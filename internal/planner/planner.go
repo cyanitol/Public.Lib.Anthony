@@ -1,0 +1,534 @@
+package planner
+
+import (
+	"fmt"
+	"sort"
+)
+
+// Planner is the main query planner that generates execution plans.
+type Planner struct {
+	CostModel *CostModel
+}
+
+// NewPlanner creates a new query planner.
+func NewPlanner() *Planner {
+	return &Planner{
+		CostModel: NewCostModel(),
+	}
+}
+
+// PlanQuery generates an execution plan for a query.
+func (p *Planner) PlanQuery(tables []*TableInfo, whereClause *WhereClause) (*WhereInfo, error) {
+	if len(tables) == 0 {
+		return nil, fmt.Errorf("no tables in query")
+	}
+
+	info := &WhereInfo{
+		Clause:   whereClause,
+		Tables:   tables,
+		AllLoops: make([]*WhereLoop, 0),
+	}
+
+	// Phase 1: Analyze WHERE clause and split into terms
+	if whereClause != nil {
+		// Terms are already split in WhereClause
+	}
+
+	// Phase 2: Generate all possible WhereLoop objects for each table
+	for cursor, table := range tables {
+		loops := p.generateLoops(table, cursor, whereClause)
+		info.AllLoops = append(info.AllLoops, loops...)
+	}
+
+	// Phase 3: Find the optimal query plan
+	bestPath, err := p.findBestPath(info)
+	if err != nil {
+		return nil, err
+	}
+
+	info.BestPath = bestPath
+	info.NOut = bestPath.NRow
+
+	return info, nil
+}
+
+// generateLoops generates all WhereLoop options for a single table.
+func (p *Planner) generateLoops(table *TableInfo, cursor int, whereClause *WhereClause) []*WhereLoop {
+	// Filter terms that apply to this table
+	var terms []*WhereTerm
+	if whereClause != nil {
+		terms = make([]*WhereTerm, 0)
+		for _, term := range whereClause.Terms {
+			if term.LeftCursor == cursor {
+				terms = append(terms, term)
+			}
+		}
+	}
+
+	// Build all possible access paths
+	builder := NewWhereLoopBuilder(table, cursor, terms, p.CostModel)
+	loops := builder.Build()
+
+	// Also try skip-scan optimization for each index
+	for _, index := range table.Indexes {
+		if skipLoop := builder.OptimizeForSkipScan(index); skipLoop != nil {
+			loops = append(loops, skipLoop)
+		}
+	}
+
+	return loops
+}
+
+// findBestPath finds the optimal sequence of WhereLoops (one per table).
+// This implements a dynamic programming algorithm similar to SQLite's solver.
+func (p *Planner) findBestPath(info *WhereInfo) (*WherePath, error) {
+	nTables := len(info.Tables)
+
+	if nTables == 1 {
+		// Single table: just pick the best loop
+		return p.findBestSingleTable(info)
+	}
+
+	// Multi-table join: use dynamic programming
+	return p.findBestMultiTable(info)
+}
+
+// findBestSingleTable finds the best plan for a single table.
+func (p *Planner) findBestSingleTable(info *WhereInfo) (*WherePath, error) {
+	// Find all loops for the single table
+	loops := make([]*WhereLoop, 0)
+	for _, loop := range info.AllLoops {
+		if loop.TabIndex == 0 {
+			loops = append(loops, loop)
+		}
+	}
+
+	if len(loops) == 0 {
+		return nil, fmt.Errorf("no access paths found")
+	}
+
+	// Select the best loop
+	bestLoop := p.CostModel.SelectBestLoop(loops)
+
+	path := &WherePath{
+		MaskLoop: bestLoop.MaskSelf,
+		NRow:     bestLoop.NOut,
+		Cost:     p.CostModel.CalculateLoopCost(bestLoop),
+		Loops:    []*WhereLoop{bestLoop},
+	}
+
+	return path, nil
+}
+
+// findBestMultiTable finds the best plan for multiple tables using dynamic programming.
+func (p *Planner) findBestMultiTable(info *WhereInfo) (*WherePath, error) {
+	nTables := len(info.Tables)
+	const N = 5
+
+	currentPaths := []*WherePath{{
+		MaskLoop: 0,
+		NRow:     0,
+		Cost:     0,
+		Loops:    make([]*WhereLoop, 0),
+	}}
+
+	for level := 0; level < nTables; level++ {
+		nextPaths := p.extendAllPaths(info, currentPaths, nTables)
+		if len(nextPaths) == 0 {
+			return nil, fmt.Errorf("no valid join order found at level %d", level)
+		}
+		currentPaths = p.selectBestPaths(nextPaths, N)
+	}
+
+	if len(currentPaths) == 0 {
+		return nil, fmt.Errorf("no complete path found")
+	}
+	return currentPaths[0], nil
+}
+
+// extendAllPaths extends all current paths with all valid next loops.
+func (p *Planner) extendAllPaths(info *WhereInfo, currentPaths []*WherePath, nTables int) []*WherePath {
+	nextPaths := make([]*WherePath, 0)
+	for _, path := range currentPaths {
+		nextPaths = append(nextPaths, p.extendPathWithTables(info, path, nTables)...)
+	}
+	return nextPaths
+}
+
+// extendPathWithTables extends a single path with all valid table loops.
+func (p *Planner) extendPathWithTables(info *WhereInfo, path *WherePath, nTables int) []*WherePath {
+	result := make([]*WherePath, 0)
+	for cursor := 0; cursor < nTables; cursor++ {
+		mask := Bitmask(1 << uint(cursor))
+		if path.MaskLoop.Overlaps(mask) {
+			continue
+		}
+		result = append(result, p.extendPathWithLoops(info, path, cursor)...)
+	}
+	return result
+}
+
+// extendPathWithLoops extends a path with all valid loops for a cursor.
+func (p *Planner) extendPathWithLoops(info *WhereInfo, path *WherePath, cursor int) []*WherePath {
+	result := make([]*WherePath, 0)
+	for _, loop := range p.findLoopsForTable(info, cursor) {
+		if path.MaskLoop.HasAll(loop.Prereq) {
+			result = append(result, p.extendPath(path, loop))
+		}
+	}
+	return result
+}
+
+// findLoopsForTable finds all loops for a specific table.
+func (p *Planner) findLoopsForTable(info *WhereInfo, cursor int) []*WhereLoop {
+	loops := make([]*WhereLoop, 0)
+	for _, loop := range info.AllLoops {
+		if loop.TabIndex == cursor {
+			loops = append(loops, loop)
+		}
+	}
+	return loops
+}
+
+// extendPath extends a partial path with a new loop.
+func (p *Planner) extendPath(path *WherePath, loop *WhereLoop) *WherePath {
+	newPath := &WherePath{
+		MaskLoop: path.MaskLoop | loop.MaskSelf,
+		Loops:    make([]*WhereLoop, len(path.Loops)+1),
+	}
+
+	copy(newPath.Loops, path.Loops)
+	newPath.Loops[len(path.Loops)] = loop
+
+	// Calculate combined cost and row count
+	newPath.Cost, newPath.NRow = p.CostModel.CombineLoopCosts(newPath.Loops)
+
+	return newPath
+}
+
+// selectBestPaths selects the top N paths by cost.
+func (p *Planner) selectBestPaths(paths []*WherePath, n int) []*WherePath {
+	// Sort by cost (ascending)
+	sort.Slice(paths, func(i, j int) bool {
+		// Primary: cost
+		if paths[i].Cost != paths[j].Cost {
+			return paths[i].Cost < paths[j].Cost
+		}
+		// Tie-breaker: output rows
+		return paths[i].NRow < paths[j].NRow
+	})
+
+	// Keep top N
+	if len(paths) > n {
+		paths = paths[:n]
+	}
+
+	return paths
+}
+
+// OptimizeWhereClause analyzes and optimizes WHERE clause terms.
+func (p *Planner) OptimizeWhereClause(expr Expr, tables []*TableInfo) (*WhereClause, error) {
+	clause := &WhereClause{
+		Terms: make([]*WhereTerm, 0),
+	}
+
+	// Split AND terms
+	andTerms := p.splitAnd(expr)
+
+	// Convert each term to WhereTerm
+	for _, term := range andTerms {
+		whereTerm, err := p.analyzeExpr(term, tables)
+		if err != nil {
+			return nil, err
+		}
+		if whereTerm != nil {
+			clause.Terms = append(clause.Terms, whereTerm)
+			if whereTerm.Operator == WO_OR {
+				clause.HasOr = true
+			}
+		}
+	}
+
+	// Apply transitive closure (if a=b and b=c, add a=c)
+	p.applyTransitiveClosure(clause)
+
+	return clause, nil
+}
+
+// splitAnd recursively splits AND expressions.
+func (p *Planner) splitAnd(expr Expr) []Expr {
+	if andExpr, ok := expr.(*AndExpr); ok {
+		result := make([]Expr, 0)
+		for _, term := range andExpr.Terms {
+			result = append(result, p.splitAnd(term)...)
+		}
+		return result
+	}
+	return []Expr{expr}
+}
+
+// analyzeExpr analyzes a single expression and creates a WhereTerm.
+func (p *Planner) analyzeExpr(expr Expr, tables []*TableInfo) (*WhereTerm, error) {
+	binExpr, ok := expr.(*BinaryExpr)
+	if !ok {
+		// Not a binary expression, might be OR or other complex expr
+		if orExpr, ok := expr.(*OrExpr); ok {
+			return p.analyzeOrExpr(orExpr, tables)
+		}
+		return nil, nil
+	}
+
+	// Extract column reference
+	colExpr, ok := binExpr.Left.(*ColumnExpr)
+	if !ok {
+		return nil, nil
+	}
+
+	// Determine operator
+	op := p.parseOperator(binExpr.Op)
+	if op == 0 {
+		return nil, nil // Unknown operator
+	}
+
+	// Find column index
+	colIdx := -1
+	for i, col := range tables[colExpr.Cursor].Columns {
+		if col.Name == colExpr.Column {
+			colIdx = i
+			break
+		}
+	}
+
+	// Extract right-side value
+	var rightValue interface{}
+	if valExpr, ok := binExpr.Right.(*ValueExpr); ok {
+		rightValue = valExpr.Value
+	}
+
+	term := &WhereTerm{
+		Expr:        expr,
+		Operator:    op,
+		LeftCursor:  colExpr.Cursor,
+		LeftColumn:  colIdx,
+		RightValue:  rightValue,
+		PrereqRight: binExpr.Right.UsedTables(),
+		PrereqAll:   expr.UsedTables(),
+		TruthProb:   0, // Will be estimated later
+		Flags:       0,
+		Parent:      -1,
+	}
+
+	return term, nil
+}
+
+// analyzeOrExpr handles OR expressions specially.
+func (p *Planner) analyzeOrExpr(expr *OrExpr, tables []*TableInfo) (*WhereTerm, error) {
+	term := &WhereTerm{
+		Expr:       expr,
+		Operator:   WO_OR,
+		LeftCursor: -1,
+		LeftColumn: -1,
+		PrereqAll:  expr.UsedTables(),
+		TruthProb:  0,
+		Flags:      0,
+		Parent:     -1,
+	}
+
+	return term, nil
+}
+
+// parseOperatorMap maps string operators to WhereOperator values.
+var parseOperatorMap = map[string]WhereOperator{
+	"=":       WO_EQ,
+	"<":       WO_LT,
+	"<=":      WO_LE,
+	">":       WO_GT,
+	">=":      WO_GE,
+	"IN":      WO_IN,
+	"IS":      WO_IS,
+	"IS NULL": WO_ISNULL,
+}
+
+// parseOperator converts string operator to WhereOperator.
+func (p *Planner) parseOperator(op string) WhereOperator {
+	if wo, ok := parseOperatorMap[op]; ok {
+		return wo
+	}
+	return 0
+}
+
+// applyTransitiveClosure adds implied constraints from transitive relationships.
+// For example, if we have a=b and b=5, we can infer a=5.
+func (p *Planner) applyTransitiveClosure(clause *WhereClause) {
+	equiv := p.buildEquivalenceClasses(clause)
+	newTerms := p.propagateConstants(clause, equiv)
+	clause.Terms = append(clause.Terms, newTerms...)
+}
+
+// buildEquivalenceClasses builds a map of equivalent columns.
+func (p *Planner) buildEquivalenceClasses(clause *WhereClause) map[string][]string {
+	equiv := make(map[string][]string)
+	for _, term := range clause.Terms {
+		if term.Operator != WO_EQ {
+			continue
+		}
+		colExpr, ok := term.Expr.(*BinaryExpr)
+		if !ok {
+			continue
+		}
+		rightCol, ok := colExpr.Right.(*ColumnExpr)
+		if !ok {
+			continue
+		}
+		leftKey := fmt.Sprintf("%d.%d", term.LeftCursor, term.LeftColumn)
+		rightKey := fmt.Sprintf("%d.%d", rightCol.Cursor, rightCol.UsedTables())
+		equiv[leftKey] = append(equiv[leftKey], rightKey)
+		equiv[rightKey] = append(equiv[rightKey], leftKey)
+	}
+	return equiv
+}
+
+// propagateConstants creates new terms for equivalent columns with constant values.
+func (p *Planner) propagateConstants(clause *WhereClause, equiv map[string][]string) []*WhereTerm {
+	newTerms := make([]*WhereTerm, 0)
+	for _, term := range clause.Terms {
+		if term.Operator != WO_EQ || term.RightValue == nil {
+			continue
+		}
+		if _, ok := term.Expr.(*BinaryExpr); !ok {
+			continue
+		}
+		leftKey := fmt.Sprintf("%d.%d", term.LeftCursor, term.LeftColumn)
+		for _, equivKey := range equiv[leftKey] {
+			newTerms = append(newTerms, p.createEquivTerm(term, equivKey))
+		}
+	}
+	return newTerms
+}
+
+// createEquivTerm creates a new equivalent term for a column.
+func (p *Planner) createEquivTerm(term *WhereTerm, equivKey string) *WhereTerm {
+	var cursor, column int
+	fmt.Sscanf(equivKey, "%d.%d", &cursor, &column)
+	return &WhereTerm{
+		Expr:        term.Expr,
+		Operator:    WO_EQ,
+		LeftCursor:  cursor,
+		LeftColumn:  column,
+		RightValue:  term.RightValue,
+		PrereqRight: 0,
+		PrereqAll:   term.PrereqAll,
+		TruthProb:   term.TruthProb,
+		Flags:       TERM_VIRTUAL,
+		Parent:      -1,
+	}
+}
+
+// ExplainPlan returns a human-readable explanation of the query plan.
+func (p *Planner) ExplainPlan(info *WhereInfo) string {
+	if info.BestPath == nil {
+		return "No plan available"
+	}
+
+	result := "QUERY PLAN:\n"
+	result += fmt.Sprintf("Estimated output rows: %d\n", info.BestPath.NRow.ToInt())
+	result += fmt.Sprintf("Estimated cost: %d\n\n", info.BestPath.Cost)
+
+	for i, loop := range info.BestPath.Loops {
+		result += p.explainLoop(info, loop, i)
+	}
+
+	return result
+}
+
+// explainLoop returns a human-readable explanation for a single loop.
+func (p *Planner) explainLoop(info *WhereInfo, loop *WhereLoop, i int) string {
+	table := info.Tables[loop.TabIndex]
+	indent := makeIndent(i)
+
+	var result string
+	if loop.Index != nil {
+		result = p.explainIndexLoop(table, loop, indent, i)
+	} else {
+		result = fmt.Sprintf("%s%d. SCAN %s\n", indent, i+1, table.Name)
+	}
+	result += fmt.Sprintf("%s   Cost: %d, Rows: %d\n", indent, loop.Run.ToInt(), loop.NOut.ToInt())
+	return result
+}
+
+// makeIndent creates an indentation string for the given level.
+func makeIndent(level int) string {
+	indent := ""
+	for j := 0; j < level; j++ {
+		indent += "  "
+	}
+	return indent
+}
+
+// explainIndexLoop explains an index-based loop.
+func (p *Planner) explainIndexLoop(table *TableInfo, loop *WhereLoop, indent string, i int) string {
+	result := fmt.Sprintf("%s%d. SEARCH %s USING INDEX %s", indent, i+1, table.Name, loop.Index.Name)
+	constraints := p.buildConstraintStrings(table, loop)
+	if len(constraints) > 0 {
+		result += " (" + joinStrings(constraints, " AND ") + ")"
+	}
+	return result + "\n"
+}
+
+// buildConstraintStrings builds constraint descriptions for explain output.
+func (p *Planner) buildConstraintStrings(table *TableInfo, loop *WhereLoop) []string {
+	constraints := make([]string, 0)
+	for _, term := range loop.Terms {
+		if term.LeftColumn >= 0 && term.LeftColumn < len(table.Columns) {
+			col := table.Columns[term.LeftColumn].Name
+			op := operatorString(term.Operator)
+			constraints = append(constraints, fmt.Sprintf("%s%s?", col, op))
+		}
+	}
+	return constraints
+}
+
+// joinStrings joins strings with a separator (helper function).
+func joinStrings(strs []string, sep string) string {
+	if len(strs) == 0 {
+		return ""
+	}
+	result := strs[0]
+	for i := 1; i < len(strs); i++ {
+		result += sep + strs[i]
+	}
+	return result
+}
+
+// ValidatePlan performs sanity checks on a query plan.
+func (p *Planner) ValidatePlan(info *WhereInfo) error {
+	if info.BestPath == nil {
+		return fmt.Errorf("no plan generated")
+	}
+
+	// Check that we have a loop for each table
+	if len(info.BestPath.Loops) != len(info.Tables) {
+		return fmt.Errorf("plan has %d loops but %d tables",
+			len(info.BestPath.Loops), len(info.Tables))
+	}
+
+	// Check that each table appears exactly once
+	seen := make(map[int]bool)
+	for _, loop := range info.BestPath.Loops {
+		if seen[loop.TabIndex] {
+			return fmt.Errorf("table %d appears multiple times in plan", loop.TabIndex)
+		}
+		seen[loop.TabIndex] = true
+	}
+
+	// Check that prerequisites are satisfied
+	available := Bitmask(0)
+	for _, loop := range info.BestPath.Loops {
+		if !available.HasAll(loop.Prereq) {
+			return fmt.Errorf("prerequisites not satisfied for table %d", loop.TabIndex)
+		}
+		available |= loop.MaskSelf
+	}
+
+	return nil
+}
