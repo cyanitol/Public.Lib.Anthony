@@ -214,6 +214,7 @@ func (p *Pager) downgradeLock() error {
 
 // TryUpgradeToExclusive attempts to acquire an exclusive lock.
 // Returns true if successful, false if the lock is held by another process.
+// If a busy handler is set, it will retry on lock contention.
 func (p *Pager) TryUpgradeToExclusive() (bool, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -222,9 +223,21 @@ func (p *Pager) TryUpgradeToExclusive() (bool, error) {
 		return true, nil
 	}
 
-	// In a real implementation, this would try to acquire an exclusive file lock
-	// For now, we just update the state
-	p.lockState = LockExclusive
+	// Try to acquire exclusive lock with busy handler if available
+	var err error
+	if p.busyHandler != nil {
+		err = p.acquireExclusiveLockWithRetry()
+	} else {
+		err = p.tryAcquireExclusiveLock()
+	}
+
+	if err != nil {
+		if err == ErrDatabaseLocked {
+			return false, nil
+		}
+		return false, err
+	}
+
 	return true, nil
 }
 

@@ -37,6 +37,7 @@ const (
 	LockNone = iota
 	LockShared
 	LockReserved
+	LockPending
 	LockExclusive
 )
 
@@ -126,6 +127,9 @@ type Pager struct {
 
 	// Savepoints for nested transaction support
 	savepoints []*Savepoint
+
+	// Busy handler for lock contention
+	busyHandler BusyHandler
 
 	// Mutex for thread-safe operations
 	mu sync.RWMutex
@@ -596,17 +600,19 @@ func (p *Pager) writeDirtyPages() error {
 }
 
 // acquireSharedLock acquires a shared lock on the database.
+// If a busy handler is set, it will retry on lock contention.
 func (p *Pager) acquireSharedLock() error {
 	if p.lockState >= LockShared {
 		return nil
 	}
 
-	// In a real implementation, this would use file locking (flock/fcntl)
-	// For simplicity, we just update the state
-	p.lockState = LockShared
-	p.state = PagerStateReader
+	// Use busy handler if available
+	if p.busyHandler != nil {
+		return p.acquireSharedLockWithRetry()
+	}
 
-	return nil
+	// Otherwise, try once without retry
+	return p.tryAcquireSharedLock()
 }
 
 // beginWriteTransaction starts a write transaction.
@@ -619,8 +625,18 @@ func (p *Pager) beginWriteTransaction() error {
 		return ErrTransactionOpen
 	}
 
-	// Acquire reserved lock
-	p.lockState = LockReserved
+	// Acquire reserved lock (with busy handler retry if available)
+	var err error
+	if p.busyHandler != nil {
+		err = p.acquireReservedLockWithRetry()
+	} else {
+		err = p.tryAcquireReservedLock()
+	}
+
+	if err != nil {
+		return err
+	}
+
 	p.state = PagerStateWriterLocked
 	p.dbOrigSize = p.dbSize
 

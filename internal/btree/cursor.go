@@ -708,13 +708,18 @@ func (c *BtCursor) Delete() error {
 }
 
 // splitPage splits a full page when inserting a new cell
-// This is a simplified implementation - a full implementation would need to:
-// 1. Allocate a new page
-// 2. Distribute cells between old and new page
-// 3. Update parent page (or create new root if splitting root)
-// 4. Handle propagation of splits up the tree
+// Delegates to splitLeafPage or splitInteriorPage based on page type
 func (c *BtCursor) splitPage(key int64, payload []byte) error {
-	// For now, return an error indicating the page needs to be split
-	// A full implementation would handle the split here
-	return fmt.Errorf("page split not yet implemented (page %d is full)", c.CurrentPage)
+	if c.CurrentHeader == nil {
+		return fmt.Errorf("cursor not positioned at valid page")
+	}
+
+	if c.CurrentHeader.IsLeaf {
+		return c.splitLeafPage(key, payload)
+	}
+
+	// For interior pages, we need the child page number
+	// This is a simplified case - in practice, interior page splits
+	// happen during parent updates in splitLeafPage
+	return fmt.Errorf("direct interior page split not supported (page %d)", c.CurrentPage)
 }
