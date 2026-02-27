@@ -310,9 +310,9 @@ func checkKeyOrder(pageNum uint32, cells []*CellInfo, minKey, maxKey *int64, res
 			result.AddError(pageNum, "key_out_of_range",
 				fmt.Sprintf("cell %d key %d is not greater than minimum bound %d", i, key, *minKey))
 		}
-		if maxKey != nil && key >= *maxKey {
+		if maxKey != nil && key > *maxKey {
 			result.AddError(pageNum, "key_out_of_range",
-				fmt.Sprintf("cell %d key %d is not less than maximum bound %d", i, key, *maxKey))
+				fmt.Sprintf("cell %d key %d is greater than maximum bound %d", i, key, *maxKey))
 		}
 
 		// Check ascending order

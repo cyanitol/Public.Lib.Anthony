@@ -8,6 +8,10 @@ import (
 )
 
 // Platform-specific lock implementation for Unix systems.
+// This implementation uses OFD (Open File Description) locks when available,
+// which are per-file-descriptor rather than per-process. This allows proper
+// locking between different file descriptors in the same process.
+//
 // SQLite uses byte-range locks on specific regions of the database file:
 //
 //   Byte Range         Lock Type    Lock Name
@@ -29,10 +33,23 @@ const (
 	sharedSize   = 510             // Number of bytes in SHARED lock range
 )
 
+// OFD lock command constants (Linux-specific, available since kernel 3.15)
+// These provide per-file-descriptor locking instead of per-process locking
+const (
+	// F_OFD_GETLK gets the lock info for open file description locks
+	F_OFD_GETLK = 36
+	// F_OFD_SETLK sets/clears an open file description lock (non-blocking)
+	F_OFD_SETLK = 37
+	// F_OFD_SETLKW sets/clears an open file description lock (blocking)
+	F_OFD_SETLKW = 38
+)
+
 // unixLockData holds Unix-specific locking information.
 type unixLockData struct {
 	// Which shared byte we're using (randomized within the range)
 	sharedByte int64
+	// Whether OFD locks are available (detected at init time)
+	useOFD bool
 }
 
 // initPlatform initializes platform-specific lock data.
@@ -42,10 +59,25 @@ func (lm *LockManager) initPlatform() error {
 	fd := lm.file.Fd()
 	sharedOffset := (fd % sharedSize)
 
-	lm.platformData = &unixLockData{
+	data := &unixLockData{
 		sharedByte: sharedFirst + int64(sharedOffset),
+		useOFD:     true, // Try OFD locks by default
 	}
 
+	// Test if OFD locks are supported by attempting a test lock
+	testLock := syscall.Flock_t{
+		Type:   syscall.F_RDLCK,
+		Whence: 0,
+		Start:  0,
+		Len:    0, // Lock entire file
+	}
+	err := syscall.FcntlFlock(fd, F_OFD_GETLK, &testLock)
+	if err != nil {
+		// OFD locks not supported, fall back to POSIX locks
+		data.useOFD = false
+	}
+
+	lm.platformData = data
 	return nil
 }
 
@@ -53,6 +85,24 @@ func (lm *LockManager) initPlatform() error {
 func (lm *LockManager) cleanupPlatform() error {
 	// Nothing special to clean up on Unix
 	return nil
+}
+
+// fcntlCmd returns the appropriate fcntl command based on OFD availability
+func (lm *LockManager) fcntlSetLk() int {
+	data := lm.platformData.(*unixLockData)
+	if data.useOFD {
+		return F_OFD_SETLK
+	}
+	return syscall.F_SETLK
+}
+
+// fcntlGetLk returns the appropriate fcntl command for lock testing
+func (lm *LockManager) fcntlGetLk() int {
+	data := lm.platformData.(*unixLockData)
+	if data.useOFD {
+		return F_OFD_GETLK
+	}
+	return syscall.F_GETLK
 }
 
 // acquireLockPlatform performs the platform-specific lock acquisition.
@@ -121,8 +171,8 @@ func (lm *LockManager) acquireSharedLock() error {
 		Len:    1,
 	}
 
-	// Use F_SETLK for non-blocking lock
-	if err := syscall.FcntlFlock(lm.file.Fd(), syscall.F_SETLK, &lock); err != nil {
+	// Use F_OFD_SETLK or F_SETLK for non-blocking lock
+	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
 		if err == syscall.EAGAIN || err == syscall.EACCES {
 			return ErrLockBusy
 		}
@@ -143,7 +193,7 @@ func (lm *LockManager) releaseSharedLock() error {
 		Len:    1,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), syscall.F_SETLK, &lock); err != nil {
+	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
 		return fmt.Errorf("failed to release shared lock: %w", err)
 	}
 
@@ -160,7 +210,7 @@ func (lm *LockManager) acquireReservedLock() error {
 		Len:    1,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), syscall.F_SETLK, &lock); err != nil {
+	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
 		if err == syscall.EAGAIN || err == syscall.EACCES {
 			return ErrLockBusy
 		}
@@ -188,7 +238,7 @@ func (lm *LockManager) releaseReservedLock() error {
 		Len:    1,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), syscall.F_SETLK, &lock); err != nil {
+	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
 		return fmt.Errorf("failed to release reserved lock: %w", err)
 	}
 
@@ -205,7 +255,7 @@ func (lm *LockManager) acquirePendingLock() error {
 		Len:    1,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), syscall.F_SETLK, &lock); err != nil {
+	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
 		if err == syscall.EAGAIN || err == syscall.EACCES {
 			return ErrLockBusy
 		}
@@ -232,7 +282,7 @@ func (lm *LockManager) releasePendingLock() error {
 		Len:    1,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), syscall.F_SETLK, &lock); err != nil {
+	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
 		return fmt.Errorf("failed to release pending lock: %w", err)
 	}
 
@@ -263,7 +313,7 @@ func (lm *LockManager) acquireExclusiveLock() error {
 		Len:    sharedSize,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), syscall.F_SETLK, &lock); err != nil {
+	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
 		if err == syscall.EAGAIN || err == syscall.EACCES {
 			return ErrLockBusy
 		}
@@ -278,7 +328,7 @@ func (lm *LockManager) acquireExclusiveLock() error {
 		Start:  data.sharedByte,
 		Len:    1,
 	}
-	syscall.FcntlFlock(lm.file.Fd(), syscall.F_SETLK, &releaseLock)
+	syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &releaseLock)
 
 	return nil
 }
@@ -293,7 +343,7 @@ func (lm *LockManager) releaseExclusiveLock() error {
 		Len:    sharedSize,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), syscall.F_SETLK, &lock); err != nil {
+	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
 		return fmt.Errorf("failed to release exclusive lock: %w", err)
 	}
 
@@ -310,8 +360,8 @@ func (lm *LockManager) CheckReservedLock() (bool, error) {
 		Len:    1,
 	}
 
-	// F_GETLK checks if a lock would succeed without actually acquiring it
-	if err := syscall.FcntlFlock(lm.file.Fd(), syscall.F_GETLK, &lock); err != nil {
+	// F_GETLK/F_OFD_GETLK checks if a lock would succeed without actually acquiring it
+	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlGetLk(), &lock); err != nil {
 		return false, fmt.Errorf("failed to check reserved lock: %w", err)
 	}
 

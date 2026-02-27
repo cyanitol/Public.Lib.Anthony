@@ -192,11 +192,6 @@ func (lm *LockManager) isValidTransition(from, to LockLevel) bool {
 		return true
 	}
 
-	// Can always release locks (downgrade)
-	if to < from {
-		return true
-	}
-
 	// Valid escalation paths (upgrading)
 	switch from {
 	case lockNone:
@@ -204,20 +199,20 @@ func (lm *LockManager) isValidTransition(from, to LockLevel) bool {
 		return to == lockShared || to == lockExclusive
 
 	case lockShared:
-		// From SHARED, can go to RESERVED or EXCLUSIVE
-		return to == lockReserved || to == lockExclusive
+		// From SHARED, can go to RESERVED or EXCLUSIVE, or back to NONE
+		return to == lockReserved || to == lockExclusive || to == lockNone
 
 	case lockReserved:
-		// From RESERVED, can go to PENDING or EXCLUSIVE
-		return to == lockPending || to == lockExclusive
+		// From RESERVED, can go to PENDING or EXCLUSIVE, or downgrade to SHARED or NONE
+		return to == lockPending || to == lockExclusive || to == lockShared || to == lockNone
 
 	case lockPending:
-		// From PENDING, can only go to EXCLUSIVE
-		return to == lockExclusive
+		// From PENDING, can go to EXCLUSIVE, or downgrade to SHARED or NONE
+		return to == lockExclusive || to == lockShared || to == lockNone
 
 	case lockExclusive:
-		// Already at highest level, can only downgrade
-		return false
+		// From EXCLUSIVE, can only downgrade to SHARED or NONE
+		return to == lockShared || to == lockNone
 
 	default:
 		return false

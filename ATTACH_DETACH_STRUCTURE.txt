@@ -1,0 +1,220 @@
+ATTACH/DETACH DATABASE IMPLEMENTATION STRUCTURE
+==============================================
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    SQL INPUT PROCESSING                          │
+└─────────────────────────────────────────────────────────────────┘
+
+  SQL: "ATTACH DATABASE 'mydb.db' AS mydb"
+    │
+    ├─> LEXER (lexer.go)
+    │     └─> Tokenizes into:
+    │           [TK_ATTACH] [TK_DATABASE] [TK_STRING:'mydb.db'] [TK_AS] [TK_ID:mydb]
+    │
+    ├─> PARSER (parser.go)
+    │     ├─> parseStatement() recognizes TK_ATTACH
+    │     └─> Dispatches to parseAttach()
+    │           ├─> Consumes TK_DATABASE (optional)
+    │           ├─> parseExpression() → LiteralExpr{Type: LiteralString, Value: "mydb.db"}
+    │           ├─> Expects TK_AS
+    │           └─> Consumes TK_ID and Unquote() → "mydb"
+    │
+    └─> AST (ast.go)
+          └─> Creates AttachStmt{
+                Filename: LiteralExpr{...},
+                SchemaName: "mydb"
+              }
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    IMPLEMENTATION FILES                          │
+└─────────────────────────────────────────────────────────────────┘
+
+token.go (Lines 129-136, 332-334)
+  ├─> TK_ATTACH   = iota + ...
+  ├─> TK_DETACH
+  └─> TK_DATABASE
+
+lexer.go (Lines 746-748)
+  └─> keywordMap:
+        "ATTACH":  TK_ATTACH,
+        "DETACH":  TK_DETACH,
+        "DATABASE": TK_DATABASE
+
+ast.go (Lines 500-520)
+  ├─> type AttachStmt struct {
+  │     Filename   Expression
+  │     SchemaName string
+  │   }
+  │
+  └─> type DetachStmt struct {
+        SchemaName string
+      }
+
+parser.go
+  ├─> statementParsers map (Lines 71-84)
+  │     ├─> TK_ATTACH: parseAttach()
+  │     └─> TK_DETACH: parseDetach()
+  │
+  ├─> parseAttach() (Lines 1790-1817)
+  │     └─> Parses: ATTACH [DATABASE] expr AS id
+  │
+  └─> parseDetach() (Lines 1819-1834)
+        └─> Parses: DETACH [DATABASE] id
+
+parser_attach_test.go
+  ├─> TestParseAttach()           [8 test cases]
+  ├─> TestParseDetach()           [6 test cases]
+  └─> TestParseAttachDetachCombined() [3 test cases]
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    AST STRUCTURE                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+AttachStmt (implements Statement)
+  │
+  ├─> Filename: Expression
+  │     └─> Can be:
+  │           ├─> LiteralExpr (simple: 'file.db')
+  │           ├─> BinaryExpr (concat: 'dir/' || 'file.db')
+  │           └─> Any Expression type
+  │
+  └─> SchemaName: string (unquoted identifier)
+
+DetachStmt (implements Statement)
+  │
+  └─> SchemaName: string (unquoted identifier)
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    PARSING FLOW                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+ATTACH FLOW:
+  Input: "ATTACH DATABASE 'file.db' AS mydb"
+    │
+    ├─> match(TK_ATTACH)         ✓ consumed
+    ├─> match(TK_DATABASE)       ✓ consumed (optional)
+    ├─> parseExpression()        → LiteralExpr{Value: "file.db"}
+    ├─> match(TK_AS)             ✓ required
+    ├─> check(TK_ID)             ✓ verified
+    └─> advance() + Unquote()    → "mydb"
+
+  Result: AttachStmt{Filename: LiteralExpr{...}, SchemaName: "mydb"}
+
+DETACH FLOW:
+  Input: "DETACH DATABASE mydb"
+    │
+    ├─> match(TK_DETACH)         ✓ consumed
+    ├─> match(TK_DATABASE)       ✓ consumed (optional)
+    ├─> check(TK_ID)             ✓ verified
+    └─> advance() + Unquote()    → "mydb"
+
+  Result: DetachStmt{SchemaName: "mydb"}
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    ERROR HANDLING                                │
+└─────────────────────────────────────────────────────────────────┘
+
+ATTACH Errors:
+  "ATTACH mydb"                → Error: expected expression (filename missing)
+  "ATTACH 'file.db' mydb"      → Error: expected AS after database filename
+  "ATTACH 'file.db' AS"        → Error: expected schema name
+
+DETACH Errors:
+  "DETACH"                     → Error: expected schema name
+  "DETACH DATABASE"            → Error: expected schema name
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    SUPPORTED SYNTAX VARIATIONS                   │
+└─────────────────────────────────────────────────────────────────┘
+
+ATTACH:
+  ✓ ATTACH DATABASE 'file.db' AS name
+  ✓ ATTACH 'file.db' AS name
+  ✓ ATTACH "file.db" AS name
+  ✓ ATTACH DATABASE 'file.db' AS "name"
+  ✓ ATTACH 'dir/' || 'file.db' AS name
+
+DETACH:
+  ✓ DETACH DATABASE name
+  ✓ DETACH name
+  ✓ DETACH "name"
+  ✓ DETACH `name`
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    INTEGRATION EXAMPLE                           │
+└─────────────────────────────────────────────────────────────────┘
+
+package main
+
+import (
+    "fmt"
+    "github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+)
+
+func main() {
+    // Parse ATTACH statement
+    p := parser.NewParser("ATTACH 'mydb.db' AS mydb")
+    stmts, err := p.Parse()
+    if err != nil {
+        panic(err)
+    }
+
+    stmt := stmts[0].(*parser.AttachStmt)
+
+    // Extract filename
+    if lit, ok := stmt.Filename.(*parser.LiteralExpr); ok {
+        fmt.Printf("File: %s\n", lit.Value)  // Output: File: mydb.db
+    }
+
+    // Extract schema name
+    fmt.Printf("Schema: %s\n", stmt.SchemaName)  // Output: Schema: mydb
+}
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    TEST COVERAGE SUMMARY                         │
+└─────────────────────────────────────────────────────────────────┘
+
+TestParseAttach:
+  ✓ attach_with_DATABASE_keyword
+  ✓ attach_without_DATABASE_keyword
+  ✓ attach_with_double_quoted_filename
+  ✓ attach_with_quoted_schema_name
+  ✓ attach_with_expression
+  ✗ attach_missing_AS (error case)
+  ✗ attach_missing_schema_name (error case)
+  ✗ attach_missing_filename (error case)
+
+TestParseDetach:
+  ✓ detach_with_DATABASE_keyword
+  ✓ detach_without_DATABASE_keyword
+  ✓ detach_with_quoted_schema_name
+  ✓ detach_with_backtick_quoted_name
+  ✗ detach_missing_schema_name (error case)
+  ✗ detach_with_DATABASE_but_missing_schema (error case)
+
+TestParseAttachDetachCombined:
+  ✓ multiple_attach_statements
+  ✓ attach_then_detach
+  ✓ detach_then_attach
+
+Legend: ✓ = valid syntax test, ✗ = error case test
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    FILE SIZE SUMMARY                             │
+└─────────────────────────────────────────────────────────────────┘
+
+parser_attach_test.go      195 lines (4.8 KB)
+parser_attach_example.go    39 lines (1.3 KB)
+ast.go additions            32 lines
+parser.go additions         49 lines
+─────────────────────────────────────────────
+Total implementation:      315 lines
+
+Documentation:
+  ATTACH_DETACH_IMPLEMENTATION.md   ~180 lines
+  PHASE2_ATTACH_DETACH_SUMMARY.md   ~350 lines
+  ATTACH_DETACH_STRUCTURE.txt       ~230 lines
+  ─────────────────────────────────────────────
+  Total documentation:              ~760 lines
+
+Grand total:                        ~1075 lines

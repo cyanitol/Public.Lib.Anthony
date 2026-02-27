@@ -9,6 +9,7 @@ func TestCheckIntegrity_ValidTree(t *testing.T) {
 	bt := NewBtree(4096)
 
 	// Create a valid leaf page
+	// Use page 2 instead of page 1 because page 1 has a 100-byte file header
 	pageData := createTestLeafPage(4096, []struct {
 		rowid   int64
 		payload []byte
@@ -18,9 +19,9 @@ func TestCheckIntegrity_ValidTree(t *testing.T) {
 		{3, []byte("row3")},
 	})
 
-	bt.Pages[1] = pageData
+	bt.Pages[2] = pageData
 
-	result := CheckIntegrity(bt, 1)
+	result := CheckIntegrity(bt, 2)
 
 	if !result.OK() {
 		t.Errorf("Expected no errors, got %d errors:", len(result.Errors))
@@ -126,7 +127,7 @@ func TestCheckIntegrity_UnsortedCellPointers(t *testing.T) {
 	bt := NewBtree(4096)
 	pageData := make([]byte, 4096)
 
-	// Create a leaf table page
+	// Create a leaf table page (use page 2 to avoid file header issues)
 	pageData[0] = PageTypeLeafTable
 	binary.BigEndian.PutUint16(pageData[3:], 2) // NumCells = 2
 
@@ -141,9 +142,9 @@ func TestCheckIntegrity_UnsortedCellPointers(t *testing.T) {
 	binary.BigEndian.PutUint16(pageData[100:], 0) // Payload size
 	binary.BigEndian.PutUint16(pageData[200:], 0) // Payload size
 
-	bt.Pages[1] = pageData
+	bt.Pages[2] = pageData
 
-	result := CheckIntegrity(bt, 1)
+	result := CheckIntegrity(bt, 2)
 
 	if result.OK() {
 		t.Error("Expected errors for unsorted cell pointers")
@@ -165,7 +166,7 @@ func TestCheckIntegrity_UnsortedCellPointers(t *testing.T) {
 func TestCheckIntegrity_KeysNotSorted(t *testing.T) {
 	bt := NewBtree(4096)
 
-	// Create a leaf page with unsorted keys
+	// Create a leaf page with unsorted keys (use page 2)
 	pageData := createTestLeafPage(4096, []struct {
 		rowid   int64
 		payload []byte
@@ -175,9 +176,9 @@ func TestCheckIntegrity_KeysNotSorted(t *testing.T) {
 		{2, []byte("row2")}, // Out of order!
 	})
 
-	bt.Pages[1] = pageData
+	bt.Pages[2] = pageData
 
-	result := CheckIntegrity(bt, 1)
+	result := CheckIntegrity(bt, 2)
 
 	if result.OK() {
 		t.Error("Expected errors for unsorted keys")
@@ -199,7 +200,7 @@ func TestCheckIntegrity_KeysNotSorted(t *testing.T) {
 func TestCheckIntegrity_DuplicateKeys(t *testing.T) {
 	bt := NewBtree(4096)
 
-	// Create a leaf page with duplicate keys
+	// Create a leaf page with duplicate keys (use page 2)
 	pageData := createTestLeafPage(4096, []struct {
 		rowid   int64
 		payload []byte
@@ -209,9 +210,9 @@ func TestCheckIntegrity_DuplicateKeys(t *testing.T) {
 		{2, []byte("row2_duplicate")}, // Duplicate key
 	})
 
-	bt.Pages[1] = pageData
+	bt.Pages[2] = pageData
 
-	result := CheckIntegrity(bt, 1)
+	result := CheckIntegrity(bt, 2)
 
 	if result.OK() {
 		t.Error("Expected errors for duplicate keys")
@@ -235,6 +236,7 @@ func TestCheckIntegrity_InteriorPage(t *testing.T) {
 
 	// Create a valid two-level tree
 	// Root (interior) -> Two leaf pages
+	// Use page 4 as root to avoid file header issues with page 1
 
 	// Leaf page 2: rows 1-5
 	leaf1 := createTestLeafPage(4096, []struct {
@@ -262,7 +264,7 @@ func TestCheckIntegrity_InteriorPage(t *testing.T) {
 	})
 	bt.Pages[3] = leaf2
 
-	// Interior root page
+	// Interior root page (page 4 to avoid file header issues)
 	root := make([]byte, 4096)
 	root[0] = PageTypeInteriorTable
 	binary.BigEndian.PutUint16(root[3:], 1)    // NumCells = 1
@@ -276,9 +278,9 @@ func TestCheckIntegrity_InteriorPage(t *testing.T) {
 	binary.BigEndian.PutUint32(root[cellOffset:], 2) // Child page 2
 	PutVarint(root[cellOffset+4:], 5)                // Key 5
 
-	bt.Pages[1] = root
+	bt.Pages[4] = root
 
-	result := CheckIntegrity(bt, 1)
+	result := CheckIntegrity(bt, 4)
 
 	if !result.OK() {
 		t.Errorf("Expected no errors, got %d errors:", len(result.Errors))
@@ -300,6 +302,7 @@ func TestCheckIntegrity_InvalidChildPointer(t *testing.T) {
 	bt := NewBtree(4096)
 
 	// Create interior page with invalid child pointer (0)
+	// Use page 4 as root to avoid file header issues
 	root := make([]byte, 4096)
 	root[0] = PageTypeInteriorTable
 	binary.BigEndian.PutUint16(root[3:], 1)    // NumCells = 1
@@ -322,9 +325,9 @@ func TestCheckIntegrity_InvalidChildPointer(t *testing.T) {
 	})
 	bt.Pages[2] = leaf
 
-	bt.Pages[1] = root
+	bt.Pages[4] = root
 
-	result := CheckIntegrity(bt, 1)
+	result := CheckIntegrity(bt, 4)
 
 	if result.OK() {
 		t.Error("Expected errors for invalid child pointer")
@@ -346,22 +349,22 @@ func TestCheckIntegrity_InvalidChildPointer(t *testing.T) {
 func TestCheckIntegrity_SelfReference(t *testing.T) {
 	bt := NewBtree(4096)
 
-	// Create interior page that points to itself
+	// Create interior page that points to itself (use page 4)
 	root := make([]byte, 4096)
 	root[0] = PageTypeInteriorTable
 	binary.BigEndian.PutUint16(root[3:], 1)    // NumCells = 1
-	binary.BigEndian.PutUint32(root[8:], 1)    // RightChild = page 1 (SELF!)
+	binary.BigEndian.PutUint32(root[8:], 4)    // RightChild = page 4 (SELF!)
 	binary.BigEndian.PutUint16(root[5:], 4084) // CellContentStart
 
 	cellOffset := 4084
 	binary.BigEndian.PutUint16(root[12:], uint16(cellOffset))
 
-	binary.BigEndian.PutUint32(root[cellOffset:], 1) // Child page 1 (SELF!)
+	binary.BigEndian.PutUint32(root[cellOffset:], 4) // Child page 4 (SELF!)
 	PutVarint(root[cellOffset+4:], 5)                // Key 5
 
-	bt.Pages[1] = root
+	bt.Pages[4] = root
 
-	result := CheckIntegrity(bt, 1)
+	result := CheckIntegrity(bt, 4)
 
 	if result.OK() {
 		t.Error("Expected errors for self-reference")
@@ -383,7 +386,7 @@ func TestCheckIntegrity_SelfReference(t *testing.T) {
 func TestCheckIntegrity_CycleDetection(t *testing.T) {
 	bt := NewBtree(4096)
 
-	// Create a cycle: page 1 -> page 2 -> page 1
+	// Create a cycle: page 4 -> page 2 -> page 4 (use page 4 as root)
 	root := make([]byte, 4096)
 	root[0] = PageTypeInteriorTable
 	binary.BigEndian.PutUint16(root[3:], 0)    // NumCells = 0
@@ -393,13 +396,13 @@ func TestCheckIntegrity_CycleDetection(t *testing.T) {
 	page2 := make([]byte, 4096)
 	page2[0] = PageTypeInteriorTable
 	binary.BigEndian.PutUint16(page2[3:], 0)    // NumCells = 0
-	binary.BigEndian.PutUint32(page2[8:], 1)    // RightChild = page 1 (CYCLE!)
+	binary.BigEndian.PutUint32(page2[8:], 4)    // RightChild = page 4 (CYCLE!)
 	binary.BigEndian.PutUint16(page2[5:], 4096) // CellContentStart
 
-	bt.Pages[1] = root
+	bt.Pages[4] = root
 	bt.Pages[2] = page2
 
-	result := CheckIntegrity(bt, 1)
+	result := CheckIntegrity(bt, 4)
 
 	if result.OK() {
 		t.Error("Expected errors for cycle")
@@ -421,14 +424,14 @@ func TestCheckIntegrity_CycleDetection(t *testing.T) {
 func TestCheckIntegrity_OrphanPage(t *testing.T) {
 	bt := NewBtree(4096)
 
-	// Create a valid leaf page as root
+	// Create a valid leaf page as root (use page 2)
 	pageData := createTestLeafPage(4096, []struct {
 		rowid   int64
 		payload []byte
 	}{
 		{1, []byte("row1")},
 	})
-	bt.Pages[1] = pageData
+	bt.Pages[2] = pageData
 
 	// Create an orphan page (not referenced)
 	orphan := createTestLeafPage(4096, []struct {
@@ -439,7 +442,7 @@ func TestCheckIntegrity_OrphanPage(t *testing.T) {
 	})
 	bt.Pages[999] = orphan
 
-	result := CheckIntegrity(bt, 1)
+	result := CheckIntegrity(bt, 2)
 
 	if result.OK() {
 		t.Error("Expected errors for orphan page")
@@ -461,7 +464,7 @@ func TestCheckIntegrity_OrphanPage(t *testing.T) {
 func TestCheckIntegrity_KeyOutOfRange(t *testing.T) {
 	bt := NewBtree(4096)
 
-	// Create interior page with bounds
+	// Create interior page with bounds (use page 4 as root)
 	root := make([]byte, 4096)
 	root[0] = PageTypeInteriorTable
 	binary.BigEndian.PutUint16(root[3:], 1)    // NumCells = 1
@@ -490,11 +493,11 @@ func TestCheckIntegrity_KeyOutOfRange(t *testing.T) {
 		{7, []byte("row7")},
 	})
 
-	bt.Pages[1] = root
+	bt.Pages[4] = root
 	bt.Pages[2] = leaf1
 	bt.Pages[3] = leaf2
 
-	result := CheckIntegrity(bt, 1)
+	result := CheckIntegrity(bt, 4)
 
 	if result.OK() {
 		t.Error("Expected errors for key out of range")
@@ -516,7 +519,7 @@ func TestCheckIntegrity_KeyOutOfRange(t *testing.T) {
 func TestCheckPageIntegrity(t *testing.T) {
 	bt := NewBtree(4096)
 
-	// Create a valid leaf page
+	// Create a valid leaf page (use page 2)
 	pageData := createTestLeafPage(4096, []struct {
 		rowid   int64
 		payload []byte
@@ -525,9 +528,9 @@ func TestCheckPageIntegrity(t *testing.T) {
 		{2, []byte("row2")},
 	})
 
-	bt.Pages[1] = pageData
+	bt.Pages[2] = pageData
 
-	result := CheckPageIntegrity(bt, 1)
+	result := CheckPageIntegrity(bt, 2)
 
 	if !result.OK() {
 		t.Errorf("Expected no errors, got %d errors:", len(result.Errors))
@@ -555,9 +558,9 @@ func TestValidateFreeBlockList_NoFreeBlocks(t *testing.T) {
 		{1, []byte("row1")},
 	})
 
-	bt.Pages[1] = pageData
+	bt.Pages[2] = pageData
 
-	result := ValidateFreeBlockList(bt, 1)
+	result := ValidateFreeBlockList(bt, 2)
 
 	if !result.OK() {
 		t.Errorf("Expected no errors for page with no free blocks, got %d errors", len(result.Errors))
@@ -581,9 +584,9 @@ func TestValidateFreeBlockList_ValidList(t *testing.T) {
 	binary.BigEndian.PutUint16(pageData[200:], 0)  // No next block
 	binary.BigEndian.PutUint16(pageData[202:], 40) // Block size 40
 
-	bt.Pages[1] = pageData
+	bt.Pages[2] = pageData
 
-	result := ValidateFreeBlockList(bt, 1)
+	result := ValidateFreeBlockList(bt, 2)
 
 	if !result.OK() {
 		t.Errorf("Expected no errors for valid free block list, got %d errors:", len(result.Errors))
@@ -610,9 +613,9 @@ func TestValidateFreeBlockList_Cycle(t *testing.T) {
 	binary.BigEndian.PutUint16(pageData[200:], 100) // Next block at 100 (CYCLE!)
 	binary.BigEndian.PutUint16(pageData[202:], 40)  // Block size 40
 
-	bt.Pages[1] = pageData
+	bt.Pages[2] = pageData
 
-	result := ValidateFreeBlockList(bt, 1)
+	result := ValidateFreeBlockList(bt, 2)
 
 	if result.OK() {
 		t.Error("Expected errors for free block list cycle")
@@ -644,9 +647,9 @@ func TestValidateFreeBlockList_InvalidSize(t *testing.T) {
 	binary.BigEndian.PutUint16(pageData[100:], 0) // No next block
 	binary.BigEndian.PutUint16(pageData[102:], 2) // Block size 2 (INVALID - must be >= 4)
 
-	bt.Pages[1] = pageData
+	bt.Pages[2] = pageData
 
-	result := ValidateFreeBlockList(bt, 1)
+	result := ValidateFreeBlockList(bt, 2)
 
 	if result.OK() {
 		t.Error("Expected errors for invalid free block size")
@@ -674,9 +677,9 @@ func TestValidateFreeBlockList_OutOfBounds(t *testing.T) {
 	binary.BigEndian.PutUint16(pageData[3:], 0)    // NumCells = 0
 	binary.BigEndian.PutUint16(pageData[5:], 0)    // CellContentStart = 0
 
-	bt.Pages[1] = pageData
+	bt.Pages[2] = pageData
 
-	result := ValidateFreeBlockList(bt, 1)
+	result := ValidateFreeBlockList(bt, 2)
 
 	if result.OK() {
 		t.Error("Expected errors for free block out of bounds")
@@ -731,9 +734,9 @@ func TestCheckIntegrity_ContentOverlap(t *testing.T) {
 	binary.BigEndian.PutUint16(pageData[8:], 100)
 	binary.BigEndian.PutUint16(pageData[10:], 90)
 
-	bt.Pages[1] = pageData
+	bt.Pages[2] = pageData
 
-	result := CheckIntegrity(bt, 1)
+	result := CheckIntegrity(bt, 2)
 
 	if result.OK() {
 		t.Error("Expected errors for content overlap")
@@ -756,14 +759,16 @@ func TestCheckIntegrity_DepthExceeded(t *testing.T) {
 	bt := NewBtree(4096)
 
 	// Create a very deep tree (deeper than MaxBtreeDepth)
-	for i := 1; i <= MaxBtreeDepth+2; i++ {
+	// Start from page 100 to avoid file header issues
+	startPage := 100
+	for i := 0; i <= MaxBtreeDepth+1; i++ {
 		page := make([]byte, 4096)
 		page[0] = PageTypeInteriorTable
-		binary.BigEndian.PutUint16(page[3:], 0)       // NumCells = 0
-		binary.BigEndian.PutUint32(page[8:], uint32(i+1)) // RightChild = next page
-		binary.BigEndian.PutUint16(page[5:], 4096)    // CellContentStart
+		binary.BigEndian.PutUint16(page[3:], 0)                    // NumCells = 0
+		binary.BigEndian.PutUint32(page[8:], uint32(startPage+i+1)) // RightChild = next page
+		binary.BigEndian.PutUint16(page[5:], 4096)                 // CellContentStart
 
-		bt.Pages[uint32(i)] = page
+		bt.Pages[uint32(startPage+i)] = page
 	}
 
 	// Last page is a leaf
@@ -772,9 +777,9 @@ func TestCheckIntegrity_DepthExceeded(t *testing.T) {
 	binary.BigEndian.PutUint16(lastPage[3:], 0)    // NumCells = 0
 	binary.BigEndian.PutUint16(lastPage[5:], 4096) // CellContentStart
 
-	bt.Pages[uint32(MaxBtreeDepth+3)] = lastPage
+	bt.Pages[uint32(startPage+MaxBtreeDepth+2)] = lastPage
 
-	result := CheckIntegrity(bt, 1)
+	result := CheckIntegrity(bt, uint32(startPage))
 
 	if result.OK() {
 		t.Error("Expected errors for excessive depth")
@@ -796,7 +801,7 @@ func TestCheckIntegrity_DepthExceeded(t *testing.T) {
 func TestCheckIntegrity_MultipleErrors(t *testing.T) {
 	bt := NewBtree(4096)
 
-	// Create a page with multiple errors
+	// Create a page with multiple errors (use page 2)
 	pageData := createTestLeafPage(4096, []struct {
 		rowid   int64
 		payload []byte
@@ -814,10 +819,10 @@ func TestCheckIntegrity_MultipleErrors(t *testing.T) {
 		{100, []byte("orphan")},
 	})
 
-	bt.Pages[1] = pageData
+	bt.Pages[2] = pageData
 	bt.Pages[999] = orphan
 
-	result := CheckIntegrity(bt, 1)
+	result := CheckIntegrity(bt, 2)
 
 	if result.OK() {
 		t.Error("Expected multiple errors")

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/collation"
 )
 
 // MemFlags represents the type and state flags for a Mem structure.
@@ -498,24 +500,35 @@ func compareNumeric(m, other *Mem) int {
 }
 
 func compareStrings(m, other *Mem) int {
+	return compareStringsWithCollation(m, other, "")
+}
+
+func compareStringsWithCollation(m, other *Mem, collName string) int {
 	s1, s2 := m.StrValue(), other.StrValue()
-	if s1 < s2 {
-		return -1
+
+	// Use specified collation, or default to BINARY
+	if collName == "" {
+		collName = collation.DefaultCollation()
 	}
-	if s1 > s2 {
-		return 1
-	}
-	return 0
+
+	return collation.Compare(s1, s2, collName)
 }
 
 func (m *Mem) Compare(other *Mem) int {
+	return m.CompareWithCollation(other, "")
+}
+
+// CompareWithCollation compares two memory cells using the specified collation.
+// The collation is only used for string comparisons.
+// If collation is empty, BINARY collation is used.
+func (m *Mem) CompareWithCollation(other *Mem, collName string) int {
 	if result, handled := compareNulls(m, other); handled {
 		return result
 	}
 	if m.IsNumeric() && other.IsNumeric() {
 		return compareNumeric(m, other)
 	}
-	return compareStrings(m, other)
+	return compareStringsWithCollation(m, other, collName)
 }
 
 // CompareWithDirection compares two memory cells with a sort direction.

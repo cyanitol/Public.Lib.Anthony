@@ -14,16 +14,18 @@ import (
 // Schema represents a database schema containing tables and indexes.
 // It is safe for concurrent access.
 type Schema struct {
-	Tables  map[string]*Table
-	Indexes map[string]*Index
-	mu      sync.RWMutex
+	Tables    map[string]*Table
+	Indexes   map[string]*Index
+	Sequences *SequenceManager // Manages AUTOINCREMENT sequences
+	mu        sync.RWMutex
 }
 
 // NewSchema creates a new empty schema.
 func NewSchema() *Schema {
 	return &Schema{
-		Tables:  make(map[string]*Table),
-		Indexes: make(map[string]*Index),
+		Tables:    make(map[string]*Table),
+		Indexes:   make(map[string]*Index),
+		Sequences: NewSequenceManager(),
 	}
 }
 
@@ -196,6 +198,9 @@ func (s *Schema) DropTable(name string) error {
 		}
 	}
 
+	// Remove sequence if it exists
+	s.Sequences.DropSequence(actualName)
+
 	// Remove the table
 	delete(s.Tables, actualName)
 
@@ -240,6 +245,34 @@ func (t *Table) GetColumnIndex(name string) int {
 		}
 	}
 	return -1
+}
+
+// GetColumnCollation returns the collation for a column by index.
+// Returns empty string if column doesn't exist or has no explicit collation.
+func (t *Table) GetColumnCollation(index int) string {
+	if index < 0 || index >= len(t.Columns) {
+		return ""
+	}
+	return t.Columns[index].Collation
+}
+
+// GetColumnCollationByName returns the collation for a column by name.
+// Returns empty string if column doesn't exist or has no explicit collation.
+func (t *Table) GetColumnCollationByName(name string) string {
+	col, ok := t.GetColumn(name)
+	if !ok {
+		return ""
+	}
+	return col.Collation
+}
+
+// GetEffectiveCollation returns the effective collation for a column.
+// If the column has no explicit collation, returns "BINARY" (the default).
+func (c *Column) GetEffectiveCollation() string {
+	if c.Collation == "" {
+		return "BINARY"
+	}
+	return c.Collation
 }
 
 // HasRowID returns true if the table has an implicit rowid column.
@@ -443,6 +476,16 @@ func (s *Schema) CreateTable(stmt *parser.CreateTableStmt) (*Table, error) {
 		Strict:       stmt.Strict,
 		Temp:         stmt.Temp,
 		Constraints:  tableConstraints,
+	}
+
+	// Validate AUTOINCREMENT constraints
+	if err := table.ValidateAutoincrementColumn(); err != nil {
+		return nil, err
+	}
+
+	// Initialize sequence if table has AUTOINCREMENT column
+	if _, hasAutoincrement := table.HasAutoincrementColumn(); hasAutoincrement {
+		s.Sequences.InitSequence(stmt.Name)
 	}
 
 	s.Tables[stmt.Name] = table

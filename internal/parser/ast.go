@@ -1,5 +1,7 @@
 package parser
 
+import "strings"
+
 // Node is the interface that all AST nodes implement.
 type Node interface {
 	node()
@@ -24,6 +26,7 @@ type Expression interface {
 
 // SelectStmt represents a SELECT statement.
 type SelectStmt struct {
+	With     *WithClause     // Common Table Expressions (WITH clause)
 	Distinct bool
 	Columns  []ResultColumn
 	From     *FromClause
@@ -42,6 +45,19 @@ func (s *SelectStmt) String() string {
 	return "SELECT"
 }
 
+// WithClause represents a WITH clause containing Common Table Expressions.
+type WithClause struct {
+	Recursive bool
+	CTEs      []CTE
+}
+
+// CTE represents a Common Table Expression.
+type CTE struct {
+	Name    string
+	Columns []string      // Optional column list
+	Select  *SelectStmt   // The SELECT query defining the CTE
+}
+
 // CompoundSelect represents compound SELECT operators (UNION, EXCEPT, INTERSECT).
 type CompoundSelect struct {
 	Op    CompoundOp
@@ -57,6 +73,21 @@ const (
 	CompoundExcept
 	CompoundIntersect
 )
+
+func (op CompoundOp) String() string {
+	switch op {
+	case CompoundUnion:
+		return "UNION"
+	case CompoundUnionAll:
+		return "UNION ALL"
+	case CompoundExcept:
+		return "EXCEPT"
+	case CompoundIntersect:
+		return "INTERSECT"
+	default:
+		return "UNKNOWN"
+	}
+}
 
 // ResultColumn represents a column in the SELECT clause.
 type ResultColumn struct {
@@ -117,6 +148,7 @@ type InsertStmt struct {
 	Select      *SelectStmt
 	OnConflict  OnConflictClause
 	DefaultVals bool
+	Upsert      *UpsertClause
 }
 
 func (i *InsertStmt) node()      {}
@@ -349,6 +381,83 @@ func (d *DropIndexStmt) String() string {
 	return "DROP INDEX"
 }
 
+// CreateViewStmt represents a CREATE VIEW statement.
+type CreateViewStmt struct {
+	Name        string
+	Columns     []string
+	Select      *SelectStmt
+	IfNotExists bool
+	Temporary   bool
+}
+
+func (c *CreateViewStmt) node()      {}
+func (c *CreateViewStmt) statement() {}
+func (c *CreateViewStmt) String() string {
+	return "CREATE VIEW"
+}
+
+// DropViewStmt represents a DROP VIEW statement.
+type DropViewStmt struct {
+	Name     string
+	IfExists bool
+}
+
+func (d *DropViewStmt) node()      {}
+func (d *DropViewStmt) statement() {}
+func (d *DropViewStmt) String() string {
+	return "DROP VIEW"
+}
+
+// CreateTriggerStmt represents a CREATE TRIGGER statement.
+type CreateTriggerStmt struct {
+	Name        string
+	Temp        bool
+	IfNotExists bool
+	Timing      TriggerTiming
+	Event       TriggerEvent
+	UpdateOf    []string // columns for UPDATE OF
+	Table       string
+	ForEachRow  bool
+	When        Expression
+	Body        []Statement
+}
+
+func (c *CreateTriggerStmt) node()      {}
+func (c *CreateTriggerStmt) statement() {}
+func (c *CreateTriggerStmt) String() string {
+	return "CREATE TRIGGER"
+}
+
+// TriggerTiming represents when a trigger fires.
+type TriggerTiming int
+
+const (
+	TriggerBefore TriggerTiming = iota
+	TriggerAfter
+	TriggerInsteadOf
+)
+
+// TriggerEvent represents the event that activates a trigger.
+type TriggerEvent int
+
+const (
+	TriggerInsert TriggerEvent = iota
+	TriggerUpdate
+	TriggerDelete
+)
+
+// DropTriggerStmt represents a DROP TRIGGER statement.
+type DropTriggerStmt struct {
+	Name     string
+	IfExists bool
+}
+
+func (d *DropTriggerStmt) node()      {}
+func (d *DropTriggerStmt) statement() {}
+func (d *DropTriggerStmt) String() string {
+	return "DROP TRIGGER"
+}
+
 // BeginStmt represents a BEGIN/START TRANSACTION statement.
 type BeginStmt struct {
 	Mode TransactionMode
@@ -388,6 +497,121 @@ func (r *RollbackStmt) String() string {
 	return "ROLLBACK"
 }
 
+// ExplainStmt represents an EXPLAIN or EXPLAIN QUERY PLAN statement.
+type ExplainStmt struct {
+	QueryPlan bool      // true for EXPLAIN QUERY PLAN, false for EXPLAIN
+	Statement Statement // the statement being explained
+}
+
+func (e *ExplainStmt) node()      {}
+func (e *ExplainStmt) statement() {}
+func (e *ExplainStmt) String() string {
+	if e.QueryPlan {
+		return "EXPLAIN QUERY PLAN"
+	}
+	return "EXPLAIN"
+}
+
+
+// AttachStmt represents an ATTACH DATABASE statement.
+type AttachStmt struct {
+	Filename   Expression // String literal or expression for the database file path
+	SchemaName string     // The schema name to attach as
+}
+
+func (a *AttachStmt) node()      {}
+func (a *AttachStmt) statement() {}
+func (a *AttachStmt) String() string {
+	return "ATTACH"
+}
+
+// DetachStmt represents a DETACH DATABASE statement.
+type DetachStmt struct {
+	SchemaName string // The schema name to detach
+}
+
+func (d *DetachStmt) node()      {}
+func (d *DetachStmt) statement() {}
+func (d *DetachStmt) String() string {
+	return "DETACH"
+}
+
+// PragmaStmt represents a PRAGMA statement.
+type PragmaStmt struct {
+	Schema string     // optional schema name
+	Name   string     // pragma name
+	Value  Expression // optional value (for = or () syntax)
+}
+
+func (p *PragmaStmt) node()      {}
+func (p *PragmaStmt) statement() {}
+func (p *PragmaStmt) String() string {
+	return "PRAGMA"
+}
+
+// AlterTableStmt represents an ALTER TABLE statement.
+type AlterTableStmt struct {
+	Table  string
+	Action AlterTableAction
+}
+
+func (a *AlterTableStmt) node()      {}
+func (a *AlterTableStmt) statement() {}
+func (a *AlterTableStmt) String() string {
+	return "ALTER TABLE"
+}
+
+// AlterTableAction represents the action to perform in ALTER TABLE.
+type AlterTableAction interface {
+	Node
+	alterTableAction()
+}
+
+// RenameTableAction represents RENAME TO newname.
+type RenameTableAction struct {
+	NewName string
+}
+
+func (r *RenameTableAction) node()             {}
+func (r *RenameTableAction) alterTableAction() {}
+func (r *RenameTableAction) String() string {
+	return "RENAME TO"
+}
+
+// RenameColumnAction represents RENAME COLUMN oldname TO newname.
+type RenameColumnAction struct {
+	OldName string
+	NewName string
+}
+
+func (r *RenameColumnAction) node()             {}
+func (r *RenameColumnAction) alterTableAction() {}
+func (r *RenameColumnAction) String() string {
+	return "RENAME COLUMN"
+}
+
+// AddColumnAction represents ADD COLUMN column_def.
+type AddColumnAction struct {
+	Column ColumnDef
+}
+
+func (a *AddColumnAction) node()             {}
+func (a *AddColumnAction) alterTableAction() {}
+func (a *AddColumnAction) String() string {
+	return "ADD COLUMN"
+}
+
+// DropColumnAction represents DROP COLUMN column_name.
+type DropColumnAction struct {
+	ColumnName string
+}
+
+func (d *DropColumnAction) node()             {}
+func (d *DropColumnAction) alterTableAction() {}
+func (d *DropColumnAction) String() string {
+	return "DROP COLUMN"
+}
+
 // =============================================================================
 // Expressions
 // =============================================================================
@@ -402,7 +626,66 @@ type BinaryExpr struct {
 func (b *BinaryExpr) node()       {}
 func (b *BinaryExpr) expression() {}
 func (b *BinaryExpr) String() string {
-	return "BinaryExpr"
+	left := "nil"
+	right := "nil"
+	if b.Left != nil {
+		left = b.Left.String()
+	}
+	if b.Right != nil {
+		right = b.Right.String()
+	}
+	return left + " " + b.Op.String() + " " + right
+}
+
+func (o BinaryOp) String() string {
+	switch o {
+	case OpEq:
+		return "="
+	case OpNe:
+		return "!="
+	case OpLt:
+		return "<"
+	case OpLe:
+		return "<="
+	case OpGt:
+		return ">"
+	case OpGe:
+		return ">="
+	case OpAnd:
+		return "AND"
+	case OpOr:
+		return "OR"
+	case OpPlus:
+		return "+"
+	case OpMinus:
+		return "-"
+	case OpMul:
+		return "*"
+	case OpDiv:
+		return "/"
+	case OpRem:
+		return "%"
+	case OpConcat:
+		return "||"
+	case OpBitAnd:
+		return "&"
+	case OpBitOr:
+		return "|"
+	case OpLShift:
+		return "<<"
+	case OpRShift:
+		return ">>"
+	case OpLike:
+		return "LIKE"
+	case OpGlob:
+		return "GLOB"
+	case OpRegexp:
+		return "REGEXP"
+	case OpMatch:
+		return "MATCH"
+	default:
+		return "?"
+	}
 }
 
 type BinaryOp int
@@ -441,7 +724,24 @@ type UnaryExpr struct {
 func (u *UnaryExpr) node()       {}
 func (u *UnaryExpr) expression() {}
 func (u *UnaryExpr) String() string {
-	return "UnaryExpr"
+	expr := "nil"
+	if u.Expr != nil {
+		expr = u.Expr.String()
+	}
+	switch u.Op {
+	case OpNot:
+		return "NOT " + expr
+	case OpNeg:
+		return "-" + expr
+	case OpBitNot:
+		return "~" + expr
+	case OpIsNull:
+		return expr + " IS NULL"
+	case OpNotNull:
+		return expr + " IS NOT NULL"
+	default:
+		return "?" + expr
+	}
 }
 
 type UnaryOp int
@@ -463,7 +763,19 @@ type LiteralExpr struct {
 func (l *LiteralExpr) node()       {}
 func (l *LiteralExpr) expression() {}
 func (l *LiteralExpr) String() string {
-	return "Literal:" + l.Value
+	switch l.Type {
+	case LiteralNull:
+		return "NULL"
+	case LiteralString:
+		// Escape single quotes by doubling them
+		escaped := strings.ReplaceAll(l.Value, "'", "''")
+		return "'" + escaped + "'"
+	case LiteralBlob:
+		return "X'" + l.Value + "'"
+	default:
+		// Integer and Float are returned as-is
+		return l.Value
+	}
 }
 
 type LiteralType int
@@ -504,7 +816,20 @@ type FunctionExpr struct {
 func (f *FunctionExpr) node()       {}
 func (f *FunctionExpr) expression() {}
 func (f *FunctionExpr) String() string {
-	return "Function:" + f.Name
+	if f.Star {
+		return f.Name + "(*)"
+	}
+	var args []string
+	for _, arg := range f.Args {
+		if arg != nil {
+			args = append(args, arg.String())
+		}
+	}
+	prefix := ""
+	if f.Distinct {
+		prefix = "DISTINCT "
+	}
+	return f.Name + "(" + prefix + strings.Join(args, ", ") + ")"
 }
 
 // WindowSpec represents a window specification for window functions.
@@ -555,7 +880,28 @@ type CaseExpr struct {
 func (c *CaseExpr) node()       {}
 func (c *CaseExpr) expression() {}
 func (c *CaseExpr) String() string {
-	return "CASE"
+	var sb strings.Builder
+	sb.WriteString("CASE")
+	if c.Expr != nil {
+		sb.WriteString(" ")
+		sb.WriteString(c.Expr.String())
+	}
+	for _, w := range c.WhenClauses {
+		sb.WriteString(" WHEN ")
+		if w.Condition != nil {
+			sb.WriteString(w.Condition.String())
+		}
+		sb.WriteString(" THEN ")
+		if w.Result != nil {
+			sb.WriteString(w.Result.String())
+		}
+	}
+	if c.ElseClause != nil {
+		sb.WriteString(" ELSE ")
+		sb.WriteString(c.ElseClause.String())
+	}
+	sb.WriteString(" END")
+	return sb.String()
 }
 
 // WhenClause represents a WHEN clause in a CASE expression.
@@ -575,7 +921,23 @@ type InExpr struct {
 func (i *InExpr) node()       {}
 func (i *InExpr) expression() {}
 func (i *InExpr) String() string {
-	return "IN"
+	var sb strings.Builder
+	if i.Expr != nil {
+		sb.WriteString(i.Expr.String())
+	}
+	if i.Not {
+		sb.WriteString(" NOT")
+	}
+	sb.WriteString(" IN (")
+	var vals []string
+	for _, v := range i.Values {
+		if v != nil {
+			vals = append(vals, v.String())
+		}
+	}
+	sb.WriteString(strings.Join(vals, ", "))
+	sb.WriteString(")")
+	return sb.String()
 }
 
 // BetweenExpr represents a BETWEEN expression.
@@ -589,7 +951,22 @@ type BetweenExpr struct {
 func (b *BetweenExpr) node()       {}
 func (b *BetweenExpr) expression() {}
 func (b *BetweenExpr) String() string {
-	return "BETWEEN"
+	var sb strings.Builder
+	if b.Expr != nil {
+		sb.WriteString(b.Expr.String())
+	}
+	if b.Not {
+		sb.WriteString(" NOT")
+	}
+	sb.WriteString(" BETWEEN ")
+	if b.Lower != nil {
+		sb.WriteString(b.Lower.String())
+	}
+	sb.WriteString(" AND ")
+	if b.Upper != nil {
+		sb.WriteString(b.Upper.String())
+	}
+	return sb.String()
 }
 
 // CastExpr represents a CAST expression.
@@ -601,7 +978,11 @@ type CastExpr struct {
 func (c *CastExpr) node()       {}
 func (c *CastExpr) expression() {}
 func (c *CastExpr) String() string {
-	return "CAST"
+	expr := "nil"
+	if c.Expr != nil {
+		expr = c.Expr.String()
+	}
+	return "CAST(" + expr + " AS " + c.Type + ")"
 }
 
 // CollateExpr represents a COLLATE expression.
@@ -613,7 +994,11 @@ type CollateExpr struct {
 func (c *CollateExpr) node()       {}
 func (c *CollateExpr) expression() {}
 func (c *CollateExpr) String() string {
-	return "COLLATE"
+	expr := "nil"
+	if c.Expr != nil {
+		expr = c.Expr.String()
+	}
+	return expr + " COLLATE " + c.Collation
 }
 
 // ParenExpr represents a parenthesized expression.
@@ -624,7 +1009,11 @@ type ParenExpr struct {
 func (p *ParenExpr) node()       {}
 func (p *ParenExpr) expression() {}
 func (p *ParenExpr) String() string {
-	return "Paren"
+	expr := "nil"
+	if p.Expr != nil {
+		expr = p.Expr.String()
+	}
+	return "(" + expr + ")"
 }
 
 // SubqueryExpr represents a subquery expression.
@@ -635,7 +1024,10 @@ type SubqueryExpr struct {
 func (s *SubqueryExpr) node()       {}
 func (s *SubqueryExpr) expression() {}
 func (s *SubqueryExpr) String() string {
-	return "Subquery"
+	// We can't easily convert a full SELECT statement to string here,
+	// so we return a placeholder. Full subquery serialization would require
+	// implementing String() on SelectStmt as well.
+	return "(SELECT ...)"
 }
 
 // VariableExpr represents a parameter placeholder.
@@ -646,5 +1038,41 @@ type VariableExpr struct {
 func (v *VariableExpr) node()       {}
 func (v *VariableExpr) expression() {}
 func (v *VariableExpr) String() string {
-	return "Variable:" + v.Name
+	// SQL parameters are typically represented as ? or :name or $name
+	if v.Name == "" {
+		return "?"
+	}
+	return ":" + v.Name
+}
+
+// =============================================================================
+// UPSERT (ON CONFLICT) Clause
+// =============================================================================
+
+// UpsertClause represents an ON CONFLICT clause in an INSERT statement.
+type UpsertClause struct {
+	Target *ConflictTarget
+	Action ConflictAction
+	Update *DoUpdateClause
+}
+
+// ConflictTarget specifies which conflict to handle.
+type ConflictTarget struct {
+	Columns        []IndexedColumn // columns for ON CONFLICT (col1, col2)
+	Where          Expression      // WHERE clause for partial indexes
+	ConstraintName string          // ON CONSTRAINT name
+}
+
+// ConflictAction specifies what to do on conflict.
+type ConflictAction int
+
+const (
+	ConflictDoNothing ConflictAction = iota
+	ConflictDoUpdate
+)
+
+// DoUpdateClause represents DO UPDATE SET clause.
+type DoUpdateClause struct {
+	Sets  []Assignment // SET column = value
+	Where Expression   // WHERE clause for conditional updates
 }

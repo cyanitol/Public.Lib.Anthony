@@ -329,13 +329,14 @@ func TestVdbeBasicExecution(t *testing.T) {
 		v := New()
 		v.AllocMemory(10)
 
-		// Program: r[1] = 0; r[2] = 10; r[1]++; if r[1] < r[2] goto 2; Halt
+		// Program: r[1] = 0; r[2] = 10; r[1]++; r[4] = (r[1] < r[2]); if r[4] goto 2; Halt
 		v.AddOp(OpInteger, 0, 1, 0)  // 0: r[1] = 0 (counter)
 		v.AddOp(OpInteger, 10, 2, 0) // 1: r[2] = 10 (limit)
 		v.AddOp(OpInteger, 1, 3, 0)  // 2: r[3] = 1
-		v.AddOp(OpAdd, 1, 3, 1)      // 3: r[1] = r[1] + 1
-		v.AddOp(OpLt, 1, 2, 2)       // 4: if r[1] < r[2] goto 2
-		v.AddOp(OpHalt, 0, 0, 0)     // 5: Halt
+		v.AddOp(OpAdd, 1, 3, 1)      // 3: r[1] = r[1] + r[3] (increment)
+		v.AddOp(OpLt, 1, 2, 4)       // 4: r[4] = (r[1] < r[2])
+		v.AddOp(OpIf, 4, 2, 0)       // 5: if r[4] is true, goto 2
+		v.AddOp(OpHalt, 0, 0, 0)     // 6: Halt
 
 		if err := v.Run(); err != nil {
 			t.Fatalf("Execution failed: %v", err)
@@ -353,22 +354,22 @@ func TestVdbeComparison(t *testing.T) {
 		name   string
 		opcode Opcode
 		a, b   int64
-		jump   bool
+		result int64 // Expected result (1=true, 0=false)
 	}{
-		{"EqTrue", OpEq, 5, 5, true},
-		{"EqFalse", OpEq, 5, 10, false},
-		{"NeTrue", OpNe, 5, 10, true},
-		{"NeFalse", OpNe, 5, 5, false},
-		{"LtTrue", OpLt, 5, 10, true},
-		{"LtFalse", OpLt, 10, 5, false},
-		{"LeTrue", OpLe, 5, 10, true},
-		{"LeEqual", OpLe, 5, 5, true},
-		{"LeFalse", OpLe, 10, 5, false},
-		{"GtTrue", OpGt, 10, 5, true},
-		{"GtFalse", OpGt, 5, 10, false},
-		{"GeTrue", OpGe, 10, 5, true},
-		{"GeEqual", OpGe, 5, 5, true},
-		{"GeFalse", OpGe, 5, 10, false},
+		{"EqTrue", OpEq, 5, 5, 1},
+		{"EqFalse", OpEq, 5, 10, 0},
+		{"NeTrue", OpNe, 5, 10, 1},
+		{"NeFalse", OpNe, 5, 5, 0},
+		{"LtTrue", OpLt, 5, 10, 1},
+		{"LtFalse", OpLt, 10, 5, 0},
+		{"LeTrue", OpLe, 5, 10, 1},
+		{"LeEqual", OpLe, 5, 5, 1},
+		{"LeFalse", OpLe, 10, 5, 0},
+		{"GtTrue", OpGt, 10, 5, 1},
+		{"GtFalse", OpGt, 5, 10, 0},
+		{"GeTrue", OpGe, 10, 5, 1},
+		{"GeEqual", OpGe, 5, 5, 1},
+		{"GeFalse", OpGe, 5, 10, 0},
 	}
 
 	for _, tt := range tests {
@@ -376,25 +377,22 @@ func TestVdbeComparison(t *testing.T) {
 			v := New()
 			v.AllocMemory(10)
 
-			// Program: r[1] = a; r[3] = b; r[4] = 0; compare and jump; r[4] = 1; Halt
+			// Program: r[1] = a; r[2] = b; compare(r[1], r[2]) -> r[3]; Halt
+			// P1 = left operand register
+			// P2 = right operand register
+			// P3 = result register (1=true, 0=false)
 			v.AddOp(OpInteger, int(tt.a), 1, 0)
-			v.AddOp(OpInteger, int(tt.b), 3, 0)
-			v.AddOp(OpInteger, 0, 4, 0)
-			v.AddOp(tt.opcode, 1, 6, 3) // Jump to instruction 6 if condition true
-			v.AddOp(OpInteger, 1, 4, 0) // r[4] = 1 (not jumped)
-			v.AddOp(OpHalt, 0, 0, 0)
-			v.AddOp(OpInteger, 2, 4, 0) // r[4] = 2 (jumped)
+			v.AddOp(OpInteger, int(tt.b), 2, 0)
+			v.AddOp(tt.opcode, 1, 2, 3)
 			v.AddOp(OpHalt, 0, 0, 0)
 
 			if err := v.Run(); err != nil {
 				t.Fatalf("Execution failed: %v", err)
 			}
 
-			mem, _ := v.GetMem(4)
-			jumped := mem.IntValue() == 2
-
-			if jumped != tt.jump {
-				t.Errorf("Expected jump=%v, got jump=%v", tt.jump, jumped)
+			mem, _ := v.GetMem(3)
+			if mem.IntValue() != tt.result {
+				t.Errorf("Expected result=%d, got result=%d", tt.result, mem.IntValue())
 			}
 		})
 	}
@@ -609,9 +607,4 @@ func TestResultRowHandling(t *testing.T) {
 	})
 }
 
-// Helper function to check if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		(s == substr || len(s) > len(substr) &&
-			(s[:len(substr)] == substr || contains(s[1:], substr)))
-}
+// contains is defined in exec_transaction_test.go

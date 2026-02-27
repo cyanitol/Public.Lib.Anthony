@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"strconv"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
 )
@@ -79,7 +80,11 @@ type opcodeHandler func(v *VDBE, instr *Instruction) error
 
 // opcodeDispatch maps opcodes to their handler functions.
 // Using a dispatch table reduces cyclomatic complexity vs switch statement.
-var opcodeDispatch = map[Opcode]opcodeHandler{
+// Initialized in init() to avoid initialization cycle.
+var opcodeDispatch map[Opcode]opcodeHandler
+
+func init() {
+	opcodeDispatch = map[Opcode]opcodeHandler{
 	// Control flow opcodes
 	OpInit:   (*VDBE).execInit,
 	OpGoto:   (*VDBE).execGoto,
@@ -103,15 +108,20 @@ var opcodeDispatch = map[Opcode]opcodeHandler{
 	OpSCopy:   (*VDBE).execSCopy,
 
 	// Cursor operations
-	OpOpenRead:  (*VDBE).execOpenRead,
-	OpOpenWrite: (*VDBE).execOpenWrite,
-	OpClose:     (*VDBE).execClose,
-	OpRewind:    (*VDBE).execRewind,
-	OpNext:      (*VDBE).execNext,
-	OpPrev:      (*VDBE).execPrev,
-	OpSeekGE:    (*VDBE).execSeekGE,
-	OpSeekLE:    (*VDBE).execSeekLE,
-	OpSeekRowid: (*VDBE).execSeekRowid,
+	OpOpenRead:      (*VDBE).execOpenRead,
+	OpOpenWrite:     (*VDBE).execOpenWrite,
+	OpOpenEphemeral: (*VDBE).execOpenEphemeral,
+	OpClose:         (*VDBE).execClose,
+	OpRewind:        (*VDBE).execRewind,
+	OpNext:          (*VDBE).execNext,
+	OpPrev:          (*VDBE).execPrev,
+	OpSeekGE:        (*VDBE).execSeekGE,
+	OpSeekGT:        (*VDBE).execSeekGT,
+	OpSeekLE:        (*VDBE).execSeekLE,
+	OpSeekLT:        (*VDBE).execSeekLT,
+	OpSeekRowid:     (*VDBE).execSeekRowid,
+	OpNotExists:     (*VDBE).execNotExists,
+	OpDeferredSeek:  (*VDBE).execDeferredSeek,
 
 	// Data retrieval
 	OpColumn:    (*VDBE).execColumn,
@@ -142,6 +152,18 @@ var opcodeDispatch = map[Opcode]opcodeHandler{
 	OpRemainder: (*VDBE).execRemainder,
 	OpAddImm:    (*VDBE).execAddImm,
 
+	// Bitwise operations
+	OpBitAnd:     (*VDBE).execBitAnd,
+	OpBitOr:      (*VDBE).execBitOr,
+	OpBitNot:     (*VDBE).execBitNot,
+	OpShiftLeft:  (*VDBE).execShiftLeft,
+	OpShiftRight: (*VDBE).execShiftRight,
+
+	// Logical operations
+	OpAnd: (*VDBE).execAnd,
+	OpOr:  (*VDBE).execOr,
+	OpNot: (*VDBE).execNot,
+
 	// Aggregate functions
 	OpAggStep:  (*VDBE).execAggStep,
 	OpAggFinal: (*VDBE).execAggFinal,
@@ -150,9 +172,13 @@ var opcodeDispatch = map[Opcode]opcodeHandler{
 	OpFunction: (*VDBE).execFunction,
 
 	// Transaction operations
-	OpTransaction: (*VDBE).execTransaction,
-	OpCommit:      (*VDBE).execCommit,
-	OpRollback:    (*VDBE).execRollback,
+	OpTransaction:  (*VDBE).execTransaction,
+	OpCommit:       (*VDBE).execCommit,
+	OpRollback:     (*VDBE).execRollback,
+	OpAutocommit:   (*VDBE).execAutoCommit,
+	OpSavepoint:    (*VDBE).execSavepoint,
+	OpVerifyCookie: (*VDBE).execVerifyCookie,
+	OpSetCookie:    (*VDBE).execSetCookie,
 
 	// Sorter operations
 	OpSorterOpen:   (*VDBE).execSorterOpen,
@@ -164,6 +190,32 @@ var opcodeDispatch = map[Opcode]opcodeHandler{
 
 	// No operation
 	OpNoop: (*VDBE).execNoop,
+
+	// Type conversion operations
+	OpCast:      (*VDBE).execCast,
+	OpToText:    (*VDBE).execToText,
+	OpToBlob:    (*VDBE).execToBlob,
+	OpToNumeric: (*VDBE).execToNumeric,
+	OpToInt:     (*VDBE).execToInt,
+	OpToReal:    (*VDBE).execToReal,
+
+	// Index operations
+	OpIdxInsert: (*VDBE).execIdxInsert,
+	OpIdxDelete: (*VDBE).execIdxDelete,
+	OpIdxRowid:  (*VDBE).execIdxRowid,
+	OpIdxLT:     (*VDBE).execIdxLT,
+	OpIdxGT:     (*VDBE).execIdxGT,
+	OpIdxLE:     (*VDBE).execIdxLE,
+	OpIdxGE:     (*VDBE).execIdxGE,
+
+	// Trigger and sub-program operations
+	OpProgram:       (*VDBE).execProgram,
+	OpParam:         (*VDBE).execParam,
+	OpInitCoroutine: (*VDBE).execInitCoroutine,
+	OpEndCoroutine:  (*VDBE).execEndCoroutine,
+	OpYield:         (*VDBE).execYield,
+	OpOpenPseudo:    (*VDBE).execOpenPseudo,
+	}
 }
 
 // execNoop handles the OpNoop instruction (no operation).
@@ -743,6 +795,241 @@ func (v *VDBE) execSeekRowid(instr *Instruction) error {
 	return nil
 }
 
+func (v *VDBE) execOpenEphemeral(instr *Instruction) error {
+	// Open ephemeral/temporary table
+	// P1 = cursor number
+	// P2 = number of columns
+	// P4 = key info (optional, for index tables)
+
+	// For now, we create an in-memory btree for ephemeral tables
+	// In a full implementation, this would create a temporary btree structure
+
+	// Allocate cursors if needed
+	if err := v.AllocCursors(instr.P1 + 1); err != nil {
+		return err
+	}
+
+	// Create an ephemeral cursor (in-memory temporary table)
+	// For simplicity, we'll use a pseudo-cursor type to represent ephemeral tables
+	cursor := &Cursor{
+		CurType:     CursorPseudo,
+		IsTable:     true,
+		Writable:    true,
+		CachedCols:  make([][]byte, 0),
+		CacheStatus: 0,
+	}
+
+	v.Cursors[instr.P1] = cursor
+	return nil
+}
+
+func (v *VDBE) execSeekGT(instr *Instruction) error {
+	// Position cursor to first row > key
+	// P1 = cursor number
+	// P2 = jump address if not found
+	// P3 = key register
+	cursor, err := v.GetCursor(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	keyReg, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	btCursor := seekGetBtCursor(cursor)
+	if btCursor == nil {
+		return v.seekNotFound(cursor, instr.P2)
+	}
+
+	// Move to first entry
+	if err = btCursor.MoveToFirst(); err != nil {
+		return v.seekNotFound(cursor, instr.P2)
+	}
+
+	// Linear scan to find first entry > key
+	targetRowid := keyReg.IntValue()
+	found := false
+	for {
+		currentRowid := btCursor.GetKey()
+		if currentRowid > targetRowid {
+			found = true
+			break
+		}
+		if err = btCursor.Next(); err != nil {
+			// Reached end without finding
+			break
+		}
+	}
+
+	if !found {
+		return v.seekNotFound(cursor, instr.P2)
+	}
+
+	cursor.EOF = false
+	v.IncrCacheCtr()
+	return nil
+}
+
+func (v *VDBE) execSeekLT(instr *Instruction) error {
+	// Position cursor to last row < key
+	// P1 = cursor number
+	// P2 = jump address if not found
+	// P3 = key register
+	cursor, err := v.GetCursor(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	keyReg, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	btCursor := seekGetBtCursor(cursor)
+	if btCursor == nil {
+		return v.seekNotFound(cursor, instr.P2)
+	}
+
+	// Move to first entry
+	if err = btCursor.MoveToFirst(); err != nil {
+		return v.seekNotFound(cursor, instr.P2)
+	}
+
+	// Linear scan to find last entry < key
+	targetRowid := keyReg.IntValue()
+	found := false
+	lastValidRowid := int64(0)
+
+	for {
+		currentRowid := btCursor.GetKey()
+		if currentRowid < targetRowid {
+			lastValidRowid = currentRowid
+			found = true
+		} else {
+			// Gone too far
+			break
+		}
+		if err = btCursor.Next(); err != nil {
+			// Reached end
+			break
+		}
+	}
+
+	if !found {
+		return v.seekNotFound(cursor, instr.P2)
+	}
+
+	// Reposition to the last valid entry
+	if err = btCursor.MoveToFirst(); err != nil {
+		return v.seekNotFound(cursor, instr.P2)
+	}
+
+	foundAgain, err := seekLinearScan(btCursor, lastValidRowid)
+	if err != nil || !foundAgain {
+		return v.seekNotFound(cursor, instr.P2)
+	}
+
+	cursor.EOF = false
+	v.IncrCacheCtr()
+	return nil
+}
+
+func (v *VDBE) execNotExists(instr *Instruction) error {
+	// Jump if rowid does not exist
+	// P1 = cursor number
+	// P2 = jump address if not found
+	// P3 = rowid register
+	cursor, err := v.GetCursor(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	rowidReg, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	btCursor := seekGetBtCursor(cursor)
+	if btCursor == nil {
+		// No cursor, rowid doesn't exist - jump
+		if instr.P2 > 0 {
+			v.PC = instr.P2
+		}
+		return nil
+	}
+
+	if err = btCursor.MoveToFirst(); err != nil {
+		// Empty table, rowid doesn't exist - jump
+		if instr.P2 > 0 {
+			v.PC = instr.P2
+		}
+		return nil
+	}
+
+	found, err := seekLinearScan(btCursor, rowidReg.IntValue())
+	if err != nil {
+		return err
+	}
+
+	if !found {
+		// Rowid doesn't exist - jump to P2
+		if instr.P2 > 0 {
+			v.PC = instr.P2
+		}
+	}
+	// If found, don't jump (continue to next instruction)
+
+	return nil
+}
+
+func (v *VDBE) execDeferredSeek(instr *Instruction) error {
+	// Seek cursor but defer until data needed
+	// P1 = index cursor number
+	// P2 = table cursor number
+	// P3 = rowid register
+	//
+	// This is an optimization opcode that defers seeking the table cursor
+	// until data is actually needed from it. For this simplified implementation,
+	// we'll just perform the seek immediately.
+
+	tableCursor, err := v.GetCursor(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	rowidReg, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	btCursor := seekGetBtCursor(tableCursor)
+	if btCursor == nil {
+		tableCursor.EOF = true
+		return nil
+	}
+
+	if err = btCursor.MoveToFirst(); err != nil {
+		tableCursor.EOF = true
+		return nil
+	}
+
+	found, err := seekLinearScan(btCursor, rowidReg.IntValue())
+	if err != nil {
+		return err
+	}
+
+	if !found {
+		tableCursor.EOF = true
+		return nil
+	}
+
+	tableCursor.EOF = false
+	v.IncrCacheCtr()
+	return nil
+}
+
 // Data retrieval implementations
 
 func (v *VDBE) execColumn(instr *Instruction) error {
@@ -767,6 +1054,24 @@ func (v *VDBE) getColumnPayload(cursor *Cursor, dst *Mem) []byte {
 		dst.SetNull()
 		return nil
 	}
+
+	// Handle pseudo-table cursors (for OLD/NEW in triggers)
+	if cursor.CurType == CursorPseudo {
+		// Get the record data from the pseudo register
+		pseudoMem, err := v.GetMem(cursor.PseudoReg)
+		if err != nil || pseudoMem.IsNull() {
+			dst.SetNull()
+			return nil
+		}
+		// The pseudo register should contain a blob (record)
+		if pseudoMem.IsBlob() {
+			return pseudoMem.BlobValue()
+		}
+		dst.SetNull()
+		return nil
+	}
+
+	// Handle regular btree cursors
 	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
 	if !ok || btCursor == nil {
 		dst.SetNull()
@@ -801,6 +1106,14 @@ func (v *VDBE) execRowid(instr *Instruction) error {
 
 	// Check for null row or EOF
 	if cursor.NullRow || cursor.EOF {
+		dst.SetNull()
+		return nil
+	}
+
+	// Handle pseudo-table cursors (they don't have rowids, set to NULL)
+	if cursor.CurType == CursorPseudo {
+		// Pseudo-tables for OLD/NEW don't have meaningful rowids
+		// Set to NULL or could use a stored rowid if needed
 		dst.SetNull()
 		return nil
 	}
@@ -1400,7 +1713,10 @@ func (v *VDBE) execGe(instr *Instruction) error {
 }
 
 func (v *VDBE) execCompare(instr *Instruction, test func(int) bool) error {
-	// Compare registers P1 and P2, store boolean result (1 or 0) in P3
+	// Compare r[P1] with r[P2] and store the boolean result (0 or 1) in r[P3].
+	// P1 = left operand register
+	// P2 = right operand register
+	// P3 = result register (1 if condition is true, 0 otherwise)
 	left, err := v.GetMem(instr.P1)
 	if err != nil {
 		return err
@@ -1418,12 +1734,10 @@ func (v *VDBE) execCompare(instr *Instruction, test func(int) bool) error {
 	}
 
 	// Store result in P3
-	dest, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
+	if instr.P3 >= len(v.Mem) {
+		return fmt.Errorf("register %d out of range", instr.P3)
 	}
-	dest.SetInt(result)
-
+	v.Mem[instr.P3].SetInt(result)
 	return nil
 }
 
@@ -1618,8 +1932,9 @@ func (v *VDBE) execFunction(instr *Instruction) error {
 
 func (v *VDBE) execTransaction(instr *Instruction) error {
 	// Begin a transaction
-	// P1 = write flag (0 = read-only, 1 = read-write)
-	// P2 = database number (typically 0 for main)
+	// P1 = database index (0 for main)
+	// P2 = write flag (0 = read-only, 1 = read-write)
+	// P3 = schema version (for verification)
 	if v.Ctx == nil || v.Ctx.Pager == nil {
 		return fmt.Errorf("no pager context available")
 	}
@@ -1629,8 +1944,8 @@ func (v *VDBE) execTransaction(instr *Instruction) error {
 		return fmt.Errorf("pager does not implement PagerInterface")
 	}
 
-	// P1 != 0 means write transaction
-	if instr.P1 != 0 {
+	// P2 != 0 means write transaction
+	if instr.P2 != 0 {
 		return pager.BeginWrite()
 	}
 	return pager.BeginRead()
@@ -1682,6 +1997,128 @@ func (v *VDBE) execRollback(instr *Instruction) error {
 	}
 
 	return nil
+}
+
+func (v *VDBE) execAutoCommit(instr *Instruction) error {
+	// Set autocommit mode or begin/commit transaction
+	// P1: 1 for commit/enable autocommit, 0 for begin/disable autocommit
+	// P2: rollback flag - if non-zero and P1=1, do rollback instead of commit
+	if v.Ctx == nil || v.Ctx.Pager == nil {
+		return fmt.Errorf("no pager context available")
+	}
+
+	pager, ok := v.Ctx.Pager.(PagerInterface)
+	if !ok {
+		return fmt.Errorf("pager does not implement PagerInterface")
+	}
+
+	if instr.P1 == 0 {
+		// P1=0: Begin transaction (disable autocommit)
+		// Only start a transaction if not already in one
+		if !pager.InTransaction() {
+			return pager.BeginWrite()
+		}
+	} else {
+		// P1=1: Commit or rollback transaction (enable autocommit)
+		if pager.InWriteTransaction() {
+			if instr.P2 != 0 {
+				// P2 non-zero: rollback
+				return pager.Rollback()
+			}
+			// P2 zero: commit
+			return pager.Commit()
+		}
+		if pager.InTransaction() {
+			return pager.EndRead()
+		}
+	}
+
+	return nil
+}
+
+func (v *VDBE) execSavepoint(instr *Instruction) error {
+	// Create, release, or rollback to a savepoint
+	// P1: operation (0=begin, 1=release, 2=rollback)
+	// P4: savepoint name (string)
+	if v.Ctx == nil || v.Ctx.Pager == nil {
+		return fmt.Errorf("no pager context available")
+	}
+
+	pager, ok := v.Ctx.Pager.(SavepointPagerInterface)
+	if !ok {
+		return fmt.Errorf("pager does not implement SavepointPagerInterface")
+	}
+
+	// Get savepoint name from P4
+	if instr.P4Type != P4Static && instr.P4Type != P4Dynamic {
+		return fmt.Errorf("savepoint name must be in P4 as string")
+	}
+	name := instr.P4.Z
+
+	if name == "" {
+		return fmt.Errorf("savepoint name cannot be empty")
+	}
+
+	switch instr.P1 {
+	case 0:
+		// Begin savepoint
+		return pager.Savepoint(name)
+	case 1:
+		// Release savepoint
+		return pager.Release(name)
+	case 2:
+		// Rollback to savepoint
+		return pager.RollbackTo(name)
+	default:
+		return fmt.Errorf("invalid savepoint operation: %d", instr.P1)
+	}
+}
+
+func (v *VDBE) execVerifyCookie(instr *Instruction) error {
+	// Verify that the schema cookie matches the expected value
+	// P1: database index (0 for main)
+	// P2: cookie type (typically 0 for schema cookie)
+	// P3: expected cookie value
+	if v.Ctx == nil || v.Ctx.Pager == nil {
+		return fmt.Errorf("no pager context available")
+	}
+
+	pager, ok := v.Ctx.Pager.(CookiePagerInterface)
+	if !ok {
+		return fmt.Errorf("pager does not implement CookiePagerInterface")
+	}
+
+	// Get the current cookie value
+	currentValue, err := pager.GetCookie(instr.P1, instr.P2)
+	if err != nil {
+		return err
+	}
+
+	// Verify it matches the expected value
+	expectedValue := uint32(instr.P3)
+	if currentValue != expectedValue {
+		return fmt.Errorf("schema changed: expected cookie %d, got %d", expectedValue, currentValue)
+	}
+
+	return nil
+}
+
+func (v *VDBE) execSetCookie(instr *Instruction) error {
+	// Set a database cookie value
+	// P1: database index (0 for main)
+	// P2: cookie type
+	// P3: new cookie value
+	if v.Ctx == nil || v.Ctx.Pager == nil {
+		return fmt.Errorf("no pager context available")
+	}
+
+	pager, ok := v.Ctx.Pager.(CookiePagerInterface)
+	if !ok {
+		return fmt.Errorf("pager does not implement CookiePagerInterface")
+	}
+
+	// Set the cookie value
+	return pager.SetCookie(instr.P1, instr.P2, uint32(instr.P3))
 }
 
 // Sorter opcode implementations
@@ -1823,5 +2260,1107 @@ func (v *VDBE) execSorterClose(instr *Instruction) error {
 	if sorterNum < len(v.Sorters) {
 		v.Sorters[sorterNum] = nil
 	}
+	return nil
+}
+
+// Type conversion opcode implementations
+
+// execCast converts the value in register P1 to the type specified by P2 affinity.
+// P1 = register containing value to convert
+// P2 = affinity code (NONE=0, BLOB=1, TEXT=2, INTEGER=3, REAL=4, NUMERIC=5)
+//
+// SQLite affinity codes:
+// - 0 (NONE/BLOB): Keep as-is
+// - 1 (BLOB): Convert to blob
+// - 2 (TEXT): Convert to text
+// - 3 (INTEGER): Convert to integer, NULL if not numeric
+// - 4 (REAL): Convert to real
+// - 5 (NUMERIC): Try int, then float, keep text if neither works
+func (v *VDBE) execCast(instr *Instruction) error {
+	mem, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	// NULL values remain NULL regardless of affinity
+	if mem.IsNull() {
+		return nil
+	}
+
+	affinity := instr.P2
+	switch affinity {
+	case 0: // NONE/BLOB affinity - keep as-is
+		return nil
+
+	case 1: // BLOB affinity - convert to blob
+		if mem.IsBlob() {
+			return nil
+		}
+		// Convert to blob by getting string representation and treating as bytes
+		if mem.IsString() {
+			return mem.SetBlob(mem.BlobValue())
+		}
+		// For numeric types, stringify first then convert to blob
+		if err := mem.Stringify(); err != nil {
+			return err
+		}
+		return mem.SetBlob(mem.BlobValue())
+
+	case 2: // TEXT affinity - convert to text
+		return mem.Stringify()
+
+	case 3: // INTEGER affinity - convert to integer, NULL if not numeric
+		if mem.IsInt() {
+			return nil
+		}
+		// Try to convert to integer
+		if mem.IsReal() {
+			mem.SetInt(int64(mem.RealValue()))
+			return nil
+		}
+		if mem.IsString() || mem.IsBlob() {
+			// Try to parse as integer
+			err := mem.Integerify()
+			if err != nil {
+				// Not a valid integer - set to NULL
+				mem.SetNull()
+			}
+			return nil
+		}
+		// Can't convert to integer - set to NULL
+		mem.SetNull()
+		return nil
+
+	case 4: // REAL affinity - convert to real
+		return mem.Realify()
+
+	case 5: // NUMERIC affinity - try int, then float, keep text if neither works
+		if mem.IsNumeric() {
+			return nil
+		}
+		if mem.IsString() || mem.IsBlob() {
+			// Try integer first
+			str := mem.StrValue()
+			if val, err := strconv.ParseInt(str, 10, 64); err == nil {
+				mem.SetInt(val)
+				return nil
+			}
+			// Try real
+			if val, err := strconv.ParseFloat(str, 64); err == nil {
+				mem.SetReal(val)
+				return nil
+			}
+			// Keep as text if neither works
+			return nil
+		}
+		return nil
+
+	default:
+		return fmt.Errorf("unknown affinity code: %d", affinity)
+	}
+}
+
+// execToText forces the value in register P1 to text type.
+// P1 = register to convert
+// This always converts to string representation.
+func (v *VDBE) execToText(instr *Instruction) error {
+	mem, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	// NULL remains NULL
+	if mem.IsNull() {
+		return nil
+	}
+
+	// Convert to string
+	return mem.Stringify()
+}
+
+// execToBlob forces the value in register P1 to blob type.
+// P1 = register to convert
+// Converts the value to a blob (byte array).
+func (v *VDBE) execToBlob(instr *Instruction) error {
+	mem, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	// NULL remains NULL
+	if mem.IsNull() {
+		return nil
+	}
+
+	// If already a blob, nothing to do
+	if mem.IsBlob() {
+		return nil
+	}
+
+	// If string, convert to blob
+	if mem.IsString() {
+		return mem.SetBlob(mem.BlobValue())
+	}
+
+	// For numeric types, stringify first then convert to blob
+	if err := mem.Stringify(); err != nil {
+		return err
+	}
+	return mem.SetBlob(mem.BlobValue())
+}
+
+// execToNumeric applies numeric affinity to the value in register P1.
+// P1 = register to convert
+// Tries to convert to integer first, then real, keeps as text if neither works.
+func (v *VDBE) execToNumeric(instr *Instruction) error {
+	mem, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	// NULL remains NULL
+	if mem.IsNull() {
+		return nil
+	}
+
+	// Already numeric, nothing to do
+	if mem.IsNumeric() {
+		return nil
+	}
+
+	// Try to convert to numeric
+	if mem.IsString() || mem.IsBlob() {
+		str := mem.StrValue()
+
+		// Try integer first
+		if val, err := strconv.ParseInt(str, 10, 64); err == nil {
+			mem.SetInt(val)
+			return nil
+		}
+
+		// Try real
+		if val, err := strconv.ParseFloat(str, 64); err == nil {
+			mem.SetReal(val)
+			return nil
+		}
+
+		// Keep as text if neither conversion works
+		return nil
+	}
+
+	return nil
+}
+
+// execToInt forces the value in register P1 to integer type.
+// P1 = register to convert
+// Truncates real numbers to integers.
+func (v *VDBE) execToInt(instr *Instruction) error {
+	mem, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	// NULL remains NULL
+	if mem.IsNull() {
+		return nil
+	}
+
+	// Already an integer, nothing to do
+	if mem.IsInt() {
+		return nil
+	}
+
+	// Convert to integer, truncating if real
+	if mem.IsReal() {
+		mem.SetInt(int64(mem.RealValue()))
+		return nil
+	}
+
+	// Try to parse string/blob as integer
+	if mem.IsString() || mem.IsBlob() {
+		str := mem.StrValue()
+		// Try parsing as integer directly
+		if val, err := strconv.ParseInt(str, 10, 64); err == nil {
+			mem.SetInt(val)
+			return nil
+		}
+		// Try parsing as float and truncating
+		if val, err := strconv.ParseFloat(str, 64); err == nil {
+			mem.SetInt(int64(val))
+			return nil
+		}
+		// Can't convert - set to 0
+		mem.SetInt(0)
+		return nil
+	}
+
+	// Default to 0 for unknown types
+	mem.SetInt(0)
+	return nil
+}
+
+// execToReal forces the value in register P1 to real (floating-point) type.
+// P1 = register to convert
+// Converts integers and strings to real numbers.
+func (v *VDBE) execToReal(instr *Instruction) error {
+	mem, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	// NULL remains NULL
+	if mem.IsNull() {
+		return nil
+	}
+
+	// Already a real, nothing to do
+	if mem.IsReal() {
+		return nil
+	}
+
+	// Convert to real
+	return mem.Realify()
+}
+
+// Bitwise operation implementations
+
+func (v *VDBE) execBitAnd(instr *Instruction) error {
+	// P3 = P1 & P2 (bitwise AND)
+	left, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	right, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	result, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	// NULL propagation: if either operand is NULL, result is NULL
+	if left.IsNull() || right.IsNull() {
+		result.SetNull()
+		return nil
+	}
+
+	// Convert both operands to integers
+	leftVal := left.IntValue()
+	rightVal := right.IntValue()
+
+	// Perform bitwise AND
+	result.SetInt(leftVal & rightVal)
+	return nil
+}
+
+func (v *VDBE) execBitOr(instr *Instruction) error {
+	// P3 = P1 | P2 (bitwise OR)
+	left, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	right, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	result, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	// NULL propagation: if either operand is NULL, result is NULL
+	if left.IsNull() || right.IsNull() {
+		result.SetNull()
+		return nil
+	}
+
+	// Convert both operands to integers
+	leftVal := left.IntValue()
+	rightVal := right.IntValue()
+
+	// Perform bitwise OR
+	result.SetInt(leftVal | rightVal)
+	return nil
+}
+
+func (v *VDBE) execBitNot(instr *Instruction) error {
+	// P2 = ~P1 (bitwise NOT)
+	src, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	dst, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	// NULL propagation: if operand is NULL, result is NULL
+	if src.IsNull() {
+		dst.SetNull()
+		return nil
+	}
+
+	// Convert operand to integer
+	srcVal := src.IntValue()
+
+	// Perform bitwise NOT
+	dst.SetInt(^srcVal)
+	return nil
+}
+
+func (v *VDBE) execShiftLeft(instr *Instruction) error {
+	// P3 = P2 << P1
+	// Note: P1 is shift amount, P2 is value to shift
+	shiftAmount, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	value, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	result, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	// NULL propagation: if either operand is NULL, result is NULL
+	if shiftAmount.IsNull() || value.IsNull() {
+		result.SetNull()
+		return nil
+	}
+
+	// Convert operands to integers
+	shift := shiftAmount.IntValue()
+	val := value.IntValue()
+
+	// SQLite behavior: negative shift amounts or shifts >= 64 result in 0
+	if shift < 0 || shift >= 64 {
+		result.SetInt(0)
+		return nil
+	}
+
+	// Perform left shift
+	result.SetInt(val << uint(shift))
+	return nil
+}
+
+func (v *VDBE) execShiftRight(instr *Instruction) error {
+	// P3 = P2 >> P1
+	// Note: P1 is shift amount, P2 is value to shift
+	shiftAmount, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	value, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	result, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	// NULL propagation: if either operand is NULL, result is NULL
+	if shiftAmount.IsNull() || value.IsNull() {
+		result.SetNull()
+		return nil
+	}
+
+	// Convert operands to integers
+	shift := shiftAmount.IntValue()
+	val := value.IntValue()
+
+	// SQLite behavior: negative shift amounts result in 0
+	// Shifts >= 64 also result in 0 (or -1 for negative values with arithmetic shift)
+	if shift < 0 {
+		result.SetInt(0)
+		return nil
+	}
+
+	if shift >= 64 {
+		// Arithmetic right shift: sign-extend
+		if val < 0 {
+			result.SetInt(-1)
+		} else {
+			result.SetInt(0)
+		}
+		return nil
+	}
+
+	// Perform right shift (arithmetic shift in Go for signed integers)
+	result.SetInt(val >> uint(shift))
+	return nil
+}
+
+// Logical operation implementations
+
+func (v *VDBE) execAnd(instr *Instruction) error {
+	// P3 = P1 AND P2 (logical AND, returns 0/1/NULL)
+	// SQLite semantics:
+	// - FALSE AND anything = FALSE (0)
+	// - TRUE AND TRUE = TRUE (1)
+	// - TRUE AND FALSE = FALSE (0)
+	// - NULL AND FALSE = FALSE (0)
+	// - NULL AND TRUE = NULL
+	// - NULL AND NULL = NULL
+	left, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	right, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	result, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	// Evaluate left operand as boolean
+	leftIsNull := left.IsNull()
+	var leftBool bool
+	if !leftIsNull {
+		if left.IsInt() {
+			leftBool = left.IntValue() != 0
+		} else {
+			leftBool = left.RealValue() != 0.0
+		}
+	}
+
+	// Evaluate right operand as boolean
+	rightIsNull := right.IsNull()
+	var rightBool bool
+	if !rightIsNull {
+		if right.IsInt() {
+			rightBool = right.IntValue() != 0
+		} else {
+			rightBool = right.RealValue() != 0.0
+		}
+	}
+
+	// Apply SQLite logical AND semantics
+	if !leftIsNull && !leftBool {
+		// FALSE AND anything = FALSE
+		result.SetInt(0)
+		return nil
+	}
+
+	if !rightIsNull && !rightBool {
+		// anything AND FALSE = FALSE
+		result.SetInt(0)
+		return nil
+	}
+
+	if leftIsNull || rightIsNull {
+		// NULL involved (and no FALSE found) = NULL
+		result.SetNull()
+		return nil
+	}
+
+	// Both are TRUE
+	result.SetInt(1)
+	return nil
+}
+
+func (v *VDBE) execOr(instr *Instruction) error {
+	// P3 = P1 OR P2 (logical OR, returns 0/1/NULL)
+	// SQLite semantics:
+	// - TRUE OR anything = TRUE (1)
+	// - FALSE OR FALSE = FALSE (0)
+	// - FALSE OR TRUE = TRUE (1)
+	// - NULL OR TRUE = TRUE (1)
+	// - NULL OR FALSE = NULL
+	// - NULL OR NULL = NULL
+	left, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	right, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	result, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	// Evaluate left operand as boolean
+	leftIsNull := left.IsNull()
+	var leftBool bool
+	if !leftIsNull {
+		if left.IsInt() {
+			leftBool = left.IntValue() != 0
+		} else {
+			leftBool = left.RealValue() != 0.0
+		}
+	}
+
+	// Evaluate right operand as boolean
+	rightIsNull := right.IsNull()
+	var rightBool bool
+	if !rightIsNull {
+		if right.IsInt() {
+			rightBool = right.IntValue() != 0
+		} else {
+			rightBool = right.RealValue() != 0.0
+		}
+	}
+
+	// Apply SQLite logical OR semantics
+	if !leftIsNull && leftBool {
+		// TRUE OR anything = TRUE
+		result.SetInt(1)
+		return nil
+	}
+
+	if !rightIsNull && rightBool {
+		// anything OR TRUE = TRUE
+		result.SetInt(1)
+		return nil
+	}
+
+	if leftIsNull || rightIsNull {
+		// NULL involved (and no TRUE found) = NULL
+		result.SetNull()
+		return nil
+	}
+
+	// Both are FALSE
+	result.SetInt(0)
+	return nil
+}
+
+func (v *VDBE) execNot(instr *Instruction) error {
+	// P2 = NOT P1 (logical NOT)
+	// SQLite semantics:
+	// - NOT TRUE = FALSE (0)
+	// - NOT FALSE = TRUE (1)
+	// - NOT NULL = NULL
+	src, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	dst, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	// NULL propagation
+	if src.IsNull() {
+		dst.SetNull()
+		return nil
+	}
+
+	// Evaluate as boolean
+	var srcBool bool
+	if src.IsInt() {
+		srcBool = src.IntValue() != 0
+	} else {
+		srcBool = src.RealValue() != 0.0
+	}
+
+	// Apply logical NOT
+	if srcBool {
+		dst.SetInt(0) // NOT TRUE = FALSE
+	} else {
+		dst.SetInt(1) // NOT FALSE = TRUE
+	}
+
+	return nil
+}
+
+// Index operation implementations
+
+// execIdxInsert inserts a key into an index.
+// P1 = cursor number (index cursor)
+// P2 = register containing the key
+// P3 = register containing the rowid (data)
+func (v *VDBE) execIdxInsert(instr *Instruction) error {
+	// Get the index cursor
+	cursor, err := v.GetCursor(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	// Verify this is an index cursor
+	if cursor.IsTable {
+		return fmt.Errorf("cursor %d is not an index cursor", instr.P1)
+	}
+
+	// Verify cursor is writable
+	if !cursor.Writable {
+		return fmt.Errorf("cursor %d is not writable (opened with OpenRead instead of OpenWrite)", instr.P1)
+	}
+
+	// Get the key from register P2
+	keyMem, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	// Get the rowid from register P3
+	rowidMem, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	// Extract key as blob (index keys are stored as binary data)
+	var key []byte
+	if keyMem.IsBlob() {
+		key = keyMem.BlobValue()
+	} else if keyMem.IsString() {
+		key = []byte(keyMem.StrValue())
+	} else {
+		// Convert other types to blob representation
+		keyMem.Stringify()
+		key = []byte(keyMem.StrValue())
+	}
+
+	// Extract rowid as integer
+	rowid := rowidMem.IntValue()
+
+	// Get the index cursor (btree.IndexCursor)
+	idxCursor, ok := cursor.BtreeCursor.(*btree.IndexCursor)
+	if !ok || idxCursor == nil {
+		return fmt.Errorf("invalid index cursor for IdxInsert")
+	}
+
+	// Insert the key-rowid pair into the index
+	if err := idxCursor.InsertIndex(key, rowid); err != nil {
+		return fmt.Errorf("index insert failed: %w", err)
+	}
+
+	// Invalidate cursor cache
+	v.IncrCacheCtr()
+
+	return nil
+}
+
+// execIdxDelete deletes a key from an index.
+// P1 = cursor number (index cursor)
+// P2 = register containing the key to delete
+func (v *VDBE) execIdxDelete(instr *Instruction) error {
+	// Get the index cursor
+	cursor, err := v.GetCursor(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	// Verify this is an index cursor
+	if cursor.IsTable {
+		return fmt.Errorf("cursor %d is not an index cursor", instr.P1)
+	}
+
+	// Verify cursor is writable
+	if !cursor.Writable {
+		return fmt.Errorf("cursor %d is not writable (opened with OpenRead instead of OpenWrite)", instr.P1)
+	}
+
+	// Get the key from register P2
+	keyMem, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	// Extract key as blob
+	var key []byte
+	if keyMem.IsBlob() {
+		key = keyMem.BlobValue()
+	} else if keyMem.IsString() {
+		key = []byte(keyMem.StrValue())
+	} else {
+		keyMem.Stringify()
+		key = []byte(keyMem.StrValue())
+	}
+
+	// Get the index cursor (btree.IndexCursor)
+	idxCursor, ok := cursor.BtreeCursor.(*btree.IndexCursor)
+	if !ok || idxCursor == nil {
+		return fmt.Errorf("invalid index cursor for IdxDelete")
+	}
+
+	// For index deletion, we need both key and rowid to uniquely identify the entry
+	// In real SQLite, the rowid would be encoded as part of the key or provided separately
+	// For now, we'll seek to the key and delete the current entry
+	found, err := idxCursor.SeekIndex(key)
+	if err != nil {
+		return fmt.Errorf("index seek failed: %w", err)
+	}
+
+	if !found {
+		// Key not found - this is not necessarily an error in SQLite
+		// It might have already been deleted
+		return nil
+	}
+
+	// Get the rowid from the current position
+	rowid := idxCursor.GetRowid()
+
+	// Delete the key-rowid pair
+	if err := idxCursor.DeleteIndex(key, rowid); err != nil {
+		return fmt.Errorf("index delete failed: %w", err)
+	}
+
+	// Invalidate cursor cache
+	v.IncrCacheCtr()
+
+	return nil
+}
+
+// execIdxRowid gets the rowid from the current index position.
+// P1 = cursor number (index cursor)
+// P2 = destination register for rowid
+func (v *VDBE) execIdxRowid(instr *Instruction) error {
+	// Get the index cursor
+	cursor, err := v.GetCursor(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	// Verify this is an index cursor
+	if cursor.IsTable {
+		return fmt.Errorf("cursor %d is not an index cursor", instr.P1)
+	}
+
+	// Get destination register
+	dst, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	// Check for EOF or null row
+	if cursor.EOF || cursor.NullRow {
+		dst.SetNull()
+		return nil
+	}
+
+	// Get the index cursor (btree.IndexCursor)
+	idxCursor, ok := cursor.BtreeCursor.(*btree.IndexCursor)
+	if !ok || idxCursor == nil {
+		dst.SetNull()
+		return nil
+	}
+
+	// Get the rowid from the current index entry
+	rowid := idxCursor.GetRowid()
+	dst.SetInt(rowid)
+
+	return nil
+}
+
+// execIdxLT jumps if the index key at cursor < key in register.
+// P1 = cursor number (index cursor)
+// P2 = jump address if condition is true
+// P3 = register containing comparison key
+func (v *VDBE) execIdxLT(instr *Instruction) error {
+	return v.execIdxCompare(instr, func(cmp int) bool { return cmp < 0 })
+}
+
+// execIdxGT jumps if the index key at cursor > key in register.
+// P1 = cursor number (index cursor)
+// P2 = jump address if condition is true
+// P3 = register containing comparison key
+func (v *VDBE) execIdxGT(instr *Instruction) error {
+	return v.execIdxCompare(instr, func(cmp int) bool { return cmp > 0 })
+}
+
+// execIdxLE jumps if the index key at cursor <= key in register.
+// P1 = cursor number (index cursor)
+// P2 = jump address if condition is true
+// P3 = register containing comparison key
+func (v *VDBE) execIdxLE(instr *Instruction) error {
+	return v.execIdxCompare(instr, func(cmp int) bool { return cmp <= 0 })
+}
+
+// execIdxGE jumps if the index key at cursor >= key in register.
+// P1 = cursor number (index cursor)
+// P2 = jump address if condition is true
+// P3 = register containing comparison key
+func (v *VDBE) execIdxGE(instr *Instruction) error {
+	return v.execIdxCompare(instr, func(cmp int) bool { return cmp >= 0 })
+}
+
+// execIdxCompare is a helper function for index comparison operations.
+// It compares the key at the current cursor position with a key in a register.
+func (v *VDBE) execIdxCompare(instr *Instruction, test func(int) bool) error {
+	// Get the index cursor
+	cursor, err := v.GetCursor(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	// Verify this is an index cursor
+	if cursor.IsTable {
+		return fmt.Errorf("cursor %d is not an index cursor", instr.P1)
+	}
+
+	// Get the comparison key from register P3
+	keyMem, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	// Extract comparison key as blob
+	var compKey []byte
+	if keyMem.IsBlob() {
+		compKey = keyMem.BlobValue()
+	} else if keyMem.IsString() {
+		compKey = []byte(keyMem.StrValue())
+	} else {
+		keyMem.Stringify()
+		compKey = []byte(keyMem.StrValue())
+	}
+
+	// Get the index cursor (btree.IndexCursor)
+	idxCursor, ok := cursor.BtreeCursor.(*btree.IndexCursor)
+	if !ok || idxCursor == nil {
+		return fmt.Errorf("invalid index cursor for index comparison")
+	}
+
+	// Check if cursor is at a valid position
+	if !idxCursor.IsValid() || cursor.EOF {
+		// Cursor is not at a valid position - don't jump
+		return nil
+	}
+
+	// Get the current key from the index cursor
+	currentKey := idxCursor.GetKey()
+	if currentKey == nil {
+		// No current key - don't jump
+		return nil
+	}
+
+	// Compare the keys (byte-wise comparison)
+	cmp := compareBytes(currentKey, compKey)
+
+	// Jump if the test condition is satisfied
+	if test(cmp) {
+		v.PC = instr.P2
+	}
+
+	return nil
+}
+
+// compareBytes compares two byte slices lexicographically.
+// Returns negative if a < b, positive if a > b, 0 if equal.
+func compareBytes(a, b []byte) int {
+	minLen := len(a)
+	if len(b) < minLen {
+		minLen = len(b)
+	}
+
+	for i := 0; i < minLen; i++ {
+		if a[i] < b[i] {
+			return -1
+		}
+		if a[i] > b[i] {
+			return 1
+		}
+	}
+
+	// If all compared bytes are equal, compare lengths
+	if len(a) < len(b) {
+		return -1
+	}
+	if len(a) > len(b) {
+		return 1
+	}
+	return 0
+}
+
+// Trigger and sub-program implementations
+
+// execProgram executes a trigger sub-program.
+// P1 = sub-program ID
+// P2 = jump address on completion
+// P4 = sub-VDBE program (P4SubProgram)
+func (v *VDBE) execProgram(instr *Instruction) error {
+	// Get or create the sub-program VDBE
+	subID := instr.P1
+	subVdbe, ok := v.SubPrograms[subID]
+	if !ok {
+		// Extract sub-program from P4
+		if instr.P4Type != P4SubProgram {
+			return fmt.Errorf("OpProgram requires P4_SUBPROGRAM type")
+		}
+		if instr.P4.P == nil {
+			return fmt.Errorf("OpProgram: sub-program is nil")
+		}
+		
+		// The sub-program should be a *VDBE
+		var subProg *VDBE
+		subProg, ok = instr.P4.P.(*VDBE)
+		if !ok {
+			return fmt.Errorf("OpProgram: P4 is not a *VDBE")
+		}
+		
+		// Set up parent relationship
+		subProg.Parent = v
+		subProg.Ctx = v.Ctx // Share execution context
+		
+		v.SubPrograms[subID] = subProg
+		subVdbe = subProg
+	}
+	
+	// Execute the sub-program until completion
+	err := subVdbe.Run()
+	if err != nil {
+		return fmt.Errorf("sub-program execution failed: %w", err)
+	}
+	
+	// Reset the sub-program for next execution
+	subVdbe.Reset()
+	
+	return nil
+}
+
+// execParam gets a parameter from the parent VDBE.
+// P1 = parameter index in parent's register space
+// P2 = destination register in this VDBE
+func (v *VDBE) execParam(instr *Instruction) error {
+	// Check if we have a parent VDBE
+	if v.Parent == nil {
+		return fmt.Errorf("OpParam: no parent VDBE available")
+	}
+	
+	// Get the parameter from parent's register
+	parentReg, err := v.Parent.GetMem(instr.P1)
+	if err != nil {
+		return fmt.Errorf("OpParam: failed to get parent register %d: %w", instr.P1, err)
+	}
+	
+	// Copy to our destination register
+	destReg, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+	
+	return destReg.Copy(parentReg)
+}
+
+// execInitCoroutine initializes a coroutine.
+// P1 = coroutine ID
+// P2 = jump address to skip coroutine body initially
+// P3 = entry point address for the coroutine
+func (v *VDBE) execInitCoroutine(instr *Instruction) error {
+	coroutineID := instr.P1
+	jumpAddr := instr.P2
+	entryPoint := instr.P3
+	
+	// Create coroutine info
+	v.Coroutines[coroutineID] = &CoroutineInfo{
+		EntryPoint: entryPoint,
+		YieldAddr:  0,
+		Active:     false,
+	}
+	
+	// Jump past the coroutine body (don't execute it during init)
+	if jumpAddr > 0 {
+		v.PC = jumpAddr
+	}
+	
+	return nil
+}
+
+// execEndCoroutine ends coroutine execution and returns to the caller.
+// P1 = coroutine ID
+func (v *VDBE) execEndCoroutine(instr *Instruction) error {
+	coroutineID := instr.P1
+	
+	// Get coroutine info
+	coInfo, ok := v.Coroutines[coroutineID]
+	if !ok {
+		return fmt.Errorf("OpEndCoroutine: coroutine %d not initialized", coroutineID)
+	}
+	
+	if !coInfo.Active {
+		return fmt.Errorf("OpEndCoroutine: coroutine %d is not active", coroutineID)
+	}
+	
+	// Return to the yield address
+	if coInfo.YieldAddr > 0 {
+		v.PC = coInfo.YieldAddr
+	}
+	
+	// Mark as inactive
+	coInfo.Active = false
+	
+	return nil
+}
+
+// execYield yields from a coroutine, saving the return address.
+// P1 = coroutine ID
+// P2 = register containing return address (or 0 to use PC)
+func (v *VDBE) execYield(instr *Instruction) error {
+	coroutineID := instr.P1
+	
+	// Get coroutine info
+	coInfo, ok := v.Coroutines[coroutineID]
+	if !ok {
+		return fmt.Errorf("OpYield: coroutine %d not initialized", coroutineID)
+	}
+	
+	// If P2 is specified, get return address from register
+	// Otherwise, use current PC as return address
+	returnAddr := v.PC
+	if instr.P2 > 0 {
+		regMem, err := v.GetMem(instr.P2)
+		if err != nil {
+			return err
+		}
+		if regMem.IsInt() {
+			returnAddr = int(regMem.IntValue())
+		}
+	}
+	
+	// Save return address and jump to entry point
+	coInfo.YieldAddr = returnAddr
+	coInfo.Active = true
+	v.PC = coInfo.EntryPoint
+	
+	return nil
+}
+
+// execOpenPseudo opens a pseudo-table cursor for accessing OLD/NEW row data in triggers.
+// P1 = cursor number
+// P2 = register containing the pseudo-table data (record blob)
+// P3 = number of columns
+func (v *VDBE) execOpenPseudo(instr *Instruction) error {
+	cursorNum := instr.P1
+	dataReg := instr.P2
+	
+	// Allocate cursors if needed
+	if err := v.AllocCursors(cursorNum + 1); err != nil {
+		return err
+	}
+	
+	// Create pseudo-table cursor
+	cursor := &Cursor{
+		CurType:     CursorPseudo,
+		IsTable:     true,
+		PseudoReg:   dataReg,
+		CachedCols:  make([][]byte, 0),
+		CacheStatus: 0,
+		NullRow:     false,
+		EOF:         false,
+	}
+	
+	v.Cursors[cursorNum] = cursor
 	return nil
 }

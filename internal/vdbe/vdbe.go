@@ -130,6 +130,18 @@ type VDBE struct {
 
 	// Sorters for ORDER BY
 	Sorters []*Sorter // Array of open sorters
+
+	// Trigger and sub-program support
+	Parent      *VDBE                  // Parent VDBE (for sub-programs/triggers)
+	SubPrograms map[int]*VDBE          // Sub-programs (triggers) keyed by ID
+	Coroutines  map[int]*CoroutineInfo // Coroutine state keyed by coroutine ID
+}
+
+// CoroutineInfo holds the state of a coroutine
+type CoroutineInfo struct {
+	EntryPoint int  // Address to jump to when yielding to this coroutine
+	YieldAddr  int  // Address to return to after yield
+	Active     bool // True if coroutine is currently active
 }
 
 // Sorter is an in-memory sorting structure for ORDER BY.
@@ -228,12 +240,14 @@ func (s *Sorter) CurrentRow() []*Mem {
 // New creates a new VDBE instance.
 func New() *VDBE {
 	return &VDBE{
-		Program:  make([]*Instruction, 0, 16),
-		Mem:      make([]*Mem, 0, 16),
-		Cursors:  make([]*Cursor, 0, 4),
-		State:    StateInit,
-		CacheCtr: 1,
-		funcCtx:  NewFunctionContext(),
+		Program:     make([]*Instruction, 0, 16),
+		Mem:         make([]*Mem, 0, 16),
+		Cursors:     make([]*Cursor, 0, 4),
+		State:       StateInit,
+		CacheCtr:    1,
+		funcCtx:     NewFunctionContext(),
+		SubPrograms: make(map[int]*VDBE),
+		Coroutines:  make(map[int]*CoroutineInfo),
 	}
 }
 

@@ -79,9 +79,14 @@ func (c *Conn) Close() error {
 		return nil
 	}
 
-	// Close all statements
+	// Close all statements - finalize VDBEs directly since we already hold the lock
+	// (calling stmt.Close() would cause a deadlock as it tries to acquire c.mu)
 	for stmt := range c.stmts {
-		stmt.Close()
+		stmt.closed = true
+		if stmt.vdbe != nil {
+			stmt.vdbe.Finalize()
+			stmt.vdbe = nil
+		}
 	}
 	c.stmts = nil
 

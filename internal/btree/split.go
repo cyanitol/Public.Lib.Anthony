@@ -59,7 +59,7 @@ func (c *BtCursor) splitLeafPage(key int64, payload []byte) error {
 	}
 
 	// Initialize new page header
-	if err := initializeLeafPage(newPageData, c.CurrentPage, c.Btree.UsableSize); err != nil {
+	if err := initializeLeafPage(newPageData, newPageNum, c.Btree.UsableSize); err != nil {
 		return fmt.Errorf("failed to initialize new page: %w", err)
 	}
 
@@ -158,7 +158,7 @@ func (c *BtCursor) splitInteriorPage(key int64, childPgno uint32) error {
 	}
 
 	// Initialize new page header as interior
-	if err := initializeInteriorPage(newPageData, c.CurrentPage, c.Btree.UsableSize); err != nil {
+	if err := initializeInteriorPage(newPageData, newPageNum, c.Btree.UsableSize); err != nil {
 		return fmt.Errorf("failed to initialize new page: %w", err)
 	}
 

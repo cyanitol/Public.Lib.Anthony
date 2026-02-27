@@ -675,6 +675,7 @@ var keywordMap = map[string]TokenType{
 	"RENAME":        TK_RENAME,
 	"ADD":           TK_ADD,
 	"COLUMN":        TK_COLUMN,
+	"TO":            TK_TO,
 	"ORDER":         TK_ORDER,
 	"BY":            TK_BY,
 	"GROUP":         TK_GROUP,
@@ -738,6 +739,8 @@ var keywordMap = map[string]TokenType{
 	"DEFERRED":      TK_DEFERRED,
 	"IMMEDIATE":     TK_IMMEDIATE,
 	"EXCLUSIVE":     TK_EXCLUSIVE,
+	"WITH":          TK_WITH,
+	"RECURSIVE":     TK_RECURSIVE,
 	"EXPLAIN":       TK_EXPLAIN,
 	"QUERY":         TK_QUERY,
 	"PLAN":          TK_PLAN,
@@ -794,6 +797,10 @@ var keywordMap = map[string]TokenType{
 	"GENERATED":     TK_GENERATED,
 	"ALWAYS":        TK_ALWAYS,
 	"STORED":        TK_STORED,
+	"INSTEAD":       TK_INSTEAD,
+	"OF":            TK_OF,
+	"DO":            TK_DO,
+	"NOTHING":       TK_NOTHING,
 }
 
 // lookupKeyword returns the token type for a keyword, or TK_ID if not a keyword.

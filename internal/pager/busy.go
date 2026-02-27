@@ -129,8 +129,8 @@ func NewDefaultBusyHandler(timeout time.Duration) *DefaultBusyHandler {
 // It sleeps for an exponentially increasing duration with jitter,
 // and returns false once the total timeout has been exceeded.
 func (h *DefaultBusyHandler) Busy(count int) bool {
-	// Initialize start time on first call
-	if count == 0 {
+	// Initialize start time on first call or if it's been reset
+	if count == 0 || h.startTime.IsZero() {
 		h.startTime = time.Now()
 	}
 
@@ -229,19 +229,20 @@ func BusyTimeout(timeout time.Duration) BusyHandler {
 // Busy implements the BusyHandler interface.
 // It sleeps for a fixed interval and returns false once timeout is exceeded.
 func (h *TimeoutBusyHandler) Busy(count int) bool {
-	// Initialize start time on first call
-	if count == 0 {
+	// Initialize start time on first call or if it's been reset
+	if count == 0 || h.startTime.IsZero() {
 		h.startTime = time.Now()
 		h.totalRetries = 0
 	}
-
-	h.totalRetries++
 
 	// Check if we've exceeded the timeout
 	elapsed := time.Since(h.startTime)
 	if elapsed >= h.timeout {
 		return false
 	}
+
+	// Increment retries only when we're actually going to retry
+	h.totalRetries++
 
 	// Calculate remaining time
 	remaining := h.timeout - elapsed

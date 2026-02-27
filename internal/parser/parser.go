@@ -75,28 +75,33 @@ var statementParsers = map[TokenType]statementParser{
 	TK_DELETE:   func(p *Parser) (Statement, error) { return p.parseDelete() },
 	TK_CREATE:   (*Parser).parseCreate,
 	TK_DROP:     (*Parser).parseDrop,
+	TK_ALTER:    (*Parser).parseAlter,
 	TK_BEGIN:    func(p *Parser) (Statement, error) { return p.parseBegin() },
 	TK_COMMIT:   func(p *Parser) (Statement, error) { return &CommitStmt{}, nil },
 	TK_ROLLBACK: func(p *Parser) (Statement, error) { return p.parseRollback() },
+	TK_ATTACH:   func(p *Parser) (Statement, error) { return p.parseAttach() },
+	TK_DETACH:   func(p *Parser) (Statement, error) { return p.parseDetach() },
+	TK_PRAGMA:   func(p *Parser) (Statement, error) { return p.parsePragma() },
+	TK_WITH:     func(p *Parser) (Statement, error) { return p.parseSelect() }, // WITH starts a CTE, parsed as part of SELECT
 }
 
 var statementParserOrder = []TokenType{
-	TK_SELECT, TK_INSERT, TK_UPDATE, TK_DELETE,
-	TK_CREATE, TK_DROP, TK_BEGIN, TK_COMMIT, TK_ROLLBACK,
-}
-
-func (p *Parser) consumeExplainPrefix() {
-	p.match(TK_QUERY)
-	p.match(TK_PLAN)
+	TK_WITH, TK_SELECT, TK_INSERT, TK_UPDATE, TK_DELETE,
+	TK_CREATE, TK_DROP, TK_ALTER, TK_BEGIN, TK_COMMIT, TK_ROLLBACK,
+	TK_ATTACH, TK_DETACH, TK_PRAGMA,
 }
 
 func (p *Parser) parseStatement() (Statement, error) {
 	if p.match(TK_EXPLAIN) {
-		p.consumeExplainPrefix()
-		return p.parseStatement()
+		return p.parseExplain()
 	}
 	for _, tok := range statementParserOrder {
-		if p.match(tok) {
+		if tok == TK_WITH {
+			// Don't consume WITH - parseSelect() will handle it
+			if p.check(TK_WITH) {
+				return statementParsers[tok](p)
+			}
+		} else if p.match(tok) {
 			return statementParsers[tok](p)
 		}
 	}
@@ -110,6 +115,27 @@ func (p *Parser) parseStatement() (Statement, error) {
 func (p *Parser) parseSelect() (*SelectStmt, error) {
 	stmt := &SelectStmt{}
 
+	// Parse optional WITH clause
+	if p.check(TK_WITH) {
+		with, err := p.parseWithClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.With = with
+
+		// After WITH clause, the main SELECT keyword should follow
+		// (it wasn't consumed by the statement dispatcher because WITH was first)
+		if !p.match(TK_SELECT) {
+			return nil, p.error("expected SELECT after WITH clause")
+		}
+	}
+
+	return p.parseSelectBody(stmt)
+}
+
+// parseSelectBody parses the body of a SELECT statement (after WITH clause and SELECT keyword).
+// This is used both for top-level SELECT and for CTE SELECT bodies.
+func (p *Parser) parseSelectBody(stmt *SelectStmt) (*SelectStmt, error) {
 	// DISTINCT or ALL
 	if p.match(TK_DISTINCT) {
 		stmt.Distinct = true
@@ -262,7 +288,12 @@ func (p *Parser) parseCompoundSelect(left *SelectStmt) (*SelectStmt, error) {
 		op = CompoundIntersect
 	}
 
-	right, err := p.parseSelect()
+	// Consume SELECT keyword for the right side of the compound
+	if !p.match(TK_SELECT) {
+		return nil, p.error("expected SELECT after %s", op.String())
+	}
+
+	right, err := p.parseSelectBody(&SelectStmt{})
 	if err != nil {
 		return nil, err
 	}
@@ -276,6 +307,102 @@ func (p *Parser) parseCompoundSelect(left *SelectStmt) (*SelectStmt, error) {
 	}
 
 	return result, nil
+}
+
+// parseWithClause parses a WITH clause containing Common Table Expressions.
+// Syntax: WITH [RECURSIVE] cte_name [(col1, col2, ...)] AS (SELECT ...) [, ...]
+func (p *Parser) parseWithClause() (*WithClause, error) {
+	if !p.match(TK_WITH) {
+		return nil, p.error("expected WITH")
+	}
+
+	with := &WithClause{}
+
+	// Check for RECURSIVE
+	if p.match(TK_RECURSIVE) {
+		with.Recursive = true
+	}
+
+	// Parse one or more CTEs
+	for {
+		cte, err := p.parseCTE()
+		if err != nil {
+			return nil, err
+		}
+		with.CTEs = append(with.CTEs, *cte)
+
+		// Check for more CTEs
+		if !p.match(TK_COMMA) {
+			break
+		}
+	}
+
+	return with, nil
+}
+
+// parseCTE parses a single Common Table Expression.
+// Syntax: cte_name [(col1, col2, ...)] AS (SELECT ...)
+func (p *Parser) parseCTE() (*CTE, error) {
+	cte := &CTE{}
+
+	// Parse CTE name
+	if !p.check(TK_ID) {
+		return nil, p.error("expected CTE name")
+	}
+	cte.Name = Unquote(p.advance().Lexeme)
+
+	// Parse optional column list
+	if p.match(TK_LP) {
+		// Check if this is the AS clause or a column list
+		// If we see SELECT, it's the AS clause
+		if p.check(TK_SELECT) {
+			// No column list, this is the start of the SELECT
+			// Put back the LP by decrementing current
+			p.current--
+		} else {
+			// Parse column list
+			for {
+				if !p.check(TK_ID) {
+					return nil, p.error("expected column name")
+				}
+				cte.Columns = append(cte.Columns, Unquote(p.advance().Lexeme))
+
+				if !p.match(TK_COMMA) {
+					break
+				}
+			}
+
+			if !p.match(TK_RP) {
+				return nil, p.error("expected ) after column list")
+			}
+		}
+	}
+
+	// Parse AS (SELECT ...)
+	if !p.match(TK_AS) {
+		return nil, p.error("expected AS after CTE name")
+	}
+
+	if !p.match(TK_LP) {
+		return nil, p.error("expected ( after AS")
+	}
+
+	if !p.match(TK_SELECT) {
+		return nil, p.error("expected SELECT in CTE")
+	}
+
+	// Parse the SELECT statement body (SELECT keyword already consumed)
+	sel, err := p.parseSelectBody(&SelectStmt{})
+	if err != nil {
+		return nil, err
+	}
+	cte.Select = sel
+
+	if !p.match(TK_RP) {
+		return nil, p.error("expected ) after CTE SELECT")
+	}
+
+	return cte, nil
 }
 
 func (p *Parser) isTableStar() bool {
@@ -403,21 +530,38 @@ func (p *Parser) parseSubquery(table *TableOrSubquery) error {
 }
 
 func (p *Parser) parseTableRef(table *TableOrSubquery) error {
-	if !p.check(TK_ID) {
+	if !p.isTableIdentifier() {
 		return p.error("expected table name")
 	}
-	table.TableName = Unquote(p.advance().Lexeme)
+	table.TableName = p.consumeTableIdentifier()
 	if !p.match(TK_INDEXED) {
 		return nil
 	}
 	if !p.match(TK_BY) {
 		return p.error("expected BY after INDEXED")
 	}
-	if !p.check(TK_ID) {
+	if !p.isTableIdentifier() {
 		return p.error("expected index name")
 	}
-	table.Indexed = Unquote(p.advance().Lexeme)
+	table.Indexed = p.consumeTableIdentifier()
 	return nil
+}
+
+// isTableIdentifier checks if the current token can be used as a table/index name.
+// This includes regular identifiers and certain keywords that can be used as names.
+func (p *Parser) isTableIdentifier() bool {
+	switch p.peek().Type {
+	case TK_ID, TK_TEMP:
+		return true
+	default:
+		return false
+	}
+}
+
+// consumeTableIdentifier consumes and returns a table/index identifier token.
+func (p *Parser) consumeTableIdentifier() string {
+	tok := p.advance()
+	return Unquote(tok.Lexeme)
 }
 
 func (p *Parser) parseTableAlias(table *TableOrSubquery) error {
@@ -561,6 +705,9 @@ func (p *Parser) parseInsert() (*InsertStmt, error) {
 	if err := p.parseInsertSource(stmt); err != nil {
 		return nil, err
 	}
+	if err := p.parseInsertUpsertClause(stmt); err != nil {
+		return nil, err
+	}
 	return stmt, nil
 }
 
@@ -611,7 +758,8 @@ func (p *Parser) parseInsertSource(stmt *InsertStmt) error {
 	case p.match(TK_VALUES):
 		return p.parseInsertValues(stmt)
 	case p.match(TK_SELECT):
-		sel, err := p.parseSelect()
+		// SELECT keyword already consumed, go directly to body
+		sel, err := p.parseSelectBody(&SelectStmt{})
 		if err != nil {
 			return err
 		}
@@ -626,6 +774,137 @@ func (p *Parser) parseInsertSource(stmt *InsertStmt) error {
 	default:
 		return p.error("expected VALUES, SELECT, or DEFAULT")
 	}
+}
+
+// parseInsertUpsertClause parses the optional ON CONFLICT clause.
+func (p *Parser) parseInsertUpsertClause(stmt *InsertStmt) error {
+	if !p.match(TK_ON) {
+		return nil
+	}
+	if !p.match(TK_CONFLICT) {
+		return p.error("expected CONFLICT after ON")
+	}
+	upsert, err := p.parseUpsertClause()
+	if err != nil {
+		return err
+	}
+	stmt.Upsert = upsert
+	return nil
+}
+
+// parseUpsertClause parses the complete ON CONFLICT clause.
+// ON CONFLICT [(columns) [WHERE expr]] [ON CONSTRAINT name] DO NOTHING | DO UPDATE SET ...
+func (p *Parser) parseUpsertClause() (*UpsertClause, error) {
+	upsert := &UpsertClause{}
+
+	// Parse conflict target (optional)
+	if err := p.parseConflictTarget(upsert); err != nil {
+		return nil, err
+	}
+
+	// Parse DO NOTHING or DO UPDATE
+	if !p.match(TK_DO) {
+		return nil, p.error("expected DO after ON CONFLICT")
+	}
+
+	if p.match(TK_NOTHING) {
+		upsert.Action = ConflictDoNothing
+		return upsert, nil
+	}
+
+	if p.match(TK_UPDATE) {
+		upsert.Action = ConflictDoUpdate
+		return p.parseDoUpdateClause(upsert)
+	}
+
+	return nil, p.error("expected NOTHING or UPDATE after DO")
+}
+
+// parseConflictTarget parses the optional conflict target.
+// (columns) [WHERE expr] or ON CONSTRAINT name
+func (p *Parser) parseConflictTarget(upsert *UpsertClause) error {
+	// ON CONSTRAINT name
+	if p.match(TK_ON) {
+		if !p.match(TK_CONSTRAINT) {
+			return p.error("expected CONSTRAINT after ON")
+		}
+		if !p.check(TK_ID) {
+			return p.error("expected constraint name")
+		}
+		upsert.Target = &ConflictTarget{
+			ConstraintName: Unquote(p.advance().Lexeme),
+		}
+		return nil
+	}
+
+	// (columns) [WHERE expr]
+	if p.match(TK_LP) {
+		cols, err := p.parseIndexedColumns()
+		if err != nil {
+			return err
+		}
+		if !p.match(TK_RP) {
+			return p.error("expected ) after conflict columns")
+		}
+		target := &ConflictTarget{Columns: cols}
+
+		// Optional WHERE clause
+		if p.match(TK_WHERE) {
+			where, err := p.parseExpression()
+			if err != nil {
+				return err
+			}
+			target.Where = where
+		}
+
+		upsert.Target = target
+	}
+
+	return nil
+}
+
+// parseDoUpdateClause parses the DO UPDATE SET clause.
+func (p *Parser) parseDoUpdateClause(upsert *UpsertClause) (*UpsertClause, error) {
+	if !p.match(TK_SET) {
+		return nil, p.error("expected SET after DO UPDATE")
+	}
+
+	doUpdate := &DoUpdateClause{}
+
+	// Parse SET assignments
+	for {
+		if !p.check(TK_ID) {
+			return nil, p.error("expected column name")
+		}
+		column := Unquote(p.advance().Lexeme)
+
+		if !p.match(TK_EQ) {
+			return nil, p.error("expected = after column name")
+		}
+
+		value, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+
+		doUpdate.Sets = append(doUpdate.Sets, Assignment{Column: column, Value: value})
+
+		if !p.match(TK_COMMA) {
+			break
+		}
+	}
+
+	// Optional WHERE clause
+	if p.match(TK_WHERE) {
+		where, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		doUpdate.Where = where
+	}
+
+	upsert.Update = doUpdate
+	return upsert, nil
 }
 
 // =============================================================================
@@ -816,8 +1095,12 @@ func (p *Parser) parseCreate() (Statement, error) {
 		return p.parseCreateTable(temp)
 	} else if p.match(TK_INDEX) {
 		return p.parseCreateIndex()
+	} else if p.match(TK_VIEW) {
+		return p.parseCreateView(temp)
+	} else if p.match(TK_TRIGGER) {
+		return p.parseCreateTrigger(temp)
 	} else {
-		return nil, p.error("expected TABLE or INDEX after CREATE")
+		return nil, p.error("expected TABLE, INDEX, VIEW, or TRIGGER after CREATE")
 	}
 }
 
@@ -1304,6 +1587,61 @@ func (p *Parser) parseIndexedColumns() ([]IndexedColumn, error) {
 }
 
 // =============================================================================
+// CREATE VIEW
+// =============================================================================
+
+// parseCreateView parses a CREATE VIEW statement.
+// Syntax:
+//   CREATE [TEMP|TEMPORARY] VIEW [IF NOT EXISTS] view_name [(column_list)] AS select_stmt
+func (p *Parser) parseCreateView(temp bool) (*CreateViewStmt, error) {
+	stmt := &CreateViewStmt{Temporary: temp}
+
+	// Parse IF NOT EXISTS
+	if err := p.parseIfNotExists(&stmt.IfNotExists); err != nil {
+		return nil, err
+	}
+
+	// Parse view name
+	if !p.check(TK_ID) {
+		return nil, p.error("expected view name")
+	}
+	stmt.Name = Unquote(p.advance().Lexeme)
+
+	// Parse optional column list: (col1, col2, ...)
+	if p.match(TK_LP) {
+		for {
+			if !p.check(TK_ID) {
+				return nil, p.error("expected column name")
+			}
+			stmt.Columns = append(stmt.Columns, Unquote(p.advance().Lexeme))
+			if !p.match(TK_COMMA) {
+				break
+			}
+		}
+		if !p.match(TK_RP) {
+			return nil, p.error("expected ) after column list")
+		}
+	}
+
+	// Parse AS keyword
+	if !p.match(TK_AS) {
+		return nil, p.error("expected AS after view name")
+	}
+
+	// Parse SELECT statement - SELECT keyword already consumed
+	if !p.match(TK_SELECT) {
+		return nil, p.error("expected SELECT after AS")
+	}
+	sel, err := p.parseSelectBody(&SelectStmt{})
+	if err != nil {
+		return nil, err
+	}
+	stmt.Select = sel
+
+	return stmt, nil
+}
+
+// =============================================================================
 // DROP
 // =============================================================================
 
@@ -1312,8 +1650,12 @@ func (p *Parser) parseDrop() (Statement, error) {
 		return p.parseDropTable()
 	} else if p.match(TK_INDEX) {
 		return p.parseDropIndex()
+	} else if p.match(TK_VIEW) {
+		return p.parseDropView()
+	} else if p.match(TK_TRIGGER) {
+		return p.parseDropTrigger()
 	} else {
-		return nil, p.error("expected TABLE or INDEX after DROP")
+		return nil, p.error("expected TABLE, INDEX, VIEW, or TRIGGER after DROP")
 	}
 }
 
@@ -1353,6 +1695,221 @@ func (p *Parser) parseDropIndex() (*DropIndexStmt, error) {
 	return stmt, nil
 }
 
+// parseDropView parses a DROP VIEW statement.
+// Syntax: DROP VIEW [IF EXISTS] view_name
+func (p *Parser) parseDropView() (*DropViewStmt, error) {
+	stmt := &DropViewStmt{}
+
+	if p.match(TK_IF) {
+		if !p.match(TK_EXISTS) {
+			return nil, p.error("expected EXISTS after IF")
+		}
+		stmt.IfExists = true
+	}
+
+	if !p.check(TK_ID) {
+		return nil, p.error("expected view name")
+	}
+	stmt.Name = Unquote(p.advance().Lexeme)
+
+	return stmt, nil
+}
+
+// =============================================================================
+// TRIGGER
+// =============================================================================
+
+// parseCreateTrigger parses a CREATE TRIGGER statement.
+// Syntax: CREATE [TEMP] TRIGGER [IF NOT EXISTS] name
+//         {BEFORE|AFTER|INSTEAD OF} {INSERT|UPDATE|DELETE} ON table
+//         [FOR EACH ROW] [WHEN expr]
+//         BEGIN statements END
+func (p *Parser) parseCreateTrigger(temp bool) (*CreateTriggerStmt, error) {
+	stmt := &CreateTriggerStmt{Temp: temp}
+
+	// IF NOT EXISTS
+	if err := p.parseIfNotExists(&stmt.IfNotExists); err != nil {
+		return nil, err
+	}
+
+	// Trigger name
+	if !p.check(TK_ID) {
+		return nil, p.error("expected trigger name")
+	}
+	stmt.Name = Unquote(p.advance().Lexeme)
+
+	// Timing: BEFORE, AFTER, or INSTEAD OF
+	if err := p.parseTriggerTiming(stmt); err != nil {
+		return nil, err
+	}
+
+	// Event: INSERT, UPDATE, or DELETE
+	if err := p.parseTriggerEvent(stmt); err != nil {
+		return nil, err
+	}
+
+	// ON table
+	if !p.match(TK_ON) {
+		return nil, p.error("expected ON after trigger event")
+	}
+	if !p.check(TK_ID) {
+		return nil, p.error("expected table name")
+	}
+	stmt.Table = Unquote(p.advance().Lexeme)
+
+	// FOR EACH ROW (optional)
+	if p.match(TK_FOR) {
+		if !p.match(TK_EACH) {
+			return nil, p.error("expected EACH after FOR")
+		}
+		if !p.match(TK_ROW) {
+			return nil, p.error("expected ROW after EACH")
+		}
+		stmt.ForEachRow = true
+	}
+
+	// WHEN expr (optional)
+	if p.match(TK_WHEN) {
+		when, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.When = when
+	}
+
+	// BEGIN statements END
+	if !p.match(TK_BEGIN) {
+		return nil, p.error("expected BEGIN")
+	}
+
+	// Parse trigger body statements
+	// Note: Trigger bodies can only contain INSERT, UPDATE, DELETE, and SELECT statements
+	for !p.check(TK_END) && !p.isAtEnd() {
+		if p.match(TK_SEMI) {
+			continue
+		}
+		var triggerStmt Statement
+		var err error
+		switch {
+		case p.match(TK_SELECT):
+			triggerStmt, err = p.parseSelect()
+		case p.match(TK_INSERT):
+			triggerStmt, err = p.parseInsert()
+		case p.match(TK_UPDATE):
+			triggerStmt, err = p.parseUpdate()
+		case p.match(TK_DELETE):
+			triggerStmt, err = p.parseDelete()
+		default:
+			return nil, p.error("trigger body can only contain SELECT, INSERT, UPDATE, or DELETE statements")
+		}
+		if err != nil {
+			return nil, err
+		}
+		stmt.Body = append(stmt.Body, triggerStmt)
+		p.match(TK_SEMI)
+	}
+
+	if !p.match(TK_END) {
+		return nil, p.error("expected END")
+	}
+
+	return stmt, nil
+}
+
+// parseTriggerTiming parses the trigger timing (BEFORE, AFTER, INSTEAD OF).
+func (p *Parser) parseTriggerTiming(stmt *CreateTriggerStmt) error {
+	if p.match(TK_BEFORE) {
+		stmt.Timing = TriggerBefore
+	} else if p.match(TK_AFTER) {
+		stmt.Timing = TriggerAfter
+	} else if p.match(TK_INSTEAD) {
+		if !p.match(TK_OF) {
+			return p.error("expected OF after INSTEAD")
+		}
+		stmt.Timing = TriggerInsteadOf
+	} else {
+		return p.error("expected BEFORE, AFTER, or INSTEAD OF")
+	}
+	return nil
+}
+
+// parseTriggerEvent parses the trigger event (INSERT, UPDATE, DELETE).
+func (p *Parser) parseTriggerEvent(stmt *CreateTriggerStmt) error {
+	if p.match(TK_INSERT) {
+		stmt.Event = TriggerInsert
+	} else if p.match(TK_DELETE) {
+		stmt.Event = TriggerDelete
+	} else if p.match(TK_UPDATE) {
+		stmt.Event = TriggerUpdate
+		// UPDATE OF column1, column2, ...
+		if p.match(TK_OF) {
+			for {
+				if !p.check(TK_ID) {
+					return p.error("expected column name after UPDATE OF")
+				}
+				stmt.UpdateOf = append(stmt.UpdateOf, Unquote(p.advance().Lexeme))
+				if !p.match(TK_COMMA) {
+					break
+				}
+			}
+		}
+	} else {
+		return p.error("expected INSERT, UPDATE, or DELETE")
+	}
+	return nil
+}
+
+// parseDropTrigger parses a DROP TRIGGER statement.
+// Syntax: DROP TRIGGER [IF EXISTS] name
+func (p *Parser) parseDropTrigger() (*DropTriggerStmt, error) {
+	stmt := &DropTriggerStmt{}
+
+	// IF EXISTS
+	if p.match(TK_IF) {
+		if !p.match(TK_EXISTS) {
+			return nil, p.error("expected EXISTS after IF")
+		}
+		stmt.IfExists = true
+	}
+
+	// Trigger name
+	if !p.check(TK_ID) {
+		return nil, p.error("expected trigger name")
+	}
+	stmt.Name = Unquote(p.advance().Lexeme)
+
+	return stmt, nil
+}
+
+// =============================================================================
+// EXPLAIN
+// =============================================================================
+
+// parseExplain parses an EXPLAIN or EXPLAIN QUERY PLAN statement.
+// Syntax:
+//   EXPLAIN statement
+//   EXPLAIN QUERY PLAN statement
+func (p *Parser) parseExplain() (*ExplainStmt, error) {
+	stmt := &ExplainStmt{}
+
+	// Check for QUERY PLAN
+	if p.match(TK_QUERY) {
+		if !p.match(TK_PLAN) {
+			return nil, p.error("expected PLAN after QUERY")
+		}
+		stmt.QueryPlan = true
+	}
+
+	// Parse the statement being explained
+	innerStmt, err := p.parseStatement()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Statement = innerStmt
+
+	return stmt, nil
+}
+
 // =============================================================================
 // Transactions
 // =============================================================================
@@ -1382,11 +1939,158 @@ func (p *Parser) parseRollback() (*RollbackStmt, error) {
 }
 
 // =============================================================================
+// ATTACH / DETACH DATABASE
+// =============================================================================
+
+// parseAttach parses an ATTACH DATABASE statement.
+// Syntax: ATTACH [DATABASE] filename AS schema_name
+func (p *Parser) parseAttach() (*AttachStmt, error) {
+	stmt := &AttachStmt{}
+
+	// DATABASE keyword is optional
+	p.match(TK_DATABASE)
+
+	// Parse filename expression (usually a string literal)
+	filename, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Filename = filename
+
+	// Expect AS keyword
+	if !p.match(TK_AS) {
+		return nil, p.error("expected AS after database filename")
+	}
+
+	// Parse schema name (can be identifier or keyword like "temp")
+	if !p.isSchemaIdentifier() {
+		return nil, p.error("expected schema name")
+	}
+	stmt.SchemaName = p.consumeSchemaIdentifier()
+
+	return stmt, nil
+}
+
+// parseDetach parses a DETACH DATABASE statement.
+// Syntax: DETACH [DATABASE] schema_name
+func (p *Parser) parseDetach() (*DetachStmt, error) {
+	stmt := &DetachStmt{}
+
+	// DATABASE keyword is optional
+	p.match(TK_DATABASE)
+
+	// Parse schema name (can be identifier or keyword like "temp")
+	if !p.isSchemaIdentifier() {
+		return nil, p.error("expected schema name")
+	}
+	stmt.SchemaName = p.consumeSchemaIdentifier()
+
+	return stmt, nil
+}
+
+// isSchemaIdentifier checks if the current token can be used as a schema name.
+// This includes regular identifiers and certain keywords that are valid as schema names.
+func (p *Parser) isSchemaIdentifier() bool {
+	switch p.peek().Type {
+	case TK_ID, TK_TEMP:
+		return true
+	default:
+		return false
+	}
+}
+
+// consumeSchemaIdentifier consumes and returns a schema identifier token.
+func (p *Parser) consumeSchemaIdentifier() string {
+	tok := p.advance()
+	return Unquote(tok.Lexeme)
+}
+
+// =============================================================================
+// PRAGMA
+// =============================================================================
+
+// parsePragma parses a PRAGMA statement.
+// Syntax:
+//   PRAGMA name
+//   PRAGMA name = value
+//   PRAGMA name(value)
+//   PRAGMA schema.name
+//   PRAGMA schema.name = value
+//   PRAGMA schema.name(value)
+func (p *Parser) parsePragma() (*PragmaStmt, error) {
+	stmt := &PragmaStmt{}
+
+	// Parse optional schema name (can be identifier or keyword like "temp", "main")
+	if !p.isPragmaIdentifier() {
+		return nil, p.error("expected pragma name")
+	}
+
+	firstID := p.consumePragmaIdentifier()
+
+	// Check if this is schema.name syntax
+	if p.match(TK_DOT) {
+		stmt.Schema = firstID
+		if !p.isPragmaIdentifier() {
+			return nil, p.error("expected pragma name after schema")
+		}
+		stmt.Name = p.consumePragmaIdentifier()
+	} else {
+		stmt.Name = firstID
+	}
+
+	// Check for value assignment or function call syntax
+	if p.match(TK_EQ) {
+		// PRAGMA name = value - use parseUnaryExpression to handle negative values
+		value, err := p.parseUnaryExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Value = value
+	} else if p.match(TK_LP) {
+		// PRAGMA name(value) - use parseUnaryExpression to handle negative values
+		value, err := p.parseUnaryExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Value = value
+		if !p.match(TK_RP) {
+			return nil, p.error("expected ) after pragma value")
+		}
+	}
+
+	return stmt, nil
+}
+
+// isPragmaIdentifier checks if the current token can be used as a pragma/schema name.
+// This includes regular identifiers and certain keywords that are valid as schema names.
+func (p *Parser) isPragmaIdentifier() bool {
+	switch p.peek().Type {
+	case TK_ID, TK_TEMP:
+		return true
+	default:
+		return false
+	}
+}
+
+// consumePragmaIdentifier consumes and returns a pragma identifier token.
+func (p *Parser) consumePragmaIdentifier() string {
+	tok := p.advance()
+	return Unquote(tok.Lexeme)
+}
+
+// =============================================================================
 // Expressions
 // =============================================================================
 
 func (p *Parser) parseExpression() (Expression, error) {
 	return p.parseOrExpression()
+}
+
+// ParseExpression parses a single SQL expression.
+// This is an exported version for external packages that need to parse expressions.
+func (p *Parser) ParseExpression() (Expression, error) {
+	p.tokenize()
+	return p.parseExpression()
 }
 
 func (p *Parser) parseOrExpression() (Expression, error) {
@@ -1782,8 +2486,8 @@ func (p *Parser) parsePrimaryExpression() (Expression, error) {
 		return &VariableExpr{Name: tok.Lexeme}, nil
 	}
 
-	// Identifier or function call
-	if p.check(TK_ID) {
+	// Identifier or function call (including keywords that can be used as identifiers)
+	if p.isExpressionIdentifier() {
 		return p.parseIdentOrFunction()
 	}
 
@@ -1838,7 +2542,7 @@ func (p *Parser) parseIdentOrFunction() (Expression, error) {
 
 	// Column reference with optional table qualifier
 	if p.match(TK_DOT) {
-		if !p.check(TK_ID) {
+		if !p.isExpressionIdentifier() {
 			return nil, p.error("expected column name after .")
 		}
 		column := Unquote(p.advance().Lexeme)
@@ -1846,6 +2550,17 @@ func (p *Parser) parseIdentOrFunction() (Expression, error) {
 	}
 
 	return &IdentExpr{Name: name}, nil
+}
+
+// isExpressionIdentifier checks if the current token can be used as an identifier in an expression.
+// This includes regular identifiers and certain keywords that can be used as column/table names.
+func (p *Parser) isExpressionIdentifier() bool {
+	switch p.peek().Type {
+	case TK_ID, TK_TEMP:
+		return true
+	default:
+		return false
+	}
 }
 
 // parseFunctionCall parses a function call after the opening paren.

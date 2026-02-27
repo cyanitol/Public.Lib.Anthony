@@ -45,168 +45,170 @@ const (
 
 	// Variable operations
 	OpVariable Opcode = 25 // Load bound parameter into register
+	OpParam    Opcode = 26 // Get parameter from parent VDBE
 
 	// Register operations
-	OpMove  Opcode = 26 // Move value between registers
-	OpCopy  Opcode = 27 // Copy value between registers
-	OpSCopy Opcode = 28 // Shallow copy between registers
-	OpCast  Opcode = 29 // Cast value to type
+	OpMove  Opcode = 27 // Move value between registers
+	OpCopy  Opcode = 28 // Copy value between registers
+	OpSCopy Opcode = 29 // Shallow copy between registers
+	OpCast  Opcode = 30 // Cast value to type
 
 	// Cursor operations
-	OpOpenRead      Opcode = 30 // Open cursor for reading
-	OpOpenWrite     Opcode = 31 // Open cursor for writing
-	OpOpenAutoindex Opcode = 32 // Open auto-index cursor
-	OpOpenEphemeral Opcode = 33 // Open ephemeral table
-	OpClose         Opcode = 34 // Close cursor
-	OpRewind        Opcode = 35 // Move cursor to first entry
-	OpNext          Opcode = 36 // Move cursor to next entry
-	OpPrev          Opcode = 37 // Move cursor to previous entry
-	OpSeek          Opcode = 38 // Seek to specific key
-	OpSeekGE        Opcode = 39 // Seek greater than or equal
-	OpSeekGT        Opcode = 40 // Seek greater than
-	OpSeekLE        Opcode = 41 // Seek less than or equal
-	OpSeekLT        Opcode = 42 // Seek less than
-	OpSeekRowid     Opcode = 43 // Seek to rowid
-	OpNotExists     Opcode = 44 // Check if rowid exists
-	OpSequence      Opcode = 45 // Get cursor sequence number
+	OpOpenRead      Opcode = 31 // Open cursor for reading
+	OpOpenWrite     Opcode = 32 // Open cursor for writing
+	OpOpenAutoindex Opcode = 33 // Open auto-index cursor
+	OpOpenEphemeral Opcode = 34 // Open ephemeral table
+	OpClose         Opcode = 35 // Close cursor
+	OpRewind        Opcode = 36 // Move cursor to first entry
+	OpNext          Opcode = 37 // Move cursor to next entry
+	OpPrev          Opcode = 38 // Move cursor to previous entry
+	OpSeek          Opcode = 39 // Seek to specific key
+	OpSeekGE        Opcode = 40 // Seek greater than or equal
+	OpSeekGT        Opcode = 41 // Seek greater than
+	OpSeekLE        Opcode = 42 // Seek less than or equal
+	OpSeekLT        Opcode = 43 // Seek less than
+	OpSeekRowid     Opcode = 44 // Seek to rowid
+	OpNotExists     Opcode = 45 // Check if rowid exists
+	OpSequence      Opcode = 46 // Get cursor sequence number
+	OpDeferredSeek  Opcode = 47 // Deferred seek operation
 
 	// Data retrieval opcodes
-	OpColumn     Opcode = 46 // Read column from cursor
-	OpRowid      Opcode = 47 // Get rowid from cursor
-	OpRowData    Opcode = 48 // Get entire row data
-	OpResultRow  Opcode = 49 // Output result row
-	OpMakeRecord Opcode = 50 // Create a record from registers
-	OpCount      Opcode = 51 // Count entries in cursor
+	OpColumn     Opcode = 48 // Read column from cursor
+	OpRowid      Opcode = 49 // Get rowid from cursor
+	OpRowData    Opcode = 50 // Get entire row data
+	OpResultRow  Opcode = 51 // Output result row
+	OpMakeRecord Opcode = 52 // Create a record from registers
+	OpCount      Opcode = 53 // Count entries in cursor
 
 	// Data modification opcodes
-	OpInsert     Opcode = 52 // Insert record into table
-	OpInsertInt  Opcode = 53 // Insert with integer key
-	OpDelete     Opcode = 54 // Delete current record
-	OpUpdate     Opcode = 55 // Update current record
-	OpNewRowid   Opcode = 56 // Generate new rowid
-	OpRowSetAdd  Opcode = 57 // Add rowid to rowset
-	OpRowSetRead Opcode = 58 // Read rowid from rowset
-	OpRowSetTest Opcode = 59 // Test if rowid in rowset
+	OpInsert     Opcode = 54 // Insert record into table
+	OpInsertInt  Opcode = 55 // Insert with integer key
+	OpDelete     Opcode = 56 // Delete current record
+	OpUpdate     Opcode = 57 // Update current record
+	OpNewRowid   Opcode = 58 // Generate new rowid
+	OpRowSetAdd  Opcode = 59 // Add rowid to rowset
+	OpRowSetRead Opcode = 60 // Read rowid from rowset
+	OpRowSetTest Opcode = 61 // Test if rowid in rowset
 
 	// Comparison opcodes
-	OpEq      Opcode = 60 // Equal comparison
-	OpNe      Opcode = 61 // Not equal comparison
-	OpLt      Opcode = 62 // Less than comparison
-	OpLe      Opcode = 63 // Less than or equal comparison
-	OpGt      Opcode = 64 // Greater than comparison
-	OpGe      Opcode = 65 // Greater than or equal comparison
-	OpCompare Opcode = 66 // Compare two register ranges
-	OpJump    Opcode = 67 // Three-way comparison jump
-	OpElseEq  Opcode = 68 // Else-equal for optimization
+	OpEq      Opcode = 62 // Equal comparison
+	OpNe      Opcode = 63 // Not equal comparison
+	OpLt      Opcode = 64 // Less than comparison
+	OpLe      Opcode = 65 // Less than or equal comparison
+	OpGt      Opcode = 66 // Greater than comparison
+	OpGe      Opcode = 67 // Greater than or equal comparison
+	OpCompare Opcode = 68 // Compare two register ranges
+	OpJump    Opcode = 69 // Three-way comparison jump
+	OpElseEq  Opcode = 70 // Else-equal for optimization
 
 	// Arithmetic opcodes
-	OpAdd       Opcode = 69 // Addition
-	OpSubtract  Opcode = 70 // Subtraction
-	OpMultiply  Opcode = 71 // Multiplication
-	OpDivide    Opcode = 72 // Division
-	OpRemainder Opcode = 73 // Modulo/remainder
+	OpAdd       Opcode = 71 // Addition
+	OpSubtract  Opcode = 72 // Subtraction
+	OpMultiply  Opcode = 73 // Multiplication
+	OpDivide    Opcode = 74 // Division
+	OpRemainder Opcode = 75 // Modulo/remainder
 
 	// Bitwise opcodes
-	OpBitAnd     Opcode = 74 // Bitwise AND
-	OpBitOr      Opcode = 75 // Bitwise OR
-	OpBitNot     Opcode = 76 // Bitwise NOT
-	OpShiftLeft  Opcode = 77 // Left shift
-	OpShiftRight Opcode = 78 // Right shift
+	OpBitAnd     Opcode = 76 // Bitwise AND
+	OpBitOr      Opcode = 77 // Bitwise OR
+	OpBitNot     Opcode = 78 // Bitwise NOT
+	OpShiftLeft  Opcode = 79 // Left shift
+	OpShiftRight Opcode = 80 // Right shift
 
 	// Logical opcodes
-	OpAnd Opcode = 79 // Logical AND
-	OpOr  Opcode = 80 // Logical OR
-	OpNot Opcode = 81 // Logical NOT
+	OpAnd Opcode = 81 // Logical AND
+	OpOr  Opcode = 82 // Logical OR
+	OpNot Opcode = 83 // Logical NOT
 
 	// Aggregate function opcodes
-	OpAggStep  Opcode = 82 // Execute aggregate step function
-	OpAggFinal Opcode = 83 // Execute aggregate finalization
-	OpAggValue Opcode = 84 // Get aggregate intermediate value
+	OpAggStep  Opcode = 84 // Execute aggregate step function
+	OpAggFinal Opcode = 85 // Execute aggregate finalization
+	OpAggValue Opcode = 86 // Get aggregate intermediate value
 
 	// Scalar function opcodes
-	OpFunction Opcode = 85 // Call scalar function
-	OpPureFunc Opcode = 86 // Call pure function (cacheable)
+	OpFunction Opcode = 87 // Call scalar function
+	OpPureFunc Opcode = 88 // Call pure function (cacheable)
 
 	// Transaction opcodes
-	OpTransaction Opcode = 87 // Begin transaction
-	OpCommit      Opcode = 88 // Commit transaction
-	OpRollback    Opcode = 89 // Rollback transaction
-	OpSavepoint   Opcode = 90 // Create savepoint
-	OpRelease     Opcode = 91 // Release savepoint
+	OpTransaction Opcode = 89 // Begin transaction
+	OpCommit      Opcode = 90 // Commit transaction
+	OpRollback    Opcode = 91 // Rollback transaction
+	OpSavepoint   Opcode = 92 // Create savepoint
+	OpRelease     Opcode = 93 // Release savepoint
 
 	// Schema opcodes
-	OpVerifyCookie Opcode = 92 // Verify schema cookie
-	OpSetCookie    Opcode = 93 // Set schema cookie
-	OpOpenPseudo   Opcode = 94 // Open pseudo-cursor
+	OpVerifyCookie Opcode = 94 // Verify schema cookie
+	OpSetCookie    Opcode = 95 // Set schema cookie
+	OpOpenPseudo   Opcode = 96 // Open pseudo-cursor
 
 	// Sorting opcodes
-	OpSorterOpen   Opcode = 95  // Open sorter
-	OpSorterInsert Opcode = 96  // Insert into sorter
-	OpSorterNext   Opcode = 97  // Get next from sorter
-	OpSorterSort   Opcode = 98  // Sort the sorter
-	OpSorterData   Opcode = 99  // Get data from sorter
-	OpSorterClose  Opcode = 100 // Close sorter
+	OpSorterOpen   Opcode = 97  // Open sorter
+	OpSorterInsert Opcode = 98  // Insert into sorter
+	OpSorterNext   Opcode = 99  // Get next from sorter
+	OpSorterSort   Opcode = 100 // Sort the sorter
+	OpSorterData   Opcode = 101 // Get data from sorter
+	OpSorterClose  Opcode = 102 // Close sorter
 
 	// Program flow opcodes
-	OpProgram       Opcode = 101 // Execute sub-program
-	OpInitCoroutine Opcode = 102 // Initialize coroutine
-	OpEndCoroutine  Opcode = 103 // End coroutine
-	OpOnce          Opcode = 104 // Execute once guard
-	OpBeginSubrtn   Opcode = 105 // Begin subroutine
+	OpProgram       Opcode = 150 // Execute sub-program
+	OpInitCoroutine Opcode = 151 // Initialize coroutine
+	OpEndCoroutine  Opcode = 152 // End coroutine
+	OpOnce          Opcode = 153 // Execute once guard
+	OpBeginSubrtn   Opcode = 154 // Begin subroutine
 
 	// Index opcodes
-	OpIdxInsert Opcode = 106 // Insert into index
-	OpIdxDelete Opcode = 107 // Delete from index
-	OpIdxRowid  Opcode = 108 // Get rowid from index
-	OpIdxLT     Opcode = 109 // Index less than
-	OpIdxGE     Opcode = 110 // Index greater or equal
-	OpIdxGT     Opcode = 111 // Index greater than
-	OpIdxLE     Opcode = 112 // Index less or equal
+	OpIdxInsert Opcode = 155 // Insert into index
+	OpIdxDelete Opcode = 156 // Delete from index
+	OpIdxRowid  Opcode = 157 // Get rowid from index
+	OpIdxLT     Opcode = 158 // Index less than
+	OpIdxGE     Opcode = 159 // Index greater or equal
+	OpIdxGT     Opcode = 160 // Index greater than
+	OpIdxLE     Opcode = 161 // Index less or equal
 
 	// Virtual table opcodes
-	OpVOpen    Opcode = 113 // Open virtual table cursor
-	OpVFilter  Opcode = 114 // Virtual table filter
-	OpVColumn  Opcode = 115 // Read virtual table column
-	OpVNext    Opcode = 116 // Next row in virtual table
-	OpVCreate  Opcode = 117 // Create virtual table
-	OpVDestroy Opcode = 118 // Destroy virtual table
-	OpVUpdate  Opcode = 119 // Update virtual table
-	OpVRename  Opcode = 120 // Rename virtual table
+	OpVOpen    Opcode = 162 // Open virtual table cursor
+	OpVFilter  Opcode = 163 // Virtual table filter
+	OpVColumn  Opcode = 164 // Read virtual table column
+	OpVNext    Opcode = 165 // Next row in virtual table
+	OpVCreate  Opcode = 166 // Create virtual table
+	OpVDestroy Opcode = 167 // Destroy virtual table
+	OpVUpdate  Opcode = 168 // Update virtual table
+	OpVRename  Opcode = 169 // Rename virtual table
 
 	// Miscellaneous opcodes
-	OpNoop        Opcode = 121 // No operation
-	OpExplain     Opcode = 122 // EXPLAIN opcode marker
-	OpPermutation Opcode = 123 // Set permutation for comparison
-	OpCollSeq     Opcode = 124 // Set collation sequence
-	OpTableLock   Opcode = 125 // Lock table
-	OpFkCheck     Opcode = 126 // Foreign key check
-	OpFkCounter   Opcode = 127 // Foreign key counter
-	OpIsNull      Opcode = 128 // Check if NULL
-	OpNotNull     Opcode = 129 // Check if NOT NULL
-	OpMaxPgcnt    Opcode = 130 // Set max page count
-	OpMemMax      Opcode = 131 // Track maximum value
-	OpAutocommit  Opcode = 132 // Set autocommit mode
+	OpNoop        Opcode = 170 // No operation
+	OpExplain     Opcode = 171 // EXPLAIN opcode marker
+	OpPermutation Opcode = 172 // Set permutation for comparison
+	OpCollSeq     Opcode = 173 // Set collation sequence
+	OpTableLock   Opcode = 174 // Lock table
+	OpFkCheck     Opcode = 175 // Foreign key check
+	OpFkCounter   Opcode = 176 // Foreign key counter
+	OpIsNull      Opcode = 177 // Check if NULL
+	OpNotNull     Opcode = 178 // Check if NOT NULL
+	OpMaxPgcnt    Opcode = 179 // Set max page count
+	OpMemMax      Opcode = 180 // Track maximum value
+	OpAutocommit  Opcode = 181 // Set autocommit mode
 
 	// Type checking opcodes
-	OpIsType      Opcode = 133 // Check value type
-	OpIsNumeric   Opcode = 134 // Check if numeric
-	OpMustBeInt64 Opcode = 135 // Assert 64-bit integer
+	OpIsType      Opcode = 182 // Check value type
+	OpIsNumeric   Opcode = 183 // Check if numeric
+	OpMustBeInt64 Opcode = 184 // Assert 64-bit integer
 
 	// Additional cursor opcodes
-	OpLast          Opcode = 136 // Move cursor to last entry
-	OpFirst         Opcode = 137 // Move cursor to first entry (alias)
-	OpSorterCompare Opcode = 138 // Compare sorter keys
+	OpLast          Opcode = 185 // Move cursor to last entry
+	OpFirst         Opcode = 186 // Move cursor to first entry (alias)
+	OpSorterCompare Opcode = 187 // Compare sorter keys
 
 	// String operations
-	OpToText    Opcode = 139 // Convert to text
-	OpToBlob    Opcode = 140 // Convert to blob
-	OpToNumeric Opcode = 141 // Convert to numeric
-	OpToInt     Opcode = 142 // Convert to integer
-	OpToReal    Opcode = 143 // Convert to real
+	OpToText    Opcode = 188 // Convert to text
+	OpToBlob    Opcode = 189 // Convert to blob
+	OpToNumeric Opcode = 190 // Convert to numeric
+	OpToInt     Opcode = 191 // Convert to integer
+	OpToReal    Opcode = 192 // Convert to real
 
 	// Debugging/profiling opcodes
-	OpTrace      Opcode = 144 // Debug trace point
-	OpScanStatus Opcode = 145 // Scan status tracking
+	OpTrace      Opcode = 193 // Debug trace point
+	OpScanStatus Opcode = 194 // Scan status tracking
 )
 
 // OpcodeNames maps opcodes to their string names for debugging.
@@ -237,6 +239,7 @@ var OpcodeNames = map[Opcode]string{
 	OpNull:          "Null",
 	OpSoftNull:      "SoftNull",
 	OpVariable:      "Variable",
+	OpParam:         "Param",
 	OpMove:          "Move",
 	OpCopy:          "Copy",
 	OpSCopy:         "SCopy",

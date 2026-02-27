@@ -149,32 +149,34 @@ func TestSplitCreatesNewRoot(t *testing.T) {
 
 		err := cursor.Insert(key, payload)
 		if err != nil {
-			t.Logf("Insert %d triggered split: %v", i, err)
-			if cursor.RootPage != originalRoot {
-				t.Logf("Root changed from %d to %d", originalRoot, cursor.RootPage)
+			t.Logf("Insert %d error: %v", i, err)
+		}
 
-				// Verify new root is an interior page
-				newRootData, err := bt.GetPage(cursor.RootPage)
-				if err != nil {
-					t.Fatalf("Failed to get new root page: %v", err)
-				}
+		// Check if root changed (split can succeed without returning an error)
+		if cursor.RootPage != originalRoot {
+			t.Logf("Root changed from %d to %d at insert %d", originalRoot, cursor.RootPage, i)
 
-				header, err := ParsePageHeader(newRootData, cursor.RootPage)
-				if err != nil {
-					t.Fatalf("Failed to parse new root header: %v", err)
-				}
-
-				if !header.IsInterior {
-					t.Errorf("New root should be interior page, got leaf")
-				}
-
-				if header.NumCells < 1 {
-					t.Errorf("New root should have at least 1 cell, got %d", header.NumCells)
-				}
-
-				t.Logf("New root is interior page with %d cells", header.NumCells)
-				return
+			// Verify new root is an interior page
+			newRootData, err := bt.GetPage(cursor.RootPage)
+			if err != nil {
+				t.Fatalf("Failed to get new root page: %v", err)
 			}
+
+			header, err := ParsePageHeader(newRootData, cursor.RootPage)
+			if err != nil {
+				t.Fatalf("Failed to parse new root header: %v", err)
+			}
+
+			if !header.IsInterior {
+				t.Errorf("New root should be interior page, got leaf")
+			}
+
+			if header.NumCells < 1 {
+				t.Errorf("New root should have at least 1 cell, got %d", header.NumCells)
+			}
+
+			t.Logf("New root is interior page with %d cells", header.NumCells)
+			return
 		}
 	}
 

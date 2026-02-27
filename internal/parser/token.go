@@ -32,6 +32,7 @@ const (
 	TK_RENAME
 	TK_ADD
 	TK_COLUMN
+	TK_TO
 
 	// Keywords - DML
 	TK_SELECT
@@ -119,6 +120,10 @@ const (
 	TK_DEFERRED
 	TK_IMMEDIATE
 	TK_EXCLUSIVE
+
+	// Keywords - CTE
+	TK_WITH
+	TK_RECURSIVE
 
 	// Keywords - Other
 	TK_EXPLAIN
@@ -215,6 +220,10 @@ const (
 	TK_GENERATED
 	TK_ALWAYS
 	TK_STORED
+	TK_INSTEAD
+	TK_OF
+	TK_DO
+	TK_NOTHING
 
 	// Special operator types
 	TK_PTR     // ->
@@ -253,6 +262,7 @@ var tokenTypeNames = [...]string{
 	TK_RENAME:        "RENAME",
 	TK_ADD:           "ADD",
 	TK_COLUMN:        "COLUMN",
+	TK_TO:            "TO",
 	TK_SELECT:        "SELECT",
 	TK_FROM:          "FROM",
 	TK_WHERE:         "WHERE",
@@ -324,6 +334,8 @@ var tokenTypeNames = [...]string{
 	TK_DEFERRED:      "DEFERRED",
 	TK_IMMEDIATE:     "IMMEDIATE",
 	TK_EXCLUSIVE:     "EXCLUSIVE",
+	TK_WITH:          "WITH",
+	TK_RECURSIVE:     "RECURSIVE",
 	TK_EXPLAIN:       "EXPLAIN",
 	TK_QUERY:         "QUERY",
 	TK_PLAN:          "PLAN",
@@ -402,6 +414,10 @@ var tokenTypeNames = [...]string{
 	TK_GENERATED:     "GENERATED",
 	TK_ALWAYS:        "ALWAYS",
 	TK_STORED:        "STORED",
+	TK_INSTEAD:       "INSTEAD",
+	TK_OF:            "OF",
+	TK_DO:            "DO",
+	TK_NOTHING:       "NOTHING",
 	TK_PTR:           "PTR",
 	TK_QNUMBER:       "QNUMBER",
 }

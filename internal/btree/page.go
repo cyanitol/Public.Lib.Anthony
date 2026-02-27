@@ -231,7 +231,9 @@ func (p *BtreePage) InsertCell(idx int, cell []byte) error {
 
 	// Update header
 	p.Header.NumCells++
-	binary.BigEndian.PutUint16(p.Data[p.Header.CellPtrOffset-5:], p.Header.NumCells)
+	// Calculate correct offset for NumCells field (CellPtrOffset - HeaderSize + PageHeaderOffsetNumCells)
+	numCellsOffset := p.Header.CellPtrOffset - p.Header.HeaderSize + PageHeaderOffsetNumCells
+	binary.BigEndian.PutUint16(p.Data[numCellsOffset:], p.Header.NumCells)
 
 	return nil
 }
@@ -260,7 +262,9 @@ func (p *BtreePage) DeleteCell(idx int) error {
 
 	// Update header
 	p.Header.NumCells--
-	binary.BigEndian.PutUint16(p.Data[p.Header.CellPtrOffset-5:], p.Header.NumCells)
+	// Calculate correct offset for NumCells field (CellPtrOffset - HeaderSize + PageHeaderOffsetNumCells)
+	numCellsOffset := p.Header.CellPtrOffset - p.Header.HeaderSize + PageHeaderOffsetNumCells
+	binary.BigEndian.PutUint16(p.Data[numCellsOffset:], p.Header.NumCells)
 
 	// Note: The actual cell content is not removed here - it becomes fragmented space
 	// Call Defragment() to reclaim the space
@@ -305,17 +309,22 @@ func (p *BtreePage) AllocateSpace(size int) (offset int, err error) {
 
 	// Update cell content start in header
 	p.Header.CellContentStart = uint16(newCellContentStart)
-	binary.BigEndian.PutUint16(p.Data[p.Header.CellPtrOffset-3:], uint16(newCellContentStart))
+	// Calculate correct offset for CellContentStart field (CellPtrOffset - HeaderSize + PageHeaderOffsetCellStart)
+	cellStartOffset := p.Header.CellPtrOffset - p.Header.HeaderSize + PageHeaderOffsetCellStart
+	binary.BigEndian.PutUint16(p.Data[cellStartOffset:], uint16(newCellContentStart))
 
 	return newCellContentStart, nil
 }
 
 // Defragment defragments the page by compacting all cells
 func (p *BtreePage) Defragment() error {
+	// Calculate correct offset for CellContentStart field
+	cellStartOffset := p.Header.CellPtrOffset - p.Header.HeaderSize + PageHeaderOffsetCellStart
+
 	if p.Header.NumCells == 0 {
 		// Empty page - just reset content start
 		p.Header.CellContentStart = 0
-		binary.BigEndian.PutUint16(p.Data[p.Header.CellPtrOffset-3:], 0)
+		binary.BigEndian.PutUint16(p.Data[cellStartOffset:], 0)
 		return nil
 	}
 
@@ -344,9 +353,18 @@ func (p *BtreePage) Defragment() error {
 			return err
 		}
 
+		// Bounds check to prevent slice overflow
+		cellEnd := cellOffset + int(cell.CellSize)
+		if cellEnd > len(p.Data) {
+			cellEnd = len(p.Data)
+		}
+		// Make a copy of the cell data to avoid corruption during compaction
+		// (since we're modifying p.Data in place, slices into it would become invalid)
+		cellDataCopy := make([]byte, cellEnd-cellOffset)
+		copy(cellDataCopy, p.Data[cellOffset:cellEnd])
 		cells[i] = cellData{
 			offset: cellOffset,
-			data:   p.Data[cellOffset : cellOffset+int(cell.CellSize)],
+			data:   cellDataCopy,
 		}
 	}
 
@@ -366,11 +384,13 @@ func (p *BtreePage) Defragment() error {
 
 	// Update header
 	p.Header.CellContentStart = uint16(newContentStart)
-	binary.BigEndian.PutUint16(p.Data[p.Header.CellPtrOffset-3:], uint16(newContentStart))
+	binary.BigEndian.PutUint16(p.Data[cellStartOffset:], uint16(newContentStart))
 
 	// Clear fragmented bytes
 	p.Header.FragmentedBytes = 0
-	p.Data[p.Header.CellPtrOffset-1] = 0
+	// Calculate correct offset for FragmentedBytes field
+	fragmentedOffset := p.Header.CellPtrOffset - p.Header.HeaderSize + PageHeaderOffsetFragmented
+	p.Data[fragmentedOffset] = 0
 
 	return nil
 }

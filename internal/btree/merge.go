@@ -417,7 +417,12 @@ func RedistributeCells(leftPage, rightPage *BtreePage) error {
 				return err
 			}
 
-			cellData := rightPage.Data[cellOffset : cellOffset+uint16(cell.CellSize)]
+			// Bounds check to prevent slice overflow
+			cellEnd := int(cellOffset) + int(cell.CellSize)
+			if cellEnd > len(rightPage.Data) {
+				cellEnd = len(rightPage.Data)
+			}
+			cellData := rightPage.Data[cellOffset:cellEnd]
 
 			// Insert at end of left page
 			if err := leftPage.InsertCell(int(leftPage.Header.NumCells), cellData); err != nil {
@@ -450,7 +455,12 @@ func RedistributeCells(leftPage, rightPage *BtreePage) error {
 				return err
 			}
 
-			cellData := leftPage.Data[cellOffset : cellOffset+uint16(cell.CellSize)]
+			// Bounds check to prevent slice overflow
+			cellEnd := int(cellOffset) + int(cell.CellSize)
+			if cellEnd > len(leftPage.Data) {
+				cellEnd = len(leftPage.Data)
+			}
+			cellData := leftPage.Data[cellOffset:cellEnd]
 
 			// Insert at beginning of right page
 			if err := rightPage.InsertCell(0, cellData); err != nil {

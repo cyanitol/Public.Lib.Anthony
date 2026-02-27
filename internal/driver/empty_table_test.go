@@ -2,7 +2,6 @@ package driver
 
 import (
 	"database/sql"
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -13,11 +12,7 @@ func TestEmptyTableQuery(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	// Create a minimal database file
-	if err := os.WriteFile(dbPath, make([]byte, 4096), 0600); err != nil {
-		t.Fatalf("failed to create test database: %v", err)
-	}
-
+	// Open database - driver will create a new database file
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
@@ -70,10 +65,7 @@ func TestEmptyTableWithColumns(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	if err := os.WriteFile(dbPath, make([]byte, 4096), 0600); err != nil {
-		t.Fatalf("failed to create test database: %v", err)
-	}
-
+	// Open database - driver will create a new database file
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
