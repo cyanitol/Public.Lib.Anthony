@@ -214,36 +214,63 @@ func (c *BtCursor) advanceWithinPage() (bool, error) {
 func (c *BtCursor) climbToNextParent() (uint32, bool, error) {
 	for c.Depth > 0 {
 		c.Depth--
-		parentPage := c.PageStack[c.Depth]
-		parentIndex := c.IndexStack[c.Depth]
-
-		parentData, err := c.Btree.GetPage(parentPage)
+		childPage, found, err := c.tryAdvanceInParent()
 		if err != nil {
-			c.State = CursorInvalid
 			return 0, false, err
 		}
-		parentHeader, err := ParsePageHeader(parentData, parentPage)
-		if err != nil {
-			c.State = CursorInvalid
-			return 0, false, err
+		if found {
+			return childPage, true, nil
 		}
-		if parentIndex >= int(parentHeader.NumCells)-1 {
-			continue
-		}
-		c.IndexStack[c.Depth] = parentIndex + 1
-		cellOffset, err := parentHeader.GetCellPointer(parentData, parentIndex+1)
-		if err != nil {
-			c.State = CursorInvalid
-			return 0, false, err
-		}
-		cell, err := ParseCell(parentHeader.PageType, parentData[cellOffset:], c.Btree.UsableSize)
-		if err != nil {
-			c.State = CursorInvalid
-			return 0, false, err
-		}
-		return cell.ChildPage, true, nil
 	}
 	return 0, false, nil
+}
+
+// tryAdvanceInParent attempts to advance to the next cell in the parent page.
+func (c *BtCursor) tryAdvanceInParent() (uint32, bool, error) {
+	parentPage := c.PageStack[c.Depth]
+	parentIndex := c.IndexStack[c.Depth]
+
+	parentData, parentHeader, err := c.loadParentPage(parentPage)
+	if err != nil {
+		return 0, false, err
+	}
+
+	if parentIndex >= int(parentHeader.NumCells)-1 {
+		return 0, false, nil
+	}
+
+	c.IndexStack[c.Depth] = parentIndex + 1
+	return c.getChildPageFromParent(parentData, parentHeader, parentIndex+1)
+}
+
+// loadParentPage loads and parses a parent page.
+func (c *BtCursor) loadParentPage(parentPage uint32) ([]byte, *PageHeader, error) {
+	parentData, err := c.Btree.GetPage(parentPage)
+	if err != nil {
+		c.State = CursorInvalid
+		return nil, nil, err
+	}
+	parentHeader, err := ParsePageHeader(parentData, parentPage)
+	if err != nil {
+		c.State = CursorInvalid
+		return nil, nil, err
+	}
+	return parentData, parentHeader, nil
+}
+
+// getChildPageFromParent extracts the child page number from a parent cell.
+func (c *BtCursor) getChildPageFromParent(parentData []byte, parentHeader *PageHeader, cellIdx int) (uint32, bool, error) {
+	cellOffset, err := parentHeader.GetCellPointer(parentData, cellIdx)
+	if err != nil {
+		c.State = CursorInvalid
+		return 0, false, err
+	}
+	cell, err := ParseCell(parentHeader.PageType, parentData[cellOffset:], c.Btree.UsableSize)
+	if err != nil {
+		c.State = CursorInvalid
+		return 0, false, err
+	}
+	return cell.ChildPage, true, nil
 }
 
 // Previous moves the cursor to the previous entry
@@ -629,67 +656,66 @@ func (c *BtCursor) Insert(key int64, payload []byte) error {
 		return err
 	}
 
-	// Calculate if overflow is needed
-	payloadSize := uint32(len(payload))
-	localSize := CalculateLocalPayload(payloadSize, c.Btree.UsableSize, true)
-
-	var cellData []byte
-	var overflowPage uint32
-
-	// Check if payload needs overflow pages
-	if payloadSize > uint32(localSize) {
-		// Write overflow pages first
-		var err error
-		overflowPage, err = c.WriteOverflow(payload, localSize, c.Btree.UsableSize)
-		if err != nil {
-			return fmt.Errorf("failed to write overflow: %w", err)
-		}
-
-		// Encode cell with local payload and overflow pointer
-		cellData = c.encodeTableLeafCellWithOverflow(key, payload[:localSize], overflowPage, payloadSize)
-	} else {
-		// No overflow needed, use standard encoding
-		cellData = EncodeTableLeafCell(key, payload)
+	cellData, overflowPage, err := c.prepareCellData(key, payload)
+	if err != nil {
+		return err
 	}
 
 	btreePage, err := c.getCurrentBtreePage()
 	if err != nil {
-		// Clean up overflow pages if they were allocated
-		if overflowPage != 0 {
-			c.FreeOverflowChain(overflowPage)
-		}
+		c.cleanupOverflowOnError(overflowPage)
 		return err
 	}
 
 	if len(cellData) > btreePage.FreeSpace() {
-		// Clean up overflow pages before split, as split will re-encode
-		if overflowPage != 0 {
-			c.FreeOverflowChain(overflowPage)
-		}
+		c.cleanupOverflowOnError(overflowPage)
 		return c.splitPage(key, payload)
 	}
 
-	// Mark page dirty BEFORE modification for journal support
-	if c.Btree.Provider != nil {
-		if err := c.Btree.Provider.MarkDirty(c.CurrentPage); err != nil {
-			// Clean up overflow pages on error
-			if overflowPage != 0 {
-				c.FreeOverflowChain(overflowPage)
-			}
-			return err
-		}
+	if err := c.markPageDirty(); err != nil {
+		c.cleanupOverflowOnError(overflowPage)
+		return err
 	}
 
 	if err := btreePage.InsertCell(c.CurrentIndex, cellData); err != nil {
-		// Clean up overflow pages on error
-		if overflowPage != 0 {
-			c.FreeOverflowChain(overflowPage)
-		}
+		c.cleanupOverflowOnError(overflowPage)
 		return err
 	}
 
 	_, err = c.SeekRowid(key)
 	return err
+}
+
+// prepareCellData encodes the cell data with optional overflow handling.
+func (c *BtCursor) prepareCellData(key int64, payload []byte) (cellData []byte, overflowPage uint32, err error) {
+	payloadSize := uint32(len(payload))
+	localSize := CalculateLocalPayload(payloadSize, c.Btree.UsableSize, true)
+
+	if payloadSize > uint32(localSize) {
+		overflowPage, err = c.WriteOverflow(payload, localSize, c.Btree.UsableSize)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to write overflow: %w", err)
+		}
+		cellData = c.encodeTableLeafCellWithOverflow(key, payload[:localSize], overflowPage, payloadSize)
+	} else {
+		cellData = EncodeTableLeafCell(key, payload)
+	}
+	return cellData, overflowPage, nil
+}
+
+// cleanupOverflowOnError cleans up overflow pages if they were allocated.
+func (c *BtCursor) cleanupOverflowOnError(overflowPage uint32) {
+	if overflowPage != 0 {
+		c.FreeOverflowChain(overflowPage)
+	}
+}
+
+// markPageDirty marks the current page as dirty if using a provider.
+func (c *BtCursor) markPageDirty() error {
+	if c.Btree.Provider != nil {
+		return c.Btree.Provider.MarkDirty(c.CurrentPage)
+	}
+	return nil
 }
 
 // encodeTableLeafCellWithOverflow encodes a table leaf cell with overflow
@@ -750,48 +776,103 @@ func (c *BtCursor) getCurrentBtreePage() (*BtreePage, error) {
 // Delete deletes the row at the current cursor position
 // Automatically frees any overflow pages associated with the cell
 func (c *BtCursor) Delete() error {
+	if err := c.validateDeletePosition(); err != nil {
+		return err
+	}
+
+	if err := c.freeOverflowPages(); err != nil {
+		return err
+	}
+
+	if err := c.markPageDirty(); err != nil {
+		return err
+	}
+
+	if err := c.performCellDeletion(); err != nil {
+		return err
+	}
+
+	return c.adjustCursorAfterDelete()
+}
+
+// validateDeletePosition validates the cursor is in a valid position for deletion.
+func (c *BtCursor) validateDeletePosition() error {
 	if c.State != CursorValid {
 		return fmt.Errorf("cursor not in valid state")
 	}
-
 	if c.CurrentHeader == nil || !c.CurrentHeader.IsLeaf {
 		return fmt.Errorf("cursor not positioned at leaf page")
 	}
+	return nil
+}
 
-	// Free overflow pages if this cell has any
+// freeOverflowPages frees any overflow pages associated with the current cell.
+func (c *BtCursor) freeOverflowPages() error {
 	if c.CurrentCell != nil && c.CurrentCell.OverflowPage != 0 {
 		if err := c.FreeOverflowChain(c.CurrentCell.OverflowPage); err != nil {
 			return fmt.Errorf("failed to free overflow pages: %w", err)
 		}
 	}
+	return nil
+}
 
-	// Mark page dirty BEFORE modification for journal support
-	if c.Btree.Provider != nil {
-		if err := c.Btree.Provider.MarkDirty(c.CurrentPage); err != nil {
-			return err
-		}
-	}
-
-	// Get the current page
+// performCellDeletion performs the actual cell deletion from the page.
+func (c *BtCursor) performCellDeletion() error {
 	pageData, err := c.Btree.GetPage(c.CurrentPage)
 	if err != nil {
 		return err
 	}
 
-	// Wrap in BtreePage for write operations
 	btreePage, err := NewBtreePage(c.CurrentPage, pageData, c.Btree.UsableSize)
 	if err != nil {
 		return err
 	}
 
-	// Delete the cell
-	if err := btreePage.DeleteCell(c.CurrentIndex); err != nil {
+	return btreePage.DeleteCell(c.CurrentIndex)
+}
+
+// adjustCursorAfterDelete adjusts the cursor position after deletion.
+// After deleting a cell at index i, all cells from index i+1 onwards shift down by one.
+// We decrement the index so Next() will advance to the correct next cell.
+func (c *BtCursor) adjustCursorAfterDelete() error {
+	pageData, err := c.Btree.GetPage(c.CurrentPage)
+	if err != nil {
+		c.State = CursorInvalid
 		return err
 	}
 
-	// Invalidate cursor
-	c.State = CursorInvalid
+	c.CurrentHeader, err = ParsePageHeader(pageData, c.CurrentPage)
+	if err != nil {
+		c.State = CursorInvalid
+		return err
+	}
 
+	c.CurrentIndex--
+	c.IndexStack[c.Depth] = c.CurrentIndex
+
+	if c.CurrentIndex < 0 {
+		c.CurrentCell = nil
+		return nil
+	}
+
+	return c.loadCellAtCurrentIndex(pageData)
+}
+
+// loadCellAtCurrentIndex loads the cell at the current cursor index.
+func (c *BtCursor) loadCellAtCurrentIndex(pageData []byte) error {
+	cellOffset, err := c.CurrentHeader.GetCellPointer(pageData, c.CurrentIndex)
+	if err != nil {
+		c.State = CursorInvalid
+		return err
+	}
+
+	cell, err := ParseCell(c.CurrentHeader.PageType, pageData[cellOffset:], c.Btree.UsableSize)
+	if err != nil {
+		c.State = CursorInvalid
+		return err
+	}
+
+	c.CurrentCell = cell
 	return nil
 }
 

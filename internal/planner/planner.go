@@ -10,6 +10,7 @@ type Planner struct {
 	CostModel         *CostModel
 	SubqueryOptimizer *SubqueryOptimizer
 	Statistics        *Statistics
+	CTEContext        *CTEContext // Common Table Expression context
 }
 
 // NewPlanner creates a new query planner.
@@ -42,22 +43,42 @@ func (p *Planner) GetStatistics() *Statistics {
 	return p.Statistics
 }
 
+// SetCTEContext sets the CTE context for the planner.
+func (p *Planner) SetCTEContext(ctx *CTEContext) {
+	p.CTEContext = ctx
+}
+
+// GetCTEContext returns the planner's CTE context.
+func (p *Planner) GetCTEContext() *CTEContext {
+	return p.CTEContext
+}
+
 // PlanQuery generates an execution plan for a query.
 func (p *Planner) PlanQuery(tables []*TableInfo, whereClause *WhereClause) (*WhereInfo, error) {
 	if len(tables) == 0 {
 		return nil, fmt.Errorf("no tables in query")
 	}
 
+	// Phase 0: Expand CTEs if present
+	expandedTables := tables
+	if p.CTEContext != nil {
+		var err error
+		expandedTables, err = p.CTEContext.RewriteQueryWithCTEs(tables)
+		if err != nil {
+			return nil, fmt.Errorf("CTE expansion failed: %w", err)
+		}
+	}
+
 	// Apply statistics to tables before planning
 	if p.Statistics != nil {
-		for _, table := range tables {
+		for _, table := range expandedTables {
 			ApplyStatisticsToTable(table, p.Statistics)
 		}
 	}
 
 	info := &WhereInfo{
 		Clause:   whereClause,
-		Tables:   tables,
+		Tables:   expandedTables,
 		AllLoops: make([]*WhereLoop, 0),
 	}
 
@@ -74,7 +95,7 @@ func (p *Planner) PlanQuery(tables []*TableInfo, whereClause *WhereClause) (*Whe
 	}
 
 	// Phase 2: Generate all possible WhereLoop objects for each table
-	for cursor, table := range tables {
+	for cursor, table := range expandedTables {
 		loops := p.generateLoops(table, cursor, whereClause)
 		info.AllLoops = append(info.AllLoops, loops...)
 	}
@@ -643,53 +664,67 @@ func (p *Planner) detectSubquery(expr Expr) *SubqueryInfo {
 // PlanQueryWithSubqueries plans a query that may contain subqueries.
 // This is the main entry point for queries with FROM subqueries or complex WHERE clauses.
 func (p *Planner) PlanQueryWithSubqueries(tables []*TableInfo, fromSubqueries []Expr, whereClause *WhereClause) (*WhereInfo, error) {
-	// First, optimize FROM subqueries
 	optimizedTables := make([]*TableInfo, 0, len(tables)+len(fromSubqueries))
 	optimizedTables = append(optimizedTables, tables...)
 
 	for _, subquery := range fromSubqueries {
-		// Analyze FROM subquery
-		subqueryInfo, err := p.SubqueryOptimizer.AnalyzeSubquery(subquery, tables)
+		table, err := p.optimizeFromSubquery(subquery, tables, len(optimizedTables))
 		if err != nil {
-			return nil, fmt.Errorf("failed to analyze FROM subquery: %w", err)
+			return nil, err
 		}
-
-		// Determine optimization strategy
-		if subqueryInfo.CanFlatten {
-			// Flatten the subquery - add its tables to the main query
-			// In a full implementation, would extract tables from subquery
-			// For now, we'll create a placeholder table
-			subqueryTable := &TableInfo{
-				Name:      subqueryInfo.MaterializedTable,
-				Alias:     fmt.Sprintf("subq_%d", len(optimizedTables)),
-				Cursor:    len(optimizedTables),
-				RowCount:  subqueryInfo.EstimatedRows.ToInt(),
-				RowLogEst: subqueryInfo.EstimatedRows,
-				Columns:   make([]ColumnInfo, 0),
-				Indexes:   make([]*IndexInfo, 0),
-			}
-			optimizedTables = append(optimizedTables, subqueryTable)
-		} else if subqueryInfo.CanMaterialize {
-			// Materialize the subquery
-			materialized, err := p.SubqueryOptimizer.MaterializeSubquery(subqueryInfo)
-			if err != nil {
-				return nil, fmt.Errorf("failed to materialize subquery: %w", err)
-			}
-
-			// Add materialized table to plan
-			subqueryTable := &TableInfo{
-				Name:      materialized.MaterializedTable,
-				Alias:     materialized.MaterializedTable,
-				Cursor:    len(optimizedTables),
-				RowCount:  materialized.EstimatedRows.ToInt(),
-				RowLogEst: materialized.EstimatedRows,
-				Columns:   make([]ColumnInfo, 0),
-				Indexes:   make([]*IndexInfo, 0),
-			}
-			optimizedTables = append(optimizedTables, subqueryTable)
+		if table != nil {
+			optimizedTables = append(optimizedTables, table)
 		}
 	}
 
-	// Now plan the query with optimized tables
 	return p.PlanQuery(optimizedTables, whereClause)
+}
+
+// optimizeFromSubquery optimizes a single FROM subquery.
+func (p *Planner) optimizeFromSubquery(subquery Expr, tables []*TableInfo, cursor int) (*TableInfo, error) {
+	subqueryInfo, err := p.SubqueryOptimizer.AnalyzeSubquery(subquery, tables)
+	if err != nil {
+		return nil, fmt.Errorf("failed to analyze FROM subquery: %w", err)
+	}
+
+	if subqueryInfo.CanFlatten {
+		return p.createFlattenedSubqueryTable(subqueryInfo, cursor), nil
+	}
+
+	if subqueryInfo.CanMaterialize {
+		return p.createMaterializedSubqueryTable(subqueryInfo, cursor)
+	}
+
+	return nil, nil
+}
+
+// createFlattenedSubqueryTable creates a TableInfo for a flattened subquery.
+func (p *Planner) createFlattenedSubqueryTable(info *SubqueryInfo, cursor int) *TableInfo {
+	return &TableInfo{
+		Name:      info.MaterializedTable,
+		Alias:     fmt.Sprintf("subq_%d", cursor),
+		Cursor:    cursor,
+		RowCount:  info.EstimatedRows.ToInt(),
+		RowLogEst: info.EstimatedRows,
+		Columns:   make([]ColumnInfo, 0),
+		Indexes:   make([]*IndexInfo, 0),
+	}
+}
+
+// createMaterializedSubqueryTable creates a TableInfo for a materialized subquery.
+func (p *Planner) createMaterializedSubqueryTable(info *SubqueryInfo, cursor int) (*TableInfo, error) {
+	materialized, err := p.SubqueryOptimizer.MaterializeSubquery(info)
+	if err != nil {
+		return nil, fmt.Errorf("failed to materialize subquery: %w", err)
+	}
+
+	return &TableInfo{
+		Name:      materialized.MaterializedTable,
+		Alias:     materialized.MaterializedTable,
+		Cursor:    cursor,
+		RowCount:  materialized.EstimatedRows.ToInt(),
+		RowLogEst: materialized.EstimatedRows,
+		Columns:   make([]ColumnInfo, 0),
+		Indexes:   make([]*IndexInfo, 0),
+	}, nil
 }

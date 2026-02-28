@@ -69,14 +69,26 @@ func (s *Schema) processMasterIndexRow(row MasterRow) error {
 	return nil
 }
 
+// processMasterViewRow parses and registers a single "view" master row.
+func (s *Schema) processMasterViewRow(row MasterRow) error {
+	view, err := s.parseViewSQL(row)
+	if err != nil {
+		return fmt.Errorf("failed to parse view %s: %w", row.Name, err)
+	}
+	s.Views[view.Name] = view
+	return nil
+}
+
 // processMasterRow dispatches a single sqlite_master row to the appropriate
-// handler based on its type.  Unknown types (view, trigger, …) are ignored.
+// handler based on its type.  Unknown types (trigger, …) are ignored.
 func (s *Schema) processMasterRow(row MasterRow) error {
 	switch row.Type {
 	case "table":
 		return s.processMasterTableRow(row)
 	case "index":
 		return s.processMasterIndexRow(row)
+	case "view":
+		return s.processMasterViewRow(row)
 	default:
 		return nil
 	}
@@ -146,6 +158,17 @@ func (s *Schema) SaveToMaster(bt *btree.Btree) error {
 			TblName:  index.Table,
 			RootPage: index.RootPage,
 			SQL:      index.SQL,
+		})
+	}
+
+	// Add views
+	for _, view := range s.Views {
+		rows = append(rows, MasterRow{
+			Type:     "view",
+			Name:     view.Name,
+			TblName:  view.Name,
+			RootPage: 0, // Views don't have a root page
+			SQL:      view.SQL,
 		})
 	}
 

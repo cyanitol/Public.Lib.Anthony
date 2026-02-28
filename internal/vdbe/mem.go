@@ -521,13 +521,67 @@ func (m *Mem) Compare(other *Mem) int {
 // CompareWithCollation compares two memory cells using the specified collation.
 // The collation is only used for string comparisons.
 // If collation is empty, BINARY collation is used.
+//
+// This follows SQLite's type affinity comparison rules:
+// 1. NULL is less than everything else
+// 2. If both are numeric (INT or REAL), compare numerically
+// 3. If one is numeric and one is text, try to convert text to numeric:
+//    - If successful, compare numerically
+//    - If unsuccessful, numeric < text (return -1 or 1)
+// 4. If both are text, compare using collation
+// 5. If one is text and one is blob, text < blob
 func (m *Mem) CompareWithCollation(other *Mem, collName string) int {
+	// Handle NULL comparisons
 	if result, handled := compareNulls(m, other); handled {
 		return result
 	}
-	if m.IsNumeric() && other.IsNumeric() {
+
+	mIsNumeric := m.IsNumeric()
+	otherIsNumeric := other.IsNumeric()
+	mIsText := (m.flags & MemStr) != 0
+	otherIsText := (other.flags & MemStr) != 0
+
+	// Both numeric: numeric comparison
+	if mIsNumeric && otherIsNumeric {
 		return compareNumeric(m, other)
 	}
+
+	// One numeric, one text: try to convert text to numeric
+	if mIsNumeric && otherIsText {
+		// Try to parse the text value as a number
+		if val, err := strconv.ParseFloat(string(other.z), 64); err == nil {
+			// Text can be interpreted as a number, compare numerically
+			mVal := m.RealValue()
+			if mVal < val {
+				return -1
+			}
+			if mVal > val {
+				return 1
+			}
+			return 0
+		}
+		// Text cannot be numeric, numeric < text
+		return -1
+	}
+
+	if otherIsNumeric && mIsText {
+		// Try to parse the text value as a number
+		if val, err := strconv.ParseFloat(string(m.z), 64); err == nil {
+			// Text can be interpreted as a number, compare numerically
+			otherVal := other.RealValue()
+			if val < otherVal {
+				return -1
+			}
+			if val > otherVal {
+				return 1
+			}
+			return 0
+		}
+		// Text cannot be numeric, numeric < text
+		return 1
+	}
+
+	// Both text or mixed text/blob: string comparison
 	return compareStringsWithCollation(m, other, collName)
 }
 

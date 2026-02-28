@@ -251,13 +251,28 @@ func (p *Pager) WaitForReadersToFinish() error {
 }
 
 // Checkpoint performs a WAL checkpoint operation.
-// This is a placeholder for future WAL mode support.
+// In WAL mode, this copies all WAL frames back to the database.
+// In other journal modes, this returns an error.
 func (p *Pager) Checkpoint() error {
+	return p.CheckpointMode(CheckpointPassive)
+}
+
+// CheckpointMode performs a WAL checkpoint with the specified mode.
+func (p *Pager) CheckpointMode(mode CheckpointMode) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// WAL mode not yet implemented
-	return errors.New("checkpoint not supported in delete journal mode")
+	if p.journalMode != JournalModeWAL {
+		return errors.New("checkpoint only supported in WAL mode")
+	}
+
+	if p.wal == nil {
+		return errors.New("WAL not initialized")
+	}
+
+	// Perform checkpoint using WAL's checkpoint implementation
+	_, _, err := p.wal.CheckpointWithMode(mode)
+	return err
 }
 
 // SetJournalMode sets the journal mode for the pager.
@@ -265,20 +280,107 @@ func (p *Pager) SetJournalMode(mode int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Can't change journal mode during a transaction
 	if p.state != PagerStateOpen {
 		return errors.New("cannot change journal mode during transaction")
 	}
 
-	// Validate journal mode
-	switch mode {
-	case JournalModeDelete, JournalModePersist, JournalModeOff,
-		JournalModeTruncate, JournalModeMemory:
-		p.journalMode = mode
-		return nil
-	default:
+	if !isValidJournalMode(mode) {
 		return errors.New("invalid journal mode")
 	}
+
+	if err := p.handleJournalModeTransition(mode); err != nil {
+		return err
+	}
+
+	p.journalMode = mode
+	return nil
+}
+
+// isValidJournalMode checks if a journal mode is valid.
+func isValidJournalMode(mode int) bool {
+	switch mode {
+	case JournalModeDelete, JournalModePersist, JournalModeOff,
+		JournalModeTruncate, JournalModeMemory, JournalModeWAL:
+		return true
+	default:
+		return false
+	}
+}
+
+// handleJournalModeTransition handles transitions between journal modes.
+func (p *Pager) handleJournalModeTransition(newMode int) error {
+	// Handle transition to WAL mode
+	if newMode == JournalModeWAL && p.journalMode != JournalModeWAL {
+		return p.enableWALMode()
+	}
+
+	// Handle transition from WAL mode
+	if p.journalMode == JournalModeWAL && newMode != JournalModeWAL {
+		return p.disableWALMode()
+	}
+
+	return nil
+}
+
+// enableWALMode enables WAL mode for the pager.
+func (p *Pager) enableWALMode() error {
+	if p.readOnly {
+		return errors.New("cannot enable WAL mode on read-only database")
+	}
+
+	// Create WAL instance
+	p.wal = NewWAL(p.filename, p.pageSize)
+	if err := p.wal.Open(); err != nil {
+		p.wal = nil
+		return err
+	}
+
+	// Create WAL index
+	walIndex, err := NewWALIndex(p.filename)
+	if err != nil {
+		p.wal.Close()
+		p.wal = nil
+		return err
+	}
+	p.walIndex = walIndex
+
+	// Set WAL index page size
+	if err := p.walIndex.SetPageCount(uint32(p.dbSize)); err != nil {
+		p.walIndex.Close()
+		p.wal.Close()
+		p.walIndex = nil
+		p.wal = nil
+		return err
+	}
+
+	return nil
+}
+
+// disableWALMode disables WAL mode and checkpoints any remaining frames.
+func (p *Pager) disableWALMode() error {
+	if p.wal == nil {
+		return nil
+	}
+
+	// Checkpoint all remaining frames
+	if err := p.wal.Checkpoint(); err != nil {
+		return err
+	}
+
+	// Close and delete WAL files
+	if err := p.wal.Delete(); err != nil {
+		return err
+	}
+	p.wal = nil
+
+	if p.walIndex != nil {
+		if err := p.walIndex.Delete(); err != nil {
+			return err
+		}
+		p.walIndex = nil
+	}
+
+	return nil
 }
 
 // GetJournalMode returns the current journal mode.

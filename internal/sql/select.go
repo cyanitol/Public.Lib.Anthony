@@ -341,6 +341,22 @@ func (c *SelectCompiler) disposeResult(dest *SelectDest, nResultCol int, regResu
 		vdbe.AddOp4Int(OP_IdxInsert, dest.SDParm, r1, regResult, nResultCol)
 		c.parse.ReleaseReg(r1)
 
+	case SRT_Union:
+		// Insert into union table (used for UNION/INTERSECT/EXCEPT)
+		// This stores rows as keys in an ephemeral table for deduplication
+		r1 := c.parse.AllocReg()
+		vdbe.AddOp3(OP_MakeRecord, regResult, nResultCol, r1)
+		vdbe.AddOp4Int(OP_IdxInsert, dest.SDParm, r1, regResult, nResultCol)
+		c.parse.ReleaseReg(r1)
+
+	case SRT_Except:
+		// Remove from union table (used for EXCEPT right side)
+		// This deletes matching keys from the ephemeral table
+		r1 := c.parse.AllocReg()
+		vdbe.AddOp3(OP_MakeRecord, regResult, nResultCol, r1)
+		vdbe.AddOp4Int(OP_IdxDelete, dest.SDParm, r1, regResult, nResultCol)
+		c.parse.ReleaseReg(r1)
+
 	case SRT_Table, SRT_EphemTab:
 		r1 := c.parse.AllocReg()
 		r2 := c.parse.AllocReg()
@@ -508,15 +524,190 @@ func (c *SelectCompiler) compileUnion(sel *Select, dest *SelectDest) error {
 }
 
 // compileIntersect compiles INTERSECT.
+// INTERSECT returns only rows that appear in BOTH the left and right queries.
+// Algorithm:
+// 1. Execute left query and store results in ephemeral table A
+// 2. Execute right query and for each row:
+//    - Check if it exists in table A
+//    - If yes, insert into result table B
+// 3. Read from result table B and output
 func (c *SelectCompiler) compileIntersect(sel *Select, dest *SelectDest) error {
-	// Similar to UNION but with different logic
-	return fmt.Errorf("INTERSECT not yet implemented")
+	vdbe := c.parse.GetVdbe()
+	nCol := sel.EList.Len()
+
+	// Create ephemeral table for left query results
+	leftTab := c.parse.AllocCursor()
+	vdbe.AddOp2(OP_OpenEphemeral, leftTab, nCol)
+
+	// Create ephemeral table for final results
+	resultTab := c.parse.AllocCursor()
+	vdbe.AddOp2(OP_OpenEphemeral, resultTab, nCol)
+
+	// Compile left side into leftTab
+	leftDest := &SelectDest{
+		Dest:   SRT_Union,
+		SDParm: leftTab,
+	}
+	if err := c.CompileSelect(sel.Prior, leftDest); err != nil {
+		return err
+	}
+
+	// For right side, we need to check each row against leftTab
+	// and only insert into resultTab if it exists in leftTab
+	// We compile the right query and for each row:
+	// 1. Check if row exists in leftTab (using OP_Found)
+	// 2. If found, insert into resultTab
+
+	// We need to handle this differently - compile right side with custom logic
+	// For now, use a temporary approach: compile to a temp table, then intersect
+
+	rightTab := c.parse.AllocCursor()
+	vdbe.AddOp2(OP_OpenEphemeral, rightTab, nCol)
+
+	rightDest := &SelectDest{
+		Dest:   SRT_Union,
+		SDParm: rightTab,
+	}
+	if err := c.compileSimpleSelect(sel, rightDest); err != nil {
+		return err
+	}
+
+	// Now iterate through rightTab and check each row against leftTab
+	addrEnd := vdbe.MakeLabel()
+	vdbe.AddOp2(OP_Rewind, rightTab, addrEnd)
+
+	addrLoop := vdbe.CurrentAddr()
+	regResult := c.parse.AllocRegs(nCol)
+
+	// Extract row from rightTab
+	for i := 0; i < nCol; i++ {
+		vdbe.AddOp3(OP_Column, rightTab, i, regResult+i)
+	}
+
+	// Make record for lookup
+	regRecord := c.parse.AllocReg()
+	vdbe.AddOp3(OP_MakeRecord, regResult, nCol, regRecord)
+
+	// Check if this row exists in leftTab
+	addrNotFound := vdbe.MakeLabel()
+	vdbe.AddOp4Int(OP_NotFound, leftTab, addrNotFound, regRecord, 0)
+
+	// Row exists in both - insert into resultTab
+	vdbe.AddOp4Int(OP_IdxInsert, resultTab, regRecord, regResult, nCol)
+
+	// Continue to next row
+	vdbe.ResolveLabel(addrNotFound)
+	vdbe.AddOp2(OP_Next, rightTab, addrLoop)
+
+	vdbe.ResolveLabel(addrEnd)
+
+	// Close temporary tables
+	vdbe.AddOp1(OP_Close, leftTab)
+	vdbe.AddOp1(OP_Close, rightTab)
+
+	// Now output results from resultTab
+	addrOutputEnd := vdbe.MakeLabel()
+	vdbe.AddOp2(OP_Rewind, resultTab, addrOutputEnd)
+
+	addrOutputLoop := vdbe.CurrentAddr()
+	regOutput := c.parse.AllocRegs(nCol)
+	for i := 0; i < nCol; i++ {
+		vdbe.AddOp3(OP_Column, resultTab, i, regOutput+i)
+	}
+
+	// Deliver result based on destination
+	if dest.Dest == SRT_Output {
+		vdbe.AddOp2(OP_ResultRow, regOutput, nCol)
+	} else {
+		// For other destinations, use disposeResult
+		tempDest := &SelectDest{
+			Dest:  dest.Dest,
+			SDParm: dest.SDParm,
+			SDParm2: dest.SDParm2,
+			Sdst:  regOutput,
+			NSdst: nCol,
+		}
+		if err := c.disposeResult(tempDest, nCol, regOutput); err != nil {
+			return err
+		}
+	}
+
+	vdbe.AddOp2(OP_Next, resultTab, addrOutputLoop)
+
+	vdbe.ResolveLabel(addrOutputEnd)
+	vdbe.AddOp1(OP_Close, resultTab)
+
+	return nil
 }
 
 // compileExcept compiles EXCEPT.
+// EXCEPT returns rows from the left query that do NOT appear in the right query.
+// Algorithm:
+// 1. Execute left query and store results in ephemeral table A
+// 2. Execute right query and for each row:
+//    - Delete matching row from table A (using SRT_Except)
+// 3. Read remaining rows from table A and output
 func (c *SelectCompiler) compileExcept(sel *Select, dest *SelectDest) error {
-	// Similar to UNION but with different logic
-	return fmt.Errorf("EXCEPT not yet implemented")
+	vdbe := c.parse.GetVdbe()
+	nCol := sel.EList.Len()
+
+	// Create ephemeral table for left query results
+	exceptTab := c.parse.AllocCursor()
+	vdbe.AddOp2(OP_OpenEphemeral, exceptTab, nCol)
+
+	// Compile left side into exceptTab
+	leftDest := &SelectDest{
+		Dest:   SRT_Union,
+		SDParm: exceptTab,
+	}
+	if err := c.CompileSelect(sel.Prior, leftDest); err != nil {
+		return err
+	}
+
+	// Compile right side with SRT_Except to remove matching rows
+	rightDest := &SelectDest{
+		Dest:   SRT_Except,
+		SDParm: exceptTab,
+	}
+	if err := c.compileSimpleSelect(sel, rightDest); err != nil {
+		return err
+	}
+
+	// Now output remaining rows from exceptTab
+	addrEnd := vdbe.MakeLabel()
+	vdbe.AddOp2(OP_Rewind, exceptTab, addrEnd)
+
+	addrLoop := vdbe.CurrentAddr()
+	regResult := c.parse.AllocRegs(nCol)
+
+	// Extract row from exceptTab
+	for i := 0; i < nCol; i++ {
+		vdbe.AddOp3(OP_Column, exceptTab, i, regResult+i)
+	}
+
+	// Deliver result based on destination
+	if dest.Dest == SRT_Output {
+		vdbe.AddOp2(OP_ResultRow, regResult, nCol)
+	} else {
+		// For other destinations, use disposeResult
+		tempDest := &SelectDest{
+			Dest:    dest.Dest,
+			SDParm:  dest.SDParm,
+			SDParm2: dest.SDParm2,
+			Sdst:    regResult,
+			NSdst:   nCol,
+		}
+		if err := c.disposeResult(tempDest, nCol, regResult); err != nil {
+			return err
+		}
+	}
+
+	vdbe.AddOp2(OP_Next, exceptTab, addrLoop)
+
+	vdbe.ResolveLabel(addrEnd)
+	vdbe.AddOp1(OP_Close, exceptTab)
+
+	return nil
 }
 
 // generateSortTailWithLimit generates code to extract sorted results with LIMIT applied.

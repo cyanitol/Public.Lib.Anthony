@@ -812,22 +812,41 @@ func (v *VDBE) execOpenEphemeral(instr *Instruction) error {
 	// P2 = number of columns
 	// P4 = key info (optional, for index tables)
 
-	// For now, we create an in-memory btree for ephemeral tables
-	// In a full implementation, this would create a temporary btree structure
-
 	// Allocate cursors if needed
 	if err := v.AllocCursors(instr.P1 + 1); err != nil {
 		return err
 	}
 
-	// Create an ephemeral cursor (in-memory temporary table)
-	// For simplicity, we'll use a pseudo-cursor type to represent ephemeral tables
+	// Create an in-memory btree for the ephemeral table
+	// We need to import btree package types, but we store as interface{} to avoid cycles
+	if v.Ctx == nil || v.Ctx.Btree == nil {
+		return fmt.Errorf("cannot create ephemeral table: no btree context")
+	}
+
+	// Type assert to get the actual Btree
+	bt, ok := v.Ctx.Btree.(*btree.Btree)
+	if !ok {
+		return fmt.Errorf("invalid btree type")
+	}
+
+	// Create a new table in the btree for this ephemeral cursor
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		return fmt.Errorf("failed to create ephemeral table: %w", err)
+	}
+
+	// Open a cursor on this table
+	btCursor := btree.NewCursor(bt, rootPage)
+
+	// Create the cursor
 	cursor := &Cursor{
-		CurType:     CursorPseudo,
-		IsTable:     true,
-		Writable:    true,
-		CachedCols:  make([][]byte, 0),
-		CacheStatus: 0,
+		CurType:      CursorBTree,
+		IsTable:      true,
+		Writable:     true,
+		BtreeCursor:  btCursor,
+		RootPage:     rootPage,
+		CachedCols:   make([][]byte, 0),
+		CacheStatus:  0,
 	}
 
 	v.Cursors[instr.P1] = cursor
@@ -903,13 +922,32 @@ func (v *VDBE) execSeekLT(instr *Instruction) error {
 		return v.seekNotFound(cursor, instr.P2)
 	}
 
-	// Move to first entry
-	if err = btCursor.MoveToFirst(); err != nil {
+	targetRowid := keyReg.IntValue()
+
+	// Find and position to the last valid entry
+	lastValidRowid, found, err := findLastRowidLessThan(btCursor, targetRowid)
+	if err != nil || !found {
 		return v.seekNotFound(cursor, instr.P2)
 	}
 
+	// Reposition to the last valid entry
+	if err := repositionToRowid(btCursor, lastValidRowid); err != nil {
+		return v.seekNotFound(cursor, instr.P2)
+	}
+
+	cursor.EOF = false
+	v.IncrCacheCtr()
+	return nil
+}
+
+// findLastRowidLessThan scans the cursor to find the last rowid less than target.
+func findLastRowidLessThan(btCursor *btree.BtCursor, targetRowid int64) (int64, bool, error) {
+	// Move to first entry
+	if err := btCursor.MoveToFirst(); err != nil {
+		return 0, false, err
+	}
+
 	// Linear scan to find last entry < key
-	targetRowid := keyReg.IntValue()
 	found := false
 	lastValidRowid := int64(0)
 
@@ -922,28 +960,26 @@ func (v *VDBE) execSeekLT(instr *Instruction) error {
 			// Gone too far
 			break
 		}
-		if err = btCursor.Next(); err != nil {
+		if err := btCursor.Next(); err != nil {
 			// Reached end
 			break
 		}
 	}
 
-	if !found {
-		return v.seekNotFound(cursor, instr.P2)
+	return lastValidRowid, found, nil
+}
+
+// repositionToRowid moves the cursor to first, then scans to the target rowid.
+func repositionToRowid(btCursor *btree.BtCursor, targetRowid int64) error {
+	if err := btCursor.MoveToFirst(); err != nil {
+		return err
 	}
 
-	// Reposition to the last valid entry
-	if err = btCursor.MoveToFirst(); err != nil {
-		return v.seekNotFound(cursor, instr.P2)
+	found, err := seekLinearScan(btCursor, targetRowid)
+	if err != nil || !found {
+		return fmt.Errorf("failed to reposition to rowid %d", targetRowid)
 	}
 
-	foundAgain, err := seekLinearScan(btCursor, lastValidRowid)
-	if err != nil || !foundAgain {
-		return v.seekNotFound(cursor, instr.P2)
-	}
-
-	cursor.EOF = false
-	v.IncrCacheCtr()
 	return nil
 }
 
@@ -1656,7 +1692,18 @@ func (v *VDBE) getInsertPayload(reg int) ([]byte, error) {
 // getInsertRowid determines the rowid for the insert operation.
 func (v *VDBE) getInsertRowid(p3 int, cursor *Cursor) (int64, error) {
 	if p3 == 0 {
-		return cursor.LastRowid, nil
+		// Auto-generate a new rowid
+		bt, ok := v.Ctx.Btree.(*btree.Btree)
+		if !ok {
+			return 0, fmt.Errorf("invalid btree type for rowid generation")
+		}
+		newRowid, err := bt.NewRowid(cursor.RootPage)
+		if err != nil {
+			// If table is empty, start with 1
+			newRowid = 1
+		}
+		cursor.LastRowid = newRowid
+		return newRowid, nil
 	}
 	rowidMem, err := v.GetMem(p3)
 	if err != nil {
@@ -1728,6 +1775,7 @@ func (v *VDBE) execCompare(instr *Instruction, test func(int) bool) error {
 	// P1 = left operand register
 	// P2 = right operand register
 	// P3 = result register (1 if condition is true, 0 otherwise)
+	// P4 = optional collation name (for string comparisons)
 	left, err := v.GetMem(instr.P1)
 	if err != nil {
 		return err
@@ -1738,7 +1786,14 @@ func (v *VDBE) execCompare(instr *Instruction, test func(int) bool) error {
 		return err
 	}
 
-	cmp := left.Compare(right)
+	// Use collation from P4 if present, otherwise default comparison
+	var cmp int
+	if instr.P4Type == P4Static && instr.P4.Z != "" {
+		cmp = left.CompareWithCollation(right, instr.P4.Z)
+	} else {
+		cmp = left.Compare(right)
+	}
+
 	result := int64(0)
 	if test(cmp) {
 		result = 1
@@ -2147,24 +2202,27 @@ func (v *VDBE) execSorterOpen(instr *Instruction) error {
 		v.Sorters = append(v.Sorters, nil)
 	}
 
-	// Get key columns and desc info from P4.P
+	// Get key columns, desc, and collations info from P4.P
 	var keyCols []int
 	var desc []bool
+	var collations []string
 	if instr.P4.P != nil {
 		if keyInfo, ok := instr.P4.P.(*SorterKeyInfo); ok {
 			keyCols = keyInfo.KeyCols
 			desc = keyInfo.Desc
+			collations = keyInfo.Collations
 		}
 	}
 
-	v.Sorters[sorterNum] = NewSorter(keyCols, desc, numCols)
+	v.Sorters[sorterNum] = NewSorter(keyCols, desc, collations, numCols)
 	return nil
 }
 
 // SorterKeyInfo holds key column information for sorting.
 type SorterKeyInfo struct {
-	KeyCols []int  // Column indices for sorting
-	Desc    []bool // True for descending order
+	KeyCols    []int    // Column indices for sorting
+	Desc       []bool   // True for descending order
+	Collations []string // Collation name for each key column (empty string for default)
 }
 
 // execSorterInsert inserts a row into the sorter.
@@ -2302,73 +2360,82 @@ func (v *VDBE) execCast(instr *Instruction) error {
 	switch affinity {
 	case 0: // NONE/BLOB affinity - keep as-is
 		return nil
-
 	case 1: // BLOB affinity - convert to blob
-		if mem.IsBlob() {
-			return nil
-		}
-		// Convert to blob by getting string representation and treating as bytes
-		if mem.IsString() {
-			return mem.SetBlob(mem.BlobValue())
-		}
-		// For numeric types, stringify first then convert to blob
-		if err := mem.Stringify(); err != nil {
-			return err
-		}
-		return mem.SetBlob(mem.BlobValue())
-
+		return castToBlob(mem)
 	case 2: // TEXT affinity - convert to text
 		return mem.Stringify()
-
 	case 3: // INTEGER affinity - convert to integer, NULL if not numeric
-		if mem.IsInt() {
-			return nil
-		}
-		// Try to convert to integer
-		if mem.IsReal() {
-			mem.SetInt(int64(mem.RealValue()))
-			return nil
-		}
-		if mem.IsString() || mem.IsBlob() {
-			// Try to parse as integer
-			err := mem.Integerify()
-			if err != nil {
-				// Not a valid integer - set to NULL
-				mem.SetNull()
-			}
-			return nil
-		}
-		// Can't convert to integer - set to NULL
-		mem.SetNull()
-		return nil
-
+		return castToInteger(mem)
 	case 4: // REAL affinity - convert to real
 		return mem.Realify()
-
 	case 5: // NUMERIC affinity - try int, then float, keep text if neither works
-		if mem.IsNumeric() {
-			return nil
-		}
-		if mem.IsString() || mem.IsBlob() {
-			// Try integer first
-			str := mem.StrValue()
-			if val, err := strconv.ParseInt(str, 10, 64); err == nil {
-				mem.SetInt(val)
-				return nil
-			}
-			// Try real
-			if val, err := strconv.ParseFloat(str, 64); err == nil {
-				mem.SetReal(val)
-				return nil
-			}
-			// Keep as text if neither works
-			return nil
-		}
-		return nil
-
+		return castToNumeric(mem)
 	default:
 		return fmt.Errorf("unknown affinity code: %d", affinity)
 	}
+}
+
+// castToBlob converts a memory value to blob affinity.
+func castToBlob(mem *Mem) error {
+	if mem.IsBlob() {
+		return nil
+	}
+	// Convert to blob by getting string representation and treating as bytes
+	if mem.IsString() {
+		return mem.SetBlob(mem.BlobValue())
+	}
+	// For numeric types, stringify first then convert to blob
+	if err := mem.Stringify(); err != nil {
+		return err
+	}
+	return mem.SetBlob(mem.BlobValue())
+}
+
+// castToInteger converts a memory value to integer affinity, NULL if not numeric.
+func castToInteger(mem *Mem) error {
+	if mem.IsInt() {
+		return nil
+	}
+	// Try to convert to integer
+	if mem.IsReal() {
+		mem.SetInt(int64(mem.RealValue()))
+		return nil
+	}
+	if mem.IsString() || mem.IsBlob() {
+		// Try to parse as integer
+		err := mem.Integerify()
+		if err != nil {
+			// Not a valid integer - set to NULL
+			mem.SetNull()
+		}
+		return nil
+	}
+	// Can't convert to integer - set to NULL
+	mem.SetNull()
+	return nil
+}
+
+// castToNumeric tries int, then float, keeps text if neither works.
+func castToNumeric(mem *Mem) error {
+	if mem.IsNumeric() {
+		return nil
+	}
+	if mem.IsString() || mem.IsBlob() {
+		// Try integer first
+		str := mem.StrValue()
+		if val, err := strconv.ParseInt(str, 10, 64); err == nil {
+			mem.SetInt(val)
+			return nil
+		}
+		// Try real
+		if val, err := strconv.ParseFloat(str, 64); err == nil {
+			mem.SetReal(val)
+			return nil
+		}
+		// Keep as text if neither works
+		return nil
+	}
+	return nil
 }
 
 // execToText forces the value in register P1 to text type.
@@ -2740,27 +2807,9 @@ func (v *VDBE) execAnd(instr *Instruction) error {
 		return err
 	}
 
-	// Evaluate left operand as boolean
-	leftIsNull := left.IsNull()
-	var leftBool bool
-	if !leftIsNull {
-		if left.IsInt() {
-			leftBool = left.IntValue() != 0
-		} else {
-			leftBool = left.RealValue() != 0.0
-		}
-	}
-
-	// Evaluate right operand as boolean
-	rightIsNull := right.IsNull()
-	var rightBool bool
-	if !rightIsNull {
-		if right.IsInt() {
-			rightBool = right.IntValue() != 0
-		} else {
-			rightBool = right.RealValue() != 0.0
-		}
-	}
+	// Evaluate operands as booleans
+	leftIsNull, leftBool := evalMemAsBool(left)
+	rightIsNull, rightBool := evalMemAsBool(right)
 
 	// Apply SQLite logical AND semantics
 	if !leftIsNull && !leftBool {
@@ -2810,27 +2859,9 @@ func (v *VDBE) execOr(instr *Instruction) error {
 		return err
 	}
 
-	// Evaluate left operand as boolean
-	leftIsNull := left.IsNull()
-	var leftBool bool
-	if !leftIsNull {
-		if left.IsInt() {
-			leftBool = left.IntValue() != 0
-		} else {
-			leftBool = left.RealValue() != 0.0
-		}
-	}
-
-	// Evaluate right operand as boolean
-	rightIsNull := right.IsNull()
-	var rightBool bool
-	if !rightIsNull {
-		if right.IsInt() {
-			rightBool = right.IntValue() != 0
-		} else {
-			rightBool = right.RealValue() != 0.0
-		}
-	}
+	// Evaluate operands as booleans
+	leftIsNull, leftBool := evalMemAsBool(left)
+	rightIsNull, rightBool := evalMemAsBool(right)
 
 	// Apply SQLite logical OR semantics
 	if !leftIsNull && leftBool {
@@ -2854,6 +2885,18 @@ func (v *VDBE) execOr(instr *Instruction) error {
 	// Both are FALSE
 	result.SetInt(0)
 	return nil
+}
+
+// evalMemAsBool evaluates a memory value as a boolean.
+// Returns (isNull, boolValue).
+func evalMemAsBool(mem *Mem) (bool, bool) {
+	if mem.IsNull() {
+		return true, false
+	}
+	if mem.IsInt() {
+		return false, mem.IntValue() != 0
+	}
+	return false, mem.RealValue() != 0.0
 }
 
 func (v *VDBE) execNot(instr *Instruction) error {
@@ -2903,20 +2946,10 @@ func (v *VDBE) execNot(instr *Instruction) error {
 // P2 = register containing the key
 // P3 = register containing the rowid (data)
 func (v *VDBE) execIdxInsert(instr *Instruction) error {
-	// Get the index cursor
-	cursor, err := v.GetCursor(instr.P1)
+	// Get and verify the writable index cursor
+	_, idxCursor, err := v.getWritableIndexCursor(instr.P1)
 	if err != nil {
 		return err
-	}
-
-	// Verify this is an index cursor
-	if cursor.IsTable {
-		return fmt.Errorf("cursor %d is not an index cursor", instr.P1)
-	}
-
-	// Verify cursor is writable
-	if !cursor.Writable {
-		return fmt.Errorf("cursor %d is not writable (opened with OpenRead instead of OpenWrite)", instr.P1)
 	}
 
 	// Get the key from register P2
@@ -2932,25 +2965,10 @@ func (v *VDBE) execIdxInsert(instr *Instruction) error {
 	}
 
 	// Extract key as blob (index keys are stored as binary data)
-	var key []byte
-	if keyMem.IsBlob() {
-		key = keyMem.BlobValue()
-	} else if keyMem.IsString() {
-		key = []byte(keyMem.StrValue())
-	} else {
-		// Convert other types to blob representation
-		keyMem.Stringify()
-		key = []byte(keyMem.StrValue())
-	}
+	key := extractKeyAsBlob(keyMem)
 
 	// Extract rowid as integer
 	rowid := rowidMem.IntValue()
-
-	// Get the index cursor (btree.IndexCursor)
-	idxCursor, ok := cursor.BtreeCursor.(*btree.IndexCursor)
-	if !ok || idxCursor == nil {
-		return fmt.Errorf("invalid index cursor for IdxInsert")
-	}
 
 	// Insert the key-rowid pair into the index
 	if err := idxCursor.InsertIndex(key, rowid); err != nil {
@@ -2967,20 +2985,10 @@ func (v *VDBE) execIdxInsert(instr *Instruction) error {
 // P1 = cursor number (index cursor)
 // P2 = register containing the key to delete
 func (v *VDBE) execIdxDelete(instr *Instruction) error {
-	// Get the index cursor
-	cursor, err := v.GetCursor(instr.P1)
+	// Get and verify the index cursor
+	_, idxCursor, err := v.getWritableIndexCursor(instr.P1)
 	if err != nil {
 		return err
-	}
-
-	// Verify this is an index cursor
-	if cursor.IsTable {
-		return fmt.Errorf("cursor %d is not an index cursor", instr.P1)
-	}
-
-	// Verify cursor is writable
-	if !cursor.Writable {
-		return fmt.Errorf("cursor %d is not writable (opened with OpenRead instead of OpenWrite)", instr.P1)
 	}
 
 	// Get the key from register P2
@@ -2990,22 +2998,36 @@ func (v *VDBE) execIdxDelete(instr *Instruction) error {
 	}
 
 	// Extract key as blob
-	var key []byte
-	if keyMem.IsBlob() {
-		key = keyMem.BlobValue()
-	} else if keyMem.IsString() {
-		key = []byte(keyMem.StrValue())
-	} else {
-		keyMem.Stringify()
-		key = []byte(keyMem.StrValue())
+	key := extractKeyAsBlob(keyMem)
+
+	// Seek and delete the index entry
+	if err := seekAndDeleteIndexEntry(idxCursor, key); err != nil {
+		return err
 	}
 
-	// Get the index cursor (btree.IndexCursor)
-	idxCursor, ok := cursor.BtreeCursor.(*btree.IndexCursor)
-	if !ok || idxCursor == nil {
-		return fmt.Errorf("invalid index cursor for IdxDelete")
+	// Invalidate cursor cache
+	v.IncrCacheCtr()
+
+	return nil
+}
+
+// getWritableIndexCursor retrieves and validates a writable index cursor.
+func (v *VDBE) getWritableIndexCursor(cursorNum int) (*Cursor, *btree.IndexCursor, error) {
+	cursor, idxCursor, err := v.getIndexCursor(cursorNum)
+	if err != nil {
+		return nil, nil, err
 	}
 
+	// Verify cursor is writable
+	if !cursor.Writable {
+		return nil, nil, fmt.Errorf("cursor %d is not writable (opened with OpenRead instead of OpenWrite)", cursorNum)
+	}
+
+	return cursor, idxCursor, nil
+}
+
+// seekAndDeleteIndexEntry seeks to a key in an index and deletes it.
+func seekAndDeleteIndexEntry(idxCursor *btree.IndexCursor, key []byte) error {
 	// For index deletion, we need both key and rowid to uniquely identify the entry
 	// In real SQLite, the rowid would be encoded as part of the key or provided separately
 	// For now, we'll seek to the key and delete the current entry
@@ -3027,9 +3049,6 @@ func (v *VDBE) execIdxDelete(instr *Instruction) error {
 	if err := idxCursor.DeleteIndex(key, rowid); err != nil {
 		return fmt.Errorf("index delete failed: %w", err)
 	}
-
-	// Invalidate cursor cache
-	v.IncrCacheCtr()
 
 	return nil
 }
@@ -3110,15 +3129,10 @@ func (v *VDBE) execIdxGE(instr *Instruction) error {
 // execIdxCompare is a helper function for index comparison operations.
 // It compares the key at the current cursor position with a key in a register.
 func (v *VDBE) execIdxCompare(instr *Instruction, test func(int) bool) error {
-	// Get the index cursor
-	cursor, err := v.GetCursor(instr.P1)
+	// Get and verify the index cursor
+	cursor, idxCursor, err := v.getIndexCursor(instr.P1)
 	if err != nil {
 		return err
-	}
-
-	// Verify this is an index cursor
-	if cursor.IsTable {
-		return fmt.Errorf("cursor %d is not an index cursor", instr.P1)
 	}
 
 	// Get the comparison key from register P3
@@ -3128,21 +3142,7 @@ func (v *VDBE) execIdxCompare(instr *Instruction, test func(int) bool) error {
 	}
 
 	// Extract comparison key as blob
-	var compKey []byte
-	if keyMem.IsBlob() {
-		compKey = keyMem.BlobValue()
-	} else if keyMem.IsString() {
-		compKey = []byte(keyMem.StrValue())
-	} else {
-		keyMem.Stringify()
-		compKey = []byte(keyMem.StrValue())
-	}
-
-	// Get the index cursor (btree.IndexCursor)
-	idxCursor, ok := cursor.BtreeCursor.(*btree.IndexCursor)
-	if !ok || idxCursor == nil {
-		return fmt.Errorf("invalid index cursor for index comparison")
-	}
+	compKey := extractKeyAsBlob(keyMem)
 
 	// Check if cursor is at a valid position
 	if !idxCursor.IsValid() || cursor.EOF {
@@ -3166,6 +3166,39 @@ func (v *VDBE) execIdxCompare(instr *Instruction, test func(int) bool) error {
 	}
 
 	return nil
+}
+
+// getIndexCursor retrieves and validates an index cursor.
+func (v *VDBE) getIndexCursor(cursorNum int) (*Cursor, *btree.IndexCursor, error) {
+	cursor, err := v.GetCursor(cursorNum)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Verify this is an index cursor
+	if cursor.IsTable {
+		return nil, nil, fmt.Errorf("cursor %d is not an index cursor", cursorNum)
+	}
+
+	// Get the index cursor (btree.IndexCursor)
+	idxCursor, ok := cursor.BtreeCursor.(*btree.IndexCursor)
+	if !ok || idxCursor == nil {
+		return nil, nil, fmt.Errorf("invalid index cursor for index operation")
+	}
+
+	return cursor, idxCursor, nil
+}
+
+// extractKeyAsBlob extracts a memory value as a blob suitable for index operations.
+func extractKeyAsBlob(keyMem *Mem) []byte {
+	if keyMem.IsBlob() {
+		return keyMem.BlobValue()
+	}
+	if keyMem.IsString() {
+		return []byte(keyMem.StrValue())
+	}
+	keyMem.Stringify()
+	return []byte(keyMem.StrValue())
 }
 
 // compareBytes compares two byte slices lexicographically.

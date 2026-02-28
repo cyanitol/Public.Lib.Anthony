@@ -56,7 +56,7 @@ type ForeignKeyConstraint struct {
 // ForeignKeyManager manages foreign key constraints for a database.
 type ForeignKeyManager struct {
 	constraints map[string][]*ForeignKeyConstraint // table name -> constraints
-	enabled     bool                                // PRAGMA foreign_keys setting
+	enabled     bool                               // PRAGMA foreign_keys setting
 	mu          sync.RWMutex
 }
 
@@ -168,6 +168,7 @@ func (m *ForeignKeyManager) ValidateUpdate(
 	newValues map[string]interface{},
 	schemaObj *schema.Schema,
 	rowReader RowReader,
+	rowUpdater RowUpdater,
 ) error {
 	if !m.IsEnabled() {
 		return nil
@@ -216,8 +217,8 @@ func (m *ForeignKeyManager) ValidateUpdate(
 	}
 
 	// 2. Check incoming foreign keys (other tables reference this one)
-	// This is needed to enforce RESTRICT/NO ACTION
-	if err := m.validateIncomingReferences(tableName, oldValues, newValues, schemaObj, rowReader); err != nil {
+	// This is needed to enforce RESTRICT/NO ACTION and perform CASCADE/SET NULL/SET DEFAULT
+	if err := m.validateIncomingReferences(tableName, oldValues, newValues, schemaObj, rowReader, rowUpdater); err != nil {
 		return err
 	}
 
@@ -378,6 +379,7 @@ func (m *ForeignKeyManager) validateIncomingReferences(
 	newValues map[string]interface{},
 	schemaObj *schema.Schema,
 	rowReader RowReader,
+	rowUpdater RowUpdater,
 ) error {
 	// Get the table
 	table, ok := schemaObj.GetTable(tableName)
@@ -420,10 +422,12 @@ func (m *ForeignKeyManager) validateIncomingReferences(
 			continue // Referenced columns unchanged
 		}
 
-		// Extract old key values
+		// Extract old and new key values
 		oldKeyValues := make([]interface{}, len(refCols))
+		newKeyValues := make([]interface{}, len(refCols))
 		for i, col := range refCols {
 			oldKeyValues[i] = oldValues[col]
+			newKeyValues[i] = newValues[col]
 		}
 
 		// Check if any rows reference the old values
@@ -438,24 +442,56 @@ func (m *ForeignKeyManager) validateIncomingReferences(
 
 		// Handle based on ON UPDATE action
 		switch fk.OnUpdate {
-		case FKActionRestrict:
-			return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", fk.Table)
-
-		case FKActionNoAction:
-			// NO ACTION is similar to RESTRICT but checked at the end of statement
-			// For now, treat it the same as RESTRICT
+		case FKActionRestrict, FKActionNoAction:
+			// RESTRICT/NO ACTION: prevent the update if there are referencing rows
 			return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", fk.Table)
 
 		case FKActionCascade:
-			// This would require updating referencing rows
-			// Implementation would need RowUpdater interface passed in
-			return fmt.Errorf("CASCADE UPDATE not yet implemented")
+			// Update all referencing rows with the new key values
+			updateValues := make(map[string]interface{})
+			for i, col := range fk.Columns {
+				updateValues[col] = newKeyValues[i]
+			}
+			for _, rowID := range referencingRows {
+				if err := rowUpdater.UpdateRow(fk.Table, rowID, updateValues); err != nil {
+					return fmt.Errorf("CASCADE UPDATE failed: %w", err)
+				}
+			}
 
 		case FKActionSetNull:
-			return fmt.Errorf("SET NULL UPDATE not yet implemented")
+			// Set foreign key columns to NULL in referencing rows
+			nullValues := make(map[string]interface{})
+			for _, col := range fk.Columns {
+				nullValues[col] = nil
+			}
+			for _, rowID := range referencingRows {
+				if err := rowUpdater.UpdateRow(fk.Table, rowID, nullValues); err != nil {
+					return fmt.Errorf("SET NULL UPDATE failed: %w", err)
+				}
+			}
 
 		case FKActionSetDefault:
-			return fmt.Errorf("SET DEFAULT UPDATE not yet implemented")
+			// Set foreign key columns to their DEFAULT values
+			// This requires reading the column defaults from schema
+			refTable, ok := schemaObj.GetTable(fk.Table)
+			if !ok {
+				return fmt.Errorf("referencing table not found: %s", fk.Table)
+			}
+
+			defaultValues := make(map[string]interface{})
+			for _, col := range fk.Columns {
+				column, ok := refTable.GetColumn(col)
+				if !ok {
+					return fmt.Errorf("column not found: %s", col)
+				}
+				defaultValues[col] = column.Default
+			}
+
+			for _, rowID := range referencingRows {
+				if err := rowUpdater.UpdateRow(fk.Table, rowID, defaultValues); err != nil {
+					return fmt.Errorf("SET DEFAULT UPDATE failed: %w", err)
+				}
+			}
 		}
 	}
 

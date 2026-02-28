@@ -89,7 +89,12 @@ func createSeekTestBtree() *btree.Btree {
 }
 
 func TestOpOpenEphemeral(t *testing.T) {
+	bt := btree.NewBtree(4096)
+
 	v := New()
+	v.Ctx = &VDBEContext{
+		Btree: bt,
+	}
 	v.AllocMemory(10)
 	v.AllocCursors(5)
 
@@ -108,8 +113,8 @@ func TestOpOpenEphemeral(t *testing.T) {
 		t.Fatalf("Failed to get cursor: %v", err)
 	}
 
-	if cursor.CurType != CursorPseudo {
-		t.Errorf("Expected CursorPseudo for ephemeral table, got %v", cursor.CurType)
+	if cursor.CurType != CursorBTree {
+		t.Errorf("Expected CursorBTree for ephemeral table, got %v", cursor.CurType)
 	}
 
 	if !cursor.Writable {

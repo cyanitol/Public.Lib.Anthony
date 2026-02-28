@@ -153,23 +153,25 @@ type CoroutineInfo struct {
 
 // Sorter is an in-memory sorting structure for ORDER BY.
 type Sorter struct {
-	Rows     [][]*Mem // Collected rows
-	KeyCols  []int    // Indices of columns to sort by (relative to row start)
-	Desc     []bool   // True for descending sort for each key column
-	Current  int      // Current position during iteration
-	Sorted   bool     // True after Sort() has been called
-	NumCols  int      // Number of data columns per row
+	Rows       [][]*Mem // Collected rows
+	KeyCols    []int    // Indices of columns to sort by (relative to row start)
+	Desc       []bool   // True for descending sort for each key column
+	Collations []string // Collation name for each key column (empty string for default)
+	Current    int      // Current position during iteration
+	Sorted     bool     // True after Sort() has been called
+	NumCols    int      // Number of data columns per row
 }
 
 // NewSorter creates a new Sorter with the given key columns and sort directions.
-func NewSorter(keyCols []int, desc []bool, numCols int) *Sorter {
+func NewSorter(keyCols []int, desc []bool, collations []string, numCols int) *Sorter {
 	return &Sorter{
-		Rows:    make([][]*Mem, 0),
-		KeyCols: keyCols,
-		Desc:    desc,
-		Current: -1,
-		Sorted:  false,
-		NumCols: numCols,
+		Rows:       make([][]*Mem, 0),
+		KeyCols:    keyCols,
+		Desc:       desc,
+		Collations: collations,
+		Current:    -1,
+		Sorted:     false,
+		NumCols:    numCols,
 	}
 }
 
@@ -213,7 +215,15 @@ func (s *Sorter) compareRows(a, b []*Mem) int {
 		if colIdx >= len(a) || colIdx >= len(b) {
 			continue
 		}
-		cmp := a[colIdx].Compare(b[colIdx])
+
+		// Use collation if specified for this key column
+		var cmp int
+		if len(s.Collations) > i && s.Collations[i] != "" {
+			cmp = a[colIdx].CompareWithCollation(b[colIdx], s.Collations[i])
+		} else {
+			cmp = a[colIdx].Compare(b[colIdx])
+		}
+
 		if cmp != 0 {
 			if len(s.Desc) > i && s.Desc[i] {
 				return -cmp // Reverse for DESC

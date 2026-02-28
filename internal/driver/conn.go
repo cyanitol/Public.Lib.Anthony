@@ -15,18 +15,23 @@ import (
 
 // Conn implements database/sql/driver.Conn for SQLite.
 type Conn struct {
-	driver   *Driver
-	filename string
-	pager    *pager.Pager
-	btree    *btree.Btree
-	schema   *schema.Schema
-	funcReg  *functions.Registry
-	stmts    map[*Stmt]struct{}
-	mu       sync.Mutex
-	closed   bool
+	driver     *Driver
+	filename   string
+	pager      pager.PagerInterface
+	btree      *btree.Btree
+	schema     *schema.Schema
+	funcReg    *functions.Registry
+	dbRegistry *schema.DatabaseRegistry
+	stmts      map[*Stmt]struct{}
+	mu         sync.Mutex
+	closed     bool
 
 	// Transaction state
 	inTx bool
+
+	// PRAGMA settings
+	foreignKeysEnabled bool
+	journalMode        string
 }
 
 // Prepare prepares a SQL statement.
@@ -211,12 +216,23 @@ func (c *Conn) removeStmt(stmt *Stmt) {
 func (c *Conn) openDatabase(schemaLoaded bool) error {
 	// Load schema from the database only if this is the first connection
 	if !schemaLoaded {
+		// First, ensure sqlite_master table exists in the schema
+		// This is required for both new and existing databases
+		if err := c.schema.InitializeMaster(); err != nil {
+			return fmt.Errorf("failed to initialize sqlite_master: %w", err)
+		}
+
 		if err := c.schema.LoadFromMaster(c.btree); err != nil {
 			// Schema loading may fail for new empty databases (no sqlite_master table yet),
 			// which is expected and safe to ignore. The schema will be populated as tables
 			// are created through DDL statements.
 			// We explicitly ignore this error as it indicates a new database, not a failure.
 		}
+	}
+
+	// Register the main database in the registry
+	if err := c.dbRegistry.AttachDatabase("main", c.filename, c.pager, c.btree); err != nil {
+		return fmt.Errorf("failed to register main database: %w", err)
 	}
 
 	// Register built-in SQL functions

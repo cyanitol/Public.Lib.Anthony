@@ -13,6 +13,7 @@ import (
 type Schema struct {
 	Tables  map[string]*Table // Table name -> Table definition
 	Indexes map[string]*Index // Index name -> Index definition
+	Views   map[string]*View  // View name -> View definition
 }
 
 // NewSchema creates a new empty schema.
@@ -20,6 +21,7 @@ func NewSchema() *Schema {
 	return &Schema{
 		Tables:  make(map[string]*Table),
 		Indexes: make(map[string]*Index),
+		Views:   make(map[string]*View),
 	}
 }
 
@@ -71,6 +73,15 @@ type Index struct {
 	Columns  []string // Indexed column names
 	Unique   bool     // True for UNIQUE indexes
 	RootPage int      // Root page in database file
+}
+
+// View represents a database view.
+type View struct {
+	Name      string              // View name
+	Columns   []string            // Optional explicit column names
+	Select    *parser.SelectStmt  // The SELECT statement defining the view
+	SQL       string              // CREATE VIEW statement
+	Temporary bool                // True for temporary views
 }
 
 // CompileCreateTable generates VDBE bytecode for CREATE TABLE.
@@ -601,5 +612,373 @@ func generateCreateIndexSQL(stmt *parser.CreateIndexStmt) string {
 	}
 
 	sql.WriteString(")")
+	return sql.String()
+}
+
+// CompileCreateView generates VDBE bytecode for CREATE VIEW.
+func CompileCreateView(stmt *parser.CreateViewStmt, schema *Schema, bt *btree.Btree) (*vdbe.VDBE, error) {
+	// Check if view already exists
+	if existingView, exists := schema.Views[stmt.Name]; existingView != nil && exists {
+		if stmt.IfNotExists {
+			// IF NOT EXISTS - just return success without error
+			v := vdbe.New()
+			v.AddOp(vdbe.OpHalt, 0, 0, 0)
+			return v, nil
+		}
+		return nil, fmt.Errorf("view %q already exists", stmt.Name)
+	}
+
+	// Check if a table with the same name exists
+	if existingTable := schema.GetTable(stmt.Name); existingTable != nil {
+		return nil, fmt.Errorf("table %q already exists", stmt.Name)
+	}
+
+	// Validate view name
+	if stmt.Name == "" {
+		return nil, fmt.Errorf("view name cannot be empty")
+	}
+	if strings.ToLower(stmt.Name) == "sqlite_master" || strings.ToLower(stmt.Name) == "sqlite_schema" {
+		return nil, fmt.Errorf("view name %q is reserved", stmt.Name)
+	}
+
+	// Validate that the SELECT statement exists
+	if stmt.Select == nil {
+		return nil, fmt.Errorf("view must have a SELECT statement")
+	}
+
+	// Create the CREATE VIEW SQL statement text for sqlite_master
+	createSQL := generateCreateViewSQL(stmt)
+
+	// Generate VDBE bytecode
+	v := vdbe.New()
+	v.SetReadOnly(false)
+
+	// Initialize the program
+	v.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	// Register allocation:
+	// R[1] = "view"
+	// R[2] = view name
+	// R[3] = view name (same as name)
+	// R[4] = 0 (views don't have a root page)
+	// R[5] = CREATE VIEW SQL text
+	v.AllocMemory(6) // Allocate 6 registers (0-5)
+
+	// Load values into registers
+	v.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, "view")           // R[1] = "view"
+	v.AddOpWithP4Str(vdbe.OpString, 0, 2, 0, stmt.Name)        // R[2] = view name
+	v.AddOpWithP4Str(vdbe.OpString, 0, 3, 0, stmt.Name)        // R[3] = view name
+	v.AddOpWithP4Int(vdbe.OpInteger, 0, 4, 0, 0)               // R[4] = 0 (no rootpage)
+	v.AddOpWithP4Str(vdbe.OpString, 0, 5, 0, createSQL)        // R[5] = SQL
+
+	// Open cursor 0 on sqlite_master for writing
+	// sqlite_master is always at root page 1
+	v.AllocCursors(1)
+	v.AddOp(vdbe.OpOpenWrite, 0, 1, 0) // Cursor 0, root page 1
+
+	// Create a record from registers 1-5 and insert into sqlite_master
+	v.AddOp(vdbe.OpMakeRecord, 1, 5, 6) // Make record from R[1..5] into R[6]
+	v.AddOp(vdbe.OpInsert, 0, 6, 0)     // Insert R[6] into cursor 0
+
+	// Close cursor
+	v.AddOp(vdbe.OpClose, 0, 0, 0)
+
+	// Halt with success
+	v.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return v, nil
+}
+
+// CompileDropView generates VDBE bytecode for DROP VIEW.
+func CompileDropView(stmt *parser.DropViewStmt, schema *Schema, bt *btree.Btree) (*vdbe.VDBE, error) {
+	// Check if view exists
+	view, exists := schema.Views[stmt.Name]
+	if !exists || view == nil {
+		if stmt.IfExists {
+			// IF EXISTS - just return success without error
+			v := vdbe.New()
+			v.AddOp(vdbe.OpHalt, 0, 0, 0)
+			return v, nil
+		}
+		return nil, fmt.Errorf("view %q does not exist", stmt.Name)
+	}
+
+	// Validate view name
+	if strings.ToLower(stmt.Name) == "sqlite_master" || strings.ToLower(stmt.Name) == "sqlite_schema" {
+		return nil, fmt.Errorf("cannot drop system view %q", stmt.Name)
+	}
+
+	// Generate VDBE bytecode
+	v := vdbe.New()
+	v.SetReadOnly(false)
+
+	// Initialize the program
+	v.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	// Allocate registers and cursors
+	v.AllocMemory(3)  // R[0..2]
+	v.AllocCursors(1) // Cursor 0 for sqlite_master
+
+	// Open cursor 0 on sqlite_master for writing
+	v.AddOp(vdbe.OpOpenWrite, 0, 1, 0) // Cursor 0, root page 1
+
+	// Find and delete the row in sqlite_master for this view
+	// R[1] = view name to search for
+	v.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, view.Name)
+
+	// Scan sqlite_master to find the row with matching name
+	addrLoop := v.AddOp(vdbe.OpRewind, 0, 0, 0) // Start at beginning
+	addrNext := v.NumOps()
+
+	// Read column 1 (name) from sqlite_master
+	v.AddOp(vdbe.OpColumn, 0, 1, 2) // Read column 1 into R[2]
+
+	// Compare R[2] with R[1]
+	addrDelete := v.AddOp(vdbe.OpEq, 1, 0, 2) // If R[1] == R[2], jump to delete
+
+	// Move to next row
+	v.AddOp(vdbe.OpNext, 0, addrNext, 0)
+	v.AddOp(vdbe.OpGoto, 0, addrLoop+1, 0) // Jump past loop if no more rows
+
+	// Delete the current row
+	addrDeleteOp := v.NumOps()
+	v.AddOp(vdbe.OpDelete, 0, 0, 0)
+
+	// Patch the jump addresses
+	if instr, _ := v.GetInstruction(addrDelete); instr != nil {
+		instr.P2 = addrDeleteOp
+	}
+	if instr, _ := v.GetInstruction(addrLoop); instr != nil {
+		instr.P2 = v.NumOps() // Jump past loop when rewind is done
+	}
+
+	// Close cursor
+	v.AddOp(vdbe.OpClose, 0, 0, 0)
+
+	// Halt with success
+	v.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return v, nil
+}
+
+// generateCreateViewSQL generates the CREATE VIEW SQL text from the AST.
+func generateCreateViewSQL(stmt *parser.CreateViewStmt) string {
+	var sql strings.Builder
+	sql.WriteString("CREATE ")
+	if stmt.Temporary {
+		sql.WriteString("TEMP ")
+	}
+	sql.WriteString("VIEW ")
+	if stmt.IfNotExists {
+		sql.WriteString("IF NOT EXISTS ")
+	}
+	sql.WriteString(stmt.Name)
+
+	// Add column list if specified
+	if len(stmt.Columns) > 0 {
+		sql.WriteString("(")
+		for i, col := range stmt.Columns {
+			if i > 0 {
+				sql.WriteString(", ")
+			}
+			sql.WriteString(col)
+		}
+		sql.WriteString(")")
+	}
+
+	sql.WriteString(" AS ")
+	if stmt.Select != nil {
+		sql.WriteString(stmt.Select.String())
+	}
+
+	return sql.String()
+}
+
+// CompileCreateTrigger generates VDBE bytecode for CREATE TRIGGER.
+func CompileCreateTrigger(stmt *parser.CreateTriggerStmt, schema *Schema, bt *btree.Btree) (*vdbe.VDBE, error) {
+	// Check if trigger already exists
+	// Note: schema.Schema doesn't have Triggers map, so we can't check it here
+	// The driver layer will need to check with schema.Schema which has triggers
+
+	// Validate trigger name
+	if stmt.Name == "" {
+		return nil, fmt.Errorf("trigger name cannot be empty")
+	}
+
+	// Validate that the table exists
+	table := schema.GetTable(stmt.Table)
+	if table == nil {
+		return nil, fmt.Errorf("table not found: %s", stmt.Table)
+	}
+
+	// Create the CREATE TRIGGER SQL statement text for sqlite_master
+	createSQL := generateCreateTriggerSQL(stmt)
+
+	// Generate VDBE bytecode
+	v := vdbe.New()
+	v.SetReadOnly(false)
+
+	// Initialize the program
+	v.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	// Register allocation:
+	// R[1] = "trigger"
+	// R[2] = trigger name
+	// R[3] = table name
+	// R[4] = 0 (triggers don't have a root page)
+	// R[5] = CREATE TRIGGER SQL text
+	v.AllocMemory(6) // Allocate 6 registers (0-5)
+
+	// Load values into registers
+	v.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, "trigger")      // R[1] = "trigger"
+	v.AddOpWithP4Str(vdbe.OpString, 0, 2, 0, stmt.Name)      // R[2] = trigger name
+	v.AddOpWithP4Str(vdbe.OpString, 0, 3, 0, stmt.Table)     // R[3] = table name
+	v.AddOpWithP4Int(vdbe.OpInteger, 0, 4, 0, 0)             // R[4] = 0 (no rootpage)
+	v.AddOpWithP4Str(vdbe.OpString, 0, 5, 0, createSQL)      // R[5] = SQL
+
+	// Open cursor 0 on sqlite_master for writing
+	// sqlite_master is always at root page 1
+	v.AllocCursors(1)
+	v.AddOp(vdbe.OpOpenWrite, 0, 1, 0) // Cursor 0, root page 1
+
+	// Create a record from registers 1-5 and insert into sqlite_master
+	v.AddOp(vdbe.OpMakeRecord, 1, 5, 6) // Make record from R[1..5] into R[6]
+	v.AddOp(vdbe.OpInsert, 0, 6, 0)     // Insert R[6] into cursor 0
+
+	// Close cursor
+	v.AddOp(vdbe.OpClose, 0, 0, 0)
+
+	// Halt with success
+	v.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return v, nil
+}
+
+// CompileDropTrigger generates VDBE bytecode for DROP TRIGGER.
+func CompileDropTrigger(stmt *parser.DropTriggerStmt, schema *Schema, bt *btree.Btree) (*vdbe.VDBE, error) {
+	// Validate trigger name
+	if strings.ToLower(stmt.Name) == "sqlite_master" || strings.ToLower(stmt.Name) == "sqlite_schema" {
+		return nil, fmt.Errorf("cannot drop system trigger %q", stmt.Name)
+	}
+
+	// Generate VDBE bytecode
+	v := vdbe.New()
+	v.SetReadOnly(false)
+
+	// Initialize the program
+	v.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	// Allocate registers and cursors
+	v.AllocMemory(3)  // R[0..2]
+	v.AllocCursors(1) // Cursor 0 for sqlite_master
+
+	// Open cursor 0 on sqlite_master for writing
+	v.AddOp(vdbe.OpOpenWrite, 0, 1, 0) // Cursor 0, root page 1
+
+	// Find and delete the row in sqlite_master for this trigger
+	// R[1] = trigger name to search for
+	v.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, stmt.Name)
+
+	// Scan sqlite_master to find the row with matching name
+	addrLoop := v.AddOp(vdbe.OpRewind, 0, 0, 0) // Start at beginning
+	addrNext := v.NumOps()
+
+	// Read column 1 (name) from sqlite_master
+	v.AddOp(vdbe.OpColumn, 0, 1, 2) // Read column 1 into R[2]
+
+	// Compare R[2] with R[1]
+	addrDelete := v.AddOp(vdbe.OpEq, 1, 0, 2) // If R[1] == R[2], jump to delete
+
+	// Move to next row
+	v.AddOp(vdbe.OpNext, 0, addrNext, 0)
+	v.AddOp(vdbe.OpGoto, 0, addrLoop+1, 0) // Jump past loop if no more rows
+
+	// Delete the current row
+	addrDeleteOp := v.NumOps()
+	v.AddOp(vdbe.OpDelete, 0, 0, 0)
+
+	// Patch the jump addresses
+	if instr, _ := v.GetInstruction(addrDelete); instr != nil {
+		instr.P2 = addrDeleteOp
+	}
+	if instr, _ := v.GetInstruction(addrLoop); instr != nil {
+		instr.P2 = v.NumOps() // Jump past loop when rewind is done
+	}
+
+	// Close cursor
+	v.AddOp(vdbe.OpClose, 0, 0, 0)
+
+	// Halt with success
+	v.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return v, nil
+}
+
+// generateCreateTriggerSQL generates the CREATE TRIGGER SQL text from the AST.
+func generateCreateTriggerSQL(stmt *parser.CreateTriggerStmt) string {
+	var sql strings.Builder
+	sql.WriteString("CREATE ")
+	if stmt.Temp {
+		sql.WriteString("TEMP ")
+	}
+	sql.WriteString("TRIGGER ")
+	if stmt.IfNotExists {
+		sql.WriteString("IF NOT EXISTS ")
+	}
+	sql.WriteString(stmt.Name)
+	sql.WriteString(" ")
+
+	// Timing: BEFORE, AFTER, or INSTEAD OF
+	switch stmt.Timing {
+	case parser.TriggerBefore:
+		sql.WriteString("BEFORE ")
+	case parser.TriggerAfter:
+		sql.WriteString("AFTER ")
+	case parser.TriggerInsteadOf:
+		sql.WriteString("INSTEAD OF ")
+	}
+
+	// Event: INSERT, UPDATE, or DELETE
+	switch stmt.Event {
+	case parser.TriggerInsert:
+		sql.WriteString("INSERT")
+	case parser.TriggerUpdate:
+		sql.WriteString("UPDATE")
+		if len(stmt.UpdateOf) > 0 {
+			sql.WriteString(" OF ")
+			for i, col := range stmt.UpdateOf {
+				if i > 0 {
+					sql.WriteString(", ")
+				}
+				sql.WriteString(col)
+			}
+		}
+	case parser.TriggerDelete:
+		sql.WriteString("DELETE")
+	}
+
+	sql.WriteString(" ON ")
+	sql.WriteString(stmt.Table)
+
+	// FOR EACH ROW
+	if stmt.ForEachRow {
+		sql.WriteString(" FOR EACH ROW")
+	}
+
+	// WHEN clause
+	if stmt.When != nil {
+		sql.WriteString(" WHEN ")
+		sql.WriteString(stmt.When.String())
+	}
+
+	// Body
+	sql.WriteString(" BEGIN")
+	for _, bodyStmt := range stmt.Body {
+		sql.WriteString(" ")
+		sql.WriteString(bodyStmt.String())
+		sql.WriteString(";")
+	}
+	sql.WriteString(" END")
+
 	return sql.String()
 }

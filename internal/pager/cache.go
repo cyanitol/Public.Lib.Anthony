@@ -384,9 +384,9 @@ func (c *LRUCache) Touch(pgno Pgno) {
 	}
 }
 
-// MarkDirty marks a page as dirty and adds it to the dirty list.
+// MarkDirtyByPgno marks a page as dirty by page number.
 // In write-through mode, immediately flushes the page to disk.
-func (c *LRUCache) MarkDirty(pgno Pgno) error {
+func (c *LRUCache) MarkDirtyByPgno(pgno Pgno) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -410,6 +410,16 @@ func (c *LRUCache) MarkDirty(pgno Pgno) error {
 	}
 
 	return nil
+}
+
+// MarkDirty marks a page as dirty and adds it to the dirty list.
+// This implements the PageCacheInterface.
+func (c *LRUCache) MarkDirty(page *DbPage) {
+	if page == nil {
+		return
+	}
+	// Ignore error since interface method is void
+	_ = c.MarkDirtyByPgno(page.Pgno)
 }
 
 // Contains returns true if the cache contains the given page number.
@@ -718,6 +728,7 @@ type PageCacheInterface interface {
 	Clear()
 	GetDirtyPages() []*DbPage
 	MakeClean()
+	MarkDirty(page *DbPage)
 	Size() int
 }
 

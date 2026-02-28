@@ -10,8 +10,8 @@ import (
 
 // MockRowReader implements RowReader for testing
 type MockRowReader struct {
-	rows             map[string]map[string][]interface{} // table -> columns -> values
-	referencingRows  map[string][]int64                  // key -> rowids
+	rows            map[string]map[string][]interface{} // table -> columns -> values
+	referencingRows map[string][]int64                  // key -> rowids
 }
 
 func NewMockRowReader() *MockRowReader {
@@ -36,10 +36,17 @@ func (m *MockRowReader) RowExists(table string, columns []string, values []inter
 }
 
 func (m *MockRowReader) FindReferencingRows(table string, columns []string, values []interface{}) ([]int64, error) {
+	// First try the full key format
 	key := fmt.Sprintf("%s:%v:%v", table, columns, values)
 	if rowids, ok := m.referencingRows[key]; ok {
 		return rowids, nil
 	}
+
+	// Also check for simple table-only key (used by AddReferencingRows)
+	if rowids, ok := m.referencingRows[table]; ok {
+		return rowids, nil
+	}
+
 	return []int64{}, nil
 }
 
@@ -54,6 +61,13 @@ func (m *MockRowReader) AddRow(table string, columns []string, values []interfac
 func (m *MockRowReader) AddReferencingRow(table string, columns []string, values []interface{}, rowid int64) {
 	key := fmt.Sprintf("%s:%v:%v", table, columns, values)
 	m.referencingRows[key] = append(m.referencingRows[key], rowid)
+}
+
+// AddReferencingRows adds multiple referencing rowids for a table (simplified for CASCADE tests)
+func (m *MockRowReader) AddReferencingRows(table string, rowids []int64) {
+	// Store under a simple table key for CASCADE operations
+	key := table
+	m.referencingRows[key] = rowids
 }
 
 // MockRowDeleter implements RowDeleter for testing
@@ -72,14 +86,23 @@ func (m *MockRowDeleter) DeleteRow(table string, rowid int64) error {
 	return nil
 }
 
+// updateRecord holds a single update record for test verification
+type updateRecord struct {
+	table  string
+	rowid  int64
+	values map[string]interface{}
+}
+
 // MockRowUpdater implements RowUpdater for testing
 type MockRowUpdater struct {
 	updatedRows map[string]map[int64]map[string]interface{} // table -> rowid -> column values
+	updates     []updateRecord                              // ordered list of updates for verification
 }
 
 func NewMockRowUpdater() *MockRowUpdater {
 	return &MockRowUpdater{
 		updatedRows: make(map[string]map[int64]map[string]interface{}),
+		updates:     make([]updateRecord, 0),
 	}
 }
 
@@ -88,6 +111,7 @@ func (m *MockRowUpdater) UpdateRow(table string, rowid int64, values map[string]
 		m.updatedRows[table] = make(map[int64]map[string]interface{})
 	}
 	m.updatedRows[table][rowid] = values
+	m.updates = append(m.updates, updateRecord{table: table, rowid: rowid, values: values})
 	return nil
 }
 
@@ -539,6 +563,9 @@ func TestForeignKeyManager_ValidateUpdate(t *testing.T) {
 	reader := NewMockRowReader()
 	reader.AddRow("customers", []string{"id"}, []interface{}{2})
 
+	// Mock row updater
+	updater := NewMockRowUpdater()
+
 	// Update order to reference customer 2 (valid)
 	oldValues := map[string]interface{}{
 		"id":          1,
@@ -549,7 +576,7 @@ func TestForeignKeyManager_ValidateUpdate(t *testing.T) {
 		"customer_id": 2,
 	}
 
-	err := mgr.ValidateUpdate("orders", oldValues, newValues, sch, reader)
+	err := mgr.ValidateUpdate("orders", oldValues, newValues, sch, reader, updater)
 	if err != nil {
 		t.Errorf("ValidateUpdate should succeed with valid reference: %v", err)
 	}
@@ -557,7 +584,7 @@ func TestForeignKeyManager_ValidateUpdate(t *testing.T) {
 	// Update to non-existent customer (invalid)
 	newValues["customer_id"] = 999
 
-	err = mgr.ValidateUpdate("orders", oldValues, newValues, sch, reader)
+	err = mgr.ValidateUpdate("orders", oldValues, newValues, sch, reader, updater)
 	if err == nil {
 		t.Error("ValidateUpdate should fail with non-existent reference")
 	}
@@ -726,5 +753,243 @@ func TestForeignKeyManager_MultiColumnFK(t *testing.T) {
 	err = mgr.ValidateInsert("order_items", values, sch, reader)
 	if err == nil {
 		t.Error("ValidateInsert should fail with invalid composite FK")
+	}
+}
+
+// TestForeignKeyManager_OnUpdateCascade tests ON UPDATE CASCADE action
+func TestForeignKeyManager_OnUpdateCascade(t *testing.T) {
+	mgr := NewForeignKeyManager()
+	mgr.SetEnabled(true)
+
+	sch := schema.NewSchema()
+	customerTable := &schema.Table{
+		Name:       "customers",
+		Columns:    []*schema.Column{{Name: "id", Type: "INTEGER", PrimaryKey: true}},
+		PrimaryKey: []string{"id"},
+	}
+	ordersTable := &schema.Table{
+		Name: "orders",
+		Columns: []*schema.Column{
+			{Name: "id", Type: "INTEGER", PrimaryKey: true},
+			{Name: "customer_id", Type: "INTEGER"},
+		},
+		PrimaryKey: []string{"id"},
+	}
+	sch.Tables["customers"] = customerTable
+	sch.Tables["orders"] = ordersTable
+
+	// Add foreign key with CASCADE UPDATE
+	fk := &ForeignKeyConstraint{
+		Table:      "orders",
+		Columns:    []string{"customer_id"},
+		RefTable:   "customers",
+		RefColumns: []string{"id"},
+		OnUpdate:   FKActionCascade,
+	}
+	mgr.AddConstraint(fk)
+
+	// Mock reader with referencing rows
+	reader := NewMockRowReader()
+	reader.AddReferencingRows("orders", []int64{10, 20}) // Two orders reference customer 1
+
+	// Mock updater
+	updater := NewMockRowUpdater()
+
+	// Update customer ID from 1 to 100
+	oldValues := map[string]interface{}{"id": 1}
+	newValues := map[string]interface{}{"id": 100}
+
+	err := mgr.ValidateUpdate("customers", oldValues, newValues, sch, reader, updater)
+	if err != nil {
+		t.Errorf("ValidateUpdate should succeed with CASCADE: %v", err)
+	}
+
+	// Verify CASCADE updated referencing rows
+	if len(updater.updates) != 2 {
+		t.Errorf("Expected 2 CASCADE updates, got %d", len(updater.updates))
+	}
+
+	for _, update := range updater.updates {
+		if update.table != "orders" {
+			t.Errorf("Expected CASCADE on 'orders' table, got '%s'", update.table)
+		}
+		if update.values["customer_id"] != 100 {
+			t.Errorf("Expected CASCADE to set customer_id=100, got %v", update.values["customer_id"])
+		}
+	}
+}
+
+// TestForeignKeyManager_OnUpdateSetNull tests ON UPDATE SET NULL action
+func TestForeignKeyManager_OnUpdateSetNull(t *testing.T) {
+	mgr := NewForeignKeyManager()
+	mgr.SetEnabled(true)
+
+	sch := schema.NewSchema()
+	customerTable := &schema.Table{
+		Name:       "customers",
+		Columns:    []*schema.Column{{Name: "id", Type: "INTEGER", PrimaryKey: true}},
+		PrimaryKey: []string{"id"},
+	}
+	ordersTable := &schema.Table{
+		Name: "orders",
+		Columns: []*schema.Column{
+			{Name: "id", Type: "INTEGER", PrimaryKey: true},
+			{Name: "customer_id", Type: "INTEGER"},
+		},
+		PrimaryKey: []string{"id"},
+	}
+	sch.Tables["customers"] = customerTable
+	sch.Tables["orders"] = ordersTable
+
+	// Add foreign key with SET NULL UPDATE
+	fk := &ForeignKeyConstraint{
+		Table:      "orders",
+		Columns:    []string{"customer_id"},
+		RefTable:   "customers",
+		RefColumns: []string{"id"},
+		OnUpdate:   FKActionSetNull,
+	}
+	mgr.AddConstraint(fk)
+
+	// Mock reader with referencing rows
+	reader := NewMockRowReader()
+	reader.AddReferencingRows("orders", []int64{10, 20})
+
+	// Mock updater
+	updater := NewMockRowUpdater()
+
+	// Update customer ID from 1 to 100
+	oldValues := map[string]interface{}{"id": 1}
+	newValues := map[string]interface{}{"id": 100}
+
+	err := mgr.ValidateUpdate("customers", oldValues, newValues, sch, reader, updater)
+	if err != nil {
+		t.Errorf("ValidateUpdate should succeed with SET NULL: %v", err)
+	}
+
+	// Verify SET NULL updated referencing rows
+	if len(updater.updates) != 2 {
+		t.Errorf("Expected 2 SET NULL updates, got %d", len(updater.updates))
+	}
+
+	for _, update := range updater.updates {
+		if update.table != "orders" {
+			t.Errorf("Expected SET NULL on 'orders' table, got '%s'", update.table)
+		}
+		if update.values["customer_id"] != nil {
+			t.Errorf("Expected SET NULL to set customer_id=NULL, got %v", update.values["customer_id"])
+		}
+	}
+}
+
+// TestForeignKeyManager_OnUpdateSetDefault tests ON UPDATE SET DEFAULT action
+func TestForeignKeyManager_OnUpdateSetDefault(t *testing.T) {
+	mgr := NewForeignKeyManager()
+	mgr.SetEnabled(true)
+
+	sch := schema.NewSchema()
+	customerTable := &schema.Table{
+		Name:       "customers",
+		Columns:    []*schema.Column{{Name: "id", Type: "INTEGER", PrimaryKey: true}},
+		PrimaryKey: []string{"id"},
+	}
+	ordersTable := &schema.Table{
+		Name: "orders",
+		Columns: []*schema.Column{
+			{Name: "id", Type: "INTEGER", PrimaryKey: true},
+			{Name: "customer_id", Type: "INTEGER", Default: 0},
+		},
+		PrimaryKey: []string{"id"},
+	}
+	sch.Tables["customers"] = customerTable
+	sch.Tables["orders"] = ordersTable
+
+	// Add foreign key with SET DEFAULT UPDATE
+	fk := &ForeignKeyConstraint{
+		Table:      "orders",
+		Columns:    []string{"customer_id"},
+		RefTable:   "customers",
+		RefColumns: []string{"id"},
+		OnUpdate:   FKActionSetDefault,
+	}
+	mgr.AddConstraint(fk)
+
+	// Mock reader with referencing rows
+	reader := NewMockRowReader()
+	reader.AddReferencingRows("orders", []int64{10, 20})
+
+	// Mock updater
+	updater := NewMockRowUpdater()
+
+	// Update customer ID from 1 to 100
+	oldValues := map[string]interface{}{"id": 1}
+	newValues := map[string]interface{}{"id": 100}
+
+	err := mgr.ValidateUpdate("customers", oldValues, newValues, sch, reader, updater)
+	if err != nil {
+		t.Errorf("ValidateUpdate should succeed with SET DEFAULT: %v", err)
+	}
+
+	// Verify SET DEFAULT updated referencing rows
+	if len(updater.updates) != 2 {
+		t.Errorf("Expected 2 SET DEFAULT updates, got %d", len(updater.updates))
+	}
+
+	for _, update := range updater.updates {
+		if update.table != "orders" {
+			t.Errorf("Expected SET DEFAULT on 'orders' table, got '%s'", update.table)
+		}
+		if update.values["customer_id"] != 0 {
+			t.Errorf("Expected SET DEFAULT to set customer_id=0, got %v", update.values["customer_id"])
+		}
+	}
+}
+
+// TestForeignKeyManager_OnUpdateRestrict tests ON UPDATE RESTRICT action
+func TestForeignKeyManager_OnUpdateRestrict(t *testing.T) {
+	mgr := NewForeignKeyManager()
+	mgr.SetEnabled(true)
+
+	sch := schema.NewSchema()
+	customerTable := &schema.Table{
+		Name:       "customers",
+		Columns:    []*schema.Column{{Name: "id", Type: "INTEGER", PrimaryKey: true}},
+		PrimaryKey: []string{"id"},
+	}
+	ordersTable := &schema.Table{
+		Name: "orders",
+		Columns: []*schema.Column{
+			{Name: "id", Type: "INTEGER", PrimaryKey: true},
+			{Name: "customer_id", Type: "INTEGER"},
+		},
+		PrimaryKey: []string{"id"},
+	}
+	sch.Tables["customers"] = customerTable
+	sch.Tables["orders"] = ordersTable
+
+	// Add foreign key with RESTRICT UPDATE
+	fk := &ForeignKeyConstraint{
+		Table:      "orders",
+		Columns:    []string{"customer_id"},
+		RefTable:   "customers",
+		RefColumns: []string{"id"},
+		OnUpdate:   FKActionRestrict,
+	}
+	mgr.AddConstraint(fk)
+
+	// Mock reader with referencing rows
+	reader := NewMockRowReader()
+	reader.AddReferencingRows("orders", []int64{10, 20})
+
+	// Mock updater
+	updater := NewMockRowUpdater()
+
+	// Update customer ID from 1 to 100
+	oldValues := map[string]interface{}{"id": 1}
+	newValues := map[string]interface{}{"id": 100}
+
+	err := mgr.ValidateUpdate("customers", oldValues, newValues, sch, reader, updater)
+	if err == nil {
+		t.Error("ValidateUpdate should fail with RESTRICT when referencing rows exist")
 	}
 }

@@ -48,6 +48,7 @@ const (
 	JournalModeOff
 	JournalModeTruncate
 	JournalModeMemory
+	JournalModeWAL
 )
 
 // Default values
@@ -133,6 +134,12 @@ type Pager struct {
 
 	// Busy handler for lock contention
 	busyHandler BusyHandler
+
+	// WAL instance (only used in WAL mode)
+	wal *WAL
+
+	// WAL index (only used in WAL mode)
+	walIndex *WALIndex
 
 	// Mutex for thread-safe operations
 	mu sync.RWMutex
@@ -388,6 +395,11 @@ func (p *Pager) writeLocked(page *DbPage) error {
 	page.MakeDirty()
 	p.advanceToWriterCachemod()
 
+	// Notify cache that the page is now dirty
+	if pageCache, ok := p.cache.(*PageCache); ok {
+		pageCache.MarkDirty(page)
+	}
+
 	return nil
 }
 
@@ -427,67 +439,97 @@ func (p *Pager) Commit() error {
 		return ErrNoTransaction
 	}
 
-	// Phase 0: Flush pending free pages to disk
-	if err := p.freeList.Flush(); err != nil {
-		p.state = PagerStateError
-		p.errCode = err
+	if err := p.commitPhase0FlushFreeList(); err != nil {
 		return err
 	}
 
-	// Phase 1: Write all dirty pages to disk
-	// If using LRU cache with write-back mode, flush the cache
+	if err := p.commitPhase1WriteDirtyPages(); err != nil {
+		return err
+	}
+
+	if err := p.commitPhase2SyncDatabase(); err != nil {
+		return err
+	}
+
+	if err := p.commitPhase3FinalizeJournal(); err != nil {
+		return err
+	}
+
+	if err := p.commitPhase4UpdateHeader(); err != nil {
+		return err
+	}
+
+	p.commitPhase5Cleanup()
+
+	return nil
+}
+
+// commitPhase0FlushFreeList flushes pending free pages to disk.
+func (p *Pager) commitPhase0FlushFreeList() error {
+	if err := p.freeList.Flush(); err != nil {
+		p.setErrorState(err)
+		return err
+	}
+	return nil
+}
+
+// commitPhase1WriteDirtyPages writes all dirty pages to disk.
+func (p *Pager) commitPhase1WriteDirtyPages() error {
 	if lruCache, ok := p.cache.(*LRUCache); ok && lruCache.Mode() == WriteBackMode {
 		if _, err := lruCache.Flush(); err != nil {
-			p.state = PagerStateError
-			p.errCode = err
+			p.setErrorState(err)
 			return err
 		}
-	} else {
-		// Otherwise use the traditional method
-		if err := p.writeDirtyPages(); err != nil {
-			p.state = PagerStateError
-			p.errCode = err
-			return err
-		}
+		return nil
 	}
 
-	// Phase 2: Sync the database file
+	if err := p.writeDirtyPages(); err != nil {
+		p.setErrorState(err)
+		return err
+	}
+	return nil
+}
+
+// commitPhase2SyncDatabase syncs the database file.
+func (p *Pager) commitPhase2SyncDatabase() error {
 	if err := p.file.Sync(); err != nil {
-		p.state = PagerStateError
-		p.errCode = err
+		p.setErrorState(err)
 		return err
 	}
+	return nil
+}
 
-	// Phase 3: Delete or truncate the journal
+// commitPhase3FinalizeJournal deletes or truncates the journal.
+func (p *Pager) commitPhase3FinalizeJournal() error {
 	if err := p.finalizeJournal(); err != nil {
-		p.state = PagerStateError
-		p.errCode = err
+		p.setErrorState(err)
 		return err
 	}
+	return nil
+}
 
-	// Update database size and free list info in header if changed
-	needsHeaderUpdate := p.dbSize != p.dbOrigSize ||
+// commitPhase4UpdateHeader updates the database header if needed.
+func (p *Pager) commitPhase4UpdateHeader() error {
+	if !p.needsHeaderUpdate() {
+		return nil
+	}
+	return p.updateDatabaseHeader()
+}
+
+// needsHeaderUpdate checks if the database header needs updating.
+func (p *Pager) needsHeaderUpdate() bool {
+	return p.dbSize != p.dbOrigSize ||
 		p.header.FreelistTrunk != uint32(p.freeList.GetFirstTrunk()) ||
 		p.header.FreelistCount != p.freeList.GetTotalFree()
+}
 
-	if needsHeaderUpdate {
-		if err := p.updateDatabaseHeader(); err != nil {
-			return err
-		}
-	}
-
-	// Clear the cache dirty flags
+// commitPhase5Cleanup cleans up after a successful commit.
+func (p *Pager) commitPhase5Cleanup() {
 	p.cache.MakeClean()
-
-	// Clear savepoints
 	p.clearSavepointsLocked()
-
-	// Release locks and return to open state
 	p.state = PagerStateOpen
 	p.lockState = LockNone
 	p.dbOrigSize = p.dbSize
-
-	return nil
 }
 
 // Rollback rolls back the current write transaction.

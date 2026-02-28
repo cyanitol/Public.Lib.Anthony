@@ -13,17 +13,19 @@ import (
 
 // dbState represents shared state for a database file
 type dbState struct {
-	pager  *pager.Pager
-	btree  *btree.Btree
-	schema *schema.Schema
-	refCnt int
+	pager    pager.PagerInterface
+	btree    *btree.Btree
+	schema   *schema.Schema
+	refCnt   int
+	inMemory bool // True for :memory: databases
 }
 
 // Driver implements database/sql/driver.Driver for SQLite.
 type Driver struct {
-	mu    sync.Mutex
-	conns map[string]*Conn
-	dbs   map[string]*dbState // Shared database state per file
+	mu          sync.Mutex
+	conns       map[string]*Conn
+	dbs         map[string]*dbState // Shared database state per file
+	memoryCount int                 // Counter for unique memory database IDs
 }
 
 // sqliteDriver is the singleton driver instance
@@ -50,13 +52,23 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 // OpenConnector returns a connector for the database.
 func (d *Driver) OpenConnector(name string) (driver.Conn, error) {
 	filename := name
-	if filename == "" || filename == ":memory:" {
-		return nil, fmt.Errorf("in-memory databases not yet supported")
-	}
+	isMemory := filename == "" || filename == ":memory:"
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.initMaps()
+
+	if isMemory {
+		// For in-memory databases, create a unique state per connection
+		state, err := d.newMemoryDBState()
+		if err != nil {
+			return nil, fmt.Errorf("failed to open memory database: %w", err)
+		}
+		// Assign a unique ID to each memory database connection
+		d.memoryCount++
+		memoryID := fmt.Sprintf(":memory:%d", d.memoryCount)
+		return d.createMemoryConnection(memoryID, state)
+	}
 
 	state, exists := d.getOrCreateState(filename)
 	if state == nil {
@@ -101,28 +113,70 @@ func (d *Driver) newDBState(filename string) (*dbState, error) {
 	bt := btree.NewBtree(uint32(pgr.PageSize()))
 	bt.Provider = newPagerProvider(pgr)
 	return &dbState{
-		pager:  pgr,
-		btree:  bt,
-		schema: schema.NewSchema(),
-		refCnt: 0,
+		pager:    pgr,
+		btree:    bt,
+		schema:   schema.NewSchema(),
+		refCnt:   0,
+		inMemory: false,
+	}, nil
+}
+
+// newMemoryDBState creates a new in-memory database state.
+func (d *Driver) newMemoryDBState() (*dbState, error) {
+	// Use default page size of 4096 for memory databases
+	const defaultPageSize = 4096
+	pgr, err := pager.OpenMemory(defaultPageSize)
+	if err != nil {
+		return nil, err
+	}
+	bt := btree.NewBtree(uint32(pgr.PageSize()))
+	bt.Provider = newMemoryPagerProvider(pgr)
+	return &dbState{
+		pager:    pgr,
+		btree:    bt,
+		schema:   schema.NewSchema(),
+		refCnt:   1, // Memory databases are not shared
+		inMemory: true,
 	}, nil
 }
 
 // createConnection creates a new connection with the given state.
 func (d *Driver) createConnection(filename string, state *dbState, existed bool) (driver.Conn, error) {
 	conn := &Conn{
-		driver:   d,
-		filename: filename,
-		pager:    state.pager,
-		btree:    state.btree,
-		schema:   state.schema,
-		stmts:    make(map[*Stmt]struct{}),
+		driver:     d,
+		filename:   filename,
+		pager:      state.pager,
+		btree:      state.btree,
+		schema:     state.schema,
+		dbRegistry: schema.NewDatabaseRegistry(),
+		stmts:      make(map[*Stmt]struct{}),
 	}
 	if err := conn.openDatabase(existed); err != nil {
 		d.releaseState(filename, state)
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 	d.conns[filename] = conn
+	return conn, nil
+}
+
+// createMemoryConnection creates a new in-memory database connection.
+func (d *Driver) createMemoryConnection(memoryID string, state *dbState) (driver.Conn, error) {
+	conn := &Conn{
+		driver:     d,
+		filename:   memoryID,
+		pager:      state.pager,
+		btree:      state.btree,
+		schema:     state.schema,
+		dbRegistry: schema.NewDatabaseRegistry(),
+		stmts:      make(map[*Stmt]struct{}),
+	}
+	// Memory databases are always new, so schema never pre-loaded
+	if err := conn.openDatabase(false); err != nil {
+		state.pager.Close()
+		return nil, fmt.Errorf("failed to initialize memory database: %w", err)
+	}
+	// Track memory connection (each gets unique ID)
+	d.conns[memoryID] = conn
 	return conn, nil
 }
 
@@ -188,6 +242,55 @@ func (pp *pagerProvider) MarkDirty(pgno uint32) error {
 	}
 	// Call Write() which journals the page before marking it dirty
 	// This is crucial for transaction rollback support
+	if err := pp.pager.Write(page); err != nil {
+		return err
+	}
+	return nil
+}
+
+// memoryPagerProvider implements btree.PageProvider for in-memory databases
+type memoryPagerProvider struct {
+	pager    *pager.MemoryPager
+	nextPage uint32
+}
+
+// newMemoryPagerProvider creates a new memory pager provider
+func newMemoryPagerProvider(pgr *pager.MemoryPager) *memoryPagerProvider {
+	return &memoryPagerProvider{
+		pager:    pgr,
+		nextPage: uint32(pgr.PageCount()) + 1,
+	}
+}
+
+// GetPageData retrieves page data from the memory pager
+func (pp *memoryPagerProvider) GetPageData(pgno uint32) ([]byte, error) {
+	page, err := pp.pager.Get(pager.Pgno(pgno))
+	if err != nil {
+		return nil, err
+	}
+	return page.GetData(), nil
+}
+
+// AllocatePageData allocates a new page
+func (pp *memoryPagerProvider) AllocatePageData() (uint32, []byte, error) {
+	pgno := pp.nextPage
+	pp.nextPage++
+	page, err := pp.pager.Get(pager.Pgno(pgno))
+	if err != nil {
+		return 0, nil, err
+	}
+	if err := pp.pager.Write(page); err != nil {
+		return 0, nil, err
+	}
+	return pgno, page.GetData(), nil
+}
+
+// MarkDirty marks a page as dirty
+func (pp *memoryPagerProvider) MarkDirty(pgno uint32) error {
+	page, err := pp.pager.Get(pager.Pgno(pgno))
+	if err != nil {
+		return err
+	}
 	if err := pp.pager.Write(page); err != nil {
 		return err
 	}

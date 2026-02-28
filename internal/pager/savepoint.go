@@ -10,20 +10,20 @@ import (
 // Savepoints allow partial rollback of a transaction.
 type Savepoint struct {
 	// Name of the savepoint
-	name string
+	Name string
 
 	// Database size at the time of savepoint creation
-	dbSize Pgno
+	DbSize Pgno
 
 	// Original page states (for pages modified after this savepoint)
 	// Maps page number to original page data
-	pageStates map[Pgno][]byte
+	Pages map[Pgno][]byte
 
 	// Journal file offset at savepoint creation
-	journalOffset int64
+	JournalOffset int64
 
 	// Number of pages in journal at savepoint creation
-	journalPageCount int
+	JournalPageCount int
 }
 
 // SavepointManager manages savepoints for a transaction.
@@ -39,6 +39,14 @@ type SavepointManager struct {
 func NewSavepointManager() *SavepointManager {
 	return &SavepointManager{
 		savepoints: make([]*Savepoint, 0),
+	}
+}
+
+// NewSavepoint creates a new savepoint with the given name.
+func NewSavepoint(name string) *Savepoint {
+	return &Savepoint{
+		Name:  name,
+		Pages: make(map[Pgno][]byte),
 	}
 }
 
@@ -62,24 +70,24 @@ func (p *Pager) Savepoint(name string) error {
 
 	// Check if savepoint with this name already exists
 	for _, sp := range p.getSavepoints() {
-		if sp.name == name {
+		if sp.Name == name {
 			return fmt.Errorf("savepoint %s already exists", name)
 		}
 	}
 
 	// Create new savepoint
 	sp := &Savepoint{
-		name:             name,
-		dbSize:           p.dbSize,
-		pageStates:       make(map[Pgno][]byte),
-		journalPageCount: 0,
+		Name:             name,
+		DbSize:           p.dbSize,
+		Pages:            make(map[Pgno][]byte),
+		JournalPageCount: 0,
 	}
 
 	// If journal is open, record its current state
 	if p.journalFile != nil {
 		offset, err := p.journalFile.Seek(0, 1) // Get current position
 		if err == nil {
-			sp.journalOffset = offset
+			sp.JournalOffset = offset
 		}
 	}
 
@@ -107,7 +115,7 @@ func (p *Pager) Release(name string) error {
 	savepoints := p.getSavepoints()
 	index := -1
 	for i, sp := range savepoints {
-		if sp.name == name {
+		if sp.Name == name {
 			index = i
 			break
 		}
@@ -142,7 +150,7 @@ func (p *Pager) RollbackTo(name string) error {
 	index := -1
 	var targetSavepoint *Savepoint
 	for i, sp := range savepoints {
-		if sp.name == name {
+		if sp.Name == name {
 			index = i
 			targetSavepoint = sp
 			break
@@ -187,11 +195,11 @@ func (p *Pager) savePageState(page *DbPage) error {
 
 	// For each savepoint that doesn't have this page saved, save it
 	for _, sp := range savepoints {
-		if _, exists := sp.pageStates[page.Pgno]; !exists {
+		if _, exists := sp.Pages[page.Pgno]; !exists {
 			// Make a copy of the page data
 			pageData := make([]byte, len(page.Data))
 			copy(pageData, page.Data)
-			sp.pageStates[page.Pgno] = pageData
+			sp.Pages[page.Pgno] = pageData
 		}
 	}
 
@@ -211,7 +219,7 @@ func (p *Pager) restoreToSavepoint(sp *Savepoint, index int) error {
 	// collecting the FIRST occurrence of each page (which is the state at the savepoint).
 
 	// Start with the target savepoint
-	for pgno, data := range sp.pageStates {
+	for pgno, data := range sp.Pages {
 		pagesToRestore[pgno] = data
 	}
 
@@ -220,7 +228,7 @@ func (p *Pager) restoreToSavepoint(sp *Savepoint, index int) error {
 	// we check sp2 (index 1) and sp3 (index 0)
 	for i := index - 1; i >= 0; i-- {
 		newer := savepoints[i]
-		for pgno, data := range newer.pageStates {
+		for pgno, data := range newer.Pages {
 			// Only take the first version we find (from older savepoints)
 			if _, exists := pagesToRestore[pgno]; !exists {
 				pagesToRestore[pgno] = data
@@ -246,7 +254,7 @@ func (p *Pager) restoreToSavepoint(sp *Savepoint, index int) error {
 	}
 
 	// Restore database size
-	p.dbSize = sp.dbSize
+	p.dbSize = sp.DbSize
 
 	return nil
 }
@@ -283,7 +291,7 @@ func (p *Pager) HasSavepoint(name string) bool {
 	defer p.mu.RUnlock()
 
 	for _, sp := range p.getSavepoints() {
-		if sp.name == name {
+		if sp.Name == name {
 			return true
 		}
 	}
@@ -298,7 +306,7 @@ func (p *Pager) GetSavepointNames() []string {
 	savepoints := p.getSavepoints()
 	names := make([]string, len(savepoints))
 	for i, sp := range savepoints {
-		names[i] = sp.name
+		names[i] = sp.Name
 	}
 	return names
 }

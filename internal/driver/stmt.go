@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/engine"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/expr"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/planner"
@@ -161,12 +162,34 @@ func (s *Stmt) dispatchDDLOrTxn(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.
 		return s.compileCreateTable(vm, stmt, args)
 	case *parser.DropTableStmt:
 		return s.compileDropTable(vm, stmt, args)
+	case *parser.CreateIndexStmt:
+		return s.compileCreateIndex(vm, stmt, args)
+	case *parser.DropIndexStmt:
+		return s.compileDropIndex(vm, stmt, args)
+	case *parser.CreateViewStmt:
+		return s.compileCreateView(vm, stmt, args)
+	case *parser.DropViewStmt:
+		return s.compileDropView(vm, stmt, args)
+	case *parser.CreateTriggerStmt:
+		return s.compileCreateTrigger(vm, stmt, args)
+	case *parser.DropTriggerStmt:
+		return s.compileDropTrigger(vm, stmt, args)
+	case *parser.AlterTableStmt:
+		return s.compileAlterTable(vm, stmt, args)
+	case *parser.PragmaStmt:
+		return s.compilePragma(vm, stmt, args)
 	case *parser.BeginStmt:
 		return s.compileBegin(vm, stmt, args)
 	case *parser.CommitStmt:
 		return s.compileCommit(vm, stmt, args)
 	case *parser.RollbackStmt:
 		return s.compileRollback(vm, stmt, args)
+	case *parser.AttachStmt:
+		return s.compileAttach(vm, stmt, args)
+	case *parser.DetachStmt:
+		return s.compileDetach(vm, stmt, args)
+	case *parser.VacuumStmt:
+		return s.compileVacuum(vm, stmt, args)
 	default:
 		return nil, fmt.Errorf("unsupported statement type: %T", stmt)
 	}
@@ -300,7 +323,7 @@ func emitAggregateFunction(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, targetReg
 	// For COUNT(expr), SUM, AVG, MIN, MAX, etc.
 	// These also need accumulator handling in the scan loop
 	if funcName == "COUNT" || funcName == "SUM" || funcName == "AVG" ||
-	   funcName == "MIN" || funcName == "MAX" || funcName == "TOTAL" {
+		funcName == "MIN" || funcName == "MAX" || funcName == "TOTAL" {
 		// The accumulator will be managed by the scan loop
 		return nil
 	}
@@ -324,10 +347,27 @@ func emitAggregateFunction(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, targetReg
 func (s *Stmt) compileSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(true)
 
+	// Handle WITH clause (CTEs) if present
+	if stmt.With != nil {
+		return s.compileSelectWithCTEs(vm, stmt, args)
+	}
+
+	// Expand any view references in the SELECT statement
+	expandedStmt, err := planner.ExpandViewsInSelect(stmt, s.conn.schema)
+	if err != nil {
+		return nil, fmt.Errorf("failed to expand views: %w", err)
+	}
+	stmt = expandedStmt
+
 	// Check if we have FROM subqueries
 	hasFromSubqueries := s.hasFromSubqueries(stmt)
 	if hasFromSubqueries {
 		return s.compileSelectWithFromSubqueries(vm, stmt, args)
+	}
+
+	// Check if this is a SELECT without FROM clause (e.g., SELECT 1, SELECT 1+1)
+	if stmt.From == nil || len(stmt.From.Tables) == 0 {
+		return s.compileSelectWithoutFrom(vm, stmt, args)
 	}
 
 	tableName, err := selectFromTableName(stmt)
@@ -362,11 +402,22 @@ func (s *Stmt) compileSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driv
 	// Single table SELECT without aggregates
 	numCols := len(expandedCols)
 	vm.AllocMemory(numCols + 30) // Extra registers for sorting
-	vm.AllocCursors(1)
+
+	// Determine which cursor to use
+	cursorNum := 0
+	if table.Temp {
+		// For temporary (ephemeral) tables like CTEs, use the cursor stored in RootPage
+		cursorNum = int(table.RootPage)
+		// Make sure we have enough cursors allocated
+		vm.AllocCursors(cursorNum + 1)
+	} else {
+		// For regular tables, use cursor 0
+		vm.AllocCursors(1)
+	}
 
 	// Create expression code generator
 	gen := expr.NewCodeGenerator(vm)
-	gen.RegisterCursor(tableName, 0)
+	gen.RegisterCursor(tableName, cursorNum)
 
 	// Register table info for column resolution
 	tableInfo := buildTableInfo(tableName, table)
@@ -389,8 +440,13 @@ func (s *Stmt) compileSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driv
 	// No ORDER BY - original simple implementation
 	// Emit scan preamble.
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
-	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+
+	// Open cursor if it's a regular table (ephemeral tables are already open)
+	if !table.Temp {
+		vm.AddOp(vdbe.OpOpenRead, cursorNum, int(table.RootPage), len(table.Columns))
+	}
+
+	rewindAddr := vm.AddOp(vdbe.OpRewind, cursorNum, 0, 0)
 
 	// Handle WHERE clause if present
 	var skipAddr int
@@ -419,33 +475,168 @@ func (s *Stmt) compileSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driv
 		vm.Program[skipAddr].P2 = vm.NumOps()
 	}
 
-	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
-	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+	vm.AddOp(vdbe.OpNext, cursorNum, rewindAddr+1, 0)
+
+	// Only close cursor if it's a regular table (don't close ephemeral cursors yet)
+	if !table.Temp {
+		vm.AddOp(vdbe.OpClose, cursorNum, 0, 0)
+	}
+
 	haltAddr := vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	vm.Program[rewindAddr].P2 = haltAddr
 
 	return vm, nil
 }
 
-// compileSelectWithOrderBy handles SELECT with ORDER BY clause using a sorter.
-func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, table *schema.Table, gen *expr.CodeGenerator, numCols int) (*vdbe.VDBE, error) {
-	// Build a list of columns to store in sorter:
-	// - All SELECT columns first (at positions 0..numCols-1)
-	// - Additional ORDER BY columns that aren't in SELECT (at positions numCols..)
+// compileSelectWithoutFrom handles SELECT statements without a FROM clause.
+// This is used for queries like SELECT 1, SELECT 1+1, or recursive CTE anchors.
+func (s *Stmt) compileSelectWithoutFrom(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	// Allocate memory for result columns
+	numCols := len(stmt.Columns)
+	vm.AllocMemory(numCols + 10)
 
-	// Track extra columns needed for ORDER BY
-	extraCols := make([]string, 0) // Column names not in SELECT
-	extraColRegs := make([]int, 0) // Register numbers for extra columns
+	// Create expression code generator (no table context needed)
+	gen := expr.NewCodeGenerator(vm)
 
-	// Determine which columns to sort by and their position in the sorter row
-	keyCols := make([]int, len(stmt.OrderBy))
-	desc := make([]bool, len(stmt.OrderBy))
+	// Set up args for parameter binding
+	argValues := make([]interface{}, len(args))
+	for i, a := range args {
+		argValues[i] = a.Value
+	}
+	gen.SetArgs(argValues)
+
+	// Build result column names
+	colNames := make([]string, numCols)
+	for i, col := range stmt.Columns {
+		colNames[i] = selectColName(col, i)
+	}
+	vm.ResultCols = colNames
+
+	// Initialize VM
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	// Evaluate each column expression
+	for i, col := range stmt.Columns {
+		// Generate code for the expression
+		reg, err := gen.GenerateExpr(col.Expr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate expression for column %d: %w", i, err)
+		}
+		// Copy result to target register if needed
+		if reg != i {
+			vm.AddOp(vdbe.OpCopy, reg, i, 0)
+		}
+	}
+
+	// Return single row with the computed values
+	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
+// orderByColumnInfo holds information about ORDER BY columns
+type orderByColumnInfo struct {
+	keyCols      []int
+	desc         []bool
+	collations   []string
+	extraCols    []string
+	extraColRegs []int
+	sorterCols   int
+}
+
+// limitOffsetInfo holds LIMIT/OFFSET state
+type limitOffsetInfo struct {
+	hasLimit  bool
+	hasOffset bool
+	limitVal  int
+	offsetVal int
+	limitReg  int
+	offsetReg int
+}
+
+// setupLimitOffset parses LIMIT/OFFSET and initializes counter registers
+func (s *Stmt) setupLimitOffset(vm *vdbe.VDBE, stmt *parser.SelectStmt, gen *expr.CodeGenerator) *limitOffsetInfo {
+	info := &limitOffsetInfo{}
+
+	if stmt.Limit != nil {
+		if litExpr, ok := stmt.Limit.(*parser.LiteralExpr); ok {
+			var parsedVal int64
+			if _, err := fmt.Sscanf(litExpr.Value, "%d", &parsedVal); err == nil {
+				info.hasLimit = true
+				info.limitVal = int(parsedVal)
+				info.limitReg = gen.AllocReg()
+				vm.AddOp(vdbe.OpInteger, 0, info.limitReg, 0)
+			}
+		}
+	}
+
+	if stmt.Offset != nil {
+		if litExpr, ok := stmt.Offset.(*parser.LiteralExpr); ok {
+			var parsedVal int64
+			if _, err := fmt.Sscanf(litExpr.Value, "%d", &parsedVal); err == nil {
+				info.hasOffset = true
+				info.offsetVal = int(parsedVal)
+				info.offsetReg = gen.AllocReg()
+				vm.AddOp(vdbe.OpInteger, 0, info.offsetReg, 0)
+			}
+		}
+	}
+
+	return info
+}
+
+// emitLimitOffsetChecks emits VDBE opcodes to check LIMIT/OFFSET conditions
+func (s *Stmt) emitLimitOffsetChecks(vm *vdbe.VDBE, info *limitOffsetInfo, gen *expr.CodeGenerator) (offsetSkipAddr int, limitJumpAddr int) {
+	if info.hasOffset {
+		// Increment offset counter
+		vm.AddOp(vdbe.OpAddImm, info.offsetReg, 1, 0)
+		// Compare counter to offset value
+		offsetCheckReg := gen.AllocReg()
+		vm.AddOp(vdbe.OpInteger, info.offsetVal, offsetCheckReg, 0)
+		cmpReg := gen.AllocReg()
+		vm.AddOp(vdbe.OpLe, info.offsetReg, offsetCheckReg, cmpReg)
+		offsetSkipAddr = vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)
+	}
+
+	if info.hasLimit {
+		// Increment counter
+		vm.AddOp(vdbe.OpAddImm, info.limitReg, 1, 0)
+		// Compare counter to limit
+		limitCheckReg := gen.AllocReg()
+		vm.AddOp(vdbe.OpInteger, info.limitVal, limitCheckReg, 0)
+		cmpReg := gen.AllocReg()
+		vm.AddOp(vdbe.OpGt, info.limitReg, limitCheckReg, cmpReg)
+		limitJumpAddr = vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)
+	}
+
+	return offsetSkipAddr, limitJumpAddr
+}
+
+// resolveOrderByColumns determines which columns to sort by and identifies extra columns needed
+func (s *Stmt) resolveOrderByColumns(stmt *parser.SelectStmt, table *schema.Table, numCols int, gen *expr.CodeGenerator) *orderByColumnInfo {
+	info := &orderByColumnInfo{
+		keyCols:      make([]int, len(stmt.OrderBy)),
+		desc:         make([]bool, len(stmt.OrderBy)),
+		collations:   make([]string, len(stmt.OrderBy)),
+		extraCols:    make([]string, 0),
+		extraColRegs: make([]int, 0),
+	}
 
 	for i, orderTerm := range stmt.OrderBy {
 		colIdx := -1
 		var orderColName string
 
-		if ident, ok := orderTerm.Expr.(*parser.IdentExpr); ok {
+		// Extract base expression (unwrap CollateExpr if present)
+		baseExpr := orderTerm.Expr
+		if collateExpr, ok := orderTerm.Expr.(*parser.CollateExpr); ok {
+			baseExpr = collateExpr.Expr
+			info.collations[i] = collateExpr.Collation
+		} else {
+			info.collations[i] = orderTerm.Collation
+		}
+
+		if ident, ok := baseExpr.(*parser.IdentExpr); ok {
 			orderColName = ident.Name
 
 			// Search by column name in SELECT columns
@@ -461,12 +652,21 @@ func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 					}
 				}
 			}
+
+			// If no explicit collation, look up from table schema
+			if info.collations[i] == "" && orderColName != "" {
+				for _, col := range table.Columns {
+					if col.Name == orderColName {
+						info.collations[i] = col.Collation
+						break
+					}
+				}
+			}
 		}
 
 		if colIdx < 0 && orderColName != "" {
-			// ORDER BY column is not in SELECT list
-			// Check if we already added it to extra columns
-			for j, extraCol := range extraCols {
+			// ORDER BY column is not in SELECT list - check if already added
+			for j, extraCol := range info.extraCols {
 				if extraCol == orderColName {
 					colIdx = numCols + j
 					break
@@ -475,33 +675,37 @@ func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 
 			// If still not found, add as a new extra column
 			if colIdx < 0 {
-				colIdx = numCols + len(extraCols)
-				extraCols = append(extraCols, orderColName)
-				extraColRegs = append(extraColRegs, gen.AllocReg())
+				colIdx = numCols + len(info.extraCols)
+				info.extraCols = append(info.extraCols, orderColName)
+				info.extraColRegs = append(info.extraColRegs, gen.AllocReg())
 			}
 		}
 
 		if colIdx < 0 {
-			// Default to first column if we can't resolve
-			colIdx = 0
+			colIdx = 0 // Default to first column
 		}
 
-		keyCols[i] = colIdx
-		desc[i] = !orderTerm.Asc
+		info.keyCols[i] = colIdx
+		info.desc[i] = !orderTerm.Asc
 	}
 
-	// Total columns in sorter = SELECT columns + extra ORDER BY columns
-	sorterCols := numCols + len(extraCols)
+	info.sorterCols = numCols + len(info.extraCols)
+	return info
+}
 
-	// Reserve registers for result columns so AllocReg doesn't reuse them
-	// Result columns use registers 0..numCols-1 for output
-	// Extra ORDER BY columns use registers numCols..sorterCols-1 for sorting
-	gen.SetNextReg(sorterCols)
+// compileSelectWithOrderBy handles SELECT with ORDER BY clause using a sorter.
+func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, table *schema.Table, gen *expr.CodeGenerator, numCols int) (*vdbe.VDBE, error) {
+	// Resolve ORDER BY columns and determine sorter structure
+	orderInfo := s.resolveOrderByColumns(stmt, table, numCols, gen)
+
+	// Reserve registers for result columns
+	gen.SetNextReg(orderInfo.sorterCols)
 
 	// Create sorter key info
 	keyInfo := &vdbe.SorterKeyInfo{
-		KeyCols: keyCols,
-		Desc:    desc,
+		KeyCols:    orderInfo.keyCols,
+		Desc:       orderInfo.desc,
+		Collations: orderInfo.collations,
 	}
 
 	// Emit scan preamble
@@ -509,7 +713,7 @@ func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
 
 	// Open sorter with the full number of columns
-	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, 0, sorterCols, 0)
+	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, 0, orderInfo.sorterCols, 0)
 	vm.Program[sorterOpenAddr].P4.P = keyInfo
 
 	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
@@ -532,22 +736,21 @@ func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	}
 
 	// Read extra ORDER BY columns into their registers
-	for i, colName := range extraCols {
+	for i, colName := range orderInfo.extraCols {
 		tableColIdx := table.GetColumnIndex(colName)
 		if tableColIdx >= 0 {
 			recordIdx := schemaRecordIdx(table.Columns, tableColIdx)
-			vm.AddOp(vdbe.OpColumn, 0, recordIdx, extraColRegs[i])
+			vm.AddOp(vdbe.OpColumn, 0, recordIdx, orderInfo.extraColRegs[i])
 		} else {
-			vm.AddOp(vdbe.OpNull, 0, extraColRegs[i], 0)
+			vm.AddOp(vdbe.OpNull, 0, orderInfo.extraColRegs[i], 0)
 		}
 	}
 
-	// Insert row into sorter - need to use a contiguous range of registers
-	// Copy extra column registers to positions after SELECT columns
-	for i := range extraCols {
-		vm.AddOp(vdbe.OpCopy, extraColRegs[i], numCols+i, 0)
+	// Insert row into sorter - copy extra columns to contiguous registers
+	for i := range orderInfo.extraCols {
+		vm.AddOp(vdbe.OpCopy, orderInfo.extraColRegs[i], numCols+i, 0)
 	}
-	vm.AddOp(vdbe.OpSorterInsert, 0, 0, sorterCols)
+	vm.AddOp(vdbe.OpSorterInsert, 0, 0, orderInfo.sorterCols)
 
 	// Fix up WHERE skip address to point to Next
 	if stmt.Where != nil {
@@ -563,37 +766,8 @@ func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	// Sort the collected rows
 	sorterSortAddr := vm.AddOp(vdbe.OpSorterSort, 0, 0, 0)
 
-	// Handle LIMIT and OFFSET - parse and set up counters
-	var limitReg, limitVal int
-	var offsetReg, offsetVal int
-	hasLimit := false
-	hasOffset := false
-
-	if stmt.Limit != nil {
-		if litExpr, ok := stmt.Limit.(*parser.LiteralExpr); ok {
-			var parsedVal int64
-			if _, err := fmt.Sscanf(litExpr.Value, "%d", &parsedVal); err == nil {
-				hasLimit = true
-				limitVal = int(parsedVal)
-				limitReg = gen.AllocReg()
-				// Initialize limit counter to 0
-				vm.AddOp(vdbe.OpInteger, 0, limitReg, 0)
-			}
-		}
-	}
-
-	if stmt.Offset != nil {
-		if litExpr, ok := stmt.Offset.(*parser.LiteralExpr); ok {
-			var parsedVal int64
-			if _, err := fmt.Sscanf(litExpr.Value, "%d", &parsedVal); err == nil {
-				hasOffset = true
-				offsetVal = int(parsedVal)
-				offsetReg = gen.AllocReg()
-				// Initialize offset counter to 0
-				vm.AddOp(vdbe.OpInteger, 0, offsetReg, 0)
-			}
-		}
-	}
+	// Handle LIMIT and OFFSET
+	limitInfo := s.setupLimitOffset(vm, stmt, gen)
 
 	// First SorterNext call to move to first row
 	// This jumps to loop body if there are rows
@@ -608,31 +782,8 @@ func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	// Copy data from sorter to result registers
 	vm.AddOp(vdbe.OpSorterData, 0, 0, numCols)
 
-	// Check OFFSET if present - skip first offsetVal rows
-	var offsetSkipAddr int
-	if hasOffset {
-		// Increment offset counter
-		vm.AddOp(vdbe.OpAddImm, offsetReg, 1, 0)
-		// Compare counter to offset value - if counter <= offset, skip this row
-		offsetCheckReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpInteger, offsetVal, offsetCheckReg, 0)
-		cmpReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpLe, offsetReg, offsetCheckReg, cmpReg) // cmpReg = 1 if counter <= offset
-		offsetSkipAddr = vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)     // Jump to next if still in offset range
-	}
-
-	// Check LIMIT if present
-	var limitJumpAddr int
-	if hasLimit {
-		// Increment counter
-		vm.AddOp(vdbe.OpAddImm, limitReg, 1, 0)
-		// Compare counter to limit
-		limitCheckReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpInteger, limitVal, limitCheckReg, 0)
-		cmpReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpGt, limitReg, limitCheckReg, cmpReg) // cmpReg = 1 if counter > limit
-		limitJumpAddr = vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)    // Jump to halt if over limit
-	}
+	// Apply OFFSET and LIMIT checks
+	offsetSkipAddr, limitJumpAddr := s.emitLimitOffsetChecks(vm, limitInfo, gen)
 
 	// Emit result row
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
@@ -647,13 +798,13 @@ func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 
 	// Fix up addresses
 	vm.Program[rewindAddr].P2 = haltAddr
-	vm.Program[sorterSortAddr].P2 = haltAddr // Jump to close if empty
-	vm.Program[sorterNextAddr].P2 = sorterLoopAddr // Jump to loop body if there are rows
+	vm.Program[sorterSortAddr].P2 = haltAddr
+	vm.Program[sorterNextAddr].P2 = sorterLoopAddr
 	vm.Program[haltJumpAddr].P2 = haltAddr
-	if hasOffset {
-		vm.Program[offsetSkipAddr].P2 = nextRowAddr // Skip to next row if still in offset range
+	if limitInfo.hasOffset {
+		vm.Program[offsetSkipAddr].P2 = nextRowAddr
 	}
-	if hasLimit {
+	if limitInfo.hasLimit {
 		vm.Program[limitJumpAddr].P2 = haltAddr
 	}
 
@@ -691,6 +842,211 @@ func (s *Stmt) isAggregateExpr(expr parser.Expression) bool {
 	return aggFuncs[fnExpr.Name]
 }
 
+// emitCountUpdate emits VDBE opcodes to update COUNT accumulator
+func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, accReg int) {
+	// COUNT(*) or COUNT(expr) - for now both just increment
+	// TODO: evaluate expression and check for NULL in COUNT(expr)
+	vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
+}
+
+// emitSumUpdate emits VDBE opcodes to update SUM/TOTAL accumulator
+func (s *Stmt) emitSumUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, accReg int, gen *expr.CodeGenerator) {
+	if len(fnExpr.Args) == 0 {
+		return
+	}
+
+	argIdent, ok := fnExpr.Args[0].(*parser.IdentExpr)
+	if !ok {
+		return
+	}
+
+	colIdx := table.GetColumnIndex(argIdent.Name)
+	if colIdx < 0 {
+		return
+	}
+
+	// Load column value into a temp register
+	tempReg := gen.AllocReg()
+	recordIdx := schemaRecordIdx(table.Columns, colIdx)
+	vm.AddOp(vdbe.OpColumn, 0, recordIdx, tempReg)
+
+	// Skip NULL values
+	skipAddr := vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0)
+
+	// If accumulator is NOT NULL, jump to add instruction
+	addAddr := vm.AddOp(vdbe.OpNotNull, accReg, 0, 0)
+
+	// Accumulator is NULL - copy the first value
+	vm.AddOp(vdbe.OpCopy, tempReg, accReg, 0)
+	skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+
+	// Accumulator is not NULL - add to it
+	vm.Program[addAddr].P2 = vm.NumOps()
+	vm.AddOp(vdbe.OpAdd, accReg, tempReg, accReg)
+
+	// Patch jump addresses
+	endAddr := vm.NumOps()
+	vm.Program[skipAddr].P2 = endAddr
+	vm.Program[skipToEndAddr].P2 = endAddr
+}
+
+// emitAvgUpdate emits VDBE opcodes to update AVG accumulator (sum and count)
+func (s *Stmt) emitAvgUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, sumReg int, countReg int, gen *expr.CodeGenerator) {
+	if len(fnExpr.Args) == 0 {
+		return
+	}
+
+	argIdent, ok := fnExpr.Args[0].(*parser.IdentExpr)
+	if !ok {
+		return
+	}
+
+	colIdx := table.GetColumnIndex(argIdent.Name)
+	if colIdx < 0 {
+		return
+	}
+
+	// Load column value into a temp register
+	tempReg := gen.AllocReg()
+	recordIdx := schemaRecordIdx(table.Columns, colIdx)
+	vm.AddOp(vdbe.OpColumn, 0, recordIdx, tempReg)
+
+	// Skip NULL values
+	skipAddr := vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0)
+
+	// Increment count (always for non-NULL values)
+	vm.AddOp(vdbe.OpAddImm, countReg, 1, 0)
+
+	// If sum accumulator is NOT NULL, jump to add instruction
+	addAddr := vm.AddOp(vdbe.OpNotNull, sumReg, 0, 0)
+
+	// Sum is NULL - copy the first value
+	vm.AddOp(vdbe.OpCopy, tempReg, sumReg, 0)
+	skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+
+	// Sum is not NULL - add to it
+	vm.Program[addAddr].P2 = vm.NumOps()
+	vm.AddOp(vdbe.OpAdd, sumReg, tempReg, sumReg)
+
+	// Patch jump addresses
+	endAddr := vm.NumOps()
+	vm.Program[skipAddr].P2 = endAddr
+	vm.Program[skipToEndAddr].P2 = endAddr
+}
+
+// emitMinUpdate emits VDBE opcodes to update MIN accumulator
+func (s *Stmt) emitMinUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, accReg int, gen *expr.CodeGenerator) {
+	if len(fnExpr.Args) == 0 {
+		return
+	}
+
+	argIdent, ok := fnExpr.Args[0].(*parser.IdentExpr)
+	if !ok {
+		return
+	}
+
+	colIdx := table.GetColumnIndex(argIdent.Name)
+	if colIdx < 0 {
+		return
+	}
+
+	// Load column value into a temp register
+	tempReg := gen.AllocReg()
+	recordIdx := schemaRecordIdx(table.Columns, colIdx)
+	vm.AddOp(vdbe.OpColumn, 0, recordIdx, tempReg)
+
+	// Skip NULL values
+	skipAddr := vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0)
+
+	// If accumulator is NULL, just copy the value (first value)
+	copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
+
+	// Accumulator is not NULL - compare
+	cmpReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpLt, tempReg, accReg, cmpReg)
+	notLessAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
+
+	// Copy value (either first value or new min)
+	vm.Program[copyAddr].P2 = vm.NumOps()
+	vm.AddOp(vdbe.OpCopy, tempReg, accReg, 0)
+
+	// Patch jump addresses
+	endAddr := vm.NumOps()
+	vm.Program[skipAddr].P2 = endAddr
+	vm.Program[notLessAddr].P2 = endAddr
+}
+
+// emitMaxUpdate emits VDBE opcodes to update MAX accumulator
+func (s *Stmt) emitMaxUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, accReg int, gen *expr.CodeGenerator) {
+	if len(fnExpr.Args) == 0 {
+		return
+	}
+
+	argIdent, ok := fnExpr.Args[0].(*parser.IdentExpr)
+	if !ok {
+		return
+	}
+
+	colIdx := table.GetColumnIndex(argIdent.Name)
+	if colIdx < 0 {
+		return
+	}
+
+	// Load column value into a temp register
+	tempReg := gen.AllocReg()
+	recordIdx := schemaRecordIdx(table.Columns, colIdx)
+	vm.AddOp(vdbe.OpColumn, 0, recordIdx, tempReg)
+
+	// Skip NULL values
+	skipAddr := vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0)
+
+	// If accumulator is NULL, just copy the value (first value)
+	copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
+
+	// Accumulator is not NULL - compare
+	cmpReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpGt, tempReg, accReg, cmpReg)
+	notGreaterAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
+
+	// Copy value (either first value or new max)
+	vm.Program[copyAddr].P2 = vm.NumOps()
+	vm.AddOp(vdbe.OpCopy, tempReg, accReg, 0)
+
+	// Patch jump addresses
+	endAddr := vm.NumOps()
+	vm.Program[skipAddr].P2 = endAddr
+	vm.Program[notGreaterAddr].P2 = endAddr
+}
+
+// initializeAggregateAccumulators allocates and initializes accumulator registers for aggregate functions
+func (s *Stmt) initializeAggregateAccumulators(vm *vdbe.VDBE, stmt *parser.SelectStmt, gen *expr.CodeGenerator) (accRegs []int, avgCountRegs []int) {
+	numCols := len(stmt.Columns)
+	accRegs = make([]int, numCols)
+	avgCountRegs = make([]int, numCols)
+
+	for i, col := range stmt.Columns {
+		fnExpr, isAgg := col.Expr.(*parser.FunctionExpr)
+		if !isAgg || !s.isAggregateExpr(col.Expr) {
+			continue
+		}
+
+		accRegs[i] = gen.AllocReg()
+
+		// Initialize accumulator based on function type
+		switch fnExpr.Name {
+		case "COUNT":
+			vm.AddOp(vdbe.OpInteger, 0, accRegs[i], 0)
+		case "AVG":
+			vm.AddOp(vdbe.OpNull, 0, accRegs[i], 0)
+			avgCountRegs[i] = gen.AllocReg()
+			vm.AddOp(vdbe.OpInteger, 0, avgCountRegs[i], 0)
+		case "SUM", "MIN", "MAX", "TOTAL":
+			vm.AddOp(vdbe.OpNull, 0, accRegs[i], 0)
+		}
+	}
+	return accRegs, avgCountRegs
+}
+
 // compileSelectWithAggregates compiles a SELECT with aggregate functions
 func (s *Stmt) compileSelectWithAggregates(vm *vdbe.VDBE, stmt *parser.SelectStmt, tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	numCols := len(stmt.Columns)
@@ -709,30 +1065,20 @@ func (s *Stmt) compileSelectWithAggregates(vm *vdbe.VDBE, stmt *parser.SelectStm
 		vm.ResultCols[i] = selectColName(col, i)
 	}
 
-	// Allocate accumulator registers for each aggregate
-	// For AVG, we need a second register for count
-	accRegs := make([]int, numCols)
-	avgCountRegs := make([]int, numCols) // Only used for AVG
-	for i, col := range stmt.Columns {
-		fnExpr, isAgg := col.Expr.(*parser.FunctionExpr)
-		if isAgg && s.isAggregateExpr(col.Expr) {
-			accRegs[i] = gen.AllocReg()
+	// Allocate and initialize accumulator registers
+	accRegs, avgCountRegs := s.initializeAggregateAccumulators(vm, stmt, gen)
 
-			// Initialize accumulator based on function type
-			switch fnExpr.Name {
-			case "COUNT":
-				// COUNT starts at 0
-				vm.AddOp(vdbe.OpInteger, 0, accRegs[i], 0)
-			case "AVG":
-				// AVG needs sum (NULL initially) and count (0 initially)
-				vm.AddOp(vdbe.OpNull, 0, accRegs[i], 0) // sum starts as NULL
-				avgCountRegs[i] = gen.AllocReg()
-				vm.AddOp(vdbe.OpInteger, 0, avgCountRegs[i], 0) // count starts at 0
-			case "SUM", "MIN", "MAX", "TOTAL":
-				// Other aggregates start as NULL
-				vm.AddOp(vdbe.OpNull, 0, accRegs[i], 0)
-			}
+	// Register table info for WHERE clause column resolution
+	tableInfo := buildTableInfo(tableName, table)
+	gen.RegisterTable(tableInfo)
+
+	// Set up args for parameter binding in WHERE clause
+	if len(args) > 0 {
+		argValues := make([]interface{}, len(args))
+		for i, a := range args {
+			argValues[i] = a.Value
 		}
+		gen.SetArgs(argValues)
 	}
 
 	// Emit scan preamble
@@ -743,6 +1089,18 @@ func (s *Stmt) compileSelectWithAggregates(vm *vdbe.VDBE, stmt *parser.SelectStm
 	// Scan loop: update accumulators
 	loopStart := vm.NumOps()
 
+	// Handle WHERE clause if present
+	var skipAddr int
+	if stmt.Where != nil {
+		// Generate code for WHERE expression
+		whereReg, err := gen.GenerateExpr(stmt.Where)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compile WHERE clause: %w", err)
+		}
+		// Skip this row if WHERE condition is false
+		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+	}
+
 	for i, col := range stmt.Columns {
 		fnExpr, isAgg := col.Expr.(*parser.FunctionExpr)
 		if !isAgg || !s.isAggregateExpr(col.Expr) {
@@ -752,154 +1110,21 @@ func (s *Stmt) compileSelectWithAggregates(vm *vdbe.VDBE, stmt *parser.SelectStm
 		// Update accumulator based on function type
 		switch fnExpr.Name {
 		case "COUNT":
-			if fnExpr.Star {
-				// COUNT(*) - always increment
-				vm.AddOp(vdbe.OpAddImm, accRegs[i], 1, 0)
-			} else {
-				// COUNT(expr) - increment if not NULL
-				// TODO: evaluate expression and check for NULL
-				vm.AddOp(vdbe.OpAddImm, accRegs[i], 1, 0)
-			}
+			s.emitCountUpdate(vm, fnExpr, accRegs[i])
 		case "SUM", "TOTAL":
-			// SUM(expr) - Add value to accumulator
-			// Get the expression argument
-			if len(fnExpr.Args) > 0 {
-				// Get the column value
-				argIdent, ok := fnExpr.Args[0].(*parser.IdentExpr)
-				if ok {
-					colIdx := table.GetColumnIndex(argIdent.Name)
-					if colIdx >= 0 {
-						// Load column value into a temp register
-						tempReg := gen.AllocReg()
-						recordIdx := schemaRecordIdx(table.Columns, colIdx)
-						vm.AddOp(vdbe.OpColumn, 0, recordIdx, tempReg)
-
-						// Skip NULL values - if tempReg is NULL, skip this row
-						skipAddr := vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0) // P2 will be patched
-
-						// If accumulator is NOT NULL, jump to add instruction
-						addAddr := vm.AddOp(vdbe.OpNotNull, accRegs[i], 0, 0) // P2 will be patched
-
-						// Accumulator is NULL - copy the first value, then skip add
-						vm.AddOp(vdbe.OpCopy, tempReg, accRegs[i], 0)
-						skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0) // Jump past the add
-
-						// Accumulator is not NULL - add to it
-						vm.Program[addAddr].P2 = vm.NumOps()
-						vm.AddOp(vdbe.OpAdd, accRegs[i], tempReg, accRegs[i])
-
-						// Patch the skip jumps to here (end of SUM logic for this row)
-						endAddr := vm.NumOps()
-						vm.Program[skipAddr].P2 = endAddr
-						vm.Program[skipToEndAddr].P2 = endAddr
-					}
-				}
-			}
+			s.emitSumUpdate(vm, fnExpr, table, accRegs[i], gen)
 		case "AVG":
-			// AVG(expr) - Add value to sum accumulator and increment count
-			if len(fnExpr.Args) > 0 {
-				argIdent, ok := fnExpr.Args[0].(*parser.IdentExpr)
-				if ok {
-					colIdx := table.GetColumnIndex(argIdent.Name)
-					if colIdx >= 0 {
-						// Load column value into a temp register
-						tempReg := gen.AllocReg()
-						recordIdx := schemaRecordIdx(table.Columns, colIdx)
-						vm.AddOp(vdbe.OpColumn, 0, recordIdx, tempReg)
-
-						// Skip NULL values - if tempReg is NULL, skip this row
-						skipAddr := vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0) // P2 will be patched
-
-						// Increment count (always for non-NULL values)
-						vm.AddOp(vdbe.OpAddImm, avgCountRegs[i], 1, 0)
-
-						// If sum accumulator is NOT NULL, jump to add instruction
-						addAddr := vm.AddOp(vdbe.OpNotNull, accRegs[i], 0, 0) // P2 will be patched
-
-						// Sum is NULL - copy the first value, then skip add
-						vm.AddOp(vdbe.OpCopy, tempReg, accRegs[i], 0)
-						skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0) // Jump past the add
-
-						// Sum is not NULL - add to it
-						vm.Program[addAddr].P2 = vm.NumOps()
-						vm.AddOp(vdbe.OpAdd, accRegs[i], tempReg, accRegs[i])
-
-						// Patch the skip jumps to here
-						endAddr := vm.NumOps()
-						vm.Program[skipAddr].P2 = endAddr
-						vm.Program[skipToEndAddr].P2 = endAddr
-					}
-				}
-			}
+			s.emitAvgUpdate(vm, fnExpr, table, accRegs[i], avgCountRegs[i], gen)
 		case "MIN":
-			// MIN(expr) - Keep smallest value
-			if len(fnExpr.Args) > 0 {
-				argIdent, ok := fnExpr.Args[0].(*parser.IdentExpr)
-				if ok {
-					colIdx := table.GetColumnIndex(argIdent.Name)
-					if colIdx >= 0 {
-						// Load column value into a temp register
-						tempReg := gen.AllocReg()
-						recordIdx := schemaRecordIdx(table.Columns, colIdx)
-						vm.AddOp(vdbe.OpColumn, 0, recordIdx, tempReg)
-
-						// Skip NULL values
-						skipAddr := vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0) // P2 will be patched
-
-						// If accumulator is NULL, just copy the value (first value)
-						copyAddr := vm.AddOp(vdbe.OpIsNull, accRegs[i], 0, 0) // Jump to copy
-
-						// Accumulator is not NULL - compare
-						cmpReg := gen.AllocReg()
-						vm.AddOp(vdbe.OpLt, tempReg, accRegs[i], cmpReg) // cmpReg = 1 if tempReg < accRegs[i]
-						notLessAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0) // Jump if NOT less
-
-						// Copy value (either first value or new min)
-						vm.Program[copyAddr].P2 = vm.NumOps()
-						vm.AddOp(vdbe.OpCopy, tempReg, accRegs[i], 0)
-
-						// End of MIN logic
-						endAddr := vm.NumOps()
-						vm.Program[skipAddr].P2 = endAddr
-						vm.Program[notLessAddr].P2 = endAddr
-					}
-				}
-			}
+			s.emitMinUpdate(vm, fnExpr, table, accRegs[i], gen)
 		case "MAX":
-			// MAX(expr) - Keep largest value
-			if len(fnExpr.Args) > 0 {
-				argIdent, ok := fnExpr.Args[0].(*parser.IdentExpr)
-				if ok {
-					colIdx := table.GetColumnIndex(argIdent.Name)
-					if colIdx >= 0 {
-						// Load column value into a temp register
-						tempReg := gen.AllocReg()
-						recordIdx := schemaRecordIdx(table.Columns, colIdx)
-						vm.AddOp(vdbe.OpColumn, 0, recordIdx, tempReg)
-
-						// Skip NULL values
-						skipAddr := vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0) // P2 will be patched
-
-						// If accumulator is NULL, just copy the value (first value)
-						copyAddr := vm.AddOp(vdbe.OpIsNull, accRegs[i], 0, 0) // Jump to copy
-
-						// Accumulator is not NULL - compare
-						cmpReg := gen.AllocReg()
-						vm.AddOp(vdbe.OpGt, tempReg, accRegs[i], cmpReg) // cmpReg = 1 if tempReg > accRegs[i]
-						notGreaterAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0) // Jump if NOT greater
-
-						// Copy value (either first value or new max)
-						vm.Program[copyAddr].P2 = vm.NumOps()
-						vm.AddOp(vdbe.OpCopy, tempReg, accRegs[i], 0)
-
-						// End of MAX logic
-						endAddr := vm.NumOps()
-						vm.Program[skipAddr].P2 = endAddr
-						vm.Program[notGreaterAddr].P2 = endAddr
-					}
-				}
-			}
+			s.emitMaxUpdate(vm, fnExpr, table, accRegs[i], gen)
 		}
+	}
+
+	// Fix up WHERE skip address to point to Next
+	if stmt.Where != nil {
+		vm.Program[skipAddr].P2 = vm.NumOps()
 	}
 
 	// Continue scan
@@ -950,7 +1175,12 @@ type stmtTableInfo struct {
 // compileSelectWithJoins compiles a SELECT statement with JOIN clauses.
 func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	// Collect all tables involved in the query (base table + JOINs)
-	tables := []stmtTableInfo{{name: tableName, table: table, cursorIdx: 0}}
+	// Use alias if present, otherwise use table name
+	baseTableAlias := tableName
+	if len(stmt.From.Tables) > 0 && stmt.From.Tables[0].Alias != "" {
+		baseTableAlias = stmt.From.Tables[0].Alias
+	}
+	tables := []stmtTableInfo{{name: baseTableAlias, table: table, cursorIdx: 0}}
 
 	// Process JOIN clauses
 	for i, join := range stmt.From.Joins {
@@ -958,8 +1188,13 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 		if !ok {
 			return nil, fmt.Errorf("table not found: %s", join.Table.TableName)
 		}
+		// Use alias if present, otherwise use table name
+		joinTableAlias := join.Table.TableName
+		if join.Table.Alias != "" {
+			joinTableAlias = join.Table.Alias
+		}
 		tables = append(tables, stmtTableInfo{
-			name:      join.Table.TableName,
+			name:      joinTableAlias,
 			table:     joinTable,
 			cursorIdx: i + 1,
 		})
@@ -1190,15 +1425,21 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
 
-	row, err := insertFirstRow(stmt)
-	if err != nil {
-		return nil, err
+	// Execute BEFORE INSERT triggers
+	if err := s.executeBeforeInsertTriggers(stmt, table); err != nil {
+		return nil, fmt.Errorf("BEFORE INSERT trigger failed: %w", err)
 	}
 
+	if len(stmt.Values) == 0 {
+		return nil, fmt.Errorf("INSERT requires VALUES clause")
+	}
+
+	// Use first row to determine structure
+	firstRow := stmt.Values[0]
 	colNames := resolveInsertColumns(stmt, table)
 	rowidColIdx := findInsertRowidCol(colNames, table)
 
-	numRecordCols := len(row)
+	numRecordCols := len(firstRow)
 	if rowidColIdx >= 0 {
 		numRecordCols--
 	}
@@ -1216,19 +1457,28 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 	vm.AddOp(vdbe.OpOpenWrite, 0, int(table.RootPage), len(table.Columns))
 
 	paramIdx := 0
-	s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, &paramIdx)
-	s.emitInsertRecordValues(vm, row, rowidColIdx, recordStartReg, args, &paramIdx)
 
-	resultReg := recordStartReg + numRecordCols
-	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
+	// Loop over all rows in VALUES clause
+	for _, row := range stmt.Values {
+		s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, &paramIdx)
+		s.emitInsertRecordValues(vm, row, rowidColIdx, recordStartReg, args, &paramIdx)
 
-	// OpInsert: P1=cursor, P2=record register, P3=rowid register
-	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidReg)
+		resultReg := recordStartReg + numRecordCols
+		vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
 
-	// For AUTOINCREMENT tables, we need to pass table metadata to the Insert handler
-	// Store table name in P4 string for sequence management
-	if _, hasAutoincrement := table.HasAutoincrementColumn(); hasAutoincrement {
-		vm.Program[insertOp].P4.Z = table.Name
+		// OpInsert: P1=cursor, P2=record register, P3=rowid register
+		insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidReg)
+
+		// For AUTOINCREMENT tables, we need to pass table metadata to the Insert handler
+		// Store table name in P4 string for sequence management
+		if _, hasAutoincrement := table.HasAutoincrementColumn(); hasAutoincrement {
+			vm.Program[insertOp].P4.Z = table.Name
+		}
+	}
+
+	// Execute AFTER INSERT triggers
+	if err := s.executeAfterInsertTriggers(stmt, table); err != nil {
+		return nil, fmt.Errorf("AFTER INSERT trigger failed: %w", err)
 	}
 
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
@@ -1307,8 +1557,15 @@ func (s *Stmt) compileUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt, args []driv
 
 	// Build map of columns being updated
 	updateMap := make(map[string]parser.Expression)
+	updatedColumns := make([]string, 0, len(stmt.Sets))
 	for _, assign := range stmt.Sets {
 		updateMap[assign.Column] = assign.Value
+		updatedColumns = append(updatedColumns, assign.Column)
+	}
+
+	// Execute BEFORE UPDATE triggers
+	if err := s.executeBeforeUpdateTriggers(stmt, table, updatedColumns); err != nil {
+		return nil, fmt.Errorf("BEFORE UPDATE trigger failed: %w", err)
 	}
 
 	// Count non-rowid columns for record creation
@@ -1421,6 +1678,11 @@ func (s *Stmt) compileUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt, args []driv
 	// Move to next row and loop back
 	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
 
+	// Execute AFTER UPDATE triggers
+	if err := s.executeAfterUpdateTriggers(stmt, table, updatedColumns); err != nil {
+		return nil, fmt.Errorf("AFTER UPDATE trigger failed: %w", err)
+	}
+
 	// Close table cursor
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
 
@@ -1441,6 +1703,11 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 	table, ok := s.conn.schema.GetTable(stmt.Table)
 	if !ok {
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
+	}
+
+	// Execute BEFORE DELETE triggers
+	if err := s.executeBeforeDeleteTriggers(stmt, table); err != nil {
+		return nil, fmt.Errorf("BEFORE DELETE trigger failed: %w", err)
 	}
 
 	vm.AllocMemory(10)
@@ -1493,6 +1760,11 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 
 	// Move to next row and loop back (common for both WHERE and non-WHERE cases)
 	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
+
+	// Execute AFTER DELETE triggers
+	if err := s.executeAfterDeleteTriggers(stmt, table); err != nil {
+		return nil, fmt.Errorf("AFTER DELETE trigger failed: %w", err)
+	}
 
 	// Close table cursor
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
@@ -1592,6 +1864,118 @@ func (s *Stmt) compileRollback(vm *vdbe.VDBE, stmt *parser.RollbackStmt, args []
 	return vm, nil
 }
 
+// compileCreateView compiles a CREATE VIEW statement.
+func (s *Stmt) compileCreateView(vm *vdbe.VDBE, stmt *parser.CreateViewStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+	vm.AllocMemory(10)
+
+	// Create the view in the schema
+	_, err := s.conn.schema.CreateView(stmt)
+	if err != nil {
+		return nil, err
+	}
+
+	// In a full implementation, this would also:
+	// 1. Insert entry into sqlite_master table
+	// 2. Update the schema cookie
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
+// compileDropView compiles a DROP VIEW statement.
+func (s *Stmt) compileDropView(vm *vdbe.VDBE, stmt *parser.DropViewStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+	vm.AllocMemory(10)
+
+	// Check if view exists
+	_, exists := s.conn.schema.GetView(stmt.Name)
+	if !exists {
+		if stmt.IfExists {
+			// IF EXISTS was specified, silently succeed
+			vm.AddOp(vdbe.OpInit, 0, 0, 0)
+			vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+			return vm, nil
+		}
+		return nil, fmt.Errorf("view not found: %s", stmt.Name)
+	}
+
+	// Drop the view from the schema
+	if err := s.conn.schema.DropView(stmt.Name); err != nil {
+		return nil, err
+	}
+
+	// In a full implementation, this would:
+	// 1. Delete entry from sqlite_master table
+	// 2. Update the schema cookie
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
+// compileCreateTrigger compiles a CREATE TRIGGER statement.
+func (s *Stmt) compileCreateTrigger(vm *vdbe.VDBE, stmt *parser.CreateTriggerStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+	vm.AllocMemory(10)
+
+	// Create the trigger in the schema
+	_, err := s.conn.schema.CreateTrigger(stmt)
+	if err != nil {
+		if stmt.IfNotExists && err.Error() == fmt.Sprintf("trigger already exists: %s", stmt.Name) {
+			// IF NOT EXISTS was specified, silently succeed
+			vm.AddOp(vdbe.OpInit, 0, 0, 0)
+			vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+			return vm, nil
+		}
+		return nil, err
+	}
+
+	// In a full implementation, this would also:
+	// 1. Insert entry into sqlite_master table
+	// 2. Update the schema cookie
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
+// compileDropTrigger compiles a DROP TRIGGER statement.
+func (s *Stmt) compileDropTrigger(vm *vdbe.VDBE, stmt *parser.DropTriggerStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+	vm.AllocMemory(10)
+
+	// Check if trigger exists
+	_, exists := s.conn.schema.GetTrigger(stmt.Name)
+	if !exists {
+		if stmt.IfExists {
+			// IF EXISTS was specified, silently succeed
+			vm.AddOp(vdbe.OpInit, 0, 0, 0)
+			vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+			return vm, nil
+		}
+		return nil, fmt.Errorf("trigger not found: %s", stmt.Name)
+	}
+
+	// Drop the trigger from the schema
+	if err := s.conn.schema.DropTrigger(stmt.Name); err != nil {
+		return nil, err
+	}
+
+	// In a full implementation, this would:
+	// 1. Delete entry from sqlite_master table
+	// 2. Update the schema cookie
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
 // valuesToNamedValues converts []driver.Value to []driver.NamedValue
 func valuesToNamedValues(args []driver.Value) []driver.NamedValue {
 	nv := make([]driver.NamedValue, len(args))
@@ -1683,7 +2067,15 @@ func (s *Stmt) hasFromSubqueries(stmt *parser.SelectStmt) bool {
 
 // compileSelectWithFromSubqueries compiles a SELECT with FROM subqueries.
 func (s *Stmt) compileSelectWithFromSubqueries(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	// Special case: if we have a single FROM subquery and the outer query is simple
+	// (just selecting columns, possibly with WHERE/ORDER BY), we can optimize by
+	// compiling the subquery directly and handling column references
+	if len(stmt.From.Tables) == 1 && stmt.From.Tables[0].Subquery != nil && len(stmt.From.Joins) == 0 {
+		return s.compileSingleFromSubquery(vm, stmt, args)
+	}
+
 	// Strategy: compile each FROM subquery into a temp table, then compile main query
+	// This is a more complex case with multiple subqueries or joins
 
 	// Allocate cursors for all subqueries and main query
 	numSubqueries := s.countFromSubqueries(stmt)
@@ -1731,6 +2123,97 @@ func (s *Stmt) compileSelectWithFromSubqueries(vm *vdbe.VDBE, stmt *parser.Selec
 	// If all tables are subqueries, emit a placeholder result
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	return vm, nil
+}
+
+// compileSingleFromSubquery compiles a SELECT with a single FROM subquery.
+// This handles cases like: SELECT columns FROM (subquery) [WHERE ...] [ORDER BY ...]
+func (s *Stmt) compileSingleFromSubquery(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	subquery := stmt.From.Tables[0].Subquery
+	_ = stmt.From.Tables[0].Alias // subqueryAlias - may be used in future
+
+	// Helper function to make a shallow copy of a SELECT statement
+	copySelectStmtShallow := func(stmt *parser.SelectStmt) *parser.SelectStmt {
+		if stmt == nil {
+			return nil
+		}
+		copy := *stmt
+		return &copy
+	}
+
+	// Helper function to check if SELECT is SELECT *
+	isSelectStar := func(stmt *parser.SelectStmt) bool {
+		if len(stmt.Columns) == 1 {
+			col := stmt.Columns[0]
+			if col.Star && col.Table == "" {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Special optimization: if outer query is just SELECT * (or all columns from subquery)
+	// and has no WHERE clause, just compile the subquery directly with any ORDER BY from outer
+	if isSelectStar(stmt) && stmt.Where == nil {
+		// Compile the subquery
+		subVM, err := s.compileSelect(s.newVDBE(), subquery, args)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compile FROM subquery: %w", err)
+		}
+
+		// If the outer query has ORDER BY, we need to apply it
+		// For now, just return the subquery as-is
+		// TODO: Handle ORDER BY from outer query
+		return subVM, nil
+	}
+
+	// For more complex cases (specific columns, WHERE clause, etc.),
+	// we need to map column references in the outer query to subquery columns
+	// This requires knowing the subquery's result columns
+
+	// Compile the subquery to get its structure
+	subVM, err := s.compileSelect(s.newVDBE(), subquery, args)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile FROM subquery: %w", err)
+	}
+
+	// Get the subquery's result columns
+	subqueryColumns := subVM.ResultCols
+
+	// Build a new SELECT that selects only the requested columns from the subquery
+	// Create a modified subquery that only selects the requested columns
+	modifiedSubquery := copySelectStmtShallow(subquery)
+
+	// Build column mapping: which columns from the subquery do we need?
+	var newColumns []parser.ResultColumn
+	for _, outerCol := range stmt.Columns {
+		if outerCol.Star {
+			// SELECT * - use all subquery columns
+			newColumns = subquery.Columns
+			break
+		}
+
+		if ident, ok := outerCol.Expr.(*parser.IdentExpr); ok {
+			// Find this column in the subquery
+			found := false
+			for i, subCol := range subqueryColumns {
+				if subCol == ident.Name {
+					// Include this column from the subquery
+					newColumns = append(newColumns, subquery.Columns[i])
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("column not found: %s", ident.Name)
+			}
+		}
+	}
+
+	// Update the subquery to only select the requested columns
+	modifiedSubquery.Columns = newColumns
+
+	// Recompile the modified subquery
+	return s.compileSelect(s.newVDBE(), modifiedSubquery, args)
 }
 
 // countFromSubqueries counts the number of subqueries in FROM clause.
@@ -1984,7 +2467,246 @@ func (s *Stmt) compileInnerStatement(vm *vdbe.VDBE, stmt parser.Statement, args 
 		return s.compileCreateTable(vm, innerStmt, args)
 	case *parser.DropTableStmt:
 		return s.compileDropTable(vm, innerStmt, args)
+	case *parser.CreateViewStmt:
+		return s.compileCreateView(vm, innerStmt, args)
+	case *parser.DropViewStmt:
+		return s.compileDropView(vm, innerStmt, args)
 	default:
 		return nil, fmt.Errorf("EXPLAIN not supported for statement type: %T", stmt)
+	}
+}
+
+// ============================================================================
+// Trigger Execution Helper Functions
+// ============================================================================
+
+// executeBeforeInsertTriggers executes all BEFORE INSERT triggers for the given table.
+func (s *Stmt) executeBeforeInsertTriggers(stmt *parser.InsertStmt, table *schema.Table) error {
+	// Note: This is called during compilation, not runtime. For proper trigger execution,
+	// we need to prepare NEW row data from the INSERT VALUES clause.
+	// In a production implementation, triggers would execute during VDBE runtime when
+	// actual row data is available. This is a simplified version that executes at compile time.
+
+	timing := parser.TriggerBefore
+	event := parser.TriggerInsert
+	triggers := s.conn.schema.GetTableTriggers(stmt.Table, &timing, &event)
+
+	if len(triggers) == 0 {
+		return nil // No triggers to execute
+	}
+
+	// Prepare NEW row data from INSERT statement
+	newRow := s.prepareNewRowForInsert(stmt, table)
+
+	// Create trigger context
+	ctx := &engine.TriggerContext{
+		Schema:    s.conn.schema,
+		Pager:     s.conn.pager,
+		Btree:     s.conn.btree,
+		OldRow:    nil, // INSERT has no OLD row
+		NewRow:    newRow,
+		TableName: stmt.Table,
+	}
+
+	// Execute triggers
+	return engine.ExecuteTriggersForInsert(ctx)
+}
+
+// executeAfterInsertTriggers executes all AFTER INSERT triggers for the given table.
+func (s *Stmt) executeAfterInsertTriggers(stmt *parser.InsertStmt, table *schema.Table) error {
+	timing := parser.TriggerAfter
+	event := parser.TriggerInsert
+	triggers := s.conn.schema.GetTableTriggers(stmt.Table, &timing, &event)
+
+	if len(triggers) == 0 {
+		return nil
+	}
+
+	// Prepare NEW row data
+	newRow := s.prepareNewRowForInsert(stmt, table)
+
+	ctx := &engine.TriggerContext{
+		Schema:    s.conn.schema,
+		Pager:     s.conn.pager,
+		Btree:     s.conn.btree,
+		OldRow:    nil,
+		NewRow:    newRow,
+		TableName: stmt.Table,
+	}
+
+	return engine.ExecuteAfterInsertTriggers(ctx)
+}
+
+// executeBeforeUpdateTriggers executes all BEFORE UPDATE triggers for the given table.
+func (s *Stmt) executeBeforeUpdateTriggers(stmt *parser.UpdateStmt, table *schema.Table, updatedColumns []string) error {
+	timing := parser.TriggerBefore
+	event := parser.TriggerUpdate
+	triggers := s.conn.schema.GetTableTriggers(stmt.Table, &timing, &event)
+
+	if len(triggers) == 0 {
+		return nil
+	}
+
+	// Note: In a full implementation, we would need to iterate through each row
+	// and execute triggers with the actual OLD and NEW values. This simplified
+	// version executes once at compile time with placeholder data.
+
+	// For UPDATE, we need both OLD and NEW rows
+	// Since we're at compile time, we can't access actual row data
+	// In a production implementation, this would be done in the VDBE loop
+	oldRow := make(map[string]interface{})
+	newRow := make(map[string]interface{})
+
+	ctx := &engine.TriggerContext{
+		Schema:    s.conn.schema,
+		Pager:     s.conn.pager,
+		Btree:     s.conn.btree,
+		OldRow:    oldRow,
+		NewRow:    newRow,
+		TableName: stmt.Table,
+	}
+
+	return engine.ExecuteTriggersForUpdate(ctx, updatedColumns)
+}
+
+// executeAfterUpdateTriggers executes all AFTER UPDATE triggers for the given table.
+func (s *Stmt) executeAfterUpdateTriggers(stmt *parser.UpdateStmt, table *schema.Table, updatedColumns []string) error {
+	timing := parser.TriggerAfter
+	event := parser.TriggerUpdate
+	triggers := s.conn.schema.GetTableTriggers(stmt.Table, &timing, &event)
+
+	if len(triggers) == 0 {
+		return nil
+	}
+
+	oldRow := make(map[string]interface{})
+	newRow := make(map[string]interface{})
+
+	ctx := &engine.TriggerContext{
+		Schema:    s.conn.schema,
+		Pager:     s.conn.pager,
+		Btree:     s.conn.btree,
+		OldRow:    oldRow,
+		NewRow:    newRow,
+		TableName: stmt.Table,
+	}
+
+	return engine.ExecuteAfterUpdateTriggers(ctx, updatedColumns)
+}
+
+// executeBeforeDeleteTriggers executes all BEFORE DELETE triggers for the given table.
+func (s *Stmt) executeBeforeDeleteTriggers(stmt *parser.DeleteStmt, table *schema.Table) error {
+	timing := parser.TriggerBefore
+	event := parser.TriggerDelete
+	triggers := s.conn.schema.GetTableTriggers(stmt.Table, &timing, &event)
+
+	if len(triggers) == 0 {
+		return nil
+	}
+
+	// For DELETE, we need the OLD row (the row being deleted)
+	// Since we're at compile time, we use placeholder data
+	oldRow := make(map[string]interface{})
+
+	ctx := &engine.TriggerContext{
+		Schema:    s.conn.schema,
+		Pager:     s.conn.pager,
+		Btree:     s.conn.btree,
+		OldRow:    oldRow,
+		NewRow:    nil, // DELETE has no NEW row
+		TableName: stmt.Table,
+	}
+
+	return engine.ExecuteTriggersForDelete(ctx)
+}
+
+// executeAfterDeleteTriggers executes all AFTER DELETE triggers for the given table.
+func (s *Stmt) executeAfterDeleteTriggers(stmt *parser.DeleteStmt, table *schema.Table) error {
+	timing := parser.TriggerAfter
+	event := parser.TriggerDelete
+	triggers := s.conn.schema.GetTableTriggers(stmt.Table, &timing, &event)
+
+	if len(triggers) == 0 {
+		return nil
+	}
+
+	oldRow := make(map[string]interface{})
+
+	ctx := &engine.TriggerContext{
+		Schema:    s.conn.schema,
+		Pager:     s.conn.pager,
+		Btree:     s.conn.btree,
+		OldRow:    oldRow,
+		NewRow:    nil,
+		TableName: stmt.Table,
+	}
+
+	return engine.ExecuteAfterDeleteTriggers(ctx)
+}
+
+// prepareNewRowForInsert constructs a NEW row map from the INSERT statement.
+// This extracts values from the first row of the VALUES clause.
+func (s *Stmt) prepareNewRowForInsert(stmt *parser.InsertStmt, table *schema.Table) map[string]interface{} {
+	newRow := make(map[string]interface{})
+
+	if len(stmt.Values) == 0 {
+		return newRow
+	}
+
+	// Get column names (use all table columns if not specified)
+	colNames := stmt.Columns
+	if len(colNames) == 0 {
+		colNames = make([]string, len(table.Columns))
+		for i, col := range table.Columns {
+			colNames[i] = col.Name
+		}
+	}
+
+	// Get first row values
+	firstRow := stmt.Values[0]
+
+	// Map column names to values
+	for i, colName := range colNames {
+		if i < len(firstRow) {
+			val := s.extractValueFromExpression(firstRow[i])
+			newRow[colName] = val
+		}
+	}
+
+	return newRow
+}
+
+// extractValueFromExpression extracts the actual value from an expression.
+// This handles literal values and returns placeholder for complex expressions.
+func (s *Stmt) extractValueFromExpression(expr parser.Expression) interface{} {
+	switch e := expr.(type) {
+	case *parser.LiteralExpr:
+		return s.parseLiteralValue(e)
+	case *parser.VariableExpr:
+		// Bound parameter - return placeholder
+		return nil
+	default:
+		// Complex expression - return nil placeholder
+		return nil
+	}
+}
+
+// parseLiteralValue converts a literal expression to its Go value.
+func (s *Stmt) parseLiteralValue(expr *parser.LiteralExpr) interface{} {
+	switch expr.Type {
+	case parser.LiteralInteger:
+		var val int64
+		fmt.Sscanf(expr.Value, "%d", &val)
+		return val
+	case parser.LiteralFloat:
+		var val float64
+		fmt.Sscanf(expr.Value, "%f", &val)
+		return val
+	case parser.LiteralString:
+		return expr.Value
+	case parser.LiteralNull:
+		return nil
+	default:
+		return expr.Value
 	}
 }

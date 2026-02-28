@@ -149,95 +149,128 @@ func GenerateExplain(stmt parser.Statement) (*ExplainPlan, error) {
 
 // generateExplainSelect generates an explain plan for a SELECT statement.
 func generateExplainSelect(plan *ExplainPlan, stmt *parser.SelectStmt) (*ExplainPlan, error) {
-	// Check if this is a simple SELECT or has complex features
-	hasJoins := stmt.From != nil && len(stmt.From.Joins) > 0
-	hasSubqueries := hasFromSubqueries(stmt)
-	hasAggregates := detectAggregates(stmt)
-	hasOrderBy := len(stmt.OrderBy) > 0
+	features := analyzeSelectFeatures(stmt)
+	tableName := extractMainTableName(stmt)
 
-	// Get the main table name
-	var tableName string
-	if stmt.From != nil && len(stmt.From.Tables) > 0 {
-		tableName = stmt.From.Tables[0].TableName
-		if tableName == "" && stmt.From.Tables[0].Subquery != nil {
-			tableName = "subquery"
-		}
+	if features.hasSubqueries {
+		return generateExplainWithSubqueries(plan, stmt)
 	}
 
-	if hasSubqueries {
-		// Handle FROM subqueries
-		root := plan.AddNode(nil, "COMPOUND QUERY")
-		for i, table := range stmt.From.Tables {
-			if table.Subquery != nil {
-				subNode := plan.AddNode(root, fmt.Sprintf("SUBQUERY %d", i+1))
-				// Recursively explain the subquery
-				subPlan, err := generateExplainSelect(NewExplainPlan(), table.Subquery)
-				if err == nil && len(subPlan.Roots) > 0 {
-					// Merge subplan nodes as children
-					for _, subRoot := range subPlan.Roots {
-						mergeSubplan(subNode, subRoot, plan)
-					}
+	if features.hasJoins {
+		return generateExplainWithJoins(plan, stmt, tableName)
+	}
+
+	return generateExplainSimpleSelect(plan, stmt, tableName, features)
+}
+
+// selectFeatures represents features detected in a SELECT statement.
+type selectFeatures struct {
+	hasJoins      bool
+	hasSubqueries bool
+	hasAggregates bool
+	hasOrderBy    bool
+}
+
+// analyzeSelectFeatures analyzes a SELECT statement for various features.
+func analyzeSelectFeatures(stmt *parser.SelectStmt) selectFeatures {
+	return selectFeatures{
+		hasJoins:      stmt.From != nil && len(stmt.From.Joins) > 0,
+		hasSubqueries: hasFromSubqueries(stmt),
+		hasAggregates: detectAggregates(stmt),
+		hasOrderBy:    len(stmt.OrderBy) > 0,
+	}
+}
+
+// extractMainTableName extracts the main table name from a SELECT statement.
+func extractMainTableName(stmt *parser.SelectStmt) string {
+	if stmt.From != nil && len(stmt.From.Tables) > 0 {
+		tableName := stmt.From.Tables[0].TableName
+		if tableName == "" && stmt.From.Tables[0].Subquery != nil {
+			return "subquery"
+		}
+		return tableName
+	}
+	return ""
+}
+
+// generateExplainWithSubqueries handles EXPLAIN for queries with subqueries.
+func generateExplainWithSubqueries(plan *ExplainPlan, stmt *parser.SelectStmt) (*ExplainPlan, error) {
+	root := plan.AddNode(nil, "COMPOUND QUERY")
+	for i, table := range stmt.From.Tables {
+		if table.Subquery != nil {
+			subNode := plan.AddNode(root, fmt.Sprintf("SUBQUERY %d", i+1))
+			subPlan, err := generateExplainSelect(NewExplainPlan(), table.Subquery)
+			if err == nil && len(subPlan.Roots) > 0 {
+				for _, subRoot := range subPlan.Roots {
+					mergeSubplan(subNode, subRoot, plan)
 				}
 			}
 		}
-	} else if hasJoins {
-		// Handle JOINs
-		root := plan.AddNode(nil, "QUERY PLAN")
+	}
+	return plan, nil
+}
 
-		// Add main table scan
-		scanDetail := formatTableScan(tableName, stmt.Where, false)
-		mainScan := plan.AddNode(root, scanDetail)
+// generateExplainWithJoins handles EXPLAIN for queries with JOINs.
+func generateExplainWithJoins(plan *ExplainPlan, stmt *parser.SelectStmt, tableName string) (*ExplainPlan, error) {
+	root := plan.AddNode(nil, "QUERY PLAN")
+	scanDetail := formatTableScan(tableName, stmt.Where, false)
+	mainScan := plan.AddNode(root, scanDetail)
 
-		// Add JOIN operations
-		for _, join := range stmt.From.Joins {
-			joinType := "INNER JOIN"
-			switch join.Type {
-			case parser.JoinLeft:
-				joinType = "LEFT JOIN"
-			case parser.JoinRight:
-				joinType = "RIGHT JOIN"
-			case parser.JoinFull:
-				joinType = "FULL JOIN"
-			case parser.JoinCross:
-				joinType = "CROSS JOIN"
-			}
-
-			joinDetail := fmt.Sprintf("%s", joinType)
-			joinNode := plan.AddNode(mainScan, joinDetail)
-
-			// Add joined table scan
-			scanDetail := formatTableScan(join.Table.TableName, join.Condition.On, false)
-			plan.AddNode(joinNode, scanDetail)
-		}
-	} else {
-		// Simple SELECT from single table
-		root := plan.AddNode(nil, "QUERY PLAN")
-
-		// Determine scan type
-		scanDetail := formatTableScan(tableName, stmt.Where, false)
-		scanNode := plan.AddNode(root, scanDetail)
-
-		// Add aggregate information if present
-		if hasAggregates {
-			plan.AddNode(scanNode, "USE TEMP B-TREE FOR GROUP BY")
-		}
-
-		// Add sort information if present
-		if hasOrderBy {
-			var orderCols []string
-			for _, term := range stmt.OrderBy {
-				if ident, ok := term.Expr.(*parser.IdentExpr); ok {
-					orderCols = append(orderCols, ident.Name)
-				}
-			}
-			if len(orderCols) > 0 {
-				sortDetail := fmt.Sprintf("USE TEMP B-TREE FOR ORDER BY (%s)", strings.Join(orderCols, ", "))
-				plan.AddNode(scanNode, sortDetail)
-			}
-		}
+	for _, join := range stmt.From.Joins {
+		joinType := formatJoinType(join.Type)
+		joinNode := plan.AddNode(mainScan, joinType)
+		scanDetail := formatTableScan(join.Table.TableName, join.Condition.On, false)
+		plan.AddNode(joinNode, scanDetail)
 	}
 
 	return plan, nil
+}
+
+// formatJoinType returns the string representation of a join type.
+func formatJoinType(joinType parser.JoinType) string {
+	switch joinType {
+	case parser.JoinLeft:
+		return "LEFT JOIN"
+	case parser.JoinRight:
+		return "RIGHT JOIN"
+	case parser.JoinFull:
+		return "FULL JOIN"
+	case parser.JoinCross:
+		return "CROSS JOIN"
+	default:
+		return "INNER JOIN"
+	}
+}
+
+// generateExplainSimpleSelect handles EXPLAIN for simple SELECT queries.
+func generateExplainSimpleSelect(plan *ExplainPlan, stmt *parser.SelectStmt, tableName string, features selectFeatures) (*ExplainPlan, error) {
+	root := plan.AddNode(nil, "QUERY PLAN")
+	scanDetail := formatTableScan(tableName, stmt.Where, false)
+	scanNode := plan.AddNode(root, scanDetail)
+
+	if features.hasAggregates {
+		plan.AddNode(scanNode, "USE TEMP B-TREE FOR GROUP BY")
+	}
+
+	if features.hasOrderBy {
+		addOrderByNode(plan, scanNode, stmt.OrderBy)
+	}
+
+	return plan, nil
+}
+
+// addOrderByNode adds an ORDER BY node to the explain plan.
+func addOrderByNode(plan *ExplainPlan, parent *ExplainNode, orderBy []parser.OrderingTerm) {
+	var orderCols []string
+	for _, term := range orderBy {
+		if ident, ok := term.Expr.(*parser.IdentExpr); ok {
+			orderCols = append(orderCols, ident.Name)
+		}
+	}
+	if len(orderCols) > 0 {
+		sortDetail := fmt.Sprintf("USE TEMP B-TREE FOR ORDER BY (%s)", strings.Join(orderCols, ", "))
+		plan.AddNode(parent, sortDetail)
+	}
 }
 
 // generateExplainInsert generates an explain plan for an INSERT statement.

@@ -283,7 +283,7 @@ func TestLRUCacheDirtyList(t *testing.T) {
 	}
 
 	// Mark page 3 as dirty through cache
-	cache.MarkDirty(3)
+	cache.MarkDirtyByPgno(3)
 	dirty = cache.GetDirtyPages()
 	if len(dirty) != 3 {
 		t.Errorf("expected 3 dirty pages after MarkDirty, got %d", len(dirty))
@@ -794,7 +794,7 @@ func TestLRUCacheWriteThroughMode(t *testing.T) {
 	cache.Put(page1)
 
 	// Mark it dirty - should flush immediately in write-through mode
-	err = cache.MarkDirty(1)
+	err = cache.MarkDirtyByPgno(1)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -829,7 +829,7 @@ func TestLRUCacheWriteBackMode(t *testing.T) {
 	cache.Put(page1)
 
 	// Mark it dirty - should NOT flush immediately in write-back mode
-	err = cache.MarkDirty(1)
+	err = cache.MarkDirtyByPgno(1)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}

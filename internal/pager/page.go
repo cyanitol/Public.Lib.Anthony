@@ -341,6 +341,17 @@ func (c *PageCache) MakeClean() {
 	}
 }
 
+// MarkDirty marks a page as dirty and adds it to the dirty list.
+func (c *PageCache) MarkDirty(page *DbPage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Add to dirty list if the page is dirty
+	if page.IsDirty() {
+		c.addToDirtyList(page)
+	}
+}
+
 // Size returns the number of pages in the cache.
 func (c *PageCache) Size() int {
 	c.mu.RLock()

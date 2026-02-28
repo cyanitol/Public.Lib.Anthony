@@ -230,55 +230,49 @@ func (c *BtCursor) splitInteriorPage(key int64, childPgno uint32) error {
 // Returns cells in sorted order by key
 // Properly handles overflow pages when encoding the new cell
 func (c *BtCursor) collectLeafCellsForSplit(page *BtreePage, newKey int64, newPayload []byte) ([][]byte, []int64, error) {
-	numCells := int(page.Header.NumCells)
-	cells := make([][]byte, 0, numCells+1)
-	keys := make([]int64, 0, numCells+1)
+	newCellData, err := c.encodeNewCellWithOverflow(newKey, newPayload)
+	if err != nil {
+		return nil, nil, err
+	}
 
-	// Encode new cell with proper overflow handling
-	var newCellData []byte
+	return c.mergeNewCellWithExisting(page, newKey, newCellData)
+}
+
+// encodeNewCellWithOverflow encodes the new cell with proper overflow handling.
+func (c *BtCursor) encodeNewCellWithOverflow(newKey int64, newPayload []byte) ([]byte, error) {
 	payloadSize := uint32(len(newPayload))
 	localSize := CalculateLocalPayload(payloadSize, c.Btree.UsableSize, true)
 
 	if payloadSize > uint32(localSize) {
-		// Need overflow pages for new cell
 		overflowPage, err := c.WriteOverflow(newPayload, localSize, c.Btree.UsableSize)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to write overflow for split: %w", err)
+			return nil, fmt.Errorf("failed to write overflow for split: %w", err)
 		}
-		newCellData = c.encodeTableLeafCellWithOverflow(newKey, newPayload[:localSize], overflowPage, payloadSize)
-	} else {
-		// No overflow needed
-		newCellData = EncodeTableLeafCell(newKey, newPayload)
+		return c.encodeTableLeafCellWithOverflow(newKey, newPayload[:localSize], overflowPage, payloadSize), nil
 	}
+	return EncodeTableLeafCell(newKey, newPayload), nil
+}
 
+// mergeNewCellWithExisting merges the new cell with existing cells in sorted order.
+func (c *BtCursor) mergeNewCellWithExisting(page *BtreePage, newKey int64, newCellData []byte) ([][]byte, []int64, error) {
+	numCells := int(page.Header.NumCells)
+	cells := make([][]byte, 0, numCells+1)
+	keys := make([]int64, 0, numCells+1)
 	inserted := false
 
 	for i := 0; i < numCells; i++ {
-		cellPtr, err := page.Header.GetCellPointer(page.Data, i)
+		if !inserted {
+			inserted = c.tryInsertNewCell(&cells, &keys, newKey, newCellData, i, page)
+		}
+
+		cellData, cellKey, err := c.copyExistingCell(page, i)
 		if err != nil {
 			return nil, nil, err
 		}
-
-		cellInfo, err := ParseCell(page.Header.PageType, page.Data[cellPtr:], page.UsableSize)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		// Insert new cell in sorted position
-		if !inserted && newKey < cellInfo.Key {
-			cells = append(cells, newCellData)
-			keys = append(keys, newKey)
-			inserted = true
-		}
-
-		// Copy existing cell data
-		cellData := make([]byte, cellInfo.CellSize)
-		copy(cellData, page.Data[cellPtr:cellPtr+uint16(cellInfo.CellSize)])
 		cells = append(cells, cellData)
-		keys = append(keys, cellInfo.Key)
+		keys = append(keys, cellKey)
 	}
 
-	// If new cell wasn't inserted yet, it goes at the end
 	if !inserted {
 		cells = append(cells, newCellData)
 		keys = append(keys, newKey)
@@ -287,54 +281,118 @@ func (c *BtCursor) collectLeafCellsForSplit(page *BtreePage, newKey int64, newPa
 	return cells, keys, nil
 }
 
+// tryInsertNewCell inserts the new cell if its key is less than the current cell's key.
+func (c *BtCursor) tryInsertNewCell(cells *[][]byte, keys *[]int64, newKey int64, newCellData []byte, idx int, page *BtreePage) bool {
+	cellPtr, err := page.Header.GetCellPointer(page.Data, idx)
+	if err != nil {
+		return false
+	}
+
+	cellInfo, err := ParseCell(page.Header.PageType, page.Data[cellPtr:], page.UsableSize)
+	if err != nil {
+		return false
+	}
+
+	if newKey < cellInfo.Key {
+		*cells = append(*cells, newCellData)
+		*keys = append(*keys, newKey)
+		return true
+	}
+	return false
+}
+
+// copyExistingCell copies an existing cell from the page.
+func (c *BtCursor) copyExistingCell(page *BtreePage, idx int) ([]byte, int64, error) {
+	cellPtr, err := page.Header.GetCellPointer(page.Data, idx)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	cellInfo, err := ParseCell(page.Header.PageType, page.Data[cellPtr:], page.UsableSize)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	cellData := make([]byte, cellInfo.CellSize)
+	copy(cellData, page.Data[cellPtr:cellPtr+uint16(cellInfo.CellSize)])
+	return cellData, cellInfo.Key, nil
+}
+
 // collectInteriorCellsForSplit collects all existing interior cells plus the new cell
 func (c *BtCursor) collectInteriorCellsForSplit(page *BtreePage, newKey int64, newChildPgno uint32) ([][]byte, []int64, []uint32, error) {
 	numCells := int(page.Header.NumCells)
 	cells := make([][]byte, 0, numCells+1)
 	keys := make([]int64, 0, numCells+1)
-	childPages := make([]uint32, 0, numCells+2) // +2 for new cell and rightmost child
+	childPages := make([]uint32, 0, numCells+2)
 
 	newCellData := EncodeTableInteriorCell(newChildPgno, newKey)
 	inserted := false
 
 	for i := 0; i < numCells; i++ {
-		cellPtr, err := page.Header.GetCellPointer(page.Data, i)
+		inserted = c.tryInsertInteriorCell(&cells, &keys, &childPages, newKey, newChildPgno, newCellData, inserted, page, i)
+
+		cellData, cellKey, childPage, err := c.copyExistingInteriorCell(page, i)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-
-		cellInfo, err := ParseCell(page.Header.PageType, page.Data[cellPtr:], page.UsableSize)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-
-		// Insert new cell in sorted position
-		if !inserted && newKey < cellInfo.Key {
-			cells = append(cells, newCellData)
-			keys = append(keys, newKey)
-			childPages = append(childPages, newChildPgno)
-			inserted = true
-		}
-
-		// Copy existing cell data
-		cellData := make([]byte, cellInfo.CellSize)
-		copy(cellData, page.Data[cellPtr:cellPtr+uint16(cellInfo.CellSize)])
 		cells = append(cells, cellData)
-		keys = append(keys, cellInfo.Key)
-		childPages = append(childPages, cellInfo.ChildPage)
+		keys = append(keys, cellKey)
+		childPages = append(childPages, childPage)
 	}
 
-	// Add rightmost child
-	childPages = append(childPages, page.Header.RightChild)
+	return c.finalizeInteriorCellCollection(cells, keys, childPages, newCellData, newKey, newChildPgno, page.Header.RightChild, inserted)
+}
 
-	// If new cell wasn't inserted yet, insert before rightmost child
+// tryInsertInteriorCell attempts to insert the new interior cell in sorted position.
+func (c *BtCursor) tryInsertInteriorCell(cells *[][]byte, keys *[]int64, childPages *[]uint32, newKey int64, newChildPgno uint32, newCellData []byte, inserted bool, page *BtreePage, idx int) bool {
+	if inserted {
+		return true
+	}
+
+	cellPtr, err := page.Header.GetCellPointer(page.Data, idx)
+	if err != nil {
+		return false
+	}
+
+	cellInfo, err := ParseCell(page.Header.PageType, page.Data[cellPtr:], page.UsableSize)
+	if err != nil {
+		return false
+	}
+
+	if newKey < cellInfo.Key {
+		*cells = append(*cells, newCellData)
+		*keys = append(*keys, newKey)
+		*childPages = append(*childPages, newChildPgno)
+		return true
+	}
+	return false
+}
+
+// copyExistingInteriorCell copies an existing interior cell from the page.
+func (c *BtCursor) copyExistingInteriorCell(page *BtreePage, idx int) ([]byte, int64, uint32, error) {
+	cellPtr, err := page.Header.GetCellPointer(page.Data, idx)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	cellInfo, err := ParseCell(page.Header.PageType, page.Data[cellPtr:], page.UsableSize)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	cellData := make([]byte, cellInfo.CellSize)
+	copy(cellData, page.Data[cellPtr:cellPtr+uint16(cellInfo.CellSize)])
+	return cellData, cellInfo.Key, cellInfo.ChildPage, nil
+}
+
+// finalizeInteriorCellCollection finalizes the collection by adding the rightmost child and potentially the new cell.
+func (c *BtCursor) finalizeInteriorCellCollection(cells [][]byte, keys []int64, childPages []uint32, newCellData []byte, newKey int64, newChildPgno uint32, rightChild uint32, inserted bool) ([][]byte, []int64, []uint32, error) {
+	childPages = append(childPages, rightChild)
+
 	if !inserted {
 		cells = append(cells, newCellData)
 		keys = append(keys, newKey)
-		// Insert new child page before rightmost
-		childPages = append([]uint32{}, childPages[:len(childPages)-1]...)
-		childPages = append(childPages, newChildPgno)
-		childPages = append(childPages, page.Header.RightChild)
+		childPages = append(childPages[:len(childPages)-1], newChildPgno, rightChild)
 	}
 
 	return cells, keys, childPages, nil
@@ -343,95 +401,114 @@ func (c *BtCursor) collectInteriorCellsForSplit(page *BtreePage, newKey int64, n
 // updateParentAfterSplit updates the parent page after a split
 // If the current page is root, creates a new root
 func (c *BtCursor) updateParentAfterSplit(leftPage, rightPage uint32, dividerKey int64) error {
-	// If we're at the root, create a new root
 	if c.Depth == 0 || leftPage == c.RootPage {
 		return c.createNewRoot(leftPage, rightPage, dividerKey)
 	}
 
-	// Otherwise, insert divider into parent
 	parentDepth := c.Depth - 1
 	parentPage := c.PageStack[parentDepth]
 
-	// Load parent page
+	parent, dividerCell, err := c.loadParentAndCreateDivider(parentPage, leftPage, dividerKey)
+	if err != nil {
+		return err
+	}
+
+	if len(dividerCell) > parent.FreeSpace() {
+		return c.splitParentRecursively(parentPage, parentDepth, dividerKey, leftPage, parent)
+	}
+
+	return c.insertDividerIntoParent(parent, parentPage, rightPage, dividerKey, dividerCell)
+}
+
+// loadParentAndCreateDivider loads the parent page and creates the divider cell.
+func (c *BtCursor) loadParentAndCreateDivider(parentPage, leftPage uint32, dividerKey int64) (*BtreePage, []byte, error) {
 	parentData, err := c.Btree.GetPage(parentPage)
 	if err != nil {
-		return fmt.Errorf("failed to get parent page: %w", err)
+		return nil, nil, fmt.Errorf("failed to get parent page: %w", err)
 	}
 
 	parent, err := NewBtreePage(parentPage, parentData, c.Btree.UsableSize)
 	if err != nil {
-		return fmt.Errorf("failed to create parent BtreePage: %w", err)
+		return nil, nil, fmt.Errorf("failed to create parent BtreePage: %w", err)
 	}
 
-	// Create interior cell for the divider
 	dividerCell := EncodeTableInteriorCell(leftPage, dividerKey)
+	return parent, dividerCell, nil
+}
 
-	// Check if parent has space
-	if len(dividerCell) > parent.FreeSpace() {
-		// Parent is full, need to split parent recursively
-		// Save current state
-		savedPage := c.CurrentPage
-		savedIndex := c.CurrentIndex
-		savedDepth := c.Depth
-		savedHeader := c.CurrentHeader
+// splitParentRecursively splits the parent page when it's full.
+func (c *BtCursor) splitParentRecursively(parentPage uint32, parentDepth int, dividerKey int64, leftPage uint32, parent *BtreePage) error {
+	savedPage, savedIdx, savedDepth, savedHeader := c.saveCursorState()
+	c.positionOnParent(parentPage, parentDepth, parent)
+	err := c.splitInteriorPage(dividerKey, leftPage)
+	c.restoreCursorState(savedPage, savedIdx, savedDepth, savedHeader)
+	return err
+}
 
-		// Position cursor on parent
-		c.CurrentPage = parentPage
-		c.Depth = parentDepth
-		c.CurrentHeader = parent.Header
+// saveCursorState saves the current cursor state for restoration.
+func (c *BtCursor) saveCursorState() (uint32, int, int, *PageHeader) {
+	return c.CurrentPage, c.CurrentIndex, c.Depth, c.CurrentHeader
+}
 
-		// Split parent
-		err := c.splitInteriorPage(dividerKey, leftPage)
+// restoreCursorState restores a previously saved cursor state.
+func (c *BtCursor) restoreCursorState(savedPage uint32, savedIndex, savedDepth int, savedHeader *PageHeader) {
+	c.CurrentPage = savedPage
+	c.CurrentIndex = savedIndex
+	c.Depth = savedDepth
+	c.CurrentHeader = savedHeader
+}
 
-		// Restore cursor state
-		c.CurrentPage = savedPage
-		c.CurrentIndex = savedIndex
-		c.Depth = savedDepth
-		c.CurrentHeader = savedHeader
+// positionOnParent positions the cursor on the parent page.
+func (c *BtCursor) positionOnParent(parentPage uint32, parentDepth int, parent *BtreePage) {
+	c.CurrentPage = parentPage
+	c.Depth = parentDepth
+	c.CurrentHeader = parent.Header
+}
 
-		return err
-	}
-
-	// Mark parent as dirty
+// insertDividerIntoParent inserts the divider cell into the parent page.
+func (c *BtCursor) insertDividerIntoParent(parent *BtreePage, parentPage, rightPage uint32, dividerKey int64, dividerCell []byte) error {
 	if c.Btree.Provider != nil {
 		if err := c.Btree.Provider.MarkDirty(parentPage); err != nil {
 			return err
 		}
 	}
 
-	// Find insertion point in parent
-	insertIdx := 0
-	for i := 0; i < int(parent.Header.NumCells); i++ {
-		cellPtr, err := parent.Header.GetCellPointer(parent.Data, i)
-		if err != nil {
-			return err
-		}
+	insertIdx := c.findInsertionPoint(parent, dividerKey)
 
-		cellInfo, err := ParseCell(parent.Header.PageType, parent.Data[cellPtr:], parent.UsableSize)
-		if err != nil {
-			return err
-		}
-
-		if dividerKey < cellInfo.Key {
-			break
-		}
-		insertIdx++
-	}
-
-	// Insert divider cell
 	if err := parent.InsertCell(insertIdx, dividerCell); err != nil {
 		return fmt.Errorf("failed to insert divider into parent: %w", err)
 	}
 
-	// Update the cell that points to leftPage to now point to rightPage
-	// Find the cell pointing to leftPage and update right child if needed
+	c.updateRightChildIfNeeded(parent, parentPage, rightPage, insertIdx)
+	return nil
+}
+
+// findInsertionPoint finds the correct insertion point for the divider key.
+func (c *BtCursor) findInsertionPoint(parent *BtreePage, dividerKey int64) int {
+	for i := 0; i < int(parent.Header.NumCells); i++ {
+		cellPtr, err := parent.Header.GetCellPointer(parent.Data, i)
+		if err != nil {
+			return i
+		}
+
+		cellInfo, err := ParseCell(parent.Header.PageType, parent.Data[cellPtr:], parent.UsableSize)
+		if err != nil {
+			return i
+		}
+
+		if dividerKey < cellInfo.Key {
+			return i
+		}
+	}
+	return int(parent.Header.NumCells)
+}
+
+// updateRightChildIfNeeded updates the rightmost child pointer if necessary.
+func (c *BtCursor) updateRightChildIfNeeded(parent *BtreePage, parentPage, rightPage uint32, insertIdx int) {
 	if insertIdx == int(parent.Header.NumCells)-1 {
-		// If this is the last cell, update rightmost child pointer
 		headerOffset := getHeaderOffset(parentPage)
 		binary.BigEndian.PutUint32(parent.Data[headerOffset+PageHeaderOffsetRightChild:], rightPage)
 	}
-
-	return nil
 }
 
 // createNewRoot creates a new root page after splitting the old root

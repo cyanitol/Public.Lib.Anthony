@@ -11,12 +11,14 @@ import (
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 )
 
-// Schema represents a database schema containing tables and indexes.
+// Schema represents a database schema containing tables, indexes, views, and triggers.
 // It is safe for concurrent access.
 type Schema struct {
 	Tables    map[string]*Table
 	Indexes   map[string]*Index
-	Sequences *SequenceManager // Manages AUTOINCREMENT sequences
+	Views     map[string]*View
+	Triggers  map[string]*Trigger // Trigger definitions
+	Sequences *SequenceManager    // Manages AUTOINCREMENT sequences
 	mu        sync.RWMutex
 }
 
@@ -25,6 +27,8 @@ func NewSchema() *Schema {
 	return &Schema{
 		Tables:    make(map[string]*Table),
 		Indexes:   make(map[string]*Index),
+		Views:     make(map[string]*View),
+		Triggers:  make(map[string]*Trigger),
 		Sequences: NewSequenceManager(),
 	}
 }
@@ -203,6 +207,50 @@ func (s *Schema) DropTable(name string) error {
 
 	// Remove the table
 	delete(s.Tables, actualName)
+
+	return nil
+}
+
+// RenameTable renames a table in the schema.
+func (s *Schema) RenameTable(oldName, newName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	lowerOldName := strings.ToLower(oldName)
+	lowerNewName := strings.ToLower(newName)
+
+	// Check if new name already exists
+	for tableName := range s.Tables {
+		if strings.ToLower(tableName) == lowerNewName {
+			return fmt.Errorf("table already exists: %s", newName)
+		}
+	}
+
+	// Find the old table
+	var actualOldName string
+	for tableName := range s.Tables {
+		if strings.ToLower(tableName) == lowerOldName {
+			actualOldName = tableName
+			break
+		}
+	}
+
+	if actualOldName == "" {
+		return fmt.Errorf("table not found: %s", oldName)
+	}
+
+	// Get the table and update its name
+	table := s.Tables[actualOldName]
+	delete(s.Tables, actualOldName)
+	table.Name = newName
+	s.Tables[newName] = table
+
+	// Update index references
+	for _, idx := range s.Indexes {
+		if strings.ToLower(idx.Table) == lowerOldName {
+			idx.Table = newName
+		}
+	}
 
 	return nil
 }

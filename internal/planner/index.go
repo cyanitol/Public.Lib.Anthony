@@ -134,7 +134,19 @@ type IndexUsage struct {
 
 // AnalyzeIndexUsage determines how an index would be used.
 func (s *IndexSelector) AnalyzeIndexUsage(index *IndexInfo, neededColumns []string) *IndexUsage {
-	usage := &IndexUsage{
+	usage := s.createEmptyIndexUsage(index)
+
+	if !s.processIndexColumns(usage, index) {
+		return usage
+	}
+
+	usage.Covering = s.checkCovering(index, neededColumns)
+	return usage
+}
+
+// createEmptyIndexUsage creates an empty IndexUsage structure.
+func (s *IndexSelector) createEmptyIndexUsage(index *IndexInfo) *IndexUsage {
+	return &IndexUsage{
 		Index:      index,
 		EqTerms:    make([]*WhereTerm, 0),
 		RangeTerms: make([]*WhereTerm, 0),
@@ -142,22 +154,21 @@ func (s *IndexSelector) AnalyzeIndexUsage(index *IndexInfo, neededColumns []stri
 		StartKey:   make([]interface{}, 0),
 		EndKey:     make([]interface{}, 0),
 	}
+}
 
+// processIndexColumns processes index columns and applies terms to usage.
+// Returns false if first column has no constraint, true otherwise.
+func (s *IndexSelector) processIndexColumns(usage *IndexUsage, index *IndexInfo) bool {
 	for i, col := range index.Columns {
 		term := s.findTermForColumn(col.Index)
 		if term == nil {
-			if i == 0 {
-				return usage // First column must have constraint
-			}
-			break
+			return i > 0 // First column must have constraint
 		}
 		if done := s.applyTermToUsage(term, usage); done {
 			break
 		}
 	}
-
-	usage.Covering = s.checkCovering(index, neededColumns)
-	return usage
+	return true
 }
 
 // applyTermToUsage applies a term to the usage and returns true if no more columns should be processed.
@@ -422,16 +433,20 @@ func (s *IndexSelector) SelectBestIndexWithOptions(opts OptimizeOptions) *IndexI
 		return nil
 	}
 
-	scores := make([]indexScore, 0, len(s.Table.Indexes))
-	for _, index := range s.Table.Indexes {
-		scores = append(scores, s.scoreIndexEntry(index, opts))
-	}
-
-	best := pickBestScore(scores)
+	best := s.findBestIndexScore(opts)
 	if best.score > 0 {
 		return best.index
 	}
 	return nil
+}
+
+// findBestIndexScore finds the best index score from all available indexes.
+func (s *IndexSelector) findBestIndexScore(opts OptimizeOptions) indexScore {
+	scores := make([]indexScore, 0, len(s.Table.Indexes))
+	for _, index := range s.Table.Indexes {
+		scores = append(scores, s.scoreIndexEntry(index, opts))
+	}
+	return pickBestScore(scores)
 }
 
 // indexMatchesOrderBy checks if an index can satisfy ORDER BY without sorting.

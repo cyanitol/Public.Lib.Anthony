@@ -136,8 +136,9 @@ type JoinCondition struct {
 
 // OrderingTerm represents an ORDER BY term.
 type OrderingTerm struct {
-	Expr Expression
-	Asc  bool
+	Expr      Expression
+	Asc       bool
+	Collation string // COLLATE clause
 }
 
 // InsertStmt represents an INSERT statement.
@@ -559,6 +560,22 @@ func (a *AlterTableStmt) node()      {}
 func (a *AlterTableStmt) statement() {}
 func (a *AlterTableStmt) String() string {
 	return "ALTER TABLE"
+}
+
+// VacuumStmt represents a VACUUM statement.
+type VacuumStmt struct {
+	Schema    string // optional schema name
+	Into      string // optional INTO filename
+	IntoParam bool   // true if INTO filename comes from a parameter
+}
+
+func (v *VacuumStmt) node()      {}
+func (v *VacuumStmt) statement() {}
+func (v *VacuumStmt) String() string {
+	if v.Into != "" || v.IntoParam {
+		return "VACUUM INTO"
+	}
+	return "VACUUM"
 }
 
 // AlterTableAction represents the action to perform in ALTER TABLE.
@@ -1028,6 +1045,21 @@ func (s *SubqueryExpr) String() string {
 	// so we return a placeholder. Full subquery serialization would require
 	// implementing String() on SelectStmt as well.
 	return "(SELECT ...)"
+}
+
+// ExistsExpr represents an EXISTS (SELECT ...) expression.
+type ExistsExpr struct {
+	Select *SelectStmt
+	Not    bool // true for NOT EXISTS
+}
+
+func (e *ExistsExpr) node()       {}
+func (e *ExistsExpr) expression() {}
+func (e *ExistsExpr) String() string {
+	if e.Not {
+		return "NOT EXISTS (SELECT ...)"
+	}
+	return "EXISTS (SELECT ...)"
 }
 
 // VariableExpr represents a parameter placeholder.

@@ -75,7 +75,7 @@ type FreeList struct {
 }
 
 // NewFreeList creates a new FreeList manager.
-func NewFreeList(pager *Pager) *FreeList {
+func NewFreeList(pager pagerInternal) *FreeList {
 	return &FreeList{
 		pager:       pager,
 		pageSize:    pager.PageSize(),

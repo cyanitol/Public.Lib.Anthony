@@ -87,30 +87,45 @@ func NewJoinOptimizer(tables []*TableInfo, whereInfo *WhereInfo, costModel *Cost
 func (jo *JoinOptimizer) DynamicProgrammingJoinOrder() (*JoinOrder, error) {
 	nTables := len(jo.Tables)
 
-	if nTables == 0 {
-		return nil, fmt.Errorf("no tables to join")
+	if err := jo.validateTableCount(nTables); err != nil {
+		return nil, err
 	}
 
-	// Single table - no join needed
 	if nTables == 1 {
-		return &JoinOrder{
-			Tables:         []int{0},
-			Cost:           0,
-			RowCount:       jo.Tables[0].RowLogEst,
-			Algorithm:      []JoinAlgorithm{},
-			JoinConditions: make(map[string][]*WhereTerm),
-		}, nil
+		return jo.createSingleTableJoinOrder(), nil
 	}
 
-	// Use bitmask-based DP for efficiency (supports up to 64 tables)
+	bestPlan := jo.initializeSingleTablePlans(nTables)
+	jo.buildJoinSubsets(nTables, bestPlan)
+
+	return jo.extractBestPlan(nTables, bestPlan)
+}
+
+// validateTableCount validates the number of tables for DP join optimization.
+func (jo *JoinOptimizer) validateTableCount(nTables int) error {
+	if nTables == 0 {
+		return fmt.Errorf("no tables to join")
+	}
 	if nTables > 64 {
-		return nil, fmt.Errorf("too many tables for join optimization: %d (max 64)", nTables)
+		return fmt.Errorf("too many tables for join optimization: %d (max 64)", nTables)
 	}
+	return nil
+}
 
-	// bestPlan[bitmask] = best plan for that subset of tables
+// createSingleTableJoinOrder creates a join order for a single table.
+func (jo *JoinOptimizer) createSingleTableJoinOrder() *JoinOrder {
+	return &JoinOrder{
+		Tables:         []int{0},
+		Cost:           0,
+		RowCount:       jo.Tables[0].RowLogEst,
+		Algorithm:      []JoinAlgorithm{},
+		JoinConditions: make(map[string][]*WhereTerm),
+	}
+}
+
+// initializeSingleTablePlans creates initial plans for each single table.
+func (jo *JoinOptimizer) initializeSingleTablePlans(nTables int) map[uint64]*JoinOrder {
 	bestPlan := make(map[uint64]*JoinOrder)
-
-	// Initialize single-table plans
 	for i := 0; i < nTables; i++ {
 		mask := uint64(1 << uint(i))
 		bestPlan[mask] = &JoinOrder{
@@ -121,60 +136,84 @@ func (jo *JoinOptimizer) DynamicProgrammingJoinOrder() (*JoinOrder, error) {
 			JoinConditions: make(map[string][]*WhereTerm),
 		}
 	}
+	return bestPlan
+}
 
-	// Build up larger subsets
+// buildJoinSubsets builds join plans for increasingly larger table subsets.
+func (jo *JoinOptimizer) buildJoinSubsets(nTables int, bestPlan map[uint64]*JoinOrder) {
 	for size := 2; size <= nTables; size++ {
-		// Enumerate all subsets of size 'size'
 		jo.enumerateSubsets(nTables, size, func(subset uint64) {
-			bestCost := LogEst(math.MaxInt16)
-			var bestOrder *JoinOrder
-
-			// Try all ways to split this subset into two non-empty parts
-			for left := subset; left > 0; left = (left - 1) & subset {
-				if left == 0 || left == subset {
-					continue
-				}
-				right := subset &^ left
-
-				leftPlan, leftOK := bestPlan[left]
-				rightPlan, rightOK := bestPlan[right]
-
-				if !leftOK || !rightOK {
-					continue
-				}
-
-				// Try both join orders: left JOIN right and right JOIN left
-				for _, swap := range []bool{false, true} {
-					var outer, inner *JoinOrder
-					if swap {
-						outer, inner = rightPlan, leftPlan
-					} else {
-						outer, inner = leftPlan, rightPlan
-					}
-
-					// Estimate cost of this join
-					cost, rowCount, algorithm := jo.estimateJoinCost(outer, inner)
-
-					if cost < bestCost {
-						bestCost = cost
-						// Create new join order by combining outer and inner
-						bestOrder = jo.combineJoinOrders(outer, inner, algorithm, cost, rowCount)
-					}
-				}
-			}
-
-			if bestOrder != nil {
+			if bestOrder := jo.findBestJoinForSubset(subset, bestPlan); bestOrder != nil {
 				bestPlan[subset] = bestOrder
 			}
 		})
 	}
+}
 
-	// Return the plan for all tables
+// findBestJoinForSubset finds the best join plan for a specific subset of tables.
+func (jo *JoinOptimizer) findBestJoinForSubset(subset uint64, bestPlan map[uint64]*JoinOrder) *JoinOrder {
+	bestCost := LogEst(math.MaxInt16)
+	var bestOrder *JoinOrder
+
+	// Try all ways to split this subset into two non-empty parts
+	for left := subset; left > 0; left = (left - 1) & subset {
+		if !jo.isValidSplit(left, subset) {
+			continue
+		}
+
+		right := subset &^ left
+		leftPlan, rightPlan := bestPlan[left], bestPlan[right]
+
+		if leftPlan == nil || rightPlan == nil {
+			continue
+		}
+
+		if order := jo.tryBothJoinDirections(leftPlan, rightPlan, bestCost); order != nil {
+			bestCost = order.Cost
+			bestOrder = order
+		}
+	}
+
+	return bestOrder
+}
+
+// isValidSplit checks if a split is valid (non-empty parts).
+func (jo *JoinOptimizer) isValidSplit(left, subset uint64) bool {
+	return left != 0 && left != subset
+}
+
+// tryBothJoinDirections tries both join directions and returns the best.
+func (jo *JoinOptimizer) tryBothJoinDirections(leftPlan, rightPlan *JoinOrder, currentBest LogEst) *JoinOrder {
+	var bestOrder *JoinOrder
+	bestCost := currentBest
+
+	for _, swap := range []bool{false, true} {
+		outer, inner := jo.selectJoinDirection(leftPlan, rightPlan, swap)
+		cost, rowCount, algorithm := jo.estimateJoinCost(outer, inner)
+
+		if cost < bestCost {
+			bestCost = cost
+			bestOrder = jo.combineJoinOrders(outer, inner, algorithm, cost, rowCount)
+		}
+	}
+
+	return bestOrder
+}
+
+// selectJoinDirection selects outer and inner based on swap flag.
+func (jo *JoinOptimizer) selectJoinDirection(left, right *JoinOrder, swap bool) (*JoinOrder, *JoinOrder) {
+	if swap {
+		return right, left
+	}
+	return left, right
+}
+
+// extractBestPlan extracts the final best plan for all tables.
+func (jo *JoinOptimizer) extractBestPlan(nTables int, bestPlan map[uint64]*JoinOrder) (*JoinOrder, error) {
 	fullMask := (uint64(1) << uint(nTables)) - 1
 	if plan, ok := bestPlan[fullMask]; ok {
 		return plan, nil
 	}
-
 	return nil, fmt.Errorf("failed to find join order for all tables")
 }
 
@@ -423,79 +462,99 @@ func (jo *JoinOptimizer) GreedyJoinOrder() (*JoinOrder, error) {
 	}
 
 	if nTables == 1 {
-		return &JoinOrder{
-			Tables:         []int{0},
-			Cost:           0,
-			RowCount:       jo.Tables[0].RowLogEst,
-			Algorithm:      []JoinAlgorithm{},
-			JoinConditions: make(map[string][]*WhereTerm),
-		}, nil
+		return jo.createSingleTableJoinOrder(), nil
 	}
 
+	remaining := jo.createRemainingSet(nTables)
+	currentOrder := jo.initializeGreedyOrder(remaining)
+
+	for len(remaining) > 0 {
+		next, err := jo.selectNextTableGreedy(currentOrder, remaining)
+		if err != nil {
+			return nil, err
+		}
+
+		currentOrder = jo.combineJoinOrders(currentOrder, next.order, next.algorithm, next.cost, next.rowCount)
+		delete(remaining, next.tableIdx)
+	}
+
+	return currentOrder, nil
+}
+
+// createRemainingSet creates a set of remaining table indices.
+func (jo *JoinOptimizer) createRemainingSet(nTables int) map[int]bool {
 	remaining := make(map[int]bool)
 	for i := 0; i < nTables; i++ {
 		remaining[i] = true
 	}
+	return remaining
+}
 
-	// Start with the smallest table
+// initializeGreedyOrder initializes the greedy join order with the smallest table.
+func (jo *JoinOptimizer) initializeGreedyOrder(remaining map[int]bool) *JoinOrder {
 	smallestIdx := jo.findSmallestTable(remaining)
 	delete(remaining, smallestIdx)
 
-	currentOrder := &JoinOrder{
+	return &JoinOrder{
 		Tables:         []int{smallestIdx},
 		Cost:           jo.estimateSingleTableCost(smallestIdx),
 		RowCount:       jo.Tables[smallestIdx].RowLogEst,
 		Algorithm:      []JoinAlgorithm{},
 		JoinConditions: make(map[string][]*WhereTerm),
 	}
+}
 
-	// Greedily add tables one at a time
-	for len(remaining) > 0 {
-		bestIdx := -1
-		bestCost := LogEst(math.MaxInt16)
-		var bestAlgorithm JoinAlgorithm
-		var bestRowCount LogEst
+// greedyChoice represents a candidate table to add in greedy join order.
+type greedyChoice struct {
+	tableIdx  int
+	cost      LogEst
+	rowCount  LogEst
+	algorithm JoinAlgorithm
+	order     *JoinOrder
+}
 
-		// Try each remaining table
-		for tableIdx := range remaining {
-			innerOrder := &JoinOrder{
-				Tables:         []int{tableIdx},
-				Cost:           jo.estimateSingleTableCost(tableIdx),
-				RowCount:       jo.Tables[tableIdx].RowLogEst,
-				Algorithm:      []JoinAlgorithm{},
-				JoinConditions: make(map[string][]*WhereTerm),
-			}
-
-			joinTerms := jo.findJoinConditions(currentOrder, innerOrder)
-			algorithm := jo.SelectJoinAlgorithm(currentOrder, innerOrder, joinTerms)
-			cost, rowCount := jo.CostEstimate(currentOrder, innerOrder, algorithm, joinTerms)
-
-			if cost < bestCost {
-				bestCost = cost
-				bestIdx = tableIdx
-				bestAlgorithm = algorithm
-				bestRowCount = rowCount
-			}
-		}
-
-		if bestIdx == -1 {
-			return nil, fmt.Errorf("failed to find next table in greedy join order")
-		}
-
-		// Add the best table
-		innerOrder := &JoinOrder{
-			Tables:         []int{bestIdx},
-			Cost:           jo.estimateSingleTableCost(bestIdx),
-			RowCount:       jo.Tables[bestIdx].RowLogEst,
-			Algorithm:      []JoinAlgorithm{},
-			JoinConditions: make(map[string][]*WhereTerm),
-		}
-
-		currentOrder = jo.combineJoinOrders(currentOrder, innerOrder, bestAlgorithm, bestCost, bestRowCount)
-		delete(remaining, bestIdx)
+// selectNextTableGreedy selects the next best table to add in greedy join order.
+func (jo *JoinOptimizer) selectNextTableGreedy(currentOrder *JoinOrder, remaining map[int]bool) (*greedyChoice, error) {
+	bestChoice := &greedyChoice{
+		tableIdx: -1,
+		cost:     LogEst(math.MaxInt16),
 	}
 
-	return currentOrder, nil
+	for tableIdx := range remaining {
+		choice := jo.evaluateGreedyChoice(currentOrder, tableIdx)
+		if choice.cost < bestChoice.cost {
+			bestChoice = choice
+		}
+	}
+
+	if bestChoice.tableIdx == -1 {
+		return nil, fmt.Errorf("failed to find next table in greedy join order")
+	}
+
+	return bestChoice, nil
+}
+
+// evaluateGreedyChoice evaluates adding a specific table to the current join order.
+func (jo *JoinOptimizer) evaluateGreedyChoice(currentOrder *JoinOrder, tableIdx int) *greedyChoice {
+	innerOrder := &JoinOrder{
+		Tables:         []int{tableIdx},
+		Cost:           jo.estimateSingleTableCost(tableIdx),
+		RowCount:       jo.Tables[tableIdx].RowLogEst,
+		Algorithm:      []JoinAlgorithm{},
+		JoinConditions: make(map[string][]*WhereTerm),
+	}
+
+	joinTerms := jo.findJoinConditions(currentOrder, innerOrder)
+	algorithm := jo.SelectJoinAlgorithm(currentOrder, innerOrder, joinTerms)
+	cost, rowCount := jo.CostEstimate(currentOrder, innerOrder, algorithm, joinTerms)
+
+	return &greedyChoice{
+		tableIdx:  tableIdx,
+		cost:      cost,
+		rowCount:  rowCount,
+		algorithm: algorithm,
+		order:     innerOrder,
+	}
 }
 
 // findSmallestTable returns the index of the table with the fewest rows.
