@@ -21,12 +21,38 @@ import (
 func (s *Stmt) compileVacuum(vm *vdbe.VDBE, stmt *parser.VacuumStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
 
-	// VACUUM cannot run inside a transaction
-	if s.conn.inTx {
-		return nil, fmt.Errorf("cannot VACUUM inside a transaction")
+	if err := s.validateVacuumContext(); err != nil {
+		return nil, err
 	}
 
-	// Determine which schema to vacuum (default is main)
+	schemaName, err := s.resolveVacuumSchema(stmt)
+	if err != nil {
+		return nil, err
+	}
+
+	opts, err := s.buildVacuumOptions(stmt, args, schemaName)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.executeVacuum(opts); err != nil {
+		return nil, err
+	}
+
+	s.finalizeVacuumBytecode(vm)
+	return vm, nil
+}
+
+// validateVacuumContext checks if VACUUM can run in the current context.
+func (s *Stmt) validateVacuumContext() error {
+	if s.conn.inTx {
+		return fmt.Errorf("cannot VACUUM inside a transaction")
+	}
+	return nil
+}
+
+// resolveVacuumSchema determines which schema to vacuum.
+func (s *Stmt) resolveVacuumSchema(stmt *parser.VacuumStmt) (string, error) {
 	schemaName := stmt.Schema
 	if schemaName == "" {
 		schemaName = "main"
@@ -35,26 +61,20 @@ func (s *Stmt) compileVacuum(vm *vdbe.VDBE, stmt *parser.VacuumStmt, args []driv
 	// For now, only support vacuuming the main database
 	// TODO: Add support for attached databases
 	if schemaName != "main" {
-		return nil, fmt.Errorf("VACUUM of attached databases not yet supported")
+		return "", fmt.Errorf("VACUUM of attached databases not yet supported")
 	}
 
-	// Build vacuum options
+	return schemaName, nil
+}
+
+// buildVacuumOptions constructs the vacuum options from the statement.
+func (s *Stmt) buildVacuumOptions(stmt *parser.VacuumStmt, args []driver.NamedValue, schemaName string) (*pager.VacuumOptions, error) {
 	opts := &pager.VacuumOptions{
 		Schema: schemaName,
 	}
 
-	if stmt.Into != "" {
-		opts.IntoFile = stmt.Into
-	} else if stmt.IntoParam {
-		// Get filename from parameter
-		if len(args) < 1 {
-			return nil, fmt.Errorf("VACUUM INTO requires filename parameter")
-		}
-		filename, ok := args[0].Value.(string)
-		if !ok {
-			return nil, fmt.Errorf("VACUUM INTO filename must be a string")
-		}
-		opts.IntoFile = filename
+	if err := s.setVacuumIntoFile(opts, stmt, args); err != nil {
+		return nil, err
 	}
 
 	// For VACUUM INTO, we need to pass the schema so it can be copied to the target
@@ -62,11 +82,47 @@ func (s *Stmt) compileVacuum(vm *vdbe.VDBE, stmt *parser.VacuumStmt, args []driv
 		opts.SourceSchema = s.conn.schema
 	}
 
+	return opts, nil
+}
+
+// setVacuumIntoFile sets the INTO file in vacuum options.
+func (s *Stmt) setVacuumIntoFile(opts *pager.VacuumOptions, stmt *parser.VacuumStmt, args []driver.NamedValue) error {
+	if stmt.Into != "" {
+		opts.IntoFile = stmt.Into
+		return nil
+	}
+
+	if !stmt.IntoParam {
+		return nil
+	}
+
+	filename, err := s.getIntoFilenameFromArgs(args)
+	if err != nil {
+		return err
+	}
+	opts.IntoFile = filename
+	return nil
+}
+
+// getIntoFilenameFromArgs extracts the filename from VACUUM INTO parameter.
+func (s *Stmt) getIntoFilenameFromArgs(args []driver.NamedValue) (string, error) {
+	if len(args) < 1 {
+		return "", fmt.Errorf("VACUUM INTO requires filename parameter")
+	}
+	filename, ok := args[0].Value.(string)
+	if !ok {
+		return "", fmt.Errorf("VACUUM INTO filename must be a string")
+	}
+	return filename, nil
+}
+
+// executeVacuum performs the actual vacuum operation.
+func (s *Stmt) executeVacuum(opts *pager.VacuumOptions) error {
 	// Execute the VACUUM operation directly on the pager
 	// We do this at compile time rather than runtime because VACUUM
 	// is a special operation that needs to run immediately
 	if err := s.conn.pager.Vacuum(opts); err != nil {
-		return nil, fmt.Errorf("VACUUM failed: %w", err)
+		return fmt.Errorf("VACUUM failed: %w", err)
 	}
 
 	// For VACUUM INTO, we need to set up the schema in the target database
@@ -80,38 +136,61 @@ func (s *Stmt) compileVacuum(vm *vdbe.VDBE, stmt *parser.VacuumStmt, args []driv
 		}
 	}
 
-	// Generate simple bytecode that indicates success
+	return nil
+}
+
+// finalizeVacuumBytecode generates the final bytecode for VACUUM.
+func (s *Stmt) finalizeVacuumBytecode(vm *vdbe.VDBE) {
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	return vm, nil
 }
 
 // setupVacuumIntoSchema is a workaround to copy schema to VACUUM INTO target.
 // This is needed because schema is not yet persisted to sqlite_master in this implementation.
 // In a full implementation, schema would be in sqlite_master and copied automatically.
 func (s *Stmt) setupVacuumIntoSchema(targetFile string, sourceSchemaIface interface{}) error {
-	// Type assert to get the schema
-	sourceSchema, ok := sourceSchemaIface.(*schema.Schema)
-	if !ok || sourceSchema == nil {
+	sourceSchema := s.validateSourceSchema(sourceSchemaIface)
+	if sourceSchema == nil {
 		return nil // No schema to copy
 	}
 
-	// Get all tables from source
-	tables := sourceSchema.ListTables()
+	targetSchema := s.cloneSchema(sourceSchema)
+	return s.registerTargetSchema(targetFile, targetSchema)
+}
 
-	// Create a new schema for the target and copy tables
+// validateSourceSchema validates and type-asserts the source schema.
+func (s *Stmt) validateSourceSchema(sourceSchemaIface interface{}) *schema.Schema {
+	sourceSchema, ok := sourceSchemaIface.(*schema.Schema)
+	if !ok || sourceSchema == nil {
+		return nil
+	}
+	return sourceSchema
+}
+
+// cloneSchema creates a deep copy of the source schema.
+func (s *Stmt) cloneSchema(sourceSchema *schema.Schema) *schema.Schema {
 	targetSchema := schema.NewSchema()
+
+	s.cloneTables(sourceSchema, targetSchema)
+	s.cloneViews(sourceSchema, targetSchema)
+	s.cloneTriggers(sourceSchema, targetSchema)
+
+	return targetSchema
+}
+
+// cloneTables copies all tables from source to target schema.
+func (s *Stmt) cloneTables(sourceSchema, targetSchema *schema.Schema) {
+	tables := sourceSchema.ListTables()
 	for _, tableName := range tables {
 		if table, ok := sourceSchema.GetTable(tableName); ok {
-			// Clone the table into the target schema
-			// We create a shallow copy of the table
 			tableCopy := *table
 			targetSchema.Tables[tableName] = &tableCopy
 		}
 	}
+}
 
-	// Copy views as well
+// cloneViews copies all views from source to target schema.
+func (s *Stmt) cloneViews(sourceSchema, targetSchema *schema.Schema) {
 	views := sourceSchema.ListViews()
 	for _, viewName := range views {
 		if view, ok := sourceSchema.GetView(viewName); ok {
@@ -119,8 +198,10 @@ func (s *Stmt) setupVacuumIntoSchema(targetFile string, sourceSchemaIface interf
 			targetSchema.Views[viewName] = &viewCopy
 		}
 	}
+}
 
-	// Copy triggers
+// cloneTriggers copies all triggers from source to target schema.
+func (s *Stmt) cloneTriggers(sourceSchema, targetSchema *schema.Schema) {
 	triggers := sourceSchema.ListTriggers()
 	for _, triggerName := range triggers {
 		if trigger, ok := sourceSchema.GetTrigger(triggerName); ok {
@@ -128,9 +209,10 @@ func (s *Stmt) setupVacuumIntoSchema(targetFile string, sourceSchemaIface interf
 			targetSchema.Triggers[triggerName] = &triggerCopy
 		}
 	}
+}
 
-	// Now when the target file is opened, we want it to use this schema
-	// We'll register it in the driver's state
+// registerTargetSchema registers the target schema in the driver's state.
+func (s *Stmt) registerTargetSchema(targetFile string, targetSchema *schema.Schema) error {
 	s.conn.driver.mu.Lock()
 	defer s.conn.driver.mu.Unlock()
 
@@ -140,22 +222,23 @@ func (s *Stmt) setupVacuumIntoSchema(targetFile string, sourceSchemaIface interf
 
 	// Check if target is already registered (shouldn't be, but handle it)
 	if existingState, exists := s.conn.driver.dbs[targetFile]; exists {
-		// Target already open - just update its schema
 		existingState.schema = targetSchema
 		return nil
 	}
 
-	// Open the target file's pager
+	return s.createTargetDbState(targetFile, targetSchema)
+}
+
+// createTargetDbState creates and registers a new database state for the target file.
+func (s *Stmt) createTargetDbState(targetFile string, targetSchema *schema.Schema) error {
 	targetPager, err := pager.Open(targetFile, false)
 	if err != nil {
 		return fmt.Errorf("failed to open target file: %w", err)
 	}
 
-	// Create a btree for the target
 	targetBtree := btree.NewBtree(uint32(targetPager.PageSize()))
 	targetBtree.Provider = newPagerProvider(targetPager)
 
-	// Register the target file's state with the pre-populated schema
 	s.conn.driver.dbs[targetFile] = &dbState{
 		pager:    targetPager,
 		btree:    targetBtree,

@@ -129,28 +129,33 @@ func (lm *LockManager) acquireLockPlatform(level LockLevel) error {
 	}
 }
 
+// shouldReleaseLock determines if a specific lock level should be released.
+func (lm *LockManager) shouldReleaseLock(currentLevel, targetLevel, lockType LockLevel) bool {
+	return lm.currentLevel >= currentLevel && targetLevel < lockType
+}
+
 // releaseLockPlatform performs the platform-specific lock release.
 func (lm *LockManager) releaseLockPlatform(level LockLevel) error {
 	// Release locks in reverse order of acquisition
-	if lm.currentLevel >= lockExclusive && level < lockExclusive {
+	if lm.shouldReleaseLock(lockExclusive, level, lockExclusive) {
 		if err := lm.releaseExclusiveLock(); err != nil {
 			return err
 		}
 	}
 
-	if lm.currentLevel >= lockPending && level < lockPending {
+	if lm.shouldReleaseLock(lockPending, level, lockPending) {
 		if err := lm.releasePendingLock(); err != nil {
 			return err
 		}
 	}
 
-	if lm.currentLevel >= lockReserved && level < lockReserved {
+	if lm.shouldReleaseLock(lockReserved, level, lockReserved) {
 		if err := lm.releaseReservedLock(); err != nil {
 			return err
 		}
 	}
 
-	if lm.currentLevel >= lockShared && level < lockShared {
+	if lm.shouldReleaseLock(lockShared, level, lockShared) {
 		if err := lm.releaseSharedLock(); err != nil {
 			return err
 		}

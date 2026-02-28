@@ -210,28 +210,39 @@ func (ws *WindowState) updateFrame() {
 	currentRow := ws.CurrentPartRow
 	partitionSize := len(partition.Rows)
 
-	// Calculate frame start
+	partition.FrameStart = ws.calculateFrameStart(currentRow, partitionSize)
+	partition.FrameEnd = ws.calculateFrameEnd(currentRow, partitionSize)
+}
+
+// calculateFrameStart computes the starting position of the frame
+func (ws *WindowState) calculateFrameStart(currentRow, partitionSize int) int {
 	switch ws.Frame.Start.Type {
 	case BoundUnboundedPreceding:
-		partition.FrameStart = 0
+		return 0
 	case BoundPreceding:
-		partition.FrameStart = max(0, currentRow-ws.Frame.Start.Offset)
+		return max(0, currentRow-ws.Frame.Start.Offset)
 	case BoundCurrentRow:
-		partition.FrameStart = currentRow
+		return currentRow
 	case BoundFollowing:
-		partition.FrameStart = min(partitionSize-1, currentRow+ws.Frame.Start.Offset)
+		return min(partitionSize-1, currentRow+ws.Frame.Start.Offset)
+	default:
+		return 0
 	}
+}
 
-	// Calculate frame end
+// calculateFrameEnd computes the ending position of the frame
+func (ws *WindowState) calculateFrameEnd(currentRow, partitionSize int) int {
 	switch ws.Frame.End.Type {
 	case BoundUnboundedFollowing:
-		partition.FrameEnd = partitionSize - 1
+		return partitionSize - 1
 	case BoundFollowing:
-		partition.FrameEnd = min(partitionSize-1, currentRow+ws.Frame.End.Offset)
+		return min(partitionSize-1, currentRow+ws.Frame.End.Offset)
 	case BoundCurrentRow:
-		partition.FrameEnd = currentRow
+		return currentRow
 	case BoundPreceding:
-		partition.FrameEnd = max(0, currentRow-ws.Frame.End.Offset)
+		return max(0, currentRow-ws.Frame.End.Offset)
+	default:
+		return partitionSize - 1
 	}
 }
 

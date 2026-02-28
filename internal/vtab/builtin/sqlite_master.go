@@ -103,9 +103,8 @@ type SQLiteMasterCursor struct {
 	nameFilter string
 }
 
-// Filter initializes the cursor with the given constraints.
-func (c *SQLiteMasterCursor) Filter(idxNum int, idxStr string, argv []interface{}) error {
-	// Parse constraint values from argv
+// parseFilterConstraints extracts type and name filters from argv.
+func (c *SQLiteMasterCursor) parseFilterConstraints(argv []interface{}) {
 	c.typeFilter = ""
 	c.nameFilter = ""
 
@@ -113,19 +112,26 @@ func (c *SQLiteMasterCursor) Filter(idxNum int, idxStr string, argv []interface{
 		if arg == nil {
 			continue
 		}
-		// First non-nil arg is type filter, second is name filter
-		if c.typeFilter == "" {
-			if str, ok := arg.(string); ok {
-				c.typeFilter = str
-			}
-		} else if c.nameFilter == "" {
-			if str, ok := arg.(string); ok {
-				c.nameFilter = str
-			}
-		}
+		c.assignFilterValue(arg)
+	}
+}
+
+// assignFilterValue assigns a filter value to the appropriate field.
+func (c *SQLiteMasterCursor) assignFilterValue(arg interface{}) {
+	str, ok := arg.(string)
+	if !ok {
+		return
 	}
 
-	// Load rows from the database schema
+	if c.typeFilter == "" {
+		c.typeFilter = str
+	} else if c.nameFilter == "" {
+		c.nameFilter = str
+	}
+}
+
+// loadSchemaRows loads rows from the database schema.
+func (c *SQLiteMasterCursor) loadSchemaRows() {
 	// In a real implementation, this would query the actual schema
 	// For now, return a sample set of rows
 	c.rows = []MasterRow{
@@ -137,27 +143,45 @@ func (c *SQLiteMasterCursor) Filter(idxNum int, idxStr string, argv []interface{
 			SQL:      "CREATE TABLE sqlite_master(type text,name text,tbl_name text,rootpage integer,sql text)",
 		},
 	}
+}
 
-	// Apply filters
-	filtered := []MasterRow{}
+// applyFilters filters rows based on type and name constraints.
+func (c *SQLiteMasterCursor) applyFilters() {
+	filtered := make([]MasterRow, 0, len(c.rows))
 	for _, row := range c.rows {
-		if c.typeFilter != "" && row.Type != c.typeFilter {
-			continue
+		if c.matchesFilters(row) {
+			filtered = append(filtered, row)
 		}
-		if c.nameFilter != "" && row.Name != c.nameFilter {
-			continue
-		}
-		filtered = append(filtered, row)
 	}
 	c.rows = filtered
+}
 
-	// Position at first row or EOF
+// matchesFilters returns true if the row matches all active filters.
+func (c *SQLiteMasterCursor) matchesFilters(row MasterRow) bool {
+	if c.typeFilter != "" && row.Type != c.typeFilter {
+		return false
+	}
+	if c.nameFilter != "" && row.Name != c.nameFilter {
+		return false
+	}
+	return true
+}
+
+// positionCursor sets the cursor position to the first row or EOF.
+func (c *SQLiteMasterCursor) positionCursor() {
 	if len(c.rows) > 0 {
 		c.pos = 0
 	} else {
 		c.pos = -1
 	}
+}
 
+// Filter initializes the cursor with the given constraints.
+func (c *SQLiteMasterCursor) Filter(idxNum int, idxStr string, argv []interface{}) error {
+	c.parseFilterConstraints(argv)
+	c.loadSchemaRows()
+	c.applyFilters()
+	c.positionCursor()
 	return nil
 }
 

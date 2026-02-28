@@ -208,29 +208,38 @@ func needsCursorAdjustment(op vdbe.Opcode) bool {
 func adjustRegisterNumbers(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int, int) {
 	// For opcodes that use cursors in P1, don't adjust P1
 	if needsCursorAdjustment(op) {
-		// P2 and P3 might still be registers
-		switch op {
-		case vdbe.OpColumn:
-			// P1=cursor, P2=column, P3=dest register
-			return p1, p2, p3 + baseReg
-		case vdbe.OpInsert, vdbe.OpDelete:
-			// P1=cursor, P2=data register, P3=key register (or 0)
-			newP2 := p2 + baseReg
-			newP3 := p3
-			if p3 > 0 {
-				newP3 = p3 + baseReg
-			}
-			return p1, newP2, newP3
-		case vdbe.OpRewind, vdbe.OpNext, vdbe.OpPrev:
-			// P1=cursor, P2=jump target, P3=unused
-			return p1, p2, p3
-		default:
-			// For other cursor ops, only P1 is cursor
-			return p1, p2, p3
-		}
+		return adjustCursorOpRegisters(op, p1, p2, p3, baseReg)
 	}
 
 	// For most other opcodes, adjust register parameters
+	return adjustNonCursorOpRegisters(op, p1, p2, p3, baseReg)
+}
+
+// adjustCursorOpRegisters handles register adjustment for cursor operations.
+func adjustCursorOpRegisters(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int, int) {
+	switch op {
+	case vdbe.OpColumn:
+		// P1=cursor, P2=column, P3=dest register
+		return p1, p2, p3 + baseReg
+	case vdbe.OpInsert, vdbe.OpDelete:
+		// P1=cursor, P2=data register, P3=key register (or 0)
+		newP2 := p2 + baseReg
+		newP3 := p3
+		if p3 > 0 {
+			newP3 = p3 + baseReg
+		}
+		return p1, newP2, newP3
+	case vdbe.OpRewind, vdbe.OpNext, vdbe.OpPrev:
+		// P1=cursor, P2=jump target, P3=unused
+		return p1, p2, p3
+	default:
+		// For other cursor ops, only P1 is cursor
+		return p1, p2, p3
+	}
+}
+
+// adjustNonCursorOpRegisters handles register adjustment for non-cursor operations.
+func adjustNonCursorOpRegisters(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int, int) {
 	switch op {
 	case vdbe.OpInteger, vdbe.OpReal, vdbe.OpString8, vdbe.OpBlob, vdbe.OpNull:
 		// P1=value/size, P2=dest register, P3=unused
@@ -246,27 +255,14 @@ func adjustRegisterNumbers(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int, i
 
 	case vdbe.OpAdd, vdbe.OpSubtract, vdbe.OpMultiply, vdbe.OpDivide, vdbe.OpRemainder,
 		vdbe.OpConcat, vdbe.OpEq, vdbe.OpNe, vdbe.OpLt, vdbe.OpLe, vdbe.OpGt, vdbe.OpGe:
-		// P1=left register, P2=right register or jump, P3=dest register
-		// Note: comparison ops use P2 for jump target, not register
-		switch op {
-		case vdbe.OpEq, vdbe.OpNe, vdbe.OpLt, vdbe.OpLe, vdbe.OpGt, vdbe.OpGe:
-			// P1=register, P2=jump target, P3=register
-			return p1 + baseReg, p2, p3 + baseReg
-		default:
-			// Arithmetic ops: P1, P2, P3 all registers
-			return p1 + baseReg, p2 + baseReg, p3 + baseReg
-		}
+		return adjustArithmeticAndComparisonOps(op, p1, p2, p3, baseReg)
 
 	case vdbe.OpNot, vdbe.OpBitNot:
 		// P1=src register, P2=dest register
 		return p1 + baseReg, p2 + baseReg, p3
 
 	case vdbe.OpGoto, vdbe.OpIf, vdbe.OpIfNot, vdbe.OpIfPos:
-		// P1=register or unused, P2=jump target
-		if op == vdbe.OpGoto {
-			return p1, p2, p3
-		}
-		return p1 + baseReg, p2, p3
+		return adjustJumpOps(op, p1, p2, p3, baseReg)
 
 	case vdbe.OpInit, vdbe.OpHalt, vdbe.OpNoop:
 		// No register adjustments needed
@@ -278,12 +274,72 @@ func adjustRegisterNumbers(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int, i
 	}
 }
 
-// compileRecursiveCTE compiles a recursive CTE using iterative execution.
+// adjustArithmeticAndComparisonOps handles register adjustment for arithmetic and comparison operations.
+func adjustArithmeticAndComparisonOps(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int, int) {
+	// P1=left register, P2=right register or jump, P3=dest register
+	// Note: comparison ops use P2 for jump target, not register
+	switch op {
+	case vdbe.OpEq, vdbe.OpNe, vdbe.OpLt, vdbe.OpLe, vdbe.OpGt, vdbe.OpGe:
+		// P1=register, P2=jump target, P3=register
+		return p1 + baseReg, p2, p3 + baseReg
+	default:
+		// Arithmetic ops: P1, P2, P3 all registers
+		return p1 + baseReg, p2 + baseReg, p3 + baseReg
+	}
+}
+
+// adjustJumpOps handles register adjustment for jump operations.
+func adjustJumpOps(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int, int) {
+	// P1=register or unused, P2=jump target
+	if op == vdbe.OpGoto {
+		return p1, p2, p3
+	}
+	return p1 + baseReg, p2, p3
+}
+
 // compileRecursiveCTE compiles a recursive CTE using iterative execution.
 func (s *Stmt) compileRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planner.CTEDefinition,
 	cteCtx *planner.CTEContext, cteTempTables map[string]*schema.Table, args []driver.NamedValue) (*schema.Table, error) {
 
-	// Recursive CTEs must have a UNION structure
+	compound, err := s.validateRecursiveCTE(def, cteName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create and initialize temp tables
+	tempTable, currentTable, resultCursor, currentCursor, err := s.setupRecursiveTables(vm, cteName, def)
+	if err != nil {
+		return nil, err
+	}
+
+	// Register temp tables in schema
+	s.registerRecursiveTempTables(tempTable, currentTable)
+
+	// Step 1: Execute anchor member
+	numColumns := len(tempTable.Columns)
+	anchorRows, err := s.executeAnchorMember(vm, compound.Left, cteTempTables, numColumns, args)
+	if err != nil {
+		return nil, err
+	}
+
+	// Materialize anchor results
+	baseReg := len(vm.Mem)
+	vm.AllocMemory(baseReg + numColumns + 2)
+	recordReg := baseReg + numColumns
+	s.materializeRows(vm, anchorRows, numColumns, baseReg, recordReg, resultCursor, currentCursor)
+
+	// Step 2: Iterate recursive member
+	err = s.executeRecursiveIterations(vm, compound.Right, cteName, currentTable, cteTempTables,
+		numColumns, baseReg, recordReg, resultCursor, currentCursor, args)
+	if err != nil {
+		return nil, err
+	}
+
+	return tempTable, nil
+}
+
+// validateRecursiveCTE validates that a CTE is properly structured for recursion.
+func (s *Stmt) validateRecursiveCTE(def *planner.CTEDefinition, cteName string) (*parser.CompoundSelect, error) {
 	if def.Select.Compound == nil {
 		return nil, fmt.Errorf("recursive CTE %s must use UNION or UNION ALL", cteName)
 	}
@@ -293,7 +349,13 @@ func (s *Stmt) compileRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planner.C
 		return nil, fmt.Errorf("recursive CTE %s must use UNION or UNION ALL", cteName)
 	}
 
-	// Create temp tables for recursive iteration
+	return compound, nil
+}
+
+// setupRecursiveTables creates and initializes the ephemeral tables for recursive CTE execution.
+func (s *Stmt) setupRecursiveTables(vm *vdbe.VDBE, cteName string, def *planner.CTEDefinition) (
+	*schema.Table, *schema.Table, int, int, error) {
+
 	tempTableName := fmt.Sprintf("_cte_%s", cteName)
 	currentTableName := fmt.Sprintf("_cte_%s_current", cteName)
 
@@ -315,18 +377,21 @@ func (s *Stmt) compileRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planner.C
 	tempTable.RootPage = uint32(resultCursor)
 	currentTable.RootPage = uint32(currentCursor)
 
-	// Register both temp tables in the schema
-	s.conn.schema.Tables[tempTableName] = tempTable
-	s.conn.schema.Tables[currentTableName] = currentTable
+	return tempTable, currentTable, resultCursor, currentCursor, nil
+}
 
-	// Step 1: Execute anchor member (non-recursive part)
-	// The anchor is typically the left side of UNION
-	anchorSelect := compound.Left
+// registerRecursiveTempTables registers temporary tables in the schema.
+func (s *Stmt) registerRecursiveTempTables(tempTable, currentTable *schema.Table) {
+	s.conn.schema.Tables[tempTable.Name] = tempTable
+	s.conn.schema.Tables[currentTable.Name] = currentTable
+}
 
-	// Rewrite anchor to use already-materialized CTEs
+// executeAnchorMember executes the anchor (non-recursive) part of a recursive CTE.
+func (s *Stmt) executeAnchorMember(vm *vdbe.VDBE, anchorSelect *parser.SelectStmt,
+	cteTempTables map[string]*schema.Table, numColumns int, args []driver.NamedValue) ([][]interface{}, error) {
+
 	rewrittenAnchor := s.rewriteSelectWithCTETables(anchorSelect, cteTempTables)
 
-	// Execute anchor and collect all rows in memory first
 	anchorVM := vdbe.New()
 	anchorVM.Ctx = vm.Ctx
 	compiledAnchor, err := s.compileSelect(anchorVM, rewrittenAnchor, args)
@@ -334,88 +399,74 @@ func (s *Stmt) compileRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planner.C
 		return nil, fmt.Errorf("failed to compile recursive CTE anchor: %w", err)
 	}
 
-	// Collect all anchor rows
-	var anchorRows [][]interface{}
+	return s.collectRows(compiledAnchor, numColumns, "anchor")
+}
+
+// collectRows collects all rows from a compiled VDBE execution.
+func (s *Stmt) collectRows(vm *vdbe.VDBE, numColumns int, description string) ([][]interface{}, error) {
+	var rows [][]interface{}
 	for {
-		hasRow, err := compiledAnchor.Step()
+		hasRow, err := vm.Step()
 		if err != nil {
-			return nil, fmt.Errorf("anchor execution failed: %w", err)
+			return nil, fmt.Errorf("%s execution failed: %w", description, err)
 		}
 		if !hasRow {
 			break
 		}
 		// Copy the result row
 		row := make([]interface{}, numColumns)
-		for i := 0; i < numColumns && i < len(compiledAnchor.ResultRow); i++ {
-			row[i] = compiledAnchor.ResultRow[i].Value()
+		for i := 0; i < numColumns && i < len(vm.ResultRow); i++ {
+			row[i] = vm.ResultRow[i].Value()
 		}
-		anchorRows = append(anchorRows, row)
+		rows = append(rows, row)
 	}
+	return rows, nil
+}
 
-	// Materialize anchor results into both result and current tables
-	baseReg := len(vm.Mem)
-	vm.AllocMemory(baseReg + numColumns + 2)
-	recordReg := baseReg + numColumns
-	for _, row := range anchorRows {
-		for i := 0; i < numColumns; i++ {
-			// Emit bytecode to load value into register
-			switch v := row[i].(type) {
-			case nil:
-				vm.AddOp(vdbe.OpNull, 0, baseReg+i, 0)
-			case int64:
-				vm.AddOp(vdbe.OpInteger, int(v), baseReg+i, 0)
-			case float64:
-				vm.AddOpWithP4Real(vdbe.OpReal, 0, baseReg+i, 0, v)
-			case string:
-				vm.AddOpWithP4Str(vdbe.OpString8, 0, baseReg+i, 0, v)
-			case []byte:
-				vm.AddOpWithP4Blob(vdbe.OpBlob, len(v), baseReg+i, 0, v)
-			default:
-				vm.AddOp(vdbe.OpNull, 0, baseReg+i, 0)
-			}
-		}
+// materializeRows generates bytecode to materialize rows into ephemeral tables.
+func (s *Stmt) materializeRows(vm *vdbe.VDBE, rows [][]interface{}, numColumns, baseReg, recordReg,
+	resultCursor, currentCursor int) {
+
+	for _, row := range rows {
+		s.emitRowLoadBytecode(vm, row, numColumns, baseReg)
 		vm.AddOp(vdbe.OpMakeRecord, baseReg, numColumns, recordReg)
 		vm.AddOp(vdbe.OpInsert, resultCursor, recordReg, 0)
 		vm.AddOp(vdbe.OpInsert, currentCursor, recordReg, 0)
 	}
+}
 
-	// Step 2: Iterate recursive member until no new rows
-	// The recursive member is typically the right side of UNION
-	recursiveMember := compound.Right
+// emitRowLoadBytecode generates bytecode to load a row's values into registers.
+func (s *Stmt) emitRowLoadBytecode(vm *vdbe.VDBE, row []interface{}, numColumns, baseReg int) {
+	for i := 0; i < numColumns; i++ {
+		switch v := row[i].(type) {
+		case nil:
+			vm.AddOp(vdbe.OpNull, 0, baseReg+i, 0)
+		case int64:
+			vm.AddOp(vdbe.OpInteger, int(v), baseReg+i, 0)
+		case float64:
+			vm.AddOpWithP4Real(vdbe.OpReal, 0, baseReg+i, 0, v)
+		case string:
+			vm.AddOpWithP4Str(vdbe.OpString8, 0, baseReg+i, 0, v)
+		case []byte:
+			vm.AddOpWithP4Blob(vdbe.OpBlob, len(v), baseReg+i, 0, v)
+		default:
+			vm.AddOp(vdbe.OpNull, 0, baseReg+i, 0)
+		}
+	}
+}
+
+// executeRecursiveIterations executes the recursive member until no new rows are produced.
+func (s *Stmt) executeRecursiveIterations(vm *vdbe.VDBE, recursiveMember *parser.SelectStmt,
+	cteName string, currentTable *schema.Table, cteTempTables map[string]*schema.Table,
+	numColumns, baseReg, recordReg, resultCursor, currentCursor int, args []driver.NamedValue) error {
+
 	maxIterations := 1000
 
 	for iteration := 0; iteration < maxIterations; iteration++ {
-		// Compile recursive member with CTE reference pointing to current table
-		recursiveTempTables := make(map[string]*schema.Table)
-		for k, v := range cteTempTables {
-			recursiveTempTables[k] = v
-		}
-		recursiveTempTables[cteName] = currentTable
-
-		rewrittenRecursive := s.rewriteSelectWithCTETables(recursiveMember, recursiveTempTables)
-		recursiveVM := vdbe.New()
-		recursiveVM.Ctx = vm.Ctx
-		compiledRecursive, err := s.compileSelect(recursiveVM, rewrittenRecursive, args)
+		newRows, err := s.executeRecursiveMember(vm, recursiveMember, cteName, currentTable,
+			cteTempTables, numColumns, args)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile recursive member: %w", err)
-		}
-
-		// Execute recursive member and collect all new rows
-		var newRows [][]interface{}
-		for {
-			hasRow, err := compiledRecursive.Step()
-			if err != nil {
-				return nil, fmt.Errorf("recursive member execution failed: %w", err)
-			}
-			if !hasRow {
-				break
-			}
-			// Copy the result row
-			row := make([]interface{}, numColumns)
-			for i := 0; i < numColumns && i < len(compiledRecursive.ResultRow); i++ {
-				row[i] = compiledRecursive.ResultRow[i].Value()
-			}
-			newRows = append(newRows, row)
+			return err
 		}
 
 		// If no new rows, exit loop
@@ -423,32 +474,34 @@ func (s *Stmt) compileRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planner.C
 			break
 		}
 
-		// Materialize new rows into both result and current tables
-		for _, row := range newRows {
-			for i := 0; i < numColumns; i++ {
-				// Emit bytecode to load value into register
-				switch v := row[i].(type) {
-				case nil:
-					vm.AddOp(vdbe.OpNull, 0, baseReg+i, 0)
-				case int64:
-					vm.AddOp(vdbe.OpInteger, int(v), baseReg+i, 0)
-				case float64:
-					vm.AddOpWithP4Real(vdbe.OpReal, 0, baseReg+i, 0, v)
-				case string:
-					vm.AddOpWithP4Str(vdbe.OpString8, 0, baseReg+i, 0, v)
-				case []byte:
-					vm.AddOpWithP4Blob(vdbe.OpBlob, len(v), baseReg+i, 0, v)
-				default:
-					vm.AddOp(vdbe.OpNull, 0, baseReg+i, 0)
-				}
-			}
-			vm.AddOp(vdbe.OpMakeRecord, baseReg, numColumns, recordReg)
-			vm.AddOp(vdbe.OpInsert, resultCursor, recordReg, 0)
-			vm.AddOp(vdbe.OpInsert, currentCursor, recordReg, 0)
-		}
+		// Materialize new rows
+		s.materializeRows(vm, newRows, numColumns, baseReg, recordReg, resultCursor, currentCursor)
 	}
 
-	return tempTable, nil
+	return nil
+}
+
+// executeRecursiveMember executes one iteration of the recursive member.
+func (s *Stmt) executeRecursiveMember(vm *vdbe.VDBE, recursiveMember *parser.SelectStmt,
+	cteName string, currentTable *schema.Table, cteTempTables map[string]*schema.Table,
+	numColumns int, args []driver.NamedValue) ([][]interface{}, error) {
+
+	// Build temp tables map with CTE pointing to current table
+	recursiveTempTables := make(map[string]*schema.Table)
+	for k, v := range cteTempTables {
+		recursiveTempTables[k] = v
+	}
+	recursiveTempTables[cteName] = currentTable
+
+	rewrittenRecursive := s.rewriteSelectWithCTETables(recursiveMember, recursiveTempTables)
+	recursiveVM := vdbe.New()
+	recursiveVM.Ctx = vm.Ctx
+	compiledRecursive, err := s.compileSelect(recursiveVM, rewrittenRecursive, args)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile recursive member: %w", err)
+	}
+
+	return s.collectRows(compiledRecursive, numColumns, "recursive member")
 }
 
 

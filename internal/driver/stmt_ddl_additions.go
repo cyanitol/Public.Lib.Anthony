@@ -255,21 +255,11 @@ func (s *Stmt) compilePragma(vm *vdbe.VDBE, stmt *parser.PragmaStmt, args []driv
 
 // compilePragmaTableInfo compiles PRAGMA table_info(tablename)
 func (s *Stmt) compilePragmaTableInfo(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
-	// Extract table name from Value (could be a string literal or identifier)
-	var tableName string
-	if stmt.Value != nil {
-		if lit, ok := stmt.Value.(*parser.LiteralExpr); ok {
-			tableName = lit.Value
-		} else if ident, ok := stmt.Value.(*parser.IdentExpr); ok {
-			tableName = ident.Name
-		} else {
-			return nil, fmt.Errorf("invalid table name in PRAGMA table_info")
-		}
-	} else {
-		return nil, fmt.Errorf("PRAGMA table_info requires a table name")
+	tableName, err := extractTableNameFromPragma(stmt)
+	if err != nil {
+		return nil, err
 	}
 
-	// Get the table
 	table, exists := s.conn.schema.GetTable(tableName)
 	if !exists {
 		return nil, fmt.Errorf("table not found: %s", tableName)
@@ -278,7 +268,6 @@ func (s *Stmt) compilePragmaTableInfo(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*
 	// PRAGMA table_info returns:
 	// cid, name, type, notnull, dflt_value, pk
 	vm.ResultCols = []string{"cid", "name", "type", "notnull", "dflt_value", "pk"}
-
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 
 	// Use registers 1-6 for the result row (reused for each column)
@@ -286,55 +275,94 @@ func (s *Stmt) compilePragmaTableInfo(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*
 
 	// Generate rows for each column
 	for i, col := range table.Columns {
-		// cid (column index)
-		vm.AddOpWithP4Int(vdbe.OpInteger, i, baseReg, 0, int32(i))
-
-		// name
-		vm.AddOpWithP4Str(vdbe.OpString, 0, baseReg+1, 0, col.Name)
-
-		// type
-		vm.AddOpWithP4Str(vdbe.OpString, 0, baseReg+2, 0, col.Type)
-
-		// notnull (0 or 1)
-		notNull := 0
-		if col.NotNull {
-			notNull = 1
-		}
-		vm.AddOpWithP4Int(vdbe.OpInteger, notNull, baseReg+3, 0, int32(notNull))
-
-		// dflt_value (default value or NULL)
-		if col.Default != nil {
-			if defStr, ok := col.Default.(string); ok {
-				vm.AddOpWithP4Str(vdbe.OpString, 0, baseReg+4, 0, defStr)
-			} else {
-				vm.AddOp(vdbe.OpNull, 0, baseReg+4, 0)
-			}
-		} else {
-			vm.AddOp(vdbe.OpNull, 0, baseReg+4, 0)
-		}
-
-		// pk (primary key index, 0 if not primary key)
-		pk := 0
-		if col.PrimaryKey {
-			// Find position in primary key
-			for j, pkCol := range table.PrimaryKey {
-				if pkCol == col.Name {
-					pk = j + 1
-					break
-				}
-			}
-			if pk == 0 {
-				pk = 1 // Single column primary key
-			}
-		}
-		vm.AddOpWithP4Int(vdbe.OpInteger, pk, baseReg+5, 0, int32(pk))
-
-		// Create result row
-		vm.AddOp(vdbe.OpResultRow, baseReg, 6, 0)
+		emitTableInfoRow(vm, baseReg, i, col, table)
 	}
 
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	return vm, nil
+}
+
+// extractTableNameFromPragma extracts the table name from a PRAGMA statement value.
+func extractTableNameFromPragma(stmt *parser.PragmaStmt) (string, error) {
+	if stmt.Value == nil {
+		return "", fmt.Errorf("PRAGMA table_info requires a table name")
+	}
+
+	if lit, ok := stmt.Value.(*parser.LiteralExpr); ok {
+		return lit.Value, nil
+	}
+
+	if ident, ok := stmt.Value.(*parser.IdentExpr); ok {
+		return ident.Name, nil
+	}
+
+	return "", fmt.Errorf("invalid table name in PRAGMA table_info")
+}
+
+// emitTableInfoRow generates VDBE opcodes for a single table_info row.
+func emitTableInfoRow(vm *vdbe.VDBE, baseReg, index int, col *schema.Column, table *schema.Table) {
+	// cid (column index)
+	vm.AddOpWithP4Int(vdbe.OpInteger, index, baseReg, 0, int32(index))
+
+	// name
+	vm.AddOpWithP4Str(vdbe.OpString, 0, baseReg+1, 0, col.Name)
+
+	// type
+	vm.AddOpWithP4Str(vdbe.OpString, 0, baseReg+2, 0, col.Type)
+
+	// notnull (0 or 1)
+	emitNotNullValue(vm, baseReg+3, col.NotNull)
+
+	// dflt_value (default value or NULL)
+	emitDefaultValue(vm, baseReg+4, col.Default)
+
+	// pk (primary key index, 0 if not primary key)
+	pk := calculatePrimaryKeyIndex(col, table)
+	vm.AddOpWithP4Int(vdbe.OpInteger, pk, baseReg+5, 0, int32(pk))
+
+	// Create result row
+	vm.AddOp(vdbe.OpResultRow, baseReg, 6, 0)
+}
+
+// emitNotNullValue generates the VDBE opcode for the notnull column value.
+func emitNotNullValue(vm *vdbe.VDBE, reg int, notNull bool) {
+	value := 0
+	if notNull {
+		value = 1
+	}
+	vm.AddOpWithP4Int(vdbe.OpInteger, value, reg, 0, int32(value))
+}
+
+// emitDefaultValue generates the VDBE opcode for the default value column.
+func emitDefaultValue(vm *vdbe.VDBE, reg int, defaultVal interface{}) {
+	if defaultVal == nil {
+		vm.AddOp(vdbe.OpNull, 0, reg, 0)
+		return
+	}
+
+	if defStr, ok := defaultVal.(string); ok {
+		vm.AddOpWithP4Str(vdbe.OpString, 0, reg, 0, defStr)
+	} else {
+		vm.AddOp(vdbe.OpNull, 0, reg, 0)
+	}
+}
+
+// calculatePrimaryKeyIndex returns the primary key index for a column.
+// Returns 0 if the column is not a primary key, or the position (1-based) if it is.
+func calculatePrimaryKeyIndex(col *schema.Column, table *schema.Table) int {
+	if !col.PrimaryKey {
+		return 0
+	}
+
+	// Find position in composite primary key
+	for j, pkCol := range table.PrimaryKey {
+		if pkCol == col.Name {
+			return j + 1
+		}
+	}
+
+	// Single column primary key
+	return 1
 }
 
 // compilePragmaForeignKeys compiles PRAGMA foreign_keys or PRAGMA foreign_keys = value
