@@ -1,6 +1,7 @@
 package pager
 
 import (
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -567,5 +568,199 @@ func BenchmarkBusyCallback(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		handler.Busy(i % 10)
+	}
+}
+
+// TestAcquireSharedLockWithRetry tests shared lock acquisition with retry
+func TestAcquireSharedLockWithRetry(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "lock_retry_test_*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	// Open pager with busy handler
+	pager, err := Open(tmpFile.Name(), false)
+	if err != nil {
+		t.Fatalf("failed to open pager: %v", err)
+	}
+	defer pager.Close()
+
+	handler := NewDefaultBusyHandler(100 * time.Millisecond)
+	pager.WithBusyHandler(handler)
+
+	// Test successful acquisition - this will exercise the retry path
+	err = pager.acquireSharedLockWithRetry()
+	if err != nil {
+		t.Errorf("failed to acquire shared lock: %v", err)
+	}
+
+	// Verify lock state
+	if pager.lockState < LockShared {
+		t.Error("lock state should be at least shared")
+	}
+}
+
+// TestAcquireReservedLockWithRetry tests reserved lock acquisition with retry
+func TestAcquireReservedLockWithRetry(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "lock_retry_test_*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	pager, err := Open(tmpFile.Name(), false)
+	if err != nil {
+		t.Fatalf("failed to open pager: %v", err)
+	}
+	defer pager.Close()
+
+	handler := NewDefaultBusyHandler(100 * time.Millisecond)
+	pager.WithBusyHandler(handler)
+
+	// First acquire shared lock
+	if err := pager.acquireSharedLockWithRetry(); err != nil {
+		t.Fatalf("failed to acquire shared lock: %v", err)
+	}
+
+	// Then acquire reserved lock
+	err = pager.acquireReservedLockWithRetry()
+	if err != nil {
+		t.Errorf("failed to acquire reserved lock: %v", err)
+	}
+
+	// Verify lock state
+	if pager.lockState < LockReserved {
+		t.Error("lock state should be at least reserved")
+	}
+}
+
+// TestAcquireExclusiveLockWithRetry tests exclusive lock acquisition with retry
+func TestAcquireExclusiveLockWithRetry(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "lock_retry_test_*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	pager, err := Open(tmpFile.Name(), false)
+	if err != nil {
+		t.Fatalf("failed to open pager: %v", err)
+	}
+	defer pager.Close()
+
+	handler := NewDefaultBusyHandler(100 * time.Millisecond)
+	pager.WithBusyHandler(handler)
+
+	// First acquire shared lock
+	if err := pager.acquireSharedLockWithRetry(); err != nil {
+		t.Fatalf("failed to acquire shared lock: %v", err)
+	}
+
+	// Then reserved lock
+	if err := pager.acquireReservedLockWithRetry(); err != nil {
+		t.Fatalf("failed to acquire reserved lock: %v", err)
+	}
+
+	// Then exclusive lock
+	err = pager.acquireExclusiveLockWithRetry()
+	if err != nil {
+		t.Errorf("failed to acquire exclusive lock: %v", err)
+	}
+
+	// Verify lock state
+	if pager.lockState < LockExclusive {
+		t.Error("lock state should be exclusive")
+	}
+}
+
+// TestTryAcquireSharedLock tests tryAcquireSharedLock
+func TestTryAcquireSharedLock(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "lock_test_*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	pager, err := Open(tmpFile.Name(), false)
+	if err != nil {
+		t.Fatalf("failed to open pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Try to acquire shared lock
+	err = pager.tryAcquireSharedLock()
+	if err != nil {
+		t.Errorf("failed to try acquire shared lock: %v", err)
+	}
+
+	if pager.lockState < LockShared {
+		t.Error("should have acquired shared lock")
+	}
+}
+
+// TestTryAcquireReservedLock tests tryAcquireReservedLock
+func TestTryAcquireReservedLock(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "lock_test_*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	pager, err := Open(tmpFile.Name(), false)
+	if err != nil {
+		t.Fatalf("failed to open pager: %v", err)
+	}
+	defer pager.Close()
+
+	// First need a write transaction
+	if err := pager.BeginWrite(); err != nil {
+		t.Fatalf("failed to begin write: %v", err)
+	}
+
+	// Try to acquire reserved lock
+	err = pager.tryAcquireReservedLock()
+	if err != nil {
+		t.Errorf("failed to try acquire reserved lock: %v", err)
+	}
+
+	if pager.lockState < LockReserved {
+		t.Error("should have acquired reserved lock")
+	}
+}
+
+// TestTryAcquireExclusiveLock tests tryAcquireExclusiveLock
+func TestTryAcquireExclusiveLock(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "lock_test_*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	pager, err := Open(tmpFile.Name(), false)
+	if err != nil {
+		t.Fatalf("failed to open pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Need write transaction
+	if err := pager.BeginWrite(); err != nil {
+		t.Fatalf("failed to begin write: %v", err)
+	}
+
+	// Try to acquire exclusive lock
+	err = pager.tryAcquireExclusiveLock()
+	if err != nil {
+		t.Errorf("failed to try acquire exclusive lock: %v", err)
+	}
+
+	if pager.lockState < LockExclusive {
+		t.Error("should have acquired exclusive lock")
 	}
 }

@@ -241,3 +241,376 @@ func TestCompareBytes(t *testing.T) {
 		}
 	}
 }
+
+// TestIdxInsertOpcode tests the OpIdxInsert opcode
+func TestIdxInsertOpcode(t *testing.T) {
+	bt := btree.NewBtree(4096)
+	rootPage, err := createIndexPage(bt)
+	if err != nil {
+		t.Fatalf("failed to create index page: %v", err)
+	}
+
+	idxCursor := btree.NewIndexCursor(bt, rootPage)
+
+	// Create VDBE
+	v := New()
+	v.Ctx = &VDBEContext{
+		Btree: bt,
+	}
+
+	v.AllocMemory(10)
+	v.AllocCursors(2)
+
+	// Set up writable index cursor
+	v.Cursors[0] = &Cursor{
+		CurType:     CursorBTree,
+		IsTable:     false,
+		Writable:    true, // Writable
+		RootPage:    rootPage,
+		BtreeCursor: idxCursor,
+		CachedCols:  make([][]byte, 0),
+		CacheStatus: 0,
+	}
+
+	// Set up key and rowid in registers
+	v.Mem[1].SetBlob([]byte("testkey"))
+	v.Mem[2].SetInt(123)
+
+	// Test OpIdxInsert
+	instr := &Instruction{
+		Opcode: OpIdxInsert,
+		P1:     0, // cursor
+		P2:     1, // key register
+		P3:     2, // rowid register
+	}
+
+	err = v.execIdxInsert(instr)
+	if err != nil {
+		t.Fatalf("execIdxInsert failed: %v", err)
+	}
+
+	// Verify insertion
+	found, err := idxCursor.SeekIndex([]byte("testkey"))
+	if err != nil {
+		t.Fatalf("SeekIndex failed: %v", err)
+	}
+	if !found {
+		t.Error("Key not found after insert")
+	}
+	if idxCursor.GetRowid() != 123 {
+		t.Errorf("Expected rowid 123, got %d", idxCursor.GetRowid())
+	}
+}
+
+// TestIdxDeleteOpcode tests the OpIdxDelete opcode
+func TestIdxDeleteOpcode(t *testing.T) {
+	bt := btree.NewBtree(4096)
+	rootPage, err := createIndexPage(bt)
+	if err != nil {
+		t.Fatalf("failed to create index page: %v", err)
+	}
+
+	idxCursor := btree.NewIndexCursor(bt, rootPage)
+
+	// Insert a key first
+	if err := idxCursor.InsertIndex([]byte("deletekey"), 456); err != nil {
+		t.Fatalf("InsertIndex failed: %v", err)
+	}
+
+	// Create VDBE
+	v := New()
+	v.Ctx = &VDBEContext{
+		Btree: bt,
+	}
+
+	v.AllocMemory(10)
+	v.AllocCursors(2)
+
+	// Set up writable index cursor
+	v.Cursors[0] = &Cursor{
+		CurType:     CursorBTree,
+		IsTable:     false,
+		Writable:    true,
+		RootPage:    rootPage,
+		BtreeCursor: idxCursor,
+		CachedCols:  make([][]byte, 0),
+		CacheStatus: 0,
+	}
+
+	// Set up key in register
+	v.Mem[1].SetBlob([]byte("deletekey"))
+
+	// Test OpIdxDelete
+	instr := &Instruction{
+		Opcode: OpIdxDelete,
+		P1:     0, // cursor
+		P2:     1, // key register
+	}
+
+	err = v.execIdxDelete(instr)
+	if err != nil {
+		t.Fatalf("execIdxDelete failed: %v", err)
+	}
+
+	// Verify deletion
+	found, err := idxCursor.SeekIndex([]byte("deletekey"))
+	if err != nil {
+		t.Fatalf("SeekIndex failed: %v", err)
+	}
+	if found {
+		t.Error("Key still found after delete")
+	}
+}
+
+// TestIdxCompareOpcodes tests the OpIdxLT, OpIdxGT, OpIdxLE, OpIdxGE opcodes
+func TestIdxCompareOpcodes(t *testing.T) {
+	bt := btree.NewBtree(4096)
+	rootPage, err := createIndexPage(bt)
+	if err != nil {
+		t.Fatalf("failed to create index page: %v", err)
+	}
+
+	idxCursor := btree.NewIndexCursor(bt, rootPage)
+
+	// Insert keys in sorted order
+	keys := []string{"apple", "banana", "cherry", "date"}
+	for i, key := range keys {
+		if err := idxCursor.InsertIndex([]byte(key), int64(i)); err != nil {
+			t.Fatalf("InsertIndex failed: %v", err)
+		}
+	}
+
+	// Seek to "banana"
+	if found, err := idxCursor.SeekIndex([]byte("banana")); err != nil || !found {
+		t.Fatalf("SeekIndex failed: %v, found=%v", err, found)
+	}
+
+	// Create VDBE
+	v := New()
+	v.Ctx = &VDBEContext{
+		Btree: bt,
+	}
+
+	v.AllocMemory(10)
+	v.AllocCursors(2)
+
+	// Set up index cursor at "banana"
+	v.Cursors[0] = &Cursor{
+		CurType:     CursorBTree,
+		IsTable:     false,
+		Writable:    false,
+		RootPage:    rootPage,
+		BtreeCursor: idxCursor,
+		CachedCols:  make([][]byte, 0),
+		CacheStatus: 0,
+	}
+
+	t.Run("OpIdxLT", func(t *testing.T) {
+		// Compare "banana" < "cherry" (should be true, so jump)
+		v.Mem[1].SetBlob([]byte("cherry"))
+		v.PC = 0
+
+		instr := &Instruction{
+			Opcode: OpIdxLT,
+			P1:     0,  // cursor
+			P2:     10, // jump address
+			P3:     1,  // comparison key register
+		}
+
+		err := v.execIdxLT(instr)
+		if err != nil {
+			t.Fatalf("execIdxLT failed: %v", err)
+		}
+
+		if v.PC != 10 {
+			t.Errorf("Expected jump to 10, PC=%d", v.PC)
+		}
+
+		// Compare "banana" < "apple" (should be false, no jump)
+		v.Mem[1].SetBlob([]byte("apple"))
+		v.PC = 0
+
+		err = v.execIdxLT(instr)
+		if err != nil {
+			t.Fatalf("execIdxLT failed: %v", err)
+		}
+
+		if v.PC == 10 {
+			t.Error("Should not jump when condition is false")
+		}
+	})
+
+	t.Run("OpIdxGT", func(t *testing.T) {
+		// Compare "banana" > "apple" (should be true, so jump)
+		v.Mem[1].SetBlob([]byte("apple"))
+		v.PC = 0
+
+		instr := &Instruction{
+			Opcode: OpIdxGT,
+			P1:     0,
+			P2:     10,
+			P3:     1,
+		}
+
+		err := v.execIdxGT(instr)
+		if err != nil {
+			t.Fatalf("execIdxGT failed: %v", err)
+		}
+
+		if v.PC != 10 {
+			t.Errorf("Expected jump to 10, PC=%d", v.PC)
+		}
+	})
+
+	t.Run("OpIdxLE", func(t *testing.T) {
+		// Compare "banana" <= "banana" (should be true, so jump)
+		v.Mem[1].SetBlob([]byte("banana"))
+		v.PC = 0
+
+		instr := &Instruction{
+			Opcode: OpIdxLE,
+			P1:     0,
+			P2:     10,
+			P3:     1,
+		}
+
+		err := v.execIdxLE(instr)
+		if err != nil {
+			t.Fatalf("execIdxLE failed: %v", err)
+		}
+
+		if v.PC != 10 {
+			t.Errorf("Expected jump to 10, PC=%d", v.PC)
+		}
+
+		// Compare "banana" <= "cherry" (should be true, so jump)
+		v.Mem[1].SetBlob([]byte("cherry"))
+		v.PC = 0
+
+		err = v.execIdxLE(instr)
+		if err != nil {
+			t.Fatalf("execIdxLE failed: %v", err)
+		}
+
+		if v.PC != 10 {
+			t.Errorf("Expected jump to 10, PC=%d", v.PC)
+		}
+	})
+
+	t.Run("OpIdxGE", func(t *testing.T) {
+		// Compare "banana" >= "banana" (should be true, so jump)
+		v.Mem[1].SetBlob([]byte("banana"))
+		v.PC = 0
+
+		instr := &Instruction{
+			Opcode: OpIdxGE,
+			P1:     0,
+			P2:     10,
+			P3:     1,
+		}
+
+		err := v.execIdxGE(instr)
+		if err != nil {
+			t.Fatalf("execIdxGE failed: %v", err)
+		}
+
+		if v.PC != 10 {
+			t.Errorf("Expected jump to 10, PC=%d", v.PC)
+		}
+
+		// Compare "banana" >= "apple" (should be true, so jump)
+		v.Mem[1].SetBlob([]byte("apple"))
+		v.PC = 0
+
+		err = v.execIdxGE(instr)
+		if err != nil {
+			t.Fatalf("execIdxGE failed: %v", err)
+		}
+
+		if v.PC != 10 {
+			t.Errorf("Expected jump to 10, PC=%d", v.PC)
+		}
+	})
+}
+
+// TestIdxOpcodeErrors tests error conditions for index opcodes
+func TestIdxOpcodeErrors(t *testing.T) {
+	v := New()
+	v.AllocMemory(10)
+	v.AllocCursors(2)
+
+	t.Run("IdxInsert_NoCursor", func(t *testing.T) {
+		err := v.execIdxInsert(&Instruction{
+			Opcode: OpIdxInsert,
+			P1:     0,
+			P2:     1,
+			P3:     2,
+		})
+
+		if err == nil {
+			t.Error("Expected error for missing cursor")
+		}
+	})
+
+	t.Run("IdxInsert_NotWritable", func(t *testing.T) {
+		bt := btree.NewBtree(4096)
+		rootPage, _ := createIndexPage(bt)
+		idxCursor := btree.NewIndexCursor(bt, rootPage)
+
+		v.Ctx = &VDBEContext{Btree: bt}
+		v.Cursors[0] = &Cursor{
+			CurType:     CursorBTree,
+			IsTable:     false,
+			Writable:    false, // NOT writable
+			RootPage:    rootPage,
+			BtreeCursor: idxCursor,
+		}
+
+		v.Mem[1].SetBlob([]byte("key"))
+		v.Mem[2].SetInt(1)
+
+		err := v.execIdxInsert(&Instruction{
+			Opcode: OpIdxInsert,
+			P1:     0,
+			P2:     1,
+			P3:     2,
+		})
+
+		if err == nil {
+			t.Error("Expected error for non-writable cursor")
+		}
+	})
+
+	t.Run("IdxDelete_NoCursor", func(t *testing.T) {
+		v2 := New()
+		v2.AllocMemory(10)
+		v2.AllocCursors(2)
+
+		err := v2.execIdxDelete(&Instruction{
+			Opcode: OpIdxDelete,
+			P1:     0,
+			P2:     1,
+		})
+
+		if err == nil {
+			t.Error("Expected error for missing cursor")
+		}
+	})
+
+	t.Run("IdxCompare_InvalidCursor", func(t *testing.T) {
+		v3 := New()
+		v3.AllocMemory(10)
+		v3.AllocCursors(2)
+
+		err := v3.execIdxLT(&Instruction{
+			Opcode: OpIdxLT,
+			P1:     0,
+			P2:     10,
+			P3:     1,
+		})
+
+		if err == nil {
+			t.Error("Expected error for invalid cursor")
+		}
+	})
+}

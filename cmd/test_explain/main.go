@@ -9,112 +9,101 @@ import (
 )
 
 func main() {
-	// Open an in-memory database
+	db := setupDatabase()
+	defer db.Close()
+
+	runQueryPlanTests(db)
+	runOpcodeTests(db)
+	runDMLTests(db)
+
+	fmt.Println("All tests completed successfully!")
+}
+
+func setupDatabase() *sql.DB {
 	db, err := sql.Open("sqlite_internal", ":memory:")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
-	defer db.Close()
 
-	// Create a test table
-	_, err = db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
-	if err != nil {
-		log.Fatalf("Failed to create table: %v", err)
+	if err := createTestTables(db); err != nil {
+		log.Fatalf("Failed to create tables: %v", err)
 	}
 
+	return db
+}
+
+func createTestTables(db *sql.DB) error {
+	tables := []string{
+		"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)",
+		"CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, amount INTEGER)",
+	}
+
+	for _, table := range tables {
+		if _, err := db.Exec(table); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func runQueryPlanTests(db *sql.DB) {
 	fmt.Println("=== Testing EXPLAIN QUERY PLAN ===")
 	fmt.Println()
 
-	// Test 1: Simple SELECT
-	fmt.Println("1. EXPLAIN QUERY PLAN SELECT * FROM users:")
-	rows, err := db.Query("EXPLAIN QUERY PLAN SELECT * FROM users")
-	if err != nil {
-		log.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
-	}
-	printQueryPlan(rows)
-	rows.Close()
-	fmt.Println()
-
-	// Test 2: SELECT with WHERE
-	fmt.Println("2. EXPLAIN QUERY PLAN SELECT * FROM users WHERE id = 1:")
-	rows, err = db.Query("EXPLAIN QUERY PLAN SELECT * FROM users WHERE id = 1")
-	if err != nil {
-		log.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
-	}
-	printQueryPlan(rows)
-	rows.Close()
-	fmt.Println()
-
-	// Test 3: SELECT with ORDER BY
-	fmt.Println("3. EXPLAIN QUERY PLAN SELECT * FROM users ORDER BY name:")
-	rows, err = db.Query("EXPLAIN QUERY PLAN SELECT * FROM users ORDER BY name")
-	if err != nil {
-		log.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
-	}
-	printQueryPlan(rows)
-	rows.Close()
-	fmt.Println()
-
-	// Create another table for JOIN test
-	_, err = db.Exec("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, amount INTEGER)")
-	if err != nil {
-		log.Fatalf("Failed to create orders table: %v", err)
+	tests := []struct {
+		description string
+		query       string
+	}{
+		{"1. EXPLAIN QUERY PLAN SELECT * FROM users:", "EXPLAIN QUERY PLAN SELECT * FROM users"},
+		{"2. EXPLAIN QUERY PLAN SELECT * FROM users WHERE id = 1:", "EXPLAIN QUERY PLAN SELECT * FROM users WHERE id = 1"},
+		{"3. EXPLAIN QUERY PLAN SELECT * FROM users ORDER BY name:", "EXPLAIN QUERY PLAN SELECT * FROM users ORDER BY name"},
+		{"4. EXPLAIN QUERY PLAN SELECT * FROM users JOIN orders ON users.id = orders.user_id:", "EXPLAIN QUERY PLAN SELECT * FROM users INNER JOIN orders ON users.id = orders.user_id"},
 	}
 
-	// Test 4: JOIN
-	fmt.Println("4. EXPLAIN QUERY PLAN SELECT * FROM users JOIN orders ON users.id = orders.user_id:")
-	rows, err = db.Query("EXPLAIN QUERY PLAN SELECT * FROM users INNER JOIN orders ON users.id = orders.user_id")
-	if err != nil {
-		log.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
+	for _, test := range tests {
+		executeQueryPlanTest(db, test.description, test.query)
 	}
-	printQueryPlan(rows)
-	rows.Close()
-	fmt.Println()
+}
 
+func runOpcodeTests(db *sql.DB) {
 	fmt.Println("=== Testing EXPLAIN (VDBE opcodes) ===")
 	fmt.Println()
 
-	// Test 5: EXPLAIN opcodes
 	fmt.Println("5. EXPLAIN SELECT * FROM users:")
-	rows, err = db.Query("EXPLAIN SELECT * FROM users")
+	rows, err := db.Query("EXPLAIN SELECT * FROM users")
 	if err != nil {
 		log.Fatalf("EXPLAIN failed: %v", err)
 	}
 	printOpcodes(rows)
 	rows.Close()
 	fmt.Println()
+}
 
-	// Test 6: INSERT
-	fmt.Println("6. EXPLAIN QUERY PLAN INSERT INTO users (name, age) VALUES ('Alice', 25):")
-	rows, err = db.Query("EXPLAIN QUERY PLAN INSERT INTO users (name, age) VALUES ('Alice', 25)")
+func runDMLTests(db *sql.DB) {
+	tests := []struct {
+		description string
+		query       string
+	}{
+		{"6. EXPLAIN QUERY PLAN INSERT INTO users (name, age) VALUES ('Alice', 25):", "EXPLAIN QUERY PLAN INSERT INTO users (name, age) VALUES ('Alice', 25)"},
+		{"7. EXPLAIN QUERY PLAN UPDATE users SET age = 30 WHERE id = 1:", "EXPLAIN QUERY PLAN UPDATE users SET age = 30 WHERE id = 1"},
+		{"8. EXPLAIN QUERY PLAN DELETE FROM users WHERE age < 18:", "EXPLAIN QUERY PLAN DELETE FROM users WHERE age < 18"},
+	}
+
+	for _, test := range tests {
+		executeQueryPlanTest(db, test.description, test.query)
+	}
+}
+
+func executeQueryPlanTest(db *sql.DB, description, query string) {
+	fmt.Println(description)
+	rows, err := db.Query(query)
 	if err != nil {
-		log.Fatalf("EXPLAIN QUERY PLAN INSERT failed: %v", err)
+		log.Fatalf("Query failed: %v", err)
 	}
 	printQueryPlan(rows)
 	rows.Close()
 	fmt.Println()
-
-	// Test 7: UPDATE
-	fmt.Println("7. EXPLAIN QUERY PLAN UPDATE users SET age = 30 WHERE id = 1:")
-	rows, err = db.Query("EXPLAIN QUERY PLAN UPDATE users SET age = 30 WHERE id = 1")
-	if err != nil {
-		log.Fatalf("EXPLAIN QUERY PLAN UPDATE failed: %v", err)
-	}
-	printQueryPlan(rows)
-	rows.Close()
-	fmt.Println()
-
-	// Test 8: DELETE
-	fmt.Println("8. EXPLAIN QUERY PLAN DELETE FROM users WHERE age < 18:")
-	rows, err = db.Query("EXPLAIN QUERY PLAN DELETE FROM users WHERE age < 18")
-	if err != nil {
-		log.Fatalf("EXPLAIN QUERY PLAN DELETE failed: %v", err)
-	}
-	printQueryPlan(rows)
-	rows.Close()
-	fmt.Println()
-
-	fmt.Println("All tests completed successfully!")
 }
 
 func printQueryPlan(rows *sql.Rows) {

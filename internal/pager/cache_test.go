@@ -918,3 +918,221 @@ func TestLRUCacheFlushWithError(t *testing.T) {
 		t.Error("expected error during flush")
 	}
 }
+
+// TestDefaultLRUCacheConfig tests the default config function
+func TestDefaultLRUCacheConfig(t *testing.T) {
+	config := DefaultLRUCacheConfig(4096)
+
+	if config.PageSize != 4096 {
+		t.Errorf("expected page size 4096, got %d", config.PageSize)
+	}
+
+	if config.MaxPages <= 0 && config.MaxMemory <= 0 {
+		t.Error("expected either MaxPages or MaxMemory to be set")
+	}
+
+	if config.Mode != WriteBackMode {
+		t.Errorf("expected write-back mode, got %d", config.Mode)
+	}
+}
+
+// TestLRUCacheSetMaxMemory tests the SetMaxMemory function
+func TestLRUCacheSetMaxMemory(t *testing.T) {
+	tests := []struct {
+		name      string
+		maxPages  int
+		maxMemory int64
+		newMemory int64
+		wantErr   bool
+	}{
+		{
+			name:      "valid memory limit",
+			maxPages:  10,
+			maxMemory: 100000,
+			newMemory: 50000,
+			wantErr:   false,
+		},
+		{
+			name:      "increase memory limit",
+			maxPages:  10,
+			maxMemory: 50000,
+			newMemory: 100000,
+			wantErr:   false,
+		},
+		{
+			name:      "zero memory with zero pages",
+			maxPages:  0,
+			maxMemory: 100000,
+			newMemory: 0,
+			wantErr:   true,
+		},
+		{
+			name:      "zero memory with positive pages",
+			maxPages:  10,
+			maxMemory: 100000,
+			newMemory: 0,
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := LRUCacheConfig{
+				PageSize:  4096,
+				MaxPages:  tt.maxPages,
+				MaxMemory: tt.maxMemory,
+			}
+			cache, err := NewLRUCache(config)
+			if err != nil {
+				t.Fatalf("failed to create cache: %v", err)
+			}
+
+			// Add some pages
+			for i := Pgno(1); i <= 5; i++ {
+				page := NewDbPage(i, 4096)
+				page.Unref() // Make evictable
+				cache.Put(page)
+			}
+
+			err = cache.SetMaxMemory(tt.newMemory)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error but got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+
+				// Verify memory limit is respected
+				if tt.newMemory > 0 {
+					memUsage := cache.MemoryUsage()
+					if memUsage > tt.newMemory {
+						t.Errorf("memory usage %d exceeds limit %d", memUsage, tt.newMemory)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestLRUCacheMarkDirty tests the MarkDirty function
+func TestLRUCacheMarkDirty(t *testing.T) {
+	cache := NewLRUCacheSimple(4096, 10)
+	writer := newMockPageWriter()
+	cache.SetPager(writer)
+
+	t.Run("mark clean page dirty in write-back mode", func(t *testing.T) {
+		cache.SetMode(WriteBackMode)
+		page := NewDbPage(1, 4096)
+		cache.Put(page)
+
+		// Mark dirty - void function
+		cache.MarkDirty(page)
+
+		if !page.IsDirty() {
+			t.Error("page should be dirty")
+		}
+	})
+
+	t.Run("mark page dirty in write-through mode", func(t *testing.T) {
+		cache.SetMode(WriteThroughMode)
+		cache.Clear()
+
+		page := NewDbPage(2, 4096)
+		cache.Put(page)
+
+		// Mark dirty should flush immediately
+		cache.MarkDirty(page)
+
+		// Page should be clean after write-through
+		if page.IsDirty() {
+			t.Error("page should be clean after write-through")
+		}
+
+		// Verify write happened
+		if len(writer.writtenPages) != 1 {
+			t.Errorf("expected 1 write, got %d", len(writer.writtenPages))
+		}
+	})
+
+	t.Run("mark non-existent page dirty", func(t *testing.T) {
+		cache.SetMode(WriteBackMode)
+		page := NewDbPage(999, 4096)
+
+		// Should not error for non-existent page
+		cache.MarkDirty(page)
+	})
+
+	t.Run("mark dirty with write error", func(t *testing.T) {
+		cache.SetMode(WriteThroughMode)
+		cache.Clear()
+		writer.writeError = errors.New("write failed")
+		defer func() { writer.writeError = nil }()
+
+		page := NewDbPage(3, 4096)
+		cache.Put(page)
+
+		// Mark dirty - will fail but function is void
+		cache.MarkDirty(page)
+
+		// Page should still be dirty since write failed
+		if !page.IsDirty() {
+			t.Error("page should still be dirty after failed write")
+		}
+	})
+}
+
+// TestLRUCacheEvictWithDirtyPages tests eviction with dirty pages
+func TestLRUCacheEvictWithDirtyPages(t *testing.T) {
+	cache := NewLRUCacheSimple(4096, 5)
+
+	// Fill cache with dirty pages
+	for i := Pgno(1); i <= 5; i++ {
+		page := NewDbPage(i, 4096)
+		page.MakeDirty()
+		page.Unref()
+		cache.Put(page)
+	}
+
+	// Try to add another page - should fail because all are dirty
+	page6 := NewDbPage(6, 4096)
+	page6.Unref()
+	err := cache.Put(page6)
+	if err == nil {
+		t.Error("expected error when cache full of dirty pages")
+	}
+}
+
+// TestLRUCacheHitRateEdgeCases tests hit rate calculation edge cases
+func TestLRUCacheHitRateEdgeCases(t *testing.T) {
+	cache := NewLRUCacheSimple(4096, 10)
+
+	// No accesses - should return 0.0
+	hitRate := cache.HitRate()
+	if hitRate != 0.0 {
+		t.Errorf("expected 0.0 hit rate with no accesses, got %f", hitRate)
+	}
+
+	// Add a page - this counts as a miss
+	page := NewDbPage(1, 4096)
+	cache.Put(page)
+
+	// Get triggers stats tracking
+	cache.Get(999) // Miss
+
+	// Check stats
+	hits, misses := cache.Stats()
+	if hits != 0 {
+		t.Errorf("expected 0 hits, got %d", hits)
+	}
+
+	// Now get existing page - hit
+	cache.Get(1)
+
+	hits, _ = cache.Stats()
+	if hits < 1 {
+		t.Errorf("expected at least 1 hit, got %d", hits)
+	}
+	_ = misses // suppress unused warning
+}

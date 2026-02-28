@@ -511,3 +511,149 @@ func TestResetAggregateState(t *testing.T) {
 	ctx.ResetAggregateState(0)
 	// Just ensure no panic
 }
+
+// TestGetPseudoCursorPayload tests the getPseudoCursorPayload function
+func TestGetPseudoCursorPayload(t *testing.T) {
+	v := NewTestVDBE(10)
+	v.AllocCursors(2)
+
+	// Set up pseudo-table cursor with data
+	recordData := []byte{1, 2, 3, 4, 5}
+	v.Mem[5].SetBlob(recordData)
+
+	cursor := &Cursor{
+		CurType:   CursorPseudo,
+		IsTable:   true,
+		PseudoReg: 5,
+	}
+	v.Cursors[0] = cursor
+
+	// Get payload from pseudo cursor
+	dst := NewMem()
+	payload := v.getPseudoCursorPayload(cursor, dst)
+
+	if len(payload) != len(recordData) {
+		t.Errorf("Expected payload length %d, got %d", len(recordData), len(payload))
+	}
+
+	for i, b := range recordData {
+		if payload[i] != b {
+			t.Errorf("Byte %d: expected %d, got %d", i, b, payload[i])
+		}
+	}
+}
+
+// TestExecRollback tests the execRollback function
+func TestExecRollback(t *testing.T) {
+	t.Run("Rollback_WriteTransaction", func(t *testing.T) {
+		v := NewTestVDBE(10)
+
+		mockPager := &MockTransactionPager{
+			inWriteTxn: true,
+			inTxn:      true,
+		}
+		v.Ctx = &VDBEContext{
+			Pager: mockPager,
+		}
+
+		instr := &Instruction{
+			Opcode: OpRollback,
+		}
+
+		err := v.execRollback(instr)
+		if err != nil {
+			t.Fatalf("execRollback failed: %v", err)
+		}
+
+		if !mockPager.rolledBack {
+			t.Error("Expected Rollback to be called")
+		}
+	})
+
+	t.Run("Rollback_ReadTransaction", func(t *testing.T) {
+		v := NewTestVDBE(10)
+
+		mockPager := &MockTransactionPager{
+			inWriteTxn: false,
+			inTxn:      true,
+		}
+		v.Ctx = &VDBEContext{
+			Pager: mockPager,
+		}
+
+		instr := &Instruction{
+			Opcode: OpRollback,
+		}
+
+		err := v.execRollback(instr)
+		if err != nil {
+			t.Fatalf("execRollback failed: %v", err)
+		}
+
+		if !mockPager.endedRead {
+			t.Error("Expected EndRead to be called")
+		}
+	})
+
+	t.Run("Rollback_NoPager", func(t *testing.T) {
+		v := NewTestVDBE(10)
+		// No context
+
+		instr := &Instruction{
+			Opcode: OpRollback,
+		}
+
+		err := v.execRollback(instr)
+		if err == nil {
+			t.Error("Expected error when no pager")
+		}
+	})
+}
+
+// MockTransactionPager for testing
+type MockTransactionPager struct {
+	inTxn      bool
+	inWriteTxn bool
+	committed  bool
+	rolledBack bool
+	endedRead  bool
+}
+
+func (m *MockTransactionPager) BeginRead() error {
+	m.inTxn = true
+	return nil
+}
+
+func (m *MockTransactionPager) EndRead() error {
+	m.inTxn = false
+	m.endedRead = true
+	return nil
+}
+
+func (m *MockTransactionPager) BeginWrite() error {
+	m.inTxn = true
+	m.inWriteTxn = true
+	return nil
+}
+
+func (m *MockTransactionPager) Commit() error {
+	m.inTxn = false
+	m.inWriteTxn = false
+	m.committed = true
+	return nil
+}
+
+func (m *MockTransactionPager) Rollback() error {
+	m.inTxn = false
+	m.inWriteTxn = false
+	m.rolledBack = true
+	return nil
+}
+
+func (m *MockTransactionPager) InTransaction() bool {
+	return m.inTxn
+}
+
+func (m *MockTransactionPager) InWriteTransaction() bool {
+	return m.inWriteTxn
+}
