@@ -1786,7 +1786,7 @@ func (v *VDBE) execCompare(instr *Instruction, test func(int) bool) error {
 	// Compare r[P1] with r[P2] and store the boolean result (0 or 1) in r[P3].
 	// P1 = left operand register
 	// P2 = right operand register
-	// P3 = result register (1 if condition is true, 0 otherwise)
+	// P3 = result register (1 if condition is true, 0 otherwise, NULL if either operand is NULL)
 	// P4 = optional collation name (for string comparisons)
 	left, err := v.GetMem(instr.P1)
 	if err != nil {
@@ -1796,6 +1796,18 @@ func (v *VDBE) execCompare(instr *Instruction, test func(int) bool) error {
 	right, err := v.GetMem(instr.P2)
 	if err != nil {
 		return err
+	}
+
+	// Store result in P3
+	if instr.P3 >= len(v.Mem) {
+		return fmt.Errorf("register %d out of range", instr.P3)
+	}
+
+	// NULL handling: NULL compared to anything (including NULL) results in NULL (UNKNOWN)
+	// This implements SQL three-valued logic
+	if left.IsNull() || right.IsNull() {
+		v.Mem[instr.P3].SetNull()
+		return nil
 	}
 
 	// Use collation from P4 if present, otherwise default comparison
@@ -1811,10 +1823,6 @@ func (v *VDBE) execCompare(instr *Instruction, test func(int) bool) error {
 		result = 1
 	}
 
-	// Store result in P3
-	if instr.P3 >= len(v.Mem) {
-		return fmt.Errorf("register %d out of range", instr.P3)
-	}
 	v.Mem[instr.P3].SetInt(result)
 	return nil
 }
