@@ -1134,6 +1134,11 @@ func (s *Stmt) isWindowFunctionExpr(expr parser.Expression) bool {
 
 // detectAggregates checks if a SELECT statement contains aggregate functions
 func (s *Stmt) detectAggregates(stmt *parser.SelectStmt) bool {
+	// Check for GROUP BY clause
+	if len(stmt.GroupBy) > 0 {
+		return true
+	}
+
 	for _, col := range stmt.Columns {
 		if s.isAggregateExpr(col.Expr) {
 			return true
@@ -1370,6 +1375,11 @@ func (s *Stmt) initializeAggregateAccumulators(vm *vdbe.VDBE, stmt *parser.Selec
 
 // compileSelectWithAggregates compiles a SELECT with aggregate functions
 func (s *Stmt) compileSelectWithAggregates(vm *vdbe.VDBE, stmt *parser.SelectStmt, tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	// Check if we have GROUP BY
+	if len(stmt.GroupBy) > 0 {
+		return s.compileSelectWithGroupBy(vm, stmt, tableName, table, args)
+	}
+
 	numCols := len(stmt.Columns)
 
 	// Setup VDBE and code generator
@@ -1526,7 +1536,16 @@ func (s *Stmt) emitAggregateOutput(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 		}
 	}
 
+	// Check HAVING clause if present
+	havingSkipAddr := s.emitAggregateHavingClause(vm, stmt, accRegs, avgCountRegs, numCols)
+
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+
+	// Fix HAVING skip address to jump past ResultRow
+	if havingSkipAddr > 0 {
+		vm.Program[havingSkipAddr].P2 = vm.NumOps()
+	}
+
 	return afterScanAddr
 }
 
@@ -1617,6 +1636,58 @@ func (s *Stmt) compileSelectWithWindowFunctions(vm *vdbe.VDBE, stmt *parser.Sele
 	rowCountReg := numCols + 10
 	vm.AddOp(vdbe.OpInteger, 0, rowCountReg, 0)
 
+	// Initialize registers for RANK() and DENSE_RANK()
+	rankReg := numCols + 11
+	denseRankReg := numCols + 12
+	vm.AddOp(vdbe.OpInteger, 1, rankReg, 0)      // Start with rank 1
+	vm.AddOp(vdbe.OpInteger, 1, denseRankReg, 0) // Start with dense_rank 1
+
+	// Analyze window functions to find ORDER BY columns for ranking
+	var rankOrderByCols []int
+	hasRankFunc := false
+	hasDenseRankFunc := false
+
+	for _, col := range expandedCols {
+		if fnExpr, ok := col.Expr.(*parser.FunctionExpr); ok && fnExpr.Over != nil {
+			if fnExpr.Name == "rank" {
+				hasRankFunc = true
+				// Extract ORDER BY columns from window spec
+				if fnExpr.Over.OrderBy != nil && len(rankOrderByCols) == 0 {
+					for _, orderTerm := range fnExpr.Over.OrderBy {
+						if identExpr, ok := orderTerm.Expr.(*parser.IdentExpr); ok {
+							colIdx := s.findColumnIndex(table, identExpr.Name)
+							if colIdx >= 0 {
+								rankOrderByCols = append(rankOrderByCols, colIdx)
+							}
+						}
+					}
+				}
+			} else if fnExpr.Name == "dense_rank" {
+				hasDenseRankFunc = true
+				// Extract ORDER BY columns from window spec
+				if fnExpr.Over.OrderBy != nil && len(rankOrderByCols) == 0 {
+					for _, orderTerm := range fnExpr.Over.OrderBy {
+						if identExpr, ok := orderTerm.Expr.(*parser.IdentExpr); ok {
+							colIdx := s.findColumnIndex(table, identExpr.Name)
+							if colIdx >= 0 {
+								rankOrderByCols = append(rankOrderByCols, colIdx)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Allocate registers for storing previous and current ORDER BY values
+	prevOrderByReg := numCols + 20
+	currOrderByReg := numCols + 30
+
+	// Initialize previous ORDER BY values to NULL (indicates first row)
+	for idx := range rankOrderByCols {
+		vm.AddOp(vdbe.OpNull, 0, prevOrderByReg+idx, 0)
+	}
+
 	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
 
 	// WHERE clause
@@ -1629,8 +1700,77 @@ func (s *Stmt) compileSelectWithWindowFunctions(vm *vdbe.VDBE, stmt *parser.Sele
 		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
 	}
 
-	// Increment row counter
-	vm.AddOp(vdbe.OpAddImm, rowCountReg, 1, 0)
+	// For RANK/DENSE_RANK: compare current ORDER BY values with previous
+	if (hasRankFunc || hasDenseRankFunc) && len(rankOrderByCols) > 0 {
+		// Read current ORDER BY values into registers
+		for idx, colIdx := range rankOrderByCols {
+			vm.AddOp(vdbe.OpColumn, 0, colIdx, currOrderByReg+idx)
+		}
+
+		// Compare with previous values
+		valuesChangedReg := numCols + 40
+		vm.AddOp(vdbe.OpInteger, 0, valuesChangedReg, 0) // Assume no change
+
+		for idx := range rankOrderByCols {
+			curr := currOrderByReg + idx
+			prev := prevOrderByReg + idx
+
+			// Check if previous is NULL (first row)
+			isNullAddr := vm.AddOp(vdbe.OpNotNull, prev, 0, 0)
+
+			// Previous is NULL - this is first row, values "changed"
+			vm.AddOp(vdbe.OpInteger, 1, valuesChangedReg, 0)
+			skipNullAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+
+			// Previous not NULL - compare values
+			vm.Program[isNullAddr].P2 = vm.NumOps()
+
+			// If curr != prev, set changed flag
+			neAddr := vm.AddOp(vdbe.OpNe, curr, 0, prev)
+			skipNeAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+
+			vm.Program[neAddr].P2 = vm.NumOps()
+			vm.AddOp(vdbe.OpInteger, 1, valuesChangedReg, 0)
+
+			vm.Program[skipNeAddr].P2 = vm.NumOps()
+			vm.Program[skipNullAddr].P2 = vm.NumOps()
+		}
+
+		// Increment row counter before checking if values changed
+		vm.AddOp(vdbe.OpAddImm, rowCountReg, 1, 0)
+
+		// If values changed, update ranks
+		updateRankAddr := vm.AddOp(vdbe.OpIfNot, valuesChangedReg, 0, 0)
+
+		// Values changed - update ranks
+		// RANK: rank = current row_number
+		vm.AddOp(vdbe.OpCopy, rowCountReg, rankReg, 0)
+
+		// DENSE_RANK: increment unless it's the first row
+		// Check if previous was NULL (first row case)
+		firstRowAddr := vm.AddOp(vdbe.OpIsNull, prevOrderByReg, 0, 0)
+		// Not first row - increment dense_rank
+		vm.AddOp(vdbe.OpAddImm, denseRankReg, 1, 0)
+		skipDenseIncAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+		// First row - dense_rank already set to 1, do nothing
+		vm.Program[firstRowAddr].P2 = vm.NumOps()
+		vm.Program[skipDenseIncAddr].P2 = vm.NumOps()
+
+		// Store current ORDER BY values as previous for next iteration
+		for idx := range rankOrderByCols {
+			vm.AddOp(vdbe.OpCopy, currOrderByReg+idx, prevOrderByReg+idx, 0)
+		}
+
+		skipUpdateRankAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+
+		// Values not changed - ranks stay the same (no update needed)
+		vm.Program[updateRankAddr].P2 = vm.NumOps()
+
+		vm.Program[skipUpdateRankAddr].P2 = vm.NumOps()
+	} else {
+		// No ranking functions with ORDER BY - just increment row counter
+		vm.AddOp(vdbe.OpAddImm, rowCountReg, 1, 0)
+	}
 
 	// Extract columns
 	for i := 0; i < numCols; i++ {
@@ -1642,10 +1782,12 @@ func (s *Stmt) compileSelectWithWindowFunctions(vm *vdbe.VDBE, stmt *parser.Sele
 			case "row_number":
 				// Copy the row counter to the result column
 				vm.AddOp(vdbe.OpCopy, rowCountReg, i, 0)
-			case "rank", "dense_rank":
-				// For ranking functions, we'd need to track ORDER BY values
-				// For now, same as row_number
-				vm.AddOp(vdbe.OpCopy, rowCountReg, i, 0)
+			case "rank":
+				// Copy the rank value
+				vm.AddOp(vdbe.OpCopy, rankReg, i, 0)
+			case "dense_rank":
+				// Copy the dense rank value
+				vm.AddOp(vdbe.OpCopy, denseRankReg, i, 0)
 			case "ntile":
 				// For ntile, we need the bucket count argument
 				// For now, just return row number
