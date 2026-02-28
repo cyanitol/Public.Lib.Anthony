@@ -1494,3 +1494,200 @@ func TestCompileDropTrigger(t *testing.T) {
 		})
 	}
 }
+
+// Test Schema.AddIndex with duplicate
+func TestSchemaAddIndexDuplicate(t *testing.T) {
+	schema := NewSchema()
+
+	index := &Index{
+		Name:    "idx_test",
+		Table:   "users",
+		Columns: []string{"id"},
+	}
+
+	err := schema.AddIndex(index)
+	if err != nil {
+		t.Fatalf("AddIndex failed: %v", err)
+	}
+
+	// Try to add duplicate
+	err = schema.AddIndex(index)
+	if err == nil {
+		t.Error("Expected error when adding duplicate index")
+	}
+}
+
+// Test findColumnIndex with non-existent column
+func TestFindColumnIndexNotFound(t *testing.T) {
+	table := &Table{
+		Name:       "users",
+		NumColumns: 2,
+		Columns: []Column{
+			{Name: "id", DeclType: "INTEGER"},
+			{Name: "name", DeclType: "TEXT"},
+		},
+	}
+
+	idx := findColumnIndex(table, "nonexistent")
+	if idx != -1 {
+		t.Errorf("findColumnIndex for nonexistent column = %d, want -1", idx)
+	}
+}
+
+// Test findColumnIndex with existing column
+func TestFindColumnIndexFound(t *testing.T) {
+	table := &Table{
+		Name:       "users",
+		NumColumns: 3,
+		Columns: []Column{
+			{Name: "id", DeclType: "INTEGER"},
+			{Name: "name", DeclType: "TEXT"},
+			{Name: "email", DeclType: "TEXT"},
+		},
+	}
+
+	idx := findColumnIndex(table, "email")
+	if idx != 2 {
+		t.Errorf("findColumnIndex for 'email' = %d, want 2", idx)
+	}
+}
+
+// Test convertExpr with column reference
+func TestConvertExprColumnRef(t *testing.T) {
+	expr := &parser.IdentExpr{Name: "column1"}
+	result := convertExpr(expr)
+
+	if result == nil {
+		t.Fatal("convertExpr returned nil")
+	}
+
+	// Should convert to appropriate type
+	if result.Op == 0 {
+		t.Error("Result Op should be set")
+	}
+}
+
+// Test allocateRootPage multiple times
+func TestAllocateRootPageSequence(t *testing.T) {
+	bt := btree.NewBtree(4096)
+
+	page1 := allocateRootPage(bt)
+	if page1 < 2 {
+		t.Errorf("First page = %d, should be >= 2", page1)
+	}
+
+	// Add the page
+	bt.SetPage(page1, make([]byte, 4096))
+
+	page2 := allocateRootPage(bt)
+	if page2 <= page1 {
+		t.Errorf("Second page %d should be > first page %d", page2, page1)
+	}
+}
+
+// Test typeNameToAffinity with mixed case
+func TestTypeNameToAffinityMixedCase(t *testing.T) {
+	tests := []struct {
+		typeName string
+		expected Affinity
+	}{
+		{"InTeGeR", SQLITE_AFF_INTEGER},
+		{"TeXt", SQLITE_AFF_TEXT},
+		{"REAL", SQLITE_AFF_REAL},
+		{"blob", SQLITE_AFF_BLOB},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.typeName, func(t *testing.T) {
+			result := typeNameToAffinity(tt.typeName)
+			if result != tt.expected {
+				t.Errorf("typeNameToAffinity(%q) = %v, want %v", tt.typeName, result, tt.expected)
+			}
+		})
+	}
+}
+
+// Test typeNameToAffinity with type containing numbers
+func TestTypeNameToAffinityWithNumbers(t *testing.T) {
+	tests := []struct {
+		typeName string
+		expected Affinity
+	}{
+		{"INT8", SQLITE_AFF_INTEGER},
+		{"VARCHAR2", SQLITE_AFF_TEXT},
+		{"FLOAT64", SQLITE_AFF_REAL},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.typeName, func(t *testing.T) {
+			result := typeNameToAffinity(tt.typeName)
+			if result != tt.expected {
+				t.Errorf("typeNameToAffinity(%q) = %v, want %v", tt.typeName, result, tt.expected)
+			}
+		})
+	}
+}
+
+
+// Test CompileCreateIndex with DESC order
+func TestCompileCreateIndexDescOrder(t *testing.T) {
+	schema := NewSchema()
+	bt := btree.NewBtree(4096)
+
+	// Create table first
+	createTableStmt := &parser.CreateTableStmt{
+		Name: "users",
+		Columns: []parser.ColumnDef{
+			{Name: "id", Type: "INTEGER"},
+			{Name: "created_at", Type: "INTEGER"},
+		},
+	}
+
+	_, err := CompileCreateTable(createTableStmt, schema, bt)
+	if err != nil {
+		t.Fatalf("Create table failed: %v", err)
+	}
+
+	// Create index with DESC
+	createIndexStmt := &parser.CreateIndexStmt{
+		Name:  "idx_created_desc",
+		Table: "users",
+		Columns: []parser.IndexedColumn{
+			{Column: "created_at", Order: parser.SortDesc},
+		},
+	}
+
+	v, err := CompileCreateIndex(createIndexStmt, schema, bt)
+	if err != nil {
+		t.Fatalf("CompileCreateIndex with DESC failed: %v", err)
+	}
+
+	if v == nil {
+		t.Fatal("VDBE is nil")
+	}
+}
+
+// Test generateCreateTableSQL with multiple constraints
+func TestGenerateCreateTableSQLMultipleConstraints(t *testing.T) {
+	stmt := &parser.CreateTableStmt{
+		Name: "users",
+		Columns: []parser.ColumnDef{
+			{
+				Name: "email",
+				Type: "TEXT",
+				Constraints: []parser.ColumnConstraint{
+					{Type: parser.ConstraintNotNull},
+					{Type: parser.ConstraintUnique},
+				},
+			},
+		},
+	}
+
+	sql := generateCreateTableSQL(stmt)
+	if !strings.Contains(sql, "NOT NULL") {
+		t.Error("SQL should contain NOT NULL")
+	}
+	if !strings.Contains(sql, "UNIQUE") {
+		t.Error("SQL should contain UNIQUE")
+	}
+}

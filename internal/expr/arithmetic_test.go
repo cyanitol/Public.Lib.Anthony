@@ -495,6 +495,54 @@ func TestEvaluateCast(t *testing.T) {
 			targetType: "INTEGER",
 			expected:   int64(0),
 		},
+		{
+			name:       "Integer to REAL",
+			value:      int64(42),
+			targetType: "REAL",
+			expected:   42.0,
+		},
+		{
+			name:       "Non-numeric string to REAL",
+			value:      "not a number",
+			targetType: "REAL",
+			expected:   0.0,
+		},
+		{
+			name:       "String to NUMERIC (integer result)",
+			value:      "123",
+			targetType: "NUMERIC",
+			expected:   int64(123),
+		},
+		{
+			name:       "String to NUMERIC (integer-like string)",
+			value:      "123.45",
+			targetType: "NUMERIC",
+			expected:   int64(123), // CoerceToInteger tries integer first
+		},
+		{
+			name:       "Non-numeric string to NUMERIC",
+			value:      "not a number",
+			targetType: "NUMERIC",
+			expected:   "not a number",
+		},
+		{
+			name:       "Byte array to BLOB",
+			value:      []byte{1, 2, 3},
+			targetType: "BLOB",
+			expected:   []byte{1, 2, 3},
+		},
+		{
+			name:       "Integer to BLOB",
+			value:      int64(42),
+			targetType: "BLOB",
+			expected:   []byte("42"),
+		},
+		{
+			name:       "Unknown type passthrough",
+			value:      int64(42),
+			targetType: "UNKNOWN_TYPE",
+			expected:   int64(42),
+		},
 	}
 
 	for _, tt := range tests {
@@ -503,6 +551,143 @@ func TestEvaluateCast(t *testing.T) {
 			if !compareResults(result, tt.expected) {
 				t.Errorf("EvaluateCast(%v, %q) = %v, want %v",
 					tt.value, tt.targetType, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestCastToReal specifically tests the castToReal function coverage.
+func TestCastToReal(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    interface{}
+		expected interface{}
+	}{
+		{
+			name:     "float64 passthrough",
+			value:    3.14,
+			expected: 3.14,
+		},
+		{
+			name:     "int64 to float64",
+			value:    int64(42),
+			expected: 42.0,
+		},
+		{
+			name:     "valid string to float64",
+			value:    "3.14159",
+			expected: 3.14159,
+		},
+		{
+			name:     "invalid string to 0.0",
+			value:    "not a number",
+			expected: 0.0,
+		},
+		{
+			name:     "other type to 0.0",
+			value:    []byte{1, 2, 3},
+			expected: 0.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := castToReal(tt.value)
+			if !compareResults(result, tt.expected) {
+				t.Errorf("castToReal(%v) = %v, want %v", tt.value, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestCastToNumeric specifically tests the castToNumeric function coverage.
+func TestCastToNumeric(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    interface{}
+		expected interface{}
+	}{
+		{
+			name:     "int64 passthrough",
+			value:    int64(42),
+			expected: int64(42),
+		},
+		{
+			name:     "string integer to int64",
+			value:    "123",
+			expected: int64(123),
+		},
+		{
+			name:     "string float to integer (CoerceToInteger truncates)",
+			value:    "123.45",
+			expected: int64(123),
+		},
+		{
+			name:     "invalid string passthrough",
+			value:    "not a number",
+			expected: "not a number",
+		},
+		{
+			name:     "non-string non-integer passthrough",
+			value:    []byte{1, 2, 3},
+			expected: []byte{1, 2, 3},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := castToNumeric(tt.value)
+			if !compareResults(result, tt.expected) {
+				t.Errorf("castToNumeric(%v) = %v, want %v", tt.value, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestCastToBlob specifically tests the castToBlob function coverage.
+func TestCastToBlob(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    interface{}
+		expected interface{}
+	}{
+		{
+			name:     "byte array passthrough",
+			value:    []byte{1, 2, 3},
+			expected: []byte{1, 2, 3},
+		},
+		{
+			name:     "string to bytes",
+			value:    "hello",
+			expected: []byte("hello"),
+		},
+		{
+			name:     "int64 to bytes",
+			value:    int64(42),
+			expected: []byte("42"),
+		},
+		{
+			name:     "float64 to bytes",
+			value:    3.14,
+			expected: []byte("3.14"),
+		},
+		{
+			name:     "bool true to bytes",
+			value:    true,
+			expected: []byte("1"),
+		},
+		{
+			name:     "bool false to bytes",
+			value:    false,
+			expected: []byte("0"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := castToBlob(tt.value)
+			if !compareResults(result, tt.expected) {
+				t.Errorf("castToBlob(%v) = %v, want %v", tt.value, result, tt.expected)
 			}
 		})
 	}

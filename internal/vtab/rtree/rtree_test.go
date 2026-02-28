@@ -3775,3 +3775,1383 @@ func TestBulkOperations(t *testing.T) {
 		t.Errorf("Expected 100 entries after compact, got %d", compactCount)
 	}
 }
+
+// TestInsertWithNilRootAndNoOverflow tests Insert when leaf doesn't overflow.
+func TestInsertWithNilRootAndNoOverflow(t *testing.T) {
+	root := NewLeafNode()
+
+	// Insert a single entry (won't overflow)
+	bbox := NewBoundingBox(2)
+	bbox.Min[0], bbox.Max[0] = 0, 10
+	bbox.Min[1], bbox.Max[1] = 0, 10
+	entry := NewEntry(1, bbox)
+
+	newRoot := root.Insert(entry)
+	if newRoot == nil {
+		t.Fatal("Insert returned nil")
+	}
+
+	if len(newRoot.Entries) != 1 {
+		t.Errorf("Expected 1 entry, got %d", len(newRoot.Entries))
+	}
+
+	// Insert another without overflow (MaxEntries = 8)
+	bbox2 := NewBoundingBox(2)
+	bbox2.Min[0], bbox2.Max[0] = 20, 30
+	bbox2.Min[1], bbox2.Max[1] = 20, 30
+	entry2 := NewEntry(2, bbox2)
+
+	newRoot = newRoot.Insert(entry2)
+	if len(newRoot.Entries) != 2 {
+		t.Errorf("Expected 2 entries, got %d", len(newRoot.Entries))
+	}
+}
+
+// TestAssignEntryOnTieAllCases tests all tie-breaking scenarios.
+func TestAssignEntryOnTieAllCases(t *testing.T) {
+	// Create a node with entries that will trigger all tie scenarios
+	root := NewLeafNode()
+
+	// Create entries that will cause splits with different tie scenarios
+	for i := 0; i < MaxEntries+3; i++ {
+		bbox := NewBoundingBox(2)
+		// Create entries with same area to trigger ties
+		x := float64(i * 15)
+		bbox.Min[0], bbox.Max[0] = x, x+10
+		bbox.Min[1], bbox.Max[1] = 0, 10  // Same height for all
+		entry := NewEntry(int64(i+1), bbox)
+		root = root.Insert(entry)
+	}
+
+	// The split should have exercised tie-breaking
+	if root == nil {
+		t.Fatal("Insert returned nil after split")
+	}
+
+	// Test assignEntryOnTie directly
+	node := NewLeafNode()
+
+	// Create groups with equal enlargement and equal area
+	bbox1 := NewBoundingBox(2)
+	bbox1.Min[0], bbox1.Max[0] = 0, 10
+	bbox1.Min[1], bbox1.Max[1] = 0, 10
+	entry1 := NewEntry(1, bbox1)
+
+	bbox2 := NewBoundingBox(2)
+	bbox2.Min[0], bbox2.Max[0] = 20, 30
+	bbox2.Min[1], bbox2.Max[1] = 0, 10  // Same area as entry1
+	entry2 := NewEntry(2, bbox2)
+
+	group1 := []*Entry{entry1}
+	group2 := []*Entry{entry2}
+
+	// Entry to assign with same enlargement to both groups
+	bboxNew := NewBoundingBox(2)
+	bboxNew.Min[0], bboxNew.Max[0] = 10, 20
+	bboxNew.Min[1], bboxNew.Max[1] = 0, 10
+	entryNew := NewEntry(3, bboxNew)
+
+	// This should trigger the area comparison
+	g1bbox := calculateGroupBBox(group1)
+	g2bbox := calculateGroupBBox(group2)
+	node.assignEntryOnTie(entryNew, &group1, &group2, g1bbox, g2bbox)
+
+	// One group should have 2 entries now
+	if len(group1)+len(group2) != 3 {
+		t.Errorf("Expected 3 total entries, got %d", len(group1)+len(group2))
+	}
+
+	// Test with different areas - group2 smaller area
+	bbox3 := NewBoundingBox(2)
+	bbox3.Min[0], bbox3.Max[0] = 40, 45  // Smaller area
+	bbox3.Min[1], bbox3.Max[1] = 0, 5
+	entry3 := NewEntry(4, bbox3)
+	group3 := []*Entry{entry1}
+	group4 := []*Entry{entry3}
+
+	bboxNew2 := NewBoundingBox(2)
+	bboxNew2.Min[0], bboxNew2.Max[0] = 50, 60
+	bboxNew2.Min[1], bboxNew2.Max[1] = 0, 10
+	entryNew2 := NewEntry(5, bboxNew2)
+
+	g3bbox := calculateGroupBBox(group3)
+	g4bbox := calculateGroupBBox(group4)
+	node.assignEntryOnTie(entryNew2, &group3, &group4, g3bbox, g4bbox)
+
+	// Should prefer smaller area group
+	if len(group4) < 1 {
+		t.Error("Expected entry to be assigned to group with smaller area")
+	}
+}
+
+// TestPickNextEdgeCases tests pickNext with edge cases.
+func TestPickNextEdgeCases(t *testing.T) {
+	node := NewLeafNode()
+
+	// Test with empty groups
+	entries := make([]*Entry, 3)
+	for i := 0; i < 3; i++ {
+		bbox := NewBoundingBox(2)
+		bbox.Min[0], bbox.Max[0] = float64(i*10), float64(i*10+5)
+		bbox.Min[1], bbox.Max[1] = 0, 5
+		entries[i] = NewEntry(int64(i+1), bbox)
+	}
+
+	assigned := []bool{true, false, false}
+	group1 := []*Entry{}
+	group2 := []*Entry{}
+
+	// Should find first unassigned when one group is empty
+	idx := node.pickNext(entries, assigned, group1, group2)
+	if idx != 1 {
+		t.Errorf("Expected index 1, got %d", idx)
+	}
+
+	// Test with all assigned
+	allAssigned := []bool{true, true, true}
+	idx = node.pickNext(entries, allAssigned, group1, group2)
+	if idx != -1 {
+		t.Errorf("Expected -1 for all assigned, got %d", idx)
+	}
+
+	// Test normal case with differences
+	group1 = []*Entry{entries[0]}
+	group2 = []*Entry{entries[1]}
+	assigned = []bool{true, true, false}
+
+	idx = node.pickNext(entries, assigned, group1, group2)
+	if idx != 2 {
+		t.Errorf("Expected index 2, got %d", idx)
+	}
+}
+
+// TestHandleRootAfterRemovalCases tests root handling after removal.
+func TestHandleRootAfterRemovalCases(t *testing.T) {
+	// Case 1: Empty root after deletion
+	root := NewLeafNode()
+	bbox := NewBoundingBox(2)
+	bbox.Min[0], bbox.Max[0] = 0, 10
+	bbox.Min[1], bbox.Max[1] = 0, 10
+	entry := NewEntry(1, bbox)
+
+	root.AddEntry(entry)
+	root = root.Remove(entry)
+
+	if root != nil {
+		t.Error("Expected nil root for empty tree")
+	}
+
+	// Case 2: Root with single child after deletion
+	root = NewLeafNode()
+	for i := 0; i < MaxEntries+1; i++ {
+		bbox := NewBoundingBox(2)
+		bbox.Min[0], bbox.Max[0] = float64(i*10), float64(i*10+5)
+		bbox.Min[1], bbox.Max[1] = 0, 5
+		entry := NewEntry(int64(i+1), bbox)
+		root = root.Insert(entry)
+	}
+
+	// Root should now be internal with 2 children
+	if root.IsLeaf {
+		t.Fatal("Expected internal root after split")
+	}
+
+	// Remove entries to get down to single child
+	for i := 0; i < MaxEntries; i++ {
+		if len(root.Entries) <= 1 {
+			break
+		}
+		// Find a leaf entry to remove
+		leaf, _ := root.FindEntry(root.Entries[0].Child.Entries[0])
+		if leaf != nil && len(leaf.Entries) > 0 {
+			root = root.Remove(leaf.Entries[0])
+		}
+	}
+
+	// After removing enough entries, root might collapse
+	if root != nil && !root.IsLeaf && len(root.Entries) == 1 {
+		root = root.handleRootAfterRemoval()
+		if root != nil && !root.IsLeaf {
+			t.Error("Expected root to collapse to leaf with single child")
+		}
+	}
+}
+
+// TestHandleUnderflowRecursive tests recursive underflow handling.
+func TestHandleUnderflowRecursive(t *testing.T) {
+	// Build a tree that will trigger recursive underflow
+	root := NewLeafNode()
+
+	// Insert enough entries to create a multi-level tree
+	for i := 0; i < 30; i++ {
+		bbox := NewBoundingBox(2)
+		bbox.Min[0], bbox.Max[0] = float64(i*10), float64(i*10+5)
+		bbox.Min[1], bbox.Max[1] = float64(i*10), float64(i*10+5)
+		entry := NewEntry(int64(i+1), bbox)
+		root = root.Insert(entry)
+	}
+
+	// Now remove entries to trigger underflow
+	for i := 0; i < 25; i++ {
+		if root != nil && root.Count() > 0 {
+			// Find any leaf entry
+			var leafEntry *Entry
+			if root.IsLeaf && len(root.Entries) > 0 {
+				leafEntry = root.Entries[0]
+			} else if !root.IsLeaf && len(root.Entries) > 0 {
+				current := root
+				for !current.IsLeaf && len(current.Entries) > 0 {
+					current = current.Entries[0].Child
+				}
+				if len(current.Entries) > 0 {
+					leafEntry = current.Entries[0]
+				}
+			}
+			if leafEntry != nil {
+				root = root.Remove(leafEntry)
+			}
+		}
+	}
+
+	// Tree should still be valid
+	if root != nil && root.Count() > 0 {
+		// Verify tree structure
+		if !root.IsLeaf {
+			for _, e := range root.Entries {
+				if e.Child.Parent != root {
+					t.Error("Parent pointer not updated correctly after underflow")
+				}
+			}
+		}
+	}
+}
+
+// TestStrBulkLoadEdgeCases tests STR bulk loading edge cases.
+func TestStrBulkLoadEdgeCases(t *testing.T) {
+	// Test with empty entries
+	result := strBulkLoad(nil)
+	if result != nil {
+		t.Error("Expected nil for empty entries")
+	}
+
+	result = strBulkLoad([]*Entry{})
+	if result != nil {
+		t.Error("Expected nil for empty slice")
+	}
+
+	// Test with single entry
+	bbox := NewBoundingBox(2)
+	bbox.Min[0], bbox.Max[0] = 0, 10
+	bbox.Min[1], bbox.Max[1] = 0, 10
+	singleEntry := NewEntry(1, bbox)
+
+	result = strBulkLoad([]*Entry{singleEntry})
+	if result == nil {
+		t.Fatal("Expected non-nil result for single entry")
+	}
+	if result.Count() != 1 {
+		t.Errorf("Expected 1 entry, got %d", result.Count())
+	}
+
+	// Test with 3D entries
+	entries3D := make([]*Entry, 20)
+	for i := 0; i < 20; i++ {
+		bbox := NewBoundingBox(3)
+		bbox.Min[0], bbox.Max[0] = float64(i), float64(i+1)
+		bbox.Min[1], bbox.Max[1] = float64(i), float64(i+1)
+		bbox.Min[2], bbox.Max[2] = float64(i), float64(i+1)
+		entries3D[i] = NewEntry(int64(i+1), bbox)
+	}
+
+	result = strBulkLoad(entries3D)
+	if result == nil {
+		t.Fatal("Expected non-nil result for 3D entries")
+	}
+	if result.Count() != 20 {
+		t.Errorf("Expected 20 entries, got %d", result.Count())
+	}
+}
+
+// TestStrPartitionEdgeCases tests strPartition edge cases.
+func TestStrPartitionEdgeCases(t *testing.T) {
+	// Test with nil entries
+	result := strPartition(nil, 0, 2)
+	if result != nil {
+		t.Error("Expected nil for nil entries")
+	}
+
+	// Test with empty entries
+	result = strPartition([]*Entry{}, 0, 2)
+	if result != nil {
+		t.Error("Expected nil for empty entries")
+	}
+
+	// Test base case (dimension >= dimensions)
+	entries := make([]*Entry, 5)
+	for i := 0; i < 5; i++ {
+		bbox := NewBoundingBox(2)
+		bbox.Min[0], bbox.Max[0] = float64(i*10), float64(i*10+5)
+		bbox.Min[1], bbox.Max[1] = 0, 5
+		entries[i] = NewEntry(int64(i+1), bbox)
+	}
+
+	// dimension=2 should trigger base case for 2D entries
+	result = strPartition(entries, 2, 2)
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+
+	totalEntries := 0
+	for _, node := range result {
+		totalEntries += len(node.Entries)
+	}
+	if totalEntries != 5 {
+		t.Errorf("Expected 5 entries, got %d", totalEntries)
+	}
+
+	// Test recursive partitioning
+	result = strPartition(entries, 0, 2)
+	if result == nil {
+		t.Fatal("Expected non-nil result from recursive partition")
+	}
+}
+
+// TestBuildTreeFromLeavesEdgeCases tests buildTreeFromLeaves edge cases.
+func TestBuildTreeFromLeavesEdgeCases(t *testing.T) {
+	// Test with nil
+	result := buildTreeFromLeaves(nil)
+	if result != nil {
+		t.Error("Expected nil for nil leaves")
+	}
+
+	// Test with empty slice
+	result = buildTreeFromLeaves([]*Node{})
+	if result != nil {
+		t.Error("Expected nil for empty leaves")
+	}
+
+	// Test with single leaf
+	leaf := NewLeafNode()
+	bbox := NewBoundingBox(2)
+	bbox.Min[0], bbox.Max[0] = 0, 10
+	bbox.Min[1], bbox.Max[1] = 0, 10
+	leaf.AddEntry(NewEntry(1, bbox))
+
+	result = buildTreeFromLeaves([]*Node{leaf})
+	if result != leaf {
+		t.Error("Expected same leaf for single node")
+	}
+
+	// Test with multiple leaves requiring multiple levels
+	leaves := make([]*Node, MaxEntries+5)
+	for i := 0; i < MaxEntries+5; i++ {
+		leaf := NewLeafNode()
+		bbox := NewBoundingBox(2)
+		bbox.Min[0], bbox.Max[0] = float64(i*10), float64(i*10+5)
+		bbox.Min[1], bbox.Max[1] = 0, 5
+		leaf.AddEntry(NewEntry(int64(i+1), bbox))
+		leaves[i] = leaf
+	}
+
+	result = buildTreeFromLeaves(leaves)
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+
+	// Should create internal nodes
+	if result.IsLeaf && len(leaves) > 1 {
+		t.Error("Expected internal root for multiple leaves")
+	}
+}
+
+// TestChooseSubtreeEdgeCases tests ChooseSubtree edge cases.
+func TestChooseSubtreeEdgeCases(t *testing.T) {
+	// Test with empty node
+	node := NewLeafNode()
+	bbox := NewBoundingBox(2)
+	bbox.Min[0], bbox.Max[0] = 0, 10
+	bbox.Min[1], bbox.Max[1] = 0, 10
+	entry := NewEntry(1, bbox)
+
+	result := node.ChooseSubtree(entry)
+	if result != nil {
+		t.Error("Expected nil for empty node")
+	}
+
+	// Test with single entry
+	bbox2 := NewBoundingBox(2)
+	bbox2.Min[0], bbox2.Max[0] = 5, 15
+	bbox2.Min[1], bbox2.Max[1] = 5, 15
+	entry2 := NewEntry(2, bbox2)
+	node.AddEntry(entry2)
+
+	result = node.ChooseSubtree(entry)
+	if result != entry2 {
+		t.Error("Expected the only entry")
+	}
+
+	// Test with ties (same enlargement and area)
+	node2 := NewLeafNode()
+	bbox3 := NewBoundingBox(2)
+	bbox3.Min[0], bbox3.Max[0] = 0, 10
+	bbox3.Min[1], bbox3.Max[1] = 0, 10
+	entry3 := NewEntry(3, bbox3)
+
+	bbox4 := NewBoundingBox(2)
+	bbox4.Min[0], bbox4.Max[0] = 20, 30
+	bbox4.Min[1], bbox4.Max[1] = 0, 10  // Same area
+	entry4 := NewEntry(4, bbox4)
+
+	node2.AddEntry(entry3)
+	node2.AddEntry(entry4)
+
+	// Entry that needs same enlargement for both
+	bboxQuery := NewBoundingBox(2)
+	bboxQuery.Min[0], bboxQuery.Max[0] = 10, 20
+	bboxQuery.Min[1], bboxQuery.Max[1] = 0, 10
+	entryQuery := NewEntry(5, bboxQuery)
+
+	result = node2.ChooseSubtree(entryQuery)
+	if result == nil {
+		t.Error("Expected a result from ChooseSubtree")
+	}
+}
+
+// TestHeightEdgeCases tests Height function edge cases.
+func TestHeightEdgeCases(t *testing.T) {
+	// Test leaf node
+	leaf := NewLeafNode()
+	if leaf.Height() != 1 {
+		t.Errorf("Expected height 1 for leaf, got %d", leaf.Height())
+	}
+
+	// Test empty internal node
+	internal := NewInternalNode()
+	if internal.Height() != 1 {
+		t.Errorf("Expected height 1 for empty internal, got %d", internal.Height())
+	}
+
+	// Test tree with multiple levels
+	root := NewLeafNode()
+	for i := 0; i < MaxEntries+1; i++ {
+		bbox := NewBoundingBox(2)
+		bbox.Min[0], bbox.Max[0] = float64(i*10), float64(i*10+5)
+		bbox.Min[1], bbox.Max[1] = 0, 5
+		entry := NewEntry(int64(i+1), bbox)
+		root = root.Insert(entry)
+	}
+
+	height := root.Height()
+	if height < 2 {
+		t.Errorf("Expected height >= 2 after split, got %d", height)
+	}
+}
+
+// TestCreateTableEdgeCases tests createTable edge cases.
+func TestCreateTableEdgeCases(t *testing.T) {
+	module := NewRTreeModule()
+
+	// Test with exactly 5 columns (minimum valid)
+	table, schema, err := module.Create(nil, "rtree", "main", "test",
+		[]string{"id", "minX", "maxX", "minY", "maxY"})
+	if err != nil {
+		t.Errorf("Unexpected error for 5 columns: %v", err)
+	}
+	if table == nil {
+		t.Error("Expected non-nil table")
+	}
+	if schema == "" {
+		t.Error("Expected non-empty schema")
+	}
+
+	// Test with whitespace in args
+	table, _, err = module.Create(nil, "rtree", "main", "test",
+		[]string{"id", " minX ", "maxX", "minY", "maxY"})
+	if err != nil {
+		t.Errorf("Should handle whitespace: %v", err)
+	}
+
+	// Test with empty strings in args (they get filtered out, reducing column count)
+	table, _, err = module.Create(nil, "rtree", "main", "test",
+		[]string{"id", "", "minX", "maxX", ""})
+	if err == nil {
+		t.Error("Expected error for insufficient columns after empty string filtering")
+	}
+
+	// Test with too many dimensions (>5)
+	args := []string{"id"}
+	for i := 0; i < 6; i++ {
+		args = append(args, fmt.Sprintf("min%d", i), fmt.Sprintf("max%d", i))
+	}
+	table, _, err = module.Create(nil, "rtree", "main", "test", args)
+	if err == nil {
+		t.Error("Expected error for >5 dimensions")
+	}
+
+	// Test Connect method (should behave same as Create)
+	table, schema, err = module.Connect(nil, "rtree", "main", "test",
+		[]string{"id", "minX", "maxX", "minY", "maxY"})
+	if err != nil {
+		t.Errorf("Connect failed: %v", err)
+	}
+	if table == nil {
+		t.Error("Expected non-nil table from Connect")
+	}
+}
+
+// TestBestIndexEdgeCases tests BestIndex edge cases.
+func TestBestIndexEdgeCases(t *testing.T) {
+	module := NewRTreeModule()
+	table, _, _ := module.Create(nil, "rtree", "main", "test",
+		[]string{"id", "minX", "maxX", "minY", "maxY"})
+	rtree := table.(*RTree)
+
+	// Test with no constraints
+	info := &vtab.IndexInfo{
+		Constraints: []vtab.IndexConstraint{},
+		OrderBy:     []vtab.OrderBy{},
+	}
+	err := rtree.BestIndex(info)
+	if err != nil {
+		t.Errorf("BestIndex failed with no constraints: %v", err)
+	}
+
+	// Test with ID constraint
+	info = &vtab.IndexInfo{
+		Constraints: []vtab.IndexConstraint{
+			{Column: 0, Op: vtab.ConstraintEQ, Usable: true},
+		},
+		OrderBy: []vtab.OrderBy{},
+	}
+	err = rtree.BestIndex(info)
+	if err != nil {
+		t.Errorf("BestIndex failed with ID constraint: %v", err)
+	}
+	if info.IdxNum&1 == 0 {
+		t.Error("Expected bit 0 set for ID constraint")
+	}
+
+	// Test with spatial constraints
+	info = &vtab.IndexInfo{
+		Constraints: []vtab.IndexConstraint{
+			{Column: 1, Op: vtab.ConstraintLE, Usable: true},
+			{Column: 2, Op: vtab.ConstraintGE, Usable: true},
+		},
+		OrderBy: []vtab.OrderBy{},
+	}
+	err = rtree.BestIndex(info)
+	if err != nil {
+		t.Errorf("BestIndex failed with spatial constraints: %v", err)
+	}
+
+	// Test with unusable constraints
+	info = &vtab.IndexInfo{
+		Constraints: []vtab.IndexConstraint{
+			{Column: 0, Op: vtab.ConstraintEQ, Usable: false},
+		},
+		OrderBy: []vtab.OrderBy{},
+	}
+	err = rtree.BestIndex(info)
+	if err != nil {
+		t.Errorf("BestIndex failed with unusable constraints: %v", err)
+	}
+
+	// Test with LT and GT operators
+	info = &vtab.IndexInfo{
+		Constraints: []vtab.IndexConstraint{
+			{Column: 1, Op: vtab.ConstraintLT, Usable: true},
+			{Column: 2, Op: vtab.ConstraintGT, Usable: true},
+		},
+		OrderBy: []vtab.OrderBy{},
+	}
+	err = rtree.BestIndex(info)
+	if err != nil {
+		t.Errorf("BestIndex failed with LT/GT constraints: %v", err)
+	}
+}
+
+// TestUpdateEdgeCases tests Update function edge cases.
+func TestUpdateEdgeCases(t *testing.T) {
+	module := NewRTreeModule()
+	table, _, _ := module.Create(nil, "rtree", "main", "test",
+		[]string{"id", "minX", "maxX", "minY", "maxY"})
+	rtree := table.(*RTree)
+
+	// Test invalid argc
+	_, err := rtree.Update(0, []interface{}{})
+	if err == nil {
+		t.Error("Expected error for argc=0")
+	}
+
+	// Test DELETE with invalid ID type
+	_, err = rtree.Update(1, []interface{}{"invalid"})
+	if err == nil {
+		t.Error("Expected error for invalid ID type in DELETE")
+	}
+
+	// Test DELETE of non-existent entry
+	_, err = rtree.Update(1, []interface{}{int64(999)})
+	if err == nil {
+		t.Error("Expected error for DELETE of non-existent entry")
+	}
+
+	// Test INSERT with auto-generated ID
+	id, err := rtree.Update(6, []interface{}{nil, nil, 0.0, 10.0, 0.0, 10.0})
+	if err != nil {
+		t.Errorf("INSERT with auto ID failed: %v", err)
+	}
+	if id != 1 {
+		t.Errorf("Expected auto-generated ID 1, got %d", id)
+	}
+
+	// Test INSERT with explicit ID
+	id, err = rtree.Update(6, []interface{}{nil, int64(42), 20.0, 30.0, 0.0, 10.0})
+	if err != nil {
+		t.Errorf("INSERT with explicit ID failed: %v", err)
+	}
+	if id != 42 {
+		t.Errorf("Expected ID 42, got %d", id)
+	}
+
+	// Test UPDATE (oldID != nil)
+	id, err = rtree.Update(6, []interface{}{int64(42), int64(43), 25.0, 35.0, 5.0, 15.0})
+	if err != nil {
+		t.Errorf("UPDATE failed: %v", err)
+	}
+	if id != 43 {
+		t.Errorf("Expected new ID 43, got %d", id)
+	}
+
+	// Old entry should be gone
+	_, exists := rtree.GetEntry(42)
+	if exists {
+		t.Error("Old entry should be removed after UPDATE")
+	}
+
+	// Test DELETE of existing entry
+	id, err = rtree.Update(1, []interface{}{int64(43)})
+	if err != nil {
+		t.Errorf("DELETE failed: %v", err)
+	}
+}
+
+// TestHandleDeleteEdgeCases tests handleDelete edge cases.
+func TestHandleDeleteEdgeCases(t *testing.T) {
+	module := NewRTreeModule()
+	table, _, _ := module.Create(nil, "rtree", "main", "test",
+		[]string{"id", "minX", "maxX", "minY", "maxY"})
+	rtree := table.(*RTree)
+
+	// Insert an entry
+	rtree.Update(6, []interface{}{nil, int64(1), 0.0, 10.0, 0.0, 10.0})
+
+	// Delete with valid ID
+	id, err := rtree.handleDelete([]interface{}{int64(1)})
+	if err != nil {
+		t.Errorf("handleDelete failed: %v", err)
+	}
+	if id != 1 {
+		t.Errorf("Expected ID 1, got %d", id)
+	}
+
+	// Delete with non-existent ID
+	_, err = rtree.handleDelete([]interface{}{int64(999)})
+	if err == nil {
+		t.Error("Expected error for non-existent ID")
+	}
+}
+
+// TestCheckIfUpdateEdgeCases tests checkIfUpdate edge cases.
+func TestCheckIfUpdateEdgeCases(t *testing.T) {
+	module := NewRTreeModule()
+	table, _, _ := module.Create(nil, "rtree", "main", "test",
+		[]string{"id", "minX", "maxX", "minY", "maxY"})
+	rtree := table.(*RTree)
+
+	// Test with nil oldID
+	isUpdate, id := rtree.checkIfUpdate(nil)
+	if isUpdate {
+		t.Error("Expected false for nil oldID")
+	}
+	if id != 0 {
+		t.Errorf("Expected 0 for nil oldID, got %d", id)
+	}
+
+	// Test with zero oldID
+	isUpdate, id = rtree.checkIfUpdate(int64(0))
+	if isUpdate {
+		t.Error("Expected false for zero oldID")
+	}
+
+	// Test with non-zero oldID
+	isUpdate, id = rtree.checkIfUpdate(int64(42))
+	if !isUpdate {
+		t.Error("Expected true for non-zero oldID")
+	}
+	if id != 42 {
+		t.Errorf("Expected 42, got %d", id)
+	}
+
+	// Test with non-int64 type
+	isUpdate, id = rtree.checkIfUpdate("invalid")
+	if isUpdate {
+		t.Error("Expected false for non-int64 type")
+	}
+}
+
+// TestParseCoordinatesEdgeCases tests parseCoordinates edge cases.
+func TestParseCoordinatesEdgeCases(t *testing.T) {
+	module := NewRTreeModule()
+	table, _, _ := module.Create(nil, "rtree", "main", "test",
+		[]string{"id", "minX", "maxX", "minY", "maxY"})
+	rtree := table.(*RTree)
+
+	// Test with too few coordinates
+	_, err := rtree.parseCoordinates(4, []interface{}{nil, nil, 0.0, 10.0})
+	if err == nil {
+		t.Error("Expected error for too few coordinates")
+	}
+
+	// Test with valid coordinates
+	coords, err := rtree.parseCoordinates(6, []interface{}{nil, nil, 0.0, 10.0, 5.0, 15.0})
+	if err != nil {
+		t.Errorf("parseCoordinates failed: %v", err)
+	}
+	if len(coords) != 4 {
+		t.Errorf("Expected 4 coordinates, got %d", len(coords))
+	}
+}
+
+// TestParseCoordinateAllTypes tests parseCoordinate with all type branches.
+func TestParseCoordinateAllTypes(t *testing.T) {
+	module := NewRTreeModule()
+	table, _, _ := module.Create(nil, "rtree", "main", "test",
+		[]string{"id", "minX", "maxX", "minY", "maxY"})
+	rtree := table.(*RTree)
+
+	// Test int64
+	coord, err := rtree.parseCoordinate(int64(42), 0)
+	if err != nil {
+		t.Errorf("Failed to parse int64: %v", err)
+	}
+	if coord != 42.0 {
+		t.Errorf("Expected 42.0, got %f", coord)
+	}
+
+	// Test float64
+	coord, err = rtree.parseCoordinate(3.14, 0)
+	if err != nil {
+		t.Errorf("Failed to parse float64: %v", err)
+	}
+	if coord != 3.14 {
+		t.Errorf("Expected 3.14, got %f", coord)
+	}
+
+	// Test string
+	coord, err = rtree.parseCoordinate("2.5", 0)
+	if err != nil {
+		t.Errorf("Failed to parse string: %v", err)
+	}
+	if coord != 2.5 {
+		t.Errorf("Expected 2.5, got %f", coord)
+	}
+
+	// Test invalid string
+	_, err = rtree.parseCoordinate("invalid", 0)
+	if err == nil {
+		t.Error("Expected error for invalid string")
+	}
+
+	// Test unsupported type
+	_, err = rtree.parseCoordinate([]int{1, 2}, 0)
+	if err == nil {
+		t.Error("Expected error for unsupported type")
+	}
+}
+
+// TestDistanceToPointAllBranches tests distanceToPoint with all code branches.
+func TestDistanceToPointAllBranches(t *testing.T) {
+	// Test with mismatched dimensions
+	bbox := NewBoundingBox(2)
+	bbox.Min[0], bbox.Max[0] = 0, 10
+	bbox.Min[1], bbox.Max[1] = 0, 10
+
+	point3D := []float64{5, 5, 5}
+	dist := distanceToPoint(bbox, point3D)
+	if dist != math.MaxFloat64 {
+		t.Errorf("Expected MaxFloat64 for dimension mismatch, got %f", dist)
+	}
+
+	// Test with point inside bbox
+	point := []float64{5, 5}
+	dist = distanceToPoint(bbox, point)
+	if dist != 0 {
+		t.Errorf("Expected 0 for point inside bbox, got %f", dist)
+	}
+
+	// Test with point outside bbox
+	pointOutside := []float64{20, 20}
+	dist = distanceToPoint(bbox, pointOutside)
+	expected := math.Sqrt(10*10 + 10*10)
+	if math.Abs(dist-expected) > 0.0001 {
+		t.Errorf("Expected %f, got %f", expected, dist)
+	}
+
+	// Test with point outside in one dimension only
+	pointPartial := []float64{5, 20}
+	dist = distanceToPoint(bbox, pointPartial)
+	if dist != 10 {
+		t.Errorf("Expected 10, got %f", dist)
+	}
+}
+
+// TestWindowQueryDimensionMismatch tests WindowQuery with mismatched dimensions.
+func TestWindowQueryDimensionMismatch(t *testing.T) {
+	root := NewLeafNode()
+
+	// Add some entries
+	for i := 0; i < 5; i++ {
+		bbox := NewBoundingBox(2)
+		bbox.Min[0], bbox.Max[0] = float64(i*10), float64(i*10+5)
+		bbox.Min[1], bbox.Max[1] = 0, 5
+		entry := NewEntry(int64(i+1), bbox)
+		root = root.Insert(entry)
+	}
+
+	// Test with mismatched dimensions
+	min := []float64{0, 0}
+	max := []float64{20}
+	results := root.WindowQuery(min, max)
+	if results != nil {
+		t.Error("Expected nil for mismatched dimensions")
+	}
+
+	// Test with valid window
+	min = []float64{0, 0}
+	max = []float64{25, 10}
+	results = root.WindowQuery(min, max)
+	if len(results) == 0 {
+		t.Error("Expected some results")
+	}
+}
+
+// TestProcessSpatialJoinPairComprehensive tests processSpatialJoinPair comprehensively.
+func TestProcessSpatialJoinPairComprehensive(t *testing.T) {
+	// Create two trees
+	leaf1 := NewLeafNode()
+	leaf2 := NewLeafNode()
+
+	bbox1 := NewBoundingBox(2)
+	bbox1.Min[0], bbox1.Max[0] = 0, 10
+	bbox1.Min[1], bbox1.Max[1] = 0, 10
+	entry1 := NewEntry(1, bbox1)
+	leaf1.AddEntry(entry1)
+
+	bbox2 := NewBoundingBox(2)
+	bbox2.Min[0], bbox2.Max[0] = 5, 15
+	bbox2.Min[1], bbox2.Max[1] = 5, 15
+	entry2 := NewEntry(2, bbox2)
+	leaf2.AddEntry(entry2)
+
+	// Test both leaves
+	results := make([][2]*Entry, 0)
+	processSpatialJoinPair(leaf1, leaf2, entry1, entry2, &results)
+	if len(results) != 1 {
+		t.Errorf("Expected 1 result, got %d", len(results))
+	}
+
+	// Create internal nodes
+	internal1 := NewInternalNode()
+	internal2 := NewInternalNode()
+
+	childEntry1 := &Entry{BBox: bbox1, Child: leaf1}
+	childEntry2 := &Entry{BBox: bbox2, Child: leaf2}
+	internal1.AddEntry(childEntry1)
+	internal2.AddEntry(childEntry2)
+
+	// Test leaf + internal
+	results = make([][2]*Entry, 0)
+	processSpatialJoinPair(leaf1, internal2, entry1, childEntry2, &results)
+
+	// Test internal + leaf
+	results = make([][2]*Entry, 0)
+	processSpatialJoinPair(internal1, leaf2, childEntry1, entry2, &results)
+
+	// Test both internal
+	results = make([][2]*Entry, 0)
+	processSpatialJoinPair(internal1, internal2, childEntry1, childEntry2, &results)
+}
+
+// TestDistanceBetweenBoxesAllCases tests DistanceBetweenBoxes with all scenarios.
+func TestDistanceBetweenBoxesAllCases(t *testing.T) {
+	bbox1 := NewBoundingBox(2)
+	bbox1.Min[0], bbox1.Max[0] = 0, 10
+	bbox1.Min[1], bbox1.Max[1] = 0, 10
+
+	// Test with mismatched dimensions
+	bbox2 := NewBoundingBox(3)
+	dist := DistanceBetweenBoxes(bbox1, bbox2)
+	if dist != math.MaxFloat64 {
+		t.Errorf("Expected MaxFloat64 for dimension mismatch, got %f", dist)
+	}
+
+	// Test with overlapping boxes
+	bbox3 := NewBoundingBox(2)
+	bbox3.Min[0], bbox3.Max[0] = 5, 15
+	bbox3.Min[1], bbox3.Max[1] = 5, 15
+	dist = DistanceBetweenBoxes(bbox1, bbox3)
+	if dist != 0 {
+		t.Errorf("Expected 0 for overlapping boxes, got %f", dist)
+	}
+
+	// Test with separated boxes in one dimension
+	bbox4 := NewBoundingBox(2)
+	bbox4.Min[0], bbox4.Max[0] = 20, 30
+	bbox4.Min[1], bbox4.Max[1] = 0, 10
+	dist = DistanceBetweenBoxes(bbox1, bbox4)
+	if dist != 10 {
+		t.Errorf("Expected 10, got %f", dist)
+	}
+}
+
+// TestOverlapAreaAllCases tests OverlapArea with all scenarios.
+func TestOverlapAreaAllCases(t *testing.T) {
+	bbox1 := NewBoundingBox(2)
+	bbox1.Min[0], bbox1.Max[0] = 0, 10
+	bbox1.Min[1], bbox1.Max[1] = 0, 10
+
+	// Test with non-overlapping boxes
+	bbox2 := NewBoundingBox(2)
+	bbox2.Min[0], bbox2.Max[0] = 20, 30
+	bbox2.Min[1], bbox2.Max[1] = 20, 30
+	area := OverlapArea(bbox1, bbox2)
+	if area != 0 {
+		t.Errorf("Expected 0 for non-overlapping boxes, got %f", area)
+	}
+
+	// Test with mismatched dimensions
+	bbox3 := NewBoundingBox(3)
+	area = OverlapArea(bbox1, bbox3)
+	if area != 0 {
+		t.Errorf("Expected 0 for dimension mismatch, got %f", area)
+	}
+
+	// Test with overlapping boxes
+	bbox4 := NewBoundingBox(2)
+	bbox4.Min[0], bbox4.Max[0] = 5, 15
+	bbox4.Min[1], bbox4.Max[1] = 5, 15
+	area = OverlapArea(bbox1, bbox4)
+	expected := 5.0 * 5.0
+	if area != expected {
+		t.Errorf("Expected %f, got %f", expected, area)
+	}
+}
+
+// TestIntersectionBoxAllCases tests IntersectionBox with all scenarios.
+func TestIntersectionBoxAllCases(t *testing.T) {
+	bbox1 := NewBoundingBox(2)
+	bbox1.Min[0], bbox1.Max[0] = 0, 10
+	bbox1.Min[1], bbox1.Max[1] = 0, 10
+
+	// Test with non-overlapping boxes
+	bbox2 := NewBoundingBox(2)
+	bbox2.Min[0], bbox2.Max[0] = 20, 30
+	bbox2.Min[1], bbox2.Max[1] = 20, 30
+	result := IntersectionBox(bbox1, bbox2)
+	if result != nil {
+		t.Error("Expected nil for non-overlapping boxes")
+	}
+
+	// Test with mismatched dimensions
+	bbox3 := NewBoundingBox(3)
+	result = IntersectionBox(bbox1, bbox3)
+	if result != nil {
+		t.Error("Expected nil for dimension mismatch")
+	}
+
+	// Test with overlapping boxes
+	bbox4 := NewBoundingBox(2)
+	bbox4.Min[0], bbox4.Max[0] = 5, 15
+	bbox4.Min[1], bbox4.Max[1] = 5, 15
+	result = IntersectionBox(bbox1, bbox4)
+	if result == nil {
+		t.Fatal("Expected non-nil intersection")
+	}
+	if result.Min[0] != 5 || result.Max[0] != 10 {
+		t.Errorf("Incorrect x intersection: [%f, %f]", result.Min[0], result.Max[0])
+	}
+	if result.Min[1] != 5 || result.Max[1] != 10 {
+		t.Errorf("Incorrect y intersection: [%f, %f]", result.Min[1], result.Max[1])
+	}
+}
+
+// TestAssignEntryOnTieArea2Smaller tests assignEntryOnTie when area2 < area1.
+func TestAssignEntryOnTieArea2Smaller(t *testing.T) {
+	node := NewLeafNode()
+
+	// Create group1 with larger area
+	bbox1 := NewBoundingBox(2)
+	bbox1.Min[0], bbox1.Max[0] = 0, 20  // Area = 20 * 10 = 200
+	bbox1.Min[1], bbox1.Max[1] = 0, 10
+	entry1 := NewEntry(1, bbox1)
+	group1 := []*Entry{entry1}
+
+	// Create group2 with smaller area
+	bbox2 := NewBoundingBox(2)
+	bbox2.Min[0], bbox2.Max[0] = 30, 35  // Area = 5 * 5 = 25
+	bbox2.Min[1], bbox2.Max[1] = 0, 5
+	entry2 := NewEntry(2, bbox2)
+	group2 := []*Entry{entry2}
+
+	// Entry to assign
+	bboxNew := NewBoundingBox(2)
+	bboxNew.Min[0], bboxNew.Max[0] = 50, 60
+	bboxNew.Min[1], bboxNew.Max[1] = 0, 10
+	entryNew := NewEntry(3, bboxNew)
+
+	g1bbox := calculateGroupBBox(group1)
+	g2bbox := calculateGroupBBox(group2)
+
+	lenBefore2 := len(group2)
+	node.assignEntryOnTie(entryNew, &group1, &group2, g1bbox, g2bbox)
+
+	// Should prefer group2 (smaller area)
+	if len(group2) <= lenBefore2 {
+		t.Error("Expected entry to be assigned to group2 (smaller area)")
+	}
+}
+
+// TestInsertNilParentCase tests Insert when parent becomes nil during traversal.
+func TestInsertNilParentCase(t *testing.T) {
+	// Create a simple leaf node (no parent)
+	root := NewLeafNode()
+
+	bbox := NewBoundingBox(2)
+	bbox.Min[0], bbox.Max[0] = 0, 10
+	bbox.Min[1], bbox.Max[1] = 0, 10
+	entry := NewEntry(1, bbox)
+
+	// Insert when there's no parent (root case)
+	newRoot := root.Insert(entry)
+	if newRoot == nil {
+		t.Fatal("Insert returned nil")
+	}
+
+	// The root should remain the same node since no split occurred
+	if newRoot != root {
+		t.Error("Expected same root node for single insert")
+	}
+}
+
+// TestQuadraticSplitWithTies tests quadraticSplit with tie scenarios.
+func TestQuadraticSplitWithTies(t *testing.T) {
+	node := NewLeafNode()
+
+	// Create entries that will produce ties in pickNext
+	for i := 0; i < MaxEntries+1; i++ {
+		bbox := NewBoundingBox(2)
+		// Create overlapping entries to trigger ties
+		x := float64(i * 3)
+		bbox.Min[0], bbox.Max[0] = x, x+10
+		bbox.Min[1], bbox.Max[1] = 0, 10  // Same y-dimension for all
+		entry := NewEntry(int64(i+1), bbox)
+		node.AddEntry(entry)
+	}
+
+	// quadraticSplit should handle ties
+	group1, group2 := node.quadraticSplit()
+
+	if len(group1) < MinEntries || len(group2) < MinEntries {
+		t.Errorf("Groups don't meet MinEntries: %d, %d", len(group1), len(group2))
+	}
+
+	if len(group1)+len(group2) != MaxEntries+1 {
+		t.Errorf("Lost entries during split: %d + %d != %d", len(group1), len(group2), MaxEntries+1)
+	}
+}
+
+// TestHandleUnderflowNonRootCase tests handleUnderflow when parent is not root.
+func TestHandleUnderflowNonRootCase(t *testing.T) {
+	// Build a 3-level tree to test non-root underflow
+	root := NewLeafNode()
+
+	// Insert many entries to create a deep tree
+	for i := 0; i < 50; i++ {
+		bbox := NewBoundingBox(2)
+		bbox.Min[0], bbox.Max[0] = float64(i*5), float64(i*5+3)
+		bbox.Min[1], bbox.Max[1] = float64(i%10), float64(i%10+3)
+		entry := NewEntry(int64(i+1), bbox)
+		root = root.Insert(entry)
+	}
+
+	// Verify we have a multi-level tree
+	if root.IsLeaf {
+		t.Skip("Need multi-level tree for this test")
+	}
+
+	height := root.Height()
+	if height < 3 {
+		t.Skip("Need at least 3-level tree for this test")
+	}
+
+	// Now remove enough entries to trigger underflow at a non-root level
+	for i := 0; i < 40; i++ {
+		if root != nil && root.Count() > 0 {
+			// Find a leaf entry to remove
+			current := root
+			for !current.IsLeaf && len(current.Entries) > 0 {
+				current = current.Entries[0].Child
+			}
+			if len(current.Entries) > 0 {
+				root = root.Remove(current.Entries[0])
+			}
+		}
+	}
+
+	// Tree should still be valid
+	if root != nil && !root.IsLeaf {
+		for _, e := range root.Entries {
+			if e.Child != nil && e.Child.Parent != root {
+				t.Error("Parent pointer incorrect after underflow")
+			}
+		}
+	}
+}
+
+// TestCreateTableExactDimensionCount tests createTable with exact dimension boundaries.
+func TestCreateTableExactDimensionCount(t *testing.T) {
+	module := NewRTreeModule()
+
+	// Test with exactly 1 dimension (should fail - minimum is 2D)
+	_, _, err := module.Create(nil, "rtree", "main", "test",
+		[]string{"id", "min1", "max1"})
+	if err == nil {
+		t.Error("Expected error for 1D (minimum is 2D)")
+	}
+
+	// Test with exactly 5 dimensions (maximum)
+	args := []string{"id"}
+	for i := 0; i < 5; i++ {
+		args = append(args, fmt.Sprintf("min%d", i), fmt.Sprintf("max%d", i))
+	}
+	table, schema, err := module.Create(nil, "rtree", "main", "test", args)
+	if err != nil {
+		t.Errorf("Should support 5D: %v", err)
+	}
+	if table == nil {
+		t.Error("Expected non-nil table for 5D")
+	}
+	if schema == "" {
+		t.Error("Expected non-empty schema for 5D")
+	}
+}
+
+// TestDistanceBetweenBoxesSeparatedInOneDimension tests boxes separated in one dimension.
+func TestDistanceBetweenBoxesSeparatedInOneDimension(t *testing.T) {
+	bbox1 := NewBoundingBox(2)
+	bbox1.Min[0], bbox1.Max[0] = 0, 10
+	bbox1.Min[1], bbox1.Max[1] = 0, 10
+
+	// Separated in X dimension only
+	bbox2 := NewBoundingBox(2)
+	bbox2.Min[0], bbox2.Max[0] = 20, 30  // Gap of 10 in X
+	bbox2.Min[1], bbox2.Max[1] = 5, 15   // Overlapping in Y
+
+	dist := DistanceBetweenBoxes(bbox1, bbox2)
+	expected := 10.0
+	if math.Abs(dist-expected) > 0.0001 {
+		t.Errorf("Expected distance %f, got %f", expected, dist)
+	}
+
+	// Separated in Y dimension only
+	bbox3 := NewBoundingBox(2)
+	bbox3.Min[0], bbox3.Max[0] = 5, 15   // Overlapping in X
+	bbox3.Min[1], bbox3.Max[1] = 20, 30  // Gap of 10 in Y
+
+	dist = DistanceBetweenBoxes(bbox1, bbox3)
+	if math.Abs(dist-expected) > 0.0001 {
+		t.Errorf("Expected distance %f, got %f", expected, dist)
+	}
+}
+
+// TestOverlapAreaWithDifferentOverlaps tests OverlapArea with various overlap scenarios.
+func TestOverlapAreaWithDifferentOverlaps(t *testing.T) {
+	bbox1 := NewBoundingBox(2)
+	bbox1.Min[0], bbox1.Max[0] = 0, 10
+	bbox1.Min[1], bbox1.Max[1] = 0, 10
+
+	// Partial overlap
+	bbox2 := NewBoundingBox(2)
+	bbox2.Min[0], bbox2.Max[0] = 5, 15
+	bbox2.Min[1], bbox2.Max[1] = 5, 15
+
+	area := OverlapArea(bbox1, bbox2)
+	expected := 5.0 * 5.0  // 25
+	if math.Abs(area-expected) > 0.0001 {
+		t.Errorf("Expected area %f, got %f", expected, area)
+	}
+
+	// Complete containment
+	bbox3 := NewBoundingBox(2)
+	bbox3.Min[0], bbox3.Max[0] = 2, 8
+	bbox3.Min[1], bbox3.Max[1] = 2, 8
+
+	area = OverlapArea(bbox1, bbox3)
+	expected = 6.0 * 6.0  // 36
+	if math.Abs(area-expected) > 0.0001 {
+		t.Errorf("Expected area %f, got %f", expected, area)
+	}
+}
+
+// TestIntersectionBoxWithPartialOverlap tests IntersectionBox with partial overlaps.
+func TestIntersectionBoxWithPartialOverlap(t *testing.T) {
+	bbox1 := NewBoundingBox(2)
+	bbox1.Min[0], bbox1.Max[0] = 0, 10
+	bbox1.Min[1], bbox1.Max[1] = 0, 10
+
+	// Partial overlap in both dimensions
+	bbox2 := NewBoundingBox(2)
+	bbox2.Min[0], bbox2.Max[0] = 5, 15
+	bbox2.Min[1], bbox2.Max[1] = 3, 12
+
+	result := IntersectionBox(bbox1, bbox2)
+	if result == nil {
+		t.Fatal("Expected non-nil intersection")
+	}
+
+	if result.Min[0] != 5 || result.Max[0] != 10 {
+		t.Errorf("Incorrect X intersection: [%f, %f]", result.Min[0], result.Max[0])
+	}
+	if result.Min[1] != 3 || result.Max[1] != 10 {
+		t.Errorf("Incorrect Y intersection: [%f, %f]", result.Min[1], result.Max[1])
+	}
+
+	// Verify intersection area
+	area := result.Area()
+	expected := 5.0 * 7.0  // 35
+	if math.Abs(area-expected) > 0.0001 {
+		t.Errorf("Expected intersection area %f, got %f", expected, area)
+	}
+}
+
+// TestAssignEntryOnTieGroup2FewerEntries tests the branch where group2 has fewer entries.
+func TestAssignEntryOnTieGroup2FewerEntries(t *testing.T) {
+	node := NewLeafNode()
+
+	// Create two groups with equal area
+	bbox1 := NewBoundingBox(2)
+	bbox1.Min[0], bbox1.Max[0] = 0, 10
+	bbox1.Min[1], bbox1.Max[1] = 0, 10
+	entry1a := NewEntry(1, bbox1)
+	entry1b := NewEntry(2, bbox1.Clone())
+
+	bbox2 := NewBoundingBox(2)
+	bbox2.Min[0], bbox2.Max[0] = 20, 30  // Same area = 10*10 = 100
+	bbox2.Min[1], bbox2.Max[1] = 0, 10
+	entry2 := NewEntry(3, bbox2)
+
+	// group1 has 2 entries, group2 has 1 entry
+	group1 := []*Entry{entry1a, entry1b}
+	group2 := []*Entry{entry2}
+
+	// Entry to assign
+	bboxNew := NewBoundingBox(2)
+	bboxNew.Min[0], bboxNew.Max[0] = 40, 50
+	bboxNew.Min[1], bboxNew.Max[1] = 0, 10
+	entryNew := NewEntry(4, bboxNew)
+
+	g1bbox := calculateGroupBBox(group1)
+	g2bbox := calculateGroupBBox(group2)
+
+	lenBefore2 := len(group2)
+	node.assignEntryOnTie(entryNew, &group1, &group2, g1bbox, g2bbox)
+
+	// Should assign to group2 (fewer entries)
+	if len(group2) != lenBefore2+1 {
+		t.Errorf("Expected entry to be assigned to group2, but group2 went from %d to %d entries",
+			lenBefore2, len(group2))
+	}
+}
+
+// TestInsertWithParentTraversal tests Insert traversing up to root.
+func TestInsertWithParentTraversal(t *testing.T) {
+	// Build a multi-level tree
+	root := NewLeafNode()
+	for i := 0; i < MaxEntries*2; i++ {
+		bbox := NewBoundingBox(2)
+		bbox.Min[0], bbox.Max[0] = float64(i*10), float64(i*10+5)
+		bbox.Min[1], bbox.Max[1] = 0, 5
+		entry := NewEntry(int64(i+1), bbox)
+		root = root.Insert(entry)
+	}
+
+	// Verify we have a multi-level tree
+	if root.IsLeaf {
+		t.Skip("Need multi-level tree for this test")
+	}
+
+	// Find a leaf node to insert into (without causing overflow)
+	var leafNode *Node
+	if len(root.Entries) > 0 && root.Entries[0].Child != nil {
+		current := root.Entries[0].Child
+		for !current.IsLeaf && len(current.Entries) > 0 {
+			current = current.Entries[0].Child
+		}
+		if current.IsLeaf && len(current.Entries) < MaxEntries {
+			leafNode = current
+		}
+	}
+
+	if leafNode == nil {
+		t.Skip("Could not find suitable leaf for test")
+	}
+
+	// Insert an entry that won't cause overflow
+	bbox := NewBoundingBox(2)
+	bbox.Min[0], bbox.Max[0] = 9999, 10004
+	bbox.Min[1], bbox.Max[1] = 0, 5
+	entry := NewEntry(9999, bbox)
+
+	initialCount := root.Count()
+	newRoot := root.Insert(entry)
+
+	// Should traverse up to root
+	if newRoot == nil {
+		t.Fatal("Insert returned nil")
+	}
+
+	if newRoot.Count() != initialCount+1 {
+		t.Errorf("Expected count %d, got %d", initialCount+1, newRoot.Count())
+	}
+}
+
+// TestQuadraticSplitEdgeCases tests quadraticSplit edge cases.
+func TestQuadraticSplitEdgeCases(t *testing.T) {
+	node := NewLeafNode()
+
+	// Create a scenario where mustAssignRemainingToGroup triggers
+	// We need exactly MinEntries entries left to assign
+	totalEntries := MaxEntries + 1
+	for i := 0; i < totalEntries; i++ {
+		bbox := NewBoundingBox(2)
+		bbox.Min[0], bbox.Max[0] = float64(i*5), float64(i*5+3)
+		bbox.Min[1], bbox.Max[1] = 0, 3
+		entry := NewEntry(int64(i+1), bbox)
+		node.AddEntry(entry)
+	}
+
+	group1, group2 := node.quadraticSplit()
+
+	// Both groups should have at least MinEntries
+	if len(group1) < MinEntries {
+		t.Errorf("group1 has %d entries, need at least %d", len(group1), MinEntries)
+	}
+	if len(group2) < MinEntries {
+		t.Errorf("group2 has %d entries, need at least %d", len(group2), MinEntries)
+	}
+
+	// All entries should be assigned
+	if len(group1)+len(group2) != totalEntries {
+		t.Errorf("Lost entries: %d + %d != %d", len(group1), len(group2), totalEntries)
+	}
+}

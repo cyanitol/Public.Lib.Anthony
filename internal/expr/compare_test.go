@@ -698,3 +698,219 @@ func TestCollationSequences(t *testing.T) {
 		})
 	}
 }
+
+// TestLikeEdgeCases tests edge cases for LIKE pattern matching to improve stepMultiWildcard coverage.
+func TestLikeEdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		pattern  string
+		str      string
+		escape   rune
+		expected bool
+	}{
+		{
+			name:     "Trailing wildcard matches empty",
+			pattern:  "hello%",
+			str:      "hello",
+			escape:   0,
+			expected: true,
+		},
+		{
+			name:     "Trailing wildcard matches many chars",
+			pattern:  "hello%",
+			str:      "hello world and beyond",
+			escape:   0,
+			expected: true,
+		},
+		{
+			name:     "Multiple consecutive wildcards",
+			pattern:  "a%%b",
+			str:      "axxxb",
+			escape:   0,
+			expected: true,
+		},
+		{
+			name:     "Wildcard at start matches nothing",
+			pattern:  "%test",
+			str:      "test",
+			escape:   0,
+			expected: true,
+		},
+		{
+			name:     "Wildcard in middle with backtracking",
+			pattern:  "a%b%c",
+			str:      "abbbbc",
+			escape:   0,
+			expected: true,
+		},
+		{
+			name:     "Complex pattern with multiple wildcards",
+			pattern:  "%abc%def%",
+			str:      "xyzabcxxxdefghi",
+			escape:   0,
+			expected: true,
+		},
+		{
+			name:     "Pattern requires backtracking",
+			pattern:  "a%a%a",
+			str:      "aaaaaa",
+			escape:   0,
+			expected: true,
+		},
+		{
+			name:     "Wildcard doesn't match pattern continuation",
+			pattern:  "a%bc",
+			str:      "axxxxbd",
+			escape:   0,
+			expected: false,
+		},
+		{
+			name:     "Empty string with wildcard",
+			pattern:  "%",
+			str:      "",
+			escape:   0,
+			expected: true,
+		},
+		{
+			name:     "Multiple wildcards at end",
+			pattern:  "test%%",
+			str:      "test",
+			escape:   0,
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := EvaluateLike(tt.pattern, tt.str, tt.escape)
+			if result != tt.expected {
+				t.Errorf("EvaluateLike(%q, %q, %v) = %v, want %v",
+					tt.pattern, tt.str, tt.escape, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestGlobEdgeCases tests edge cases for GLOB pattern matching.
+func TestGlobEdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		pattern  string
+		str      string
+		expected bool
+	}{
+		{
+			name:     "Trailing wildcard matches empty",
+			pattern:  "hello*",
+			str:      "hello",
+			expected: true,
+		},
+		{
+			name:     "Wildcard at start",
+			pattern:  "*world",
+			str:      "world",
+			expected: true,
+		},
+		{
+			name:     "Multiple wildcards with backtracking",
+			pattern:  "a*b*c",
+			str:      "abbbbc",
+			expected: true,
+		},
+		{
+			name:     "Case sensitive GLOB",
+			pattern:  "Hello",
+			str:      "hello",
+			expected: false,
+		},
+		{
+			name:     "Empty string with wildcard",
+			pattern:  "*",
+			str:      "",
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := EvaluateGlob(tt.pattern, tt.str)
+			if result != tt.expected {
+				t.Errorf("EvaluateGlob(%q, %q) = %v, want %v",
+					tt.pattern, tt.str, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestGetBinaryCompareCollSeq tests the GetBinaryCompareCollSeq function.
+func TestGetBinaryCompareCollSeq(t *testing.T) {
+	tests := []struct {
+		name     string
+		left     *Expr
+		right    *Expr
+		expected *CollSeq
+	}{
+		{
+			name:     "Both nil",
+			left:     nil,
+			right:    nil,
+			expected: CollSeqBinary,
+		},
+		{
+			name: "Left has collate property",
+			left: &Expr{
+				Op:      OpCollate,
+				CollSeq: "NOCASE",
+				Flags:   EP_Collate,
+			},
+			right:    NewIntExpr(5),
+			expected: CollSeqNoCase,
+		},
+		{
+			name: "Right has collate property",
+			left: NewIntExpr(5),
+			right: &Expr{
+				Op:      OpCollate,
+				CollSeq: "RTRIM",
+				Flags:   EP_Collate,
+			},
+			expected: CollSeqRTrim,
+		},
+		{
+			name:     "Neither has collate",
+			left:     NewIntExpr(5),
+			right:    NewIntExpr(10),
+			expected: CollSeqBinary,
+		},
+		{
+			name:     "Left nil, right has no collate",
+			left:     nil,
+			right:    NewIntExpr(5),
+			expected: CollSeqBinary,
+		},
+		{
+			name:     "Left has no collate, right nil",
+			left:     NewIntExpr(5),
+			right:    nil,
+			expected: CollSeqBinary,
+		},
+		{
+			name: "Left has non-binary collation from GetCollSeq",
+			left: &Expr{
+				Op:      OpColumn,
+				CollSeq: "NOCASE",
+			},
+			right:    NewIntExpr(5),
+			expected: CollSeqNoCase,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := GetBinaryCompareCollSeq(tt.left, tt.right)
+			if result != tt.expected {
+				t.Errorf("GetBinaryCompareCollSeq() = %v, want %v", result.Name, tt.expected.Name)
+			}
+		})
+	}
+}

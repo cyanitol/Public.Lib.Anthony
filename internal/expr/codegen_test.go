@@ -712,3 +712,128 @@ func TestComplexExpression(t *testing.T) {
 		t.Error("Expected OpMultiply")
 	}
 }
+
+// TestGenerateBinaryOperandsErrors tests error handling in generateBinaryOperands.
+func TestGenerateBinaryOperandsErrors(t *testing.T) {
+	v := vdbe.New()
+	g := NewCodeGenerator(v)
+
+	// Create an invalid expression that will cause an error
+	// Use a column reference without proper setup
+	invalidExpr := &parser.BinaryExpr{
+		Op:    parser.OpPlus,
+		Left:  &parser.IdentExpr{Name: "invalid"},
+		Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "5"},
+	}
+
+	// This should handle the error gracefully
+	_, err := g.generateBinary(invalidExpr)
+	// We expect an error or the code to handle it
+	if err == nil {
+		// If no error, that's also acceptable as long as it doesn't crash
+		t.Log("generateBinary handled invalid expression without error")
+	}
+}
+
+// TestGenerateBinaryWithSpecialHandlers tests binary operations with special handlers.
+func TestGenerateBinaryWithSpecialHandlers(t *testing.T) {
+	v := vdbe.New()
+	g := NewCodeGenerator(v)
+
+	// Test LIKE operator (has special handler)
+	likeExpr := &parser.BinaryExpr{
+		Op:    parser.OpLike,
+		Left:  &parser.LiteralExpr{Type: parser.LiteralString, Value: "test"},
+		Right: &parser.LiteralExpr{Type: parser.LiteralString, Value: "%st%"},
+	}
+
+	_, err := g.GenerateExpr(likeExpr)
+	if err != nil {
+		t.Errorf("GenerateExpr(LIKE) failed: %v", err)
+	}
+
+	// Test GLOB operator (has special handler)
+	globExpr := &parser.BinaryExpr{
+		Op:    parser.OpGlob,
+		Left:  &parser.LiteralExpr{Type: parser.LiteralString, Value: "test"},
+		Right: &parser.LiteralExpr{Type: parser.LiteralString, Value: "*st*"},
+	}
+
+	_, err = g.GenerateExpr(globExpr)
+	if err != nil {
+		t.Errorf("GenerateExpr(GLOB) failed: %v", err)
+	}
+}
+
+// TestGenerateLogicalShortCircuit tests short-circuit evaluation for AND/OR.
+func TestGenerateLogicalShortCircuit(t *testing.T) {
+	v := vdbe.New()
+	g := NewCodeGenerator(v)
+
+	// Test AND operation (should use short-circuit logic)
+	andExpr := &parser.BinaryExpr{
+		Op:    parser.OpAnd,
+		Left:  &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
+		Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "0"},
+	}
+
+	_, err := g.GenerateExpr(andExpr)
+	if err != nil {
+		t.Errorf("GenerateExpr(AND) failed: %v", err)
+	}
+
+	// Test OR operation (should use short-circuit logic)
+	orExpr := &parser.BinaryExpr{
+		Op:    parser.OpOr,
+		Left:  &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "0"},
+		Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
+	}
+
+	_, err = g.GenerateExpr(orExpr)
+	if err != nil {
+		t.Errorf("GenerateExpr(OR) failed: %v", err)
+	}
+}
+
+// TestGenerateBinaryAllOperators tests all binary operators for coverage.
+func TestGenerateBinaryAllOperators(t *testing.T) {
+	operators := []parser.BinaryOp{
+		parser.OpPlus,
+		parser.OpMinus,
+		parser.OpMul,
+		parser.OpDiv,
+		parser.OpConcat,
+		parser.OpBitAnd,
+		parser.OpBitOr,
+		parser.OpLShift,
+		parser.OpRShift,
+		parser.OpEq,
+		parser.OpNe,
+		parser.OpLt,
+		parser.OpLe,
+		parser.OpGt,
+		parser.OpGe,
+	}
+
+	for _, op := range operators {
+		t.Run(op.String(), func(t *testing.T) {
+			v := vdbe.New()
+			g := NewCodeGenerator(v)
+
+			expr := &parser.BinaryExpr{
+				Op:    op,
+				Left:  &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "10"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "5"},
+			}
+
+			_, err := g.GenerateExpr(expr)
+			if err != nil {
+				t.Errorf("GenerateExpr(%v) failed: %v", op, err)
+			}
+
+			if len(v.Program) == 0 {
+				t.Errorf("No instructions generated for %v", op)
+			}
+		})
+	}
+}

@@ -1,6 +1,7 @@
 package expr
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -140,6 +141,78 @@ func TestIsConstant(t *testing.T) {
 			name:     "Non-constant arithmetic",
 			expr:     NewBinaryExpr(OpPlus, NewIntExpr(1), NewColumnExpr("t", "x", 0, 0)),
 			expected: false,
+		},
+		{
+			name:     "NULL is constant",
+			expr:     NewNullExpr(),
+			expected: true,
+		},
+		{
+			name:     "Float is constant",
+			expr:     NewFloatExpr(3.14),
+			expected: true,
+		},
+		{
+			name:     "String is constant",
+			expr:     NewStringExpr("hello"),
+			expected: true,
+		},
+		{
+			name:     "Unary negation of constant",
+			expr:     NewUnaryExpr(OpNegate, NewIntExpr(5)),
+			expected: true,
+		},
+		{
+			name:     "Unary negation of non-constant",
+			expr:     NewUnaryExpr(OpNegate, NewColumnExpr("t", "x", 0, 0)),
+			expected: false,
+		},
+		{
+			name:     "Function with constant args",
+			expr:     NewFunctionExpr("abs", &ExprList{Items: []*ExprListItem{{Expr: NewIntExpr(-5)}}}),
+			expected: true,
+		},
+		{
+			name:     "Function with non-constant args",
+			expr:     NewFunctionExpr("abs", &ExprList{Items: []*ExprListItem{{Expr: NewColumnExpr("t", "x", 0, 0)}}}),
+			expected: false,
+		},
+		{
+			name: "Function with mixed args",
+			expr: NewFunctionExpr("coalesce", &ExprList{Items: []*ExprListItem{
+				{Expr: NewIntExpr(1)},
+				{Expr: NewColumnExpr("t", "x", 0, 0)},
+			}}),
+			expected: false,
+		},
+		{
+			name: "Function with EP_HasFunc property",
+			expr: &Expr{
+				Op:    OpFunction,
+				Token: "now",
+				Flags: EP_HasFunc,
+			},
+			expected: false,
+		},
+		{
+			name:     "nil expr is constant",
+			expr:     nil,
+			expected: true,
+		},
+		{
+			name:     "Bitwise AND constant",
+			expr:     NewBinaryExpr(OpBitAnd, NewIntExpr(12), NewIntExpr(10)),
+			expected: true,
+		},
+		{
+			name:     "Logical AND constant",
+			expr:     NewBinaryExpr(OpAnd, NewIntExpr(1), NewIntExpr(1)),
+			expected: true,
+		},
+		{
+			name:     "Comparison constant",
+			expr:     NewBinaryExpr(OpEq, NewIntExpr(5), NewIntExpr(5)),
+			expected: true,
 		},
 	}
 
@@ -420,3 +493,34 @@ func TestIsNullExpression(t *testing.T) {
 		t.Errorf("Expected %q, got %q", expected, result)
 	}
 }
+
+// TestExprStringEdgeCases tests edge cases for the String method.
+func TestExprStringEdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		expr     *Expr
+		contains string
+	}{
+		{
+			name:     "Unknown OpCode",
+			expr:     &Expr{Op: OpCode(200)},
+			contains: "Expr<",
+		},
+		{
+			name:     "Nil expression",
+			expr:     nil,
+			contains: "NULL",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.expr.String()
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("Expected String() to contain %q, got %q", tt.contains, result)
+			}
+		})
+	}
+}
+
+// Import strings for TestExprStringEdgeCases

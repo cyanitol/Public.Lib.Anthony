@@ -141,3 +141,211 @@ func TestValidateDeleteComprehensive(t *testing.T) {
 		})
 	}
 }
+
+// Test EstimateDeleteCost with nil WHERE (truncate case)
+func TestEstimateDeleteCostNilWhere(t *testing.T) {
+	stmt := &DeleteStmt{
+		Table: "users",
+		Where: nil,
+	}
+
+	cost := EstimateDeleteCost(stmt, 10000)
+	if cost != 1 {
+		t.Errorf("Cost for truncate = %d, want 1", cost)
+	}
+}
+
+// Test EstimateDeleteCost with LIMIT
+func TestEstimateDeleteCostWithLimit(t *testing.T) {
+	limit := 50
+	stmt := &DeleteStmt{
+		Table: "users",
+		Where: &WhereClause{
+			Expr: &Expression{
+				Type:   ExprColumn,
+				Column: "id",
+			},
+		},
+		Limit: &limit,
+	}
+
+	cost := EstimateDeleteCost(stmt, 1000)
+	if cost != 50 {
+		t.Errorf("Cost with LIMIT = %d, want 50", cost)
+	}
+}
+
+// Test EstimateDeleteCost with LIMIT greater than table rows
+func TestEstimateDeleteCostLimitGreaterThanRows(t *testing.T) {
+	limit := 5000
+	stmt := &DeleteStmt{
+		Table: "users",
+		Where: &WhereClause{
+			Expr: &Expression{
+				Type:   ExprColumn,
+				Column: "id",
+			},
+		},
+		Limit: &limit,
+	}
+
+	cost := EstimateDeleteCost(stmt, 1000)
+	if cost != 1000 {
+		t.Errorf("Cost with LIMIT > rows = %d, want 1000", cost)
+	}
+}
+
+// Test CompileDeleteWithIndex with empty index list
+func TestCompileDeleteWithIndexEmpty(t *testing.T) {
+	stmt := &DeleteStmt{
+		Table: "users",
+		Where: &WhereClause{
+			Expr: &Expression{
+				Type:   ExprColumn,
+				Column: "id",
+			},
+		},
+	}
+
+	prog, err := CompileDeleteWithIndex(stmt, 100, []IndexInfo{})
+	if err != nil {
+		t.Fatalf("CompileDeleteWithIndex with empty indexes failed: %v", err)
+	}
+
+	if prog == nil {
+		t.Error("Program should not be nil")
+	}
+}
+
+// Test CompileDeleteWithForeignKeys with empty foreign keys
+func TestCompileDeleteWithForeignKeysEmpty(t *testing.T) {
+	stmt := &DeleteStmt{
+		Table: "users",
+	}
+
+	prog, err := CompileDeleteWithForeignKeys(stmt, 100, []ForeignKeyInfo{})
+	if err != nil {
+		t.Fatalf("CompileDeleteWithForeignKeys with empty FKs failed: %v", err)
+	}
+
+	if prog == nil {
+		t.Error("Program should not be nil")
+	}
+}
+
+// Test CompileDeleteWithForeignKeys with RESTRICT action
+func TestCompileDeleteWithForeignKeysRestrict(t *testing.T) {
+	stmt := &DeleteStmt{
+		Table: "users",
+	}
+
+	foreignKeys := []ForeignKeyInfo{
+		{
+			Name:       "fk_posts_user",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "RESTRICT",
+		},
+	}
+
+	prog, err := CompileDeleteWithForeignKeys(stmt, 100, foreignKeys)
+	if err != nil {
+		t.Fatalf("CompileDeleteWithForeignKeys failed: %v", err)
+	}
+
+	if prog == nil {
+		t.Error("Program should not be nil")
+	}
+}
+
+// Test CompileDeleteWithForeignKeys with SET NULL action
+func TestCompileDeleteWithForeignKeysSetNull(t *testing.T) {
+	stmt := &DeleteStmt{
+		Table: "users",
+	}
+
+	foreignKeys := []ForeignKeyInfo{
+		{
+			Name:       "fk_posts_user",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "SET NULL",
+		},
+	}
+
+	prog, err := CompileDeleteWithForeignKeys(stmt, 100, foreignKeys)
+	if err != nil {
+		t.Fatalf("CompileDeleteWithForeignKeys failed: %v", err)
+	}
+
+	if prog == nil {
+		t.Error("Program should not be nil")
+	}
+}
+
+// Test CompileDeleteWithForeignKeys with NO ACTION
+func TestCompileDeleteWithForeignKeysNoAction(t *testing.T) {
+	stmt := &DeleteStmt{
+		Table: "users",
+	}
+
+	foreignKeys := []ForeignKeyInfo{
+		{
+			Name:       "fk_posts_user",
+			Columns:    []string{"user_id"},
+			RefTable:   "users",
+			RefColumns: []string{"id"},
+			OnDelete:   "NO ACTION",
+		},
+	}
+
+	prog, err := CompileDeleteWithForeignKeys(stmt, 100, foreignKeys)
+	if err != nil {
+		t.Fatalf("CompileDeleteWithForeignKeys failed: %v", err)
+	}
+
+	if prog == nil {
+		t.Error("Program should not be nil")
+	}
+}
+
+// Test CompileDeleteWithTruncateOptimization
+func TestCompileDeleteWithTruncateOptimizationNilWhere(t *testing.T) {
+	stmt := &DeleteStmt{
+		Table: "users",
+		Where: nil,
+	}
+
+	prog, err := CompileDeleteWithTruncateOptimization(stmt, 100)
+	if err != nil {
+		t.Fatalf("CompileDeleteWithTruncateOptimization failed: %v", err)
+	}
+
+	if prog == nil {
+		t.Error("Program should not be nil")
+	}
+}
+
+// Test CompileDeleteWithTruncateOptimization with WHERE clause
+func TestCompileDeleteWithTruncateOptimizationWithWhere(t *testing.T) {
+	stmt := &DeleteStmt{
+		Table: "users",
+		Where: &WhereClause{
+			Expr: &Expression{
+				Type:   ExprColumn,
+				Column: "id",
+			},
+		},
+	}
+
+	prog, err := CompileDeleteWithTruncateOptimization(stmt, 100)
+	if err != nil {
+		t.Fatalf("CompileDeleteWithTruncateOptimization failed: %v", err)
+	}
+
+	if prog == nil {
+		t.Error("Program should not be nil")
+	}
+}

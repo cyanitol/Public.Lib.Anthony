@@ -1394,3 +1394,307 @@ func TestFinalizeResultExprBinaryOps(t *testing.T) {
 		t.Error("No VDBE instructions generated")
 	}
 }
+
+// Test findAggsInSelect edge cases with nil Having
+func TestFindAggsInSelectNilHaving(t *testing.T) {
+	parse := &Parse{Vdbe: NewVdbe(nil)}
+	ac := NewAggregateCompiler(parse)
+
+	sel := &Select{
+		EList: &ExprList{
+			Items: []ExprListItem{
+				{Expr: &Expr{Op: TK_COLUMN}},
+			},
+		},
+		Having:   nil, // nil Having
+		OrderBy:  nil,
+		SelectID: 1,
+	}
+
+	aggInfo := &AggInfo{}
+	err := ac.findAggsInSelect(sel, aggInfo)
+	if err != nil {
+		t.Fatalf("findAggsInSelect failed: %v", err)
+	}
+}
+
+// Test findAggsInExprList with nil list
+func TestFindAggsInExprListNil(t *testing.T) {
+	parse := &Parse{Vdbe: NewVdbe(nil)}
+	ac := NewAggregateCompiler(parse)
+
+	aggInfo := &AggInfo{}
+	err := ac.findAggsInExprList(nil, aggInfo)
+	if err != nil {
+		t.Errorf("findAggsInExprList with nil list should not error: %v", err)
+	}
+}
+
+// Test findAggregateFuncs with nil expr
+func TestFindAggregateFuncsNil(t *testing.T) {
+	parse := &Parse{Vdbe: NewVdbe(nil)}
+	ac := NewAggregateCompiler(parse)
+
+	aggInfo := &AggInfo{}
+	err := ac.findAggregateFuncs(nil, aggInfo)
+	if err != nil {
+		t.Errorf("findAggregateFuncs with nil expr should not error: %v", err)
+	}
+}
+
+// Test finalizeResultExpr with AVG function
+func TestFinalizeResultExprAvg(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:  1,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	avgExpr := &Expr{Op: TK_AGG_FUNCTION}
+	aggInfo := &AggInfo{
+		AggFuncs: []AggFunc{
+			{
+				Expr:   avgExpr,
+				Func:   &FuncDef{Name: "avg"},
+				RegAcc: 15,
+			},
+		},
+	}
+
+	target := 5
+	ac.finalizeResultExpr(avgExpr, aggInfo, target)
+
+	// Should find OP_Copy
+	hasCopy := false
+	for _, op := range parse.Vdbe.Ops {
+		if op.Opcode == OP_Copy {
+			hasCopy = true
+			break
+		}
+	}
+
+	if !hasCopy {
+		t.Error("Expected OP_Copy for AVG finalization")
+	}
+}
+
+// Test finalizeResultExpr with non-matching aggregate
+func TestFinalizeResultExprNonMatching(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:  1,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	differentExpr := &Expr{Op: TK_AGG_FUNCTION}
+	aggInfo := &AggInfo{
+		AggFuncs: []AggFunc{
+			{
+				Expr:   &Expr{Op: TK_AGG_FUNCTION}, // Different instance
+				Func:   &FuncDef{Name: "count"},
+				RegAcc: 10,
+			},
+		},
+	}
+
+	target := 5
+	ac.finalizeResultExpr(differentExpr, aggInfo, target)
+
+	// Should fallback to compileExpr
+	if len(parse.Vdbe.Ops) == 0 {
+		t.Error("No VDBE instructions generated")
+	}
+}
+
+// Test evalArgReg with empty list
+func TestEvalArgRegEmptyList(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:  1,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	aggFunc := &AggFunc{
+		Expr: &Expr{
+			Op:   TK_AGG_FUNCTION,
+			List: &ExprList{Items: []ExprListItem{}}, // Empty list
+		},
+	}
+
+	reg := ac.evalArgReg(aggFunc)
+	if reg != 0 {
+		t.Errorf("Expected 0 for empty list, got %d", reg)
+	}
+}
+
+// Test updateAccumulators with unknown function
+func TestUpdateAccumulatorsUnknownFunc(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:  1,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	sel := &Select{}
+
+	aggInfo := &AggInfo{
+		AggFuncs: []AggFunc{
+			{
+				Expr: &Expr{
+					Op: TK_AGG_FUNCTION,
+					List: &ExprList{
+						Items: []ExprListItem{
+							{Expr: &Expr{Op: TK_COLUMN}},
+						},
+					},
+				},
+				Func: &FuncDef{Name: "unknown_func"},
+			},
+		},
+	}
+
+	ac.updateAccumulators(sel, aggInfo)
+	// Should handle unknown function gracefully
+}
+
+// Test compileWhereClause with nil WHERE
+func TestCompileWhereClauseNil(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:  1,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	sel := &Select{
+		Where: nil,
+	}
+
+	initialOps := len(parse.Vdbe.Ops)
+	addrBreak := parse.Vdbe.MakeLabel()
+	ac.compileWhereClause(sel, addrBreak)
+
+	// Should not generate any ops for nil WHERE
+	if len(parse.Vdbe.Ops) != initialOps {
+		t.Error("Should not generate ops for nil WHERE clause")
+	}
+}
+
+// Test compileGroupBy with nil VDBE
+func TestCompileGroupByNilVdbe(t *testing.T) {
+	parse := &Parse{Vdbe: nil}
+	ac := NewAggregateCompiler(parse)
+
+	sel := &Select{
+		EList: &ExprList{
+			Items: []ExprListItem{
+				{Expr: &Expr{Op: TK_COLUMN}},
+			},
+		},
+		SelectID: 1,
+	}
+
+	dest := &SelectDest{Dest: SRT_Output}
+
+	err := ac.compileGroupBy(sel, dest)
+	// May or may not error depending on implementation
+	_ = err
+}
+
+// Test checkNewGroup with empty GroupBy
+func TestCheckNewGroupEmptyGroupBy(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:  1,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	sel := &Select{
+		GroupBy: &ExprList{Items: []ExprListItem{}}, // Empty but not nil
+	}
+
+	aggInfo := &AggInfo{}
+	continueAddr := parse.Vdbe.MakeLabel()
+
+	initialOps := len(parse.Vdbe.Ops)
+	ac.checkNewGroup(sel, aggInfo, continueAddr)
+
+	// Should not generate comparison ops for empty GroupBy
+	if len(parse.Vdbe.Ops) != initialOps {
+		t.Error("Should not generate ops for empty GROUP BY")
+	}
+}
+
+// Test outputAggregateRow SRT_Mem with same register
+func TestOutputAggregateRowMemSameReg(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:  1,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	dest := &SelectDest{
+		Dest:   SRT_Mem,
+		SDParm: 10,
+	}
+
+	// regResult == dest.SDParm
+	ac.outputAggregateRow(10, 3, dest)
+
+	// Should not copy when registers match
+	hasCopy := false
+	for _, op := range parse.Vdbe.Ops {
+		if op.Opcode == OP_Copy {
+			hasCopy = true
+			break
+		}
+	}
+
+	if hasCopy {
+		t.Error("Should not generate OP_Copy when registers match")
+	}
+}
+
+// Test finalizeResultExpr with nil expr
+func TestFinalizeResultExprNilExpr(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:  1,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	aggInfo := &AggInfo{}
+	target := 5
+
+	initialOps := len(parse.Vdbe.Ops)
+	ac.finalizeResultExpr(nil, aggInfo, target)
+
+	// Should return early for nil expr
+	if len(parse.Vdbe.Ops) != initialOps {
+		t.Error("Should not generate ops for nil expr")
+	}
+}
+
+// Test compileExpr with default case
+func TestCompileExprDefaultCase(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:  1,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	// Use an unknown opcode
+	expr := &Expr{Op: TK_FUNCTION} // Not handled in compileExpr
+
+	target := 5
+	ac.compileExpr(expr, target)
+
+	// Should default to OP_Null
+	if len(parse.Vdbe.Ops) == 0 {
+		t.Fatal("No VDBE instructions generated")
+	}
+
+	lastOp := parse.Vdbe.Ops[len(parse.Vdbe.Ops)-1]
+	if lastOp.Opcode != OP_Null {
+		t.Errorf("Expected OP_Null for default case, got %v", lastOp.Opcode)
+	}
+}

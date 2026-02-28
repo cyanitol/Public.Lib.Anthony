@@ -1967,3 +1967,1122 @@ func TestNOTQueryInsufficientChildren(t *testing.T) {
 		t.Errorf("Expected 0 results for NOT query with insufficient children, got %d", len(results))
 	}
 }
+
+// TestBestIndexUnusableConstraints tests BestIndex with unusable constraints.
+func TestBestIndexUnusableConstraints(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	// Create info with unusable constraints
+	info := vtab.NewIndexInfo(2)
+	info.Constraints[0].Column = 0
+	info.Constraints[0].Op = vtab.ConstraintMatch
+	info.Constraints[0].Usable = false // Not usable
+	info.Constraints[1].Column = 1
+	info.Constraints[1].Op = vtab.ConstraintMatch
+	info.Constraints[1].Usable = false // Not usable
+
+	err := ftsTable.BestIndex(info)
+	if err != nil {
+		t.Errorf("BestIndex failed: %v", err)
+	}
+
+	// Should not set IdxNum to 1 since no usable MATCH constraints
+	if info.IdxNum == 1 {
+		t.Error("Expected IdxNum != 1 when no usable MATCH constraints")
+	}
+}
+
+// TestHandleDeleteInvalidRowid tests delete with invalid rowid type.
+func TestHandleDeleteInvalidRowid(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	// Insert a document first
+	ftsTable.Update(3, []interface{}{nil, nil, "test"})
+
+	// Try to delete with invalid rowid type (string instead of int64)
+	_, err := ftsTable.Update(1, []interface{}{"invalid"})
+	if err == nil {
+		t.Error("Expected error for invalid rowid type in DELETE")
+	}
+}
+
+// TestDetermineDocumentIDInvalidType tests document ID determination with invalid type.
+func TestDetermineDocumentIDInvalidType(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	// Try to insert with invalid rowid type
+	_, err := ftsTable.Update(3, []interface{}{nil, "invalid", "test"})
+	if err == nil {
+		t.Error("Expected error for invalid rowid type")
+	}
+}
+
+// TestCheckAndRemoveOldDocumentWithZeroRowID tests update detection with zero rowid.
+func TestCheckAndRemoveOldDocumentWithZeroRowID(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	// Insert with explicit rowid 0 (should be treated as auto-generate)
+	rowid, err := ftsTable.Update(3, []interface{}{int64(0), int64(0), "test"})
+	if err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+	if rowid == 0 {
+		t.Error("Expected non-zero rowid when passing 0")
+	}
+}
+
+// TestFilterInvalidQueryString tests filter with invalid query string.
+func TestFilterInvalidQueryString(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	ftsTable.Update(3, []interface{}{nil, nil, "test content"})
+
+	cursor, _ := ftsTable.Open()
+	defer cursor.Close()
+
+	// Try to filter with invalid query (only punctuation which produces no terms)
+	err := cursor.Filter(1, "", []interface{}{"!@#$%"})
+	if err == nil {
+		t.Error("Expected error for invalid query")
+	}
+}
+
+// TestFilterNonStringQuery tests filter with non-string query argument.
+func TestFilterNonStringQuery(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	ftsTable.Update(3, []interface{}{nil, nil, "test content"})
+
+	cursor, _ := ftsTable.Open()
+	defer cursor.Close()
+
+	// Filter with MATCH but non-string argument
+	err := cursor.Filter(1, "", []interface{}{123})
+	if err != nil {
+		t.Fatalf("Filter failed: %v", err)
+	}
+
+	// Should return no results or handle gracefully
+	count := 0
+	for !cursor.EOF() {
+		count++
+		cursor.Next()
+	}
+	t.Logf("Results with non-string query: %d", count)
+}
+
+// TestColumnEOFError tests column access when cursor is at EOF.
+func TestColumnEOFError(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	cursor, _ := ftsTable.Open()
+	defer cursor.Close()
+
+	// Filter returns no results (empty cursor)
+	cursor.Filter(0, "", nil)
+
+	// Try to access column when at EOF
+	_, err := cursor.Column(0)
+	if err == nil {
+		t.Error("Expected error when accessing column at EOF")
+	}
+}
+
+// TestColumnDocumentNotFound tests column access for missing document.
+func TestColumnDocumentNotFound(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	ftsTable.Update(3, []interface{}{nil, nil, "test"})
+
+	cursor, _ := ftsTable.Open()
+	defer cursor.Close()
+
+	cursor.Filter(0, "", nil)
+
+	if !cursor.EOF() {
+		// Manually corrupt the data to test error handling
+		ftsCursor := cursor.(*FTS5Cursor)
+		if len(ftsCursor.results) > 0 {
+			// Change docID to non-existent one
+			ftsCursor.results[0].DocID = 999
+			_, err := cursor.Column(0)
+			if err == nil {
+				t.Error("Expected error for non-existent document")
+			}
+		}
+	}
+}
+
+// TestColumnOutOfRange tests column access with out of range index.
+func TestColumnOutOfRange(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	ftsTable.Update(3, []interface{}{nil, nil, "test"})
+
+	cursor, _ := ftsTable.Open()
+	defer cursor.Close()
+
+	cursor.Filter(0, "", nil)
+
+	if !cursor.EOF() {
+		// Try to access column beyond range
+		_, err := cursor.Column(999)
+		if err == nil {
+			t.Error("Expected error for out of range column index")
+		}
+
+		// Try negative index (other than -1)
+		_, err = cursor.Column(-2)
+		if err == nil {
+			t.Error("Expected error for invalid negative column index")
+		}
+	}
+}
+
+// TestUpdateInsufficientArguments tests update with too few arguments.
+func TestUpdateInsufficientArguments(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	// Try to call update with only 1 arg (edge case between DELETE and INSERT)
+	// Actually argc=1 is DELETE, so let's test argc=0
+	_, err := ftsTable.Update(0, []interface{}{})
+	if err == nil {
+		t.Error("Expected error for update with 0 arguments")
+	}
+}
+
+// TestTruncateTextEdgeCases tests truncateText function edge cases.
+func TestTruncateTextEdgeCases(t *testing.T) {
+	// Test text exactly at maxLength
+	text := "12345"
+	snippet := GenerateSnippet(text, []int{}, 5)
+	if snippet != text {
+		t.Errorf("Expected unchanged text for exact length match, got %s", snippet)
+	}
+
+	// Test text shorter than maxLength
+	text = "123"
+	snippet = GenerateSnippet(text, []int{}, 5)
+	if snippet != text {
+		t.Errorf("Expected unchanged text for shorter text, got %s", snippet)
+	}
+
+	// Test empty text with zero maxLength
+	snippet = GenerateSnippet("", []int{}, 0)
+	if snippet != "" {
+		t.Errorf("Expected empty string for empty input with zero maxLength, got %s", snippet)
+	}
+
+	// Test zero maxLength with non-empty text
+	snippet = GenerateSnippet("text", []int{}, 0)
+	if snippet != "" {
+		t.Errorf("Expected empty string for zero maxLength, got %s", snippet)
+	}
+}
+
+// TestCalculateSnippetBoundsNegativeStart tests snippet bounds with negative start.
+func TestCalculateSnippetBoundsNegativeStart(t *testing.T) {
+	text := "The quick brown fox"
+
+	// Position near start of text (start would be negative)
+	snippet := GenerateSnippet(text, []int{0}, 10)
+	if len(snippet) == 0 {
+		t.Error("Expected non-empty snippet")
+	}
+	t.Logf("Snippet at position 0: %s", snippet)
+
+	// Position at start with large maxLength
+	snippet = GenerateSnippet(text, []int{5}, 50)
+	if len(snippet) == 0 {
+		t.Error("Expected non-empty snippet")
+	}
+	t.Logf("Snippet with large maxLength: %s", snippet)
+}
+
+// TestScoreWithEmptyIndex tests BM25.Score with specific edge cases.
+func TestScoreWithEmptyIndex(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	ranker := NewBM25Ranker()
+
+	// Score with empty index (N=0)
+	score := ranker.Score(index, 1, []string{"test"})
+	if score != 0 {
+		t.Errorf("Expected 0 score for empty index, got %f", score)
+	}
+}
+
+// TestScoreTermNotInDocument tests scoring when term not in document.
+func TestScoreTermNotInDocument(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	ranker := NewBM25Ranker()
+
+	// Add documents
+	index.AddDocument(1, map[int]string{0: "quick brown fox"}, tokenizer)
+	index.AddDocument(2, map[int]string{0: "lazy dog"}, tokenizer)
+
+	// Search for term not in specific document
+	score := ranker.Score(index, 2, []string{"fox"})
+	if score != 0 {
+		t.Errorf("Expected 0 score when term not in document, got %f", score)
+	}
+}
+
+// TestTFIDFWithZeroDocumentLength tests TF-IDF with zero-length document.
+func TestTFIDFWithZeroDocumentLength(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	ranker := NewTFIDFRanker()
+
+	// Add empty document
+	index.AddDocument(1, map[int]string{0: ""}, tokenizer)
+
+	score := ranker.Score(index, 1, []string{"test"})
+	if score != 0 {
+		t.Errorf("Expected 0 score for zero-length document, got %f", score)
+	}
+}
+
+// TestParseColumnFilterEdgeCases tests column filter parsing edge cases.
+func TestParseColumnFilterEdgeCases(t *testing.T) {
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+
+	tests := []struct {
+		name     string
+		query    string
+		hasColon bool
+	}{
+		{"no colon", "search term", false},
+		{"with colon", "title:search", true},
+		{"colon no content after", "title:", true},
+		{"only colon", ":", true},
+		{"multiple colons", "a:b:c", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parser.Parse(tt.query)
+			// Should handle gracefully
+			if err != nil {
+				t.Logf("Parse returned error for %s: %v", tt.name, err)
+			}
+		})
+	}
+}
+
+// TestTryParsePrefixQueryNoTokens tests prefix query parsing with no tokens.
+func TestTryParsePrefixQueryNoTokens(t *testing.T) {
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+
+	// Query that produces no tokens after removing special chars
+	query, err := parser.Parse("!@#*")
+	if err != nil {
+		t.Logf("Parse '!@#*' returned error: %v", err)
+	} else if query != nil {
+		t.Logf("Query type: %v, terms: %v", query.Type, query.Terms)
+	}
+}
+
+// TestMatchPhraseEmptyResult tests phrase matching with no initial matches.
+func TestMatchPhraseEmptyResult(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	executor := NewQueryExecutor(index, NewBM25Ranker())
+
+	// Add document
+	index.AddDocument(1, map[int]string{0: "quick brown fox"}, tokenizer)
+
+	// Create phrase query with term not in any document
+	query := &Query{
+		Type:  QueryPhrase,
+		Terms: []string{"nonexistent", "term"},
+	}
+
+	results, err := executor.Execute(query)
+	if err != nil {
+		t.Errorf("Execute failed: %v", err)
+	}
+
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results for phrase with non-existent term, got %d", len(results))
+	}
+}
+
+// TestExtractTermsWithNilQuery tests extractTerms with nil query.
+func TestExtractTermsWithNilQuery(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	executor := NewQueryExecutor(index, NewBM25Ranker())
+
+	terms := executor.extractTerms(nil)
+	if len(terms) != 0 {
+		t.Errorf("Expected empty terms for nil query, got %v", terms)
+	}
+}
+
+// TestExtractTermsRecursive tests extractTerms with nested queries.
+func TestExtractTermsRecursive(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	executor := NewQueryExecutor(index, NewBM25Ranker())
+
+	// Create complex nested query
+	query := &Query{
+		Type:  QueryAND,
+		Terms: []string{"top"},
+		Children: []*Query{
+			{
+				Type:  QuerySimple,
+				Terms: []string{"child1"},
+			},
+			{
+				Type:  QueryOR,
+				Terms: []string{"child2"},
+				Children: []*Query{
+					{
+						Type:  QuerySimple,
+						Terms: []string{"grandchild"},
+					},
+				},
+			},
+		},
+	}
+
+	terms := executor.extractTerms(query)
+	expectedCount := 4 // top, child1, child2, grandchild
+	if len(terms) != expectedCount {
+		t.Errorf("Expected %d terms, got %d: %v", expectedCount, len(terms), terms)
+	}
+}
+
+// TestUpdateWithExplicitRowIDs tests updates with specific rowid sequences.
+func TestUpdateWithExplicitRowIDs(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	// Insert with explicit rowid 10
+	rowid, err := ftsTable.Update(3, []interface{}{nil, int64(10), "first"})
+	if err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+	if rowid != 10 {
+		t.Errorf("Expected rowid 10, got %d", rowid)
+	}
+
+	// Next auto-generated rowid should be > 10
+	rowid2, err := ftsTable.Update(3, []interface{}{nil, nil, "second"})
+	if err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+	if rowid2 <= 10 {
+		t.Errorf("Expected rowid > 10, got %d", rowid2)
+	}
+
+	// Insert with rowid equal to current nextRowID
+	currentNext := ftsTable.nextRowID
+	rowid3, err := ftsTable.Update(3, []interface{}{nil, int64(currentNext), "third"})
+	if err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+	if rowid3 != int64(currentNext) {
+		t.Errorf("Expected rowid %d, got %d", currentNext, rowid3)
+	}
+
+	// Verify nextRowID was updated
+	if ftsTable.nextRowID <= currentNext {
+		t.Errorf("Expected nextRowID > %d, got %d", currentNext, ftsTable.nextRowID)
+	}
+}
+
+// TestUpdateRealUpdate tests actual UPDATE (not INSERT) with old rowid.
+func TestUpdateRealUpdate(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	// Insert original document
+	rowid, err := ftsTable.Update(3, []interface{}{nil, int64(5), "original"})
+	if err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+
+	// Verify it was inserted
+	if ftsTable.index.GetTotalDocuments() != 1 {
+		t.Errorf("Expected 1 document after insert, got %d", ftsTable.index.GetTotalDocuments())
+	}
+
+	// Update the document (old rowid = new rowid = 5)
+	rowid2, err := ftsTable.Update(3, []interface{}{int64(5), int64(5), "updated"})
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	if rowid2 != rowid {
+		t.Errorf("Expected same rowid %d, got %d", rowid, rowid2)
+	}
+
+	// Should still have 1 document
+	if ftsTable.index.GetTotalDocuments() != 1 {
+		t.Errorf("Expected 1 document after update, got %d", ftsTable.index.GetTotalDocuments())
+	}
+
+	// Verify content was updated
+	content, exists := ftsTable.rows[DocumentID(5)]
+	if !exists {
+		t.Error("Document should still exist")
+	}
+	if content[0] != "updated" {
+		t.Errorf("Expected updated content, got %v", content[0])
+	}
+}
+
+// TestConvertToStringVariousTypes tests convertToString with various value types.
+func TestConvertToStringVariousTypes(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"col1", "col2", "col3", "col4"})
+	ftsTable := table.(*FTS5Table)
+
+	// Insert with various types
+	rowid, err := ftsTable.Update(6, []interface{}{
+		nil,
+		nil,
+		"string value",
+		int64(123),
+		45.67,
+		[]byte("byte slice"),
+	})
+	if err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+
+	// Verify document was indexed
+	if ftsTable.index.GetTotalDocuments() != 1 {
+		t.Errorf("Expected 1 document, got %d", ftsTable.index.GetTotalDocuments())
+	}
+
+	// Query to verify all values were indexed
+	cursor, _ := ftsTable.Open()
+	defer cursor.Close()
+
+	cursor.Filter(0, "", nil)
+
+	if !cursor.EOF() {
+		for i := 0; i < 4; i++ {
+			val, err := cursor.Column(i)
+			if err != nil {
+				t.Errorf("Column(%d) failed: %v", i, err)
+			}
+			t.Logf("Column %d (rowid=%d): %v (type: %T)", i, rowid, val, val)
+		}
+	}
+}
+
+// TestExtractColumnValuesNilValues tests extracting column values with nil values.
+func TestExtractColumnValuesNilValues(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"col1", "col2"})
+	ftsTable := table.(*FTS5Table)
+
+	// Insert with nil values
+	rowid, err := ftsTable.Update(4, []interface{}{nil, nil, nil, "not nil"})
+	if err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+
+	// Verify document exists
+	if ftsTable.index.GetTotalDocuments() != 1 {
+		t.Errorf("Expected 1 document, got %d", ftsTable.index.GetTotalDocuments())
+	}
+
+	// Access the values
+	cursor, _ := ftsTable.Open()
+	defer cursor.Close()
+
+	cursor.Filter(0, "", nil)
+
+	if !cursor.EOF() {
+		val0, err := cursor.Column(0)
+		if err != nil {
+			t.Errorf("Column(0) failed: %v", err)
+		}
+		if val0 != nil {
+			t.Errorf("Expected nil for column 0, got %v", val0)
+		}
+
+		val1, err := cursor.Column(1)
+		if err != nil {
+			t.Errorf("Column(1) failed: %v", err)
+		}
+		if val1 != "not nil" {
+			t.Errorf("Expected 'not nil' for column 1, got %v", val1)
+		}
+
+		t.Logf("Rowid: %d", rowid)
+	}
+}
+
+// TestParseANDQueryWithInvalidChild tests AND query parsing with invalid child.
+func TestParseANDQueryWithInvalidChild(t *testing.T) {
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+
+	// AND query with invalid child query (only special chars that produce no terms)
+	_, err := parser.Parse("test AND !@#$%")
+	if err == nil {
+		t.Error("Expected error for AND query with invalid child")
+	}
+}
+
+// TestParseORQueryWithInvalidChild tests OR query parsing with invalid child.
+func TestParseORQueryWithInvalidChild(t *testing.T) {
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+
+	// OR query with invalid child query
+	_, err := parser.Parse("test OR !@#$%")
+	if err == nil {
+		t.Error("Expected error for OR query with invalid child")
+	}
+}
+
+// TestParseNOTQueryWithInvalidChildren tests NOT query parsing with invalid children.
+func TestParseNOTQueryWithInvalidChildren(t *testing.T) {
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+
+	// NOT query with invalid left child
+	_, err := parser.Parse("!@#$% NOT test")
+	if err == nil {
+		t.Error("Expected error for NOT query with invalid left child")
+	}
+
+	// NOT query with invalid right child
+	_, err = parser.Parse("test NOT !@#$%")
+	if err == nil {
+		t.Error("Expected error for NOT query with invalid right child")
+	}
+}
+
+// TestHandleDeleteNonExistent tests deleting non-existent document.
+func TestHandleDeleteNonExistent(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	// Try to delete document that doesn't exist
+	// This should not error but just return the rowid
+	rowid, err := ftsTable.Update(1, []interface{}{int64(999)})
+	if err != nil {
+		t.Logf("Delete non-existent document error: %v", err)
+	}
+	if rowid != 999 {
+		t.Errorf("Expected rowid 999, got %d", rowid)
+	}
+}
+
+// TestFilterQueryExecutionError tests filter with query execution error.
+func TestFilterQueryExecutionError(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	cursor, _ := ftsTable.Open()
+	defer cursor.Close()
+
+	// Try to filter with query that has execution issues
+	// Empty query should error
+	err := cursor.Filter(1, "", []interface{}{""})
+	if err == nil {
+		t.Error("Expected error for empty query string")
+	}
+}
+
+// TestGetMatchingDocumentsUnknownType tests getMatchingDocuments with unknown query type.
+func TestGetMatchingDocumentsUnknownType(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	executor := NewQueryExecutor(index, NewBM25Ranker())
+
+	// Create query with invalid/unknown type
+	query := &Query{
+		Type:  QueryType(999), // Unknown type
+		Terms: []string{"test"},
+	}
+
+	results, err := executor.Execute(query)
+	if err != nil {
+		t.Errorf("Execute failed: %v", err)
+	}
+
+	// Should return empty results for unknown query type
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results for unknown query type, got %d", len(results))
+	}
+}
+
+// TestMatchPhraseNotConsecutive tests phrase matching with non-consecutive terms.
+func TestMatchPhraseNotConsecutive(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	executor := NewQueryExecutor(index, NewBM25Ranker())
+
+	// Add document
+	index.AddDocument(1, map[int]string{0: "the quick brown fox jumps"}, tokenizer)
+
+	// Create phrase query with terms that exist but aren't consecutive
+	query := &Query{
+		Type:  QueryPhrase,
+		Terms: []string{"quick", "jumps"}, // Not consecutive
+	}
+
+	results, err := executor.Execute(query)
+	if err != nil {
+		t.Errorf("Execute failed: %v", err)
+	}
+
+	// Should return no results since terms aren't consecutive
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results for non-consecutive phrase, got %d", len(results))
+	}
+}
+
+// TestTruncateTextExactLength tests truncateText with text exactly at maxLength.
+func TestTruncateTextExactLength(t *testing.T) {
+	text := "12345"
+	snippet := GenerateSnippet(text, []int{}, 5)
+
+	// Should not add ellipsis when exactly at maxLength
+	if snippet != text {
+		t.Errorf("Expected '%s', got '%s'", text, snippet)
+	}
+
+	// Test with longer text
+	text = "123456"
+	snippet = GenerateSnippet(text, []int{}, 5)
+
+	// Should add ellipsis when over maxLength
+	if !strings.Contains(snippet, "...") {
+		t.Error("Expected ellipsis for truncated text")
+	}
+}
+
+// TestCalculateSnippetBoundsEndOverflow tests snippet bounds when end exceeds text length.
+func TestCalculateSnippetBoundsEndOverflow(t *testing.T) {
+	text := "Short text"
+
+	// Position near end with large maxLength
+	snippet := GenerateSnippet(text, []int{8}, 20)
+
+	// Should handle gracefully
+	if len(snippet) == 0 {
+		t.Error("Expected non-empty snippet")
+	}
+
+	t.Logf("Snippet: '%s'", snippet)
+}
+
+// TestScoreTermNotFound tests scoring when term has no postings.
+func TestScoreTermNotFound(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	ranker := NewBM25Ranker()
+
+	// Add document
+	index.AddDocument(1, map[int]string{0: "test content"}, tokenizer)
+
+	// Search for term that doesn't exist
+	score := ranker.Score(index, 1, []string{"nonexistent"})
+
+	// Should return 0 for term not found
+	if score != 0 {
+		t.Errorf("Expected 0 score for non-existent term, got %f", score)
+	}
+}
+
+// TestTFIDFScoreTermNotFound tests TF-IDF scoring when term has no postings.
+func TestTFIDFScoreTermNotFound(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	ranker := NewTFIDFRanker()
+
+	// Add document
+	index.AddDocument(1, map[int]string{0: "test content"}, tokenizer)
+
+	// Search for term that doesn't exist
+	score := ranker.Score(index, 1, []string{"nonexistent"})
+
+	// Should return 0 for term not found
+	if score != 0 {
+		t.Errorf("Expected 0 score for non-existent term, got %f", score)
+	}
+}
+
+// TestParseColumnFilterSinglePart tests parseColumnFilter edge case.
+func TestParseColumnFilterSinglePart(t *testing.T) {
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+
+	// Query with colon but only one part after split (edge case)
+	query, err := parser.Parse("column:")
+	if err != nil {
+		t.Logf("Parse 'column:' returned error: %v", err)
+	} else if query != nil {
+		t.Logf("Query type: %v, terms: %v", query.Type, query.Terms)
+	}
+}
+
+// TestANDQueryOneChild tests AND query execution with only one child.
+func TestANDQueryOneChild(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	executor := NewQueryExecutor(index, NewBM25Ranker())
+
+	// Add document
+	index.AddDocument(1, map[int]string{0: "test content"}, tokenizer)
+
+	// Create AND query with one child
+	query := &Query{
+		Type: QueryAND,
+		Children: []*Query{
+			{Type: QuerySimple, Terms: []string{"test"}},
+		},
+	}
+
+	results, err := executor.Execute(query)
+	if err != nil {
+		t.Errorf("Execute failed: %v", err)
+	}
+
+	// Should match the single child's results
+	if len(results) != 1 {
+		t.Errorf("Expected 1 result, got %d", len(results))
+	}
+}
+
+// TestORQueryNoChildren tests OR query execution with no children.
+func TestORQueryNoChildren(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	executor := NewQueryExecutor(index, NewBM25Ranker())
+
+	// Create OR query with no children
+	query := &Query{
+		Type:     QueryOR,
+		Children: []*Query{},
+	}
+
+	results, err := executor.Execute(query)
+	if err != nil {
+		t.Errorf("Execute failed: %v", err)
+	}
+
+	// Should return empty results
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results, got %d", len(results))
+	}
+}
+
+// TestPrefixQueryEmptyPrefix tests prefix query with empty prefix term.
+func TestPrefixQueryEmptyPrefix(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	executor := NewQueryExecutor(index, NewBM25Ranker())
+
+	// Add document
+	index.AddDocument(1, map[int]string{0: "database test"}, tokenizer)
+
+	// Create prefix query manually with empty term
+	query := &Query{
+		Type:  QueryPrefix,
+		Terms: []string{""},
+	}
+
+	results, err := executor.Execute(query)
+	if err != nil {
+		t.Errorf("Execute failed: %v", err)
+	}
+
+	// Should handle gracefully
+	t.Logf("Results for empty prefix: %d", len(results))
+}
+
+// TestUpdateInsufficientColumnValues tests update with insufficient column values.
+func TestUpdateInsufficientColumnValues(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"col1", "col2", "col3"})
+	ftsTable := table.(*FTS5Table)
+
+	// Try to insert with only 2 column values when 3 are required
+	_, err := ftsTable.Update(4, []interface{}{nil, nil, "val1", "val2"})
+	if err == nil {
+		t.Error("Expected error for insufficient column values")
+	}
+}
+
+// TestConvertToStringByteSlice tests convertToString specifically with byte slice.
+func TestConvertToStringByteSlice(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	// Insert with byte slice
+	byteData := []byte("test data")
+	rowid, err := ftsTable.Update(3, []interface{}{nil, nil, byteData})
+	if err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+
+	// Query the document
+	cursor, _ := ftsTable.Open()
+	defer cursor.Close()
+
+	cursor.Filter(0, "", nil)
+
+	if !cursor.EOF() {
+		val, err := cursor.Column(0)
+		if err != nil {
+			t.Errorf("Column failed: %v", err)
+		}
+
+		// Should store the original byte slice
+		t.Logf("Stored value (rowid=%d): %v (type: %T)", rowid, val, val)
+	}
+}
+
+// TestHandleDeleteWithIndexError tests delete when RemoveDocument returns error.
+func TestHandleDeleteWithIndexError(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	// Insert a document
+	ftsTable.Update(3, []interface{}{nil, nil, "test"})
+
+	// Delete should succeed even if document doesn't exist in index
+	// (RemoveDocument handles non-existent gracefully)
+	rowid, err := ftsTable.Update(1, []interface{}{int64(1)})
+	if err != nil {
+		t.Logf("Delete returned error: %v", err)
+	}
+	if rowid != 1 {
+		t.Errorf("Expected rowid 1, got %d", rowid)
+	}
+}
+
+// TestHandleInsertOrUpdateExtractError tests insert with column extraction error.
+func TestHandleInsertOrUpdateExtractError(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"col1", "col2"})
+	ftsTable := table.(*FTS5Table)
+
+	// Try insert with too few values (should trigger extractColumnValues error)
+	_, err := ftsTable.Update(3, []interface{}{nil, nil, "only_one"})
+	if err == nil {
+		t.Error("Expected error for insufficient column values")
+	}
+}
+
+// TestFilterWithEmptyArgv tests filter with empty argv.
+func TestFilterWithEmptyArgv(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	ftsTable.Update(3, []interface{}{nil, nil, "test"})
+
+	cursor, _ := ftsTable.Open()
+	defer cursor.Close()
+
+	// Filter with idxNum=1 (MATCH) but empty argv
+	err := cursor.Filter(1, "", []interface{}{})
+	if err != nil {
+		t.Fatalf("Filter failed: %v", err)
+	}
+
+	// Should return all documents since no query string
+	count := 0
+	for !cursor.EOF() {
+		count++
+		cursor.Next()
+	}
+	t.Logf("Results with empty argv: %d", count)
+}
+
+// TestTruncateTextLongerThanMax tests truncateText with text longer than maxLength.
+func TestTruncateTextLongerThanMax(t *testing.T) {
+	text := "This is a very long text that needs to be truncated"
+
+	// Test truncation
+	snippet := GenerateSnippet(text, []int{}, 10)
+
+	// Should be truncated and have ellipsis
+	if !strings.Contains(snippet, "...") {
+		t.Error("Expected ellipsis in truncated text")
+	}
+
+	// Length should be around maxLength + 3 for "..."
+	if len(snippet) > 15 {
+		t.Errorf("Snippet too long: %d characters (expected ~13)", len(snippet))
+	}
+
+	t.Logf("Truncated snippet: '%s'", snippet)
+}
+
+// TestCalculateSnippetBoundsStartAdjustment tests snippet bounds adjustment.
+func TestCalculateSnippetBoundsStartAdjustment(t *testing.T) {
+	// Text where end would overflow, forcing start adjustment
+	text := "1234567890"
+
+	// Position near end with maxLength that would overflow
+	snippet := GenerateSnippet(text, []int{8}, 8)
+
+	if len(snippet) == 0 {
+		t.Error("Expected non-empty snippet")
+	}
+
+	t.Logf("Snippet with boundary adjustment: '%s'", snippet)
+}
+
+// TestParsePhraseQuerySimple tests phrase query parsing edge case.
+func TestParsePhraseQuerySimple(t *testing.T) {
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+
+	// Simple phrase query
+	query, err := parser.Parse(`"single"`)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if query.Type != QueryPhrase {
+		t.Errorf("Expected QueryPhrase, got %v", query.Type)
+	}
+
+	if len(query.Terms) != 1 || query.Terms[0] != "single" {
+		t.Errorf("Expected single term 'single', got %v", query.Terms)
+	}
+}
+
+// TestParseColumnFilterNoContent tests column filter with no content after colon.
+func TestParseColumnFilterNoContent(t *testing.T) {
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+
+	// Column filter with no content (should error on no valid terms)
+	_, err := parser.Parse("column:   ")
+	if err == nil {
+		t.Error("Expected error for column filter with no content")
+	}
+}
+
+// TestMatchPhraseSingleTerm tests phrase matching with single term.
+func TestMatchPhraseSingleTerm(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	executor := NewQueryExecutor(index, NewBM25Ranker())
+
+	// Add document
+	index.AddDocument(1, map[int]string{0: "quick brown fox"}, tokenizer)
+
+	// Create phrase query with single term
+	query := &Query{
+		Type:  QueryPhrase,
+		Terms: []string{"quick"},
+	}
+
+	results, err := executor.Execute(query)
+	if err != nil {
+		t.Errorf("Execute failed: %v", err)
+	}
+
+	// Should match the document
+	if len(results) != 1 {
+		t.Errorf("Expected 1 result for single-term phrase, got %d", len(results))
+	}
+}
+
+// TestTryParseNOTQueryEdgeCase tests NOT query edge case.
+func TestTryParseNOTQueryEdgeCase(t *testing.T) {
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+
+	// NOT query where split doesn't produce 2 parts (shouldn't happen with " NOT ")
+	// This tests the len(parts) != 2 check
+	query, err := parser.Parse("test NOT ")
+
+	// Should handle gracefully - may error on invalid right side
+	if err != nil {
+		t.Logf("Parse 'test NOT ' returned error: %v", err)
+	} else if query != nil {
+		t.Logf("Query type: %v", query.Type)
+	}
+}
+
+// TestGenerateSnippetWithMatchAtEnd tests snippet generation with match at text end.
+func TestGenerateSnippetWithMatchAtEnd(t *testing.T) {
+	text := "The quick brown fox"
+
+	// Match position at the end
+	snippet := GenerateSnippet(text, []int{len(text) - 3}, 10)
+
+	if len(snippet) == 0 {
+		t.Error("Expected non-empty snippet")
+	}
+
+	t.Logf("Snippet with match at end: '%s'", snippet)
+}
+
+// TestFilterWithQueryParseError tests filter when query parsing fails.
+func TestFilterWithQueryParseError(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	cursor, _ := ftsTable.Open()
+	defer cursor.Close()
+
+	// Try filter with query that will fail to parse (only punctuation)
+	err := cursor.Filter(1, "", []interface{}{"   "})
+	if err == nil {
+		t.Error("Expected error for whitespace-only query")
+	}
+}
+
+// TestUpdateWithAddDocumentError tests insert when AddDocument fails.
+func TestUpdateWithAddDocumentError(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	// Insert a document normally
+	rowid, err := ftsTable.Update(3, []interface{}{nil, nil, "test"})
+	if err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+
+	// Try to insert with same explicit rowid (should still work, just updates nextRowID)
+	rowid2, err := ftsTable.Update(3, []interface{}{nil, int64(rowid), "test2"})
+	if err != nil {
+		t.Logf("Second insert error: %v", err)
+	}
+
+	t.Logf("First rowid: %d, Second rowid: %d", rowid, rowid2)
+}

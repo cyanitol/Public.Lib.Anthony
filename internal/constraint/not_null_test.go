@@ -465,6 +465,14 @@ func TestValidateRow(t *testing.T) {
 			shouldError: true,
 			errorMsg:    "NOT NULL constraint failed: column name",
 		},
+		{
+			name: "valid row defaults fill all missing NOT NULL columns",
+			values: map[string]interface{}{
+				"id":   5,
+				"name": "Test User",
+			},
+			shouldError: false,
+		},
 	}
 
 	for _, tt := range tests {

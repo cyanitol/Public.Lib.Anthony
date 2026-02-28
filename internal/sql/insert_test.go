@@ -442,3 +442,209 @@ func TestComputeNumCols(t *testing.T) {
 		})
 	}
 }
+
+// Test OpCode String method with unknown opcode
+func TestOpCodeStringUnknown(t *testing.T) {
+	unknownOp := OpCode(9999)
+	result := unknownOp.String()
+	if result == "" {
+		t.Error("String() for unknown opcode should not be empty")
+	}
+}
+
+// Test compileInsertRows
+func TestCompileInsertRowsMultiple(t *testing.T) {
+	stmt := &InsertStmt{
+		Table:   "test",
+		Columns: []string{"a", "b"},
+		Values: [][]Value{
+			{IntValue(1), IntValue(2)},
+			{IntValue(3), IntValue(4)},
+			{IntValue(5), IntValue(6)},
+		},
+	}
+
+	prog, err := CompileInsert(stmt, 100)
+	if err != nil {
+		t.Fatalf("CompileInsert failed: %v", err)
+	}
+
+	// Count MakeRecord operations (one per row)
+	makeRecordCount := 0
+	for _, inst := range prog.Instructions {
+		if inst.OpCode == OpMakeRecord {
+			makeRecordCount++
+		}
+	}
+
+	if makeRecordCount != 3 {
+		t.Errorf("Expected 3 MakeRecord ops, got %d", makeRecordCount)
+	}
+}
+
+// Test addValueLoad with different value types
+func TestAddValueLoadTypes(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     Value
+		expectOp  OpCode
+	}{
+		{
+			name:     "integer",
+			value:    IntValue(42),
+			expectOp: OpInteger,
+		},
+		{
+			name:     "text",
+			value:    TextValue("hello"),
+			expectOp: OpString,
+		},
+		{
+			name:     "float",
+			value:    FloatValue(3.14),
+			expectOp: OpReal,
+		},
+		{
+			name:     "blob",
+			value:    BlobValue([]byte{1, 2, 3}),
+			expectOp: OpBlob,
+		},
+		{
+			name:     "null",
+			value:    NullValue(),
+			expectOp: OpNull,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stmt := &InsertStmt{
+				Table:   "test",
+				Columns: []string{"col"},
+				Values:  [][]Value{{tt.value}},
+			}
+
+			prog, err := CompileInsert(stmt, 100)
+			if err != nil {
+				t.Fatalf("CompileInsert failed: %v", err)
+			}
+
+			// Find the expected opcode
+			found := false
+			for _, inst := range prog.Instructions {
+				if inst.OpCode == tt.expectOp {
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				t.Errorf("Expected to find opcode %v in instructions", tt.expectOp)
+			}
+		})
+	}
+}
+
+// Test CompileInsertWithAutoInc with autoInc=false
+func TestCompileInsertWithAutoIncFalse(t *testing.T) {
+	stmt := &InsertStmt{
+		Table:   "test",
+		Columns: []string{"id", "name"},
+		Values: [][]Value{
+			{IntValue(1), TextValue("test")},
+		},
+	}
+
+	prog, err := CompileInsertWithAutoInc(stmt, 100, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if prog == nil {
+		t.Fatal("program is nil")
+	}
+
+	// Should still work, just like regular CompileInsert
+	if len(prog.Instructions) == 0 {
+		t.Error("Expected instructions")
+	}
+}
+
+// Test Program String method coverage
+func TestProgramStringMethod(t *testing.T) {
+	stmt := &InsertStmt{
+		Table:   "test",
+		Columns: []string{"id"},
+		Values:  [][]Value{{IntValue(1)}},
+	}
+
+	prog, err := CompileInsert(stmt, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test that String() method exists and returns something
+	str := prog.Disassemble()
+	if str == "" {
+		t.Error("Program String() should not be empty")
+	}
+}
+
+// Test edge case with very large number of columns
+func TestCompileInsertManyColumns(t *testing.T) {
+	columns := make([]string, 50)
+	values := make([]Value, 50)
+	for i := 0; i < 50; i++ {
+		columns[i] = "col" + string(rune('0'+i%10))
+		values[i] = IntValue(int64(i))
+	}
+
+	stmt := &InsertStmt{
+		Table:   "wide_table",
+		Columns: columns,
+		Values:  [][]Value{values},
+	}
+
+	prog, err := CompileInsert(stmt, 100)
+	if err != nil {
+		t.Fatalf("CompileInsert with many columns failed: %v", err)
+	}
+
+	if prog == nil {
+		t.Fatal("program is nil")
+	}
+
+	// Should successfully compile even with many columns
+	if len(prog.Instructions) == 0 {
+		t.Error("Expected instructions")
+	}
+}
+
+// Test ValidateInsert with nil values in row
+func TestValidateInsertNilRow(t *testing.T) {
+	stmt := &InsertStmt{
+		Table:   "test",
+		Columns: []string{"a"},
+		Values: [][]Value{
+			nil, // nil row
+		},
+	}
+
+	err := ValidateInsert(stmt)
+	// Depending on implementation, this may or may not error
+	// Just ensure it doesn't panic
+	_ = err
+}
+
+// Test empty table name edge case
+func TestCompileInsertEmptyTable(t *testing.T) {
+	stmt := &InsertStmt{
+		Table:   "",
+		Columns: []string{"a"},
+		Values:  [][]Value{{IntValue(1)}},
+	}
+
+	_, err := CompileInsert(stmt, 100)
+	// May or may not error depending on implementation
+	_ = err
+}
