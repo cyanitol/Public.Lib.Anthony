@@ -175,12 +175,34 @@ func (mp *MemoryPager) writeLocked(page *DbPage) error {
 	}
 
 	// Ensure we have a write transaction
-	if mp.state == PagerStateOpen || mp.state == PagerStateReader {
-		if err := mp.beginWriteTransaction(); err != nil {
-			return err
-		}
+	if err := mp.ensureWriteTransaction(); err != nil {
+		return err
 	}
 
+	// Journal and save page state
+	if err := mp.preparePageForWrite(page); err != nil {
+		return err
+	}
+
+	// Mark page as writeable and dirty
+	mp.markPageDirty(page)
+
+	// Advance state if needed
+	mp.advanceStateAfterWrite()
+
+	return nil
+}
+
+// ensureWriteTransaction ensures a write transaction is active.
+func (mp *MemoryPager) ensureWriteTransaction() error {
+	if mp.state == PagerStateOpen || mp.state == PagerStateReader {
+		return mp.beginWriteTransaction()
+	}
+	return nil
+}
+
+// preparePageForWrite journals the page and saves savepoint state.
+func (mp *MemoryPager) preparePageForWrite(page *DbPage) error {
 	// Journal the page if not already writeable
 	if !page.IsWriteable() {
 		if err := mp.journalPage(page); err != nil {
@@ -195,18 +217,21 @@ func (mp *MemoryPager) writeLocked(page *DbPage) error {
 		}
 	}
 
+	return nil
+}
+
+// markPageDirty marks a page as writeable and dirty.
+func (mp *MemoryPager) markPageDirty(page *DbPage) {
 	page.MakeWriteable()
 	page.MakeDirty()
-
-	// Add page to cache's dirty list so it gets written during commit
 	mp.cache.MarkDirty(page)
+}
 
-	// Advance state
+// advanceStateAfterWrite advances the pager state after a write operation.
+func (mp *MemoryPager) advanceStateAfterWrite() {
 	if mp.state == PagerStateWriterLocked {
 		mp.state = PagerStateWriterCachemod
 	}
-
-	return nil
 }
 
 // Commit commits the current write transaction.

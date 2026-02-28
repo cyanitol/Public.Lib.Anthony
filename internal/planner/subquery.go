@@ -389,49 +389,79 @@ func (o *SubqueryOptimizer) OptimizeSubquery(info *SubqueryInfo, parentInfo *Whe
 	// 5. Materialize if beneficial
 
 	// Try flattening
-	if info.CanFlatten {
-		flattened, err := o.FlattenSubquery(info, parentInfo)
-		if err == nil {
-			return flattened, nil
-		}
+	if result, ok := o.tryFlatten(info, parentInfo); ok {
+		return result, nil
 	}
 
 	// Try decorrelation
-	if info.IsCorrelated {
-		decorrelated, err := o.DecorrelateSubquery(info)
-		if err == nil {
-			info = decorrelated
-		}
-	}
+	info = o.tryDecorrelate(info)
 
-	// Try EXISTS to semi-join
-	if info.Type == SubqueryExists {
-		optimized, err := o.ConvertExistsToSemiJoin(info, parentInfo)
-		if err == nil {
-			return optimized, nil
-		}
-	}
-
-	// Try IN to join
-	if info.Type == SubqueryIn {
-		optimized, err := o.ConvertInToJoin(info, parentInfo)
-		if err == nil {
-			return optimized, nil
-		}
+	// Try type-specific optimizations
+	if result, ok := o.tryTypeSpecificOptimization(info, parentInfo); ok {
+		return result, nil
 	}
 
 	// Try materialization
+	if result, ok := o.tryMaterialize(info, parentInfo); ok {
+		return result, nil
+	}
+
+	// No optimization applied, return original
+	return parentInfo, nil
+}
+
+// tryFlatten attempts to flatten a subquery and returns the result if successful
+func (o *SubqueryOptimizer) tryFlatten(info *SubqueryInfo, parentInfo *WhereInfo) (*WhereInfo, bool) {
+	if info.CanFlatten {
+		flattened, err := o.FlattenSubquery(info, parentInfo)
+		if err == nil {
+			return flattened, true
+		}
+	}
+	return nil, false
+}
+
+// tryDecorrelate attempts to decorrelate a subquery and returns the updated info
+func (o *SubqueryOptimizer) tryDecorrelate(info *SubqueryInfo) *SubqueryInfo {
+	if info.IsCorrelated {
+		decorrelated, err := o.DecorrelateSubquery(info)
+		if err == nil {
+			return decorrelated
+		}
+	}
+	return info
+}
+
+// tryTypeSpecificOptimization applies type-specific optimizations (EXISTS, IN)
+func (o *SubqueryOptimizer) tryTypeSpecificOptimization(info *SubqueryInfo, parentInfo *WhereInfo) (*WhereInfo, bool) {
+	if info.Type == SubqueryExists {
+		optimized, err := o.ConvertExistsToSemiJoin(info, parentInfo)
+		if err == nil {
+			return optimized, true
+		}
+	}
+
+	if info.Type == SubqueryIn {
+		optimized, err := o.ConvertInToJoin(info, parentInfo)
+		if err == nil {
+			return optimized, true
+		}
+	}
+
+	return nil, false
+}
+
+// tryMaterialize attempts to materialize a subquery
+func (o *SubqueryOptimizer) tryMaterialize(info *SubqueryInfo, parentInfo *WhereInfo) (*WhereInfo, bool) {
 	if info.CanMaterialize {
 		_, err := o.MaterializeSubquery(info)
 		if err == nil {
 			// Update parent info to use materialized table
 			// This is a simplified return - real implementation would modify parentInfo
-			return parentInfo, nil
+			return parentInfo, true
 		}
 	}
-
-	// No optimization applied, return original
-	return parentInfo, nil
+	return nil, false
 }
 
 // SubqueryExpr represents a subquery expression in the planner.

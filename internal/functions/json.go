@@ -499,8 +499,19 @@ func getJSONType(data interface{}) string {
 // extractPath extracts a value from JSON using a JSONPath-like syntax
 // Simplified version supporting $, $.key, $[0], $.key[0], etc.
 func extractPath(data interface{}, path string) interface{} {
-	if path == "" || path == "$" {
+	normalizedPath := normalizeJSONPath(path)
+	if normalizedPath == "" {
 		return data
+	}
+
+	parts := parsePath(normalizedPath)
+	return traversePath(data, parts)
+}
+
+// normalizeJSONPath removes the leading $ from a JSON path
+func normalizeJSONPath(path string) string {
+	if path == "" || path == "$" {
+		return ""
 	}
 
 	// Remove leading $ if present
@@ -508,12 +519,11 @@ func extractPath(data interface{}, path string) interface{} {
 		path = path[1:]
 	}
 
-	// If path is empty after removing $, return root
-	if path == "" {
-		return data
-	}
+	return path
+}
 
-	parts := parsePath(path)
+// traversePath traverses a JSON structure following the given path parts
+func traversePath(data interface{}, parts []pathPart) interface{} {
 	current := data
 
 	for _, part := range parts {
@@ -522,30 +532,42 @@ func extractPath(data interface{}, path string) interface{} {
 		}
 
 		if part.isIndex {
-			// Array index access
-			arr, ok := current.([]interface{})
-			if !ok {
-				return nil
-			}
-			if part.index < 0 || part.index >= len(arr) {
-				return nil
-			}
-			current = arr[part.index]
+			current = extractArrayElement(current, part.index)
 		} else {
-			// Object key access
-			obj, ok := current.(map[string]interface{})
-			if !ok {
-				return nil
-			}
-			val, exists := obj[part.key]
-			if !exists {
-				return nil
-			}
-			current = val
+			current = extractObjectKey(current, part.key)
+		}
+
+		if current == nil {
+			return nil
 		}
 	}
 
 	return current
+}
+
+// extractArrayElement extracts an element from a JSON array
+func extractArrayElement(data interface{}, index int) interface{} {
+	arr, ok := data.([]interface{})
+	if !ok {
+		return nil
+	}
+	if index < 0 || index >= len(arr) {
+		return nil
+	}
+	return arr[index]
+}
+
+// extractObjectKey extracts a value from a JSON object by key
+func extractObjectKey(data interface{}, key string) interface{} {
+	obj, ok := data.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	val, exists := obj[key]
+	if !exists {
+		return nil
+	}
+	return val
 }
 
 // setPath sets a value in JSON at the given path
@@ -700,42 +722,70 @@ func parsePath(path string) []pathPart {
 
 	for i := 0; i < len(path); i++ {
 		ch := path[i]
-
-		switch ch {
-		case '.':
-			if inBracket {
-				current.WriteByte(ch)
-			} else {
-				if current.Len() > 0 {
-					parts = append(parts, pathPart{key: current.String(), isIndex: false})
-					current.Reset()
-				}
-			}
-		case '[':
-			if current.Len() > 0 {
-				parts = append(parts, pathPart{key: current.String(), isIndex: false})
-				current.Reset()
-			}
-			inBracket = true
-		case ']':
-			if inBracket {
-				idx, err := strconv.Atoi(current.String())
-				if err == nil {
-					parts = append(parts, pathPart{index: idx, isIndex: true})
-				}
-				current.Reset()
-				inBracket = false
-			}
-		default:
-			current.WriteByte(ch)
-		}
+		inBracket = handlePathCharacter(ch, &current, &parts, inBracket)
 	}
 
-	if current.Len() > 0 {
-		parts = append(parts, pathPart{key: current.String(), isIndex: false})
-	}
+	// Add any remaining content as a key part
+	addRemainingKeyPart(&current, &parts)
 
 	return parts
+}
+
+// handlePathCharacter processes a single character in the path parsing
+func handlePathCharacter(ch byte, current *strings.Builder, parts *[]pathPart, inBracket bool) bool {
+	switch ch {
+	case '.':
+		return handleDotCharacter(current, parts, inBracket)
+	case '[':
+		return handleOpenBracket(current, parts)
+	case ']':
+		return handleCloseBracket(current, parts, inBracket)
+	default:
+		current.WriteByte(ch)
+		return inBracket
+	}
+}
+
+// handleDotCharacter handles the '.' character in path parsing
+func handleDotCharacter(current *strings.Builder, parts *[]pathPart, inBracket bool) bool {
+	if inBracket {
+		current.WriteByte('.')
+	} else {
+		addRemainingKeyPart(current, parts)
+	}
+	return inBracket
+}
+
+// handleOpenBracket handles the '[' character in path parsing
+func handleOpenBracket(current *strings.Builder, parts *[]pathPart) bool {
+	addRemainingKeyPart(current, parts)
+	return true // entering bracket context
+}
+
+// handleCloseBracket handles the ']' character in path parsing
+func handleCloseBracket(current *strings.Builder, parts *[]pathPart, inBracket bool) bool {
+	if inBracket {
+		addIndexPart(current, parts)
+		return false // exiting bracket context
+	}
+	return inBracket
+}
+
+// addRemainingKeyPart adds any remaining content as a key part
+func addRemainingKeyPart(current *strings.Builder, parts *[]pathPart) {
+	if current.Len() > 0 {
+		*parts = append(*parts, pathPart{key: current.String(), isIndex: false})
+		current.Reset()
+	}
+}
+
+// addIndexPart adds an index part from the current content
+func addIndexPart(current *strings.Builder, parts *[]pathPart) {
+	idx, err := strconv.Atoi(current.String())
+	if err == nil {
+		*parts = append(*parts, pathPart{index: idx, isIndex: true})
+	}
+	current.Reset()
 }
 
 // applyJSONPatch applies RFC 7396 JSON Merge Patch

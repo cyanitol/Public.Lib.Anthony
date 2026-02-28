@@ -86,60 +86,43 @@ func (w *WAL) checkpointPassive() (int, int, error) {
 
 	initialFrameCount := int(w.frameCount)
 	if initialFrameCount == 0 {
-		// Nothing to checkpoint
 		return 0, 0, nil
 	}
 
+	// Open database file and checkpoint frames
+	framesCheckpointed, err := w.checkpointFramesPassive(initialFrameCount)
+	if err != nil {
+		return 0, initialFrameCount, err
+	}
+
+	framesRemaining := initialFrameCount - framesCheckpointed
+	return framesCheckpointed, framesRemaining, nil
+}
+
+// checkpointFramesPassive handles the frame checkpointing for passive mode.
+func (w *WAL) checkpointFramesPassive(initialFrameCount int) (int, error) {
 	// Open database file if not already open
-	if w.dbFile == nil {
-		var err error
-		w.dbFile, err = os.OpenFile(w.dbFilename, os.O_RDWR, 0600)
-		if err != nil {
-			return 0, initialFrameCount, fmt.Errorf("failed to open database file: %w", err)
-		}
+	if err := w.ensureDBFileOpen(); err != nil {
+		return 0, fmt.Errorf("failed to open database file: %w", err)
 	}
 
 	// Build map of page number to latest frame index
-	// This ensures we only write the latest version of each page
-	pageFrames := make(map[uint32]uint32)
-	for i := uint32(0); i < w.frameCount; i++ {
-		frame, err := w.readFrameAtIndex(i)
-		if err != nil {
-			return 0, initialFrameCount, err
-		}
-		// Later frames override earlier ones
-		pageFrames[frame.PageNumber] = i
+	pageFrames, err := w.buildPageFrameMap()
+	if err != nil {
+		return 0, err
 	}
 
-	// Write each page to the database
-	// In passive mode, we write all pages (simplified - real implementation
-	// would check for active readers and skip pages being read)
-	for pgno, frameIdx := range pageFrames {
-		frame, err := w.readFrameAtIndex(frameIdx)
-		if err != nil {
-			return 0, initialFrameCount, fmt.Errorf("failed to read frame %d: %w", frameIdx, err)
-		}
-
-		// Calculate offset in database file (pages are 1-indexed)
-		offset := int64(pgno-1) * int64(w.pageSize)
-
-		// Write page to database
-		if _, err := w.dbFile.WriteAt(frame.Data, offset); err != nil {
-			return 0, initialFrameCount, fmt.Errorf("failed to write page %d to database: %w", pgno, err)
-		}
+	// Write frames to database
+	if err := w.writeFramesToDB(pageFrames); err != nil {
+		return 0, err
 	}
 
 	// Sync database file
 	if err := w.dbFile.Sync(); err != nil {
-		return 0, initialFrameCount, fmt.Errorf("failed to sync database: %w", err)
+		return 0, fmt.Errorf("failed to sync database: %w", err)
 	}
 
-	// In passive mode, we don't reset the WAL
-	// We just return the number of frames checkpointed
-	framesCheckpointed := len(pageFrames)
-	framesRemaining := initialFrameCount - framesCheckpointed
-
-	return framesCheckpointed, framesRemaining, nil
+	return len(pageFrames), nil
 }
 
 // checkpointFull performs a full checkpoint.
@@ -154,7 +137,6 @@ func (w *WAL) checkpointFull() (int, int, error) {
 
 	initialFrameCount := int(w.frameCount)
 	if initialFrameCount == 0 {
-		// Nothing to checkpoint
 		return 0, 0, nil
 	}
 
@@ -164,53 +146,40 @@ func (w *WAL) checkpointFull() (int, int, error) {
 	// 3. Checkpoint all frames
 	// For this simplified version, we just checkpoint everything
 
+	// Open database file and checkpoint frames
+	framesCheckpointed, err := w.checkpointFramesFull(initialFrameCount)
+	if err != nil {
+		return 0, initialFrameCount, err
+	}
+
+	framesRemaining := initialFrameCount - framesCheckpointed
+	return framesCheckpointed, framesRemaining, nil
+}
+
+// checkpointFramesFull handles the frame checkpointing for full mode.
+func (w *WAL) checkpointFramesFull(initialFrameCount int) (int, error) {
 	// Open database file if not already open
-	if w.dbFile == nil {
-		var err error
-		w.dbFile, err = os.OpenFile(w.dbFilename, os.O_RDWR, 0600)
-		if err != nil {
-			return 0, initialFrameCount, fmt.Errorf("failed to open database file: %w", err)
-		}
+	if err := w.ensureDBFileOpen(); err != nil {
+		return 0, fmt.Errorf("failed to open database file: %w", err)
 	}
 
 	// Build map of page number to latest frame index
-	pageFrames := make(map[uint32]uint32)
-	for i := uint32(0); i < w.frameCount; i++ {
-		frame, err := w.readFrameAtIndex(i)
-		if err != nil {
-			return 0, initialFrameCount, err
-		}
-		// Later frames override earlier ones
-		pageFrames[frame.PageNumber] = i
+	pageFrames, err := w.buildPageFrameMap()
+	if err != nil {
+		return 0, err
 	}
 
-	// Write each page to the database
-	for pgno, frameIdx := range pageFrames {
-		frame, err := w.readFrameAtIndex(frameIdx)
-		if err != nil {
-			return 0, initialFrameCount, fmt.Errorf("failed to read frame %d: %w", frameIdx, err)
-		}
-
-		// Calculate offset in database file (pages are 1-indexed)
-		offset := int64(pgno-1) * int64(w.pageSize)
-
-		// Write page to database
-		if _, err := w.dbFile.WriteAt(frame.Data, offset); err != nil {
-			return 0, initialFrameCount, fmt.Errorf("failed to write page %d to database: %w", pgno, err)
-		}
+	// Write frames to database
+	if err := w.writeFramesToDB(pageFrames); err != nil {
+		return 0, err
 	}
 
 	// Sync database file
 	if err := w.dbFile.Sync(); err != nil {
-		return 0, initialFrameCount, fmt.Errorf("failed to sync database: %w", err)
+		return 0, fmt.Errorf("failed to sync database: %w", err)
 	}
 
-	// In full mode, we don't reset the WAL either
-	// The difference from passive is that we ensure all frames are written
-	framesCheckpointed := len(pageFrames)
-	framesRemaining := initialFrameCount - framesCheckpointed
-
-	return framesCheckpointed, framesRemaining, nil
+	return len(pageFrames), nil
 }
 
 // checkpointRestart performs a restart checkpoint.

@@ -221,43 +221,61 @@ func (fl *FreeList) flushPending() error {
 			continue
 		}
 
-		// Read current trunk page
-		trunkPage, err := fl.pager.getLocked(fl.firstTrunk)
-		if err != nil {
+		// Process current trunk page
+		if err := fl.processTrunkPage(maxLeaves); err != nil {
 			return err
-		}
-
-		leafCount := int(binary.BigEndian.Uint32(trunkPage.Data[4:8]))
-
-		if leafCount < maxLeaves {
-			// Add pending pages to this trunk
-			if err := fl.pager.writeLocked(trunkPage); err != nil {
-				fl.pager.Put(trunkPage)
-				return err
-			}
-
-			// Add as many pending pages as will fit
-			for leafCount < maxLeaves && len(fl.pendingFree) > 0 {
-				pgno := fl.pendingFree[len(fl.pendingFree)-1]
-				fl.pendingFree = fl.pendingFree[:len(fl.pendingFree)-1]
-
-				offset := FreeListTrunkHeaderSize + leafCount*4
-				binary.BigEndian.PutUint32(trunkPage.Data[offset:offset+4], uint32(pgno))
-				leafCount++
-				fl.totalFree++
-			}
-
-			binary.BigEndian.PutUint32(trunkPage.Data[4:8], uint32(leafCount))
-			fl.pager.Put(trunkPage)
-		} else {
-			// Trunk is full - create a new trunk page
-			fl.pager.Put(trunkPage)
-			if err := fl.createNewTrunk(); err != nil {
-				return err
-			}
 		}
 	}
 
+	return nil
+}
+
+// processTrunkPage processes the current trunk page, adding pending pages if there's space.
+func (fl *FreeList) processTrunkPage(maxLeaves int) error {
+	// Read current trunk page
+	trunkPage, err := fl.pager.getLocked(fl.firstTrunk)
+	if err != nil {
+		return err
+	}
+
+	leafCount := int(binary.BigEndian.Uint32(trunkPage.Data[4:8]))
+
+	if leafCount < maxLeaves {
+		// Add pending pages to this trunk
+		if err := fl.addPendingToTrunk(trunkPage, leafCount, maxLeaves); err != nil {
+			fl.pager.Put(trunkPage)
+			return err
+		}
+		fl.pager.Put(trunkPage)
+	} else {
+		// Trunk is full - create a new trunk page
+		fl.pager.Put(trunkPage)
+		if err := fl.createNewTrunk(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// addPendingToTrunk adds pending pages to the given trunk page.
+func (fl *FreeList) addPendingToTrunk(trunkPage *DbPage, leafCount, maxLeaves int) error {
+	if err := fl.pager.writeLocked(trunkPage); err != nil {
+		return err
+	}
+
+	// Add as many pending pages as will fit
+	for leafCount < maxLeaves && len(fl.pendingFree) > 0 {
+		pgno := fl.pendingFree[len(fl.pendingFree)-1]
+		fl.pendingFree = fl.pendingFree[:len(fl.pendingFree)-1]
+
+		offset := FreeListTrunkHeaderSize + leafCount*4
+		binary.BigEndian.PutUint32(trunkPage.Data[offset:offset+4], uint32(pgno))
+		leafCount++
+		fl.totalFree++
+	}
+
+	binary.BigEndian.PutUint32(trunkPage.Data[4:8], uint32(leafCount))
 	return nil
 }
 

@@ -347,39 +347,19 @@ func (w *WAL) Checkpoint() error {
 	}
 
 	// Open database file if not already open
-	if w.dbFile == nil {
-		var err error
-		w.dbFile, err = os.OpenFile(w.dbFilename, os.O_RDWR, 0600)
-		if err != nil {
-			return fmt.Errorf("failed to open database file: %w", err)
-		}
+	if err := w.ensureDBFileOpen(); err != nil {
+		return fmt.Errorf("failed to open database file: %w", err)
 	}
 
 	// Build map of page number to latest frame index
-	pageFrames := make(map[uint32]uint32)
-	for i := uint32(0); i < w.frameCount; i++ {
-		frame, err := w.readFrameAtIndex(i)
-		if err != nil {
-			return err
-		}
-		// Later frames override earlier ones
-		pageFrames[frame.PageNumber] = i
+	pageFrames, err := w.buildPageFrameMap()
+	if err != nil {
+		return err
 	}
 
-	// Write each page to the database
-	for pgno, frameIdx := range pageFrames {
-		frame, err := w.readFrameAtIndex(frameIdx)
-		if err != nil {
-			return fmt.Errorf("failed to read frame %d: %w", frameIdx, err)
-		}
-
-		// Calculate offset in database file (pages are 1-indexed)
-		offset := int64(pgno-1) * int64(w.pageSize)
-
-		// Write page to database
-		if _, err := w.dbFile.WriteAt(frame.Data, offset); err != nil {
-			return fmt.Errorf("failed to write page %d to database: %w", pgno, err)
-		}
+	// Write each page to the database and sync
+	if err := w.writeFramesToDB(pageFrames); err != nil {
+		return err
 	}
 
 	// Sync database file
@@ -388,26 +368,7 @@ func (w *WAL) Checkpoint() error {
 	}
 
 	// Truncate and reset WAL
-	if err := w.file.Truncate(0); err != nil {
-		return fmt.Errorf("failed to truncate WAL: %w", err)
-	}
-
-	// Seek to beginning and write fresh header
-	if _, err := w.file.Seek(0, 0); err != nil {
-		return fmt.Errorf("failed to seek WAL: %w", err)
-	}
-
-	// Generate new salt and increment checkpoint sequence
-	w.salt1 = generateSalt()
-	w.salt2 = generateSalt()
-	w.frameCount = 0
-	w.checkpointSeq++
-
-	if err := w.writeHeader(); err != nil {
-		return fmt.Errorf("failed to write new WAL header: %w", err)
-	}
-
-	return nil
+	return w.restartWAL()
 }
 
 // Sync syncs the WAL file to disk.

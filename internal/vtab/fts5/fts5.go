@@ -133,19 +133,7 @@ func (t *FTS5Table) Update(argc int, argv []interface{}) (int64, error) {
 
 	// DELETE: argc=1, argv[0]=rowid
 	if argc == 1 {
-		rowid, ok := argv[0].(int64)
-		if !ok {
-			return 0, fmt.Errorf("invalid rowid for DELETE")
-		}
-
-		docID := DocumentID(rowid)
-		err := t.index.RemoveDocument(docID)
-		if err != nil {
-			return 0, err
-		}
-
-		delete(t.rows, docID)
-		return rowid, nil
+		return t.handleDelete(argv)
 	}
 
 	// INSERT: argc>1, argv[0]=NULL or 0, argv[1]=new rowid or NULL
@@ -154,48 +142,110 @@ func (t *FTS5Table) Update(argc int, argv []interface{}) (int64, error) {
 		return 0, fmt.Errorf("invalid number of arguments for UPDATE/INSERT")
 	}
 
+	return t.handleInsertOrUpdate(argc, argv)
+}
+
+// handleDelete handles DELETE operations.
+func (t *FTS5Table) handleDelete(argv []interface{}) (int64, error) {
+	rowid, ok := argv[0].(int64)
+	if !ok {
+		return 0, fmt.Errorf("invalid rowid for DELETE")
+	}
+
+	docID := DocumentID(rowid)
+	if err := t.index.RemoveDocument(docID); err != nil {
+		return 0, err
+	}
+
+	delete(t.rows, docID)
+	return rowid, nil
+}
+
+// handleInsertOrUpdate handles INSERT and UPDATE operations.
+func (t *FTS5Table) handleInsertOrUpdate(argc int, argv []interface{}) (int64, error) {
 	oldRowID := argv[0]
 	newRowID := argv[1]
 
-	// Check if this is an UPDATE (old rowid is not null/0)
-	isUpdate := false
-	var oldDocID DocumentID
-	if oldRowID != nil {
-		if rid, ok := oldRowID.(int64); ok && rid != 0 {
-			isUpdate = true
-			oldDocID = DocumentID(rid)
-		}
-	}
+	// Check if this is an UPDATE and remove old document if needed
+	oldDocID, isUpdate := t.checkAndRemoveOldDocument(oldRowID)
 
 	// Determine the new document ID
-	var docID DocumentID
+	docID, err := t.determineDocumentID(newRowID)
+	if err != nil {
+		return 0, err
+	}
+
+	// Remove old document if this is an update
+	if isUpdate {
+		t.removeDocument(oldDocID)
+	}
+
+	// Extract and index column values
+	columnValues, columnTexts, err := t.extractColumnValues(argc, argv)
+	if err != nil {
+		return 0, err
+	}
+
+	// Add to index
+	if err := t.index.AddDocument(docID, columnTexts, t.tokenizer); err != nil {
+		return 0, err
+	}
+
+	// Store row data
+	t.rows[docID] = columnValues
+
+	return int64(docID), nil
+}
+
+// checkAndRemoveOldDocument checks if this is an update operation.
+func (t *FTS5Table) checkAndRemoveOldDocument(oldRowID interface{}) (DocumentID, bool) {
+	if oldRowID == nil {
+		return 0, false
+	}
+
+	rid, ok := oldRowID.(int64)
+	if !ok || rid == 0 {
+		return 0, false
+	}
+
+	return DocumentID(rid), true
+}
+
+// determineDocumentID determines the document ID for the new/updated document.
+func (t *FTS5Table) determineDocumentID(newRowID interface{}) (DocumentID, error) {
 	if newRowID == nil || newRowID == int64(0) {
 		// Auto-generate rowid
-		docID = t.nextRowID
+		docID := t.nextRowID
 		t.nextRowID++
-	} else {
-		rid, ok := newRowID.(int64)
-		if !ok {
-			return 0, fmt.Errorf("invalid rowid type")
-		}
-		docID = DocumentID(rid)
-
-		// Update nextRowID if needed
-		if docID >= t.nextRowID {
-			t.nextRowID = docID + 1
-		}
+		return docID, nil
 	}
 
-	// If this is an update, remove the old document
-	if isUpdate {
-		t.index.RemoveDocument(oldDocID)
-		delete(t.rows, oldDocID)
+	rid, ok := newRowID.(int64)
+	if !ok {
+		return 0, fmt.Errorf("invalid rowid type")
 	}
 
-	// Extract column values (skip rowid columns: argv[0], argv[1])
+	docID := DocumentID(rid)
+
+	// Update nextRowID if needed
+	if docID >= t.nextRowID {
+		t.nextRowID = docID + 1
+	}
+
+	return docID, nil
+}
+
+// removeDocument removes a document from the index and storage.
+func (t *FTS5Table) removeDocument(docID DocumentID) {
+	t.index.RemoveDocument(docID)
+	delete(t.rows, docID)
+}
+
+// extractColumnValues extracts column values from argv and prepares them for indexing.
+func (t *FTS5Table) extractColumnValues(argc int, argv []interface{}) ([]interface{}, map[int]string, error) {
 	columnCount := len(t.columns)
 	if argc-2 < columnCount {
-		return 0, fmt.Errorf("not enough values for columns")
+		return nil, nil, fmt.Errorf("not enough values for columns")
 	}
 
 	columnValues := make([]interface{}, columnCount)
@@ -207,25 +257,19 @@ func (t *FTS5Table) Update(argc int, argv []interface{}) (int64, error) {
 
 		// Convert to string for indexing
 		if value != nil {
-			if str, ok := value.(string); ok {
-				columnTexts[i] = str
-			} else {
-				// Convert other types to string
-				columnTexts[i] = fmt.Sprintf("%v", value)
-			}
+			columnTexts[i] = t.convertToString(value)
 		}
 	}
 
-	// Add to index
-	err := t.index.AddDocument(docID, columnTexts, t.tokenizer)
-	if err != nil {
-		return 0, err
+	return columnValues, columnTexts, nil
+}
+
+// convertToString converts a value to string for indexing.
+func (t *FTS5Table) convertToString(value interface{}) string {
+	if str, ok := value.(string); ok {
+		return str
 	}
-
-	// Store row data
-	t.rows[docID] = columnValues
-
-	return int64(docID), nil
+	return fmt.Sprintf("%v", value)
 }
 
 // Destroy is called when the table is dropped.

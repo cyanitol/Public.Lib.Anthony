@@ -44,44 +44,67 @@ func (t *SimpleTokenizer) Tokenize(text string) []Token {
 	tokenStart := 0
 
 	for offset, r := range text {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			// Part of a token
-			if currentToken.Len() == 0 {
-				tokenStart = offset
-			}
-			currentToken.WriteRune(unicode.ToLower(r))
+		if t.isTokenChar(r) {
+			tokenStart = t.handleTokenChar(r, &currentToken, tokenStart, offset)
 		} else {
-			// End of token
-			if currentToken.Len() > 0 {
-				tokenText := currentToken.String()
-				if len(tokenText) >= t.MinTokenLength && len(tokenText) <= t.MaxTokenLength {
-					tokens = append(tokens, Token{
-						Text:     tokenText,
-						Position: position,
-						Offset:   tokenStart,
-						Length:   len(tokenText),
-					})
-					position++
-				}
-				currentToken.Reset()
-			}
+			position = t.handleNonTokenChar(&tokens, &currentToken, position, tokenStart)
 		}
 	}
 
 	// Handle last token
-	if currentToken.Len() > 0 {
-		tokenText := currentToken.String()
-		if len(tokenText) >= t.MinTokenLength && len(tokenText) <= t.MaxTokenLength {
-			tokens = append(tokens, Token{
-				Text:     tokenText,
-				Position: position,
-				Offset:   tokenStart,
-				Length:   len(tokenText),
-			})
-		}
-	}
+	t.finalizeToken(&tokens, &currentToken, position, tokenStart)
 
 	return tokens
+}
+
+// isTokenChar returns true if the rune is part of a token.
+func (t *SimpleTokenizer) isTokenChar(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+// handleTokenChar processes a character that is part of a token.
+func (t *SimpleTokenizer) handleTokenChar(r rune, currentToken *strings.Builder, tokenStart, offset int) int {
+	if currentToken.Len() == 0 {
+		tokenStart = offset
+	}
+	currentToken.WriteRune(unicode.ToLower(r))
+	return tokenStart
+}
+
+// handleNonTokenChar processes a character that ends a token.
+func (t *SimpleTokenizer) handleNonTokenChar(tokens *[]Token, currentToken *strings.Builder, position, tokenStart int) int {
+	if currentToken.Len() > 0 {
+		position = t.addTokenIfValid(tokens, currentToken, position, tokenStart)
+		currentToken.Reset()
+	}
+	return position
+}
+
+// addTokenIfValid adds a token to the list if it meets length requirements.
+func (t *SimpleTokenizer) addTokenIfValid(tokens *[]Token, currentToken *strings.Builder, position, tokenStart int) int {
+	tokenText := currentToken.String()
+	if t.isValidTokenLength(tokenText) {
+		*tokens = append(*tokens, Token{
+			Text:     tokenText,
+			Position: position,
+			Offset:   tokenStart,
+			Length:   len(tokenText),
+		})
+		position++
+	}
+	return position
+}
+
+// isValidTokenLength checks if a token meets the length requirements.
+func (t *SimpleTokenizer) isValidTokenLength(tokenText string) bool {
+	return len(tokenText) >= t.MinTokenLength && len(tokenText) <= t.MaxTokenLength
+}
+
+// finalizeToken handles the last token in the text.
+func (t *SimpleTokenizer) finalizeToken(tokens *[]Token, currentToken *strings.Builder, position, tokenStart int) {
+	if currentToken.Len() > 0 {
+		t.addTokenIfValid(tokens, currentToken, position, tokenStart)
+	}
 }
 
 // PrefixTokenizer wraps another tokenizer and also generates prefix tokens.

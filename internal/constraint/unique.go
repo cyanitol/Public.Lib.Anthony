@@ -153,41 +153,9 @@ func (uc *UniqueConstraint) checkDuplicateViaIndex(
 	}
 
 	for {
-		// Get current row's rowid
-		currentRowid := cursor.GetKey()
-
-		// Skip the row we're updating (self-check)
-		if currentRowid == rowid {
-			if err := cursor.Next(); err != nil {
-				break
-			}
-			continue
-		}
-
-		// Get current row's data
-		currentData := cursor.GetPayload()
-		if currentData == nil {
-			// Skip rows with no data
-			if err := cursor.Next(); err != nil {
-				break
-			}
-			continue
-		}
-
-		// Parse the row data to extract column values
-		// This requires decoding the SQLite record format
-		currentValues, err := parseRecordValues(currentData, table)
-		if err != nil {
-			// Skip malformed rows
-			if err := cursor.Next(); err != nil {
-				break
-			}
-			continue
-		}
-
-		// Check if all constraint columns match
-		if uc.valuesMatch(values, currentValues) {
-			return true, currentRowid, nil
+		conflictFound, conflictRowid := uc.checkCurrentRow(cursor, table, values, rowid)
+		if conflictFound {
+			return true, conflictRowid, nil
 		}
 
 		// Move to next row
@@ -197,6 +165,48 @@ func (uc *UniqueConstraint) checkDuplicateViaIndex(
 	}
 
 	return false, 0, nil
+}
+
+// checkCurrentRow checks if the current cursor position has a conflicting value.
+// Returns (conflictFound, conflictRowid).
+func (uc *UniqueConstraint) checkCurrentRow(
+	cursor *btree.BtCursor,
+	table *schema.Table,
+	values map[string]interface{},
+	skipRowid int64,
+) (bool, int64) {
+	// Get current row's rowid
+	currentRowid := cursor.GetKey()
+
+	// Skip the row we're updating (self-check)
+	if currentRowid == skipRowid {
+		return false, 0
+	}
+
+	// Get current row's data and validate it
+	currentData := cursor.GetPayload()
+	if !uc.isValidRowData(currentData) {
+		return false, 0
+	}
+
+	// Parse and check for conflicts
+	currentValues, err := parseRecordValues(currentData, table)
+	if err != nil {
+		// Skip malformed rows
+		return false, 0
+	}
+
+	// Check if all constraint columns match
+	if uc.valuesMatch(values, currentValues) {
+		return true, currentRowid
+	}
+
+	return false, 0
+}
+
+// isValidRowData checks if row data is valid (non-nil).
+func (uc *UniqueConstraint) isValidRowData(data []byte) bool {
+	return data != nil
 }
 
 // valuesMatch checks if the constraint column values match between two rows.
@@ -224,53 +234,93 @@ func (uc *UniqueConstraint) valuesMatch(values1, values2 map[string]interface{})
 // valuesEqual compares two values for equality.
 // Handles different types according to SQLite's type affinity rules.
 func valuesEqual(v1, v2 interface{}) bool {
-	// Handle nil cases
-	if v1 == nil && v2 == nil {
+	if bothNil(v1, v2) {
 		return true
 	}
-	if v1 == nil || v2 == nil {
+	if eitherNil(v1, v2) {
 		return false
 	}
 
 	// Type conversions for comparison
 	switch a := v1.(type) {
 	case int:
-		if b, ok := v2.(int); ok {
-			return a == b
-		}
-		if b, ok := v2.(int64); ok {
-			return int64(a) == b
-		}
+		return compareInt(a, v2)
 	case int64:
-		if b, ok := v2.(int64); ok {
-			return a == b
-		}
-		if b, ok := v2.(int); ok {
-			return a == int64(b)
-		}
+		return compareInt64(a, v2)
 	case float64:
-		if b, ok := v2.(float64); ok {
-			return a == b
-		}
+		return compareFloat64(a, v2)
 	case string:
-		if b, ok := v2.(string); ok {
-			return a == b
-		}
+		return compareString(a, v2)
 	case []byte:
-		if b, ok := v2.([]byte); ok {
-			if len(a) != len(b) {
-				return false
-			}
-			for i := range a {
-				if a[i] != b[i] {
-					return false
-				}
-			}
-			return true
-		}
+		return compareBytes(a, v2)
 	}
 
 	return false
+}
+
+// bothNil returns true if both values are nil.
+func bothNil(v1, v2 interface{}) bool {
+	return v1 == nil && v2 == nil
+}
+
+// eitherNil returns true if either value is nil (but not both).
+func eitherNil(v1, v2 interface{}) bool {
+	return v1 == nil || v2 == nil
+}
+
+// compareInt compares an int value with another value that might be int or int64.
+func compareInt(a int, v2 interface{}) bool {
+	if b, ok := v2.(int); ok {
+		return a == b
+	}
+	if b, ok := v2.(int64); ok {
+		return int64(a) == b
+	}
+	return false
+}
+
+// compareInt64 compares an int64 value with another value that might be int64 or int.
+func compareInt64(a int64, v2 interface{}) bool {
+	if b, ok := v2.(int64); ok {
+		return a == b
+	}
+	if b, ok := v2.(int); ok {
+		return a == int64(b)
+	}
+	return false
+}
+
+// compareFloat64 compares two float64 values.
+func compareFloat64(a float64, v2 interface{}) bool {
+	if b, ok := v2.(float64); ok {
+		return a == b
+	}
+	return false
+}
+
+// compareString compares two string values.
+func compareString(a string, v2 interface{}) bool {
+	if b, ok := v2.(string); ok {
+		return a == b
+	}
+	return false
+}
+
+// compareBytes compares two byte slices for equality.
+func compareBytes(a []byte, v2 interface{}) bool {
+	b, ok := v2.([]byte)
+	if !ok {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // parseRecordValues parses a SQLite record and extracts column values.

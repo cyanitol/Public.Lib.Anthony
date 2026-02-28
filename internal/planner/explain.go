@@ -328,36 +328,48 @@ func formatTableScan(tableName string, where parser.Expression, isWrite bool) st
 	}
 
 	// Check for index usage (simplified - real implementation would analyze WHERE clause)
-	hasWhere := where != nil
-
-	if hasWhere {
-		// Try to determine if an index could be used
-		indexable := false
-		var colName string
-
-		if binExpr, ok := where.(*parser.BinaryExpr); ok {
-			if ident, ok := binExpr.Left.(*parser.IdentExpr); ok {
-				colName = ident.Name
-				// Simple heuristic: = and < > operators are indexable
-				if binExpr.Op == parser.OpEq || binExpr.Op == parser.OpLt ||
-					binExpr.Op == parser.OpGt || binExpr.Op == parser.OpLe ||
-					binExpr.Op == parser.OpGe {
-					indexable = true
-				}
-			}
-		}
-
-		if indexable && colName != "" {
-			// Assume we might use an index on this column
-			return fmt.Sprintf("SEARCH %s USING INDEX (POSSIBLE %s)", tableName, colName)
-		}
-
-		// Full scan with WHERE clause
+	if where == nil {
 		return fmt.Sprintf("SCAN %s", tableName)
 	}
 
-	// Full table scan
+	return formatTableScanWithWhere(tableName, where)
+}
+
+// formatTableScanWithWhere formats a table scan description when WHERE clause exists
+func formatTableScanWithWhere(tableName string, where parser.Expression) string {
+	indexable, colName := analyzeIndexability(where)
+
+	if indexable && colName != "" {
+		// Assume we might use an index on this column
+		return fmt.Sprintf("SEARCH %s USING INDEX (POSSIBLE %s)", tableName, colName)
+	}
+
+	// Full scan with WHERE clause
 	return fmt.Sprintf("SCAN %s", tableName)
+}
+
+// analyzeIndexability determines if a WHERE expression is indexable
+func analyzeIndexability(where parser.Expression) (bool, string) {
+	binExpr, ok := where.(*parser.BinaryExpr)
+	if !ok {
+		return false, ""
+	}
+
+	ident, ok := binExpr.Left.(*parser.IdentExpr)
+	if !ok {
+		return false, ""
+	}
+
+	// Simple heuristic: = and < > operators are indexable
+	indexable := isIndexableOperator(binExpr.Op)
+	return indexable, ident.Name
+}
+
+// isIndexableOperator checks if an operator can use an index
+func isIndexableOperator(op parser.BinaryOp) bool {
+	return op == parser.OpEq || op == parser.OpLt ||
+		op == parser.OpGt || op == parser.OpLe ||
+		op == parser.OpGe
 }
 
 // mergeSubplan merges a subplan tree into the parent plan.

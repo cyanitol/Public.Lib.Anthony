@@ -265,52 +265,72 @@ func (idx *InvertedIndex) PhraseMatch(terms []string, docID DocumentID) bool {
 		return false
 	}
 
-	// Get posting lists for all terms
-	postingLists := make([][]PostingList, len(terms))
-	for i, term := range terms {
-		postingLists[i] = idx.index[term]
-	}
-
-	// Find the posting for this document in each term's list
-	termPositions := make([][]int, len(terms))
-	for i, postings := range postingLists {
-		found := false
-		for _, posting := range postings {
-			if posting.DocID == docID {
-				termPositions[i] = posting.Positions
-				found = true
-				break
-			}
-		}
-		if !found {
-			// Document doesn't contain one of the terms
-			return false
-		}
+	// Get term positions for this document
+	termPositions, ok := idx.getTermPositionsForDocument(terms, docID)
+	if !ok {
+		return false
 	}
 
 	// Check if terms appear consecutively
+	return idx.hasConsecutiveTerms(termPositions)
+}
+
+// getTermPositionsForDocument retrieves the positions of all terms in a document.
+// Returns false if any term is not found in the document.
+func (idx *InvertedIndex) getTermPositionsForDocument(terms []string, docID DocumentID) ([][]int, bool) {
+	termPositions := make([][]int, len(terms))
+
+	for i, term := range terms {
+		postings := idx.index[term]
+		positions, found := idx.findPositionsInPostings(postings, docID)
+		if !found {
+			return nil, false
+		}
+		termPositions[i] = positions
+	}
+
+	return termPositions, true
+}
+
+// findPositionsInPostings finds the positions for a specific document in posting list.
+func (idx *InvertedIndex) findPositionsInPostings(postings []PostingList, docID DocumentID) ([]int, bool) {
+	for _, posting := range postings {
+		if posting.DocID == docID {
+			return posting.Positions, true
+		}
+	}
+	return nil, false
+}
+
+// hasConsecutiveTerms checks if terms appear consecutively in the document.
+func (idx *InvertedIndex) hasConsecutiveTerms(termPositions [][]int) bool {
 	// For each position of the first term, check if subsequent terms follow
 	for _, firstPos := range termPositions[0] {
-		match := true
-		for i := 1; i < len(terms); i++ {
-			expectedPos := firstPos + i
-			found := false
-			for _, pos := range termPositions[i] {
-				if pos == expectedPos {
-					found = true
-					break
-				}
-			}
-			if !found {
-				match = false
-				break
-			}
-		}
-		if match {
+		if idx.termsFollowFrom(firstPos, termPositions[1:]) {
 			return true
 		}
 	}
+	return false
+}
 
+// termsFollowFrom checks if remaining terms appear consecutively after a starting position.
+func (idx *InvertedIndex) termsFollowFrom(startPos int, remainingTerms [][]int) bool {
+	for i, positions := range remainingTerms {
+		expectedPos := startPos + i + 1
+		if !idx.containsPosition(positions, expectedPos) {
+			return false
+		}
+	}
+	return true
+}
+
+// containsPosition checks if a position exists in a list of positions.
+func (idx *InvertedIndex) containsPosition(positions []int, target int) bool {
+	for _, pos := range positions {
+		if pos == target {
+			return true
+		}
+	}
 	return false
 }
 

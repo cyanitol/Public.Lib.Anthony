@@ -332,7 +332,11 @@ func compareValues(left, right interface{}, op parser.BinaryOp) (bool, error) {
 		return false, nil
 	}
 
-	// Type conversion and comparison
+	return compareNonNullValues(left, right, op)
+}
+
+// compareNonNullValues compares two non-NULL values using the given operator
+func compareNonNullValues(left, right interface{}, op parser.BinaryOp) (bool, error) {
 	switch op {
 	case parser.OpEq:
 		return compareEqual(left, right), nil
@@ -341,14 +345,29 @@ func compareValues(left, right interface{}, op parser.BinaryOp) (bool, error) {
 	case parser.OpLt:
 		return compareLessThan(left, right), nil
 	case parser.OpLe:
-		return compareLessThan(left, right) || compareEqual(left, right), nil
+		return compareLessThanOrEqual(left, right), nil
 	case parser.OpGt:
-		return !compareLessThan(left, right) && !compareEqual(left, right), nil
+		return compareGreaterThan(left, right), nil
 	case parser.OpGe:
-		return !compareLessThan(left, right), nil
+		return compareGreaterThanOrEqual(left, right), nil
 	default:
 		return false, fmt.Errorf("unsupported comparison operator: %v", op)
 	}
+}
+
+// compareLessThanOrEqual checks if left <= right
+func compareLessThanOrEqual(left, right interface{}) bool {
+	return compareLessThan(left, right) || compareEqual(left, right)
+}
+
+// compareGreaterThan checks if left > right
+func compareGreaterThan(left, right interface{}) bool {
+	return !compareLessThan(left, right) && !compareEqual(left, right)
+}
+
+// compareGreaterThanOrEqual checks if left >= right
+func compareGreaterThanOrEqual(left, right interface{}) bool {
+	return !compareLessThan(left, right)
 }
 
 // compareEqual compares two values for equality

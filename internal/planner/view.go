@@ -42,46 +42,72 @@ func copySelectStmt(stmt *parser.SelectStmt) *parser.SelectStmt {
 	copy := *stmt
 
 	// Copy slices to prevent shared references
-	if len(stmt.Columns) > 0 {
-		copy.Columns = make([]parser.ResultColumn, len(stmt.Columns))
-		for i := range stmt.Columns {
-			copy.Columns[i] = stmt.Columns[i]
-		}
-	}
-
-	if len(stmt.GroupBy) > 0 {
-		copy.GroupBy = make([]parser.Expression, len(stmt.GroupBy))
-		for i := range stmt.GroupBy {
-			copy.GroupBy[i] = stmt.GroupBy[i]
-		}
-	}
-
-	if len(stmt.OrderBy) > 0 {
-		copy.OrderBy = make([]parser.OrderingTerm, len(stmt.OrderBy))
-		for i := range stmt.OrderBy {
-			copy.OrderBy[i] = stmt.OrderBy[i]
-		}
-	}
-
-	// Copy FROM clause if present
-	if stmt.From != nil {
-		fromCopy := *stmt.From
-		if len(stmt.From.Tables) > 0 {
-			fromCopy.Tables = make([]parser.TableOrSubquery, len(stmt.From.Tables))
-			for i := range stmt.From.Tables {
-				fromCopy.Tables[i] = stmt.From.Tables[i]
-			}
-		}
-		if len(stmt.From.Joins) > 0 {
-			fromCopy.Joins = make([]parser.JoinClause, len(stmt.From.Joins))
-			for i := range stmt.From.Joins {
-				fromCopy.Joins[i] = stmt.From.Joins[i]
-			}
-		}
-		copy.From = &fromCopy
-	}
+	copyResultColumns(&copy, stmt)
+	copyGroupByClause(&copy, stmt)
+	copyOrderByClause(&copy, stmt)
+	copyFromClause(&copy, stmt)
 
 	return &copy
+}
+
+// copyResultColumns copies result columns from source to destination.
+func copyResultColumns(dst, src *parser.SelectStmt) {
+	if len(src.Columns) > 0 {
+		dst.Columns = make([]parser.ResultColumn, len(src.Columns))
+		for i := range src.Columns {
+			dst.Columns[i] = src.Columns[i]
+		}
+	}
+}
+
+// copyGroupByClause copies GROUP BY expressions from source to destination.
+func copyGroupByClause(dst, src *parser.SelectStmt) {
+	if len(src.GroupBy) > 0 {
+		dst.GroupBy = make([]parser.Expression, len(src.GroupBy))
+		for i := range src.GroupBy {
+			dst.GroupBy[i] = src.GroupBy[i]
+		}
+	}
+}
+
+// copyOrderByClause copies ORDER BY terms from source to destination.
+func copyOrderByClause(dst, src *parser.SelectStmt) {
+	if len(src.OrderBy) > 0 {
+		dst.OrderBy = make([]parser.OrderingTerm, len(src.OrderBy))
+		for i := range src.OrderBy {
+			dst.OrderBy[i] = src.OrderBy[i]
+		}
+	}
+}
+
+// copyFromClause copies FROM clause including tables and joins from source to destination.
+func copyFromClause(dst, src *parser.SelectStmt) {
+	if src.From != nil {
+		fromCopy := *src.From
+		copyFromTables(&fromCopy, src.From)
+		copyFromJoins(&fromCopy, src.From)
+		dst.From = &fromCopy
+	}
+}
+
+// copyFromTables copies table references from source FROM clause to destination.
+func copyFromTables(dst, src *parser.FromClause) {
+	if len(src.Tables) > 0 {
+		dst.Tables = make([]parser.TableOrSubquery, len(src.Tables))
+		for i := range src.Tables {
+			dst.Tables[i] = src.Tables[i]
+		}
+	}
+}
+
+// copyFromJoins copies JOIN clauses from source FROM clause to destination.
+func copyFromJoins(dst, src *parser.FromClause) {
+	if len(src.Joins) > 0 {
+		dst.Joins = make([]parser.JoinClause, len(src.Joins))
+		for i := range src.Joins {
+			dst.Joins[i] = src.Joins[i]
+		}
+	}
 }
 
 // renameViewColumns applies explicit column names from a view definition
@@ -130,8 +156,17 @@ func flattenViewsInSelect(stmt *parser.SelectStmt, s *schema.Schema, depth int) 
 	result := copySelectStmt(stmt)
 
 	// Process each table in the FROM clause
-	for i := range result.From.Tables {
-		table := &result.From.Tables[i]
+	if err := processFromTablesForFlattening(result, s, depth); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// processFromTablesForFlattening processes FROM clause tables, flattening views where possible.
+func processFromTablesForFlattening(stmt *parser.SelectStmt, s *schema.Schema, depth int) error {
+	for i := range stmt.From.Tables {
+		table := &stmt.From.Tables[i]
 
 		// Skip if it's already a subquery
 		if table.Subquery != nil {
@@ -144,36 +179,51 @@ func flattenViewsInSelect(stmt *parser.SelectStmt, s *schema.Schema, depth int) 
 			continue
 		}
 
-		// Check if this view can be flattened (simple single-table view)
-		if canFlattenView(view) {
-			// Flatten the view
-			flattenedStmt, err := flattenSimpleView(result, i, view, s, depth)
-			if err != nil {
-				return nil, err
-			}
-			result = flattenedStmt
-		} else {
-			// Fall back to subquery for complex views
-			expandedSelect, err := ExpandView(view, table.Alias)
-			if err != nil {
-				return nil, fmt.Errorf("failed to expand view %s: %w", table.TableName, err)
-			}
-
-			// Recursively flatten views in the expanded select
-			expandedSelect, err = flattenViewsInSelect(expandedSelect, s, depth+1)
-			if err != nil {
-				return nil, err
-			}
-
-			table.Subquery = expandedSelect
-			if table.Alias == "" {
-				table.Alias = table.TableName
-			}
-			table.TableName = ""
+		// Process the view (flatten or expand as subquery)
+		if err := processViewInFromClause(stmt, i, view, table, s, depth); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
-	return result, nil
+// processViewInFromClause handles a view reference by either flattening or expanding as subquery.
+func processViewInFromClause(stmt *parser.SelectStmt, tableIdx int, view *schema.View, table *parser.TableOrSubquery, s *schema.Schema, depth int) error {
+	if canFlattenView(view) {
+		return flattenViewInPlace(stmt, tableIdx, view, s, depth)
+	}
+	return expandViewAsSubquery(table, view, s, depth)
+}
+
+// flattenViewInPlace flattens a simple view directly into the statement.
+func flattenViewInPlace(stmt *parser.SelectStmt, tableIdx int, view *schema.View, s *schema.Schema, depth int) error {
+	flattenedStmt, err := flattenSimpleView(stmt, tableIdx, view, s, depth)
+	if err != nil {
+		return err
+	}
+	*stmt = *flattenedStmt
+	return nil
+}
+
+// expandViewAsSubquery expands a complex view as a subquery.
+func expandViewAsSubquery(table *parser.TableOrSubquery, view *schema.View, s *schema.Schema, depth int) error {
+	expandedSelect, err := ExpandView(view, table.Alias)
+	if err != nil {
+		return fmt.Errorf("failed to expand view %s: %w", table.TableName, err)
+	}
+
+	// Recursively flatten views in the expanded select
+	expandedSelect, err = flattenViewsInSelect(expandedSelect, s, depth+1)
+	if err != nil {
+		return err
+	}
+
+	table.Subquery = expandedSelect
+	if table.Alias == "" {
+		table.Alias = table.TableName
+	}
+	table.TableName = ""
+	return nil
 }
 
 // canFlattenView checks if a view can be flattened into the outer query.
@@ -185,6 +235,13 @@ func canFlattenView(view *schema.View) bool {
 
 	sel := view.Select
 
+	return hasValidFromClauseForFlattening(sel) &&
+		hasNoComplexFeatures(sel) &&
+		hasNoExplicitColumns(view)
+}
+
+// hasValidFromClauseForFlattening checks if FROM clause allows flattening.
+func hasValidFromClauseForFlattening(sel *parser.SelectStmt) bool {
 	// Must have a FROM clause with exactly one table (no subqueries)
 	if sel.From == nil || len(sel.From.Tables) != 1 {
 		return false
@@ -200,6 +257,11 @@ func canFlattenView(view *schema.View) bool {
 		return false
 	}
 
+	return true
+}
+
+// hasNoComplexFeatures checks if the SELECT has no features that prevent flattening.
+func hasNoComplexFeatures(sel *parser.SelectStmt) bool {
 	// No GROUP BY, HAVING
 	if len(sel.GroupBy) > 0 || sel.Having != nil {
 		return false
@@ -215,13 +277,14 @@ func canFlattenView(view *schema.View) bool {
 		return false
 	}
 
+	return true
+}
+
+// hasNoExplicitColumns checks if view has no explicit column names.
+func hasNoExplicitColumns(view *schema.View) bool {
 	// Don't flatten views with explicit column names
 	// because flattening loses the column name mapping
-	if len(view.Columns) > 0 {
-		return false
-	}
-
-	return true
+	return len(view.Columns) == 0
 }
 
 // flattenSimpleView flattens a simple view into the outer query.

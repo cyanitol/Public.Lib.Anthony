@@ -347,11 +347,7 @@ func (g *CodeGenerator) generateBinary(e *parser.BinaryExpr) (int, error) {
 		return g.generateLogical(e)
 	}
 
-	leftReg, err := g.GenerateExpr(e.Left)
-	if err != nil {
-		return 0, err
-	}
-	rightReg, err := g.GenerateExpr(e.Right)
+	leftReg, rightReg, err := g.generateBinaryOperands(e)
 	if err != nil {
 		return 0, err
 	}
@@ -361,35 +357,65 @@ func (g *CodeGenerator) generateBinary(e *parser.BinaryExpr) (int, error) {
 		return handler(g, leftReg, rightReg)
 	}
 
-	// Standard operators resolved via lookup table.
-	entry, ok := binaryOpTable[e.Op]
+	return g.generateStandardBinaryOp(e.Op, leftReg, rightReg)
+}
+
+// generateBinaryOperands generates code for left and right operands
+func (g *CodeGenerator) generateBinaryOperands(e *parser.BinaryExpr) (int, int, error) {
+	leftReg, err := g.GenerateExpr(e.Left)
+	if err != nil {
+		return 0, 0, err
+	}
+	rightReg, err := g.GenerateExpr(e.Right)
+	if err != nil {
+		return 0, 0, err
+	}
+	return leftReg, rightReg, nil
+}
+
+// generateStandardBinaryOp generates code for standard binary operators from the lookup table
+func (g *CodeGenerator) generateStandardBinaryOp(op parser.BinaryOp, leftReg, rightReg int) (int, error) {
+	entry, ok := binaryOpTable[op]
 	if !ok {
-		return 0, fmt.Errorf("unsupported binary operator: %v", e.Op)
+		return 0, fmt.Errorf("unsupported binary operator: %v", op)
 	}
 
 	resultReg := g.AllocReg()
+	collation := g.getCollationForOperands(leftReg, rightReg)
 
-	// Check if left or right operand has a collation
-	collation := ""
+	g.emitBinaryOpcode(entry, op, leftReg, rightReg, resultReg, collation)
+	return resultReg, nil
+}
+
+// getCollationForOperands retrieves the collation from either operand register
+func (g *CodeGenerator) getCollationForOperands(leftReg, rightReg int) string {
 	if coll, ok := g.collations[leftReg]; ok {
-		collation = coll
-	} else if coll, ok := g.collations[rightReg]; ok {
-		collation = coll
+		return coll
 	}
+	if coll, ok := g.collations[rightReg]; ok {
+		return coll
+	}
+	return ""
+}
 
-	// If this is a comparison operator and we have a collation, pass it in P4
-	isComparison := (e.Op >= parser.OpEq && e.Op <= parser.OpGe)
+// emitBinaryOpcode emits the appropriate opcode with optional collation
+func (g *CodeGenerator) emitBinaryOpcode(entry binaryOpEntry, op parser.BinaryOp, leftReg, rightReg, resultReg int, collation string) {
+	isComparison := (op >= parser.OpEq && op <= parser.OpGe)
+
 	if isComparison && collation != "" {
-		addr := g.vdbe.AddOp(entry.op, leftReg, rightReg, resultReg)
-		g.vdbe.Program[addr].P4.Z = collation
-		g.vdbe.Program[addr].P4Type = vdbe.P4Static
-		g.vdbe.SetComment(addr, fmt.Sprintf("%s (COLLATE %s)", entry.comment, collation))
+		g.emitCollatedComparison(entry, leftReg, rightReg, resultReg, collation)
 	} else {
 		g.vdbe.AddOp(entry.op, leftReg, rightReg, resultReg)
 		g.vdbe.SetComment(g.vdbe.NumOps()-1, entry.comment)
 	}
+}
 
-	return resultReg, nil
+// emitCollatedComparison emits a comparison operator with collation
+func (g *CodeGenerator) emitCollatedComparison(entry binaryOpEntry, leftReg, rightReg, resultReg int, collation string) {
+	addr := g.vdbe.AddOp(entry.op, leftReg, rightReg, resultReg)
+	g.vdbe.Program[addr].P4.Z = collation
+	g.vdbe.Program[addr].P4Type = vdbe.P4Static
+	g.vdbe.SetComment(addr, fmt.Sprintf("%s (COLLATE %s)", entry.comment, collation))
 }
 
 // generateLogical generates code for AND/OR with short-circuit evaluation.

@@ -202,29 +202,45 @@ type HighlightMatch struct {
 // GenerateSnippet creates a snippet of text around matched terms.
 // maxLength specifies the maximum length of the snippet in characters.
 func GenerateSnippet(text string, matchPositions []int, maxLength int) string {
-	if len(text) == 0 || maxLength <= 0 {
+	if !isValidSnippetInput(text, maxLength) {
 		return ""
 	}
 
-	// If text is shorter than max length, return it all
 	if len(text) <= maxLength {
 		return text
 	}
 
-	// If no matches, return first maxLength characters
 	if len(matchPositions) == 0 {
-		if len(text) > maxLength {
-			return text[:maxLength] + "..."
-		}
-		return text
+		return truncateText(text, maxLength)
 	}
 
-	// Find the best window around matches
-	// For simplicity, center around the first match
-	firstMatch := matchPositions[0]
+	return extractSnippetAroundMatch(text, matchPositions[0], maxLength)
+}
 
+// isValidSnippetInput checks if the input for snippet generation is valid.
+func isValidSnippetInput(text string, maxLength int) bool {
+	return len(text) > 0 && maxLength > 0
+}
+
+// truncateText returns the first maxLength characters with ellipsis if needed.
+func truncateText(text string, maxLength int) string {
+	if len(text) > maxLength {
+		return text[:maxLength] + "..."
+	}
+	return text
+}
+
+// extractSnippetAroundMatch creates a snippet centered around a match position.
+func extractSnippetAroundMatch(text string, matchPos, maxLength int) string {
+	start, end := calculateSnippetBounds(text, matchPos, maxLength)
+	snippet := text[start:end]
+	return addEllipsis(snippet, start, end, len(text))
+}
+
+// calculateSnippetBounds calculates the start and end positions for a snippet.
+func calculateSnippetBounds(text string, matchPos, maxLength int) (int, int) {
 	// Try to center the window around the match
-	start := firstMatch - maxLength/2
+	start := matchPos - maxLength/2
 	if start < 0 {
 		start = 0
 	}
@@ -238,16 +254,17 @@ func GenerateSnippet(text string, matchPositions []int, maxLength int) string {
 		}
 	}
 
-	snippet := text[start:end]
+	return start, end
+}
 
-	// Add ellipsis if we're not at the beginning/end
+// addEllipsis adds ellipsis to the snippet if it's not at the text boundaries.
+func addEllipsis(snippet string, start, end, textLen int) string {
 	if start > 0 {
 		snippet = "..." + snippet
 	}
-	if end < len(text) {
+	if end < textLen {
 		snippet = snippet + "..."
 	}
-
 	return snippet
 }
 

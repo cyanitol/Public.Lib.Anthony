@@ -464,20 +464,8 @@ func ValidateFreeBlockList(bt *Btree, pageNum uint32) *IntegrityResult {
 		Errors: make([]*IntegrityError, 0),
 	}
 
-	if bt == nil {
-		result.AddError(0, "null_btree", "btree is nil")
-		return result
-	}
-
-	pageData, err := bt.GetPage(pageNum)
-	if err != nil {
-		result.AddError(pageNum, "page_not_found", fmt.Sprintf("failed to get page: %v", err))
-		return result
-	}
-
-	header, err := ParsePageHeader(pageData, pageNum)
-	if err != nil {
-		result.AddError(pageNum, "invalid_header", fmt.Sprintf("failed to parse page header: %v", err))
+	pageData, header := validateFreeBlockPrerequisites(bt, pageNum, result)
+	if pageData == nil || header == nil {
 		return result
 	}
 
@@ -487,50 +475,101 @@ func ValidateFreeBlockList(bt *Btree, pageNum uint32) *IntegrityResult {
 	}
 
 	// Traverse the free block list
+	traverseFreeBlockList(bt, pageNum, pageData, header.FirstFreeblock, result)
+
+	return result
+}
+
+// validateFreeBlockPrerequisites checks btree, page, and header validity
+// Returns nil values if validation fails
+func validateFreeBlockPrerequisites(bt *Btree, pageNum uint32, result *IntegrityResult) ([]byte, *PageHeader) {
+	if bt == nil {
+		result.AddError(0, "null_btree", "btree is nil")
+		return nil, nil
+	}
+
+	pageData, err := bt.GetPage(pageNum)
+	if err != nil {
+		result.AddError(pageNum, "page_not_found", fmt.Sprintf("failed to get page: %v", err))
+		return nil, nil
+	}
+
+	header, err := ParsePageHeader(pageData, pageNum)
+	if err != nil {
+		result.AddError(pageNum, "invalid_header", fmt.Sprintf("failed to parse page header: %v", err))
+		return nil, nil
+	}
+
+	return pageData, header
+}
+
+// traverseFreeBlockList walks through the free block chain and validates each block
+func traverseFreeBlockList(bt *Btree, pageNum uint32, pageData []byte, startOffset uint16, result *IntegrityResult) {
 	visited := make(map[uint16]bool)
-	offset := header.FirstFreeblock
+	offset := startOffset
 	maxIterations := 1000 // Prevent infinite loops
 
 	for i := 0; i < maxIterations && offset != 0; i++ {
-		// Check for cycles
-		if visited[offset] {
-			result.AddError(pageNum, "freeblock_cycle",
-				fmt.Sprintf("free block list contains cycle at offset %d", offset))
+		if shouldStopTraversal(pageNum, offset, visited, pageData, result) {
 			break
 		}
 		visited[offset] = true
 
-		// Check offset is within bounds
-		if int(offset)+4 > len(pageData) {
-			result.AddError(pageNum, "freeblock_out_of_bounds",
-				fmt.Sprintf("free block at offset %d exceeds page bounds", offset))
-			break
-		}
-
-		// Read next pointer (2 bytes) and size (2 bytes)
-		nextOffset := uint16(pageData[offset])<<8 | uint16(pageData[offset+1])
-		blockSize := uint16(pageData[offset+2])<<8 | uint16(pageData[offset+3])
-
-		// Validate block size
-		if blockSize < 4 {
-			result.AddError(pageNum, "invalid_freeblock_size",
-				fmt.Sprintf("free block at offset %d has invalid size %d (minimum 4)", offset, blockSize))
-		}
-
-		// Check block doesn't exceed page bounds
-		if int(offset)+int(blockSize) > int(bt.UsableSize) {
-			result.AddError(pageNum, "freeblock_exceeds_page",
-				fmt.Sprintf("free block at offset %d with size %d exceeds page usable size %d",
-					offset, blockSize, bt.UsableSize))
-		}
+		nextOffset, blockSize := parseFreeBlock(pageData, offset)
+		validateFreeBlock(bt, pageNum, offset, blockSize, result)
 
 		offset = nextOffset
 	}
 
+	checkMaxIterationsExceeded(pageNum, offset, visited, maxIterations, result)
+}
+
+// shouldStopTraversal checks if we should stop traversing (cycle detected or out of bounds)
+func shouldStopTraversal(pageNum uint32, offset uint16, visited map[uint16]bool, pageData []byte, result *IntegrityResult) bool {
+	// Check for cycles
+	if visited[offset] {
+		result.AddError(pageNum, "freeblock_cycle",
+			fmt.Sprintf("free block list contains cycle at offset %d", offset))
+		return true
+	}
+
+	// Check offset is within bounds
+	if int(offset)+4 > len(pageData) {
+		result.AddError(pageNum, "freeblock_out_of_bounds",
+			fmt.Sprintf("free block at offset %d exceeds page bounds", offset))
+		return true
+	}
+
+	return false
+}
+
+// parseFreeBlock reads the next pointer and size from a free block
+func parseFreeBlock(pageData []byte, offset uint16) (nextOffset uint16, blockSize uint16) {
+	nextOffset = uint16(pageData[offset])<<8 | uint16(pageData[offset+1])
+	blockSize = uint16(pageData[offset+2])<<8 | uint16(pageData[offset+3])
+	return nextOffset, blockSize
+}
+
+// validateFreeBlock validates a single free block's size and bounds
+func validateFreeBlock(bt *Btree, pageNum uint32, offset uint16, blockSize uint16, result *IntegrityResult) {
+	// Validate block size
+	if blockSize < 4 {
+		result.AddError(pageNum, "invalid_freeblock_size",
+			fmt.Sprintf("free block at offset %d has invalid size %d (minimum 4)", offset, blockSize))
+	}
+
+	// Check block doesn't exceed page bounds
+	if int(offset)+int(blockSize) > int(bt.UsableSize) {
+		result.AddError(pageNum, "freeblock_exceeds_page",
+			fmt.Sprintf("free block at offset %d with size %d exceeds page usable size %d",
+				offset, blockSize, bt.UsableSize))
+	}
+}
+
+// checkMaxIterationsExceeded checks if the free block list is too long
+func checkMaxIterationsExceeded(pageNum uint32, offset uint16, visited map[uint16]bool, maxIterations int, result *IntegrityResult) {
 	if offset != 0 && len(visited) >= maxIterations {
 		result.AddError(pageNum, "freeblock_list_too_long",
 			fmt.Sprintf("free block list exceeds maximum iterations %d", maxIterations))
 	}
-
-	return result
 }

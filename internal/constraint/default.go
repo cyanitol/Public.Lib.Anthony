@@ -100,33 +100,44 @@ func parseLiteralValue(lit *parser.LiteralExpr) interface{} {
 	switch lit.Type {
 	case parser.LiteralNull:
 		return nil
-
 	case parser.LiteralInteger:
-		if val, err := strconv.ParseInt(lit.Value, 10, 64); err == nil {
-			return val
-		}
-		return nil
-
+		return parseIntegerValue(lit.Value)
 	case parser.LiteralFloat:
-		if val, err := strconv.ParseFloat(lit.Value, 64); err == nil {
-			return val
-		}
-		return nil
-
+		return parseFloatValue(lit.Value)
 	case parser.LiteralString:
-		// Remove surrounding quotes
-		s := lit.Value
-		if len(s) >= 2 && (s[0] == '\'' || s[0] == '"') {
-			s = s[1 : len(s)-1]
-		}
-		return s
-
+		return parseStringValue(lit.Value)
 	case parser.LiteralBlob:
 		return lit.Value
-
 	default:
 		return nil
 	}
+}
+
+// parseIntegerValue parses an integer literal value.
+func parseIntegerValue(value string) interface{} {
+	val, err := strconv.ParseInt(value, 10, 64)
+	if err == nil {
+		return val
+	}
+	return nil
+}
+
+// parseFloatValue parses a float literal value.
+func parseFloatValue(value string) interface{} {
+	val, err := strconv.ParseFloat(value, 64)
+	if err == nil {
+		return val
+	}
+	return nil
+}
+
+// parseStringValue removes surrounding quotes from a string literal.
+func parseStringValue(value string) string {
+	s := value
+	if len(s) >= 2 && (s[0] == '\'' || s[0] == '"') {
+		s = s[1 : len(s)-1]
+	}
+	return s
 }
 
 // Evaluate computes the default value for the constraint.

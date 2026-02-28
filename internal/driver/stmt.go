@@ -363,36 +363,62 @@ func emitSelectColumnOp(vm *vdbe.VDBE, table *schema.Table, col parser.ResultCol
 func emitAggregateFunction(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, targetReg int, gen *expr.CodeGenerator) error {
 	funcName := fnExpr.Name
 
-	// For COUNT(*), we need to count rows in the scan loop
-	// The accumulator will be initialized before the loop and incremented in the loop
-	if funcName == "COUNT" && fnExpr.Star {
-		// COUNT(*) - the accumulator is managed by compileSelectWithAggregates
-		// For now, just mark that this register will hold the count
-		// The actual counting logic will be in the scan loop
-		return nil
+	if isCountStar(fnExpr) {
+		return handleCountStar()
 	}
 
-	// For COUNT(expr), SUM, AVG, MIN, MAX, etc.
-	// These also need accumulator handling in the scan loop
-	if funcName == "COUNT" || funcName == "SUM" || funcName == "AVG" ||
-		funcName == "MIN" || funcName == "MAX" || funcName == "TOTAL" {
-		// The accumulator will be managed by the scan loop
-		return nil
+	if isKnownAggregateFunction(funcName) {
+		return handleKnownAggregate()
 	}
 
-	// For non-aggregate functions, generate normal function call
-	if gen != nil {
-		reg, err := gen.GenerateExpr(fnExpr)
-		if err != nil {
-			return fmt.Errorf("failed to generate function: %w", err)
-		}
-		if reg != targetReg {
-			vm.AddOp(vdbe.OpCopy, reg, targetReg, 0)
-		}
-		return nil
+	return handleNonAggregateFunction(vm, fnExpr, targetReg, gen)
+}
+
+// isCountStar checks if the expression is COUNT(*).
+func isCountStar(fnExpr *parser.FunctionExpr) bool {
+	return fnExpr.Name == "COUNT" && fnExpr.Star
+}
+
+// handleCountStar handles COUNT(*) - accumulator managed by compileSelectWithAggregates.
+func handleCountStar() error {
+	// COUNT(*) - the accumulator is managed by compileSelectWithAggregates
+	// For now, just mark that this register will hold the count
+	// The actual counting logic will be in the scan loop
+	return nil
+}
+
+// isKnownAggregateFunction checks if the function is a known aggregate function.
+func isKnownAggregateFunction(funcName string) bool {
+	switch funcName {
+	case "COUNT", "SUM", "AVG", "MIN", "MAX", "TOTAL":
+		return true
+	default:
+		return false
+	}
+}
+
+// handleKnownAggregate handles known aggregate functions - accumulator managed by scan loop.
+func handleKnownAggregate() error {
+	// The accumulator will be managed by the scan loop
+	return nil
+}
+
+// handleNonAggregateFunction handles non-aggregate functions with normal code generation.
+func handleNonAggregateFunction(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, targetReg int, gen *expr.CodeGenerator) error {
+	if gen == nil {
+		return fmt.Errorf("unsupported function: %s", fnExpr.Name)
 	}
 
-	return fmt.Errorf("unsupported function: %s", funcName)
+	reg, err := gen.GenerateExpr(fnExpr)
+	if err != nil {
+		return fmt.Errorf("failed to generate function: %w", err)
+	}
+
+	if reg != targetReg {
+		vm.AddOp(vdbe.OpCopy, reg, targetReg, 0)
+	}
+
+	return nil
 }
 
 // compileSelect compiles a SELECT statement.
@@ -846,108 +872,137 @@ func (s *Stmt) addExtraOrderByColumn(orderColName string, numCols int, gen *expr
 
 // compileSelectWithOrderBy handles SELECT with ORDER BY clause using a sorter.
 func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, table *schema.Table, gen *expr.CodeGenerator, numCols int) (*vdbe.VDBE, error) {
-	// Resolve ORDER BY columns and determine sorter structure
+	// Resolve ORDER BY columns and setup sorter
 	orderInfo := s.resolveOrderByColumns(stmt, table, numCols, gen)
-
-	// Reserve registers for result columns
 	gen.SetNextReg(orderInfo.sorterCols)
+	keyInfo := s.createSorterKeyInfo(orderInfo)
 
-	// Create sorter key info
-	keyInfo := &vdbe.SorterKeyInfo{
+	// Emit table scan and sorter population
+	rewindAddr, skipAddr := s.emitOrderByScanSetup(vm, stmt, table, keyInfo, orderInfo.sorterCols, gen)
+	if err := s.emitOrderBySorterPopulation(vm, stmt, table, orderInfo, numCols, gen); err != nil {
+		return nil, err
+	}
+	s.fixOrderByScanAddresses(vm, stmt, rewindAddr, skipAddr)
+
+	// Emit sorter output loop
+	sorterSortAddr, limitInfo := s.emitOrderBySorterSort(vm, stmt, gen)
+	sorterNextAddr, haltJumpAddr, sorterLoopAddr := s.emitOrderByOutputSetup(vm)
+	offsetSkipAddr, limitJumpAddr, nextRowAddr := s.emitOrderByOutputLoop(vm, numCols, limitInfo, gen, sorterLoopAddr)
+	haltAddr := s.emitOrderByCleanup(vm)
+
+	// Fix all addresses
+	s.fixOrderByAddresses(vm, rewindAddr, sorterSortAddr, sorterNextAddr, haltJumpAddr,
+		offsetSkipAddr, limitJumpAddr, nextRowAddr, haltAddr, limitInfo, sorterLoopAddr)
+
+	return vm, nil
+}
+
+// createSorterKeyInfo creates sorter key information from ORDER BY info.
+func (s *Stmt) createSorterKeyInfo(orderInfo *orderByColumnInfo) *vdbe.SorterKeyInfo {
+	return &vdbe.SorterKeyInfo{
 		KeyCols:    orderInfo.keyCols,
 		Desc:       orderInfo.desc,
 		Collations: orderInfo.collations,
 	}
+}
 
-	// Emit scan preamble
+// emitOrderByScanSetup emits initialization, table open, and sorter open operations.
+func (s *Stmt) emitOrderByScanSetup(vm *vdbe.VDBE, stmt *parser.SelectStmt, table *schema.Table, keyInfo *vdbe.SorterKeyInfo, sorterCols int, gen *expr.CodeGenerator) (int, int) {
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
 
-	// Open sorter with the full number of columns
-	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, 0, orderInfo.sorterCols, 0)
+	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, 0, sorterCols, 0)
 	vm.Program[sorterOpenAddr].P4.P = keyInfo
 
 	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
 
-	// Handle WHERE clause if present
 	var skipAddr int
 	if stmt.Where != nil {
-		whereReg, err := gen.GenerateExpr(stmt.Where)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile WHERE clause: %w", err)
-		}
+		whereReg, _ := gen.GenerateExpr(stmt.Where)
 		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
 	}
 
-	// Read SELECT columns into registers 0..numCols-1
+	return rewindAddr, skipAddr
+}
+
+// emitOrderBySorterPopulation reads columns and populates the sorter.
+func (s *Stmt) emitOrderBySorterPopulation(vm *vdbe.VDBE, stmt *parser.SelectStmt, table *schema.Table, orderInfo *orderByColumnInfo, numCols int, gen *expr.CodeGenerator) error {
+	// Read SELECT columns
 	for i, col := range stmt.Columns {
 		if err := emitSelectColumnOp(vm, table, col, i, gen); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	// Read extra ORDER BY columns into their registers
+	// Read extra ORDER BY columns
 	for i, colName := range orderInfo.extraCols {
-		tableColIdx := table.GetColumnIndex(colName)
-		if tableColIdx >= 0 {
-			recordIdx := schemaRecordIdx(table.Columns, tableColIdx)
-			vm.AddOp(vdbe.OpColumn, 0, recordIdx, orderInfo.extraColRegs[i])
-		} else {
-			vm.AddOp(vdbe.OpNull, 0, orderInfo.extraColRegs[i], 0)
-		}
+		s.emitExtraOrderByColumn(vm, table, colName, orderInfo.extraColRegs[i])
 	}
 
-	// Insert row into sorter - copy extra columns to contiguous registers
+	// Copy extra columns to contiguous registers and insert
 	for i := range orderInfo.extraCols {
 		vm.AddOp(vdbe.OpCopy, orderInfo.extraColRegs[i], numCols+i, 0)
 	}
 	vm.AddOp(vdbe.OpSorterInsert, 0, 0, orderInfo.sorterCols)
 
-	// Fix up WHERE skip address to point to Next
+	return nil
+}
+
+// emitExtraOrderByColumn emits code to read an extra ORDER BY column.
+func (s *Stmt) emitExtraOrderByColumn(vm *vdbe.VDBE, table *schema.Table, colName string, targetReg int) {
+	tableColIdx := table.GetColumnIndex(colName)
+	if tableColIdx >= 0 {
+		recordIdx := schemaRecordIdx(table.Columns, tableColIdx)
+		vm.AddOp(vdbe.OpColumn, 0, recordIdx, targetReg)
+	} else {
+		vm.AddOp(vdbe.OpNull, 0, targetReg, 0)
+	}
+}
+
+// fixOrderByScanAddresses fixes addresses for the table scan loop.
+func (s *Stmt) fixOrderByScanAddresses(vm *vdbe.VDBE, stmt *parser.SelectStmt, rewindAddr int, skipAddr int) {
 	if stmt.Where != nil {
 		vm.Program[skipAddr].P2 = vm.NumOps()
 	}
-
-	// Next row from table
 	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
-
-	// Close table cursor
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+}
 
-	// Sort the collected rows
+// emitOrderBySorterSort emits sorter sort operation and sets up LIMIT/OFFSET.
+func (s *Stmt) emitOrderBySorterSort(vm *vdbe.VDBE, stmt *parser.SelectStmt, gen *expr.CodeGenerator) (int, *limitOffsetInfo) {
 	sorterSortAddr := vm.AddOp(vdbe.OpSorterSort, 0, 0, 0)
-
-	// Handle LIMIT and OFFSET
 	limitInfo := s.setupLimitOffset(vm, stmt, gen)
+	return sorterSortAddr, limitInfo
+}
 
-	// First SorterNext call to move to first row
-	// This jumps to loop body if there are rows
-	sorterNextAddr := vm.AddOp(vdbe.OpSorterNext, 0, 0, 0) // P2 will be patched to loop body
-
-	// If no rows, jump to halt
-	haltJumpAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0) // P2 will be patched to halt
-
-	// Output loop body: read from sorter and emit result rows
+// emitOrderByOutputSetup sets up the output loop structure.
+func (s *Stmt) emitOrderByOutputSetup(vm *vdbe.VDBE) (int, int, int) {
+	sorterNextAddr := vm.AddOp(vdbe.OpSorterNext, 0, 0, 0)
+	haltJumpAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
 	sorterLoopAddr := vm.NumOps()
+	return sorterNextAddr, haltJumpAddr, sorterLoopAddr
+}
 
-	// Copy data from sorter to result registers
+// emitOrderByOutputLoop emits the sorter output loop with LIMIT/OFFSET checks.
+func (s *Stmt) emitOrderByOutputLoop(vm *vdbe.VDBE, numCols int, limitInfo *limitOffsetInfo, gen *expr.CodeGenerator, sorterLoopAddr int) (int, int, int) {
 	vm.AddOp(vdbe.OpSorterData, 0, 0, numCols)
-
-	// Apply OFFSET and LIMIT checks
 	offsetSkipAddr, limitJumpAddr := s.emitLimitOffsetChecks(vm, limitInfo, gen)
-
-	// Emit result row
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
-
-	// Get next sorted row - jump back to loop body if more rows
 	nextRowAddr := vm.AddOp(vdbe.OpSorterNext, 0, sorterLoopAddr, 0)
+	return offsetSkipAddr, limitJumpAddr, nextRowAddr
+}
 
-	// Close sorter and halt
+// emitOrderByCleanup emits cleanup operations.
+func (s *Stmt) emitOrderByCleanup(vm *vdbe.VDBE) int {
 	haltAddr := vm.NumOps()
 	vm.AddOp(vdbe.OpSorterClose, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return haltAddr
+}
 
-	// Fix up addresses
+// fixOrderByAddresses fixes all forward references in the ORDER BY bytecode.
+func (s *Stmt) fixOrderByAddresses(vm *vdbe.VDBE, rewindAddr, sorterSortAddr, sorterNextAddr, haltJumpAddr,
+	offsetSkipAddr, limitJumpAddr, nextRowAddr, haltAddr int, limitInfo *limitOffsetInfo, sorterLoopAddr int) {
 	vm.Program[rewindAddr].P2 = haltAddr
 	vm.Program[sorterSortAddr].P2 = haltAddr
 	vm.Program[sorterNextAddr].P2 = sorterLoopAddr
@@ -958,8 +1013,6 @@ func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	if limitInfo.hasLimit {
 		vm.Program[limitJumpAddr].P2 = haltAddr
 	}
-
-	return vm, nil
 }
 
 // detectAggregates checks if a SELECT statement contains aggregate functions
@@ -1376,21 +1429,46 @@ type stmtTableInfo struct {
 
 // compileSelectWithJoins compiles a SELECT statement with JOIN clauses.
 func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
-	// Collect all tables involved in the query (base table + JOINs)
-	// Use alias if present, otherwise use table name
+	// Collect all tables involved in the query
+	tables, err := s.collectJoinTables(stmt, tableName, table)
+	if err != nil {
+		return nil, err
+	}
+
+	// Setup VDBE and code generator
+	numCols, gen := s.setupJoinVDBE(vm, stmt, tables)
+
+	// Emit scan preamble and open cursors
+	rewindAddr := s.emitJoinScanSetup(vm, tables)
+	loopStart := vm.NumOps()
+
+	// Setup nested loops for joined tables
+	innerLoopStarts := s.emitJoinNestedLoops(vm, tables)
+
+	// Emit column reads and result
+	if err := s.emitJoinColumns(vm, stmt, tables, numCols, gen); err != nil {
+		return nil, err
+	}
+
+	// Emit loop cleanup
+	s.emitJoinLoopCleanup(vm, tables, innerLoopStarts, loopStart, rewindAddr)
+
+	return vm, nil
+}
+
+// collectJoinTables collects all tables involved in a JOIN query.
+func (s *Stmt) collectJoinTables(stmt *parser.SelectStmt, tableName string, table *schema.Table) ([]stmtTableInfo, error) {
 	baseTableAlias := tableName
 	if len(stmt.From.Tables) > 0 && stmt.From.Tables[0].Alias != "" {
 		baseTableAlias = stmt.From.Tables[0].Alias
 	}
 	tables := []stmtTableInfo{{name: baseTableAlias, table: table, cursorIdx: 0}}
 
-	// Process JOIN clauses
 	for i, join := range stmt.From.Joins {
 		joinTable, ok := s.conn.schema.GetTable(join.Table.TableName)
 		if !ok {
 			return nil, fmt.Errorf("table not found: %s", join.Table.TableName)
 		}
-		// Use alias if present, otherwise use table name
 		joinTableAlias := join.Table.TableName
 		if join.Table.Alias != "" {
 			joinTableAlias = join.Table.Alias
@@ -1402,122 +1480,138 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 		})
 	}
 
+	return tables, nil
+}
+
+// setupJoinVDBE initializes VDBE and code generator for JOIN query.
+func (s *Stmt) setupJoinVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo) (int, *expr.CodeGenerator) {
 	numCols := len(stmt.Columns)
 	vm.AllocMemory(numCols + 10)
 	vm.AllocCursors(len(tables))
 
-	// Create expression code generator
 	gen := expr.NewCodeGenerator(vm)
 	for _, tbl := range tables {
 		gen.RegisterCursor(tbl.name, tbl.cursorIdx)
 	}
 
-	// Build result column name list
 	vm.ResultCols = s.buildMultiTableColumnNames(stmt.Columns, tables)
 
-	// Emit scan preamble
+	return numCols, gen
+}
+
+// emitJoinScanSetup emits initialization and cursor open operations for JOIN.
+func (s *Stmt) emitJoinScanSetup(vm *vdbe.VDBE, tables []stmtTableInfo) int {
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 
-	// Open cursors for all tables
 	for _, tbl := range tables {
 		vm.AddOp(vdbe.OpOpenRead, tbl.cursorIdx, int(tbl.table.RootPage), len(tbl.table.Columns))
 	}
 
-	// Set up nested loop for first table
-	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
-	loopStart := vm.NumOps()
+	return vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+}
 
-	// Set up nested loops for joined tables
+// emitJoinNestedLoops sets up nested loops for joined tables.
+func (s *Stmt) emitJoinNestedLoops(vm *vdbe.VDBE, tables []stmtTableInfo) []int {
 	var innerLoopStarts []int
 	for i := 1; i < len(tables); i++ {
-		vm.AddOp(vdbe.OpRewind, i, 0, 0) // Will fix P2 later if needed
+		vm.AddOp(vdbe.OpRewind, i, 0, 0)
 		innerLoopStarts = append(innerLoopStarts, vm.NumOps())
 	}
+	return innerLoopStarts
+}
 
-	// Emit column-read ops
+// emitJoinColumns emits column read operations and result row for JOIN.
+func (s *Stmt) emitJoinColumns(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int, gen *expr.CodeGenerator) error {
 	for i, col := range stmt.Columns {
 		if err := s.emitSelectColumnOpMultiTable(vm, tables, col, i, gen); err != nil {
-			return nil, err
+			return err
 		}
 	}
-
-	// Emit result row
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+	return nil
+}
 
-	// Next operations for joined tables (innermost to outermost)
+// emitJoinLoopCleanup emits Next and Close operations for all tables and fixes addresses.
+func (s *Stmt) emitJoinLoopCleanup(vm *vdbe.VDBE, tables []stmtTableInfo, innerLoopStarts []int, loopStart int, rewindAddr int) {
 	for i := len(tables) - 1; i > 0; i-- {
 		vm.AddOp(vdbe.OpNext, i, innerLoopStarts[i-1], 0)
 		vm.AddOp(vdbe.OpClose, i, 0, 0)
 	}
 
-	// Next operation for base table
 	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
 	haltAddr := vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	vm.Program[rewindAddr].P2 = haltAddr
-
-	return vm, nil
 }
 
 // emitSelectColumnOpMultiTable emits the VDBE opcode(s) for reading a column across multiple tables.
 func (s *Stmt) emitSelectColumnOpMultiTable(vm *vdbe.VDBE, tables []stmtTableInfo, col parser.ResultColumn, i int, gen *expr.CodeGenerator) error {
 	ident, ok := col.Expr.(*parser.IdentExpr)
 	if !ok {
-		// Non-identifier expression: try using expression code generator
-		if gen != nil {
-			reg, err := gen.GenerateExpr(col.Expr)
-			if err != nil {
-				// If code generation fails, emit NULL placeholder
-				vm.AddOp(vdbe.OpNull, 0, i, 0)
-				return nil
-			}
-			// Copy result to target register if needed
-			if reg != i {
-				vm.AddOp(vdbe.OpCopy, reg, i, 0)
-			}
-			return nil
-		}
-		// No code generator: emit NULL placeholder
-		vm.AddOp(vdbe.OpNull, 0, i, 0)
+		return s.emitNonIdentifierColumn(vm, col, i, gen)
+	}
+
+	if ident.Table != "" {
+		return s.emitQualifiedColumn(vm, tables, ident, i)
+	}
+
+	return s.emitUnqualifiedColumn(vm, tables, ident, i)
+}
+
+// emitNonIdentifierColumn handles non-identifier expressions in multi-table SELECT.
+func (s *Stmt) emitNonIdentifierColumn(vm *vdbe.VDBE, col parser.ResultColumn, targetReg int, gen *expr.CodeGenerator) error {
+	if gen == nil {
+		vm.AddOp(vdbe.OpNull, 0, targetReg, 0)
 		return nil
 	}
 
-	// If qualified (table.column), search only that table
-	if ident.Table != "" {
-		for _, tbl := range tables {
-			if tbl.name == ident.Table || tbl.table.Name == ident.Table {
-				colIdx := tbl.table.GetColumnIndex(ident.Name)
-				if colIdx == -1 {
-					return fmt.Errorf("column not found: %s.%s", ident.Table, ident.Name)
-				}
-
-				if schemaColIsRowid(tbl.table.Columns[colIdx]) {
-					vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, i, 0)
-					return nil
-				}
-
-				vm.AddOp(vdbe.OpColumn, tbl.cursorIdx, schemaRecordIdx(tbl.table.Columns, colIdx), i)
-				return nil
-			}
-		}
-		return fmt.Errorf("table not found: %s", ident.Table)
+	reg, err := gen.GenerateExpr(col.Expr)
+	if err != nil {
+		vm.AddOp(vdbe.OpNull, 0, targetReg, 0)
+		return nil
 	}
 
-	// For unqualified names, search all tables in join order
+	if reg != targetReg {
+		vm.AddOp(vdbe.OpCopy, reg, targetReg, 0)
+	}
+	return nil
+}
+
+// emitQualifiedColumn handles qualified column references (table.column) in multi-table SELECT.
+func (s *Stmt) emitQualifiedColumn(vm *vdbe.VDBE, tables []stmtTableInfo, ident *parser.IdentExpr, targetReg int) error {
+	for _, tbl := range tables {
+		if tbl.name == ident.Table || tbl.table.Name == ident.Table {
+			return s.emitColumnFromTable(vm, tbl, ident.Name, targetReg)
+		}
+	}
+	return fmt.Errorf("table not found: %s", ident.Table)
+}
+
+// emitUnqualifiedColumn handles unqualified column references in multi-table SELECT.
+func (s *Stmt) emitUnqualifiedColumn(vm *vdbe.VDBE, tables []stmtTableInfo, ident *parser.IdentExpr, targetReg int) error {
 	for _, tbl := range tables {
 		colIdx := tbl.table.GetColumnIndex(ident.Name)
 		if colIdx >= 0 {
-			if schemaColIsRowid(tbl.table.Columns[colIdx]) {
-				vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, i, 0)
-				return nil
-			}
-
-			vm.AddOp(vdbe.OpColumn, tbl.cursorIdx, schemaRecordIdx(tbl.table.Columns, colIdx), i)
-			return nil
+			return s.emitColumnFromTable(vm, tbl, ident.Name, targetReg)
 		}
 	}
-
 	return fmt.Errorf("column not found: %s", ident.Name)
+}
+
+// emitColumnFromTable emits opcodes to read a specific column from a table.
+func (s *Stmt) emitColumnFromTable(vm *vdbe.VDBE, tbl stmtTableInfo, colName string, targetReg int) error {
+	colIdx := tbl.table.GetColumnIndex(colName)
+	if colIdx == -1 {
+		return fmt.Errorf("column not found: %s.%s", tbl.name, colName)
+	}
+
+	if schemaColIsRowid(tbl.table.Columns[colIdx]) {
+		vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, targetReg, 0)
+		return nil
+	}
+
+	vm.AddOp(vdbe.OpColumn, tbl.cursorIdx, schemaRecordIdx(tbl.table.Columns, colIdx), targetReg)
+	return nil
 }
 
 // buildMultiTableColumnNames builds result column names for a SELECT with multiple tables.

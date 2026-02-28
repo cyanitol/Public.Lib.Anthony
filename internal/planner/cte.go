@@ -282,16 +282,24 @@ func (ctx *CTEContext) collectCTEReferencesInExpr(expr parser.Expression, deps m
 		ctx.handleInExpr(e, deps)
 	case *parser.BinaryExpr:
 		ctx.handleBinaryExpr(e, deps)
-	case *parser.UnaryExpr:
-		ctx.collectCTEReferencesInExpr(e.Expr, deps)
-	case *parser.ParenExpr:
-		ctx.collectCTEReferencesInExpr(e.Expr, deps)
 	case *parser.CaseExpr:
 		ctx.handleCaseExpr(e, deps)
 	case *parser.BetweenExpr:
 		ctx.handleBetweenExpr(e, deps)
 	case *parser.FunctionExpr:
 		ctx.handleFunctionExpr(e, deps)
+	default:
+		ctx.handleSimpleWrapperExpr(e, deps)
+	}
+}
+
+// handleSimpleWrapperExpr handles expression types that simply wrap another expression
+func (ctx *CTEContext) handleSimpleWrapperExpr(expr parser.Expression, deps map[string]bool) {
+	switch e := expr.(type) {
+	case *parser.UnaryExpr:
+		ctx.collectCTEReferencesInExpr(e.Expr, deps)
+	case *parser.ParenExpr:
+		ctx.collectCTEReferencesInExpr(e.Expr, deps)
 	case *parser.CastExpr:
 		ctx.collectCTEReferencesInExpr(e.Expr, deps)
 	case *parser.CollateExpr:
