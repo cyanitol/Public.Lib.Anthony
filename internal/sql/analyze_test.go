@@ -139,3 +139,225 @@ func TestFormatStatRow(t *testing.T) {
 		t.Error("Formatted stat row should not be empty")
 	}
 }
+
+func TestEstimateDistinctValuesFromSample(t *testing.T) {
+	tests := []struct {
+		name        string
+		sample      *IndexSample
+		columnIndex int
+		wantMin     int64
+		wantMax     int64
+	}{
+		{
+			name:        "nil sample",
+			sample:      nil,
+			columnIndex: 0,
+			wantMin:     1,
+			wantMax:     1,
+		},
+		{
+			name: "empty sample",
+			sample: &IndexSample{
+				Values: [][]interface{}{},
+				Count:  0,
+			},
+			columnIndex: 0,
+			wantMin:     1,
+			wantMax:     1,
+		},
+		{
+			name: "sample with distinct values",
+			sample: &IndexSample{
+				Values: [][]interface{}{
+					{1, "a"},
+					{2, "b"},
+					{3, "c"},
+					{4, "d"},
+				},
+				Count: 100,
+			},
+			columnIndex: 0,
+			wantMin:     4,
+			wantMax:     200,
+		},
+		{
+			name: "sample with duplicate values",
+			sample: &IndexSample{
+				Values: [][]interface{}{
+					{1, "a"},
+					{1, "b"},
+					{2, "c"},
+					{2, "d"},
+				},
+				Count: 50,
+			},
+			columnIndex: 0,
+			wantMin:     2,
+			wantMax:     100,
+		},
+		{
+			name: "multi-column sample",
+			sample: &IndexSample{
+				Values: [][]interface{}{
+					{1, "a", "x"},
+					{1, "a", "y"},
+					{1, "b", "z"},
+					{2, "a", "w"},
+				},
+				Count: 80,
+			},
+			columnIndex: 1,
+			wantMin:     2,
+			wantMax:     100,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := EstimateDistinctValuesFromSample(tt.sample, tt.columnIndex)
+			if got < tt.wantMin || got > tt.wantMax {
+				t.Errorf("EstimateDistinctValuesFromSample() = %d, want between %d and %d", got, tt.wantMin, tt.wantMax)
+			}
+		})
+	}
+}
+
+func TestBuildKeyFromValues(t *testing.T) {
+	tests := []struct {
+		name      string
+		values    []interface{}
+		upToIndex int
+		want      string
+	}{
+		{
+			name:      "single value",
+			values:    []interface{}{1},
+			upToIndex: 0,
+			want:      "1",
+		},
+		{
+			name:      "multiple values",
+			values:    []interface{}{1, "hello", 3.14},
+			upToIndex: 1,
+			want:      "1|hello",
+		},
+		{
+			name:      "all values",
+			values:    []interface{}{1, "hello", 3.14},
+			upToIndex: 2,
+			want:      "1|hello|3.14",
+		},
+		{
+			name:      "index beyond length",
+			values:    []interface{}{1, 2},
+			upToIndex: 10,
+			want:      "1|2",
+		},
+		{
+			name:      "empty values",
+			values:    []interface{}{},
+			upToIndex: 0,
+			want:      "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildKeyFromValues(tt.values, tt.upToIndex)
+			if got != tt.want {
+				t.Errorf("buildKeyFromValues() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEstimateDistinct(t *testing.T) {
+	tests := []struct {
+		name             string
+		sampleSize       int64
+		uniqueInSample   int64
+		totalCount       int64
+		wantMin          int64
+		wantMax          int64
+	}{
+		{
+			name:           "zero sample size",
+			sampleSize:     0,
+			uniqueInSample: 0,
+			totalCount:     100,
+			wantMin:        1,
+			wantMax:        1,
+		},
+		{
+			name:           "zero unique",
+			sampleSize:     10,
+			uniqueInSample: 0,
+			totalCount:     100,
+			wantMin:        1,
+			wantMax:        1,
+		},
+		{
+			name:           "sample equals total",
+			sampleSize:     100,
+			uniqueInSample: 50,
+			totalCount:     100,
+			wantMin:        50,
+			wantMax:        50,
+		},
+		{
+			name:           "sample larger than total",
+			sampleSize:     150,
+			uniqueInSample: 50,
+			totalCount:     100,
+			wantMin:        50,
+			wantMax:        50,
+		},
+		{
+			name:           "small sample with correction",
+			sampleSize:     5,
+			uniqueInSample: 4,
+			totalCount:     100,
+			wantMin:        4,
+			wantMax:        100,
+		},
+		{
+			name:           "large sample no correction",
+			sampleSize:     50,
+			uniqueInSample: 40,
+			totalCount:     100,
+			wantMin:        40,
+			wantMax:        100,
+		},
+		{
+			name:           "result bounded by total",
+			sampleSize:     10,
+			uniqueInSample: 10,
+			totalCount:     50,
+			wantMin:        10,
+			wantMax:        50,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := estimateDistinct(tt.sampleSize, tt.uniqueInSample, tt.totalCount)
+			if got < tt.wantMin || got > tt.wantMax {
+				t.Errorf("estimateDistinct(%d, %d, %d) = %d, want between %d and %d",
+					tt.sampleSize, tt.uniqueInSample, tt.totalCount, got, tt.wantMin, tt.wantMax)
+			}
+		})
+	}
+}
+
+func TestAnalyzeReportString(t *testing.T) {
+	report := &AnalyzeReport{
+		TablesAnalyzed:  3,
+		IndexesAnalyzed: 5,
+		RowsScanned:     1000,
+	}
+
+	str := report.String()
+	if str == "" {
+		t.Error("AnalyzeReport.String() should not return empty string")
+	}
+}

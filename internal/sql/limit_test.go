@@ -289,3 +289,207 @@ func TestValidateLimitOffset(t *testing.T) {
 		})
 	}
 }
+
+// TestGenerateLimitCode tests generating LIMIT code
+func TestGenerateLimitCode(t *testing.T) {
+	p := &Parse{DB: &Database{Name: "test"}, Mem: 0}
+	p.Vdbe = NewVdbe(p.DB)
+	lc := NewLimitCompiler(p)
+
+	tests := []struct {
+		name         string
+		limitInfo    *LimitInfo
+		jumpIfDone   int
+		wantOpsAdded int
+	}{
+		{
+			name: "with limit",
+			limitInfo: &LimitInfo{
+				Limit:    10,
+				LimitReg: 1,
+			},
+			jumpIfDone:   100,
+			wantOpsAdded: 2,
+		},
+		{
+			name: "no limit",
+			limitInfo: &LimitInfo{
+				Limit: 0,
+			},
+			jumpIfDone:   100,
+			wantOpsAdded: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opsBefore := len(p.Vdbe.Ops)
+			lc.GenerateLimitCode(tt.limitInfo, tt.jumpIfDone)
+			opsAfter := len(p.Vdbe.Ops)
+			opsAdded := opsAfter - opsBefore
+
+			if opsAdded != tt.wantOpsAdded {
+				t.Errorf("GenerateLimitCode() added %d ops, want %d", opsAdded, tt.wantOpsAdded)
+			}
+		})
+	}
+}
+
+// TestGenerateOffsetCode tests generating OFFSET code
+func TestGenerateOffsetCode(t *testing.T) {
+	p := &Parse{DB: &Database{Name: "test"}, Mem: 0}
+	p.Vdbe = NewVdbe(p.DB)
+	lc := NewLimitCompiler(p)
+
+	tests := []struct {
+		name         string
+		limitInfo    *LimitInfo
+		jumpToNext   int
+		wantOpsAdded int
+	}{
+		{
+			name: "with offset",
+			limitInfo: &LimitInfo{
+				Offset:    5,
+				OffsetReg: 1,
+			},
+			jumpToNext:   100,
+			wantOpsAdded: 1,
+		},
+		{
+			name: "no offset",
+			limitInfo: &LimitInfo{
+				Offset: 0,
+			},
+			jumpToNext:   100,
+			wantOpsAdded: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opsBefore := len(p.Vdbe.Ops)
+			lc.GenerateOffsetCode(tt.limitInfo, tt.jumpToNext)
+			opsAfter := len(p.Vdbe.Ops)
+			opsAdded := opsAfter - opsBefore
+
+			if opsAdded != tt.wantOpsAdded {
+				t.Errorf("GenerateOffsetCode() added %d ops, want %d", opsAdded, tt.wantOpsAdded)
+			}
+		})
+	}
+}
+
+// TestGenerateLimitedScan tests generating a limited scan
+func TestGenerateLimitedScan(t *testing.T) {
+	p := &Parse{DB: &Database{Name: "test"}, Mem: 0}
+	p.Vdbe = NewVdbe(p.DB)
+	lc := NewLimitCompiler(p)
+
+	tests := []struct {
+		name     string
+		cursor   int
+		rootPage int
+		limit    int
+		offset   int
+		destReg  int
+		wantErr  bool
+	}{
+		{
+			name:     "basic scan with limit and offset",
+			cursor:   0,
+			rootPage: 1,
+			limit:    10,
+			offset:   5,
+			destReg:  1,
+			wantErr:  false,
+		},
+		{
+			name:     "scan with limit only",
+			cursor:   0,
+			rootPage: 1,
+			limit:    10,
+			offset:   0,
+			destReg:  1,
+			wantErr:  false,
+		},
+		{
+			name:     "scan with offset only",
+			cursor:   0,
+			rootPage: 1,
+			limit:    0,
+			offset:   5,
+			destReg:  1,
+			wantErr:  false,
+		},
+		{
+			name:     "scan with no limit or offset",
+			cursor:   0,
+			rootPage: 1,
+			limit:    0,
+			offset:   0,
+			destReg:  1,
+			wantErr:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p.Vdbe = NewVdbe(p.DB)
+			p.Mem = 0
+			err := lc.GenerateLimitedScan(tt.cursor, tt.rootPage, tt.limit, tt.offset, tt.destReg)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GenerateLimitedScan() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && len(p.Vdbe.Ops) == 0 {
+				t.Error("GenerateLimitedScan() generated no ops")
+			}
+		})
+	}
+}
+
+// TestCanOptimizeWithIndex tests checking if LIMIT can use index optimization
+func TestCanOptimizeWithIndex(t *testing.T) {
+	p := &Parse{DB: &Database{Name: "test"}}
+	lc := NewLimitCompiler(p)
+
+	tests := []struct {
+		name     string
+		sel      *Select
+		expected bool
+	}{
+		{
+			name: "no ORDER BY",
+			sel: &Select{
+				Limit: 10,
+			},
+			expected: false,
+		},
+		{
+			name: "empty ORDER BY",
+			sel: &Select{
+				Limit:   10,
+				OrderBy: &ExprList{Items: []ExprListItem{}},
+			},
+			expected: false,
+		},
+		{
+			name: "with ORDER BY but has aggregates",
+			sel: &Select{
+				Limit:   10,
+				OrderBy: &ExprList{Items: []ExprListItem{{Name: "col1"}}},
+				GroupBy: &ExprList{Items: []ExprListItem{{Name: "col1"}}},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := lc.canOptimizeWithIndex(tt.sel)
+			if got != tt.expected {
+				t.Errorf("canOptimizeWithIndex() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}

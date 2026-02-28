@@ -167,3 +167,93 @@ func TestValidateUpdateComprehensive(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateUpdateStmt tests the internal validateUpdateStmt function
+func TestValidateUpdateStmt(t *testing.T) {
+	tests := []struct {
+		name    string
+		stmt    *UpdateStmt
+		wantErr bool
+	}{
+		{
+			name: "valid",
+			stmt: &UpdateStmt{
+				Table:   "users",
+				Columns: []string{"name"},
+				Values:  []Value{TextValue("test")},
+			},
+			wantErr: false,
+		},
+		{
+			name:    "nil",
+			stmt:    nil,
+			wantErr: true,
+		},
+		{
+			name: "no columns",
+			stmt: &UpdateStmt{
+				Table:   "users",
+				Columns: []string{},
+				Values:  []Value{},
+			},
+			wantErr: true,
+		},
+		{
+			name: "mismatched count",
+			stmt: &UpdateStmt{
+				Table:   "users",
+				Columns: []string{"a", "b"},
+				Values:  []Value{TextValue("x")},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateUpdateStmt(tt.stmt)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateUpdateStmt() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestCompileUpdateEdgeCases tests edge cases for CompileUpdate
+func TestCompileUpdateEdgeCases(t *testing.T) {
+	tests := []struct {
+		name      string
+		stmt      *UpdateStmt
+		tableRoot int
+		numCols   int
+		wantErr   bool
+	}{
+		{
+			name:      "nil stmt",
+			stmt:      nil,
+			tableRoot: 1,
+			numCols:   2,
+			wantErr:   true,
+		},
+		{
+			name: "invalid stmt",
+			stmt: &UpdateStmt{
+				Table:   "users",
+				Columns: []string{},
+				Values:  []Value{},
+			},
+			tableRoot: 1,
+			numCols:   2,
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := CompileUpdate(tt.stmt, tt.tableRoot, tt.numCols)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CompileUpdate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

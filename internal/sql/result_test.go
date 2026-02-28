@@ -905,3 +905,97 @@ func TestColumnRefAffinity(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveChildExprs tests resolving expressions in child nodes
+func TestResolveChildExprs(t *testing.T) {
+	parse := &Parse{Vdbe: NewVdbe(nil)}
+	rc := NewResultCompiler(parse)
+
+	table := &Table{
+		Name:       "users",
+		NumColumns: 2,
+		Columns: []Column{
+			{Name: "id", DeclType: "INTEGER"},
+			{Name: "name", DeclType: "TEXT"},
+		},
+	}
+
+	srcList := NewSrcList()
+	srcList.Append(SrcListItem{Table: table, Cursor: 0})
+
+	sel := &Select{
+		Src: srcList,
+	}
+
+	tests := []struct {
+		name    string
+		expr    *Expr
+		wantErr bool
+	}{
+		{
+			name: "binary expression with columns",
+			expr: &Expr{
+				Op: TK_PLUS,
+				Left: &Expr{
+					Op:          TK_COLUMN,
+					StringValue: "id",
+				},
+				Right: &Expr{
+					Op:       TK_INTEGER,
+					IntValue: 1,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "nested expression",
+			expr: &Expr{
+				Op: TK_STAR,
+				Left: &Expr{
+					Op: TK_PLUS,
+					Left: &Expr{
+						Op:          TK_COLUMN,
+						StringValue: "id",
+					},
+					Right: &Expr{
+						Op:       TK_INTEGER,
+						IntValue: 2,
+					},
+				},
+				Right: &Expr{
+					Op:       TK_INTEGER,
+					IntValue: 3,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "expression with no children",
+			expr: &Expr{
+				Op:       TK_INTEGER,
+				IntValue: 42,
+			},
+			wantErr: false,
+		},
+		{
+			name: "expression with only left child",
+			expr: &Expr{
+				Op: TK_MINUS,
+				Left: &Expr{
+					Op:          TK_COLUMN,
+					StringValue: "id",
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := rc.resolveChildExprs(sel, tt.expr)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("resolveChildExprs() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

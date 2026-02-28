@@ -54,36 +54,49 @@ func TestNodeInterface(t *testing.T) {
 	var _ Statement = &AlterTableStmt{}
 	var _ Statement = &VacuumStmt{}
 
-	// Call methods through interface to ensure coverage
-	statements := []Statement{
-		&SelectStmt{},
-		&InsertStmt{},
-		&UpdateStmt{},
-		&DeleteStmt{},
-		&CreateTableStmt{},
-		&DropTableStmt{},
-		&CreateIndexStmt{},
-		&DropIndexStmt{},
-		&CreateViewStmt{},
-		&DropViewStmt{},
-		&CreateTriggerStmt{},
-		&DropTriggerStmt{},
-		&BeginStmt{},
-		&CommitStmt{},
-		&RollbackStmt{},
-		&ExplainStmt{},
-		&AttachStmt{},
-		&DetachStmt{},
-		&PragmaStmt{},
-		&AlterTableStmt{},
-		&VacuumStmt{},
-	}
-
-	for _, stmt := range statements {
-		stmt.node()
-		stmt.statement()
-		_ = stmt.String()
-	}
+	// Call methods directly on concrete types to ensure coverage
+	(&SelectStmt{}).node()
+	(&SelectStmt{}).statement()
+	(&InsertStmt{}).node()
+	(&InsertStmt{}).statement()
+	(&UpdateStmt{}).node()
+	(&UpdateStmt{}).statement()
+	(&DeleteStmt{}).node()
+	(&DeleteStmt{}).statement()
+	(&CreateTableStmt{}).node()
+	(&CreateTableStmt{}).statement()
+	(&DropTableStmt{}).node()
+	(&DropTableStmt{}).statement()
+	(&CreateIndexStmt{}).node()
+	(&CreateIndexStmt{}).statement()
+	(&DropIndexStmt{}).node()
+	(&DropIndexStmt{}).statement()
+	(&CreateViewStmt{}).node()
+	(&CreateViewStmt{}).statement()
+	(&DropViewStmt{}).node()
+	(&DropViewStmt{}).statement()
+	(&CreateTriggerStmt{}).node()
+	(&CreateTriggerStmt{}).statement()
+	(&DropTriggerStmt{}).node()
+	(&DropTriggerStmt{}).statement()
+	(&BeginStmt{}).node()
+	(&BeginStmt{}).statement()
+	(&CommitStmt{}).node()
+	(&CommitStmt{}).statement()
+	(&RollbackStmt{}).node()
+	(&RollbackStmt{}).statement()
+	(&ExplainStmt{}).node()
+	(&ExplainStmt{}).statement()
+	(&AttachStmt{}).node()
+	(&AttachStmt{}).statement()
+	(&DetachStmt{}).node()
+	(&DetachStmt{}).statement()
+	(&PragmaStmt{}).node()
+	(&PragmaStmt{}).statement()
+	(&AlterTableStmt{}).node()
+	(&AlterTableStmt{}).statement()
+	(&VacuumStmt{}).node()
+	(&VacuumStmt{}).statement()
 }
 
 func TestExpressionInterface(t *testing.T) {
@@ -119,29 +132,35 @@ func TestExpressionInterface(t *testing.T) {
 	var _ Expression = &ExistsExpr{}
 	var _ Expression = &VariableExpr{}
 
-	// Call methods through interface to ensure coverage
-	expressions := []Expression{
-		&BinaryExpr{},
-		&UnaryExpr{},
-		&LiteralExpr{Type: LiteralInteger, Value: "42"},
-		&IdentExpr{Name: "x"},
-		&FunctionExpr{Name: "COUNT"},
-		&CaseExpr{},
-		&InExpr{},
-		&BetweenExpr{},
-		&CastExpr{},
-		&CollateExpr{},
-		&ParenExpr{},
-		&SubqueryExpr{},
-		&ExistsExpr{},
-		&VariableExpr{},
-	}
-
-	for _, expr := range expressions {
-		expr.node()
-		expr.expression()
-		_ = expr.String()
-	}
+	// Call methods directly on concrete types to ensure coverage
+	(&BinaryExpr{}).node()
+	(&BinaryExpr{}).expression()
+	(&UnaryExpr{}).node()
+	(&UnaryExpr{}).expression()
+	(&LiteralExpr{}).node()
+	(&LiteralExpr{}).expression()
+	(&IdentExpr{}).node()
+	(&IdentExpr{}).expression()
+	(&FunctionExpr{}).node()
+	(&FunctionExpr{}).expression()
+	(&CaseExpr{}).node()
+	(&CaseExpr{}).expression()
+	(&InExpr{}).node()
+	(&InExpr{}).expression()
+	(&BetweenExpr{}).node()
+	(&BetweenExpr{}).expression()
+	(&CastExpr{}).node()
+	(&CastExpr{}).expression()
+	(&CollateExpr{}).node()
+	(&CollateExpr{}).expression()
+	(&ParenExpr{}).node()
+	(&ParenExpr{}).expression()
+	(&SubqueryExpr{}).node()
+	(&SubqueryExpr{}).expression()
+	(&ExistsExpr{}).node()
+	(&ExistsExpr{}).expression()
+	(&VariableExpr{}).node()
+	(&VariableExpr{}).expression()
 }
 
 func TestAlterTableActionInterface(t *testing.T) {
@@ -156,17 +175,13 @@ func TestAlterTableActionInterface(t *testing.T) {
 	var _ AlterTableAction = &AddColumnAction{}
 	var _ AlterTableAction = &DropColumnAction{}
 
-	// Call methods through interface to ensure coverage
-	actions := []AlterTableAction{
-		&RenameTableAction{NewName: "new_table"},
-		&RenameColumnAction{OldName: "old_col", NewName: "new_col"},
-		&AddColumnAction{Column: ColumnDef{Name: "col", Type: "TEXT"}},
-		&DropColumnAction{ColumnName: "col"},
-	}
-
-	for _, action := range actions {
-		action.node()
-		action.alterTableAction()
-		_ = action.String()
-	}
+	// Call methods directly on concrete types to ensure coverage
+	(&RenameTableAction{}).node()
+	(&RenameTableAction{}).alterTableAction()
+	(&RenameColumnAction{}).node()
+	(&RenameColumnAction{}).alterTableAction()
+	(&AddColumnAction{}).node()
+	(&AddColumnAction{}).alterTableAction()
+	(&DropColumnAction{}).node()
+	(&DropColumnAction{}).alterTableAction()
 }

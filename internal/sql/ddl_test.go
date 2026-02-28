@@ -1007,3 +1007,490 @@ func TestGenerateCreateTriggerSQL(t *testing.T) {
 		})
 	}
 }
+
+func TestSchemaRemoveIndex(t *testing.T) {
+	schema := NewSchema()
+
+	index := &Index{
+		Name:    "idx_users_id",
+		Table:   "users",
+		Columns: []string{"id"},
+	}
+
+	schema.AddIndex(index)
+
+	err := schema.RemoveIndex("idx_users_id")
+	if err != nil {
+		t.Fatalf("RemoveIndex failed: %v", err)
+	}
+
+	if _, exists := schema.Indexes["idx_users_id"]; exists {
+		t.Error("Index still exists after removal")
+	}
+
+	// Try to remove non-existent index
+	err = schema.RemoveIndex("nonexistent")
+	if err == nil {
+		t.Error("Expected error when removing non-existent index")
+	}
+}
+
+func TestCompileCreateView(t *testing.T) {
+	schema := NewSchema()
+	bt := btree.NewBtree(4096)
+
+	// Create a simple SELECT statement for the view
+	selectStmt := &parser.SelectStmt{
+		Columns: []parser.ResultColumn{
+			{Expr: &parser.IdentExpr{Name: "id"}},
+			{Expr: &parser.IdentExpr{Name: "name"}},
+		},
+		From: &parser.FromClause{
+			Tables: []parser.TableOrSubquery{
+				{TableName: "users"},
+			},
+		},
+	}
+
+	tests := []struct {
+		name        string
+		stmt        *parser.CreateViewStmt
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "basic view",
+			stmt: &parser.CreateViewStmt{
+				Name:   "user_view",
+				Select: selectStmt,
+			},
+			wantErr: false,
+		},
+		{
+			name: "view with IF NOT EXISTS",
+			stmt: &parser.CreateViewStmt{
+				Name:        "user_view2",
+				Select:      selectStmt,
+				IfNotExists: true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "temporary view",
+			stmt: &parser.CreateViewStmt{
+				Name:      "temp_view",
+				Select:    selectStmt,
+				Temporary: true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "view with columns",
+			stmt: &parser.CreateViewStmt{
+				Name:    "view_with_cols",
+				Columns: []string{"user_id", "user_name"},
+				Select:  selectStmt,
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty view name",
+			stmt: &parser.CreateViewStmt{
+				Name:   "",
+				Select: selectStmt,
+			},
+			wantErr:     true,
+			errContains: "cannot be empty",
+		},
+		{
+			name: "reserved view name",
+			stmt: &parser.CreateViewStmt{
+				Name:   "sqlite_master",
+				Select: selectStmt,
+			},
+			wantErr:     true,
+			errContains: "reserved",
+		},
+		{
+			name: "no SELECT statement",
+			stmt: &parser.CreateViewStmt{
+				Name:   "bad_view",
+				Select: nil,
+			},
+			wantErr:     true,
+			errContains: "SELECT statement",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, err := CompileCreateView(tt.stmt, schema, bt)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error containing %q, got nil", tt.errContains)
+				} else if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Expected error containing %q, got %q", tt.errContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if v == nil {
+					t.Error("Expected VDBE, got nil")
+				} else {
+					// Add view to schema for subsequent tests
+					schema.Views[tt.stmt.Name] = &View{
+						Name:   tt.stmt.Name,
+						Select: tt.stmt.Select,
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestCompileCreateViewDuplicate(t *testing.T) {
+	schema := NewSchema()
+	bt := btree.NewBtree(4096)
+
+	selectStmt := &parser.SelectStmt{
+		Columns: []parser.ResultColumn{
+			{Expr: &parser.IdentExpr{Name: "id"}},
+		},
+	}
+
+	// Add a view first
+	schema.Views = map[string]*View{
+		"existing_view": {
+			Name:   "existing_view",
+			Select: selectStmt,
+		},
+	}
+
+	// Try to create duplicate without IF NOT EXISTS
+	stmt := &parser.CreateViewStmt{
+		Name:   "existing_view",
+		Select: selectStmt,
+	}
+	_, err := CompileCreateView(stmt, schema, bt)
+	if err == nil {
+		t.Error("Expected error for duplicate view")
+	}
+
+	// Try with IF NOT EXISTS
+	stmt.IfNotExists = true
+	v, err := CompileCreateView(stmt, schema, bt)
+	if err != nil {
+		t.Errorf("IF NOT EXISTS should not error: %v", err)
+	}
+	if v == nil {
+		t.Error("Expected VDBE")
+	}
+}
+
+func TestCompileCreateViewConflictWithTable(t *testing.T) {
+	schema := NewSchema()
+	bt := btree.NewBtree(4096)
+
+	// Add a table first
+	table := &Table{
+		Name:       "users",
+		NumColumns: 1,
+		Columns:    []Column{{Name: "id", DeclType: "INTEGER"}},
+		RootPage:   2,
+	}
+	schema.AddTable(table)
+
+	selectStmt := &parser.SelectStmt{
+		Columns: []parser.ResultColumn{
+			{Expr: &parser.IdentExpr{Name: "id"}},
+		},
+	}
+
+	// Try to create view with same name as table
+	stmt := &parser.CreateViewStmt{
+		Name:   "users",
+		Select: selectStmt,
+	}
+	_, err := CompileCreateView(stmt, schema, bt)
+	if err == nil {
+		t.Error("Expected error when view name conflicts with table")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("Expected 'already exists' error, got: %v", err)
+	}
+}
+
+func TestCompileDropView(t *testing.T) {
+	schema := NewSchema()
+	bt := btree.NewBtree(4096)
+
+	// Add a view
+	schema.Views = map[string]*View{
+		"test_view": {
+			Name: "test_view",
+		},
+		"sqlite_master": {
+			Name: "sqlite_master",
+		},
+	}
+
+	tests := []struct {
+		name        string
+		stmt        *parser.DropViewStmt
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "basic drop",
+			stmt: &parser.DropViewStmt{
+				Name: "test_view",
+			},
+			wantErr: false,
+		},
+		{
+			name: "drop with IF EXISTS",
+			stmt: &parser.DropViewStmt{
+				Name:     "nonexistent",
+				IfExists: true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "drop nonexistent without IF EXISTS",
+			stmt: &parser.DropViewStmt{
+				Name: "nonexistent2",
+			},
+			wantErr:     true,
+			errContains: "does not exist",
+		},
+		{
+			name: "drop reserved view",
+			stmt: &parser.DropViewStmt{
+				Name: "sqlite_master",
+			},
+			wantErr:     true,
+			errContains: "system view",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, err := CompileDropView(tt.stmt, schema, bt)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error containing %q, got nil", tt.errContains)
+				} else if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Expected error containing %q, got %q", tt.errContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if v == nil {
+					t.Error("Expected VDBE, got nil")
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateCreateViewSQL(t *testing.T) {
+	tests := []struct {
+		name     string
+		stmt     *parser.CreateViewStmt
+		contains []string
+	}{
+		{
+			name: "basic view",
+			stmt: &parser.CreateViewStmt{
+				Name: "my_view",
+				Select: &parser.SelectStmt{
+					Columns: []parser.ResultColumn{
+						{Expr: &parser.IdentExpr{Name: "id"}},
+					},
+				},
+			},
+			contains: []string{"CREATE", "VIEW", "my_view"},
+		},
+		{
+			name: "temporary view",
+			stmt: &parser.CreateViewStmt{
+				Name:      "temp_view",
+				Temporary: true,
+				Select: &parser.SelectStmt{
+					Columns: []parser.ResultColumn{
+						{Expr: &parser.IdentExpr{Name: "id"}},
+					},
+				},
+			},
+			contains: []string{"CREATE", "TEMP", "VIEW", "temp_view"},
+		},
+		{
+			name: "view with IF NOT EXISTS",
+			stmt: &parser.CreateViewStmt{
+				Name:        "safe_view",
+				IfNotExists: true,
+				Select: &parser.SelectStmt{
+					Columns: []parser.ResultColumn{
+						{Expr: &parser.IdentExpr{Name: "id"}},
+					},
+				},
+			},
+			contains: []string{"CREATE", "VIEW", "IF NOT EXISTS", "safe_view"},
+		},
+		{
+			name: "view with columns",
+			stmt: &parser.CreateViewStmt{
+				Name:    "cols_view",
+				Columns: []string{"col1", "col2"},
+				Select: &parser.SelectStmt{
+					Columns: []parser.ResultColumn{
+						{Expr: &parser.IdentExpr{Name: "id"}},
+					},
+				},
+			},
+			contains: []string{"CREATE", "VIEW", "cols_view", "(", "col1", "col2", ")"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sql := generateCreateViewSQL(tt.stmt)
+			for _, substr := range tt.contains {
+				if !strings.Contains(sql, substr) {
+					t.Errorf("Generated SQL does not contain %q:\n%s", substr, sql)
+				}
+			}
+		})
+	}
+}
+
+func TestCompileCreateTrigger(t *testing.T) {
+	schema := NewSchema()
+	bt := btree.NewBtree(4096)
+
+	// Add a table for the trigger
+	table := &Table{
+		Name:       "users",
+		NumColumns: 2,
+		Columns: []Column{
+			{Name: "id", DeclType: "INTEGER"},
+			{Name: "name", DeclType: "TEXT"},
+		},
+		RootPage: 2,
+	}
+	schema.AddTable(table)
+
+	tests := []struct {
+		name        string
+		stmt        *parser.CreateTriggerStmt
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "basic trigger",
+			stmt: &parser.CreateTriggerStmt{
+				Name:   "my_trigger",
+				Table:  "users",
+				Timing: parser.TriggerAfter,
+				Event:  parser.TriggerInsert,
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty trigger name",
+			stmt: &parser.CreateTriggerStmt{
+				Name:  "",
+				Table: "users",
+			},
+			wantErr:     true,
+			errContains: "cannot be empty",
+		},
+		{
+			name: "table not found",
+			stmt: &parser.CreateTriggerStmt{
+				Name:  "bad_trigger",
+				Table: "nonexistent",
+			},
+			wantErr:     true,
+			errContains: "not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, err := CompileCreateTrigger(tt.stmt, schema, bt)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error containing %q, got nil", tt.errContains)
+				} else if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Expected error containing %q, got %q", tt.errContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if v == nil {
+					t.Error("Expected VDBE, got nil")
+				}
+			}
+		})
+	}
+}
+
+func TestCompileDropTrigger(t *testing.T) {
+	schema := NewSchema()
+	bt := btree.NewBtree(4096)
+
+	tests := []struct {
+		name        string
+		stmt        *parser.DropTriggerStmt
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "basic drop",
+			stmt: &parser.DropTriggerStmt{
+				Name: "my_trigger",
+			},
+			wantErr: false,
+		},
+		{
+			name: "drop with IF EXISTS",
+			stmt: &parser.DropTriggerStmt{
+				Name:     "any_trigger",
+				IfExists: true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "drop reserved trigger",
+			stmt: &parser.DropTriggerStmt{
+				Name: "sqlite_master",
+			},
+			wantErr:     true,
+			errContains: "system trigger",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, err := CompileDropTrigger(tt.stmt, schema, bt)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error containing %q, got nil", tt.errContains)
+				} else if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Expected error containing %q, got %q", tt.errContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if v == nil {
+					t.Error("Expected VDBE, got nil")
+				}
+			}
+		})
+	}
+}

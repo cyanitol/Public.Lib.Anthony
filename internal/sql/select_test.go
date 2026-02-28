@@ -731,3 +731,165 @@ func TestCompileSelectWithLimitAndOffset(t *testing.T) {
 		t.Fatalf("CompileSelect with LIMIT and OFFSET failed: %v", err)
 	}
 }
+
+// TestSelectCodeOffset tests generating OFFSET code in SelectCompiler
+func TestSelectCodeOffset(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:  0,
+	}
+	sc := NewSelectCompiler(parse)
+
+	tests := []struct {
+		name         string
+		offset       int
+		jumpTo       int
+		wantOpsAdded int
+	}{
+		{
+			name:         "offset 5",
+			offset:       5,
+			jumpTo:       100,
+			wantOpsAdded: 2,
+		},
+		{
+			name:         "offset 0",
+			offset:       0,
+			jumpTo:       100,
+			wantOpsAdded: 2,
+		},
+		{
+			name:         "offset 100",
+			offset:       100,
+			jumpTo:       50,
+			wantOpsAdded: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parse.Vdbe = NewVdbe(nil)
+			parse.Mem = 0
+			opsBefore := len(parse.Vdbe.Ops)
+			sc.codeOffset(tt.offset, tt.jumpTo)
+			opsAfter := len(parse.Vdbe.Ops)
+			opsAdded := opsAfter - opsBefore
+
+			if opsAdded != tt.wantOpsAdded {
+				t.Errorf("codeOffset() added %d ops, want %d", opsAdded, tt.wantOpsAdded)
+			}
+		})
+	}
+}
+
+// TestApplyLimitCheck tests generating LIMIT check code
+func TestApplyLimitCheck(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:  0,
+	}
+	sc := NewSelectCompiler(parse)
+
+	tests := []struct {
+		name         string
+		limit        int
+		jumpTo       int
+		wantOpsAdded int
+	}{
+		{
+			name:         "limit 10",
+			limit:        10,
+			jumpTo:       100,
+			wantOpsAdded: 2,
+		},
+		{
+			name:         "limit 0",
+			limit:        0,
+			jumpTo:       100,
+			wantOpsAdded: 2,
+		},
+		{
+			name:         "limit 1000",
+			limit:        1000,
+			jumpTo:       50,
+			wantOpsAdded: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parse.Vdbe = NewVdbe(nil)
+			parse.Mem = 0
+			opsBefore := len(parse.Vdbe.Ops)
+			sc.applyLimitCheck(tt.limit, tt.jumpTo)
+			opsAfter := len(parse.Vdbe.Ops)
+			opsAdded := opsAfter - opsBefore
+
+			if opsAdded != tt.wantOpsAdded {
+				t.Errorf("applyLimitCheck() added %d ops, want %d", opsAdded, tt.wantOpsAdded)
+			}
+		})
+	}
+}
+
+// TestSelectCompilerCompileGroupBy tests the wrapper function
+func TestSelectCompilerCompileGroupBy(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:  1,
+		Tabs: 0,
+	}
+	sc := NewSelectCompiler(parse)
+
+	table := &Table{
+		Name:       "sales",
+		RootPage:   1,
+		NumColumns: 3,
+		Columns: []Column{
+			{Name: "product", DeclType: "TEXT"},
+			{Name: "quantity", DeclType: "INTEGER"},
+			{Name: "price", DeclType: "REAL"},
+		},
+	}
+
+	srcList := NewSrcList()
+	srcList.Append(SrcListItem{Table: table, Cursor: 0})
+
+	sel := &Select{
+		EList: &ExprList{
+			Items: []ExprListItem{
+				{Expr: &Expr{Op: TK_COLUMN, Table: 0, Column: 0}},
+				{Expr: &Expr{
+					Op: TK_AGG_FUNCTION,
+					FuncDef: &FuncDef{Name: "sum"},
+					List: &ExprList{
+						Items: []ExprListItem{
+							{Expr: &Expr{Op: TK_COLUMN, Table: 0, Column: 1}},
+						},
+					},
+				}},
+			},
+		},
+		Src: srcList,
+		GroupBy: &ExprList{
+			Items: []ExprListItem{
+				{Expr: &Expr{Op: TK_COLUMN, Table: 0, Column: 0}},
+			},
+		},
+		SelectID: 1,
+	}
+
+	dest := &SelectDest{
+		Dest: SRT_Output,
+	}
+
+	err := sc.compileGroupBy(sel, dest)
+	if err != nil {
+		t.Fatalf("compileGroupBy wrapper failed: %v", err)
+	}
+
+	// Verify instructions were generated
+	if len(parse.Vdbe.Ops) == 0 {
+		t.Error("No VDBE instructions generated")
+	}
+}

@@ -233,3 +233,54 @@ func TestParseVacuum_AST(t *testing.T) {
 		t.Errorf("VACUUM INTO String() = %q, want %q", intoStmt.String(), "VACUUM INTO")
 	}
 }
+
+func TestParseVacuum_WithParameter(t *testing.T) {
+	tests := []struct {
+		name        string
+		sql         string
+		wantErr     bool
+		wantParam   bool
+	}{
+		{
+			name:      "vacuum into with ? parameter",
+			sql:       "VACUUM INTO ?",
+			wantErr:   false,
+			wantParam: true,
+		},
+		{
+			name:      "vacuum schema into with parameter",
+			sql:       "VACUUM main INTO ?",
+			wantErr:   false,
+			wantParam: true,
+		},
+		{
+			name:      "vacuum into with named parameter",
+			sql:       "VACUUM INTO :filename",
+			wantErr:   false,
+			wantParam: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if len(stmts) != 1 {
+					t.Fatalf("expected 1 statement, got %d", len(stmts))
+				}
+				stmt, ok := stmts[0].(*VacuumStmt)
+				if !ok {
+					t.Fatalf("expected VacuumStmt, got %T", stmts[0])
+				}
+				if stmt.IntoParam != tt.wantParam {
+					t.Errorf("IntoParam = %v, want %v", stmt.IntoParam, tt.wantParam)
+				}
+			}
+		})
+	}
+}

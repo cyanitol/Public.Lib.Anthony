@@ -554,3 +554,25 @@ func TestVdbeCommentEmpty(t *testing.T) {
 	// Should not panic
 	vdbe.Comment("test")
 }
+
+// TestParseReleaseReg tests releasing a register
+func TestParseReleaseReg(t *testing.T) {
+	p := &Parse{Mem: 10}
+	// This is a no-op in the current implementation but should not panic
+	p.ReleaseReg(5)
+	// Verify state is unchanged
+	if p.Mem != 10 {
+		t.Errorf("ReleaseReg should not modify Mem, got %d, want 10", p.Mem)
+	}
+}
+
+// TestParseReleaseRegs tests releasing multiple registers
+func TestParseReleaseRegs(t *testing.T) {
+	p := &Parse{Mem: 10}
+	// This is a no-op in the current implementation but should not panic
+	p.ReleaseRegs(3, 5)
+	// Verify state is unchanged
+	if p.Mem != 10 {
+		t.Errorf("ReleaseRegs should not modify Mem, got %d, want 10", p.Mem)
+	}
+}
