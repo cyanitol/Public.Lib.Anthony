@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 
@@ -143,6 +144,16 @@ func (d *Driver) newMemoryDBState() (*dbState, error) {
 
 // createConnection creates a new connection with the given state.
 func (d *Driver) createConnection(filename string, state *dbState, existed bool) (driver.Conn, error) {
+	// Create security config with database directory as sandbox root
+	secCfg := security.DefaultSecurityConfig()
+	if filename != "" && filename != ":memory:" {
+		// Set the database directory as the sandbox root for file operations
+		dbDir := filepath.Dir(filename)
+		if dbDir != "" && dbDir != "." {
+			secCfg.DatabaseRoot = dbDir
+		}
+	}
+
 	conn := &Conn{
 		driver:         d,
 		filename:       filename,
@@ -151,7 +162,7 @@ func (d *Driver) createConnection(filename string, state *dbState, existed bool)
 		schema:         state.schema,
 		dbRegistry:     schema.NewDatabaseRegistry(),
 		stmts:          make(map[*Stmt]struct{}),
-		securityConfig: security.DefaultSecurityConfig(),
+		securityConfig: secCfg,
 	}
 	if err := conn.openDatabase(existed); err != nil {
 		d.releaseState(filename, state)

@@ -81,9 +81,9 @@ func TestGetPageConcurrentAccess(t *testing.T) {
 	bt := NewBtree(4096)
 	provider := NewSafetyTestProvider()
 
-	// Create a valid test page
+	// Create a valid test page (use page 2, not 1, to avoid file header offset)
 	validPage := createValidLeafPage(4096)
-	provider.AddPage(1, validPage)
+	provider.AddPage(2, validPage)
 	bt.Provider = provider
 
 	const numGoroutines = 100
@@ -95,7 +95,7 @@ func TestGetPageConcurrentAccess(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			page, err := bt.GetPage(1)
+			page, err := bt.GetPage(2)
 			if err != nil {
 				t.Errorf("GetPage failed: %v", err)
 				return
@@ -111,7 +111,7 @@ func TestGetPageConcurrentAccess(t *testing.T) {
 
 	// Verify the page was only loaded once (should be in cache now)
 	bt.mu.RLock()
-	if _, ok := bt.Pages[1]; !ok {
+	if _, ok := bt.Pages[2]; !ok {
 		t.Error("Page should be cached after concurrent access")
 	}
 	bt.mu.RUnlock()
@@ -132,12 +132,13 @@ func TestGetPageDoubleCheckPattern(t *testing.T) {
 	bt := NewBtree(4096)
 	provider := NewSafetyTestProvider()
 
+	// Use page 2, not 1, to avoid file header offset issues
 	validPage := createValidLeafPage(4096)
-	provider.AddPage(1, validPage)
+	provider.AddPage(2, validPage)
 	bt.Provider = provider
 
 	// First call should load from provider
-	_, err := bt.GetPage(1)
+	_, err := bt.GetPage(2)
 	if err != nil {
 		t.Fatalf("GetPage failed: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestGetPageDoubleCheckPattern(t *testing.T) {
 	}
 
 	// Second call should use cache
-	_, err = bt.GetPage(1)
+	_, err = bt.GetPage(2)
 	if err != nil {
 		t.Fatalf("GetPage failed: %v", err)
 	}
@@ -240,7 +241,8 @@ func TestPageValidation(t *testing.T) {
 			bt := NewBtree(4096)
 			page := tt.setupPage()
 
-			err := bt.validatePage(page, 1)
+			// Use page 2, not 1, to avoid file header offset issues
+			err := bt.validatePage(page, 2)
 			if tt.wantErr {
 				if err == nil {
 					t.Error("Expected error but got none")
@@ -259,21 +261,21 @@ func TestPageValidationWithProvider(t *testing.T) {
 	bt := NewBtree(4096)
 	provider := NewSafetyTestProvider()
 
-	// Add a corrupted page with invalid type
+	// Add a corrupted page with invalid type (use page 2, not 1)
 	corruptedPage := make([]byte, 4096)
 	corruptedPage[0] = 0xFF // Invalid page type
-	provider.AddPage(1, corruptedPage)
+	provider.AddPage(2, corruptedPage)
 
 	bt.Provider = provider
 
-	_, err := bt.GetPage(1)
+	_, err := bt.GetPage(2)
 	if err == nil {
 		t.Error("Expected error for corrupted page")
 	}
 
 	// Verify the corrupted page was NOT cached
 	bt.mu.RLock()
-	if _, ok := bt.Pages[1]; ok {
+	if _, ok := bt.Pages[2]; ok {
 		t.Error("Corrupted page should not be cached")
 	}
 	bt.mu.RUnlock()
@@ -373,8 +375,8 @@ func TestConcurrentPageAccess(t *testing.T) {
 	bt := NewBtree(4096)
 	provider := NewSafetyTestProvider()
 
-	// Create multiple valid pages
-	for i := uint32(1); i <= 10; i++ {
+	// Create multiple valid pages (use pages 2-11, not 1, to avoid file header offset)
+	for i := uint32(2); i <= 11; i++ {
 		validPage := createValidLeafPage(4096)
 		provider.AddPage(i, validPage)
 	}
@@ -388,8 +390,8 @@ func TestConcurrentPageAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 
-			// Access random pages
-			pageNum := uint32((id % 10) + 1)
+			// Access random pages (2-11)
+			pageNum := uint32((id % 10) + 2)
 			_, err := bt.GetPage(pageNum)
 			if err != nil {
 				t.Errorf("GetPage(%d) failed: %v", pageNum, err)
@@ -444,8 +446,9 @@ func TestRaceConditionInGetPage(t *testing.T) {
 	bt := NewBtree(4096)
 	provider := NewSafetyTestProvider()
 
+	// Use page 2, not 1, to avoid file header offset issues
 	validPage := createValidLeafPage(4096)
-	provider.AddPage(1, validPage)
+	provider.AddPage(2, validPage)
 	bt.Provider = provider
 
 	// Multiple goroutines racing to load the same page
@@ -458,7 +461,7 @@ func TestRaceConditionInGetPage(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		go func(idx int) {
 			defer wg.Done()
-			page, err := bt.GetPage(1)
+			page, err := bt.GetPage(2)
 			if err != nil {
 				t.Errorf("GetPage failed: %v", err)
 				return
@@ -478,7 +481,7 @@ func TestRaceConditionInGetPage(t *testing.T) {
 
 	// Should only be one copy in cache
 	bt.mu.RLock()
-	cachedPage := bt.Pages[1]
+	cachedPage := bt.Pages[2]
 	bt.mu.RUnlock()
 
 	for i := 0; i < len(results); i++ {

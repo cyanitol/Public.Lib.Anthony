@@ -76,13 +76,12 @@ func (s *Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (drive
 	}
 	s.mu.Unlock()
 
-	// Check connection state under lock to avoid TOCTOU race
+	// Lock connection for entire execution to prevent concurrent access to pager
 	s.conn.mu.Lock()
-	inTx := s.conn.inTx
-	connClosed := s.conn.closed
-	s.conn.mu.Unlock()
+	defer s.conn.mu.Unlock()
 
-	if connClosed {
+	inTx := s.conn.inTx
+	if s.conn.closed {
 		return nil, driver.ErrBadConn
 	}
 

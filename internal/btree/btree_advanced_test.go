@@ -225,7 +225,8 @@ func TestGetPage_WithProvider(t *testing.T) {
 	// Add page to provider
 	pageNum := uint32(10)
 	expectedData := make([]byte, 4096)
-	expectedData[0] = 42
+	expectedData[0] = PageTypeLeafTable // Use valid page type
+	expectedData[100] = 42              // Use different byte for testing data retrieval
 	mockProvider.pages[pageNum] = expectedData
 
 	// Get page (should fetch from provider and cache it)
@@ -234,7 +235,7 @@ func TestGetPage_WithProvider(t *testing.T) {
 		t.Fatalf("GetPage() error = %v", err)
 	}
 
-	if data[0] != 42 {
+	if data[100] != 42 {
 		t.Error("GetPage() should return data from provider")
 	}
 
@@ -249,7 +250,7 @@ func TestGetPage_WithProvider(t *testing.T) {
 		t.Fatalf("Second GetPage() error = %v", err)
 	}
 
-	if data2[0] != 42 {
+	if data2[100] != 42 {
 		t.Error("Second GetPage() should return cached data")
 	}
 }

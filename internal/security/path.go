@@ -83,7 +83,11 @@ func resolveSandboxPath(path string, config *SecurityConfig) (string, error) {
 	// Get the sandbox root
 	sandboxRoot := config.DatabaseRoot
 	if sandboxRoot == "" {
-		// No sandbox root configured, allow all paths (sandbox not effectively enforced)
+		// No sandbox root configured - if absolute paths are blocked, reject them
+		// Otherwise allow relative paths only
+		if config.BlockAbsolutePaths && filepath.IsAbs(path) {
+			return "", ErrAbsolutePath
+		}
 		return filepath.Clean(path), nil
 	}
 

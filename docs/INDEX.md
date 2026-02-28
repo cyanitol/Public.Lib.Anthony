@@ -4,181 +4,70 @@ This is the complete documentation index for the Anthony pure Go SQLite implemen
 
 ## Getting Started
 
-- **[QUICKSTART.md](QUICKSTART.md)** - Quick start guide for using Anthony SQLite
-- **[API.md](API.md)** - Complete public API documentation
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Overall architecture and design
+- **[QUICKSTART.md](QUICKSTART.md)** - Quick start guide with code examples
+- **[API.md](API.md)** - Complete public API documentation and usage guide
+- **[README.md](README.md)** - Documentation overview and navigation guide
 - **[README (root)](../README.md)** - Project overview and installation
 - **[CONTRIBUTING (root)](../CONTRIBUTING.md)** - Contributor guidelines and development workflow
 
-## Core Package Documentation
+## Architecture
 
-### Storage Layer
+Core architecture and system design documentation:
 
-- **[btree](internal/btree/README.md)** - B-tree storage engine
-  - Variable-length integer encoding
-  - Page structure and cell parsing
-  - Cursor operations and navigation
-  - Page splitting and tree growth
-  - Integrity checking
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - High-level architecture, component overview, and design decisions
+- **[LOCK_ORDERING.md](LOCK_ORDERING.md)** - Concurrency control and lock ordering hierarchy for thread safety
 
-- **[pager](internal/pager/README.md)** - Page cache, journal, and transaction management
-  - Page caching and I/O
-  - Transaction support
-  - Write-Ahead Logging (WAL)
-  - Lock management
+## Security
 
-- **[format](internal/format/README.md)** - SQLite file format utilities
-  - Database file header
-  - Page types and structures
-  - Format validation
+Security model, controls, and best practices:
 
-### Query Processing
+- **[SECURITY.md](SECURITY.md)** - Comprehensive security guide
+  - Layered security architecture (Pattern blocking, Sandbox, Allowlist, File permissions)
+  - SecurityConfig configuration and examples
+  - Input validation and resource limits
+  - Integer safety and buffer safety
+  - Concurrency safety and best practices
+  - Security testing and vulnerability reporting
+- **[SECURITY_AUDIT_PLAN.md](SECURITY_AUDIT_PLAN.md)** - Security audit planning document
+- **[SECURITY_AUDIT_IMPLEMENTATION.md](SECURITY_AUDIT_IMPLEMENTATION.md)** - Security implementation details and audit results
 
-- **[parser](internal/parser/README.md)** - SQL lexer, parser, and AST
-  - Lexical analysis
-  - Syntax parsing
-  - Abstract Syntax Tree (AST)
-  - SQL statement support
+## SQL Features
 
-- **[planner](internal/planner/README.md)** - Query optimizer
-  - Query plan generation
-  - Cost-based optimization
-  - Common Table Expressions (CTEs)
-  - Join optimization
+### Query Processing Features
 
-- **[sql](internal/sql/README.md)** - SQL statement compilation
-  - SELECT, INSERT, UPDATE, DELETE
-  - DDL operations (CREATE TABLE, DROP TABLE, ALTER TABLE)
-  - Compound queries (UNION, INTERSECT, EXCEPT)
-  - Subqueries
+#### Common Table Expressions (CTEs)
+- **[CTE_USAGE_GUIDE.md](CTE_USAGE_GUIDE.md)** - User guide with examples and best practices
+- **[CTE_IMPLEMENTATION_SUMMARY.md](CTE_IMPLEMENTATION_SUMMARY.md)** - Complete implementation details
+- **[CTE_QUICK_REFERENCE.md](CTE_QUICK_REFERENCE.md)** - Quick syntax reference
+- **[CTE_AST_STRUCTURE.md](CTE_AST_STRUCTURE.md)** - AST structure and parsing details
 
-### Execution Engine
+#### Subqueries
+- **[SUBQUERY_ARCHITECTURE.md](SUBQUERY_ARCHITECTURE.md)** - Architecture and design patterns
+- **[SUBQUERY_IMPLEMENTATION.md](SUBQUERY_IMPLEMENTATION.md)** - Implementation guide and technical details
+- **[SUBQUERY_QUICK_REFERENCE.md](SUBQUERY_QUICK_REFERENCE.md)** - Quick syntax reference
+- **[SUBQUERY_CHECKLIST.md](SUBQUERY_CHECKLIST.md)** - Development checklist and status
 
-- **[vdbe](internal/vdbe/README.md)** - Virtual Database Engine (bytecode VM)
-  - Bytecode instruction set
-  - Memory cells and type system
-  - Cursor operations
-  - Program execution
-
-- **[expr](internal/expr/README.md)** - Expression evaluation
-  - Expression compilation to bytecode
-  - Type conversions
-  - Operator support
-  - Code generation
-
-- **[functions](internal/functions/README.md)** - Built-in SQL functions
-  - Scalar functions (string, math, date)
-  - Aggregate functions (SUM, COUNT, AVG, etc.)
-  - Function registration and execution
-
-### Database Interface
-
-- **[driver](internal/driver/README.md)** - database/sql driver interface
-  - Go database/sql compatibility
-  - Connection management
-  - Statement preparation and execution
-  - Transaction support
-
-- **[engine](internal/engine/README.md)** - Query execution engine
-  - Query coordination
-  - Result set management
-  - Error handling
-
-### Data Management
-
-- **[schema](internal/schema/README.md)** - Database schema management
-  - Table and column definitions
-  - Type affinity
-  - sqlite_master table
-  - Index management
-
-- **[constraint](internal/constraint/README.md)** - SQL constraint enforcement
-  - CHECK constraints
-  - UNIQUE constraints
-  - Collation sequences
-  - Constraint validation
-
-### Utilities
-
-- **[utf](internal/utf/README.md)** - UTF-8/UTF-16 encoding and collation
-  - Character encoding conversion
-  - String comparison
-  - Unicode support
-
-- **[collation](internal/collation/README.md)** - Collation sequences
-  - Built-in collations (BINARY, NOCASE, RTRIM)
-  - Custom collation registration
-  - String comparison functions
-
-- **[vtab](internal/vtab/README.md)** - Virtual table support
-  - Virtual table modules
-  - Cursor interface
-  - Index planning
-
-## Feature Documentation
-
-### SQL Features
-
-- **[Common Table Expressions](CTE_USAGE_GUIDE.md)** - WITH clause and CTEs
-- **[Subqueries](SUBQUERY_ARCHITECTURE.md)** - Subquery implementation
-- **[Triggers](TRIGGER_INTEGRATION_REPORT.md)** - Trigger support
-- **[VACUUM](VACUUM_USAGE.md)** - Database compaction
+#### Compound SELECT Operations
+- **[COMPOUND_SELECT_QUICK_REFERENCE.md](COMPOUND_SELECT_QUICK_REFERENCE.md)** - UNION, INTERSECT, EXCEPT reference
+- **[COMPOUND_SELECT_BYTECODE_FLOW.md](COMPOUND_SELECT_BYTECODE_FLOW.md)** - Bytecode implementation and execution flow
+- **[INTERSECT_EXCEPT_IMPLEMENTATION.md](INTERSECT_EXCEPT_IMPLEMENTATION.md)** - INTERSECT/EXCEPT implementation details
 
 ### DDL Operations
 
-- **[ALTER TABLE](ALTER_TABLE_QUICK_REFERENCE.md)** - ALTER TABLE operations
-- **[ATTACH/DETACH](ATTACH_DETACH_IMPLEMENTATION.md)** - Multi-database support
-- **[PRAGMA](PRAGMA_QUICK_REFERENCE.md)** - Database configuration
+- **[DDL_IMPLEMENTATION_REPORT.md](DDL_IMPLEMENTATION_REPORT.md)** - DDL operations implementation and status
+- **[ALTER_TABLE_QUICK_REFERENCE.md](ALTER_TABLE_QUICK_REFERENCE.md)** - ALTER TABLE syntax and operations
+- **[ATTACH_DETACH_IMPLEMENTATION.md](ATTACH_DETACH_IMPLEMENTATION.md)** - Multi-database support (ATTACH/DETACH)
 
-### DML Operations
+### Database Operations
 
-- **[Compound SELECT](COMPOUND_SELECT_QUICK_REFERENCE.md)** - UNION, INTERSECT, EXCEPT
-- **[INSERT/UPDATE/DELETE](DDL_IMPLEMENTATION_REPORT.md)** - Data modification
+- **[PRAGMA_QUICK_REFERENCE.md](PRAGMA_QUICK_REFERENCE.md)** - PRAGMA quick reference and configuration
+- **[PRAGMA_IMPLEMENTATION_SUMMARY.md](PRAGMA_IMPLEMENTATION_SUMMARY.md)** - PRAGMA implementation details
+- **[VACUUM_USAGE.md](VACUUM_USAGE.md)** - VACUUM usage guide and best practices
+- **[VACUUM_IMPLEMENTATION.md](VACUUM_IMPLEMENTATION.md)** - VACUUM implementation details
 
-### System Operations
+### Advanced Features
 
-- **[EXPLAIN](PHASE2_EXPLAIN_SUMMARY.md)** - Query plan explanation
-- **[Lock Ordering](LOCK_ORDERING.md)** - Concurrency control
-- **[SECURITY](SECURITY.md)** - Security model, controls, and best practices
-
-## Implementation Status
-
-### Phase 1 - Core Infrastructure
-- B-tree storage engine
-- Page management
-- Basic SQL parsing
-- VDBE bytecode engine
-
-### Phase 2 - SQL Features (Current)
-- Comprehensive constraint support
-- Advanced SELECT features (CTEs, subqueries)
-- Transaction management
-- Full DDL support
-
-### Phase 3 - Advanced Features (Planned)
-- Triggers
-- Views
-- Full-text search
-- Virtual tables
-
-## Development Documentation
-
-### Contributor Guide
-- **[CONTRIBUTING (root)](../CONTRIBUTING.md)** - Complete contributor documentation
-  - Code style guidelines
-  - Pull request process
-  - Commit message format
-  - Security considerations
-  - Testing requirements
-
-### Implementation Guides
-- **[CTE Implementation Status](CTE_IMPLEMENTATION_STATUS.md)**
-- **[Subquery Implementation](SUBQUERY_IMPLEMENTATION.md)**
-- **[Compound SELECT Implementation](COMPOUND_SELECT_BYTECODE_FLOW.md)**
-
-### Checklists
-- **[Subquery Checklist](SUBQUERY_CHECKLIST.md)**
-- **[DDL Implementation Report](DDL_IMPLEMENTATION_REPORT.md)**
+- **[TRIGGER_INTEGRATION_REPORT.md](TRIGGER_INTEGRATION_REPORT.md)** - Trigger support implementation and status
 
 ## Testing
 
@@ -186,24 +75,13 @@ This is the complete documentation index for the Anthony pure Go SQLite implemen
   - Unit, integration, and security tests
   - Race detection and fuzz testing
   - Coverage goals and reporting
+  - Running specific tests
+  - Continuous integration guidelines
   - Troubleshooting and best practices
 
-Each package includes comprehensive tests. Quick reference:
+## Development
 
-```bash
-# All tests
-go test ./...
-
-# With coverage
-make test-cover
-
-# Race detection
-make test-race
-
-# See TESTING.md for detailed testing guide
-```
-
-## Contributing
+### Contributing
 
 See **[CONTRIBUTING.md](../CONTRIBUTING.md)** for complete contributor guidelines.
 
@@ -212,10 +90,108 @@ When adding new features or fixing bugs:
 1. Read the relevant package documentation
 2. Understand the SQLite specification
 3. Write tests first (TDD approach)
-4. Keep cyclomatic complexity ≤ 10
+4. Keep cyclomatic complexity <= 10
 5. Document all public APIs
 6. Update this INDEX.md if adding new documentation
 7. Follow security best practices in [SECURITY.md](SECURITY.md)
+8. Review lock ordering requirements in [LOCK_ORDERING.md](LOCK_ORDERING.md)
+
+### Documentation Organization
+
+Documentation files follow these naming patterns:
+
+- `*_QUICK_REFERENCE.md` - Concise syntax references
+- `*_USAGE.md` - User guides with examples
+- `*_IMPLEMENTATION*.md` - Technical implementation details
+- `*_SUMMARY.md` - High-level overviews
+- `*_CHECKLIST.md` - Development task lists
+- `*_REPORT.md` - Detailed status reports
+- `*_ARCHITECTURE.md` - Architectural documentation
+- `*_STRUCTURE.md` - Structure and format documentation
+- `*_FLOW.md` - Process and data flow documentation
+
+### Internal Package Documentation
+
+Note: Detailed package READMEs that were previously in docs/internal/ have been moved to the attic. For the most up-to-date package documentation, refer to the godoc comments in the source code or generate documentation using:
+
+```bash
+# Generate and view package documentation
+go doc -all github.com/JuniperBible/Public.Lib.Anthony/internal/driver
+go doc -all github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe
+# etc.
+```
+
+**Core Packages:**
+- `internal/driver` - database/sql driver interface
+- `internal/engine` - Query execution engine
+- `internal/parser` - SQL lexer, parser, and AST
+- `internal/planner` - Query optimizer
+- `internal/sql` - SQL statement compilation
+- `internal/vdbe` - Virtual Database Engine (bytecode VM)
+- `internal/expr` - Expression evaluation
+- `internal/functions` - Built-in SQL functions
+- `internal/btree` - B-tree storage engine
+- `internal/pager` - Page cache and transaction management
+- `internal/schema` - Database schema management
+- `internal/constraint` - SQL constraint enforcement
+- `internal/format` - SQLite file format utilities
+- `internal/utf` - UTF-8/UTF-16 encoding and collation
+- `internal/collation` - Collation sequences
+- `internal/vtab` - Virtual table support
+- `internal/security` - Security controls and validation
+
+## Quick Reference by Use Case
+
+### For Users
+
+**Getting Started:**
+- [QUICKSTART.md](QUICKSTART.md) - Start here for basic usage
+- [API.md](API.md) - Complete API reference
+
+**SQL Features:**
+- [CTE_USAGE_GUIDE.md](CTE_USAGE_GUIDE.md) - Common Table Expressions
+- [VACUUM_USAGE.md](VACUUM_USAGE.md) - Database maintenance
+- [CTE_QUICK_REFERENCE.md](CTE_QUICK_REFERENCE.md) - CTE syntax
+- [SUBQUERY_QUICK_REFERENCE.md](SUBQUERY_QUICK_REFERENCE.md) - Subquery syntax
+- [COMPOUND_SELECT_QUICK_REFERENCE.md](COMPOUND_SELECT_QUICK_REFERENCE.md) - UNION/INTERSECT/EXCEPT
+- [ALTER_TABLE_QUICK_REFERENCE.md](ALTER_TABLE_QUICK_REFERENCE.md) - ALTER TABLE syntax
+- [PRAGMA_QUICK_REFERENCE.md](PRAGMA_QUICK_REFERENCE.md) - PRAGMA configuration
+
+### For Developers
+
+**Understanding the System:**
+- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture overview
+- [LOCK_ORDERING.md](LOCK_ORDERING.md) - Concurrency and thread safety
+
+**Implementation Details:**
+- [CTE_IMPLEMENTATION_SUMMARY.md](CTE_IMPLEMENTATION_SUMMARY.md) - CTE implementation
+- [SUBQUERY_IMPLEMENTATION.md](SUBQUERY_IMPLEMENTATION.md) - Subquery implementation
+- [INTERSECT_EXCEPT_IMPLEMENTATION.md](INTERSECT_EXCEPT_IMPLEMENTATION.md) - Set operations
+- [ATTACH_DETACH_IMPLEMENTATION.md](ATTACH_DETACH_IMPLEMENTATION.md) - Multi-database support
+- [PRAGMA_IMPLEMENTATION_SUMMARY.md](PRAGMA_IMPLEMENTATION_SUMMARY.md) - PRAGMA implementation
+- [VACUUM_IMPLEMENTATION.md](VACUUM_IMPLEMENTATION.md) - VACUUM implementation
+- [DDL_IMPLEMENTATION_REPORT.md](DDL_IMPLEMENTATION_REPORT.md) - DDL feature status
+
+**Architecture Details:**
+- [SUBQUERY_ARCHITECTURE.md](SUBQUERY_ARCHITECTURE.md) - Subquery design patterns
+- [CTE_AST_STRUCTURE.md](CTE_AST_STRUCTURE.md) - CTE AST structure
+- [COMPOUND_SELECT_BYTECODE_FLOW.md](COMPOUND_SELECT_BYTECODE_FLOW.md) - Compound query execution
+
+**Development Tracking:**
+- [SUBQUERY_CHECKLIST.md](SUBQUERY_CHECKLIST.md) - Subquery development checklist
+- [TRIGGER_INTEGRATION_REPORT.md](TRIGGER_INTEGRATION_REPORT.md) - Trigger implementation status
+
+### For Contributors
+
+**Essential Reading:**
+- [CONTRIBUTING.md](../CONTRIBUTING.md) - Contribution guidelines
+- [SECURITY.md](SECURITY.md) - Security requirements
+- [TESTING.md](TESTING.md) - Testing practices
+- [LOCK_ORDERING.md](LOCK_ORDERING.md) - Concurrency rules
+
+**Security:**
+- [SECURITY_AUDIT_PLAN.md](SECURITY_AUDIT_PLAN.md) - Security audit scope
+- [SECURITY_AUDIT_IMPLEMENTATION.md](SECURITY_AUDIT_IMPLEMENTATION.md) - Security implementation
 
 ## References
 
@@ -229,6 +205,11 @@ When adding new features or fixing bugs:
 - Knuth, "The Art of Computer Programming, Volume 3"
 - Bayer & McCreight, "Organization and Maintenance of Large Ordered Indexes"
 - SQLite source code (public domain)
+
+### Go Documentation
+- [Go database/sql package](https://pkg.go.dev/database/sql)
+- [Go testing package](https://pkg.go.dev/testing)
+- [Go fuzzing](https://go.dev/doc/fuzz/)
 
 ## License
 

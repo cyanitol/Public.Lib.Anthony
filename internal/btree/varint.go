@@ -36,12 +36,11 @@ func PutVarint(p []byte, v uint64) int {
 
 // putVarint64 handles the general case of encoding a 64-bit varint
 func putVarint64(p []byte, v uint64) int {
-	// Validate buffer length for worst case (9 bytes)
-	if len(p) < 9 {
-		return 0
-	}
-
+	// Check for 9-byte case first (values with top bits set)
 	if v&(uint64(0xff000000)<<32) != 0 {
+		if len(p) < 9 {
+			return 0
+		}
 		// 9-byte case: all 8 bits of the 9th byte are used
 		p[8] = byte(v)
 		v >>= 8
@@ -59,6 +58,11 @@ func putVarint64(p []byte, v uint64) int {
 	for temp > 0 {
 		n++
 		temp >>= 7
+	}
+
+	// Validate we have enough buffer space
+	if len(p) < n {
+		return 0
 	}
 
 	// Encode from most significant to least significant
