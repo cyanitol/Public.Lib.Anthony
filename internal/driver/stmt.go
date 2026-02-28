@@ -1366,7 +1366,9 @@ func (s *Stmt) initializeAggregateAccumulators(vm *vdbe.VDBE, stmt *parser.Selec
 			vm.AddOp(vdbe.OpNull, 0, accRegs[i], 0)
 			avgCountRegs[i] = gen.AllocReg()
 			vm.AddOp(vdbe.OpInteger, 0, avgCountRegs[i], 0)
-		case "SUM", "MIN", "MAX", "TOTAL":
+		case "TOTAL":
+			vm.AddOpWithP4Real(vdbe.OpReal, 0, accRegs[i], 0, 0.0)
+		case "SUM", "MIN", "MAX":
 			vm.AddOp(vdbe.OpNull, 0, accRegs[i], 0)
 		}
 	}
