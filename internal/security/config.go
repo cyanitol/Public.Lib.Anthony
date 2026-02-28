@@ -27,3 +27,26 @@ func DefaultSecurityConfig() *SecurityConfig {
 		MaxAttachedDBs:     10,
 	}
 }
+
+// Clone creates a deep copy of the SecurityConfig.
+func (c *SecurityConfig) Clone() *SecurityConfig {
+	if c == nil {
+		return nil
+	}
+	clone := &SecurityConfig{
+		DatabaseRoot:       c.DatabaseRoot,
+		BlockNullBytes:     c.BlockNullBytes,
+		BlockTraversal:     c.BlockTraversal,
+		BlockSymlinks:      c.BlockSymlinks,
+		BlockAbsolutePaths: c.BlockAbsolutePaths,
+		EnforceSandbox:     c.EnforceSandbox,
+		CreateMode:         c.CreateMode,
+		DirMode:            c.DirMode,
+		MaxAttachedDBs:     c.MaxAttachedDBs,
+	}
+	if len(c.AllowedSubdirs) > 0 {
+		clone.AllowedSubdirs = make([]string, len(c.AllowedSubdirs))
+		copy(clone.AllowedSubdirs, c.AllowedSubdirs)
+	}
+	return clone
+}

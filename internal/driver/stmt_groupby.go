@@ -104,7 +104,7 @@ func (s *Stmt) updateGroupAccumulators(vm *vdbe.VDBE, gen *expr.CodeGenerator, s
 			continue
 		}
 		fnExpr := col.Expr.(*parser.FunctionExpr)
-		s.emitSingleAggregateUpdate(vm, fnExpr, table, state.accRegs[i], state.avgCountRegs[i], gen, 0)
+		s.emitSingleAggregateUpdate(vm, fnExpr, table, state.accRegs[i], state.avgCountRegs[i], gen)
 	}
 }
 

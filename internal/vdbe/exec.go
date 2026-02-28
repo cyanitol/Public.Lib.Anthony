@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/types"
 )
 
 // Step executes the VDBE program until a result row is ready or the program halts.
@@ -2065,9 +2066,9 @@ func (v *VDBE) execTransaction(instr *Instruction) error {
 		return fmt.Errorf("no pager context available")
 	}
 
-	pager, ok := v.Ctx.Pager.(PagerInterface)
+	pager, ok := v.Ctx.Pager.(types.PagerWriter)
 	if !ok {
-		return fmt.Errorf("pager does not implement PagerInterface")
+		return fmt.Errorf("pager does not implement types.PagerWriter")
 	}
 
 	// P2 != 0 means write transaction
@@ -2083,9 +2084,9 @@ func (v *VDBE) execCommit(instr *Instruction) error {
 		return fmt.Errorf("no pager context available")
 	}
 
-	pager, ok := v.Ctx.Pager.(PagerInterface)
+	pager, ok := v.Ctx.Pager.(types.PagerWriter)
 	if !ok {
-		return fmt.Errorf("pager does not implement PagerInterface")
+		return fmt.Errorf("pager does not implement types.PagerWriter")
 	}
 
 	// Check if we're in a write transaction
@@ -2107,9 +2108,9 @@ func (v *VDBE) execRollback(instr *Instruction) error {
 		return fmt.Errorf("no pager context available")
 	}
 
-	pager, ok := v.Ctx.Pager.(PagerInterface)
+	pager, ok := v.Ctx.Pager.(types.PagerWriter)
 	if !ok {
-		return fmt.Errorf("pager does not implement PagerInterface")
+		return fmt.Errorf("pager does not implement types.PagerWriter")
 	}
 
 	// Check if we're in a write transaction
@@ -2133,9 +2134,9 @@ func (v *VDBE) execAutoCommit(instr *Instruction) error {
 		return fmt.Errorf("no pager context available")
 	}
 
-	pager, ok := v.Ctx.Pager.(PagerInterface)
+	pager, ok := v.Ctx.Pager.(types.PagerWriter)
 	if !ok {
-		return fmt.Errorf("pager does not implement PagerInterface")
+		return fmt.Errorf("pager does not implement types.PagerWriter")
 	}
 
 	if instr.P1 == 0 {
@@ -2180,14 +2181,14 @@ func (v *VDBE) execSavepoint(instr *Instruction) error {
 }
 
 // getSavepointPager gets the pager that supports savepoints
-func (v *VDBE) getSavepointPager() (SavepointPagerInterface, error) {
+func (v *VDBE) getSavepointPager() (types.SavepointPager, error) {
 	if v.Ctx == nil || v.Ctx.Pager == nil {
 		return nil, fmt.Errorf("no pager context available")
 	}
 
-	pager, ok := v.Ctx.Pager.(SavepointPagerInterface)
+	pager, ok := v.Ctx.Pager.(types.SavepointPager)
 	if !ok {
-		return nil, fmt.Errorf("pager does not implement SavepointPagerInterface")
+		return nil, fmt.Errorf("pager does not implement types.SavepointPager")
 	}
 
 	return pager, nil
@@ -2208,7 +2209,7 @@ func (v *VDBE) getSavepointName(instr *Instruction) (string, error) {
 }
 
 // executeSavepointOperation executes the savepoint operation
-func (v *VDBE) executeSavepointOperation(pager SavepointPagerInterface, operation int, name string) error {
+func (v *VDBE) executeSavepointOperation(pager types.SavepointPager, operation int, name string) error {
 	switch operation {
 	case 0:
 		return pager.Savepoint(name)
@@ -2230,9 +2231,9 @@ func (v *VDBE) execVerifyCookie(instr *Instruction) error {
 		return fmt.Errorf("no pager context available")
 	}
 
-	pager, ok := v.Ctx.Pager.(CookiePagerInterface)
+	pager, ok := v.Ctx.Pager.(types.CookiePager)
 	if !ok {
-		return fmt.Errorf("pager does not implement CookiePagerInterface")
+		return fmt.Errorf("pager does not implement types.CookiePager")
 	}
 
 	// Get the current cookie value
@@ -2259,9 +2260,9 @@ func (v *VDBE) execSetCookie(instr *Instruction) error {
 		return fmt.Errorf("no pager context available")
 	}
 
-	pager, ok := v.Ctx.Pager.(CookiePagerInterface)
+	pager, ok := v.Ctx.Pager.(types.CookiePager)
 	if !ok {
-		return fmt.Errorf("pager does not implement CookiePagerInterface")
+		return fmt.Errorf("pager does not implement types.CookiePager")
 	}
 
 	// Set the cookie value
