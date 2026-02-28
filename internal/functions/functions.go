@@ -3,6 +3,7 @@ package functions
 
 import (
 	"fmt"
+	"strings"
 )
 
 // Value represents a SQL value with its type.
@@ -280,26 +281,33 @@ func NewRegistry() *Registry {
 
 // Register registers a built-in function.
 // This is used for standard SQLite functions.
+// Function names are normalized to lowercase for case-insensitive lookup.
 func (r *Registry) Register(fn Function) {
-	r.builtins[fn.Name()] = fn
+	r.builtins[strings.ToLower(fn.Name())] = fn
 }
 
 // RegisterUser registers a user-defined function with overloading support.
 // numArgs should match fn.NumArgs() and is used for overloading.
+// Function names are normalized to lowercase for case-insensitive lookup.
 func (r *Registry) RegisterUser(fn Function, numArgs int) {
+	name := strings.ToLower(fn.Name())
 	if numArgs < 0 {
 		// Variadic function
-		r.variadicUser[fn.Name()] = fn
+		r.variadicUser[name] = fn
 	} else {
 		// Fixed-arg function with overloading
-		key := functionKey{name: fn.Name(), numArgs: numArgs}
+		key := functionKey{name: name, numArgs: numArgs}
 		r.userFuncs[key] = fn
 	}
 }
 
 // Unregister removes a user-defined function.
 // Returns true if a function was removed.
+// Function names are case-insensitive (converted to lowercase).
 func (r *Registry) Unregister(name string, numArgs int) bool {
+	// Normalize to lowercase for case-insensitive lookup
+	name = strings.ToLower(name)
+
 	if numArgs < 0 {
 		if _, ok := r.variadicUser[name]; ok {
 			delete(r.variadicUser, name)
@@ -319,7 +327,11 @@ func (r *Registry) Unregister(name string, numArgs int) bool {
 // Lookup finds a function by name.
 // User-defined functions are checked before built-in functions.
 // For user functions, exact argument count match is preferred.
+// Function names are case-insensitive (converted to lowercase).
 func (r *Registry) Lookup(name string) (Function, bool) {
+	// Normalize to lowercase for case-insensitive lookup
+	name = strings.ToLower(name)
+
 	// First check variadic user functions
 	if fn, ok := r.variadicUser[name]; ok {
 		return fn, true
@@ -339,7 +351,11 @@ func (r *Registry) Lookup(name string) (Function, bool) {
 //  1. User-defined function with exact arg count match
 //  2. User-defined variadic function
 //  3. Built-in function
+// Function names are case-insensitive (converted to lowercase).
 func (r *Registry) LookupWithArgs(name string, numArgs int) (Function, bool) {
+	// Normalize to lowercase for case-insensitive lookup
+	name = strings.ToLower(name)
+
 	// First try exact match in user functions
 	key := functionKey{name: name, numArgs: numArgs}
 	if fn, ok := r.userFuncs[key]; ok {

@@ -2873,9 +2873,21 @@ func (p *Parser) parseIdentOrFunction() (Expression, error) {
 
 // isExpressionIdentifier checks if the current token can be used as an identifier in an expression.
 // This includes regular identifiers and certain keywords that can be used as column/table names.
+// In SQLite, type names and many other keywords can be used as identifiers.
 func (p *Parser) isExpressionIdentifier() bool {
 	switch p.peek().Type {
-	case TK_ID, TK_TEMP:
+	case TK_ID, TK_TEMP,
+		// Type keywords that can be column names
+		TK_TEXT, TK_INTEGER_TYPE, TK_REAL, TK_BLOB_TYPE, TK_NUMERIC,
+		// Other common keywords that SQLite allows as identifiers
+		TK_KEY, TK_ABORT, TK_ACTION, TK_AFTER, TK_ANALYZE,
+		TK_ASC, TK_BEFORE, TK_CASCADE, TK_CONFLICT, TK_DATABASE,
+		TK_DEFERRED, TK_DESC, TK_EACH, TK_EXCLUSIVE, TK_FAIL,
+		TK_FOR, TK_IGNORE, TK_IMMEDIATE, TK_INITIALLY, TK_NO,
+		TK_OF, TK_PLAN, TK_PRAGMA, TK_QUERY, TK_RECURSIVE,
+		TK_REINDEX, TK_RELEASE, TK_RENAME, TK_REPLACE, TK_RESTRICT,
+		TK_ROW, TK_ROWID, TK_SAVEPOINT, TK_STRICT, TK_VACUUM,
+		TK_VIEW, TK_VIRTUAL, TK_WITHOUT:
 		return true
 	default:
 		return false

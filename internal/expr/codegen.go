@@ -98,6 +98,9 @@ func init() {
 		reflect.TypeOf((*parser.CollateExpr)(nil)): func(g *CodeGenerator, e parser.Expression) (int, error) {
 			return g.generateCollate(e.(*parser.CollateExpr))
 		},
+		reflect.TypeOf((*parser.ParenExpr)(nil)): func(g *CodeGenerator, e parser.Expression) (int, error) {
+			return g.GenerateExpr(e.(*parser.ParenExpr).Expr)
+		},
 	}
 }
 

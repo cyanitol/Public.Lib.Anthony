@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -13,6 +14,36 @@ import (
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
 )
+
+// dsnOptions holds parsed DSN options
+type dsnOptions struct {
+	filename string
+	readOnly bool
+}
+
+// parseDSN parses a SQLite DSN and extracts options.
+// Supports query parameters like ?mode=ro for read-only mode.
+func parseDSN(dsn string) dsnOptions {
+	opts := dsnOptions{filename: dsn}
+
+	// Check for query parameters
+	if idx := strings.Index(dsn, "?"); idx >= 0 {
+		opts.filename = dsn[:idx]
+		query := dsn[idx+1:]
+
+		// Parse simple query parameters
+		for _, param := range strings.Split(query, "&") {
+			if kv := strings.SplitN(param, "=", 2); len(kv) == 2 {
+				switch kv[0] {
+				case "mode":
+					opts.readOnly = kv[1] == "ro"
+				}
+			}
+		}
+	}
+
+	return opts
+}
 
 // dbState represents shared state for a database file
 type dbState struct {
@@ -54,7 +85,8 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 
 // OpenConnector returns a connector for the database.
 func (d *Driver) OpenConnector(name string) (driver.Conn, error) {
-	filename := name
+	opts := parseDSN(name)
+	filename := opts.filename
 	isMemory := filename == "" || filename == ":memory:"
 
 	d.mu.Lock()
@@ -72,7 +104,7 @@ func (d *Driver) OpenConnector(name string) (driver.Conn, error) {
 		return d.createMemoryConnection(memoryID, state)
 	}
 
-	state, exists := d.getOrCreateState(filename)
+	state, exists := d.getOrCreateState(filename, opts.readOnly)
 	if state == nil {
 		return nil, fmt.Errorf("failed to open database: state creation failed")
 	}
@@ -91,13 +123,13 @@ func (d *Driver) initMaps() {
 }
 
 // getOrCreateState gets or creates database state.
-func (d *Driver) getOrCreateState(filename string) (*dbState, bool) {
+func (d *Driver) getOrCreateState(filename string, readOnly bool) (*dbState, bool) {
 	state, exists := d.dbs[filename]
 	if exists {
 		state.refCnt++
 		return state, true
 	}
-	state, err := d.newDBState(filename)
+	state, err := d.newDBState(filename, readOnly)
 	if err != nil {
 		return nil, false
 	}
@@ -107,8 +139,8 @@ func (d *Driver) getOrCreateState(filename string) (*dbState, bool) {
 }
 
 // newDBState creates a new database state.
-func (d *Driver) newDBState(filename string) (*dbState, error) {
-	pgr, err := pager.Open(filename, false)
+func (d *Driver) newDBState(filename string, readOnly bool) (*dbState, error) {
+	pgr, err := pager.Open(filename, readOnly)
 	if err != nil {
 		return nil, err
 	}
