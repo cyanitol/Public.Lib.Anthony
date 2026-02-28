@@ -998,37 +998,37 @@ func (v *VDBE) execNotExists(instr *Instruction) error {
 		return err
 	}
 
-	btCursor := seekGetBtCursor(cursor)
-	if btCursor == nil {
-		// No cursor, rowid doesn't exist - jump
-		if instr.P2 > 0 {
-			v.PC = instr.P2
-		}
-		return nil
-	}
-
-	if err = btCursor.MoveToFirst(); err != nil {
-		// Empty table, rowid doesn't exist - jump
-		if instr.P2 > 0 {
-			v.PC = instr.P2
-		}
-		return nil
-	}
-
-	found, err := seekLinearScan(btCursor, rowidReg.IntValue())
+	found, err := v.checkRowidExists(cursor, rowidReg.IntValue())
 	if err != nil {
 		return err
 	}
 
 	if !found {
-		// Rowid doesn't exist - jump to P2
-		if instr.P2 > 0 {
-			v.PC = instr.P2
-		}
+		v.jumpToAddress(instr.P2)
 	}
-	// If found, don't jump (continue to next instruction)
 
 	return nil
+}
+
+// checkRowidExists checks if a rowid exists in the cursor's table
+func (v *VDBE) checkRowidExists(cursor *Cursor, rowid int64) (bool, error) {
+	btCursor := seekGetBtCursor(cursor)
+	if btCursor == nil {
+		return false, nil
+	}
+
+	if err := btCursor.MoveToFirst(); err != nil {
+		return false, nil
+	}
+
+	return seekLinearScan(btCursor, rowid)
+}
+
+// jumpToAddress performs a jump to the given address if it's valid
+func (v *VDBE) jumpToAddress(address int) {
+	if address > 0 {
+		v.PC = address
+	}
 }
 
 func (v *VDBE) execDeferredSeek(instr *Instruction) error {
@@ -1102,28 +1102,37 @@ func (v *VDBE) getColumnPayload(cursor *Cursor, dst *Mem) []byte {
 		return nil
 	}
 
-	// Handle pseudo-table cursors (for OLD/NEW in triggers)
 	if cursor.CurType == CursorPseudo {
-		// Get the record data from the pseudo register
-		pseudoMem, err := v.GetMem(cursor.PseudoReg)
-		if err != nil || pseudoMem.IsNull() {
-			dst.SetNull()
-			return nil
-		}
-		// The pseudo register should contain a blob (record)
-		if pseudoMem.IsBlob() {
-			return pseudoMem.BlobValue()
-		}
+		return v.getPseudoCursorPayload(cursor, dst)
+	}
+
+	return v.getBtreeCursorPayload(cursor, dst)
+}
+
+// getPseudoCursorPayload returns payload from a pseudo-table cursor
+func (v *VDBE) getPseudoCursorPayload(cursor *Cursor, dst *Mem) []byte {
+	pseudoMem, err := v.GetMem(cursor.PseudoReg)
+	if err != nil || pseudoMem.IsNull() {
 		dst.SetNull()
 		return nil
 	}
 
-	// Handle regular btree cursors
+	if pseudoMem.IsBlob() {
+		return pseudoMem.BlobValue()
+	}
+
+	dst.SetNull()
+	return nil
+}
+
+// getBtreeCursorPayload returns payload from a btree cursor
+func (v *VDBE) getBtreeCursorPayload(cursor *Cursor, dst *Mem) []byte {
 	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
 	if !ok || btCursor == nil {
 		dst.SetNull()
 		return nil
 	}
+
 	payload := btCursor.GetPayload()
 	if payload == nil {
 		dst.SetNull()
@@ -2106,37 +2115,58 @@ func (v *VDBE) execSavepoint(instr *Instruction) error {
 	// Create, release, or rollback to a savepoint
 	// P1: operation (0=begin, 1=release, 2=rollback)
 	// P4: savepoint name (string)
+	pager, err := v.getSavepointPager()
+	if err != nil {
+		return err
+	}
+
+	name, err := v.getSavepointName(instr)
+	if err != nil {
+		return err
+	}
+
+	return v.executeSavepointOperation(pager, instr.P1, name)
+}
+
+// getSavepointPager gets the pager that supports savepoints
+func (v *VDBE) getSavepointPager() (SavepointPagerInterface, error) {
 	if v.Ctx == nil || v.Ctx.Pager == nil {
-		return fmt.Errorf("no pager context available")
+		return nil, fmt.Errorf("no pager context available")
 	}
 
 	pager, ok := v.Ctx.Pager.(SavepointPagerInterface)
 	if !ok {
-		return fmt.Errorf("pager does not implement SavepointPagerInterface")
+		return nil, fmt.Errorf("pager does not implement SavepointPagerInterface")
 	}
 
-	// Get savepoint name from P4
+	return pager, nil
+}
+
+// getSavepointName extracts and validates the savepoint name from instruction
+func (v *VDBE) getSavepointName(instr *Instruction) (string, error) {
 	if instr.P4Type != P4Static && instr.P4Type != P4Dynamic {
-		return fmt.Errorf("savepoint name must be in P4 as string")
+		return "", fmt.Errorf("savepoint name must be in P4 as string")
 	}
+
 	name := instr.P4.Z
-
 	if name == "" {
-		return fmt.Errorf("savepoint name cannot be empty")
+		return "", fmt.Errorf("savepoint name cannot be empty")
 	}
 
-	switch instr.P1 {
+	return name, nil
+}
+
+// executeSavepointOperation executes the savepoint operation
+func (v *VDBE) executeSavepointOperation(pager SavepointPagerInterface, operation int, name string) error {
+	switch operation {
 	case 0:
-		// Begin savepoint
 		return pager.Savepoint(name)
 	case 1:
-		// Release savepoint
 		return pager.Release(name)
 	case 2:
-		// Rollback to savepoint
 		return pager.RollbackTo(name)
 	default:
-		return fmt.Errorf("invalid savepoint operation: %d", instr.P1)
+		return fmt.Errorf("invalid savepoint operation: %d", operation)
 	}
 }
 
@@ -2792,47 +2822,56 @@ func (v *VDBE) execAnd(instr *Instruction) error {
 	// - NULL AND FALSE = FALSE (0)
 	// - NULL AND TRUE = NULL
 	// - NULL AND NULL = NULL
-	left, err := v.GetMem(instr.P1)
+	left, right, result, err := v.getLogicalOperands(instr)
 	if err != nil {
 		return err
+	}
+
+	leftIsNull, leftBool := evalMemAsBool(left)
+	rightIsNull, rightBool := evalMemAsBool(right)
+
+	v.setLogicalAndResult(result, leftIsNull, leftBool, rightIsNull, rightBool)
+	return nil
+}
+
+// getLogicalOperands retrieves the operands and result for logical operations
+func (v *VDBE) getLogicalOperands(instr *Instruction) (*Mem, *Mem, *Mem, error) {
+	left, err := v.GetMem(instr.P1)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	right, err := v.GetMem(instr.P2)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 
 	result, err := v.GetMem(instr.P3)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 
-	// Evaluate operands as booleans
-	leftIsNull, leftBool := evalMemAsBool(left)
-	rightIsNull, rightBool := evalMemAsBool(right)
+	return left, right, result, nil
+}
 
-	// Apply SQLite logical AND semantics
+// setLogicalAndResult sets the result of a logical AND operation
+func (v *VDBE) setLogicalAndResult(result *Mem, leftIsNull, leftBool, rightIsNull, rightBool bool) {
 	if !leftIsNull && !leftBool {
-		// FALSE AND anything = FALSE
 		result.SetInt(0)
-		return nil
+		return
 	}
 
 	if !rightIsNull && !rightBool {
-		// anything AND FALSE = FALSE
 		result.SetInt(0)
-		return nil
+		return
 	}
 
 	if leftIsNull || rightIsNull {
-		// NULL involved (and no FALSE found) = NULL
 		result.SetNull()
-		return nil
+		return
 	}
 
-	// Both are TRUE
 	result.SetInt(1)
-	return nil
 }
 
 func (v *VDBE) execOr(instr *Instruction) error {
@@ -2844,47 +2883,36 @@ func (v *VDBE) execOr(instr *Instruction) error {
 	// - NULL OR TRUE = TRUE (1)
 	// - NULL OR FALSE = NULL
 	// - NULL OR NULL = NULL
-	left, err := v.GetMem(instr.P1)
+	left, right, result, err := v.getLogicalOperands(instr)
 	if err != nil {
 		return err
 	}
 
-	right, err := v.GetMem(instr.P2)
-	if err != nil {
-		return err
-	}
-
-	result, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
-	}
-
-	// Evaluate operands as booleans
 	leftIsNull, leftBool := evalMemAsBool(left)
 	rightIsNull, rightBool := evalMemAsBool(right)
 
-	// Apply SQLite logical OR semantics
+	v.setLogicalOrResult(result, leftIsNull, leftBool, rightIsNull, rightBool)
+	return nil
+}
+
+// setLogicalOrResult sets the result of a logical OR operation
+func (v *VDBE) setLogicalOrResult(result *Mem, leftIsNull, leftBool, rightIsNull, rightBool bool) {
 	if !leftIsNull && leftBool {
-		// TRUE OR anything = TRUE
 		result.SetInt(1)
-		return nil
+		return
 	}
 
 	if !rightIsNull && rightBool {
-		// anything OR TRUE = TRUE
 		result.SetInt(1)
-		return nil
+		return
 	}
 
 	if leftIsNull || rightIsNull {
-		// NULL involved (and no TRUE found) = NULL
 		result.SetNull()
-		return nil
+		return
 	}
 
-	// Both are FALSE
 	result.SetInt(0)
-	return nil
 }
 
 // evalMemAsBool evaluates a memory value as a boolean.

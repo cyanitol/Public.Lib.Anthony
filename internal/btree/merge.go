@@ -463,62 +463,78 @@ func (c *BtCursor) replaceSeparatorCell(parentBtreePage *BtreePage, separatorInd
 // CanMerge checks if two pages can be merged into one
 // Returns true if the combined cells would fit in a single page
 func CanMerge(leftPageData []byte, leftHeader *PageHeader, rightPageData []byte, rightHeader *PageHeader, usableSize uint32) (bool, error) {
-	// Both pages must be the same type
-	if leftHeader.PageType != rightHeader.PageType {
+	if !canMergePageTypes(leftHeader, rightHeader) {
 		return false, nil
 	}
 
-	// Both must be leaf pages (interior page merging is more complex)
-	if !leftHeader.IsLeaf || !rightHeader.IsLeaf {
-		return false, nil
-	}
-
-	// Calculate total cells
 	totalCells := leftHeader.NumCells + rightHeader.NumCells
-
-	// Calculate total cell content size
-	var totalContentSize int
-
-	// Calculate left page cell content size
-	for i := 0; i < int(leftHeader.NumCells); i++ {
-		cellOffset, err := leftHeader.GetCellPointer(leftPageData, i)
-		if err != nil {
-			return false, err
-		}
-
-		cell, err := ParseCell(leftHeader.PageType, leftPageData[cellOffset:], usableSize)
-		if err != nil {
-			return false, err
-		}
-
-		totalContentSize += int(cell.CellSize)
+	totalContentSize, err := calculateMergedContentSize(leftPageData, leftHeader, rightPageData, rightHeader, usableSize)
+	if err != nil {
+		return false, err
 	}
 
-	// Calculate right page cell content size
-	for i := 0; i < int(rightHeader.NumCells); i++ {
-		cellOffset, err := rightHeader.GetCellPointer(rightPageData, i)
-		if err != nil {
-			return false, err
-		}
-
-		cell, err := ParseCell(rightHeader.PageType, rightPageData[cellOffset:], usableSize)
-		if err != nil {
-			return false, err
-		}
-
-		totalContentSize += int(cell.CellSize)
-	}
-
-	// Calculate space needed
-	// Header size + cell pointer array + cell content
-	headerSize := leftHeader.HeaderSize
-	cellPointerSize := int(totalCells) * 2
-	totalNeeded := headerSize + cellPointerSize + totalContentSize
-
-	// Add some margin for safety (10%)
-	totalNeeded = totalNeeded * 110 / 100
-
+	totalNeeded := calculateTotalSpaceNeeded(leftHeader.HeaderSize, int(totalCells), totalContentSize)
 	return totalNeeded <= int(usableSize), nil
+}
+
+// canMergePageTypes checks if two pages have compatible types for merging
+func canMergePageTypes(leftHeader, rightHeader *PageHeader) bool {
+	if leftHeader.PageType != rightHeader.PageType {
+		return false
+	}
+	// Both must be leaf pages (interior page merging is more complex)
+	return leftHeader.IsLeaf && rightHeader.IsLeaf
+}
+
+// calculateMergedContentSize calculates total cell content size for both pages
+func calculateMergedContentSize(leftPageData []byte, leftHeader *PageHeader, rightPageData []byte, rightHeader *PageHeader, usableSize uint32) (int, error) {
+	leftSize, err := calculatePageContentSize(leftPageData, leftHeader, usableSize)
+	if err != nil {
+		return 0, err
+	}
+
+	rightSize, err := calculatePageContentSize(rightPageData, rightHeader, usableSize)
+	if err != nil {
+		return 0, err
+	}
+
+	return leftSize + rightSize, nil
+}
+
+// calculatePageContentSize calculates total cell content size for a single page
+func calculatePageContentSize(pageData []byte, header *PageHeader, usableSize uint32) (int, error) {
+	totalSize := 0
+	for i := 0; i < int(header.NumCells); i++ {
+		cellSize, err := getCellSize(pageData, header, i, usableSize)
+		if err != nil {
+			return 0, err
+		}
+		totalSize += cellSize
+	}
+	return totalSize, nil
+}
+
+// getCellSize returns the size of a cell at the given index
+func getCellSize(pageData []byte, header *PageHeader, index int, usableSize uint32) (int, error) {
+	cellOffset, err := header.GetCellPointer(pageData, index)
+	if err != nil {
+		return 0, err
+	}
+
+	cell, err := ParseCell(header.PageType, pageData[cellOffset:], usableSize)
+	if err != nil {
+		return 0, err
+	}
+
+	return int(cell.CellSize), nil
+}
+
+// calculateTotalSpaceNeeded calculates total space needed including header and pointers
+func calculateTotalSpaceNeeded(headerSize, totalCells, contentSize int) int {
+	cellPointerSize := totalCells * 2
+	totalNeeded := headerSize + cellPointerSize + contentSize
+	// Add some margin for safety (10%)
+	return totalNeeded * 110 / 100
 }
 
 // RedistributeCells redistributes cells between two pages to balance them

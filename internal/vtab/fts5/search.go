@@ -56,15 +56,8 @@ func (qp *QueryParser) Parse(queryStr string) (*Query, error) {
 	}
 
 	// Check for boolean operators
-	if query, err := qp.tryParseANDQuery(queryStr); query != nil || err != nil {
-		return query, err
-	}
-
-	if query, err := qp.tryParseORQuery(queryStr); query != nil || err != nil {
-		return query, err
-	}
-
-	if query, err := qp.tryParseNOTQuery(queryStr); query != nil || err != nil {
+	query, err := qp.tryParseBooleanQuery(queryStr)
+	if query != nil || err != nil {
 		return query, err
 	}
 
@@ -78,6 +71,22 @@ func (qp *QueryParser) Parse(queryStr string) (*Query, error) {
 
 	// Simple term query
 	return qp.parseSimpleQuery(queryStr, column)
+}
+
+// tryParseBooleanQuery attempts to parse any boolean query (AND, OR, NOT).
+func (qp *QueryParser) tryParseBooleanQuery(queryStr string) (*Query, error) {
+	// Check for AND
+	if query, err := qp.tryParseANDQuery(queryStr); query != nil || err != nil {
+		return query, err
+	}
+
+	// Check for OR
+	if query, err := qp.tryParseORQuery(queryStr); query != nil || err != nil {
+		return query, err
+	}
+
+	// Check for NOT
+	return qp.tryParseNOTQuery(queryStr)
 }
 
 // tryParsePhraseQuery attempts to parse a phrase query (quoted string).

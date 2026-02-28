@@ -677,34 +677,39 @@ func removePathRecursive(data interface{}, parts []pathPart) interface{} {
 	remaining := parts[1:]
 
 	if part.isIndex {
-		arr, ok := data.([]interface{})
-		if !ok || part.index < 0 || part.index >= len(arr) {
-			return data
-		}
-
-		if len(remaining) == 0 {
-			// Remove this element
-			return append(arr[:part.index], arr[part.index+1:]...)
-		} else {
-			arr[part.index] = removePathRecursive(arr[part.index], remaining)
-			return arr
-		}
-	} else {
-		obj, ok := data.(map[string]interface{})
-		if !ok {
-			return data
-		}
-
-		if len(remaining) == 0 {
-			delete(obj, part.key)
-			return obj
-		} else {
-			if val, exists := obj[part.key]; exists {
-				obj[part.key] = removePathRecursive(val, remaining)
-			}
-			return obj
-		}
+		return removeFromArray(data, part, remaining)
 	}
+	return removeFromObject(data, part, remaining)
+}
+
+func removeFromArray(data interface{}, part pathPart, remaining []pathPart) interface{} {
+	arr, ok := data.([]interface{})
+	if !ok || part.index < 0 || part.index >= len(arr) {
+		return data
+	}
+
+	if len(remaining) == 0 {
+		// Remove this element
+		return append(arr[:part.index], arr[part.index+1:]...)
+	}
+	arr[part.index] = removePathRecursive(arr[part.index], remaining)
+	return arr
+}
+
+func removeFromObject(data interface{}, part pathPart, remaining []pathPart) interface{} {
+	obj, ok := data.(map[string]interface{})
+	if !ok {
+		return data
+	}
+
+	if len(remaining) == 0 {
+		delete(obj, part.key)
+		return obj
+	}
+	if val, exists := obj[part.key]; exists {
+		obj[part.key] = removePathRecursive(val, remaining)
+	}
+	return obj
 }
 
 // pathPart represents a single part of a JSON path

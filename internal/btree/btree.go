@@ -2,6 +2,7 @@ package btree
 
 import (
 	"fmt"
+	"sync"
 )
 
 // PageProvider is an interface for page access (can be pager or in-memory)
@@ -18,6 +19,7 @@ type Btree struct {
 	ReservedSize uint32            // Reserved bytes at end of each page
 	Pages        map[uint32][]byte // In-memory page cache (pageNum -> page data)
 	Provider     PageProvider      // Optional page provider (pager integration)
+	mu           sync.RWMutex      // Protects Pages map
 }
 
 // BtShared represents shared B-tree state (in SQLite, multiple Btree handles can share this)
@@ -48,10 +50,13 @@ func NewBtree(pageSize uint32) *Btree {
 
 // GetPage retrieves a page from the B-tree
 func (bt *Btree) GetPage(pageNum uint32) ([]byte, error) {
-	// Try in-memory cache first
+	// Try in-memory cache first (read lock)
+	bt.mu.RLock()
 	if page, ok := bt.Pages[pageNum]; ok {
+		bt.mu.RUnlock()
 		return page, nil
 	}
+	bt.mu.RUnlock()
 
 	// If we have a provider, try to get from there
 	if bt.Provider != nil {
@@ -59,8 +64,10 @@ func (bt *Btree) GetPage(pageNum uint32) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Cache it
+		// Cache it (write lock)
+		bt.mu.Lock()
 		bt.Pages[pageNum] = data
+		bt.mu.Unlock()
 		return data, nil
 	}
 
@@ -72,7 +79,9 @@ func (bt *Btree) SetPage(pageNum uint32, data []byte) error {
 	if uint32(len(data)) != bt.PageSize {
 		return fmt.Errorf("page size mismatch: expected %d, got %d", bt.PageSize, len(data))
 	}
+	bt.mu.Lock()
 	bt.Pages[pageNum] = data
+	bt.mu.Unlock()
 
 	// Mark as dirty if using a provider
 	if bt.Provider != nil {
@@ -140,14 +149,19 @@ func (bt *Btree) IteratePage(pageNum uint32, visitor func(cellIndex int, cell *C
 
 // String returns a string representation of the B-tree
 func (bt *Btree) String() string {
+	bt.mu.RLock()
+	pageCount := len(bt.Pages)
+	bt.mu.RUnlock()
 	return fmt.Sprintf("Btree{pageSize=%d, usableSize=%d, pages=%d}",
-		bt.PageSize, bt.UsableSize, len(bt.Pages))
+		bt.PageSize, bt.UsableSize, pageCount)
 }
 
 // ClearCache clears the in-memory page cache.
 // This should be called after a rollback to ensure cached pages are re-read from disk.
 func (bt *Btree) ClearCache() {
+	bt.mu.Lock()
 	bt.Pages = make(map[uint32][]byte)
+	bt.mu.Unlock()
 }
 
 // AllocatePage allocates a new page in the B-tree and returns its page number
@@ -158,9 +172,14 @@ func (bt *Btree) AllocatePage() (uint32, error) {
 		if err != nil {
 			return 0, err
 		}
+		bt.mu.Lock()
 		bt.Pages[pageNum] = data
+		bt.mu.Unlock()
 		return pageNum, nil
 	}
+
+	bt.mu.Lock()
+	defer bt.mu.Unlock()
 
 	// Find the next available page number
 	pageNum := uint32(1)
@@ -246,7 +265,9 @@ func (bt *Btree) DropTable(rootPage uint32) error {
 		bt.dropInteriorChildren(pageData, header)
 	}
 
+	bt.mu.Lock()
 	delete(bt.Pages, rootPage)
+	bt.mu.Unlock()
 	return nil
 }
 

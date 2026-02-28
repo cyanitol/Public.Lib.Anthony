@@ -50,7 +50,20 @@ func (n *Node) chooseLeaf(entry *Entry) *Node {
 // splitNode splits a node that has overflowed and returns the new root.
 // This implements the quadratic split algorithm.
 func (n *Node) splitNode() *Node {
-	// Create a new node for the split
+	newNode := n.createSplitNode()
+	n.updateChildParentPointers()
+	newNode.updateChildParentPointers()
+
+	// If this was the root, create a new root
+	if n.Parent == nil {
+		return n.createNewRootForSplit(newNode)
+	}
+
+	return n.handleNonRootSplit(newNode)
+}
+
+// createSplitNode creates a new node and distributes entries between nodes.
+func (n *Node) createSplitNode() *Node {
 	newNode := &Node{
 		Entries: make([]*Entry, 0, MaxEntries),
 		IsLeaf:  n.IsLeaf,
@@ -63,38 +76,40 @@ func (n *Node) splitNode() *Node {
 	n.Entries = group1
 	newNode.Entries = group2
 
-	// Update parent pointers for children
+	return newNode
+}
+
+// updateChildParentPointers updates parent pointers for all child entries.
+func (n *Node) updateChildParentPointers() {
 	for _, entry := range n.Entries {
 		if entry.Child != nil {
 			entry.Child.Parent = n
 		}
 	}
-	for _, entry := range newNode.Entries {
-		if entry.Child != nil {
-			entry.Child.Parent = newNode
-		}
+}
+
+// createNewRootForSplit creates a new root node after splitting the old root.
+func (n *Node) createNewRootForSplit(newNode *Node) *Node {
+	newRoot := NewInternalNode()
+
+	// Create entries for both nodes
+	entry1 := &Entry{
+		BBox:  n.BoundingBox(),
+		Child: n,
+	}
+	entry2 := &Entry{
+		BBox:  newNode.BoundingBox(),
+		Child: newNode,
 	}
 
-	// If this was the root, create a new root
-	if n.Parent == nil {
-		newRoot := NewInternalNode()
+	newRoot.AddEntry(entry1)
+	newRoot.AddEntry(entry2)
 
-		// Create entries for both nodes
-		entry1 := &Entry{
-			BBox:  n.BoundingBox(),
-			Child: n,
-		}
-		entry2 := &Entry{
-			BBox:  newNode.BoundingBox(),
-			Child: newNode,
-		}
+	return newRoot
+}
 
-		newRoot.AddEntry(entry1)
-		newRoot.AddEntry(entry2)
-
-		return newRoot
-	}
-
+// handleNonRootSplit handles splitting a non-root node.
+func (n *Node) handleNonRootSplit(newNode *Node) *Node {
 	// Insert the new node into the parent
 	newEntry := &Entry{
 		BBox:  newNode.BoundingBox(),
@@ -103,12 +118,7 @@ func (n *Node) splitNode() *Node {
 	n.Parent.AddEntry(newEntry)
 
 	// Update the original entry's bounding box
-	for _, entry := range n.Parent.Entries {
-		if entry.Child == n {
-			entry.BBox = n.BoundingBox()
-			break
-		}
-	}
+	n.updateParentEntryBBox()
 
 	// If parent overflows, split it recursively
 	if len(n.Parent.Entries) > MaxEntries {
@@ -118,7 +128,21 @@ func (n *Node) splitNode() *Node {
 	// Adjust bounding boxes up the tree
 	n.Parent.AdjustBoundingBoxes()
 
-	// Return the root
+	return n.findRoot()
+}
+
+// updateParentEntryBBox updates the bounding box for this node in the parent.
+func (n *Node) updateParentEntryBBox() {
+	for _, entry := range n.Parent.Entries {
+		if entry.Child == n {
+			entry.BBox = n.BoundingBox()
+			break
+		}
+	}
+}
+
+// findRoot finds and returns the root node by traversing up the tree.
+func (n *Node) findRoot() *Node {
 	root := n.Parent
 	for root.Parent != nil {
 		root = root.Parent
@@ -344,6 +368,11 @@ func (n *Node) Remove(entry *Entry) *Node {
 		leaf.AdjustBoundingBoxes()
 	}
 
+	return n.handleRootAfterRemoval()
+}
+
+// handleRootAfterRemoval handles special cases for the root node after removal.
+func (n *Node) handleRootAfterRemoval() *Node {
 	// If root is empty after deletion, return nil
 	if n.Parent == nil && len(n.Entries) == 0 {
 		return nil

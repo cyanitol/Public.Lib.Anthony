@@ -1,0 +1,227 @@
+# Anthony SQLite Driver - Best Practices Improvement TODO
+# Generated: 2026-02-27
+# Status: [ ] Pending  [x] Complete  [~] In Progress
+
+================================================================================
+PHASE 1: CRITICAL STABILITY FIXES (Priority: IMMEDIATE)
+================================================================================
+
+[x] 1.1 Fix race condition in Conn.Close()
+    - internal/driver/conn.go (lines 87-96)
+    - Add mutex to Stmt struct
+    - Create local copy of statements before iteration
+
+[x] 1.2 Add atomic operations for memoryCount
+    - internal/driver/driver.go (line 68)
+    - Change memoryCount to int64, use atomic.AddInt64()
+
+[x] 1.3 Fix Btree Pages map race condition
+    - internal/btree/btree.go (lines 50-82)
+    - Add sync.RWMutex to Btree struct
+    - Protect all Pages map access
+
+[x] 1.4 Document lock ordering
+    - Create docs/LOCK_ORDERING.md
+    - Establish hierarchy: Driver -> Conn -> Pager -> Schema -> Btree
+
+================================================================================
+PHASE 2: STORAGE LAYER HARDENING (Priority: HIGH)
+================================================================================
+
+[ ] 2.1 Implement Windows file locking
+    - internal/pager/lock_windows.go
+    - Use golang.org/x/sys/windows LockFileEx/UnlockFileEx
+
+[ ] 2.2 Add journal crash recovery
+    - internal/pager/pager.go
+    - Hot journal detection in OpenWithPageSize()
+    - Implement recoverHotJournal() method
+
+[ ] 2.3 Fix journal checksums
+    - internal/pager/journal.go (lines 397-418)
+    - Replace XOR checksum with CRC32
+
+[ ] 2.4 Complete WAL frame validation
+    - internal/pager/wal.go (line 272)
+    - Implement checksum validation
+    - Add WAL recovery on database open
+
+================================================================================
+PHASE 3: FEATURE COMPLETION (Priority: HIGH)
+================================================================================
+
+[ ] 3.1 Complete CTE bytecode materialization
+    - internal/driver/stmt_cte.go
+    - Refactor compileNonRecursiveCTE() to use coroutines
+    - Generate runtime bytecode, not compile-time execution
+
+[ ] 3.2 Complete subquery compilation
+    - internal/expr/codegen.go (lines 711-928)
+    - Complete generateSubquery() for scalar subqueries
+    - Complete generateInSubquery() for IN clauses
+    - Complete generateExists() for EXISTS clauses
+
+[ ] 3.3 Implement ORDER BY execution
+    - internal/sql/orderby.go
+    - internal/engine/compiler.go
+    - Integrate sorter bytecode chain
+
+[ ] 3.4 Complete UPDATE/DELETE operations
+    - internal/engine/compiler.go (lines 368-407)
+    - Implement full CompileUpdate() with SET expressions
+    - Implement full CompileDelete() with WHERE conditions
+
+[ ] 3.5 Hook trigger execution to DML
+    - internal/engine/trigger.go
+    - Complete substituteOldNewReferences() (lines 194-207)
+    - Hook triggers into INSERT/UPDATE/DELETE compilation
+
+================================================================================
+PHASE 4: PERFORMANCE OPTIMIZATION (Priority: MEDIUM)
+================================================================================
+
+[ ] 4.1 Add prepared statement caching
+    - Create internal/driver/stmt_cache.go
+    - LRU cache for compiled VDBE programs
+    - Schema version tracking for invalidation
+
+[ ] 4.2 Add query plan caching
+    - Create internal/planner/plan_cache.go
+    - Cache optimized query plans by SQL hash
+
+[ ] 4.3 Add memory pooling
+    - Create internal/vdbe/pool.go
+    - sync.Pool for Mem cells, Instructions, page buffers
+
+[ ] 4.4 Add spill-to-disk for large operations
+    - Create internal/vdbe/sorter_spill.go
+    - Configurable memory limits for sorters
+
+================================================================================
+PHASE 5: CODE ARCHITECTURE IMPROVEMENTS (Priority: MEDIUM)
+================================================================================
+
+[ ] 5.1 Split stmt.go (3,051 lines)
+    - Create compile_select.go (~600 lines)
+    - Create compile_select_agg.go (~400 lines)
+    - Create compile_select_join.go (~350 lines)
+    - Create compile_dml.go (~500 lines)
+    - Create compile_ddl.go (~400 lines)
+    - Create compile_subquery.go (~250 lines)
+
+[ ] 5.2 Segregate PagerInterface (23 methods)
+    - internal/pager/pager_interface.go
+    - Create PagerReader, PagerWriter, PagerTransaction interfaces
+
+[ ] 5.3 Create typed error hierarchy
+    - Create internal/errors/errors.go
+    - ConstraintError, UniqueViolationError, ForeignKeyError
+    - SyntaxError, LockError with proper error codes
+
+[ ] 5.4 Eliminate interface{} in VDBEContext
+    - Create internal/types/ package
+    - Define BtreeAccess, PagerWriter, SchemaAccess interfaces
+
+================================================================================
+PHASE 6: SECURITY AND ROBUSTNESS (Priority: MEDIUM)
+================================================================================
+
+[ ] 6.1 Path traversal prevention
+    - internal/driver/stmt_attach.go
+    - internal/pager/pager.go
+    - Validate database paths for "..", null bytes
+
+[ ] 6.2 Integer overflow protection
+    - internal/pager/pager.go
+    - internal/btree/btree.go
+    - Add checked arithmetic for page offsets
+
+[ ] 6.3 Input size limits
+    - internal/parser/parser.go
+    - Add MaxSQLLength, MaxTokens, MaxExprDepth limits
+
+[ ] 6.4 Memory limits
+    - internal/btree/btree.go
+    - internal/vdbe/record.go
+    - Add configurable cache size limits
+
+================================================================================
+PHASE 7: TESTING AND QUALITY (Priority: MEDIUM)
+================================================================================
+
+[ ] 7.1 Enable skipped tests
+    - Phase 7.1a: Integration tests (9 tests)
+    - Phase 7.1b: Parser/Planner tests (9 tests)
+    - Phase 7.1c: Storage layer tests (9 tests)
+    - Phase 7.1d: Feature tests (CTE, triggers, etc.)
+
+[ ] 7.2 Add concurrency tests
+    - Create internal/driver/concurrent_test.go
+    - Multiple readers, reader-writer isolation
+    - Connection pool stress tests
+
+[ ] 7.3 Add fuzzing tests
+    - Create internal/parser/fuzz_test.go
+    - Create internal/btree/fuzz_test.go
+
+[ ] 7.4 Add performance benchmarks
+    - Create internal/driver/benchmark_test.go
+    - Insert/Select/Update/Delete benchmarks
+
+================================================================================
+PHASE 8: CONFIGURATION AND EXTENSIBILITY (Priority: LOW)
+================================================================================
+
+[ ] 8.1 Add configuration structures
+    - Create internal/pager/config.go
+    - Create internal/driver/config.go
+    - PagerConfig, DriverConfig structs
+
+[ ] 8.2 Add DSN parameter parsing
+    - Create internal/driver/dsn.go
+    - Parse filename?journal_mode=WAL&cache_size=10000
+
+[ ] 8.3 Expose virtual table API
+    - internal/driver/conn.go
+    - Add Conn.RegisterVirtualTableModule()
+
+[ ] 8.4 Expose custom collation registration
+    - internal/driver/conn.go
+    - Add Conn.CreateCollation()
+
+================================================================================
+PHASE 9: OBSERVABILITY (Priority: LOW)
+================================================================================
+
+[ ] 9.1 Add structured logging
+    - Create internal/observability/ package
+    - Leveled logging (Error, Warn, Info, Debug, Trace)
+
+[ ] 9.2 Add query statistics
+    - internal/vdbe/vdbe.go
+    - Track execution time, rows scanned, I/O operations
+
+[ ] 9.3 Complete EXPLAIN QUERY PLAN
+    - internal/planner/planner.go
+    - Add cost estimates to EXPLAIN output
+
+[ ] 9.4 Add VDBE debug mode
+    - Create internal/vdbe/debug.go
+    - Instruction tracing, register inspection
+
+================================================================================
+SUMMARY
+================================================================================
+
+Total Tasks: 36
+Phase 1 (Critical):    4 tasks
+Phase 2 (Storage):     4 tasks
+Phase 3 (Features):    5 tasks
+Phase 4 (Performance): 4 tasks
+Phase 5 (Architecture):4 tasks
+Phase 6 (Security):    4 tasks
+Phase 7 (Testing):     4 tasks
+Phase 8 (Config):      4 tasks
+Phase 9 (Observability): 4 tasks
+
+Completed: 4/36

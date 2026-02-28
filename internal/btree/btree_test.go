@@ -234,3 +234,151 @@ func TestBtreeGetSetPage(t *testing.T) {
 		t.Error("SetPage() with wrong size expected error, got nil")
 	}
 }
+
+// TestBtreeString tests the String method
+func TestBtreeString(t *testing.T) {
+	bt := NewBtree(4096)
+
+	// Add a page
+	pageData := make([]byte, 4096)
+	bt.SetPage(1, pageData)
+
+	str := bt.String()
+	if str == "" {
+		t.Error("String() returned empty string")
+	}
+
+	// Should contain key information
+	if !contains(str, "Btree") {
+		t.Errorf("String() = %q, should contain 'Btree'", str)
+	}
+}
+
+// TestClearCache tests the ClearCache method
+func TestClearCache(t *testing.T) {
+	bt := NewBtree(4096)
+
+	// Add some pages
+	pageData1 := make([]byte, 4096)
+	pageData2 := make([]byte, 4096)
+	bt.SetPage(1, pageData1)
+	bt.SetPage(2, pageData2)
+
+	// Verify pages exist
+	_, err := bt.GetPage(1)
+	if err != nil {
+		t.Fatalf("GetPage(1) before clear failed: %v", err)
+	}
+
+	// Clear cache
+	bt.ClearCache()
+
+	// Pages should be gone
+	_, err = bt.GetPage(1)
+	if err == nil {
+		t.Error("GetPage(1) after clear should fail, got nil error")
+	}
+}
+
+// TestAllocatePageWithProvider tests page allocation with a provider
+func TestAllocatePageWithProvider(t *testing.T) {
+	bt := NewBtree(4096)
+
+	// Set up a mock provider
+	provider := &mockPageProvider{
+		pages: make(map[uint32][]byte),
+		dirty: make(map[uint32]bool),
+	}
+	bt.Provider = provider
+
+	// Allocate a page
+	pageNum, err := bt.AllocatePage()
+	if err != nil {
+		t.Fatalf("AllocatePage() error = %v", err)
+	}
+
+	if pageNum == 0 {
+		t.Error("AllocatePage() returned page number 0")
+	}
+
+	// Verify page exists in provider
+	if _, ok := provider.pages[pageNum]; !ok {
+		t.Errorf("Page %d not found in provider", pageNum)
+	}
+}
+
+// TestAllocatePageWithoutProvider tests page allocation without a provider
+func TestAllocatePageWithoutProvider(t *testing.T) {
+	bt := NewBtree(4096)
+
+	// Allocate pages
+	page1, err := bt.AllocatePage()
+	if err != nil {
+		t.Fatalf("AllocatePage() error = %v", err)
+	}
+
+	page2, err := bt.AllocatePage()
+	if err != nil {
+		t.Fatalf("AllocatePage() error = %v", err)
+	}
+
+	// Pages should be different
+	if page1 == page2 {
+		t.Errorf("AllocatePage() returned same page number twice: %d", page1)
+	}
+
+	// Both pages should exist
+	_, err = bt.GetPage(page1)
+	if err != nil {
+		t.Errorf("GetPage(%d) failed: %v", page1, err)
+	}
+
+	_, err = bt.GetPage(page2)
+	if err != nil {
+		t.Errorf("GetPage(%d) failed: %v", page2, err)
+	}
+}
+
+// TestGetPageWithProvider tests GetPage with a provider
+func TestGetPageWithProvider(t *testing.T) {
+	bt := NewBtree(4096)
+
+	// Set up a mock provider
+	provider := &mockPageProvider{
+		pages: make(map[uint32][]byte),
+		dirty: make(map[uint32]bool),
+	}
+
+	// Add a page to the provider
+	pageData := make([]byte, 4096)
+	pageData[0] = 0x0d
+	provider.pages[5] = pageData
+
+	bt.Provider = provider
+
+	// Get page from provider
+	retrieved, err := bt.GetPage(5)
+	if err != nil {
+		t.Fatalf("GetPage(5) error = %v", err)
+	}
+
+	if retrieved[0] != 0x0d {
+		t.Errorf("Retrieved page type = 0x%02x, want 0x0d", retrieved[0])
+	}
+
+	// Page should now be cached
+	_, err = bt.GetPage(5)
+	if err != nil {
+		t.Errorf("GetPage(5) from cache error = %v", err)
+	}
+}
+
+// Helper function for string contains check
+func contains(s, substr string) bool {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

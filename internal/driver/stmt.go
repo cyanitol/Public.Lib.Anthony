@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
+	"sync"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/engine"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/expr"
@@ -20,10 +21,14 @@ type Stmt struct {
 	ast    parser.Statement
 	vdbe   *vdbe.VDBE
 	closed bool
+	mu     sync.Mutex // Protects closed and vdbe fields
 }
 
 // Close closes the statement.
 func (s *Stmt) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if s.closed {
 		return nil
 	}
@@ -56,9 +61,12 @@ func (s *Stmt) Exec(args []driver.Value) (driver.Result, error) {
 
 // ExecContext executes a statement that doesn't return rows.
 func (s *Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	s.mu.Lock()
 	if s.closed {
+		s.mu.Unlock()
 		return nil, driver.ErrBadConn
 	}
+	s.mu.Unlock()
 
 	// Compile the statement to VDBE bytecode
 	vm, err := s.compile(args)
@@ -99,9 +107,12 @@ func (s *Stmt) Query(args []driver.Value) (driver.Rows, error) {
 
 // QueryContext executes a query that returns rows.
 func (s *Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	s.mu.Lock()
 	if s.closed {
+		s.mu.Unlock()
 		return nil, driver.ErrBadConn
 	}
+	s.mu.Unlock()
 
 	// Compile the statement to VDBE bytecode
 	vm, err := s.compile(args)
@@ -177,6 +188,31 @@ func (s *Stmt) dispatchDDLOrTxn(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.
 
 // dispatchSchemaDDL handles CREATE/DROP/ALTER statements.
 func (s *Stmt) dispatchSchemaDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	// Try table operations
+	if result, err, handled := s.dispatchTableDDL(vm, args); handled {
+		return result, err, true
+	}
+
+	// Try index operations
+	if result, err, handled := s.dispatchIndexDDL(vm, args); handled {
+		return result, err, true
+	}
+
+	// Try view operations
+	if result, err, handled := s.dispatchViewDDL(vm, args); handled {
+		return result, err, true
+	}
+
+	// Try trigger operations
+	if result, err, handled := s.dispatchTriggerDDL(vm, args); handled {
+		return result, err, true
+	}
+
+	return nil, nil, false
+}
+
+// dispatchTableDDL handles CREATE/DROP/ALTER TABLE statements.
+func (s *Stmt) dispatchTableDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
 	switch stmt := s.ast.(type) {
 	case *parser.CreateTableStmt:
 		result, err := s.compileCreateTable(vm, stmt, args)
@@ -184,26 +220,50 @@ func (s *Stmt) dispatchSchemaDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe
 	case *parser.DropTableStmt:
 		result, err := s.compileDropTable(vm, stmt, args)
 		return result, err, true
+	case *parser.AlterTableStmt:
+		result, err := s.compileAlterTable(vm, stmt, args)
+		return result, err, true
+	default:
+		return nil, nil, false
+	}
+}
+
+// dispatchIndexDDL handles CREATE/DROP INDEX statements.
+func (s *Stmt) dispatchIndexDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	switch stmt := s.ast.(type) {
 	case *parser.CreateIndexStmt:
 		result, err := s.compileCreateIndex(vm, stmt, args)
 		return result, err, true
 	case *parser.DropIndexStmt:
 		result, err := s.compileDropIndex(vm, stmt, args)
 		return result, err, true
+	default:
+		return nil, nil, false
+	}
+}
+
+// dispatchViewDDL handles CREATE/DROP VIEW statements.
+func (s *Stmt) dispatchViewDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	switch stmt := s.ast.(type) {
 	case *parser.CreateViewStmt:
 		result, err := s.compileCreateView(vm, stmt, args)
 		return result, err, true
 	case *parser.DropViewStmt:
 		result, err := s.compileDropView(vm, stmt, args)
 		return result, err, true
+	default:
+		return nil, nil, false
+	}
+}
+
+// dispatchTriggerDDL handles CREATE/DROP TRIGGER statements.
+func (s *Stmt) dispatchTriggerDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	switch stmt := s.ast.(type) {
 	case *parser.CreateTriggerStmt:
 		result, err := s.compileCreateTrigger(vm, stmt, args)
 		return result, err, true
 	case *parser.DropTriggerStmt:
 		result, err := s.compileDropTrigger(vm, stmt, args)
-		return result, err, true
-	case *parser.AlterTableStmt:
-		result, err := s.compileAlterTable(vm, stmt, args)
 		return result, err, true
 	default:
 		return nil, nil, false

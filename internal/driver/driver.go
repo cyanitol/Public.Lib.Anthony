@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/pager"
@@ -25,7 +26,7 @@ type Driver struct {
 	mu          sync.Mutex
 	conns       map[string]*Conn
 	dbs         map[string]*dbState // Shared database state per file
-	memoryCount int                 // Counter for unique memory database IDs
+	memoryCount int64               // Counter for unique memory database IDs (atomic)
 }
 
 // sqliteDriver is the singleton driver instance
@@ -65,8 +66,7 @@ func (d *Driver) OpenConnector(name string) (driver.Conn, error) {
 			return nil, fmt.Errorf("failed to open memory database: %w", err)
 		}
 		// Assign a unique ID to each memory database connection
-		d.memoryCount++
-		memoryID := fmt.Sprintf(":memory:%d", d.memoryCount)
+		memoryID := fmt.Sprintf(":memory:%d", atomic.AddInt64(&d.memoryCount, 1))
 		return d.createMemoryConnection(memoryID, state)
 	}
 

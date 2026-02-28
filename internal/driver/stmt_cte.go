@@ -93,102 +93,142 @@ func (s *Stmt) compileNonRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planne
 // compileCTEPopulation generates bytecode to populate an ephemeral table with CTE results.
 func (s *Stmt) compileCTEPopulation(vm *vdbe.VDBE, cteSelect *parser.SelectStmt, cursorNum int, numColumns int, args []driver.NamedValue) error {
 	// Compile the CTE SELECT to generate rows
+	compiledCTE, err := s.compileCTESelect(vm, cteSelect, args)
+	if err != nil {
+		return err
+	}
+
+	// Allocate resources for inlining CTE bytecode
+	offsets := s.allocateCTEResources(vm, compiledCTE)
+
+	// Copy CTE bytecode into main VM with adjustments
+	s.inlineCTEBytecode(vm, compiledCTE, cursorNum, offsets)
+
+	return nil
+}
+
+// compileCTESelect compiles the CTE SELECT statement.
+func (s *Stmt) compileCTESelect(vm *vdbe.VDBE, cteSelect *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	cteVM := vdbe.New()
 	cteVM.Ctx = vm.Ctx
 	compiledCTE, err := s.compileSelect(cteVM, cteSelect, args)
 	if err != nil {
-		return fmt.Errorf("failed to compile CTE SELECT: %w", err)
+		return nil, fmt.Errorf("failed to compile CTE SELECT: %w", err)
 	}
+	return compiledCTE, nil
+}
 
-	// We need to inline the CTE bytecode into the main VM
-	// The strategy is:
-	// 1. Allocate cursors for the CTE (it might need cursors for its tables)
-	// 2. Copy CTE bytecode, adjusting cursor numbers to avoid conflicts
-	// 3. Replace OpResultRow with code to insert into ephemeral table
-	// 4. Replace OpHalt with Noop to continue execution
+// cteInlineOffsets holds offset information for inlining CTE bytecode.
+type cteInlineOffsets struct {
+	baseCursor   int
+	baseRegister int
+	recordReg    int
+	startAddr    int
+}
 
-	// Get cursor and register offsets for the CTE
-	cteBaseCursor := len(vm.Cursors)
+// allocateCTEResources allocates cursors and registers for CTE inlining.
+func (s *Stmt) allocateCTEResources(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE) cteInlineOffsets {
+	offsets := cteInlineOffsets{}
+
+	// Allocate cursors
+	offsets.baseCursor = len(vm.Cursors)
 	cteCursorCount := len(compiledCTE.Cursors)
 	if cteCursorCount > 0 {
-		vm.AllocCursors(cteBaseCursor + cteCursorCount)
+		vm.AllocCursors(offsets.baseCursor + cteCursorCount)
 	}
 
-	// Get register offset - CTE registers need to be shifted to avoid conflicts
-	cteBaseRegister := len(vm.Mem)
+	// Allocate registers
+	offsets.baseRegister = len(vm.Mem)
 	cteRegisterCount := len(compiledCTE.Mem)
 	if cteRegisterCount > 0 {
-		vm.AllocMemory(cteBaseRegister + cteRegisterCount)
+		vm.AllocMemory(offsets.baseRegister + cteRegisterCount)
 	}
 
-	// Allocate a register for record assembly
-	recordReg := len(vm.Mem)
-	vm.AllocMemory(recordReg + 1)
+	// Allocate record register
+	offsets.recordReg = len(vm.Mem)
+	vm.AllocMemory(offsets.recordReg + 1)
 
 	// Mark where CTE bytecode starts
-	cteStartAddr := vm.NumOps()
+	offsets.startAddr = vm.NumOps()
 
-	// Copy CTE bytecode into main VM
+	return offsets
+}
+
+// inlineCTEBytecode copies CTE bytecode into main VM with necessary adjustments.
+func (s *Stmt) inlineCTEBytecode(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE, cursorNum int, offsets cteInlineOffsets) {
 	for _, instr := range compiledCTE.Program {
-		newInstr := *instr
+		newInstr := s.adjustInstructionParameters(instr, offsets)
 
-		// Adjust cursor and register numbers
-		adjustedP1, adjustedP2, adjustedP3 := instr.P1, instr.P2, instr.P3
-
-		// First adjust cursor numbers for cursor operations
-		if needsCursorAdjustment(instr.Opcode) {
-			adjustedP1 = instr.P1 + cteBaseCursor
+		// Handle special opcodes
+		if s.handleSpecialOpcode(vm, instr, &newInstr, cursorNum, offsets) {
+			continue // Instruction already added or skipped
 		}
 
-		// Then adjust register numbers
-		adjustedP1, adjustedP2, adjustedP3 = adjustRegisterNumbers(
-			instr.Opcode, adjustedP1, adjustedP2, adjustedP3, cteBaseRegister,
-		)
-
-		newInstr.P1 = adjustedP1
-		newInstr.P2 = adjustedP2
-		newInstr.P3 = adjustedP3
-
-		// Handle special opcodes BEFORE adding the instruction
-		switch instr.Opcode {
-		case vdbe.OpResultRow:
-			// Replace ResultRow with MakeRecord + Insert
-			// OpResultRow was already adjusted: P1 = base register (adjusted), P2 = count
-			newInstr.Opcode = vdbe.OpMakeRecord
-			newInstr.P3 = recordReg // Output to recordReg
-
-			// Add the Make Record instruction
-			addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
-			vm.Program[addr].P4 = instr.P4
-			vm.Program[addr].Comment = instr.Comment
-
-			// Add Insert instruction to put record into ephemeral table
-			vm.AddOp(vdbe.OpInsert, cursorNum, recordReg, 0)
-			continue // Don't add the original OpResultRow
-
-		case vdbe.OpHalt:
-			// Replace Halt with Noop so execution continues
-			newInstr.Opcode = vdbe.OpNoop
-		}
-
-		// Add the instruction (unless it was already added above)
+		// Add the instruction
 		addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
 		vm.Program[addr].P4 = instr.P4
 		vm.Program[addr].Comment = instr.Comment
 
-		// Adjust jump targets AFTER adding the instruction
-		switch instr.Opcode {
-		case vdbe.OpGoto, vdbe.OpIf, vdbe.OpIfNot, vdbe.OpIfPos,
-			vdbe.OpEq, vdbe.OpNe, vdbe.OpLt, vdbe.OpLe, vdbe.OpGt, vdbe.OpGe,
-			vdbe.OpRewind, vdbe.OpNext, vdbe.OpPrev:
-			// Adjust jump targets (P2) by adding the offset where CTE code starts
-			if instr.P2 > 0 {
-				vm.Program[addr].P2 = instr.P2 + cteStartAddr
-			}
-		}
+		// Adjust jump targets
+		s.adjustJumpTarget(vm, instr, addr, offsets)
+	}
+}
+
+// adjustInstructionParameters adjusts cursor and register numbers in an instruction.
+func (s *Stmt) adjustInstructionParameters(instr *vdbe.Instruction, offsets cteInlineOffsets) vdbe.Instruction {
+	newInstr := *instr
+	adjustedP1, adjustedP2, adjustedP3 := instr.P1, instr.P2, instr.P3
+
+	// Adjust cursor numbers for cursor operations
+	if needsCursorAdjustment(instr.Opcode) {
+		adjustedP1 = instr.P1 + offsets.baseCursor
 	}
 
-	return nil
+	// Adjust register numbers
+	adjustedP1, adjustedP2, adjustedP3 = adjustRegisterNumbers(
+		instr.Opcode, adjustedP1, adjustedP2, adjustedP3, offsets.baseRegister,
+	)
+
+	newInstr.P1 = adjustedP1
+	newInstr.P2 = adjustedP2
+	newInstr.P3 = adjustedP3
+
+	return newInstr
+}
+
+// handleSpecialOpcode handles ResultRow and Halt opcodes specially. Returns true if handled.
+func (s *Stmt) handleSpecialOpcode(vm *vdbe.VDBE, instr *vdbe.Instruction, newInstr *vdbe.Instruction, cursorNum int, offsets cteInlineOffsets) bool {
+	switch instr.Opcode {
+	case vdbe.OpResultRow:
+		// Replace ResultRow with MakeRecord + Insert
+		newInstr.Opcode = vdbe.OpMakeRecord
+		newInstr.P3 = offsets.recordReg
+
+		addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
+		vm.Program[addr].P4 = instr.P4
+		vm.Program[addr].Comment = instr.Comment
+
+		vm.AddOp(vdbe.OpInsert, cursorNum, offsets.recordReg, 0)
+		return true
+
+	case vdbe.OpHalt:
+		// Replace Halt with Noop
+		newInstr.Opcode = vdbe.OpNoop
+		return false
+	}
+	return false
+}
+
+// adjustJumpTarget adjusts jump target addresses for jump opcodes.
+func (s *Stmt) adjustJumpTarget(vm *vdbe.VDBE, instr *vdbe.Instruction, addr int, offsets cteInlineOffsets) {
+	switch instr.Opcode {
+	case vdbe.OpGoto, vdbe.OpIf, vdbe.OpIfNot, vdbe.OpIfPos,
+		vdbe.OpEq, vdbe.OpNe, vdbe.OpLt, vdbe.OpLe, vdbe.OpGt, vdbe.OpGe,
+		vdbe.OpRewind, vdbe.OpNext, vdbe.OpPrev:
+		if instr.P2 > 0 {
+			vm.Program[addr].P2 = instr.P2 + offsets.startAddr
+		}
+	}
 }
 
 // needsCursorAdjustment returns true if the opcode uses P1 as a cursor number.
@@ -504,7 +544,6 @@ func (s *Stmt) executeRecursiveMember(vm *vdbe.VDBE, recursiveMember *parser.Sel
 	return s.collectRows(compiledRecursive, numColumns, "recursive member")
 }
 
-
 func (s *Stmt) createCTETempTable(tableName string, def *planner.CTEDefinition) *schema.Table {
 	// Infer columns from CTE definition
 	var columns []*schema.Column
@@ -542,7 +581,7 @@ func (s *Stmt) createCTETempTable(tableName string, def *planner.CTEDefinition) 
 	return &schema.Table{
 		Name:     tableName,
 		Columns:  columns,
-		RootPage: 0, // Will be set to cursor number
+		RootPage: 0,    // Will be set to cursor number
 		Temp:     true, // Mark as temporary/ephemeral table
 	}
 }

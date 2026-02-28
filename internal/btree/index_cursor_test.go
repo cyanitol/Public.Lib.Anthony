@@ -314,6 +314,47 @@ func BenchmarkIndexCursor_Seek(b *testing.B) {
 	}
 }
 
+// TestIndexCursor_MoveToLast tests MoveToLast method
+func TestIndexCursor_MoveToLast(t *testing.T) {
+	bt := NewBtree(4096)
+	rootPage, err := createIndexPage(bt)
+	if err != nil {
+		t.Fatalf("createIndexPage() error = %v", err)
+	}
+
+	cursor := NewIndexCursor(bt, rootPage)
+
+	// Insert entries (not in alphabetical order)
+	entries := []struct {
+		key   []byte
+		rowid int64
+	}{
+		{[]byte("cherry"), 3},
+		{[]byte("apple"), 1},
+		{[]byte("banana"), 2},
+	}
+
+	for _, entry := range entries {
+		cursor.InsertIndex(entry.key, entry.rowid)
+	}
+
+	// Move to last
+	if err := cursor.MoveToLast(); err != nil {
+		t.Fatalf("MoveToLast() error = %v", err)
+	}
+
+	// Should be at "cherry" (last alphabetically)
+	if !cursor.IsValid() {
+		t.Fatal("cursor should be valid after MoveToLast")
+	}
+	if !bytes.Equal(cursor.GetKey(), []byte("cherry")) {
+		t.Errorf("GetKey() = %q, want %q", cursor.GetKey(), "cherry")
+	}
+	if cursor.GetRowid() != 3 {
+		t.Errorf("GetRowid() = %d, want 3", cursor.GetRowid())
+	}
+}
+
 // Example demonstrating index cursor usage
 func ExampleIndexCursor() {
 	// Create a B-tree and index page

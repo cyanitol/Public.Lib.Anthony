@@ -508,8 +508,24 @@ func (w *WALIndex) readHeader() error {
 	}
 
 	w.header = &WALIndexHeader{}
+	w.readHeaderFields()
 
-	// Read header fields from mmap
+	// If not initialized, initialize now
+	if w.header.IsInit == 0 {
+		return w.initializeHeader()
+	}
+
+	// Validate and possibly reinitialize header
+	if err := w.validateAndFixHeader(); err != nil {
+		return err
+	}
+
+	// Load hash table from mmap
+	return w.loadHashTable()
+}
+
+// readHeaderFields reads all header fields from mmap and returns final offset.
+func (w *WALIndex) readHeaderFields() int {
 	offset := 0
 	w.header.Version = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
 	offset += 4
@@ -535,52 +551,39 @@ func (w *WALIndex) readHeader() error {
 	w.header.NPage = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
 	offset += 4
 
-	// Read frame checksums
-	for i := 0; i < 2; i++ {
-		w.header.AFrameCksum[i] = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
+	offset = readUint32Array(w.mmap, offset, w.header.AFrameCksum[:])
+	offset = readUint32Array(w.mmap, offset, w.header.ASalt[:])
+	offset = readUint32Array(w.mmap, offset, w.header.ACksum[:])
+	offset = readUint32Array(w.mmap, offset, w.header.ReadMark[:])
+
+	return offset
+}
+
+// readUint32Array reads multiple uint32 values from mmap at the given offset.
+func readUint32Array(mmap []byte, offset int, dest []uint32) int {
+	for i := range dest {
+		dest[i] = binary.LittleEndian.Uint32(mmap[offset : offset+4])
 		offset += 4
 	}
+	return offset
+}
 
-	// Read salt values
-	for i := 0; i < 2; i++ {
-		w.header.ASalt[i] = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
-		offset += 4
-	}
+// initializeHeader initializes a new WAL index header.
+func (w *WALIndex) initializeHeader() error {
+	w.header.Version = WALIndexVersion
+	w.header.IsInit = 1
+	w.header.BigEndCksum = 0
+	return w.writeHeader()
+}
 
-	// Read checksums
-	for i := 0; i < 2; i++ {
-		w.header.ACksum[i] = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
-		offset += 4
-	}
-
-	// Read read marks
-	for i := 0; i < WALIndexMaxReaders; i++ {
-		w.header.ReadMark[i] = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
-		offset += 4
-	}
-
-	// If not initialized, initialize now
-	if w.header.IsInit == 0 {
-		w.header.Version = WALIndexVersion
-		w.header.IsInit = 1
-		w.header.BigEndCksum = 0
-		return w.writeHeader()
-	}
-
-	// Validate header
+// validateAndFixHeader validates the header version and reinitializes if needed.
+func (w *WALIndex) validateAndFixHeader() error {
 	if w.header.Version != WALIndexVersion && w.header.Version != 0 {
-		// Version mismatch - may need recovery
-		// For now, reinitialize
+		// Version mismatch - reinitialize
 		w.header.Version = WALIndexVersion
 		w.header.IsInit = 1
 		return w.writeHeader()
 	}
-
-	// Load hash table from mmap
-	if err := w.loadHashTable(); err != nil {
-		return err
-	}
-
 	return nil
 }
 

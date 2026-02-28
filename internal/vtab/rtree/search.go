@@ -304,22 +304,33 @@ func spatialJoinRecursive(n1, n2 *Node, results *[][2]*Entry) {
 			if !e1.BBox.Overlaps(e2.BBox) {
 				continue
 			}
-
-			// Both are leaf entries - add to results
-			if n1.IsLeaf && n2.IsLeaf {
-				*results = append(*results, [2]*Entry{e1, e2})
-			} else if n1.IsLeaf && !n2.IsLeaf {
-				// n1 is leaf, n2 is internal - recurse into n2
-				spatialJoinRecursive(n1, e2.Child, results)
-			} else if !n1.IsLeaf && n2.IsLeaf {
-				// n1 is internal, n2 is leaf - recurse into n1
-				spatialJoinRecursive(e1.Child, n2, results)
-			} else {
-				// Both are internal - recurse into both
-				spatialJoinRecursive(e1.Child, e2.Child, results)
-			}
+			processSpatialJoinPair(n1, n2, e1, e2, results)
 		}
 	}
+}
+
+// processSpatialJoinPair processes a single pair of entries in spatial join.
+func processSpatialJoinPair(n1, n2 *Node, e1, e2 *Entry, results *[][2]*Entry) {
+	// Both are leaf entries - add to results
+	if n1.IsLeaf && n2.IsLeaf {
+		*results = append(*results, [2]*Entry{e1, e2})
+		return
+	}
+
+	// n1 is leaf, n2 is internal - recurse into n2
+	if n1.IsLeaf && !n2.IsLeaf {
+		spatialJoinRecursive(n1, e2.Child, results)
+		return
+	}
+
+	// n1 is internal, n2 is leaf - recurse into n1
+	if !n1.IsLeaf && n2.IsLeaf {
+		spatialJoinRecursive(e1.Child, n2, results)
+		return
+	}
+
+	// Both are internal - recurse into both
+	spatialJoinRecursive(e1.Child, e2.Child, results)
 }
 
 // DistanceBetweenBoxes calculates the minimum distance between two bounding boxes.

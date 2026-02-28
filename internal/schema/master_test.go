@@ -286,3 +286,278 @@ func TestMasterTableNotSaved(t *testing.T) {
 	// The implementation is a placeholder, so we can't verify the actual
 	// behavior, but at least we ensure it doesn't try to save sqlite_master
 }
+
+func TestIsInternalTable(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected bool
+	}{
+		{"sqlite_master", true},
+		{"sqlite_sequence", true},
+		{"users", false},
+		{"my_table", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isInternalTable(tt.name)
+			if result != tt.expected {
+				t.Errorf("isInternalTable(%q) = %v, want %v", tt.name, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsAutoIndex(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected bool
+	}{
+		{"sqlite_autoindex_users_1", true},
+		{"sqlite_autoindex", false},
+		{"idx_users", false},
+		{"users", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isAutoIndex(tt.name)
+			if result != tt.expected {
+				t.Errorf("isAutoIndex(%q) = %v, want %v", tt.name, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestProcessMasterTableRow(t *testing.T) {
+	s := NewSchema()
+
+	row := MasterRow{
+		Type:     "table",
+		Name:     "users",
+		TblName:  "users",
+		RootPage: 2,
+		SQL:      "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT)",
+	}
+
+	err := s.processMasterTableRow(row)
+	if err != nil {
+		t.Fatalf("processMasterTableRow() error = %v", err)
+	}
+
+	if _, ok := s.GetTable("users"); !ok {
+		t.Error("Table not added to schema")
+	}
+
+	// Test with internal table (should skip)
+	internalRow := MasterRow{
+		Type:     "table",
+		Name:     "sqlite_master",
+		TblName:  "sqlite_master",
+		RootPage: 1,
+		SQL:      "",
+	}
+
+	err = s.processMasterTableRow(internalRow)
+	if err != nil {
+		t.Fatalf("processMasterTableRow() error = %v", err)
+	}
+}
+
+func TestProcessMasterIndexRow(t *testing.T) {
+	s := NewSchema()
+
+	row := MasterRow{
+		Type:     "index",
+		Name:     "idx_users",
+		TblName:  "users",
+		RootPage: 3,
+		SQL:      "CREATE INDEX idx_users ON users(name)",
+	}
+
+	err := s.processMasterIndexRow(row)
+	if err != nil {
+		t.Fatalf("processMasterIndexRow() error = %v", err)
+	}
+
+	if _, ok := s.GetIndex("idx_users"); !ok {
+		t.Error("Index not added to schema")
+	}
+
+	// Test with auto-index (should skip)
+	autoRow := MasterRow{
+		Type:     "index",
+		Name:     "sqlite_autoindex_users_1",
+		TblName:  "users",
+		RootPage: 4,
+		SQL:      "",
+	}
+
+	err = s.processMasterIndexRow(autoRow)
+	if err != nil {
+		t.Fatalf("processMasterIndexRow() error = %v", err)
+	}
+}
+
+func TestProcessMasterViewRow(t *testing.T) {
+	s := NewSchema()
+
+	row := MasterRow{
+		Type:    "view",
+		Name:    "active_users",
+		TblName: "active_users",
+		SQL:     "CREATE VIEW active_users AS SELECT * FROM users WHERE active = 1",
+	}
+
+	err := s.processMasterViewRow(row)
+	if err != nil {
+		t.Fatalf("processMasterViewRow() error = %v", err)
+	}
+
+	if _, ok := s.GetView("active_users"); !ok {
+		t.Error("View not added to schema")
+	}
+}
+
+func TestProcessMasterRow(t *testing.T) {
+	s := NewSchema()
+
+	// Test table row
+	tableRow := MasterRow{
+		Type:     "table",
+		Name:     "users",
+		TblName:  "users",
+		RootPage: 2,
+		SQL:      "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT)",
+	}
+
+	err := s.processMasterRow(tableRow)
+	if err != nil {
+		t.Errorf("processMasterRow(table) error = %v", err)
+	}
+
+	// Test index row
+	indexRow := MasterRow{
+		Type:     "index",
+		Name:     "idx_users",
+		TblName:  "users",
+		RootPage: 3,
+		SQL:      "CREATE INDEX idx_users ON users(name)",
+	}
+
+	err = s.processMasterRow(indexRow)
+	if err != nil {
+		t.Errorf("processMasterRow(index) error = %v", err)
+	}
+
+	// Test view row
+	viewRow := MasterRow{
+		Type:    "view",
+		Name:    "active_users",
+		TblName: "active_users",
+		SQL:     "CREATE VIEW active_users AS SELECT * FROM users",
+	}
+
+	err = s.processMasterRow(viewRow)
+	if err != nil {
+		t.Errorf("processMasterRow(view) error = %v", err)
+	}
+
+	// Test unknown type (should be silently ignored)
+	unknownRow := MasterRow{
+		Type: "trigger",
+		Name: "my_trigger",
+	}
+
+	err = s.processMasterRow(unknownRow)
+	if err != nil {
+		t.Errorf("processMasterRow(unknown) should not error, got %v", err)
+	}
+}
+
+func TestParseSingleCreateTable(t *testing.T) {
+	sql := "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT)"
+	stmt, err := parseSingleCreateTable(sql)
+	if err != nil {
+		t.Fatalf("parseSingleCreateTable() error = %v", err)
+	}
+
+	if stmt.Name != "users" {
+		t.Errorf("stmt.Name = %q, want %q", stmt.Name, "users")
+	}
+	if len(stmt.Columns) != 2 {
+		t.Errorf("stmt has %d columns, want 2", len(stmt.Columns))
+	}
+}
+
+func TestParseSingleCreateTableMultiple(t *testing.T) {
+	sql := "CREATE TABLE t1(id INTEGER); CREATE TABLE t2(id INTEGER)"
+	_, err := parseSingleCreateTable(sql)
+	if err == nil {
+		t.Error("Expected error for multiple statements")
+	}
+}
+
+func TestParseSingleCreateTableWrongType(t *testing.T) {
+	sql := "CREATE INDEX idx ON t(c)"
+	_, err := parseSingleCreateTable(sql)
+	if err == nil {
+		t.Error("Expected error for non-CREATE TABLE statement")
+	}
+}
+
+func TestParseViewSQL(t *testing.T) {
+	s := NewSchema()
+
+	row := MasterRow{
+		Name: "active_users",
+		SQL:  "CREATE VIEW active_users AS SELECT * FROM users WHERE active = 1",
+	}
+
+	view, err := s.parseViewSQL(row)
+	if err != nil {
+		t.Fatalf("parseViewSQL() error = %v", err)
+	}
+
+	if view.Name != "active_users" {
+		t.Errorf("view.Name = %q, want %q", view.Name, "active_users")
+	}
+	if view.Select == nil {
+		t.Error("view.Select should not be nil")
+	}
+}
+
+func TestParseViewSQLNoSQL(t *testing.T) {
+	s := NewSchema()
+
+	row := MasterRow{
+		Name: "some_view",
+		SQL:  "",
+	}
+
+	view, err := s.parseViewSQL(row)
+	if err != nil {
+		t.Fatalf("parseViewSQL() error = %v", err)
+	}
+
+	if view.Name != "some_view" {
+		t.Errorf("view.Name = %q, want %q", view.Name, "some_view")
+	}
+	if len(view.Columns) != 0 {
+		t.Errorf("view with no SQL should have 0 columns, got %d", len(view.Columns))
+	}
+}
+
+func TestParseViewSQLInvalid(t *testing.T) {
+	s := NewSchema()
+
+	row := MasterRow{
+		Name: "bad_view",
+		SQL:  "INVALID SQL",
+	}
+
+	_, err := s.parseViewSQL(row)
+	if err == nil {
+		t.Error("Expected error for invalid SQL")
+	}
+}

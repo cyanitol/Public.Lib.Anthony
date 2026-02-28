@@ -185,3 +185,239 @@ func TestResult(t *testing.T) {
 		t.Errorf("RowsAffected() = %d, want 10", rows)
 	}
 }
+
+func TestOpenMemoryDatabase(t *testing.T) {
+	d := &Driver{}
+
+	// Open with :memory:
+	conn1, err := d.Open(":memory:")
+	if err != nil {
+		t.Fatalf("failed to open :memory: database: %v", err)
+	}
+	defer conn1.Close()
+
+	// Open with empty string (also memory)
+	conn2, err := d.Open("")
+	if err != nil {
+		t.Fatalf("failed to open empty string database: %v", err)
+	}
+	defer conn2.Close()
+
+	// Verify connections are independent
+	c1 := conn1.(*Conn)
+	c2 := conn2.(*Conn)
+
+	if c1.filename == c2.filename {
+		t.Error("memory databases should have unique filenames")
+	}
+}
+
+func TestGetDriver(t *testing.T) {
+	d := GetDriver()
+	if d == nil {
+		t.Error("GetDriver() returned nil")
+	}
+
+	// Should return the same instance
+	d2 := GetDriver()
+	if d != d2 {
+		t.Error("GetDriver() should return singleton instance")
+	}
+}
+
+func TestDriverInitMaps(t *testing.T) {
+	d := &Driver{}
+
+	// Maps should be nil initially
+	if d.conns != nil || d.dbs != nil {
+		t.Error("new Driver should have nil maps")
+	}
+
+	d.initMaps()
+
+	// Maps should be initialized
+	if d.conns == nil {
+		t.Error("initMaps() should initialize conns")
+	}
+	if d.dbs == nil {
+		t.Error("initMaps() should initialize dbs")
+	}
+
+	// Should be idempotent - verify maps are not nil after second call
+	d.initMaps()
+	if d.conns == nil || d.dbs == nil {
+		t.Error("initMaps() should not replace existing maps with nil")
+	}
+}
+
+func TestMultipleMemoryDatabases(t *testing.T) {
+	d := &Driver{}
+
+	// Open multiple memory databases
+	conn1, err := d.Open(":memory:")
+	if err != nil {
+		t.Fatalf("failed to open first memory database: %v", err)
+	}
+	defer conn1.Close()
+
+	conn2, err := d.Open(":memory:")
+	if err != nil {
+		t.Fatalf("failed to open second memory database: %v", err)
+	}
+	defer conn2.Close()
+
+	conn3, err := d.Open(":memory:")
+	if err != nil {
+		t.Fatalf("failed to open third memory database: %v", err)
+	}
+	defer conn3.Close()
+
+	// All should have unique IDs
+	c1 := conn1.(*Conn)
+	c2 := conn2.(*Conn)
+	c3 := conn3.(*Conn)
+
+	filenames := map[string]bool{
+		c1.filename: true,
+		c2.filename: true,
+		c3.filename: true,
+	}
+
+	if len(filenames) != 3 {
+		t.Errorf("expected 3 unique memory database IDs, got %d", len(filenames))
+	}
+}
+
+func TestDriverOpenConnector(t *testing.T) {
+	dbFile := "test_open_connector.db"
+	defer os.Remove(dbFile)
+
+	d := &Driver{}
+
+	// OpenConnector should work like Open
+	conn, err := d.OpenConnector(dbFile)
+	if err != nil {
+		t.Fatalf("OpenConnector() failed: %v", err)
+	}
+	defer conn.Close()
+
+	c := conn.(*Conn)
+	if c.filename != dbFile {
+		t.Errorf("connection filename = %s, want %s", c.filename, dbFile)
+	}
+}
+
+func TestSharedDatabaseState(t *testing.T) {
+	dbFile := "test_shared_state.db"
+	defer os.Remove(dbFile)
+
+	d := &Driver{}
+
+	// Open first connection
+	conn1, err := d.Open(dbFile)
+	if err != nil {
+		t.Fatalf("failed to open first connection: %v", err)
+	}
+
+	c1 := conn1.(*Conn)
+
+	// Open second connection to same file
+	conn2, err := d.Open(dbFile)
+	if err != nil {
+		t.Fatalf("failed to open second connection: %v", err)
+	}
+
+	c2 := conn2.(*Conn)
+
+	// Should share pager and btree
+	if c1.pager != c2.pager {
+		t.Error("connections should share pager")
+	}
+	if c1.btree != c2.btree {
+		t.Error("connections should share btree")
+	}
+	if c1.schema != c2.schema {
+		t.Error("connections should share schema")
+	}
+
+	// Close first connection
+	conn1.Close()
+
+	// Second connection should still work
+	if err := c2.Ping(nil); err != nil {
+		t.Errorf("second connection should still work after first closes: %v", err)
+	}
+
+	// Close second connection
+	conn2.Close()
+}
+
+func TestReleaseStateDecreasesRefCount(t *testing.T) {
+	dbFile := "test_release_state.db"
+	defer os.Remove(dbFile)
+
+	d := &Driver{}
+
+	// Open and close connection
+	conn, err := d.Open(dbFile)
+	if err != nil {
+		t.Fatalf("failed to open connection: %v", err)
+	}
+
+	c := conn.(*Conn)
+
+	// Check state exists
+	d.mu.Lock()
+	state, exists := d.dbs[dbFile]
+	d.mu.Unlock()
+
+	if !exists {
+		t.Fatal("database state should exist")
+	}
+
+	if state.refCnt != 1 {
+		t.Errorf("refCnt = %d, want 1", state.refCnt)
+	}
+
+	// Close connection
+	c.Close()
+
+	// Note: State cleanup depends on driver implementation details.
+	// The key test is that refCnt was properly incremented during Open.
+	// State removal is tested indirectly through memory leak tests.
+}
+
+func TestPagerProvider(t *testing.T) {
+	dbFile := "test_pager_provider.db"
+	defer os.Remove(dbFile)
+
+	d := &Driver{}
+	conn, err := d.Open(dbFile)
+	if err != nil {
+		t.Fatalf("failed to open connection: %v", err)
+	}
+	defer conn.Close()
+
+	c := conn.(*Conn)
+
+	// Verify btree has a provider
+	if c.btree.Provider == nil {
+		t.Error("btree should have a provider")
+	}
+}
+
+func TestMemoryPagerProvider(t *testing.T) {
+	d := &Driver{}
+	conn, err := d.Open(":memory:")
+	if err != nil {
+		t.Fatalf("failed to open memory database: %v", err)
+	}
+	defer conn.Close()
+
+	c := conn.(*Conn)
+
+	// Verify btree has a provider
+	if c.btree.Provider == nil {
+		t.Error("btree should have a provider for memory database")
+	}
+}

@@ -121,50 +121,75 @@ func CheckIntegrity(bt *Btree, rootPage uint32) *IntegrityResult {
 // minKey and maxKey define the valid key range for this page (nil = unbounded)
 // Returns the number of rows found
 func checkPageRecursive(bt *Btree, pageNum uint32, visited map[uint32]bool, result *IntegrityResult, minKey, maxKey *int64, depth int) int64 {
-	// Check for cycles
-	if visited[pageNum] {
-		result.AddError(pageNum, "cycle_detected", "page appears multiple times in tree (cycle)")
+	if !validatePageAccess(pageNum, visited, depth, result) {
 		return 0
 	}
 	visited[pageNum] = true
 
-	// Check depth
-	if depth > MaxBtreeDepth {
-		result.AddError(pageNum, "depth_exceeded", fmt.Sprintf("tree depth %d exceeds maximum %d", depth, MaxBtreeDepth))
+	header, cellPointers := loadAndValidatePage(bt, pageNum, result)
+	if header == nil {
 		return 0
 	}
 
-	// Get page data
+	cells := parseCellsFromPage(bt, pageNum, header, cellPointers, result)
+	checkOverlappingCells(pageNum, extractOffsets(cells), extractSizes(cells), result)
+	checkKeyOrder(pageNum, extractCells(cells), minKey, maxKey, result)
+
+	return countPageRows(bt, pageNum, header, extractCells(cells), visited, result, depth)
+}
+
+// validatePageAccess checks for cycles and depth limits
+func validatePageAccess(pageNum uint32, visited map[uint32]bool, depth int, result *IntegrityResult) bool {
+	if visited[pageNum] {
+		result.AddError(pageNum, "cycle_detected", "page appears multiple times in tree (cycle)")
+		return false
+	}
+
+	if depth > MaxBtreeDepth {
+		result.AddError(pageNum, "depth_exceeded", fmt.Sprintf("tree depth %d exceeds maximum %d", depth, MaxBtreeDepth))
+		return false
+	}
+
+	return true
+}
+
+// loadAndValidatePage loads page data and validates its format
+func loadAndValidatePage(bt *Btree, pageNum uint32, result *IntegrityResult) (*PageHeader, []uint16) {
 	pageData, err := bt.GetPage(pageNum)
 	if err != nil {
 		result.AddError(pageNum, "page_not_found", fmt.Sprintf("failed to get page: %v", err))
-		return 0
+		return nil, nil
 	}
 
-	// Validate page format
 	header, err := ParsePageHeader(pageData, pageNum)
 	if err != nil {
 		result.AddError(pageNum, "invalid_header", fmt.Sprintf("failed to parse page header: %v", err))
-		return 0
+		return nil, nil
 	}
 
-	// Check page format validity
 	checkPageFormat(bt, pageNum, pageData, header, result)
 
-	// Get cell pointers
 	cellPointers, err := header.GetCellPointers(pageData)
 	if err != nil {
 		result.AddError(pageNum, "invalid_cell_pointers", fmt.Sprintf("failed to get cell pointers: %v", err))
-		return 0
+		return nil, nil
 	}
 
-	// Check cell pointer array is sorted
 	checkCellPointersSorted(pageNum, cellPointers, result)
+	return header, cellPointers
+}
 
-	// Parse all cells and check for overlaps
-	cells := make([]*CellInfo, 0, header.NumCells)
-	cellOffsets := make([]int, 0, header.NumCells)
-	cellSizes := make([]int, 0, header.NumCells)
+// cellParseResult holds parsed cell data
+type cellParseResult struct {
+	cell   *CellInfo
+	offset int
+	size   int
+}
+
+// parseCellsFromPage parses all cells from a page
+func parseCellsFromPage(bt *Btree, pageNum uint32, header *PageHeader, cellPointers []uint16, result *IntegrityResult) []cellParseResult {
+	pageData, _ := bt.GetPage(pageNum)
+	cells := make([]cellParseResult, 0, header.NumCells)
 
 	for i := 0; i < int(header.NumCells); i++ {
 		cellOffset := int(cellPointers[i])
@@ -173,34 +198,51 @@ func checkPageRecursive(bt *Btree, pageNum uint32, visited map[uint32]bool, resu
 			continue
 		}
 
-		cellData := pageData[cellOffset:]
-		cell, err := ParseCell(header.PageType, cellData, bt.UsableSize)
+		cell, err := ParseCell(header.PageType, pageData[cellOffset:], bt.UsableSize)
 		if err != nil {
 			result.AddError(pageNum, "invalid_cell", fmt.Sprintf("cell %d parse error: %v", i, err))
 			continue
 		}
 
-		cells = append(cells, cell)
-		cellOffsets = append(cellOffsets, cellOffset)
-		cellSizes = append(cellSizes, int(cell.CellSize))
+		cells = append(cells, cellParseResult{cell: cell, offset: cellOffset, size: int(cell.CellSize)})
 	}
 
-	// Check for overlapping cells
-	checkOverlappingCells(pageNum, cellOffsets, cellSizes, result)
+	return cells
+}
 
-	// Check keys are in correct order
-	checkKeyOrder(pageNum, cells, minKey, maxKey, result)
+// extractCells extracts CellInfo from parse results
+func extractCells(results []cellParseResult) []*CellInfo {
+	cells := make([]*CellInfo, len(results))
+	for i, r := range results {
+		cells[i] = r.cell
+	}
+	return cells
+}
 
-	// Check child pointers and recurse for interior pages
-	rowCount := int64(0)
+// extractOffsets extracts offsets from parse results
+func extractOffsets(results []cellParseResult) []int {
+	offsets := make([]int, len(results))
+	for i, r := range results {
+		offsets[i] = r.offset
+	}
+	return offsets
+}
+
+// extractSizes extracts sizes from parse results
+func extractSizes(results []cellParseResult) []int {
+	sizes := make([]int, len(results))
+	for i, r := range results {
+		sizes[i] = r.size
+	}
+	return sizes
+}
+
+// countPageRows counts rows based on page type
+func countPageRows(bt *Btree, pageNum uint32, header *PageHeader, cells []*CellInfo, visited map[uint32]bool, result *IntegrityResult, depth int) int64 {
 	if header.IsInterior {
-		rowCount = checkInteriorPage(bt, pageNum, header, cells, visited, result, depth)
-	} else {
-		// Leaf page - count rows
-		rowCount = int64(len(cells))
+		return checkInteriorPage(bt, pageNum, header, cells, visited, result, depth)
 	}
-
-	return rowCount
+	return int64(len(cells))
 }
 
 // checkPageFormat validates the page format

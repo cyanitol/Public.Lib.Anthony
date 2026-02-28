@@ -546,3 +546,193 @@ func TestConcurrentTransactions(t *testing.T) {
 		t.Errorf("failed to commit tx2: %v", err)
 	}
 }
+
+func TestSavepoint(t *testing.T) {
+	dbFile := "test_savepoint.db"
+	defer os.Remove(dbFile)
+
+	d := &Driver{}
+	conn, err := d.Open(dbFile)
+	if err != nil {
+		t.Fatalf("failed to open connection: %v", err)
+	}
+	defer conn.Close()
+
+	c := conn.(*Conn)
+
+	// Begin write transaction
+	dtx, err := c.BeginTx(context.Background(), driver.TxOptions{ReadOnly: false})
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+	defer dtx.Rollback()
+
+	tx := dtx.(*Tx)
+
+	// Create savepoint
+	if err := tx.Savepoint("sp1"); err != nil {
+		t.Errorf("failed to create savepoint: %v", err)
+	}
+
+	// Release savepoint
+	if err := tx.ReleaseSavepoint("sp1"); err != nil {
+		t.Errorf("failed to release savepoint: %v", err)
+	}
+}
+
+func TestSavepointRollback(t *testing.T) {
+	dbFile := "test_savepoint_rollback.db"
+	defer os.Remove(dbFile)
+
+	d := &Driver{}
+	conn, err := d.Open(dbFile)
+	if err != nil {
+		t.Fatalf("failed to open connection: %v", err)
+	}
+	defer conn.Close()
+
+	c := conn.(*Conn)
+
+	// Begin write transaction
+	dtx, err := c.BeginTx(context.Background(), driver.TxOptions{ReadOnly: false})
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+	defer dtx.Rollback()
+
+	tx := dtx.(*Tx)
+
+	// Create savepoint
+	if err := tx.Savepoint("sp1"); err != nil {
+		t.Errorf("failed to create savepoint: %v", err)
+	}
+
+	// Rollback to savepoint
+	if err := tx.RollbackToSavepoint("sp1"); err != nil {
+		t.Errorf("failed to rollback to savepoint: %v", err)
+	}
+}
+
+func TestSavepointOnClosedTx(t *testing.T) {
+	dbFile := "test_savepoint_closed.db"
+	defer os.Remove(dbFile)
+
+	d := &Driver{}
+	conn, err := d.Open(dbFile)
+	if err != nil {
+		t.Fatalf("failed to open connection: %v", err)
+	}
+	defer conn.Close()
+
+	c := conn.(*Conn)
+
+	// Begin and commit transaction
+	dtx, err := c.BeginTx(context.Background(), driver.TxOptions{ReadOnly: false})
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+
+	tx := dtx.(*Tx)
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+
+	// Try savepoint operations on closed transaction
+	if err := tx.Savepoint("sp1"); err != driver.ErrBadConn {
+		t.Errorf("expected ErrBadConn, got: %v", err)
+	}
+
+	if err := tx.ReleaseSavepoint("sp1"); err != driver.ErrBadConn {
+		t.Errorf("expected ErrBadConn, got: %v", err)
+	}
+
+	if err := tx.RollbackToSavepoint("sp1"); err != driver.ErrBadConn {
+		t.Errorf("expected ErrBadConn, got: %v", err)
+	}
+}
+
+func TestSavepointOnReadOnlyTx(t *testing.T) {
+	dbFile := "test_savepoint_readonly.db"
+	defer os.Remove(dbFile)
+
+	d := &Driver{}
+	conn, err := d.Open(dbFile)
+	if err != nil {
+		t.Fatalf("failed to open connection: %v", err)
+	}
+	defer conn.Close()
+
+	c := conn.(*Conn)
+
+	// Begin read-only transaction
+	dtx, err := c.BeginTx(context.Background(), driver.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("failed to begin read-only transaction: %v", err)
+	}
+	defer dtx.Rollback()
+
+	tx := dtx.(*Tx)
+
+	// Try savepoint operations on read-only transaction
+	err = tx.Savepoint("sp1")
+	if err == nil || err.Error() != "cannot create savepoint in read-only transaction" {
+		t.Errorf("expected read-only error, got: %v", err)
+	}
+
+	err = tx.ReleaseSavepoint("sp1")
+	if err == nil || err.Error() != "cannot release savepoint in read-only transaction" {
+		t.Errorf("expected read-only error, got: %v", err)
+	}
+
+	err = tx.RollbackToSavepoint("sp1")
+	if err == nil || err.Error() != "cannot rollback to savepoint in read-only transaction" {
+		t.Errorf("expected read-only error, got: %v", err)
+	}
+}
+
+func TestSavepointWithoutActiveTx(t *testing.T) {
+	dbFile := "test_savepoint_no_tx.db"
+	defer os.Remove(dbFile)
+
+	d := &Driver{}
+	conn, err := d.Open(dbFile)
+	if err != nil {
+		t.Fatalf("failed to open connection: %v", err)
+	}
+	defer conn.Close()
+
+	c := conn.(*Conn)
+
+	// Begin and rollback transaction
+	dtx, err := c.BeginTx(context.Background(), driver.TxOptions{ReadOnly: false})
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+
+	tx := dtx.(*Tx)
+
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("failed to rollback: %v", err)
+	}
+
+	// Manually clear closed flag to test transaction state check
+	// This simulates a race condition or edge case
+	tx.closed = false
+
+	// Try savepoint operations without active transaction
+	err = tx.Savepoint("sp1")
+	if err == nil || err.Error() != "no transaction in progress" {
+		t.Errorf("expected 'no transaction in progress' error, got: %v", err)
+	}
+
+	err = tx.ReleaseSavepoint("sp1")
+	if err == nil || err.Error() != "no transaction in progress" {
+		t.Errorf("expected 'no transaction in progress' error, got: %v", err)
+	}
+
+	err = tx.RollbackToSavepoint("sp1")
+	if err == nil || err.Error() != "no transaction in progress" {
+		t.Errorf("expected 'no transaction in progress' error, got: %v", err)
+	}
+}

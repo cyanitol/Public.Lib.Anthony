@@ -38,61 +38,82 @@ func writeOverflowChain(bt *Btree, data []byte, usableSize uint32) (uint32, erro
 		return 0, nil
 	}
 
-	// Calculate how much data fits in each overflow page
 	overflowPageCapacity := int(usableSize) - OverflowHeaderSize
-
-	// Allocate first overflow page
 	firstPageNum, err := bt.AllocatePage()
 	if err != nil {
 		return 0, fmt.Errorf("failed to allocate first overflow page: %w", err)
 	}
 
+	err = writeOverflowPages(bt, data, firstPageNum, overflowPageCapacity)
+	if err != nil {
+		return 0, err
+	}
+
+	return firstPageNum, nil
+}
+
+// writeOverflowPages writes data across a chain of overflow pages
+func writeOverflowPages(bt *Btree, data []byte, firstPageNum uint32, pageCapacity int) error {
 	prevPageNum := firstPageNum
 	offset := 0
 
 	for offset < len(data) {
-		// Get current page
-		pageData, err := bt.GetPage(prevPageNum)
+		toWrite := calculateWriteAmount(offset, len(data), pageCapacity)
+		nextPageNum, err := allocateNextPageIfNeeded(bt, offset, toWrite, len(data))
 		if err != nil {
-			return 0, fmt.Errorf("failed to get overflow page %d: %w", prevPageNum, err)
+			return err
 		}
 
-		// Calculate how much data to write to this page
-		remaining := len(data) - offset
-		toWrite := remaining
-		if toWrite > overflowPageCapacity {
-			toWrite = overflowPageCapacity
+		err = writeSingleOverflowPage(bt, prevPageNum, data, offset, toWrite, nextPageNum)
+		if err != nil {
+			return err
 		}
 
-		// Check if we need another overflow page
-		var nextPageNum uint32
-		if offset+toWrite < len(data) {
-			// Allocate next overflow page
-			nextPageNum, err = bt.AllocatePage()
-			if err != nil {
-				return 0, fmt.Errorf("failed to allocate overflow page: %w", err)
-			}
-		}
-
-		// Write the overflow page header (next page pointer)
-		binary.BigEndian.PutUint32(pageData[0:4], nextPageNum)
-
-		// Write the payload data
-		copy(pageData[OverflowHeaderSize:], data[offset:offset+toWrite])
-
-		// Mark page as dirty if using a provider
-		if bt.Provider != nil {
-			if err := bt.Provider.MarkDirty(prevPageNum); err != nil {
-				return 0, fmt.Errorf("failed to mark overflow page %d dirty: %w", prevPageNum, err)
-			}
-		}
-
-		// Move to next page
 		offset += toWrite
 		prevPageNum = nextPageNum
 	}
 
-	return firstPageNum, nil
+	return nil
+}
+
+// calculateWriteAmount determines how many bytes to write to the current page
+func calculateWriteAmount(offset, dataLen, pageCapacity int) int {
+	remaining := dataLen - offset
+	if remaining > pageCapacity {
+		return pageCapacity
+	}
+	return remaining
+}
+
+// allocateNextPageIfNeeded allocates a new page if more data needs to be written
+func allocateNextPageIfNeeded(bt *Btree, offset, toWrite, dataLen int) (uint32, error) {
+	if offset+toWrite < dataLen {
+		nextPageNum, err := bt.AllocatePage()
+		if err != nil {
+			return 0, fmt.Errorf("failed to allocate overflow page: %w", err)
+		}
+		return nextPageNum, nil
+	}
+	return 0, nil
+}
+
+// writeSingleOverflowPage writes data to a single overflow page
+func writeSingleOverflowPage(bt *Btree, pageNum uint32, data []byte, offset, toWrite int, nextPageNum uint32) error {
+	pageData, err := bt.GetPage(pageNum)
+	if err != nil {
+		return fmt.Errorf("failed to get overflow page %d: %w", pageNum, err)
+	}
+
+	binary.BigEndian.PutUint32(pageData[0:4], nextPageNum)
+	copy(pageData[OverflowHeaderSize:], data[offset:offset+toWrite])
+
+	if bt.Provider != nil {
+		if err := bt.Provider.MarkDirty(pageNum); err != nil {
+			return fmt.Errorf("failed to mark overflow page %d dirty: %w", pageNum, err)
+		}
+	}
+
+	return nil
 }
 
 // ReadOverflow reads payload from an overflow page chain
@@ -138,46 +159,12 @@ func readOverflowChain(bt *Btree, firstPage uint32, dataSize int, usableSize uin
 	}
 
 	result := make([]byte, dataSize)
-	currentPage := firstPage
-	offset := 0
 	overflowPageCapacity := int(usableSize) - OverflowHeaderSize
-
-	// Limit chain traversal to prevent infinite loops in corrupt databases
 	maxPages := (dataSize / overflowPageCapacity) + 2
-	pageCount := 0
 
-	for offset < dataSize && currentPage != 0 {
-		pageCount++
-		if pageCount > maxPages {
-			return nil, fmt.Errorf("overflow chain too long (possible corruption), page count: %d", pageCount)
-		}
-
-		// Get the overflow page
-		pageData, err := bt.GetPage(currentPage)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get overflow page %d: %w", currentPage, err)
-		}
-
-		// Read next page pointer from header
-		nextPage := binary.BigEndian.Uint32(pageData[0:4])
-
-		// Calculate how much to read from this page
-		remaining := dataSize - offset
-		toRead := remaining
-		if toRead > overflowPageCapacity {
-			toRead = overflowPageCapacity
-		}
-
-		// Check bounds
-		if OverflowHeaderSize+toRead > len(pageData) {
-			return nil, fmt.Errorf("overflow page %d data exceeds page bounds", currentPage)
-		}
-
-		// Copy data from this page
-		copy(result[offset:offset+toRead], pageData[OverflowHeaderSize:OverflowHeaderSize+toRead])
-
-		offset += toRead
-		currentPage = nextPage
+	offset, err := readOverflowPages(bt, firstPage, result, dataSize, overflowPageCapacity, maxPages)
+	if err != nil {
+		return nil, err
 	}
 
 	if offset < dataSize {
@@ -185,6 +172,57 @@ func readOverflowChain(bt *Btree, firstPage uint32, dataSize int, usableSize uin
 	}
 
 	return result, nil
+}
+
+// readOverflowPages reads data from overflow page chain into result buffer
+func readOverflowPages(bt *Btree, firstPage uint32, result []byte, dataSize, pageCapacity, maxPages int) (int, error) {
+	currentPage := firstPage
+	offset := 0
+	pageCount := 0
+
+	for offset < dataSize && currentPage != 0 {
+		pageCount++
+		if pageCount > maxPages {
+			return 0, fmt.Errorf("overflow chain too long (possible corruption), page count: %d", pageCount)
+		}
+
+		nextPage, bytesRead, err := readSingleOverflowPage(bt, currentPage, result, offset, dataSize, pageCapacity)
+		if err != nil {
+			return 0, err
+		}
+
+		offset += bytesRead
+		currentPage = nextPage
+	}
+
+	return offset, nil
+}
+
+// readSingleOverflowPage reads data from a single overflow page
+func readSingleOverflowPage(bt *Btree, pageNum uint32, result []byte, offset, dataSize, pageCapacity int) (uint32, int, error) {
+	pageData, err := bt.GetPage(pageNum)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get overflow page %d: %w", pageNum, err)
+	}
+
+	nextPage := binary.BigEndian.Uint32(pageData[0:4])
+	toRead := calculateReadAmount(offset, dataSize, pageCapacity)
+
+	if OverflowHeaderSize+toRead > len(pageData) {
+		return 0, 0, fmt.Errorf("overflow page %d data exceeds page bounds", pageNum)
+	}
+
+	copy(result[offset:offset+toRead], pageData[OverflowHeaderSize:OverflowHeaderSize+toRead])
+	return nextPage, toRead, nil
+}
+
+// calculateReadAmount determines how many bytes to read from the current page
+func calculateReadAmount(offset, dataSize, pageCapacity int) int {
+	remaining := dataSize - offset
+	if remaining > pageCapacity {
+		return pageCapacity
+	}
+	return remaining
 }
 
 // FreeOverflowChain frees all pages in an overflow chain

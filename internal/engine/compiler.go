@@ -99,42 +99,16 @@ func resolveNoFromColNames(cols []parser.ResultColumn) []string {
 // compileSelectScan emits the full table-scan bytecode for a SELECT with a FROM clause.
 func (c *Compiler) compileSelectScan(vm *vdbe.VDBE, stmt *parser.SelectStmt, tableName string, table *schema.Table) (*vdbe.VDBE, error) {
 	// Collect all tables involved in the query (base table + JOINs)
-	tables := []tableInfo{{name: tableName, table: table, cursorIdx: 0}}
-
-	// Process JOIN clauses if present
-	if stmt.From != nil && len(stmt.From.Joins) > 0 {
-		for i, join := range stmt.From.Joins {
-			joinTable, ok := c.engine.schema.GetTable(join.Table.TableName)
-			if !ok {
-				return nil, fmt.Errorf("table not found: %s", join.Table.TableName)
-			}
-			tables = append(tables, tableInfo{
-				name:      join.Table.TableName,
-				table:     joinTable,
-				cursorIdx: i + 1,
-			})
-		}
+	tables, err := c.collectQueryTables(stmt, tableName, table)
+	if err != nil {
+		return nil, err
 	}
 
-	// Allocate cursors for all tables
-	vm.AllocCursors(len(tables))
+	// Allocate and open cursors for all tables
+	c.openTableCursors(vm, tables)
 
-	// Open cursors for all tables
-	for _, tbl := range tables {
-		vm.AddOp(vdbe.OpOpenRead, tbl.cursorIdx, int(tbl.table.RootPage), 0)
-		vm.SetComment(vm.NumOps()-1, fmt.Sprintf("Open cursor for %s", tbl.name))
-	}
-
-	// Set up nested loop for first table
-	vm.AddOp(vdbe.OpRewind, 0, vm.NumOps()+100, 0) // Jump to end if empty
-	loopStart := vm.NumOps()
-
-	// Set up nested loops for joined tables
-	var innerLoopStarts []int
-	for i := 1; i < len(tables); i++ {
-		vm.AddOp(vdbe.OpRewind, i, 0, 0) // Will fix P2 later
-		innerLoopStarts = append(innerLoopStarts, vm.NumOps())
-	}
+	// Set up nested loops
+	loopStart, innerLoopStarts := c.setupNestedLoops(vm, tables)
 
 	// Evaluate WHERE clause if present (including JOIN conditions)
 	if stmt.Where != nil {
@@ -148,19 +122,59 @@ func (c *Compiler) compileSelectScan(vm *vdbe.VDBE, stmt *parser.SelectStmt, tab
 
 	vm.AddOp(vdbe.OpResultRow, 0, len(stmt.Columns), 0)
 
-	// Next operations for joined tables (innermost to outermost)
+	// Close nested loops and cursors
+	c.closeNestedLoops(vm, tables, loopStart, innerLoopStarts)
+
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	vm.ResultCols = resolveMultiTableColNames(stmt.Columns, tables)
+	return vm, nil
+}
+
+func (c *Compiler) collectQueryTables(stmt *parser.SelectStmt, tableName string, table *schema.Table) ([]tableInfo, error) {
+	tables := []tableInfo{{name: tableName, table: table, cursorIdx: 0}}
+
+	if stmt.From != nil && len(stmt.From.Joins) > 0 {
+		for i, join := range stmt.From.Joins {
+			joinTable, ok := c.engine.schema.GetTable(join.Table.TableName)
+			if !ok {
+				return nil, fmt.Errorf("table not found: %s", join.Table.TableName)
+			}
+			tables = append(tables, tableInfo{
+				name:      join.Table.TableName,
+				table:     joinTable,
+				cursorIdx: i + 1,
+			})
+		}
+	}
+	return tables, nil
+}
+
+func (c *Compiler) openTableCursors(vm *vdbe.VDBE, tables []tableInfo) {
+	vm.AllocCursors(len(tables))
+	for _, tbl := range tables {
+		vm.AddOp(vdbe.OpOpenRead, tbl.cursorIdx, int(tbl.table.RootPage), 0)
+		vm.SetComment(vm.NumOps()-1, fmt.Sprintf("Open cursor for %s", tbl.name))
+	}
+}
+
+func (c *Compiler) setupNestedLoops(vm *vdbe.VDBE, tables []tableInfo) (loopStart int, innerLoopStarts []int) {
+	vm.AddOp(vdbe.OpRewind, 0, vm.NumOps()+100, 0)
+	loopStart = vm.NumOps()
+
+	for i := 1; i < len(tables); i++ {
+		vm.AddOp(vdbe.OpRewind, i, 0, 0)
+		innerLoopStarts = append(innerLoopStarts, vm.NumOps())
+	}
+	return
+}
+
+func (c *Compiler) closeNestedLoops(vm *vdbe.VDBE, tables []tableInfo, loopStart int, innerLoopStarts []int) {
 	for i := len(tables) - 1; i > 0; i-- {
 		vm.AddOp(vdbe.OpNext, i, innerLoopStarts[i-1], 0)
 		vm.AddOp(vdbe.OpClose, i, 0, 0)
 	}
-
-	// Next operation for base table
 	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	vm.ResultCols = resolveMultiTableColNames(stmt.Columns, tables)
-	return vm, nil
 }
 
 // tableInfo holds information about a table in a query.

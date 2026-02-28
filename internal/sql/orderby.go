@@ -96,16 +96,8 @@ func (obc *OrderByCompiler) generateSortTailWithLimit(sel *Select, sort *SortCtx
 	// Allocate registers for result row
 	regRow, regRowid := obc.allocateResultRegisters(dest, &nColumn)
 
-	// Initialize OFFSET and LIMIT counters BEFORE the sort loop starts
-	var regOffset, regLimit int
-	if sel.Offset > 0 {
-		regOffset = obc.parse.AllocReg()
-		vdbe.AddOp2(OP_Integer, sel.Offset, regOffset)
-	}
-	if sel.Limit > 0 {
-		regLimit = obc.parse.AllocReg()
-		vdbe.AddOp2(OP_Integer, sel.Limit, regLimit)
-	}
+	// Initialize OFFSET and LIMIT counters
+	regOffset, regLimit := obc.initializeOffsetLimit(sel)
 
 	// Generate sort loop based on sorter type
 	var ctx sortLoopContext
@@ -117,7 +109,6 @@ func (obc *OrderByCompiler) generateSortTailWithLimit(sel *Select, sort *SortCtx
 
 	// Handle OFFSET: skip the first OFFSET rows in sorted output
 	if sel.Offset > 0 {
-		// If offset counter > 0, decrement and skip this row
 		vdbe.AddOp3(OP_IfPos, regOffset, addrContinue, -1)
 	}
 
@@ -131,37 +122,59 @@ func (obc *OrderByCompiler) generateSortTailWithLimit(sel *Select, sort *SortCtx
 	}
 
 	// Handle LIMIT: decrement counter and break when limit reached
-	// This is the KEY FIX: LIMIT must be checked AFTER each sorted row is output
-	if sel.Limit > 0 {
-		// Decrement limit counter
-		vdbe.AddOp2(OP_AddImm, regLimit, -1)
-		// If limit reached (counter <= 0), break out of loop
-		vdbe.AddOp3(OP_IfNot, regLimit, addrBreak, 1)
-	}
+	obc.applyLimitCheck(sel, regLimit, addrBreak)
 
 	// Clean up registers
 	obc.cleanupResultRegisters(eDest, regRow, regRowid, nColumn)
 
 	// Loop to next sorted record
 	vdbe.ResolveLabel(addrContinue)
+	obc.generateSortNext(sort, iTab, ctx)
+	vdbe.ResolveLabel(addrBreak)
 
+	// Release OFFSET and LIMIT registers
+	obc.releaseOffsetLimit(regOffset, regLimit)
+
+	return nil
+}
+
+func (obc *OrderByCompiler) initializeOffsetLimit(sel *Select) (regOffset, regLimit int) {
+	vdbe := obc.parse.GetVdbe()
+	if sel.Offset > 0 {
+		regOffset = obc.parse.AllocReg()
+		vdbe.AddOp2(OP_Integer, sel.Offset, regOffset)
+	}
+	if sel.Limit > 0 {
+		regLimit = obc.parse.AllocReg()
+		vdbe.AddOp2(OP_Integer, sel.Limit, regLimit)
+	}
+	return
+}
+
+func (obc *OrderByCompiler) applyLimitCheck(sel *Select, regLimit int, addrBreak int) {
+	if sel.Limit > 0 {
+		vdbe := obc.parse.GetVdbe()
+		vdbe.AddOp2(OP_AddImm, regLimit, -1)
+		vdbe.AddOp3(OP_IfNot, regLimit, addrBreak, 1)
+	}
+}
+
+func (obc *OrderByCompiler) generateSortNext(sort *SortCtx, iTab int, ctx sortLoopContext) {
+	vdbe := obc.parse.GetVdbe()
 	if sort.SortFlags&SORTFLAG_UseSorter != 0 {
 		vdbe.AddOp2(OP_SorterNext, iTab, ctx.addr)
 	} else {
 		vdbe.AddOp2(OP_Next, iTab, ctx.addr)
 	}
+}
 
-	vdbe.ResolveLabel(addrBreak)
-
-	// Release OFFSET and LIMIT registers
+func (obc *OrderByCompiler) releaseOffsetLimit(regOffset, regLimit int) {
 	if regOffset != 0 {
 		obc.parse.ReleaseReg(regOffset)
 	}
 	if regLimit != 0 {
 		obc.parse.ReleaseReg(regLimit)
 	}
-
-	return nil
 }
 
 // generateSortTail implements the main sorting output loop (without LIMIT).

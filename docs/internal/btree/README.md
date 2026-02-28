@@ -1,6 +1,6 @@
-# SQLite B-Tree Implementation in Go
+# B-Tree Implementation
 
-This package provides a pure Go implementation of the SQLite B-tree data structure, based on the reference C implementation from SQLite 3.51.2.
+This package provides a pure Go implementation of the SQLite B-tree data structure, based on SQLite 3.51.2.
 
 ## Overview
 
@@ -22,7 +22,6 @@ SQLite uses four types of B-tree pages:
 #### 1. Variable-Length Integer Encoding (`varint.go`)
 
 SQLite uses a custom variable-length integer format:
-
 - 1-9 bytes per integer
 - Lower 7 bits of each byte store data
 - High bit (0x80) set on all bytes except the last
@@ -30,7 +29,6 @@ SQLite uses a custom variable-length integer format:
 - 9th byte uses all 8 bits
 
 **Functions:**
-
 - `PutVarint(p []byte, v uint64) int` - Encode a 64-bit integer
 - `GetVarint(p []byte) (uint64, int)` - Decode a 64-bit integer
 - `GetVarint32(p []byte) (uint32, int)` - Decode a 32-bit integer (optimized)
@@ -53,19 +51,6 @@ Interior Pages (12 bytes):
   Same as leaf, plus:
   Bytes 8-11: Right-most child page number
 ```
-
-**Page Types:**
-
-- `0x02` - Interior index B-tree page
-- `0x05` - Interior table B-tree page
-- `0x0a` - Leaf index B-tree page
-- `0x0d` - Leaf table B-tree page
-
-**Functions:**
-
-- `ParsePageHeader(data []byte, pageNum uint32) (*PageHeader, error)` - Parse page header
-- `GetCellPointer(data []byte, cellIndex int) (uint16, error)` - Get cell offset
-- `GetCellPointers(data []byte) ([]uint16, error)` - Get all cell offsets
 
 #### 3. Cell Parsing (`cell.go`)
 
@@ -102,21 +87,11 @@ bytes:  payload (up to maxLocal bytes)
 uint32: overflow page number (if payload > maxLocal)
 ```
 
-**Functions:**
-
-- `ParseCell(pageType byte, cellData []byte, usableSize uint32) (*CellInfo, error)` - Parse any cell type
-
 #### 4. B-Tree Management (`btree.go`)
 
 Main B-tree structure providing page management and cell iteration.
 
-**Structures:**
-
-- `Btree` - B-tree instance with page cache
-- `BtShared` - Shared B-tree metadata (page sizes, transaction state)
-
-**Functions:**
-
+**Key Functions:**
 - `NewBtree(pageSize uint32) *Btree` - Create new B-tree
 - `GetPage(pageNum uint32) ([]byte, error)` - Retrieve page
 - `SetPage(pageNum uint32, data []byte) error` - Store page
@@ -128,107 +103,132 @@ Main B-tree structure providing page management and cell iteration.
 Cursors provide sequential access to B-tree entries.
 
 **Cursor States:**
-
 - `CursorValid` - Positioned at valid entry
 - `CursorInvalid` - Not positioned at valid entry
 - `CursorSkipNext` - Next operation should be no-op
 - `CursorRequireSeek` - Position needs restoration
 - `CursorFault` - Unrecoverable error
 
-**Functions:**
-
+**Key Functions:**
 - `NewCursor(bt *Btree, rootPage uint32) *BtCursor` - Create cursor
 - `MoveToFirst() error` - Move to first (leftmost) entry
 - `MoveToLast() error` - Move to last (rightmost) entry
 - `Next() error` - Move to next entry in order
 - `Previous() error` - Move to previous entry in order
-- `IsValid() bool` - Check if cursor is valid
-- `GetKey() int64` - Get current key
-- `GetPayload() []byte` - Get current payload
+- `Insert(key int64, payload []byte) error` - Insert new row
+- `Delete() error` - Delete current row
+
+#### 6. Page Splitting (`split.go`)
+
+Handles B-tree page splits when pages become full.
+
+**Split Algorithm:**
+
+For leaf pages:
+1. Collect all cells plus new cell, sorted by key
+2. Find median index to divide cells
+3. Allocate new sibling page
+4. Distribute cells between left (original) and right (new) pages
+5. Update parent with divider key
+6. Create new root if splitting root page
+
+For interior pages:
+1. Collect all cells plus new divider
+2. Find median key to promote to parent
+3. Distribute cells, promoting median
+4. Update child pointers
+5. Recursively handle parent splits
+
+**Key Functions:**
+- `splitLeafPage(cursor, key, payload)` - Split full leaf page
+- `splitInteriorPage(cursor, key, childPgno)` - Split full interior page
+- `updateParentAfterSplit()` - Handle cascading splits
+- `createNewRoot()` - Create new root when old root splits
+
+#### 7. Integrity Checking (`integrity.go`)
+
+Comprehensive B-tree integrity verification.
+
+**Checks Performed:**
+- Page format validation (headers, cell pointers, content areas)
+- Cell overlap detection
+- Key ordering verification
+- Parent-child pointer validation
+- Cycle detection
+- Depth limit enforcement
+- Free block list validation
+- Orphan page detection
+
+**Key Functions:**
+- `CheckIntegrity(bt *Btree, rootPage uint32) *IntegrityResult` - Full recursive check
+- `CheckPageIntegrity(bt *Btree, pageNum uint32) *IntegrityResult` - Single page check
+- `ValidateFreeBlockList(bt *Btree, pageNum uint32) *IntegrityResult` - Free block validation
+
+**Error Types Detected:** 26 different integrity error types including corruption, invalid structures, and consistency violations.
 
 ## Usage Examples
 
-### Example 1: Parse a B-Tree Page
+### Basic B-Tree Operations
 
 ```go
-package main
+// Create B-tree with 4KB pages
+bt := btree.NewBtree(4096)
+rootPage, _ := bt.CreateTable()
+cursor := btree.NewCursor(bt, rootPage)
 
-import (
-    "fmt"
-    "github.com/yourusername/btree"
-)
-
-func main() {
-    // Create B-tree with 4KB pages
-    bt := btree.NewBtree(4096)
-
-    // Load page data (from file, etc.)
-    pageData := loadPageFromDisk(1)
-    bt.SetPage(1, pageData)
-
-    // Parse page
-    header, cells, err := bt.ParsePage(1)
+// Insert data
+for i := 1; i <= 1000; i++ {
+    key := int64(i)
+    payload := []byte(fmt.Sprintf("Row %d", i))
+    err := cursor.Insert(key, payload)
     if err != nil {
-        panic(err)
+        log.Fatal(err)
     }
+}
 
-    fmt.Printf("Page type: %s\n", header)
-    fmt.Printf("Number of cells: %d\n", len(cells))
+// Iterate through all entries
+cursor.MoveToFirst()
+for cursor.IsValid() {
+    key := cursor.GetKey()
+    payload := cursor.GetPayload()
+    fmt.Printf("Key: %d, Data: %s\n", key, string(payload))
+    cursor.Next()
+}
+```
 
-    for i, cell := range cells {
-        fmt.Printf("Cell %d: key=%d, payload=%q\n",
-            i, cell.Key, string(cell.Payload))
+### Integrity Checking
+
+```go
+// Check B-tree integrity
+result := btree.CheckIntegrity(bt, rootPage)
+
+if result.OK() {
+    fmt.Printf("B-tree is healthy: %d pages, %d rows\n",
+        result.PagesVisited, result.RowCount)
+} else {
+    fmt.Println("B-tree has errors:")
+    for _, err := range result.Errors {
+        fmt.Printf("  Page %d: %s - %s\n",
+            err.PageNum, err.Type, err.Description)
     }
 }
 ```
 
-### Example 2: Iterate Through a B-Tree
+### Page Parsing
 
 ```go
-func iterateTable(bt *btree.Btree, rootPage uint32) error {
-    cursor := btree.NewCursor(bt, rootPage)
-
-    // Move to first entry
-    if err := cursor.MoveToFirst(); err != nil {
-        return err
-    }
-
-    // Iterate through all entries
-    for cursor.IsValid() {
-        key := cursor.GetKey()
-        payload := cursor.GetPayload()
-
-        fmt.Printf("Rowid: %d, Data: %q\n", key, string(payload))
-
-        if err := cursor.Next(); err != nil {
-            if err.Error() == "end of btree" {
-                break
-            }
-            return err
-        }
-    }
-
-    return nil
+// Parse a B-tree page
+header, cells, err := bt.ParsePage(pageNum)
+if err != nil {
+    log.Fatal(err)
 }
-```
 
-### Example 3: Encode/Decode Varints
+fmt.Printf("Page type: %s\n", header)
+fmt.Printf("Number of cells: %d\n", len(cells))
 
-```go
-func varintExample() {
-    // Encode a value
-    var buf [9]byte
-    value := uint64(12345678)
-    n := btree.PutVarint(buf[:], value)
-    fmt.Printf("Encoded %d in %d bytes: %x\n", value, n, buf[:n])
-
-    // Decode the value
-    decoded, m := btree.GetVarint(buf[:])
-    fmt.Printf("Decoded %d from %d bytes\n", decoded, m)
-
-    // Check length without encoding
-    length := btree.VarintLen(value)
-    fmt.Printf("Varint length: %d\n", length)
+for i, cell := range cells {
+    fmt.Printf("Cell %d: key=%d, size=%d bytes\n",
+        i, cell.Key, len(cell.Payload))
 }
 ```
 
@@ -245,6 +245,21 @@ When a cell's payload is too large to fit on the page, the excess is stored in o
    - Surplus calculated to optimize overflow page usage
    - Overflow pages form a linked list
    - Each overflow page has 4-byte next pointer + data
+
+### Tree Navigation
+
+The cursor maintains a stack of (page, index) pairs representing the path from root to current position:
+
+```go
+type BtCursor struct {
+    PageStack  [MaxBtreeDepth]uint32  // Page numbers
+    IndexStack [MaxBtreeDepth]int     // Cell indices
+    Depth      int                     // Current depth
+    // ...
+}
+```
+
+Navigation operations (Next/Previous) use this stack to efficiently traverse the tree without re-reading parent pages.
 
 ### Page Layout
 
@@ -264,61 +279,64 @@ When a cell's payload is too large to fit on the page, the excess is stored in o
 └─────────────────────────────────────────────┘
 ```
 
-### Tree Navigation
-
-The cursor maintains a stack of (page, index) pairs representing the path from root to current position:
-
-```go
-type BtCursor struct {
-    PageStack  [MaxBtreeDepth]uint32  // Page numbers
-    IndexStack [MaxBtreeDepth]int     // Cell indices
-    Depth      int                     // Current depth
-    // ...
-}
-```
-
-Navigation operations (Next/Previous) use this stack to efficiently traverse the tree without re-reading parent pages.
-
-## Testing
-
-Run all tests:
-```bash
-go test -v ./...
-```
-
-Run with coverage:
-```bash
-go test -cover ./...
-```
-
-Run benchmarks:
-```bash
-go test -bench=. -benchmem ./...
-```
-
 ## Performance Characteristics
 
 - **Page access**: O(1) with in-memory cache
 - **Cell parsing**: O(1) per cell
 - **Cursor navigation**: O(log N) worst case (tree height)
 - **Sequential iteration**: O(1) amortized per entry
+- **Insert**: O(log N) search + O(N) split (amortized O(1) split cost)
+- **Delete**: O(log N) search + O(N) cell removal
 
-## Limitations
+## Testing
 
-This implementation currently:
+Run all tests:
+```bash
+go test -v ./internal/btree/...
+```
 
-- Does not handle overflow pages (reads only local payload)
-- Does not support write operations (read-only)
-- Does not implement auto-vacuum
-- Does not support WAL (write-ahead logging)
-- Keeps all pages in memory (no paging to disk)
+Run with coverage:
+```bash
+go test -cover ./internal/btree/...
+```
+
+Run specific test categories:
+```bash
+go test -v ./internal/btree -run Split      # Split tests
+go test -v ./internal/btree -run Integrity  # Integrity tests
+go test -v ./internal/btree -run Cursor     # Cursor tests
+```
+
+## Implementation Status
+
+### Completed
+- Variable-length integer encoding/decoding
+- Page header parsing for all page types
+- Cell parsing for all cell formats
+- B-tree cursor with full navigation
+- Insert operations with automatic splitting
+- Delete operations
+- Page splitting (leaf and interior)
+- Root splitting and tree growth
+- Integrity checking (26 error types)
+- Comprehensive test coverage
+
+### Limitations
+- Index B-trees support incomplete (only table B-trees fully tested)
+- Overflow pages supported but not extensively tested
+- No page merging/rebalancing for underfull pages
+- No auto-vacuum support
+- In-memory page cache only (no disk-based paging)
 
 ## References
 
 - [SQLite File Format Documentation](https://www.sqlite.org/fileformat.html)
+- [SQLite B-tree Module](https://www.sqlite.org/btree.html)
 - SQLite source: `btree.c`, `btree.h`, `btreeInt.h`
-- Donald E. Knuth, "The Art of Computer Programming, Volume 3: Sorting and Searching"
+- Knuth, "The Art of Computer Programming, Volume 3: Sorting and Searching"
+- Bayer & McCreight (1972) - Original B-tree paper
 
 ## License
 
 This implementation is based on the SQLite source code, which is in the public domain.
+The Go implementation follows the same public domain dedication.

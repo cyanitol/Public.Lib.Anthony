@@ -335,36 +335,14 @@ func (c *SelectCompiler) disposeResult(dest *SelectDest, nResultCol int, regResu
 			vdbe.AddOp3(OP_Copy, regResult, dest.SDParm, nResultCol-1)
 		}
 
-	case SRT_Set:
-		r1 := c.parse.AllocReg()
-		vdbe.AddOp3(OP_MakeRecord, regResult, nResultCol, r1)
-		vdbe.AddOp4Int(OP_IdxInsert, dest.SDParm, r1, regResult, nResultCol)
-		c.parse.ReleaseReg(r1)
-
-	case SRT_Union:
-		// Insert into union table (used for UNION/INTERSECT/EXCEPT)
-		// This stores rows as keys in an ephemeral table for deduplication
-		r1 := c.parse.AllocReg()
-		vdbe.AddOp3(OP_MakeRecord, regResult, nResultCol, r1)
-		vdbe.AddOp4Int(OP_IdxInsert, dest.SDParm, r1, regResult, nResultCol)
-		c.parse.ReleaseReg(r1)
+	case SRT_Set, SRT_Union:
+		c.disposeResultWithRecord(dest, nResultCol, regResult, OP_IdxInsert)
 
 	case SRT_Except:
-		// Remove from union table (used for EXCEPT right side)
-		// This deletes matching keys from the ephemeral table
-		r1 := c.parse.AllocReg()
-		vdbe.AddOp3(OP_MakeRecord, regResult, nResultCol, r1)
-		vdbe.AddOp4Int(OP_IdxDelete, dest.SDParm, r1, regResult, nResultCol)
-		c.parse.ReleaseReg(r1)
+		c.disposeResultWithRecord(dest, nResultCol, regResult, OP_IdxDelete)
 
 	case SRT_Table, SRT_EphemTab:
-		r1 := c.parse.AllocReg()
-		r2 := c.parse.AllocReg()
-		vdbe.AddOp3(OP_MakeRecord, regResult, nResultCol, r1)
-		vdbe.AddOp2(OP_NewRowid, dest.SDParm, r2)
-		vdbe.AddOp3(OP_Insert, dest.SDParm, r1, r2)
-		c.parse.ReleaseReg(r1)
-		c.parse.ReleaseReg(r2)
+		c.disposeResultAsTableInsert(dest, nResultCol, regResult)
 
 	case SRT_Exists:
 		vdbe.AddOp2(OP_Integer, 1, dest.SDParm)
@@ -376,6 +354,25 @@ func (c *SelectCompiler) disposeResult(dest *SelectDest, nResultCol int, regResu
 		return fmt.Errorf("unsupported destination type: %d", dest.Dest)
 	}
 	return nil
+}
+
+func (c *SelectCompiler) disposeResultWithRecord(dest *SelectDest, nResultCol int, regResult int, op Opcode) {
+	vdbe := c.parse.GetVdbe()
+	r1 := c.parse.AllocReg()
+	vdbe.AddOp3(OP_MakeRecord, regResult, nResultCol, r1)
+	vdbe.AddOp4Int(op, dest.SDParm, r1, regResult, nResultCol)
+	c.parse.ReleaseReg(r1)
+}
+
+func (c *SelectCompiler) disposeResultAsTableInsert(dest *SelectDest, nResultCol int, regResult int) {
+	vdbe := c.parse.GetVdbe()
+	r1 := c.parse.AllocReg()
+	r2 := c.parse.AllocReg()
+	vdbe.AddOp3(OP_MakeRecord, regResult, nResultCol, r1)
+	vdbe.AddOp2(OP_NewRowid, dest.SDParm, r2)
+	vdbe.AddOp3(OP_Insert, dest.SDParm, r1, r2)
+	c.parse.ReleaseReg(r1)
+	c.parse.ReleaseReg(r2)
 }
 
 // applyLimitFilter emits code to stop iteration once the LIMIT is reached when

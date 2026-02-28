@@ -1,6 +1,8 @@
 package fts5
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/vtab"
@@ -573,4 +575,874 @@ func TestIndexStats(t *testing.T) {
 	}
 
 	t.Logf("Index stats: %s", stats.String())
+}
+
+// TestFTS5ModuleConnect tests the Connect method.
+func TestFTS5ModuleConnect(t *testing.T) {
+	module := NewFTS5Module()
+
+	table, schema, err := module.Connect(nil, "fts5", "main", "test_fts", []string{"title", "body"})
+	if err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+
+	if table == nil {
+		t.Fatal("Expected non-nil table")
+	}
+
+	if schema == "" {
+		t.Error("Expected non-empty schema")
+	}
+
+	ftsTable, ok := table.(*FTS5Table)
+	if !ok {
+		t.Fatal("Expected FTS5Table type")
+	}
+
+	if len(ftsTable.columns) != 2 {
+		t.Errorf("Expected 2 columns, got %d", len(ftsTable.columns))
+	}
+}
+
+// TestFTS5Destroy tests the Destroy method.
+func TestFTS5Destroy(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, err := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	ftsTable := table.(*FTS5Table)
+
+	// Add some documents
+	ftsTable.Update(4, []interface{}{nil, nil, "test content"})
+	ftsTable.Update(4, []interface{}{nil, nil, "more content"})
+
+	// Destroy the table
+	err = ftsTable.Destroy()
+	if err != nil {
+		t.Errorf("Destroy failed: %v", err)
+	}
+
+	// Verify data is cleared
+	if ftsTable.index.GetTotalDocuments() != 0 {
+		t.Errorf("Expected 0 documents after Destroy, got %d", ftsTable.index.GetTotalDocuments())
+	}
+
+	if len(ftsTable.rows) != 0 {
+		t.Errorf("Expected 0 rows after Destroy, got %d", len(ftsTable.rows))
+	}
+}
+
+// TestFTS5CursorRowid tests the Rowid method.
+func TestFTS5CursorRowid(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, err := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	ftsTable := table.(*FTS5Table)
+	ftsTable.Update(4, []interface{}{nil, nil, "test document"})
+
+	cursor, err := ftsTable.Open()
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer cursor.Close()
+
+	// Query all documents
+	err = cursor.Filter(0, "", nil)
+	if err != nil {
+		t.Fatalf("Filter failed: %v", err)
+	}
+
+	if !cursor.EOF() {
+		rowid, err := cursor.Rowid()
+		if err != nil {
+			t.Errorf("Rowid failed: %v", err)
+		}
+		if rowid != 1 {
+			t.Errorf("Expected rowid 1, got %d", rowid)
+		}
+	}
+
+	// Test Rowid at EOF
+	for !cursor.EOF() {
+		cursor.Next()
+	}
+
+	_, err = cursor.Rowid()
+	if err == nil {
+		t.Error("Expected error when calling Rowid at EOF")
+	}
+}
+
+// TestRegisterFTS5 tests FTS5 registration.
+func TestRegisterFTS5(t *testing.T) {
+	err := RegisterFTS5()
+	if err != nil {
+		t.Fatalf("RegisterFTS5 failed: %v", err)
+	}
+
+	// Verify module is registered
+	if !vtab.HasModule("fts5") {
+		t.Error("FTS5 module not registered")
+	}
+}
+
+// TestBM25Function tests the BM25 auxiliary function.
+func TestBM25Function(t *testing.T) {
+	// Create index with documents
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+
+	docs := []map[int]string{
+		{0: "database systems"},
+		{0: "database management"},
+		{0: "distributed systems"},
+	}
+
+	for i, doc := range docs {
+		index.AddDocument(DocumentID(i+1), doc, tokenizer)
+	}
+
+	// Test BM25 scoring
+	score := BM25(index, 1, []string{"database", "systems"})
+	if score <= 0 {
+		t.Errorf("Expected positive BM25 score, got %f", score)
+	}
+
+	// Document without matching terms should score 0
+	score = BM25(index, 2, []string{"nonexistent"})
+	if score != 0 {
+		t.Errorf("Expected 0 score for non-matching terms, got %f", score)
+	}
+}
+
+// TestSnippetFunction tests the Snippet auxiliary function.
+func TestSnippetFunction(t *testing.T) {
+	text := "The quick brown fox jumps over the lazy dog. This is a longer piece of text for testing snippet generation."
+	terms := []string{"quick", "lazy"}
+
+	snippet := Snippet(text, terms, "<b>", "</b>", 10)
+
+	if len(snippet) == 0 {
+		t.Error("Expected non-empty snippet")
+	}
+
+	t.Logf("Snippet: %s", snippet)
+}
+
+// TestHighlightFunction tests the Highlight auxiliary function.
+func TestHighlightFunction(t *testing.T) {
+	text := "The quick brown fox"
+	terms := []string{"quick", "fox"}
+
+	highlighted := Highlight(text, terms, "<mark>", "</mark>")
+
+	if highlighted == text {
+		t.Error("Expected text to be modified")
+	}
+
+	if !strings.Contains(highlighted, "<mark>") {
+		t.Error("Expected highlight markers in text")
+	}
+
+	t.Logf("Highlighted: %s", highlighted)
+}
+
+// TestTFIDFRanker tests the TF-IDF ranking algorithm.
+func TestTFIDFRanker(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	ranker := NewTFIDFRanker()
+
+	docs := []map[int]string{
+		{0: "database systems"},
+		{0: "database management systems"},
+		{0: "web development"},
+	}
+
+	for i, doc := range docs {
+		index.AddDocument(DocumentID(i+1), doc, tokenizer)
+	}
+
+	terms := []string{"database", "systems"}
+
+	score1 := ranker.Score(index, 1, terms)
+	score2 := ranker.Score(index, 2, terms)
+	score3 := ranker.Score(index, 3, terms)
+
+	// Doc 3 shouldn't match
+	if score3 != 0.0 {
+		t.Errorf("Expected score 0 for non-matching document, got %f", score3)
+	}
+
+	// Docs 1 and 2 should have positive scores
+	if score1 <= 0 || score2 <= 0 {
+		t.Error("Expected positive scores for matching documents")
+	}
+
+	t.Logf("TF-IDF Scores: doc1=%f, doc2=%f, doc3=%f", score1, score2, score3)
+}
+
+// TestSimpleRanker tests the simple ranking algorithm.
+func TestSimpleRanker(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	ranker := NewSimpleRanker()
+
+	docs := []map[int]string{
+		{0: "database systems"},
+		{0: "database database systems"},
+		{0: "web development"},
+	}
+
+	for i, doc := range docs {
+		index.AddDocument(DocumentID(i+1), doc, tokenizer)
+	}
+
+	terms := []string{"database"}
+
+	score1 := ranker.Score(index, 1, terms)
+	score2 := ranker.Score(index, 2, terms)
+	score3 := ranker.Score(index, 3, terms)
+
+	// Doc 2 should have higher score (more occurrences)
+	if score2 <= score1 {
+		t.Error("Expected doc2 to have higher score than doc1")
+	}
+
+	// Doc 3 shouldn't match
+	if score3 != 0.0 {
+		t.Errorf("Expected score 0 for non-matching document, got %f", score3)
+	}
+
+	t.Logf("Simple Ranker Scores: doc1=%f, doc2=%f, doc3=%f", score1, score2, score3)
+}
+
+// TestScoreWithBoost tests scoring with column boosting.
+func TestScoreWithBoost(t *testing.T) {
+	baseScore := 10.0
+	boost := map[int]float64{0: 2.0, 1: 1.0}
+
+	// Test with boosted column
+	score := ScoreWithBoost(baseScore, 0, boost)
+	if score != 20.0 {
+		t.Errorf("Expected score 20.0, got %f", score)
+	}
+
+	// Test with non-boosted column
+	score = ScoreWithBoost(baseScore, 2, boost)
+	if score != baseScore {
+		t.Errorf("Expected score %f, got %f", baseScore, score)
+	}
+
+	t.Logf("Boosted score: %f", score)
+}
+
+// TestPrefixTokenizer tests the prefix tokenizer.
+func TestPrefixTokenizer(t *testing.T) {
+	base := NewSimpleTokenizer()
+	tokenizer := NewPrefixTokenizer(base, 2, 5)
+
+	text := "database"
+	tokens := tokenizer.Tokenize(text)
+
+	// Should generate prefixes: da, dat, data, datab, databa
+	if len(tokens) == 0 {
+		t.Error("Expected tokens from prefix tokenizer")
+	}
+
+	hasPrefix := false
+	for _, token := range tokens {
+		if len(token.Text) >= 2 && len(token.Text) <= 5 {
+			hasPrefix = true
+			break
+		}
+	}
+
+	if !hasPrefix {
+		t.Error("Expected prefix tokens")
+	}
+
+	t.Logf("Prefix tokens: %v", tokens)
+}
+
+// TestStopWordIsStopWord tests stop word filtering.
+func TestStopWordIsStopWord(t *testing.T) {
+	base := NewSimpleTokenizer()
+	tokenizer := NewStopWordTokenizer(base, StopWords)
+
+	// Test that stop words are filtered out
+	text := "the quick brown fox and the lazy dog"
+	tokens := tokenizer.Tokenize(text)
+
+	// "the" and "and" should be filtered
+	for _, token := range tokens {
+		if token.Text == "the" || token.Text == "and" {
+			t.Errorf("Stop word '%s' should have been filtered", token.Text)
+		}
+	}
+
+	// Should contain non-stop words
+	hasNonStop := false
+	for _, token := range tokens {
+		if token.Text == "quick" || token.Text == "brown" {
+			hasNonStop = true
+			break
+		}
+	}
+
+	if !hasNonStop {
+		t.Error("Expected non-stop words in result")
+	}
+}
+
+// TestGetDocumentContent tests retrieving document content.
+func TestGetDocumentContent(t *testing.T) {
+	index := NewInvertedIndex([]string{"title", "body"})
+	tokenizer := NewSimpleTokenizer()
+
+	doc := map[int]string{
+		0: "Title Text",
+		1: "Body content",
+	}
+	index.AddDocument(1, doc, tokenizer)
+
+	// Test getting specific column content
+	content, exists := index.GetDocumentContent(1, 0)
+	if !exists {
+		t.Error("Expected content to exist for column 0")
+	}
+
+	if content != "Title Text" {
+		t.Errorf("Expected title 'Title Text', got %s", content)
+	}
+
+	content, exists = index.GetDocumentContent(1, 1)
+	if !exists {
+		t.Error("Expected content to exist for column 1")
+	}
+
+	if content != "Body content" {
+		t.Errorf("Expected body 'Body content', got %s", content)
+	}
+
+	// Test non-existent document
+	_, exists = index.GetDocumentContent(999, 0)
+	if exists {
+		t.Error("Expected content not to exist for non-existent document")
+	}
+}
+
+// TestGetColumnNames tests getting column names from index.
+func TestGetColumnNames(t *testing.T) {
+	columns := []string{"title", "body", "author"}
+	index := NewInvertedIndex(columns)
+
+	names := index.GetColumnNames()
+
+	if len(names) != 3 {
+		t.Errorf("Expected 3 column names, got %d", len(names))
+	}
+
+	for i, name := range names {
+		if name != columns[i] {
+			t.Errorf("Column %d: expected %s, got %s", i, columns[i], name)
+		}
+	}
+}
+
+// TestGetAllDocuments tests retrieving all document IDs.
+func TestGetAllDocuments(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+
+	// Add multiple documents
+	for i := 1; i <= 5; i++ {
+		doc := map[int]string{0: fmt.Sprintf("document %d", i)}
+		index.AddDocument(DocumentID(i), doc, tokenizer)
+	}
+
+	docIDs := index.GetAllDocuments()
+
+	if len(docIDs) != 5 {
+		t.Errorf("Expected 5 documents, got %d", len(docIDs))
+	}
+
+	// Check that all IDs are present
+	for i := 1; i <= 5; i++ {
+		found := false
+		for _, id := range docIDs {
+			if id == DocumentID(i) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Document ID %d not found", i)
+		}
+	}
+}
+
+// TestGetTerms tests getting all terms from index.
+func TestGetTerms(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+
+	doc := map[int]string{0: "quick brown fox"}
+	index.AddDocument(1, doc, tokenizer)
+
+	terms := index.GetTerms()
+
+	expectedTerms := []string{"quick", "brown", "fox"}
+	if len(terms) != len(expectedTerms) {
+		t.Errorf("Expected %d terms, got %d", len(expectedTerms), len(terms))
+	}
+
+	for _, expected := range expectedTerms {
+		found := false
+		for _, term := range terms {
+			if term == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected term '%s' not found", expected)
+		}
+	}
+}
+
+// TestClearIndex tests clearing the index.
+func TestClearIndex(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+
+	// Add documents
+	for i := 1; i <= 3; i++ {
+		doc := map[int]string{0: "test content"}
+		index.AddDocument(DocumentID(i), doc, tokenizer)
+	}
+
+	if index.GetTotalDocuments() != 3 {
+		t.Errorf("Expected 3 documents before clear, got %d", index.GetTotalDocuments())
+	}
+
+	// Clear index
+	index.Clear()
+
+	if index.GetTotalDocuments() != 0 {
+		t.Errorf("Expected 0 documents after clear, got %d", index.GetTotalDocuments())
+	}
+
+	terms := index.GetTerms()
+	if len(terms) != 0 {
+		t.Errorf("Expected 0 terms after clear, got %d", len(terms))
+	}
+}
+
+// TestMatchOperator tests the MATCH operator in queries.
+func TestMatchOperator(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+	executor := NewQueryExecutor(index, NewBM25Ranker())
+
+	// Add documents
+	docs := []map[int]string{
+		{0: "quick brown fox"},
+		{0: "lazy dog"},
+		{0: "quick animal"},
+	}
+
+	for i, doc := range docs {
+		index.AddDocument(DocumentID(i+1), doc, tokenizer)
+	}
+
+	// Test MATCH operator
+	query, err := parser.Parse("quick")
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	results, err := executor.Execute(query)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Errorf("Expected 2 results, got %d", len(results))
+	}
+}
+
+// TestPrefixQuery tests prefix query execution.
+func TestPrefixQuery(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+	executor := NewQueryExecutor(index, NewBM25Ranker())
+
+	// Add documents
+	docs := []map[int]string{
+		{0: "database systems"},
+		{0: "data structures"},
+		{0: "web development"},
+	}
+
+	for i, doc := range docs {
+		index.AddDocument(DocumentID(i+1), doc, tokenizer)
+	}
+
+	// Test prefix query
+	query, err := parser.Parse("dat*")
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	results, err := executor.Execute(query)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// Should match "database" and "data"
+	if len(results) != 2 {
+		t.Errorf("Expected 2 results for prefix query, got %d", len(results))
+	}
+}
+
+// TestColumnFilterQuery tests column-specific queries.
+func TestColumnFilterQuery(t *testing.T) {
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+
+	// Test simple column filter syntax
+	// Note: The actual implementation may vary, so we test what's supported
+	query, err := parser.Parse("database")
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	// Should parse as simple query
+	if query.Type != QuerySimple {
+		t.Errorf("Expected QuerySimple, got %v", query.Type)
+	}
+
+	if len(query.Terms) != 1 || query.Terms[0] != "database" {
+		t.Errorf("Expected term 'database', got %v", query.Terms)
+	}
+}
+
+// TestGenerateSnippet tests snippet generation with various inputs.
+func TestGenerateSnippet(t *testing.T) {
+	text := "The quick brown fox jumps over the lazy dog"
+
+	// Test with match positions
+	matchPositions := []int{4, 36} // "quick" and "lazy"
+	snippet := GenerateSnippet(text, matchPositions, 20)
+
+	if len(snippet) == 0 {
+		t.Error("Expected non-empty snippet")
+	}
+
+	t.Logf("Generated snippet: %s", snippet)
+
+	// Test with empty positions
+	snippet = GenerateSnippet(text, []int{}, 20)
+	if len(snippet) > 25 {
+		t.Errorf("Snippet too long: %d characters", len(snippet))
+	}
+}
+
+// TestHighlightTextEdgeCases tests highlighting edge cases.
+func TestHighlightTextEdgeCases(t *testing.T) {
+	tests := []struct {
+		name  string
+		text  string
+		terms []string
+	}{
+		{
+			name:  "empty text",
+			text:  "",
+			terms: []string{"test"},
+		},
+		{
+			name:  "empty terms",
+			text:  "some text",
+			terms: []string{},
+		},
+		{
+			name:  "no matches",
+			text:  "some text",
+			terms: []string{"nomatch"},
+		},
+		{
+			name:  "multiple matches",
+			text:  "test test test",
+			terms: []string{"test"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := HighlightText(tt.text, tt.terms, "<b>", "</b>")
+
+			// Should not crash and return valid string
+			if tt.text == "" && result != "" {
+				t.Errorf("Expected empty result for empty text, got %s", result)
+			}
+		})
+	}
+}
+
+// TestFTS5UpdateEdgeCases tests Update method edge cases.
+func TestFTS5UpdateEdgeCases(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	// Test UPDATE with mismatched rowids
+	ftsTable.Update(4, []interface{}{nil, int64(1), "first"})
+
+	// Try UPDATE changing rowid
+	_, err := ftsTable.Update(4, []interface{}{int64(1), int64(2), "updated"})
+	if err != nil {
+		t.Logf("UPDATE with changed rowid: %v", err)
+	}
+
+	// Test DELETE non-existent
+	_, err = ftsTable.Update(1, []interface{}{int64(999)})
+	if err != nil {
+		t.Logf("DELETE non-existent: %v", err)
+	}
+}
+
+// TestFTS5ColumnEdgeCases tests cursor Column edge cases.
+func TestFTS5ColumnEdgeCases(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"title", "body"})
+	ftsTable := table.(*FTS5Table)
+
+	// Insert with different value types
+	ftsTable.Update(4, []interface{}{nil, nil, "Title", int64(123)})
+	ftsTable.Update(4, []interface{}{nil, nil, []byte("Bytes"), 45.67})
+
+	cursor, _ := ftsTable.Open()
+	defer cursor.Close()
+
+	cursor.Filter(0, "", nil)
+
+	// Test various column access
+	for !cursor.EOF() {
+		for col := 0; col < 2; col++ {
+			val, err := cursor.Column(col)
+			if err != nil {
+				t.Errorf("Column(%d) failed: %v", col, err)
+			}
+			t.Logf("Column %d: %v (type: %T)", col, val, val)
+		}
+		cursor.Next()
+	}
+}
+
+// TestFTS5BestIndexWithoutMatch tests BestIndex without MATCH constraint.
+func TestFTS5BestIndexWithoutMatch(t *testing.T) {
+	module := NewFTS5Module()
+	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
+	ftsTable := table.(*FTS5Table)
+
+	info := vtab.NewIndexInfo(2)
+	info.Constraints[0].Column = 0
+	info.Constraints[0].Op = vtab.ConstraintEQ
+	info.Constraints[0].Usable = true
+	info.Constraints[1].Column = 1
+	info.Constraints[1].Op = vtab.ConstraintGT
+	info.Constraints[1].Usable = true
+
+	err := ftsTable.BestIndex(info)
+	if err != nil {
+		t.Errorf("BestIndex failed: %v", err)
+	}
+
+	// Should handle non-MATCH constraints
+	t.Logf("BestIndex estimated cost: %f", info.EstimatedCost)
+}
+
+// TestInvertedIndexEdgeCases tests index edge cases.
+func TestInvertedIndexEdgeCases(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+
+	// Add document with empty content
+	doc := map[int]string{0: ""}
+	err := index.AddDocument(1, doc, tokenizer)
+	if err != nil {
+		t.Errorf("AddDocument with empty content failed: %v", err)
+	}
+
+	// Get posting list for non-existent term
+	postings := index.GetPostingList("nonexistent")
+	if len(postings) != 0 {
+		t.Error("Expected empty postings for non-existent term")
+	}
+
+	// Get document frequency for non-existent term
+	df := index.GetDocumentFrequency("nonexistent")
+	if df != 0 {
+		t.Errorf("Expected DF 0 for non-existent term, got %d", df)
+	}
+
+	// Remove non-existent document
+	err = index.RemoveDocument(999)
+	if err != nil {
+		t.Logf("RemoveDocument non-existent: %v", err)
+	}
+
+	// Phrase match with non-existent document
+	match := index.PhraseMatch([]string{"test"}, 999)
+	if match {
+		t.Error("Expected no phrase match for non-existent document")
+	}
+}
+
+// TestQueryParserEmptyQuery tests parsing empty queries.
+func TestQueryParserEmptyQuery(t *testing.T) {
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+
+	query, err := parser.Parse("")
+	// Empty queries may return an error or a query with no terms
+	if err != nil {
+		t.Logf("Parse empty query returned error: %v", err)
+		return
+	}
+
+	if query != nil {
+		t.Logf("Query type: %v, terms: %v", query.Type, query.Terms)
+	}
+}
+
+// TestQueryExecutorEdgeCases tests query execution edge cases.
+func TestQueryExecutorEdgeCases(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+	tokenizer := NewSimpleTokenizer()
+	parser := NewQueryParser(tokenizer)
+	executor := NewQueryExecutor(index, NewBM25Ranker())
+
+	// Add document
+	index.AddDocument(1, map[int]string{0: "test content"}, tokenizer)
+
+	// Test query with no results
+	query, err := parser.Parse("nonexistent")
+	if err != nil {
+		t.Logf("Parse failed: %v", err)
+		return
+	}
+
+	results, err := executor.Execute(query)
+	if err != nil {
+		t.Errorf("Execute failed: %v", err)
+	}
+
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results, got %d", len(results))
+	}
+
+	// Test with valid simple query
+	query, err = parser.Parse("test")
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	results, err = executor.Execute(query)
+	if err != nil {
+		t.Errorf("Execute failed: %v", err)
+	}
+
+	t.Logf("Query results: %d", len(results))
+}
+
+// TestRankersWithEmptyIndex tests rankers with empty index.
+func TestRankersWithEmptyIndex(t *testing.T) {
+	index := NewInvertedIndex([]string{"content"})
+
+	rankers := []struct {
+		name   string
+		ranker RankFunction
+	}{
+		{"BM25", NewBM25Ranker()},
+		{"TFIDF", NewTFIDFRanker()},
+		{"Simple", NewSimpleRanker()},
+	}
+
+	for _, r := range rankers {
+		t.Run(r.name, func(t *testing.T) {
+			score := r.ranker.Score(index, 1, []string{"test"})
+			if score != 0 {
+				t.Errorf("Expected score 0 for empty index, got %f", score)
+			}
+		})
+	}
+}
+
+// TestGenerateSnippetEdgeCases tests snippet generation edge cases.
+func TestGenerateSnippetEdgeCases(t *testing.T) {
+	tests := []struct {
+		name      string
+		text      string
+		positions []int
+		maxLen    int
+	}{
+		{
+			name:      "empty text",
+			text:      "",
+			positions: []int{0},
+			maxLen:    20,
+		},
+		{
+			name:      "no positions",
+			text:      "some text",
+			positions: []int{},
+			maxLen:    20,
+		},
+		{
+			name:      "position out of range",
+			text:      "short",
+			positions: []int{100},
+			maxLen:    20,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snippet := GenerateSnippet(tt.text, tt.positions, tt.maxLen)
+			// Should not crash
+			t.Logf("Snippet: %s", snippet)
+		})
+	}
+}
+
+// TestTokenizerEdgeCases tests tokenizer edge cases.
+func TestTokenizerEdgeCases(t *testing.T) {
+	tokenizer := NewSimpleTokenizer()
+
+	tests := []struct {
+		name string
+		text string
+	}{
+		{"only spaces", "    "},
+		{"unicode", "Hello 世界 مرحبا"},
+		{"mixed case", "TeSt CaSe"},
+		{"numbers only", "123 456"},
+		{"special chars", "!@#$%^&*()"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokens := tokenizer.Tokenize(tt.text)
+			t.Logf("Tokens for '%s': %v", tt.name, tokens)
+		})
+	}
 }

@@ -59,21 +59,10 @@ func (p *Planner) PlanQuery(tables []*TableInfo, whereClause *WhereClause) (*Whe
 		return nil, fmt.Errorf("no tables in query")
 	}
 
-	// Phase 0: Expand CTEs if present
-	expandedTables := tables
-	if p.CTEContext != nil {
-		var err error
-		expandedTables, err = p.CTEContext.RewriteQueryWithCTEs(tables)
-		if err != nil {
-			return nil, fmt.Errorf("CTE expansion failed: %w", err)
-		}
-	}
-
-	// Apply statistics to tables before planning
-	if p.Statistics != nil {
-		for _, table := range expandedTables {
-			ApplyStatisticsToTable(table, p.Statistics)
-		}
+	// Phase 0: Expand CTEs and apply statistics
+	expandedTables, err := p.prepareTablesForPlanning(tables)
+	if err != nil {
+		return nil, err
 	}
 
 	info := &WhereInfo{
@@ -82,16 +71,10 @@ func (p *Planner) PlanQuery(tables []*TableInfo, whereClause *WhereClause) (*Whe
 		AllLoops: make([]*WhereLoop, 0),
 	}
 
-	// Phase 1: Analyze WHERE clause and split into terms
-	// Also detect and optimize subqueries
-	if whereClause != nil {
-		// Terms are already split in WhereClause
-		// Detect subqueries in WHERE clause
-		optimizedInfo, err := p.optimizeWhereSubqueries(info)
-		if err != nil {
-			return nil, fmt.Errorf("subquery optimization failed: %w", err)
-		}
-		info = optimizedInfo
+	// Phase 1: Optimize WHERE clause if present
+	info, err = p.optimizeWhereClause(info, whereClause)
+	if err != nil {
+		return nil, err
 	}
 
 	// Phase 2: Generate all possible WhereLoop objects for each table
@@ -110,6 +93,37 @@ func (p *Planner) PlanQuery(tables []*TableInfo, whereClause *WhereClause) (*Whe
 	info.NOut = bestPath.NRow
 
 	return info, nil
+}
+
+func (p *Planner) prepareTablesForPlanning(tables []*TableInfo) ([]*TableInfo, error) {
+	expandedTables := tables
+	if p.CTEContext != nil {
+		var err error
+		expandedTables, err = p.CTEContext.RewriteQueryWithCTEs(tables)
+		if err != nil {
+			return nil, fmt.Errorf("CTE expansion failed: %w", err)
+		}
+	}
+
+	if p.Statistics != nil {
+		for _, table := range expandedTables {
+			ApplyStatisticsToTable(table, p.Statistics)
+		}
+	}
+
+	return expandedTables, nil
+}
+
+func (p *Planner) optimizeWhereClause(info *WhereInfo, whereClause *WhereClause) (*WhereInfo, error) {
+	if whereClause == nil {
+		return info, nil
+	}
+
+	optimizedInfo, err := p.optimizeWhereSubqueries(info)
+	if err != nil {
+		return nil, fmt.Errorf("subquery optimization failed: %w", err)
+	}
+	return optimizedInfo, nil
 }
 
 // generateLoops generates all WhereLoop options for a single table.

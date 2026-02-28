@@ -275,21 +275,26 @@ func HighlightText(text string, terms []string, startMarker, endMarker string) s
 		return text
 	}
 
-	// Create a tokenizer to find term positions
+	highlights := findHighlightRanges(text, terms)
+	if len(highlights) == 0 {
+		return text
+	}
+
+	return buildHighlightedText(text, highlights, startMarker, endMarker)
+}
+
+// highlight represents a range of text to highlight.
+type highlight struct {
+	start int
+	end   int
+}
+
+// findHighlightRanges finds all ranges of text that should be highlighted.
+func findHighlightRanges(text string, terms []string) []highlight {
 	tokenizer := NewSimpleTokenizer()
 	tokens := tokenizer.Tokenize(text)
 
-	// Build a set of terms to match
-	termSet := make(map[string]bool)
-	for _, term := range terms {
-		termSet[term] = true
-	}
-
-	// Track which character ranges should be highlighted
-	type highlight struct {
-		start int
-		end   int
-	}
+	termSet := buildTermSet(terms)
 	highlights := []highlight{}
 
 	for _, token := range tokens {
@@ -301,11 +306,20 @@ func HighlightText(text string, terms []string, startMarker, endMarker string) s
 		}
 	}
 
-	if len(highlights) == 0 {
-		return text
-	}
+	return highlights
+}
 
-	// Build the highlighted text
+// buildTermSet creates a set of terms for fast lookup.
+func buildTermSet(terms []string) map[string]bool {
+	termSet := make(map[string]bool)
+	for _, term := range terms {
+		termSet[term] = true
+	}
+	return termSet
+}
+
+// buildHighlightedText builds the final highlighted text.
+func buildHighlightedText(text string, highlights []highlight, startMarker, endMarker string) string {
 	result := ""
 	lastPos := 0
 

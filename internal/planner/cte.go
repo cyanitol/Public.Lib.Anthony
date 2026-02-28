@@ -409,30 +409,47 @@ func (ctx *CTEContext) calculateLevel(name string, visiting map[string]bool) err
 		return nil // Already calculated
 	}
 
-	if visiting[name] {
-		// Check if it's a recursive CTE
-		if def.IsRecursive {
-			// Recursive self-reference is allowed
-			def.Level = 1
-			return nil
-		}
-		return fmt.Errorf("circular dependency detected in CTE: %s", name)
+	if err := ctx.checkLevelCircularity(name, def, visiting); err != nil {
+		return err
 	}
 
 	visiting[name] = true
+	maxLevel, err := ctx.calculateMaxDependencyLevel(name, def, visiting)
+	if err != nil {
+		return err
+	}
+
+	def.Level = maxLevel + 1
+	delete(visiting, name)
+
+	return nil
+}
+
+func (ctx *CTEContext) checkLevelCircularity(name string, def *CTEDefinition, visiting map[string]bool) error {
+	if !visiting[name] {
+		return nil
+	}
+
+	if def.IsRecursive {
+		def.Level = 1
+		return nil
+	}
+	return fmt.Errorf("circular dependency detected in CTE: %s", name)
+}
+
+func (ctx *CTEContext) calculateMaxDependencyLevel(name string, def *CTEDefinition, visiting map[string]bool) (int, error) {
 	maxLevel := 0
 
 	for _, dep := range def.DependsOn {
 		if dep == name {
-			// Self-reference in recursive CTE
 			if !def.IsRecursive {
-				return fmt.Errorf("non-recursive CTE cannot reference itself: %s", name)
+				return 0, fmt.Errorf("non-recursive CTE cannot reference itself: %s", name)
 			}
 			continue
 		}
 
 		if err := ctx.calculateLevel(dep, visiting); err != nil {
-			return err
+			return 0, err
 		}
 
 		depDef := ctx.CTEs[dep]
@@ -441,10 +458,7 @@ func (ctx *CTEContext) calculateLevel(name string, visiting map[string]bool) err
 		}
 	}
 
-	def.Level = maxLevel + 1
-	delete(visiting, name)
-
-	return nil
+	return maxLevel, nil
 }
 
 // ExpandCTE expands a CTE reference into a TableInfo.
