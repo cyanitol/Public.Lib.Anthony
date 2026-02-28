@@ -147,6 +147,13 @@ go doc -all github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe
 **Getting Started:**
 - [QUICKSTART.md](QUICKSTART.md) - Start here for basic usage
 - [API.md](API.md) - Complete API reference
+- [COMPATIBILITY.md](COMPATIBILITY.md) - SQLite compatibility guide
+
+**SQL Core Concepts:**
+- [SQL_LANGUAGE.md](SQL_LANGUAGE.md) - Complete SQL syntax reference
+- [TYPE_SYSTEM.md](TYPE_SYSTEM.md) - Type system and affinities
+- [FILE_FORMAT.md](FILE_FORMAT.md) - Database file format
+- [PRAGMAS.md](PRAGMAS.md) - PRAGMA commands guide
 
 **SQL Features:**
 - [CTE_USAGE_GUIDE.md](CTE_USAGE_GUIDE.md) - Common Table Expressions
@@ -155,20 +162,27 @@ go doc -all github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe
 - [SUBQUERY_QUICK_REFERENCE.md](SUBQUERY_QUICK_REFERENCE.md) - Subquery syntax
 - [COMPOUND_SELECT_QUICK_REFERENCE.md](COMPOUND_SELECT_QUICK_REFERENCE.md) - UNION/INTERSECT/EXCEPT
 - [ALTER_TABLE_QUICK_REFERENCE.md](ALTER_TABLE_QUICK_REFERENCE.md) - ALTER TABLE syntax
-- [PRAGMA_QUICK_REFERENCE.md](PRAGMA_QUICK_REFERENCE.md) - PRAGMA configuration
+- [PRAGMA_QUICK_REFERENCE.md](PRAGMA_QUICK_REFERENCE.md) - PRAGMA quick reference
 
 ### For Developers
 
 **Understanding the System:**
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture overview
 - [LOCK_ORDERING.md](LOCK_ORDERING.md) - Concurrency and thread safety
+- [FILE_FORMAT.md](FILE_FORMAT.md) - Database file format and storage
+- [TYPE_SYSTEM.md](TYPE_SYSTEM.md) - Type system implementation
 
-**Implementation Details:**
+**SQL Implementation:**
+- [SQL_LANGUAGE.md](SQL_LANGUAGE.md) - SQL language implementation
+- [PRAGMAS.md](PRAGMAS.md) - PRAGMA implementation details
+- [COMPATIBILITY.md](COMPATIBILITY.md) - SQLite compatibility
+
+**Feature Implementation Details:**
 - [CTE_IMPLEMENTATION_SUMMARY.md](CTE_IMPLEMENTATION_SUMMARY.md) - CTE implementation
 - [SUBQUERY_IMPLEMENTATION.md](SUBQUERY_IMPLEMENTATION.md) - Subquery implementation
 - [INTERSECT_EXCEPT_IMPLEMENTATION.md](INTERSECT_EXCEPT_IMPLEMENTATION.md) - Set operations
 - [ATTACH_DETACH_IMPLEMENTATION.md](ATTACH_DETACH_IMPLEMENTATION.md) - Multi-database support
-- [PRAGMA_IMPLEMENTATION_SUMMARY.md](PRAGMA_IMPLEMENTATION_SUMMARY.md) - PRAGMA implementation
+- [PRAGMA_IMPLEMENTATION_SUMMARY.md](PRAGMA_IMPLEMENTATION_SUMMARY.md) - PRAGMA parsing
 - [VACUUM_IMPLEMENTATION.md](VACUUM_IMPLEMENTATION.md) - VACUUM implementation
 - [DDL_IMPLEMENTATION_REPORT.md](DDL_IMPLEMENTATION_REPORT.md) - DDL feature status
 
@@ -193,11 +207,58 @@ go doc -all github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe
 - [SECURITY_AUDIT_PLAN.md](SECURITY_AUDIT_PLAN.md) - Security audit scope
 - [SECURITY_AUDIT_IMPLEMENTATION.md](SECURITY_AUDIT_IMPLEMENTATION.md) - Security implementation
 
+## SQLite Core Documentation
+
+Comprehensive documentation on SQLite fundamentals as implemented in Anthony:
+
+- **[FILE_FORMAT.md](FILE_FORMAT.md)** - SQLite database file format for Go implementation
+  - Database structure and organization
+  - Page layout and B-tree storage
+  - Record encoding and serialization
+  - Header format and metadata
+  - Transaction files (journal and WAL)
+  - Go-specific implementation notes
+
+- **[TYPE_SYSTEM.md](TYPE_SYSTEM.md)** - Type affinity and storage classes
+  - Storage classes (NULL, INTEGER, REAL, TEXT, BLOB)
+  - Type affinity system and rules
+  - Type conversions and coercion
+  - Column affinity determination
+  - STRICT tables
+  - Comparison and sorting behavior
+
+- **[SQL_LANGUAGE.md](SQL_LANGUAGE.md)** - Supported SQL syntax reference
+  - Data Definition Language (DDL)
+  - Data Manipulation Language (DML)
+  - Query language (SELECT, JOIN, etc.)
+  - Expressions and operators
+  - Built-in functions
+  - Transactions
+  - Go-specific usage examples
+
+- **[PRAGMAS.md](PRAGMAS.md)** - PRAGMA commands reference
+  - Database configuration PRAGMAs
+  - Performance tuning options
+  - Schema inspection commands
+  - Integrity checking
+  - Transaction control
+  - Complete Go usage examples
+
+- **[COMPATIBILITY.md](COMPATIBILITY.md)** - SQLite compatibility status
+  - Feature compatibility matrix
+  - Known differences from SQLite
+  - File format compatibility
+  - Migration guide
+  - Testing compatibility
+  - Version compatibility matrix
+
 ## References
 
 ### SQLite Documentation
 - [SQLite File Format](https://www.sqlite.org/fileformat.html)
 - [SQLite SQL Syntax](https://www.sqlite.org/lang.html)
+- [SQLite Datatypes](https://www.sqlite.org/datatype3.html)
+- [SQLite Pragma Statements](https://www.sqlite.org/pragma.html)
 - [SQLite Opcodes](https://www.sqlite.org/opcode.html)
 - [SQLite Internals](https://www.sqlite.org/arch.html)
 

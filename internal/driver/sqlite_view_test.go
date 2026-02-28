@@ -809,7 +809,7 @@ func TestSQLiteViewErrors(t *testing.T) {
 			}
 			if err == nil {
 				t.Errorf("Expected error containing %q, but got none", tt.errMsg)
-			} else if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+			} else if tt.errMsg != "" && !containsView(err.Error(), tt.errMsg) {
 				t.Errorf("Expected error containing %q, got %q", tt.errMsg, err.Error())
 			}
 		})
@@ -884,7 +884,7 @@ func TestSQLiteViewCreateIfNotExists(t *testing.T) {
 	}
 
 	// The original view should still exist (IF NOT EXISTS doesn't replace)
-	if !contains(sql, "xyz") {
+	if !containsView(sql, "xyz") {
 		t.Errorf("Expected original view definition with 'xyz', got: %s", sql)
 	}
 }
@@ -997,7 +997,7 @@ func TestSQLiteViewInsteadOfTriggers(t *testing.T) {
 }
 
 // Helper function to check if a string contains a substring
-func contains(s, substr string) bool {
+func containsView(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
 		(len(s) > 0 && len(substr) > 0 && hasSubstring(s, substr)))
 }
