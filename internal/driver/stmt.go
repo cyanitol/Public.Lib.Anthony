@@ -1459,7 +1459,7 @@ func (s *Stmt) emitAggregateUpdates(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 			continue
 		}
 
-		s.emitSingleAggregateUpdate(vm, fnExpr, table, accRegs[i], avgCountRegs[i], gen)
+		s.emitSingleAggregateUpdate(vm, fnExpr, table, accRegs[i], avgCountRegs[i], gen, 0)
 	}
 }
 
@@ -1471,9 +1471,9 @@ func (s *Stmt) emitSingleAggregateUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionE
 	case "COUNT":
 		s.emitCountUpdate(vm, fnExpr, accReg)
 	case "SUM", "TOTAL":
-		s.emitSumUpdate(vm, fnExpr, table, accReg, gen, distinctCursor)
+		s.emitSumUpdate(vm, fnExpr, table, accReg, gen)
 	case "AVG":
-		s.emitAvgUpdate(vm, fnExpr, table, accReg, avgCountReg, gen, distinctCursor)
+		s.emitAvgUpdate(vm, fnExpr, table, accReg, avgCountReg, gen)
 	case "MIN":
 		s.emitMinUpdate(vm, fnExpr, table, accReg, gen)
 	case "MAX":
@@ -2565,6 +2565,17 @@ func buildTableInfo(tableName string, table *schema.Table) expr.TableInfo {
 		Name:    tableName,
 		Columns: columns,
 	}
+}
+
+// setupSubqueryCompiler configures the CodeGenerator to handle subqueries.
+// It provides a callback that compiles subquery SELECT statements.
+func (s *Stmt) setupSubqueryCompiler(gen *expr.CodeGenerator) {
+	gen.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
+		// Create a new VDBE for the subquery
+		subVM := vdbe.New()
+		// Compile the subquery SELECT statement
+		return s.compileSelect(subVM, selectStmt, nil)
+	})
 }
 
 // countParams counts the number of parameter placeholders in SET clauses.

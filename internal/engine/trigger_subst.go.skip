@@ -1,0 +1,296 @@
+// Package engine provides trigger OLD/NEW reference substitution logic.
+package engine
+
+import (
+	"fmt"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+)
+
+// substituteOldNewReferences walks the statement AST and replaces OLD.col and NEW.col
+// references with the actual values from the trigger context.
+func (te *TriggerExecutor) substituteOldNewReferences(stmt parser.Statement) (parser.Statement, error) {
+	// Create a new AST visitor to traverse and substitute OLD/NEW references
+	visitor := &oldNewSubstitutor{
+		oldRow: te.ctx.OldRow,
+		newRow: te.ctx.NewRow,
+	}
+
+	// Substitute based on statement type
+	switch s := stmt.(type) {
+	case *parser.InsertStmt:
+		return visitor.substituteInsert(s)
+	case *parser.UpdateStmt:
+		return visitor.substituteUpdate(s)
+	case *parser.DeleteStmt:
+		return visitor.substituteDelete(s)
+	case *parser.SelectStmt:
+		return visitor.substituteSelect(s)
+	default:
+		return stmt, nil
+	}
+}
+
+// oldNewSubstitutor performs OLD/NEW reference substitution in AST nodes.
+type oldNewSubstitutor struct {
+	oldRow map[string]interface{}
+	newRow map[string]interface{}
+}
+
+// substituteInsert handles INSERT statement substitution.
+func (s *oldNewSubstitutor) substituteInsert(stmt *parser.InsertStmt) (*parser.InsertStmt, error) {
+	// Clone the statement to avoid modifying the original
+	newStmt := *stmt
+
+	// Substitute in VALUES clause
+	if len(newStmt.Values) > 0 {
+		newValues := make([][]parser.Expression, len(newStmt.Values))
+		for i, row := range newStmt.Values {
+			newRow := make([]parser.Expression, len(row))
+			for j, expr := range row {
+				substituted, err := s.substituteExpr(expr)
+				if err != nil {
+					return nil, err
+				}
+				newRow[j] = substituted
+			}
+			newValues[i] = newRow
+		}
+		newStmt.Values = newValues
+	}
+
+	return &newStmt, nil
+}
+
+// substituteUpdate handles UPDATE statement substitution.
+func (s *oldNewSubstitutor) substituteUpdate(stmt *parser.UpdateStmt) (*parser.UpdateStmt, error) {
+	newStmt := *stmt
+
+	// Substitute in SET assignments
+	if len(newStmt.Sets) > 0 {
+		newSets := make([]parser.Assignment, len(newStmt.Sets))
+		for i, assignment := range newStmt.Sets {
+			substituted, err := s.substituteExpr(assignment.Value)
+			if err != nil {
+				return nil, err
+			}
+			newSets[i] = parser.Assignment{
+				Column: assignment.Column,
+				Expr:  substituted,
+			}
+		}
+		newStmt.Sets = newSets
+	}
+
+	// Substitute in WHERE clause
+	if newStmt.Where != nil {
+		substituted, err := s.substituteExpr(newStmt.Where)
+		if err != nil {
+			return nil, err
+		}
+		newStmt.Where = substituted
+	}
+
+	return &newStmt, nil
+}
+
+// substituteDelete handles DELETE statement substitution.
+func (s *oldNewSubstitutor) substituteDelete(stmt *parser.DeleteStmt) (*parser.DeleteStmt, error) {
+	newStmt := *stmt
+
+	// Substitute in WHERE clause
+	if newStmt.Where != nil {
+		substituted, err := s.substituteExpr(newStmt.Where)
+		if err != nil {
+			return nil, err
+		}
+		newStmt.Where = substituted
+	}
+
+	return &newStmt, nil
+}
+
+// substituteSelect handles SELECT statement substitution.
+func (s *oldNewSubstitutor) substituteSelect(stmt *parser.SelectStmt) (*parser.SelectStmt, error) {
+	newStmt := *stmt
+
+	// Substitute in result columns
+	if len(newStmt.Columns) > 0 {
+		newCols := make([]parser.ResultColumn, len(newStmt.Columns))
+		for i, col := range newStmt.Columns {
+			if col.Expr != nil {
+				substituted, err := s.substituteExpr(col.Expr)
+				if err != nil {
+					return nil, err
+				}
+				newCols[i] = parser.ResultColumn{
+					Expr:  substituted,
+					Alias: col.Alias,
+					Star:  col.Star,
+				}
+			} else {
+				newCols[i] = col
+			}
+		}
+		newStmt.Columns = newCols
+	}
+
+	// Substitute in WHERE clause
+	if newStmt.Where != nil {
+		substituted, err := s.substituteExpr(newStmt.Where)
+		if err != nil {
+			return nil, err
+		}
+		newStmt.Where = substituted
+	}
+
+	return &newStmt, nil
+}
+
+// substituteExpr recursively substitutes OLD/NEW references in an expression.
+func (s *oldNewSubstitutor) substituteExpr(expr parser.Expression) (parser.Expression, error) {
+	if expr == nil {
+		return nil, nil
+	}
+
+	switch e := expr.(type) {
+	case *parser.IdentExpr:
+		// Check if this is an OLD or NEW reference
+		if e.Table == "OLD" || e.Table == "old" {
+			if s.oldRow != nil {
+				if val, ok := s.oldRow[e.Name]; ok {
+					return s.valueToLiteral(val), nil
+				}
+			}
+			return e, nil
+		}
+		if e.Table == "NEW" || e.Table == "new" {
+			if s.newRow != nil {
+				if val, ok := s.newRow[e.Name]; ok {
+					return s.valueToLiteral(val), nil
+				}
+			}
+			return e, nil
+		}
+		return e, nil
+
+	case *parser.BinaryExpr:
+		left, err := s.substituteExpr(e.Left)
+		if err != nil {
+			return nil, err
+		}
+		right, err := s.substituteExpr(e.Right)
+		if err != nil {
+			return nil, err
+		}
+		return &parser.BinaryExpr{
+			Left:  left,
+			Op:    e.Op,
+			Right: right,
+		}, nil
+
+	case *parser.UnaryExpr:
+		operand, err := s.substituteExpr(e.Expr)
+		if err != nil {
+			return nil, err
+		}
+		return &parser.UnaryExpr{
+			Op:   e.Op,
+			Expr: operand,
+		}, nil
+
+	case *parser.FunctionExpr:
+		newArgs := make([]parser.Expression, len(e.Args))
+		for i, arg := range e.Args {
+			substituted, err := s.substituteExpr(arg)
+			if err != nil {
+				return nil, err
+			}
+			newArgs[i] = substituted
+		}
+		return &parser.FunctionExpr{
+			Name:     e.Name,
+			Args:     newArgs,
+			Distinct: e.Distinct,
+		}, nil
+
+	case *parser.CaseExpr:
+		newExpr, err := s.substituteExpr(e.Expr)
+		if err != nil {
+			return nil, err
+		}
+		newElse, err := s.substituteExpr(e.ElseClauseClause)
+		if err != nil {
+			return nil, err
+		}
+
+		newWhenClauses := make([]parser.WhenClause, len(e.WhenClauses))
+		for i, when := range e.WhenClauses {
+			cond, err := s.substituteExpr(when.Condition)
+			if err != nil {
+				return nil, err
+			}
+			result, err := s.substituteExpr(when.Result)
+			if err != nil {
+				return nil, err
+			}
+			newWhenClauses[i] = parser.WhenClause{
+				Condition: cond,
+				Result:    result,
+			}
+		}
+
+		return &parser.CaseExpr{
+			Expr:        newExpr,
+			WhenClauses: newWhenClauses,
+			ElseClause:  newElse,
+		}, nil
+
+	case *parser.LiteralExpr:
+		// Literals don't need substitution
+		return e, nil
+
+	default:
+		// For other expression types, return as-is
+		return expr, nil
+	}
+}
+
+// valueToLiteral converts a runtime value to a literal expression.
+func (s *oldNewSubstitutor) valueToLiteral(val interface{}) parser.Expression {
+	if val == nil {
+		return &parser.LiteralExpr{
+			Type:  parser.LiteralNull,
+			Expr: "NULL",
+		}
+	}
+
+	switch v := val.(type) {
+	case int64:
+		return &parser.LiteralExpr{
+			Type:  parser.LiteralInteger,
+			Expr: fmt.Sprintf("%d", v),
+		}
+	case float64:
+		return &parser.LiteralExpr{
+			Type:  parser.LiteralFloat,
+			Expr: fmt.Sprintf("%f", v),
+		}
+	case string:
+		return &parser.LiteralExpr{
+			Type:  parser.LiteralString,
+			Expr: v,
+		}
+	case []byte:
+		return &parser.LiteralExpr{
+			Type:  parser.LiteralBlob,
+			Expr: string(v),
+		}
+	default:
+		// For unknown types, convert to string
+		return &parser.LiteralExpr{
+			Type:  parser.LiteralString,
+			Expr: fmt.Sprintf("%v", v),
+		}
+	}
+}

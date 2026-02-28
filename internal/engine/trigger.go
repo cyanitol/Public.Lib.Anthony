@@ -189,20 +189,11 @@ func (te *TriggerExecutor) compileAndExecuteStatement(vm *vdbe.VDBE, stmt parser
 	}
 }
 
-// substituteOldNewReferences walks the statement AST and replaces OLD.col and NEW.col
-// references with the actual values from the trigger context.
+// substituteOldNewReferences walks the statement AST and replaces OLD.col and NEW.col references with actual values.
+// TODO: Full implementation pending - currently returns statement unchanged.
 func (te *TriggerExecutor) substituteOldNewReferences(stmt parser.Statement) (parser.Statement, error) {
-	// This is a simplified implementation that handles basic cases
-	// A full implementation would need to walk the entire AST and replace
-	// all OLD.column and NEW.column references with literal values
-
-	// For now, we'll document that OLD/NEW substitution happens here
-	// The actual implementation would need an AST visitor pattern
-
-	// TODO: Implement full AST traversal and substitution
-	// For the current implementation, we'll return the statement as-is
-	// and let the executor handle OLD/NEW references at evaluation time
-
+	// Stub implementation - returns statement unchanged
+	// Full implementation will substitute OLD.* and NEW.* references
 	return stmt, nil
 }
 

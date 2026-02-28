@@ -194,6 +194,7 @@ func (d *Driver) createConnection(filename string, state *dbState, existed bool)
 		schema:         state.schema,
 		dbRegistry:     schema.NewDatabaseRegistry(),
 		stmts:          make(map[*Stmt]struct{}),
+		stmtCache:      NewStmtCache(100), // Default cache size of 100
 		securityConfig: secCfg,
 	}
 	if err := conn.openDatabase(existed); err != nil {
@@ -214,6 +215,7 @@ func (d *Driver) createMemoryConnection(memoryID string, state *dbState) (driver
 		schema:         state.schema,
 		dbRegistry:     schema.NewDatabaseRegistry(),
 		stmts:          make(map[*Stmt]struct{}),
+		stmtCache:      NewStmtCache(100), // Default cache size of 100
 		securityConfig: security.DefaultSecurityConfig(),
 	}
 	// Memory databases are always new, so schema never pre-loaded

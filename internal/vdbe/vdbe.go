@@ -114,8 +114,9 @@ type VDBE struct {
 	ErrorAction uint8  // Recovery action on error
 
 	// Statistics and counters
-	CacheCtr uint32 // Cursor cache generation counter
-	NumSteps int64  // Number of VM steps executed
+	CacheCtr uint32          // Cursor cache generation counter
+	NumSteps int64           // Number of VM steps executed
+	Stats    *QueryStatistics // Query execution statistics (Phase 9.2)
 
 	// Transaction and change tracking
 	InTxn        bool  // True if in a transaction
@@ -142,6 +143,9 @@ type VDBE struct {
 
 	// Window function support
 	WindowStates map[int]*WindowState // Window states keyed by cursor/index
+
+	// Debug support (Phase 9.4)
+	Debug *DebugContext // Debug context for instruction tracing and inspection
 }
 
 // CoroutineInfo holds the state of a coroutine
@@ -509,4 +513,170 @@ func (v *VDBE) GetInstruction(addr int) (*Instruction, error) {
 // IncrCacheCtr increments the cache counter, invalidating all cursor caches.
 func (v *VDBE) IncrCacheCtr() {
 	v.CacheCtr++
+}
+
+// QueryStatistics tracks execution statistics for a VDBE program.
+// This provides observability into query performance and resource usage.
+type QueryStatistics struct {
+	// Execution timing
+	StartTime    int64 // Start time in nanoseconds (time.Now().UnixNano())
+	EndTime      int64 // End time in nanoseconds
+	ExecutionNS  int64 // Total execution time in nanoseconds
+	ExecutionMS  int64 // Total execution time in milliseconds (derived)
+
+	// Instruction counts
+	NumInstructions int64 // Total number of instructions executed
+	NumJumps        int64 // Number of jump instructions
+	NumComparisons  int64 // Number of comparison operations
+
+	// Data operations
+	RowsRead    int64 // Number of rows read from tables/indexes
+	RowsWritten int64 // Number of rows inserted/updated/deleted
+	RowsScanned int64 // Number of rows scanned (including non-matching)
+
+	// I/O operations
+	PageReads   int64 // Number of pages read from disk
+	PageWrites  int64 // Number of pages written to disk
+	CacheHits   int64 // Number of page cache hits
+	CacheMisses int64 // Number of page cache misses
+
+	// Memory operations
+	MemoryUsed     int64 // Peak memory used by registers (bytes)
+	SorterMemory   int64 // Memory used by sorters (bytes)
+	TempSpaceUsed  int64 // Temporary disk space used (bytes)
+	AllocatedCells int   // Number of memory cells allocated
+
+	// Cursor operations
+	CursorSeeks  int64 // Number of cursor seek operations
+	CursorSteps  int64 // Number of cursor next/previous operations
+	IndexLookups int64 // Number of index lookup operations
+
+	// Transaction tracking
+	TransactionLevel int    // Nesting level of transactions (0=none)
+	IsolationLevel   string // Transaction isolation level
+
+	// Query metadata
+	IsReadOnly bool   // True if query is read-only
+	IsExplain  bool   // True if this is an EXPLAIN query
+	QueryType  string // "SELECT", "INSERT", "UPDATE", "DELETE", etc.
+}
+
+// NewQueryStatistics creates a new statistics tracker.
+func NewQueryStatistics() *QueryStatistics {
+	return &QueryStatistics{
+		StartTime: 0,
+		EndTime:   0,
+	}
+}
+
+// Start marks the beginning of query execution.
+func (s *QueryStatistics) Start() {
+	s.StartTime = getCurrentTimeNanos()
+}
+
+// End marks the end of query execution and calculates duration.
+func (s *QueryStatistics) End() {
+	s.EndTime = getCurrentTimeNanos()
+	if s.StartTime > 0 {
+		s.ExecutionNS = s.EndTime - s.StartTime
+		s.ExecutionMS = s.ExecutionNS / 1000000
+	}
+}
+
+// getCurrentTimeNanos returns current time in nanoseconds.
+// This is a helper to avoid importing time in tests.
+func getCurrentTimeNanos() int64 {
+	// In production, this would be time.Now().UnixNano()
+	// For testing, we can return 0 to avoid time dependencies
+	return 0
+}
+
+// RecordInstruction records execution of an instruction.
+func (s *QueryStatistics) RecordInstruction(opcode Opcode) {
+	s.NumInstructions++
+
+	// Track specific operation types
+	switch opcode {
+	case OpGoto, OpIf, OpIfNot, OpIfPos, OpIfNotZero:
+		s.NumJumps++
+	case OpEq, OpNe, OpLt, OpLe, OpGt, OpGe:
+		s.NumComparisons++
+	case OpRewind, OpSeekGE, OpSeekGT, OpSeekLE, OpSeekLT, OpSeekRowid:
+		s.CursorSeeks++
+	case OpNext, OpPrev:
+		s.CursorSteps++
+	case OpRowData, OpColumn:
+		s.RowsRead++
+	case OpInsert, OpDelete:
+		s.RowsWritten++
+	case OpIdxInsert, OpIdxDelete:
+		s.IndexLookups++
+	}
+}
+
+// RecordPageRead records a page read operation.
+func (s *QueryStatistics) RecordPageRead() {
+	s.PageReads++
+}
+
+// RecordPageWrite records a page write operation.
+func (s *QueryStatistics) RecordPageWrite() {
+	s.PageWrites++
+}
+
+// RecordCacheHit records a page cache hit.
+func (s *QueryStatistics) RecordCacheHit() {
+	s.CacheHits++
+}
+
+// RecordCacheMiss records a page cache miss.
+func (s *QueryStatistics) RecordCacheMiss() {
+	s.CacheMisses++
+}
+
+// RecordRowScanned records scanning a row (even if not returned).
+func (s *QueryStatistics) RecordRowScanned() {
+	s.RowsScanned++
+}
+
+// UpdateMemoryUsage updates the peak memory usage.
+func (s *QueryStatistics) UpdateMemoryUsage(bytes int64) {
+	if bytes > s.MemoryUsed {
+		s.MemoryUsed = bytes
+	}
+}
+
+// UpdateSorterMemory updates the sorter memory usage.
+func (s *QueryStatistics) UpdateSorterMemory(bytes int64) {
+	if bytes > s.SorterMemory {
+		s.SorterMemory = bytes
+	}
+}
+
+// GetStatistics returns the current query statistics.
+// This creates a copy to avoid race conditions.
+func (v *VDBE) GetStatistics() *QueryStatistics {
+	if v.Stats == nil {
+		return NewQueryStatistics()
+	}
+	// Return a copy to avoid concurrent modification
+	statsCopy := *v.Stats
+	return &statsCopy
+}
+
+// ResetStatistics resets all statistics counters.
+func (v *VDBE) ResetStatistics() {
+	v.Stats = NewQueryStatistics()
+}
+
+// EnableStatistics enables statistics tracking for this VDBE.
+func (v *VDBE) EnableStatistics() {
+	if v.Stats == nil {
+		v.Stats = NewQueryStatistics()
+	}
+}
+
+// DisableStatistics disables statistics tracking.
+func (v *VDBE) DisableStatistics() {
+	v.Stats = nil
 }

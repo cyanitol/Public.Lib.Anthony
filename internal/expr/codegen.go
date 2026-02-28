@@ -117,29 +117,45 @@ type TableInfo struct {
 	Columns []ColumnInfo
 }
 
+// SubqueryCompiler is a callback function to compile subquery SELECT statements.
+// It takes a SELECT AST node and returns compiled VDBE bytecode.
+type SubqueryCompiler func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error)
+
 // CodeGenerator generates VDBE bytecode for expressions.
 // It converts parser AST nodes into executable VDBE instructions.
 type CodeGenerator struct {
-	vdbe       *vdbe.VDBE
-	nextReg    int
-	cursorMap  map[string]int       // table name -> cursor number
-	tableInfo  map[string]TableInfo // table name -> table info
-	args       []interface{}        // bound parameter values
-	paramIdx   int                  // next parameter index to use
-	collations map[int]string       // register -> collation name (for collate expressions)
+	vdbe             *vdbe.VDBE
+	nextReg          int
+	cursorMap        map[string]int       // table name -> cursor number
+	tableInfo        map[string]TableInfo // table name -> table info
+	args             []interface{}        // bound parameter values
+	paramIdx         int                  // next parameter index to use
+	collations       map[int]string       // register -> collation name (for collate expressions)
+	subqueryCompiler SubqueryCompiler     // callback to compile subqueries
 }
 
 // NewCodeGenerator creates a new code generator.
 func NewCodeGenerator(v *vdbe.VDBE) *CodeGenerator {
 	return &CodeGenerator{
-		vdbe:       v,
-		nextReg:    1,
-		cursorMap:  make(map[string]int),
-		tableInfo:  make(map[string]TableInfo),
-		args:       nil,
-		paramIdx:   0,
-		collations: make(map[int]string),
+		vdbe:             v,
+		nextReg:          1,
+		cursorMap:        make(map[string]int),
+		tableInfo:        make(map[string]TableInfo),
+		args:             nil,
+		paramIdx:         0,
+		collations:       make(map[int]string),
+		subqueryCompiler: nil,
 	}
+}
+
+// SetSubqueryCompiler sets the callback for compiling subqueries.
+func (g *CodeGenerator) SetSubqueryCompiler(compiler SubqueryCompiler) {
+	g.subqueryCompiler = compiler
+}
+
+// GetVDBE returns the underlying VDBE for access to context.
+func (g *CodeGenerator) GetVDBE() *vdbe.VDBE {
+	return g.vdbe
 }
 
 // SetArgs sets the bound parameter values for the code generator.

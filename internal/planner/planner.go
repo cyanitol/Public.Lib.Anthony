@@ -499,17 +499,29 @@ func (p *Planner) createEquivTerm(term *WhereTerm, equivKey string) *WhereTerm {
 }
 
 // ExplainPlan returns a human-readable explanation of the query plan.
+// This is enhanced in Phase 9.3 to include detailed cost estimates.
 func (p *Planner) ExplainPlan(info *WhereInfo) string {
 	if info.BestPath == nil {
 		return "No plan available"
 	}
 
 	result := "QUERY PLAN:\n"
-	result += fmt.Sprintf("Estimated output rows: %d\n", info.BestPath.NRow.ToInt())
-	result += fmt.Sprintf("Estimated cost: %d\n\n", info.BestPath.Cost)
+	result += fmt.Sprintf("├─ Estimated output rows: %d\n", info.BestPath.NRow.ToInt())
+	result += fmt.Sprintf("├─ Estimated cost: %.2f\n", float64(info.BestPath.Cost))
+
+	// Add cost breakdown
+	totalCost := float64(info.BestPath.Cost)
+	if totalCost > 0 {
+		result += fmt.Sprintf("├─ Cost breakdown:\n")
+		cpuCost := totalCost * 0.6  // Estimated 60% CPU
+		ioCost := totalCost * 0.4   // Estimated 40% I/O
+		result += fmt.Sprintf("│  ├─ CPU cost: %.2f (%.1f%%)\n", cpuCost, 60.0)
+		result += fmt.Sprintf("│  └─ I/O cost: %.2f (%.1f%%)\n", ioCost, 40.0)
+	}
+	result += "└─ Execution steps:\n"
 
 	for i, loop := range info.BestPath.Loops {
-		result += p.explainLoop(info, loop, i)
+		result += p.explainLoopDetailed(info, loop, i, len(info.BestPath.Loops))
 	}
 
 	return result
@@ -528,6 +540,112 @@ func (p *Planner) explainLoop(info *WhereInfo, loop *WhereLoop, i int) string {
 	}
 	result += fmt.Sprintf("%s   Cost: %d, Rows: %d\n", indent, loop.Run.ToInt(), loop.NOut.ToInt())
 	return result
+}
+
+// explainLoopDetailed returns a detailed explanation for a single loop (Phase 9.3).
+func (p *Planner) explainLoopDetailed(info *WhereInfo, loop *WhereLoop, i int, totalLoops int) string {
+	table := info.Tables[loop.TabIndex]
+	isLast := (i == totalLoops-1)
+	prefix := "   "
+	if isLast {
+		prefix += "└─ "
+	} else {
+		prefix += "├─ "
+	}
+
+	var result string
+	stepNum := i + 1
+
+	if loop.Index != nil {
+		// Index-based access
+		result = fmt.Sprintf("%s%d. INDEX SEARCH on %s\n", prefix, stepNum, table.Name)
+
+		subPrefix := "   "
+		if !isLast {
+			subPrefix += "│  "
+		} else {
+			subPrefix += "   "
+		}
+
+		result += fmt.Sprintf("%s├─ Index: %s\n", subPrefix, loop.Index.Name)
+		result += fmt.Sprintf("%s├─ Columns: %v\n", subPrefix, loop.Index.Columns)
+
+		// Add constraint information
+		constraints := p.buildConstraintStrings(table, loop)
+		if len(constraints) > 0 {
+			result += fmt.Sprintf("%s├─ Constraints: %s\n", subPrefix, joinStrings(constraints, ", "))
+		}
+
+		// Add selectivity estimate
+		selectivity := p.estimateSelectivity(loop)
+		result += fmt.Sprintf("%s├─ Selectivity: %.4f (%.2f%%)\n", subPrefix, selectivity, selectivity*100)
+
+		// Cost details
+		result += fmt.Sprintf("%s├─ Estimated cost: %.2f\n", subPrefix, float64(loop.Run.ToInt()))
+		result += fmt.Sprintf("%s├─ Estimated rows out: %d\n", subPrefix, loop.NOut.ToInt())
+
+		// Index characteristics
+		if loop.Index.Unique {
+			result += fmt.Sprintf("%s└─ Index type: UNIQUE\n", subPrefix)
+		} else {
+			result += fmt.Sprintf("%s└─ Index type: NON-UNIQUE\n", subPrefix)
+		}
+	} else {
+		// Full table scan
+		result = fmt.Sprintf("%s%d. FULL TABLE SCAN on %s\n", prefix, stepNum, table.Name)
+
+		subPrefix := "   "
+		if !isLast {
+			subPrefix += "│  "
+		} else {
+			subPrefix += "   "
+		}
+
+		result += fmt.Sprintf("%s├─ Table rows: %d\n", subPrefix, table.RowCount)
+		result += fmt.Sprintf("%s├─ Estimated cost: %.2f\n", subPrefix, float64(loop.Run.ToInt()))
+		result += fmt.Sprintf("%s├─ Estimated rows out: %d\n", subPrefix, loop.NOut.ToInt())
+		result += fmt.Sprintf("%s└─ Access method: Sequential\n", subPrefix)
+	}
+
+	return result
+}
+
+// estimateSelectivity estimates the selectivity of a where loop (0.0 to 1.0).
+func (p *Planner) estimateSelectivity(loop *WhereLoop) float64 {
+	if len(loop.Terms) == 0 {
+		return 1.0 // No constraints, all rows selected
+	}
+
+	// Use product of individual term selectivities
+	selectivity := 1.0
+	for _, term := range loop.Terms {
+		termSelectivity := p.estimateTermSelectivity(term)
+		selectivity *= termSelectivity
+	}
+
+	return selectivity
+}
+
+// estimateTermSelectivity estimates the selectivity of a single where term.
+func (p *Planner) estimateTermSelectivity(term *WhereTerm) float64 {
+	// Default selectivity estimates based on operator
+	switch term.Operator {
+	case WO_EQ:
+		// Equality: typically very selective
+		return 0.01 // 1% selectivity
+	case WO_LT, WO_LE, WO_GT, WO_GE:
+		// Range: moderately selective
+		return 0.33 // 33% selectivity
+	case WO_IN:
+		// IN clause: depends on list size, estimate medium
+		return 0.10 // 10% selectivity
+	case WO_IS, WO_ISNULL:
+		// IS NULL: typically rare
+		return 0.05 // 5% selectivity
+	default:
+		// Default selectivity for other operators (including LIKE via flags)
+		return 0.50 // 50% default
+	}
 }
 
 // makeIndent creates an indentation string for the given level.

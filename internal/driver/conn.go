@@ -7,11 +7,13 @@ import (
 	"sync"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/collation"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/functions"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/pager"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/vtab"
 )
 
 // Conn implements database/sql/driver.Conn for SQLite.
@@ -24,6 +26,7 @@ type Conn struct {
 	funcReg    *functions.Registry
 	dbRegistry *schema.DatabaseRegistry
 	stmts      map[*Stmt]struct{}
+	stmtCache  *StmtCache
 	mu         sync.Mutex
 	closed     bool
 
@@ -36,6 +39,10 @@ type Conn struct {
 
 	// Security configuration
 	securityConfig *security.SecurityConfig
+
+	// Virtual table and collation registries
+	vtabRegistry *vtab.ModuleRegistry
+	collRegistry *collation.CollationRegistry
 }
 
 // Prepare prepares a SQL statement.
@@ -268,6 +275,10 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 	// Register built-in SQL functions
 	c.funcReg = functions.DefaultRegistry()
 
+	// Initialize virtual table and collation registries
+	c.vtabRegistry = vtab.NewModuleRegistry()
+	c.collRegistry = collation.NewCollationRegistry()
+
 	return nil
 }
 
@@ -368,4 +379,151 @@ func (c *Conn) UnregisterFunction(name string, numArgs int) bool {
 	}
 
 	return functions.UnregisterFunction(c.funcReg, name, numArgs)
+}
+
+// RegisterVirtualTableModule registers a virtual table module with the connection.
+// This allows custom virtual table implementations to be used in SQL queries.
+//
+// A virtual table module provides callbacks for creating and accessing virtual tables
+// that don't have persistent storage in the database file. Common use cases include:
+// - In-memory tables computed on-the-fly
+// - Views over external data sources (CSV files, REST APIs, etc.)
+// - Full-text search indexes (FTS)
+// - R-tree spatial indexes
+//
+// Parameters:
+//   - name: The module name to use in CREATE VIRTUAL TABLE statements
+//   - module: The virtual table module implementation
+//
+// Example:
+//
+//	// Create a module
+//	type MyModule struct{ vtab.BaseModule }
+//	func (m *MyModule) Create(db interface{}, moduleName, dbName, tableName string, args []string) (vtab.VirtualTable, string, error) {
+//	    return &MyTable{}, "CREATE TABLE x(id INTEGER, name TEXT)", nil
+//	}
+//
+//	// Register it
+//	conn.RegisterVirtualTableModule("my_module", &MyModule{})
+//
+//	// Use in SQL
+//	db.Exec("CREATE VIRTUAL TABLE my_table USING my_module(arg1, arg2)")
+func (c *Conn) RegisterVirtualTableModule(name string, module vtab.Module) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return driver.ErrBadConn
+	}
+
+	// Initialize the registry if not already done
+	if c.vtabRegistry == nil {
+		c.vtabRegistry = vtab.NewModuleRegistry()
+	}
+
+	return c.vtabRegistry.RegisterModule(name, module)
+}
+
+// UnregisterVirtualTableModule removes a virtual table module from the connection.
+// This prevents the module from being used in new CREATE VIRTUAL TABLE statements.
+// Existing virtual tables created with this module are not affected.
+//
+// Parameters:
+//   - name: The module name to unregister
+//
+// Returns an error if the module is not registered.
+func (c *Conn) UnregisterVirtualTableModule(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return driver.ErrBadConn
+	}
+
+	if c.vtabRegistry == nil {
+		return fmt.Errorf("virtual table module %q not registered", name)
+	}
+
+	return c.vtabRegistry.UnregisterModule(name)
+}
+
+// CreateCollation registers a custom collation sequence for string comparisons.
+// Collations define how strings are compared and sorted, which affects:
+// - ORDER BY clauses
+// - Comparison operators (=, <, >, etc.)
+// - DISTINCT operations
+// - GROUP BY clauses
+// - Indexes on TEXT columns
+//
+// SQLite provides three built-in collations:
+// - BINARY: Byte-by-byte comparison (case-sensitive, default)
+// - NOCASE: Case-insensitive for ASCII A-Z
+// - RTRIM: Ignores trailing spaces
+//
+// Custom collations allow you to implement locale-specific sorting,
+// natural sort order, or any custom comparison logic.
+//
+// Parameters:
+//   - name: The collation name to use in SQL (e.g., "UTF8_UNICODE_CI")
+//   - fn: A comparison function that returns -1, 0, or 1
+//
+// Example:
+//
+//	// Create a reverse collation (sorts in reverse order)
+//	reverseCollation := func(a, b string) int {
+//	    if a > b { return -1 }
+//	    if a < b { return 1 }
+//	    return 0
+//	}
+//	conn.CreateCollation("REVERSE", reverseCollation)
+//
+//	// Use in SQL
+//	db.Query("SELECT name FROM users ORDER BY name COLLATE REVERSE")
+//
+//	// Or in table definition
+//	db.Exec("CREATE TABLE users (name TEXT COLLATE REVERSE)")
+func (c *Conn) CreateCollation(name string, fn collation.CollationFunc) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return driver.ErrBadConn
+	}
+
+	if name == "" {
+		return fmt.Errorf("collation name cannot be empty")
+	}
+
+	if fn == nil {
+		return fmt.Errorf("collation function cannot be nil")
+	}
+
+	// Initialize the registry if not already done
+	if c.collRegistry == nil {
+		c.collRegistry = collation.NewCollationRegistry()
+	}
+
+	return c.collRegistry.Register(name, fn)
+}
+
+// RemoveCollation removes a custom collation sequence from the connection.
+// Built-in collations (BINARY, NOCASE, RTRIM) cannot be removed.
+//
+// Parameters:
+//   - name: The collation name to remove
+//
+// Returns an error if the collation is built-in or not registered.
+func (c *Conn) RemoveCollation(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return driver.ErrBadConn
+	}
+
+	if c.collRegistry == nil {
+		return fmt.Errorf("collation %q not registered", name)
+	}
+
+	return c.collRegistry.Unregister(name)
 }
