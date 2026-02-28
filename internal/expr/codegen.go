@@ -554,10 +554,12 @@ func (g *CodeGenerator) generateFunction(e *parser.FunctionExpr) (int, error) {
 	}
 
 	// Emit function call
-	// P1 = first arg register, P2 = arg count, P3 = result register
-	addr := g.vdbe.AddOp(vdbe.OpFunction, firstArg, argCount, resultReg)
+	// P1 = constant mask (unused), P2 = first arg register, P3 = result register
+	// P4 = function name, P5 = number of arguments
+	addr := g.vdbe.AddOp(vdbe.OpFunction, 0, firstArg, resultReg)
 	g.vdbe.Program[addr].P4.Z = e.Name
 	g.vdbe.Program[addr].P4Type = vdbe.P4Static
+	g.vdbe.Program[addr].P5 = uint16(argCount)
 	g.vdbe.SetComment(addr, fmt.Sprintf("%s(%d args)", e.Name, argCount))
 
 	return resultReg, nil
