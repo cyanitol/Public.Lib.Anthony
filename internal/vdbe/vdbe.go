@@ -76,6 +76,10 @@ type Cursor struct {
 	// Sorter data (for CursorSorter)
 	// SortOrders[i] = 0 for ASC, 1 for DESC
 	SortOrders []int // Sort direction for each ORDER BY column
+
+	// Virtual table cursor data (for CursorVTab)
+	VTabCursor interface{} // Actual vtab.VirtualCursor (stored as interface to avoid import cycle)
+	VTable     interface{} // Actual vtab.VirtualTable (stored as interface to avoid import cycle)
 }
 
 // VDBEContext holds runtime context for VDBE execution
@@ -135,6 +139,9 @@ type VDBE struct {
 	Parent      *VDBE                  // Parent VDBE (for sub-programs/triggers)
 	SubPrograms map[int]*VDBE          // Sub-programs (triggers) keyed by ID
 	Coroutines  map[int]*CoroutineInfo // Coroutine state keyed by coroutine ID
+
+	// Window function support
+	WindowStates map[int]*WindowState // Window states keyed by cursor/index
 }
 
 // CoroutineInfo holds the state of a coroutine
@@ -240,14 +247,15 @@ func (s *Sorter) CurrentRow() []*Mem {
 // New creates a new VDBE instance.
 func New() *VDBE {
 	return &VDBE{
-		Program:     make([]*Instruction, 0, 16),
-		Mem:         make([]*Mem, 0, 16),
-		Cursors:     make([]*Cursor, 0, 4),
-		State:       StateInit,
-		CacheCtr:    1,
-		funcCtx:     NewFunctionContext(),
-		SubPrograms: make(map[int]*VDBE),
-		Coroutines:  make(map[int]*CoroutineInfo),
+		Program:      make([]*Instruction, 0, 16),
+		Mem:          make([]*Mem, 0, 16),
+		Cursors:      make([]*Cursor, 0, 4),
+		State:        StateInit,
+		CacheCtr:     1,
+		funcCtx:      NewFunctionContext(),
+		SubPrograms:  make(map[int]*VDBE),
+		Coroutines:   make(map[int]*CoroutineInfo),
+		WindowStates: make(map[int]*WindowState),
 	}
 }
 

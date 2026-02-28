@@ -1,0 +1,210 @@
+package builtin
+
+import (
+	"fmt"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/vtab"
+)
+
+// SQLiteMasterModule implements a virtual table module for sqlite_master.
+// This provides access to the schema metadata table.
+type SQLiteMasterModule struct {
+	vtab.BaseModule
+}
+
+// NewSQLiteMasterModule creates a new sqlite_master virtual table module.
+func NewSQLiteMasterModule() *SQLiteMasterModule {
+	return &SQLiteMasterModule{}
+}
+
+// Connect creates a connection to the sqlite_master virtual table.
+func (m *SQLiteMasterModule) Connect(db interface{}, moduleName string, dbName string, tableName string, args []string) (vtab.VirtualTable, string, error) {
+	schema := `CREATE TABLE sqlite_master(
+		type TEXT,
+		name TEXT,
+		tbl_name TEXT,
+		rootpage INTEGER,
+		sql TEXT
+	)`
+
+	return &SQLiteMasterTable{
+		db: db,
+	}, schema, nil
+}
+
+// Create creates a new sqlite_master virtual table.
+// This is the same as Connect since sqlite_master is read-only and eponymous.
+func (m *SQLiteMasterModule) Create(db interface{}, moduleName string, dbName string, tableName string, args []string) (vtab.VirtualTable, string, error) {
+	return m.Connect(db, moduleName, dbName, tableName, args)
+}
+
+// SQLiteMasterTable represents an instance of the sqlite_master virtual table.
+type SQLiteMasterTable struct {
+	vtab.BaseVirtualTable
+	db interface{}
+}
+
+// BestIndex analyzes the query and determines the best index strategy.
+func (t *SQLiteMasterTable) BestIndex(info *vtab.IndexInfo) error {
+	// Simple implementation: we can use constraints on type and name columns
+	argvIndex := 1
+
+	for i, constraint := range info.Constraints {
+		if !constraint.Usable {
+			continue
+		}
+
+		// We can handle equality constraints on type (column 0) and name (column 1)
+		if (constraint.Column == 0 || constraint.Column == 1) && constraint.Op == vtab.ConstraintEQ {
+			info.SetConstraintUsage(i, argvIndex, true)
+			argvIndex++
+		}
+	}
+
+	// Estimate cost based on whether we have constraints
+	if argvIndex > 1 {
+		// We have some constraints, so the query will be more efficient
+		info.EstimatedCost = 10.0
+		info.EstimatedRows = 10
+	} else {
+		// Full table scan
+		info.EstimatedCost = 100.0
+		info.EstimatedRows = 100
+	}
+
+	return nil
+}
+
+// Open creates a new cursor for scanning the sqlite_master table.
+func (t *SQLiteMasterTable) Open() (vtab.VirtualCursor, error) {
+	return &SQLiteMasterCursor{
+		table: t,
+		rows:  []MasterRow{},
+		pos:   -1,
+	}, nil
+}
+
+// MasterRow represents a row in the sqlite_master table.
+type MasterRow struct {
+	Type     string
+	Name     string
+	TblName  string
+	RootPage int64
+	SQL      string
+}
+
+// SQLiteMasterCursor represents a cursor for iterating over sqlite_master rows.
+type SQLiteMasterCursor struct {
+	vtab.BaseCursor
+	table      *SQLiteMasterTable
+	rows       []MasterRow
+	pos        int
+	typeFilter string
+	nameFilter string
+}
+
+// Filter initializes the cursor with the given constraints.
+func (c *SQLiteMasterCursor) Filter(idxNum int, idxStr string, argv []interface{}) error {
+	// Parse constraint values from argv
+	c.typeFilter = ""
+	c.nameFilter = ""
+
+	for _, arg := range argv {
+		if arg == nil {
+			continue
+		}
+		// First non-nil arg is type filter, second is name filter
+		if c.typeFilter == "" {
+			if str, ok := arg.(string); ok {
+				c.typeFilter = str
+			}
+		} else if c.nameFilter == "" {
+			if str, ok := arg.(string); ok {
+				c.nameFilter = str
+			}
+		}
+	}
+
+	// Load rows from the database schema
+	// In a real implementation, this would query the actual schema
+	// For now, return a sample set of rows
+	c.rows = []MasterRow{
+		{
+			Type:     "table",
+			Name:     "sqlite_master",
+			TblName:  "sqlite_master",
+			RootPage: 1,
+			SQL:      "CREATE TABLE sqlite_master(type text,name text,tbl_name text,rootpage integer,sql text)",
+		},
+	}
+
+	// Apply filters
+	filtered := []MasterRow{}
+	for _, row := range c.rows {
+		if c.typeFilter != "" && row.Type != c.typeFilter {
+			continue
+		}
+		if c.nameFilter != "" && row.Name != c.nameFilter {
+			continue
+		}
+		filtered = append(filtered, row)
+	}
+	c.rows = filtered
+
+	// Position at first row or EOF
+	if len(c.rows) > 0 {
+		c.pos = 0
+	} else {
+		c.pos = -1
+	}
+
+	return nil
+}
+
+// Next advances to the next row.
+func (c *SQLiteMasterCursor) Next() error {
+	c.pos++
+	return nil
+}
+
+// EOF returns true if we're past the last row.
+func (c *SQLiteMasterCursor) EOF() bool {
+	return c.pos < 0 || c.pos >= len(c.rows)
+}
+
+// Column returns the value of the specified column for the current row.
+func (c *SQLiteMasterCursor) Column(index int) (interface{}, error) {
+	if c.EOF() {
+		return nil, fmt.Errorf("cursor is at EOF")
+	}
+
+	row := c.rows[c.pos]
+	switch index {
+	case 0: // type
+		return row.Type, nil
+	case 1: // name
+		return row.Name, nil
+	case 2: // tbl_name
+		return row.TblName, nil
+	case 3: // rootpage
+		return row.RootPage, nil
+	case 4: // sql
+		return row.SQL, nil
+	default:
+		return nil, fmt.Errorf("column index %d out of range", index)
+	}
+}
+
+// Rowid returns the rowid of the current row.
+func (c *SQLiteMasterCursor) Rowid() (int64, error) {
+	if c.EOF() {
+		return 0, fmt.Errorf("cursor is at EOF")
+	}
+	return int64(c.pos), nil
+}
+
+// Close closes the cursor.
+func (c *SQLiteMasterCursor) Close() error {
+	c.rows = nil
+	return nil
+}

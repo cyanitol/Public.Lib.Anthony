@@ -1,0 +1,403 @@
+package driver
+
+import (
+	"database/sql"
+	"os"
+	"strings"
+	"testing"
+)
+
+// createTestDB creates a temporary database file and returns an open connection.
+// The caller should call the returned cleanup function when done.
+func createTestDB(t *testing.T) (*sql.DB, func()) {
+	t.Helper()
+	tmpfile, err := os.CreateTemp("", "anthony_explain_test_*.db")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	tmpfile.Close()
+
+	db, err := sql.Open(DriverName, tmpfile.Name())
+	if err != nil {
+		os.Remove(tmpfile.Name())
+		t.Fatalf("Failed to open database: %v", err)
+	}
+
+	cleanup := func() {
+		db.Close()
+		os.Remove(tmpfile.Name())
+	}
+
+	return db, cleanup
+}
+
+// TestExplainQueryPlan tests EXPLAIN QUERY PLAN functionality end-to-end.
+func TestExplainQueryPlan(t *testing.T) {
+	t.Skip("EXPLAIN QUERY PLAN requires full query planning integration")
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	// Create a test table
+	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	// Test EXPLAIN QUERY PLAN for a simple SELECT
+	rows, err := db.Query("EXPLAIN QUERY PLAN SELECT * FROM users")
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
+	}
+	defer rows.Close()
+
+	// Check column names
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("Failed to get columns: %v", err)
+	}
+
+	expectedCols := []string{"id", "parent", "notused", "detail"}
+	if len(cols) != len(expectedCols) {
+		t.Errorf("Expected %d columns, got %d", len(expectedCols), len(cols))
+	}
+
+	for i, col := range cols {
+		if i < len(expectedCols) && col != expectedCols[i] {
+			t.Errorf("Column %d: expected '%s', got '%s'", i, expectedCols[i], col)
+		}
+	}
+
+	// Read and validate rows
+	rowCount := 0
+	foundUsers := false
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+
+		err = rows.Scan(&id, &parent, &notused, &detail)
+		if err != nil {
+			t.Fatalf("Failed to scan row: %v", err)
+		}
+
+		rowCount++
+
+		// Check that the plan mentions the users table
+		if strings.Contains(detail, "users") {
+			foundUsers = true
+		}
+
+		t.Logf("Plan row %d: id=%d, parent=%d, detail=%s", rowCount, id, parent, detail)
+	}
+
+	if err = rows.Err(); err != nil {
+		t.Fatalf("Error iterating rows: %v", err)
+	}
+
+	if rowCount == 0 {
+		t.Error("Expected at least one row in explain output")
+	}
+
+	if !foundUsers {
+		t.Error("Expected plan to mention 'users' table")
+	}
+}
+
+// TestExplainQueryPlanWithWhere tests EXPLAIN QUERY PLAN with WHERE clause.
+func TestExplainQueryPlanWithWhere(t *testing.T) {
+	t.Skip("EXPLAIN QUERY PLAN requires full query planning integration")
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	_, err := db.Exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, price INTEGER)")
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	rows, err := db.Query("EXPLAIN QUERY PLAN SELECT * FROM products WHERE id = 1")
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
+	}
+	defer rows.Close()
+
+	foundScanOrSearch := false
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+
+		err = rows.Scan(&id, &parent, &notused, &detail)
+		if err != nil {
+			t.Fatalf("Failed to scan row: %v", err)
+		}
+
+		// Check that it mentions SCAN or SEARCH
+		if strings.Contains(detail, "SCAN") || strings.Contains(detail, "SEARCH") {
+			foundScanOrSearch = true
+		}
+
+		t.Logf("Plan: %s", detail)
+	}
+
+	if !foundScanOrSearch {
+		t.Error("Expected plan to mention SCAN or SEARCH")
+	}
+}
+
+// TestExplainQueryPlanWithJoin tests EXPLAIN QUERY PLAN with JOIN.
+func TestExplainQueryPlanWithJoin(t *testing.T) {
+	t.Skip("EXPLAIN QUERY PLAN requires full query planning integration")
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+	if err != nil {
+		t.Fatalf("Failed to create users table: %v", err)
+	}
+
+	_, err = db.Exec("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER)")
+	if err != nil {
+		t.Fatalf("Failed to create orders table: %v", err)
+	}
+
+	rows, err := db.Query("EXPLAIN QUERY PLAN SELECT * FROM users INNER JOIN orders ON users.id = orders.user_id")
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
+	}
+	defer rows.Close()
+
+	foundUsers := false
+	foundOrders := false
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+
+		err = rows.Scan(&id, &parent, &notused, &detail)
+		if err != nil {
+			t.Fatalf("Failed to scan row: %v", err)
+		}
+
+		if strings.Contains(detail, "users") {
+			foundUsers = true
+		}
+		if strings.Contains(detail, "orders") {
+			foundOrders = true
+		}
+
+		t.Logf("Plan: %s", detail)
+	}
+
+	if !foundUsers {
+		t.Error("Expected plan to mention 'users' table")
+	}
+	if !foundOrders {
+		t.Error("Expected plan to mention 'orders' table")
+	}
+}
+
+// TestExplainOpcodes tests basic EXPLAIN (shows VDBE opcodes).
+func TestExplainOpcodes(t *testing.T) {
+	t.Skip("EXPLAIN requires full query planning integration")
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	_, err := db.Exec("CREATE TABLE items (id INTEGER PRIMARY KEY, value INTEGER)")
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	rows, err := db.Query("EXPLAIN SELECT * FROM items")
+	if err != nil {
+		t.Fatalf("EXPLAIN failed: %v", err)
+	}
+	defer rows.Close()
+
+	// Check column names
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("Failed to get columns: %v", err)
+	}
+
+	expectedCols := []string{"addr", "opcode", "p1", "p2", "p3", "p4", "p5", "comment"}
+	if len(cols) != len(expectedCols) {
+		t.Errorf("Expected %d columns, got %d", len(expectedCols), len(cols))
+	}
+
+	// Read and validate rows
+	rowCount := 0
+	foundInit := false
+	foundOpenRead := false
+	foundRewind := false
+	foundResultRow := false
+	foundHalt := false
+
+	for rows.Next() {
+		var addr, p1, p2, p3, p5 int
+		var opcode, p4, comment string
+
+		err = rows.Scan(&addr, &opcode, &p1, &p2, &p3, &p4, &p5, &comment)
+		if err != nil {
+			t.Fatalf("Failed to scan row: %v", err)
+		}
+
+		rowCount++
+
+		// Check for expected opcodes
+		if opcode == "Init" {
+			foundInit = true
+		}
+		if opcode == "OpenRead" {
+			foundOpenRead = true
+		}
+		if opcode == "Rewind" {
+			foundRewind = true
+		}
+		if opcode == "ResultRow" {
+			foundResultRow = true
+		}
+		if opcode == "Halt" {
+			foundHalt = true
+		}
+
+		t.Logf("Opcode %d: %s p1=%d p2=%d p3=%d p4=%s p5=%d", addr, opcode, p1, p2, p3, p4, p5)
+	}
+
+	if err = rows.Err(); err != nil {
+		t.Fatalf("Error iterating rows: %v", err)
+	}
+
+	if rowCount == 0 {
+		t.Error("Expected at least one row in explain output")
+	}
+
+	if !foundInit {
+		t.Error("Expected to find Init opcode")
+	}
+	if !foundOpenRead {
+		t.Error("Expected to find OpenRead opcode")
+	}
+	if !foundRewind {
+		t.Error("Expected to find Rewind opcode")
+	}
+	if !foundResultRow {
+		t.Error("Expected to find ResultRow opcode")
+	}
+	if !foundHalt {
+		t.Error("Expected to find Halt opcode")
+	}
+}
+
+// TestExplainInsert tests EXPLAIN QUERY PLAN for INSERT.
+func TestExplainInsert(t *testing.T) {
+	t.Skip("EXPLAIN QUERY PLAN requires full query planning integration")
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	_, err := db.Exec("CREATE TABLE data (id INTEGER PRIMARY KEY, value TEXT)")
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	rows, err := db.Query("EXPLAIN QUERY PLAN INSERT INTO data (value) VALUES ('test')")
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
+	}
+	defer rows.Close()
+
+	foundInsert := false
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+
+		err = rows.Scan(&id, &parent, &notused, &detail)
+		if err != nil {
+			t.Fatalf("Failed to scan row: %v", err)
+		}
+
+		if strings.Contains(detail, "INSERT") {
+			foundInsert = true
+		}
+
+		t.Logf("Plan: %s", detail)
+	}
+
+	if !foundInsert {
+		t.Error("Expected plan to mention INSERT")
+	}
+}
+
+// TestExplainUpdate tests EXPLAIN QUERY PLAN for UPDATE.
+func TestExplainUpdate(t *testing.T) {
+	t.Skip("EXPLAIN QUERY PLAN requires full query planning integration")
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	_, err := db.Exec("CREATE TABLE records (id INTEGER PRIMARY KEY, status TEXT)")
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	rows, err := db.Query("EXPLAIN QUERY PLAN UPDATE records SET status = 'active' WHERE id = 1")
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
+	}
+	defer rows.Close()
+
+	foundUpdate := false
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+
+		err = rows.Scan(&id, &parent, &notused, &detail)
+		if err != nil {
+			t.Fatalf("Failed to scan row: %v", err)
+		}
+
+		if strings.Contains(detail, "UPDATE") {
+			foundUpdate = true
+		}
+
+		t.Logf("Plan: %s", detail)
+	}
+
+	if !foundUpdate {
+		t.Error("Expected plan to mention UPDATE")
+	}
+}
+
+// TestExplainDelete tests EXPLAIN QUERY PLAN for DELETE.
+func TestExplainDelete(t *testing.T) {
+	t.Skip("EXPLAIN QUERY PLAN requires full query planning integration")
+	db, cleanup := createTestDB(t)
+	defer cleanup()
+
+	_, err := db.Exec("CREATE TABLE logs (id INTEGER PRIMARY KEY, message TEXT)")
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	rows, err := db.Query("EXPLAIN QUERY PLAN DELETE FROM logs WHERE id < 100")
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
+	}
+	defer rows.Close()
+
+	foundDelete := false
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+
+		err = rows.Scan(&id, &parent, &notused, &detail)
+		if err != nil {
+			t.Fatalf("Failed to scan row: %v", err)
+		}
+
+		if strings.Contains(detail, "DELETE") {
+			foundDelete = true
+		}
+
+		t.Logf("Plan: %s", detail)
+	}
+
+	if !foundDelete {
+		t.Error("Expected plan to mention DELETE")
+	}
+}

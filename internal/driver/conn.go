@@ -224,3 +224,102 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 
 	return nil
 }
+
+// CreateScalarFunction registers a user-defined scalar function.
+// The function is registered in the connection's local function registry
+// and can be used in SQL queries executed on this connection.
+//
+// Parameters:
+//   - name: The function name to use in SQL
+//   - numArgs: Number of arguments (-1 for variadic)
+//   - deterministic: Whether the function always returns the same result for the same inputs
+//   - fn: The UserFunction implementation
+//
+// Example:
+//
+//	type DoubleFunc struct{}
+//	func (f *DoubleFunc) Invoke(args []functions.Value) (functions.Value, error) {
+//	    if args[0].IsNull() {
+//	        return functions.NewNullValue(), nil
+//	    }
+//	    return functions.NewIntValue(args[0].AsInt64() * 2), nil
+//	}
+//	conn.CreateScalarFunction("double", 1, true, &DoubleFunc{})
+func (c *Conn) CreateScalarFunction(name string, numArgs int, deterministic bool, fn functions.UserFunction) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return driver.ErrBadConn
+	}
+
+	config := functions.FunctionConfig{
+		Name:          name,
+		NumArgs:       numArgs,
+		Deterministic: deterministic,
+	}
+
+	return functions.RegisterScalarFunction(c.funcReg, config, fn)
+}
+
+// CreateAggregateFunction registers a user-defined aggregate function.
+// The function is registered in the connection's local function registry
+// and can be used in GROUP BY queries and aggregations on this connection.
+//
+// Parameters:
+//   - name: The function name to use in SQL
+//   - numArgs: Number of arguments (-1 for variadic)
+//   - deterministic: Whether the function always returns the same result for the same inputs
+//   - fn: The UserAggregateFunction implementation
+//
+// Example:
+//
+//	type ProductFunc struct { product int64; hasValue bool }
+//	func (f *ProductFunc) Step(args []functions.Value) error {
+//	    if !args[0].IsNull() {
+//	        if !f.hasValue { f.product = 1; f.hasValue = true }
+//	        f.product *= args[0].AsInt64()
+//	    }
+//	    return nil
+//	}
+//	func (f *ProductFunc) Final() (functions.Value, error) {
+//	    if !f.hasValue { return functions.NewNullValue(), nil }
+//	    return functions.NewIntValue(f.product), nil
+//	}
+//	func (f *ProductFunc) Reset() { f.product = 1; f.hasValue = false }
+//	conn.CreateAggregateFunction("product", 1, true, &ProductFunc{})
+func (c *Conn) CreateAggregateFunction(name string, numArgs int, deterministic bool, fn functions.UserAggregateFunction) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return driver.ErrBadConn
+	}
+
+	config := functions.FunctionConfig{
+		Name:          name,
+		NumArgs:       numArgs,
+		Deterministic: deterministic,
+	}
+
+	return functions.RegisterAggregateFunction(c.funcReg, config, fn)
+}
+
+// UnregisterFunction removes a user-defined function from the connection.
+// This allows removing functions that were previously registered.
+//
+// Parameters:
+//   - name: The function name to remove
+//   - numArgs: The number of arguments (-1 for variadic)
+//
+// Returns true if a function was removed, false if not found.
+func (c *Conn) UnregisterFunction(name string, numArgs int) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return false
+	}
+
+	return functions.UnregisterFunction(c.funcReg, name, numArgs)
+}

@@ -215,6 +215,17 @@ func init() {
 	OpEndCoroutine:  (*VDBE).execEndCoroutine,
 	OpYield:         (*VDBE).execYield,
 	OpOpenPseudo:    (*VDBE).execOpenPseudo,
+
+	// Window function operations
+	OpAggStepWindow:    (*VDBE).execAggStepWindow,
+	OpWindowRowNum:     (*VDBE).execWindowRowNum,
+	OpWindowRank:       (*VDBE).execWindowRank,
+	OpWindowDenseRank:  (*VDBE).execWindowDenseRank,
+	OpWindowNtile:      (*VDBE).execWindowNtile,
+	OpWindowLag:        (*VDBE).execWindowLag,
+	OpWindowLead:       (*VDBE).execWindowLead,
+	OpWindowFirstValue: (*VDBE).execWindowFirstValue,
+	OpWindowLastValue:  (*VDBE).execWindowLastValue,
 	}
 }
 
@@ -3363,4 +3374,511 @@ func (v *VDBE) execOpenPseudo(instr *Instruction) error {
 	
 	v.Cursors[cursorNum] = cursor
 	return nil
+}
+
+// Virtual table opcode implementations
+
+// execVOpen opens a cursor on a virtual table.
+// P1: cursor number
+// P2: module name (unused, virtual table is passed via P4)
+// P3: unused
+// P4: VirtualTable instance (interface{})
+func (v *VDBE) execVOpen(instr *Instruction) error {
+	cursorIdx := instr.P1
+
+	// Ensure cursor array is large enough
+	if err := v.AllocCursors(cursorIdx + 1); err != nil {
+		return err
+	}
+
+	// Get the virtual table from P4
+	if instr.P4Type != P4VTab {
+		return fmt.Errorf("OpVOpen: P4 must contain VirtualTable")
+	}
+
+	vtable := instr.P4.P
+	if vtable == nil {
+		return fmt.Errorf("OpVOpen: virtual table is nil")
+	}
+
+	// Create a cursor for the virtual table
+	// We'll need to import vtab package to use VirtualTable interface
+	// For now, store it as interface{} and cast when needed
+	cursor := &Cursor{
+		CurType: CursorVTab,
+		VTable:  vtable,
+	}
+
+	v.Cursors[cursorIdx] = cursor
+	return nil
+}
+
+// execVFilter initializes a virtual table cursor for iteration.
+// P1: cursor number
+// P2: number of arguments in P4
+// P3: idxNum (query plan index)
+// P4: idxStr (query plan string)
+// P5+: constraint values from registers
+func (v *VDBE) execVFilter(instr *Instruction) error {
+	cursor, err := v.GetCursor(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	if cursor.CurType != CursorVTab {
+		return fmt.Errorf("OpVFilter: cursor %d is not a virtual table cursor", instr.P1)
+	}
+
+	// Get the virtual cursor from the virtual table
+	// This requires casting the interface{} to vtab.VirtualTable
+	// For now, we'll assume it has an Open() method
+	if cursor.VTabCursor == nil {
+		// Open the cursor if not already open
+		// This would call vtable.Open() in a real implementation
+		// For now, just set a placeholder
+		cursor.VTabCursor = nil // Will be set by actual implementation
+	}
+
+	// Get idxNum and idxStr
+	_ = instr.P3 // idxNum - will be used when implementing actual Filter call
+	_ = ""       // idxStr - will be used when implementing actual Filter call
+	if instr.P4Type == P4Static || instr.P4Type == P4Dynamic {
+		_ = instr.P4.Z // Will be used for idxStr
+	}
+
+	// Get constraint values from registers
+	argc := instr.P2
+	argv := make([]interface{}, argc)
+	for i := 0; i < argc; i++ {
+		regIdx := int(instr.P5) + i
+		if regIdx < len(v.Mem) {
+			argv[i] = v.Mem[regIdx].Value()
+		}
+	}
+
+	// Call Filter on the virtual cursor
+	// This would be: cursor.VTabCursor.Filter(idxNum, idxStr, argv)
+	// For now, just mark the cursor as not at EOF
+	cursor.EOF = false
+	_ = argv // Suppress unused warning until we implement actual Filter call
+
+	return nil
+}
+
+// execVColumn reads a column from a virtual table cursor.
+// P1: cursor number
+// P2: column number
+// P3: destination register
+func (v *VDBE) execVColumn(instr *Instruction) error {
+	cursor, err := v.GetCursor(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	if cursor.CurType != CursorVTab {
+		return fmt.Errorf("OpVColumn: cursor %d is not a virtual table cursor", instr.P1)
+	}
+
+	if cursor.VTabCursor == nil {
+		return fmt.Errorf("OpVColumn: virtual cursor is not initialized")
+	}
+
+	// Get the destination register
+	destReg, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	// Call Column on the virtual cursor
+	// This would be: value, err := cursor.VTabCursor.Column(instr.P2)
+	// For now, set a null value
+	destReg.SetNull()
+
+	return nil
+}
+
+// execVNext advances a virtual table cursor to the next row.
+// P1: cursor number
+// P2: jump address if not EOF
+func (v *VDBE) execVNext(instr *Instruction) error {
+	cursor, err := v.GetCursor(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	if cursor.CurType != CursorVTab {
+		return fmt.Errorf("OpVNext: cursor %d is not a virtual table cursor", instr.P1)
+	}
+
+	if cursor.VTabCursor == nil {
+		return fmt.Errorf("OpVNext: virtual cursor is not initialized")
+	}
+
+	// Call Next on the virtual cursor
+	// This would be: err := cursor.VTabCursor.Next()
+	// Then check EOF: if !cursor.VTabCursor.EOF() { v.PC = instr.P2 }
+	// For now, set EOF to true
+	cursor.EOF = true
+
+	// If not at EOF, jump to P2
+	if !cursor.EOF && instr.P2 > 0 {
+		v.PC = instr.P2
+	}
+
+	return nil
+}
+
+// execVRowid gets the rowid of the current row from a virtual table cursor.
+// P1: cursor number
+// P2: destination register
+func (v *VDBE) execVRowid(instr *Instruction) error {
+	cursor, err := v.GetCursor(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	if cursor.CurType != CursorVTab {
+		return fmt.Errorf("OpVRowid: cursor %d is not a virtual table cursor", instr.P1)
+	}
+
+	if cursor.VTabCursor == nil {
+		return fmt.Errorf("OpVRowid: virtual cursor is not initialized")
+	}
+
+	// Get the destination register
+	destReg, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	// Call Rowid on the virtual cursor
+	// This would be: rowid, err := cursor.VTabCursor.Rowid()
+	// For now, set a default value
+	destReg.SetInt(0)
+
+	return nil
+}
+
+// Note: OpClose handles closing virtual table cursors as well as regular cursors.
+// The existing execClose implementation should check cursor.CurType and call
+// cursor.VTabCursor.Close() for virtual table cursors.
+
+// Window function implementations
+
+// execAggStepWindow implements OpAggStepWindow - Step aggregate in window context
+// P1 = window state index
+// P2 = first argument register
+// P3 = aggregate function index (reserved for future use)
+// P4 = function name (string)
+// P5 = number of arguments
+func (v *VDBE) execAggStepWindow(instr *Instruction) error {
+	windowIdx := instr.P1
+	argReg := instr.P2
+	numArgs := int(instr.P5)
+
+	// Get or create window state
+	windowState, ok := v.WindowStates[windowIdx]
+	if !ok {
+		// Initialize with default window frame
+		windowState = NewWindowState(nil, nil, nil, DefaultWindowFrame())
+		v.WindowStates[windowIdx] = windowState
+	}
+
+	// Get function name from P4
+	funcName := instr.P4.Z
+	if funcName == "" {
+		return fmt.Errorf("OpAggStepWindow requires function name in P4")
+	}
+
+	// Collect arguments
+	args, err := v.collectFunctionArgs(argReg, numArgs)
+	if err != nil {
+		return err
+	}
+
+	// Add current row to window state
+	windowState.AddRow(args)
+
+	// Execute aggregate step within window context
+	// This would integrate with aggregate function state
+	return nil
+}
+
+// execWindowRowNum implements OpWindowRowNum - ROW_NUMBER() window function
+// P1 = window state index
+// P2 = output register
+func (v *VDBE) execWindowRowNum(instr *Instruction) error {
+	windowIdx := instr.P1
+	outputReg := instr.P2
+
+	// Get window state
+	windowState, ok := v.WindowStates[windowIdx]
+	if !ok {
+		return fmt.Errorf("window state %d not found", windowIdx)
+	}
+
+	// Get row number (1-based)
+	rowNum := windowState.GetCurrentRowNumber()
+
+	// Store result
+	mem, err := v.GetMem(outputReg)
+	if err != nil {
+		return err
+	}
+	mem.SetInt(rowNum)
+
+	return nil
+}
+
+// execWindowRank implements OpWindowRank - RANK() window function
+// P1 = window state index
+// P2 = output register
+func (v *VDBE) execWindowRank(instr *Instruction) error {
+	windowIdx := instr.P1
+	outputReg := instr.P2
+
+	// Get window state
+	windowState, ok := v.WindowStates[windowIdx]
+	if !ok {
+		return fmt.Errorf("window state %d not found", windowIdx)
+	}
+
+	// Update ranking based on current row
+	windowState.UpdateRanking()
+
+	// Get rank value
+	rank := windowState.GetRank()
+
+	// Store result
+	mem, err := v.GetMem(outputReg)
+	if err != nil {
+		return err
+	}
+	mem.SetInt(rank)
+
+	return nil
+}
+
+// execWindowDenseRank implements OpWindowDenseRank - DENSE_RANK() window function
+// P1 = window state index
+// P2 = output register
+func (v *VDBE) execWindowDenseRank(instr *Instruction) error {
+	windowIdx := instr.P1
+	outputReg := instr.P2
+
+	// Get window state
+	windowState, ok := v.WindowStates[windowIdx]
+	if !ok {
+		return fmt.Errorf("window state %d not found", windowIdx)
+	}
+
+	// Update ranking based on current row
+	windowState.UpdateRanking()
+
+	// Get dense rank value
+	denseRank := windowState.GetDenseRank()
+
+	// Store result
+	mem, err := v.GetMem(outputReg)
+	if err != nil {
+		return err
+	}
+	mem.SetInt(denseRank)
+
+	return nil
+}
+
+// execWindowNtile implements OpWindowNtile - NTILE() window function
+// P1 = window state index
+// P2 = output register
+// P3 = number of buckets (from register or immediate)
+func (v *VDBE) execWindowNtile(instr *Instruction) error {
+	windowIdx := instr.P1
+	outputReg := instr.P2
+	numBuckets := instr.P3
+
+	// Get window state
+	windowState, ok := v.WindowStates[windowIdx]
+	if !ok {
+		return fmt.Errorf("window state %d not found", windowIdx)
+	}
+
+	// Get partition size and current row number
+	partitionSize := windowState.GetPartitionSize()
+	currentRowNum := windowState.GetCurrentRowNumber()
+
+	// Calculate bucket number
+	// NTILE divides rows into N buckets as evenly as possible
+	if numBuckets <= 0 {
+		numBuckets = 1
+	}
+
+	bucketSize := int64(partitionSize) / int64(numBuckets)
+	remainder := int64(partitionSize) % int64(numBuckets)
+
+	// Rows are distributed: first 'remainder' buckets get (bucketSize+1) rows,
+	// remaining buckets get bucketSize rows
+	var bucket int64
+	if currentRowNum <= remainder*(bucketSize+1) {
+		bucket = (currentRowNum-1)/(bucketSize+1) + 1
+	} else {
+		bucket = (currentRowNum-remainder*(bucketSize+1)-1)/bucketSize + remainder + 1
+	}
+
+	// Store result
+	mem, err := v.GetMem(outputReg)
+	if err != nil {
+		return err
+	}
+	mem.SetInt(bucket)
+
+	return nil
+}
+
+// execWindowLag implements OpWindowLag - LAG() window function
+// P1 = window state index
+// P2 = output register
+// P3 = column index to retrieve
+// P4 = offset (default 1)
+// P5 = default value register (if row doesn't exist)
+func (v *VDBE) execWindowLag(instr *Instruction) error {
+	windowIdx := instr.P1
+	outputReg := instr.P2
+	colIdx := instr.P3
+	offset := 1
+	if instr.P4.I > 0 {
+		offset = int(instr.P4.I)
+	}
+
+	// Get window state
+	windowState, ok := v.WindowStates[windowIdx]
+	if !ok {
+		return fmt.Errorf("window state %d not found", windowIdx)
+	}
+
+	// Get the lag row
+	lagRow := windowState.GetLagRow(offset)
+
+	// Store result
+	mem, err := v.GetMem(outputReg)
+	if err != nil {
+		return err
+	}
+
+	if lagRow == nil || colIdx >= len(lagRow) {
+		// Use default value if provided in P5, otherwise NULL
+		if instr.P5 > 0 {
+			defaultMem, err := v.GetMem(int(instr.P5))
+			if err != nil {
+				return err
+			}
+			return mem.Copy(defaultMem)
+		}
+		mem.SetNull()
+	} else {
+		return mem.Copy(lagRow[colIdx])
+	}
+
+	return nil
+}
+
+// execWindowLead implements OpWindowLead - LEAD() window function
+// P1 = window state index
+// P2 = output register
+// P3 = column index to retrieve
+// P4 = offset (default 1)
+// P5 = default value register (if row doesn't exist)
+func (v *VDBE) execWindowLead(instr *Instruction) error {
+	windowIdx := instr.P1
+	outputReg := instr.P2
+	colIdx := instr.P3
+	offset := 1
+	if instr.P4.I > 0 {
+		offset = int(instr.P4.I)
+	}
+
+	// Get window state
+	windowState, ok := v.WindowStates[windowIdx]
+	if !ok {
+		return fmt.Errorf("window state %d not found", windowIdx)
+	}
+
+	// Get the lead row
+	leadRow := windowState.GetLeadRow(offset)
+
+	// Store result
+	mem, err := v.GetMem(outputReg)
+	if err != nil {
+		return err
+	}
+
+	if leadRow == nil || colIdx >= len(leadRow) {
+		// Use default value if provided in P5, otherwise NULL
+		if instr.P5 > 0 {
+			defaultMem, err := v.GetMem(int(instr.P5))
+			if err != nil {
+				return err
+			}
+			return mem.Copy(defaultMem)
+		}
+		mem.SetNull()
+	} else {
+		return mem.Copy(leadRow[colIdx])
+	}
+
+	return nil
+}
+
+// execWindowFirstValue implements OpWindowFirstValue - FIRST_VALUE() window function
+// P1 = window state index
+// P2 = output register
+// P3 = column index to retrieve
+func (v *VDBE) execWindowFirstValue(instr *Instruction) error {
+	windowIdx := instr.P1
+	outputReg := instr.P2
+	colIdx := instr.P3
+
+	// Get window state
+	windowState, ok := v.WindowStates[windowIdx]
+	if !ok {
+		return fmt.Errorf("window state %d not found", windowIdx)
+	}
+
+	// Get first value in frame
+	firstValue := windowState.GetFirstValue(colIdx)
+
+	// Store result
+	mem, err := v.GetMem(outputReg)
+	if err != nil {
+		return err
+	}
+
+	return mem.Copy(firstValue)
+}
+
+// execWindowLastValue implements OpWindowLastValue - LAST_VALUE() window function
+// P1 = window state index
+// P2 = output register
+// P3 = column index to retrieve
+func (v *VDBE) execWindowLastValue(instr *Instruction) error {
+	windowIdx := instr.P1
+	outputReg := instr.P2
+	colIdx := instr.P3
+
+	// Get window state
+	windowState, ok := v.WindowStates[windowIdx]
+	if !ok {
+		return fmt.Errorf("window state %d not found", windowIdx)
+	}
+
+	// Get last value in frame
+	lastValue := windowState.GetLastValue(colIdx)
+
+	// Store result
+	mem, err := v.GetMem(outputReg)
+	if err != nil {
+		return err
+	}
+
+	return mem.Copy(lastValue)
 }

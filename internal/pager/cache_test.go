@@ -1,6 +1,7 @@
 package pager
 
 import (
+	"errors"
 	"sync"
 	"testing"
 )
@@ -645,5 +646,275 @@ func BenchmarkLRUCacheEviction(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		cache.Put(pages[i])
+	}
+}
+
+// Mock PageWriter for testing
+type mockPageWriter struct {
+	writtenPages map[Pgno]*DbPage
+	writeError   error
+	mu           sync.Mutex
+}
+
+func newMockPageWriter() *mockPageWriter {
+	return &mockPageWriter{
+		writtenPages: make(map[Pgno]*DbPage),
+	}
+}
+
+func (m *mockPageWriter) writePage(page *DbPage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.writeError != nil {
+		return m.writeError
+	}
+
+	m.writtenPages[page.Pgno] = page
+	return nil
+}
+
+func (m *mockPageWriter) getWrittenPage(pgno Pgno) *DbPage {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.writtenPages[pgno]
+}
+
+func (m *mockPageWriter) clearWritten() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.writtenPages = make(map[Pgno]*DbPage)
+}
+
+func TestLRUCacheFlush(t *testing.T) {
+	cache := NewLRUCacheSimple(4096, 10)
+	writer := newMockPageWriter()
+	cache.SetPager(writer)
+
+	// Add some dirty pages
+	for i := Pgno(1); i <= 5; i++ {
+		page := NewDbPage(i, 4096)
+		page.MakeDirty()
+		cache.Put(page)
+	}
+
+	// Verify we have 5 dirty pages
+	dirty := cache.GetDirtyPages()
+	if len(dirty) != 5 {
+		t.Errorf("expected 5 dirty pages, got %d", len(dirty))
+	}
+
+	// Flush the cache
+	flushed, err := cache.Flush()
+	if err != nil {
+		t.Errorf("unexpected error during flush: %v", err)
+	}
+	if flushed != 5 {
+		t.Errorf("expected to flush 5 pages, got %d", flushed)
+	}
+
+	// Verify all pages were written
+	for i := Pgno(1); i <= 5; i++ {
+		if writer.getWrittenPage(i) == nil {
+			t.Errorf("page %d was not written", i)
+		}
+	}
+
+	// Verify dirty list is now empty
+	dirty = cache.GetDirtyPages()
+	if len(dirty) != 0 {
+		t.Errorf("expected 0 dirty pages after flush, got %d", len(dirty))
+	}
+}
+
+func TestLRUCacheFlushPage(t *testing.T) {
+	cache := NewLRUCacheSimple(4096, 10)
+	writer := newMockPageWriter()
+	cache.SetPager(writer)
+
+	// Add pages
+	for i := Pgno(1); i <= 3; i++ {
+		page := NewDbPage(i, 4096)
+		page.MakeDirty()
+		cache.Put(page)
+	}
+
+	// Flush only page 2
+	err := cache.FlushPage(2)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Verify page 2 was written
+	if writer.getWrittenPage(2) == nil {
+		t.Error("page 2 should have been written")
+	}
+
+	// Verify page 2 is clean
+	page := cache.Get(2)
+	if page.IsDirty() {
+		t.Error("page 2 should be clean after flush")
+	}
+
+	// Verify pages 1 and 3 were not written
+	if writer.getWrittenPage(1) != nil {
+		t.Error("page 1 should not have been written")
+	}
+	if writer.getWrittenPage(3) != nil {
+		t.Error("page 3 should not have been written")
+	}
+}
+
+func TestLRUCacheFlushNoPager(t *testing.T) {
+	cache := NewLRUCacheSimple(4096, 10)
+
+	// Try to flush without setting a pager
+	_, err := cache.Flush()
+	if err == nil {
+		t.Error("expected error when flushing without pager")
+	}
+}
+
+func TestLRUCacheWriteThroughMode(t *testing.T) {
+	config := LRUCacheConfig{
+		PageSize: 4096,
+		MaxPages: 10,
+		Mode:     WriteThroughMode,
+	}
+	cache, err := NewLRUCache(config)
+	if err != nil {
+		t.Fatalf("failed to create cache: %v", err)
+	}
+
+	writer := newMockPageWriter()
+	cache.SetPager(writer)
+
+	// Add a clean page
+	page1 := NewDbPage(1, 4096)
+	cache.Put(page1)
+
+	// Mark it dirty - should flush immediately in write-through mode
+	err = cache.MarkDirty(1)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Verify page was written immediately
+	if writer.getWrittenPage(1) == nil {
+		t.Error("page should have been written immediately in write-through mode")
+	}
+
+	// Verify page is clean again
+	if cache.Get(1).IsDirty() {
+		t.Error("page should be clean after write-through flush")
+	}
+}
+
+func TestLRUCacheWriteBackMode(t *testing.T) {
+	config := LRUCacheConfig{
+		PageSize: 4096,
+		MaxPages: 10,
+		Mode:     WriteBackMode,
+	}
+	cache, err := NewLRUCache(config)
+	if err != nil {
+		t.Fatalf("failed to create cache: %v", err)
+	}
+
+	writer := newMockPageWriter()
+	cache.SetPager(writer)
+
+	// Add a clean page
+	page1 := NewDbPage(1, 4096)
+	cache.Put(page1)
+
+	// Mark it dirty - should NOT flush immediately in write-back mode
+	err = cache.MarkDirty(1)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Verify page was NOT written yet
+	if writer.getWrittenPage(1) != nil {
+		t.Error("page should not be written in write-back mode until flush")
+	}
+
+	// Verify page is still dirty
+	if !cache.Get(1).IsDirty() {
+		t.Error("page should still be dirty in write-back mode")
+	}
+
+	// Now flush
+	flushed, err := cache.Flush()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if flushed != 1 {
+		t.Errorf("expected 1 page flushed, got %d", flushed)
+	}
+
+	// Now it should be written
+	if writer.getWrittenPage(1) == nil {
+		t.Error("page should be written after flush")
+	}
+}
+
+func TestLRUCacheSetMode(t *testing.T) {
+	cache := NewLRUCacheSimple(4096, 10)
+
+	// Default should be write-back
+	if cache.Mode() != WriteBackMode {
+		t.Error("default mode should be write-back")
+	}
+
+	// Change to write-through
+	cache.SetMode(WriteThroughMode)
+	if cache.Mode() != WriteThroughMode {
+		t.Error("mode should be write-through after SetMode")
+	}
+}
+
+func TestLRUCacheEvictMethod(t *testing.T) {
+	cache := NewLRUCacheSimple(4096, 3)
+
+	// Add 3 pages
+	for i := Pgno(1); i <= 3; i++ {
+		page := NewDbPage(i, 4096)
+		page.Unref()
+		cache.Put(page)
+	}
+
+	if cache.Size() != 3 {
+		t.Errorf("expected size 3, got %d", cache.Size())
+	}
+
+	// Evict one page
+	_, err := cache.Evict()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if cache.Size() != 2 {
+		t.Errorf("expected size 2 after eviction, got %d", cache.Size())
+	}
+}
+
+func TestLRUCacheFlushWithError(t *testing.T) {
+	cache := NewLRUCacheSimple(4096, 10)
+	writer := newMockPageWriter()
+	writer.writeError = errors.New("disk full")
+	cache.SetPager(writer)
+
+	// Add dirty pages
+	for i := Pgno(1); i <= 3; i++ {
+		page := NewDbPage(i, 4096)
+		page.MakeDirty()
+		cache.Put(page)
+	}
+
+	// Try to flush - should get error
+	_, err := cache.Flush()
+	if err == nil {
+		t.Error("expected error during flush")
 	}
 }

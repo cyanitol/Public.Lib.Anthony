@@ -228,12 +228,29 @@ func (c *BtCursor) splitInteriorPage(key int64, childPgno uint32) error {
 
 // collectLeafCellsForSplit collects all existing cells plus the new cell to be inserted
 // Returns cells in sorted order by key
+// Properly handles overflow pages when encoding the new cell
 func (c *BtCursor) collectLeafCellsForSplit(page *BtreePage, newKey int64, newPayload []byte) ([][]byte, []int64, error) {
 	numCells := int(page.Header.NumCells)
 	cells := make([][]byte, 0, numCells+1)
 	keys := make([]int64, 0, numCells+1)
 
-	newCellData := EncodeTableLeafCell(newKey, newPayload)
+	// Encode new cell with proper overflow handling
+	var newCellData []byte
+	payloadSize := uint32(len(newPayload))
+	localSize := CalculateLocalPayload(payloadSize, c.Btree.UsableSize, true)
+
+	if payloadSize > uint32(localSize) {
+		// Need overflow pages for new cell
+		overflowPage, err := c.WriteOverflow(newPayload, localSize, c.Btree.UsableSize)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to write overflow for split: %w", err)
+		}
+		newCellData = c.encodeTableLeafCellWithOverflow(newKey, newPayload[:localSize], overflowPage, payloadSize)
+	} else {
+		// No overflow needed
+		newCellData = EncodeTableLeafCell(newKey, newPayload)
+	}
+
 	inserted := false
 
 	for i := 0; i < numCells; i++ {

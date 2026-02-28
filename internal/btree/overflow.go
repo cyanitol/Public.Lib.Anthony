@@ -278,3 +278,13 @@ func (c *BtCursor) GetCompletePayload() ([]byte, error) {
 		c.Btree.UsableSize,
 	)
 }
+
+// GetOverflowThreshold returns the maximum payload size that can be stored
+// locally (without overflow) for the given page size and page type
+// This implements SQLite's overflow threshold calculation
+func GetOverflowThreshold(pageSize uint32, isTable bool) uint32 {
+	// For table b-trees (leaf pages): maxLocal = pageSize - 35
+	// For index b-trees: maxLocal = pageSize - 35
+	// This is the threshold above which overflow is required
+	return calculateMaxLocal(pageSize, isTable)
+}

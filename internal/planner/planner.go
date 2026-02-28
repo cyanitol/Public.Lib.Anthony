@@ -7,20 +7,52 @@ import (
 
 // Planner is the main query planner that generates execution plans.
 type Planner struct {
-	CostModel *CostModel
+	CostModel         *CostModel
+	SubqueryOptimizer *SubqueryOptimizer
+	Statistics        *Statistics
 }
 
 // NewPlanner creates a new query planner.
 func NewPlanner() *Planner {
+	costModel := NewCostModel()
 	return &Planner{
-		CostModel: NewCostModel(),
+		CostModel:         costModel,
+		SubqueryOptimizer: NewSubqueryOptimizer(costModel),
+		Statistics:        NewStatistics(),
 	}
+}
+
+// NewPlannerWithStatistics creates a planner with pre-loaded statistics.
+func NewPlannerWithStatistics(stats *Statistics) *Planner {
+	costModel := NewCostModel()
+	return &Planner{
+		CostModel:         costModel,
+		SubqueryOptimizer: NewSubqueryOptimizer(costModel),
+		Statistics:        stats,
+	}
+}
+
+// SetStatistics updates the planner's statistics.
+func (p *Planner) SetStatistics(stats *Statistics) {
+	p.Statistics = stats
+}
+
+// GetStatistics returns the planner's current statistics.
+func (p *Planner) GetStatistics() *Statistics {
+	return p.Statistics
 }
 
 // PlanQuery generates an execution plan for a query.
 func (p *Planner) PlanQuery(tables []*TableInfo, whereClause *WhereClause) (*WhereInfo, error) {
 	if len(tables) == 0 {
 		return nil, fmt.Errorf("no tables in query")
+	}
+
+	// Apply statistics to tables before planning
+	if p.Statistics != nil {
+		for _, table := range tables {
+			ApplyStatisticsToTable(table, p.Statistics)
+		}
 	}
 
 	info := &WhereInfo{
@@ -30,8 +62,15 @@ func (p *Planner) PlanQuery(tables []*TableInfo, whereClause *WhereClause) (*Whe
 	}
 
 	// Phase 1: Analyze WHERE clause and split into terms
+	// Also detect and optimize subqueries
 	if whereClause != nil {
 		// Terms are already split in WhereClause
+		// Detect subqueries in WHERE clause
+		optimizedInfo, err := p.optimizeWhereSubqueries(info)
+		if err != nil {
+			return nil, fmt.Errorf("subquery optimization failed: %w", err)
+		}
+		info = optimizedInfo
 	}
 
 	// Phase 2: Generate all possible WhereLoop objects for each table
@@ -531,4 +570,126 @@ func (p *Planner) ValidatePlan(info *WhereInfo) error {
 	}
 
 	return nil
+}
+
+// optimizeWhereSubqueries detects and optimizes subqueries in WHERE clause.
+func (p *Planner) optimizeWhereSubqueries(info *WhereInfo) (*WhereInfo, error) {
+	if info.Clause == nil {
+		return info, nil
+	}
+
+	// Scan WHERE terms for subqueries
+	for _, term := range info.Clause.Terms {
+		subqueryInfo := p.detectSubquery(term.Expr)
+		if subqueryInfo != nil {
+			// Analyze the subquery
+			analyzed, err := p.SubqueryOptimizer.AnalyzeSubquery(subqueryInfo.Expr, info.Tables)
+			if err != nil {
+				continue // Skip optimization on error
+			}
+
+			// Apply optimization
+			optimized, err := p.SubqueryOptimizer.OptimizeSubquery(analyzed, info)
+			if err != nil {
+				continue // Skip if optimization fails
+			}
+
+			// Update info with optimized plan
+			info = optimized
+		}
+	}
+
+	return info, nil
+}
+
+// detectSubquery detects if an expression contains a subquery.
+func (p *Planner) detectSubquery(expr Expr) *SubqueryInfo {
+	if expr == nil {
+		return nil
+	}
+
+	// Check for SubqueryExpr
+	if subExpr, ok := expr.(*SubqueryExpr); ok {
+		return &SubqueryInfo{
+			Type:          subExpr.Type,
+			Expr:          subExpr.Query,
+			EstimatedRows: NewLogEst(100),
+		}
+	}
+
+	// Check for binary expressions that might contain subqueries
+	if binExpr, ok := expr.(*BinaryExpr); ok {
+		// Check if this is an IN operator
+		if binExpr.Op == "IN" {
+			return &SubqueryInfo{
+				Type:          SubqueryIn,
+				Expr:          binExpr.Right,
+				EstimatedRows: NewLogEst(100),
+			}
+		}
+
+		// Recursively check left and right
+		if left := p.detectSubquery(binExpr.Left); left != nil {
+			return left
+		}
+		if right := p.detectSubquery(binExpr.Right); right != nil {
+			return right
+		}
+	}
+
+	return nil
+}
+
+// PlanQueryWithSubqueries plans a query that may contain subqueries.
+// This is the main entry point for queries with FROM subqueries or complex WHERE clauses.
+func (p *Planner) PlanQueryWithSubqueries(tables []*TableInfo, fromSubqueries []Expr, whereClause *WhereClause) (*WhereInfo, error) {
+	// First, optimize FROM subqueries
+	optimizedTables := make([]*TableInfo, 0, len(tables)+len(fromSubqueries))
+	optimizedTables = append(optimizedTables, tables...)
+
+	for _, subquery := range fromSubqueries {
+		// Analyze FROM subquery
+		subqueryInfo, err := p.SubqueryOptimizer.AnalyzeSubquery(subquery, tables)
+		if err != nil {
+			return nil, fmt.Errorf("failed to analyze FROM subquery: %w", err)
+		}
+
+		// Determine optimization strategy
+		if subqueryInfo.CanFlatten {
+			// Flatten the subquery - add its tables to the main query
+			// In a full implementation, would extract tables from subquery
+			// For now, we'll create a placeholder table
+			subqueryTable := &TableInfo{
+				Name:      subqueryInfo.MaterializedTable,
+				Alias:     fmt.Sprintf("subq_%d", len(optimizedTables)),
+				Cursor:    len(optimizedTables),
+				RowCount:  subqueryInfo.EstimatedRows.ToInt(),
+				RowLogEst: subqueryInfo.EstimatedRows,
+				Columns:   make([]ColumnInfo, 0),
+				Indexes:   make([]*IndexInfo, 0),
+			}
+			optimizedTables = append(optimizedTables, subqueryTable)
+		} else if subqueryInfo.CanMaterialize {
+			// Materialize the subquery
+			materialized, err := p.SubqueryOptimizer.MaterializeSubquery(subqueryInfo)
+			if err != nil {
+				return nil, fmt.Errorf("failed to materialize subquery: %w", err)
+			}
+
+			// Add materialized table to plan
+			subqueryTable := &TableInfo{
+				Name:      materialized.MaterializedTable,
+				Alias:     materialized.MaterializedTable,
+				Cursor:    len(optimizedTables),
+				RowCount:  materialized.EstimatedRows.ToInt(),
+				RowLogEst: materialized.EstimatedRows,
+				Columns:   make([]ColumnInfo, 0),
+				Indexes:   make([]*IndexInfo, 0),
+			}
+			optimizedTables = append(optimizedTables, subqueryTable)
+		}
+	}
+
+	// Now plan the query with optimized tables
+	return p.PlanQuery(optimizedTables, whereClause)
 }

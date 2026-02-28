@@ -10,6 +10,7 @@ type PagerInterface interface {
 	Write(page interface{}) error
 	PageSize() int
 	PageCount() uint32
+	AllocatePage() (uint32, error)
 }
 
 // DbPageInterface is what we need from a DbPage
@@ -54,9 +55,16 @@ func (pa *PagerAdapter) GetPageData(pgno uint32) ([]byte, error) {
 
 // AllocatePageData allocates a new page
 func (pa *PagerAdapter) AllocatePageData() (uint32, []byte, error) {
-	// Get the next page number
-	pgno := pa.nextPage
-	pa.nextPage++
+	// Use the pager's AllocatePage method which handles free list
+	pgno, err := pa.pager.AllocatePage()
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to allocate page: %w", err)
+	}
+
+	// Update nextPage tracking if this page is beyond current count
+	if pgno >= pa.nextPage {
+		pa.nextPage = pgno + 1
+	}
 
 	// Create empty page data
 	data := make([]byte, pa.pageSize)

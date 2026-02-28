@@ -55,6 +55,12 @@ type LRUCache struct {
 	// Maximum memory usage in bytes (0 = unlimited, use maxPages)
 	maxMemory int64
 
+	// Write mode (write-through or write-back)
+	mode CacheMode
+
+	// Pager for flushing pages (optional)
+	pager PageWriter
+
 	// Statistics
 	hits   int64
 	misses int64
@@ -63,11 +69,22 @@ type LRUCache struct {
 	mu sync.RWMutex
 }
 
+// CacheMode defines the cache write mode
+type CacheMode int
+
+const (
+	// WriteThroughMode - writes are immediately synced to disk
+	WriteThroughMode CacheMode = iota
+	// WriteBackMode - writes are batched and flushed later
+	WriteBackMode
+)
+
 // LRUCacheConfig holds configuration options for the LRU cache.
 type LRUCacheConfig struct {
-	PageSize  int   // Size of each page in bytes
-	MaxPages  int   // Maximum number of pages to cache
-	MaxMemory int64 // Maximum memory usage in bytes (0 = use MaxPages)
+	PageSize  int       // Size of each page in bytes
+	MaxPages  int       // Maximum number of pages to cache
+	MaxMemory int64     // Maximum memory usage in bytes (0 = use MaxPages)
+	Mode      CacheMode // Write mode (write-through or write-back)
 }
 
 // DefaultLRUCacheConfig returns a default cache configuration.
@@ -75,8 +92,15 @@ func DefaultLRUCacheConfig(pageSize int) LRUCacheConfig {
 	return LRUCacheConfig{
 		PageSize:  pageSize,
 		MaxPages:  DefaultCacheSize,
-		MaxMemory: 0, // Use MaxPages instead
+		MaxMemory: 0,                // Use MaxPages instead
+		Mode:      WriteBackMode,    // Default to write-back for better performance
 	}
+}
+
+// PageWriter is an interface for writing pages to storage.
+// This allows the cache to flush dirty pages without depending on the full Pager type.
+type PageWriter interface {
+	writePage(page *DbPage) error
 }
 
 // NewLRUCache creates a new LRU page cache with the given configuration.
@@ -90,6 +114,7 @@ func NewLRUCache(config LRUCacheConfig) (*LRUCache, error) {
 		pageSize:  config.PageSize,
 		maxPages:  config.MaxPages,
 		maxMemory: config.MaxMemory,
+		mode:      config.Mode,
 	}, nil
 }
 
@@ -98,6 +123,7 @@ func NewLRUCacheSimple(pageSize, maxPages int) *LRUCache {
 	cache, _ := NewLRUCache(LRUCacheConfig{
 		PageSize: pageSize,
 		MaxPages: maxPages,
+		Mode:     WriteBackMode,
 	})
 	return cache
 }
@@ -359,16 +385,31 @@ func (c *LRUCache) Touch(pgno Pgno) {
 }
 
 // MarkDirty marks a page as dirty and adds it to the dirty list.
-func (c *LRUCache) MarkDirty(pgno Pgno) {
+// In write-through mode, immediately flushes the page to disk.
+func (c *LRUCache) MarkDirty(pgno Pgno) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if entry, ok := c.entries[pgno]; ok {
-		if !entry.page.IsDirty() {
-			entry.page.MakeDirty()
-			c.addToDirtyList(entry.page)
+	entry, ok := c.entries[pgno]
+	if !ok {
+		return nil // Page not in cache
+	}
+
+	if !entry.page.IsDirty() {
+		entry.page.MakeDirty()
+		c.addToDirtyList(entry.page)
+
+		// In write-through mode, flush immediately
+		if c.mode == WriteThroughMode && c.pager != nil {
+			if err := c.pager.writePage(entry.page); err != nil {
+				return err
+			}
+			entry.page.MakeClean()
+			c.removeFromDirtyList(entry.page)
 		}
 	}
+
+	return nil
 }
 
 // Contains returns true if the cache contains the given page number.
@@ -377,6 +418,107 @@ func (c *LRUCache) Contains(pgno Pgno) bool {
 	defer c.mu.RUnlock()
 	_, ok := c.entries[pgno]
 	return ok
+}
+
+// SetPager sets the pager for flushing dirty pages.
+// This is needed for write-through mode.
+func (c *LRUCache) SetPager(pager PageWriter) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pager = pager
+}
+
+// Flush writes all dirty pages to disk.
+// Returns the number of pages flushed and any error encountered.
+func (c *LRUCache) Flush() (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.pager == nil {
+		return 0, errors.New("no pager set for cache flush")
+	}
+
+	flushed := 0
+	var firstErr error
+
+	// Flush all dirty pages
+	current := c.dirtyHead
+	for current != nil {
+		next := current.dirtyNext
+
+		if err := c.pager.writePage(current); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			// Continue trying to flush other pages
+		} else {
+			flushed++
+			// Mark page as clean but keep it in cache
+			current.MakeClean()
+			c.removeFromDirtyList(current)
+		}
+
+		current = next
+	}
+
+	return flushed, firstErr
+}
+
+// FlushPage writes a specific dirty page to disk.
+// Returns an error if the page is not in cache or if write fails.
+func (c *LRUCache) FlushPage(pgno Pgno) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.pager == nil {
+		return errors.New("no pager set for cache flush")
+	}
+
+	entry, ok := c.entries[pgno]
+	if !ok {
+		return ErrCachePageNotFound
+	}
+
+	if !entry.page.IsDirty() {
+		return nil // Nothing to flush
+	}
+
+	if err := c.pager.writePage(entry.page); err != nil {
+		return err
+	}
+
+	entry.page.MakeClean()
+	c.removeFromDirtyList(entry.page)
+	return nil
+}
+
+// Evict evicts the least recently used page from the cache.
+// Only evicts clean pages with no references.
+// Returns the page number that was evicted, or 0 if no page was evicted.
+func (c *LRUCache) Evict() (Pgno, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	err := c.evictLRU(1)
+	if err != nil {
+		return 0, err
+	}
+
+	return 0, nil
+}
+
+// Mode returns the current cache write mode.
+func (c *LRUCache) Mode() CacheMode {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.mode
+}
+
+// SetMode sets the cache write mode.
+func (c *LRUCache) SetMode(mode CacheMode) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.mode = mode
 }
 
 // Pages returns a slice of all page numbers in the cache.

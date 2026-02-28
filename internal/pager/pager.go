@@ -86,11 +86,14 @@ type Pager struct {
 	// Journal filename
 	journalFilename string
 
-	// Page cache
-	cache *PageCache
+	// Page cache (can be either PageCache or LRUCache)
+	cache PageCacheInterface
 
 	// Database header
 	header *DatabaseHeader
+
+	// Free list manager
+	freeList *FreeList
 
 	// Current pager state
 	state int
@@ -156,9 +159,32 @@ func OpenWithPageSize(filename string, readOnly bool, pageSize int) (*Pager, err
 	return pager, nil
 }
 
+// OpenWithLRUCache opens a database file with an LRU cache.
+func OpenWithLRUCache(filename string, readOnly bool, pageSize int, cacheConfig LRUCacheConfig) (*Pager, error) {
+	if !isValidPageSize(pageSize) {
+		return nil, ErrInvalidPageSize
+	}
+
+	// Create pager with LRU cache
+	pager := newPagerWithLRUCache(filename, pageSize, readOnly, cacheConfig)
+	if err := pager.openFile(readOnly); err != nil {
+		return nil, err
+	}
+	if err := pager.initOrReadHeader(readOnly); err != nil {
+		return nil, err
+	}
+
+	// Set the pager reference in the cache for flushing
+	if lruCache, ok := pager.cache.(*LRUCache); ok {
+		lruCache.SetPager(pager)
+	}
+
+	return pager, nil
+}
+
 // newPager creates a new Pager instance.
 func newPager(filename string, pageSize int, readOnly bool) *Pager {
-	return &Pager{
+	pager := &Pager{
 		filename:        filename,
 		journalFilename: filename + "-journal",
 		pageSize:        pageSize,
@@ -169,6 +195,32 @@ func newPager(filename string, pageSize int, readOnly bool) *Pager {
 		cache:           NewPageCache(pageSize, DefaultCacheSize),
 		maxPageNum:      0x7FFFFFFF,
 	}
+	// Initialize free list (will be loaded from header later)
+	pager.freeList = NewFreeList(pager)
+	return pager
+}
+
+// newPagerWithLRUCache creates a new Pager instance with an LRU cache.
+func newPagerWithLRUCache(filename string, pageSize int, readOnly bool, cacheConfig LRUCacheConfig) *Pager {
+	// Ensure page size matches
+	cacheConfig.PageSize = pageSize
+
+	lruCache, _ := NewLRUCache(cacheConfig)
+
+	pager := &Pager{
+		filename:        filename,
+		journalFilename: filename + "-journal",
+		pageSize:        pageSize,
+		journalMode:     JournalModeDelete,
+		readOnly:        readOnly,
+		state:           PagerStateOpen,
+		lockState:       LockNone,
+		cache:           lruCache,
+		maxPageNum:      0x7FFFFFFF,
+	}
+	// Initialize free list (will be loaded from header later)
+	pager.freeList = NewFreeList(pager)
+	return pager
 }
 
 // openFile opens the database file.
@@ -262,7 +314,11 @@ func (p *Pager) Close() error {
 func (p *Pager) Get(pgno Pgno) (*DbPage, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.getLocked(pgno)
+}
 
+// getLocked retrieves a page without acquiring the mutex (must be called with lock held).
+func (p *Pager) getLocked(pgno Pgno) (*DbPage, error) {
 	if pgno == 0 || pgno > p.maxPageNum {
 		return nil, ErrInvalidPageNum
 	}
@@ -307,7 +363,11 @@ func (p *Pager) Put(page *DbPage) {
 func (p *Pager) Write(page *DbPage) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.writeLocked(page)
+}
 
+// writeLocked writes a page without acquiring the mutex (must be called with lock held).
+func (p *Pager) writeLocked(page *DbPage) error {
 	if p.readOnly {
 		return ErrReadOnly
 	}
@@ -367,11 +427,28 @@ func (p *Pager) Commit() error {
 		return ErrNoTransaction
 	}
 
-	// Phase 1: Write all dirty pages to disk
-	if err := p.writeDirtyPages(); err != nil {
+	// Phase 0: Flush pending free pages to disk
+	if err := p.freeList.Flush(); err != nil {
 		p.state = PagerStateError
 		p.errCode = err
 		return err
+	}
+
+	// Phase 1: Write all dirty pages to disk
+	// If using LRU cache with write-back mode, flush the cache
+	if lruCache, ok := p.cache.(*LRUCache); ok && lruCache.Mode() == WriteBackMode {
+		if _, err := lruCache.Flush(); err != nil {
+			p.state = PagerStateError
+			p.errCode = err
+			return err
+		}
+	} else {
+		// Otherwise use the traditional method
+		if err := p.writeDirtyPages(); err != nil {
+			p.state = PagerStateError
+			p.errCode = err
+			return err
+		}
 	}
 
 	// Phase 2: Sync the database file
@@ -388,9 +465,13 @@ func (p *Pager) Commit() error {
 		return err
 	}
 
-	// Update database size in header if it changed
-	if p.dbSize != p.dbOrigSize {
-		if err := p.updateDatabaseSize(); err != nil {
+	// Update database size and free list info in header if changed
+	needsHeaderUpdate := p.dbSize != p.dbOrigSize ||
+		p.header.FreelistTrunk != uint32(p.freeList.GetFirstTrunk()) ||
+		p.header.FreelistCount != p.freeList.GetTotalFree()
+
+	if needsHeaderUpdate {
+		if err := p.updateDatabaseHeader(); err != nil {
 			return err
 		}
 	}
@@ -529,7 +610,11 @@ func (p *Pager) readHeader() error {
 	if actualPageSize != p.pageSize {
 		p.pageSize = actualPageSize
 		p.cache = NewPageCache(actualPageSize, DefaultCacheSize)
+		p.freeList = NewFreeList(p)
 	}
+
+	// Initialize free list from header
+	p.freeList.Initialize(Pgno(header.FreelistTrunk), header.FreelistCount)
 
 	return nil
 }
@@ -781,9 +866,11 @@ func (p *Pager) zeroJournalHeader() error {
 	return err
 }
 
-// updateDatabaseSize updates the database size in the header.
-func (p *Pager) updateDatabaseSize() error {
+// updateDatabaseHeader updates the database size and free list info in the header.
+func (p *Pager) updateDatabaseHeader() error {
 	p.header.DatabaseSize = uint32(p.dbSize)
+	p.header.FreelistTrunk = uint32(p.freeList.GetFirstTrunk())
+	p.header.FreelistCount = p.freeList.GetTotalFree()
 	p.header.FileChangeCounter++
 
 	headerData := p.header.Serialize()
@@ -792,4 +879,65 @@ func (p *Pager) updateDatabaseSize() error {
 	}
 
 	return p.file.Sync()
+}
+
+// AllocatePage allocates a new page, first trying the free list,
+// then allocating at the end of the file if no free pages are available.
+// Returns the page number of the allocated page.
+func (p *Pager) AllocatePage() (Pgno, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.readOnly {
+		return 0, ErrReadOnly
+	}
+
+	// Ensure we have a write transaction
+	if err := p.ensureWriteTransaction(); err != nil {
+		return 0, err
+	}
+
+	// Try to allocate from the free list first
+	pgno, err := p.freeList.Allocate()
+	if err != nil {
+		return 0, err
+	}
+
+	// If we got a free page, return it
+	if pgno != 0 {
+		return pgno, nil
+	}
+
+	// No free pages available - allocate new page at end of file
+	p.dbSize++
+	return p.dbSize, nil
+}
+
+// FreePage adds a page to the free list for later reuse.
+func (p *Pager) FreePage(pgno Pgno) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.readOnly {
+		return ErrReadOnly
+	}
+
+	if pgno == 0 || pgno > p.dbSize {
+		return ErrInvalidPageNum
+	}
+
+	// Ensure we have a write transaction
+	if err := p.ensureWriteTransaction(); err != nil {
+		return err
+	}
+
+	// Add to free list
+	return p.freeList.Free(pgno)
+}
+
+// GetFreePageCount returns the number of free pages in the database.
+func (p *Pager) GetFreePageCount() uint32 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.freeList.Count()
 }

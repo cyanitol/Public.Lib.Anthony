@@ -1,6 +1,7 @@
 package btree
 
 import (
+	"encoding/binary"
 	"fmt"
 )
 
@@ -439,12 +440,21 @@ func (c *BtCursor) GetKey() int64 {
 	return c.CurrentCell.Key
 }
 
-// GetPayload returns the payload of the current entry
+// GetPayload returns the local payload of the current entry
+// Note: This only returns the portion stored locally in the cell.
+// For cells with overflow pages, use GetCompletePayload() to get the full payload.
 func (c *BtCursor) GetPayload() []byte {
 	if c.State != CursorValid || c.CurrentCell == nil {
 		return nil
 	}
 	return c.CurrentCell.Payload
+}
+
+// GetPayloadWithOverflow returns the complete payload of the current entry,
+// automatically reading from overflow pages if necessary.
+// This is an alias for GetCompletePayload() for convenience.
+func (c *BtCursor) GetPayloadWithOverflow() ([]byte, error) {
+	return c.GetCompletePayload()
 }
 
 // String returns a string representation of the cursor
@@ -613,34 +623,104 @@ func (c *BtCursor) binarySearch(pageData []byte, header *PageHeader, rowid int64
 }
 
 // Insert inserts a new row with the given key and payload
+// Automatically handles overflow pages if the payload is too large
 func (c *BtCursor) Insert(key int64, payload []byte) error {
 	if err := c.validateInsertPosition(key); err != nil {
 		return err
 	}
 
-	cellData := EncodeTableLeafCell(key, payload)
+	// Calculate if overflow is needed
+	payloadSize := uint32(len(payload))
+	localSize := CalculateLocalPayload(payloadSize, c.Btree.UsableSize, true)
+
+	var cellData []byte
+	var overflowPage uint32
+
+	// Check if payload needs overflow pages
+	if payloadSize > uint32(localSize) {
+		// Write overflow pages first
+		var err error
+		overflowPage, err = c.WriteOverflow(payload, localSize, c.Btree.UsableSize)
+		if err != nil {
+			return fmt.Errorf("failed to write overflow: %w", err)
+		}
+
+		// Encode cell with local payload and overflow pointer
+		cellData = c.encodeTableLeafCellWithOverflow(key, payload[:localSize], overflowPage, payloadSize)
+	} else {
+		// No overflow needed, use standard encoding
+		cellData = EncodeTableLeafCell(key, payload)
+	}
+
 	btreePage, err := c.getCurrentBtreePage()
 	if err != nil {
+		// Clean up overflow pages if they were allocated
+		if overflowPage != 0 {
+			c.FreeOverflowChain(overflowPage)
+		}
 		return err
 	}
 
 	if len(cellData) > btreePage.FreeSpace() {
+		// Clean up overflow pages before split, as split will re-encode
+		if overflowPage != 0 {
+			c.FreeOverflowChain(overflowPage)
+		}
 		return c.splitPage(key, payload)
 	}
 
 	// Mark page dirty BEFORE modification for journal support
 	if c.Btree.Provider != nil {
 		if err := c.Btree.Provider.MarkDirty(c.CurrentPage); err != nil {
+			// Clean up overflow pages on error
+			if overflowPage != 0 {
+				c.FreeOverflowChain(overflowPage)
+			}
 			return err
 		}
 	}
 
 	if err := btreePage.InsertCell(c.CurrentIndex, cellData); err != nil {
+		// Clean up overflow pages on error
+		if overflowPage != 0 {
+			c.FreeOverflowChain(overflowPage)
+		}
 		return err
 	}
 
 	_, err = c.SeekRowid(key)
 	return err
+}
+
+// encodeTableLeafCellWithOverflow encodes a table leaf cell with overflow
+// Format: varint(total_payload_size), varint(rowid), local_payload, overflow_page_number
+func (c *BtCursor) encodeTableLeafCellWithOverflow(rowid int64, localPayload []byte, overflowPage uint32, totalPayloadSize uint32) []byte {
+	// Pre-calculate varint sizes
+	sizeVarintSize := VarintLen(uint64(totalPayloadSize))
+	rowidVarintSize := VarintLen(uint64(rowid))
+
+	// Allocate exact buffer size
+	bufSize := sizeVarintSize + rowidVarintSize + len(localPayload) + 4
+	buf := make([]byte, bufSize)
+	offset := 0
+
+	// Write total payload size
+	n := PutVarint(buf[offset:], uint64(totalPayloadSize))
+	offset += n
+
+	// Write rowid
+	n = PutVarint(buf[offset:], uint64(rowid))
+	offset += n
+
+	// Write local payload
+	copy(buf[offset:], localPayload)
+	offset += len(localPayload)
+
+	// Write overflow page number (4 bytes, big-endian)
+	binary.BigEndian.PutUint32(buf[offset:], overflowPage)
+	offset += 4
+
+	return buf[:offset]
 }
 
 // validateInsertPosition seeks to position and validates it's a valid leaf.
@@ -668,6 +748,7 @@ func (c *BtCursor) getCurrentBtreePage() (*BtreePage, error) {
 }
 
 // Delete deletes the row at the current cursor position
+// Automatically frees any overflow pages associated with the cell
 func (c *BtCursor) Delete() error {
 	if c.State != CursorValid {
 		return fmt.Errorf("cursor not in valid state")
@@ -675,6 +756,13 @@ func (c *BtCursor) Delete() error {
 
 	if c.CurrentHeader == nil || !c.CurrentHeader.IsLeaf {
 		return fmt.Errorf("cursor not positioned at leaf page")
+	}
+
+	// Free overflow pages if this cell has any
+	if c.CurrentCell != nil && c.CurrentCell.OverflowPage != 0 {
+		if err := c.FreeOverflowChain(c.CurrentCell.OverflowPage); err != nil {
+			return fmt.Errorf("failed to free overflow pages: %w", err)
+		}
 	}
 
 	// Mark page dirty BEFORE modification for journal support

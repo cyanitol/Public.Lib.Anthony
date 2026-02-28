@@ -28,6 +28,16 @@ func FreeListMaxLeafPages(pageSize int) int {
 	return (pageSize - FreeListTrunkHeaderSize) / 4
 }
 
+// pagerInternal interface for internal freelist operations.
+// This allows the freelist to call pager methods without acquiring locks
+// when already inside a pager method that holds the lock.
+type pagerInternal interface {
+	getLocked(pgno Pgno) (*DbPage, error)
+	writeLocked(page *DbPage) error
+	Put(page *DbPage)
+	PageSize() int
+}
+
 // FreeList manages free (unused) pages in the database.
 // It implements SQLite's free list format using a linked list of trunk pages,
 // where each trunk page contains pointers to leaf pages that are free.
@@ -43,7 +53,7 @@ func FreeListMaxLeafPages(pageSize int) int {
 // When freeing a page, we add it to the free list.
 type FreeList struct {
 	// Pager reference for reading/writing pages
-	pager *Pager
+	pager pagerInternal
 
 	// First trunk page number (0 if no free pages)
 	firstTrunk Pgno
@@ -121,7 +131,7 @@ func (fl *FreeList) Allocate() (Pgno, error) {
 // allocateFromDisk allocates a page from the on-disk free list.
 func (fl *FreeList) allocateFromDisk() (Pgno, error) {
 	// Read the first trunk page
-	trunkPage, err := fl.pager.Get(fl.firstTrunk)
+	trunkPage, err := fl.pager.getLocked(fl.firstTrunk)
 	if err != nil {
 		return 0, err
 	}
@@ -139,7 +149,7 @@ func (fl *FreeList) allocateFromDisk() (Pgno, error) {
 		allocatedPage = Pgno(binary.BigEndian.Uint32(trunkPage.Data[offset : offset+4]))
 
 		// Mark page as writable and update leaf count
-		if err := fl.pager.Write(trunkPage); err != nil {
+		if err := fl.pager.writeLocked(trunkPage); err != nil {
 			return 0, err
 		}
 		binary.BigEndian.PutUint32(trunkPage.Data[4:8], leafCount-1)
@@ -212,7 +222,7 @@ func (fl *FreeList) flushPending() error {
 		}
 
 		// Read current trunk page
-		trunkPage, err := fl.pager.Get(fl.firstTrunk)
+		trunkPage, err := fl.pager.getLocked(fl.firstTrunk)
 		if err != nil {
 			return err
 		}
@@ -221,7 +231,7 @@ func (fl *FreeList) flushPending() error {
 
 		if leafCount < maxLeaves {
 			// Add pending pages to this trunk
-			if err := fl.pager.Write(trunkPage); err != nil {
+			if err := fl.pager.writeLocked(trunkPage); err != nil {
 				fl.pager.Put(trunkPage)
 				return err
 			}
@@ -262,12 +272,12 @@ func (fl *FreeList) createNewTrunk() error {
 	fl.pendingFree = fl.pendingFree[:len(fl.pendingFree)-1]
 
 	// Read the page to initialize it as a trunk
-	trunkPage, err := fl.pager.Get(newTrunkPgno)
+	trunkPage, err := fl.pager.getLocked(newTrunkPgno)
 	if err != nil {
 		return err
 	}
 
-	if err := fl.pager.Write(trunkPage); err != nil {
+	if err := fl.pager.writeLocked(trunkPage); err != nil {
 		fl.pager.Put(trunkPage)
 		return err
 	}
@@ -314,7 +324,7 @@ func (fl *FreeList) ReadTrunk(trunkPgno Pgno) (nextTrunk Pgno, leaves []Pgno, er
 		return 0, nil, ErrInvalidTrunkPage
 	}
 
-	trunkPage, err := fl.pager.Get(trunkPgno)
+	trunkPage, err := fl.pager.getLocked(trunkPgno)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -348,7 +358,7 @@ func (fl *FreeList) Iterate(callback func(pgno Pgno) bool) error {
 	// Then iterate on-disk free list
 	trunkPgno := fl.firstTrunk
 	for trunkPgno != 0 {
-		trunkPage, err := fl.pager.Get(trunkPgno)
+		trunkPage, err := fl.pager.getLocked(trunkPgno)
 		if err != nil {
 			return err
 		}
@@ -391,7 +401,7 @@ func (fl *FreeList) Verify() error {
 		seen[trunkPgno] = true
 		count++ // Count the trunk page itself
 
-		trunkPage, err := fl.pager.Get(trunkPgno)
+		trunkPage, err := fl.pager.getLocked(trunkPgno)
 		if err != nil {
 			return err
 		}
@@ -470,7 +480,7 @@ func (fl *FreeList) Info() (FreeListInfo, error) {
 	for trunkPgno != 0 {
 		info.TrunkCount++
 
-		trunkPage, err := fl.pager.Get(trunkPgno)
+		trunkPage, err := fl.pager.getLocked(trunkPgno)
 		if err != nil {
 			return info, err
 		}

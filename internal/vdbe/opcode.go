@@ -209,6 +209,23 @@ const (
 	// Debugging/profiling opcodes
 	OpTrace      Opcode = 193 // Debug trace point
 	OpScanStatus Opcode = 194 // Scan status tracking
+
+	// Join operation opcodes
+	OpHashJoin   Opcode = 195 // Hash join operation
+	OpMergeJoin  Opcode = 196 // Merge join operation
+	OpBuildHash  Opcode = 197 // Build hash table for join
+	OpProbeHash  Opcode = 198 // Probe hash table for join
+
+	// Window function opcodes
+	OpAggStepWindow     Opcode = 199 // Step aggregate in window context
+	OpWindowRowNum      Opcode = 200 // ROW_NUMBER() window function
+	OpWindowRank        Opcode = 201 // RANK() window function
+	OpWindowDenseRank   Opcode = 202 // DENSE_RANK() window function
+	OpWindowNtile       Opcode = 203 // NTILE() window function
+	OpWindowLag         Opcode = 204 // LAG() window function
+	OpWindowLead        Opcode = 205 // LEAD() window function
+	OpWindowFirstValue  Opcode = 206 // FIRST_VALUE() window function
+	OpWindowLastValue   Opcode = 207 // LAST_VALUE() window function
 )
 
 // OpcodeNames maps opcodes to their string names for debugging.
@@ -357,9 +374,22 @@ var OpcodeNames = map[Opcode]string{
 	OpToBlob:        "ToBlob",
 	OpToNumeric:     "ToNumeric",
 	OpToInt:         "ToInt",
-	OpToReal:        "ToReal",
-	OpTrace:         "Trace",
-	OpScanStatus:    "ScanStatus",
+	OpToReal:            "ToReal",
+	OpTrace:             "Trace",
+	OpScanStatus:        "ScanStatus",
+	OpHashJoin:          "HashJoin",
+	OpMergeJoin:         "MergeJoin",
+	OpBuildHash:         "BuildHash",
+	OpProbeHash:         "ProbeHash",
+	OpAggStepWindow:     "AggStepWindow",
+	OpWindowRowNum:      "WindowRowNum",
+	OpWindowRank:        "WindowRank",
+	OpWindowDenseRank:   "WindowDenseRank",
+	OpWindowNtile:       "WindowNtile",
+	OpWindowLag:         "WindowLag",
+	OpWindowLead:        "WindowLead",
+	OpWindowFirstValue:  "WindowFirstValue",
+	OpWindowLastValue:   "WindowLastValue",
 }
 
 // String returns the string representation of an opcode.

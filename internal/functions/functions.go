@@ -84,6 +84,23 @@ type AggregateFunction interface {
 	Reset()
 }
 
+// WindowFunction is the interface for window SQL functions.
+// Window functions can access rows relative to the current row
+// and can have frame specifications (ROWS, RANGE, GROUPS).
+type WindowFunction interface {
+	Function
+
+	// Inverse removes a value from the window (for sliding frames)
+	// Only needed for aggregates in window context with sliding frames
+	Inverse(args []Value) error
+
+	// Value returns the current window function value
+	Value() (Value, error)
+
+	// Reset resets the window function state
+	Reset()
+}
+
 // ScalarFunc is a simple scalar function implementation.
 type ScalarFunc struct {
 	name    string
@@ -230,35 +247,139 @@ func (v *SimpleValue) Bytes() int {
 	}
 }
 
+// functionKey is used for function overloading by argument count.
+type functionKey struct {
+	name    string
+	numArgs int
+}
+
 // Registry holds all registered functions.
+// It supports function overloading by argument count and prioritizes
+// user-defined functions over built-in functions.
 type Registry struct {
-	functions map[string]Function
+	// Built-in functions indexed by name only (legacy)
+	builtins map[string]Function
+
+	// User-defined functions with overloading support
+	// Key includes both name and arg count for overloading
+	userFuncs map[functionKey]Function
+
+	// Variadic user functions (numArgs = -1)
+	// These are tried last during lookup
+	variadicUser map[string]Function
 }
 
 // NewRegistry creates a new function registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		functions: make(map[string]Function),
+		builtins:     make(map[string]Function),
+		userFuncs:    make(map[functionKey]Function),
+		variadicUser: make(map[string]Function),
 	}
 }
 
-// Register registers a function.
+// Register registers a built-in function.
+// This is used for standard SQLite functions.
 func (r *Registry) Register(fn Function) {
-	r.functions[fn.Name()] = fn
+	r.builtins[fn.Name()] = fn
+}
+
+// RegisterUser registers a user-defined function with overloading support.
+// numArgs should match fn.NumArgs() and is used for overloading.
+func (r *Registry) RegisterUser(fn Function, numArgs int) {
+	if numArgs < 0 {
+		// Variadic function
+		r.variadicUser[fn.Name()] = fn
+	} else {
+		// Fixed-arg function with overloading
+		key := functionKey{name: fn.Name(), numArgs: numArgs}
+		r.userFuncs[key] = fn
+	}
+}
+
+// Unregister removes a user-defined function.
+// Returns true if a function was removed.
+func (r *Registry) Unregister(name string, numArgs int) bool {
+	if numArgs < 0 {
+		if _, ok := r.variadicUser[name]; ok {
+			delete(r.variadicUser, name)
+			return true
+		}
+		return false
+	}
+
+	key := functionKey{name: name, numArgs: numArgs}
+	if _, ok := r.userFuncs[key]; ok {
+		delete(r.userFuncs, key)
+		return true
+	}
+	return false
 }
 
 // Lookup finds a function by name.
+// User-defined functions are checked before built-in functions.
+// For user functions, exact argument count match is preferred.
 func (r *Registry) Lookup(name string) (Function, bool) {
-	fn, ok := r.functions[name]
-	return fn, ok
+	// First check variadic user functions
+	if fn, ok := r.variadicUser[name]; ok {
+		return fn, true
+	}
+
+	// Then check built-in functions
+	if fn, ok := r.builtins[name]; ok {
+		return fn, true
+	}
+
+	return nil, false
+}
+
+// LookupWithArgs finds a function by name and argument count.
+// This supports function overloading for user-defined functions.
+// Lookup priority:
+//  1. User-defined function with exact arg count match
+//  2. User-defined variadic function
+//  3. Built-in function
+func (r *Registry) LookupWithArgs(name string, numArgs int) (Function, bool) {
+	// First try exact match in user functions
+	key := functionKey{name: name, numArgs: numArgs}
+	if fn, ok := r.userFuncs[key]; ok {
+		return fn, true
+	}
+
+	// Then try variadic user functions
+	if fn, ok := r.variadicUser[name]; ok {
+		return fn, true
+	}
+
+	// Finally fall back to built-in functions
+	if fn, ok := r.builtins[name]; ok {
+		return fn, true
+	}
+
+	return nil, false
 }
 
 // GetAllFunctions returns all registered functions.
 func (r *Registry) GetAllFunctions() []Function {
-	result := make([]Function, 0, len(r.functions))
-	for _, fn := range r.functions {
+	// Calculate total size
+	total := len(r.builtins) + len(r.userFuncs) + len(r.variadicUser)
+	result := make([]Function, 0, total)
+
+	// Add built-ins
+	for _, fn := range r.builtins {
 		result = append(result, fn)
 	}
+
+	// Add user functions
+	for _, fn := range r.userFuncs {
+		result = append(result, fn)
+	}
+
+	// Add variadic user functions
+	for _, fn := range r.variadicUser {
+		result = append(result, fn)
+	}
+
 	return result
 }
 
@@ -277,6 +398,12 @@ func DefaultRegistry() *Registry {
 
 	// Register math functions
 	RegisterMathFunctions(r)
+
+	// Register JSON functions
+	RegisterJSONFunctions(r)
+
+	// Register window functions
+	RegisterWindowFunctions(r)
 
 	return r
 }
