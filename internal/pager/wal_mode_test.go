@@ -119,7 +119,7 @@ func TestWALModeWriteRead(t *testing.T) {
 
 // TestWALModeCheckpoint tests checkpointing in WAL mode
 func TestWALModeCheckpoint(t *testing.T) {
-	t.Skip("WAL mode not fully implemented - pager doesn't write to WAL during commit")
+	// WAL mode now implemented!
 
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")

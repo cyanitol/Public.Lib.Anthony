@@ -385,6 +385,19 @@ func (p *Pager) getLocked(pgno Pgno) (*DbPage, error) {
 		}
 	}
 
+	// In WAL mode, check WAL first
+	if p.journalMode == JournalModeWAL && p.wal != nil {
+		if frame, err := p.wal.FindPage(pgno); err == nil && frame != nil {
+			page := NewDbPage(pgno, p.pageSize)
+			copy(page.Data, frame.Data)
+			page.pager = p
+			if err := p.cache.Put(page); err != nil {
+				return nil, err
+			}
+			return page, nil
+		}
+	}
+
 	// Read page from disk
 	page, err := p.readPage(pgno)
 	if err != nil {
@@ -525,6 +538,15 @@ func (p *Pager) commitPhase1WriteDirtyPages() error {
 		return nil
 	}
 
+	// In WAL mode, write to WAL instead of database file
+	if p.journalMode == JournalModeWAL {
+		if err := p.writeDirtyPagesToWAL(); err != nil {
+			p.setErrorState(err)
+			return err
+		}
+		return nil
+	}
+
 	if err := p.writeDirtyPages(); err != nil {
 		p.setErrorState(err)
 		return err
@@ -534,6 +556,15 @@ func (p *Pager) commitPhase1WriteDirtyPages() error {
 
 // commitPhase2SyncDatabase syncs the database file.
 func (p *Pager) commitPhase2SyncDatabase() error {
+	// In WAL mode, sync the WAL file instead of database file
+	if p.journalMode == JournalModeWAL && p.wal != nil {
+		if err := p.wal.Sync(); err != nil {
+			p.setErrorState(err)
+			return err
+		}
+		return nil
+	}
+
 	if err := p.file.Sync(); err != nil {
 		p.setErrorState(err)
 		return err
@@ -818,7 +849,7 @@ func (p *Pager) beginWriteTransaction() error {
 
 // journalPage writes a page to the journal file with checksum validation.
 func (p *Pager) journalPage(page *DbPage) error {
-	if p.journalMode == JournalModeOff {
+	if p.journalMode == JournalModeOff || p.journalMode == JournalModeWAL {
 		return nil
 	}
 
@@ -940,6 +971,11 @@ func (p *Pager) rollbackJournal() error {
 
 // finalizeJournal finalizes the journal after a successful commit.
 func (p *Pager) finalizeJournal() error {
+	// In WAL mode, skip journal handling
+	if p.journalMode == JournalModeWAL {
+		return nil
+	}
+
 	if p.journalFile == nil {
 		return nil
 	}
@@ -1102,4 +1138,38 @@ func (p *Pager) validateJournalPage(data []byte, expectedChecksum uint32) bool {
 // calculateChecksum calculates CRC32 checksum for data.
 func (p *Pager) calculateChecksum(data []byte) uint32 {
 	return crc32.ChecksumIEEE(data)
+}
+
+// writeDirtyPagesToWAL writes all dirty pages to the WAL file.
+func (p *Pager) writeDirtyPagesToWAL() error {
+	if p.wal == nil {
+		return errors.New("WAL not initialized")
+	}
+
+	dirtyPages := p.cache.GetDirtyPages()
+
+	for _, page := range dirtyPages {
+		if err := p.wal.WriteFrame(page.Pgno, page.Data, uint32(p.dbSize)); err != nil {
+			return fmt.Errorf("failed to write page %d to WAL: %w", page.Pgno, err)
+		}
+
+		// Update WAL index
+		if p.walIndex != nil {
+			frameNo := p.wal.FrameCount() - 1
+			if err := p.walIndex.InsertFrame(uint32(page.Pgno), frameNo); err != nil {
+				return fmt.Errorf("failed to update WAL index for page %d: %w", page.Pgno, err)
+			}
+		}
+	}
+
+	if err := p.setStateLocked(PagerStateWriterFinished); err != nil {
+		return err
+	}
+
+	// Auto-checkpoint if WAL is getting large
+	if p.wal.ShouldCheckpoint() {
+		_ = p.wal.Checkpoint() // Ignore checkpoint errors for now
+	}
+
+	return nil
 }

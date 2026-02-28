@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/pager"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
@@ -431,18 +432,26 @@ func (s *Stmt) compilePragmaJournalMode(vm *vdbe.VDBE, stmt *parser.PragmaStmt) 
 			mode = strings.ToUpper(ident.Name)
 		}
 
-		// Validate mode (DELETE, TRUNCATE, PERSIST, MEMORY, WAL, OFF)
-		validModes := map[string]bool{
-			"DELETE":   true,
-			"TRUNCATE": true,
-			"PERSIST":  true,
-			"MEMORY":   true,
-			"WAL":      true,
-			"OFF":      true,
+		// Map string mode to pager journal mode constant
+		modeMap := map[string]int{
+			"DELETE":   0, // JournalModeDelete
+			"TRUNCATE": 3, // JournalModeTruncate
+			"PERSIST":  1, // JournalModePersist
+			"MEMORY":   4, // JournalModeMemory
+			"WAL":      5, // JournalModeWAL
+			"OFF":      2, // JournalModeOff
 		}
 
-		if !validModes[mode] {
+		pagerMode, valid := modeMap[mode]
+		if !valid {
 			return nil, fmt.Errorf("invalid journal mode: %s", mode)
+		}
+
+		// Actually set the mode in the pager if it's a concrete pager (not in-memory)
+		if concretePager, ok := s.conn.pager.(*pager.Pager); ok {
+			if err := concretePager.SetJournalMode(pagerMode); err != nil {
+				return nil, fmt.Errorf("failed to set journal mode: %w", err)
+			}
 		}
 
 		// Store the setting in the connection
@@ -462,8 +471,16 @@ func (s *Stmt) compilePragmaJournalMode(vm *vdbe.VDBE, stmt *parser.PragmaStmt) 
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 
-	// Return current value (default is DELETE if not set)
+	// Get current mode from pager if available
 	mode := s.conn.journalMode
+	if concretePager, ok := s.conn.pager.(*pager.Pager); ok {
+		pagerModeInt := concretePager.GetJournalMode()
+		modeNames := []string{"delete", "persist", "off", "truncate", "memory", "wal"}
+		if pagerModeInt >= 0 && pagerModeInt < len(modeNames) {
+			mode = modeNames[pagerModeInt]
+		}
+	}
+
 	if mode == "" {
 		mode = "delete"
 	} else {
