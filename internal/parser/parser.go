@@ -2964,7 +2964,7 @@ func (p *Parser) parseCastExpr() (Expression, error) {
 	if !p.match(TK_AS) {
 		return nil, p.error("expected AS in CAST")
 	}
-	if !p.check(TK_ID) {
+	if !typeNameTokens[p.peek().Type] {
 		return nil, p.error("expected type name")
 	}
 	typeName := p.parseTypeName()

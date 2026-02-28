@@ -555,3 +555,82 @@ func TestFabsHelper(t *testing.T) {
 }
 
 // filterIgnoredChars is tested through unhexFunc
+
+// TestLengthFuncEdgeCases tests length function with various types
+func TestLengthFuncEdgeCases(t *testing.T) {
+	// Test with float
+	result, err := lengthFunc([]Value{NewFloatValue(3.14)})
+	if err != nil {
+		t.Errorf("lengthFunc() with float error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("lengthFunc() with float should not return NULL")
+	}
+
+	// Test with integer
+	result, err = lengthFunc([]Value{NewIntValue(42)})
+	if err != nil {
+		t.Errorf("lengthFunc() with integer error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("lengthFunc() with integer should not return NULL")
+	}
+}
+
+// TestSubstrFuncBlobEdgeCases tests substr with blob edge cases
+func TestSubstrFuncBlobEdgeCases(t *testing.T) {
+	// Test with blob and various positions
+	blob := NewBlobValue([]byte{1, 2, 3, 4, 5})
+
+	result, err := substrFunc([]Value{blob, NewIntValue(2), NewIntValue(3)})
+	if err != nil {
+		t.Errorf("substrFunc() error = %v", err)
+	}
+	if result.Type() != TypeBlob {
+		t.Errorf("substrFunc() on blob should return blob, got %v", result.Type())
+	}
+}
+
+// TestTrimFuncEdgeCases tests trim with custom characters
+func TestTrimFuncEdgeCases(t *testing.T) {
+	// Test with second argument (chars to trim)
+	result, err := trimFunc([]Value{NewTextValue("xxhelloxx"), NewTextValue("x")})
+	if err != nil {
+		t.Errorf("trimFunc() error = %v", err)
+	}
+	if result.AsString() != "hello" {
+		t.Errorf("trimFunc() = %q, want 'hello'", result.AsString())
+	}
+}
+
+// TestQuoteFuncBlob tests quote with blob
+func TestQuoteFuncBlob(t *testing.T) {
+	result, err := quoteFunc([]Value{NewBlobValue([]byte{65, 66, 67})})
+	if err != nil {
+		t.Errorf("quoteFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("quoteFunc() should not return NULL for blob")
+	}
+}
+
+// TestCompareValuesEdgeCases tests compareValues with mixed types
+func TestCompareValuesEdgeCases(t *testing.T) {
+	// Test through nullif which uses compareValues
+	result, err := nullifFunc([]Value{NewIntValue(1), NewIntValue(2)})
+	if err != nil {
+		t.Errorf("nullifFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("nullifFunc() should not return NULL when values differ")
+	}
+
+	// Test with equal values
+	result, err = nullifFunc([]Value{NewIntValue(5), NewIntValue(5)})
+	if err != nil {
+		t.Errorf("nullifFunc() error = %v", err)
+	}
+	if !result.IsNull() {
+		t.Error("nullifFunc() should return NULL when values are equal")
+	}
+}

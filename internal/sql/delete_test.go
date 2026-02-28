@@ -1,4 +1,5 @@
 package sql
+import "strings"
 
 import (
 	"testing"
@@ -89,5 +90,54 @@ func TestEstimateDeleteCost(t *testing.T) {
 	cost := EstimateDeleteCost(stmt, 1000)
 	if cost <= 0 {
 		t.Error("Cost should be > 0")
+	}
+}
+
+// Test ValidateDelete comprehensive
+func TestValidateDeleteComprehensive(t *testing.T) {
+	tests := []struct {
+		name    string
+		stmt    *DeleteStmt
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid_delete",
+			stmt: &DeleteStmt{
+				Table: "users",
+			},
+			wantErr: false,
+		},
+		{
+			name:    "nil_stmt",
+			stmt:    nil,
+			wantErr: true,
+			errMsg:  "nil delete statement",
+		},
+		{
+			name: "empty_table",
+			stmt: &DeleteStmt{
+				Table: "",
+			},
+			wantErr: true,
+			errMsg:  "table name is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateDelete(tt.stmt)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateDelete() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr && err != nil && tt.errMsg != "" {
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("ValidateDelete() error = %v, want substring %q", err, tt.errMsg)
+				}
+			}
+		})
 	}
 }

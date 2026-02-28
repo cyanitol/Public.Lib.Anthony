@@ -353,7 +353,7 @@ func TestSharedDatabaseState(t *testing.T) {
 }
 
 func TestReleaseStateDecreasesRefCount(t *testing.T) {
-	dbFile := "test_release_state.db"
+	dbFile := "test_driver_release_state.db"
 	defer os.Remove(dbFile)
 
 	d := &Driver{}

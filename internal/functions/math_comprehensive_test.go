@@ -772,3 +772,218 @@ func TestRoundToIntValue(t *testing.T) {
 		}
 	}
 }
+
+// Test NULL handling for all math functions
+func TestMathFunctionsNullHandling(t *testing.T) {
+	tests := []struct {
+		name string
+		fn   func([]Value) (Value, error)
+		args []Value
+	}{
+		{"ceil", ceilFunc, []Value{NewNullValue()}},
+		{"floor", floorFunc, []Value{NewNullValue()}},
+		{"exp", expFunc, []Value{NewNullValue()}},
+		{"log10", log10Func, []Value{NewNullValue()}},
+		{"log2", log2Func, []Value{NewNullValue()}},
+		{"sin", sinFunc, []Value{NewNullValue()}},
+		{"cos", cosFunc, []Value{NewNullValue()}},
+		{"tan", tanFunc, []Value{NewNullValue()}},
+		{"atan", atanFunc, []Value{NewNullValue()}},
+		{"sinh", sinhFunc, []Value{NewNullValue()}},
+		{"cosh", coshFunc, []Value{NewNullValue()}},
+		{"tanh", tanhFunc, []Value{NewNullValue()}},
+		{"asinh", asinhFunc, []Value{NewNullValue()}},
+		{"power", powerFunc, []Value{NewNullValue(), NewFloatValue(2.0)}},
+		{"power_null_exp", powerFunc, []Value{NewFloatValue(2.0), NewNullValue()}},
+		{"atan2", atan2Func, []Value{NewNullValue(), NewFloatValue(1.0)}},
+		{"atan2_null_x", atan2Func, []Value{NewFloatValue(1.0), NewNullValue()}},
+		{"radians", radiansFunc, []Value{NewNullValue()}},
+		{"degrees", degreesFunc, []Value{NewNullValue()}},
+		{"mod", modFunc, []Value{NewNullValue(), NewIntValue(5)}},
+		{"mod_null_y", modFunc, []Value{NewIntValue(10), NewNullValue()}},
+		{"sign_null", signFunc, []Value{NewNullValue()}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := tt.fn(tt.args)
+			if err != nil {
+				t.Errorf("%s error: %v", tt.name, err)
+				return
+			}
+			if !result.IsNull() {
+				t.Errorf("%s should return NULL for null input, got %v", tt.name, result)
+			}
+		})
+	}
+}
+
+// Test edge cases for log functions with invalid inputs
+func TestLogFunctionsInvalidInputs(t *testing.T) {
+	tests := []struct {
+		name  string
+		fn    func([]Value) (Value, error)
+		input Value
+	}{
+		{"log10_zero", log10Func, NewFloatValue(0.0)},
+		{"log10_negative", log10Func, NewFloatValue(-1.0)},
+		{"log2_zero", log2Func, NewFloatValue(0.0)},
+		{"log2_negative", log2Func, NewFloatValue(-1.0)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := tt.fn([]Value{tt.input})
+			if err != nil {
+				t.Errorf("%s error: %v", tt.name, err)
+				return
+			}
+			if !math.IsNaN(result.AsFloat64()) {
+				t.Errorf("%s should return NaN for invalid input, got %v", tt.name, result.AsFloat64())
+			}
+		})
+	}
+}
+
+// Test atanh edge cases for values at boundaries
+func TestAtanhBoundaries(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected float64
+		isInf    bool
+	}{
+		{NewFloatValue(0.9999), 0.0, false}, // Valid value
+		{NewFloatValue(2.0), 0.0, true},     // Out of range
+	}
+
+	for _, tt := range tests {
+		result, err := atanhFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("atanhFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if tt.isInf {
+			if !math.IsNaN(result.AsFloat64()) && !math.IsInf(result.AsFloat64(), 0) {
+				t.Errorf("atanhFunc(%v) should be NaN or Inf for out of range value", tt.input)
+			}
+		}
+	}
+}
+
+// TestAbsFuncText tests abs with text value
+func TestAbsFuncText(t *testing.T) {
+	result, err := absFunc([]Value{NewTextValue("-42")})
+	if err != nil {
+		t.Errorf("absFunc() with text error: %v", err)
+	}
+	if result.AsInt64() != 42 {
+		t.Errorf("absFunc('-42') = %d, want 42", result.AsInt64())
+	}
+}
+
+// TestRoundFuncText tests round with text value
+func TestRoundFuncText(t *testing.T) {
+	result, err := roundFunc([]Value{NewTextValue("5.5")})
+	if err != nil {
+		t.Errorf("roundFunc() with text error: %v", err)
+	}
+	if result.AsFloat64() != 6.0 {
+		t.Errorf("roundFunc('5.5') = %f, want 6.0", result.AsFloat64())
+	}
+}
+
+// TestSqrtFuncText tests sqrt with text value
+func TestSqrtFuncText(t *testing.T) {
+	result, err := sqrtFunc([]Value{NewTextValue("4")})
+	if err != nil {
+		t.Errorf("sqrtFunc() with text error: %v", err)
+	}
+	if result.AsFloat64() != 2.0 {
+		t.Errorf("sqrtFunc('4') = %f, want 2.0", result.AsFloat64())
+	}
+}
+
+// TestLnFuncText tests ln with text value
+func TestLnFuncText(t *testing.T) {
+	result, err := lnFunc([]Value{NewTextValue("2.718281828")})
+	if err != nil {
+		t.Errorf("lnFunc() with text error: %v", err)
+	}
+	expected := math.Log(2.718281828)
+	if math.Abs(result.AsFloat64()-expected) > 0.01 {
+		t.Errorf("lnFunc('2.718281828') = %f, want %f", result.AsFloat64(), expected)
+	}
+}
+
+// TestTrigFuncText tests trig functions with text
+func TestTrigFuncText(t *testing.T) {
+	result, err := asinFunc([]Value{NewTextValue("0.5")})
+	if err != nil {
+		t.Errorf("asinFunc() with text error: %v", err)
+	}
+	if result.Type() != TypeFloat {
+		t.Error("asinFunc('0.5') should return float")
+	}
+
+	result, err = acosFunc([]Value{NewTextValue("0.5")})
+	if err != nil {
+		t.Errorf("acosFunc() with text error: %v", err)
+	}
+	if result.Type() != TypeFloat {
+		t.Error("acosFunc('0.5') should return float")
+	}
+
+	result, err = acoshFunc([]Value{NewTextValue("2")})
+	if err != nil {
+		t.Errorf("acoshFunc() with text error: %v", err)
+	}
+	if result.Type() != TypeFloat {
+		t.Error("acoshFunc('2') should return float")
+	}
+
+	result, err = atanhFunc([]Value{NewTextValue("0.5")})
+	if err != nil {
+		t.Errorf("atanhFunc() with text error: %v", err)
+	}
+	if result.Type() != TypeFloat {
+		t.Error("atanhFunc('0.5') should return float")
+	}
+}
+
+// TestRandomBlobFuncZero tests randomblob with zero (becomes 1)
+func TestRandomBlobFuncZero(t *testing.T) {
+	result, err := randomblobFunc([]Value{NewIntValue(0)})
+	if err != nil {
+		t.Errorf("randomblobFunc(0) error: %v", err)
+	}
+	if result.Type() != TypeBlob {
+		t.Error("randomblobFunc(0) should return blob")
+	}
+	blob := result.AsBlob()
+	if len(blob) != 1 {
+		t.Errorf("randomblobFunc(0) = blob of size %d, want 1", len(blob))
+	}
+}
+
+// TestRandomFuncError tests random function error path
+func TestRandomFuncError(t *testing.T) {
+	// Random function takes no args, just test it executes
+	result, err := randomFunc([]Value{})
+	if err != nil {
+		t.Errorf("randomFunc() error: %v", err)
+	}
+	if result.Type() != TypeInteger {
+		t.Error("randomFunc() should return integer")
+	}
+}
+
+// TestRoundParsePrecisionText tests roundParsePrecision with text precision
+func TestRoundParsePrecisionText(t *testing.T) {
+	_, ok, err := roundParsePrecision([]Value{NewFloatValue(5.5), NewTextValue("2")})
+	if err != nil {
+		t.Errorf("roundParsePrecision() with text precision error: %v", err)
+	}
+	if !ok {
+		t.Error("roundParsePrecision() with text precision should succeed")
+	}
+}

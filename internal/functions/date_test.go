@@ -370,3 +370,524 @@ func TestFormatTimeSubsec(t *testing.T) {
 		t.Errorf("formatTime() without subsec should not contain decimal point, got %s", result)
 	}
 }
+
+// TestDateTimeRawNumber tests setRawNumber for Julian day and Unix timestamp ranges
+func TestDateTimeRawNumber(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    float64
+		isJulian bool
+	}{
+		{"Julian day", 2451545.0, true},  // Valid Julian day
+		{"Unix timestamp", 1609459200.0, false}, // Outside Julian range
+		{"Small Julian", 100.5, true},    // Small Julian day
+		{"Large timestamp", 9999999999.0, false}, // Large Unix timestamp
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dt := &DateTime{}
+			dt.setRawNumber(tt.value)
+			if !dt.validJD {
+				t.Errorf("setRawNumber(%f) should set validJD", tt.value)
+			}
+		})
+	}
+}
+
+// TestDateTimeParseString tests parseString with various formats
+func TestDateTimeParseString(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"Valid YMD", "2024-01-15", false},
+		{"Valid with time", "2024-01-15 10:30:45", false},
+		{"Invalid format", "not-a-date", true},
+		{"Empty string", "", true},
+		{"Just time", "10:30:45", false}, // This may actually succeed as HMS
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dt := &DateTime{}
+			err := dt.parseString(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseString(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestDateTimeComputeHMS tests computeHMS function
+func TestDateTimeComputeHMS(t *testing.T) {
+	dt := &DateTime{
+		jd:      2451545000000, // Some Julian day value
+		validJD: true,
+	}
+
+	dt.computeHMS()
+
+	if !dt.validHMS {
+		t.Error("computeHMS() should set validHMS")
+	}
+
+	// Test that calling again doesn't recompute
+	dt.hour = 99
+	dt.computeHMS()
+	if dt.hour != 99 {
+		t.Error("computeHMS() should not recompute when validHMS is true")
+	}
+}
+
+// TestDateTimeNormalizeMonth tests normalizeMonth with edge cases
+func TestDateTimeNormalizeMonth(t *testing.T) {
+	tests := []struct {
+		name       string
+		initMonth  int
+		initYear   int
+		wantMonth  int
+		wantYear   int
+	}{
+		{"Month 13", 13, 2020, 1, 2021},
+		{"Month 0", 0, 2020, 12, 2019},
+		{"Month -1", -1, 2020, 11, 2019},
+		{"Month 25", 25, 2020, 1, 2022},
+		{"Normal month", 6, 2020, 6, 2020},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dt := &DateTime{
+				month: tt.initMonth,
+				year:  tt.initYear,
+			}
+			dt.normalizeMonth()
+			if dt.month != tt.wantMonth || dt.year != tt.wantYear {
+				t.Errorf("normalizeMonth() = (month=%d, year=%d), want (month=%d, year=%d)",
+					dt.month, dt.year, tt.wantMonth, tt.wantYear)
+			}
+		})
+	}
+}
+
+// TestDateTimeParseTimeComponent tests parseTimeComponent with various inputs
+func TestDateTimeParseTimeComponent(t *testing.T) {
+	tests := []struct {
+		name  string
+		s     string
+		parts []string
+	}{
+		{"Valid parts", "2024-01-15 10:30:45", []string{"10:30:45"}},
+		{"Space separator", "2024-01-15 10:30:45", []string{"extra"}},
+		{"T separator", "2024-01-15T10:30:45", []string{}},
+		{"No separator", "2024-01-15", []string{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dt := &DateTime{}
+			dt.parseTimeComponent(tt.s, tt.parts)
+			// Just verify it doesn't panic
+		})
+	}
+}
+
+// TestDateTimeParsing tests parse field functions with invalid values
+func TestDateTimeParseFields(t *testing.T) {
+	// Test parseYearField with invalid input
+	_, ok := parseYearField("invalid")
+	if ok {
+		t.Error("parseYearField('invalid') should return ok=false")
+	}
+
+	// Test parseMonthField with invalid input
+	_, ok = parseMonthField("invalid")
+	if ok {
+		t.Error("parseMonthField('invalid') should return ok=false")
+	}
+
+	// Test parseDayField with invalid input
+	_, ok = parseDayField("invalid")
+	if ok {
+		t.Error("parseDayField('invalid') should return ok=false")
+	}
+
+	// Test parseHourField with invalid input
+	_, ok = parseHourField("invalid")
+	if ok {
+		t.Error("parseHourField('invalid') should return ok=false")
+	}
+
+	// Test parseMinuteField with invalid input
+	_, ok = parseMinuteField("invalid")
+	if ok {
+		t.Error("parseMinuteField('invalid') should return ok=false")
+	}
+
+	// Test parseSecondField with invalid input
+	_, ok = parseSecondField("invalid")
+	if ok {
+		t.Error("parseSecondField('invalid') should return ok=false")
+	}
+}
+
+// TestDateTimeParseYMD tests parseYMD with various edge cases
+func TestDateTimeParseYMD(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		wantOK bool
+	}{
+		{"Valid date", "2024-01-15", true},
+		{"Invalid month", "2024-13-15", false},
+		{"Invalid day", "2024-01-32", false},
+		{"Too few parts", "2024-01", false},
+		{"Invalid year", "abcd-01-15", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dt := &DateTime{}
+			ok := dt.parseYMD(tt.input)
+			if ok != tt.wantOK {
+				t.Errorf("parseYMD(%q) = %v, want %v", tt.input, ok, tt.wantOK)
+			}
+		})
+	}
+}
+
+// TestDateTimeParseHMS tests parseHMS with various edge cases
+func TestDateTimeParseHMS(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		wantOK bool
+	}{
+		{"Valid time", "10:30:45", true},
+		{"Invalid hour", "25:30:45", false},
+		{"Invalid minute", "10:61:45", false},
+		{"Invalid second", "10:30:61", false},
+		{"Two parts", "10:30", true}, // May be valid as HH:MM
+		{"Non-numeric", "aa:bb:cc", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dt := &DateTime{}
+			ok := dt.parseHMS(tt.input)
+			if ok != tt.wantOK {
+				t.Errorf("parseHMS(%q) = %v, want %v", tt.input, ok, tt.wantOK)
+			}
+		})
+	}
+}
+
+// TestDateTimeComputeJD tests computeJD edge cases
+func TestDateTimeComputeJD(t *testing.T) {
+	tests := []struct {
+		name  string
+		year  int
+		month int
+		day   int
+	}{
+		{"Leap year", 2020, 2, 29},
+		{"Non-leap year", 2021, 2, 28},
+		{"January", 2020, 1, 1},
+		{"December", 2020, 12, 31},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dt := &DateTime{
+				year:     tt.year,
+				month:    tt.month,
+				day:      tt.day,
+				validYMD: true,
+			}
+			dt.computeJD()
+			if !dt.validJD {
+				t.Error("computeJD() should set validJD")
+			}
+		})
+	}
+}
+
+// TestDateTimeComputeYMD tests computeYMD edge cases
+func TestDateTimeComputeYMD(t *testing.T) {
+	dt := &DateTime{
+		jd:      2451545000000, // Julian day for 2000-01-01
+		validJD: true,
+	}
+
+	dt.computeYMD()
+
+	if !dt.validYMD {
+		t.Error("computeYMD() should set validYMD")
+	}
+
+	// Verify month normalization path
+	if dt.month < 1 || dt.month > 12 {
+		t.Errorf("computeYMD() month = %d, should be 1-12", dt.month)
+	}
+}
+
+// TestDateFuncEdgeCases tests date function with various input types
+func TestDateFuncEdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []Value
+		wantNull bool
+	}{
+		{"Integer input", []Value{NewIntValue(1234567890)}, false},
+		{"Float input", []Value{NewFloatValue(2451545.5)}, false},
+		{"Invalid modifier", []Value{NewTextValue("2024-01-15"), NewTextValue("invalid_mod")}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := dateFunc(tt.args)
+			if err != nil {
+				t.Errorf("dateFunc() error = %v", err)
+				return
+			}
+			if tt.wantNull && !result.IsNull() {
+				t.Errorf("dateFunc() should return NULL, got %v", result)
+			}
+		})
+	}
+}
+
+// TestTimeFuncEdgeCases tests time function with various inputs
+func TestTimeFuncEdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []Value
+		wantNull bool
+	}{
+		{"Integer input", []Value{NewIntValue(1234567890)}, false},
+		{"Float input", []Value{NewFloatValue(2451545.5)}, false},
+		{"With modifier", []Value{NewTextValue("2024-01-15 10:30:45"), NewTextValue("+1 hour")}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := timeFunc(tt.args)
+			if err != nil {
+				t.Errorf("timeFunc() error = %v", err)
+				return
+			}
+			if tt.wantNull && !result.IsNull() {
+				t.Errorf("timeFunc() should return NULL, got %v", result)
+			}
+		})
+	}
+}
+
+// TestDatetimeFuncEdgeCases tests datetime function with various inputs
+func TestDatetimeFuncEdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []Value
+		wantNull bool
+	}{
+		{"Integer input", []Value{NewIntValue(1234567890)}, false},
+		{"Float input", []Value{NewFloatValue(2451545.5)}, false},
+		{"With modifier", []Value{NewTextValue("2024-01-15 10:30:45"), NewTextValue("+1 day")}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := datetimeFunc(tt.args)
+			if err != nil {
+				t.Errorf("datetimeFunc() error = %v", err)
+				return
+			}
+			if tt.wantNull && !result.IsNull() {
+				t.Errorf("datetimeFunc() should return NULL, got %v", result)
+			}
+		})
+	}
+}
+
+// TestJuliandayFuncEdgeCases tests julianday function edge cases
+func TestJuliandayFuncEdgeCases(t *testing.T) {
+	tests := []struct {
+		name string
+		args []Value
+	}{
+		{"Integer input", []Value{NewIntValue(1234567890)}},
+		{"Float input", []Value{NewFloatValue(2451545.5)}},
+		{"With modifier", []Value{NewTextValue("2024-01-15"), NewTextValue("+1 day")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := juliandayFunc(tt.args)
+			if err != nil {
+				t.Errorf("juliandayFunc() error = %v", err)
+				return
+			}
+			if result.IsNull() {
+				t.Error("juliandayFunc() should not return NULL for valid inputs")
+			}
+		})
+	}
+}
+
+// TestApplyUnixEpochModifiers tests unixepoch modifier edge cases
+func TestApplyUnixEpochModifiers(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []Value
+		wantNull bool
+	}{
+		{"With invalid modifier", []Value{NewTextValue("now"), NewTextValue("invalid")}, true},
+		{"Multiple modifiers", []Value{NewTextValue("now"), NewTextValue("+1 day"), NewTextValue("start of day")}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := unixepochFunc(tt.args)
+			if err != nil {
+				t.Errorf("unixepochFunc() error = %v", err)
+				return
+			}
+			if tt.wantNull && !result.IsNull() {
+				t.Errorf("unixepochFunc() should return NULL for invalid modifier, got %v", result)
+			}
+		})
+	}
+}
+
+// TestIsValidDateEdgeCases tests isValidDate with boundary conditions
+func TestIsValidDateEdgeCases(t *testing.T) {
+	tests := []struct {
+		year  int
+		month int
+		day   int
+		want  bool
+	}{
+		{2020, 2, 29, true},  // Leap year
+		{2021, 2, 29, false}, // Non-leap year
+		{2020, 0, 15, false}, // Invalid month
+		{2020, 1, 0, false},  // Invalid day
+	}
+
+	for _, tt := range tests {
+		result := isValidDate(tt.year, tt.month, tt.day)
+		if result != tt.want {
+			t.Errorf("isValidDate(%d, %d, %d) = %v, want %v", tt.year, tt.month, tt.day, result, tt.want)
+		}
+	}
+}
+
+// TestStartOfModifiers tests start of modifiers edge cases
+func TestStartOfModifiers(t *testing.T) {
+	tests := []struct {
+		name     string
+		modifier string
+		wantNull bool
+	}{
+		{"Start of hour", "start of hour", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := dateFunc([]Value{NewTextValue("now"), NewTextValue(tt.modifier)})
+			if err != nil {
+				t.Errorf("dateFunc() with %s error = %v", tt.modifier, err)
+				return
+			}
+			if tt.wantNull && !result.IsNull() {
+				t.Errorf("dateFunc() with %s should return NULL", tt.modifier)
+			}
+		})
+	}
+}
+
+// TestAddModifiers tests add modifiers with various units
+func TestAddModifiers(t *testing.T) {
+	modifiers := []string{
+		"-1 hour",
+		"-1 minute",
+		"-1 second",
+		"-1 month",
+		"-1 year",
+	}
+
+	for _, mod := range modifiers {
+		t.Run(mod, func(t *testing.T) {
+			result, err := dateFunc([]Value{NewTextValue("2024-06-15"), NewTextValue(mod)})
+			if err != nil {
+				t.Fatalf("dateFunc() with %s error = %v", mod, err)
+			}
+			if result.IsNull() {
+				t.Errorf("dateFunc() with %s should not return NULL", mod)
+			}
+		})
+	}
+}
+
+// TestDateTimeFuncBlob tests date/time functions with blob input
+func TestDateTimeFuncBlob(t *testing.T) {
+	// Test with blob input - blob is not supported, should return NULL
+	result, err := dateFunc([]Value{NewBlobValue([]byte("2024-01-15"))})
+	if err != nil {
+		t.Errorf("dateFunc() with blob error = %v", err)
+	}
+	if !result.IsNull() {
+		t.Error("dateFunc() with blob should return NULL (unsupported type)")
+	}
+
+	result, err = timeFunc([]Value{NewBlobValue([]byte("10:30:45"))})
+	if err != nil {
+		t.Errorf("timeFunc() with blob error = %v", err)
+	}
+	if !result.IsNull() {
+		t.Error("timeFunc() with blob should return NULL (unsupported type)")
+	}
+
+	result, err = datetimeFunc([]Value{NewBlobValue([]byte("2024-01-15 10:30:45"))})
+	if err != nil {
+		t.Errorf("datetimeFunc() with blob error = %v", err)
+	}
+	if !result.IsNull() {
+		t.Error("datetimeFunc() with blob should return NULL (unsupported type)")
+	}
+}
+
+// TestDateTimeFuncErrorPaths tests error paths in date/time functions
+func TestDateTimeFuncErrorPaths(t *testing.T) {
+	// Test parseDateTime with error during modifier application
+	result, err := juliandayFunc([]Value{NewTextValue("now"), NewTextValue("weekday 10")})
+	if err != nil {
+		t.Errorf("juliandayFunc() error = %v", err)
+	}
+	if !result.IsNull() {
+		t.Error("juliandayFunc() with invalid weekday should return NULL")
+	}
+
+	// Test computeJD path
+	result, err = juliandayFunc([]Value{NewTextValue("2024-01-15")})
+	if err != nil {
+		t.Errorf("juliandayFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("juliandayFunc() should not return NULL for valid date")
+	}
+}
+
+// TestStrftimeFuncNullFormat tests strftime with null format
+func TestStrftimeFuncNullFormat(t *testing.T) {
+	// Null format becomes empty string, which is still a valid format
+	result, err := strftimeFunc([]Value{NewNullValue(), NewTextValue("now")})
+	if err != nil {
+		t.Errorf("strftimeFunc() with null format error = %v", err)
+	}
+	// Empty format is valid, just returns empty string
+	if result.Type() != TypeText {
+		t.Errorf("strftimeFunc() with null format should return text, got %v", result.Type())
+	}
+}

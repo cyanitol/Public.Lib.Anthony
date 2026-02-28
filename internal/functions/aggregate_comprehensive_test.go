@@ -486,3 +486,23 @@ func TestIsInf(t *testing.T) {
 		})
 	}
 }
+
+// TestSumFuncIntegerOverflow tests SumFunc.addInteger overflow handling
+func TestSumFuncIntegerOverflow(t *testing.T) {
+	f := &SumFunc{hasValue: true}
+
+	// Test positive overflow
+	f.intSum = math.MaxInt64
+	f.addInteger(1)
+	if !f.isFloat {
+		t.Error("addInteger() should convert to float on positive overflow")
+	}
+
+	// Reset and test negative overflow
+	f = &SumFunc{hasValue: true}
+	f.intSum = math.MinInt64
+	f.addInteger(-1)
+	if !f.isFloat {
+		t.Error("addInteger() should convert to float on negative overflow")
+	}
+}

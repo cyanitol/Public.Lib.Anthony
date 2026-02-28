@@ -435,3 +435,185 @@ func TestVirtualTableCursor(t *testing.T) {
 		t.Errorf("Expected 3 rows, got %d", count)
 	}
 }
+
+// TestBaseModuleCreate tests the BaseModule Create method.
+func TestBaseModuleCreate(t *testing.T) {
+	base := &BaseModule{}
+
+	_, _, err := base.Create(nil, "test", "main", "test_table", []string{})
+	if err == nil {
+		t.Error("Expected error from BaseModule.Create")
+	}
+
+	if err != nil {
+		t.Logf("BaseModule.Create error: %v", err)
+	}
+}
+
+// TestBaseModuleConnect tests the BaseModule Connect method.
+func TestBaseModuleConnect(t *testing.T) {
+	base := &BaseModule{}
+
+	_, _, err := base.Connect(nil, "test", "main", "test_table", []string{})
+	if err == nil {
+		t.Error("Expected error from BaseModule.Connect")
+	}
+
+	if err != nil {
+		t.Logf("BaseModule.Connect error: %v", err)
+	}
+}
+
+// TestIsColumnUsedAllCases tests IsColumnUsed with various column indices.
+func TestIsColumnUsedAllCases(t *testing.T) {
+	info := NewIndexInfo(0)
+
+	tests := []struct {
+		colUsed uint64
+		column  int
+		want    bool
+	}{
+		{0x01, 0, true},     // Bit 0 set
+		{0x02, 1, true},     // Bit 1 set
+		{0x04, 2, true},     // Bit 2 set
+		{0x01, 1, false},    // Bit 1 not set
+		{0x00, 0, false},    // No bits set
+		{0xFF, 7, true},     // Bit 7 set
+		{0xFF, 8, false},    // Bit 8 not set in 0xFF
+		{1 << 63, 63, true}, // Highest bit set
+	}
+
+	for _, tt := range tests {
+		info.ColUsed = tt.colUsed
+		result := info.IsColumnUsed(tt.column)
+		if result != tt.want {
+			t.Errorf("IsColumnUsed(col=%d, colUsed=0x%X) = %v, want %v",
+				tt.column, tt.colUsed, result, tt.want)
+		}
+	}
+}
+
+// TestConstraintOpStringUnknown tests String method with unknown constraint op.
+func TestConstraintOpStringUnknown(t *testing.T) {
+	// Test with invalid constraint op value
+	op := ConstraintOp(999)
+	str := op.String()
+
+	// Should return some string representation
+	if str == "" {
+		t.Error("Expected non-empty string for unknown constraint op")
+	}
+
+	t.Logf("Unknown constraint op string: %s", str)
+}
+
+// TestIndexInfoManyConstraints tests IndexInfo with many constraints.
+func TestIndexInfoManyConstraints(t *testing.T) {
+	// Test with large number of constraints
+	info := NewIndexInfo(100)
+
+	if len(info.Constraints) != 100 {
+		t.Errorf("Expected 100 constraints, got %d", len(info.Constraints))
+	}
+
+	if len(info.ConstraintUsage) != 100 {
+		t.Errorf("Expected 100 constraint usages, got %d", len(info.ConstraintUsage))
+	}
+
+	// Set usage for various constraints
+	for i := 0; i < 100; i += 10 {
+		info.SetConstraintUsage(i, i+1, i%2 == 0)
+	}
+
+	// Verify settings
+	for i := 0; i < 100; i += 10 {
+		if info.ConstraintUsage[i].ArgvIndex != i+1 {
+			t.Errorf("Constraint %d argv index = %d, want %d",
+				i, info.ConstraintUsage[i].ArgvIndex, i+1)
+		}
+	}
+}
+
+// TestFindConstraintNotFound tests FindConstraint when constraint not found.
+func TestFindConstraintNotFound(t *testing.T) {
+	info := NewIndexInfo(5)
+
+	// Set up constraints
+	for i := 0; i < 5; i++ {
+		info.Constraints[i].Column = i
+		info.Constraints[i].Op = ConstraintEQ
+		info.Constraints[i].Usable = true
+	}
+
+	// Search for non-existent column
+	idx := info.FindConstraint(10, ConstraintEQ)
+	if idx != -1 {
+		t.Errorf("Expected -1 for non-existent column, got %d", idx)
+	}
+
+	// Search for non-existent operator
+	idx = info.FindConstraint(0, ConstraintMatch)
+	if idx != -1 {
+		t.Errorf("Expected -1 for non-existent operator, got %d", idx)
+	}
+
+	// Search for unusable constraint
+	info.Constraints[2].Usable = false
+	idx = info.FindConstraint(2, ConstraintEQ)
+	if idx != -1 {
+		t.Errorf("Expected -1 for unusable constraint, got %d", idx)
+	}
+}
+
+// TestIsColumnUsedLargeColumn tests IsColumnUsed with large column numbers.
+func TestIsColumnUsedLargeColumn(t *testing.T) {
+	info := NewIndexInfo(0)
+
+	// Test column 63 (highest valid bit)
+	info.ColUsed = 1 << 63
+	result := info.IsColumnUsed(63)
+	if !result {
+		t.Error("Expected true for column 63 when bit 63 is set")
+	}
+
+	// Test with column number at or beyond 64
+	// The implementation may handle this differently
+	result = info.IsColumnUsed(64)
+	t.Logf("IsColumnUsed(64) = %v", result)
+
+	// Test column 0 when bit 63 is set
+	result = info.IsColumnUsed(0)
+	if result {
+		t.Error("Expected false for column 0 when only bit 63 is set")
+	}
+}
+
+// TestCountUsableConstraintsNone tests CountUsableConstraints with no usable constraints.
+func TestCountUsableConstraintsNone(t *testing.T) {
+	info := NewIndexInfo(5)
+
+	// Set all constraints to unusable
+	for i := 0; i < 5; i++ {
+		info.Constraints[i].Usable = false
+	}
+
+	count := info.CountUsableConstraints()
+	if count != 0 {
+		t.Errorf("Expected 0 usable constraints, got %d", count)
+	}
+}
+
+// TestHasOrderByEmpty tests HasOrderBy with empty order by list.
+func TestHasOrderByEmpty(t *testing.T) {
+	info := NewIndexInfo(0)
+
+	if info.HasOrderBy() {
+		t.Error("Expected false for empty order by list")
+	}
+
+	// Add empty OrderBy slice
+	info.OrderBy = []OrderBy{}
+	if info.HasOrderBy() {
+		t.Error("Expected false for empty order by slice")
+	}
+}

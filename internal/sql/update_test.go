@@ -1,4 +1,5 @@
 package sql
+import "strings"
 
 import (
 	"testing"
@@ -91,5 +92,78 @@ func TestNewLiteralExpression(t *testing.T) {
 	}
 	if expr.Type != ExprLiteral {
 		t.Error("Type should be ExprLiteral")
+	}
+}
+
+// Test ValidateUpdate comprehensive
+func TestValidateUpdateComprehensive(t *testing.T) {
+	tests := []struct {
+		name    string
+		stmt    *UpdateStmt
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid_update",
+			stmt: &UpdateStmt{
+				Table:   "users",
+				Columns: []string{"name"},
+				Values:  []Value{TextValue("Alice")},
+			},
+			wantErr: false,
+		},
+		{
+			name:    "nil_stmt",
+			stmt:    nil,
+			wantErr: true,
+			errMsg:  "nil update statement",
+		},
+		{
+			name: "empty_table",
+			stmt: &UpdateStmt{
+				Table:   "",
+				Columns: []string{"name"},
+				Values:  []Value{TextValue("Alice")},
+			},
+			wantErr: true,
+			errMsg:  "table name is required",
+		},
+		{
+			name: "no_columns",
+			stmt: &UpdateStmt{
+				Table:   "users",
+				Columns: []string{},
+				Values:  []Value{},
+			},
+			wantErr: true,
+			errMsg:  "no columns to update",
+		},
+		{
+			name: "column_value_mismatch",
+			stmt: &UpdateStmt{
+				Table:   "users",
+				Columns: []string{"name", "email"},
+				Values:  []Value{TextValue("Alice")}, // only 1 value for 2 columns
+			},
+			wantErr: true,
+			errMsg:  "column count",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateUpdate(tt.stmt)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateUpdate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr && err != nil && tt.errMsg != "" {
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("ValidateUpdate() error = %v, want substring %q", err, tt.errMsg)
+				}
+			}
+		})
 	}
 }

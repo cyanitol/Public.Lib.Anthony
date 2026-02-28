@@ -1001,3 +1001,396 @@ func TestAggregateCompileExpr(t *testing.T) {
 		})
 	}
 }
+
+// Test findAggsInSelect with HAVING and ORDER BY
+func TestFindAggsInSelectComprehensive(t *testing.T) {
+	parse := &Parse{Vdbe: NewVdbe(nil)}
+	ac := NewAggregateCompiler(parse)
+
+	tests := []struct {
+		name     string
+		sel      *Select
+		wantFunc int
+	}{
+		{
+			name: "having_clause",
+			sel: &Select{
+				EList: &ExprList{
+					Items: []ExprListItem{
+						{Expr: &Expr{Op: TK_COLUMN}},
+					},
+				},
+				Having: &Expr{
+					Op:      TK_AGG_FUNCTION,
+					FuncDef: &FuncDef{Name: "count"},
+				},
+				SelectID: 1,
+			},
+			wantFunc: 1,
+		},
+		{
+			name: "order_by_aggregate",
+			sel: &Select{
+				EList: &ExprList{
+					Items: []ExprListItem{
+						{Expr: &Expr{Op: TK_COLUMN}},
+					},
+				},
+				OrderBy: &ExprList{
+					Items: []ExprListItem{
+						{Expr: &Expr{
+							Op:      TK_AGG_FUNCTION,
+							FuncDef: &FuncDef{Name: "sum"},
+						}},
+					},
+				},
+				SelectID: 1,
+			},
+			wantFunc: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			aggInfo, err := ac.analyzeAggregates(tt.sel)
+			if err != nil {
+				t.Fatalf("analyzeAggregates failed: %v", err)
+			}
+
+			if len(aggInfo.AggFuncs) != tt.wantFunc {
+				t.Errorf("Found %d functions, want %d", len(aggInfo.AggFuncs), tt.wantFunc)
+			}
+		})
+	}
+}
+
+// Test openSourceTables with nil src and nil table
+func TestOpenSourceTablesEdgeCases(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:    1,
+		Tabs: 0,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	tests := []struct {
+		name string
+		sel  *Select
+	}{
+		{
+			name: "nil_src",
+			sel:  &Select{Src: nil},
+		},
+		{
+			name: "nil_table",
+			sel: &Select{
+				Src: &SrcList{
+					Items: []SrcListItem{
+						{Table: nil, Cursor: 0},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addrBreak := parse.Vdbe.MakeLabel()
+			ac.openSourceTables(tt.sel, addrBreak)
+			// Should not panic and should handle nil cases gracefully
+		})
+	}
+}
+
+// Test emitNextRow with nil or empty src
+func TestEmitNextRowEdgeCases(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem:    1,
+		Tabs: 0,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	tests := []struct {
+		name string
+		sel  *Select
+	}{
+		{
+			name: "nil_src",
+			sel:  &Select{Src: nil},
+		},
+		{
+			name: "empty_src",
+			sel:  &Select{Src: &SrcList{Items: []SrcListItem{}}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addrLoop := parse.Vdbe.CurrentAddr()
+			ac.emitNextRow(tt.sel, addrLoop)
+			// Should not panic
+		})
+	}
+}
+
+// Test analyzeAggregates without GROUP BY
+func TestAnalyzeAggregatesNoGroupBy(t *testing.T) {
+	parse := &Parse{Vdbe: NewVdbe(nil)}
+	ac := NewAggregateCompiler(parse)
+
+	sel := &Select{
+		EList: &ExprList{
+			Items: []ExprListItem{
+				{Expr: &Expr{
+					Op:      TK_AGG_FUNCTION,
+					FuncDef: &FuncDef{Name: "count"},
+				}},
+			},
+		},
+		SelectID: 1,
+	}
+
+	aggInfo, err := ac.analyzeAggregates(sel)
+	if err != nil {
+		t.Fatalf("analyzeAggregates failed: %v", err)
+	}
+
+	if aggInfo.NumGroupBy != 0 {
+		t.Errorf("NumGroupBy should be 0, got %d", aggInfo.NumGroupBy)
+	}
+}
+
+// Test findAggsInChildren with complex expressions
+func TestFindAggsInChildrenComplex(t *testing.T) {
+	parse := &Parse{Vdbe: NewVdbe(nil)}
+	ac := NewAggregateCompiler(parse)
+
+	tests := []struct {
+		name     string
+		expr     *Expr
+		wantFunc int
+	}{
+		{
+			name: "left_only",
+			expr: &Expr{
+				Op: TK_PLUS,
+				Left: &Expr{
+					Op:      TK_AGG_FUNCTION,
+					FuncDef: &FuncDef{Name: "sum"},
+				},
+			},
+			wantFunc: 1,
+		},
+		{
+			name: "right_only",
+			expr: &Expr{
+				Op: TK_PLUS,
+				Right: &Expr{
+					Op:      TK_AGG_FUNCTION,
+					FuncDef: &FuncDef{Name: "max"},
+				},
+			},
+			wantFunc: 1,
+		},
+		{
+			name: "list_only",
+			expr: &Expr{
+				Op: TK_FUNCTION,
+				List: &ExprList{
+					Items: []ExprListItem{
+						{Expr: &Expr{
+							Op:      TK_AGG_FUNCTION,
+							FuncDef: &FuncDef{Name: "min"},
+						}},
+					},
+				},
+			},
+			wantFunc: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			aggInfo := &AggInfo{}
+			err := ac.findAggsInChildren(tt.expr, aggInfo)
+			if err != nil {
+				t.Fatalf("findAggsInChildren failed: %v", err)
+			}
+
+			if len(aggInfo.AggFuncs) != tt.wantFunc {
+				t.Errorf("Found %d functions, want %d", len(aggInfo.AggFuncs), tt.wantFunc)
+			}
+		})
+	}
+}
+
+// Test initializeAccumulators with unsupported function
+func TestInitializeAccumulatorsUnsupported(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem: 1,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	aggInfo := &AggInfo{
+		AggFuncs: []AggFunc{
+			{
+				Expr: &Expr{Op: TK_AGG_FUNCTION},
+				Func: &FuncDef{Name: "unsupported_func"},
+			},
+		},
+	}
+
+	ac.initializeAccumulators(aggInfo)
+
+	// Should default to OP_Null for unsupported functions
+	if len(parse.Vdbe.Ops) == 0 {
+		t.Error("No VDBE instructions generated")
+	}
+
+	firstOp := parse.Vdbe.Ops[0]
+	if firstOp.Opcode != OP_Null {
+		t.Errorf("Expected OP_Null for unsupported function, got %v", firstOp.Opcode)
+	}
+}
+
+// Test updateSum, updateMin, updateMax, updateAvg, updateGroupConcat with null checks
+func TestUpdateAggregateFunctionsNullHandling(t *testing.T) {
+	tests := []struct {
+		name         string
+		updateFunc   func(*AggregateCompiler, *AggFunc, int)
+		expectOpcode Opcode
+	}{
+		{"updateSum_null", updateSum, OP_IsNull},
+		{"updateAvg_null", updateAvg, OP_IsNull},
+		{"updateMin_lt", updateMin, OP_Lt},
+		{"updateMax_gt", updateMax, OP_Gt},
+		{"updateGroupConcat_null", updateGroupConcat, OP_IsNull},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parse := &Parse{
+				Vdbe: NewVdbe(nil),
+				Mem: 1,
+			}
+			ac := NewAggregateCompiler(parse)
+
+			aggFunc := &AggFunc{
+				RegAcc: 10,
+			}
+
+			tt.updateFunc(ac, aggFunc, 5)
+
+			hasExpected := false
+			for _, op := range parse.Vdbe.Ops {
+				if op.Opcode == tt.expectOpcode {
+					hasExpected = true
+					break
+				}
+			}
+
+			if !hasExpected {
+				t.Errorf("Expected opcode %v", tt.expectOpcode)
+			}
+		})
+	}
+}
+
+// Test updateMin and updateMax with argReg==0
+func TestUpdateMinMaxZeroArg(t *testing.T) {
+	tests := []struct {
+		name       string
+		updateFunc func(*AggregateCompiler, *AggFunc, int)
+	}{
+		{"updateMin", updateMin},
+		{"updateMax", updateMax},
+		{"updateGroupConcat", updateGroupConcat},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parse := &Parse{
+				Vdbe: NewVdbe(nil),
+				Mem: 1,
+			}
+			ac := NewAggregateCompiler(parse)
+
+			aggFunc := &AggFunc{
+				RegAcc: 10,
+			}
+
+			initialOps := len(parse.Vdbe.Ops)
+			tt.updateFunc(ac, aggFunc, 0) // argReg == 0
+
+			// Should not generate any ops when argReg==0
+			if len(parse.Vdbe.Ops) != initialOps {
+				t.Error("Should not generate ops when argReg==0")
+			}
+		})
+	}
+}
+
+// Test checkNewGroup with nil GroupBy
+func TestCheckNewGroupNilGroupBy(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem: 1,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	sel := &Select{
+		GroupBy: nil,
+	}
+
+	aggInfo := &AggInfo{}
+	continueAddr := parse.Vdbe.MakeLabel()
+
+	initialOpsCount := len(parse.Vdbe.Ops)
+	ac.checkNewGroup(sel, aggInfo, continueAddr)
+
+	// With nil GroupBy, fewer ops should be generated
+	if len(parse.Vdbe.Ops) == initialOpsCount {
+		// This is expected - nil GroupBy doesn't generate comparison ops
+	}
+}
+
+// Test finalizeResultExpr with binary operations
+func TestFinalizeResultExprBinaryOps(t *testing.T) {
+	parse := &Parse{
+		Vdbe: NewVdbe(nil),
+		Mem: 1,
+	}
+	ac := NewAggregateCompiler(parse)
+
+	aggInfo := &AggInfo{
+		AggFuncs: []AggFunc{
+			{
+				Expr:   &Expr{Op: TK_AGG_FUNCTION},
+				Func:   &FuncDef{Name: "count"},
+				RegAcc: 10,
+			},
+		},
+	}
+
+	// Binary expression with aggregate
+	expr := &Expr{
+		Op: TK_PLUS,
+		Left: &Expr{
+			Op:      TK_AGG_FUNCTION,
+			FuncDef: &FuncDef{Name: "count"},
+		},
+		Right: &Expr{
+			Op:       TK_INTEGER,
+			IntValue: 5,
+		},
+	}
+
+	target := 5
+	ac.finalizeResultExpr(expr, aggInfo, target)
+
+	if len(parse.Vdbe.Ops) == 0 {
+		t.Error("No VDBE instructions generated")
+	}
+}

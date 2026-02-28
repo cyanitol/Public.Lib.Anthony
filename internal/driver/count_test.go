@@ -170,7 +170,7 @@ func TestCountWithParameters(t *testing.T) {
 
 // TestMultipleAggregates tests multiple aggregate functions in one query
 func TestMultipleAggregates(t *testing.T) {
-	dbFile := "test_multi_agg.db"
+	dbFile := "test_count_multi_agg.db"
 	defer os.Remove(dbFile)
 
 	db, err := sql.Open(DriverName, dbFile)

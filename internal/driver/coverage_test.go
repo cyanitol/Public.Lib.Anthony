@@ -74,7 +74,7 @@ func TestDropTable(t *testing.T) {
 }
 
 func TestCountStar(t *testing.T) {
-	dbFile := "test_count_star.db"
+	dbFile := "test_coverage_count_star.db"
 	defer os.Remove(dbFile)
 
 	db, err := sql.Open(DriverName, dbFile)

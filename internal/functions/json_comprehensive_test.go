@@ -1126,3 +1126,398 @@ func TestDeepCopy_EdgeCases(t *testing.T) {
 		})
 	}
 }
+
+// TestJsonFuncMarshalError tests json function with values that cause marshal errors
+func TestJsonFuncMarshalError(t *testing.T) {
+	// Test with invalid JSON string
+	result, err := jsonFunc([]Value{NewTextValue("{invalid json}")})
+	if err != nil {
+		t.Errorf("jsonFunc() error = %v", err)
+	}
+	if !result.IsNull() {
+		t.Error("jsonFunc() should return NULL for invalid JSON")
+	}
+}
+
+// TestJsonArrayFuncMarshalError tests json_array with unmarshalable data
+func TestJsonArrayFuncMarshalError(t *testing.T) {
+	// Normal case should work
+	result, err := jsonArrayFunc([]Value{NewIntValue(1), NewTextValue("test")})
+	if err != nil {
+		t.Errorf("jsonArrayFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("jsonArrayFunc() should not return NULL for valid input")
+	}
+}
+
+// TestJsonObjectFuncOddArgs tests json_object with odd number of arguments
+func TestJsonObjectFuncOddArgs(t *testing.T) {
+	result, err := jsonObjectFunc([]Value{NewTextValue("key1")})
+	if err == nil {
+		t.Error("jsonObjectFunc() should return error for odd number of args")
+		return
+	}
+	// Error expected, result may be nil
+	_ = result
+}
+
+// TestJsonObjectFuncNullKey tests json_object with null key
+func TestJsonObjectFuncNullKey(t *testing.T) {
+	result, err := jsonObjectFunc([]Value{NewNullValue(), NewTextValue("value")})
+	if err == nil {
+		t.Error("jsonObjectFunc() should return error for null key")
+		return
+	}
+	// Error expected, result may be nil
+	_ = result
+}
+
+// TestJsonQuoteFuncEdgeCases tests json_quote with various edge cases
+func TestJsonQuoteFuncEdgeCases(t *testing.T) {
+	tests := []struct {
+		name  string
+		input Value
+	}{
+		{"text", NewTextValue("hello")},
+		{"null", NewNullValue()},
+		{"integer", NewIntValue(42)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := jsonQuoteFunc([]Value{tt.input})
+			if err != nil {
+				t.Errorf("jsonQuoteFunc() error = %v", err)
+			}
+			if result.IsNull() {
+				t.Error("jsonQuoteFunc() should not return NULL")
+			}
+		})
+	}
+}
+
+// TestValueToJSONEdgeCases tests valueToJSON with various types
+func TestValueToJSONEdgeCases(t *testing.T) {
+	tests := []struct {
+		name  string
+		input Value
+	}{
+		{"blob", NewBlobValue([]byte{1, 2, 3})},
+		{"text_number", NewTextValue("123")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := valueToJSON(tt.input)
+			_ = result // Just verify it doesn't panic
+		})
+	}
+}
+
+// TestJsonToValueEdgeCases tests jsonToValue with edge cases
+func TestJsonToValueEdgeCases(t *testing.T) {
+	tests := []struct {
+		name  string
+		input interface{}
+	}{
+		{"bool", true},
+		{"null", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := jsonToValue(tt.input)
+			_ = result // Just verify it doesn't panic
+		})
+	}
+}
+
+// TestGetJSONTypeEdgeCases tests getJSONType with edge cases
+func TestGetJSONTypeEdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    interface{}
+		expected string
+	}{
+		{"bool", true, "true"},
+		{"unknown", struct{}{}, "null"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getJSONType(tt.input)
+			if result != tt.expected {
+				t.Errorf("getJSONType() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestJsonSetPathEdgeCases tests json_set with edge cases via the public API
+func TestJsonSetPathEdgeCases(t *testing.T) {
+	// Test with empty path
+	result, err := jsonSetFunc([]Value{
+		NewTextValue(`{"key":"value"}`),
+		NewTextValue("$"),
+		NewTextValue("newvalue"),
+	})
+	if err != nil {
+		t.Errorf("jsonSetFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("jsonSetFunc() should not return NULL for valid input")
+	}
+}
+
+// TestJsonRemovePathEdgeCases tests json_remove with edge cases via the public API
+func TestJsonRemovePathEdgeCases(t *testing.T) {
+	// Test with valid removal
+	result, err := jsonRemoveFunc([]Value{
+		NewTextValue(`{"key":"value"}`),
+		NewTextValue("$.key"),
+	})
+	if err != nil {
+		t.Errorf("jsonRemoveFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("jsonRemoveFunc() should not return NULL for valid input")
+	}
+}
+
+// TestJsonExtractPathEdgeCases tests json_extract with various paths
+func TestJsonExtractPathEdgeCases(t *testing.T) {
+	// Test with array access
+	result, err := jsonExtractFunc([]Value{
+		NewTextValue(`{"arr":[1,2,3]}`),
+		NewTextValue("$.arr[0]"),
+	})
+	if err != nil {
+		t.Errorf("jsonExtractFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("jsonExtractFunc() should not return NULL for valid array access")
+	}
+}
+
+// TestJsonInsertEdgeCases tests json_insert with various edge cases
+func TestJsonInsertEdgeCases(t *testing.T) {
+	// Test inserting into existing path (should not replace)
+	result, err := jsonInsertFunc([]Value{
+		NewTextValue(`{"key":"value"}`),
+		NewTextValue("$.key"),
+		NewTextValue("newvalue"),
+	})
+	if err != nil {
+		t.Errorf("jsonInsertFunc() error = %v", err)
+	}
+	// Should keep original value since path exists
+	if result.IsNull() {
+		t.Error("jsonInsertFunc() should not return NULL")
+	}
+}
+
+// TestJsonReplaceEdgeCases tests json_replace with various edge cases
+func TestJsonReplaceEdgeCases(t *testing.T) {
+	// Test replacing non-existent path (should not add)
+	result, err := jsonReplaceFunc([]Value{
+		NewTextValue(`{"key":"value"}`),
+		NewTextValue("$.newkey"),
+		NewTextValue("newvalue"),
+	})
+	if err != nil {
+		t.Errorf("jsonReplaceFunc() error = %v", err)
+	}
+	// Should keep original since path doesn't exist
+	if result.IsNull() {
+		t.Error("jsonReplaceFunc() should not return NULL")
+	}
+}
+
+// TestJsonPatchEdgeCases tests json_patch with various edge cases
+func TestJsonPatchEdgeCases(t *testing.T) {
+	// Test with valid patch
+	result, err := jsonPatchFunc([]Value{
+		NewTextValue(`{"key":"value"}`),
+		NewTextValue(`{"key":"newvalue"}`),
+	})
+	if err != nil {
+		t.Errorf("jsonPatchFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("jsonPatchFunc() should not return NULL for valid patch")
+	}
+}
+
+// TestJsonFuncInvalidMarshal tests json function error handling
+func TestJsonFuncInvalidMarshal(t *testing.T) {
+	// Test with blob input
+	result, err := jsonFunc([]Value{NewBlobValue([]byte(`{"key":"value"}`))})
+	if err != nil {
+		t.Errorf("jsonFunc() with blob error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("jsonFunc() with valid JSON blob should not return NULL")
+	}
+}
+
+// TestJsonArrayFuncErrorHandling tests json_array error path
+func TestJsonArrayFuncErrorHandling(t *testing.T) {
+	// Test with various value types
+	result, err := jsonArrayFunc([]Value{
+		NewBlobValue([]byte{1, 2, 3}),
+		NewNullValue(),
+		NewIntValue(42),
+	})
+	if err != nil {
+		t.Errorf("jsonArrayFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("jsonArrayFunc() should not return NULL")
+	}
+}
+
+// TestJsonExtractMultiplePaths tests json_extract with multiple paths
+func TestJsonExtractMultiplePaths(t *testing.T) {
+	result, err := jsonExtractFunc([]Value{
+		NewTextValue(`{"a":1,"b":2}`),
+		NewTextValue("$.a"),
+		NewTextValue("$.b"),
+	})
+	if err != nil {
+		t.Errorf("jsonExtractFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("jsonExtractFunc() should not return NULL for multiple valid paths")
+	}
+}
+
+// TestJsonInsertInvalidJSON tests json_insert with invalid JSON
+func TestJsonInsertInvalidJSON(t *testing.T) {
+	result, err := jsonInsertFunc([]Value{
+		NewTextValue(`{invalid}`),
+		NewTextValue("$.key"),
+		NewTextValue("value"),
+	})
+	if err != nil {
+		t.Errorf("jsonInsertFunc() error = %v", err)
+	}
+	if !result.IsNull() {
+		t.Error("jsonInsertFunc() should return NULL for invalid JSON")
+	}
+}
+
+// TestJsonRemoveInvalidJSON tests json_remove with invalid JSON
+func TestJsonRemoveInvalidJSON(t *testing.T) {
+	result, err := jsonRemoveFunc([]Value{
+		NewTextValue(`{invalid}`),
+		NewTextValue("$.key"),
+	})
+	if err != nil {
+		t.Errorf("jsonRemoveFunc() error = %v", err)
+	}
+	if !result.IsNull() {
+		t.Error("jsonRemoveFunc() should return NULL for invalid JSON")
+	}
+}
+
+// TestJsonReplaceInvalidJSON tests json_replace with invalid JSON
+func TestJsonReplaceInvalidJSON(t *testing.T) {
+	result, err := jsonReplaceFunc([]Value{
+		NewTextValue(`{invalid}`),
+		NewTextValue("$.key"),
+		NewTextValue("value"),
+	})
+	if err != nil {
+		t.Errorf("jsonReplaceFunc() error = %v", err)
+	}
+	if !result.IsNull() {
+		t.Error("jsonReplaceFunc() should return NULL for invalid JSON")
+	}
+}
+
+// TestJsonSetInvalidJSON tests json_set with invalid JSON
+func TestJsonSetInvalidJSON(t *testing.T) {
+	result, err := jsonSetFunc([]Value{
+		NewTextValue(`{invalid}`),
+		NewTextValue("$.key"),
+		NewTextValue("value"),
+	})
+	if err != nil {
+		t.Errorf("jsonSetFunc() error = %v", err)
+	}
+	if !result.IsNull() {
+		t.Error("jsonSetFunc() should return NULL for invalid JSON")
+	}
+}
+
+// TestJsonQuoteBlob tests json_quote with blob
+func TestJsonQuoteBlob(t *testing.T) {
+	result, err := jsonQuoteFunc([]Value{NewBlobValue([]byte{1, 2, 3})})
+	if err != nil {
+		t.Errorf("jsonQuoteFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("jsonQuoteFunc() should not return NULL for blob")
+	}
+}
+
+// TestRemovePathWithNonExistentPath tests removePath internals
+func TestRemovePathWithNonExistentPath(t *testing.T) {
+	// Test via json_remove
+	result, err := jsonRemoveFunc([]Value{
+		NewTextValue(`{"key":"value"}`),
+		NewTextValue("$.nonexistent"),
+	})
+	if err != nil {
+		t.Errorf("jsonRemoveFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("jsonRemoveFunc() should not return NULL even if path doesn't exist")
+	}
+}
+
+// TestSetPathWithComplexPaths tests setPath with nested structures
+func TestSetPathWithComplexPaths(t *testing.T) {
+	// Test via json_set with nested array access
+	result, err := jsonSetFunc([]Value{
+		NewTextValue(`{"arr":[1,2,3]}`),
+		NewTextValue("$.arr[1]"),
+		NewIntValue(99),
+	})
+	if err != nil {
+		t.Errorf("jsonSetFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("jsonSetFunc() should not return NULL for valid array set")
+	}
+}
+
+// TestTraversePathWithInvalidIndex tests traversePath error paths
+func TestTraversePathWithInvalidIndex(t *testing.T) {
+	// Test via json_extract with invalid array index
+	// Note: "abc" might be parsed as a key, not an array index
+	result, err := jsonExtractFunc([]Value{
+		NewTextValue(`{"arr":[1,2,3]}`),
+		NewTextValue("$.arr[999]"), // Out of bounds index
+	})
+	if err != nil {
+		t.Errorf("jsonExtractFunc() error = %v", err)
+	}
+	// Out of bounds returns NULL or the value might be handled gracefully
+	_ = result
+}
+
+// TestApplyJSONPatchWithNestedObjects tests applyJSONPatch
+func TestApplyJSONPatchWithNestedObjects(t *testing.T) {
+	result, err := jsonPatchFunc([]Value{
+		NewTextValue(`{"a":{"b":1}}`),
+		NewTextValue(`{"a":{"c":2}}`),
+	})
+	if err != nil {
+		t.Errorf("jsonPatchFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("jsonPatchFunc() should not return NULL for nested patch")
+	}
+}

@@ -390,3 +390,55 @@ func BenchmarkCompileInsertMultipleRows(b *testing.B) {
 		_, _ = CompileInsert(stmt, 100)
 	}
 }
+
+// Test computeNumCols function
+func TestComputeNumCols(t *testing.T) {
+	tests := []struct {
+		name     string
+		stmt     *InsertStmt
+		wantCols int
+	}{
+		{
+			name: "explicit_columns",
+			stmt: &InsertStmt{
+				Columns: []string{"id", "name", "email"},
+				Values:  [][]Value{{IntValue(1), TextValue("Alice"), TextValue("alice@example.com")}},
+			},
+			wantCols: 3,
+		},
+		{
+			name: "no_columns_specified",
+			stmt: &InsertStmt{
+				Columns: nil,
+				Values:  [][]Value{{IntValue(1), TextValue("Alice"), TextValue("alice@example.com"), IntValue(25), TextValue("USA")}},
+			},
+			wantCols: 5,
+		},
+		{
+			name: "single_column",
+			stmt: &InsertStmt{
+				Columns: []string{"id"},
+				Values:  [][]Value{{IntValue(1)}},
+			},
+			wantCols: 1,
+		},
+		{
+			name: "empty_values_empty_columns",
+			stmt: &InsertStmt{
+				Columns: nil,
+				Values:  [][]Value{},
+			},
+			wantCols: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := computeNumCols(tt.stmt)
+
+			if got != tt.wantCols {
+				t.Errorf("computeNumCols() = %d, want %d", got, tt.wantCols)
+			}
+		})
+	}
+}

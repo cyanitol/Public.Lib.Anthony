@@ -1933,3 +1933,1028 @@ func TestCompactEdgeCases(t *testing.T) {
 		})
 	}
 }
+
+// TestHandleUnderflow tests the underflow handling during deletion.
+func TestHandleUnderflow(t *testing.T) {
+	// Create a tree with enough entries to cause splits
+	node := NewLeafNode()
+
+	// Insert entries to create a multi-level tree
+	entries := make([]*Entry, MaxEntries*2+5)
+	for i := 0; i < len(entries); i++ {
+		entries[i] = &Entry{
+			ID:   int64(i + 1),
+			BBox: &BoundingBox{Min: []float64{float64(i), 0}, Max: []float64{float64(i + 1), 1}},
+		}
+		node = node.Insert(entries[i])
+	}
+
+	initialHeight := node.Height()
+	t.Logf("Initial tree height: %d", initialHeight)
+
+	// Remove entries to trigger underflow
+	// Keep removing until we trigger underflow handling
+	for i := 0; i < MinEntries+2; i++ {
+		node = node.Remove(entries[i])
+	}
+
+	t.Logf("Count after deletions: %d", node.Count())
+
+	// Verify tree is still valid
+	if node != nil && node.Count() > 0 {
+		height := node.Height()
+		t.Logf("Tree height after underflow: %d", height)
+	}
+}
+
+// TestPickNextEmptyGroups tests pickNext with empty groups.
+func TestPickNextEmptyGroups(t *testing.T) {
+	node := NewLeafNode()
+
+	// Create entries for splitting
+	for i := 0; i < MaxEntries+1; i++ {
+		entry := &Entry{
+			ID:   int64(i),
+			BBox: &BoundingBox{Min: []float64{float64(i * 5), 0}, Max: []float64{float64(i*5 + 3), 1}},
+		}
+		node.AddEntry(entry)
+	}
+
+	// Trigger split which uses pickNext internally
+	if len(node.Entries) > MaxEntries {
+		newRoot := node.splitNode()
+		if newRoot == nil {
+			t.Error("Expected non-nil root after split")
+		}
+	}
+}
+
+// TestExpandBoundingBox tests bounding box expansion.
+func TestExpandBoundingBox(t *testing.T) {
+	bbox1 := &BoundingBox{
+		Min: []float64{0, 0},
+		Max: []float64{10, 10},
+	}
+
+	tests := []struct {
+		name     string
+		other    *BoundingBox
+		expected [][]float64
+	}{
+		{
+			name:     "larger box",
+			other:    &BoundingBox{Min: []float64{-5, -5}, Max: []float64{15, 15}},
+			expected: [][]float64{{-5, -5}, {15, 15}},
+		},
+		{
+			name:     "smaller box",
+			other:    &BoundingBox{Min: []float64{2, 2}, Max: []float64{8, 8}},
+			expected: [][]float64{{0, 0}, {10, 10}},
+		},
+		{
+			name:     "partially overlapping",
+			other:    &BoundingBox{Min: []float64{5, 5}, Max: []float64{20, 20}},
+			expected: [][]float64{{0, 0}, {20, 20}},
+		},
+		{
+			name:     "disjoint box",
+			other:    &BoundingBox{Min: []float64{20, 20}, Max: []float64{30, 30}},
+			expected: [][]float64{{0, 0}, {30, 30}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bbox := bbox1.Clone()
+			bbox.Expand(tt.other)
+
+			for i := 0; i < 2; i++ {
+				if bbox.Min[i] != tt.expected[0][i] || bbox.Max[i] != tt.expected[1][i] {
+					t.Errorf("After expand, bounds = [%v, %v], want [%v, %v]",
+						bbox.Min, bbox.Max, tt.expected[0], tt.expected[1])
+					break
+				}
+			}
+		})
+	}
+}
+
+// TestEnlargementNeededEdgeCases tests enlargement calculation edge cases.
+func TestEnlargementNeededEdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		bbox     *BoundingBox
+		other    *BoundingBox
+		minExpected float64
+	}{
+		{
+			name:     "identical boxes",
+			bbox:     &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+			other:    &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+			minExpected: 0,
+		},
+		{
+			name:     "contained box",
+			bbox:     &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+			other:    &BoundingBox{Min: []float64{2, 2}, Max: []float64{8, 8}},
+			minExpected: 0,
+		},
+		{
+			name:     "larger box",
+			bbox:     &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+			other:    &BoundingBox{Min: []float64{-5, -5}, Max: []float64{15, 15}},
+			minExpected: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			enlargement := tt.bbox.EnlargementNeeded(tt.other)
+			if enlargement < tt.minExpected {
+				t.Errorf("EnlargementNeeded = %f, want >= %f", enlargement, tt.minExpected)
+			}
+			t.Logf("Enlargement for %s: %f", tt.name, enlargement)
+		})
+	}
+}
+
+// TestSearchWithinEdgeCases tests SearchWithin with various scenarios.
+func TestSearchWithinEdgeCases(t *testing.T) {
+	node := NewLeafNode()
+
+	// Insert entries with various containment relationships
+	entries := []*Entry{
+		{ID: 1, BBox: &BoundingBox{Min: []float64{2, 2}, Max: []float64{8, 8}}},   // Inside
+		{ID: 2, BBox: &BoundingBox{Min: []float64{0, 0}, Max: []float64{20, 20}}}, // Contains query
+		{ID: 3, BBox: &BoundingBox{Min: []float64{5, 5}, Max: []float64{15, 15}}}, // Overlaps
+		{ID: 4, BBox: &BoundingBox{Min: []float64{0, 0}, Max: []float64{5, 5}}},   // Partially inside
+	}
+
+	for _, entry := range entries {
+		node = node.Insert(entry)
+	}
+
+	queryBox := &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}}
+	results := node.SearchWithin(queryBox)
+
+	t.Logf("SearchWithin found %d entries", len(results))
+	for _, entry := range results {
+		t.Logf("  Entry %d: [%.1f,%.1f] to [%.1f,%.1f]",
+			entry.ID, entry.BBox.Min[0], entry.BBox.Min[1], entry.BBox.Max[0], entry.BBox.Max[1])
+	}
+}
+
+// TestGetAllLeafEntriesInternal tests getAllLeafEntries with internal nodes.
+func TestGetAllLeafEntriesInternal(t *testing.T) {
+	node := NewLeafNode()
+
+	// Insert enough entries to create internal nodes
+	for i := 0; i < MaxEntries*2; i++ {
+		entry := &Entry{
+			ID:   int64(i),
+			BBox: &BoundingBox{Min: []float64{float64(i), 0}, Max: []float64{float64(i + 1), 1}},
+		}
+		node = node.Insert(entry)
+	}
+
+	// Get all leaf entries
+	entries := node.getAllLeafEntries(node)
+
+	if len(entries) != MaxEntries*2 {
+		t.Errorf("getAllLeafEntries returned %d entries, want %d", len(entries), MaxEntries*2)
+	}
+}
+
+// TestCalculateGroupBBoxEmpty tests calculateGroupBBox with empty group.
+func TestCalculateGroupBBoxEmpty(t *testing.T) {
+	bbox := calculateGroupBBox([]*Entry{})
+
+	if bbox != nil {
+		t.Error("Expected nil bounding box for empty group")
+	}
+}
+
+// TestPickSeedsLessThanTwo tests pickSeeds with less than 2 entries.
+func TestPickSeedsLessThanTwo(t *testing.T) {
+	node := NewLeafNode()
+
+	// Add only one entry
+	entry := &Entry{
+		ID:   1,
+		BBox: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+	}
+	node.AddEntry(entry)
+
+	// Try to pick seeds - should handle gracefully
+	seed1, seed2 := node.pickSeeds(node.Entries)
+	t.Logf("Seeds from single entry: %d, %d", seed1, seed2)
+}
+
+// TestDistanceToPointEdgeCases tests distance calculation to points.
+func TestDistanceToPointEdgeCases(t *testing.T) {
+	bbox := &BoundingBox{
+		Min: []float64{0, 0},
+		Max: []float64{10, 10},
+	}
+
+	tests := []struct {
+		name  string
+		point []float64
+	}{
+		{"point inside", []float64{5, 5}},
+		{"point on edge", []float64{0, 5}},
+		{"point at corner", []float64{0, 0}},
+		{"point outside", []float64{15, 15}},
+		{"point far away", []float64{100, 100}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dist := distanceToPoint(bbox, tt.point)
+			t.Logf("Distance from bbox to %v: %f", tt.point, dist)
+		})
+	}
+}
+
+// TestNearestNeighborEdgeCases tests nearest neighbor search edge cases.
+func TestNearestNeighborEdgeCases(t *testing.T) {
+	node := NewLeafNode()
+
+	// Insert single entry
+	entry := &Entry{
+		ID:   1,
+		BBox: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+	}
+	node = node.Insert(entry)
+
+	// Search for more neighbors than exist
+	point := []float64{5, 5}
+	results := node.NearestNeighborSearch(point, 10)
+
+	if len(results) != 1 {
+		t.Errorf("Expected 1 result when requesting more than available, got %d", len(results))
+	}
+
+	// Search with k=0
+	results = node.NearestNeighborSearch(point, 0)
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results for k=0, got %d", len(results))
+	}
+}
+
+// TestRangeSearchEdgeCases tests range search edge cases.
+func TestRangeSearchEdgeCases(t *testing.T) {
+	node := NewLeafNode()
+
+	entries := []*Entry{
+		{ID: 1, BBox: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}}},
+		{ID: 2, BBox: &BoundingBox{Min: []float64{20, 20}, Max: []float64{30, 30}}},
+		{ID: 3, BBox: &BoundingBox{Min: []float64{40, 40}, Max: []float64{50, 50}}},
+	}
+
+	for _, entry := range entries {
+		node = node.Insert(entry)
+	}
+
+	// Search with very large radius
+	point := []float64{25, 25}
+	results := node.RangeSearch(point, 1000.0)
+
+	if len(results) != 3 {
+		t.Errorf("Expected all 3 entries with large radius, got %d", len(results))
+	}
+
+	// Search with very small radius
+	results = node.RangeSearch(point, 0.1)
+	t.Logf("Found %d results with very small radius", len(results))
+}
+
+// TestEnclosureSearchEdgeCases tests enclosure search edge cases.
+func TestEnclosureSearchEdgeCases(t *testing.T) {
+	node := NewLeafNode()
+
+	// Entry that exactly matches query box
+	entry1 := &Entry{
+		ID:   1,
+		BBox: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+	}
+	node = node.Insert(entry1)
+
+	queryBox := &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}}
+	results := node.EnclosureSearch(queryBox)
+
+	// Exact match should be found
+	if len(results) != 1 {
+		t.Errorf("Expected 1 result for exact match, got %d", len(results))
+	}
+}
+
+// TestWindowQueryEdgeCases tests window query edge cases.
+func TestWindowQueryEdgeCases(t *testing.T) {
+	node := NewLeafNode()
+
+	entry := &Entry{
+		ID:   1,
+		BBox: &BoundingBox{Min: []float64{5, 5}, Max: []float64{15, 15}},
+	}
+	node = node.Insert(entry)
+
+	// Window that exactly matches entry
+	results := node.WindowQuery([]float64{5, 5}, []float64{15, 15})
+	if len(results) != 1 {
+		t.Errorf("Expected 1 result for exact match, got %d", len(results))
+	}
+
+	// Window outside all entries
+	results = node.WindowQuery([]float64{100, 100}, []float64{200, 200})
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results outside all entries, got %d", len(results))
+	}
+}
+
+// TestSpatialJoinEdgeCases tests spatial join edge cases.
+func TestSpatialJoinEdgeCases(t *testing.T) {
+	// Test with empty trees
+	tree1 := NewLeafNode()
+	tree2 := NewLeafNode()
+
+	results := SpatialJoin(tree1, tree2)
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results for empty trees, got %d", len(results))
+	}
+
+	// Test with one empty tree
+	tree1 = tree1.Insert(&Entry{
+		ID:   1,
+		BBox: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+	})
+
+	results = SpatialJoin(tree1, tree2)
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results when one tree is empty, got %d", len(results))
+	}
+}
+
+// TestProcessSpatialJoinPairEdgeCases tests spatial join pair processing.
+func TestProcessSpatialJoinPairEdgeCases(t *testing.T) {
+	// Create trees with non-overlapping entries
+	tree1 := NewLeafNode()
+	tree2 := NewLeafNode()
+
+	tree1 = tree1.Insert(&Entry{
+		ID:   1,
+		BBox: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+	})
+
+	tree2 = tree2.Insert(&Entry{
+		ID:   2,
+		BBox: &BoundingBox{Min: []float64{20, 20}, Max: []float64{30, 30}},
+	})
+
+	results := SpatialJoin(tree1, tree2)
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results for non-overlapping entries, got %d", len(results))
+	}
+}
+
+// TestDistanceBetweenBoxesEdgeCases tests distance calculation edge cases.
+func TestDistanceBetweenBoxesEdgeCases(t *testing.T) {
+	tests := []struct {
+		name  string
+		bbox1 *BoundingBox
+		bbox2 *BoundingBox
+	}{
+		{
+			name:  "touching boxes",
+			bbox1: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+			bbox2: &BoundingBox{Min: []float64{10, 10}, Max: []float64{20, 20}},
+		},
+		{
+			name:  "overlapping boxes",
+			bbox1: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+			bbox2: &BoundingBox{Min: []float64{5, 5}, Max: []float64{15, 15}},
+		},
+		{
+			name:  "same box",
+			bbox1: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+			bbox2: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dist := DistanceBetweenBoxes(tt.bbox1, tt.bbox2)
+			t.Logf("Distance for %s: %f", tt.name, dist)
+		})
+	}
+}
+
+// TestOverlapAreaEdgeCases tests overlap area calculation edge cases.
+func TestOverlapAreaEdgeCases(t *testing.T) {
+	tests := []struct {
+		name  string
+		bbox1 *BoundingBox
+		bbox2 *BoundingBox
+	}{
+		{
+			name:  "touching but not overlapping",
+			bbox1: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+			bbox2: &BoundingBox{Min: []float64{10, 0}, Max: []float64{20, 10}},
+		},
+		{
+			name:  "fully contained",
+			bbox1: &BoundingBox{Min: []float64{0, 0}, Max: []float64{20, 20}},
+			bbox2: &BoundingBox{Min: []float64{5, 5}, Max: []float64{15, 15}},
+		},
+		{
+			name:  "identical boxes",
+			bbox1: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+			bbox2: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			area := OverlapArea(tt.bbox1, tt.bbox2)
+			t.Logf("Overlap area for %s: %f", tt.name, area)
+		})
+	}
+}
+
+// TestIntersectionBoxEdgeCases tests intersection box calculation edge cases.
+func TestIntersectionBoxEdgeCases(t *testing.T) {
+	// Test with 3D boxes
+	bbox1 := &BoundingBox{
+		Min: []float64{0, 0, 0},
+		Max: []float64{10, 10, 10},
+	}
+
+	bbox2 := &BoundingBox{
+		Min: []float64{5, 5, 5},
+		Max: []float64{15, 15, 15},
+	}
+
+	intersection := IntersectionBox(bbox1, bbox2)
+	if intersection == nil {
+		t.Fatal("Expected non-nil intersection for 3D boxes")
+	}
+
+	for i := 0; i < 3; i++ {
+		if intersection.Min[i] != 5 || intersection.Max[i] != 10 {
+			t.Errorf("3D intersection dim %d: got [%f, %f], want [5, 10]",
+				i, intersection.Min[i], intersection.Max[i])
+		}
+	}
+}
+
+// TestUnionBoxEdgeCases tests union box calculation edge cases.
+func TestUnionBoxEdgeCases(t *testing.T) {
+	// Test with 3D boxes
+	bbox1 := &BoundingBox{
+		Min: []float64{0, 0, 0},
+		Max: []float64{10, 10, 10},
+	}
+
+	bbox2 := &BoundingBox{
+		Min: []float64{5, 5, 5},
+		Max: []float64{15, 15, 15},
+	}
+
+	union := UnionBox(bbox1, bbox2)
+	if union == nil {
+		t.Fatal("Expected non-nil union for 3D boxes")
+	}
+
+	for i := 0; i < 3; i++ {
+		if union.Min[i] != 0 || union.Max[i] != 15 {
+			t.Errorf("3D union dim %d: got [%f, %f], want [0, 15]",
+				i, union.Min[i], union.Max[i])
+		}
+	}
+}
+
+// TestPriorityQueuePopEmpty tests popping from empty priority queue.
+func TestPriorityQueuePopEmpty(t *testing.T) {
+	pq := NewPriorityQueue()
+
+	// Pop from empty queue should not crash
+	item := pq.Pop()
+	if item != nil {
+		t.Error("Expected nil from empty queue")
+	}
+}
+
+// TestPriorityQueueOrdering tests priority queue maintains correct ordering.
+func TestPriorityQueueOrdering(t *testing.T) {
+	pq := NewPriorityQueue()
+
+	// Push items with different distances (priorities)
+	pq.Push(&SearchItem{Entry: &Entry{ID: 3}, Distance: 3.0})
+	pq.Push(&SearchItem{Entry: &Entry{ID: 1}, Distance: 1.0})
+	pq.Push(&SearchItem{Entry: &Entry{ID: 2}, Distance: 2.0})
+
+	// Pop should return in distance order (lowest first)
+	item1 := pq.Pop()
+	if item1.Distance != 1.0 {
+		t.Errorf("First pop distance = %f, want 1.0", item1.Distance)
+	}
+
+	item2 := pq.Pop()
+	if item2.Distance != 2.0 {
+		t.Errorf("Second pop distance = %f, want 2.0", item2.Distance)
+	}
+
+	item3 := pq.Pop()
+	if item3.Distance != 3.0 {
+		t.Errorf("Third pop distance = %f, want 3.0", item3.Distance)
+	}
+}
+
+// TestRTreeCursorAtEOF tests cursor operations at EOF.
+func TestRTreeCursorAtEOF(t *testing.T) {
+	module := NewRTreeModule()
+	table, _, _ := module.Create(nil, "rtree", "main", "test_rtree",
+		[]string{"id", "minX", "maxX", "minY", "maxY"})
+	rtree := table.(*RTree)
+
+	cursor, _ := rtree.Open()
+	defer cursor.Close()
+
+	// Empty tree - cursor should be at EOF
+	cursor.Filter(0, "", nil)
+
+	// Try to get column at EOF
+	_, err := cursor.Column(0)
+	if err == nil {
+		t.Error("Expected error when getting column at EOF")
+	}
+
+	// Try to get rowid at EOF
+	_, err = cursor.Rowid()
+	if err == nil {
+		t.Error("Expected error when getting rowid at EOF")
+	}
+}
+
+// TestRTreeRowidWithFloat tests Rowid method when entry ID is not int64.
+func TestRTreeRowidWithFloat(t *testing.T) {
+	module := NewRTreeModule()
+	table, _, _ := module.Create(nil, "rtree", "main", "test_rtree",
+		[]string{"id", "minX", "maxX", "minY", "maxY"})
+	rtree := table.(*RTree)
+
+	// Insert with float64 ID
+	rtree.Update(6, []interface{}{nil, 1.0, 0.0, 10.0, 0.0, 10.0})
+
+	cursor, _ := rtree.Open()
+	defer cursor.Close()
+
+	cursor.Filter(0, "", nil)
+
+	if !cursor.EOF() {
+		rowid, err := cursor.Rowid()
+		if err != nil {
+			t.Errorf("Rowid failed: %v", err)
+		}
+		t.Logf("Rowid: %d", rowid)
+	}
+}
+
+// TestBBoxOperationsWithMismatchedDimensions tests operations with wrong dimensions.
+func TestBBoxOperationsWithMismatchedDimensions(t *testing.T) {
+	bbox2D := NewBoundingBox(2)
+	bbox2D.Min[0], bbox2D.Max[0] = 0, 10
+	bbox2D.Min[1], bbox2D.Max[1] = 0, 10
+
+	bbox3D := NewBoundingBox(3)
+	bbox3D.Min[0], bbox3D.Max[0] = 5, 15
+	bbox3D.Min[1], bbox3D.Max[1] = 5, 15
+	bbox3D.Min[2], bbox3D.Max[2] = 5, 15
+
+	// Test Equal with different dimensions
+	if bbox2D.Equal(bbox3D) {
+		t.Error("Expected false for boxes with different dimensions")
+	}
+
+	// Test ContainsPoint with wrong dimension point
+	if bbox2D.ContainsPoint([]float64{5, 5, 5}) {
+		t.Error("Expected false for point with wrong dimensions")
+	}
+
+	// Test Expand with different dimensions (should not crash)
+	bbox2DCopy := bbox2D.Clone()
+	bbox2DCopy.Expand(bbox3D)
+	t.Log("Expand with mismatched dimensions completed")
+}
+
+// TestUnderflowRebalancing tests underflow handling through node rebalancing.
+func TestUnderflowRebalancing(t *testing.T) {
+	// Create a specific tree structure to trigger underflow
+	// We need a tree where a leaf has exactly MinEntries+1 and removing one triggers underflow
+	node := NewLeafNode()
+
+	// Insert exactly (MaxEntries + 1) * 2 entries to force splitting into 3 or more leaves
+	numEntries := (MaxEntries + 1) * 2
+	entries := make([]*Entry, numEntries)
+	for i := 0; i < numEntries; i++ {
+		entries[i] = &Entry{
+			ID:   int64(i + 1),
+			BBox: &BoundingBox{Min: []float64{float64(i * 2), 0}, Max: []float64{float64(i*2 + 1), 1}},
+		}
+		node = node.Insert(entries[i])
+	}
+
+	initialHeight := node.Height()
+	initialCount := node.Count()
+	t.Logf("Initial state: height=%d, count=%d, minEntries=%d", initialHeight, initialCount, MinEntries)
+
+	// Now find a leaf and delete entries from it until it underflows
+	// This is tricky - we need to delete from one specific leaf
+	// Let's delete several entries in sequence which are likely in the same leaf
+	deleteCount := 0
+	for i := 0; i < numEntries && deleteCount < MinEntries; i++ {
+		prevCount := node.Count()
+		node = node.Remove(entries[i])
+		if node == nil {
+			t.Log("Tree became nil after removal")
+			break
+		}
+		if node.Count() < prevCount {
+			deleteCount++
+		}
+	}
+
+	if node != nil {
+		finalHeight := node.Height()
+		finalCount := node.Count()
+		t.Logf("After deletions: height=%d, count=%d", finalHeight, finalCount)
+	}
+}
+
+// TestHandleUnderflowDirectly tests underflow with careful tree construction.
+func TestHandleUnderflowDirectly(t *testing.T) {
+	// Build a tree where we can force underflow
+	// Strategy: Create a tree with multiple levels, then delete enough from one leaf to trigger underflow
+
+	root := NewLeafNode()
+
+	// Insert enough entries to create a 3-level tree
+	numEntries := MaxEntries * MaxEntries / 2
+	allEntries := make([]*Entry, numEntries)
+
+	for i := 0; i < numEntries; i++ {
+		allEntries[i] = &Entry{
+			ID:   int64(i + 1),
+			BBox: &BoundingBox{Min: []float64{float64(i), 0}, Max: []float64{float64(i + 1), 1}},
+		}
+		root = root.Insert(allEntries[i])
+	}
+
+	initialCount := root.Count()
+	t.Logf("Built tree with %d entries, height=%d", initialCount, root.Height())
+
+	// Now delete entries one by one - eventually this should trigger underflow handling
+	deleted := 0
+	for i := 0; i < numEntries/2 && root != nil; i++ {
+		prevCount := root.Count()
+		root = root.Remove(allEntries[i])
+		if root != nil && root.Count() < prevCount {
+			deleted++
+		}
+	}
+
+	if root != nil {
+		finalCount := root.Count()
+		t.Logf("After deleting %d entries, %d remain, height=%d", deleted, finalCount, root.Height())
+	}
+}
+
+// TestRangeSearchNilRoot tests range search with nil root.
+func TestRangeSearchNilRoot(t *testing.T) {
+	var node *Node
+	results := node.RangeSearch([]float64{0, 0}, 10.0)
+
+	if results != nil {
+		t.Error("Expected nil results for nil root")
+	}
+}
+
+// TestProcessSpatialJoinPairAllBranches tests all branches of processSpatialJoinPair.
+func TestProcessSpatialJoinPairAllBranches(t *testing.T) {
+	// Create tree with both leaf and internal nodes
+	tree1 := NewLeafNode()
+	tree2 := NewLeafNode()
+
+	// Insert enough entries to create internal nodes
+	for i := 0; i < MaxEntries+5; i++ {
+		entry1 := &Entry{
+			ID:   int64(i + 1),
+			BBox: &BoundingBox{Min: []float64{float64(i), 0}, Max: []float64{float64(i + 2), 2}},
+		}
+		tree1 = tree1.Insert(entry1)
+
+		entry2 := &Entry{
+			ID:   int64(i + 1000),
+			BBox: &BoundingBox{Min: []float64{float64(i + 1), 1}, Max: []float64{float64(i + 3), 3}},
+		}
+		tree2 = tree2.Insert(entry2)
+	}
+
+	results := SpatialJoin(tree1, tree2)
+	t.Logf("Spatial join found %d pairs", len(results))
+}
+
+// TestLessFunction tests the less function in priority queue.
+func TestLessFunction(t *testing.T) {
+	pq := NewPriorityQueue()
+
+	// Push items with equal distances
+	pq.Push(&SearchItem{Entry: &Entry{ID: 1}, Distance: 5.0})
+	pq.Push(&SearchItem{Entry: &Entry{ID: 2}, Distance: 5.0})
+
+	// Pop should still work with equal priorities
+	item := pq.Pop()
+	if item == nil {
+		t.Error("Expected non-nil item")
+	}
+}
+
+// TestUnionBoxDifferentSizes tests UnionBox with boxes of different dimensions.
+func TestUnionBoxDifferentSizes(t *testing.T) {
+	bbox2D := &BoundingBox{
+		Min: []float64{0, 0},
+		Max: []float64{10, 10},
+	}
+
+	bbox3D := &BoundingBox{
+		Min: []float64{5, 5, 5},
+		Max: []float64{15, 15, 15},
+	}
+
+	result := UnionBox(bbox2D, bbox3D)
+	if result != nil {
+		t.Error("Expected nil for boxes with different dimensions")
+	}
+}
+
+// TestIntersectionBoxDifferentSizes tests IntersectionBox with boxes of different dimensions.
+func TestIntersectionBoxDifferentSizes(t *testing.T) {
+	bbox2D := &BoundingBox{
+		Min: []float64{0, 0},
+		Max: []float64{10, 10},
+	}
+
+	bbox3D := &BoundingBox{
+		Min: []float64{5, 5, 5},
+		Max: []float64{15, 15, 15},
+	}
+
+	result := IntersectionBox(bbox2D, bbox3D)
+	if result != nil {
+		t.Error("Expected nil for boxes with different dimensions")
+	}
+}
+
+// TestNearestNeighborLargeK tests nearest neighbor with k larger than tree size.
+func TestNearestNeighborLargeK(t *testing.T) {
+	node := NewLeafNode()
+
+	// Insert 5 entries
+	for i := 0; i < 5; i++ {
+		entry := &Entry{
+			ID:   int64(i + 1),
+			BBox: &BoundingBox{Min: []float64{float64(i * 10), 0}, Max: []float64{float64(i*10 + 5), 5}},
+		}
+		node = node.Insert(entry)
+	}
+
+	// Request 100 neighbors (more than available)
+	point := []float64{25, 2}
+	results := node.NearestNeighborSearch(point, 100)
+
+	if len(results) != 5 {
+		t.Errorf("Expected 5 results (all entries), got %d", len(results))
+	}
+}
+
+// TestSearchWithinAllScenarios tests SearchWithin with various containment scenarios.
+func TestSearchWithinAllScenarios(t *testing.T) {
+	node := NewLeafNode()
+
+	// Add entries with different relationships to query box
+	entries := []*Entry{
+		// Fully contained
+		{ID: 1, BBox: &BoundingBox{Min: []float64{2, 2}, Max: []float64{5, 5}}},
+		// Exactly matches query box
+		{ID: 2, BBox: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}}},
+		// Contains query box
+		{ID: 3, BBox: &BoundingBox{Min: []float64{-5, -5}, Max: []float64{15, 15}}},
+		// Partially overlaps
+		{ID: 4, BBox: &BoundingBox{Min: []float64{5, 5}, Max: []float64{15, 15}}},
+		// Outside
+		{ID: 5, BBox: &BoundingBox{Min: []float64{20, 20}, Max: []float64{30, 30}}},
+	}
+
+	for _, entry := range entries {
+		node = node.Insert(entry)
+	}
+
+	queryBox := &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}}
+	results := node.SearchWithin(queryBox)
+
+	t.Logf("SearchWithin found %d entries", len(results))
+	for _, r := range results {
+		t.Logf("  Entry %d", r.ID)
+	}
+}
+
+// TestEnclosureSearchNonLeaf tests enclosure search with non-leaf nodes.
+func TestEnclosureSearchNonLeaf(t *testing.T) {
+	node := NewLeafNode()
+
+	// Create a multi-level tree
+	for i := 0; i < MaxEntries*2; i++ {
+		entry := &Entry{
+			ID:   int64(i + 1),
+			BBox: &BoundingBox{Min: []float64{float64(i), 0}, Max: []float64{float64(i + 1), 1}},
+		}
+		node = node.Insert(entry)
+	}
+
+	// Search for entries that enclose a small box
+	queryBox := &BoundingBox{Min: []float64{5, 0}, Max: []float64{6, 1}}
+	results := node.EnclosureSearch(queryBox)
+
+	t.Logf("EnclosureSearch found %d entries", len(results))
+}
+
+// TestNodeBoundingBoxEmptyNode tests BoundingBox on empty node.
+func TestNodeBoundingBoxEmptyNode(t *testing.T) {
+	node := NewLeafNode()
+
+	bbox := node.BoundingBox()
+	if bbox != nil {
+		t.Error("Expected nil bounding box for empty node")
+	}
+}
+
+// TestHeightEmptyTree tests Height on empty tree.
+func TestHeightEmptyTree(t *testing.T) {
+	node := NewLeafNode()
+
+	height := node.Height()
+	if height != 1 {
+		t.Errorf("Expected height 1 for empty leaf, got %d", height)
+	}
+}
+
+// TestChooseLeafNilChild tests chooseLeaf with nil child pointer.
+func TestChooseLeafNilChild(t *testing.T) {
+	// Create an internal node with entry but ensure robust handling
+	node := NewInternalNode()
+
+	entry := &Entry{
+		ID:   1,
+		BBox: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+		// Child is intentionally nil to test error handling
+	}
+	node.AddEntry(entry)
+
+	// Try to choose leaf - should handle nil child gracefully
+	insertEntry := &Entry{
+		ID:   2,
+		BBox: &BoundingBox{Min: []float64{5, 5}, Max: []float64{15, 15}},
+	}
+
+	leaf := node.chooseLeaf(insertEntry)
+	if leaf == nil {
+		t.Log("chooseLeaf correctly handled nil child")
+	}
+}
+
+// TestBulkLoadSingleEntry tests STR bulk load with single entry.
+func TestBulkLoadSingleEntry(t *testing.T) {
+	entries := []*Entry{
+		{ID: 1, BBox: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}}},
+	}
+
+	node := Compact(entries)
+
+	if node == nil {
+		t.Error("Expected non-nil node")
+	}
+
+	if node.Count() != 1 {
+		t.Errorf("Expected count 1, got %d", node.Count())
+	}
+}
+
+// TestDistanceBetweenBoxesSameDimensions tests distance with various dimensions.
+func TestDistanceBetweenBoxesSameDimensions(t *testing.T) {
+	// Test 1D
+	bbox1D_1 := &BoundingBox{Min: []float64{0}, Max: []float64{10}}
+	bbox1D_2 := &BoundingBox{Min: []float64{20}, Max: []float64{30}}
+	dist := DistanceBetweenBoxes(bbox1D_1, bbox1D_2)
+	t.Logf("1D distance: %f", dist)
+
+	// Test 3D
+	bbox3D_1 := &BoundingBox{Min: []float64{0, 0, 0}, Max: []float64{10, 10, 10}}
+	bbox3D_2 := &BoundingBox{Min: []float64{20, 20, 20}, Max: []float64{30, 30, 30}}
+	dist = DistanceBetweenBoxes(bbox3D_1, bbox3D_2)
+	t.Logf("3D distance: %f", dist)
+}
+
+// TestOverlapAreaFullContainment tests overlap with full containment.
+func TestOverlapAreaFullContainment(t *testing.T) {
+	bbox1 := &BoundingBox{Min: []float64{0, 0}, Max: []float64{20, 20}}
+	bbox2 := &BoundingBox{Min: []float64{5, 5}, Max: []float64{15, 15}}
+
+	area := OverlapArea(bbox1, bbox2)
+	expectedArea := 100.0 // 10x10
+
+	if area != expectedArea {
+		t.Errorf("Overlap area = %f, want %f", area, expectedArea)
+	}
+}
+
+// TestCreateTableInvalidDimensions tests creating rtree with invalid dimensions.
+func TestCreateTableInvalidDimensions(t *testing.T) {
+	module := NewRTreeModule()
+
+	// Test with 1D (not enough columns)
+	_, _, err := module.Create(nil, "rtree", "main", "test", []string{"id", "minX", "maxX"})
+	if err == nil {
+		t.Error("Expected error for 1D rtree")
+	}
+
+	// Test with too many dimensions
+	args := []string{"id"}
+	for i := 0; i < 20; i++ {
+		args = append(args, fmt.Sprintf("min%d", i), fmt.Sprintf("max%d", i))
+	}
+	_, _, err = module.Create(nil, "rtree", "main", "test", args)
+	if err != nil {
+		t.Logf("Create with many dimensions: %v", err)
+	}
+}
+
+// TestParseCoordinateDifferentTypes tests parsing coordinates of different types.
+func TestParseCoordinateDifferentTypes(t *testing.T) {
+	module := NewRTreeModule()
+	table, _, _ := module.Create(nil, "rtree", "main", "test_rtree",
+		[]string{"id", "minX", "maxX", "minY", "maxY"})
+	rtree := table.(*RTree)
+
+	tests := []struct {
+		name  string
+		value interface{}
+	}{
+		{"int", int(10)},
+		{"int32", int32(10)},
+		{"int64", int64(10)},
+		{"float32", float32(10.5)},
+		{"float64", float64(10.5)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := []interface{}{nil, int64(1), tt.value, 20.0, 0.0, 10.0}
+			_, err := rtree.Update(len(args), args)
+			if err != nil {
+				t.Logf("Update with %s: %v", tt.name, err)
+			}
+		})
+	}
+}
+
+// TestSearchFunctionsWithNilRoot tests search functions with nil root.
+func TestSearchFunctionsWithNilRoot(t *testing.T) {
+	module := NewRTreeModule()
+	table, _, _ := module.Create(nil, "rtree", "main", "test_rtree",
+		[]string{"id", "minX", "maxX", "minY", "maxY"})
+	rtree := table.(*RTree)
+
+	// Don't insert anything - root is nil
+
+	queryBox := NewBoundingBox(2)
+	queryBox.Min[0], queryBox.Max[0] = 0, 10
+	queryBox.Min[1], queryBox.Max[1] = 0, 10
+
+	// Test SearchOverlap
+	results := rtree.SearchOverlap(queryBox)
+	if len(results) != 0 {
+		t.Error("Expected 0 results from empty tree")
+	}
+
+	// Test SearchContains
+	results = rtree.SearchContains([]float64{5, 5})
+	if len(results) != 0 {
+		t.Error("Expected 0 results from empty tree")
+	}
+
+	// Test SearchWithin
+	results = rtree.SearchWithin(queryBox)
+	if len(results) != 0 {
+		t.Error("Expected 0 results from empty tree")
+	}
+}

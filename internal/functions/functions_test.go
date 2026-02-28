@@ -1,6 +1,7 @@
 package functions
 
 import (
+	"fmt"
 	"math"
 	"testing"
 )
@@ -601,5 +602,273 @@ func TestScalarFuncExecution(t *testing.T) {
 
 	if result.AsInt64() != 5 {
 		t.Errorf("length('hello') = %d, want 5", result.AsInt64())
+	}
+}
+
+// TestValueTypeStringUnknown tests ValueType.String for unknown type
+func TestValueTypeStringUnknown(t *testing.T) {
+	var vt ValueType = 99 // Invalid type
+	result := vt.String()
+	if result != "unknown" {
+		t.Errorf("Unknown ValueType.String() = %q, want 'unknown'", result)
+	}
+}
+
+// TestScalarFuncCallError tests ScalarFunc.Call with function that returns error
+func TestScalarFuncCallError(t *testing.T) {
+	sf := NewScalarFunc("test", 1, func(args []Value) (Value, error) {
+		return NewNullValue(), fmt.Errorf("test error")
+	})
+
+	_, err := sf.Call([]Value{NewIntValue(1)})
+	if err == nil {
+		t.Error("Call() should propagate error from function")
+	}
+}
+
+// TestValueAsInt64NullValue tests AsInt64 on null value
+func TestValueAsInt64NullValue(t *testing.T) {
+	v := NewNullValue()
+	result := v.AsInt64()
+	if result != 0 {
+		t.Errorf("NULL AsInt64() = %d, want 0", result)
+	}
+}
+
+// TestValueAsStringNonTextValue tests AsString on non-text value
+func TestValueAsStringNonTextValue(t *testing.T) {
+	// Test with blob - returns string representation
+	v := NewBlobValue([]byte{1, 2, 3})
+	result := v.AsString()
+	if result != string([]byte{1, 2, 3}) {
+		t.Errorf("Blob AsString() = %q, want byte string", result)
+	}
+
+	// Test with integer
+	v = NewIntValue(42)
+	result = v.AsString()
+	if result != "42" {
+		t.Errorf("Integer AsString() = %q, want '42'", result)
+	}
+}
+
+// TestValueAsBlobNonBlobValue tests AsBlob on non-blob value
+func TestValueAsBlobNonBlobValue(t *testing.T) {
+	// Test with integer
+	v := NewIntValue(42)
+	result := v.AsBlob()
+	if result != nil {
+		t.Errorf("Integer AsBlob() = %v, want nil", result)
+	}
+
+	// Test with null
+	v = NewNullValue()
+	result = v.AsBlob()
+	if result != nil {
+		t.Errorf("NULL AsBlob() = %v, want nil", result)
+	}
+}
+
+// TestValueBytesForDifferentTypes tests Bytes on different value types
+func TestValueBytesForDifferentTypes(t *testing.T) {
+	// Test with text
+	v := NewTextValue("hello")
+	result := v.Bytes()
+	if result != 5 {
+		t.Errorf("Text Bytes() = %d, want 5", result)
+	}
+
+	// Test with integer (should return 8 for int64 size)
+	v = NewIntValue(42)
+	result = v.Bytes()
+	if result != 8 {
+		t.Errorf("Integer Bytes() = %d, want 8", result)
+	}
+
+	// Test with float (should return 8 for float64 size)
+	v = NewFloatValue(3.14)
+	result = v.Bytes()
+	if result != 8 {
+		t.Errorf("Float Bytes() = %d, want 8", result)
+	}
+
+	// Test with NULL (should return 0)
+	v = NewNullValue()
+	result = v.Bytes()
+	if result != 0 {
+		t.Errorf("NULL Bytes() = %d, want 0", result)
+	}
+}
+
+// TestRegistryLookupNonExistent tests Lookup with non-existent function
+func TestRegistryLookupNonExistent(t *testing.T) {
+	r := NewRegistry()
+	_, ok := r.Lookup("nonexistent")
+	if ok {
+		t.Error("Lookup() should return false for non-existent function")
+	}
+}
+
+// TestRegistryLookupWithArgsNoMatch tests LookupWithArgs with no matching overload
+func TestRegistryLookupWithArgsNoMatch(t *testing.T) {
+	r := NewRegistry()
+	// Register a user function with specific arg count
+	testFunc := NewScalarFunc("test", 2, func(args []Value) (Value, error) {
+		return NewIntValue(42), nil
+	})
+	r.RegisterUser(testFunc, 2)
+
+	// Lookup with matching arg count should work
+	_, ok := r.LookupWithArgs("test", 2)
+	if !ok {
+		t.Error("LookupWithArgs() should find function with matching arg count")
+	}
+
+	// Try to look up with different arg count when no variadic version exists
+	_, ok = r.LookupWithArgs("nonexistent", 5)
+	if ok {
+		t.Error("LookupWithArgs() should return false for non-existent function")
+	}
+}
+
+// TestRegistryUnregisterNonExistent tests Unregister with non-existent function
+func TestRegistryUnregisterNonExistent(t *testing.T) {
+	r := NewRegistry()
+	// Unregistering non-existent function should not panic
+	result := r.Unregister("nonexistent", 1)
+	if result {
+		t.Error("Unregister() should return false for non-existent function")
+	}
+}
+
+// TestRegistryGetAllFunctionsEmpty tests GetAllFunctions on empty registry
+func TestRegistryGetAllFunctionsEmpty(t *testing.T) {
+	r := NewRegistry()
+	funcs := r.GetAllFunctions()
+	if len(funcs) != 0 {
+		t.Errorf("GetAllFunctions() on empty registry = %d functions, want 0", len(funcs))
+	}
+}
+
+// TestValueAsInt64WithFloat tests AsInt64 on float value
+func TestValueAsInt64WithFloat(t *testing.T) {
+	v := NewFloatValue(42.7)
+	result := v.AsInt64()
+	if result != 42 {
+		t.Errorf("Float AsInt64() = %d, want 42", result)
+	}
+}
+
+// TestValueAsStringWithFloat tests AsString on float value
+func TestValueAsStringWithFloat(t *testing.T) {
+	v := NewFloatValue(3.14)
+	result := v.AsString()
+	if result != "3.14" {
+		t.Errorf("Float AsString() = %q, want '3.14'", result)
+	}
+}
+
+// TestRegistryLookupUserFunction tests user function priority
+func TestRegistryLookupUserFunction(t *testing.T) {
+	r := NewRegistry()
+
+	// Register a built-in
+	r.Register(NewScalarFunc("test", 1, func(args []Value) (Value, error) {
+		return NewIntValue(1), nil
+	}))
+
+	// Register a user function with same name (should have priority)
+	userFunc := NewScalarFunc("test", 1, func(args []Value) (Value, error) {
+		return NewIntValue(2), nil
+	})
+	r.RegisterUser(userFunc, 1)
+
+	// Lookup should find user function via LookupWithArgs
+	fn, ok := r.LookupWithArgs("test", 1)
+	if !ok {
+		t.Fatal("LookupWithArgs() should find test function")
+	}
+
+	result, err := fn.Call([]Value{NewIntValue(0)})
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	if result.AsInt64() != 2 {
+		t.Errorf("User function should be used, got result = %d, want 2", result.AsInt64())
+	}
+}
+
+// TestRegistryUnregisterVariadic tests unregistering variadic function
+func TestRegistryUnregisterVariadic(t *testing.T) {
+	r := NewRegistry()
+
+	// Register a variadic function
+	varFunc := NewScalarFunc("vfunc", -1, func(args []Value) (Value, error) {
+		return NewIntValue(int64(len(args))), nil
+	})
+	r.RegisterUser(varFunc, -1)
+
+	// Verify it's there
+	_, ok := r.Lookup("vfunc")
+	if !ok {
+		t.Error("Variadic function should be registered")
+	}
+
+	// Unregister it
+	removed := r.Unregister("vfunc", -1)
+	if !removed {
+		t.Error("Unregister() should return true")
+	}
+
+	// Verify it's gone
+	_, ok = r.Lookup("vfunc")
+	if ok {
+		t.Error("Variadic function should be unregistered")
+	}
+}
+
+// TestRegistryGetAllFunctionsWithUserFuncs tests GetAllFunctions with user functions
+func TestRegistryGetAllFunctionsWithUserFuncs(t *testing.T) {
+	r := NewRegistry()
+
+	// Register some functions
+	r.Register(NewScalarFunc("builtin", 1, func(args []Value) (Value, error) {
+		return NewIntValue(1), nil
+	}))
+
+	userFunc := NewScalarFunc("user", 1, func(args []Value) (Value, error) {
+		return NewIntValue(2), nil
+	})
+	r.RegisterUser(userFunc, 1)
+
+	funcs := r.GetAllFunctions()
+	if len(funcs) < 1 {
+		t.Errorf("GetAllFunctions() = %d functions, want at least 1", len(funcs))
+	}
+}
+
+// TestRegistryLookupVariadicFallback tests variadic fallback in Lookup
+func TestRegistryLookupVariadicFallback(t *testing.T) {
+	r := NewRegistry()
+
+	// Only register variadic version
+	varFunc := NewScalarFunc("vfunc", -1, func(args []Value) (Value, error) {
+		return NewIntValue(int64(len(args))), nil
+	})
+	r.RegisterUser(varFunc, -1)
+
+	// Lookup without args should find variadic
+	fn, ok := r.Lookup("vfunc")
+	if !ok {
+		t.Error("Lookup() should find variadic function")
+	}
+
+	// Should work with any number of args
+	result, err := fn.Call([]Value{NewIntValue(1), NewIntValue(2), NewIntValue(3)})
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	if result.AsInt64() != 3 {
+		t.Errorf("Variadic function result = %d, want 3", result.AsInt64())
 	}
 }
