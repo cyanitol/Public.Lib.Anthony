@@ -816,7 +816,7 @@ func TestSQLiteViewErrors(t *testing.T) {
 }
 
 // TestSQLiteViewInsteadOfTriggers tests INSTEAD OF triggers on views
-func TestSQLiteViewInsteadOfTriggers(t *testing.T) {
+func TestSQLiteViewInsteadOfTriggersAdvanced(t *testing.T) {
 	db := setupMemoryDB(t)
 	defer db.Close()
 

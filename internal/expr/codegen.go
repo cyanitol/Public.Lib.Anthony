@@ -939,20 +939,52 @@ func (g *CodeGenerator) generateSubquery(e *parser.SubqueryExpr) (int, error) {
 }
 
 // generateLikeExpr generates code for LIKE expressions.
-func (g *CodeGenerator) generateLikeExpr(patternReg, valueReg int) (int, error) {
+func (g *CodeGenerator) generateLikeExpr(leftReg, rightReg int) (int, error) {
 	resultReg := g.AllocReg()
 	// For now, use function call approach
 	// In real implementation, would use optimized LIKE opcode
-	g.vdbe.AddOp(vdbe.OpFunction, patternReg, 2, resultReg)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "LIKE")
+
+	// Allocate consecutive registers for the two arguments (value, pattern)
+	firstArg := g.AllocRegs(2)
+
+	// Move arguments to consecutive registers
+	if leftReg != firstArg {
+		g.vdbe.AddOp(vdbe.OpMove, leftReg, firstArg, 0)
+	}
+	if rightReg != firstArg+1 {
+		g.vdbe.AddOp(vdbe.OpMove, rightReg, firstArg+1, 0)
+	}
+
+	// Emit function call
+	addr := g.vdbe.AddOp(vdbe.OpFunction, 0, firstArg, resultReg)
+	g.vdbe.Program[addr].P4.Z = "like"
+	g.vdbe.Program[addr].P4Type = vdbe.P4Static
+	g.vdbe.Program[addr].P5 = 2
+	g.vdbe.SetComment(addr, "LIKE")
 	return resultReg, nil
 }
 
 // generateGlobExpr generates code for GLOB expressions.
-func (g *CodeGenerator) generateGlobExpr(patternReg, valueReg int) (int, error) {
+func (g *CodeGenerator) generateGlobExpr(leftReg, rightReg int) (int, error) {
 	resultReg := g.AllocReg()
-	g.vdbe.AddOp(vdbe.OpFunction, patternReg, 2, resultReg)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "GLOB")
+
+	// Allocate consecutive registers for the two arguments (value, pattern)
+	firstArg := g.AllocRegs(2)
+
+	// Move arguments to consecutive registers
+	if leftReg != firstArg {
+		g.vdbe.AddOp(vdbe.OpMove, leftReg, firstArg, 0)
+	}
+	if rightReg != firstArg+1 {
+		g.vdbe.AddOp(vdbe.OpMove, rightReg, firstArg+1, 0)
+	}
+
+	// Emit function call
+	addr := g.vdbe.AddOp(vdbe.OpFunction, 0, firstArg, resultReg)
+	g.vdbe.Program[addr].P4.Z = "glob"
+	g.vdbe.Program[addr].P4Type = vdbe.P4Static
+	g.vdbe.Program[addr].P5 = 2
+	g.vdbe.SetComment(addr, "GLOB")
 	return resultReg, nil
 }
 

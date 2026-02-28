@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 )

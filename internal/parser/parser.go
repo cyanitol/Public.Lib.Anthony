@@ -2920,6 +2920,11 @@ func (p *Parser) parseFunctionCall(name string) (Expression, error) {
 		return nil, err
 	}
 
+	// Parse optional OVER clause for window functions
+	if err := p.parseFunctionOver(fn); err != nil {
+		return nil, err
+	}
+
 	return fn, nil
 }
 
@@ -2942,6 +2947,58 @@ func (p *Parser) parseFunctionFilter(fn *FunctionExpr) error {
 	if !p.match(TK_RP) {
 		return p.error("expected ) after FILTER")
 	}
+	return nil
+}
+
+// parseFunctionOver parses the optional OVER clause for window functions.
+func (p *Parser) parseFunctionOver(fn *FunctionExpr) error {
+	if !p.match(TK_OVER) {
+		return nil
+	}
+	if !p.match(TK_LP) {
+		return p.error("expected ( after OVER")
+	}
+
+	windowSpec := &WindowSpec{}
+
+	// Parse optional PARTITION BY clause
+	if p.match(TK_PARTITION) {
+		if !p.match(TK_BY) {
+			return p.error("expected BY after PARTITION")
+		}
+		partitionExprs, err := p.parseExpressionList()
+		if err != nil {
+			return err
+		}
+		windowSpec.PartitionBy = partitionExprs
+	}
+
+	// Parse optional ORDER BY clause
+	if p.match(TK_ORDER) {
+		if !p.match(TK_BY) {
+			return p.error("expected BY after ORDER")
+		}
+		orderTerms, err := p.parseOrderByList()
+		if err != nil {
+			return err
+		}
+		windowSpec.OrderBy = orderTerms
+	}
+
+	// Parse optional frame specification (ROWS, RANGE, GROUPS)
+	if p.check(TK_ROWS) || p.check(TK_RANGE) || p.check(TK_GROUPS) {
+		frameSpec, err := p.parseFrameSpec()
+		if err != nil {
+			return err
+		}
+		windowSpec.Frame = frameSpec
+	}
+
+	if !p.match(TK_RP) {
+		return p.error("expected ) after window specification")
+	}
+
+	fn.Over = windowSpec
 	return nil
 }
 
@@ -3236,4 +3293,94 @@ func StringValue(expr Expression) (string, error) {
 		return lit.Value, nil
 	}
 	return "", fmt.Errorf("not a string literal")
+}
+
+// parseFrameSpec parses a window frame specification (ROWS/RANGE/GROUPS BETWEEN...).
+func (p *Parser) parseFrameSpec() (*FrameSpec, error) {
+	frameSpec := &FrameSpec{}
+
+	// Parse frame mode (ROWS, RANGE, or GROUPS)
+	if p.match(TK_ROWS) {
+		frameSpec.Mode = FrameRows
+	} else if p.match(TK_RANGE) {
+		frameSpec.Mode = FrameRange
+	} else if p.match(TK_GROUPS) {
+		frameSpec.Mode = FrameGroups
+	} else {
+		return nil, p.error("expected ROWS, RANGE, or GROUPS")
+	}
+
+	// Parse BETWEEN clause or simple frame bound
+	if p.match(TK_BETWEEN) {
+		// Parse start bound
+		start, err := p.parseFrameBound()
+		if err != nil {
+			return nil, err
+		}
+		frameSpec.Start = start
+
+		if !p.match(TK_AND) {
+			return nil, p.error("expected AND in frame specification")
+		}
+
+		// Parse end bound
+		end, err := p.parseFrameBound()
+		if err != nil {
+			return nil, err
+		}
+		frameSpec.End = end
+	} else {
+		// Single bound (implicitly UNBOUNDED PRECEDING to specified bound)
+		bound, err := p.parseFrameBound()
+		if err != nil {
+			return nil, err
+		}
+		// For single bound, start is UNBOUNDED PRECEDING and end is the specified bound
+		frameSpec.Start = FrameBound{Type: BoundUnboundedPreceding}
+		frameSpec.End = bound
+	}
+
+	return frameSpec, nil
+}
+
+// parseFrameBound parses a single frame boundary.
+func (p *Parser) parseFrameBound() (FrameBound, error) {
+	bound := FrameBound{}
+
+	if p.match(TK_UNBOUNDED) {
+		if p.match(TK_PRECEDING) {
+			bound.Type = BoundUnboundedPreceding
+		} else if p.match(TK_FOLLOWING) {
+			bound.Type = BoundUnboundedFollowing
+		} else {
+			return bound, p.error("expected PRECEDING or FOLLOWING after UNBOUNDED")
+		}
+		return bound, nil
+	}
+
+	if p.match(TK_CURRENT) {
+		if !p.match(TK_ROW) {
+			return bound, p.error("expected ROW after CURRENT")
+		}
+		bound.Type = BoundCurrentRow
+		return bound, nil
+	}
+
+	// Parse numeric offset
+	expr, err := p.parsePrimaryExpression()
+	if err != nil {
+		return bound, err
+	}
+
+	if p.match(TK_PRECEDING) {
+		bound.Type = BoundPreceding
+		bound.Offset = expr
+	} else if p.match(TK_FOLLOWING) {
+		bound.Type = BoundFollowing
+		bound.Offset = expr
+	} else {
+		return bound, p.error("expected PRECEDING or FOLLOWING after offset")
+	}
+
+	return bound, nil
 }
