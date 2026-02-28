@@ -208,12 +208,12 @@ func TestComprehensiveParserCoverage(t *testing.T) {
 		// isPragmaValueIdentifier - 75.0%
 		{
 			name:    "PRAGMA with YES",
-			sql:     "PRAGMA test = YES",
+			sql:     "PRAGMA secure_delete = YES",
 			wantErr: false,
 		},
 		{
 			name:    "PRAGMA with NO - unsupported",
-			sql:     "PRAGMA test = NO",
+			sql:     "PRAGMA secure_delete = NO",
 			wantErr: true,
 		},
 

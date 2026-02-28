@@ -3,6 +3,8 @@ package btree
 import (
 	"encoding/binary"
 	"fmt"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
 )
 
 // CellInfo contains parsed information about a B-tree cell
@@ -84,14 +86,30 @@ func completeLeafCellParse(info *CellInfo, cellData []byte, offset int, usableSi
 // calculateCellSizeAndLocal sets LocalPayload and CellSize.
 func calculateCellSizeAndLocal(info *CellInfo, offset int, maxLocal, minLocal, usableSize uint32) {
 	if info.PayloadSize <= maxLocal {
-		info.LocalPayload = uint16(info.PayloadSize)
-		info.CellSize = uint16(offset + int(info.PayloadSize))
+		localPayload, err := security.SafeCastUint32ToUint16(info.PayloadSize)
+		if err != nil {
+			// If payload size doesn't fit in uint16, use maxLocal instead
+			localPayload = uint16(maxLocal)
+		}
+		info.LocalPayload = localPayload
+
+		cellSize, err := security.SafeCastIntToUint16(offset + int(info.PayloadSize))
+		if err != nil {
+			// Should not happen in practice, but handle defensively
+			cellSize = 4
+		}
+		info.CellSize = cellSize
 		if info.CellSize < 4 {
 			info.CellSize = 4
 		}
 	} else {
 		info.LocalPayload = calculateLocalPayload(info.PayloadSize, minLocal, maxLocal, usableSize)
-		info.CellSize = uint16(offset + int(info.LocalPayload) + 4)
+		cellSize, err := security.SafeCastIntToUint16(offset + int(info.LocalPayload) + 4)
+		if err != nil {
+			// Should not happen in practice, but handle defensively
+			cellSize = uint16(offset) + info.LocalPayload + 4
+		}
+		info.CellSize = cellSize
 	}
 }
 
@@ -156,15 +174,28 @@ func parseIndexLeafCell(cellData []byte, usableSize uint32) (*CellInfo, error) {
 
 	if info.PayloadSize <= maxLocal {
 		// Entire payload fits locally
-		info.LocalPayload = uint16(info.PayloadSize)
-		info.CellSize = uint16(offset + int(info.PayloadSize))
+		localPayload, err := security.SafeCastUint32ToUint16(info.PayloadSize)
+		if err != nil {
+			localPayload = uint16(maxLocal)
+		}
+		info.LocalPayload = localPayload
+
+		cellSize, err := security.SafeCastIntToUint16(offset + int(info.PayloadSize))
+		if err != nil {
+			cellSize = 4
+		}
+		info.CellSize = cellSize
 		if info.CellSize < 4 {
 			info.CellSize = 4
 		}
 	} else {
 		// Payload spills to overflow pages
 		info.LocalPayload = calculateLocalPayload(info.PayloadSize, minLocal, maxLocal, usableSize)
-		info.CellSize = uint16(offset + int(info.LocalPayload) + 4) // +4 for overflow page number
+		cellSize, err := security.SafeCastIntToUint16(offset + int(info.LocalPayload) + 4)
+		if err != nil {
+			cellSize = uint16(offset) + info.LocalPayload + 4
+		}
+		info.CellSize = cellSize
 	}
 
 	// Extract payload pointer
@@ -213,15 +244,28 @@ func parseIndexInteriorCell(cellData []byte, usableSize uint32) (*CellInfo, erro
 
 	if info.PayloadSize <= maxLocal {
 		// Entire payload fits locally
-		info.LocalPayload = uint16(info.PayloadSize)
-		info.CellSize = uint16(offset + int(info.PayloadSize))
+		localPayload, err := security.SafeCastUint32ToUint16(info.PayloadSize)
+		if err != nil {
+			localPayload = uint16(maxLocal)
+		}
+		info.LocalPayload = localPayload
+
+		cellSize, err := security.SafeCastIntToUint16(offset + int(info.PayloadSize))
+		if err != nil {
+			cellSize = 4
+		}
+		info.CellSize = cellSize
 		if info.CellSize < 4 {
 			info.CellSize = 4
 		}
 	} else {
 		// Payload spills to overflow pages
 		info.LocalPayload = calculateLocalPayload(info.PayloadSize, minLocal, maxLocal, usableSize)
-		info.CellSize = uint16(offset + int(info.LocalPayload) + 4) // +4 for overflow page number
+		cellSize, err := security.SafeCastIntToUint16(offset + int(info.LocalPayload) + 4)
+		if err != nil {
+			cellSize = uint16(offset) + info.LocalPayload + 4
+		}
+		info.CellSize = cellSize
 	}
 
 	// Extract payload pointer
@@ -261,17 +305,52 @@ func calculateMaxLocal(usableSize uint32, isTable bool) uint32 {
 // calculateMinLocal calculates the minimum amount of payload that must be stored locally
 func calculateMinLocal(usableSize uint32, isTable bool) uint32 {
 	// SQLite uses: minLocal = (usableSize-12)*32/255 - 23
-	// Simplified: approximately (usableSize - 12) / 8
-	return ((usableSize - 12) * 32 / 255) - 23
+	// Validate that usableSize is large enough to avoid underflow
+	if usableSize < security.MinUsableSize {
+		// Return safe minimum if usableSize is too small
+		return 0
+	}
+
+	// Prevent underflow: ensure (usableSize-12)*32/255 >= 23
+	intermediate := (usableSize - 12) * 32 / 255
+	if intermediate < 23 {
+		return 0
+	}
+
+	return intermediate - 23
 }
 
 // calculateLocalPayload calculates how much payload to store locally when it overflows
 func calculateLocalPayload(payloadSize uint32, minLocal, maxLocal, usableSize uint32) uint16 {
-	surplus := minLocal + (payloadSize-minLocal)%(usableSize-4)
-	if surplus <= maxLocal {
-		return uint16(surplus)
+	// Validate usableSize to prevent underflow
+	if usableSize < 4 {
+		// Fallback to minLocal if usableSize is too small
+		localPayload, err := security.SafeCastUint32ToUint16(minLocal)
+		if err != nil {
+			return 0
+		}
+		return localPayload
 	}
-	return uint16(minLocal)
+
+	surplus := minLocal + (payloadSize-minLocal)%(usableSize-4)
+
+	if surplus <= maxLocal {
+		localPayload, err := security.SafeCastUint32ToUint16(surplus)
+		if err != nil {
+			// If surplus doesn't fit in uint16, use minLocal instead
+			localPayload, err = security.SafeCastUint32ToUint16(minLocal)
+			if err != nil {
+				return 0
+			}
+		}
+		return localPayload
+	}
+
+	localPayload, err := security.SafeCastUint32ToUint16(minLocal)
+	if err != nil {
+		return 0
+	}
+	return localPayload
 }
 
 // String returns a string representation of the cell info

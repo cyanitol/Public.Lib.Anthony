@@ -5,8 +5,10 @@ This is the complete documentation index for the Anthony pure Go SQLite implemen
 ## Getting Started
 
 - **[QUICKSTART.md](QUICKSTART.md)** - Quick start guide for using Anthony SQLite
+- **[API.md](API.md)** - Complete public API documentation
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - Overall architecture and design
 - **[README (root)](../README.md)** - Project overview and installation
+- **[CONTRIBUTING (root)](../CONTRIBUTING.md)** - Contributor guidelines and development workflow
 
 ## Core Package Documentation
 
@@ -137,6 +139,7 @@ This is the complete documentation index for the Anthony pure Go SQLite implemen
 
 - **[EXPLAIN](PHASE2_EXPLAIN_SUMMARY.md)** - Query plan explanation
 - **[Lock Ordering](LOCK_ORDERING.md)** - Concurrency control
+- **[SECURITY](SECURITY.md)** - Security model, controls, and best practices
 
 ## Implementation Status
 
@@ -160,6 +163,14 @@ This is the complete documentation index for the Anthony pure Go SQLite implemen
 
 ## Development Documentation
 
+### Contributor Guide
+- **[CONTRIBUTING (root)](../CONTRIBUTING.md)** - Complete contributor documentation
+  - Code style guidelines
+  - Pull request process
+  - Commit message format
+  - Security considerations
+  - Testing requirements
+
 ### Implementation Guides
 - **[CTE Implementation Status](CTE_IMPLEMENTATION_STATUS.md)**
 - **[Subquery Implementation](SUBQUERY_IMPLEMENTATION.md)**
@@ -171,24 +182,30 @@ This is the complete documentation index for the Anthony pure Go SQLite implemen
 
 ## Testing
 
-Each package includes comprehensive tests. Run all tests:
+- **[TESTING.md](TESTING.md)** - Comprehensive testing guide
+  - Unit, integration, and security tests
+  - Race detection and fuzz testing
+  - Coverage goals and reporting
+  - Troubleshooting and best practices
+
+Each package includes comprehensive tests. Quick reference:
 
 ```bash
 # All tests
 go test ./...
 
-# Specific package
-go test ./internal/btree/...
-go test ./internal/vdbe/...
-
 # With coverage
-go test -cover ./...
+make test-cover
 
-# Verbose output
-go test -v ./internal/parser/...
+# Race detection
+make test-race
+
+# See TESTING.md for detailed testing guide
 ```
 
 ## Contributing
+
+See **[CONTRIBUTING.md](../CONTRIBUTING.md)** for complete contributor guidelines.
 
 When adding new features or fixing bugs:
 
@@ -198,6 +215,7 @@ When adding new features or fixing bugs:
 4. Keep cyclomatic complexity ≤ 10
 5. Document all public APIs
 6. Update this INDEX.md if adding new documentation
+7. Follow security best practices in [SECURITY.md](SECURITY.md)
 
 ## References
 

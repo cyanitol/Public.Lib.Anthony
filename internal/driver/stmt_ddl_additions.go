@@ -31,7 +31,7 @@ func (s *Stmt) compileCreateIndex(vm *vdbe.VDBE, stmt *parser.CreateIndexStmt, a
 	} else {
 		// For in-memory databases without btree, use a placeholder
 		// Use higher page numbers for indexes to avoid conflicts
-		index.RootPage = uint32(1000 + len(s.conn.schema.Indexes))
+		index.RootPage = uint32(1000 + s.conn.schema.IndexCount())
 	}
 
 	// In a full implementation, this would also:

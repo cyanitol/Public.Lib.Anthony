@@ -10,6 +10,7 @@ import (
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/pager"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
 )
 
 // dbState represents shared state for a database file
@@ -143,13 +144,14 @@ func (d *Driver) newMemoryDBState() (*dbState, error) {
 // createConnection creates a new connection with the given state.
 func (d *Driver) createConnection(filename string, state *dbState, existed bool) (driver.Conn, error) {
 	conn := &Conn{
-		driver:     d,
-		filename:   filename,
-		pager:      state.pager,
-		btree:      state.btree,
-		schema:     state.schema,
-		dbRegistry: schema.NewDatabaseRegistry(),
-		stmts:      make(map[*Stmt]struct{}),
+		driver:         d,
+		filename:       filename,
+		pager:          state.pager,
+		btree:          state.btree,
+		schema:         state.schema,
+		dbRegistry:     schema.NewDatabaseRegistry(),
+		stmts:          make(map[*Stmt]struct{}),
+		securityConfig: security.DefaultSecurityConfig(),
 	}
 	if err := conn.openDatabase(existed); err != nil {
 		d.releaseState(filename, state)
@@ -162,13 +164,14 @@ func (d *Driver) createConnection(filename string, state *dbState, existed bool)
 // createMemoryConnection creates a new in-memory database connection.
 func (d *Driver) createMemoryConnection(memoryID string, state *dbState) (driver.Conn, error) {
 	conn := &Conn{
-		driver:     d,
-		filename:   memoryID,
-		pager:      state.pager,
-		btree:      state.btree,
-		schema:     state.schema,
-		dbRegistry: schema.NewDatabaseRegistry(),
-		stmts:      make(map[*Stmt]struct{}),
+		driver:         d,
+		filename:       memoryID,
+		pager:          state.pager,
+		btree:          state.btree,
+		schema:         state.schema,
+		dbRegistry:     schema.NewDatabaseRegistry(),
+		stmts:          make(map[*Stmt]struct{}),
+		securityConfig: security.DefaultSecurityConfig(),
 	}
 	// Memory databases are always new, so schema never pre-loaded
 	if err := conn.openDatabase(false); err != nil {

@@ -11,6 +11,7 @@ import (
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/planner"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
 )
 
@@ -27,9 +28,8 @@ type Stmt struct {
 // Close closes the statement.
 func (s *Stmt) Close() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.closed {
+		s.mu.Unlock()
 		return nil
 	}
 
@@ -41,8 +41,16 @@ func (s *Stmt) Close() error {
 		s.vdbe = nil
 	}
 
+	// Save connection reference before unlocking
+	conn := s.conn
+	s.mu.Unlock()
+
 	// Remove from connection's statement map
-	s.conn.removeStmt(s)
+	// This is done after releasing stmt.mu to avoid deadlock
+	// (conn.removeStmt acquires conn.mu)
+	if conn != nil {
+		conn.removeStmt(s)
+	}
 
 	return nil
 }
@@ -68,6 +76,16 @@ func (s *Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (drive
 	}
 	s.mu.Unlock()
 
+	// Check connection state under lock to avoid TOCTOU race
+	s.conn.mu.Lock()
+	inTx := s.conn.inTx
+	connClosed := s.conn.closed
+	s.conn.mu.Unlock()
+
+	if connClosed {
+		return nil, driver.ErrBadConn
+	}
+
 	// Compile the statement to VDBE bytecode
 	vm, err := s.compile(args)
 	if err != nil {
@@ -78,14 +96,14 @@ func (s *Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (drive
 	// Execute the statement
 	if err := vm.Run(); err != nil {
 		// Rollback on error if in autocommit mode
-		if !s.conn.inTx {
+		if !inTx {
 			s.conn.pager.Rollback()
 		}
 		return nil, fmt.Errorf("execution error: %w", err)
 	}
 
 	// Auto-commit if not in explicit transaction and pager has a write transaction
-	if !s.conn.inTx && s.conn.pager.InWriteTransaction() {
+	if !inTx && s.conn.pager.InWriteTransaction() {
 		if err := s.conn.pager.Commit(); err != nil {
 			return nil, fmt.Errorf("auto-commit error: %w", err)
 		}
@@ -113,6 +131,15 @@ func (s *Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driv
 		return nil, driver.ErrBadConn
 	}
 	s.mu.Unlock()
+
+	// Check connection state under lock to avoid TOCTOU race
+	s.conn.mu.Lock()
+	connClosed := s.conn.closed
+	s.conn.mu.Unlock()
+
+	if connClosed {
+		return nil, driver.ErrBadConn
+	}
 
 	// Compile the statement to VDBE bytecode
 	vm, err := s.compile(args)
@@ -3108,4 +3135,14 @@ func (s *Stmt) parseLiteralValue(expr *parser.LiteralExpr) interface{} {
 	default:
 		return expr.Value
 	}
+}
+
+// validateDatabasePath validates a database file path using the connection's security configuration.
+func (s *Stmt) validateDatabasePath(path string) (string, error) {
+	if s.conn.securityConfig == nil {
+		// No security config, return path as-is (should not happen in normal operation)
+		return path, nil
+	}
+	// Import the security package to use ValidateDatabasePath
+	return security.ValidateDatabasePath(path, s.conn.securityConfig)
 }

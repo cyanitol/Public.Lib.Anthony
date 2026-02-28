@@ -1,0 +1,18 @@
+package btree
+
+import (
+	"fmt"
+	"testing"
+)
+
+func TestDebugPageCreation(t *testing.T) {
+	page := createValidLeafPage(4096)
+	fmt.Printf("Page type after creation: 0x%02x\n", page[0])
+	fmt.Printf("First 20 bytes: %v\n", page[:20])
+	
+	bt := NewBtree(4096)
+	err := bt.validatePage(page, 1)
+	if err != nil {
+		t.Errorf("Validation failed: %v", err)
+	}
+}

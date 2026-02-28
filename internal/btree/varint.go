@@ -9,21 +9,38 @@ package btree
 // - High bit (0x80) set on all bytes except the last
 // - Most significant byte first (big-endian)
 // - Maximum of 9 bytes (last byte uses all 8 bits)
+// Returns 0 if buffer is too small.
 func PutVarint(p []byte, v uint64) int {
+	// Validate minimum buffer length
+	if len(p) == 0 {
+		return 0
+	}
+
 	if v <= 0x7f {
 		p[0] = byte(v & 0x7f)
 		return 1
 	}
+
+	if len(p) < 2 {
+		return 0
+	}
+
 	if v <= 0x3fff {
 		p[0] = byte((v>>7)&0x7f) | 0x80
 		p[1] = byte(v & 0x7f)
 		return 2
 	}
+
 	return putVarint64(p, v)
 }
 
 // putVarint64 handles the general case of encoding a 64-bit varint
 func putVarint64(p []byte, v uint64) int {
+	// Validate buffer length for worst case (9 bytes)
+	if len(p) < 9 {
+		return 0
+	}
+
 	if v&(uint64(0xff000000)<<32) != 0 {
 		// 9-byte case: all 8 bits of the 9th byte are used
 		p[8] = byte(v)
@@ -79,6 +96,12 @@ func decodeShortVarint(p []byte) (uint64, int) {
 }
 
 func decodeMultiByteVarint(p []byte) (uint64, int) {
+	// This function should only be called when len(p) >= 9 is verified
+	// by the caller (GetVarint), but we add an extra safety check
+	if len(p) < 9 {
+		return 0, 0
+	}
+
 	var v uint64
 	for i := 0; i < 8; i++ {
 		v = (v << 7) | uint64(p[i]&0x7f)
@@ -92,6 +115,11 @@ func decodeMultiByteVarint(p []byte) (uint64, int) {
 // GetVarint reads a 64-bit variable-length integer from p and returns
 // the value and the number of bytes read.
 func GetVarint(p []byte) (uint64, int) {
+	// Validate minimum buffer length
+	if len(p) == 0 {
+		return 0, 0
+	}
+
 	if p[0] < 0x80 {
 		return uint64(p[0]), 1
 	}

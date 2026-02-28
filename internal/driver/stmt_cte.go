@@ -77,7 +77,7 @@ func (s *Stmt) compileNonRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planne
 	tempTable.RootPage = uint32(cursorNum) // Use RootPage to store cursor number for ephemeral tables
 
 	// Register the temp table in the schema so it can be found during compilation
-	s.conn.schema.Tables[tempTableName] = tempTable
+	s.conn.schema.AddTableDirect(tempTable)
 
 	// Rewrite the CTE's SELECT to use already-materialized CTEs
 	cteSelect := s.rewriteSelectWithCTETables(def.Select, cteTempTables)
@@ -422,8 +422,8 @@ func (s *Stmt) setupRecursiveTables(vm *vdbe.VDBE, cteName string, def *planner.
 
 // registerRecursiveTempTables registers temporary tables in the schema.
 func (s *Stmt) registerRecursiveTempTables(tempTable, currentTable *schema.Table) {
-	s.conn.schema.Tables[tempTable.Name] = tempTable
-	s.conn.schema.Tables[currentTable.Name] = currentTable
+	s.conn.schema.AddTableDirect(tempTable)
+	s.conn.schema.AddTableDirect(currentTable)
 }
 
 // executeAnchorMember executes the anchor (non-recursive) part of a recursive CTE.

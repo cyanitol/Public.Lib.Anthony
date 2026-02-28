@@ -61,6 +61,11 @@ func (s *Schema) CreateView(stmt *parser.CreateViewStmt) (*View, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Check for reserved names
+	if IsReservedName(stmt.Name) {
+		return nil, fmt.Errorf("view name is reserved: %s", stmt.Name)
+	}
+
 	// Check if view already exists
 	if existing, err := s.checkViewExists(stmt.Name, stmt.IfNotExists); err != nil || existing != nil {
 		return existing, err

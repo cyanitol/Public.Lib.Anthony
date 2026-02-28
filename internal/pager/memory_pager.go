@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
 )
 
 // MemoryPager implements a fully in-memory pager that stores pages in a map.
@@ -381,6 +383,11 @@ func (mp *MemoryPager) AllocatePage() (Pgno, error) {
 	}
 
 	// No free pages available - allocate new page at end
+	// Security: Check page count limit to prevent memory exhaustion
+	if mp.dbSize >= Pgno(security.MaxMemoryDBPages) {
+		return 0, fmt.Errorf("memory database page limit exceeded: %d pages (limit: %d)", mp.dbSize, security.MaxMemoryDBPages)
+	}
+
 	mp.dbSize++
 	newPgno := mp.dbSize
 	mp.pages[newPgno] = make([]byte, mp.pageSize)

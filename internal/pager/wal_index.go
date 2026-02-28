@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"os"
 	"sync"
 	"syscall"
@@ -34,10 +35,11 @@ const (
 
 // Common errors
 var (
-	ErrWALIndexCorrupt = errors.New("WAL index is corrupt")
-	ErrWALIndexLocked  = errors.New("WAL index is locked")
-	ErrInvalidReader   = errors.New("invalid reader ID")
-	ErrFrameNotFound   = errors.New("frame not found in WAL index")
+	ErrWALIndexCorrupt      = errors.New("WAL index is corrupt")
+	ErrWALIndexLocked       = errors.New("WAL index is locked")
+	ErrInvalidReader        = errors.New("invalid reader ID")
+	ErrFrameNotFound        = errors.New("frame not found in WAL index")
+	ErrWALChecksumMismatch  = errors.New("WAL frame checksum mismatch")
 )
 
 // WALIndexHeader represents the header of the WAL index (shared memory).
@@ -788,4 +790,61 @@ func (w *WALIndex) IsInitialized() bool {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.initialized
+}
+
+// ValidateFrameChecksum validates a WAL frame using CRC32 checksum.
+// The frame data should include the page data, and expectedChecksum is compared against it.
+func (w *WALIndex) ValidateFrameChecksum(frameData []byte, expectedChecksum uint32) bool {
+	actualChecksum := crc32.ChecksumIEEE(frameData)
+	return actualChecksum == expectedChecksum
+}
+
+// CalculateFrameChecksum calculates CRC32 checksum for a WAL frame.
+func (w *WALIndex) CalculateFrameChecksum(frameData []byte) uint32 {
+	return crc32.ChecksumIEEE(frameData)
+}
+
+// InsertFrameWithChecksum adds a frame to the WAL index with checksum validation.
+// This is a safer version of InsertFrame that validates data integrity.
+func (w *WALIndex) InsertFrameWithChecksum(pgno uint32, frameNo uint32, frameData []byte, checksum uint32) error {
+	// Validate checksum before inserting
+	if !w.ValidateFrameChecksum(frameData, checksum) {
+		return fmt.Errorf("%w: frame %d page %d", ErrWALChecksumMismatch, frameNo, pgno)
+	}
+
+	// Proceed with normal insertion
+	return w.InsertFrame(pgno, frameNo)
+}
+
+// UpdateFrameChecksum updates the frame checksum in the header.
+// This should be called when new frames are added to the WAL.
+func (w *WALIndex) UpdateFrameChecksum(checksum1, checksum2 uint32) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if !w.initialized {
+		return errors.New("WAL index not initialized")
+	}
+
+	w.header.mu.Lock()
+	w.header.AFrameCksum[0] = checksum1
+	w.header.AFrameCksum[1] = checksum2
+	w.header.Change++
+	w.header.mu.Unlock()
+
+	return w.writeHeader()
+}
+
+// GetFrameChecksum returns the current frame checksums from the header.
+func (w *WALIndex) GetFrameChecksum() (uint32, uint32, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if !w.initialized || w.header == nil {
+		return 0, 0, errors.New("WAL index not initialized")
+	}
+
+	w.header.mu.RLock()
+	defer w.header.mu.RUnlock()
+	return w.header.AFrameCksum[0], w.header.AFrameCksum[1], nil
 }

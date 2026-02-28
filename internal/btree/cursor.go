@@ -49,6 +49,20 @@ func NewCursor(bt *Btree, rootPage uint32) *BtCursor {
 	}
 }
 
+// validateCursorState validates that the cursor is in a valid state for operations
+func (c *BtCursor) validateCursorState() error {
+	if c.Btree == nil {
+		return fmt.Errorf("cursor has nil btree")
+	}
+	if c.RootPage == 0 {
+		return fmt.Errorf("cursor has invalid root page")
+	}
+	if c.Depth >= MaxBtreeDepth {
+		return fmt.Errorf("cursor depth exceeded maximum")
+	}
+	return nil
+}
+
 func (c *BtCursor) resetToRoot() {
 	c.Depth = -1
 	c.AtFirst = false
@@ -57,6 +71,9 @@ func (c *BtCursor) resetToRoot() {
 
 // MoveToFirst moves the cursor to the first entry in the B-tree
 func (c *BtCursor) MoveToFirst() error {
+	if err := c.validateCursorState(); err != nil {
+		return err
+	}
 	c.resetToRoot()
 	if err := c.descendToFirst(c.RootPage); err != nil {
 		return err
@@ -67,6 +84,9 @@ func (c *BtCursor) MoveToFirst() error {
 
 // MoveToLast moves the cursor to the last entry in the B-tree
 func (c *BtCursor) MoveToLast() error {
+	if err := c.validateCursorState(); err != nil {
+		return err
+	}
 	c.resetForMoveToLast()
 	return c.navigateToRightmostLeaf(c.RootPage)
 }
@@ -461,7 +481,7 @@ func (c *BtCursor) IsValid() bool {
 
 // GetKey returns the key of the current entry
 func (c *BtCursor) GetKey() int64 {
-	if c.State != CursorValid || c.CurrentCell == nil {
+	if c.Btree == nil || c.State != CursorValid || c.CurrentCell == nil {
 		return 0
 	}
 	return c.CurrentCell.Key
@@ -471,7 +491,7 @@ func (c *BtCursor) GetKey() int64 {
 // Note: This only returns the portion stored locally in the cell.
 // For cells with overflow pages, use GetCompletePayload() to get the full payload.
 func (c *BtCursor) GetPayload() []byte {
-	if c.State != CursorValid || c.CurrentCell == nil {
+	if c.Btree == nil || c.State != CursorValid || c.CurrentCell == nil {
 		return nil
 	}
 	return c.CurrentCell.Payload
@@ -496,6 +516,10 @@ func (c *BtCursor) String() string {
 // SeekRowid seeks to the specified rowid in the table
 // Returns true if the exact rowid is found, false otherwise
 func (c *BtCursor) SeekRowid(rowid int64) (found bool, err error) {
+	if err := c.validateCursorState(); err != nil {
+		return false, err
+	}
+
 	// Start from root
 	c.Depth = 0
 	c.PageStack[0] = c.RootPage

@@ -2,14 +2,29 @@ package vdbe
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 )
+
+// Error constants for buffer safety
+var (
+	ErrBufferOverflow = errors.New("buffer overflow: insufficient data")
+	ErrRecordTooLarge = errors.New("record exceeds maximum size")
+)
+
+// MaxRecordSize is the maximum allowed size for a record (1GB)
+const MaxRecordSize = 1_000_000_000
 
 // decodeRecord decodes a SQLite record back to a slice of values
 func decodeRecord(data []byte) ([]interface{}, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("empty record")
+	}
+
+	// Enforce maximum record size to prevent memory exhaustion attacks
+	if len(data) > MaxRecordSize {
+		return nil, ErrRecordTooLarge
 	}
 
 	// Read header size
@@ -62,46 +77,55 @@ func decodeFixedInt(data []byte, offset int, st uint64) (interface{}, int, error
 	if offset+width > len(data) {
 		return nil, 0, fmt.Errorf("truncated int%d", width*8)
 	}
-	v := decodeIntValue(data, offset, st)
+	v, err := decodeIntValue(data, offset, st)
+	if err != nil {
+		return nil, 0, err
+	}
 	return v, width, nil
 }
 
 // decodeIntValue extracts the integer value based on serial type.
-func decodeIntValue(data []byte, offset int, st uint64) int64 {
+func decodeIntValue(data []byte, offset int, st uint64) (int64, error) {
 	switch st {
 	case 1:
-		return int64(int8(data[offset]))
+		return int64(int8(data[offset])), nil
 	case 2:
-		return int64(int16(binary.BigEndian.Uint16(data[offset:])))
+		return int64(int16(binary.BigEndian.Uint16(data[offset:]))), nil
 	case 3:
 		return decodeInt24Value(data, offset)
 	case 4:
-		return int64(int32(binary.BigEndian.Uint32(data[offset:])))
+		return int64(int32(binary.BigEndian.Uint32(data[offset:]))), nil
 	case 5:
 		return decodeInt48Value(data, offset)
 	default:
-		return int64(binary.BigEndian.Uint64(data[offset:]))
+		return int64(binary.BigEndian.Uint64(data[offset:])), nil
 	}
 }
 
 // decodeInt24Value decodes a 24-bit signed integer.
-func decodeInt24Value(data []byte, offset int) int64 {
+func decodeInt24Value(data []byte, offset int) (int64, error) {
+	if offset < 0 || offset+3 > len(data) {
+		return 0, ErrBufferOverflow
+	}
 	v := int32(data[offset])<<16 | int32(data[offset+1])<<8 | int32(data[offset+2])
 	if v&0x800000 != 0 {
 		v |= ^0xffffff
 	}
-	return int64(v)
+	return int64(v), nil
 }
 
 // decodeInt48Value decodes a 48-bit signed integer.
-func decodeInt48Value(data []byte, offset int) int64 {
+func decodeInt48Value(data []byte, offset int) (int64, error) {
+	if offset < 0 || offset+6 > len(data) {
+		return 0, ErrBufferOverflow
+	}
 	v := int64(data[offset])<<40 | int64(data[offset+1])<<32 |
 		int64(data[offset+2])<<24 | int64(data[offset+3])<<16 |
 		int64(data[offset+4])<<8 | int64(data[offset+5])
 	if v&0x800000000000 != 0 {
 		v |= ^0xffffffffffff
 	}
-	return v
+	return v, nil
 }
 
 // decodeFloat64 reads an IEEE 754 float64 from data at offset.

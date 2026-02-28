@@ -11,6 +11,7 @@ import (
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/pager"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
 )
 
 // Conn implements database/sql/driver.Conn for SQLite.
@@ -32,6 +33,9 @@ type Conn struct {
 	// PRAGMA settings
 	foreignKeysEnabled bool
 	journalMode        string
+
+	// Security configuration
+	securityConfig *security.SecurityConfig
 }
 
 // Prepare prepares a SQL statement.
@@ -75,19 +79,35 @@ func (c *Conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, e
 	return stmt, nil
 }
 
-// Close closes the connection.
+// Close closes the connection using a two-phase close pattern to avoid lock ordering violations.
+// Phase 1: Mark closed and collect cleanup items under conn lock
+// Phase 2: Close statements without holding conn lock
+// Phase 3: Remove from driver (only driver lock needed)
+// Phase 4: Close pager
 func (c *Conn) Close() error {
+	// Phase 1: Mark closed and collect cleanup items under conn lock
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.closed {
-		return nil
+		c.mu.Unlock()
+		return nil // Already closed
 	}
+	c.closed = true
 
-	// Close all statements - finalize VDBEs directly since we already hold the lock
-	// (calling stmt.Close() would cause a deadlock as it tries to acquire c.mu)
-	// We acquire each stmt's mutex to prevent races with concurrent stmt operations.
+	// Collect statements to close (make a slice copy)
+	stmts := make([]*Stmt, 0, len(c.stmts))
 	for stmt := range c.stmts {
+		stmts = append(stmts, stmt)
+	}
+	c.stmts = nil
+
+	// Collect transaction state and pager reference
+	inTx := c.inTx
+	pager := c.pager
+	c.mu.Unlock()
+
+	// Phase 2: Close statements without holding conn lock
+	// This avoids deadlock since stmt.Close() calls removeStmt() which needs conn.mu
+	for _, stmt := range stmts {
 		stmt.mu.Lock()
 		stmt.closed = true
 		if stmt.vdbe != nil {
@@ -96,26 +116,29 @@ func (c *Conn) Close() error {
 		}
 		stmt.mu.Unlock()
 	}
-	c.stmts = nil
 
-	// Rollback any active transaction
-	if c.inTx {
-		if err := c.pager.Rollback(); err != nil {
+	// Phase 3: Remove from driver (only driver lock needed)
+	// This respects the lock hierarchy: Driver.mu should be acquired before Conn.mu
+	if c.driver != nil {
+		c.driver.mu.Lock()
+		delete(c.driver.conns, c.filename)
+		c.driver.mu.Unlock()
+	}
+
+	// Phase 4: Close pager (no locks needed)
+	if pager != nil {
+		// Rollback any active transaction
+		if inTx {
+			if err := pager.Rollback(); err != nil {
+				return err
+			}
+		}
+
+		// Close pager
+		if err := pager.Close(); err != nil {
 			return err
 		}
 	}
-
-	// Close pager
-	if err := c.pager.Close(); err != nil {
-		return err
-	}
-
-	c.closed = true
-
-	// Remove from driver's connection map
-	c.driver.mu.Lock()
-	delete(c.driver.conns, c.filename)
-	c.driver.mu.Unlock()
 
 	return nil
 }
@@ -206,10 +229,14 @@ func (c *Conn) CheckNamedValue(nv *driver.NamedValue) error {
 }
 
 // removeStmt removes a statement from the connection's statement map.
+// This is safe to call even if the connection is closed, as Close() already
+// removed all statements from the map.
 func (c *Conn) removeStmt(stmt *Stmt) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.stmts, stmt)
+	if c.stmts != nil {
+		delete(c.stmts, stmt)
+	}
 }
 
 // openDatabase initializes the database connection by:

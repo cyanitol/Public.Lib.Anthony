@@ -122,7 +122,10 @@ func TestDecodeInt48ValueCoverage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := decodeInt48Value(tt.data, tt.offset)
+			result, err := decodeInt48Value(tt.data, tt.offset)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
 			if result != tt.expected {
 				t.Errorf("Expected %d, got %d", tt.expected, result)
 			}

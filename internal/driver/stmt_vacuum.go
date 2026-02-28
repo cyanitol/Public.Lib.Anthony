@@ -87,20 +87,26 @@ func (s *Stmt) buildVacuumOptions(stmt *parser.VacuumStmt, args []driver.NamedVa
 
 // setVacuumIntoFile sets the INTO file in vacuum options.
 func (s *Stmt) setVacuumIntoFile(opts *pager.VacuumOptions, stmt *parser.VacuumStmt, args []driver.NamedValue) error {
+	var filename string
 	if stmt.Into != "" {
-		opts.IntoFile = stmt.Into
+		filename = stmt.Into
+	} else if stmt.IntoParam {
+		var err error
+		filename, err = s.getIntoFilenameFromArgs(args)
+		if err != nil {
+			return err
+		}
+	} else {
 		return nil
 	}
 
-	if !stmt.IntoParam {
-		return nil
-	}
-
-	filename, err := s.getIntoFilenameFromArgs(args)
+	// Validate the database file path for security
+	validatedPath, err := s.validateDatabasePath(filename)
 	if err != nil {
-		return err
+		return fmt.Errorf("invalid VACUUM INTO path: %w", err)
 	}
-	opts.IntoFile = filename
+
+	opts.IntoFile = validatedPath
 	return nil
 }
 
@@ -184,7 +190,7 @@ func (s *Stmt) cloneTables(sourceSchema, targetSchema *schema.Schema) {
 	for _, tableName := range tables {
 		if table, ok := sourceSchema.GetTable(tableName); ok {
 			tableCopy := *table
-			targetSchema.Tables[tableName] = &tableCopy
+			targetSchema.AddTableDirect(&tableCopy)
 		}
 	}
 }
@@ -195,7 +201,7 @@ func (s *Stmt) cloneViews(sourceSchema, targetSchema *schema.Schema) {
 	for _, viewName := range views {
 		if view, ok := sourceSchema.GetView(viewName); ok {
 			viewCopy := *view
-			targetSchema.Views[viewName] = &viewCopy
+			targetSchema.AddViewDirect(&viewCopy)
 		}
 	}
 }
@@ -206,7 +212,7 @@ func (s *Stmt) cloneTriggers(sourceSchema, targetSchema *schema.Schema) {
 	for _, triggerName := range triggers {
 		if trigger, ok := sourceSchema.GetTrigger(triggerName); ok {
 			triggerCopy := *trigger
-			targetSchema.Triggers[triggerName] = &triggerCopy
+			targetSchema.AddTriggerDirect(&triggerCopy)
 		}
 	}
 }
@@ -231,7 +237,13 @@ func (s *Stmt) registerTargetSchema(targetFile string, targetSchema *schema.Sche
 
 // createTargetDbState creates and registers a new database state for the target file.
 func (s *Stmt) createTargetDbState(targetFile string, targetSchema *schema.Schema) error {
-	targetPager, err := pager.Open(targetFile, false)
+	// Validate the target file path (it's already validated in setVacuumIntoFile, but double-check)
+	validatedPath, err := s.validateDatabasePath(targetFile)
+	if err != nil {
+		return fmt.Errorf("invalid target file path: %w", err)
+	}
+
+	targetPager, err := pager.Open(validatedPath, false)
 	if err != nil {
 		return fmt.Errorf("failed to open target file: %w", err)
 	}
@@ -239,7 +251,7 @@ func (s *Stmt) createTargetDbState(targetFile string, targetSchema *schema.Schem
 	targetBtree := btree.NewBtree(uint32(targetPager.PageSize()))
 	targetBtree.Provider = newPagerProvider(targetPager)
 
-	s.conn.driver.dbs[targetFile] = &dbState{
+	s.conn.driver.dbs[validatedPath] = &dbState{
 		pager:    targetPager,
 		btree:    targetBtree,
 		schema:   targetSchema,

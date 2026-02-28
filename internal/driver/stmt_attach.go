@@ -33,17 +33,23 @@ func (s *Stmt) compileAttach(vm *vdbe.VDBE, stmt *parser.AttachStmt, args []driv
 		return nil, fmt.Errorf("cannot ATTACH database with reserved name: %s", schemaName)
 	}
 
-	// Open the database file
-	p, err := pager.Open(filename, false)
+	// Validate the database file path for security
+	validatedPath, err := s.validateDatabasePath(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database file %s: %w", filename, err)
+		return nil, fmt.Errorf("invalid database path: %w", err)
+	}
+
+	// Open the database file using the validated path
+	p, err := pager.Open(validatedPath, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database file %s: %w", validatedPath, err)
 	}
 
 	// Create btree for the attached database
 	bt := btree.NewBtree(uint32(p.PageSize()))
 
-	// Attach the database to the connection's registry
-	if err := s.conn.dbRegistry.AttachDatabase(schemaName, filename, p, bt); err != nil {
+	// Attach the database to the connection's registry using the validated path
+	if err := s.conn.dbRegistry.AttachDatabase(schemaName, validatedPath, p, bt); err != nil {
 		p.Close()
 		return nil, fmt.Errorf("failed to attach database: %w", err)
 	}

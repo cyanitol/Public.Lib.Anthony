@@ -321,7 +321,10 @@ func TestDecodeIntValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := decodeIntValue(tt.data, tt.offset, tt.st)
+			got, err := decodeIntValue(tt.data, tt.offset, tt.st)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
 			if got != tt.want {
 				t.Errorf("decodeIntValue() = %d, want %d", got, tt.want)
 			}

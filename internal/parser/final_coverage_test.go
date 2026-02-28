@@ -129,19 +129,19 @@ func TestParserEdgeCasesForHighCoverage(t *testing.T) {
 		},
 		{
 			name:    "PRAGMA with float - not typically supported",
-			sql:     "PRAGMA test = 3.14",
+			sql:     "PRAGMA mmap_size = 3.14",
 			wantErr: false,
 		},
 
 		// isPragmaValueIdentifier edge cases
 		{
 			name:    "PRAGMA with TRUE",
-			sql:     "PRAGMA test = TRUE",
+			sql:     "PRAGMA foreign_keys = TRUE",
 			wantErr: false,
 		},
 		{
 			name:    "PRAGMA with FALSE",
-			sql:     "PRAGMA test = FALSE",
+			sql:     "PRAGMA foreign_keys = FALSE",
 			wantErr: false,
 		},
 
@@ -474,12 +474,12 @@ func TestParserIntFloatStringValue(t *testing.T) {
 		},
 		{
 			name:    "PRAGMA with positive float",
-			sql:     "PRAGMA test = 3.14159",
+			sql:     "PRAGMA mmap_size = 3.14159",
 			wantErr: false,
 		},
 		{
 			name:    "PRAGMA with negative float",
-			sql:     "PRAGMA test = -2.5",
+			sql:     "PRAGMA mmap_size = -2.5",
 			wantErr: false,
 		},
 	}

@@ -249,7 +249,7 @@ func TestFinalEdgeCasesToReach99(t *testing.T) {
 		},
 		{
 			name:    "PRAGMA with float value",
-			sql:     "PRAGMA test_val = 3.14159",
+			sql:     "PRAGMA mmap_size = 3.14159",
 			wantErr: false,
 		},
 

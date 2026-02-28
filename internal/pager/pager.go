@@ -1,8 +1,10 @@
 package pager
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 	"sync"
@@ -56,20 +58,59 @@ const (
 	DefaultCacheSize = 2000 // Default number of pages to cache
 )
 
+// validTransitions defines valid state transitions for the pager
+var validTransitions = map[int][]int{
+	PagerStateOpen: {
+		PagerStateReader,
+		PagerStateWriterLocked,
+	},
+	PagerStateReader: {
+		PagerStateOpen,
+		PagerStateWriterLocked,
+	},
+	PagerStateWriterLocked: {
+		PagerStateWriterCachemod,
+		PagerStateWriterDbmod,
+		PagerStateWriterFinished,
+		PagerStateOpen,
+		PagerStateError,
+	},
+	PagerStateWriterCachemod: {
+		PagerStateWriterDbmod,
+		PagerStateWriterFinished,
+		PagerStateOpen,
+		PagerStateError,
+	},
+	PagerStateWriterDbmod: {
+		PagerStateWriterFinished,
+		PagerStateOpen,
+		PagerStateError,
+	},
+	PagerStateWriterFinished: {
+		PagerStateOpen,
+		PagerStateError,
+	},
+	PagerStateError: {
+		PagerStateOpen,
+	},
+}
+
 // Common errors
 var (
-	ErrInvalidPageSize = errors.New("invalid page size")
-	ErrInvalidPageNum  = errors.New("invalid page number")
-	ErrInvalidOffset   = errors.New("invalid offset")
-	ErrPageNotFound    = errors.New("page not found")
-	ErrCacheFull       = errors.New("cache full")
-	ErrReadOnly        = errors.New("pager is read-only")
-	ErrNoTransaction   = errors.New("no transaction active")
-	ErrTransactionOpen = errors.New("transaction already open")
-	ErrDatabaseLocked  = errors.New("database is locked")
-	ErrDatabaseCorrupt = errors.New("database file is corrupt")
-	ErrDiskIO          = errors.New("disk I/O error")
-	ErrDiskFull        = errors.New("disk full")
+	ErrInvalidPageSize        = errors.New("invalid page size")
+	ErrInvalidPageNum         = errors.New("invalid page number")
+	ErrInvalidOffset          = errors.New("invalid offset")
+	ErrPageNotFound           = errors.New("page not found")
+	ErrCacheFull              = errors.New("cache full")
+	ErrReadOnly               = errors.New("pager is read-only")
+	ErrNoTransaction          = errors.New("no transaction active")
+	ErrTransactionOpen        = errors.New("transaction already open")
+	ErrDatabaseLocked         = errors.New("database is locked")
+	ErrDatabaseCorrupt        = errors.New("database file is corrupt")
+	ErrDiskIO                 = errors.New("disk I/O error")
+	ErrDiskFull               = errors.New("disk full")
+	ErrInvalidStateTransition = errors.New("invalid pager state transition")
+	ErrChecksumMismatch       = errors.New("checksum validation failed")
 )
 
 // Pager manages reading and writing pages from/to a database file.
@@ -310,7 +351,7 @@ func (p *Pager) Close() error {
 		p.file = nil
 	}
 
-	p.state = PagerStateOpen
+	_ = p.setStateLocked(PagerStateOpen)
 	p.lockState = LockNone
 
 	return nil
@@ -426,7 +467,8 @@ func (p *Pager) preparePageForWrite(page *DbPage) error {
 
 func (p *Pager) advanceToWriterCachemod() {
 	if p.state == PagerStateWriterLocked {
-		p.state = PagerStateWriterCachemod
+		// Use validated state transition
+		_ = p.setStateLocked(PagerStateWriterCachemod)
 	}
 }
 
@@ -527,7 +569,7 @@ func (p *Pager) needsHeaderUpdate() bool {
 func (p *Pager) commitPhase5Cleanup() {
 	p.cache.MakeClean()
 	p.clearSavepointsLocked()
-	p.state = PagerStateOpen
+	_ = p.setStateLocked(PagerStateOpen)
 	p.lockState = LockNone
 	p.dbOrigSize = p.dbSize
 }
@@ -572,7 +614,7 @@ func (p *Pager) rollbackLocked() error {
 	p.clearSavepointsLocked()
 
 	// Return to open state
-	p.state = PagerStateOpen
+	_ = p.setStateLocked(PagerStateOpen)
 	p.lockState = LockNone
 
 	return nil
@@ -722,7 +764,9 @@ func (p *Pager) writeDirtyPages() error {
 		}
 	}
 
-	p.state = PagerStateWriterFinished
+	if err := p.setStateLocked(PagerStateWriterFinished); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -764,13 +808,15 @@ func (p *Pager) beginWriteTransaction() error {
 		return err
 	}
 
-	p.state = PagerStateWriterLocked
+	if err := p.setStateLocked(PagerStateWriterLocked); err != nil {
+		return err
+	}
 	p.dbOrigSize = p.dbSize
 
 	return nil
 }
 
-// journalPage writes a page to the journal file.
+// journalPage writes a page to the journal file with checksum validation.
 func (p *Pager) journalPage(page *DbPage) error {
 	if p.journalMode == JournalModeOff {
 		return nil
@@ -783,9 +829,9 @@ func (p *Pager) journalPage(page *DbPage) error {
 		}
 	}
 
-	// Write page number and data to journal
-	// Format: [4 bytes page number][pageSize bytes data]
-	journalEntry := make([]byte, 4+p.pageSize)
+	// Write page number, data, and checksum to journal
+	// Format: [4 bytes page number][pageSize bytes data][4 bytes checksum]
+	journalEntry := make([]byte, 4+p.pageSize+4)
 
 	// Write page number (big-endian)
 	journalEntry[0] = byte(page.Pgno >> 24)
@@ -794,7 +840,11 @@ func (p *Pager) journalPage(page *DbPage) error {
 	journalEntry[3] = byte(page.Pgno)
 
 	// Write page data
-	copy(journalEntry[4:], page.Data)
+	copy(journalEntry[4:4+p.pageSize], page.Data)
+
+	// Calculate and write checksum for the page data
+	checksum := p.calculateChecksum(page.Data)
+	binary.BigEndian.PutUint32(journalEntry[4+p.pageSize:], checksum)
 
 	if _, err := p.journalFile.Write(journalEntry); err != nil {
 		return fmt.Errorf("failed to journal page %d: %w", page.Pgno, err)
@@ -829,7 +879,7 @@ func (p *Pager) openJournal() error {
 	return nil
 }
 
-// rollbackJournal rolls back changes using the journal file.
+// rollbackJournal rolls back changes using the journal file with checksum validation.
 func (p *Pager) rollbackJournal() error {
 	if p.journalFile == nil {
 		return nil
@@ -840,9 +890,10 @@ func (p *Pager) rollbackJournal() error {
 		return err
 	}
 
-	// Read and apply journal entries
+	// Read and apply journal entries with checksum validation
 	for {
-		entry := make([]byte, 4+p.pageSize)
+		// Entry format: [4 bytes page number][pageSize bytes data][4 bytes checksum]
+		entry := make([]byte, 4+p.pageSize+4)
 		n, err := p.journalFile.Read(entry)
 
 		if err == io.EOF {
@@ -851,16 +902,34 @@ func (p *Pager) rollbackJournal() error {
 		if err != nil {
 			return fmt.Errorf("failed to read journal: %w", err)
 		}
-		if n < 4+p.pageSize {
+		if n < 4+p.pageSize+4 {
+			// Old format without checksum - still support it
+			if n == 4+p.pageSize {
+				pgno := Pgno(entry[0])<<24 | Pgno(entry[1])<<16 | Pgno(entry[2])<<8 | Pgno(entry[3])
+				offset := int64(pgno-1) * int64(p.pageSize)
+				if _, err := p.file.WriteAt(entry[4:4+p.pageSize], offset); err != nil {
+					return fmt.Errorf("failed to rollback page %d: %w", pgno, err)
+				}
+				continue
+			}
 			break
 		}
 
 		// Parse page number
 		pgno := Pgno(entry[0])<<24 | Pgno(entry[1])<<16 | Pgno(entry[2])<<8 | Pgno(entry[3])
 
+		// Extract page data and checksum
+		pageData := entry[4 : 4+p.pageSize]
+		expectedChecksum := binary.BigEndian.Uint32(entry[4+p.pageSize:])
+
+		// Validate checksum before applying
+		if !p.validateJournalPage(pageData, expectedChecksum) {
+			return fmt.Errorf("%w: page %d in journal has invalid checksum", ErrChecksumMismatch, pgno)
+		}
+
 		// Write original page data back to database
 		offset := int64(pgno-1) * int64(p.pageSize)
-		if _, err := p.file.WriteAt(entry[4:], offset); err != nil {
+		if _, err := p.file.WriteAt(pageData, offset); err != nil {
 			return fmt.Errorf("failed to rollback page %d: %w", pgno, err)
 		}
 	}
@@ -982,4 +1051,55 @@ func (p *Pager) GetFreePageCount() uint32 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.freeList.Count()
+}
+
+// getState returns the current pager state with proper synchronization.
+func (p *Pager) getState() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.state
+}
+
+// setState sets the pager state with proper synchronization and validation.
+func (p *Pager) setState(newState int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.setStateLocked(newState)
+}
+
+// setStateLocked sets the pager state without acquiring the lock (must be called with lock held).
+func (p *Pager) setStateLocked(newState int) error {
+	if err := p.validateTransition(newState); err != nil {
+		return err
+	}
+	p.state = newState
+	return nil
+}
+
+// validateTransition validates that a state transition is allowed.
+func (p *Pager) validateTransition(newState int) error {
+	currentState := p.state
+	validStates, exists := validTransitions[currentState]
+	if !exists {
+		return fmt.Errorf("%w: unknown current state %d", ErrInvalidStateTransition, currentState)
+	}
+
+	for _, validState := range validStates {
+		if validState == newState {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("%w: cannot transition from state %d to %d", ErrInvalidStateTransition, currentState, newState)
+}
+
+// validateJournalPage validates a journal page using CRC32 checksum.
+func (p *Pager) validateJournalPage(data []byte, expectedChecksum uint32) bool {
+	actualChecksum := crc32.ChecksumIEEE(data)
+	return actualChecksum == expectedChecksum
+}
+
+// calculateChecksum calculates CRC32 checksum for data.
+func (p *Pager) calculateChecksum(data []byte) uint32 {
+	return crc32.ChecksumIEEE(data)
 }

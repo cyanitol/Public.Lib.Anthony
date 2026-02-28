@@ -3,6 +3,8 @@ package btree
 import (
 	"encoding/binary"
 	"fmt"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
 )
 
 // Overflow page format (per SQLite specification):
@@ -284,16 +286,45 @@ func CalculateLocalPayload(totalSize uint32, pageSize uint32, isTable bool) uint
 
 	if totalSize <= maxLocal {
 		// Entire payload fits locally
-		return uint16(totalSize)
+		localPayload, err := security.SafeCastUint32ToUint16(totalSize)
+		if err != nil {
+			// If totalSize doesn't fit in uint16, use maxLocal
+			localPayload, err = security.SafeCastUint32ToUint16(maxLocal)
+			if err != nil {
+				return 0
+			}
+		}
+		return localPayload
+	}
+
+	// Validate usableSize to prevent underflow
+	if usableSize < 4 {
+		localPayload, err := security.SafeCastUint32ToUint16(minLocal)
+		if err != nil {
+			return 0
+		}
+		return localPayload
 	}
 
 	// Calculate surplus using SQLite's algorithm
 	surplus := minLocal + (totalSize-minLocal)%(usableSize-4)
 	if surplus <= maxLocal {
-		return uint16(surplus)
+		localPayload, err := security.SafeCastUint32ToUint16(surplus)
+		if err != nil {
+			// If surplus doesn't fit in uint16, use minLocal instead
+			localPayload, err = security.SafeCastUint32ToUint16(minLocal)
+			if err != nil {
+				return 0
+			}
+		}
+		return localPayload
 	}
 
-	return uint16(minLocal)
+	localPayload, err := security.SafeCastUint32ToUint16(minLocal)
+	if err != nil {
+		return 0
+	}
+	return localPayload
 }
 
 // Helper function to get complete payload including overflow

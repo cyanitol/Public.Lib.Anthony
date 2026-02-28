@@ -1,8 +1,16 @@
 package btree
 
 import (
+	"errors"
 	"fmt"
 	"sync"
+)
+
+// Error definitions for page validation
+var (
+	ErrInvalidPageNumber = errors.New("invalid page number")
+	ErrCorruptedPage     = errors.New("corrupted page")
+	ErrInvalidPageType   = errors.New("invalid page type")
 )
 
 // PageProvider is an interface for page access (can be pager or in-memory)
@@ -48,9 +56,65 @@ func NewBtree(pageSize uint32) *Btree {
 	}
 }
 
+// validatePage validates a page's integrity before caching
+func (bt *Btree) validatePage(data []byte, pageNum uint32) error {
+	// Check minimum page size
+	if len(data) < int(bt.PageSize) {
+		return fmt.Errorf("%w: page size mismatch (expected %d, got %d)",
+			ErrCorruptedPage, bt.PageSize, len(data))
+	}
+
+	// Try to parse the page header to validate structure
+	header, err := ParsePageHeader(data, pageNum)
+	if err != nil {
+		return fmt.Errorf("%w: failed to parse header: %v", ErrCorruptedPage, err)
+	}
+
+	// Validate page type is one of the known types
+	validTypes := map[byte]bool{
+		PageTypeLeafTable:     true,
+		PageTypeInteriorTable: true,
+		PageTypeLeafIndex:     true,
+		PageTypeInteriorIndex: true,
+	}
+
+	if !validTypes[header.PageType] {
+		return fmt.Errorf("%w: 0x%02x", ErrInvalidPageType, header.PageType)
+	}
+
+	// Validate cell count is reasonable (not corrupted)
+	// Cell pointer array must fit in the page
+	cellPtrArraySize := int(header.NumCells) * 2
+	if header.CellPtrOffset+cellPtrArraySize > len(data) {
+		return fmt.Errorf("%w: cell pointer array exceeds page bounds", ErrCorruptedPage)
+	}
+
+	// Validate cell content start
+	cellContentStart := int(header.CellContentStart)
+	if cellContentStart == 0 {
+		cellContentStart = len(data) // 0 means end of page
+	}
+	if cellContentStart > len(data) {
+		return fmt.Errorf("%w: invalid cell content start", ErrCorruptedPage)
+	}
+
+	// Ensure cell pointer array doesn't overlap with cell content
+	cellPtrArrayEnd := header.CellPtrOffset + cellPtrArraySize
+	if cellPtrArrayEnd > cellContentStart {
+		return fmt.Errorf("%w: cell pointers overlap with cell content", ErrCorruptedPage)
+	}
+
+	return nil
+}
+
 // GetPage retrieves a page from the B-tree
 func (bt *Btree) GetPage(pageNum uint32) ([]byte, error) {
-	// Try in-memory cache first (read lock)
+	// Validate page number
+	if pageNum == 0 {
+		return nil, ErrInvalidPageNumber
+	}
+
+	// Fast path: check cache with read lock
 	bt.mu.RLock()
 	if page, ok := bt.Pages[pageNum]; ok {
 		bt.mu.RUnlock()
@@ -58,16 +122,31 @@ func (bt *Btree) GetPage(pageNum uint32) ([]byte, error) {
 	}
 	bt.mu.RUnlock()
 
-	// If we have a provider, try to get from there
+	// If we have a provider, load from storage
 	if bt.Provider != nil {
+		// Slow path: acquire write lock
+		bt.mu.Lock()
+		defer bt.mu.Unlock()
+
+		// CRITICAL: Double-check after acquiring write lock
+		// Another goroutine may have loaded the page
+		if page, ok := bt.Pages[pageNum]; ok {
+			return page, nil
+		}
+
+		// Load page from provider
 		data, err := bt.Provider.GetPageData(pageNum)
 		if err != nil {
 			return nil, err
 		}
-		// Cache it (write lock)
-		bt.mu.Lock()
+
+		// Validate page before caching
+		if err := bt.validatePage(data, pageNum); err != nil {
+			return nil, err
+		}
+
+		// Cache the validated page
 		bt.Pages[pageNum] = data
-		bt.mu.Unlock()
 		return data, nil
 	}
 

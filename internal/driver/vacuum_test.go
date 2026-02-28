@@ -153,8 +153,10 @@ func TestVacuum_AfterDeletes(t *testing.T) {
 }
 
 func TestVacuum_Into(t *testing.T) {
-	sourceFile := filepath.Join(t.TempDir(), "source.db")
-	targetFile := filepath.Join(t.TempDir(), "target.db")
+	tempDir := t.TempDir()
+	sourceFile := filepath.Join(tempDir, "source.db")
+	// Use same temp directory for target so security check passes
+	targetFile := filepath.Join(tempDir, "target.db")
 
 	// Create source database
 	db, err := sql.Open("sqlite_internal", sourceFile)

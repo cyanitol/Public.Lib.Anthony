@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
 )
 
 // keywordsAsIdentifiers lists keywords that can also be used as identifiers (column/table names)
@@ -45,24 +47,37 @@ var keywordsAsIdentifiers = map[TokenType]bool{
 
 // Parser implements a recursive descent parser for SQL.
 type Parser struct {
-	lexer   *Lexer
-	tokens  []Token
-	current int
-	errors  []string
+	lexer     *Lexer
+	tokens    []Token
+	current   int
+	errors    []string
+	exprDepth int // Current expression depth to prevent stack overflow
 }
 
 // NewParser creates a new parser for the given SQL input.
 func NewParser(input string) *Parser {
 	return &Parser{
-		lexer:  NewLexer(input),
-		tokens: make([]Token, 0),
-		errors: make([]string, 0),
+		lexer:     NewLexer(input),
+		tokens:    make([]Token, 0),
+		errors:    make([]string, 0),
+		exprDepth: 0,
 	}
 }
 
 // Parse parses the SQL input and returns a list of statements.
 func (p *Parser) Parse() ([]Statement, error) {
+	// Check SQL length limit to prevent DoS attacks
+	if len(p.lexer.input) > security.MaxSQLLength {
+		return nil, fmt.Errorf("SQL query too long: %d bytes exceeds maximum of %d", len(p.lexer.input), security.MaxSQLLength)
+	}
+
 	p.tokenize()
+
+	// Check token count limit
+	if len(p.tokens) > security.MaxTokens {
+		return nil, fmt.Errorf("SQL query has too many tokens: %d exceeds maximum of %d", len(p.tokens), security.MaxTokens)
+	}
+
 	statements, err := p.parseStatements()
 	if err != nil {
 		return statements, err
@@ -2262,6 +2277,11 @@ func (p *Parser) parsePragma() (*PragmaStmt, error) {
 		stmt.Name = firstID
 	}
 
+	// Security: Check PRAGMA whitelist to prevent dangerous operations
+	if !security.IsSafePragma(stmt.Name) {
+		return nil, p.error("PRAGMA '%s' is not allowed for security reasons", stmt.Name)
+	}
+
 	// Check for value assignment or function call syntax
 	if p.match(TK_EQ) {
 		// PRAGMA name = value - parse value allowing keywords as identifiers
@@ -2348,7 +2368,25 @@ func (p *Parser) isPragmaValueIdentifier() bool {
 // Expressions
 // =============================================================================
 
+// enterExpr increments expression depth and checks for overflow.
+func (p *Parser) enterExpr() error {
+	p.exprDepth++
+	if p.exprDepth > security.MaxExprDepth {
+		return fmt.Errorf("expression depth exceeds maximum of %d (possible stack overflow attack)", security.MaxExprDepth)
+	}
+	return nil
+}
+
+// exitExpr decrements expression depth.
+func (p *Parser) exitExpr() {
+	p.exprDepth--
+}
+
 func (p *Parser) parseExpression() (Expression, error) {
+	if err := p.enterExpr(); err != nil {
+		return nil, err
+	}
+	defer p.exitExpr()
 	return p.parseOrExpression()
 }
 
@@ -2360,6 +2398,11 @@ func (p *Parser) ParseExpression() (Expression, error) {
 }
 
 func (p *Parser) parseOrExpression() (Expression, error) {
+	if err := p.enterExpr(); err != nil {
+		return nil, err
+	}
+	defer p.exitExpr()
+
 	left, err := p.parseAndExpression()
 	if err != nil {
 		return nil, err
@@ -2381,6 +2424,11 @@ func (p *Parser) parseOrExpression() (Expression, error) {
 }
 
 func (p *Parser) parseAndExpression() (Expression, error) {
+	if err := p.enterExpr(); err != nil {
+		return nil, err
+	}
+	defer p.exitExpr()
+
 	left, err := p.parseNotExpression()
 	if err != nil {
 		return nil, err
@@ -2402,6 +2450,11 @@ func (p *Parser) parseAndExpression() (Expression, error) {
 }
 
 func (p *Parser) parseNotExpression() (Expression, error) {
+	if err := p.enterExpr(); err != nil {
+		return nil, err
+	}
+	defer p.exitExpr()
+
 	if p.match(TK_NOT) {
 		expr, err := p.parseNotExpression()
 		if err != nil {

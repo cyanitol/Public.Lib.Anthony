@@ -11,6 +11,19 @@ import (
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 )
 
+// reservedNames contains SQLite reserved schema object names that should not be used.
+var reservedNames = map[string]bool{
+	"sqlite_master":      true,
+	"sqlite_temp_master": true,
+	"sqlite_sequence":    true,
+}
+
+// IsReservedName checks if a name is reserved by SQLite.
+// Reserved names cannot be used for user-created tables, indexes, or views.
+func IsReservedName(name string) bool {
+	return reservedNames[strings.ToLower(name)]
+}
+
 // Schema represents a database schema containing tables, indexes, views, and triggers.
 // It is safe for concurrent access.
 type Schema struct {
@@ -504,6 +517,11 @@ func (s *Schema) CreateTable(stmt *parser.CreateTableStmt) (*Table, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Check for reserved names
+	if IsReservedName(stmt.Name) {
+		return nil, fmt.Errorf("table name is reserved: %s", stmt.Name)
+	}
+
 	// Check if table already exists
 	if existing, err := s.checkTableExists(stmt.Name, stmt.IfNotExists); err != nil || existing != nil {
 		return existing, err
@@ -548,6 +566,11 @@ func (s *Schema) CreateIndex(stmt *parser.CreateIndexStmt) (*Index, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Check for reserved names
+	if IsReservedName(stmt.Name) {
+		return nil, fmt.Errorf("index name is reserved: %s", stmt.Name)
+	}
 
 	if existing, skip := s.checkExistingIndex(stmt); skip {
 		return existing, nil
@@ -626,4 +649,101 @@ func uniqueStrings(strs []string) []string {
 	}
 
 	return result
+}
+
+// AddTableUnsafe adds a table to the schema without validation.
+// This method is NOT thread-safe and should only be used when the caller
+// already holds the schema lock or during initialization.
+// For normal use, use CreateTable instead.
+func (s *Schema) AddTableUnsafe(table *Table) {
+	s.Tables[table.Name] = table
+}
+
+// AddIndexUnsafe adds an index to the schema without validation.
+// This method is NOT thread-safe and should only be used when the caller
+// already holds the schema lock or during initialization.
+// For normal use, use CreateIndex instead.
+func (s *Schema) AddIndexUnsafe(index *Index) {
+	s.Indexes[index.Name] = index
+}
+
+// AddViewUnsafe adds a view to the schema without validation.
+// This method is NOT thread-safe and should only be used when the caller
+// already holds the schema lock or during initialization.
+func (s *Schema) AddViewUnsafe(view *View) {
+	s.Views[view.Name] = view
+}
+
+// AddTriggerUnsafe adds a trigger to the schema without validation.
+// This method is NOT thread-safe and should only be used when the caller
+// already holds the schema lock or during initialization.
+func (s *Schema) AddTriggerUnsafe(trigger *Trigger) {
+	if s.Triggers == nil {
+		s.Triggers = make(map[string]*Trigger)
+	}
+	s.Triggers[trigger.Name] = trigger
+}
+
+// AddTableDirect adds a table directly to the schema with proper locking.
+// This is a low-level method that bypasses validation and is intended
+// for special cases like VACUUM or temporary tables.
+func (s *Schema) AddTableDirect(table *Table) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Tables[table.Name] = table
+}
+
+// AddIndexDirect adds an index directly to the schema with proper locking.
+// This is a low-level method that bypasses validation.
+func (s *Schema) AddIndexDirect(index *Index) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Indexes[index.Name] = index
+}
+
+// AddViewDirect adds a view directly to the schema with proper locking.
+// This is a low-level method that bypasses validation.
+func (s *Schema) AddViewDirect(view *View) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Views[view.Name] = view
+}
+
+// AddTriggerDirect adds a trigger directly to the schema with proper locking.
+// This is a low-level method that bypasses validation.
+func (s *Schema) AddTriggerDirect(trigger *Trigger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Triggers == nil {
+		s.Triggers = make(map[string]*Trigger)
+	}
+	s.Triggers[trigger.Name] = trigger
+}
+
+// IndexCount returns the number of indexes in the schema.
+func (s *Schema) IndexCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.Indexes)
+}
+
+// TableCount returns the number of tables in the schema.
+func (s *Schema) TableCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.Tables)
+}
+
+// ViewCount returns the number of views in the schema.
+func (s *Schema) ViewCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.Views)
+}
+
+// TriggerCount returns the number of triggers in the schema.
+func (s *Schema) TriggerCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.Triggers)
 }

@@ -1,0 +1,260 @@
+package parser
+
+import (
+	"strings"
+	"testing"
+)
+
+// FuzzParse tests the parser with random input to ensure it doesn't panic
+func FuzzParse(f *testing.F) {
+	// Add seed corpus with various SQL statements
+	seeds := []string{
+		"SELECT * FROM t",
+		"SELECT * FROM t WHERE id = 1",
+		"INSERT INTO t VALUES (1, 'test')",
+		"INSERT INTO t (id, name) VALUES (1, 'test')",
+		"UPDATE t SET name = 'test' WHERE id = 1",
+		"DELETE FROM t WHERE id = 1",
+		"CREATE TABLE t (id INT, name TEXT)",
+		"CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+		"DROP TABLE t",
+		"CREATE INDEX idx ON t(id)",
+		"SELECT COUNT(*) FROM t",
+		"SELECT id, name FROM t ORDER BY id",
+		"SELECT * FROM t LIMIT 10",
+		"SELECT * FROM t LIMIT 10 OFFSET 5",
+		"SELECT a.id, b.name FROM a JOIN b ON a.id = b.id",
+
+		// Empty and whitespace
+		"",
+		" ",
+		"\n",
+		"\t",
+
+		// Nested expressions
+		"SELECT (1 + (2 * (3 - 4)))",
+		"SELECT * FROM (SELECT * FROM t)",
+
+		// String literals with special characters
+		"SELECT 'test'",
+		"SELECT 'test''s'", // escaped quote
+		"SELECT \"test\"",
+
+		// Comments
+		"SELECT * FROM t -- comment",
+		"SELECT * FROM t /* comment */",
+
+		// Long inputs
+		string(make([]byte, 1000)),
+		string(make([]byte, 10000)),
+		strings.Repeat("SELECT * FROM t UNION ", 100) + "SELECT * FROM t",
+
+		// Special characters
+		"SELECT '\x00'",
+		"SELECT '\n\r\t'",
+
+		// Malformed SQL
+		"SELECT",
+		"FROM",
+		"WHERE",
+		"SELECT FROM",
+		"SELECT * FROM",
+		"INSERT INTO",
+		"CREATE TABLE",
+
+		// Injection attempts
+		"SELECT * FROM t WHERE id = 1; DROP TABLE t",
+		"SELECT * FROM t WHERE name = '' OR '1'='1",
+		"SELECT * FROM t WHERE name = '\' OR 1=1--",
+
+		// Unicode
+		"SELECT '你好'",
+		"SELECT 'Привет'",
+		"SELECT '🔥'",
+	}
+
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	// Fuzz function - should never panic
+	f.Fuzz(func(t *testing.T, sql string) {
+		// Create parser
+		p := NewParser(sql)
+
+		// Parse should not panic, even with malformed input
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Parser panicked on input: %q\nPanic: %v", sql, r)
+			}
+		}()
+
+		// We don't care if it returns an error, just that it doesn't panic
+		_, _ = p.Parse()
+	})
+}
+
+// FuzzLexer tests the lexer independently
+func FuzzLexer(f *testing.F) {
+	seeds := []string{
+		"SELECT",
+		"123",
+		"'string'",
+		"identifier",
+		"--comment",
+		"/* comment */",
+		"",
+		"\x00",
+		strings.Repeat("a", 10000),
+	}
+
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, input string) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Lexer panicked on input: %q\nPanic: %v", input, r)
+			}
+		}()
+
+		lexer := NewLexer(input)
+
+		// Tokenize entire input
+		maxTokens := 100000 // prevent infinite loops
+		count := 0
+		for {
+			tok := lexer.Next()
+			count++
+
+			if tok.Type == TK_EOF || tok.Type == TK_ILLEGAL || count > maxTokens {
+				break
+			}
+		}
+	})
+}
+
+// FuzzParseExpression tests expression parsing specifically
+func FuzzParseExpression(f *testing.F) {
+	seeds := []string{
+		"1",
+		"1 + 2",
+		"1 + 2 * 3",
+		"(1 + 2) * 3",
+		"func()",
+		"func(1, 2, 3)",
+		"col",
+		"table.col",
+		"COUNT(*)",
+		"CASE WHEN 1 THEN 2 END",
+		"1 IN (1, 2, 3)",
+		"1 BETWEEN 2 AND 3",
+		"NOT EXISTS (SELECT 1)",
+		strings.Repeat("(", 100) + "1" + strings.Repeat(")", 100),
+	}
+
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, expr string) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Expression parser panicked on: %q\nPanic: %v", expr, r)
+			}
+		}()
+
+		// Try parsing as a SELECT expression
+		sql := "SELECT " + expr
+		p := NewParser(sql)
+		_, _ = p.Parse()
+	})
+}
+
+// FuzzParseTableName tests table name parsing
+func FuzzParseTableName(f *testing.F) {
+	seeds := []string{
+		"table",
+		"schema.table",
+		"\"table\"",
+		"[table]",
+		"`table`",
+		"table AS alias",
+		"",
+		"\x00",
+		strings.Repeat("a", 1000),
+	}
+
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, table string) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Table name parser panicked on: %q\nPanic: %v", table, r)
+			}
+		}()
+
+		sql := "SELECT * FROM " + table
+		p := NewParser(sql)
+		_, _ = p.Parse()
+	})
+}
+
+// FuzzParseCreateTable tests CREATE TABLE parsing
+func FuzzParseCreateTable(f *testing.F) {
+	seeds := []string{
+		"CREATE TABLE t (id INT)",
+		"CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)",
+		"CREATE TABLE t (id INT, FOREIGN KEY(id) REFERENCES other(id))",
+		"CREATE TEMPORARY TABLE t (id INT)",
+		"CREATE TABLE IF NOT EXISTS t (id INT)",
+		"CREATE TABLE t AS SELECT 1",
+		"",
+		"CREATE TABLE",
+		"CREATE TABLE t",
+		"CREATE TABLE t ()",
+	}
+
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, ddl string) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("CREATE TABLE parser panicked on: %q\nPanic: %v", ddl, r)
+			}
+		}()
+
+		p := NewParser(ddl)
+		_, _ = p.Parse()
+	})
+}
+
+// TestFuzzCorpusRegression tests against any previously found crashes
+func TestFuzzCorpusRegression(t *testing.T) {
+	// This test ensures known problematic inputs don't cause panics
+	regressionInputs := []string{
+		"",
+		"\x00",
+		strings.Repeat("\x00", 1000),
+		strings.Repeat("(", 1000),
+		strings.Repeat("SELECT * FROM t UNION ", 1000),
+	}
+
+	for i, input := range regressionInputs {
+		t.Run(string(rune('A'+i)), func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Panic on regression input %d: %v\nInput: %q", i, r, input)
+				}
+			}()
+
+			p := NewParser(input)
+			_, _ = p.Parse()
+		})
+	}
+}
