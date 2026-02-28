@@ -152,6 +152,9 @@ func init() {
 	OpRemainder: (*VDBE).execRemainder,
 	OpAddImm:    (*VDBE).execAddImm,
 
+	// String operations
+	OpConcat: (*VDBE).execConcat,
+
 	// Bitwise operations
 	OpBitAnd:     (*VDBE).execBitAnd,
 	OpBitOr:      (*VDBE).execBitOr,
@@ -1863,6 +1866,35 @@ func (v *VDBE) execAdd(instr *Instruction) error {
 
 	result.Copy(left)
 	return result.Add(right)
+}
+
+func (v *VDBE) execConcat(instr *Instruction) error {
+	// P3 = P1 || P2 (string concatenation)
+	left, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	right, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+
+	result, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
+	// Handle NULL: NULL || anything = NULL
+	if left.IsNull() || right.IsNull() {
+		result.SetNull()
+		return nil
+	}
+
+	// Concatenate as strings
+	s1 := left.StrValue()
+	s2 := right.StrValue()
+	return result.SetStr(s1 + s2)
 }
 
 func (v *VDBE) execSubtract(instr *Instruction) error {
