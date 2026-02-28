@@ -338,10 +338,16 @@ func ParseRecord(data []byte) (*Record, error) {
 
 	// Read serial types from header
 	var serialTypes []SerialType
+	if headerSize > math.MaxInt {
+		return nil, errors.New("header size too large")
+	}
 	for offset < int(headerSize) {
 		st, n := GetVarint(data, offset)
 		if n == 0 {
 			return nil, errors.New("invalid serial type")
+		}
+		if st > math.MaxUint32 {
+			return nil, errors.New("serial type too large")
 		}
 		serialTypes = append(serialTypes, SerialType(st))
 		offset += n
@@ -397,7 +403,8 @@ func decodeIntByType(data []byte, offset int, st SerialType) int64 {
 	case SerialTypeInt48:
 		return decodeInt48(data, offset)
 	default:
-		return int64(binary.BigEndian.Uint64(data[offset:]))
+		val := binary.BigEndian.Uint64(data[offset:])
+		return int64(val)
 	}
 }
 

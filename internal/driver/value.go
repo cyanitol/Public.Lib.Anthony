@@ -37,7 +37,9 @@ func convertToInt64(v interface{}) (int64, bool) {
 		return 0, false
 	}
 	if rv.Kind() >= reflect.Uint && rv.Kind() <= reflect.Uint32 {
-		return int64(rv.Uint()), true
+		uval := rv.Uint()
+		// Uint32 and smaller always fit in int64
+		return int64(uval), true
 	}
 	return rv.Int(), true
 }

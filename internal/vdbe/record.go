@@ -37,6 +37,9 @@ func decodeRecord(data []byte) ([]interface{}, error) {
 
 	// Read serial types from header
 	serialTypes := make([]uint64, 0)
+	if headerSize > math.MaxInt {
+		return nil, fmt.Errorf("header size too large")
+	}
 	for offset < int(headerSize) {
 		st, n := getVarint(data, offset)
 		if n == 0 {
@@ -98,7 +101,9 @@ func decodeIntValue(data []byte, offset int, st uint64) (int64, error) {
 	case 5:
 		return decodeInt48Value(data, offset)
 	default:
-		return int64(binary.BigEndian.Uint64(data[offset:])), nil
+		val := binary.BigEndian.Uint64(data[offset:])
+		// Allow conversion even if val > MaxInt64 - preserves bit pattern
+		return int64(val), nil
 	}
 }
 

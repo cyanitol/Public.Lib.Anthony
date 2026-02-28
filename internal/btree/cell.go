@@ -3,6 +3,7 @@ package btree
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
 )
@@ -56,12 +57,18 @@ func parseLeafCellHeader(cellData []byte) (*CellInfo, int, error) {
 	if n == 0 {
 		return nil, 0, fmt.Errorf("failed to read payload size")
 	}
+	if payloadSize64 > math.MaxUint32 {
+		return nil, 0, security.ErrIntegerOverflow
+	}
 	info.PayloadSize = uint32(payloadSize64)
 	offset += n
 
 	rowid, n := GetVarint(cellData[offset:])
 	if n == 0 {
 		return nil, 0, fmt.Errorf("failed to read rowid")
+	}
+	if rowid > math.MaxInt64 {
+		return nil, 0, security.ErrIntegerOverflow
 	}
 	info.Key = int64(rowid)
 	offset += n
@@ -143,6 +150,9 @@ func parseTableInteriorCell(cellData []byte) (*CellInfo, error) {
 	if n == 0 {
 		return nil, fmt.Errorf("failed to read rowid")
 	}
+	if rowid > math.MaxInt64 {
+		return nil, security.ErrIntegerOverflow
+	}
 	info.Key = int64(rowid)
 	info.CellSize = uint16(4 + n)
 
@@ -164,7 +174,13 @@ func parseIndexLeafCell(cellData []byte, usableSize uint32) (*CellInfo, error) {
 	if n == 0 {
 		return nil, fmt.Errorf("failed to read payload size")
 	}
+	if payloadSize64 > math.MaxUint32 {
+		return nil, security.ErrIntegerOverflow
+	}
 	info.PayloadSize = uint32(payloadSize64)
+	if payloadSize64 > math.MaxInt64 {
+		return nil, security.ErrIntegerOverflow
+	}
 	info.Key = int64(payloadSize64) // For index pages, key is payload size
 	offset += n
 
@@ -234,7 +250,13 @@ func parseIndexInteriorCell(cellData []byte, usableSize uint32) (*CellInfo, erro
 	if n == 0 {
 		return nil, fmt.Errorf("failed to read payload size")
 	}
+	if payloadSize64 > math.MaxUint32 {
+		return nil, security.ErrIntegerOverflow
+	}
 	info.PayloadSize = uint32(payloadSize64)
+	if payloadSize64 > math.MaxInt64 {
+		return nil, security.ErrIntegerOverflow
+	}
 	info.Key = int64(payloadSize64)
 	offset += n
 

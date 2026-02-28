@@ -141,6 +141,7 @@ func randomFunc(args []Value) (Value, error) {
 		return nil, fmt.Errorf("failed to generate random number: %w", err)
 	}
 
+	// Convert to int64 - intentionally allows values > MaxInt64 for full random range
 	r := int64(binary.LittleEndian.Uint64(buf[:]))
 
 	// Prevent returning the most negative value to avoid abs() issues

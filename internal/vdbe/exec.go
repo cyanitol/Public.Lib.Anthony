@@ -1210,6 +1210,10 @@ func parseRecordColumn(data []byte, colIndex int, dst *Mem) error {
 
 	// Read serial types from header
 	serialTypes := make([]uint64, 0)
+	if headerSize > math.MaxInt {
+		dst.SetNull()
+		return fmt.Errorf("header size too large")
+	}
 	for offset < int(headerSize) {
 		st, n := getVarint(data, offset)
 		if n == 0 {
@@ -1277,7 +1281,13 @@ func serialTypeLen(serialType uint64) int {
 	if serialType < 12 {
 		return serialTypeLenTable[serialType]
 	}
-	return int(serialType-12) / 2
+	// Calculate the result as uint64 first to check bounds
+	result := (serialType - 12) / 2
+	// Check if it fits in int
+	if result > uint64(math.MaxInt) {
+		return 0 // Invalid, return 0 to trigger error
+	}
+	return int(result)
 }
 
 // parseSerialValue parses a SQLite record value based on its serial type.
@@ -1322,6 +1332,7 @@ func parseSerialInt(data []byte, offset int, st uint64, mem *Mem) error {
 	case 5:
 		v = parseSignedInt48(data[offset:])
 	case 6:
+		// Allow conversion even if value > MaxInt64 - preserves bit pattern
 		v = int64(binary.BigEndian.Uint64(data[offset:]))
 	}
 	mem.SetInt(v)

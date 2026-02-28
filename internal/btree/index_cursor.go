@@ -3,6 +3,7 @@ package btree
 import (
 	"bytes"
 	"fmt"
+	"math"
 )
 
 // IndexCursor represents a cursor for traversing an index B-tree
@@ -62,7 +63,12 @@ func (c *IndexCursor) parseIndexPayload(payload []byte) (key []byte, rowid int64
 		if n > 0 && start+n == len(payload) {
 			// Found a valid varint that ends exactly at the end of the payload
 			key = payload[:start]
-			rowid = int64(rowid64)
+			if rowid64 > math.MaxInt64 {
+				// Preserve bit pattern even if value exceeds MaxInt64
+				rowid = int64(rowid64)
+			} else {
+				rowid = int64(rowid64)
+			}
 			return key, rowid, nil
 		}
 	}

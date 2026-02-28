@@ -123,15 +123,7 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 			continue
 		}
 		fnExpr := col.Expr.(*parser.FunctionExpr)
-		switch fnExpr.Name {
-		case "COUNT":
-			vm.AddOp(vdbe.OpInteger, 0, accRegs[i], 0)
-		case "AVG":
-			vm.AddOp(vdbe.OpNull, 0, accRegs[i], 0)
-			vm.AddOp(vdbe.OpInteger, 0, avgCountRegs[i], 0)
-		case "SUM", "MIN", "MAX", "TOTAL":
-			vm.AddOp(vdbe.OpNull, 0, accRegs[i], 0)
-		}
+		avgCountRegs[i] = s.initializeAggregateRegister(vm, fnExpr.Name, accRegs[i], gen)
 	}
 
 	// Save current GROUP BY values to prev

@@ -18,6 +18,17 @@ func RegisterAggregateFunctions(r *Registry) {
 	r.Register(&GroupConcatFunc{})
 }
 
+// Resettable defines the interface for types that can be reset.
+type Resettable interface {
+	Reset()
+}
+
+// finalizeAndReset is a helper that calls Reset on the resettable type and returns the result.
+func finalizeAndReset(r Resettable, result Value) (Value, error) {
+	r.Reset()
+	return result, nil
+}
+
 // CountFunc implements count(X)
 type CountFunc struct {
 	count int64
@@ -38,9 +49,7 @@ func (f *CountFunc) Step(args []Value) error {
 }
 
 func (f *CountFunc) Final() (Value, error) {
-	result := NewIntValue(f.count)
-	f.Reset()
-	return result, nil
+	return finalizeAndReset(f, NewIntValue(f.count))
 }
 
 func (f *CountFunc) Reset() {
@@ -65,9 +74,7 @@ func (f *CountStarFunc) Step(args []Value) error {
 }
 
 func (f *CountStarFunc) Final() (Value, error) {
-	result := NewIntValue(f.count)
-	f.Reset()
-	return result, nil
+	return finalizeAndReset(f, NewIntValue(f.count))
 }
 
 func (f *CountStarFunc) Reset() {
@@ -183,9 +190,7 @@ func (f *TotalFunc) Step(args []Value) error {
 }
 
 func (f *TotalFunc) Final() (Value, error) {
-	result := NewFloatValue(f.sum)
-	f.Reset()
-	return result, nil
+	return finalizeAndReset(f, NewFloatValue(f.sum))
 }
 
 func (f *TotalFunc) Reset() {
@@ -225,12 +230,9 @@ func (f *AvgFunc) Step(args []Value) error {
 
 func (f *AvgFunc) Final() (Value, error) {
 	if f.count == 0 {
-		return NewNullValue(), nil
+		return finalizeAndReset(f, NewNullValue())
 	}
-
-	result := NewFloatValue(f.sum / float64(f.count))
-	f.Reset()
-	return result, nil
+	return finalizeAndReset(f, NewFloatValue(f.sum/float64(f.count)))
 }
 
 func (f *AvgFunc) Reset() {
@@ -269,12 +271,9 @@ func (f *MinFunc) Step(args []Value) error {
 
 func (f *MinFunc) Final() (Value, error) {
 	if !f.hasValue {
-		return NewNullValue(), nil
+		return finalizeAndReset(f, NewNullValue())
 	}
-
-	result := f.minValue
-	f.Reset()
-	return result, nil
+	return finalizeAndReset(f, f.minValue)
 }
 
 func (f *MinFunc) Reset() {
@@ -313,12 +312,9 @@ func (f *MaxFunc) Step(args []Value) error {
 
 func (f *MaxFunc) Final() (Value, error) {
 	if !f.hasValue {
-		return NewNullValue(), nil
+		return finalizeAndReset(f, NewNullValue())
 	}
-
-	result := f.maxValue
-	f.Reset()
-	return result, nil
+	return finalizeAndReset(f, f.maxValue)
 }
 
 func (f *MaxFunc) Reset() {
@@ -367,12 +363,9 @@ func (f *GroupConcatFunc) Step(args []Value) error {
 
 func (f *GroupConcatFunc) Final() (Value, error) {
 	if len(f.values) == 0 {
-		return NewNullValue(), nil
+		return finalizeAndReset(f, NewNullValue())
 	}
-
-	result := NewTextValue(strings.Join(f.values, f.separator))
-	f.Reset()
-	return result, nil
+	return finalizeAndReset(f, NewTextValue(strings.Join(f.values, f.separator)))
 }
 
 func (f *GroupConcatFunc) Reset() {

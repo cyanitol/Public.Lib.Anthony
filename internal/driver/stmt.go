@@ -1168,27 +1168,21 @@ func (s *Stmt) isAggregateExpr(expr parser.Expression) bool {
 	return aggFuncs[fnExpr.Name]
 }
 
-// emitCountUpdate emits VDBE opcodes to update COUNT accumulator
-func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, accReg int) {
-	// COUNT(*) or COUNT(expr) - for now both just increment
-	// TODO: evaluate expression and check for NULL in COUNT(expr)
-	vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
-}
-
-// emitSumUpdate emits VDBE opcodes to update SUM/TOTAL accumulator
-func (s *Stmt) emitSumUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, accReg int, gen *expr.CodeGenerator) {
+// loadAggregateColumnValue is a helper to load a column value for aggregate functions.
+// Returns (tempReg, skipAddr, ok) where skipAddr is the address to patch for NULL skip.
+func (s *Stmt) loadAggregateColumnValue(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, gen *expr.CodeGenerator) (int, int, bool) {
 	if len(fnExpr.Args) == 0 {
-		return
+		return 0, 0, false
 	}
 
 	argIdent, ok := fnExpr.Args[0].(*parser.IdentExpr)
 	if !ok {
-		return
+		return 0, 0, false
 	}
 
 	colIdx := table.GetColumnIndex(argIdent.Name)
 	if colIdx < 0 {
-		return
+		return 0, 0, false
 	}
 
 	// Load column value into a temp register
@@ -1198,6 +1192,23 @@ func (s *Stmt) emitSumUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 
 	// Skip NULL values
 	skipAddr := vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0)
+
+	return tempReg, skipAddr, true
+}
+
+// emitCountUpdate emits VDBE opcodes to update COUNT accumulator
+func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, accReg int) {
+	// COUNT(*) or COUNT(expr) - for now both just increment
+	// TODO: evaluate expression and check for NULL in COUNT(expr)
+	vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
+}
+
+// emitSumUpdate emits VDBE opcodes to update SUM/TOTAL accumulator
+func (s *Stmt) emitSumUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, accReg int, gen *expr.CodeGenerator) {
+	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, gen)
+	if !ok {
+		return
+	}
 
 	// If accumulator is NOT NULL, jump to add instruction
 	addAddr := vm.AddOp(vdbe.OpNotNull, accReg, 0, 0)
@@ -1218,27 +1229,10 @@ func (s *Stmt) emitSumUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 
 // emitAvgUpdate emits VDBE opcodes to update AVG accumulator (sum and count)
 func (s *Stmt) emitAvgUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, sumReg int, countReg int, gen *expr.CodeGenerator) {
-	if len(fnExpr.Args) == 0 {
-		return
-	}
-
-	argIdent, ok := fnExpr.Args[0].(*parser.IdentExpr)
+	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, gen)
 	if !ok {
 		return
 	}
-
-	colIdx := table.GetColumnIndex(argIdent.Name)
-	if colIdx < 0 {
-		return
-	}
-
-	// Load column value into a temp register
-	tempReg := gen.AllocReg()
-	recordIdx := schemaRecordIdx(table.Columns, colIdx)
-	vm.AddOp(vdbe.OpColumn, 0, recordIdx, tempReg)
-
-	// Skip NULL values
-	skipAddr := vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0)
 
 	// Increment count (always for non-NULL values)
 	vm.AddOp(vdbe.OpAddImm, countReg, 1, 0)
@@ -1262,27 +1256,10 @@ func (s *Stmt) emitAvgUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 
 // emitMinUpdate emits VDBE opcodes to update MIN accumulator
 func (s *Stmt) emitMinUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, accReg int, gen *expr.CodeGenerator) {
-	if len(fnExpr.Args) == 0 {
-		return
-	}
-
-	argIdent, ok := fnExpr.Args[0].(*parser.IdentExpr)
+	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, gen)
 	if !ok {
 		return
 	}
-
-	colIdx := table.GetColumnIndex(argIdent.Name)
-	if colIdx < 0 {
-		return
-	}
-
-	// Load column value into a temp register
-	tempReg := gen.AllocReg()
-	recordIdx := schemaRecordIdx(table.Columns, colIdx)
-	vm.AddOp(vdbe.OpColumn, 0, recordIdx, tempReg)
-
-	// Skip NULL values
-	skipAddr := vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0)
 
 	// If accumulator is NULL, just copy the value (first value)
 	copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
@@ -1304,27 +1281,10 @@ func (s *Stmt) emitMinUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 
 // emitMaxUpdate emits VDBE opcodes to update MAX accumulator
 func (s *Stmt) emitMaxUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, accReg int, gen *expr.CodeGenerator) {
-	if len(fnExpr.Args) == 0 {
-		return
-	}
-
-	argIdent, ok := fnExpr.Args[0].(*parser.IdentExpr)
+	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, gen)
 	if !ok {
 		return
 	}
-
-	colIdx := table.GetColumnIndex(argIdent.Name)
-	if colIdx < 0 {
-		return
-	}
-
-	// Load column value into a temp register
-	tempReg := gen.AllocReg()
-	recordIdx := schemaRecordIdx(table.Columns, colIdx)
-	vm.AddOp(vdbe.OpColumn, 0, recordIdx, tempReg)
-
-	// Skip NULL values
-	skipAddr := vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0)
 
 	// If accumulator is NULL, just copy the value (first value)
 	copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
@@ -1344,6 +1304,23 @@ func (s *Stmt) emitMaxUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 	vm.Program[notGreaterAddr].P2 = endAddr
 }
 
+// initializeAggregateRegister initializes a single aggregate accumulator register.
+func (s *Stmt) initializeAggregateRegister(vm *vdbe.VDBE, funcName string, accReg int, gen *expr.CodeGenerator) (avgCountReg int) {
+	switch funcName {
+	case "COUNT":
+		vm.AddOp(vdbe.OpInteger, 0, accReg, 0)
+	case "AVG":
+		vm.AddOp(vdbe.OpNull, 0, accReg, 0)
+		avgCountReg = gen.AllocReg()
+		vm.AddOp(vdbe.OpInteger, 0, avgCountReg, 0)
+	case "TOTAL":
+		vm.AddOpWithP4Real(vdbe.OpReal, 0, accReg, 0, 0.0)
+	case "SUM", "MIN", "MAX":
+		vm.AddOp(vdbe.OpNull, 0, accReg, 0)
+	}
+	return avgCountReg
+}
+
 // initializeAggregateAccumulators allocates and initializes accumulator registers for aggregate functions
 func (s *Stmt) initializeAggregateAccumulators(vm *vdbe.VDBE, stmt *parser.SelectStmt, gen *expr.CodeGenerator) (accRegs []int, avgCountRegs []int) {
 	numCols := len(stmt.Columns)
@@ -1357,20 +1334,7 @@ func (s *Stmt) initializeAggregateAccumulators(vm *vdbe.VDBE, stmt *parser.Selec
 		}
 
 		accRegs[i] = gen.AllocReg()
-
-		// Initialize accumulator based on function type
-		switch fnExpr.Name {
-		case "COUNT":
-			vm.AddOp(vdbe.OpInteger, 0, accRegs[i], 0)
-		case "AVG":
-			vm.AddOp(vdbe.OpNull, 0, accRegs[i], 0)
-			avgCountRegs[i] = gen.AllocReg()
-			vm.AddOp(vdbe.OpInteger, 0, avgCountRegs[i], 0)
-		case "TOTAL":
-			vm.AddOpWithP4Real(vdbe.OpReal, 0, accRegs[i], 0, 0.0)
-		case "SUM", "MIN", "MAX":
-			vm.AddOp(vdbe.OpNull, 0, accRegs[i], 0)
-		}
+		avgCountRegs[i] = s.initializeAggregateRegister(vm, fnExpr.Name, accRegs[i], gen)
 	}
 	return accRegs, avgCountRegs
 }
@@ -1634,61 +1598,10 @@ func (s *Stmt) compileSelectWithWindowFunctions(vm *vdbe.VDBE, stmt *parser.Sele
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
 
-	// Initialize row counter in a register for row_number()
-	rowCountReg := numCols + 10
-	vm.AddOp(vdbe.OpInteger, 0, rowCountReg, 0)
-
-	// Initialize registers for RANK() and DENSE_RANK()
-	rankReg := numCols + 11
-	denseRankReg := numCols + 12
-	vm.AddOp(vdbe.OpInteger, 1, rankReg, 0)      // Start with rank 1
-	vm.AddOp(vdbe.OpInteger, 1, denseRankReg, 0) // Start with dense_rank 1
-
-	// Analyze window functions to find ORDER BY columns for ranking
-	var rankOrderByCols []int
-	hasRankFunc := false
-	hasDenseRankFunc := false
-
-	for _, col := range expandedCols {
-		if fnExpr, ok := col.Expr.(*parser.FunctionExpr); ok && fnExpr.Over != nil {
-			if fnExpr.Name == "rank" {
-				hasRankFunc = true
-				// Extract ORDER BY columns from window spec
-				if fnExpr.Over.OrderBy != nil && len(rankOrderByCols) == 0 {
-					for _, orderTerm := range fnExpr.Over.OrderBy {
-						if identExpr, ok := orderTerm.Expr.(*parser.IdentExpr); ok {
-							colIdx := s.findColumnIndex(table, identExpr.Name)
-							if colIdx >= 0 {
-								rankOrderByCols = append(rankOrderByCols, colIdx)
-							}
-						}
-					}
-				}
-			} else if fnExpr.Name == "dense_rank" {
-				hasDenseRankFunc = true
-				// Extract ORDER BY columns from window spec
-				if fnExpr.Over.OrderBy != nil && len(rankOrderByCols) == 0 {
-					for _, orderTerm := range fnExpr.Over.OrderBy {
-						if identExpr, ok := orderTerm.Expr.(*parser.IdentExpr); ok {
-							colIdx := s.findColumnIndex(table, identExpr.Name)
-							if colIdx >= 0 {
-								rankOrderByCols = append(rankOrderByCols, colIdx)
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Allocate registers for storing previous and current ORDER BY values
-	prevOrderByReg := numCols + 20
-	currOrderByReg := numCols + 30
-
-	// Initialize previous ORDER BY values to NULL (indicates first row)
-	for idx := range rankOrderByCols {
-		vm.AddOp(vdbe.OpNull, 0, prevOrderByReg+idx, 0)
-	}
+	// Initialize rank tracking registers and analyze rank functions
+	rankRegs := initWindowRankRegisters(numCols)
+	rankInfo := s.analyzeWindowRankFunctions(expandedCols, table)
+	emitWindowRankSetup(vm, rankRegs, rankInfo)
 
 	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
 
@@ -1702,121 +1615,12 @@ func (s *Stmt) compileSelectWithWindowFunctions(vm *vdbe.VDBE, stmt *parser.Sele
 		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
 	}
 
-	// For RANK/DENSE_RANK: compare current ORDER BY values with previous
-	if (hasRankFunc || hasDenseRankFunc) && len(rankOrderByCols) > 0 {
-		// Read current ORDER BY values into registers
-		for idx, colIdx := range rankOrderByCols {
-			vm.AddOp(vdbe.OpColumn, 0, colIdx, currOrderByReg+idx)
-		}
-
-		// Compare with previous values
-		valuesChangedReg := numCols + 40
-		vm.AddOp(vdbe.OpInteger, 0, valuesChangedReg, 0) // Assume no change
-
-		for idx := range rankOrderByCols {
-			curr := currOrderByReg + idx
-			prev := prevOrderByReg + idx
-
-			// Check if previous is NULL (first row)
-			isNullAddr := vm.AddOp(vdbe.OpNotNull, prev, 0, 0)
-
-			// Previous is NULL - this is first row, values "changed"
-			vm.AddOp(vdbe.OpInteger, 1, valuesChangedReg, 0)
-			skipNullAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
-
-			// Previous not NULL - compare values
-			vm.Program[isNullAddr].P2 = vm.NumOps()
-
-			// If curr != prev, set changed flag
-			neAddr := vm.AddOp(vdbe.OpNe, curr, 0, prev)
-			skipNeAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
-
-			vm.Program[neAddr].P2 = vm.NumOps()
-			vm.AddOp(vdbe.OpInteger, 1, valuesChangedReg, 0)
-
-			vm.Program[skipNeAddr].P2 = vm.NumOps()
-			vm.Program[skipNullAddr].P2 = vm.NumOps()
-		}
-
-		// Increment row counter before checking if values changed
-		vm.AddOp(vdbe.OpAddImm, rowCountReg, 1, 0)
-
-		// If values changed, update ranks
-		updateRankAddr := vm.AddOp(vdbe.OpIfNot, valuesChangedReg, 0, 0)
-
-		// Values changed - update ranks
-		// RANK: rank = current row_number
-		vm.AddOp(vdbe.OpCopy, rowCountReg, rankReg, 0)
-
-		// DENSE_RANK: increment unless it's the first row
-		// Check if previous was NULL (first row case)
-		firstRowAddr := vm.AddOp(vdbe.OpIsNull, prevOrderByReg, 0, 0)
-		// Not first row - increment dense_rank
-		vm.AddOp(vdbe.OpAddImm, denseRankReg, 1, 0)
-		skipDenseIncAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
-		// First row - dense_rank already set to 1, do nothing
-		vm.Program[firstRowAddr].P2 = vm.NumOps()
-		vm.Program[skipDenseIncAddr].P2 = vm.NumOps()
-
-		// Store current ORDER BY values as previous for next iteration
-		for idx := range rankOrderByCols {
-			vm.AddOp(vdbe.OpCopy, currOrderByReg+idx, prevOrderByReg+idx, 0)
-		}
-
-		skipUpdateRankAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
-
-		// Values not changed - ranks stay the same (no update needed)
-		vm.Program[updateRankAddr].P2 = vm.NumOps()
-
-		vm.Program[skipUpdateRankAddr].P2 = vm.NumOps()
-	} else {
-		// No ranking functions with ORDER BY - just increment row counter
-		vm.AddOp(vdbe.OpAddImm, rowCountReg, 1, 0)
-	}
+	// Emit rank tracking logic
+	emitWindowRankTracking(vm, rankRegs, rankInfo, numCols)
 
 	// Extract columns
 	for i := 0; i < numCols; i++ {
-		col := expandedCols[i]
-
-		if fnExpr, ok := col.Expr.(*parser.FunctionExpr); ok && fnExpr.Over != nil {
-			// Window function - for now, just handle row_number()
-			switch fnExpr.Name {
-			case "row_number":
-				// Copy the row counter to the result column
-				vm.AddOp(vdbe.OpCopy, rowCountReg, i, 0)
-			case "rank":
-				// Copy the rank value
-				vm.AddOp(vdbe.OpCopy, rankReg, i, 0)
-			case "dense_rank":
-				// Copy the dense rank value
-				vm.AddOp(vdbe.OpCopy, denseRankReg, i, 0)
-			case "ntile":
-				// For ntile, we need the bucket count argument
-				// For now, just return row number
-				vm.AddOp(vdbe.OpCopy, rowCountReg, i, 0)
-			default:
-				// Unknown window function
-				vm.AddOp(vdbe.OpNull, 0, i, 0)
-			}
-		} else {
-			// Regular column
-			if identExpr, ok := col.Expr.(*parser.IdentExpr); ok {
-				colIdx := s.findColumnIndex(table, identExpr.Name)
-				if colIdx >= 0 {
-					vm.AddOp(vdbe.OpColumn, 0, colIdx, i)
-				} else {
-					vm.AddOp(vdbe.OpNull, 0, i, 0)
-				}
-			} else {
-				// For other expressions, try to generate
-				reg, err := gen.GenerateExpr(col.Expr)
-				if err == nil && reg != i {
-					vm.AddOp(vdbe.OpCopy, reg, i, 0)
-				} else {
-					vm.AddOp(vdbe.OpNull, 0, i, 0)
-				}
-			}
-		}
+		s.emitWindowColumn(vm, gen, expandedCols[i], table, rankRegs, i)
 	}
 
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
