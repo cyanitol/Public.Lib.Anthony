@@ -643,6 +643,439 @@ func TestSQLiteJoin(t *testing.T) {
 				{int64(2), nil, nil},
 			},
 		},
+		// JOIN with ORDER BY
+		{
+			name: "join with order by",
+			setup: []string{
+				"CREATE TABLE employees(id INTEGER, name TEXT, dept_id INTEGER)",
+				"CREATE TABLE departments(id INTEGER, dept_name TEXT)",
+				"INSERT INTO employees VALUES(1, 'Zoe', 10)",
+				"INSERT INTO employees VALUES(2, 'Alice', 20)",
+				"INSERT INTO employees VALUES(3, 'Bob', 10)",
+				"INSERT INTO departments VALUES(10, 'Engineering')",
+				"INSERT INTO departments VALUES(20, 'Sales')",
+			},
+			query: "SELECT e.name, d.dept_name FROM employees e JOIN departments d ON e.dept_id = d.id ORDER BY e.name",
+			wantRows: [][]interface{}{
+				{"Alice", "Sales"},
+				{"Bob", "Engineering"},
+				{"Zoe", "Engineering"},
+			},
+		},
+		{
+			name: "join with order by descending",
+			setup: []string{
+				"CREATE TABLE products(id INTEGER, name TEXT, category_id INTEGER)",
+				"CREATE TABLE categories(id INTEGER, name TEXT)",
+				"INSERT INTO products VALUES(1, 'Widget', 1)",
+				"INSERT INTO products VALUES(2, 'Gadget', 2)",
+				"INSERT INTO products VALUES(3, 'Tool', 1)",
+				"INSERT INTO categories VALUES(1, 'Hardware')",
+				"INSERT INTO categories VALUES(2, 'Electronics')",
+			},
+			query: "SELECT p.name, c.name FROM products p JOIN categories c ON p.category_id = c.id ORDER BY p.name DESC",
+			wantRows: [][]interface{}{
+				{"Widget", "Hardware"},
+				{"Tool", "Hardware"},
+				{"Gadget", "Electronics"},
+			},
+		},
+		{
+			name: "join with order by multiple columns",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER, b TEXT)",
+				"CREATE TABLE t2(a INTEGER, c TEXT)",
+				"INSERT INTO t1 VALUES(1, 'Z')",
+				"INSERT INTO t1 VALUES(2, 'A')",
+				"INSERT INTO t1 VALUES(2, 'B')",
+				"INSERT INTO t2 VALUES(1, 'X')",
+				"INSERT INTO t2 VALUES(2, 'Y')",
+			},
+			query: "SELECT t1.a, t1.b, t2.c FROM t1 JOIN t2 ON t1.a = t2.a ORDER BY t1.a, t1.b",
+			wantRows: [][]interface{}{
+				{int64(1), "Z", "X"},
+				{int64(2), "A", "Y"},
+				{int64(2), "B", "Y"},
+			},
+		},
+		// JOIN with GROUP BY and aggregate functions
+		{
+			name: "join with group by and count",
+			setup: []string{
+				"CREATE TABLE customers(id INTEGER, name TEXT)",
+				"CREATE TABLE orders(id INTEGER, customer_id INTEGER, amount REAL)",
+				"INSERT INTO customers VALUES(1, 'Alice')",
+				"INSERT INTO customers VALUES(2, 'Bob')",
+				"INSERT INTO customers VALUES(3, 'Charlie')",
+				"INSERT INTO orders VALUES(1, 1, 100.0)",
+				"INSERT INTO orders VALUES(2, 1, 200.0)",
+				"INSERT INTO orders VALUES(3, 2, 150.0)",
+			},
+			query: "SELECT c.name, COUNT(o.id) FROM customers c LEFT JOIN orders o ON c.id = o.customer_id GROUP BY c.id, c.name ORDER BY c.name",
+			wantRows: [][]interface{}{
+				{"Alice", int64(2)},
+				{"Bob", int64(1)},
+				{"Charlie", int64(0)},
+			},
+		},
+		{
+			name: "join with group by and sum",
+			setup: []string{
+				"CREATE TABLE products(id INTEGER, name TEXT, category_id INTEGER, price REAL)",
+				"CREATE TABLE categories(id INTEGER, name TEXT)",
+				"INSERT INTO products VALUES(1, 'Widget', 1, 10.0)",
+				"INSERT INTO products VALUES(2, 'Gadget', 2, 20.0)",
+				"INSERT INTO products VALUES(3, 'Tool', 1, 15.0)",
+				"INSERT INTO categories VALUES(1, 'Hardware')",
+				"INSERT INTO categories VALUES(2, 'Electronics')",
+			},
+			query: "SELECT c.name, SUM(p.price) FROM categories c LEFT JOIN products p ON c.id = p.category_id GROUP BY c.id, c.name ORDER BY c.name",
+			wantRows: [][]interface{}{
+				{"Electronics", 20.0},
+				{"Hardware", 25.0},
+			},
+		},
+		{
+			name: "join with group by and avg",
+			setup: []string{
+				"CREATE TABLE students(id INTEGER, name TEXT, class_id INTEGER)",
+				"CREATE TABLE classes(id INTEGER, name TEXT)",
+				"CREATE TABLE grades(student_id INTEGER, score INTEGER)",
+				"INSERT INTO classes VALUES(1, 'Math')",
+				"INSERT INTO classes VALUES(2, 'Science')",
+				"INSERT INTO students VALUES(1, 'Alice', 1)",
+				"INSERT INTO students VALUES(2, 'Bob', 1)",
+				"INSERT INTO students VALUES(3, 'Charlie', 2)",
+				"INSERT INTO grades VALUES(1, 90)",
+				"INSERT INTO grades VALUES(1, 85)",
+				"INSERT INTO grades VALUES(2, 75)",
+				"INSERT INTO grades VALUES(3, 95)",
+			},
+			query: "SELECT c.name, AVG(g.score) FROM classes c JOIN students s ON c.id = s.class_id JOIN grades g ON s.id = g.student_id GROUP BY c.id, c.name ORDER BY c.name",
+			wantRows: [][]interface{}{
+				{"Math", 83.33333333333333},
+				{"Science", 95.0},
+			},
+		},
+		{
+			name: "join with group by having",
+			setup: []string{
+				"CREATE TABLE departments(id INTEGER, name TEXT)",
+				"CREATE TABLE employees(id INTEGER, dept_id INTEGER, salary REAL)",
+				"INSERT INTO departments VALUES(1, 'Engineering')",
+				"INSERT INTO departments VALUES(2, 'Sales')",
+				"INSERT INTO departments VALUES(3, 'Marketing')",
+				"INSERT INTO employees VALUES(1, 1, 80000)",
+				"INSERT INTO employees VALUES(2, 1, 90000)",
+				"INSERT INTO employees VALUES(3, 2, 60000)",
+				"INSERT INTO employees VALUES(4, 3, 70000)",
+			},
+			query: "SELECT d.name, COUNT(e.id) FROM departments d LEFT JOIN employees e ON d.id = e.dept_id GROUP BY d.id, d.name HAVING COUNT(e.id) >= 2 ORDER BY d.name",
+			wantRows: [][]interface{}{
+				{"Engineering", int64(2)},
+			},
+		},
+		// Empty table JOIN tests
+		{
+			name: "join with empty left table",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(b INTEGER)",
+				"INSERT INTO t2 VALUES(1)",
+				"INSERT INTO t2 VALUES(2)",
+			},
+			query:    "SELECT * FROM t1 JOIN t2 ON t1.a = t2.b",
+			wantRows: [][]interface{}{},
+		},
+		{
+			name: "join with empty right table",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(b INTEGER)",
+				"INSERT INTO t1 VALUES(1)",
+				"INSERT INTO t1 VALUES(2)",
+			},
+			query:    "SELECT * FROM t1 JOIN t2 ON t1.a = t2.b",
+			wantRows: [][]interface{}{},
+		},
+		{
+			name: "left join with empty right table",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(b INTEGER)",
+				"INSERT INTO t1 VALUES(1)",
+				"INSERT INTO t1 VALUES(2)",
+			},
+			query: "SELECT * FROM t1 LEFT JOIN t2 ON t1.a = t2.b",
+			wantRows: [][]interface{}{
+				{int64(1), nil},
+				{int64(2), nil},
+			},
+		},
+		{
+			name: "cross join with empty table",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(b INTEGER)",
+				"INSERT INTO t1 VALUES(1)",
+			},
+			query:    "SELECT * FROM t1 CROSS JOIN t2",
+			wantRows: [][]interface{}{},
+		},
+		{
+			name: "natural join with empty table",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(a INTEGER)",
+				"INSERT INTO t1 VALUES(1)",
+			},
+			query:    "SELECT * FROM t1 NATURAL JOIN t2",
+			wantRows: [][]interface{}{},
+		},
+		// JOINs with NULL values in join columns
+		{
+			name: "join with null in left table join column",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(b INTEGER)",
+				"INSERT INTO t1 VALUES(1)",
+				"INSERT INTO t1 VALUES(NULL)",
+				"INSERT INTO t1 VALUES(3)",
+				"INSERT INTO t2 VALUES(1)",
+				"INSERT INTO t2 VALUES(2)",
+				"INSERT INTO t2 VALUES(3)",
+			},
+			query: "SELECT * FROM t1 JOIN t2 ON t1.a = t2.b",
+			wantRows: [][]interface{}{
+				{int64(1), int64(1)},
+				{int64(3), int64(3)},
+			},
+		},
+		{
+			name: "join with null in right table join column",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(b INTEGER)",
+				"INSERT INTO t1 VALUES(1)",
+				"INSERT INTO t1 VALUES(2)",
+				"INSERT INTO t1 VALUES(3)",
+				"INSERT INTO t2 VALUES(1)",
+				"INSERT INTO t2 VALUES(NULL)",
+				"INSERT INTO t2 VALUES(3)",
+			},
+			query: "SELECT * FROM t1 JOIN t2 ON t1.a = t2.b",
+			wantRows: [][]interface{}{
+				{int64(1), int64(1)},
+				{int64(3), int64(3)},
+			},
+		},
+		{
+			name: "left join with null in join column",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(b INTEGER, c TEXT)",
+				"INSERT INTO t1 VALUES(1)",
+				"INSERT INTO t1 VALUES(NULL)",
+				"INSERT INTO t1 VALUES(3)",
+				"INSERT INTO t2 VALUES(1, 'one')",
+				"INSERT INTO t2 VALUES(3, 'three')",
+			},
+			query: "SELECT * FROM t1 LEFT JOIN t2 ON t1.a = t2.b ORDER BY t1.a",
+			wantRows: [][]interface{}{
+				{nil, nil, nil},
+				{int64(1), int64(1), "one"},
+				{int64(3), int64(3), "three"},
+			},
+		},
+		// Four-way join
+		{
+			name: "four way join",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(a INTEGER, b INTEGER)",
+				"CREATE TABLE t3(b INTEGER, c INTEGER)",
+				"CREATE TABLE t4(c INTEGER, d INTEGER)",
+				"INSERT INTO t1 VALUES(1)",
+				"INSERT INTO t2 VALUES(1, 2)",
+				"INSERT INTO t3 VALUES(2, 3)",
+				"INSERT INTO t4 VALUES(3, 4)",
+			},
+			query: "SELECT t1.a, t2.b, t3.c, t4.d FROM t1 JOIN t2 ON t1.a = t2.a JOIN t3 ON t2.b = t3.b JOIN t4 ON t3.c = t4.c",
+			wantRows: [][]interface{}{
+				{int64(1), int64(2), int64(3), int64(4)},
+			},
+		},
+		// JOIN with IN subquery
+		{
+			name: "join with in subquery in where",
+			setup: []string{
+				"CREATE TABLE products(id INTEGER, name TEXT, category_id INTEGER)",
+				"CREATE TABLE categories(id INTEGER, name TEXT)",
+				"CREATE TABLE featured(product_id INTEGER)",
+				"INSERT INTO products VALUES(1, 'Widget', 1)",
+				"INSERT INTO products VALUES(2, 'Gadget', 2)",
+				"INSERT INTO products VALUES(3, 'Tool', 1)",
+				"INSERT INTO categories VALUES(1, 'Hardware')",
+				"INSERT INTO categories VALUES(2, 'Electronics')",
+				"INSERT INTO featured VALUES(1)",
+				"INSERT INTO featured VALUES(3)",
+			},
+			query: "SELECT p.name, c.name FROM products p JOIN categories c ON p.category_id = c.id WHERE p.id IN (SELECT product_id FROM featured) ORDER BY p.name",
+			wantRows: [][]interface{}{
+				{"Tool", "Hardware"},
+				{"Widget", "Hardware"},
+			},
+		},
+		// JOIN with DISTINCT
+		{
+			name: "join with distinct",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(a INTEGER, b TEXT)",
+				"INSERT INTO t1 VALUES(1)",
+				"INSERT INTO t1 VALUES(1)",
+				"INSERT INTO t2 VALUES(1, 'x')",
+				"INSERT INTO t2 VALUES(1, 'y')",
+			},
+			query: "SELECT DISTINCT t1.a FROM t1 JOIN t2 ON t1.a = t2.a",
+			wantRows: [][]interface{}{
+				{int64(1)},
+			},
+		},
+		// Complex self-join scenarios
+		{
+			name: "self join to find pairs",
+			setup: []string{
+				"CREATE TABLE employees(id INTEGER, name TEXT, manager_id INTEGER)",
+				"INSERT INTO employees VALUES(1, 'Alice', NULL)",
+				"INSERT INTO employees VALUES(2, 'Bob', 1)",
+				"INSERT INTO employees VALUES(3, 'Charlie', 1)",
+				"INSERT INTO employees VALUES(4, 'David', 2)",
+			},
+			query: "SELECT e.name, m.name FROM employees e LEFT JOIN employees m ON e.manager_id = m.id ORDER BY e.id",
+			wantRows: [][]interface{}{
+				{"Alice", nil},
+				{"Bob", "Alice"},
+				{"Charlie", "Alice"},
+				{"David", "Bob"},
+			},
+		},
+		{
+			name: "self join to find related rows",
+			setup: []string{
+				"CREATE TABLE items(id INTEGER, value INTEGER)",
+				"INSERT INTO items VALUES(1, 10)",
+				"INSERT INTO items VALUES(2, 20)",
+				"INSERT INTO items VALUES(3, 30)",
+			},
+			query: "SELECT a.id, a.value, b.id, b.value FROM items a JOIN items b ON a.value + 10 = b.value ORDER BY a.id",
+			wantRows: [][]interface{}{
+				{int64(1), int64(10), int64(2), int64(20)},
+				{int64(2), int64(20), int64(3), int64(30)},
+			},
+		},
+		// JOIN with CASE expression
+		{
+			name: "join with case in select",
+			setup: []string{
+				"CREATE TABLE orders(id INTEGER, customer_id INTEGER, amount REAL)",
+				"CREATE TABLE customers(id INTEGER, name TEXT)",
+				"INSERT INTO customers VALUES(1, 'Alice')",
+				"INSERT INTO customers VALUES(2, 'Bob')",
+				"INSERT INTO orders VALUES(1, 1, 100)",
+				"INSERT INTO orders VALUES(2, 1, 250)",
+				"INSERT INTO orders VALUES(3, 2, 75)",
+			},
+			query: "SELECT c.name, CASE WHEN o.amount > 200 THEN 'Large' ELSE 'Small' END FROM customers c JOIN orders o ON c.id = o.customer_id ORDER BY o.id",
+			wantRows: [][]interface{}{
+				{"Alice", "Small"},
+				{"Alice", "Large"},
+				{"Bob", "Small"},
+			},
+		},
+		// JOIN with LIMIT
+		{
+			name: "join with limit",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(b INTEGER)",
+				"INSERT INTO t1 VALUES(1)",
+				"INSERT INTO t1 VALUES(2)",
+				"INSERT INTO t1 VALUES(3)",
+				"INSERT INTO t2 VALUES(1)",
+				"INSERT INTO t2 VALUES(2)",
+				"INSERT INTO t2 VALUES(3)",
+			},
+			query: "SELECT * FROM t1 JOIN t2 ON t1.a = t2.b ORDER BY t1.a LIMIT 2",
+			wantRows: [][]interface{}{
+				{int64(1), int64(1)},
+				{int64(2), int64(2)},
+			},
+		},
+		// Mixed JOIN types in one query
+		{
+			name: "mixed join types",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(a INTEGER, b INTEGER)",
+				"CREATE TABLE t3(b INTEGER, c INTEGER)",
+				"INSERT INTO t1 VALUES(1)",
+				"INSERT INTO t1 VALUES(2)",
+				"INSERT INTO t2 VALUES(1, 10)",
+				"INSERT INTO t3 VALUES(10, 100)",
+				"INSERT INTO t3 VALUES(20, 200)",
+			},
+			query: "SELECT t1.a, t2.b, t3.c FROM t1 JOIN t2 ON t1.a = t2.a LEFT JOIN t3 ON t2.b = t3.b ORDER BY t1.a",
+			wantRows: [][]interface{}{
+				{int64(1), int64(10), int64(100)},
+			},
+		},
+		// JOIN on expression
+		{
+			name: "join on expression with math",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(b INTEGER)",
+				"INSERT INTO t1 VALUES(5)",
+				"INSERT INTO t1 VALUES(10)",
+				"INSERT INTO t2 VALUES(10)",
+				"INSERT INTO t2 VALUES(20)",
+			},
+			query: "SELECT * FROM t1 JOIN t2 ON t1.a * 2 = t2.b",
+			wantRows: [][]interface{}{
+				{int64(5), int64(10)},
+				{int64(10), int64(20)},
+			},
+		},
+		// NATURAL JOIN with no common columns
+		{
+			name: "natural join with no common columns",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER)",
+				"CREATE TABLE t2(b INTEGER)",
+				"INSERT INTO t1 VALUES(1)",
+				"INSERT INTO t2 VALUES(2)",
+			},
+			query: "SELECT * FROM t1 NATURAL JOIN t2",
+			wantRows: [][]interface{}{
+				{int64(1), int64(2)},
+			},
+		},
+		// JOIN with string concatenation
+		{
+			name: "join with string concat in select",
+			setup: []string{
+				"CREATE TABLE users(id INTEGER, first_name TEXT, last_name TEXT)",
+				"CREATE TABLE orders(id INTEGER, user_id INTEGER)",
+				"INSERT INTO users VALUES(1, 'John', 'Doe')",
+				"INSERT INTO users VALUES(2, 'Jane', 'Smith')",
+				"INSERT INTO orders VALUES(1, 1)",
+			},
+			query: "SELECT u.first_name || ' ' || u.last_name, o.id FROM users u JOIN orders o ON u.id = o.user_id",
+			wantRows: [][]interface{}{
+				{"John Doe", int64(1)},
+			},
+		},
 	}
 
 	for _, tt := range tests {

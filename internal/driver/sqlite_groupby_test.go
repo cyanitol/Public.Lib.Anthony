@@ -483,6 +483,195 @@ func TestSQLiteGroupBy(t *testing.T) {
 			want:  [][]interface{}{{"real"}},
 		},
 
+		// HAVING with complex nested conditions
+		{
+			name: "HAVING with nested OR and AND conditions",
+			setup: []string{
+				"CREATE TABLE t1(category TEXT, value INTEGER)",
+				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 5), ('B', 10), ('C', 100)",
+			},
+			query: "SELECT category, SUM(value), COUNT(*) FROM t1 GROUP BY category HAVING (SUM(value) > 50 OR COUNT(*) >= 2) AND category != 'B' ORDER BY category",
+			want:  [][]interface{}{{"A", int64(30), int64(2)}, {"C", int64(100), int64(1)}},
+		},
+		{
+			name: "HAVING with multiple aggregate functions and complex logic",
+			setup: []string{
+				"CREATE TABLE t1(category TEXT, value INTEGER)",
+				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('A', 30), ('B', 5), ('B', 5), ('C', 50)",
+			},
+			query: "SELECT category, MIN(value), MAX(value), AVG(value) FROM t1 GROUP BY category HAVING MIN(value) < 15 AND MAX(value) > 25 ORDER BY category",
+			want:  [][]interface{}{{"A", int64(10), int64(30), float64(20)}},
+		},
+		{
+			name: "HAVING with arithmetic on aggregates",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER, b INTEGER)",
+				"INSERT INTO t1 VALUES(1, 10), (1, 20), (2, 5), (2, 15)",
+			},
+			query: "SELECT a, SUM(b), AVG(b) FROM t1 GROUP BY a HAVING SUM(b) > AVG(b) * 2 ORDER BY a",
+			want:  [][]interface{}{{int64(1), int64(30), float64(15)}, {int64(2), int64(20), float64(10)}},
+		},
+		{
+			name: "HAVING with BETWEEN on aggregate",
+			setup: []string{
+				"CREATE TABLE t1(category TEXT, value INTEGER)",
+				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 50), ('C', 5), ('C', 10), ('C', 15)",
+			},
+			query: "SELECT category, SUM(value) FROM t1 GROUP BY category HAVING SUM(value) BETWEEN 20 AND 40 ORDER BY category",
+			want:  [][]interface{}{{"A", int64(30)}, {"C", int64(30)}},
+			},
+		{
+			name: "HAVING with IN clause on aggregate",
+			setup: []string{
+				"CREATE TABLE t1(category TEXT, value INTEGER)",
+				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 5), ('B', 5), ('B', 5), ('C', 100)",
+			},
+			query: "SELECT category, COUNT(*) FROM t1 GROUP BY category HAVING COUNT(*) IN (1, 3) ORDER BY category",
+			want:  [][]interface{}{{"B", int64(3)}, {"C", int64(1)}},
+		},
+
+		// GROUP BY with DISTINCT variations
+		{
+			name: "GROUP BY with DISTINCT in SELECT without aggregate",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER, b INTEGER)",
+				"INSERT INTO t1 VALUES(1, 10), (1, 10), (2, 20)",
+			},
+			query: "SELECT DISTINCT a FROM t1 GROUP BY a ORDER BY a",
+			want:  [][]interface{}{{int64(1)}, {int64(2)}},
+		},
+		{
+			name: "GROUP BY with aggregate of DISTINCT values",
+			setup: []string{
+				"CREATE TABLE t1(category TEXT, value INTEGER)",
+				"INSERT INTO t1 VALUES('A', 10), ('A', 10), ('A', 20), ('B', 5)",
+			},
+			query: "SELECT category, SUM(DISTINCT value), COUNT(DISTINCT value) FROM t1 GROUP BY category ORDER BY category",
+			want:  [][]interface{}{{"A", int64(30), int64(2)}, {"B", int64(5), int64(1)}},
+		},
+		{
+			name: "GROUP BY with AVG of DISTINCT values",
+			setup: []string{
+				"CREATE TABLE t1(category TEXT, value INTEGER)",
+				"INSERT INTO t1 VALUES('A', 10), ('A', 10), ('A', 20), ('B', 5), ('B', 5)",
+			},
+			query: "SELECT category, AVG(DISTINCT value) FROM t1 GROUP BY category ORDER BY category",
+			want:  [][]interface{}{{"A", float64(15)}, {"B", float64(5)}},
+		},
+
+		// GROUP BY with CASE expressions
+		{
+			name: "GROUP BY with CASE expression",
+			setup: []string{
+				"CREATE TABLE t1(value INTEGER)",
+				"INSERT INTO t1 VALUES(5), (15), (25), (35), (45)",
+			},
+			query: "SELECT CASE WHEN value < 20 THEN 'low' ELSE 'high' END as range, COUNT(*) FROM t1 GROUP BY range ORDER BY range",
+			want:  [][]interface{}{{"high", int64(3)}, {"low", int64(2)}},
+		},
+		{
+			name: "GROUP BY with CASE in aggregate",
+			setup: []string{
+				"CREATE TABLE t1(category TEXT, value INTEGER)",
+				"INSERT INTO t1 VALUES('A', 10), ('A', 30), ('B', 5), ('B', 50)",
+			},
+			query: "SELECT category, SUM(CASE WHEN value > 20 THEN value ELSE 0 END) FROM t1 GROUP BY category ORDER BY category",
+			want:  [][]interface{}{{"A", int64(30)}, {"B", int64(50)}},
+		},
+
+		// GROUP BY with window function context (subquery)
+		{
+			name: "GROUP BY in subquery with outer aggregate",
+			setup: []string{
+				"CREATE TABLE t1(category TEXT, value INTEGER)",
+				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 30)",
+			},
+			query: "SELECT MAX(total) FROM (SELECT category, SUM(value) as total FROM t1 GROUP BY category)",
+			want:  [][]interface{}{{int64(30)}},
+		},
+		{
+			name: "GROUP BY with correlated subquery in HAVING",
+			setup: []string{
+				"CREATE TABLE t1(id INTEGER, category TEXT, value INTEGER)",
+				"INSERT INTO t1 VALUES(1, 'A', 10), (2, 'A', 20), (3, 'B', 30), (4, 'B', 40), (5, 'C', 5)",
+			},
+			query: "SELECT category, SUM(value) FROM t1 GROUP BY category HAVING SUM(value) > (SELECT AVG(value) FROM t1) ORDER BY category",
+			want:  [][]interface{}{{"A", int64(30)}, {"B", int64(70)}},
+		},
+
+		// GROUP BY with mathematical functions
+		{
+			name: "GROUP BY with ABS function",
+			setup: []string{
+				"CREATE TABLE t1(value INTEGER)",
+				"INSERT INTO t1 VALUES(-5), (5), (-10), (10)",
+			},
+			query: "SELECT ABS(value) as abs_val, COUNT(*) FROM t1 GROUP BY abs_val ORDER BY abs_val",
+			want:  [][]interface{}{{int64(5), int64(2)}, {int64(10), int64(2)}},
+		},
+		{
+			name: "GROUP BY with ROUND in expression",
+			setup: []string{
+				"CREATE TABLE t1(category TEXT, value REAL)",
+				"INSERT INTO t1 VALUES('A', 10.4), ('A', 10.6), ('B', 20.1)",
+			},
+			query: "SELECT category, ROUND(AVG(value), 1) FROM t1 GROUP BY category ORDER BY category",
+			want:  [][]interface{}{{"A", float64(10.5)}, {"B", float64(20.1)}},
+		},
+
+		// GROUP BY with LIMIT and OFFSET combinations
+		{
+			name: "GROUP BY with LIMIT and OFFSET",
+			setup: []string{
+				"CREATE TABLE t1(category TEXT, value INTEGER)",
+				"INSERT INTO t1 VALUES('A', 10), ('B', 20), ('C', 30), ('D', 40), ('E', 50)",
+			},
+			query: "SELECT category, value FROM t1 GROUP BY category ORDER BY category LIMIT 2 OFFSET 1",
+			want:  [][]interface{}{{"B", int64(20)}, {"C", int64(30)}},
+		},
+		{
+			name: "GROUP BY with aggregate and LIMIT OFFSET",
+			setup: []string{
+				"CREATE TABLE t1(a INTEGER, b INTEGER)",
+				"INSERT INTO t1 VALUES(1, 10), (2, 20), (1, 30), (3, 40), (2, 50)",
+			},
+			query: "SELECT a, SUM(b) FROM t1 GROUP BY a ORDER BY SUM(b) DESC LIMIT 2 OFFSET 1",
+			want:  [][]interface{}{{int64(2), int64(70)}, {int64(1), int64(40)}},
+		},
+
+		// GROUP BY with string aggregates
+		{
+			name: "GROUP BY with MIN and MAX on strings",
+			setup: []string{
+				"CREATE TABLE t1(category TEXT, name TEXT)",
+				"INSERT INTO t1 VALUES('A', 'apple'), ('A', 'zebra'), ('B', 'banana')",
+			},
+			query: "SELECT category, MIN(name), MAX(name) FROM t1 GROUP BY category ORDER BY category",
+			want:  [][]interface{}{{"A", "apple", "zebra"}, {"B", "banana", "banana"}},
+		},
+
+		// GROUP BY with type mixing
+		{
+			name: "GROUP BY with mixed types in aggregate",
+			setup: []string{
+				"CREATE TABLE t1(category TEXT, value)",
+				"INSERT INTO t1 VALUES('A', 10), ('A', 20.5), ('B', 30)",
+			},
+			query: "SELECT category, SUM(value) FROM t1 GROUP BY category ORDER BY category",
+			want:  [][]interface{}{{"A", float64(30.5)}, {"B", float64(30)}},
+		},
+
+		// GROUP BY with all NULL group
+		{
+			name: "GROUP BY with all NULL values in group",
+			setup: []string{
+				"CREATE TABLE t1(category TEXT, value INTEGER)",
+				"INSERT INTO t1 VALUES(NULL, 10), (NULL, 20), ('A', 30)",
+			},
+			query: "SELECT category, SUM(value) FROM t1 GROUP BY category ORDER BY category",
+			want:  [][]interface{}{{nil, int64(30)}, {"A", int64(30)}},
+		},
+
 		// Error cases
 		{
 			name: "GROUP BY with invalid column reference",

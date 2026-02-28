@@ -11,8 +11,23 @@ import (
 // - select8.test: LIMIT and OFFSET with GROUP BY
 // - select9.test: Compound SELECT with ORDER BY
 //
-// Total: 54 test cases covering subqueries, compound SELECT, complex expressions,
-// nested queries, and correlated subqueries
+// Additional comprehensive tests:
+// - SELECT with multiple tables (implicit join)
+// - SELECT with table aliases
+// - SELECT with column aliases
+// - SELECT DISTINCT with multiple columns
+// - SELECT with complex WHERE clauses (AND, OR, NOT)
+// - SELECT with IN and NOT IN
+// - SELECT with BETWEEN
+// - SELECT with LIKE and GLOB patterns
+// - SELECT with IS NULL and IS NOT NULL
+// - SELECT with LIMIT and OFFSET variations
+// - SELECT with ORDER BY multiple columns (ASC, DESC)
+// - SELECT COUNT(*), COUNT(column), COUNT(DISTINCT)
+// - SELECT with nested subqueries
+// - SELECT with correlated subqueries
+//
+// Total: 140+ test cases
 func TestSQLiteSelectAdvanced(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -753,6 +768,738 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 			},
 			query: "SELECT a FROM t61 WHERE 0 UNION ALL SELECT b FROM t62",
 			want:  [][]interface{}{{int64(222)}},
+		},
+
+		// ====== Multiple Tables (Implicit Join) ======
+		{
+			name: "implicit_join_two_tables",
+			setup: []string{
+				"CREATE TABLE colors(id, name)",
+				"CREATE TABLE sizes(id, size)",
+				"INSERT INTO colors VALUES(1, 'red')",
+				"INSERT INTO colors VALUES(2, 'blue')",
+				"INSERT INTO sizes VALUES(1, 'small')",
+				"INSERT INTO sizes VALUES(2, 'large')",
+			},
+			query: "SELECT colors.name, sizes.size FROM colors, sizes WHERE colors.id = sizes.id ORDER BY colors.id",
+			want: [][]interface{}{
+				{"red", "small"},
+				{"blue", "large"},
+			},
+		},
+		{
+			name: "implicit_join_three_tables",
+			setup: []string{
+				"CREATE TABLE t1(a)",
+				"CREATE TABLE t2(b)",
+				"CREATE TABLE t3(c)",
+				"INSERT INTO t1 VALUES(1)",
+				"INSERT INTO t2 VALUES(2)",
+				"INSERT INTO t3 VALUES(3)",
+			},
+			query: "SELECT t1.a, t2.b, t3.c FROM t1, t2, t3",
+			want: [][]interface{}{
+				{int64(1), int64(2), int64(3)},
+			},
+		},
+		{
+			name: "implicit_join_cartesian_product",
+			setup: []string{
+				"CREATE TABLE t1(x)",
+				"CREATE TABLE t2(y)",
+				"INSERT INTO t1 VALUES(1)",
+				"INSERT INTO t1 VALUES(2)",
+				"INSERT INTO t2 VALUES(10)",
+				"INSERT INTO t2 VALUES(20)",
+			},
+			query: "SELECT * FROM t1, t2 ORDER BY x, y",
+			want: [][]interface{}{
+				{int64(1), int64(10)},
+				{int64(1), int64(20)},
+				{int64(2), int64(10)},
+				{int64(2), int64(20)},
+			},
+		},
+
+		// ====== Table Aliases ======
+		{
+			name: "table_alias_simple",
+			setup: []string{
+				"CREATE TABLE employees(id, name)",
+				"INSERT INTO employees VALUES(1, 'Alice')",
+				"INSERT INTO employees VALUES(2, 'Bob')",
+			},
+			query: "SELECT e.id, e.name FROM employees AS e ORDER BY e.id",
+			want: [][]interface{}{
+				{int64(1), "Alice"},
+				{int64(2), "Bob"},
+			},
+		},
+		{
+			name: "table_alias_self_join",
+			setup: []string{
+				"CREATE TABLE emp(id, name, manager_id)",
+				"INSERT INTO emp VALUES(1, 'Alice', NULL)",
+				"INSERT INTO emp VALUES(2, 'Bob', 1)",
+				"INSERT INTO emp VALUES(3, 'Charlie', 1)",
+			},
+			query: "SELECT e.name, m.name FROM emp e, emp m WHERE e.manager_id = m.id ORDER BY e.id",
+			want: [][]interface{}{
+				{"Bob", "Alice"},
+				{"Charlie", "Alice"},
+			},
+		},
+		{
+			name: "table_alias_without_as",
+			setup: []string{
+				"CREATE TABLE test(a, b)",
+				"INSERT INTO test VALUES(1, 2)",
+			},
+			query: "SELECT t.a, t.b FROM test t",
+			want:  [][]interface{}{{int64(1), int64(2)}},
+		},
+
+		// ====== Column Aliases ======
+		{
+			name: "column_alias_simple",
+			setup: []string{
+				"CREATE TABLE data(value)",
+				"INSERT INTO data VALUES(100)",
+			},
+			query: "SELECT value AS amount FROM data",
+			want:  [][]interface{}{{int64(100)}},
+		},
+		{
+			name: "column_alias_expression",
+			setup: []string{
+				"CREATE TABLE data(a, b)",
+				"INSERT INTO data VALUES(10, 5)",
+			},
+			query: "SELECT a + b AS total, a - b AS diff FROM data",
+			want:  [][]interface{}{{int64(15), int64(5)}},
+		},
+		{
+			name: "column_alias_in_order_by",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(3)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(2)",
+			},
+			query: "SELECT x AS num FROM data ORDER BY num",
+			want: [][]interface{}{
+				{int64(1)}, {int64(2)}, {int64(3)},
+			},
+		},
+
+		// ====== DISTINCT with Multiple Columns ======
+		{
+			name: "distinct_multiple_columns",
+			setup: []string{
+				"CREATE TABLE data(a, b)",
+				"INSERT INTO data VALUES(1, 'x')",
+				"INSERT INTO data VALUES(1, 'x')",
+				"INSERT INTO data VALUES(1, 'y')",
+				"INSERT INTO data VALUES(2, 'x')",
+			},
+			query: "SELECT DISTINCT a, b FROM data ORDER BY a, b",
+			want: [][]interface{}{
+				{int64(1), "x"},
+				{int64(1), "y"},
+				{int64(2), "x"},
+			},
+		},
+		{
+			name: "distinct_with_null",
+			setup: []string{
+				"CREATE TABLE data(a, b)",
+				"INSERT INTO data VALUES(1, NULL)",
+				"INSERT INTO data VALUES(1, NULL)",
+				"INSERT INTO data VALUES(2, NULL)",
+			},
+			query: "SELECT DISTINCT a, b FROM data ORDER BY a",
+			want: [][]interface{}{
+				{int64(1), nil},
+				{int64(2), nil},
+			},
+		},
+		{
+			name: "distinct_all_columns",
+			setup: []string{
+				"CREATE TABLE data(x, y, z)",
+				"INSERT INTO data VALUES(1, 2, 3)",
+				"INSERT INTO data VALUES(1, 2, 3)",
+				"INSERT INTO data VALUES(1, 2, 4)",
+			},
+			query: "SELECT DISTINCT x, y, z FROM data ORDER BY z",
+			want: [][]interface{}{
+				{int64(1), int64(2), int64(3)},
+				{int64(1), int64(2), int64(4)},
+			},
+		},
+
+		// ====== Complex WHERE Clauses (AND, OR, NOT) ======
+		{
+			name: "where_and_simple",
+			setup: []string{
+				"CREATE TABLE data(a, b)",
+				"INSERT INTO data VALUES(1, 10)",
+				"INSERT INTO data VALUES(2, 20)",
+				"INSERT INTO data VALUES(3, 30)",
+			},
+			query: "SELECT * FROM data WHERE a > 1 AND b < 30 ORDER BY a",
+			want:  [][]interface{}{{int64(2), int64(20)}},
+		},
+		{
+			name: "where_or_simple",
+			setup: []string{
+				"CREATE TABLE data(a, b)",
+				"INSERT INTO data VALUES(1, 10)",
+				"INSERT INTO data VALUES(2, 20)",
+				"INSERT INTO data VALUES(3, 30)",
+			},
+			query: "SELECT * FROM data WHERE a = 1 OR a = 3 ORDER BY a",
+			want: [][]interface{}{
+				{int64(1), int64(10)},
+				{int64(3), int64(30)},
+			},
+		},
+		{
+			name: "where_not_simple",
+			setup: []string{
+				"CREATE TABLE data(a)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(2)",
+				"INSERT INTO data VALUES(3)",
+			},
+			query: "SELECT * FROM data WHERE NOT a = 2 ORDER BY a",
+			want: [][]interface{}{
+				{int64(1)}, {int64(3)},
+			},
+		},
+		{
+			name: "where_complex_and_or",
+			setup: []string{
+				"CREATE TABLE data(a, b, c)",
+				"INSERT INTO data VALUES(1, 10, 100)",
+				"INSERT INTO data VALUES(2, 20, 200)",
+				"INSERT INTO data VALUES(3, 30, 300)",
+				"INSERT INTO data VALUES(4, 40, 400)",
+			},
+			query: "SELECT * FROM data WHERE (a = 1 OR a = 2) AND b > 15 ORDER BY a",
+			want:  [][]interface{}{{int64(2), int64(20), int64(200)}},
+		},
+		{
+			name: "where_and_or_not_mixed",
+			setup: []string{
+				"CREATE TABLE data(a, b)",
+				"INSERT INTO data VALUES(1, 10)",
+				"INSERT INTO data VALUES(2, 20)",
+				"INSERT INTO data VALUES(3, 30)",
+				"INSERT INTO data VALUES(4, 40)",
+			},
+			query: "SELECT * FROM data WHERE a > 1 AND (b = 20 OR b = 40) AND NOT a = 2 ORDER BY a",
+			want:  [][]interface{}{{int64(4), int64(40)}},
+		},
+
+		// ====== IN and NOT IN ======
+		{
+			name: "where_in_simple",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(2)",
+				"INSERT INTO data VALUES(3)",
+				"INSERT INTO data VALUES(4)",
+			},
+			query: "SELECT * FROM data WHERE x IN (1, 3) ORDER BY x",
+			want: [][]interface{}{
+				{int64(1)}, {int64(3)},
+			},
+		},
+		{
+			name: "where_in_strings",
+			setup: []string{
+				"CREATE TABLE data(name)",
+				"INSERT INTO data VALUES('Alice')",
+				"INSERT INTO data VALUES('Bob')",
+				"INSERT INTO data VALUES('Charlie')",
+			},
+			query: "SELECT * FROM data WHERE name IN ('Alice', 'Charlie') ORDER BY name",
+			want: [][]interface{}{
+				{"Alice"}, {"Charlie"},
+			},
+		},
+		{
+			name: "where_not_in",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(2)",
+				"INSERT INTO data VALUES(3)",
+				"INSERT INTO data VALUES(4)",
+			},
+			query: "SELECT * FROM data WHERE x NOT IN (2, 4) ORDER BY x",
+			want: [][]interface{}{
+				{int64(1)}, {int64(3)},
+			},
+		},
+		{
+			name: "where_in_subquery",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"CREATE TABLE filter(y)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(2)",
+				"INSERT INTO data VALUES(3)",
+				"INSERT INTO filter VALUES(1)",
+				"INSERT INTO filter VALUES(3)",
+			},
+			query: "SELECT * FROM data WHERE x IN (SELECT y FROM filter) ORDER BY x",
+			want: [][]interface{}{
+				{int64(1)}, {int64(3)},
+			},
+		},
+
+		// ====== BETWEEN ======
+		{
+			name: "where_between_integers",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(5)",
+				"INSERT INTO data VALUES(10)",
+				"INSERT INTO data VALUES(15)",
+			},
+			query: "SELECT * FROM data WHERE x BETWEEN 5 AND 10 ORDER BY x",
+			want: [][]interface{}{
+				{int64(5)}, {int64(10)},
+			},
+		},
+		{
+			name: "where_between_strings",
+			setup: []string{
+				"CREATE TABLE data(name)",
+				"INSERT INTO data VALUES('Apple')",
+				"INSERT INTO data VALUES('Banana')",
+				"INSERT INTO data VALUES('Cherry')",
+				"INSERT INTO data VALUES('Date')",
+			},
+			query: "SELECT * FROM data WHERE name BETWEEN 'Banana' AND 'Date' ORDER BY name",
+			want: [][]interface{}{
+				{"Banana"}, {"Cherry"}, {"Date"},
+			},
+		},
+		{
+			name: "where_not_between",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(5)",
+				"INSERT INTO data VALUES(10)",
+				"INSERT INTO data VALUES(15)",
+			},
+			query: "SELECT * FROM data WHERE x NOT BETWEEN 5 AND 10 ORDER BY x",
+			want: [][]interface{}{
+				{int64(1)}, {int64(15)},
+			},
+		},
+
+		// ====== LIKE and GLOB Patterns ======
+		{
+			name: "where_like_simple",
+			setup: []string{
+				"CREATE TABLE data(name)",
+				"INSERT INTO data VALUES('Alice')",
+				"INSERT INTO data VALUES('Bob')",
+				"INSERT INTO data VALUES('Alicia')",
+			},
+			query: "SELECT * FROM data WHERE name LIKE 'Ali%' ORDER BY name",
+			want: [][]interface{}{
+				{"Alice"}, {"Alicia"},
+			},
+		},
+		{
+			name: "where_like_underscore",
+			setup: []string{
+				"CREATE TABLE data(code)",
+				"INSERT INTO data VALUES('A1')",
+				"INSERT INTO data VALUES('A2')",
+				"INSERT INTO data VALUES('B1')",
+			},
+			query: "SELECT * FROM data WHERE code LIKE 'A_' ORDER BY code",
+			want: [][]interface{}{
+				{"A1"}, {"A2"},
+			},
+		},
+		{
+			name: "where_like_middle_pattern",
+			setup: []string{
+				"CREATE TABLE data(text)",
+				"INSERT INTO data VALUES('hello world')",
+				"INSERT INTO data VALUES('hello there')",
+				"INSERT INTO data VALUES('goodbye world')",
+			},
+			query: "SELECT * FROM data WHERE text LIKE '%world%' ORDER BY text",
+			want: [][]interface{}{
+				{"goodbye world"}, {"hello world"},
+			},
+		},
+		{
+			name: "where_not_like",
+			setup: []string{
+				"CREATE TABLE data(name)",
+				"INSERT INTO data VALUES('Apple')",
+				"INSERT INTO data VALUES('Apricot')",
+				"INSERT INTO data VALUES('Banana')",
+			},
+			query: "SELECT * FROM data WHERE name NOT LIKE 'Ap%' ORDER BY name",
+			want:  [][]interface{}{{"Banana"}},
+		},
+		{
+			name: "where_glob_case_sensitive",
+			setup: []string{
+				"CREATE TABLE data(name)",
+				"INSERT INTO data VALUES('Alice')",
+				"INSERT INTO data VALUES('alice')",
+				"INSERT INTO data VALUES('ALICE')",
+			},
+			query: "SELECT * FROM data WHERE name GLOB 'Ali*'",
+			want:  [][]interface{}{{"Alice"}},
+		},
+		{
+			name: "where_glob_bracket",
+			setup: []string{
+				"CREATE TABLE data(code)",
+				"INSERT INTO data VALUES('A1')",
+				"INSERT INTO data VALUES('B2')",
+				"INSERT INTO data VALUES('C3')",
+			},
+			query: "SELECT * FROM data WHERE code GLOB '[AB]*' ORDER BY code",
+			want: [][]interface{}{
+				{"A1"}, {"B2"},
+			},
+		},
+
+		// ====== IS NULL and IS NOT NULL ======
+		{
+			name: "where_is_null",
+			setup: []string{
+				"CREATE TABLE data(a, b)",
+				"INSERT INTO data VALUES(1, NULL)",
+				"INSERT INTO data VALUES(2, 20)",
+				"INSERT INTO data VALUES(3, NULL)",
+			},
+			query: "SELECT a FROM data WHERE b IS NULL ORDER BY a",
+			want: [][]interface{}{
+				{int64(1)}, {int64(3)},
+			},
+		},
+		{
+			name: "where_is_not_null",
+			setup: []string{
+				"CREATE TABLE data(a, b)",
+				"INSERT INTO data VALUES(1, NULL)",
+				"INSERT INTO data VALUES(2, 20)",
+				"INSERT INTO data VALUES(3, 30)",
+			},
+			query: "SELECT a, b FROM data WHERE b IS NOT NULL ORDER BY a",
+			want: [][]interface{}{
+				{int64(2), int64(20)},
+				{int64(3), int64(30)},
+			},
+		},
+		{
+			name: "where_is_null_with_and",
+			setup: []string{
+				"CREATE TABLE data(a, b, c)",
+				"INSERT INTO data VALUES(1, NULL, 100)",
+				"INSERT INTO data VALUES(2, 20, NULL)",
+				"INSERT INTO data VALUES(3, NULL, NULL)",
+			},
+			query: "SELECT a FROM data WHERE b IS NULL AND c IS NULL",
+			want:  [][]interface{}{{int64(3)}},
+		},
+
+		// ====== LIMIT and OFFSET Variations ======
+		{
+			name: "limit_basic",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(2)",
+				"INSERT INTO data VALUES(3)",
+				"INSERT INTO data VALUES(4)",
+			},
+			query: "SELECT * FROM data LIMIT 2",
+			want: [][]interface{}{
+				{int64(1)}, {int64(2)},
+			},
+		},
+		{
+			name: "offset_basic",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(2)",
+				"INSERT INTO data VALUES(3)",
+				"INSERT INTO data VALUES(4)",
+			},
+			query: "SELECT * FROM data LIMIT 2 OFFSET 1",
+			want: [][]interface{}{
+				{int64(2)}, {int64(3)},
+			},
+		},
+		{
+			name: "limit_offset_order_by",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(3)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(4)",
+				"INSERT INTO data VALUES(2)",
+			},
+			query: "SELECT * FROM data ORDER BY x LIMIT 2 OFFSET 1",
+			want: [][]interface{}{
+				{int64(2)}, {int64(3)},
+			},
+		},
+		{
+			name: "limit_zero",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+			},
+			query: "SELECT * FROM data LIMIT 0",
+			want:  [][]interface{}{},
+		},
+		{
+			name: "limit_negative_means_unlimited",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(2)",
+				"INSERT INTO data VALUES(3)",
+			},
+			query: "SELECT * FROM data LIMIT -1 OFFSET 1",
+			want: [][]interface{}{
+				{int64(2)}, {int64(3)},
+			},
+		},
+
+		// ====== ORDER BY Multiple Columns ======
+		{
+			name: "order_by_two_columns_asc",
+			setup: []string{
+				"CREATE TABLE data(a, b)",
+				"INSERT INTO data VALUES(1, 20)",
+				"INSERT INTO data VALUES(1, 10)",
+				"INSERT INTO data VALUES(2, 10)",
+			},
+			query: "SELECT * FROM data ORDER BY a, b",
+			want: [][]interface{}{
+				{int64(1), int64(10)},
+				{int64(1), int64(20)},
+				{int64(2), int64(10)},
+			},
+		},
+		{
+			name: "order_by_asc_desc_mixed",
+			setup: []string{
+				"CREATE TABLE data(a, b)",
+				"INSERT INTO data VALUES(1, 10)",
+				"INSERT INTO data VALUES(1, 20)",
+				"INSERT INTO data VALUES(2, 10)",
+				"INSERT INTO data VALUES(2, 20)",
+			},
+			query: "SELECT * FROM data ORDER BY a ASC, b DESC",
+			want: [][]interface{}{
+				{int64(1), int64(20)},
+				{int64(1), int64(10)},
+				{int64(2), int64(20)},
+				{int64(2), int64(10)},
+			},
+		},
+		{
+			name: "order_by_three_columns",
+			setup: []string{
+				"CREATE TABLE data(a, b, c)",
+				"INSERT INTO data VALUES(1, 1, 3)",
+				"INSERT INTO data VALUES(1, 1, 1)",
+				"INSERT INTO data VALUES(1, 2, 2)",
+			},
+			query: "SELECT * FROM data ORDER BY a, b DESC, c",
+			want: [][]interface{}{
+				{int64(1), int64(2), int64(2)},
+				{int64(1), int64(1), int64(1)},
+				{int64(1), int64(1), int64(3)},
+			},
+		},
+		{
+			name: "order_by_with_nulls",
+			setup: []string{
+				"CREATE TABLE data(a, b)",
+				"INSERT INTO data VALUES(1, NULL)",
+				"INSERT INTO data VALUES(2, 20)",
+				"INSERT INTO data VALUES(3, NULL)",
+				"INSERT INTO data VALUES(4, 10)",
+			},
+			query: "SELECT * FROM data ORDER BY b, a",
+			want: [][]interface{}{
+				{int64(1), nil},
+				{int64(3), nil},
+				{int64(4), int64(10)},
+				{int64(2), int64(20)},
+			},
+		},
+
+		// ====== COUNT Variations ======
+		{
+			name: "count_star",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(2)",
+				"INSERT INTO data VALUES(3)",
+			},
+			query: "SELECT COUNT(*) FROM data",
+			want:  [][]interface{}{{int64(3)}},
+		},
+		{
+			name: "count_column",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(NULL)",
+				"INSERT INTO data VALUES(3)",
+			},
+			query: "SELECT COUNT(x) FROM data",
+			want:  [][]interface{}{{int64(2)}},
+		},
+		{
+			name: "count_distinct",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(2)",
+				"INSERT INTO data VALUES(2)",
+				"INSERT INTO data VALUES(3)",
+			},
+			query: "SELECT COUNT(DISTINCT x) FROM data",
+			want:  [][]interface{}{{int64(3)}},
+		},
+		{
+			name: "count_distinct_with_nulls",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(NULL)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(NULL)",
+			},
+			query: "SELECT COUNT(DISTINCT x) FROM data",
+			want:  [][]interface{}{{int64(1)}},
+		},
+		{
+			name: "count_multiple_columns",
+			setup: []string{
+				"CREATE TABLE data(a, b)",
+				"INSERT INTO data VALUES(1, 10)",
+				"INSERT INTO data VALUES(2, NULL)",
+				"INSERT INTO data VALUES(3, 30)",
+			},
+			query: "SELECT COUNT(*), COUNT(a), COUNT(b) FROM data",
+			want:  [][]interface{}{{int64(3), int64(3), int64(2)}},
+		},
+
+		// ====== Nested Subqueries ======
+		{
+			name: "nested_subquery_two_levels",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(2)",
+				"INSERT INTO data VALUES(3)",
+			},
+			query: "SELECT * FROM (SELECT * FROM (SELECT x FROM data WHERE x > 1) WHERE x < 3)",
+			want:  [][]interface{}{{int64(2)}},
+		},
+		{
+			name: "nested_subquery_with_aggregate",
+			setup: []string{
+				"CREATE TABLE data(x, y)",
+				"INSERT INTO data VALUES(1, 10)",
+				"INSERT INTO data VALUES(2, 20)",
+				"INSERT INTO data VALUES(3, 30)",
+			},
+			query: "SELECT total FROM (SELECT SUM(y) as total FROM (SELECT y FROM data WHERE x <= 2))",
+			want:  [][]interface{}{{int64(30)}},
+		},
+		{
+			name: "nested_subquery_in_where",
+			setup: []string{
+				"CREATE TABLE data(x)",
+				"INSERT INTO data VALUES(1)",
+				"INSERT INTO data VALUES(2)",
+				"INSERT INTO data VALUES(3)",
+			},
+			query: "SELECT x FROM data WHERE x IN (SELECT * FROM (SELECT x FROM data WHERE x > 1))",
+			want: [][]interface{}{
+				{int64(2)}, {int64(3)},
+			},
+		},
+
+		// ====== Correlated Subqueries ======
+		{
+			name: "correlated_subquery_exists",
+			setup: []string{
+				"CREATE TABLE employees(id, dept_id, name)",
+				"CREATE TABLE departments(id, name)",
+				"INSERT INTO employees VALUES(1, 10, 'Alice')",
+				"INSERT INTO employees VALUES(2, 20, 'Bob')",
+				"INSERT INTO departments VALUES(10, 'Engineering')",
+			},
+			query: "SELECT e.name FROM employees e WHERE EXISTS (SELECT 1 FROM departments d WHERE d.id = e.dept_id)",
+			want:  [][]interface{}{{"Alice"}},
+		},
+		{
+			name: "correlated_subquery_scalar",
+			setup: []string{
+				"CREATE TABLE orders(id, customer_id, amount)",
+				"CREATE TABLE customers(id, name)",
+				"INSERT INTO customers VALUES(1, 'Alice')",
+				"INSERT INTO customers VALUES(2, 'Bob')",
+				"INSERT INTO orders VALUES(1, 1, 100)",
+				"INSERT INTO orders VALUES(2, 1, 200)",
+			},
+			query: "SELECT c.name, (SELECT SUM(amount) FROM orders o WHERE o.customer_id = c.id) as total FROM customers c ORDER BY c.id",
+			want: [][]interface{}{
+				{"Alice", int64(300)},
+				{"Bob", nil},
+			},
+		},
+		{
+			name: "correlated_subquery_not_exists",
+			setup: []string{
+				"CREATE TABLE products(id, name)",
+				"CREATE TABLE sales(product_id, amount)",
+				"INSERT INTO products VALUES(1, 'Widget')",
+				"INSERT INTO products VALUES(2, 'Gadget')",
+				"INSERT INTO sales VALUES(1, 100)",
+			},
+			query: "SELECT p.name FROM products p WHERE NOT EXISTS (SELECT 1 FROM sales s WHERE s.product_id = p.id)",
+			want:  [][]interface{}{{"Gadget"}},
+		},
+		{
+			name: "correlated_subquery_comparison",
+			setup: []string{
+				"CREATE TABLE employees(id, salary, dept_id)",
+				"INSERT INTO employees VALUES(1, 50000, 1)",
+				"INSERT INTO employees VALUES(2, 60000, 1)",
+				"INSERT INTO employees VALUES(3, 55000, 2)",
+			},
+			query: "SELECT e1.id FROM employees e1 WHERE e1.salary > (SELECT AVG(salary) FROM employees e2 WHERE e2.dept_id = e1.dept_id) ORDER BY e1.id",
+			want:  [][]interface{}{{int64(2)}, {int64(3)}},
 		},
 	}
 
