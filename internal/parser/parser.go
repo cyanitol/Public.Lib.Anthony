@@ -1750,13 +1750,20 @@ func (p *Parser) parseIndexedColumns() ([]IndexedColumn, error) {
 	columns := make([]IndexedColumn, 0)
 
 	for {
-		if !p.check(TK_ID) {
-			return nil, p.error("expected column name")
-		}
-		col := IndexedColumn{
-			Column: Unquote(p.advance().Lexeme),
+		// Parse the expression (which could be a simple column name or complex expression)
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
 		}
 
+		col := IndexedColumn{
+			Expr: expr,
+		}
+
+		// Extract column name from expression for backwards compatibility
+		col.Column = extractExpressionName(expr)
+
+		// Parse optional ASC/DESC
 		if p.match(TK_ASC) {
 			col.Order = SortAsc
 		} else if p.match(TK_DESC) {
@@ -1771,6 +1778,26 @@ func (p *Parser) parseIndexedColumns() ([]IndexedColumn, error) {
 	}
 
 	return columns, nil
+}
+
+// extractExpressionName extracts a string representation from an expression.
+// For simple identifiers, it returns the column name.
+// For complex expressions, it returns the expression's string representation.
+func extractExpressionName(expr Expression) string {
+	if expr == nil {
+		return ""
+	}
+
+	// For simple column references, return just the column name
+	if ident, ok := expr.(*IdentExpr); ok {
+		if ident.Table != "" {
+			return ident.Table + "." + ident.Name
+		}
+		return ident.Name
+	}
+
+	// For any other expression, return its string representation
+	return expr.String()
 }
 
 // =============================================================================
@@ -2961,37 +2988,14 @@ func (p *Parser) parseFunctionOver(fn *FunctionExpr) error {
 
 	windowSpec := &WindowSpec{}
 
-	// Parse optional PARTITION BY clause
-	if p.match(TK_PARTITION) {
-		if !p.match(TK_BY) {
-			return p.error("expected BY after PARTITION")
-		}
-		partitionExprs, err := p.parseExpressionList()
-		if err != nil {
-			return err
-		}
-		windowSpec.PartitionBy = partitionExprs
+	if err := p.parsePartitionBy(windowSpec); err != nil {
+		return err
 	}
-
-	// Parse optional ORDER BY clause
-	if p.match(TK_ORDER) {
-		if !p.match(TK_BY) {
-			return p.error("expected BY after ORDER")
-		}
-		orderTerms, err := p.parseOrderByList()
-		if err != nil {
-			return err
-		}
-		windowSpec.OrderBy = orderTerms
+	if err := p.parseWindowOrderBy(windowSpec); err != nil {
+		return err
 	}
-
-	// Parse optional frame specification (ROWS, RANGE, GROUPS)
-	if p.check(TK_ROWS) || p.check(TK_RANGE) || p.check(TK_GROUPS) {
-		frameSpec, err := p.parseFrameSpec()
-		if err != nil {
-			return err
-		}
-		windowSpec.Frame = frameSpec
+	if err := p.parseWindowFrame(windowSpec); err != nil {
+		return err
 	}
 
 	if !p.match(TK_RP) {
@@ -2999,6 +3003,51 @@ func (p *Parser) parseFunctionOver(fn *FunctionExpr) error {
 	}
 
 	fn.Over = windowSpec
+	return nil
+}
+
+// parsePartitionBy parses the optional PARTITION BY clause.
+func (p *Parser) parsePartitionBy(windowSpec *WindowSpec) error {
+	if !p.match(TK_PARTITION) {
+		return nil
+	}
+	if !p.match(TK_BY) {
+		return p.error("expected BY after PARTITION")
+	}
+	partitionExprs, err := p.parseExpressionList()
+	if err != nil {
+		return err
+	}
+	windowSpec.PartitionBy = partitionExprs
+	return nil
+}
+
+// parseWindowOrderBy parses the optional ORDER BY clause.
+func (p *Parser) parseWindowOrderBy(windowSpec *WindowSpec) error {
+	if !p.match(TK_ORDER) {
+		return nil
+	}
+	if !p.match(TK_BY) {
+		return p.error("expected BY after ORDER")
+	}
+	orderTerms, err := p.parseOrderByList()
+	if err != nil {
+		return err
+	}
+	windowSpec.OrderBy = orderTerms
+	return nil
+}
+
+// parseWindowFrame parses the optional frame specification (ROWS, RANGE, GROUPS).
+func (p *Parser) parseWindowFrame(windowSpec *WindowSpec) error {
+	if !p.check(TK_ROWS) && !p.check(TK_RANGE) && !p.check(TK_GROUPS) {
+		return nil
+	}
+	frameSpec, err := p.parseFrameSpec()
+	if err != nil {
+		return err
+	}
+	windowSpec.Frame = frameSpec
 	return nil
 }
 

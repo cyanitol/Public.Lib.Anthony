@@ -775,9 +775,9 @@ func TestParserIndexedColumns(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "index with expression - unsupported",
+			name:    "index with expression - now supported",
 			sql:     "CREATE INDEX idx ON users (LOWER(email))",
-			wantErr: true,
+			wantErr: false,
 		},
 	}
 

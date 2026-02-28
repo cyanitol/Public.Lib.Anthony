@@ -339,6 +339,7 @@ type ForeignKeyTableConstraint struct {
 // IndexedColumn represents a column in an index.
 type IndexedColumn struct {
 	Column string
+	Expr   Expression // Expression for expression indexes (nil for simple column references)
 	Order  SortOrder
 }
 

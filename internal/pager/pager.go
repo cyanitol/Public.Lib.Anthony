@@ -319,6 +319,13 @@ func (p *Pager) readExistingDatabase(info os.FileInfo) error {
 	}
 	p.dbSize = Pgno(info.Size() / int64(p.pageSize))
 	p.dbOrigSize = p.dbSize
+
+	// Check if WAL file exists and recover it
+	if err := p.recoverWALIfExists(); err != nil {
+		p.file.Close()
+		return err
+	}
+
 	return nil
 }
 
@@ -730,6 +737,81 @@ func (p *Pager) readHeader() error {
 
 	// Initialize free list from header
 	p.freeList.Initialize(Pgno(header.FreelistTrunk), header.FreelistCount)
+
+	return nil
+}
+
+// recoverWALIfExists checks for an existing WAL file and recovers it if present.
+// This ensures that uncommitted changes in the WAL are made visible when reopening a database.
+func (p *Pager) recoverWALIfExists() error {
+	walFilename := p.filename + "-wal"
+
+	// Check if WAL file exists and has content
+	info, err := os.Stat(walFilename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No WAL file - nothing to recover
+			return nil
+		}
+		return fmt.Errorf("failed to stat WAL file: %w", err)
+	}
+
+	// If WAL file exists but is empty (just header or less), skip recovery
+	if info.Size() <= WALHeaderSize {
+		return nil
+	}
+
+	// WAL file exists and has frames
+	// For read-only databases, we'll open the WAL for reading but not checkpoint
+	// For read-write databases, we checkpoint to persist the data
+	if p.readOnly {
+		// Read-only mode: just open the WAL for reading
+		p.wal = NewWAL(p.filename, p.pageSize)
+		if err := p.wal.Open(); err != nil {
+			return fmt.Errorf("failed to open WAL for reading: %w", err)
+		}
+
+		// Also open WAL index
+		walIndex, err := NewWALIndex(p.filename)
+		if err != nil {
+			p.wal.Close()
+			p.wal = nil
+			return fmt.Errorf("failed to open WAL index: %w", err)
+		}
+		p.walIndex = walIndex
+
+		// Set journal mode to WAL since we're using it
+		p.journalMode = JournalModeWAL
+	} else {
+		// Read-write mode: checkpoint the WAL to persist data
+		wal := NewWAL(p.filename, p.pageSize)
+		if err := wal.Open(); err != nil {
+			return fmt.Errorf("failed to open WAL for recovery: %w", err)
+		}
+
+		// Set the database file handle so checkpoint can write to it
+		wal.dbFile = p.file
+
+		// Checkpoint the WAL to move data to the main database file
+		if err := wal.Checkpoint(); err != nil {
+			wal.Close()
+			return fmt.Errorf("failed to checkpoint WAL during recovery: %w", err)
+		}
+
+		// Close the WAL (keeps the file for future use)
+		wal.dbFile = nil // Don't close the main db file
+		if err := wal.Close(); err != nil {
+			return fmt.Errorf("failed to close WAL after recovery: %w", err)
+		}
+
+		// Re-read the database size after WAL recovery
+		fileInfo, err := p.file.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to stat database after WAL recovery: %w", err)
+		}
+		p.dbSize = Pgno(fileInfo.Size() / int64(p.pageSize))
+		p.dbOrigSize = p.dbSize
+	}
 
 	return nil
 }

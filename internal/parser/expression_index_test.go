@@ -286,7 +286,7 @@ func TestExpressionIndexNameExtraction(t *testing.T) {
 		{
 			name:     "binary expression",
 			sql:      "CREATE INDEX idx ON t(a + b)",
-			expected: "a_b",
+			expected: "a + b",
 		},
 	}
 

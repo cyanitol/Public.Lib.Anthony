@@ -51,6 +51,14 @@ Security model, controls, and best practices:
   - Security testing and vulnerability reporting
 - [SECURITY_AUDIT_PLAN.md](SECURITY_AUDIT_PLAN.md) - Security audit planning document
 - [SECURITY_AUDIT_IMPLEMENTATION.md](SECURITY_AUDIT_IMPLEMENTATION.md) - Security implementation details
+- [SECURITY_AUDIT_REPORT.md](SECURITY_AUDIT_REPORT.md) - Security audit report and findings
+- [SECURITY_FIXES_SUMMARY.md](SECURITY_FIXES_SUMMARY.md) - Summary of security fixes implemented
+
+## Code Quality
+
+Code quality reports and analysis:
+
+- [CYCLOMATIC_COMPLEXITY_REPORT.md](CYCLOMATIC_COMPLEXITY_REPORT.md) - Cyclomatic complexity analysis and reduction efforts
 
 ## Development
 

@@ -10,6 +10,104 @@ import (
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
 )
 
+// groupByState holds registers and state for GROUP BY processing
+type groupByState struct {
+	groupByRegs     []int
+	prevGroupByRegs []int
+	accRegs         []int
+	avgCountRegs    []int
+	firstRowReg     int
+}
+
+// initGroupByState allocates and initializes registers for GROUP BY processing
+func (s *Stmt) initGroupByState(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, numGroupBy int) groupByState {
+	state := groupByState{
+		groupByRegs:     make([]int, numGroupBy),
+		prevGroupByRegs: make([]int, numGroupBy),
+		accRegs:         make([]int, len(stmt.Columns)),
+		avgCountRegs:    make([]int, len(stmt.Columns)),
+	}
+
+	// Allocate GROUP BY registers
+	for i := 0; i < numGroupBy; i++ {
+		state.groupByRegs[i] = gen.AllocReg()
+		state.prevGroupByRegs[i] = gen.AllocReg()
+	}
+
+	// Allocate accumulator registers
+	for i, col := range stmt.Columns {
+		if s.isAggregateExpr(col.Expr) {
+			state.accRegs[i] = gen.AllocReg()
+			fnExpr := col.Expr.(*parser.FunctionExpr)
+			if fnExpr.Name == "AVG" {
+				state.avgCountRegs[i] = gen.AllocReg()
+			}
+		}
+	}
+
+	// Allocate first row flag register
+	state.firstRowReg = gen.AllocReg()
+
+	// Initialize first row flag to 1 (true)
+	vm.AddOp(vdbe.OpInteger, 1, state.firstRowReg, 0)
+
+	// Initialize prev GROUP BY registers to NULL
+	for i := 0; i < numGroupBy; i++ {
+		vm.AddOp(vdbe.OpNull, 0, state.prevGroupByRegs[i], 0)
+	}
+
+	return state
+}
+
+// emitGroupComparison emits code to compare GROUP BY values and output previous group if changed
+func (s *Stmt) emitGroupComparison(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, numGroupBy, numCols int) int {
+	// Check if group has changed (skip on first row)
+	skipCheckAddr := vm.AddOp(vdbe.OpIf, state.firstRowReg, 0, 0)
+
+	// Compare GROUP BY values - if any differ, output previous group
+	for i := 0; i < numGroupBy; i++ {
+		cmpReg := gen.AllocReg()
+		vm.AddOp(vdbe.OpNe, state.groupByRegs[i], state.prevGroupByRegs[i], cmpReg)
+		outputGroupAddr := vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)
+
+		// Patch to output group
+		outputAddr := vm.NumOps()
+		s.emitGroupOutput(vm, stmt, state.accRegs, state.avgCountRegs, state.prevGroupByRegs, numCols)
+		vm.Program[outputGroupAddr].P2 = outputAddr
+	}
+
+	return skipCheckAddr
+}
+
+// updateGroupAccumulators initializes/resets accumulators and saves current GROUP BY values
+func (s *Stmt) updateGroupAccumulators(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, table *schema.Table) {
+	// Clear first row flag
+	vm.AddOp(vdbe.OpInteger, 0, state.firstRowReg, 0)
+
+	// Initialize/reset accumulators
+	for i, col := range stmt.Columns {
+		if !s.isAggregateExpr(col.Expr) {
+			continue
+		}
+		fnExpr := col.Expr.(*parser.FunctionExpr)
+		state.avgCountRegs[i] = s.initializeAggregateRegister(vm, fnExpr.Name, state.accRegs[i], gen)
+	}
+
+	// Save current GROUP BY values to prev
+	for i := 0; i < len(state.groupByRegs); i++ {
+		vm.AddOp(vdbe.OpCopy, state.groupByRegs[i], state.prevGroupByRegs[i], 0)
+	}
+
+	// Update accumulators
+	for i, col := range stmt.Columns {
+		if !s.isAggregateExpr(col.Expr) {
+			continue
+		}
+		fnExpr := col.Expr.(*parser.FunctionExpr)
+		s.emitSingleAggregateUpdate(vm, fnExpr, table, state.accRegs[i], state.avgCountRegs[i], gen, 0)
+	}
+}
+
 // compileSelectWithGroupBy compiles a SELECT with GROUP BY clause using a simplified row-by-row approach.
 func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	numCols := len(stmt.Columns)
@@ -35,40 +133,9 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	// Setup args
 	s.setupAggregateArgs(gen, args)
 
-	// Allocate registers
-	groupByRegs := make([]int, numGroupBy)
-	prevGroupByRegs := make([]int, numGroupBy)
-	for i := 0; i < numGroupBy; i++ {
-		groupByRegs[i] = gen.AllocReg()
-		prevGroupByRegs[i] = gen.AllocReg()
-	}
-
-	// Allocate accumulator registers
-	accRegs := make([]int, numCols)
-	avgCountRegs := make([]int, numCols)
-	for i, col := range stmt.Columns {
-		if s.isAggregateExpr(col.Expr) {
-			accRegs[i] = gen.AllocReg()
-			fnExpr := col.Expr.(*parser.FunctionExpr)
-			if fnExpr.Name == "AVG" {
-				avgCountRegs[i] = gen.AllocReg()
-			}
-		}
-	}
-
-	// Flag register to track if we've seen the first row
-	firstRowReg := gen.AllocReg()
-
-	// Init
+	// Initialize GROUP BY state
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
-	// Initialize first row flag to 1 (true)
-	vm.AddOp(vdbe.OpInteger, 1, firstRowReg, 0)
-
-	// Initialize prev GROUP BY registers to NULL
-	for i := 0; i < numGroupBy; i++ {
-		vm.AddOp(vdbe.OpNull, 0, prevGroupByRegs[i], 0)
-	}
+	state := s.initGroupByState(vm, gen, stmt, numGroupBy)
 
 	// Open cursor
 	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
@@ -77,90 +144,34 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	loopStart := vm.NumOps()
 
 	// WHERE clause
-	skipAddr := -1
-	if stmt.Where != nil {
-		whereReg, err := gen.GenerateExpr(stmt.Where)
-		if err != nil {
-			return nil, fmt.Errorf("error compiling WHERE clause: %w", err)
-		}
-		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
-	}
+	skipAddr := s.emitWhereClause(vm, gen, stmt)
 
 	// Evaluate GROUP BY expressions into groupByRegs
-	for i, groupExpr := range stmt.GroupBy {
-		reg, err := gen.GenerateExpr(groupExpr)
-		if err != nil {
-			return nil, fmt.Errorf("error compiling GROUP BY expression: %w", err)
-		}
-		vm.AddOp(vdbe.OpCopy, reg, groupByRegs[i], 0)
+	if err := s.evaluateGroupByExprs(vm, gen, stmt, state.groupByRegs); err != nil {
+		return nil, err
 	}
 
-	// Check if group has changed (skip on first row)
-	skipCheckAddr := vm.AddOp(vdbe.OpIf, firstRowReg, 0, 0)
-
-	// Compare GROUP BY values - if any differ, output previous group
-	for i := 0; i < numGroupBy; i++ {
-		cmpReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpNe, groupByRegs[i], prevGroupByRegs[i], cmpReg)
-		outputGroupAddr := vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)
-
-		// Patch to output group
-		outputAddr := vm.NumOps()
-		s.emitGroupOutput(vm, stmt, accRegs, avgCountRegs, prevGroupByRegs, numCols)
-		vm.Program[outputGroupAddr].P2 = outputAddr
-	}
+	// Compare GROUP BY values and output previous group if changed
+	skipCheckAddr := s.emitGroupComparison(vm, gen, stmt, state, numGroupBy, numCols)
 
 	// Patch first row skip
 	initAccumulatorsAddr := vm.NumOps()
 	vm.Program[skipCheckAddr].P2 = initAccumulatorsAddr
 
-	// Clear first row flag
-	vm.AddOp(vdbe.OpInteger, 0, firstRowReg, 0)
-
-	// Initialize/reset accumulators
-	for i, col := range stmt.Columns {
-		if !s.isAggregateExpr(col.Expr) {
-			continue
-		}
-		fnExpr := col.Expr.(*parser.FunctionExpr)
-		avgCountRegs[i] = s.initializeAggregateRegister(vm, fnExpr.Name, accRegs[i], gen)
-	}
-
-	// Save current GROUP BY values to prev
-	for i := 0; i < numGroupBy; i++ {
-		vm.AddOp(vdbe.OpCopy, groupByRegs[i], prevGroupByRegs[i], 0)
-	}
-
-	// Update accumulators
-	for i, col := range stmt.Columns {
-		if !s.isAggregateExpr(col.Expr) {
-			continue
-		}
-		fnExpr := col.Expr.(*parser.FunctionExpr)
-		s.emitSingleAggregateUpdate(vm, fnExpr, table, accRegs[i], avgCountRegs[i], gen)
-	}
+	// Update accumulators and save GROUP BY values
+	s.updateGroupAccumulators(vm, gen, stmt, state, table)
 
 	// Fix WHERE skip
-	if skipAddr >= 0 {
-		vm.Program[skipAddr].P2 = vm.NumOps()
-	}
+	s.fixWhereSkip(vm, skipAddr)
 
 	// Next row
 	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
 
 	// After scan - output last group
 	afterScanAddr := vm.NumOps()
-
-	// Check if we processed any rows (firstRowReg == 0 means we did)
-	checkHasRowsReg := gen.AllocReg()
-	vm.AddOp(vdbe.OpNot, firstRowReg, checkHasRowsReg, 0)
-	skipFinalOutputAddr := vm.AddOp(vdbe.OpIfNot, checkHasRowsReg, 0, 0)
-
-	// Output final group
-	s.emitGroupOutput(vm, stmt, accRegs, avgCountRegs, prevGroupByRegs, numCols)
+	s.emitFinalGroupOutput(vm, gen, stmt, state, numCols)
 
 	// Close and halt
-	vm.Program[skipFinalOutputAddr].P2 = vm.NumOps()
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
@@ -168,6 +179,51 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	vm.Program[rewindAddr].P2 = afterScanAddr
 
 	return vm, nil
+}
+
+// emitWhereClause emits WHERE clause code and returns skip address
+func (s *Stmt) emitWhereClause(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt) int {
+	if stmt.Where == nil {
+		return -1
+	}
+	whereReg, err := gen.GenerateExpr(stmt.Where)
+	if err != nil {
+		return -1
+	}
+	return vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+}
+
+// evaluateGroupByExprs evaluates GROUP BY expressions into registers
+func (s *Stmt) evaluateGroupByExprs(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, groupByRegs []int) error {
+	for i, groupExpr := range stmt.GroupBy {
+		reg, err := gen.GenerateExpr(groupExpr)
+		if err != nil {
+			return fmt.Errorf("error compiling GROUP BY expression: %w", err)
+		}
+		vm.AddOp(vdbe.OpCopy, reg, groupByRegs[i], 0)
+	}
+	return nil
+}
+
+// fixWhereSkip patches the WHERE skip address
+func (s *Stmt) fixWhereSkip(vm *vdbe.VDBE, skipAddr int) {
+	if skipAddr >= 0 {
+		vm.Program[skipAddr].P2 = vm.NumOps()
+	}
+}
+
+// emitFinalGroupOutput emits code to output the last group
+func (s *Stmt) emitFinalGroupOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, numCols int) {
+	// Check if we processed any rows (firstRowReg == 0 means we did)
+	checkHasRowsReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpNot, state.firstRowReg, checkHasRowsReg, 0)
+	skipFinalOutputAddr := vm.AddOp(vdbe.OpIfNot, checkHasRowsReg, 0, 0)
+
+	// Output final group
+	s.emitGroupOutput(vm, stmt, state.accRegs, state.avgCountRegs, state.prevGroupByRegs, numCols)
+
+	// Patch skip address
+	vm.Program[skipFinalOutputAddr].P2 = vm.NumOps()
 }
 
 // emitGroupOutput outputs a single group's results.
@@ -305,6 +361,22 @@ func (s *Stmt) generateHavingExpression(vm *vdbe.VDBE, gen *expr.CodeGenerator, 
 	}
 }
 
+// binaryOpToVdbeOpcode maps parser binary operators to VDBE opcodes.
+var binaryOpToVdbeOpcode = map[parser.BinaryOp]vdbe.Opcode{
+	parser.OpEq:    vdbe.OpEq,
+	parser.OpNe:    vdbe.OpNe,
+	parser.OpLt:    vdbe.OpLt,
+	parser.OpLe:    vdbe.OpLe,
+	parser.OpGt:    vdbe.OpGt,
+	parser.OpGe:    vdbe.OpGe,
+	parser.OpAnd:   vdbe.OpAnd,
+	parser.OpOr:    vdbe.OpOr,
+	parser.OpPlus:  vdbe.OpAdd,
+	parser.OpMinus: vdbe.OpSubtract,
+	parser.OpMul:   vdbe.OpMultiply,
+	parser.OpDiv:   vdbe.OpDivide,
+}
+
 // generateHavingBinaryExpr generates code for a binary expression in HAVING.
 func (s *Stmt) generateHavingBinaryExpr(vm *vdbe.VDBE, gen *expr.CodeGenerator, expr *parser.BinaryExpr,
 	aggregateMap map[string]int, baseReg int) (int, error) {
@@ -323,36 +395,14 @@ func (s *Stmt) generateHavingBinaryExpr(vm *vdbe.VDBE, gen *expr.CodeGenerator, 
 	// Allocate a result register
 	resultReg := gen.AllocReg()
 
-	// Emit the appropriate comparison or logical operation
-	switch expr.Op {
-	case parser.OpEq:
-		vm.AddOp(vdbe.OpEq, leftReg, rightReg, resultReg)
-	case parser.OpNe:
-		vm.AddOp(vdbe.OpNe, leftReg, rightReg, resultReg)
-	case parser.OpLt:
-		vm.AddOp(vdbe.OpLt, leftReg, rightReg, resultReg)
-	case parser.OpLe:
-		vm.AddOp(vdbe.OpLe, leftReg, rightReg, resultReg)
-	case parser.OpGt:
-		vm.AddOp(vdbe.OpGt, leftReg, rightReg, resultReg)
-	case parser.OpGe:
-		vm.AddOp(vdbe.OpGe, leftReg, rightReg, resultReg)
-	case parser.OpAnd:
-		vm.AddOp(vdbe.OpAnd, leftReg, rightReg, resultReg)
-	case parser.OpOr:
-		vm.AddOp(vdbe.OpOr, leftReg, rightReg, resultReg)
-	case parser.OpPlus:
-		vm.AddOp(vdbe.OpAdd, leftReg, rightReg, resultReg)
-	case parser.OpMinus:
-		vm.AddOp(vdbe.OpSubtract, leftReg, rightReg, resultReg)
-	case parser.OpMul:
-		vm.AddOp(vdbe.OpMultiply, leftReg, rightReg, resultReg)
-	case parser.OpDiv:
-		vm.AddOp(vdbe.OpDivide, leftReg, rightReg, resultReg)
-	default:
+	// Look up the opcode in the table
+	opcode, ok := binaryOpToVdbeOpcode[expr.Op]
+	if !ok {
 		// For unsupported operations, try normal code generation
 		return gen.GenerateExpr(expr)
 	}
 
+	// Emit the operation
+	vm.AddOp(opcode, leftReg, rightReg, resultReg)
 	return resultReg, nil
 }

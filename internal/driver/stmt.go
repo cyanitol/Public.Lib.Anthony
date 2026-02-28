@@ -1465,15 +1465,15 @@ func (s *Stmt) emitAggregateUpdates(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 
 // emitSingleAggregateUpdate emits update for a single aggregate function.
 func (s *Stmt) emitSingleAggregateUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr,
-	table *schema.Table, accReg int, avgCountReg int, gen *expr.CodeGenerator) {
+	table *schema.Table, accReg int, avgCountReg int, gen *expr.CodeGenerator, distinctCursor int) {
 
 	switch fnExpr.Name {
 	case "COUNT":
 		s.emitCountUpdate(vm, fnExpr, accReg)
 	case "SUM", "TOTAL":
-		s.emitSumUpdate(vm, fnExpr, table, accReg, gen)
+		s.emitSumUpdate(vm, fnExpr, table, accReg, gen, distinctCursor)
 	case "AVG":
-		s.emitAvgUpdate(vm, fnExpr, table, accReg, avgCountReg, gen)
+		s.emitAvgUpdate(vm, fnExpr, table, accReg, avgCountReg, gen, distinctCursor)
 	case "MIN":
 		s.emitMinUpdate(vm, fnExpr, table, accReg, gen)
 	case "MAX":

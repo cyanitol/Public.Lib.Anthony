@@ -100,14 +100,15 @@ const (
 
 // Index represents a database index definition.
 type Index struct {
-	Name     string   // Index name
-	Table    string   // Table name this index belongs to
-	RootPage uint32   // B-tree root page number
-	SQL      string   // CREATE INDEX statement
-	Columns  []string // Indexed column names
-	Unique   bool     // True for UNIQUE indexes
-	Partial  bool     // True for partial indexes (WHERE clause)
-	Where    string   // WHERE clause for partial indexes
+	Name        string              // Index name
+	Table       string              // Table name this index belongs to
+	RootPage    uint32              // B-tree root page number
+	SQL         string              // CREATE INDEX statement
+	Columns     []string            // Indexed column names
+	Expressions []parser.Expression // Expression for each indexed column (nil for simple columns)
+	Unique      bool                // True for UNIQUE indexes
+	Partial     bool                // True for partial indexes (WHERE clause)
+	Where       string              // WHERE clause for partial indexes
 }
 
 // GetTable retrieves a table by name.
@@ -616,18 +617,21 @@ func (s *Schema) tableExistsLocked(tableName string) bool {
 // buildIndex creates an Index from a CREATE INDEX statement.
 func (s *Schema) buildIndex(stmt *parser.CreateIndexStmt) *Index {
 	columns := make([]string, len(stmt.Columns))
+	expressions := make([]parser.Expression, len(stmt.Columns))
 	for i, col := range stmt.Columns {
 		columns[i] = col.Column
+		expressions[i] = col.Expr
 	}
 
 	index := &Index{
-		Name:     stmt.Name,
-		Table:    stmt.Table,
-		RootPage: 0,
-		SQL:      stmt.String(),
-		Columns:  columns,
-		Unique:   stmt.Unique,
-		Partial:  stmt.Where != nil,
+		Name:        stmt.Name,
+		Table:       stmt.Table,
+		RootPage:    0,
+		SQL:         stmt.String(),
+		Columns:     columns,
+		Expressions: expressions,
+		Unique:      stmt.Unique,
+		Partial:     stmt.Where != nil,
 	}
 
 	if stmt.Where != nil {

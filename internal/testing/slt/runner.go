@@ -102,65 +102,19 @@ func (r *Runner) runTests(reader io.Reader) ([]TestResult, error) {
 			continue
 		}
 
-		// Check for directives
-		if strings.HasPrefix(line, "hash-threshold") {
-			result := r.handleHashThreshold(line)
-			results = append(results, result)
+		// Handle directives that complete the previous test and start a new one
+		if r.handleStatementDirective(line, &currentTest, &currentSQL, &results) {
+			continue
+		}
+		if r.handleQueryDirective(line, &currentTest, &currentSQL, &results) {
+			continue
+		}
+		if r.handleHashDirective(line, &results) {
 			continue
 		}
 
-		if strings.HasPrefix(line, "statement") {
-			// Execute previous test if exists
-			if currentTest != nil {
-				result := r.executeTest(currentTest, currentSQL.String())
-				results = append(results, result)
-			}
-
-			// Start new statement test
-			currentTest = &Test{
-				Type: "statement",
-				Line: r.lineNumber,
-			}
-			currentTest.parseStatementDirective(line)
-			currentSQL.Reset()
-			continue
-		}
-
-		if strings.HasPrefix(line, "query") {
-			// Execute previous test if exists
-			if currentTest != nil {
-				result := r.executeTest(currentTest, currentSQL.String())
-				results = append(results, result)
-			}
-
-			// Start new query test
-			currentTest = &Test{
-				Type: "query",
-				Line: r.lineNumber,
-			}
-			currentTest.parseQueryDirective(line)
-			currentSQL.Reset()
-			continue
-		}
-
-		// If we have a current test, accumulate SQL or expected results
-		if currentTest != nil {
-			if currentTest.State == "sql" {
-				// Check if this line starts expected results (for queries)
-				if currentTest.Type == "query" && strings.HasPrefix(line, "----") {
-					currentTest.State = "results"
-					continue
-				}
-				// Accumulate SQL
-				if currentSQL.Len() > 0 {
-					currentSQL.WriteString("\n")
-				}
-				currentSQL.WriteString(line)
-			} else if currentTest.State == "results" {
-				// Accumulate expected results
-				currentTest.Expected = append(currentTest.Expected, line)
-			}
-		}
+		// Accumulate SQL or expected results for current test
+		r.accumulateTestData(line, currentTest, &currentSQL)
 	}
 
 	// Execute final test if exists
@@ -174,6 +128,89 @@ func (r *Runner) runTests(reader io.Reader) ([]TestResult, error) {
 	}
 
 	return results, nil
+}
+
+// handleStatementDirective processes statement directive lines
+func (r *Runner) handleStatementDirective(line string, currentTest **Test, currentSQL *strings.Builder, results *[]TestResult) bool {
+	if !strings.HasPrefix(line, "statement") {
+		return false
+	}
+
+	// Execute previous test if exists
+	if *currentTest != nil {
+		result := r.executeTest(*currentTest, currentSQL.String())
+		*results = append(*results, result)
+	}
+
+	// Start new statement test
+	*currentTest = &Test{
+		Type: "statement",
+		Line: r.lineNumber,
+	}
+	(*currentTest).parseStatementDirective(line)
+	currentSQL.Reset()
+	return true
+}
+
+// handleQueryDirective processes query directive lines
+func (r *Runner) handleQueryDirective(line string, currentTest **Test, currentSQL *strings.Builder, results *[]TestResult) bool {
+	if !strings.HasPrefix(line, "query") {
+		return false
+	}
+
+	// Execute previous test if exists
+	if *currentTest != nil {
+		result := r.executeTest(*currentTest, currentSQL.String())
+		*results = append(*results, result)
+	}
+
+	// Start new query test
+	*currentTest = &Test{
+		Type: "query",
+		Line: r.lineNumber,
+	}
+	(*currentTest).parseQueryDirective(line)
+	currentSQL.Reset()
+	return true
+}
+
+// handleHashDirective processes hash-threshold directive lines
+func (r *Runner) handleHashDirective(line string, results *[]TestResult) bool {
+	if !strings.HasPrefix(line, "hash-threshold") {
+		return false
+	}
+
+	result := r.handleHashThreshold(line)
+	*results = append(*results, result)
+	return true
+}
+
+// accumulateTestData accumulates SQL or expected results for the current test
+func (r *Runner) accumulateTestData(line string, currentTest *Test, currentSQL *strings.Builder) {
+	if currentTest == nil {
+		return
+	}
+
+	if currentTest.State == "sql" {
+		r.accumulateSQLOrResults(line, currentTest, currentSQL)
+	} else if currentTest.State == "results" {
+		currentTest.Expected = append(currentTest.Expected, line)
+	}
+}
+
+// accumulateSQLOrResults accumulates SQL lines or transitions to results state
+func (r *Runner) accumulateSQLOrResults(line string, currentTest *Test, currentSQL *strings.Builder) {
+	// Check if this line starts expected results (for queries)
+	if currentTest.Type == "query" && strings.HasPrefix(line, "----") {
+		currentTest.State = "results"
+		return
+	}
+
+	// Accumulate SQL
+	if currentSQL.Len() > 0 {
+		currentSQL.WriteString("\n")
+	}
+	currentSQL.WriteString(line)
 }
 
 // Test represents a single SLT test

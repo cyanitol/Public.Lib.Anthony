@@ -131,9 +131,9 @@ func TestMixedExpressionIndex(t *testing.T) {
 		t.Error("First expression should not be nil")
 	}
 
-	// Second should be nil (regular column)
-	if index.Expressions[1] != nil {
-		t.Error("Second expression should be nil (regular column)")
+	// Second should also be an expression (IdentExpr for regular columns)
+	if index.Expressions[1] == nil {
+		t.Error("Second expression should not be nil (all columns have expressions)")
 	}
 }
 
