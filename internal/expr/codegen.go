@@ -536,21 +536,27 @@ func (g *CodeGenerator) generateFunction(e *parser.FunctionExpr) (int, error) {
 		return resultReg, nil
 	}
 
-	// Evaluate arguments into consecutive registers
-	var argRegs []int
-	for _, arg := range e.Args {
-		reg, err := g.GenerateExpr(arg)
-		if err != nil {
-			return 0, err
-		}
-		argRegs = append(argRegs, reg)
-	}
+	// Allocate consecutive registers for arguments
+	argCount := len(e.Args)
+	var firstArg int
 
-	// Determine first arg register and count
-	firstArg := 0
-	argCount := len(argRegs)
 	if argCount > 0 {
-		firstArg = argRegs[0]
+		// Allocate N consecutive registers for arguments
+		firstArg = g.AllocRegs(argCount)
+
+		// Evaluate each argument and move to consecutive register
+		for i, arg := range e.Args {
+			argReg, err := g.GenerateExpr(arg)
+			if err != nil {
+				return 0, err
+			}
+
+			// If argument is not already in the correct position, move it
+			targetReg := firstArg + i
+			if argReg != targetReg {
+				g.vdbe.AddOp(vdbe.OpMove, argReg, targetReg, 0)
+			}
+		}
 	}
 
 	// Emit function call

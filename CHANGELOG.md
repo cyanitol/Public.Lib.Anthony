@@ -2,11 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
 ### Added
+- Comprehensive documentation across all major components
+- TCL to Go test conversions (batches 1-5) for SQLite compatibility testing
+  - Batch 1: Core functionality tests
+  - Batch 2: Extended SQL feature tests
+  - Batch 3: Additional SQL feature tests
+  - Batch 4: Advanced features with documentation
+  - Batch 5: Final batch with comprehensive documentation
+- DSN parsing with read-only mode support
+- OpConcat operator for string concatenation (`||`)
 - Comprehensive security audit implementation addressing 23 vulnerabilities
 - New `internal/security` package with defense-in-depth security model
 - Path traversal prevention with 4-layer validation (Layered + Sandbox model)
@@ -62,9 +72,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `Makefile` with common development targets
 - Comprehensive TODO.txt with 36 improvement tasks across 9 phases
 - Best practices improvement plan based on 11-agent architectural review
+- SQLite testing plans and documentation
 
 ### Changed
 - Reduced all function cyclomatic complexity to ≤10 for improved maintainability
+  - Complete cyclomatic complexity reduction (only 9 functions remained >10, then all reduced)
+  - Further complexity reduction across entire codebase
+  - Final reduction achieving ≤10 for all functions
+- Significantly improved test coverage across all packages (multiple pushes)
 - Refactored connection and statement close operations with two-phase pattern
   - Prevents lock ordering violations and deadlocks
   - Phase 1: Mark closed and collect cleanup items under lock
@@ -92,8 +107,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Consolidated security documentation
   - Moved deprecated documentation to `attic/` directory
   - Updated all security-related documentation for consistency
+- Cleaned up contrib directory (removed SQLite C source, kept documentation)
 
 ### Fixed
+- Function call opcode parameter order (P5 for arg count)
+- B-tree split operations
+- Pager lock management
+- Driver timeout handling
+- VDBE comparison operations
+- Various test failures across multiple packages (multiple fix iterations)
 - **CRITICAL**: Race condition in statement transaction checks
   - Fixed by holding connection lock during transaction state reads
   - Applied to both `ExecContext()` and `QueryContext()`
@@ -150,7 +172,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Race condition in `Conn.Close()` - added mutex protection to Stmt struct
 - B-tree Pages map synchronization - added `sync.RWMutex` to Btree struct
 - memoryCount atomic operations - changed to int64 with `atomic.AddInt64()`
-- All test failures from previous versions
+
+### Removed
+- SQLite C source code from contrib directory (documentation retained)
+- Generated artifacts and build files from version control
 
 ### Security
 - Implemented complete security audit addressing all 23 identified issues:
@@ -178,9 +203,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 - Phase 3: Functions, Query Optimization, and Integration
+- Built-in function library (50+ functions)
+  - String functions (length, substr, upper, lower, trim, replace, etc.)
+  - Math functions (abs, round, random, min, max, etc.)
+  - Date/time functions
+  - Type conversion functions
+  - Aggregate functions (SUM, COUNT, AVG, MIN, MAX, GROUP_CONCAT)
+- Query optimizer with rule-based optimization
+- Trigger system integration with DML operations
+- Window function support
+- Enhanced expression evaluation engine
+- Query planner improvements for better execution plans
+
+### Changed
+- Further reduced cyclomatic complexity across codebase
+- Improved test coverage and code organization
 
 ### Fixed
 - All test failures: btree splits, pager locks, driver timeouts, VDBE comparisons
+- Test failures and reduced cyclomatic complexity (multiple iterations)
 
 ---
 
@@ -188,9 +229,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 - Phase 1: Core ACID & Storage implementation
-- B-tree with page management
-- Pager with journal and transaction support
-- VDBE bytecode VM
+- B-tree storage engine with page-based storage
+  - Overflow page handling
+  - Cell pointer management
+  - Page splitting and merging
+- Pager with page cache and transaction management
+  - Page cache with LRU eviction
+  - Rollback journal support
+  - Write-Ahead Logging (WAL)
+  - Multi-version concurrency control (MVCC)
+- Transaction coordinator with journal and WAL support
+- VDBE (Virtual Database Engine) bytecode interpreter
+  - 100+ opcodes for SQL execution
+  - Register-based virtual machine
+  - Cursor management for table and index access
+- Complete SQL parser with error recovery
+  - Lexer with full token support
+  - Recursive descent parser
+  - Abstract Syntax Tree (AST) generation
+- Schema management system
+  - Table and index metadata
+  - Column definitions with types
+  - Constraint tracking
+- Constraint enforcement system
+  - PRIMARY KEY
+  - UNIQUE
+  - CHECK
+  - FOREIGN KEY
+  - NOT NULL
+- Common Table Expressions (CTEs) with recursive queries
+- Subquery integration (scalar, IN, EXISTS)
+- Compound query support (UNION, INTERSECT, EXCEPT)
+- ALTER TABLE implementation
+- VACUUM operation for database compaction
+- Virtual table support with extensible interface
+- UTF-8 and UTF-16 encoding support
+- Collation support (BINARY, NOCASE, RTRIM)
+
+### Fixed
+- All test failures: btree splits, pager locks, driver timeouts, VDBE comparisons
 
 ---
 
@@ -198,6 +275,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 - Initial implementation of pure Go SQLite database driver
-- SQL parser and lexer
-- Schema management
-- Basic query execution
+- Core package structure and layout
+  - `internal/btree` - B-tree storage engine
+  - `internal/pager` - Page cache and transactions
+  - `internal/format` - SQLite file format utilities
+  - `internal/parser` - SQL lexer and parser
+  - `internal/planner` - Query planner
+  - `internal/sql` - SQL statement compilation
+  - `internal/vdbe` - Virtual Database Engine
+  - `internal/expr` - Expression evaluation
+  - `internal/functions` - Built-in SQL functions
+  - `internal/engine` - Query execution engine
+  - `internal/driver` - database/sql driver interface
+  - `internal/schema` - Schema management
+  - `internal/constraint` - Constraint enforcement
+  - `internal/utf` - UTF encoding and collation
+  - `internal/vtab` - Virtual table support
+- SQL parser and lexer with full token support
+- Schema management for tables and indexes
+- Basic query execution framework
+- Database/sql driver interface (`sqlite_internal`)
+- Initial documentation and README
+- Public domain license (SQLite-style blessing)
+- Module initialization with Go 1.26 requirement
+
+---
+
+**Notes:**
+- This project was developed in an intensive sprint during February 2026
+- Development progressed through 3 major phases in less than 4 days
+- All code achieves cyclomatic complexity ≤10 for maintainability
+- Comprehensive security audit completed with all issues resolved
+- Test coverage consistently improved throughout development
+- Future releases will focus on:
+  - Performance optimization (caching, pooling)
+  - Platform-specific enhancements (Windows file locking)
+  - Additional SQL features (complete ORDER BY, enhanced triggers)
+  - Query optimization improvements
+- See [TODO.txt](TODO.txt) for detailed roadmap and planned features (36 tasks across 9 phases)
+- See [README.md](README.md) for complete feature list and usage examples
+- See [docs/SECURITY.md](docs/SECURITY.md) for security model and best practices
