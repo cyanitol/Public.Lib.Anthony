@@ -917,6 +917,16 @@ func CompileDropTrigger(stmt *parser.DropTriggerStmt, schema *Schema, bt *btree.
 // generateCreateTriggerSQL generates the CREATE TRIGGER SQL text from the AST.
 func generateCreateTriggerSQL(stmt *parser.CreateTriggerStmt) string {
 	var sql strings.Builder
+	writeTriggerHeader(&sql, stmt)
+	writeTriggerTiming(&sql, stmt.Timing)
+	writeTriggerEvent(&sql, stmt)
+	writeTriggerTarget(&sql, stmt)
+	writeTriggerBody(&sql, stmt)
+	return sql.String()
+}
+
+// writeTriggerHeader writes the CREATE TRIGGER header clause.
+func writeTriggerHeader(sql *strings.Builder, stmt *parser.CreateTriggerStmt) {
 	sql.WriteString("CREATE ")
 	if stmt.Temp {
 		sql.WriteString("TEMP ")
@@ -927,9 +937,11 @@ func generateCreateTriggerSQL(stmt *parser.CreateTriggerStmt) string {
 	}
 	sql.WriteString(stmt.Name)
 	sql.WriteString(" ")
+}
 
-	// Timing: BEFORE, AFTER, or INSTEAD OF
-	switch stmt.Timing {
+// writeTriggerTiming writes the trigger timing clause (BEFORE/AFTER/INSTEAD OF).
+func writeTriggerTiming(sql *strings.Builder, timing parser.TriggerTiming) {
+	switch timing {
 	case parser.TriggerBefore:
 		sql.WriteString("BEFORE ")
 	case parser.TriggerAfter:
@@ -937,41 +949,52 @@ func generateCreateTriggerSQL(stmt *parser.CreateTriggerStmt) string {
 	case parser.TriggerInsteadOf:
 		sql.WriteString("INSTEAD OF ")
 	}
+}
 
-	// Event: INSERT, UPDATE, or DELETE
+// writeTriggerEvent writes the trigger event clause (INSERT/UPDATE/DELETE).
+func writeTriggerEvent(sql *strings.Builder, stmt *parser.CreateTriggerStmt) {
 	switch stmt.Event {
 	case parser.TriggerInsert:
 		sql.WriteString("INSERT")
 	case parser.TriggerUpdate:
 		sql.WriteString("UPDATE")
-		if len(stmt.UpdateOf) > 0 {
-			sql.WriteString(" OF ")
-			for i, col := range stmt.UpdateOf {
-				if i > 0 {
-					sql.WriteString(", ")
-				}
-				sql.WriteString(col)
-			}
-		}
+		writeTriggerUpdateOf(sql, stmt.UpdateOf)
 	case parser.TriggerDelete:
 		sql.WriteString("DELETE")
 	}
+}
 
+// writeTriggerUpdateOf writes the UPDATE OF column list if present.
+func writeTriggerUpdateOf(sql *strings.Builder, columns []string) {
+	if len(columns) == 0 {
+		return
+	}
+	sql.WriteString(" OF ")
+	for i, col := range columns {
+		if i > 0 {
+			sql.WriteString(", ")
+		}
+		sql.WriteString(col)
+	}
+}
+
+// writeTriggerTarget writes the ON table, FOR EACH ROW, and WHEN clauses.
+func writeTriggerTarget(sql *strings.Builder, stmt *parser.CreateTriggerStmt) {
 	sql.WriteString(" ON ")
 	sql.WriteString(stmt.Table)
 
-	// FOR EACH ROW
 	if stmt.ForEachRow {
 		sql.WriteString(" FOR EACH ROW")
 	}
 
-	// WHEN clause
 	if stmt.When != nil {
 		sql.WriteString(" WHEN ")
 		sql.WriteString(stmt.When.String())
 	}
+}
 
-	// Body
+// writeTriggerBody writes the trigger body (BEGIN...END block).
+func writeTriggerBody(sql *strings.Builder, stmt *parser.CreateTriggerStmt) {
 	sql.WriteString(" BEGIN")
 	for _, bodyStmt := range stmt.Body {
 		sql.WriteString(" ")
@@ -979,6 +1002,4 @@ func generateCreateTriggerSQL(stmt *parser.CreateTriggerStmt) string {
 		sql.WriteString(";")
 	}
 	sql.WriteString(" END")
-
-	return sql.String()
 }

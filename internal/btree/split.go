@@ -25,66 +25,176 @@ func (c *BtCursor) splitLeafPage(key int64, payload []byte) error {
 		return fmt.Errorf("splitLeafPage called on non-leaf page")
 	}
 
-	// Get current page data
+	oldPage, cells, keys, err := c.prepareLeafSplit(key, payload)
+	if err != nil {
+		return err
+	}
+
+	medianIdx := len(cells) / 2
+	newPage, newPageNum, err := c.allocateAndInitializeLeafPage()
+	if err != nil {
+		return err
+	}
+
+	if err := c.markPagesAsDirty(c.CurrentPage, newPageNum); err != nil {
+		return err
+	}
+
+	if err := c.redistributeLeafCells(oldPage, newPage, cells, medianIdx); err != nil {
+		return err
+	}
+
+	dividerKey := keys[medianIdx]
+	if err := c.updateParentAfterSplit(c.CurrentPage, newPageNum, dividerKey); err != nil {
+		return fmt.Errorf("failed to update parent: %w", err)
+	}
+
+	_, err = c.SeekRowid(key)
+	return err
+}
+
+// splitInteriorPage splits a full interior page when inserting a new cell
+func (c *BtCursor) splitInteriorPage(key int64, childPgno uint32) error {
+	if c.CurrentHeader == nil || !c.CurrentHeader.IsInterior {
+		return fmt.Errorf("splitInteriorPage called on non-interior page")
+	}
+
+	oldPage, cells, keys, childPages, err := c.prepareInteriorSplit(key, childPgno)
+	if err != nil {
+		return err
+	}
+
+	medianIdx := len(cells) / 2
+	newPage, newPageNum, err := c.allocateAndInitializeInteriorPage()
+	if err != nil {
+		return err
+	}
+
+	if err := c.markPagesAsDirty(c.CurrentPage, newPageNum); err != nil {
+		return err
+	}
+
+	if err := c.redistributeInteriorCells(oldPage, newPage, cells, childPages, medianIdx, newPageNum); err != nil {
+		return err
+	}
+
+	dividerKey := keys[medianIdx]
+	if err := c.updateParentAfterSplit(c.CurrentPage, newPageNum, dividerKey); err != nil {
+		return fmt.Errorf("failed to update parent: %w", err)
+	}
+
+	return nil
+}
+
+// prepareLeafSplit prepares the current page for splitting by collecting all cells
+func (c *BtCursor) prepareLeafSplit(key int64, payload []byte) (*BtreePage, [][]byte, []int64, error) {
 	pageData, err := c.Btree.GetPage(c.CurrentPage)
 	if err != nil {
-		return fmt.Errorf("failed to get current page: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to get current page: %w", err)
 	}
 
-	// Create BtreePage wrapper for current page
 	oldPage, err := NewBtreePage(c.CurrentPage, pageData, c.Btree.UsableSize)
 	if err != nil {
-		return fmt.Errorf("failed to create BtreePage: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to create BtreePage: %w", err)
 	}
 
-	// Collect all cells including the new one
 	cells, keys, err := c.collectLeafCellsForSplit(oldPage, key, payload)
 	if err != nil {
-		return fmt.Errorf("failed to collect cells: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to collect cells: %w", err)
 	}
 
-	// Find median index
-	medianIdx := len(cells) / 2
+	return oldPage, cells, keys, nil
+}
 
-	// Allocate new page
+// prepareInteriorSplit prepares the current page for splitting by collecting all cells
+func (c *BtCursor) prepareInteriorSplit(key int64, childPgno uint32) (*BtreePage, [][]byte, []int64, []uint32, error) {
+	pageData, err := c.Btree.GetPage(c.CurrentPage)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("failed to get current page: %w", err)
+	}
+
+	oldPage, err := NewBtreePage(c.CurrentPage, pageData, c.Btree.UsableSize)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("failed to create BtreePage: %w", err)
+	}
+
+	cells, keys, childPages, err := c.collectInteriorCellsForSplit(oldPage, key, childPgno)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("failed to collect cells: %w", err)
+	}
+
+	return oldPage, cells, keys, childPages, nil
+}
+
+// allocateAndInitializeLeafPage allocates and initializes a new leaf page
+func (c *BtCursor) allocateAndInitializeLeafPage() (*BtreePage, uint32, error) {
 	newPageNum, err := c.Btree.AllocatePage()
 	if err != nil {
-		return fmt.Errorf("failed to allocate new page: %w", err)
+		return nil, 0, fmt.Errorf("failed to allocate new page: %w", err)
 	}
 
-	// Get and initialize new page
 	newPageData, err := c.Btree.GetPage(newPageNum)
 	if err != nil {
-		return fmt.Errorf("failed to get new page: %w", err)
+		return nil, 0, fmt.Errorf("failed to get new page: %w", err)
 	}
 
-	// Initialize new page header
 	if err := initializeLeafPage(newPageData, newPageNum, c.Btree.UsableSize); err != nil {
-		return fmt.Errorf("failed to initialize new page: %w", err)
+		return nil, 0, fmt.Errorf("failed to initialize new page: %w", err)
 	}
 
-	// Mark both pages as dirty
-	if c.Btree.Provider != nil {
-		if err := c.Btree.Provider.MarkDirty(c.CurrentPage); err != nil {
-			return err
-		}
-		if err := c.Btree.Provider.MarkDirty(newPageNum); err != nil {
-			return err
-		}
+	newPage, err := NewBtreePage(newPageNum, newPageData, c.Btree.UsableSize)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create new BtreePage: %w", err)
 	}
 
-	// Clear old page (we'll rebuild it)
+	return newPage, newPageNum, nil
+}
+
+// allocateAndInitializeInteriorPage allocates and initializes a new interior page
+func (c *BtCursor) allocateAndInitializeInteriorPage() (*BtreePage, uint32, error) {
+	newPageNum, err := c.Btree.AllocatePage()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to allocate new page: %w", err)
+	}
+
+	newPageData, err := c.Btree.GetPage(newPageNum)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get new page: %w", err)
+	}
+
+	if err := initializeInteriorPage(newPageData, newPageNum, c.Btree.UsableSize); err != nil {
+		return nil, 0, fmt.Errorf("failed to initialize new page: %w", err)
+	}
+
+	newPage, err := NewBtreePage(newPageNum, newPageData, c.Btree.UsableSize)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create new BtreePage: %w", err)
+	}
+
+	return newPage, newPageNum, nil
+}
+
+// markPagesAsDirty marks both pages as dirty in the pager
+func (c *BtCursor) markPagesAsDirty(page1, page2 uint32) error {
+	if c.Btree.Provider == nil {
+		return nil
+	}
+
+	if err := c.Btree.Provider.MarkDirty(page1); err != nil {
+		return err
+	}
+	if err := c.Btree.Provider.MarkDirty(page2); err != nil {
+		return err
+	}
+	return nil
+}
+
+// redistributeLeafCells distributes cells between left and right leaf pages
+func (c *BtCursor) redistributeLeafCells(oldPage, newPage *BtreePage, cells [][]byte, medianIdx int) error {
 	if err := clearPageCells(oldPage); err != nil {
 		return fmt.Errorf("failed to clear old page: %w", err)
 	}
 
-	// Create new page wrapper
-	newPage, err := NewBtreePage(newPageNum, newPageData, c.Btree.UsableSize)
-	if err != nil {
-		return fmt.Errorf("failed to create new BtreePage: %w", err)
-	}
-
-	// Distribute cells: left page gets cells [0, medianIdx), right page gets [medianIdx, end)
 	for i := 0; i < medianIdx; i++ {
 		if err := oldPage.InsertCell(i, cells[i]); err != nil {
 			return fmt.Errorf("failed to insert cell %d into left page: %w", i, err)
@@ -97,7 +207,6 @@ func (c *BtCursor) splitLeafPage(key int64, payload []byte) error {
 		}
 	}
 
-	// Defragment both pages
 	if err := oldPage.Defragment(); err != nil {
 		return fmt.Errorf("failed to defragment left page: %w", err)
 	}
@@ -105,93 +214,21 @@ func (c *BtCursor) splitLeafPage(key int64, payload []byte) error {
 		return fmt.Errorf("failed to defragment right page: %w", err)
 	}
 
-	// The divider key is the first key in the right page
-	dividerKey := keys[medianIdx]
-
-	// Update parent page
-	if err := c.updateParentAfterSplit(c.CurrentPage, newPageNum, dividerKey); err != nil {
-		return fmt.Errorf("failed to update parent: %w", err)
-	}
-
-	// Reposition cursor to the newly inserted key
-	_, err = c.SeekRowid(key)
-	return err
+	return nil
 }
 
-// splitInteriorPage splits a full interior page when inserting a new cell
-func (c *BtCursor) splitInteriorPage(key int64, childPgno uint32) error {
-	if c.CurrentHeader == nil || !c.CurrentHeader.IsInterior {
-		return fmt.Errorf("splitInteriorPage called on non-interior page")
-	}
-
-	// Get current page data
-	pageData, err := c.Btree.GetPage(c.CurrentPage)
-	if err != nil {
-		return fmt.Errorf("failed to get current page: %w", err)
-	}
-
-	// Create BtreePage wrapper for current page
-	oldPage, err := NewBtreePage(c.CurrentPage, pageData, c.Btree.UsableSize)
-	if err != nil {
-		return fmt.Errorf("failed to create BtreePage: %w", err)
-	}
-
-	// Collect all cells including the new one
-	cells, keys, childPages, err := c.collectInteriorCellsForSplit(oldPage, key, childPgno)
-	if err != nil {
-		return fmt.Errorf("failed to collect cells: %w", err)
-	}
-
-	// Find median index
-	medianIdx := len(cells) / 2
-
-	// Allocate new page
-	newPageNum, err := c.Btree.AllocatePage()
-	if err != nil {
-		return fmt.Errorf("failed to allocate new page: %w", err)
-	}
-
-	// Get and initialize new page
-	newPageData, err := c.Btree.GetPage(newPageNum)
-	if err != nil {
-		return fmt.Errorf("failed to get new page: %w", err)
-	}
-
-	// Initialize new page header as interior
-	if err := initializeInteriorPage(newPageData, newPageNum, c.Btree.UsableSize); err != nil {
-		return fmt.Errorf("failed to initialize new page: %w", err)
-	}
-
-	// Mark both pages as dirty
-	if c.Btree.Provider != nil {
-		if err := c.Btree.Provider.MarkDirty(c.CurrentPage); err != nil {
-			return err
-		}
-		if err := c.Btree.Provider.MarkDirty(newPageNum); err != nil {
-			return err
-		}
-	}
-
-	// Clear old page
+// redistributeInteriorCells distributes cells between left and right interior pages
+func (c *BtCursor) redistributeInteriorCells(oldPage, newPage *BtreePage, cells [][]byte, childPages []uint32, medianIdx int, newPageNum uint32) error {
 	if err := clearPageCells(oldPage); err != nil {
 		return fmt.Errorf("failed to clear old page: %w", err)
 	}
 
-	// Create new page wrapper
-	newPage, err := NewBtreePage(newPageNum, newPageData, c.Btree.UsableSize)
-	if err != nil {
-		return fmt.Errorf("failed to create new BtreePage: %w", err)
-	}
-
-	// Distribute cells
-	// Left page gets [0, medianIdx), median key goes to parent, right page gets [medianIdx+1, end)
 	for i := 0; i < medianIdx; i++ {
 		if err := oldPage.InsertCell(i, cells[i]); err != nil {
 			return fmt.Errorf("failed to insert cell %d into left page: %w", i, err)
 		}
 	}
 
-	// Set right child of left page to the left child of the median cell
 	headerOffset := getHeaderOffset(c.CurrentPage)
 	binary.BigEndian.PutUint32(oldPage.Data[headerOffset+PageHeaderOffsetRightChild:], childPages[medianIdx])
 
@@ -201,26 +238,16 @@ func (c *BtCursor) splitInteriorPage(key int64, childPgno uint32) error {
 		}
 	}
 
-	// Set right child of new page
 	newHeaderOffset := getHeaderOffset(newPageNum)
 	if medianIdx+1 < len(childPages) {
 		binary.BigEndian.PutUint32(newPage.Data[newHeaderOffset+PageHeaderOffsetRightChild:], childPages[len(childPages)-1])
 	}
 
-	// Defragment both pages
 	if err := oldPage.Defragment(); err != nil {
 		return fmt.Errorf("failed to defragment left page: %w", err)
 	}
 	if err := newPage.Defragment(); err != nil {
 		return fmt.Errorf("failed to defragment right page: %w", err)
-	}
-
-	// The divider key is the median key
-	dividerKey := keys[medianIdx]
-
-	// Update parent page
-	if err := c.updateParentAfterSplit(c.CurrentPage, newPageNum, dividerKey); err != nil {
-		return fmt.Errorf("failed to update parent: %w", err)
 	}
 
 	return nil

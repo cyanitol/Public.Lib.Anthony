@@ -340,8 +340,8 @@ func formatTableScan(tableName string, where parser.Expression, isWrite bool) st
 				colName = ident.Name
 				// Simple heuristic: = and < > operators are indexable
 				if binExpr.Op == parser.OpEq || binExpr.Op == parser.OpLt ||
-				   binExpr.Op == parser.OpGt || binExpr.Op == parser.OpLe ||
-				   binExpr.Op == parser.OpGe {
+					binExpr.Op == parser.OpGt || binExpr.Op == parser.OpLe ||
+					binExpr.Op == parser.OpGe {
 					indexable = true
 				}
 			}

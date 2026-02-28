@@ -157,41 +157,93 @@ func (s *Stmt) dispatchCompile(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.V
 
 // dispatchDDLOrTxn handles DDL and transaction statements.
 func (s *Stmt) dispatchDDLOrTxn(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	// Try schema DDL statements (CREATE/DROP/ALTER)
+	if result, err, handled := s.dispatchSchemaDDL(vm, args); handled {
+		return result, err
+	}
+
+	// Try transaction control statements
+	if result, err, handled := s.dispatchTransactionControl(vm, args); handled {
+		return result, err
+	}
+
+	// Try other statements (PRAGMA, ATTACH, DETACH, VACUUM)
+	if result, err, handled := s.dispatchOtherStatements(vm, args); handled {
+		return result, err
+	}
+
+	return nil, fmt.Errorf("unsupported statement type: %T", s.ast)
+}
+
+// dispatchSchemaDDL handles CREATE/DROP/ALTER statements.
+func (s *Stmt) dispatchSchemaDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
 	switch stmt := s.ast.(type) {
 	case *parser.CreateTableStmt:
-		return s.compileCreateTable(vm, stmt, args)
+		result, err := s.compileCreateTable(vm, stmt, args)
+		return result, err, true
 	case *parser.DropTableStmt:
-		return s.compileDropTable(vm, stmt, args)
+		result, err := s.compileDropTable(vm, stmt, args)
+		return result, err, true
 	case *parser.CreateIndexStmt:
-		return s.compileCreateIndex(vm, stmt, args)
+		result, err := s.compileCreateIndex(vm, stmt, args)
+		return result, err, true
 	case *parser.DropIndexStmt:
-		return s.compileDropIndex(vm, stmt, args)
+		result, err := s.compileDropIndex(vm, stmt, args)
+		return result, err, true
 	case *parser.CreateViewStmt:
-		return s.compileCreateView(vm, stmt, args)
+		result, err := s.compileCreateView(vm, stmt, args)
+		return result, err, true
 	case *parser.DropViewStmt:
-		return s.compileDropView(vm, stmt, args)
+		result, err := s.compileDropView(vm, stmt, args)
+		return result, err, true
 	case *parser.CreateTriggerStmt:
-		return s.compileCreateTrigger(vm, stmt, args)
+		result, err := s.compileCreateTrigger(vm, stmt, args)
+		return result, err, true
 	case *parser.DropTriggerStmt:
-		return s.compileDropTrigger(vm, stmt, args)
+		result, err := s.compileDropTrigger(vm, stmt, args)
+		return result, err, true
 	case *parser.AlterTableStmt:
-		return s.compileAlterTable(vm, stmt, args)
-	case *parser.PragmaStmt:
-		return s.compilePragma(vm, stmt, args)
-	case *parser.BeginStmt:
-		return s.compileBegin(vm, stmt, args)
-	case *parser.CommitStmt:
-		return s.compileCommit(vm, stmt, args)
-	case *parser.RollbackStmt:
-		return s.compileRollback(vm, stmt, args)
-	case *parser.AttachStmt:
-		return s.compileAttach(vm, stmt, args)
-	case *parser.DetachStmt:
-		return s.compileDetach(vm, stmt, args)
-	case *parser.VacuumStmt:
-		return s.compileVacuum(vm, stmt, args)
+		result, err := s.compileAlterTable(vm, stmt, args)
+		return result, err, true
 	default:
-		return nil, fmt.Errorf("unsupported statement type: %T", stmt)
+		return nil, nil, false
+	}
+}
+
+// dispatchTransactionControl handles BEGIN/COMMIT/ROLLBACK statements.
+func (s *Stmt) dispatchTransactionControl(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	switch stmt := s.ast.(type) {
+	case *parser.BeginStmt:
+		result, err := s.compileBegin(vm, stmt, args)
+		return result, err, true
+	case *parser.CommitStmt:
+		result, err := s.compileCommit(vm, stmt, args)
+		return result, err, true
+	case *parser.RollbackStmt:
+		result, err := s.compileRollback(vm, stmt, args)
+		return result, err, true
+	default:
+		return nil, nil, false
+	}
+}
+
+// dispatchOtherStatements handles PRAGMA, ATTACH, DETACH, VACUUM statements.
+func (s *Stmt) dispatchOtherStatements(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	switch stmt := s.ast.(type) {
+	case *parser.PragmaStmt:
+		result, err := s.compilePragma(vm, stmt, args)
+		return result, err, true
+	case *parser.AttachStmt:
+		result, err := s.compileAttach(vm, stmt, args)
+		return result, err, true
+	case *parser.DetachStmt:
+		result, err := s.compileDetach(vm, stmt, args)
+		return result, err, true
+	case *parser.VacuumStmt:
+		result, err := s.compileVacuum(vm, stmt, args)
+		return result, err, true
+	default:
+		return nil, nil, false
 	}
 }
 
@@ -343,149 +395,216 @@ func emitAggregateFunction(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, targetReg
 	return fmt.Errorf("unsupported function: %s", funcName)
 }
 
-// compileSelect compiles a SELECT statement. CC=5
+// compileSelect compiles a SELECT statement.
 func (s *Stmt) compileSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(true)
 
-	// Handle WITH clause (CTEs) if present
-	if stmt.With != nil {
-		return s.compileSelectWithCTEs(vm, stmt, args)
+	// Handle special SELECT types
+	if specialVM, err, handled := s.handleSpecialSelectTypes(vm, stmt, args); handled {
+		return specialVM, err
 	}
 
-	// Expand any view references in the SELECT statement
-	expandedStmt, err := planner.ExpandViewsInSelect(stmt, s.conn.schema)
-	if err != nil {
-		return nil, fmt.Errorf("failed to expand views: %w", err)
-	}
-	stmt = expandedStmt
-
-	// Check if we have FROM subqueries
-	hasFromSubqueries := s.hasFromSubqueries(stmt)
-	if hasFromSubqueries {
-		return s.compileSelectWithFromSubqueries(vm, stmt, args)
-	}
-
-	// Check if this is a SELECT without FROM clause (e.g., SELECT 1, SELECT 1+1)
-	if stmt.From == nil || len(stmt.From.Tables) == 0 {
-		return s.compileSelectWithoutFrom(vm, stmt, args)
-	}
-
-	tableName, err := selectFromTableName(stmt)
+	// Get table and check for special cases
+	tableName, table, err := s.resolveSelectTable(stmt)
 	if err != nil {
 		return nil, err
 	}
 
+	// Route to specialized compilers
+	if routedVM, err, handled := s.routeSpecializedSelect(vm, stmt, tableName, table, args); handled {
+		return routedVM, err
+	}
+
+	// Compile simple single-table SELECT
+	return s.compileSimpleSelect(vm, stmt, tableName, table, args)
+}
+
+// handleSpecialSelectTypes handles CTEs, views, subqueries, and no-FROM selects.
+func (s *Stmt) handleSpecialSelectTypes(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	// Handle WITH clause (CTEs)
+	if stmt.With != nil {
+		result, err := s.compileSelectWithCTEs(vm, stmt, args)
+		return result, err, true
+	}
+
+	// Expand views
+	expandedStmt, err := planner.ExpandViewsInSelect(stmt, s.conn.schema)
+	if err != nil {
+		return nil, err, true
+	}
+	*stmt = *expandedStmt
+
+	// Handle FROM subqueries
+	if s.hasFromSubqueries(stmt) {
+		result, err := s.compileSelectWithFromSubqueries(vm, stmt, args)
+		return result, err, true
+	}
+
+	// Handle SELECT without FROM
+	if stmt.From == nil || len(stmt.From.Tables) == 0 {
+		result, err := s.compileSelectWithoutFrom(vm, stmt, args)
+		return result, err, true
+	}
+
+	return nil, nil, false
+}
+
+// resolveSelectTable gets the table name and schema for the SELECT.
+func (s *Stmt) resolveSelectTable(stmt *parser.SelectStmt) (string, *schema.Table, error) {
+	tableName, err := selectFromTableName(stmt)
+	if err != nil {
+		return "", nil, err
+	}
+
 	table, ok := s.conn.schema.GetTable(tableName)
 	if !ok {
-		return nil, fmt.Errorf("table not found: %s", tableName)
+		return "", nil, fmt.Errorf("table not found: %s", tableName)
 	}
 
-	// Check if we have JOIN clauses
-	hasJoins := stmt.From != nil && len(stmt.From.Joins) > 0
+	return tableName, table, nil
+}
 
-	if hasJoins {
-		return s.compileSelectWithJoins(vm, stmt, tableName, table, args)
+// routeSpecializedSelect routes to JOIN or aggregate SELECT compilers.
+func (s *Stmt) routeSpecializedSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt,
+	tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+
+	// Handle JOINs
+	if stmt.From != nil && len(stmt.From.Joins) > 0 {
+		result, err := s.compileSelectWithJoins(vm, stmt, tableName, table, args)
+		return result, err, true
 	}
 
-	// Expand any SELECT * into explicit columns
+	// Handle aggregates
+	if s.detectAggregates(stmt) {
+		result, err := s.compileSelectWithAggregates(vm, stmt, tableName, table, args)
+		return result, err, true
+	}
+
+	return nil, nil, false
+}
+
+// compileSimpleSelect compiles a simple single-table SELECT.
+func (s *Stmt) compileSimpleSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt,
+	tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
+
+	// Expand SELECT *
 	expandedCols, colNames := expandStarColumns(stmt.Columns, table)
-
-	// Check if we have aggregate functions
-	hasAggregates := s.detectAggregates(stmt)
-	if hasAggregates {
-		return s.compileSelectWithAggregates(vm, stmt, tableName, table, args)
-	}
-
-	// Check if we have ORDER BY
-	hasOrderBy := len(stmt.OrderBy) > 0
-
-	// Single table SELECT without aggregates
 	numCols := len(expandedCols)
-	vm.AllocMemory(numCols + 30) // Extra registers for sorting
 
-	// Determine which cursor to use
-	cursorNum := 0
-	if table.Temp {
-		// For temporary (ephemeral) tables like CTEs, use the cursor stored in RootPage
-		cursorNum = int(table.RootPage)
-		// Make sure we have enough cursors allocated
-		vm.AllocCursors(cursorNum + 1)
-	} else {
-		// For regular tables, use cursor 0
-		vm.AllocCursors(1)
+	// Setup VDBE and code generator
+	gen, cursorNum := s.setupSimpleSelectVDBE(vm, stmt, tableName, table, numCols, colNames, args)
+
+	// Handle ORDER BY
+	if len(stmt.OrderBy) > 0 {
+		return s.compileSelectWithOrderBy(vm, stmt, table, gen, numCols)
 	}
 
-	// Create expression code generator
+	// Compile simple scan
+	return s.emitSimpleSelectScan(vm, stmt, table, expandedCols, numCols, cursorNum, gen)
+}
+
+// setupSimpleSelectVDBE initializes VDBE and code generator for simple SELECT.
+func (s *Stmt) setupSimpleSelectVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt,
+	tableName string, table *schema.Table, numCols int, colNames []string,
+	args []driver.NamedValue) (*expr.CodeGenerator, int) {
+
+	vm.AllocMemory(numCols + 30)
+
+	// Determine cursor number
+	cursorNum := s.determineCursorNum(table, vm)
+
+	// Setup code generator
 	gen := expr.NewCodeGenerator(vm)
 	gen.RegisterCursor(tableName, cursorNum)
-
-	// Register table info for column resolution
 	tableInfo := buildTableInfo(tableName, table)
 	gen.RegisterTable(tableInfo)
 
-	// Set up args for parameter binding
+	// Setup args
 	argValues := make([]interface{}, len(args))
 	for i, a := range args {
 		argValues[i] = a.Value
 	}
 	gen.SetArgs(argValues)
 
-	// Build result column name list from expanded columns
 	vm.ResultCols = colNames
 
-	if hasOrderBy {
-		return s.compileSelectWithOrderBy(vm, stmt, table, gen, numCols)
-	}
+	return gen, cursorNum
+}
 
-	// No ORDER BY - original simple implementation
-	// Emit scan preamble.
+// determineCursorNum determines which cursor to use for a table.
+func (s *Stmt) determineCursorNum(table *schema.Table, vm *vdbe.VDBE) int {
+	if table.Temp {
+		// Ephemeral tables use cursor stored in RootPage
+		cursorNum := int(table.RootPage)
+		vm.AllocCursors(cursorNum + 1)
+		return cursorNum
+	}
+	// Regular tables use cursor 0
+	vm.AllocCursors(1)
+	return 0
+}
+
+// emitSimpleSelectScan emits bytecode for a simple table scan.
+func (s *Stmt) emitSimpleSelectScan(vm *vdbe.VDBE, stmt *parser.SelectStmt,
+	table *schema.Table, expandedCols []parser.ResultColumn, numCols int,
+	cursorNum int, gen *expr.CodeGenerator) (*vdbe.VDBE, error) {
+
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 
-	// Open cursor if it's a regular table (ephemeral tables are already open)
+	// Open cursor for regular tables
 	if !table.Temp {
 		vm.AddOp(vdbe.OpOpenRead, cursorNum, int(table.RootPage), len(table.Columns))
 	}
 
 	rewindAddr := vm.AddOp(vdbe.OpRewind, cursorNum, 0, 0)
 
-	// Handle WHERE clause if present
-	var skipAddr int
-	if stmt.Where != nil {
-		// Generate code for WHERE expression
-		whereReg, err := gen.GenerateExpr(stmt.Where)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile WHERE clause: %w", err)
-		}
-		// Skip this row if WHERE condition is false
-		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
-	}
+	// WHERE clause
+	skipAddr := s.emitSimpleSelectWhere(vm, stmt, gen)
 
-	// Emit one column-read op per SELECT column (using expanded columns).
+	// SELECT columns
 	for i, col := range expandedCols {
 		if err := emitSelectColumnOp(vm, table, col, i, gen); err != nil {
 			return nil, err
 		}
 	}
 
-	// Emit scan tail.
+	// Output row
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
 
-	// Fix up WHERE skip address to point to Next
+	// Fix WHERE skip
 	if stmt.Where != nil {
 		vm.Program[skipAddr].P2 = vm.NumOps()
 	}
 
+	// Loop
 	vm.AddOp(vdbe.OpNext, cursorNum, rewindAddr+1, 0)
 
-	// Only close cursor if it's a regular table (don't close ephemeral cursors yet)
+	// Close regular tables
 	if !table.Temp {
 		vm.AddOp(vdbe.OpClose, cursorNum, 0, 0)
 	}
 
+	// Halt
 	haltAddr := vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	vm.Program[rewindAddr].P2 = haltAddr
 
 	return vm, nil
+}
+
+// emitSimpleSelectWhere emits WHERE clause for simple SELECT.
+func (s *Stmt) emitSimpleSelectWhere(vm *vdbe.VDBE, stmt *parser.SelectStmt,
+	gen *expr.CodeGenerator) int {
+
+	if stmt.Where == nil {
+		return 0
+	}
+
+	whereReg, err := gen.GenerateExpr(stmt.Where)
+	if err != nil {
+		return 0
+	}
+
+	return vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
 }
 
 // compileSelectWithoutFrom handles SELECT statements without a FROM clause.
@@ -624,73 +743,105 @@ func (s *Stmt) resolveOrderByColumns(stmt *parser.SelectStmt, table *schema.Tabl
 	}
 
 	for i, orderTerm := range stmt.OrderBy {
-		colIdx := -1
-		var orderColName string
-
-		// Extract base expression (unwrap CollateExpr if present)
-		baseExpr := orderTerm.Expr
-		if collateExpr, ok := orderTerm.Expr.(*parser.CollateExpr); ok {
-			baseExpr = collateExpr.Expr
-			info.collations[i] = collateExpr.Collation
-		} else {
-			info.collations[i] = orderTerm.Collation
-		}
-
-		if ident, ok := baseExpr.(*parser.IdentExpr); ok {
-			orderColName = ident.Name
-
-			// Search by column name in SELECT columns
-			for j, selCol := range stmt.Columns {
-				if selCol.Alias == ident.Name {
-					colIdx = j
-					break
-				}
-				if selColIdent, ok := selCol.Expr.(*parser.IdentExpr); ok {
-					if selColIdent.Name == ident.Name {
-						colIdx = j
-						break
-					}
-				}
-			}
-
-			// If no explicit collation, look up from table schema
-			if info.collations[i] == "" && orderColName != "" {
-				for _, col := range table.Columns {
-					if col.Name == orderColName {
-						info.collations[i] = col.Collation
-						break
-					}
-				}
-			}
-		}
-
-		if colIdx < 0 && orderColName != "" {
-			// ORDER BY column is not in SELECT list - check if already added
-			for j, extraCol := range info.extraCols {
-				if extraCol == orderColName {
-					colIdx = numCols + j
-					break
-				}
-			}
-
-			// If still not found, add as a new extra column
-			if colIdx < 0 {
-				colIdx = numCols + len(info.extraCols)
-				info.extraCols = append(info.extraCols, orderColName)
-				info.extraColRegs = append(info.extraColRegs, gen.AllocReg())
-			}
-		}
-
-		if colIdx < 0 {
-			colIdx = 0 // Default to first column
-		}
-
-		info.keyCols[i] = colIdx
-		info.desc[i] = !orderTerm.Asc
+		s.resolveOrderByTerm(orderTerm, i, stmt, table, numCols, gen, info)
 	}
 
 	info.sorterCols = numCols + len(info.extraCols)
 	return info
+}
+
+// resolveOrderByTerm resolves a single ORDER BY term.
+func (s *Stmt) resolveOrderByTerm(orderTerm parser.OrderingTerm, termIdx int,
+	stmt *parser.SelectStmt, table *schema.Table, numCols int,
+	gen *expr.CodeGenerator, info *orderByColumnInfo) {
+
+	// Extract base expression and collation
+	baseExpr, collation := s.extractOrderByExpression(orderTerm, termIdx, info)
+
+	// Try to find column in SELECT list
+	orderColName, colIdx := s.findOrderByColumnInSelect(baseExpr, stmt)
+
+	// Look up collation from schema if not explicitly specified
+	if collation == "" && orderColName != "" {
+		collation = s.findCollationInSchema(orderColName, table)
+	}
+	info.collations[termIdx] = collation
+
+	// Handle column not in SELECT list
+	if colIdx < 0 && orderColName != "" {
+		colIdx = s.addExtraOrderByColumn(orderColName, numCols, gen, info)
+	}
+
+	// Default to first column if not found
+	if colIdx < 0 {
+		colIdx = 0
+	}
+
+	info.keyCols[termIdx] = colIdx
+	info.desc[termIdx] = !orderTerm.Asc
+}
+
+// extractOrderByExpression extracts base expression and collation from ORDER BY term.
+func (s *Stmt) extractOrderByExpression(orderTerm parser.OrderingTerm, termIdx int, info *orderByColumnInfo) (parser.Expression, string) {
+	baseExpr := orderTerm.Expr
+	collation := orderTerm.Collation
+
+	if collateExpr, ok := orderTerm.Expr.(*parser.CollateExpr); ok {
+		baseExpr = collateExpr.Expr
+		collation = collateExpr.Collation
+	}
+
+	return baseExpr, collation
+}
+
+// findOrderByColumnInSelect searches for ORDER BY column in SELECT columns.
+func (s *Stmt) findOrderByColumnInSelect(baseExpr parser.Expression, stmt *parser.SelectStmt) (string, int) {
+	ident, ok := baseExpr.(*parser.IdentExpr)
+	if !ok {
+		return "", -1
+	}
+
+	orderColName := ident.Name
+
+	// Search by alias or column name
+	for j, selCol := range stmt.Columns {
+		if selCol.Alias == orderColName {
+			return orderColName, j
+		}
+		if selColIdent, ok := selCol.Expr.(*parser.IdentExpr); ok {
+			if selColIdent.Name == orderColName {
+				return orderColName, j
+			}
+		}
+	}
+
+	return orderColName, -1
+}
+
+// findCollationInSchema looks up collation from table schema.
+func (s *Stmt) findCollationInSchema(colName string, table *schema.Table) string {
+	for _, col := range table.Columns {
+		if col.Name == colName {
+			return col.Collation
+		}
+	}
+	return ""
+}
+
+// addExtraOrderByColumn adds an extra column for ORDER BY that's not in SELECT.
+func (s *Stmt) addExtraOrderByColumn(orderColName string, numCols int, gen *expr.CodeGenerator, info *orderByColumnInfo) int {
+	// Check if already added
+	for j, extraCol := range info.extraCols {
+		if extraCol == orderColName {
+			return numCols + j
+		}
+	}
+
+	// Add new extra column
+	colIdx := numCols + len(info.extraCols)
+	info.extraCols = append(info.extraCols, orderColName)
+	info.extraColRegs = append(info.extraColRegs, gen.AllocReg())
+	return colIdx
 }
 
 // compileSelectWithOrderBy handles SELECT with ORDER BY clause using a sorter.
@@ -1051,28 +1202,52 @@ func (s *Stmt) initializeAggregateAccumulators(vm *vdbe.VDBE, stmt *parser.Selec
 func (s *Stmt) compileSelectWithAggregates(vm *vdbe.VDBE, stmt *parser.SelectStmt, tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	numCols := len(stmt.Columns)
 
-	// Allocate extra registers for accumulators
+	// Setup VDBE and code generator
+	gen := s.setupAggregateVDBE(vm, stmt, tableName, table, numCols)
+
+	// Initialize accumulator registers
+	accRegs, avgCountRegs := s.initializeAggregateAccumulators(vm, stmt, gen)
+
+	// Setup args for WHERE clause
+	s.setupAggregateArgs(gen, args)
+
+	// Emit scan loop that updates accumulators
+	rewindAddr := s.emitAggregateScanLoop(vm, stmt, table, accRegs, avgCountRegs, gen)
+
+	// Emit aggregate output
+	afterScanAddr := s.emitAggregateOutput(vm, stmt, accRegs, avgCountRegs, numCols)
+
+	// Close and finalize
+	s.finalizeAggregate(vm, rewindAddr, afterScanAddr)
+
+	return vm, nil
+}
+
+// setupAggregateVDBE initializes VDBE and code generator for aggregate SELECT.
+func (s *Stmt) setupAggregateVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt,
+	tableName string, table *schema.Table, numCols int) *expr.CodeGenerator {
+
 	vm.AllocMemory(numCols + 20)
 	vm.AllocCursors(1)
 
-	// Create expression code generator
 	gen := expr.NewCodeGenerator(vm)
 	gen.RegisterCursor(tableName, 0)
 
-	// Build result column name list
+	// Build result column names
 	vm.ResultCols = make([]string, numCols)
 	for i, col := range stmt.Columns {
 		vm.ResultCols[i] = selectColName(col, i)
 	}
 
-	// Allocate and initialize accumulator registers
-	accRegs, avgCountRegs := s.initializeAggregateAccumulators(vm, stmt, gen)
-
-	// Register table info for WHERE clause column resolution
+	// Register table info
 	tableInfo := buildTableInfo(tableName, table)
 	gen.RegisterTable(tableInfo)
 
-	// Set up args for parameter binding in WHERE clause
+	return gen
+}
+
+// setupAggregateArgs sets up args for parameter binding.
+func (s *Stmt) setupAggregateArgs(gen *expr.CodeGenerator, args []driver.NamedValue) {
 	if len(args) > 0 {
 		argValues := make([]interface{}, len(args))
 		for i, a := range args {
@@ -1080,49 +1255,27 @@ func (s *Stmt) compileSelectWithAggregates(vm *vdbe.VDBE, stmt *parser.SelectStm
 		}
 		gen.SetArgs(argValues)
 	}
+}
+
+// emitAggregateScanLoop emits the scan loop that updates accumulators.
+func (s *Stmt) emitAggregateScanLoop(vm *vdbe.VDBE, stmt *parser.SelectStmt,
+	table *schema.Table, accRegs []int, avgCountRegs []int,
+	gen *expr.CodeGenerator) int {
 
 	// Emit scan preamble
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
 	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
 
-	// Scan loop: update accumulators
 	loopStart := vm.NumOps()
 
-	// Handle WHERE clause if present
-	var skipAddr int
-	if stmt.Where != nil {
-		// Generate code for WHERE expression
-		whereReg, err := gen.GenerateExpr(stmt.Where)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile WHERE clause: %w", err)
-		}
-		// Skip this row if WHERE condition is false
-		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
-	}
+	// Handle WHERE clause
+	skipAddr := s.emitAggregateWhereClause(vm, stmt, gen)
 
-	for i, col := range stmt.Columns {
-		fnExpr, isAgg := col.Expr.(*parser.FunctionExpr)
-		if !isAgg || !s.isAggregateExpr(col.Expr) {
-			continue
-		}
+	// Update accumulators for each aggregate
+	s.emitAggregateUpdates(vm, stmt, table, accRegs, avgCountRegs, gen)
 
-		// Update accumulator based on function type
-		switch fnExpr.Name {
-		case "COUNT":
-			s.emitCountUpdate(vm, fnExpr, accRegs[i])
-		case "SUM", "TOTAL":
-			s.emitSumUpdate(vm, fnExpr, table, accRegs[i], gen)
-		case "AVG":
-			s.emitAvgUpdate(vm, fnExpr, table, accRegs[i], avgCountRegs[i], gen)
-		case "MIN":
-			s.emitMinUpdate(vm, fnExpr, table, accRegs[i], gen)
-		case "MAX":
-			s.emitMaxUpdate(vm, fnExpr, table, accRegs[i], gen)
-		}
-	}
-
-	// Fix up WHERE skip address to point to Next
+	// Fix WHERE skip address
 	if stmt.Where != nil {
 		vm.Program[skipAddr].P2 = vm.NumOps()
 	}
@@ -1130,39 +1283,88 @@ func (s *Stmt) compileSelectWithAggregates(vm *vdbe.VDBE, stmt *parser.SelectStm
 	// Continue scan
 	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
 
-	// After scan completes (rewind jumps here when no more rows)
-	// We need to output aggregate results even if there were no rows
+	return rewindAddr
+}
+
+// emitAggregateWhereClause emits WHERE clause for aggregate SELECT.
+func (s *Stmt) emitAggregateWhereClause(vm *vdbe.VDBE, stmt *parser.SelectStmt,
+	gen *expr.CodeGenerator) int {
+
+	if stmt.Where == nil {
+		return 0
+	}
+
+	whereReg, err := gen.GenerateExpr(stmt.Where)
+	if err != nil {
+		return 0
+	}
+
+	return vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+}
+
+// emitAggregateUpdates emits accumulator updates for all aggregate functions.
+func (s *Stmt) emitAggregateUpdates(vm *vdbe.VDBE, stmt *parser.SelectStmt,
+	table *schema.Table, accRegs []int, avgCountRegs []int,
+	gen *expr.CodeGenerator) {
+
+	for i, col := range stmt.Columns {
+		fnExpr, isAgg := col.Expr.(*parser.FunctionExpr)
+		if !isAgg || !s.isAggregateExpr(col.Expr) {
+			continue
+		}
+
+		s.emitSingleAggregateUpdate(vm, fnExpr, table, accRegs[i], avgCountRegs[i], gen)
+	}
+}
+
+// emitSingleAggregateUpdate emits update for a single aggregate function.
+func (s *Stmt) emitSingleAggregateUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr,
+	table *schema.Table, accReg int, avgCountReg int, gen *expr.CodeGenerator) {
+
+	switch fnExpr.Name {
+	case "COUNT":
+		s.emitCountUpdate(vm, fnExpr, accReg)
+	case "SUM", "TOTAL":
+		s.emitSumUpdate(vm, fnExpr, table, accReg, gen)
+	case "AVG":
+		s.emitAvgUpdate(vm, fnExpr, table, accReg, avgCountReg, gen)
+	case "MIN":
+		s.emitMinUpdate(vm, fnExpr, table, accReg, gen)
+	case "MAX":
+		s.emitMaxUpdate(vm, fnExpr, table, accReg, gen)
+	}
+}
+
+// emitAggregateOutput emits code to output aggregate results.
+func (s *Stmt) emitAggregateOutput(vm *vdbe.VDBE, stmt *parser.SelectStmt,
+	accRegs []int, avgCountRegs []int, numCols int) int {
+
 	afterScanAddr := vm.NumOps()
 
-	// Finalize aggregates and copy to result registers
+	// Finalize and copy aggregates to result registers
 	for i, col := range stmt.Columns {
 		if s.isAggregateExpr(col.Expr) {
 			fnExpr := col.Expr.(*parser.FunctionExpr)
 			if fnExpr.Name == "AVG" {
-				// AVG = sum / count (result goes in result register i)
-				// If sum is NULL (no rows), result is NULL
-				// Otherwise divide sum by count
 				vm.AddOp(vdbe.OpDivide, accRegs[i], avgCountRegs[i], i)
 			} else {
 				vm.AddOp(vdbe.OpCopy, accRegs[i], i, 0)
 			}
 		} else {
-			// Non-aggregate column in aggregate query (should be constant or error)
-			vm.AddOp(vdbe.OpNull, 0, i, 0) // P2=destination register, P3=0 for single register
+			// Non-aggregate column (should be constant or error)
+			vm.AddOp(vdbe.OpNull, 0, i, 0)
 		}
 	}
 
-	// Output the single result row (always output for aggregates, even with 0 input rows)
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+	return afterScanAddr
+}
 
-	// Close and halt
+// finalizeAggregate emits close and halt instructions.
+func (s *Stmt) finalizeAggregate(vm *vdbe.VDBE, rewindAddr int, afterScanAddr int) {
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	// Fix up the rewind jump to go to the aggregate output code (not halt)
 	vm.Program[rewindAddr].P2 = afterScanAddr
-
-	return vm, nil
 }
 
 // stmtTableInfo holds information about a table in a query.
@@ -1555,20 +1757,45 @@ func (s *Stmt) compileUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt, args []driv
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
 
-	// Build map of columns being updated
-	updateMap := make(map[string]parser.Expression)
-	updatedColumns := make([]string, 0, len(stmt.Sets))
-	for _, assign := range stmt.Sets {
-		updateMap[assign.Column] = assign.Value
-		updatedColumns = append(updatedColumns, assign.Column)
-	}
+	// Build update map and column list
+	updateMap, updatedColumns := s.buildUpdateMap(stmt)
 
 	// Execute BEFORE UPDATE triggers
 	if err := s.executeBeforeUpdateTriggers(stmt, table, updatedColumns); err != nil {
 		return nil, fmt.Errorf("BEFORE UPDATE trigger failed: %w", err)
 	}
 
-	// Count non-rowid columns for record creation
+	// Setup VDBE and code generator
+	gen, numRecordCols := s.setupUpdateVDBE(vm, table, stmt)
+
+	// Emit update loop
+	rewindAddr := s.emitUpdateLoop(vm, stmt, table, updateMap, numRecordCols, gen, args)
+
+	// Execute AFTER UPDATE triggers
+	if err := s.executeAfterUpdateTriggers(stmt, table, updatedColumns); err != nil {
+		return nil, fmt.Errorf("AFTER UPDATE trigger failed: %w", err)
+	}
+
+	// Close and finalize
+	s.finalizeUpdate(vm, rewindAddr)
+
+	return vm, nil
+}
+
+// buildUpdateMap builds the update map and column list from UPDATE statement.
+func (s *Stmt) buildUpdateMap(stmt *parser.UpdateStmt) (map[string]parser.Expression, []string) {
+	updateMap := make(map[string]parser.Expression)
+	updatedColumns := make([]string, 0, len(stmt.Sets))
+	for _, assign := range stmt.Sets {
+		updateMap[assign.Column] = assign.Value
+		updatedColumns = append(updatedColumns, assign.Column)
+	}
+	return updateMap, updatedColumns
+}
+
+// setupUpdateVDBE initializes VDBE and code generator for UPDATE.
+func (s *Stmt) setupUpdateVDBE(vm *vdbe.VDBE, table *schema.Table, stmt *parser.UpdateStmt) (*expr.CodeGenerator, int) {
+	// Count non-rowid columns
 	numRecordCols := 0
 	for _, col := range table.Columns {
 		if !schemaColIsRowid(col) {
@@ -1576,123 +1803,131 @@ func (s *Stmt) compileUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt, args []driv
 		}
 	}
 
-	// Allocate sufficient memory and cursors
+	// Allocate resources
 	vm.AllocMemory(numRecordCols + 20)
 	vm.AllocCursors(1)
 
 	// Initialize program
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
-	// Open table for writing (cursor 0)
 	vm.AddOp(vdbe.OpOpenWrite, 0, int(table.RootPage), len(table.Columns))
 
-	// Start iteration from beginning
-	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
-
-	// Create code generator for expression compilation
+	// Create and configure code generator
 	gen := expr.NewCodeGenerator(vm)
 	gen.RegisterCursor(stmt.Table, 0)
-
-	// Register table info for column resolution
 	tableInfo := buildTableInfo(stmt.Table, table)
 	gen.RegisterTable(tableInfo)
 
-	// Set up args for parameter binding
-	// Count params in SET expressions first to offset WHERE params correctly
+	return gen, numRecordCols
+}
+
+// emitUpdateLoop generates the main UPDATE loop bytecode.
+func (s *Stmt) emitUpdateLoop(vm *vdbe.VDBE, stmt *parser.UpdateStmt, table *schema.Table,
+	updateMap map[string]parser.Expression, numRecordCols int, gen *expr.CodeGenerator,
+	args []driver.NamedValue) int {
+
+	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+
+	// Prepare args
 	setParamCount := countParams(stmt.Sets)
 	argValues := make([]interface{}, len(args))
 	for i, a := range args {
 		argValues[i] = a.Value
 	}
 
-	// Allocate register for rowid
+	// Get rowid
 	rowidReg := gen.AllocReg()
 	vm.AddOp(vdbe.OpRowid, 0, rowidReg, 0)
 
-	// If WHERE clause exists, compile and evaluate it
-	// WHERE params come after SET params in the args list
-	var skipAddr int
-	if stmt.Where != nil {
-		// Set args with offset for WHERE clause (params start after SET params)
-		whereArgs := argValues[setParamCount:]
-		gen.SetArgs(whereArgs)
+	// Compile WHERE clause if present
+	skipAddr := s.emitUpdateWhereClause(vm, stmt, gen, argValues, setParamCount)
 
-		// Generate code for WHERE expression
-		whereReg, err := gen.GenerateExpr(stmt.Where)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile WHERE clause: %w", err)
-		}
-
-		// Skip update if WHERE condition is false (OpIfNot jumps when register is false/0)
-		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
-	}
-
-	// Reset args for SET clause (params start at index 0)
+	// Reset args for SET clause
 	gen.SetArgs(argValues)
 
-	// Load column values into registers for new record
-	// For each column in the table, either:
-	//   - Use the SET value if this column is being updated
-	//   - Load existing value from current row if not being updated
+	// Build updated record
+	recordStartReg := s.emitUpdateRecordBuild(vm, table, updateMap, numRecordCols, gen)
+
+	// Create record, delete old, insert new
+	s.emitUpdateRowReplacement(vm, recordStartReg, numRecordCols, rowidReg, gen)
+
+	// Fix WHERE skip target
+	if stmt.Where != nil {
+		vm.Program[skipAddr].P2 = vm.NumOps()
+	}
+
+	// Loop to next row
+	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
+
+	return rewindAddr
+}
+
+// emitUpdateWhereClause compiles WHERE clause for UPDATE.
+func (s *Stmt) emitUpdateWhereClause(vm *vdbe.VDBE, stmt *parser.UpdateStmt,
+	gen *expr.CodeGenerator, argValues []interface{}, setParamCount int) int {
+
+	if stmt.Where == nil {
+		return 0
+	}
+
+	// Set args with offset for WHERE clause
+	whereArgs := argValues[setParamCount:]
+	gen.SetArgs(whereArgs)
+
+	// Generate WHERE expression
+	whereReg, err := gen.GenerateExpr(stmt.Where)
+	if err != nil {
+		return 0
+	}
+
+	// Skip update if WHERE is false
+	return vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+}
+
+// emitUpdateRecordBuild builds the updated record in registers.
+func (s *Stmt) emitUpdateRecordBuild(vm *vdbe.VDBE, table *schema.Table,
+	updateMap map[string]parser.Expression, numRecordCols int,
+	gen *expr.CodeGenerator) int {
+
 	recordStartReg := gen.AllocRegs(numRecordCols)
 	reg := recordStartReg
+
 	for colIdx, col := range table.Columns {
 		if schemaColIsRowid(col) {
-			continue // rowid is handled separately
+			continue
 		}
 
 		if updateExpr, isUpdated := updateMap[col.Name]; isUpdated {
-			// This column is being updated - compile the new value expression
-			valReg, err := gen.GenerateExpr(updateExpr)
-			if err != nil {
-				return nil, fmt.Errorf("failed to compile SET expression for column %s: %w", col.Name, err)
-			}
-			// Copy the computed value to the record register
+			// Column is being updated
+			valReg, _ := gen.GenerateExpr(updateExpr)
 			vm.AddOp(vdbe.OpCopy, valReg, reg, 0)
 		} else {
-			// This column is NOT being updated - load existing value
+			// Column is not updated - load existing value
 			recordIdx := schemaRecordIdx(table.Columns, colIdx)
 			vm.AddOp(vdbe.OpColumn, 0, recordIdx, reg)
 		}
 		reg++
 	}
 
-	// Create new record from the column values
+	return recordStartReg
+}
+
+// emitUpdateRowReplacement emits bytecode to replace the row.
+func (s *Stmt) emitUpdateRowReplacement(vm *vdbe.VDBE, recordStartReg int,
+	numRecordCols int, rowidReg int, gen *expr.CodeGenerator) {
+
 	resultReg := gen.AllocReg()
 	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
-
-	// Delete old row
 	vm.AddOp(vdbe.OpDelete, 0, 0, 0)
 
-	// Insert new row with same rowid
-	// Set P4.I = 1 to indicate this is part of UPDATE (don't double-count in NumChanges)
 	insertAddr := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidReg)
-	vm.Program[insertAddr].P4.I = 1
+	vm.Program[insertAddr].P4.I = 1 // Don't double-count in NumChanges
+}
 
-	// Fix up the skip target if WHERE clause exists
-	if stmt.Where != nil {
-		// Point skip address to the Next instruction
-		vm.Program[skipAddr].P2 = vm.NumOps()
-	}
-
-	// Move to next row and loop back
-	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
-
-	// Execute AFTER UPDATE triggers
-	if err := s.executeAfterUpdateTriggers(stmt, table, updatedColumns); err != nil {
-		return nil, fmt.Errorf("AFTER UPDATE trigger failed: %w", err)
-	}
-
-	// Close table cursor
+// finalizeUpdate closes cursor and adds halt instruction.
+func (s *Stmt) finalizeUpdate(vm *vdbe.VDBE, rewindAddr int) {
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
-
-	// Halt execution
 	haltAddr := vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	// Fix up the rewind instruction to jump to halt when done
 	vm.Program[rewindAddr].P2 = haltAddr
-
-	return vm, nil
 }
 
 // compileDelete compiles a DELETE statement.
@@ -2129,91 +2364,101 @@ func (s *Stmt) compileSelectWithFromSubqueries(vm *vdbe.VDBE, stmt *parser.Selec
 // This handles cases like: SELECT columns FROM (subquery) [WHERE ...] [ORDER BY ...]
 func (s *Stmt) compileSingleFromSubquery(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	subquery := stmt.From.Tables[0].Subquery
-	_ = stmt.From.Tables[0].Alias // subqueryAlias - may be used in future
 
-	// Helper function to make a shallow copy of a SELECT statement
-	copySelectStmtShallow := func(stmt *parser.SelectStmt) *parser.SelectStmt {
-		if stmt == nil {
-			return nil
-		}
-		copy := *stmt
-		return &copy
+	// Special optimization: SELECT * with no WHERE clause
+	if s.isSimpleSelectStar(stmt) {
+		return s.compileSimpleSubquery(subquery, args)
 	}
 
-	// Helper function to check if SELECT is SELECT *
-	isSelectStar := func(stmt *parser.SelectStmt) bool {
-		if len(stmt.Columns) == 1 {
-			col := stmt.Columns[0]
-			if col.Star && col.Table == "" {
-				return true
-			}
-		}
-		return false
+	// Complex case: specific columns or WHERE clause
+	return s.compileComplexSubquery(stmt, subquery, args)
+}
+
+// isSimpleSelectStar checks if statement is SELECT * with no WHERE.
+func (s *Stmt) isSimpleSelectStar(stmt *parser.SelectStmt) bool {
+	return isSelectStar(stmt) && stmt.Where == nil
+}
+
+// compileSimpleSubquery compiles a simple SELECT * subquery.
+func (s *Stmt) compileSimpleSubquery(subquery *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	subVM, err := s.compileSelect(s.newVDBE(), subquery, args)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile FROM subquery: %w", err)
 	}
+	// TODO: Handle ORDER BY from outer query
+	return subVM, nil
+}
 
-	// Special optimization: if outer query is just SELECT * (or all columns from subquery)
-	// and has no WHERE clause, just compile the subquery directly with any ORDER BY from outer
-	if isSelectStar(stmt) && stmt.Where == nil {
-		// Compile the subquery
-		subVM, err := s.compileSelect(s.newVDBE(), subquery, args)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile FROM subquery: %w", err)
-		}
-
-		// If the outer query has ORDER BY, we need to apply it
-		// For now, just return the subquery as-is
-		// TODO: Handle ORDER BY from outer query
-		return subVM, nil
-	}
-
-	// For more complex cases (specific columns, WHERE clause, etc.),
-	// we need to map column references in the outer query to subquery columns
-	// This requires knowing the subquery's result columns
-
-	// Compile the subquery to get its structure
+// compileComplexSubquery compiles a subquery with column selection or WHERE clause.
+func (s *Stmt) compileComplexSubquery(stmt *parser.SelectStmt, subquery *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	// Compile subquery to get its structure
 	subVM, err := s.compileSelect(s.newVDBE(), subquery, args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile FROM subquery: %w", err)
 	}
 
-	// Get the subquery's result columns
-	subqueryColumns := subVM.ResultCols
+	// Map outer columns to subquery columns
+	newColumns, err := s.mapSubqueryColumns(stmt, subquery, subVM.ResultCols)
+	if err != nil {
+		return nil, err
+	}
 
-	// Build a new SELECT that selects only the requested columns from the subquery
-	// Create a modified subquery that only selects the requested columns
+	// Recompile with mapped columns
 	modifiedSubquery := copySelectStmtShallow(subquery)
+	modifiedSubquery.Columns = newColumns
+	return s.compileSelect(s.newVDBE(), modifiedSubquery, args)
+}
 
-	// Build column mapping: which columns from the subquery do we need?
+// mapSubqueryColumns maps outer query columns to subquery columns.
+func (s *Stmt) mapSubqueryColumns(stmt *parser.SelectStmt, subquery *parser.SelectStmt, subqueryColumns []string) ([]parser.ResultColumn, error) {
 	var newColumns []parser.ResultColumn
+
 	for _, outerCol := range stmt.Columns {
 		if outerCol.Star {
 			// SELECT * - use all subquery columns
-			newColumns = subquery.Columns
-			break
+			return subquery.Columns, nil
 		}
 
 		if ident, ok := outerCol.Expr.(*parser.IdentExpr); ok {
-			// Find this column in the subquery
-			found := false
-			for i, subCol := range subqueryColumns {
-				if subCol == ident.Name {
-					// Include this column from the subquery
-					newColumns = append(newColumns, subquery.Columns[i])
-					found = true
-					break
-				}
+			col, err := s.findSubqueryColumn(ident.Name, subquery, subqueryColumns)
+			if err != nil {
+				return nil, err
 			}
-			if !found {
-				return nil, fmt.Errorf("column not found: %s", ident.Name)
-			}
+			newColumns = append(newColumns, col)
 		}
 	}
 
-	// Update the subquery to only select the requested columns
-	modifiedSubquery.Columns = newColumns
+	return newColumns, nil
+}
 
-	// Recompile the modified subquery
-	return s.compileSelect(s.newVDBE(), modifiedSubquery, args)
+// findSubqueryColumn finds a column in the subquery by name.
+func (s *Stmt) findSubqueryColumn(name string, subquery *parser.SelectStmt, subqueryColumns []string) (parser.ResultColumn, error) {
+	for i, subCol := range subqueryColumns {
+		if subCol == name {
+			return subquery.Columns[i], nil
+		}
+	}
+	return parser.ResultColumn{}, fmt.Errorf("column not found: %s", name)
+}
+
+// copySelectStmtShallow makes a shallow copy of a SELECT statement.
+func copySelectStmtShallow(stmt *parser.SelectStmt) *parser.SelectStmt {
+	if stmt == nil {
+		return nil
+	}
+	copy := *stmt
+	return &copy
+}
+
+// isSelectStar checks if SELECT is SELECT *.
+func isSelectStar(stmt *parser.SelectStmt) bool {
+	if len(stmt.Columns) == 1 {
+		col := stmt.Columns[0]
+		if col.Star && col.Table == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // countFromSubqueries counts the number of subqueries in FROM clause.

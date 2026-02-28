@@ -51,99 +51,167 @@ func (qp *QueryParser) Parse(queryStr string) (*Query, error) {
 	}
 
 	// Check for phrase query (quoted)
-	if strings.HasPrefix(queryStr, "\"") && strings.HasSuffix(queryStr, "\"") {
-		phrase := strings.Trim(queryStr, "\"")
-		tokens := qp.tokenizer.Tokenize(phrase)
-		terms := make([]string, len(tokens))
-		for i, token := range tokens {
-			terms[i] = token.Text
-		}
-		return &Query{
-			Type:   QueryPhrase,
-			Terms:  terms,
-			Column: -1,
-		}, nil
+	if query, ok := qp.tryParsePhraseQuery(queryStr); ok {
+		return query, nil
 	}
 
 	// Check for boolean operators
-	if strings.Contains(queryStr, " AND ") {
-		parts := strings.Split(queryStr, " AND ")
-		children := make([]*Query, len(parts))
-		for i, part := range parts {
-			child, err := qp.Parse(strings.TrimSpace(part))
-			if err != nil {
-				return nil, err
-			}
-			children[i] = child
-		}
-		return &Query{
-			Type:     QueryAND,
-			Children: children,
-			Column:   -1,
-		}, nil
+	if query, err := qp.tryParseANDQuery(queryStr); query != nil || err != nil {
+		return query, err
 	}
 
-	if strings.Contains(queryStr, " OR ") {
-		parts := strings.Split(queryStr, " OR ")
-		children := make([]*Query, len(parts))
-		for i, part := range parts {
-			child, err := qp.Parse(strings.TrimSpace(part))
-			if err != nil {
-				return nil, err
-			}
-			children[i] = child
-		}
-		return &Query{
-			Type:     QueryOR,
-			Children: children,
-			Column:   -1,
-		}, nil
+	if query, err := qp.tryParseORQuery(queryStr); query != nil || err != nil {
+		return query, err
 	}
 
-	if strings.Contains(queryStr, " NOT ") {
-		parts := strings.SplitN(queryStr, " NOT ", 2)
-		if len(parts) == 2 {
-			left, err := qp.Parse(strings.TrimSpace(parts[0]))
-			if err != nil {
-				return nil, err
-			}
-			right, err := qp.Parse(strings.TrimSpace(parts[1]))
-			if err != nil {
-				return nil, err
-			}
-			return &Query{
-				Type:     QueryNOT,
-				Children: []*Query{left, right},
-				Column:   -1,
-			}, nil
-		}
+	if query, err := qp.tryParseNOTQuery(queryStr); query != nil || err != nil {
+		return query, err
 	}
 
-	// Check for column filter (column:term)
-	column := -1
-	if strings.Contains(queryStr, ":") {
-		parts := strings.SplitN(queryStr, ":", 2)
-		if len(parts) == 2 {
-			// Note: In a real implementation, we'd resolve column name to index
-			// For now, we just mark that a column filter was specified
-			queryStr = strings.TrimSpace(parts[1])
-		}
-	}
+	// Parse column filter if present
+	column, queryStr := qp.parseColumnFilter(queryStr)
 
 	// Check for prefix query
-	if strings.HasSuffix(queryStr, "*") {
-		term := strings.TrimSuffix(queryStr, "*")
-		tokens := qp.tokenizer.Tokenize(term)
-		if len(tokens) > 0 {
-			return &Query{
-				Type:   QueryPrefix,
-				Terms:  []string{tokens[0].Text},
-				Column: column,
-			}, nil
-		}
+	if query, ok := qp.tryParsePrefixQuery(queryStr, column); ok {
+		return query, nil
 	}
 
 	// Simple term query
+	return qp.parseSimpleQuery(queryStr, column)
+}
+
+// tryParsePhraseQuery attempts to parse a phrase query (quoted string).
+func (qp *QueryParser) tryParsePhraseQuery(queryStr string) (*Query, bool) {
+	if !strings.HasPrefix(queryStr, "\"") || !strings.HasSuffix(queryStr, "\"") {
+		return nil, false
+	}
+
+	phrase := strings.Trim(queryStr, "\"")
+	tokens := qp.tokenizer.Tokenize(phrase)
+	terms := make([]string, len(tokens))
+	for i, token := range tokens {
+		terms[i] = token.Text
+	}
+
+	return &Query{
+		Type:   QueryPhrase,
+		Terms:  terms,
+		Column: -1,
+	}, true
+}
+
+// tryParseANDQuery attempts to parse an AND boolean query.
+func (qp *QueryParser) tryParseANDQuery(queryStr string) (*Query, error) {
+	if !strings.Contains(queryStr, " AND ") {
+		return nil, nil
+	}
+
+	parts := strings.Split(queryStr, " AND ")
+	children := make([]*Query, len(parts))
+	for i, part := range parts {
+		child, err := qp.Parse(strings.TrimSpace(part))
+		if err != nil {
+			return nil, err
+		}
+		children[i] = child
+	}
+
+	return &Query{
+		Type:     QueryAND,
+		Children: children,
+		Column:   -1,
+	}, nil
+}
+
+// tryParseORQuery attempts to parse an OR boolean query.
+func (qp *QueryParser) tryParseORQuery(queryStr string) (*Query, error) {
+	if !strings.Contains(queryStr, " OR ") {
+		return nil, nil
+	}
+
+	parts := strings.Split(queryStr, " OR ")
+	children := make([]*Query, len(parts))
+	for i, part := range parts {
+		child, err := qp.Parse(strings.TrimSpace(part))
+		if err != nil {
+			return nil, err
+		}
+		children[i] = child
+	}
+
+	return &Query{
+		Type:     QueryOR,
+		Children: children,
+		Column:   -1,
+	}, nil
+}
+
+// tryParseNOTQuery attempts to parse a NOT boolean query.
+func (qp *QueryParser) tryParseNOTQuery(queryStr string) (*Query, error) {
+	if !strings.Contains(queryStr, " NOT ") {
+		return nil, nil
+	}
+
+	parts := strings.SplitN(queryStr, " NOT ", 2)
+	if len(parts) != 2 {
+		return nil, nil
+	}
+
+	left, err := qp.Parse(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return nil, err
+	}
+
+	right, err := qp.Parse(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return nil, err
+	}
+
+	return &Query{
+		Type:     QueryNOT,
+		Children: []*Query{left, right},
+		Column:   -1,
+	}, nil
+}
+
+// parseColumnFilter extracts column filter from query string.
+// Returns the column index and the remaining query string.
+func (qp *QueryParser) parseColumnFilter(queryStr string) (int, string) {
+	if !strings.Contains(queryStr, ":") {
+		return -1, queryStr
+	}
+
+	parts := strings.SplitN(queryStr, ":", 2)
+	if len(parts) != 2 {
+		return -1, queryStr
+	}
+
+	// Note: In a real implementation, we'd resolve column name to index
+	// For now, we just mark that a column filter was specified
+	return -1, strings.TrimSpace(parts[1])
+}
+
+// tryParsePrefixQuery attempts to parse a prefix query (term*).
+func (qp *QueryParser) tryParsePrefixQuery(queryStr string, column int) (*Query, bool) {
+	if !strings.HasSuffix(queryStr, "*") {
+		return nil, false
+	}
+
+	term := strings.TrimSuffix(queryStr, "*")
+	tokens := qp.tokenizer.Tokenize(term)
+	if len(tokens) == 0 {
+		return nil, false
+	}
+
+	return &Query{
+		Type:   QueryPrefix,
+		Terms:  []string{tokens[0].Text},
+		Column: column,
+	}, true
+}
+
+// parseSimpleQuery parses a simple term query.
+func (qp *QueryParser) parseSimpleQuery(queryStr string, column int) (*Query, error) {
 	tokens := qp.tokenizer.Tokenize(queryStr)
 	terms := make([]string, len(tokens))
 	for i, token := range tokens {

@@ -174,23 +174,7 @@ func (t *RTree) Update(argc int, argv []interface{}) (int64, error) {
 
 	// DELETE: argc=1, argv[0]=rowid
 	if argc == 1 {
-		id, ok := argv[0].(int64)
-		if !ok {
-			return 0, fmt.Errorf("invalid ID for DELETE")
-		}
-
-		entry, exists := t.entries[id]
-		if !exists {
-			return 0, fmt.Errorf("entry with ID %d not found", id)
-		}
-
-		// Remove from R-Tree
-		if t.root != nil {
-			t.root = t.root.Remove(entry)
-		}
-
-		delete(t.entries, id)
-		return id, nil
+		return t.handleDelete(argv)
 	}
 
 	// INSERT or UPDATE
@@ -198,99 +182,59 @@ func (t *RTree) Update(argc int, argv []interface{}) (int64, error) {
 		return 0, fmt.Errorf("invalid number of arguments for UPDATE/INSERT")
 	}
 
+	return t.handleInsertOrUpdate(argc, argv)
+}
+
+// handleDelete handles DELETE operations.
+func (t *RTree) handleDelete(argv []interface{}) (int64, error) {
+	id, ok := argv[0].(int64)
+	if !ok {
+		return 0, fmt.Errorf("invalid ID for DELETE")
+	}
+
+	entry, exists := t.entries[id]
+	if !exists {
+		return 0, fmt.Errorf("entry with ID %d not found", id)
+	}
+
+	// Remove from R-Tree
+	if t.root != nil {
+		t.root = t.root.Remove(entry)
+	}
+
+	delete(t.entries, id)
+	return id, nil
+}
+
+// handleInsertOrUpdate handles INSERT and UPDATE operations.
+func (t *RTree) handleInsertOrUpdate(argc int, argv []interface{}) (int64, error) {
 	oldID := argv[0]
 	newID := argv[1]
 
 	// Check if this is an UPDATE
-	isUpdate := false
-	var oldEntryID int64
-	if oldID != nil {
-		if id, ok := oldID.(int64); ok && id != 0 {
-			isUpdate = true
-			oldEntryID = id
-		}
-	}
+	isUpdate, oldEntryID := t.checkIfUpdate(oldID)
 
 	// Determine the entry ID
-	var entryID int64
-	if newID == nil || newID == int64(0) {
-		// Auto-generate ID
-		entryID = t.nextID
-		t.nextID++
-	} else {
-		id, ok := newID.(int64)
-		if !ok {
-			return 0, fmt.Errorf("invalid ID type")
-		}
-		entryID = id
-
-		// Update nextID if needed
-		if entryID >= t.nextID {
-			t.nextID = entryID + 1
-		}
+	entryID, err := t.determineEntryID(newID)
+	if err != nil {
+		return 0, err
 	}
 
 	// If this is an update, remove the old entry
 	if isUpdate {
-		if oldEntry, exists := t.entries[oldEntryID]; exists {
-			if t.root != nil {
-				t.root = t.root.Remove(oldEntry)
-			}
-			delete(t.entries, oldEntryID)
-		}
-	}
-
-	// Extract coordinate values
-	// Expected: argv[2] onwards are the coordinate pairs
-	expectedCoords := t.dimensions * 2
-	if argc-2 < expectedCoords {
-		return 0, fmt.Errorf("not enough coordinate values, expected %d", expectedCoords)
+		t.removeOldEntry(oldEntryID)
 	}
 
 	// Parse coordinates
-	coords := make([]float64, expectedCoords)
-	for i := 0; i < expectedCoords; i++ {
-		val := argv[i+2]
-		var coord float64
-
-		switch v := val.(type) {
-		case int64:
-			coord = float64(v)
-		case float64:
-			coord = v
-		case string:
-			var err error
-			coord, err = strconv.ParseFloat(v, 64)
-			if err != nil {
-				return 0, fmt.Errorf("invalid coordinate value at position %d: %v", i, err)
-			}
-		default:
-			return 0, fmt.Errorf("unsupported coordinate type at position %d", i)
-		}
-
-		coords[i] = coord
+	coords, err := t.parseCoordinates(argc, argv)
+	if err != nil {
+		return 0, err
 	}
 
-	// Validate that min <= max for each dimension
-	for i := 0; i < t.dimensions; i++ {
-		minIdx := i * 2
-		maxIdx := i*2 + 1
-		if coords[minIdx] > coords[maxIdx] {
-			return 0, fmt.Errorf("dimension %d: min (%f) > max (%f)", i, coords[minIdx], coords[maxIdx])
-		}
-	}
-
-	// Create bounding box
-	bbox := NewBoundingBox(t.dimensions)
-	for i := 0; i < t.dimensions; i++ {
-		bbox.Min[i] = coords[i*2]
-		bbox.Max[i] = coords[i*2+1]
-	}
-
-	// Create entry
-	entry := &Entry{
-		ID:   entryID,
-		BBox: bbox,
+	// Create and insert entry
+	entry, err := t.createEntry(entryID, coords)
+	if err != nil {
+		return 0, err
 	}
 
 	// Insert into R-Tree
@@ -303,6 +247,129 @@ func (t *RTree) Update(argc int, argv []interface{}) (int64, error) {
 	t.entries[entryID] = entry
 
 	return entryID, nil
+}
+
+// checkIfUpdate determines if the operation is an UPDATE.
+func (t *RTree) checkIfUpdate(oldID interface{}) (bool, int64) {
+	if oldID == nil {
+		return false, 0
+	}
+
+	if id, ok := oldID.(int64); ok && id != 0 {
+		return true, id
+	}
+
+	return false, 0
+}
+
+// determineEntryID determines the entry ID for the operation.
+func (t *RTree) determineEntryID(newID interface{}) (int64, error) {
+	if newID == nil || newID == int64(0) {
+		// Auto-generate ID
+		entryID := t.nextID
+		t.nextID++
+		return entryID, nil
+	}
+
+	id, ok := newID.(int64)
+	if !ok {
+		return 0, fmt.Errorf("invalid ID type")
+	}
+
+	// Update nextID if needed
+	if id >= t.nextID {
+		t.nextID = id + 1
+	}
+
+	return id, nil
+}
+
+// removeOldEntry removes an old entry during UPDATE.
+func (t *RTree) removeOldEntry(oldEntryID int64) {
+	if oldEntry, exists := t.entries[oldEntryID]; exists {
+		if t.root != nil {
+			t.root = t.root.Remove(oldEntry)
+		}
+		delete(t.entries, oldEntryID)
+	}
+}
+
+// parseCoordinates parses coordinate values from the argv array.
+func (t *RTree) parseCoordinates(argc int, argv []interface{}) ([]float64, error) {
+	expectedCoords := t.dimensions * 2
+	if argc-2 < expectedCoords {
+		return nil, fmt.Errorf("not enough coordinate values, expected %d", expectedCoords)
+	}
+
+	coords := make([]float64, expectedCoords)
+	for i := 0; i < expectedCoords; i++ {
+		coord, err := t.parseCoordinate(argv[i+2], i)
+		if err != nil {
+			return nil, err
+		}
+		coords[i] = coord
+	}
+
+	return coords, nil
+}
+
+// parseCoordinate parses a single coordinate value.
+func (t *RTree) parseCoordinate(val interface{}, position int) (float64, error) {
+	switch v := val.(type) {
+	case int64:
+		return float64(v), nil
+	case float64:
+		return v, nil
+	case string:
+		coord, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid coordinate value at position %d: %v", position, err)
+		}
+		return coord, nil
+	default:
+		return 0, fmt.Errorf("unsupported coordinate type at position %d", position)
+	}
+}
+
+// createEntry creates a new Entry with the given ID and coordinates.
+func (t *RTree) createEntry(entryID int64, coords []float64) (*Entry, error) {
+	// Validate that min <= max for each dimension
+	if err := t.validateCoordinates(coords); err != nil {
+		return nil, err
+	}
+
+	// Create bounding box
+	bbox := t.createBoundingBox(coords)
+
+	// Create entry
+	entry := &Entry{
+		ID:   entryID,
+		BBox: bbox,
+	}
+
+	return entry, nil
+}
+
+// validateCoordinates validates that min <= max for each dimension.
+func (t *RTree) validateCoordinates(coords []float64) error {
+	for i := 0; i < t.dimensions; i++ {
+		minIdx := i * 2
+		maxIdx := i*2 + 1
+		if coords[minIdx] > coords[maxIdx] {
+			return fmt.Errorf("dimension %d: min (%f) > max (%f)", i, coords[minIdx], coords[maxIdx])
+		}
+	}
+	return nil
+}
+
+// createBoundingBox creates a bounding box from coordinates.
+func (t *RTree) createBoundingBox(coords []float64) *BoundingBox {
+	bbox := NewBoundingBox(t.dimensions)
+	for i := 0; i < t.dimensions; i++ {
+		bbox.Min[i] = coords[i*2]
+		bbox.Max[i] = coords[i*2+1]
+	}
+	return bbox
 }
 
 // Destroy is called when the table is dropped.

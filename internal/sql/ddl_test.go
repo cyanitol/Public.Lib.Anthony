@@ -899,3 +899,111 @@ func TestConvertExpr(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerateCreateTriggerSQL(t *testing.T) {
+	tests := []struct {
+		name     string
+		stmt     *parser.CreateTriggerStmt
+		contains []string
+	}{
+		{
+			name: "basic BEFORE INSERT trigger",
+			stmt: &parser.CreateTriggerStmt{
+				Name:       "trigger_insert",
+				Table:      "users",
+				Timing:     parser.TriggerBefore,
+				Event:      parser.TriggerInsert,
+				ForEachRow: true,
+				Body: []parser.Statement{
+					&parser.SelectStmt{},
+				},
+			},
+			contains: []string{"CREATE TRIGGER", "trigger_insert", "BEFORE INSERT", "ON users", "FOR EACH ROW", "BEGIN", "END"},
+		},
+		{
+			name: "AFTER DELETE trigger with TEMP",
+			stmt: &parser.CreateTriggerStmt{
+				Name:       "trigger_delete",
+				Temp:       true,
+				Table:      "logs",
+				Timing:     parser.TriggerAfter,
+				Event:      parser.TriggerDelete,
+				ForEachRow: false,
+				Body: []parser.Statement{
+					&parser.SelectStmt{},
+				},
+			},
+			contains: []string{"CREATE TEMP TRIGGER", "trigger_delete", "AFTER DELETE", "ON logs", "BEGIN", "END"},
+		},
+		{
+			name: "UPDATE OF trigger",
+			stmt: &parser.CreateTriggerStmt{
+				Name:       "trigger_update",
+				Table:      "accounts",
+				Timing:     parser.TriggerBefore,
+				Event:      parser.TriggerUpdate,
+				UpdateOf:   []string{"balance", "status"},
+				ForEachRow: true,
+				Body: []parser.Statement{
+					&parser.SelectStmt{},
+				},
+			},
+			contains: []string{"CREATE TRIGGER", "trigger_update", "BEFORE UPDATE", "OF balance, status", "ON accounts", "FOR EACH ROW", "BEGIN", "END"},
+		},
+		{
+			name: "INSTEAD OF trigger",
+			stmt: &parser.CreateTriggerStmt{
+				Name:       "trigger_view",
+				Table:      "my_view",
+				Timing:     parser.TriggerInsteadOf,
+				Event:      parser.TriggerInsert,
+				ForEachRow: true,
+				Body: []parser.Statement{
+					&parser.SelectStmt{},
+				},
+			},
+			contains: []string{"CREATE TRIGGER", "trigger_view", "INSTEAD OF INSERT", "ON my_view", "FOR EACH ROW", "BEGIN", "END"},
+		},
+		{
+			name: "trigger with IF NOT EXISTS",
+			stmt: &parser.CreateTriggerStmt{
+				Name:        "trigger_safe",
+				IfNotExists: true,
+				Table:       "data",
+				Timing:      parser.TriggerAfter,
+				Event:       parser.TriggerInsert,
+				ForEachRow:  true,
+				Body: []parser.Statement{
+					&parser.SelectStmt{},
+				},
+			},
+			contains: []string{"CREATE TRIGGER", "IF NOT EXISTS", "trigger_safe", "AFTER INSERT", "ON data", "BEGIN", "END"},
+		},
+		{
+			name: "trigger with WHEN clause",
+			stmt: &parser.CreateTriggerStmt{
+				Name:       "trigger_conditional",
+				Table:      "orders",
+				Timing:     parser.TriggerBefore,
+				Event:      parser.TriggerUpdate,
+				ForEachRow: true,
+				When:       &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
+				Body: []parser.Statement{
+					&parser.SelectStmt{},
+				},
+			},
+			contains: []string{"CREATE TRIGGER", "trigger_conditional", "BEFORE UPDATE", "ON orders", "FOR EACH ROW", "WHEN", "BEGIN", "END"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sql := generateCreateTriggerSQL(tt.stmt)
+			for _, substr := range tt.contains {
+				if !strings.Contains(sql, substr) {
+					t.Errorf("Generated SQL does not contain %q:\n%s", substr, sql)
+				}
+			}
+		})
+	}
+}

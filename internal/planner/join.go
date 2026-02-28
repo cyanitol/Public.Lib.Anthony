@@ -10,8 +10,8 @@ type JoinAlgorithm int
 
 const (
 	JoinNestedLoop JoinAlgorithm = iota // Nested loop join (default)
-	JoinHash                             // Hash join
-	JoinMerge                            // Merge join (for sorted inputs)
+	JoinHash                            // Hash join
+	JoinMerge                           // Merge join (for sorted inputs)
 )
 
 // String returns the string representation of a join algorithm.
@@ -79,10 +79,11 @@ func NewJoinOptimizer(tables []*TableInfo, whereInfo *WhereInfo, costModel *Cost
 // The algorithm works as follows:
 // 1. Start with single-table access paths
 // 2. For each subset size k = 2..n:
-//    - For each subset S of size k:
-//      - For each split of S into S1 and S2:
-//        - Compute cost of joining best(S1) with best(S2)
-//        - Keep the best plan for S
+//   - For each subset S of size k:
+//   - For each split of S into S1 and S2:
+//   - Compute cost of joining best(S1) with best(S2)
+//   - Keep the best plan for S
+//
 // 3. Return the best plan for the full set of tables
 func (jo *JoinOptimizer) DynamicProgrammingJoinOrder() (*JoinOrder, error) {
 	nTables := len(jo.Tables)

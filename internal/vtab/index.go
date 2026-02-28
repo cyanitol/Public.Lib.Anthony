@@ -24,44 +24,32 @@ const (
 	ConstraintFunction   ConstraintOp = 150 // Function constraint (undocumented)
 )
 
+// constraintOpStrings is a lookup table for constraint operation string representations.
+var constraintOpStrings = map[ConstraintOp]string{
+	ConstraintEQ:        "=",
+	ConstraintGT:        ">",
+	ConstraintLE:        "<=",
+	ConstraintLT:        "<",
+	ConstraintGE:        ">=",
+	ConstraintMatch:     "MATCH",
+	ConstraintLike:      "LIKE",
+	ConstraintGlob:      "GLOB",
+	ConstraintRegexp:    "REGEXP",
+	ConstraintNE:        "!=",
+	ConstraintIsNot:     "IS NOT",
+	ConstraintIsNotNull: "IS NOT NULL",
+	ConstraintIsNull:    "IS NULL",
+	ConstraintIs:        "IS",
+	ConstraintLimit:     "LIMIT",
+	ConstraintOffset:    "OFFSET",
+}
+
 // String returns a string representation of the constraint operation.
 func (op ConstraintOp) String() string {
-	switch op {
-	case ConstraintEQ:
-		return "="
-	case ConstraintGT:
-		return ">"
-	case ConstraintLE:
-		return "<="
-	case ConstraintLT:
-		return "<"
-	case ConstraintGE:
-		return ">="
-	case ConstraintMatch:
-		return "MATCH"
-	case ConstraintLike:
-		return "LIKE"
-	case ConstraintGlob:
-		return "GLOB"
-	case ConstraintRegexp:
-		return "REGEXP"
-	case ConstraintNE:
-		return "!="
-	case ConstraintIsNot:
-		return "IS NOT"
-	case ConstraintIsNotNull:
-		return "IS NOT NULL"
-	case ConstraintIsNull:
-		return "IS NULL"
-	case ConstraintIs:
-		return "IS"
-	case ConstraintLimit:
-		return "LIMIT"
-	case ConstraintOffset:
-		return "OFFSET"
-	default:
-		return "UNKNOWN"
+	if str, ok := constraintOpStrings[op]; ok {
+		return str
 	}
+	return "UNKNOWN"
 }
 
 // IndexConstraint represents a single constraint from a WHERE clause.

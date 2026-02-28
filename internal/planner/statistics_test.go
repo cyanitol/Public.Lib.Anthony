@@ -93,11 +93,11 @@ func TestSaveStatistics(t *testing.T) {
 
 	// Add index statistics
 	stats.IndexStats["idx_name"] = &IndexStatistics{
-		IndexName:  "idx_name",
-		TableName:  "users",
-		Stat:       "1000 10",
-		RowCount:   1000,
-		AvgEq:      []int64{10},
+		IndexName: "idx_name",
+		TableName: "users",
+		Stat:      "1000 10",
+		RowCount:  1000,
+		AvgEq:     []int64{10},
 	}
 
 	rows := SaveStatistics(stats)

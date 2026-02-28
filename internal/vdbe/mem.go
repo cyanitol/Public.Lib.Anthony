@@ -518,6 +518,48 @@ func (m *Mem) Compare(other *Mem) int {
 	return m.CompareWithCollation(other, "")
 }
 
+// compareNumericWithText tries to compare a numeric value with text.
+// Returns the comparison result and true if comparison was successful,
+// or 0 and false if text cannot be parsed as a number.
+func compareNumericWithText(numericVal float64, textBytes []byte) (int, bool) {
+	textVal, err := strconv.ParseFloat(string(textBytes), 64)
+	if err != nil {
+		// Text cannot be parsed as numeric
+		return 0, false
+	}
+	// Compare numerically
+	if numericVal < textVal {
+		return -1, true
+	}
+	if numericVal > textVal {
+		return 1, true
+	}
+	return 0, true
+}
+
+// compareMixedNumericText handles comparison when one value is numeric and the other is text.
+func compareMixedNumericText(m, other *Mem, mIsNumeric, mIsText bool) (int, bool) {
+	if mIsNumeric && !mIsText {
+		// m is numeric, other is text
+		if result, ok := compareNumericWithText(m.RealValue(), other.z); ok {
+			return result, true
+		}
+		// Text cannot be numeric, numeric < text
+		return -1, true
+	}
+
+	if !mIsNumeric && mIsText {
+		// m is text, other is numeric
+		if result, ok := compareNumericWithText(other.RealValue(), m.z); ok {
+			return -result, true // Invert result since we compared in reverse order
+		}
+		// Text cannot be numeric, numeric < text
+		return 1, true
+	}
+
+	return 0, false
+}
+
 // CompareWithCollation compares two memory cells using the specified collation.
 // The collation is only used for string comparisons.
 // If collation is empty, BINARY collation is used.
@@ -547,38 +589,10 @@ func (m *Mem) CompareWithCollation(other *Mem, collName string) int {
 	}
 
 	// One numeric, one text: try to convert text to numeric
-	if mIsNumeric && otherIsText {
-		// Try to parse the text value as a number
-		if val, err := strconv.ParseFloat(string(other.z), 64); err == nil {
-			// Text can be interpreted as a number, compare numerically
-			mVal := m.RealValue()
-			if mVal < val {
-				return -1
-			}
-			if mVal > val {
-				return 1
-			}
-			return 0
+	if (mIsNumeric && otherIsText) || (otherIsNumeric && mIsText) {
+		if result, handled := compareMixedNumericText(m, other, mIsNumeric, mIsText); handled {
+			return result
 		}
-		// Text cannot be numeric, numeric < text
-		return -1
-	}
-
-	if otherIsNumeric && mIsText {
-		// Try to parse the text value as a number
-		if val, err := strconv.ParseFloat(string(m.z), 64); err == nil {
-			// Text can be interpreted as a number, compare numerically
-			otherVal := other.RealValue()
-			if val < otherVal {
-				return -1
-			}
-			if val > otherVal {
-				return 1
-			}
-			return 0
-		}
-		// Text cannot be numeric, numeric < text
-		return 1
 	}
 
 	// Both text or mixed text/blob: string comparison

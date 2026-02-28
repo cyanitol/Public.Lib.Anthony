@@ -9,11 +9,11 @@ import (
 // TestNewCTEContext tests creating a CTE context from a WITH clause.
 func TestNewCTEContext(t *testing.T) {
 	tests := []struct {
-		name        string
-		sql         string
-		wantCTEs    int
-		wantRecur   bool
-		wantErr     bool
+		name      string
+		sql       string
+		wantCTEs  int
+		wantRecur bool
+		wantErr   bool
 	}{
 		{
 			name:      "simple CTE",
@@ -180,9 +180,9 @@ func TestCTEDependencyOrder(t *testing.T) {
 // TestRecursiveCTEDetection tests detecting recursive CTEs.
 func TestRecursiveCTEDetection(t *testing.T) {
 	tests := []struct {
-		name         string
-		sql          string
-		cteName      string
+		name          string
+		sql           string
+		cteName       string
 		wantRecursive bool
 	}{
 		{

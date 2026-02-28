@@ -293,14 +293,28 @@ func expandViewsInSelectWithDepth(stmt *parser.SelectStmt, s *schema.Schema, dep
 	}
 
 	// Process each table in the FROM clause
-	for i := range stmt.From.Tables {
-		table := &stmt.From.Tables[i]
+	if err := expandViewsInFromTables(stmt.From.Tables, s, depth); err != nil {
+		return nil, err
+	}
+
+	// Process JOINs as well
+	if err := expandViewsInJoins(stmt.From.Joins, s, depth); err != nil {
+		return nil, err
+	}
+
+	return stmt, nil
+}
+
+// expandViewsInFromTables expands views in FROM clause tables.
+func expandViewsInFromTables(tables []parser.TableOrSubquery, s *schema.Schema, depth int) error {
+	for i := range tables {
+		table := &tables[i]
 
 		// If it's already a subquery, recursively expand views within it
 		if table.Subquery != nil {
 			expandedSubquery, err := expandViewsInSelectWithDepth(table.Subquery, s, depth+1)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			table.Subquery = expandedSubquery
 			continue
@@ -308,40 +322,24 @@ func expandViewsInSelectWithDepth(stmt *parser.SelectStmt, s *schema.Schema, dep
 
 		// Check if this is a view reference
 		if view, exists := s.GetView(table.TableName); exists {
-			// Expand the view
-			expandedSelect, err := ExpandView(view, table.Alias)
-			if err != nil {
-				return nil, fmt.Errorf("failed to expand view %s: %w", table.TableName, err)
+			if err := expandViewReference(table, view, s, depth); err != nil {
+				return err
 			}
-
-			// Recursively expand views within the expanded view
-			expandedSelect, err = expandViewsInSelectWithDepth(expandedSelect, s, depth+1)
-			if err != nil {
-				return nil, err
-			}
-
-			// Replace the table reference with a subquery
-			table.Subquery = expandedSelect
-
-			// If no alias was specified, use the view name as the alias
-			if table.Alias == "" {
-				table.Alias = table.TableName
-			}
-
-			// Clear the table name since it's now a subquery
-			table.TableName = ""
 		}
 	}
+	return nil
+}
 
-	// Process JOINs as well
-	for i := range stmt.From.Joins {
-		join := &stmt.From.Joins[i]
+// expandViewsInJoins expands views in JOIN clauses.
+func expandViewsInJoins(joins []parser.JoinClause, s *schema.Schema, depth int) error {
+	for i := range joins {
+		join := &joins[i]
 
 		// If it's already a subquery, recursively expand views within it
 		if join.Table.Subquery != nil {
 			expandedSubquery, err := expandViewsInSelectWithDepth(join.Table.Subquery, s, depth+1)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			join.Table.Subquery = expandedSubquery
 			continue
@@ -349,30 +347,37 @@ func expandViewsInSelectWithDepth(stmt *parser.SelectStmt, s *schema.Schema, dep
 
 		// Check if this is a view reference
 		if view, exists := s.GetView(join.Table.TableName); exists {
-			// Expand the view
-			expandedSelect, err := ExpandView(view, join.Table.Alias)
-			if err != nil {
-				return nil, fmt.Errorf("failed to expand view %s: %w", join.Table.TableName, err)
+			if err := expandViewReference(&join.Table, view, s, depth); err != nil {
+				return err
 			}
-
-			// Recursively expand views within the expanded view
-			expandedSelect, err = expandViewsInSelectWithDepth(expandedSelect, s, depth+1)
-			if err != nil {
-				return nil, err
-			}
-
-			// Replace the table reference with a subquery
-			join.Table.Subquery = expandedSelect
-
-			// If no alias was specified, use the view name as the alias
-			if join.Table.Alias == "" {
-				join.Table.Alias = join.Table.TableName
-			}
-
-			// Clear the table name since it's now a subquery
-			join.Table.TableName = ""
 		}
 	}
+	return nil
+}
 
-	return stmt, nil
+// expandViewReference expands a single view reference into a subquery.
+func expandViewReference(table *parser.TableOrSubquery, view *schema.View, s *schema.Schema, depth int) error {
+	// Expand the view
+	expandedSelect, err := ExpandView(view, table.Alias)
+	if err != nil {
+		return fmt.Errorf("failed to expand view %s: %w", table.TableName, err)
+	}
+
+	// Recursively expand views within the expanded view
+	expandedSelect, err = expandViewsInSelectWithDepth(expandedSelect, s, depth+1)
+	if err != nil {
+		return err
+	}
+
+	// Replace the table reference with a subquery
+	table.Subquery = expandedSelect
+
+	// If no alias was specified, use the view name as the alias
+	if table.Alias == "" {
+		table.Alias = table.TableName
+	}
+
+	// Clear the table name since it's now a subquery
+	table.TableName = ""
+	return nil
 }

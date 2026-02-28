@@ -119,39 +119,24 @@ func (m *ForeignKeyManager) ValidateInsert(
 	rowReader RowReader,
 ) error {
 	if !m.IsEnabled() {
-		return nil // Foreign keys disabled
+		return nil
 	}
 
 	constraints := m.GetConstraints(tableName)
 	if len(constraints) == 0 {
-		return nil // No constraints to check
+		return nil
 	}
 
 	for _, fk := range constraints {
-		// Check if this constraint is deferred
 		if fk.Deferrable == DeferrableInitiallyDeferred {
-			// Deferred constraints are checked at COMMIT time
 			continue
 		}
 
-		// Extract foreign key column values from the new row
-		fkValues := make([]interface{}, len(fk.Columns))
-		hasNull := false
-		for i, col := range fk.Columns {
-			val, ok := values[col]
-			if !ok || val == nil {
-				hasNull = true
-				break
-			}
-			fkValues[i] = val
-		}
-
-		// NULL values in foreign key columns don't need to reference anything
+		fkValues, hasNull := extractForeignKeyValues(values, fk.Columns)
 		if hasNull {
 			continue
 		}
 
-		// Check if referenced row exists
 		if err := m.validateReference(fk, fkValues, schemaObj, rowReader); err != nil {
 			return err
 		}
@@ -175,54 +160,65 @@ func (m *ForeignKeyManager) ValidateUpdate(
 	}
 
 	// 1. Check outgoing foreign keys (this table references others)
-	constraints := m.GetConstraints(tableName)
-	for _, fk := range constraints {
-		if fk.Deferrable == DeferrableInitiallyDeferred {
-			continue
-		}
-
-		// Check if any FK columns were updated
-		updated := false
-		for _, col := range fk.Columns {
-			if oldValues[col] != newValues[col] {
-				updated = true
-				break
-			}
-		}
-
-		if !updated {
-			continue // FK columns unchanged
-		}
-
-		// Extract new foreign key values
-		fkValues := make([]interface{}, len(fk.Columns))
-		hasNull := false
-		for i, col := range fk.Columns {
-			val, ok := newValues[col]
-			if !ok || val == nil {
-				hasNull = true
-				break
-			}
-			fkValues[i] = val
-		}
-
-		if hasNull {
-			continue // NULL is always valid
-		}
-
-		// Validate the new reference exists
-		if err := m.validateReference(fk, fkValues, schemaObj, rowReader); err != nil {
-			return err
-		}
+	if err := m.validateOutgoingReferences(tableName, oldValues, newValues, schemaObj, rowReader); err != nil {
+		return err
 	}
 
 	// 2. Check incoming foreign keys (other tables reference this one)
-	// This is needed to enforce RESTRICT/NO ACTION and perform CASCADE/SET NULL/SET DEFAULT
 	if err := m.validateIncomingReferences(tableName, oldValues, newValues, schemaObj, rowReader, rowUpdater); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+// validateOutgoingReferences validates that updated foreign key columns still reference valid rows.
+func (m *ForeignKeyManager) validateOutgoingReferences(
+	tableName string,
+	oldValues map[string]interface{},
+	newValues map[string]interface{},
+	schemaObj *schema.Schema,
+	rowReader RowReader,
+) error {
+	constraints := m.GetConstraints(tableName)
+
+	for _, fk := range constraints {
+		if fk.Deferrable == DeferrableInitiallyDeferred {
+			continue
+		}
+
+		if !columnsChanged(fk.Columns, oldValues, newValues) {
+			continue
+		}
+
+		fkValues, hasNull := extractForeignKeyValues(newValues, fk.Columns)
+		if hasNull {
+			continue
+		}
+
+		if err := m.validateReference(fk, fkValues, schemaObj, rowReader); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// extractForeignKeyValues extracts foreign key values and indicates if any are NULL.
+func extractForeignKeyValues(values map[string]interface{}, columns []string) ([]interface{}, bool) {
+	fkValues := make([]interface{}, len(columns))
+	hasNull := false
+
+	for i, col := range columns {
+		val, ok := values[col]
+		if !ok || val == nil {
+			hasNull = true
+			break
+		}
+		fkValues[i] = val
+	}
+
+	return fkValues, hasNull
 }
 
 // ValidateDelete validates foreign key constraints for a DELETE operation.
@@ -239,101 +235,171 @@ func (m *ForeignKeyManager) ValidateDelete(
 		return nil
 	}
 
-	// Find all foreign keys that reference this table
-	var referencingConstraints []*ForeignKeyConstraint
-	for _, fks := range m.constraints {
-		for _, fk := range fks {
-			if strings.ToLower(fk.RefTable) == strings.ToLower(tableName) {
-				referencingConstraints = append(referencingConstraints, fk)
-			}
-		}
-	}
-
+	referencingConstraints := m.findReferencingConstraints(tableName)
 	if len(referencingConstraints) == 0 {
-		return nil // Nothing references this table
+		return nil
 	}
 
-	// Get the table to find primary key
 	table, ok := schemaObj.GetTable(tableName)
 	if !ok {
 		return fmt.Errorf("table not found: %s", tableName)
 	}
 
-	// For each referencing constraint, handle based on ON DELETE action
 	for _, fk := range referencingConstraints {
-		// Determine which columns are being referenced
-		refCols := fk.RefColumns
-		if len(refCols) == 0 {
-			refCols = table.PrimaryKey
-		}
-
-		// Extract the key values being deleted
-		keyValues := make([]interface{}, len(refCols))
-		for i, col := range refCols {
-			keyValues[i] = values[col]
-		}
-
-		// Check if any rows reference this one
-		referencingRows, err := rowReader.FindReferencingRows(fk.Table, fk.Columns, keyValues)
-		if err != nil {
-			return fmt.Errorf("failed to check foreign key references: %w", err)
-		}
-
-		if len(referencingRows) == 0 {
-			continue // No references, OK to delete
-		}
-
-		// Handle based on ON DELETE action
-		switch fk.OnDelete {
-		case FKActionRestrict, FKActionNoAction:
-			return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", fk.Table)
-
-		case FKActionCascade:
-			// Delete all referencing rows
-			for _, rowID := range referencingRows {
-				if err := rowDeleter.DeleteRow(fk.Table, rowID); err != nil {
-					return fmt.Errorf("CASCADE DELETE failed: %w", err)
-				}
-			}
-
-		case FKActionSetNull:
-			// Set foreign key columns to NULL in referencing rows
-			nullValues := make(map[string]interface{})
-			for _, col := range fk.Columns {
-				nullValues[col] = nil
-			}
-			for _, rowID := range referencingRows {
-				if err := rowUpdater.UpdateRow(fk.Table, rowID, nullValues); err != nil {
-					return fmt.Errorf("SET NULL failed: %w", err)
-				}
-			}
-
-		case FKActionSetDefault:
-			// Set foreign key columns to their DEFAULT values
-			// This requires reading the column defaults from schema
-			refTable, ok := schemaObj.GetTable(fk.Table)
-			if !ok {
-				return fmt.Errorf("referencing table not found: %s", fk.Table)
-			}
-
-			defaultValues := make(map[string]interface{})
-			for _, col := range fk.Columns {
-				column, ok := refTable.GetColumn(col)
-				if !ok {
-					return fmt.Errorf("column not found: %s", col)
-				}
-				defaultValues[col] = column.Default
-			}
-
-			for _, rowID := range referencingRows {
-				if err := rowUpdater.UpdateRow(fk.Table, rowID, defaultValues); err != nil {
-					return fmt.Errorf("SET DEFAULT failed: %w", err)
-				}
-			}
+		if err := m.handleDeleteConstraint(fk, table, values, schemaObj, rowReader, rowDeleter, rowUpdater); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// findReferencingConstraints finds all foreign keys that reference the given table.
+func (m *ForeignKeyManager) findReferencingConstraints(tableName string) []*ForeignKeyConstraint {
+	var result []*ForeignKeyConstraint
+	tableLower := strings.ToLower(tableName)
+
+	for _, fks := range m.constraints {
+		for _, fk := range fks {
+			if strings.ToLower(fk.RefTable) == tableLower {
+				result = append(result, fk)
+			}
+		}
+	}
+
+	return result
+}
+
+// handleDeleteConstraint processes a single foreign key constraint during delete.
+func (m *ForeignKeyManager) handleDeleteConstraint(
+	fk *ForeignKeyConstraint,
+	table *schema.Table,
+	values map[string]interface{},
+	schemaObj *schema.Schema,
+	rowReader RowReader,
+	rowDeleter RowDeleter,
+	rowUpdater RowUpdater,
+) error {
+	refCols := fk.RefColumns
+	if len(refCols) == 0 {
+		refCols = table.PrimaryKey
+	}
+
+	keyValues := extractKeyValues(values, refCols)
+
+	referencingRows, err := rowReader.FindReferencingRows(fk.Table, fk.Columns, keyValues)
+	if err != nil {
+		return fmt.Errorf("failed to check foreign key references: %w", err)
+	}
+
+	if len(referencingRows) == 0 {
+		return nil
+	}
+
+	return m.applyDeleteAction(fk, referencingRows, schemaObj, rowDeleter, rowUpdater)
+}
+
+// applyDeleteAction applies the appropriate ON DELETE action.
+func (m *ForeignKeyManager) applyDeleteAction(
+	fk *ForeignKeyConstraint,
+	referencingRows []int64,
+	schemaObj *schema.Schema,
+	rowDeleter RowDeleter,
+	rowUpdater RowUpdater,
+) error {
+	switch fk.OnDelete {
+	case FKActionRestrict, FKActionNoAction:
+		return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", fk.Table)
+
+	case FKActionCascade:
+		return m.cascadeDelete(fk.Table, referencingRows, rowDeleter)
+
+	case FKActionSetNull:
+		return m.setNullOnRows(fk.Table, fk.Columns, referencingRows, rowUpdater)
+
+	case FKActionSetDefault:
+		return m.setDefaultOnRows(fk.Table, fk.Columns, referencingRows, schemaObj, rowUpdater)
+	}
+
+	return nil
+}
+
+// cascadeDelete deletes all referencing rows.
+func (m *ForeignKeyManager) cascadeDelete(table string, rowIDs []int64, rowDeleter RowDeleter) error {
+	for _, rowID := range rowIDs {
+		if err := rowDeleter.DeleteRow(table, rowID); err != nil {
+			return fmt.Errorf("CASCADE DELETE failed: %w", err)
+		}
+	}
+	return nil
+}
+
+// setNullOnRows sets foreign key columns to NULL in the given rows.
+func (m *ForeignKeyManager) setNullOnRows(table string, columns []string, rowIDs []int64, rowUpdater RowUpdater) error {
+	nullValues := make(map[string]interface{})
+	for _, col := range columns {
+		nullValues[col] = nil
+	}
+
+	for _, rowID := range rowIDs {
+		if err := rowUpdater.UpdateRow(table, rowID, nullValues); err != nil {
+			return fmt.Errorf("SET NULL failed: %w", err)
+		}
+	}
+	return nil
+}
+
+// setDefaultOnRows sets foreign key columns to their DEFAULT values in the given rows.
+func (m *ForeignKeyManager) setDefaultOnRows(
+	table string,
+	columns []string,
+	rowIDs []int64,
+	schemaObj *schema.Schema,
+	rowUpdater RowUpdater,
+) error {
+	defaultValues, err := m.getDefaultValues(table, columns, schemaObj)
+	if err != nil {
+		return err
+	}
+
+	for _, rowID := range rowIDs {
+		if err := rowUpdater.UpdateRow(table, rowID, defaultValues); err != nil {
+			return fmt.Errorf("SET DEFAULT failed: %w", err)
+		}
+	}
+	return nil
+}
+
+// getDefaultValues retrieves default values for the given columns.
+func (m *ForeignKeyManager) getDefaultValues(
+	tableName string,
+	columns []string,
+	schemaObj *schema.Schema,
+) (map[string]interface{}, error) {
+	table, ok := schemaObj.GetTable(tableName)
+	if !ok {
+		return nil, fmt.Errorf("referencing table not found: %s", tableName)
+	}
+
+	defaultValues := make(map[string]interface{})
+	for _, col := range columns {
+		column, ok := table.GetColumn(col)
+		if !ok {
+			return nil, fmt.Errorf("column not found: %s", col)
+		}
+		defaultValues[col] = column.Default
+	}
+
+	return defaultValues, nil
+}
+
+// extractKeyValues extracts values from the given map based on column names.
+func extractKeyValues(values map[string]interface{}, columns []string) []interface{} {
+	result := make([]interface{}, len(columns))
+	for i, col := range columns {
+		result[i] = values[col]
+	}
+	return result
 }
 
 // validateReference checks if a referenced row exists.
@@ -381,120 +447,111 @@ func (m *ForeignKeyManager) validateIncomingReferences(
 	rowReader RowReader,
 	rowUpdater RowUpdater,
 ) error {
-	// Get the table
 	table, ok := schemaObj.GetTable(tableName)
 	if !ok {
 		return nil
 	}
 
-	// Find all foreign keys that reference this table
-	var referencingConstraints []*ForeignKeyConstraint
-	for _, fks := range m.constraints {
-		for _, fk := range fks {
-			if strings.ToLower(fk.RefTable) == strings.ToLower(tableName) {
-				referencingConstraints = append(referencingConstraints, fk)
-			}
-		}
-	}
-
+	referencingConstraints := m.findReferencingConstraints(tableName)
 	if len(referencingConstraints) == 0 {
 		return nil
 	}
 
-	// Check each referencing constraint
 	for _, fk := range referencingConstraints {
-		// Determine which columns are being referenced
-		refCols := fk.RefColumns
-		if len(refCols) == 0 {
-			refCols = table.PrimaryKey
-		}
-
-		// Check if any referenced columns changed
-		changed := false
-		for _, col := range refCols {
-			if oldValues[col] != newValues[col] {
-				changed = true
-				break
-			}
-		}
-
-		if !changed {
-			continue // Referenced columns unchanged
-		}
-
-		// Extract old and new key values
-		oldKeyValues := make([]interface{}, len(refCols))
-		newKeyValues := make([]interface{}, len(refCols))
-		for i, col := range refCols {
-			oldKeyValues[i] = oldValues[col]
-			newKeyValues[i] = newValues[col]
-		}
-
-		// Check if any rows reference the old values
-		referencingRows, err := rowReader.FindReferencingRows(fk.Table, fk.Columns, oldKeyValues)
-		if err != nil {
-			return fmt.Errorf("failed to check foreign key references: %w", err)
-		}
-
-		if len(referencingRows) == 0 {
-			continue // No references
-		}
-
-		// Handle based on ON UPDATE action
-		switch fk.OnUpdate {
-		case FKActionRestrict, FKActionNoAction:
-			// RESTRICT/NO ACTION: prevent the update if there are referencing rows
-			return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", fk.Table)
-
-		case FKActionCascade:
-			// Update all referencing rows with the new key values
-			updateValues := make(map[string]interface{})
-			for i, col := range fk.Columns {
-				updateValues[col] = newKeyValues[i]
-			}
-			for _, rowID := range referencingRows {
-				if err := rowUpdater.UpdateRow(fk.Table, rowID, updateValues); err != nil {
-					return fmt.Errorf("CASCADE UPDATE failed: %w", err)
-				}
-			}
-
-		case FKActionSetNull:
-			// Set foreign key columns to NULL in referencing rows
-			nullValues := make(map[string]interface{})
-			for _, col := range fk.Columns {
-				nullValues[col] = nil
-			}
-			for _, rowID := range referencingRows {
-				if err := rowUpdater.UpdateRow(fk.Table, rowID, nullValues); err != nil {
-					return fmt.Errorf("SET NULL UPDATE failed: %w", err)
-				}
-			}
-
-		case FKActionSetDefault:
-			// Set foreign key columns to their DEFAULT values
-			// This requires reading the column defaults from schema
-			refTable, ok := schemaObj.GetTable(fk.Table)
-			if !ok {
-				return fmt.Errorf("referencing table not found: %s", fk.Table)
-			}
-
-			defaultValues := make(map[string]interface{})
-			for _, col := range fk.Columns {
-				column, ok := refTable.GetColumn(col)
-				if !ok {
-					return fmt.Errorf("column not found: %s", col)
-				}
-				defaultValues[col] = column.Default
-			}
-
-			for _, rowID := range referencingRows {
-				if err := rowUpdater.UpdateRow(fk.Table, rowID, defaultValues); err != nil {
-					return fmt.Errorf("SET DEFAULT UPDATE failed: %w", err)
-				}
-			}
+		if err := m.handleUpdateConstraint(fk, table, oldValues, newValues, schemaObj, rowReader, rowUpdater); err != nil {
+			return err
 		}
 	}
 
+	return nil
+}
+
+// handleUpdateConstraint processes a single foreign key constraint during update.
+func (m *ForeignKeyManager) handleUpdateConstraint(
+	fk *ForeignKeyConstraint,
+	table *schema.Table,
+	oldValues map[string]interface{},
+	newValues map[string]interface{},
+	schemaObj *schema.Schema,
+	rowReader RowReader,
+	rowUpdater RowUpdater,
+) error {
+	refCols := fk.RefColumns
+	if len(refCols) == 0 {
+		refCols = table.PrimaryKey
+	}
+
+	if !columnsChanged(refCols, oldValues, newValues) {
+		return nil
+	}
+
+	oldKeyValues := extractKeyValues(oldValues, refCols)
+	newKeyValues := extractKeyValues(newValues, refCols)
+
+	referencingRows, err := rowReader.FindReferencingRows(fk.Table, fk.Columns, oldKeyValues)
+	if err != nil {
+		return fmt.Errorf("failed to check foreign key references: %w", err)
+	}
+
+	if len(referencingRows) == 0 {
+		return nil
+	}
+
+	return m.applyUpdateAction(fk, newKeyValues, referencingRows, schemaObj, rowUpdater)
+}
+
+// columnsChanged checks if any of the specified columns changed between old and new values.
+func columnsChanged(columns []string, oldValues, newValues map[string]interface{}) bool {
+	for _, col := range columns {
+		if oldValues[col] != newValues[col] {
+			return true
+		}
+	}
+	return false
+}
+
+// applyUpdateAction applies the appropriate ON UPDATE action.
+func (m *ForeignKeyManager) applyUpdateAction(
+	fk *ForeignKeyConstraint,
+	newKeyValues []interface{},
+	referencingRows []int64,
+	schemaObj *schema.Schema,
+	rowUpdater RowUpdater,
+) error {
+	switch fk.OnUpdate {
+	case FKActionRestrict, FKActionNoAction:
+		return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", fk.Table)
+
+	case FKActionCascade:
+		return m.cascadeUpdate(fk, newKeyValues, referencingRows, rowUpdater)
+
+	case FKActionSetNull:
+		return m.setNullOnRows(fk.Table, fk.Columns, referencingRows, rowUpdater)
+
+	case FKActionSetDefault:
+		return m.setDefaultOnRows(fk.Table, fk.Columns, referencingRows, schemaObj, rowUpdater)
+	}
+
+	return nil
+}
+
+// cascadeUpdate updates all referencing rows with new key values.
+func (m *ForeignKeyManager) cascadeUpdate(
+	fk *ForeignKeyConstraint,
+	newKeyValues []interface{},
+	rowIDs []int64,
+	rowUpdater RowUpdater,
+) error {
+	updateValues := make(map[string]interface{})
+	for i, col := range fk.Columns {
+		updateValues[col] = newKeyValues[i]
+	}
+
+	for _, rowID := range rowIDs {
+		if err := rowUpdater.UpdateRow(fk.Table, rowID, updateValues); err != nil {
+			return fmt.Errorf("CASCADE UPDATE failed: %w", err)
+		}
+	}
 	return nil
 }
 

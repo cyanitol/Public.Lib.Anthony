@@ -68,7 +68,9 @@ func NewStatistics() *Statistics {
 
 // LoadStatistics reads statistics from the sqlite_stat1 table.
 // The sqlite_stat1 table has the schema:
-//   CREATE TABLE sqlite_stat1(tbl, idx, stat);
+//
+//	CREATE TABLE sqlite_stat1(tbl, idx, stat);
+//
 // where:
 //   - tbl is the table name
 //   - idx is the index name (or NULL for table stats)

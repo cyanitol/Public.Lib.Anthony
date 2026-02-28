@@ -129,36 +129,75 @@ func (ctx *CTEContext) selectReferencesTable(sel *parser.SelectStmt, tableName s
 	}
 
 	// Check FROM clause
-	if sel.From != nil {
-		for _, table := range sel.From.Tables {
-			if table.TableName == tableName {
-				return true
-			}
-			// Check subqueries
-			if table.Subquery != nil && ctx.selectReferencesTable(table.Subquery, tableName) {
-				return true
-			}
-		}
-
-		// Check JOINs
-		for _, join := range sel.From.Joins {
-			if join.Table.TableName == tableName {
-				return true
-			}
-			if join.Table.Subquery != nil && ctx.selectReferencesTable(join.Table.Subquery, tableName) {
-				return true
-			}
-		}
+	if ctx.fromClauseReferencesTable(sel.From, tableName) {
+		return true
 	}
 
 	// Check UNION/EXCEPT/INTERSECT compound queries
-	if sel.Compound != nil {
-		if ctx.selectReferencesTable(sel.Compound.Left, tableName) {
+	if ctx.compoundReferencesTable(sel.Compound, tableName) {
+		return true
+	}
+
+	return false
+}
+
+// fromClauseReferencesTable checks if a FROM clause references a table name.
+func (ctx *CTEContext) fromClauseReferencesTable(from *parser.FromClause, tableName string) bool {
+	if from == nil {
+		return false
+	}
+
+	// Check tables in FROM clause
+	if ctx.tablesReferenceTable(from.Tables, tableName) {
+		return true
+	}
+
+	// Check JOINs
+	if ctx.joinsReferenceTable(from.Joins, tableName) {
+		return true
+	}
+
+	return false
+}
+
+// tablesReferenceTable checks if a slice of tables references a table name.
+func (ctx *CTEContext) tablesReferenceTable(tables []parser.TableOrSubquery, tableName string) bool {
+	for _, table := range tables {
+		if table.TableName == tableName {
 			return true
 		}
-		if ctx.selectReferencesTable(sel.Compound.Right, tableName) {
+		// Check subqueries
+		if table.Subquery != nil && ctx.selectReferencesTable(table.Subquery, tableName) {
 			return true
 		}
+	}
+	return false
+}
+
+// joinsReferenceTable checks if a slice of joins references a table name.
+func (ctx *CTEContext) joinsReferenceTable(joins []parser.JoinClause, tableName string) bool {
+	for _, join := range joins {
+		if join.Table.TableName == tableName {
+			return true
+		}
+		if join.Table.Subquery != nil && ctx.selectReferencesTable(join.Table.Subquery, tableName) {
+			return true
+		}
+	}
+	return false
+}
+
+// compoundReferencesTable checks if a compound query references a table name.
+func (ctx *CTEContext) compoundReferencesTable(compound *parser.CompoundSelect, tableName string) bool {
+	if compound == nil {
+		return false
+	}
+
+	if ctx.selectReferencesTable(compound.Left, tableName) {
+		return true
+	}
+	if ctx.selectReferencesTable(compound.Right, tableName) {
+		return true
 	}
 
 	return false
@@ -601,9 +640,9 @@ func (ctx *CTEContext) EstimateRecursiveCTERows(def *CTEDefinition) LogEst {
 	// 2. Growth factor per iteration
 	// 3. Maximum iteration limit
 
-	anchorRows := NewLogEst(10)   // Default anchor estimate
-	growthFactor := NewLogEst(2)  // Assume 2x growth per iteration
-	maxIterations := 10           // Safety limit
+	anchorRows := NewLogEst(10)  // Default anchor estimate
+	growthFactor := NewLogEst(2) // Assume 2x growth per iteration
+	maxIterations := 10          // Safety limit
 
 	// Estimate total rows: anchor * (1 + growth + growth^2 + ... + growth^n)
 	// Simplified: anchor * growth^(iterations/2)

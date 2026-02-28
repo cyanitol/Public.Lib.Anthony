@@ -654,57 +654,6 @@ func (b *BinaryExpr) String() string {
 	return left + " " + b.Op.String() + " " + right
 }
 
-func (o BinaryOp) String() string {
-	switch o {
-	case OpEq:
-		return "="
-	case OpNe:
-		return "!="
-	case OpLt:
-		return "<"
-	case OpLe:
-		return "<="
-	case OpGt:
-		return ">"
-	case OpGe:
-		return ">="
-	case OpAnd:
-		return "AND"
-	case OpOr:
-		return "OR"
-	case OpPlus:
-		return "+"
-	case OpMinus:
-		return "-"
-	case OpMul:
-		return "*"
-	case OpDiv:
-		return "/"
-	case OpRem:
-		return "%"
-	case OpConcat:
-		return "||"
-	case OpBitAnd:
-		return "&"
-	case OpBitOr:
-		return "|"
-	case OpLShift:
-		return "<<"
-	case OpRShift:
-		return ">>"
-	case OpLike:
-		return "LIKE"
-	case OpGlob:
-		return "GLOB"
-	case OpRegexp:
-		return "REGEXP"
-	case OpMatch:
-		return "MATCH"
-	default:
-		return "?"
-	}
-}
-
 type BinaryOp int
 
 const (
@@ -731,6 +680,38 @@ const (
 	OpRegexp
 	OpMatch
 )
+
+var binaryOpStrings = map[BinaryOp]string{
+	OpEq:     "=",
+	OpNe:     "!=",
+	OpLt:     "<",
+	OpLe:     "<=",
+	OpGt:     ">",
+	OpGe:     ">=",
+	OpAnd:    "AND",
+	OpOr:     "OR",
+	OpPlus:   "+",
+	OpMinus:  "-",
+	OpMul:    "*",
+	OpDiv:    "/",
+	OpRem:    "%",
+	OpConcat: "||",
+	OpBitAnd: "&",
+	OpBitOr:  "|",
+	OpLShift: "<<",
+	OpRShift: ">>",
+	OpLike:   "LIKE",
+	OpGlob:   "GLOB",
+	OpRegexp: "REGEXP",
+	OpMatch:  "MATCH",
+}
+
+func (o BinaryOp) String() string {
+	if s, ok := binaryOpStrings[o]; ok {
+		return s
+	}
+	return "?"
+}
 
 // UnaryExpr represents a unary expression.
 type UnaryExpr struct {

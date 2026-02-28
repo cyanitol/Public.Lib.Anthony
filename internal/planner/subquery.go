@@ -170,8 +170,8 @@ func (o *SubqueryOptimizer) DecorrelateSubquery(info *SubqueryInfo) (*SubqueryIn
 		OuterRefs:         0,
 		EstimatedRows:     info.EstimatedRows,
 		ExecutionCount:    NewLogEst(1), // Execute once instead of per outer row
-		CanFlatten:        true,          // May now be flattenable
-		CanMaterialize:    true,          // Can materialize since uncorrelated
+		CanFlatten:        true,         // May now be flattenable
+		CanMaterialize:    true,         // Can materialize since uncorrelated
 		MaterializedTable: "",
 	}
 

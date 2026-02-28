@@ -155,26 +155,8 @@ func (n *Node) quadraticSplit() ([]*Entry, []*Entry) {
 
 	// Assign remaining entries
 	for countUnassigned() > 0 {
-		// Ensure each group has at least MinEntries
-		remaining := countUnassigned()
-		if len(group1)+remaining == MinEntries {
-			// Must assign all remaining to group1
-			for j := 0; j < len(entries); j++ {
-				if !assigned[j] {
-					group1 = append(group1, entries[j])
-					assigned[j] = true
-				}
-			}
-			break
-		}
-		if len(group2)+remaining == MinEntries {
-			// Must assign all remaining to group2
-			for j := 0; j < len(entries); j++ {
-				if !assigned[j] {
-					group2 = append(group2, entries[j])
-					assigned[j] = true
-				}
-			}
+		// Check if we must assign all remaining entries to one group
+		if n.mustAssignRemainingToGroup(countUnassigned(), &group1, &group2, entries, assigned) {
 			break
 		}
 
@@ -184,41 +166,76 @@ func (n *Node) quadraticSplit() ([]*Entry, []*Entry) {
 			break
 		}
 
-		// Assign to the group that needs less enlargement
-		entry := entries[nextIdx]
-		bbox1 := calculateGroupBBox(group1)
-		bbox2 := calculateGroupBBox(group2)
-
-		enlargement1 := bbox1.EnlargementNeeded(entry.BBox)
-		enlargement2 := bbox2.EnlargementNeeded(entry.BBox)
-
-		if enlargement1 < enlargement2 {
-			group1 = append(group1, entry)
-		} else if enlargement2 < enlargement1 {
-			group2 = append(group2, entry)
-		} else {
-			// Tie - choose the group with smaller area
-			area1 := bbox1.Area()
-			area2 := bbox2.Area()
-
-			if area1 < area2 {
-				group1 = append(group1, entry)
-			} else if area2 < area1 {
-				group2 = append(group2, entry)
-			} else {
-				// Tie - choose the group with fewer entries
-				if len(group1) <= len(group2) {
-					group1 = append(group1, entry)
-				} else {
-					group2 = append(group2, entry)
-				}
-			}
-		}
-
+		// Assign to the best group
+		n.assignEntryToGroup(entries[nextIdx], &group1, &group2)
 		assigned[nextIdx] = true
 	}
 
 	return group1, group2
+}
+
+// mustAssignRemainingToGroup checks if we must assign all remaining entries to one group.
+func (n *Node) mustAssignRemainingToGroup(remaining int, group1, group2 *[]*Entry, entries []*Entry, assigned []bool) bool {
+	// Ensure each group has at least MinEntries
+	if len(*group1)+remaining == MinEntries {
+		// Must assign all remaining to group1
+		n.assignRemainingEntries(entries, assigned, group1)
+		return true
+	}
+	if len(*group2)+remaining == MinEntries {
+		// Must assign all remaining to group2
+		n.assignRemainingEntries(entries, assigned, group2)
+		return true
+	}
+	return false
+}
+
+// assignRemainingEntries assigns all remaining unassigned entries to a group.
+func (n *Node) assignRemainingEntries(entries []*Entry, assigned []bool, group *[]*Entry) {
+	for j := 0; j < len(entries); j++ {
+		if !assigned[j] {
+			*group = append(*group, entries[j])
+			assigned[j] = true
+		}
+	}
+}
+
+// assignEntryToGroup assigns an entry to the best group based on enlargement.
+func (n *Node) assignEntryToGroup(entry *Entry, group1, group2 *[]*Entry) {
+	bbox1 := calculateGroupBBox(*group1)
+	bbox2 := calculateGroupBBox(*group2)
+
+	enlargement1 := bbox1.EnlargementNeeded(entry.BBox)
+	enlargement2 := bbox2.EnlargementNeeded(entry.BBox)
+
+	if enlargement1 < enlargement2 {
+		*group1 = append(*group1, entry)
+	} else if enlargement2 < enlargement1 {
+		*group2 = append(*group2, entry)
+	} else {
+		// Tie - use tie-breaking logic
+		n.assignEntryOnTie(entry, group1, group2, bbox1, bbox2)
+	}
+}
+
+// assignEntryOnTie assigns an entry when there's a tie in enlargement.
+func (n *Node) assignEntryOnTie(entry *Entry, group1, group2 *[]*Entry, bbox1, bbox2 *BoundingBox) {
+	// Tie - choose the group with smaller area
+	area1 := bbox1.Area()
+	area2 := bbox2.Area()
+
+	if area1 < area2 {
+		*group1 = append(*group1, entry)
+	} else if area2 < area1 {
+		*group2 = append(*group2, entry)
+	} else {
+		// Tie - choose the group with fewer entries
+		if len(*group1) <= len(*group2) {
+			*group1 = append(*group1, entry)
+		} else {
+			*group2 = append(*group2, entry)
+		}
+	}
 }
 
 // pickSeeds finds the pair of entries with maximum wasted space.
