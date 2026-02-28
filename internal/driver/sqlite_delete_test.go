@@ -3,9 +3,21 @@ package driver
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// Helper function to create a test database
+func openTestDB(t *testing.T) *sql.DB {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	db, err := sql.Open(DriverName, dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	return db
+}
 
 // TestSQLiteDelete tests DELETE FROM operations converted from SQLite TCL tests.
 // Covers delete.test, delete2.test, and delete3.test
@@ -486,7 +498,7 @@ func TestSQLiteDelete(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := openTestDB(t)
+			db := setupMemoryDB(t)
 			defer db.Close()
 
 			// Execute setup statements
@@ -530,7 +542,7 @@ func TestSQLiteDelete(t *testing.T) {
 
 // TestSQLiteDeleteTriggers tests DELETE operations with triggers
 func TestSQLiteDeleteTriggers(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create table and trigger counter
@@ -618,7 +630,7 @@ func TestSQLiteDeleteTriggers(t *testing.T) {
 
 // TestSQLiteDeleteIndexScan tests DELETE during index scan operations
 func TestSQLiteDeleteIndexScan(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Setup tables with indexes
@@ -661,7 +673,7 @@ func TestSQLiteDeleteIndexScan(t *testing.T) {
 
 // TestSQLiteDeleteConcurrent tests DELETE during concurrent operations
 func TestSQLiteDeleteConcurrent(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create test data
@@ -704,7 +716,7 @@ func TestSQLiteDeleteConcurrent(t *testing.T) {
 
 // TestSQLiteDeleteLargeDataset tests DELETE on large datasets
 func TestSQLiteDeleteLargeDataset(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create table with many rows (scaled down from 524288 in original test)
@@ -764,7 +776,7 @@ func TestSQLiteDeleteLargeDataset(t *testing.T) {
 
 // TestSQLiteDeleteWithAliases tests DELETE with table aliases
 func TestSQLiteDeleteWithAliases(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	_, err := db.Exec(`

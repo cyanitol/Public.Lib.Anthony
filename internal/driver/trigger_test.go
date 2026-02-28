@@ -1,13 +1,12 @@
 package driver
 
 import (
-	"database/sql"
 	"testing"
 )
 
 // TestCreateTrigger tests basic trigger creation.
 func TestCreateTrigger(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create a test table
@@ -43,7 +42,7 @@ func TestCreateTrigger(t *testing.T) {
 
 // TestCreateTriggerIfNotExists tests IF NOT EXISTS clause.
 func TestCreateTriggerIfNotExists(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create a test table
@@ -79,7 +78,7 @@ func TestCreateTriggerIfNotExists(t *testing.T) {
 
 // TestDropTrigger tests basic trigger dropping.
 func TestDropTrigger(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create a test table
@@ -115,7 +114,7 @@ func TestDropTrigger(t *testing.T) {
 
 // TestDropTriggerIfExists tests IF EXISTS clause.
 func TestDropTriggerIfExists(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Drop a non-existent trigger with IF EXISTS (should succeed)
@@ -127,7 +126,7 @@ func TestDropTriggerIfExists(t *testing.T) {
 
 // TestBeforeInsertTrigger tests BEFORE INSERT triggers.
 func TestBeforeInsertTrigger(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create tables
@@ -178,7 +177,7 @@ func TestBeforeInsertTrigger(t *testing.T) {
 
 // TestAfterInsertTrigger tests AFTER INSERT triggers.
 func TestAfterInsertTrigger(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create tables
@@ -213,7 +212,7 @@ func TestAfterInsertTrigger(t *testing.T) {
 
 // TestBeforeUpdateTrigger tests BEFORE UPDATE triggers.
 func TestBeforeUpdateTrigger(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create tables
@@ -254,7 +253,7 @@ func TestBeforeUpdateTrigger(t *testing.T) {
 
 // TestAfterUpdateTrigger tests AFTER UPDATE triggers.
 func TestAfterUpdateTrigger(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create tables
@@ -295,7 +294,7 @@ func TestAfterUpdateTrigger(t *testing.T) {
 
 // TestBeforeDeleteTrigger tests BEFORE DELETE triggers.
 func TestBeforeDeleteTrigger(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create tables
@@ -336,7 +335,7 @@ func TestBeforeDeleteTrigger(t *testing.T) {
 
 // TestAfterDeleteTrigger tests AFTER DELETE triggers.
 func TestAfterDeleteTrigger(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create tables
@@ -377,7 +376,7 @@ func TestAfterDeleteTrigger(t *testing.T) {
 
 // TestTriggerWithForEachRow tests FOR EACH ROW clause.
 func TestTriggerWithForEachRow(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create table
@@ -408,7 +407,7 @@ func TestTriggerWithForEachRow(t *testing.T) {
 
 // TestTriggerWithWhenClause tests WHEN clause.
 func TestTriggerWithWhenClause(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create table
@@ -444,7 +443,7 @@ func TestTriggerWithWhenClause(t *testing.T) {
 
 // TestUpdateOfTrigger tests UPDATE OF specific columns.
 func TestUpdateOfTrigger(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create table
@@ -486,7 +485,7 @@ func TestUpdateOfTrigger(t *testing.T) {
 
 // TestMultipleTriggers tests multiple triggers on the same table.
 func TestMultipleTriggers(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create table
@@ -544,7 +543,7 @@ func TestMultipleTriggers(t *testing.T) {
 
 // TestTempTrigger tests temporary triggers.
 func TestTempTrigger(t *testing.T) {
-	db := openTestDB(t)
+	db := setupMemoryDB(t)
 	defer db.Close()
 
 	// Create table
@@ -572,11 +571,4 @@ func TestTempTrigger(t *testing.T) {
 	}
 }
 
-// openTestDB is a helper function to open an in-memory test database.
-func openTestDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite_internal", ":memory:")
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
-	return db
-}
+// setupMemoryDB is defined in sqlite_view_test.go
