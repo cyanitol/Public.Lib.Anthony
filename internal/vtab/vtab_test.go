@@ -6,6 +6,7 @@ import (
 
 // TestModuleRegistry tests the module registry functionality.
 func TestModuleRegistry(t *testing.T) {
+	t.Parallel()
 	registry := NewModuleRegistry()
 
 	// Test registering a module
@@ -74,6 +75,7 @@ func TestModuleRegistry(t *testing.T) {
 
 // TestGlobalRegistry tests the global registry functions.
 func TestGlobalRegistry(t *testing.T) {
+	t.Parallel()
 	// Clear any existing modules
 	DefaultRegistry().Clear()
 
@@ -100,6 +102,7 @@ func TestGlobalRegistry(t *testing.T) {
 	modules := ListModules()
 	found := false
 	for _, name := range modules {
+		name := name
 		if name == "global" {
 			found = true
 			break
@@ -115,6 +118,7 @@ func TestGlobalRegistry(t *testing.T) {
 
 // TestIndexInfo tests the IndexInfo structure and methods.
 func TestIndexInfo(t *testing.T) {
+	t.Parallel()
 	info := NewIndexInfo(3)
 
 	// Test initialization
@@ -184,6 +188,7 @@ func TestIndexInfo(t *testing.T) {
 
 // TestConstraintOp tests the ConstraintOp string representation.
 func TestConstraintOp(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		op       ConstraintOp
 		expected string
@@ -203,6 +208,7 @@ func TestConstraintOp(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		result := tt.op.String()
 		if result != tt.expected {
 			t.Errorf("Expected %s.String() = %q, got %q", tt.op, tt.expected, result)
@@ -212,6 +218,7 @@ func TestConstraintOp(t *testing.T) {
 
 // TestBaseVirtualTable tests the base virtual table implementation.
 func TestBaseVirtualTable(t *testing.T) {
+	t.Parallel()
 	base := &BaseVirtualTable{}
 
 	// Test BestIndex (should succeed with default values)
@@ -268,6 +275,7 @@ func TestBaseVirtualTable(t *testing.T) {
 
 // TestBaseCursor tests the base cursor implementation.
 func TestBaseCursor(t *testing.T) {
+	t.Parallel()
 	cursor := &BaseCursor{}
 
 	// Test Filter (should succeed and set EOF)
@@ -381,6 +389,7 @@ func (c *testCursor) Rowid() (int64, error) {
 
 // TestVirtualTableCursor tests a complete virtual table implementation.
 func TestVirtualTableCursor(t *testing.T) {
+	t.Parallel()
 	module := &testModule{name: "test"}
 	vtable, schema, err := module.Connect(nil, "test", "main", "test", nil)
 	if err != nil {
@@ -438,6 +447,7 @@ func TestVirtualTableCursor(t *testing.T) {
 
 // TestBaseModuleCreate tests the BaseModule Create method.
 func TestBaseModuleCreate(t *testing.T) {
+	t.Parallel()
 	base := &BaseModule{}
 
 	_, _, err := base.Create(nil, "test", "main", "test_table", []string{})
@@ -452,6 +462,7 @@ func TestBaseModuleCreate(t *testing.T) {
 
 // TestBaseModuleConnect tests the BaseModule Connect method.
 func TestBaseModuleConnect(t *testing.T) {
+	t.Parallel()
 	base := &BaseModule{}
 
 	_, _, err := base.Connect(nil, "test", "main", "test_table", []string{})
@@ -466,6 +477,7 @@ func TestBaseModuleConnect(t *testing.T) {
 
 // TestIsColumnUsedAllCases tests IsColumnUsed with various column indices.
 func TestIsColumnUsedAllCases(t *testing.T) {
+	t.Parallel()
 	info := NewIndexInfo(0)
 
 	tests := []struct {
@@ -484,6 +496,7 @@ func TestIsColumnUsedAllCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		info.ColUsed = tt.colUsed
 		result := info.IsColumnUsed(tt.column)
 		if result != tt.want {
@@ -495,6 +508,7 @@ func TestIsColumnUsedAllCases(t *testing.T) {
 
 // TestConstraintOpStringUnknown tests String method with unknown constraint op.
 func TestConstraintOpStringUnknown(t *testing.T) {
+	t.Parallel()
 	// Test with invalid constraint op value
 	op := ConstraintOp(999)
 	str := op.String()
@@ -509,6 +523,7 @@ func TestConstraintOpStringUnknown(t *testing.T) {
 
 // TestIndexInfoManyConstraints tests IndexInfo with many constraints.
 func TestIndexInfoManyConstraints(t *testing.T) {
+	t.Parallel()
 	// Test with large number of constraints
 	info := NewIndexInfo(100)
 
@@ -536,6 +551,7 @@ func TestIndexInfoManyConstraints(t *testing.T) {
 
 // TestFindConstraintNotFound tests FindConstraint when constraint not found.
 func TestFindConstraintNotFound(t *testing.T) {
+	t.Parallel()
 	info := NewIndexInfo(5)
 
 	// Set up constraints
@@ -567,6 +583,7 @@ func TestFindConstraintNotFound(t *testing.T) {
 
 // TestIsColumnUsedLargeColumn tests IsColumnUsed with large column numbers.
 func TestIsColumnUsedLargeColumn(t *testing.T) {
+	t.Parallel()
 	info := NewIndexInfo(0)
 
 	// Test column 63 (highest valid bit)
@@ -590,6 +607,7 @@ func TestIsColumnUsedLargeColumn(t *testing.T) {
 
 // TestCountUsableConstraintsNone tests CountUsableConstraints with no usable constraints.
 func TestCountUsableConstraintsNone(t *testing.T) {
+	t.Parallel()
 	info := NewIndexInfo(5)
 
 	// Set all constraints to unusable
@@ -605,6 +623,7 @@ func TestCountUsableConstraintsNone(t *testing.T) {
 
 // TestHasOrderByEmpty tests HasOrderBy with empty order by list.
 func TestHasOrderByEmpty(t *testing.T) {
+	t.Parallel()
 	info := NewIndexInfo(0)
 
 	if info.HasOrderBy() {

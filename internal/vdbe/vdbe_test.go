@@ -5,7 +5,9 @@ import (
 )
 
 func TestMemBasicTypes(t *testing.T) {
+	t.Parallel()
 	t.Run("Null", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemNull()
 		if !mem.IsNull() {
 			t.Error("Expected NULL flag to be set")
@@ -16,6 +18,7 @@ func TestMemBasicTypes(t *testing.T) {
 	})
 
 	t.Run("Integer", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemInt(42)
 		if !mem.IsInt() {
 			t.Error("Expected INT flag to be set")
@@ -29,6 +32,7 @@ func TestMemBasicTypes(t *testing.T) {
 	})
 
 	t.Run("Real", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemReal(3.14159)
 		if !mem.IsReal() {
 			t.Error("Expected REAL flag to be set")
@@ -39,6 +43,7 @@ func TestMemBasicTypes(t *testing.T) {
 	})
 
 	t.Run("String", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemStr("hello")
 		if !mem.IsStr() {
 			t.Error("Expected STR flag to be set")
@@ -49,6 +54,7 @@ func TestMemBasicTypes(t *testing.T) {
 	})
 
 	t.Run("Blob", func(t *testing.T) {
+		t.Parallel()
 		data := []byte{1, 2, 3, 4, 5}
 		mem := NewMemBlob(data)
 		if !mem.IsBlob() {
@@ -62,7 +68,9 @@ func TestMemBasicTypes(t *testing.T) {
 }
 
 func TestMemConversions(t *testing.T) {
+	t.Parallel()
 	t.Run("IntToReal", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemInt(42)
 		if err := mem.Realify(); err != nil {
 			t.Fatalf("Realify failed: %v", err)
@@ -76,6 +84,7 @@ func TestMemConversions(t *testing.T) {
 	})
 
 	t.Run("StringToInt", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemStr("123")
 		if err := mem.Integerify(); err != nil {
 			t.Fatalf("Integerify failed: %v", err)
@@ -86,6 +95,7 @@ func TestMemConversions(t *testing.T) {
 	})
 
 	t.Run("StringToReal", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemStr("3.14")
 		if err := mem.Realify(); err != nil {
 			t.Fatalf("Realify failed: %v", err)
@@ -96,6 +106,7 @@ func TestMemConversions(t *testing.T) {
 	})
 
 	t.Run("IntToString", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemInt(42)
 		if err := mem.Stringify(); err != nil {
 			t.Fatalf("Stringify failed: %v", err)
@@ -107,7 +118,9 @@ func TestMemConversions(t *testing.T) {
 }
 
 func TestMemArithmetic(t *testing.T) {
+	t.Parallel()
 	t.Run("AddIntegers", func(t *testing.T) {
+		t.Parallel()
 		a := NewMemInt(10)
 		b := NewMemInt(20)
 		if err := a.Add(b); err != nil {
@@ -119,6 +132,7 @@ func TestMemArithmetic(t *testing.T) {
 	})
 
 	t.Run("SubtractIntegers", func(t *testing.T) {
+		t.Parallel()
 		a := NewMemInt(50)
 		b := NewMemInt(20)
 		if err := a.Subtract(b); err != nil {
@@ -130,6 +144,7 @@ func TestMemArithmetic(t *testing.T) {
 	})
 
 	t.Run("MultiplyIntegers", func(t *testing.T) {
+		t.Parallel()
 		a := NewMemInt(6)
 		b := NewMemInt(7)
 		if err := a.Multiply(b); err != nil {
@@ -141,6 +156,7 @@ func TestMemArithmetic(t *testing.T) {
 	})
 
 	t.Run("DivideReals", func(t *testing.T) {
+		t.Parallel()
 		a := NewMemReal(10.0)
 		b := NewMemReal(4.0)
 		if err := a.Divide(b); err != nil {
@@ -152,6 +168,7 @@ func TestMemArithmetic(t *testing.T) {
 	})
 
 	t.Run("DivideByZero", func(t *testing.T) {
+		t.Parallel()
 		a := NewMemInt(10)
 		b := NewMemInt(0)
 		if err := a.Divide(b); err != nil {
@@ -163,6 +180,7 @@ func TestMemArithmetic(t *testing.T) {
 	})
 
 	t.Run("Remainder", func(t *testing.T) {
+		t.Parallel()
 		a := NewMemInt(17)
 		b := NewMemInt(5)
 		if err := a.Remainder(b); err != nil {
@@ -175,7 +193,9 @@ func TestMemArithmetic(t *testing.T) {
 }
 
 func TestMemComparison(t *testing.T) {
+	t.Parallel()
 	t.Run("IntegerComparison", func(t *testing.T) {
+		t.Parallel()
 		a := NewMemInt(10)
 		b := NewMemInt(20)
 		c := NewMemInt(10)
@@ -192,6 +212,7 @@ func TestMemComparison(t *testing.T) {
 	})
 
 	t.Run("StringComparison", func(t *testing.T) {
+		t.Parallel()
 		a := NewMemStr("apple")
 		b := NewMemStr("banana")
 		c := NewMemStr("apple")
@@ -208,6 +229,7 @@ func TestMemComparison(t *testing.T) {
 	})
 
 	t.Run("NullComparison", func(t *testing.T) {
+		t.Parallel()
 		a := NewMemNull()
 		b := NewMemNull()
 		c := NewMemInt(42)
@@ -222,7 +244,9 @@ func TestMemComparison(t *testing.T) {
 }
 
 func TestMemCopyMove(t *testing.T) {
+	t.Parallel()
 	t.Run("DeepCopy", func(t *testing.T) {
+		t.Parallel()
 		src := NewMemStr("hello")
 		dst := NewMem()
 		if err := dst.Copy(src); err != nil {
@@ -241,6 +265,7 @@ func TestMemCopyMove(t *testing.T) {
 	})
 
 	t.Run("Move", func(t *testing.T) {
+		t.Parallel()
 		src := NewMemInt(42)
 		dst := NewMem()
 		dst.Move(src)
@@ -254,6 +279,7 @@ func TestMemCopyMove(t *testing.T) {
 	})
 
 	t.Run("ShallowCopy", func(t *testing.T) {
+		t.Parallel()
 		src := NewMemStr("test")
 		dst := NewMem()
 		dst.ShallowCopy(src)
@@ -265,7 +291,9 @@ func TestMemCopyMove(t *testing.T) {
 }
 
 func TestVdbeBasicExecution(t *testing.T) {
+	t.Parallel()
 	t.Run("SimpleProgram", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.AllocMemory(10)
 
@@ -284,6 +312,7 @@ func TestVdbeBasicExecution(t *testing.T) {
 	})
 
 	t.Run("ArithmeticProgram", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.AllocMemory(10)
 
@@ -304,6 +333,7 @@ func TestVdbeBasicExecution(t *testing.T) {
 	})
 
 	t.Run("ConditionalJump", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.AllocMemory(10)
 
@@ -326,6 +356,7 @@ func TestVdbeBasicExecution(t *testing.T) {
 	})
 
 	t.Run("Loop", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.AllocMemory(10)
 
@@ -350,6 +381,7 @@ func TestVdbeBasicExecution(t *testing.T) {
 }
 
 func TestVdbeComparison(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		opcode Opcode
@@ -373,7 +405,9 @@ func TestVdbeComparison(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v := New()
 			v.AllocMemory(10)
 
@@ -399,6 +433,7 @@ func TestVdbeComparison(t *testing.T) {
 }
 
 func TestVdbeExplain(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 
@@ -426,7 +461,9 @@ func TestVdbeExplain(t *testing.T) {
 }
 
 func TestVdbeCursorOperations(t *testing.T) {
+	t.Parallel()
 	t.Run("OpenAndClose", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.AllocCursors(5)
 
@@ -457,6 +494,7 @@ func TestVdbeCursorOperations(t *testing.T) {
 }
 
 func TestVdbeReset(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 
@@ -490,7 +528,9 @@ func TestVdbeReset(t *testing.T) {
 }
 
 func TestResultRowHandling(t *testing.T) {
+	t.Parallel()
 	t.Run("SingleRowResult", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.AllocMemory(10)
 
@@ -547,6 +587,7 @@ func TestResultRowHandling(t *testing.T) {
 	})
 
 	t.Run("MultipleRowResults", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.AllocMemory(10)
 

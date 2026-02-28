@@ -9,6 +9,7 @@ import (
 
 // TestIndexCursor_PrevIndex tests backward iteration
 func TestIndexCursor_PrevIndex(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -67,6 +68,7 @@ func TestIndexCursor_PrevIndex(t *testing.T) {
 
 // TestIndexCursor_SeekNotFound tests seeking non-existent keys
 func TestIndexCursor_SeekNotFound(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -107,6 +109,7 @@ func TestIndexCursor_SeekNotFound(t *testing.T) {
 
 // TestIndexCursor_DeleteNotFound tests deleting non-existent entry
 func TestIndexCursor_DeleteNotFound(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -127,6 +130,7 @@ func TestIndexCursor_DeleteNotFound(t *testing.T) {
 
 // TestIndexCursor_DeleteWrongRowid tests deleting with wrong rowid
 func TestIndexCursor_DeleteWrongRowid(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -159,6 +163,7 @@ func TestIndexCursor_DeleteWrongRowid(t *testing.T) {
 
 // TestIndexCursor_String tests String method
 func TestIndexCursor_String(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -189,6 +194,7 @@ func TestIndexCursor_String(t *testing.T) {
 
 // TestIndexCursor_GettersWhenInvalid tests getter methods with invalid cursor
 func TestIndexCursor_GettersWhenInvalid(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -213,6 +219,7 @@ func TestIndexCursor_GettersWhenInvalid(t *testing.T) {
 
 // TestIndexCursor_InsertDuplicate tests inserting duplicate keys
 func TestIndexCursor_InsertDuplicate(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -244,6 +251,7 @@ func TestIndexCursor_InsertDuplicate(t *testing.T) {
 
 // TestIndexCursor_EmptyPage tests operations on empty page
 func TestIndexCursor_EmptyPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -276,6 +284,7 @@ func TestIndexCursor_EmptyPage(t *testing.T) {
 
 // TestIndexCursor_InteriorPage tests multi-level index tree
 func TestIndexCursor_InteriorPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages to force interior pages
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -317,6 +326,7 @@ func TestIndexCursor_InteriorPage(t *testing.T) {
 
 // TestIndexCursor_ParseIndexPayloadErrors tests error handling in payload parsing
 func TestIndexCursor_ParseIndexPayloadErrors(t *testing.T) {
+	t.Parallel()
 	cursor := &IndexCursor{}
 
 	tests := []struct {
@@ -342,7 +352,9 @@ func TestIndexCursor_ParseIndexPayloadErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			_, _, err := cursor.parseIndexPayload(tt.payload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseIndexPayload() error = %v, wantErr %v", err, tt.wantErr)
@@ -353,6 +365,7 @@ func TestIndexCursor_ParseIndexPayloadErrors(t *testing.T) {
 
 // TestIndexCursor_BinarySearchEdges tests binary search edge cases
 func TestIndexCursor_BinarySearchEdges(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -398,7 +411,9 @@ func TestIndexCursor_BinarySearchEdges(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			idx, exact := cursor.binarySearchKey(pageData, header, tt.searchKey)
 			if exact != tt.wantExact {
 				t.Errorf("binarySearchKey(%q) exact = %v, want %v (idx=%d)",
@@ -410,6 +425,7 @@ func TestIndexCursor_BinarySearchEdges(t *testing.T) {
 
 // TestIndexCursor_NextPrevInvalid tests next/prev with invalid cursor
 func TestIndexCursor_NextPrevInvalid(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -434,6 +450,7 @@ func TestIndexCursor_NextPrevInvalid(t *testing.T) {
 
 // TestIndexCursor_MoveToLastSingleEntry tests MoveToLast with one entry
 func TestIndexCursor_MoveToLastSingleEntry(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -459,6 +476,7 @@ func TestIndexCursor_MoveToLastSingleEntry(t *testing.T) {
 
 // TestIndexCursor_DeleteLastEntry tests deleting the last entry
 func TestIndexCursor_DeleteLastEntry(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -492,6 +510,7 @@ func TestIndexCursor_DeleteLastEntry(t *testing.T) {
 
 // TestIndexCursor_MoveToFirstLastEmpty tests navigation on empty results
 func TestIndexCursor_MoveToFirstLastEmpty(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -513,6 +532,7 @@ func TestIndexCursor_MoveToFirstLastEmpty(t *testing.T) {
 
 // TestIndexCursor_CorruptedPage tests handling of corrupted page data
 func TestIndexCursor_CorruptedPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageNum := uint32(2)
 
@@ -538,6 +558,7 @@ func TestIndexCursor_CorruptedPage(t *testing.T) {
 
 // TestIndexCursor_DepthExceeded tests tree depth limit
 func TestIndexCursor_DepthExceeded(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := createIndexPage(bt)
 
@@ -577,6 +598,7 @@ func TestIndexCursor_DepthExceeded(t *testing.T) {
 
 // TestIndexCursor_LoadCurrentEntryError tests error in loadCurrentEntry
 func TestIndexCursor_LoadCurrentEntryError(t *testing.T) {
+	t.Parallel()
 	cursor := &IndexCursor{}
 
 	// Create invalid cell with bad payload
@@ -592,6 +614,7 @@ func TestIndexCursor_LoadCurrentEntryError(t *testing.T) {
 
 // TestIndexCursor_SeekBeyondEnd tests seeking beyond last entry
 func TestIndexCursor_SeekBeyondEnd(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -623,6 +646,7 @@ func TestIndexCursor_SeekBeyondEnd(t *testing.T) {
 
 // TestIndexCursor_NextAtEnd tests calling Next when at last entry
 func TestIndexCursor_NextAtEnd(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -647,6 +671,7 @@ func TestIndexCursor_NextAtEnd(t *testing.T) {
 
 // TestIndexCursor_PrevAtBeginning tests calling Prev when at first entry
 func TestIndexCursor_PrevAtBeginning(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 )
 
 func TestBtreeInsertAndRead(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a table (allocates page 1 and initializes it)

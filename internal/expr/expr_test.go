@@ -6,6 +6,7 @@ import (
 )
 
 func TestExprCreation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -39,7 +40,9 @@ func TestExprCreation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := tt.expr.String()
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
@@ -49,6 +52,7 @@ func TestExprCreation(t *testing.T) {
 }
 
 func TestBinaryExpressions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -79,7 +83,9 @@ func TestBinaryExpressions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := tt.expr.String()
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
@@ -89,6 +95,7 @@ func TestBinaryExpressions(t *testing.T) {
 }
 
 func TestUnaryExpressions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -107,7 +114,9 @@ func TestUnaryExpressions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := tt.expr.String()
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
@@ -117,6 +126,7 @@ func TestUnaryExpressions(t *testing.T) {
 }
 
 func TestIsConstant(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -217,7 +227,9 @@ func TestIsConstant(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := tt.expr.IsConstant()
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -227,6 +239,7 @@ func TestIsConstant(t *testing.T) {
 }
 
 func TestExprHeight(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -252,7 +265,9 @@ func TestExprHeight(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			if tt.expr.Height != tt.expected {
 				t.Errorf("Expected height %d, got %d", tt.expected, tt.expr.Height)
 			}
@@ -261,6 +276,7 @@ func TestExprHeight(t *testing.T) {
 }
 
 func TestExprClone(t *testing.T) {
+	t.Parallel()
 	original := NewBinaryExpr(OpPlus,
 		NewIntExpr(1),
 		NewBinaryExpr(OpMultiply, NewIntExpr(2), NewIntExpr(3)))
@@ -287,6 +303,7 @@ func TestExprClone(t *testing.T) {
 }
 
 func TestFunctionExpr(t *testing.T) {
+	t.Parallel()
 	args := &ExprList{
 		Items: []*ExprListItem{
 			{Expr: NewColumnExpr("", "name", 0, 0)},
@@ -305,6 +322,7 @@ func TestFunctionExpr(t *testing.T) {
 }
 
 func TestExprListClone(t *testing.T) {
+	t.Parallel()
 	original := &ExprList{
 		Items: []*ExprListItem{
 			{Expr: NewIntExpr(1), Name: "col1"},
@@ -334,6 +352,7 @@ func TestExprListClone(t *testing.T) {
 }
 
 func TestVectorExpressions(t *testing.T) {
+	t.Parallel()
 	// Scalar expression
 	scalar := NewIntExpr(42)
 	if scalar.IsVector() {
@@ -365,6 +384,7 @@ func TestVectorExpressions(t *testing.T) {
 }
 
 func TestExprFlags(t *testing.T) {
+	t.Parallel()
 	expr := NewIntExpr(42)
 
 	// Initially should have EP_IntValue and EP_Leaf
@@ -389,6 +409,7 @@ func TestExprFlags(t *testing.T) {
 }
 
 func TestExprComplexExpression(t *testing.T) {
+	t.Parallel()
 	// Build: (a + b * c) > 10
 	expr := NewBinaryExpr(OpGt,
 		NewBinaryExpr(OpPlus,
@@ -417,6 +438,7 @@ func TestExprComplexExpression(t *testing.T) {
 }
 
 func TestExprCastExpression(t *testing.T) {
+	t.Parallel()
 	expr := &Expr{
 		Op:    OpCast,
 		Token: "INTEGER",
@@ -433,6 +455,7 @@ func TestExprCastExpression(t *testing.T) {
 }
 
 func TestCollateExpression(t *testing.T) {
+	t.Parallel()
 	expr := &Expr{
 		Op:      OpCollate,
 		CollSeq: "NOCASE",
@@ -449,6 +472,7 @@ func TestCollateExpression(t *testing.T) {
 }
 
 func TestLikeExpression(t *testing.T) {
+	t.Parallel()
 	expr := NewBinaryExpr(OpLike,
 		NewColumnExpr("", "name", 0, 0),
 		NewStringExpr("%test%"))
@@ -462,6 +486,7 @@ func TestLikeExpression(t *testing.T) {
 }
 
 func TestAndOrExpressions(t *testing.T) {
+	t.Parallel()
 	// age > 18 AND active = true
 	expr := NewBinaryExpr(OpAnd,
 		NewBinaryExpr(OpGt,
@@ -480,6 +505,7 @@ func TestAndOrExpressions(t *testing.T) {
 }
 
 func TestIsNullExpression(t *testing.T) {
+	t.Parallel()
 	expr := &Expr{
 		Op:   OpIsNull,
 		Left: NewColumnExpr("", "email", 0, 0),
@@ -496,6 +522,7 @@ func TestIsNullExpression(t *testing.T) {
 
 // TestExprStringEdgeCases tests edge cases for the String method.
 func TestExprStringEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -514,7 +541,9 @@ func TestExprStringEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := tt.expr.String()
 			if !strings.Contains(result, tt.contains) {
 				t.Errorf("Expected String() to contain %q, got %q", tt.contains, result)

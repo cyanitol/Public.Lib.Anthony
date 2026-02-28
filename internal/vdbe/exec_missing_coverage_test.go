@@ -6,7 +6,9 @@ import (
 
 // TestMissingOpcodesCoverage adds coverage for opcodes that have 0% coverage
 func TestMissingOpcodesCoverage(t *testing.T) {
+	t.Parallel()
 	t.Run("OpNoop", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		instr := &Instruction{Opcode: OpNoop}
 		err := v.execNoop(instr)
@@ -16,6 +18,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpGosub_Return", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.PC = 1
 
@@ -50,6 +53,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpIfNot", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 
 		// Test with false value (should jump)
@@ -76,6 +80,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpIfPos", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 
 		// Test with positive value (should add P3 and jump)
@@ -106,6 +111,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpInt64", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		instr := &Instruction{
 			Opcode: OpInt64,
@@ -123,6 +129,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpNull", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetInt(42)
 		v.Mem[1].SetInt(43)
@@ -144,6 +151,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpCopy", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetInt(42)
 
@@ -159,6 +167,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpMove", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.Mem[0].SetInt(42)
 		v.Mem[1].SetInt(43)
@@ -179,6 +188,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpSCopy", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetInt(42)
 
@@ -194,6 +204,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpSubtract", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetInt(50)
 		v.Mem[1].SetInt(8)
@@ -211,6 +222,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpMultiply", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetInt(6)
 		v.Mem[1].SetInt(7)
@@ -227,6 +239,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpDivide", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetInt(84)
 		v.Mem[1].SetInt(2)
@@ -254,6 +267,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpRemainder", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetInt(47)
 		v.Mem[1].SetInt(5)
@@ -281,6 +295,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpAddImm", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetInt(40)
 
@@ -297,6 +312,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpIsNull", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 
 		// Test with NULL value (should jump)
@@ -323,6 +339,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpNotNull", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 
 		// Test with non-NULL value (should jump)
@@ -349,6 +366,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpSeekGE", func(t *testing.T) {
+		t.Parallel()
 		// This requires a cursor, which is more complex
 		// Just test the basic error path for now
 		v := NewTestVDBE(5)
@@ -364,6 +382,7 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 	})
 
 	t.Run("OpSeekLE", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(5)
 
@@ -379,7 +398,9 @@ func TestMissingOpcodesCoverage(t *testing.T) {
 
 // TestVDBEUtilityMethods tests utility methods with 0% coverage
 func TestVDBEUtilityMethods(t *testing.T) {
+	t.Parallel()
 	t.Run("Finalize", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.AllocMemory(5)
 		v.AddOp(OpHalt, 0, 0, 0)
@@ -395,6 +416,7 @@ func TestVDBEUtilityMethods(t *testing.T) {
 	})
 
 	t.Run("GetError", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.SetError("test error")
 
@@ -405,6 +427,7 @@ func TestVDBEUtilityMethods(t *testing.T) {
 	})
 
 	t.Run("IsReadOnly_SetReadOnly", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 
 		if v.IsReadOnly() {
@@ -423,6 +446,7 @@ func TestVDBEUtilityMethods(t *testing.T) {
 	})
 
 	t.Run("NumOps", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.AddOp(OpHalt, 0, 0, 0)
 		v.AddOp(OpInteger, 1, 0, 0)
@@ -434,6 +458,7 @@ func TestVDBEUtilityMethods(t *testing.T) {
 	})
 
 	t.Run("GetInstruction", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.AddOp(OpInteger, 42, 5, 0)
 
@@ -459,6 +484,7 @@ func TestVDBEUtilityMethods(t *testing.T) {
 	})
 
 	t.Run("AddOpWithP4Int", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.AddOpWithP4Int(OpInteger, 0, 0, 0, 42)
 
@@ -471,6 +497,7 @@ func TestVDBEUtilityMethods(t *testing.T) {
 	})
 
 	t.Run("AddOpWithP4Real", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.AddOpWithP4Real(OpReal, 0, 0, 0, 3.14)
 
@@ -483,6 +510,7 @@ func TestVDBEUtilityMethods(t *testing.T) {
 	})
 
 	t.Run("AddOpWithP4Blob", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		blob := []byte{1, 2, 3, 4}
 		v.AddOpWithP4Blob(OpBlob, 0, 0, 0, blob)
@@ -498,6 +526,7 @@ func TestVDBEUtilityMethods(t *testing.T) {
 
 // TestNewFunctionContextWithRegistry tests the function context creation
 func TestNewFunctionContextWithRegistry(t *testing.T) {
+	t.Parallel()
 	ctx := NewFunctionContextWithRegistry(nil)
 	if ctx == nil {
 		t.Error("Expected non-nil context")
@@ -506,6 +535,7 @@ func TestNewFunctionContextWithRegistry(t *testing.T) {
 
 // TestResetAggregateState tests resetting aggregate state
 func TestResetAggregateState(t *testing.T) {
+	t.Parallel()
 	ctx := NewFunctionContext()
 	ctx.GetOrCreateAggregateState(0)
 	ctx.ResetAggregateState(0)
@@ -514,6 +544,7 @@ func TestResetAggregateState(t *testing.T) {
 
 // TestGetPseudoCursorPayload tests the getPseudoCursorPayload function
 func TestGetPseudoCursorPayload(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(10)
 	v.AllocCursors(2)
 
@@ -545,7 +576,9 @@ func TestGetPseudoCursorPayload(t *testing.T) {
 
 // TestExecRollback tests the execRollback function
 func TestExecRollback(t *testing.T) {
+	t.Parallel()
 	t.Run("Rollback_WriteTransaction", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		mockPager := &MockTransactionPager{
@@ -571,6 +604,7 @@ func TestExecRollback(t *testing.T) {
 	})
 
 	t.Run("Rollback_ReadTransaction", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		mockPager := &MockTransactionPager{
@@ -596,6 +630,7 @@ func TestExecRollback(t *testing.T) {
 	})
 
 	t.Run("Rollback_NoPager", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		// No context
 

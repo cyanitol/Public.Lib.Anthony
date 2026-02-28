@@ -80,6 +80,11 @@ type Column struct {
 	GeneratedStored bool   // STORED vs VIRTUAL
 }
 
+// GetDefault returns the default value for this column (for interface access).
+func (c *Column) GetDefault() interface{} {
+	return c.Default
+}
+
 // TableConstraint represents a table-level constraint.
 type TableConstraint struct {
 	Type       ConstraintType
@@ -121,6 +126,21 @@ func (s *Schema) GetTable(name string) (*Table, bool) {
 	lowerName := strings.ToLower(name)
 	for tableName, table := range s.Tables {
 		if strings.ToLower(tableName) == lowerName {
+			return table, true
+		}
+	}
+	return nil, false
+}
+
+// GetTableByRootPage retrieves a table by its root page number.
+// Returns the table (as interface{}) and true if found, nil and false otherwise.
+// The return type is interface{} to avoid import cycles with the vdbe package.
+func (s *Schema) GetTableByRootPage(rootPage uint32) (interface{}, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, table := range s.Tables {
+		if table.RootPage == rootPage {
 			return table, true
 		}
 	}
@@ -233,10 +253,17 @@ func (s *Schema) RenameTable(oldName, newName string) error {
 	lowerOldName := strings.ToLower(oldName)
 	lowerNewName := strings.ToLower(newName)
 
-	// Check if new name already exists
+	// Check if new name conflicts with existing table
 	for tableName := range s.Tables {
 		if strings.ToLower(tableName) == lowerNewName {
-			return fmt.Errorf("table already exists: %s", newName)
+			return fmt.Errorf("there is already another table or index with this name: %s", newName)
+		}
+	}
+
+	// Check if new name conflicts with existing index
+	for indexName := range s.Indexes {
+		if strings.ToLower(indexName) == lowerNewName {
+			return fmt.Errorf("there is already another table or index with this name: %s", newName)
 		}
 	}
 
@@ -335,6 +362,15 @@ func (c *Column) GetEffectiveCollation() string {
 		return "BINARY"
 	}
 	return c.Collation
+}
+
+// GetColumns returns the columns as a slice of interfaces (for VDBE access).
+func (t *Table) GetColumns() []interface{} {
+	result := make([]interface{}, len(t.Columns))
+	for i, col := range t.Columns {
+		result[i] = col
+	}
+	return result
 }
 
 // HasRowID returns true if the table has an implicit rowid column.

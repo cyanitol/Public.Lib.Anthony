@@ -7,6 +7,7 @@ import (
 // Test helper functions that extract values from expressions
 
 func TestIntValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		expr    Expression
@@ -52,7 +53,9 @@ func TestIntValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := IntValue(tt.expr)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("IntValue() error = %v, wantErr %v", err, tt.wantErr)
@@ -66,6 +69,7 @@ func TestIntValue(t *testing.T) {
 }
 
 func TestFloatValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		expr    Expression
@@ -111,7 +115,9 @@ func TestFloatValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := FloatValue(tt.expr)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("FloatValue() error = %v, wantErr %v", err, tt.wantErr)
@@ -125,6 +131,7 @@ func TestFloatValue(t *testing.T) {
 }
 
 func TestStringValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		expr    Expression
@@ -164,7 +171,9 @@ func TestStringValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := StringValue(tt.expr)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("StringValue() error = %v, wantErr %v", err, tt.wantErr)
@@ -180,7 +189,9 @@ func TestStringValue(t *testing.T) {
 // Test parser helper methods
 
 func TestParserHelpers(t *testing.T) {
+	t.Parallel()
 	t.Run("peek at end", func(t *testing.T) {
+			t.Parallel()
 		p := NewParser("")
 		tok := p.peek()
 		if tok.Type != TK_EOF {
@@ -189,6 +200,7 @@ func TestParserHelpers(t *testing.T) {
 	})
 
 	t.Run("checkIdentifier at end", func(t *testing.T) {
+			t.Parallel()
 		p := NewParser("")
 		if p.checkIdentifier() {
 			t.Error("checkIdentifier() at end should be false")

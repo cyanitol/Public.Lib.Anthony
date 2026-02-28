@@ -41,7 +41,9 @@ func (m *MockCookiePager) InWriteTransaction() bool            { return false }
 
 // TestSetCookieOpcode tests the OpSetCookie opcode
 func TestSetCookieOpcode(t *testing.T) {
+	t.Parallel()
 	t.Run("BasicSetCookie", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		mockPager := NewMockCookiePager()
@@ -72,6 +74,7 @@ func TestSetCookieOpcode(t *testing.T) {
 	})
 
 	t.Run("SetCookie_MultipleCookies", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		mockPager := NewMockCookiePager()
@@ -118,6 +121,7 @@ func TestSetCookieOpcode(t *testing.T) {
 	})
 
 	t.Run("SetCookie_NoPager", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		// No context set
 
@@ -135,6 +139,7 @@ func TestSetCookieOpcode(t *testing.T) {
 	})
 
 	t.Run("SetCookie_NoPagerInterface", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		// Set pager to something that doesn't implement CookiePagerInterface
@@ -156,6 +161,7 @@ func TestSetCookieOpcode(t *testing.T) {
 	})
 
 	t.Run("SetCookie_NilPager", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		v.Ctx = &VDBEContext{

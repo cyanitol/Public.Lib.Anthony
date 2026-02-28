@@ -11,6 +11,7 @@ import (
 
 // TestEnableWALModeFull tests complete WAL mode enable path
 func TestEnableWALModeFull(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_wal_full.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -51,6 +52,7 @@ func TestEnableWALModeFull(t *testing.T) {
 
 // TestJournalRestoreEntryWithValidChecksum tests restore with valid checksum
 func TestJournalRestoreEntryWithValidChecksum(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_restore_valid.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -129,6 +131,7 @@ func TestJournalRestoreEntryWithValidChecksum(t *testing.T) {
 
 // TestAcquirePendingLockFullPath tests pending lock acquisition
 func TestAcquirePendingLockFullPath(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -180,6 +183,7 @@ func TestAcquirePendingLockFullPath(t *testing.T) {
 
 // TestProcessTrunkPageEdgeCases tests trunk page processing edge cases
 func TestProcessTrunkPageEdgeCases(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_trunk_edge.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -241,6 +245,7 @@ func TestProcessTrunkPageEdgeCases(t *testing.T) {
 
 // TestFreeListCreateNewTrunkMultiple tests creating multiple trunks
 func TestFreeListCreateNewTrunkMultiple(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_multi_trunk.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -302,6 +307,7 @@ func TestFreeListCreateNewTrunkMultiple(t *testing.T) {
 
 // TestWALModeCheckpointTransition tests WAL checkpoint
 func TestWALModeCheckpointTransition(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_wal_checkpoint.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -355,6 +361,7 @@ func TestWALModeCheckpointTransition(t *testing.T) {
 
 // TestCommitPhasesWithErrors tests error handling in commit phases
 func TestCommitPhasesWithErrors(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_commit_errors.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -388,6 +395,7 @@ func TestCommitPhasesWithErrors(t *testing.T) {
 
 // TestLRUCacheSetMaxPagesExtended tests setting max pages
 func TestLRUCacheSetMaxPagesExtended(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_set_max.db")
 
 	config := DefaultLRUCacheConfig(4096)
@@ -424,6 +432,7 @@ func TestLRUCacheSetMaxPagesExtended(t *testing.T) {
 
 // TestLRUCacheSetMaxMemoryExtended tests setting max memory
 func TestLRUCacheSetMaxMemoryExtended(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_set_mem.db")
 
 	config := DefaultLRUCacheConfig(4096)
@@ -459,6 +468,7 @@ func TestLRUCacheSetMaxMemoryExtended(t *testing.T) {
 
 // TestCacheMarkDirtyError tests error handling in MarkDirty
 func TestCacheMarkDirtyError(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_mark_dirty.db")
 
 	config := DefaultLRUCacheConfig(4096)
@@ -486,6 +496,7 @@ func TestCacheMarkDirtyError(t *testing.T) {
 
 // TestCacheFlushPageNonExistent tests flushing non-existent page
 func TestCacheFlushPageNonExistent(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_flush_nonexist.db")
 
 	config := DefaultLRUCacheConfig(4096)
@@ -508,6 +519,7 @@ func TestCacheFlushPageNonExistent(t *testing.T) {
 
 // TestCacheRemoveLocked tests removing locked page from cache
 func TestCacheRemoveLocked(t *testing.T) {
+	t.Parallel()
 	cache := NewPageCache(10, 4096)
 
 	// Add a page
@@ -530,6 +542,7 @@ func TestCacheRemoveLocked(t *testing.T) {
 
 // TestCacheEvictClean tests evicting clean pages
 func TestCacheEvictClean(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_evict_clean.db")
 
 	config := DefaultLRUCacheConfig(4096)
@@ -558,6 +571,7 @@ func TestCacheEvictClean(t *testing.T) {
 
 // TestPeekCacheHit tests Peek with cache hit
 func TestPeekCacheHit(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_peek_hit.db")
 
 	config := DefaultLRUCacheConfig(4096)
@@ -588,6 +602,7 @@ func TestPeekCacheHit(t *testing.T) {
 
 // TestInitOrReadHeaderExisting tests reading existing header
 func TestInitOrReadHeaderExisting(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_init_or_read.db")
 
 	// Create initial database
@@ -621,6 +636,7 @@ func TestInitOrReadHeaderExisting(t *testing.T) {
 
 // TestJournalUpdatePageCountExtended tests updating page count in journal
 func TestJournalUpdatePageCountExtended(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_journal_pagecount.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)

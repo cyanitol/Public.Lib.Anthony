@@ -8,6 +8,7 @@ import (
 
 // TestSQLiteMasterModule tests the sqlite_master virtual table module.
 func TestSQLiteMasterModule(t *testing.T) {
+	t.Parallel()
 	module := NewSQLiteMasterModule()
 
 	// Test Connect
@@ -41,6 +42,7 @@ func TestSQLiteMasterModule(t *testing.T) {
 
 // TestSQLiteMasterTable tests the sqlite_master virtual table.
 func TestSQLiteMasterTable(t *testing.T) {
+	t.Parallel()
 	table := &SQLiteMasterTable{db: nil}
 
 	// Test BestIndex
@@ -88,6 +90,7 @@ func TestSQLiteMasterTable(t *testing.T) {
 
 // TestSQLiteMasterCursor tests the sqlite_master cursor.
 func TestSQLiteMasterCursor(t *testing.T) {
+	t.Parallel()
 	table := &SQLiteMasterTable{db: nil}
 	cursor, err := table.Open()
 	if err != nil {
@@ -179,6 +182,7 @@ func TestSQLiteMasterCursor(t *testing.T) {
 
 // TestSQLiteMasterCursorWithFilters tests filtering in sqlite_master.
 func TestSQLiteMasterCursorWithFilters(t *testing.T) {
+	t.Parallel()
 	table := &SQLiteMasterTable{db: nil}
 	cursor, err := table.Open()
 	if err != nil {
@@ -220,6 +224,7 @@ func TestSQLiteMasterCursorWithFilters(t *testing.T) {
 
 // TestPragmaTableInfoModule tests the pragma_table_info module.
 func TestPragmaTableInfoModule(t *testing.T) {
+	t.Parallel()
 	module := NewPragmaTableInfoModule()
 
 	// Test Connect
@@ -249,6 +254,7 @@ func TestPragmaTableInfoModule(t *testing.T) {
 
 // TestPragmaIndexListModule tests the pragma_index_list module.
 func TestPragmaIndexListModule(t *testing.T) {
+	t.Parallel()
 	module := NewPragmaIndexListModule()
 
 	// Test Connect
@@ -278,6 +284,7 @@ func TestPragmaIndexListModule(t *testing.T) {
 
 // TestPragmaTableInfoCursor tests the pragma_table_info cursor.
 func TestPragmaTableInfoCursor(t *testing.T) {
+	t.Parallel()
 	module := NewPragmaTableInfoModule()
 	vtable, _, err := module.Connect(nil, "pragma_table_info", "main", "pragma_table_info", nil)
 	if err != nil {
@@ -336,6 +343,7 @@ func TestPragmaTableInfoCursor(t *testing.T) {
 
 // TestPragmaIndexListCursor tests the pragma_index_list cursor.
 func TestPragmaIndexListCursor(t *testing.T) {
+	t.Parallel()
 	module := NewPragmaIndexListModule()
 	vtable, _, err := module.Connect(nil, "pragma_index_list", "main", "pragma_index_list", nil)
 	if err != nil {
@@ -383,6 +391,7 @@ func TestPragmaIndexListCursor(t *testing.T) {
 
 // TestPragmaTableCreate tests the Create method for pragma tables.
 func TestPragmaTableCreate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		module     *PragmaModule
@@ -401,7 +410,9 @@ func TestPragmaTableCreate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			vtable, schema, err := tt.module.Create(nil, "pragma_"+tt.name, "main", tt.wantSchema, nil)
 			if err != nil {
 				t.Fatalf("Create failed: %v", err)
@@ -418,6 +429,7 @@ func TestPragmaTableCreate(t *testing.T) {
 
 // TestPragmaTableBestIndex tests BestIndex for pragma tables.
 func TestPragmaTableBestIndex(t *testing.T) {
+	t.Parallel()
 	table := &PragmaTable{
 		db:         nil,
 		pragmaType: "table_info",
@@ -443,6 +455,7 @@ func TestPragmaTableBestIndex(t *testing.T) {
 
 // TestPragmaCursorRowid tests the Rowid method.
 func TestPragmaCursorRowid(t *testing.T) {
+	t.Parallel()
 	module := NewPragmaTableInfoModule()
 	vtable, _, err := module.Connect(nil, "pragma_table_info", "main", "pragma_table_info", nil)
 	if err != nil {
@@ -483,6 +496,7 @@ func TestPragmaCursorRowid(t *testing.T) {
 
 // TestPragmaCursorColumnErrors tests error cases for Column method.
 func TestPragmaCursorColumnErrors(t *testing.T) {
+	t.Parallel()
 	module := NewPragmaTableInfoModule()
 	vtable, _, err := module.Connect(nil, "pragma_table_info", "main", "pragma_table_info", nil)
 	if err != nil {
@@ -526,6 +540,7 @@ func TestPragmaCursorColumnErrors(t *testing.T) {
 
 // TestPragmaFunctionModule tests the pragma function module.
 func TestPragmaFunctionModule(t *testing.T) {
+	t.Parallel()
 	module := NewPragmaFunctionModule()
 
 	tests := []struct {
@@ -556,7 +571,9 @@ func TestPragmaFunctionModule(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			vtable, schema, err := module.Connect(nil, tt.moduleName, "main", "test", nil)
 			if err != nil {
 				t.Fatalf("Connect failed: %v", err)
@@ -584,6 +601,7 @@ func TestPragmaFunctionModule(t *testing.T) {
 
 // TestPragmaFunctionModuleCreate tests the Create method.
 func TestPragmaFunctionModuleCreate(t *testing.T) {
+	t.Parallel()
 	module := NewPragmaFunctionModule()
 
 	vtable, schema, err := module.Create(nil, "pragma_table_info", "main", "test", nil)
@@ -602,6 +620,7 @@ func TestPragmaFunctionModuleCreate(t *testing.T) {
 
 // TestPragmaCursorEmptyTable tests pragma cursor with empty table name.
 func TestPragmaCursorEmptyTable(t *testing.T) {
+	t.Parallel()
 	module := NewPragmaTableInfoModule()
 	vtable, _, err := module.Connect(nil, "pragma_table_info", "main", "pragma_table_info", nil)
 	if err != nil {
@@ -630,6 +649,7 @@ func TestPragmaCursorEmptyTable(t *testing.T) {
 
 // TestSQLiteMasterBestIndexEdgeCases tests edge cases in BestIndex.
 func TestSQLiteMasterBestIndexEdgeCases(t *testing.T) {
+	t.Parallel()
 	table := &SQLiteMasterTable{db: nil}
 
 	// Test with non-usable constraints
@@ -662,6 +682,7 @@ func TestSQLiteMasterBestIndexEdgeCases(t *testing.T) {
 
 // TestSQLiteMasterColumnEdgeCases tests edge cases in Column method.
 func TestSQLiteMasterColumnEdgeCases(t *testing.T) {
+	t.Parallel()
 	table := &SQLiteMasterTable{db: nil}
 	cursor, err := table.Open()
 	if err != nil {
@@ -692,6 +713,7 @@ func TestSQLiteMasterColumnEdgeCases(t *testing.T) {
 
 // TestSQLiteMasterRowidError tests Rowid error cases.
 func TestSQLiteMasterRowidError(t *testing.T) {
+	t.Parallel()
 	table := &SQLiteMasterTable{db: nil}
 	cursor, err := table.Open()
 	if err != nil {
@@ -719,6 +741,7 @@ func TestSQLiteMasterRowidError(t *testing.T) {
 
 // TestSQLiteMasterFilterTypeMatch tests matchesFilters edge cases.
 func TestSQLiteMasterFilterTypeMatch(t *testing.T) {
+	t.Parallel()
 	table := &SQLiteMasterTable{db: nil}
 	cursor, err := table.Open()
 	if err != nil {
@@ -742,6 +765,7 @@ func TestSQLiteMasterFilterTypeMatch(t *testing.T) {
 
 // TestPragmaModuleUnknownType tests error handling for unknown pragma types.
 func TestPragmaModuleUnknownType(t *testing.T) {
+	t.Parallel()
 	module := &PragmaModule{pragmaType: "unknown_type"}
 
 	_, _, err := module.Connect(nil, "pragma_unknown", "main", "test", nil)
@@ -752,6 +776,7 @@ func TestPragmaModuleUnknownType(t *testing.T) {
 
 // TestPragmaCursorWithNilArgs tests Filter with nil arguments.
 func TestPragmaCursorWithNilArgs(t *testing.T) {
+	t.Parallel()
 	module := NewPragmaTableInfoModule()
 	vtable, _, err := module.Connect(nil, "pragma_table_info", "main", "pragma_table_info", nil)
 	if err != nil {
@@ -780,6 +805,7 @@ func TestPragmaCursorWithNilArgs(t *testing.T) {
 
 // TestPragmaCursorEmptyTableName tests empty table name handling.
 func TestPragmaCursorEmptyTableName(t *testing.T) {
+	t.Parallel()
 	module := NewPragmaTableInfoModule()
 	vtable, _, _ := module.Connect(nil, "pragma_table_info", "main", "pragma_table_info", nil)
 	cursor, _ := vtable.Open()
@@ -802,6 +828,7 @@ func TestPragmaCursorEmptyTableName(t *testing.T) {
 
 // TestPragmaDefaultCase tests the default case in pragma switch.
 func TestPragmaDefaultCase(t *testing.T) {
+	t.Parallel()
 	module := NewPragmaTableInfoModule()
 	vtable, _, _ := module.Connect(nil, "pragma_table_info", "main", "test", nil)
 	cursor, _ := vtable.Open()
@@ -823,6 +850,7 @@ func TestPragmaDefaultCase(t *testing.T) {
 
 // TestSQLiteMasterNonUsableConstraints tests BestIndex with more constraints.
 func TestSQLiteMasterNonUsableConstraints(t *testing.T) {
+	t.Parallel()
 	table := &SQLiteMasterTable{db: nil}
 
 	info := &vtab.IndexInfo{
@@ -857,6 +885,7 @@ func TestSQLiteMasterNonUsableConstraints(t *testing.T) {
 
 // TestSQLiteMasterColumnAllTypes tests all column types.
 func TestSQLiteMasterColumnAllTypes(t *testing.T) {
+	t.Parallel()
 	table := &SQLiteMasterTable{db: nil}
 	cursor, _ := table.Open()
 	defer cursor.Close()

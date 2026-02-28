@@ -7,6 +7,7 @@ import (
 )
 
 func TestInitializeMaster(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	err := s.InitializeMaster()
@@ -46,6 +47,7 @@ func TestInitializeMaster(t *testing.T) {
 	}
 
 	for i, expected := range expectedColumns {
+		expected := expected
 		col := table.Columns[i]
 		if col.Name != expected.name {
 			t.Errorf("column %d name = %q, want %q", i, col.Name, expected.name)
@@ -60,6 +62,7 @@ func TestInitializeMaster(t *testing.T) {
 }
 
 func TestLoadFromMaster(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	bt := btree.NewBtree(4096)
 
@@ -77,6 +80,7 @@ func TestLoadFromMaster(t *testing.T) {
 }
 
 func TestSaveToMaster(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	bt := btree.NewBtree(4096)
 
@@ -109,6 +113,7 @@ func TestSaveToMaster(t *testing.T) {
 }
 
 func TestMasterRow(t *testing.T) {
+	t.Parallel()
 	// Test MasterRow structure
 	row := MasterRow{
 		Type:     "table",
@@ -133,6 +138,7 @@ func TestMasterRow(t *testing.T) {
 }
 
 func TestParseMasterPage(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	bt := btree.NewBtree(4096)
 
@@ -153,6 +159,7 @@ func TestParseMasterPage(t *testing.T) {
 }
 
 func TestWriteMasterPage(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	bt := btree.NewBtree(4096)
 
@@ -174,6 +181,7 @@ func TestWriteMasterPage(t *testing.T) {
 }
 
 func TestParseTableSQL(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Test with empty SQL (system table)
@@ -211,6 +219,7 @@ func TestParseTableSQL(t *testing.T) {
 }
 
 func TestParseIndexSQL(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Test with empty SQL (auto-index)
@@ -238,6 +247,7 @@ func TestParseIndexSQL(t *testing.T) {
 }
 
 func TestMasterSchemaIntegration(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	bt := btree.NewBtree(4096)
 
@@ -261,6 +271,7 @@ func TestMasterSchemaIntegration(t *testing.T) {
 }
 
 func TestMasterTableNotSaved(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	bt := btree.NewBtree(4096)
 
@@ -288,6 +299,7 @@ func TestMasterTableNotSaved(t *testing.T) {
 }
 
 func TestIsInternalTable(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expected bool
@@ -299,7 +311,9 @@ func TestIsInternalTable(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := isInternalTable(tt.name)
 			if result != tt.expected {
 				t.Errorf("isInternalTable(%q) = %v, want %v", tt.name, result, tt.expected)
@@ -309,6 +323,7 @@ func TestIsInternalTable(t *testing.T) {
 }
 
 func TestIsAutoIndex(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expected bool
@@ -320,7 +335,9 @@ func TestIsAutoIndex(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := isAutoIndex(tt.name)
 			if result != tt.expected {
 				t.Errorf("isAutoIndex(%q) = %v, want %v", tt.name, result, tt.expected)
@@ -330,6 +347,7 @@ func TestIsAutoIndex(t *testing.T) {
 }
 
 func TestProcessMasterTableRow(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	row := MasterRow{
@@ -365,6 +383,7 @@ func TestProcessMasterTableRow(t *testing.T) {
 }
 
 func TestProcessMasterIndexRow(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	row := MasterRow{
@@ -400,6 +419,7 @@ func TestProcessMasterIndexRow(t *testing.T) {
 }
 
 func TestProcessMasterViewRow(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	row := MasterRow{
@@ -420,6 +440,7 @@ func TestProcessMasterViewRow(t *testing.T) {
 }
 
 func TestProcessMasterRow(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Test table row
@@ -476,6 +497,7 @@ func TestProcessMasterRow(t *testing.T) {
 }
 
 func TestParseSingleCreateTable(t *testing.T) {
+	t.Parallel()
 	sql := "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT)"
 	stmt, err := parseSingleCreateTable(sql)
 	if err != nil {
@@ -491,6 +513,7 @@ func TestParseSingleCreateTable(t *testing.T) {
 }
 
 func TestParseSingleCreateTableMultiple(t *testing.T) {
+	t.Parallel()
 	sql := "CREATE TABLE t1(id INTEGER); CREATE TABLE t2(id INTEGER)"
 	_, err := parseSingleCreateTable(sql)
 	if err == nil {
@@ -499,6 +522,7 @@ func TestParseSingleCreateTableMultiple(t *testing.T) {
 }
 
 func TestParseSingleCreateTableWrongType(t *testing.T) {
+	t.Parallel()
 	sql := "CREATE INDEX idx ON t(c)"
 	_, err := parseSingleCreateTable(sql)
 	if err == nil {
@@ -507,6 +531,7 @@ func TestParseSingleCreateTableWrongType(t *testing.T) {
 }
 
 func TestParseViewSQL(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	row := MasterRow{
@@ -528,6 +553,7 @@ func TestParseViewSQL(t *testing.T) {
 }
 
 func TestParseViewSQLNoSQL(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	row := MasterRow{
@@ -549,6 +575,7 @@ func TestParseViewSQLNoSQL(t *testing.T) {
 }
 
 func TestParseViewSQLInvalid(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	row := MasterRow{

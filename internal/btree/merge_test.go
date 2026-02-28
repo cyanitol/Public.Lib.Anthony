@@ -113,6 +113,7 @@ func createInteriorPage(pageNum uint32, pageSize uint32, cells []struct {
 }
 
 func TestCanMerge(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	tests := []struct {
@@ -153,7 +154,9 @@ func TestCanMerge(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			// Create left page
 			leftCells := make([]struct {
 				rowid   int64
@@ -198,6 +201,7 @@ func TestCanMerge(t *testing.T) {
 }
 
 func TestCanMerge_DifferentPageTypes(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	// Create left page as leaf
@@ -228,6 +232,7 @@ func TestCanMerge_DifferentPageTypes(t *testing.T) {
 }
 
 func TestRedistributeCells(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	tests := []struct {
@@ -273,7 +278,9 @@ func TestRedistributeCells(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			// Create left page
 			leftCells := make([]struct {
 				rowid   int64
@@ -329,6 +336,7 @@ func TestRedistributeCells(t *testing.T) {
 }
 
 func TestIsUnderfull(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	tests := []struct {
@@ -370,7 +378,9 @@ func TestIsUnderfull(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			// Create page
 			cells := make([]struct {
 				rowid   int64
@@ -397,6 +407,7 @@ func TestIsUnderfull(t *testing.T) {
 }
 
 func TestMergePage_Simple(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -484,6 +495,7 @@ func TestMergePage_Simple(t *testing.T) {
 }
 
 func TestMergePage_RootPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a single-page tree (root only)
@@ -512,6 +524,7 @@ func TestMergePage_RootPage(t *testing.T) {
 }
 
 func TestRedistributeCells_KeyOrdering(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	// Create left page with keys 1-3
@@ -633,6 +646,7 @@ func TestRedistributeCells_KeyOrdering(t *testing.T) {
 }
 
 func TestCanMerge_EmptyPages(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	// Create two empty pages

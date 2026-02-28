@@ -41,6 +41,7 @@ func TestCountWithPreparedStatement(t *testing.T) {
 
 	// Test COUNT(*) with prepared statement
 	t.Run("COUNT(*) with prepared statement", func(t *testing.T) {
+		t.Parallel()
 		stmt, err := db.Prepare("SELECT COUNT(*) FROM users")
 		if err != nil {
 			t.Fatalf("failed to prepare statement: %v", err)
@@ -60,6 +61,7 @@ func TestCountWithPreparedStatement(t *testing.T) {
 
 	// Test COUNT(*) with direct query (for comparison)
 	t.Run("COUNT(*) with direct query", func(t *testing.T) {
+		t.Parallel()
 		var count int
 		err = db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
 		if err != nil {
@@ -73,6 +75,7 @@ func TestCountWithPreparedStatement(t *testing.T) {
 
 	// Test COUNT(column) with prepared statement
 	t.Run("COUNT(column) with prepared statement", func(t *testing.T) {
+		t.Parallel()
 		stmt, err := db.Prepare("SELECT COUNT(name) FROM users")
 		if err != nil {
 			t.Fatalf("failed to prepare statement: %v", err)
@@ -92,6 +95,7 @@ func TestCountWithPreparedStatement(t *testing.T) {
 
 	// Test empty table COUNT
 	t.Run("COUNT(*) on empty table", func(t *testing.T) {
+		t.Parallel()
 		_, err = db.Exec("CREATE TABLE empty_table (id INTEGER PRIMARY KEY)")
 		if err != nil {
 			t.Fatalf("failed to create empty table: %v", err)
@@ -150,6 +154,7 @@ func TestCountWithParameters(t *testing.T) {
 	// Test COUNT with WHERE clause - note: WHERE is not yet implemented in this simplified version
 	// This test is here for future validation
 	t.Run("COUNT(*) total", func(t *testing.T) {
+		t.Parallel()
 		stmt, err := db.Prepare("SELECT COUNT(*) FROM products")
 		if err != nil {
 			t.Fatalf("failed to prepare statement: %v", err)
@@ -194,6 +199,7 @@ func TestMultipleAggregates(t *testing.T) {
 
 	// Test just COUNT for now (SUM, MIN, MAX may need additional implementation)
 	t.Run("COUNT only", func(t *testing.T) {
+		t.Parallel()
 		stmt, err := db.Prepare("SELECT COUNT(*) FROM sales")
 		if err != nil {
 			t.Fatalf("failed to prepare statement: %v", err)

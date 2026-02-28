@@ -6,6 +6,7 @@ import (
 
 // TestFinalEdgeCasesToReach99 covers remaining uncovered lines
 func TestFinalEdgeCasesToReach99(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -262,7 +263,9 @@ func TestFinalEdgeCasesToReach99(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -274,6 +277,7 @@ func TestFinalEdgeCasesToReach99(t *testing.T) {
 
 // TestAllStatementTypes ensures all statement types are covered
 func TestAllStatementTypes(t *testing.T) {
+	t.Parallel()
 	tests := []string{
 		"SELECT * FROM users",
 		"INSERT INTO users VALUES (1)",
@@ -312,6 +316,7 @@ func TestAllStatementTypes(t *testing.T) {
 
 	for _, sql := range tests {
 		t.Run(sql, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(sql)
 			_, err := p.Parse()
 			if err != nil {
@@ -323,6 +328,7 @@ func TestAllStatementTypes(t *testing.T) {
 
 // TestErrorRecovery tests that parser properly returns errors
 func TestErrorRecovery(t *testing.T) {
+	t.Parallel()
 	errorTests := []string{
 		"",
 		"SELECT",
@@ -349,6 +355,7 @@ func TestErrorRecovery(t *testing.T) {
 
 	for _, sql := range errorTests {
 		t.Run(sql, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(sql)
 			_, err := p.Parse()
 			// We just want to ensure these produce some result (error or empty)

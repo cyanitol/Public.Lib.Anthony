@@ -87,7 +87,9 @@ func TestBindInteger32(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", tt.a, tt.b, tt.c)
 			if err != nil {
 				t.Fatalf("failed to insert: %v", err)
@@ -189,7 +191,9 @@ func TestBindDouble(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", tt.a, tt.b, tt.c)
 			if err != nil {
 				t.Fatalf("failed to insert: %v", err)
@@ -971,6 +975,7 @@ func TestBindMultipleQueries(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(fmt.Sprintf("threshold_%d", tt.threshold), func(t *testing.T) {
 			var count int
 			err := db.QueryRow("SELECT COUNT(*) FROM t1 WHERE n > ?", tt.threshold).Scan(&count)

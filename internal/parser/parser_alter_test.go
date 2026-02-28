@@ -5,6 +5,7 @@ import (
 )
 
 func TestAlterTableRenameTable(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -48,7 +49,9 @@ func TestAlterTableRenameTable(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			stmts, err := ParseString(tt.sql)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ParseString() error = %v, wantErr %v", err, tt.wantErr)
@@ -67,6 +70,7 @@ func TestAlterTableRenameTable(t *testing.T) {
 }
 
 func TestAlterTableRenameColumn(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -123,7 +127,9 @@ func TestAlterTableRenameColumn(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			stmts, err := ParseString(tt.sql)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ParseString() error = %v, wantErr %v", err, tt.wantErr)
@@ -142,6 +148,7 @@ func TestAlterTableRenameColumn(t *testing.T) {
 }
 
 func TestAlterTableAddColumn(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -236,7 +243,9 @@ func TestAlterTableAddColumn(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			stmts, err := ParseString(tt.sql)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ParseString() error = %v, wantErr %v", err, tt.wantErr)
@@ -255,6 +264,7 @@ func TestAlterTableAddColumn(t *testing.T) {
 }
 
 func TestAlterTableDropColumn(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -305,7 +315,9 @@ func TestAlterTableDropColumn(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			stmts, err := ParseString(tt.sql)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ParseString() error = %v, wantErr %v", err, tt.wantErr)
@@ -324,6 +336,7 @@ func TestAlterTableDropColumn(t *testing.T) {
 }
 
 func TestAlterTableErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -351,7 +364,9 @@ func TestAlterTableErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := ParseString(tt.sql)
 			if err == nil {
 				t.Errorf("expected error for invalid SQL: %s", tt.sql)
@@ -361,6 +376,7 @@ func TestAlterTableErrors(t *testing.T) {
 }
 
 func TestAlterTableMultipleStatements(t *testing.T) {
+	t.Parallel()
 	sql := `
 		ALTER TABLE users RENAME TO customers;
 		ALTER TABLE customers ADD COLUMN email TEXT;
@@ -421,6 +437,7 @@ func TestAlterTableMultipleStatements(t *testing.T) {
 }
 
 func TestAlterTableComplexColumnDefinitions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -444,7 +461,9 @@ func TestAlterTableComplexColumnDefinitions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			stmts, err := ParseString(tt.sql)
 			if err != nil {
 				t.Fatalf("ParseString() error = %v", err)

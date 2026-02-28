@@ -7,6 +7,7 @@ import (
 // Test parser edge cases and error paths for better coverage
 
 func TestParserEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -230,7 +231,9 @@ func TestParserEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if tt.wantErr {
@@ -247,6 +250,7 @@ func TestParserEdgeCases(t *testing.T) {
 }
 
 func TestParserDMLStatements(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -290,7 +294,9 @@ func TestParserDMLStatements(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil {
@@ -301,6 +307,7 @@ func TestParserDMLStatements(t *testing.T) {
 }
 
 func TestParserDDLStatements(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -344,7 +351,9 @@ func TestParserDDLStatements(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil {
@@ -355,6 +364,7 @@ func TestParserDDLStatements(t *testing.T) {
 }
 
 func TestParserUtilityStatements(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -390,7 +400,9 @@ func TestParserUtilityStatements(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil {

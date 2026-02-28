@@ -7,6 +7,7 @@ import (
 )
 
 func TestDetermineAffinity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		typeName string
 		want     Affinity
@@ -57,7 +58,9 @@ func TestDetermineAffinity(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.typeName, func(t *testing.T) {
+			t.Parallel()
 			got := DetermineAffinity(tt.typeName)
 			if got != tt.want {
 				t.Errorf("DetermineAffinity(%q) = %v, want %v",
@@ -68,6 +71,7 @@ func TestDetermineAffinity(t *testing.T) {
 }
 
 func TestIsNumericAffinity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		affinity Affinity
 		want     bool
@@ -81,7 +85,9 @@ func TestIsNumericAffinity(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(AffinityName(tt.affinity), func(t *testing.T) {
+			t.Parallel()
 			got := IsNumericAffinity(tt.affinity)
 			if got != tt.want {
 				t.Errorf("IsNumericAffinity(%v) = %v, want %v",
@@ -92,6 +98,7 @@ func TestIsNumericAffinity(t *testing.T) {
 }
 
 func TestAffinityName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		affinity Affinity
 		want     string
@@ -106,7 +113,9 @@ func TestAffinityName(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.want, func(t *testing.T) {
+			t.Parallel()
 			got := AffinityName(tt.affinity)
 			if got != tt.want {
 				t.Errorf("AffinityName(%d) = %q, want %q",
@@ -117,6 +126,7 @@ func TestAffinityName(t *testing.T) {
 }
 
 func TestAffinityConstants(t *testing.T) {
+	t.Parallel()
 	// Verify that our constants match the expr package constants
 	if AffinityNone != expr.AFF_NONE {
 		t.Errorf("AffinityNone mismatch")

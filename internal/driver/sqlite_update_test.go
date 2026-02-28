@@ -736,7 +736,9 @@ func TestSQLiteUpdate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Create a new in-memory database for each test
 			db, err := sql.Open(DriverName, ":memory:")
 			if err != nil {

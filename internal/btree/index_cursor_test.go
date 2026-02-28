@@ -38,6 +38,7 @@ func createIndexPage(bt *Btree) (uint32, error) {
 }
 
 func TestNewIndexCursor(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -60,6 +61,7 @@ func TestNewIndexCursor(t *testing.T) {
 }
 
 func TestEncodeDecodeIndexPayload(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		key   []byte
@@ -75,7 +77,9 @@ func TestEncodeDecodeIndexPayload(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			payload := encodeIndexPayload(tt.key, tt.rowid)
 
 			cursor := &IndexCursor{}
@@ -95,6 +99,7 @@ func TestEncodeDecodeIndexPayload(t *testing.T) {
 }
 
 func TestIndexCursor_InsertAndSeek(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -142,6 +147,7 @@ func TestIndexCursor_InsertAndSeek(t *testing.T) {
 }
 
 func TestIndexCursor_MoveToFirst(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -182,6 +188,7 @@ func TestIndexCursor_MoveToFirst(t *testing.T) {
 }
 
 func TestIndexCursor_NextIndex(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -235,6 +242,7 @@ func TestIndexCursor_NextIndex(t *testing.T) {
 }
 
 func TestIndexCursor_DeleteIndex(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -316,6 +324,7 @@ func BenchmarkIndexCursor_Seek(b *testing.B) {
 
 // TestIndexCursor_MoveToLast tests MoveToLast method
 func TestIndexCursor_MoveToLast(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {

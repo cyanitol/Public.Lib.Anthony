@@ -5,6 +5,7 @@ import (
 )
 
 func TestAffinityFromType(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		typeName string
 		expected Affinity
@@ -26,7 +27,9 @@ func TestAffinityFromType(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.typeName, func(t *testing.T) {
+				t.Parallel()
 			result := AffinityFromType(tt.typeName)
 			if result != tt.expected {
 				t.Errorf("AffinityFromType(%q) = %v, want %v",
@@ -37,6 +40,7 @@ func TestAffinityFromType(t *testing.T) {
 }
 
 func TestGetExprAffinity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -76,7 +80,9 @@ func TestGetExprAffinity(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("GetExprAffinity() = %v, want %v", result, tt.expected)
@@ -86,6 +92,7 @@ func TestGetExprAffinity(t *testing.T) {
 }
 
 func TestCompareAffinity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		left     *Expr
@@ -119,7 +126,9 @@ func TestCompareAffinity(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := CompareAffinity(tt.left, tt.right)
 			if result != tt.expected {
 				t.Errorf("CompareAffinity() = %v, want %v", result, tt.expected)
@@ -129,6 +138,7 @@ func TestCompareAffinity(t *testing.T) {
 }
 
 func TestApplyAffinity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -180,7 +190,9 @@ func TestApplyAffinity(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := ApplyAffinity(tt.value, tt.affinity)
 			if result != tt.expected {
 				t.Errorf("ApplyAffinity(%v, %v) = %v, want %v",
@@ -191,6 +203,7 @@ func TestApplyAffinity(t *testing.T) {
 }
 
 func TestPropagateAffinity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -229,7 +242,9 @@ func TestPropagateAffinity(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			PropagateAffinity(tt.expr)
 			if tt.expr.Affinity != tt.expected {
 				t.Errorf("After PropagateAffinity, affinity = %v, want %v",
@@ -240,6 +255,7 @@ func TestPropagateAffinity(t *testing.T) {
 }
 
 func TestIsNumericAffinity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		affinity Affinity
 		expected bool
@@ -253,7 +269,9 @@ func TestIsNumericAffinity(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.affinity.String(), func(t *testing.T) {
+				t.Parallel()
 			result := IsNumericAffinity(tt.affinity)
 			if result != tt.expected {
 				t.Errorf("IsNumericAffinity(%v) = %v, want %v",
@@ -264,6 +282,7 @@ func TestIsNumericAffinity(t *testing.T) {
 }
 
 func TestSetTableColumnAffinity(t *testing.T) {
+	t.Parallel()
 	expr := NewColumnExpr("users", "age", 0, 0)
 
 	// Initially should have no affinity
@@ -281,6 +300,7 @@ func TestSetTableColumnAffinity(t *testing.T) {
 }
 
 func TestAffinityString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		affinity Affinity
 		expected string
@@ -294,7 +314,9 @@ func TestAffinityString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.expected, func(t *testing.T) {
+				t.Parallel()
 			result := tt.affinity.String()
 			if result != tt.expected {
 				t.Errorf("String() = %q, want %q", result, tt.expected)
@@ -304,6 +326,7 @@ func TestAffinityString(t *testing.T) {
 }
 
 func TestComplexAffinityPropagation(t *testing.T) {
+	t.Parallel()
 	// Build: (a + b) * 2
 	// Should have NUMERIC affinity throughout
 	expr := NewBinaryExpr(OpMultiply,

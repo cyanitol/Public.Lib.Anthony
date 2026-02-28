@@ -89,6 +89,7 @@ func createSeekTestBtree() *btree.Btree {
 }
 
 func TestOpOpenEphemeral(t *testing.T) {
+	t.Parallel()
 	bt := btree.NewBtree(4096)
 
 	v := New()
@@ -123,6 +124,7 @@ func TestOpOpenEphemeral(t *testing.T) {
 }
 
 func TestOpSeekGT(t *testing.T) {
+	t.Parallel()
 	bt := createSeekTestBtree()
 
 	v := New()
@@ -162,6 +164,7 @@ func TestOpSeekGT(t *testing.T) {
 }
 
 func TestOpSeekGTNotFound(t *testing.T) {
+	t.Parallel()
 	bt := createSeekTestBtree()
 
 	v := New()
@@ -192,6 +195,7 @@ func TestOpSeekGTNotFound(t *testing.T) {
 }
 
 func TestOpSeekLT(t *testing.T) {
+	t.Parallel()
 	bt := createSeekTestBtree()
 
 	v := New()
@@ -231,6 +235,7 @@ func TestOpSeekLT(t *testing.T) {
 }
 
 func TestOpSeekLTNotFound(t *testing.T) {
+	t.Parallel()
 	bt := createSeekTestBtree()
 
 	v := New()
@@ -261,6 +266,7 @@ func TestOpSeekLTNotFound(t *testing.T) {
 }
 
 func TestOpNotExists(t *testing.T) {
+	t.Parallel()
 	bt := createSeekTestBtree()
 
 	v := New()
@@ -291,6 +297,7 @@ func TestOpNotExists(t *testing.T) {
 }
 
 func TestOpNotExistsJumps(t *testing.T) {
+	t.Parallel()
 	bt := createSeekTestBtree()
 
 	v := New()
@@ -321,6 +328,7 @@ func TestOpNotExistsJumps(t *testing.T) {
 }
 
 func TestOpDeferredSeek(t *testing.T) {
+	t.Parallel()
 	bt := createSeekTestBtree()
 
 	v := New()
@@ -363,6 +371,7 @@ func TestOpDeferredSeek(t *testing.T) {
 }
 
 func TestOpDeferredSeekNotFound(t *testing.T) {
+	t.Parallel()
 	bt := createSeekTestBtree()
 
 	v := New()
@@ -392,6 +401,7 @@ func TestOpDeferredSeekNotFound(t *testing.T) {
 }
 
 func TestOpSeekGTBoundary(t *testing.T) {
+	t.Parallel()
 	bt := createSeekTestBtree()
 
 	v := New()
@@ -422,6 +432,7 @@ func TestOpSeekGTBoundary(t *testing.T) {
 }
 
 func TestOpSeekLTBoundary(t *testing.T) {
+	t.Parallel()
 	bt := createSeekTestBtree()
 
 	v := New()

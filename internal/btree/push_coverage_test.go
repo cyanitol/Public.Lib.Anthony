@@ -7,6 +7,7 @@ import (
 
 // TestCursor_InsertValidationErrors tests insert validation edge cases (65.0% -> higher)
 func TestCursor_InsertValidationErrors(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -40,6 +41,7 @@ func TestCursor_InsertValidationErrors(t *testing.T) {
 
 // TestCursor_SplitPageEdgeCases tests page splitting edge cases (60.0% -> higher)
 func TestCursor_SplitPageEdgeCases(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -78,6 +80,7 @@ func TestCursor_SplitPageEdgeCases(t *testing.T) {
 
 // TestCell_ParseIndexInteriorCell tests index interior cell parsing (65.5% -> higher)
 func TestCell_ParseIndexInteriorCell(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create an interior index page manually
@@ -130,6 +133,7 @@ func TestCell_ParseIndexInteriorCell(t *testing.T) {
 
 // TestCursor_AdvanceWithinPageComplete tests within-page advancement (66.7% -> higher)
 func TestCursor_AdvanceWithinPageComplete(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -168,6 +172,7 @@ func TestCursor_AdvanceWithinPageComplete(t *testing.T) {
 
 // TestCursor_LoadCellAtCurrentIndexErrors tests cell loading error paths (60.0% -> higher)
 func TestCursor_LoadCellAtCurrentIndexErrors(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -213,6 +218,7 @@ func TestCursor_LoadCellAtCurrentIndexErrors(t *testing.T) {
 
 // TestIndexCursor_AdvanceWithinPageComplete tests index advancement (60.0% -> higher)
 func TestIndexCursor_AdvanceWithinPageComplete(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -252,6 +258,7 @@ func TestIndexCursor_AdvanceWithinPageComplete(t *testing.T) {
 
 // TestIndexCursor_ClimbToNextParentComplete tests parent climbing (68.0% -> higher)
 func TestIndexCursor_ClimbToNextParentComplete(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -292,6 +299,7 @@ func TestIndexCursor_ClimbToNextParentComplete(t *testing.T) {
 
 // TestMerge_ExtractCellData tests cell extraction during merge (71.4% -> higher)
 func TestMerge_ExtractCellData(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -330,6 +338,7 @@ func TestMerge_ExtractCellData(t *testing.T) {
 
 // TestMerge_FindSiblingPages tests sibling finding (62.5% -> higher)
 func TestMerge_FindSiblingPages(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -373,6 +382,7 @@ func TestMerge_FindSiblingPages(t *testing.T) {
 
 // TestMerge_LoadPageHeaders tests header loading during merge (69.2% -> higher)
 func TestMerge_LoadPageHeaders(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -410,6 +420,7 @@ func TestMerge_LoadPageHeaders(t *testing.T) {
 
 // TestMerge_MoveRightToLeft tests cell movement (63.6% -> higher)
 func TestMerge_MoveRightToLeft(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -448,6 +459,7 @@ func TestMerge_MoveRightToLeft(t *testing.T) {
 
 // TestMerge_MoveLeftToRight tests cell movement other direction (66.7% -> higher)
 func TestMerge_MoveLeftToRight(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -486,6 +498,7 @@ func TestMerge_MoveLeftToRight(t *testing.T) {
 
 // TestMerge_GetChildPageAt tests child page retrieval (77.8% -> higher)
 func TestMerge_GetChildPageAt(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {

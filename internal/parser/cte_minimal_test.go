@@ -6,6 +6,7 @@ import (
 
 // Minimal test to verify CTE parsing works
 func TestCTE_BasicParsing(t *testing.T) {
+	t.Parallel()
 	sql := "WITH cte AS (SELECT * FROM users) SELECT * FROM cte"
 
 	lexer := NewLexer(sql)

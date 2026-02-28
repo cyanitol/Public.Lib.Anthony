@@ -137,7 +137,9 @@ func TestJSONFunctionsIntegration(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var result interface{}
 			err := db.QueryRow(tt.query).Scan(&result)
 			if err != nil {
@@ -189,7 +191,9 @@ func TestJSONFunctionsNULL(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var result interface{}
 			err := db.QueryRow(tt.query).Scan(&result)
 			if err != nil {
@@ -231,6 +235,7 @@ func TestJSONFunctionsInTable(t *testing.T) {
 
 	// Test extracting JSON values from table
 	t.Run("extract name from JSON", func(t *testing.T) {
+		t.Parallel()
 		var name string
 		err := db.QueryRow(`SELECT json_extract(data, '$.name') FROM users WHERE id = 1`).Scan(&name)
 		if err != nil {
@@ -243,6 +248,7 @@ func TestJSONFunctionsInTable(t *testing.T) {
 	})
 
 	t.Run("extract age from JSON", func(t *testing.T) {
+		t.Parallel()
 		var age int64
 		err := db.QueryRow(`SELECT json_extract(data, '$.age') FROM users WHERE id = 2`).Scan(&age)
 		if err != nil {
@@ -255,6 +261,7 @@ func TestJSONFunctionsInTable(t *testing.T) {
 	})
 
 	t.Run("validate all JSON data", func(t *testing.T) {
+		t.Parallel()
 		rows, err := db.Query(`SELECT id, json_valid(data) FROM users ORDER BY id`)
 		if err != nil {
 			t.Fatalf("query failed: %v", err)
@@ -284,6 +291,7 @@ func TestJSONFunctionsComplex(t *testing.T) {
 	defer os.Remove("test_json_complex.db")
 
 	t.Run("nested object extraction", func(t *testing.T) {
+		t.Parallel()
 		query := `SELECT json_extract('{"user":{"profile":{"email":"test@example.com"}}}', '$.user.profile.email')`
 		var email string
 		err := db.QueryRow(query).Scan(&email)
@@ -297,6 +305,7 @@ func TestJSONFunctionsComplex(t *testing.T) {
 	})
 
 	t.Run("array within object", func(t *testing.T) {
+		t.Parallel()
 		query := `SELECT json_extract('{"items":[10,20,30]}', '$.items[1]')`
 		var value int64
 		err := db.QueryRow(query).Scan(&value)
@@ -310,6 +319,7 @@ func TestJSONFunctionsComplex(t *testing.T) {
 	})
 
 	t.Run("create complex object", func(t *testing.T) {
+		t.Parallel()
 		query := `SELECT json_object('id', 1, 'items', json_array(1, 2, 3), 'active', 1)`
 		var result string
 		err := db.QueryRow(query).Scan(&result)

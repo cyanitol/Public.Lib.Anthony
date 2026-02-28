@@ -15,6 +15,7 @@ func tempWALIndexFile(t *testing.T) string {
 
 // TestNewWALIndex tests creating a new WAL index
 func TestNewWALIndex(t *testing.T) {
+	t.Parallel()
 	filename := tempWALIndexFile(t)
 
 	idx, err := NewWALIndex(filename)
@@ -48,6 +49,7 @@ func TestNewWALIndex(t *testing.T) {
 
 // TestWALIndex_InsertAndFind tests inserting and finding frames
 func TestWALIndex_InsertAndFind(t *testing.T) {
+	t.Parallel()
 	filename := tempWALIndexFile(t)
 
 	idx, err := NewWALIndex(filename)
@@ -69,6 +71,7 @@ func TestWALIndex_InsertAndFind(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
+		tc := tc
 		if err := idx.InsertFrame(tc.pgno, tc.frameNo); err != nil {
 			t.Fatalf("InsertFrame(%d, %d) error = %v", tc.pgno, tc.frameNo, err)
 		}
@@ -76,6 +79,7 @@ func TestWALIndex_InsertAndFind(t *testing.T) {
 
 	// Find the frames
 	for _, tc := range testCases {
+		tc := tc
 		frameNo, err := idx.FindFrame(tc.pgno)
 		if err != nil {
 			t.Fatalf("FindFrame(%d) error = %v", tc.pgno, err)
@@ -94,6 +98,7 @@ func TestWALIndex_InsertAndFind(t *testing.T) {
 
 // TestWALIndex_UpdateFrame tests updating an existing frame
 func TestWALIndex_UpdateFrame(t *testing.T) {
+	t.Parallel()
 	filename := tempWALIndexFile(t)
 
 	idx, err := NewWALIndex(filename)
@@ -133,6 +138,7 @@ func TestWALIndex_UpdateFrame(t *testing.T) {
 
 // TestWALIndex_MaxFrame tests tracking the maximum frame number
 func TestWALIndex_MaxFrame(t *testing.T) {
+	t.Parallel()
 	filename := tempWALIndexFile(t)
 
 	idx, err := NewWALIndex(filename)
@@ -171,6 +177,7 @@ func TestWALIndex_MaxFrame(t *testing.T) {
 
 // TestWALIndex_ReadMarks tests setting and getting read marks
 func TestWALIndex_ReadMarks(t *testing.T) {
+	t.Parallel()
 	filename := tempWALIndexFile(t)
 
 	idx, err := NewWALIndex(filename)
@@ -203,6 +210,7 @@ func TestWALIndex_ReadMarks(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
+		tc := tc
 		if err := idx.SetReadMark(tc.reader, tc.frame); err != nil {
 			t.Fatalf("SetReadMark(%d, %d) error = %v", tc.reader, tc.frame, err)
 		}
@@ -210,6 +218,7 @@ func TestWALIndex_ReadMarks(t *testing.T) {
 
 	// Verify the read marks
 	for _, tc := range testCases {
+		tc := tc
 		mark, err := idx.GetReadMark(tc.reader)
 		if err != nil {
 			t.Fatalf("GetReadMark(%d) error = %v", tc.reader, err)
@@ -239,6 +248,7 @@ func TestWALIndex_ReadMarks(t *testing.T) {
 
 // TestWALIndex_PageCount tests setting and getting the page count
 func TestWALIndex_PageCount(t *testing.T) {
+	t.Parallel()
 	filename := tempWALIndexFile(t)
 
 	idx, err := NewWALIndex(filename)
@@ -275,6 +285,7 @@ func TestWALIndex_PageCount(t *testing.T) {
 
 // TestWALIndex_Clear tests clearing the WAL index
 func TestWALIndex_Clear(t *testing.T) {
+	t.Parallel()
 	filename := tempWALIndexFile(t)
 
 	idx, err := NewWALIndex(filename)
@@ -329,6 +340,7 @@ func TestWALIndex_Clear(t *testing.T) {
 
 // TestWALIndex_ChangeCounter tests the change counter
 func TestWALIndex_ChangeCounter(t *testing.T) {
+	t.Parallel()
 	filename := tempWALIndexFile(t)
 
 	idx, err := NewWALIndex(filename)
@@ -373,6 +385,7 @@ func TestWALIndex_ChangeCounter(t *testing.T) {
 
 // TestWALIndex_CloseAndReopen tests closing and reopening the WAL index
 func TestWALIndex_CloseAndReopen(t *testing.T) {
+	t.Parallel()
 	filename := tempWALIndexFile(t)
 
 	// Create and populate the index
@@ -429,6 +442,7 @@ func TestWALIndex_CloseAndReopen(t *testing.T) {
 
 // TestWALIndex_InvalidPageNum tests inserting/finding invalid page numbers
 func TestWALIndex_InvalidPageNum(t *testing.T) {
+	t.Parallel()
 	filename := tempWALIndexFile(t)
 
 	idx, err := NewWALIndex(filename)
@@ -450,6 +464,7 @@ func TestWALIndex_InvalidPageNum(t *testing.T) {
 
 // TestWALIndex_MultipleFrames tests inserting many frames to test hash collisions
 func TestWALIndex_MultipleFrames(t *testing.T) {
+	t.Parallel()
 	filename := tempWALIndexFile(t)
 
 	idx, err := NewWALIndex(filename)
@@ -484,6 +499,7 @@ func TestWALIndex_MultipleFrames(t *testing.T) {
 
 // TestWALIndex_Delete tests deleting the WAL index file
 func TestWALIndex_Delete(t *testing.T) {
+	t.Parallel()
 	filename := tempWALIndexFile(t)
 	shmFile := filename + "-shm"
 
@@ -521,6 +537,7 @@ func TestWALIndex_Delete(t *testing.T) {
 
 // TestWALIndex_Concurrent tests concurrent access to the WAL index
 func TestWALIndex_Concurrent(t *testing.T) {
+	t.Parallel()
 	filename := tempWALIndexFile(t)
 
 	idx, err := NewWALIndex(filename)

@@ -6,6 +6,7 @@ import (
 )
 
 func TestPutGetVarint(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		value uint64
@@ -26,7 +27,9 @@ func TestPutGetVarint(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			var buf [9]byte
 			n := PutVarint(buf[:], tt.value)
 			if n != tt.want {
@@ -45,6 +48,7 @@ func TestPutGetVarint(t *testing.T) {
 }
 
 func TestGetVarint32(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		value uint32
@@ -59,7 +63,9 @@ func TestGetVarint32(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			var buf [9]byte
 			n := PutVarint(buf[:], uint64(tt.value))
 			if n != tt.want {
@@ -78,6 +84,7 @@ func TestGetVarint32(t *testing.T) {
 }
 
 func TestVarintLen(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		value uint64
 		want  int
@@ -95,6 +102,7 @@ func TestVarintLen(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := VarintLen(tt.value)
 		if got != tt.want {
 			t.Errorf("VarintLen(0x%x) = %d, want %d", tt.value, got, tt.want)
@@ -103,6 +111,7 @@ func TestVarintLen(t *testing.T) {
 }
 
 func TestVarintRoundTrip(t *testing.T) {
+	t.Parallel()
 	// Test all powers of 2 and nearby values
 	for i := uint(0); i < 64; i++ {
 		values := []uint64{
@@ -162,6 +171,7 @@ func BenchmarkGetVarint9Byte(b *testing.B) {
 
 // TestGetVarintEdgeCases tests edge cases for GetVarint
 func TestGetVarintEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		setup func() []byte
@@ -206,7 +216,9 @@ func TestGetVarintEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			buf := tt.setup()
 			got, _ := GetVarint(buf)
 			if got != tt.want {
@@ -218,6 +230,7 @@ func TestGetVarintEdgeCases(t *testing.T) {
 
 // TestDecodeShortVarint tests the short varint decoding path
 func TestDecodeShortVarint(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		value uint64
@@ -232,7 +245,9 @@ func TestDecodeShortVarint(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			var buf [9]byte
 			n := PutVarint(buf[:], tt.value)
 			got, m := GetVarint(buf[:])
@@ -248,6 +263,7 @@ func TestDecodeShortVarint(t *testing.T) {
 
 // TestSlowBtreeVarint32 tests the slow path for GetVarint32
 func TestSlowBtreeVarint32(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		value uint32
@@ -258,7 +274,9 @@ func TestSlowBtreeVarint32(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			var buf [9]byte
 			PutVarint(buf[:], uint64(tt.value))
 			got, _ := GetVarint32(buf[:])
@@ -271,6 +289,7 @@ func TestSlowBtreeVarint32(t *testing.T) {
 
 // TestGetVarintBufferTooSmall tests behavior with insufficient buffer
 func TestGetVarintBufferTooSmall(t *testing.T) {
+	t.Parallel()
 	var buf [9]byte
 	PutVarint(buf[:], 0xffffffffffffffff)
 
@@ -287,6 +306,7 @@ func TestGetVarintBufferTooSmall(t *testing.T) {
 
 // TestVarintLenBoundaries tests VarintLen at all boundaries
 func TestVarintLenBoundaries(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		value uint64
 		want  int
@@ -312,6 +332,7 @@ func TestVarintLenBoundaries(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := VarintLen(tt.value)
 		if got != tt.want {
 			t.Errorf("VarintLen(0x%x) = %d, want %d", tt.value, got, tt.want)
@@ -321,6 +342,7 @@ func TestVarintLenBoundaries(t *testing.T) {
 
 // TestPutVarintAllSizes tests PutVarint for all possible sizes
 func TestPutVarintAllSizes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		value uint64
 		size  int
@@ -337,7 +359,9 @@ func TestPutVarintAllSizes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(fmt.Sprintf("size=%d", tt.size), func(t *testing.T) {
+		t.Parallel()
 			var buf [9]byte
 			n := PutVarint(buf[:], tt.value)
 			if n != tt.size {
@@ -358,6 +382,7 @@ func TestPutVarintAllSizes(t *testing.T) {
 
 // TestGetVarint32Overflow tests GetVarint32 with values that fit in uint32
 func TestGetVarint32Overflow(t *testing.T) {
+	t.Parallel()
 	var buf [9]byte
 
 	// Test with max uint32
@@ -373,6 +398,7 @@ func TestGetVarint32Overflow(t *testing.T) {
 
 // TestVarintZeroValue tests zero value encoding/decoding
 func TestVarintZeroValue(t *testing.T) {
+	t.Parallel()
 	var buf [9]byte
 	n := PutVarint(buf[:], 0)
 	if n != 1 {

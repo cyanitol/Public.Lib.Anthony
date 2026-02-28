@@ -7,6 +7,7 @@ import (
 
 // TestRedistribution_ExplicitScenario creates pages that cannot merge and must redistribute
 func TestRedistribution_ExplicitScenario(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(1024) // Smaller page size
 
 	// Create left page with many large cells (close to full)
@@ -76,6 +77,7 @@ func TestRedistribution_ExplicitScenario(t *testing.T) {
 
 // TestRedistribution_MultipleSizes tests redistribution with various page sizes
 func TestRedistribution_MultipleSizes(t *testing.T) {
+	t.Parallel()
 	testCases := []struct {
 		name     string
 		pageSize uint32
@@ -89,7 +91,9 @@ func TestRedistribution_MultipleSizes(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
 			bt := NewBtree(tc.pageSize)
 
 			// Create left page
@@ -144,6 +148,7 @@ func TestRedistribution_MultipleSizes(t *testing.T) {
 
 // TestSiblingSelection tests getSiblingWithLeftPage and getSiblingAsRightmost
 func TestSiblingSelection(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create 3 sibling pages
@@ -195,6 +200,7 @@ func TestSiblingSelection(t *testing.T) {
 
 // TestHandleOverfullAndUnderfullPages tests balance handler functions
 func TestHandleOverfullAndUnderfullPages(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, _ := bt.CreateTable()
 	cursor := NewCursor(bt, rootPage)
@@ -220,6 +226,7 @@ func TestHandleOverfullAndUnderfullPages(t *testing.T) {
 
 // TestErrorPaths tests error handling in various functions
 func TestErrorPaths(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Test with invalid cursor
@@ -253,6 +260,7 @@ func TestErrorPaths(t *testing.T) {
 
 // TestPageHeaderStringFormat tests String method which was at 0% previously
 func TestPageHeaderStringFormat(t *testing.T) {
+	t.Parallel()
 	testHeaders := []PageHeader{
 		{PageType: PageTypeLeafTable, NumCells: 10, IsLeaf: true, IsTable: true},
 		{PageType: PageTypeInteriorTable, NumCells: 5, IsInterior: true, IsTable: true},
@@ -271,6 +279,7 @@ func TestPageHeaderStringFormat(t *testing.T) {
 
 // TestCursorStringMethod tests cursor String method
 func TestCursorStringMethod(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := bt.CreateTable()
 	cursor := NewCursor(bt, rootPage)
@@ -288,6 +297,7 @@ func TestCursorStringMethod(t *testing.T) {
 
 // TestIndexCursorStringMethod tests index cursor String method
 func TestIndexCursorStringMethod(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := createIndexPage(bt)
 	cursor := NewIndexCursor(bt, rootPage)
@@ -305,6 +315,7 @@ func TestIndexCursorStringMethod(t *testing.T) {
 
 // TestCheckPageIntegrityBasic tests the CheckPageIntegrity function
 func TestCheckPageIntegrityBasic(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := bt.CreateTable()
 	cursor := NewCursor(bt, rootPage)
@@ -321,6 +332,7 @@ func TestCheckPageIntegrityBasic(t *testing.T) {
 
 // TestValidateFreeBlockListBasic tests free block list validation
 func TestValidateFreeBlockListBasic(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := bt.CreateTable()
 
@@ -331,6 +343,7 @@ func TestValidateFreeBlockListBasic(t *testing.T) {
 
 // TestPagerAdapterWithNilCases tests pager adapter with edge cases
 func TestPagerAdapterWithNilCases(t *testing.T) {
+	t.Parallel()
 	mockPager := &MockPager{
 		pages:     make(map[uint32][]byte),
 		pageSize:  4096,
@@ -363,6 +376,7 @@ func TestPagerAdapterWithNilCases(t *testing.T) {
 
 // TestOverflowOperations tests overflow page operations
 func TestOverflowOperations(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := bt.CreateTable()
 	cursor := NewCursor(bt, rootPage)
@@ -400,6 +414,7 @@ func TestOverflowOperations(t *testing.T) {
 
 // TestCellParsing tests cell parsing edge cases
 func TestCellParsing(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a test page

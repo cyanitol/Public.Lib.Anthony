@@ -7,6 +7,7 @@ import (
 // Test parser helper methods for full coverage
 
 func TestParseExpression(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -95,7 +96,9 @@ func TestParseExpression(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			p.tokenize()
 			expr, err := p.ParseExpression()
@@ -118,6 +121,7 @@ func TestParseExpression(t *testing.T) {
 // TestParseCastExpr removed - CAST requires specific type name keywords which may not be fully implemented
 
 func TestParserIntValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -145,7 +149,9 @@ func TestParserIntValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil && !tt.wantErr {
@@ -156,6 +162,7 @@ func TestParserIntValue(t *testing.T) {
 }
 
 func TestParserFloatValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -179,7 +186,9 @@ func TestParserFloatValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil && !tt.wantErr {
@@ -190,6 +199,7 @@ func TestParserFloatValue(t *testing.T) {
 }
 
 func TestParserStringValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -213,7 +223,9 @@ func TestParserStringValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil && !tt.wantErr {
@@ -224,6 +236,7 @@ func TestParserStringValue(t *testing.T) {
 }
 
 func TestParserPeek(t *testing.T) {
+	t.Parallel()
 	p := NewParser("SELECT * FROM users")
 	p.tokenize()
 
@@ -249,6 +262,7 @@ func TestParserPeek(t *testing.T) {
 }
 
 func TestParserPeekAhead(t *testing.T) {
+	t.Parallel()
 	p := NewParser("SELECT * FROM users")
 	p.tokenize()
 
@@ -271,6 +285,7 @@ func TestParserPeekAhead(t *testing.T) {
 }
 
 func TestParserCheckIdentifier(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -289,7 +304,9 @@ func TestParserCheckIdentifier(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil && !tt.wantErr {
@@ -300,6 +317,7 @@ func TestParserCheckIdentifier(t *testing.T) {
 }
 
 func TestParseOrExpression(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -319,7 +337,9 @@ func TestParseOrExpression(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil {
@@ -330,6 +350,7 @@ func TestParseOrExpression(t *testing.T) {
 }
 
 func TestParseIsExpression(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -349,7 +370,9 @@ func TestParseIsExpression(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil {
@@ -360,6 +383,7 @@ func TestParseIsExpression(t *testing.T) {
 }
 
 func TestParseBitwiseExpression(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -383,7 +407,9 @@ func TestParseBitwiseExpression(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil {
@@ -394,6 +420,7 @@ func TestParseBitwiseExpression(t *testing.T) {
 }
 
 func TestParseComplexExpressions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -421,7 +448,9 @@ func TestParseComplexExpressions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil {
@@ -432,6 +461,7 @@ func TestParseComplexExpressions(t *testing.T) {
 }
 
 func TestParseErrorCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -459,7 +489,9 @@ func TestParseErrorCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			// These should all produce errors

@@ -7,6 +7,7 @@ import (
 
 // TestDropTable_InteriorPages tests dropping a table with interior pages
 func TestDropTable_InteriorPages(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages to force interior structure
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -47,6 +48,7 @@ func TestDropTable_InteriorPages(t *testing.T) {
 
 // TestDropTable_InvalidRootPage tests dropping with invalid root
 func TestDropTable_InvalidRootPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	err := bt.DropTable(0)
@@ -57,6 +59,7 @@ func TestDropTable_InvalidRootPage(t *testing.T) {
 
 // TestDropTable_NonExistentPage tests dropping non-existent page
 func TestDropTable_NonExistentPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	err := bt.DropTable(999)
@@ -67,6 +70,7 @@ func TestDropTable_NonExistentPage(t *testing.T) {
 
 // TestDropTable_CorruptedHeader tests dropping table with corrupted header
 func TestDropTable_CorruptedHeader(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create corrupted page
@@ -83,6 +87,7 @@ func TestDropTable_CorruptedHeader(t *testing.T) {
 
 // TestNewRowid_EmptyTable tests NewRowid on empty table
 func TestNewRowid_EmptyTable(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -101,6 +106,7 @@ func TestNewRowid_EmptyTable(t *testing.T) {
 
 // TestNewRowid_WithExistingRows tests NewRowid with existing data
 func TestNewRowid_WithExistingRows(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -128,6 +134,7 @@ func TestNewRowid_WithExistingRows(t *testing.T) {
 
 // TestNewRowid_InvalidRootPage tests NewRowid with invalid root
 func TestNewRowid_InvalidRootPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	_, err := bt.NewRowid(0)
@@ -138,6 +145,7 @@ func TestNewRowid_InvalidRootPage(t *testing.T) {
 
 // TestAllocatePage_Overflow tests page allocation overflow
 func TestAllocatePage_Overflow(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Allocate pages until we approach the limit
@@ -157,6 +165,7 @@ func TestAllocatePage_Overflow(t *testing.T) {
 
 // TestAllocatePage_WithProvider tests allocation with provider
 func TestAllocatePage_WithProvider(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	mockProvider := &MockPageProvider{
 		pages:      make(map[uint32][]byte),
@@ -182,6 +191,7 @@ func TestAllocatePage_WithProvider(t *testing.T) {
 
 // TestSetPage_WrongSize tests SetPage with wrong page size
 func TestSetPage_WrongSize(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Try to set page with wrong size
@@ -194,6 +204,7 @@ func TestSetPage_WrongSize(t *testing.T) {
 
 // TestSetPage_WithProvider tests SetPage marks page dirty
 func TestSetPage_WithProvider(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	mockProvider := &MockPageProvider{
 		pages:      make(map[uint32][]byte),
@@ -215,6 +226,7 @@ func TestSetPage_WithProvider(t *testing.T) {
 
 // TestGetPage_WithProvider tests GetPage with provider
 func TestGetPage_WithProvider(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	mockProvider := &MockPageProvider{
 		pages:      make(map[uint32][]byte),
@@ -257,6 +269,7 @@ func TestGetPage_WithProvider(t *testing.T) {
 
 // TestGetPage_NotFound tests GetPage with missing page
 func TestGetPage_NotFound(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	_, err := bt.GetPage(999)
@@ -267,6 +280,7 @@ func TestGetPage_NotFound(t *testing.T) {
 
 // TestGetPage_ProviderError tests GetPage when provider fails
 func TestGetPage_ProviderError(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	bt.Provider = &FailingGetProvider{}
 
@@ -278,6 +292,7 @@ func TestGetPage_ProviderError(t *testing.T) {
 
 // TestClearCacheAdvanced tests cache clearing with provider
 func TestClearCacheAdvanced(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Add some pages
@@ -300,6 +315,7 @@ func TestClearCacheAdvanced(t *testing.T) {
 
 // TestParsePageWithProvider tests ParsePage with provider
 func TestParsePageWithProvider(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := bt.CreateTable()
 
@@ -336,6 +352,7 @@ func TestParsePageWithProvider(t *testing.T) {
 
 // TestIteratePage tests IteratePage functionality
 func TestIteratePage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := bt.CreateTable()
 
@@ -368,6 +385,7 @@ func TestIteratePage(t *testing.T) {
 
 // TestIteratePage_VisitorError tests IteratePage with visitor returning error
 func TestIteratePage_VisitorError(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := bt.CreateTable()
 
@@ -386,6 +404,7 @@ func TestIteratePage_VisitorError(t *testing.T) {
 
 // TestIteratePage_InvalidPage tests IteratePage with invalid page
 func TestIteratePage_InvalidPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	err := bt.IteratePage(999, func(cellIndex int, cell *CellInfo) error {
@@ -399,6 +418,7 @@ func TestIteratePage_InvalidPage(t *testing.T) {
 
 // TestString tests Btree String method
 func TestString(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	str := bt.String()
@@ -422,6 +442,7 @@ func TestString(t *testing.T) {
 
 // TestCreateTable_Page1 tests creating table at page 1 (with file header)
 func TestCreateTable_Page1(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// First table should be at page 1
@@ -452,6 +473,7 @@ func TestCreateTable_Page1(t *testing.T) {
 
 // TestCreateTable_Multiple tests creating multiple tables
 func TestCreateTable_Multiple(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	tables := make([]uint32, 5)
@@ -473,6 +495,7 @@ func TestCreateTable_Multiple(t *testing.T) {
 
 // TestNewBtree_DefaultPageSize tests NewBtree with zero page size
 func TestNewBtree_DefaultPageSize(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(0)
 
 	if bt.PageSize != 4096 {
@@ -482,6 +505,7 @@ func TestNewBtree_DefaultPageSize(t *testing.T) {
 
 // TestNewBtree_CustomPageSize tests NewBtree with custom page size
 func TestNewBtree_CustomPageSize(t *testing.T) {
+	t.Parallel()
 	customSize := uint32(8192)
 	bt := NewBtree(customSize)
 
@@ -515,6 +539,7 @@ func (f *FailingGetProvider) MarkDirty(pgno uint32) error {
 
 // TestDropInteriorChildrenAdvanced tests dropInteriorChildren helper
 func TestDropInteriorChildrenAdvanced(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 

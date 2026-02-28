@@ -6,6 +6,7 @@ import (
 
 // TestDbPageGetPgno tests GetPgno method
 func TestDbPageGetPgno(t *testing.T) {
+	t.Parallel()
 	page := NewDbPage(42, 4096)
 
 	if page.GetPgno() != 42 {
@@ -15,6 +16,7 @@ func TestDbPageGetPgno(t *testing.T) {
 
 // TestDbPageGetData tests GetData method
 func TestDbPageGetData(t *testing.T) {
+	t.Parallel()
 	page := NewDbPage(1, 4096)
 	page.Data[0] = 0xAA
 	page.Data[100] = 0xBB
@@ -30,6 +32,7 @@ func TestDbPageGetData(t *testing.T) {
 
 // TestDbPageSize tests Size method
 func TestDbPageSize(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		pageSize int
@@ -41,6 +44,7 @@ func TestDbPageSize(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			page := NewDbPage(1, tt.pageSize)
 			if page.Size() != tt.pageSize {
@@ -52,6 +56,7 @@ func TestDbPageSize(t *testing.T) {
 
 // TestDbPageSetDontWrite tests SetDontWrite method
 func TestDbPageSetDontWrite(t *testing.T) {
+	t.Parallel()
 	page := NewDbPage(1, 4096)
 
 	// Should write by default

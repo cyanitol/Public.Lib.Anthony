@@ -7,6 +7,7 @@ import (
 // Test edge cases and error paths in lexer for full coverage
 
 func TestLexerReadStringErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -35,7 +36,9 @@ func TestLexerReadStringErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			lexer := NewLexer(tt.input)
 			tok := lexer.NextToken()
 			if tok.Type != tt.want {
@@ -46,6 +49,7 @@ func TestLexerReadStringErrors(t *testing.T) {
 }
 
 func TestLexerReadQuotedIdentifier(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -74,7 +78,9 @@ func TestLexerReadQuotedIdentifier(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			lexer := NewLexer(tt.input)
 			tok := lexer.NextToken()
 			if tok.Type != TK_ID {
@@ -88,6 +94,7 @@ func TestLexerReadQuotedIdentifier(t *testing.T) {
 }
 
 func TestLexerReadBracketedIdentifier(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -121,7 +128,9 @@ func TestLexerReadBracketedIdentifier(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			lexer := NewLexer(tt.input)
 			tok := lexer.NextToken()
 			if tok.Type != TK_ID {
@@ -135,6 +144,7 @@ func TestLexerReadBracketedIdentifier(t *testing.T) {
 }
 
 func TestLexerScanDefaultIllegal(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -153,7 +163,9 @@ func TestLexerScanDefaultIllegal(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			lexer := NewLexer(tt.input)
 			tok := lexer.NextToken()
 			if tok.Type != tt.want {
@@ -164,6 +176,7 @@ func TestLexerScanDefaultIllegal(t *testing.T) {
 }
 
 func TestTokenizeAllWithIllegal(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -191,7 +204,9 @@ func TestTokenizeAllWithIllegal(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			tokens, err := TokenizeAll(tt.input)
 			if err != nil {
 				t.Errorf("TokenizeAll failed: %v", err)
@@ -207,6 +222,7 @@ func TestTokenizeAllWithIllegal(t *testing.T) {
 }
 
 func TestLexerNumberVariations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -264,7 +280,9 @@ func TestLexerNumberVariations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			lexer := NewLexer(tt.input)
 			tok := lexer.NextToken()
 			if tok.Type != tt.tokType {
@@ -278,6 +296,7 @@ func TestLexerNumberVariations(t *testing.T) {
 }
 
 func TestLexerBlobVariations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		input  string
@@ -306,7 +325,9 @@ func TestLexerBlobVariations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			lexer := NewLexer(tt.input)
 			tok := lexer.NextToken()
 			if tok.Type != TK_BLOB {
@@ -320,6 +341,7 @@ func TestLexerBlobVariations(t *testing.T) {
 }
 
 func TestLexerCommentsVariations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -347,7 +369,9 @@ func TestLexerCommentsVariations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			lexer := NewLexer(tt.input)
 			tok := lexer.NextToken()
 			// First token should be either comment or something after comment
@@ -359,6 +383,7 @@ func TestLexerCommentsVariations(t *testing.T) {
 }
 
 func TestLexerVariableVariations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		input  string
@@ -397,7 +422,9 @@ func TestLexerVariableVariations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			lexer := NewLexer(tt.input)
 			tok := lexer.NextToken()
 			if tok.Type != TK_VARIABLE && tok.Type != TK_ILLEGAL {
@@ -411,6 +438,7 @@ func TestLexerVariableVariations(t *testing.T) {
 }
 
 func TestLexerOperatorVariations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input   string
 		tokType TokenType
@@ -428,7 +456,9 @@ func TestLexerOperatorVariations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			lexer := NewLexer(tt.input)
 			tok := lexer.NextToken()
 			if tok.Type != tt.tokType {
@@ -439,6 +469,7 @@ func TestLexerOperatorVariations(t *testing.T) {
 }
 
 func TestLexerBacktickIdentifier(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		input  string
@@ -467,7 +498,9 @@ func TestLexerBacktickIdentifier(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			lexer := NewLexer(tt.input)
 			tok := lexer.NextToken()
 			if tok.Type != TK_ID {
@@ -481,6 +514,7 @@ func TestLexerBacktickIdentifier(t *testing.T) {
 }
 
 func TestLexerComplexSQL(t *testing.T) {
+	t.Parallel()
 	// Test a complex SQL statement to ensure all paths are covered
 	input := `
 		WITH RECURSIVE cte AS (
@@ -513,6 +547,7 @@ func TestLexerComplexSQL(t *testing.T) {
 }
 
 func TestLexerDollarEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -525,7 +560,9 @@ func TestLexerDollarEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			lexer := NewLexer(tt.input)
 			tok := lexer.NextToken()
 			if tok.Type != tt.wantTyp {

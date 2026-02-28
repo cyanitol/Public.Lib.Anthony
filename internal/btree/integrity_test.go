@@ -6,6 +6,7 @@ import (
 )
 
 func TestCheckIntegrity_ValidTree(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a valid leaf page
@@ -40,6 +41,7 @@ func TestCheckIntegrity_ValidTree(t *testing.T) {
 }
 
 func TestCheckIntegrity_NilBtree(t *testing.T) {
+	t.Parallel()
 	result := CheckIntegrity(nil, 1)
 
 	if result.OK() {
@@ -56,6 +58,7 @@ func TestCheckIntegrity_NilBtree(t *testing.T) {
 }
 
 func TestCheckIntegrity_InvalidRootPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	result := CheckIntegrity(bt, 0)
 
@@ -73,6 +76,7 @@ func TestCheckIntegrity_InvalidRootPage(t *testing.T) {
 }
 
 func TestCheckIntegrity_PageNotFound(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Don't add page 1
@@ -96,6 +100,7 @@ func TestCheckIntegrity_PageNotFound(t *testing.T) {
 }
 
 func TestCheckIntegrity_InvalidPageHeader(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create page with invalid page type
@@ -124,6 +129,7 @@ func TestCheckIntegrity_InvalidPageHeader(t *testing.T) {
 }
 
 func TestCheckIntegrity_UnsortedCellPointers(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageData := make([]byte, 4096)
 
@@ -164,6 +170,7 @@ func TestCheckIntegrity_UnsortedCellPointers(t *testing.T) {
 }
 
 func TestCheckIntegrity_KeysNotSorted(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a leaf page with unsorted keys (use page 2)
@@ -198,6 +205,7 @@ func TestCheckIntegrity_KeysNotSorted(t *testing.T) {
 }
 
 func TestCheckIntegrity_DuplicateKeys(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a leaf page with duplicate keys (use page 2)
@@ -232,6 +240,7 @@ func TestCheckIntegrity_DuplicateKeys(t *testing.T) {
 }
 
 func TestCheckIntegrity_InteriorPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a valid two-level tree
@@ -299,6 +308,7 @@ func TestCheckIntegrity_InteriorPage(t *testing.T) {
 }
 
 func TestCheckIntegrity_InvalidChildPointer(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create interior page with invalid child pointer (0)
@@ -347,6 +357,7 @@ func TestCheckIntegrity_InvalidChildPointer(t *testing.T) {
 }
 
 func TestCheckIntegrity_SelfReference(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create interior page that points to itself (use page 4)
@@ -384,6 +395,7 @@ func TestCheckIntegrity_SelfReference(t *testing.T) {
 }
 
 func TestCheckIntegrity_CycleDetection(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a cycle: page 4 -> page 2 -> page 4 (use page 4 as root)
@@ -422,6 +434,7 @@ func TestCheckIntegrity_CycleDetection(t *testing.T) {
 }
 
 func TestCheckIntegrity_OrphanPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a valid leaf page as root (use page 2)
@@ -462,6 +475,7 @@ func TestCheckIntegrity_OrphanPage(t *testing.T) {
 }
 
 func TestCheckIntegrity_KeyOutOfRange(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create interior page with bounds (use page 4 as root)
@@ -517,6 +531,7 @@ func TestCheckIntegrity_KeyOutOfRange(t *testing.T) {
 }
 
 func TestCheckPageIntegrity(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a valid leaf page (use page 2)
@@ -549,6 +564,7 @@ func TestCheckPageIntegrity(t *testing.T) {
 }
 
 func TestValidateFreeBlockList_NoFreeBlocks(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	pageData := createTestLeafPage(4096, []struct {
@@ -568,6 +584,7 @@ func TestValidateFreeBlockList_NoFreeBlocks(t *testing.T) {
 }
 
 func TestValidateFreeBlockList_ValidList(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	pageData := make([]byte, 4096)
@@ -597,6 +614,7 @@ func TestValidateFreeBlockList_ValidList(t *testing.T) {
 }
 
 func TestValidateFreeBlockList_Cycle(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	pageData := make([]byte, 4096)
@@ -635,6 +653,7 @@ func TestValidateFreeBlockList_Cycle(t *testing.T) {
 }
 
 func TestValidateFreeBlockList_InvalidSize(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	pageData := make([]byte, 4096)
@@ -669,6 +688,7 @@ func TestValidateFreeBlockList_InvalidSize(t *testing.T) {
 }
 
 func TestValidateFreeBlockList_OutOfBounds(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	pageData := make([]byte, 4096)
@@ -699,6 +719,7 @@ func TestValidateFreeBlockList_OutOfBounds(t *testing.T) {
 }
 
 func TestIntegrityError_Error(t *testing.T) {
+	t.Parallel()
 	err1 := &IntegrityError{
 		PageNum:     5,
 		ErrorType:   "test_error",
@@ -723,6 +744,7 @@ func TestIntegrityError_Error(t *testing.T) {
 }
 
 func TestCheckIntegrity_ContentOverlap(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	pageData := make([]byte, 4096)
@@ -756,6 +778,7 @@ func TestCheckIntegrity_ContentOverlap(t *testing.T) {
 }
 
 func TestCheckIntegrity_DepthExceeded(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a very deep tree (deeper than MaxBtreeDepth)
@@ -799,6 +822,7 @@ func TestCheckIntegrity_DepthExceeded(t *testing.T) {
 }
 
 func TestCheckIntegrity_MultipleErrors(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a page with multiple errors (use page 2)

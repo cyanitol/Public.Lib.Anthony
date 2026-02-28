@@ -7,6 +7,7 @@ import (
 
 // TestBalance_HandleUnderfullPageEdgeCases tests underfull page handling (25.0% -> higher)
 func TestBalance_HandleUnderfullPageEdgeCases(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -75,6 +76,7 @@ func TestBalance_HandleUnderfullPageEdgeCases(t *testing.T) {
 
 // TestBalance_HandleOverfullPageWithDefrag tests overfull with defragmentation (33.3% -> higher)
 func TestBalance_HandleOverfullPageWithDefrag(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 
 	// Create a page manually with fragmentation
@@ -139,6 +141,7 @@ func TestBalance_HandleOverfullPageWithDefrag(t *testing.T) {
 
 // TestIntegrity_CheckMaxIterationsExceededEdge tests iteration limit edge case (50.0% -> higher)
 func TestIntegrity_CheckMaxIterationsExceededEdge(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageData := make([]byte, 4096)
 
@@ -170,6 +173,7 @@ func TestIntegrity_CheckMaxIterationsExceededEdge(t *testing.T) {
 
 // TestCursor_LoadParentPageMultipleLevels tests parent page loading (55.6% -> higher)
 func TestCursor_LoadParentPageMultipleLevels(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -209,6 +213,7 @@ func TestCursor_LoadParentPageMultipleLevels(t *testing.T) {
 
 // TestCursor_GetChildPageFromParentEdgeCases tests child page resolution (55.6% -> higher)
 func TestCursor_GetChildPageFromParentEdgeCases(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -244,6 +249,7 @@ func TestCursor_GetChildPageFromParentEdgeCases(t *testing.T) {
 
 // TestCursor_PrevInPageBoundary tests backward navigation at boundaries (62.5% -> higher)
 func TestCursor_PrevInPageBoundary(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -281,6 +287,7 @@ func TestCursor_PrevInPageBoundary(t *testing.T) {
 
 // TestCursor_DescendToRightChildBoundary tests right child descent (60.0% -> higher)
 func TestCursor_DescendToRightChildBoundary(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -326,6 +333,7 @@ func TestCursor_DescendToRightChildBoundary(t *testing.T) {
 
 // TestPage_AllocateSpaceFragmented tests allocation with fragmentation (55.6% -> higher)
 func TestPage_AllocateSpaceFragmented(t *testing.T) {
+	t.Parallel()
 	pageData := make([]byte, 1024)
 	offset := FileHeaderSize
 	pageData[offset+PageHeaderOffsetType] = PageTypeLeafTable
@@ -378,6 +386,7 @@ func TestPage_AllocateSpaceFragmented(t *testing.T) {
 
 // TestIndexCursor_PrevInPageBoundary tests index backward navigation (55.6% -> higher)
 func TestIndexCursor_PrevInPageBoundary(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -419,6 +428,7 @@ func TestIndexCursor_PrevInPageBoundary(t *testing.T) {
 
 // TestIndexCursor_EnterPageMultiLevel tests entering pages (57.1% -> higher)
 func TestIndexCursor_EnterPageMultiLevel(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -455,6 +465,7 @@ func TestIndexCursor_EnterPageMultiLevel(t *testing.T) {
 
 // TestIndexCursor_DescendToLastMultiLevel tests descending to last (62.5% -> higher)
 func TestIndexCursor_DescendToLastMultiLevel(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -498,6 +509,7 @@ func TestIndexCursor_DescendToLastMultiLevel(t *testing.T) {
 
 // TestIndexCursor_DescendToRightChildMultiple tests right child descent (60.0% -> higher)
 func TestIndexCursor_DescendToRightChildMultiple(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -536,6 +548,7 @@ func TestIndexCursor_DescendToRightChildMultiple(t *testing.T) {
 
 // TestOverflow_FreeOverflowChainMultiple tests freeing multiple overflow chains (60.0% -> higher)
 func TestOverflow_FreeOverflowChainMultiple(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(1024)
 	rootPage, err := bt.CreateTable()
 	if err != nil {

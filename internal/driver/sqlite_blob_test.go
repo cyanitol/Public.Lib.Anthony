@@ -41,7 +41,9 @@ func TestBlobLiteralBasic(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var result []byte
 			query := "SELECT " + tt.literal
 			err := db.QueryRow(query).Scan(&result)
@@ -77,7 +79,9 @@ func TestBlobLiteralErrors(t *testing.T) {
 	}
 
 	for _, literal := range invalidLiterals {
+		literal := literal  // Capture range variable
 		t.Run(literal, func(t *testing.T) {
+			t.Parallel()
 			_, err := db.Query("SELECT " + literal)
 			if err == nil {
 				t.Errorf("expected error for %s, got none", literal)
@@ -747,6 +751,7 @@ func TestBlobLength(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(fmt.Sprintf("length_%d", tt.length), func(t *testing.T) {
 			var length int
 			query := "SELECT length(" + tt.blob + ")"
@@ -1203,7 +1208,9 @@ func TestBlobLiteralVariations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var result []byte
 			query := "SELECT " + tt.literal
 			err := db.QueryRow(query).Scan(&result)

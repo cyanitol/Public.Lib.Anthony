@@ -100,7 +100,9 @@ func TestEmitNonIdentifierColumnCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := db.Query(tt.sql)
 			if err != nil {
 				t.Errorf("Query failed: %v", err)
@@ -145,7 +147,9 @@ func TestEmitUnqualifiedColumnCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := db.Query(tt.sql)
 			if err != nil {
 				t.Errorf("Query failed: %v", err)
@@ -194,7 +198,9 @@ func TestHandleNonAggregateFunctionCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := db.Query(tt.sql)
 			if err != nil {
 				t.Errorf("Query failed: %v", err)
@@ -243,7 +249,9 @@ func TestCompileInnerStatementCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := db.Exec(tt.sql)
 			if err != nil {
 				t.Errorf("Exec failed: %v", err)
@@ -288,7 +296,9 @@ func TestFromSubqueryIntegration(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := db.Query(tt.sql)
 			if err != nil {
 				t.Logf("Query %q: %v", tt.sql, err)

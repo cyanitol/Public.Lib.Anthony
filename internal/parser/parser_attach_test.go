@@ -5,6 +5,7 @@ import (
 )
 
 func TestParseAttach(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		sql        string
@@ -59,7 +60,9 @@ func TestParseAttach(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -89,6 +92,7 @@ func TestParseAttach(t *testing.T) {
 }
 
 func TestParseDetach(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		sql        string
@@ -132,7 +136,9 @@ func TestParseDetach(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -159,6 +165,7 @@ func TestParseDetach(t *testing.T) {
 }
 
 func TestParseAttachDetachCombined(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		sql        string
@@ -190,7 +197,9 @@ func TestParseAttachDetachCombined(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {

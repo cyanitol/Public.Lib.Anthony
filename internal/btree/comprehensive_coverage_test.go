@@ -10,6 +10,7 @@ import (
 
 // TestIndexCursor_InteriorPageNavigation tests navigation through interior pages
 func TestIndexCursor_InteriorPageNavigation(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages to force interior structure
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -48,6 +49,7 @@ func TestIndexCursor_InteriorPageNavigation(t *testing.T) {
 
 // TestIndexCursor_descendToRightChild tests descending to right child in interior page
 func TestIndexCursor_descendToRightChild(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 
 	// Create a small interior page structure
@@ -74,6 +76,7 @@ func TestIndexCursor_descendToRightChild(t *testing.T) {
 
 // TestIndexCursor_getFirstChildPage tests getting first child from interior page
 func TestIndexCursor_getFirstChildPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, _ := createIndexPage(bt)
 	cursor := NewIndexCursor(bt, rootPage)
@@ -93,6 +96,7 @@ func TestIndexCursor_getFirstChildPage(t *testing.T) {
 
 // TestIndexCursor_prevViaParent tests backward navigation through parent
 func TestIndexCursor_prevViaParent(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, _ := createIndexPage(bt)
 	cursor := NewIndexCursor(bt, rootPage)
@@ -116,6 +120,7 @@ func TestIndexCursor_prevViaParent(t *testing.T) {
 
 // TestIndexCursor_descendToLast tests descending to last entry
 func TestIndexCursor_descendToLast(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, _ := createIndexPage(bt)
 	cursor := NewIndexCursor(bt, rootPage)
@@ -135,6 +140,7 @@ func TestIndexCursor_descendToLast(t *testing.T) {
 
 // TestIndexCursor_enterPage tests entering a page during navigation
 func TestIndexCursor_enterPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, _ := createIndexPage(bt)
 	cursor := NewIndexCursor(bt, rootPage)
@@ -153,6 +159,7 @@ func TestIndexCursor_enterPage(t *testing.T) {
 
 // TestIndexCursor_resolveChildPage tests resolving child pages in interior nodes
 func TestIndexCursor_resolveChildPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, _ := createIndexPage(bt)
 	cursor := NewIndexCursor(bt, rootPage)
@@ -170,6 +177,7 @@ func TestIndexCursor_resolveChildPage(t *testing.T) {
 
 // TestIndexCursor_climbToNextParent tests climbing to next parent during iteration
 func TestIndexCursor_climbToNextParent(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, _ := createIndexPage(bt)
 	cursor := NewIndexCursor(bt, rootPage)
@@ -194,6 +202,7 @@ func TestIndexCursor_climbToNextParent(t *testing.T) {
 
 // TestMerge_getSiblingWithLeftPage tests getting left sibling
 func TestMerge_getSiblingWithLeftPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -243,6 +252,7 @@ func TestMerge_getSiblingWithLeftPage(t *testing.T) {
 
 // TestMerge_getSiblingAsRightmost tests getting sibling when current is rightmost
 func TestMerge_getSiblingAsRightmost(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -285,6 +295,7 @@ func TestMerge_getSiblingAsRightmost(t *testing.T) {
 
 // TestSplit_prepareInteriorSplit tests preparing interior page split
 func TestSplit_prepareInteriorSplit(t *testing.T) {
+	t.Parallel()
 	// This is difficult to trigger without actually creating an interior page
 	// that needs splitting. We'll create a scenario that might trigger it.
 	bt := NewBtree(512) // Small pages
@@ -305,6 +316,7 @@ func TestSplit_prepareInteriorSplit(t *testing.T) {
 
 // TestSplit_splitParentRecursively tests recursive parent splitting
 func TestSplit_splitParentRecursively(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages to force splits
 	rootPage, _ := bt.CreateTable()
 	cursor := NewCursor(bt, rootPage)
@@ -322,6 +334,7 @@ func TestSplit_splitParentRecursively(t *testing.T) {
 
 // TestSplit_positionOnParent tests positioning on parent after split
 func TestSplit_positionOnParent(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, _ := bt.CreateTable()
 	cursor := NewCursor(bt, rootPage)
@@ -349,6 +362,7 @@ func TestSplit_positionOnParent(t *testing.T) {
 
 // TestPagerAdapter tests the pager adapter interface
 func TestPagerAdapter(t *testing.T) {
+	t.Parallel()
 	// Create a mock pager
 	mockPager := &MockPager{
 		pages:     make(map[uint32][]byte),
@@ -450,6 +464,7 @@ func (p *MockDbPage) GetPgno() uint32 {
 
 // TestIndexCursor_FullScenario tests a complete index scenario
 func TestIndexCursor_FullScenario(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := createIndexPage(bt)
 	cursor := NewIndexCursor(bt, rootPage)
@@ -519,6 +534,7 @@ func TestIndexCursor_FullScenario(t *testing.T) {
 
 // TestBtree_ComplexPageOperations tests complex page scenarios
 func TestBtree_ComplexPageOperations(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(1024) // Medium-sized pages
 
 	// Create multiple tables
@@ -564,6 +580,7 @@ func TestBtree_ComplexPageOperations(t *testing.T) {
 
 // TestMerge_redistributeSiblings tests redistribution
 func TestMerge_redistributeSiblings(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	// Create very imbalanced pages

@@ -7,6 +7,7 @@ import (
 
 // TestExprEdgeCases tests edge cases not covered by existing tests
 func TestExprEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test maxListHeight with nil list
 	height := maxListHeight(nil, 5)
 	if height != 5 {
@@ -28,6 +29,7 @@ func TestExprEdgeCases(t *testing.T) {
 
 // TestIsFunctionConstantWithFlags tests function constant detection with flags
 func TestIsFunctionConstantWithFlags(t *testing.T) {
+	t.Parallel()
 	// Function with EP_HasFunc flag should not be constant
 	expr := &Expr{
 		Op:    OpFunction,
@@ -49,6 +51,7 @@ func TestIsFunctionConstantWithFlags(t *testing.T) {
 
 // TestFormatFloatSpecialValues tests formatFloat with special values
 func TestFormatFloatSpecialValues(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		value float64
@@ -72,7 +75,9 @@ func TestFormatFloatSpecialValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := formatFloat(tt.value)
 			if !tt.check(result) {
 				t.Errorf("formatFloat(%f) = %q, expected special value", tt.value, result)
@@ -83,6 +88,7 @@ func TestFormatFloatSpecialValues(t *testing.T) {
 
 // TestArithmeticOverflowEdgeCases tests additional overflow scenarios
 func TestArithmeticOverflowEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test multiply with infinity result
 	result := EvaluateArithmetic(OpMultiply, int64(math.MaxInt64), int64(math.MaxInt64))
 	if _, ok := result.(float64); !ok {
@@ -107,6 +113,7 @@ func EvaluateDivide(left, right float64) interface{} {
 
 // TestBitwiseEdgeCases tests bitwise operation edge cases
 func TestBitwiseEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test right shift with large positive value
 	result := bitwiseRShift(math.MaxInt64, 100)
 	if result != 0 {
@@ -122,6 +129,7 @@ func TestBitwiseEdgeCases(t *testing.T) {
 
 // TestCollSeqEdgeCases tests collation sequence edge cases
 func TestCollSeqEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test collSeqFromName with lowercase
 	coll := collSeqFromName("nocase")
 	if coll.Name != "NOCASE" {
@@ -177,6 +185,7 @@ func TestCollSeqEdgeCases(t *testing.T) {
 
 // TestCompareNumericsNaN tests NaN handling in numeric comparison
 func TestCompareNumericsNaN(t *testing.T) {
+	t.Parallel()
 	result := compareNumerics(math.NaN(), 1.0)
 	if result != CmpNull {
 		t.Errorf("Expected CmpNull for NaN comparison, got %v", result)
@@ -190,6 +199,7 @@ func TestCompareNumericsNaN(t *testing.T) {
 
 // TestMatchLikeEdgeCases tests LIKE matching edge cases
 func TestMatchLikeEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test escape at end of pattern
 	result := EvaluateLike("test\\", "test", '\\')
 	if result {
@@ -217,6 +227,7 @@ func TestMatchLikeEdgeCases(t *testing.T) {
 
 // TestStepResultFunctions tests step result helper functions
 func TestStepResultFunctions(t *testing.T) {
+	t.Parallel()
 	pattern := []rune("a\\bc")
 	str := []rune("abc")
 
@@ -259,6 +270,7 @@ func TestStepResultFunctions(t *testing.T) {
 
 // TestIsMultiWildcard tests wildcard detection
 func TestIsMultiWildcard(t *testing.T) {
+	t.Parallel()
 	if !isMultiWildcard('*', true) {
 		t.Error("Expected * to be multi wildcard for GLOB")
 	}
@@ -275,6 +287,7 @@ func TestIsMultiWildcard(t *testing.T) {
 
 // TestIsSingleWildcard tests single wildcard detection
 func TestIsSingleWildcard(t *testing.T) {
+	t.Parallel()
 	if !isSingleWildcard('?', true) {
 		t.Error("Expected ? to be single wildcard for GLOB")
 	}
@@ -291,6 +304,7 @@ func TestIsSingleWildcard(t *testing.T) {
 
 // TestMatchChar tests character matching for LIKE/GLOB
 func TestMatchChar(t *testing.T) {
+	t.Parallel()
 	// GLOB is case-sensitive
 	if !matchChar('a', 'a', true) {
 		t.Error("Expected 'a' == 'a' for GLOB")
@@ -310,6 +324,7 @@ func TestMatchChar(t *testing.T) {
 
 // TestValueTypeOrdering tests value type ordering
 func TestValueTypeOrdering(t *testing.T) {
+	t.Parallel()
 	// Test that value types are ordered correctly
 	types := []struct {
 		value interface{}
@@ -324,6 +339,7 @@ func TestValueTypeOrdering(t *testing.T) {
 	}
 
 	for i, tt := range types {
+		tt := tt
 		order := valueType(tt.value)
 		if order != tt.order {
 			t.Errorf("Test %d: expected order %d, got %d", i, tt.order, order)
@@ -333,6 +349,7 @@ func TestValueTypeOrdering(t *testing.T) {
 
 // TestCompareSameType tests compareSameType helper
 func TestCompareSameType(t *testing.T) {
+	t.Parallel()
 	// Integer comparison
 	result, ok := compareSameType(int64(5), int64(5), nil)
 	if !ok || result != CmpEqual {
@@ -360,6 +377,7 @@ func TestCompareSameType(t *testing.T) {
 
 // TestIsNumeric tests isNumeric helper
 func TestIsNumeric(t *testing.T) {
+	t.Parallel()
 	if !isNumeric(int64(42)) {
 		t.Error("Expected int64 to be numeric")
 	}
@@ -376,6 +394,7 @@ func TestIsNumeric(t *testing.T) {
 
 // TestToFloat64 tests toFloat64 helper
 func TestToFloat64(t *testing.T) {
+	t.Parallel()
 	result := toFloat64(int64(42))
 	if result != 42.0 {
 		t.Errorf("Expected 42.0, got %f", result)
@@ -389,6 +408,7 @@ func TestToFloat64(t *testing.T) {
 
 // TestCompareIntegersAndBlobs tests comparison helpers
 func TestCompareIntegersAndBlobs(t *testing.T) {
+	t.Parallel()
 	// Integer comparison
 	if compareIntegers(5, 5) != CmpEqual {
 		t.Error("Expected CmpEqual for equal integers")
@@ -414,6 +434,7 @@ func TestCompareIntegersAndBlobs(t *testing.T) {
 
 // TestCompareStringsWithCollation tests string comparison with different collations
 func TestCompareStringsWithCollation(t *testing.T) {
+	t.Parallel()
 	result := compareStrings("abc", "ABC", CollSeqNoCase)
 	if result != CmpEqual {
 		t.Error("Expected CmpEqual for case-insensitive comparison")
@@ -432,6 +453,7 @@ func TestCompareStringsWithCollation(t *testing.T) {
 
 // TestIntToCompareResult tests intToCompareResult helper
 func TestIntToCompareResult(t *testing.T) {
+	t.Parallel()
 	if intToCompareResult(-5) != CmpLess {
 		t.Error("Expected CmpLess for negative")
 	}
@@ -445,6 +467,7 @@ func TestIntToCompareResult(t *testing.T) {
 
 // TestContainsAnyAffinity tests containsAnyAffinity helper
 func TestContainsAnyAffinity(t *testing.T) {
+	t.Parallel()
 	if !containsAnyAffinity("INTEGER", []string{"INT"}) {
 		t.Error("Expected true for INT in INTEGER")
 	}

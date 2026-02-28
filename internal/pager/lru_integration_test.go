@@ -7,6 +7,7 @@ import (
 
 // TestPagerWithLRUCache tests the pager using the LRU cache
 func TestPagerWithLRUCache(t *testing.T) {
+	t.Parallel()
 	tmpFile := "/tmp/test_lru_pager.db"
 	defer os.Remove(tmpFile)
 	defer os.Remove(tmpFile + "-journal")
@@ -66,6 +67,7 @@ func TestPagerWithLRUCache(t *testing.T) {
 
 // TestPagerWithLRUCache_WriteThroughMode tests write-through mode
 func TestPagerWithLRUCache_WriteThroughMode(t *testing.T) {
+	t.Parallel()
 	tmpFile := "/tmp/test_lru_writethrough.db"
 	defer os.Remove(tmpFile)
 	defer os.Remove(tmpFile + "-journal")
@@ -93,6 +95,11 @@ func TestPagerWithLRUCache_WriteThroughMode(t *testing.T) {
 
 // TestPagerWithLRUCache_LargeWorkload tests LRU cache with many pages
 func TestPagerWithLRUCache_LargeWorkload(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("skipping slow test in short mode")
+	}
+
 	tmpFile := "/tmp/test_lru_large.db"
 	defer os.Remove(tmpFile)
 	defer os.Remove(tmpFile + "-journal")
@@ -160,6 +167,7 @@ func TestPagerWithLRUCache_LargeWorkload(t *testing.T) {
 
 // TestPagerWithLRUCache_MemoryLimit tests memory-based eviction
 func TestPagerWithLRUCache_MemoryLimit(t *testing.T) {
+	t.Parallel()
 	tmpFile := "/tmp/test_lru_memory.db"
 	defer os.Remove(tmpFile)
 	defer os.Remove(tmpFile + "-journal")
@@ -200,6 +208,7 @@ func TestPagerWithLRUCache_MemoryLimit(t *testing.T) {
 
 // TestLRUCacheEvictionOrder tests that LRU eviction happens in correct order
 func TestLRUCacheEvictionOrder(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 3)
 
 	// Add pages 1, 2, 3

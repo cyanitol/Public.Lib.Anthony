@@ -6,6 +6,7 @@ import (
 
 // TestBitAnd tests the OpBitAnd instruction
 func TestBitAnd(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		left     int64
@@ -20,7 +21,9 @@ func TestBitAnd(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(10)
 
 			// Set up operands
@@ -54,6 +57,7 @@ func TestBitAnd(t *testing.T) {
 
 // TestBitAndNull tests NULL propagation for OpBitAnd
 func TestBitAndNull(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(10)
 
 	// Test NULL & value = NULL
@@ -92,6 +96,7 @@ func TestBitAndNull(t *testing.T) {
 
 // TestBitOr tests the OpBitOr instruction
 func TestBitOr(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		left     int64
@@ -106,7 +111,9 @@ func TestBitOr(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(10)
 
 			v.Mem[1].SetInt(tt.left)
@@ -138,6 +145,7 @@ func TestBitOr(t *testing.T) {
 
 // TestBitNot tests the OpBitNot instruction
 func TestBitNot(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    int64
@@ -151,7 +159,9 @@ func TestBitNot(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(10)
 
 			v.Mem[1].SetInt(tt.value)
@@ -181,6 +191,7 @@ func TestBitNot(t *testing.T) {
 
 // TestShiftLeft tests the OpShiftLeft instruction
 func TestShiftLeft(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    int64
@@ -196,7 +207,9 @@ func TestShiftLeft(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(10)
 
 			v.Mem[1].SetInt(tt.shift)
@@ -228,6 +241,7 @@ func TestShiftLeft(t *testing.T) {
 
 // TestShiftRight tests the OpShiftRight instruction
 func TestShiftRight(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    int64
@@ -244,7 +258,9 @@ func TestShiftRight(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(10)
 
 			v.Mem[1].SetInt(tt.shift)
@@ -276,6 +292,7 @@ func TestShiftRight(t *testing.T) {
 
 // TestLogicalAnd tests the OpAnd instruction
 func TestLogicalAnd(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		left         interface{}
@@ -296,7 +313,9 @@ func TestLogicalAnd(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(10)
 
 			if tt.left == nil {
@@ -343,6 +362,7 @@ func TestLogicalAnd(t *testing.T) {
 
 // TestLogicalOr tests the OpOr instruction
 func TestLogicalOr(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		left         interface{}
@@ -363,7 +383,9 @@ func TestLogicalOr(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(10)
 
 			if tt.left == nil {
@@ -410,6 +432,7 @@ func TestLogicalOr(t *testing.T) {
 
 // TestLogicalNot tests the OpNot instruction
 func TestLogicalNot(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		value        interface{}
@@ -424,7 +447,9 @@ func TestLogicalNot(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(10)
 
 			if tt.value == nil {

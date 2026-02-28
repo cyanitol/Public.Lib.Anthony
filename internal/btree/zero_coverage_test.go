@@ -10,6 +10,7 @@ import (
 // TestCursor_PrevViaParent tests backward navigation through parent pages
 // This tests the prevViaParent function which is at 0% coverage
 func TestCursor_PrevViaParent(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages to force multi-level trees
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -50,6 +51,7 @@ func TestCursor_PrevViaParent(t *testing.T) {
 // TestCursor_DescendToLast tests descending to the last entry in a tree
 // This tests the descendToLast and enterPage functions at 0% coverage
 func TestCursor_DescendToLast(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -86,6 +88,7 @@ func TestCursor_DescendToLast(t *testing.T) {
 // TestMerge_GetSiblingWithLeftPage tests merging with left sibling
 // This tests getSiblingWithLeftPage at 0% coverage
 func TestMerge_GetSiblingWithLeftPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -144,6 +147,7 @@ func TestMerge_GetSiblingWithLeftPage(t *testing.T) {
 // TestMerge_GetSiblingAsRightmost tests merging when current page is rightmost
 // This tests getSiblingAsRightmost at 0% coverage
 func TestMerge_GetSiblingAsRightmost(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -195,6 +199,7 @@ func TestMerge_GetSiblingAsRightmost(t *testing.T) {
 // updateParentSeparator, getFirstKeyFromPage, loadParentBtreePage,
 // calculateSeparatorIndex, replaceSeparatorCell
 func TestMerge_RedistributeSiblings(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -233,6 +238,7 @@ func TestMerge_RedistributeSiblings(t *testing.T) {
 // TestSplit_PrepareInteriorSplit tests splitting interior pages
 // This tests prepareInteriorSplit at 0% coverage
 func TestSplit_PrepareInteriorSplit(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Very small pages to force splits
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -257,6 +263,7 @@ func TestSplit_PrepareInteriorSplit(t *testing.T) {
 // TestSplit_SplitParentRecursively tests recursive parent splits
 // This tests splitParentRecursively and positionOnParent at 0% coverage
 func TestSplit_SplitParentRecursively(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -288,6 +295,7 @@ func TestSplit_SplitParentRecursively(t *testing.T) {
 // TestPageHeader_String tests the String method on PageHeader
 // This tests page.go String() at 0% coverage
 func TestPageHeader_String(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		pageType byte
@@ -321,7 +329,9 @@ func TestPageHeader_String(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			header := &PageHeader{
 				PageType:         tt.pageType,
 				NumCells:         tt.numCells,
@@ -344,6 +354,7 @@ func TestPageHeader_String(t *testing.T) {
 // TestIndexCursor_DescendToRightChild tests descending to right child
 // This tests index_cursor.go descendToRightChild at 0% coverage
 func TestIndexCursor_DescendToRightChild(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -375,6 +386,7 @@ func TestIndexCursor_DescendToRightChild(t *testing.T) {
 // TestIndexCursor_GetFirstChildPage tests getting first child from interior page
 // This tests index_cursor.go getFirstChildPage at 0% coverage
 func TestIndexCursor_GetFirstChildPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -406,6 +418,7 @@ func TestIndexCursor_GetFirstChildPage(t *testing.T) {
 // TestIndexCursor_PrevViaParent tests backward navigation through parent
 // This tests index_cursor.go prevViaParent at 0% coverage
 func TestIndexCursor_PrevViaParent(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -442,6 +455,7 @@ func TestIndexCursor_PrevViaParent(t *testing.T) {
 // TestIndexCursor_DescendToLast tests descending to last in index
 // This tests index_cursor.go descendToLast at 0% coverage
 func TestIndexCursor_DescendToLast(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -474,6 +488,7 @@ func TestIndexCursor_DescendToLast(t *testing.T) {
 // TestIndexCursor_EnterPage tests entering a page during navigation
 // This tests index_cursor.go enterPage at 0% coverage
 func TestIndexCursor_EnterPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -505,6 +520,7 @@ func TestIndexCursor_EnterPage(t *testing.T) {
 // TestIndexCursor_ResolveChildPage tests resolving child pages
 // This tests index_cursor.go resolveChildPage at 0% coverage
 func TestIndexCursor_ResolveChildPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -535,6 +551,7 @@ func TestIndexCursor_ResolveChildPage(t *testing.T) {
 // TestIndexCursor_ClimbToNextParent tests climbing to next parent
 // This tests index_cursor.go climbToNextParent at low coverage (8.0%)
 func TestIndexCursor_ClimbToNextParent(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -568,6 +585,7 @@ func TestIndexCursor_ClimbToNextParent(t *testing.T) {
 
 // TestMultipleLevelTree creates a deep tree to trigger interior page operations
 func TestMultipleLevelTree(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small page size
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -625,6 +643,7 @@ func TestMultipleLevelTree(t *testing.T) {
 
 // TestDeepIndexTree creates a deep index tree
 func TestDeepIndexTree(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -693,6 +712,7 @@ func TestDeepIndexTree(t *testing.T) {
 
 // TestCreateInteriorIndexPage manually creates an interior index page to test navigation
 func TestCreateInteriorIndexPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create two leaf index pages

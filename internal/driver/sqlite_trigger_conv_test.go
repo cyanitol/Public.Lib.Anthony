@@ -43,6 +43,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.1.1: Error if table does not exist
 	t.Run("ErrorNoSuchTable", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`CREATE TRIGGER trig UPDATE ON no_such_table BEGIN SELECT * FROM sqlite_master; END`)
 		if err == nil {
 			t.Error("expected error when creating trigger on non-existent table")
@@ -57,6 +58,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.1.3: FOR EACH STATEMENT syntax error
 	t.Run("ForEachStatementError", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`CREATE TRIGGER trig UPDATE ON t1 FOR EACH STATEMENT BEGIN SELECT * FROM sqlite_master; END`)
 		if err == nil {
 			t.Error("expected syntax error for FOR EACH STATEMENT")
@@ -71,6 +73,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.2.0: IF NOT EXISTS should succeed for existing trigger
 	t.Run("IfNotExists", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS tr1 DELETE ON t1 BEGIN SELECT * FROM sqlite_master; END`)
 		if err != nil {
 			t.Errorf("IF NOT EXISTS should not error for existing trigger: %v", err)
@@ -79,6 +82,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.2.1: Trigger already exists
 	t.Run("TriggerAlreadyExists", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`CREATE TRIGGER tr1 DELETE ON t1 BEGIN SELECT * FROM sqlite_master; END`)
 		if err == nil {
 			t.Error("expected error when creating duplicate trigger")
@@ -87,6 +91,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.2.2: Trigger with quoted name already exists
 	t.Run("QuotedNameExists", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`CREATE TRIGGER "tr1" DELETE ON t1 BEGIN SELECT * FROM sqlite_master; END`)
 		if err == nil {
 			t.Error("expected error when creating duplicate trigger with quoted name")
@@ -95,6 +100,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.3: Rollback CREATE TRIGGER
 	t.Run("RollbackCreate", func(t *testing.T) {
+		t.Parallel()
 		tx, err := db.Begin()
 		if err != nil {
 			t.Fatalf("failed to begin transaction: %v", err)
@@ -114,6 +120,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.4: DROP TRIGGER IF EXISTS
 	t.Run("DropIfExists", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec("DROP TRIGGER IF EXISTS tr1")
 		if err != nil {
 			t.Errorf("DROP TRIGGER IF EXISTS failed: %v", err)
@@ -127,6 +134,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.5: Rollback DROP TRIGGER
 	t.Run("RollbackDrop", func(t *testing.T) {
+		t.Parallel()
 		tx, err := db.Begin()
 		if err != nil {
 			t.Fatalf("failed to begin transaction: %v", err)
@@ -146,6 +154,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.6.1: DROP TRIGGER IF EXISTS on non-existent trigger
 	t.Run("DropNonExistentIfExists", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec("DROP TRIGGER IF EXISTS biggles")
 		if err != nil {
 			t.Errorf("DROP TRIGGER IF EXISTS should not error: %v", err)
@@ -154,6 +163,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.6.2: DROP TRIGGER on non-existent trigger
 	t.Run("DropNonExistent", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec("DROP TRIGGER biggles")
 		if err == nil {
 			t.Error("expected error when dropping non-existent trigger")
@@ -162,6 +172,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.7: Dropping table automatically drops triggers
 	t.Run("DropTableDropsTrigger", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec("DROP TABLE t1")
 		if err != nil {
 			t.Fatalf("failed to drop table: %v", err)
@@ -175,6 +186,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.9: Cannot create trigger on system tables
 	t.Run("NoTriggerOnSystemTable", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`CREATE TRIGGER tr1 AFTER UPDATE ON sqlite_master BEGIN SELECT * FROM sqlite_master; END`)
 		if err == nil {
 			t.Error("expected error when creating trigger on sqlite_master")
@@ -183,6 +195,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.10: DELETE within trigger body
 	t.Run("DeleteInTriggerBody", func(t *testing.T) {
+		t.Parallel()
 		db.Exec("DROP TABLE IF EXISTS t1")
 		_, err := db.Exec("CREATE TABLE t1(a, b)")
 		if err != nil {
@@ -223,6 +236,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.11: UPDATE within trigger body
 	t.Run("UpdateInTriggerBody", func(t *testing.T) {
+		t.Parallel()
 		db.Exec("DROP TABLE IF EXISTS t1")
 		db.Exec("DROP TRIGGER IF EXISTS r1")
 		_, err := db.Exec("CREATE TABLE t1(a, b)")
@@ -259,6 +273,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 1.12: Cannot create INSTEAD OF trigger on tables
 	t.Run("NoInsteadOfOnTable", func(t *testing.T) {
+		t.Parallel()
 		db.Exec("DROP TABLE IF EXISTS t1")
 		_, err := db.Exec("CREATE TABLE t1(a, b)")
 		if err != nil {
@@ -272,6 +287,7 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 
 	// Test 8.1-8.6: Quoted trigger names
 	t.Run("QuotedTriggerNames", func(t *testing.T) {
+		t.Parallel()
 		db.Exec("DROP TABLE IF EXISTS t2")
 		_, err := db.Exec("CREATE TABLE t2(x, y)")
 		if err != nil {
@@ -358,6 +374,7 @@ func testTriggerExecutionOrder(t *testing.T, db *sql.DB) {
 
 	// Test UPDATE triggers
 	t.Run("UpdateTriggerOrder", func(t *testing.T) {
+		t.Parallel()
 		// Create BEFORE UPDATE trigger
 		_, err := db.Exec(`
 			CREATE TRIGGER before_update_row BEFORE UPDATE ON tbl FOR EACH ROW
@@ -428,6 +445,7 @@ func testTriggerExecutionOrder(t *testing.T, db *sql.DB) {
 
 	// Test DELETE triggers
 	t.Run("DeleteTriggerOrder", func(t *testing.T) {
+		t.Parallel()
 		db.Exec("DELETE FROM rlog")
 		db.Exec("DELETE FROM tbl")
 		db.Exec("INSERT INTO tbl VALUES(100, 100), (300, 200)")
@@ -479,6 +497,7 @@ func testTriggerExecutionOrder(t *testing.T, db *sql.DB) {
 
 	// Test INSERT triggers
 	t.Run("InsertTriggerOrder", func(t *testing.T) {
+		t.Parallel()
 		db.Exec("DELETE FROM rlog")
 
 		_, err := db.Exec(`
@@ -545,6 +564,7 @@ func testTriggerWithNEWOLD(t *testing.T, db *sql.DB) {
 
 	// Test INSERT with NEW reference
 	t.Run("InsertWithNEW", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TRIGGER trig AFTER INSERT ON tbl
 			BEGIN
@@ -572,6 +592,7 @@ func testTriggerWithNEWOLD(t *testing.T, db *sql.DB) {
 
 	// Test UPDATE with OLD and NEW references
 	t.Run("UpdateWithOLDNEW", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec("INSERT INTO tbl VALUES(10, 20, 30)")
 		if err != nil {
 			t.Fatalf("failed to insert: %v", err)
@@ -599,6 +620,7 @@ func testTriggerWithNEWOLD(t *testing.T, db *sql.DB) {
 
 	// Test DELETE with OLD reference
 	t.Run("DeleteWithOLD", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec("INSERT INTO tbl VALUES(5, 6, 7)")
 		if err != nil {
 			t.Fatalf("failed to insert: %v", err)
@@ -651,6 +673,7 @@ func testConditionalTriggers(t *testing.T, db *sql.DB) {
 
 	// Test UPDATE OF
 	t.Run("UpdateOf", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TRIGGER tbl_after_update_cd BEFORE UPDATE OF c, d ON tbl
 			BEGIN
@@ -695,6 +718,7 @@ func testConditionalTriggers(t *testing.T, db *sql.DB) {
 
 	// Test WHEN clause
 	t.Run("WhenClause", func(t *testing.T) {
+		t.Parallel()
 		db.Exec("DROP TABLE IF EXISTS tbl")
 		db.Exec("DROP TABLE IF EXISTS log")
 		db.Exec("DROP TRIGGER IF EXISTS tbl_after_update_cd")
@@ -852,6 +876,7 @@ func testRaiseFunctions(t *testing.T, db *sql.DB) {
 
 	// Test RAISE(IGNORE)
 	t.Run("RaiseIgnore", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TRIGGER before_tbl_insert BEFORE INSERT ON tbl
 			BEGIN
@@ -877,6 +902,7 @@ func testRaiseFunctions(t *testing.T, db *sql.DB) {
 
 	// Test RAISE(ABORT)
 	t.Run("RaiseAbort", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TRIGGER after_tbl_insert AFTER INSERT ON tbl
 			BEGIN
@@ -918,6 +944,7 @@ func testRaiseFunctions(t *testing.T, db *sql.DB) {
 
 	// Test RAISE(FAIL)
 	t.Run("RaiseFail", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TRIGGER after_tbl_insert AFTER INSERT ON tbl
 			BEGIN
@@ -953,6 +980,7 @@ func testRaiseFunctions(t *testing.T, db *sql.DB) {
 
 	// Test RAISE(ROLLBACK)
 	t.Run("RaiseRollback", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TRIGGER after_tbl_insert AFTER INSERT ON tbl
 			BEGIN
@@ -988,6 +1016,7 @@ func testRaiseFunctions(t *testing.T, db *sql.DB) {
 
 	// Test RAISE outside trigger
 	t.Run("RaiseOutsideTrigger", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec("SELECT RAISE(ABORT, 'message')")
 		if err == nil {
 			t.Error("expected error when using RAISE outside trigger")
@@ -1009,6 +1038,7 @@ func testTriggerWithTransactions(t *testing.T, db *sql.DB) {
 
 	// Test CREATE TRIGGER in transaction with ROLLBACK
 	t.Run("CreateTriggerRollback", func(t *testing.T) {
+		t.Parallel()
 		tx, err := db.Begin()
 		if err != nil {
 			t.Fatalf("failed to begin transaction: %v", err)
@@ -1034,6 +1064,7 @@ func testTriggerWithTransactions(t *testing.T, db *sql.DB) {
 
 	// Test DROP TRIGGER in transaction with ROLLBACK
 	t.Run("DropTriggerRollback", func(t *testing.T) {
+		t.Parallel()
 		tx, err := db.Begin()
 		if err != nil {
 			t.Fatalf("failed to begin transaction: %v", err)
@@ -1198,6 +1229,7 @@ func testViewTriggers(t *testing.T, db *sql.DB) {
 
 	// Test INSTEAD OF INSERT
 	t.Run("InsteadOfInsert", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TRIGGER I_test INSTEAD OF INSERT ON test_view
 			BEGIN
@@ -1232,6 +1264,7 @@ func testViewTriggers(t *testing.T, db *sql.DB) {
 
 	// Test INSTEAD OF UPDATE
 	t.Run("InsteadOfUpdate", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TRIGGER U_test INSTEAD OF UPDATE ON test_view
 			BEGIN
@@ -1259,6 +1292,7 @@ func testViewTriggers(t *testing.T, db *sql.DB) {
 
 	// Test INSTEAD OF DELETE
 	t.Run("InsteadOfDelete", func(t *testing.T) {
+		t.Parallel()
 		// Insert another row first
 		db.Exec("INSERT INTO test1(id, a) VALUES(4, 5)")
 		db.Exec("INSERT INTO test2(id, b) VALUES(4, 6)")
@@ -1286,6 +1320,7 @@ func testViewTriggers(t *testing.T, db *sql.DB) {
 
 	// Test that BEFORE trigger on view fails
 	t.Run("NoBeforeTriggerOnView", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TRIGGER v_before BEFORE UPDATE ON test_view
 			BEGIN
@@ -1299,6 +1334,7 @@ func testViewTriggers(t *testing.T, db *sql.DB) {
 
 	// Test that AFTER trigger on view fails
 	t.Run("NoAfterTriggerOnView", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TRIGGER v_after AFTER UPDATE ON test_view
 			BEGIN
@@ -1316,6 +1352,7 @@ func testViewTriggers(t *testing.T, db *sql.DB) {
 func testTriggerErrors(t *testing.T, db *sql.DB) {
 	// Test syntax errors in trigger body
 	t.Run("SyntaxErrorInBody", func(t *testing.T) {
+		t.Parallel()
 		db.Exec("DROP TABLE IF EXISTS t1")
 		db.Exec("CREATE TABLE t1(a)")
 
@@ -1332,6 +1369,7 @@ func testTriggerErrors(t *testing.T, db *sql.DB) {
 
 	// Test multiple syntax errors
 	t.Run("MultipleSyntaxErrors", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TRIGGER r1 AFTER INSERT ON t1
 			BEGIN
@@ -1346,6 +1384,7 @@ func testTriggerErrors(t *testing.T, db *sql.DB) {
 
 	// Test qualified table names in trigger (should fail)
 	t.Run("QualifiedTableNamesInTrigger", func(t *testing.T) {
+		t.Parallel()
 		db.Exec("DROP TABLE IF EXISTS t16")
 		db.Exec("CREATE TABLE t16(a, b, c)")
 
@@ -1382,6 +1421,7 @@ func testTriggerErrors(t *testing.T, db *sql.DB) {
 
 	// Test INDEXED BY in trigger (should fail)
 	t.Run("IndexedByInTrigger", func(t *testing.T) {
+		t.Parallel()
 		db.Exec("DROP TABLE IF EXISTS t16")
 		db.Exec("CREATE TABLE t16(a, b, c)")
 		db.Exec("CREATE INDEX t16a ON t16(a)")
@@ -1409,6 +1449,7 @@ func testTriggerErrors(t *testing.T, db *sql.DB) {
 
 	// Test NOT INDEXED in trigger (should fail)
 	t.Run("NotIndexedInTrigger", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TRIGGER t16err4 AFTER INSERT ON t1
 			BEGIN
@@ -1432,6 +1473,7 @@ func testTriggerErrors(t *testing.T, db *sql.DB) {
 
 	// Test trigger with variables (should fail)
 	t.Run("VariablesInTrigger", func(t *testing.T) {
+		t.Parallel()
 		db.Exec("DROP TABLE IF EXISTS t17a")
 		db.Exec("DROP TABLE IF EXISTS t17b")
 		db.Exec("CREATE TABLE t17a(ii INT)")
@@ -1450,6 +1492,7 @@ func testTriggerErrors(t *testing.T, db *sql.DB) {
 
 	// Test datatype mismatch with trigger
 	t.Run("DatatypeMismatchWithTrigger", func(t *testing.T) {
+		t.Parallel()
 		db.Exec("DROP TABLE IF EXISTS tA")
 		db.Exec("DROP TRIGGER IF EXISTS tA_trigger")
 

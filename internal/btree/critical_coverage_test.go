@@ -8,6 +8,7 @@ import (
 // TestGetSiblingWithLeftPage_ActualMerge tests merging with a left sibling
 // This targets getSiblingWithLeftPage at 0% coverage
 func TestGetSiblingWithLeftPage_ActualMerge(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -72,6 +73,7 @@ func TestGetSiblingWithLeftPage_ActualMerge(t *testing.T) {
 // TestGetSiblingAsRightmost_ActualMerge tests merging when current page is rightmost
 // This targets getSiblingAsRightmost at 0% coverage
 func TestGetSiblingAsRightmost_ActualMerge(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -125,6 +127,7 @@ func TestGetSiblingAsRightmost_ActualMerge(t *testing.T) {
 // TestHandleUnderfullPage_NonRoot tests underfull page handling for non-root pages
 // This targets handleUnderfullPage at 25% coverage
 func TestHandleUnderfullPage_NonRoot(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -177,6 +180,7 @@ func TestHandleUnderfullPage_NonRoot(t *testing.T) {
 // TestHandleUnderfullPage_RootPage tests underfull page handling for root page
 // This should allow underfull state
 func TestHandleUnderfullPage_RootPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -213,6 +217,7 @@ func TestHandleUnderfullPage_RootPage(t *testing.T) {
 
 // TestHandleUnderfullPage_WithFragmentation tests defragmentation path
 func TestHandleUnderfullPage_WithFragmentation(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -273,6 +278,7 @@ func TestHandleUnderfullPage_WithFragmentation(t *testing.T) {
 // TestHandleOverfullPage_WithDefragmentation tests overfull handling with fragmentation
 // This targets handleOverfullPage at 33.3% coverage
 func TestHandleOverfullPage_WithDefragmentation(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages
 	pageSize := bt.PageSize
 
@@ -331,6 +337,7 @@ func TestHandleOverfullPage_WithDefragmentation(t *testing.T) {
 
 // TestHandleOverfullPage_StillOverfull tests when defragmentation doesn't help
 func TestHandleOverfullPage_StillOverfull(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Very small pages
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -383,6 +390,7 @@ func TestHandleOverfullPage_StillOverfull(t *testing.T) {
 // TestCheckMaxIterationsExceeded tests the free block iteration check
 // This targets checkMaxIterationsExceeded at 50% coverage
 func TestCheckMaxIterationsExceeded(t *testing.T) {
+	t.Parallel()
 	result := &IntegrityResult{
 		Errors: make([]*IntegrityError, 0),
 	}
@@ -428,6 +436,7 @@ func TestCheckMaxIterationsExceeded(t *testing.T) {
 // TestSeekLeafExactMatch_IndexCursor tests exact match seeking in index cursor
 // This targets index_cursor.go seekLeafExactMatch at 53.8% coverage
 func TestSeekLeafExactMatch_IndexCursor(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage2(bt)
 	if err != nil {
@@ -477,6 +486,7 @@ func TestSeekLeafExactMatch_IndexCursor(t *testing.T) {
 // TestIndexCursor_PrevInPage2 tests backward navigation within a page
 // This targets index_cursor.go prevInPage at 55.6% coverage
 func TestIndexCursor_PrevInPage2(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage2(bt)
 	if err != nil {
@@ -517,6 +527,7 @@ func TestIndexCursor_PrevInPage2(t *testing.T) {
 // TestIndexCursor_DeleteCurrentEntry2 tests deleting current entry
 // This targets index_cursor.go deleteCurrentEntry at 58.8% coverage
 func TestIndexCursor_DeleteCurrentEntry2(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage2(bt)
 	if err != nil {

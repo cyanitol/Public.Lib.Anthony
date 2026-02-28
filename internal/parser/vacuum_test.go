@@ -5,6 +5,7 @@ import (
 )
 
 func TestParseVacuum_Basic(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -33,7 +34,9 @@ func TestParseVacuum_Basic(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -54,6 +57,7 @@ func TestParseVacuum_Basic(t *testing.T) {
 }
 
 func TestParseVacuum_Structure(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		sql        string
@@ -87,7 +91,9 @@ func TestParseVacuum_Structure(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if err != nil {
@@ -115,6 +121,7 @@ func TestParseVacuum_Structure(t *testing.T) {
 }
 
 func TestParseVacuum_String(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		sql        string
@@ -133,7 +140,9 @@ func TestParseVacuum_String(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if err != nil {
@@ -157,6 +166,7 @@ func TestParseVacuum_String(t *testing.T) {
 }
 
 func TestParseVacuum_MultipleStatements(t *testing.T) {
+	t.Parallel()
 	sql := `
 		CREATE TABLE test (id INTEGER);
 		INSERT INTO test VALUES (1);
@@ -181,6 +191,7 @@ func TestParseVacuum_MultipleStatements(t *testing.T) {
 }
 
 func TestParseVacuum_CaseSensitivity(t *testing.T) {
+	t.Parallel()
 	tests := []string{
 		"VACUUM",
 		"vacuum",
@@ -193,6 +204,7 @@ func TestParseVacuum_CaseSensitivity(t *testing.T) {
 
 	for _, sql := range tests {
 		t.Run(sql, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(sql)
 			stmts, err := parser.Parse()
 			if err != nil {
@@ -213,6 +225,7 @@ func TestParseVacuum_CaseSensitivity(t *testing.T) {
 }
 
 func TestParseVacuum_AST(t *testing.T) {
+	t.Parallel()
 	// Verify VACUUM statement implements required interfaces
 	var _ Statement = (*VacuumStmt)(nil)
 	var _ Node = (*VacuumStmt)(nil)
@@ -235,6 +248,7 @@ func TestParseVacuum_AST(t *testing.T) {
 }
 
 func TestParseVacuum_WithParameter(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		sql         string
@@ -262,7 +276,9 @@ func TestParseVacuum_WithParameter(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {

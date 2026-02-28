@@ -5,6 +5,7 @@ import (
 )
 
 func TestCompoundOpString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		op   CompoundOp
 		want string
@@ -17,6 +18,7 @@ func TestCompoundOpString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := tt.op.String()
 		if got != tt.want {
 			t.Errorf("CompoundOp(%d).String() = %q, want %q", tt.op, got, tt.want)
@@ -25,6 +27,7 @@ func TestCompoundOpString(t *testing.T) {
 }
 
 func TestAlterTableActionString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		action AlterTableAction
@@ -55,7 +58,9 @@ func TestAlterTableActionString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.action.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -65,6 +70,7 @@ func TestAlterTableActionString(t *testing.T) {
 }
 
 func TestUpsertClause(t *testing.T) {
+	t.Parallel()
 	// UpsertClause doesn't have a String method, just test creation
 	upsert := &UpsertClause{
 		Target: &ConflictTarget{
@@ -78,6 +84,7 @@ func TestUpsertClause(t *testing.T) {
 }
 
 func TestBinaryExprString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *BinaryExpr
@@ -113,7 +120,9 @@ func TestBinaryExprString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -123,6 +132,7 @@ func TestBinaryExprString(t *testing.T) {
 }
 
 func TestUnaryExprString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *UnaryExpr
@@ -155,7 +165,9 @@ func TestUnaryExprString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -165,6 +177,7 @@ func TestUnaryExprString(t *testing.T) {
 }
 
 func TestUnaryIsNullExprString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *UnaryExpr
@@ -189,7 +202,9 @@ func TestUnaryIsNullExprString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -199,6 +214,7 @@ func TestUnaryIsNullExprString(t *testing.T) {
 }
 
 func TestInExprString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *InExpr
@@ -230,7 +246,9 @@ func TestInExprString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -240,6 +258,7 @@ func TestInExprString(t *testing.T) {
 }
 
 func TestBetweenExprString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *BetweenExpr
@@ -268,7 +287,9 @@ func TestBetweenExprString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -278,6 +299,7 @@ func TestBetweenExprString(t *testing.T) {
 }
 
 func TestFunctionExprString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *FunctionExpr
@@ -321,7 +343,9 @@ func TestFunctionExprString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -331,6 +355,7 @@ func TestFunctionExprString(t *testing.T) {
 }
 
 func TestCaseExprString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *CaseExpr
@@ -371,7 +396,9 @@ func TestCaseExprString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -381,6 +408,7 @@ func TestCaseExprString(t *testing.T) {
 }
 
 func TestCastExprString(t *testing.T) {
+	t.Parallel()
 	expr := &CastExpr{
 		Expr: &IdentExpr{Name: "value"},
 		Type: "INTEGER",
@@ -393,6 +421,7 @@ func TestCastExprString(t *testing.T) {
 }
 
 func TestCollateExprString(t *testing.T) {
+	t.Parallel()
 	expr := &CollateExpr{
 		Expr:      &IdentExpr{Name: "name"},
 		Collation: "NOCASE",
@@ -405,6 +434,7 @@ func TestCollateExprString(t *testing.T) {
 }
 
 func TestExistsExprString(t *testing.T) {
+	t.Parallel()
 	expr := &ExistsExpr{
 		Select: &SelectStmt{},
 	}
@@ -416,6 +446,7 @@ func TestExistsExprString(t *testing.T) {
 }
 
 func TestParenExprString(t *testing.T) {
+	t.Parallel()
 	expr := &ParenExpr{
 		Expr: &IdentExpr{Name: "value"},
 	}
@@ -427,6 +458,7 @@ func TestParenExprString(t *testing.T) {
 }
 
 func TestSubqueryExprString(t *testing.T) {
+	t.Parallel()
 	expr := &SubqueryExpr{
 		Select: &SelectStmt{},
 	}
@@ -438,6 +470,7 @@ func TestSubqueryExprString(t *testing.T) {
 }
 
 func TestVacuumStmtString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		stmt *VacuumStmt
@@ -461,7 +494,9 @@ func TestVacuumStmtString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.stmt.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -471,6 +506,7 @@ func TestVacuumStmtString(t *testing.T) {
 }
 
 func TestASTExplainStmtString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		stmt *ExplainStmt
@@ -489,7 +525,9 @@ func TestASTExplainStmtString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.stmt.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -500,6 +538,7 @@ func TestASTExplainStmtString(t *testing.T) {
 
 // Test node() and statement() methods to ensure they're callable
 func TestNodeMethods(t *testing.T) {
+	t.Parallel()
 	statements := []Statement{
 		&SelectStmt{},
 		&InsertStmt{},
@@ -532,6 +571,7 @@ func TestNodeMethods(t *testing.T) {
 
 // Test expression() methods to ensure they're callable
 func TestExpressionMethods(t *testing.T) {
+	t.Parallel()
 	expressions := []Expression{
 		&BinaryExpr{},
 		&UnaryExpr{},
@@ -556,6 +596,7 @@ func TestExpressionMethods(t *testing.T) {
 
 // Test alterTableAction() methods
 func TestAlterTableActionMethods(t *testing.T) {
+	t.Parallel()
 	actions := []AlterTableAction{
 		&RenameTableAction{},
 		&RenameColumnAction{},

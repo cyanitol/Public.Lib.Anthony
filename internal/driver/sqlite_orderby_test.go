@@ -141,7 +141,9 @@ func TestSQLiteOrderBySingleColumn(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -245,7 +247,9 @@ func TestSQLiteOrderByMultipleColumns(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -313,7 +317,9 @@ func TestSQLiteOrderByColumnNumber(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -374,7 +380,9 @@ func TestSQLiteOrderByExpression(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -444,7 +452,9 @@ func TestSQLiteOrderByWithNulls(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -506,7 +516,9 @@ func TestSQLiteOrderByWithLimit(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -599,7 +611,9 @@ func TestSQLiteOrderByJoin(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -659,7 +673,9 @@ func TestSQLiteOrderByCompoundSelect(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -713,7 +729,9 @@ func TestSQLiteOrderByRowid(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -774,7 +792,9 @@ func TestSQLiteOrderByTypeMixing(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -860,7 +880,9 @@ func TestSQLiteOrderByComplexQueries(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -933,7 +955,9 @@ func TestSQLiteOrderByEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -1004,7 +1028,9 @@ func TestSQLiteOrderByCollation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -1110,7 +1136,9 @@ func TestSQLiteOrderByASCExplicit(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -1166,7 +1194,9 @@ func TestSQLiteOrderByJoinUnique(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -1315,7 +1345,9 @@ func TestSQLiteOrderByPrimaryKey(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -1403,7 +1435,9 @@ func TestSQLiteOrderByWithIndex(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}

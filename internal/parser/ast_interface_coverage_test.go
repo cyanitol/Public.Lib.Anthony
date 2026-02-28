@@ -6,6 +6,7 @@ import "testing"
 // The Go coverage tool doesn't always count calls through interface values, so we need
 // to explicitly call these methods on concrete types.
 func TestConcreteTypeNodeMethods(t *testing.T) {
+	t.Parallel()
 	// Test all statement types
 	var s1 SelectStmt
 	s1.node()
@@ -94,6 +95,7 @@ func TestConcreteTypeNodeMethods(t *testing.T) {
 
 // TestConcreteTypeExpressionMethods tests expression() methods on concrete types.
 func TestConcreteTypeExpressionMethods(t *testing.T) {
+	t.Parallel()
 	var be BinaryExpr
 	be.node()
 	be.expression()
@@ -153,6 +155,7 @@ func TestConcreteTypeExpressionMethods(t *testing.T) {
 
 // TestConcreteTypeAlterTableActions tests alterTableAction() methods on concrete types.
 func TestConcreteTypeAlterTableActions(t *testing.T) {
+	t.Parallel()
 	var rt RenameTableAction
 	rt.node()
 	rt.alterTableAction()
@@ -172,6 +175,7 @@ func TestConcreteTypeAlterTableActions(t *testing.T) {
 
 // TestVariableExprString tests the String() method for VariableExpr
 func TestVariableExprString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *VariableExpr
@@ -195,7 +199,9 @@ func TestVariableExprString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("VariableExpr.String() = %q, want %q", got, tt.want)
@@ -206,6 +212,7 @@ func TestVariableExprString(t *testing.T) {
 
 // TestExistsExprStringNotExists tests the String() method for NOT EXISTS
 func TestExistsExprStringNotExists(t *testing.T) {
+	t.Parallel()
 	expr := &ExistsExpr{
 		Select: &SelectStmt{},
 		Not:    true,
@@ -219,6 +226,7 @@ func TestExistsExprStringNotExists(t *testing.T) {
 
 // TestLiteralExprStringAllTypes tests all literal types
 func TestLiteralExprStringAllTypes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *LiteralExpr
@@ -257,7 +265,9 @@ func TestLiteralExprStringAllTypes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("LiteralExpr.String() = %q, want %q", got, tt.want)
@@ -268,6 +278,7 @@ func TestLiteralExprStringAllTypes(t *testing.T) {
 
 // TestIdentExprStringWithTable tests IdentExpr with table qualifier
 func TestIdentExprStringWithTable(t *testing.T) {
+	t.Parallel()
 	expr := &IdentExpr{
 		Table: "users",
 		Name:  "id",
@@ -281,6 +292,7 @@ func TestIdentExprStringWithTable(t *testing.T) {
 
 // TestUnaryExprStringBitNot tests bitwise NOT operator
 func TestUnaryExprStringBitNot(t *testing.T) {
+	t.Parallel()
 	expr := &UnaryExpr{
 		Op:   OpBitNot,
 		Expr: &LiteralExpr{Type: LiteralInteger, Value: "5"},
@@ -294,6 +306,7 @@ func TestUnaryExprStringBitNot(t *testing.T) {
 
 // TestUnaryExprStringUnknownOp tests unknown unary operator
 func TestUnaryExprStringUnknownOp(t *testing.T) {
+	t.Parallel()
 	expr := &UnaryExpr{
 		Op:   UnaryOp(999),
 		Expr: &LiteralExpr{Type: LiteralInteger, Value: "5"},
@@ -307,6 +320,7 @@ func TestUnaryExprStringUnknownOp(t *testing.T) {
 
 // TestBinaryOpStringAllOps tests all binary operators
 func TestBinaryOpStringAllOps(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		op   BinaryOp
 		want string
@@ -337,6 +351,7 @@ func TestBinaryOpStringAllOps(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := tt.op.String()
 		if got != tt.want {
 			t.Errorf("BinaryOp(%d).String() = %q, want %q", tt.op, got, tt.want)
@@ -346,6 +361,7 @@ func TestBinaryOpStringAllOps(t *testing.T) {
 
 // TestFunctionExprStringNilArgs tests FunctionExpr with nil args
 func TestFunctionExprStringNilArgs(t *testing.T) {
+	t.Parallel()
 	expr := &FunctionExpr{
 		Name: "test",
 		Args: []Expression{nil, &LiteralExpr{Type: LiteralInteger, Value: "1"}, nil},
@@ -359,6 +375,7 @@ func TestFunctionExprStringNilArgs(t *testing.T) {
 
 // TestCaseExprStringNilConditionsResults tests CaseExpr with nil conditions/results
 func TestCaseExprStringNilConditionsResults(t *testing.T) {
+	t.Parallel()
 	expr := &CaseExpr{
 		Expr: nil,
 		WhenClauses: []WhenClause{
@@ -379,6 +396,7 @@ func TestCaseExprStringNilConditionsResults(t *testing.T) {
 
 // TestCastExprStringNilExpr tests CastExpr with nil expression
 func TestCastExprStringNilExpr(t *testing.T) {
+	t.Parallel()
 	expr := &CastExpr{
 		Expr: nil,
 		Type: "INTEGER",
@@ -392,6 +410,7 @@ func TestCastExprStringNilExpr(t *testing.T) {
 
 // TestCollateExprStringNilExpr tests CollateExpr with nil expression
 func TestCollateExprStringNilExpr(t *testing.T) {
+	t.Parallel()
 	expr := &CollateExpr{
 		Expr:      nil,
 		Collation: "NOCASE",
@@ -405,6 +424,7 @@ func TestCollateExprStringNilExpr(t *testing.T) {
 
 // TestParenExprStringNilExpr tests ParenExpr with nil expression
 func TestParenExprStringNilExpr(t *testing.T) {
+	t.Parallel()
 	expr := &ParenExpr{
 		Expr: nil,
 	}
@@ -417,6 +437,7 @@ func TestParenExprStringNilExpr(t *testing.T) {
 
 // TestInExprStringNilExpr tests InExpr with nil expression
 func TestInExprStringNilExpr(t *testing.T) {
+	t.Parallel()
 	expr := &InExpr{
 		Expr:   nil,
 		Values: []Expression{&LiteralExpr{Type: LiteralInteger, Value: "1"}},
@@ -431,6 +452,7 @@ func TestInExprStringNilExpr(t *testing.T) {
 
 // TestInExprStringNilValuesInList tests InExpr with nil values in list
 func TestInExprStringNilValuesInList(t *testing.T) {
+	t.Parallel()
 	expr := &InExpr{
 		Expr:   &IdentExpr{Name: "id"},
 		Values: []Expression{nil, &LiteralExpr{Type: LiteralInteger, Value: "1"}, nil},
@@ -445,6 +467,7 @@ func TestInExprStringNilValuesInList(t *testing.T) {
 
 // TestBetweenExprStringNilParts tests BetweenExpr with nil parts
 func TestBetweenExprStringNilParts(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *BetweenExpr
@@ -476,7 +499,9 @@ func TestBetweenExprStringNilParts(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			// Should handle nil values without panicking
 			if got == "" {

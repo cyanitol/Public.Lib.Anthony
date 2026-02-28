@@ -6,6 +6,7 @@ import (
 
 // TestCursorPrevViaParent tests the prevViaParent navigation path
 func TestCursorPrevViaParent(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -59,6 +60,7 @@ func TestCursorPrevViaParent(t *testing.T) {
 
 // TestCursorDescendToLastPath tests descendToLast navigation
 func TestCursorDescendToLastPath(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -100,6 +102,7 @@ func TestCursorDescendToLastPath(t *testing.T) {
 
 // TestCursorEnterPageDepth tests enterPage depth tracking
 func TestCursorEnterPageDepth(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -137,6 +140,7 @@ func TestCursorEnterPageDepth(t *testing.T) {
 
 // TestDropInteriorChildren tests dropInteriorChildren during drop table
 func TestDropInteriorChildren(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -174,6 +178,7 @@ func TestDropInteriorChildren(t *testing.T) {
 
 // TestBalanceOverfullCondition tests handleOverfullPage in balance
 func TestBalanceOverfullCondition(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -219,6 +224,7 @@ func TestBalanceOverfullCondition(t *testing.T) {
 
 // TestBalanceUnderfullCondition tests handleUnderfullPage in balance
 func TestBalanceUnderfullCondition(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -276,6 +282,7 @@ func TestBalanceUnderfullCondition(t *testing.T) {
 
 // TestMergeOperations tests merge-related operations
 func TestMergeOperations(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -317,6 +324,7 @@ func TestMergeOperations(t *testing.T) {
 
 // TestSiblingOperations tests sibling page operations
 func TestSiblingOperations(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -368,6 +376,7 @@ func TestSiblingOperations(t *testing.T) {
 
 // TestRightmostSiblingHandling tests rightmost sibling handling
 func TestRightmostSiblingHandling(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -414,6 +423,7 @@ func TestRightmostSiblingHandling(t *testing.T) {
 
 // TestRedistributionBetweenSiblings tests cell redistribution
 func TestRedistributionBetweenSiblings(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -467,6 +477,7 @@ func TestRedistributionBetweenSiblings(t *testing.T) {
 
 // TestFirstKeyFromPage tests first key extraction
 func TestFirstKeyFromPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -499,6 +510,7 @@ func TestFirstKeyFromPage(t *testing.T) {
 
 // TestParentPageOperations tests parent page loading and operations
 func TestParentPageOperations(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()

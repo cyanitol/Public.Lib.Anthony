@@ -6,6 +6,7 @@ import (
 )
 
 func TestEvaluateArithmetic(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		op       OpCode
@@ -120,7 +121,9 @@ func TestEvaluateArithmetic(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateArithmetic(tt.op, tt.left, tt.right)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("EvaluateArithmetic(%v, %v, %v) = %v, want %v",
@@ -131,6 +134,7 @@ func TestEvaluateArithmetic(t *testing.T) {
 }
 
 func TestEvaluateUnary(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		op       OpCode
@@ -188,7 +192,9 @@ func TestEvaluateUnary(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateUnary(tt.op, tt.operand)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("EvaluateUnary(%v, %v) = %v, want %v",
@@ -199,6 +205,7 @@ func TestEvaluateUnary(t *testing.T) {
 }
 
 func TestEvaluateBitwise(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		op       OpCode
@@ -251,7 +258,9 @@ func TestEvaluateBitwise(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateBitwise(tt.op, tt.left, tt.right)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("EvaluateBitwise(%v, %v, %v) = %v, want %v",
@@ -262,6 +271,7 @@ func TestEvaluateBitwise(t *testing.T) {
 }
 
 func TestEvaluateConcat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		left     interface{}
@@ -301,7 +311,9 @@ func TestEvaluateConcat(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateConcat(tt.left, tt.right)
 			if result != tt.expected {
 				t.Errorf("EvaluateConcat(%v, %v) = %v, want %v",
@@ -312,6 +324,7 @@ func TestEvaluateConcat(t *testing.T) {
 }
 
 func TestEvaluateLogical(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		op       OpCode
@@ -430,7 +443,9 @@ func TestEvaluateLogical(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateLogical(tt.op, tt.left, tt.right)
 			if result != tt.expected {
 				t.Errorf("EvaluateLogical(%v, %v, %v) = %v, want %v",
@@ -441,6 +456,7 @@ func TestEvaluateLogical(t *testing.T) {
 }
 
 func TestEvaluateCast(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		value      interface{}
@@ -546,7 +562,9 @@ func TestEvaluateCast(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateCast(tt.value, tt.targetType)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("EvaluateCast(%v, %q) = %v, want %v",
@@ -558,6 +576,7 @@ func TestEvaluateCast(t *testing.T) {
 
 // TestCastToReal specifically tests the castToReal function coverage.
 func TestCastToReal(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -591,7 +610,9 @@ func TestCastToReal(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := castToReal(tt.value)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("castToReal(%v) = %v, want %v", tt.value, result, tt.expected)
@@ -602,6 +623,7 @@ func TestCastToReal(t *testing.T) {
 
 // TestCastToNumeric specifically tests the castToNumeric function coverage.
 func TestCastToNumeric(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -635,7 +657,9 @@ func TestCastToNumeric(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := castToNumeric(tt.value)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("castToNumeric(%v) = %v, want %v", tt.value, result, tt.expected)
@@ -646,6 +670,7 @@ func TestCastToNumeric(t *testing.T) {
 
 // TestCastToBlob specifically tests the castToBlob function coverage.
 func TestCastToBlob(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -684,7 +709,9 @@ func TestCastToBlob(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := castToBlob(tt.value)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("castToBlob(%v) = %v, want %v", tt.value, result, tt.expected)
@@ -694,6 +721,7 @@ func TestCastToBlob(t *testing.T) {
 }
 
 func TestValueToString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -742,7 +770,9 @@ func TestValueToString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := valueToString(tt.value)
 			if result != tt.expected {
 				t.Errorf("valueToString(%v) = %q, want %q",
@@ -753,6 +783,7 @@ func TestValueToString(t *testing.T) {
 }
 
 func TestArithmeticOverflow(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		op      OpCode
@@ -783,7 +814,9 @@ func TestArithmeticOverflow(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateArithmetic(tt.op, tt.left, tt.right)
 			if result == nil {
 				t.Error("Expected result, got nil")

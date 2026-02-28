@@ -6,6 +6,7 @@ import (
 
 // TestParseCreateView tests CREATE VIEW statement parsing.
 func TestParseCreateView(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -203,7 +204,9 @@ func TestParseCreateView(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -231,6 +234,7 @@ func TestParseCreateView(t *testing.T) {
 
 // TestParseDropView tests DROP VIEW statement parsing.
 func TestParseDropView(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -307,7 +311,9 @@ func TestParseDropView(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -335,6 +341,7 @@ func TestParseDropView(t *testing.T) {
 
 // TestParseViewWithUnion tests CREATE VIEW with UNION queries.
 func TestParseViewWithUnion(t *testing.T) {
+	t.Parallel()
 	sql := "CREATE VIEW all_items AS SELECT id, name FROM products UNION SELECT id, name FROM services"
 	parser := NewParser(sql)
 	stmts, err := parser.Parse()
@@ -361,6 +368,7 @@ func TestParseViewWithUnion(t *testing.T) {
 
 // TestParseViewWithSubquery tests CREATE VIEW with subqueries.
 func TestParseViewWithSubquery(t *testing.T) {
+	t.Parallel()
 	sql := "CREATE VIEW high_value_users AS SELECT * FROM users WHERE id IN (SELECT user_id FROM orders WHERE total > 1000)"
 	parser := NewParser(sql)
 	stmts, err := parser.Parse()
@@ -381,6 +389,7 @@ func TestParseViewWithSubquery(t *testing.T) {
 
 // TestMultipleViewStatements tests parsing multiple VIEW statements.
 func TestMultipleViewStatements(t *testing.T) {
+	t.Parallel()
 	sql := `
 		CREATE VIEW v1 AS SELECT * FROM t1;
 		CREATE VIEW v2 AS SELECT * FROM t2;

@@ -619,9 +619,10 @@ func (a *AddColumnAction) String() string {
 	return "ADD COLUMN"
 }
 
-// DropColumnAction represents DROP COLUMN column_name.
+// DropColumnAction represents DROP COLUMN [IF EXISTS] column_name.
 type DropColumnAction struct {
 	ColumnName string
+	IfExists   bool
 }
 
 func (d *DropColumnAction) node()             {}

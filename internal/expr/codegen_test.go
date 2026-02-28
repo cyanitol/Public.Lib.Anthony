@@ -9,6 +9,7 @@ import (
 
 // TestSimpleArithmetic tests basic arithmetic expression code generation.
 func TestSimpleArithmetic(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     parser.Expression
@@ -53,7 +54,9 @@ func TestSimpleArithmetic(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -78,6 +81,7 @@ func TestSimpleArithmetic(t *testing.T) {
 
 // TestComparisons tests comparison expression code generation.
 func TestComparisons(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		expr   parser.Expression
@@ -119,7 +123,9 @@ func TestComparisons(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -146,6 +152,7 @@ func TestComparisons(t *testing.T) {
 
 // TestLogicalOperators tests AND/OR with short-circuit evaluation.
 func TestLogicalOperators(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		expr       parser.Expression
@@ -172,7 +179,9 @@ func TestLogicalOperators(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -199,6 +208,7 @@ func TestLogicalOperators(t *testing.T) {
 
 // TestFunctionCalls tests function call code generation.
 func TestFunctionCalls(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     parser.Expression
@@ -239,7 +249,9 @@ func TestFunctionCalls(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -268,6 +280,7 @@ func TestFunctionCalls(t *testing.T) {
 
 // TestInExpression tests IN expression code generation.
 func TestInExpression(t *testing.T) {
+	t.Parallel()
 	expr := &parser.InExpr{
 		Expr: &parser.IdentExpr{Name: "x"},
 		Values: []parser.Expression{
@@ -289,6 +302,7 @@ func TestInExpression(t *testing.T) {
 	// Should have comparisons for each value
 	eqCount := 0
 	for _, instr := range v.Program {
+		instr := instr
 		if instr.Opcode == vdbe.OpEq {
 			eqCount++
 		}
@@ -301,6 +315,7 @@ func TestInExpression(t *testing.T) {
 
 // TestBetweenExpression tests BETWEEN expression code generation.
 func TestBetweenExpression(t *testing.T) {
+	t.Parallel()
 	expr := &parser.BetweenExpr{
 		Expr:  &parser.IdentExpr{Name: "age"},
 		Lower: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "18"},
@@ -322,6 +337,7 @@ func TestBetweenExpression(t *testing.T) {
 	hasAnd := false
 
 	for _, instr := range v.Program {
+		instr := instr
 		switch instr.Opcode {
 		case vdbe.OpGe:
 			hasGe = true
@@ -345,6 +361,7 @@ func TestBetweenExpression(t *testing.T) {
 
 // TestCaseExpression tests CASE expression code generation.
 func TestCaseExpression(t *testing.T) {
+	t.Parallel()
 	expr := &parser.CaseExpr{
 		WhenClauses: []parser.WhenClause{
 			{
@@ -380,6 +397,7 @@ func TestCaseExpression(t *testing.T) {
 	gotoCount := 0
 
 	for _, instr := range v.Program {
+		instr := instr
 		if instr.Opcode == vdbe.OpIfNot {
 			ifNotCount++
 		}
@@ -398,6 +416,7 @@ func TestCaseExpression(t *testing.T) {
 
 // TestUnaryOperators tests unary operator code generation.
 func TestUnaryOperators(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		expr   parser.Expression
@@ -430,7 +449,9 @@ func TestUnaryOperators(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -456,6 +477,7 @@ func TestUnaryOperators(t *testing.T) {
 
 // TestNullChecks tests IS NULL and IS NOT NULL code generation.
 func TestNullChecks(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		expr   parser.Expression
@@ -480,7 +502,9 @@ func TestNullChecks(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -506,6 +530,7 @@ func TestNullChecks(t *testing.T) {
 
 // TestCastExpression tests CAST expression code generation.
 func TestCastExpression(t *testing.T) {
+	t.Parallel()
 	expr := &parser.CastExpr{
 		Expr: &parser.IdentExpr{Name: "value"},
 		Type: "INTEGER",
@@ -522,6 +547,7 @@ func TestCastExpression(t *testing.T) {
 	// Should have Cast opcode
 	found := false
 	for _, instr := range v.Program {
+		instr := instr
 		if instr.Opcode == vdbe.OpCast {
 			if instr.P4.Z == "INTEGER" {
 				found = true
@@ -537,6 +563,7 @@ func TestCastExpression(t *testing.T) {
 
 // TestLiteralValues tests literal value code generation.
 func TestLiteralValues(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		expr   parser.Expression
@@ -576,7 +603,9 @@ func TestLiteralValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -599,6 +628,7 @@ func TestLiteralValues(t *testing.T) {
 
 // TestWhereClause tests WHERE clause code generation.
 func TestWhereClause(t *testing.T) {
+	t.Parallel()
 	where := &parser.BinaryExpr{
 		Left:  &parser.IdentExpr{Name: "age"},
 		Op:    parser.OpGt,
@@ -619,6 +649,7 @@ func TestWhereClause(t *testing.T) {
 	hasJump := false
 
 	for _, instr := range v.Program {
+		instr := instr
 		if instr.Opcode == vdbe.OpGt {
 			hasComparison = true
 		}
@@ -637,6 +668,7 @@ func TestWhereClause(t *testing.T) {
 
 // TestRegisterAllocation tests that registers are allocated properly.
 func TestRegisterAllocation(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -663,6 +695,7 @@ func TestRegisterAllocation(t *testing.T) {
 
 // TestComplexExpression tests a complex nested expression.
 func TestComplexExpression(t *testing.T) {
+	t.Parallel()
 	// (a + b) * (c - d)
 	expr := &parser.BinaryExpr{
 		Left: &parser.BinaryExpr{
@@ -692,6 +725,7 @@ func TestComplexExpression(t *testing.T) {
 	hasMul := false
 
 	for _, instr := range v.Program {
+		instr := instr
 		switch instr.Opcode {
 		case vdbe.OpAdd:
 			hasAdd = true
@@ -715,6 +749,7 @@ func TestComplexExpression(t *testing.T) {
 
 // TestGenerateBinaryOperandsErrors tests error handling in generateBinaryOperands.
 func TestGenerateBinaryOperandsErrors(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	g := NewCodeGenerator(v)
 
@@ -737,6 +772,7 @@ func TestGenerateBinaryOperandsErrors(t *testing.T) {
 
 // TestGenerateBinaryWithSpecialHandlers tests binary operations with special handlers.
 func TestGenerateBinaryWithSpecialHandlers(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	g := NewCodeGenerator(v)
 
@@ -767,6 +803,7 @@ func TestGenerateBinaryWithSpecialHandlers(t *testing.T) {
 
 // TestGenerateLogicalShortCircuit tests short-circuit evaluation for AND/OR.
 func TestGenerateLogicalShortCircuit(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	g := NewCodeGenerator(v)
 
@@ -797,6 +834,7 @@ func TestGenerateLogicalShortCircuit(t *testing.T) {
 
 // TestGenerateBinaryAllOperators tests all binary operators for coverage.
 func TestGenerateBinaryAllOperators(t *testing.T) {
+	t.Parallel()
 	operators := []parser.BinaryOp{
 		parser.OpPlus,
 		parser.OpMinus,
@@ -816,7 +854,9 @@ func TestGenerateBinaryAllOperators(t *testing.T) {
 	}
 
 	for _, op := range operators {
+		op := op
 		t.Run(op.String(), func(t *testing.T) {
+				t.Parallel()
 			v := vdbe.New()
 			g := NewCodeGenerator(v)
 

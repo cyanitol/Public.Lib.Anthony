@@ -343,6 +343,7 @@ func buildComplexRecord() []byte {
 
 // TestFuzzRegressionVdbe tests against known problematic inputs
 func TestFuzzRegressionVdbe(t *testing.T) {
+	t.Parallel()
 	regressionInputs := [][]byte{
 		// Empty
 		{},
@@ -379,6 +380,7 @@ func TestFuzzRegressionVdbe(t *testing.T) {
 
 	for i, input := range regressionInputs {
 		t.Run(string(rune('A'+i)), func(t *testing.T) {
+		t.Parallel()
 			defer func() {
 				if r := recover(); r != nil {
 					t.Errorf("Panic on regression input %d: %v\nInput: %x", i, r, input)
@@ -392,6 +394,7 @@ func TestFuzzRegressionVdbe(t *testing.T) {
 
 // TestFuzzEdgeCases tests specific edge cases
 func TestFuzzEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		data []byte
@@ -419,7 +422,9 @@ func TestFuzzEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			defer func() {
 				if r := recover(); r != nil {
 					t.Errorf("Panic on %s: %v", tt.name, r)

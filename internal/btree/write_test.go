@@ -7,6 +7,7 @@ import (
 )
 
 func TestCreateTable(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a table
@@ -44,6 +45,7 @@ func TestCreateTable(t *testing.T) {
 }
 
 func TestDropTable(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a table
@@ -66,6 +68,7 @@ func TestDropTable(t *testing.T) {
 }
 
 func TestNewRowid(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create an empty table
@@ -86,6 +89,7 @@ func TestNewRowid(t *testing.T) {
 }
 
 func TestAllocatePage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Allocate first page
@@ -117,6 +121,7 @@ func TestAllocatePage(t *testing.T) {
 }
 
 func TestEncodeTableLeafCell(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		rowid   int64
@@ -140,7 +145,9 @@ func TestEncodeTableLeafCell(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			cell := EncodeTableLeafCell(tt.rowid, tt.payload)
 
 			// Verify we can parse it back
@@ -161,6 +168,7 @@ func TestEncodeTableLeafCell(t *testing.T) {
 }
 
 func TestEncodeTableInteriorCell(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		childPage uint32
@@ -179,7 +187,9 @@ func TestEncodeTableInteriorCell(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			cell := EncodeTableInteriorCell(tt.childPage, tt.rowid)
 
 			// Verify we can parse it back
@@ -200,6 +210,7 @@ func TestEncodeTableInteriorCell(t *testing.T) {
 }
 
 func TestBtreePageInsertCell(t *testing.T) {
+	t.Parallel()
 	// Create a page (use page 2 to avoid file header at offset 100)
 	pageData := make([]byte, 4096)
 	pageData[0] = PageTypeLeafTable             // Leaf table page
@@ -244,6 +255,7 @@ func TestBtreePageInsertCell(t *testing.T) {
 }
 
 func TestBtreePageDeleteCell(t *testing.T) {
+	t.Parallel()
 	// Create a page with one cell (use page 2 to avoid file header at offset 100)
 	pageData := make([]byte, 4096)
 	pageData[0] = PageTypeLeafTable
@@ -274,6 +286,7 @@ func TestBtreePageDeleteCell(t *testing.T) {
 }
 
 func TestBtreePageDefragment(t *testing.T) {
+	t.Parallel()
 	// Create a page with fragmented space (use page 2 to avoid file header at offset 100)
 	pageData := make([]byte, 4096)
 	pageData[0] = PageTypeLeafTable
@@ -324,6 +337,7 @@ func TestBtreePageDefragment(t *testing.T) {
 }
 
 func TestCursorInsert(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a table
@@ -388,6 +402,7 @@ func TestCursorInsert(t *testing.T) {
 }
 
 func TestCursorDelete(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a table with some data
@@ -445,6 +460,7 @@ func TestCursorDelete(t *testing.T) {
 }
 
 func TestCursorSeekRowid(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a table
@@ -477,7 +493,9 @@ func TestCursorSeekRowid(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(fmt.Sprintf("seek_%d", tt.rowid), func(t *testing.T) {
+		t.Parallel()
 			found, err := cursor.SeekRowid(tt.rowid)
 			if err != nil {
 				t.Fatalf("SeekRowid(%d) error = %v", tt.rowid, err)
@@ -498,6 +516,7 @@ func TestCursorSeekRowid(t *testing.T) {
 }
 
 func TestCursorInsertDuplicateKey(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -521,6 +540,7 @@ func TestCursorInsertDuplicateKey(t *testing.T) {
 }
 
 func TestNewRowidWithData(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()

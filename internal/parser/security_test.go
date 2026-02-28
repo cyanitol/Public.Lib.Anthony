@@ -8,6 +8,7 @@ import (
 )
 
 func TestSQLLengthLimit(t *testing.T) {
+	t.Parallel()
 	// Create a SQL string that exceeds the limit
 	longSQL := "SELECT " + strings.Repeat("a, ", security.MaxSQLLength/3)
 
@@ -24,6 +25,7 @@ func TestSQLLengthLimit(t *testing.T) {
 }
 
 func TestSQLLengthLimitAtBoundary(t *testing.T) {
+	t.Parallel()
 	// Create a SQL string just under the limit
 	sql := "SELECT " + strings.Repeat("a", security.MaxSQLLength-10)
 
@@ -37,6 +39,7 @@ func TestSQLLengthLimitAtBoundary(t *testing.T) {
 }
 
 func TestTokenCountLimit(t *testing.T) {
+	t.Parallel()
 	// Create a SQL string with too many tokens
 	// Each "a," is 2 tokens, so we need MaxTokens/2 + 1 repetitions
 	manyTokens := "SELECT " + strings.Repeat("a, ", security.MaxTokens/2+1)
@@ -54,6 +57,7 @@ func TestTokenCountLimit(t *testing.T) {
 }
 
 func TestExpressionDepthLimit(t *testing.T) {
+	t.Parallel()
 	// Create a deeply nested expression that exceeds the depth limit
 	// NOT NOT NOT ... NOT 1
 	deepExpr := strings.Repeat("NOT (", security.MaxExprDepth+10) + "1" + strings.Repeat(")", security.MaxExprDepth+10)
@@ -72,6 +76,7 @@ func TestExpressionDepthLimit(t *testing.T) {
 }
 
 func TestExpressionDepthLimitBinary(t *testing.T) {
+	t.Parallel()
 	// Binary operators like AND/OR create a left-recursive structure
 	// The depth is determined by how many recursive parse calls are made
 	// Since each binary operator increments depth once, we need a very long chain
@@ -80,6 +85,7 @@ func TestExpressionDepthLimitBinary(t *testing.T) {
 }
 
 func TestExpressionDepthLimitNested(t *testing.T) {
+	t.Parallel()
 	// Create nested parenthetical expressions
 	deepExpr := strings.Repeat("(", security.MaxExprDepth+10) + "1" + strings.Repeat(")", security.MaxExprDepth+10)
 	sql := "SELECT " + deepExpr
@@ -97,6 +103,7 @@ func TestExpressionDepthLimitNested(t *testing.T) {
 }
 
 func TestPragmaWhitelistAllowed(t *testing.T) {
+	t.Parallel()
 	allowedPragmas := []string{
 		"PRAGMA table_info(users)",
 		"PRAGMA index_list(users)",
@@ -111,6 +118,7 @@ func TestPragmaWhitelistAllowed(t *testing.T) {
 
 	for _, sql := range allowedPragmas {
 		t.Run(sql, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(sql)
 			_, err := p.Parse()
 
@@ -122,6 +130,7 @@ func TestPragmaWhitelistAllowed(t *testing.T) {
 }
 
 func TestPragmaWhitelistDenied(t *testing.T) {
+	t.Parallel()
 	// These are actually dangerous PRAGMAs that should be blocked
 	deniedPragmas := []string{
 		"PRAGMA writable_schema = ON",
@@ -134,6 +143,7 @@ func TestPragmaWhitelistDenied(t *testing.T) {
 
 	for _, sql := range deniedPragmas {
 		t.Run(sql, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(sql)
 			_, err := p.Parse()
 
@@ -149,6 +159,7 @@ func TestPragmaWhitelistDenied(t *testing.T) {
 }
 
 func TestPragmaWhitelistCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	// Test that PRAGMA checking is case-insensitive
 	tests := []struct {
 		sql     string
@@ -166,7 +177,9 @@ func TestPragmaWhitelistCaseInsensitive(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.sql, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 
@@ -183,6 +196,7 @@ func TestPragmaWhitelistCaseInsensitive(t *testing.T) {
 }
 
 func TestNormalQueriesNotAffectedByLimits(t *testing.T) {
+	t.Parallel()
 	// Test that normal queries are not affected by security limits
 	normalQueries := []string{
 		"SELECT * FROM users",
@@ -196,6 +210,7 @@ func TestNormalQueriesNotAffectedByLimits(t *testing.T) {
 
 	for _, sql := range normalQueries {
 		t.Run(sql, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(sql)
 			_, err := p.Parse()
 
@@ -213,6 +228,7 @@ func TestNormalQueriesNotAffectedByLimits(t *testing.T) {
 }
 
 func TestExpressionDepthAtBoundary(t *testing.T) {
+	t.Parallel()
 	// Test expression depth just under the limit (should succeed)
 	// Each level of the parse tree adds to depth (OR, AND, NOT, comparison, etc.)
 	// So we need to account for all levels, not just the NOT operators

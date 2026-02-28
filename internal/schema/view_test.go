@@ -7,6 +7,7 @@ import (
 )
 
 func TestCreateView(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create a simple view
@@ -39,6 +40,7 @@ func TestCreateView(t *testing.T) {
 }
 
 func TestCreateViewWithColumns(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateViewStmt{
@@ -64,6 +66,7 @@ func TestCreateViewWithColumns(t *testing.T) {
 
 	expectedCols := []string{"user_id", "user_name", "user_email"}
 	for i, col := range view.Columns {
+		col := col
 		if col != expectedCols[i] {
 			t.Errorf("column %d: got %q, want %q", i, col, expectedCols[i])
 		}
@@ -71,6 +74,7 @@ func TestCreateViewWithColumns(t *testing.T) {
 }
 
 func TestCreateViewIfNotExists(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateViewStmt{
@@ -106,6 +110,7 @@ func TestCreateViewIfNotExists(t *testing.T) {
 }
 
 func TestCreateTemporaryView(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateViewStmt{
@@ -129,6 +134,7 @@ func TestCreateTemporaryView(t *testing.T) {
 }
 
 func TestGetView(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Add a view directly
@@ -137,7 +143,9 @@ func TestGetView(t *testing.T) {
 	// Test case-insensitive lookup
 	tests := []string{"TestView", "testview", "TESTVIEW", "tEsTvIeW"}
 	for _, name := range tests {
+		name := name
 		t.Run(name, func(t *testing.T) {
+				t.Parallel()
 			view, ok := s.GetView(name)
 			if !ok {
 				t.Errorf("GetView(%q) not found", name)
@@ -156,6 +164,7 @@ func TestGetView(t *testing.T) {
 }
 
 func TestListViews(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Empty schema
@@ -177,6 +186,7 @@ func TestListViews(t *testing.T) {
 	// Should be sorted
 	expected := []string{"view1", "view2", "view3"}
 	for i, name := range expected {
+		name := name
 		if views[i] != name {
 			t.Errorf("views[%d] = %q, want %q", i, views[i], name)
 		}
@@ -184,6 +194,7 @@ func TestListViews(t *testing.T) {
 }
 
 func TestDropView(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create view
@@ -208,6 +219,7 @@ func TestDropView(t *testing.T) {
 }
 
 func TestDropViewCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create view with mixed case
@@ -226,6 +238,7 @@ func TestDropViewCaseInsensitive(t *testing.T) {
 }
 
 func TestGenerateCreateViewSQL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		stmt *parser.CreateViewStmt
@@ -277,7 +290,9 @@ func TestGenerateCreateViewSQL(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			got := generateCreateViewSQL(tt.stmt)
 			// Just check that the SQL contains expected keywords
 			// (full SQL comparison would be too fragile)
@@ -289,6 +304,7 @@ func TestGenerateCreateViewSQL(t *testing.T) {
 }
 
 func TestConcurrentViewAccess(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Test concurrent reads and writes

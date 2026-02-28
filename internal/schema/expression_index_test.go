@@ -8,6 +8,7 @@ import (
 
 // TestExpressionIndexCreation tests that expression indexes are stored correctly in the schema
 func TestExpressionIndexCreation(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create a table
@@ -78,6 +79,7 @@ func TestExpressionIndexCreation(t *testing.T) {
 
 // TestMixedExpressionIndex tests an index with both expressions and regular columns
 func TestMixedExpressionIndex(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	tableStmt := &parser.CreateTableStmt{
@@ -139,6 +141,7 @@ func TestMixedExpressionIndex(t *testing.T) {
 
 // TestMultipleExpressionIndex tests an index with multiple expressions
 func TestMultipleExpressionIndex(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	tableStmt := &parser.CreateTableStmt{
@@ -178,6 +181,7 @@ func TestMultipleExpressionIndex(t *testing.T) {
 
 // TestArithmeticExpressionIndex tests an index with arithmetic expressions
 func TestArithmeticExpressionIndex(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	tableStmt := &parser.CreateTableStmt{
@@ -221,6 +225,7 @@ func TestArithmeticExpressionIndex(t *testing.T) {
 
 // TestUniqueExpressionIndex tests unique expression indexes
 func TestUniqueExpressionIndex(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	tableStmt := &parser.CreateTableStmt{
@@ -257,6 +262,7 @@ func TestUniqueExpressionIndex(t *testing.T) {
 
 // TestPartialExpressionIndex tests partial expression indexes (with WHERE)
 func TestPartialExpressionIndex(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	tableStmt := &parser.CreateTableStmt{

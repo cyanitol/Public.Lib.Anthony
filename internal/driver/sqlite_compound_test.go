@@ -232,7 +232,9 @@ func TestSQLiteCompoundBasic(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -334,7 +336,9 @@ func TestSQLiteCompoundWithOrderBy(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -445,7 +449,9 @@ func TestSQLiteCompoundWithLimit(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -572,7 +578,9 @@ func TestSQLiteCompoundMultiple(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -649,7 +657,9 @@ func TestSQLiteCompoundErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -720,7 +730,9 @@ func TestSQLiteCompoundTypeCoercion(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -831,7 +843,9 @@ func TestSQLiteCompoundWithNulls(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -928,7 +942,9 @@ func TestSQLiteCompoundNested(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -1062,7 +1078,9 @@ func TestSQLiteCompoundInSubquery(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
@@ -1224,7 +1242,9 @@ func TestSQLiteCompoundComplex(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}

@@ -6,6 +6,7 @@ import (
 
 // TestComprehensiveParserCoverage tests edge cases for remaining low-coverage functions
 func TestComprehensiveParserCoverage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -448,7 +449,9 @@ func TestComprehensiveParserCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -460,6 +463,7 @@ func TestComprehensiveParserCoverage(t *testing.T) {
 
 // TestParserAdditionalErrorPaths tests error conditions to increase coverage
 func TestParserAdditionalErrorPaths(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -523,7 +527,9 @@ func TestParserAdditionalErrorPaths(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if err == nil {

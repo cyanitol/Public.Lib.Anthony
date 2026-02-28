@@ -6,11 +6,13 @@ import (
 
 // TestPragmaASTNode verifies that PragmaStmt implements the Statement interface
 func TestPragmaASTNode(t *testing.T) {
+	t.Parallel()
 	var _ Statement = (*PragmaStmt)(nil)
 }
 
 // TestPragmaStmtFields verifies that PragmaStmt has the correct fields
 func TestPragmaStmtFields(t *testing.T) {
+	t.Parallel()
 	stmt := &PragmaStmt{
 		Schema: "main",
 		Name:   "cache_size",
@@ -36,6 +38,7 @@ func TestPragmaStmtFields(t *testing.T) {
 
 // TestPragmaStmtNoValue verifies PragmaStmt with no value
 func TestPragmaStmtNoValue(t *testing.T) {
+	t.Parallel()
 	stmt := &PragmaStmt{
 		Name: "user_version",
 	}

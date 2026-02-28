@@ -7,6 +7,7 @@ import (
 // Test edge cases in DML parsing
 
 func TestParseInsertEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -40,7 +41,9 @@ func TestParseInsertEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -51,6 +54,7 @@ func TestParseInsertEdgeCases(t *testing.T) {
 }
 
 func TestParseUpsertEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -89,7 +93,9 @@ func TestParseUpsertEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -100,6 +106,7 @@ func TestParseUpsertEdgeCases(t *testing.T) {
 }
 
 func TestParseUpdateEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -138,7 +145,9 @@ func TestParseUpdateEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -149,6 +158,7 @@ func TestParseUpdateEdgeCases(t *testing.T) {
 }
 
 func TestParseDeleteEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -177,7 +187,9 @@ func TestParseDeleteEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -188,6 +200,7 @@ func TestParseDeleteEdgeCases(t *testing.T) {
 }
 
 func TestParseSelectEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -221,7 +234,9 @@ func TestParseSelectEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -232,6 +247,7 @@ func TestParseSelectEdgeCases(t *testing.T) {
 }
 
 func TestParseJoinEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -270,7 +286,9 @@ func TestParseJoinEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -281,6 +299,7 @@ func TestParseJoinEdgeCases(t *testing.T) {
 }
 
 func TestParseSubqueryEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -309,7 +328,9 @@ func TestParseSubqueryEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -320,6 +341,7 @@ func TestParseSubqueryEdgeCases(t *testing.T) {
 }
 
 func TestParseCTEEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -348,7 +370,9 @@ func TestParseCTEEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -359,6 +383,7 @@ func TestParseCTEEdgeCases(t *testing.T) {
 }
 
 func TestParseCompoundSelectEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -392,7 +417,9 @@ func TestParseCompoundSelectEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if (err != nil) != tt.wantErr {

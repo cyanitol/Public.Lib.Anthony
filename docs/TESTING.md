@@ -5,6 +5,7 @@
 - [Overview](#overview)
 - [Quick Start](#quick-start)
 - [Running Tests](#running-tests)
+  - [Fast Testing Commands](#fast-testing-commands)
   - [Unit Tests](#unit-tests)
   - [Integration Tests](#integration-tests)
   - [Race Detection Tests](#race-detection-tests)
@@ -19,6 +20,15 @@
   - [Test File Structure](#test-file-structure)
   - [Test Naming Conventions](#test-naming-conventions)
   - [Test Categories](#test-categories)
+- [Test Parallelization](#test-parallelization)
+  - [Using t.Parallel()](#using-tparallel)
+  - [Writing Parallel-Safe Tests](#writing-parallel-safe-tests)
+  - [Parallel Execution Levels](#parallel-execution-levels)
+  - [Short Mode for Slow Tests](#short-mode-for-slow-tests)
+- [Connection Pooling](#connection-pooling)
+  - [Using Pooled Connections](#using-pooled-connections)
+  - [GetTestDB vs GetFreshDB](#gettestdb-vs-getfreshdb)
+  - [Connection Pool Benefits](#connection-pool-benefits)
 - [Running Specific Tests](#running-specific-tests)
   - [By Package](#by-package)
   - [By Name Pattern](#by-name-pattern)
@@ -44,6 +54,12 @@ The Anthony SQLite driver has comprehensive test coverage across all components.
 # Run all tests (recommended for most development)
 make test
 
+# Fast parallel testing (optimized for speed)
+make test-fast
+
+# Short mode (skip slow tests)
+make test-short
+
 # Run tests with coverage
 make test-cover
 
@@ -55,6 +71,46 @@ make all
 ```
 
 ## Running Tests
+
+### Fast Testing Commands
+
+The project includes several optimized test targets for different use cases:
+
+```bash
+# Standard testing (recommended for CI and validation)
+make test
+
+# Fast parallel testing (optimized for development)
+make test-fast
+
+# CI testing with JSON output
+make test-ci
+
+# Short mode - skip slow tests (fastest option)
+make test-short
+```
+
+**Command Details:**
+
+- **`make test`** - Standard test run with CGO disabled
+- **`make test-fast`** - Parallel execution with 8 package workers and 4 test workers
+- **`make test-ci`** - Same as test-fast but with JSON output for CI parsers
+- **`make test-short`** - Uses Go's `-short` flag to skip slow tests
+
+**Customizing Parallelism:**
+
+You can customize the parallelism levels:
+
+```bash
+# Adjust package-level parallelism (default: 8)
+make test-fast TEST_PKG_PARALLEL=16
+
+# Adjust test-level parallelism (default: 4)
+make test-fast TEST_PARALLEL=8
+
+# Combine both
+make test-fast TEST_PKG_PARALLEL=16 TEST_PARALLEL=8
+```
 
 ### Unit Tests
 
@@ -296,6 +352,18 @@ go test -bench=. ./internal/btree > new.txt
 benchcmp old.txt new.txt
 ```
 
+**Running Benchmarks in CI:**
+
+For CI environments, use shorter benchmark times:
+
+```bash
+# Quick benchmark run (3 seconds per benchmark)
+go test -bench=. -benchtime=3s ./...
+
+# With memory stats for performance tracking
+go test -bench=. -benchtime=3s -benchmem ./... > benchmark-results.txt
+```
+
 ## Test Coverage
 
 ### Coverage Goals
@@ -455,6 +523,163 @@ Tests are categorized by purpose:
    - Require Go 1.18+
    - Corpus-based testing
 
+## Test Parallelization
+
+The test suite is optimized for parallel execution to significantly reduce test run time.
+
+### Using t.Parallel()
+
+Most tests in the codebase use `t.Parallel()` to enable concurrent execution:
+
+```go
+func TestExample(t *testing.T) {
+    t.Parallel()  // Top-level parallelism
+
+    tests := []struct {
+        name string
+        input string
+        want string
+    }{
+        {"case 1", "input1", "output1"},
+        {"case 2", "input2", "output2"},
+    }
+
+    for _, tt := range tests {
+        tt := tt  // Capture range variable (Go < 1.22)
+        t.Run(tt.name, func(t *testing.T) {
+            t.Parallel()  // Subtest parallelism
+            // test code
+        })
+    }
+}
+```
+
+### Writing Parallel-Safe Tests
+
+When writing new tests, follow these guidelines:
+
+1. **Add t.Parallel() by default** - Unless the test has shared state
+2. **Capture range variables** - Use `tt := tt` pattern (Go < 1.22)
+3. **Avoid shared state** - Use isolated resources or proper synchronization
+4. **Use pooled connections** - See Connection Pooling section below
+
+**When NOT to use t.Parallel():**
+
+- Tests that modify global state
+- Tests that require specific execution order
+- Tests with filesystem operations that conflict
+- Tests that set environment variables
+
+### Parallel Execution Levels
+
+Go provides two levels of parallelism:
+
+```bash
+# Package-level parallelism (number of packages tested concurrently)
+go test -p 8 ./...
+
+# Test-level parallelism (number of tests per package running concurrently)
+go test -parallel 4 ./...
+
+# Combine both for maximum speed
+go test -p 8 -parallel 4 ./...
+```
+
+The `make test-fast` target uses optimized settings: `-p 8 -parallel 4`
+
+### Short Mode for Slow Tests
+
+Use Go's `-short` flag to skip slow tests during development:
+
+```go
+func TestSlowIntegration(t *testing.T) {
+    if testing.Short() {
+        t.Skip("skipping slow test in short mode")
+    }
+    // slow test code
+}
+```
+
+Run with short mode:
+
+```bash
+# Skip slow tests
+go test -short ./...
+
+# Or use the Makefile target
+make test-short
+```
+
+**When to use testing.Short():**
+
+- Integration tests with large datasets
+- Stress tests with many iterations
+- Tests that take more than 1 second
+- Tests with network or external dependencies
+
+## Connection Pooling
+
+The `internal/testing` package provides helper functions for efficient database connection management.
+
+### Using Pooled Connections
+
+```go
+import (
+    "testing"
+    testutil "github.com/JuniperBible/Public.Lib.Anthony/internal/testing"
+)
+
+func TestDatabaseOperation(t *testing.T) {
+    t.Parallel()
+
+    // Get a pooled database connection
+    db := testutil.GetTestDB(t)
+
+    // Use the connection
+    _, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY)")
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    // Connection is automatically cleaned and returned to pool
+}
+```
+
+### GetTestDB vs GetFreshDB
+
+The testing package provides two functions:
+
+**GetTestDB(t) - Pooled Connection (Recommended)**
+
+- Reuses connections from a pool
+- Automatically cleaned and reset after test
+- Faster for parallel tests
+- Use for most unit tests
+
+```go
+db := testutil.GetTestDB(t)
+```
+
+**GetFreshDB(t) - New Connection**
+
+- Creates a new connection
+- Completely isolated
+- Use when you need guaranteed clean state
+- Use for tests that modify SQLite internals
+
+```go
+db := testutil.GetFreshDB(t)
+```
+
+### Connection Pool Benefits
+
+Using pooled connections provides:
+
+- **10-20% faster test execution** - Reduces connection overhead
+- **Better parallelism** - Multiple tests can run concurrently
+- **Automatic cleanup** - No manual Close() required
+- **Consistent state** - Connections are reset between tests
+
 ## Running Specific Tests
 
 ### By Package
@@ -541,7 +766,10 @@ make vet
 # Check complexity
 make complexity
 
-# Run all tests
+# Run all tests (fast mode for development)
+make test-fast
+
+# Or run standard tests
 make test
 
 # Run tests with race detection
@@ -553,14 +781,57 @@ make fmt && make vet && make complexity && make test-race
 
 ### CI Pipeline
 
-Recommended CI pipeline:
+Recommended CI pipeline using optimized targets:
+
+```bash
+# 1. Code quality
+make fmt
+make vet
+make complexity
+
+# 2. Fast parallel tests with JSON output
+make test-ci > test-results.json
+
+# 3. Coverage (if needed)
+make test-cover-report
+
+# 4. Race detection (on critical packages)
+go test -race ./internal/driver ./internal/pager ./internal/vdbe
+
+# 5. Security tests
+go test -v ./internal/security/...
+
+# 6. Fuzz tests (short duration for CI)
+go test -fuzz=FuzzParser -fuzztime=30s ./internal/parser/
+go test -fuzz=FuzzDecodeRecord -fuzztime=30s ./internal/vdbe/
+
+# 7. Build verification
+make build
+```
+
+**Fast CI Configuration:**
+
+For faster CI pipelines, use the short mode:
+
+```bash
+# Quick validation (skips slow tests)
+make test-short
+
+# With JSON output for CI systems
+make test-ci | tee test-results.json
+```
+
+**Traditional CI Pipeline:**
+
+If you prefer explicit commands:
+
 ```bash
 # 1. Code quality
 go fmt ./...
 go vet ./...
 
-# 2. Unit tests with coverage
-go test -cover -coverprofile=coverage.out ./...
+# 2. Unit tests with coverage and parallelism
+CGO_ENABLED=0 go test -p 8 -parallel 4 -cover -coverprofile=coverage.out ./...
 
 # 3. Race detection
 go test -race ./...
@@ -757,9 +1028,11 @@ go test -timeout=5m ./...
 
 ### Writing Tests
 
-1. **Use Table-Driven Tests** for multiple scenarios:
+1. **Use Table-Driven Tests with Parallelism** for multiple scenarios:
    ```go
    func TestFunction(t *testing.T) {
+       t.Parallel()  // Enable top-level parallelism
+
        tests := []struct {
            name    string
            input   string
@@ -770,7 +1043,9 @@ go test -timeout=5m ./...
            {"empty input", "", "", true},
        }
        for _, tt := range tests {
+           tt := tt  // Capture range variable (Go < 1.22)
            t.Run(tt.name, func(t *testing.T) {
+               t.Parallel()  // Enable subtest parallelism
                got, err := Function(tt.input)
                if (err != nil) != tt.wantErr {
                    t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
@@ -794,6 +1069,8 @@ go test -timeout=5m ./...
 3. **Use t.Cleanup()** for resource cleanup:
    ```go
    func TestFeature(t *testing.T) {
+       t.Parallel()
+
        db := openDatabase(t)
        t.Cleanup(func() {
            db.Close()
@@ -801,22 +1078,58 @@ go test -timeout=5m ./...
    }
    ```
 
-4. **Test error cases**:
+4. **Use Connection Pooling** for database tests:
+   ```go
+   import testutil "github.com/JuniperBible/Public.Lib.Anthony/internal/testing"
+
+   func TestDatabaseFeature(t *testing.T) {
+       t.Parallel()
+
+       db := testutil.GetTestDB(t)  // Pooled connection
+       // test code - cleanup is automatic
+   }
+   ```
+
+5. **Mark Slow Tests** with testing.Short():
+   ```go
+   func TestSlowOperation(t *testing.T) {
+       if testing.Short() {
+           t.Skip("skipping slow test in short mode")
+       }
+       t.Parallel()
+       // slow test code
+   }
+   ```
+
+6. **Test error cases**:
    - Happy path
    - Edge cases
    - Error conditions
    - Boundary values
 
-5. **Use descriptive test names**:
+7. **Use descriptive test names**:
    - What is being tested
    - Under what conditions
    - What is expected
 
+8. **Parallel Testing Guidelines**:
+   - Add `t.Parallel()` to all tests by default
+   - Capture range variables in loops: `tt := tt`
+   - Avoid shared state between tests
+   - Use fresh resources (pooled connections, temp files, etc.)
+   - Don't use `t.Parallel()` if test modifies global state
+
 ### Running Tests Efficiently
 
-1. **Run relevant tests during development:**
+1. **Use optimized test commands during development:**
    ```bash
-   # Test package you're working on
+   # Fast parallel testing
+   make test-fast
+
+   # Skip slow tests for quick feedback
+   make test-short
+
+   # Test specific package
    go test ./internal/driver
    ```
 
@@ -825,20 +1138,42 @@ go test -timeout=5m ./...
    # Go automatically caches test results
    # Force re-run with:
    go test -count=1 ./internal/driver
+
+   # Clear test cache if needed
+   make clean
    ```
 
-3. **Run parallel tests when possible:**
+3. **Write parallel-safe tests:**
    ```bash
-   # Default parallelism
-   go test ./...
+   # Always add t.Parallel() to new tests
+   func TestNewFeature(t *testing.T) {
+       t.Parallel()
+       // test code
+   }
 
-   # Specify parallel workers
-   go test -parallel=4 ./...
+   # Use pooled connections for database tests
+   db := testutil.GetTestDB(t)
    ```
 
 4. **Use short mode for quick feedback:**
    ```bash
+   # Skip slow tests
+   make test-short
+
+   # Or directly with go test
    go test -short ./...
+   ```
+
+5. **Optimize parallelism for your system:**
+   ```bash
+   # Default settings (8 packages, 4 tests per package)
+   make test-fast
+
+   # High-end system (more parallelism)
+   make test-fast TEST_PKG_PARALLEL=16 TEST_PARALLEL=8
+
+   # Low-end system (less parallelism)
+   make test-fast TEST_PKG_PARALLEL=4 TEST_PARALLEL=2
    ```
 
 ### Code Coverage
@@ -916,6 +1251,7 @@ go test -timeout=5m ./...
 - [Go Testing Documentation](https://pkg.go.dev/testing)
 - [Go Fuzzing](https://go.dev/doc/fuzz/)
 - [Table Driven Tests](https://github.com/golang/go/wiki/TableDrivenTests)
+- [Test Optimization Charter](./TEST_OPTIMIZATION.md) - Detailed optimization strategy and project plan
 - [Security Guide](./SECURITY.md) - Security testing details
 - [Lock Ordering](./LOCK_ORDERING.md) - Concurrency testing guidelines
 - [Architecture Guide](./ARCHITECTURE.md) - Component overview
@@ -923,6 +1259,7 @@ go test -timeout=5m ./...
 ---
 
 **Related Documentation:**
+- [TEST_OPTIMIZATION.md](./TEST_OPTIMIZATION.md) - Test optimization strategy and implementation details
 - [SECURITY.md](./SECURITY.md) - Security model and testing
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - System architecture
 - [LOCK_ORDERING.md](./LOCK_ORDERING.md) - Concurrency guidelines

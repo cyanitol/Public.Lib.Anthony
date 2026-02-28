@@ -8,6 +8,7 @@ import (
 
 // TestAggregateCountStar tests COUNT(*) functionality
 func TestAggregateCountStar(t *testing.T) {
+	t.Parallel()
 	dbFile := "test_count_star.db"
 	defer os.Remove(dbFile)
 
@@ -58,6 +59,7 @@ func TestAggregateCountStar(t *testing.T) {
 
 // TestAggregateSum tests SUM function
 func TestAggregateSum(t *testing.T) {
+	t.Parallel()
 	dbFile := "test_sum.db"
 	defer os.Remove(dbFile)
 
@@ -97,6 +99,7 @@ func TestAggregateSum(t *testing.T) {
 
 // TestAggregateAvg tests AVG function
 func TestAggregateAvg(t *testing.T) {
+	t.Parallel()
 	dbFile := "test_avg.db"
 	defer os.Remove(dbFile)
 
@@ -136,6 +139,7 @@ func TestAggregateAvg(t *testing.T) {
 
 // TestAggregateMin tests MIN function
 func TestAggregateMin(t *testing.T) {
+	t.Parallel()
 	dbFile := "test_min.db"
 	defer os.Remove(dbFile)
 
@@ -175,6 +179,7 @@ func TestAggregateMin(t *testing.T) {
 
 // TestAggregateMax tests MAX function
 func TestAggregateMax(t *testing.T) {
+	t.Parallel()
 	dbFile := "test_max.db"
 	defer os.Remove(dbFile)
 
@@ -214,6 +219,7 @@ func TestAggregateMax(t *testing.T) {
 
 // TestAggregateTotal tests TOTAL function
 func TestAggregateTotal(t *testing.T) {
+	t.Parallel()
 	dbFile := "test_total.db"
 	defer os.Remove(dbFile)
 
@@ -249,6 +255,7 @@ func TestAggregateTotal(t *testing.T) {
 
 // TestAggregateCount tests COUNT(column) function
 func TestAggregateCount(t *testing.T) {
+	t.Parallel()
 	dbFile := "test_count_col.db"
 	defer os.Remove(dbFile)
 
@@ -284,6 +291,7 @@ func TestAggregateCount(t *testing.T) {
 
 // TestMultipleAggregatesExtended tests multiple aggregate functions in one query
 func TestMultipleAggregatesExtended(t *testing.T) {
+	t.Parallel()
 	dbFile := "test_multi_agg.db"
 	defer os.Remove(dbFile)
 

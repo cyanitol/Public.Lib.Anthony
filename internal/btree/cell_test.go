@@ -6,6 +6,7 @@ import (
 
 // TestCellInfoString tests the String method
 func TestCellInfoString(t *testing.T) {
+	t.Parallel()
 	cell := &CellInfo{
 		Key:          123,
 		PayloadSize:  100,
@@ -28,6 +29,7 @@ func TestCellInfoString(t *testing.T) {
 
 // TestEncodeIndexInteriorCell tests encoding index interior cells
 func TestEncodeIndexInteriorCell(t *testing.T) {
+	t.Parallel()
 	// Create a test payload
 	payload := []byte("test index key")
 
@@ -59,6 +61,7 @@ func TestEncodeIndexInteriorCell(t *testing.T) {
 
 // TestParseIndexInteriorCell tests parsing index interior cells
 func TestParseIndexInteriorCell(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		childPage   uint32
@@ -90,7 +93,9 @@ func TestParseIndexInteriorCell(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			// Encode the cell
 			cell := EncodeIndexInteriorCell(tt.childPage, tt.payload)
 
@@ -118,6 +123,7 @@ func TestParseIndexInteriorCell(t *testing.T) {
 
 // TestParseTableInteriorCellError tests error handling
 func TestParseTableInteriorCellError(t *testing.T) {
+	t.Parallel()
 	// Test with too small data
 	tooSmall := []byte{0x01, 0x02}
 	_, err := ParseCell(PageTypeInteriorTable, tooSmall, 4096)
@@ -128,6 +134,7 @@ func TestParseTableInteriorCellError(t *testing.T) {
 
 // TestParseInvalidPageType tests parsing with invalid page type
 func TestParseInvalidPageType(t *testing.T) {
+	t.Parallel()
 	data := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
 	_, err := ParseCell(0xFF, data, 4096)
 	if err == nil {
@@ -137,6 +144,7 @@ func TestParseInvalidPageType(t *testing.T) {
 
 // TestCalculateLocalPayloadValues tests local payload calculation
 func TestCalculateLocalPayloadValues(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		payloadSize uint32
@@ -170,7 +178,9 @@ func TestCalculateLocalPayloadValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			local := CalculateLocalPayload(tt.payloadSize, tt.usableSize, tt.isLeaf)
 
 			// Local should never exceed usable size
@@ -193,6 +203,7 @@ func TestCalculateLocalPayloadValues(t *testing.T) {
 
 // TestEncodeTableLeafCellWithOverflow tests encoding cells that need overflow
 func TestEncodeTableLeafCellWithOverflow(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := bt.CreateTable()
 	cursor := NewCursor(bt, rootPage)
@@ -236,6 +247,7 @@ func TestEncodeTableLeafCellWithOverflow(t *testing.T) {
 
 // TestParseTableLeafCellWithOverflow tests parsing cells with overflow
 func TestParseTableLeafCellWithOverflow(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := bt.CreateTable()
 	cursor := NewCursor(bt, rootPage)
@@ -277,6 +289,7 @@ func TestParseTableLeafCellWithOverflow(t *testing.T) {
 
 // TestEncodeIndexLeafCellLarge tests encoding large index leaf cells
 func TestEncodeIndexLeafCellLarge(t *testing.T) {
+	t.Parallel()
 	// Create large payload
 	payload := make([]byte, 8000)
 	for i := range payload {
@@ -307,6 +320,7 @@ func TestEncodeIndexLeafCellLarge(t *testing.T) {
 
 // TestCalculateMaxLocal tests max local calculation
 func TestCalculateMaxLocal(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		usableSize uint32
 		isLeaf     bool
@@ -320,6 +334,7 @@ func TestCalculateMaxLocal(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		maxLocal := calculateMaxLocal(tt.usableSize, tt.isLeaf)
 
 		// Should be positive
@@ -336,6 +351,7 @@ func TestCalculateMaxLocal(t *testing.T) {
 
 // TestCalculateMinLocal tests min local calculation
 func TestCalculateMinLocal(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		usableSize uint32
 		isLeaf     bool
@@ -347,6 +363,7 @@ func TestCalculateMinLocal(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		minLocal := calculateMinLocal(tt.usableSize, tt.isLeaf)
 
 		// Should be positive

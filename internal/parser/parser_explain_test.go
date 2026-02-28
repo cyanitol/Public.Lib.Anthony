@@ -5,6 +5,7 @@ import (
 )
 
 func TestParseExplain(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		sql         string
@@ -118,7 +119,9 @@ func TestParseExplain(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 
@@ -159,6 +162,7 @@ func TestParseExplain(t *testing.T) {
 }
 
 func TestParseExplainNested(t *testing.T) {
+	t.Parallel()
 	// Test that nested EXPLAIN statements work correctly
 	tests := []struct {
 		name    string
@@ -178,7 +182,9 @@ func TestParseExplainNested(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 
@@ -220,6 +226,7 @@ func TestParseExplainNested(t *testing.T) {
 }
 
 func TestExplainStmtString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		stmt      *ExplainStmt
@@ -244,7 +251,9 @@ func TestExplainStmtString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.stmt.String()
 			if got != tt.wantStr {
 				t.Errorf("String() = %v, want %v", got, tt.wantStr)

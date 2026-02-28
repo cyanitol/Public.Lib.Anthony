@@ -6,6 +6,7 @@ import (
 
 // TestMemGetFlags tests the GetFlags method
 func TestMemGetFlags(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		setup    func() *Mem
@@ -39,7 +40,9 @@ func TestMemGetFlags(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			m := tt.setup()
 			if got := m.GetFlags(); got != tt.expected {
 				t.Errorf("GetFlags() = %v, want %v", got, tt.expected)
@@ -50,6 +53,7 @@ func TestMemGetFlags(t *testing.T) {
 
 // TestMemStringValue tests the StringValue method
 func TestMemStringValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		mem      *Mem
@@ -83,7 +87,9 @@ func TestMemStringValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := tt.mem.StringValue()
 			if got != tt.expected {
 				t.Errorf("StringValue() = %q, want %q", got, tt.expected)
@@ -94,6 +100,7 @@ func TestMemStringValue(t *testing.T) {
 
 // TestMemValue tests the Value method
 func TestMemValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		mem      *Mem
@@ -127,7 +134,9 @@ func TestMemValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := tt.mem.Value()
 			switch v := tt.expected.(type) {
 			case nil:
@@ -163,6 +172,7 @@ func TestMemValue(t *testing.T) {
 
 // TestMemNumerify tests the Numerify method
 func TestMemNumerify(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		setup     func() *Mem
@@ -209,7 +219,9 @@ func TestMemNumerify(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			m := tt.setup()
 			err := m.Numerify()
 			if (err != nil) != tt.wantErr {
@@ -243,6 +255,7 @@ func TestMemNumerify(t *testing.T) {
 
 // TestMemApplyAffinity tests the ApplyAffinity method
 func TestMemApplyAffinity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		mem      *Mem
@@ -289,7 +302,9 @@ func TestMemApplyAffinity(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			err := tt.mem.ApplyAffinity(tt.affinity)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ApplyAffinity() error = %v, wantErr %v", err, tt.wantErr)
@@ -304,6 +319,7 @@ func TestMemApplyAffinity(t *testing.T) {
 
 // TestMemString tests the String method for debugging
 func TestMemString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		mem  *Mem
@@ -342,7 +358,9 @@ func TestMemString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := tt.mem.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -353,6 +371,7 @@ func TestMemString(t *testing.T) {
 
 // TestMemCompareWithDirection tests the CompareWithDirection method
 func TestMemCompareWithDirection(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		m1        *Mem
@@ -405,7 +424,9 @@ func TestMemCompareWithDirection(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := tt.m1.CompareWithDirection(tt.m2, tt.direction)
 			if got != tt.want {
 				t.Errorf("CompareWithDirection() = %v, want %v", got, tt.want)
@@ -416,6 +437,7 @@ func TestMemCompareWithDirection(t *testing.T) {
 
 // TestMemCompareStrings tests the compareStrings helper
 func TestMemCompareStrings(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		m1   *Mem
@@ -443,7 +465,9 @@ func TestMemCompareStrings(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := compareStrings(tt.m1, tt.m2)
 			if got != tt.want {
 				t.Errorf("compareStrings() = %v, want %v", got, tt.want)
@@ -454,6 +478,7 @@ func TestMemCompareStrings(t *testing.T) {
 
 // TestCompareNumericWithText tests numeric vs text comparison
 func TestCompareNumericWithText(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		numericVal float64
@@ -492,7 +517,9 @@ func TestCompareNumericWithText(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			result, ok := compareNumericWithText(tt.numericVal, tt.textBytes)
 			if ok != tt.wantOk {
 				t.Errorf("compareNumericWithText() ok = %v, want %v", ok, tt.wantOk)
@@ -506,6 +533,7 @@ func TestCompareNumericWithText(t *testing.T) {
 
 // TestCompareMixedNumericText tests the compareMixedNumericText helper
 func TestCompareMixedNumericText(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		m           *Mem
@@ -563,7 +591,9 @@ func TestCompareMixedNumericText(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			result, handled := compareMixedNumericText(tt.m, tt.other, tt.mIsNumeric, tt.mIsText)
 			if handled != tt.wantHandled {
 				t.Errorf("compareMixedNumericText() handled = %v, want %v", handled, tt.wantHandled)
@@ -577,7 +607,9 @@ func TestCompareMixedNumericText(t *testing.T) {
 
 // TestMemArithmeticEdgeCases tests edge cases for arithmetic operations
 func TestMemArithmeticEdgeCases(t *testing.T) {
+	t.Parallel()
 	t.Run("Subtract with null", func(t *testing.T) {
+		t.Parallel()
 		m := NewMemInt(10)
 		err := m.Subtract(NewMemNull())
 		if err != nil {
@@ -589,6 +621,7 @@ func TestMemArithmeticEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Subtract with overflow", func(t *testing.T) {
+		t.Parallel()
 		m := NewMemInt(-9223372036854775808) // min int64
 		err := m.Subtract(NewMemInt(1))
 		if err != nil {
@@ -601,6 +634,7 @@ func TestMemArithmeticEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Multiply with null", func(t *testing.T) {
+		t.Parallel()
 		m := NewMemInt(10)
 		err := m.Multiply(NewMemNull())
 		if err != nil {
@@ -612,6 +646,7 @@ func TestMemArithmeticEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Multiply with overflow", func(t *testing.T) {
+		t.Parallel()
 		m := NewMemInt(9223372036854775807) // max int64
 		err := m.Multiply(NewMemInt(2))
 		if err != nil {
@@ -624,6 +659,7 @@ func TestMemArithmeticEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Remainder with null", func(t *testing.T) {
+		t.Parallel()
 		m := NewMemInt(10)
 		err := m.Remainder(NewMemNull())
 		if err != nil {
@@ -635,6 +671,7 @@ func TestMemArithmeticEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Remainder with zero divisor (int)", func(t *testing.T) {
+		t.Parallel()
 		m := NewMemInt(10)
 		err := m.Remainder(NewMemInt(0))
 		if err != nil {
@@ -646,6 +683,7 @@ func TestMemArithmeticEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Remainder with zero divisor (real)", func(t *testing.T) {
+		t.Parallel()
 		m := NewMemInt(10)
 		err := m.Remainder(NewMemReal(0.0))
 		if err != nil {
@@ -657,6 +695,7 @@ func TestMemArithmeticEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Remainder with real values", func(t *testing.T) {
+		t.Parallel()
 		m := NewMemReal(10.5)
 		err := m.Remainder(NewMemReal(3.0))
 		if err != nil {

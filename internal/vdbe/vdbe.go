@@ -80,6 +80,9 @@ type Cursor struct {
 	// Virtual table cursor data (for CursorVTab)
 	VTabCursor interface{} // Actual vtab.VirtualCursor (stored as interface to avoid import cycle)
 	VTable     interface{} // Actual vtab.VirtualTable (stored as interface to avoid import cycle)
+
+	// Schema metadata (for handling ALTER TABLE ADD COLUMN default values)
+	Table interface{} // *schema.Table (stored as interface to avoid import cycle)
 }
 
 // VDBEContext holds runtime context for VDBE execution

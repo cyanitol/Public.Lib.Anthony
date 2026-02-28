@@ -13,6 +13,7 @@ import (
 
 // Test applyIntegerAffinity uncovered case
 func TestApplyIntegerAffinityBlob(t *testing.T) {
+	t.Parallel()
 	result := ApplyAffinity([]byte("123"), AFF_INTEGER)
 	// Blob should remain unchanged
 	if _, ok := result.([]byte); !ok {
@@ -22,6 +23,7 @@ func TestApplyIntegerAffinityBlob(t *testing.T) {
 
 // Test applyTextAffinity uncovered case
 func TestApplyTextAffinityBlob(t *testing.T) {
+	t.Parallel()
 	result := ApplyAffinity([]byte("test"), AFF_TEXT)
 	// Blob may remain as blob for text affinity
 	_ = result
@@ -29,6 +31,7 @@ func TestApplyTextAffinityBlob(t *testing.T) {
 
 // Test SetTableColumnAffinity for non-column expression
 func TestSetTableColumnAffinityNonColumn(t *testing.T) {
+	t.Parallel()
 	expr := NewIntExpr(42)
 	SetTableColumnAffinity(expr, "INTEGER")
 	// Should not change non-column expr
@@ -36,6 +39,7 @@ func TestSetTableColumnAffinityNonColumn(t *testing.T) {
 
 // Test propagateAffinityNegate for different op types
 func TestPropagateAffinityNegateUnaryPlus(t *testing.T) {
+	t.Parallel()
 	expr := &Expr{
 		Op:   OpUnaryPlus,
 		Left: &Expr{Op: OpInteger, Affinity: AFF_INTEGER},
@@ -46,6 +50,7 @@ func TestPropagateAffinityNegateUnaryPlus(t *testing.T) {
 
 // Test divide with different numeric combinations
 func TestDivideIntegersWithRemainder(t *testing.T) {
+	t.Parallel()
 	// Integer division with remainder
 	result := EvaluateArithmetic(OpDivide, int64(7), int64(2))
 	if result != int64(3) {
@@ -55,6 +60,7 @@ func TestDivideIntegersWithRemainder(t *testing.T) {
 
 // Test divideFloats
 func TestDivideFloatsZero(t *testing.T) {
+	t.Parallel()
 	result := EvaluateArithmetic(OpDivide, 10.0, 0.0)
 	if result != nil {
 		t.Errorf("Expected nil for divide by zero, got %v", result)
@@ -63,6 +69,7 @@ func TestDivideFloatsZero(t *testing.T) {
 
 // Test castToReal uncovered paths
 func TestCastToRealBlob(t *testing.T) {
+	t.Parallel()
 	result := EvaluateCast([]byte("3.14"), "REAL")
 	// Blob cast to real may not parse the value
 	_ = result
@@ -70,6 +77,7 @@ func TestCastToRealBlob(t *testing.T) {
 
 // Test castToBlob uncovered paths
 func TestCastToBlobInt(t *testing.T) {
+	t.Parallel()
 	result := EvaluateCast(int64(42), "BLOB")
 	if _, ok := result.([]byte); !ok {
 		t.Error("Expected blob result")
@@ -78,6 +86,7 @@ func TestCastToBlobInt(t *testing.T) {
 
 // Test valueToString for bool
 func TestValueToStringBool(t *testing.T) {
+	t.Parallel()
 	result := valueToString(true)
 	if result != "1" {
 		t.Errorf("Expected '1', got %s", result)
@@ -86,6 +95,7 @@ func TestValueToStringBool(t *testing.T) {
 
 // Test EvaluateArithmetic uncovered op
 func TestEvaluateArithmeticInvalidOp(t *testing.T) {
+	t.Parallel()
 	result := EvaluateArithmetic(OpEq, int64(1), int64(2))
 	if result != nil {
 		t.Error("Expected nil for invalid arithmetic op")
@@ -94,6 +104,7 @@ func TestEvaluateArithmeticInvalidOp(t *testing.T) {
 
 // Test EvaluateUnary uncovered op
 func TestEvaluateUnaryInvalidOp(t *testing.T) {
+	t.Parallel()
 	result := EvaluateUnary(OpPlus, int64(42))
 	if result != nil {
 		t.Error("Expected nil for invalid unary op")
@@ -102,6 +113,7 @@ func TestEvaluateUnaryInvalidOp(t *testing.T) {
 
 // Test EvaluateBitwise uncovered op
 func TestEvaluateBitwiseInvalidOp(t *testing.T) {
+	t.Parallel()
 	result := EvaluateBitwise(OpPlus, int64(1), int64(2))
 	if result != nil {
 		t.Error("Expected nil for invalid bitwise op")
@@ -110,6 +122,7 @@ func TestEvaluateBitwiseInvalidOp(t *testing.T) {
 
 // Test EvaluateLogical uncovered op
 func TestEvaluateLogicalInvalidOp(t *testing.T) {
+	t.Parallel()
 	result := EvaluateLogical(OpPlus, int64(1), int64(2))
 	if result != nil {
 		t.Error("Expected nil for invalid logical op")
@@ -118,6 +131,7 @@ func TestEvaluateLogicalInvalidOp(t *testing.T) {
 
 // Test EvaluateCast for all type variants
 func TestEvaluateCastVariants(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		value      interface{}
@@ -129,7 +143,9 @@ func TestEvaluateCastVariants(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateCast(tt.value, tt.targetType)
 			if result == nil {
 				t.Error("Expected non-nil result")
@@ -140,6 +156,7 @@ func TestEvaluateCastVariants(t *testing.T) {
 
 // Test GetExprAffinity for nil
 func TestGetExprAffinityNil(t *testing.T) {
+	t.Parallel()
 	result := GetExprAffinity(nil)
 	if result != AFF_NONE {
 		t.Errorf("Expected AFF_NONE for nil, got %v", result)
@@ -148,6 +165,7 @@ func TestGetExprAffinityNil(t *testing.T) {
 
 // Test GetComparisonAffinity for nil expr
 func TestGetComparisonAffinityNil(t *testing.T) {
+	t.Parallel()
 	result := GetComparisonAffinity(nil)
 	if result != AFF_NONE {
 		t.Errorf("Expected AFF_NONE for nil, got %v", result)
@@ -156,6 +174,7 @@ func TestGetComparisonAffinityNil(t *testing.T) {
 
 // Test computeComparisonAffinity without right or select
 func TestComputeComparisonAffinityLeftOnly(t *testing.T) {
+	t.Parallel()
 	expr := &Expr{
 		Op:   OpEq,
 		Left: &Expr{Op: OpColumn, Affinity: AFF_INTEGER},
@@ -168,6 +187,7 @@ func TestComputeComparisonAffinityLeftOnly(t *testing.T) {
 
 // Test code generation for unregistered table
 func TestGenerateColumnUnregisteredTable(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -183,6 +203,7 @@ func TestGenerateColumnUnregisteredTable(t *testing.T) {
 
 // Test emitColumnOpcode with rowid column
 func TestEmitColumnOpcodeRowid(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -207,6 +228,7 @@ func TestEmitColumnOpcodeRowid(t *testing.T) {
 
 // Test getCollationForOperands with both operands having collation
 func TestGetCollationForOperandsBoth(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -234,6 +256,7 @@ func TestGetCollationForOperandsBoth(t *testing.T) {
 
 // Test emitBinaryOpcode for comparison
 func TestEmitBinaryOpcodeComparison(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -251,6 +274,7 @@ func TestEmitBinaryOpcodeComparison(t *testing.T) {
 	// Check for OpLe
 	found := false
 	for _, instr := range v.Program {
+		instr := instr
 		if instr.Opcode == vdbe.OpLe {
 			found = true
 			break
@@ -264,6 +288,7 @@ func TestEmitBinaryOpcodeComparison(t *testing.T) {
 
 // Test generateLogical for complex AND/OR
 func TestGenerateLogicalComplex(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -286,6 +311,7 @@ func TestGenerateLogicalComplex(t *testing.T) {
 
 // Test generateUnary for all unary ops
 func TestGenerateUnaryAllOps(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -298,6 +324,7 @@ func TestGenerateUnaryAllOps(t *testing.T) {
 	}
 
 	for _, op := range tests {
+		op := op
 		v = vdbe.New()
 		gen = NewCodeGenerator(v)
 
@@ -315,6 +342,7 @@ func TestGenerateUnaryAllOps(t *testing.T) {
 
 // Test generateIn with empty list
 func TestGenerateInEmptyList(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -332,6 +360,7 @@ func TestGenerateInEmptyList(t *testing.T) {
 
 // Test generateInValueList with multiple values
 func TestGenerateInValueListMultiple(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -355,6 +384,7 @@ func TestGenerateInValueListMultiple(t *testing.T) {
 
 // Test GenerateExpr with nil
 func TestGenerateExprNil(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -367,6 +397,7 @@ func TestGenerateExprNil(t *testing.T) {
 
 // Test resolveTableForColumn with qualified name
 func TestResolveTableForColumnQualified(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -391,6 +422,7 @@ func TestResolveTableForColumnQualified(t *testing.T) {
 
 // Test lookupColumnInfo not found
 func TestLookupColumnInfoNotFound(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -413,6 +445,7 @@ func TestLookupColumnInfoNotFound(t *testing.T) {
 
 // Test generateBinary for bitwise ops
 func TestGenerateBinaryBitwiseXor(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -430,6 +463,7 @@ func TestGenerateBinaryBitwiseXor(t *testing.T) {
 
 // Test generateStandardBinaryOp for shift operations
 func TestGenerateStandardBinaryOpShift(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -439,6 +473,7 @@ func TestGenerateStandardBinaryOpShift(t *testing.T) {
 	}
 
 	for _, op := range tests {
+		op := op
 		v = vdbe.New()
 		gen = NewCodeGenerator(v)
 

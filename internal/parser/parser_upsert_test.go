@@ -5,6 +5,7 @@ import (
 )
 
 func TestParseUpsert(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -251,7 +252,9 @@ func TestParseUpsert(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 
@@ -283,6 +286,7 @@ func TestParseUpsert(t *testing.T) {
 }
 
 func TestParseUpsertColumnOrder(t *testing.T) {
+	t.Parallel()
 	sql := "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id ASC, email DESC) DO NOTHING"
 	parser := NewParser(sql)
 	stmts, err := parser.Parse()
@@ -316,6 +320,7 @@ func TestParseUpsertColumnOrder(t *testing.T) {
 }
 
 func TestParseInsertWithoutUpsert(t *testing.T) {
+	t.Parallel()
 	// Make sure regular INSERTs still work
 	tests := []string{
 		"INSERT INTO users (id, name) VALUES (1, 'John')",
@@ -326,6 +331,7 @@ func TestParseInsertWithoutUpsert(t *testing.T) {
 
 	for _, sql := range tests {
 		t.Run(sql, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(sql)
 			stmts, err := parser.Parse()
 

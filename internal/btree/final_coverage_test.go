@@ -7,6 +7,7 @@ import (
 
 // TestCursor_DescendToLastExplicit creates an interior tree and explicitly tests descendToLast
 func TestCursor_DescendToLastExplicit(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a 3-level tree structure
@@ -75,6 +76,7 @@ func TestCursor_DescendToLastExplicit(t *testing.T) {
 
 // TestCursor_EnterPageViaNavigation tests enterPage through various navigation
 func TestCursor_EnterPageViaNavigation(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create multi-level tree
@@ -126,6 +128,7 @@ func TestCursor_EnterPageViaNavigation(t *testing.T) {
 
 // TestMerge_WithActualRedistribution creates a scenario to trigger redistribution
 func TestMerge_WithActualRedistribution(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create left page with many cells (overfull relative to right)
@@ -184,6 +187,7 @@ func TestMerge_WithActualRedistribution(t *testing.T) {
 
 // TestBalance_HandleOverfullAndUnderfullPages tests balance operations
 func TestBalance_HandleOverfullAndUnderfullPages(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -217,6 +221,7 @@ func TestBalance_HandleOverfullAndUnderfullPages(t *testing.T) {
 
 // TestAllErrorPaths tests error paths in various functions
 func TestAllErrorPaths(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Test invalid cursor operations
@@ -250,6 +255,7 @@ func TestAllErrorPaths(t *testing.T) {
 
 // TestEdgeCasesInNavigation tests edge cases in tree navigation
 func TestEdgeCasesInNavigation(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(1024)
 	rootPage, _ := bt.CreateTable()
 	cursor := NewCursor(bt, rootPage)
@@ -283,6 +289,7 @@ func TestEdgeCasesInNavigation(t *testing.T) {
 
 // TestComplexSiblingScenarios tests various sibling configurations
 func TestComplexSiblingScenarios(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create 5 sibling pages with varying cell counts
@@ -346,6 +353,7 @@ func TestComplexSiblingScenarios(t *testing.T) {
 
 // TestIndexCursorComplexNavigation tests complex index navigation scenarios
 func TestIndexCursorComplexNavigation(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create 4 index leaf pages
@@ -434,6 +442,7 @@ func TestIndexCursorComplexNavigation(t *testing.T) {
 
 // TestVeryDeepTree creates a very deep tree to ensure all navigation paths are tested
 func TestVeryDeepTree(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Very small pages for depth
 	rootPage, _ := bt.CreateTable()
 	cursor := NewCursor(bt, rootPage)
@@ -498,6 +507,7 @@ func TestVeryDeepTree(t *testing.T) {
 
 // TestVeryDeepIndexTree creates a very deep index tree
 func TestVeryDeepIndexTree(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, _ := createIndexPage(bt)
 	cursor := NewIndexCursor(bt, rootPage)

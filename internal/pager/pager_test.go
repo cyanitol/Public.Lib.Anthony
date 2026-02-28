@@ -14,6 +14,7 @@ func tempFile(t *testing.T) string {
 }
 
 func TestOpen_NewDatabase(t *testing.T) {
+	t.Parallel()
 	filename := tempFile(t)
 
 	pager, err := Open(filename, false)
@@ -51,6 +52,7 @@ func TestOpen_NewDatabase(t *testing.T) {
 }
 
 func TestOpen_ExistingDatabase(t *testing.T) {
+	t.Parallel()
 	t.Skip("Opening existing database not yet fully implemented")
 	filename := tempFile(t)
 
@@ -105,6 +107,7 @@ func TestOpen_ExistingDatabase(t *testing.T) {
 }
 
 func TestOpen_ReadOnly(t *testing.T) {
+	t.Parallel()
 	filename := tempFile(t)
 
 	// Create database
@@ -138,6 +141,7 @@ func TestOpen_ReadOnly(t *testing.T) {
 }
 
 func TestOpen_NonExistentReadOnly(t *testing.T) {
+	t.Parallel()
 	filename := tempFile(t)
 
 	_, err := Open(filename, true)
@@ -147,10 +151,12 @@ func TestOpen_NonExistentReadOnly(t *testing.T) {
 }
 
 func TestOpenWithPageSize(t *testing.T) {
+	t.Parallel()
 	pageSizes := []int{512, 1024, 2048, 4096, 8192}
 
 	for _, pageSize := range pageSizes {
 		t.Run("pagesize_"+string(rune(pageSize)), func(t *testing.T) {
+				t.Parallel()
 			filename := tempFile(t)
 
 			pager, err := OpenWithPageSize(filename, false, pageSize)
@@ -167,12 +173,14 @@ func TestOpenWithPageSize(t *testing.T) {
 }
 
 func TestOpenWithPageSize_InvalidSize(t *testing.T) {
+	t.Parallel()
 	filename := tempFile(t)
 
 	invalidSizes := []int{0, 256, 4000, 131072}
 
 	for _, size := range invalidSizes {
 		t.Run("invalid_size_"+string(rune(size)), func(t *testing.T) {
+				t.Parallel()
 			_, err := OpenWithPageSize(filename, false, size)
 			if err == nil {
 				t.Error("OpenWithPageSize() with invalid size should fail")
@@ -182,6 +190,7 @@ func TestOpenWithPageSize_InvalidSize(t *testing.T) {
 }
 
 func TestPager_Get(t *testing.T) {
+	t.Parallel()
 	filename := tempFile(t)
 
 	pager, err := Open(filename, false)
@@ -208,6 +217,7 @@ func TestPager_Get(t *testing.T) {
 }
 
 func TestPager_Get_InvalidPageNumber(t *testing.T) {
+	t.Parallel()
 	filename := tempFile(t)
 
 	pager, err := Open(filename, false)
@@ -224,6 +234,7 @@ func TestPager_Get_InvalidPageNumber(t *testing.T) {
 }
 
 func TestPager_WriteAndCommit(t *testing.T) {
+	t.Parallel()
 	filename := tempFile(t)
 
 	pager, err := Open(filename, false)
@@ -260,6 +271,7 @@ func TestPager_WriteAndCommit(t *testing.T) {
 }
 
 func TestPager_WriteAndRollback(t *testing.T) {
+	t.Parallel()
 	t.Skip("Pager write and rollback not yet fully implemented")
 	filename := tempFile(t)
 
@@ -327,6 +339,7 @@ func TestPager_WriteAndRollback(t *testing.T) {
 }
 
 func TestPager_MultiplePages(t *testing.T) {
+	t.Parallel()
 	filename := tempFile(t)
 
 	pager, err := Open(filename, false)
@@ -397,6 +410,7 @@ func TestPager_MultiplePages(t *testing.T) {
 }
 
 func TestPager_Close(t *testing.T) {
+	t.Parallel()
 	filename := tempFile(t)
 
 	pager, err := Open(filename, false)
@@ -415,6 +429,7 @@ func TestPager_Close(t *testing.T) {
 }
 
 func TestPager_CloseWithActiveTransaction(t *testing.T) {
+	t.Parallel()
 	filename := tempFile(t)
 
 	pager, err := Open(filename, false)
@@ -444,6 +459,7 @@ func TestPager_CloseWithActiveTransaction(t *testing.T) {
 }
 
 func TestPager_Cache(t *testing.T) {
+	t.Parallel()
 	filename := tempFile(t)
 
 	pager, err := Open(filename, false)
@@ -474,6 +490,7 @@ func TestPager_Cache(t *testing.T) {
 }
 
 func TestPager_PageCount(t *testing.T) {
+	t.Parallel()
 	t.Skip("Page count tracking not yet fully implemented")
 	filename := tempFile(t)
 
@@ -490,6 +507,7 @@ func TestPager_PageCount(t *testing.T) {
 }
 
 func TestPager_CommitWithoutWrite(t *testing.T) {
+	t.Parallel()
 	filename := tempFile(t)
 
 	pager, err := Open(filename, false)
@@ -506,6 +524,7 @@ func TestPager_CommitWithoutWrite(t *testing.T) {
 }
 
 func TestPager_RollbackWithoutWrite(t *testing.T) {
+	t.Parallel()
 	filename := tempFile(t)
 
 	pager, err := Open(filename, false)
@@ -522,6 +541,7 @@ func TestPager_RollbackWithoutWrite(t *testing.T) {
 }
 
 func TestPager_HeaderUpdates(t *testing.T) {
+	t.Parallel()
 	t.Skip("Header update tracking not yet fully implemented")
 	filename := tempFile(t)
 

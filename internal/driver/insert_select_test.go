@@ -47,6 +47,7 @@ func TestDriverInsertSelect(t *testing.T) {
 
 	// Test INSERT
 	t.Run("INSERT", func(t *testing.T) {
+		t.Parallel()
 		vm := vdbe.New()
 		vm.Ctx = ctx
 		vm.AllocMemory(10)
@@ -85,6 +86,7 @@ func TestDriverInsertSelect(t *testing.T) {
 
 	// Test SELECT
 	t.Run("SELECT", func(t *testing.T) {
+		t.Parallel()
 		vm := vdbe.New()
 		vm.Ctx = ctx
 		vm.AllocMemory(10)

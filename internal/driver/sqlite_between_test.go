@@ -206,7 +206,9 @@ func TestBetweenCollation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var result int
 			query := "SELECT " + tt.expr + " FROM t1"
 			err := db.QueryRow(query).Scan(&result)
@@ -864,7 +866,9 @@ func TestBetweenBoundaryValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var count int
 			err := db.QueryRow("SELECT COUNT(*) FROM t WHERE n BETWEEN ? AND ?", tt.lower, tt.upper).Scan(&count)
 			if err != nil {

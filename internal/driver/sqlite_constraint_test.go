@@ -869,7 +869,9 @@ func TestSQLiteConstraints(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Create temporary database
 			tmpDir := t.TempDir()
 			dbPath := filepath.Join(tmpDir, "test.db")

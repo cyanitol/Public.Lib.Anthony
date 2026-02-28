@@ -8,6 +8,7 @@ import (
 
 // TestSplitLeafPageBasic tests basic leaf page splitting
 func TestSplitLeafPageBasic(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a table
@@ -74,6 +75,7 @@ func TestSplitLeafPageBasic(t *testing.T) {
 
 // TestSplitLeafPageOrder tests that cells remain sorted after split
 func TestSplitLeafPageOrder(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -130,6 +132,7 @@ func TestSplitLeafPageOrder(t *testing.T) {
 
 // TestSplitCreatesNewRoot tests that splitting the root creates a new root
 func TestSplitCreatesNewRoot(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(1024) // Smaller page to trigger split sooner
 
 	rootPage, err := bt.CreateTable()
@@ -186,6 +189,7 @@ func TestSplitCreatesNewRoot(t *testing.T) {
 
 // TestCollectLeafCellsForSplit tests the cell collection helper
 func TestCollectLeafCellsForSplit(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -242,6 +246,7 @@ func TestCollectLeafCellsForSplit(t *testing.T) {
 
 // TestSplitWithDuplicateKey tests that inserting duplicate keys is properly rejected
 func TestSplitWithDuplicateKey(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -266,6 +271,7 @@ func TestSplitWithDuplicateKey(t *testing.T) {
 
 // TestInitializeLeafPage tests leaf page initialization
 func TestInitializeLeafPage(t *testing.T) {
+	t.Parallel()
 	pageData := make([]byte, 4096)
 	pageNum := uint32(2) // Not page 1
 
@@ -288,6 +294,7 @@ func TestInitializeLeafPage(t *testing.T) {
 
 // TestInitializeInteriorPage tests interior page initialization
 func TestInitializeInteriorPage(t *testing.T) {
+	t.Parallel()
 	pageData := make([]byte, 4096)
 	pageNum := uint32(2)
 
@@ -316,6 +323,7 @@ func TestInitializeInteriorPage(t *testing.T) {
 
 // TestGetHeaderOffset tests header offset calculation
 func TestGetHeaderOffset(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		pageNum uint32
 		want    int
@@ -326,6 +334,7 @@ func TestGetHeaderOffset(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := getHeaderOffset(tt.pageNum)
 		if got != tt.want {
 			t.Errorf("getHeaderOffset(%d) = %d, want %d", tt.pageNum, got, tt.want)
@@ -335,6 +344,7 @@ func TestGetHeaderOffset(t *testing.T) {
 
 // TestClearPageCells tests clearing all cells from a page
 func TestClearPageCells(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -390,6 +400,7 @@ func TestClearPageCells(t *testing.T) {
 
 // TestSplitMultipleLevels tests splitting that propagates up multiple levels
 func TestSplitMultipleLevels(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Very small page to force multiple splits
 
 	rootPage, err := bt.CreateTable()
@@ -454,6 +465,7 @@ func TestSplitMultipleLevels(t *testing.T) {
 
 // TestSplitEmptyPayload tests splitting with empty payloads
 func TestSplitEmptyPayload(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(1024)
 
 	rootPage, err := bt.CreateTable()
@@ -501,6 +513,7 @@ func TestSplitEmptyPayload(t *testing.T) {
 
 // TestSplitLargePayloads tests splitting with large payloads
 func TestSplitLargePayloads(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -557,6 +570,7 @@ func TestSplitLargePayloads(t *testing.T) {
 
 // TestSplitInteriorPage tests splitting interior pages
 func TestSplitInteriorPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages force interior page creation
 
 	rootPage, err := bt.CreateTable()
@@ -611,6 +625,7 @@ func TestSplitInteriorPage(t *testing.T) {
 
 // TestSplitLeafPageErrors tests error conditions in splitLeafPage
 func TestSplitLeafPageErrors(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	cursor := NewCursor(bt, 1)
 
@@ -669,6 +684,7 @@ func TestSplitLeafPageErrors(t *testing.T) {
 
 // TestSplitInteriorPageErrors tests error conditions in splitInteriorPage
 func TestSplitInteriorPageErrors(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -702,6 +718,7 @@ func TestSplitInteriorPageErrors(t *testing.T) {
 
 // TestPrepareLeafSplit tests prepareLeafSplit function
 func TestPrepareLeafSplit(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -768,6 +785,7 @@ func TestPrepareLeafSplit(t *testing.T) {
 
 // TestAllocateAndInitializePages tests page allocation functions
 func TestAllocateAndInitializePages(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -816,6 +834,7 @@ func TestAllocateAndInitializePages(t *testing.T) {
 
 // TestMarkPagesAsDirty tests markPagesAsDirty function
 func TestMarkPagesAsDirty(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -854,6 +873,7 @@ func TestMarkPagesAsDirty(t *testing.T) {
 
 // TestRedistributeLeafCells tests redistributeLeafCells function
 func TestRedistributeLeafCells(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -903,6 +923,7 @@ func TestRedistributeLeafCells(t *testing.T) {
 
 // TestRedistributeInteriorCells tests redistributeInteriorCells function
 func TestRedistributeInteriorCells(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -966,6 +987,7 @@ func TestRedistributeInteriorCells(t *testing.T) {
 
 // TestCollectInteriorCellsForSplit tests collectInteriorCellsForSplit function
 func TestCollectInteriorCellsForSplit(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a table and populate it to force interior pages
@@ -1050,6 +1072,7 @@ func TestCollectInteriorCellsForSplit(t *testing.T) {
 
 // TestSaveCursorState tests cursor state save/restore
 func TestSaveCursorState(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -1102,6 +1125,7 @@ func TestSaveCursorState(t *testing.T) {
 
 // TestFindInsertionPoint tests findInsertionPoint function
 func TestFindInsertionPoint(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -1134,7 +1158,9 @@ func TestFindInsertionPoint(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(fmt.Sprintf("key=%d", tt.key), func(t *testing.T) {
+		t.Parallel()
 			idx := cursor.findInsertionPoint(interiorPage, tt.key)
 			if idx != tt.expected {
 				t.Errorf("findInsertionPoint(%d) = %d, want %d", tt.key, idx, tt.expected)
@@ -1145,6 +1171,7 @@ func TestFindInsertionPoint(t *testing.T) {
 
 // TestUpdateRightChildIfNeeded tests updateRightChildIfNeeded function
 func TestUpdateRightChildIfNeeded(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -1183,6 +1210,7 @@ func TestUpdateRightChildIfNeeded(t *testing.T) {
 
 // TestCreateNewRoot tests createNewRoot function
 func TestCreateNewRoot(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {

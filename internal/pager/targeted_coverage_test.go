@@ -9,6 +9,7 @@ import (
 
 // TestAcquireSharedLockWithRetryFailure tests when busy handler returns false
 func TestAcquireSharedLockWithRetryFailure(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "lock_fail_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -39,6 +40,7 @@ func TestAcquireSharedLockWithRetryFailure(t *testing.T) {
 
 // TestAcquireReservedLockWithRetryFailure tests reserved lock with failing busy handler
 func TestAcquireReservedLockWithRetryFailure(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "lock_reserved_fail_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -71,6 +73,7 @@ func TestAcquireReservedLockWithRetryFailure(t *testing.T) {
 
 // TestAcquireExclusiveLockWithRetryFailure tests exclusive lock with failing busy handler
 func TestAcquireExclusiveLockWithRetryFailure(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "lock_exclusive_fail_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -103,6 +106,7 @@ func TestAcquireExclusiveLockWithRetryFailure(t *testing.T) {
 
 // TestCacheRemoveLockedDirtyPage tests removing a dirty page
 func TestCacheRemoveLockedDirtyPage(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -131,6 +135,7 @@ func TestCacheRemoveLockedDirtyPage(t *testing.T) {
 
 // TestCacheMarkDirtyCleanPage tests marking a clean page dirty
 func TestCacheMarkDirtyCleanPage(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -165,6 +170,7 @@ func TestCacheMarkDirtyCleanPage(t *testing.T) {
 
 // TestFreeListProcessTrunkPageWithSpace tests trunk page with available space
 func TestFreeListProcessTrunkPageWithSpace(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_trunk_space_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -221,6 +227,7 @@ func TestFreeListProcessTrunkPageWithSpace(t *testing.T) {
 
 // TestFreeListCreateNewTrunkSuccess tests successful trunk creation
 func TestFreeListCreateNewTrunkSuccess(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_newtrunk_ok_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -260,6 +267,7 @@ func TestFreeListCreateNewTrunkSuccess(t *testing.T) {
 
 // TestFreeListFlushPendingWithPages tests flushing with pending pages
 func TestFreeListFlushPendingWithPages(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_flush_pages_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -301,6 +309,7 @@ func TestFreeListFlushPendingWithPages(t *testing.T) {
 
 // TestFreeListIterateWithPages tests iteration over freelist
 func TestFreeListIterateWithPages(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_iterate_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -349,6 +358,7 @@ func TestFreeListIterateWithPages(t *testing.T) {
 
 // TestFreeListVerifyValid tests verification of valid freelist
 func TestFreeListVerifyValid(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_verify_valid_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -387,6 +397,7 @@ func TestFreeListVerifyValid(t *testing.T) {
 
 // TestJournalOpenCreateNew tests opening a new journal
 func TestJournalOpenCreateNew(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_open_new.db-journal"
 	defer os.Remove(journalFile)
 
@@ -412,6 +423,7 @@ func TestJournalOpenCreateNew(t *testing.T) {
 
 // TestJournalWriteOriginalValidSize tests writing with correct size
 func TestJournalWriteOriginalValidSize(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_write_valid.db-journal"
 	defer os.Remove(journalFile)
 
@@ -441,12 +453,14 @@ func TestJournalWriteOriginalValidSize(t *testing.T) {
 
 // TestJournalRollbackSuccess tests successful rollback
 func TestJournalRollbackSuccess(t *testing.T) {
+	t.Parallel()
 	// This is a complex integration test, skip for now
 	t.Skip("Rollback integration test is complex")
 }
 
 // TestJournalFinalizeSuccess tests successful finalize
 func TestJournalFinalizeSuccess(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_finalize_ok.db-journal"
 	defer os.Remove(journalFile)
 
@@ -473,6 +487,7 @@ func TestJournalFinalizeSuccess(t *testing.T) {
 
 // TestJournalDeleteSuccess tests successful delete
 func TestJournalDeleteSuccess(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_delete_ok.db-journal"
 	defer os.Remove(journalFile)
 
@@ -500,6 +515,7 @@ func TestJournalDeleteSuccess(t *testing.T) {
 
 // TestJournalIsValidAfterWrite tests validation after writing
 func TestJournalIsValidAfterWrite(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_valid_after_write.db-journal"
 	defer os.Remove(journalFile)
 
@@ -524,6 +540,7 @@ func TestJournalIsValidAfterWrite(t *testing.T) {
 
 // TestParseDBHeaderValid tests parsing valid header
 func TestParseDBHeaderValid(t *testing.T) {
+	t.Parallel()
 	// Create valid header
 	header := make([]byte, 100)
 	copy(header[0:16], []byte("SQLite format 3\x00"))
@@ -543,6 +560,7 @@ func TestParseDBHeaderValid(t *testing.T) {
 
 // TestBusyHandlerMultipleRetries tests handler with multiple retries
 func TestBusyHandlerMultipleRetries(t *testing.T) {
+	t.Parallel()
 	retries := 0
 	maxRetries := 3
 

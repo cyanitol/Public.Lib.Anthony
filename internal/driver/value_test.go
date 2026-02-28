@@ -40,7 +40,9 @@ func TestConvertValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := vc.ConvertValue(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ConvertValue() error = %v, wantErr %v", err, tt.wantErr)
@@ -90,7 +92,9 @@ func TestIsNativeDriverValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := isNativeDriverValue(tt.input)
 			if result != tt.expected {
 				t.Errorf("isNativeDriverValue() = %v, want %v", result, tt.expected)
@@ -115,7 +119,9 @@ func TestConvertUint64(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := convertUint64(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("convertUint64() error = %v, wantErr %v", err, tt.wantErr)
@@ -157,7 +163,9 @@ func TestConvertToInt64(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result, ok := convertToInt64(tt.input)
 			if ok != tt.expectOk {
 				t.Errorf("convertToInt64() ok = %v, want %v", ok, tt.expectOk)

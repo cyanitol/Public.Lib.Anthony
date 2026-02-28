@@ -8,6 +8,7 @@ import (
 
 // TestIsOverfull tests the isOverfull function
 func TestIsOverfull(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		pageSize   uint32
@@ -46,7 +47,9 @@ func TestIsOverfull(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			page := createBalanceTestPage(tt.pageSize, PageTypeLeafTable, tt.numCells, tt.cellSizes)
 			got := isOverfull(page)
 
@@ -59,6 +62,7 @@ func TestIsOverfull(t *testing.T) {
 
 // TestIsUnderfullBalance tests the isUnderfull function for balance
 func TestIsUnderfullBalance(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		pageSize   uint32
@@ -97,7 +101,9 @@ func TestIsUnderfullBalance(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			// Fill in default cell sizes if needed
 			cellSizes := tt.cellSizes
 			if tt.name == "well-filled page" {
@@ -119,6 +125,7 @@ func TestIsUnderfullBalance(t *testing.T) {
 
 // TestDefragmentPage tests the defragmentPage function
 func TestDefragmentPage(t *testing.T) {
+	t.Parallel()
 	// Create a page with fragmented space
 	// Use page 2 to avoid file header complications
 	pageNum := uint32(2)
@@ -184,6 +191,7 @@ func TestDefragmentPage(t *testing.T) {
 
 // TestBalance tests the balance function
 func TestBalance(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		setup     func(*Btree) (*BtCursor, error)
@@ -268,7 +276,9 @@ func TestBalance(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			bt := NewBtree(4096)
 			cursor, err := tt.setup(bt)
 			if err != nil {
@@ -300,6 +310,7 @@ func TestBalance(t *testing.T) {
 
 // TestGetBalanceInfo tests the GetBalanceInfo function
 func TestGetBalanceInfo(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -353,6 +364,7 @@ func TestGetBalanceInfo(t *testing.T) {
 
 // TestBalanceInfoString tests the String method of BalanceInfo
 func TestBalanceInfoString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		info BalanceInfo
@@ -400,7 +412,9 @@ func TestBalanceInfoString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := tt.info.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -411,6 +425,7 @@ func TestBalanceInfoString(t *testing.T) {
 
 // TestBalanceAfterInsert tests balance checking after insertions
 func TestBalanceAfterInsert(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -452,6 +467,7 @@ func TestBalanceAfterInsert(t *testing.T) {
 
 // TestBalanceAfterDelete tests balance checking after deletions
 func TestBalanceAfterDelete(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -603,6 +619,7 @@ func BenchmarkBalance(b *testing.B) {
 
 // TestIsOverfullPublic tests the public IsOverfull method
 func TestIsOverfullPublic(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -652,6 +669,7 @@ func TestIsOverfullPublic(t *testing.T) {
 
 // TestHandleOverfullPage tests handleOverfullPage function
 func TestHandleOverfullPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages to easily trigger overflow
 	rootPage, err := bt.CreateTable()
 	if err != nil {

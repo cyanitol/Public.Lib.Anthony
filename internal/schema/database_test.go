@@ -5,6 +5,7 @@ import (
 )
 
 func TestNewDatabaseRegistry(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 	if dr == nil {
 		t.Fatal("NewDatabaseRegistry() returned nil")
@@ -15,6 +16,7 @@ func TestNewDatabaseRegistry(t *testing.T) {
 }
 
 func TestAttachDatabase(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	// Attach main database
@@ -40,6 +42,7 @@ func TestAttachDatabase(t *testing.T) {
 }
 
 func TestAttachDatabaseDuplicate(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	// Attach database
@@ -56,6 +59,7 @@ func TestAttachDatabaseDuplicate(t *testing.T) {
 }
 
 func TestAttachDatabaseCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	// Attach with lowercase
@@ -72,6 +76,7 @@ func TestAttachDatabaseCaseInsensitive(t *testing.T) {
 }
 
 func TestDetachDatabase(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	// Attach a user database
@@ -94,6 +99,7 @@ func TestDetachDatabase(t *testing.T) {
 }
 
 func TestDetachMainDatabase(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	err := dr.AttachDatabase("main", "/path/to/main.db", nil, nil)
@@ -109,6 +115,7 @@ func TestDetachMainDatabase(t *testing.T) {
 }
 
 func TestDetachTempDatabase(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	err := dr.AttachDatabase("temp", "/path/to/temp.db", nil, nil)
@@ -124,6 +131,7 @@ func TestDetachTempDatabase(t *testing.T) {
 }
 
 func TestDetachNonexistent(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	err := dr.DetachDatabase("nonexistent")
@@ -133,6 +141,7 @@ func TestDetachNonexistent(t *testing.T) {
 }
 
 func TestGetDatabaseCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	err := dr.AttachDatabase("MyDb", "/path/to/mydb.db", nil, nil)
@@ -142,7 +151,9 @@ func TestGetDatabaseCaseInsensitive(t *testing.T) {
 
 	tests := []string{"MyDb", "mydb", "MYDB", "mYdB"}
 	for _, name := range tests {
+		name := name
 		t.Run(name, func(t *testing.T) {
+				t.Parallel()
 			db, ok := dr.GetDatabase(name)
 			if !ok {
 				t.Errorf("GetDatabase(%q) not found", name)
@@ -155,6 +166,7 @@ func TestGetDatabaseCaseInsensitive(t *testing.T) {
 }
 
 func TestGetTableQualified(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	// Attach main database with a table
@@ -180,6 +192,7 @@ func TestGetTableQualified(t *testing.T) {
 }
 
 func TestGetTableUnqualified(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	// Attach main database
@@ -205,6 +218,7 @@ func TestGetTableUnqualified(t *testing.T) {
 }
 
 func TestGetTableUnqualifiedSearchOrder(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	// Attach multiple databases
@@ -233,6 +247,7 @@ func TestGetTableUnqualifiedSearchOrder(t *testing.T) {
 }
 
 func TestGetTableUnqualifiedTemp(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	// Attach main and temp
@@ -254,6 +269,7 @@ func TestGetTableUnqualifiedTemp(t *testing.T) {
 }
 
 func TestGetTableUnqualifiedNotFound(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	dr.AttachDatabase("main", "/path/to/main.db", nil, nil)
@@ -265,6 +281,7 @@ func TestGetTableUnqualifiedNotFound(t *testing.T) {
 }
 
 func TestGetTableQualifiedNotFound(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	dr.AttachDatabase("main", "/path/to/main.db", nil, nil)
@@ -283,6 +300,7 @@ func TestGetTableQualifiedNotFound(t *testing.T) {
 }
 
 func TestListDatabases(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	// Empty registry
@@ -304,6 +322,7 @@ func TestListDatabases(t *testing.T) {
 	// Verify all databases are listed
 	dbMap := make(map[string]bool)
 	for _, name := range dbs {
+		name := name
 		dbMap[name] = true
 	}
 
@@ -313,6 +332,7 @@ func TestListDatabases(t *testing.T) {
 }
 
 func TestGetMainDatabase(t *testing.T) {
+	t.Parallel()
 	dr := NewDatabaseRegistry()
 
 	// No main database

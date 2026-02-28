@@ -7,6 +7,7 @@ import (
 
 // TestCursor_PrevInPageDetailed tests backward navigation within a page (62.5% coverage)
 func TestCursor_PrevInPageDetailed(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096) // Large page to keep entries on one page
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -48,6 +49,7 @@ func TestCursor_PrevInPageDetailed(t *testing.T) {
 
 // TestCursor_AdvanceWithinPage tests forward navigation within page (66.7% coverage)
 func TestCursor_AdvanceWithinPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -89,6 +91,7 @@ func TestCursor_AdvanceWithinPage(t *testing.T) {
 
 // TestCursor_ResolveChildPage tests child page resolution (63.6% coverage)
 func TestCursor_ResolveChildPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -120,6 +123,7 @@ func TestCursor_ResolveChildPage(t *testing.T) {
 
 // TestCursor_TryLoadCell tests cell loading during seeks (77.8% coverage)
 func TestCursor_TryLoadCell(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -147,6 +151,7 @@ func TestCursor_TryLoadCell(t *testing.T) {
 
 // TestCursor_ValidateDeletePosition tests delete validation (80.0% coverage)
 func TestCursor_ValidateDeletePosition(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -186,6 +191,7 @@ func TestCursor_ValidateDeletePosition(t *testing.T) {
 
 // TestCursor_FreeOverflowPages tests overflow page freeing (75.0% coverage)
 func TestCursor_FreeOverflowPages(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(1024)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -224,6 +230,7 @@ func TestCursor_FreeOverflowPages(t *testing.T) {
 
 // TestCursor_PerformCellDeletion tests cell deletion logic (71.4% coverage)
 func TestCursor_PerformCellDeletion(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -268,6 +275,7 @@ func TestCursor_PerformCellDeletion(t *testing.T) {
 
 // TestCursor_AdjustCursorAfterDelete tests cursor adjustment (71.4% coverage)
 func TestCursor_AdjustCursorAfterDelete(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -302,6 +310,7 @@ func TestCursor_AdjustCursorAfterDelete(t *testing.T) {
 
 // TestCursor_LoadCellAtCurrentIndex tests cell loading (60.0% coverage)
 func TestCursor_LoadCellAtCurrentIndex(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -334,6 +343,7 @@ func TestCursor_LoadCellAtCurrentIndex(t *testing.T) {
 
 // TestIndexCursor_AdvanceWithinPageIndex tests index forward navigation (60.0% coverage)
 func TestIndexCursor_AdvanceWithinPageIndex(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -372,6 +382,7 @@ func TestIndexCursor_AdvanceWithinPageIndex(t *testing.T) {
 
 // TestIndexCursor_ClimbToNextParentDetailed tests parent climbing (68.0% coverage)
 func TestIndexCursor_ClimbToNextParentDetailed(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -406,6 +417,7 @@ func TestIndexCursor_ClimbToNextParentDetailed(t *testing.T) {
 
 // TestIndexCursor_PrevViaParentDetailed tests backward parent navigation (65.2% coverage)
 func TestIndexCursor_PrevViaParentDetailed(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -440,6 +452,7 @@ func TestIndexCursor_PrevViaParentDetailed(t *testing.T) {
 
 // TestMerge_MergePages tests the merge operation (66.7% coverage)
 func TestMerge_MergePages(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -481,6 +494,7 @@ func TestMerge_MergePages(t *testing.T) {
 
 // TestMerge_UpdateParentAfterMerge tests parent update (66.7% coverage)
 func TestMerge_UpdateParentAfterMerge(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -519,6 +533,7 @@ func TestMerge_UpdateParentAfterMerge(t *testing.T) {
 
 // TestMerge_CopyRightCellsToLeft tests cell copying (70.0% coverage)
 func TestMerge_CopyRightCellsToLeft(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {

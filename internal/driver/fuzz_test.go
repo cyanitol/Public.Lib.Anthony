@@ -349,6 +349,7 @@ func TestFuzzRegressionDriver(t *testing.T) {
 
 	for i, input := range regressionInputs {
 		t.Run(string(rune('A'+i)), func(t *testing.T) {
+			t.Parallel()
 			defer func() {
 				if r := recover(); r != nil {
 					t.Errorf("Panic on regression input %d: %v\nInput: %q", i, r, input)

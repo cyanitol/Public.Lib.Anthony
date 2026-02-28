@@ -6,7 +6,9 @@ import (
 
 // TestOpenPseudoOpcode tests the OpOpenPseudo opcode
 func TestOpenPseudoOpcode(t *testing.T) {
+	t.Parallel()
 	t.Run("BasicOpenPseudo", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.AllocCursors(3)
 
@@ -53,6 +55,7 @@ func TestOpenPseudoOpcode(t *testing.T) {
 	})
 
 	t.Run("OpenPseudo_AllocatesCursors", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		// Don't pre-allocate cursors
 
@@ -80,7 +83,9 @@ func TestOpenPseudoOpcode(t *testing.T) {
 
 // TestVirtualTableOpcodes tests virtual table related opcodes
 func TestVirtualTableOpcodes(t *testing.T) {
+	t.Parallel()
 	t.Run("VOpen_Basic", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		// Create a mock virtual table (just use a string for testing)
@@ -116,6 +121,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	})
 
 	t.Run("VOpen_NilVTable", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		instr := &Instruction{
@@ -132,6 +138,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	})
 
 	t.Run("VOpen_WrongP4Type", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		instr := &Instruction{
@@ -148,6 +155,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	})
 
 	t.Run("VFilter_Basic", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		// Create a virtual table cursor
@@ -185,6 +193,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	})
 
 	t.Run("VFilter_WrongCursorType", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		// Create a non-virtual cursor
@@ -207,6 +216,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	})
 
 	t.Run("VColumn_Basic", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		// Create a virtual table cursor with initialized VTabCursor
@@ -236,6 +246,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	})
 
 	t.Run("VColumn_NoCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		instr := &Instruction{
@@ -252,6 +263,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	})
 
 	t.Run("VColumn_UninitializedCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		v.Cursors = make([]*Cursor, 2)
@@ -275,6 +287,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	})
 
 	t.Run("VNext_Basic", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		v.Cursors = make([]*Cursor, 2)
@@ -305,6 +318,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	})
 
 	t.Run("VNext_WrongCursorType", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		v.Cursors = make([]*Cursor, 2)
@@ -325,6 +339,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	})
 
 	t.Run("VNext_UninitializedCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		v.Cursors = make([]*Cursor, 2)
@@ -346,6 +361,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	})
 
 	t.Run("VRowid_Direct", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		v.Cursors = make([]*Cursor, 2)
@@ -373,6 +389,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	})
 
 	t.Run("VRowid_WrongCursorType", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		v.Cursors = make([]*Cursor, 2)
@@ -392,6 +409,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	})
 
 	t.Run("VRowid_UninitializedCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		v.Cursors = make([]*Cursor, 2)

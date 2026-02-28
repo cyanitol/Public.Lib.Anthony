@@ -424,7 +424,9 @@ func TestSQLiteExplain(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Clean up and run setup
 			_, err := db.Exec("DROP TABLE IF EXISTS t1")
 			db.Exec("DROP TABLE IF EXISTS t2")
@@ -607,7 +609,9 @@ func TestExplainQueryPlanMultipleStatements(t *testing.T) {
 	}
 
 	for _, q := range queries {
+		q := q  // Capture range variable
 		t.Run(q.name, func(t *testing.T) {
+			t.Parallel()
 			rows, err := db.Query(q.sql)
 			if err != nil {
 				t.Fatalf("query failed: %v", err)

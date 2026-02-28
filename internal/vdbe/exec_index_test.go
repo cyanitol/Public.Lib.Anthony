@@ -41,6 +41,7 @@ func createIndexPage(bt *btree.Btree) (uint32, error) {
 
 // TestIndexCursorBasicOperations tests basic index cursor operations
 func TestIndexCursorBasicOperations(t *testing.T) {
+	t.Parallel()
 	// Create in-memory btree
 	bt := btree.NewBtree(4096)
 
@@ -55,6 +56,7 @@ func TestIndexCursorBasicOperations(t *testing.T) {
 
 	// Test insertion
 	t.Run("Insert", func(t *testing.T) {
+		t.Parallel()
 		if err := idxCursor.InsertIndex([]byte("apple"), 100); err != nil {
 			t.Fatalf("failed to insert 'apple': %v", err)
 		}
@@ -70,6 +72,7 @@ func TestIndexCursorBasicOperations(t *testing.T) {
 
 	// Test seeking
 	t.Run("Seek", func(t *testing.T) {
+		t.Parallel()
 		found, err := idxCursor.SeekIndex([]byte("apple"))
 		if err != nil {
 			t.Fatalf("failed to seek 'apple': %v", err)
@@ -104,6 +107,7 @@ func TestIndexCursorBasicOperations(t *testing.T) {
 
 	// Test iteration from first
 	t.Run("Iteration", func(t *testing.T) {
+		t.Parallel()
 		err := idxCursor.MoveToFirst()
 		if err != nil {
 			t.Fatalf("failed to move to first: %v", err)
@@ -130,6 +134,7 @@ func TestIndexCursorBasicOperations(t *testing.T) {
 
 	// Test deletion
 	t.Run("Delete", func(t *testing.T) {
+		t.Parallel()
 		// Delete 'banana' (key, rowid pair)
 		if err := idxCursor.DeleteIndex([]byte("banana"), 200); err != nil {
 			t.Fatalf("failed to delete 'banana': %v", err)
@@ -157,6 +162,7 @@ func TestIndexCursorBasicOperations(t *testing.T) {
 
 // TestIdxRowidOpcode tests the OpIdxRowid opcode
 func TestIdxRowidOpcode(t *testing.T) {
+	t.Parallel()
 	bt := btree.NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -219,6 +225,7 @@ func TestIdxRowidOpcode(t *testing.T) {
 
 // TestCompareBytes tests the compareBytes helper function.
 func TestCompareBytes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		a      []byte
 		b      []byte
@@ -235,6 +242,7 @@ func TestCompareBytes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		result := compareBytes(tt.a, tt.b)
 		if (result < 0 && tt.expect >= 0) || (result > 0 && tt.expect <= 0) || (result == 0 && tt.expect != 0) {
 			t.Errorf("compareBytes(%q, %q) = %d, want %d", tt.a, tt.b, result, tt.expect)
@@ -244,6 +252,7 @@ func TestCompareBytes(t *testing.T) {
 
 // TestIdxInsertOpcode tests the OpIdxInsert opcode
 func TestIdxInsertOpcode(t *testing.T) {
+	t.Parallel()
 	bt := btree.NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -304,6 +313,7 @@ func TestIdxInsertOpcode(t *testing.T) {
 
 // TestIdxDeleteOpcode tests the OpIdxDelete opcode
 func TestIdxDeleteOpcode(t *testing.T) {
+	t.Parallel()
 	bt := btree.NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -364,6 +374,7 @@ func TestIdxDeleteOpcode(t *testing.T) {
 
 // TestIdxCompareOpcodes tests the OpIdxLT, OpIdxGT, OpIdxLE, OpIdxGE opcodes
 func TestIdxCompareOpcodes(t *testing.T) {
+	t.Parallel()
 	bt := btree.NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -406,6 +417,7 @@ func TestIdxCompareOpcodes(t *testing.T) {
 	}
 
 	t.Run("OpIdxLT", func(t *testing.T) {
+		t.Parallel()
 		// Compare "banana" < "cherry" (should be true, so jump)
 		v.Mem[1].SetBlob([]byte("cherry"))
 		v.PC = 0
@@ -441,6 +453,7 @@ func TestIdxCompareOpcodes(t *testing.T) {
 	})
 
 	t.Run("OpIdxGT", func(t *testing.T) {
+		t.Parallel()
 		// Compare "banana" > "apple" (should be true, so jump)
 		v.Mem[1].SetBlob([]byte("apple"))
 		v.PC = 0
@@ -463,6 +476,7 @@ func TestIdxCompareOpcodes(t *testing.T) {
 	})
 
 	t.Run("OpIdxLE", func(t *testing.T) {
+		t.Parallel()
 		// Compare "banana" <= "banana" (should be true, so jump)
 		v.Mem[1].SetBlob([]byte("banana"))
 		v.PC = 0
@@ -498,6 +512,7 @@ func TestIdxCompareOpcodes(t *testing.T) {
 	})
 
 	t.Run("OpIdxGE", func(t *testing.T) {
+		t.Parallel()
 		// Compare "banana" >= "banana" (should be true, so jump)
 		v.Mem[1].SetBlob([]byte("banana"))
 		v.PC = 0
@@ -535,11 +550,13 @@ func TestIdxCompareOpcodes(t *testing.T) {
 
 // TestIdxOpcodeErrors tests error conditions for index opcodes
 func TestIdxOpcodeErrors(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 	v.AllocCursors(2)
 
 	t.Run("IdxInsert_NoCursor", func(t *testing.T) {
+		t.Parallel()
 		err := v.execIdxInsert(&Instruction{
 			Opcode: OpIdxInsert,
 			P1:     0,
@@ -553,6 +570,7 @@ func TestIdxOpcodeErrors(t *testing.T) {
 	})
 
 	t.Run("IdxInsert_NotWritable", func(t *testing.T) {
+		t.Parallel()
 		bt := btree.NewBtree(4096)
 		rootPage, _ := createIndexPage(bt)
 		idxCursor := btree.NewIndexCursor(bt, rootPage)
@@ -582,6 +600,7 @@ func TestIdxOpcodeErrors(t *testing.T) {
 	})
 
 	t.Run("IdxDelete_NoCursor", func(t *testing.T) {
+		t.Parallel()
 		v2 := New()
 		v2.AllocMemory(10)
 		v2.AllocCursors(2)
@@ -598,6 +617,7 @@ func TestIdxOpcodeErrors(t *testing.T) {
 	})
 
 	t.Run("IdxCompare_InvalidCursor", func(t *testing.T) {
+		t.Parallel()
 		v3 := New()
 		v3.AllocMemory(10)
 		v3.AllocCursors(2)

@@ -6,6 +6,7 @@ import (
 
 // TestCursorPrevious tests the Previous method
 func TestCursorPrevious(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -60,6 +61,7 @@ func TestCursorPrevious(t *testing.T) {
 
 // TestCursorGetPayloadWithOverflow tests GetPayloadWithOverflow
 func TestCursorGetPayloadWithOverflow(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -107,6 +109,7 @@ func TestCursorGetPayloadWithOverflow(t *testing.T) {
 
 // TestCursorString tests the String method
 func TestCursorString(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := bt.CreateTable()
 	cursor := NewCursor(bt, rootPage)
@@ -119,6 +122,7 @@ func TestCursorString(t *testing.T) {
 
 // TestCursorMoveToFirstEmpty tests MoveToFirst on empty table
 func TestCursorMoveToFirstEmpty(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -134,6 +138,7 @@ func TestCursorMoveToFirstEmpty(t *testing.T) {
 
 // TestCursorDescendToRightChild tests descendToRightChild
 func TestCursorDescendToRightChild(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages to force tree growth
 
 	rootPage, err := bt.CreateTable()
@@ -175,6 +180,7 @@ func TestCursorDescendToRightChild(t *testing.T) {
 
 // TestCursorInvalidOperations tests error conditions
 func TestCursorInvalidOperations(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	cursor := NewCursor(bt, 999) // Non-existent root
 
@@ -201,6 +207,7 @@ func TestCursorInvalidOperations(t *testing.T) {
 
 // TestCursorNavigationEdgeCases tests edge cases in navigation
 func TestCursorNavigationEdgeCases(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -245,6 +252,7 @@ func TestCursorNavigationEdgeCases(t *testing.T) {
 
 // TestCursorDeleteInvalid tests deletion error conditions
 func TestCursorDeleteInvalid(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -263,6 +271,7 @@ func TestCursorDeleteInvalid(t *testing.T) {
 
 // TestCursorGetPayload tests GetPayload method
 func TestCursorGetPayload(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -293,6 +302,7 @@ func TestCursorGetPayload(t *testing.T) {
 
 // TestCursorGetKey tests GetKey method
 func TestCursorGetKey(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -322,6 +332,7 @@ func TestCursorGetKey(t *testing.T) {
 
 // TestCursorIsValid tests IsValid method
 func TestCursorIsValid(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()

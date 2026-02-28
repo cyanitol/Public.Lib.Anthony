@@ -6,6 +6,7 @@ import (
 
 // TestExecGotoExtended tests additional execGoto edge cases
 func TestExecGotoExtended(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(5)
 	// Add some instructions to the program
 	v.AddOp(OpNoop, 0, 0, 0)   // 0
@@ -29,6 +30,7 @@ func TestExecGotoExtended(t *testing.T) {
 
 // TestExecGosub tests execGosub edge cases
 func TestExecGosub(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(10)
 	v.PC = 3
 
@@ -54,6 +56,7 @@ func TestExecGosub(t *testing.T) {
 
 // TestExecReturn tests execReturn edge cases
 func TestExecReturn(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(10)
 	v.Mem[2].SetInt(7)
 	v.PC = 15
@@ -75,6 +78,7 @@ func TestExecReturn(t *testing.T) {
 
 // TestExecHalt tests execHalt
 func TestExecHalt(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(5)
 
 	instr := &Instruction{
@@ -94,6 +98,7 @@ func TestExecHalt(t *testing.T) {
 
 // TestExecIf tests execIf edge cases
 func TestExecIf(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		setupMem   func(*VDBE)
@@ -131,7 +136,9 @@ func TestExecIf(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(5)
 			tt.setupMem(v)
 			v.PC = 0
@@ -156,6 +163,7 @@ func TestExecIf(t *testing.T) {
 
 // TestExecIfNot tests execIfNot edge cases
 func TestExecIfNot(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		setupMem   func(*VDBE)
@@ -193,7 +201,9 @@ func TestExecIfNot(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(5)
 			tt.setupMem(v)
 			v.PC = 0
@@ -218,6 +228,7 @@ func TestExecIfNot(t *testing.T) {
 
 // TestExecInteger tests execInteger edge cases
 func TestExecInteger(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(5)
 
 	instr := &Instruction{
@@ -238,6 +249,7 @@ func TestExecInteger(t *testing.T) {
 
 // TestExecNull tests execNull
 func TestExecNull(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(5)
 	v.Mem[0].SetInt(42)
 	v.Mem[1].SetInt(43)
@@ -263,6 +275,7 @@ func TestExecNull(t *testing.T) {
 
 // TestExecMoveExtended tests execMove with zero count
 func TestExecMoveExtended(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(10)
 	v.Mem[0].SetInt(10)
 
@@ -286,6 +299,7 @@ func TestExecMoveExtended(t *testing.T) {
 
 // TestExecSCopyExtended tests execSCopy with different types
 func TestExecSCopyExtended(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(10)
 	v.Mem[0].SetInt(42)
 
@@ -307,6 +321,7 @@ func TestExecSCopyExtended(t *testing.T) {
 
 // TestExecBlobExtended tests execBlob with nil P4
 func TestExecBlobExtended(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(5)
 	v.Mem[0].SetInt(42) // Set initial value
 
@@ -328,6 +343,7 @@ func TestExecBlobExtended(t *testing.T) {
 
 // TestExecAddImm tests execAddImm
 func TestExecAddImm(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		initial  int64
@@ -355,7 +371,9 @@ func TestExecAddImm(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(5)
 			v.Mem[0].SetInt(tt.initial)
 
@@ -379,6 +397,7 @@ func TestExecAddImm(t *testing.T) {
 
 // TestExecIsNull tests execIsNull
 func TestExecIsNull(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		setupMem func(*Mem)
@@ -402,7 +421,9 @@ func TestExecIsNull(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(5)
 			tt.setupMem(v.Mem[0])
 
@@ -429,6 +450,7 @@ func TestExecIsNull(t *testing.T) {
 
 // TestExecNotNull tests execNotNull
 func TestExecNotNull(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		setupMem func(*Mem)
@@ -452,7 +474,9 @@ func TestExecNotNull(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(5)
 			tt.setupMem(v.Mem[0])
 
@@ -479,7 +503,9 @@ func TestExecNotNull(t *testing.T) {
 
 // TestExecRollbackExtended tests execRollback extended cases
 func TestExecRollbackExtended(t *testing.T) {
+	t.Parallel()
 	t.Run("RollbackWithState", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		mockPager := &MockTransactionPager{
 			inWriteTxn: true,
@@ -504,7 +530,9 @@ func TestExecRollbackExtended(t *testing.T) {
 
 // TestExecTransaction tests execTransaction
 func TestExecTransaction(t *testing.T) {
+	t.Parallel()
 	t.Run("BeginWrite", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		mockPager := &MockTransactionPager{}
 		v.Ctx = &VDBEContext{
@@ -528,6 +556,7 @@ func TestExecTransaction(t *testing.T) {
 	})
 
 	t.Run("BeginRead", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		mockPager := &MockTransactionPager{}
 		v.Ctx = &VDBEContext{
@@ -553,6 +582,7 @@ func TestExecTransaction(t *testing.T) {
 
 // TestExecClose tests execClose
 func TestExecClose(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(5)
 	v.AllocCursors(3)
 	v.Cursors[0] = &Cursor{
@@ -576,6 +606,7 @@ func TestExecClose(t *testing.T) {
 
 // TestEvalMemAsBool tests evalMemAsBool
 func TestEvalMemAsBool(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		setupMem func(*Mem)
@@ -615,7 +646,9 @@ func TestEvalMemAsBool(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			mem := NewMem()
 			tt.setupMem(mem)
 

@@ -10,6 +10,7 @@ import (
 
 // TestTokenizer tests the simple tokenizer.
 func TestTokenizer(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 
 	tests := []struct {
@@ -45,7 +46,9 @@ func TestTokenizer(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			tokens := tokenizer.Tokenize(tt.text)
 			if len(tokens) != len(tt.expected) {
 				t.Errorf("Expected %d tokens, got %d", len(tt.expected), len(tokens))
@@ -65,6 +68,7 @@ func TestTokenizer(t *testing.T) {
 
 // TestStopWordTokenizer tests the stop word filtering tokenizer.
 func TestStopWordTokenizer(t *testing.T) {
+	t.Parallel()
 	base := NewSimpleTokenizer()
 	tokenizer := NewStopWordTokenizer(base, StopWords)
 
@@ -79,6 +83,7 @@ func TestStopWordTokenizer(t *testing.T) {
 	}
 
 	for i, token := range tokens {
+		token := token
 		if i >= len(expected) {
 			break
 		}
@@ -90,6 +95,7 @@ func TestStopWordTokenizer(t *testing.T) {
 
 // TestInvertedIndex tests the inverted index functionality.
 func TestInvertedIndex(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 
@@ -157,6 +163,7 @@ func TestInvertedIndex(t *testing.T) {
 
 // TestBM25Ranker tests the BM25 ranking algorithm.
 func TestBM25Ranker(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	ranker := NewBM25Ranker()
@@ -170,6 +177,7 @@ func TestBM25Ranker(t *testing.T) {
 	}
 
 	for i, doc := range docs {
+		doc := doc
 		index.AddDocument(DocumentID(i+1), doc, tokenizer)
 	}
 
@@ -196,6 +204,7 @@ func TestBM25Ranker(t *testing.T) {
 
 // TestQueryParser tests query parsing.
 func TestQueryParser(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -244,7 +253,9 @@ func TestQueryParser(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			query, err := parser.Parse(tt.query)
 			if err != nil {
 				t.Fatalf("Failed to parse query: %v", err)
@@ -263,6 +274,7 @@ func TestQueryParser(t *testing.T) {
 
 // TestQueryExecution tests query execution and search.
 func TestQueryExecution(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
@@ -277,11 +289,13 @@ func TestQueryExecution(t *testing.T) {
 	}
 
 	for i, doc := range docs {
+		doc := doc
 		index.AddDocument(DocumentID(i+1), doc, tokenizer)
 	}
 
 	// Test simple query
 	t.Run("simple query", func(t *testing.T) {
+			t.Parallel()
 		query, _ := parser.Parse("quick brown")
 		results, err := executor.Execute(query)
 		if err != nil {
@@ -302,6 +316,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test phrase query
 	t.Run("phrase query", func(t *testing.T) {
+			t.Parallel()
 		query, _ := parser.Parse(`"quick brown"`)
 		results, err := executor.Execute(query)
 		if err != nil {
@@ -317,6 +332,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test AND query
 	t.Run("AND query", func(t *testing.T) {
+			t.Parallel()
 		query, _ := parser.Parse("quick AND fox")
 		results, err := executor.Execute(query)
 		if err != nil {
@@ -331,6 +347,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test OR query
 	t.Run("OR query", func(t *testing.T) {
+			t.Parallel()
 		query, _ := parser.Parse("cat OR dog")
 		results, err := executor.Execute(query)
 		if err != nil {
@@ -345,6 +362,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test NOT query
 	t.Run("NOT query", func(t *testing.T) {
+			t.Parallel()
 		query, _ := parser.Parse("quick NOT fox")
 		results, err := executor.Execute(query)
 		if err != nil {
@@ -366,6 +384,7 @@ func TestQueryExecution(t *testing.T) {
 
 // TestFTS5Module tests the FTS5 virtual table module.
 func TestFTS5Module(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 
 	// Test Create
@@ -394,6 +413,7 @@ func TestFTS5Module(t *testing.T) {
 
 	// Test Insert
 	t.Run("insert documents", func(t *testing.T) {
+			t.Parallel()
 		// INSERT: argv[0]=NULL, argv[1]=NULL/rowid, argv[2+]=column values
 		rowid, err := ftsTable.Update(4, []interface{}{nil, nil, "First Document", "This is the body of the first document"})
 		if err != nil {
@@ -414,6 +434,7 @@ func TestFTS5Module(t *testing.T) {
 
 	// Test Open and Filter
 	t.Run("query documents", func(t *testing.T) {
+			t.Parallel()
 		cursor, err := ftsTable.Open()
 		if err != nil {
 			t.Fatalf("Failed to open cursor: %v", err)
@@ -458,6 +479,7 @@ func TestFTS5Module(t *testing.T) {
 
 	// Test Delete
 	t.Run("delete document", func(t *testing.T) {
+			t.Parallel()
 		// DELETE: argc=1, argv[0]=rowid
 		_, err := ftsTable.Update(1, []interface{}{int64(1)})
 		if err != nil {
@@ -473,6 +495,7 @@ func TestFTS5Module(t *testing.T) {
 
 // TestHighlightAndSnippet tests highlighting and snippet generation.
 func TestHighlightAndSnippet(t *testing.T) {
+	t.Parallel()
 	text := "The quick brown fox jumps over the lazy dog"
 	terms := []string{"quick", "fox", "lazy"}
 
@@ -493,6 +516,7 @@ func TestHighlightAndSnippet(t *testing.T) {
 
 // TestRankResults tests result ranking.
 func TestRankResults(t *testing.T) {
+	t.Parallel()
 	results := []SearchResult{
 		{DocID: 1, Score: 5.0},
 		{DocID: 2, Score: 10.0},
@@ -518,6 +542,7 @@ func TestRankResults(t *testing.T) {
 
 // TestConcurrentAccess tests thread-safe concurrent access to FTS5.
 func TestConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, err := module.Create(nil, "fts5", "main", "concurrent_test", []string{"content"})
 	if err != nil {
@@ -551,6 +576,7 @@ func TestConcurrentAccess(t *testing.T) {
 
 // TestIndexStats tests index statistics.
 func TestIndexStats(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 
@@ -579,6 +605,7 @@ func TestIndexStats(t *testing.T) {
 
 // TestFTS5ModuleConnect tests the Connect method.
 func TestFTS5ModuleConnect(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 
 	table, schema, err := module.Connect(nil, "fts5", "main", "test_fts", []string{"title", "body"})
@@ -606,6 +633,7 @@ func TestFTS5ModuleConnect(t *testing.T) {
 
 // TestFTS5Destroy tests the Destroy method.
 func TestFTS5Destroy(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, err := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	if err != nil {
@@ -636,6 +664,7 @@ func TestFTS5Destroy(t *testing.T) {
 
 // TestFTS5CursorRowid tests the Rowid method.
 func TestFTS5CursorRowid(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, err := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	if err != nil {
@@ -680,6 +709,7 @@ func TestFTS5CursorRowid(t *testing.T) {
 
 // TestRegisterFTS5 tests FTS5 registration.
 func TestRegisterFTS5(t *testing.T) {
+	t.Parallel()
 	err := RegisterFTS5()
 	if err != nil {
 		t.Fatalf("RegisterFTS5 failed: %v", err)
@@ -693,6 +723,7 @@ func TestRegisterFTS5(t *testing.T) {
 
 // TestBM25Function tests the BM25 auxiliary function.
 func TestBM25Function(t *testing.T) {
+	t.Parallel()
 	// Create index with documents
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
@@ -704,6 +735,7 @@ func TestBM25Function(t *testing.T) {
 	}
 
 	for i, doc := range docs {
+		doc := doc
 		index.AddDocument(DocumentID(i+1), doc, tokenizer)
 	}
 
@@ -722,6 +754,7 @@ func TestBM25Function(t *testing.T) {
 
 // TestSnippetFunction tests the Snippet auxiliary function.
 func TestSnippetFunction(t *testing.T) {
+	t.Parallel()
 	text := "The quick brown fox jumps over the lazy dog. This is a longer piece of text for testing snippet generation."
 	terms := []string{"quick", "lazy"}
 
@@ -736,6 +769,7 @@ func TestSnippetFunction(t *testing.T) {
 
 // TestHighlightFunction tests the Highlight auxiliary function.
 func TestHighlightFunction(t *testing.T) {
+	t.Parallel()
 	text := "The quick brown fox"
 	terms := []string{"quick", "fox"}
 
@@ -754,6 +788,7 @@ func TestHighlightFunction(t *testing.T) {
 
 // TestTFIDFRanker tests the TF-IDF ranking algorithm.
 func TestTFIDFRanker(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	ranker := NewTFIDFRanker()
@@ -765,6 +800,7 @@ func TestTFIDFRanker(t *testing.T) {
 	}
 
 	for i, doc := range docs {
+		doc := doc
 		index.AddDocument(DocumentID(i+1), doc, tokenizer)
 	}
 
@@ -789,6 +825,7 @@ func TestTFIDFRanker(t *testing.T) {
 
 // TestSimpleRanker tests the simple ranking algorithm.
 func TestSimpleRanker(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	ranker := NewSimpleRanker()
@@ -800,6 +837,7 @@ func TestSimpleRanker(t *testing.T) {
 	}
 
 	for i, doc := range docs {
+		doc := doc
 		index.AddDocument(DocumentID(i+1), doc, tokenizer)
 	}
 
@@ -824,6 +862,7 @@ func TestSimpleRanker(t *testing.T) {
 
 // TestScoreWithBoost tests scoring with column boosting.
 func TestScoreWithBoost(t *testing.T) {
+	t.Parallel()
 	baseScore := 10.0
 	boost := map[int]float64{0: 2.0, 1: 1.0}
 
@@ -844,6 +883,7 @@ func TestScoreWithBoost(t *testing.T) {
 
 // TestPrefixTokenizer tests the prefix tokenizer.
 func TestPrefixTokenizer(t *testing.T) {
+	t.Parallel()
 	base := NewSimpleTokenizer()
 	tokenizer := NewPrefixTokenizer(base, 2, 5)
 
@@ -857,6 +897,7 @@ func TestPrefixTokenizer(t *testing.T) {
 
 	hasPrefix := false
 	for _, token := range tokens {
+		token := token
 		if len(token.Text) >= 2 && len(token.Text) <= 5 {
 			hasPrefix = true
 			break
@@ -872,6 +913,7 @@ func TestPrefixTokenizer(t *testing.T) {
 
 // TestStopWordIsStopWord tests stop word filtering.
 func TestStopWordIsStopWord(t *testing.T) {
+	t.Parallel()
 	base := NewSimpleTokenizer()
 	tokenizer := NewStopWordTokenizer(base, StopWords)
 
@@ -881,6 +923,7 @@ func TestStopWordIsStopWord(t *testing.T) {
 
 	// "the" and "and" should be filtered
 	for _, token := range tokens {
+		token := token
 		if token.Text == "the" || token.Text == "and" {
 			t.Errorf("Stop word '%s' should have been filtered", token.Text)
 		}
@@ -889,6 +932,7 @@ func TestStopWordIsStopWord(t *testing.T) {
 	// Should contain non-stop words
 	hasNonStop := false
 	for _, token := range tokens {
+		token := token
 		if token.Text == "quick" || token.Text == "brown" {
 			hasNonStop = true
 			break
@@ -902,6 +946,7 @@ func TestStopWordIsStopWord(t *testing.T) {
 
 // TestGetDocumentContent tests retrieving document content.
 func TestGetDocumentContent(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"title", "body"})
 	tokenizer := NewSimpleTokenizer()
 
@@ -939,6 +984,7 @@ func TestGetDocumentContent(t *testing.T) {
 
 // TestGetColumnNames tests getting column names from index.
 func TestGetColumnNames(t *testing.T) {
+	t.Parallel()
 	columns := []string{"title", "body", "author"}
 	index := NewInvertedIndex(columns)
 
@@ -949,6 +995,7 @@ func TestGetColumnNames(t *testing.T) {
 	}
 
 	for i, name := range names {
+		name := name
 		if name != columns[i] {
 			t.Errorf("Column %d: expected %s, got %s", i, columns[i], name)
 		}
@@ -957,6 +1004,7 @@ func TestGetColumnNames(t *testing.T) {
 
 // TestGetAllDocuments tests retrieving all document IDs.
 func TestGetAllDocuments(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 
@@ -989,6 +1037,7 @@ func TestGetAllDocuments(t *testing.T) {
 
 // TestGetTerms tests getting all terms from index.
 func TestGetTerms(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 
@@ -1003,6 +1052,7 @@ func TestGetTerms(t *testing.T) {
 	}
 
 	for _, expected := range expectedTerms {
+		expected := expected
 		found := false
 		for _, term := range terms {
 			if term == expected {
@@ -1018,6 +1068,7 @@ func TestGetTerms(t *testing.T) {
 
 // TestClearIndex tests clearing the index.
 func TestClearIndex(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 
@@ -1046,6 +1097,7 @@ func TestClearIndex(t *testing.T) {
 
 // TestMatchOperator tests the MATCH operator in queries.
 func TestMatchOperator(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
@@ -1059,6 +1111,7 @@ func TestMatchOperator(t *testing.T) {
 	}
 
 	for i, doc := range docs {
+		doc := doc
 		index.AddDocument(DocumentID(i+1), doc, tokenizer)
 	}
 
@@ -1080,6 +1133,7 @@ func TestMatchOperator(t *testing.T) {
 
 // TestPrefixQuery tests prefix query execution.
 func TestPrefixQuery(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
@@ -1093,6 +1147,7 @@ func TestPrefixQuery(t *testing.T) {
 	}
 
 	for i, doc := range docs {
+		doc := doc
 		index.AddDocument(DocumentID(i+1), doc, tokenizer)
 	}
 
@@ -1115,6 +1170,7 @@ func TestPrefixQuery(t *testing.T) {
 
 // TestColumnFilterQuery tests column-specific queries.
 func TestColumnFilterQuery(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -1137,6 +1193,7 @@ func TestColumnFilterQuery(t *testing.T) {
 
 // TestGenerateSnippet tests snippet generation with various inputs.
 func TestGenerateSnippet(t *testing.T) {
+	t.Parallel()
 	text := "The quick brown fox jumps over the lazy dog"
 
 	// Test with match positions
@@ -1158,6 +1215,7 @@ func TestGenerateSnippet(t *testing.T) {
 
 // TestHighlightTextEdgeCases tests highlighting edge cases.
 func TestHighlightTextEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		text  string
@@ -1186,7 +1244,9 @@ func TestHighlightTextEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := HighlightText(tt.text, tt.terms, "<b>", "</b>")
 
 			// Should not crash and return valid string
@@ -1199,6 +1259,7 @@ func TestHighlightTextEdgeCases(t *testing.T) {
 
 // TestFTS5UpdateEdgeCases tests Update method edge cases.
 func TestFTS5UpdateEdgeCases(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -1221,6 +1282,7 @@ func TestFTS5UpdateEdgeCases(t *testing.T) {
 
 // TestFTS5ColumnEdgeCases tests cursor Column edge cases.
 func TestFTS5ColumnEdgeCases(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"title", "body"})
 	ftsTable := table.(*FTS5Table)
@@ -1249,6 +1311,7 @@ func TestFTS5ColumnEdgeCases(t *testing.T) {
 
 // TestFTS5BestIndexWithoutMatch tests BestIndex without MATCH constraint.
 func TestFTS5BestIndexWithoutMatch(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -1272,6 +1335,7 @@ func TestFTS5BestIndexWithoutMatch(t *testing.T) {
 
 // TestInvertedIndexEdgeCases tests index edge cases.
 func TestInvertedIndexEdgeCases(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 
@@ -1309,6 +1373,7 @@ func TestInvertedIndexEdgeCases(t *testing.T) {
 
 // TestQueryParserEmptyQuery tests parsing empty queries.
 func TestQueryParserEmptyQuery(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -1326,6 +1391,7 @@ func TestQueryParserEmptyQuery(t *testing.T) {
 
 // TestQueryExecutorEdgeCases tests query execution edge cases.
 func TestQueryExecutorEdgeCases(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
@@ -1366,6 +1432,7 @@ func TestQueryExecutorEdgeCases(t *testing.T) {
 
 // TestRankersWithEmptyIndex tests rankers with empty index.
 func TestRankersWithEmptyIndex(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 
 	rankers := []struct {
@@ -1378,7 +1445,9 @@ func TestRankersWithEmptyIndex(t *testing.T) {
 	}
 
 	for _, r := range rankers {
+		r := r
 		t.Run(r.name, func(t *testing.T) {
+				t.Parallel()
 			score := r.ranker.Score(index, 1, []string{"test"})
 			if score != 0 {
 				t.Errorf("Expected score 0 for empty index, got %f", score)
@@ -1389,6 +1458,7 @@ func TestRankersWithEmptyIndex(t *testing.T) {
 
 // TestGenerateSnippetEdgeCases tests snippet generation edge cases.
 func TestGenerateSnippetEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		text      string
@@ -1416,7 +1486,9 @@ func TestGenerateSnippetEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			snippet := GenerateSnippet(tt.text, tt.positions, tt.maxLen)
 			// Should not crash
 			t.Logf("Snippet: %s", snippet)
@@ -1426,6 +1498,7 @@ func TestGenerateSnippetEdgeCases(t *testing.T) {
 
 // TestTokenizerEdgeCases tests tokenizer edge cases.
 func TestTokenizerEdgeCases(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 
 	tests := []struct {
@@ -1440,7 +1513,9 @@ func TestTokenizerEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			tokens := tokenizer.Tokenize(tt.text)
 			t.Logf("Tokens for '%s': %v", tt.name, tokens)
 		})
@@ -1449,6 +1524,7 @@ func TestTokenizerEdgeCases(t *testing.T) {
 
 // TestMatchOperatorFunction tests the MatchOperator function directly.
 func TestMatchOperatorFunction(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 
@@ -1460,6 +1536,7 @@ func TestMatchOperatorFunction(t *testing.T) {
 	}
 
 	for i, doc := range docs {
+		doc := doc
 		index.AddDocument(DocumentID(i+1), doc, tokenizer)
 	}
 
@@ -1480,7 +1557,9 @@ func TestMatchOperatorFunction(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			matches, err := MatchOperator(index, tt.queryStr, tt.docID)
 			if err != nil {
 				t.Errorf("MatchOperator failed: %v", err)
@@ -1502,6 +1581,7 @@ func TestMatchOperatorFunction(t *testing.T) {
 
 // TestStopWordIsStopWordFunction tests the IsStopWord function.
 func TestStopWordIsStopWordFunction(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		word       string
 		isStopWord bool
@@ -1516,7 +1596,9 @@ func TestStopWordIsStopWordFunction(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.word, func(t *testing.T) {
+				t.Parallel()
 			result := IsStopWord(tt.word)
 			if result != tt.isStopWord {
 				t.Errorf("IsStopWord(%q) = %v, want %v", tt.word, result, tt.isStopWord)
@@ -1527,6 +1609,7 @@ func TestStopWordIsStopWordFunction(t *testing.T) {
 
 // TestParseColumnFilter tests column filter parsing.
 func TestParseColumnFilterParsing(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -1543,7 +1626,9 @@ func TestParseColumnFilterParsing(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			query, err := parser.Parse(tt.queryStr)
 			if err != nil && tt.name != "empty after colon" {
 				t.Errorf("Parse failed: %v", err)
@@ -1560,6 +1645,7 @@ func TestParseColumnFilterParsing(t *testing.T) {
 
 // TestQueryExecutorNilQuery tests executor with nil query.
 func TestQueryExecutorNilQuery(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	executor := NewQueryExecutor(index, NewBM25Ranker())
 
@@ -1571,6 +1657,7 @@ func TestQueryExecutorNilQuery(t *testing.T) {
 
 // TestNewQueryExecutorNilRanker tests creating executor with nil ranker.
 func TestNewQueryExecutorNilRanker(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	executor := NewQueryExecutor(index, nil)
 
@@ -1581,6 +1668,7 @@ func TestNewQueryExecutorNilRanker(t *testing.T) {
 
 // TestParsePrefixQueryEmpty tests prefix query with no tokens.
 func TestParsePrefixQueryEmpty(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -1595,6 +1683,7 @@ func TestParsePrefixQueryEmpty(t *testing.T) {
 
 // TestParseSimpleQueryNoTerms tests simple query with no valid terms.
 func TestParseSimpleQueryNoTerms(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -1607,6 +1696,7 @@ func TestParseSimpleQueryNoTerms(t *testing.T) {
 
 // TestBM25WithEmptyTerms tests BM25 ranking with empty terms.
 func TestBM25WithEmptyTerms(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	ranker := NewBM25Ranker()
@@ -1622,6 +1712,7 @@ func TestBM25WithEmptyTerms(t *testing.T) {
 
 // TestTFIDFWithEmptyTerms tests TF-IDF ranking with empty terms.
 func TestTFIDFWithEmptyTerms(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	ranker := NewTFIDFRanker()
@@ -1637,6 +1728,7 @@ func TestTFIDFWithEmptyTerms(t *testing.T) {
 
 // TestCalculateSnippetBoundsEdgeCases tests snippet bounds calculation.
 func TestCalculateSnippetBoundsEdgeCases(t *testing.T) {
+	t.Parallel()
 	text := "Short text"
 
 	// Test with position at end of text
@@ -1658,6 +1750,7 @@ func TestCalculateSnippetBoundsEdgeCases(t *testing.T) {
 
 // TestAddEllipsisEdgeCases tests ellipsis addition edge cases.
 func TestAddEllipsisEdgeCases(t *testing.T) {
+	t.Parallel()
 	text := "The quick brown fox jumps over the lazy dog"
 
 	tests := []struct {
@@ -1672,7 +1765,9 @@ func TestAddEllipsisEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			snippet := GenerateSnippet(text, tt.positions, tt.maxLen)
 			t.Logf("Snippet: %s", snippet)
 		})
@@ -1681,6 +1776,7 @@ func TestAddEllipsisEdgeCases(t *testing.T) {
 
 // TestTruncateText tests text truncation.
 func TestTruncateText(t *testing.T) {
+	t.Parallel()
 	// Test with long text
 	longText := "This is a very long text that should be truncated to a reasonable length for snippet generation purposes"
 
@@ -1699,6 +1795,7 @@ func TestTruncateText(t *testing.T) {
 
 // TestPhraseMatchEmptyTerms tests phrase matching with empty terms.
 func TestPhraseMatchEmptyTerms(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 
@@ -1713,6 +1810,7 @@ func TestPhraseMatchEmptyTerms(t *testing.T) {
 
 // TestHasConsecutiveTermsEdgeCases tests consecutive terms checking.
 func TestHasConsecutiveTermsEdgeCases(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 
@@ -1735,6 +1833,7 @@ func TestHasConsecutiveTermsEdgeCases(t *testing.T) {
 
 // TestTermsFollowFromEdgeCases tests term position following.
 func TestTermsFollowFromEdgeCases(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 
@@ -1750,6 +1849,7 @@ func TestTermsFollowFromEdgeCases(t *testing.T) {
 
 // TestContainsPositionEdgeCases tests position containment.
 func TestContainsPositionEdgeCases(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 
@@ -1768,6 +1868,7 @@ func TestContainsPositionEdgeCases(t *testing.T) {
 
 // TestFTS5ColumnSpecial tests special column indices.
 func TestFTS5ColumnSpecial(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -1793,6 +1894,7 @@ func TestFTS5ColumnSpecial(t *testing.T) {
 
 // TestFTS5UpdateNoColumns tests update with insufficient columns.
 func TestFTS5UpdateNoColumns(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"col1", "col2"})
 	ftsTable := table.(*FTS5Table)
@@ -1806,6 +1908,7 @@ func TestFTS5UpdateNoColumns(t *testing.T) {
 
 // TestFTS5CreateNoColumns tests creating FTS5 table with no columns.
 func TestFTS5CreateNoColumns(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 
 	// Test with empty args
@@ -1823,6 +1926,7 @@ func TestFTS5CreateNoColumns(t *testing.T) {
 
 // TestBM25EdgeCaseScores tests BM25 with edge case document frequencies.
 func TestBM25EdgeCaseScores(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	ranker := NewBM25Ranker()
@@ -1841,6 +1945,7 @@ func TestBM25EdgeCaseScores(t *testing.T) {
 
 // TestTFIDFEdgeCaseScores tests TF-IDF with edge cases.
 func TestTFIDFEdgeCaseScores(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	ranker := NewTFIDFRanker()
@@ -1854,6 +1959,7 @@ func TestTFIDFEdgeCaseScores(t *testing.T) {
 	}
 
 	for i, content := range docs {
+		content := content
 		doc := map[int]string{0: content}
 		index.AddDocument(DocumentID(i+1), doc, tokenizer)
 	}
@@ -1867,6 +1973,7 @@ func TestTFIDFEdgeCaseScores(t *testing.T) {
 
 // TestPrefixTokenizerEdgeCases tests prefix tokenizer edge cases.
 func TestPrefixTokenizerEdgeCases(t *testing.T) {
+	t.Parallel()
 	base := NewSimpleTokenizer()
 
 	tests := []struct {
@@ -1883,7 +1990,9 @@ func TestPrefixTokenizerEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			tokenizer := NewPrefixTokenizer(base, tt.minPrefix, tt.maxPrefix)
 			tokens := tokenizer.Tokenize(tt.text)
 			t.Logf("Prefix tokens for '%s' (min=%d, max=%d): %d tokens", tt.text, tt.minPrefix, tt.maxPrefix, len(tokens))
@@ -1893,6 +2002,7 @@ func TestPrefixTokenizerEdgeCases(t *testing.T) {
 
 // TestStopWordTokenizerNilStopWords tests stop word tokenizer with nil stop words.
 func TestStopWordTokenizerNilStopWords(t *testing.T) {
+	t.Parallel()
 	base := NewSimpleTokenizer()
 	tokenizer := NewStopWordTokenizer(base, nil)
 
@@ -1907,6 +2017,7 @@ func TestStopWordTokenizerNilStopWords(t *testing.T) {
 
 // TestGetDocumentLengthNonExistent tests getting length of non-existent document.
 func TestGetDocumentLengthNonExistent(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 
 	length := index.GetDocumentLength(999)
@@ -1917,6 +2028,7 @@ func TestGetDocumentLengthNonExistent(t *testing.T) {
 
 // TestANDQueryEmpty tests AND query with no children.
 func TestANDQueryEmpty(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	executor := NewQueryExecutor(index, NewBM25Ranker())
@@ -1943,6 +2055,7 @@ func TestANDQueryEmpty(t *testing.T) {
 
 // TestNOTQueryInsufficientChildren tests NOT query with less than 2 children.
 func TestNOTQueryInsufficientChildren(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	executor := NewQueryExecutor(index, NewBM25Ranker())
@@ -1970,6 +2083,7 @@ func TestNOTQueryInsufficientChildren(t *testing.T) {
 
 // TestBestIndexUnusableConstraints tests BestIndex with unusable constraints.
 func TestBestIndexUnusableConstraints(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -1996,6 +2110,7 @@ func TestBestIndexUnusableConstraints(t *testing.T) {
 
 // TestHandleDeleteInvalidRowid tests delete with invalid rowid type.
 func TestHandleDeleteInvalidRowid(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2012,6 +2127,7 @@ func TestHandleDeleteInvalidRowid(t *testing.T) {
 
 // TestDetermineDocumentIDInvalidType tests document ID determination with invalid type.
 func TestDetermineDocumentIDInvalidType(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2025,6 +2141,7 @@ func TestDetermineDocumentIDInvalidType(t *testing.T) {
 
 // TestCheckAndRemoveOldDocumentWithZeroRowID tests update detection with zero rowid.
 func TestCheckAndRemoveOldDocumentWithZeroRowID(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2041,6 +2158,7 @@ func TestCheckAndRemoveOldDocumentWithZeroRowID(t *testing.T) {
 
 // TestFilterInvalidQueryString tests filter with invalid query string.
 func TestFilterInvalidQueryString(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2059,6 +2177,7 @@ func TestFilterInvalidQueryString(t *testing.T) {
 
 // TestFilterNonStringQuery tests filter with non-string query argument.
 func TestFilterNonStringQuery(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2085,6 +2204,7 @@ func TestFilterNonStringQuery(t *testing.T) {
 
 // TestColumnEOFError tests column access when cursor is at EOF.
 func TestColumnEOFError(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2104,6 +2224,7 @@ func TestColumnEOFError(t *testing.T) {
 
 // TestColumnDocumentNotFound tests column access for missing document.
 func TestColumnDocumentNotFound(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2131,6 +2252,7 @@ func TestColumnDocumentNotFound(t *testing.T) {
 
 // TestColumnOutOfRange tests column access with out of range index.
 func TestColumnOutOfRange(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2159,6 +2281,7 @@ func TestColumnOutOfRange(t *testing.T) {
 
 // TestUpdateInsufficientArguments tests update with too few arguments.
 func TestUpdateInsufficientArguments(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2173,6 +2296,7 @@ func TestUpdateInsufficientArguments(t *testing.T) {
 
 // TestTruncateTextEdgeCases tests truncateText function edge cases.
 func TestTruncateTextEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test text exactly at maxLength
 	text := "12345"
 	snippet := GenerateSnippet(text, []int{}, 5)
@@ -2202,6 +2326,7 @@ func TestTruncateTextEdgeCases(t *testing.T) {
 
 // TestCalculateSnippetBoundsNegativeStart tests snippet bounds with negative start.
 func TestCalculateSnippetBoundsNegativeStart(t *testing.T) {
+	t.Parallel()
 	text := "The quick brown fox"
 
 	// Position near start of text (start would be negative)
@@ -2221,6 +2346,7 @@ func TestCalculateSnippetBoundsNegativeStart(t *testing.T) {
 
 // TestScoreWithEmptyIndex tests BM25.Score with specific edge cases.
 func TestScoreWithEmptyIndex(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	ranker := NewBM25Ranker()
 
@@ -2233,6 +2359,7 @@ func TestScoreWithEmptyIndex(t *testing.T) {
 
 // TestScoreTermNotInDocument tests scoring when term not in document.
 func TestScoreTermNotInDocument(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	ranker := NewBM25Ranker()
@@ -2250,6 +2377,7 @@ func TestScoreTermNotInDocument(t *testing.T) {
 
 // TestTFIDFWithZeroDocumentLength tests TF-IDF with zero-length document.
 func TestTFIDFWithZeroDocumentLength(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	ranker := NewTFIDFRanker()
@@ -2265,6 +2393,7 @@ func TestTFIDFWithZeroDocumentLength(t *testing.T) {
 
 // TestParseColumnFilterEdgeCases tests column filter parsing edge cases.
 func TestParseColumnFilterEdgeCases(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -2281,7 +2410,9 @@ func TestParseColumnFilterEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			_, err := parser.Parse(tt.query)
 			// Should handle gracefully
 			if err != nil {
@@ -2293,6 +2424,7 @@ func TestParseColumnFilterEdgeCases(t *testing.T) {
 
 // TestTryParsePrefixQueryNoTokens tests prefix query parsing with no tokens.
 func TestTryParsePrefixQueryNoTokens(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -2307,6 +2439,7 @@ func TestTryParsePrefixQueryNoTokens(t *testing.T) {
 
 // TestMatchPhraseEmptyResult tests phrase matching with no initial matches.
 func TestMatchPhraseEmptyResult(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	executor := NewQueryExecutor(index, NewBM25Ranker())
@@ -2332,6 +2465,7 @@ func TestMatchPhraseEmptyResult(t *testing.T) {
 
 // TestExtractTermsWithNilQuery tests extractTerms with nil query.
 func TestExtractTermsWithNilQuery(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	executor := NewQueryExecutor(index, NewBM25Ranker())
 
@@ -2343,6 +2477,7 @@ func TestExtractTermsWithNilQuery(t *testing.T) {
 
 // TestExtractTermsRecursive tests extractTerms with nested queries.
 func TestExtractTermsRecursive(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	executor := NewQueryExecutor(index, NewBM25Ranker())
 
@@ -2377,6 +2512,7 @@ func TestExtractTermsRecursive(t *testing.T) {
 
 // TestUpdateWithExplicitRowIDs tests updates with specific rowid sequences.
 func TestUpdateWithExplicitRowIDs(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2417,6 +2553,7 @@ func TestUpdateWithExplicitRowIDs(t *testing.T) {
 
 // TestUpdateRealUpdate tests actual UPDATE (not INSERT) with old rowid.
 func TestUpdateRealUpdate(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2458,6 +2595,7 @@ func TestUpdateRealUpdate(t *testing.T) {
 
 // TestConvertToStringVariousTypes tests convertToString with various value types.
 func TestConvertToStringVariousTypes(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"col1", "col2", "col3", "col4"})
 	ftsTable := table.(*FTS5Table)
@@ -2499,6 +2637,7 @@ func TestConvertToStringVariousTypes(t *testing.T) {
 
 // TestExtractColumnValuesNilValues tests extracting column values with nil values.
 func TestExtractColumnValuesNilValues(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"col1", "col2"})
 	ftsTable := table.(*FTS5Table)
@@ -2543,6 +2682,7 @@ func TestExtractColumnValuesNilValues(t *testing.T) {
 
 // TestParseANDQueryWithInvalidChild tests AND query parsing with invalid child.
 func TestParseANDQueryWithInvalidChild(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -2555,6 +2695,7 @@ func TestParseANDQueryWithInvalidChild(t *testing.T) {
 
 // TestParseORQueryWithInvalidChild tests OR query parsing with invalid child.
 func TestParseORQueryWithInvalidChild(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -2567,6 +2708,7 @@ func TestParseORQueryWithInvalidChild(t *testing.T) {
 
 // TestParseNOTQueryWithInvalidChildren tests NOT query parsing with invalid children.
 func TestParseNOTQueryWithInvalidChildren(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -2585,6 +2727,7 @@ func TestParseNOTQueryWithInvalidChildren(t *testing.T) {
 
 // TestHandleDeleteNonExistent tests deleting non-existent document.
 func TestHandleDeleteNonExistent(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2602,6 +2745,7 @@ func TestHandleDeleteNonExistent(t *testing.T) {
 
 // TestFilterQueryExecutionError tests filter with query execution error.
 func TestFilterQueryExecutionError(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2619,6 +2763,7 @@ func TestFilterQueryExecutionError(t *testing.T) {
 
 // TestGetMatchingDocumentsUnknownType tests getMatchingDocuments with unknown query type.
 func TestGetMatchingDocumentsUnknownType(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	executor := NewQueryExecutor(index, NewBM25Ranker())
 
@@ -2641,6 +2786,7 @@ func TestGetMatchingDocumentsUnknownType(t *testing.T) {
 
 // TestMatchPhraseNotConsecutive tests phrase matching with non-consecutive terms.
 func TestMatchPhraseNotConsecutive(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	executor := NewQueryExecutor(index, NewBM25Ranker())
@@ -2667,6 +2813,7 @@ func TestMatchPhraseNotConsecutive(t *testing.T) {
 
 // TestTruncateTextExactLength tests truncateText with text exactly at maxLength.
 func TestTruncateTextExactLength(t *testing.T) {
+	t.Parallel()
 	text := "12345"
 	snippet := GenerateSnippet(text, []int{}, 5)
 
@@ -2687,6 +2834,7 @@ func TestTruncateTextExactLength(t *testing.T) {
 
 // TestCalculateSnippetBoundsEndOverflow tests snippet bounds when end exceeds text length.
 func TestCalculateSnippetBoundsEndOverflow(t *testing.T) {
+	t.Parallel()
 	text := "Short text"
 
 	// Position near end with large maxLength
@@ -2702,6 +2850,7 @@ func TestCalculateSnippetBoundsEndOverflow(t *testing.T) {
 
 // TestScoreTermNotFound tests scoring when term has no postings.
 func TestScoreTermNotFound(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	ranker := NewBM25Ranker()
@@ -2720,6 +2869,7 @@ func TestScoreTermNotFound(t *testing.T) {
 
 // TestTFIDFScoreTermNotFound tests TF-IDF scoring when term has no postings.
 func TestTFIDFScoreTermNotFound(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	ranker := NewTFIDFRanker()
@@ -2738,6 +2888,7 @@ func TestTFIDFScoreTermNotFound(t *testing.T) {
 
 // TestParseColumnFilterSinglePart tests parseColumnFilter edge case.
 func TestParseColumnFilterSinglePart(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -2752,6 +2903,7 @@ func TestParseColumnFilterSinglePart(t *testing.T) {
 
 // TestANDQueryOneChild tests AND query execution with only one child.
 func TestANDQueryOneChild(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	executor := NewQueryExecutor(index, NewBM25Ranker())
@@ -2780,6 +2932,7 @@ func TestANDQueryOneChild(t *testing.T) {
 
 // TestORQueryNoChildren tests OR query execution with no children.
 func TestORQueryNoChildren(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	executor := NewQueryExecutor(index, NewBM25Ranker())
 
@@ -2802,6 +2955,7 @@ func TestORQueryNoChildren(t *testing.T) {
 
 // TestPrefixQueryEmptyPrefix tests prefix query with empty prefix term.
 func TestPrefixQueryEmptyPrefix(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	executor := NewQueryExecutor(index, NewBM25Ranker())
@@ -2826,6 +2980,7 @@ func TestPrefixQueryEmptyPrefix(t *testing.T) {
 
 // TestUpdateInsufficientColumnValues tests update with insufficient column values.
 func TestUpdateInsufficientColumnValues(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"col1", "col2", "col3"})
 	ftsTable := table.(*FTS5Table)
@@ -2839,6 +2994,7 @@ func TestUpdateInsufficientColumnValues(t *testing.T) {
 
 // TestConvertToStringByteSlice tests convertToString specifically with byte slice.
 func TestConvertToStringByteSlice(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2869,6 +3025,7 @@ func TestConvertToStringByteSlice(t *testing.T) {
 
 // TestHandleDeleteWithIndexError tests delete when RemoveDocument returns error.
 func TestHandleDeleteWithIndexError(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2889,6 +3046,7 @@ func TestHandleDeleteWithIndexError(t *testing.T) {
 
 // TestHandleInsertOrUpdateExtractError tests insert with column extraction error.
 func TestHandleInsertOrUpdateExtractError(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"col1", "col2"})
 	ftsTable := table.(*FTS5Table)
@@ -2902,6 +3060,7 @@ func TestHandleInsertOrUpdateExtractError(t *testing.T) {
 
 // TestFilterWithEmptyArgv tests filter with empty argv.
 func TestFilterWithEmptyArgv(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -2928,6 +3087,7 @@ func TestFilterWithEmptyArgv(t *testing.T) {
 
 // TestTruncateTextLongerThanMax tests truncateText with text longer than maxLength.
 func TestTruncateTextLongerThanMax(t *testing.T) {
+	t.Parallel()
 	text := "This is a very long text that needs to be truncated"
 
 	// Test truncation
@@ -2948,6 +3108,7 @@ func TestTruncateTextLongerThanMax(t *testing.T) {
 
 // TestCalculateSnippetBoundsStartAdjustment tests snippet bounds adjustment.
 func TestCalculateSnippetBoundsStartAdjustment(t *testing.T) {
+	t.Parallel()
 	// Text where end would overflow, forcing start adjustment
 	text := "1234567890"
 
@@ -2963,6 +3124,7 @@ func TestCalculateSnippetBoundsStartAdjustment(t *testing.T) {
 
 // TestParsePhraseQuerySimple tests phrase query parsing edge case.
 func TestParsePhraseQuerySimple(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -2983,6 +3145,7 @@ func TestParsePhraseQuerySimple(t *testing.T) {
 
 // TestParseColumnFilterNoContent tests column filter with no content after colon.
 func TestParseColumnFilterNoContent(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -2995,6 +3158,7 @@ func TestParseColumnFilterNoContent(t *testing.T) {
 
 // TestMatchPhraseSingleTerm tests phrase matching with single term.
 func TestMatchPhraseSingleTerm(t *testing.T) {
+	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	executor := NewQueryExecutor(index, NewBM25Ranker())
@@ -3021,6 +3185,7 @@ func TestMatchPhraseSingleTerm(t *testing.T) {
 
 // TestTryParseNOTQueryEdgeCase tests NOT query edge case.
 func TestTryParseNOTQueryEdgeCase(t *testing.T) {
+	t.Parallel()
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 
@@ -3038,6 +3203,7 @@ func TestTryParseNOTQueryEdgeCase(t *testing.T) {
 
 // TestGenerateSnippetWithMatchAtEnd tests snippet generation with match at text end.
 func TestGenerateSnippetWithMatchAtEnd(t *testing.T) {
+	t.Parallel()
 	text := "The quick brown fox"
 
 	// Match position at the end
@@ -3052,6 +3218,7 @@ func TestGenerateSnippetWithMatchAtEnd(t *testing.T) {
 
 // TestFilterWithQueryParseError tests filter when query parsing fails.
 func TestFilterWithQueryParseError(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)
@@ -3068,6 +3235,7 @@ func TestFilterWithQueryParseError(t *testing.T) {
 
 // TestUpdateWithAddDocumentError tests insert when AddDocument fails.
 func TestUpdateWithAddDocumentError(t *testing.T) {
+	t.Parallel()
 	module := NewFTS5Module()
 	table, _, _ := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
 	ftsTable := table.(*FTS5Table)

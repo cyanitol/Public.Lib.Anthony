@@ -61,6 +61,7 @@ func createTestLeafPage(pageSize uint32, cells []struct {
 }
 
 func TestParsePageHeader(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		pageNum  uint32
@@ -102,7 +103,9 @@ func TestParsePageHeader(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			header, err := ParsePageHeader(tt.data, tt.pageNum)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParsePageHeader() error = %v, wantErr %v", err, tt.wantErr)
@@ -123,6 +126,7 @@ func TestParsePageHeader(t *testing.T) {
 }
 
 func TestBtreeIteratePage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a test page with 3 cells
@@ -171,6 +175,7 @@ func TestBtreeIteratePage(t *testing.T) {
 }
 
 func TestNewBtree(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		pageSize uint32
@@ -182,7 +187,9 @@ func TestNewBtree(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			bt := NewBtree(tt.pageSize)
 			if bt.PageSize != tt.want {
 				t.Errorf("PageSize = %d, want %d", bt.PageSize, tt.want)
@@ -195,6 +202,7 @@ func TestNewBtree(t *testing.T) {
 }
 
 func TestBtreeGetSetPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create test page data
@@ -237,6 +245,7 @@ func TestBtreeGetSetPage(t *testing.T) {
 
 // TestBtreeString tests the String method
 func TestBtreeString(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Add a page
@@ -256,6 +265,7 @@ func TestBtreeString(t *testing.T) {
 
 // TestClearCache tests the ClearCache method
 func TestClearCache(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Add some pages
@@ -282,6 +292,7 @@ func TestClearCache(t *testing.T) {
 
 // TestAllocatePageWithProvider tests page allocation with a provider
 func TestAllocatePageWithProvider(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Set up a mock provider
@@ -309,6 +320,7 @@ func TestAllocatePageWithProvider(t *testing.T) {
 
 // TestAllocatePageWithoutProvider tests page allocation without a provider
 func TestAllocatePageWithoutProvider(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Allocate pages
@@ -341,6 +353,7 @@ func TestAllocatePageWithoutProvider(t *testing.T) {
 
 // TestGetPageWithProvider tests GetPage with a provider
 func TestGetPageWithProvider(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Set up a mock provider

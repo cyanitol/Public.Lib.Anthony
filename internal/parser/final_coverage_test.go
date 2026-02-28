@@ -6,6 +6,7 @@ import (
 
 // TestParserEdgeCasesForHighCoverage tests remaining edge cases for high coverage
 func TestParserEdgeCasesForHighCoverage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -450,7 +451,9 @@ func TestParserEdgeCasesForHighCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -462,6 +465,7 @@ func TestParserEdgeCasesForHighCoverage(t *testing.T) {
 
 // TestParserIntFloatStringValue tests value extraction methods
 func TestParserIntFloatStringValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -485,7 +489,9 @@ func TestParserIntFloatStringValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -497,6 +503,7 @@ func TestParserIntFloatStringValue(t *testing.T) {
 
 // TestLexerEdgeCasesMultilineIdentifiers tests newline tracking in identifiers
 func TestLexerEdgeCasesMultilineIdentifiers(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -516,7 +523,9 @@ func TestLexerEdgeCasesMultilineIdentifiers(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			// Just ensure it parses without panic
@@ -527,6 +536,7 @@ func TestLexerEdgeCasesMultilineIdentifiers(t *testing.T) {
 
 // TestParserCheckIdentifierEdgeCases tests identifier checking
 func TestParserCheckIdentifierEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -550,7 +560,9 @@ func TestParserCheckIdentifierEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -562,6 +574,7 @@ func TestParserCheckIdentifierEdgeCases(t *testing.T) {
 
 // TestParserPeekBounds tests peek at end of token stream
 func TestParserPeekBounds(t *testing.T) {
+	t.Parallel()
 	// This tests the bounds check in peek()
 	p := NewParser("SELECT")
 	_, err := p.Parse()
@@ -572,6 +585,7 @@ func TestParserPeekBounds(t *testing.T) {
 
 // TestCastExprErrorPaths tests error paths in parseCastExpr
 func TestCastExprErrorPaths(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -595,7 +609,9 @@ func TestCastExprErrorPaths(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {

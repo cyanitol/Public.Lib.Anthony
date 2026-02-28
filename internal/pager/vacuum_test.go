@@ -7,6 +7,7 @@ import (
 )
 
 func TestVacuum_BasicOperation(t *testing.T) {
+	t.Parallel()
 	filename := filepath.Join(t.TempDir(), "test.db")
 
 	// Create database and add some data
@@ -84,6 +85,7 @@ func TestVacuum_BasicOperation(t *testing.T) {
 }
 
 func TestVacuum_AfterManyDeletes(t *testing.T) {
+	t.Parallel()
 	filename := filepath.Join(t.TempDir(), "test.db")
 
 	// Create database
@@ -168,6 +170,7 @@ func TestVacuum_AfterManyDeletes(t *testing.T) {
 }
 
 func TestVacuum_Into(t *testing.T) {
+	t.Parallel()
 	sourceFile := filepath.Join(t.TempDir(), "source.db")
 	targetFile := filepath.Join(t.TempDir(), "target.db")
 
@@ -277,6 +280,7 @@ func TestVacuum_Into(t *testing.T) {
 }
 
 func TestVacuum_ReadOnlyDatabase(t *testing.T) {
+	t.Parallel()
 	filename := filepath.Join(t.TempDir(), "test.db")
 
 	// Create database
@@ -302,6 +306,7 @@ func TestVacuum_ReadOnlyDatabase(t *testing.T) {
 }
 
 func TestVacuum_DuringTransaction(t *testing.T) {
+	t.Parallel()
 	filename := filepath.Join(t.TempDir(), "test.db")
 
 	pager, err := Open(filename, false)
@@ -331,6 +336,7 @@ func TestVacuum_DuringTransaction(t *testing.T) {
 }
 
 func TestVacuum_DataIntegrity(t *testing.T) {
+	t.Parallel()
 	filename := filepath.Join(t.TempDir(), "test.db")
 
 	pager, err := Open(filename, false)
@@ -406,6 +412,7 @@ func TestVacuum_DataIntegrity(t *testing.T) {
 }
 
 func TestVacuum_EmptyDatabase(t *testing.T) {
+	t.Parallel()
 	filename := filepath.Join(t.TempDir(), "test.db")
 
 	pager, err := Open(filename, false)

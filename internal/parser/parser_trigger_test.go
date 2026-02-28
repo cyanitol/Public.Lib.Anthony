@@ -5,6 +5,7 @@ import (
 )
 
 func TestParseCreateTrigger(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -200,7 +201,9 @@ func TestParseCreateTrigger(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 
@@ -232,6 +235,7 @@ func TestParseCreateTrigger(t *testing.T) {
 }
 
 func TestParseDropTrigger(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -277,7 +281,9 @@ func TestParseDropTrigger(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 
@@ -309,6 +315,7 @@ func TestParseDropTrigger(t *testing.T) {
 }
 
 func TestTriggerEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -347,7 +354,9 @@ func TestTriggerEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 

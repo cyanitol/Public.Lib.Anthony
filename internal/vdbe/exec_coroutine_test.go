@@ -6,7 +6,9 @@ import (
 
 // TestCoroutineOpcodes tests coroutine-related opcodes
 func TestCoroutineOpcodes(t *testing.T) {
+	t.Parallel()
 	t.Run("InitCoroutine", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.Coroutines = make(map[int]*CoroutineInfo)
 
@@ -44,6 +46,7 @@ func TestCoroutineOpcodes(t *testing.T) {
 	})
 
 	t.Run("Yield", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.Coroutines = make(map[int]*CoroutineInfo)
 
@@ -83,6 +86,7 @@ func TestCoroutineOpcodes(t *testing.T) {
 	})
 
 	t.Run("YieldWithRegister", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.Coroutines = make(map[int]*CoroutineInfo)
 
@@ -113,6 +117,7 @@ func TestCoroutineOpcodes(t *testing.T) {
 	})
 
 	t.Run("EndCoroutine", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.Coroutines = make(map[int]*CoroutineInfo)
 
@@ -147,6 +152,7 @@ func TestCoroutineOpcodes(t *testing.T) {
 	})
 
 	t.Run("EndCoroutine_NotActive", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.Coroutines = make(map[int]*CoroutineInfo)
 
@@ -169,6 +175,7 @@ func TestCoroutineOpcodes(t *testing.T) {
 	})
 
 	t.Run("EndCoroutine_NotInitialized", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.Coroutines = make(map[int]*CoroutineInfo)
 
@@ -184,6 +191,7 @@ func TestCoroutineOpcodes(t *testing.T) {
 	})
 
 	t.Run("Yield_NotInitialized", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.Coroutines = make(map[int]*CoroutineInfo)
 
@@ -202,7 +210,9 @@ func TestCoroutineOpcodes(t *testing.T) {
 
 // TestProgramOpcode tests the OpProgram opcode for sub-programs
 func TestProgramOpcode(t *testing.T) {
+	t.Parallel()
 	t.Run("BasicProgram", func(t *testing.T) {
+		t.Parallel()
 		// Create main VDBE
 		v := NewTestVDBE(10)
 		v.SubPrograms = make(map[int]*VDBE)
@@ -241,6 +251,7 @@ func TestProgramOpcode(t *testing.T) {
 	})
 
 	t.Run("Program_NilP4", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.SubPrograms = make(map[int]*VDBE)
 
@@ -258,6 +269,7 @@ func TestProgramOpcode(t *testing.T) {
 	})
 
 	t.Run("Program_WrongP4Type", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.SubPrograms = make(map[int]*VDBE)
 
@@ -275,6 +287,7 @@ func TestProgramOpcode(t *testing.T) {
 	})
 
 	t.Run("Program_InvalidP4Content", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.SubPrograms = make(map[int]*VDBE)
 
@@ -294,7 +307,9 @@ func TestProgramOpcode(t *testing.T) {
 
 // TestParamOpcode tests the OpParam opcode for accessing parent registers
 func TestParamOpcode(t *testing.T) {
+	t.Parallel()
 	t.Run("BasicParam", func(t *testing.T) {
+		t.Parallel()
 		// Create parent VDBE
 		parent := NewTestVDBE(10)
 		parent.Mem[3].SetInt(99)
@@ -322,6 +337,7 @@ func TestParamOpcode(t *testing.T) {
 	})
 
 	t.Run("Param_NoParent", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		// No parent set
 
@@ -338,6 +354,7 @@ func TestParamOpcode(t *testing.T) {
 	})
 
 	t.Run("Param_InvalidParentRegister", func(t *testing.T) {
+		t.Parallel()
 		parent := NewTestVDBE(5)
 		child := NewTestVDBE(5)
 		child.Parent = parent
@@ -355,6 +372,7 @@ func TestParamOpcode(t *testing.T) {
 	})
 
 	t.Run("Param_StringValue", func(t *testing.T) {
+		t.Parallel()
 		parent := NewTestVDBE(10)
 		parent.Mem[2].SetStr("hello")
 

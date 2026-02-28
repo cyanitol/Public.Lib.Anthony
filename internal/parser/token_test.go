@@ -3,6 +3,7 @@ package parser
 import "testing"
 
 func TestTokenTypeString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		tokType TokenType
 		want    string
@@ -23,6 +24,7 @@ func TestTokenTypeString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := tt.tokType.String()
 		if got != tt.want {
 			t.Errorf("TokenType(%d).String() = %q, want %q", tt.tokType, got, tt.want)
@@ -31,6 +33,7 @@ func TestTokenTypeString(t *testing.T) {
 }
 
 func TestTokenTypeIsKeyword(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		tokType TokenType
 		want    bool
@@ -56,6 +59,7 @@ func TestTokenTypeIsKeyword(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := tt.tokType.IsKeyword()
 		if got != tt.want {
 			t.Errorf("TokenType(%s).IsKeyword() = %v, want %v", tt.tokType, got, tt.want)
@@ -64,6 +68,7 @@ func TestTokenTypeIsKeyword(t *testing.T) {
 }
 
 func TestTokenTypeIsOperator(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		tokType TokenType
 		want    bool
@@ -94,6 +99,7 @@ func TestTokenTypeIsOperator(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := tt.tokType.IsOperator()
 		if got != tt.want {
 			t.Errorf("TokenType(%s).IsOperator() = %v, want %v", tt.tokType, got, tt.want)
@@ -102,6 +108,7 @@ func TestTokenTypeIsOperator(t *testing.T) {
 }
 
 func TestTokenTypeIsLiteral(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		tokType TokenType
 		want    bool
@@ -119,6 +126,7 @@ func TestTokenTypeIsLiteral(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := tt.tokType.IsLiteral()
 		if got != tt.want {
 			t.Errorf("TokenType(%s).IsLiteral() = %v, want %v", tt.tokType, got, tt.want)
@@ -127,6 +135,7 @@ func TestTokenTypeIsLiteral(t *testing.T) {
 }
 
 func TestTokenTypeIsPunctuation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		tokType TokenType
 		want    bool
@@ -143,6 +152,7 @@ func TestTokenTypeIsPunctuation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := tt.tokType.IsPunctuation()
 		if got != tt.want {
 			t.Errorf("TokenType(%s).IsPunctuation() = %v, want %v", tt.tokType, got, tt.want)

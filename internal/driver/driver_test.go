@@ -154,7 +154,9 @@ func TestValueConversion(t *testing.T) {
 
 	vc := ValueConverter{}
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := vc.ConvertValue(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ConvertValue() error = %v, wantErr %v", err, tt.wantErr)

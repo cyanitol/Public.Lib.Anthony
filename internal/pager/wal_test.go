@@ -9,6 +9,7 @@ import (
 
 // TestWALCreation tests creating a new WAL file
 func TestWALCreation(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -42,6 +43,7 @@ func TestWALCreation(t *testing.T) {
 
 // TestWALHeader tests WAL header serialization and parsing
 func TestWALHeader(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -82,6 +84,7 @@ func TestWALHeader(t *testing.T) {
 
 // TestWALWriteFrame tests writing frames to the WAL
 func TestWALWriteFrame(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -128,6 +131,7 @@ func TestWALWriteFrame(t *testing.T) {
 
 // TestWALReadFrame tests reading frames from the WAL
 func TestWALReadFrame(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -176,6 +180,7 @@ func TestWALReadFrame(t *testing.T) {
 
 // TestWALFindPage tests finding the latest version of a page
 func TestWALFindPage(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -237,6 +242,7 @@ func TestWALFindPage(t *testing.T) {
 
 // TestWALCheckpoint tests checkpointing the WAL to the database
 func TestWALCheckpoint(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -298,6 +304,7 @@ func TestWALCheckpoint(t *testing.T) {
 
 // TestWALCheckpointOverwrite tests that checkpoint handles multiple versions correctly
 func TestWALCheckpointOverwrite(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -349,6 +356,7 @@ func TestWALCheckpointOverwrite(t *testing.T) {
 
 // TestWALInvalidPageSize tests error handling for invalid page sizes
 func TestWALInvalidPageSize(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -373,6 +381,7 @@ func TestWALInvalidPageSize(t *testing.T) {
 
 // TestWALInvalidPageNumber tests error handling for invalid page numbers
 func TestWALInvalidPageNumber(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -397,6 +406,7 @@ func TestWALInvalidPageNumber(t *testing.T) {
 
 // TestWALDelete tests deleting the WAL file
 func TestWALDelete(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -438,6 +448,7 @@ func TestWALDelete(t *testing.T) {
 
 // TestWALSync tests syncing the WAL to disk
 func TestWALSync(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -465,6 +476,7 @@ func TestWALSync(t *testing.T) {
 
 // TestWALShouldCheckpoint tests the checkpoint threshold
 func TestWALShouldCheckpoint(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -494,6 +506,7 @@ func TestWALShouldCheckpoint(t *testing.T) {
 
 // TestWALHeaderFormat tests the exact WAL header format
 func TestWALHeaderFormat(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -541,6 +554,7 @@ func TestWALHeaderFormat(t *testing.T) {
 
 // TestWALFrameFormat tests the exact WAL frame format
 func TestWALFrameFormat(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 

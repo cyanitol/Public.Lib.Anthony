@@ -8,6 +8,7 @@ import (
 )
 
 func TestMemoryPagerPageLimit(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(4096)
 	if err != nil {
 		t.Fatalf("Failed to open memory pager: %v", err)
@@ -42,6 +43,7 @@ func TestMemoryPagerPageLimit(t *testing.T) {
 }
 
 func TestMemoryPagerPageLimitExceeded(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(4096)
 	if err != nil {
 		t.Fatalf("Failed to open memory pager: %v", err)
@@ -76,6 +78,7 @@ func TestMemoryPagerPageLimitExceeded(t *testing.T) {
 }
 
 func TestMemoryPagerPageLimitWithFreeList(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(4096)
 	if err != nil {
 		t.Fatalf("Failed to open memory pager: %v", err)
@@ -134,6 +137,7 @@ func TestMemoryPagerPageLimitWithFreeList(t *testing.T) {
 }
 
 func TestMemoryPagerSecurityLimitPreventsDOS(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(4096)
 	if err != nil {
 		t.Fatalf("Failed to open memory pager: %v", err)

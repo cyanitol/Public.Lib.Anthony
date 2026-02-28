@@ -9,6 +9,7 @@ import (
 
 // TestReadExistingDatabase tests reading an existing database
 func TestReadExistingDatabase(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_existing.db")
 
 	// Create database
@@ -58,6 +59,7 @@ func TestReadExistingDatabase(t *testing.T) {
 
 // TestPagerReadHeader tests reading database header
 func TestPagerReadHeader(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_read_header.db")
 
 	pager1, err := OpenWithPageSize(dbFile, false, 8192)
@@ -85,6 +87,7 @@ func TestPagerReadHeader(t *testing.T) {
 
 // TestPagerAcquireSharedLock tests shared lock acquisition path
 func TestPagerAcquireSharedLock(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -110,6 +113,7 @@ func TestPagerAcquireSharedLock(t *testing.T) {
 
 // TestPagerBeginWriteTransaction tests write transaction initialization
 func TestPagerBeginWriteTransaction(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_begin_write.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -136,6 +140,7 @@ func TestPagerBeginWriteTransaction(t *testing.T) {
 
 // TestPagerJournalPage tests journaling a page
 func TestPagerJournalPage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_journal_page.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -167,6 +172,7 @@ func TestPagerJournalPage(t *testing.T) {
 
 // TestPagerRollbackJournal tests journal rollback
 func TestPagerRollbackJournal(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_rollback_journal.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -234,6 +240,7 @@ func TestPagerRollbackJournal(t *testing.T) {
 
 // TestPagerFinalizeJournal tests journal finalization
 func TestPagerFinalizeJournal(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_finalize.db")
 	journalFile := dbFile + "-journal"
 
@@ -266,6 +273,7 @@ func TestPagerFinalizeJournal(t *testing.T) {
 
 // TestPagerUpdateDatabaseHeader tests database header updates
 func TestPagerUpdateDatabaseHeader(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_update_header.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -327,6 +335,7 @@ func TestPagerUpdateDatabaseHeader(t *testing.T) {
 
 // TestFreeListAllocateFromDisk tests allocation from disk-based freelist
 func TestFreeListAllocateFromDisk(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -373,6 +382,7 @@ func TestFreeListAllocateFromDisk(t *testing.T) {
 
 // TestFreeListCreateNewTrunk tests creating new trunk pages
 func TestFreeListCreateNewTrunk(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -416,6 +426,7 @@ func TestFreeListCreateNewTrunk(t *testing.T) {
 
 // TestTransactionGetTransactionState tests transaction state retrieval
 func TestTransactionGetTransactionState(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_txn_state.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -444,6 +455,7 @@ func TestTransactionGetTransactionState(t *testing.T) {
 
 // TestTransactionSetJournalMode tests journal mode transitions
 func TestTransactionSetJournalMode(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_journal_mode.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -465,6 +477,7 @@ func TestTransactionSetJournalMode(t *testing.T) {
 
 // TestTransactionIsAutoVacuum tests auto-vacuum detection
 func TestTransactionIsAutoVacuum(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_auto_vacuum.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -479,6 +492,7 @@ func TestTransactionIsAutoVacuum(t *testing.T) {
 
 // TestTransactionGetOriginalPageCount tests original page count retrieval
 func TestTransactionGetOriginalPageCount(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_orig_count.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -510,6 +524,7 @@ func TestTransactionGetOriginalPageCount(t *testing.T) {
 
 // TestCacheModeOperations tests cache mode get/set
 func TestCacheModeOperations(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_cache_mode.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -533,6 +548,7 @@ func TestCacheModeOperations(t *testing.T) {
 
 // TestCacheEvictOperations tests cache eviction
 func TestCacheEvictOperations(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_cache_evict.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)

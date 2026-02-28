@@ -5,6 +5,7 @@ import (
 )
 
 func TestMemoryPagerOpen(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(DefaultPageSize)
 	if err != nil {
 		t.Fatalf("failed to open memory pager: %v", err)
@@ -21,6 +22,7 @@ func TestMemoryPagerOpen(t *testing.T) {
 }
 
 func TestMemoryPagerGetPage(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(DefaultPageSize)
 	if err != nil {
 		t.Fatalf("failed to open memory pager: %v", err)
@@ -46,6 +48,7 @@ func TestMemoryPagerGetPage(t *testing.T) {
 }
 
 func TestMemoryPagerAllocate(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(DefaultPageSize)
 	if err != nil {
 		t.Fatalf("failed to open memory pager: %v", err)
@@ -68,6 +71,7 @@ func TestMemoryPagerAllocate(t *testing.T) {
 }
 
 func TestMemoryPagerWriteAndRead(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(DefaultPageSize)
 	if err != nil {
 		t.Fatalf("failed to open memory pager: %v", err)
@@ -116,6 +120,7 @@ func TestMemoryPagerWriteAndRead(t *testing.T) {
 }
 
 func TestMemoryPagerTransaction(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(DefaultPageSize)
 	if err != nil {
 		t.Fatalf("failed to open memory pager: %v", err)
@@ -177,6 +182,7 @@ func TestMemoryPagerTransaction(t *testing.T) {
 }
 
 func TestMemoryPagerSavepoint(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(DefaultPageSize)
 	if err != nil {
 		t.Fatalf("failed to open memory pager: %v", err)
@@ -244,6 +250,7 @@ func TestMemoryPagerSavepoint(t *testing.T) {
 }
 
 func TestMemoryPagerFreePage(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(DefaultPageSize)
 	if err != nil {
 		t.Fatalf("failed to open memory pager: %v", err)
@@ -281,6 +288,7 @@ func TestMemoryPagerFreePage(t *testing.T) {
 }
 
 func TestMemoryPagerMultiplePages(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(DefaultPageSize)
 	if err != nil {
 		t.Fatalf("failed to open memory pager: %v", err)
@@ -319,6 +327,7 @@ func TestMemoryPagerMultiplePages(t *testing.T) {
 }
 
 func TestMemoryPagerInvalidPageSize(t *testing.T) {
+	t.Parallel()
 	// Test invalid page sizes
 	invalidSizes := []int{0, 256, 513, 100000}
 
@@ -331,6 +340,7 @@ func TestMemoryPagerInvalidPageSize(t *testing.T) {
 }
 
 func TestMemoryPagerReadOnly(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(DefaultPageSize)
 	if err != nil {
 		t.Fatalf("failed to open memory pager: %v", err)
@@ -343,6 +353,7 @@ func TestMemoryPagerReadOnly(t *testing.T) {
 }
 
 func TestMemoryPagerClose(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(DefaultPageSize)
 	if err != nil {
 		t.Fatalf("failed to open memory pager: %v", err)
@@ -377,6 +388,7 @@ func TestMemoryPagerClose(t *testing.T) {
 }
 
 func TestMemoryPagerInterface(t *testing.T) {
+	t.Parallel()
 	// Verify MemoryPager implements PagerInterface
 	var _ PagerInterface = (*MemoryPager)(nil)
 

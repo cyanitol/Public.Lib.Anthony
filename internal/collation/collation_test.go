@@ -6,6 +6,7 @@ import (
 )
 
 func TestNewCollationRegistry(t *testing.T) {
+	t.Parallel()
 	cr := NewCollationRegistry()
 	if cr == nil {
 		t.Fatal("NewCollationRegistry() returned nil")
@@ -14,6 +15,7 @@ func TestNewCollationRegistry(t *testing.T) {
 	// Check built-in collations are registered
 	builtins := []string{"BINARY", "NOCASE", "RTRIM"}
 	for _, name := range builtins {
+		name := name
 		if _, ok := cr.Get(name); !ok {
 			t.Errorf("Built-in collation %q not registered", name)
 		}
@@ -21,6 +23,7 @@ func TestNewCollationRegistry(t *testing.T) {
 }
 
 func TestGlobalRegistry(t *testing.T) {
+	t.Parallel()
 	gr := GlobalRegistry()
 	if gr == nil {
 		t.Fatal("GlobalRegistry() returned nil")
@@ -33,6 +36,7 @@ func TestGlobalRegistry(t *testing.T) {
 }
 
 func TestRegisterCollation(t *testing.T) {
+	t.Parallel()
 	cr := NewCollationRegistry()
 
 	// Register custom collation
@@ -62,6 +66,7 @@ func TestRegisterCollation(t *testing.T) {
 }
 
 func TestRegisterErrors(t *testing.T) {
+	t.Parallel()
 	cr := NewCollationRegistry()
 
 	tests := []struct {
@@ -76,7 +81,9 @@ func TestRegisterErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			err := cr.Register(tt.colName, tt.fn)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Register() error = %v, wantErr %v", err, tt.wantErr)
@@ -86,6 +93,7 @@ func TestRegisterErrors(t *testing.T) {
 }
 
 func TestUnregisterCollation(t *testing.T) {
+	t.Parallel()
 	cr := NewCollationRegistry()
 
 	// Register custom collation
@@ -107,11 +115,14 @@ func TestUnregisterCollation(t *testing.T) {
 }
 
 func TestUnregisterBuiltinProtection(t *testing.T) {
+	t.Parallel()
 	cr := NewCollationRegistry()
 
 	builtins := []string{"BINARY", "NOCASE", "RTRIM"}
 	for _, name := range builtins {
+		name := name
 		t.Run(name, func(t *testing.T) {
+				t.Parallel()
 			err := cr.Unregister(name)
 			if err == nil {
 				t.Errorf("Unregister(%q) should error for built-in collation", name)
@@ -126,6 +137,7 @@ func TestUnregisterBuiltinProtection(t *testing.T) {
 }
 
 func TestListCollations(t *testing.T) {
+	t.Parallel()
 	cr := NewCollationRegistry()
 
 	// Should have at least the 3 built-in collations
@@ -137,11 +149,13 @@ func TestListCollations(t *testing.T) {
 	// Check for built-ins
 	found := make(map[string]bool)
 	for _, name := range names {
+		name := name
 		found[name] = true
 	}
 
 	builtins := []string{"BINARY", "NOCASE", "RTRIM"}
 	for _, name := range builtins {
+		name := name
 		if !found[name] {
 			t.Errorf("List() missing built-in collation %q", name)
 		}
@@ -149,6 +163,7 @@ func TestListCollations(t *testing.T) {
 }
 
 func TestGetCollation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		colName string
@@ -161,7 +176,9 @@ func TestGetCollation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			coll, ok := GetCollation(tt.colName)
 			if ok != tt.wantOk {
 				t.Errorf("GetCollation(%q) ok = %v, want %v", tt.colName, ok, tt.wantOk)
@@ -174,6 +191,7 @@ func TestGetCollation(t *testing.T) {
 }
 
 func TestCompare(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		a, b      string
@@ -206,7 +224,9 @@ func TestCompare(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := Compare(tt.a, tt.b, tt.collation)
 			// Check sign of result
 			if (result < 0) != (tt.want < 0) || (result > 0) != (tt.want > 0) || (result == 0) != (tt.want == 0) {
@@ -217,6 +237,7 @@ func TestCompare(t *testing.T) {
 }
 
 func TestCompareBytes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		a, b      []byte
@@ -229,7 +250,9 @@ func TestCompareBytes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := CompareBytes(tt.a, tt.b, tt.collation)
 			if (result < 0) != (tt.want < 0) || (result > 0) != (tt.want > 0) || (result == 0) != (tt.want == 0) {
 				t.Errorf("CompareBytes(%q, %q, %q) = %d, want %d", tt.a, tt.b, tt.collation, result, tt.want)
@@ -239,6 +262,7 @@ func TestCompareBytes(t *testing.T) {
 }
 
 func TestGetCollationFunc(t *testing.T) {
+	t.Parallel()
 	fn := GetCollationFunc("BINARY")
 	if fn == nil {
 		t.Error("GetCollationFunc(BINARY) returned nil")
@@ -258,6 +282,7 @@ func TestGetCollationFunc(t *testing.T) {
 }
 
 func TestDefaultCollation(t *testing.T) {
+	t.Parallel()
 	def := DefaultCollation()
 	if def != "BINARY" {
 		t.Errorf("DefaultCollation() = %q, want %q", def, "BINARY")
@@ -265,6 +290,7 @@ func TestDefaultCollation(t *testing.T) {
 }
 
 func TestCompareFallback(t *testing.T) {
+	t.Parallel()
 	// Compare with nonexistent collation should fall back to BINARY
 	result := Compare("Hello", "hello", "NONEXISTENT")
 	if result >= 0 {
@@ -273,6 +299,7 @@ func TestCompareFallback(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	cr := NewCollationRegistry()
 
 	// Test concurrent reads and writes

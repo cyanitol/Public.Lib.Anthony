@@ -85,6 +85,7 @@ func verifyPageInDatabase(t *testing.T, dbFile string, pageNum Pgno, expectedCon
 // Basic checkpoint mode tests
 
 func TestCheckpointMode_Constants(t *testing.T) {
+	t.Parallel()
 	// Verify checkpoint mode constants are distinct
 	modes := []CheckpointMode{
 		CheckpointPassive,
@@ -117,6 +118,7 @@ func TestCheckpointMode_Constants(t *testing.T) {
 }
 
 func TestCheckpointPassive_EmptyWAL(t *testing.T) {
+	t.Parallel()
 	wal, _ := createTestWALForCheckpoint(t)
 	defer wal.Close()
 
@@ -135,6 +137,7 @@ func TestCheckpointPassive_EmptyWAL(t *testing.T) {
 }
 
 func TestCheckpointPassive_SingleFrame(t *testing.T) {
+	t.Parallel()
 	wal, dbFile := createTestWALForCheckpoint(t)
 	defer wal.Close()
 
@@ -162,6 +165,7 @@ func TestCheckpointPassive_SingleFrame(t *testing.T) {
 }
 
 func TestCheckpointPassive_MultipleFrames(t *testing.T) {
+	t.Parallel()
 	wal, dbFile := createTestWALForCheckpoint(t)
 	defer wal.Close()
 
@@ -188,6 +192,7 @@ func TestCheckpointPassive_MultipleFrames(t *testing.T) {
 }
 
 func TestCheckpointFull_SingleFrame(t *testing.T) {
+	t.Parallel()
 	wal, dbFile := createTestWALForCheckpoint(t)
 	defer wal.Close()
 
@@ -210,6 +215,7 @@ func TestCheckpointFull_SingleFrame(t *testing.T) {
 }
 
 func TestCheckpointFull_MultipleFrames(t *testing.T) {
+	t.Parallel()
 	wal, dbFile := createTestWALForCheckpoint(t)
 	defer wal.Close()
 
@@ -236,6 +242,7 @@ func TestCheckpointFull_MultipleFrames(t *testing.T) {
 }
 
 func TestCheckpointRestart_ResetsWAL(t *testing.T) {
+	t.Parallel()
 	wal, dbFile := createTestWALForCheckpoint(t)
 	defer wal.Close()
 
@@ -291,6 +298,7 @@ func TestCheckpointRestart_ResetsWAL(t *testing.T) {
 }
 
 func TestCheckpointTruncate_RemovesWAL(t *testing.T) {
+	t.Parallel()
 	wal, dbFile := createTestWALForCheckpoint(t)
 	walFilename := wal.filename
 
@@ -341,6 +349,7 @@ func TestCheckpointTruncate_RemovesWAL(t *testing.T) {
 }
 
 func TestCheckpointInvalidMode(t *testing.T) {
+	t.Parallel()
 	wal, _ := createTestWALForCheckpoint(t)
 	defer wal.Close()
 
@@ -354,6 +363,7 @@ func TestCheckpointInvalidMode(t *testing.T) {
 // Test checkpointing with updated pages
 
 func TestCheckpoint_UpdatedPages(t *testing.T) {
+	t.Parallel()
 	wal, dbFile := createTestWALForCheckpoint(t)
 	defer wal.Close()
 
@@ -386,6 +396,7 @@ func TestCheckpoint_UpdatedPages(t *testing.T) {
 // Test CheckpointWithInfo
 
 func TestCheckpointWithInfo_Passive(t *testing.T) {
+	t.Parallel()
 	wal, _ := createTestWALForCheckpoint(t)
 	defer wal.Close()
 
@@ -417,6 +428,7 @@ func TestCheckpointWithInfo_Passive(t *testing.T) {
 }
 
 func TestCheckpointWithInfo_Restart(t *testing.T) {
+	t.Parallel()
 	wal, _ := createTestWALForCheckpoint(t)
 	defer wal.Close()
 
@@ -447,6 +459,7 @@ func TestCheckpointWithInfo_Restart(t *testing.T) {
 }
 
 func TestCheckpointWithInfo_Truncate(t *testing.T) {
+	t.Parallel()
 	wal, _ := createTestWALForCheckpoint(t)
 	defer wal.Close()
 
@@ -478,6 +491,7 @@ func TestCheckpointWithInfo_Truncate(t *testing.T) {
 // Test reopening after checkpoint
 
 func TestCheckpoint_ReopenAfterRestart(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -532,6 +546,11 @@ func TestCheckpoint_ReopenAfterRestart(t *testing.T) {
 // Test large WAL checkpoint
 
 func TestCheckpoint_LargeWAL(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("skipping slow test in short mode")
+	}
+
 	wal, dbFile := createTestWALForCheckpoint(t)
 	defer wal.Close()
 

@@ -402,7 +402,9 @@ func TestSQLitePragma(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Cleanup
 			_, _ = db.Exec("DROP TABLE IF EXISTS t1")
 			_, _ = db.Exec("DROP TABLE IF EXISTS parent")
@@ -480,6 +482,7 @@ func TestPragmaSchemaQueries(t *testing.T) {
 	}
 
 	t.Run("table_info", func(t *testing.T) {
+		t.Parallel()
 		rows, err := db.Query("PRAGMA table_info(users)")
 		if err != nil {
 			t.Fatalf("query failed: %v", err)
@@ -506,6 +509,7 @@ func TestPragmaSchemaQueries(t *testing.T) {
 	})
 
 	t.Run("index_list", func(t *testing.T) {
+		t.Parallel()
 		rows, err := db.Query("PRAGMA index_list(users)")
 		if err != nil {
 			t.Fatalf("query failed: %v", err)
@@ -525,6 +529,7 @@ func TestPragmaSchemaQueries(t *testing.T) {
 	})
 
 	t.Run("index_info", func(t *testing.T) {
+		t.Parallel()
 		rows, err := db.Query("PRAGMA index_info(idx_users_name)")
 		if err != nil {
 			t.Fatalf("query failed: %v", err)
@@ -565,6 +570,7 @@ func TestPragmaIntegrityCheck(t *testing.T) {
 	}
 
 	t.Run("integrity_check", func(t *testing.T) {
+		t.Parallel()
 		var result string
 		err := db.QueryRow("PRAGMA integrity_check").Scan(&result)
 		if err != nil {
@@ -577,6 +583,7 @@ func TestPragmaIntegrityCheck(t *testing.T) {
 	})
 
 	t.Run("quick_check", func(t *testing.T) {
+		t.Parallel()
 		var result string
 		err := db.QueryRow("PRAGMA quick_check").Scan(&result)
 		if err != nil {
@@ -603,7 +610,9 @@ func TestPragmaJournalModeSwitch(t *testing.T) {
 	modes := []string{"DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL"}
 
 	for _, mode := range modes {
+		mode := mode  // Capture range variable
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
 			var result string
 			query := "PRAGMA journal_mode=" + mode
 			err := db.QueryRow(query).Scan(&result)

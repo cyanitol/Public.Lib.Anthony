@@ -6,6 +6,7 @@ import (
 
 // TestExecFunctionCoverage tests the execFunction opcode (0% coverage)
 func TestExecFunctionCoverage(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(20)
 
 	// Set up function context (uses default registry with built-in functions)
@@ -42,6 +43,7 @@ func TestExecFunctionCoverage(t *testing.T) {
 
 // TestExecAggStepWindowCoverage tests the execAggStepWindow opcode (0% coverage)
 func TestExecAggStepWindowCoverage(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(20)
 	v.funcCtx = NewFunctionContext()
 	v.WindowStates = make(map[int]*WindowState)
@@ -88,6 +90,7 @@ func TestExecAggStepWindowCoverage(t *testing.T) {
 
 // TestDecodeInt48ValueCoverage tests decodeInt48Value (0% coverage)
 func TestDecodeInt48ValueCoverage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		data     []byte
@@ -121,7 +124,9 @@ func TestDecodeInt48ValueCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			result, err := decodeInt48Value(tt.data, tt.offset)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
@@ -135,7 +140,9 @@ func TestDecodeInt48ValueCoverage(t *testing.T) {
 
 // TestSorterRewindCoverage tests Sorter.Rewind (0% coverage)
 func TestSorterRewindCoverage(t *testing.T) {
+	t.Parallel()
 	t.Run("EmptySorter", func(t *testing.T) {
+		t.Parallel()
 		sorter := NewSorter(nil, nil, nil, 0)
 		hasRows := sorter.Rewind()
 		if hasRows {
@@ -147,6 +154,7 @@ func TestSorterRewindCoverage(t *testing.T) {
 	})
 
 	t.Run("SorterWithRows", func(t *testing.T) {
+		t.Parallel()
 		sorter := NewSorter(nil, nil, nil, 0)
 		row1 := []*Mem{NewMemInt(1)}
 		row2 := []*Mem{NewMemInt(2)}
@@ -169,7 +177,9 @@ func TestSorterRewindCoverage(t *testing.T) {
 
 // TestExecDeleteComprehensive tests execDelete with more coverage (28.6% -> higher)
 func TestExecDeleteComprehensive(t *testing.T) {
+	t.Parallel()
 	t.Run("DeleteNoCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(20)
 		v.AllocCursors(5)
 
@@ -185,6 +195,7 @@ func TestExecDeleteComprehensive(t *testing.T) {
 	})
 
 	t.Run("DeleteNotWritableCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(20)
 		v.AllocCursors(5)
 
@@ -207,6 +218,7 @@ func TestExecDeleteComprehensive(t *testing.T) {
 	})
 
 	t.Run("DeleteInvalidBtreeCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(20)
 		v.AllocCursors(5)
 
@@ -232,7 +244,9 @@ func TestExecDeleteComprehensive(t *testing.T) {
 
 // TestSeekGEAndLEComprehensive tests SeekGE and SeekLE (33.3% -> higher)
 func TestSeekGEAndLEComprehensive(t *testing.T) {
+	t.Parallel()
 	t.Run("SeekGE_Basic", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(20)
 		v.AllocCursors(5)
 
@@ -268,6 +282,7 @@ func TestSeekGEAndLEComprehensive(t *testing.T) {
 	})
 
 	t.Run("SeekGE_ErrorNoCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(20)
 		v.AllocCursors(5)
 
@@ -289,6 +304,7 @@ func TestSeekGEAndLEComprehensive(t *testing.T) {
 	})
 
 	t.Run("SeekLE_Basic", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(20)
 		v.AllocCursors(5)
 
@@ -324,6 +340,7 @@ func TestSeekGEAndLEComprehensive(t *testing.T) {
 	})
 
 	t.Run("SeekLE_ErrorNoCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(20)
 		v.AllocCursors(5)
 

@@ -6,7 +6,9 @@ import (
 
 // TestMemRealify tests Realify function (66.7% coverage)
 func TestMemRealify(t *testing.T) {
+	t.Parallel()
 	t.Run("IntToReal", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemInt(42)
 		err := mem.Realify()
 		if err != nil {
@@ -21,6 +23,7 @@ func TestMemRealify(t *testing.T) {
 	})
 
 	t.Run("StringToReal", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemStr("3.14")
 		err := mem.Realify()
 		if err != nil {
@@ -32,6 +35,7 @@ func TestMemRealify(t *testing.T) {
 	})
 
 	t.Run("RealNoOp", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemReal(2.5)
 		err := mem.Realify()
 		if err != nil {
@@ -45,7 +49,9 @@ func TestMemRealify(t *testing.T) {
 
 // TestMemIntegerify tests Integerify function (72.7% coverage)
 func TestMemIntegerify(t *testing.T) {
+	t.Parallel()
 	t.Run("RealToInt", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemReal(42.7)
 		err := mem.Integerify()
 		if err != nil {
@@ -60,6 +66,7 @@ func TestMemIntegerify(t *testing.T) {
 	})
 
 	t.Run("StringToInt", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemStr("123")
 		err := mem.Integerify()
 		if err != nil {
@@ -74,6 +81,7 @@ func TestMemIntegerify(t *testing.T) {
 	})
 
 	t.Run("IntNoOp", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemInt(99)
 		err := mem.Integerify()
 		if err != nil {
@@ -87,7 +95,9 @@ func TestMemIntegerify(t *testing.T) {
 
 // TestExecBitNot tests execBitNot function (66.7% coverage)
 func TestExecBitNot(t *testing.T) {
+	t.Parallel()
 	t.Run("BitNotInt", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetInt(5) // Binary: 0101
 
@@ -104,6 +114,7 @@ func TestExecBitNot(t *testing.T) {
 	})
 
 	t.Run("BitNotZero", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetInt(0)
 
@@ -119,6 +130,7 @@ func TestExecBitNot(t *testing.T) {
 	})
 
 	t.Run("BitNotNull", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetNull()
 
@@ -136,7 +148,9 @@ func TestExecBitNot(t *testing.T) {
 
 // TestExecBitOr tests execBitOr function (68.8% coverage)
 func TestExecBitOr(t *testing.T) {
+	t.Parallel()
 	t.Run("BitOrInts", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetInt(12) // Binary: 1100
 		v.Mem[1].SetInt(10) // Binary: 1010
@@ -155,6 +169,7 @@ func TestExecBitOr(t *testing.T) {
 	})
 
 	t.Run("BitOrWithNull", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetInt(5)
 		v.Mem[1].SetNull()
@@ -177,6 +192,7 @@ func TestExecBitOr(t *testing.T) {
 
 // TestMemToValue tests memToValue function (72.7% coverage)
 func TestMemToValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		mem      *Mem
@@ -205,7 +221,9 @@ func TestMemToValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			val := memToValue(tt.mem)
 			if tt.wantType == "nil" {
 				if val != nil {
@@ -222,6 +240,7 @@ func TestMemToValue(t *testing.T) {
 
 // TestGetVarintGeneral tests getVarintGeneral function (70% coverage)
 func TestGetVarintGeneral(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		data    []byte
@@ -260,7 +279,9 @@ func TestGetVarintGeneral(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			val, n := getVarintGeneral(tt.data, tt.offset)
 			if tt.wantErr {
 				if n > 0 {
@@ -282,6 +303,7 @@ func TestGetVarintGeneral(t *testing.T) {
 
 // TestDecodeIntValue tests decodeIntValue function (71.4% coverage)
 func TestDecodeIntValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		data   []byte
@@ -320,7 +342,9 @@ func TestDecodeIntValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got, err := decodeIntValue(tt.data, tt.offset, tt.st)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
@@ -334,7 +358,9 @@ func TestDecodeIntValue(t *testing.T) {
 
 // TestExecGoto tests execGoto function (75% coverage)
 func TestExecGoto(t *testing.T) {
+	t.Parallel()
 	t.Run("UnconditionalJump", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		// Add enough instructions to make jump valid
 		for i := 0; i < 25; i++ {
@@ -356,7 +382,9 @@ func TestExecGoto(t *testing.T) {
 
 // TestExecBlob tests execBlob function (75% coverage)
 func TestExecBlob(t *testing.T) {
+	t.Parallel()
 	t.Run("SetBlobFromP4", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		data := []byte{1, 2, 3, 4, 5}
 
@@ -386,7 +414,9 @@ func TestExecBlob(t *testing.T) {
 
 // TestExecMove tests execMove function (75% coverage)
 func TestExecMove(t *testing.T) {
+	t.Parallel()
 	t.Run("MoveMultipleRegisters", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.Mem[0].SetInt(1)
 		v.Mem[1].SetInt(2)
@@ -413,7 +443,9 @@ func TestExecMove(t *testing.T) {
 
 // TestExecSCopy tests execSCopy function (75% coverage)
 func TestExecSCopy(t *testing.T) {
+	t.Parallel()
 	t.Run("ShallowCopy", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetStr("test string")
 
@@ -431,7 +463,9 @@ func TestExecSCopy(t *testing.T) {
 
 // TestExecVerifyCookie tests execVerifyCookie function (75% coverage)
 func TestExecVerifyCookie(t *testing.T) {
+	t.Parallel()
 	t.Run("NoPager", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		// No context set
 

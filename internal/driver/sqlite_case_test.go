@@ -264,7 +264,9 @@ func TestSQLiteCaseExpressions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Create a fresh database for each test to avoid state leakage
 			db := setupCaseTestDB(t)
 			defer db.Close()
@@ -362,7 +364,9 @@ func TestSQLiteCaseInSelectList(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			rows, err := db.Query(tt.query)
 			if err != nil {
 				t.Fatalf("query failed: %v", err)
@@ -445,7 +449,9 @@ func TestSQLiteCaseInWhereClause(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			rows, err := db.Query(tt.query)
 			if err != nil {
 				t.Fatalf("query failed: %v", err)
@@ -519,7 +525,9 @@ func TestSQLiteCaseInOrderBy(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			rows, err := db.Query(tt.query)
 			if err != nil {
 				t.Fatalf("query failed: %v", err)
@@ -607,7 +615,9 @@ func TestSQLiteCaseWithAggregates(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Check if we expect multiple rows
 			if slice, ok := tt.want.([]interface{}); ok {
 				rows, err := db.Query(tt.query)
@@ -725,7 +735,9 @@ func TestSQLiteCaseNullHandling(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var result interface{}
 			err := db.QueryRow(tt.query).Scan(&result)
 			if err != nil {
@@ -766,7 +778,9 @@ func TestSQLiteCaseSyntaxErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := db.Query(tt.query)
 			if err == nil {
 				t.Errorf("expected syntax error, got none")

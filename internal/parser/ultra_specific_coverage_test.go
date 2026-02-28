@@ -7,6 +7,7 @@ import (
 // Ultra-specific tests for remaining uncovered paths
 
 func TestParseIdentExprWithDot(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -22,7 +23,9 @@ func TestParseIdentExprWithDot(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if err != nil {
@@ -33,6 +36,7 @@ func TestParseIdentExprWithDot(t *testing.T) {
 }
 
 func TestParseTableStarColumn(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -48,7 +52,9 @@ func TestParseTableStarColumn(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if err != nil {
@@ -59,6 +65,7 @@ func TestParseTableStarColumn(t *testing.T) {
 }
 
 func TestParseSubqueryInFrom(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -77,7 +84,9 @@ func TestParseSubqueryInFrom(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -88,6 +97,7 @@ func TestParseSubqueryInFrom(t *testing.T) {
 }
 
 func TestParseOrderByWithDirection(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -107,7 +117,9 @@ func TestParseOrderByWithDirection(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if err != nil {
@@ -118,6 +130,7 @@ func TestParseOrderByWithDirection(t *testing.T) {
 }
 
 func TestParseIndexedColumn(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -133,7 +146,9 @@ func TestParseIndexedColumn(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if err != nil {
@@ -144,6 +159,7 @@ func TestParseIndexedColumn(t *testing.T) {
 }
 
 func TestParseColumnConstraintPrimaryKey(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -163,7 +179,9 @@ func TestParseColumnConstraintPrimaryKey(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if err != nil {
@@ -174,6 +192,7 @@ func TestParseColumnConstraintPrimaryKey(t *testing.T) {
 }
 
 func TestParseExpressionInParen(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -189,7 +208,9 @@ func TestParseExpressionInParen(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if err != nil {
@@ -200,6 +221,7 @@ func TestParseExpressionInParen(t *testing.T) {
 }
 
 func TestParseMultiplicativeOperators(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -223,7 +245,9 @@ func TestParseMultiplicativeOperators(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if err != nil {
@@ -234,6 +258,7 @@ func TestParseMultiplicativeOperators(t *testing.T) {
 }
 
 func TestParseAdditiveOperators(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -253,7 +278,9 @@ func TestParseAdditiveOperators(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if err != nil {
@@ -264,6 +291,7 @@ func TestParseAdditiveOperators(t *testing.T) {
 }
 
 func TestParseComparisonOperators(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -299,7 +327,9 @@ func TestParseComparisonOperators(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if err != nil {
@@ -310,6 +340,7 @@ func TestParseComparisonOperators(t *testing.T) {
 }
 
 func TestParseIsExpressions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -333,7 +364,9 @@ func TestParseIsExpressions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if err != nil {
@@ -345,6 +378,7 @@ func TestParseIsExpressions(t *testing.T) {
 
 
 func TestParseExplainVariants(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -360,7 +394,9 @@ func TestParseExplainVariants(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if err != nil {
@@ -371,6 +407,7 @@ func TestParseExplainVariants(t *testing.T) {
 }
 
 func TestParseTransactionStatements(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -402,7 +439,9 @@ func TestParseTransactionStatements(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if err != nil {
@@ -413,6 +452,7 @@ func TestParseTransactionStatements(t *testing.T) {
 }
 
 func TestParseAttachDetach(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -436,7 +476,9 @@ func TestParseAttachDetach(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if err != nil {

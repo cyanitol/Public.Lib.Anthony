@@ -20,6 +20,7 @@ func TestSQLiteReindex(t *testing.T) {
 
 	// Test 1: Basic sanity checks (reindex-1.1-1.8)
 	t.Run("basic_reindex", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t1(a, b);
 			INSERT INTO t1 VALUES(1, 2);
@@ -72,6 +73,7 @@ func TestSQLiteReindex(t *testing.T) {
 
 	// Test 2: REINDEX on non-existent object
 	t.Run("reindex_bogus", func(t *testing.T) {
+		t.Parallel()
 		_, err := db.Exec("REINDEX bogus")
 		if err == nil {
 			t.Error("expected error for REINDEX on non-existent object")
@@ -80,6 +82,7 @@ func TestSQLiteReindex(t *testing.T) {
 
 	// Test 3: Verify data after reindex
 	t.Run("verify_data_after_reindex", func(t *testing.T) {
+		t.Parallel()
 		var results []int
 		rows, err := db.Query("SELECT a FROM t1 ORDER BY a")
 		if err != nil {
@@ -123,6 +126,7 @@ func TestReindexWithCollation(t *testing.T) {
 	defer db.Close()
 
 	t.Run("reindex_nocase_collation", func(t *testing.T) {
+		t.Parallel()
 		// Create table with NOCASE collation
 		_, err := db.Exec(`
 			CREATE TABLE t2(
@@ -181,6 +185,7 @@ func TestReindexMultipleIndexes(t *testing.T) {
 	defer db.Close()
 
 	t.Run("multiple_indexes", func(t *testing.T) {
+		t.Parallel()
 		// Create table with multiple indexes
 		_, err := db.Exec(`
 			CREATE TABLE t3(id INTEGER PRIMARY KEY, name TEXT, age INTEGER);
@@ -237,6 +242,7 @@ func TestReindexAfterInsert(t *testing.T) {
 	defer db.Close()
 
 	t.Run("reindex_after_bulk_insert", func(t *testing.T) {
+		t.Parallel()
 		// Create table and index
 		_, err := db.Exec(`
 			CREATE TABLE t4(value INTEGER);
@@ -296,6 +302,7 @@ func TestReindexWithoutRowid(t *testing.T) {
 	defer db.Close()
 
 	t.Run("without_rowid_desc", func(t *testing.T) {
+		t.Parallel()
 		// Create WITHOUT ROWID table with DESC primary key
 		_, err := db.Exec(`
 			CREATE TABLE t5(
@@ -379,6 +386,7 @@ func TestReindexPartialIndex(t *testing.T) {
 	defer db.Close()
 
 	t.Run("partial_index", func(t *testing.T) {
+		t.Parallel()
 		// Create table with partial index
 		_, err := db.Exec(`
 			CREATE TABLE t6(id INTEGER, status TEXT);
@@ -424,6 +432,7 @@ func TestReindexCompositeIndex(t *testing.T) {
 	defer db.Close()
 
 	t.Run("composite_index", func(t *testing.T) {
+		t.Parallel()
 		// Create table with composite index
 		_, err := db.Exec(`
 			CREATE TABLE t7(a INTEGER, b INTEGER, c TEXT);
@@ -474,6 +483,7 @@ func TestReindexAfterUpdate(t *testing.T) {
 	defer db.Close()
 
 	t.Run("reindex_after_update", func(t *testing.T) {
+		t.Parallel()
 		// Create table
 		_, err := db.Exec(`
 			CREATE TABLE t8(id INTEGER PRIMARY KEY, value TEXT);
@@ -523,6 +533,7 @@ func TestReindexAfterDelete(t *testing.T) {
 	defer db.Close()
 
 	t.Run("reindex_after_delete", func(t *testing.T) {
+		t.Parallel()
 		// Create table
 		_, err := db.Exec(`
 			CREATE TABLE t9(id INTEGER PRIMARY KEY, value INTEGER);
@@ -576,6 +587,7 @@ func TestReindexEmptyTable(t *testing.T) {
 	defer db.Close()
 
 	t.Run("empty_table", func(t *testing.T) {
+		t.Parallel()
 		// Create empty table with index
 		_, err := db.Exec(`
 			CREATE TABLE t10(id INTEGER PRIMARY KEY, data TEXT);

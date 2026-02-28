@@ -7,6 +7,7 @@ import (
 
 // TestParseSerialValue tests parseSerialValue function (30% coverage)
 func TestParseSerialValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		serialType uint64
@@ -146,7 +147,9 @@ func TestParseSerialValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			mem := NewMem()
 			err := parseSerialValue(tt.data, tt.offset, tt.serialType, mem)
 			if (err != nil) != tt.wantErr {
@@ -162,6 +165,7 @@ func TestParseSerialValue(t *testing.T) {
 
 // TestParseSerialInt tests parseSerialInt function (50% coverage)
 func TestParseSerialInt(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		serialType uint64
@@ -243,7 +247,9 @@ func TestParseSerialInt(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			mem := NewMem()
 			err := parseSerialInt(tt.data, tt.offset, tt.serialType, mem)
 			if (err != nil) != tt.wantErr {
@@ -259,7 +265,9 @@ func TestParseSerialInt(t *testing.T) {
 
 // TestGetColumnPayload tests getColumnPayload function (50% coverage)
 func TestGetColumnPayload(t *testing.T) {
+	t.Parallel()
 	t.Run("NullRow", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		cursor := &Cursor{NullRow: true}
 		dst := NewMem()
@@ -274,6 +282,7 @@ func TestGetColumnPayload(t *testing.T) {
 	})
 
 	t.Run("EOF", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		cursor := &Cursor{EOF: true}
 		dst := NewMem()
@@ -288,6 +297,7 @@ func TestGetColumnPayload(t *testing.T) {
 	})
 
 	t.Run("PseudoCursor_WithBlob", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.Mem[5].SetBlob([]byte{1, 2, 3, 4})
 
@@ -307,6 +317,7 @@ func TestGetColumnPayload(t *testing.T) {
 	})
 
 	t.Run("PseudoCursor_WithNull", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.Mem[5].SetNull()
 
@@ -326,6 +337,7 @@ func TestGetColumnPayload(t *testing.T) {
 	})
 
 	t.Run("PseudoCursor_WithNonBlob", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.Mem[5].SetInt(42)
 
@@ -347,7 +359,9 @@ func TestGetColumnPayload(t *testing.T) {
 
 // TestGetBtreeCursorPayload tests getBtreeCursorPayload function (62.5% coverage)
 func TestGetBtreeCursorPayload(t *testing.T) {
+	t.Parallel()
 	t.Run("NilBtreeCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		cursor := &Cursor{
 			CurType:      CursorBTree,
@@ -365,6 +379,7 @@ func TestGetBtreeCursorPayload(t *testing.T) {
 	})
 
 	t.Run("InvalidBtreeCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		cursor := &Cursor{
 			CurType:      CursorBTree,
@@ -384,7 +399,9 @@ func TestGetBtreeCursorPayload(t *testing.T) {
 
 // TestExecRowid tests execRowid function (57.9% coverage)
 func TestExecRowid(t *testing.T) {
+	t.Parallel()
 	t.Run("NullRow", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 		v.Cursors[0] = &Cursor{NullRow: true}
@@ -401,6 +418,7 @@ func TestExecRowid(t *testing.T) {
 	})
 
 	t.Run("EOF", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 		v.Cursors[0] = &Cursor{EOF: true}
@@ -417,6 +435,7 @@ func TestExecRowid(t *testing.T) {
 	})
 
 	t.Run("PseudoCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 		v.Cursors[0] = &Cursor{CurType: CursorPseudo}
@@ -433,6 +452,7 @@ func TestExecRowid(t *testing.T) {
 	})
 
 	t.Run("NilBtreeCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 		v.Cursors[0] = &Cursor{
@@ -452,6 +472,7 @@ func TestExecRowid(t *testing.T) {
 	})
 
 	t.Run("InvalidBtreeCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 		v.Cursors[0] = &Cursor{
@@ -473,7 +494,9 @@ func TestExecRowid(t *testing.T) {
 
 // TestParseRecordColumn tests parseRecordColumn function (65.2% coverage)
 func TestParseRecordColumn(t *testing.T) {
+	t.Parallel()
 	t.Run("TruncatedHeader", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMem()
 		// Header length says 5, but only 2 bytes provided
 		err := parseRecordColumn([]byte{5, 1}, 0, mem)
@@ -483,6 +506,7 @@ func TestParseRecordColumn(t *testing.T) {
 	})
 
 	t.Run("ValidColumn0_Null", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMem()
 		// Valid record: header length 2, serial type 0 (NULL)
 		payload := []byte{2, 0}
@@ -496,6 +520,7 @@ func TestParseRecordColumn(t *testing.T) {
 	})
 
 	t.Run("ValidColumn0_Int", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMem()
 		// Record: header length 2, serial type 1 (int8), value 42
 		payload := []byte{2, 1, 42}
@@ -509,6 +534,7 @@ func TestParseRecordColumn(t *testing.T) {
 	})
 
 	t.Run("MultiColumn_GetSecond", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMem()
 		// Record: header length 3, col0: serial type 8 (int 0), col1: serial type 1 (int8), value 99
 		payload := []byte{3, 8, 1, 99}
@@ -527,7 +553,9 @@ func TestParseRecordColumn(t *testing.T) {
 
 // TestExecDelete tests execDelete function (57.1% coverage)
 func TestExecDelete(t *testing.T) {
+	t.Parallel()
 	t.Run("InvalidCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 
@@ -539,6 +567,7 @@ func TestExecDelete(t *testing.T) {
 	})
 
 	t.Run("NilBtreeCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 		v.Cursors[0] = &Cursor{BtreeCursor: nil}
@@ -551,6 +580,7 @@ func TestExecDelete(t *testing.T) {
 	})
 
 	t.Run("InvalidBtreeCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 		v.Cursors[0] = &Cursor{BtreeCursor: "invalid"}
@@ -565,7 +595,9 @@ func TestExecDelete(t *testing.T) {
 
 // TestExecCommit tests execCommit function (50% coverage)
 func TestExecCommit(t *testing.T) {
+	t.Parallel()
 	t.Run("NoPager", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		// No context, no pager
 
@@ -577,6 +609,7 @@ func TestExecCommit(t *testing.T) {
 	})
 
 	t.Run("WithPager", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		mockPager := &MockTransactionPager{
 			inWriteTxn: true,
@@ -599,7 +632,9 @@ func TestExecCommit(t *testing.T) {
 
 // TestExtractKeyAsBlob tests extractKeyAsBlob function (33.3% coverage)
 func TestExtractKeyAsBlob(t *testing.T) {
+	t.Parallel()
 	t.Run("BlobMem", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemBlob([]byte{1, 2, 3, 4})
 		result := extractKeyAsBlob(mem)
 		if !bytes.Equal(result, []byte{1, 2, 3, 4}) {
@@ -608,6 +643,7 @@ func TestExtractKeyAsBlob(t *testing.T) {
 	})
 
 	t.Run("StringMem", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemStr("test")
 		result := extractKeyAsBlob(mem)
 		if !bytes.Equal(result, []byte("test")) {
@@ -616,6 +652,7 @@ func TestExtractKeyAsBlob(t *testing.T) {
 	})
 
 	t.Run("IntMem", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemInt(42)
 		result := extractKeyAsBlob(mem)
 		// Should stringify the int
@@ -630,7 +667,9 @@ func TestExtractKeyAsBlob(t *testing.T) {
 
 // TestExecIdxRowid tests execIdxRowid function (61.1% coverage)
 func TestExecIdxRowid(t *testing.T) {
+	t.Parallel()
 	t.Run("InvalidCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 
@@ -646,7 +685,9 @@ func TestExecIdxRowid(t *testing.T) {
 
 // TestExecDeferredSeek tests execDeferredSeek function (68.2% coverage)
 func TestExecDeferredSeek(t *testing.T) {
+	t.Parallel()
 	t.Run("InvalidCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 
@@ -661,7 +702,9 @@ func TestExecDeferredSeek(t *testing.T) {
 
 // TestExecPrev tests execPrev function (66.7% coverage)
 func TestExecPrev(t *testing.T) {
+	t.Parallel()
 	t.Run("InvalidCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 
@@ -676,7 +719,9 @@ func TestExecPrev(t *testing.T) {
 
 // TestExecStep tests Step function edge cases (66.7% coverage)
 func TestExecStep(t *testing.T) {
+	t.Parallel()
 	t.Run("HaltState", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.State = StateHalt
 
@@ -690,6 +735,7 @@ func TestExecStep(t *testing.T) {
 	})
 
 	t.Run("InitToReady", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.AddOp(OpHalt, 0, 0, 0)
 		v.State = StateInit
@@ -706,7 +752,9 @@ func TestExecStep(t *testing.T) {
 
 // TestExecInstruction tests execInstruction edge cases (66.7% coverage)
 func TestExecInstruction(t *testing.T) {
+	t.Parallel()
 	t.Run("UnknownOpcode", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		instr := &Instruction{Opcode: Opcode(255)} // Invalid opcode
 
@@ -719,7 +767,9 @@ func TestExecInstruction(t *testing.T) {
 
 // TestExecInit tests execInit edge cases (66.7% coverage)
 func TestExecInit(t *testing.T) {
+	t.Parallel()
 	t.Run("JumpToP2", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.PC = 0
 
@@ -737,7 +787,9 @@ func TestExecInit(t *testing.T) {
 
 // TestGetInsertPayload tests getInsertPayload function (66.7% coverage)
 func TestGetInsertPayload(t *testing.T) {
+	t.Parallel()
 	t.Run("InvalidRegister", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 
 		_, err := v.getInsertPayload(100) // Out of bounds
@@ -747,6 +799,7 @@ func TestGetInsertPayload(t *testing.T) {
 	})
 
 	t.Run("BlobRegister", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Mem[0].SetBlob([]byte{1, 2, 3, 4})
 
@@ -762,7 +815,9 @@ func TestGetInsertPayload(t *testing.T) {
 
 // TestGetSavepointPager tests getSavepointPager function (66.7% coverage)
 func TestGetSavepointPager(t *testing.T) {
+	t.Parallel()
 	t.Run("NoContext", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 
 		_, err := v.getSavepointPager()
@@ -772,6 +827,7 @@ func TestGetSavepointPager(t *testing.T) {
 	})
 
 	t.Run("NoPager", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.Ctx = &VDBEContext{}
 
@@ -785,7 +841,9 @@ func TestGetSavepointPager(t *testing.T) {
 
 // TestMemRealValue tests RealValue function (50% coverage)
 func TestMemRealValue(t *testing.T) {
+	t.Parallel()
 	t.Run("IntToReal", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemInt(42)
 		val := mem.RealValue()
 		if val != 42.0 {
@@ -794,6 +852,7 @@ func TestMemRealValue(t *testing.T) {
 	})
 
 	t.Run("StringToReal", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemStr("3.14")
 		val := mem.RealValue()
 		if val < 3.13 || val > 3.15 {
@@ -802,6 +861,7 @@ func TestMemRealValue(t *testing.T) {
 	})
 
 	t.Run("NullToReal", func(t *testing.T) {
+		t.Parallel()
 		mem := NewMemNull()
 		val := mem.RealValue()
 		if val != 0.0 {
@@ -812,7 +872,9 @@ func TestMemRealValue(t *testing.T) {
 
 // TestMemAdd tests Add function (50% coverage)
 func TestMemAdd(t *testing.T) {
+	t.Parallel()
 	t.Run("IntAdd", func(t *testing.T) {
+		t.Parallel()
 		a := NewMemInt(10)
 		b := NewMemInt(20)
 
@@ -826,6 +888,7 @@ func TestMemAdd(t *testing.T) {
 	})
 
 	t.Run("RealAdd", func(t *testing.T) {
+		t.Parallel()
 		a := NewMemReal(1.5)
 		b := NewMemReal(2.5)
 
@@ -841,6 +904,7 @@ func TestMemAdd(t *testing.T) {
 
 // TestWindowCurrentRow tests CurrentRow function (66.7% coverage)
 func TestWindowCurrentRow(t *testing.T) {
+	t.Parallel()
 	frame := DefaultWindowFrame()
 	ws := NewWindowState(nil, nil, nil, frame)
 
@@ -852,6 +916,7 @@ func TestWindowCurrentRow(t *testing.T) {
 
 // TestWindowGetPartitionSize tests GetPartitionSize function (66.7% coverage)
 func TestWindowGetPartitionSize(t *testing.T) {
+	t.Parallel()
 	frame := DefaultWindowFrame()
 	ws := NewWindowState(nil, nil, nil, frame)
 
@@ -863,6 +928,7 @@ func TestWindowGetPartitionSize(t *testing.T) {
 
 // TestCalculateFrameStart tests calculateFrameStart function (50% coverage)
 func TestCalculateFrameStart(t *testing.T) {
+	t.Parallel()
 	frame := DefaultWindowFrame()
 	ws := NewWindowState(nil, nil, nil, frame)
 	// Add some rows
@@ -878,6 +944,7 @@ func TestCalculateFrameStart(t *testing.T) {
 
 // TestCalculateFrameEnd tests calculateFrameEnd function (50% coverage)
 func TestCalculateFrameEnd(t *testing.T) {
+	t.Parallel()
 	frame := DefaultWindowFrame()
 	ws := NewWindowState(nil, nil, nil, frame)
 	// Add some rows
@@ -893,6 +960,7 @@ func TestCalculateFrameEnd(t *testing.T) {
 
 // TestOpcodeString tests Opcode.String function (66.7% coverage)
 func TestOpcodeString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		opcode Opcode
 		want   string
@@ -904,7 +972,9 @@ func TestOpcodeString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.want, func(t *testing.T) {
+		t.Parallel()
 			got := tt.opcode.String()
 			if got != tt.want {
 				t.Errorf("Opcode.String() = %v, want %v", got, tt.want)

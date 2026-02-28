@@ -6,6 +6,7 @@ import (
 )
 
 func TestEncodeDecodeRecord(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		values []interface{}
@@ -71,7 +72,9 @@ func TestEncodeDecodeRecord(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Encode
 			encoded := encodeSimpleRecord(tt.values)
 
@@ -134,6 +137,7 @@ func TestEncodeDecodeRecord(t *testing.T) {
 }
 
 func TestSerialTypes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		value      interface{}
@@ -156,7 +160,9 @@ func TestSerialTypes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Encode to get serial type
 			encoded := encodeSimpleRecord([]interface{}{tt.value})
 

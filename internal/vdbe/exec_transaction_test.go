@@ -137,6 +137,7 @@ func (m *MockPager) SetCookie(dbIndex int, cookieType int, value uint32) error {
 
 // Test OpTransaction
 func TestOpTransaction(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		p1          int // db index
@@ -151,7 +152,9 @@ func TestOpTransaction(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v := New()
 			pager := NewMockPager()
 			v.Ctx = &VDBEContext{Pager: pager}
@@ -189,6 +192,7 @@ func TestOpTransaction(t *testing.T) {
 
 // Test OpAutoCommit
 func TestOpAutoCommit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		p1          int  // 1=commit, 0=begin
@@ -203,7 +207,9 @@ func TestOpAutoCommit(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v := New()
 			pager := NewMockPager()
 			v.Ctx = &VDBEContext{Pager: pager}
@@ -244,6 +250,7 @@ func TestOpAutoCommit(t *testing.T) {
 
 // Test OpSavepoint
 func TestOpSavepoint(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		operation   int    // 0=begin, 1=release, 2=rollback
@@ -264,7 +271,9 @@ func TestOpSavepoint(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v := New()
 			pager := NewMockPager()
 			v.Ctx = &VDBEContext{Pager: pager}
@@ -313,6 +322,7 @@ func TestOpSavepoint(t *testing.T) {
 
 // Test OpVerifyCookie
 func TestOpVerifyCookie(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		dbIndex      int
@@ -329,7 +339,9 @@ func TestOpVerifyCookie(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v := New()
 			pager := NewMockPager()
 			v.Ctx = &VDBEContext{Pager: pager}
@@ -362,6 +374,7 @@ func TestOpVerifyCookie(t *testing.T) {
 
 // Test OpSetCookie
 func TestOpSetCookie(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		dbIndex    int
@@ -375,7 +388,9 @@ func TestOpSetCookie(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v := New()
 			pager := NewMockPager()
 			v.Ctx = &VDBEContext{Pager: pager}
@@ -406,6 +421,7 @@ func TestOpSetCookie(t *testing.T) {
 
 // Test transaction flow with multiple opcodes
 func TestTransactionFlow(t *testing.T) {
+	t.Parallel()
 	v := New()
 	pager := NewMockPager()
 	v.Ctx = &VDBEContext{Pager: pager}
@@ -471,6 +487,7 @@ func TestTransactionFlow(t *testing.T) {
 
 // Test schema cookie verification
 func TestSchemaCookieVerification(t *testing.T) {
+	t.Parallel()
 	v := New()
 	pager := NewMockPager()
 	v.Ctx = &VDBEContext{Pager: pager}
@@ -523,8 +540,10 @@ func TestSchemaCookieVerification(t *testing.T) {
 
 // Test error cases
 func TestTransactionErrors(t *testing.T) {
+	t.Parallel()
 	// Test without pager context
 	t.Run("no pager context", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		v.Ctx = &VDBEContext{Pager: nil}
 
@@ -536,6 +555,7 @@ func TestTransactionErrors(t *testing.T) {
 
 	// Test savepoint without proper interface
 	t.Run("pager without savepoint support", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		// Use a pager that doesn't implement SavepointPagerInterface
 		basicPager := NewMockPager()
@@ -556,6 +576,7 @@ func TestTransactionErrors(t *testing.T) {
 
 	// Test cookie operations without proper interface
 	t.Run("pager without cookie support", func(t *testing.T) {
+		t.Parallel()
 		v := New()
 		basicPager := NewMockPager()
 		v.Ctx = &VDBEContext{Pager: PagerInterface(basicPager)}

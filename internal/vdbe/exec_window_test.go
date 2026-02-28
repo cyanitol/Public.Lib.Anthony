@@ -6,6 +6,7 @@ import (
 
 // TestWindowRowNumber tests the ROW_NUMBER() window function
 func TestWindowRowNumber(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 	v.WindowStates = make(map[int]*WindowState)
@@ -54,6 +55,7 @@ func TestWindowRowNumber(t *testing.T) {
 
 // TestWindowRank tests the RANK() window function
 func TestWindowRank(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 	v.WindowStates = make(map[int]*WindowState)
@@ -103,6 +105,7 @@ func TestWindowRank(t *testing.T) {
 
 // TestWindowDenseRank tests the DENSE_RANK() window function
 func TestWindowDenseRank(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 	v.WindowStates = make(map[int]*WindowState)
@@ -151,6 +154,7 @@ func TestWindowDenseRank(t *testing.T) {
 
 // TestWindowNtile tests the NTILE() window function
 func TestWindowNtile(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 	v.WindowStates = make(map[int]*WindowState)
@@ -192,6 +196,7 @@ func TestWindowNtile(t *testing.T) {
 
 // TestWindowLag tests the LAG() window function
 func TestWindowLag(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 	v.WindowStates = make(map[int]*WindowState)
@@ -227,6 +232,7 @@ func TestWindowLag(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		// Reset and advance to target row
 		windowState.CurrentPartIdx = -1
 		windowState.CurrentPartRow = -1
@@ -262,6 +268,7 @@ func TestWindowLag(t *testing.T) {
 
 // TestWindowLead tests the LEAD() window function
 func TestWindowLead(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 	v.WindowStates = make(map[int]*WindowState)
@@ -297,6 +304,7 @@ func TestWindowLead(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		// Reset and advance to target row
 		windowState.CurrentPartIdx = -1
 		windowState.CurrentPartRow = -1
@@ -332,6 +340,7 @@ func TestWindowLead(t *testing.T) {
 
 // TestWindowFirstValue tests the FIRST_VALUE() window function
 func TestWindowFirstValue(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 	v.WindowStates = make(map[int]*WindowState)
@@ -387,6 +396,7 @@ func TestWindowFirstValue(t *testing.T) {
 
 // TestWindowLastValue tests the LAST_VALUE() window function
 func TestWindowLastValue(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 	v.WindowStates = make(map[int]*WindowState)
@@ -444,6 +454,7 @@ func TestWindowLastValue(t *testing.T) {
 
 // TestWindowWithPartitioning tests window functions with PARTITION BY
 func TestWindowWithPartitioning(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 	v.WindowStates = make(map[int]*WindowState)
@@ -492,6 +503,7 @@ func TestWindowWithPartitioning(t *testing.T) {
 
 // TestWindowFrameBounds tests different frame bound types
 func TestWindowFrameBounds(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 	v.WindowStates = make(map[int]*WindowState)
@@ -539,6 +551,7 @@ func TestWindowFrameBounds(t *testing.T) {
 
 // TestWindowStateReset tests that window states are properly managed
 func TestWindowStateReset(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 	v.WindowStates = make(map[int]*WindowState)

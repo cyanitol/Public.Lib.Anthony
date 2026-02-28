@@ -6,7 +6,9 @@ import (
 
 // TestSorterOperations tests all sorter-related opcodes
 func TestSorterOperations(t *testing.T) {
+	t.Parallel()
 	t.Run("BasicSorterWorkflow", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(20)
 
 		// Test SorterOpen
@@ -168,6 +170,7 @@ func TestSorterOperations(t *testing.T) {
 	})
 
 	t.Run("SorterDescending", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		// Sort in descending order
@@ -214,6 +217,7 @@ func TestSorterOperations(t *testing.T) {
 	})
 
 	t.Run("SorterEmpty", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		// Open sorter but don't insert anything
@@ -239,6 +243,7 @@ func TestSorterOperations(t *testing.T) {
 	})
 
 	t.Run("SorterErrors", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		// Try to insert into non-existent sorter
@@ -289,6 +294,7 @@ func TestSorterOperations(t *testing.T) {
 	})
 
 	t.Run("SorterDataNoCurrentRow", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		v.execSorterOpen(&Instruction{
@@ -311,6 +317,7 @@ func TestSorterOperations(t *testing.T) {
 	})
 
 	t.Run("SorterMultipleColumns", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(20)
 
 		// Sort by two columns
@@ -361,6 +368,7 @@ func TestSorterOperations(t *testing.T) {
 	})
 
 	t.Run("SorterOpenWithoutKeyInfo", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 
 		// Open without key info

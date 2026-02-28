@@ -5,6 +5,7 @@ import (
 )
 
 func TestLexerBasicTokens(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input    string
 		expected []TokenType
@@ -28,6 +29,7 @@ func TestLexerBasicTokens(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		lexer := NewLexer(tt.input)
 		tokens := make([]TokenType, 0)
 
@@ -53,6 +55,7 @@ func TestLexerBasicTokens(t *testing.T) {
 }
 
 func TestLexerOperators(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input    string
 		expected TokenType
@@ -81,6 +84,7 @@ func TestLexerOperators(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		lexer := NewLexer(tt.input)
 		tok := lexer.NextToken()
 		if tok.Type != tt.expected {
@@ -90,6 +94,7 @@ func TestLexerOperators(t *testing.T) {
 }
 
 func TestLexerLiterals(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input    string
 		tokType  TokenType
@@ -108,6 +113,7 @@ func TestLexerLiterals(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		lexer := NewLexer(tt.input)
 		tok := lexer.NextToken()
 		if tok.Type != tt.tokType {
@@ -120,6 +126,7 @@ func TestLexerLiterals(t *testing.T) {
 }
 
 func TestLexerIdentifiers(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input    string
 		expected string
@@ -134,6 +141,7 @@ func TestLexerIdentifiers(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		lexer := NewLexer(tt.input)
 		tok := lexer.NextToken()
 		if tok.Type != TK_ID {
@@ -146,6 +154,7 @@ func TestLexerIdentifiers(t *testing.T) {
 }
 
 func TestLexerVariables(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -160,6 +169,7 @@ func TestLexerVariables(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		lexer := NewLexer(tt.input)
 		tok := lexer.NextToken()
 		if tok.Type != TK_VARIABLE {
@@ -172,6 +182,7 @@ func TestLexerVariables(t *testing.T) {
 }
 
 func TestLexerComments(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  TokenType
@@ -183,6 +194,7 @@ func TestLexerComments(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		lexer := NewLexer(tt.input)
 		tok := lexer.NextToken()
 		if tok.Type != tt.want {
@@ -192,6 +204,7 @@ func TestLexerComments(t *testing.T) {
 }
 
 func TestLexerKeywords(t *testing.T) {
+	t.Parallel()
 	keywords := map[string]TokenType{
 		"SELECT":   TK_SELECT,
 		"FROM":     TK_FROM,
@@ -244,6 +257,7 @@ func TestLexerKeywords(t *testing.T) {
 }
 
 func TestLexerLineAndColumn(t *testing.T) {
+	t.Parallel()
 	input := "SELECT\n  *\n  FROM users"
 	lexer := NewLexer(input)
 
@@ -259,6 +273,7 @@ func TestLexerLineAndColumn(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		tok := lexer.NextToken()
 		if tok.Type != tt.wantType {
 			t.Errorf("expected token type %s, got %s", tt.wantType, tok.Type)
@@ -270,6 +285,7 @@ func TestLexerLineAndColumn(t *testing.T) {
 }
 
 func TestTokenizeAll(t *testing.T) {
+	t.Parallel()
 	input := "SELECT id, name FROM users WHERE age > 18 ORDER BY name;"
 	tokens, err := TokenizeAll(input)
 	if err != nil {
@@ -288,6 +304,7 @@ func TestTokenizeAll(t *testing.T) {
 }
 
 func TestUnquote(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -302,6 +319,7 @@ func TestUnquote(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := Unquote(tt.input)
 		if got != tt.want {
 			t.Errorf("Unquote(%q) = %q, want %q", tt.input, got, tt.want)
@@ -322,6 +340,7 @@ func toLower(s string) string {
 }
 
 func TestLexerPeekAhead(t *testing.T) {
+	t.Parallel()
 	lexer := NewLexer("ABC")
 	// Test peekAhead - it's 0-indexed from readPos
 	if got := lexer.peekAhead(1); got != 'B' {
@@ -336,6 +355,7 @@ func TestLexerPeekAhead(t *testing.T) {
 }
 
 func TestLexerDollarToken(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  TokenType
@@ -347,6 +367,7 @@ func TestLexerDollarToken(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		lexer := NewLexer(tt.input)
 		tok := lexer.NextToken()
 		if tok.Type != tt.want {
@@ -356,6 +377,7 @@ func TestLexerDollarToken(t *testing.T) {
 }
 
 func TestLexerScanDefault(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  TokenType
@@ -366,6 +388,7 @@ func TestLexerScanDefault(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		lexer := NewLexer(tt.input)
 		tok := lexer.NextToken()
 		if tok.Type != tt.want {
@@ -375,6 +398,7 @@ func TestLexerScanDefault(t *testing.T) {
 }
 
 func TestLexerScanDot(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  TokenType
@@ -385,6 +409,7 @@ func TestLexerScanDot(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		lexer := NewLexer(tt.input)
 		tok := lexer.NextToken()
 		if tok.Type != tt.want {
@@ -394,6 +419,7 @@ func TestLexerScanDot(t *testing.T) {
 }
 
 func TestLexerScanBang(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  TokenType
@@ -405,6 +431,7 @@ func TestLexerScanBang(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		lexer := NewLexer(tt.input)
 		tok := lexer.NextToken()
 		if tok.Type != tt.want {
@@ -414,6 +441,7 @@ func TestLexerScanBang(t *testing.T) {
 }
 
 func TestTokenizeAllIllegal(t *testing.T) {
+	t.Parallel()
 	// Test that illegal tokens are captured
 	input := "SELECT \x00 FROM users"
 	tokens, err := TokenizeAll(input)
@@ -435,6 +463,7 @@ func TestTokenizeAllIllegal(t *testing.T) {
 }
 
 func TestIsIdentChar(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		char rune
 		want bool
@@ -450,6 +479,7 @@ func TestIsIdentChar(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := IsIdentChar(tt.char)
 		if got != tt.want {
 			t.Errorf("IsIdentChar(%c) = %v, want %v", tt.char, got, tt.want)

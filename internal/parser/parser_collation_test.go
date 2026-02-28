@@ -5,6 +5,7 @@ import (
 )
 
 func TestParseCollateInColumn(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		sql        string
@@ -85,7 +86,9 @@ func TestParseCollateInColumn(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -109,6 +112,7 @@ func TestParseCollateInColumn(t *testing.T) {
 }
 
 func TestParseCollateInOrderBy(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		sql        string
@@ -220,7 +224,9 @@ func TestParseCollateInOrderBy(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -244,6 +250,7 @@ func TestParseCollateInOrderBy(t *testing.T) {
 }
 
 func TestParseCollateInExpression(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -267,7 +274,9 @@ func TestParseCollateInExpression(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -321,6 +330,7 @@ func checkExprForCollate(expr Expression) bool {
 }
 
 func TestParseUpdateWithCollate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -334,7 +344,9 @@ func TestParseUpdateWithCollate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -358,6 +370,7 @@ func TestParseUpdateWithCollate(t *testing.T) {
 }
 
 func TestParseDeleteWithCollate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -371,7 +384,9 @@ func TestParseDeleteWithCollate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {

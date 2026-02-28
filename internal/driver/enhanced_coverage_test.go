@@ -91,7 +91,9 @@ func TestAggregateFunctionCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			dbFile := "test_agg_cov_" + tt.name + ".db"
 			defer os.Remove(dbFile)
 
@@ -121,6 +123,7 @@ func TestAggregateFunctionCoverage(t *testing.T) {
 // TestHelperFunctionCoverage tests helper functions at 0% coverage
 func TestHelperFunctionCoverage(t *testing.T) {
 	t.Run("isCountStar", func(t *testing.T) {
+		t.Parallel()
 		tests := []struct {
 			name string
 			fn   *parser.FunctionExpr
@@ -144,7 +147,9 @@ func TestHelperFunctionCoverage(t *testing.T) {
 		}
 
 		for _, tt := range tests {
+			tt := tt  // Capture range variable
 			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 				got := isCountStar(tt.fn)
 				if got != tt.want {
 					t.Errorf("isCountStar() = %v, want %v", got, tt.want)
@@ -154,6 +159,7 @@ func TestHelperFunctionCoverage(t *testing.T) {
 	})
 
 	t.Run("isKnownAggregateFunction", func(t *testing.T) {
+		t.Parallel()
 		tests := []struct {
 			name     string
 			funcName string
@@ -171,7 +177,9 @@ func TestHelperFunctionCoverage(t *testing.T) {
 		}
 
 		for _, tt := range tests {
+			tt := tt  // Capture range variable
 			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 				got := isKnownAggregateFunction(tt.funcName)
 				if got != tt.want {
 					t.Errorf("isKnownAggregateFunction(%q) = %v, want %v", tt.funcName, got, tt.want)
@@ -181,6 +189,7 @@ func TestHelperFunctionCoverage(t *testing.T) {
 	})
 
 	t.Run("handleCountStar", func(t *testing.T) {
+		t.Parallel()
 		err := handleCountStar()
 		if err != nil {
 			t.Errorf("handleCountStar() error = %v, want nil", err)
@@ -188,6 +197,7 @@ func TestHelperFunctionCoverage(t *testing.T) {
 	})
 
 	t.Run("handleKnownAggregate", func(t *testing.T) {
+		t.Parallel()
 		err := handleKnownAggregate()
 		if err != nil {
 			t.Errorf("handleKnownAggregate() error = %v, want nil", err)
@@ -246,7 +256,9 @@ func TestMultiTableColumnCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := db.Query(tt.sql)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Query() error = %v, wantErr %v", err, tt.wantErr)
@@ -290,7 +302,9 @@ func TestInsertFirstRowCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			row, err := insertFirstRow(tt.stmt)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("insertFirstRow() error = %v, wantErr %v", err, tt.wantErr)
@@ -337,6 +351,7 @@ func TestSubqueryCompilationCoverage(t *testing.T) {
 	}
 
 	t.Run("compileScalarSubquery", func(t *testing.T) {
+		t.Parallel()
 		s := &Stmt{conn: c}
 		vm := vdbe.New()
 
@@ -357,6 +372,7 @@ func TestSubqueryCompilationCoverage(t *testing.T) {
 	})
 
 	t.Run("compileExistsSubquery", func(t *testing.T) {
+		t.Parallel()
 		s := &Stmt{conn: c}
 		vm := vdbe.New()
 
@@ -377,6 +393,7 @@ func TestSubqueryCompilationCoverage(t *testing.T) {
 	})
 
 	t.Run("compileInSubquery with nil generator", func(t *testing.T) {
+		t.Parallel()
 		// This will panic with nil generator, so we'll skip this test
 		// The function will be tested through integration tests instead
 		t.Skip("compileInSubquery requires non-nil generator - tested via integration")
@@ -467,7 +484,9 @@ func TestCountExprParamsCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			count := countExprParams(tt.expr)
 			if count != tt.wantCount {
 				t.Errorf("countExprParams() = %d, want %d", count, tt.wantCount)
@@ -511,7 +530,9 @@ func TestValueExtractionCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			s := &Stmt{}
 			val := s.extractValueFromExpression(tt.expr)
 			// For identifiers, we expect nil
@@ -560,7 +581,9 @@ func TestCompileArgValueCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			vm := vdbe.New()
 			targetReg := 1
 			compileArgValue(vm, tt.value.Value, targetReg)
@@ -602,7 +625,9 @@ func TestLiteralCompilationCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			vm := vdbe.New()
 			targetReg := 1
 			if lit, ok := tt.expr.(*parser.LiteralExpr); ok {
@@ -656,7 +681,9 @@ func TestTransactionCompilationCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := db.Exec(tt.sql)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Exec() error = %v, wantErr %v", err, tt.wantErr)
@@ -668,6 +695,7 @@ func TestTransactionCompilationCoverage(t *testing.T) {
 // TestFromSubqueryHelpersCoverage tests FROM subquery helper functions
 func TestFromSubqueryHelpersCoverage(t *testing.T) {
 	t.Run("isSimpleSelectStar", func(t *testing.T) {
+		t.Parallel()
 		tests := []struct {
 			name string
 			stmt *parser.SelectStmt
@@ -704,7 +732,9 @@ func TestFromSubqueryHelpersCoverage(t *testing.T) {
 		}
 
 		for _, tt := range tests {
+			tt := tt  // Capture range variable
 			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 				s := &Stmt{}
 				got := s.isSimpleSelectStar(tt.stmt)
 				if got != tt.want {
@@ -715,6 +745,7 @@ func TestFromSubqueryHelpersCoverage(t *testing.T) {
 	})
 
 	t.Run("isSelectStar", func(t *testing.T) {
+		t.Parallel()
 		tests := []struct {
 			name string
 			stmt *parser.SelectStmt
@@ -739,7 +770,9 @@ func TestFromSubqueryHelpersCoverage(t *testing.T) {
 		}
 
 		for _, tt := range tests {
+			tt := tt  // Capture range variable
 			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 				// Use the package-level function
 				got := isSelectStar(tt.stmt)
 				if got != tt.want {

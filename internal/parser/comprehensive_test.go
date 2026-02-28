@@ -7,6 +7,7 @@ import (
 // Comprehensive tests to maximize coverage of all parser paths
 
 func TestParserAllSQLKeywordVariations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -140,7 +141,9 @@ func TestParserAllSQLKeywordVariations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil {
@@ -151,6 +154,7 @@ func TestParserAllSQLKeywordVariations(t *testing.T) {
 }
 
 func TestParserSubqueryVariations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -164,7 +168,9 @@ func TestParserSubqueryVariations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil {
@@ -175,6 +181,7 @@ func TestParserSubqueryVariations(t *testing.T) {
 }
 
 func TestParserAllOperators(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -195,7 +202,9 @@ func TestParserAllOperators(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil {
@@ -206,6 +215,7 @@ func TestParserAllOperators(t *testing.T) {
 }
 
 func TestParserCaseExpressionVariations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -217,7 +227,9 @@ func TestParserCaseExpressionVariations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			_, err := p.Parse()
 			if err != nil {

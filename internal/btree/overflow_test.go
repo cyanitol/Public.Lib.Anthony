@@ -8,6 +8,7 @@ import (
 
 // TestCalculateLocalPayload tests the local payload calculation
 func TestCalculateLocalPayload(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		totalSize  uint32
@@ -59,7 +60,9 @@ func TestCalculateLocalPayload(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := CalculateLocalPayload(tt.totalSize, tt.pageSize, tt.isTable)
 			if got != tt.wantLocal {
 				t.Errorf("CalculateLocalPayload() = %d, want %d (%s)", got, tt.wantLocal, tt.wantReason)
@@ -70,6 +73,7 @@ func TestCalculateLocalPayload(t *testing.T) {
 
 // TestWriteOverflowChain tests writing data to overflow pages
 func TestWriteOverflowChain(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	tests := []struct {
@@ -111,7 +115,9 @@ func TestWriteOverflowChain(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			// Fill test data with pattern
 			for i := range tt.data {
 				tt.data[i] = byte(i % 256)
@@ -152,6 +158,7 @@ func TestWriteOverflowChain(t *testing.T) {
 
 // TestReadOverflowChain tests reading data from overflow pages
 func TestReadOverflowChain(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	tests := []struct {
@@ -173,7 +180,9 @@ func TestReadOverflowChain(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			// Fill test data with pattern
 			for i := range tt.data {
 				tt.data[i] = byte(i % 256)
@@ -209,6 +218,7 @@ func TestReadOverflowChain(t *testing.T) {
 
 // TestReadWriteOverflowRoundtrip tests complete round-trip with cursor
 func TestReadWriteOverflowRoundtrip(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create root page for cursor
@@ -240,7 +250,9 @@ func TestReadWriteOverflowRoundtrip(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			// Fill payload with pattern
 			for i := range tt.payload {
 				tt.payload[i] = byte(i % 256)
@@ -286,6 +298,7 @@ func TestReadWriteOverflowRoundtrip(t *testing.T) {
 
 // TestFreeOverflowChain tests freeing overflow pages
 func TestFreeOverflowChain(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create test data
@@ -330,9 +343,11 @@ func TestFreeOverflowChain(t *testing.T) {
 
 // TestOverflowChainCorruptionDetection tests detection of corrupt chains
 func TestOverflowChainCorruptionDetection(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	t.Run("excessive chain traversal", func(t *testing.T) {
+		t.Parallel()
 		// Test that we handle valid long chains correctly
 		// The maxPages calculation allows enough pages for the data requested
 		// This test ensures we DON'T error for valid (though long) chains
@@ -363,6 +378,7 @@ func TestOverflowChainCorruptionDetection(t *testing.T) {
 	})
 
 	t.Run("chain too long", func(t *testing.T) {
+		t.Parallel()
 		// Create a very long chain that claims more pages than reasonable
 		firstPage, _ := bt.AllocatePage()
 		currentPage := firstPage
@@ -383,6 +399,7 @@ func TestOverflowChainCorruptionDetection(t *testing.T) {
 	})
 
 	t.Run("premature chain end", func(t *testing.T) {
+		t.Parallel()
 		// Create a short chain
 		firstPage, _ := bt.AllocatePage()
 		data, _ := bt.GetPage(firstPage)
@@ -398,10 +415,12 @@ func TestOverflowChainCorruptionDetection(t *testing.T) {
 
 // TestOverflowWithDifferentPageSizes tests overflow with various page sizes
 func TestOverflowWithDifferentPageSizes(t *testing.T) {
+	t.Parallel()
 	pageSizes := []uint32{512, 1024, 2048, 4096, 8192, 16384, 32768}
 
 	for _, pageSize := range pageSizes {
 		t.Run(string(rune(pageSize)), func(t *testing.T) {
+		t.Parallel()
 			bt := NewBtree(pageSize)
 
 			// Create test data larger than one page
@@ -430,6 +449,7 @@ func TestOverflowWithDifferentPageSizes(t *testing.T) {
 
 // TestGetCompletePayload tests the convenience function
 func TestGetCompletePayload(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	// Create a table with some test data
@@ -446,6 +466,7 @@ func TestGetCompletePayload(t *testing.T) {
 	}
 
 	t.Run("small payload without overflow", func(t *testing.T) {
+		t.Parallel()
 		cursor := NewCursor(bt, rootPage)
 
 		// Simulate a cell with no overflow
@@ -467,6 +488,7 @@ func TestGetCompletePayload(t *testing.T) {
 	})
 
 	t.Run("large payload with overflow", func(t *testing.T) {
+		t.Parallel()
 		cursor := NewCursor(bt, rootPage)
 
 		// Write overflow data
@@ -495,6 +517,7 @@ func TestGetCompletePayload(t *testing.T) {
 	})
 
 	t.Run("invalid cursor state", func(t *testing.T) {
+		t.Parallel()
 		cursor := NewCursor(bt, rootPage)
 		cursor.State = CursorInvalid
 
@@ -557,6 +580,7 @@ func BenchmarkCalculateLocalPayload(b *testing.B) {
 
 // TestInsertWithOverflow tests inserting large payloads that require overflow pages
 func TestInsertWithOverflow(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -598,7 +622,9 @@ func TestInsertWithOverflow(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			// Create test payload
 			payload := make([]byte, tt.payloadSize)
 			for i := range payload {
@@ -643,6 +669,7 @@ func TestInsertWithOverflow(t *testing.T) {
 
 // TestDeleteWithOverflow tests deleting rows with overflow pages
 func TestDeleteWithOverflow(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -717,6 +744,7 @@ func TestDeleteWithOverflow(t *testing.T) {
 // TestMultipleRowsWithOverflow tests inserting and deleting multiple rows with overflow
 // Uses smaller payload sizes to avoid page split edge cases
 func TestMultipleRowsWithOverflow(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -813,7 +841,9 @@ func TestMultipleRowsWithOverflow(t *testing.T) {
 
 // TestOverflowEdgeCases tests edge cases in overflow handling
 func TestOverflowEdgeCases(t *testing.T) {
+	t.Parallel()
 	t.Run("payload just below threshold", func(t *testing.T) {
+		t.Parallel()
 		// Create fresh btree for this test
 		bt := NewBtree(4096)
 		rootPage, err := bt.CreateTable()
@@ -858,6 +888,7 @@ func TestOverflowEdgeCases(t *testing.T) {
 	})
 
 	t.Run("payload one byte over threshold", func(t *testing.T) {
+		t.Parallel()
 		// Create fresh btree for this test
 		bt := NewBtree(4096)
 		rootPage, err := bt.CreateTable()
@@ -906,6 +937,7 @@ func TestOverflowEdgeCases(t *testing.T) {
 
 // TestGetOverflowThreshold tests the GetOverflowThreshold function
 func TestGetOverflowThreshold(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		pageSize uint32
@@ -939,7 +971,9 @@ func TestGetOverflowThreshold(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := GetOverflowThreshold(tt.pageSize, tt.isTable)
 			if got != tt.want {
 				t.Errorf("GetOverflowThreshold() = %d, want %d", got, tt.want)

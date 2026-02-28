@@ -30,6 +30,7 @@ func createTestPagerForFreeList(t *testing.T) (*Pager, func()) {
 }
 
 func TestFreeListCreate(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -49,6 +50,7 @@ func TestFreeListCreate(t *testing.T) {
 }
 
 func TestFreeListInitialize(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -67,6 +69,7 @@ func TestFreeListInitialize(t *testing.T) {
 }
 
 func TestFreeListPendingPages(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -103,6 +106,7 @@ func TestFreeListPendingPages(t *testing.T) {
 }
 
 func TestFreeListAllocateEmpty(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -120,6 +124,7 @@ func TestFreeListAllocateEmpty(t *testing.T) {
 }
 
 func TestFreeListFreeMultiple(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -138,6 +143,7 @@ func TestFreeListFreeMultiple(t *testing.T) {
 }
 
 func TestFreeListClear(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -163,6 +169,7 @@ func TestFreeListClear(t *testing.T) {
 }
 
 func TestFreeListInfo(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -182,6 +189,7 @@ func TestFreeListInfo(t *testing.T) {
 }
 
 func TestFreeListIterate(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -218,6 +226,7 @@ func TestFreeListIterate(t *testing.T) {
 }
 
 func TestFreeListIterateEarlyStop(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -242,6 +251,7 @@ func TestFreeListIterateEarlyStop(t *testing.T) {
 }
 
 func TestFreeListMaxLeafPages(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		pageSize int
 		expected int
@@ -253,6 +263,7 @@ func TestFreeListMaxLeafPages(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := FreeListMaxLeafPages(tt.pageSize)
 		if got != tt.expected {
 			t.Errorf("FreeListMaxLeafPages(%d) = %d, expected %d", tt.pageSize, got, tt.expected)
@@ -261,6 +272,7 @@ func TestFreeListMaxLeafPages(t *testing.T) {
 }
 
 func TestFreeListLIFOOrder(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -285,6 +297,7 @@ func TestFreeListLIFOOrder(t *testing.T) {
 }
 
 func TestFreeListFlushToTrunk(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -365,6 +378,7 @@ func BenchmarkFreeListFree(b *testing.B) {
 
 // TestPagerAllocatePage tests the pager's AllocatePage method.
 func TestPagerAllocatePage(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -393,6 +407,7 @@ func TestPagerAllocatePage(t *testing.T) {
 
 // TestPagerFreePageAndReuse tests freeing a page and reusing it.
 func TestPagerFreePageAndReuse(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -447,6 +462,7 @@ func TestPagerFreePageAndReuse(t *testing.T) {
 
 // TestPagerFreeListPersistence tests that free list survives database close/reopen.
 func TestPagerFreeListPersistence(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_persist_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -559,6 +575,7 @@ func TestPagerFreeListPersistence(t *testing.T) {
 
 // TestPagerFreeListMultiplePages tests freeing and reusing multiple pages.
 func TestPagerFreeListMultiplePages(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -630,6 +647,7 @@ func TestPagerFreeListMultiplePages(t *testing.T) {
 
 // TestPagerFreeInvalidPage tests error handling for invalid page numbers.
 func TestPagerFreeInvalidPage(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -648,6 +666,7 @@ func TestPagerFreeInvalidPage(t *testing.T) {
 
 // TestPagerReadOnlyNoAllocate tests that read-only pager cannot allocate.
 func TestPagerReadOnlyNoAllocate(t *testing.T) {
+	t.Parallel()
 	// First create a database
 	tmpFile, err := os.CreateTemp("", "freelist_readonly_*.db")
 	if err != nil {
@@ -686,6 +705,7 @@ func TestPagerReadOnlyNoAllocate(t *testing.T) {
 
 // TestFreeListReadTrunk tests reading trunk page information
 func TestFreeListReadTrunk(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -745,12 +765,14 @@ func TestFreeListReadTrunk(t *testing.T) {
 
 // TestFreeListVerify tests freelist integrity verification
 func TestFreeListVerify(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
 	fl := NewFreeList(pager)
 
 	t.Run("empty freelist is valid", func(t *testing.T) {
+			t.Parallel()
 		err := fl.Verify()
 		if err != nil {
 			t.Errorf("empty freelist should be valid: %v", err)
@@ -758,6 +780,7 @@ func TestFreeListVerify(t *testing.T) {
 	})
 
 	t.Run("verify after freeeting pages", func(t *testing.T) {
+			t.Parallel()
 		// Ensure we have pages
 		for i := Pgno(2); i <= 30; i++ {
 			page, err := pager.Get(i)
@@ -795,6 +818,7 @@ func TestFreeListVerify(t *testing.T) {
 
 // TestFreeListIterateComplete tests complete iteration through freelist
 func TestFreeListIterateComplete(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -851,6 +875,7 @@ func TestFreeListIterateComplete(t *testing.T) {
 
 // TestFreeListInfoDetails tests detailed freelist information
 func TestFreeListInfoDetails(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -917,6 +942,7 @@ func TestFreeListInfoDetails(t *testing.T) {
 
 // TestFreeListFreeMultipleError tests error handling in FreeMultiple
 func TestFreeListFreeMultipleError(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 

@@ -6,6 +6,7 @@ import (
 )
 
 func TestJournalCreation(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_journal.db-journal"
 	defer os.Remove(journalFile)
 
@@ -28,6 +29,7 @@ func TestJournalCreation(t *testing.T) {
 }
 
 func TestJournalWriteOriginal(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_write_original.db-journal"
 	defer os.Remove(journalFile)
 
@@ -65,6 +67,7 @@ func TestJournalWriteOriginal(t *testing.T) {
 }
 
 func TestJournalRollback(t *testing.T) {
+	t.Parallel()
 	t.Skip("Journal rollback not yet fully implemented")
 	dbFile := "test_rollback.db"
 	journalFile := dbFile + "-journal"
@@ -142,6 +145,7 @@ func TestJournalRollback(t *testing.T) {
 }
 
 func TestJournalFinalize(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_finalize.db-journal"
 	defer os.Remove(journalFile)
 
@@ -169,6 +173,7 @@ func TestJournalFinalize(t *testing.T) {
 }
 
 func TestJournalDelete(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_delete.db-journal"
 	defer os.Remove(journalFile)
 
@@ -195,6 +200,7 @@ func TestJournalDelete(t *testing.T) {
 }
 
 func TestJournalValidation(t *testing.T) {
+	t.Parallel()
 	t.Skip("Journal validation not yet fully implemented")
 	journalFile := "test_validation.db-journal"
 	defer os.Remove(journalFile)
@@ -237,6 +243,7 @@ func TestJournalValidation(t *testing.T) {
 }
 
 func TestJournalTruncate(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_truncate.db-journal"
 	defer os.Remove(journalFile)
 
@@ -271,6 +278,7 @@ func TestJournalTruncate(t *testing.T) {
 }
 
 func TestJournalZeroHeader(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_zero_header.db-journal"
 	defer os.Remove(journalFile)
 
@@ -304,6 +312,7 @@ func TestJournalZeroHeader(t *testing.T) {
 }
 
 func TestJournalMultiplePages(t *testing.T) {
+	t.Parallel()
 	t.Skip("Journal multiple pages not yet fully implemented")
 	dbFile := "test_multi_pages.db"
 	journalFile := dbFile + "-journal"
@@ -385,6 +394,7 @@ func TestJournalMultiplePages(t *testing.T) {
 }
 
 func TestJournalInvalidPageSize(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_invalid_size.db-journal"
 	defer os.Remove(journalFile)
 
@@ -410,6 +420,7 @@ func TestJournalInvalidPageSize(t *testing.T) {
 
 // TestJournalSync tests journal sync operation
 func TestJournalSync(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_sync.db-journal"
 	defer os.Remove(journalFile)
 
@@ -444,6 +455,7 @@ func TestJournalSync(t *testing.T) {
 
 // TestJournalRollbackReal tests actual journal rollback with pager
 func TestJournalRollbackReal(t *testing.T) {
+	t.Parallel()
 	dbFile := "test_rollback_real.db"
 	journalFile := dbFile + "-journal"
 	defer os.Remove(dbFile)
@@ -526,6 +538,7 @@ func TestJournalRollbackReal(t *testing.T) {
 
 // TestJournalUpdatePageCount tests the updatePageCount method
 func TestJournalUpdatePageCount(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_update_count.db-journal"
 	defer os.Remove(journalFile)
 
@@ -562,6 +575,7 @@ func TestJournalUpdatePageCount(t *testing.T) {
 
 // TestJournalCalculateChecksum tests checksum calculation
 func TestJournalCalculateChecksum(t *testing.T) {
+	t.Parallel()
 	journal := NewJournal("test.db-journal", DefaultPageSize, 1)
 
 	// Test with various data patterns
@@ -579,6 +593,7 @@ func TestJournalCalculateChecksum(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			data := make([]byte, tt.dataSize)
 			for i := range data {

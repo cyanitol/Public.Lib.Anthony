@@ -97,7 +97,9 @@ func TestSQLiteLimitBasic(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -152,7 +154,9 @@ func TestSQLiteLimitJoin(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -200,7 +204,9 @@ func TestSQLiteLimitSubquery(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -268,7 +274,9 @@ func TestSQLiteLimitZero(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -346,7 +354,9 @@ func TestSQLiteLimitUnion(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.wantErr {
 				expectQueryError(t, db, tt.query)
 			} else {
@@ -392,7 +402,9 @@ func TestSQLiteLimitDistinct(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -428,7 +440,9 @@ func TestSQLiteLimitGroupBy(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			for _, stmt := range tt.setup {
 				mustExec(t, db, stmt)
 			}
@@ -508,7 +522,9 @@ func TestSQLiteLimitExpressions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.wantErr {
 				expectQueryError(t, db, tt.query)
 			} else {
@@ -563,7 +579,9 @@ func TestSQLiteLimit2OrderByOptimization(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -612,7 +630,9 @@ func TestSQLiteLimit2DescendingOrder(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -660,7 +680,9 @@ func TestSQLiteLimit2JoinOrdering(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -703,7 +725,9 @@ func TestSQLiteLimit2ComplexConditions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -753,7 +777,9 @@ func TestSQLiteLimit2OrderDirection(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -793,7 +819,9 @@ func TestSQLiteLimit2IntegerPrimaryKey(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -827,7 +855,9 @@ func TestSQLiteLimit2OrderedJoin(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -890,7 +920,9 @@ func TestSQLiteLimit2NestedViews(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})

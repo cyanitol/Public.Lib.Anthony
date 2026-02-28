@@ -8,6 +8,7 @@ import (
 // These are interface satisfaction tests to ensure coverage
 
 func TestNodeInterface(t *testing.T) {
+	t.Parallel()
 	// Test all statements implement Node and Statement
 	var _ Node = &SelectStmt{}
 	var _ Node = &InsertStmt{}
@@ -100,6 +101,7 @@ func TestNodeInterface(t *testing.T) {
 }
 
 func TestExpressionInterface(t *testing.T) {
+	t.Parallel()
 	// Test all expressions implement Node and Expression
 	var _ Node = &BinaryExpr{}
 	var _ Node = &UnaryExpr{}
@@ -164,6 +166,7 @@ func TestExpressionInterface(t *testing.T) {
 }
 
 func TestAlterTableActionInterface(t *testing.T) {
+	t.Parallel()
 	// Test all alter table actions implement Node and AlterTableAction
 	var _ Node = &RenameTableAction{}
 	var _ Node = &RenameColumnAction{}

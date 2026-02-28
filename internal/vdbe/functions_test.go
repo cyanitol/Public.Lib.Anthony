@@ -8,6 +8,7 @@ import (
 
 // TestScalarFunctions tests scalar function execution
 func TestScalarFunctions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		funcName string
@@ -114,7 +115,9 @@ func TestScalarFunctions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			fc := NewFunctionContext()
 			got, err := fc.ExecuteFunction(tt.funcName, tt.args)
 
@@ -136,6 +139,7 @@ func TestScalarFunctions(t *testing.T) {
 
 // TestAggregateFunctions tests aggregate function execution
 func TestAggregateFunctions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		funcName string
@@ -242,7 +246,9 @@ func TestAggregateFunctions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			fc := NewFunctionContext()
 
 			// Look up the aggregate function
@@ -296,6 +302,7 @@ func TestAggregateFunctions(t *testing.T) {
 
 // TestOPFunction tests the OP_Function opcode
 func TestOPFunction(t *testing.T) {
+	t.Parallel()
 	v := New()
 
 	// Allocate memory for registers
@@ -339,6 +346,7 @@ func TestOPFunction(t *testing.T) {
 
 // TestOPAggStep tests the OP_AggStep opcode
 func TestOPAggStep(t *testing.T) {
+	t.Parallel()
 	v := New()
 
 	// Allocate memory and cursors
@@ -390,6 +398,7 @@ func TestOPAggStep(t *testing.T) {
 
 // TestNestedFunctionCalls tests nested function calls
 func TestNestedFunctionCalls(t *testing.T) {
+	t.Parallel()
 	fc := NewFunctionContext()
 
 	// Test UPPER(LOWER("HELLO"))
@@ -412,6 +421,7 @@ func TestNestedFunctionCalls(t *testing.T) {
 
 // TestNullHandling tests NULL value handling in functions
 func TestNullHandling(t *testing.T) {
+	t.Parallel()
 	fc := NewFunctionContext()
 
 	tests := []struct {
@@ -453,7 +463,9 @@ func TestNullHandling(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := fc.ExecuteFunction(tt.funcName, tt.args)
 			if err != nil {
 				t.Fatalf("ExecuteFunction() error = %v", err)

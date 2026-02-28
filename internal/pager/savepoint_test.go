@@ -6,8 +6,9 @@ import (
 )
 
 func TestSavepointCreation(t *testing.T) {
-	dbFile := "test_savepoint.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_savepoint.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -50,8 +51,9 @@ func TestSavepointCreation(t *testing.T) {
 }
 
 func TestSavepointRelease(t *testing.T) {
-	dbFile := "test_savepoint_release.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_savepoint_release.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -102,8 +104,9 @@ func TestSavepointRelease(t *testing.T) {
 }
 
 func TestSavepointRollback(t *testing.T) {
-	dbFile := "test_savepoint_rollback.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_savepoint_rollback.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -167,8 +170,9 @@ func TestSavepointRollback(t *testing.T) {
 }
 
 func TestNestedSavepoints(t *testing.T) {
-	dbFile := "test_nested_savepoints.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_nested_savepoints.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -274,8 +278,9 @@ func TestNestedSavepoints(t *testing.T) {
 }
 
 func TestSavepointMultiplePages(t *testing.T) {
-	dbFile := "test_savepoint_multi.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_savepoint_multi.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -346,8 +351,9 @@ func TestSavepointMultiplePages(t *testing.T) {
 }
 
 func TestSavepointClearOnCommit(t *testing.T) {
-	dbFile := "test_savepoint_clear.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_savepoint_clear.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -390,8 +396,9 @@ func TestSavepointClearOnCommit(t *testing.T) {
 }
 
 func TestSavepointClearOnRollback(t *testing.T) {
-	dbFile := "test_savepoint_rollback_clear.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_savepoint_rollback_clear.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -434,8 +441,9 @@ func TestSavepointClearOnRollback(t *testing.T) {
 }
 
 func TestSavepointNames(t *testing.T) {
-	dbFile := "test_savepoint_names.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_savepoint_names.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -480,8 +488,9 @@ func TestSavepointNames(t *testing.T) {
 }
 
 func TestSavepointEmptyName(t *testing.T) {
-	dbFile := "test_savepoint_empty.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_savepoint_empty.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -503,8 +512,9 @@ func TestSavepointEmptyName(t *testing.T) {
 }
 
 func TestSavepointReadOnlyTransaction(t *testing.T) {
-	dbFile := "test_savepoint_readonly.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_savepoint_readonly.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {

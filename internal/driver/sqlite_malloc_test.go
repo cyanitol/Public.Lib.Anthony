@@ -351,7 +351,9 @@ func TestSQLiteMemoryAllocation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Cleanup from previous test
 			_, _ = db.Exec("DROP TABLE IF EXISTS t1")
 			_, _ = db.Exec("DROP TABLE IF EXISTS t2")
@@ -422,7 +424,9 @@ func TestMemoryLimit(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			rows, err := db.Query(tt.query)
 			if err != nil {
 				t.Fatalf("query failed: %v", err)
@@ -465,6 +469,7 @@ func TestMemoryPressure(t *testing.T) {
 
 	// Test inserting many rows
 	t.Run("many_inserts", func(t *testing.T) {
+		t.Parallel()
 		tx, err := db.Begin()
 		if err != nil {
 			t.Fatalf("failed to begin transaction: %v", err)
@@ -492,6 +497,7 @@ func TestMemoryPressure(t *testing.T) {
 
 	// Verify data
 	t.Run("verify_inserts", func(t *testing.T) {
+		t.Parallel()
 		var count int
 		err := db.QueryRow("SELECT count(*) FROM t1").Scan(&count)
 		if err != nil {

@@ -7,6 +7,7 @@ import (
 )
 
 func TestCreateTrigger(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create a table first
@@ -52,6 +53,7 @@ func TestCreateTrigger(t *testing.T) {
 }
 
 func TestCreateTriggerWithNilStatement(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	_, err := s.CreateTrigger(nil)
 	if err == nil {
@@ -60,6 +62,7 @@ func TestCreateTriggerWithNilStatement(t *testing.T) {
 }
 
 func TestCreateTriggerOnNonexistentTable(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateTriggerStmt{
@@ -76,6 +79,7 @@ func TestCreateTriggerOnNonexistentTable(t *testing.T) {
 }
 
 func TestCreateTriggerIfNotExists(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	s.Tables["users"] = &Table{Name: "users"}
@@ -111,6 +115,7 @@ func TestCreateTriggerIfNotExists(t *testing.T) {
 }
 
 func TestCreateTriggerWithUpdateOf(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	s.Tables["users"] = &Table{Name: "users"}
@@ -137,6 +142,7 @@ func TestCreateTriggerWithUpdateOf(t *testing.T) {
 }
 
 func TestCreateTriggerWithWhen(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	s.Tables["users"] = &Table{Name: "users"}
@@ -166,6 +172,7 @@ func TestCreateTriggerWithWhen(t *testing.T) {
 }
 
 func TestCreateTemporaryTrigger(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	s.Tables["users"] = &Table{Name: "users"}
@@ -189,6 +196,7 @@ func TestCreateTemporaryTrigger(t *testing.T) {
 }
 
 func TestDropTrigger(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	s.Triggers["my_trigger"] = &Trigger{Name: "my_trigger"}
@@ -204,6 +212,7 @@ func TestDropTrigger(t *testing.T) {
 }
 
 func TestDropTriggerCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	s.Triggers["MyTrigger"] = &Trigger{Name: "MyTrigger"}
@@ -219,6 +228,7 @@ func TestDropTriggerCaseInsensitive(t *testing.T) {
 }
 
 func TestDropTriggerNonexistent(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	err := s.DropTrigger("nonexistent")
@@ -228,6 +238,7 @@ func TestDropTriggerNonexistent(t *testing.T) {
 }
 
 func TestGetTrigger(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	s.Triggers["TestTrigger"] = &Trigger{Name: "TestTrigger"}
@@ -235,7 +246,9 @@ func TestGetTrigger(t *testing.T) {
 	// Test case-insensitive lookup
 	tests := []string{"TestTrigger", "testtrigger", "TESTTRIGGER", "tEsTtRiGgEr"}
 	for _, name := range tests {
+		name := name
 		t.Run(name, func(t *testing.T) {
+				t.Parallel()
 			trigger, ok := s.GetTrigger(name)
 			if !ok {
 				t.Errorf("GetTrigger(%q) not found", name)
@@ -254,6 +267,7 @@ func TestGetTrigger(t *testing.T) {
 }
 
 func TestGetTableTriggers(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	s.Triggers["trigger1"] = &Trigger{
@@ -311,6 +325,7 @@ func TestGetTableTriggers(t *testing.T) {
 }
 
 func TestGetTableTriggersCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	s.Triggers["trigger1"] = &Trigger{
@@ -325,6 +340,7 @@ func TestGetTableTriggersCaseInsensitive(t *testing.T) {
 }
 
 func TestListTriggers(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Empty schema
@@ -345,6 +361,7 @@ func TestListTriggers(t *testing.T) {
 }
 
 func TestShouldExecuteTriggerNoWhen(t *testing.T) {
+	t.Parallel()
 	trigger := &Trigger{
 		Name:  "my_trigger",
 		When:  nil,
@@ -360,6 +377,7 @@ func TestShouldExecuteTriggerNoWhen(t *testing.T) {
 }
 
 func TestShouldExecuteTriggerWithWhen(t *testing.T) {
+	t.Parallel()
 	// WHEN NEW.age > 18
 	whenExpr := &parser.BinaryExpr{
 		Op: parser.OpGt,
@@ -400,6 +418,7 @@ func TestShouldExecuteTriggerWithWhen(t *testing.T) {
 }
 
 func TestShouldExecuteTriggerLogicalOperators(t *testing.T) {
+	t.Parallel()
 	// WHEN NEW.age > 18 AND NEW.active = 1
 	whenExpr := &parser.BinaryExpr{
 		Op: parser.OpAnd,
@@ -440,6 +459,7 @@ func TestShouldExecuteTriggerLogicalOperators(t *testing.T) {
 }
 
 func TestShouldExecuteTriggerOrOperator(t *testing.T) {
+	t.Parallel()
 	// WHEN NEW.age < 18 OR NEW.age > 65
 	whenExpr := &parser.BinaryExpr{
 		Op: parser.OpOr,
@@ -480,6 +500,7 @@ func TestShouldExecuteTriggerOrOperator(t *testing.T) {
 }
 
 func TestShouldExecuteTriggerWithOLD(t *testing.T) {
+	t.Parallel()
 	// WHEN OLD.status != NEW.status
 	whenExpr := &parser.BinaryExpr{
 		Op:    parser.OpNe,
@@ -507,6 +528,7 @@ func TestShouldExecuteTriggerWithOLD(t *testing.T) {
 }
 
 func TestShouldExecuteTriggerNullComparison(t *testing.T) {
+	t.Parallel()
 	// WHEN NEW.age > 18
 	whenExpr := &parser.BinaryExpr{
 		Op:    parser.OpGt,
@@ -525,6 +547,7 @@ func TestShouldExecuteTriggerNullComparison(t *testing.T) {
 }
 
 func TestShouldExecuteTriggerStringComparison(t *testing.T) {
+	t.Parallel()
 	// WHEN NEW.name = 'John'
 	whenExpr := &parser.BinaryExpr{
 		Op:    parser.OpEq,
@@ -548,6 +571,7 @@ func TestShouldExecuteTriggerStringComparison(t *testing.T) {
 }
 
 func TestMatchesUpdateColumns(t *testing.T) {
+	t.Parallel()
 	// INSERT trigger - should always match
 	trigger := &Trigger{
 		Event: parser.TriggerInsert,
@@ -587,6 +611,7 @@ func TestMatchesUpdateColumns(t *testing.T) {
 }
 
 func TestMatchesUpdateColumnsCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	trigger := &Trigger{
 		Event:    parser.TriggerUpdate,
 		UpdateOf: []string{"Name", "Email"},
@@ -601,6 +626,7 @@ func TestMatchesUpdateColumnsCaseInsensitive(t *testing.T) {
 }
 
 func TestEvaluateLiteralAsBool(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		literal  *parser.LiteralExpr
@@ -613,7 +639,9 @@ func TestEvaluateLiteralAsBool(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result, err := evaluateLiteralAsBool(tt.literal)
 			if err != nil {
 				t.Fatalf("evaluateLiteralAsBool() error = %v", err)
@@ -626,6 +654,7 @@ func TestEvaluateLiteralAsBool(t *testing.T) {
 }
 
 func TestCompareValues(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		left     interface{}
@@ -645,7 +674,9 @@ func TestCompareValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result, err := compareValues(tt.left, tt.right, tt.op)
 			if err != nil {
 				t.Fatalf("compareValues() error = %v", err)
@@ -658,6 +689,7 @@ func TestCompareValues(t *testing.T) {
 }
 
 func TestToBool(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -676,7 +708,9 @@ func TestToBool(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := toBool(tt.value)
 			if result != tt.expected {
 				t.Errorf("toBool(%v) = %v, want %v", tt.value, result, tt.expected)
@@ -686,6 +720,7 @@ func TestToBool(t *testing.T) {
 }
 
 func TestEvaluateIdentExprDirect(t *testing.T) {
+	t.Parallel()
 	expr := &parser.IdentExpr{Name: "status"}
 	newRow := map[string]interface{}{"status": int64(1)}
 
@@ -708,6 +743,7 @@ func TestEvaluateIdentExprDirect(t *testing.T) {
 }
 
 func TestResolveIdentValueUnqualified(t *testing.T) {
+	t.Parallel()
 	expr := &parser.IdentExpr{Name: "age"}
 
 	// Try NEW first
@@ -739,6 +775,7 @@ func TestResolveIdentValueUnqualified(t *testing.T) {
 }
 
 func TestResolveQualifiedValueErrors(t *testing.T) {
+	t.Parallel()
 	// NEW not available
 	expr := &parser.IdentExpr{Table: "NEW", Name: "age"}
 	_, err := resolveQualifiedValue(expr, nil, nil)
@@ -779,6 +816,7 @@ func TestResolveQualifiedValueErrors(t *testing.T) {
 }
 
 func TestParseLiteralValueFloat(t *testing.T) {
+	t.Parallel()
 	expr := &parser.LiteralExpr{Type: parser.LiteralFloat, Value: "3.14"}
 	val := parseLiteralValue(expr)
 	if val == nil {
@@ -787,6 +825,7 @@ func TestParseLiteralValueFloat(t *testing.T) {
 }
 
 func TestCompareLessThanFloat(t *testing.T) {
+	t.Parallel()
 	result := compareLessThan(float64(1.5), float64(2.5))
 	if !result {
 		t.Error("1.5 < 2.5 should be true")
@@ -799,6 +838,7 @@ func TestCompareLessThanFloat(t *testing.T) {
 }
 
 func TestCompareLessThanString(t *testing.T) {
+	t.Parallel()
 	result := compareLessThan("abc", "def")
 	if !result {
 		t.Error("'abc' < 'def' should be true")
@@ -811,6 +851,7 @@ func TestCompareLessThanString(t *testing.T) {
 }
 
 func TestCompareLessThanIncompatibleTypes(t *testing.T) {
+	t.Parallel()
 	result := compareLessThan(int64(10), "string")
 	if result {
 		t.Error("Incompatible types should return false")
@@ -823,6 +864,7 @@ func TestCompareLessThanIncompatibleTypes(t *testing.T) {
 }
 
 func TestCompareEqualBool(t *testing.T) {
+	t.Parallel()
 	result := compareEqual(true, true)
 	if !result {
 		t.Error("true == true should be true")
@@ -835,6 +877,7 @@ func TestCompareEqualBool(t *testing.T) {
 }
 
 func TestCompareEqualFloat(t *testing.T) {
+	t.Parallel()
 	result := compareEqual(float64(3.14), float64(3.14))
 	if !result {
 		t.Error("3.14 == 3.14 should be true")
@@ -847,6 +890,7 @@ func TestCompareEqualFloat(t *testing.T) {
 }
 
 func TestCompareEqualIncompatibleTypes(t *testing.T) {
+	t.Parallel()
 	result := compareEqual(int64(10), float64(10.0))
 	if result {
 		t.Error("int64 and float64 should not be equal (incompatible types)")
@@ -859,6 +903,7 @@ func TestCompareEqualIncompatibleTypes(t *testing.T) {
 }
 
 func TestEvaluateWhenClauseLiteral(t *testing.T) {
+	t.Parallel()
 	// Literal integer
 	literalExpr := &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"}
 	result, err := evaluateWhenClause(literalExpr, nil, nil)
@@ -881,6 +926,7 @@ func TestEvaluateWhenClauseLiteral(t *testing.T) {
 }
 
 func TestEvaluateWhenClauseUnsupportedOp(t *testing.T) {
+	t.Parallel()
 	// Binary expression with unsupported operator
 	expr := &parser.BinaryExpr{
 		Op:    parser.OpMul, // Arithmetic operator, not logical/comparison
@@ -895,6 +941,7 @@ func TestEvaluateWhenClauseUnsupportedOp(t *testing.T) {
 }
 
 func TestEvaluateExprValueUnsupportedType(t *testing.T) {
+	t.Parallel()
 	// Case expression (not supported in WHEN clause evaluation)
 	expr := &parser.CaseExpr{}
 	_, err := evaluateExprValue(expr, nil, nil)
@@ -904,6 +951,7 @@ func TestEvaluateExprValueUnsupportedType(t *testing.T) {
 }
 
 func TestCompareNonNullValuesUnsupportedOp(t *testing.T) {
+	t.Parallel()
 	_, err := compareNonNullValues(int64(1), int64(2), parser.OpMul)
 	if err == nil {
 		t.Error("Expected error for unsupported comparison operator")
@@ -911,6 +959,7 @@ func TestCompareNonNullValuesUnsupportedOp(t *testing.T) {
 }
 
 func TestCreateTriggerInitializesMap(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	s.Triggers = nil // Set to nil to test initialization
 
@@ -934,6 +983,7 @@ func TestCreateTriggerInitializesMap(t *testing.T) {
 }
 
 func TestShouldExecuteTriggerError(t *testing.T) {
+	t.Parallel()
 	// WHEN with identifier that can't be resolved
 	trigger := &Trigger{
 		When: &parser.IdentExpr{
@@ -949,6 +999,7 @@ func TestShouldExecuteTriggerError(t *testing.T) {
 }
 
 func TestEvaluateWhenClauseUnsupportedExpr(t *testing.T) {
+	t.Parallel()
 	// Unsupported expression type
 	expr := &parser.UnaryExpr{Op: parser.OpNot}
 	result, err := evaluateWhenClause(expr, nil, nil)
@@ -962,6 +1013,7 @@ func TestEvaluateWhenClauseUnsupportedExpr(t *testing.T) {
 }
 
 func TestEvaluateLogicalOpErrors(t *testing.T) {
+	t.Parallel()
 	// Error in left operand
 	expr := &parser.BinaryExpr{
 		Op: parser.OpAnd,
@@ -994,6 +1046,7 @@ func TestEvaluateLogicalOpErrors(t *testing.T) {
 }
 
 func TestEvaluateComparisonOpErrors(t *testing.T) {
+	t.Parallel()
 	// Error in left operand
 	expr := &parser.BinaryExpr{
 		Op: parser.OpEq,
@@ -1026,6 +1079,7 @@ func TestEvaluateComparisonOpErrors(t *testing.T) {
 }
 
 func TestEvaluateIdentExprValueQualified(t *testing.T) {
+	t.Parallel()
 	expr := &parser.IdentExpr{
 		Table: "NEW",
 		Name:  "age",
@@ -1042,6 +1096,7 @@ func TestEvaluateIdentExprValueQualified(t *testing.T) {
 }
 
 func TestParseLiteralValueNull(t *testing.T) {
+	t.Parallel()
 	expr := &parser.LiteralExpr{Type: parser.LiteralNull}
 	val := parseLiteralValue(expr)
 	if val != nil {
@@ -1050,6 +1105,7 @@ func TestParseLiteralValueNull(t *testing.T) {
 }
 
 func TestParseLiteralValueDefault(t *testing.T) {
+	t.Parallel()
 	expr := &parser.LiteralExpr{Type: parser.LiteralBlob, Value: "x'00FF'"}
 	val := parseLiteralValue(expr)
 	if val == nil {
@@ -1058,6 +1114,7 @@ func TestParseLiteralValueDefault(t *testing.T) {
 }
 
 func TestEvaluateIdentExprError(t *testing.T) {
+	t.Parallel()
 	expr := &parser.IdentExpr{Name: "nonexistent"}
 	_, err := evaluateIdentExpr(expr, nil, nil)
 	if err == nil {

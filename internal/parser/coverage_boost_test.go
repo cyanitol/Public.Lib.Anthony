@@ -6,6 +6,7 @@ import (
 
 // TestCastExpressionParsing tests CAST expressions to achieve 100% coverage of parseCastExpr
 func TestCastExpressionParsing(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -59,7 +60,9 @@ func TestCastExpressionParsing(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -71,6 +74,7 @@ func TestCastExpressionParsing(t *testing.T) {
 
 // TestLexerIdentifiersWithNewlines tests identifiers containing newlines
 func TestLexerIdentifiersWithNewlines(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		input  string
@@ -99,7 +103,9 @@ func TestLexerIdentifiersWithNewlines(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			lexer := NewLexer(tt.input)
 			tok := lexer.NextToken()
 			if tok.Type != TK_ID {
@@ -114,6 +120,7 @@ func TestLexerIdentifiersWithNewlines(t *testing.T) {
 
 // TestTokenizeAllWithIllegalToken tests the error path in TokenizeAll
 func TestTokenizeAllWithIllegalToken(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -137,7 +144,9 @@ func TestTokenizeAllWithIllegalToken(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := TokenizeAll(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("TokenizeAll() error = %v, wantErr %v", err, tt.wantErr)
@@ -148,6 +157,7 @@ func TestTokenizeAllWithIllegalToken(t *testing.T) {
 
 // TestParserLowCoverageFunctions tests various parser functions with low coverage
 func TestParserLowCoverageFunctions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -517,7 +527,9 @@ func TestParserLowCoverageFunctions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -529,6 +541,7 @@ func TestParserLowCoverageFunctions(t *testing.T) {
 
 // TestParserExpressionEdgeCases tests expression parsing edge cases
 func TestParserExpressionEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -602,7 +615,9 @@ func TestParserExpressionEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -614,6 +629,7 @@ func TestParserExpressionEdgeCases(t *testing.T) {
 
 // TestParserGroupByHaving tests GROUP BY with HAVING clause
 func TestParserGroupByHaving(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -632,7 +648,9 @@ func TestParserGroupByHaving(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -644,6 +662,7 @@ func TestParserGroupByHaving(t *testing.T) {
 
 // TestParserLimitOffset tests LIMIT with OFFSET clause
 func TestParserLimitOffset(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -667,7 +686,9 @@ func TestParserLimitOffset(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -679,6 +700,7 @@ func TestParserLimitOffset(t *testing.T) {
 
 // TestParserAlias tests alias parsing edge cases
 func TestParserAlias(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -702,7 +724,9 @@ func TestParserAlias(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -714,6 +738,7 @@ func TestParserAlias(t *testing.T) {
 
 // TestParserConstraintNames tests named constraints
 func TestParserConstraintNames(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -742,7 +767,9 @@ func TestParserConstraintNames(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -754,6 +781,7 @@ func TestParserConstraintNames(t *testing.T) {
 
 // TestParserIndexedColumns tests indexed column variations
 func TestParserIndexedColumns(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -782,7 +810,9 @@ func TestParserIndexedColumns(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -794,6 +824,7 @@ func TestParserIndexedColumns(t *testing.T) {
 
 // TestParserPragmaValue tests PRAGMA value variations
 func TestParserPragmaValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -827,7 +858,9 @@ func TestParserPragmaValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {
@@ -839,6 +872,7 @@ func TestParserPragmaValue(t *testing.T) {
 
 // TestParserTriggerEvent tests trigger event variations
 func TestParserTriggerEvent(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -867,7 +901,9 @@ func TestParserTriggerEvent(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantErr {

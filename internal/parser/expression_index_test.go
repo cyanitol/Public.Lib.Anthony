@@ -6,6 +6,7 @@ import (
 
 // TestParseExpressionIndex tests parsing of expression-based indexes
 func TestParseExpressionIndex(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		sql      string
@@ -235,7 +236,9 @@ func TestParseExpressionIndex(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			stmts, err := p.Parse()
 
@@ -268,6 +271,7 @@ func TestParseExpressionIndex(t *testing.T) {
 
 // TestExpressionIndexNameExtraction tests the extractExpressionName helper
 func TestExpressionIndexNameExtraction(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		sql      string
@@ -291,7 +295,9 @@ func TestExpressionIndexNameExtraction(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			stmts, err := p.Parse()
 			if err != nil {

@@ -6,6 +6,7 @@ import (
 
 // TestInsertDefaultValues tests INSERT with DEFAULT VALUES
 func TestInsertDefaultValues(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -24,7 +25,9 @@ func TestInsertDefaultValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -36,6 +39,7 @@ func TestInsertDefaultValues(t *testing.T) {
 
 // TestInsertSelectSource tests INSERT with SELECT
 func TestInsertSelectSource(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -54,7 +58,9 @@ func TestInsertSelectSource(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -66,6 +72,7 @@ func TestInsertSelectSource(t *testing.T) {
 
 // TestOnConflictConstraintName tests ON CONFLICT with constraint name
 func TestOnConflictConstraintName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -89,7 +96,9 @@ func TestOnConflictConstraintName(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -101,6 +110,7 @@ func TestOnConflictConstraintName(t *testing.T) {
 
 // TestSelectWithCompoundOperators tests compound SELECT operators
 func TestSelectWithCompoundOperators(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -134,7 +144,9 @@ func TestSelectWithCompoundOperators(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -146,6 +158,7 @@ func TestSelectWithCompoundOperators(t *testing.T) {
 
 // TestWithClauseRecursive tests WITH RECURSIVE
 func TestWithClauseRecursive(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -164,7 +177,9 @@ func TestWithClauseRecursive(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -176,6 +191,7 @@ func TestWithClauseRecursive(t *testing.T) {
 
 // TestFromClauseMultipleTables tests FROM with multiple tables
 func TestFromClauseMultipleTables(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -194,7 +210,9 @@ func TestFromClauseMultipleTables(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -206,6 +224,7 @@ func TestFromClauseMultipleTables(t *testing.T) {
 
 // TestTableAliasWithAs tests table alias with and without AS
 func TestTableAliasWithAs(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -234,7 +253,9 @@ func TestTableAliasWithAs(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -246,6 +267,7 @@ func TestTableAliasWithAs(t *testing.T) {
 
 // TestJoinTypes tests different JOIN types
 func TestJoinTypes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -279,7 +301,9 @@ func TestJoinTypes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -291,6 +315,7 @@ func TestJoinTypes(t *testing.T) {
 
 // TestJoinUsingClause tests JOIN with USING clause
 func TestJoinUsingClause(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -309,7 +334,9 @@ func TestJoinUsingClause(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -321,6 +348,7 @@ func TestJoinUsingClause(t *testing.T) {
 
 // TestInsertMultipleRows tests INSERT with multiple value rows
 func TestInsertMultipleRows(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -344,7 +372,9 @@ func TestInsertMultipleRows(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -356,6 +386,7 @@ func TestInsertMultipleRows(t *testing.T) {
 
 // TestDoUpdateClauseWithWhere tests DO UPDATE SET with WHERE
 func TestDoUpdateClauseWithWhere(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -374,7 +405,9 @@ func TestDoUpdateClauseWithWhere(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -386,6 +419,7 @@ func TestDoUpdateClauseWithWhere(t *testing.T) {
 
 // TestCreateTableConstraints tests various table constraints
 func TestCreateTableConstraints(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -419,7 +453,9 @@ func TestCreateTableConstraints(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -431,6 +467,7 @@ func TestCreateTableConstraints(t *testing.T) {
 
 // TestCreateTableColumnConstraints tests column-level constraints
 func TestCreateTableColumnConstraints(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -454,7 +491,9 @@ func TestCreateTableColumnConstraints(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -466,6 +505,7 @@ func TestCreateTableColumnConstraints(t *testing.T) {
 
 // TestAlterTableActions tests different ALTER TABLE actions
 func TestAlterTableActions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -494,7 +534,9 @@ func TestAlterTableActions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -506,6 +548,7 @@ func TestAlterTableActions(t *testing.T) {
 
 // TestParseExpressionBitwiseOps tests various expression edge cases
 func TestParseExpressionBitwiseOps(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -559,7 +602,9 @@ func TestParseExpressionBitwiseOps(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -571,6 +616,7 @@ func TestParseExpressionBitwiseOps(t *testing.T) {
 
 // TestParseFunctionFilterClause tests function FILTER clause
 func TestParseFunctionFilterClause(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -589,7 +635,9 @@ func TestParseFunctionFilterClause(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -601,6 +649,7 @@ func TestParseFunctionFilterClause(t *testing.T) {
 
 // TestParseCaseExprWithMultipleWhen tests CASE with multiple WHEN clauses
 func TestParseCaseExprWithMultipleWhen(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -619,7 +668,9 @@ func TestParseCaseExprWithMultipleWhen(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -631,6 +682,7 @@ func TestParseCaseExprWithMultipleWhen(t *testing.T) {
 
 // TestParseSubqueryInFromClause tests subqueries in FROM clause
 func TestParseSubqueryInFromClause(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -654,7 +706,9 @@ func TestParseSubqueryInFromClause(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -666,6 +720,7 @@ func TestParseSubqueryInFromClause(t *testing.T) {
 
 // TestParseCreateTriggerTiming tests trigger timing variations
 func TestParseCreateTriggerTiming(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -694,7 +749,9 @@ func TestParseCreateTriggerTiming(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -706,6 +763,7 @@ func TestParseCreateTriggerTiming(t *testing.T) {
 
 // TestParseForeignKeyReferences tests foreign key reference clauses
 func TestParseForeignKeyReferences(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -726,7 +784,9 @@ func TestParseForeignKeyReferences(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -738,6 +798,7 @@ func TestParseForeignKeyReferences(t *testing.T) {
 
 // TestParseOrderByCollation tests ORDER BY with COLLATE
 func TestParseOrderByCollation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -761,7 +822,9 @@ func TestParseOrderByCollation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -773,6 +836,7 @@ func TestParseOrderByCollation(t *testing.T) {
 
 // TestParseGroupByHavingClause tests GROUP BY with HAVING
 func TestParseGroupByHavingClause(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -791,7 +855,9 @@ func TestParseGroupByHavingClause(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -803,6 +869,7 @@ func TestParseGroupByHavingClause(t *testing.T) {
 
 // TestParseLimitOffset tests LIMIT with OFFSET
 func TestParseLimitOffset(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -826,7 +893,9 @@ func TestParseLimitOffset(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -838,6 +907,7 @@ func TestParseLimitOffset(t *testing.T) {
 
 // TestParseVacuumInto tests VACUUM INTO
 func TestParseVacuumInto(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -866,7 +936,9 @@ func TestParseVacuumInto(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -878,6 +950,7 @@ func TestParseVacuumInto(t *testing.T) {
 
 // TestParseParenthesizedExpression tests parenthesized vs subquery
 func TestParseParenthesizedExpression(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -901,7 +974,9 @@ func TestParseParenthesizedExpression(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {
@@ -913,6 +988,7 @@ func TestParseParenthesizedExpression(t *testing.T) {
 
 // TestParseIdentOrFunctionQualified tests qualified identifiers
 func TestParseIdentOrFunctionQualified(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -936,7 +1012,9 @@ func TestParseIdentOrFunctionQualified(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if (err != nil) != tt.wantError {

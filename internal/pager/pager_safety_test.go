@@ -11,6 +11,7 @@ import (
 
 // TestStateTransitionValidation tests that state transitions are properly validated.
 func TestStateTransitionValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		fromState   int
@@ -86,6 +87,7 @@ func TestStateTransitionValidation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			p := &Pager{state: tt.fromState}
 			err := p.validateTransition(tt.toState)
@@ -102,6 +104,7 @@ func TestStateTransitionValidation(t *testing.T) {
 
 // TestGetSetState tests thread-safe state access.
 func TestGetSetState(t *testing.T) {
+	t.Parallel()
 	tmpFile := createTempDB(t)
 	defer os.Remove(tmpFile)
 
@@ -137,6 +140,7 @@ func TestGetSetState(t *testing.T) {
 
 // TestConcurrentStateAccess tests that concurrent state access is safe.
 func TestConcurrentStateAccess(t *testing.T) {
+	t.Parallel()
 	tmpFile := createTempDB(t)
 	defer os.Remove(tmpFile)
 
@@ -182,6 +186,7 @@ func TestConcurrentStateAccess(t *testing.T) {
 
 // TestJournalChecksumValidation tests checksum validation during journal operations.
 func TestJournalChecksumValidation(t *testing.T) {
+	t.Parallel()
 	tmpFile := createTempDB(t)
 	defer os.Remove(tmpFile)
 	defer os.Remove(tmpFile + "-journal")
@@ -227,6 +232,7 @@ func TestJournalChecksumValidation(t *testing.T) {
 
 // TestJournalChecksumCorruption tests that corrupted checksums are detected.
 func TestJournalChecksumCorruption(t *testing.T) {
+	t.Parallel()
 	tmpFile := createTempDB(t)
 	defer os.Remove(tmpFile)
 	defer os.Remove(tmpFile + "-journal")
@@ -334,6 +340,7 @@ func TestJournalChecksumCorruption(t *testing.T) {
 
 // TestValidateJournalPage tests the checksum validation function.
 func TestValidateJournalPage(t *testing.T) {
+	t.Parallel()
 	p := &Pager{pageSize: 4096}
 
 	testData := make([]byte, 4096)
@@ -362,6 +369,7 @@ func TestValidateJournalPage(t *testing.T) {
 
 // TestCalculateChecksum tests the checksum calculation function.
 func TestCalculateChecksum(t *testing.T) {
+	t.Parallel()
 	p := &Pager{}
 
 	testCases := []struct {
@@ -375,6 +383,7 @@ func TestCalculateChecksum(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			checksum := p.calculateChecksum(tc.data)
 			expected := crc32.ChecksumIEEE(tc.data)
@@ -394,6 +403,7 @@ func TestCalculateChecksum(t *testing.T) {
 
 // TestWALFrameChecksum tests WAL frame checksum validation.
 func TestWALFrameChecksum(t *testing.T) {
+	t.Parallel()
 	tmpFile := createTempDB(t)
 	defer os.Remove(tmpFile)
 	defer os.Remove(tmpFile + "-shm")
@@ -427,6 +437,7 @@ func TestWALFrameChecksum(t *testing.T) {
 
 // TestWALInsertFrameWithChecksum tests inserting WAL frames with checksum validation.
 func TestWALInsertFrameWithChecksum(t *testing.T) {
+	t.Parallel()
 	tmpFile := createTempDB(t)
 	defer os.Remove(tmpFile)
 	defer os.Remove(tmpFile + "-shm")
@@ -461,6 +472,7 @@ func TestWALInsertFrameWithChecksum(t *testing.T) {
 
 // TestWALFrameChecksumInHeader tests updating and retrieving frame checksums in header.
 func TestWALFrameChecksumInHeader(t *testing.T) {
+	t.Parallel()
 	tmpFile := createTempDB(t)
 	defer os.Remove(tmpFile)
 	defer os.Remove(tmpFile + "-shm")
@@ -491,6 +503,7 @@ func TestWALFrameChecksumInHeader(t *testing.T) {
 
 // TestConcurrentStateTransitions tests that concurrent state transitions are safe.
 func TestConcurrentStateTransitions(t *testing.T) {
+	t.Parallel()
 	tmpFile := createTempDB(t)
 	defer os.Remove(tmpFile)
 
@@ -529,6 +542,7 @@ func TestConcurrentStateTransitions(t *testing.T) {
 
 // TestStateTransitionErrorRecovery tests that the pager can recover from state errors.
 func TestStateTransitionErrorRecovery(t *testing.T) {
+	t.Parallel()
 	tmpFile := createTempDB(t)
 	defer os.Remove(tmpFile)
 

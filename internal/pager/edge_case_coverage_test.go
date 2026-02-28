@@ -10,6 +10,7 @@ import (
 
 // TestInitNewDatabaseReadOnly tests attempting to create a database in read-only mode
 func TestInitNewDatabaseReadOnly(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_readonly_create.db")
 
 	// Try to open non-existent file in read-only mode (should fail)
@@ -21,6 +22,7 @@ func TestInitNewDatabaseReadOnly(t *testing.T) {
 
 // TestCommitWithFreelistFlush tests commit phase 0 with freelist
 func TestCommitWithFreelistFlush(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_freelist_flush.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -71,6 +73,7 @@ func TestCommitWithFreelistFlush(t *testing.T) {
 
 // TestCommitWithMultipleDirtyPages tests commit phase 1 with many dirty pages
 func TestCommitWithMultipleDirtyPages(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_dirty_pages.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -130,6 +133,7 @@ func TestCommitWithMultipleDirtyPages(t *testing.T) {
 
 // TestCommitWithSync tests commit phase 2 (sync)
 func TestCommitWithSync(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_sync.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -180,6 +184,7 @@ func TestCommitWithSync(t *testing.T) {
 
 // TestCommitWithJournalFinalization tests commit phase 3 (finalize journal)
 func TestCommitWithJournalFinalization(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_finalize_journal.db")
 	journalFile := dbFile + "-journal"
 
@@ -216,6 +221,7 @@ func TestCommitWithJournalFinalization(t *testing.T) {
 
 // TestAcquireReservedLockWithRetryContention tests retry logic for reserved lock
 func TestAcquireReservedLockWithRetryContention(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -255,6 +261,7 @@ func TestAcquireReservedLockWithRetryContention(t *testing.T) {
 
 // TestAcquirePendingLockWithRetry tests pending lock acquisition with retry
 func TestAcquirePendingLockWithRetry(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -292,6 +299,7 @@ func TestAcquirePendingLockWithRetry(t *testing.T) {
 
 // TestProcessTrunkPageWithMultipleTrunks tests trunk page processing
 func TestProcessTrunkPageWithMultipleTrunks(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -359,6 +367,7 @@ func TestProcessTrunkPageWithMultipleTrunks(t *testing.T) {
 
 // TestEnableWALModeEdgeCases tests WAL mode edge cases
 func TestEnableWALModeEdgeCases(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_wal_edge.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -405,6 +414,7 @@ func TestEnableWALModeEdgeCases(t *testing.T) {
 
 // TestTryUpgradeToExclusiveEdgeCases tests exclusive upgrade edge cases
 func TestTryUpgradeToExclusiveEdgeCases(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -438,6 +448,7 @@ func TestTryUpgradeToExclusiveEdgeCases(t *testing.T) {
 
 // TestMultipleCommitCycles tests multiple commit/rollback cycles
 func TestMultipleCommitCycles(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_cycles.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -485,6 +496,7 @@ func TestMultipleCommitCycles(t *testing.T) {
 
 // TestRollbackCycles tests multiple rollback cycles
 func TestRollbackCycles(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_rollback_cycles.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)

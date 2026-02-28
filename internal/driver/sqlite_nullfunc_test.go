@@ -910,7 +910,9 @@ func TestSQLiteNullFunctions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			db := setupMemoryDB(t)
 			defer db.Close()
 
@@ -937,6 +939,7 @@ func TestSQLiteNullFunctionEdgeCases(t *testing.T) {
 	defer db.Close()
 
 	t.Run("coalesce-preserves-null-in-middle", func(t *testing.T) {
+		t.Parallel()
 		// Once a non-NULL value is found, remaining arguments should not be evaluated
 		result := querySingle(t, db, "SELECT coalesce(NULL, 42, NULL, 100)")
 		if !valuesEqual(result, int64(42)) {
@@ -945,6 +948,7 @@ func TestSQLiteNullFunctionEdgeCases(t *testing.T) {
 	})
 
 	t.Run("nullif-type-coercion", func(t *testing.T) {
+		t.Parallel()
 		// SQLite performs type coercion for comparison
 		result := querySingle(t, db, "SELECT nullif('5', 5)")
 		// In SQLite, '5' = 5 evaluates to true due to type affinity
@@ -954,6 +958,7 @@ func TestSQLiteNullFunctionEdgeCases(t *testing.T) {
 	})
 
 	t.Run("iif-evaluates-only-selected-branch", func(t *testing.T) {
+		t.Parallel()
 		// The false branch should not be evaluated if condition is true
 		result := querySingle(t, db, "SELECT iif(1, 'yes', 1/0)")
 		if !valuesEqual(result, "yes") {
@@ -962,6 +967,7 @@ func TestSQLiteNullFunctionEdgeCases(t *testing.T) {
 	})
 
 	t.Run("multiple-coalesce-same-query", func(t *testing.T) {
+		t.Parallel()
 		execSQL(t, db, "CREATE TABLE t1(a INTEGER, b INTEGER, c INTEGER, d INTEGER)")
 		execSQL(t, db, "INSERT INTO t1 VALUES(NULL, 2, NULL, 4)")
 
@@ -980,6 +986,7 @@ func TestSQLiteNullFunctionEdgeCases(t *testing.T) {
 	})
 
 	t.Run("nullif-with-case-sensitive-text", func(t *testing.T) {
+		t.Parallel()
 		// SQLite text comparison is case-sensitive by default
 		result := querySingle(t, db, "SELECT nullif('Hello', 'hello')")
 		if !valuesEqual(result, "Hello") {
@@ -988,6 +995,7 @@ func TestSQLiteNullFunctionEdgeCases(t *testing.T) {
 	})
 
 	t.Run("ifnull-chain", func(t *testing.T) {
+		t.Parallel()
 		result := querySingle(t, db, "SELECT ifnull(ifnull(ifnull(NULL, NULL), NULL), 'final')")
 		if !valuesEqual(result, "final") {
 			t.Errorf("expected 'final', got %v", result)

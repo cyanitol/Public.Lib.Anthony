@@ -6,7 +6,9 @@ import (
 
 // TestExecCopyErrorPaths tests error paths in execCopy
 func TestExecCopyErrorPaths(t *testing.T) {
+	t.Parallel()
 	t.Run("InvalidSrc", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(3)
 		instr := &Instruction{
 			Opcode: OpCopy,
@@ -20,6 +22,7 @@ func TestExecCopyErrorPaths(t *testing.T) {
 	})
 
 	t.Run("InvalidDst", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(3)
 		instr := &Instruction{
 			Opcode: OpCopy,
@@ -35,6 +38,7 @@ func TestExecCopyErrorPaths(t *testing.T) {
 
 // TestExecIntegerErrorPath tests error path in execInteger
 func TestExecIntegerErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	instr := &Instruction{
 		Opcode: OpInteger,
@@ -49,6 +53,7 @@ func TestExecIntegerErrorPath(t *testing.T) {
 
 // TestExecNullErrorPath tests error path in execNull
 func TestExecNullErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	instr := &Instruction{
 		Opcode: OpNull,
@@ -63,6 +68,7 @@ func TestExecNullErrorPath(t *testing.T) {
 
 // TestExecIfErrorPath tests error path in execIf
 func TestExecIfErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	instr := &Instruction{
 		Opcode: OpIf,
@@ -77,6 +83,7 @@ func TestExecIfErrorPath(t *testing.T) {
 
 // TestExecIfNotErrorPath tests error path in execIfNot
 func TestExecIfNotErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	instr := &Instruction{
 		Opcode: OpIfNot,
@@ -91,6 +98,7 @@ func TestExecIfNotErrorPath(t *testing.T) {
 
 // TestExecIfPosErrorPath tests error path in execIfPos
 func TestExecIfPosErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	instr := &Instruction{
 		Opcode: OpIfPos,
@@ -106,6 +114,7 @@ func TestExecIfPosErrorPath(t *testing.T) {
 
 // TestExecGosubErrorPath tests error path in execGosub
 func TestExecGosubErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	instr := &Instruction{
 		Opcode: OpGosub,
@@ -120,6 +129,7 @@ func TestExecGosubErrorPath(t *testing.T) {
 
 // TestExecReturnErrorPath tests error path in execReturn
 func TestExecReturnErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	instr := &Instruction{
 		Opcode: OpReturn,
@@ -133,9 +143,11 @@ func TestExecReturnErrorPath(t *testing.T) {
 
 // TestExecMoveErrorPath tests error path in execMove
 func TestExecMoveErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 
 	t.Run("InvalidSrc", func(t *testing.T) {
+		t.Parallel()
 		instr := &Instruction{
 			Opcode: OpMove,
 			P1:     100, // Out of bounds
@@ -149,6 +161,7 @@ func TestExecMoveErrorPath(t *testing.T) {
 	})
 
 	t.Run("InvalidDst", func(t *testing.T) {
+		t.Parallel()
 		instr := &Instruction{
 			Opcode: OpMove,
 			P1:     0,
@@ -164,9 +177,11 @@ func TestExecMoveErrorPath(t *testing.T) {
 
 // TestExecSCopyErrorPath tests error path in execSCopy
 func TestExecSCopyErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 
 	t.Run("InvalidSrc", func(t *testing.T) {
+		t.Parallel()
 		instr := &Instruction{
 			Opcode: OpSCopy,
 			P1:     100, // Out of bounds
@@ -179,6 +194,7 @@ func TestExecSCopyErrorPath(t *testing.T) {
 	})
 
 	t.Run("InvalidDst", func(t *testing.T) {
+		t.Parallel()
 		instr := &Instruction{
 			Opcode: OpSCopy,
 			P1:     0,
@@ -193,6 +209,7 @@ func TestExecSCopyErrorPath(t *testing.T) {
 
 // TestExecAddImmErrorPath tests error path in execAddImm
 func TestExecAddImmErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	instr := &Instruction{
 		Opcode: OpAddImm,
@@ -207,6 +224,7 @@ func TestExecAddImmErrorPath(t *testing.T) {
 
 // TestExecIsNullErrorPath tests error path in execIsNull
 func TestExecIsNullErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	instr := &Instruction{
 		Opcode: OpIsNull,
@@ -221,6 +239,7 @@ func TestExecIsNullErrorPath(t *testing.T) {
 
 // TestExecNotNullErrorPath tests error path in execNotNull
 func TestExecNotNullErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	instr := &Instruction{
 		Opcode: OpNotNull,
@@ -235,6 +254,7 @@ func TestExecNotNullErrorPath(t *testing.T) {
 
 // TestExecCloseErrorPath tests error path in execClose
 func TestExecCloseErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	v.AllocCursors(2)
 
@@ -250,6 +270,7 @@ func TestExecCloseErrorPath(t *testing.T) {
 
 // TestExecRewindErrorPath tests error path in execRewind
 func TestExecRewindErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	v.AllocCursors(2)
 
@@ -266,6 +287,7 @@ func TestExecRewindErrorPath(t *testing.T) {
 
 // TestExecNextErrorPath tests error path in execNext
 func TestExecNextErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	v.AllocCursors(2)
 
@@ -282,6 +304,7 @@ func TestExecNextErrorPath(t *testing.T) {
 
 // TestExecPrevErrorPath tests error path in execPrev
 func TestExecPrevErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	v.AllocCursors(2)
 
@@ -298,10 +321,12 @@ func TestExecPrevErrorPath(t *testing.T) {
 
 // TestExecSeekGEErrorPath tests error path in execSeekGE
 func TestExecSeekGEErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	v.AllocCursors(2)
 
 	t.Run("InvalidCursor", func(t *testing.T) {
+		t.Parallel()
 		instr := &Instruction{
 			Opcode: OpSeekGE,
 			P1:     100, // Out of bounds
@@ -315,6 +340,7 @@ func TestExecSeekGEErrorPath(t *testing.T) {
 	})
 
 	t.Run("InvalidKey", func(t *testing.T) {
+		t.Parallel()
 		instr := &Instruction{
 			Opcode: OpSeekGE,
 			P1:     0,
@@ -330,10 +356,12 @@ func TestExecSeekGEErrorPath(t *testing.T) {
 
 // TestExecColumnErrorPath tests error path in execColumn
 func TestExecColumnErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	v.AllocCursors(2)
 
 	t.Run("InvalidCursor", func(t *testing.T) {
+		t.Parallel()
 		instr := &Instruction{
 			Opcode: OpColumn,
 			P1:     100, // Out of bounds
@@ -347,6 +375,7 @@ func TestExecColumnErrorPath(t *testing.T) {
 	})
 
 	t.Run("InvalidDst", func(t *testing.T) {
+		t.Parallel()
 		v.Cursors[0] = &Cursor{}
 		instr := &Instruction{
 			Opcode: OpColumn,
@@ -363,10 +392,12 @@ func TestExecColumnErrorPath(t *testing.T) {
 
 // TestExecRowidErrorPath tests error path in execRowid
 func TestExecRowidErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	v.AllocCursors(2)
 
 	t.Run("InvalidCursor", func(t *testing.T) {
+		t.Parallel()
 		instr := &Instruction{
 			Opcode: OpRowid,
 			P1:     100, // Out of bounds
@@ -379,6 +410,7 @@ func TestExecRowidErrorPath(t *testing.T) {
 	})
 
 	t.Run("InvalidDst", func(t *testing.T) {
+		t.Parallel()
 		v.Cursors[0] = &Cursor{}
 		instr := &Instruction{
 			Opcode: OpRowid,
@@ -394,10 +426,12 @@ func TestExecRowidErrorPath(t *testing.T) {
 
 // TestExecNotExistsErrorPath tests error path in execNotExists
 func TestExecNotExistsErrorPath(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(3)
 	v.AllocCursors(2)
 
 	t.Run("InvalidCursor", func(t *testing.T) {
+		t.Parallel()
 		instr := &Instruction{
 			Opcode: OpNotExists,
 			P1:     100, // Out of bounds
@@ -411,6 +445,7 @@ func TestExecNotExistsErrorPath(t *testing.T) {
 	})
 
 	t.Run("InvalidRowidReg", func(t *testing.T) {
+		t.Parallel()
 		v.Cursors[0] = &Cursor{}
 		instr := &Instruction{
 			Opcode: OpNotExists,
@@ -427,6 +462,7 @@ func TestExecNotExistsErrorPath(t *testing.T) {
 
 // TestCompareOperationsErrorPaths tests error paths in comparison operations
 func TestCompareOperationsErrorPaths(t *testing.T) {
+	t.Parallel()
 	opcodes := []struct {
 		name   string
 		opcode Opcode
@@ -441,6 +477,7 @@ func TestCompareOperationsErrorPaths(t *testing.T) {
 
 	for _, op := range opcodes {
 		t.Run(op.name+"_InvalidLeft", func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(3)
 			instr := &Instruction{
 				Opcode: op.opcode,
@@ -455,6 +492,7 @@ func TestCompareOperationsErrorPaths(t *testing.T) {
 		})
 
 		t.Run(op.name+"_InvalidRight", func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(3)
 			v.Mem[0].SetInt(10)
 			instr := &Instruction{
@@ -470,6 +508,7 @@ func TestCompareOperationsErrorPaths(t *testing.T) {
 		})
 
 		t.Run(op.name+"_InvalidResult", func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(3)
 			v.Mem[0].SetInt(10)
 			v.Mem[1].SetInt(20)
@@ -489,6 +528,7 @@ func TestCompareOperationsErrorPaths(t *testing.T) {
 
 // TestExecAddImmNonInt tests execAddImm with non-integer value
 func TestExecAddImmNonInt(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(5)
 	v.Mem[0].SetStr("42")
 

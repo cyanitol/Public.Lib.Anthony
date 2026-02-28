@@ -12,6 +12,7 @@ import (
 
 // TestJournalRestoreEntry tests the journal restoreEntry function
 func TestJournalRestoreEntry(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_restore.db")
 
 	// Create a pager
@@ -102,6 +103,7 @@ func TestJournalRestoreEntry(t *testing.T) {
 
 // TestJournalRestoreEntryChecksumMismatch tests checksum validation in restoreEntry
 func TestJournalRestoreEntryChecksumMismatch(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_checksum.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -141,6 +143,7 @@ func TestJournalRestoreEntryChecksumMismatch(t *testing.T) {
 
 // TestJournalValidateHeader tests journal header validation
 func TestJournalValidateHeader(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_validate.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -152,6 +155,7 @@ func TestJournalValidateHeader(t *testing.T) {
 	journal := NewJournal(dbFile+"-journal", 4096, 1)
 
 	t.Run("validate valid header", func(t *testing.T) {
+			t.Parallel()
 		if err := journal.Open(); err != nil {
 			t.Fatalf("failed to open journal: %v", err)
 		}
@@ -184,6 +188,7 @@ func TestJournalValidateHeader(t *testing.T) {
 
 // TestLockUnixFcntlGetLk tests the fcntlGetLk function
 func TestLockUnixFcntlGetLk(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -206,6 +211,7 @@ func TestLockUnixFcntlGetLk(t *testing.T) {
 
 // TestLockUnixCheckReservedLock tests the CheckReservedLock function
 func TestLockUnixCheckReservedLock(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -260,6 +266,7 @@ func TestLockUnixCheckReservedLock(t *testing.T) {
 
 // TestLockUnixAcquirePendingLock tests pending lock acquisition
 func TestLockUnixAcquirePendingLock(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -291,6 +298,7 @@ func TestLockUnixAcquirePendingLock(t *testing.T) {
 
 // TestLockUnixAcquireReservedLock tests reserved lock acquisition edge cases
 func TestLockUnixAcquireReservedLock(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -341,6 +349,7 @@ func TestLockUnixAcquireReservedLock(t *testing.T) {
 
 // TestTransactionErrorState tests transaction error state management
 func TestTransactionErrorState(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_error.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -371,6 +380,7 @@ func TestTransactionErrorState(t *testing.T) {
 
 // TestTransactionUpgradeDowngradeLock tests lock upgrade/downgrade
 func TestTransactionUpgradeDowngradeLock(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_lock_updown.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -411,6 +421,7 @@ func TestTransactionUpgradeDowngradeLock(t *testing.T) {
 
 // TestTransactionTryUpgradeToExclusive tests exclusive lock upgrade
 func TestTransactionTryUpgradeToExclusive(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_exclusive.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -444,6 +455,7 @@ func TestTransactionTryUpgradeToExclusive(t *testing.T) {
 
 // TestTransactionWaitForReadersToFinish tests waiting for readers
 func TestTransactionWaitForReadersToFinish(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_wait.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -463,6 +475,7 @@ func TestTransactionWaitForReadersToFinish(t *testing.T) {
 
 // TestPagerJournalZeroHeader tests zeroing journal header via journal API
 func TestPagerJournalZeroHeader(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_zero.db")
 	journalFile := dbFile + "-journal"
 
@@ -515,6 +528,7 @@ func TestPagerJournalZeroHeader(t *testing.T) {
 
 // TestPagerFullCommitCycle tests complete commit cycle
 func TestPagerFullCommitCycle(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_commit_cycle.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -574,6 +588,7 @@ func TestPagerFullCommitCycle(t *testing.T) {
 
 // TestPagerInitNewDatabase tests new database initialization
 func TestPagerInitNewDatabaseViaOpen(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_init.db")
 
 	// Open will initialize a new database
@@ -601,6 +616,7 @@ func TestPagerInitNewDatabaseViaOpen(t *testing.T) {
 
 // TestFreeListProcessTrunkPage tests trunk page processing
 func TestFreeListProcessTrunkPage(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -680,6 +696,7 @@ func createCoverageTestFile(t *testing.T) (*os.File, func()) {
 
 // TestBusyHandlerRetry tests busy handler with retry logic
 func TestBusyHandlerRetry(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}

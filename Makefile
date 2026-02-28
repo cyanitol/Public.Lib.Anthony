@@ -1,4 +1,8 @@
-.PHONY: all build test test-cover test-race lint clean help
+.PHONY: all build test test-fast test-ci test-short test-cover test-race lint clean help
+
+# Test configuration
+TEST_PARALLEL ?= 4
+TEST_PKG_PARALLEL ?= 8
 
 # Default target
 all: test build
@@ -9,7 +13,19 @@ build:
 
 # Run all tests
 test:
-	go test ./...
+	CGO_ENABLED=0 go test ./...
+
+# Fast parallel testing for development
+test-fast:
+	CGO_ENABLED=0 go test -p $(TEST_PKG_PARALLEL) -parallel $(TEST_PARALLEL) ./...
+
+# CI testing with JSON output and trimpath
+test-ci:
+	CGO_ENABLED=0 go test -p $(TEST_PKG_PARALLEL) -parallel $(TEST_PARALLEL) -trimpath -json ./...
+
+# Short mode skipping slow tests
+test-short:
+	CGO_ENABLED=0 go test -p $(TEST_PKG_PARALLEL) -parallel $(TEST_PARALLEL) -short ./...
 
 # Run tests with coverage
 test-cover:
@@ -64,6 +80,9 @@ help:
 	@echo "  all              - Run tests and build"
 	@echo "  build            - Build the project"
 	@echo "  test             - Run all tests"
+	@echo "  test-fast        - Fast parallel testing for development"
+	@echo "  test-ci          - CI testing with JSON output and trimpath"
+	@echo "  test-short       - Short mode skipping slow tests"
 	@echo "  test-cover       - Run tests with coverage summary"
 	@echo "  test-cover-report - Generate HTML coverage report"
 	@echo "  test-cover-func  - Show per-function coverage"

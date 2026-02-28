@@ -11,6 +11,7 @@ import (
 
 // TestRTreeModule tests the R-Tree module creation.
 func TestRTreeModule(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	if module == nil {
 		t.Fatal("NewRTreeModule returned nil")
@@ -19,6 +20,7 @@ func TestRTreeModule(t *testing.T) {
 
 // TestCreateRTreeTable tests creating an R-Tree virtual table.
 func TestCreateRTreeTable(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 
 	tests := []struct {
@@ -52,7 +54,9 @@ func TestCreateRTreeTable(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			table, schema, err := module.Create(nil, "rtree", "main", "test_rtree", tt.args)
 
 			if tt.wantErr {
@@ -91,6 +95,7 @@ func TestCreateRTreeTable(t *testing.T) {
 
 // TestRTreeInsert tests inserting entries into the R-Tree.
 func TestRTreeInsert(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, err := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -144,6 +149,7 @@ func TestRTreeInsert(t *testing.T) {
 
 // TestRTreeDelete tests deleting entries from the R-Tree.
 func TestRTreeDelete(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, err := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -193,6 +199,7 @@ func TestRTreeDelete(t *testing.T) {
 
 // TestRTreeUpdate tests updating entries in the R-Tree.
 func TestRTreeUpdate(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, err := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -238,6 +245,7 @@ func TestRTreeUpdate(t *testing.T) {
 
 // TestRTreeCursor tests cursor operations.
 func TestRTreeCursor(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, err := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -303,6 +311,7 @@ func TestRTreeCursor(t *testing.T) {
 
 // TestRTreeSearchOverlap tests spatial overlap queries.
 func TestRTreeSearchOverlap(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, err := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -325,6 +334,7 @@ func TestRTreeSearchOverlap(t *testing.T) {
 	}
 
 	for _, r := range rects {
+		r := r
 		args := []interface{}{
 			nil, r.id, r.minX, r.maxX, r.minY, r.maxY,
 		}
@@ -365,6 +375,7 @@ func TestRTreeSearchOverlap(t *testing.T) {
 
 // TestRTreeSearchWithin tests spatial containment queries.
 func TestRTreeSearchWithin(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, err := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -386,6 +397,7 @@ func TestRTreeSearchWithin(t *testing.T) {
 	}
 
 	for _, r := range rects {
+		r := r
 		args := []interface{}{
 			nil, r.id, r.minX, r.maxX, r.minY, r.maxY,
 		}
@@ -415,6 +427,7 @@ func TestRTreeSearchWithin(t *testing.T) {
 
 // TestRTreeSearchContains tests point containment queries.
 func TestRTreeSearchContains(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, err := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -435,6 +448,7 @@ func TestRTreeSearchContains(t *testing.T) {
 	}
 
 	for _, r := range rects {
+		r := r
 		args := []interface{}{
 			nil, r.id, r.minX, r.maxX, r.minY, r.maxY,
 		}
@@ -474,6 +488,7 @@ func TestRTreeSearchContains(t *testing.T) {
 
 // TestRTreeBestIndex tests the BestIndex method.
 func TestRTreeBestIndex(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, err := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -509,6 +524,11 @@ func TestRTreeBestIndex(t *testing.T) {
 
 // TestRTreeLargeDataset tests R-Tree with a larger dataset.
 func TestRTreeLargeDataset(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("skipping slow test in short mode")
+	}
+
 	module := NewRTreeModule()
 	table, _, err := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -574,6 +594,7 @@ func TestRTreeLargeDataset(t *testing.T) {
 
 // TestRTreeBoundingBox tests bounding box operations.
 func TestRTreeBoundingBox(t *testing.T) {
+	t.Parallel()
 	// Test 2D bounding box
 	bbox1 := NewBoundingBox(2)
 	bbox1.Min[0] = 0
@@ -634,6 +655,7 @@ func TestRTreeBoundingBox(t *testing.T) {
 
 // TestRTreeNearestNeighbor tests nearest neighbor search.
 func TestRTreeNearestNeighbor(t *testing.T) {
+	t.Parallel()
 	rtree := NewLeafNode()
 
 	// Insert some entries
@@ -644,6 +666,7 @@ func TestRTreeNearestNeighbor(t *testing.T) {
 	}
 
 	for _, entry := range entries {
+		entry := entry
 		rtree = rtree.Insert(entry)
 	}
 
@@ -670,6 +693,7 @@ func TestRTreeNearestNeighbor(t *testing.T) {
 
 // TestRTreeSplitting tests node splitting behavior.
 func TestRTreeSplitting(t *testing.T) {
+	t.Parallel()
 	rtree := NewLeafNode()
 
 	// Insert enough entries to trigger splits
@@ -699,6 +723,7 @@ func TestRTreeSplitting(t *testing.T) {
 
 // TestRTreeRegistration tests module registration.
 func TestRTreeRegistration(t *testing.T) {
+	t.Parallel()
 	// Clear any existing registrations
 	vtab.DefaultRegistry().Clear()
 
@@ -782,6 +807,7 @@ func BenchmarkRTreeSearch(b *testing.B) {
 
 // TestRTree3D tests 3D spatial indexing.
 func TestRTree3D(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, err := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY", "minZ", "maxZ"})
@@ -821,6 +847,7 @@ func TestRTree3D(t *testing.T) {
 
 // TestDistanceFunctions tests distance calculation functions.
 func TestDistanceFunctions(t *testing.T) {
+	t.Parallel()
 	bbox1 := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 10},
@@ -853,6 +880,7 @@ func TestDistanceFunctions(t *testing.T) {
 
 // TestOverlapArea tests overlap area calculation.
 func TestOverlapArea(t *testing.T) {
+	t.Parallel()
 	bbox1 := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 10},
@@ -884,6 +912,7 @@ func TestOverlapArea(t *testing.T) {
 
 // TestRTreeModuleConnect tests the Connect method.
 func TestRTreeModuleConnect(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 
 	table, schema, err := module.Connect(nil, "rtree", "main", "test_rtree",
@@ -912,6 +941,7 @@ func TestRTreeModuleConnect(t *testing.T) {
 
 // TestRTreeDestroy tests the Destroy method.
 func TestRTreeDestroy(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, err := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -953,6 +983,7 @@ func TestRTreeDestroy(t *testing.T) {
 
 // TestRTreeCursorColumn tests Column method for all column types.
 func TestRTreeCursorColumn(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, err := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -998,6 +1029,7 @@ func TestRTreeCursorColumn(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		val, err := cursor.Column(tt.col)
 		if err != nil {
 			t.Errorf("Column(%d) error: %v", tt.col, err)
@@ -1035,6 +1067,7 @@ func TestRTreeCursorColumn(t *testing.T) {
 
 // TestRangeSearch tests range-based spatial queries.
 func TestRangeSearch(t *testing.T) {
+	t.Parallel()
 	root := NewLeafNode()
 
 	// Insert entries
@@ -1045,6 +1078,7 @@ func TestRangeSearch(t *testing.T) {
 	}
 
 	for _, entry := range entries {
+		entry := entry
 		root = root.Insert(entry)
 	}
 
@@ -1064,6 +1098,7 @@ func TestRangeSearch(t *testing.T) {
 
 // TestIntersectionSearch tests intersection queries.
 func TestIntersectionSearch(t *testing.T) {
+	t.Parallel()
 	root := NewLeafNode()
 
 	entries := []*Entry{
@@ -1072,6 +1107,7 @@ func TestIntersectionSearch(t *testing.T) {
 	}
 
 	for _, entry := range entries {
+		entry := entry
 		root = root.Insert(entry)
 	}
 
@@ -1089,6 +1125,7 @@ func TestIntersectionSearch(t *testing.T) {
 
 // TestContainmentSearch tests containment queries.
 func TestContainmentSearch(t *testing.T) {
+	t.Parallel()
 	root := NewLeafNode()
 
 	entries := []*Entry{
@@ -1097,6 +1134,7 @@ func TestContainmentSearch(t *testing.T) {
 	}
 
 	for _, entry := range entries {
+		entry := entry
 		root = root.Insert(entry)
 	}
 
@@ -1111,6 +1149,7 @@ func TestContainmentSearch(t *testing.T) {
 
 // TestEnclosureSearch tests enclosure queries.
 func TestEnclosureSearch(t *testing.T) {
+	t.Parallel()
 	root := NewLeafNode()
 
 	entries := []*Entry{
@@ -1120,6 +1159,7 @@ func TestEnclosureSearch(t *testing.T) {
 	}
 
 	for _, entry := range entries {
+		entry := entry
 		root = root.Insert(entry)
 	}
 
@@ -1134,6 +1174,7 @@ func TestEnclosureSearch(t *testing.T) {
 
 // TestWindowQuery tests window queries.
 func TestWindowQuery(t *testing.T) {
+	t.Parallel()
 	root := NewLeafNode()
 
 	entries := []*Entry{
@@ -1143,6 +1184,7 @@ func TestWindowQuery(t *testing.T) {
 	}
 
 	for _, entry := range entries {
+		entry := entry
 		root = root.Insert(entry)
 	}
 
@@ -1159,6 +1201,7 @@ func TestWindowQuery(t *testing.T) {
 
 // TestSpatialJoin tests spatial join operation.
 func TestSpatialJoin(t *testing.T) {
+	t.Parallel()
 	tree1 := NewLeafNode()
 	tree2 := NewLeafNode()
 
@@ -1186,6 +1229,7 @@ func TestSpatialJoin(t *testing.T) {
 
 // TestIntersectionBox tests intersection box calculation.
 func TestIntersectionBox(t *testing.T) {
+	t.Parallel()
 	bbox1 := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 10},
@@ -1224,6 +1268,7 @@ func TestIntersectionBox(t *testing.T) {
 
 // TestUnionBox tests union box calculation.
 func TestUnionBox(t *testing.T) {
+	t.Parallel()
 	bbox1 := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 10},
@@ -1251,6 +1296,7 @@ func TestUnionBox(t *testing.T) {
 
 // TestBoundingBoxPerimeter tests perimeter calculation.
 func TestBoundingBoxPerimeter(t *testing.T) {
+	t.Parallel()
 	bbox := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 5},
@@ -1266,6 +1312,7 @@ func TestBoundingBoxPerimeter(t *testing.T) {
 
 // TestBoundingBoxContainsPoint tests point containment.
 func TestBoundingBoxContainsPoint(t *testing.T) {
+	t.Parallel()
 	bbox := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 10},
@@ -1283,6 +1330,7 @@ func TestBoundingBoxContainsPoint(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		result := bbox.ContainsPoint(tt.point)
 		if result != tt.expected {
 			t.Errorf("ContainsPoint(%v) = %v, want %v", tt.point, result, tt.expected)
@@ -1292,6 +1340,7 @@ func TestBoundingBoxContainsPoint(t *testing.T) {
 
 // TestBoundingBoxEqual tests equality comparison.
 func TestBoundingBoxEqual(t *testing.T) {
+	t.Parallel()
 	bbox1 := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 10},
@@ -1318,6 +1367,7 @@ func TestBoundingBoxEqual(t *testing.T) {
 
 // TestBoundingBoxCenter tests center calculation.
 func TestBoundingBoxCenter(t *testing.T) {
+	t.Parallel()
 	bbox := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 20},
@@ -1336,6 +1386,7 @@ func TestBoundingBoxCenter(t *testing.T) {
 
 // TestEntryCreation tests entry creation and properties.
 func TestEntryCreation(t *testing.T) {
+	t.Parallel()
 	bbox := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 10},
@@ -1364,6 +1415,7 @@ func TestEntryCreation(t *testing.T) {
 
 // TestNodeIsFull tests the IsFull method.
 func TestNodeIsFull(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	if node.IsFull() {
@@ -1386,6 +1438,7 @@ func TestNodeIsFull(t *testing.T) {
 
 // TestNodeIsUnderflow tests the IsUnderflow method.
 func TestNodeIsUnderflow(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	if !node.IsUnderflow() {
@@ -1408,6 +1461,7 @@ func TestNodeIsUnderflow(t *testing.T) {
 
 // TestNodeRemoveEntry tests removing entries from a node.
 func TestNodeRemoveEntry(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Add entries
@@ -1447,6 +1501,7 @@ func TestNodeRemoveEntry(t *testing.T) {
 
 // TestGetAllLeafEntries tests retrieving all leaf entries.
 func TestGetAllLeafEntries(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Add entries
@@ -1467,6 +1522,7 @@ func TestGetAllLeafEntries(t *testing.T) {
 
 // TestFindEntry tests finding entries in the tree.
 func TestFindEntry(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	entry := &Entry{
@@ -1502,6 +1558,7 @@ func TestFindEntry(t *testing.T) {
 
 // TestParseCoordinateErrors tests error handling in coordinate parsing.
 func TestParseCoordinateErrors(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -1527,7 +1584,9 @@ func TestParseCoordinateErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			_, err := rtree.Update(len(tt.args), tt.args)
 			if err == nil {
 				t.Error("Expected error for invalid coordinate")
@@ -1538,6 +1597,7 @@ func TestParseCoordinateErrors(t *testing.T) {
 
 // TestBulkInsert tests bulk insertion operation.
 func TestBulkInsert(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Create entries for bulk insert
@@ -1560,6 +1620,7 @@ func TestBulkInsert(t *testing.T) {
 
 // TestCompact tests tree compaction.
 func TestCompact(t *testing.T) {
+	t.Parallel()
 	// Create entries
 	entries := make([]*Entry, 50)
 	for i := 0; i < 50; i++ {
@@ -1582,6 +1643,7 @@ func TestCompact(t *testing.T) {
 
 // TestAssignEntryOnTie tests tie-breaking in quadratic split.
 func TestAssignEntryOnTie(t *testing.T) {
+	t.Parallel()
 	// Create groups with equal area
 	group1 := []*Entry{
 		{ID: 1, BBox: &BoundingBox{Min: []float64{0, 0}, Max: []float64{5, 5}}},
@@ -1605,6 +1667,7 @@ func TestAssignEntryOnTie(t *testing.T) {
 
 // TestRTreeUpdateEdgeCases tests Update method edge cases.
 func TestRTreeUpdateEdgeCases(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -1630,7 +1693,9 @@ func TestRTreeUpdateEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			_, err := rtree.Update(len(tt.args), tt.args)
 			if err != nil {
 				t.Logf("Update %s: %v", tt.name, err)
@@ -1648,6 +1713,7 @@ func TestRTreeUpdateEdgeCases(t *testing.T) {
 
 // TestRTreeBestIndexVariousConstraints tests BestIndex with different constraints.
 func TestRTreeBestIndexVariousConstraints(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -1667,7 +1733,9 @@ func TestRTreeBestIndexVariousConstraints(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			info := vtab.NewIndexInfo(1)
 			info.Constraints[0].Column = tt.column
 			info.Constraints[0].Op = tt.op
@@ -1685,6 +1753,7 @@ func TestRTreeBestIndexVariousConstraints(t *testing.T) {
 
 // TestRTreeFilterEdgeCases tests cursor Filter edge cases.
 func TestRTreeFilterEdgeCases(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -1718,6 +1787,7 @@ func TestRTreeFilterEdgeCases(t *testing.T) {
 
 // TestNodeEnlargementEdgeCases tests enlargement calculation edge cases.
 func TestNodeEnlargementEdgeCases(t *testing.T) {
+	t.Parallel()
 	bbox1 := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 10},
@@ -1746,7 +1816,9 @@ func TestNodeEnlargementEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			enlargement := bbox1.EnlargementNeeded(tt.bbox)
 			t.Logf("Enlargement for %s: %f", tt.name, enlargement)
 		})
@@ -1755,6 +1827,7 @@ func TestNodeEnlargementEdgeCases(t *testing.T) {
 
 // TestNodeChooseSubtreeEdgeCases tests subtree selection edge cases.
 func TestNodeChooseSubtreeEdgeCases(t *testing.T) {
+	t.Parallel()
 	node := NewInternalNode()
 
 	// Add child entries with different bounding boxes
@@ -1791,7 +1864,9 @@ func TestNodeChooseSubtreeEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			chosenEntry := node.ChooseSubtree(tt.entry)
 			if chosenEntry == nil {
 				t.Error("Expected non-nil entry from ChooseSubtree")
@@ -1803,6 +1878,7 @@ func TestNodeChooseSubtreeEdgeCases(t *testing.T) {
 
 // TestRemoveEdgeCases tests Remove operation edge cases.
 func TestRemoveEdgeCases(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Build a tree with multiple levels
@@ -1847,6 +1923,7 @@ func TestRemoveEdgeCases(t *testing.T) {
 
 // TestBoundingBoxDimensionMismatch tests operations with mismatched dimensions.
 func TestBoundingBoxDimensionMismatch(t *testing.T) {
+	t.Parallel()
 	bbox2D := &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}}
 	bbox3D := &BoundingBox{Min: []float64{0, 0, 0}, Max: []float64{10, 10, 10}}
 
@@ -1878,6 +1955,7 @@ func TestBoundingBoxDimensionMismatch(t *testing.T) {
 
 // TestSearchWithEmptyTree tests search operations on empty tree.
 func TestSearchWithEmptyTree(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Test SearchOverlap
@@ -1901,6 +1979,7 @@ func TestSearchWithEmptyTree(t *testing.T) {
 
 // TestCompactEdgeCases tests Compact with various entry counts.
 func TestCompactEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		count int
@@ -1913,7 +1992,9 @@ func TestCompactEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			entries := make([]*Entry, tt.count)
 			for i := 0; i < tt.count; i++ {
 				entries[i] = &Entry{
@@ -1937,6 +2018,7 @@ func TestCompactEdgeCases(t *testing.T) {
 
 // TestHandleUnderflow tests the underflow handling during deletion.
 func TestHandleUnderflow(t *testing.T) {
+	t.Parallel()
 	// Create a tree with enough entries to cause splits
 	node := NewLeafNode()
 
@@ -1970,6 +2052,7 @@ func TestHandleUnderflow(t *testing.T) {
 
 // TestPickNextEmptyGroups tests pickNext with empty groups.
 func TestPickNextEmptyGroups(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Create entries for splitting
@@ -1992,6 +2075,7 @@ func TestPickNextEmptyGroups(t *testing.T) {
 
 // TestExpandBoundingBox tests bounding box expansion.
 func TestExpandBoundingBox(t *testing.T) {
+	t.Parallel()
 	bbox1 := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 10},
@@ -2025,7 +2109,9 @@ func TestExpandBoundingBox(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			bbox := bbox1.Clone()
 			bbox.Expand(tt.other)
 
@@ -2042,6 +2128,7 @@ func TestExpandBoundingBox(t *testing.T) {
 
 // TestEnlargementNeededEdgeCases tests enlargement calculation edge cases.
 func TestEnlargementNeededEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		bbox     *BoundingBox
@@ -2069,7 +2156,9 @@ func TestEnlargementNeededEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			enlargement := tt.bbox.EnlargementNeeded(tt.other)
 			if enlargement < tt.minExpected {
 				t.Errorf("EnlargementNeeded = %f, want >= %f", enlargement, tt.minExpected)
@@ -2081,6 +2170,7 @@ func TestEnlargementNeededEdgeCases(t *testing.T) {
 
 // TestSearchWithinEdgeCases tests SearchWithin with various scenarios.
 func TestSearchWithinEdgeCases(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Insert entries with various containment relationships
@@ -2092,6 +2182,7 @@ func TestSearchWithinEdgeCases(t *testing.T) {
 	}
 
 	for _, entry := range entries {
+		entry := entry
 		node = node.Insert(entry)
 	}
 
@@ -2100,6 +2191,7 @@ func TestSearchWithinEdgeCases(t *testing.T) {
 
 	t.Logf("SearchWithin found %d entries", len(results))
 	for _, entry := range results {
+		entry := entry
 		t.Logf("  Entry %d: [%.1f,%.1f] to [%.1f,%.1f]",
 			entry.ID, entry.BBox.Min[0], entry.BBox.Min[1], entry.BBox.Max[0], entry.BBox.Max[1])
 	}
@@ -2107,6 +2199,7 @@ func TestSearchWithinEdgeCases(t *testing.T) {
 
 // TestGetAllLeafEntriesInternal tests getAllLeafEntries with internal nodes.
 func TestGetAllLeafEntriesInternal(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Insert enough entries to create internal nodes
@@ -2128,6 +2221,7 @@ func TestGetAllLeafEntriesInternal(t *testing.T) {
 
 // TestCalculateGroupBBoxEmpty tests calculateGroupBBox with empty group.
 func TestCalculateGroupBBoxEmpty(t *testing.T) {
+	t.Parallel()
 	bbox := calculateGroupBBox([]*Entry{})
 
 	if bbox != nil {
@@ -2137,6 +2231,7 @@ func TestCalculateGroupBBoxEmpty(t *testing.T) {
 
 // TestPickSeedsLessThanTwo tests pickSeeds with less than 2 entries.
 func TestPickSeedsLessThanTwo(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Add only one entry
@@ -2153,6 +2248,7 @@ func TestPickSeedsLessThanTwo(t *testing.T) {
 
 // TestDistanceToPointEdgeCases tests distance calculation to points.
 func TestDistanceToPointEdgeCases(t *testing.T) {
+	t.Parallel()
 	bbox := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 10},
@@ -2170,7 +2266,9 @@ func TestDistanceToPointEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			dist := distanceToPoint(bbox, tt.point)
 			t.Logf("Distance from bbox to %v: %f", tt.point, dist)
 		})
@@ -2179,6 +2277,7 @@ func TestDistanceToPointEdgeCases(t *testing.T) {
 
 // TestNearestNeighborEdgeCases tests nearest neighbor search edge cases.
 func TestNearestNeighborEdgeCases(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Insert single entry
@@ -2205,6 +2304,7 @@ func TestNearestNeighborEdgeCases(t *testing.T) {
 
 // TestRangeSearchEdgeCases tests range search edge cases.
 func TestRangeSearchEdgeCases(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	entries := []*Entry{
@@ -2214,6 +2314,7 @@ func TestRangeSearchEdgeCases(t *testing.T) {
 	}
 
 	for _, entry := range entries {
+		entry := entry
 		node = node.Insert(entry)
 	}
 
@@ -2232,6 +2333,7 @@ func TestRangeSearchEdgeCases(t *testing.T) {
 
 // TestEnclosureSearchEdgeCases tests enclosure search edge cases.
 func TestEnclosureSearchEdgeCases(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Entry that exactly matches query box
@@ -2252,6 +2354,7 @@ func TestEnclosureSearchEdgeCases(t *testing.T) {
 
 // TestWindowQueryEdgeCases tests window query edge cases.
 func TestWindowQueryEdgeCases(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	entry := &Entry{
@@ -2275,6 +2378,7 @@ func TestWindowQueryEdgeCases(t *testing.T) {
 
 // TestSpatialJoinEdgeCases tests spatial join edge cases.
 func TestSpatialJoinEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test with empty trees
 	tree1 := NewLeafNode()
 	tree2 := NewLeafNode()
@@ -2298,6 +2402,7 @@ func TestSpatialJoinEdgeCases(t *testing.T) {
 
 // TestProcessSpatialJoinPairEdgeCases tests spatial join pair processing.
 func TestProcessSpatialJoinPairEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Create trees with non-overlapping entries
 	tree1 := NewLeafNode()
 	tree2 := NewLeafNode()
@@ -2320,6 +2425,7 @@ func TestProcessSpatialJoinPairEdgeCases(t *testing.T) {
 
 // TestDistanceBetweenBoxesEdgeCases tests distance calculation edge cases.
 func TestDistanceBetweenBoxesEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		bbox1 *BoundingBox
@@ -2343,7 +2449,9 @@ func TestDistanceBetweenBoxesEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			dist := DistanceBetweenBoxes(tt.bbox1, tt.bbox2)
 			t.Logf("Distance for %s: %f", tt.name, dist)
 		})
@@ -2352,6 +2460,7 @@ func TestDistanceBetweenBoxesEdgeCases(t *testing.T) {
 
 // TestOverlapAreaEdgeCases tests overlap area calculation edge cases.
 func TestOverlapAreaEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		bbox1 *BoundingBox
@@ -2375,7 +2484,9 @@ func TestOverlapAreaEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			area := OverlapArea(tt.bbox1, tt.bbox2)
 			t.Logf("Overlap area for %s: %f", tt.name, area)
 		})
@@ -2384,6 +2495,7 @@ func TestOverlapAreaEdgeCases(t *testing.T) {
 
 // TestIntersectionBoxEdgeCases tests intersection box calculation edge cases.
 func TestIntersectionBoxEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test with 3D boxes
 	bbox1 := &BoundingBox{
 		Min: []float64{0, 0, 0},
@@ -2410,6 +2522,7 @@ func TestIntersectionBoxEdgeCases(t *testing.T) {
 
 // TestUnionBoxEdgeCases tests union box calculation edge cases.
 func TestUnionBoxEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test with 3D boxes
 	bbox1 := &BoundingBox{
 		Min: []float64{0, 0, 0},
@@ -2436,6 +2549,7 @@ func TestUnionBoxEdgeCases(t *testing.T) {
 
 // TestPriorityQueuePopEmpty tests popping from empty priority queue.
 func TestPriorityQueuePopEmpty(t *testing.T) {
+	t.Parallel()
 	pq := NewPriorityQueue()
 
 	// Pop from empty queue should not crash
@@ -2447,6 +2561,7 @@ func TestPriorityQueuePopEmpty(t *testing.T) {
 
 // TestPriorityQueueOrdering tests priority queue maintains correct ordering.
 func TestPriorityQueueOrdering(t *testing.T) {
+	t.Parallel()
 	pq := NewPriorityQueue()
 
 	// Push items with different distances (priorities)
@@ -2473,6 +2588,7 @@ func TestPriorityQueueOrdering(t *testing.T) {
 
 // TestRTreeCursorAtEOF tests cursor operations at EOF.
 func TestRTreeCursorAtEOF(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -2499,6 +2615,7 @@ func TestRTreeCursorAtEOF(t *testing.T) {
 
 // TestRTreeRowidWithFloat tests Rowid method when entry ID is not int64.
 func TestRTreeRowidWithFloat(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -2523,6 +2640,7 @@ func TestRTreeRowidWithFloat(t *testing.T) {
 
 // TestBBoxOperationsWithMismatchedDimensions tests operations with wrong dimensions.
 func TestBBoxOperationsWithMismatchedDimensions(t *testing.T) {
+	t.Parallel()
 	bbox2D := NewBoundingBox(2)
 	bbox2D.Min[0], bbox2D.Max[0] = 0, 10
 	bbox2D.Min[1], bbox2D.Max[1] = 0, 10
@@ -2550,6 +2668,7 @@ func TestBBoxOperationsWithMismatchedDimensions(t *testing.T) {
 
 // TestUnderflowRebalancing tests underflow handling through node rebalancing.
 func TestUnderflowRebalancing(t *testing.T) {
+	t.Parallel()
 	// Create a specific tree structure to trigger underflow
 	// We need a tree where a leaf has exactly MinEntries+1 and removing one triggers underflow
 	node := NewLeafNode()
@@ -2594,6 +2713,7 @@ func TestUnderflowRebalancing(t *testing.T) {
 
 // TestHandleUnderflowDirectly tests underflow with careful tree construction.
 func TestHandleUnderflowDirectly(t *testing.T) {
+	t.Parallel()
 	// Build a tree where we can force underflow
 	// Strategy: Create a tree with multiple levels, then delete enough from one leaf to trigger underflow
 
@@ -2632,6 +2752,7 @@ func TestHandleUnderflowDirectly(t *testing.T) {
 
 // TestRangeSearchNilRoot tests range search with nil root.
 func TestRangeSearchNilRoot(t *testing.T) {
+	t.Parallel()
 	var node *Node
 	results := node.RangeSearch([]float64{0, 0}, 10.0)
 
@@ -2642,6 +2763,7 @@ func TestRangeSearchNilRoot(t *testing.T) {
 
 // TestProcessSpatialJoinPairAllBranches tests all branches of processSpatialJoinPair.
 func TestProcessSpatialJoinPairAllBranches(t *testing.T) {
+	t.Parallel()
 	// Create tree with both leaf and internal nodes
 	tree1 := NewLeafNode()
 	tree2 := NewLeafNode()
@@ -2667,6 +2789,7 @@ func TestProcessSpatialJoinPairAllBranches(t *testing.T) {
 
 // TestLessFunction tests the less function in priority queue.
 func TestLessFunction(t *testing.T) {
+	t.Parallel()
 	pq := NewPriorityQueue()
 
 	// Push items with equal distances
@@ -2682,6 +2805,7 @@ func TestLessFunction(t *testing.T) {
 
 // TestUnionBoxDifferentSizes tests UnionBox with boxes of different dimensions.
 func TestUnionBoxDifferentSizes(t *testing.T) {
+	t.Parallel()
 	bbox2D := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 10},
@@ -2700,6 +2824,7 @@ func TestUnionBoxDifferentSizes(t *testing.T) {
 
 // TestIntersectionBoxDifferentSizes tests IntersectionBox with boxes of different dimensions.
 func TestIntersectionBoxDifferentSizes(t *testing.T) {
+	t.Parallel()
 	bbox2D := &BoundingBox{
 		Min: []float64{0, 0},
 		Max: []float64{10, 10},
@@ -2718,6 +2843,7 @@ func TestIntersectionBoxDifferentSizes(t *testing.T) {
 
 // TestNearestNeighborLargeK tests nearest neighbor with k larger than tree size.
 func TestNearestNeighborLargeK(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Insert 5 entries
@@ -2740,6 +2866,7 @@ func TestNearestNeighborLargeK(t *testing.T) {
 
 // TestSearchWithinAllScenarios tests SearchWithin with various containment scenarios.
 func TestSearchWithinAllScenarios(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Add entries with different relationships to query box
@@ -2757,6 +2884,7 @@ func TestSearchWithinAllScenarios(t *testing.T) {
 	}
 
 	for _, entry := range entries {
+		entry := entry
 		node = node.Insert(entry)
 	}
 
@@ -2765,12 +2893,14 @@ func TestSearchWithinAllScenarios(t *testing.T) {
 
 	t.Logf("SearchWithin found %d entries", len(results))
 	for _, r := range results {
+		r := r
 		t.Logf("  Entry %d", r.ID)
 	}
 }
 
 // TestEnclosureSearchNonLeaf tests enclosure search with non-leaf nodes.
 func TestEnclosureSearchNonLeaf(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Create a multi-level tree
@@ -2791,6 +2921,7 @@ func TestEnclosureSearchNonLeaf(t *testing.T) {
 
 // TestNodeBoundingBoxEmptyNode tests BoundingBox on empty node.
 func TestNodeBoundingBoxEmptyNode(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	bbox := node.BoundingBox()
@@ -2801,6 +2932,7 @@ func TestNodeBoundingBoxEmptyNode(t *testing.T) {
 
 // TestHeightEmptyTree tests Height on empty tree.
 func TestHeightEmptyTree(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	height := node.Height()
@@ -2811,6 +2943,7 @@ func TestHeightEmptyTree(t *testing.T) {
 
 // TestChooseLeafNilChild tests chooseLeaf with nil child pointer.
 func TestChooseLeafNilChild(t *testing.T) {
+	t.Parallel()
 	// Create an internal node with entry but ensure robust handling
 	node := NewInternalNode()
 
@@ -2835,6 +2968,7 @@ func TestChooseLeafNilChild(t *testing.T) {
 
 // TestBulkLoadSingleEntry tests STR bulk load with single entry.
 func TestBulkLoadSingleEntry(t *testing.T) {
+	t.Parallel()
 	entries := []*Entry{
 		{ID: 1, BBox: &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}}},
 	}
@@ -2852,6 +2986,7 @@ func TestBulkLoadSingleEntry(t *testing.T) {
 
 // TestDistanceBetweenBoxesSameDimensions tests distance with various dimensions.
 func TestDistanceBetweenBoxesSameDimensions(t *testing.T) {
+	t.Parallel()
 	// Test 1D
 	bbox1D_1 := &BoundingBox{Min: []float64{0}, Max: []float64{10}}
 	bbox1D_2 := &BoundingBox{Min: []float64{20}, Max: []float64{30}}
@@ -2867,6 +3002,7 @@ func TestDistanceBetweenBoxesSameDimensions(t *testing.T) {
 
 // TestOverlapAreaFullContainment tests overlap with full containment.
 func TestOverlapAreaFullContainment(t *testing.T) {
+	t.Parallel()
 	bbox1 := &BoundingBox{Min: []float64{0, 0}, Max: []float64{20, 20}}
 	bbox2 := &BoundingBox{Min: []float64{5, 5}, Max: []float64{15, 15}}
 
@@ -2880,6 +3016,7 @@ func TestOverlapAreaFullContainment(t *testing.T) {
 
 // TestCreateTableInvalidDimensions tests creating rtree with invalid dimensions.
 func TestCreateTableInvalidDimensions(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 
 	// Test with 1D (not enough columns)
@@ -2901,6 +3038,7 @@ func TestCreateTableInvalidDimensions(t *testing.T) {
 
 // TestParseCoordinateDifferentTypes tests parsing coordinates of different types.
 func TestParseCoordinateDifferentTypes(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -2918,7 +3056,9 @@ func TestParseCoordinateDifferentTypes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			args := []interface{}{nil, int64(1), tt.value, 20.0, 0.0, 10.0}
 			_, err := rtree.Update(len(args), args)
 			if err != nil {
@@ -2930,6 +3070,7 @@ func TestParseCoordinateDifferentTypes(t *testing.T) {
 
 // TestSearchFunctionsWithNilRoot tests search functions with nil root.
 func TestSearchFunctionsWithNilRoot(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test_rtree",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -2962,6 +3103,7 @@ func TestSearchFunctionsWithNilRoot(t *testing.T) {
 
 // TestInsertTieBreaking tests quadratic split tie-breaking logic.
 func TestInsertTieBreaking(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -2987,6 +3129,7 @@ func TestInsertTieBreaking(t *testing.T) {
 
 // TestPriorityQueueTieBreakers tests all branches of priority queue less function.
 func TestPriorityQueueTieBreakers(t *testing.T) {
+	t.Parallel()
 	pq := NewPriorityQueue()
 
 	bbox1 := NewBoundingBox(2)
@@ -3022,6 +3165,7 @@ func TestPriorityQueueTieBreakers(t *testing.T) {
 
 // TestSearchWithinCompleteContainment tests SearchWithin when query contains entry bbox.
 func TestSearchWithinCompleteContainment(t *testing.T) {
+	t.Parallel()
 	root := NewInternalNode()
 	leaf := NewLeafNode()
 
@@ -3054,6 +3198,7 @@ func TestSearchWithinCompleteContainment(t *testing.T) {
 
 // TestRangeSearchInternalNode tests RangeSearch with internal nodes.
 func TestRangeSearchInternalNode(t *testing.T) {
+	t.Parallel()
 	root := NewInternalNode()
 	leaf := NewLeafNode()
 
@@ -3081,6 +3226,7 @@ func TestRangeSearchInternalNode(t *testing.T) {
 
 // TestHandleDeleteMissingEntry tests deleting an entry that doesn't exist.
 func TestHandleDeleteMissingEntry(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -3108,6 +3254,7 @@ func TestHandleDeleteMissingEntry(t *testing.T) {
 
 // TestHandleRootAfterRemovalLeafCase tests handleRootAfterRemoval with leaf root.
 func TestHandleRootAfterRemovalLeafCase(t *testing.T) {
+	t.Parallel()
 	root := NewLeafNode()
 
 	bbox := NewBoundingBox(2)
@@ -3126,6 +3273,7 @@ func TestHandleRootAfterRemovalLeafCase(t *testing.T) {
 
 // TestEnlargementDifferentDims tests EnlargementNeeded with mismatched dimensions.
 func TestEnlargementDifferentDims(t *testing.T) {
+	t.Parallel()
 	bbox2D := NewBoundingBox(2)
 	bbox2D.Min[0], bbox2D.Max[0] = 0, 10
 	bbox2D.Min[1], bbox2D.Max[1] = 0, 10
@@ -3143,6 +3291,7 @@ func TestEnlargementDifferentDims(t *testing.T) {
 
 // TestHeightMultiLevel tests Height calculation for multi-level trees.
 func TestHeightMultiLevel(t *testing.T) {
+	t.Parallel()
 	// Build a 3-level tree
 	root := NewInternalNode()
 	mid := NewInternalNode()
@@ -3171,6 +3320,7 @@ func TestHeightMultiLevel(t *testing.T) {
 
 // TestDistanceToPointBelowMin tests distanceToPoint when point is below min.
 func TestDistanceToPointBelowMin(t *testing.T) {
+	t.Parallel()
 	bbox := NewBoundingBox(2)
 	bbox.Min[0], bbox.Max[0] = 10, 20
 	bbox.Min[1], bbox.Max[1] = 10, 20
@@ -3186,6 +3336,7 @@ func TestDistanceToPointBelowMin(t *testing.T) {
 
 // TestDistanceBetweenBoxes3D tests distance calculation in 3D.
 func TestDistanceBetweenBoxes3D(t *testing.T) {
+	t.Parallel()
 	bbox1 := NewBoundingBox(3)
 	bbox1.Min[0], bbox1.Max[0] = 0, 10
 	bbox1.Min[1], bbox1.Max[1] = 0, 10
@@ -3206,6 +3357,7 @@ func TestDistanceBetweenBoxes3D(t *testing.T) {
 
 // TestIntersectionBoxEdgeTouch tests intersection when boxes touch at edges.
 func TestIntersectionBoxEdgeTouch(t *testing.T) {
+	t.Parallel()
 	bbox1 := NewBoundingBox(2)
 	bbox1.Min[0], bbox1.Max[0] = 0, 10
 	bbox1.Min[1], bbox1.Max[1] = 0, 10
@@ -3224,8 +3376,10 @@ func TestIntersectionBoxEdgeTouch(t *testing.T) {
 
 // TestProcessSpatialJoinPairAllCases tests all 4 branches of processSpatialJoinPair.
 func TestProcessSpatialJoinPairAllCases(t *testing.T) {
+	t.Parallel()
 	// Test both internal nodes case
 	t.Run("BothInternal", func(t *testing.T) {
+			t.Parallel()
 		internal1 := NewInternalNode()
 		internal2 := NewInternalNode()
 		leaf1 := NewLeafNode()
@@ -3258,6 +3412,7 @@ func TestProcessSpatialJoinPairAllCases(t *testing.T) {
 
 	// Test n1 internal, n2 leaf case
 	t.Run("N1InternalN2Leaf", func(t *testing.T) {
+			t.Parallel()
 		internal1 := NewInternalNode()
 		leaf1 := NewLeafNode()
 		leaf2 := NewLeafNode()
@@ -3287,6 +3442,7 @@ func TestProcessSpatialJoinPairAllCases(t *testing.T) {
 
 // TestAssignEntryOnTieAllBranches tests all branches of assignEntryOnTie.
 func TestAssignEntryOnTieAllBranches(t *testing.T) {
+	t.Parallel()
 	node := NewInternalNode()
 
 	bbox1 := NewBoundingBox(2)
@@ -3301,6 +3457,7 @@ func TestAssignEntryOnTieAllBranches(t *testing.T) {
 
 	// Test tie case with equal areas and equal sizes
 	t.Run("TieEqualSizes", func(t *testing.T) {
+			t.Parallel()
 		group1 := []*Entry{}
 		group2 := []*Entry{}
 
@@ -3314,6 +3471,7 @@ func TestAssignEntryOnTieAllBranches(t *testing.T) {
 
 // TestSearchWithinPartialOverlap tests SearchWithin with partial overlap.
 func TestSearchWithinPartialOverlap(t *testing.T) {
+	t.Parallel()
 	root := NewInternalNode()
 	leaf := NewLeafNode()
 
@@ -3342,6 +3500,7 @@ func TestSearchWithinPartialOverlap(t *testing.T) {
 
 // TestInsertEdgeCase tests Insert edge case.
 func TestInsertEdgeCase(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -3358,6 +3517,7 @@ func TestInsertEdgeCase(t *testing.T) {
 
 // TestHandleDeleteInternalNode tests handleDelete with complex tree.
 func TestHandleDeleteInternalNode(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -3397,6 +3557,7 @@ func TestHandleDeleteInternalNode(t *testing.T) {
 
 // TestSearchWithNilRoot tests search with nil root.
 func TestSearchWithNilRoot(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -3416,6 +3577,7 @@ func TestSearchWithNilRoot(t *testing.T) {
 
 // TestSpatialJoinNilNodes tests SpatialJoin with nil nodes.
 func TestSpatialJoinNilNodes(t *testing.T) {
+	t.Parallel()
 	results := SpatialJoin(nil, nil)
 
 	if len(results) != 0 {
@@ -3425,6 +3587,7 @@ func TestSpatialJoinNilNodes(t *testing.T) {
 
 // TestDistanceBetweenBoxesDifferentDims tests DistanceBetweenBoxes with different dimensions.
 func TestDistanceBetweenBoxesDifferentDims(t *testing.T) {
+	t.Parallel()
 	bbox2D := NewBoundingBox(2)
 	bbox2D.Min[0], bbox2D.Max[0] = 0, 10
 	bbox2D.Min[1], bbox2D.Max[1] = 0, 10
@@ -3443,6 +3606,7 @@ func TestDistanceBetweenBoxesDifferentDims(t *testing.T) {
 
 // TestDistanceBetweenBoxesNonOverlapping tests distance for non-overlapping boxes.
 func TestDistanceBetweenBoxesNonOverlapping(t *testing.T) {
+	t.Parallel()
 	bbox1 := NewBoundingBox(2)
 	bbox1.Min[0], bbox1.Max[0] = 0, 5
 	bbox1.Min[1], bbox1.Max[1] = 0, 5
@@ -3460,6 +3624,7 @@ func TestDistanceBetweenBoxesNonOverlapping(t *testing.T) {
 
 // TestIntersectionBoxDifferentDims tests IntersectionBox with different dimensions.
 func TestIntersectionBoxDifferentDims(t *testing.T) {
+	t.Parallel()
 	bbox2D := NewBoundingBox(2)
 	bbox2D.Min[0], bbox2D.Max[0] = 0, 10
 	bbox2D.Min[1], bbox2D.Max[1] = 0, 10
@@ -3478,6 +3643,11 @@ func TestIntersectionBoxDifferentDims(t *testing.T) {
 
 // TestNearestNeighborLargeTree tests NearestNeighborSearch with complex tree.
 func TestNearestNeighborLargeTree(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("skipping slow test in short mode")
+	}
+
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -3502,6 +3672,7 @@ func TestNearestNeighborLargeTree(t *testing.T) {
 
 // TestUpdateWithNilOldID tests Update with nil old ID.
 func TestUpdateWithNilOldID(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -3523,6 +3694,7 @@ func TestUpdateWithNilOldID(t *testing.T) {
 
 // TestUpdateWithDifferentIDs tests Update when old and new IDs differ.
 func TestUpdateWithDifferentIDs(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -3561,6 +3733,7 @@ func TestUpdateWithDifferentIDs(t *testing.T) {
 
 // TestParseCoordinateEdgeCases tests parseCoordinate with various types.
 func TestParseCoordinateEdgeCases(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -3577,6 +3750,7 @@ func TestParseCoordinateEdgeCases(t *testing.T) {
 
 // TestSTRBulkLoadEdgeCases tests STR bulk load with edge cases.
 func TestSTRBulkLoadEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Insert entries for bulk load
 	entries := make([]*Entry, 0)
 	for i := 0; i < 5; i++ {
@@ -3603,6 +3777,7 @@ func TestSTRBulkLoadEdgeCases(t *testing.T) {
 
 // TestOverlapAreaNoOverlap tests OverlapArea when boxes don't overlap.
 func TestOverlapAreaNoOverlap(t *testing.T) {
+	t.Parallel()
 	bbox1 := NewBoundingBox(2)
 	bbox1.Min[0], bbox1.Max[0] = 0, 10
 	bbox1.Min[1], bbox1.Max[1] = 0, 10
@@ -3620,6 +3795,7 @@ func TestOverlapAreaNoOverlap(t *testing.T) {
 
 // TestChooseSubtreeMultipleChildren tests ChooseSubtree with multiple children.
 func TestChooseSubtreeMultipleChildren(t *testing.T) {
+	t.Parallel()
 	node := NewInternalNode()
 
 	bbox1 := NewBoundingBox(2)
@@ -3660,6 +3836,7 @@ func TestChooseSubtreeMultipleChildren(t *testing.T) {
 
 // TestInsertSplitScenarios tests various insert and split scenarios.
 func TestInsertSplitScenarios(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -3692,6 +3869,7 @@ func TestInsertSplitScenarios(t *testing.T) {
 
 // Test3DOperations tests 3D bounding box operations.
 func Test3DOperations(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY", "minZ", "maxZ"})
@@ -3715,6 +3893,7 @@ func Test3DOperations(t *testing.T) {
 
 // TestWindowQueryFullCoverage tests WindowQuery with various scenarios.
 func TestWindowQueryFullCoverage(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -3740,6 +3919,7 @@ func TestWindowQueryFullCoverage(t *testing.T) {
 
 // TestBulkOperations tests bulk insert and compact.
 func TestBulkOperations(t *testing.T) {
+	t.Parallel()
 	// Create entries for bulk insert
 	entries := make([]*Entry, 100)
 	for i := 0; i < 100; i++ {
@@ -3778,6 +3958,7 @@ func TestBulkOperations(t *testing.T) {
 
 // TestInsertWithNilRootAndNoOverflow tests Insert when leaf doesn't overflow.
 func TestInsertWithNilRootAndNoOverflow(t *testing.T) {
+	t.Parallel()
 	root := NewLeafNode()
 
 	// Insert a single entry (won't overflow)
@@ -3809,6 +3990,7 @@ func TestInsertWithNilRootAndNoOverflow(t *testing.T) {
 
 // TestAssignEntryOnTieAllCases tests all tie-breaking scenarios.
 func TestAssignEntryOnTieAllCases(t *testing.T) {
+	t.Parallel()
 	// Create a node with entries that will trigger all tie scenarios
 	root := NewLeafNode()
 
@@ -3886,6 +4068,7 @@ func TestAssignEntryOnTieAllCases(t *testing.T) {
 
 // TestPickNextEdgeCases tests pickNext with edge cases.
 func TestPickNextEdgeCases(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Test with empty groups
@@ -3927,6 +4110,7 @@ func TestPickNextEdgeCases(t *testing.T) {
 
 // TestHandleRootAfterRemovalCases tests root handling after removal.
 func TestHandleRootAfterRemovalCases(t *testing.T) {
+	t.Parallel()
 	// Case 1: Empty root after deletion
 	root := NewLeafNode()
 	bbox := NewBoundingBox(2)
@@ -3979,6 +4163,7 @@ func TestHandleRootAfterRemovalCases(t *testing.T) {
 
 // TestHandleUnderflowRecursive tests recursive underflow handling.
 func TestHandleUnderflowRecursive(t *testing.T) {
+	t.Parallel()
 	// Build a tree that will trigger recursive underflow
 	root := NewLeafNode()
 
@@ -4028,6 +4213,7 @@ func TestHandleUnderflowRecursive(t *testing.T) {
 
 // TestStrBulkLoadEdgeCases tests STR bulk loading edge cases.
 func TestStrBulkLoadEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test with empty entries
 	result := strBulkLoad(nil)
 	if result != nil {
@@ -4074,6 +4260,7 @@ func TestStrBulkLoadEdgeCases(t *testing.T) {
 
 // TestStrPartitionEdgeCases tests strPartition edge cases.
 func TestStrPartitionEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test with nil entries
 	result := strPartition(nil, 0, 2)
 	if result != nil {
@@ -4103,6 +4290,7 @@ func TestStrPartitionEdgeCases(t *testing.T) {
 
 	totalEntries := 0
 	for _, node := range result {
+		node := node
 		totalEntries += len(node.Entries)
 	}
 	if totalEntries != 5 {
@@ -4118,6 +4306,7 @@ func TestStrPartitionEdgeCases(t *testing.T) {
 
 // TestBuildTreeFromLeavesEdgeCases tests buildTreeFromLeaves edge cases.
 func TestBuildTreeFromLeavesEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test with nil
 	result := buildTreeFromLeaves(nil)
 	if result != nil {
@@ -4166,6 +4355,7 @@ func TestBuildTreeFromLeavesEdgeCases(t *testing.T) {
 
 // TestChooseSubtreeEdgeCases tests ChooseSubtree edge cases.
 func TestChooseSubtreeEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test with empty node
 	node := NewLeafNode()
 	bbox := NewBoundingBox(2)
@@ -4219,6 +4409,7 @@ func TestChooseSubtreeEdgeCases(t *testing.T) {
 
 // TestHeightEdgeCases tests Height function edge cases.
 func TestHeightEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Test leaf node
 	leaf := NewLeafNode()
 	if leaf.Height() != 1 {
@@ -4249,6 +4440,7 @@ func TestHeightEdgeCases(t *testing.T) {
 
 // TestCreateTableEdgeCases tests createTable edge cases.
 func TestCreateTableEdgeCases(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 
 	// Test with exactly 5 columns (minimum valid)
@@ -4301,6 +4493,7 @@ func TestCreateTableEdgeCases(t *testing.T) {
 
 // TestBestIndexEdgeCases tests BestIndex edge cases.
 func TestBestIndexEdgeCases(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -4372,6 +4565,7 @@ func TestBestIndexEdgeCases(t *testing.T) {
 
 // TestUpdateEdgeCases tests Update function edge cases.
 func TestUpdateEdgeCases(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -4437,6 +4631,7 @@ func TestUpdateEdgeCases(t *testing.T) {
 
 // TestHandleDeleteEdgeCases tests handleDelete edge cases.
 func TestHandleDeleteEdgeCases(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -4463,6 +4658,7 @@ func TestHandleDeleteEdgeCases(t *testing.T) {
 
 // TestCheckIfUpdateEdgeCases tests checkIfUpdate edge cases.
 func TestCheckIfUpdateEdgeCases(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -4501,6 +4697,7 @@ func TestCheckIfUpdateEdgeCases(t *testing.T) {
 
 // TestParseCoordinatesEdgeCases tests parseCoordinates edge cases.
 func TestParseCoordinatesEdgeCases(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -4524,6 +4721,7 @@ func TestParseCoordinatesEdgeCases(t *testing.T) {
 
 // TestParseCoordinateAllTypes tests parseCoordinate with all type branches.
 func TestParseCoordinateAllTypes(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
@@ -4571,6 +4769,7 @@ func TestParseCoordinateAllTypes(t *testing.T) {
 
 // TestDistanceToPointAllBranches tests distanceToPoint with all code branches.
 func TestDistanceToPointAllBranches(t *testing.T) {
+	t.Parallel()
 	// Test with mismatched dimensions
 	bbox := NewBoundingBox(2)
 	bbox.Min[0], bbox.Max[0] = 0, 10
@@ -4607,6 +4806,7 @@ func TestDistanceToPointAllBranches(t *testing.T) {
 
 // TestWindowQueryDimensionMismatch tests WindowQuery with mismatched dimensions.
 func TestWindowQueryDimensionMismatch(t *testing.T) {
+	t.Parallel()
 	root := NewLeafNode()
 
 	// Add some entries
@@ -4637,6 +4837,7 @@ func TestWindowQueryDimensionMismatch(t *testing.T) {
 
 // TestProcessSpatialJoinPairComprehensive tests processSpatialJoinPair comprehensively.
 func TestProcessSpatialJoinPairComprehensive(t *testing.T) {
+	t.Parallel()
 	// Create two trees
 	leaf1 := NewLeafNode()
 	leaf2 := NewLeafNode()
@@ -4684,6 +4885,7 @@ func TestProcessSpatialJoinPairComprehensive(t *testing.T) {
 
 // TestDistanceBetweenBoxesAllCases tests DistanceBetweenBoxes with all scenarios.
 func TestDistanceBetweenBoxesAllCases(t *testing.T) {
+	t.Parallel()
 	bbox1 := NewBoundingBox(2)
 	bbox1.Min[0], bbox1.Max[0] = 0, 10
 	bbox1.Min[1], bbox1.Max[1] = 0, 10
@@ -4716,6 +4918,7 @@ func TestDistanceBetweenBoxesAllCases(t *testing.T) {
 
 // TestOverlapAreaAllCases tests OverlapArea with all scenarios.
 func TestOverlapAreaAllCases(t *testing.T) {
+	t.Parallel()
 	bbox1 := NewBoundingBox(2)
 	bbox1.Min[0], bbox1.Max[0] = 0, 10
 	bbox1.Min[1], bbox1.Max[1] = 0, 10
@@ -4749,6 +4952,7 @@ func TestOverlapAreaAllCases(t *testing.T) {
 
 // TestIntersectionBoxAllCases tests IntersectionBox with all scenarios.
 func TestIntersectionBoxAllCases(t *testing.T) {
+	t.Parallel()
 	bbox1 := NewBoundingBox(2)
 	bbox1.Min[0], bbox1.Max[0] = 0, 10
 	bbox1.Min[1], bbox1.Max[1] = 0, 10
@@ -4787,6 +4991,7 @@ func TestIntersectionBoxAllCases(t *testing.T) {
 
 // TestAssignEntryOnTieArea2Smaller tests assignEntryOnTie when area2 < area1.
 func TestAssignEntryOnTieArea2Smaller(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Create group1 with larger area
@@ -4823,6 +5028,7 @@ func TestAssignEntryOnTieArea2Smaller(t *testing.T) {
 
 // TestInsertNilParentCase tests Insert when parent becomes nil during traversal.
 func TestInsertNilParentCase(t *testing.T) {
+	t.Parallel()
 	// Create a simple leaf node (no parent)
 	root := NewLeafNode()
 
@@ -4845,6 +5051,7 @@ func TestInsertNilParentCase(t *testing.T) {
 
 // TestQuadraticSplitWithTies tests quadraticSplit with tie scenarios.
 func TestQuadraticSplitWithTies(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Create entries that will produce ties in pickNext
@@ -4872,6 +5079,7 @@ func TestQuadraticSplitWithTies(t *testing.T) {
 
 // TestHandleUnderflowNonRootCase tests handleUnderflow when parent is not root.
 func TestHandleUnderflowNonRootCase(t *testing.T) {
+	t.Parallel()
 	// Build a 3-level tree to test non-root underflow
 	root := NewLeafNode()
 
@@ -4920,6 +5128,7 @@ func TestHandleUnderflowNonRootCase(t *testing.T) {
 
 // TestCreateTableExactDimensionCount tests createTable with exact dimension boundaries.
 func TestCreateTableExactDimensionCount(t *testing.T) {
+	t.Parallel()
 	module := NewRTreeModule()
 
 	// Test with exactly 1 dimension (should fail - minimum is 2D)
@@ -4948,6 +5157,7 @@ func TestCreateTableExactDimensionCount(t *testing.T) {
 
 // TestDistanceBetweenBoxesSeparatedInOneDimension tests boxes separated in one dimension.
 func TestDistanceBetweenBoxesSeparatedInOneDimension(t *testing.T) {
+	t.Parallel()
 	bbox1 := NewBoundingBox(2)
 	bbox1.Min[0], bbox1.Max[0] = 0, 10
 	bbox1.Min[1], bbox1.Max[1] = 0, 10
@@ -4976,6 +5186,7 @@ func TestDistanceBetweenBoxesSeparatedInOneDimension(t *testing.T) {
 
 // TestOverlapAreaWithDifferentOverlaps tests OverlapArea with various overlap scenarios.
 func TestOverlapAreaWithDifferentOverlaps(t *testing.T) {
+	t.Parallel()
 	bbox1 := NewBoundingBox(2)
 	bbox1.Min[0], bbox1.Max[0] = 0, 10
 	bbox1.Min[1], bbox1.Max[1] = 0, 10
@@ -5005,6 +5216,7 @@ func TestOverlapAreaWithDifferentOverlaps(t *testing.T) {
 
 // TestIntersectionBoxWithPartialOverlap tests IntersectionBox with partial overlaps.
 func TestIntersectionBoxWithPartialOverlap(t *testing.T) {
+	t.Parallel()
 	bbox1 := NewBoundingBox(2)
 	bbox1.Min[0], bbox1.Max[0] = 0, 10
 	bbox1.Min[1], bbox1.Max[1] = 0, 10
@@ -5036,6 +5248,7 @@ func TestIntersectionBoxWithPartialOverlap(t *testing.T) {
 
 // TestAssignEntryOnTieGroup2FewerEntries tests the branch where group2 has fewer entries.
 func TestAssignEntryOnTieGroup2FewerEntries(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Create two groups with equal area
@@ -5075,6 +5288,7 @@ func TestAssignEntryOnTieGroup2FewerEntries(t *testing.T) {
 
 // TestInsertWithParentTraversal tests Insert traversing up to root.
 func TestInsertWithParentTraversal(t *testing.T) {
+	t.Parallel()
 	// Build a multi-level tree
 	root := NewLeafNode()
 	for i := 0; i < MaxEntries*2; i++ {
@@ -5127,6 +5341,7 @@ func TestInsertWithParentTraversal(t *testing.T) {
 
 // TestQuadraticSplitEdgeCases tests quadraticSplit edge cases.
 func TestQuadraticSplitEdgeCases(t *testing.T) {
+	t.Parallel()
 	node := NewLeafNode()
 
 	// Create a scenario where mustAssignRemainingToGroup triggers

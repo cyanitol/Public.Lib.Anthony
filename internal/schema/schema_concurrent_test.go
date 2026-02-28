@@ -10,6 +10,7 @@ import (
 
 // TestConcurrentReads tests that multiple goroutines can safely read from the schema simultaneously.
 func TestConcurrentReads(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Populate schema with test data
@@ -64,6 +65,7 @@ func TestConcurrentReads(t *testing.T) {
 
 // TestConcurrentReadWrite tests that concurrent reads and writes don't cause race conditions.
 func TestConcurrentReadWrite(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Pre-populate with some tables
@@ -128,6 +130,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 
 // TestConcurrentTableOperations tests concurrent CREATE, DROP, and RENAME operations.
 func TestConcurrentTableOperations(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	const numWorkers = 10
@@ -177,6 +180,7 @@ func TestConcurrentTableOperations(t *testing.T) {
 
 // TestConcurrentIndexOperations tests concurrent index creation and deletion.
 func TestConcurrentIndexOperations(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create base tables first
@@ -233,6 +237,7 @@ func TestConcurrentIndexOperations(t *testing.T) {
 
 // TestConcurrentViewOperations tests concurrent view creation and access.
 func TestConcurrentViewOperations(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create a base table for views to reference
@@ -294,6 +299,7 @@ func TestConcurrentViewOperations(t *testing.T) {
 
 // TestConcurrentTriggerOperations tests concurrent trigger creation and access.
 func TestConcurrentTriggerOperations(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create base tables
@@ -352,6 +358,7 @@ func TestConcurrentTriggerOperations(t *testing.T) {
 
 // TestReservedNameRejection tests that reserved names are properly rejected.
 func TestReservedNameRejection(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	reservedTables := []string{
@@ -363,7 +370,9 @@ func TestReservedNameRejection(t *testing.T) {
 	}
 
 	for _, name := range reservedTables {
+		name := name
 		t.Run("Table_"+name, func(t *testing.T) {
+				t.Parallel()
 			stmt := &parser.CreateTableStmt{
 				Name: name,
 				Columns: []parser.ColumnDef{
@@ -380,6 +389,7 @@ func TestReservedNameRejection(t *testing.T) {
 		})
 
 		t.Run("Index_"+name, func(t *testing.T) {
+				t.Parallel()
 			// Create a valid table first
 			tableStmt := &parser.CreateTableStmt{
 				Name: "valid_table",
@@ -403,6 +413,7 @@ func TestReservedNameRejection(t *testing.T) {
 		})
 
 		t.Run("View_"+name, func(t *testing.T) {
+				t.Parallel()
 			selectStmt := &parser.SelectStmt{
 				Columns: []parser.ResultColumn{
 					{Expr: &parser.IdentExpr{Name: "id"}},
@@ -422,6 +433,7 @@ func TestReservedNameRejection(t *testing.T) {
 
 // TestIsReservedName tests the IsReservedName function.
 func TestIsReservedName(t *testing.T) {
+	t.Parallel()
 	testCases := []struct {
 		name     string
 		expected bool
@@ -437,7 +449,9 @@ func TestIsReservedName(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
 			result := IsReservedName(tc.name)
 			if result != tc.expected {
 				t.Errorf("IsReservedName(%q) = %v, expected %v", tc.name, result, tc.expected)
@@ -448,6 +462,7 @@ func TestIsReservedName(t *testing.T) {
 
 // TestConcurrentMixedOperations tests a realistic mix of operations happening concurrently.
 func TestConcurrentMixedOperations(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Pre-populate with some data

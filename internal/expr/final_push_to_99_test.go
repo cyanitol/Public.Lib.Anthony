@@ -17,6 +17,7 @@ import (
 // ----------------------------------------------------------------------------
 
 func TestGetComparisonAffinityNilLeft(t *testing.T) {
+	t.Parallel()
 	// Line 221-222: e.Left == nil case
 	expr := &Expr{
 		Op:    OpEq,
@@ -34,6 +35,7 @@ func TestGetComparisonAffinityNilLeft(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestApplyIntegerAffinityStringWithFloat(t *testing.T) {
+	t.Parallel()
 	// Lines 266-267: string that parses as float
 	result := applyIntegerAffinity("123.456")
 	if val, ok := result.(int64); !ok || val != 123 {
@@ -42,6 +44,7 @@ func TestApplyIntegerAffinityStringWithFloat(t *testing.T) {
 }
 
 func TestApplyIntegerAffinityStringNonNumeric(t *testing.T) {
+	t.Parallel()
 	// Line 269: string that doesn't parse
 	result := applyIntegerAffinity("not a number")
 	if val, ok := result.(string); !ok || val != "not a number" {
@@ -54,6 +57,7 @@ func TestApplyIntegerAffinityStringNonNumeric(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestApplyRealAffinityStringNonNumeric(t *testing.T) {
+	t.Parallel()
 	// Lines 283-286: string that doesn't parse as float
 	result := applyRealAffinity("not a number")
 	if val, ok := result.(string); !ok || val != "not a number" {
@@ -62,6 +66,7 @@ func TestApplyRealAffinityStringNonNumeric(t *testing.T) {
 }
 
 func TestApplyRealAffinityBlob(t *testing.T) {
+	t.Parallel()
 	// Line 288: default case
 	blob := []byte("test")
 	result := applyRealAffinity(blob)
@@ -75,6 +80,7 @@ func TestApplyRealAffinityBlob(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestApplyNumericAffinityStringFloat(t *testing.T) {
+	t.Parallel()
 	// Lines 300-301: string that parses as float
 	result := applyNumericAffinity("123.456")
 	if val, ok := result.(float64); !ok || val != 123.456 {
@@ -83,6 +89,7 @@ func TestApplyNumericAffinityStringFloat(t *testing.T) {
 }
 
 func TestApplyNumericAffinityStringInt(t *testing.T) {
+	t.Parallel()
 	// Lines 303-304: string that parses as int
 	result := applyNumericAffinity("789")
 	if val, ok := result.(float64); !ok || val != 789.0 {
@@ -91,6 +98,7 @@ func TestApplyNumericAffinityStringInt(t *testing.T) {
 }
 
 func TestApplyNumericAffinityStringNonNumeric(t *testing.T) {
+	t.Parallel()
 	// Line 306: string that doesn't parse
 	result := applyNumericAffinity("not a number")
 	if val, ok := result.(string); !ok || val != "not a number" {
@@ -99,6 +107,7 @@ func TestApplyNumericAffinityStringNonNumeric(t *testing.T) {
 }
 
 func TestApplyNumericAffinityBlob(t *testing.T) {
+	t.Parallel()
 	// Line 308: default case
 	blob := []byte("test")
 	result := applyNumericAffinity(blob)
@@ -112,6 +121,7 @@ func TestApplyNumericAffinityBlob(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestPropagateAffinityNegateNilLeft(t *testing.T) {
+	t.Parallel()
 	// Lines 408-410: e.Left == nil case
 	expr := &Expr{
 		Op:   OpNegate,
@@ -122,6 +132,7 @@ func TestPropagateAffinityNegateNilLeft(t *testing.T) {
 }
 
 func TestPropagateAffinityNegateTextAffinity(t *testing.T) {
+	t.Parallel()
 	// Lines 414-415: non-numeric affinity becomes AFF_NUMERIC
 	expr := &Expr{
 		Op:   OpNegate,
@@ -138,6 +149,7 @@ func TestPropagateAffinityNegateTextAffinity(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestPropagateAffinityCaseNilList(t *testing.T) {
+	t.Parallel()
 	// Lines 422-424: e.List == nil
 	expr := &Expr{
 		Op:   OpCase,
@@ -148,6 +160,7 @@ func TestPropagateAffinityCaseNilList(t *testing.T) {
 }
 
 func TestPropagateAffinityCaseMismatchedAffinities(t *testing.T) {
+	t.Parallel()
 	// Lines 432-434: different THEN affinities
 	expr := &Expr{
 		Op: OpCase,
@@ -163,6 +176,7 @@ func TestPropagateAffinityCaseMismatchedAffinities(t *testing.T) {
 	}
 	// Propagate affinities on the child expressions first
 	for _, item := range expr.List.Items {
+		item := item
 		PropagateAffinity(item.Expr)
 	}
 	PropagateAffinity(expr)
@@ -171,6 +185,7 @@ func TestPropagateAffinityCaseMismatchedAffinities(t *testing.T) {
 }
 
 func TestPropagateAffinityCaseELSEMismatch(t *testing.T) {
+	t.Parallel()
 	// Lines 443-445: ELSE affinity differs from THEN
 	expr := &Expr{
 		Op: OpCase,
@@ -190,6 +205,7 @@ func TestPropagateAffinityCaseELSEMismatch(t *testing.T) {
 }
 
 func TestPropagateAffinityCaseFirstELSE(t *testing.T) {
+	t.Parallel()
 	// Lines 441-442: first affinity from ELSE
 	expr := &Expr{
 		Op: OpCase,
@@ -210,6 +226,7 @@ func TestPropagateAffinityCaseFirstELSE(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestParseNumericOperandsNilLeft(t *testing.T) {
+	t.Parallel()
 	// Lines 17-18: left == nil
 	_, ok := parseNumericOperands(nil, int64(42))
 	if ok {
@@ -218,6 +235,7 @@ func TestParseNumericOperandsNilLeft(t *testing.T) {
 }
 
 func TestParseNumericOperandsNilRight(t *testing.T) {
+	t.Parallel()
 	// Line 17-18: right == nil
 	_, ok := parseNumericOperands(int64(42), nil)
 	if ok {
@@ -226,6 +244,7 @@ func TestParseNumericOperandsNilRight(t *testing.T) {
 }
 
 func TestParseNumericOperandsLeftNotNumeric(t *testing.T) {
+	t.Parallel()
 	// Lines 26-27: left not numeric
 	_, ok := parseNumericOperands("not a number", int64(42))
 	if ok {
@@ -234,6 +253,7 @@ func TestParseNumericOperandsLeftNotNumeric(t *testing.T) {
 }
 
 func TestParseNumericOperandsRightNotNumeric(t *testing.T) {
+	t.Parallel()
 	// Lines 29-30: right not numeric
 	_, ok := parseNumericOperands(int64(42), "not a number")
 	if ok {
@@ -246,6 +266,7 @@ func TestParseNumericOperandsRightNotNumeric(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestDivideIntegersMinInt64(t *testing.T) {
+	t.Parallel()
 	// Lines 122-123: MinInt64 / -1 special case
 	// This special case is only triggered in divideIntegers when both are int64
 	// But EvaluateArithmetic calls divide which checks for zero first
@@ -261,6 +282,7 @@ func TestDivideIntegersMinInt64(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestDivideFloatsInfinityResult(t *testing.T) {
+	t.Parallel()
 	// Lines 130-131: result is infinity
 	result := divideFloats(1e308, 1e-308)
 	if result != nil {
@@ -273,6 +295,7 @@ func TestDivideFloatsInfinityResult(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestNegateNonNumericString(t *testing.T) {
+	t.Parallel()
 	// Line 204: non-numeric string becomes 0
 	result := negate("not a number")
 	if val, ok := result.(int64); !ok || val != 0 {
@@ -281,6 +304,7 @@ func TestNegateNonNumericString(t *testing.T) {
 }
 
 func TestNegateBool(t *testing.T) {
+	t.Parallel()
 	// Line 206: default case (bool, etc.)
 	result := negate(true)
 	if val, ok := result.(int64); !ok || val != 0 {
@@ -293,6 +317,7 @@ func TestNegateBool(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestEvaluateBitwiseLeftNotCoercible(t *testing.T) {
+	t.Parallel()
 	// Lines 257-258: left not coercible to integer
 	result := EvaluateBitwise(OpBitAnd, "not a number", int64(42))
 	if result != nil {
@@ -301,6 +326,7 @@ func TestEvaluateBitwiseLeftNotCoercible(t *testing.T) {
 }
 
 func TestEvaluateBitwiseRightNotCoercible(t *testing.T) {
+	t.Parallel()
 	// Lines 257-258: right not coercible to integer
 	result := EvaluateBitwise(OpBitAnd, int64(42), "not a number")
 	if result != nil {
@@ -313,6 +339,7 @@ func TestEvaluateBitwiseRightNotCoercible(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestValueToStringBoolFalse(t *testing.T) {
+	t.Parallel()
 	// Lines 300-302: bool false
 	result := valueToString(false)
 	if result != "0" {
@@ -321,6 +348,7 @@ func TestValueToStringBoolFalse(t *testing.T) {
 }
 
 func TestValueToStringUnknownType(t *testing.T) {
+	t.Parallel()
 	// Line 305: default fmt.Sprintf case
 	type CustomType struct{ Value int }
 	custom := CustomType{Value: 42}
@@ -335,6 +363,7 @@ func TestValueToStringUnknownType(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestCastToRealStringInvalid(t *testing.T) {
+	t.Parallel()
 	// Lines 442-443: string that doesn't parse
 	result := castToReal("not a number")
 	if val, ok := result.(float64); !ok || val != 0.0 {
@@ -343,6 +372,7 @@ func TestCastToRealStringInvalid(t *testing.T) {
 }
 
 func TestCastToRealBlobValue(t *testing.T) {
+	t.Parallel()
 	// Line 447: default case (blob, etc.)
 	result := castToReal([]byte("test"))
 	if val, ok := result.(float64); !ok || val != 0.0 {
@@ -355,6 +385,7 @@ func TestCastToRealBlobValue(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestCastToNumericInt(t *testing.T) {
+	t.Parallel()
 	// Lines 453-454: CoerceToInteger succeeds
 	result := castToNumeric(int64(42))
 	if val, ok := result.(int64); !ok || val != 42 {
@@ -363,6 +394,7 @@ func TestCastToNumericInt(t *testing.T) {
 }
 
 func TestCastToNumericStringFloat(t *testing.T) {
+	t.Parallel()
 	// Lines 456-460: string parses as float
 	// Note: castToNumeric first tries CoerceToInteger, which will succeed for "123.456"
 	// returning 123, so we need a value that's clearly a float
@@ -379,6 +411,7 @@ func TestCastToNumericStringFloat(t *testing.T) {
 }
 
 func TestCastToNumericStringInvalid(t *testing.T) {
+	t.Parallel()
 	// Line 462: string doesn't parse
 	result := castToNumeric("not a number")
 	if val, ok := result.(string); !ok || val != "not a number" {
@@ -387,6 +420,7 @@ func TestCastToNumericStringInvalid(t *testing.T) {
 }
 
 func TestCastToNumericBlob(t *testing.T) {
+	t.Parallel()
 	// Line 462: non-string, non-coercible
 	blob := []byte("test")
 	result := castToNumeric(blob)
@@ -400,6 +434,7 @@ func TestCastToNumericBlob(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestCastToBlobFloat(t *testing.T) {
+	t.Parallel()
 	// Line 473: default case with float
 	result := castToBlob(3.14159)
 	if _, ok := result.([]byte); !ok {
@@ -412,6 +447,7 @@ func TestCastToBlobFloat(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestEvaluateCastUnknownAffinity(t *testing.T) {
+	t.Parallel()
 	// Lines 499-503: unknown affinity type
 	result := EvaluateCast(int64(42), "UNKNOWN_TYPE")
 	if result != int64(42) {
@@ -424,6 +460,7 @@ func TestEvaluateCastUnknownAffinity(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestGetBinaryCompareCollSeqLeftExplicitCollate(t *testing.T) {
+	t.Parallel()
 	// Lines 118-120: left has EP_Collate
 	left := &Expr{
 		Op:      OpCollate,
@@ -439,6 +476,7 @@ func TestGetBinaryCompareCollSeqLeftExplicitCollate(t *testing.T) {
 }
 
 func TestGetBinaryCompareCollSeqRightExplicitCollate(t *testing.T) {
+	t.Parallel()
 	// Lines 121-123: right has EP_Collate
 	left := &Expr{Op: OpInteger}
 	right := &Expr{
@@ -458,6 +496,7 @@ func TestGetBinaryCompareCollSeqRightExplicitCollate(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestEvaluateComparisonUnsupportedOp(t *testing.T) {
+	t.Parallel()
 	// Lines 315-318: unsupported comparison operator
 	result := EvaluateComparison(OpPlus, int64(1), int64(2), AFF_NUMERIC, CollSeqBinary)
 	if result != nil {
@@ -470,6 +509,7 @@ func TestEvaluateComparisonUnsupportedOp(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestStepMultiWildcardTrailing(t *testing.T) {
+	t.Parallel()
 	// Lines 374-376: trailing wildcard matches everything
 	pattern := []rune("abc%")
 	str := []rune("abcdefghijklmnop")
@@ -484,6 +524,7 @@ func TestStepMultiWildcardTrailing(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestCoerceToBooleanString(t *testing.T) {
+	t.Parallel()
 	// Lines 553-556: string coercion
 	result := CoerceToBoolean("123")
 	if !result {
@@ -492,6 +533,7 @@ func TestCoerceToBooleanString(t *testing.T) {
 }
 
 func TestCoerceToBooleanBlob(t *testing.T) {
+	t.Parallel()
 	// Lines 553-556: blob coercion
 	// Blob is not directly coercible to boolean, it goes through CoerceToInteger
 	result := CoerceToBoolean([]byte{1, 2, 3})
@@ -505,6 +547,7 @@ func TestCoerceToBooleanBlob(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestOpCodeStringUnknown(t *testing.T) {
+	t.Parallel()
 	// Line 119: unknown opcode
 	op := OpCode(200) // Use a value that doesn't overflow but is unknown
 	str := op.String()
@@ -518,6 +561,7 @@ func TestOpCodeStringUnknown(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestUpdateHeightNil(t *testing.T) {
+	t.Parallel()
 	// Lines 436-437: nil expression
 	var expr *Expr
 	expr.updateHeight()
@@ -529,6 +573,7 @@ func TestUpdateHeightNil(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestIsConstantNonConstantOp(t *testing.T) {
+	t.Parallel()
 	// Lines 518-519: non-constant op like OpColumn
 	expr := &Expr{Op: OpColumn}
 	if expr.IsConstant() {
@@ -537,6 +582,7 @@ func TestIsConstantNonConstantOp(t *testing.T) {
 }
 
 func TestIsConstantVector(t *testing.T) {
+	t.Parallel()
 	// Line 530: OpVector (not in the predefined sets)
 	expr := &Expr{Op: OpVector}
 	if expr.IsConstant() {
@@ -549,6 +595,7 @@ func TestIsConstantVector(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestStringLiteralIntegerWithoutIntValue(t *testing.T) {
+	t.Parallel()
 	// Line 602: OpInteger without EP_IntValue flag
 	expr := &Expr{
 		Op:    OpInteger,
@@ -566,6 +613,7 @@ func TestStringLiteralIntegerWithoutIntValue(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestExprStringUnknownOp(t *testing.T) {
+	t.Parallel()
 	// Line 731: unknown op not in handlers
 	expr := &Expr{Op: OpCode(200)} // Use a value that doesn't overflow but is unknown
 	str := expr.String()
@@ -579,6 +627,7 @@ func TestExprStringUnknownOp(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestExprCloneNil(t *testing.T) {
+	t.Parallel()
 	// Lines 756-757: nil expression
 	var expr *Expr
 	clone := expr.Clone()
@@ -588,6 +637,7 @@ func TestExprCloneNil(t *testing.T) {
 }
 
 func TestExprCloneWithAllFields(t *testing.T) {
+	t.Parallel()
 	// Lines 779-787: clone with Left, Right, List
 	expr := &Expr{
 		Op:    OpPlus,
@@ -625,6 +675,7 @@ func TestExprCloneWithAllFields(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestGenerateLiteralBlob(t *testing.T) {
+	t.Parallel()
 	// Lines 246-248: LiteralBlob case
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
@@ -641,6 +692,7 @@ func TestGenerateLiteralBlob(t *testing.T) {
 }
 
 func TestGenerateLiteralUnsupportedType(t *testing.T) {
+	t.Parallel()
 	// Lines 250-251: unsupported literal type
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
@@ -661,6 +713,7 @@ func TestGenerateLiteralUnsupportedType(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestGenerateColumnUnknownTable(t *testing.T) {
+	t.Parallel()
 	// Lines 262-264: resolveTableForColumn error
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
@@ -677,6 +730,7 @@ func TestGenerateColumnUnknownTable(t *testing.T) {
 }
 
 func TestGenerateColumnLookupError(t *testing.T) {
+	t.Parallel()
 	// Lines 268-270: lookupColumnInfo error
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
@@ -709,6 +763,7 @@ func TestGenerateColumnLookupError(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestGenerateStandardBinaryOpUnsupportedOp(t *testing.T) {
+	t.Parallel()
 	// Lines 378-381: unsupported binary operator
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
@@ -724,6 +779,7 @@ func TestGenerateStandardBinaryOpUnsupportedOp(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestGetCollationForOperandsLeftCollation(t *testing.T) {
+	t.Parallel()
 	// Lines 392-393: left register has collation
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
@@ -737,6 +793,7 @@ func TestGetCollationForOperandsLeftCollation(t *testing.T) {
 }
 
 func TestGetCollationForOperandsRightCollation(t *testing.T) {
+	t.Parallel()
 	// Lines 395-396: right register has collation
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
@@ -762,6 +819,7 @@ func TestGetCollationForOperandsRightCollation(t *testing.T) {
 // Unary error tests removed - cannot construct from outside parser package
 
 func TestGenerateUnaryUnsupportedOp(t *testing.T) {
+	t.Parallel()
 	// Lines 517-518: unsupported unary operator
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
@@ -830,6 +888,7 @@ func TestGenerateUnaryUnsupportedOp(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestExprListCloneNilValue(t *testing.T) {
+	t.Parallel()
 	var list *ExprList
 	clone := list.Clone()
 	if clone != nil {
@@ -838,6 +897,7 @@ func TestExprListCloneNilValue(t *testing.T) {
 }
 
 func TestExprListCloneWithItems(t *testing.T) {
+	t.Parallel()
 	list := &ExprList{
 		Items: []*ExprListItem{
 			{

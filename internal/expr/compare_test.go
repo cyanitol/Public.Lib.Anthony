@@ -5,6 +5,7 @@ import (
 )
 
 func TestCompareValues(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		left     interface{}
@@ -96,7 +97,9 @@ func TestCompareValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := CompareValues(tt.left, tt.right, tt.aff, tt.coll)
 			if result != tt.expected {
 				t.Errorf("CompareValues() = %v, want %v", result, tt.expected)
@@ -106,6 +109,7 @@ func TestCompareValues(t *testing.T) {
 }
 
 func TestEvaluateComparison(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		op       OpCode
@@ -199,7 +203,9 @@ func TestEvaluateComparison(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateComparison(tt.op, tt.left, tt.right, tt.aff, tt.coll)
 			if result != tt.expected {
 				t.Errorf("EvaluateComparison() = %v, want %v", result, tt.expected)
@@ -209,6 +215,7 @@ func TestEvaluateComparison(t *testing.T) {
 }
 
 func TestEvaluateLike(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		pattern  string
@@ -282,7 +289,9 @@ func TestEvaluateLike(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateLike(tt.pattern, tt.str, tt.escape)
 			if result != tt.expected {
 				t.Errorf("EvaluateLike(%q, %q, %v) = %v, want %v",
@@ -293,6 +302,7 @@ func TestEvaluateLike(t *testing.T) {
 }
 
 func TestEvaluateGlob(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		pattern  string
@@ -326,7 +336,9 @@ func TestEvaluateGlob(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateGlob(tt.pattern, tt.str)
 			if result != tt.expected {
 				t.Errorf("EvaluateGlob(%q, %q) = %v, want %v",
@@ -337,6 +349,7 @@ func TestEvaluateGlob(t *testing.T) {
 }
 
 func TestEvaluateBetween(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -403,7 +416,9 @@ func TestEvaluateBetween(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateBetween(tt.value, tt.low, tt.high, tt.aff, tt.coll)
 			if result != tt.expected {
 				t.Errorf("EvaluateBetween() = %v, want %v", result, tt.expected)
@@ -413,6 +428,7 @@ func TestEvaluateBetween(t *testing.T) {
 }
 
 func TestEvaluateIn(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -464,7 +480,9 @@ func TestEvaluateIn(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateIn(tt.value, tt.list, tt.aff, tt.coll)
 			if result != tt.expected {
 				t.Errorf("EvaluateIn() = %v, want %v", result, tt.expected)
@@ -474,6 +492,7 @@ func TestEvaluateIn(t *testing.T) {
 }
 
 func TestCoerceToNumeric(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -507,7 +526,9 @@ func TestCoerceToNumeric(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := CoerceToNumeric(tt.value)
 			if result != tt.expected {
 				t.Errorf("CoerceToNumeric(%v) = %v, want %v",
@@ -518,6 +539,7 @@ func TestCoerceToNumeric(t *testing.T) {
 }
 
 func TestCoerceToInteger(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -569,7 +591,9 @@ func TestCoerceToInteger(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result, ok := CoerceToInteger(tt.value)
 			if result != tt.expected || ok != tt.expectOk {
 				t.Errorf("CoerceToInteger(%v) = (%v, %v), want (%v, %v)",
@@ -580,6 +604,7 @@ func TestCoerceToInteger(t *testing.T) {
 }
 
 func TestCoerceToBoolean(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -638,7 +663,9 @@ func TestCoerceToBoolean(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := CoerceToBoolean(tt.value)
 			if result != tt.expected {
 				t.Errorf("CoerceToBoolean(%v) = %v, want %v",
@@ -649,6 +676,7 @@ func TestCoerceToBoolean(t *testing.T) {
 }
 
 func TestCollationSequences(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		collSeq  *CollSeq
@@ -687,7 +715,9 @@ func TestCollationSequences(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := tt.collSeq.Compare(tt.a, tt.b)
 			if (result < 0 && tt.expected >= 0) ||
 				(result > 0 && tt.expected <= 0) ||
@@ -701,6 +731,7 @@ func TestCollationSequences(t *testing.T) {
 
 // TestLikeEdgeCases tests edge cases for LIKE pattern matching to improve stepMultiWildcard coverage.
 func TestLikeEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		pattern  string
@@ -781,7 +812,9 @@ func TestLikeEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateLike(tt.pattern, tt.str, tt.escape)
 			if result != tt.expected {
 				t.Errorf("EvaluateLike(%q, %q, %v) = %v, want %v",
@@ -793,6 +826,7 @@ func TestLikeEdgeCases(t *testing.T) {
 
 // TestGlobEdgeCases tests edge cases for GLOB pattern matching.
 func TestGlobEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		pattern  string
@@ -832,7 +866,9 @@ func TestGlobEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateGlob(tt.pattern, tt.str)
 			if result != tt.expected {
 				t.Errorf("EvaluateGlob(%q, %q) = %v, want %v",
@@ -844,6 +880,7 @@ func TestGlobEdgeCases(t *testing.T) {
 
 // TestGetBinaryCompareCollSeq tests the GetBinaryCompareCollSeq function.
 func TestGetBinaryCompareCollSeq(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		left     *Expr
@@ -906,7 +943,9 @@ func TestGetBinaryCompareCollSeq(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := GetBinaryCompareCollSeq(tt.left, tt.right)
 			if result != tt.expected {
 				t.Errorf("GetBinaryCompareCollSeq() = %v, want %v", result.Name, tt.expected.Name)

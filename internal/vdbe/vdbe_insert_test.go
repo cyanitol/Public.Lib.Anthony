@@ -7,6 +7,7 @@ import (
 )
 
 func TestVDBEInsertAndSelect(t *testing.T) {
+	t.Parallel()
 	// Create a btree and initialize a table
 	bt := btree.NewBtree(4096)
 	rootPage, err := bt.CreateTable()
@@ -22,6 +23,7 @@ func TestVDBEInsertAndSelect(t *testing.T) {
 
 	// Test INSERT
 	t.Run("INSERT", func(t *testing.T) {
+		t.Parallel()
 		vm := New()
 		vm.Ctx = ctx
 		vm.AllocMemory(10)
@@ -77,6 +79,7 @@ func TestVDBEInsertAndSelect(t *testing.T) {
 
 	// Test SELECT
 	t.Run("SELECT", func(t *testing.T) {
+		t.Parallel()
 		vm := New()
 		vm.Ctx = ctx
 		vm.AllocMemory(10)

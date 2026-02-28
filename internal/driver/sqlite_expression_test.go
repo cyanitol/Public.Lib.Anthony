@@ -966,7 +966,9 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Setup: update the table with test values if needed
 			if tt.setup != "" {
 				_, err := db.Exec("UPDATE expr_test SET " + tt.setup + " WHERE id = 1")
@@ -1079,7 +1081,9 @@ func TestExpressionBetween(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.setup != "" {
 				_, err := db.Exec("UPDATE expr_test SET " + tt.setup + " WHERE id = 1")
 				if err != nil {
@@ -1162,7 +1166,9 @@ func TestExpressionComplexCombinations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.setup != "" {
 				_, err := db.Exec("UPDATE expr_test SET " + tt.setup + " WHERE id = 1")
 				if err != nil {

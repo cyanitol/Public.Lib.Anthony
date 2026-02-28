@@ -8,6 +8,7 @@ import (
 
 // TestBalance_HandleOverfullPage tests the handleOverfullPage function (33.3% coverage)
 func TestBalance_HandleOverfullPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages to make overfull easier
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -40,6 +41,7 @@ func TestBalance_HandleOverfullPage(t *testing.T) {
 
 // TestBalance_HandleUnderfullPage tests the handleUnderfullPage function (25.0% coverage)
 func TestBalance_HandleUnderfullPage(t *testing.T) {
+	t.Parallel()
 	btree := NewBtree(4096)
 	rootPage, err := btree.CreateTable()
 	if err != nil {
@@ -79,6 +81,7 @@ func TestBalance_HandleUnderfullPage(t *testing.T) {
 
 // TestPage_AllocateSpace tests the AllocateSpace function with defragmentation (55.6% coverage)
 func TestPage_AllocateSpace(t *testing.T) {
+	t.Parallel()
 	pageData := make([]byte, 1024)
 
 	// Initialize as leaf table page
@@ -130,6 +133,7 @@ func TestPage_AllocateSpace(t *testing.T) {
 
 // TestCursor_LoadParentPage tests the loadParentPage function (55.6% coverage)
 func TestCursor_LoadParentPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -165,6 +169,7 @@ func TestCursor_LoadParentPage(t *testing.T) {
 
 // TestCursor_GetChildPageFromParent tests the getChildPageFromParent function (55.6% coverage)
 func TestCursor_GetChildPageFromParent(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -195,6 +200,7 @@ func TestCursor_GetChildPageFromParent(t *testing.T) {
 
 // TestIntegrity_ValidateFreeBlockPrerequisites tests prerequisite validation (50.0% coverage)
 func TestIntegrity_ValidateFreeBlockPrerequisites(t *testing.T) {
+	t.Parallel()
 	// Test with nil btree
 	result := ValidateFreeBlockList(nil, 1)
 	if len(result.Errors) == 0 {
@@ -228,6 +234,7 @@ func TestIntegrity_ValidateFreeBlockPrerequisites(t *testing.T) {
 
 // TestIntegrity_CheckMaxIterationsExceeded tests iteration limit (50.0% coverage)
 func TestIntegrity_CheckMaxIterationsExceeded(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageData := make([]byte, 4096)
 
@@ -260,6 +267,7 @@ func TestIntegrity_CheckMaxIterationsExceeded(t *testing.T) {
 
 // TestMerge_GetSiblingWithLeftPageDetailed tests left sibling merging (0% coverage)
 func TestMerge_GetSiblingWithLeftPageDetailed(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -321,6 +329,7 @@ func TestMerge_GetSiblingWithLeftPageDetailed(t *testing.T) {
 
 // TestMerge_GetSiblingAsRightmostDetailed tests rightmost child merging (0% coverage)
 func TestMerge_GetSiblingAsRightmostDetailed(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -383,6 +392,7 @@ func TestMerge_GetSiblingAsRightmostDetailed(t *testing.T) {
 
 // TestCursor_EnterPage tests the enterPage function (57.1% coverage)
 func TestCursor_EnterPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -413,6 +423,7 @@ func TestCursor_EnterPage(t *testing.T) {
 
 // TestCursor_DescendToRightChild tests descending to right child (60.0% coverage)
 func TestCursor_DescendToRightChild(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -453,6 +464,7 @@ func TestCursor_DescendToRightChild(t *testing.T) {
 
 // TestCursor_DescendToLastMultiLevel tests descending to last entry in deep tree (62.5% coverage)
 func TestCursor_DescendToLastMultiLevel(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -495,6 +507,7 @@ func TestCursor_DescendToLastMultiLevel(t *testing.T) {
 
 // TestIndexCursor_SeekLeafExactMatch tests exact match seeking (53.8% coverage)
 func TestIndexCursor_SeekLeafExactMatch(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -546,6 +559,7 @@ func TestIndexCursor_SeekLeafExactMatch(t *testing.T) {
 
 // TestIndexCursor_PrevInPage tests backward navigation within page (55.6% coverage)
 func TestIndexCursor_PrevInPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -586,6 +600,7 @@ func TestIndexCursor_PrevInPage(t *testing.T) {
 
 // TestIndexCursor_DeleteCurrentEntry tests deleting current entry (58.8% coverage)
 func TestIndexCursor_DeleteCurrentEntry(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -651,6 +666,7 @@ func TestIndexCursor_DeleteCurrentEntry(t *testing.T) {
 
 // TestOverflow_FreeOverflowChain tests freeing overflow chains (60.0% coverage)
 func TestOverflow_FreeOverflowChain(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -697,6 +713,7 @@ func TestOverflow_FreeOverflowChain(t *testing.T) {
 
 // TestCursor_SplitPage tests page splitting (60.0% coverage)
 func TestCursor_SplitPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages to force splits
 	rootPage, err := bt.CreateTable()
 	if err != nil {

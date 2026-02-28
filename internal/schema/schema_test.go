@@ -7,6 +7,7 @@ import (
 )
 
 func TestNewSchema(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	if s == nil {
 		t.Fatal("NewSchema() returned nil")
@@ -26,6 +27,7 @@ func TestNewSchema(t *testing.T) {
 }
 
 func TestCreateTable(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create a simple table
@@ -106,6 +108,7 @@ func TestCreateTable(t *testing.T) {
 }
 
 func TestCreateTableWithTableConstraints(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateTableStmt{
@@ -161,6 +164,7 @@ func TestCreateTableWithTableConstraints(t *testing.T) {
 }
 
 func TestCreateTableIfNotExists(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateTableStmt{
@@ -194,6 +198,7 @@ func TestCreateTableIfNotExists(t *testing.T) {
 }
 
 func TestCreateIndex(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// First create a table
@@ -247,6 +252,7 @@ func TestCreateIndex(t *testing.T) {
 }
 
 func TestCreateIndexOnNonexistentTable(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	indexStmt := &parser.CreateIndexStmt{
@@ -264,6 +270,7 @@ func TestCreateIndexOnNonexistentTable(t *testing.T) {
 }
 
 func TestGetTable(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Add a table directly
@@ -272,7 +279,9 @@ func TestGetTable(t *testing.T) {
 	// Test case-insensitive lookup
 	tests := []string{"TestTable", "testtable", "TESTTABLE", "tEsTtAbLe"}
 	for _, name := range tests {
+		name := name
 		t.Run(name, func(t *testing.T) {
+				t.Parallel()
 			table, ok := s.GetTable(name)
 			if !ok {
 				t.Errorf("GetTable(%q) not found", name)
@@ -291,6 +300,7 @@ func TestGetTable(t *testing.T) {
 }
 
 func TestListTables(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Empty schema
@@ -312,6 +322,7 @@ func TestListTables(t *testing.T) {
 	// Should be sorted
 	expected := []string{"orders", "products", "users"}
 	for i, name := range expected {
+		name := name
 		if tables[i] != name {
 			t.Errorf("tables[%d] = %q, want %q", i, tables[i], name)
 		}
@@ -319,6 +330,7 @@ func TestListTables(t *testing.T) {
 }
 
 func TestDropTable(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create table and indexes
@@ -359,6 +371,7 @@ func TestDropTable(t *testing.T) {
 }
 
 func TestDropIndex(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	s.Indexes["idx_test"] = &Index{Name: "idx_test"}
@@ -380,6 +393,7 @@ func TestDropIndex(t *testing.T) {
 }
 
 func TestTableGetColumn(t *testing.T) {
+	t.Parallel()
 	table := &Table{
 		Columns: []*Column{
 			{Name: "ID"},
@@ -391,7 +405,9 @@ func TestTableGetColumn(t *testing.T) {
 	// Test case-insensitive lookup
 	tests := []string{"ID", "id", "Id", "iD"}
 	for _, name := range tests {
+		name := name
 		t.Run(name, func(t *testing.T) {
+				t.Parallel()
 			col, ok := table.GetColumn(name)
 			if !ok {
 				t.Errorf("GetColumn(%q) not found", name)
@@ -410,6 +426,7 @@ func TestTableGetColumn(t *testing.T) {
 }
 
 func TestTableGetColumnIndex(t *testing.T) {
+	t.Parallel()
 	table := &Table{
 		Columns: []*Column{
 			{Name: "id"},
@@ -431,7 +448,9 @@ func TestTableGetColumnIndex(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			got := table.GetColumnIndex(tt.name)
 			if got != tt.want {
 				t.Errorf("GetColumnIndex(%q) = %d, want %d", tt.name, got, tt.want)
@@ -441,6 +460,7 @@ func TestTableGetColumnIndex(t *testing.T) {
 }
 
 func TestTableHasRowID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		withoutRowID bool
@@ -451,7 +471,9 @@ func TestTableHasRowID(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			table := &Table{WithoutRowID: tt.withoutRowID}
 			got := table.HasRowID()
 			if got != tt.want {
@@ -462,6 +484,7 @@ func TestTableHasRowID(t *testing.T) {
 }
 
 func TestGetTableIndexes(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Add indexes
@@ -487,6 +510,7 @@ func TestGetTableIndexes(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Test concurrent reads and writes
@@ -520,6 +544,7 @@ func TestConcurrentAccess(t *testing.T) {
 }
 
 func TestRenameTable(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create a table with an index
@@ -566,6 +591,7 @@ func TestRenameTable(t *testing.T) {
 }
 
 func TestRenameTableCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	s.Tables["MyTable"] = &Table{Name: "MyTable"}
@@ -588,6 +614,7 @@ func TestRenameTableCaseInsensitive(t *testing.T) {
 }
 
 func TestGetColumnCollation(t *testing.T) {
+	t.Parallel()
 	table := &Table{
 		Columns: []*Column{
 			{Name: "id", Collation: ""},
@@ -608,6 +635,7 @@ func TestGetColumnCollation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := table.GetColumnCollation(tt.index)
 		if got != tt.want {
 			t.Errorf("GetColumnCollation(%d) = %q, want %q", tt.index, got, tt.want)
@@ -616,6 +644,7 @@ func TestGetColumnCollation(t *testing.T) {
 }
 
 func TestGetColumnCollationByName(t *testing.T) {
+	t.Parallel()
 	table := &Table{
 		Columns: []*Column{
 			{Name: "id", Collation: ""},
@@ -634,6 +663,7 @@ func TestGetColumnCollationByName(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := table.GetColumnCollationByName(tt.name)
 		if got != tt.want {
 			t.Errorf("GetColumnCollationByName(%q) = %q, want %q", tt.name, got, tt.want)
@@ -642,6 +672,7 @@ func TestGetColumnCollationByName(t *testing.T) {
 }
 
 func TestColumnGetEffectiveCollation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		collation string
@@ -653,7 +684,9 @@ func TestColumnGetEffectiveCollation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			col := &Column{Collation: tt.collation}
 			got := col.GetEffectiveCollation()
 			if got != tt.want {
@@ -664,6 +697,7 @@ func TestColumnGetEffectiveCollation(t *testing.T) {
 }
 
 func TestCreateTableWithNilStatement(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	_, err := s.CreateTable(nil)
 	if err == nil {
@@ -672,6 +706,7 @@ func TestCreateTableWithNilStatement(t *testing.T) {
 }
 
 func TestCreateIndexWithNilStatement(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	_, err := s.CreateIndex(nil)
 	if err == nil {
@@ -680,6 +715,7 @@ func TestCreateIndexWithNilStatement(t *testing.T) {
 }
 
 func TestCreateIndexIfNotExists(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create a table first
@@ -717,6 +753,7 @@ func TestCreateIndexIfNotExists(t *testing.T) {
 }
 
 func TestCreateIndexWithPartialWhere(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create a table
@@ -751,6 +788,7 @@ func TestCreateIndexWithPartialWhere(t *testing.T) {
 }
 
 func TestListIndexes(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Empty schema
@@ -772,6 +810,7 @@ func TestListIndexes(t *testing.T) {
 	// Should be sorted
 	expected := []string{"idx_orders", "idx_products", "idx_users"}
 	for i, name := range expected {
+		name := name
 		if indexes[i] != name {
 			t.Errorf("indexes[%d] = %q, want %q", i, indexes[i], name)
 		}
@@ -779,12 +818,15 @@ func TestListIndexes(t *testing.T) {
 }
 
 func TestGetIndexCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	s.Indexes["MyIndex"] = &Index{Name: "MyIndex"}
 
 	tests := []string{"MyIndex", "myindex", "MYINDEX", "mYiNdEx"}
 	for _, name := range tests {
+		name := name
 		t.Run(name, func(t *testing.T) {
+				t.Parallel()
 			idx, ok := s.GetIndex(name)
 			if !ok {
 				t.Errorf("GetIndex(%q) not found", name)
@@ -797,6 +839,7 @@ func TestGetIndexCaseInsensitive(t *testing.T) {
 }
 
 func TestDropIndexCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	s.Indexes["MyIndex"] = &Index{Name: "MyIndex"}
 
@@ -811,6 +854,7 @@ func TestDropIndexCaseInsensitive(t *testing.T) {
 }
 
 func TestDropTableCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 	s.Tables["MyTable"] = &Table{Name: "MyTable"}
 	s.Indexes["idx_mytable"] = &Index{Name: "idx_mytable", Table: "MyTable"}
@@ -831,6 +875,7 @@ func TestDropTableCaseInsensitive(t *testing.T) {
 }
 
 func TestCreateTableWithAutoincrement(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateTableStmt{
@@ -871,6 +916,7 @@ func TestCreateTableWithAutoincrement(t *testing.T) {
 }
 
 func TestCreateTableWithInvalidAutoincrement(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// AUTOINCREMENT on non-INTEGER column should fail
@@ -899,6 +945,7 @@ func TestCreateTableWithInvalidAutoincrement(t *testing.T) {
 }
 
 func TestCreateTableWithGeneratedColumn(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateTableStmt{
@@ -939,6 +986,7 @@ func TestCreateTableWithGeneratedColumn(t *testing.T) {
 }
 
 func TestCreateTableWithCheck(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	checkExpr := &parser.BinaryExpr{
@@ -974,6 +1022,7 @@ func TestCreateTableWithCheck(t *testing.T) {
 }
 
 func TestCreateTableWithDefault(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	defaultExpr := &parser.LiteralExpr{Value: "0"}
@@ -1005,6 +1054,7 @@ func TestCreateTableWithDefault(t *testing.T) {
 }
 
 func TestCreateTableWithForeignKey(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateTableStmt{
@@ -1038,6 +1088,7 @@ func TestCreateTableWithForeignKey(t *testing.T) {
 }
 
 func TestCreateTableWithTableCheck(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	checkExpr := &parser.BinaryExpr{
@@ -1079,6 +1130,7 @@ func TestCreateTableWithTableCheck(t *testing.T) {
 }
 
 func TestCreateTableWithCollation(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateTableStmt{
@@ -1108,6 +1160,7 @@ func TestCreateTableWithCollation(t *testing.T) {
 }
 
 func TestCreateTableWithStrict(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateTableStmt{
@@ -1129,6 +1182,7 @@ func TestCreateTableWithStrict(t *testing.T) {
 }
 
 func TestCreateTableWithoutRowID(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateTableStmt{
@@ -1160,6 +1214,7 @@ func TestCreateTableWithoutRowID(t *testing.T) {
 }
 
 func TestDropTableWithSequence(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	// Create table with AUTOINCREMENT
@@ -1184,6 +1239,7 @@ func TestDropTableWithSequence(t *testing.T) {
 }
 
 func TestApplyGeneratedConstraintVirtual(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateTableStmt{
@@ -1224,6 +1280,7 @@ func TestApplyGeneratedConstraintVirtual(t *testing.T) {
 }
 
 func TestApplyGeneratedConstraintNil(t *testing.T) {
+	t.Parallel()
 	// Test the nil check in applyGeneratedConstraint
 	col := &Column{Name: "test"}
 	pkCols := []string{}
@@ -1241,6 +1298,7 @@ func TestApplyGeneratedConstraintNil(t *testing.T) {
 }
 
 func TestApplyTablePrimaryKeyNil(t *testing.T) {
+	t.Parallel()
 	tc := &TableConstraint{}
 	pkCols := []string{}
 
@@ -1257,6 +1315,7 @@ func TestApplyTablePrimaryKeyNil(t *testing.T) {
 }
 
 func TestApplyTableUniqueNil(t *testing.T) {
+	t.Parallel()
 	tc := &TableConstraint{}
 	pkCols := []string{}
 
@@ -1273,6 +1332,7 @@ func TestApplyTableUniqueNil(t *testing.T) {
 }
 
 func TestCreateViewNilSelect(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	stmt := &parser.CreateViewStmt{
@@ -1291,6 +1351,7 @@ func TestCreateViewNilSelect(t *testing.T) {
 }
 
 func TestParseViewSQLWrongType(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	row := MasterRow{
@@ -1305,6 +1366,7 @@ func TestParseViewSQLWrongType(t *testing.T) {
 }
 
 func TestParseViewSQLMultipleStatements(t *testing.T) {
+	t.Parallel()
 	s := NewSchema()
 
 	row := MasterRow{

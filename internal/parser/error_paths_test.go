@@ -7,6 +7,7 @@ import (
 // Test error paths and edge cases to improve coverage
 
 func TestParserErrorPaths(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -102,7 +103,9 @@ func TestParserErrorPaths(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.input)
 			stmts, err := p.Parse()
 			if tt.wantErr {

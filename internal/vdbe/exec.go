@@ -503,6 +503,30 @@ func (v *VDBE) execSCopy(instr *Instruction) error {
 
 // Cursor operation implementations
 
+// findTableByRootPage finds a table by its root page number from the schema.
+// Returns nil if schema is not available or table not found.
+func (v *VDBE) findTableByRootPage(rootPage uint32) interface{} {
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return nil
+	}
+
+	// Use interface to avoid import cycle with schema package
+	type schemaWithRootPageLookup interface {
+		GetTableByRootPage(uint32) (interface{}, bool)
+	}
+
+	schemaObj, ok := v.Ctx.Schema.(schemaWithRootPageLookup)
+	if !ok {
+		return nil
+	}
+
+	if table, found := schemaObj.GetTableByRootPage(rootPage); found {
+		return table
+	}
+
+	return nil
+}
+
 func (v *VDBE) execOpenRead(instr *Instruction) error {
 	// Open cursor P1 for reading on root page P2
 	// P1 = cursor number, P2 = root page, P3 = num columns
@@ -532,6 +556,9 @@ func (v *VDBE) execOpenRead(instr *Instruction) error {
 		CachedCols:  make([][]byte, 0),
 		CacheStatus: 0,
 	}
+
+	// Store table metadata if available (for handling ALTER TABLE ADD COLUMN defaults)
+	cursor.Table = v.findTableByRootPage(uint32(instr.P2))
 
 	v.Cursors[instr.P1] = cursor
 	return nil
@@ -567,6 +594,9 @@ func (v *VDBE) execOpenWrite(instr *Instruction) error {
 		CachedCols:  make([][]byte, 0),
 		CacheStatus: 0,
 	}
+
+	// Store table metadata if available (for handling ALTER TABLE ADD COLUMN defaults)
+	cursor.Table = v.findTableByRootPage(uint32(instr.P2))
 
 	v.Cursors[instr.P1] = cursor
 	return nil
@@ -1096,7 +1126,7 @@ func (v *VDBE) execColumn(instr *Instruction) error {
 	if payload == nil {
 		return nil
 	}
-	return v.parseColumnIntoMem(payload, instr.P2, dst)
+	return v.parseColumnIntoMem(payload, instr.P2, dst, cursor)
 }
 
 // getColumnPayload returns the payload from cursor, or nil if unavailable.
@@ -1145,11 +1175,97 @@ func (v *VDBE) getBtreeCursorPayload(cursor *Cursor, dst *Mem) []byte {
 }
 
 // parseColumnIntoMem parses a record column into dst.
-func (v *VDBE) parseColumnIntoMem(payload []byte, colIndex int, dst *Mem) error {
+// If the column doesn't exist in the record (e.g., added via ALTER TABLE ADD COLUMN),
+// it returns the column's DEFAULT value from the schema.
+func (v *VDBE) parseColumnIntoMem(payload []byte, colIndex int, dst *Mem, cursor *Cursor) error {
 	if err := parseRecordColumn(payload, colIndex, dst); err != nil {
 		return fmt.Errorf("failed to parse record column: %w", err)
 	}
+
+	// If the column was set to NULL and we have a cursor with table metadata,
+	// check if this column has a DEFAULT value
+	if dst.IsNull() && cursor != nil && cursor.Table != nil {
+		// Try to get default value from schema
+		// This handles the case where a column was added via ALTER TABLE ADD COLUMN
+		// and existing rows don't have data for that column
+		v.applyDefaultValueIfAvailable(colIndex, dst, cursor.Table)
+	}
+
 	return nil
+}
+
+// applyDefaultValueIfAvailable applies a default value from schema if available.
+// This is used when reading columns that were added via ALTER TABLE ADD COLUMN.
+func (v *VDBE) applyDefaultValueIfAvailable(colIndex int, dst *Mem, tableInterface interface{}) {
+	// Define interfaces that schema.Table and schema.Column implement
+	// to avoid import cycle
+	type colDefault interface {
+		GetDefault() interface{}
+	}
+
+	type tblColumns interface {
+		GetColumns() []interface{}
+	}
+
+	tbl, ok := tableInterface.(tblColumns)
+	if !ok {
+		return
+	}
+
+	cols := tbl.GetColumns()
+	if colIndex < 0 || colIndex >= len(cols) {
+		return
+	}
+
+	col, ok := cols[colIndex].(colDefault)
+	if !ok {
+		return
+	}
+
+	defaultVal := col.GetDefault()
+	if defaultVal == nil {
+		return
+	}
+
+	// Parse the default value string and set it in dst
+	if defaultStr, ok := defaultVal.(string); ok {
+		v.parseDefaultValue(defaultStr, dst)
+	}
+}
+
+// parseDefaultValue parses a DEFAULT value string and stores it in dst.
+// This handles integer, real, string, and NULL literals.
+func (v *VDBE) parseDefaultValue(defaultStr string, dst *Mem) {
+	// Try to parse as integer first
+	if i, err := strconv.ParseInt(defaultStr, 10, 64); err == nil {
+		dst.SetInt(i)
+		return
+	}
+
+	// Try to parse as float
+	if f, err := strconv.ParseFloat(defaultStr, 64); err == nil {
+		dst.SetReal(f)
+		return
+	}
+
+	// Check for NULL
+	if defaultStr == "NULL" {
+		dst.SetNull()
+		return
+	}
+
+	// Check for string literal (remove quotes)
+	if len(defaultStr) >= 2 {
+		if (defaultStr[0] == '\'' && defaultStr[len(defaultStr)-1] == '\'') ||
+			(defaultStr[0] == '"' && defaultStr[len(defaultStr)-1] == '"') {
+			// Remove quotes and set as string
+			dst.SetStr(defaultStr[1 : len(defaultStr)-1])
+			return
+		}
+	}
+
+	// Default: treat as string
+	dst.SetStr(defaultStr)
 }
 
 func (v *VDBE) execRowid(instr *Instruction) error {

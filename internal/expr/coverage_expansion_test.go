@@ -13,6 +13,7 @@ import (
 // ============================================================================
 
 func TestAffinityHandleSelect(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -51,7 +52,9 @@ func TestAffinityHandleSelect(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -61,6 +64,7 @@ func TestAffinityHandleSelect(t *testing.T) {
 }
 
 func TestAffinityHandleSelectColumn(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -115,7 +119,9 @@ func TestAffinityHandleSelectColumn(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -125,6 +131,7 @@ func TestAffinityHandleSelectColumn(t *testing.T) {
 }
 
 func TestAffinityHandleVector(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -162,7 +169,9 @@ func TestAffinityHandleVector(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -172,6 +181,7 @@ func TestAffinityHandleVector(t *testing.T) {
 }
 
 func TestAffinityHandleFunction(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -210,7 +220,9 @@ func TestAffinityHandleFunction(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -220,6 +232,7 @@ func TestAffinityHandleFunction(t *testing.T) {
 }
 
 func TestAffinityHandleTransparent(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -258,7 +271,9 @@ func TestAffinityHandleTransparent(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -268,6 +283,7 @@ func TestAffinityHandleTransparent(t *testing.T) {
 }
 
 func TestAffinityHandleRegister(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -294,7 +310,9 @@ func TestAffinityHandleRegister(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -304,6 +322,7 @@ func TestAffinityHandleRegister(t *testing.T) {
 }
 
 func TestGetComparisonAffinity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -362,7 +381,9 @@ func TestGetComparisonAffinity(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := GetComparisonAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -372,6 +393,7 @@ func TestGetComparisonAffinity(t *testing.T) {
 }
 
 func TestPropagateAffinityNegate(t *testing.T) {
+	t.Parallel()
 	expr := &Expr{
 		Op:   OpNegate,
 		Left: &Expr{Op: OpInteger, Affinity: AFF_INTEGER},
@@ -386,6 +408,7 @@ func TestPropagateAffinityNegate(t *testing.T) {
 }
 
 func TestPropagateAffinityCase(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -419,7 +442,9 @@ func TestPropagateAffinityCase(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			PropagateAffinity(tt.expr)
 			if tt.expr.Affinity != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, tt.expr.Affinity)
@@ -429,6 +454,7 @@ func TestPropagateAffinityCase(t *testing.T) {
 }
 
 func TestApplyNumericAffinity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -467,7 +493,9 @@ func TestApplyNumericAffinity(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := ApplyAffinity(tt.value, AFF_NUMERIC)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -482,6 +510,7 @@ func TestApplyNumericAffinity(t *testing.T) {
 // ============================================================================
 
 func TestCodeGeneratorSetArgs(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -497,6 +526,7 @@ func TestCodeGeneratorSetArgs(t *testing.T) {
 }
 
 func TestCodeGeneratorSetNextReg(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -519,6 +549,7 @@ func TestCodeGeneratorSetNextReg(t *testing.T) {
 }
 
 func TestCodeGeneratorGetCursor(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -539,6 +570,7 @@ func TestCodeGeneratorGetCursor(t *testing.T) {
 }
 
 func TestGenerateNullLiteral(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -561,6 +593,7 @@ func TestGenerateNullLiteral(t *testing.T) {
 }
 
 func TestGenerateVariable(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		args        []interface{}
@@ -625,7 +658,9 @@ func TestGenerateVariable(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 			gen.SetArgs(tt.args)
@@ -652,6 +687,7 @@ func TestGenerateVariable(t *testing.T) {
 }
 
 func TestGenerateCollate(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -671,6 +707,7 @@ func TestGenerateCollate(t *testing.T) {
 }
 
 func TestPatchJumpAndCurrentAddr(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -695,6 +732,7 @@ func TestPatchJumpAndCurrentAddr(t *testing.T) {
 }
 
 func TestGenerateLikeAndGlobExpr(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -722,6 +760,7 @@ func TestGenerateLikeAndGlobExpr(t *testing.T) {
 // ============================================================================
 
 func TestCollSeqFromCollateOp(t *testing.T) {
+	t.Parallel()
 	expr := &Expr{
 		Op:      OpCollate,
 		CollSeq: "NOCASE",
@@ -735,6 +774,7 @@ func TestCollSeqFromCollateOp(t *testing.T) {
 
 
 func TestEvaluateIsAndIsNot(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		op       OpCode
@@ -808,7 +848,9 @@ func TestEvaluateIsAndIsNot(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateComparison(tt.op, tt.left, tt.right, AFF_INTEGER, CollSeqBinary)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -822,6 +864,7 @@ func TestEvaluateIsAndIsNot(t *testing.T) {
 // ============================================================================
 
 func TestNegateMinInt64(t *testing.T) {
+	t.Parallel()
 	result := EvaluateUnary(OpNegate, int64(math.MinInt64))
 	if _, ok := result.(float64); !ok {
 		t.Error("Expected float64 result for negating MinInt64")
@@ -829,6 +872,7 @@ func TestNegateMinInt64(t *testing.T) {
 }
 
 func TestNegateString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -857,7 +901,9 @@ func TestNegateString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := EvaluateUnary(OpNegate, tt.value)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -867,6 +913,7 @@ func TestNegateString(t *testing.T) {
 }
 
 func TestBitNotWithNonInteger(t *testing.T) {
+	t.Parallel()
 	result := EvaluateUnary(OpBitNot, "not a number")
 	if result != int64(0) {
 		t.Errorf("Expected 0 for bitwise NOT of non-integer, got %v", result)
@@ -874,6 +921,7 @@ func TestBitNotWithNonInteger(t *testing.T) {
 }
 
 func TestBitwiseRShiftNegative(t *testing.T) {
+	t.Parallel()
 	result := EvaluateBitwise(OpRShift, int64(-8), int64(100))
 	if result != int64(-1) {
 		t.Errorf("Expected -1 for right shift of negative by large amount, got %v", result)
@@ -885,6 +933,7 @@ func TestBitwiseRShiftNegative(t *testing.T) {
 // ============================================================================
 
 func TestOpCodeString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		op       OpCode
 		expected string
@@ -899,7 +948,9 @@ func TestOpCodeString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.expected, func(t *testing.T) {
+				t.Parallel()
 			result := tt.op.String()
 			if result != tt.expected {
 				t.Errorf("Expected %s, got %s", tt.expected, result)
@@ -909,6 +960,7 @@ func TestOpCodeString(t *testing.T) {
 }
 
 func TestExprListItems(t *testing.T) {
+	t.Parallel()
 	list := &ExprList{
 		Items: []*ExprListItem{
 			{Expr: NewIntExpr(1)},
@@ -923,6 +975,7 @@ func TestExprListItems(t *testing.T) {
 }
 
 func TestVectorSizeExpr(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -970,7 +1023,9 @@ func TestVectorSizeExpr(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := tt.expr.VectorSize()
 			if result != tt.expected {
 				t.Errorf("Expected %d, got %d", tt.expected, result)
@@ -980,6 +1035,7 @@ func TestVectorSizeExpr(t *testing.T) {
 }
 
 func TestExprCloneDeepCopy(t *testing.T) {
+	t.Parallel()
 	original := &Expr{
 		Op:       OpPlus,
 		Affinity: AFF_INTEGER,
@@ -1014,6 +1070,7 @@ func TestExprCloneDeepCopy(t *testing.T) {
 }
 
 func TestExprListCloneDeepCopy(t *testing.T) {
+	t.Parallel()
 	original := &ExprList{
 		Items: []*ExprListItem{
 			{Expr: NewIntExpr(1), Name: "a"},
@@ -1039,6 +1096,7 @@ func TestExprListCloneDeepCopy(t *testing.T) {
 }
 
 func TestIsFunctionConstant(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -1079,7 +1137,9 @@ func TestIsFunctionConstant(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := tt.expr.IsConstant()
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -1089,6 +1149,7 @@ func TestIsFunctionConstant(t *testing.T) {
 }
 
 func TestUpdateHeight(t *testing.T) {
+	t.Parallel()
 	expr := &Expr{
 		Op: OpPlus,
 		Left: &Expr{
@@ -1123,6 +1184,7 @@ func TestUpdateHeight(t *testing.T) {
 }
 
 func TestStringLiteral(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expr     *Expr
@@ -1151,7 +1213,9 @@ func TestStringLiteral(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			result := tt.expr.String()
 			if result != tt.expected {
 				t.Errorf("Expected %s, got %s", tt.expected, result)
@@ -1165,6 +1229,7 @@ func TestStringLiteral(t *testing.T) {
 // ============================================================================
 
 func TestCompareNumericsWithInfinity(t *testing.T) {
+	t.Parallel()
 	result := compareNumerics(math.Inf(1), 1.0)
 	if result != CmpGreater {
 		t.Errorf("Expected CmpGreater for +Inf > 1.0, got %v", result)
@@ -1182,6 +1247,7 @@ func TestCompareNumericsWithInfinity(t *testing.T) {
 }
 
 func TestDivideFloatsInfinity(t *testing.T) {
+	t.Parallel()
 	result := EvaluateArithmetic(OpDivide, 1.0, 0.0)
 	if result != nil {
 		t.Errorf("Expected nil for divide by zero, got %v", result)
@@ -1189,6 +1255,7 @@ func TestDivideFloatsInfinity(t *testing.T) {
 }
 
 func TestResolveFloatVal(t *testing.T) {
+	t.Parallel()
 	// This tests the internal resolveFloatVal logic through divide
 	result := EvaluateArithmetic(OpDivide, int64(10), 3.0)
 	if _, ok := result.(float64); !ok {
@@ -1202,6 +1269,7 @@ func TestResolveFloatVal(t *testing.T) {
 }
 
 func TestSubtractOverflow(t *testing.T) {
+	t.Parallel()
 	result := EvaluateArithmetic(OpMinus, int64(math.MinInt64), int64(1))
 	if _, ok := result.(float64); !ok {
 		t.Error("Expected float64 result for subtraction overflow")
@@ -1209,6 +1277,7 @@ func TestSubtractOverflow(t *testing.T) {
 }
 
 func TestRemainderWithFloat(t *testing.T) {
+	t.Parallel()
 	result := EvaluateArithmetic(OpRemainder, 10.5, int64(3))
 	if result == nil {
 		t.Error("Expected non-nil result for remainder with float")

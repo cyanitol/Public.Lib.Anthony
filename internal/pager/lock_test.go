@@ -10,6 +10,7 @@ import (
 
 // TestLockLevelString tests the String() method for lock levels.
 func TestLockLevelString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		level    LockLevel
 		expected string
@@ -23,6 +24,7 @@ func TestLockLevelString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.expected, func(t *testing.T) {
 			got := tt.level.String()
 			if got != tt.expected {
@@ -34,6 +36,7 @@ func TestLockLevelString(t *testing.T) {
 
 // TestNewLockManager tests creating a new lock manager.
 func TestNewLockManager(t *testing.T) {
+	t.Parallel()
 	t.Run("nil file", func(t *testing.T) {
 		_, err := NewLockManager(nil)
 		if err != ErrFileNotOpen {
@@ -42,6 +45,7 @@ func TestNewLockManager(t *testing.T) {
 	})
 
 	t.Run("valid file", func(t *testing.T) {
+			t.Parallel()
 		f, cleanup := createTestFile(t)
 		defer cleanup()
 
@@ -59,6 +63,7 @@ func TestNewLockManager(t *testing.T) {
 
 // TestGetLockState tests getting the current lock state.
 func TestGetLockState(t *testing.T) {
+	t.Parallel()
 	f, cleanup := createTestFile(t)
 	defer cleanup()
 
@@ -75,6 +80,7 @@ func TestGetLockState(t *testing.T) {
 
 // TestIsValidTransition tests the lock transition validation.
 func TestIsValidTransition(t *testing.T) {
+	t.Parallel()
 	f, cleanup := createTestFile(t)
 	defer cleanup()
 
@@ -118,6 +124,7 @@ func TestIsValidTransition(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			lm.currentLevel = tt.from
 			got := lm.isValidTransition(tt.from, tt.to)
@@ -131,6 +138,7 @@ func TestIsValidTransition(t *testing.T) {
 
 // TestAcquireReleaseLock tests basic lock acquisition and release.
 func TestAcquireReleaseLock(t *testing.T) {
+	t.Parallel()
 	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
@@ -147,6 +155,7 @@ func TestAcquireReleaseLock(t *testing.T) {
 
 	// Test acquiring SHARED lock
 	t.Run("acquire shared", func(t *testing.T) {
+			t.Parallel()
 		if err := lm.AcquireLock(lockShared); err != nil {
 			t.Fatalf("AcquireLock(SHARED) error = %v", err)
 		}
@@ -158,6 +167,7 @@ func TestAcquireReleaseLock(t *testing.T) {
 
 	// Test upgrading to RESERVED
 	t.Run("upgrade to reserved", func(t *testing.T) {
+			t.Parallel()
 		if err := lm.AcquireLock(lockReserved); err != nil {
 			t.Fatalf("AcquireLock(RESERVED) error = %v", err)
 		}
@@ -169,6 +179,7 @@ func TestAcquireReleaseLock(t *testing.T) {
 
 	// Test upgrading to EXCLUSIVE
 	t.Run("upgrade to exclusive", func(t *testing.T) {
+			t.Parallel()
 		if err := lm.AcquireLock(lockExclusive); err != nil {
 			t.Fatalf("AcquireLock(EXCLUSIVE) error = %v", err)
 		}
@@ -180,6 +191,7 @@ func TestAcquireReleaseLock(t *testing.T) {
 
 	// Test downgrading to SHARED
 	t.Run("downgrade to shared", func(t *testing.T) {
+			t.Parallel()
 		if err := lm.ReleaseLock(lockShared); err != nil {
 			t.Fatalf("ReleaseLock(SHARED) error = %v", err)
 		}
@@ -191,6 +203,7 @@ func TestAcquireReleaseLock(t *testing.T) {
 
 	// Test releasing all locks
 	t.Run("release all", func(t *testing.T) {
+			t.Parallel()
 		if err := lm.ReleaseLock(lockNone); err != nil {
 			t.Fatalf("ReleaseLock(NONE) error = %v", err)
 		}
@@ -203,6 +216,7 @@ func TestAcquireReleaseLock(t *testing.T) {
 
 // TestInvalidTransitions tests that invalid lock transitions are rejected.
 func TestInvalidTransitions(t *testing.T) {
+	t.Parallel()
 	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
@@ -232,6 +246,7 @@ func TestInvalidTransitions(t *testing.T) {
 
 // TestConcurrentReaders tests that multiple readers can hold SHARED locks.
 func TestConcurrentReaders(t *testing.T) {
+	t.Parallel()
 	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
@@ -279,6 +294,7 @@ func TestConcurrentReaders(t *testing.T) {
 
 // TestReaderWriterConflict tests that a writer blocks when readers exist.
 func TestReaderWriterConflict(t *testing.T) {
+	t.Parallel()
 	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
@@ -339,6 +355,7 @@ func TestReaderWriterConflict(t *testing.T) {
 
 // TestReservedlockExclusive tests that only one RESERVED lock can be held.
 func TestReservedlockExclusive(t *testing.T) {
+	t.Parallel()
 	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
@@ -390,6 +407,7 @@ func TestReservedlockExclusive(t *testing.T) {
 
 // TestExclusivelockExclusive tests that EXCLUSIVE locks are truly exclusive.
 func TestExclusivelockExclusive(t *testing.T) {
+	t.Parallel()
 	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
@@ -436,6 +454,7 @@ func TestExclusivelockExclusive(t *testing.T) {
 
 // TestConcurrentLockOperations tests thread safety of lock operations.
 func TestConcurrentLockOperations(t *testing.T) {
+	t.Parallel()
 	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
@@ -469,6 +488,7 @@ func TestConcurrentLockOperations(t *testing.T) {
 
 // TestIsLockHeld tests the IsLockHeld method.
 func TestIsLockHeld(t *testing.T) {
+	t.Parallel()
 	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
@@ -518,6 +538,7 @@ func TestIsLockHeld(t *testing.T) {
 
 // TestCanAcquire tests the CanAcquire method.
 func TestCanAcquire(t *testing.T) {
+	t.Parallel()
 	f, cleanup := createTestFile(t)
 	defer cleanup()
 
@@ -542,6 +563,7 @@ func TestCanAcquire(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			lm.mu.Lock()
 			lm.currentLevel = tt.currentLevel
@@ -558,6 +580,7 @@ func TestCanAcquire(t *testing.T) {
 
 // TestLockManagerClose tests that Close releases all locks.
 func TestLockManagerClose(t *testing.T) {
+	t.Parallel()
 	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
@@ -591,6 +614,7 @@ func TestLockManagerClose(t *testing.T) {
 
 // TestTryAcquireLock tests the non-blocking lock acquisition.
 func TestTryAcquireLock(t *testing.T) {
+	t.Parallel()
 	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
@@ -617,6 +641,7 @@ func TestTryAcquireLock(t *testing.T) {
 
 // TestLockSequence tests a typical lock sequence for a write transaction.
 func TestLockSequence(t *testing.T) {
+	t.Parallel()
 	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
@@ -665,6 +690,7 @@ func TestLockSequence(t *testing.T) {
 
 // TestPendingBlocksNewReaders tests that PENDING blocks new SHARED locks.
 func TestPendingBlocksNewReaders(t *testing.T) {
+	t.Parallel()
 	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")

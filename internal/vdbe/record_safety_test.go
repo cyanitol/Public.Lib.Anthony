@@ -8,6 +8,7 @@ import (
 
 // TestDecodeInt24ValueBufferOverflow tests bounds checking for 24-bit integer decoding
 func TestDecodeInt24ValueBufferOverflow(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		data      []byte
@@ -59,7 +60,9 @@ func TestDecodeInt24ValueBufferOverflow(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			_, err := decodeInt24Value(tt.data, tt.offset)
 			if tt.expectErr {
 				if err == nil {
@@ -79,6 +82,7 @@ func TestDecodeInt24ValueBufferOverflow(t *testing.T) {
 
 // TestDecodeInt48ValueBufferOverflow tests bounds checking for 48-bit integer decoding
 func TestDecodeInt48ValueBufferOverflow(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		data      []byte
@@ -130,7 +134,9 @@ func TestDecodeInt48ValueBufferOverflow(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			_, err := decodeInt48Value(tt.data, tt.offset)
 			if tt.expectErr {
 				if err == nil {
@@ -150,6 +156,7 @@ func TestDecodeInt48ValueBufferOverflow(t *testing.T) {
 
 // TestDecodeInt24ValueCorrectness tests that valid 24-bit values decode correctly
 func TestDecodeInt24ValueCorrectness(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		data     []byte
@@ -189,7 +196,9 @@ func TestDecodeInt24ValueCorrectness(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			result, err := decodeInt24Value(tt.data, tt.offset)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -203,6 +212,7 @@ func TestDecodeInt24ValueCorrectness(t *testing.T) {
 
 // TestDecodeInt48ValueCorrectness tests that valid 48-bit values decode correctly
 func TestDecodeInt48ValueCorrectness(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		data     []byte
@@ -242,7 +252,9 @@ func TestDecodeInt48ValueCorrectness(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			result, err := decodeInt48Value(tt.data, tt.offset)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -256,7 +268,9 @@ func TestDecodeInt48ValueCorrectness(t *testing.T) {
 
 // TestDecodeRecordMaxSize tests that records exceeding MaxRecordSize are rejected
 func TestDecodeRecordMaxSize(t *testing.T) {
+	t.Parallel()
 	t.Run("empty record", func(t *testing.T) {
+		t.Parallel()
 		_, err := decodeRecord([]byte{})
 		if err == nil {
 			t.Error("expected error for empty record")
@@ -264,6 +278,7 @@ func TestDecodeRecordMaxSize(t *testing.T) {
 	})
 
 	t.Run("record at max size", func(t *testing.T) {
+		t.Parallel()
 		// Create a large but valid header
 		data := make([]byte, MaxRecordSize)
 		// Header size = 2 (varint encoding of small number)
@@ -280,6 +295,7 @@ func TestDecodeRecordMaxSize(t *testing.T) {
 	})
 
 	t.Run("record exceeding max size", func(t *testing.T) {
+		t.Parallel()
 		// Create a record that's too large
 		data := make([]byte, MaxRecordSize+1)
 		data[0] = 0x02
@@ -297,6 +313,7 @@ func TestDecodeRecordMaxSize(t *testing.T) {
 
 // TestDecodeRecordTruncated tests decoding with truncated data
 func TestDecodeRecordTruncated(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		data []byte
@@ -320,7 +337,9 @@ func TestDecodeRecordTruncated(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			_, err := decodeRecord(tt.data)
 			if err == nil {
 				t.Error("expected error for truncated data")
@@ -331,6 +350,7 @@ func TestDecodeRecordTruncated(t *testing.T) {
 
 // TestDecodeRecordIntEdgeCases tests integer decoding edge cases
 func TestDecodeRecordIntEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    int64
@@ -349,7 +369,9 @@ func TestDecodeRecordIntEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			// Encode the value
 			encoded := encodeSimpleRecord([]interface{}{tt.value})
 
@@ -377,6 +399,7 @@ func TestDecodeRecordIntEdgeCases(t *testing.T) {
 
 // TestDecodeRecordOffsetEdgeCases tests offset validation
 func TestDecodeRecordOffsetEdgeCases(t *testing.T) {
+	t.Parallel()
 	// Create a valid record with multiple values
 	values := []interface{}{
 		int64(100),   // serial type 1 (1 byte)
@@ -408,6 +431,7 @@ func TestDecodeRecordOffsetEdgeCases(t *testing.T) {
 
 // TestDecodeRecordBlobAndText tests blob and text handling with various sizes
 func TestDecodeRecordBlobAndText(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		value interface{}
@@ -423,7 +447,9 @@ func TestDecodeRecordBlobAndText(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			encoded := encodeSimpleRecord([]interface{}{tt.value})
 			decoded, err := decodeRecord(encoded)
 			if err != nil {

@@ -78,6 +78,7 @@ func (m *SafetyTestProvider) GetCallCount() int {
 
 // TestGetPageConcurrentAccess tests concurrent access to GetPage with double-check pattern
 func TestGetPageConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	provider := NewSafetyTestProvider()
 
@@ -119,6 +120,7 @@ func TestGetPageConcurrentAccess(t *testing.T) {
 
 // TestGetPageInvalidPageNumber tests that page 0 is rejected
 func TestGetPageInvalidPageNumber(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	_, err := bt.GetPage(0)
@@ -129,6 +131,7 @@ func TestGetPageInvalidPageNumber(t *testing.T) {
 
 // TestGetPageDoubleCheckPattern verifies the double-check pattern works correctly
 func TestGetPageDoubleCheckPattern(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	provider := NewSafetyTestProvider()
 
@@ -160,6 +163,7 @@ func TestGetPageDoubleCheckPattern(t *testing.T) {
 
 // TestPageValidation tests page validation
 func TestPageValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		setupPage func() []byte
@@ -237,7 +241,9 @@ func TestPageValidation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			bt := NewBtree(4096)
 			page := tt.setupPage()
 
@@ -258,6 +264,7 @@ func TestPageValidation(t *testing.T) {
 
 // TestPageValidationWithProvider tests that validation is called when loading from provider
 func TestPageValidationWithProvider(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	provider := NewSafetyTestProvider()
 
@@ -283,7 +290,9 @@ func TestPageValidationWithProvider(t *testing.T) {
 
 // TestCursorStateValidation tests cursor state validation
 func TestCursorStateValidation(t *testing.T) {
+	t.Parallel()
 	t.Run("nil btree", func(t *testing.T) {
+		t.Parallel()
 		cursor := &BtCursor{
 			Btree:    nil,
 			RootPage: 1,
@@ -298,6 +307,7 @@ func TestCursorStateValidation(t *testing.T) {
 	})
 
 	t.Run("invalid root page", func(t *testing.T) {
+		t.Parallel()
 		bt := NewBtree(4096)
 		cursor := &BtCursor{
 			Btree:    bt,
@@ -313,6 +323,7 @@ func TestCursorStateValidation(t *testing.T) {
 	})
 
 	t.Run("depth exceeded", func(t *testing.T) {
+		t.Parallel()
 		bt := NewBtree(4096)
 		cursor := &BtCursor{
 			Btree:    bt,
@@ -328,6 +339,7 @@ func TestCursorStateValidation(t *testing.T) {
 	})
 
 	t.Run("valid cursor state", func(t *testing.T) {
+		t.Parallel()
 		bt := NewBtree(4096)
 		cursor := NewCursor(bt, 1)
 
@@ -340,6 +352,7 @@ func TestCursorStateValidation(t *testing.T) {
 
 // TestCursorGetKeyWithNilBtree tests that GetKey handles nil btree safely
 func TestCursorGetKeyWithNilBtree(t *testing.T) {
+	t.Parallel()
 	cursor := &BtCursor{
 		Btree: nil,
 		State: CursorValid,
@@ -356,6 +369,7 @@ func TestCursorGetKeyWithNilBtree(t *testing.T) {
 
 // TestCursorGetPayloadWithNilBtree tests that GetPayload handles nil btree safely
 func TestCursorGetPayloadWithNilBtree(t *testing.T) {
+	t.Parallel()
 	cursor := &BtCursor{
 		Btree: nil,
 		State: CursorValid,
@@ -372,6 +386,7 @@ func TestCursorGetPayloadWithNilBtree(t *testing.T) {
 
 // TestConcurrentPageAccess tests concurrent access to different pages
 func TestConcurrentPageAccess(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	provider := NewSafetyTestProvider()
 
@@ -443,6 +458,7 @@ func createValidInteriorPage(size uint32) []byte {
 
 // TestRaceConditionInGetPage specifically tests for race conditions
 func TestRaceConditionInGetPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	provider := NewSafetyTestProvider()
 

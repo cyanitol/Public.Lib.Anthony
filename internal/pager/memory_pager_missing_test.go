@@ -6,6 +6,7 @@ import (
 
 // TestMemoryPagerBeginRead tests BeginRead on memory pager
 func TestMemoryPagerBeginRead(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(4096)
 	if err != nil {
 		t.Fatalf("OpenMemory failed: %v", err)
@@ -25,6 +26,7 @@ func TestMemoryPagerBeginRead(t *testing.T) {
 
 // TestMemoryPagerInWriteTransaction tests InWriteTransaction
 func TestMemoryPagerInWriteTransaction(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(4096)
 	if err != nil {
 		t.Fatalf("OpenMemory failed: %v", err)
@@ -59,6 +61,7 @@ func TestMemoryPagerInWriteTransaction(t *testing.T) {
 
 // TestMemoryPagerEndRead tests EndRead
 func TestMemoryPagerEndRead(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(4096)
 	if err != nil {
 		t.Fatalf("OpenMemory failed: %v", err)
@@ -83,6 +86,7 @@ func TestMemoryPagerEndRead(t *testing.T) {
 
 // TestMemoryPagerVacuum tests Vacuum
 func TestMemoryPagerVacuum(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(4096)
 	if err != nil {
 		t.Fatalf("OpenMemory failed: %v", err)
@@ -119,6 +123,7 @@ func TestMemoryPagerVacuum(t *testing.T) {
 
 // TestMemoryPagerRelease tests Release savepoint
 func TestMemoryPagerRelease(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(4096)
 	if err != nil {
 		t.Fatalf("OpenMemory failed: %v", err)
@@ -148,6 +153,7 @@ func TestMemoryPagerRelease(t *testing.T) {
 
 // TestMemoryPagerReleaseNonExistent tests releasing non-existent savepoint
 func TestMemoryPagerReleaseNonExistent(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(4096)
 	if err != nil {
 		t.Fatalf("OpenMemory failed: %v", err)

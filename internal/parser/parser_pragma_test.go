@@ -5,6 +5,7 @@ import (
 )
 
 func TestParsePragma(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		sql        string
@@ -122,7 +123,9 @@ func TestParsePragma(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 
@@ -168,6 +171,7 @@ func TestParsePragma(t *testing.T) {
 }
 
 func TestParsePragmaMultiple(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		sql        string
@@ -192,7 +196,9 @@ func TestParsePragmaMultiple(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 
@@ -226,6 +232,7 @@ func TestParsePragmaMultiple(t *testing.T) {
 }
 
 func TestParsePragmaValueTypes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -286,7 +293,9 @@ func TestParsePragmaValueTypes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 

@@ -3,6 +3,7 @@ package builtin
 import (
 	"fmt"
 
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/vtab"
 )
 
@@ -132,8 +133,57 @@ func (c *SQLiteMasterCursor) assignFilterValue(arg interface{}) {
 
 // loadSchemaRows loads rows from the database schema.
 func (c *SQLiteMasterCursor) loadSchemaRows() {
-	// In a real implementation, this would query the actual schema
-	// For now, return a sample set of rows
+	c.rows = []MasterRow{}
+
+	// Try to cast db to *schema.Schema
+	if sch, ok := c.table.db.(*schema.Schema); ok && sch != nil {
+		// Load all tables from schema
+		for _, table := range sch.Tables {
+			c.rows = append(c.rows, MasterRow{
+				Type:     "table",
+				Name:     table.Name,
+				TblName:  table.Name,
+				RootPage: int64(table.RootPage),
+				SQL:      table.SQL,
+			})
+		}
+
+		// Load all indexes from schema
+		for _, index := range sch.Indexes {
+			c.rows = append(c.rows, MasterRow{
+				Type:     "index",
+				Name:     index.Name,
+				TblName:  index.Table,
+				RootPage: int64(index.RootPage),
+				SQL:      index.SQL,
+			})
+		}
+
+		// Load all views from schema
+		for _, view := range sch.Views {
+			c.rows = append(c.rows, MasterRow{
+				Type:     "view",
+				Name:     view.Name,
+				TblName:  view.Name,
+				RootPage: 0,
+				SQL:      view.SQL,
+			})
+		}
+
+		// Load all triggers from schema
+		for _, trigger := range sch.Triggers {
+			c.rows = append(c.rows, MasterRow{
+				Type:     "trigger",
+				Name:     trigger.Name,
+				TblName:  trigger.Table,
+				RootPage: 0,
+				SQL:      trigger.SQL,
+			})
+		}
+		return
+	}
+
+	// Fallback: return just sqlite_master itself when no schema is available
 	c.rows = []MasterRow{
 		{
 			Type:     "table",

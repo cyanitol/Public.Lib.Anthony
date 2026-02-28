@@ -13,6 +13,7 @@ import (
 
 // Test OpCode.String() for uncovered opcodes
 func TestOpCodeStringUncovered(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		op       OpCode
 		expected string
@@ -43,7 +44,9 @@ func TestOpCodeStringUncovered(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.expected, func(t *testing.T) {
+				t.Parallel()
 			result := tt.op.String()
 			if result != tt.expected {
 				t.Errorf("Expected %s, got %s", tt.expected, result)
@@ -54,6 +57,7 @@ func TestOpCodeStringUncovered(t *testing.T) {
 
 // Test Affinity.String() uncovered cases
 func TestAffinityStringUncovered(t *testing.T) {
+	t.Parallel()
 	aff := Affinity(99) // Invalid affinity
 	result := aff.String()
 	if result == "" {
@@ -63,6 +67,7 @@ func TestAffinityStringUncovered(t *testing.T) {
 
 // Test stringLiteral for uncovered cases
 func TestStringLiteralBlobAndVariable(t *testing.T) {
+	t.Parallel()
 	// Blob literal
 	blobExpr := &Expr{
 		Op:    OpBlob,
@@ -86,6 +91,7 @@ func TestStringLiteralBlobAndVariable(t *testing.T) {
 
 // Test Expr.String() for uncovered opcodes
 func TestExprStringUncoveredOps(t *testing.T) {
+	t.Parallel()
 	// Test an unregistered op
 	expr := &Expr{
 		Op: OpAggFunc,
@@ -98,6 +104,7 @@ func TestExprStringUncoveredOps(t *testing.T) {
 
 // Test IsConstant for uncovered cases
 func TestIsConstantUncovered(t *testing.T) {
+	t.Parallel()
 	// Select expression is not constant
 	expr := &Expr{
 		Op: OpSelect,
@@ -125,6 +132,7 @@ func TestIsConstantUncovered(t *testing.T) {
 
 // Test updateHeight uncovered case
 func TestUpdateHeightWithSelect(t *testing.T) {
+	t.Parallel()
 	expr := &Expr{
 		Op: OpSelect,
 		Select: &SelectStmt{
@@ -144,6 +152,7 @@ func TestUpdateHeightWithSelect(t *testing.T) {
 
 // Test Clone for uncovered cases
 func TestCloneWithSelect(t *testing.T) {
+	t.Parallel()
 	original := &Expr{
 		Op: OpSelect,
 		Select: &SelectStmt{
@@ -164,6 +173,7 @@ func TestCloneWithSelect(t *testing.T) {
 
 // Test ExprList.Clone for uncovered case
 func TestExprListCloneNil(t *testing.T) {
+	t.Parallel()
 	var list *ExprList
 	cloned := list.Clone()
 	if cloned != nil {
@@ -173,6 +183,7 @@ func TestExprListCloneNil(t *testing.T) {
 
 // Test generateBetween for uncovered case
 func TestGenerateBetweenNot(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -191,6 +202,7 @@ func TestGenerateBetweenNot(t *testing.T) {
 	// Should have OpNot to negate the result
 	hasNot := false
 	for _, instr := range v.Program {
+		instr := instr
 		if instr.Opcode == vdbe.OpNot {
 			hasNot = true
 			break
@@ -204,6 +216,7 @@ func TestGenerateBetweenNot(t *testing.T) {
 
 // Test GetCollSeq uncovered cases
 func TestGetCollSeqWithColumn(t *testing.T) {
+	t.Parallel()
 	expr := &Expr{
 		Op:      OpColumn,
 		CollSeq: "NOCASE",
@@ -233,6 +246,7 @@ func TestGetCollSeqWithColumn(t *testing.T) {
 
 // Test GetBinaryCompareCollSeq uncovered case
 func TestGetBinaryCompareCollSeqNilLeft(t *testing.T) {
+	t.Parallel()
 	right := &Expr{
 		Op:      OpCollate,
 		CollSeq: "NOCASE",
@@ -247,6 +261,7 @@ func TestGetBinaryCompareCollSeqNilLeft(t *testing.T) {
 
 // Test generateCollate error case
 func TestGenerateCollateError(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -266,6 +281,7 @@ func TestGenerateCollateError(t *testing.T) {
 
 // Test generateCast uncovered type
 func TestGenerateCastUncoveredType(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -282,6 +298,7 @@ func TestGenerateCastUncoveredType(t *testing.T) {
 
 // Test generateBinary uncovered cases
 func TestGenerateBinaryUncoveredOps(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -296,7 +313,9 @@ func TestGenerateBinaryUncoveredOps(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			expr := &parser.BinaryExpr{
 				Left:  &parser.IdentExpr{Name: "a"},
 				Op:    tt.op,
@@ -313,6 +332,7 @@ func TestGenerateBinaryUncoveredOps(t *testing.T) {
 
 // Test generateIn for uncovered case
 func TestGenerateInNotIn(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -332,6 +352,7 @@ func TestGenerateInNotIn(t *testing.T) {
 	// Should have OpNot for NOT IN
 	hasNot := false
 	for _, instr := range v.Program {
+		instr := instr
 		if instr.Opcode == vdbe.OpNot {
 			hasNot = true
 			break
@@ -345,6 +366,7 @@ func TestGenerateInNotIn(t *testing.T) {
 
 // Test CompareValues uncovered case
 func TestCompareValuesDifferentTypes(t *testing.T) {
+	t.Parallel()
 	// Compare integer to blob
 	result := CompareValues(int64(42), []byte("test"), AFF_NONE, CollSeqBinary)
 	// Should handle type ordering
@@ -355,6 +377,7 @@ func TestCompareValuesDifferentTypes(t *testing.T) {
 
 // Test EvaluateComparison uncovered op
 func TestEvaluateComparisonNe(t *testing.T) {
+	t.Parallel()
 	result := EvaluateComparison(OpNe, int64(42), int64(43), AFF_INTEGER, CollSeqBinary)
 	if result != true {
 		t.Errorf("Expected true for 42 != 43, got %v", result)
@@ -368,6 +391,7 @@ func TestEvaluateComparisonNe(t *testing.T) {
 
 // Test stepMultiWildcard uncovered case
 func TestStepMultiWildcardRecursion(t *testing.T) {
+	t.Parallel()
 	// Test pattern with % followed by non-matching char
 	result := EvaluateLike("%abc", "xabc", 0)
 	if !result {
@@ -377,6 +401,7 @@ func TestStepMultiWildcardRecursion(t *testing.T) {
 
 // Test CoerceToNumeric uncovered case
 func TestCoerceToNumericBlob(t *testing.T) {
+	t.Parallel()
 	result := CoerceToNumeric([]byte("123"))
 	if result == nil {
 		t.Error("Expected non-nil result")
@@ -385,6 +410,7 @@ func TestCoerceToNumericBlob(t *testing.T) {
 
 // Test CoerceToInteger uncovered case
 func TestCoerceToIntegerNil(t *testing.T) {
+	t.Parallel()
 	result, ok := CoerceToInteger(nil)
 	if ok {
 		t.Error("Expected false for nil")
@@ -396,6 +422,7 @@ func TestCoerceToIntegerNil(t *testing.T) {
 
 // Test CoerceToBoolean uncovered case
 func TestCoerceToBooleanFloat(t *testing.T) {
+	t.Parallel()
 	result := CoerceToBoolean(-3.14)
 	if !result {
 		t.Error("Expected true for negative float")
@@ -404,6 +431,7 @@ func TestCoerceToBooleanFloat(t *testing.T) {
 
 // Test generateWhereClause with nil
 func TestGenerateWhereClauseNil(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -415,6 +443,7 @@ func TestGenerateWhereClauseNil(t *testing.T) {
 
 // Test generateCondition
 func TestGenerateConditionComplex(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -445,6 +474,7 @@ func TestGenerateConditionComplex(t *testing.T) {
 
 // Test findTableWithColumn uncovered cases
 func TestFindTableWithColumnMultiple(t *testing.T) {
+	t.Parallel()
 	v := vdbe.New()
 	gen := NewCodeGenerator(v)
 
@@ -476,6 +506,7 @@ func TestFindTableWithColumnMultiple(t *testing.T) {
 
 // Test collSeqFromColumn with valid column
 func TestCollSeqFromColumnWithValidCollSeq(t *testing.T) {
+	t.Parallel()
 	expr := &Expr{
 		Op:      OpColumn,
 		CollSeq: "RTRIM",

@@ -10,6 +10,7 @@ import (
 
 // TestPagerInitNewDatabaseEdgeCases tests edge cases in database initialization
 func TestPagerInitNewDatabaseEdgeCases(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_init_edge.db")
 
 	// Create with specific page size
@@ -43,6 +44,7 @@ func TestPagerInitNewDatabaseEdgeCases(t *testing.T) {
 
 // TestCommitPhaseErrors tests error handling in commit phases
 func TestCommitPhaseErrors(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_commit_errors.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -85,6 +87,7 @@ func TestCommitPhaseErrors(t *testing.T) {
 
 // TestFreeListProcessTrunkPageEdgeCases tests trunk page processing edge cases
 func TestFreeListProcessTrunkPageEdgeCases(t *testing.T) {
+	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
@@ -144,6 +147,7 @@ func TestFreeListProcessTrunkPageEdgeCases(t *testing.T) {
 
 // TestTryUpgradeToExclusiveWithContention tests exclusive lock upgrade with contention
 func TestTryUpgradeToExclusiveWithContention(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -178,6 +182,7 @@ func TestTryUpgradeToExclusiveWithContention(t *testing.T) {
 
 // TestAcquireReservedLockEdgeCases tests reserved lock acquisition edge cases
 func TestAcquireReservedLockEdgeCases(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -230,6 +235,7 @@ func TestAcquireReservedLockEdgeCases(t *testing.T) {
 
 // TestAcquirePendingLockEdgeCases tests pending lock acquisition edge cases
 func TestAcquirePendingLockEdgeCases(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -268,6 +274,7 @@ func TestAcquirePendingLockEdgeCases(t *testing.T) {
 
 // TestEnableWALMode tests WAL mode enabling
 func TestEnableWALMode(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_wal.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -297,6 +304,7 @@ func TestEnableWALMode(t *testing.T) {
 
 // TestDisableWALMode tests WAL mode disabling
 func TestDisableWALMode(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_wal_disable.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -315,6 +323,7 @@ func TestDisableWALMode(t *testing.T) {
 
 // TestValidateTransactionStateError tests error state validation
 func TestValidateTransactionStateError(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_validate_state.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -343,6 +352,7 @@ func TestValidateTransactionStateError(t *testing.T) {
 
 // TestUpgradeToWriteLockReadOnly tests upgrade on read-only database
 func TestUpgradeToWriteLockReadOnly(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_upgrade_readonly.db")
 
 	// Create database first
@@ -368,6 +378,7 @@ func TestUpgradeToWriteLockReadOnly(t *testing.T) {
 
 // TestJournalRestoreEntryFull tests full journal restore with valid entry
 func TestJournalRestoreEntryFull(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_restore_full.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -435,6 +446,7 @@ func TestJournalRestoreEntryFull(t *testing.T) {
 
 // TestFcntlGetLkWithOFD tests fcntlGetLk with OFD locks
 func TestFcntlGetLkWithOFD(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -460,6 +472,7 @@ func TestFcntlGetLkWithOFD(t *testing.T) {
 
 // TestCheckReservedLockDetection tests reserved lock detection
 func TestCheckReservedLockDetection(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -515,6 +528,7 @@ func TestCheckReservedLockDetection(t *testing.T) {
 
 // TestCommitPhasesInSequence tests commit phases execute in proper sequence
 func TestCommitPhasesInSequence(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_commit_seq.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)

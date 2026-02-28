@@ -10,6 +10,7 @@ import (
 
 // TestJournalRestoreEntryChecksum tests the restoreEntry function with checksum validation
 func TestJournalRestoreEntryChecksum(t *testing.T) {
+	t.Parallel()
 	dbFile := "test_restore_entry.db"
 	journalFile := dbFile + "-journal"
 	defer os.Remove(dbFile)
@@ -70,12 +71,14 @@ func TestJournalRestoreEntryChecksum(t *testing.T) {
 
 // TestJournalRestoreAllEntries tests the restoreAllEntries function
 func TestJournalRestoreAllEntries(t *testing.T) {
+	t.Parallel()
 	// Skip this test as it's complex and covered by other journal tests
 	t.Skip("Journal restore is tested in integration tests")
 }
 
 // TestJournalRestoreAllEntriesEOF tests restoreAllEntries with incomplete entries
 func TestJournalRestoreAllEntriesEOF(t *testing.T) {
+	t.Parallel()
 	dbFile := "test_restore_eof.db"
 	journalFile := dbFile + "-journal"
 	defer os.Remove(dbFile)
@@ -113,12 +116,14 @@ func TestJournalRestoreAllEntriesEOF(t *testing.T) {
 
 // TestJournalRestoreAllEntriesReadError tests error handling in restoreAllEntries
 func TestJournalRestoreAllEntriesReadError(t *testing.T) {
+	t.Parallel()
 	// This test is difficult to trigger reliably, skip it
 	t.Skip("Error handling in restoreAllEntries is hard to test without OS-level manipulation")
 }
 
 // TestCachePeekNonExistent tests Peek with non-existent page
 func TestCachePeekNonExistent(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -136,6 +141,7 @@ func TestCachePeekNonExistent(t *testing.T) {
 
 // TestCachePeekExisting tests Peek with existing page
 func TestCachePeekExisting(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -163,6 +169,7 @@ func TestCachePeekExisting(t *testing.T) {
 
 // TestCachePutLockedDirtyTransitions tests putLocked with dirty state changes
 func TestCachePutLockedDirtyTransitions(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -212,6 +219,7 @@ func TestCachePutLockedDirtyTransitions(t *testing.T) {
 
 // TestCacheRemoveLockedNonExistent tests removeLocked with non-existent page
 func TestCacheRemoveLockedNonExistent(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -239,6 +247,7 @@ func TestCacheRemoveLockedNonExistent(t *testing.T) {
 
 // TestCacheSetMaxPagesIncrease tests increasing max pages
 func TestCacheSetMaxPagesIncrease(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 2,
@@ -279,6 +288,7 @@ func TestCacheSetMaxPagesIncrease(t *testing.T) {
 
 // TestCacheSetMaxPagesDecrease tests decreasing max pages
 func TestCacheSetMaxPagesDecrease(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -310,6 +320,7 @@ func TestCacheSetMaxPagesDecrease(t *testing.T) {
 
 // TestCacheSetMaxPagesWithDirty tests SetMaxPages with dirty pages
 func TestCacheSetMaxPagesWithDirty(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -338,6 +349,7 @@ func TestCacheSetMaxPagesWithDirty(t *testing.T) {
 
 // TestCacheSetMaxMemoryIncrease tests increasing max memory
 func TestCacheSetMaxMemoryIncrease(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize:  4096,
 		MaxMemory: 8192, // 2 pages
@@ -369,6 +381,7 @@ func TestCacheSetMaxMemoryIncrease(t *testing.T) {
 
 // TestCacheSetMaxMemoryDecrease tests decreasing max memory
 func TestCacheSetMaxMemoryDecrease(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize:  4096,
 		MaxMemory: 40960, // 10 pages
@@ -399,6 +412,7 @@ func TestCacheSetMaxMemoryDecrease(t *testing.T) {
 
 // TestCacheSetMaxMemoryWithDirtyPages tests SetMaxMemory with dirty pages
 func TestCacheSetMaxMemoryWithDirtyPages(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize:  4096,
 		MaxMemory: 40960, // 10 pages
@@ -427,6 +441,7 @@ func TestCacheSetMaxMemoryWithDirtyPages(t *testing.T) {
 
 // TestCacheMarkDirtyNonExistent tests MarkDirty with non-existent page
 func TestCacheMarkDirtyNonExistent(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -447,6 +462,7 @@ func TestCacheMarkDirtyNonExistent(t *testing.T) {
 
 // TestCacheMarkDirtyAlreadyDirty tests MarkDirty on already dirty page
 func TestCacheMarkDirtyAlreadyDirty(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -475,6 +491,7 @@ func TestCacheMarkDirtyAlreadyDirty(t *testing.T) {
 
 // TestCacheFlushPageNotDirty tests FlushPage on clean page
 func TestCacheFlushPageNotDirty(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "cache_flush_test_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -503,6 +520,7 @@ func TestCacheFlushPageNotDirty(t *testing.T) {
 
 // TestCacheFlushPageMissing tests FlushPage with non-existent page
 func TestCacheFlushPageMissing(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "cache_flush_test_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -526,6 +544,7 @@ func TestCacheFlushPageMissing(t *testing.T) {
 
 // TestCacheEvictNonExistent tests Evict with non-existent page
 func TestCacheEvictNonExistent(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -544,6 +563,7 @@ func TestCacheEvictNonExistent(t *testing.T) {
 
 // TestCacheEvictDirtyPage tests Evict with dirty page
 func TestCacheEvictDirtyPage(t *testing.T) {
+	t.Parallel()
 	cache, err := NewLRUCache(LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -569,6 +589,7 @@ func TestCacheEvictDirtyPage(t *testing.T) {
 
 // TestFreeListProcessTrunkPageFull tests processTrunkPage when trunk is full
 func TestFreeListProcessTrunkPageFull(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_trunk_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -634,6 +655,7 @@ func TestFreeListProcessTrunkPageFull(t *testing.T) {
 
 // TestFreeListAddPendingToTrunkPartial tests addPendingToTrunk with partial fill
 func TestFreeListAddPendingToTrunkPartial(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_pending_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -693,6 +715,7 @@ func TestFreeListAddPendingToTrunkPartial(t *testing.T) {
 
 // TestFreeListCreateNewTrunkEmpty tests createNewTrunk with no pending pages
 func TestFreeListCreateNewTrunkEmpty(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_newtrunk_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -726,6 +749,7 @@ func TestFreeListCreateNewTrunkEmpty(t *testing.T) {
 
 // TestFormatValidateFileFormatsInvalid tests file format validation
 func TestFormatValidateFileFormatsInvalid(t *testing.T) {
+	t.Parallel()
 	// Create a database with invalid header to test parsing
 	tmpFile, err := os.CreateTemp("", "format_test_*.db")
 	if err != nil {
@@ -748,6 +772,7 @@ func TestFormatValidateFileFormatsInvalid(t *testing.T) {
 
 // TestBusyHandlerRetryPaths tests retry logic with various scenarios
 func TestBusyHandlerRetryPaths(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "busy_retry_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -804,6 +829,7 @@ func TestBusyHandlerRetryPaths(t *testing.T) {
 
 // TestBusyHandlerNonLockError tests that non-lock errors are returned immediately
 func TestBusyHandlerNonLockError(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "busy_err_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -838,6 +864,7 @@ func TestBusyHandlerNonLockError(t *testing.T) {
 
 // TestFreeListAllocateFromDiskEdgeCases tests allocateFromDisk edge cases
 func TestFreeListAllocateFromDiskEdgeCases(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_alloc_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -870,6 +897,7 @@ func TestFreeListAllocateFromDiskEdgeCases(t *testing.T) {
 
 // TestFreeListFreeMultiplePages tests FreeMultiple function
 func TestFreeListFreeMultiplePages(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_multi_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -920,6 +948,7 @@ func TestFreeListFreeMultiplePages(t *testing.T) {
 
 // TestFreeListFlushPendingEmpty tests flushPending with empty pending list
 func TestFreeListFlushPendingEmpty(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_flush_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -951,6 +980,7 @@ func TestFreeListFlushPendingEmpty(t *testing.T) {
 
 // TestFreeListIterateEmpty tests Iterate with empty freelist
 func TestFreeListIterateEmpty(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_iter_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -983,6 +1013,7 @@ func TestFreeListIterateEmpty(t *testing.T) {
 
 // TestFreeListIterateWithError tests Iterate error handling
 func TestFreeListIterateWithError(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_iter_err_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -1026,6 +1057,7 @@ func TestFreeListIterateWithError(t *testing.T) {
 
 // TestFreeListVerifyCorruption tests Verify with corrupted freelist
 func TestFreeListVerifyCorruption(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_verify_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -1074,6 +1106,7 @@ func TestFreeListVerifyCorruption(t *testing.T) {
 
 // TestFreeListReadTrunkInvalid tests ReadTrunk with invalid page
 func TestFreeListReadTrunkInvalid(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_readtrunk_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -1097,6 +1130,7 @@ func TestFreeListReadTrunkInvalid(t *testing.T) {
 
 // TestJournalOpenExistingFile tests opening journal when file exists
 func TestJournalOpenExistingFile(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_open_existing.db-journal"
 	defer os.Remove(journalFile)
 
@@ -1131,6 +1165,7 @@ func TestJournalOpenExistingFile(t *testing.T) {
 
 // TestJournalOpenWriteHeaderError tests error handling when writing header fails
 func TestJournalOpenWriteHeaderError(t *testing.T) {
+	t.Parallel()
 	// This test is hard to trigger without OS-level manipulation
 	// We'll just verify the journal works normally for now
 	journalFile := "test_header_write.db-journal"
@@ -1152,6 +1187,7 @@ func TestJournalOpenWriteHeaderError(t *testing.T) {
 
 // TestJournalWriteOriginalErrorHandling tests WriteOriginal error cases
 func TestJournalWriteOriginalErrorHandling(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_write_error.db-journal"
 	defer os.Remove(journalFile)
 
@@ -1180,6 +1216,7 @@ func TestJournalWriteOriginalErrorHandling(t *testing.T) {
 
 // TestJournalRollbackNotOpen tests Rollback on closed journal
 func TestJournalRollbackNotOpen(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "rollback_closed_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -1206,6 +1243,7 @@ func TestJournalRollbackNotOpen(t *testing.T) {
 
 // TestJournalFinalizeNotOpen tests Finalize on closed journal
 func TestJournalFinalizeNotOpen(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_finalize_closed.db-journal"
 	defer os.Remove(journalFile)
 
@@ -1220,6 +1258,7 @@ func TestJournalFinalizeNotOpen(t *testing.T) {
 
 // TestJournalDeleteWhenOpen tests Delete when journal is open
 func TestJournalDeleteWhenOpen(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_delete_open.db-journal"
 	defer os.Remove(journalFile)
 
@@ -1243,6 +1282,7 @@ func TestJournalDeleteWhenOpen(t *testing.T) {
 
 // TestJournalCloseAlreadyClosed tests Close on already closed journal
 func TestJournalCloseAlreadyClosed(t *testing.T) {
+	t.Parallel()
 	journalFile := "test_close_twice.db-journal"
 	defer os.Remove(journalFile)
 
@@ -1266,6 +1306,7 @@ func TestJournalCloseAlreadyClosed(t *testing.T) {
 
 // TestParseDBHeaderCorruptMagic tests header parsing with corrupt magic
 func TestParseDBHeaderCorruptMagic(t *testing.T) {
+	t.Parallel()
 	data := make([]byte, 100)
 	copy(data[0:16], "invalid magic!!!")
 
@@ -1277,6 +1318,7 @@ func TestParseDBHeaderCorruptMagic(t *testing.T) {
 
 // TestJournalRollbackSeekError tests Rollback when seek fails
 func TestJournalRollbackSeekError(t *testing.T) {
+	t.Parallel()
 	// Create a valid journal file first
 	tmpFile, err := os.CreateTemp("", "rollback_seek_*.db")
 	if err != nil {
@@ -1315,6 +1357,7 @@ func TestJournalRollbackSeekError(t *testing.T) {
 
 // Additional timeout and retry tests
 func TestAcquireLockWithRetryTimeout(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "lock_timeout_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)

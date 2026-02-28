@@ -6,6 +6,7 @@ import (
 
 // TestOpCast tests the Cast opcode with various affinity types.
 func TestOpCast(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		inputValue    interface{}
@@ -53,7 +54,9 @@ func TestOpCast(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v := New()
 			v.AllocMemory(2)
 
@@ -81,6 +84,7 @@ func TestOpCast(t *testing.T) {
 
 // TestOpToText tests the ToText opcode.
 func TestOpToText(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		inputValue    interface{}
@@ -93,7 +97,9 @@ func TestOpToText(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v := New()
 			v.AllocMemory(2)
 
@@ -122,6 +128,7 @@ func TestOpToText(t *testing.T) {
 
 // TestOpToTextNull tests ToText with NULL value.
 func TestOpToTextNull(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(2)
 
@@ -145,6 +152,7 @@ func TestOpToTextNull(t *testing.T) {
 
 // TestOpToBlob tests the ToBlob opcode.
 func TestOpToBlob(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		inputValue    interface{}
@@ -157,7 +165,9 @@ func TestOpToBlob(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v := New()
 			v.AllocMemory(2)
 
@@ -188,6 +198,7 @@ func TestOpToBlob(t *testing.T) {
 
 // TestOpToBlobNull tests ToBlob with NULL value.
 func TestOpToBlobNull(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(2)
 
@@ -211,6 +222,7 @@ func TestOpToBlobNull(t *testing.T) {
 
 // TestOpToNumeric tests the ToNumeric opcode.
 func TestOpToNumeric(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		inputValue    interface{}
@@ -225,7 +237,9 @@ func TestOpToNumeric(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v := New()
 			v.AllocMemory(2)
 
@@ -249,6 +263,7 @@ func TestOpToNumeric(t *testing.T) {
 
 // TestOpToNumericNull tests ToNumeric with NULL value.
 func TestOpToNumericNull(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(2)
 
@@ -272,6 +287,7 @@ func TestOpToNumericNull(t *testing.T) {
 
 // TestOpToInt tests the ToInt opcode.
 func TestOpToInt(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		inputValue    interface{}
@@ -286,7 +302,9 @@ func TestOpToInt(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v := New()
 			v.AllocMemory(2)
 
@@ -315,6 +333,7 @@ func TestOpToInt(t *testing.T) {
 
 // TestOpToIntNull tests ToInt with NULL value.
 func TestOpToIntNull(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(2)
 
@@ -338,6 +357,7 @@ func TestOpToIntNull(t *testing.T) {
 
 // TestOpToReal tests the ToReal opcode.
 func TestOpToReal(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		inputValue    interface{}
@@ -350,7 +370,9 @@ func TestOpToReal(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v := New()
 			v.AllocMemory(2)
 
@@ -379,6 +401,7 @@ func TestOpToReal(t *testing.T) {
 
 // TestOpToRealNull tests ToReal with NULL value.
 func TestOpToRealNull(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(2)
 
@@ -402,6 +425,7 @@ func TestOpToRealNull(t *testing.T) {
 
 // TestTypeConversionIntegration tests type conversions in a VDBE program.
 func TestTypeConversionIntegration(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 
@@ -445,6 +469,7 @@ func TestTypeConversionIntegration(t *testing.T) {
 
 // TestCastAffinityTypes tests all affinity types with Cast opcode.
 func TestCastAffinityTypes(t *testing.T) {
+	t.Parallel()
 	v := New()
 	v.AllocMemory(10)
 

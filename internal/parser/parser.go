@@ -1362,18 +1362,22 @@ type columnConstraintHandler func(p *Parser, c *ColumnConstraint) error
 // handlers are individually keyed. The one two-token prefix (PRIMARY KEY) is
 // handled by the PRIMARY handler itself.
 var columnConstraintHandlers = map[TokenType]columnConstraintHandler{
-	TK_PRIMARY: (*Parser).applyConstraintPrimaryKey,
-	TK_NOT:     (*Parser).applyConstraintNotNull,
-	TK_UNIQUE:  (*Parser).applyConstraintUnique,
-	TK_CHECK:   (*Parser).applyConstraintCheck,
-	TK_DEFAULT: (*Parser).applyConstraintDefault,
-	TK_COLLATE: (*Parser).applyConstraintCollate,
+	TK_PRIMARY:    (*Parser).applyConstraintPrimaryKey,
+	TK_NOT:        (*Parser).applyConstraintNotNull,
+	TK_UNIQUE:     (*Parser).applyConstraintUnique,
+	TK_CHECK:      (*Parser).applyConstraintCheck,
+	TK_DEFAULT:    (*Parser).applyConstraintDefault,
+	TK_COLLATE:    (*Parser).applyConstraintCollate,
+	TK_REFERENCES: (*Parser).applyConstraintReferences,
+	TK_GENERATED:  (*Parser).applyConstraintGenerated,
+	TK_AS:         (*Parser).applyConstraintGenerated,
 }
 
 // columnConstraintOrder defines the token-check order so the dispatch is
 // deterministic (maps have no guaranteed iteration order in Go).
 var columnConstraintOrder = []TokenType{
 	TK_PRIMARY, TK_NOT, TK_UNIQUE, TK_CHECK, TK_DEFAULT, TK_COLLATE,
+	TK_REFERENCES, TK_GENERATED, TK_AS,
 }
 
 func (p *Parser) parseColumnConstraint() (*ColumnConstraint, error) {
@@ -1452,9 +1456,10 @@ func (p *Parser) applyConstraintCheck(c *ColumnConstraint) error {
 	return nil
 }
 
-// applyConstraintDefault handles DEFAULT <primary-expr>.
+// applyConstraintDefault handles DEFAULT <expr>.
+// This supports literals, negative numbers, and other expressions.
 func (p *Parser) applyConstraintDefault(c *ColumnConstraint) error {
-	expr, err := p.parsePrimaryExpression()
+	expr, err := p.parseUnaryExpression()
 	if err != nil {
 		return err
 	}
@@ -1470,6 +1475,75 @@ func (p *Parser) applyConstraintCollate(c *ColumnConstraint) error {
 	}
 	c.Type = ConstraintCollate
 	c.Collate = Unquote(p.advance().Lexeme)
+	return nil
+}
+
+// applyConstraintReferences handles REFERENCES table [(column)].
+func (p *Parser) applyConstraintReferences(c *ColumnConstraint) error {
+	c.Type = ConstraintForeignKey
+	if !p.check(TK_ID) {
+		return p.error("expected table name after REFERENCES")
+	}
+	tableName := Unquote(p.advance().Lexeme)
+
+	// Initialize ForeignKey struct
+	c.ForeignKey = &ForeignKeyConstraint{
+		Table: tableName,
+	}
+
+	// Optional column list
+	if p.match(TK_LP) {
+		if !p.check(TK_ID) {
+			return p.error("expected column name")
+		}
+		c.ForeignKey.Columns = []string{Unquote(p.advance().Lexeme)}
+		if !p.match(TK_RP) {
+			return p.error("expected ')'")
+		}
+	}
+
+	return nil
+}
+
+// applyConstraintGenerated handles GENERATED ALWAYS AS (expr) or AS (expr).
+func (p *Parser) applyConstraintGenerated(c *ColumnConstraint) error {
+	c.Type = ConstraintGenerated
+
+	// Skip ALWAYS if present
+	p.match(TK_ALWAYS)
+
+	// Expect AS
+	if !p.match(TK_AS) {
+		return p.error("expected AS in generated column")
+	}
+
+	// Expect (expr)
+	if !p.match(TK_LP) {
+		return p.error("expected '(' after AS")
+	}
+
+	expr, err := p.parseExpression()
+	if err != nil {
+		return err
+	}
+
+	// Initialize Generated struct
+	c.Generated = &GeneratedConstraint{
+		Expr: expr,
+	}
+
+	if !p.match(TK_RP) {
+		return p.error("expected ')'")
+	}
+
+	// Optional STORED or VIRTUAL
+	if p.match(TK_STORED) {
+		c.Generated.Stored = true
+	} else {
+		p.match(TK_VIRTUAL) // VIRTUAL is default, just consume if present
+		c.Generated.Virtual = true
+	}
+
 	return nil
 }
 
@@ -1667,6 +1741,58 @@ func (p *Parser) parseForeignKeyReferences() (string, []string, error) {
 	}
 
 	return refTable, refColumns, nil
+}
+
+// parseForeignKeyActions parses optional ON DELETE and ON UPDATE actions.
+func (p *Parser) parseForeignKeyActions(fk *ForeignKeyConstraint) error {
+	for {
+		if !p.match(TK_ON) {
+			break
+		}
+
+		if p.match(TK_DELETE) {
+			action, err := p.parseForeignKeyAction()
+			if err != nil {
+				return err
+			}
+			fk.OnDelete = action
+		} else if p.match(TK_UPDATE) {
+			action, err := p.parseForeignKeyAction()
+			if err != nil {
+				return err
+			}
+			fk.OnUpdate = action
+		} else {
+			return p.error("expected DELETE or UPDATE after ON")
+		}
+	}
+	return nil
+}
+
+// parseForeignKeyAction parses a single foreign key action (CASCADE, SET NULL, etc.).
+func (p *Parser) parseForeignKeyAction() (ForeignKeyAction, error) {
+	if p.match(TK_CASCADE) {
+		return FKActionCascade, nil
+	}
+	if p.match(TK_RESTRICT) {
+		return FKActionRestrict, nil
+	}
+	if p.match(TK_SET) {
+		if p.match(TK_NULL) {
+			return FKActionSetNull, nil
+		}
+		if p.match(TK_DEFAULT) {
+			return FKActionSetDefault, nil
+		}
+		return FKActionNone, p.error("expected NULL or DEFAULT after SET")
+	}
+	if p.match(TK_NO) {
+		if !p.match(TK_ACTION) {
+			return FKActionNone, p.error("expected ACTION after NO")
+		}
+		return FKActionNoAction, nil
+	}
+	return FKActionNone, p.error("expected foreign key action (CASCADE, RESTRICT, SET NULL, SET DEFAULT, or NO ACTION)")
 }
 
 func (p *Parser) parseCreateIndex(unique bool) (*CreateIndexStmt, error) {
@@ -3250,7 +3376,8 @@ func (p *Parser) isJoinKeyword() bool {
 func (p *Parser) isColumnConstraint() bool {
 	return p.check(TK_CONSTRAINT) || p.check(TK_PRIMARY) || p.check(TK_NOT) ||
 		p.check(TK_UNIQUE) || p.check(TK_CHECK) || p.check(TK_DEFAULT) ||
-		p.check(TK_COLLATE)
+		p.check(TK_COLLATE) || p.check(TK_REFERENCES) || p.check(TK_GENERATED) ||
+		p.check(TK_AS)
 }
 
 func (p *Parser) peek() Token {

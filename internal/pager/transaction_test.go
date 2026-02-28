@@ -6,8 +6,9 @@ import (
 )
 
 func TestBeginReadTransaction(t *testing.T) {
-	dbFile := "test_begin_read.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_begin_read.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -42,8 +43,9 @@ func TestBeginReadTransaction(t *testing.T) {
 }
 
 func TestBeginWriteTransaction(t *testing.T) {
-	dbFile := "test_begin_write.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_begin_write.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -82,8 +84,9 @@ func TestBeginWriteTransaction(t *testing.T) {
 }
 
 func TestWriteTransactionExclusive(t *testing.T) {
-	dbFile := "test_write_exclusive.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_write_exclusive.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -108,8 +111,9 @@ func TestWriteTransactionExclusive(t *testing.T) {
 }
 
 func TestReadTransactionReadOnly(t *testing.T) {
-	dbFile := "test_read_only.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_read_only.db"
 
 	// Create database with some data
 	pager, err := Open(dbFile, false)
@@ -142,8 +146,9 @@ func TestReadTransactionReadOnly(t *testing.T) {
 }
 
 func TestTransactionStateTransitions(t *testing.T) {
-	dbFile := "test_state_transitions.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_state_transitions.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -201,8 +206,9 @@ func TestTransactionStateTransitions(t *testing.T) {
 }
 
 func TestTransactionIsolation(t *testing.T) {
-	dbFile := "test_isolation.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_isolation.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -250,8 +256,9 @@ func TestTransactionIsolation(t *testing.T) {
 }
 
 func TestLockStateManagement(t *testing.T) {
-	dbFile := "test_lock_state.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_lock_state.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -301,8 +308,9 @@ func TestLockStateManagement(t *testing.T) {
 }
 
 func TestJournalModeSettings(t *testing.T) {
-	dbFile := "test_journal_mode.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_journal_mode.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -351,8 +359,9 @@ func TestJournalModeSettings(t *testing.T) {
 }
 
 func TestPageCountTracking(t *testing.T) {
-	dbFile := "test_page_count.db"
-	defer os.Remove(dbFile)
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbFile := tmpDir + "/" + "test_page_count.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {

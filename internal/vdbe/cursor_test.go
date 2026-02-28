@@ -119,6 +119,7 @@ var _ = math.Float64frombits
 var _ = binary.BigEndian
 
 func TestCursorOpenRead(t *testing.T) {
+	t.Parallel()
 	bt := createTestBtree()
 
 	v := New()
@@ -153,6 +154,7 @@ func TestCursorOpenRead(t *testing.T) {
 }
 
 func TestCursorRewindAndNext(t *testing.T) {
+	t.Parallel()
 	bt := createTestBtree()
 
 	v := New()
@@ -197,6 +199,7 @@ func TestCursorRewindAndNext(t *testing.T) {
 }
 
 func TestCursorRowid(t *testing.T) {
+	t.Parallel()
 	bt := createTestBtree()
 
 	v := New()
@@ -239,6 +242,7 @@ func TestCursorRowid(t *testing.T) {
 }
 
 func TestCursorSeekRowid(t *testing.T) {
+	t.Parallel()
 	bt := createTestBtree()
 
 	v := New()
@@ -285,6 +289,7 @@ func TestCursorSeekRowid(t *testing.T) {
 }
 
 func TestCursorSeekRowidNotFound(t *testing.T) {
+	t.Parallel()
 	bt := createTestBtree()
 
 	v := New()
@@ -315,6 +320,7 @@ func TestCursorSeekRowidNotFound(t *testing.T) {
 }
 
 func TestCursorClose(t *testing.T) {
+	t.Parallel()
 	bt := createTestBtree()
 
 	v := New()
@@ -342,6 +348,7 @@ func TestCursorClose(t *testing.T) {
 }
 
 func TestCursorPrev(t *testing.T) {
+	t.Parallel()
 	bt := createTestBtree()
 
 	v := New()
@@ -381,6 +388,7 @@ func TestCursorPrev(t *testing.T) {
 }
 
 func TestCursorEmptyTable(t *testing.T) {
+	t.Parallel()
 	// Create empty btree
 	bt := btree.NewBtree(4096)
 	pageData := make([]byte, 4096)

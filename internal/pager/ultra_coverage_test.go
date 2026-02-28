@@ -10,6 +10,7 @@ import (
 
 // TestPagerReadPageCoverage tests readPage function coverage
 func TestPagerReadPageCoverage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_read_page.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -50,6 +51,7 @@ func TestPagerReadPageCoverage(t *testing.T) {
 
 // TestPagerWritePageCoverage tests writePage function coverage
 func TestPagerWritePageCoverage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_write_page.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -100,6 +102,7 @@ func TestPagerWritePageCoverage(t *testing.T) {
 
 // TestAcquireSharedLockCoverage tests acquireSharedLock coverage
 func TestAcquireSharedLockCoverage(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -126,6 +129,7 @@ func TestAcquireSharedLockCoverage(t *testing.T) {
 
 // TestBeginWriteTransactionCoverage tests beginWriteTransaction coverage
 func TestBeginWriteTransactionCoverage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_begin_write.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -160,6 +164,7 @@ func TestBeginWriteTransactionCoverage(t *testing.T) {
 
 // TestJournalPageCoverage tests journalPage coverage
 func TestJournalPageCoverage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_journal_page.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -195,6 +200,7 @@ func TestJournalPageCoverage(t *testing.T) {
 
 // TestOpenJournalCoverage tests openJournal coverage
 func TestOpenJournalCoverage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_open_journal.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -226,6 +232,7 @@ func TestOpenJournalCoverage(t *testing.T) {
 
 // TestRollbackJournalCoverage tests rollbackJournal coverage
 func TestRollbackJournalCoverage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_rollback_journal.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -281,6 +288,7 @@ func TestRollbackJournalCoverage(t *testing.T) {
 
 // TestFinalizeJournalCoverage tests finalizeJournal coverage
 func TestFinalizeJournalCoverage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_finalize_journal.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -312,6 +320,7 @@ func TestFinalizeJournalCoverage(t *testing.T) {
 
 // TestUpdateDatabaseHeaderCoverage tests updateDatabaseHeader coverage
 func TestUpdateDatabaseHeaderCoverage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_update_header.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -345,6 +354,7 @@ func TestUpdateDatabaseHeaderCoverage(t *testing.T) {
 
 // TestAllocatePageCoverage tests AllocatePage coverage
 func TestAllocatePageCoverage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_allocate.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -385,6 +395,7 @@ func TestAllocatePageCoverage(t *testing.T) {
 
 // TestFreePageCoverage tests FreePage coverage
 func TestFreePageCoverage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_free.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -434,6 +445,7 @@ func TestFreePageCoverage(t *testing.T) {
 
 // TestReadHeaderCoverage tests readHeader coverage
 func TestReadHeaderCoverage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_read_header.db")
 
 	// Create a database
@@ -475,6 +487,7 @@ func TestReadHeaderCoverage(t *testing.T) {
 
 // TestInitializeNewDatabaseCoverage tests initializeNewDatabase coverage
 func TestInitializeNewDatabaseCoverage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_init_new.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -508,6 +521,7 @@ func TestInitializeNewDatabaseCoverage(t *testing.T) {
 
 // TestWriteDirtyPagesCoverage tests writeDirtyPages coverage
 func TestWriteDirtyPagesCoverage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_dirty_pages.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -554,6 +568,7 @@ func TestWriteDirtyPagesCoverage(t *testing.T) {
 
 // TestTryAcquireReservedLockAlreadyHeld tests acquiring reserved when already held
 func TestTryAcquireReservedLockAlreadyHeld(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_reserved_held.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -574,6 +589,7 @@ func TestTryAcquireReservedLockAlreadyHeld(t *testing.T) {
 
 // TestTryAcquireExclusiveLockReadOnly tests acquiring exclusive on read-only
 func TestTryAcquireExclusiveLockReadOnly(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_exclusive_ro.db")
 
 	// Create database
@@ -598,6 +614,7 @@ func TestTryAcquireExclusiveLockReadOnly(t *testing.T) {
 
 // TestCachePeekMiss tests cache Peek with cache miss
 func TestCachePeekMiss(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_peek.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -617,6 +634,7 @@ func TestCachePeekMiss(t *testing.T) {
 
 // TestCacheRemoveNonExistent tests removing non-existent page
 func TestCacheRemoveNonExistent(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_remove.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -632,6 +650,7 @@ func TestCacheRemoveNonExistent(t *testing.T) {
 
 // TestCacheShrink tests cache shrinking
 func TestCacheShrink(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_shrink.db")
 
 	config := DefaultLRUCacheConfig(4096)
@@ -671,6 +690,7 @@ func TestCacheShrink(t *testing.T) {
 
 // TestCacheFlushPage tests flushing individual page
 func TestCacheFlushPage(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_flush_page.db")
 
 	config := DefaultLRUCacheConfig(4096)
@@ -707,6 +727,7 @@ func TestCacheFlushPage(t *testing.T) {
 
 // TestCacheEvict tests cache eviction
 func TestCacheEvict(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_evict.db")
 
 	config := DefaultLRUCacheConfig(4096)

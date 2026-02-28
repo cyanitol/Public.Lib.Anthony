@@ -7,6 +7,7 @@ import (
 )
 
 func TestLRUCacheCreate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		config    LRUCacheConfig
@@ -50,6 +51,7 @@ func TestLRUCacheCreate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			cache, err := NewLRUCache(tt.config)
 			if tt.wantErr {
@@ -69,6 +71,7 @@ func TestLRUCacheCreate(t *testing.T) {
 }
 
 func TestLRUCacheBasicOperations(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
 	// Test empty cache
@@ -121,6 +124,7 @@ func TestLRUCacheBasicOperations(t *testing.T) {
 }
 
 func TestLRUCacheLRUOrder(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
 	// Add pages 1, 2, 3
@@ -163,6 +167,7 @@ func TestLRUCacheLRUOrder(t *testing.T) {
 }
 
 func TestLRUCacheEviction(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 3)
 
 	// Add 3 pages (at capacity)
@@ -202,6 +207,7 @@ func TestLRUCacheEviction(t *testing.T) {
 }
 
 func TestLRUCacheEvictionSkipsDirty(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 3)
 
 	// Add page 1 and mark it dirty
@@ -234,6 +240,7 @@ func TestLRUCacheEvictionSkipsDirty(t *testing.T) {
 }
 
 func TestLRUCacheEvictionSkipsReferenced(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 3)
 
 	// Add page 1 and keep a reference
@@ -265,6 +272,7 @@ func TestLRUCacheEvictionSkipsReferenced(t *testing.T) {
 }
 
 func TestLRUCacheDirtyList(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
 	// Add some pages
@@ -298,6 +306,7 @@ func TestLRUCacheDirtyList(t *testing.T) {
 }
 
 func TestLRUCacheStats(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
 	// Add a page
@@ -340,6 +349,7 @@ func TestLRUCacheStats(t *testing.T) {
 }
 
 func TestLRUCacheMemoryUsage(t *testing.T) {
+	t.Parallel()
 	pageSize := 4096
 	cache := NewLRUCacheSimple(pageSize, 10)
 
@@ -375,6 +385,7 @@ func TestLRUCacheMemoryUsage(t *testing.T) {
 }
 
 func TestLRUCachePeek(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
 	// Add pages 1, 2, 3
@@ -402,6 +413,7 @@ func TestLRUCachePeek(t *testing.T) {
 }
 
 func TestLRUCacheShrink(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
 	// Add 5 pages
@@ -426,6 +438,7 @@ func TestLRUCacheShrink(t *testing.T) {
 }
 
 func TestLRUCacheEvictClean(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
 	// Add 5 pages - make 2 of them dirty
@@ -458,6 +471,7 @@ func TestLRUCacheEvictClean(t *testing.T) {
 }
 
 func TestLRUCacheSetMaxPages(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
 	// Add 5 pages
@@ -480,6 +494,7 @@ func TestLRUCacheSetMaxPages(t *testing.T) {
 }
 
 func TestLRUCachePages(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
 	// Add some pages
@@ -506,6 +521,7 @@ func TestLRUCachePages(t *testing.T) {
 }
 
 func TestLRUCacheUpdateExisting(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
 	// Add page 1
@@ -531,6 +547,7 @@ func TestLRUCacheUpdateExisting(t *testing.T) {
 }
 
 func TestLRUCacheConcurrent(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 100)
 	var wg sync.WaitGroup
 
@@ -569,6 +586,7 @@ func TestLRUCacheConcurrent(t *testing.T) {
 }
 
 func TestLRUCacheMemoryLimit(t *testing.T) {
+	t.Parallel()
 	pageSize := 4096
 	maxMemory := int64(pageSize * 3) // Only 3 pages worth
 
@@ -687,6 +705,7 @@ func (m *mockPageWriter) clearWritten() {
 }
 
 func TestLRUCacheFlush(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 	writer := newMockPageWriter()
 	cache.SetPager(writer)
@@ -728,6 +747,7 @@ func TestLRUCacheFlush(t *testing.T) {
 }
 
 func TestLRUCacheFlushPage(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 	writer := newMockPageWriter()
 	cache.SetPager(writer)
@@ -766,6 +786,7 @@ func TestLRUCacheFlushPage(t *testing.T) {
 }
 
 func TestLRUCacheFlushNoPager(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
 	// Try to flush without setting a pager
@@ -776,6 +797,7 @@ func TestLRUCacheFlushNoPager(t *testing.T) {
 }
 
 func TestLRUCacheWriteThroughMode(t *testing.T) {
+	t.Parallel()
 	config := LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -811,6 +833,7 @@ func TestLRUCacheWriteThroughMode(t *testing.T) {
 }
 
 func TestLRUCacheWriteBackMode(t *testing.T) {
+	t.Parallel()
 	config := LRUCacheConfig{
 		PageSize: 4096,
 		MaxPages: 10,
@@ -860,6 +883,7 @@ func TestLRUCacheWriteBackMode(t *testing.T) {
 }
 
 func TestLRUCacheSetMode(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
 	// Default should be write-back
@@ -875,6 +899,7 @@ func TestLRUCacheSetMode(t *testing.T) {
 }
 
 func TestLRUCacheEvictMethod(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 3)
 
 	// Add 3 pages
@@ -900,6 +925,7 @@ func TestLRUCacheEvictMethod(t *testing.T) {
 }
 
 func TestLRUCacheFlushWithError(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 	writer := newMockPageWriter()
 	writer.writeError = errors.New("disk full")
@@ -921,6 +947,7 @@ func TestLRUCacheFlushWithError(t *testing.T) {
 
 // TestDefaultLRUCacheConfig tests the default config function
 func TestDefaultLRUCacheConfig(t *testing.T) {
+	t.Parallel()
 	config := DefaultLRUCacheConfig(4096)
 
 	if config.PageSize != 4096 {
@@ -938,6 +965,7 @@ func TestDefaultLRUCacheConfig(t *testing.T) {
 
 // TestLRUCacheSetMaxMemory tests the SetMaxMemory function
 func TestLRUCacheSetMaxMemory(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		maxPages  int
@@ -976,6 +1004,7 @@ func TestLRUCacheSetMaxMemory(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			config := LRUCacheConfig{
 				PageSize:  4096,
@@ -1018,11 +1047,13 @@ func TestLRUCacheSetMaxMemory(t *testing.T) {
 
 // TestLRUCacheMarkDirty tests the MarkDirty function
 func TestLRUCacheMarkDirty(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 	writer := newMockPageWriter()
 	cache.SetPager(writer)
 
 	t.Run("mark clean page dirty in write-back mode", func(t *testing.T) {
+			t.Parallel()
 		cache.SetMode(WriteBackMode)
 		page := NewDbPage(1, 4096)
 		cache.Put(page)
@@ -1036,6 +1067,7 @@ func TestLRUCacheMarkDirty(t *testing.T) {
 	})
 
 	t.Run("mark page dirty in write-through mode", func(t *testing.T) {
+			t.Parallel()
 		cache.SetMode(WriteThroughMode)
 		cache.Clear()
 
@@ -1057,6 +1089,7 @@ func TestLRUCacheMarkDirty(t *testing.T) {
 	})
 
 	t.Run("mark non-existent page dirty", func(t *testing.T) {
+			t.Parallel()
 		cache.SetMode(WriteBackMode)
 		page := NewDbPage(999, 4096)
 
@@ -1065,6 +1098,7 @@ func TestLRUCacheMarkDirty(t *testing.T) {
 	})
 
 	t.Run("mark dirty with write error", func(t *testing.T) {
+			t.Parallel()
 		cache.SetMode(WriteThroughMode)
 		cache.Clear()
 		writer.writeError = errors.New("write failed")
@@ -1085,6 +1119,7 @@ func TestLRUCacheMarkDirty(t *testing.T) {
 
 // TestLRUCacheEvictWithDirtyPages tests eviction with dirty pages
 func TestLRUCacheEvictWithDirtyPages(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 5)
 
 	// Fill cache with dirty pages
@@ -1106,6 +1141,7 @@ func TestLRUCacheEvictWithDirtyPages(t *testing.T) {
 
 // TestLRUCacheHitRateEdgeCases tests hit rate calculation edge cases
 func TestLRUCacheHitRateEdgeCases(t *testing.T) {
+	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
 	// No accesses - should return 0.0

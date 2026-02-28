@@ -10,6 +10,7 @@ import (
 
 // TestDefaultBusyHandler tests the default busy handler with exponential backoff
 func TestDefaultBusyHandler(t *testing.T) {
+	t.Parallel()
 	t.Run("respects timeout", func(t *testing.T) {
 		timeout := 100 * time.Millisecond
 		handler := NewDefaultBusyHandler(timeout)
@@ -40,6 +41,7 @@ func TestDefaultBusyHandler(t *testing.T) {
 	})
 
 	t.Run("exponential backoff increases delay", func(t *testing.T) {
+			t.Parallel()
 		handler := NewDefaultBusyHandler(10 * time.Second)
 
 		// First few calls should have increasing delays
@@ -67,6 +69,7 @@ func TestDefaultBusyHandler(t *testing.T) {
 	})
 
 	t.Run("caps delay at maximum", func(t *testing.T) {
+			t.Parallel()
 		handler := NewDefaultBusyHandler(1 * time.Second)
 
 		// After many retries, delay should cap at maxDelay (100ms)
@@ -84,6 +87,7 @@ func TestDefaultBusyHandler(t *testing.T) {
 	})
 
 	t.Run("reset clears state", func(t *testing.T) {
+			t.Parallel()
 		handler := NewDefaultBusyHandler(50 * time.Millisecond)
 
 		// Use up most of the timeout
@@ -114,6 +118,7 @@ func TestDefaultBusyHandler(t *testing.T) {
 
 // TestBusyTimeout tests the timeout-based busy handler
 func TestBusyTimeout(t *testing.T) {
+	t.Parallel()
 	t.Run("retries until timeout", func(t *testing.T) {
 		timeout := 100 * time.Millisecond
 		handler := BusyTimeout(timeout)
@@ -143,6 +148,7 @@ func TestBusyTimeout(t *testing.T) {
 	})
 
 	t.Run("tracks total retries", func(t *testing.T) {
+			t.Parallel()
 		handler := BusyTimeout(50 * time.Millisecond)
 		th := handler.(*TimeoutBusyHandler)
 
@@ -158,6 +164,7 @@ func TestBusyTimeout(t *testing.T) {
 	})
 
 	t.Run("zero timeout returns immediately", func(t *testing.T) {
+			t.Parallel()
 		handler := BusyTimeout(0)
 
 		start := time.Now()
@@ -175,6 +182,7 @@ func TestBusyTimeout(t *testing.T) {
 
 // TestBusyCallback tests the callback-based busy handler
 func TestBusyCallback(t *testing.T) {
+	t.Parallel()
 	t.Run("invokes callback with count", func(t *testing.T) {
 		callCount := 0
 		maxRetries := 5
@@ -198,6 +206,7 @@ func TestBusyCallback(t *testing.T) {
 	})
 
 	t.Run("nil callback returns false", func(t *testing.T) {
+			t.Parallel()
 		handler := &CallbackBusyHandler{callback: nil}
 
 		result := handler.Busy(0)
@@ -207,6 +216,7 @@ func TestBusyCallback(t *testing.T) {
 	})
 
 	t.Run("custom retry logic", func(t *testing.T) {
+			t.Parallel()
 		retries := 0
 		maxRetries := 3
 		delay := 10 * time.Millisecond
@@ -241,6 +251,7 @@ func TestBusyCallback(t *testing.T) {
 
 // TestNoBusyHandler tests the no-retry busy handler
 func TestNoBusyHandler(t *testing.T) {
+	t.Parallel()
 	handler := &NoBusyHandler{}
 
 	// Should always return false
@@ -254,6 +265,7 @@ func TestNoBusyHandler(t *testing.T) {
 
 // TestPagerBusyHandler tests busy handler integration with pager
 func TestPagerBusyHandler(t *testing.T) {
+	t.Parallel()
 	t.Run("set and get busy handler", func(t *testing.T) {
 		pager := newPager("test.db", DefaultPageSize, false)
 		defer func() {
@@ -285,6 +297,7 @@ func TestPagerBusyHandler(t *testing.T) {
 	})
 
 	t.Run("busy handler is invoked on lock contention", func(t *testing.T) {
+			t.Parallel()
 		// This test verifies that the busy handler is called
 		// when a lock cannot be acquired
 		pager := newPager("test.db", DefaultPageSize, false)
@@ -314,6 +327,7 @@ func TestPagerBusyHandler(t *testing.T) {
 	})
 
 	t.Run("no handler means immediate failure", func(t *testing.T) {
+			t.Parallel()
 		pager := newPager("test.db", DefaultPageSize, false)
 		defer func() {
 			if pager.file != nil {
@@ -331,6 +345,7 @@ func TestPagerBusyHandler(t *testing.T) {
 
 // TestConcurrentLockAcquisition tests busy handler behavior with concurrent access
 func TestConcurrentLockAcquisition(t *testing.T) {
+	t.Parallel()
 	t.Run("multiple goroutines with busy handler", func(t *testing.T) {
 		// This is a simulation test since we don't have real file locking yet
 		// We test that the busy handler mechanism works correctly
@@ -389,6 +404,7 @@ func TestConcurrentLockAcquisition(t *testing.T) {
 
 // TestBusyHandlerEdgeCases tests edge cases and boundary conditions
 func TestBusyHandlerEdgeCases(t *testing.T) {
+	t.Parallel()
 	t.Run("very short timeout", func(t *testing.T) {
 		handler := NewDefaultBusyHandler(1 * time.Nanosecond)
 
@@ -400,6 +416,7 @@ func TestBusyHandlerEdgeCases(t *testing.T) {
 	})
 
 	t.Run("very long timeout", func(t *testing.T) {
+			t.Parallel()
 		handler := NewDefaultBusyHandler(1 * time.Hour)
 
 		// Should be able to retry many times
@@ -417,6 +434,7 @@ func TestBusyHandlerEdgeCases(t *testing.T) {
 	})
 
 	t.Run("negative timeout treated as zero", func(t *testing.T) {
+			t.Parallel()
 		// The handler should handle negative timeouts gracefully
 		handler := BusyTimeout(-1 * time.Second)
 
@@ -427,6 +445,7 @@ func TestBusyHandlerEdgeCases(t *testing.T) {
 	})
 
 	t.Run("callback panic is not caught", func(t *testing.T) {
+			t.Parallel()
 		handler := BusyCallback(func(count int) bool {
 			if count == 0 {
 				panic("test panic")
@@ -446,6 +465,7 @@ func TestBusyHandlerEdgeCases(t *testing.T) {
 
 // TestBusyHandlerTiming tests precise timing behavior
 func TestBusyHandlerTiming(t *testing.T) {
+	t.Parallel()
 	t.Run("default handler minimum delay", func(t *testing.T) {
 		handler := NewDefaultBusyHandler(1 * time.Second)
 
@@ -465,6 +485,7 @@ func TestBusyHandlerTiming(t *testing.T) {
 	})
 
 	t.Run("timeout handler fixed delay", func(t *testing.T) {
+			t.Parallel()
 		handler := BusyTimeout(1 * time.Second)
 
 		// Each call should sleep for approximately 10ms
@@ -485,6 +506,7 @@ func TestBusyHandlerTiming(t *testing.T) {
 
 // TestBusyHandlerThreadSafety tests thread safety of busy handlers
 func TestBusyHandlerThreadSafety(t *testing.T) {
+	t.Parallel()
 	t.Run("concurrent access to same handler", func(t *testing.T) {
 		handler := NewDefaultBusyHandler(100 * time.Millisecond)
 
@@ -507,6 +529,7 @@ func TestBusyHandlerThreadSafety(t *testing.T) {
 	})
 
 	t.Run("concurrent set and get on pager", func(t *testing.T) {
+			t.Parallel()
 		pager := newPager("test.db", DefaultPageSize, false)
 		defer func() {
 			if pager.file != nil {
@@ -573,6 +596,7 @@ func BenchmarkBusyCallback(b *testing.B) {
 
 // TestAcquireSharedLockWithRetry tests shared lock acquisition with retry
 func TestAcquireSharedLockWithRetry(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "lock_retry_test_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -604,6 +628,7 @@ func TestAcquireSharedLockWithRetry(t *testing.T) {
 
 // TestAcquireReservedLockWithRetry tests reserved lock acquisition with retry
 func TestAcquireReservedLockWithRetry(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "lock_retry_test_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -639,6 +664,7 @@ func TestAcquireReservedLockWithRetry(t *testing.T) {
 
 // TestAcquireExclusiveLockWithRetry tests exclusive lock acquisition with retry
 func TestAcquireExclusiveLockWithRetry(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "lock_retry_test_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -679,6 +705,7 @@ func TestAcquireExclusiveLockWithRetry(t *testing.T) {
 
 // TestTryAcquireSharedLock tests tryAcquireSharedLock
 func TestTryAcquireSharedLock(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "lock_test_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -705,6 +732,7 @@ func TestTryAcquireSharedLock(t *testing.T) {
 
 // TestTryAcquireReservedLock tests tryAcquireReservedLock
 func TestTryAcquireReservedLock(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "lock_test_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -736,6 +764,7 @@ func TestTryAcquireReservedLock(t *testing.T) {
 
 // TestTryAcquireExclusiveLock tests tryAcquireExclusiveLock
 func TestTryAcquireExclusiveLock(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "lock_test_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)

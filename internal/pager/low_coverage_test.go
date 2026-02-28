@@ -11,6 +11,7 @@ import (
 
 // TestZeroJournalHeader tests the zeroJournalHeader function (0% coverage)
 func TestZeroJournalHeader(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_zero_header.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -55,6 +56,7 @@ func TestZeroJournalHeader(t *testing.T) {
 
 // TestZeroJournalHeaderNonExistent tests zeroing a non-existent journal
 func TestZeroJournalHeaderNonExistent(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_no_journal.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -72,6 +74,7 @@ func TestZeroJournalHeaderNonExistent(t *testing.T) {
 
 // TestCommitPhase0FlushFreeList tests commitPhase0FlushFreeList (50% coverage)
 func TestCommitPhase0FlushFreeList(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_phase0.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -121,6 +124,7 @@ func TestCommitPhase0FlushFreeList(t *testing.T) {
 
 // TestCommitPhase1WriteDirtyPages tests commitPhase1WriteDirtyPages (55.6% coverage)
 func TestCommitPhase1WriteDirtyPages(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_phase1.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -152,6 +156,7 @@ func TestCommitPhase1WriteDirtyPages(t *testing.T) {
 
 // TestCommitPhase2SyncDatabase tests commitPhase2SyncDatabase (50% coverage)
 func TestCommitPhase2SyncDatabase(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_phase2.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -172,6 +177,7 @@ func TestCommitPhase2SyncDatabase(t *testing.T) {
 
 // TestCommitPhase3FinalizeJournal tests commitPhase3FinalizeJournal (50% coverage)
 func TestCommitPhase3FinalizeJournal(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_phase3.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -202,6 +208,7 @@ func TestCommitPhase3FinalizeJournal(t *testing.T) {
 
 // TestInitNewDatabaseInternalReadOnly tests initNewDatabase with read-only flag (42.9% coverage)
 func TestInitNewDatabaseInternalReadOnly(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_readonly_init.db")
 
 	// Try to create a new database in read-only mode (should fail)
@@ -227,6 +234,7 @@ func TestInitNewDatabaseInternalReadOnly(t *testing.T) {
 
 // TestAcquireSharedLockWithRetrySuccess tests successful acquisition (50% coverage)
 func TestAcquireSharedLockWithRetrySuccess(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_shared_retry.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -251,6 +259,7 @@ func TestAcquireSharedLockWithRetrySuccess(t *testing.T) {
 
 // TestAcquireReservedLockWithRetrySuccess tests successful acquisition (50% coverage)
 func TestAcquireReservedLockWithRetrySuccess(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_reserved_retry.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -275,6 +284,7 @@ func TestAcquireReservedLockWithRetrySuccess(t *testing.T) {
 
 // TestAcquireExclusiveLockWithRetrySuccess tests successful acquisition (50% coverage)
 func TestAcquireExclusiveLockWithRetrySuccess(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_exclusive_retry.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -299,6 +309,7 @@ func TestAcquireExclusiveLockWithRetrySuccess(t *testing.T) {
 
 // TestProcessTrunkPageFullTrunk tests trunk page processing when trunk is full (53.8% coverage)
 func TestProcessTrunkPageFullTrunk(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_trunk_full.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -365,6 +376,7 @@ func TestProcessTrunkPageFullTrunk(t *testing.T) {
 
 // TestProcessTrunkPageAddToExisting tests adding pages to existing trunk (53.8% coverage)
 func TestProcessTrunkPageAddToExisting(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_trunk_add.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -421,6 +433,7 @@ func TestProcessTrunkPageAddToExisting(t *testing.T) {
 
 // TestEnableWALModeReadOnly tests enabling WAL on read-only database (42.1% coverage)
 func TestEnableWALModeReadOnly(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_wal_readonly.db")
 
 	// Create database first
@@ -449,6 +462,7 @@ func TestEnableWALModeReadOnly(t *testing.T) {
 
 // TestEnableWALModeSuccess tests successful WAL mode enabling (42.1% coverage)
 func TestEnableWALModeSuccess(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_wal_enable.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -484,6 +498,7 @@ func TestEnableWALModeSuccess(t *testing.T) {
 
 // TestEnableWALModeWALIndexFailure tests WAL index creation failure (42.1% coverage)
 func TestEnableWALModeWALIndexFailure(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_wal_index_fail.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -511,6 +526,7 @@ func TestEnableWALModeWALIndexFailure(t *testing.T) {
 
 // TestDisableWALModeSuccess tests disabling WAL mode (66.7% coverage)
 func TestDisableWALModeSuccess(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_wal_disable.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -540,6 +556,7 @@ func TestDisableWALModeSuccess(t *testing.T) {
 
 // TestDisableWALModeNoWAL tests disabling when WAL is not enabled (66.7% coverage)
 func TestDisableWALModeNoWAL(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_no_wal_disable.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -556,6 +573,7 @@ func TestDisableWALModeNoWAL(t *testing.T) {
 
 // TestJournalRestoreEntryPageNumberZero tests restoring page 0 (55.6% coverage)
 func TestJournalRestoreEntryPageNumberZero(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_restore_zero.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -578,6 +596,7 @@ func TestJournalRestoreEntryPageNumberZero(t *testing.T) {
 
 // TestMemoryPagerReadPageBeyondSize tests reading beyond database size (54.5% coverage)
 func TestMemoryPagerReadPageBeyondSize(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(4096)
 	if err != nil {
 		t.Fatalf("failed to open memory pager: %v", err)
@@ -603,6 +622,7 @@ func TestMemoryPagerReadPageBeyondSize(t *testing.T) {
 
 // TestMemoryPagerReadPageWithinSize tests reading existing page (54.5% coverage)
 func TestMemoryPagerReadPageWithinSize(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(4096)
 	if err != nil {
 		t.Fatalf("failed to open memory pager: %v", err)
@@ -641,6 +661,7 @@ func TestMemoryPagerReadPageWithinSize(t *testing.T) {
 
 // TestMemoryPagerWritePageError tests write page error handling (70% coverage)
 func TestMemoryPagerWritePageError(t *testing.T) {
+	t.Parallel()
 	mp, err := OpenMemory(4096)
 	if err != nil {
 		t.Fatalf("failed to open memory pager: %v", err)
@@ -658,6 +679,7 @@ func TestMemoryPagerWritePageError(t *testing.T) {
 
 // TestLockUnixAcquirePendingLockError tests pending lock error cases (50% coverage)
 func TestLockUnixAcquirePendingLockError(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific test")
 	}
@@ -696,6 +718,7 @@ func TestLockUnixAcquirePendingLockError(t *testing.T) {
 
 // TestBusyHandlerWithCustomHandler tests custom busy handler
 func TestBusyHandlerWithCustomHandler(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_custom_busy.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -720,6 +743,7 @@ func TestBusyHandlerWithCustomHandler(t *testing.T) {
 
 // TestTryAcquireSharedLockAlreadyHeld tests acquiring shared lock when already held (80% coverage)
 func TestTryAcquireSharedLockAlreadyHeld(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_shared_held.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -740,6 +764,7 @@ func TestTryAcquireSharedLockAlreadyHeld(t *testing.T) {
 
 // TestTryAcquireReservedLockReadOnly tests acquiring reserved lock on read-only pager (83.3% coverage)
 func TestTryAcquireReservedLockReadOnly(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_reserved_ro.db")
 
 	// Create database first
@@ -765,6 +790,7 @@ func TestTryAcquireReservedLockReadOnly(t *testing.T) {
 
 // TestTryAcquireExclusiveLockAlreadyHeld tests acquiring exclusive lock when already held (75% coverage)
 func TestTryAcquireExclusiveLockAlreadyHeld(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_exclusive_held.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -785,6 +811,7 @@ func TestTryAcquireExclusiveLockAlreadyHeld(t *testing.T) {
 
 // TestBusyHandlerInvocationRetry tests busy handler invocation with retries
 func TestBusyHandlerInvocationRetry(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_busy_invoke.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -816,6 +843,7 @@ func TestBusyHandlerInvocationRetry(t *testing.T) {
 
 // TestFreeListCreateNewTrunkNoPages tests creating trunk with no pending pages (77.8% coverage)
 func TestFreeListCreateNewTrunkNoPages(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_trunk_nopages.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -836,6 +864,7 @@ func TestFreeListCreateNewTrunkNoPages(t *testing.T) {
 
 // TestCommitPhaseErrorHandling tests error handling in commit phases
 func TestCommitPhaseErrorHandling(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_commit_error.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -871,6 +900,7 @@ func TestCommitPhaseErrorHandling(t *testing.T) {
 
 // TestReadExistingDatabaseError tests error handling when reading existing database
 func TestReadExistingDatabaseError(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_read_error.db")
 
 	// Create an invalid database file (too small)
@@ -887,6 +917,7 @@ func TestReadExistingDatabaseError(t *testing.T) {
 
 // TestSetJournalModeTransitions tests journal mode transitions
 func TestSetJournalModeTransitions(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_journal_mode.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -928,6 +959,7 @@ func TestSetJournalModeTransitions(t *testing.T) {
 
 // TestIsAutoVacuumNilHeader tests IsAutoVacuum with nil header (80% coverage)
 func TestIsAutoVacuumNilHeader(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_autovacuum.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -951,6 +983,7 @@ func TestIsAutoVacuumNilHeader(t *testing.T) {
 
 // TestOpenWithLRUCacheError tests error handling in OpenWithLRUCache (70% coverage)
 func TestOpenWithLRUCacheError(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "readonly", "test.db")
 
 	// Try to open in non-existent directory
@@ -963,6 +996,7 @@ func TestOpenWithLRUCacheError(t *testing.T) {
 
 // TestInitNewDatabaseError tests error in initializeNewDatabase
 func TestInitNewDatabaseError(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_init_error.db")
 
 	pager := &Pager{
@@ -999,6 +1033,7 @@ func TestInitNewDatabaseError(t *testing.T) {
 
 // TestJournalTruncateError tests journal truncate error handling
 func TestJournalTruncateError(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_trunc.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -1031,6 +1066,7 @@ func TestJournalTruncateError(t *testing.T) {
 
 // TestCommitWithHeaderUpdate tests commit that requires header update
 func TestCommitWithHeaderUpdate(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_header_update.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -1058,6 +1094,7 @@ func TestCommitWithHeaderUpdate(t *testing.T) {
 
 // TestAcquireSharedLockError tests shared lock acquisition with error
 func TestAcquireSharedLockError(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_shared_error.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -1077,6 +1114,7 @@ func TestAcquireSharedLockError(t *testing.T) {
 
 // TestNeedsHeaderUpdateTrue tests needsHeaderUpdate when update is needed
 func TestNeedsHeaderUpdateTrue(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_needs_update.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -1103,6 +1141,7 @@ func TestNeedsHeaderUpdateTrue(t *testing.T) {
 
 // TestCommitPhase5Cleanup tests the cleanup phase
 func TestCommitPhase5Cleanup(t *testing.T) {
+	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_cleanup.db")
 
 	pager, err := OpenWithPageSize(dbFile, false, 4096)
@@ -1134,6 +1173,7 @@ func TestCommitPhase5Cleanup(t *testing.T) {
 
 // TestValidateFormatFileFormats tests file format validation edge cases
 func TestValidateFormatFileFormats(t *testing.T) {
+	t.Parallel()
 	header := NewDatabaseHeader(4096)
 
 	// Serialize and parse to test validation

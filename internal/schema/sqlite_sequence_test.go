@@ -5,6 +5,7 @@ import (
 )
 
 func TestNewSequenceManager(t *testing.T) {
+	t.Parallel()
 	sm := NewSequenceManager()
 	if sm == nil {
 		t.Fatal("NewSequenceManager() returned nil")
@@ -15,6 +16,7 @@ func TestNewSequenceManager(t *testing.T) {
 }
 
 func TestGetSequence(t *testing.T) {
+	t.Parallel()
 	sm := NewSequenceManager()
 
 	// Non-existent sequence should return 0
@@ -33,6 +35,7 @@ func TestGetSequence(t *testing.T) {
 }
 
 func TestInitSequence(t *testing.T) {
+	t.Parallel()
 	sm := NewSequenceManager()
 
 	sm.InitSequence("users")
@@ -56,6 +59,7 @@ func TestInitSequence(t *testing.T) {
 }
 
 func TestNextSequence(t *testing.T) {
+	t.Parallel()
 	sm := NewSequenceManager()
 
 	// First call with no existing sequence
@@ -89,6 +93,7 @@ func TestNextSequence(t *testing.T) {
 }
 
 func TestUpdateSequence(t *testing.T) {
+	t.Parallel()
 	sm := NewSequenceManager()
 
 	// Update non-existent sequence
@@ -114,6 +119,7 @@ func TestUpdateSequence(t *testing.T) {
 }
 
 func TestDropSequence(t *testing.T) {
+	t.Parallel()
 	sm := NewSequenceManager()
 
 	sm.InitSequence("users")
@@ -131,6 +137,7 @@ func TestDropSequence(t *testing.T) {
 }
 
 func TestHasSequence(t *testing.T) {
+	t.Parallel()
 	sm := NewSequenceManager()
 
 	if sm.HasSequence("users") {
@@ -144,6 +151,7 @@ func TestHasSequence(t *testing.T) {
 }
 
 func TestListSequences(t *testing.T) {
+	t.Parallel()
 	sm := NewSequenceManager()
 
 	// Empty list
@@ -165,6 +173,7 @@ func TestListSequences(t *testing.T) {
 	// Verify all are present
 	listMap := make(map[string]bool)
 	for _, name := range list {
+		name := name
 		listMap[name] = true
 	}
 
@@ -174,6 +183,7 @@ func TestListSequences(t *testing.T) {
 }
 
 func TestGetAllSequences(t *testing.T) {
+	t.Parallel()
 	sm := NewSequenceManager()
 
 	// Empty map
@@ -210,6 +220,7 @@ func TestGetAllSequences(t *testing.T) {
 }
 
 func TestSetSequence(t *testing.T) {
+	t.Parallel()
 	sm := NewSequenceManager()
 
 	sm.SetSequence("users", 42)
@@ -227,6 +238,7 @@ func TestSetSequence(t *testing.T) {
 }
 
 func TestHasAutoincrementColumn(t *testing.T) {
+	t.Parallel()
 	table := &Table{
 		Columns: []*Column{
 			{Name: "id", Autoincrement: false},
@@ -258,6 +270,7 @@ func TestHasAutoincrementColumn(t *testing.T) {
 }
 
 func TestGetAutoincrementColumnIndex(t *testing.T) {
+	t.Parallel()
 	table := &Table{
 		Columns: []*Column{
 			{Name: "id", Autoincrement: false},
@@ -280,6 +293,7 @@ func TestGetAutoincrementColumnIndex(t *testing.T) {
 }
 
 func TestValidateAutoincrementColumn(t *testing.T) {
+	t.Parallel()
 	// Valid: INTEGER PRIMARY KEY AUTOINCREMENT
 	table := &Table{
 		Columns: []*Column{
@@ -321,6 +335,7 @@ func TestValidateAutoincrementColumn(t *testing.T) {
 }
 
 func TestGenerateAutoincrementRowid(t *testing.T) {
+	t.Parallel()
 	sm := NewSequenceManager()
 
 	// No explicit rowid - should generate next sequence
@@ -361,6 +376,7 @@ func TestGenerateAutoincrementRowid(t *testing.T) {
 }
 
 func TestConcurrentSequenceAccess(t *testing.T) {
+	t.Parallel()
 	sm := NewSequenceManager()
 	sm.InitSequence("users")
 

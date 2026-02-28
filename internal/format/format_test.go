@@ -7,6 +7,7 @@ import (
 )
 
 func TestConstants(t *testing.T) {
+	t.Parallel()
 	// Test that constants have expected values
 	if HeaderSize != 100 {
 		t.Errorf("HeaderSize = %d, want 100", HeaderSize)
@@ -34,6 +35,7 @@ func TestConstants(t *testing.T) {
 }
 
 func TestPageTypeConstants(t *testing.T) {
+	t.Parallel()
 	// Test page type constants
 	if PageTypeInteriorIndex != 0x02 {
 		t.Errorf("PageTypeInteriorIndex = 0x%02x, want 0x02", PageTypeInteriorIndex)
@@ -53,6 +55,7 @@ func TestPageTypeConstants(t *testing.T) {
 }
 
 func TestEncodingConstants(t *testing.T) {
+	t.Parallel()
 	if EncodingUTF8 != 1 {
 		t.Errorf("EncodingUTF8 = %d, want 1", EncodingUTF8)
 	}
@@ -67,6 +70,7 @@ func TestEncodingConstants(t *testing.T) {
 }
 
 func TestBtreeHeaderSizeConstants(t *testing.T) {
+	t.Parallel()
 	if BtreeHeaderSizeLeaf != 8 {
 		t.Errorf("BtreeHeaderSizeLeaf = %d, want 8", BtreeHeaderSizeLeaf)
 	}
@@ -77,6 +81,7 @@ func TestBtreeHeaderSizeConstants(t *testing.T) {
 }
 
 func TestIsValidPageSize(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		size int
@@ -99,7 +104,9 @@ func TestIsValidPageSize(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			got := IsValidPageSize(tt.size)
 			if got != tt.want {
 				t.Errorf("IsValidPageSize(%d) = %v, want %v", tt.size, got, tt.want)
@@ -109,10 +116,13 @@ func TestIsValidPageSize(t *testing.T) {
 }
 
 func TestNewHeader(t *testing.T) {
+	t.Parallel()
 	pageSizes := []int{512, 1024, 2048, 4096, 8192, 16384, 32768, 65536}
 
 	for _, pageSize := range pageSizes {
+		pageSize := pageSize
 		t.Run("", func(t *testing.T) {
+				t.Parallel()
 			h := NewHeader(pageSize)
 
 			if h == nil {
@@ -168,6 +178,7 @@ func TestNewHeader(t *testing.T) {
 }
 
 func TestHeader_Parse(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		setup   func() []byte
@@ -227,7 +238,9 @@ func TestHeader_Parse(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			data := tt.setup()
 			h := &Header{}
 			err := h.Parse(data)
@@ -254,6 +267,7 @@ func TestHeader_Parse(t *testing.T) {
 }
 
 func TestHeader_Serialize(t *testing.T) {
+	t.Parallel()
 	h := NewHeader(4096)
 	h.DatabaseSize = 100
 	h.FileChangeCounter = 42
@@ -296,6 +310,7 @@ func TestHeader_Serialize(t *testing.T) {
 }
 
 func TestHeader_GetPageSize(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		pageSize uint16
@@ -324,7 +339,9 @@ func TestHeader_GetPageSize(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			h := &Header{PageSize: tt.pageSize}
 			got := h.GetPageSize()
 
@@ -336,6 +353,7 @@ func TestHeader_GetPageSize(t *testing.T) {
 }
 
 func TestHeader_Validate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		setup   func() *Header
@@ -522,7 +540,9 @@ func TestHeader_Validate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 			h := tt.setup()
 			err := h.Validate()
 
@@ -538,6 +558,7 @@ func TestHeader_Validate(t *testing.T) {
 }
 
 func TestHeader_RoundTrip(t *testing.T) {
+	t.Parallel()
 	// Test round-trip serialization with various field values
 	h := NewHeader(8192)
 	h.DatabaseSize = 1000
@@ -610,6 +631,7 @@ func TestHeader_RoundTrip(t *testing.T) {
 }
 
 func TestHeader_MaxPageSizeEncoding(t *testing.T) {
+	t.Parallel()
 	// Test that page size 65536 is encoded as 1
 	h := NewHeader(65536)
 
@@ -634,6 +656,7 @@ func TestHeader_MaxPageSizeEncoding(t *testing.T) {
 }
 
 func TestHeader_OffsetConstants(t *testing.T) {
+	t.Parallel()
 	// Verify offset constants are correct according to SQLite spec
 	offsets := map[string]int{
 		"OffsetMagic":             0,
@@ -689,6 +712,7 @@ func TestHeader_OffsetConstants(t *testing.T) {
 	}
 
 	for name, expected := range offsets {
+		expected := expected
 		if actual[name] != expected {
 			t.Errorf("%s = %d, want %d", name, actual[name], expected)
 		}

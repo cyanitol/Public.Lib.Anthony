@@ -8,6 +8,7 @@ import (
 // TestCursorFreeOverflowChain_MultiPage tests freeing a multi-page overflow chain
 // Targets FreeOverflowChain at 60% coverage
 func TestCursorFreeOverflowChain_MultiPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -45,6 +46,7 @@ func TestCursorFreeOverflowChain_MultiPage(t *testing.T) {
 
 // TestCursorFreeOverflowChain_SinglePage tests freeing a single overflow page
 func TestCursorFreeOverflowChain_SinglePage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -73,6 +75,7 @@ func TestCursorFreeOverflowChain_SinglePage(t *testing.T) {
 // TestRedistributeLeafCells_Comprehensive tests leaf cell redistribution
 // Targets redistributeLeafCells at 61.5% coverage
 func TestRedistributeLeafCells_Comprehensive(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages to force redistribution
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -109,6 +112,7 @@ func TestRedistributeLeafCells_Comprehensive(t *testing.T) {
 // TestInsertDividerIntoParent tests divider insertion during split
 // Targets insertDividerIntoParent at 62.5% coverage
 func TestInsertDividerIntoParent(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages to force splits
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -133,6 +137,7 @@ func TestInsertDividerIntoParent(t *testing.T) {
 // TestMoveRightToLeft tests moving cells from right to left
 // Targets moveRightToLeft at 63.6% coverage
 func TestMoveRightToLeft(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	// Create left page with few cells
@@ -188,6 +193,7 @@ func TestMoveRightToLeft(t *testing.T) {
 // TestMoveLeftToRight tests moving cells from left to right
 // Targets moveLeftToRight at 66.7% coverage
 func TestMoveLeftToRight(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	// Create left page with many cells
@@ -243,6 +249,7 @@ func TestMoveLeftToRight(t *testing.T) {
 // TestCreateNewRoot2 tests root page creation during split
 // Targets createNewRoot at 66.7% coverage
 func TestCreateNewRoot2(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Small pages to force root split
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -283,6 +290,7 @@ func TestCreateNewRoot2(t *testing.T) {
 // TestAllocateAndInitializeLeafPage tests leaf page allocation during split
 // Targets allocateAndInitializeLeafPage at 66.7% coverage
 func TestAllocateAndInitializeLeafPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -309,6 +317,7 @@ func TestAllocateAndInitializeLeafPage(t *testing.T) {
 // TestAllocateAndInitializeInteriorPage tests interior page allocation
 // Targets allocateAndInitializeInteriorPage at 66.7% coverage
 func TestAllocateAndInitializeInteriorPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -350,6 +359,7 @@ func TestAllocateAndInitializeInteriorPage(t *testing.T) {
 // TestDefragmentPages2 tests page defragmentation
 // Targets defragmentPages at 66.7% coverage
 func TestDefragmentPages2(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	// Create pages with fragmentation
@@ -424,6 +434,7 @@ func TestDefragmentPages2(t *testing.T) {
 // TestCursorWriteSingleOverflowPage tests writing a single overflow page
 // Targets writeSingleOverflowPage at 66.7% coverage
 func TestCursorWriteSingleOverflowPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -471,6 +482,7 @@ func TestCursorWriteSingleOverflowPage(t *testing.T) {
 
 // TestCursorWriteOverflow_MultiPage tests multi-page overflow
 func TestCursorWriteOverflow_MultiPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -515,6 +527,7 @@ func TestCursorWriteOverflow_MultiPage(t *testing.T) {
 
 // TestCursorReadOverflow_EdgeCases tests overflow reading edge cases
 func TestCursorReadOverflow_EdgeCases(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -549,6 +562,7 @@ func TestCursorReadOverflow_EdgeCases(t *testing.T) {
 
 // TestSplitPage_Coverage tests page splitting comprehensively
 func TestSplitPage_Coverage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {

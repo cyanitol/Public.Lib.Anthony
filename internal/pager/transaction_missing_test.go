@@ -7,6 +7,7 @@ import (
 
 // TestNewTransactionManager tests creating a transaction manager
 func TestNewTransactionManager(t *testing.T) {
+	t.Parallel()
 	tm := NewTransactionManager()
 	if tm == nil {
 		t.Error("expected non-nil transaction manager")
@@ -19,6 +20,7 @@ func TestNewTransactionManager(t *testing.T) {
 
 // TestNewSavepointManager tests creating a savepoint manager
 func TestNewSavepointManager(t *testing.T) {
+	t.Parallel()
 	sm := NewSavepointManager()
 	if sm == nil {
 		t.Error("expected non-nil savepoint manager")
@@ -27,6 +29,7 @@ func TestNewSavepointManager(t *testing.T) {
 
 // TestCheckpointFunction tests Checkpoint function
 func TestCheckpointFunction(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "checkpoint_test_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -48,6 +51,7 @@ func TestCheckpointFunction(t *testing.T) {
 
 // TestIsAutoVacuum tests IsAutoVacuum function
 func TestIsAutoVacuum(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "autovac_test_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -68,6 +72,7 @@ func TestIsAutoVacuum(t *testing.T) {
 
 // TestSavepointManagerMethods tests savepoint manager methods via Pager
 func TestSavepointManagerMethods(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "savepoint_test_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)

@@ -7,6 +7,7 @@ import (
 )
 
 func TestBtreeCursorBasic(t *testing.T) {
+	t.Parallel()
 	// Create a simple test to verify the btree cursor works
 	bt := createTestBtree()
 

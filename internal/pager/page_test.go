@@ -7,6 +7,7 @@ import (
 )
 
 func TestNewDbPage(t *testing.T) {
+	t.Parallel()
 	pgno := Pgno(5)
 	pageSize := 4096
 
@@ -30,6 +31,7 @@ func TestNewDbPage(t *testing.T) {
 }
 
 func TestDbPage_IsDirty(t *testing.T) {
+	t.Parallel()
 	page := NewDbPage(1, 4096)
 
 	if page.IsDirty() {
@@ -44,6 +46,7 @@ func TestDbPage_IsDirty(t *testing.T) {
 }
 
 func TestDbPage_MakeDirty(t *testing.T) {
+	t.Parallel()
 	page := NewDbPage(1, 4096)
 
 	page.MakeDirty()
@@ -58,6 +61,7 @@ func TestDbPage_MakeDirty(t *testing.T) {
 }
 
 func TestDbPage_MakeClean(t *testing.T) {
+	t.Parallel()
 	page := NewDbPage(1, 4096)
 	page.MakeDirty()
 
@@ -73,6 +77,7 @@ func TestDbPage_MakeClean(t *testing.T) {
 }
 
 func TestDbPage_RefCount(t *testing.T) {
+	t.Parallel()
 	page := NewDbPage(1, 4096)
 
 	if page.GetRefCount() != 1 {
@@ -108,6 +113,7 @@ func TestDbPage_RefCount(t *testing.T) {
 }
 
 func TestDbPage_Write(t *testing.T) {
+	t.Parallel()
 	page := NewDbPage(1, 4096)
 	testData := []byte("Hello, World!")
 
@@ -130,6 +136,7 @@ func TestDbPage_Write(t *testing.T) {
 }
 
 func TestDbPage_Write_InvalidOffset(t *testing.T) {
+	t.Parallel()
 	page := NewDbPage(1, 4096)
 
 	tests := []struct {
@@ -143,7 +150,9 @@ func TestDbPage_Write_InvalidOffset(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := page.Write(tt.offset, tt.data)
 			if err == nil {
 				t.Error("Write() expected error, got nil")
@@ -153,6 +162,7 @@ func TestDbPage_Write_InvalidOffset(t *testing.T) {
 }
 
 func TestDbPage_Read(t *testing.T) {
+	t.Parallel()
 	page := NewDbPage(1, 4096)
 	testData := []byte("Hello, World!")
 	copy(page.Data, testData)
@@ -168,6 +178,7 @@ func TestDbPage_Read(t *testing.T) {
 }
 
 func TestDbPage_Read_InvalidOffset(t *testing.T) {
+	t.Parallel()
 	page := NewDbPage(1, 4096)
 
 	tests := []struct {
@@ -181,7 +192,9 @@ func TestDbPage_Read_InvalidOffset(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := page.Read(tt.offset, tt.length)
 			if err == nil {
 				t.Error("Read() expected error, got nil")
@@ -191,6 +204,7 @@ func TestDbPage_Read_InvalidOffset(t *testing.T) {
 }
 
 func TestDbPage_Zero(t *testing.T) {
+	t.Parallel()
 	page := NewDbPage(1, 4096)
 	copy(page.Data, []byte("Some data"))
 
@@ -210,6 +224,7 @@ func TestDbPage_Zero(t *testing.T) {
 }
 
 func TestDbPage_Clone(t *testing.T) {
+	t.Parallel()
 	original := NewDbPage(5, 4096)
 	testData := []byte("Test data")
 	copy(original.Data, testData)
@@ -244,6 +259,7 @@ func TestDbPage_Clone(t *testing.T) {
 }
 
 func TestDbPage_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	page := NewDbPage(1, 4096)
 	var wg sync.WaitGroup
 
@@ -280,6 +296,7 @@ func TestDbPage_ConcurrentAccess(t *testing.T) {
 }
 
 func TestNewPageCache(t *testing.T) {
+	t.Parallel()
 	pageSize := 4096
 	maxPages := 100
 
@@ -303,6 +320,7 @@ func TestNewPageCache(t *testing.T) {
 }
 
 func TestPageCache_PutAndGet(t *testing.T) {
+	t.Parallel()
 	cache := NewPageCache(4096, 100)
 	page := NewDbPage(5, 4096)
 
@@ -322,6 +340,7 @@ func TestPageCache_PutAndGet(t *testing.T) {
 }
 
 func TestPageCache_Get_NotFound(t *testing.T) {
+	t.Parallel()
 	cache := NewPageCache(4096, 100)
 
 	got := cache.Get(999)
@@ -331,6 +350,7 @@ func TestPageCache_Get_NotFound(t *testing.T) {
 }
 
 func TestPageCache_Remove(t *testing.T) {
+	t.Parallel()
 	cache := NewPageCache(4096, 100)
 	page := NewDbPage(5, 4096)
 
@@ -344,6 +364,7 @@ func TestPageCache_Remove(t *testing.T) {
 }
 
 func TestPageCache_Clear(t *testing.T) {
+	t.Parallel()
 	cache := NewPageCache(4096, 100)
 
 	for i := 1; i <= 10; i++ {
@@ -363,6 +384,7 @@ func TestPageCache_Clear(t *testing.T) {
 }
 
 func TestPageCache_DirtyPages(t *testing.T) {
+	t.Parallel()
 	cache := NewPageCache(4096, 100)
 
 	// Add clean pages
@@ -392,6 +414,7 @@ func TestPageCache_DirtyPages(t *testing.T) {
 }
 
 func TestPageCache_MakeClean(t *testing.T) {
+	t.Parallel()
 	cache := NewPageCache(4096, 100)
 
 	// Add dirty pages
@@ -415,6 +438,7 @@ func TestPageCache_MakeClean(t *testing.T) {
 }
 
 func TestPageCache_Eviction(t *testing.T) {
+	t.Parallel()
 	cache := NewPageCache(4096, 5)
 
 	// Fill cache to capacity
@@ -440,6 +464,7 @@ func TestPageCache_Eviction(t *testing.T) {
 }
 
 func TestPageCache_NoEvictDirtyPages(t *testing.T) {
+	t.Parallel()
 	cache := NewPageCache(4096, 5)
 
 	// Fill cache with dirty pages

@@ -6,7 +6,9 @@ import (
 
 // TestAggregateOpcodes tests the OpAggStep and OpAggFinal opcodes
 func TestAggregateOpcodes(t *testing.T) {
+	t.Parallel()
 	t.Run("execAggStep_execAggFinal_COUNT", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.funcCtx = NewFunctionContext()
 
@@ -54,6 +56,7 @@ func TestAggregateOpcodes(t *testing.T) {
 	})
 
 	t.Run("execAggStep_execAggFinal_SUM", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.funcCtx = NewFunctionContext()
 
@@ -96,6 +99,7 @@ func TestAggregateOpcodes(t *testing.T) {
 	})
 
 	t.Run("execAggStep_execAggFinal_AVG", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.funcCtx = NewFunctionContext()
 
@@ -140,6 +144,7 @@ func TestAggregateOpcodes(t *testing.T) {
 	})
 
 	t.Run("execAggStep_execAggFinal_MAX", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.funcCtx = NewFunctionContext()
 
@@ -182,6 +187,7 @@ func TestAggregateOpcodes(t *testing.T) {
 	})
 
 	t.Run("execAggStep_execAggFinal_MIN", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.funcCtx = NewFunctionContext()
 
@@ -224,6 +230,7 @@ func TestAggregateOpcodes(t *testing.T) {
 	})
 
 	t.Run("execAggStep_MultipleGroups", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.funcCtx = NewFunctionContext()
 
@@ -288,6 +295,7 @@ func TestAggregateOpcodes(t *testing.T) {
 	})
 
 	t.Run("execAggStep_WithNullValues", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.funcCtx = NewFunctionContext()
 
@@ -332,6 +340,7 @@ func TestAggregateOpcodes(t *testing.T) {
 	})
 
 	t.Run("execAggFinal_WithoutContext", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		// Don't set funcCtx
 
@@ -348,6 +357,7 @@ func TestAggregateOpcodes(t *testing.T) {
 	})
 
 	t.Run("execAggStep_RealValues", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.funcCtx = NewFunctionContext()
 
@@ -392,6 +402,7 @@ func TestAggregateOpcodes(t *testing.T) {
 	})
 
 	t.Run("execAggStep_StringAggregate", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.funcCtx = NewFunctionContext()
 

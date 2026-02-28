@@ -6,6 +6,7 @@ import (
 )
 
 func TestParseDatabaseHeader(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		setup   func() []byte
@@ -54,7 +55,9 @@ func TestParseDatabaseHeader(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			data := tt.setup()
 			header, err := ParseDatabaseHeader(data)
 
@@ -85,6 +88,7 @@ func TestParseDatabaseHeader(t *testing.T) {
 }
 
 func TestDatabaseHeader_Validate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		setup   func() *DatabaseHeader
@@ -163,7 +167,9 @@ func TestDatabaseHeader_Validate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			header := tt.setup()
 			err := header.Validate()
 
@@ -179,6 +185,7 @@ func TestDatabaseHeader_Validate(t *testing.T) {
 }
 
 func TestDatabaseHeader_GetPageSize(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		pageSize uint16
@@ -202,7 +209,9 @@ func TestDatabaseHeader_GetPageSize(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			header := &DatabaseHeader{PageSize: tt.pageSize}
 			got := header.GetPageSize()
 
@@ -214,10 +223,13 @@ func TestDatabaseHeader_GetPageSize(t *testing.T) {
 }
 
 func TestNewDatabaseHeader(t *testing.T) {
+	t.Parallel()
 	pageSizes := []int{512, 1024, 2048, 4096, 8192, 16384, 32768, 65536}
 
 	for _, pageSize := range pageSizes {
+		pageSize := pageSize
 		t.Run("page_size_"+string(rune(pageSize)), func(t *testing.T) {
+			t.Parallel()
 			header := NewDatabaseHeader(pageSize)
 
 			if header == nil {
@@ -269,6 +281,7 @@ func TestNewDatabaseHeader(t *testing.T) {
 }
 
 func TestDatabaseHeader_Serialize(t *testing.T) {
+	t.Parallel()
 	header := NewDatabaseHeader(4096)
 	header.DatabaseSize = 100
 	header.FileChangeCounter = 42
@@ -311,6 +324,7 @@ func TestDatabaseHeader_Serialize(t *testing.T) {
 }
 
 func TestIsValidPageSize(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		size int
 		want bool
@@ -331,7 +345,9 @@ func TestIsValidPageSize(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run("size_"+string(rune(tt.size)), func(t *testing.T) {
+			t.Parallel()
 			got := isValidPageSize(tt.size)
 			if got != tt.want {
 				t.Errorf("isValidPageSize(%d) = %v, want %v", tt.size, got, tt.want)

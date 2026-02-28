@@ -8,6 +8,7 @@ import (
 
 // TestOpenWriteCreatesWritableCursor tests that OpenWrite creates a cursor with Writable=true
 func TestOpenWriteCreatesWritableCursor(t *testing.T) {
+	t.Parallel()
 	// Create a new in-memory btree
 	bt := btree.NewBtree(4096)
 
@@ -54,6 +55,7 @@ func TestOpenWriteCreatesWritableCursor(t *testing.T) {
 
 // TestOpenReadCreatesNonWritableCursor tests that OpenRead creates a cursor with Writable=false
 func TestOpenReadCreatesNonWritableCursor(t *testing.T) {
+	t.Parallel()
 	// Create a new in-memory btree
 	bt := btree.NewBtree(4096)
 
@@ -100,6 +102,7 @@ func TestOpenReadCreatesNonWritableCursor(t *testing.T) {
 
 // TestInsertRequiresWritableCursor tests that Insert fails on a read-only cursor
 func TestInsertRequiresWritableCursor(t *testing.T) {
+	t.Parallel()
 	// Create a new in-memory btree
 	bt := btree.NewBtree(4096)
 
@@ -138,6 +141,7 @@ func TestInsertRequiresWritableCursor(t *testing.T) {
 
 // TestDeleteRequiresWritableCursor tests that Delete fails on a read-only cursor
 func TestDeleteRequiresWritableCursor(t *testing.T) {
+	t.Parallel()
 	// Create a new in-memory btree
 	bt := btree.NewBtree(4096)
 
@@ -172,6 +176,7 @@ func TestDeleteRequiresWritableCursor(t *testing.T) {
 
 // TestInsertSucceedsWithWritableCursor tests that Insert doesn't fail with writable error
 func TestInsertSucceedsWithWritableCursor(t *testing.T) {
+	t.Parallel()
 	// Create a new in-memory btree
 	bt := btree.NewBtree(4096)
 

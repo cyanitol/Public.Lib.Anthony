@@ -10,6 +10,7 @@ import (
 
 // TestWALModeSwitch tests switching to and from WAL mode
 func TestWALModeSwitch(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -60,6 +61,7 @@ func TestWALModeSwitch(t *testing.T) {
 
 // TestWALModeWriteRead tests writing and reading in WAL mode
 func TestWALModeWriteRead(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -119,6 +121,7 @@ func TestWALModeWriteRead(t *testing.T) {
 
 // TestWALModeCheckpoint tests checkpointing in WAL mode
 func TestWALModeCheckpoint(t *testing.T) {
+	t.Parallel()
 	// WAL mode now implemented!
 
 	tempDir := t.TempDir()
@@ -209,6 +212,7 @@ func TestWALModeCheckpoint(t *testing.T) {
 
 // TestWALModeRecovery tests recovery from WAL on database open
 func TestWALModeRecovery(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -273,6 +277,7 @@ func TestWALModeRecovery(t *testing.T) {
 
 // TestWALModeConcurrentReads tests concurrent readers in WAL mode
 func TestWALModeConcurrentReads(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -379,6 +384,7 @@ func TestWALModeConcurrentReads(t *testing.T) {
 
 // TestWALModeMultipleVersions tests reading the latest version of a page
 func TestWALModeMultipleVersions(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -478,6 +484,7 @@ func TestWALModeMultipleVersions(t *testing.T) {
 
 // TestWALModeCheckpointModes tests different checkpoint modes
 func TestWALModeCheckpointModes(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
@@ -582,6 +589,7 @@ func TestWALModeCheckpointModes(t *testing.T) {
 
 // TestWALModeRollback tests rollback in WAL mode
 func TestWALModeRollback(t *testing.T) {
+	t.Parallel()
 	t.Skip("WAL mode not fully implemented - rollback doesn't properly restore WAL data")
 
 	tempDir := t.TempDir()

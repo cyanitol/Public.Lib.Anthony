@@ -5,6 +5,7 @@ import (
 )
 
 func TestParseCTE_Simple(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -43,7 +44,9 @@ func TestParseCTE_Simple(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -70,6 +73,7 @@ func TestParseCTE_Simple(t *testing.T) {
 }
 
 func TestParseCTE_Recursive(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -99,7 +103,9 @@ func TestParseCTE_Recursive(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -129,6 +135,7 @@ func TestParseCTE_Recursive(t *testing.T) {
 }
 
 func TestParseCTE_Multiple(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		sql      string
@@ -162,7 +169,9 @@ func TestParseCTE_Multiple(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -192,6 +201,7 @@ func TestParseCTE_Multiple(t *testing.T) {
 }
 
 func TestParseCTE_WithColumnList(t *testing.T) {
+	t.Parallel()
 	sql := "WITH users_info(user_id, user_name, user_email) AS (SELECT id, name, email FROM users) SELECT * FROM users_info"
 
 	parser := NewParser(sql)
@@ -239,6 +249,7 @@ func TestParseCTE_WithColumnList(t *testing.T) {
 }
 
 func TestParseCTE_Complex(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -291,7 +302,9 @@ func TestParseCTE_Complex(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -317,6 +330,7 @@ func TestParseCTE_Complex(t *testing.T) {
 }
 
 func TestParseCTE_Errors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sql     string
@@ -350,7 +364,9 @@ func TestParseCTE_Errors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			_, err := parser.Parse()
 			if (err != nil) != tt.wantErr {
@@ -361,6 +377,7 @@ func TestParseCTE_Errors(t *testing.T) {
 }
 
 func TestParseCTE_RecursiveFlag(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -379,7 +396,9 @@ func TestParseCTE_RecursiveFlag(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			parser := NewParser(tt.sql)
 			stmts, err := parser.Parse()
 			if err != nil {

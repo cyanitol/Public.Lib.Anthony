@@ -6,6 +6,7 @@ import (
 
 // TestWindowStateCreation tests basic window state creation
 func TestWindowStateCreation(t *testing.T) {
+	t.Parallel()
 	ws := NewWindowState(nil, nil, nil, DefaultWindowFrame())
 	if ws == nil {
 		t.Fatal("NewWindowState returned nil")
@@ -18,6 +19,7 @@ func TestWindowStateCreation(t *testing.T) {
 
 // TestWindowStateAddRow tests adding rows to window state
 func TestWindowStateAddRow(t *testing.T) {
+	t.Parallel()
 	ws := NewWindowState(nil, nil, nil, DefaultWindowFrame())
 
 	// Add first row
@@ -43,6 +45,7 @@ func TestWindowStateAddRow(t *testing.T) {
 
 // TestWindowStatePartitioning tests partitioning behavior
 func TestWindowStatePartitioning(t *testing.T) {
+	t.Parallel()
 	// Create window state with partition by column 1
 	partitionCols := []int{1}
 	ws := NewWindowState(partitionCols, nil, nil, DefaultWindowFrame())
@@ -67,6 +70,7 @@ func TestWindowStatePartitioning(t *testing.T) {
 
 // TestWindowFrameDefault tests default frame behavior
 func TestWindowFrameDefault(t *testing.T) {
+	t.Parallel()
 	frame := DefaultWindowFrame()
 
 	if frame.Type != FrameRange {
@@ -84,6 +88,7 @@ func TestWindowFrameDefault(t *testing.T) {
 
 // TestWindowStateNextRow tests row iteration
 func TestWindowStateNextRow(t *testing.T) {
+	t.Parallel()
 	ws := NewWindowState(nil, nil, nil, DefaultWindowFrame())
 
 	// Add test rows
@@ -108,6 +113,7 @@ func TestWindowStateNextRow(t *testing.T) {
 
 // TestWindowStateRowNumber tests row numbering
 func TestWindowStateRowNumber(t *testing.T) {
+	t.Parallel()
 	ws := NewWindowState(nil, nil, nil, DefaultWindowFrame())
 
 	ws.AddRow([]*Mem{NewMemInt(1)})

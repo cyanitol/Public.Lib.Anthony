@@ -7,6 +7,7 @@ import (
 
 // TestGetVarint tests the getVarint and getVarintGeneral functions
 func TestGetVarint(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		data   []byte
@@ -59,7 +60,9 @@ func TestGetVarint(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got, gotN := getVarint(tt.data, tt.offset)
 			if got != tt.want || gotN != tt.wantN {
 				t.Errorf("getVarint(%v, %d) = (%d, %d), want (%d, %d)",
@@ -71,6 +74,7 @@ func TestGetVarint(t *testing.T) {
 
 // TestParseSignedInt24 tests the parseSignedInt24 function
 func TestParseSignedInt24(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		data []byte
@@ -109,7 +113,9 @@ func TestParseSignedInt24(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := parseSignedInt24(tt.data)
 			if got != tt.want {
 				t.Errorf("parseSignedInt24(%v) = %d, want %d", tt.data, got, tt.want)
@@ -120,6 +126,7 @@ func TestParseSignedInt24(t *testing.T) {
 
 // TestParseSignedInt48 tests the parseSignedInt48 function
 func TestParseSignedInt48(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		data []byte
@@ -153,7 +160,9 @@ func TestParseSignedInt48(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			got := parseSignedInt48(tt.data)
 			if got != tt.want {
 				t.Errorf("parseSignedInt48(%v) = %d, want %d", tt.data, got, tt.want)
@@ -164,6 +173,7 @@ func TestParseSignedInt48(t *testing.T) {
 
 // TestParseSerialFloat tests the parseSerialFloat function
 func TestParseSerialFloat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		data   []byte
@@ -209,7 +219,9 @@ func TestParseSerialFloat(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			mem := NewMem()
 			err := parseSerialFloat(tt.data, tt.offset, mem)
 
@@ -228,6 +240,7 @@ func TestParseSerialFloat(t *testing.T) {
 
 // TestEncodeVarint tests the encodeVarint function
 func TestEncodeVarint(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		value uint64
@@ -239,7 +252,9 @@ func TestEncodeVarint(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			buf := encodeVarint(tt.value)
 
 			// Decode it back
@@ -258,6 +273,7 @@ func TestEncodeVarint(t *testing.T) {
 
 // TestVarintLen tests the varintLen function
 func TestVarintLen(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		value uint64
 		want  int
@@ -274,7 +290,9 @@ func TestVarintLen(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run("", func(t *testing.T) {
+		t.Parallel()
 			got := varintLen(tt.value)
 			if got != tt.want {
 				t.Errorf("varintLen(%d) = %d, want %d", tt.value, got, tt.want)
@@ -285,6 +303,7 @@ func TestVarintLen(t *testing.T) {
 
 // TestSerialTypeLen tests the serialTypeLen function
 func TestSerialTypeLen(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		serialType uint64
 		want       int
@@ -311,7 +330,9 @@ func TestSerialTypeLen(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run("", func(t *testing.T) {
+		t.Parallel()
 			got := serialTypeLen(tt.serialType)
 			if got != tt.want {
 				t.Errorf("serialTypeLen(%d) = %d, want %d", tt.serialType, got, tt.want)
@@ -322,6 +343,7 @@ func TestSerialTypeLen(t *testing.T) {
 
 // TestMemToInterface tests the memToInterface helper function
 func TestMemToInterface(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		setup func() *Mem
@@ -375,7 +397,9 @@ func TestMemToInterface(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			mem := tt.setup()
 			got := memToInterface(mem)
 

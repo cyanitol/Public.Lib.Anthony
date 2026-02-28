@@ -6,6 +6,7 @@ import (
 
 // TestIntegrationLargeDataset tests inserting and querying a large dataset
 func TestIntegrationLargeDataset(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(1024) // Smaller pages to force tree growth
 
 	rootPage, err := bt.CreateTable()
@@ -62,6 +63,7 @@ func TestIntegrationLargeDataset(t *testing.T) {
 
 // TestIntegrationMixedOperations tests a mix of insert, seek, delete
 func TestIntegrationMixedOperations(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(2048)
 
 	rootPage, err := bt.CreateTable()
@@ -133,6 +135,7 @@ func TestIntegrationMixedOperations(t *testing.T) {
 
 // TestIntegrationVeryLargePayloads tests inserting very large payloads
 func TestIntegrationVeryLargePayloads(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := bt.CreateTable()
@@ -182,6 +185,7 @@ func TestIntegrationVeryLargePayloads(t *testing.T) {
 
 // TestIntegrationBackwardIteration tests iterating backward through tree
 func TestIntegrationBackwardIteration(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(2048)
 
 	rootPage, err := bt.CreateTable()
@@ -236,6 +240,7 @@ func TestIntegrationBackwardIteration(t *testing.T) {
 
 // TestIntegrationIndexOperations tests index cursor operations
 func TestIntegrationIndexOperations(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 
 	rootPage, err := createIndexPage(bt)
@@ -293,6 +298,7 @@ func TestIntegrationIndexOperations(t *testing.T) {
 
 // TestIntegrationRandomAccess tests random access patterns
 func TestIntegrationRandomAccess(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(2048)
 
 	rootPage, err := bt.CreateTable()
@@ -357,6 +363,7 @@ func TestIntegrationRandomAccess(t *testing.T) {
 
 // TestIntegrationTreeGrowth tests tree growing from leaf to multi-level
 func TestIntegrationTreeGrowth(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(512) // Very small pages to force growth
 
 	rootPage, err := bt.CreateTable()

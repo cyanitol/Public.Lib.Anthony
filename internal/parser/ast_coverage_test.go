@@ -5,6 +5,7 @@ import "testing"
 // Test all AST node String() methods for full coverage
 
 func TestStatementNodeString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		stmt Statement
@@ -32,7 +33,9 @@ func TestStatementNodeString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.stmt.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -45,6 +48,7 @@ func TestStatementNodeString(t *testing.T) {
 }
 
 func TestExpressionNodeString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr Expression
@@ -148,7 +152,9 @@ func TestExpressionNodeString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -161,6 +167,7 @@ func TestExpressionNodeString(t *testing.T) {
 }
 
 func TestBinaryOpString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		op   BinaryOp
 		want string
@@ -191,6 +198,7 @@ func TestBinaryOpString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := tt.op.String()
 		if got != tt.want {
 			t.Errorf("BinaryOp(%d).String() = %q, want %q", tt.op, got, tt.want)
@@ -199,6 +207,7 @@ func TestBinaryOpString(t *testing.T) {
 }
 
 func TestUnaryExprStringAllOps(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *UnaryExpr
@@ -237,7 +246,9 @@ func TestUnaryExprStringAllOps(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -247,6 +258,7 @@ func TestUnaryExprStringAllOps(t *testing.T) {
 }
 
 func TestBinaryExprStringAllOps(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *BinaryExpr
@@ -282,7 +294,9 @@ func TestBinaryExprStringAllOps(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -292,6 +306,7 @@ func TestBinaryExprStringAllOps(t *testing.T) {
 }
 
 func TestInExprStringNilValues(t *testing.T) {
+	t.Parallel()
 	expr := &InExpr{
 		Expr:   &IdentExpr{Name: "id"},
 		Values: []Expression{nil, &LiteralExpr{Type: LiteralInteger, Value: "1"}},
@@ -305,6 +320,7 @@ func TestInExprStringNilValues(t *testing.T) {
 }
 
 func TestBetweenExprStringNilFields(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *BetweenExpr
@@ -340,7 +356,9 @@ func TestBetweenExprStringNilFields(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -350,6 +368,7 @@ func TestBetweenExprStringNilFields(t *testing.T) {
 }
 
 func TestFunctionExprStringWithNilArgs(t *testing.T) {
+	t.Parallel()
 	expr := &FunctionExpr{
 		Name: "COALESCE",
 		Args: []Expression{
@@ -366,6 +385,7 @@ func TestFunctionExprStringWithNilArgs(t *testing.T) {
 }
 
 func TestCaseExprStringNilFields(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		expr *CaseExpr
@@ -392,7 +412,9 @@ func TestCaseExprStringNilFields(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.expr.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -402,6 +424,7 @@ func TestCaseExprStringNilFields(t *testing.T) {
 }
 
 func TestInExprStringWithNilExpr(t *testing.T) {
+	t.Parallel()
 	expr := &InExpr{
 		Expr:   nil,
 		Values: []Expression{&LiteralExpr{Type: LiteralInteger, Value: "1"}},
@@ -415,6 +438,7 @@ func TestInExprStringWithNilExpr(t *testing.T) {
 
 // Test all AlterTableAction implementations
 func TestAlterTableActionNode(t *testing.T) {
+	t.Parallel()
 	actions := []AlterTableAction{
 		&RenameTableAction{NewName: "new_table"},
 		&RenameColumnAction{OldName: "old_col", NewName: "new_col"},

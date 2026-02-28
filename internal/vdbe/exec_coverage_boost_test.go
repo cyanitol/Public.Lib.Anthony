@@ -6,6 +6,7 @@ import (
 
 // TestExecIfPos tests the execIfPos function comprehensively
 func TestExecIfPos(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		setupMem      func(*VDBE)
@@ -84,7 +85,9 @@ func TestExecIfPos(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(5)
 			tt.setupMem(v)
 			v.PC = 0
@@ -114,6 +117,7 @@ func TestExecIfPos(t *testing.T) {
 
 // TestExecInt64 tests the execInt64 function
 func TestExecInt64(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		p4Type  P4Type
@@ -141,7 +145,9 @@ func TestExecInt64(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(5)
 			instr := &Instruction{
 				Opcode: OpInt64,
@@ -167,6 +173,7 @@ func TestExecInt64(t *testing.T) {
 
 // TestExecReal tests the execReal function
 func TestExecReal(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		p4Type  P4Type
@@ -200,7 +207,9 @@ func TestExecReal(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(5)
 			instr := &Instruction{
 				Opcode: OpReal,
@@ -226,6 +235,7 @@ func TestExecReal(t *testing.T) {
 
 // TestExecString tests the execString function
 func TestExecString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		p4Type  P4Type
@@ -259,7 +269,9 @@ func TestExecString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(5)
 			instr := &Instruction{
 				Opcode: OpString,
@@ -285,6 +297,7 @@ func TestExecString(t *testing.T) {
 
 // TestExecCopy tests the execCopy function
 func TestExecCopy(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		setupSrc func(*Mem)
@@ -318,7 +331,9 @@ func TestExecCopy(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(5)
 			tt.setupSrc(v.Mem[0])
 
@@ -342,7 +357,9 @@ func TestExecCopy(t *testing.T) {
 
 // TestExecOpenEphemeral tests the execOpenEphemeral function error case
 func TestExecOpenEphemeral(t *testing.T) {
+	t.Parallel()
 	t.Run("NoBtreeContext", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(5)
 		v.Ctx = &VDBEContext{
@@ -365,6 +382,7 @@ func TestExecOpenEphemeral(t *testing.T) {
 
 // TestExecDelete_NotWritable tests the execDelete error case
 func TestExecDelete_NotWritable(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(5)
 	v.AllocCursors(2)
 	v.Cursors[0] = &Cursor{
@@ -384,6 +402,7 @@ func TestExecDelete_NotWritable(t *testing.T) {
 
 // TestExecCommit_ReadTransaction tests execCommit with read transaction
 func TestExecCommit_ReadTransaction(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(5)
 	mockPager := &MockTransactionPager{
 		inTxn:      true,
@@ -406,6 +425,7 @@ func TestExecCommit_ReadTransaction(t *testing.T) {
 
 // TestExecCommit_NoTransaction tests execCommit with no transaction
 func TestExecCommit_NoTransaction(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(5)
 	mockPager := &MockTransactionPager{
 		inTxn:      false,
@@ -429,6 +449,7 @@ func TestExecCommit_NoTransaction(t *testing.T) {
 
 // TestCastToBlob tests the castToBlob function
 func TestCastToBlob(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		setup   func(*Mem)
@@ -457,7 +478,9 @@ func TestCastToBlob(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			mem := NewMem()
 			tt.setup(mem)
 
@@ -475,7 +498,9 @@ func TestCastToBlob(t *testing.T) {
 
 // TestGetLogicalOperands tests the getLogicalOperands function
 func TestGetLogicalOperands(t *testing.T) {
+	t.Parallel()
 	t.Run("ValidOperands", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(10)
 		v.Mem[0].SetInt(1)
 		v.Mem[1].SetInt(0)
@@ -497,6 +522,7 @@ func TestGetLogicalOperands(t *testing.T) {
 	})
 
 	t.Run("InvalidP1", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(3)
 		instr := &Instruction{
 			P1: 100, // Out of bounds
@@ -511,6 +537,7 @@ func TestGetLogicalOperands(t *testing.T) {
 	})
 
 	t.Run("InvalidP2", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(3)
 		instr := &Instruction{
 			P1: 0,
@@ -525,6 +552,7 @@ func TestGetLogicalOperands(t *testing.T) {
 	})
 
 	t.Run("InvalidP3", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(3)
 		instr := &Instruction{
 			P1: 0,
@@ -541,6 +569,7 @@ func TestGetLogicalOperands(t *testing.T) {
 
 // TestArithmeticOperations tests arithmetic operations comprehensively
 func TestArithmeticOperations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		opcode   Opcode
@@ -624,7 +653,9 @@ func TestArithmeticOperations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(5)
 
 			// Setup operands
@@ -676,6 +707,7 @@ func TestArithmeticOperations(t *testing.T) {
 
 // TestArithmeticWithNulls tests arithmetic operations with NULL values
 func TestArithmeticWithNulls(t *testing.T) {
+	t.Parallel()
 	opcodes := []struct {
 		name   string
 		opcode Opcode
@@ -690,6 +722,7 @@ func TestArithmeticWithNulls(t *testing.T) {
 
 	for _, op := range opcodes {
 		t.Run(op.name+"_LeftNull", func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(5)
 			v.Mem[0].SetNull()
 			v.Mem[1].SetInt(10)
@@ -712,6 +745,7 @@ func TestArithmeticWithNulls(t *testing.T) {
 		})
 
 		t.Run(op.name+"_RightNull", func(t *testing.T) {
+		t.Parallel()
 			v := NewTestVDBE(5)
 			v.Mem[0].SetInt(10)
 			v.Mem[1].SetNull()
@@ -737,6 +771,7 @@ func TestArithmeticWithNulls(t *testing.T) {
 
 // TestMemRealifyExtended tests additional Realify cases
 func TestMemRealifyExtended(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		setup    func(*Mem)
@@ -752,7 +787,9 @@ func TestMemRealifyExtended(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			mem := NewMem()
 			tt.setup(mem)
 
@@ -776,13 +813,15 @@ func TestMemRealifyExtended(t *testing.T) {
 
 // TestParseColumnIntoMem tests parseColumnIntoMem error handling
 func TestParseColumnIntoMem(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(5)
 
 	t.Run("ValidPayload", func(t *testing.T) {
+		t.Parallel()
 		dst := NewMem()
 		// Valid record: header length 2, serial type 8 (int 0)
 		payload := []byte{2, 8}
-		err := v.parseColumnIntoMem(payload, 0, dst)
+		err := v.parseColumnIntoMem(payload, 0, dst, nil)
 		if err != nil {
 			t.Fatalf("parseColumnIntoMem failed: %v", err)
 		}
@@ -794,9 +833,11 @@ func TestParseColumnIntoMem(t *testing.T) {
 
 // TestCheckRowidExists tests checkRowidExists edge cases
 func TestCheckRowidExists(t *testing.T) {
+	t.Parallel()
 	v := NewTestVDBE(5)
 
 	t.Run("NilBtreeCursor", func(t *testing.T) {
+		t.Parallel()
 		cursor := &Cursor{BtreeCursor: nil}
 		found, err := v.checkRowidExists(cursor, 1)
 		if err != nil {
@@ -810,7 +851,9 @@ func TestCheckRowidExists(t *testing.T) {
 
 // TestExecSeekRowid tests execSeekRowid edge cases
 func TestExecSeekRowid(t *testing.T) {
+	t.Parallel()
 	t.Run("InvalidCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 
@@ -830,7 +873,9 @@ func TestExecSeekRowid(t *testing.T) {
 
 // TestExecOpenRead tests execOpenRead edge cases
 func TestExecOpenRead(t *testing.T) {
+	t.Parallel()
 	t.Run("NoContext", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 
@@ -849,7 +894,9 @@ func TestExecOpenRead(t *testing.T) {
 
 // TestExecOpenWrite tests execOpenWrite edge cases
 func TestExecOpenWrite(t *testing.T) {
+	t.Parallel()
 	t.Run("NoContext", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 
@@ -868,7 +915,9 @@ func TestExecOpenWrite(t *testing.T) {
 
 // TestExecPrevExtended tests additional execPrev edge cases
 func TestExecPrevExtended(t *testing.T) {
+	t.Parallel()
 	t.Run("NilBtreeCursor_SetsEOF", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 		// Create a cursor with nil BtreeCursor
@@ -901,7 +950,9 @@ func TestExecPrevExtended(t *testing.T) {
 
 // TestExecIdxRowidExtended tests additional execIdxRowid edge cases
 func TestExecIdxRowidExtended(t *testing.T) {
+	t.Parallel()
 	t.Run("TableCursor", func(t *testing.T) {
+		t.Parallel()
 		v := NewTestVDBE(5)
 		v.AllocCursors(2)
 		v.Cursors[0] = &Cursor{IsTable: true}

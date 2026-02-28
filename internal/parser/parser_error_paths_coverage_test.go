@@ -7,6 +7,7 @@ import (
 
 // TestParseErrors tests various error paths in the parser
 func TestParseErrorPaths(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -332,7 +333,9 @@ func TestParseErrorPaths(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if err == nil {
@@ -344,6 +347,7 @@ func TestParseErrorPaths(t *testing.T) {
 
 // TestParseCompoundSelectErrors tests error paths in compound SELECT parsing
 func TestParseCompoundSelectErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -367,7 +371,9 @@ func TestParseCompoundSelectErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if err == nil {
@@ -379,6 +385,7 @@ func TestParseCompoundSelectErrors(t *testing.T) {
 
 // TestParseAliasErrorPaths tests edge cases in alias parsing
 func TestParseAliasErrorPaths(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -407,7 +414,9 @@ func TestParseAliasErrorPaths(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -421,6 +430,7 @@ func TestParseAliasErrorPaths(t *testing.T) {
 
 // TestParseTableOrSubqueryEdgeCases tests edge cases in table/subquery parsing
 func TestParseTableOrSubqueryEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -445,7 +455,9 @@ func TestParseTableOrSubqueryEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -459,6 +471,7 @@ func TestParseTableOrSubqueryEdgeCases(t *testing.T) {
 
 // TestParseExprColumnEdgeCases tests parseExprColumn edge cases
 func TestParseExprColumnEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -487,7 +500,9 @@ func TestParseExprColumnEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -501,6 +516,7 @@ func TestParseExprColumnEdgeCases(t *testing.T) {
 
 // TestParseInsertSourceErrors tests error paths in INSERT source parsing
 func TestParseInsertSourceErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -520,7 +536,9 @@ func TestParseInsertSourceErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			stmt, err := p.Parse()
 			// Some of these should parse successfully
@@ -542,6 +560,7 @@ func TestParseInsertSourceErrors(t *testing.T) {
 
 // TestParseConflictTargetErrors tests error paths in conflict target parsing
 func TestParseConflictTargetErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		sql  string
@@ -565,7 +584,9 @@ func TestParseConflictTargetErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if strings.Contains(tt.name, "incomplete") {
@@ -584,6 +605,7 @@ func TestParseConflictTargetErrors(t *testing.T) {
 
 // TestParseUpdateOrderByEdgeCases tests UPDATE with ORDER BY and LIMIT
 func TestParseUpdateOrderByEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -607,7 +629,9 @@ func TestParseUpdateOrderByEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -621,6 +645,7 @@ func TestParseUpdateOrderByEdgeCases(t *testing.T) {
 
 // TestParseDeleteOrderByEdgeCases tests DELETE with ORDER BY and LIMIT
 func TestParseDeleteOrderByEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -644,7 +669,9 @@ func TestParseDeleteOrderByEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -658,6 +685,7 @@ func TestParseDeleteOrderByEdgeCases(t *testing.T) {
 
 // TestParseCreateTableAsSelectErrorPaths tests CREATE TABLE AS SELECT
 func TestParseCreateTableAsSelectErrorPaths(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -681,7 +709,9 @@ func TestParseCreateTableAsSelectErrorPaths(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -695,6 +725,7 @@ func TestParseCreateTableAsSelectErrorPaths(t *testing.T) {
 
 // TestParseCreateViewSelectEdgeCases tests CREATE VIEW with SELECT
 func TestParseCreateViewSelectEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -718,7 +749,9 @@ func TestParseCreateViewSelectEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -732,6 +765,7 @@ func TestParseCreateViewSelectEdgeCases(t *testing.T) {
 
 // TestParseTriggerBodyStatementErrorPaths tests trigger body statements
 func TestParseTriggerBodyStatementErrorPaths(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -760,7 +794,9 @@ func TestParseTriggerBodyStatementErrorPaths(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -774,6 +810,7 @@ func TestParseTriggerBodyStatementErrorPaths(t *testing.T) {
 
 // TestParseExplainEdgeCases tests EXPLAIN statement variations
 func TestParseExplainEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -807,7 +844,9 @@ func TestParseExplainEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -821,6 +860,7 @@ func TestParseExplainEdgeCases(t *testing.T) {
 
 // TestParsePragmaValueEdgeCases tests PRAGMA value variations
 func TestParsePragmaValueEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -854,7 +894,9 @@ func TestParsePragmaValueEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -868,6 +910,7 @@ func TestParsePragmaValueEdgeCases(t *testing.T) {
 
 // TestParseIsExpressionEdgeCases tests IS expression variations
 func TestParseIsExpressionEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -897,7 +940,9 @@ func TestParseIsExpressionEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -911,6 +956,7 @@ func TestParseIsExpressionEdgeCases(t *testing.T) {
 
 // TestParseInExpressionEdgeCases tests IN expression variations
 func TestParseInExpressionEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -939,7 +985,9 @@ func TestParseInExpressionEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -953,6 +1001,7 @@ func TestParseInExpressionEdgeCases(t *testing.T) {
 
 // TestParseBetweenExpressionEdgeCases tests BETWEEN expression variations
 func TestParseBetweenExpressionEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -976,7 +1025,9 @@ func TestParseBetweenExpressionEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -990,6 +1041,7 @@ func TestParseBetweenExpressionEdgeCases(t *testing.T) {
 
 // TestParseTryParsePatternOpEdgeCases tests pattern matching operators
 func TestParseTryParsePatternOpEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -1030,7 +1082,9 @@ func TestParseTryParsePatternOpEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -1044,6 +1098,7 @@ func TestParseTryParsePatternOpEdgeCases(t *testing.T) {
 
 // TestParseMultiplicativeExpressionEdgeCases tests multiplicative operators
 func TestParseMultiplicativeExpressionEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -1072,7 +1127,9 @@ func TestParseMultiplicativeExpressionEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -1086,6 +1143,7 @@ func TestParseMultiplicativeExpressionEdgeCases(t *testing.T) {
 
 // TestParseUnaryExpressionEdgeCases tests unary operators
 func TestParseUnaryExpressionEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -1114,7 +1172,9 @@ func TestParseUnaryExpressionEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -1128,6 +1188,7 @@ func TestParseUnaryExpressionEdgeCases(t *testing.T) {
 
 // TestParsePostfixExpressionEdgeCases tests postfix operators
 func TestParsePostfixExpressionEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -1151,7 +1212,9 @@ func TestParsePostfixExpressionEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -1165,6 +1228,7 @@ func TestParsePostfixExpressionEdgeCases(t *testing.T) {
 
 // TestParseIdentOrFunctionEdgeCases tests identifier vs function call parsing
 func TestParseIdentOrFunctionEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -1193,7 +1257,9 @@ func TestParseIdentOrFunctionEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -1207,6 +1273,7 @@ func TestParseIdentOrFunctionEdgeCases(t *testing.T) {
 
 // TestParseFunctionCallEdgeCases tests function call variations
 func TestParseFunctionCallEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -1235,7 +1302,9 @@ func TestParseFunctionCallEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -1249,6 +1318,7 @@ func TestParseFunctionCallEdgeCases(t *testing.T) {
 
 // TestParseCaseExprEdgeCases tests CASE expression variations
 func TestParseCaseExprEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -1277,7 +1347,9 @@ func TestParseCaseExprEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -1291,6 +1363,7 @@ func TestParseCaseExprEdgeCases(t *testing.T) {
 
 // TestParseCastExprEdgeCases tests CAST expression variations
 func TestParseCastExprEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -1314,7 +1387,9 @@ func TestParseCastExprEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {
@@ -1328,6 +1403,7 @@ func TestParseCastExprEdgeCases(t *testing.T) {
 
 // TestParseParenOrSubqueryEdgeCases tests parenthesized expressions and subqueries
 func TestParseParenOrSubqueryEdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sql       string
@@ -1357,7 +1433,9 @@ func TestParseParenOrSubqueryEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := NewParser(tt.sql)
 			_, err := p.Parse()
 			if tt.wantError && err == nil {

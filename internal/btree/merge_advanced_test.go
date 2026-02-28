@@ -7,6 +7,7 @@ import (
 
 // TestMergePage_WithProvider tests merge with a PageProvider
 func TestMergePage_WithProvider(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -80,6 +81,7 @@ func TestMergePage_WithProvider(t *testing.T) {
 
 // TestMergePage_LeftSibling tests merging with left sibling
 func TestMergePage_LeftSibling(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -145,6 +147,7 @@ func TestMergePage_LeftSibling(t *testing.T) {
 
 // TestMergePage_RightmostChild tests merging rightmost child
 func TestMergePage_RightmostChild(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -199,6 +202,7 @@ func TestMergePage_RightmostChild(t *testing.T) {
 
 // TestMergePage_InteriorPage tests that interior pages don't merge
 func TestMergePage_InteriorPage(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -254,6 +258,7 @@ func TestMergePage_InteriorPage(t *testing.T) {
 
 // TestRedistributeSiblings_EdgeCases tests redistribution edge cases
 func TestRedistributeSiblings_EdgeCases(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	tests := []struct {
@@ -283,7 +288,9 @@ func TestRedistributeSiblings_EdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			// Create left page
 			leftCells := make([]struct {
 				rowid   int64
@@ -338,6 +345,7 @@ func TestRedistributeSiblings_EdgeCases(t *testing.T) {
 
 // TestCanMerge_ErrorCases tests CanMerge error handling
 func TestCanMerge_ErrorCases(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	// Create valid page
@@ -373,6 +381,7 @@ func TestCanMerge_ErrorCases(t *testing.T) {
 
 // TestGetChildPageAt tests getChildPageAt helper
 func TestGetChildPageAt(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	pageSize := bt.PageSize
 
@@ -406,7 +415,9 @@ func TestGetChildPageAt(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+		t.Parallel()
 			page, err := cursor.getChildPageAt(pageData, header, tt.index)
 
 			if tt.wantError {
@@ -429,6 +440,7 @@ func TestGetChildPageAt(t *testing.T) {
 
 // TestMergePage_InvalidState tests merge with invalid cursor state
 func TestMergePage_InvalidState(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := bt.CreateTable()
 
@@ -447,6 +459,7 @@ func TestMergePage_InvalidState(t *testing.T) {
 
 // TestMergePage_DepthZero tests merge at root level (depth 0)
 func TestMergePage_DepthZero(t *testing.T) {
+	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, _ := bt.CreateTable()
 
@@ -501,6 +514,7 @@ func (m *MockPageProvider) MarkDirty(pgno uint32) error {
 
 // TestExtractCellFromPage tests cell extraction helper
 func TestExtractCellFromPage(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	cells := []struct {
@@ -543,6 +557,7 @@ func TestExtractCellFromPage(t *testing.T) {
 
 // TestDefragmentPages tests defragmenting multiple pages
 func TestDefragmentPages(t *testing.T) {
+	t.Parallel()
 	pageSize := uint32(4096)
 
 	// Create two pages with fragmentation

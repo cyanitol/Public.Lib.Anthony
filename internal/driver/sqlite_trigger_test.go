@@ -487,7 +487,9 @@ func TestSQLiteTrigger(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			db := setupMemoryDB(t)
 			defer db.Close()
 
@@ -677,7 +679,9 @@ func TestSQLiteTriggerErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			db := setupMemoryDB(t)
 			defer db.Close()
 
@@ -815,7 +819,9 @@ func TestSQLiteTriggerTransactions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			db := setupMemoryDB(t)
 			defer db.Close()
 			tt.test(t, db)
@@ -874,7 +880,9 @@ func TestSQLiteTriggerNaming(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			db := setupMemoryDB(t)
 			defer db.Close()
 
@@ -909,6 +917,7 @@ func TestSQLiteTriggerNaming(t *testing.T) {
 // TestSQLiteTriggerComplexScenarios tests complex real-world trigger scenarios
 func TestSQLiteTriggerComplexScenarios(t *testing.T) {
 	t.Run("complex-1.1 audit trail trigger", func(t *testing.T) {
+		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -937,6 +946,7 @@ func TestSQLiteTriggerComplexScenarios(t *testing.T) {
 	})
 
 	t.Run("complex-1.2 referential integrity trigger", func(t *testing.T) {
+		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -968,6 +978,7 @@ func TestSQLiteTriggerComplexScenarios(t *testing.T) {
 	})
 
 	t.Run("complex-1.3 computed column trigger", func(t *testing.T) {
+		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -991,6 +1002,7 @@ func TestSQLiteTriggerComplexScenarios(t *testing.T) {
 	})
 
 	t.Run("complex-1.4 cascade delete trigger", func(t *testing.T) {
+		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
