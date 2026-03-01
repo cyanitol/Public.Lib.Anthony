@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
 )
 
 // ExplainNode represents a node in the query plan tree.
@@ -27,6 +28,10 @@ type ExplainNode struct {
 
 	// Level is the nesting level (0 for root, 1 for children, etc.)
 	Level int
+
+	// Cost estimates (for enhanced EXPLAIN QUERY PLAN)
+	EstimatedRows int64   // Estimated number of rows this operation will produce
+	EstimatedCost float64 // Relative cost estimate (higher = more expensive)
 }
 
 // ExplainPlan represents a complete query execution plan.
@@ -49,12 +54,14 @@ func NewExplainPlan() *ExplainPlan {
 // AddNode adds a new node to the plan and returns it.
 func (p *ExplainPlan) AddNode(parent *ExplainNode, detail string) *ExplainNode {
 	node := &ExplainNode{
-		ID:       p.nextID,
-		Parent:   -1,
-		NotUsed:  0,
-		Detail:   detail,
-		Children: make([]*ExplainNode, 0),
-		Level:    0,
+		ID:            p.nextID,
+		Parent:        -1,
+		NotUsed:       0,
+		Detail:        detail,
+		Children:      make([]*ExplainNode, 0),
+		Level:         0,
+		EstimatedRows: 0,
+		EstimatedCost: 0,
 	}
 	p.nextID++
 
@@ -68,6 +75,14 @@ func (p *ExplainPlan) AddNode(parent *ExplainNode, detail string) *ExplainNode {
 		parent.Children = append(parent.Children, node)
 	}
 
+	return node
+}
+
+// AddNodeWithCost adds a new node with cost estimates to the plan and returns it.
+func (p *ExplainPlan) AddNodeWithCost(parent *ExplainNode, detail string, estimatedRows int64, estimatedCost float64) *ExplainNode {
+	node := p.AddNode(parent, detail)
+	node.EstimatedRows = estimatedRows
+	node.EstimatedCost = estimatedCost
 	return node
 }
 
@@ -131,6 +146,11 @@ func (p *ExplainPlan) FormatAsText() string {
 // GenerateExplain generates an explain plan for a SQL statement.
 // This is the main entry point for EXPLAIN QUERY PLAN functionality.
 func GenerateExplain(stmt parser.Statement) (*ExplainPlan, error) {
+	return GenerateExplainWithSchema(stmt, nil)
+}
+
+// GenerateExplainWithSchema generates an explain plan with schema information for better cost estimates.
+func GenerateExplainWithSchema(stmt parser.Statement, schemaInfo *schema.Schema) (*ExplainPlan, error) {
 	plan := NewExplainPlan()
 
 	switch s := stmt.(type) {
@@ -212,15 +232,34 @@ func generateExplainWithSubqueries(plan *ExplainPlan, stmt *parser.SelectStmt) (
 
 // generateExplainWithJoins handles EXPLAIN for queries with JOINs.
 func generateExplainWithJoins(plan *ExplainPlan, stmt *parser.SelectStmt, tableName string) (*ExplainPlan, error) {
+	estimator := NewCostEstimator()
 	root := plan.AddNode(nil, "QUERY PLAN")
-	scanDetail := formatTableScan(tableName, stmt.Where, false)
-	mainScan := plan.AddNode(root, scanDetail)
+
+	// Estimate main table scan
+	leftRows, leftCost := estimator.EstimateTableScan(tableName, stmt.Where != nil)
+	scanDetail := formatTableScanWithCost(tableName, stmt.Where, false, leftRows, leftCost)
+	mainScan := plan.AddNodeWithCost(root, scanDetail, leftRows, leftCost)
+
+	currentRows := leftRows
+	totalCost := leftCost
 
 	for _, join := range stmt.From.Joins {
+		// Estimate right table scan
+		rightRows, rightCost := estimator.EstimateTableScan(join.Table.TableName, join.Condition.On != nil)
+
+		// Estimate join cost
+		hasIndex := false // Simplified: assume no index
+		joinRows, joinCost := estimator.EstimateJoinCost(currentRows, rightRows, join.Type, hasIndex)
+
 		joinType := formatJoinType(join.Type)
-		joinNode := plan.AddNode(mainScan, joinType)
-		scanDetail := formatTableScan(join.Table.TableName, join.Condition.On, false)
-		plan.AddNode(joinNode, scanDetail)
+		joinDetail := fmt.Sprintf("%s (cost=%.2f rows=%d)", joinType, joinCost, joinRows)
+		joinNode := plan.AddNodeWithCost(mainScan, joinDetail, joinRows, joinCost)
+
+		scanDetail := formatTableScanWithCost(join.Table.TableName, join.Condition.On, false, rightRows, rightCost)
+		plan.AddNodeWithCost(joinNode, scanDetail, rightRows, rightCost)
+
+		currentRows = joinRows
+		totalCost += joinCost + rightCost
 	}
 
 	return plan, nil
@@ -244,16 +283,25 @@ func formatJoinType(joinType parser.JoinType) string {
 
 // generateExplainSimpleSelect handles EXPLAIN for simple SELECT queries.
 func generateExplainSimpleSelect(plan *ExplainPlan, stmt *parser.SelectStmt, tableName string, features selectFeatures) (*ExplainPlan, error) {
+	estimator := NewCostEstimator()
+
 	root := plan.AddNode(nil, "QUERY PLAN")
-	scanDetail := formatTableScan(tableName, stmt.Where, false)
-	scanNode := plan.AddNode(root, scanDetail)
+
+	// Estimate table scan cost
+	estimatedRows, estimatedCost := estimator.EstimateTableScan(tableName, stmt.Where != nil)
+	scanDetail := formatTableScanWithCost(tableName, stmt.Where, false, estimatedRows, estimatedCost)
+	scanNode := plan.AddNodeWithCost(root, scanDetail, estimatedRows, estimatedCost)
 
 	if features.hasAggregates {
-		plan.AddNode(scanNode, "USE TEMP B-TREE FOR GROUP BY")
+		aggRows, aggCost := estimator.EstimateAggregateCost(estimatedRows, 0)
+		aggDetail := fmt.Sprintf("USE TEMP B-TREE FOR GROUP BY (cost=%.2f rows=%d)", aggCost, aggRows)
+		plan.AddNodeWithCost(scanNode, aggDetail, aggRows, aggCost)
+		estimatedRows = aggRows
+		estimatedCost += aggCost
 	}
 
 	if features.hasOrderBy {
-		addOrderByNode(plan, scanNode, stmt.OrderBy)
+		addOrderByNodeWithCost(plan, scanNode, stmt.OrderBy, estimatedRows, estimator)
 	}
 
 	return plan, nil
@@ -273,12 +321,38 @@ func addOrderByNode(plan *ExplainPlan, parent *ExplainNode, orderBy []parser.Ord
 	}
 }
 
+// addOrderByNodeWithCost adds an ORDER BY node with cost estimates to the explain plan.
+func addOrderByNodeWithCost(plan *ExplainPlan, parent *ExplainNode, orderBy []parser.OrderingTerm, inputRows int64, estimator *CostEstimator) {
+	var orderCols []string
+	for _, term := range orderBy {
+		if ident, ok := term.Expr.(*parser.IdentExpr); ok {
+			orderCols = append(orderCols, ident.Name)
+		}
+	}
+	if len(orderCols) > 0 {
+		sortRows, sortCost := estimator.EstimateSortCost(inputRows)
+		sortDetail := fmt.Sprintf("USE TEMP B-TREE FOR ORDER BY (%s) (cost=%.2f rows=%d)",
+			strings.Join(orderCols, ", "), sortCost, sortRows)
+		plan.AddNodeWithCost(parent, sortDetail, sortRows, sortCost)
+	}
+}
+
 // generateExplainInsert generates an explain plan for an INSERT statement.
 func generateExplainInsert(plan *ExplainPlan, stmt *parser.InsertStmt) (*ExplainPlan, error) {
+	_ = NewCostEstimator() // Reserved for future cost estimation
 	root := plan.AddNode(nil, "QUERY PLAN")
 
-	detail := fmt.Sprintf("INSERT INTO %s", stmt.Table)
-	insertNode := plan.AddNode(root, detail)
+	// Estimate insert cost
+	numRows := int64(1) // Single row insert by default
+	if stmt.Select != nil {
+		numRows = 1000 // Estimate for INSERT...SELECT
+	} else if len(stmt.Values) > 0 {
+		numRows = int64(len(stmt.Values))
+	}
+
+	insertCost := float64(numRows) * 2.0 // Cost per row insert
+	detail := fmt.Sprintf("INSERT INTO %s (cost=%.2f rows=%d)", stmt.Table, insertCost, numRows)
+	insertNode := plan.AddNodeWithCost(root, detail, numRows, insertCost)
 
 	// Check if INSERT...SELECT
 	if stmt.Select != nil {
@@ -295,28 +369,40 @@ func generateExplainInsert(plan *ExplainPlan, stmt *parser.InsertStmt) (*Explain
 
 // generateExplainUpdate generates an explain plan for an UPDATE statement.
 func generateExplainUpdate(plan *ExplainPlan, stmt *parser.UpdateStmt) (*ExplainPlan, error) {
+	estimator := NewCostEstimator()
 	root := plan.AddNode(nil, "QUERY PLAN")
 
-	detail := fmt.Sprintf("UPDATE %s", stmt.Table)
-	updateNode := plan.AddNode(root, detail)
+	// Estimate scan cost
+	scanRows, scanCost := estimator.EstimateTableScan(stmt.Table, stmt.Where != nil)
+
+	// Estimate update cost (scan + write)
+	updateCost := scanCost + float64(scanRows)*1.5 // Additional cost for writing
+	detail := fmt.Sprintf("UPDATE %s (cost=%.2f rows=%d)", stmt.Table, updateCost, scanRows)
+	updateNode := plan.AddNodeWithCost(root, detail, scanRows, updateCost)
 
 	// Add scan information
-	scanDetail := formatTableScan(stmt.Table, stmt.Where, true)
-	plan.AddNode(updateNode, scanDetail)
+	scanDetail := formatTableScanWithCost(stmt.Table, stmt.Where, true, scanRows, scanCost)
+	plan.AddNodeWithCost(updateNode, scanDetail, scanRows, scanCost)
 
 	return plan, nil
 }
 
 // generateExplainDelete generates an explain plan for a DELETE statement.
 func generateExplainDelete(plan *ExplainPlan, stmt *parser.DeleteStmt) (*ExplainPlan, error) {
+	estimator := NewCostEstimator()
 	root := plan.AddNode(nil, "QUERY PLAN")
 
-	detail := fmt.Sprintf("DELETE FROM %s", stmt.Table)
-	deleteNode := plan.AddNode(root, detail)
+	// Estimate scan cost
+	scanRows, scanCost := estimator.EstimateTableScan(stmt.Table, stmt.Where != nil)
+
+	// Estimate delete cost (scan + delete)
+	deleteCost := scanCost + float64(scanRows)*1.0 // Additional cost for deletion
+	detail := fmt.Sprintf("DELETE FROM %s (cost=%.2f rows=%d)", stmt.Table, deleteCost, scanRows)
+	deleteNode := plan.AddNodeWithCost(root, detail, scanRows, deleteCost)
 
 	// Add scan information
-	scanDetail := formatTableScan(stmt.Table, stmt.Where, true)
-	plan.AddNode(deleteNode, scanDetail)
+	scanDetail := formatTableScanWithCost(stmt.Table, stmt.Where, true, scanRows, scanCost)
+	plan.AddNodeWithCost(deleteNode, scanDetail, scanRows, scanCost)
 
 	return plan, nil
 }
@@ -335,6 +421,16 @@ func formatTableScan(tableName string, where parser.Expression, isWrite bool) st
 	return formatTableScanWithWhere(tableName, where)
 }
 
+// formatTableScanWithCost formats a table scan description with cost estimates.
+func formatTableScanWithCost(tableName string, where parser.Expression, isWrite bool, estimatedRows int64, estimatedCost float64) string {
+	if tableName == "" {
+		tableName = "?"
+	}
+
+	baseScan := formatTableScan(tableName, where, isWrite)
+	return fmt.Sprintf("%s (cost=%.2f rows=%d)", baseScan, estimatedCost, estimatedRows)
+}
+
 // formatTableScanWithWhere formats a table scan description when WHERE clause exists
 func formatTableScanWithWhere(tableName string, where parser.Expression) string {
 	indexable, colName := analyzeIndexability(where)
@@ -346,6 +442,27 @@ func formatTableScanWithWhere(tableName string, where parser.Expression) string 
 
 	// Full scan with WHERE clause
 	return fmt.Sprintf("SCAN %s", tableName)
+}
+
+// formatIndexScan formats an index scan description.
+func formatIndexScan(candidate *IndexCandidate) string {
+	if candidate.IsUnique && candidate.HasEquality {
+		return fmt.Sprintf("SEARCH %s USING INDEX %s (%s=?)",
+			candidate.TableName, candidate.IndexName, candidate.Columns[0])
+	}
+
+	if candidate.IsCovering {
+		return fmt.Sprintf("SCAN %s USING COVERING INDEX %s",
+			candidate.TableName, candidate.IndexName)
+	}
+
+	operation := "SEARCH"
+	if !candidate.HasEquality {
+		operation = "SCAN"
+	}
+
+	return fmt.Sprintf("%s %s USING INDEX %s",
+		operation, candidate.TableName, candidate.IndexName)
 }
 
 // analyzeIndexability determines if a WHERE expression is indexable
@@ -370,6 +487,80 @@ func isIndexableOperator(op parser.BinaryOp) bool {
 	return op == parser.OpEq || op == parser.OpLt ||
 		op == parser.OpGt || op == parser.OpLe ||
 		op == parser.OpGe
+}
+
+// IndexCandidate represents a potential index that could be used for a query.
+type IndexCandidate struct {
+	IndexName     string
+	TableName     string
+	Columns       []string
+	IsUnique      bool
+	IsCovering    bool
+	HasEquality   bool
+	EstimatedRows int64
+	EstimatedCost float64
+}
+
+// findBestIndex analyzes the WHERE clause and available indexes to find the best index.
+// Returns nil if no suitable index is found (table scan should be used).
+func findBestIndex(tableName string, where parser.Expression, schemaInfo *schema.Schema) *IndexCandidate {
+	if schemaInfo == nil || where == nil {
+		return nil
+	}
+
+	// Get all indexes for this table
+	indexes := schemaInfo.GetTableIndexes(tableName)
+	if len(indexes) == 0 {
+		return nil
+	}
+
+	// Analyze WHERE clause to find usable columns
+	indexable, colName := analyzeIndexability(where)
+	if !indexable || colName == "" {
+		return nil
+	}
+
+	// Find indexes that start with the referenced column
+	var bestCandidate *IndexCandidate
+	estimator := NewCostEstimator()
+
+	for _, idx := range indexes {
+		if len(idx.Columns) == 0 {
+			continue
+		}
+
+		// Check if this index can be used (first column matches WHERE column)
+		if idx.Columns[0] != colName {
+			continue
+		}
+
+		// Determine if this is an equality condition
+		hasEquality := false
+		if binExpr, ok := where.(*parser.BinaryExpr); ok {
+			hasEquality = binExpr.Op == parser.OpEq
+		}
+
+		// Estimate cost for this index
+		rows, cost := estimator.EstimateIndexScan(idx.Name, idx.Unique, false, hasEquality)
+
+		candidate := &IndexCandidate{
+			IndexName:     idx.Name,
+			TableName:     tableName,
+			Columns:       idx.Columns,
+			IsUnique:      idx.Unique,
+			IsCovering:    false, // TODO: Determine if covering
+			HasEquality:   hasEquality,
+			EstimatedRows: rows,
+			EstimatedCost: cost,
+		}
+
+		// Select the index with the lowest cost
+		if bestCandidate == nil || candidate.EstimatedCost < bestCandidate.EstimatedCost {
+			bestCandidate = candidate
+		}
+	}
+
+	return bestCandidate
 }
 
 // mergeSubplan merges a subplan tree into the parent plan.
@@ -442,4 +633,150 @@ func isAggregateExpr(expr parser.Expression) bool {
 	}
 
 	return aggFuncs[fnExpr.Name]
+}
+
+// CostEstimator provides cost estimation for query operations.
+type CostEstimator struct {
+	// Default heuristic values when statistics are unavailable
+	defaultTableRows int64
+	defaultIndexRows int64
+
+	// Schema information for better estimates
+	schemaInfo *schema.Schema
+}
+
+// NewCostEstimator creates a new cost estimator with default values.
+func NewCostEstimator() *CostEstimator {
+	return &CostEstimator{
+		defaultTableRows: 1000000, // Assume 1M rows by default
+		defaultIndexRows: 100000,  // Assume 100K rows for index scans
+		schemaInfo:       nil,
+	}
+}
+
+// NewCostEstimatorWithSchema creates a new cost estimator with schema information.
+func NewCostEstimatorWithSchema(schemaInfo *schema.Schema) *CostEstimator {
+	ce := NewCostEstimator()
+	ce.schemaInfo = schemaInfo
+	return ce
+}
+
+// getTableRowCount returns the row count for a table from statistics or defaults.
+func (ce *CostEstimator) getTableRowCount(tableName string) int64 {
+	if ce.schemaInfo != nil {
+		if table, ok := ce.schemaInfo.GetTable(tableName); ok {
+			if stats := table.GetTableStats(); stats != nil && stats.RowCount > 0 {
+				return stats.RowCount
+			}
+		}
+	}
+	return ce.defaultTableRows
+}
+
+// EstimateTableScan estimates the cost of a full table scan.
+func (ce *CostEstimator) EstimateTableScan(tableName string, hasWhere bool) (rows int64, cost float64) {
+	// Get actual or estimated row count
+	totalRows := ce.getTableRowCount(tableName)
+	rows = totalRows
+
+	// Base cost is proportional to number of rows
+	// Full table scan = 1.0 cost per row
+	cost = float64(totalRows)
+
+	// WHERE clause reduces estimated rows but still scans all
+	if hasWhere {
+		rows = totalRows / 10 // Assume WHERE filters 90% of rows
+		// Cost remains the same (still need to scan all rows)
+	}
+
+	return rows, cost
+}
+
+// EstimateIndexScan estimates the cost of an index scan.
+func (ce *CostEstimator) EstimateIndexScan(indexName string, isUnique bool, isCovering bool, hasEquality bool) (rows int64, cost float64) {
+	// Unique index with equality: expect 1 row
+	if isUnique && hasEquality {
+		rows = 1
+		cost = 10.0 // Log(N) probes = ~10 for 1M rows
+		return
+	}
+
+	// Non-unique index with equality: expect ~1% of rows
+	if hasEquality {
+		rows = ce.defaultIndexRows / 100
+		cost = float64(rows) * 0.5 // Index scan is cheaper than table scan
+	} else {
+		// Range scan: expect ~10% of rows
+		rows = ce.defaultIndexRows / 10
+		cost = float64(rows) * 0.7
+	}
+
+	// Covering index is cheaper (no table lookup needed)
+	if isCovering {
+		cost = cost * 0.8
+	}
+
+	return rows, cost
+}
+
+// EstimateJoinCost estimates the cost of joining two tables.
+func (ce *CostEstimator) EstimateJoinCost(leftRows, rightRows int64, joinType parser.JoinType, hasIndexOnRight bool) (rows int64, cost float64) {
+	// Estimate result rows based on join type
+	switch joinType {
+	case parser.JoinCross:
+		// Cartesian product
+		rows = leftRows * rightRows
+	case parser.JoinInner:
+		// Assume 10% selectivity for join condition
+		rows = (leftRows * rightRows) / 10
+	case parser.JoinLeft, parser.JoinRight:
+		// At least as many as the outer table
+		rows = leftRows
+		if joinType == parser.JoinRight {
+			rows = rightRows
+		}
+	case parser.JoinFull:
+		// Sum of both tables (worst case)
+		rows = leftRows + rightRows
+	default:
+		rows = leftRows
+	}
+
+	// Cost calculation
+	if hasIndexOnRight {
+		// Nested loop with index: O(N * log M)
+		cost = float64(leftRows) * (10.0 + float64(rightRows)*0.01)
+	} else {
+		// Nested loop without index: O(N * M)
+		cost = float64(leftRows) * float64(rightRows)
+	}
+
+	return rows, cost
+}
+
+// EstimateAggregateCost estimates the cost of aggregation (GROUP BY, DISTINCT).
+func (ce *CostEstimator) EstimateAggregateCost(inputRows int64, numGroups int64) (rows int64, cost float64) {
+	if numGroups == 0 {
+		// Estimate number of groups as sqrt(input rows)
+		numGroups = int64(1000) // Conservative estimate
+		if inputRows > 10000 {
+			numGroups = inputRows / 100
+		}
+	}
+
+	rows = numGroups
+	// Aggregation requires sorting or hashing: O(N log N)
+	cost = float64(inputRows) * 1.2
+
+	return rows, cost
+}
+
+// EstimateSortCost estimates the cost of sorting (ORDER BY).
+func (ce *CostEstimator) EstimateSortCost(inputRows int64) (rows int64, cost float64) {
+	rows = inputRows
+	// Sorting cost: O(N log N)
+	if inputRows > 0 {
+		cost = float64(inputRows) * 1.5
+	}
+	return rows, cost
 }

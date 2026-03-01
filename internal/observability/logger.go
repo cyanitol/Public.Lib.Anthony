@@ -3,332 +3,287 @@
 package observability
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"sync"
 	"time"
 )
 
-// LogLevel represents the severity level of a log message.
-type LogLevel int
+// Level represents the severity level of a log entry.
+type Level int
 
 const (
-	// LevelTrace is the most verbose level, for very detailed diagnostic information.
-	LevelTrace LogLevel = iota
-	// LevelDebug is for debugging information useful during development.
-	LevelDebug
-	// LevelInfo is for informational messages about normal operation.
-	LevelInfo
-	// LevelWarn is for warning messages about potentially problematic situations.
-	LevelWarn
-	// LevelError is for error messages about failures that may be recoverable.
-	LevelError
-	// LevelFatal is for critical errors that require immediate attention.
-	LevelFatal
-	// LevelNone disables all logging.
-	LevelNone
+	// TraceLevel is the most verbose logging level, for very detailed debugging.
+	TraceLevel Level = iota
+	// DebugLevel is for development and debugging information.
+	DebugLevel
+	// InfoLevel is for operational information.
+	InfoLevel
+	// WarnLevel is for important issues that should be noted.
+	WarnLevel
+	// ErrorLevel is for errors that should always be logged.
+	ErrorLevel
 )
 
-// String returns the string representation of a log level.
-func (l LogLevel) String() string {
+// String returns the string representation of the log level.
+func (l Level) String() string {
 	switch l {
-	case LevelTrace:
+	case TraceLevel:
 		return "TRACE"
-	case LevelDebug:
+	case DebugLevel:
 		return "DEBUG"
-	case LevelInfo:
+	case InfoLevel:
 		return "INFO"
-	case LevelWarn:
+	case WarnLevel:
 		return "WARN"
-	case LevelError:
+	case ErrorLevel:
 		return "ERROR"
-	case LevelFatal:
-		return "FATAL"
-	case LevelNone:
-		return "NONE"
 	default:
 		return "UNKNOWN"
 	}
 }
 
-// Logger provides structured logging with multiple severity levels.
-// It is safe for concurrent use by multiple goroutines.
-type Logger struct {
-	mu       sync.Mutex
-	output   io.Writer
-	level    LogLevel
-	prefix   string
-	flags    int
-	enabled  bool
-	fileMode bool // true if logging to a file
+// Fields represents structured logging fields as key-value pairs.
+type Fields map[string]interface{}
+
+// Logger is the interface for structured logging with multiple severity levels.
+type Logger interface {
+	// Error logs an error-level message with optional structured fields.
+	Error(msg string, fields ...Fields)
+	// Warn logs a warning-level message with optional structured fields.
+	Warn(msg string, fields ...Fields)
+	// Info logs an info-level message with optional structured fields.
+	Info(msg string, fields ...Fields)
+	// Debug logs a debug-level message with optional structured fields.
+	Debug(msg string, fields ...Fields)
+	// Trace logs a trace-level message with optional structured fields.
+	Trace(msg string, fields ...Fields)
+
+	// SetLevel sets the minimum log level threshold.
+	SetLevel(level Level)
+	// GetLevel returns the current log level threshold.
+	GetLevel() Level
+	// SetOutput sets the output writer for log messages.
+	SetOutput(w io.Writer)
+	// SetFormat sets the output format (text or json).
+	SetFormat(format OutputFormat)
 }
 
-// LogEntry represents a single log entry with structured fields.
-type LogEntry struct {
-	Timestamp time.Time
-	Level     LogLevel
-	Message   string
-	Fields    map[string]interface{}
+// OutputFormat specifies how log entries should be formatted.
+type OutputFormat int
+
+const (
+	// TextFormat outputs human-readable text logs.
+	TextFormat OutputFormat = iota
+	// JSONFormat outputs structured JSON logs.
+	JSONFormat
+)
+
+// defaultLogger is the default implementation of the Logger interface.
+type defaultLogger struct {
+	mu     sync.Mutex
+	level  Level
+	output io.Writer
+	format OutputFormat
 }
 
-// NewLogger creates a new logger with the specified output and level.
-// By default, it writes to stderr with LevelInfo.
-func NewLogger(output io.Writer, level LogLevel) *Logger {
+// NewLogger creates a new Logger instance with the specified configuration.
+func NewLogger(level Level, output io.Writer, format OutputFormat) Logger {
 	if output == nil {
 		output = os.Stderr
 	}
-
-	return &Logger{
-		output:  output,
-		level:   level,
-		flags:   log.LstdFlags | log.Lmicroseconds,
-		enabled: true,
+	return &defaultLogger{
+		level:  level,
+		output: output,
+		format: format,
 	}
 }
 
-// NewFileLogger creates a logger that writes to the specified file.
-func NewFileLogger(filename string, level LogLevel) (*Logger, error) {
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open log file: %w", err)
-	}
-
-	logger := NewLogger(file, level)
-	logger.fileMode = true
-	return logger, nil
+// Error logs an error-level message.
+func (l *defaultLogger) Error(msg string, fields ...Fields) {
+	l.log(ErrorLevel, msg, fields...)
 }
 
-// DefaultLogger returns the default logger instance (logs to stderr at Info level).
-var defaultLogger = NewLogger(os.Stderr, LevelInfo)
-
-// SetDefaultLogger sets the default logger instance.
-func SetDefaultLogger(logger *Logger) {
-	defaultLogger = logger
+// Warn logs a warning-level message.
+func (l *defaultLogger) Warn(msg string, fields ...Fields) {
+	l.log(WarnLevel, msg, fields...)
 }
 
-// GetDefaultLogger returns the default logger instance.
-func GetDefaultLogger() *Logger {
-	return defaultLogger
+// Info logs an info-level message.
+func (l *defaultLogger) Info(msg string, fields ...Fields) {
+	l.log(InfoLevel, msg, fields...)
 }
 
-// SetLevel sets the minimum log level. Messages below this level are ignored.
-func (l *Logger) SetLevel(level LogLevel) {
+// Debug logs a debug-level message.
+func (l *defaultLogger) Debug(msg string, fields ...Fields) {
+	l.log(DebugLevel, msg, fields...)
+}
+
+// Trace logs a trace-level message.
+func (l *defaultLogger) Trace(msg string, fields ...Fields) {
+	l.log(TraceLevel, msg, fields...)
+}
+
+// SetLevel sets the minimum log level threshold.
+func (l *defaultLogger) SetLevel(level Level) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.level = level
 }
 
-// GetLevel returns the current log level.
-func (l *Logger) GetLevel() LogLevel {
+// GetLevel returns the current log level threshold.
+func (l *defaultLogger) GetLevel() Level {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.level
 }
 
-// SetOutput sets the output destination for the logger.
-func (l *Logger) SetOutput(output io.Writer) {
+// SetOutput sets the output writer for log messages.
+func (l *defaultLogger) SetOutput(w io.Writer) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.output = output
+	if w == nil {
+		w = os.Stderr
+	}
+	l.output = w
 }
 
-// SetPrefix sets the prefix for all log messages.
-func (l *Logger) SetPrefix(prefix string) {
+// SetFormat sets the output format.
+func (l *defaultLogger) SetFormat(format OutputFormat) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.prefix = prefix
+	l.format = format
 }
 
-// Enable enables logging.
-func (l *Logger) Enable() {
+// log is the internal logging function that handles level checking and formatting.
+func (l *defaultLogger) log(level Level, msg string, fields ...Fields) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.enabled = true
-}
 
-// Disable disables logging.
-func (l *Logger) Disable() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.enabled = false
-}
-
-// IsEnabled returns true if logging is enabled.
-func (l *Logger) IsEnabled() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.enabled
-}
-
-// shouldLog returns true if a message at the given level should be logged.
-func (l *Logger) shouldLog(level LogLevel) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.enabled && level >= l.level
-}
-
-// log writes a log message at the specified level.
-func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
-	if !l.shouldLog(level) {
+	// Check if this message should be logged based on level threshold
+	if level < l.level {
 		return
 	}
 
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	timestamp := time.Now().Format("2006/01/02 15:04:05.000000")
-	message := fmt.Sprintf(format, args...)
-
-	var output string
-	if l.prefix != "" {
-		output = fmt.Sprintf("%s [%s] %s: %s\n", timestamp, level, l.prefix, message)
-	} else {
-		output = fmt.Sprintf("%s [%s] %s\n", timestamp, level, message)
+	// Merge all fields into one map
+	mergedFields := make(Fields)
+	for _, f := range fields {
+		for k, v := range f {
+			mergedFields[k] = v
+		}
 	}
 
-	fmt.Fprint(l.output, output)
+	var output string
+	switch l.format {
+	case JSONFormat:
+		output = l.formatJSON(level, msg, mergedFields)
+	default:
+		output = l.formatText(level, msg, mergedFields)
+	}
+
+	fmt.Fprintln(l.output, output)
 }
 
-// logWithFields writes a log message with structured fields.
-func (l *Logger) logWithFields(level LogLevel, message string, fields map[string]interface{}) {
-	if !l.shouldLog(level) {
-		return
-	}
+// formatText formats a log entry as human-readable text.
+func (l *defaultLogger) formatText(level Level, msg string, fields Fields) string {
+	timestamp := time.Now().Format("2006-01-02T15:04:05.000Z07:00")
+	result := fmt.Sprintf("[%s] %s: %s", timestamp, level.String(), msg)
 
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	timestamp := time.Now().Format("2006/01/02 15:04:05.000000")
-
-	var output string
-	if l.prefix != "" {
-		output = fmt.Sprintf("%s [%s] %s: %s", timestamp, level, l.prefix, message)
-	} else {
-		output = fmt.Sprintf("%s [%s] %s", timestamp, level, message)
-	}
-
-	// Add fields
 	if len(fields) > 0 {
-		output += " |"
-		for key, value := range fields {
-			output += fmt.Sprintf(" %s=%v", key, value)
+		result += " |"
+		for k, v := range fields {
+			result += fmt.Sprintf(" %s=%v", k, v)
 		}
 	}
-	output += "\n"
 
-	fmt.Fprint(l.output, output)
+	return result
 }
 
-// Trace logs a message at TRACE level (most verbose).
-func (l *Logger) Trace(format string, args ...interface{}) {
-	l.log(LevelTrace, format, args...)
-}
-
-// TraceFields logs a message with fields at TRACE level.
-func (l *Logger) TraceFields(message string, fields map[string]interface{}) {
-	l.logWithFields(LevelTrace, message, fields)
-}
-
-// Debug logs a message at DEBUG level.
-func (l *Logger) Debug(format string, args ...interface{}) {
-	l.log(LevelDebug, format, args...)
-}
-
-// DebugFields logs a message with fields at DEBUG level.
-func (l *Logger) DebugFields(message string, fields map[string]interface{}) {
-	l.logWithFields(LevelDebug, message, fields)
-}
-
-// Info logs a message at INFO level.
-func (l *Logger) Info(format string, args ...interface{}) {
-	l.log(LevelInfo, format, args...)
-}
-
-// InfoFields logs a message with fields at INFO level.
-func (l *Logger) InfoFields(message string, fields map[string]interface{}) {
-	l.logWithFields(LevelInfo, message, fields)
-}
-
-// Warn logs a message at WARN level.
-func (l *Logger) Warn(format string, args ...interface{}) {
-	l.log(LevelWarn, format, args...)
-}
-
-// WarnFields logs a message with fields at WARN level.
-func (l *Logger) WarnFields(message string, fields map[string]interface{}) {
-	l.logWithFields(LevelWarn, message, fields)
-}
-
-// Error logs a message at ERROR level.
-func (l *Logger) Error(format string, args ...interface{}) {
-	l.log(LevelError, format, args...)
-}
-
-// ErrorFields logs a message with fields at ERROR level.
-func (l *Logger) ErrorFields(message string, fields map[string]interface{}) {
-	l.logWithFields(LevelError, message, fields)
-}
-
-// Fatal logs a message at FATAL level and exits the program.
-func (l *Logger) Fatal(format string, args ...interface{}) {
-	l.log(LevelFatal, format, args...)
-	os.Exit(1)
-}
-
-// FatalFields logs a message with fields at FATAL level and exits the program.
-func (l *Logger) FatalFields(message string, fields map[string]interface{}) {
-	l.logWithFields(LevelFatal, message, fields)
-	os.Exit(1)
-}
-
-// Close closes the logger's output if it's a file.
-func (l *Logger) Close() error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.fileMode {
-		if closer, ok := l.output.(io.Closer); ok {
-			return closer.Close()
-		}
+// formatJSON formats a log entry as JSON.
+func (l *defaultLogger) formatJSON(level Level, msg string, fields Fields) string {
+	entry := map[string]interface{}{
+		"timestamp": time.Now().Format(time.RFC3339Nano),
+		"level":     level.String(),
+		"message":   msg,
 	}
-	return nil
+
+	// Add all structured fields to the entry
+	for k, v := range fields {
+		entry[k] = v
+	}
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		// Fallback to text format if JSON marshaling fails
+		return l.formatText(level, msg, fields)
+	}
+
+	return string(data)
 }
 
-// Package-level convenience functions that use the default logger
+// Global logger instance
+var (
+	globalLogger     Logger
+	globalLoggerOnce sync.Once
+)
 
-// SetLevel sets the log level for the default logger.
-func SetLevel(level LogLevel) {
-	defaultLogger.SetLevel(level)
+// initGlobalLogger initializes the global logger with default settings.
+func initGlobalLogger() {
+	globalLogger = NewLogger(InfoLevel, os.Stderr, TextFormat)
 }
 
-// Trace logs a trace message using the default logger.
-func Trace(format string, args ...interface{}) {
-	defaultLogger.Trace(format, args...)
+// GetLogger returns the global logger instance.
+func GetLogger() Logger {
+	globalLoggerOnce.Do(initGlobalLogger)
+	return globalLogger
 }
 
-// Debug logs a debug message using the default logger.
-func Debug(format string, args ...interface{}) {
-	defaultLogger.Debug(format, args...)
+// SetLogger sets the global logger instance.
+func SetLogger(logger Logger) {
+	globalLoggerOnce.Do(func() {}) // Ensure initialization happens
+	globalLogger = logger
 }
 
-// Info logs an info message using the default logger.
-func Info(format string, args ...interface{}) {
-	defaultLogger.Info(format, args...)
+// Convenience functions that use the global logger
+
+// Error logs an error-level message using the global logger.
+func Error(msg string, fields ...Fields) {
+	GetLogger().Error(msg, fields...)
 }
 
-// Warn logs a warning message using the default logger.
-func Warn(format string, args ...interface{}) {
-	defaultLogger.Warn(format, args...)
+// Warn logs a warning-level message using the global logger.
+func Warn(msg string, fields ...Fields) {
+	GetLogger().Warn(msg, fields...)
 }
 
-// Error logs an error message using the default logger.
-func Error(format string, args ...interface{}) {
-	defaultLogger.Error(format, args...)
+// Info logs an info-level message using the global logger.
+func Info(msg string, fields ...Fields) {
+	GetLogger().Info(msg, fields...)
 }
 
-// Fatal logs a fatal message using the default logger and exits.
-func Fatal(format string, args ...interface{}) {
-	defaultLogger.Fatal(format, args...)
+// Debug logs a debug-level message using the global logger.
+func Debug(msg string, fields ...Fields) {
+	GetLogger().Debug(msg, fields...)
+}
+
+// Trace logs a trace-level message using the global logger.
+func Trace(msg string, fields ...Fields) {
+	GetLogger().Trace(msg, fields...)
+}
+
+// SetLevel sets the log level for the global logger.
+func SetLevel(level Level) {
+	GetLogger().SetLevel(level)
+}
+
+// SetOutput sets the output writer for the global logger.
+func SetOutput(w io.Writer) {
+	GetLogger().SetOutput(w)
+}
+
+// SetFormat sets the output format for the global logger.
+func SetFormat(format OutputFormat) {
+	GetLogger().SetFormat(format)
 }

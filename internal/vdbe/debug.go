@@ -3,6 +3,8 @@ package vdbe
 import (
 	"fmt"
 	"strings"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/observability"
 )
 
 // DebugMode controls VDBE debugging features.
@@ -25,13 +27,16 @@ const (
 
 // DebugContext holds the debugging state for a VDBE instance.
 type DebugContext struct {
-	Mode            DebugMode     // Debug mode flags
-	TraceCallback   TraceCallback // Custom trace callback
-	BreakPoints     map[int]bool  // Map of PC addresses to break on
-	StepMode        bool          // Single-step mode
-	InstructionLog  []string      // Log of executed instructions
-	MaxLogSize      int           // Maximum log size (0 = unlimited)
-	RegisterWatches map[int]bool  // Map of register indices to watch
+	Mode              DebugMode              // Debug mode flags
+	TraceCallback     TraceCallback          // Custom trace callback
+	BreakPoints       map[int]bool           // Map of PC addresses to break on
+	StepMode          bool                   // Single-step mode
+	InstructionLog    []string               // Log of executed instructions
+	MaxLogSize        int                    // Maximum log size (0 = unlimited)
+	RegisterWatches   map[int]bool           // Map of register indices to watch
+	Logger            observability.Logger   // Observability logger for debug output
+	LogLevel          observability.Level    // Log level for debug messages
+	RegisterSnapshots map[int]map[int]string // PC -> Register -> Value snapshots (before execution)
 }
 
 // TraceCallback is called for each instruction execution when tracing is enabled.
@@ -42,11 +47,14 @@ type TraceCallback func(v *VDBE, pc int, instr *Instruction) bool
 // NewDebugContext creates a new debug context with the specified mode.
 func NewDebugContext(mode DebugMode) *DebugContext {
 	return &DebugContext{
-		Mode:            mode,
-		BreakPoints:     make(map[int]bool),
-		InstructionLog:  make([]string, 0),
-		MaxLogSize:      1000, // Default max log size
-		RegisterWatches: make(map[int]bool),
+		Mode:              mode,
+		BreakPoints:       make(map[int]bool),
+		InstructionLog:    make([]string, 0),
+		MaxLogSize:        1000, // Default max log size
+		RegisterWatches:   make(map[int]bool),
+		Logger:            nil, // Will use default logger if nil
+		LogLevel:          observability.DebugLevel,
+		RegisterSnapshots: make(map[int]map[int]string),
 	}
 }
 
@@ -113,6 +121,23 @@ func (v *VDBE) SetStepMode(enabled bool) {
 	v.Debug.StepMode = enabled
 }
 
+// SetDebugLogger sets the logger for debug output.
+// If logger is nil, the default observability logger will be used.
+func (v *VDBE) SetDebugLogger(logger observability.Logger) {
+	if v.Debug == nil {
+		v.Debug = NewDebugContext(DebugOff)
+	}
+	v.Debug.Logger = logger
+}
+
+// SetDebugLogLevel sets the log level for debug messages.
+func (v *VDBE) SetDebugLogLevel(level observability.Level) {
+	if v.Debug == nil {
+		v.Debug = NewDebugContext(DebugOff)
+	}
+	v.Debug.LogLevel = level
+}
+
 // WatchRegister adds a register to the watch list.
 // Changes to watched registers will be logged in debug mode.
 func (v *VDBE) WatchRegister(regIndex int) {
@@ -131,26 +156,35 @@ func (v *VDBE) UnwatchRegister(regIndex int) {
 
 // TraceInstruction logs the execution of an instruction.
 // This is called internally during VDBE execution when tracing is enabled.
+// It captures register/cursor state before execution and logs the instruction.
 func (v *VDBE) TraceInstruction(pc int, instr *Instruction) bool {
 	if v.Debug == nil {
 		return true
 	}
 
+	// Capture register state before execution if register debugging is enabled
+	if v.IsDebugEnabled(DebugRegisters) {
+		v.captureRegisterSnapshot(pc)
+	}
+
 	// Check for breakpoint
 	if v.Debug.BreakPoints[pc] {
 		v.logInstruction(pc, instr, "BREAKPOINT")
+		v.logToObservability(observability.WarnLevel, "BREAKPOINT at PC=%d: %s", pc, formatInstruction(pc, instr))
 		return false // Break execution
 	}
 
 	// Check step mode
 	if v.Debug.StepMode {
 		v.logInstruction(pc, instr, "STEP")
+		v.logToObservability(observability.DebugLevel, "STEP at PC=%d: %s", pc, formatInstruction(pc, instr))
 		return false // Break after each instruction
 	}
 
 	// Log instruction if tracing enabled
 	if v.IsDebugEnabled(DebugTrace) {
 		v.logInstruction(pc, instr, "")
+		v.logInstructionToObservability(pc, instr)
 	}
 
 	// Call custom trace callback if set
@@ -159,6 +193,24 @@ func (v *VDBE) TraceInstruction(pc int, instr *Instruction) bool {
 	}
 
 	return true // Continue execution
+}
+
+// TraceInstructionAfter logs register/cursor state changes after instruction execution.
+// This should be called after an instruction has been executed.
+func (v *VDBE) TraceInstructionAfter(pc int, instr *Instruction) {
+	if v.Debug == nil {
+		return
+	}
+
+	// Log affected registers if debugging enabled
+	if v.IsDebugEnabled(DebugRegisters) {
+		v.logAffectedRegisters(pc, instr)
+	}
+
+	// Log cursor state if debugging enabled
+	if v.IsDebugEnabled(DebugCursors) {
+		v.logAffectedCursors(pc, instr)
+	}
 }
 
 // logInstruction adds an instruction to the debug log.
@@ -407,5 +459,215 @@ func (v *VDBE) DumpState() string {
 	return sb.String()
 }
 
-// Debug field to VDBE struct (this should be added to vdbe.go VDBE struct)
-// Debug *DebugContext // Debug context for tracing and inspection
+// captureRegisterSnapshot captures the current state of all registers before execution.
+func (v *VDBE) captureRegisterSnapshot(pc int) {
+	if v.Debug == nil {
+		return
+	}
+
+	snapshot := make(map[int]string)
+	for i, mem := range v.Mem {
+		snapshot[i] = mem.String()
+	}
+	v.Debug.RegisterSnapshots[pc] = snapshot
+}
+
+// logAffectedRegisters logs changes to registers caused by instruction execution.
+func (v *VDBE) logAffectedRegisters(pc int, instr *Instruction) {
+	if v.Debug == nil {
+		return
+	}
+
+	// Get the before snapshot
+	snapshot, hasSnapshot := v.Debug.RegisterSnapshots[pc]
+	if !hasSnapshot {
+		return
+	}
+
+	// Determine which registers might be affected based on opcode
+	affectedRegs := v.getAffectedRegisters(instr)
+
+	// Log changes
+	for _, regIdx := range affectedRegs {
+		if regIdx < 0 || regIdx >= len(v.Mem) {
+			continue
+		}
+
+		oldVal := snapshot[regIdx]
+		newVal := v.Mem[regIdx].String()
+
+		if oldVal != newVal {
+			msg := fmt.Sprintf("R%d: %s -> %s", regIdx, oldVal, newVal)
+			v.logToObservability(v.Debug.LogLevel, "  [REG CHANGE] %s", msg)
+		}
+	}
+
+	// Clean up old snapshots to prevent memory leaks
+	if len(v.Debug.RegisterSnapshots) > 100 {
+		// Keep only the last 100 snapshots
+		for oldPC := range v.Debug.RegisterSnapshots {
+			if oldPC < pc-100 {
+				delete(v.Debug.RegisterSnapshots, oldPC)
+			}
+		}
+	}
+}
+
+// logAffectedCursors logs cursor state changes.
+func (v *VDBE) logAffectedCursors(pc int, instr *Instruction) {
+	if v.Debug == nil {
+		return
+	}
+
+	// Determine which cursors might be affected based on opcode
+	affectedCursors := v.getAffectedCursors(instr)
+
+	for _, curIdx := range affectedCursors {
+		if curIdx < 0 || curIdx >= len(v.Cursors) {
+			continue
+		}
+
+		cursor := v.Cursors[curIdx]
+		if cursor == nil {
+			v.logToObservability(v.Debug.LogLevel, "  [CURSOR] C%d: <CLOSED>", curIdx)
+			continue
+		}
+
+		curType := "UNKNOWN"
+		switch cursor.CurType {
+		case CursorBTree:
+			curType = "BTREE"
+		case CursorSorter:
+			curType = "SORTER"
+		case CursorVTab:
+			curType = "VTAB"
+		case CursorPseudo:
+			curType = "PSEUDO"
+		}
+
+		flags := ""
+		if cursor.EOF {
+			flags += " EOF"
+		}
+		if cursor.NullRow {
+			flags += " NULL"
+		}
+
+		v.logToObservability(v.Debug.LogLevel, "  [CURSOR] C%d: Type=%s%s", curIdx, curType, flags)
+	}
+}
+
+// getAffectedRegisters returns the list of register indices potentially affected by an instruction.
+func (v *VDBE) getAffectedRegisters(instr *Instruction) []int {
+	affected := make([]int, 0, 3)
+
+	// Most instructions affect P1, P2, or P3 as register destinations
+	switch instr.Opcode {
+	case OpInteger, OpInt64, OpReal, OpString, OpString8, OpBlob, OpNull:
+		// These write to P2
+		affected = append(affected, instr.P2)
+	case OpCopy, OpSCopy, OpMove:
+		// These write to P2 and read from P1
+		affected = append(affected, instr.P1, instr.P2)
+	case OpColumn, OpRowData:
+		// These write to P3
+		affected = append(affected, instr.P3)
+	case OpMakeRecord:
+		// Writes to P3, reads from P1..P1+P2
+		affected = append(affected, instr.P3)
+		for i := instr.P1; i < instr.P1+instr.P2; i++ {
+			affected = append(affected, i)
+		}
+	case OpResultRow:
+		// Reads from P1..P1+P2
+		for i := instr.P1; i < instr.P1+instr.P2; i++ {
+			affected = append(affected, i)
+		}
+	case OpAdd, OpSubtract, OpMultiply, OpDivide, OpRemainder:
+		// Binary operations: P1 op P2 -> P3
+		affected = append(affected, instr.P1, instr.P2, instr.P3)
+	case OpConcat:
+		// P1..P1+P2 -> P3
+		affected = append(affected, instr.P3)
+		for i := instr.P1; i < instr.P1+instr.P2; i++ {
+			affected = append(affected, i)
+		}
+	default:
+		// For unknown opcodes, check if any operand looks like a register index
+		if instr.P1 >= 0 && instr.P1 < len(v.Mem) {
+			affected = append(affected, instr.P1)
+		}
+		if instr.P2 >= 0 && instr.P2 < len(v.Mem) {
+			affected = append(affected, instr.P2)
+		}
+		if instr.P3 >= 0 && instr.P3 < len(v.Mem) {
+			affected = append(affected, instr.P3)
+		}
+	}
+
+	return affected
+}
+
+// getAffectedCursors returns the list of cursor indices potentially affected by an instruction.
+func (v *VDBE) getAffectedCursors(instr *Instruction) []int {
+	affected := make([]int, 0, 1)
+
+	switch instr.Opcode {
+	case OpOpenRead, OpOpenWrite, OpOpenEphemeral, OpOpenPseudo:
+		// Opens cursor at P1
+		affected = append(affected, instr.P1)
+	case OpClose:
+		// Closes cursor at P1
+		affected = append(affected, instr.P1)
+	case OpRewind, OpLast, OpNext, OpPrev, OpSeek, OpSeekGE, OpSeekGT, OpSeekLE, OpSeekLT, OpSeekRowid:
+		// Cursor operations on P1
+		affected = append(affected, instr.P1)
+	case OpColumn, OpRowData, OpRowid:
+		// Read from cursor P1
+		affected = append(affected, instr.P1)
+	case OpInsert, OpDelete, OpIdxInsert, OpIdxDelete:
+		// Write operations on cursor P1
+		affected = append(affected, instr.P1)
+	}
+
+	return affected
+}
+
+// logInstructionToObservability logs instruction execution to the observability logger.
+func (v *VDBE) logInstructionToObservability(pc int, instr *Instruction) {
+	if v.Debug == nil {
+		return
+	}
+
+	instrStr := formatInstruction(pc, instr)
+
+	// Use custom logger if set, otherwise skip (default global logger not exposed)
+	if v.Debug.Logger != nil {
+		v.Debug.Logger.Debug(instrStr, observability.Fields{"pc": pc, "opcode": instr.Opcode.String()})
+	}
+}
+
+// logToObservability logs a message to the observability logger.
+func (v *VDBE) logToObservability(level observability.Level, format string, args ...interface{}) {
+	if v.Debug == nil {
+		return
+	}
+
+	msg := fmt.Sprintf(format, args...)
+
+	// Use custom logger if set
+	if v.Debug.Logger != nil {
+		switch level {
+		case observability.TraceLevel:
+			v.Debug.Logger.Trace(msg, observability.Fields{})
+		case observability.DebugLevel:
+			v.Debug.Logger.Debug(msg, observability.Fields{})
+		case observability.InfoLevel:
+			v.Debug.Logger.Info(msg, observability.Fields{})
+		case observability.WarnLevel:
+			v.Debug.Logger.Warn(msg, observability.Fields{})
+		case observability.ErrorLevel:
+			v.Debug.Logger.Error(msg, observability.Fields{})
+		}
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/observability"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/types"
 )
 
@@ -31,6 +32,10 @@ func (v *VDBE) prepareForStep() error {
 	case StateReady:
 		v.PC = 0
 		v.State = StateRun
+		// Start statistics tracking if enabled
+		if v.Stats != nil && v.Stats.StartTime == 0 {
+			v.Stats.Start()
+		}
 	case StateRowReady:
 		v.ResultRow = nil
 		v.State = StateRun
@@ -43,17 +48,60 @@ func (v *VDBE) runUntilRowOrHalt() (bool, error) {
 	for {
 		if v.PC >= len(v.Program) {
 			v.State = StateHalt
+			// End statistics tracking if enabled
+			if v.Stats != nil && v.Stats.EndTime == 0 {
+				v.Stats.End()
+			}
 			return false, nil
 		}
 		instr := v.Program[v.PC]
+		currentPC := v.PC // Save PC before incrementing for debug logging
 		v.PC++
 		v.NumSteps++
+
+		// Track instruction execution if stats enabled
+		if v.Stats != nil {
+			v.Stats.RecordInstruction(instr.Opcode)
+		}
+
+		// Trace instruction before execution (if debug mode enabled)
+		if v.Debug != nil {
+			shouldContinue := v.TraceInstruction(currentPC, instr)
+			if !shouldContinue {
+				// Breakpoint or step mode - pause execution
+				v.PC = currentPC // Restore PC so next step re-executes this instruction
+				v.State = StateHalt
+				return false, nil
+			}
+		}
+
+		// Execute the instruction
 		if err := v.execInstruction(instr); err != nil {
 			v.SetError(err.Error())
 			v.State = StateHalt
+			// End statistics tracking if enabled
+			if v.Stats != nil && v.Stats.EndTime == 0 {
+				v.Stats.End()
+			}
+
+			// Log error in debug mode
+			if v.Debug != nil && v.IsDebugEnabled(DebugStack) {
+				v.logToObservability(observability.ErrorLevel, "Error at PC=%d: %s", currentPC, err.Error())
+			}
+
 			return false, err
 		}
+
+		// Trace instruction after execution (log register/cursor changes)
+		if v.Debug != nil {
+			v.TraceInstructionAfter(currentPC, instr)
+		}
+
 		if v.State == StateHalt {
+			// End statistics tracking if enabled
+			if v.Stats != nil && v.Stats.EndTime == 0 {
+				v.Stats.End()
+			}
 			return false, nil
 		}
 		if v.State == StateRowReady {
@@ -692,6 +740,11 @@ func (v *VDBE) execNext(instr *Instruction) error {
 	// Successfully moved to next entry - jump to P2
 	cursor.EOF = false
 	v.PC = instr.P2
+
+	// Track row scanned
+	if v.Stats != nil {
+		v.Stats.RecordRowScanned()
+	}
 
 	return nil
 }
@@ -1522,6 +1575,11 @@ func (v *VDBE) execResultRow(instr *Instruction) error {
 		v.ResultRow[i].Copy(mem)
 	}
 
+	// Track row returned
+	if v.Stats != nil {
+		v.Stats.RowsRead++
+	}
+
 	// Set state to StateRowReady to pause execution and allow the driver to read this row
 	// The Run() loop will pause here, and the driver's Next() method can read ResultRow
 	// When Step() is called again, it will clear ResultRow and continue execution
@@ -1800,6 +1858,12 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 	if instr.P4.I != 1 {
 		v.NumChanges++
 	}
+
+	// Track row written
+	if v.Stats != nil {
+		v.Stats.RowsWritten++
+	}
+
 	return nil
 }
 
@@ -1883,6 +1947,12 @@ func (v *VDBE) execDelete(instr *Instruction) error {
 
 	// Update change counter
 	v.NumChanges++
+
+	// Track row written (deleted)
+	if v.Stats != nil {
+		v.Stats.RowsWritten++
+	}
+
 	return nil
 }
 
@@ -2414,7 +2484,13 @@ func (v *VDBE) execSorterOpen(instr *Instruction) error {
 		}
 	}
 
-	v.Sorters[sorterNum] = NewSorter(keyCols, desc, collations, numCols)
+	// Get collation registry from VDBE context
+	var collRegistry interface{}
+	if v.Ctx != nil {
+		collRegistry = v.Ctx.CollationRegistry
+	}
+
+	v.Sorters[sorterNum] = NewSorterWithRegistry(keyCols, desc, collations, numCols, collRegistry)
 	return nil
 }
 
@@ -2449,6 +2525,15 @@ func (v *VDBE) execSorterInsert(instr *Instruction) error {
 	}
 
 	v.Sorters[sorterNum].Insert(row)
+
+	// Track sorter memory usage (rough estimate)
+	if v.Stats != nil {
+		sorter := v.Sorters[sorterNum]
+		// Estimate: each row is roughly numCols * 64 bytes
+		memBytes := int64(len(sorter.Rows) * numCols * 64)
+		v.Stats.UpdateSorterMemory(memBytes)
+	}
+
 	return nil
 }
 

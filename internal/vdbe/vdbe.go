@@ -2,6 +2,7 @@ package vdbe
 
 import (
 	"fmt"
+	"time"
 )
 
 // VdbeState represents the execution state of the VDBE.
@@ -87,9 +88,10 @@ type Cursor struct {
 
 // VDBEContext holds runtime context for VDBE execution
 type VDBEContext struct {
-	Btree  interface{} // *btree.Btree (stored as interface to avoid import cycle)
-	Pager  interface{} // *pager.Pager (stored as interface to avoid import cycle)
-	Schema interface{} // Schema metadata (for future use)
+	Btree             interface{} // *btree.Btree (stored as interface to avoid import cycle)
+	Pager             interface{} // *pager.Pager (stored as interface to avoid import cycle)
+	Schema            interface{} // Schema metadata (for future use)
+	CollationRegistry interface{} // *collation.CollationRegistry (stored as interface to avoid import cycle)
 }
 
 // VDBE represents the Virtual Database Engine - a bytecode virtual machine.
@@ -163,13 +165,14 @@ type CoroutineInfo struct {
 
 // Sorter is an in-memory sorting structure for ORDER BY.
 type Sorter struct {
-	Rows       [][]*Mem // Collected rows
-	KeyCols    []int    // Indices of columns to sort by (relative to row start)
-	Desc       []bool   // True for descending sort for each key column
-	Collations []string // Collation name for each key column (empty string for default)
-	Current    int      // Current position during iteration
-	Sorted     bool     // True after Sort() has been called
-	NumCols    int      // Number of data columns per row
+	Rows              [][]*Mem    // Collected rows
+	KeyCols           []int       // Indices of columns to sort by (relative to row start)
+	Desc              []bool      // True for descending sort for each key column
+	Collations        []string    // Collation name for each key column (empty string for default)
+	Current           int         // Current position during iteration
+	Sorted            bool        // True after Sort() has been called
+	NumCols           int         // Number of data columns per row
+	CollationRegistry interface{} // *collation.CollationRegistry (for connection-specific collations)
 }
 
 // NewSorter creates a new Sorter with the given key columns and sort directions.
@@ -182,6 +185,20 @@ func NewSorter(keyCols []int, desc []bool, collations []string, numCols int) *So
 		Current:    -1,
 		Sorted:     false,
 		NumCols:    numCols,
+	}
+}
+
+// NewSorterWithRegistry creates a new Sorter with a custom collation registry.
+func NewSorterWithRegistry(keyCols []int, desc []bool, collations []string, numCols int, registry interface{}) *Sorter {
+	return &Sorter{
+		Rows:              make([][]*Mem, 0),
+		KeyCols:           keyCols,
+		Desc:              desc,
+		Collations:        collations,
+		Current:           -1,
+		Sorted:            false,
+		NumCols:           numCols,
+		CollationRegistry: registry,
 	}
 }
 
@@ -229,7 +246,7 @@ func (s *Sorter) compareRows(a, b []*Mem) int {
 		// Use collation if specified for this key column
 		var cmp int
 		if len(s.Collations) > i && s.Collations[i] != "" {
-			cmp = a[colIdx].CompareWithCollation(b[colIdx], s.Collations[i])
+			cmp = a[colIdx].CompareWithCollationRegistry(b[colIdx], s.Collations[i], s.CollationRegistry)
 		} else {
 			cmp = a[colIdx].Compare(b[colIdx])
 		}
@@ -288,6 +305,7 @@ func New() *VDBE {
 		SubPrograms:  make(map[int]*VDBE),
 		Coroutines:   make(map[int]*CoroutineInfo),
 		WindowStates: make(map[int]*WindowState),
+		Stats:        NewQueryStatistics(), // Enable statistics by default
 	}
 }
 
@@ -355,6 +373,14 @@ func (v *VDBE) AllocMemory(n int) error {
 		v.Mem = append(v.Mem, GetMem())
 	}
 	v.NumMem = n
+
+	// Update statistics if enabled
+	if v.Stats != nil {
+		v.Stats.AllocatedCells = n
+		// Estimate memory usage (each Mem cell is roughly 64 bytes)
+		v.Stats.UpdateMemoryUsage(int64(n * 64))
+	}
+
 	return nil
 }
 
@@ -451,6 +477,11 @@ func (v *VDBE) Reset() error {
 	v.ResultRow = nil
 	v.ErrorMsg = ""
 	v.NumSteps = 0
+
+	// Reset statistics if enabled
+	if v.Stats != nil {
+		v.Stats = NewQueryStatistics()
+	}
 
 	return nil
 }
@@ -639,11 +670,8 @@ func (s *QueryStatistics) End() {
 }
 
 // getCurrentTimeNanos returns current time in nanoseconds.
-// This is a helper to avoid importing time in tests.
 func getCurrentTimeNanos() int64 {
-	// In production, this would be time.Now().UnixNano()
-	// For testing, we can return 0 to avoid time dependencies
-	return 0
+	return time.Now().UnixNano()
 }
 
 // RecordInstruction records execution of an instruction.
@@ -734,4 +762,39 @@ func (v *VDBE) EnableStatistics() {
 // DisableStatistics disables statistics tracking.
 func (v *VDBE) DisableStatistics() {
 	v.Stats = nil
+}
+
+// String returns a formatted string representation of the statistics.
+func (s *QueryStatistics) String() string {
+	if s == nil {
+		return "Statistics: disabled"
+	}
+
+	var result string
+	result += fmt.Sprintf("Query Statistics:\n")
+	result += fmt.Sprintf("  Execution Time: %d ms (%d ns)\n", s.ExecutionMS, s.ExecutionNS)
+	result += fmt.Sprintf("  Instructions: %d\n", s.NumInstructions)
+	result += fmt.Sprintf("    - Jumps: %d\n", s.NumJumps)
+	result += fmt.Sprintf("    - Comparisons: %d\n", s.NumComparisons)
+	result += fmt.Sprintf("  Data Operations:\n")
+	result += fmt.Sprintf("    - Rows Read: %d\n", s.RowsRead)
+	result += fmt.Sprintf("    - Rows Written: %d\n", s.RowsWritten)
+	result += fmt.Sprintf("    - Rows Scanned: %d\n", s.RowsScanned)
+	result += fmt.Sprintf("  Cursor Operations:\n")
+	result += fmt.Sprintf("    - Seeks: %d\n", s.CursorSeeks)
+	result += fmt.Sprintf("    - Steps: %d\n", s.CursorSteps)
+	result += fmt.Sprintf("    - Index Lookups: %d\n", s.IndexLookups)
+	result += fmt.Sprintf("  I/O Operations:\n")
+	result += fmt.Sprintf("    - Page Reads: %d\n", s.PageReads)
+	result += fmt.Sprintf("    - Page Writes: %d\n", s.PageWrites)
+	result += fmt.Sprintf("    - Cache Hits: %d\n", s.CacheHits)
+	result += fmt.Sprintf("    - Cache Misses: %d\n", s.CacheMisses)
+	result += fmt.Sprintf("  Memory:\n")
+	result += fmt.Sprintf("    - Peak Memory: %d bytes\n", s.MemoryUsed)
+	result += fmt.Sprintf("    - Sorter Memory: %d bytes\n", s.SorterMemory)
+	result += fmt.Sprintf("    - Allocated Cells: %d\n", s.AllocatedCells)
+	result += fmt.Sprintf("  Query Type: %s\n", s.QueryType)
+	result += fmt.Sprintf("  Read-Only: %v\n", s.IsReadOnly)
+
+	return result
 }

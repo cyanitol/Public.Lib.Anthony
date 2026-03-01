@@ -167,9 +167,10 @@ func (s *Stmt) compile(args []driver.NamedValue) (*vdbe.VDBE, error) {
 		if cachedVdbe := s.conn.stmtCache.Get(s.query); cachedVdbe != nil {
 			// Set the VDBE context for this connection
 			cachedVdbe.Ctx = &vdbe.VDBEContext{
-				Btree:  s.conn.btree,
-				Pager:  s.conn.pager,
-				Schema: s.conn.schema,
+				Btree:             s.conn.btree,
+				Pager:             s.conn.pager,
+				Schema:            s.conn.schema,
+				CollationRegistry: s.conn.collRegistry,
 			}
 			return cachedVdbe, nil
 		}
@@ -203,9 +204,10 @@ func (s *Stmt) invalidateStmtCache() {
 func (s *Stmt) newVDBE() *vdbe.VDBE {
 	vm := vdbe.New()
 	vm.Ctx = &vdbe.VDBEContext{
-		Btree:  s.conn.btree,
-		Pager:  s.conn.pager,
-		Schema: s.conn.schema,
+		Btree:             s.conn.btree,
+		Pager:             s.conn.pager,
+		Schema:            s.conn.schema,
+		CollationRegistry: s.conn.collRegistry,
 	}
 	return vm
 }

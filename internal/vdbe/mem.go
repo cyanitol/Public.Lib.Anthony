@@ -504,6 +504,10 @@ func compareStrings(m, other *Mem) int {
 }
 
 func compareStringsWithCollation(m, other *Mem, collName string) int {
+	return compareStringsWithCollationRegistry(m, other, collName, nil)
+}
+
+func compareStringsWithCollationRegistry(m, other *Mem, collName string, registry interface{}) int {
 	s1, s2 := m.StrValue(), other.StrValue()
 
 	// Use specified collation, or default to BINARY
@@ -511,6 +515,16 @@ func compareStringsWithCollation(m, other *Mem, collName string) int {
 		collName = collation.DefaultCollation()
 	}
 
+	// Try connection-specific registry first (if provided)
+	if registry != nil {
+		if reg, ok := registry.(*collation.CollationRegistry); ok {
+			if coll, found := reg.Get(collName); found {
+				return coll.Func(s1, s2)
+			}
+		}
+	}
+
+	// Fall back to global registry
 	return collation.Compare(s1, s2, collName)
 }
 
@@ -573,6 +587,13 @@ func compareMixedNumericText(m, other *Mem, mIsNumeric, mIsText bool) (int, bool
 // 4. If both are text, compare using collation
 // 5. If one is text and one is blob, text < blob
 func (m *Mem) CompareWithCollation(other *Mem, collName string) int {
+	return m.CompareWithCollationRegistry(other, collName, nil)
+}
+
+// CompareWithCollationRegistry compares two memory cells using the specified collation,
+// with support for connection-specific collation registries.
+// The registry parameter allows using custom collations registered on a specific connection.
+func (m *Mem) CompareWithCollationRegistry(other *Mem, collName string, registry interface{}) int {
 	// Handle NULL comparisons
 	if result, handled := compareNulls(m, other); handled {
 		return result
@@ -596,7 +617,7 @@ func (m *Mem) CompareWithCollation(other *Mem, collName string) int {
 	}
 
 	// Both text or mixed text/blob: string comparison
-	return compareStringsWithCollation(m, other, collName)
+	return compareStringsWithCollationRegistry(m, other, collName, registry)
 }
 
 // CompareWithDirection compares two memory cells with a sort direction.

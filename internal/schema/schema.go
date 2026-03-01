@@ -57,6 +57,7 @@ type Table struct {
 	Strict       bool              // True for STRICT tables
 	Temp         bool              // True for temporary tables
 	Constraints  []TableConstraint // Table-level constraints
+	Stats        *TableStats       // Table statistics (optional, may be nil)
 }
 
 // Column represents a table column definition.
@@ -786,4 +787,39 @@ func (s *Schema) TriggerCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.Triggers)
+}
+
+// TableStats represents statistics for a table.
+// These statistics are used by the query planner to estimate costs.
+type TableStats struct {
+	// RowCount is the approximate number of rows in the table
+	RowCount int64
+
+	// AverageRowSize is the average size of a row in bytes
+	AverageRowSize int64
+
+	// LastUpdated is a timestamp when statistics were last updated
+	// (currently not used, reserved for future use)
+	LastUpdated int64
+}
+
+// IndexStats represents statistics for an index.
+type IndexStats struct {
+	// Uniqueness is the average number of rows per distinct key
+	// (1.0 for unique indexes, higher for non-unique)
+	Uniqueness float64
+
+	// Selectivity is the estimated fraction of rows matched by typical queries
+	// (0.01 = 1% of rows, useful for partial indexes)
+	Selectivity float64
+}
+
+// GetTableStats returns the statistics for a table, or nil if not available.
+func (t *Table) GetTableStats() *TableStats {
+	return t.Stats
+}
+
+// SetTableStats sets the statistics for a table.
+func (t *Table) SetTableStats(stats *TableStats) {
+	t.Stats = stats
 }
