@@ -909,6 +909,7 @@ Now that you understand the basics, explore more advanced features:
 ### Documentation
 
 - **[API Reference](API.md)** - Complete API documentation
+- **[Local SQLite Reference](sqlite/README.md)** - Detailed SQL syntax, functions, pragmas, and internals
 - **[Quick Start Guide](QUICKSTART.md)** - More examples and patterns
 - **[Architecture Overview](ARCHITECTURE.md)** - How Anthony works internally
 - **[Security Guide](SECURITY.md)** - Security best practices

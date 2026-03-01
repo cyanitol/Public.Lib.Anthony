@@ -1177,10 +1177,11 @@ WHERE min_x <= 100 AND max_x >= 50
 
 ## References
 
-- **SQLite Documentation**:
-  - [Virtual Tables](https://sqlite.org/vtab.html)
-  - [FTS5](https://sqlite.org/fts5.html)
-  - [R-Tree](https://sqlite.org/rtree.html)
+- **SQLite Documentation (local)**:
+  - [Virtual Table Specification (local)](sqlite/VIRTUAL_TABLES_SPEC.md) ([sqlite.org](https://sqlite.org/vtab.html))
+  - [CREATE VTAB Reference (local)](sqlite/CREATE_VTAB.md)
+  - [FTS5 (local)](sqlite/FTS5.md) ([sqlite.org](https://sqlite.org/fts5.html))
+  - [R-Tree (local)](sqlite/RTREE.md) ([sqlite.org](https://sqlite.org/rtree.html))
 
 - **Anthony Implementation**:
   - `internal/vtab/module.go` - Module and VirtualTable interfaces

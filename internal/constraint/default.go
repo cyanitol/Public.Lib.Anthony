@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
 // Package constraint provides constraint handling for SQLite databases.
 // It implements DEFAULT value constraints and other column/table constraints.
 package constraint

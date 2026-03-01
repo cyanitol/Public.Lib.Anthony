@@ -1,470 +1,541 @@
-package functions
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+package parser
 
 import (
-	"crypto/rand"
-	"encoding/binary"
-	"fmt"
-	"math"
+	"testing"
 )
 
-// RegisterMathFunctions registers all math functions.
-func RegisterMathFunctions(r *Registry) {
-	r.Register(NewScalarFunc("abs", 1, absFunc))
-	// Note: min/max are registered as aggregate functions in RegisterAggregateFunctions
-	// SQLite uses aggregate min/max by default; scalar versions would need different names
-	r.Register(NewScalarFunc("round", -1, roundFunc)) // 1 or 2 args
-	r.Register(NewScalarFunc("random", 0, randomFunc))
-	r.Register(NewScalarFunc("randomblob", 1, randomblobFunc))
+// TestComprehensiveParserCoverage tests edge cases for remaining low-coverage functions
+func TestComprehensiveParserCoverage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		sql     string
+		wantErr bool
+	}{
+		// parseUpdateClauses - 57.1%
+		{
+			name:    "UPDATE with all clauses",
+			sql:     "UPDATE users SET name = 'John' WHERE id = 1 ORDER BY name LIMIT 1",
+			wantErr: false,
+		},
+		{
+			name:    "UPDATE minimal",
+			sql:     "UPDATE users SET name = 'John'",
+			wantErr: false,
+		},
 
-	// Extended math functions
-	r.Register(NewScalarFunc("ceil", 1, ceilFunc))
-	r.Register(NewScalarFunc("ceiling", 1, ceilFunc))
-	r.Register(NewScalarFunc("floor", 1, floorFunc))
-	r.Register(NewScalarFunc("sqrt", 1, sqrtFunc))
-	r.Register(NewScalarFunc("power", 2, powerFunc))
-	r.Register(NewScalarFunc("pow", 2, powerFunc))
-	r.Register(NewScalarFunc("exp", 1, expFunc))
-	r.Register(NewScalarFunc("ln", 1, lnFunc))
-	r.Register(NewScalarFunc("log", 1, lnFunc)) // SQLite compatibility
-	r.Register(NewScalarFunc("log10", 1, log10Func))
-	r.Register(NewScalarFunc("log2", 1, log2Func))
+		// parseDeleteClauses - 60.0%
+		{
+			name:    "DELETE with all clauses",
+			sql:     "DELETE FROM users WHERE id = 1 ORDER BY name LIMIT 1",
+			wantErr: false,
+		},
+		{
+			name:    "DELETE minimal",
+			sql:     "DELETE FROM users",
+			wantErr: false,
+		},
 
-	// Trigonometric functions
-	r.Register(NewScalarFunc("sin", 1, sinFunc))
-	r.Register(NewScalarFunc("cos", 1, cosFunc))
-	r.Register(NewScalarFunc("tan", 1, tanFunc))
-	r.Register(NewScalarFunc("asin", 1, asinFunc))
-	r.Register(NewScalarFunc("acos", 1, acosFunc))
-	r.Register(NewScalarFunc("atan", 1, atanFunc))
-	r.Register(NewScalarFunc("atan2", 2, atan2Func))
+		// parseColumnConstraint - 61.5%
+		{
+			name:    "column with AUTOINCREMENT",
+			sql:     "CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT)",
+			wantErr: false,
+		},
+		{
+			name:    "column with multiple constraints",
+			sql:     "CREATE TABLE t (id INTEGER PRIMARY KEY NOT NULL UNIQUE)",
+			wantErr: false,
+		},
+		{
+			name:    "column with DEFAULT expression",
+			sql:     "CREATE TABLE t (created INTEGER DEFAULT (strftime('%s', 'now')))",
+			wantErr: false,
+		},
+		{
+			name:    "column with DEFAULT number",
+			sql:     "CREATE TABLE t (count INTEGER DEFAULT 0)",
+			wantErr: false,
+		},
 
-	// Hyperbolic functions
-	r.Register(NewScalarFunc("sinh", 1, sinhFunc))
-	r.Register(NewScalarFunc("cosh", 1, coshFunc))
-	r.Register(NewScalarFunc("tanh", 1, tanhFunc))
-	r.Register(NewScalarFunc("asinh", 1, asinhFunc))
-	r.Register(NewScalarFunc("acosh", 1, acoshFunc))
-	r.Register(NewScalarFunc("atanh", 1, atanhFunc))
+		// parseSubquery - 66.7%
+		{
+			name:    "subquery missing closing paren",
+			sql:     "SELECT * FROM (SELECT * FROM users",
+			wantErr: true,
+		},
+		{
+			name:    "subquery with alias",
+			sql:     "SELECT * FROM (SELECT * FROM users) AS u",
+			wantErr: false,
+		},
 
-	// Other functions
-	r.Register(NewScalarFunc("sign", 1, signFunc))
-	r.Register(NewScalarFunc("mod", 2, modFunc))
-	r.Register(NewScalarFunc("pi", 0, piFunc))
-	r.Register(NewScalarFunc("radians", 1, radiansFunc))
-	r.Register(NewScalarFunc("degrees", 1, degreesFunc))
-}
+		// parseJoinUsingCondition - 66.7%
+		{
+			name:    "JOIN USING missing column list",
+			sql:     "SELECT * FROM a JOIN b USING",
+			wantErr: true,
+		},
+		{
+			name:    "JOIN USING with columns",
+			sql:     "SELECT * FROM a JOIN b USING (id)",
+			wantErr: false,
+		},
 
-// absFunc implements abs(X)
-// Returns the absolute value of X
-func absFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
+		// parseTableConstraintPrimaryKey - 66.7%
+		{
+			name:    "table PRIMARY KEY with autoincrement",
+			sql:     "CREATE TABLE t (id INTEGER, PRIMARY KEY (id) AUTOINCREMENT)",
+			wantErr: true, // AUTOINCREMENT only valid on column constraint
+		},
+		{
+			name:    "table PRIMARY KEY simple",
+			sql:     "CREATE TABLE t (id INTEGER, PRIMARY KEY (id))",
+			wantErr: false,
+		},
+		{
+			name:    "table PRIMARY KEY composite",
+			sql:     "CREATE TABLE t (a INTEGER, b INTEGER, PRIMARY KEY (a, b))",
+			wantErr: false,
+		},
+
+		// parseColumnOrConstraint - 66.7%
+		{
+			name:    "mixed columns and constraints",
+			sql:     "CREATE TABLE t (id INTEGER, name TEXT, PRIMARY KEY (id), UNIQUE (name))",
+			wantErr: false,
+		},
+		{
+			name:    "constraint with unexpected token - treated as column name",
+			sql:     "CREATE TABLE t (id INTEGER, INVALID)",
+			wantErr: false, // INVALID is treated as a column name without type
+		},
+
+		// parseCreateIndex - 66.7%
+		{
+			name:    "CREATE INDEX missing name",
+			sql:     "CREATE INDEX ON users (name)",
+			wantErr: true,
+		},
+		{
+			name:    "CREATE UNIQUE INDEX IF NOT EXISTS",
+			sql:     "CREATE UNIQUE INDEX IF NOT EXISTS idx ON users (name)",
+			wantErr: false,
+		},
+
+		// parseIndexNameAndTable - 66.7%
+		{
+			name:    "CREATE INDEX with schema - unsupported",
+			sql:     "CREATE INDEX main.idx ON users (name)",
+			wantErr: true,
+		},
+
+		// parseWhenClause - 66.7%
+		{
+			name:    "CASE WHEN with complex expression",
+			sql:     "SELECT CASE WHEN x > 0 AND x < 10 THEN 'small' WHEN x >= 10 THEN 'large' END FROM t",
+			wantErr: false,
+		},
+
+		// parseVacuum - 66.7%
+		{
+			name:    "VACUUM with INTO",
+			sql:     "VACUUM INTO 'backup.db'",
+			wantErr: false,
+		},
+
+		// parseFunctionFilter - 69.2%
+		{
+			name:    "aggregate with complex filter",
+			sql:     "SELECT COUNT(*) FILTER (WHERE age > 18 AND active = 1) FROM users",
+			wantErr: false,
+		},
+
+		// parseCreateTableAsSelect - 71.4%
+		{
+			name:    "CREATE TABLE AS with complex SELECT",
+			sql:     "CREATE TABLE new_users AS SELECT * FROM users WHERE active = 1",
+			wantErr: false,
+		},
+		{
+			name:    "CREATE TABLE AS missing SELECT",
+			sql:     "CREATE TABLE new_users AS",
+			wantErr: true,
+		},
+
+		// parseBetweenExpression - 72.7%
+		{
+			name:    "BETWEEN with expressions",
+			sql:     "SELECT * FROM t WHERE x + 1 BETWEEN y * 2 AND z / 3",
+			wantErr: false,
+		},
+
+		// parseInsertValues - 75.0%
+		{
+			name:    "INSERT VALUES multiple rows",
+			sql:     "INSERT INTO users (id, name) VALUES (1, 'a'), (2, 'b'), (3, 'c')",
+			wantErr: false,
+		},
+		{
+			name:    "INSERT VALUES missing comma",
+			sql:     "INSERT INTO users (id, name) VALUES (1, 'a') (2, 'b')",
+			wantErr: true,
+		},
+
+		// parseInsertSource - 75.0%
+		{
+			name:    "INSERT DEFAULT VALUES",
+			sql:     "INSERT INTO users DEFAULT VALUES",
+			wantErr: false,
+		},
+		{
+			name:    "INSERT with SELECT",
+			sql:     "INSERT INTO new_users SELECT * FROM old_users",
+			wantErr: false,
+		},
+
+		// parseForeignKeyReferences - 75.0%
+		{
+			name:    "FOREIGN KEY without referenced columns",
+			sql:     "CREATE TABLE orders (user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users)",
+			wantErr: false,
+		},
+		{
+			name:    "FOREIGN KEY with referenced columns",
+			sql:     "CREATE TABLE orders (user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users (id))",
+			wantErr: false,
+		},
+
+		// isPragmaValueIdentifier - 75.0%
+		{
+			name:    "PRAGMA with YES",
+			sql:     "PRAGMA secure_delete = YES",
+			wantErr: false,
+		},
+		{
+			name:    "PRAGMA with NO - unsupported",
+			sql:     "PRAGMA secure_delete = NO",
+			wantErr: true,
+		},
+
+		// parseConflictTarget - 76.2%
+		{
+			name:    "INSERT ON CONFLICT without target",
+			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT DO NOTHING",
+			wantErr: false,
+		},
+		{
+			name:    "INSERT ON CONFLICT with WHERE",
+			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) WHERE id > 0 DO NOTHING",
+			wantErr: false,
+		},
+
+		// parseCreate - 76.9%
+		{
+			name:    "CREATE with invalid object",
+			sql:     "CREATE INVALID",
+			wantErr: true,
+		},
+		{
+			name:    "CREATE TEMP TABLE",
+			sql:     "CREATE TEMP TABLE t (id INTEGER)",
+			wantErr: false,
+		},
+		{
+			name:    "CREATE TEMPORARY TABLE",
+			sql:     "CREATE TEMPORARY TABLE t (id INTEGER)",
+			wantErr: false,
+		},
+
+		// parseCreateTable - 76.9%
+		{
+			name:    "CREATE TABLE with schema - unsupported",
+			sql:     "CREATE TABLE main.users (id INTEGER)",
+			wantErr: true,
+		},
+
+		// parseUpdateAssignments - 76.9%
+		{
+			name:    "UPDATE multiple assignments",
+			sql:     "UPDATE users SET name = 'John', age = 30, email = 'john@example.com' WHERE id = 1",
+			wantErr: false,
+		},
+		{
+			name:    "UPDATE missing assignment",
+			sql:     "UPDATE users SET WHERE id = 1",
+			wantErr: true,
+		},
+
+		// parseDelete - 77.8%
+		{
+			name:    "DELETE FROM with schema - unsupported",
+			sql:     "DELETE FROM main.users WHERE id = 1",
+			wantErr: true,
+		},
+
+		// parseDropTable - 77.8%
+		{
+			name:    "DROP TABLE with schema - unsupported",
+			sql:     "DROP TABLE main.users",
+			wantErr: true,
+		},
+
+		// parseDropIndex - 77.8%
+		{
+			name:    "DROP INDEX with schema - unsupported",
+			sql:     "DROP INDEX main.idx_name",
+			wantErr: true,
+		},
+
+		// parseDeleteOrderBy - 77.8%
+		{
+			name:    "DELETE ORDER BY multiple",
+			sql:     "DELETE FROM users ORDER BY created_at DESC, id ASC LIMIT 10",
+			wantErr: false,
+		},
+
+		// parseUpdateOrderByClause - 77.8%
+		{
+			name:    "UPDATE ORDER BY multiple",
+			sql:     "UPDATE users SET status = 'inactive' ORDER BY last_login ASC, id DESC LIMIT 100",
+			wantErr: false,
+		},
+
+		// parseSelectClauses - 77.8%
+		{
+			name:    "SELECT with HAVING without GROUP BY - unsupported",
+			sql:     "SELECT COUNT(*) FROM users HAVING COUNT(*) > 5",
+			wantErr: true,
+		},
+
+		// parseGroupByClauseInto - 78.6%
+		{
+			name:    "GROUP BY with HAVING complex",
+			sql:     "SELECT dept, COUNT(*) FROM users GROUP BY dept HAVING COUNT(*) > 5 AND AVG(age) > 30",
+			wantErr: false,
+		},
+		{
+			name:    "GROUP BY multiple columns",
+			sql:     "SELECT dept, role, COUNT(*) FROM users GROUP BY dept, role",
+			wantErr: false,
+		},
+
+		// parseUpdate - 81.8%
+		{
+			name:    "UPDATE with schema - unsupported",
+			sql:     "UPDATE main.users SET name = 'John' WHERE id = 1",
+			wantErr: true,
+		},
+
+		// parseDoUpdateClause - 81.8%
+		{
+			name:    "UPSERT with DO UPDATE",
+			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) DO UPDATE SET name = excluded.name",
+			wantErr: false,
+		},
+		{
+			name:    "UPSERT DO UPDATE with WHERE",
+			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) DO UPDATE SET name = excluded.name WHERE users.id > 0",
+			wantErr: false,
+		},
+
+		// parseTableRef - 81.8%
+		{
+			name:    "FROM with indexed hint",
+			sql:     "SELECT * FROM users INDEXED BY idx_name WHERE name = 'John'",
+			wantErr: false,
+		},
+		{
+			name:    "FROM with NOT INDEXED - unsupported",
+			sql:     "SELECT * FROM users NOT INDEXED WHERE name = 'John'",
+			wantErr: true,
+		},
+
+		// parseLimitClauseInto - 83.3%
+		{
+			name:    "LIMIT with expression",
+			sql:     "SELECT * FROM users LIMIT 10 + 5",
+			wantErr: false,
+		},
+
+		// parseIfNotExists - 83.3%
+		{
+			name:    "CREATE TABLE IF NOT EXISTS",
+			sql:     "CREATE TABLE IF NOT EXISTS users (id INTEGER)",
+			wantErr: false,
+		},
+
+		// parseCTEColumns - 83.3%
+		{
+			name:    "CTE with many columns",
+			sql:     "WITH cte (a, b, c, d) AS (SELECT 1, 2, 3, 4) SELECT * FROM cte",
+			wantErr: false,
+		},
+
+		// parseAlias - 85.7%
+		{
+			name:    "column alias quoted",
+			sql:     "SELECT name AS \"User Name\" FROM users",
+			wantErr: false,
+		},
+
+		// parseExprColumn - 87.5%
+		{
+			name:    "SELECT expr with AS",
+			sql:     "SELECT id * 2 AS double_id FROM users",
+			wantErr: false,
+		},
+
+		// parseFromClause - 87.5%
+		{
+			name:    "FROM with multiple joins",
+			sql:     "SELECT * FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id",
+			wantErr: false,
+		},
+
+		// parseTableAlias - 87.5%
+		{
+			name:    "table alias with AS keyword",
+			sql:     "SELECT * FROM users AS u WHERE u.id = 1",
+			wantErr: false,
+		},
+
+		// parseUsingColumnList - 87.5%
+		{
+			name:    "USING with multiple columns",
+			sql:     "SELECT * FROM a JOIN b USING (id, name)",
+			wantErr: false,
+		},
+
+		// parseTableOptions - 87.5%
+		{
+			name:    "CREATE TABLE with WITHOUT ROWID",
+			sql:     "CREATE TABLE t (id INTEGER PRIMARY KEY) WITHOUT ROWID",
+			wantErr: false,
+		},
+		{
+			name:    "CREATE TABLE with STRICT",
+			sql:     "CREATE TABLE t (id INTEGER) STRICT",
+			wantErr: false,
+		},
+
+		// parseCompoundSelect - 87.5%
+		{
+			name:    "UNION with ORDER BY",
+			sql:     "SELECT * FROM a UNION SELECT * FROM b ORDER BY id",
+			wantErr: false,
+		},
+
+		// parseSelect - 88.9%
+		{
+			name:    "SELECT with WITH RECURSIVE",
+			sql:     "WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM cnt WHERE x < 5) SELECT * FROM cnt",
+			wantErr: false,
+		},
+
+		// parseCTE - 88.9%
+		{
+			name:    "CTE with RECURSIVE",
+			sql:     "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 10) SELECT * FROM cte",
+			wantErr: false,
+		},
+
+		// parseViewSelect - 88.9%
+		{
+			name:    "CREATE VIEW with complex SELECT",
+			sql:     "CREATE VIEW v AS SELECT u.*, o.total FROM users u LEFT JOIN orders o ON u.id = o.user_id",
+			wantErr: false,
+		},
 	}
 
-	switch args[0].Type() {
-	case TypeInteger:
-		val := args[0].AsInt64()
-		if val < 0 {
-			// Check for overflow (most negative int64)
-			if val == math.MinInt64 {
-				return nil, fmt.Errorf("integer overflow")
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			return NewIntValue(-val), nil
-		}
-		return NewIntValue(val), nil
-
-	case TypeFloat:
-		return NewFloatValue(math.Abs(args[0].AsFloat64())), nil
-
-	default:
-		// Try to convert to number
-		f := args[0].AsFloat64()
-		return NewFloatValue(math.Abs(f)), nil
+		})
 	}
 }
 
-func roundParsePrecision(args []Value) (int64, bool, error) {
-	if len(args) < 1 || len(args) > 2 {
-		return 0, false, fmt.Errorf("round() requires 1 or 2 arguments")
-	}
-	if len(args) == 1 {
-		return 0, true, nil
-	}
-	if args[1].IsNull() {
-		return 0, false, nil
-	}
-	p := args[1].AsInt64()
-	if p > 30 {
-		p = 30
-	}
-	if p < 0 {
-		p = 0
-	}
-	return p, true, nil
-}
+// TestParserAdditionalErrorPaths tests error conditions to increase coverage
+func TestParserAdditionalErrorPaths(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		// Parse error - tokenization failure
+		{"illegal character", "SELECT ™ FROM users"},
 
-func roundIsPassthrough(value float64) bool {
-	return math.IsNaN(value) || math.IsInf(value, 0) || math.Abs(value) >= 4503599627370496.0
-}
+		// parseSelect errors
+		{"SELECT missing columns", "SELECT FROM users"},
 
-func roundToIntValue(rounded float64) Value {
-	if rounded >= float64(math.MinInt64) && rounded <= float64(math.MaxInt64) {
-		return NewIntValue(int64(rounded))
-	}
-	return NewFloatValue(rounded)
-}
+		// parseInsert errors
+		{"INSERT missing INTO", "INSERT users VALUES (1)"},
+		{"INSERT missing table", "INSERT INTO VALUES (1)"},
 
-func roundFunc(args []Value) (Value, error) {
-	precision, ok, err := roundParsePrecision(args)
-	if err != nil {
-		return nil, err
-	}
-	if !ok || args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-	value := args[0].AsFloat64()
-	if roundIsPassthrough(value) {
-		return NewFloatValue(value), nil
-	}
-	if precision == 0 {
-		return roundToIntValue(math.Round(value)), nil
-	}
-	multiplier := math.Pow(10, float64(precision))
-	return NewFloatValue(math.Round(value*multiplier) / multiplier), nil
-}
+		// parseUpdate errors
+		{"UPDATE missing table", "UPDATE SET x = 1"},
+		{"UPDATE missing SET", "UPDATE users x = 1"},
 
-// randomFunc implements random()
-// Returns a pseudo-random integer between -9223372036854775808 and +9223372036854775807
-func randomFunc(args []Value) (Value, error) {
-	var buf [8]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return nil, fmt.Errorf("failed to generate random number: %w", err)
-	}
+		// parseDelete errors
+		{"DELETE missing FROM", "DELETE users"},
+		{"DELETE missing table", "DELETE FROM"},
 
-	// Convert to int64 - intentionally allows values > MaxInt64 for full random range
-	r := int64(binary.LittleEndian.Uint64(buf[:]))
+		// parseCreate errors
+		{"CREATE missing object", "CREATE"},
 
-	// Prevent returning the most negative value to avoid abs() issues
-	if r < 0 {
-		r = -(r & math.MaxInt64)
-	}
+		// parseDrop errors
+		{"DROP missing object", "DROP"},
 
-	return NewIntValue(r), nil
-}
+		// Expression errors
+		{"incomplete expression", "SELECT (1 + FROM users"},
 
-// randomblobFunc implements randomblob(N)
-// Returns a blob of N random bytes
-func randomblobFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
+		// Subquery errors
+		{"unclosed subquery", "SELECT * FROM (SELECT * FROM users"},
+
+		// Function errors
+		{"unclosed function", "SELECT COUNT( FROM users"},
+
+		// CASE errors
+		{"CASE missing END", "SELECT CASE WHEN 1 THEN 2 FROM t"},
+
+		// JOIN errors
+		{"JOIN missing table", "SELECT * FROM users JOIN"},
+		// Note: JOIN without ON is valid (CROSS JOIN), so removed this test
+
+		// Constraint errors
+		{"CHECK missing expression", "CREATE TABLE t (id INTEGER CHECK)"},
+		{"FOREIGN KEY missing reference", "CREATE TABLE t (id INTEGER, FOREIGN KEY (id))"},
+
+		// Index errors
+		{"CREATE INDEX missing columns", "CREATE INDEX idx ON users"},
+
+		// Trigger errors
+		{"CREATE TRIGGER missing BEGIN", "CREATE TRIGGER t1 BEFORE INSERT ON users"},
+		{"CREATE TRIGGER missing END", "CREATE TRIGGER t1 BEFORE INSERT ON users BEGIN SELECT 1"},
+
+		// PRAGMA errors
+		{"PRAGMA invalid syntax", "PRAGMA = value"},
+
+		// CTE errors
+		{"WITH missing AS", "WITH cte SELECT * FROM cte"},
 	}
 
-	n := args[0].AsInt64()
-	if n < 1 {
-		n = 1
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if err == nil {
+				t.Errorf("expected error for %q, got nil", tt.sql)
+			}
+		})
 	}
-
-	blob := make([]byte, n)
-	if _, err := rand.Read(blob); err != nil {
-		return nil, fmt.Errorf("failed to generate random blob: %w", err)
-	}
-
-	return NewBlobValue(blob), nil
-}
-
-// ceilFunc implements ceil(X) / ceiling(X)
-func ceilFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Ceil(args[0].AsFloat64())), nil
-}
-
-// floorFunc implements floor(X)
-func floorFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Floor(args[0].AsFloat64())), nil
-}
-
-// sqrtFunc implements sqrt(X)
-func sqrtFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value < 0 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Sqrt(value)), nil
-}
-
-// powerFunc implements power(X, Y) / pow(X, Y)
-func powerFunc(args []Value) (Value, error) {
-	if args[0].IsNull() || args[1].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	base := args[0].AsFloat64()
-	exponent := args[1].AsFloat64()
-
-	return NewFloatValue(math.Pow(base, exponent)), nil
-}
-
-// expFunc implements exp(X)
-func expFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Exp(args[0].AsFloat64())), nil
-}
-
-// lnFunc implements ln(X) / log(X)
-func lnFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value <= 0 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Log(value)), nil
-}
-
-// log10Func implements log10(X)
-func log10Func(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value <= 0 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Log10(value)), nil
-}
-
-// log2Func implements log2(X)
-func log2Func(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value <= 0 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Log2(value)), nil
-}
-
-// sinFunc implements sin(X)
-func sinFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Sin(args[0].AsFloat64())), nil
-}
-
-// cosFunc implements cos(X)
-func cosFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Cos(args[0].AsFloat64())), nil
-}
-
-// tanFunc implements tan(X)
-func tanFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Tan(args[0].AsFloat64())), nil
-}
-
-// asinFunc implements asin(X)
-func asinFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value < -1 || value > 1 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Asin(value)), nil
-}
-
-// acosFunc implements acos(X)
-func acosFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value < -1 || value > 1 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Acos(value)), nil
-}
-
-// atanFunc implements atan(X)
-func atanFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Atan(args[0].AsFloat64())), nil
-}
-
-// atan2Func implements atan2(Y, X)
-func atan2Func(args []Value) (Value, error) {
-	if args[0].IsNull() || args[1].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	y := args[0].AsFloat64()
-	x := args[1].AsFloat64()
-
-	return NewFloatValue(math.Atan2(y, x)), nil
-}
-
-// sinhFunc implements sinh(X)
-func sinhFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Sinh(args[0].AsFloat64())), nil
-}
-
-// coshFunc implements cosh(X)
-func coshFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Cosh(args[0].AsFloat64())), nil
-}
-
-// tanhFunc implements tanh(X)
-func tanhFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Tanh(args[0].AsFloat64())), nil
-}
-
-// asinhFunc implements asinh(X)
-func asinhFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Asinh(args[0].AsFloat64())), nil
-}
-
-// acoshFunc implements acosh(X)
-func acoshFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value < 1 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Acosh(value)), nil
-}
-
-// atanhFunc implements atanh(X)
-func atanhFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value <= -1 || value >= 1 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Atanh(value)), nil
-}
-
-// signFunc implements sign(X)
-// Returns -1, 0, or +1 depending on the sign of X
-func signFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value > 0 {
-		return NewIntValue(1), nil
-	} else if value < 0 {
-		return NewIntValue(-1), nil
-	}
-	return NewIntValue(0), nil
-}
-
-// modFunc implements mod(X, Y)
-// Returns X % Y
-func modFunc(args []Value) (Value, error) {
-	if args[0].IsNull() || args[1].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	y := args[1].AsInt64()
-	if y == 0 {
-		return NewNullValue(), nil // Division by zero returns NULL
-	}
-
-	x := args[0].AsInt64()
-	return NewIntValue(x % y), nil
-}
-
-// piFunc implements pi()
-// Returns the value of π
-func piFunc(args []Value) (Value, error) {
-	return NewFloatValue(math.Pi), nil
-}
-
-// radiansFunc implements radians(X)
-// Converts degrees to radians
-func radiansFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	degrees := args[0].AsFloat64()
-	radians := degrees * math.Pi / 180.0
-	return NewFloatValue(radians), nil
-}
-
-// degreesFunc implements degrees(X)
-// Converts radians to degrees
-func degreesFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	radians := args[0].AsFloat64()
-	degrees := radians * 180.0 / math.Pi
-	return NewFloatValue(degrees), nil
 }

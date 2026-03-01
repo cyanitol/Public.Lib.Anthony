@@ -641,7 +641,7 @@ tx.Commit() // Single fsync
 - **Package:** `internal/format` - File format utilities
 - **Package:** `internal/btree` - B-tree implementation
 - **Package:** `internal/pager` - Page cache and I/O
-- **SQLite Docs:** [File Format Specification](https://www.sqlite.org/fileformat.html)
+- **SQLite Docs (local):** [File Format Specification (local)](sqlite/FILE_FORMAT_SPEC.md) ([sqlite.org](https://www.sqlite.org/fileformat.html))
 
 ## See Also
 

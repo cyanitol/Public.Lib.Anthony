@@ -1,737 +1,871 @@
-package pager
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+package parser
 
 import (
-	"errors"
-	"sync"
+	"fmt"
+	"strings"
+	"unicode"
 )
 
-// Cache errors
-var (
-	ErrCachePageNotFound = errors.New("page not found in cache")
-	ErrCacheCapacityZero = errors.New("cache capacity must be greater than 0")
-)
-
-// CacheEntry represents a single entry in the LRU cache.
-// It contains both the page and LRU list linkage.
-type CacheEntry struct {
-	page *DbPage
-
-	// LRU list linkage (doubly-linked list)
-	lruNext *CacheEntry
-	lruPrev *CacheEntry
+// Lexer tokenizes SQL input.
+type Lexer struct {
+	input   string
+	pos     int  // current position in input
+	readPos int  // current reading position (after current char)
+	ch      byte // current char under examination
+	line    int  // current line number
+	col     int  // current column number
 }
 
-// LRUCache implements a Least Recently Used page cache.
-// It maintains pages in order of access, evicting the least recently
-// used pages when capacity is reached.
-//
-// The cache uses a combination of:
-// - Hash map for O(1) lookups by page number
-// - Doubly-linked list for O(1) LRU ordering updates
-//
-// Thread-safety is provided through a read-write mutex.
-type LRUCache struct {
-	// Map of page number to cache entry for O(1) lookups
-	entries map[Pgno]*CacheEntry
-
-	// LRU list head (most recently used)
-	lruHead *CacheEntry
-
-	// LRU list tail (least recently used)
-	lruTail *CacheEntry
-
-	// Head of dirty page list
-	dirtyHead *DbPage
-
-	// Page size in bytes
-	pageSize int
-
-	// Maximum number of pages to cache
-	maxPages int
-
-	// Current memory usage in bytes
-	memoryUsage int64
-
-	// Maximum memory usage in bytes (0 = unlimited, use maxPages)
-	maxMemory int64
-
-	// Write mode (write-through or write-back)
-	mode CacheMode
-
-	// Pager for flushing pages (optional)
-	pager PageWriter
-
-	// Statistics
-	hits   int64
-	misses int64
-
-	// Mutex for thread-safe operations
-	mu sync.RWMutex
-}
-
-// CacheMode defines the cache write mode
-type CacheMode int
-
-const (
-	// WriteThroughMode - writes are immediately synced to disk
-	WriteThroughMode CacheMode = iota
-	// WriteBackMode - writes are batched and flushed later
-	WriteBackMode
-)
-
-// LRUCacheConfig holds configuration options for the LRU cache.
-type LRUCacheConfig struct {
-	PageSize  int       // Size of each page in bytes
-	MaxPages  int       // Maximum number of pages to cache
-	MaxMemory int64     // Maximum memory usage in bytes (0 = use MaxPages)
-	Mode      CacheMode // Write mode (write-through or write-back)
-}
-
-// DefaultLRUCacheConfig returns a default cache configuration.
-func DefaultLRUCacheConfig(pageSize int) LRUCacheConfig {
-	return LRUCacheConfig{
-		PageSize:  pageSize,
-		MaxPages:  DefaultCacheSize,
-		MaxMemory: 0,                // Use MaxPages instead
-		Mode:      WriteBackMode,    // Default to write-back for better performance
+// NewLexer creates a new Lexer for the given SQL input.
+func NewLexer(input string) *Lexer {
+	l := &Lexer{
+		input: input,
+		line:  1,
+		col:   0,
 	}
+	l.readChar()
+	return l
 }
 
-// PageWriter is an interface for writing pages to storage.
-// This allows the cache to flush dirty pages without depending on the full Pager type.
-type PageWriter interface {
-	writePage(page *DbPage) error
-}
-
-// NewLRUCache creates a new LRU page cache with the given configuration.
-func NewLRUCache(config LRUCacheConfig) (*LRUCache, error) {
-	if config.MaxPages <= 0 && config.MaxMemory <= 0 {
-		return nil, ErrCacheCapacityZero
+// readChar reads the next character and advances position.
+func (l *Lexer) readChar() {
+	if l.readPos >= len(l.input) {
+		l.ch = 0 // EOF
+	} else {
+		l.ch = l.input[l.readPos]
 	}
-
-	return &LRUCache{
-		entries:   make(map[Pgno]*CacheEntry),
-		pageSize:  config.PageSize,
-		maxPages:  config.MaxPages,
-		maxMemory: config.MaxMemory,
-		mode:      config.Mode,
-	}, nil
+	l.pos = l.readPos
+	l.readPos++
+	l.col++
 }
 
-// NewLRUCacheSimple creates a new LRU cache with default settings.
-func NewLRUCacheSimple(pageSize, maxPages int) *LRUCache {
-	cache, _ := NewLRUCache(LRUCacheConfig{
-		PageSize: pageSize,
-		MaxPages: maxPages,
-		Mode:     WriteBackMode,
-	})
-	return cache
-}
-
-// Get retrieves a page from the cache.
-// If found, the page is moved to the front of the LRU list (most recently used).
-// Returns nil if the page is not in the cache.
-func (c *LRUCache) Get(pgno Pgno) *DbPage {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	entry, ok := c.entries[pgno]
-	if !ok {
-		c.misses++
-		return nil
-	}
-
-	c.hits++
-
-	// Move to front of LRU list (most recently used)
-	c.moveToFront(entry)
-
-	return entry.page
-}
-
-// Peek retrieves a page from the cache without updating LRU order.
-// This is useful for checking if a page exists without affecting eviction priority.
-func (c *LRUCache) Peek(pgno Pgno) *DbPage {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if entry, ok := c.entries[pgno]; ok {
-		return entry.page
-	}
-	return nil
-}
-
-// Put adds a page to the cache.
-// If the cache is full, the least recently used clean pages are evicted.
-// If a page with the same number already exists, it is replaced.
-func (c *LRUCache) Put(page *DbPage) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	return c.putLocked(page)
-}
-
-// putLocked adds a page to the cache (must hold lock).
-func (c *LRUCache) putLocked(page *DbPage) error {
-	// Check if page already exists
-	if entry, ok := c.entries[page.Pgno]; ok {
-		// Update existing entry
-		oldPage := entry.page
-		entry.page = page
-		c.moveToFront(entry)
-
-		// Update dirty list if needed
-		if oldPage.IsDirty() && !page.IsDirty() {
-			c.removeFromDirtyList(oldPage)
-		} else if !oldPage.IsDirty() && page.IsDirty() {
-			c.addToDirtyList(page)
-		}
-
-		return nil
-	}
-
-	// Need to evict if at capacity
-	if c.isAtCapacity() {
-		if err := c.evictLRU(1); err != nil {
-			return err
-		}
-	}
-
-	// Create new entry
-	entry := &CacheEntry{page: page}
-	c.entries[page.Pgno] = entry
-
-	// Add to front of LRU list
-	c.addToFront(entry)
-
-	// Update memory usage
-	c.memoryUsage += int64(c.pageSize)
-
-	// Add to dirty list if dirty
-	if page.IsDirty() {
-		c.addToDirtyList(page)
-	}
-
-	return nil
-}
-
-// Remove removes a page from the cache.
-func (c *LRUCache) Remove(pgno Pgno) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.removeLocked(pgno)
-}
-
-// removeLocked removes a page from the cache (must hold lock).
-func (c *LRUCache) removeLocked(pgno Pgno) {
-	entry, ok := c.entries[pgno]
-	if !ok {
-		return
-	}
-
-	// Remove from dirty list if present
-	if entry.page.IsDirty() {
-		c.removeFromDirtyList(entry.page)
-	}
-
-	// Remove from LRU list
-	c.removeFromLRU(entry)
-
-	// Remove from map
-	delete(c.entries, pgno)
-
-	// Update memory usage
-	c.memoryUsage -= int64(c.pageSize)
-}
-
-// Clear removes all pages from the cache.
-func (c *LRUCache) Clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.entries = make(map[Pgno]*CacheEntry)
-	c.lruHead = nil
-	c.lruTail = nil
-	c.dirtyHead = nil
-	c.memoryUsage = 0
-}
-
-// GetDirtyPages returns a list of all dirty pages in the cache.
-func (c *LRUCache) GetDirtyPages() []*DbPage {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	var dirty []*DbPage
-	current := c.dirtyHead
-	for current != nil {
-		dirty = append(dirty, current)
-		current = current.dirtyNext
-	}
-
-	return dirty
-}
-
-// MakeClean marks all pages as clean and clears the dirty list.
-func (c *LRUCache) MakeClean() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Clear dirty list
-	c.dirtyHead = nil
-
-	// Mark all pages as clean
-	for _, entry := range c.entries {
-		entry.page.MakeClean()
-		entry.page.dirtyNext = nil
-		entry.page.dirtyPrev = nil
-	}
-}
-
-// Size returns the number of pages in the cache.
-func (c *LRUCache) Size() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.entries)
-}
-
-// MemoryUsage returns the current memory usage in bytes.
-func (c *LRUCache) MemoryUsage() int64 {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.memoryUsage
-}
-
-// Stats returns cache statistics (hits, misses).
-func (c *LRUCache) Stats() (hits, misses int64) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.hits, c.misses
-}
-
-// HitRate returns the cache hit rate as a percentage (0-100).
-func (c *LRUCache) HitRate() float64 {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	total := c.hits + c.misses
-	if total == 0 {
+// peekChar returns the next character without advancing position.
+func (l *Lexer) peekChar() byte {
+	if l.readPos >= len(l.input) {
 		return 0
 	}
-	return float64(c.hits) / float64(total) * 100
+	return l.input[l.readPos]
 }
 
-// ResetStats resets the cache statistics.
-func (c *LRUCache) ResetStats() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.hits = 0
-	c.misses = 0
+// peekAhead returns the character n positions ahead without advancing.
+func (l *Lexer) peekAhead(n int) byte {
+	pos := l.readPos + n - 1
+	if pos >= len(l.input) {
+		return 0
+	}
+	return l.input[pos]
 }
 
-// SetMaxPages updates the maximum number of pages.
-// May trigger eviction if the new limit is lower than current size.
-func (c *LRUCache) SetMaxPages(maxPages int) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if maxPages <= 0 && c.maxMemory <= 0 {
-		return ErrCacheCapacityZero
-	}
-
-	c.maxPages = maxPages
-
-	// Evict if necessary
-	for c.isAtCapacity() {
-		if err := c.evictLRU(1); err != nil {
-			break // Stop if we can't evict more
-		}
-	}
-
-	return nil
+// simpleTokenMap maps single characters to their token types.
+var simpleTokenMap = map[byte]TokenType{
+	';': TK_SEMI,
+	'(': TK_LP,
+	')': TK_RP,
+	',': TK_COMMA,
+	'+': TK_PLUS,
+	'*': TK_STAR,
+	'%': TK_REM,
+	'~': TK_BITNOT,
+	'&': TK_BITAND,
 }
 
-// SetMaxMemory updates the maximum memory usage.
-// May trigger eviction if the new limit is lower than current usage.
-func (c *LRUCache) SetMaxMemory(maxMemory int64) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// tokenScanner is a function type for scanning complex tokens.
+type tokenScanner func(*Lexer) Token
 
-	if maxMemory <= 0 && c.maxPages <= 0 {
-		return ErrCacheCapacityZero
-	}
-
-	c.maxMemory = maxMemory
-
-	// Evict if necessary
-	for c.isAtCapacity() {
-		if err := c.evictLRU(1); err != nil {
-			break // Stop if we can't evict more
-		}
-	}
-
-	return nil
+// complexTokenScanners maps characters to their scanner functions.
+var complexTokenScanners = map[byte]tokenScanner{
+	'.':  (*Lexer).scanDot,
+	'-':  (*Lexer).scanMinus,
+	'/':  (*Lexer).scanSlash,
+	'|':  (*Lexer).scanPipe,
+	'=':  (*Lexer).scanEquals,
+	'<':  (*Lexer).scanLessThan,
+	'>':  (*Lexer).scanGreaterThan,
+	'!':  (*Lexer).scanBang,
+	'\'': (*Lexer).scanSingleQuote,
+	'"':  (*Lexer).scanDoubleQuote,
+	'`':  (*Lexer).scanBacktick,
+	'[':  (*Lexer).scanBracket,
+	'?':  (*Lexer).scanQuestion,
+	'@':  (*Lexer).scanNamedVar,
+	'#':  (*Lexer).scanNamedVar,
+	':':  (*Lexer).scanNamedVar,
+	'$':  (*Lexer).scanDollar,
 }
 
-// Touch moves a page to the front of the LRU list without retrieving it.
-// This is useful when a page is accessed but you already have a reference.
-func (c *LRUCache) Touch(pgno Pgno) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// NextToken returns the next token from the input.
+func (l *Lexer) NextToken() Token {
+	l.skipWhitespace()
 
-	if entry, ok := c.entries[pgno]; ok {
-		c.moveToFront(entry)
-	}
-}
-
-// MarkDirtyByPgno marks a page as dirty by page number.
-// In write-through mode, immediately flushes the page to disk.
-func (c *LRUCache) MarkDirtyByPgno(pgno Pgno) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	entry, ok := c.entries[pgno]
-	if !ok {
-		return nil // Page not in cache
+	// Handle EOF
+	if l.ch == 0 {
+		return Token{Type: TK_EOF, Lexeme: "", Pos: l.pos, Line: l.line, Col: l.col}
 	}
 
-	if !entry.page.IsDirty() {
-		entry.page.MakeDirty()
-		c.addToDirtyList(entry.page)
-
-		// In write-through mode, flush immediately
-		if c.mode == WriteThroughMode && c.pager != nil {
-			if err := c.pager.writePage(entry.page); err != nil {
-				return err
-			}
-			entry.page.MakeClean()
-			c.removeFromDirtyList(entry.page)
-		}
+	// Check for simple single-character tokens
+	if tokType, ok := simpleTokenMap[l.ch]; ok {
+		tok := Token{Type: tokType, Lexeme: string(l.ch), Pos: l.pos, Line: l.line, Col: l.col}
+		l.readChar()
+		return tok
 	}
 
-	return nil
-}
-
-// MarkDirty marks a page as dirty and adds it to the dirty list.
-// This implements the PageCacheInterface.
-func (c *LRUCache) MarkDirty(page *DbPage) {
-	if page == nil {
-		return
-	}
-	// Ignore error since interface method is void
-	_ = c.MarkDirtyByPgno(page.Pgno)
-}
-
-// Contains returns true if the cache contains the given page number.
-func (c *LRUCache) Contains(pgno Pgno) bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	_, ok := c.entries[pgno]
-	return ok
-}
-
-// SetPager sets the pager for flushing dirty pages.
-// This is needed for write-through mode.
-func (c *LRUCache) SetPager(pager PageWriter) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.pager = pager
-}
-
-// Flush writes all dirty pages to disk.
-// Returns the number of pages flushed and any error encountered.
-func (c *LRUCache) Flush() (int, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.pager == nil {
-		return 0, errors.New("no pager set for cache flush")
+	// Check for complex tokens
+	if scanner, ok := complexTokenScanners[l.ch]; ok {
+		return scanner(l)
 	}
 
-	flushed := 0
-	var firstErr error
+	// Default handling (identifiers, numbers)
+	return l.scanDefault()
+}
 
-	// Flush all dirty pages
-	current := c.dirtyHead
-	for current != nil {
-		next := current.dirtyNext
+// scanSingleQuote handles single-quoted strings.
+func (l *Lexer) scanSingleQuote() Token {
+	return l.readString('\'')
+}
 
-		if err := c.pager.writePage(current); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			// Continue trying to flush other pages
+// scanDoubleQuote handles double-quoted identifiers.
+func (l *Lexer) scanDoubleQuote() Token {
+	return l.readQuotedIdentifier('"')
+}
+
+// scanBacktick handles backtick-quoted identifiers.
+func (l *Lexer) scanBacktick() Token {
+	return l.readQuotedIdentifier('`')
+}
+
+// scanBracket handles bracketed identifiers.
+func (l *Lexer) scanBracket() Token {
+	return l.readBracketedIdentifier()
+}
+
+// scanQuestion handles variable placeholders.
+func (l *Lexer) scanQuestion() Token {
+	return l.readVariable()
+}
+
+// scanNamedVar handles named variable placeholders (@, #, :).
+func (l *Lexer) scanNamedVar() Token {
+	return l.readNamedVariable()
+}
+
+// scanDot handles the '.' character which may start a number.
+func (l *Lexer) scanDot() Token {
+	if isDigit(l.peekChar()) {
+		return l.readNumber()
+	}
+	tok := Token{Type: TK_DOT, Lexeme: string(l.ch), Pos: l.pos, Line: l.line, Col: l.col}
+	l.readChar()
+	return tok
+}
+
+// scanMinus handles '-', '--', '->', and '->>'.
+func (l *Lexer) scanMinus() Token {
+	tok := Token{Pos: l.pos, Line: l.line, Col: l.col}
+	if l.peekChar() == '-' {
+		return l.readLineComment()
+	}
+	if l.peekChar() == '>' {
+		l.readChar()
+		if l.peekChar() == '>' {
+			tok.Type = TK_PTR
+			tok.Lexeme = "->>"
+			l.readChar()
+			l.readChar()
 		} else {
-			flushed++
-			// Mark page as clean but keep it in cache
-			current.MakeClean()
-			c.removeFromDirtyList(current)
+			tok.Type = TK_PTR
+			tok.Lexeme = "->"
+			l.readChar()
 		}
-
-		current = next
+		return tok
 	}
-
-	return flushed, firstErr
+	tok.Type = TK_MINUS
+	tok.Lexeme = string(l.ch)
+	l.readChar()
+	return tok
 }
 
-// FlushPage writes a specific dirty page to disk.
-// Returns an error if the page is not in cache or if write fails.
-func (c *LRUCache) FlushPage(pgno Pgno) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.pager == nil {
-		return errors.New("no pager set for cache flush")
+// scanSlash handles '/' and block comments '/*'.
+func (l *Lexer) scanSlash() Token {
+	if l.peekChar() == '*' {
+		return l.readBlockComment()
 	}
-
-	entry, ok := c.entries[pgno]
-	if !ok {
-		return ErrCachePageNotFound
-	}
-
-	if !entry.page.IsDirty() {
-		return nil // Nothing to flush
-	}
-
-	if err := c.pager.writePage(entry.page); err != nil {
-		return err
-	}
-
-	entry.page.MakeClean()
-	c.removeFromDirtyList(entry.page)
-	return nil
+	tok := Token{Type: TK_SLASH, Lexeme: string(l.ch), Pos: l.pos, Line: l.line, Col: l.col}
+	l.readChar()
+	return tok
 }
 
-// Evict evicts the least recently used page from the cache.
-// Only evicts clean pages with no references.
-// Returns the page number that was evicted, or 0 if no page was evicted.
-func (c *LRUCache) Evict() (Pgno, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// scanPipe handles '|' and '||'.
+func (l *Lexer) scanPipe() Token {
+	tok := Token{Pos: l.pos, Line: l.line, Col: l.col}
+	if l.peekChar() == '|' {
+		tok.Type = TK_CONCAT
+		tok.Lexeme = "||"
+		l.readChar()
+		l.readChar()
+	} else {
+		tok.Type = TK_BITOR
+		tok.Lexeme = string(l.ch)
+		l.readChar()
+	}
+	return tok
+}
 
-	err := c.evictLRU(1)
-	if err != nil {
-		return 0, err
+// scanEquals handles '=' and '=='.
+func (l *Lexer) scanEquals() Token {
+	tok := Token{Pos: l.pos, Line: l.line, Col: l.col}
+	if l.peekChar() == '=' {
+		tok.Type = TK_EQ
+		tok.Lexeme = "=="
+		l.readChar()
+		l.readChar()
+	} else {
+		tok.Type = TK_EQ
+		tok.Lexeme = string(l.ch)
+		l.readChar()
+	}
+	return tok
+}
+
+// scanLessThan handles '<', '<=', '<>', and '<<'.
+func (l *Lexer) scanLessThan() Token {
+	tok := Token{Pos: l.pos, Line: l.line, Col: l.col}
+	switch l.peekChar() {
+	case '=':
+		tok.Type = TK_LE
+		tok.Lexeme = "<="
+		l.readChar()
+		l.readChar()
+	case '>':
+		tok.Type = TK_NE
+		tok.Lexeme = "<>"
+		l.readChar()
+		l.readChar()
+	case '<':
+		tok.Type = TK_LSHIFT
+		tok.Lexeme = "<<"
+		l.readChar()
+		l.readChar()
+	default:
+		tok.Type = TK_LT
+		tok.Lexeme = string(l.ch)
+		l.readChar()
+	}
+	return tok
+}
+
+// scanGreaterThan handles '>', '>=', and '>>'.
+func (l *Lexer) scanGreaterThan() Token {
+	tok := Token{Pos: l.pos, Line: l.line, Col: l.col}
+	switch l.peekChar() {
+	case '=':
+		tok.Type = TK_GE
+		tok.Lexeme = ">="
+		l.readChar()
+		l.readChar()
+	case '>':
+		tok.Type = TK_RSHIFT
+		tok.Lexeme = ">>"
+		l.readChar()
+		l.readChar()
+	default:
+		tok.Type = TK_GT
+		tok.Lexeme = string(l.ch)
+		l.readChar()
+	}
+	return tok
+}
+
+// scanBang handles '!' and '!='.
+func (l *Lexer) scanBang() Token {
+	tok := Token{Pos: l.pos, Line: l.line, Col: l.col}
+	if l.peekChar() == '=' {
+		tok.Type = TK_NE
+		tok.Lexeme = "!="
+		l.readChar()
+		l.readChar()
+	} else {
+		tok.Type = TK_ILLEGAL
+		tok.Lexeme = string(l.ch)
+		l.readChar()
+	}
+	return tok
+}
+
+// scanDollar handles '$' which may start a named variable.
+func (l *Lexer) scanDollar() Token {
+	if isLetter(l.peekChar()) || l.peekChar() == '_' {
+		return l.readNamedVariable()
+	}
+	tok := Token{Type: TK_ILLEGAL, Lexeme: string(l.ch), Pos: l.pos, Line: l.line, Col: l.col}
+	l.readChar()
+	return tok
+}
+
+// scanDefault handles identifiers, numbers, and illegal characters.
+func (l *Lexer) scanDefault() Token {
+	if isLetter(l.ch) || l.ch == '_' {
+		return l.readIdentifierOrKeyword()
+	}
+	if isDigit(l.ch) {
+		return l.readNumber()
+	}
+	tok := Token{Type: TK_ILLEGAL, Lexeme: string(l.ch), Pos: l.pos, Line: l.line, Col: l.col}
+	l.readChar()
+	return tok
+}
+
+// skipWhitespace skips whitespace characters and updates line/col tracking.
+func (l *Lexer) skipWhitespace() {
+	for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
+		if l.ch == '\n' {
+			l.line++
+			l.col = 0
+		}
+		l.readChar()
+	}
+}
+
+// readIdentifierOrKeyword reads an identifier or keyword.
+func (l *Lexer) readIdentifierOrKeyword() Token {
+	startPos := l.pos
+	startLine := l.line
+	startCol := l.col
+
+	// Handle X'...' blob literals
+	if (l.ch == 'x' || l.ch == 'X') && l.peekChar() == '\'' {
+		l.readChar() // consume 'x' or 'X'
+		l.readChar() // consume '\''
+		return l.readBlobLiteral(startPos, startLine, startCol)
 	}
 
-	return 0, nil
-}
-
-// Mode returns the current cache write mode.
-func (c *LRUCache) Mode() CacheMode {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.mode
-}
-
-// SetMode sets the cache write mode.
-func (c *LRUCache) SetMode(mode CacheMode) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.mode = mode
-}
-
-// Pages returns a slice of all page numbers in the cache.
-func (c *LRUCache) Pages() []Pgno {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	pages := make([]Pgno, 0, len(c.entries))
-	for pgno := range c.entries {
-		pages = append(pages, pgno)
+	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' || l.ch == '$' {
+		l.readChar()
 	}
-	return pages
-}
 
-// LRUOrder returns page numbers in LRU order (most to least recently used).
-func (c *LRUCache) LRUOrder() []Pgno {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	lexeme := l.input[startPos:l.pos]
+	tokType := lookupKeyword(lexeme)
 
-	order := make([]Pgno, 0, len(c.entries))
-	entry := c.lruHead
-	for entry != nil {
-		order = append(order, entry.page.Pgno)
-		entry = entry.lruNext
+	return Token{
+		Type:   tokType,
+		Lexeme: lexeme,
+		Pos:    startPos,
+		Line:   startLine,
+		Col:    startCol,
 	}
-	return order
 }
 
-// Shrink evicts pages until the cache is at or below the target size.
-func (c *LRUCache) Shrink(targetSize int) int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// readNumber reads a numeric literal (integer or float).
+func (l *Lexer) readNumber() Token {
+	startPos := l.pos
+	startLine := l.line
+	startCol := l.col
 
-	evicted := 0
-	for len(c.entries) > targetSize {
-		if err := c.evictLRU(1); err != nil {
+	// Handle hexadecimal: 0x...
+	if l.ch == '0' && (l.peekChar() == 'x' || l.peekChar() == 'X') {
+		return l.readHexNumber(startPos, startLine, startCol)
+	}
+
+	tokType := l.readDecimalNumber()
+
+	return Token{
+		Type:   tokType,
+		Lexeme: l.input[startPos:l.pos],
+		Pos:    startPos,
+		Line:   startLine,
+		Col:    startCol,
+	}
+}
+
+// readHexNumber reads a hexadecimal number literal.
+func (l *Lexer) readHexNumber(startPos, startLine, startCol int) Token {
+	l.readChar() // consume '0'
+	l.readChar() // consume 'x' or 'X'
+	for isHexDigit(l.ch) || l.ch == '_' {
+		l.readChar()
+	}
+	return Token{
+		Type:   TK_INTEGER,
+		Lexeme: l.input[startPos:l.pos],
+		Pos:    startPos,
+		Line:   startLine,
+		Col:    startCol,
+	}
+}
+
+// readDecimalNumber reads the decimal part of a number and returns the token type.
+func (l *Lexer) readDecimalNumber() TokenType {
+	tokType := TK_INTEGER
+
+	// Read integer part
+	l.consumeDigits()
+
+	// Check for decimal point
+	if l.ch == '.' && isDigit(l.peekChar()) {
+		tokType = TK_FLOAT
+		l.readChar() // consume '.'
+		l.consumeDigits()
+	}
+
+	// Check for scientific notation
+	if l.ch == 'e' || l.ch == 'E' {
+		tokType = TK_FLOAT
+		l.readChar()
+		l.consumeExponentSign()
+		l.consumeDigits()
+	}
+
+	return tokType
+}
+
+// consumeDigits reads consecutive digits and underscores.
+func (l *Lexer) consumeDigits() {
+	for isDigit(l.ch) || l.ch == '_' {
+		l.readChar()
+	}
+}
+
+// consumeExponentSign consumes an optional + or - sign.
+func (l *Lexer) consumeExponentSign() {
+	if l.ch == '+' || l.ch == '-' {
+		l.readChar()
+	}
+}
+
+// readString reads a string literal enclosed in single quotes.
+func (l *Lexer) readString(quote byte) Token {
+	startPos := l.pos
+	startLine := l.line
+	startCol := l.col
+
+	l.readChar() // consume opening quote
+
+	for l.ch != 0 {
+		if l.ch == quote {
+			// Check for escaped quote (doubled quote)
+			if l.peekChar() == quote {
+				l.readChar() // consume first quote
+				l.readChar() // consume second quote
+			} else {
+				l.readChar() // consume closing quote
+				break
+			}
+		} else {
+			if l.ch == '\n' {
+				l.line++
+				l.col = 0
+			}
+			l.readChar()
+		}
+	}
+
+	return Token{
+		Type:   TK_STRING,
+		Lexeme: l.input[startPos:l.pos],
+		Pos:    startPos,
+		Line:   startLine,
+		Col:    startCol,
+	}
+}
+
+// readQuotedIdentifier reads a quoted identifier (double-quoted or backticked).
+func (l *Lexer) readQuotedIdentifier(quote byte) Token {
+	startPos := l.pos
+	startLine := l.line
+	startCol := l.col
+
+	l.readChar() // consume opening quote
+
+	for l.ch != 0 && l.ch != quote {
+		if l.ch == '\n' {
+			l.line++
+			l.col = 0
+		}
+		l.readChar()
+	}
+
+	if l.ch == quote {
+		l.readChar() // consume closing quote
+	}
+
+	return Token{
+		Type:   TK_ID,
+		Lexeme: l.input[startPos:l.pos],
+		Pos:    startPos,
+		Line:   startLine,
+		Col:    startCol,
+	}
+}
+
+// readBracketedIdentifier reads a bracketed identifier [...].
+func (l *Lexer) readBracketedIdentifier() Token {
+	startPos := l.pos
+	startLine := l.line
+	startCol := l.col
+
+	l.readChar() // consume '['
+
+	for l.ch != 0 && l.ch != ']' {
+		if l.ch == '\n' {
+			l.line++
+			l.col = 0
+		}
+		l.readChar()
+	}
+
+	if l.ch == ']' {
+		l.readChar() // consume ']'
+	}
+
+	return Token{
+		Type:   TK_ID,
+		Lexeme: l.input[startPos:l.pos],
+		Pos:    startPos,
+		Line:   startLine,
+		Col:    startCol,
+	}
+}
+
+// readBlobLiteral reads a blob literal X'...'.
+func (l *Lexer) readBlobLiteral(startPos, startLine, startCol int) Token {
+	// We're already past X'
+	for isHexDigit(l.ch) {
+		l.readChar()
+	}
+
+	if l.ch == '\'' {
+		l.readChar() // consume closing quote
+	}
+
+	return Token{
+		Type:   TK_BLOB,
+		Lexeme: l.input[startPos:l.pos],
+		Pos:    startPos,
+		Line:   startLine,
+		Col:    startCol,
+	}
+}
+
+// readVariable reads a positional parameter (?NNN).
+func (l *Lexer) readVariable() Token {
+	startPos := l.pos
+	startLine := l.line
+	startCol := l.col
+
+	l.readChar() // consume '?'
+
+	for isDigit(l.ch) {
+		l.readChar()
+	}
+
+	return Token{
+		Type:   TK_VARIABLE,
+		Lexeme: l.input[startPos:l.pos],
+		Pos:    startPos,
+		Line:   startLine,
+		Col:    startCol,
+	}
+}
+
+// readNamedVariable reads a named parameter (@name, :name, #name, $name).
+func (l *Lexer) readNamedVariable() Token {
+	startPos := l.pos
+	startLine := l.line
+	startCol := l.col
+
+	l.readChar() // consume prefix
+
+	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' {
+		l.readChar()
+	}
+
+	return Token{
+		Type:   TK_VARIABLE,
+		Lexeme: l.input[startPos:l.pos],
+		Pos:    startPos,
+		Line:   startLine,
+		Col:    startCol,
+	}
+}
+
+// readLineComment reads a line comment (-- ...).
+func (l *Lexer) readLineComment() Token {
+	startPos := l.pos
+	startLine := l.line
+	startCol := l.col
+
+	l.readChar() // consume first '-'
+	l.readChar() // consume second '-'
+
+	for l.ch != 0 && l.ch != '\n' {
+		l.readChar()
+	}
+
+	return Token{
+		Type:   TK_COMMENT,
+		Lexeme: l.input[startPos:l.pos],
+		Pos:    startPos,
+		Line:   startLine,
+		Col:    startCol,
+	}
+}
+
+// readBlockComment reads a block comment (/* ... */).
+func (l *Lexer) readBlockComment() Token {
+	startPos := l.pos
+	startLine := l.line
+	startCol := l.col
+
+	l.readChar() // consume '/'
+	l.readChar() // consume '*'
+
+	for l.ch != 0 {
+		if l.ch == '\n' {
+			l.line++
+			l.col = 0
+		}
+		if l.ch == '*' && l.peekChar() == '/' {
+			l.readChar() // consume '*'
+			l.readChar() // consume '/'
 			break
 		}
-		evicted++
+		l.readChar()
 	}
-	return evicted
+
+	return Token{
+		Type:   TK_COMMENT,
+		Lexeme: l.input[startPos:l.pos],
+		Pos:    startPos,
+		Line:   startLine,
+		Col:    startCol,
+	}
 }
 
-// EvictClean evicts all clean pages from the cache.
-// Returns the number of pages evicted.
-func (c *LRUCache) EvictClean() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// Helper functions
 
-	evicted := 0
-	var toRemove []Pgno
+func isLetter(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+}
 
-	for pgno, entry := range c.entries {
-		if entry.page.IsClean() && entry.page.GetRefCount() == 0 {
-			toRemove = append(toRemove, pgno)
+func isDigit(ch byte) bool {
+	return ch >= '0' && ch <= '9'
+}
+
+func isHexDigit(ch byte) bool {
+	return isDigit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
+}
+
+// keywordMap maps uppercase keyword strings to their token types.
+var keywordMap = map[string]TokenType{
+	"SELECT":        TK_SELECT,
+	"FROM":          TK_FROM,
+	"WHERE":         TK_WHERE,
+	"INSERT":        TK_INSERT,
+	"INTO":          TK_INTO,
+	"VALUES":        TK_VALUES,
+	"UPDATE":        TK_UPDATE,
+	"SET":           TK_SET,
+	"DELETE":        TK_DELETE,
+	"CREATE":        TK_CREATE,
+	"TABLE":         TK_TABLE,
+	"INDEX":         TK_INDEX,
+	"VIEW":          TK_VIEW,
+	"TRIGGER":       TK_TRIGGER,
+	"DROP":          TK_DROP,
+	"ALTER":         TK_ALTER,
+	"RENAME":        TK_RENAME,
+	"ADD":           TK_ADD,
+	"COLUMN":        TK_COLUMN,
+	"TO":            TK_TO,
+	"ORDER":         TK_ORDER,
+	"BY":            TK_BY,
+	"GROUP":         TK_GROUP,
+	"HAVING":        TK_HAVING,
+	"LIMIT":         TK_LIMIT,
+	"OFFSET":        TK_OFFSET,
+	"DISTINCT":      TK_DISTINCT,
+	"ALL":           TK_ALL,
+	"ASC":           TK_ASC,
+	"DESC":          TK_DESC,
+	"JOIN":          TK_JOIN,
+	"LEFT":          TK_LEFT,
+	"RIGHT":         TK_RIGHT,
+	"INNER":         TK_INNER,
+	"OUTER":         TK_OUTER,
+	"CROSS":         TK_CROSS,
+	"NATURAL":       TK_NATURAL,
+	"ON":            TK_ON,
+	"USING":         TK_USING,
+	"AND":           TK_AND,
+	"OR":            TK_OR,
+	"NOT":           TK_NOT,
+	"IS":            TK_IS,
+	"IN":            TK_IN,
+	"LIKE":          TK_LIKE,
+	"GLOB":          TK_GLOB,
+	"BETWEEN":       TK_BETWEEN,
+	"CASE":          TK_CASE,
+	"WHEN":          TK_WHEN,
+	"THEN":          TK_THEN,
+	"ELSE":          TK_ELSE,
+	"END":           TK_END,
+	"NULL":          TK_NULL,
+	"INTEGER":       TK_INTEGER_TYPE,
+	"REAL":          TK_REAL,
+	"TEXT":          TK_TEXT,
+	"BLOB":          TK_BLOB_TYPE,
+	"NUMERIC":       TK_NUMERIC,
+	"PRIMARY":       TK_PRIMARY,
+	"KEY":           TK_KEY,
+	"UNIQUE":        TK_UNIQUE,
+	"CHECK":         TK_CHECK,
+	"DEFAULT":       TK_DEFAULT,
+	"CONSTRAINT":    TK_CONSTRAINT,
+	"FOREIGN":       TK_FOREIGN,
+	"REFERENCES":    TK_REFERENCES,
+	"AUTOINCREMENT": TK_AUTOINCREMENT,
+	"COLLATE":       TK_COLLATE,
+	"AS":            TK_AS,
+	"IF":            TK_IF,
+	"EXISTS":        TK_EXISTS,
+	"TEMPORARY":     TK_TEMP,
+	"TEMP":          TK_TEMP,
+	"VIRTUAL":       TK_VIRTUAL,
+	"BEGIN":         TK_BEGIN,
+	"COMMIT":        TK_COMMIT,
+	"ROLLBACK":      TK_ROLLBACK,
+	"TRANSACTION":   TK_TRANSACTION,
+	"SAVEPOINT":     TK_SAVEPOINT,
+	"RELEASE":       TK_RELEASE,
+	"DEFERRED":      TK_DEFERRED,
+	"IMMEDIATE":     TK_IMMEDIATE,
+	"EXCLUSIVE":     TK_EXCLUSIVE,
+	"WITH":          TK_WITH,
+	"RECURSIVE":     TK_RECURSIVE,
+	"EXPLAIN":       TK_EXPLAIN,
+	"QUERY":         TK_QUERY,
+	"PLAN":          TK_PLAN,
+	"PRAGMA":        TK_PRAGMA,
+	"ANALYZE":       TK_ANALYZE,
+	"ATTACH":        TK_ATTACH,
+	"DETACH":        TK_DETACH,
+	"DATABASE":      TK_DATABASE,
+	"VACUUM":        TK_VACUUM,
+	"REINDEX":       TK_REINDEX,
+	"ISNULL":        TK_ISNULL,
+	"NOTNULL":       TK_NOTNULL,
+	"OVER":          TK_OVER,
+	"PARTITION":     TK_PARTITION,
+	"ROWS":          TK_ROWS,
+	"RANGE":         TK_RANGE,
+	"UNBOUNDED":     TK_UNBOUNDED,
+	"CURRENT":       TK_CURRENT,
+	"FOLLOWING":     TK_FOLLOWING,
+	"PRECEDING":     TK_PRECEDING,
+	"FILTER":        TK_FILTER,
+	"WINDOW":        TK_WINDOW,
+	"GROUPS":        TK_GROUPS,
+	"EXCLUDE":       TK_EXCLUDE,
+	"TIES":          TK_TIES,
+	"OTHERS":        TK_OTHERS,
+	"UNION":         TK_UNION,
+	"EXCEPT":        TK_EXCEPT,
+	"INTERSECT":     TK_INTERSECT,
+	"CAST":          TK_CAST,
+	"ESCAPE":        TK_ESCAPE,
+	"MATCH":         TK_MATCH,
+	"REGEXP":        TK_REGEXP,
+	"ABORT":         TK_ABORT,
+	"ACTION":        TK_ACTION,
+	"AFTER":         TK_AFTER,
+	"BEFORE":        TK_BEFORE,
+	"CASCADE":       TK_CASCADE,
+	"CONFLICT":      TK_CONFLICT,
+	"FAIL":          TK_FAIL,
+	"IGNORE":        TK_IGNORE,
+	"REPLACE":       TK_REPLACE,
+	"RESTRICT":      TK_RESTRICT,
+	"NO":            TK_NO,
+	"EACH":          TK_EACH,
+	"FOR":           TK_FOR,
+	"ROW":           TK_ROW,
+	"INITIALLY":     TK_INITIALLY,
+	"DEFERRABLE":    TK_DEFERRABLE,
+	"INDEXED":       TK_INDEXED,
+	"WITHOUT":       TK_WITHOUT,
+	"ROWID":         TK_ROWID,
+	"STRICT":        TK_STRICT,
+	"GENERATED":     TK_GENERATED,
+	"ALWAYS":        TK_ALWAYS,
+	"STORED":        TK_STORED,
+	"INSTEAD":       TK_INSTEAD,
+	"OF":            TK_OF,
+	"DO":            TK_DO,
+	"NOTHING":       TK_NOTHING,
+}
+
+// lookupKeyword returns the token type for a keyword, or TK_ID if not a keyword.
+func lookupKeyword(ident string) TokenType {
+	if tokType, ok := keywordMap[strings.ToUpper(ident)]; ok {
+		return tokType
+	}
+	return TK_ID
+}
+
+// TokenizeAll tokenizes the entire input and returns all tokens (excluding whitespace).
+func TokenizeAll(input string) ([]Token, error) {
+	lexer := NewLexer(input)
+	var tokens []Token
+
+	for {
+		tok := lexer.NextToken()
+		if tok.Type == TK_SPACE || tok.Type == TK_COMMENT {
+			continue
+		}
+		tokens = append(tokens, tok)
+		if tok.Type == TK_EOF {
+			break
+		}
+		if tok.Type == TK_ILLEGAL {
+			return tokens, fmt.Errorf("illegal token at line %d, col %d: %q", tok.Line, tok.Col, tok.Lexeme)
 		}
 	}
 
-	for _, pgno := range toRemove {
-		c.removeLocked(pgno)
-		evicted++
-	}
-
-	return evicted
+	return tokens, nil
 }
 
-// --- Internal LRU list operations ---
-
-// isAtCapacity returns true if the cache is at or over capacity.
-func (c *LRUCache) isAtCapacity() bool {
-	if c.maxMemory > 0 && c.memoryUsage >= c.maxMemory {
-		return true
-	}
-	if c.maxPages > 0 && len(c.entries) >= c.maxPages {
-		return true
-	}
-	return false
+// isMatchingQuote checks if a string starts and ends with the same quote character.
+func isMatchingQuote(s string, quote byte) bool {
+	return s[0] == quote && s[len(s)-1] == quote
 }
 
-// moveToFront moves an entry to the front of the LRU list.
-func (c *LRUCache) moveToFront(entry *CacheEntry) {
-	if entry == c.lruHead {
-		return // Already at front
-	}
-
-	// Remove from current position
-	c.removeFromLRU(entry)
-
-	// Add to front
-	c.addToFront(entry)
+// unquoteStandard removes standard quotes (', ", `) and unescapes doubled quotes.
+func unquoteStandard(s string) string {
+	inner := s[1 : len(s)-1]
+	quote := string(s[0])
+	return strings.ReplaceAll(inner, quote+quote, quote)
 }
 
-// addToFront adds an entry to the front of the LRU list.
-func (c *LRUCache) addToFront(entry *CacheEntry) {
-	entry.lruPrev = nil
-	entry.lruNext = c.lruHead
-
-	if c.lruHead != nil {
-		c.lruHead.lruPrev = entry
+// Unquote removes quotes from a quoted identifier or string.
+func Unquote(s string) string {
+	if len(s) < 2 {
+		return s
 	}
 
-	c.lruHead = entry
-
-	if c.lruTail == nil {
-		c.lruTail = entry
+	// Handle standard quote types
+	if isMatchingQuote(s, '\'') || isMatchingQuote(s, '"') || isMatchingQuote(s, '`') {
+		return unquoteStandard(s)
 	}
+
+	// Handle bracketed identifiers
+	if s[0] == '[' && s[len(s)-1] == ']' {
+		return s[1 : len(s)-1]
+	}
+
+	return s
 }
 
-// removeFromLRU removes an entry from the LRU list.
-func (c *LRUCache) removeFromLRU(entry *CacheEntry) {
-	if entry.lruPrev != nil {
-		entry.lruPrev.lruNext = entry.lruNext
-	} else {
-		c.lruHead = entry.lruNext
-	}
-
-	if entry.lruNext != nil {
-		entry.lruNext.lruPrev = entry.lruPrev
-	} else {
-		c.lruTail = entry.lruPrev
-	}
-
-	entry.lruPrev = nil
-	entry.lruNext = nil
+// IsIdentChar returns true if the rune can be part of an unquoted identifier.
+func IsIdentChar(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '$'
 }
-
-// evictLRU evicts up to n least recently used clean pages.
-// Dirty pages and pages with references are skipped.
-func (c *LRUCache) evictLRU(n int) error {
-	evicted := 0
-	entry := c.lruTail
-
-	for entry != nil && evicted < n {
-		prev := entry.lruPrev
-
-		// Only evict clean pages with no references
-		if entry.page.IsClean() && entry.page.GetRefCount() == 0 {
-			pgno := entry.page.Pgno
-			c.removeFromLRU(entry)
-			delete(c.entries, pgno)
-			c.memoryUsage -= int64(c.pageSize)
-			evicted++
-		}
-
-		entry = prev
-	}
-
-	if evicted == 0 {
-		return ErrCacheFull
-	}
-
-	return nil
-}
-
-// --- Dirty list operations ---
-
-// addToDirtyList adds a page to the dirty page list.
-func (c *LRUCache) addToDirtyList(page *DbPage) {
-	// Remove from list if already present
-	c.removeFromDirtyList(page)
-
-	// Add to head of list
-	page.dirtyNext = c.dirtyHead
-	page.dirtyPrev = nil
-
-	if c.dirtyHead != nil {
-		c.dirtyHead.dirtyPrev = page
-	}
-
-	c.dirtyHead = page
-}
-
-// removeFromDirtyList removes a page from the dirty page list.
-func (c *LRUCache) removeFromDirtyList(page *DbPage) {
-	if page.dirtyPrev != nil {
-		page.dirtyPrev.dirtyNext = page.dirtyNext
-	} else if c.dirtyHead == page {
-		c.dirtyHead = page.dirtyNext
-	}
-
-	if page.dirtyNext != nil {
-		page.dirtyNext.dirtyPrev = page.dirtyPrev
-	}
-
-	page.dirtyNext = nil
-	page.dirtyPrev = nil
-}
-
-// --- Interface compatibility with existing PageCache ---
-
-// PageCacheInterface defines the interface that both the old PageCache
-// and new LRUCache implement.
-type PageCacheInterface interface {
-	Get(pgno Pgno) *DbPage
-	Put(page *DbPage) error
-	Remove(pgno Pgno)
-	Clear()
-	GetDirtyPages() []*DbPage
-	MakeClean()
-	MarkDirty(page *DbPage)
-	Size() int
-}
-
-// Verify that both caches implement the interface
-var _ PageCacheInterface = (*PageCache)(nil)
-var _ PageCacheInterface = (*LRUCache)(nil)

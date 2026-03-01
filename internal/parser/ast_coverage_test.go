@@ -1,456 +1,565 @@
-package parser
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+package btree
 
-import "testing"
+import (
+	"encoding/binary"
+	"fmt"
+	"testing"
+)
 
-// Test all AST node String() methods for full coverage
-
-func TestStatementNodeString(t *testing.T) {
+func TestCreateTable(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		stmt Statement
-		want string
-	}{
-		{"SelectStmt", &SelectStmt{}, "SELECT"},
-		{"InsertStmt", &InsertStmt{}, "INSERT"},
-		{"UpdateStmt", &UpdateStmt{}, "UPDATE"},
-		{"DeleteStmt", &DeleteStmt{}, "DELETE"},
-		{"CreateTableStmt", &CreateTableStmt{}, "CREATE TABLE"},
-		{"DropTableStmt", &DropTableStmt{}, "DROP TABLE"},
-		{"CreateIndexStmt", &CreateIndexStmt{}, "CREATE INDEX"},
-		{"DropIndexStmt", &DropIndexStmt{}, "DROP INDEX"},
-		{"CreateViewStmt", &CreateViewStmt{}, "CREATE VIEW"},
-		{"DropViewStmt", &DropViewStmt{}, "DROP VIEW"},
-		{"CreateTriggerStmt", &CreateTriggerStmt{}, "CREATE TRIGGER"},
-		{"DropTriggerStmt", &DropTriggerStmt{}, "DROP TRIGGER"},
-		{"BeginStmt", &BeginStmt{}, "BEGIN"},
-		{"CommitStmt", &CommitStmt{}, "COMMIT"},
-		{"RollbackStmt", &RollbackStmt{}, "ROLLBACK"},
-		{"AttachStmt", &AttachStmt{}, "ATTACH"},
-		{"DetachStmt", &DetachStmt{}, "DETACH"},
-		{"PragmaStmt", &PragmaStmt{}, "PRAGMA"},
-		{"AlterTableStmt", &AlterTableStmt{}, "ALTER TABLE"},
+	bt := NewBtree(4096)
+
+	// Create a table
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable() error = %v", err)
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.stmt.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-			// Also call node() and statement() methods for coverage
-			tt.stmt.node()
-			tt.stmt.statement()
-		})
+	if rootPage == 0 {
+		t.Error("CreateTable() returned page number 0")
+	}
+
+	// Verify the page was created
+	pageData, err := bt.GetPage(rootPage)
+	if err != nil {
+		t.Fatalf("GetPage(%d) error = %v", rootPage, err)
+	}
+
+	// Verify it's a leaf table page
+	// For page 1, the page header starts at offset 100 (FileHeaderSize)
+	// For other pages, it starts at offset 0
+	headerOffset := 0
+	if rootPage == 1 {
+		headerOffset = FileHeaderSize
+	}
+	if pageData[headerOffset] != PageTypeLeafTable {
+		t.Errorf("Page type = 0x%02x, want 0x%02x", pageData[headerOffset], PageTypeLeafTable)
+	}
+
+	// Verify it has 0 cells
+	numCells := binary.BigEndian.Uint16(pageData[headerOffset+3 : headerOffset+5])
+	if numCells != 0 {
+		t.Errorf("NumCells = %d, want 0", numCells)
 	}
 }
 
-func TestExpressionNodeString(t *testing.T) {
+func TestDropTable(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(4096)
+
+	// Create a table
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable() error = %v", err)
+	}
+
+	// Drop the table
+	err = bt.DropTable(rootPage)
+	if err != nil {
+		t.Fatalf("DropTable() error = %v", err)
+	}
+
+	// Verify the page was deleted
+	_, err = bt.GetPage(rootPage)
+	if err == nil {
+		t.Error("GetPage() expected error after DropTable, got nil")
+	}
+}
+
+func TestNewRowid(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(4096)
+
+	// Create an empty table
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable() error = %v", err)
+	}
+
+	// Get first rowid
+	rowid, err := bt.NewRowid(rootPage)
+	if err != nil {
+		t.Fatalf("NewRowid() error = %v", err)
+	}
+
+	if rowid != 1 {
+		t.Errorf("NewRowid() = %d, want 1", rowid)
+	}
+}
+
+func TestAllocatePage(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(4096)
+
+	// Allocate first page
+	page1, err := bt.AllocatePage()
+	if err != nil {
+		t.Fatalf("AllocatePage() error = %v", err)
+	}
+
+	// Allocate second page
+	page2, err := bt.AllocatePage()
+	if err != nil {
+		t.Fatalf("AllocatePage() error = %v", err)
+	}
+
+	if page1 == page2 {
+		t.Errorf("AllocatePage() returned duplicate page numbers: %d", page1)
+	}
+
+	// Verify pages were created
+	_, err = bt.GetPage(page1)
+	if err != nil {
+		t.Errorf("GetPage(%d) error = %v", page1, err)
+	}
+
+	_, err = bt.GetPage(page2)
+	if err != nil {
+		t.Errorf("GetPage(%d) error = %v", page2, err)
+	}
+}
+
+func TestEncodeTableLeafCell(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		expr Expression
-		want string
+		name    string
+		rowid   int64
+		payload []byte
 	}{
 		{
-			"LiteralExpr integer",
-			&LiteralExpr{Type: LiteralInteger, Value: "42"},
-			"42",
+			name:    "small payload",
+			rowid:   1,
+			payload: []byte("hello"),
 		},
 		{
-			"LiteralExpr float",
-			&LiteralExpr{Type: LiteralFloat, Value: "3.14"},
-			"3.14",
+			name:    "larger payload",
+			rowid:   42,
+			payload: []byte("The quick brown fox jumps over the lazy dog"),
 		},
 		{
-			"LiteralExpr string",
-			&LiteralExpr{Type: LiteralString, Value: "hello"},
-			"'hello'",
-		},
-		{
-			"LiteralExpr string with quotes",
-			&LiteralExpr{Type: LiteralString, Value: "it's"},
-			"'it''s'",
-		},
-		{
-			"LiteralExpr blob",
-			&LiteralExpr{Type: LiteralBlob, Value: "DEADBEEF"},
-			"X'DEADBEEF'",
-		},
-		{
-			"LiteralExpr null",
-			&LiteralExpr{Type: LiteralNull, Value: ""},
-			"NULL",
-		},
-		{
-			"IdentExpr simple",
-			&IdentExpr{Name: "column"},
-			"column",
-		},
-		{
-			"IdentExpr qualified",
-			&IdentExpr{Table: "users", Name: "id"},
-			"users.id",
-		},
-		{
-			"ParenExpr",
-			&ParenExpr{Expr: &LiteralExpr{Type: LiteralInteger, Value: "5"}},
-			"(5)",
-		},
-		{
-			"ParenExpr with nil",
-			&ParenExpr{Expr: nil},
-			"(nil)",
-		},
-		{
-			"SubqueryExpr",
-			&SubqueryExpr{Select: &SelectStmt{}},
-			"(SELECT ...)",
-		},
-		{
-			"ExistsExpr",
-			&ExistsExpr{Select: &SelectStmt{}, Not: false},
-			"EXISTS (SELECT ...)",
-		},
-		{
-			"ExistsExpr NOT",
-			&ExistsExpr{Select: &SelectStmt{}, Not: true},
-			"NOT EXISTS (SELECT ...)",
-		},
-		{
-			"VariableExpr unnamed",
-			&VariableExpr{Name: ""},
-			"?",
-		},
-		{
-			"VariableExpr named",
-			&VariableExpr{Name: "param"},
-			":param",
-		},
-		{
-			"CastExpr",
-			&CastExpr{Expr: &IdentExpr{Name: "value"}, Type: "INTEGER"},
-			"CAST(value AS INTEGER)",
-		},
-		{
-			"CastExpr with nil",
-			&CastExpr{Expr: nil, Type: "TEXT"},
-			"CAST(nil AS TEXT)",
-		},
-		{
-			"CollateExpr",
-			&CollateExpr{Expr: &IdentExpr{Name: "name"}, Collation: "NOCASE"},
-			"name COLLATE NOCASE",
-		},
-		{
-			"CollateExpr with nil",
-			&CollateExpr{Expr: nil, Collation: "BINARY"},
-			"nil COLLATE BINARY",
+			name:    "empty payload",
+			rowid:   100,
+			payload: []byte{},
 		},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.expr.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
+			cell := EncodeTableLeafCell(tt.rowid, tt.payload)
+
+			// Verify we can parse it back
+			parsed, err := parseTableLeafCell(cell, 4096)
+			if err != nil {
+				t.Fatalf("parseTableLeafCell() error = %v", err)
 			}
-			// Also call node() and expression() methods for coverage
-			tt.expr.node()
-			tt.expr.expression()
+
+			if parsed.Key != tt.rowid {
+				t.Errorf("Parsed rowid = %d, want %d", parsed.Key, tt.rowid)
+			}
+
+			if string(parsed.Payload) != string(tt.payload) {
+				t.Errorf("Parsed payload = %q, want %q", parsed.Payload, tt.payload)
+			}
 		})
 	}
 }
 
-func TestBinaryOpString(t *testing.T) {
+func TestEncodeTableInteriorCell(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		op   BinaryOp
-		want string
-	}{
-		{OpEq, "="},
-		{OpNe, "!="},
-		{OpLt, "<"},
-		{OpLe, "<="},
-		{OpGt, ">"},
-		{OpGe, ">="},
-		{OpAnd, "AND"},
-		{OpOr, "OR"},
-		{OpPlus, "+"},
-		{OpMinus, "-"},
-		{OpMul, "*"},
-		{OpDiv, "/"},
-		{OpRem, "%"},
-		{OpConcat, "||"},
-		{OpBitAnd, "&"},
-		{OpBitOr, "|"},
-		{OpLShift, "<<"},
-		{OpRShift, ">>"},
-		{OpLike, "LIKE"},
-		{OpGlob, "GLOB"},
-		{OpRegexp, "REGEXP"},
-		{OpMatch, "MATCH"},
-		{BinaryOp(9999), "?"}, // Unknown operator
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		got := tt.op.String()
-		if got != tt.want {
-			t.Errorf("BinaryOp(%d).String() = %q, want %q", tt.op, got, tt.want)
-		}
-	}
-}
-
-func TestUnaryExprStringAllOps(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		expr *UnaryExpr
-		want string
+		name      string
+		childPage uint32
+		rowid     int64
 	}{
 		{
-			"OpNot",
-			&UnaryExpr{Op: OpNot, Expr: &IdentExpr{Name: "x"}},
-			"NOT x",
+			name:      "page 2 rowid 10",
+			childPage: 2,
+			rowid:     10,
 		},
 		{
-			"OpNeg",
-			&UnaryExpr{Op: OpNeg, Expr: &LiteralExpr{Type: LiteralInteger, Value: "5"}},
-			"-5",
-		},
-		{
-			"OpBitNot",
-			&UnaryExpr{Op: OpBitNot, Expr: &IdentExpr{Name: "flags"}},
-			"~flags",
-		},
-		{
-			"OpIsNull",
-			&UnaryExpr{Op: OpIsNull, Expr: &IdentExpr{Name: "val"}},
-			"val IS NULL",
-		},
-		{
-			"OpNotNull",
-			&UnaryExpr{Op: OpNotNull, Expr: &IdentExpr{Name: "val"}},
-			"val IS NOT NULL",
-		},
-		{
-			"Unknown op",
-			&UnaryExpr{Op: UnaryOp(999), Expr: &IdentExpr{Name: "x"}},
-			"?x",
+			name:      "page 100 rowid 1000",
+			childPage: 100,
+			rowid:     1000,
 		},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.expr.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
+			cell := EncodeTableInteriorCell(tt.childPage, tt.rowid)
+
+			// Verify we can parse it back
+			parsed, err := parseTableInteriorCell(cell)
+			if err != nil {
+				t.Fatalf("parseTableInteriorCell() error = %v", err)
+			}
+
+			if parsed.ChildPage != tt.childPage {
+				t.Errorf("Parsed childPage = %d, want %d", parsed.ChildPage, tt.childPage)
+			}
+
+			if parsed.Key != tt.rowid {
+				t.Errorf("Parsed rowid = %d, want %d", parsed.Key, tt.rowid)
 			}
 		})
 	}
 }
 
-func TestBinaryExprStringAllOps(t *testing.T) {
+func TestBtreePageInsertCell(t *testing.T) {
 	t.Parallel()
+	// Create a page (use page 2 to avoid file header at offset 100)
+	pageData := make([]byte, 4096)
+	pageData[0] = PageTypeLeafTable             // Leaf table page
+	binary.BigEndian.PutUint16(pageData[3:], 0) // NumCells = 0
+	binary.BigEndian.PutUint16(pageData[5:], 0) // CellContentStart = 0 (end of page)
+
+	btreePage, err := NewBtreePage(2, pageData, 4096)
+	if err != nil {
+		t.Fatalf("NewBtreePage() error = %v", err)
+	}
+
+	// Insert a cell
+	cell := EncodeTableLeafCell(1, []byte("test data"))
+	err = btreePage.InsertCell(0, cell)
+	if err != nil {
+		t.Fatalf("InsertCell() error = %v", err)
+	}
+
+	// Verify the cell was inserted
+	if btreePage.Header.NumCells != 1 {
+		t.Errorf("NumCells = %d, want 1", btreePage.Header.NumCells)
+	}
+
+	// Verify we can parse it back
+	cellPtr, err := btreePage.Header.GetCellPointer(pageData, 0)
+	if err != nil {
+		t.Fatalf("GetCellPointer() error = %v", err)
+	}
+
+	parsed, err := ParseCell(PageTypeLeafTable, pageData[cellPtr:], 4096)
+	if err != nil {
+		t.Fatalf("ParseCell() error = %v", err)
+	}
+
+	if parsed.Key != 1 {
+		t.Errorf("Parsed key = %d, want 1", parsed.Key)
+	}
+
+	if string(parsed.Payload) != "test data" {
+		t.Errorf("Parsed payload = %q, want %q", parsed.Payload, "test data")
+	}
+}
+
+func TestBtreePageDeleteCell(t *testing.T) {
+	t.Parallel()
+	// Create a page with one cell (use page 2 to avoid file header at offset 100)
+	pageData := make([]byte, 4096)
+	pageData[0] = PageTypeLeafTable
+	binary.BigEndian.PutUint16(pageData[3:], 1) // NumCells = 1
+
+	// Insert a cell manually
+	cell := EncodeTableLeafCell(1, []byte("test"))
+	cellOffset := 4096 - len(cell)
+	copy(pageData[cellOffset:], cell)
+	binary.BigEndian.PutUint16(pageData[5:], uint16(cellOffset)) // CellContentStart
+	binary.BigEndian.PutUint16(pageData[8:], uint16(cellOffset)) // Cell pointer
+
+	btreePage, err := NewBtreePage(2, pageData, 4096)
+	if err != nil {
+		t.Fatalf("NewBtreePage() error = %v", err)
+	}
+
+	// Delete the cell
+	err = btreePage.DeleteCell(0)
+	if err != nil {
+		t.Fatalf("DeleteCell() error = %v", err)
+	}
+
+	// Verify the cell was deleted
+	if btreePage.Header.NumCells != 0 {
+		t.Errorf("NumCells = %d, want 0", btreePage.Header.NumCells)
+	}
+}
+
+func TestBtreePageDefragment(t *testing.T) {
+	t.Parallel()
+	// Create a page with fragmented space (use page 2 to avoid file header at offset 100)
+	pageData := make([]byte, 4096)
+	pageData[0] = PageTypeLeafTable
+	binary.BigEndian.PutUint16(pageData[3:], 2) // NumCells = 2
+
+	// Insert two cells with a gap
+	cell1 := EncodeTableLeafCell(1, []byte("cell1"))
+	cell2 := EncodeTableLeafCell(2, []byte("cell2"))
+
+	// Cell 2 at end
+	offset2 := 4096 - len(cell2)
+	copy(pageData[offset2:], cell2)
+
+	// Cell 1 with a gap
+	offset1 := offset2 - len(cell1) - 10 // Leave a 10-byte gap
+	copy(pageData[offset1:], cell1)
+
+	binary.BigEndian.PutUint16(pageData[5:], uint16(offset1))  // CellContentStart
+	binary.BigEndian.PutUint16(pageData[8:], uint16(offset1))  // Cell 1 pointer
+	binary.BigEndian.PutUint16(pageData[10:], uint16(offset2)) // Cell 2 pointer
+
+	btreePage, err := NewBtreePage(2, pageData, 4096)
+	if err != nil {
+		t.Fatalf("NewBtreePage() error = %v", err)
+	}
+
+	// Defragment
+	err = btreePage.Defragment()
+	if err != nil {
+		t.Fatalf("Defragment() error = %v", err)
+	}
+
+	// Verify cells are now adjacent
+	ptr1, _ := btreePage.Header.GetCellPointer(pageData, 0)
+	ptr2, _ := btreePage.Header.GetCellPointer(pageData, 1)
+
+	// ptr2 should be at end, ptr1 should be just before it
+	expectedPtr2 := uint16(4096 - len(cell2))
+	expectedPtr1 := uint16(int(expectedPtr2) - len(cell1))
+
+	if ptr2 != expectedPtr2 {
+		t.Errorf("Cell 2 pointer = %d, want %d", ptr2, expectedPtr2)
+	}
+
+	if ptr1 != expectedPtr1 {
+		t.Errorf("Cell 1 pointer = %d, want %d", ptr1, expectedPtr1)
+	}
+}
+
+func TestCursorInsert(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(4096)
+
+	// Create a table
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable() error = %v", err)
+	}
+
+	cursor := NewCursor(bt, rootPage)
+
+	// Insert first row
+	err = cursor.Insert(1, []byte("first"))
+	if err != nil {
+		t.Fatalf("Insert(1) error = %v", err)
+	}
+
+	// Insert second row
+	err = cursor.Insert(2, []byte("second"))
+	if err != nil {
+		t.Fatalf("Insert(2) error = %v", err)
+	}
+
+	// Insert third row
+	err = cursor.Insert(3, []byte("third"))
+	if err != nil {
+		t.Fatalf("Insert(3) error = %v", err)
+	}
+
+	// Verify we can seek to each row
+	found, err := cursor.SeekRowid(1)
+	if err != nil {
+		t.Fatalf("SeekRowid(1) error = %v", err)
+	}
+	if !found {
+		t.Error("SeekRowid(1) not found")
+	}
+	if string(cursor.GetPayload()) != "first" {
+		t.Errorf("Payload = %q, want %q", cursor.GetPayload(), "first")
+	}
+
+	found, err = cursor.SeekRowid(2)
+	if err != nil {
+		t.Fatalf("SeekRowid(2) error = %v", err)
+	}
+	if !found {
+		t.Error("SeekRowid(2) not found")
+	}
+	if string(cursor.GetPayload()) != "second" {
+		t.Errorf("Payload = %q, want %q", cursor.GetPayload(), "second")
+	}
+
+	found, err = cursor.SeekRowid(3)
+	if err != nil {
+		t.Fatalf("SeekRowid(3) error = %v", err)
+	}
+	if !found {
+		t.Error("SeekRowid(3) not found")
+	}
+	if string(cursor.GetPayload()) != "third" {
+		t.Errorf("Payload = %q, want %q", cursor.GetPayload(), "third")
+	}
+}
+
+func TestCursorDelete(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(4096)
+
+	// Create a table with some data
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable() error = %v", err)
+	}
+
+	cursor := NewCursor(bt, rootPage)
+
+	// Insert rows
+	cursor.Insert(1, []byte("first"))
+	cursor.Insert(2, []byte("second"))
+	cursor.Insert(3, []byte("third"))
+
+	// Delete the second row
+	found, err := cursor.SeekRowid(2)
+	if err != nil {
+		t.Fatalf("SeekRowid(2) error = %v", err)
+	}
+	if !found {
+		t.Fatal("SeekRowid(2) not found")
+	}
+
+	err = cursor.Delete()
+	if err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	// Verify row 2 is gone
+	found, err = cursor.SeekRowid(2)
+	if err != nil {
+		t.Fatalf("SeekRowid(2) after delete error = %v", err)
+	}
+	if found {
+		t.Error("SeekRowid(2) found after delete")
+	}
+
+	// Verify rows 1 and 3 still exist
+	found, err = cursor.SeekRowid(1)
+	if err != nil {
+		t.Fatalf("SeekRowid(1) error = %v", err)
+	}
+	if !found {
+		t.Error("SeekRowid(1) not found")
+	}
+
+	found, err = cursor.SeekRowid(3)
+	if err != nil {
+		t.Fatalf("SeekRowid(3) error = %v", err)
+	}
+	if !found {
+		t.Error("SeekRowid(3) not found")
+	}
+}
+
+func TestCursorSeekRowid(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(4096)
+
+	// Create a table
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable() error = %v", err)
+	}
+
+	cursor := NewCursor(bt, rootPage)
+
+	// Insert some rows (not in order)
+	cursor.Insert(5, []byte("five"))
+	cursor.Insert(2, []byte("two"))
+	cursor.Insert(8, []byte("eight"))
+	cursor.Insert(1, []byte("one"))
+	cursor.Insert(9, []byte("nine"))
+
 	tests := []struct {
-		name string
-		expr *BinaryExpr
-		want string
+		rowid       int64
+		shouldFind  bool
+		expectedKey int64
 	}{
-		{
-			"OpEq",
-			&BinaryExpr{
-				Left:  &IdentExpr{Name: "a"},
-				Op:    OpEq,
-				Right: &LiteralExpr{Type: LiteralInteger, Value: "1"},
-			},
-			"a = 1",
-		},
-		{
-			"OpConcat",
-			&BinaryExpr{
-				Left:  &LiteralExpr{Type: LiteralString, Value: "hello"},
-				Op:    OpConcat,
-				Right: &LiteralExpr{Type: LiteralString, Value: "world"},
-			},
-			"'hello' || 'world'",
-		},
-		{
-			"OpAnd",
-			&BinaryExpr{
-				Left:  &IdentExpr{Name: "x"},
-				Op:    OpAnd,
-				Right: &IdentExpr{Name: "y"},
-			},
-			"x AND y",
-		},
+		{1, true, 1},
+		{2, true, 2},
+		{3, false, 5}, // Should position at next higher key
+		{5, true, 5},
+		{8, true, 8},
+		{9, true, 9},
+		{10, false, 9}, // Should position at last key
 	}
 
 	for _, tt := range tests {
 		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.expr.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
+		t.Run(fmt.Sprintf("seek_%d", tt.rowid), func(t *testing.T) {
+			found, err := cursor.SeekRowid(tt.rowid)
+			if err != nil {
+				t.Fatalf("SeekRowid(%d) error = %v", tt.rowid, err)
+			}
+
+			if found != tt.shouldFind {
+				t.Errorf("SeekRowid(%d) found = %v, want %v", tt.rowid, found, tt.shouldFind)
+			}
+
+			if cursor.State == CursorValid {
+				key := cursor.GetKey()
+				if !tt.shouldFind && key != tt.expectedKey {
+					t.Errorf("Cursor positioned at key %d, want %d", key, tt.expectedKey)
+				}
 			}
 		})
 	}
 }
 
-func TestInExprStringNilValues(t *testing.T) {
+func TestCursorInsertDuplicateKey(t *testing.T) {
 	t.Parallel()
-	expr := &InExpr{
-		Expr:   &IdentExpr{Name: "id"},
-		Values: []Expression{nil, &LiteralExpr{Type: LiteralInteger, Value: "1"}},
-		Not:    false,
+	bt := NewBtree(4096)
+
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable() error = %v", err)
 	}
-	got := expr.String()
-	// Should skip nil values
-	if got != "id IN (1)" {
-		t.Errorf("InExpr with nil value: got %q, want %q", got, "id IN (1)")
+
+	cursor := NewCursor(bt, rootPage)
+
+	// Insert a row
+	err = cursor.Insert(1, []byte("first"))
+	if err != nil {
+		t.Fatalf("Insert(1) error = %v", err)
+	}
+
+	// Try to insert duplicate key
+	err = cursor.Insert(1, []byte("duplicate"))
+	if err == nil {
+		t.Error("Insert(1) duplicate expected error, got nil")
 	}
 }
 
-func TestBetweenExprStringNilFields(t *testing.T) {
+func TestNewRowidWithData(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		expr *BetweenExpr
-		want string
-	}{
-		{
-			"nil Expr",
-			&BetweenExpr{
-				Expr:  nil,
-				Lower: &LiteralExpr{Type: LiteralInteger, Value: "1"},
-				Upper: &LiteralExpr{Type: LiteralInteger, Value: "10"},
-			},
-			" BETWEEN 1 AND 10",
-		},
-		{
-			"nil Lower",
-			&BetweenExpr{
-				Expr:  &IdentExpr{Name: "x"},
-				Lower: nil,
-				Upper: &LiteralExpr{Type: LiteralInteger, Value: "10"},
-			},
-			"x BETWEEN  AND 10",
-		},
-		{
-			"nil Upper",
-			&BetweenExpr{
-				Expr:  &IdentExpr{Name: "x"},
-				Lower: &LiteralExpr{Type: LiteralInteger, Value: "1"},
-				Upper: nil,
-			},
-			"x BETWEEN 1 AND ",
-		},
+	bt := NewBtree(4096)
+
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable() error = %v", err)
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.expr.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
+	cursor := NewCursor(bt, rootPage)
 
-func TestFunctionExprStringWithNilArgs(t *testing.T) {
-	t.Parallel()
-	expr := &FunctionExpr{
-		Name: "COALESCE",
-		Args: []Expression{
-			&IdentExpr{Name: "a"},
-			nil,
-			&IdentExpr{Name: "b"},
-		},
-	}
-	got := expr.String()
-	// Should skip nil args
-	if got != "COALESCE(a, b)" {
-		t.Errorf("FunctionExpr with nil arg: got %q, want %q", got, "COALESCE(a, b)")
-	}
-}
+	// Insert some rows
+	cursor.Insert(1, []byte("first"))
+	cursor.Insert(5, []byte("fifth"))
+	cursor.Insert(3, []byte("third"))
 
-func TestCaseExprStringNilFields(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		expr *CaseExpr
-		want string
-	}{
-		{
-			"nil condition",
-			&CaseExpr{
-				WhenClauses: []WhenClause{
-					{Condition: nil, Result: &LiteralExpr{Type: LiteralInteger, Value: "1"}},
-				},
-			},
-			"CASE WHEN  THEN 1 END",
-		},
-		{
-			"nil result",
-			&CaseExpr{
-				WhenClauses: []WhenClause{
-					{Condition: &IdentExpr{Name: "x"}, Result: nil},
-				},
-			},
-			"CASE WHEN x THEN  END",
-		},
+	// Get new rowid - should be 6 (max + 1)
+	rowid, err := bt.NewRowid(rootPage)
+	if err != nil {
+		t.Fatalf("NewRowid() error = %v", err)
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.expr.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestInExprStringWithNilExpr(t *testing.T) {
-	t.Parallel()
-	expr := &InExpr{
-		Expr:   nil,
-		Values: []Expression{&LiteralExpr{Type: LiteralInteger, Value: "1"}},
-		Not:    false,
-	}
-	got := expr.String()
-	if got != " IN (1)" {
-		t.Errorf("InExpr with nil Expr: got %q, want %q", got, " IN (1)")
-	}
-}
-
-// Test all AlterTableAction implementations
-func TestAlterTableActionNode(t *testing.T) {
-	t.Parallel()
-	actions := []AlterTableAction{
-		&RenameTableAction{NewName: "new_table"},
-		&RenameColumnAction{OldName: "old_col", NewName: "new_col"},
-		&AddColumnAction{Column: ColumnDef{Name: "col", Type: "TEXT"}},
-		&DropColumnAction{ColumnName: "col"},
-	}
-
-	for _, action := range actions {
-		// Call node() and alterTableAction() for coverage
-		action.node()
-		action.alterTableAction()
-		// Also test String() method
-		_ = action.String()
+	if rowid != 6 {
+		t.Errorf("NewRowid() = %d, want 6", rowid)
 	}
 }

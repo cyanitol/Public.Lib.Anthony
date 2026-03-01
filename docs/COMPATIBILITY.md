@@ -735,3 +735,12 @@ Minimal reproduction:
 - [TYPE_SYSTEM.md](TYPE_SYSTEM.md) - Type system details
 - [PRAGMAS.md](PRAGMAS.md) - PRAGMA commands
 - [TESTING.md](TESTING.md) - Testing guide
+
+## Local SQLite Reference
+
+Complete SQLite 3.51.2 SQL reference is available locally in [docs/sqlite/](sqlite/README.md):
+
+- [Window Functions](sqlite/WINDOW_FUNCTIONS.md) · [RETURNING clause](sqlite/RETURNING.md)
+- [UPSERT](sqlite/UPSERT.md) · [STRICT Tables](sqlite/STRICT_TABLES.md)
+- [WITHOUT ROWID](sqlite/WITHOUT_ROWID.md) · [Generated Columns](sqlite/GENERATED_COLUMNS.md)
+- [Quirks and Gotchas](sqlite/QUIRKS.md) · [SQLite Differences](sqlite/SQLITE_DIFFERENCES.md)

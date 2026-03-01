@@ -272,6 +272,41 @@ Comprehensive documentation on SQLite fundamentals as implemented in Anthony:
 - [Go testing package](https://pkg.go.dev/testing)
 - [Go fuzzing](https://go.dev/doc/fuzz/)
 
+## SQLite Reference Documentation
+
+Complete SQLite 3.51.2 reference, converted to Markdown from official HTML docs.
+See [sqlite/README.md](sqlite/README.md) for the full index (305 files).
+
+### SQL Language
+
+[SELECT](sqlite/SELECT.md) · [INSERT](sqlite/INSERT.md) · [UPDATE](sqlite/UPDATE.md) ·
+[DELETE](sqlite/DELETE.md) · [WITH](sqlite/WITH_CTE.md) · [UPSERT](sqlite/UPSERT.md) ·
+[RETURNING](sqlite/RETURNING.md) · [Window Functions](sqlite/WINDOW_FUNCTIONS.md) ·
+[Savepoints](sqlite/SAVEPOINTS.md) · [Transactions](sqlite/TRANSACTIONS.md)
+
+### Reference
+
+[PRAGMA](sqlite/PRAGMA_REFERENCE.md) · [Functions](sqlite/CORE_FUNCTIONS.md) ·
+[Aggregate](sqlite/AGGREGATE_FUNCTIONS.md) · [Math](sqlite/LANG_MATHFUNC.md) ·
+[Datatypes](sqlite/DATATYPES.md) · [Result Codes](sqlite/RESULT_CODES.md) ·
+[Limits](sqlite/LIMITS.md) · [Quirks](sqlite/QUIRKS.md) · [NULL Handling](sqlite/NULLS.md)
+
+### Extensions
+
+[FTS5](sqlite/FTS5.md) · [FTS3](sqlite/FTS3.md) · [JSON1](sqlite/JSON1.md) ·
+[RTree](sqlite/RTREE.md) · [GeoPoly](sqlite/GEOPOLY.md)
+
+### Internals
+
+[Architecture](sqlite/ARCHITECTURE.md) · [File Format](sqlite/FILE_FORMAT_SPEC.md) ·
+[WAL](sqlite/WAL_SPEC.md) · [VDBE Opcodes](sqlite/VDBE_OPCODES.md) ·
+[Locking](sqlite/LOCKING.md) · [Isolation](sqlite/ISOLATION.md)
+
+### C API & Syntax
+
+[C API Reference](sqlite/c-api/) · [Session Extension](sqlite/session/) ·
+[SQL Syntax Diagrams](sqlite/syntax/)
+
 ## License
 
 This project is in the public domain (SQLite License).

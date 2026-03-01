@@ -1,388 +1,618 @@
-package pager
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+package planner
 
 import (
 	"testing"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 )
 
-func TestBeginReadTransaction(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_begin_read.db"
+// Tests for CTE expression handling functions
 
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Begin read transaction
-	if err := pager.BeginRead(); err != nil {
-		t.Fatalf("failed to begin read transaction: %v", err)
+func TestHandleSubqueryExpr(t *testing.T) {
+	ctx := &CTEContext{
+		CTEs:        make(map[string]*CTEDefinition),
+		IsRecursive: false,
 	}
 
-	// Verify transaction state
-	if !pager.InTransaction() {
-		t.Error("expected to be in transaction")
+	// Add a CTE definition
+	ctx.CTEs["test_cte"] = &CTEDefinition{
+		Name: "test_cte",
+		Select: &parser.SelectStmt{
+			Columns: []parser.ResultColumn{{Star: true}},
+		},
 	}
 
-	state := pager.GetTransactionState()
-	if state != TxRead {
-		t.Errorf("expected TxRead state, got %v", state)
+	// Create a subquery expression that references the CTE
+	subquery := &parser.SubqueryExpr{
+		Select: &parser.SelectStmt{
+			Columns: []parser.ResultColumn{{Star: true}},
+			From: &parser.FromClause{
+				Tables: []parser.TableOrSubquery{
+					{TableName: "test_cte"},
+				},
+			},
+		},
 	}
 
-	// End read transaction
-	if err := pager.EndRead(); err != nil {
-		t.Fatalf("failed to end read transaction: %v", err)
-	}
+	deps := make(map[string]bool)
+	ctx.handleSubqueryExpr(subquery, deps)
 
-	// Verify transaction ended
-	if pager.InTransaction() {
-		t.Error("expected to not be in transaction")
-	}
-}
-
-func TestBeginWriteTransaction(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_begin_write.db"
-
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Begin write transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write transaction: %v", err)
-	}
-
-	// Verify transaction state
-	if !pager.InTransaction() {
-		t.Error("expected to be in transaction")
-	}
-
-	if !pager.InWriteTransaction() {
-		t.Error("expected to be in write transaction")
-	}
-
-	state := pager.GetTransactionState()
-	if state != TxWrite {
-		t.Errorf("expected TxWrite state, got %v", state)
-	}
-
-	// Commit transaction
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit transaction: %v", err)
-	}
-
-	// Verify transaction ended
-	if pager.InTransaction() {
-		t.Error("expected to not be in transaction")
+	if !deps["test_cte"] {
+		t.Error("handleSubqueryExpr should have detected test_cte dependency")
 	}
 }
 
-func TestWriteTransactionExclusive(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_write_exclusive.db"
-
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Begin first write transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin first write transaction: %v", err)
+func TestHandleCaseExpr(t *testing.T) {
+	ctx := &CTEContext{
+		CTEs:        make(map[string]*CTEDefinition),
+		IsRecursive: false,
 	}
 
-	// Try to begin another write transaction - should fail
-	if err := pager.BeginWrite(); err == nil {
-		t.Error("expected error when starting second write transaction")
+	ctx.CTEs["cte1"] = &CTEDefinition{Name: "cte1"}
+	ctx.CTEs["cte2"] = &CTEDefinition{Name: "cte2"}
+
+	// Create a CASE expression that references CTEs in subqueries
+	caseExpr := &parser.CaseExpr{
+		Expr: &parser.SubqueryExpr{
+			Select: &parser.SelectStmt{
+				Columns: []parser.ResultColumn{{Star: true}},
+				From: &parser.FromClause{
+					Tables: []parser.TableOrSubquery{
+						{TableName: "cte1"},
+					},
+				},
+			},
+		},
+		WhenClauses: []parser.WhenClause{
+			{
+				Condition: &parser.BinaryExpr{
+					Left:  &parser.IdentExpr{Name: "id"},
+					Op:    parser.OpEq,
+					Right: &parser.LiteralExpr{Value: "1"},
+				},
+				Result: &parser.LiteralExpr{Value: "active"},
+			},
+		},
+		ElseClause: &parser.SubqueryExpr{
+			Select: &parser.SelectStmt{
+				Columns: []parser.ResultColumn{{Star: true}},
+				From: &parser.FromClause{
+					Tables: []parser.TableOrSubquery{
+						{TableName: "cte2"},
+					},
+				},
+			},
+		},
 	}
 
-	// Commit first transaction
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit transaction: %v", err)
+	deps := make(map[string]bool)
+	ctx.handleCaseExpr(caseExpr, deps)
+
+	if !deps["cte1"] {
+		t.Error("handleCaseExpr should have detected cte1 dependency")
 	}
-}
-
-func TestReadTransactionReadOnly(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_read_only.db"
-
-	// Create database with some data
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	pager.Close()
-
-	// Open read-only
-	pager, err = Open(dbFile, true)
-	if err != nil {
-		t.Fatalf("failed to open pager read-only: %v", err)
-	}
-	defer pager.Close()
-
-	// Should be able to start read transaction
-	if err := pager.BeginRead(); err != nil {
-		t.Fatalf("failed to begin read transaction: %v", err)
-	}
-
-	// Should not be able to start write transaction
-	if err := pager.BeginWrite(); err == nil {
-		t.Error("expected error when starting write transaction on read-only pager")
-	}
-
-	// End read transaction
-	if err := pager.EndRead(); err != nil {
-		t.Fatalf("failed to end read transaction: %v", err)
+	if !deps["cte2"] {
+		t.Error("handleCaseExpr should have detected cte2 dependency")
 	}
 }
 
-func TestTransactionStateTransitions(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_state_transitions.db"
-
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Initial state
-	if pager.InTransaction() {
-		t.Error("should not be in transaction initially")
+func TestHandleCaseExprNoElse(t *testing.T) {
+	ctx := &CTEContext{
+		CTEs:        make(map[string]*CTEDefinition),
+		IsRecursive: false,
 	}
 
-	// Open -> Read
-	if err := pager.BeginRead(); err != nil {
-		t.Fatalf("failed to begin read: %v", err)
-	}
-	if !pager.InTransaction() || pager.GetTransactionState() != TxRead {
-		t.Error("should be in read transaction")
-	}
-
-	// Read -> Open
-	if err := pager.EndRead(); err != nil {
-		t.Fatalf("failed to end read: %v", err)
-	}
-	if pager.InTransaction() {
-		t.Error("should not be in transaction")
+	caseExpr := &parser.CaseExpr{
+		WhenClauses: []parser.WhenClause{
+			{
+				Condition: &parser.BinaryExpr{
+					Left:  &parser.IdentExpr{Name: "id"},
+					Op:    parser.OpGt,
+					Right: &parser.LiteralExpr{Value: "100"},
+				},
+				Result: &parser.LiteralExpr{Value: "high"},
+			},
+		},
+		ElseClause: nil,
 	}
 
-	// Open -> Write
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-	if !pager.InWriteTransaction() || pager.GetTransactionState() != TxWrite {
-		t.Error("should be in write transaction")
-	}
+	deps := make(map[string]bool)
+	ctx.handleCaseExpr(caseExpr, deps)
 
-	// Write -> Open (commit)
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-	if pager.InTransaction() {
-		t.Error("should not be in transaction after commit")
-	}
-
-	// Open -> Write -> Open (rollback)
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-	if err := pager.Rollback(); err != nil {
-		t.Fatalf("failed to rollback: %v", err)
-	}
-	if pager.InTransaction() {
-		t.Error("should not be in transaction after rollback")
+	// Should not panic with nil ElseClause
+	if len(deps) != 0 {
+		t.Error("no dependencies should be found")
 	}
 }
 
-func TestTransactionIsolation(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_isolation.db"
-
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Start write transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
+func TestCheckLevelCircularity(t *testing.T) {
+	ctx := &CTEContext{
+		CTEs: make(map[string]*CTEDefinition),
 	}
 
-	// Get a page and modify it
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
+	// Create a circular dependency: A -> B -> A
+	defA := &CTEDefinition{
+		Name:      "A",
+		DependsOn: []string{"B"},
+		Level:     0,
+	}
+	ctx.CTEs["A"] = defA
+	ctx.CTEs["B"] = &CTEDefinition{
+		Name:      "B",
+		DependsOn: []string{"A"},
+		Level:     0,
 	}
 
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to mark page writable: %v", err)
-	}
-
-	// Modify page data
-	originalData := make([]byte, len(page.Data))
-	copy(originalData, page.Data)
-	page.Data[0] = 0xFF
-
-	pager.Put(page)
-
-	// Rollback transaction
-	if err := pager.Rollback(); err != nil {
-		t.Fatalf("failed to rollback: %v", err)
-	}
-
-	// Verify data was restored
-	page2, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page after rollback: %v", err)
-	}
-	defer pager.Put(page2)
-
-	if page2.Data[0] == 0xFF {
-		t.Error("page data was not restored after rollback")
+	visiting := map[string]bool{"A": true}
+	err := ctx.checkLevelCircularity("A", defA, visiting)
+	if err == nil {
+		t.Error("checkLevelCircularity should detect circular dependency")
 	}
 }
 
-func TestLockStateManagement(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_lock_state.db"
+func TestCheckLevelCircularityNoCycle(t *testing.T) {
+	ctx := &CTEContext{
+		CTEs: make(map[string]*CTEDefinition),
+	}
 
-	pager, err := Open(dbFile, false)
+	// Create a non-circular dependency: A -> B -> C
+	defA := &CTEDefinition{
+		Name:      "A",
+		DependsOn: []string{"B"},
+		Level:     0,
+	}
+	ctx.CTEs["A"] = defA
+	ctx.CTEs["B"] = &CTEDefinition{
+		Name:      "B",
+		DependsOn: []string{"C"},
+		Level:     0,
+	}
+	ctx.CTEs["C"] = &CTEDefinition{
+		Name:      "C",
+		DependsOn: []string{},
+		Level:     1,
+	}
+
+	visiting := map[string]bool{}
+	err := ctx.checkLevelCircularity("A", defA, visiting)
 	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Initial lock state
-	if pager.GetLockState() != LockNone {
-		t.Error("initial lock state should be LockNone")
-	}
-
-	// Begin read transaction
-	if err := pager.BeginRead(); err != nil {
-		t.Fatalf("failed to begin read: %v", err)
-	}
-
-	// Should have shared lock
-	if pager.GetLockState() < LockShared {
-		t.Error("should have at least shared lock in read transaction")
-	}
-
-	// End read transaction
-	if err := pager.EndRead(); err != nil {
-		t.Fatalf("failed to end read: %v", err)
-	}
-
-	// Begin write transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	// Should have reserved lock
-	if pager.GetLockState() < LockReserved {
-		t.Error("should have at least reserved lock in write transaction")
-	}
-
-	// Commit
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Lock should be released
-	if pager.GetLockState() != LockNone {
-		t.Error("lock should be released after commit")
+		t.Errorf("checkLevelCircularity should not detect circular dependency, got: %v", err)
 	}
 }
 
-func TestJournalModeSettings(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_journal_mode.db"
+func TestCalculateMaxDependencyLevel(t *testing.T) {
+	ctx := &CTEContext{
+		CTEs: make(map[string]*CTEDefinition),
+	}
 
-	pager, err := Open(dbFile, false)
+	// Create dependency chain: A -> B -> C
+	ctx.CTEs["C"] = &CTEDefinition{
+		Name:      "C",
+		DependsOn: []string{},
+		Level:     1,
+	}
+	ctx.CTEs["B"] = &CTEDefinition{
+		Name:      "B",
+		DependsOn: []string{"C"},
+		Level:     2,
+	}
+	defA := &CTEDefinition{
+		Name:      "A",
+		DependsOn: []string{"B"},
+		Level:     0,
+	}
+	ctx.CTEs["A"] = defA
+
+	visiting := map[string]bool{}
+	maxLevel, err := ctx.calculateMaxDependencyLevel("A", defA, visiting)
 	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
+		t.Fatalf("calculateMaxDependencyLevel() error = %v", err)
 	}
-	defer pager.Close()
-
-	// Default journal mode
-	if pager.GetJournalMode() != JournalModeDelete {
-		t.Error("default journal mode should be DELETE")
+	if maxLevel != 2 {
+		t.Errorf("expected max level 2, got %d", maxLevel)
 	}
-
-	// Set journal mode
-	modes := []int{
-		JournalModePersist,
-		JournalModeTruncate,
-		JournalModeOff,
-		JournalModeDelete,
-	}
-
-	for _, mode := range modes {
-		if err := pager.SetJournalMode(mode); err != nil {
-			t.Errorf("failed to set journal mode %d: %v", mode, err)
-		}
-
-		if pager.GetJournalMode() != mode {
-			t.Errorf("journal mode not set correctly: expected %d, got %d", mode, pager.GetJournalMode())
-		}
-	}
-
-	// Try to set invalid mode
-	if err := pager.SetJournalMode(999); err == nil {
-		t.Error("expected error when setting invalid journal mode")
-	}
-
-	// Cannot change journal mode during transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	if err := pager.SetJournalMode(JournalModePersist); err == nil {
-		t.Error("expected error when changing journal mode during transaction")
-	}
-
-	pager.Rollback()
 }
 
-func TestPageCountTracking(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_page_count.db"
+func TestCalculateMaxDependencyLevelNoDeps(t *testing.T) {
+	ctx := &CTEContext{
+		CTEs: make(map[string]*CTEDefinition),
+	}
 
-	pager, err := Open(dbFile, false)
+	defA := &CTEDefinition{
+		Name:      "A",
+		DependsOn: []string{},
+		Level:     0,
+	}
+	ctx.CTEs["A"] = defA
+
+	visiting := map[string]bool{}
+	maxLevel, err := ctx.calculateMaxDependencyLevel("A", defA, visiting)
 	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
+		t.Fatalf("calculateMaxDependencyLevel() error = %v", err)
 	}
-	defer pager.Close()
-
-	// Initial page count
-	initialCount := pager.GetPageCount()
-
-	// Begin write transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	// Original count should be saved
-	if pager.GetOriginalPageCount() != initialCount {
-		t.Error("original page count not saved correctly")
-	}
-
-	// Commit
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
+	if maxLevel != 0 {
+		t.Errorf("expected max level 0, got %d", maxLevel)
 	}
 }
+
+// Tests for join functions
+
+func TestValidateTableCount(t *testing.T) {
+	jo := &JoinOptimizer{
+		CostModel: NewCostModel(),
+		Tables:    []*TableInfo{},
+		WhereInfo: &WhereInfo{},
+	}
+
+	tests := []struct {
+		name    string
+		count   int
+		wantErr bool
+	}{
+		{"zero tables", 0, true},
+		{"one table", 1, false},
+		{"many tables", 10, false},
+		{"max tables", 64, false},
+		{"too many tables", 65, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := jo.validateTableCount(tt.count)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateTableCount(%d) error = %v, wantErr %v", tt.count, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestEnumerateSubsets(t *testing.T) {
+	jo := &JoinOptimizer{
+		CostModel: NewCostModel(),
+		Tables:    createJoinTestTables()[:3],
+		WhereInfo: &WhereInfo{
+			Clause: &WhereClause{Terms: []*WhereTerm{}},
+		},
+	}
+
+	callback := func(subset uint64) {
+		// Just count callbacks
+	}
+
+	jo.enumerateSubsets(3, 2, callback)
+	// If this doesn't panic, the test passes
+}
+
+func TestEnumerateSubsetsAllSizes(t *testing.T) {
+	jo := &JoinOptimizer{
+		CostModel: NewCostModel(),
+		Tables:    createJoinTestTables()[:3],
+		WhereInfo: &WhereInfo{
+			Clause: &WhereClause{Terms: []*WhereTerm{}},
+		},
+	}
+
+	callbackCount := 0
+	callback := func(subset uint64) {
+		callbackCount++
+	}
+
+	// Test with size 1
+	jo.enumerateSubsets(3, 1, callback)
+	if callbackCount != 3 {
+		t.Errorf("expected 3 subsets of size 1, got %d", callbackCount)
+	}
+
+	// Test with size 2
+	callbackCount = 0
+	jo.enumerateSubsets(3, 2, callback)
+	if callbackCount != 3 {
+		t.Errorf("expected 3 subsets of size 2, got %d", callbackCount)
+	}
+
+	// Test with size 3
+	callbackCount = 0
+	jo.enumerateSubsets(3, 3, callback)
+	if callbackCount != 1 {
+		t.Errorf("expected 1 subset of size 3, got %d", callbackCount)
+	}
+}
+
+func TestEstimateSingleTableCost(t *testing.T) {
+	tables := createJoinTestTables()
+	jo := &JoinOptimizer{
+		CostModel: NewCostModel(),
+		Tables:    tables,
+		WhereInfo: &WhereInfo{
+			Clause: &WhereClause{Terms: []*WhereTerm{}},
+			Tables: tables,
+		},
+	}
+
+	cost := jo.estimateSingleTableCost(0)
+	if cost <= 0 {
+		t.Errorf("expected positive cost, got %d", cost)
+	}
+}
+
+func TestEstimateSingleTableCostWithNilWhereInfo(t *testing.T) {
+	tables := createJoinTestTables()
+	jo := &JoinOptimizer{
+		CostModel: NewCostModel(),
+		Tables:    tables,
+		WhereInfo: nil,
+	}
+
+	cost := jo.estimateSingleTableCost(0)
+	if cost <= 0 {
+		t.Errorf("expected positive cost, got %d", cost)
+	}
+}
+
+func TestFindJoinConditions(t *testing.T) {
+	tables := createJoinTestTables()
+
+	// Create join condition: users.dept_id = departments.id
+	term := &WhereTerm{
+		Operator:    WO_EQ,
+		LeftCursor:  0, // users
+		LeftColumn:  2, // dept_id
+		PrereqAll:   (Bitmask(1) << 0) | (Bitmask(1) << 1),
+		PrereqRight: Bitmask(1) << 1, // departments
+	}
+
+	whereInfo := &WhereInfo{
+		Clause: &WhereClause{
+			Terms: []*WhereTerm{term},
+		},
+		Tables: tables,
+	}
+
+	jo := &JoinOptimizer{
+		CostModel: NewCostModel(),
+		Tables:    tables,
+		WhereInfo: whereInfo,
+	}
+
+	// Test finding join conditions between users (0) and departments (1)
+	left := &JoinOrder{
+		Tables:   []int{0},
+		Cost:     0,
+		RowCount: NewLogEst(10000),
+	}
+	right := &JoinOrder{
+		Tables:   []int{1},
+		Cost:     0,
+		RowCount: NewLogEst(100),
+	}
+
+	conditions := jo.findJoinConditions(left, right)
+	if len(conditions) != 1 {
+		t.Errorf("expected 1 join condition, got %d", len(conditions))
+	}
+}
+
+func TestFindJoinConditionsNoMatch(t *testing.T) {
+	tables := createJoinTestTables()
+
+	whereInfo := &WhereInfo{
+		Clause: &WhereClause{
+			Terms: []*WhereTerm{},
+		},
+		Tables: tables,
+	}
+
+	jo := &JoinOptimizer{
+		CostModel: NewCostModel(),
+		Tables:    tables,
+		WhereInfo: whereInfo,
+	}
+
+	// Test with no join conditions
+	left := &JoinOrder{
+		Tables:   []int{0},
+		Cost:     0,
+		RowCount: NewLogEst(10000),
+	}
+	right := &JoinOrder{
+		Tables:   []int{1},
+		Cost:     0,
+		RowCount: NewLogEst(100),
+	}
+
+	conditions := jo.findJoinConditions(left, right)
+	if len(conditions) != 0 {
+		t.Errorf("expected 0 join conditions, got %d", len(conditions))
+	}
+}
+
+// Tests for explain functions
+
+func TestFormatJoinType(t *testing.T) {
+	tests := []struct {
+		joinType parser.JoinType
+		expected string
+	}{
+		{parser.JoinInner, "INNER JOIN"},
+		{parser.JoinLeft, "LEFT JOIN"},
+		{parser.JoinCross, "CROSS JOIN"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			result := formatJoinType(tt.joinType)
+			if result != tt.expected {
+				t.Errorf("formatJoinType(%v) = %q, want %q", tt.joinType, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGenerateExplainForInsertWithValues(t *testing.T) {
+	insert := &parser.InsertStmt{
+		Table: "users",
+		Columns: []string{"id", "name"},
+		Values: [][]parser.Expression{
+			{
+				&parser.LiteralExpr{Value: "1"},
+				&parser.LiteralExpr{Value: "Alice"},
+			},
+		},
+	}
+
+	plan, err := GenerateExplain(insert)
+	if err != nil {
+		t.Fatalf("GenerateExplain() error = %v", err)
+	}
+
+	if plan == nil {
+		t.Error("GenerateExplain should not return nil plan")
+	}
+}
+
+func TestGenerateExplainForInsertWithSelect(t *testing.T) {
+	insert := &parser.InsertStmt{
+		Table: "users",
+		Select: &parser.SelectStmt{
+			Columns: []parser.ResultColumn{{Star: true}},
+			From: &parser.FromClause{
+				Tables: []parser.TableOrSubquery{
+					{TableName: "temp_users"},
+				},
+			},
+		},
+	}
+
+	plan, err := GenerateExplain(insert)
+	if err != nil {
+		t.Fatalf("GenerateExplain() error = %v", err)
+	}
+
+	if plan == nil {
+		t.Error("GenerateExplain should not return nil plan")
+	}
+}
+
+func TestGenerateExplainWithSubqueries(t *testing.T) {
+	sel := &parser.SelectStmt{
+		Columns: []parser.ResultColumn{{Star: true}},
+		From: &parser.FromClause{
+			Tables: []parser.TableOrSubquery{
+				{
+					Subquery: &parser.SelectStmt{
+						Columns: []parser.ResultColumn{{Star: true}},
+						From: &parser.FromClause{
+							Tables: []parser.TableOrSubquery{
+								{TableName: "users"},
+							},
+						},
+					},
+					Alias: "u",
+				},
+			},
+		},
+	}
+
+	plan, err := GenerateExplain(sel)
+	if err != nil {
+		t.Fatalf("GenerateExplain() error = %v", err)
+	}
+
+	if plan == nil {
+		t.Error("GenerateExplain should not return nil")
+	}
+
+	// Check that the plan includes a subquery node
+	if len(plan.Roots) == 0 {
+		t.Error("expected at least one root node")
+	}
+}
+
+// Tests for types.go String() methods - already tested via integration tests
+
+// Tests for subquery optimizer - additional coverage
+
+func TestTryTypeSpecificOptimization(t *testing.T) {
+	opt := NewSubqueryOptimizer(NewCostModel())
+
+	// Test that scalar subqueries return nil
+	info := &SubqueryInfo{
+		Type:           SubqueryScalar,
+		IsCorrelated:   false,
+		EstimatedRows:  NewLogEst(100),
+		ExecutionCount: NewLogEst(1),
+	}
+
+	whereInfo := &WhereInfo{
+		Tables: []*TableInfo{
+			{Name: "test", RowCount: 1000, RowLogEst: NewLogEst(1000)},
+		},
+		NOut: NewLogEst(1000),
+	}
+
+	result, _ := opt.tryTypeSpecificOptimization(info, whereInfo)
+	if result != nil {
+		t.Error("expected nil result for scalar subquery")
+	}
+
+	// Test IN subquery (may or may not optimize, but shouldn't crash)
+	info.Type = SubqueryIn
+	_, _ = opt.tryTypeSpecificOptimization(info, whereInfo)
+
+	// Test EXISTS subquery (may or may not optimize, but shouldn't crash)
+	info.Type = SubqueryExists
+	_, _ = opt.tryTypeSpecificOptimization(info, whereInfo)
+}
+
+func TestSubqueryTypeString(t *testing.T) {
+	tests := []struct {
+		typ      SubqueryType
+		expected string
+	}{
+		{SubqueryScalar, "SCALAR"},
+		{SubqueryExists, "EXISTS"},
+		{SubqueryIn, "IN"},
+		{SubqueryFrom, "FROM"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			result := tt.typ.String()
+			if result != tt.expected {
+				t.Errorf("SubqueryType.String() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSubqueryTypeStringUnknown(t *testing.T) {
+	var st SubqueryType = 999
+	result := st.String()
+	if result != "UNKNOWN" {
+		t.Errorf("expected 'UNKNOWN', got %q", result)
+	}
+}
+
+// TestRowSourceString removed - RowSource is not exported
+
+func TestNewLogEst(t *testing.T) {
+	tests := []struct {
+		n int64
+	}{
+		{0},
+		{1},
+		{10},
+		{100},
+		{1000},
+		{10000},
+	}
+
+	for _, tt := range tests {
+		result := NewLogEst(tt.n)
+		// Just verify it doesn't panic
+		_ = result
+	}
+}
+
+// Tests for additional join algorithm coverage - moved to join_test.go

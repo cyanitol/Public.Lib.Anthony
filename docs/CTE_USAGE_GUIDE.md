@@ -439,3 +439,7 @@ CTEs are a powerful tool for writing clear, maintainable SQL queries. Use them t
 - Generate sequences and series
 
 Start simple and build up complexity as needed. Your future self (and teammates) will thank you for the clarity!
+
+## See Also
+
+- [SQLite WITH Reference (local)](sqlite/WITH_CTE.md) — official SQLite CTE syntax reference

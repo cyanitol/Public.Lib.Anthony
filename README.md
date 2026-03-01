@@ -1,7 +1,7 @@
 # Anthony - Pure Go SQLite Implementation
 
 [![Go Version](https://img.shields.io/badge/go-1.26+-blue.svg)](https://golang.org/dl/)
-[![License](https://img.shields.io/badge/license-Public%20Domain-green.svg)](https://github.com/JuniperBible/Public.Lib.Anthony/blob/main/README.md#license)
+[![License](https://img.shields.io/badge/license-Tri--License-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](#testing)
 
 A pure Go SQLite implementation for the JuniperBible project. This library provides a complete SQLite database engine written entirely in Go with no CGO dependencies, making it easy to cross-compile and deploy.
@@ -214,17 +214,23 @@ For security vulnerabilities, please see [docs/SECURITY.md](docs/SECURITY.md) fo
 - **Configure connection pool** settings appropriately
 - **Use transactions** for bulk inserts and updates
 
+## Development status
+
+This project is open source, but we are **not accepting external code
+contributions at this time**. Issues and feedback are welcome.
+
 ## License
 
-Public Domain (SQLite License)
+Licensed under your choice of: **Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0**.
 
-The authors disclaim copyright to this source code. In place of a legal notice, here is a blessing:
+See `LICENSE` and the `LICENSE-*` files for full text.
+
+In the spirit of SQLite, the authors disclaim copyright to this source code.
+Here is the SQLite Blessing:
 
 - May you do good and not evil.
 - May you find forgiveness for yourself and forgive others.
 - May you share freely, never taking more than you give.
-
-This project honors the tradition of SQLite by placing the code in the public domain.
 
 ## Acknowledgments
 

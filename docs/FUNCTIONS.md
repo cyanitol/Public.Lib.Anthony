@@ -1691,10 +1691,11 @@ See `internal/functions/udf.go` for the complete UDF framework documentation.
 
 ## See Also
 
-- [SQLite Core Functions Documentation](https://sqlite.org/lang_corefunc.html)
-- [SQLite Aggregate Functions Documentation](https://sqlite.org/lang_aggfunc.html)
+- [Core Functions (local)](sqlite/CORE_FUNCTIONS.md) ([sqlite.org](https://sqlite.org/lang_corefunc.html))
+- [Aggregate Functions (local)](sqlite/AGGREGATE_FUNCTIONS.md) ([sqlite.org](https://sqlite.org/lang_aggfunc.html))
+- [Math Functions (local)](sqlite/MATH_FUNCTIONS.md)
+- [JSON Functions (local)](sqlite/JSON1.md) ([sqlite.org](https://sqlite.org/json1.html))
 - [SQLite Date/Time Functions Documentation](https://sqlite.org/lang_datefunc.html)
-- [SQLite JSON Functions Documentation](https://sqlite.org/json1.html)
 - [Anthony SQL Reference](SQL_REFERENCE.md)
 - [Anthony Architecture](ARCHITECTURE.md)
 

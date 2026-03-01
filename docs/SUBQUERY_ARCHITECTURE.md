@@ -486,3 +486,8 @@ This architecture provides:
 ✅ **Debuggability**: Comprehensive bytecode comments
 
 The framework is **production-ready** and awaits SELECT compiler integration.
+
+## See Also
+
+- [SQLite Expressions Reference (local)](sqlite/EXPRESSIONS.md)
+- [SQLite SELECT Reference (local)](sqlite/SELECT.md)

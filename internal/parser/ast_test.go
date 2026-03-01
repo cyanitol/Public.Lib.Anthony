@@ -1,611 +1,187 @@
-package parser
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// Package collation provides collation sequences for string comparison operations.
+// This is a low-level package with no dependencies on other internal packages
+// except for utf, which provides the actual comparison implementations.
+package collation
 
 import (
-	"testing"
+	"fmt"
+	"sync"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/utf"
 )
 
-func TestCompoundOpString(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		op   CompoundOp
-		want string
-	}{
-		{CompoundUnion, "UNION"},
-		{CompoundUnionAll, "UNION ALL"},
-		{CompoundExcept, "EXCEPT"},
-		{CompoundIntersect, "INTERSECT"},
-		{CompoundOp(999), "UNKNOWN"},
+// CollationFunc is a function type for custom collation comparison.
+// It compares two strings and returns:
+//
+//	-1 if a < b
+//	 0 if a == b
+//	+1 if a > b
+type CollationFunc func(a, b string) int
+
+// Collation represents a collation sequence used for string comparisons.
+type Collation struct {
+	Name string        // Collation name (e.g., "BINARY", "NOCASE", "RTRIM")
+	Func CollationFunc // Comparison function
+}
+
+// CollationRegistry manages registered collation sequences.
+type CollationRegistry struct {
+	collations map[string]*Collation
+	mu         sync.RWMutex
+}
+
+var (
+	// globalRegistry is the global collation registry.
+	globalRegistry = NewCollationRegistry()
+)
+
+// NewCollationRegistry creates a new collation registry with built-in collations.
+func NewCollationRegistry() *CollationRegistry {
+	cr := &CollationRegistry{
+		collations: make(map[string]*Collation),
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		got := tt.op.String()
-		if got != tt.want {
-			t.Errorf("CompoundOp(%d).String() = %q, want %q", tt.op, got, tt.want)
-		}
+	// Register built-in collations
+	cr.registerBuiltinCollations()
+
+	return cr
+}
+
+// registerBuiltinCollations registers SQLite's standard collation sequences.
+func (cr *CollationRegistry) registerBuiltinCollations() {
+	// BINARY: Byte-by-byte comparison (case-sensitive, default)
+	cr.collations["BINARY"] = &Collation{
+		Name: "BINARY",
+		Func: utf.CompareBinary,
+	}
+
+	// NOCASE: Case-insensitive comparison for ASCII characters (A-Z = a-z)
+	// Note: Only ASCII characters are folded, matching SQLite behavior
+	cr.collations["NOCASE"] = &Collation{
+		Name: "NOCASE",
+		Func: utf.CompareNoCase,
+	}
+
+	// RTRIM: Ignores trailing spaces during comparison
+	cr.collations["RTRIM"] = &Collation{
+		Name: "RTRIM",
+		Func: utf.CompareRTrim,
 	}
 }
 
-func TestAlterTableActionString(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		action AlterTableAction
-		want   string
-	}{
-		{
-			name:   "RenameTableAction",
-			action: &RenameTableAction{NewName: "new_table"},
-			want:   "RENAME TO",
-		},
-		{
-			name:   "RenameColumnAction",
-			action: &RenameColumnAction{OldName: "old_col", NewName: "new_col"},
-			want:   "RENAME COLUMN",
-		},
-		{
-			name: "AddColumnAction",
-			action: &AddColumnAction{
-				Column: ColumnDef{Name: "new_column", Type: "TEXT"},
-			},
-			want: "ADD COLUMN",
-		},
-		{
-			name:   "DropColumnAction",
-			action: &DropColumnAction{ColumnName: "old_column"},
-			want:   "DROP COLUMN",
-		},
+// Register registers a custom collation sequence.
+// If a collation with the same name already exists, it will be replaced.
+func (cr *CollationRegistry) Register(name string, fn CollationFunc) error {
+	if name == "" {
+		return fmt.Errorf("collation name cannot be empty")
+	}
+	if fn == nil {
+		return fmt.Errorf("collation function cannot be nil")
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.action.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+
+	cr.collations[name] = &Collation{
+		Name: name,
+		Func: fn,
 	}
+
+	return nil
 }
 
-func TestUpsertClause(t *testing.T) {
-	t.Parallel()
-	// UpsertClause doesn't have a String method, just test creation
-	upsert := &UpsertClause{
-		Target: &ConflictTarget{
-			Columns: []IndexedColumn{{Column: "id"}},
-		},
-		Action: ConflictDoUpdate,
-	}
-	if upsert == nil {
-		t.Error("expected UpsertClause, got nil")
-	}
+// Get retrieves a collation by name.
+// Returns the collation and true if found, nil and false otherwise.
+func (cr *CollationRegistry) Get(name string) (*Collation, bool) {
+	cr.mu.RLock()
+	defer cr.mu.RUnlock()
+
+	coll, ok := cr.collations[name]
+	return coll, ok
 }
 
-func TestBinaryExprString(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		expr *BinaryExpr
-		want string
-	}{
-		{
-			name: "simple binary expr",
-			expr: &BinaryExpr{
-				Left:  &LiteralExpr{Type: LiteralInteger, Value: "1"},
-				Op:    OpPlus,
-				Right: &LiteralExpr{Type: LiteralInteger, Value: "2"},
-			},
-			want: "1 + 2",
-		},
-		{
-			name: "nil left",
-			expr: &BinaryExpr{
-				Left:  nil,
-				Op:    OpPlus,
-				Right: &LiteralExpr{Type: LiteralInteger, Value: "2"},
-			},
-			want: "nil + 2",
-		},
-		{
-			name: "nil right",
-			expr: &BinaryExpr{
-				Left:  &LiteralExpr{Type: LiteralInteger, Value: "1"},
-				Op:    OpPlus,
-				Right: nil,
-			},
-			want: "1 + nil",
-		},
+// Unregister removes a collation from the registry.
+// Built-in collations (BINARY, NOCASE, RTRIM) cannot be unregistered.
+func (cr *CollationRegistry) Unregister(name string) error {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+
+	// Protect built-in collations
+	if name == "BINARY" || name == "NOCASE" || name == "RTRIM" {
+		return fmt.Errorf("cannot unregister built-in collation: %s", name)
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.expr.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
+	delete(cr.collations, name)
+	return nil
 }
 
-func TestUnaryExprString(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		expr *UnaryExpr
-		want string
-	}{
-		{
-			name: "negation",
-			expr: &UnaryExpr{
-				Op:   OpNeg,
-				Expr: &LiteralExpr{Type: LiteralInteger, Value: "5"},
-			},
-			want: "-5",
-		},
-		{
-			name: "not",
-			expr: &UnaryExpr{
-				Op:   OpNot,
-				Expr: &IdentExpr{Name: "flag"},
-			},
-			want: "NOT flag",
-		},
-		{
-			name: "nil expr",
-			expr: &UnaryExpr{
-				Op:   OpNeg,
-				Expr: nil,
-			},
-			want: "-nil",
-		},
+// List returns a list of all registered collation names.
+func (cr *CollationRegistry) List() []string {
+	cr.mu.RLock()
+	defer cr.mu.RUnlock()
+
+	names := make([]string, 0, len(cr.collations))
+	for name := range cr.collations {
+		names = append(names, name)
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.expr.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
+	return names
 }
 
-func TestUnaryIsNullExprString(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		expr *UnaryExpr
-		want string
-	}{
-		{
-			name: "IS NULL",
-			expr: &UnaryExpr{
-				Op:   OpIsNull,
-				Expr: &IdentExpr{Name: "value"},
-			},
-			want: "value IS NULL",
-		},
-		{
-			name: "IS NOT NULL",
-			expr: &UnaryExpr{
-				Op:   OpNotNull,
-				Expr: &IdentExpr{Name: "value"},
-			},
-			want: "value IS NOT NULL",
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.expr.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
+// GlobalRegistry returns the global collation registry.
+func GlobalRegistry() *CollationRegistry {
+	return globalRegistry
 }
 
-func TestInExprString(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		expr *InExpr
-		want string
-	}{
-		{
-			name: "IN list",
-			expr: &InExpr{
-				Expr: &IdentExpr{Name: "id"},
-				Values: []Expression{
-					&LiteralExpr{Type: LiteralInteger, Value: "1"},
-					&LiteralExpr{Type: LiteralInteger, Value: "2"},
-				},
-				Not: false,
-			},
-			want: "id IN (1, 2)",
-		},
-		{
-			name: "NOT IN list",
-			expr: &InExpr{
-				Expr: &IdentExpr{Name: "id"},
-				Values: []Expression{
-					&LiteralExpr{Type: LiteralInteger, Value: "1"},
-				},
-				Not: true,
-			},
-			want: "id NOT IN (1)",
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.expr.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
+// RegisterCollation registers a custom collation in the global registry.
+func RegisterCollation(name string, fn CollationFunc) error {
+	return globalRegistry.Register(name, fn)
 }
 
-func TestBetweenExprString(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		expr *BetweenExpr
-		want string
-	}{
-		{
-			name: "BETWEEN",
-			expr: &BetweenExpr{
-				Expr:  &IdentExpr{Name: "age"},
-				Lower: &LiteralExpr{Type: LiteralInteger, Value: "18"},
-				Upper: &LiteralExpr{Type: LiteralInteger, Value: "65"},
-				Not:   false,
-			},
-			want: "age BETWEEN 18 AND 65",
-		},
-		{
-			name: "NOT BETWEEN",
-			expr: &BetweenExpr{
-				Expr:  &IdentExpr{Name: "age"},
-				Lower: &LiteralExpr{Type: LiteralInteger, Value: "18"},
-				Upper: &LiteralExpr{Type: LiteralInteger, Value: "65"},
-				Not:   true,
-			},
-			want: "age NOT BETWEEN 18 AND 65",
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.expr.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
+// GetCollation retrieves a collation from the global registry.
+func GetCollation(name string) (*Collation, bool) {
+	return globalRegistry.Get(name)
 }
 
-func TestFunctionExprString(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		expr *FunctionExpr
-		want string
-	}{
-		{
-			name: "no args",
-			expr: &FunctionExpr{
-				Name: "COUNT",
-				Args: []Expression{},
-			},
-			want: "COUNT()",
-		},
-		{
-			name: "with args",
-			expr: &FunctionExpr{
-				Name: "MAX",
-				Args: []Expression{&IdentExpr{Name: "age"}},
-			},
-			want: "MAX(age)",
-		},
-		{
-			name: "COUNT(*)",
-			expr: &FunctionExpr{
-				Name:     "COUNT",
-				Args:     []Expression{},
-				Star:     true,
-				Distinct: false,
-			},
-			want: "COUNT(*)",
-		},
-		{
-			name: "COUNT(DISTINCT)",
-			expr: &FunctionExpr{
-				Name:     "COUNT",
-				Args:     []Expression{&IdentExpr{Name: "id"}},
-				Distinct: true,
-			},
-			want: "COUNT(DISTINCT id)",
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.expr.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
+// UnregisterCollation removes a collation from the global registry.
+func UnregisterCollation(name string) error {
+	return globalRegistry.Unregister(name)
 }
 
-func TestCaseExprString(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		expr *CaseExpr
-		want string
-	}{
-		{
-			name: "simple CASE",
-			expr: &CaseExpr{
-				Expr: nil,
-				WhenClauses: []WhenClause{
-					{
-						Condition: &BinaryExpr{
-							Left:  &IdentExpr{Name: "age"},
-							Op:    OpGt,
-							Right: &LiteralExpr{Type: LiteralInteger, Value: "18"},
-						},
-						Result: &LiteralExpr{Type: LiteralString, Value: "adult"},
-					},
-				},
-				ElseClause: &LiteralExpr{Type: LiteralString, Value: "minor"},
-			},
-			want: "CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END",
-		},
-		{
-			name: "CASE with base",
-			expr: &CaseExpr{
-				Expr: &IdentExpr{Name: "status"},
-				WhenClauses: []WhenClause{
-					{
-						Condition: &LiteralExpr{Type: LiteralInteger, Value: "1"},
-						Result:    &LiteralExpr{Type: LiteralString, Value: "active"},
-					},
-				},
-				ElseClause: nil,
-			},
-			want: "CASE status WHEN 1 THEN 'active' END",
-		},
+// Compare compares two strings using the specified collation.
+// If the collation is empty or not found, BINARY collation is used.
+func Compare(a, b string, collationName string) int {
+	if collationName == "" {
+		collationName = "BINARY"
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.expr.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
+	coll, ok := GetCollation(collationName)
+	if !ok {
+		// Fall back to BINARY if collation not found
+		coll, _ = GetCollation("BINARY")
 	}
+
+	return coll.Func(a, b)
 }
 
-func TestCastExprString(t *testing.T) {
-	t.Parallel()
-	expr := &CastExpr{
-		Expr: &IdentExpr{Name: "value"},
-		Type: "INTEGER",
-	}
-	got := expr.String()
-	want := "CAST(value AS INTEGER)"
-	if got != want {
-		t.Errorf("CastExpr.String() = %q, want %q", got, want)
-	}
+// CompareBytes compares two byte slices using the specified collation.
+// If the collation is empty or not found, BINARY collation is used.
+func CompareBytes(a, b []byte, collationName string) int {
+	return Compare(string(a), string(b), collationName)
 }
 
-func TestCollateExprString(t *testing.T) {
-	t.Parallel()
-	expr := &CollateExpr{
-		Expr:      &IdentExpr{Name: "name"},
-		Collation: "NOCASE",
+// GetCollationFunc retrieves just the comparison function for a collation.
+// Returns nil if the collation is not found.
+func GetCollationFunc(name string) CollationFunc {
+	coll, ok := GetCollation(name)
+	if !ok {
+		return nil
 	}
-	got := expr.String()
-	want := "name COLLATE NOCASE"
-	if got != want {
-		t.Errorf("CollateExpr.String() = %q, want %q", got, want)
-	}
+	return coll.Func
 }
 
-func TestExistsExprString(t *testing.T) {
-	t.Parallel()
-	expr := &ExistsExpr{
-		Select: &SelectStmt{},
-	}
-	got := expr.String()
-	want := "EXISTS (SELECT ...)"
-	if got != want {
-		t.Errorf("ExistsExpr.String() = %q, want %q", got, want)
-	}
-}
-
-func TestParenExprString(t *testing.T) {
-	t.Parallel()
-	expr := &ParenExpr{
-		Expr: &IdentExpr{Name: "value"},
-	}
-	got := expr.String()
-	want := "(value)"
-	if got != want {
-		t.Errorf("ParenExpr.String() = %q, want %q", got, want)
-	}
-}
-
-func TestSubqueryExprString(t *testing.T) {
-	t.Parallel()
-	expr := &SubqueryExpr{
-		Select: &SelectStmt{},
-	}
-	got := expr.String()
-	want := "(SELECT ...)"
-	if got != want {
-		t.Errorf("SubqueryExpr.String() = %q, want %q", got, want)
-	}
-}
-
-func TestVacuumStmtString(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		stmt *VacuumStmt
-		want string
-	}{
-		{
-			name: "simple VACUUM",
-			stmt: &VacuumStmt{},
-			want: "VACUUM",
-		},
-		{
-			name: "VACUUM INTO",
-			stmt: &VacuumStmt{Into: "backup.db"},
-			want: "VACUUM INTO",
-		},
-		{
-			name: "VACUUM INTO with param",
-			stmt: &VacuumStmt{IntoParam: true},
-			want: "VACUUM INTO",
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.stmt.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestASTExplainStmtString(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		stmt *ExplainStmt
-		want string
-	}{
-		{
-			name: "EXPLAIN",
-			stmt: &ExplainStmt{QueryPlan: false},
-			want: "EXPLAIN",
-		},
-		{
-			name: "EXPLAIN QUERY PLAN",
-			stmt: &ExplainStmt{QueryPlan: true},
-			want: "EXPLAIN QUERY PLAN",
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := tt.stmt.String()
-			if got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-// Test node() and statement() methods to ensure they're callable
-func TestNodeMethods(t *testing.T) {
-	t.Parallel()
-	statements := []Statement{
-		&SelectStmt{},
-		&InsertStmt{},
-		&UpdateStmt{},
-		&DeleteStmt{},
-		&CreateTableStmt{},
-		&DropTableStmt{},
-		&CreateIndexStmt{},
-		&DropIndexStmt{},
-		&CreateViewStmt{},
-		&DropViewStmt{},
-		&CreateTriggerStmt{},
-		&DropTriggerStmt{},
-		&BeginStmt{},
-		&CommitStmt{},
-		&RollbackStmt{},
-		&ExplainStmt{},
-		&AttachStmt{},
-		&DetachStmt{},
-		&PragmaStmt{},
-		&AlterTableStmt{},
-		&VacuumStmt{},
-	}
-
-	for _, stmt := range statements {
-		stmt.node()
-		stmt.statement()
-	}
-}
-
-// Test expression() methods to ensure they're callable
-func TestExpressionMethods(t *testing.T) {
-	t.Parallel()
-	expressions := []Expression{
-		&BinaryExpr{},
-		&UnaryExpr{},
-		&LiteralExpr{},
-		&IdentExpr{},
-		&FunctionExpr{},
-		&CaseExpr{},
-		&CastExpr{},
-		&CollateExpr{},
-		&InExpr{},
-		&BetweenExpr{},
-		&ExistsExpr{},
-		&ParenExpr{},
-		&SubqueryExpr{},
-	}
-
-	for _, expr := range expressions {
-		expr.node()
-		expr.expression()
-	}
-}
-
-// Test alterTableAction() methods
-func TestAlterTableActionMethods(t *testing.T) {
-	t.Parallel()
-	actions := []AlterTableAction{
-		&RenameTableAction{},
-		&RenameColumnAction{},
-		&AddColumnAction{},
-		&DropColumnAction{},
-	}
-
-	for _, action := range actions {
-		action.node()
-		action.alterTableAction()
-	}
+// DefaultCollation returns the default collation name (BINARY).
+func DefaultCollation() string {
+	return "BINARY"
 }

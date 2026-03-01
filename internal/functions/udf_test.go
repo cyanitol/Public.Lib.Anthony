@@ -1,733 +1,426 @@
-package functions
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+package parser
 
 import (
-	"fmt"
-	"strings"
 	"testing"
 )
 
-// Test scalar UDF implementations
-
-// doubleFunc doubles an integer value
-type doubleFunc struct{}
-
-func (f *doubleFunc) Invoke(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-	return NewIntValue(args[0].AsInt64() * 2), nil
-}
-
-// addFunc adds two numbers
-type addFunc struct{}
-
-func (f *addFunc) Invoke(args []Value) (Value, error) {
-	if args[0].IsNull() || args[1].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	// If either is float, return float
-	if args[0].Type() == TypeFloat || args[1].Type() == TypeFloat {
-		return NewFloatValue(args[0].AsFloat64() + args[1].AsFloat64()), nil
-	}
-
-	return NewIntValue(args[0].AsInt64() + args[1].AsInt64()), nil
-}
-
-// concatFunc concatenates string arguments
-type concatFunc struct{}
-
-func (f *concatFunc) Invoke(args []Value) (Value, error) {
-	var sb strings.Builder
-	for _, arg := range args {
-		if !arg.IsNull() {
-			sb.WriteString(arg.AsString())
-		}
-	}
-	return NewTextValue(sb.String()), nil
-}
-
-// Test aggregate UDF implementations
-
-// productFunc multiplies values together
-type productFunc struct {
-	product  int64
-	hasValue bool
-}
-
-func (f *productFunc) Step(args []Value) error {
-	if !args[0].IsNull() {
-		if !f.hasValue {
-			f.product = 1
-			f.hasValue = true
-		}
-		f.product *= args[0].AsInt64()
-	}
-	return nil
-}
-
-func (f *productFunc) Final() (Value, error) {
-	if !f.hasValue {
-		return NewNullValue(), nil
-	}
-	return NewIntValue(f.product), nil
-}
-
-func (f *productFunc) Reset() {
-	f.product = 1
-	f.hasValue = false
-}
-
-// customSumFunc sums values with custom state
-type customSumFunc struct {
-	sum      float64
-	count    int
-	hasValue bool
-}
-
-func (f *customSumFunc) Step(args []Value) error {
-	if !args[0].IsNull() {
-		f.sum += args[0].AsFloat64()
-		f.count++
-		f.hasValue = true
-	}
-	return nil
-}
-
-func (f *customSumFunc) Final() (Value, error) {
-	if !f.hasValue {
-		return NewNullValue(), nil
-	}
-	return NewFloatValue(f.sum), nil
-}
-
-func (f *customSumFunc) Reset() {
-	f.sum = 0
-	f.count = 0
-	f.hasValue = false
-}
-
-// Test basic scalar function registration and invocation
-
-func TestRegisterScalarFunction(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:          "double",
-		NumArgs:       1,
-		Deterministic: true,
-	}
-
-	err := RegisterScalarFunction(r, config, &doubleFunc{})
-	if err != nil {
-		t.Fatalf("Failed to register function: %v", err)
-	}
-
-	// Look up the function
-	fn, ok := r.LookupWithArgs("double", 1)
-	if !ok {
-		t.Fatal("Function not found after registration")
-	}
-
-	// Test invocation
-	args := []Value{NewIntValue(21)}
-	result, err := fn.Call(args)
-	if err != nil {
-		t.Fatalf("Function call failed: %v", err)
-	}
-
-	if result.Type() != TypeInteger {
-		t.Errorf("Expected integer result, got %v", result.Type())
-	}
-
-	if result.AsInt64() != 42 {
-		t.Errorf("Expected 42, got %d", result.AsInt64())
-	}
-}
-
-func TestRegisterScalarFunctionWithNullInput(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:    "double",
-		NumArgs: 1,
-	}
-
-	RegisterScalarFunction(r, config, &doubleFunc{})
-	fn, _ := r.LookupWithArgs("double", 1)
-
-	// Test with NULL input
-	args := []Value{NewNullValue()}
-	result, err := fn.Call(args)
-	if err != nil {
-		t.Fatalf("Function call failed: %v", err)
-	}
-
-	if !result.IsNull() {
-		t.Error("Expected NULL result for NULL input")
-	}
-}
-
-func TestRegisterScalarFunctionVariadic(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:    "concat",
-		NumArgs: -1, // variadic
-	}
-
-	err := RegisterScalarFunction(r, config, &concatFunc{})
-	if err != nil {
-		t.Fatalf("Failed to register variadic function: %v", err)
-	}
-
-	fn, ok := r.LookupWithArgs("concat", 3)
-	if !ok {
-		t.Fatal("Variadic function not found")
-	}
-
-	// Test with multiple arguments
-	args := []Value{
-		NewTextValue("Hello"),
-		NewTextValue(" "),
-		NewTextValue("World"),
-	}
-
-	result, err := fn.Call(args)
-	if err != nil {
-		t.Fatalf("Function call failed: %v", err)
-	}
-
-	if result.AsString() != "Hello World" {
-		t.Errorf("Expected 'Hello World', got '%s'", result.AsString())
-	}
-}
-
-// Test aggregate function registration and usage
-
-func TestRegisterAggregateFunction(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:          "product",
-		NumArgs:       1,
-		Deterministic: true,
-	}
-
-	err := RegisterAggregateFunction(r, config, &productFunc{})
-	if err != nil {
-		t.Fatalf("Failed to register aggregate function: %v", err)
-	}
-
-	fn, ok := r.LookupWithArgs("product", 1)
-	if !ok {
-		t.Fatal("Aggregate function not found after registration")
-	}
-
-	// Verify it's an aggregate function
-	aggFn, ok := fn.(AggregateFunction)
-	if !ok {
-		t.Fatal("Function is not an AggregateFunction")
-	}
-
-	// Test aggregation
-	values := []int64{2, 3, 4}
-	for _, v := range values {
-		err := aggFn.Step([]Value{NewIntValue(v)})
-		if err != nil {
-			t.Fatalf("Step failed: %v", err)
-		}
-	}
-
-	result, err := aggFn.Final()
-	if err != nil {
-		t.Fatalf("Final failed: %v", err)
-	}
-
-	expected := int64(24) // 2 * 3 * 4
-	if result.AsInt64() != expected {
-		t.Errorf("Expected %d, got %d", expected, result.AsInt64())
-	}
-}
-
-func TestAggregateWithNullValues(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:    "product",
-		NumArgs: 1,
-	}
-
-	RegisterAggregateFunction(r, config, &productFunc{})
-	fn, _ := r.LookupWithArgs("product", 1)
-	aggFn := fn.(AggregateFunction)
-
-	// Mix of values and NULLs
-	values := []Value{
-		NewIntValue(2),
-		NewNullValue(),
-		NewIntValue(5),
-		NewNullValue(),
-	}
-
-	for _, v := range values {
-		aggFn.Step([]Value{v})
-	}
-
-	result, err := aggFn.Final()
-	if err != nil {
-		t.Fatalf("Final failed: %v", err)
-	}
-
-	expected := int64(10) // 2 * 5, NULLs ignored
-	if result.AsInt64() != expected {
-		t.Errorf("Expected %d, got %d", expected, result.AsInt64())
-	}
-}
-
-func TestAggregateAllNullValues(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:    "product",
-		NumArgs: 1,
-	}
-
-	RegisterAggregateFunction(r, config, &productFunc{})
-	fn, _ := r.LookupWithArgs("product", 1)
-	aggFn := fn.(AggregateFunction)
-
-	// All NULL values
-	for i := 0; i < 3; i++ {
-		aggFn.Step([]Value{NewNullValue()})
-	}
-
-	result, err := aggFn.Final()
-	if err != nil {
-		t.Fatalf("Final failed: %v", err)
-	}
-
-	if !result.IsNull() {
-		t.Error("Expected NULL result for all NULL inputs")
-	}
-}
-
-func TestAggregateReset(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:    "custom_sum",
-		NumArgs: 1,
-	}
-
-	RegisterAggregateFunction(r, config, &customSumFunc{})
-	fn, _ := r.LookupWithArgs("custom_sum", 1)
-	aggFn := fn.(AggregateFunction)
-
-	// First aggregation
-	aggFn.Step([]Value{NewFloatValue(1.5)})
-	aggFn.Step([]Value{NewFloatValue(2.5)})
-	result1, _ := aggFn.Final()
-
-	if result1.AsFloat64() != 4.0 {
-		t.Errorf("First aggregation: expected 4.0, got %f", result1.AsFloat64())
+// TestEdgeCasesForMaxCoverage focuses on specific uncovered lines
+func TestEdgeCasesForMaxCoverage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		sql     string
+		wantErr bool
+	}{
+		// applyTableConstraintPrimaryKey - error paths
+		{
+			name:    "table PRIMARY KEY missing KEY",
+			sql:     "CREATE TABLE t (id INTEGER, PRIMARY)",
+			wantErr: true,
+		},
+		{
+			name:    "table PRIMARY KEY missing opening paren",
+			sql:     "CREATE TABLE t (id INTEGER, PRIMARY KEY id)",
+			wantErr: true,
+		},
+		{
+			name:    "table PRIMARY KEY missing closing paren",
+			sql:     "CREATE TABLE t (id INTEGER, PRIMARY KEY (id",
+			wantErr: true,
+		},
+
+		// parseColumnConstraint - error paths
+		{
+			name:    "column constraint with name but no constraint",
+			sql:     "CREATE TABLE t (id INTEGER CONSTRAINT pk_id)",
+			wantErr: true,
+		},
+		{
+			name:    "column constraint named PRIMARY KEY",
+			sql:     "CREATE TABLE t (id INTEGER CONSTRAINT pk_id PRIMARY KEY)",
+			wantErr: false,
+		},
+		{
+			name:    "column constraint named NOT NULL",
+			sql:     "CREATE TABLE t (id INTEGER CONSTRAINT nn_id NOT NULL)",
+			wantErr: false,
+		},
+		{
+			name:    "column constraint named UNIQUE",
+			sql:     "CREATE TABLE t (id INTEGER CONSTRAINT uk_id UNIQUE)",
+			wantErr: false,
+		},
+		{
+			name:    "column constraint named CHECK",
+			sql:     "CREATE TABLE t (age INTEGER CONSTRAINT chk_age CHECK (age > 0))",
+			wantErr: false,
+		},
+		{
+			name:    "column constraint named DEFAULT",
+			sql:     "CREATE TABLE t (status TEXT CONSTRAINT def_status DEFAULT 'active')",
+			wantErr: false,
+		},
+		{
+			name:    "column constraint named COLLATE",
+			sql:     "CREATE TABLE t (name TEXT CONSTRAINT col_name COLLATE NOCASE)",
+			wantErr: false,
+		},
+
+		// applyConstraintPrimaryKey - ASC/DESC/AUTOINCREMENT paths
+		{
+			name:    "column PRIMARY KEY ASC",
+			sql:     "CREATE TABLE t (id INTEGER PRIMARY KEY ASC)",
+			wantErr: false,
+		},
+		{
+			name:    "column PRIMARY KEY DESC",
+			sql:     "CREATE TABLE t (id INTEGER PRIMARY KEY DESC)",
+			wantErr: false,
+		},
+		{
+			name:    "column PRIMARY KEY missing KEY",
+			sql:     "CREATE TABLE t (id INTEGER PRIMARY)",
+			wantErr: true,
+		},
+
+		// parseCreateIndex - error paths
+		{
+			name:    "CREATE INDEX missing columns paren",
+			sql:     "CREATE INDEX idx ON users",
+			wantErr: true,
+		},
+		{
+			name:    "CREATE INDEX missing table name",
+			sql:     "CREATE INDEX idx ON",
+			wantErr: true,
+		},
+
+		// parseCreateTable - error paths
+		{
+			name:    "CREATE TABLE missing paren",
+			sql:     "CREATE TABLE users",
+			wantErr: true,
+		},
+		{
+			name:    "CREATE TABLE empty columns",
+			sql:     "CREATE TABLE users ()",
+			wantErr: true,
+		},
+
+		// parseUpdateAssignments - error paths
+		{
+			name:    "UPDATE missing equal sign",
+			sql:     "UPDATE users SET name 'John'",
+			wantErr: true,
+		},
+
+		// parseColumnOrConstraint - additional coverage
+		{
+			name:    "CREATE TABLE with CONSTRAINT CHECK",
+			sql:     "CREATE TABLE t (age INTEGER, CONSTRAINT chk_age CHECK (age > 0))",
+			wantErr: false,
+		},
+		{
+			name:    "CREATE TABLE with CONSTRAINT FOREIGN KEY",
+			sql:     "CREATE TABLE orders (user_id INTEGER, CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id))",
+			wantErr: false,
+		},
+
+		// parseIndexWhereClause - more coverage
+		{
+			name:    "CREATE INDEX with complex WHERE",
+			sql:     "CREATE INDEX idx ON users (name) WHERE active = 1 AND deleted_at IS NULL",
+			wantErr: false,
+		},
+
+		// parseForeignKeyReferences - error paths
+		{
+			name:    "FOREIGN KEY missing table",
+			sql:     "CREATE TABLE t (id INTEGER, FOREIGN KEY (id) REFERENCES)",
+			wantErr: true,
+		},
+		{
+			name:    "FOREIGN KEY references with multiple columns",
+			sql:     "CREATE TABLE t (a INTEGER, b INTEGER, FOREIGN KEY (a, b) REFERENCES other (x, y))",
+			wantErr: false,
+		},
+
+		// parseForeignKeyColumns - error paths
+		{
+			name:    "FOREIGN KEY missing opening paren",
+			sql:     "CREATE TABLE t (id INTEGER, FOREIGN KEY id REFERENCES other(id))",
+			wantErr: true,
+		},
+		{
+			name:    "FOREIGN KEY empty column list",
+			sql:     "CREATE TABLE t (id INTEGER, FOREIGN KEY () REFERENCES other(id))",
+			wantErr: true,
+		},
+
+		// parseIfNotExists - both paths
+		{
+			name:    "CREATE TABLE without IF NOT EXISTS",
+			sql:     "CREATE TABLE users (id INTEGER)",
+			wantErr: false,
+		},
+
+		// parseCreateTableAsSelect - error paths
+		{
+			name:    "CREATE TABLE AS without SELECT",
+			sql:     "CREATE TABLE new_users AS WHERE id = 1",
+			wantErr: true,
+		},
+
+		// parseTableOptions - all variations
+		{
+			name:    "CREATE TABLE WITHOUT ROWID",
+			sql:     "CREATE TABLE t (id INTEGER PRIMARY KEY) WITHOUT ROWID",
+			wantErr: false,
+		},
+		{
+			name:    "CREATE TABLE STRICT",
+			sql:     "CREATE TABLE t (id INTEGER) STRICT",
+			wantErr: false,
+		},
+		{
+			name:    "CREATE TABLE WITHOUT ROWID STRICT",
+			sql:     "CREATE TABLE t (id INTEGER PRIMARY KEY) WITHOUT ROWID, STRICT",
+			wantErr: false,
+		},
+
+		// applyConstraintDefault - expression vs literal
+		{
+			name:    "DEFAULT with parenthesized expression",
+			sql:     "CREATE TABLE t (created INTEGER DEFAULT (strftime('%s', 'now')))",
+			wantErr: false,
+		},
+		{
+			name:    "DEFAULT with literal string",
+			sql:     "CREATE TABLE t (status TEXT DEFAULT 'active')",
+			wantErr: false,
+		},
+		{
+			name:    "DEFAULT with literal number",
+			sql:     "CREATE TABLE t (count INTEGER DEFAULT 42)",
+			wantErr: false,
+		},
+
+		// parseTableConstraintName - with and without name
+		{
+			name:    "table constraint without name",
+			sql:     "CREATE TABLE t (id INTEGER, PRIMARY KEY (id))",
+			wantErr: false,
+		},
+		{
+			name:    "table constraint with name",
+			sql:     "CREATE TABLE t (id INTEGER, CONSTRAINT pk_t PRIMARY KEY (id))",
+			wantErr: false,
+		},
+
+		// parseIndexIfNotExists - both paths
+		{
+			name:    "CREATE INDEX without IF NOT EXISTS",
+			sql:     "CREATE INDEX idx ON users (name)",
+			wantErr: false,
+		},
+		{
+			name:    "CREATE INDEX IF NOT EXISTS",
+			sql:     "CREATE INDEX IF NOT EXISTS idx ON users (name)",
+			wantErr: false,
+		},
+
+		// parseIndexNameAndTable - error paths
+		{
+			name:    "CREATE INDEX missing ON keyword",
+			sql:     "CREATE INDEX idx users (name)",
+			wantErr: true,
+		},
+
+		// parseViewSelect - error paths
+		{
+			name:    "CREATE VIEW without AS keyword",
+			sql:     "CREATE VIEW v SELECT * FROM users",
+			wantErr: true,
+		},
+		{
+			name:    "CREATE VIEW AS without SELECT",
+			sql:     "CREATE VIEW v AS UPDATE users SET x = 1",
+			wantErr: true,
+		},
+
+		// parseUpdateWhereClause, parseUpdateOrderByClause, parseUpdateLimitClause
+		{
+			name:    "UPDATE with WHERE missing expression",
+			sql:     "UPDATE users SET x = 1 WHERE",
+			wantErr: true,
+		},
+		{
+			name:    "UPDATE with ORDER BY missing expression",
+			sql:     "UPDATE users SET x = 1 ORDER BY",
+			wantErr: true,
+		},
+		{
+			name:    "UPDATE with LIMIT missing expression",
+			sql:     "UPDATE users SET x = 1 LIMIT",
+			wantErr: true,
+		},
+
+		// parseDeleteWhere, parseDeleteOrderBy, parseDeleteLimit
+		{
+			name:    "DELETE with WHERE missing expression",
+			sql:     "DELETE FROM users WHERE",
+			wantErr: true,
+		},
+		{
+			name:    "DELETE with ORDER BY missing expression",
+			sql:     "DELETE FROM users ORDER BY",
+			wantErr: true,
+		},
+		{
+			name:    "DELETE with LIMIT missing expression",
+			sql:     "DELETE FROM users LIMIT",
+			wantErr: true,
+		},
+
+		// parseDelete - all branches
+		{
+			name:    "DELETE missing FROM keyword",
+			sql:     "DELETE users WHERE id = 1",
+			wantErr: true,
+		},
+		{
+			name:    "DELETE missing table name",
+			sql:     "DELETE FROM WHERE id = 1",
+			wantErr: true,
+		},
+
+		// parseCreateTableAsSelect - full coverage
+		{
+			name:    "CREATE TABLE AS SELECT with WHERE",
+			sql:     "CREATE TABLE archived AS SELECT * FROM users WHERE deleted = 1",
+			wantErr: false,
+		},
+
+		// parseSelect - additional edge cases
+		{
+			name:    "SELECT DISTINCT ALL - contradiction not supported",
+			sql:     "SELECT DISTINCT ALL * FROM users",
+			wantErr: true,
+		},
+
+		// parseCreate - all object types
+		{
+			name:    "CREATE after temp variations",
+			sql:     "CREATE TABLE t (x INTEGER)",
+			wantErr: false,
+		},
+
+		// parseAlterTableRename - more paths
+		{
+			name:    "ALTER TABLE RENAME missing TO",
+			sql:     "ALTER TABLE old_name RENAME new_name",
+			wantErr: true,
+		},
+		{
+			name:    "ALTER TABLE RENAME COLUMN missing TO",
+			sql:     "ALTER TABLE t RENAME COLUMN old_col new_col",
+			wantErr: true,
+		},
 	}
 
-	// Reset should be called by Final, but test explicit reset
-	aggFn.Reset()
-
-	// Second aggregation with fresh state
-	aggFn.Step([]Value{NewFloatValue(10.0)})
-	result2, _ := aggFn.Final()
-
-	if result2.AsFloat64() != 10.0 {
-		t.Errorf("Second aggregation: expected 10.0, got %f", result2.AsFloat64())
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
-// Test function overloading
-
-func TestFunctionOverloading(t *testing.T) {
-	r := NewRegistry()
-
-	// Register add function with 2 args
-	config2 := FunctionConfig{
-		Name:    "add",
-		NumArgs: 2,
-	}
-	RegisterScalarFunction(r, config2, &addFunc{})
-
-	// Register concat function with variadic args (can act as "add" for strings)
-	configVar := FunctionConfig{
-		Name:    "add",
-		NumArgs: -1,
-	}
-	RegisterScalarFunction(r, configVar, &concatFunc{})
-
-	// Lookup with 2 args should find the exact match
-	fn2, ok := r.LookupWithArgs("add", 2)
-	if !ok {
-		t.Fatal("Function with 2 args not found")
+// TestParserHelperFunctions tests low-level helper functions
+func TestParserHelperFunctions(t *testing.T) {
+	t.Parallel()
+	// Test checkIdentifier with all keyword types
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		{"quoted SELECT keyword", "SELECT \"select\" FROM t"},
+		{"quoted FROM keyword", "SELECT \"from\" FROM t"},
+		{"quoted WHERE keyword", "SELECT \"where\" FROM t"},
+		{"quoted AS keyword", "SELECT x AS \"as\" FROM t"},
+		{"backtick keyword", "SELECT `table` FROM t"},
+		{"bracket keyword", "SELECT [index] FROM t"},
 	}
 
-	result, _ := fn2.Call([]Value{NewIntValue(3), NewIntValue(4)})
-	if result.AsInt64() != 7 {
-		t.Errorf("Expected 7, got %d", result.AsInt64())
-	}
-
-	// Lookup with different arg count should find variadic
-	fn3, ok := r.LookupWithArgs("add", 3)
-	if !ok {
-		t.Fatal("Variadic function not found")
-	}
-
-	result3, _ := fn3.Call([]Value{
-		NewTextValue("a"),
-		NewTextValue("b"),
-		NewTextValue("c"),
-	})
-	if result3.AsString() != "abc" {
-		t.Errorf("Expected 'abc', got '%s'", result3.AsString())
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
 	}
 }
 
-// Test user function priority over built-ins
+// TestAllConstraintTypes ensures all constraint handling paths are covered
+func TestAllConstraintTypes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		// Column constraints
+		{"PRIMARY KEY", "CREATE TABLE t (id INTEGER PRIMARY KEY)"},
+		{"PRIMARY KEY ASC", "CREATE TABLE t (id INTEGER PRIMARY KEY ASC)"},
+		{"PRIMARY KEY DESC", "CREATE TABLE t (id INTEGER PRIMARY KEY DESC)"},
+		{"PRIMARY KEY AUTOINCREMENT", "CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT)"},
+		{"NOT NULL", "CREATE TABLE t (id INTEGER NOT NULL)"},
+		{"UNIQUE", "CREATE TABLE t (id INTEGER UNIQUE)"},
+		{"CHECK simple", "CREATE TABLE t (age INTEGER CHECK (age > 0))"},
+		{"CHECK complex", "CREATE TABLE t (age INTEGER CHECK (age BETWEEN 0 AND 120))"},
+		{"DEFAULT string", "CREATE TABLE t (status TEXT DEFAULT 'active')"},
+		{"DEFAULT number", "CREATE TABLE t (count INTEGER DEFAULT 0)"},
+		{"DEFAULT expr", "CREATE TABLE t (created INTEGER DEFAULT (strftime('%s', 'now')))"},
+		{"COLLATE", "CREATE TABLE t (name TEXT COLLATE NOCASE)"},
 
-// userLengthFunc is a test implementation that returns a fixed value
-type userLengthFunc struct{}
+		// Table constraints
+		{"table PRIMARY KEY", "CREATE TABLE t (id INTEGER, PRIMARY KEY (id))"},
+		{"table PRIMARY KEY composite", "CREATE TABLE t (a INTEGER, b INTEGER, PRIMARY KEY (a, b))"},
+		{"table UNIQUE", "CREATE TABLE t (email TEXT, UNIQUE (email))"},
+		{"table CHECK", "CREATE TABLE t (age INTEGER, CHECK (age > 0))"},
+		{"table FOREIGN KEY", "CREATE TABLE orders (user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(id))"},
 
-func (f *userLengthFunc) Invoke(args []Value) (Value, error) {
-	return NewIntValue(200), nil // User function returns 200
-}
-
-func TestUserFunctionPriority(t *testing.T) {
-	r := NewRegistry()
-
-	// Register a built-in "length" function
-	r.Register(NewScalarFunc("length", 1, func(args []Value) (Value, error) {
-		return NewIntValue(100), nil // Built-in returns 100
-	}))
-
-	// Register user-defined "length" function
-	userLength := &userLengthFunc{}
-
-	config := FunctionConfig{
-		Name:    "length",
-		NumArgs: 1,
+		// Named constraints
+		{"named column PRIMARY KEY", "CREATE TABLE t (id INTEGER CONSTRAINT pk_id PRIMARY KEY)"},
+		{"named column NOT NULL", "CREATE TABLE t (id INTEGER CONSTRAINT nn_id NOT NULL)"},
+		{"named column UNIQUE", "CREATE TABLE t (email TEXT CONSTRAINT uk_email UNIQUE)"},
+		{"named column CHECK", "CREATE TABLE t (age INTEGER CONSTRAINT chk_age CHECK (age > 0))"},
+		{"named column DEFAULT", "CREATE TABLE t (status TEXT CONSTRAINT def_status DEFAULT 'active')"},
+		{"named column COLLATE", "CREATE TABLE t (name TEXT CONSTRAINT col_name COLLATE NOCASE)"},
+		{"named table PRIMARY KEY", "CREATE TABLE t (id INTEGER, CONSTRAINT pk_id PRIMARY KEY (id))"},
+		{"named table UNIQUE", "CREATE TABLE t (email TEXT, CONSTRAINT uk_email UNIQUE (email))"},
+		{"named table CHECK", "CREATE TABLE t (age INTEGER, CONSTRAINT chk_age CHECK (age > 0))"},
+		{"named table FOREIGN KEY", "CREATE TABLE orders (user_id INTEGER, CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id))"},
 	}
 
-	RegisterScalarFunction(r, config, userLength)
-
-	// Lookup should find user function first
-	fn, ok := r.LookupWithArgs("length", 1)
-	if !ok {
-		t.Fatal("Function not found")
-	}
-
-	// The user function implementation
-	_, ok = fn.(*userScalarFunc)
-	if !ok {
-		t.Error("Expected user function, got built-in")
-	}
-}
-
-// Test unregister function
-
-func TestUnregisterFunction(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:    "double",
-		NumArgs: 1,
-	}
-
-	RegisterScalarFunction(r, config, &doubleFunc{})
-
-	// Verify it's registered
-	_, ok := r.LookupWithArgs("double", 1)
-	if !ok {
-		t.Fatal("Function not found after registration")
-	}
-
-	// Unregister it
-	removed := UnregisterFunction(r, "double", 1)
-	if !removed {
-		t.Error("Expected function to be removed")
-	}
-
-	// Verify it's gone
-	_, ok = r.LookupWithArgs("double", 1)
-	if ok {
-		t.Error("Function still found after unregistration")
-	}
-}
-
-func TestUnregisterNonExistentFunction(t *testing.T) {
-	r := NewRegistry()
-
-	removed := UnregisterFunction(r, "nonexistent", 1)
-	if removed {
-		t.Error("Expected false for non-existent function")
-	}
-}
-
-func TestUnregisterVariadicFunction(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:    "concat",
-		NumArgs: -1,
-	}
-
-	RegisterScalarFunction(r, config, &concatFunc{})
-
-	// Verify it's registered
-	_, ok := r.LookupWithArgs("concat", 3)
-	if !ok {
-		t.Fatal("Variadic function not found")
-	}
-
-	// Unregister with -1 for variadic
-	removed := UnregisterFunction(r, "concat", -1)
-	if !removed {
-		t.Error("Expected variadic function to be removed")
-	}
-
-	// Verify it's gone
-	_, ok = r.LookupWithArgs("concat", 3)
-	if ok {
-		t.Error("Variadic function still found after unregistration")
-	}
-}
-
-// Test argument validation
-
-func TestScalarFunctionArgValidation(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:    "double",
-		NumArgs: 1,
-	}
-
-	RegisterScalarFunction(r, config, &doubleFunc{})
-	fn, _ := r.LookupWithArgs("double", 1)
-
-	// Try calling with wrong number of args
-	_, err := fn.Call([]Value{NewIntValue(1), NewIntValue(2)})
-	if err == nil {
-		t.Error("Expected error for wrong number of arguments")
-	}
-
-	if !strings.Contains(err.Error(), "takes exactly 1 arguments") {
-		t.Errorf("Unexpected error message: %v", err)
-	}
-}
-
-func TestAggregateFunctionArgValidation(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:    "product",
-		NumArgs: 1,
-	}
-
-	RegisterAggregateFunction(r, config, &productFunc{})
-	fn, _ := r.LookupWithArgs("product", 1)
-	aggFn := fn.(AggregateFunction)
-
-	// Try calling Step with wrong number of args
-	err := aggFn.Step([]Value{NewIntValue(1), NewIntValue(2)})
-	if err == nil {
-		t.Error("Expected error for wrong number of arguments")
-	}
-
-	if !strings.Contains(err.Error(), "takes exactly 1 arguments") {
-		t.Errorf("Unexpected error message: %v", err)
-	}
-}
-
-// Test error cases
-
-func TestRegisterScalarFunctionEmptyName(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:    "",
-		NumArgs: 1,
-	}
-
-	err := RegisterScalarFunction(r, config, &doubleFunc{})
-	if err == nil {
-		t.Error("Expected error for empty function name")
-	}
-}
-
-func TestRegisterScalarFunctionNilImplementation(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:    "test",
-		NumArgs: 1,
-	}
-
-	err := RegisterScalarFunction(r, config, nil)
-	if err == nil {
-		t.Error("Expected error for nil function implementation")
-	}
-}
-
-func TestRegisterAggregateFunctionEmptyName(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:    "",
-		NumArgs: 1,
-	}
-
-	err := RegisterAggregateFunction(r, config, &productFunc{})
-	if err == nil {
-		t.Error("Expected error for empty function name")
-	}
-}
-
-func TestRegisterAggregateFunctionNilImplementation(t *testing.T) {
-	r := NewRegistry()
-
-	config := FunctionConfig{
-		Name:    "test",
-		NumArgs: 1,
-	}
-
-	err := RegisterAggregateFunction(r, config, nil)
-	if err == nil {
-		t.Error("Expected error for nil function implementation")
-	}
-}
-
-// Test deterministic flag
-
-func TestDeterministicFlag(t *testing.T) {
-	r := NewRegistry()
-
-	configDet := FunctionConfig{
-		Name:          "det_func",
-		NumArgs:       1,
-		Deterministic: true,
-	}
-
-	RegisterScalarFunction(r, configDet, &doubleFunc{})
-	fn, _ := r.LookupWithArgs("det_func", 1)
-
-	// Check if we can access deterministic flag
-	if udf, ok := fn.(*userScalarFunc); ok {
-		if !udf.IsDeterministic() {
-			t.Error("Expected function to be deterministic")
-		}
-	} else {
-		t.Error("Expected userScalarFunc type")
-	}
-
-	// Test non-deterministic
-	configNonDet := FunctionConfig{
-		Name:          "nondet_func",
-		NumArgs:       1,
-		Deterministic: false,
-	}
-
-	RegisterScalarFunction(r, configNonDet, &doubleFunc{})
-	fn2, _ := r.LookupWithArgs("nondet_func", 1)
-
-	if udf, ok := fn2.(*userScalarFunc); ok {
-		if udf.IsDeterministic() {
-			t.Error("Expected function to be non-deterministic")
-		}
-	}
-}
-
-// Test multiple functions in registry
-
-func TestMultipleFunctionsInRegistry(t *testing.T) {
-	r := NewRegistry()
-
-	// Register multiple functions
-	RegisterScalarFunction(r, FunctionConfig{Name: "double", NumArgs: 1}, &doubleFunc{})
-	RegisterScalarFunction(r, FunctionConfig{Name: "add", NumArgs: 2}, &addFunc{})
-	RegisterScalarFunction(r, FunctionConfig{Name: "concat", NumArgs: -1}, &concatFunc{})
-	RegisterAggregateFunction(r, FunctionConfig{Name: "product", NumArgs: 1}, &productFunc{})
-
-	// Verify all are accessible
-	if _, ok := r.LookupWithArgs("double", 1); !ok {
-		t.Error("double not found")
-	}
-	if _, ok := r.LookupWithArgs("add", 2); !ok {
-		t.Error("add not found")
-	}
-	if _, ok := r.LookupWithArgs("concat", 5); !ok {
-		t.Error("concat not found")
-	}
-	if _, ok := r.LookupWithArgs("product", 1); !ok {
-		t.Error("product not found")
-	}
-
-	// Verify GetAllFunctions returns them all
-	allFuncs := r.GetAllFunctions()
-	if len(allFuncs) < 4 {
-		t.Errorf("Expected at least 4 functions, got %d", len(allFuncs))
-	}
-}
-
-// Benchmark tests
-
-func BenchmarkScalarFunctionCall(b *testing.B) {
-	r := NewRegistry()
-	config := FunctionConfig{Name: "double", NumArgs: 1}
-	RegisterScalarFunction(r, config, &doubleFunc{})
-	fn, _ := r.LookupWithArgs("double", 1)
-	args := []Value{NewIntValue(21)}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		fn.Call(args)
-	}
-}
-
-func BenchmarkAggregateFunctionStep(b *testing.B) {
-	r := NewRegistry()
-	config := FunctionConfig{Name: "product", NumArgs: 1}
-	RegisterAggregateFunction(r, config, &productFunc{})
-	fn, _ := r.LookupWithArgs("product", 1)
-	aggFn := fn.(AggregateFunction)
-	args := []Value{NewIntValue(2)}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		aggFn.Reset()
-		aggFn.Step(args)
-		aggFn.Final()
-	}
-}
-
-// Example error-returning function
-
-type errorFunc struct{}
-
-func (f *errorFunc) Invoke(args []Value) (Value, error) {
-	return nil, fmt.Errorf("intentional error")
-}
-
-func TestErrorReturningFunction(t *testing.T) {
-	r := NewRegistry()
-	config := FunctionConfig{Name: "error_func", NumArgs: 0}
-	RegisterScalarFunction(r, config, &errorFunc{})
-	fn, _ := r.LookupWithArgs("error_func", 0)
-
-	_, err := fn.Call([]Value{})
-	if err == nil {
-		t.Error("Expected error from function")
-	}
-
-	if err.Error() != "intentional error" {
-		t.Errorf("Unexpected error message: %v", err)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
 	}
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
 // Package collation provides collation sequences for string comparison operations.
 // This is a low-level package with no dependencies on other internal packages
 // except for utf, which provides the actual comparison implementations.

@@ -1,599 +1,734 @@
-package constraint
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+package functions
 
 import (
+	"fmt"
+	"strings"
 	"testing"
-
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
 )
 
-// TestUniqueConstraint_CheckDuplicateViaIndex_EmptyTable tests checking empty table
-func TestUniqueConstraint_CheckDuplicateViaIndex_EmptyTable(t *testing.T) {
-	table := &schema.Table{
-		Name:     "test",
-		RootPage: 2,
-		Columns:  []*schema.Column{{Name: "id", Type: "INTEGER"}},
+// Test scalar UDF implementations
+
+// doubleFunc doubles an integer value
+type doubleFunc struct{}
+
+func (f *doubleFunc) Invoke(args []Value) (Value, error) {
+	if args[0].IsNull() {
+		return NewNullValue(), nil
+	}
+	return NewIntValue(args[0].AsInt64() * 2), nil
+}
+
+// addFunc adds two numbers
+type addFunc struct{}
+
+func (f *addFunc) Invoke(args []Value) (Value, error) {
+	if args[0].IsNull() || args[1].IsNull() {
+		return NewNullValue(), nil
 	}
 
-	bt := btree.NewBtree(4096)
-	rootPage, _ := bt.CreateTable()
-	table.RootPage = rootPage
+	// If either is float, return float
+	if args[0].Type() == TypeFloat || args[1].Type() == TypeFloat {
+		return NewFloatValue(args[0].AsFloat64() + args[1].AsFloat64()), nil
+	}
 
-	uc := NewUniqueConstraint("", "test", []string{"id"})
+	return NewIntValue(args[0].AsInt64() + args[1].AsInt64()), nil
+}
 
-	values := map[string]interface{}{"id": 1}
-	exists, conflictRowid, err := uc.checkDuplicateViaIndex(bt, table, values, 0)
+// concatFunc concatenates string arguments
+type concatFunc struct{}
 
+func (f *concatFunc) Invoke(args []Value) (Value, error) {
+	var sb strings.Builder
+	for _, arg := range args {
+		if !arg.IsNull() {
+			sb.WriteString(arg.AsString())
+		}
+	}
+	return NewTextValue(sb.String()), nil
+}
+
+// Test aggregate UDF implementations
+
+// productFunc multiplies values together
+type productFunc struct {
+	product  int64
+	hasValue bool
+}
+
+func (f *productFunc) Step(args []Value) error {
+	if !args[0].IsNull() {
+		if !f.hasValue {
+			f.product = 1
+			f.hasValue = true
+		}
+		f.product *= args[0].AsInt64()
+	}
+	return nil
+}
+
+func (f *productFunc) Final() (Value, error) {
+	if !f.hasValue {
+		return NewNullValue(), nil
+	}
+	return NewIntValue(f.product), nil
+}
+
+func (f *productFunc) Reset() {
+	f.product = 1
+	f.hasValue = false
+}
+
+// customSumFunc sums values with custom state
+type customSumFunc struct {
+	sum      float64
+	count    int
+	hasValue bool
+}
+
+func (f *customSumFunc) Step(args []Value) error {
+	if !args[0].IsNull() {
+		f.sum += args[0].AsFloat64()
+		f.count++
+		f.hasValue = true
+	}
+	return nil
+}
+
+func (f *customSumFunc) Final() (Value, error) {
+	if !f.hasValue {
+		return NewNullValue(), nil
+	}
+	return NewFloatValue(f.sum), nil
+}
+
+func (f *customSumFunc) Reset() {
+	f.sum = 0
+	f.count = 0
+	f.hasValue = false
+}
+
+// Test basic scalar function registration and invocation
+
+func TestRegisterScalarFunction(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:          "double",
+		NumArgs:       1,
+		Deterministic: true,
+	}
+
+	err := RegisterScalarFunction(r, config, &doubleFunc{})
 	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
+		t.Fatalf("Failed to register function: %v", err)
 	}
-	if exists {
-		t.Error("Expected no duplicate in empty table")
+
+	// Look up the function
+	fn, ok := r.LookupWithArgs("double", 1)
+	if !ok {
+		t.Fatal("Function not found after registration")
 	}
-	if conflictRowid != 0 {
-		t.Errorf("Expected conflict rowid 0, got %d", conflictRowid)
+
+	// Test invocation
+	args := []Value{NewIntValue(21)}
+	result, err := fn.Call(args)
+	if err != nil {
+		t.Fatalf("Function call failed: %v", err)
+	}
+
+	if result.Type() != TypeInteger {
+		t.Errorf("Expected integer result, got %v", result.Type())
+	}
+
+	if result.AsInt64() != 42 {
+		t.Errorf("Expected 42, got %d", result.AsInt64())
 	}
 }
 
-// TestUniqueConstraint_ValidateWithDefault tests validation when column has default
-func TestUniqueConstraint_ValidateWithDefault(t *testing.T) {
-	table := &schema.Table{
-		Name:     "test",
-		RootPage: 2,
-		Columns: []*schema.Column{
-			{Name: "id", Type: "INTEGER", PrimaryKey: true},
-			{Name: "status", Type: "TEXT", Default: "active"},
-		},
+func TestRegisterScalarFunctionWithNullInput(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:    "double",
+		NumArgs: 1,
 	}
 
-	bt := btree.NewBtree(4096)
-	rootPage, _ := bt.CreateTable()
-	table.RootPage = rootPage
+	RegisterScalarFunction(r, config, &doubleFunc{})
+	fn, _ := r.LookupWithArgs("double", 1)
 
-	uc := NewUniqueConstraint("", "test", []string{"status"})
-
-	// Values without status - should use default
-	values := map[string]interface{}{"id": 1}
-
-	err := uc.Validate(table, bt, values, 1)
+	// Test with NULL input
+	args := []Value{NewNullValue()}
+	result, err := fn.Call(args)
 	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
+		t.Fatalf("Function call failed: %v", err)
+	}
+
+	if !result.IsNull() {
+		t.Error("Expected NULL result for NULL input")
 	}
 }
 
-// TestCheckConstraint_ValidateWithNoConstraints tests validator with no constraints
-func TestCheckConstraint_ValidateWithNoConstraints(t *testing.T) {
-	table := &schema.Table{
+func TestRegisterScalarFunctionVariadic(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:    "concat",
+		NumArgs: -1, // variadic
+	}
+
+	err := RegisterScalarFunction(r, config, &concatFunc{})
+	if err != nil {
+		t.Fatalf("Failed to register variadic function: %v", err)
+	}
+
+	fn, ok := r.LookupWithArgs("concat", 3)
+	if !ok {
+		t.Fatal("Variadic function not found")
+	}
+
+	// Test with multiple arguments
+	args := []Value{
+		NewTextValue("Hello"),
+		NewTextValue(" "),
+		NewTextValue("World"),
+	}
+
+	result, err := fn.Call(args)
+	if err != nil {
+		t.Fatalf("Function call failed: %v", err)
+	}
+
+	if result.AsString() != "Hello World" {
+		t.Errorf("Expected 'Hello World', got '%s'", result.AsString())
+	}
+}
+
+// Test aggregate function registration and usage
+
+func TestRegisterAggregateFunction(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:          "product",
+		NumArgs:       1,
+		Deterministic: true,
+	}
+
+	err := RegisterAggregateFunction(r, config, &productFunc{})
+	if err != nil {
+		t.Fatalf("Failed to register aggregate function: %v", err)
+	}
+
+	fn, ok := r.LookupWithArgs("product", 1)
+	if !ok {
+		t.Fatal("Aggregate function not found after registration")
+	}
+
+	// Verify it's an aggregate function
+	aggFn, ok := fn.(AggregateFunction)
+	if !ok {
+		t.Fatal("Function is not an AggregateFunction")
+	}
+
+	// Test aggregation
+	values := []int64{2, 3, 4}
+	for _, v := range values {
+		err := aggFn.Step([]Value{NewIntValue(v)})
+		if err != nil {
+			t.Fatalf("Step failed: %v", err)
+		}
+	}
+
+	result, err := aggFn.Final()
+	if err != nil {
+		t.Fatalf("Final failed: %v", err)
+	}
+
+	expected := int64(24) // 2 * 3 * 4
+	if result.AsInt64() != expected {
+		t.Errorf("Expected %d, got %d", expected, result.AsInt64())
+	}
+}
+
+func TestAggregateWithNullValues(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:    "product",
+		NumArgs: 1,
+	}
+
+	RegisterAggregateFunction(r, config, &productFunc{})
+	fn, _ := r.LookupWithArgs("product", 1)
+	aggFn := fn.(AggregateFunction)
+
+	// Mix of values and NULLs
+	values := []Value{
+		NewIntValue(2),
+		NewNullValue(),
+		NewIntValue(5),
+		NewNullValue(),
+	}
+
+	for _, v := range values {
+		aggFn.Step([]Value{v})
+	}
+
+	result, err := aggFn.Final()
+	if err != nil {
+		t.Fatalf("Final failed: %v", err)
+	}
+
+	expected := int64(10) // 2 * 5, NULLs ignored
+	if result.AsInt64() != expected {
+		t.Errorf("Expected %d, got %d", expected, result.AsInt64())
+	}
+}
+
+func TestAggregateAllNullValues(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:    "product",
+		NumArgs: 1,
+	}
+
+	RegisterAggregateFunction(r, config, &productFunc{})
+	fn, _ := r.LookupWithArgs("product", 1)
+	aggFn := fn.(AggregateFunction)
+
+	// All NULL values
+	for i := 0; i < 3; i++ {
+		aggFn.Step([]Value{NewNullValue()})
+	}
+
+	result, err := aggFn.Final()
+	if err != nil {
+		t.Fatalf("Final failed: %v", err)
+	}
+
+	if !result.IsNull() {
+		t.Error("Expected NULL result for all NULL inputs")
+	}
+}
+
+func TestAggregateReset(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:    "custom_sum",
+		NumArgs: 1,
+	}
+
+	RegisterAggregateFunction(r, config, &customSumFunc{})
+	fn, _ := r.LookupWithArgs("custom_sum", 1)
+	aggFn := fn.(AggregateFunction)
+
+	// First aggregation
+	aggFn.Step([]Value{NewFloatValue(1.5)})
+	aggFn.Step([]Value{NewFloatValue(2.5)})
+	result1, _ := aggFn.Final()
+
+	if result1.AsFloat64() != 4.0 {
+		t.Errorf("First aggregation: expected 4.0, got %f", result1.AsFloat64())
+	}
+
+	// Reset should be called by Final, but test explicit reset
+	aggFn.Reset()
+
+	// Second aggregation with fresh state
+	aggFn.Step([]Value{NewFloatValue(10.0)})
+	result2, _ := aggFn.Final()
+
+	if result2.AsFloat64() != 10.0 {
+		t.Errorf("Second aggregation: expected 10.0, got %f", result2.AsFloat64())
+	}
+}
+
+// Test function overloading
+
+func TestFunctionOverloading(t *testing.T) {
+	r := NewRegistry()
+
+	// Register add function with 2 args
+	config2 := FunctionConfig{
+		Name:    "add",
+		NumArgs: 2,
+	}
+	RegisterScalarFunction(r, config2, &addFunc{})
+
+	// Register concat function with variadic args (can act as "add" for strings)
+	configVar := FunctionConfig{
+		Name:    "add",
+		NumArgs: -1,
+	}
+	RegisterScalarFunction(r, configVar, &concatFunc{})
+
+	// Lookup with 2 args should find the exact match
+	fn2, ok := r.LookupWithArgs("add", 2)
+	if !ok {
+		t.Fatal("Function with 2 args not found")
+	}
+
+	result, _ := fn2.Call([]Value{NewIntValue(3), NewIntValue(4)})
+	if result.AsInt64() != 7 {
+		t.Errorf("Expected 7, got %d", result.AsInt64())
+	}
+
+	// Lookup with different arg count should find variadic
+	fn3, ok := r.LookupWithArgs("add", 3)
+	if !ok {
+		t.Fatal("Variadic function not found")
+	}
+
+	result3, _ := fn3.Call([]Value{
+		NewTextValue("a"),
+		NewTextValue("b"),
+		NewTextValue("c"),
+	})
+	if result3.AsString() != "abc" {
+		t.Errorf("Expected 'abc', got '%s'", result3.AsString())
+	}
+}
+
+// Test user function priority over built-ins
+
+// userLengthFunc is a test implementation that returns a fixed value
+type userLengthFunc struct{}
+
+func (f *userLengthFunc) Invoke(args []Value) (Value, error) {
+	return NewIntValue(200), nil // User function returns 200
+}
+
+func TestUserFunctionPriority(t *testing.T) {
+	r := NewRegistry()
+
+	// Register a built-in "length" function
+	r.Register(NewScalarFunc("length", 1, func(args []Value) (Value, error) {
+		return NewIntValue(100), nil // Built-in returns 100
+	}))
+
+	// Register user-defined "length" function
+	userLength := &userLengthFunc{}
+
+	config := FunctionConfig{
+		Name:    "length",
+		NumArgs: 1,
+	}
+
+	RegisterScalarFunction(r, config, userLength)
+
+	// Lookup should find user function first
+	fn, ok := r.LookupWithArgs("length", 1)
+	if !ok {
+		t.Fatal("Function not found")
+	}
+
+	// The user function implementation
+	_, ok = fn.(*userScalarFunc)
+	if !ok {
+		t.Error("Expected user function, got built-in")
+	}
+}
+
+// Test unregister function
+
+func TestUnregisterFunction(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:    "double",
+		NumArgs: 1,
+	}
+
+	RegisterScalarFunction(r, config, &doubleFunc{})
+
+	// Verify it's registered
+	_, ok := r.LookupWithArgs("double", 1)
+	if !ok {
+		t.Fatal("Function not found after registration")
+	}
+
+	// Unregister it
+	removed := UnregisterFunction(r, "double", 1)
+	if !removed {
+		t.Error("Expected function to be removed")
+	}
+
+	// Verify it's gone
+	_, ok = r.LookupWithArgs("double", 1)
+	if ok {
+		t.Error("Function still found after unregistration")
+	}
+}
+
+func TestUnregisterNonExistentFunction(t *testing.T) {
+	r := NewRegistry()
+
+	removed := UnregisterFunction(r, "nonexistent", 1)
+	if removed {
+		t.Error("Expected false for non-existent function")
+	}
+}
+
+func TestUnregisterVariadicFunction(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:    "concat",
+		NumArgs: -1,
+	}
+
+	RegisterScalarFunction(r, config, &concatFunc{})
+
+	// Verify it's registered
+	_, ok := r.LookupWithArgs("concat", 3)
+	if !ok {
+		t.Fatal("Variadic function not found")
+	}
+
+	// Unregister with -1 for variadic
+	removed := UnregisterFunction(r, "concat", -1)
+	if !removed {
+		t.Error("Expected variadic function to be removed")
+	}
+
+	// Verify it's gone
+	_, ok = r.LookupWithArgs("concat", 3)
+	if ok {
+		t.Error("Variadic function still found after unregistration")
+	}
+}
+
+// Test argument validation
+
+func TestScalarFunctionArgValidation(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:    "double",
+		NumArgs: 1,
+	}
+
+	RegisterScalarFunction(r, config, &doubleFunc{})
+	fn, _ := r.LookupWithArgs("double", 1)
+
+	// Try calling with wrong number of args
+	_, err := fn.Call([]Value{NewIntValue(1), NewIntValue(2)})
+	if err == nil {
+		t.Error("Expected error for wrong number of arguments")
+	}
+
+	if !strings.Contains(err.Error(), "takes exactly 1 arguments") {
+		t.Errorf("Unexpected error message: %v", err)
+	}
+}
+
+func TestAggregateFunctionArgValidation(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:    "product",
+		NumArgs: 1,
+	}
+
+	RegisterAggregateFunction(r, config, &productFunc{})
+	fn, _ := r.LookupWithArgs("product", 1)
+	aggFn := fn.(AggregateFunction)
+
+	// Try calling Step with wrong number of args
+	err := aggFn.Step([]Value{NewIntValue(1), NewIntValue(2)})
+	if err == nil {
+		t.Error("Expected error for wrong number of arguments")
+	}
+
+	if !strings.Contains(err.Error(), "takes exactly 1 arguments") {
+		t.Errorf("Unexpected error message: %v", err)
+	}
+}
+
+// Test error cases
+
+func TestRegisterScalarFunctionEmptyName(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:    "",
+		NumArgs: 1,
+	}
+
+	err := RegisterScalarFunction(r, config, &doubleFunc{})
+	if err == nil {
+		t.Error("Expected error for empty function name")
+	}
+}
+
+func TestRegisterScalarFunctionNilImplementation(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
 		Name:    "test",
-		Columns: []*schema.Column{{Name: "id", Type: "INTEGER"}},
+		NumArgs: 1,
 	}
 
-	validator := NewCheckValidator(table)
-
-	if validator.HasCheckConstraints() {
-		t.Error("Expected no CHECK constraints")
-	}
-
-	mock := &mockCodeGenerator{}
-	err := validator.ValidateInsertWithGenerator(mock)
-	if err != nil {
-		t.Errorf("ValidateInsertWithGenerator should not fail: %v", err)
-	}
-
-	if len(mock.constraints) != 0 {
-		t.Errorf("Expected 0 constraints to be generated, got %d", len(mock.constraints))
+	err := RegisterScalarFunction(r, config, nil)
+	if err == nil {
+		t.Error("Expected error for nil function implementation")
 	}
 }
 
-// TestCheckConstraint_FormatErrorMessagePublic tests the public FormatErrorMessage function
-func TestCheckConstraint_FormatErrorMessagePublic(t *testing.T) {
-	tests := []struct {
-		name       string
-		constraint *CheckConstraint
-		wantSubstr string
-	}{
-		{
-			name: "named constraint",
-			constraint: &CheckConstraint{
-				Name:       "valid_age",
-				ExprString: "age >= 0",
-			},
-			wantSubstr: "valid_age",
-		},
-		{
-			name: "table-level unnamed",
-			constraint: &CheckConstraint{
-				Name:         "",
-				ExprString:   "price > 0",
-				IsTableLevel: true,
-			},
-			wantSubstr: "price > 0",
-		},
-		{
-			name: "column-level",
-			constraint: &CheckConstraint{
-				Name:         "",
-				ExprString:   "length > 0",
-				IsTableLevel: false,
-				ColumnName:   "length",
-			},
-			wantSubstr: "length",
-		},
+func TestRegisterAggregateFunctionEmptyName(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:    "",
+		NumArgs: 1,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			msg := FormatErrorMessage(tt.constraint)
-			if msg == "" {
-				t.Error("Expected non-empty error message")
-			}
-		})
+	err := RegisterAggregateFunction(r, config, &productFunc{})
+	if err == nil {
+		t.Error("Expected error for empty function name")
 	}
 }
 
-// TestDefaultConstraint_ShouldApplyDefault tests the ShouldApplyDefault function
-func TestDefaultConstraint_ShouldApplyDefault(t *testing.T) {
-	tests := []struct {
-		name             string
-		valueProvided    bool
-		valueIsNull      bool
-		columnAllowsNull bool
-		want             bool
-	}{
-		{
-			name:             "no value provided",
-			valueProvided:    false,
-			valueIsNull:      false,
-			columnAllowsNull: true,
-			want:             true,
-		},
-		{
-			name:             "null provided to NOT NULL column",
-			valueProvided:    true,
-			valueIsNull:      true,
-			columnAllowsNull: false,
-			want:             true,
-		},
-		{
-			name:             "null provided to nullable column",
-			valueProvided:    true,
-			valueIsNull:      true,
-			columnAllowsNull: true,
-			want:             false,
-		},
-		{
-			name:             "value provided",
-			valueProvided:    true,
-			valueIsNull:      false,
-			columnAllowsNull: true,
-			want:             false,
-		},
+func TestRegisterAggregateFunctionNilImplementation(t *testing.T) {
+	r := NewRegistry()
+
+	config := FunctionConfig{
+		Name:    "test",
+		NumArgs: 1,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ShouldApplyDefault(tt.valueProvided, tt.valueIsNull, tt.columnAllowsNull)
-			if got != tt.want {
-				t.Errorf("ShouldApplyDefault() = %v, want %v", got, tt.want)
-			}
-		})
+	err := RegisterAggregateFunction(r, config, nil)
+	if err == nil {
+		t.Error("Expected error for nil function implementation")
 	}
 }
 
-// TestDefaultConstraint_ApplyDefaults tests ApplyDefaults function
-func TestDefaultConstraint_ApplyDefaults(t *testing.T) {
-	// Create column info with default constraints
-	tableCols := []*ColumnInfo{
-		{
-			Name:       "id",
-			AllowsNull: false,
-			DefaultConstraint: &DefaultConstraint{
-				Type:         DefaultLiteral,
-				LiteralValue: int64(0),
-			},
-		},
-		{
-			Name:       "status",
-			AllowsNull: true,
-			DefaultConstraint: &DefaultConstraint{
-				Type:         DefaultLiteral,
-				LiteralValue: "active",
-			},
-		},
-		{
-			Name:       "name",
-			AllowsNull: true,
-			DefaultConstraint: nil,
-		},
+// Test deterministic flag
+
+func TestDeterministicFlag(t *testing.T) {
+	r := NewRegistry()
+
+	configDet := FunctionConfig{
+		Name:          "det_func",
+		NumArgs:       1,
+		Deterministic: true,
 	}
 
-	tests := []struct {
-		name        string
-		insertCols  []string
-		insertVals  []interface{}
-		wantValues  []interface{}
-		wantError   bool
-	}{
-		{
-			name:       "apply defaults for missing columns",
-			insertCols: []string{},
-			insertVals: []interface{}{},
-			wantValues: []interface{}{int64(0), "active", nil},
-			wantError:  false,
-		},
-		{
-			name:       "use provided values",
-			insertCols: []string{"id", "status", "name"},
-			insertVals: []interface{}{int64(42), "custom", "test"},
-			wantValues: []interface{}{int64(42), "custom", "test"},
-			wantError:  false,
-		},
-		{
-			name:       "partial values with defaults",
-			insertCols: []string{"id"},
-			insertVals: []interface{}{int64(99)},
-			wantValues: []interface{}{int64(99), "active", nil},
-			wantError:  false,
-		},
+	RegisterScalarFunction(r, configDet, &doubleFunc{})
+	fn, _ := r.LookupWithArgs("det_func", 1)
+
+	// Check if we can access deterministic flag
+	if udf, ok := fn.(*userScalarFunc); ok {
+		if !udf.IsDeterministic() {
+			t.Error("Expected function to be deterministic")
+		}
+	} else {
+		t.Error("Expected userScalarFunc type")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := ApplyDefaults(tableCols, tt.insertCols, tt.insertVals)
+	// Test non-deterministic
+	configNonDet := FunctionConfig{
+		Name:          "nondet_func",
+		NumArgs:       1,
+		Deterministic: false,
+	}
 
-			if tt.wantError {
-				if err == nil {
-					t.Error("Expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				}
+	RegisterScalarFunction(r, configNonDet, &doubleFunc{})
+	fn2, _ := r.LookupWithArgs("nondet_func", 1)
 
-				if len(result) != len(tt.wantValues) {
-					t.Errorf("len(result) = %d, want %d", len(result), len(tt.wantValues))
-				}
-
-				for i, want := range tt.wantValues {
-					if result[i] != want {
-						t.Errorf("result[%d] = %v, want %v", i, result[i], want)
-					}
-				}
-			}
-		})
+	if udf, ok := fn2.(*userScalarFunc); ok {
+		if udf.IsDeterministic() {
+			t.Error("Expected function to be non-deterministic")
+		}
 	}
 }
 
-// TestDefaultConstraint_Evaluate tests the Evaluate method
-func TestDefaultConstraint_Evaluate(t *testing.T) {
-	tests := []struct {
-		name      string
-		dc        *DefaultConstraint
-		wantError bool
-		checkType bool
-	}{
-		{
-			name: "literal string",
-			dc: &DefaultConstraint{
-				Type:         DefaultLiteral,
-				LiteralValue: "default_value",
-			},
-			wantError: false,
-		},
-		{
-			name: "literal integer",
-			dc: &DefaultConstraint{
-				Type:         DefaultLiteral,
-				LiteralValue: int64(42),
-			},
-			wantError: false,
-		},
-		{
-			name: "literal null",
-			dc: &DefaultConstraint{
-				Type:         DefaultLiteral,
-				LiteralValue: nil,
-			},
-			wantError: false,
-		},
-		{
-			name: "current time",
-			dc: &DefaultConstraint{
-				Type: DefaultCurrentTime,
-			},
-			wantError: false,
-			checkType: true,
-		},
-		{
-			name: "current date",
-			dc: &DefaultConstraint{
-				Type: DefaultCurrentDate,
-			},
-			wantError: false,
-			checkType: true,
-		},
-		{
-			name: "current timestamp",
-			dc: &DefaultConstraint{
-				Type: DefaultCurrentTimestamp,
-			},
-			wantError: false,
-			checkType: true,
-		},
-		{
-			name: "unsupported function",
-			dc: &DefaultConstraint{
-				Type:         DefaultFunction,
-				FunctionName: "RANDOM",
-			},
-			wantError: true,
-		},
-		{
-			name: "unsupported expression",
-			dc: &DefaultConstraint{
-				Type: DefaultExpression,
-			},
-			wantError: true,
-		},
+// Test multiple functions in registry
+
+func TestMultipleFunctionsInRegistry(t *testing.T) {
+	r := NewRegistry()
+
+	// Register multiple functions
+	RegisterScalarFunction(r, FunctionConfig{Name: "double", NumArgs: 1}, &doubleFunc{})
+	RegisterScalarFunction(r, FunctionConfig{Name: "add", NumArgs: 2}, &addFunc{})
+	RegisterScalarFunction(r, FunctionConfig{Name: "concat", NumArgs: -1}, &concatFunc{})
+	RegisterAggregateFunction(r, FunctionConfig{Name: "product", NumArgs: 1}, &productFunc{})
+
+	// Verify all are accessible
+	if _, ok := r.LookupWithArgs("double", 1); !ok {
+		t.Error("double not found")
+	}
+	if _, ok := r.LookupWithArgs("add", 2); !ok {
+		t.Error("add not found")
+	}
+	if _, ok := r.LookupWithArgs("concat", 5); !ok {
+		t.Error("concat not found")
+	}
+	if _, ok := r.LookupWithArgs("product", 1); !ok {
+		t.Error("product not found")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := tt.dc.Evaluate()
-
-			if tt.wantError {
-				if err == nil {
-					t.Error("Expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				}
-
-				if tt.checkType && result == nil {
-					t.Error("Expected non-nil result for time/date function")
-				}
-			}
-		})
+	// Verify GetAllFunctions returns them all
+	allFuncs := r.GetAllFunctions()
+	if len(allFuncs) < 4 {
+		t.Errorf("Expected at least 4 functions, got %d", len(allFuncs))
 	}
 }
 
-// TestForeignKeyManager_ColumnsChanged tests the columnsChanged helper
-func TestForeignKeyManager_ColumnsChanged(t *testing.T) {
-	tests := []struct {
-		name      string
-		columns   []string
-		oldValues map[string]interface{}
-		newValues map[string]interface{}
-		want      bool
-	}{
-		{
-			name:      "no change",
-			columns:   []string{"id"},
-			oldValues: map[string]interface{}{"id": 1},
-			newValues: map[string]interface{}{"id": 1},
-			want:      false,
-		},
-		{
-			name:      "single column changed",
-			columns:   []string{"id"},
-			oldValues: map[string]interface{}{"id": 1},
-			newValues: map[string]interface{}{"id": 2},
-			want:      true,
-		},
-		{
-			name:      "multi-column one changed",
-			columns:   []string{"a", "b"},
-			oldValues: map[string]interface{}{"a": 1, "b": 2},
-			newValues: map[string]interface{}{"a": 1, "b": 3},
-			want:      true,
-		},
-		{
-			name:      "multi-column no change",
-			columns:   []string{"a", "b"},
-			oldValues: map[string]interface{}{"a": 1, "b": 2},
-			newValues: map[string]interface{}{"a": 1, "b": 2},
-			want:      false,
-		},
-	}
+// Benchmark tests
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := columnsChanged(tt.columns, tt.oldValues, tt.newValues)
-			if got != tt.want {
-				t.Errorf("columnsChanged() = %v, want %v", got, tt.want)
-			}
-		})
+func BenchmarkScalarFunctionCall(b *testing.B) {
+	r := NewRegistry()
+	config := FunctionConfig{Name: "double", NumArgs: 1}
+	RegisterScalarFunction(r, config, &doubleFunc{})
+	fn, _ := r.LookupWithArgs("double", 1)
+	args := []Value{NewIntValue(21)}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		fn.Call(args)
 	}
 }
 
-// TestForeignKeyManager_ExtractKeyValues tests extractKeyValues helper
-func TestForeignKeyManager_ExtractKeyValues(t *testing.T) {
-	values := map[string]interface{}{
-		"id":   1,
-		"name": "test",
-		"age":  30,
-	}
+func BenchmarkAggregateFunctionStep(b *testing.B) {
+	r := NewRegistry()
+	config := FunctionConfig{Name: "product", NumArgs: 1}
+	RegisterAggregateFunction(r, config, &productFunc{})
+	fn, _ := r.LookupWithArgs("product", 1)
+	aggFn := fn.(AggregateFunction)
+	args := []Value{NewIntValue(2)}
 
-	tests := []struct {
-		name    string
-		columns []string
-		want    []interface{}
-	}{
-		{
-			name:    "single column",
-			columns: []string{"id"},
-			want:    []interface{}{1},
-		},
-		{
-			name:    "multiple columns",
-			columns: []string{"name", "age"},
-			want:    []interface{}{"test", 30},
-		},
-		{
-			name:    "column order matters",
-			columns: []string{"age", "name"},
-			want:    []interface{}{30, "test"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractKeyValues(values, tt.columns)
-			if len(got) != len(tt.want) {
-				t.Errorf("len = %d, want %d", len(got), len(tt.want))
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("index %d: got %v, want %v", i, got[i], tt.want[i])
-				}
-			}
-		})
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		aggFn.Reset()
+		aggFn.Step(args)
+		aggFn.Final()
 	}
 }
 
-// TestForeignKeyManager_ExtractForeignKeyValues tests extractForeignKeyValues
-func TestForeignKeyManager_ExtractForeignKeyValues(t *testing.T) {
-	tests := []struct {
-		name        string
-		values      map[string]interface{}
-		columns     []string
-		wantHasNull bool
-	}{
-		{
-			name:        "all values present",
-			values:      map[string]interface{}{"a": 1, "b": 2},
-			columns:     []string{"a", "b"},
-			wantHasNull: false,
-		},
-		{
-			name:        "one value null",
-			values:      map[string]interface{}{"a": 1, "b": nil},
-			columns:     []string{"a", "b"},
-			wantHasNull: true,
-		},
-		{
-			name:        "one value missing",
-			values:      map[string]interface{}{"a": 1},
-			columns:     []string{"a", "b"},
-			wantHasNull: true,
-		},
-		{
-			name:        "all null",
-			values:      map[string]interface{}{"a": nil, "b": nil},
-			columns:     []string{"a", "b"},
-			wantHasNull: true,
-		},
-	}
+// Example error-returning function
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, hasNull := extractForeignKeyValues(tt.values, tt.columns)
-			if hasNull != tt.wantHasNull {
-				t.Errorf("hasNull = %v, want %v", hasNull, tt.wantHasNull)
-			}
-		})
-	}
+type errorFunc struct{}
+
+func (f *errorFunc) Invoke(args []Value) (Value, error) {
+	return nil, fmt.Errorf("intentional error")
 }
 
-// TestConvertFKAction tests action conversion
-func TestConvertFKAction(t *testing.T) {
-	tests := []struct {
-		name   string
-		action parser.ForeignKeyAction
-		want   ForeignKeyAction
-	}{
-		{"SetNull", parser.FKActionSetNull, FKActionSetNull},
-		{"SetDefault", parser.FKActionSetDefault, FKActionSetDefault},
-		{"Cascade", parser.FKActionCascade, FKActionCascade},
-		{"Restrict", parser.FKActionRestrict, FKActionRestrict},
-		{"NoAction", parser.FKActionNoAction, FKActionNoAction},
-		{"None/Unknown", parser.ForeignKeyAction(999), FKActionNone},
+func TestErrorReturningFunction(t *testing.T) {
+	r := NewRegistry()
+	config := FunctionConfig{Name: "error_func", NumArgs: 0}
+	RegisterScalarFunction(r, config, &errorFunc{})
+	fn, _ := r.LookupWithArgs("error_func", 0)
+
+	_, err := fn.Call([]Value{})
+	if err == nil {
+		t.Error("Expected error from function")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := convertFKAction(tt.action)
-			if got != tt.want {
-				t.Errorf("convertFKAction() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestConvertDeferrableMode tests deferrable mode conversion
-func TestConvertDeferrableMode(t *testing.T) {
-	tests := []struct {
-		name string
-		mode parser.DeferrableMode
-		want DeferrableMode
-	}{
-		{"InitiallyDeferred", parser.DeferrableInitiallyDeferred, DeferrableInitiallyDeferred},
-		{"InitiallyImmediate", parser.DeferrableInitiallyImmediate, DeferrableInitiallyImmediate},
-		{"None", parser.DeferrableMode(999), DeferrableNone},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := convertDeferrableMode(tt.mode)
-			if got != tt.want {
-				t.Errorf("convertDeferrableMode() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestPrimaryKeyConstraint_ValidateUpdate_NoPrimaryKey tests update on table without PK
-func TestPrimaryKeyConstraint_ValidateUpdate_NoPrimaryKey(t *testing.T) {
-	columns := []*schema.Column{
-		{Name: "name", Type: "TEXT"},
-		{Name: "age", Type: "INTEGER"},
-	}
-
-	bt := btree.NewBtree(4096)
-	rootPage, _ := bt.CreateTable()
-
-	table := &schema.Table{
-		Name:       "test",
-		RootPage:   rootPage,
-		Columns:    columns,
-		PrimaryKey: []string{},
-	}
-
-	pk := NewPrimaryKeyConstraint(table, bt, nil)
-
-	newValues := map[string]interface{}{"name": "Updated"}
-
-	err := pk.ValidateUpdate(10, newValues)
-	if err != nil {
-		t.Errorf("ValidateUpdate should succeed for table without PK: %v", err)
-	}
-}
-
-// TestValuesEqual_EdgeCases tests edge cases in value comparison
-func TestValuesEqual_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name string
-		v1   interface{}
-		v2   interface{}
-		want bool
-	}{
-		{"nil vs nil", nil, nil, true},
-		{"nil vs value", nil, 42, false},
-		{"value vs nil", 42, nil, false},
-		{"different types", 42, "42", false},
-		{"int vs float", int(42), float64(42), false},
-		{"empty byte slices", []byte{}, []byte{}, true},
-		{"byte slice vs nil", []byte{1, 2}, nil, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := valuesEqual(tt.v1, tt.v2)
-			if got != tt.want {
-				t.Errorf("valuesEqual(%v, %v) = %v, want %v", tt.v1, tt.v2, got, tt.want)
-			}
-		})
+	if err.Error() != "intentional error" {
+		t.Errorf("Unexpected error message: %v", err)
 	}
 }

@@ -571,6 +571,11 @@ The lock ordering hierarchy is part of the overall security model:
 
 See [SECURITY.md](SECURITY.md) for the complete security model.
 
+## SQLite Reference
+
+- [SQLite Locking Reference (local)](sqlite/LOCKING.md)
+- [SQLite Isolation Reference (local)](sqlite/ISOLATION.md)
+
 ## Version History
 
 - 2026-02-28: Added Schema.mu and Pager.mu to hierarchy, expanded patterns, added diagrams (Agent 2)
