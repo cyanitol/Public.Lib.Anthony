@@ -183,15 +183,16 @@ func (s *Stmt) adjustInstructionParameters(instr *vdbe.Instruction, offsets cteI
 	newInstr := *instr
 	adjustedP1, adjustedP2, adjustedP3 := instr.P1, instr.P2, instr.P3
 
-	// Adjust cursor numbers for cursor operations
-	if needsCursorAdjustment(instr.Opcode) {
-		adjustedP1 = instr.P1 + offsets.baseCursor
-	}
-
-	// Adjust register numbers
+	// First, adjust register numbers (this modifies all three parameters)
 	adjustedP1, adjustedP2, adjustedP3 = adjustRegisterNumbers(
 		instr.Opcode, adjustedP1, adjustedP2, adjustedP3, offsets.baseRegister,
 	)
+
+	// Then, adjust cursor numbers for cursor operations
+	// This MUST come after register adjustment to override P1 for cursor ops
+	if needsCursorAdjustment(instr.Opcode) {
+		adjustedP1 = instr.P1 + offsets.baseCursor
+	}
 
 	newInstr.P1 = adjustedP1
 	newInstr.P2 = adjustedP2

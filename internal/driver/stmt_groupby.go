@@ -247,11 +247,17 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 
 	// Setup VDBE and code generator
 	vm.AllocMemory(numCols + numGroupBy*3 + 100)
-	vm.AllocCursors(2) // Cursor 0 for table, cursor 1 for sorter
+
+	// Determine cursor number for source table (handles both regular and ephemeral tables)
+	tableCursor := s.determineCursorNum(table, vm)
+
+	// Allocate sorter cursor (next available cursor)
+	sorterCursor := len(vm.Cursors)
+	vm.AllocCursors(sorterCursor + 1)
 
 	gen := expr.NewCodeGenerator(vm)
 	s.setupSubqueryCompiler(gen)
-	gen.RegisterCursor(tableName, 0)
+	gen.RegisterCursor(tableName, tableCursor)
 
 	// Build result column names
 	vm.ResultCols = make([]string, numCols)
@@ -278,11 +284,14 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	keyInfo := s.createGroupBySorterKeyInfo(numGroupBy)
 
 	// Open table and sorter
-	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
-	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, 1, sorterCols, 0)
+	// Only open the table cursor if it's not already open (e.g., for ephemeral CTE tables)
+	if !table.Temp {
+		vm.AddOp(vdbe.OpOpenRead, tableCursor, int(table.RootPage), len(table.Columns))
+	}
+	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, sorterCursor, sorterCols, 0)
 	vm.Program[sorterOpenAddr].P4.P = keyInfo
 
-	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+	rewindAddr := vm.AddOp(vdbe.OpRewind, tableCursor, 0, 0)
 	loopStart := vm.NumOps()
 
 	// WHERE clause
@@ -318,27 +327,29 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	}
 
 	// Insert into sorter
-	vm.AddOp(vdbe.OpSorterInsert, 1, sorterBaseReg, sorterCols)
+	vm.AddOp(vdbe.OpSorterInsert, sorterCursor, sorterBaseReg, sorterCols)
 
 	// Fix WHERE skip
 	s.fixWhereSkip(vm, skipAddr)
 
 	// Next row
-	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
+	vm.AddOp(vdbe.OpNext, tableCursor, loopStart, 0)
 
-	// Close table, sort the data
-	vm.AddOp(vdbe.OpClose, 0, 0, 0)
-	sorterSortAddr := vm.AddOp(vdbe.OpSorterSort, 1, 0, 0)
+	// Close table (if we opened it), sort the data
+	if !table.Temp {
+		vm.AddOp(vdbe.OpClose, tableCursor, 0, 0)
+	}
+	sorterSortAddr := vm.AddOp(vdbe.OpSorterSort, sorterCursor, 0, 0)
 
 	// Phase 2: Process sorted data with group detection
 	afterScanAddr := vm.NumOps()
 
 	// Iterate over sorted data
-	sorterNextAddr := vm.AddOp(vdbe.OpSorterNext, 1, 0, 0)
+	sorterNextAddr := vm.AddOp(vdbe.OpSorterNext, sorterCursor, 0, 0)
 	sorterLoopStart := vm.NumOps()
 
 	// Extract data from sorter
-	vm.AddOp(vdbe.OpSorterData, 1, sorterBaseReg, sorterCols)
+	vm.AddOp(vdbe.OpSorterData, sorterCursor, sorterBaseReg, sorterCols)
 
 	// Load GROUP BY values from sorter data
 	for i := 0; i < numGroupBy; i++ {
@@ -356,14 +367,14 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	s.updateGroupAccumulatorsFromSorter(vm, gen, stmt, state, sorterBaseReg, numGroupBy)
 
 	// Next sorted row
-	vm.AddOp(vdbe.OpSorterNext, 1, sorterLoopStart, 0)
+	vm.AddOp(vdbe.OpSorterNext, sorterCursor, sorterLoopStart, 0)
 
 	// After processing all sorted rows - output last group
 	finalOutputAddr := vm.NumOps()
 	s.emitFinalGroupOutput(vm, gen, stmt, state, numCols)
 
 	// Close sorter and halt
-	vm.AddOp(vdbe.OpSorterClose, 1, 0, 0)
+	vm.AddOp(vdbe.OpSorterClose, sorterCursor, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
 	// Fix jumps
