@@ -12,12 +12,17 @@ import (
 // This allows the CTE to materialize at runtime instead of compile time.
 //
 // Bytecode pattern:
+//   OpOpenEphemeral cursorNum, numColumns  // Open cursor OUTSIDE coroutine
 //   OpInitCoroutine coroutineID, jumpPastBody, entryPoint
-//   [coroutine body - opens cursor, executes SELECT, closes cursor]
+//   [coroutine body - executes SELECT and inserts into cursor]
 //   OpEndCoroutine coroutineID
 //   OpYield coroutineID  // Call the coroutine to materialize results
 //
 func (s *Stmt) compileCTEPopulationCoroutine(vm *vdbe.VDBE, cteSelect *parser.SelectStmt, cursorNum int, coroutineID int, numColumns int, args []driver.NamedValue) error {
+	// CRITICAL: Open the ephemeral table BEFORE the coroutine, not inside it.
+	// This ensures the cursor stays open after the coroutine completes.
+	vm.AddOp(vdbe.OpOpenEphemeral, cursorNum, numColumns, 0)
+
 	// Save the current address - this is where we'll place the InitCoroutine
 	initAddr := vm.NumOps()
 
@@ -26,9 +31,6 @@ func (s *Stmt) compileCTEPopulationCoroutine(vm *vdbe.VDBE, cteSelect *parser.Se
 
 	// Mark the coroutine entry point (where OpYield will jump to)
 	coroutineEntry := vm.NumOps()
-
-	// Open the ephemeral table for storing CTE results
-	vm.AddOp(vdbe.OpOpenEphemeral, cursorNum, numColumns, 0)
 
 	// Compile the CTE SELECT to generate rows
 	compiledCTE, err := s.compileCTESelect(vm, cteSelect, args)
@@ -42,8 +44,7 @@ func (s *Stmt) compileCTEPopulationCoroutine(vm *vdbe.VDBE, cteSelect *parser.Se
 	// Copy CTE bytecode into main VM with adjustments, using coroutine-aware handling
 	s.inlineCTEBytecodeForCoroutine(vm, compiledCTE, cursorNum, coroutineID, offsets)
 
-	// After the SELECT completes, close the cursor and end the coroutine
-	vm.AddOp(vdbe.OpClose, cursorNum, 0, 0)
+	// After the SELECT completes, end the coroutine (but DON'T close the cursor)
 	vm.AddOp(vdbe.OpEndCoroutine, coroutineID, 0, 0)
 
 	// Now we know where the coroutine body ends, patch the InitCoroutine instruction

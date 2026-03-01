@@ -13,7 +13,7 @@ import (
 
 // loadAggregateColumnValue is a helper to load a column value for aggregate functions.
 // Returns (tempReg, skipAddr, ok) where skipAddr is the address to patch for NULL skip.
-func (s *Stmt) loadAggregateColumnValue(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, gen *expr.CodeGenerator) (int, int, bool) {
+func (s *Stmt) loadAggregateColumnValue(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, gen *expr.CodeGenerator) (int, int, bool) {
 	if len(fnExpr.Args) == 0 {
 		return 0, 0, false
 	}
@@ -28,10 +28,13 @@ func (s *Stmt) loadAggregateColumnValue(vm *vdbe.VDBE, fnExpr *parser.FunctionEx
 		return 0, 0, false
 	}
 
+	// Get the cursor number from the code generator (handles both regular and ephemeral tables)
+	tableCursor, _ := gen.GetCursor(tableName)
+
 	// Load column value into a temp register
 	tempReg := gen.AllocReg()
 	recordIdx := schemaRecordIdx(table.Columns, colIdx)
-	vm.AddOp(vdbe.OpColumn, 0, recordIdx, tempReg)
+	vm.AddOp(vdbe.OpColumn, tableCursor, recordIdx, tempReg)
 
 	// Skip NULL values
 	skipAddr := vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0)
@@ -40,7 +43,7 @@ func (s *Stmt) loadAggregateColumnValue(vm *vdbe.VDBE, fnExpr *parser.FunctionEx
 }
 
 // emitCountUpdate emits VDBE opcodes to update COUNT accumulator
-func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, accReg int, gen *expr.CodeGenerator) {
+func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, accReg int, gen *expr.CodeGenerator) {
 	// COUNT(*) - count all rows
 	if fnExpr.Star || len(fnExpr.Args) == 0 {
 		vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
@@ -48,7 +51,7 @@ func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table
 	}
 
 	// COUNT(column) - count non-NULL values only
-	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, gen)
+	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, tableName, gen)
 	if !ok {
 		// Not a column reference, just increment
 		vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
@@ -74,8 +77,8 @@ func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table
 }
 
 // emitSumUpdate emits VDBE opcodes to update SUM/TOTAL accumulator
-func (s *Stmt) emitSumUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, accReg int, gen *expr.CodeGenerator) {
-	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, gen)
+func (s *Stmt) emitSumUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, accReg int, gen *expr.CodeGenerator) {
+	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, tableName, gen)
 	if !ok {
 		return
 	}
@@ -108,8 +111,8 @@ func (s *Stmt) emitSumUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 }
 
 // emitAvgUpdate emits VDBE opcodes to update AVG accumulator (sum and count)
-func (s *Stmt) emitAvgUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, sumReg int, countReg int, gen *expr.CodeGenerator) {
-	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, gen)
+func (s *Stmt) emitAvgUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, sumReg int, countReg int, gen *expr.CodeGenerator) {
+	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, tableName, gen)
 	if !ok {
 		return
 	}
@@ -145,8 +148,8 @@ func (s *Stmt) emitAvgUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 }
 
 // emitMinUpdate emits VDBE opcodes to update MIN accumulator
-func (s *Stmt) emitMinUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, accReg int, gen *expr.CodeGenerator) {
-	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, gen)
+func (s *Stmt) emitMinUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, accReg int, gen *expr.CodeGenerator) {
+	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, tableName, gen)
 	if !ok {
 		return
 	}
@@ -170,8 +173,8 @@ func (s *Stmt) emitMinUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 }
 
 // emitMaxUpdate emits VDBE opcodes to update MAX accumulator
-func (s *Stmt) emitMaxUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, accReg int, gen *expr.CodeGenerator) {
-	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, gen)
+func (s *Stmt) emitMaxUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, accReg int, gen *expr.CodeGenerator) {
+	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, tableName, gen)
 	if !ok {
 		return
 	}
@@ -242,7 +245,14 @@ func (s *Stmt) initializeAggregateAccumulators(vm *vdbe.VDBE, stmt *parser.Selec
 	avgCountRegs = make([]int, numCols)
 
 	for i, col := range stmt.Columns {
-		// Check if this column contains any aggregates (direct or in expressions)
+		// For simple aggregate expressions, handle directly
+		if fnExpr, ok := col.Expr.(*parser.FunctionExpr); ok && s.isAggregateExpr(fnExpr) {
+			accRegs[i] = gen.AllocReg()
+			avgCountRegs[i] = s.initializeAggregateRegister(vm, fnExpr.Name, accRegs[i], gen)
+			continue
+		}
+
+		// For complex expressions containing aggregates (e.g., COUNT(*) + 1)
 		if !s.containsAggregate(col.Expr) {
 			continue
 		}
@@ -294,11 +304,13 @@ func (s *Stmt) setupAggregateVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	tableName string, table *schema.Table, numCols int) *expr.CodeGenerator {
 
 	vm.AllocMemory(numCols + 20)
-	vm.AllocCursors(1)
+
+	// Determine cursor number for source table (handles both regular and ephemeral tables)
+	tableCursor := s.determineCursorNum(table, vm)
 
 	gen := expr.NewCodeGenerator(vm)
 	s.setupSubqueryCompiler(gen)
-	gen.RegisterCursor(tableName, 0)
+	gen.RegisterCursor(tableName, tableCursor)
 
 	// Build result column names
 	vm.ResultCols = make([]string, numCols)
@@ -329,10 +341,18 @@ func (s *Stmt) emitAggregateScanLoop(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	table *schema.Table, accRegs []int, avgCountRegs []int,
 	gen *expr.CodeGenerator) int {
 
+	// Get the cursor number from the code generator (handles both regular and ephemeral tables)
+	tableName, _ := selectFromTableName(stmt)
+	tableCursor, _ := gen.GetCursor(tableName)
+
 	// Emit scan preamble
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
-	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+
+	// Only open the table cursor if it's not already open (e.g., for ephemeral CTE tables)
+	if !table.Temp {
+		vm.AddOp(vdbe.OpOpenRead, tableCursor, int(table.RootPage), len(table.Columns))
+	}
+	rewindAddr := vm.AddOp(vdbe.OpRewind, tableCursor, 0, 0)
 
 	loopStart := vm.NumOps()
 
@@ -348,7 +368,7 @@ func (s *Stmt) emitAggregateScanLoop(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	}
 
 	// Continue scan
-	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
+	vm.AddOp(vdbe.OpNext, tableCursor, loopStart, 0)
 
 	return rewindAddr
 }
@@ -374,6 +394,9 @@ func (s *Stmt) emitAggregateUpdates(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	table *schema.Table, accRegs []int, avgCountRegs []int,
 	gen *expr.CodeGenerator) {
 
+	// Get table name for cursor lookup
+	tableName, _ := selectFromTableName(stmt)
+
 	for i, col := range stmt.Columns {
 		// Check if this column contains any aggregates
 		if !s.containsAggregate(col.Expr) {
@@ -386,25 +409,25 @@ func (s *Stmt) emitAggregateUpdates(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 			continue
 		}
 
-		s.emitSingleAggregateUpdate(vm, fnExpr, table, accRegs[i], avgCountRegs[i], gen)
+		s.emitSingleAggregateUpdate(vm, fnExpr, table, tableName, accRegs[i], avgCountRegs[i], gen)
 	}
 }
 
 // emitSingleAggregateUpdate emits update for a single aggregate function.
 func (s *Stmt) emitSingleAggregateUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr,
-	table *schema.Table, accReg int, avgCountReg int, gen *expr.CodeGenerator) {
+	table *schema.Table, tableName string, accReg int, avgCountReg int, gen *expr.CodeGenerator) {
 
 	switch fnExpr.Name {
 	case "COUNT":
-		s.emitCountUpdate(vm, fnExpr, table, accReg, gen)
+		s.emitCountUpdate(vm, fnExpr, table, tableName, accReg, gen)
 	case "SUM", "TOTAL":
-		s.emitSumUpdate(vm, fnExpr, table, accReg, gen)
+		s.emitSumUpdate(vm, fnExpr, table, tableName, accReg, gen)
 	case "AVG":
-		s.emitAvgUpdate(vm, fnExpr, table, accReg, avgCountReg, gen)
+		s.emitAvgUpdate(vm, fnExpr, table, tableName, accReg, avgCountReg, gen)
 	case "MIN":
-		s.emitMinUpdate(vm, fnExpr, table, accReg, gen)
+		s.emitMinUpdate(vm, fnExpr, table, tableName, accReg, gen)
 	case "MAX":
-		s.emitMaxUpdate(vm, fnExpr, table, accReg, gen)
+		s.emitMaxUpdate(vm, fnExpr, table, tableName, accReg, gen)
 	}
 }
 
@@ -479,6 +502,15 @@ func (s *Stmt) emitBinaryOp(vm *vdbe.VDBE, op parser.BinaryOp, leftReg, rightReg
 func (s *Stmt) emitAggregateExpressionOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator,
 	expr parser.Expression, accReg int, avgCountReg int, targetReg int) error {
 
+	// Unwrap parentheses
+	for {
+		if parenExpr, ok := expr.(*parser.ParenExpr); ok {
+			expr = parenExpr.Expr
+		} else {
+			break
+		}
+	}
+
 	// Handle simple case: direct aggregate function
 	if fnExpr, ok := expr.(*parser.FunctionExpr); ok && s.isAggregateExpr(fnExpr) {
 		if fnExpr.Name == "AVG" {
@@ -515,6 +547,14 @@ func (s *Stmt) emitAggregateOutput(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 
 	// Finalize and copy aggregates to result registers
 	for i, col := range stmt.Columns {
+		// Check if accumulator was allocated for this column
+		if accRegs[i] == 0 && s.containsAggregate(col.Expr) {
+			// Accumulator should have been allocated but wasn't - this is a bug
+			// For safety, emit NULL
+			vm.AddOp(vdbe.OpNull, 0, i, 0)
+			continue
+		}
+
 		if err := s.emitAggregateExpressionOutput(vm, gen, col.Expr, accRegs[i], avgCountRegs[i], i); err != nil {
 			// If error, just put NULL
 			vm.AddOp(vdbe.OpNull, 0, i, 0)
