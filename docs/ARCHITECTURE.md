@@ -2,6 +2,62 @@
 
 This document describes the high-level architecture of the Anthony pure Go SQLite implementation.
 
+## Table of Contents
+
+- [Design Philosophy](#design-philosophy)
+- [Package Overview](#package-overview)
+- [System Architecture](#system-architecture)
+- [Layer Descriptions](#layer-descriptions)
+  - [1. Driver Layer](#1-driver-layer-internaldriver)
+  - [2. Engine Layer](#2-engine-layer-internalengine)
+  - [3. Query Processing Layer](#3-query-processing-layer)
+  - [4. Execution Engine](#4-execution-engine-internalvdbe)
+  - [5. Storage Layer](#5-storage-layer)
+  - [6. Supporting Subsystems](#6-supporting-subsystems)
+- [Data Flow](#data-flow)
+  - [Query Execution (SELECT)](#query-execution-select)
+  - [Data Modification (INSERT)](#data-modification-insert)
+  - [Transaction Processing](#transaction-processing)
+- [Component Interactions](#component-interactions)
+  - [Driver -> Engine -> VDBE Flow](#driver--engine--vdbe-flow)
+  - [Schema and Metadata](#schema-and-metadata)
+  - [Security Integration](#security-integration)
+  - [Encoding and Collation](#encoding-and-collation)
+  - [Virtual Tables](#virtual-tables)
+- [Key Design Decisions](#key-design-decisions)
+  - [Why VDBE (Virtual Machine)?](#why-vdbe-virtual-machine)
+  - [Why B-Trees?](#why-b-trees)
+  - [Why Pure Go?](#why-pure-go)
+- [Concurrency Model](#concurrency-model)
+  - [Lock Hierarchy](#lock-hierarchy)
+  - [Transaction Isolation](#transaction-isolation)
+  - [Concurrent Access](#concurrent-access)
+- [Performance Considerations](#performance-considerations)
+  - [Optimization Strategies](#optimization-strategies)
+  - [Bottlenecks](#bottlenecks)
+- [Security Architecture](#security-architecture)
+  - [Defense in Depth](#defense-in-depth)
+- [Testing Strategy](#testing-strategy)
+  - [Unit Tests](#unit-tests)
+  - [Integration Tests](#integration-tests)
+  - [Compatibility Tests](#compatibility-tests)
+  - [Security Tests](#security-tests)
+- [Current Features](#current-features)
+  - [Implemented](#implemented)
+  - [In Progress](#in-progress)
+- [Future Directions](#future-directions)
+  - [Short Term](#short-term)
+  - [Medium Term](#medium-term)
+  - [Long Term](#long-term)
+- [Common Patterns and Best Practices](#common-patterns-and-best-practices)
+  - [Using the Engine](#using-the-engine)
+  - [Transaction Patterns](#transaction-patterns)
+  - [Virtual Table Implementation](#virtual-table-implementation)
+  - [Adding Built-in Functions](#adding-built-in-functions)
+- [Related Documentation](#related-documentation)
+- [References](#references)
+- [License](#license)
+
 ## Design Philosophy
 
 Anthony is a from-scratch implementation of SQLite in pure Go, following these principles:
@@ -37,76 +93,76 @@ Anthony is a from-scratch implementation of SQLite in pure Go, following these p
 ## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Application                             │
-└──────────────┬──────────────────────────────────────────────┘
-               │ database/sql interface
-┌──────────────▼──────────────────────────────────────────────┐
-│                    Driver Layer                              │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  Connection, Statement, Transaction Management        │  │
-│  └──────────────────────────────────────────────────────┘  │
-└──────────────┬──────────────────────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────────────────────┐
-│                    Engine Layer                              │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  Top-level integration, coordinates all components    │  │
-│  │  (Pager, Btree, Schema, Parser, VDBE, Functions)     │  │
-│  └──────────────────────────────────────────────────────┘  │
-└──────────────┬──────────────────────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────────────────────┐
-│                  Query Processing Layer                      │
-│  ┌────────────┐  ┌──────────┐  ┌──────────────────────┐   │
-│  │   Parser   │─▶│ Planner  │─▶│ SQL Compiler         │   │
-│  │            │  │          │  │                      │   │
-│  │  Lexer     │  │ Optimizer│  │ SELECT/INSERT/       │   │
-│  │  AST       │  │ CTE      │  │ UPDATE/DELETE/DDL    │   │
-│  └────────────┘  └──────────┘  └──────────────────────┘   │
-└──────────────┬──────────────────────────────────────────────┘
-               │ VDBE bytecode
-┌──────────────▼──────────────────────────────────────────────┐
-│                 Execution Engine (VDBE)                      │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  Virtual Machine with Register-Based Execution        │  │
-│  │                                                        │  │
-│  │  ┌──────────┐  ┌───────────┐  ┌────────────────┐   │  │
-│  │  │ Memory   │  │ Expression│  │ Built-in       │   │  │
-│  │  │ Cells    │  │ Evaluator │  │ Functions      │   │  │
-│  │  └──────────┘  └───────────┘  └────────────────┘   │  │
-│  └──────────────────────────────────────────────────────┘  │
-└──────────────┬──────────────────────────────────────────────┘
-               │ cursor operations
-┌──────────────▼──────────────────────────────────────────────┐
-│                    Storage Layer                             │
-│  ┌────────────────────────────────────────────────────────┐│
-│  │                B-Tree Engine                            ││
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐    ││
-│  │  │ Cursor   │  │ Cell     │  │ Page Split       │    ││
-│  │  │ Navigation│  │ Parsing  │  │ Tree Growth      │    ││
-│  │  └──────────┘  └──────────┘  └──────────────────┘    ││
-│  └────────────────────────────────────────────────────────┘│
-│  ┌────────────────────────────────────────────────────────┐│
-│  │                 Pager                                   ││
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐    ││
-│  │  │ Page     │  │ Journal  │  │ WAL (Write-Ahead││    ││
-│  │  │ Cache    │  │          │  │ Logging)         │    ││
-│  │  └──────────┘  └──────────┘  └──────────────────┘    ││
-│  └────────────────────────────────────────────────────────┘│
-│  ┌────────────────────────────────────────────────────────┐│
-│  │               File I/O                                  ││
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐    ││
-│  │  │ Database │  │ Lock     │  │ Format           │    ││
-│  │  │ File     │  │ Manager  │  │ Validation       │    ││
-│  │  └──────────┘  └──────────┘  └──────────────────┘    ││
-│  └────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────┘
++-------------------------------------------------------------+
+|                      Application                             |
++--------------+----------------------------------------------+
+               | database/sql interface
++--------------|----------------------------------------------+
+|                    Driver Layer                              |
+|  +------------------------------------------------------+  |
+|  |  Connection, Statement, Transaction Management        |  |
+|  +------------------------------------------------------+  |
++--------------+----------------------------------------------+
+               |
++--------------|----------------------------------------------+
+|                    Engine Layer                              |
+|  +------------------------------------------------------+  |
+|  |  Top-level integration, coordinates all components    |  |
+|  |  (Pager, Btree, Schema, Parser, VDBE, Functions)     |  |
+|  +------------------------------------------------------+  |
++--------------+----------------------------------------------+
+               |
++--------------|----------------------------------------------+
+|                  Query Processing Layer                      |
+|  +------------+  +----------+  +----------------------+   |
+|  |   Parser   |->| Planner  |->| SQL Compiler         |   |
+|  |            |  |          |  |                      |   |
+|  |  Lexer     |  | Optimizer|  | SELECT/INSERT/       |   |
+|  |  AST       |  | CTE      |  | UPDATE/DELETE/DDL    |   |
+|  +------------+  +----------+  +----------------------+   |
++--------------+----------------------------------------------+
+               | VDBE bytecode
++--------------|----------------------------------------------+
+|                 Execution Engine (VDBE)                      |
+|  +------------------------------------------------------+  |
+|  |  Virtual Machine with Register-Based Execution        |  |
+|  |                                                        |  |
+|  |  +----------+  +-----------+  +----------------+   |  |
+|  |  | Memory   |  | Expression|  | Built-in       |   |  |
+|  |  | Cells    |  | Evaluator |  | Functions      |   |  |
+|  |  +----------+  +-----------+  +----------------+   |  |
+|  +------------------------------------------------------+  |
++--------------+----------------------------------------------+
+               | cursor operations
++--------------|----------------------------------------------+
+|                    Storage Layer                             |
+|  +--------------------------------------------------------+|
+|  |                B-Tree Engine                            ||
+|  |  +----------+  +----------+  +------------------+    ||
+|  |  | Cursor   |  | Cell     |  | Page Split       |    ||
+|  |  | Navigation|  | Parsing  |  | Tree Growth      |    ||
+|  |  +----------+  +----------+  +------------------+    ||
+|  +--------------------------------------------------------+|
+|  +--------------------------------------------------------+|
+|  |                 Pager                                   ||
+|  |  +----------+  +----------+  +------------------+    ||
+|  |  | Page     |  | Journal  |  | WAL (Write-Ahead||    ||
+|  |  | Cache    |  |          |  | Logging)         |    ||
+|  |  +----------+  +----------+  +------------------+    ||
+|  +--------------------------------------------------------+|
+|  +--------------------------------------------------------+|
+|  |               File I/O                                  ||
+|  |  +----------+  +----------+  +------------------+    ||
+|  |  | Database |  | Lock     |  | Format           |    ||
+|  |  | File     |  | Manager  |  | Validation       |    ||
+|  |  +----------+  +----------+  +------------------+    ||
+|  +--------------------------------------------------------+|
++-------------------------------------------------------------+
 
                    Cross-Cutting Concerns
-┌─────────────────────────────────────────────────────────────┐
-│  Security  │  UTF Encoding  │  Collation  │  Virtual Tables │
-└─────────────────────────────────────────────────────────────┘
++-------------------------------------------------------------+
+|  Security  |  UTF Encoding  |  Collation  |  Virtual Tables |
++-------------------------------------------------------------+
 ```
 
 ## Layer Descriptions
@@ -389,9 +445,9 @@ Anthony is a from-scratch implementation of SQLite in pure Go, following these p
 
 1. **Driver**: Application calls database/sql interface
 2. **Engine**: Receives SQL text, coordinates processing
-3. **Parse**: SQL text → AST (Abstract Syntax Tree)
-4. **Plan**: AST → Query Plan (optimized)
-5. **Compile**: Query Plan → VDBE bytecode (via Engine.Compiler)
+3. **Parse**: SQL text -> AST (Abstract Syntax Tree)
+4. **Plan**: AST -> Query Plan (optimized)
+5. **Compile**: Query Plan -> VDBE bytecode (via Engine.Compiler)
 6. **Execute**: VDBE bytecode runs, produces rows
 7. **Return**: Rows returned to application via driver
 
@@ -403,48 +459,48 @@ SELECT name, age FROM users WHERE age > 21 ORDER BY name;
 Flow:
 ```
 Application (database/sql)
-  ↓
+  |
 Driver Layer
-  ↓
+  |
 Engine.Execute(sql)
-  ↓
+  |
 Parser.Parse(sql)
-  ↓
+  |
 SelectStmt AST
-  ↓
+  |
 Planner.Optimize(ast)
-  ↓
+  |
 Query Plan (index scan on age, sort by name)
-  ↓
+  |
 Engine.Compiler.Compile(plan)
-  ↓
+  |
 VDBE Program:
   OpenRead cursor 0 on users
   Rewind cursor 0
   loop:
-    Column 0, 1 → reg[1]  (age)
-    Integer 21 → reg[2]
+    Column 0, 1 -> reg[1]  (age)
+    Integer 21 -> reg[2]
     Gt reg[1], reg[2], skip
-    Column 0, 0 → reg[3]  (name)
-    Column 0, 1 → reg[4]  (age)
+    Column 0, 0 -> reg[3]  (name)
+    Column 0, 1 -> reg[4]  (age)
     ResultRow reg[3], 2
   skip:
     Next cursor 0, loop
   Halt
-  ↓
+  |
 VDBE.Execute()
-  ↓
+  |
 Rows: [("Alice", 22), ("Bob", 25), ...]
-  ↓
+  |
 Result returned to Driver
-  ↓
+  |
 Application receives rows
 ```
 
 ### Data Modification (INSERT)
 
-1. **Parse**: INSERT statement → AST
-2. **Compile**: AST → VDBE bytecode (includes constraint checks)
+1. **Parse**: INSERT statement -> AST
+2. **Compile**: AST -> VDBE bytecode (includes constraint checks)
 3. **Execute**: VDBE inserts row into B-tree, updates indexes
 4. **Journal**: Changes logged for rollback
 5. **Commit**: Changes become permanent
@@ -453,22 +509,22 @@ Application receives rows
 
 ```
 BEGIN
-  ↓
+  |
 Acquire Locks
-  ↓
+  |
 Execute Statements (with journaling)
-  ↓
-COMMIT → Flush journal, release locks
+  |
+COMMIT -> Flush journal, release locks
    or
-ROLLBACK → Restore from journal, release locks
+ROLLBACK -> Restore from journal, release locks
 ```
 
 ## Component Interactions
 
-### Driver → Engine → VDBE Flow
+### Driver -> Engine -> VDBE Flow
 - **Driver** provides the database/sql interface and manages connections
 - **Engine** acts as the central coordinator, managing all subsystems
-- Requests flow: Driver → Engine → Parser/Compiler → VDBE → Btree → Pager
+- Requests flow: Driver -> Engine -> Parser/Compiler -> VDBE -> Btree -> Pager
 
 ### Schema and Metadata
 - **Schema** package maintains table/index definitions in memory
@@ -619,21 +675,21 @@ Anthony implements multiple layers of security controls:
 ## Current Features
 
 ### Implemented
-- ✓ Core SQL operations (SELECT, INSERT, UPDATE, DELETE)
-- ✓ DDL operations (CREATE TABLE, DROP TABLE, ALTER TABLE)
-- ✓ Common Table Expressions (CTEs) including recursive CTEs
-- ✓ Compound SELECT (UNION, INTERSECT, EXCEPT)
-- ✓ Subqueries (scalar, EXISTS, IN)
-- ✓ Triggers (BEFORE/AFTER, FOR EACH ROW)
-- ✓ CHECK and UNIQUE constraints
-- ✓ Virtual table infrastructure
-- ✓ Aggregate functions (COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT)
-- ✓ String, math, and date/time functions
-- ✓ Transaction support with journaling
-- ✓ Write-Ahead Logging (WAL)
-- ✓ Security controls (path validation, overflow detection)
-- ✓ UTF-8/UTF-16 encoding support
-- ✓ Collation sequences
+- [x] Core SQL operations (SELECT, INSERT, UPDATE, DELETE)
+- [x] DDL operations (CREATE TABLE, DROP TABLE, ALTER TABLE)
+- [x] Common Table Expressions (CTEs) including recursive CTEs
+- [x] Compound SELECT (UNION, INTERSECT, EXCEPT)
+- [x] Subqueries (scalar, EXISTS, IN)
+- [x] Triggers (BEFORE/AFTER, FOR EACH ROW)
+- [x] CHECK and UNIQUE constraints
+- [x] Virtual table infrastructure
+- [x] Aggregate functions (COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT)
+- [x] String, math, and date/time functions
+- [x] Transaction support with journaling
+- [x] Write-Ahead Logging (WAL)
+- [x] Security controls (path validation, overflow detection)
+- [x] UTF-8/UTF-16 encoding support
+- [x] Collation sequences
 
 ### In Progress
 - ATTACH/DETACH database support
@@ -710,6 +766,14 @@ if err != nil {
 1. Implement function logic in `internal/functions`
 2. Register with `Registry.RegisterScalar` or `RegisterAggregate`
 3. Function becomes available in SQL expressions
+
+---
+
+## See Also
+
+- [File Format Specification](FILE_FORMAT.md) - SQLite database file format details
+- [Internal API Documentation](INTERNAL_API.md) - Internal package APIs and interfaces
+- [WAL Mode Guide](WAL_MODE.md) - Write-Ahead Logging implementation and usage
 
 ## Related Documentation
 

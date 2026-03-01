@@ -1128,13 +1128,13 @@ WHERE min_x <= 100 AND max_x >= 50
 | **Core Virtual Table Infrastructure** |
 | CREATE VIRTUAL TABLE | Implemented | Basic syntax working |
 | DROP VIRTUAL TABLE | Implemented | Cleanup via Destroy() |
-| Module registration | **✅ COMPLETE** | Via Conn.RegisterVirtualTableModule() |
-| VirtualTable interface | **✅ COMPLETE** | Full Go interface with all methods |
-| VirtualCursor interface | **✅ COMPLETE** | Query iteration support |
-| BestIndex query planning | **✅ COMPLETE** | Constraint optimization |
-| Public API exposure | **✅ COMPLETE** | Phase 8.3 complete |
-| Comprehensive tests | **✅ COMPLETE** | Full test coverage |
-| Example implementation | **✅ COMPLETE** | See examples/virtual_table_example.go |
+| Module registration | **[x] COMPLETE** | Via Conn.RegisterVirtualTableModule() |
+| VirtualTable interface | **[x] COMPLETE** | Full Go interface with all methods |
+| VirtualCursor interface | **[x] COMPLETE** | Query iteration support |
+| BestIndex query planning | **[x] COMPLETE** | Constraint optimization |
+| Public API exposure | **[x] COMPLETE** | Phase 8.3 complete |
+| Comprehensive tests | **[x] COMPLETE** | Full test coverage |
+| Example implementation | **[x] COMPLETE** | See examples/virtual_table_example.go |
 | Eponymous virtual tables | Planned | Auto-available modules |
 | Eponymous-only virtual tables | Planned | No CREATE required |
 | Table-valued functions | Planned | SELECT FROM func(args) |

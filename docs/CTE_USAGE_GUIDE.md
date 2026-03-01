@@ -250,8 +250,8 @@ Break complex queries into logical steps that are easy to understand.
 
 ### 2. Name CTEs Descriptively
 Use clear, descriptive names that explain what the CTE contains:
-- ✅ `active_customers`, `high_value_orders`, `recent_activity`
-- ❌ `temp1`, `t`, `cte`
+- [x] `active_customers`, `high_value_orders`, `recent_activity`
+- [fail] `temp1`, `t`, `cte`
 
 ### 3. Order CTEs by Dependency
 Place CTEs that others depend on first:
@@ -442,4 +442,8 @@ Start simple and build up complexity as needed. Your future self (and teammates)
 
 ## See Also
 
-- [SQLite WITH Reference (local)](sqlite/WITH_CTE.md) — official SQLite CTE syntax reference
+- [CTE Quick Reference](CTE_QUICK_REFERENCE.md) - Concise syntax and examples for Common Table Expressions
+- [CTE Implementation Summary](CTE_IMPLEMENTATION_SUMMARY.md) - Technical details of CTE implementation
+- [Subquery Quick Reference](SUBQUERY_QUICK_REFERENCE.md) - Alternative to CTEs for nested queries
+- [SQL Language Reference](SQL_LANGUAGE.md) - Complete SQL syntax and language features
+- [SQLite WITH Reference (local)](sqlite/WITH_CTE.md) -- official SQLite CTE syntax reference

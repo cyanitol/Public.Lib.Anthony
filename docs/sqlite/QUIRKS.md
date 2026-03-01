@@ -391,13 +391,13 @@ Should be parsed as follows:
 JOIN
 JOIN
 D
-RIGHT JOIN
+RIGHT JOIN
 A
 B
 C
 But SQLite instead parses the FROM clause like this:
 JOIN
-RIGHT JOIN
+RIGHT JOIN
 D
 JOIN
 C

@@ -246,4 +246,4 @@ nix-shell --run "go run ./examples/json_demo.go"
 
 ## See Also
 
-- [SQLite JSON1 Extension Reference (local)](sqlite/JSON1.md) — complete official JSON1 docs
+- [SQLite JSON1 Extension Reference (local)](sqlite/JSON1.md) -- complete official JSON1 docs

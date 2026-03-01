@@ -9,20 +9,20 @@ interface design.
 
 ## Key Objects
 
-- **sqlite3** — database connection handle
-- **sqlite3_stmt** — prepared statement handle
-- **sqlite3_value** — generic value container
-- **sqlite3_context** — context for user-defined functions
+- **sqlite3** -- database connection handle
+- **sqlite3_stmt** -- prepared statement handle
+- **sqlite3_value** -- generic value container
+- **sqlite3_context** -- context for user-defined functions
 
 ## Basic Pattern
 
 ```
-sqlite3_open()     → open/create database
-sqlite3_prepare()  → compile SQL to bytecode
-sqlite3_step()     → execute one step
-sqlite3_column_*() → read result columns
-sqlite3_finalize() → free the prepared statement
-sqlite3_close()    → close the database
+sqlite3_open()     -> open/create database
+sqlite3_prepare()  -> compile SQL to bytecode
+sqlite3_step()     -> execute one step
+sqlite3_column_*() -> read result columns
+sqlite3_finalize() -> free the prepared statement
+sqlite3_close()    -> close the database
 ```
 
 Source: https://www.sqlite.org/capi3.html

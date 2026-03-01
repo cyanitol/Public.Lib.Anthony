@@ -1,500 +1,763 @@
-Write-Ahead Logging
-Small. Fast. Reliable.Choose any three.
-Home
-Menu
-About
-Documentation
-Download
-License
-Support
-Purchase
-Search
-About
-Documentation
-Download
-Support
-Purchase
+- 
+WAL-mode File Format
+
+[
+
+](index.html)
+
+Small. Fast. Reliable.
+Choose any three.
+
+- [Home](index.html)
+- [Menu](javascript:void(0))
+- About
+- [Documentation](docs.html)
+- [Download](download.html)
+- License
+- [Support](support.html)
+- [Purchase](prosupport.html)
+- 
+[Search](javascript:void(0))
+
+- About
+- Documentation
+- Download
+- Support
+- Purchase
+
 Search Documentation
 Search Changelog
-function toggle_div(nm) {
-var w = document.getElementById(nm);
-if( w.style.display=="block" ){
-w.style.display = "none";
-}else{
-w.style.display = "block";
-}
-}
-function toggle_search() {
-var w = document.getElementById("searchmenu");
-if( w.style.display=="block" ){
-w.style.display = "none";
-} else {
-w.style.display = "block";
-setTimeout(function(){
-document.getElementById("searchbox").focus()
-}, 30);
-}
-}
-function div_off(nm){document.getElementById(nm).style.display="none";}
-window.onbeforeunload = function(e){div_off("submenu");}
-/* Disable the Search feature if we are not operating from CGI, since */
-/* Search is accomplished using CGI and will not work without it. */
-if( !location.origin || !location.origin.match || !location.origin.match(/http/) ){
-document.getElementById("search_menubutton").style.display = "none";
-}
-/* Used by the Hide/Show button beside syntax diagrams, to toggle the */
-function hideorshow(btn,obj){
-var x = document.getElementById(obj);
-var b = document.getElementById(btn);
-if( x.style.display!='none' ){
-x.style.display = 'none';
-b.innerHTML='show';
-}else{
-x.style.display = '';
-b.innerHTML='hide';
-}
-return false;
-}
-var antiRobot = 0;
-function antiRobotGo(){
-if( antiRobot!=3 ) return;
-antiRobot = 7;
-var j = document.getElementById("mtimelink");
-if(j && j.hasAttribute("data-href")) j.href=j.getAttribute("data-href");
-}
-function antiRobotDefense(){
-document.body.onmousedown=function(){
-antiRobot |= 2;
-antiRobotGo();
-document.body.onmousedown=null;
-}
-document.body.onmousemove=function(){
-antiRobot |= 2;
-antiRobotGo();
-document.body.onmousemove=null;
-}
-setTimeout(function(){
-antiRobot |= 1;
-antiRobotGo();
-}, 100)
-antiRobotGo();
-}
-antiRobotDefense();
-Write-Ahead Logging
+
+WAL-mode File Format
+
 Table Of Contents
-1. Overview
-2. How WAL Works
-2.1. Checkpointing
-2.2. Concurrency
-2.3. Performance Considerations
-3. Activating And Configuring WAL Mode
-3.1. Automatic Checkpoint
-3.2. Application-Initiated Checkpoints
-3.3. Persistence of WAL mode
-4. The WAL File
-5. Read-Only Databases
-6. Avoiding Excessively Large WAL Files
-7. Implementation Of Shared-Memory For The WAL-Index
-8. Use of WAL Without Shared-Memory
-9. Sometimes Queries Return SQLITE_BUSY In WAL Mode
-10. Backwards Compatibility
-1. Overview
-The default method by which SQLite implements
-atomic commit and rollback is a rollback journal.
-Beginning with version 3.7.0 (2010-07-21), a new "Write-Ahead Log" option
-(hereafter referred to as "WAL") is available.
-There are advantages and disadvantages to using WAL instead of
-a rollback journal.  Advantages include:
-WAL is significantly faster in most scenarios.
-WAL provides more concurrency as readers do not block writers and 
-    a writer does not block readers.  Reading and writing can proceed 
-    concurrently.
-Disk I/O operations tends to be more sequential using WAL.
-WAL uses many fewer fsync() operations and is thus less vulnerable to
-    problems on systems where the fsync() system call is broken.
-But there are also disadvantages:
-All processes using a database must be on the same host computer;
-    WAL does not work over a network filesystem.  This is because WAL requires
-    all processes to share a small amount of memory and processes on
-    separate host machines obviously cannot share memory with each other.
-Transactions that involve changes against multiple ATTACHed
-    databases are atomic for each individual database, but are not
-    atomic across all databases as a set.
-It is not possible to change the page_size after entering WAL
-    mode, either on an empty database or by using VACUUM or by restoring
-    from a backup using the backup API.  You must be in a rollback journal
-    mode to change the page size.
-It is not possible to open read-only WAL databases.
-    The opening process must have write privileges for "-shm"
-    wal-index shared memory file associated with the database, if that
-    file exists, or else write access on the directory containing
-    the database file if the "-shm" file does not exist.
-    Beginning with version 3.22.0 (2018-01-22), a read-only 
-    WAL-mode database file can be opened if
-    the -shm and -wal files
-    already exist or those files can be created or the
-    database is immutable.
-WAL might be very slightly slower (perhaps 1% or 2% slower)
-    than the traditional rollback-journal approach
-    in applications that do mostly reads and seldom write.
-There is an additional quasi-persistent "-wal" file and
-    "-shm" shared memory file associated with each
-    database, which can make SQLite less appealing for use as an 
-    application file-format.
-There is the extra operation of checkpointing which, though automatic
-    by default, is still something that application developers need to
-    be mindful of.
-WAL works best with smaller transactions.  WAL does
-    not work well for very large transactions.  For transactions larger than
-    about 100 megabytes, traditional rollback journal modes will likely
-    be faster.  For transactions in excess of a gigabyte, WAL mode may 
-    fail with an I/O or disk-full error.
-    It is recommended that one of the rollback journal modes be used for
-    transactions larger than a few dozen megabytes.
-    Beginning with version 3.11.0 (2016-02-15), 
-    WAL mode works as efficiently with
-    large transactions as does rollback mode.
-2. How WAL Works
-The traditional rollback journal works by writing a copy of the
-original unchanged database content into a separate rollback journal file
-and then writing changes directly into the database file.  In the
-event of a crash or ROLLBACK, the original content contained in the
-rollback journal is played back into the database file to
-revert the database file to its original state.  The COMMIT occurs
-when the rollback journal is deleted.
-The WAL approach inverts this.  The original content is preserved
-in the database file and the changes are appended into a separate
-WAL file.  A COMMIT occurs when a special record indicating a commit
-is appended to the WAL.  Thus a COMMIT can happen without ever writing
-to the original database, which allows readers to continue operating
-from the original unaltered database while changes are simultaneously being
-committed into the WAL.  Multiple transactions can be appended to the
-end of a single WAL file.
-2.1. Checkpointing
-Of course, one wants to eventually transfer all the transactions that
-are appended in the WAL file back into the original database.  Moving
-the WAL file transactions back into the database is called a
-"checkpoint".
-Another way to think about the difference between rollback and 
-write-ahead log is that in the rollback-journal
-approach, there are two primitive operations, reading and writing,
-whereas with a write-ahead log
-there are now three primitive operations:  reading, writing, and
-checkpointing.
-By default, SQLite does a checkpoint automatically when the WAL file
-reaches a threshold size of 1000 pages.  (The
-SQLITE_DEFAULT_WAL_AUTOCHECKPOINT compile-time option can be used to
-specify a different default.) Applications using WAL do
-not have to do anything in order for these checkpoints to occur.  
-But if they want to, applications can adjust the automatic checkpoint
-threshold.  Or they can turn off the automatic checkpoints and run 
-checkpoints during idle moments or in a separate thread or process.
-2.2. Concurrency
-When a read operation begins on a WAL-mode database, it first
-remembers the location of the last valid commit record in the WAL.
-Call this point the "end mark".  Because the WAL can be growing and
-adding new commit records while various readers connect to the database,
-each reader can potentially have its own end mark.  But for any
-particular reader, the end mark is unchanged for the duration of the
-transaction, thus ensuring that a single read transaction only sees
-the database content as it existed at a single point in time.
-When a reader needs a page of content, it first checks the WAL to
-see if that page appears there, and if so it pulls in the last copy
-of the page that occurs in the WAL prior to the reader's end mark.
-If no copy of the page exists in the WAL prior to the reader's end mark,
-then the page is read from the original database file.  Readers can
-exist in separate processes, so to avoid forcing every reader to scan
-the entire WAL looking for pages (the WAL file can grow to
-multiple megabytes, depending on how often checkpoints are run), a
-data structure called the "wal-index" is maintained in shared memory
-which helps readers locate pages in the WAL quickly and with a minimum
-of I/O.  The wal-index greatly improves the performance of readers,
-but the use of shared memory means that all readers must exist on the
-same machine.  This is why the write-ahead log implementation will not
-work on a network filesystem.
-Writers merely append new content to the end of the WAL file.
-Because writers do nothing that would interfere with the actions of
-readers, writers and readers can run at the same time.  However,
-since there is only one WAL file, there can only be one writer at
-a time.
-A checkpoint operation takes content from the WAL file
-and transfers it back into the original database file.
-A checkpoint can run concurrently with readers, however the checkpoint
-must stop when it reaches a page in the WAL that is past the end mark
-of any current reader.  The checkpoint has to stop at that point because
-otherwise it might overwrite part of the database file that the reader
-is actively using.  The checkpoint remembers (in the wal-index) how far
-it got and will resume transferring content from the WAL to the database
-from where it left off on the next invocation.
-Thus a long-running read transaction can prevent a checkpointer from
-making progress.  But presumably every read transaction will eventually
-end and the checkpointer will be able to continue.
-Whenever a write operation occurs, the writer checks how much progress
-the checkpointer has made, and if the entire WAL has been transferred into
-the database and synced and if no readers are making use of the WAL, then
-the writer will rewind the WAL back to the beginning and start putting new
-transactions at the beginning of the WAL.  This mechanism prevents a WAL
-file from growing without bound.
-2.3. Performance Considerations
-Write transactions are very fast since they only involve writing
-the content once (versus twice for rollback-journal transactions)
-and because the writes are all sequential.  Further, syncing the
-content to the disk is not required, as long as the application is
-willing to sacrifice durability following a power loss or hard reboot.
-(Writers sync the WAL on every transaction commit if
-PRAGMA synchronous is set to FULL but omit this sync if
-PRAGMA synchronous is set to NORMAL.)
-On the other hand, read performance deteriorates as the WAL file
-grows in size since each reader must check the WAL file for the content
-and the time needed to check the WAL file is proportional
-to the size of the WAL file.  The wal-index helps find content
-in the WAL file much faster, but performance still falls off with
-increasing WAL file size.  Hence, to maintain good read performance 
-it is important to keep the WAL file size down by
-running checkpoints at regular intervals.
-Checkpointing does require sync operations in order to avoid
-the possibility of database corruption following a power loss
-or hard reboot.  The WAL must be synced to persistent storage
-prior to moving content from the WAL into the database and the
-database file must be synced prior to resetting the WAL.
-Checkpoint also requires more seeking.
-The checkpointer makes an effort to
-do as many sequential page writes to the database as it can (the pages
-are transferred from WAL to database in ascending order) but even
-then there will typically be many seek operations interspersed among
-the page writes.  These factors combine to make checkpoints slower than
-write transactions.
-The default strategy is to allow successive write transactions to
-grow the WAL until the WAL becomes about 1000 pages in size, then to
-run a checkpoint operation for each subsequent COMMIT until the WAL
-is reset to be smaller than 1000 pages.  By default, the checkpoint will be
-run automatically by the same thread that does the COMMIT that pushes
-the WAL over its size limit.  This has the effect of causing most
-COMMIT operations to be very fast but an occasional COMMIT (those that trigger
-a checkpoint) to be much slower.  If that effect is undesirable, then
-the application can disable automatic checkpointing and run the
-periodic checkpoints in a separate thread, or separate process.
-(Links to commands and interfaces to accomplish this are
-shown below.)
-Note that with PRAGMA synchronous set to NORMAL, the checkpoint
-is the only operation to issue an I/O barrier or sync operation
-(fsync() on unix or FlushFileBuffers() on windows).  If an application
-therefore runs checkpoint in a separate thread or process, the main
-thread or process that is doing database queries and updates will never
-block on a sync operation.  This helps to prevent "latch-up" in applications
-running on a busy disk drive.  The downside to
-this configuration is that transactions are no longer durable and
-might rollback following a power failure or hard reset.
-Notice too that there is a tradeoff between average read performance
-and average write performance.  To maximize the read performance,
-one wants to keep the WAL as small as possible and hence run checkpoints
-frequently, perhaps as often as every COMMIT.  To maximize
-write performance, one wants to amortize the cost of each checkpoint
-over as many writes as possible, meaning that one wants to run checkpoints
-infrequently and let the WAL grow as large as possible before each 
-checkpoint.  The decision of how often to run checkpoints may therefore
-vary from one application to another depending on the relative read
-and write performance requirements of the application.
-The default strategy is to run a checkpoint once the WAL
-reaches 1000 pages and this strategy seems to work well in test applications on 
-workstations, but other strategies might work better on different 
-platforms or for different workloads.
-3. Activating And Configuring WAL Mode
-An SQLite database connection defaults to 
-journal_mode=DELETE.  To convert to WAL mode, use the
-following pragma:
-PRAGMA journal_mode=WAL;
-The journal_mode pragma returns a string which is the new journal mode.
-On success, the pragma will return the string "wal".  If 
-the conversion to WAL could not be completed (for example, if the VFS
-does not support the necessary shared-memory primitives) then the
-journaling mode will be unchanged and the string returned from the
-primitive will be the prior journaling mode (for example "delete").
-3.1. Automatic Checkpoint
-By default, SQLite will automatically checkpoint whenever a COMMIT
-occurs that causes the WAL file to be 1000 pages or more in size, or when the 
-last database connection on a database file closes.  The default 
-configuration is intended to work well for most applications.
-But programs that want more control can force a checkpoint
-using the wal_checkpoint pragma or by calling the
-sqlite3_wal_checkpoint() C interface.  The automatic checkpoint
-threshold can be changed or automatic checkpointing can be completely
-disabled using the wal_autocheckpoint pragma or by calling the
-sqlite3_wal_autocheckpoint() C interface.  A program can also 
-use sqlite3_wal_hook() to register a callback to be invoked whenever
-any transaction commits to the WAL.  This callback can then invoke
-sqlite3_wal_checkpoint() or sqlite3_wal_checkpoint_v2() based on whatever
-criteria it thinks is appropriate.  (The automatic checkpoint mechanism
-is implemented as a simple wrapper around sqlite3_wal_hook().)
-3.2. Application-Initiated Checkpoints
-An application can initiate a checkpoint using any writable database
-connection on the database simply by invoking
-sqlite3_wal_checkpoint() or sqlite3_wal_checkpoint_v2().
-There are three subtypes of checkpoints that vary in their aggressiveness:
-PASSIVE, FULL, and RESTART.  The default checkpoint style is PASSIVE, which
-does as much work as it can without interfering with other database
-connections, and which might not run to completion if there are
-concurrent readers or writers.
-All checkpoints initiated by sqlite3_wal_checkpoint() and
-by the automatic checkpoint mechanism are PASSIVE.  FULL and RESTART
-checkpoints try harder to run the checkpoint to completion and can only
-be initiated by a call to sqlite3_wal_checkpoint_v2().  See the
-sqlite3_wal_checkpoint_v2() documentation for additional information
-on FULL and RESET checkpoints.
-3.3. Persistence of WAL mode
-Unlike the other journaling modes, 
-PRAGMA journal_mode=WAL is
-persistent.  If a process sets WAL mode, then closes and reopens the
-database, the database will come back in WAL mode.  In contrast, if
-a process sets (for example) PRAGMA journal_mode=TRUNCATE and then closes and
-reopens the database will come back up in the default rollback mode of
-DELETE rather than the previous TRUNCATE setting.
-The persistence of WAL mode means that applications can be converted
-to using SQLite in WAL mode without making any changes to the application
-itself.  One has merely to run "PRAGMA journal_mode=WAL;" on the
-database file(s) using the command-line shell or other utility, then
-restart the application.
-The WAL journal mode will be set on all
-connections to the same database file if it is set on any one connection.
-4. The WAL File
-While a database connection is open on a WAL-mode database, SQLite
-maintains an extra journal file called a "Write Ahead Log" or "WAL File".
-The name of this file on disk is usually the name of the database file
-with an extra "-wal" suffix, though different naming rules may
-apply if SQLite is compiled with SQLITE_ENABLE_8_3_NAMES.
-The WAL file exists for as long as any database connection has the
-database open.  Usually, the WAL file is deleted automatically when the
-last connection to the database closes.  However, if the last process to
-have the database open exits without cleanly
-shutting down the database connection, or if the 
-SQLITE_FCNTL_PERSIST_WAL file control is used, then the WAL file
-might be retained on disk after all connections to the database have
-been closed.  The WAL file is part of the persistent state of the
-database and should be kept with the database if the database is copied
-or moved.  If a database file is separated from its WAL file, then
-transactions that were previously committed to the database might be lost,
-or the database file might become corrupted.
-The only safe way to remove a WAL file is
-to open the database file using one of the sqlite3_open() interfaces
-then immediately close the database using sqlite3_close().
-The WAL file format is precisely defined and is cross-platform.
-5. Read-Only Databases
-Older versions of SQLite could not read a WAL-mode database that was
-read-only.  In other words, write access was required in order to read a
-WAL-mode database.  This constraint was relaxed beginning with
-SQLite version 3.22.0 (2018-01-22).
-On newer versions of SQLite,
-a WAL-mode database on read-only media, or a WAL-mode database that lacks
-write permission, can still be read as long as one or more of the following
-conditions are met:
-The -shm and -wal files already exist and are readable.
-There is write permission on the directory containing the database so
-    that the -shm and -wal files can be created.
-The database connection is opened using the
-    immutable query parameter.
-Even though it is possible to open a read-only WAL-mode database,
-it is good practice to convert the database to 
-PRAGMA journal_mode=DELETE prior to burning an
-SQLite database image onto read-only media.
-6. Avoiding Excessively Large WAL Files
-In normal cases, new content is appended to the WAL file until the
-WAL file accumulates about 1000 pages (and is thus about 4MB 
-in size) at which point a checkpoint is automatically run and the WAL file
-is recycled.  The checkpoint does not normally truncate the WAL file
-(unless the journal_size_limit pragma is set).  Instead, it merely
-causes SQLite to start overwriting the WAL file from the beginning.
-This is done because it is normally faster to overwrite an existing file
-than to append.  When the last connection to a database closes, that
-connection does one last checkpoint and then deletes the WAL and its
-associated shared-memory file, to clean up the disk.
-So in the vast majority of cases, applications need not worry about
-the WAL file at all.  SQLite will automatically take care of it.  But
-it is possible to get SQLite into a state where the WAL file will grow
-without bound, causing excess disk space usage and slow query speeds.
-The following bullets enumerate some of the ways that this can happen
-and how to avoid them.
-Disabling the automatic checkpoint mechanism.
-In its default configuration, SQLite will checkpoint the WAL file at the
-conclusion of any transaction when the WAL file is more than 1000 pages
-long.  However, compile-time and run-time options exist that can disable
-or defer this automatic checkpoint.  If an application disables the
-automatic checkpoint, then there is nothing to prevent the WAL file
-from growing excessively.
-Checkpoint starvation.
-A checkpoint is only able to run to completion, and reset the WAL file,
-if there are no other database connections using the WAL file.  If another
-connection has a read transaction open,
-then the checkpoint cannot reset the WAL file because
-doing so might delete content out from under the reader.
-The checkpoint will do as much work as it can without upsetting the
-reader, but it cannot run to completion.
-The checkpoint will start up again where it left off after the next
-write transaction.  This repeats until some checkpoint is able to complete.
-However, if a database has many concurrent overlapping readers
-and there is always at least one active reader, then
-no checkpoints will be able to complete
-and hence the WAL file will grow without bound.
-This scenario can be avoided by ensuring that there are "reader gaps":
-times when no processes are reading from the 
-database and that checkpoints are attempted during those times.
-In applications with many concurrent readers, one might also consider 
-running manual checkpoints with the SQLITE_CHECKPOINT_RESTART or
-SQLITE_CHECKPOINT_TRUNCATE option which will ensure that the checkpoint
-runs to completion before returning.  The disadvantage of using
-SQLITE_CHECKPOINT_RESTART and SQLITE_CHECKPOINT_TRUNCATE is that
-readers might block while the checkpoint is running.
-Very large write transactions.
-A checkpoint can only complete when no other transactions are running, 
-which means the WAL file cannot be reset in the middle of a write
-transaction.  So a large change to a large database
-might result in a large WAL file.  The WAL file will be checkpointed
-once the write transaction completes (assuming there are no other readers
-blocking it) but in the meantime, the file can grow very big.
-As of SQLite version 3.11.0 (2016-02-15), 
-the WAL file for a single transaction
-should be proportional in size to the transaction itself.  Pages that
-are changed by the transaction should only be written into the WAL file
-once.  However, with older versions of SQLite, the same page might be
-written into the WAL file multiple times if the transaction grows larger
-than the page cache.
-7. Implementation Of Shared-Memory For The WAL-Index
-The wal-index is implemented using an ordinary file that is
-mmapped for robustness.  Early (pre-release) implementations of WAL mode
-stored the wal-index in volatile shared-memory, such as files created in
-/dev/shm on Linux or /tmp on other unix systems.  The problem
-with that approach is that processes with a different root directory
-(changed via chroot)
-will see different files and hence use different shared memory areas,
-leading to database corruption.  Other methods for creating nameless
-shared memory blocks are not portable across the various flavors of
-unix.  And we could not find any method to create nameless shared
-memory blocks on windows.  The only way we have found to guarantee
-that all processes accessing the same database file use the same shared
-memory is to create the shared memory by mmapping a file in the same
-directory as the database itself.
-Using an ordinary disk file to provide shared memory has the 
-disadvantage that it might actually do unnecessary disk I/O by
-writing the shared memory to disk.  However, the developers do not
-think this is a major concern since the wal-index rarely exceeds
-32 KiB in size and is never synced.  Furthermore, the wal-index 
-backing file is deleted when the last database connection disconnects,
-which often prevents any real disk I/O from ever happening.
-Specialized applications for which the default implementation of
-shared memory is unacceptable can devise alternative methods via a
-custom VFS.  
-For example, if it is known that a particular database
-will only be accessed by threads within a single process, the wal-index
-can be implemented using heap memory instead of true shared memory.
-8. Use of WAL Without Shared-Memory
-Beginning in SQLite version 3.7.4 (2010-12-07), 
-WAL databases can be created, read, and
-written even if shared memory is unavailable as long as the
-locking_mode is set to EXCLUSIVE before the first attempted access.
-In other words, a process can interact with
-a WAL database without using shared memory if that
-process is guaranteed to be the only process accessing the database.
-This feature allows WAL databases to be created, read, and written
-by legacy VFSes that lack the "version 2" shared-memory
-methods xShmMap, xShmLock, xShmBarrier, and xShmUnmap on the
-sqlite3_io_methods object.
-If EXCLUSIVE locking mode
+[1. Files On Disk](#files_on_disk)
+[1.1. The Main Database File](#the_main_database_file)
+[1.2. The Write-Ahead-Log or "-wal" File](#the_write_ahead_log_or_wal_file)
+[1.3. The Wal-Index or "-shm" file](#the_wal_index_or_shm_file)
+[1.4. File Lifecycles](#file_lifecycles)
+[1.5. Variations](#variations)
+[2. The WAL-Index File Format](#the_wal_index_file_format)
+[2.1. The WAL-Index Header](#the_wal_index_header)
+[2.1.1. The mxFrame field](#the_mxframe_field)
+[2.1.2. The nBackfill field](#the_nbackfill_field)
+[2.1.3. WAL Locks](#wal_locks)
+[2.2. WAL-Index Hash Tables](#wal_index_hash_tables)
+[2.3. Locking Matrix](#locking_matrix)
+[2.3.1. How the various locks are used](#how_the_various_locks_are_used)
+[2.3.2. Operations that require locks and which locks those operations use](#operations_that_require_locks_and_which_locks_those_operations_use)
+[3. Recovery](#recovery)
+
+This document describes low-level details on how [WAL mode](wal.html) is
+implemented on unix and windows.
+
+The separate [file format](fileformat2.html) description provides details on the
+structure of a database file and of the write-head log file used in
+[WAL mode](wal.html).  But details of the locking protocol and of the format
+of the WAL-index are deliberately omitted since those details
+are left to discretion of individual [VFS](vfs.html) implementations.  This
+document fills in those missing details for the unix and windows [VFSes](vfs.html).
+
+For completeness, some of the higher level formatting information
+contains in the [file format](fileformat2.html) document and elsewhere is replicated here,
+when it pertains to WAL mode processing.
+
+# 1. Files On Disk
+
+When in active use, the state of a WAL mode database is described
+by three separate files:
+
+-  The main database file with an arbitrary name "X".
+
+-  The write-ahead log file, usually named "X-wal".
+
+-  The wal-index file, usually named "X-shm".
+
+## 1.1. The Main Database File
+
+The format of the main database file is as described in the
+[file format](fileformat2.html) document.  The [file format version numbers](fileformat2.html#vnums) at offsets
+18 and 19 into the main database must both be 2 to indicate that the
+database is in WAL mode.  The main database may have an arbitrary
+name allowed by the underlying filesystem.  No special file suffixes
+are required, though ".db", ".sqlite", and ".sqlite3" seem to be
+popular choices.
+
+## 1.2. The Write-Ahead-Log or "-wal" File
+
+The write-ahead log or "wal" file is a roll-forward journal
+that records transactions that have been committed but not yet applied
+to the main database.  Details on the format of the wal file are
+described in the [WAL format](fileformat2.html#walformat) subsection of the main [file format](fileformat2.html)
+document.  The wal file is named by appending the four characters
+"-wal" to the end of the name of the main database file.  Except
+on 8+3 filesystems, such names are not allowed, and in that case
+the file suffix is changed to ".WAL".  But as 8+3 filesystems are
+increasingly rare, that exceptional case can usually be ignored.
+
+## 1.3. The Wal-Index or "-shm" file
+
+The wal-index file or "shm" file is not actually used as a file.
+Rather, individual database clients mmap the shm file and use it
+as shared memory for coordinating access to the database and as a cache
+for quickly locating frames within the wal file.  The name
+of the shm file is the main database file name with the four characters
+"-shm" appended.  Or, for 8+3 filesystems, the shm file is the main
+database file with the suffix changed to ".SHM".
+
+The shm file does not contain any database content and is not required
+to recover the database following a crash.  For that reason, the first
+client to connect to a quiescent database will normally truncate the
+shm file if it exists.  Since the content of the shm file does not need
+to be preserved across a crash, the shm file is never fsync()-ed to disk.
+In fact, if there were a mechanism by which SQLite could tell the 
+operating system to never persist the shm file to disk but always hold
+it in cache memory, SQLite would use that mechanism to avoid any
+unnecessary disk I/O associated with the shm file.  However, no such
+mechanism exists in standard posix.
+
+Because the shm is only used to coordinate access between concurrent
+clients, the shm file is omitted if [exclusive locking mode](pragma.html#pragma_locking_mode)
+is set, as an optimization.  When [exclusive locking mode](pragma.html#pragma_locking_mode) is set,
+SQLite uses heap memory in place of the memory-mapped shm file.
+
+## 1.4. File Lifecycles
+
+When a WAL mode database is in active use, all three of the above
+files usually exist.  Except, the Wal-Index file is omitted if
+[exclusive locking mode](pragma.html#pragma_locking_mode) is set.
+
+If the last client using the database shuts down cleanly by
+calling [sqlite3_close()](c3ref/close.html), then a [checkpoint](wal.html#ckpt) is run automatically
+in order to transfer all information from the wal file
+over into the main database, and both the shm file
+and the wal file are unlinked.  Thus, when the database is not in
+use by any client, it is usually the case that only the main
+database file exists on disk.
+However, if the last client did not call [sqlite3_close()](c3ref/close.html) before it
+shut down, or if the last client to disconnect was a read-only client,
+then the final cleanup operation does not occur and the
+shm and wal files may still exist on disk even when the database is
+not in use.
+
+## 1.5. Variations
+
+When [PRAGMA locking_mode=EXCLUSIVE](pragma.html#pragma_locking_mode) (exclusive locking mode) is set,
+only a single client is allowed to have the database open at one time.  Since
+only a single client can use the database, the shm file is omitted.
+The single client uses a buffer in heap memory as a substitute for the
+memory-mapped shm file.
+
+If a read/write client invokes
+[sqlite3_file_control](c3ref/file_control.html)([SQLITE_FCNTL_PERSIST_WAL](c3ref/c_fcntl_begin_atomic_write.html#sqlitefcntlpersistwal)) prior to shutdown,
+then at shutdown a checkpoint is still run, but the shm file and wal
+file are not deleted.
+This allows subsequent read-only clients to connect to and read the
+database.
+
+# 2. The WAL-Index File Format
+
+The WAL-index or "shm" file is used to coordinate access to the database
+by multiple clients, and as a cache to help clients quickly locate frames
+within the wal file.
+
+Because the shm file is not involved in recovery, the shm file does not
+need to be machine byte-order independent.  Hence, numeric values in
+the shm file are written in the native byte order of the host computer,
+rather than being converted into a specific cross-platform byte order as
+is done with the main database file and the wal file.
+
+The shm file consists of one or more hash tables, where each hash table
+is 32768 bytes in size.  Except, a 136-byte header is carved out of the
+front of the very first hash table, so the first hash table is only
+32632 bytes in size.  The total size of the shm file is always a multiple
+of 32768.  In most cases, the total size of the shm file is exactly 32768
+bytes.  The shm file only needs to grow beyond a single hash table if
+when the wal file grows very large (more than 4079 frames).  Since the
+default [automatic checkpoint threshold](c3ref/wal_autocheckpoint.html) is
+1000, WAL files rarely reach the 4079 threshold needed to make the shm file
+grow.
+
+## 2.1. The WAL-Index Header
+
+The first 136 bytes of the shm file are a header.  The shm header has
+three main divisions as follows:
+
+*WAL-Index Header Divisions*
+
+| **Bytes** | **Description
+** 
+| 0..47 | First copy of the WAL Index Information 
+
+| 48..95 | Second copy of the WAL Index Information 
+
+| 96..135 | Checkpoint Information and Locks 
+
+Individual fields of the shm header, except for the
+salt values copied from the WAL header, are unsigned integers
+in the native byte-order of the host machine.  The salt values
+are exact copies from the WAL header and are in whatever byte
+order is used by the WAL file.
+The size of integers may be 8, 16, 32, or 64 bits.
+A detailed breakout of the individual fields of the shm header
+follows:
+
+*WAL-Index Header Details*
+
+| **Bytes** | **Name** | **Meaning** 
+
+| 0..3 | iVersion 
+| The WAL-index format version number.  Always 3007000. 
+
+| 4..7 |   
+| Unused padding space.  Must be zero.
+ 
+
+| 8..11 | iChange 
+| Unsigned integer counter, incremented with each transaction.
+ 
+
+| 12 | isInit 
+| The "isInit" flag.  1 when the shm file has been initialized.
+ 
+
+| 13 | bigEndCksum 
+| True if the WAL file uses big-endian checksums.  0 if the WAL
+    uses little-endian checksums.
+ 
+
+| 14..15 | szPage 
+| The database page size in bytes, or 1 if the page size is 65536.
+ 
+
+| 16..19 | mxFrame 
+| Number of valid and committed frames in the WAL file.
+ 
+
+| 20..23 | nPage 
+| Size of the database file in pages.
+ 
+
+| 24..31 | aFrameCksum 
+| Checksum of the last frame in the WAL file.
+ 
+
+| 32..39 | aSalt 
+| The two salt values copied from the WAL file header.
+These values are in the byte-order of the WAL file, which
+might be different from the native byte-order of the
+machine.
+ 
+
+| 40..47 | aCksum 
+| A checksum over bytes 0 through 39 of this header.
+ 
+
+| 48..95 |   
+| A copy of bytes 0 through 47 of this header.
+ 
+
+| 96..99 | nBackfill 
+| Number of WAL frames that have already been backfilled into the database
+    by prior checkpoints.
+ 
+
+| 100..119 | read-mark 0..4 
+ | Five "read marks".  Each read mark is a 32-bit unsigned integer (4 bytes).
+ 
+
+| 120..127 |   
+| Unused space set aside for 8 file locks.
+ 
+
+| 128..132 | nBackfillAttempted 
+| Number of WAL frames that have attempted to be backfilled but which might
+    not have been backfilled successfully.
+ 
+
+| 132..136 |   
+| Unused space reserved for further expansion.
+ 
+
+### 2.1.1. The mxFrame field
+
+The 32-bit unsigned integer at offset 16 (and repeated at offset 64)
+is the number of valid frames in the WAL.  Because WAL frames are numbered
+starting with 1, mxFrame is also the index of the last valid commit frame
+in the WAL. A commit frame is a frame that has a non-zero "size of database"
+value in bytes 4 through 7 of the frame header, and that indicates the end
+of a transaction.
+
+When mxFrame field is zero, it indicates that the WAL is empty and that
+all content should be obtained directly from the database file.
+
+When mxFrame is equal to [nBackfill](walformat.html#nbackfill), that indicates that all content
+in the WAL has been written back into the database.
+In that case, all content can be read directly from the database.
+Furthermore, the next writer is free to [reset the WAL](fileformat2.html#walreset) if no other
+connections hold locks on WAL_READ_LOCK(N) for N>0.
+
+The mxFrame value is always greater than or equal to both
+[nBackfill](walformat.html#nbackfill) and nBackfillAttempted.
+
+### 2.1.2. The nBackfill field
+
+The 32-bit unsigned integer at offset 128 in the WAL-index header
+is called the "nBackfill".
+this field holds the number of frames in the WAL file which
+have been copied back into the main database.
+
+The nBackfill number is never greater than [mxFrame](walformat.html#mxframe).
+When nBackfill equals [mxFrame](walformat.html#mxframe), that means that the WAL content
+has been completely written back into the database and it is
+ok to [reset the WAL](fileformat2.html#walreset) if there are no locks held on any of WAL_READ_LOCK(N)
+for N>0.
+
+The nBackfill can only be increased while holding the
+WAL_CKPT_LOCK.  However, nBackfill is changed to zero
+during a [WAL reset](fileformat2.html#walreset), and this happens while holding
+the WAL_WRITE_LOCK.
+
+### 2.1.3. WAL Locks
+
+Eight bytes of space are set aside in the header to support
+file locking using the xShmLock() method in the [sqlite3_io_methods](c3ref/io_methods.html)
+object.  These eight bytes are never read nor written by SQLite since
+some VFSes (ex: Windows) might implement locks using mandatory file locks.
+
+These are the eight locks supported:
+
+*WAL-Index Locks Controlled By xShmLock()*
+
+| **Name** | **Offset
+** 
+| **xShmLock** | **File
+** 
+
+| WAL_WRITE_LOCK
+ | 0
+ | 120
+ 
+
+| WAL_CKPT_LOCK
+ | 1
+ | 121
+ 
+
+| WAL_RECOVER_LOCK
+ | 2
+ | 122
+ 
+
+| WAL_READ_LOCK(0)
+ | 3
+ | 123
+ 
+
+| WAL_READ_LOCK(1)
+ | 4
+ | 124
+ 
+
+| WAL_READ_LOCK(2)
+ | 5
+ | 125
+ 
+
+| WAL_READ_LOCK(3)
+ | 6
+ | 126
+ 
+
+| WAL_READ_LOCK(4)
+ | 7
+ | 127
+ 
+
+*TBD:  More information about the header*
+
+## 2.2. WAL-Index Hash Tables
+
+The hash tables in the shm file are designed to answer the
+following question quickly:
+
+*
+FindFrame(P,M):
+Given a page number P and a maximum WAL frame index M,
+return the largest WAL frame index for page P that does not exceed M, 
+or return NULL if there are no frames for page P that do not exceed M.
+*
+
+Let the datatypes "u8", "u16", and "u32" mean unsigned integers of
+length 8, 16, and 32 bits, respectively.  Then, the first 32768-byte unit
+of the shm file is organized as follows:
+
+```sql
+
+u8 aWalIndexHeader[136];
+u32 aPgno[4062];
+u16 aHash[8192];
+
+```
+
+The second and all subsequent 32768-byte units of the shm file are
+like this:
+
+```sql
+
+u32 aPgno[4096];
+u16 aHash[8192];
+
+```
+
+Collectively, the aPgno entries record the database page number stored
+in all frames of the WAL file.  The aPgno[0] entry on the first hash table
+records the database page number stored in the very first frame in the WAL 
+file. The aPgno[i] entry from the first hash table is the database page number
+for the i-th frame in the WAL file.  The aPgno[k] entry for the second
+hash table is the database page number for the (k+4062)-th frame in the
+WAL file.  The aPgno[k] entry for the n-th 32768-byte hash table in the
+shm file (for n>1) holds the database page number stored in the
+(k+4062+4096*(n-2))-th frame of the WAL file.
+
+Here is a slightly different way to describe the aPgno values:
+If you think of all aPgno values as a contiguous array, then
+the database page number stored in the i-th frame of the WAL file
+is stored in aPgno[i].  Of course, aPgno is not a contiguous array.
+The first 4062 entries are on the first 32768-byte unit of the shm
+file and subsequent values are in 4096 entry chunks in later units
+of the shm file.
+
+One way to compute FindFrame(P,M) would be to scan the aPgno
+array starting with the M-th entry and working backwards towards
+the beginning and return J where aPgno[J]==P.  Such an algorithm would
+work, and it would be faster than searching the whole WAL file for
+the latest frame with page number P.  But the search can be made
+much faster still by using the aHash structure.
+
+A database page number P is mapped into a hash value
+using the following hash function:
+
+h = (P * 383)%8192
+
+This function maps every page number into an integer between 0
+and 8191 inclusive.  The aHash field of each 32768-byte shm file unit
+maps P values into indexes of the aPgno field of the same unit as
+follows:
+
+-  Compute the hash value: h = P * 383
+
+-  Let X be the largest set of consecutive integers {h, h+1, h+2, ..., h+N}
+     such that for every j in X, aPgno j%8192]!=0.  The X set will be empty
+     if aPgno h%8192]==0.  The X set is easily computed by starting with
+     the value h%8192, and adding h%8192 to X and incrementing h until
+     encountering the first aPgno h%8192] entry that is zero.
+
+-  The set X contains the index in aPgno of every entry in the current
+     32768-byte unit of the shm file that might possibly be a solution
+     to the FindFrame(P,M) function.  Each of these entries must be
+     checked separately to ensure that the aPgno value is P and that the
+     frame number does not exceed M.  The largest frame number that passes
+     those two tests is the answer.
+
+Each entry in the aPgno array has a single corresponding entry
+in the aHash array.  There are more available slots in aHash than
+there are in aPgno.  The unused slots in aHash are filled with zero.
+And since there are guaranteed to be unused slots in aHash, that means
+the loop that computes X is guaranteed to terminate.  The expected size
+of X is less than 2.  The worst case is that X will be the same as the
+number of entries in aPgno, in which case the algorithm runs at about
+the same speed as a linear scan of aPgno.  But that worst case performance
+is exceedingly rare.  Usually, the size of X will be small and the use
+of the aHash array allows one to compute FindFrame(P,M) much faster.
+
+Here is an alternative way of describing the hash look-up algorithm:
+Start with h = (P * 383)%8192 and look at aHash[h] and subsequent entries,
+wrapping around to zero when h reaches 8192, until finding an entry with
+aHash[h]==0.  All aPgno entries having a page number of P will have an
+index that is one of the aHash[h] values thusly computed.
+But not all the computed aHash[h] values will
+meet the matching criteria, so you must check them independently.  The
+speed advantage comes about because normally this set of h values is
+very small.
+
+Note that each 32768-byte unit of the shm file has its own aHash and
+aPgno arrays.  The aHash array for a single unit is only helpful in finding
+aPgno entries in that same unit.  The overall FindFrame(P,M) function
+needs to do hash lookups beginning with the latest unit and working
+backwards to the oldest unit until it finds an answer.
+
+## 2.3. Locking Matrix
+
+Access is coordinated in WAL mode using both the legacy DELETE-mode
+locks controlled by the xLock and xUnlock methods of the [sqlite3_io_methods](c3ref/io_methods.html)
+object and the WAL locks controlled by the xShmLock method of the
+[sqlite3_io_methods](c3ref/io_methods.html) object.
+
+Conceptually, there is just a single DELETE-mode lock.  The DELETE-mode
+lock for a single database connection can be in exactly one of the
+following states:
+
+-  SQLITE_LOCK_NONE (unlocked)
+
+-  SQLITE_LOCK_SHARED (reading)
+
+-  SQLITE_LOCK_RESERVED (reading, waiting to write)
+
+-  SQLITE_LOCK_PENDING (new readers blocked, waiting to write)
+
+-  SQLITE_LOCK_EXCLUSIVE (writing)
+
+The DELETE-mode locks are stored on the [lock-byte page](fileformat2.html#lockbyte) of the
+main database file.
+Only SQLITE_LOCK_SHARED and SQLITE_LOCK_EXCLUSIVE are factors for WAL-mode
+databases.
+The other locking states are used in rollback-mode, but not in WAL-mode.
+
+The [WAL-mode locks](walformat.html#locks) are described above.
+
+### 2.3.1. How the various locks are used
+
+The following rules show how each of the locks is used.
+
+- 
+**SQLITE_LOCK_SHARED**
+
+All connections hold SQLITE_LOCK_SHARED continuously while attached
+to a WAL-mode database.  This is true for both read/write connections
+and read-only connections.
+The SQLITE_LOCK_SHARED lock is held even by connections that are
+not within transaction.
+This is different from rollback mode, where the SQLITE_LOCK_SHARED is
+released at the end of each transaction.
+
+- 
+**SQLITE_LOCK_EXCLUSIVE**
+
+Connections hold an exclusive lock when changing between WAL mode
+and any of the various rollback-modes.  Connections might also attempt to
+obtain an EXCLUSIVE lock when they disconnect from WAL mode.  If
+a connection is able to obtain an EXCLUSIVE lock, that means it is the
+only connection to the database and so it may attempt to checkpoint
+and then delete the WAL-index and WAL files.
+
+When a connection is holding a SHARED lock on the main database,
+that will prevent any other connection from acquiring the EXCLUSIVE
+lock, which in turn prevents the WAL-index and WAL files from being
+deleted out from under other users, and prevents a transition out of
+WAL-mode while other users are accessing the database in WAL-mode.
+
+- 
+**WAL_WRITE_LOCK**
+
+The WAL_WRITE_LOCK is only locked exclusively.  There is never a shared
+lock taken on WAL_WRITE_LOCK.
+
+An EXCLUSIVE WAL_WRITE_LOCK is held by any connection that is appending
+content to the end of the WAL.  Hence, only a single process at a time
+can append content to the WAL.  If a [WAL reset](fileformat2.html#walreset) occurs as a consequence of
+a write, then the [nBackfill](walformat.html#nbackfill) field of the WAL-index header is reset to
+zero while holding this lock.
+
+An EXCLUSIVE is also held WAL_WRITE_LOCK, and on several other locking
+bytes, when a connection is running [recovery](walformat.html#recovery) on the shared WAL-index.
+
+- 
+**WAL_CKPT_LOCK**
+
+The WAL_CKPT_LOCK is only locked exclusively.  There is never a shared
+lock taken on WAL_CKPT_LOCK.
+
+An EXCLUSIVE WAL_CKPT_LOCK is held by any connection that is running
+a [checkpoint](wal.html#ckpt).  The [nBackfill](walformat.html#nbackfill) field of the WAL-index header may be
+increased while holding this exclusive lock, but it may not be decreased.
+
+An EXCLUSIVE is also held WAL_CKPT_LOCK, and on several other locking
+bytes, when a connection is running [recovery](walformat.html#recovery) on the shared WAL-index.
+
+- 
+**WAL_RECOVER_LOCK**
+
+The WAL_RECOVER_LOCK is only locked exclusively.  There is never a shared
+lock taken on WAL_RECOVER_LOCK.
+
+An EXCLUSIVE WAL_RECOVER_LOCK is held by any connection that is running
+[recovery](walformat.html#recovery) to reconstruct the shared WAL-index.
+
+A read-only connection that is rebuilding its private heap-memory WAL-index
+does not hold this lock.  (It cannot, since read-only connections are not
+allowed to hold any exclusive locks.)  This lock is only held when rebuilding
+the global shared WAL-index contained in the memory-mapped SHM file.
+
+In addition to locking this byte, a connection running [recovery](walformat.html#recovery) also
+gets an exclusive lock on all other WAL locks except for WAL_READ_LOCK(0).
+
+- 
+**WAL_READ_LOCK(N)**
+
+There are five separate read locks, numbers 0 through 4.
+Read locks may be either SHARED or EXCLUSIVE.
+Connections obtain a shared lock on one of the read locks bytes while
+they are within a transaction.
+Connections also obtain an exclusive lock on read locks, one at a time,
+for the brief moment while they are updating the values of the corresponding
+read-marks.
+Read locks 1 through 4 are held exclusively when running [recovery](walformat.html#recovery).
+
+Each read lock byte corresponds to one of the five 32-bit read-mark
+integers located in bytes 100 through 119 of the WAL-index header, as
+follows:
+
+| **Lock Name** | **Lock offset** | **Read-mark name** | **Read-mark offset
+** 
+| WAL_READ_LOCK(0) | 123 | read-mark[0] | 100..103
+ 
+| WAL_READ_LOCK(1) | 124 | read-mark[1] | 104..107
+ 
+| WAL_READ_LOCK(2) | 125 | read-mark[2] | 108..111
+ 
+| WAL_READ_LOCK(3) | 126 | read-mark[3] | 112..115
+ 
+| WAL_READ_LOCK(4) | 127 | read-mark[4] | 116..119
+ 
+
+When a connection holds a shared lock on WAL_READ_LOCK(N), that is a
+promise by the connection that it will use the WAL and not the database
+file for any database pages that are modified by the first
+read-mark[N] entries in the WAL.
+The read-mark[0] is always zero.  If a connection holds a shared lock
+on WAL_READ_LOCK(0), that means the connection expects to be able to ignore
+the WAL and read any content it wants from the main database.
+If N>0 then the connection is free to use more of the WAL file beyond
+read-mark[N] if it wants to, up to the first mxFrame frames.
+But when a connection holds a shared lock on WAL_READ_LOCK(0), that is a
+promise that it will never read content from the WAL
+and will acquire all content directly from the main database.
+
+When a checkpoint runs, if it sees a lock on WAL_READ_LOCK(N), then it
+must not move WAL content into the main database for more than the first
+read-mark[N] frames.  Were it to do so, it would overwrite content that
+the process holding the lock was expecting to be able to read out of the
+main database file.  A consequence of this is that if the WAL file
+contains more than read-mark[N] frames (if mxFrame>read-mark[N]
+for any read-mark for which WAL_READ_LOCK(N) is held by another process),
+then the checkpoint cannot run to completion.
+
+When a writer wants to [reset the WAL](fileformat2.html#walreset), it must ensure that there are
+no locks on WAL_READ_LOCK(N) for N>0 because such locks indicate
+that some other connection is still using the current WAL file and 
+a [WAL reset](fileformat2.html#walreset) would delete content out from those other connections.  It is
+ok for a [WAL reset](fileformat2.html#walreset) to occur if other connections are holding WAL_READ_LOCK(0)
+because by holding WAL_READ_LOCK(0), those other connections are promising
+not to use any content from the WAL.
+
+### 2.3.2. Operations that require locks and which locks those operations use
+
+- 
+**Transition into and out of WAL-mode**
+
+The SQLITE_LOCK_EXCLUSIVE lock must be held by a connection that wants
+to transition into or out of WAL mode.
+Transitioning into WAL mode is, therefore, just like any other write
+transaction, since every write transaction in rollback mode requires
+the SQLITE_LOCK_EXCLUSIVE lock.
+If the database file is already in WAL mode (hence if the desire is to change
+it back into rollback mode) and if there are two
+or more connections to the database, then each of these connections will
+be holding an SQLITE_LOCK_SHARED lock.  That means that the
+SQLITE_LOCK_EXCLUSIVE cannot be obtained, and the transition out of
+WAL mode will not be allowed.  This prevents one connection from deleting
+WAL mode out from under another.  It also means that the only way to move
+a database from WAL mode into rollback mode is to close all but one
+connection to the database.
+
+- 
+**Close a connection to a WAL mode database**
+
+When a database connection closes (via [sqlite3_close()](c3ref/close.html) or
+[sqlite3_close_v2()](c3ref/close.html)), an attempt is made to acquire
+SQLITE_LOCK_EXCLUSIVE.  If this attempt is successful, that means
+the connection that is closing is the last connection to the database.
+In that case, it is desirable to clean up the WAL and WAL-index files,
+so the closing connection runs a [checkpoint](wal.html#ckpt) (while holding
+SQLITE_LOCK_EXCLUSIVE) and this deletes both the WAL and WAL-index files.
+The SQLITE_LOCK_EXCLUSIVE is not released until after both the
+WAL and WAL-index files have been deleted.
+
+If the application invokes
+[sqlite3_file_control](c3ref/file_control.html)([SQLITE_FCNTL_PERSIST_WAL](c3ref/c_fcntl_begin_atomic_write.html#sqlitefcntlpersistwal)) on the database
+connection prior to closing, then the final checkpoint is still
+run but the WAL and WAL-index files are
+not deleted as they normally would be.
+This leaves the database in a state that allows other processes
+without write permission on the database, WAL, or WAL-index files
+to open the database read-only.
+If the WAL and WAL-index files are missing, then a process that
+lacks permission to create and initialize those files will not be
+able to open the database, unless the database is designated
+as immutable using the [immutable query parameter](uri.html#uriimmutable).
+
+- 
+**Reconstruct the global shared WAL-index during [recovery](walformat.html#recovery)**
+
+All of the WAL-index locks, except for WAL_READ_LOCK(0),
+are held exclusively while reconstructing the global shared WAL-index
+during [recovery](walformat.html#recovery).  
+
+- 
+**Append a new transaction to the end of the WAL**
+
+An exclusive lock is held on WAL_WRITE_LOCK while adding new
+frames onto the end of a WAL file.  
+
+- 
+**Read content from the database and WAL as part of a transaction**
+
+- 
+**Run a checkpoint**
+
+- 
+**Reset the WAL file**
+
+A [WAL reset](fileformat2.html#walreset) means to rewind the WAL and start adding new frames
+at the beginning.  This occurs while appending new frames to a WAL
+that has [mxFrame](walformat.html#mxframe) equal to [nBackfill](walformat.html#nbackfill) and which has no locks on
+WAL_READ_LOCK(1) through WAL_READ_LOCK(4).  The WAL_WRITE_LOCK is
+held.
+
+# 3. Recovery
+
+Recovery is the process of rebuilding the WAL-index so that it is
+synchronized with the WAL.
+
+Recovery is run by the first thread to connect to a WAL-mode database.
+Recovery restores the WAL-index so that it accurately describes the
+WAL file.  If there is no WAL file present when the first thread connects
+to the database, there is nothing to recover, but the recovery process
+still runs to initialize the WAL-index.
+
+If the WAL-index is implemented as a memory-mapped file and that file is
+read-only to the first thread to connect, then that thread creates a
+private heap-memory ersazt WAL-index and runs the recovery routine to
+populate that private WAL-index.  The same data results, but it is held
+privately rather that being written into the public shared memory area.
+
+Recovery works by doing a single pass over the WAL, from beginning to end.
+The checksums are verified on each frame of the WAL as it is read.  The
+scan stops at the end of the file or at the first invalid checksum.
+The [mxFrame](walformat.html#mxframe) field is set to the index of the last valid commit frame
+in WAL.  Since WAL frame numbers are indexed starting with 1, mxFrame is
+also the number of valid frames in the WAL.  A "commit frame" is a frame
+that has a non-zero value in bytes 4 through 7 of the frame header.
+Since the recovery procedure has no way of knowing how many frames of the
+WAL might have previously been copied back into the database, it initializes
+the [nBackfill](walformat.html#nbackfill) value to zero.
+
+During recovery of the global shared-memory WAL-index, exclusive locks are
+held on WAL_WRITE_LOCK, WAL_CKPT_LOCK, WAL_RECOVER_LOCK, and WAL_READ_LOCK(1)
+through WAL_READ_LOCK(4).  In other words, all locks associated with the
+WAL-index except for WAL_READ_LOCK(0) are held exclusively.  This prevents
+any other thread from writing the database and from reading any transactions
+that are held in the WAL, until the recovery is complete.
+
+*This page was last updated on 2025-05-10 11:18:57Z *

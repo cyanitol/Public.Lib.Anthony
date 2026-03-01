@@ -68,7 +68,7 @@ Anthony supports SQLite URI parameters for advanced configuration:
 
 **Example with URI parameters:**
 
-```go
+```sql
 db, err := sql.Open("sqlite_internal", "mydata.db?mode=ro&cache=shared")
 ```
 
@@ -360,7 +360,7 @@ return tx.Commit()
 
 Anthony supports SQLite transaction isolation modes:
 
-```go
+```sql
 // Start a transaction with deferred locking (default)
 tx, err := db.Begin()
 
@@ -377,7 +377,7 @@ _, err = tx.Exec("BEGIN EXCLUSIVE")
 
 Use savepoints for nested transaction-like behavior:
 
-```go
+```sql
 tx, err := db.Begin()
 if err != nil {
     log.Fatal(err)
@@ -561,10 +561,10 @@ for _, ct := range columnTypes {
 - Always check `rows.Err()` after iterating
 - Ensure the number of Scan arguments matches the number of columns
 - Use appropriate types for SQLite data types:
-  - INTEGER → `int`, `int64`
-  - REAL → `float64`
-  - TEXT → `string`
-  - BLOB → `[]byte`
+  - INTEGER -> `int`, `int64`
+  - REAL -> `float64`
+  - TEXT -> `string`
+  - BLOB -> `[]byte`
 - Use `sql.Null*` types for nullable columns to avoid errors
 
 ---
@@ -577,7 +577,7 @@ Parameter binding (using placeholders) prevents SQL injection and improves perfo
 
 SQLite uses `?` as a positional parameter placeholder:
 
-```go
+```sql
 // Single parameter
 result, err := db.Exec(
     "DELETE FROM users WHERE id = ?",
@@ -601,7 +601,7 @@ rows, err := db.Query(
 
 SQLite also supports named parameters with `:name`, `@name`, or `$name` syntax:
 
-```go
+```sql
 // Using named parameters with :name syntax
 _, err := db.Exec(
     "INSERT INTO users (name, email) VALUES (:name, :email)",
@@ -648,7 +648,7 @@ db.Exec("INSERT INTO data (nullable_col) VALUES (?)", sql.NullString{})
 
 Parameters are bound when executing prepared statements:
 
-```go
+```sql
 stmt, err := db.Prepare("INSERT INTO logs (level, message, timestamp) VALUES (?, ?, ?)")
 if err != nil {
     log.Fatal(err)

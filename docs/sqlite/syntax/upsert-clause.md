@@ -90,7 +90,7 @@ WHERE
 expr
 DO
 ,
-conflict target
+conflict target
 UPDATE
 SET
 column-name-list

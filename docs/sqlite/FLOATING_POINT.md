@@ -212,19 +212,19 @@ Except that the M and E are replaced by the mantissa and exponent of the
 floating point number.  For example:
 sqlite> .mode box
 sqlite> SELECT ieee754(47.49) AS x;
-┌───────────────────────────────┐
-│               x               │
-├───────────────────────────────┤
-│ ieee754(6683623321994527,-47) │
-└───────────────────────────────┘
++-------------------------------+
+|               x               |
++-------------------------------+
+| ieee754(6683623321994527,-47) |
++-------------------------------+
 Going in the other direction, the 2-argument version of ieee754() takes
 the M and E values and converts them into the corresponding F value:
 sqlite> select ieee754(6683623321994527,-47) as x;
-┌───────┐
-│   x   │
-├───────┤
-│ 47.49 │
-└───────┘
++-------+
+|   x   |
++-------+
+| 47.49 |
++-------+
 2.1.2. The ieee754_mantissa() and ieee754_exponent() functions
 The text output of the one-argument form of ieee754() is great for human
 readability, but it is awkward to use as part of a larger expression.  Hence
@@ -234,11 +234,11 @@ value.
 For example:
 sqlite> .mode box
 sqlite> SELECT ieee754_mantissa(47.49) AS M, ieee754_exponent(47.49) AS E;
-┌──────────────────┬─────┐
-│        M         │  E  │
-├──────────────────┼─────┤
-│ 6683623321994527 │ -47 │
-└──────────────────┴─────┘
++------------------+-----+
+|        M         |  E  |
++------------------+-----+
+| 6683623321994527 | -47 |
++------------------+-----+
 2.1.3. The ieee754_from_blob() and ieee754_to_blob() functions
 The ieee754_to_blob(F) SQL function converts the floating point number F
 into an 8-byte BLOB that is the big-endian binary64 encoding of that number.
@@ -251,19 +251,19 @@ Wikipedia that the encoding for the minimum positive binary64 value is
 like this:
 sqlite> .mode box
 sqlite> SELECT ieee754_from_blob(x'0000000000000001') AS F;
-┌───────────────────────┐
-│           F           │
-├───────────────────────┤
-│ 4.94065645841247e-324 │
-└───────────────────────┘
++-----------------------+
+|           F           |
++-----------------------+
+| 4.94065645841247e-324 |
++-----------------------+
 Or go the other way:
 sqlite> .mode box
 sqlite> SELECT quote(ieee754_to_blob(4.94065645841247e-324)) AS binary64;
-┌─────────────────────┐
-│      binary64       │
-├─────────────────────┤
-│ X'0000000000000001' │
-└─────────────────────┘
++---------------------+
+|      binary64       |
++---------------------+
+| X'0000000000000001' |
++---------------------+
 2.2. The decimal.c Extension
 The decimal extension provides arbitrary-precision decimal arithmetic on
 numbers stored as text strings.  Because the numbers are stored to arbitrary
@@ -295,11 +295,11 @@ X is a floating point value, it is expanded to its exact decimal equivalent.  Fo
 example:
 sqlite> .mode qbox
 sqlite> select decimal(47.49);
-┌──────────────────────────────────────────────────────┐
-│                    decimal(47.49)                    │
-├──────────────────────────────────────────────────────┤
-│ '47.49000000000000198951966012828052043914794921875' │
-└──────────────────────────────────────────────────────┘
++------------------------------------------------------+
+|                    decimal(47.49)                    |
++------------------------------------------------------+
+| '47.49000000000000198951966012828052043914794921875' |
++------------------------------------------------------+
 2.2.4. The decimal_cmp(X) function
 The decimal_cmp(A,B) function compares two decimal values A and B.  The result will
 be negative, zero, or positive if A is less than, equal to, or greater than B,

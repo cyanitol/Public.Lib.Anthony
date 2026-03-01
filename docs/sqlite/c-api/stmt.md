@@ -1,4 +1,4 @@
-# sqlite3_stmt — Prepared Statement Object
+# sqlite3_stmt -- Prepared Statement Object
 
 The `sqlite3_stmt` object represents a single compiled SQL statement.
 It is created by `sqlite3_prepare_v2()` and destroyed by `sqlite3_finalize()`.

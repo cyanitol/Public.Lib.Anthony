@@ -116,12 +116,12 @@ Through `parsePrimaryExpression()`, PRAGMA values support:
 ## Validation
 
 The implementation:
-- ✅ Follows existing parser patterns
-- ✅ Matches SQLite PRAGMA syntax
-- ✅ Integrates with AST infrastructure
-- ✅ Has comprehensive test coverage
-- ✅ Handles all documented PRAGMA forms
-- ✅ Provides clear error messages
+- [x] Follows existing parser patterns
+- [x] Matches SQLite PRAGMA syntax
+- [x] Integrates with AST infrastructure
+- [x] Has comprehensive test coverage
+- [x] Handles all documented PRAGMA forms
+- [x] Provides clear error messages
 
 ## Running Tests
 

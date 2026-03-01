@@ -17,8 +17,8 @@ This document summarizes the security fixes implemented following the comprehens
 - `/internal/btree/cell.go`
 
 **Changes:**
-- Added bounds checking for `uint64 → uint32` conversions when parsing payload sizes
-- Added bounds checking for `uint64 → int64` conversions when parsing rowids
+- Added bounds checking for `uint64 -> uint32` conversions when parsing payload sizes
+- Added bounds checking for `uint64 -> int64` conversions when parsing rowids
 - Protects against payload size truncation and sign misinterpretation
 
 **Lines Fixed:**
@@ -71,7 +71,7 @@ This document summarizes the security fixes implemented following the comprehens
 **Changes:**
 
 #### `/internal/driver/value.go`
-- Line 40: Added explanatory comment for uint32→int64 conversion (always safe)
+- Line 40: Added explanatory comment for uint32->int64 conversion (always safe)
 
 #### `/internal/btree/index_cursor.go`
 - Line 3: Added `math` import
@@ -87,20 +87,20 @@ This document summarizes the security fixes implemented following the comprehens
 ## Test Results
 
 ### Before Fixes
-```
+```bash
 gosec warnings: 174
 High-severity integer overflow conversions: 18
 ```
 
 ### After Fixes
-```
+```bash
 gosec warnings: 162 (12 fixed)
 High-severity integer overflow conversions: 6 (12 fixed)
 ```
 
 ### Remaining Warnings Analysis
 
-The 6 remaining high-severity warnings are for `uint64 → int64` conversions that **intentionally preserve bit patterns**:
+The 6 remaining high-severity warnings are for `uint64 -> int64` conversions that **intentionally preserve bit patterns**:
 
 1. **Random number generation** (`math.go:145`): Needs full uint64 range
 2. **Record integer parsing** (`record.go:106, 407`, `exec.go:1336`): SQLite format requires bit pattern preservation
@@ -109,7 +109,7 @@ The 6 remaining high-severity warnings are for `uint64 → int64` conversions th
 
 These are **not vulnerabilities** but rather correct implementations with added documentation.
 
-The remaining 156 warnings are for `uint64 → byte` conversions in varint encoding that use bit masking (`& 0x7f`) to ensure values fit in byte range - these are safe by design.
+The remaining 156 warnings are for `uint64 -> byte` conversions in varint encoding that use bit masking (`& 0x7f`) to ensure values fit in byte range - these are safe by design.
 
 ---
 
@@ -118,25 +118,25 @@ The remaining 156 warnings are for `uint64 → byte` conversions in varint encod
 All security tests passing:
 
 ### Path Traversal Protection
-```
-✅ PASS: TestAttachDatabasePathTraversal
-✅ PASS: TestVacuumIntoPathTraversal
-✅ PASS: TestSecurityConfigDefaults
+```bash
+[x] PASS: TestAttachDatabasePathTraversal
+[x] PASS: TestVacuumIntoPathTraversal
+[x] PASS: TestSecurityConfigDefaults
 ```
 
 ### Integer Overflow Protection
-```
-✅ PASS: TestSafeCastUint32ToUint16
-✅ PASS: TestSafeCastInt64ToInt32
-✅ PASS: TestSafeAddUint32
-✅ PASS: TestSafeSubUint32
+```bash
+[x] PASS: TestSafeCastUint32ToUint16
+[x] PASS: TestSafeCastInt64ToInt32
+[x] PASS: TestSafeAddUint32
+[x] PASS: TestSafeSubUint32
 ```
 
 ### Module Tests
-```
-✅ PASS: internal/security/... (all tests)
-✅ PASS: internal/btree/... (all tests)
-✅ PASS: internal/vdbe/... (all tests)
+```bash
+[x] PASS: internal/security/... (all tests)
+[x] PASS: internal/btree/... (all tests)
+[x] PASS: internal/vdbe/... (all tests)
 ```
 
 ---
@@ -248,11 +248,11 @@ All identified CWE-190 integer overflow risks have been addressed through:
 
 The implementation follows OWASP secure coding guidelines:
 
-- ✅ Input validation (path traversal, null bytes)
-- ✅ Bounds checking (integer overflows)
-- ✅ Resource limits (MaxBlobSize, MaxRecordSize, etc.)
-- ✅ Secure defaults (DefaultSecurityConfig)
-- ✅ Defense in depth (4-layer path validation)
+- [x] Input validation (path traversal, null bytes)
+- [x] Bounds checking (integer overflows)
+- [x] Resource limits (MaxBlobSize, MaxRecordSize, etc.)
+- [x] Secure defaults (DefaultSecurityConfig)
+- [x] Defense in depth (4-layer path validation)
 
 ---
 
@@ -267,7 +267,7 @@ The security fixes successfully address all critical and high-severity integer o
 
 The remaining gosec warnings are either false positives (safe by design) or intentional behavior that has been reviewed and documented.
 
-**Security Status:** ✅ **HARDENED** - Ready for production use with strong security guarantees.
+**Security Status:** [x] **HARDENED** - Ready for production use with strong security guarantees.
 
 ---
 

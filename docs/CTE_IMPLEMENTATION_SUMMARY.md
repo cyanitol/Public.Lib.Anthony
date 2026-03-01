@@ -57,7 +57,7 @@ type CTE struct {
 Parses a complete WITH clause containing one or more CTEs.
 
 **Syntax Supported:**
-```sql
+```
 WITH [RECURSIVE] cte1 AS (SELECT ...) [, cte2 AS (SELECT ...), ...]
 ```
 
@@ -70,7 +70,7 @@ WITH [RECURSIVE] cte1 AS (SELECT ...) [, cte2 AS (SELECT ...), ...]
 Parses a single Common Table Expression.
 
 **Syntax Supported:**
-```sql
+```
 cte_name [(col1, col2, ...)] AS (SELECT ...)
 ```
 
@@ -383,32 +383,32 @@ type Planner struct {
 ## Complete Feature Set
 
 ### 1. Parser Features (Already Implemented)
-- ✅ WITH clause parsing
-- ✅ RECURSIVE keyword support
-- ✅ Multiple CTE definitions
-- ✅ CTE column lists
-- ✅ AST nodes for CTEs
-- ✅ 7 parser test functions
+- [x] WITH clause parsing
+- [x] RECURSIVE keyword support
+- [x] Multiple CTE definitions
+- [x] CTE column lists
+- [x] AST nodes for CTEs
+- [x] 7 parser test functions
 
 ### 2. Planner Features (New)
-- ✅ CTE context management
-- ✅ Dependency analysis and topological sorting
-- ✅ Recursive CTE detection
-- ✅ CTE expansion to virtual tables
-- ✅ CTE materialization support
-- ✅ Query rewriting for CTEs
-- ✅ CTE validation
-- ✅ Column inference
-- ✅ 13 planner test functions
-- ✅ 7 example functions
+- [x] CTE context management
+- [x] Dependency analysis and topological sorting
+- [x] Recursive CTE detection
+- [x] CTE expansion to virtual tables
+- [x] CTE materialization support
+- [x] Query rewriting for CTEs
+- [x] CTE validation
+- [x] Column inference
+- [x] 13 planner test functions
+- [x] 7 example functions
 
 ### 3. Integration Features
-- ✅ Seamless parser-planner integration
-- ✅ CTE references in FROM clauses
-- ✅ CTE references in subqueries
-- ✅ CTE references in JOINs
-- ✅ Circular dependency detection
-- ✅ Cost-based CTE optimization
+- [x] Seamless parser-planner integration
+- [x] CTE references in FROM clauses
+- [x] CTE references in subqueries
+- [x] CTE references in JOINs
+- [x] Circular dependency detection
+- [x] Cost-based CTE optimization
 
 ## Complete Test Coverage
 
@@ -515,27 +515,27 @@ if err != nil {
 The complete CTE implementation for the Anthony SQLite clone successfully adds full Common Table Expression support, including:
 
 ### Parser (Already Implemented)
-- ✅ Adds `TK_WITH` and `TK_RECURSIVE` tokens
-- ✅ Creates `WithClause` and `CTE` AST nodes
-- ✅ Modifies `SelectStmt` to include `WithClause`
-- ✅ Implements `parseWithClause()` and `parseCTE()` functions
-- ✅ Provides comprehensive test coverage (7 test functions)
+- [x] Adds `TK_WITH` and `TK_RECURSIVE` tokens
+- [x] Creates `WithClause` and `CTE` AST nodes
+- [x] Modifies `SelectStmt` to include `WithClause`
+- [x] Implements `parseWithClause()` and `parseCTE()` functions
+- [x] Provides comprehensive test coverage (7 test functions)
 
 ### Planner (New Implementation)
-- ✅ Creates `CTEContext` for CTE management
-- ✅ Implements dependency analysis and topological sorting
-- ✅ Supports recursive CTE detection and validation
-- ✅ Enables CTE expansion to virtual tables
-- ✅ Provides CTE materialization support
-- ✅ Integrates with existing query planner
-- ✅ Provides comprehensive test coverage (13 test functions + 7 examples)
+- [x] Creates `CTEContext` for CTE management
+- [x] Implements dependency analysis and topological sorting
+- [x] Supports recursive CTE detection and validation
+- [x] Enables CTE expansion to virtual tables
+- [x] Provides CTE materialization support
+- [x] Integrates with existing query planner
+- [x] Provides comprehensive test coverage (13 test functions + 7 examples)
 
 ### Overall
-- ✅ **Handles all CTE syntax variations**
-- ✅ **Properly handles recursive CTEs**
-- ✅ **Supports multiple CTEs with dependencies**
-- ✅ **Follows SQLite CTE syntax specification**
-- ✅ **Production-ready with 1,485 lines of test code**
-- ✅ **Complete documentation and examples**
+- [x] **Handles all CTE syntax variations**
+- [x] **Properly handles recursive CTEs**
+- [x] **Supports multiple CTEs with dependencies**
+- [x] **Follows SQLite CTE syntax specification**
+- [x] **Production-ready with 1,485 lines of test code**
+- [x] **Complete documentation and examples**
 
 The implementation is **production-ready and fully tested**, ready for integration and use in the Anthony SQLite clone project.

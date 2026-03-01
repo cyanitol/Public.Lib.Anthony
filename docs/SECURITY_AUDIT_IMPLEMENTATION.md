@@ -31,8 +31,8 @@ This implementation uses a combined **Layered Defaults** and **Sandbox** securit
 | # | Issue | Location | Description |
 |---|-------|----------|-------------|
 | 1 | Path Injection | stmt_vacuum.go:234 | VACUUM INTO accepts arbitrary paths |
-| 2 | Integer Overflow | cell.go:272 | uint32→uint16 cast without bounds check |
-| 3 | Integer Overflow | overflow.go:287 | uint32→uint16 cast without bounds check |
+| 2 | Integer Overflow | cell.go:272 | uint32->uint16 cast without bounds check |
+| 3 | Integer Overflow | overflow.go:287 | uint32->uint16 cast without bounds check |
 | 4 | Schema Race | stmt.go:517+ | Schema access without synchronization |
 | 5 | Deadlock | conn.go:79-120 | Lock ordering violation in Conn.Close() |
 | 6 | Buffer Overflow | record.go:89 | decodeInt24Value lacks bounds check |
@@ -63,12 +63,12 @@ This implementation uses a combined **Layered Defaults** and **Sandbox** securit
 
 ```
 internal/security/
-├── config.go      # SecurityConfig struct and defaults
-├── path.go        # Path validation functions
-├── limits.go      # Resource limit constants
-├── arithmetic.go  # Safe arithmetic helpers
-├── errors.go      # Security-specific error types
-└── security_test.go # Security test suite
++-- config.go      # SecurityConfig struct and defaults
++-- path.go        # Path validation functions
++-- limits.go      # Resource limit constants
++-- arithmetic.go  # Safe arithmetic helpers
++-- errors.go      # Security-specific error types
++-- security_test.go # Security test suite
 ```
 
 ### SecurityConfig Structure
@@ -119,32 +119,32 @@ func DefaultSecurityConfig() *SecurityConfig {
 
 ```
 User Input Path
-       │
-       ▼
-┌──────────────────┐
-│ Layer 1: Block   │  Reject: null bytes, "..", control chars
-│ Dangerous Chars  │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│ Layer 2: Resolve │  filepath.Clean() + Join with DatabaseRoot
-│ Within Sandbox   │  Verify: strings.HasPrefix(resolved, root)
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│ Layer 3: Check   │  If AllowedSubdirs configured,
-│ Allowlist        │  verify path is within allowed dirs
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│ Layer 4: Verify  │  Lstat() to detect symlinks
-│ No Symlinks      │  Follow links and verify still in sandbox
-└────────┬─────────┘
-         │
-         ▼
+       |
+       |
++------------------+
+| Layer 1: Block   |  Reject: null bytes, "..", control chars
+| Dangerous Chars  |
++--------+---------+
+         |
+         |
++------------------+
+| Layer 2: Resolve |  filepath.Clean() + Join with DatabaseRoot
+| Within Sandbox   |  Verify: strings.HasPrefix(resolved, root)
++--------+---------+
+         |
+         |
++------------------+
+| Layer 3: Check   |  If AllowedSubdirs configured,
+| Allowlist        |  verify path is within allowed dirs
++--------+---------+
+         |
+         |
++------------------+
+| Layer 4: Verify  |  Lstat() to detect symlinks
+| No Symlinks      |  Follow links and verify still in sandbox
++--------+---------+
+         |
+         |
     Validated Path
 ```
 
@@ -268,7 +268,7 @@ func (c *Conn) Close() error {
 **Files**: `internal/btree/cell.go`, `internal/btree/overflow.go`, `internal/security/arithmetic.go`
 
 **Issues Addressed**:
-- HIGH: Integer overflow in uint32→uint16 casts
+- HIGH: Integer overflow in uint32->uint16 casts
 - MEDIUM: Integer underflow in calculateMinLocal
 - MEDIUM: Unsafe casts in CellSize calculations
 

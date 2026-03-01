@@ -3,7 +3,7 @@
 This directory contains the complete SQLite 3.51.2 official documentation,
 converted from HTML to Markdown for offline reference.
 
-**305 files total** — 141 root docs, 71 syntax diagrams, 51 session extension, 42 C API.
+**305 files total** -- 141 root docs, 71 syntax diagrams, 51 session extension, 42 C API.
 
 ---
 
@@ -34,7 +34,7 @@ Core SQL statement syntax:
 | [COMMENTS.md](COMMENTS.md) | SQL comment syntax |
 | [INDEXED_BY.md](INDEXED_BY.md) | INDEXED BY hint |
 
-## DDL — Data Definition
+## DDL -- Data Definition
 
 | File | Description |
 |---|---|
@@ -200,7 +200,7 @@ Core SQL statement syntax:
 
 The [c-api/](c-api/) directory contains 42 individual C API function pages:
 
-- [c-api/API_INDEX.md](c-api/API_INDEX.md) — complete API listing
+- [c-api/API_INDEX.md](c-api/API_INDEX.md) -- complete API listing
 - Individual function pages: `open.md`, `close.md`, `exec.md`, `prepare.md`, `step.md`, `finalize.md`, `bind_blob.md`, `column_text.md`, `errcode.md`, `create_function.md`, and more.
 
 ## Session Extension
@@ -215,5 +215,5 @@ every SQL construct: expressions, statements, clauses, and grammar rules.
 
 ---
 
-*SQLite 3.51.2 documentation — converted from official HTML docs.*
+*SQLite 3.51.2 documentation -- converted from official HTML docs.*
 *Source: https://www.sqlite.org/docs.html*

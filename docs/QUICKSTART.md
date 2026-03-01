@@ -473,7 +473,7 @@ func main() {
 
         status := "[ ]"
         if completed {
-            status = "[✓]"
+            status = "[[x]]"
         }
 
         fmt.Printf("%s %d. %s\n", status, id, title)

@@ -134,8 +134,8 @@ This is more efficient than INTERSECT because:
 | Operation | Tables | Algorithm | Deduplication |
 |-----------|--------|-----------|---------------|
 | UNION | 1 | Both queries insert into same table | Automatic via IdxInsert |
-| INTERSECT | 3 | Left→leftTab, Right→rightTab, check & insert→resultTab | Automatic via IdxInsert |
-| EXCEPT | 2 | Left→exceptTab, Right deletes from exceptTab | Automatic via IdxInsert |
+| INTERSECT | 3 | Left->leftTab, Right->rightTab, check & insert->resultTab | Automatic via IdxInsert |
+| EXCEPT | 2 | Left->exceptTab, Right deletes from exceptTab | Automatic via IdxInsert |
 
 ## VDBE Opcodes Used
 

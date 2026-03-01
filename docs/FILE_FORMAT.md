@@ -32,17 +32,17 @@ An SQLite database consists of a single main database file containing all data, 
 The main database file is the primary component of an SQLite database:
 
 ```
-┌─────────────────────────────────┐
-│  Page 1: Database Header + Data │ ← 100-byte header + page content
-├─────────────────────────────────┤
-│  Page 2: Data                   │
-├─────────────────────────────────┤
-│  Page 3: Data                   │
-├─────────────────────────────────┤
-│  ...                            │
-├─────────────────────────────────┤
-│  Page N: Data                   │
-└─────────────────────────────────┘
++----------------------------------+
+|  Page 1: Database Header + Data  | <- 100-byte header + page content
++----------------------------------+
+|  Page 2: Data                    |
++----------------------------------+
+|  Page 3: Data                    |
++----------------------------------+
+|  ...                             |
++----------------------------------+
+|  Page N: Data                    |
++----------------------------------+
 ```
 
 ### Supporting Files
@@ -63,11 +63,11 @@ The main database file is the primary component of an SQLite database:
 
 **Page Numbering:**
 - Pages numbered starting at 1 (not 0)
-- Maximum page number: 4,294,967,294 (2³² - 2)
+- Maximum page number: 4,294,967,294 (2^32 - 2)
 - Page 1 is special: contains database header
 
 **Maximum Database Size:**
-- Theoretical: ~281 terabytes (2³² pages × 65,536 bytes)
+- Theoretical: ~281 terabytes (2^32 pages x 65,536 bytes)
 - Practical: Limited by filesystem
 
 ### Page Types
@@ -244,34 +244,34 @@ Each cell contains a record. The structure varies by page type:
 
 **Table Leaf Cell:**
 ```
-┌──────────────┬────────┬────────┐
-│ Payload Size │ RowID  │ Payload│
-│  (varint)    │(varint)│ (blob) │
-└──────────────┴────────┴────────┘
++---------------+---------+---------+
+| Payload Size  | RowID   | Payload |
+|  (varint)     |(varint) | (blob)  |
++---------------+---------+---------+
 ```
 
 **Table Interior Cell:**
 ```
-┌─────────────┬────────┐
-│ Left Child  │ RowID  │
-│  (4 bytes)  │(varint)│
-└─────────────┴────────┘
++--------------+---------+
+| Left Child   | RowID   |
+|  (4 bytes)   |(varint) |
++--------------+---------+
 ```
 
 **Index Leaf Cell:**
 ```
-┌──────────────┬────────┐
-│ Payload Size │ Payload│
-│  (varint)    │ (blob) │
-└──────────────┴────────┘
++---------------+---------+
+| Payload Size  | Payload |
+|  (varint)     | (blob)  |
++---------------+---------+
 ```
 
 **Index Interior Cell:**
 ```
-┌─────────────┬──────────────┬────────┐
-│ Left Child  │ Payload Size │ Payload│
-│  (4 bytes)  │  (varint)    │ (blob) │
-└─────────────┴──────────────┴────────┘
++--------------+---------------+---------+
+| Left Child   | Payload Size  | Payload |
+|  (4 bytes)   |  (varint)     | (blob)  |
++--------------+---------------+---------+
 ```
 
 ## Record Format
@@ -281,10 +281,10 @@ Records in SQLite use a space-efficient format with variable-length encoding.
 ### Record Structure
 
 ```
-┌──────────────┬────────────┬──────────────┬─────────────┐
-│ Header Size  │ Type Code₁ │ Type Code₂...│ Value₁, ... │
-│  (varint)    │  (varint)  │  (varint)    │  (binary)   │
-└──────────────┴────────────┴──────────────┴─────────────┘
++---------------+-------------+---------------+--------------+
+| Header Size   | Type Code1  | Type Code2... | Value1, ...  |
+|  (varint)     |  (varint)   |  (varint)     |  (binary)    |
++---------------+-------------+---------------+--------------+
 ```
 
 ### Serial Type Codes
@@ -417,10 +417,10 @@ CREATE INDEX idx_name ON users(name);
 
 **Index Record Format:**
 ```
-┌─────────────┬─────────────┬────────┐
-│ Indexed     │ ROWID       │        │
-│ Column(s)   │ (for table) │ (key)  │
-└─────────────┴─────────────┴────────┘
++--------------+--------------+---------+
+| Indexed      | ROWID        |         |
+| Column(s)    | (for table)  | (key)   |
++--------------+--------------+---------+
 ```
 
 For WITHOUT ROWID tables, the ROWID is replaced with primary key columns.
@@ -465,11 +465,11 @@ CREATE TABLE sqlite_stat4 (
 
 **Format:**
 ```
-┌──────────────┬──────────────┬─────────────┐
-│ Journal      │ Page Records │ Commit      │
-│ Header       │ (original    │ Record      │
-│              │  pages)      │             │
-└──────────────┴──────────────┴─────────────┘
++---------------+---------------+--------------+
+| Journal       | Page Records  | Commit       |
+| Header        | (original     | Record       |
+|               |  pages)       |              |
++---------------+---------------+--------------+
 ```
 
 **Journal Header:**
@@ -488,10 +488,10 @@ type JournalHeader struct {
 
 **WAL File Format:**
 ```
-┌──────────────┬──────────────┬──────────────┬─────┐
-│ WAL Header   │ Frame 1      │ Frame 2      │ ... │
-│ (32 bytes)   │ (hdr + page) │ (hdr + page) │     │
-└──────────────┴──────────────┴──────────────┴─────┘
++---------------+---------------+---------------+------+
+| WAL Header    | Frame 1       | Frame 2       | ...  |
+| (32 bytes)    | (hdr + page)  | (hdr + page)  |      |
++---------------+---------------+---------------+------+
 ```
 
 **WAL Frame:**

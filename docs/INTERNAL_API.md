@@ -27,51 +27,51 @@ This document provides comprehensive documentation of Anthony's internal package
 Anthony implements a SQLite-compatible database engine in pure Go, following a layered architecture inspired by SQLite's design:
 
 ```
-┌─────────────────────────────────────────────────────┐
-│              database/sql Interface                 │
-│                (Go standard library)                │
-└───────────────────┬─────────────────────────────────┘
-                    │
-┌───────────────────▼─────────────────────────────────┐
-│                  driver Package                     │
-│  (Conn, Stmt, Rows - database/sql/driver impl)     │
-└───┬───────────────────────────────────────────┬─────┘
-    │                                           │
-    │  ┌────────────────────────────────────┐  │
-    │  │         parser Package             │  │
-    │  │    (SQL parsing and AST)           │  │
-    │  └────────────────┬───────────────────┘  │
-    │                   │                       │
-    │  ┌────────────────▼───────────────────┐  │
-    │  │        planner Package             │  │
-    │  │   (Query planning & optimization)  │  │
-    │  └────────────────┬───────────────────┘  │
-    │                   │                       │
-    │  ┌────────────────▼───────────────────┐  │
-    │  │         engine Package             │  │
-    │  │    (Compiles AST to VDBE code)     │  │
-    │  └────────────────┬───────────────────┘  │
-    │                   │                       │
-┌───▼───────────────────▼───────────────────────▼─────┐
-│                   vdbe Package                      │
-│         (Virtual Database Engine - bytecode)        │
-└───┬─────────────────┬─────────────────┬─────────────┘
-    │                 │                 │
-┌───▼────┐   ┌────────▼────────┐   ┌───▼──────────┐
-│ schema │   │    functions    │   │   btree      │
-│        │   │   (SQL funcs)   │   │ (B+ tree)    │
-└────────┘   └─────────────────┘   └───┬──────────┘
-                                       │
-                               ┌───────▼──────────┐
-                               │     pager        │
-                               │ (Page cache,     │
-                               │  journaling,     │
-                               │  transactions)   │
-                               └───────┬──────────┘
-                                       │
-                               ┌───────▼──────────┐
-                               │   File System    │
-                               └──────────────────┘
++-----------------------------------------------------+
+|              database/sql Interface                 |
+|                (Go standard library)                |
++-------------------+---------------------------------+
+                    |
++-------------------|---------------------------------+
+|                  driver Package                     |
+|  (Conn, Stmt, Rows - database/sql/driver impl)     |
++---+-------------------------------------------+-----+
+    |                                           |
+    |  +------------------------------------+  |
+    |  |         parser Package             |  |
+    |  |    (SQL parsing and AST)           |  |
+    |  +----------------+-------------------+  |
+    |                   |                       |
+    |  +----------------|-------------------+  |
+    |  |        planner Package             |  |
+    |  |   (Query planning & optimization)  |  |
+    |  +----------------+-------------------+  |
+    |                   |                       |
+    |  +----------------|-------------------+  |
+    |  |         engine Package             |  |
+    |  |    (Compiles AST to VDBE code)     |  |
+    |  +----------------+-------------------+  |
+    |                   |                       |
++---|-------------------|-----------------------|-----+
+|                   vdbe Package                      |
+|         (Virtual Database Engine - bytecode)        |
++---+-----------------+-----------------+-------------+
+    |                 |                 |
++---|----+   +--------|--------+   +---|----------+
+| schema |   |    functions    |   |   btree      |
+|        |   |   (SQL funcs)   |   | (B+ tree)    |
++--------+   +-----------------+   +---+----------+
+                                       |
+                               +-------|----------+
+                               |     pager        |
+                               | (Page cache,     |
+                               |  journaling,     |
+                               |  transactions)   |
+                               +-------+----------+
+                                       |
+                               +-------|----------+
+                               |   File System    |
+                               +------------------+
 ```
 
 ---
@@ -216,18 +216,18 @@ func (pp *pagerProvider) MarkDirty(pgno uint32) error
 
 ```
 B-tree Structure:
-┌────────────────────────────────────────┐
-│         Interior Page (Non-leaf)       │
-│  ┌──────┬──────┬──────┬──────────┐    │
-│  │ Ptr1 │ Key1 │ Ptr2 │ Key2 ... │    │
-│  └──┬───┴──────┴───┬──┴──────────┘    │
-└─────┼──────────────┼──────────────────┘
-      │              │
-      ▼              ▼
- ┌─────────┐    ┌─────────┐
- │  Leaf   │◄──►│  Leaf   │  (Doubly-linked)
- │  Page   │    │  Page   │
- └─────────┘    └─────────┘
++----------------------------------------+
+|         Interior Page (Non-leaf)       |
+|  +------+------+------+----------+    |
+|  | Ptr1 | Key1 | Ptr2 | Key2 ... |    |
+|  +--+---+------+---+--+----------+    |
++-----+--------------+------------------+
+      |              |
+      |              |
+ +---------+    +---------+
+ |  Leaf   |<-->|  Leaf   |  (Doubly-linked)
+ |  Page   |    |  Page   |
+ +---------+    +---------+
    Contains       Contains
    data cells     data cells
 ```
@@ -329,35 +329,35 @@ Cells store the actual data in B-tree pages:
 
 ```
 Pager State Machine:
-                                ┌─────────┐
-                                │  OPEN   │
-                                └────┬────┘
-                                     │
-                    ┌────────────────┼────────────────┐
-                    │                                 │
-            ┌───────▼────────┐              ┌────────▼─────────┐
-            │    READER      │              │ WRITER_LOCKED    │
-            │ (Shared lock)  │              │(Reserved lock)   │
-            └────────────────┘              └────────┬─────────┘
-                                                     │
-                                            ┌────────▼──────────┐
-                                            │ WRITER_CACHEMOD   │
-                                            │(Cache dirty)      │
-                                            └────────┬──────────┘
-                                                     │
-                                            ┌────────▼──────────┐
-                                            │ WRITER_DBMOD      │
-                                            │(Database dirty)   │
-                                            └────────┬──────────┘
-                                                     │
-                                            ┌────────▼──────────┐
-                                            │WRITER_FINISHED    │
-                                            │(Ready to commit)  │
-                                            └────────┬──────────┘
-                                                     │
-                                            ┌────────▼──────────┐
-                                            │     ERROR         │
-                                            └───────────────────┘
+                                +---------+
+                                |  OPEN   |
+                                +----+----+
+                                     |
+                    +----------------+----------------+
+                    |                                 |
+            +-------|--------+              +--------|---------+
+            |    READER      |              | WRITER_LOCKED    |
+            | (Shared lock)  |              |(Reserved lock)   |
+            +----------------+              +--------+---------+
+                                                     |
+                                            +--------|----------+
+                                            | WRITER_CACHEMOD   |
+                                            |(Cache dirty)      |
+                                            +--------+----------+
+                                                     |
+                                            +--------|----------+
+                                            | WRITER_DBMOD      |
+                                            |(Database dirty)   |
+                                            +--------+----------+
+                                                     |
+                                            +--------|----------+
+                                            |WRITER_FINISHED    |
+                                            |(Ready to commit)  |
+                                            +--------+----------+
+                                                     |
+                                            +--------|----------+
+                                            |     ERROR         |
+                                            +-------------------+
 ```
 
 #### Key Types
@@ -463,15 +463,15 @@ type LRUCache struct {
 
 ```
 WAL File Structure:
-┌─────────────────┐
-│   WAL Header    │ (32 bytes)
-├─────────────────┤
-│   Frame 1       │ (24 byte header + page data)
-├─────────────────┤
-│   Frame 2       │
-├─────────────────┤
-│      ...        │
-└─────────────────┘
++-----------------+
+|   WAL Header    | (32 bytes)
++-----------------+
+|   Frame 1       | (24 byte header + page data)
++-----------------+
+|   Frame 2       |
++-----------------+
+|      ...        |
++-----------------+
 ```
 
 **WAL Advantages**:
@@ -494,28 +494,28 @@ WAL File Structure:
 ```
 VDBE Execution Model:
 
-┌──────────────────────────────────────┐
-│        VDBE Registers (Mem)          │
-│  [0]  [1]  [2]  [3] ... [numRegs]   │
-└──────────────────────────────────────┘
-              ▲
-              │ Read/Write
-┌─────────────┴─────────────────────┐
-│      Instruction Stream           │
-│  [OpOpenRead 0, 1, 0]             │
-│  [OpRewind 0, 8]                  │
-│  [OpColumn 0, 1, 2]               │
-│  [OpResultRow 2, 1]               │
-│  [OpNext 0, 2]                    │
-│  [OpHalt]                         │
-└───────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────┐
-│        Cursor Array                 │
-│  Cursor[0] -> Table root=1          │
-│  Cursor[1] -> Index root=3          │
-└─────────────────────────────────────┘
++--------------------------------------+
+|        VDBE Registers (Mem)          |
+|  [0]  [1]  [2]  [3] ... [numRegs]   |
++--------------------------------------+
+              ^
+              | Read/Write
++-------------+---------------------+
+|      Instruction Stream           |
+|  [OpOpenRead 0, 1, 0]             |
+|  [OpRewind 0, 8]                  |
+|  [OpColumn 0, 1, 2]               |
+|  [OpResultRow 2, 1]               |
+|  [OpNext 0, 2]                    |
+|  [OpHalt]                         |
++-----------------------------------+
+              |
+              |
++-------------------------------------+
+|        Cursor Array                 |
+|  Cursor[0] -> Table root=1          |
+|  Cursor[1] -> Index root=3          |
++-------------------------------------+
 ```
 
 #### Key Types
@@ -650,13 +650,13 @@ func (v *VDBE) Step() (bool, error) {
 #### Architecture
 
 ```
-SQL Text → Lexer → Tokens → Parser → AST
+SQL Text -> Lexer -> Tokens -> Parser -> AST
 
 Example:
 "SELECT id FROM users WHERE age > 18"
-           ↓ Lexer
+           | Lexer
 [SELECT] [ID:id] [FROM] [ID:users] [WHERE] [ID:age] [>] [INTEGER:18]
-           ↓ Parser
+           | Parser
 SelectStmt {
     Columns: [ResultColumn{Name: "id"}]
     From: [TableRef{Name: "users"}]
@@ -880,11 +880,11 @@ const (
 ```
 
 **Affinity Rules** (from SQLite):
-1. If type contains "INT" → INTEGER affinity
-2. If type contains "CHAR", "CLOB", "TEXT" → TEXT affinity
-3. If type contains "BLOB" or no type → BLOB affinity
-4. If type contains "REAL", "FLOA", "DOUB" → REAL affinity
-5. Otherwise → NUMERIC affinity
+1. If type contains "INT" -> INTEGER affinity
+2. If type contains "CHAR", "CLOB", "TEXT" -> TEXT affinity
+3. If type contains "BLOB" or no type -> BLOB affinity
+4. If type contains "REAL", "FLOA", "DOUB" -> REAL affinity
+5. Otherwise -> NUMERIC affinity
 
 ##### Index
 ```go
@@ -931,21 +931,21 @@ CREATE TABLE sqlite_master (
 
 ```
 Function Registry:
-┌─────────────────────────────────────┐
-│         Registry                    │
-├─────────────────────────────────────┤
-│  Built-in Functions:                │
-│    - Scalar (upper, lower, length)  │
-│    - Aggregate (sum, count, avg)    │
-│    - Window (row_number, rank)      │
-│    - Date/Time (date, datetime)     │
-│    - Math (abs, round, random)      │
-│    - JSON (json_extract, json_*)    │
-├─────────────────────────────────────┤
-│  User-Defined Functions:            │
-│    - Overloading by arg count       │
-│    - Priority over built-ins        │
-└─────────────────────────────────────┘
++-------------------------------------+
+|         Registry                    |
++-------------------------------------+
+|  Built-in Functions:                |
+|    - Scalar (upper, lower, length)  |
+|    - Aggregate (sum, count, avg)    |
+|    - Window (row_number, rank)      |
+|    - Date/Time (date, datetime)     |
+|    - Math (abs, round, random)      |
+|    - JSON (json_extract, json_*)    |
++-------------------------------------+
+|  User-Defined Functions:            |
+|    - Overloading by arg count       |
+|    - Priority over built-ins        |
++-------------------------------------+
 ```
 
 #### Key Interfaces
@@ -1089,23 +1089,23 @@ registry.RegisterUser(substr3Func, 3)
 
 ```
 Layer 1: Character Validation
-├─ Block null bytes (\x00)
-├─ Block control characters (0x00-0x1F)
-└─ Block path traversal patterns (..)
++- Block null bytes (\x00)
++- Block control characters (0x00-0x1F)
++- Block path traversal patterns (..)
 
 Layer 2: Sandbox Resolution
-├─ Resolve path within DatabaseRoot
-├─ Verify prefix match
-└─ Prevent escape via symlinks/..
++- Resolve path within DatabaseRoot
++- Verify prefix match
++- Prevent escape via symlinks/..
 
 Layer 3: Allowlist Checking
-├─ Check AllowedSubdirs if configured
-└─ Reject paths outside allowed dirs
++- Check AllowedSubdirs if configured
++- Reject paths outside allowed dirs
 
 Layer 4: Symlink Detection
-├─ Check if path is symlink
-├─ Check parent directories
-└─ Block symlinks if configured
++- Check if path is symlink
++- Check parent directories
++- Block symlinks if configured
 ```
 
 ##### SecurityConfig
@@ -1204,12 +1204,12 @@ func DivInt64Safe(a, b int64) (int64, error)
 **Key Components**:
 - `Compiler` - Main compilation engine
 - `CodeGenerator` - VDBE instruction emission
-- `ExprCompiler` - Expression → bytecode
+- `ExprCompiler` - Expression -> bytecode
 - `TriggerCompiler` - Trigger compilation
 
 **Compilation Flow**:
 ```
-AST → Planner → Plan → Compiler → VDBE Program
+AST -> Planner -> Plan -> Compiler -> VDBE Program
 ```
 
 ### collation Package
@@ -1248,65 +1248,65 @@ AST → Planner → Plan → Compiler → VDBE Program
 
 ```
 1. SQL Text
-   │
-   ▼
-2. Parser → AST (SelectStmt)
-   │
-   ▼
-3. Planner → QueryPlan
-   │  - Analyze WHERE clause
-   │  - Select indexes
-   │  - Determine join order
-   │
-   ▼
-4. Engine → VDBE Program
-   │  - Emit OpOpenRead for tables/indexes
-   │  - Emit OpRewind to start iteration
-   │  - Emit OpColumn to read columns
-   │  - Emit WHERE filtering (OpEq, OpLt, etc.)
-   │  - Emit OpResultRow for each result
-   │  - Emit OpNext for iteration
-   │  - Emit OpHalt when done
-   │
-   ▼
+   |
+   |
+2. Parser -> AST (SelectStmt)
+   |
+   |
+3. Planner -> QueryPlan
+   |  - Analyze WHERE clause
+   |  - Select indexes
+   |  - Determine join order
+   |
+   |
+4. Engine -> VDBE Program
+   |  - Emit OpOpenRead for tables/indexes
+   |  - Emit OpRewind to start iteration
+   |  - Emit OpColumn to read columns
+   |  - Emit WHERE filtering (OpEq, OpLt, etc.)
+   |  - Emit OpResultRow for each result
+   |  - Emit OpNext for iteration
+   |  - Emit OpHalt when done
+   |
+   |
 5. VDBE Execution
-   │  - Step through program
-   │  - Use Cursor to scan B-tree
-   │  - Read pages via Pager
-   │  - Return rows to driver
-   │
-   ▼
-6. driver.Rows → application
+   |  - Step through program
+   |  - Use Cursor to scan B-tree
+   |  - Read pages via Pager
+   |  - Return rows to driver
+   |
+   |
+6. driver.Rows -> application
 ```
 
 ### INSERT Statement Execution
 
 ```
 1. SQL: INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com')
-   │
-   ▼
-2. Parser → InsertStmt
-   │
-   ▼
+   |
+   |
+2. Parser -> InsertStmt
+   |
+   |
 3. Engine compiles to VDBE:
    OpTransaction    - Begin write transaction
-   OpString 'Alice' → reg[1]
-   OpString 'alice@example.com' → reg[2]
-   OpMakeRecord reg[1..2] → reg[3]
+   OpString 'Alice' -> reg[1]
+   OpString 'alice@example.com' -> reg[2]
+   OpMakeRecord reg[1..2] -> reg[3]
    OpOpenWrite cursor[0], rootPage=1
-   OpNewRowid cursor[0] → reg[4]
+   OpNewRowid cursor[0] -> reg[4]
    OpInsert cursor[0], reg[3], reg[4]
    OpHalt
-   │
-   ▼
+   |
+   |
 4. VDBE executes:
    - Pager begins write transaction
    - Pager journals affected pages
    - Btree allocates new cell
    - Btree inserts data
    - Pager marks pages dirty
-   │
-   ▼
+   |
+   |
 5. Auto-commit (if not in explicit transaction):
    - Pager writes dirty pages
    - Pager syncs database file
@@ -1333,7 +1333,7 @@ AST → Planner → Plan → Compiler → VDBE Program
 ### Lock Progression
 
 ```
-NONE → SHARED → RESERVED → PENDING → EXCLUSIVE
+NONE -> SHARED -> RESERVED -> PENDING -> EXCLUSIVE
 
 NONE:      No access
 SHARED:    Can read (multiple readers)
@@ -1344,13 +1344,13 @@ EXCLUSIVE: Writing (no readers/writers)
 
 **Read Transaction**:
 ```
-NONE → SHARED (read data) → NONE
+NONE -> SHARED (read data) -> NONE
 ```
 
 **Write Transaction**:
 ```
-NONE → SHARED (read) → RESERVED (write intent) →
-EXCLUSIVE (write) → NONE (commit/rollback)
+NONE -> SHARED (read) -> RESERVED (write intent) ->
+EXCLUSIVE (write) -> NONE (commit/rollback)
 ```
 
 ### Savepoints (Nested Transactions)

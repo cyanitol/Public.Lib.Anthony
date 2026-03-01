@@ -668,7 +668,7 @@ func collectDiagnostics(db *sql.DB) {
     var pageSize, pageCount int
     db.QueryRow("PRAGMA page_size").Scan(&pageSize)
     db.QueryRow("PRAGMA page_count").Scan(&pageCount)
-    log.Printf("Database size: %d pages × %d bytes = %d MB",
+    log.Printf("Database size: %d pages x %d bytes = %d MB",
                pageCount, pageSize, (pageCount*pageSize)/1024/1024)
 
     // Free pages

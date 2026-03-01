@@ -452,15 +452,15 @@ Tests follow Go conventions:
 - `security_test.go` for security-focused tests
 
 **Example Structure:**
-```
+```bash
 internal/driver/
-├── driver.go              # Implementation
-├── driver_test.go         # Unit tests
-├── example_test.go        # Examples
-├── integration_test.go    # Integration tests
-├── concurrent_security_test.go  # Concurrent/security tests
-├── trigger_test.go        # Feature-specific tests
-└── view_test.go           # Feature-specific tests
++-- driver.go              # Implementation
++-- driver_test.go         # Unit tests
++-- example_test.go        # Examples
++-- integration_test.go    # Integration tests
++-- concurrent_security_test.go  # Concurrent/security tests
++-- trigger_test.go        # Feature-specific tests
++-- view_test.go           # Feature-specific tests
 ```
 
 ### Test Naming Conventions
@@ -1259,8 +1259,17 @@ go test -timeout=5m ./...
 ---
 
 **Related Documentation:**
+- [TESTING_INFRASTRUCTURE.md](./TESTING_INFRASTRUCTURE.md) - Testing infrastructure details
 - [TEST_OPTIMIZATION.md](./TEST_OPTIMIZATION.md) - Test optimization strategy and implementation details
 - [SECURITY.md](./SECURITY.md) - Security model and testing
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - System architecture
 - [LOCK_ORDERING.md](./LOCK_ORDERING.md) - Concurrency guidelines
 - [QUICKSTART.md](./QUICKSTART.md) - Getting started guide
+
+---
+
+## See Also
+
+- [TESTING_INFRASTRUCTURE.md](TESTING_INFRASTRUCTURE.md) - Testing infrastructure and helper utilities
+- [../CONTRIBUTING.md](../CONTRIBUTING.md) - Contributing guidelines and development workflow
+- [SECURITY.md](SECURITY.md) - Security testing and best practices

@@ -28,10 +28,10 @@ Following SQLite's rigorous testing standards, this project adopts a **testing-f
 
 | Goal | Target | SQLite Baseline |
 |------|--------|-----------------|
-| Test-to-Code Ratio | ≥ 300:1 | 590:1 |
-| Branch Coverage | ≥ 95% | 100% |
-| Test Cases | ≥ 50,000 | 51,445+ |
-| Fuzz Cases Daily | ≥ 10M | 500M |
+| Test-to-Code Ratio | >= 300:1 | 590:1 |
+| Branch Coverage | >= 95% | 100% |
+| Test Cases | >= 50,000 | 51,445+ |
+| Fuzz Cases Daily | >= 10M | 500M |
 | Assertion Density | 1 per 20 LOC | 1 per 23 LOC |
 
 ### 1.3 Go-Specific Considerations
@@ -1266,7 +1266,7 @@ func TestSelect1(t *testing.T) {
 
 ### 4.3 TCL Test Utilities Translation
 
-**Common TCL Commands → Go Helpers**:
+**Common TCL Commands -> Go Helpers**:
 
 | TCL Command | Go Equivalent |
 |-------------|---------------|
@@ -1462,24 +1462,24 @@ func runSLTTests(t *testing.T, tests []SLTTest) {
 **Directory Structure**:
 ```
 tests/
-├── ported/                 # Tests ported from SQLite
-│   ├── select/
-│   │   ├── select1_test.go
-│   │   ├── select2_test.go
-│   │   └── select_join_test.go
-│   ├── insert/
-│   ├── update/
-│   ├── delete/
-│   ├── expr/
-│   ├── aggregate/
-│   └── ...
-├── slt/                    # SQL Logic Tests
-│   ├── select1.test
-│   ├── select2.test
-│   └── ...
-├── regression/             # Bug regression tests
-├── fuzz/                   # Fuzz tests
-└── benchmark/              # Performance benchmarks
++-- ported/                 # Tests ported from SQLite
+|   +-- select/
+|   |   +-- select1_test.go
+|   |   +-- select2_test.go
+|   |   +-- select_join_test.go
+|   +-- insert/
+|   +-- update/
+|   +-- delete/
+|   +-- expr/
+|   +-- aggregate/
+|   +-- ...
++-- slt/                    # SQL Logic Tests
+|   +-- select1.test
+|   +-- select2.test
+|   +-- ...
++-- regression/             # Bug regression tests
++-- fuzz/                   # Fuzz tests
++-- benchmark/              # Performance benchmarks
 ```
 
 ---

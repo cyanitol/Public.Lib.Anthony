@@ -1,500 +1,469 @@
-The C language interface to SQLite Version 2
-Small. Fast. Reliable.Choose any three.
-Home
-Menu
-About
-Documentation
-Download
-License
-Support
-Purchase
-Search
-About
-Documentation
-Download
-Support
-Purchase
+- 
+An Introduction To The SQLite C/C++ Interface
+
+[
+
+](index.html)
+
+Small. Fast. Reliable.
+Choose any three.
+
+- [Home](index.html)
+- [Menu](javascript:void(0))
+- About
+- [Documentation](docs.html)
+- [Download](download.html)
+- License
+- [Support](support.html)
+- [Purchase](prosupport.html)
+- 
+[Search](javascript:void(0))
+
+- About
+- Documentation
+- Download
+- Support
+- Purchase
+
 Search Documentation
 Search Changelog
-function toggle_div(nm) {
-var w = document.getElementById(nm);
-if( w.style.display=="block" ){
-w.style.display = "none";
-}else{
-w.style.display = "block";
-}
-}
-function toggle_search() {
-var w = document.getElementById("searchmenu");
-if( w.style.display=="block" ){
-w.style.display = "none";
-} else {
-w.style.display = "block";
-setTimeout(function(){
-document.getElementById("searchbox").focus()
-}, 30);
-}
-}
-function div_off(nm){document.getElementById(nm).style.display="none";}
-window.onbeforeunload = function(e){div_off("submenu");}
-/* Disable the Search feature if we are not operating from CGI, since */
-/* Search is accomplished using CGI and will not work without it. */
-if( !location.origin || !location.origin.match || !location.origin.match(/http/) ){
-document.getElementById("search_menubutton").style.display = "none";
-}
-/* Used by the Hide/Show button beside syntax diagrams, to toggle the */
-function hideorshow(btn,obj){
-var x = document.getElementById(obj);
-var b = document.getElementById(btn);
-if( x.style.display!='none' ){
-x.style.display = 'none';
-b.innerHTML='show';
-}else{
-x.style.display = '';
-b.innerHTML='hide';
-}
-return false;
-}
-var antiRobot = 0;
-function antiRobotGo(){
-if( antiRobot!=3 ) return;
-antiRobot = 7;
-var j = document.getElementById("mtimelink");
-if(j && j.hasAttribute("data-href")) j.href=j.getAttribute("data-href");
-}
-function antiRobotDefense(){
-document.body.onmousedown=function(){
-antiRobot |= 2;
-antiRobotGo();
-document.body.onmousedown=null;
-}
-document.body.onmousemove=function(){
-antiRobot |= 2;
-antiRobotGo();
-document.body.onmousemove=null;
-}
-setTimeout(function(){
-antiRobot |= 1;
-antiRobotGo();
-}, 100)
-antiRobotGo();
-}
-antiRobotDefense();
-Editorial Note:
-This document describes SQLite version 2, which was deprecated and
-replaced by SQLite3 in 2004.
-This document is retained as part of the historical record of SQLite.
-Modern programmers should refer to
-more up-to-date documentation on SQLite is available elsewhere
-on this website.
-The C language interface to SQLite Version 2
-The SQLite library is designed to be very easy to use from
-a C or C++ program.  This document gives an overview of the C/C++
-programming interface.
-1.0 The Core API
-The interface to the SQLite library consists of three core functions,
-one opaque data structure, and some constants used as return values.
-The core interface is as follows:
-typedef struct sqlite sqlite;
-#define SQLITE_OK           0   /* Successful result */
-sqlite *sqlite_open(const char *dbname, int mode, char **errmsg);
-void sqlite_close(sqlite *db);
-int sqlite_exec(
-  sqlite *db,
-  char *sql,
-  int (*xCallback)(void*,int,char**,char**),
-  void *pArg,
-  char **errmsg
-);
-The above is all you really need to know in order to use SQLite
-in your C or C++ programs.  There are other interface functions
-available (and described below) but we will begin by describing
-the core functions shown above.
-1.1 Opening a database
-Use the sqlite_open function to open an existing SQLite
-database or to create a new SQLite database.  The first argument
-is the database name.  The second argument is intended to signal
-whether the database is going to be used for reading and writing
-or just for reading.  But in the current implementation, the
-second argument to sqlite_open is ignored.
-The third argument is a pointer to a string pointer.
-If the third argument is not NULL and an error occurs
-while trying to open the database, then an error message will be
-written to memory obtained from malloc() and *errmsg will be made
-to point to this error message.  The calling function is responsible
-for freeing the memory when it has finished with it.
-The name of an SQLite database is the name of a file that will
-contain the database.  If the file does not exist, SQLite attempts
-to create and initialize it.  If the file is read-only (due to
-permission bits or because it is located on read-only media like
-a CD-ROM) then SQLite opens the database for reading only.  The
-entire SQL database is stored in a single file on the disk.  But
-additional temporary files may be created during the execution of
-an SQL command in order to store the database rollback journal or
-temporary and intermediate results of a query.
-The return value of the sqlite_open function is a
-pointer to an opaque sqlite structure.  This pointer will
-be the first argument to all subsequent SQLite function calls that
-deal with the same database.  NULL is returned if the open fails
-for any reason.
-1.2 Closing the database
-To close an SQLite database, call the sqlite_close
-function passing it the sqlite structure pointer that was obtained
-from a prior call to sqlite_open.
-If a transaction is active when the database is closed, the transaction
-is rolled back.
-1.3 Executing SQL statements
-The sqlite_exec function is used to process SQL statements
-and queries.  This function requires 5 parameters as follows:
-A pointer to the sqlite structure obtained from a prior call
-       to sqlite_open.
-A zero-terminated string containing the text of one or more
-       SQL statements and/or queries to be processed.
-A pointer to a callback function which is invoked once for each
-       row in the result of a query.  This argument may be NULL, in which
-       case no callbacks will ever be invoked.
-A pointer that is forwarded to become the first argument
-       to the callback function.
-A pointer to an error string.  Error messages are written to space
-       obtained from malloc() and the error string is made to point to
-       the malloced space.  The calling function is responsible for freeing
-       this space when it has finished with it.
-       This argument may be NULL, in which case error messages are not
-       reported back to the calling function.
-The callback function is used to receive the results of a query.  A
-prototype for the callback function is as follows:
-int Callback(void *pArg, int argc, char **argv, char **columnNames){
-  return 0;
-}
-The first argument to the callback is just a copy of the fourth argument
-to sqlite_exec  This parameter can be used to pass arbitrary
-information through to the callback function from client code.
-The second argument is the number of columns in the query result.
-The third argument is an array of pointers to strings where each string
-is a single column of the result for that record.  Note that the
-callback function reports a NULL value in the database as a NULL pointer,
-which is very different from an empty string.  If the i-th parameter
-is an empty string, we will get:
-argv&#91;i]&#91;0] == 0
-But if the i-th parameter is NULL we will get:
-argv&#91;i] == 0
-The names of the columns are contained in the first argc
-entries of the fourth argument.
-If the SHOW_DATATYPES pragma
-is on (it is off by default) then
-the second argc entries in the 4th argument are the datatypes
-for the corresponding columns.
-If the 
-EMPTY_RESULT_CALLBACKS pragma is set to ON and the result of
-a query is an empty set, then the callback is invoked once with the
-third parameter (argv) set to 0.  In other words
-argv == 0
-The second parameter (argc)
-and the fourth parameter (columnNames) are still valid
-and can be used to determine the number and names of the result
-columns if there had been a result.
-The default behavior is not to invoke the callback at all if the
-result set is empty.
-The callback function should normally return 0.  If the callback
-function returns non-zero, the query is immediately aborted and 
-sqlite_exec will return SQLITE_ABORT.
-1.4 Error Codes
-The sqlite_exec function normally returns SQLITE_OK.  But
-if something goes wrong it can return a different value to indicate
-the type of error.  Here is a complete list of the return codes:
-#define SQLITE_OK           0   /* Successful result */
-#define SQLITE_ERROR        1   /* SQL error or missing database */
-#define SQLITE_INTERNAL     2   /* An internal logic error in SQLite */
-#define SQLITE_PERM         3   /* Access permission denied */
-#define SQLITE_ABORT        4   /* Callback routine requested an abort */
-#define SQLITE_BUSY         5   /* The database file is locked */
-#define SQLITE_LOCKED       6   /* A table in the database is locked */
-#define SQLITE_NOMEM        7   /* A malloc() failed */
-#define SQLITE_READONLY     8   /* Attempt to write a readonly database */
-#define SQLITE_INTERRUPT    9   /* Operation terminated by sqlite_interrupt() */
-#define SQLITE_IOERR       10   /* Some kind of disk I/O error occurred */
-#define SQLITE_CORRUPT     11   /* The database disk image is malformed */
-#define SQLITE_NOTFOUND    12   /* (Internal Only) Table or record not found */
-#define SQLITE_FULL        13   /* Insertion failed because database is full */
-#define SQLITE_CANTOPEN    14   /* Unable to open the database file */
-#define SQLITE_PROTOCOL    15   /* Database lock protocol error */
-#define SQLITE_EMPTY       16   /* (Internal Only) Database table is empty */
-#define SQLITE_SCHEMA      17   /* The database schema changed */
-#define SQLITE_TOOBIG      18   /* Too much data for one row of a table */
-#define SQLITE_CONSTRAINT  19   /* Abort due to constraint violation */
-#define SQLITE_MISMATCH    20   /* Data type mismatch */
-#define SQLITE_MISUSE      21   /* Library used incorrectly */
-#define SQLITE_NOLFS       22   /* Uses OS features not supported on host */
-#define SQLITE_AUTH        23   /* Authorization denied */
-#define SQLITE_ROW         100  /* sqlite_step() has another row ready */
-#define SQLITE_DONE        101  /* sqlite_step() has finished executing */
-The meanings of these various return values are as follows:
-SQLITE_OK
-This value is returned if everything worked and there were no errors.
-SQLITE_INTERNAL
-This value indicates that an internal consistency check within
-the SQLite library failed.  This can only happen if there is a bug in
-the SQLite library.  If you ever get an SQLITE_INTERNAL reply from
-an sqlite_exec call, please report the problem on the SQLite
-mailing list.
-SQLITE_ERROR
-This return value indicates that there was an error in the SQL
-that was passed into the sqlite_exec.
-SQLITE_PERM
-This return value says that the access permissions on the database
-file are such that the file cannot be opened.
-SQLITE_ABORT
-This value is returned if the callback function returns non-zero.
-SQLITE_BUSY
-This return code indicates that another program or thread has
-the database locked.  SQLite allows two or more threads to read the
-database at the same time, but only one thread can have the database
-open for writing at the same time.  Locking in SQLite is on the
-entire database.
-SQLITE_LOCKED
-This return code is similar to SQLITE_BUSY in that it indicates
-that the database is locked.  But the source of the lock is a recursive
-call to sqlite_exec.  This return can only occur if you attempt
-to invoke sqlite_exec from within a callback routine of a query
-from a prior invocation of sqlite_exec.  Recursive calls to
-sqlite_exec are allowed as long as they do
-not attempt to write the same table.
-SQLITE_NOMEM
-This value is returned if a call to malloc fails.
-SQLITE_READONLY
-This return code indicates that an attempt was made to write to
-a database file that is opened for reading only.
-SQLITE_INTERRUPT
-This value is returned if a call to sqlite_interrupt
-interrupts a database operation in progress.
-SQLITE_IOERR
-This value is returned if the operating system informs SQLite
-that it is unable to perform some disk I/O operation.  This could mean
-that there is no more space left on the disk.
-SQLITE_CORRUPT
-This value is returned if SQLite detects that the database it is
-working on has become corrupted.  Corruption might occur due to a rogue
-process writing to the database file or it might happen due to a
-previously undetected logic error in SQLite. This value is also
-returned if a disk I/O error occurs in such a way that SQLite is forced
-to leave the database file in a corrupted state.  The latter should only
-happen due to a hardware or operating system malfunction.
-SQLITE_FULL
-This value is returned if an insertion failed because there is
-no space left on the disk, or the database is too big to hold any
-more information.  The latter case should only occur for databases
-that are larger than 2GB in size.
-SQLITE_CANTOPEN
-This value is returned if the database file could not be opened
-for some reason.
-SQLITE_PROTOCOL
-This value is returned if some other process is messing with
-file locks and has violated the file locking protocol that SQLite uses
-on its rollback journal files.
-SQLITE_SCHEMA
-When the database is first opened, SQLite reads the database schema
-into memory and uses that schema to parse new SQL statements.  If another
-process changes the schema, the command currently being processed will
-abort because the virtual machine code generated assumed the old
-schema.  This is the return code for such cases.  Retrying the
-command usually will clear the problem.
-SQLITE_TOOBIG
-SQLite will not store more than about 1 megabyte of data in a single
-row of a single table.  If you attempt to store more than 1 megabyte
-in a single row, this is the return code you get.
-SQLITE_CONSTRAINT
-This constant is returned if the SQL statement would have violated
-a database constraint.
-SQLITE_MISMATCH
-This error occurs when there is an attempt to insert non-integer
-data into a column labeled INTEGER PRIMARY KEY.  For most columns, SQLite
-ignores the data type and allows any kind of data to be stored.  But
-an INTEGER PRIMARY KEY column is only allowed to store integer data.
-SQLITE_MISUSE
-This error might occur if one or more of the SQLite API routines
-is used incorrectly.  Examples of incorrect usage include calling
-sqlite_exec after the database has been closed using
-sqlite_close or 
-calling sqlite_exec with the same
-database pointer simultaneously from two separate threads.
-SQLITE_NOLFS
-This error means that you have attempted to create or access a
-database file that is larger than 2GB on a legacy Unix machine that
-lacks large file support.
-SQLITE_AUTH
-This error indicates that the authorizer callback
-has disallowed the SQL you are attempting to execute.
-SQLITE_ROW
-This is one of the return codes from the
-sqlite_step routine which is part of the non-callback API.
-It indicates that another row of result data is available.
-SQLITE_DONE
-This is one of the return codes from the
-sqlite_step routine which is part of the non-callback API.
-It indicates that the SQL statement has been completely executed and
-the sqlite_finalize routine is ready to be called.
-2.0 Accessing Data Without Using A Callback Function
-The sqlite_exec routine described above used to be the only
-way to retrieve data from an SQLite database.  But many programmers found
-it inconvenient to use a callback function to obtain results.  So beginning
-with SQLite version 2.7.7, a second access interface is available that
-does not use callbacks.
-The new interface uses three separate functions to replace the single
-sqlite_exec function.
-typedef struct sqlite_vm sqlite_vm;
-int sqlite_compile(
-  sqlite *db,              /* The open database */
-  const char *zSql,        /* SQL statement to be compiled */
-  const char **pzTail,     /* OUT: uncompiled tail of zSql */
-  sqlite_vm **ppVm,        /* OUT: the virtual machine to execute zSql */
-  char **pzErrmsg          /* OUT: Error message. */
-);
-int sqlite_step(
-  sqlite_vm *pVm,          /* The virtual machine to execute */
-  int *pN,                 /* OUT: Number of columns in result */
-  const char ***pazValue,  /* OUT: Column data */
-  const char ***pazColName /* OUT: Column names and datatypes */
-);
-int sqlite_finalize(
-  sqlite_vm *pVm,          /* The virtual machine to be finalized */
-  char **pzErrMsg          /* OUT: Error message */
-);
-The strategy is to compile a single SQL statement using
-sqlite_compile then invoke sqlite_step multiple times,
-once for each row of output, and finally call sqlite_finalize
-to clean up after the SQL has finished execution.
-2.1 Compiling An SQL Statement Into A Virtual Machine
-The sqlite_compile "compiles" a single SQL statement (specified
-by the second parameter) and generates a virtual machine that is able
-to execute that statement.  
-As with most interface routines, the first parameter must be a pointer
-to an sqlite structure that was obtained from a prior call to
-sqlite_open.
-A pointer to the virtual machine is stored in a pointer which is passed
-in as the 4th parameter.
-Space to hold the virtual machine is dynamically allocated.  To avoid
-a memory leak, the calling function must invoke
-sqlite_finalize on the virtual machine after it has finished
-with it.
-The 4th parameter may be set to NULL if an error is encountered during
-compilation.
-If any errors are encountered during compilation, an error message is
-written into memory obtained from malloc and the 5th parameter
-is made to point to that memory.  If the 5th parameter is NULL, then
-no error message is generated.  If the 5th parameter is not NULL, then
-the calling function should dispose of the memory containing the error
-message by calling sqlite_freemem.
-If the 2nd parameter actually contains two or more statements of SQL,
-only the first statement is compiled.  (This is different from the
-behavior of sqlite_exec which executes all SQL statements
-in its input string.)  The 3rd parameter to sqlite_compile
-is made to point to the first character beyond the end of the first
-statement of SQL in the input.  If the 2nd parameter contains only
-a single SQL statement, then the 3rd parameter will be made to point
-to the '\000' terminator at the end of the 2nd parameter.
-On success, sqlite_compile returns SQLITE_OK.
-Otherwise an error code is returned.
-2.2 Step-By-Step Execution Of An SQL Statement
-After a virtual machine has been generated using sqlite_compile
-it is executed by one or more calls to sqlite_step.  Each
-invocation of sqlite_step, except the last one,
-returns a single row of the result.
-The number of columns in  the result is stored in the integer that
-the 2nd parameter points to.
-The pointer specified by the 3rd parameter is made to point
-to an array of pointers to column values.
-The pointer in the 4th parameter is made to point to an array
-of pointers to column names and datatypes.
-The 2nd through 4th parameters to sqlite_step convey the
-same information as the 2nd through 4th parameters of the
-callback routine when using
-the sqlite_exec interface.  Except, with sqlite_step
-the column datatype information is always included in the
-4th parameter regardless of whether or not the
-SHOW_DATATYPES pragma
-is on or off.
-Each invocation of sqlite_step returns an integer code that
-indicates what happened during that step.  This code may be
-SQLITE_BUSY, SQLITE_ROW, SQLITE_DONE, SQLITE_ERROR, or
-SQLITE_MISUSE.
-If the virtual machine is unable to open the database file because
-it is locked by another thread or process, sqlite_step
-will return SQLITE_BUSY.  The calling function should do some other
-activity, or sleep, for a short amount of time to give the lock a
-chance to clear, then invoke sqlite_step again.  This can
-be repeated as many times as desired.
-Whenever another row of result data is available,
-sqlite_step will return SQLITE_ROW.  The row data is
-stored in an array of pointers to strings and the 2nd parameter
-is made to point to this array.
-When all processing is complete, sqlite_step will return
-either SQLITE_DONE or SQLITE_ERROR.  SQLITE_DONE indicates that the
-statement completed successfully and SQLITE_ERROR indicates that there
-was a run-time error.  (The details of the error are obtained from
-sqlite_finalize.)  It is a misuse of the library to attempt
-to call sqlite_step again after it has returned SQLITE_DONE
-or SQLITE_ERROR.
-When sqlite_step returns SQLITE_DONE or SQLITE_ERROR,
-the *pN and *pazColName values are set to the number of columns
-in the result set and to the names of the columns, just as they
-are for an SQLITE_ROW return.  This allows the calling code to
-find the number of result columns and the column names and datatypes
-even if the result set is empty.  The *pazValue parameter is always
-set to NULL when the return code is SQLITE_DONE or SQLITE_ERROR.
-If the SQL being executed is a statement that does not
-return a result (such as an INSERT or an UPDATE) then *pN will
-be set to zero and *pazColName will be set to NULL.
-If you abuse the library by trying to call sqlite_step
-inappropriately it will attempt return SQLITE_MISUSE.
-This can happen if you call sqlite_step() on the same virtual machine
-at the same
-time from two or more threads or if you call sqlite_step()
-again after it returned SQLITE_DONE or SQLITE_ERROR or if you
-pass in an invalid virtual machine pointer to sqlite_step().
-You should not depend on the SQLITE_MISUSE return code to indicate
-an error.  It is possible that a misuse of the interface will go
-undetected and result in a program crash.  The SQLITE_MISUSE is
-intended as a debugging aid only - to help you detect incorrect
-usage prior to a mishap.  The misuse detection logic is not guaranteed
-to work in every case.
-2.3 Deleting A Virtual Machine
-Every virtual machine that sqlite_compile creates should
-eventually be handed to sqlite_finalize.  The sqlite_finalize()
-procedure deallocates the memory and other resources that the virtual
-machine uses.  Failure to call sqlite_finalize() will result in 
-resource leaks in your program.
-The sqlite_finalize routine also returns the result code
-that indicates success or failure of the SQL operation that the
-virtual machine carried out.
-The value returned by sqlite_finalize() will be the same as would
-have been returned had the same SQL been executed by sqlite_exec.
-The error message returned will also be the same.
-It is acceptable to call sqlite_finalize on a virtual machine
-before sqlite_step has returned SQLITE_DONE.  Doing so has
-the effect of interrupting the operation in progress.  Partially completed
-changes will be rolled back and the database will be restored to its
-original state (unless an alternative recovery algorithm is selected using
-an ON CONFLICT clause in the SQL being executed.)  The effect is the
-same as if a callback function of sqlite_exec had returned
-non-zero.
-It is also acceptable to call sqlite_finalize on a virtual machine
-that has never been passed to sqlite_step even once.
-3.0 The Extended API
-Only the three core routines described in section 1.0 are required to use
-SQLite.  But there are many other functions that provide 
-useful interfaces.  These extended routines are as follows:
-int sqlite_last_insert_rowid(sqlite*);
-int sqlite_changes(sqlite*);
-int sqlite_get_table(
-  sqlite*,
-  char *sql,
-  char ***result,
-  int *nrow,
-  int *ncolumn,
-  char **errmsg
-);
-void sqlite_free_table(char**);
-void sqlite_interrupt(sqlite*);
-int sqlite_complete(const char *sql);
-void sqlite_busy_handler(sqlite*, int (*)(void*,const char*,int), void*);
-void sqlite_busy_timeout(sqlite*, int ms);
+
+An Introduction To The SQLite C/C++ Interface
+
+Table Of Contents
+[1. Summary](#summary)
+[2. Introduction](#introduction)
+[3. Core Objects And Interfaces](#core_objects_and_interfaces)
+[4. Typical Usage Of Core Routines And Objects](#typical_usage_of_core_routines_and_objects)
+[5. Convenience Wrappers Around Core Routines](#convenience_wrappers_around_core_routines)
+[6. Binding Parameters and Reusing Prepared Statements](#binding_parameters_and_reusing_prepared_statements)
+[7. Configuring SQLite](#configuring_sqlite)
+[8. Extending SQLite](#extending_sqlite)
+[9. Other Interfaces](#other_interfaces)
+
+# 1. Summary
+
+The following two objects and eight methods comprise the essential
+elements of the SQLite interface:
+
+- 
+**[sqlite3](c3ref/sqlite3.html)** ->
+The database connection object.  Created by
+[sqlite3_open()](c3ref/open.html) and destroyed by [sqlite3_close()](c3ref/close.html).
+
+- 
+**[sqlite3_stmt](c3ref/stmt.html)** ->
+The prepared statement object.  Created by
+[sqlite3_prepare()](c3ref/prepare.html) and destroyed by [sqlite3_finalize()](c3ref/finalize.html).
+
+- 
+**[sqlite3_open()](c3ref/open.html)** ->
+Open a connection to a new or existing SQLite database.
+The constructor for [sqlite3](c3ref/sqlite3.html).
+
+- 
+**[sqlite3_prepare()](c3ref/prepare.html)** ->
+Compile SQL text into
+byte-code that will do the work of querying or updating the database.
+The constructor for [sqlite3_stmt](c3ref/stmt.html).
+
+- 
+**[sqlite3_bind()](c3ref/bind_blob.html)** ->
+Store application data into
+[parameters](lang_expr.html#varparam) of the original SQL.
+
+- 
+**[sqlite3_step()](c3ref/step.html)** ->
+Advance an [sqlite3_stmt](c3ref/stmt.html) to the next result row or to completion.
+
+- 
+**[sqlite3_column()](c3ref/column_blob.html)** ->
+Column values in the current result row for an [sqlite3_stmt](c3ref/stmt.html).
+
+- 
+**[sqlite3_finalize()](c3ref/finalize.html)** ->
+Destructor for [sqlite3_stmt](c3ref/stmt.html).
+
+- 
+**[sqlite3_close()](c3ref/close.html)** ->
+Destructor for [sqlite3](c3ref/sqlite3.html).
+
+- 
+**[sqlite3_exec()](c3ref/exec.html)** ->
+A wrapper function that does [sqlite3_prepare()](c3ref/prepare.html), [sqlite3_step()](c3ref/step.html),
+[sqlite3_column()](c3ref/column_blob.html), and [sqlite3_finalize()](c3ref/finalize.html) for
+a string of one or more SQL statements.
+
+# 2. Introduction
+
+  SQLite has more than 225 APIs.
+  However, most of the APIs are optional and very specialized
+  and can be ignored by beginners.
+  The core API is small, simple, and easy to learn.
+  This article summarizes the core API.
+
+  A separate document, [The SQLite C/C++ Interface](c3ref/intro.html),
+  provides detailed
+  specifications for all C/C++ APIs for SQLite.  Once
+  the reader
+  understands the basic principles of operation for SQLite,
+  [that document](c3ref/intro.html) should be used as a reference
+  guide.  This article is intended as introduction only and is neither a
+  complete nor authoritative reference for the SQLite API.
+
+# 3. Core Objects And Interfaces
+
+  The principal task of an SQL database engine is to evaluate SQL statements
+  of SQL.  To accomplish this, the developer needs two objects:
+
+  -  The [database connection](c3ref/sqlite3.html) object: sqlite3 
+
+  -  The [prepared statement](c3ref/stmt.html) object: sqlite3_stmt 
+
+  Strictly speaking, the [prepared statement](c3ref/stmt.html) object is not required since
+  the convenience wrapper interfaces, [sqlite3_exec](c3ref/exec.html) or
+  [sqlite3_get_table](c3ref/free_table.html), can be used and these convenience wrappers
+  encapsulate and hide the [prepared statement](c3ref/stmt.html) object.
+  Nevertheless, an understanding of
+  [prepared statements](c3ref/stmt.html) is needed to make full use of SQLite.
+
+  The [database connection](c3ref/sqlite3.html) and [prepared statement](c3ref/stmt.html) objects are controlled
+  by a small set of C/C++ interface routines listed below.
+
+  -  [sqlite3_open()](c3ref/open.html) 
+
+  -  [sqlite3_prepare()](c3ref/prepare.html) 
+
+  -  [sqlite3_step()](c3ref/step.html) 
+
+  -  [sqlite3_column()](c3ref/column_blob.html) 
+
+  -  [sqlite3_finalize()](c3ref/finalize.html) 
+
+  -  [sqlite3_close()](c3ref/close.html) 
+
+  Note that the list of routines above is conceptual rather than actual.
+  Many of these routines come in multiple versions.
+  For example, the list above shows a single routine
+  named [sqlite3_open()](c3ref/open.html) when in fact there are three separate routines
+  that accomplish the same thing in slightly different ways:
+  [sqlite3_open()](c3ref/open.html), [sqlite3_open16()](c3ref/open.html) and [sqlite3_open_v2()](c3ref/open.html).
+  The list mentions [sqlite3_column()](c3ref/column_blob.html)
+  when in fact no such routine exists.
+  The "sqlite3_column()" shown in the list is a placeholder for
+  an entire family of routines that extract column
+  data in various datatypes.
+
+  Here is a summary of what the core interfaces do:
+
+- 
+**[sqlite3_open()](c3ref/open.html)**
+
+  This routine
+  opens a connection to an SQLite database file and returns a
+  [database connection](c3ref/sqlite3.html) object.  This is often the first SQLite API
+  call that an application makes and is a prerequisite for most other
+  SQLite APIs.  Many SQLite interfaces require a pointer to
+  the [database connection](c3ref/sqlite3.html) object as their first parameter and can
+  be thought of as methods on the [database connection](c3ref/sqlite3.html) object.
+  This routine is the constructor for the [database connection](c3ref/sqlite3.html) object.
+
+- 
+**[sqlite3_prepare()](c3ref/prepare.html)**
+
+  This routine
+  converts SQL text into a [prepared statement](c3ref/stmt.html) object and returns a pointer
+  to that object.  This interface requires a [database connection](c3ref/sqlite3.html) pointer
+  created by a prior call to [sqlite3_open()](c3ref/open.html) and a text string containing
+  the SQL statement to be prepared.  This API does not actually evaluate
+  the SQL statement.  It merely prepares the SQL statement for evaluation.
+
+  
+
+Think of each SQL statement as a small computer program.  The purpose
+  of [sqlite3_prepare()](c3ref/prepare.html) is to compile that program into object code.
+  The [prepared statement](c3ref/stmt.html) is the object code.  The [sqlite3_step()](c3ref/step.html) interface
+  then runs the object code to get a result.
+
+  
+
+New applications should always invoke [sqlite3_prepare_v2()](c3ref/prepare.html) instead
+  of [sqlite3_prepare()](c3ref/prepare.html).  The older [sqlite3_prepare()](c3ref/prepare.html) is retained for
+  backwards compatibility.  But [sqlite3_prepare_v2()](c3ref/prepare.html) provides a much
+  better interface.
+
+- 
+**[sqlite3_step()](c3ref/step.html)**
+
+  This routine is used to evaluate a [prepared statement](c3ref/stmt.html) that has been
+  previously created by the [sqlite3_prepare()](c3ref/prepare.html) interface.  The statement
+  is evaluated up to the point where the first row of results are available.
+  To advance to the second row of results, invoke [sqlite3_step()](c3ref/step.html) again.
+  Continue invoking [sqlite3_step()](c3ref/step.html) until the statement is complete.
+  Statements that do not return results (ex: INSERT, UPDATE, or DELETE
+  statements) run to completion on a single call to [sqlite3_step()](c3ref/step.html).
+
+- 
+**[sqlite3_column()](c3ref/column_blob.html)**
+
+  This routine returns a single column from the current row of a result
+  set for a [prepared statement](c3ref/stmt.html) that is being evaluated by [sqlite3_step()](c3ref/step.html).
+  Each time [sqlite3_step()](c3ref/step.html) stops with a new result set row, this routine
+  can be called multiple times to find the values of all columns in that row.
+
+  
+
+As noted above, there really is no such thing as a "sqlite3_column()"
+  function in the SQLite API.  Instead, what we here call "sqlite3_column()"
+  is a place-holder for an entire family of functions that return
+  a value from the result set in various data types.  There are also routines
+  in this family that return the size of the result (if it is a string or
+  BLOB) and the number of columns in the result set.
+
+  
+
+    -  [sqlite3_column_blob()](c3ref/column_blob.html) 
+
+    -  [sqlite3_column_bytes()](c3ref/column_blob.html) 
+
+    -  [sqlite3_column_bytes16()](c3ref/column_blob.html) 
+
+    -  [sqlite3_column_count()](c3ref/column_count.html) 
+
+    -  [sqlite3_column_double()](c3ref/column_blob.html) 
+
+    -  [sqlite3_column_int()](c3ref/column_blob.html) 
+
+    -  [sqlite3_column_int64()](c3ref/column_blob.html) 
+
+    -  [sqlite3_column_text()](c3ref/column_blob.html) 
+
+    -  [sqlite3_column_text16()](c3ref/column_blob.html) 
+
+    -  [sqlite3_column_type()](c3ref/column_blob.html) 
+
+    -  [sqlite3_column_value()](c3ref/column_blob.html) 
+
+  
+
+- 
+**[sqlite3_finalize()](c3ref/finalize.html)**
+
+  This routine destroys a [prepared statement](c3ref/stmt.html) created by a prior call
+  to [sqlite3_prepare()](c3ref/prepare.html).  Every prepared statement must be destroyed using
+  a call to this routine in order to avoid memory leaks.
+
+- 
+**[sqlite3_close()](c3ref/close.html)**
+
+  This routine closes a [database connection](c3ref/sqlite3.html) previously opened by a call
+  to [sqlite3_open()](c3ref/open.html).  All [prepared statements](c3ref/stmt.html) associated with the
+  connection should be [finalized](c3ref/finalize.html) prior to closing the
+  connection.
+
+# 4. Typical Usage Of Core Routines And Objects
+
+  An application will typically use
+  [sqlite3_open()](c3ref/open.html) to create a single [database connection](c3ref/sqlite3.html)
+  during initialization.
+  Note that [sqlite3_open()](c3ref/open.html) can be used to either open existing database
+  files or to create and open new database files.
+  While many applications use only a single [database connection](c3ref/sqlite3.html), there is
+  no reason why an application cannot call [sqlite3_open()](c3ref/open.html) multiple times
+  in order to open multiple [database connections](c3ref/sqlite3.html) - either to the same
+  database or to different databases.  Sometimes a multi-threaded application
+  will create separate [database connections](c3ref/sqlite3.html) for each thread.
+  Note that a single [database connection](c3ref/sqlite3.html) can access two or more
+  databases using the [ATTACH](lang_attach.html) SQL command, so it is not necessary to
+  have a separate database connection for each database file.
+
+  Many applications destroy their [database connections](c3ref/sqlite3.html) using calls to
+  [sqlite3_close()](c3ref/close.html) at shutdown.  Or, for example, an application that
+  uses SQLite as its [application file format](appfileformat.html) might
+  open [database connections](c3ref/sqlite3.html) in response to a File/Open menu action
+  and then destroy the corresponding [database connection](c3ref/sqlite3.html) in response
+  to the File/Close menu.
+
+  To run an SQL statement, the application follows these steps:
+
+  -  Create a [prepared statement](c3ref/stmt.html) using [sqlite3_prepare()](c3ref/prepare.html). 
+
+  -  Evaluate the [prepared statement](c3ref/stmt.html) by calling [sqlite3_step()](c3ref/step.html) one
+       or more times. 
+
+  -  For queries, extract results by calling
+       [sqlite3_column()](c3ref/column_blob.html) in between
+       two calls to [sqlite3_step()](c3ref/step.html). 
+
+  -  Destroy the [prepared statement](c3ref/stmt.html) using [sqlite3_finalize()](c3ref/finalize.html). 
+
+  The foregoing is all one really needs to know in order to use SQLite
+  effectively.  All the rest is optimization and detail.
+
+# 5. Convenience Wrappers Around Core Routines
+
+  The [sqlite3_exec()](c3ref/exec.html) interface is a convenience wrapper that carries out
+  all four of the above steps with a single function call.  A callback
+  function passed into [sqlite3_exec()](c3ref/exec.html) is used to process each row of
+  the result set.  The [sqlite3_get_table()](c3ref/free_table.html) is another convenience wrapper
+  that does all four of the above steps.  The [sqlite3_get_table()](c3ref/free_table.html) interface
+  differs from [sqlite3_exec()](c3ref/exec.html) in that it stores the results of queries
+  in heap memory rather than invoking a callback.
+
+  It is important to realize that neither [sqlite3_exec()](c3ref/exec.html) nor
+  [sqlite3_get_table()](c3ref/free_table.html) do anything that cannot be accomplished using
+  the core routines.  In fact, these wrappers are implemented purely in
+  terms of the core routines.
+
+# 6. Binding Parameters and Reusing Prepared Statements
+
+  In prior discussion, it was assumed that each SQL statement is prepared
+  once, evaluated, then destroyed.  However, SQLite allows the same
+  [prepared statement](c3ref/stmt.html) to be evaluated multiple times.  This is accomplished
+  using the following routines:
+
+  -  [sqlite3_reset()](c3ref/reset.html) 
+
+  -  [sqlite3_bind()](c3ref/bind_blob.html) 
+
+  After a [prepared statement](c3ref/stmt.html) has been evaluated by one or more calls to
+  [sqlite3_step()](c3ref/step.html), it can be reset in order to be evaluated again by a
+  call to [sqlite3_reset()](c3ref/reset.html).
+  Think of [sqlite3_reset()](c3ref/reset.html) as rewinding the [prepared statement](c3ref/stmt.html) program
+  back to the beginning.
+  Using [sqlite3_reset()](c3ref/reset.html) on an existing [prepared statement](c3ref/stmt.html) rather than
+  creating a new [prepared statement](c3ref/stmt.html) avoids unnecessary calls to
+  [sqlite3_prepare()](c3ref/prepare.html).
+  For many SQL statements, the time needed
+  to run [sqlite3_prepare()](c3ref/prepare.html) equals or exceeds the time needed by
+  [sqlite3_step()](c3ref/step.html).  So avoiding calls to [sqlite3_prepare()](c3ref/prepare.html) can give
+  a significant performance improvement.
+
+  It is not commonly useful to evaluate the *exact* same SQL
+  statement more than once.  More often, one wants to evaluate similar
+  statements.  For example, you might want to evaluate an INSERT statement
+  multiple times with different values.  Or you might want to evaluate
+  the same query multiple times using a different key in the WHERE clause.
+  To accommodate
+  this, SQLite allows SQL statements to contain [parameters](lang_expr.html#varparam)
+  which are "bound" to values prior to being evaluated.  These values can
+  later be changed and the same [prepared statement](c3ref/stmt.html) can be evaluated
+  a second time using the new values.
+
+  SQLite allows a [parameter](lang_expr.html#varparam) wherever a string literal,
+  blob literal, numeric constant, or NULL is allowed
+  in queries or data modification statements. (DQL or DML)
+  (Parameters may not be used for column or table names,
+  or as values for constraints or default values. (DDL))
+  A [parameter](lang_expr.html#varparam) takes one of the following forms:
+
+  -  **?** 
+
+  -  **?***NNN* 
+
+  -  **:***AAA* 
+
+  -  **$***AAA* 
+
+  -  **@***AAA* 
+
+  In the examples above, *NNN* is an integer value and
+  *AAA* is an identifier.
+  A parameter initially has a value of NULL.
+  Prior to calling [sqlite3_step()](c3ref/step.html) for the first time or immediately
+  after [sqlite3_reset()](c3ref/reset.html), the application can invoke the
+  [sqlite3_bind()](c3ref/bind_blob.html) interfaces to attach values
+  to the parameters.  Each call to [sqlite3_bind()](c3ref/bind_blob.html)
+  overrides prior bindings on the same parameter.
+
+  An application is allowed to prepare multiple SQL statements in advance
+  and evaluate them as needed.
+  There is no arbitrary limit to the number of outstanding
+  [prepared statements](c3ref/stmt.html).
+  Some applications call [sqlite3_prepare()](c3ref/prepare.html) multiple times at start-up to
+  create all of the [prepared statements](c3ref/stmt.html) they will ever need.  Other
+  applications keep a cache of the most recently used [prepared statements](c3ref/stmt.html)
+  and then reuse [prepared statements](c3ref/stmt.html) out of the cache when available.
+  Another approach is to only reuse [prepared statements](c3ref/stmt.html) when they are
+  inside of a loop.
+
+# 7. Configuring SQLite
+
+  The default configuration for SQLite works great for most applications.
+  But sometimes developers want to tweak the setup to try to squeeze out
+  a little more performance, or take advantage of some obscure feature.
+
+  The [sqlite3_config()](c3ref/config.html) interface is used to make global, process-wide
+  configuration changes for SQLite.  The [sqlite3_config()](c3ref/config.html) interface must
+  be called before any [database connections](c3ref/sqlite3.html) are created.  The
+  [sqlite3_config()](c3ref/config.html) interface allows the programmer to do things like:
+
+- Adjust how SQLite does [memory allocation](malloc.html), including setting up
+    alternative memory allocators appropriate for safety-critical
+    real-time embedded systems and application-defined memory allocators.
+
+- Set up a process-wide [error log](errlog.html).
+
+- Specify an application-defined page cache.
+
+- Adjust the use of mutexes so that they are appropriate for various
+    [threading models](threadsafe.html), or substitute an
+    application-defined mutex system.
+
+  After process-wide configuration is complete and [database connections](c3ref/sqlite3.html)
+  have been created, individual database connections can be configured using
+  calls to [sqlite3_limit()](c3ref/limit.html) and [sqlite3_db_config()](c3ref/db_config.html).
+
+# 8. Extending SQLite
+
+  SQLite includes interfaces that can be used to extend its functionality.
+  Such routines include:
+
+  -  [sqlite3_create_collation()](c3ref/create_collation.html) 
+
+  -  [sqlite3_create_function()](c3ref/create_function.html) 
+
+  -  [sqlite3_create_module()](c3ref/create_module.html) 
+
+  -  [sqlite3_vfs_register()](c3ref/vfs_find.html) 
+
+  The [sqlite3_create_collation()](c3ref/create_collation.html) interface is used to create new
+  [collating sequences](datatype3.html#collation) for sorting text.
+  The [sqlite3_create_module()](c3ref/create_module.html) interface is used to register new
+  [virtual table](vtab.html) implementations.
+  The [sqlite3_vfs_register()](c3ref/vfs_find.html) interface creates new [VFSes](vfs.html).
+
+  The [sqlite3_create_function()](c3ref/create_function.html) interface creates new SQL functions -
+  either scalar or aggregate.  The new function implementation typically
+  makes use of the following additional interfaces:
+
+  -  [sqlite3_aggregate_context()](c3ref/aggregate_context.html) 
+
+  -  [sqlite3_result()](c3ref/result_blob.html) 
+
+  -  [sqlite3_user_data()](c3ref/user_data.html) 
+
+  -  [sqlite3_value()](c3ref/value_blob.html) 
+
+  All of the built-in SQL functions of SQLite are created using exactly
+  these same interfaces.  Refer to the SQLite source code, and in particular
+  the
+  [date.c](https://sqlite.org/src/doc/trunk/src/date.c) and
+  [func.c](https://sqlite.org/src/doc/trunk/src/func.c) source files
+  for examples.
+
+  Shared libraries or DLLs can be used as [loadable extensions](loadext.html) to SQLite.
+
+# 9. Other Interfaces
+
+  This article only mentions the most important and most commonly
+  used SQLite interfaces.
+  The SQLite library includes many other APIs implementing useful
+  features that are not described here.
+  A [complete list of functions](c3ref/funclist.html) that form the SQLite
+  application programming interface is found at the
+  [C/C++ Interface Specification](c3ref/intro.html).
+  Refer to that document for complete and authoritative information about
+  all SQLite interfaces.
+
+*This page was last updated on 2025-05-31 13:08:22Z *

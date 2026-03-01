@@ -3,6 +3,7 @@
 ## Table of Contents
 
 - [Overview](#overview)
+  - [Security Audit Scope](#security-audit-scope)
 - [Security Model](#security-model)
   - [Layered + Sandbox Architecture](#layered--sandbox-architecture)
 - [Configuration](#configuration)
@@ -23,15 +24,32 @@
   - [Operation Limits](#operation-limits)
   - [Query Complexity Limits](#query-complexity-limits)
 - [Integer Safety](#integer-safety)
+  - [Safe Arithmetic Operations](#safe-arithmetic-operations)
+  - [Protected Operations](#protected-operations)
+  - [Integer Overflow Errors](#integer-overflow-errors)
 - [Buffer Safety](#buffer-safety)
+  - [Bounds Checking](#bounds-checking)
+  - [Protected Buffer Operations](#protected-buffer-operations)
+  - [Buffer Overflow Prevention](#buffer-overflow-prevention)
+- [Component Security Overview](#component-security-overview)
 - [Security Best Practices](#security-best-practices)
   - [For Application Developers](#for-application-developers)
   - [For Library Contributors](#for-library-contributors)
   - [Security Checklist for Code Review](#security-checklist-for-code-review)
 - [Reporting Security Vulnerabilities](#reporting-security-vulnerabilities)
+  - [Reporting Process](#reporting-process)
+  - [What to Report](#what-to-report)
+  - [Security Updates](#security-updates)
 - [Security Testing](#security-testing)
+  - [Running Security Tests](#running-security-tests)
+  - [Test Coverage](#test-coverage)
+  - [Security Test Categories](#security-test-categories)
 - [Implementation Status](#implementation-status)
+  - [Completed Components](#completed-components)
+  - [Remaining Work](#remaining-work)
+  - [Security Audit Summary](#security-audit-summary)
 - [References](#references)
+- [License](#license)
 
 ## Overview
 
@@ -317,7 +335,7 @@ Only safe, read-only PRAGMAs are permitted by default:
 
 The driver uses a strict lock ordering hierarchy to prevent deadlocks:
 
-```
+```go
 1. Driver.mu          (sync.Mutex)     - Global driver state
 2. Conn.mu            (sync.Mutex)     - Connection state
 3. Stmt.mu            (sync.Mutex)     - Statement state
@@ -589,7 +607,7 @@ Please report:
 ### Security Updates
 
 Security updates will be:
-- Released as patch versions (e.g., v1.2.3 → v1.2.4)
+- Released as patch versions (e.g., v1.2.3 -> v1.2.4)
 - Documented in CHANGELOG.md with [SECURITY] prefix
 - Announced via GitHub releases
 - Credited to the reporter (unless anonymity requested)
@@ -738,6 +756,14 @@ The comprehensive security audit identified 23 security issues across three cate
 - **MEDIUM** (11 issues): Memory exhaustion, missing validation, cache races - Partially resolved
 
 For detailed audit findings and implementation plans, see [SECURITY_AUDIT_PLAN.md](SECURITY_AUDIT_PLAN.md) and [SECURITY_AUDIT_IMPLEMENTATION.md](SECURITY_AUDIT_IMPLEMENTATION.md).
+
+---
+
+## See Also
+
+- [Error Handling Guide](ERROR_HANDLING.md) - Proper error handling and security implications
+- [API Reference](API.md) - Security-related API configuration options
+- [Testing Guide](TESTING.md) - Security testing strategies and procedures
 
 ## References
 

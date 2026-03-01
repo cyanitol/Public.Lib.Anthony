@@ -1037,7 +1037,7 @@ SELECT log2(1024);       -- Returns: 10.0
 
 ### pi()
 
-Returns the value of π (pi).
+Returns the value of pi (pi).
 
 **Syntax:**
 ```sql
@@ -1691,6 +1691,9 @@ See `internal/functions/udf.go` for the complete UDF framework documentation.
 
 ## See Also
 
+- [JSON Functions](JSON_FUNCTIONS.md) - Detailed documentation for JSON manipulation functions
+- [API Reference](API.md) - Go API for using functions programmatically
+- [PRAGMA Reference](PRAGMAS.md) - Database configuration and query options
 - [Core Functions (local)](sqlite/CORE_FUNCTIONS.md) ([sqlite.org](https://sqlite.org/lang_corefunc.html))
 - [Aggregate Functions (local)](sqlite/AGGREGATE_FUNCTIONS.md) ([sqlite.org](https://sqlite.org/lang_aggfunc.html))
 - [Math Functions (local)](sqlite/MATH_FUNCTIONS.md)

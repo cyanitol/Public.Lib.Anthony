@@ -239,7 +239,7 @@ rows, err := db.Query("SELECT * FROM adult_users")
 
 #### CREATE TRIGGER
 
-```go
+```sql
 _, err := db.Exec(`
     CREATE TRIGGER update_timestamp
     AFTER UPDATE ON users
@@ -287,7 +287,7 @@ _, err := db.Exec("DROP TRIGGER update_timestamp")
 
 #### ATTACH/DETACH DATABASE
 
-```go
+```sql
 // Attach another database
 _, err := db.Exec("ATTACH DATABASE 'other.db' AS other")
 
@@ -330,7 +330,7 @@ fmt.Printf("Inserted row ID: %d\n", lastID)
 
 **Upsert (INSERT OR REPLACE):**
 
-```go
+```sql
 _, err := db.Exec(`
     INSERT INTO users (id, name, email)
     VALUES (?, ?, ?)
@@ -370,7 +370,7 @@ if err == sql.ErrNoRows {
 
 **WHERE Clauses:**
 
-```go
+```sql
 // Simple conditions
 rows, err := db.Query("SELECT * FROM users WHERE age > ?", 18)
 
@@ -390,14 +390,14 @@ rows, err := db.Query(`
 
 **ORDER BY:**
 
-```go
+```sql
 rows, err := db.Query("SELECT * FROM users ORDER BY name ASC")
 rows, err := db.Query("SELECT * FROM users ORDER BY age DESC, name ASC")
 ```
 
 **LIMIT and OFFSET:**
 
-```go
+```sql
 // First 10 rows
 rows, err := db.Query("SELECT * FROM users LIMIT 10")
 
@@ -407,7 +407,7 @@ rows, err := db.Query("SELECT * FROM users LIMIT 10 OFFSET 10")
 
 **JOINs:**
 
-```go
+```sql
 rows, err := db.Query(`
     SELECT u.name, d.name as department
     FROM users u
@@ -424,7 +424,7 @@ rows, err := db.Query(`
 
 **Aggregate Functions:**
 
-```go
+```sql
 // COUNT
 var count int
 err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
@@ -447,7 +447,7 @@ rows, err := db.Query(`
 
 **Subqueries:**
 
-```go
+```sql
 // Scalar subquery
 rows, err := db.Query(`
     SELECT name, age
@@ -476,7 +476,7 @@ See [Subquery Quick Reference](SUBQUERY_QUICK_REFERENCE.md) for details.
 
 **Common Table Expressions (CTEs):**
 
-```go
+```sql
 rows, err := db.Query(`
     WITH adult_users AS (
         SELECT * FROM users WHERE age >= 18
@@ -502,7 +502,7 @@ See [CTE Usage Guide](CTE_USAGE_GUIDE.md) for details.
 
 **Compound Queries:**
 
-```go
+```sql
 // UNION
 rows, err := db.Query(`
     SELECT name FROM customers
@@ -635,7 +635,7 @@ Anthony uses SQLite's transaction model:
 
 #### String Functions
 
-```go
+```sql
 // LENGTH, UPPER, LOWER, TRIM
 rows, err := db.Query(`
     SELECT
@@ -655,7 +655,7 @@ rows, err := db.Query("SELECT REPLACE(email, '@', ' at ') FROM users")
 
 #### Math Functions
 
-```go
+```sql
 // ABS, ROUND, CEIL, FLOOR
 rows, err := db.Query(`
     SELECT
@@ -672,7 +672,7 @@ rows, err := db.Query("SELECT MIN(age), MAX(age) FROM users")
 
 #### Date/Time Functions
 
-```go
+```sql
 // CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME
 _, err := db.Exec(`
     INSERT INTO events (name, created_at)
@@ -697,7 +697,7 @@ rows, err := db.Query(`
 
 #### Aggregate Functions
 
-```go
+```sql
 // COUNT, SUM, AVG, MIN, MAX, TOTAL, GROUP_CONCAT
 rows, err := db.Query(`
     SELECT
@@ -713,7 +713,7 @@ rows, err := db.Query(`
 `)
 ```
 
-See [Functions Documentation](internal/functions/README.md) for complete function reference.
+See [Functions Documentation](FUNCTIONS.md) for complete function reference.
 
 ### EXPLAIN
 
@@ -1049,7 +1049,7 @@ err = db.QueryRow("SELECT product(value) FROM numbers").Scan(&result)
 
 ### Multi-Database Support (ATTACH)
 
-```go
+```sql
 // Attach another database
 _, err := db.Exec("ATTACH DATABASE 'other.db' AS other")
 if err != nil {
@@ -1168,7 +1168,7 @@ type SecurityConfig struct {
 ### Security Best Practices
 
 1. **Always use parameterized queries** to prevent SQL injection:
-   ```go
+   ```sql
    // Good
    db.Exec("SELECT * FROM users WHERE id = ?", userID)
 
@@ -1190,7 +1190,7 @@ type SecurityConfig struct {
 4. **Validate and sanitize user input** before using in queries
 
 5. **Use CHECK constraints** to enforce data integrity:
-   ```go
+   ```sql
    db.Exec(`
        CREATE TABLE users (
            age INTEGER CHECK(age >= 0 AND age <= 150),
@@ -1283,7 +1283,7 @@ err = tx.Commit()
 
 Create indexes on frequently queried columns:
 
-```go
+```sql
 // Create indexes for better performance
 db.Exec("CREATE INDEX idx_users_email ON users(email)")
 db.Exec("CREATE INDEX idx_users_age ON users(age)")
@@ -1339,7 +1339,7 @@ db.Exec("PRAGMA journal_mode=WAL")
 
 ### Query Optimization
 
-```go
+```sql
 // Use EXPLAIN QUERY PLAN to understand query execution
 rows, _ := db.Query("EXPLAIN QUERY PLAN SELECT * FROM users WHERE age > 18")
 for rows.Next() {
@@ -1369,7 +1369,7 @@ db.SetMaxIdleConns(1)
 
 ### Database Optimization
 
-```go
+```sql
 // Analyze database for query optimizer
 db.Exec("ANALYZE")
 
@@ -1387,7 +1387,10 @@ db.Exec("PRAGMA synchronous = NORMAL") // Balanced
 
 ## See Also
 
-- [Quick Start Guide](QUICKSTART.md) - Getting started tutorial
+- [QUICKSTART.md](QUICKSTART.md) - Getting started tutorial
+- [USER_GUIDE.md](USER_GUIDE.md) - Complete user guide and examples
+- [FUNCTIONS.md](FUNCTIONS.md) - Built-in SQL function reference
+- [ERROR_HANDLING.md](ERROR_HANDLING.md) - Error handling patterns and best practices
 - [Architecture Overview](ARCHITECTURE.md) - Internal architecture
 - [Package Documentation](INDEX.md) - Complete package documentation
 - [Security Guide](SECURITY.md) - Security model and best practices

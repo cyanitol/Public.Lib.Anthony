@@ -332,61 +332,61 @@ CREATE TABLE strict_test (
 
 | Feature | Status | Compatibility | Notes |
 |---------|--------|---------------|-------|
-| CREATE TABLE | ✅ Complete | 100% | All options supported |
-| DROP TABLE | ✅ Complete | 100% | - |
-| ALTER TABLE | ✅ Complete | 100% | All variants supported |
-| CREATE INDEX | ✅ Complete | 100% | Including expression & partial indexes |
-| DROP INDEX | ✅ Complete | 100% | - |
-| INSERT | ✅ Complete | 100% | All forms supported |
-| UPDATE | ✅ Complete | 100% | - |
-| DELETE | ✅ Complete | 100% | - |
-| SELECT | ✅ Complete | 95% | Most features supported |
-| REPLACE | ✅ Complete | 100% | - |
-| UPSERT | ✅ Complete | 100% | - |
+| CREATE TABLE | [x] Complete | 100% | All options supported |
+| DROP TABLE | [x] Complete | 100% | - |
+| ALTER TABLE | [x] Complete | 100% | All variants supported |
+| CREATE INDEX | [x] Complete | 100% | Including expression & partial indexes |
+| DROP INDEX | [x] Complete | 100% | - |
+| INSERT | [x] Complete | 100% | All forms supported |
+| UPDATE | [x] Complete | 100% | - |
+| DELETE | [x] Complete | 100% | - |
+| SELECT | [x] Complete | 95% | Most features supported |
+| REPLACE | [x] Complete | 100% | - |
+| UPSERT | [x] Complete | 100% | - |
 
 ### Advanced Features
 
 | Feature | Status | Compatibility | Notes |
 |---------|--------|---------------|-------|
-| CTEs | ✅ Complete | 100% | WITH clause |
-| Recursive CTEs | ✅ Complete | 100% | WITH RECURSIVE |
-| Subqueries | ✅ Complete | 100% | All types |
-| Window Functions | ✅ Complete | 95% | Most functions supported |
-| UNION/INTERSECT/EXCEPT | ✅ Complete | 100% | All compound operators |
-| Triggers | ✅ Complete | 95% | BEFORE, AFTER, INSTEAD OF |
-| Views | ✅ Complete | 100% | - |
-| Foreign Keys | ✅ Complete | 100% | Full enforcement |
-| Check Constraints | ✅ Complete | 100% | - |
-| AUTOINCREMENT | ✅ Complete | 100% | - |
-| WITHOUT ROWID | ✅ Complete | 100% | - |
-| STRICT Tables | ✅ Complete | 100% | - |
+| CTEs | [x] Complete | 100% | WITH clause |
+| Recursive CTEs | [x] Complete | 100% | WITH RECURSIVE |
+| Subqueries | [x] Complete | 100% | All types |
+| Window Functions | [x] Complete | 95% | Most functions supported |
+| UNION/INTERSECT/EXCEPT | [x] Complete | 100% | All compound operators |
+| Triggers | [x] Complete | 95% | BEFORE, AFTER, INSTEAD OF |
+| Views | [x] Complete | 100% | - |
+| Foreign Keys | [x] Complete | 100% | Full enforcement |
+| Check Constraints | [x] Complete | 100% | - |
+| AUTOINCREMENT | [x] Complete | 100% | - |
+| WITHOUT ROWID | [x] Complete | 100% | - |
+| STRICT Tables | [x] Complete | 100% | - |
 
 ### Functions
 
 | Function Category | Status | Compatibility | Notes |
 |-------------------|--------|---------------|-------|
-| Aggregate (COUNT, SUM, AVG) | ✅ Complete | 100% | - |
-| String (length, substr, etc.) | ✅ Complete | 95% | Most functions |
-| Numeric (abs, round, etc.) | ✅ Complete | 100% | - |
-| Date/Time | ✅ Complete | 90% | Core functions |
-| JSON | ⚠️ Partial | 60% | Basic functions only |
-| Math (sin, cos, etc.) | ✅ Complete | 100% | - |
+| Aggregate (COUNT, SUM, AVG) | [x] Complete | 100% | - |
+| String (length, substr, etc.) | [x] Complete | 95% | Most functions |
+| Numeric (abs, round, etc.) | [x] Complete | 100% | - |
+| Date/Time | [x] Complete | 90% | Core functions |
+| JSON | [!] Partial | 60% | Basic functions only |
+| Math (sin, cos, etc.) | [x] Complete | 100% | - |
 
 ### PRAGMA Commands
 
 | PRAGMA | Status | Compatibility | Notes |
 |--------|--------|---------------|-------|
-| application_id | ✅ Complete | 100% | - |
-| cache_size | ✅ Complete | 100% | - |
-| database_list | ✅ Complete | 100% | - |
-| encoding | ✅ Complete | 100% | UTF-8 only in practice |
-| foreign_keys | ✅ Complete | 100% | - |
-| integrity_check | ✅ Complete | 100% | - |
-| journal_mode | ⚠️ Partial | 80% | WAL in development |
-| page_size | ✅ Complete | 100% | - |
-| synchronous | ✅ Complete | 100% | - |
-| table_info | ✅ Complete | 100% | - |
-| user_version | ✅ Complete | 100% | - |
+| application_id | [x] Complete | 100% | - |
+| cache_size | [x] Complete | 100% | - |
+| database_list | [x] Complete | 100% | - |
+| encoding | [x] Complete | 100% | UTF-8 only in practice |
+| foreign_keys | [x] Complete | 100% | - |
+| integrity_check | [x] Complete | 100% | - |
+| journal_mode | [!] Partial | 80% | WAL in development |
+| page_size | [x] Complete | 100% | - |
+| synchronous | [x] Complete | 100% | - |
+| table_info | [x] Complete | 100% | - |
+| user_version | [x] Complete | 100% | - |
 
 ## Known Differences
 
@@ -740,7 +740,7 @@ Minimal reproduction:
 
 Complete SQLite 3.51.2 SQL reference is available locally in [docs/sqlite/](sqlite/README.md):
 
-- [Window Functions](sqlite/WINDOW_FUNCTIONS.md) · [RETURNING clause](sqlite/RETURNING.md)
-- [UPSERT](sqlite/UPSERT.md) · [STRICT Tables](sqlite/STRICT_TABLES.md)
-- [WITHOUT ROWID](sqlite/WITHOUT_ROWID.md) · [Generated Columns](sqlite/GENERATED_COLUMNS.md)
-- [Quirks and Gotchas](sqlite/QUIRKS.md) · [SQLite Differences](sqlite/SQLITE_DIFFERENCES.md)
+- [Window Functions](sqlite/WINDOW_FUNCTIONS.md) * [RETURNING clause](sqlite/RETURNING.md)
+- [UPSERT](sqlite/UPSERT.md) * [STRICT Tables](sqlite/STRICT_TABLES.md)
+- [WITHOUT ROWID](sqlite/WITHOUT_ROWID.md) * [Generated Columns](sqlite/GENERATED_COLUMNS.md)
+- [Quirks and Gotchas](sqlite/QUIRKS.md) * [SQLite Differences](sqlite/SQLITE_DIFFERENCES.md)

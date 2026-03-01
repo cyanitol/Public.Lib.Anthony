@@ -14,42 +14,42 @@ SELECT * FROM cte1 JOIN cte2
 ```
 
 ### Resulting AST Structure
-```
+```go
 SelectStmt
-├── With: *WithClause
-│   ├── Recursive: true
-│   └── CTEs: []CTE
-│       ├── [0] CTE
-│       │   ├── Name: "cte1"
-│       │   ├── Columns: []string{"id", "name"}
-│       │   └── Select: *SelectStmt
-│       │       ├── With: nil
-│       │       ├── Distinct: false
-│       │       ├── Columns: []ResultColumn
-│       │       │   ├── IdentExpr{Name: "id"}
-│       │       │   └── IdentExpr{Name: "name"}
-│       │       └── From: *FromClause
-│       │           └── Tables: []TableOrSubquery
-│       │               └── {TableName: "users"}
-│       └── [1] CTE
-│           ├── Name: "cte2"
-│           ├── Columns: []string{} (empty - no column list)
-│           └── Select: *SelectStmt
-│               ├── With: nil
-│               ├── Distinct: false
-│               ├── Columns: []ResultColumn
-│               │   └── {Star: true}
-│               └── From: *FromClause
-│                   └── Tables: []TableOrSubquery
-│                       └── {TableName: "orders"}
-├── Distinct: false
-├── Columns: []ResultColumn
-│   └── {Star: true}
-└── From: *FromClause
-    ├── Tables: []TableOrSubquery
-    │   └── {TableName: "cte1"}
-    └── Joins: []JoinClause
-        └── {Table: {TableName: "cte2"}}
++-- With: *WithClause
+|   +-- Recursive: true
+|   +-- CTEs: []CTE
+|       +-- [0] CTE
+|       |   +-- Name: "cte1"
+|       |   +-- Columns: []string{"id", "name"}
+|       |   +-- Select: *SelectStmt
+|       |       +-- With: nil
+|       |       +-- Distinct: false
+|       |       +-- Columns: []ResultColumn
+|       |       |   +-- IdentExpr{Name: "id"}
+|       |       |   +-- IdentExpr{Name: "name"}
+|       |       +-- From: *FromClause
+|       |           +-- Tables: []TableOrSubquery
+|       |               +-- {TableName: "users"}
+|       +-- [1] CTE
+|           +-- Name: "cte2"
+|           +-- Columns: []string{} (empty - no column list)
+|           +-- Select: *SelectStmt
+|               +-- With: nil
+|               +-- Distinct: false
+|               +-- Columns: []ResultColumn
+|               |   +-- {Star: true}
+|               +-- From: *FromClause
+|                   +-- Tables: []TableOrSubquery
+|                       +-- {TableName: "orders"}
++-- Distinct: false
++-- Columns: []ResultColumn
+|   +-- {Star: true}
++-- From: *FromClause
+    +-- Tables: []TableOrSubquery
+    |   +-- {TableName: "cte1"}
+    +-- Joins: []JoinClause
+        +-- {Table: {TableName: "cte2"}}
 ```
 
 ## AST Node Definitions
@@ -114,7 +114,7 @@ WITH users_active AS (SELECT * FROM users WHERE active = 1)
 SELECT * FROM users_active
 ```
 
-```
+```go
 SelectStmt
   With: &WithClause{
     Recursive: false,
@@ -146,7 +146,7 @@ WITH
 SELECT * FROM a, b
 ```
 
-```
+```go
 SelectStmt
   With: &WithClause{
     Recursive: false,
@@ -177,7 +177,7 @@ WITH cte(id, name, email) AS (SELECT id, name, email FROM users)
 SELECT id FROM cte
 ```
 
-```
+```go
 SelectStmt
   With: &WithClause{
     Recursive: false,
@@ -216,7 +216,7 @@ WITH RECURSIVE nums(n) AS (
 SELECT * FROM nums
 ```
 
-```
+```go
 SelectStmt
   With: &WithClause{
     Recursive: true,  // RECURSIVE keyword present
@@ -255,10 +255,10 @@ SelectStmt
 
 | Field | Type | Description | Example |
 |-------|------|-------------|---------|
-| `WithClause.Recursive` | `bool` | True if RECURSIVE keyword present | `WITH RECURSIVE cte ...` → true |
-| `WithClause.CTEs` | `[]CTE` | List of all CTEs in WITH clause | Two CTEs → length 2 |
-| `CTE.Name` | `string` | CTE identifier | `WITH my_cte AS ...` → "my_cte" |
-| `CTE.Columns` | `[]string` | Optional column names | `cte(a, b)` → []string{"a", "b"} |
+| `WithClause.Recursive` | `bool` | True if RECURSIVE keyword present | `WITH RECURSIVE cte ...` -> true |
+| `WithClause.CTEs` | `[]CTE` | List of all CTEs in WITH clause | Two CTEs -> length 2 |
+| `CTE.Name` | `string` | CTE identifier | `WITH my_cte AS ...` -> "my_cte" |
+| `CTE.Columns` | `[]string` | Optional column names | `cte(a, b)` -> []string{"a", "b"} |
 | `CTE.Select` | `*SelectStmt` | The CTE's SELECT query | Full nested SELECT statement |
 | `SelectStmt.With` | `*WithClause` | WITH clause for this SELECT | nil if no WITH clause |
 

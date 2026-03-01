@@ -4,7 +4,7 @@
 
 Window functions (also known as analytic functions) perform calculations across a set of
 table rows related to the current row. Unlike aggregate functions, window functions do not
-collapse the result set — each row retains its identity.
+collapse the result set -- each row retains its identity.
 
 ## Syntax
 
@@ -51,6 +51,6 @@ All aggregate functions (`sum()`, `avg()`, `count()`, etc.) can also be used as 
 
 ## See Also
 
-- [Window Functions Reference](WINDOW_FUNCTIONS.md) — complete reference from SQLite docs
-- [SELECT Reference](SELECT.md) — full SELECT syntax
+- [Window Functions Reference](WINDOW_FUNCTIONS.md) -- complete reference from SQLite docs
+- [SELECT Reference](SELECT.md) -- full SELECT syntax
 - Source: https://www.sqlite.org/windowfunctions.html

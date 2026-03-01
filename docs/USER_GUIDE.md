@@ -511,11 +511,11 @@ _, err := db.Exec(`
 ### Type Conversions
 
 ```go
-// INTEGER → REAL (automatic)
+// INTEGER -> REAL (automatic)
 var result float64
 db.QueryRow("SELECT 42").Scan(&result) // result = 42.0
 
-// TEXT → INTEGER (if valid)
+// TEXT -> INTEGER (if valid)
 var num int
 db.QueryRow("SELECT '123'").Scan(&num) // num = 123
 

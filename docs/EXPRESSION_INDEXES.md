@@ -107,10 +107,10 @@ CREATE INDEX IF NOT EXISTS idx_expr ON test(LOWER(val));
 
 The `extractExpressionName()` function generates human-readable names for expressions:
 
-- `name` → `"name"`
-- `LOWER(name)` → `"LOWER(name)"`
-- `price + tax` → `"price_tax"`
-- Complex expressions → `"expr"`
+- `name` -> `"name"`
+- `LOWER(name)` -> `"LOWER(name)"`
+- `price + tax` -> `"price_tax"`
+- Complex expressions -> `"expr"`
 
 This ensures the schema can display meaningful information about expression indexes.
 
@@ -233,9 +233,9 @@ db.Exec("CREATE INDEX idx_name_age ON users(LOWER(name), age)")
 All core functionality tests pass:
 
 ```
-✓ Parser tests: 13/13 passed
-✓ Schema tests: 6/6 passed
-✓ Integration ready: Index creation syntax fully supported
+[x] Parser tests: 13/13 passed
+[x] Schema tests: 6/6 passed
+[x] Integration ready: Index creation syntax fully supported
 ```
 
 ## Future Work

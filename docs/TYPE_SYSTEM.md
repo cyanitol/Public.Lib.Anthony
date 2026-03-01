@@ -262,22 +262,22 @@ INSERT INTO t VALUES ('hello');  -- Stored as 'hello' (TEXT, no conversion)
 ### Conversion Rules
 
 **To INTEGER:**
-1. REAL → INTEGER: Truncate fractional part
-2. TEXT → INTEGER: Parse if well-formed integer literal
-3. BLOB → INTEGER: Not converted
-4. NULL → INTEGER: Remains NULL
+1. REAL -> INTEGER: Truncate fractional part
+2. TEXT -> INTEGER: Parse if well-formed integer literal
+3. BLOB -> INTEGER: Not converted
+4. NULL -> INTEGER: Remains NULL
 
 **To REAL:**
-1. INTEGER → REAL: Convert to float64
-2. TEXT → REAL: Parse if well-formed real literal
-3. BLOB → REAL: Not converted
-4. NULL → REAL: Remains NULL
+1. INTEGER -> REAL: Convert to float64
+2. TEXT -> REAL: Parse if well-formed real literal
+3. BLOB -> REAL: Not converted
+4. NULL -> REAL: Remains NULL
 
 **To TEXT:**
-1. INTEGER → TEXT: Format as decimal string
-2. REAL → TEXT: Format as decimal string
-3. BLOB → TEXT: Not converted (remains BLOB)
-4. NULL → TEXT: Remains NULL
+1. INTEGER -> TEXT: Format as decimal string
+2. REAL -> TEXT: Format as decimal string
+3. BLOB -> TEXT: Not converted (remains BLOB)
+4. NULL -> TEXT: Remains NULL
 
 **To BLOB:**
 1. No conversions (BLOB affinity doesn't convert)
@@ -499,7 +499,7 @@ func DetermineAffinity(typeName string) Affinity {
 
 ```sql
 -- Column type "CHARINT" matches both rules 1 and 2
--- Rule 1 takes precedence → INTEGER affinity
+-- Rule 1 takes precedence -> INTEGER affinity
 CREATE TABLE t (x CHARINT);
 ```
 

@@ -1429,8 +1429,8 @@ for _, id := range userIDs {
 Official SQLite SQL language documentation, available locally:
 
 - [SQL Language Overview](sqlite/SQL_LANGUAGE_OVERVIEW.md)
-- [SELECT](sqlite/SELECT.md) · [INSERT](sqlite/INSERT.md) · [UPDATE](sqlite/UPDATE.md) · [DELETE](sqlite/DELETE.md)
-- [WITH (CTE)](sqlite/WITH_CTE.md) · [UPSERT](sqlite/UPSERT.md) · [RETURNING](sqlite/RETURNING.md)
-- [Window Functions](sqlite/WINDOW_FUNCTIONS.md) · [Savepoints](sqlite/SAVEPOINTS.md) · [Transactions](sqlite/TRANSACTIONS.md)
-- [Expressions](sqlite/EXPRESSIONS.md) · [Core Functions](sqlite/CORE_FUNCTIONS.md)
-- [Full index →](sqlite/README.md)
+- [SELECT](sqlite/SELECT.md) * [INSERT](sqlite/INSERT.md) * [UPDATE](sqlite/UPDATE.md) * [DELETE](sqlite/DELETE.md)
+- [WITH (CTE)](sqlite/WITH_CTE.md) * [UPSERT](sqlite/UPSERT.md) * [RETURNING](sqlite/RETURNING.md)
+- [Window Functions](sqlite/WINDOW_FUNCTIONS.md) * [Savepoints](sqlite/SAVEPOINTS.md) * [Transactions](sqlite/TRANSACTIONS.md)
+- [Expressions](sqlite/EXPRESSIONS.md) * [Core Functions](sqlite/CORE_FUNCTIONS.md)
+- [Full index ->](sqlite/README.md)

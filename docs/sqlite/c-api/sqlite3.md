@@ -1,4 +1,4 @@
-# sqlite3 — Database Connection Object
+# sqlite3 -- Database Connection Object
 
 The `sqlite3` object represents an open SQLite database connection.
 It is created by `sqlite3_open()` or `sqlite3_open_v2()` and closed by `sqlite3_close()`.

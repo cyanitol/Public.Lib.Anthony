@@ -119,15 +119,15 @@ The WAL file consists of:
    - File format version: `3007000`
    - Page size
    - Checkpoint sequence number
-   - Salt values (2 × 32-bit)
-   - Checksums (2 × 32-bit)
+   - Salt values (2 x 32-bit)
+   - Checksums (2 x 32-bit)
 
 2. **Frames** (variable number):
    Each frame contains:
    - Page number (4 bytes)
    - Database size in pages (4 bytes)
-   - Salt values (2 × 4 bytes)
-   - Checksums (2 × 4 bytes)
+   - Salt values (2 x 4 bytes)
+   - Checksums (2 x 4 bytes)
    - Page data (page size bytes)
 
 ### WAL Index (Shared Memory)
@@ -143,26 +143,26 @@ The WAL index is memory-mapped for efficient concurrent access.
 ### Concurrency Model
 
 ```
-┌─────────────┐
-│   Reader 1  │────┐
-└─────────────┘    │
-                   ├──→ ┌─────────────┐      ┌──────────┐
-┌─────────────┐    │    │  WAL Index  │◄────►│ WAL File │
-│   Reader 2  │────┤    │   (.db-shm) │      │ (.db-wal)│
-└─────────────┘    │    └─────────────┘      └──────────┘
-                   │           ▲                    ▲
-┌─────────────┐    │           │                    │
-│   Reader 3  │────┘           │                    │
-└─────────────┘                │                    │
-                               │                    │
-┌─────────────┐                │                    │
-│   Writer    │────────────────┴────────────────────┘
-└─────────────┘
-        │
-        └──→ ┌─────────────┐
-             │ Database    │
-             │   (.db)     │
-             └─────────────┘
++-------------+
+|   Reader 1  |----+
++-------------+    |
+                   +---> +-------------+      +----------+
++-------------+    |    |  WAL Index  |<---->| WAL File |
+|   Reader 2  |----+    |   (.db-shm) |      | (.db-wal)|
++-------------+    |    +-------------+      +----------+
+                   |           ^                    ^
++-------------+    |           |                    |
+|   Reader 3  |----+           |                    |
++-------------+                |                    |
+                               |                    |
++-------------+                |                    |
+|   Writer    |----------------+--------------------+
++-------------+
+        |
+        +---> +-------------+
+             | Database    |
+             |   (.db)     |
+             +-------------+
 ```
 
 - Multiple readers can access simultaneously
@@ -352,7 +352,7 @@ func main() {
 
 ## References
 
-- [SQLite WAL Specification (local)](sqlite/WAL_SPEC.md) — complete official WAL reference
+- [SQLite WAL Specification (local)](sqlite/WAL_SPEC.md) -- complete official WAL reference
 - [SQLite Write-Ahead Logging](https://www.sqlite.org/wal.html)
 - [SQLite WAL File Format](https://www.sqlite.org/walformat.html)
 - [PRAGMA journal_mode](https://www.sqlite.org/pragma.html#pragma_journal_mode)

@@ -10,7 +10,7 @@ This report documents the current state of trigger integration in the Anthony SQ
 
 ## Current State of Triggers Integration
 
-### ✅ Completed Components
+### [x] Completed Components
 
 #### 1. **Parser Support** (internal/parser/)
 - **Status:** COMPLETE
@@ -577,28 +577,28 @@ func (s *oldNewSubstitutor) Visit(node parser.Node) (parser.Node, error) {
 
 ### Summary of Work Done
 
-1. ✅ **Implemented CREATE TRIGGER and DROP TRIGGER DDL compilation** - Complete VDBE bytecode generation
-2. ✅ **Integrated trigger handlers into driver** - Statement dispatcher and compilation methods
-3. ✅ **Implemented comprehensive WHEN clause evaluation** - Full expression evaluator with OLD/NEW support
-4. ✅ **Documented DML integration points** - Clear TODO comments with example code
-5. ✅ **Enhanced trigger execution framework** - OLD/NEW substitution framework
+1. [x] **Implemented CREATE TRIGGER and DROP TRIGGER DDL compilation** - Complete VDBE bytecode generation
+2. [x] **Integrated trigger handlers into driver** - Statement dispatcher and compilation methods
+3. [x] **Implemented comprehensive WHEN clause evaluation** - Full expression evaluator with OLD/NEW support
+4. [x] **Documented DML integration points** - Clear TODO comments with example code
+5. [x] **Enhanced trigger execution framework** - OLD/NEW substitution framework
 
 ### Current Trigger Capabilities
 
 **Working:**
-- ✅ CREATE TRIGGER with all syntax variations
-- ✅ DROP TRIGGER with IF EXISTS
-- ✅ Trigger storage in schema
-- ✅ Trigger metadata management
-- ✅ WHEN clause evaluation
-- ✅ UPDATE OF column filtering
-- ✅ Trigger lookup by table/timing/event
+- [x] CREATE TRIGGER with all syntax variations
+- [x] DROP TRIGGER with IF EXISTS
+- [x] Trigger storage in schema
+- [x] Trigger metadata management
+- [x] WHEN clause evaluation
+- [x] UPDATE OF column filtering
+- [x] Trigger lookup by table/timing/event
 
 **Not Working (Needs Runtime Integration):**
-- ❌ Actual trigger execution during INSERT/UPDATE/DELETE
-- ❌ OLD/NEW pseudo-record substitution in trigger bodies
-- ❌ Per-row trigger execution for multi-row operations
-- ❌ INSTEAD OF triggers for views
+- [fail] Actual trigger execution during INSERT/UPDATE/DELETE
+- [fail] OLD/NEW pseudo-record substitution in trigger bodies
+- [fail] Per-row trigger execution for multi-row operations
+- [fail] INSTEAD OF triggers for views
 
 ### Recommended Next Steps
 

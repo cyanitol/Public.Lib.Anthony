@@ -137,9 +137,9 @@ This new AST node represents EXISTS and NOT EXISTS expressions, complementing th
 **Location**: `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/expr/codegen.go:60-99`
 
 All three subquery expression types are now registered in the `exprDispatch` map:
-- `parser.SubqueryExpr` → `generateSubquery()`
-- `parser.ExistsExpr` → `generateExists()`
-- `parser.InExpr` with Select → `generateInSubquery()`
+- `parser.SubqueryExpr` -> `generateSubquery()`
+- `parser.ExistsExpr` -> `generateExists()`
+- `parser.InExpr` with Select -> `generateInSubquery()`
 
 ---
 

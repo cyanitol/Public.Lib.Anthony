@@ -1,17 +1,17 @@
 # Cyclomatic Complexity Analysis Report
 **Date:** 2026-02-28
-**Target:** ≤10 complexity per function
+**Target:** <=10 complexity per function
 **Tool:** gocyclo v0.6.0
 
 ## Executive Summary
 
-Analyzed all production code in the pure Go SQLite implementation for cyclomatic complexity. Successfully refactored the most complex function from **45 → 13**, achieving a 71% reduction in complexity.
+Analyzed all production code in the pure Go SQLite implementation for cyclomatic complexity. Successfully refactored the most complex function from **45 -> 13**, achieving a 71% reduction in complexity.
 
 ### Key Achievements
-- ✅ Build passes: `go build ./...` successful
-- ✅ Top function reduced from 45 → 13 (71% reduction)
-- ✅ Created reusable helper functions for window function compilation
-- ✅ All refactored code compiles and maintains functionality
+- [x] Build passes: `go build ./...` successful
+- [x] Top function reduced from 45 -> 13 (71% reduction)
+- [x] Created reusable helper functions for window function compilation
+- [x] All refactored code compiles and maintains functionality
 
 ## Functions with Complexity >10 (Production Code)
 
@@ -25,7 +25,7 @@ Analyzed all production code in the pure Go SQLite implementation for cyclomatic
 | 4 | 14 | `(*Parser).parseFunctionOver` | internal/parser/parser.go:2954 | Needs review |
 | 5 | 13 | `validatePathCharacters` | internal/security/path.go:44 | Acceptable |
 | 6 | 13 | `(*Pager).getLocked` | internal/pager/pager.go:369 | Acceptable |
-| 7 | 13 | `(*Stmt).compileSelectWithWindowFunctions` | internal/driver/stmt.go:1526 | ✅ **FIXED (was 45)** |
+| 7 | 13 | `(*Stmt).compileSelectWithWindowFunctions` | internal/driver/stmt.go:1526 | [x] **FIXED (was 45)** |
 | 8 | 13 | `parseIndexInteriorCell` | internal/btree/cell.go:237 | Acceptable |
 | 9 | 13 | `parseIndexLeafCell` | internal/btree/cell.go:164 | Acceptable |
 | 10 | 12 | `checkSymlinks` | internal/security/path.go:159 | Acceptable |
@@ -37,7 +37,7 @@ Analyzed all production code in the pure Go SQLite implementation for cyclomatic
 
 ## Detailed Analysis
 
-### 1. compileSelectWithWindowFunctions ✅ REFACTORED
+### 1. compileSelectWithWindowFunctions [x] REFACTORED
 **Before:** 45 complexity
 **After:** 13 complexity
 **Reduction:** 71%
@@ -194,7 +194,7 @@ Refactor these 4 functions using similar techniques as applied to `compileSelect
 4. **parseFunctionOver** (14) - Extract sub-parsers
 
 **Estimated effort:** 4-6 hours
-**Expected complexity after:** All ≤10
+**Expected complexity after:** All <=10
 
 ### Priority 2 (Complexity 11-13)
 Monitor these functions but no immediate action required. Consider refactoring if:
@@ -213,7 +213,7 @@ Monitor these functions but no immediate action required. Consider refactoring i
 ### Build Verification
 ```bash
 $ nix-shell --run "go build ./..."
-# ✅ Success - all packages compile
+# [x] Success - all packages compile
 ```
 
 ### Complexity Verification
@@ -233,7 +233,7 @@ $ nix-shell --run "~/go/bin/gocyclo -over 10 ."
 
 ### Modified Files
 1. `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/driver/stmt.go`
-   - Refactored `compileSelectWithWindowFunctions()` (45→13)
+   - Refactored `compileSelectWithWindowFunctions()` (45->13)
    - Replaced 200+ lines with helper function calls
 
 2. `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/btree/cell.go`
@@ -252,13 +252,13 @@ $ nix-shell --run "~/go/bin/gocyclo -over 10 ."
 
 Successfully reduced the highest cyclomatic complexity from **45 to 13** (71% reduction) in the `compileSelectWithWindowFunctions` function. The refactoring:
 
-- ✅ Maintains all functionality
-- ✅ Passes build verification
-- ✅ Improves code maintainability
-- ✅ Provides reusable helper functions
-- ✅ Reduces cognitive load for future developers
+- [x] Maintains all functionality
+- [x] Passes build verification
+- [x] Improves code maintainability
+- [x] Provides reusable helper functions
+- [x] Reduces cognitive load for future developers
 
-**Remaining work:** 4 functions with complexity 14-18 should be refactored to meet the ≤10 target. Estimated 4-6 hours of development time using similar extraction techniques.
+**Remaining work:** 4 functions with complexity 14-18 should be refactored to meet the <=10 target. Estimated 4-6 hours of development time using similar extraction techniques.
 
 ---
 

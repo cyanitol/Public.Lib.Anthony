@@ -1,500 +1,360 @@
+- 
 DELETE
-Small. Fast. Reliable.Choose any three.
-Home
-Menu
-About
-Documentation
-Download
-License
-Support
-Purchase
-Search
-About
-Documentation
-Download
-Support
-Purchase
+
+[
+
+](index.html)
+
+Small. Fast. Reliable.
+Choose any three.
+
+- [Home](index.html)
+- [Menu](javascript:void(0))
+- About
+- [Documentation](docs.html)
+- [Download](download.html)
+- License
+- [Support](support.html)
+- [Purchase](prosupport.html)
+- 
+[Search](javascript:void(0))
+
+- About
+- Documentation
+- Download
+- Support
+- Purchase
+
 Search Documentation
 Search Changelog
-function toggle_div(nm) {
-var w = document.getElementById(nm);
-if( w.style.display=="block" ){
-w.style.display = "none";
-}else{
-w.style.display = "block";
-}
-}
-function toggle_search() {
-var w = document.getElementById("searchmenu");
-if( w.style.display=="block" ){
-w.style.display = "none";
-} else {
-w.style.display = "block";
-setTimeout(function(){
-document.getElementById("searchbox").focus()
-}, 30);
-}
-}
-function div_off(nm){document.getElementById(nm).style.display="none";}
-window.onbeforeunload = function(e){div_off("submenu");}
-/* Disable the Search feature if we are not operating from CGI, since */
-/* Search is accomplished using CGI and will not work without it. */
-if( !location.origin || !location.origin.match || !location.origin.match(/http/) ){
-document.getElementById("search_menubutton").style.display = "none";
-}
-/* Used by the Hide/Show button beside syntax diagrams, to toggle the */
-function hideorshow(btn,obj){
-var x = document.getElementById(obj);
-var b = document.getElementById(btn);
-if( x.style.display!='none' ){
-x.style.display = 'none';
-b.innerHTML='show';
-}else{
-x.style.display = '';
-b.innerHTML='hide';
-}
-return false;
-}
-var antiRobot = 0;
-function antiRobotGo(){
-if( antiRobot!=3 ) return;
-antiRobot = 7;
-var j = document.getElementById("mtimelink");
-if(j && j.hasAttribute("data-href")) j.href=j.getAttribute("data-href");
-}
-function antiRobotDefense(){
-document.body.onmousedown=function(){
-antiRobot |= 2;
-antiRobotGo();
-document.body.onmousedown=null;
-}
-document.body.onmousemove=function(){
-antiRobot |= 2;
-antiRobotGo();
-document.body.onmousemove=null;
-}
-setTimeout(function(){
-antiRobot |= 1;
-antiRobotGo();
-}, 100)
-antiRobotGo();
-}
-antiRobotDefense();
+
 DELETE
+
 Table Of Contents
-1. Overview
-2. Restrictions on DELETE Statements Within CREATE TRIGGER
-3. Optional LIMIT and ORDER BY clauses
-4. The Truncate Optimization
-1. Overview
-delete-stmt:
+[1. Overview](#overview)
+[2. Restrictions on DELETE Statements Within CREATE TRIGGER](#restrictions_on_delete_statements_within_create_trigger)
+[3. Optional LIMIT and ORDER BY clauses](#optional_limit_and_order_by_clauses)
+[4. The Truncate Optimization](#the_truncate_optimization)
+
+# 1. Overview
+
+**[delete-stmt:](syntax/delete-stmt.html)**
 hide
-WITH
-RECURSIVE
-common-table-expression
-,
-DELETE
-FROM
-qualified-table-name
-returning-clause
-expr
-WHERE
-common-table-expression:
+
+ 
+ 
+
+**[common-table-expression:](syntax/common-table-expression.html)**
 show
-table-name
-(
-column-name
-)
-AS
-NOT
-MATERIALIZED
-(
-select-stmt
-)
-,
-select-stmt:
+
+ 
+ 
+
+**[select-stmt:](syntax/select-stmt.html)**
 show
-WITH
-RECURSIVE
-common-table-expression
-,
-SELECT
-DISTINCT
-result-column
-,
-ALL
-FROM
-table-or-subquery
-join-clause
-,
-WHERE
-expr
-GROUP
-BY
-expr
-HAVING
-expr
-,
-WINDOW
-window-name
-AS
-window-defn
-,
-VALUES
-(
-expr
-)
-,
-,
-compound-operator
-select-core
-ORDER
-BY
-LIMIT
-expr
-ordering-term
-,
-OFFSET
-expr
-,
-expr
-compound-operator:
+
+ 
+ 
+
+**[compound-operator:](syntax/compound-operator.html)**
 show
-UNION
-UNION
-INTERSECT
-EXCEPT
-ALL
-join-clause:
+
+ 
+ 
+
+**[join-clause:](syntax/join-clause.html)**
 show
-table-or-subquery
-join-operator
-table-or-subquery
-join-constraint
-join-constraint:
+
+ 
+ 
+
+**[join-constraint:](syntax/join-constraint.html)**
 show
-USING
-(
-column-name
-)
-,
-ON
-expr
-join-operator:
+
+ 
+ 
+
+**[join-operator:](syntax/join-operator.html)**
 show
-NATURAL
-LEFT
-OUTER
-JOIN
-,
-RIGHT
-FULL
-INNER
-CROSS
-ordering-term:
+
+ 
+ 
+
+**[ordering-term:](syntax/ordering-term.html)**
 show
-expr
-COLLATE
-collation-name
-DESC
-ASC
-NULLS
-FIRST
-NULLS
-LAST
-result-column:
+
+ 
+ 
+
+**[result-column:](syntax/result-column.html)**
 show
-expr
-AS
-column-alias
-*
-table-name
-.
-*
-table-or-subquery:
+
+ 
+ 
+
+**[table-or-subquery:](syntax/table-or-subquery.html)**
 show
-schema-name
-.
-table-name
-AS
-table-alias
-INDEXED
-BY
-index-name
-NOT
-INDEXED
-table-function-name
-(
-expr
-)
-,
-AS
-table-alias
-(
-select-stmt
-)
-(
-table-or-subquery
-)
-,
-join-clause
-window-defn:
+
+ 
+ 
+
+**[window-defn:](syntax/window-defn.html)**
 show
-(
-base-window-name
-PARTITION
-BY
-expr
-,
-ORDER
-BY
-ordering-term
-,
-frame-spec
-)
-frame-spec:
+
+ 
+ 
+
+**[frame-spec:](syntax/frame-spec.html)**
 show
-GROUPS
-BETWEEN
-UNBOUNDED
-PRECEDING
-AND
-UNBOUNDED
-FOLLOWING
-RANGE
-ROWS
-UNBOUNDED
-PRECEDING
-expr
-PRECEDING
-CURRENT
-ROW
-expr
-PRECEDING
-CURRENT
-ROW
-expr
-FOLLOWING
-expr
-PRECEDING
-CURRENT
-ROW
-expr
-FOLLOWING
-EXCLUDE
-CURRENT
-ROW
-EXCLUDE
-GROUP
-EXCLUDE
-TIES
-EXCLUDE
-NO
-OTHERS
-expr:
+
+ 
+ 
+
+**[expr:](syntax/expr.html)**
 show
-literal-value
-bind-parameter
-schema-name
-.
-table-name
-.
-column-name
-unary-operator
-expr
-expr
-binary-operator
-expr
-function-name
-(
-function-arguments
-)
-filter-clause
-over-clause
-(
-expr
-)
-,
-CAST
-(
-expr
-AS
-type-name
-)
-expr
-COLLATE
-collation-name
-expr
-NOT
-LIKE
-GLOB
-REGEXP
-MATCH
-expr
-expr
-ESCAPE
-expr
-expr
-ISNULL
-NOTNULL
-NOT
-NULL
-expr
-IS
-NOT
-DISTINCT
-FROM
-expr
-expr
-NOT
-BETWEEN
-expr
-AND
-expr
-expr
-NOT
-IN
-(
-select-stmt
-)
-expr
-,
-schema-name
-.
-table-function
-(
-expr
-)
-table-name
-,
-NOT
-EXISTS
-(
-select-stmt
-)
-CASE
-expr
-WHEN
-expr
-THEN
-expr
-ELSE
-expr
-END
-raise-function
-filter-clause:
+
+ 
+ 
+
+**[filter-clause:](syntax/filter-clause.html)**
 show
-FILTER
-(
-WHERE
-expr
-)
-function-arguments:
+
+ 
+ 
+
+**[function-arguments:](syntax/function-arguments.html)**
 show
-DISTINCT
-expr
-,
-*
-ORDER
-BY
-ordering-term
-,
-ordering-term:
+
+ 
+ 
+
+**[ordering-term:](syntax/ordering-term.html)**
 show
-expr
-COLLATE
-collation-name
-DESC
-ASC
-NULLS
-FIRST
-NULLS
-LAST
-literal-value:
+
+ 
+ 
+
+**[literal-value:](syntax/literal-value.html)**
 show
-CURRENT_TIMESTAMP
-numeric-literal
-string-literal
-blob-literal
-NULL
-TRUE
-FALSE
-CURRENT_TIME
-CURRENT_DATE
-over-clause:
+
+ 
+ 
+
+**[over-clause:](syntax/over-clause.html)**
 show
-OVER
-window-name
-(
-base-window-name
-PARTITION
-BY
-expr
-,
-ORDER
-BY
-ordering-term
-,
-frame-spec
-)
-frame-spec:
+
+ 
+ 
+
+**[frame-spec:](syntax/frame-spec.html)**
 show
-GROUPS
-BETWEEN
-UNBOUNDED
-PRECEDING
-AND
-UNBOUNDED
-FOLLOWING
-RANGE
-ROWS
-UNBOUNDED
-PRECEDING
-expr
-PRECEDING
-CURRENT
-ROW
-expr
-PRECEDING
-CURRENT
-ROW
-expr
-FOLLOWING
-expr
-PRECEDING
-CURRENT
-ROW
-expr
-FOLLOWING
-EXCLUDE
-CURRENT
-ROW
-EXCLUDE
-GROUP
-EXCLUDE
-TIES
-EXCLUDE
-NO
-OTHERS
-ordering-term:
+
+ 
+ 
+
+**[ordering-term:](syntax/ordering-term.html)**
 show
-expr
-COLLATE
-collation-name
-DESC
-ASC
-NULLS
-FIRST
-NULLS
-LAST
-raise-function:
+
+ 
+ 
+
+**[raise-function:](syntax/raise-function.html)**
 show
-RAISE
-(
-ROLLBACK
-,
-expr
-)
-IGNORE
-ABORT
-FAIL
+
+ 
+ 
+
+**[select-stmt:](syntax/select-stmt.html)**
+show
+
+ 
+ 
+
+**[compound-operator:](syntax/compound-operator.html)**
+show
+
+ 
+ 
+
+**[join-clause:](syntax/join-clause.html)**
+show
+
+ 
+ 
+
+**[join-constraint:](syntax/join-constraint.html)**
+show
+
+ 
+ 
+
+**[join-operator:](syntax/join-operator.html)**
+show
+
+ 
+ 
+
+**[ordering-term:](syntax/ordering-term.html)**
+show
+
+ 
+ 
+
+**[result-column:](syntax/result-column.html)**
+show
+
+ 
+ 
+
+**[table-or-subquery:](syntax/table-or-subquery.html)**
+show
+
+ 
+ 
+
+**[window-defn:](syntax/window-defn.html)**
+show
+
+ 
+ 
+
+**[frame-spec:](syntax/frame-spec.html)**
+show
+
+ 
+ 
+
+**[type-name:](syntax/type-name.html)**
+show
+
+ 
+ 
+
+**[signed-number:](syntax/signed-number.html)**
+show
+
+ 
+ 
+
+**[qualified-table-name:](syntax/qualified-table-name.html)**
+show
+
+ 
+ 
+
+**[returning-clause:](syntax/returning-clause.html)**
+show
+
+ 
+ 
+
+The DELETE command removes records from the table identified by the
+   [qualified-table-name](syntax/qualified-table-name.html).
+
+If the WHERE clause is not present, all records in the table are deleted.
+   If a WHERE clause is supplied, then only those rows for which the
+   WHERE clause [boolean expression](lang_expr.html#booleanexpr) is true are deleted.
+   Rows for which the expression is false or NULL are retained.
+
+# 2. Restrictions on DELETE Statements Within CREATE TRIGGER
+
+The following restrictions apply to DELETE statements that occur within the
+   body of a [CREATE TRIGGER](lang_createtrigger.html) statement:
+
+  - 
+The table-name specified as part of a 
+    DELETE statement within
+    a trigger body must be unqualified.  In other words, the
+    *schema-name***.** prefix on the table name is not allowed 
+    within triggers. If the table to which the trigger is attached is
+    not in the temp database, then DELETE statements within the trigger
+    body must operate on tables within the same database as it. If the table
+    to which the trigger is attached is in the TEMP database, then the
+    unqualified name of the table being deleted is resolved in the same way as
+    it is for a top-level statement (by searching first the TEMP database, then
+    the main database, then any other databases in the order they were
+    attached).
+    
+  
+
+- 
+The INDEXED BY and NOT INDEXED clauses are not allowed on DELETE
+    statements within triggers.
+
+  
+- 
+The LIMIT and ORDER BY clauses (described below) are unsupported for
+    DELETE statements within triggers.
+
+  
+- 
+The RETURNING clause is not supported for triggers.
+
+# 3. Optional LIMIT and ORDER BY clauses
+
+If SQLite is compiled with the [SQLITE_ENABLE_UPDATE_DELETE_LIMIT](compile.html#enable_update_delete_limit)
+compile-time option, then the syntax of the DELETE statement is
+extended by the addition of optional ORDER BY and LIMIT clauses:
+
+**[delete-stmt-limited:](syntax/delete-stmt-limited.html)**
+
+ 
+
+ 
+
+If a DELETE statement has a LIMIT clause, the maximum number of rows that
+will be deleted is found by evaluating the accompanying expression and casting
+it to an integer value. If the result of evaluating the LIMIT clause
+cannot be losslessly converted to an integer value, it is an error. A 
+negative LIMIT value is interpreted as "no limit". If the DELETE statement 
+also has an OFFSET clause, then it is similarly evaluated and cast to an
+integer value. Again, it is an error if the value cannot be losslessly
+converted to an integer. If there is no OFFSET clause, or the calculated
+integer value is negative, the effective OFFSET value is zero.
+
+If the DELETE statement has an ORDER BY clause, then all rows that would 
+be deleted in the absence of the LIMIT clause are sorted according to the 
+ORDER BY. The first *M* rows, where *M* is the value found by
+evaluating the OFFSET clause expression, are skipped, and the following 
+*N*, where *N* is the value of the LIMIT expression, are deleted.
+If there are less than *N* rows remaining after taking the OFFSET clause
+into account, or if the LIMIT clause evaluated to a negative value, then all
+remaining rows are deleted.
+
+If the DELETE statement has no ORDER BY clause, then all rows that
+would be deleted in the absence of the LIMIT clause are assembled in an
+arbitrary order before applying the LIMIT and OFFSET clauses to determine 
+the subset that are actually deleted.
+
+The ORDER BY clause on a DELETE statement is used only to determine which
+rows fall within the LIMIT. The order in which rows are deleted is arbitrary
+and is not influenced by the ORDER BY clause.
+This means that if there is a [RETURNING clause](lang_returning.html), the rows returned by
+the statement probably will not be in the order specified by the
+ORDER BY clause.
+
+# 4. The Truncate Optimization
+
+When the WHERE clause and RETURNING clause are both  omitted
+from a DELETE statement and the table being deleted has no triggers,
+SQLite uses an optimization to erase the entire table content
+without having to visit each row of the table individually.
+This "truncate" optimization makes the delete run much faster.
+Prior to SQLite [version 3.6.5](releaselog/3_6_5.html) (2008-11-12), the truncate optimization
+also meant that the [sqlite3_changes()](c3ref/changes.html) and
+[sqlite3_total_changes()](c3ref/total_changes.html) interfaces
+and the [count_changes pragma](pragma.html#pragma_count_changes)
+will not actually return the number of deleted rows.  
+That problem has been fixed as of [version 3.6.5](releaselog/3_6_5.html) (2008-11-12).
+
+The truncate optimization can be permanently disabled for all queries
+by recompiling
+SQLite with the [SQLITE_OMIT_TRUNCATE_OPTIMIZATION](compile.html#omit_truncate_optimization) compile-time switch.
+
+The truncate optimization can also be disabled at runtime using
+the [sqlite3_set_authorizer()](c3ref/set_authorizer.html) interface.  If an authorizer callback
+returns [SQLITE_IGNORE](c3ref/c_deny.html) for an [SQLITE_DELETE](c3ref/c_alter_table.html) action code, then
+the DELETE operation will proceed but the truncate optimization will
+be bypassed and rows will be deleted one by one.
+
+*This page was last updated on 2025-05-31 13:08:22Z *

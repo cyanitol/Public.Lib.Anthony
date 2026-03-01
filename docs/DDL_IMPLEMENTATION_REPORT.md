@@ -10,10 +10,10 @@ Successfully implemented and wired up the remaining DDL statements to the driver
 
 #### /home/justin/Programming/Workspace/Public.Lib.Anthony/internal/driver/stmt.go
 - **Added dispatch cases** in `dispatchDDLOrTxn()` function for:
-  - `*parser.CreateIndexStmt` → `compileCreateIndex()`
-  - `*parser.DropIndexStmt` → `compileDropIndex()`
-  - `*parser.AlterTableStmt` → `compileAlterTable()`
-  - `*parser.PragmaStmt` → `compilePragma()`
+  - `*parser.CreateIndexStmt` -> `compileCreateIndex()`
+  - `*parser.DropIndexStmt` -> `compileDropIndex()`
+  - `*parser.AlterTableStmt` -> `compileAlterTable()`
+  - `*parser.PragmaStmt` -> `compilePragma()`
 
 #### /home/justin/Programming/Workspace/Public.Lib.Anthony/internal/driver/conn.go
 - **Added PRAGMA settings fields** to `Conn` struct:
@@ -175,11 +175,11 @@ These TODOs represent the gap between the current in-memory implementation and a
 
 All DDL statements now flow through the complete pipeline:
 
-1. **Parser** → Generates AST nodes
-2. **dispatchDDLOrTxn()** → Routes to appropriate compiler
-3. **Compiler** → Updates schema and generates VDBE
-4. **Schema** → Maintains metadata
-5. **VDBE** → Executes bytecode
+1. **Parser** -> Generates AST nodes
+2. **dispatchDDLOrTxn()** -> Routes to appropriate compiler
+3. **Compiler** -> Updates schema and generates VDBE
+4. **Schema** -> Maintains metadata
+5. **VDBE** -> Executes bytecode
 
 ## Files Summary
 
@@ -195,9 +195,9 @@ All DDL statements now flow through the complete pipeline:
 
 ## Status
 
-✅ All remaining DDL statements are now wired up and functional:
-- ✅ CREATE INDEX / DROP INDEX
-- ✅ ALTER TABLE (all 4 actions)
-- ✅ PRAGMA (table_info, foreign_keys, journal_mode)
+[x] All remaining DDL statements are now wired up and functional:
+- [x] CREATE INDEX / DROP INDEX
+- [x] ALTER TABLE (all 4 actions)
+- [x] PRAGMA (table_info, foreign_keys, journal_mode)
 
 The driver now has complete DDL coverage matching the parser capabilities.

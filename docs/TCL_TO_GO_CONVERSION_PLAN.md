@@ -526,7 +526,7 @@ func equalValues(got, want interface{}) bool {
 
 ## Pattern Translation Examples
 
-### Example 1: do_test → t.Run with assertions
+### Example 1: do_test -> t.Run with assertions
 
 **TCL (select1.test):**
 ```tcl
@@ -564,7 +564,7 @@ func TestSelect1_BasicSelect(t *testing.T) {
 }
 ```
 
-### Example 2: do_execsql_test → Query execution helpers
+### Example 2: do_execsql_test -> Query execution helpers
 
 **TCL (insert.test):**
 ```tcl
@@ -639,7 +639,7 @@ func TestInsert1_BasicInsert(t *testing.T) {
 }
 ```
 
-### Example 3: catchsql → Error checking patterns
+### Example 3: catchsql -> Error checking patterns
 
 **TCL (error.test):**
 ```tcl
@@ -1544,8 +1544,8 @@ func TestEdgeCases(t *testing.T) {
         },
         {
             name:     "Unicode handling",
-            sql:      "SELECT length('你好世界')",
-            expected: [][]interface{}{{int64(4)}},
+            sql:      "SELECT length('hello world')",
+            expected: [][]interface{}{{int64(11)}},
         },
     }
 

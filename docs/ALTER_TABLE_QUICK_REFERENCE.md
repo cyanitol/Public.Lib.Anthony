@@ -99,11 +99,11 @@ go test -v ./internal/parser -run TestAlterTableDropColumn
 - Covers all variants and error conditions
 
 ## Implementation Status
-✅ RENAME TO (rename table)
-✅ RENAME COLUMN (rename column)
-✅ ADD COLUMN (add column with full constraint support)
-✅ DROP COLUMN (drop column)
-✅ Token support (TK_TO)
-✅ Parser integration
-✅ Comprehensive tests
-✅ Error handling
+[x] RENAME TO (rename table)
+[x] RENAME COLUMN (rename column)
+[x] ADD COLUMN (add column with full constraint support)
+[x] DROP COLUMN (drop column)
+[x] Token support (TK_TO)
+[x] Parser integration
+[x] Comprehensive tests
+[x] Error handling

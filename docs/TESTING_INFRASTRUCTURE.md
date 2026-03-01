@@ -205,7 +205,7 @@ The SLT runner executes tests in SQLite's SQL Logic Test format, ensuring compat
 
 SQL Logic Test files (`.test`) contain:
 
-```
+```sql
 # Comments start with #
 
 # Set hash threshold for large result sets
@@ -236,19 +236,19 @@ SELECT * FROM t
 ### Directives
 
 #### hash-threshold
-```
+```sql
 hash-threshold <number>
 ```
 Sets the threshold for using MD5 hash comparison. For queries returning more than this many rows, results are compared by hash instead of line-by-line.
 
 #### statement
-```
+```sql
 statement [ok|error] [label]
 ```
 Executes a SQL statement and expects success (`ok`) or error (`error`).
 
 Examples:
-```
+```sql
 statement ok
 CREATE TABLE t (id INT)
 
@@ -260,7 +260,7 @@ INSERT INTO t VALUES (1)
 ```
 
 #### query
-```
+```sql
 query <types> [sortmode] [label]
 ----
 <expected results>
@@ -279,7 +279,7 @@ Executes a query and compares results.
 - `valuesort` - Sort all values before comparing
 
 Examples:
-```
+```sql
 query IT
 SELECT id, name FROM t
 ----
@@ -393,7 +393,7 @@ runner.ResetStats()
 
 Complete example test file:
 
-```
+```sql
 # Example SLT test file
 
 # Create schema

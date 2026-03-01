@@ -227,15 +227,15 @@ DELETE FROM logs (cost=1100000.00 rows=100000)
 
 | Operation | Formula | Example |
 |-----------|---------|---------|
-| Table Scan | 1.0 × total_rows | 1000000.00 |
+| Table Scan | 1.0 x total_rows | 1000000.00 |
 | Index Unique Lookup | 10.0 | 10.00 |
-| Index Scan (equality) | 0.5 × matching_rows | 5000.00 |
-| Index Scan (range) | 0.7 × matching_rows | 7000.00 |
-| Covering Index | 0.8 × index_cost | 4000.00 |
-| Nested Loop (indexed) | left × (10 + 0.01×right) | 11000.00 |
-| Nested Loop (no index) | left × right | 1000000000.00 |
-| Aggregation | 1.2 × input_rows | 1200000.00 |
-| Sort | 1.5 × input_rows | 1500000.00 |
+| Index Scan (equality) | 0.5 x matching_rows | 5000.00 |
+| Index Scan (range) | 0.7 x matching_rows | 7000.00 |
+| Covering Index | 0.8 x index_cost | 4000.00 |
+| Nested Loop (indexed) | left x (10 + 0.01xright) | 11000.00 |
+| Nested Loop (no index) | left x right | 1000000000.00 |
+| Aggregation | 1.2 x input_rows | 1200000.00 |
+| Sort | 1.5 x input_rows | 1500000.00 |
 
 ## Comparing Query Plans
 
@@ -278,11 +278,11 @@ Output (annotated):
 ```
 id | parent | detail
 0  | -1     | QUERY PLAN
-1  | 0      |   SCAN users (cost=1000000.00 rows=100000)          ← Base scan with WHERE
-2  | 1      |     INNER JOIN (cost=11000000.00 rows=100000)       ← Join orders
-3  | 2      |       SCAN orders (cost=1000000.00 rows=1000000)    ← Right side of join
-4  | 3      |     USE TEMP B-TREE FOR GROUP BY (cost=1200000.00)  ← Group aggregation
-5  | 4      |     USE TEMP B-TREE FOR ORDER BY (cost=1500.00)     ← Sort results
+1  | 0      |   SCAN users (cost=1000000.00 rows=100000)          <- Base scan with WHERE
+2  | 1      |     INNER JOIN (cost=11000000.00 rows=100000)       <- Join orders
+3  | 2      |       SCAN orders (cost=1000000.00 rows=1000000)    <- Right side of join
+4  | 3      |     USE TEMP B-TREE FOR GROUP BY (cost=1200000.00)  <- Group aggregation
+5  | 4      |     USE TEMP B-TREE FOR ORDER BY (cost=1500.00)     <- Sort results
 ```
 
 **Reading order**: Bottom-up execution

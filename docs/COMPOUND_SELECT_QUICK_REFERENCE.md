@@ -78,26 +78,26 @@ OP_NotFound     // Check if key missing (jump if not found)
 ### UNION
 ```
 1. Create unionTab
-2. Compile left → SRT_Union → unionTab
-3. Compile right → SRT_Union → unionTab
+2. Compile left -> SRT_Union -> unionTab
+3. Compile right -> SRT_Union -> unionTab
 4. Output from unionTab
 ```
 
 ### INTERSECT
 ```
 1. Create leftTab, rightTab, resultTab
-2. Compile left → SRT_Union → leftTab
-3. Compile right → SRT_Union → rightTab
+2. Compile left -> SRT_Union -> leftTab
+3. Compile right -> SRT_Union -> rightTab
 4. For each row in rightTab:
-   - If exists in leftTab → insert to resultTab
+   - If exists in leftTab -> insert to resultTab
 5. Output from resultTab
 ```
 
 ### EXCEPT
 ```
 1. Create exceptTab
-2. Compile left → SRT_Union → exceptTab
-3. Compile right → SRT_Except → exceptTab
+2. Compile left -> SRT_Union -> exceptTab
+3. Compile right -> SRT_Except -> exceptTab
    (deletes matching rows)
 4. Output from exceptTab
 ```
@@ -212,7 +212,7 @@ For non-deduplicated results, use ALL variants:
 // Should validate but currently doesn't
 SELECT a FROM t1        -- 1 column
 INTERSECT
-SELECT a, b FROM t2;    -- 2 columns → ERROR
+SELECT a, b FROM t2;    -- 2 columns -> ERROR
 ```
 
 ### Type Compatibility

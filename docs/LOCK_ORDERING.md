@@ -423,49 +423,49 @@ s.mu.Unlock()
 ## Lock Hierarchy Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Driver.mu                            │
-│  (Global driver state, conns map, dbs map)                  │
-│  Type: sync.Mutex                                           │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                         Conn.mu                             │
-│  (Connection state, stmts map, closed, inTx)                │
-│  Type: sync.Mutex                                           │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                         Stmt.mu                             │
-│  (Statement state, closed, vdbe)                            │
-│  Type: sync.Mutex                                           │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        Schema.mu                            │
-│  (Schema tables, indexes, views, triggers)                  │
-│  Type: sync.RWMutex (RLock for reads, Lock for writes)     │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                         Pager.mu                            │
-│  (Pager state, cache, transactions)                         │
-│  Type: sync.RWMutex                                         │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                         Btree.mu                            │
-│  (B-tree page cache, Pages map)                             │
-│  Type: sync.RWMutex (RLock for reads, Lock for writes)     │
-└─────────────────────────────────────────────────────────────┘
++-------------------------------------------------------------+
+|                        Driver.mu                            |
+|  (Global driver state, conns map, dbs map)                  |
+|  Type: sync.Mutex                                           |
++-------------------------------------------------------------+
+                            |
+                            |
++-------------------------------------------------------------+
+|                         Conn.mu                             |
+|  (Connection state, stmts map, closed, inTx)                |
+|  Type: sync.Mutex                                           |
++-------------------------------------------------------------+
+                            |
+                            |
++-------------------------------------------------------------+
+|                         Stmt.mu                             |
+|  (Statement state, closed, vdbe)                            |
+|  Type: sync.Mutex                                           |
++-------------------------------------------------------------+
+                            |
+                            |
++-------------------------------------------------------------+
+|                        Schema.mu                            |
+|  (Schema tables, indexes, views, triggers)                  |
+|  Type: sync.RWMutex (RLock for reads, Lock for writes)     |
++-------------------------------------------------------------+
+                            |
+                            |
++-------------------------------------------------------------+
+|                         Pager.mu                            |
+|  (Pager state, cache, transactions)                         |
+|  Type: sync.RWMutex                                         |
++-------------------------------------------------------------+
+                            |
+                            |
++-------------------------------------------------------------+
+|                         Btree.mu                            |
+|  (B-tree page cache, Pages map)                             |
+|  Type: sync.RWMutex (RLock for reads, Lock for writes)     |
++-------------------------------------------------------------+
 
 Legend:
-  ▼  = Can acquire lower lock while holding higher lock
+  |  = Can acquire lower lock while holding higher lock
      = NEVER acquire higher lock while holding lower lock
 ```
 
@@ -514,7 +514,7 @@ go test -race ./internal/schema
 
 Before committing code that acquires multiple locks:
 
-- [ ] Do I acquire locks in hierarchy order (Driver.mu → Conn.mu → Stmt.mu → Schema.mu → Pager.mu → Btree.mu)?
+- [ ] Do I acquire locks in hierarchy order (Driver.mu -> Conn.mu -> Stmt.mu -> Schema.mu -> Pager.mu -> Btree.mu)?
 - [ ] Do I release all locks before calling external methods?
 - [ ] If closing resources, do I use a two-phase pattern?
 - [ ] Have I tested with `go test -race`?

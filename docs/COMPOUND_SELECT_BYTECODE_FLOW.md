@@ -8,33 +8,33 @@ This document illustrates the VDBE bytecode flow for UNION, INTERSECT, and EXCEP
 Query: SELECT a FROM t1 UNION SELECT a FROM t2
 
 Bytecode Flow:
-┌─────────────────────────────────────┐
-│ OP_OpenEphemeral unionTab, nCol     │  Create temp table
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│ [Compile Left SELECT]               │
-│   Destination: SRT_Union            │
-│   For each row:                     │
-│     OP_MakeRecord → OP_IdxInsert    │  Insert into unionTab
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│ [Compile Right SELECT]              │
-│   Destination: SRT_Union            │
-│   For each row:                     │
-│     OP_MakeRecord → OP_IdxInsert    │  Insert into unionTab (deduplicates)
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│ OP_Rewind unionTab, end             │  Start reading results
-│ loop:                               │
-│   OP_Column (extract each column)   │
-│   OP_ResultRow                      │  Output row
-│   OP_Next unionTab, loop            │  Next row
-│ end:                                │
-│   OP_Close unionTab                 │
-└─────────────────────────────────────┘
++-------------------------------------+
+| OP_OpenEphemeral unionTab, nCol     |  Create temp table
++-------------------------------------+
+              |
++-------------------------------------+
+| [Compile Left SELECT]               |
+|   Destination: SRT_Union            |
+|   For each row:                     |
+|     OP_MakeRecord -> OP_IdxInsert    |  Insert into unionTab
++-------------------------------------+
+              |
++-------------------------------------+
+| [Compile Right SELECT]              |
+|   Destination: SRT_Union            |
+|   For each row:                     |
+|     OP_MakeRecord -> OP_IdxInsert    |  Insert into unionTab (deduplicates)
++-------------------------------------+
+              |
++-------------------------------------+
+| OP_Rewind unionTab, end             |  Start reading results
+| loop:                               |
+|   OP_Column (extract each column)   |
+|   OP_ResultRow                      |  Output row
+|   OP_Next unionTab, loop            |  Next row
+| end:                                |
+|   OP_Close unionTab                 |
++-------------------------------------+
 
 Result: All rows from both queries, deduplicated
 ```
@@ -45,52 +45,52 @@ Result: All rows from both queries, deduplicated
 Query: SELECT a FROM t1 INTERSECT SELECT a FROM t2
 
 Bytecode Flow:
-┌─────────────────────────────────────┐
-│ OP_OpenEphemeral leftTab, nCol      │  Create temp table for left
-│ OP_OpenEphemeral resultTab, nCol    │  Create temp table for results
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│ [Compile Left SELECT]               │
-│   Destination: SRT_Union → leftTab  │
-│   For each row:                     │
-│     OP_MakeRecord → OP_IdxInsert    │  Insert into leftTab
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│ OP_OpenEphemeral rightTab, nCol     │  Create temp table for right
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│ [Compile Right SELECT]              │
-│   Destination: SRT_Union → rightTab │
-│   For each row:                     │
-│     OP_MakeRecord → OP_IdxInsert    │  Insert into rightTab
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│ OP_Rewind rightTab, end             │  Start intersect loop
-│ loop:                               │
-│   OP_Column (extract each column)   │  Get row from rightTab
-│   OP_MakeRecord                     │  Create record
-│   OP_NotFound leftTab, skip, rec    │  Check if exists in leftTab
-│   OP_IdxInsert resultTab, rec       │  If found, add to results
-│ skip:                               │
-│   OP_Next rightTab, loop            │  Next row
-│ end:                                │
-│   OP_Close leftTab                  │
-│   OP_Close rightTab                 │
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│ OP_Rewind resultTab, outputEnd      │  Start reading results
-│ outputLoop:                         │
-│   OP_Column (extract each column)   │
-│   OP_ResultRow                      │  Output row
-│   OP_Next resultTab, outputLoop     │
-│ outputEnd:                          │
-│   OP_Close resultTab                │
-└─────────────────────────────────────┘
++-------------------------------------+
+| OP_OpenEphemeral leftTab, nCol      |  Create temp table for left
+| OP_OpenEphemeral resultTab, nCol    |  Create temp table for results
++-------------------------------------+
+              |
++-------------------------------------+
+| [Compile Left SELECT]               |
+|   Destination: SRT_Union -> leftTab  |
+|   For each row:                     |
+|     OP_MakeRecord -> OP_IdxInsert    |  Insert into leftTab
++-------------------------------------+
+              |
++-------------------------------------+
+| OP_OpenEphemeral rightTab, nCol     |  Create temp table for right
++-------------------------------------+
+              |
++-------------------------------------+
+| [Compile Right SELECT]              |
+|   Destination: SRT_Union -> rightTab |
+|   For each row:                     |
+|     OP_MakeRecord -> OP_IdxInsert    |  Insert into rightTab
++-------------------------------------+
+              |
++-------------------------------------+
+| OP_Rewind rightTab, end             |  Start intersect loop
+| loop:                               |
+|   OP_Column (extract each column)   |  Get row from rightTab
+|   OP_MakeRecord                     |  Create record
+|   OP_NotFound leftTab, skip, rec    |  Check if exists in leftTab
+|   OP_IdxInsert resultTab, rec       |  If found, add to results
+| skip:                               |
+|   OP_Next rightTab, loop            |  Next row
+| end:                                |
+|   OP_Close leftTab                  |
+|   OP_Close rightTab                 |
++-------------------------------------+
+              |
++-------------------------------------+
+| OP_Rewind resultTab, outputEnd      |  Start reading results
+| outputLoop:                         |
+|   OP_Column (extract each column)   |
+|   OP_ResultRow                      |  Output row
+|   OP_Next resultTab, outputLoop     |
+| outputEnd:                          |
+|   OP_Close resultTab                |
++-------------------------------------+
 
 Result: Only rows present in BOTH queries
 ```
@@ -101,33 +101,33 @@ Result: Only rows present in BOTH queries
 Query: SELECT a FROM t1 EXCEPT SELECT a FROM t2
 
 Bytecode Flow:
-┌─────────────────────────────────────┐
-│ OP_OpenEphemeral exceptTab, nCol    │  Create temp table
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│ [Compile Left SELECT]               │
-│   Destination: SRT_Union            │
-│   For each row:                     │
-│     OP_MakeRecord → OP_IdxInsert    │  Insert into exceptTab
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│ [Compile Right SELECT]              │
-│   Destination: SRT_Except           │
-│   For each row:                     │
-│     OP_MakeRecord → OP_IdxDelete    │  Delete from exceptTab if exists
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│ OP_Rewind exceptTab, end            │  Start reading results
-│ loop:                               │
-│   OP_Column (extract each column)   │
-│   OP_ResultRow                      │  Output row
-│   OP_Next exceptTab, loop           │  Next row
-│ end:                                │
-│   OP_Close exceptTab                │
-└─────────────────────────────────────┘
++-------------------------------------+
+| OP_OpenEphemeral exceptTab, nCol    |  Create temp table
++-------------------------------------+
+              |
++-------------------------------------+
+| [Compile Left SELECT]               |
+|   Destination: SRT_Union            |
+|   For each row:                     |
+|     OP_MakeRecord -> OP_IdxInsert    |  Insert into exceptTab
++-------------------------------------+
+              |
++-------------------------------------+
+| [Compile Right SELECT]              |
+|   Destination: SRT_Except           |
+|   For each row:                     |
+|     OP_MakeRecord -> OP_IdxDelete    |  Delete from exceptTab if exists
++-------------------------------------+
+              |
++-------------------------------------+
+| OP_Rewind exceptTab, end            |  Start reading results
+| loop:                               |
+|   OP_Column (extract each column)   |
+|   OP_ResultRow                      |  Output row
+|   OP_Next exceptTab, loop           |  Next row
+| end:                                |
+|   OP_Close exceptTab                |
++-------------------------------------+
 
 Result: Rows from left query NOT in right query
 ```
@@ -138,13 +138,13 @@ Result: Rows from left query NOT in right query
 
 ```
 UNION:
-  unionTab: [Left rows] ∪ [Right rows]
+  unionTab: [Left rows] U [Right rows]
   Output from: unionTab
 
 INTERSECT:
   leftTab:   [Left rows]
   rightTab:  [Right rows]
-  resultTab: [Left rows] ∩ [Right rows]
+  resultTab: [Left rows] n [Right rows]
   Output from: resultTab
 
 EXCEPT:
@@ -155,12 +155,12 @@ EXCEPT:
 ### Set Theory Visualization
 
 ```
-UNION (A ∪ B):
+UNION (A U B):
   A: {1, 2, 3, 4}
   B: {3, 4, 5, 6}
   Result: {1, 2, 3, 4, 5, 6}
 
-INTERSECT (A ∩ B):
+INTERSECT (A n B):
   A: {1, 2, 3, 4}
   B: {3, 4, 5, 6}
   Result: {3, 4}
@@ -204,7 +204,7 @@ Row {1, 'Alice'}:
 Row {1, 'Alice'} (duplicate):
   1. OP_MakeRecord creates record: [1, 'Alice']
   2. OP_IdxInsert checks if key exists
-  3. Key exists → No insertion (silent ignore)
+  3. Key exists -> No insertion (silent ignore)
 
 Result: Automatic deduplication!
 ```
@@ -265,7 +265,7 @@ Already optimal! Uses only 2 tables with in-place deletion.
 ## Example: Complex Nested Operation
 
 ```sql
--- Find: (A ∩ B) - C
+-- Find: (A n B) - C
 SELECT id FROM table_a
 INTERSECT
 SELECT id FROM table_b
@@ -284,11 +284,11 @@ Bytecode structure:
    - Right: Compile "SELECT id FROM table_c"
 
 Flow:
-  ┌─ table_a ─┐
-  │           │
-  └─ INTERSECT ─┬─ table_b ─┐
-                │           │
-                └─ EXCEPT ──┴─ table_c
+  +- table_a -+
+  |           |
+  +- INTERSECT -+- table_b -+
+                |           |
+                +- EXCEPT --+- table_c
 
 Wait, this parses as: A INTERSECT (B EXCEPT C)
 For (A INTERSECT B) EXCEPT C, need parentheses in SQL.

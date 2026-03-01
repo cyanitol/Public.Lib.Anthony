@@ -81,48 +81,48 @@ Store version-specific sources in separate directories.
 
 ```
 contrib/
-└── sqlite/
-    ├── README.md                    # Integration documentation
-    ├── VERSION.txt                  # Current version tracking
-    ├── .gitignore                   # Ignore build artifacts
-    │
-    ├── official-source/             # Primary reference (fossil or git)
-    │   ├── src/                     # Core C source files
-    │   ├── test/                    # TCL test suite
-    │   ├── doc/                     # Documentation
-    │   ├── ext/                     # Extensions
-    │   ├── tool/                    # Build tools
-    │   └── manifest.uuid            # Fossil version identifier
-    │
-    ├── versions/                    # Version-specific snapshots
-    │   ├── 3.47.0/
-    │   │   ├── src/
-    │   │   └── test/
-    │   ├── 3.43.2/
-    │   │   ├── src/
-    │   │   └── test/
-    │   └── 3.35.5/
-    │       ├── src/
-    │       └── test/
-    │
-    ├── extracted-tests/             # TCL tests adapted for Anthony
-    │   ├── select/
-    │   ├── join/
-    │   ├── cte/
-    │   ├── trigger/
-    │   └── README.md                # Test extraction guidelines
-    │
-    ├── reference-builds/            # Optional: compiled SQLite for testing
-    │   ├── build-3.47.0/
-    │   │   └── sqlite3              # Compiled binary
-    │   └── build-3.43.2/
-    │       └── sqlite3
-    │
-    └── scripts/                     # Integration utilities
-        ├── update-source.sh         # Update to latest SQLite
-        ├── extract-tests.sh         # Extract and convert tests
-        ├── build-reference.sh       # Build reference binaries
-        └── compare-output.sh        # Compare Anthony vs SQLite
++-- sqlite/
+    +-- README.md                    # Integration documentation
+    +-- VERSION.txt                  # Current version tracking
+    +-- .gitignore                   # Ignore build artifacts
+    |
+    +-- official-source/             # Primary reference (fossil or git)
+    |   +-- src/                     # Core C source files
+    |   +-- test/                    # TCL test suite
+    |   +-- doc/                     # Documentation
+    |   +-- ext/                     # Extensions
+    |   +-- tool/                    # Build tools
+    |   +-- manifest.uuid            # Fossil version identifier
+    |
+    +-- versions/                    # Version-specific snapshots
+    |   +-- 3.47.0/
+    |   |   +-- src/
+    |   |   +-- test/
+    |   +-- 3.43.2/
+    |   |   +-- src/
+    |   |   +-- test/
+    |   +-- 3.35.5/
+    |       +-- src/
+    |       +-- test/
+    |
+    +-- extracted-tests/             # TCL tests adapted for Anthony
+    |   +-- select/
+    |   +-- join/
+    |   +-- cte/
+    |   +-- trigger/
+    |   +-- README.md                # Test extraction guidelines
+    |
+    +-- reference-builds/            # Optional: compiled SQLite for testing
+    |   +-- build-3.47.0/
+    |   |   +-- sqlite3              # Compiled binary
+    |   +-- build-3.43.2/
+    |       +-- sqlite3
+    |
+    +-- scripts/                     # Integration utilities
+        +-- update-source.sh         # Update to latest SQLite
+        +-- extract-tests.sh         # Extract and convert tests
+        +-- build-reference.sh       # Build reference binaries
+        +-- compare-output.sh        # Compare Anthony vs SQLite
 ```
 
 ### 2.2 .gitignore Configuration
@@ -581,10 +581,10 @@ Every 3 months:
    - Review release notes for 3 most recent versions
 
 2. **Evaluate Update Necessity**
-   - Security fixes → Immediate review
-   - File format changes → High priority
-   - New features → Medium priority
-   - Bug fixes → Low priority
+   - Security fixes -> Immediate review
+   - File format changes -> High priority
+   - New features -> Medium priority
+   - Bug fixes -> Low priority
 
 3. **Perform Update**
    - Run update script

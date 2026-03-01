@@ -30,7 +30,7 @@
 
 ## What Was Implemented
 
-### ✅ IN (SELECT ...)
+### [x] IN (SELECT ...)
 
 ```sql
 SELECT * FROM users WHERE id IN (SELECT user_id FROM orders)
@@ -43,7 +43,7 @@ SELECT * FROM products WHERE category NOT IN (SELECT name FROM disabled_categori
 - Returns true/false based on match
 - Supports NOT IN variant
 
-### ✅ Scalar Subqueries
+### [x] Scalar Subqueries
 
 ```sql
 SELECT name, (SELECT MAX(salary) FROM employees) FROM users
@@ -56,7 +56,7 @@ SELECT * FROM orders WHERE amount > (SELECT AVG(amount) FROM orders)
 - Reads one value from subquery result
 - Enforces single-row constraint (error if multiple rows)
 
-### ✅ EXISTS (SELECT ...)
+### [x] EXISTS (SELECT ...)
 
 ```sql
 SELECT * FROM users WHERE EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)
@@ -75,17 +75,17 @@ SELECT * FROM products WHERE NOT EXISTS (SELECT 1 FROM inventory WHERE inventory
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| IN (SELECT ...) | ✅ Framework Complete | SELECT compilation needed |
-| NOT IN (SELECT ...) | ✅ Framework Complete | SELECT compilation needed |
-| Scalar Subquery | ✅ Framework Complete | SELECT compilation needed |
-| EXISTS (SELECT ...) | ✅ Framework Complete | SELECT compilation needed |
-| NOT EXISTS (SELECT ...) | ✅ Framework Complete | SELECT compilation needed |
-| VDBE Bytecode Generation | ✅ Complete | Proper opcodes and patterns |
-| Error Handling | ✅ Complete | NULL checks, multiple row errors |
-| Test Suite | ✅ Complete | 8 comprehensive tests |
-| AST Support | ✅ Complete | ExistsExpr added |
-| Expression Dispatch | ✅ Complete | All types registered |
-| Documentation | ✅ Complete | Implementation guide created |
+| IN (SELECT ...) | [x] Framework Complete | SELECT compilation needed |
+| NOT IN (SELECT ...) | [x] Framework Complete | SELECT compilation needed |
+| Scalar Subquery | [x] Framework Complete | SELECT compilation needed |
+| EXISTS (SELECT ...) | [x] Framework Complete | SELECT compilation needed |
+| NOT EXISTS (SELECT ...) | [x] Framework Complete | SELECT compilation needed |
+| VDBE Bytecode Generation | [x] Complete | Proper opcodes and patterns |
+| Error Handling | [x] Complete | NULL checks, multiple row errors |
+| Test Suite | [x] Complete | 8 comprehensive tests |
+| AST Support | [x] Complete | ExistsExpr added |
+| Expression Dispatch | [x] Complete | All types registered |
+| Documentation | [x] Complete | Implementation guide created |
 
 ---
 
@@ -233,3 +233,11 @@ Expected: All tests pass (or fail on TODO placeholders for SELECT compilation)
 - **Tests**: `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/expr/subquery_test.go`
 - **Documentation**: `/home/justin/Programming/Workspace/Public.Lib.Anthony/SUBQUERY_IMPLEMENTATION.md`
 - **AST Definitions**: `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/parser/ast.go`
+
+---
+
+## See Also
+
+- [SUBQUERY_ARCHITECTURE.md](SUBQUERY_ARCHITECTURE.md) - Detailed architecture and design patterns
+- [SUBQUERY_IMPLEMENTATION.md](SUBQUERY_IMPLEMENTATION.md) - Complete implementation guide and examples
+- [CTE_USAGE_GUIDE.md](CTE_USAGE_GUIDE.md) - Common Table Expressions usage and patterns

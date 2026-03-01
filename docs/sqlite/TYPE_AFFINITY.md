@@ -19,10 +19,10 @@ column has an affinity that influences (but does not enforce) the storage class 
 ## Affinity Determination
 
 The affinity of a column is determined by its declared type:
-- Contains "INT" → INTEGER affinity
-- Contains "CHAR", "CLOB", or "TEXT" → TEXT affinity
-- Contains "BLOB" or empty → BLOB affinity (none)
-- Contains "REAL", "FLOA", or "DOUB" → REAL affinity
-- Otherwise → NUMERIC affinity
+- Contains "INT" -> INTEGER affinity
+- Contains "CHAR", "CLOB", or "TEXT" -> TEXT affinity
+- Contains "BLOB" or empty -> BLOB affinity (none)
+- Contains "REAL", "FLOA", or "DOUB" -> REAL affinity
+- Otherwise -> NUMERIC affinity
 
 Source: https://www.sqlite.org/datatype3.html

@@ -86,21 +86,21 @@ This document describes the architecture of the SQLite library.
 The information here is useful to those who want to understand or
 modify the inner workings of SQLite.
 Interface
-SQL Command
+SQL Command
 Processor
-Virtual Machine
+Virtual Machine
 B-Tree
 Pager
-OS Interface
+OS Interface
 Tokenizer
 Parser
 Code
 Generator
 Utilities
-Test Code
+Test Code
 Core
 Backend
-SQL Compiler
+SQL Compiler
 Accessories
 A nearby diagram shows the main components of SQLite
 and how they interoperate.  The text below

@@ -1,500 +1,223 @@
+- 
 ATTACH DATABASE
-Small. Fast. Reliable.Choose any three.
-Home
-Menu
-About
-Documentation
-Download
-License
-Support
-Purchase
-Search
-About
-Documentation
-Download
-Support
-Purchase
+
+[
+
+](index.html)
+
+Small. Fast. Reliable.
+Choose any three.
+
+- [Home](index.html)
+- [Menu](javascript:void(0))
+- About
+- [Documentation](docs.html)
+- [Download](download.html)
+- License
+- [Support](support.html)
+- [Purchase](prosupport.html)
+- 
+[Search](javascript:void(0))
+
+- About
+- Documentation
+- Download
+- Support
+- Purchase
+
 Search Documentation
 Search Changelog
-function toggle_div(nm) {
-var w = document.getElementById(nm);
-if( w.style.display=="block" ){
-w.style.display = "none";
-}else{
-w.style.display = "block";
-}
-}
-function toggle_search() {
-var w = document.getElementById("searchmenu");
-if( w.style.display=="block" ){
-w.style.display = "none";
-} else {
-w.style.display = "block";
-setTimeout(function(){
-document.getElementById("searchbox").focus()
-}, 30);
-}
-}
-function div_off(nm){document.getElementById(nm).style.display="none";}
-window.onbeforeunload = function(e){div_off("submenu");}
-/* Disable the Search feature if we are not operating from CGI, since */
-/* Search is accomplished using CGI and will not work without it. */
-if( !location.origin || !location.origin.match || !location.origin.match(/http/) ){
-document.getElementById("search_menubutton").style.display = "none";
-}
-/* Used by the Hide/Show button beside syntax diagrams, to toggle the */
-function hideorshow(btn,obj){
-var x = document.getElementById(obj);
-var b = document.getElementById(btn);
-if( x.style.display!='none' ){
-x.style.display = 'none';
-b.innerHTML='show';
-}else{
-x.style.display = '';
-b.innerHTML='hide';
-}
-return false;
-}
-var antiRobot = 0;
-function antiRobotGo(){
-if( antiRobot!=3 ) return;
-antiRobot = 7;
-var j = document.getElementById("mtimelink");
-if(j && j.hasAttribute("data-href")) j.href=j.getAttribute("data-href");
-}
-function antiRobotDefense(){
-document.body.onmousedown=function(){
-antiRobot |= 2;
-antiRobotGo();
-document.body.onmousedown=null;
-}
-document.body.onmousemove=function(){
-antiRobot |= 2;
-antiRobotGo();
-document.body.onmousemove=null;
-}
-setTimeout(function(){
-antiRobot |= 1;
-antiRobotGo();
-}, 100)
-antiRobotGo();
-}
-antiRobotDefense();
+
 ATTACH DATABASE
-1. Overview
-attach-stmt:
+
+# 1. Overview
+
+**[attach-stmt:](syntax/attach-stmt.html)**
 hide
-ATTACH
-DATABASE
-expr
-AS
-schema-name
-expr:
+
+ 
+ 
+
+**[expr:](syntax/expr.html)**
 show
-literal-value
-bind-parameter
-schema-name
-.
-table-name
-.
-column-name
-unary-operator
-expr
-expr
-binary-operator
-expr
-function-name
-(
-function-arguments
-)
-filter-clause
-over-clause
-(
-expr
-)
-,
-CAST
-(
-expr
-AS
-type-name
-)
-expr
-COLLATE
-collation-name
-expr
-NOT
-LIKE
-GLOB
-REGEXP
-MATCH
-expr
-expr
-ESCAPE
-expr
-expr
-ISNULL
-NOTNULL
-NOT
-NULL
-expr
-IS
-NOT
-DISTINCT
-FROM
-expr
-expr
-NOT
-BETWEEN
-expr
-AND
-expr
-expr
-NOT
-IN
-(
-select-stmt
-)
-expr
-,
-schema-name
-.
-table-function
-(
-expr
-)
-table-name
-,
-NOT
-EXISTS
-(
-select-stmt
-)
-CASE
-expr
-WHEN
-expr
-THEN
-expr
-ELSE
-expr
-END
-raise-function
-filter-clause:
+
+ 
+ 
+
+**[filter-clause:](syntax/filter-clause.html)**
 show
-FILTER
-(
-WHERE
-expr
-)
-function-arguments:
+
+ 
+ 
+
+**[function-arguments:](syntax/function-arguments.html)**
 show
-DISTINCT
-expr
-,
-*
-ORDER
-BY
-ordering-term
-,
-ordering-term:
+
+ 
+ 
+
+**[ordering-term:](syntax/ordering-term.html)**
 show
-expr
-COLLATE
-collation-name
-DESC
-ASC
-NULLS
-FIRST
-NULLS
-LAST
-literal-value:
+
+ 
+ 
+
+**[literal-value:](syntax/literal-value.html)**
 show
-CURRENT_TIMESTAMP
-numeric-literal
-string-literal
-blob-literal
-NULL
-TRUE
-FALSE
-CURRENT_TIME
-CURRENT_DATE
-over-clause:
+
+ 
+ 
+
+**[over-clause:](syntax/over-clause.html)**
 show
-OVER
-window-name
-(
-base-window-name
-PARTITION
-BY
-expr
-,
-ORDER
-BY
-ordering-term
-,
-frame-spec
-)
-frame-spec:
+
+ 
+ 
+
+**[frame-spec:](syntax/frame-spec.html)**
 show
-GROUPS
-BETWEEN
-UNBOUNDED
-PRECEDING
-AND
-UNBOUNDED
-FOLLOWING
-RANGE
-ROWS
-UNBOUNDED
-PRECEDING
-expr
-PRECEDING
-CURRENT
-ROW
-expr
-PRECEDING
-CURRENT
-ROW
-expr
-FOLLOWING
-expr
-PRECEDING
-CURRENT
-ROW
-expr
-FOLLOWING
-EXCLUDE
-CURRENT
-ROW
-EXCLUDE
-GROUP
-EXCLUDE
-TIES
-EXCLUDE
-NO
-OTHERS
-ordering-term:
+
+ 
+ 
+
+**[ordering-term:](syntax/ordering-term.html)**
 show
-expr
-COLLATE
-collation-name
-DESC
-ASC
-NULLS
-FIRST
-NULLS
-LAST
-raise-function:
+
+ 
+ 
+
+**[raise-function:](syntax/raise-function.html)**
 show
-RAISE
-(
-ROLLBACK
-,
-expr
-)
-IGNORE
-ABORT
-FAIL
-select-stmt:
+
+ 
+ 
+
+**[select-stmt:](syntax/select-stmt.html)**
 show
-WITH
-RECURSIVE
-common-table-expression
-,
-SELECT
-DISTINCT
-result-column
-,
-ALL
-FROM
-table-or-subquery
-join-clause
-,
-WHERE
-expr
-GROUP
-BY
-expr
-HAVING
-expr
-,
-WINDOW
-window-name
-AS
-window-defn
-,
-VALUES
-(
-expr
-)
-,
-,
-compound-operator
-select-core
-ORDER
-BY
-LIMIT
-expr
-ordering-term
-,
-OFFSET
-expr
-,
-expr
-common-table-expression:
+
+ 
+ 
+
+**[common-table-expression:](syntax/common-table-expression.html)**
 show
-table-name
-(
-column-name
-)
-AS
-NOT
-MATERIALIZED
-(
-select-stmt
-)
-,
-compound-operator:
+
+ 
+ 
+
+**[compound-operator:](syntax/compound-operator.html)**
 show
-UNION
-UNION
-INTERSECT
-EXCEPT
-ALL
-join-clause:
+
+ 
+ 
+
+**[join-clause:](syntax/join-clause.html)**
 show
-table-or-subquery
-join-operator
-table-or-subquery
-join-constraint
-join-constraint:
+
+ 
+ 
+
+**[join-constraint:](syntax/join-constraint.html)**
 show
-USING
-(
-column-name
-)
-,
-ON
-expr
-join-operator:
+
+ 
+ 
+
+**[join-operator:](syntax/join-operator.html)**
 show
-NATURAL
-LEFT
-OUTER
-JOIN
-,
-RIGHT
-FULL
-INNER
-CROSS
-ordering-term:
+
+ 
+ 
+
+**[ordering-term:](syntax/ordering-term.html)**
 show
-expr
-COLLATE
-collation-name
-DESC
-ASC
-NULLS
-FIRST
-NULLS
-LAST
-result-column:
+
+ 
+ 
+
+**[result-column:](syntax/result-column.html)**
 show
-expr
-AS
-column-alias
-*
-table-name
-.
-*
-table-or-subquery:
+
+ 
+ 
+
+**[table-or-subquery:](syntax/table-or-subquery.html)**
 show
-schema-name
-.
-table-name
-AS
-table-alias
-INDEXED
-BY
-index-name
-NOT
-INDEXED
-table-function-name
-(
-expr
-)
-,
-AS
-table-alias
-(
-select-stmt
-)
-(
-table-or-subquery
-)
-,
-join-clause
-window-defn:
+
+ 
+ 
+
+**[window-defn:](syntax/window-defn.html)**
 show
-(
-base-window-name
-PARTITION
-BY
-expr
-,
-ORDER
-BY
-ordering-term
-,
-frame-spec
-)
-frame-spec:
+
+ 
+ 
+
+**[frame-spec:](syntax/frame-spec.html)**
 show
-GROUPS
-BETWEEN
-UNBOUNDED
-PRECEDING
-AND
-UNBOUNDED
-FOLLOWING
-RANGE
-ROWS
-UNBOUNDED
-PRECEDING
-expr
-PRECEDING
-CURRENT
-ROW
-expr
-PRECEDING
-CURRENT
-ROW
-expr
-FOLLOWING
-expr
-PRECEDING
-CURRENT
-ROW
-expr
-FOLLOWING
-EXCLUDE
-CURRENT
-ROW
-EXCLUDE
-GROUP
-EXCLUDE
-TIES
-EXCLUDE
-NO
-OTHERS
-type-name:
+
+ 
+ 
+
+**[type-name:](syntax/type-name.html)**
 show
-name
-(
-signed-number
-,
-signed-number
-)
-(
-signed-number
+
+ 
+ 
+
+**[signed-number:](syntax/signed-number.html)**
+show
+
+ 
+ 
+
+ The ATTACH DATABASE statement adds another database 
+file to the current [database connection](c3ref/sqlite3.html). 
+Database files that were previously attached can be removed using
+the [DETACH DATABASE](lang_detach.html) command.
+
+# 2. Details
+
+The filename for the database to be attached is the value of
+the expression that occurs before the AS keyword.
+The filename of the database follows the same semantics as the
+filename argument to [sqlite3_open()](c3ref/open.html) and [sqlite3_open_v2()](c3ref/open.html); the
+special name "[:memory:](inmemorydb.html)" results in an [in-memory database](inmemorydb.html) and an
+empty string results in a new temporary database.
+The filename argument can be a [URI filename](uri.html) if URI filename processing
+is enabled on the database connection.  The default behavior is for
+URI filenames to be disabled, however that might change in a future release
+of SQLite, so application developers are advised to plan accordingly.
+
+The name that occurs after the AS keyword is the name of the database
+used internally by SQLite.
+The schema-names 'main' and 
+'temp' refer to the main database and the database used for 
+temporary tables.  The main and temp databases cannot be attached or
+detached.
+
+Attached databases use the same VFS as the main database unless
+another VFS is specified using the `vfs=NAME` URI flag.
+
+ Tables in an attached database can be referred to using the syntax 
+*schema-name.table-name*.  If the name of the table is unique
+across all attached databases and the main and temp databases, then the
+*schema-name* prefix is not required.  If two or more tables in
+different databases have the same name and the 
+*schema-name* prefix is not used on a table reference, then the
+table chosen is the one in the database that was least recently attached.
+
+Transactions involving multiple attached databases are atomic,
+assuming that the main database is not "[:memory:](inmemorydb.html)" and the 
+[journal_mode](pragma.html#pragma_journal_mode) is not [WAL](wal.html).  If the main
+database is ":memory:" or if the journal_mode is WAL, then 
+transactions continue to be atomic within each individual
+database file. But if the host computer crashes in the middle
+of a [COMMIT](lang_transaction.html) where two or more database files are updated,
+some of those files might get the changes where others
+might not.
+
+ There is a limit, set using [sqlite3_limit()](c3ref/limit.html) and 
+[SQLITE_LIMIT_ATTACHED](c3ref/c_limit_attached.html#sqlitelimitattached), to the number of databases that can be
+simultaneously attached to a single database connection.
+
+*This page was last updated on 2025-02-06 23:19:09Z *
