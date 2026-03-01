@@ -272,6 +272,26 @@ Comprehensive documentation on SQLite fundamentals as implemented in Anthony:
 - [Go testing package](https://pkg.go.dev/testing)
 - [Go fuzzing](https://go.dev/doc/fuzz/)
 
+## SQLite Reference Documentation
+
+Official SQLite 3.51.2 documentation, converted to Markdown for offline reference.
+
+See [docs/sqlite/README.md](sqlite/README.md) for the full index.
+
+### Key References
+
+- [SQL Language Overview](sqlite/SQL_LANGUAGE_OVERVIEW.md)
+- [SQL Syntax Diagrams](sqlite/syntax/)
+- [Architecture](sqlite/ARCHITECTURE.md)
+- [Datatypes](sqlite/DATATYPES.md)
+- [Full-Text Search (FTS5)](sqlite/FTS5.md)
+- [JSON Functions](sqlite/JSON1.md)
+- [WAL Mode](sqlite/WAL_SPEC.md)
+- [PRAGMA Reference](sqlite/PRAGMA_REFERENCE.md)
+- [Virtual Tables](sqlite/VIRTUAL_TABLES_SPEC.md)
+- [C API Reference](sqlite/c-api/)
+- [Session Extension](sqlite/session/)
+
 ## License
 
 This project is in the public domain (SQLite License).

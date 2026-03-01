@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
 // Package testing provides test utilities for the Anthony SQLite driver.
 package testing
 

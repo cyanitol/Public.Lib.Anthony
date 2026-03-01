@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
 // Package engine provides trigger execution logic for the Anthony SQLite clone.
 package engine
 

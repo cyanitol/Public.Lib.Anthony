@@ -1,748 +1,456 @@
-package btree
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+package functions
 
 import (
-	"bytes"
-	"encoding/binary"
-	"testing"
+	"fmt"
+	"math"
+	"strings"
 )
 
-// TestBalance_HandleOverfullPage tests the handleOverfullPage function (33.3% coverage)
-func TestBalance_HandleOverfullPage(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512) // Small pages to make overfull easier
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
+// RegisterAggregateFunctions registers all aggregate functions.
+func RegisterAggregateFunctions(r *Registry) {
+	r.Register(&CountFunc{})
+	r.Register(&CountStarFunc{})
+	r.Register(&SumFunc{})
+	r.Register(&TotalFunc{})
+	r.Register(&AvgFunc{})
+	r.Register(&MinFunc{})
+	r.Register(&MaxFunc{})
+	r.Register(&GroupConcatFunc{})
+}
+
+// Resettable defines the interface for types that can be reset.
+type Resettable interface {
+	Reset()
+}
+
+// finalizeAndReset is a helper that calls Reset on the resettable type and returns the result.
+func finalizeAndReset(r Resettable, result Value) (Value, error) {
+	r.Reset()
+	return result, nil
+}
+
+// CountFunc implements count(X)
+type CountFunc struct {
+	count int64
+}
+
+func (f *CountFunc) Name() string { return "count" }
+func (f *CountFunc) NumArgs() int { return 1 }
+func (f *CountFunc) Call([]Value) (Value, error) {
+	return nil, fmt.Errorf("count() is an aggregate function")
+}
+
+func (f *CountFunc) Step(args []Value) error {
+	// Count non-NULL values
+	if len(args) > 0 && !args[0].IsNull() {
+		f.count++
 	}
+	return nil
+}
 
-	cursor := NewCursor(bt, rootPage)
+func (f *CountFunc) Final() (Value, error) {
+	return finalizeAndReset(f, NewIntValue(f.count))
+}
 
-	// Insert enough data to fill the page
-	for i := int64(1); i <= 50; i++ {
-		err := cursor.Insert(i, make([]byte, 30)) // Large payloads
-		if err != nil {
-			// This is expected when page becomes overfull
-			t.Logf("Insert stopped at row %d (expected): %v", i, err)
-			break
-		}
+func (f *CountFunc) Reset() {
+	f.count = 0
+}
+
+// CountStarFunc implements count(*)
+type CountStarFunc struct {
+	count int64
+}
+
+func (f *CountStarFunc) Name() string { return "count(*)" }
+func (f *CountStarFunc) NumArgs() int { return 0 }
+func (f *CountStarFunc) Call([]Value) (Value, error) {
+	return nil, fmt.Errorf("count(*) is an aggregate function")
+}
+
+func (f *CountStarFunc) Step(args []Value) error {
+	// Count all rows
+	f.count++
+	return nil
+}
+
+func (f *CountStarFunc) Final() (Value, error) {
+	return finalizeAndReset(f, NewIntValue(f.count))
+}
+
+func (f *CountStarFunc) Reset() {
+	f.count = 0
+}
+
+// SumFunc implements sum(X)
+type SumFunc struct {
+	hasValue bool
+	intSum   int64
+	floatSum float64
+	isFloat  bool
+}
+
+func (f *SumFunc) Name() string { return "sum" }
+func (f *SumFunc) NumArgs() int { return 1 }
+func (f *SumFunc) Call([]Value) (Value, error) {
+	return nil, fmt.Errorf("sum() is an aggregate function")
+}
+
+func (f *SumFunc) Step(args []Value) error {
+	if args[0].IsNull() {
+		return nil
 	}
+	f.hasValue = true
+	f.addValue(args[0])
+	return nil
+}
 
-	// Try to get balance info to check overfull state
-	info, err := GetBalanceInfo(bt, rootPage)
-	if err != nil {
-		t.Logf("GetBalanceInfo() error = %v", err)
+func (f *SumFunc) addValue(v Value) {
+	switch v.Type() {
+	case TypeInteger:
+		f.addInteger(v.AsInt64())
+	case TypeFloat:
+		f.addFloat(v.AsFloat64())
+	default:
+		f.addFloat(v.AsFloat64())
+	}
+}
+
+func (f *SumFunc) addInteger(val int64) {
+	if f.isFloat {
+		f.floatSum += float64(val)
+		return
+	}
+	newSum := f.intSum + val
+	if (val > 0 && newSum < f.intSum) || (val < 0 && newSum > f.intSum) {
+		f.floatSum = float64(f.intSum) + float64(val)
+		f.isFloat = true
 	} else {
-		t.Logf("Balance info: %s", info.String())
-		if info.IsOverfull {
-			t.Log("Page is overfull as expected")
-		}
+		f.intSum = newSum
 	}
 }
 
-// TestBalance_HandleUnderfullPage tests the handleUnderfullPage function (25.0% coverage)
-func TestBalance_HandleUnderfullPage(t *testing.T) {
-	t.Parallel()
-	btree := NewBtree(4096)
-	rootPage, err := btree.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
+func (f *SumFunc) addFloat(val float64) {
+	if !f.isFloat {
+		f.floatSum = float64(f.intSum)
+		f.isFloat = true
 	}
-
-	cursor := NewCursor(btree, rootPage)
-
-	// Insert many rows to create multiple pages
-	for i := int64(1); i <= 200; i++ {
-		err := cursor.Insert(i, make([]byte, 50))
-		if err != nil {
-			break
-		}
-	}
-
-	// Delete many rows to make a page underfull
-	for i := int64(10); i <= 150; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
-	}
-
-	// Check if any pages are underfull
-	cursor.SeekRowid(5)
-	if cursor.IsValid() {
-		pageData, _ := btree.GetPage(cursor.CurrentPage)
-		if pageData != nil {
-			page, err := NewBtreePage(cursor.CurrentPage, pageData, btree.UsableSize)
-			if err == nil && page.IsUnderfull() {
-				t.Log("Page is underfull as expected")
-			}
-		}
-	}
+	f.floatSum += val
 }
 
-// TestPage_AllocateSpace tests the AllocateSpace function with defragmentation (55.6% coverage)
-func TestPage_AllocateSpace(t *testing.T) {
-	t.Parallel()
-	pageData := make([]byte, 1024)
-
-	// Initialize as leaf table page
-	offset := FileHeaderSize // Page 1 has file header
-	pageData[offset+PageHeaderOffsetType] = PageTypeLeafTable
-	binary.BigEndian.PutUint16(pageData[offset+PageHeaderOffsetNumCells:], 0)
-	binary.BigEndian.PutUint16(pageData[offset+PageHeaderOffsetCellStart:], 0) // 0 means end of page
-
-	page, err := NewBtreePage(1, pageData, 1024)
-	if err != nil {
-		t.Fatalf("NewBtreePage() error = %v", err)
+func (f *SumFunc) Final() (Value, error) {
+	if !f.hasValue {
+		return NewNullValue(), nil
 	}
 
-	// Allocate space multiple times
-	offsets := make([]int, 0)
-	for i := 0; i < 10; i++ {
-		offset, err := page.AllocateSpace(50)
-		if err != nil {
-			t.Logf("AllocateSpace() iteration %d error = %v", i, err)
-			break
-		}
-		offsets = append(offsets, offset)
-	}
-
-	if len(offsets) > 0 {
-		t.Logf("Successfully allocated %d cells", len(offsets))
-	}
-
-	// Now delete some cells to create fragmentation
-	if page.Header.NumCells > 2 {
-		page.DeleteCell(1)
-		page.DeleteCell(2)
-	}
-
-	// Allocate again - should trigger defragmentation
-	offset2, err2 := page.AllocateSpace(100)
-	if err2 != nil {
-		t.Logf("AllocateSpace() after delete error = %v (may need defragmentation)", err2)
+	var result Value
+	if f.isFloat {
+		result = NewFloatValue(f.floatSum)
 	} else {
-		t.Logf("Successfully allocated after deletion at offset %d", offset2)
+		result = NewIntValue(f.intSum)
 	}
 
-	// Try to allocate more space than available
-	_, err = page.AllocateSpace(900)
-	if err != nil {
-		t.Logf("AllocateSpace() with large size error = %v (expected)", err)
-	}
+	f.Reset()
+	return result, nil
 }
 
-// TestCursor_LoadParentPage tests the loadParentPage function (55.6% coverage)
-func TestCursor_LoadParentPage(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert enough rows to create multiple levels
-	for i := int64(1); i <= 150; i++ {
-		err := cursor.Insert(i, make([]byte, 25))
-		if err != nil {
-			break
-		}
-	}
-
-	// Navigate to trigger parent page loading
-	cursor.MoveToFirst()
-	if cursor.Depth > 0 {
-		t.Logf("Tree has depth %d, parent pages exist", cursor.Depth)
-	}
-
-	// Navigate forward and backward to load parent pages
-	for i := 0; i < 20; i++ {
-		cursor.Next()
-	}
-	for i := 0; i < 20; i++ {
-		cursor.Previous()
-	}
-
-	t.Log("Navigation completed (may have loaded parent pages)")
+func (f *SumFunc) Reset() {
+	f.hasValue = false
+	f.intSum = 0
+	f.floatSum = 0.0
+	f.isFloat = false
 }
 
-// TestCursor_GetChildPageFromParent tests the getChildPageFromParent function (55.6% coverage)
-func TestCursor_GetChildPageFromParent(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert rows to create interior pages
-	for i := int64(1); i <= 120; i++ {
-		err := cursor.Insert(i, make([]byte, 30))
-		if err != nil {
-			break
-		}
-	}
-
-	// Seek to various positions to trigger child page resolution
-	for _, rowid := range []int64{10, 50, 90, 110} {
-		found, err := cursor.SeekRowid(rowid)
-		if err != nil {
-			t.Logf("SeekRowid(%d) error = %v", rowid, err)
-		}
-		if found {
-			t.Logf("Found rowid %d at depth %d", rowid, cursor.Depth)
-		}
-	}
+// TotalFunc implements total(X)
+// Like sum() but returns 0.0 instead of NULL for empty set
+type TotalFunc struct {
+	sum float64
 }
 
-// TestIntegrity_ValidateFreeBlockPrerequisites tests prerequisite validation (50.0% coverage)
-func TestIntegrity_ValidateFreeBlockPrerequisites(t *testing.T) {
-	t.Parallel()
-	// Test with nil btree
-	result := ValidateFreeBlockList(nil, 1)
-	if len(result.Errors) == 0 {
-		t.Error("Expected error for nil btree")
+func (f *TotalFunc) Name() string { return "total" }
+func (f *TotalFunc) NumArgs() int { return 1 }
+func (f *TotalFunc) Call([]Value) (Value, error) {
+	return nil, fmt.Errorf("total() is an aggregate function")
+}
+
+func (f *TotalFunc) Step(args []Value) error {
+	if args[0].IsNull() {
+		return nil
+	}
+
+	switch args[0].Type() {
+	case TypeInteger:
+		f.sum += float64(args[0].AsInt64())
+	case TypeFloat:
+		f.sum += args[0].AsFloat64()
+	default:
+		f.sum += args[0].AsFloat64()
+	}
+
+	return nil
+}
+
+func (f *TotalFunc) Final() (Value, error) {
+	return finalizeAndReset(f, NewFloatValue(f.sum))
+}
+
+func (f *TotalFunc) Reset() {
+	f.sum = 0.0
+}
+
+// AvgFunc implements avg(X)
+type AvgFunc struct {
+	count int64
+	sum   float64
+}
+
+func (f *AvgFunc) Name() string { return "avg" }
+func (f *AvgFunc) NumArgs() int { return 1 }
+func (f *AvgFunc) Call([]Value) (Value, error) {
+	return nil, fmt.Errorf("avg() is an aggregate function")
+}
+
+func (f *AvgFunc) Step(args []Value) error {
+	if args[0].IsNull() {
+		return nil
+	}
+
+	f.count++
+
+	switch args[0].Type() {
+	case TypeInteger:
+		f.sum += float64(args[0].AsInt64())
+	case TypeFloat:
+		f.sum += args[0].AsFloat64()
+	default:
+		f.sum += args[0].AsFloat64()
+	}
+
+	return nil
+}
+
+func (f *AvgFunc) Final() (Value, error) {
+	if f.count == 0 {
+		return finalizeAndReset(f, NewNullValue())
+	}
+	return finalizeAndReset(f, NewFloatValue(f.sum/float64(f.count)))
+}
+
+func (f *AvgFunc) Reset() {
+	f.count = 0
+	f.sum = 0.0
+}
+
+// MinFunc implements min(X)
+type MinFunc struct {
+	hasValue bool
+	minValue Value
+}
+
+func (f *MinFunc) Name() string { return "min" }
+func (f *MinFunc) NumArgs() int { return 1 }
+func (f *MinFunc) Call([]Value) (Value, error) {
+	return nil, fmt.Errorf("min() is an aggregate function")
+}
+
+func (f *MinFunc) Step(args []Value) error {
+	if args[0].IsNull() {
+		return nil
+	}
+
+	if !f.hasValue {
+		f.minValue = args[0]
+		f.hasValue = true
 	} else {
-		t.Logf("Got expected error: %v", result.Errors[0])
+		if compareValues(args[0], f.minValue) < 0 {
+			f.minValue = args[0]
+		}
 	}
 
-	// Test with invalid page
-	bt := NewBtree(4096)
-	result = ValidateFreeBlockList(bt, 999)
-	if len(result.Errors) == 0 {
-		t.Error("Expected error for invalid page")
-	} else {
-		t.Logf("Got expected error: %v", result.Errors[0])
-	}
-
-	// Test with valid page
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	result = ValidateFreeBlockList(bt, rootPage)
-	if len(result.Errors) > 0 {
-		t.Logf("ValidateFreeBlockList() errors: %v", result.Errors)
-	} else {
-		t.Log("Free block list is valid")
-	}
+	return nil
 }
 
-// TestIntegrity_CheckMaxIterationsExceeded tests iteration limit (50.0% coverage)
-func TestIntegrity_CheckMaxIterationsExceeded(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	pageData := make([]byte, 4096)
-
-	// Create a page with a very long (invalid) free block chain
-	pageData[PageHeaderOffsetType] = PageTypeLeafTable
-
-	// Set first freeblock to offset 100
-	binary.BigEndian.PutUint16(pageData[PageHeaderOffsetFreeblock:], 100)
-
-	// Create a chain that would exceed max iterations
-	// Each freeblock points to the next one
-	for i := 0; i < 100; i++ {
-		offset := 100 + i*10
-		if offset+10 < len(pageData) {
-			// Next offset
-			binary.BigEndian.PutUint16(pageData[offset:], uint16(offset+10))
-			// Block size
-			binary.BigEndian.PutUint16(pageData[offset+2:], 10)
-		}
+func (f *MinFunc) Final() (Value, error) {
+	if !f.hasValue {
+		return finalizeAndReset(f, NewNullValue())
 	}
-
-	bt.SetPage(1, pageData)
-
-	// This should detect that the chain is too long
-	result := ValidateFreeBlockList(bt, 1)
-	if len(result.Errors) > 0 {
-		t.Logf("Detected free block issues: %v", result.Errors[0])
-	}
+	return finalizeAndReset(f, f.minValue)
 }
 
-// TestMerge_GetSiblingWithLeftPageDetailed tests left sibling merging (0% coverage)
-func TestMerge_GetSiblingWithLeftPageDetailed(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	pageSize := bt.PageSize
+func (f *MinFunc) Reset() {
+	f.hasValue = false
+	f.minValue = nil
+}
 
-	// Create 3 leaf pages
-	page2Data := createTestPage(2, pageSize, PageTypeLeafTable, []struct {
-		rowid   int64
-		payload []byte
-	}{{1, []byte("left")}})
-	bt.SetPage(2, page2Data)
+// MaxFunc implements max(X)
+type MaxFunc struct {
+	hasValue bool
+	maxValue Value
+}
 
-	page3Data := createTestPage(3, pageSize, PageTypeLeafTable, []struct {
-		rowid   int64
-		payload []byte
-	}{{5, []byte("middle")}})
-	bt.SetPage(3, page3Data)
+func (f *MaxFunc) Name() string { return "max" }
+func (f *MaxFunc) NumArgs() int { return 1 }
+func (f *MaxFunc) Call([]Value) (Value, error) {
+	return nil, fmt.Errorf("max() is an aggregate function")
+}
 
-	page4Data := createTestPage(4, pageSize, PageTypeLeafTable, []struct {
-		rowid   int64
-		payload []byte
-	}{{10, []byte("right")}})
-	bt.SetPage(4, page4Data)
-
-	// Create interior root with page 3 as middle child
-	rootCells := []struct {
-		childPage uint32
-		rowid     int64
-	}{
-		{2, 1},
-		{3, 5},
+func (f *MaxFunc) Step(args []Value) error {
+	if args[0].IsNull() {
+		return nil
 	}
-	rootData := createInteriorPage(1, pageSize, rootCells, 4)
-	bt.SetPage(1, rootData)
 
-	// Position cursor on middle page (index 1 in parent)
-	cursor := NewCursor(bt, 1)
-	cursor.SeekRowid(5)
-
-	if cursor.IsValid() && cursor.Depth > 0 {
-		t.Logf("Cursor at page %d, depth %d, parent index %d",
-			cursor.CurrentPage, cursor.Depth, cursor.IndexStack[cursor.Depth-1])
-
-		// Delete to make underfull and trigger merge with left sibling
-		err := cursor.Delete()
-		if err != nil {
-			t.Logf("Delete() error = %v", err)
+	if !f.hasValue {
+		f.maxValue = args[0]
+		f.hasValue = true
+	} else {
+		if compareValues(args[0], f.maxValue) > 0 {
+			f.maxValue = args[0]
 		}
+	}
 
-		merged, err := cursor.MergePage()
-		if err != nil {
-			t.Logf("MergePage() error = %v", err)
-		}
-		if merged {
-			t.Log("Successfully merged with left sibling (getSiblingWithLeftPage)")
+	return nil
+}
+
+func (f *MaxFunc) Final() (Value, error) {
+	if !f.hasValue {
+		return finalizeAndReset(f, NewNullValue())
+	}
+	return finalizeAndReset(f, f.maxValue)
+}
+
+func (f *MaxFunc) Reset() {
+	f.hasValue = false
+	f.maxValue = nil
+}
+
+// GroupConcatFunc implements group_concat(X [, Y])
+type GroupConcatFunc struct {
+	values    []string
+	separator string
+	hasSep    bool
+}
+
+func (f *GroupConcatFunc) Name() string { return "group_concat" }
+func (f *GroupConcatFunc) NumArgs() int { return -1 } // 1 or 2 args
+func (f *GroupConcatFunc) Call([]Value) (Value, error) {
+	return nil, fmt.Errorf("group_concat() is an aggregate function")
+}
+
+func (f *GroupConcatFunc) Step(args []Value) error {
+	if len(args) < 1 || len(args) > 2 {
+		return fmt.Errorf("group_concat() requires 1 or 2 arguments")
+	}
+
+	if args[0].IsNull() {
+		return nil
+	}
+
+	// Set separator from second argument (only first time)
+	if len(args) == 2 && !f.hasSep {
+		if !args[1].IsNull() {
+			f.separator = args[1].AsString()
 		} else {
-			t.Log("Merge not performed or redistributed instead")
+			f.separator = ","
 		}
+		f.hasSep = true
+	} else if !f.hasSep {
+		f.separator = ","
+		f.hasSep = true
 	}
+
+	f.values = append(f.values, args[0].AsString())
+	return nil
 }
 
-// TestMerge_GetSiblingAsRightmostDetailed tests rightmost child merging (0% coverage)
-func TestMerge_GetSiblingAsRightmostDetailed(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	pageSize := bt.PageSize
-
-	// Create 2 leaf pages
-	page2Data := createTestPage(2, pageSize, PageTypeLeafTable, []struct {
-		rowid   int64
-		payload []byte
-	}{{1, []byte("left")}})
-	bt.SetPage(2, page2Data)
-
-	page3Data := createTestPage(3, pageSize, PageTypeLeafTable, []struct {
-		rowid   int64
-		payload []byte
-	}{{5, []byte("rightmost")}})
-	bt.SetPage(3, page3Data)
-
-	// Create interior root where page 3 is the rightmost child (not in cells array)
-	rootCells := []struct {
-		childPage uint32
-		rowid     int64
-	}{{2, 1}}
-	rootData := createInteriorPage(1, pageSize, rootCells, 3) // page 3 is rightmost
-	bt.SetPage(1, rootData)
-
-	// Position cursor on rightmost page
-	cursor := NewCursor(bt, 1)
-	cursor.SeekRowid(5)
-
-	if cursor.IsValid() && cursor.Depth > 0 {
-		t.Logf("Cursor at page %d, depth %d, parent index %d",
-			cursor.CurrentPage, cursor.Depth, cursor.IndexStack[cursor.Depth-1])
-
-		// The parent index should equal NumCells for rightmost child
-		parentDepth := cursor.Depth - 1
-		parentPage := cursor.PageStack[parentDepth]
-		parentPageData, _ := bt.GetPage(parentPage)
-		if parentPageData != nil {
-			parentHeader, _ := ParsePageHeader(parentPageData, parentPage)
-			if parentHeader != nil {
-				t.Logf("Parent has %d cells, cursor at index %d",
-					parentHeader.NumCells, cursor.IndexStack[parentDepth])
-			}
-		}
-
-		// Delete to trigger merge
-		err := cursor.Delete()
-		if err != nil {
-			t.Logf("Delete() error = %v", err)
-		}
-
-		merged, err := cursor.MergePage()
-		if err != nil {
-			t.Logf("MergePage() error = %v", err)
-		}
-		if merged {
-			t.Log("Successfully merged rightmost page (getSiblingAsRightmost)")
-		}
+func (f *GroupConcatFunc) Final() (Value, error) {
+	if len(f.values) == 0 {
+		return finalizeAndReset(f, NewNullValue())
 	}
+	return finalizeAndReset(f, NewTextValue(strings.Join(f.values, f.separator)))
 }
 
-// TestCursor_EnterPage tests the enterPage function (57.1% coverage)
-func TestCursor_EnterPage(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert to create multiple pages
-	for i := int64(1); i <= 100; i++ {
-		err := cursor.Insert(i, make([]byte, 20))
-		if err != nil {
-			break
-		}
-	}
-
-	// Navigate to various positions (enterPage is used during navigation)
-	cursor.MoveToFirst()
-	cursor.Next()
-	cursor.Next()
-	cursor.MoveToLast()
-	cursor.Previous()
-	cursor.Previous()
-	cursor.SeekRowid(50)
-
-	t.Log("Navigation completed (enterPage called during cursor operations)")
+func (f *GroupConcatFunc) Reset() {
+	f.values = nil
+	f.separator = ","
+	f.hasSep = false
 }
 
-// TestCursor_DescendToRightChild tests descending to right child (60.0% coverage)
-func TestCursor_DescendToRightChild(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
+// Scalar versions of min/max for non-aggregate use
+// These are registered separately and handle multiple arguments
+
+// minScalarFunc implements min(X1, X2, ..., XN) as scalar function
+func minScalarFunc(args []Value) (Value, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("min() requires at least 1 argument")
 	}
 
-	cursor := NewCursor(bt, rootPage)
+	var minVal Value
+	hasValue := false
 
-	// Insert to create interior pages with right children
-	for i := int64(1); i <= 100; i++ {
-		err := cursor.Insert(i, make([]byte, 25))
-		if err != nil {
-			break
+	for _, arg := range args {
+		if arg.IsNull() {
+			continue
 		}
-	}
 
-	// MoveToLast descends to the rightmost path, which uses right child pointers
-	err = cursor.MoveToLast()
-	if err != nil {
-		t.Fatalf("MoveToLast() error = %v", err)
-	}
-
-	if cursor.IsValid() {
-		key := cursor.GetKey()
-		t.Logf("Moved to last entry: key=%d (used descendToRightChild)", key)
-	}
-
-	// Navigate backward, then forward again to cross page boundaries
-	for i := 0; i < 10; i++ {
-		cursor.Previous()
-	}
-	for i := 0; i < 10; i++ {
-		cursor.Next()
-	}
-
-	t.Log("Navigation completed (may have descended to right children)")
-}
-
-// TestCursor_DescendToLastMultiLevel tests descending to last entry in deep tree (62.5% coverage)
-func TestCursor_DescendToLastMultiLevel(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert to create a multi-level tree
-	for i := int64(1); i <= 120; i++ {
-		err := cursor.Insert(i, make([]byte, 28))
-		if err != nil {
-			break
-		}
-	}
-
-	// MoveToLast uses descendToLast for multi-level trees
-	err = cursor.MoveToLast()
-	if err != nil {
-		t.Fatalf("MoveToLast() error = %v", err)
-	}
-
-	if cursor.IsValid() {
-		key := cursor.GetKey()
-		if key < 100 {
-			t.Errorf("Last key = %d, expected larger value", key)
+		if !hasValue {
+			minVal = arg
+			hasValue = true
 		} else {
-			t.Logf("Successfully moved to last: key=%d", key)
-		}
-	}
-
-	// Do it again to ensure repeatability
-	err = cursor.MoveToLast()
-	if err != nil {
-		t.Fatalf("Second MoveToLast() error = %v", err)
-	}
-
-	t.Log("Multiple MoveToLast calls completed (descendToLast)")
-}
-
-// TestIndexCursor_SeekLeafExactMatch tests exact match seeking (53.8% coverage)
-func TestIndexCursor_SeekLeafExactMatch(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := createIndexPage(bt)
-	if err != nil {
-		t.Fatalf("createIndexPage() error = %v", err)
-	}
-
-	cursor := NewIndexCursor(bt, rootPage)
-
-	// Insert entries
-	testKeys := []string{"apple", "banana", "cherry", "date", "elderberry"}
-	for i, key := range testKeys {
-		err := cursor.InsertIndex([]byte(key), int64(i))
-		if err != nil {
-			t.Fatalf("InsertIndex() error = %v", err)
-		}
-	}
-
-	// Seek exact matches
-	for i, key := range testKeys {
-		found, err := cursor.SeekIndex([]byte(key))
-		if err != nil {
-			t.Errorf("SeekIndex(%s) error = %v", key, err)
-		}
-		if !found {
-			t.Errorf("SeekIndex(%s) not found", key)
-		}
-		if found && cursor.IsValid() {
-			gotKey := cursor.GetKey()
-			if !bytes.Equal(gotKey, []byte(key)) {
-				t.Errorf("SeekIndex(%s) returned wrong key: %s", key, gotKey)
-			}
-			gotRowid := cursor.GetRowid()
-			if gotRowid != int64(i) {
-				t.Errorf("SeekIndex(%s) returned wrong rowid: got %d, want %d", key, gotRowid, i)
+			if compareValues(arg, minVal) < 0 {
+				minVal = arg
 			}
 		}
 	}
 
-	// Seek non-existent keys
-	nonExistent := []string{"aardvark", "fig", "zebra"}
-	for _, key := range nonExistent {
-		found, err := cursor.SeekIndex([]byte(key))
-		if err != nil {
-			t.Logf("SeekIndex(%s) error = %v", key, err)
-		}
-		t.Logf("SeekIndex(%s) found=%v (expected false for non-existent)", key, found)
+	if !hasValue {
+		return NewNullValue(), nil
 	}
+
+	return minVal, nil
 }
 
-// TestIndexCursor_PrevInPage tests backward navigation within page (55.6% coverage)
-func TestIndexCursor_PrevInPage(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := createIndexPage(bt)
-	if err != nil {
-		t.Fatalf("createIndexPage() error = %v", err)
+// maxScalarFunc implements max(X1, X2, ..., XN) as scalar function
+func maxScalarFunc(args []Value) (Value, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("max() requires at least 1 argument")
 	}
 
-	cursor := NewIndexCursor(bt, rootPage)
+	var maxVal Value
+	hasValue := false
 
-	// Insert entries on a single page
-	for i := 0; i < 10; i++ {
-		key := []byte{byte('a' + i)}
-		err := cursor.InsertIndex(key, int64(i))
-		if err != nil {
-			t.Fatalf("InsertIndex() error = %v", err)
+	for _, arg := range args {
+		if arg.IsNull() {
+			continue
 		}
-	}
 
-	// Move to last
-	err = cursor.MoveToLast()
-	if err != nil {
-		t.Fatalf("MoveToLast() error = %v", err)
-	}
-
-	// Navigate backward within the same page
-	prevCount := 0
-	for i := 0; i < 9; i++ {
-		err := cursor.PrevIndex()
-		if err != nil || !cursor.IsValid() {
-			break
-		}
-		prevCount++
-	}
-
-	if prevCount > 0 {
-		t.Logf("Navigated backward %d times within page (prevInPage)", prevCount)
-	}
-}
-
-// TestIndexCursor_DeleteCurrentEntry tests deleting current entry (58.8% coverage)
-func TestIndexCursor_DeleteCurrentEntry(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := createIndexPage(bt)
-	if err != nil {
-		t.Fatalf("createIndexPage() error = %v", err)
-	}
-
-	cursor := NewIndexCursor(bt, rootPage)
-
-	// Insert entries
-	for i := 0; i < 20; i++ {
-		key := []byte{byte('A' + i)}
-		err := cursor.InsertIndex(key, int64(i))
-		if err != nil {
-			t.Fatalf("InsertIndex() error = %v", err)
-		}
-	}
-
-	// Delete some entries
-	deleteKeys := []struct {
-		key   []byte
-		rowid int64
-	}{
-		{[]byte("C"), 2},
-		{[]byte("F"), 5},
-		{[]byte("K"), 10},
-		{[]byte("P"), 15},
-	}
-	for _, entry := range deleteKeys {
-		err := cursor.DeleteIndex(entry.key, entry.rowid)
-		if err != nil {
-			t.Logf("DeleteIndex(%s, %d) error = %v", entry.key, entry.rowid, err)
+		if !hasValue {
+			maxVal = arg
+			hasValue = true
 		} else {
-			t.Logf("Successfully deleted key %s", entry.key)
+			if compareValues(arg, maxVal) > 0 {
+				maxVal = arg
+			}
 		}
 	}
 
-	// Verify deletions
-	for _, entry := range deleteKeys {
-		found, _ := cursor.SeekIndex(entry.key)
-		if found && cursor.GetRowid() == entry.rowid {
-			t.Errorf("Key %s with rowid %d still found after deletion", entry.key, entry.rowid)
-		}
+	if !hasValue {
+		return NewNullValue(), nil
 	}
 
-	// Count remaining entries
-	cursor.MoveToFirst()
-	count := 0
-	for cursor.IsValid() {
-		count++
-		err := cursor.NextIndex()
-		if err != nil {
-			break
-		}
-	}
-
-	expected := 20 - len(deleteKeys)
-	if count != expected {
-		t.Errorf("Remaining entries = %d, want %d", count, expected)
-	} else {
-		t.Logf("Correctly have %d entries after deletions", count)
-	}
+	return maxVal, nil
 }
 
-// TestOverflow_FreeOverflowChain tests freeing overflow chains (60.0% coverage)
-func TestOverflow_FreeOverflowChain(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert a row with large payload that requires overflow pages
-	largePayload := make([]byte, 10000) // Larger than page size
-	for i := range largePayload {
-		largePayload[i] = byte(i % 256)
-	}
-
-	err = cursor.Insert(100, largePayload)
-	if err != nil {
-		t.Fatalf("Insert() with large payload error = %v", err)
-	}
-
-	t.Log("Inserted row with overflow pages")
-
-	// Now delete it - this should free the overflow chain
-	found, err := cursor.SeekRowid(100)
-	if err != nil {
-		t.Fatalf("SeekRowid() error = %v", err)
-	}
-	if !found {
-		t.Fatal("Failed to find inserted row")
-	}
-
-	err = cursor.Delete()
-	if err != nil {
-		t.Fatalf("Delete() error = %v", err)
-	}
-
-	t.Log("Deleted row with overflow pages (FreeOverflowChain called)")
-
-	// Verify it's gone
-	found, _ = cursor.SeekRowid(100)
-	if found {
-		t.Error("Row still found after deletion")
-	}
+// init registers scalar versions of min/max
+func init() {
+	// These will be registered by the registry when needed
 }
 
-// TestCursor_SplitPage tests page splitting (60.0% coverage)
-func TestCursor_SplitPage(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512) // Small pages to force splits
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
+// Helper to check for NaN
+func isNaN(f float64) bool {
+	return math.IsNaN(f)
+}
 
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert enough to force multiple splits
-	for i := int64(1); i <= 100; i++ {
-		err := cursor.Insert(i, make([]byte, 30))
-		if err != nil {
-			t.Logf("Insert stopped at row %d: %v", i, err)
-			break
-		}
-	}
-
-	// Verify we can still access all rows
-	cursor.MoveToFirst()
-	count := 0
-	for cursor.IsValid() && count < 150 {
-		count++
-		err := cursor.Next()
-		if err != nil {
-			break
-		}
-	}
-
-	if count > 50 {
-		t.Logf("Successfully inserted and accessed %d rows (splits occurred)", count)
-	}
+// Helper to check for infinity
+func isInf(f float64) bool {
+	return math.IsInf(f, 0)
 }

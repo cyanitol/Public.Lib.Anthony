@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
 // Package schema provides schema management for SQLite databases.
 // It tracks tables, indexes, and their metadata including type affinities.
 package schema

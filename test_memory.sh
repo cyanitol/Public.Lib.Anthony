@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
 # Simple test script to verify memory database implementation compiles and runs
 
 echo "Testing in-memory database implementation..."

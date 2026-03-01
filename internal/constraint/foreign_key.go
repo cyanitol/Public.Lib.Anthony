@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
 // Package constraint provides constraint enforcement for SQLite databases.
 // It implements CHECK, FOREIGN KEY, and other constraint validations.
 package constraint

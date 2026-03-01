@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
 // Package planner implements the SQLite query planner and optimizer.
 // This is a pure Go implementation based on SQLite's query planning algorithms.
 //

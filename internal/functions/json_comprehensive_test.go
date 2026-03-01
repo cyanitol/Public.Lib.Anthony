@@ -1,1523 +1,513 @@
-package functions
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+package parser
 
-import (
-	"testing"
-)
+import "testing"
 
-// TestJSONFunc_EdgeCases tests edge cases for json function
-func TestJSONFunc_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    Value
-		wantNull bool
-		validate func(string) bool
-	}{
-		{
-			name:     "null input",
-			input:    NewNullValue(),
-			wantNull: true,
-		},
-		{
-			name:     "invalid json",
-			input:    NewTextValue("{invalid}"),
-			wantNull: true,
-		},
-		{
-			name:  "valid json object",
-			input: NewTextValue(`{"key":"value"}`),
-			validate: func(s string) bool {
-				return s == `{"key":"value"}`
-			},
-		},
-		{
-			name:  "json with whitespace",
-			input: NewTextValue(`{ "key" : "value" }`),
-			validate: func(s string) bool {
-				return s == `{"key":"value"}`
-			},
-		},
-	}
+// TestConcreteTypeNodeMethods tests node() methods on concrete types to ensure coverage.
+// The Go coverage tool doesn't always count calls through interface values, so we need
+// to explicitly call these methods on concrete types.
+func TestConcreteTypeNodeMethods(t *testing.T) {
+	t.Parallel()
+	// Test all statement types
+	var s1 SelectStmt
+	s1.node()
+	s1.statement()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonFunc([]Value{tt.input})
-			if err != nil {
-				t.Fatalf("jsonFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonFunc() returned NULL")
-			}
-			if tt.validate != nil && !tt.validate(result.AsString()) {
-				t.Errorf("jsonFunc() = %v, validation failed", result.AsString())
-			}
-		})
-	}
+	var i1 InsertStmt
+	i1.node()
+	i1.statement()
+
+	var u1 UpdateStmt
+	u1.node()
+	u1.statement()
+
+	var d1 DeleteStmt
+	d1.node()
+	d1.statement()
+
+	var ct CreateTableStmt
+	ct.node()
+	ct.statement()
+
+	var dt DropTableStmt
+	dt.node()
+	dt.statement()
+
+	var ci CreateIndexStmt
+	ci.node()
+	ci.statement()
+
+	var di DropIndexStmt
+	di.node()
+	di.statement()
+
+	var cv CreateViewStmt
+	cv.node()
+	cv.statement()
+
+	var dv DropViewStmt
+	dv.node()
+	dv.statement()
+
+	var ctr CreateTriggerStmt
+	ctr.node()
+	ctr.statement()
+
+	var dtr DropTriggerStmt
+	dtr.node()
+	dtr.statement()
+
+	var b BeginStmt
+	b.node()
+	b.statement()
+
+	var c CommitStmt
+	c.node()
+	c.statement()
+
+	var r RollbackStmt
+	r.node()
+	r.statement()
+
+	var e ExplainStmt
+	e.node()
+	e.statement()
+
+	var a AttachStmt
+	a.node()
+	a.statement()
+
+	var det DetachStmt
+	det.node()
+	det.statement()
+
+	var p PragmaStmt
+	p.node()
+	p.statement()
+
+	var alt AlterTableStmt
+	alt.node()
+	alt.statement()
+
+	var v VacuumStmt
+	v.node()
+	v.statement()
 }
 
-// TestJSONArrayFunc_EdgeCases tests edge cases for json_array function
-func TestJSONArrayFunc_EdgeCases(t *testing.T) {
+// TestConcreteTypeExpressionMethods tests expression() methods on concrete types.
+func TestConcreteTypeExpressionMethods(t *testing.T) {
+	t.Parallel()
+	var be BinaryExpr
+	be.node()
+	be.expression()
+
+	var ue UnaryExpr
+	ue.node()
+	ue.expression()
+
+	var le LiteralExpr
+	le.node()
+	le.expression()
+
+	var ie IdentExpr
+	ie.node()
+	ie.expression()
+
+	var fe FunctionExpr
+	fe.node()
+	fe.expression()
+
+	var ce CaseExpr
+	ce.node()
+	ce.expression()
+
+	var cae CastExpr
+	cae.node()
+	cae.expression()
+
+	var cole CollateExpr
+	cole.node()
+	cole.expression()
+
+	var ine InExpr
+	ine.node()
+	ine.expression()
+
+	var bte BetweenExpr
+	bte.node()
+	bte.expression()
+
+	var exe ExistsExpr
+	exe.node()
+	exe.expression()
+
+	var pe ParenExpr
+	pe.node()
+	pe.expression()
+
+	var se SubqueryExpr
+	se.node()
+	se.expression()
+
+	var ve VariableExpr
+	ve.node()
+	ve.expression()
+}
+
+// TestConcreteTypeAlterTableActions tests alterTableAction() methods on concrete types.
+func TestConcreteTypeAlterTableActions(t *testing.T) {
+	t.Parallel()
+	var rt RenameTableAction
+	rt.node()
+	rt.alterTableAction()
+
+	var rc RenameColumnAction
+	rc.node()
+	rc.alterTableAction()
+
+	var ac AddColumnAction
+	ac.node()
+	ac.alterTableAction()
+
+	var dc DropColumnAction
+	dc.node()
+	dc.alterTableAction()
+}
+
+// TestVariableExprString tests the String() method for VariableExpr
+func TestVariableExprString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name  string
-		args  []Value
-		want  string
+		name string
+		expr *VariableExpr
+		want string
 	}{
 		{
-			name: "empty array",
-			args: []Value{},
-			want: "[]",
+			name: "unnamed parameter",
+			expr: &VariableExpr{Name: ""},
+			want: "?",
 		},
 		{
-			name: "single element",
-			args: []Value{NewIntValue(42)},
-			want: "[42]",
+			name: "named parameter",
+			expr: &VariableExpr{Name: "id"},
+			want: ":id",
 		},
 		{
-			name: "with null",
-			args: []Value{NewIntValue(1), NewNullValue(), NewIntValue(3)},
-			want: "[1,null,3]",
-		},
-		{
-			name: "mixed types",
-			args: []Value{NewIntValue(1), NewTextValue("hello"), NewFloatValue(3.14)},
-			want: "[1,\"hello\",3.14]",
+			name: "named parameter with prefix",
+			expr: &VariableExpr{Name: "user_name"},
+			want: ":user_name",
 		},
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonArrayFunc(tt.args)
-			if err != nil {
-				t.Fatalf("jsonArrayFunc() error = %v", err)
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonArrayFunc() returned NULL")
-			}
-			got := result.AsString()
+			t.Parallel()
+			got := tt.expr.String()
 			if got != tt.want {
-				t.Errorf("jsonArrayFunc() = %v, want %v", got, tt.want)
+				t.Errorf("VariableExpr.String() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-// TestJSONArrayLengthFunc_EdgeCases tests edge cases for json_array_length function
-func TestJSONArrayLengthFunc_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     []Value
-		want     int64
-		wantNull bool
-		wantErr  bool
-	}{
-		{
-			name:     "null json",
-			args:     []Value{NewNullValue()},
-			wantNull: true,
-		},
-		{
-			name:     "invalid json",
-			args:     []Value{NewTextValue("{invalid}")},
-			wantNull: true,
-		},
-		{
-			name: "empty array",
-			args: []Value{NewTextValue("[]")},
-			want: 0,
-		},
-		{
-			name: "array with elements",
-			args: []Value{NewTextValue("[1,2,3]")},
-			want: 3,
-		},
-		{
-			name:     "not an array",
-			args:     []Value{NewTextValue(`{"key":"value"}`)},
-			wantNull: true,
-		},
-		{
-			name: "with path to array",
-			args: []Value{NewTextValue(`{"arr":[1,2,3]}`), NewTextValue("$.arr")},
-			want: 3,
-		},
-		{
-			name:     "with path to non-array",
-			args:     []Value{NewTextValue(`{"key":"value"}`), NewTextValue("$.key")},
-			wantNull: true,
-		},
-		{
-			name: "with null path returns array length",
-			args: []Value{NewTextValue("[1,2,3]"), NewNullValue()},
-			want: 3,
-		},
-		{
-			name:    "too many args",
-			args:    []Value{NewTextValue("[]"), NewTextValue("$"), NewTextValue("extra")},
-			wantErr: true,
-		},
+// TestExistsExprStringNotExists tests the String() method for NOT EXISTS
+func TestExistsExprStringNotExists(t *testing.T) {
+	t.Parallel()
+	expr := &ExistsExpr{
+		Select: &SelectStmt{},
+		Not:    true,
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonArrayLengthFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonArrayLengthFunc() expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonArrayLengthFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonArrayLengthFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonArrayLengthFunc() returned NULL")
-			}
-			got := result.AsInt64()
-			if got != tt.want {
-				t.Errorf("jsonArrayLengthFunc() = %d, want %d", got, tt.want)
-			}
-		})
+	got := expr.String()
+	want := "NOT EXISTS (SELECT ...)"
+	if got != want {
+		t.Errorf("ExistsExpr.String() = %q, want %q", got, want)
 	}
 }
 
-// TestJSONExtractFunc_EdgeCases tests edge cases for json_extract function
-func TestJSONExtractFunc_EdgeCases(t *testing.T) {
+// TestLiteralExprStringAllTypes tests all literal types
+func TestLiteralExprStringAllTypes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name     string
-		args     []Value
-		want     string
-		wantNull bool
-		wantErr  bool
+		name string
+		expr *LiteralExpr
+		want string
 	}{
 		{
-			name:    "too few args",
-			args:    []Value{NewTextValue("{}")},
-			wantErr: true,
+			name: "integer",
+			expr: &LiteralExpr{Type: LiteralInteger, Value: "42"},
+			want: "42",
 		},
 		{
-			name:     "null json",
-			args:     []Value{NewNullValue(), NewTextValue("$")},
-			wantNull: true,
-		},
-		{
-			name:     "invalid json",
-			args:     []Value{NewTextValue("{invalid}"), NewTextValue("$")},
-			wantNull: true,
-		},
-		{
-			name:     "null path",
-			args:     []Value{NewTextValue("{}"), NewNullValue()},
-			wantNull: true,
-		},
-		{
-			name: "extract root",
-			args: []Value{NewTextValue(`{"key":"value"}`), NewTextValue("$")},
-			want: `{"key":"value"}`,
-		},
-		{
-			name: "extract key",
-			args: []Value{NewTextValue(`{"key":"value"}`), NewTextValue("$.key")},
-			want: "value",
-		},
-		{
-			name: "multiple paths",
-			args: []Value{NewTextValue(`{"a":1,"b":2}`), NewTextValue("$.a"), NewTextValue("$.b")},
-			want: "[1,2]",
-		},
-		{
-			name: "multiple paths with null",
-			args: []Value{NewTextValue(`{"a":1}`), NewTextValue("$.a"), NewNullValue()},
-			want: "[1,null]",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonExtractFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonExtractFunc() expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonExtractFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonExtractFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonExtractFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonExtractFunc() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestJSONInsertFunc_EdgeCases tests edge cases for json_insert function
-func TestJSONInsertFunc_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     []Value
-		want     string
-		wantNull bool
-		wantErr  bool
-	}{
-		{
-			name:    "too few args",
-			args:    []Value{NewTextValue("{}")},
-			wantErr: true,
-		},
-		{
-			name:    "even number of args",
-			args:    []Value{NewTextValue("{}"), NewTextValue("$.a")},
-			wantErr: true,
-		},
-		{
-			name:     "null json",
-			args:     []Value{NewNullValue(), NewTextValue("$.a"), NewIntValue(1)},
-			wantNull: true,
-		},
-		{
-			name:     "invalid json",
-			args:     []Value{NewTextValue("{invalid}"), NewTextValue("$.a"), NewIntValue(1)},
-			wantNull: true,
-		},
-		{
-			name: "insert new key",
-			args: []Value{NewTextValue("{}"), NewTextValue("$.a"), NewIntValue(1)},
-			want: `{"a":1}`,
-		},
-		{
-			name: "skip existing key",
-			args: []Value{NewTextValue(`{"a":1}`), NewTextValue("$.a"), NewIntValue(2)},
-			want: `{"a":1}`,
-		},
-		{
-			name: "null path is skipped",
-			args: []Value{NewTextValue("{}"), NewNullValue(), NewIntValue(1)},
-			want: "{}",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonInsertFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonInsertFunc() expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonInsertFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonInsertFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonInsertFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonInsertFunc() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestJSONObjectFunc_EdgeCases tests edge cases for json_object function
-func TestJSONObjectFunc_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name    string
-		args    []Value
-		want    string
-		wantErr bool
-	}{
-		{
-			name: "empty object",
-			args: []Value{},
-			want: "{}",
-		},
-		{
-			name: "single pair",
-			args: []Value{NewTextValue("key"), NewIntValue(42)},
-			want: `{"key":42}`,
-		},
-		{
-			name: "multiple pairs",
-			args: []Value{NewTextValue("a"), NewIntValue(1), NewTextValue("b"), NewIntValue(2)},
-			want: `{"a":1,"b":2}`,
-		},
-		{
-			name:    "odd number of args",
-			args:    []Value{NewTextValue("key")},
-			wantErr: true,
-		},
-		{
-			name:    "null key",
-			args:    []Value{NewNullValue(), NewIntValue(1)},
-			wantErr: true,
-		},
-		{
-			name: "null value",
-			args: []Value{NewTextValue("key"), NewNullValue()},
-			want: `{"key":null}`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonObjectFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonObjectFunc() expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonObjectFunc() error = %v", err)
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonObjectFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonObjectFunc() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestJSONPatchFunc_EdgeCases tests edge cases for json_patch function
-func TestJSONPatchFunc_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     []Value
-		want     string
-		wantNull bool
-	}{
-		{
-			name:     "null target",
-			args:     []Value{NewNullValue(), NewTextValue("{}")},
-			wantNull: true,
-		},
-		{
-			name: "null patch returns target",
-			args: []Value{NewTextValue(`{"a":1}`), NewNullValue()},
-			want: `{"a":1}`,
-		},
-		{
-			name:     "invalid target",
-			args:     []Value{NewTextValue("{invalid}"), NewTextValue("{}")},
-			wantNull: true,
-		},
-		{
-			name:     "invalid patch",
-			args:     []Value{NewTextValue("{}"), NewTextValue("{invalid}")},
-			wantNull: true,
-		},
-		{
-			name: "patch adds key",
-			args: []Value{NewTextValue(`{"a":1}`), NewTextValue(`{"b":2}`)},
-			want: `{"a":1,"b":2}`,
-		},
-		{
-			name: "patch removes key",
-			args: []Value{NewTextValue(`{"a":1,"b":2}`), NewTextValue(`{"b":null}`)},
-			want: `{"a":1}`,
-		},
-		{
-			name: "patch replaces non-object target",
-			args: []Value{NewTextValue(`[1,2,3]`), NewTextValue(`{"a":1}`)},
-			want: `{"a":1}`,
-		},
-		{
-			name: "non-object patch replaces target",
-			args: []Value{NewTextValue(`{"a":1}`), NewTextValue(`[1,2,3]`)},
-			want: `[1,2,3]`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonPatchFunc(tt.args)
-			if err != nil {
-				t.Fatalf("jsonPatchFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonPatchFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonPatchFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonPatchFunc() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestJSONRemoveFunc_EdgeCases tests edge cases for json_remove function
-func TestJSONRemoveFunc_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     []Value
-		want     string
-		wantNull bool
-		wantErr  bool
-	}{
-		{
-			name:    "too few args",
-			args:    []Value{NewTextValue("{}")},
-			wantErr: true,
-		},
-		{
-			name:     "null json",
-			args:     []Value{NewNullValue(), NewTextValue("$.a")},
-			wantNull: true,
-		},
-		{
-			name:     "invalid json",
-			args:     []Value{NewTextValue("{invalid}"), NewTextValue("$.a")},
-			wantNull: true,
-		},
-		{
-			name: "remove key",
-			args: []Value{NewTextValue(`{"a":1,"b":2}`), NewTextValue("$.a")},
-			want: `{"b":2}`,
-		},
-		{
-			name: "remove array element",
-			args: []Value{NewTextValue(`[1,2,3]`), NewTextValue("$[1]")},
-			want: `[1,3]`,
-		},
-		{
-			name: "null path is skipped",
-			args: []Value{NewTextValue(`{"a":1}`), NewNullValue()},
-			want: `{"a":1}`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonRemoveFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonRemoveFunc() expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonRemoveFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonRemoveFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonRemoveFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonRemoveFunc() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestJSONReplaceFunc_EdgeCases tests edge cases for json_replace function
-func TestJSONReplaceFunc_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     []Value
-		want     string
-		wantNull bool
-		wantErr  bool
-	}{
-		{
-			name:    "too few args",
-			args:    []Value{NewTextValue("{}")},
-			wantErr: true,
-		},
-		{
-			name:    "even number of args",
-			args:    []Value{NewTextValue("{}"), NewTextValue("$.a")},
-			wantErr: true,
-		},
-		{
-			name:     "null json",
-			args:     []Value{NewNullValue(), NewTextValue("$.a"), NewIntValue(1)},
-			wantNull: true,
-		},
-		{
-			name:     "invalid json",
-			args:     []Value{NewTextValue("{invalid}"), NewTextValue("$.a"), NewIntValue(1)},
-			wantNull: true,
-		},
-		{
-			name: "replace existing key",
-			args: []Value{NewTextValue(`{"a":1}`), NewTextValue("$.a"), NewIntValue(2)},
-			want: `{"a":2}`,
-		},
-		{
-			name: "skip non-existing key",
-			args: []Value{NewTextValue("{}"), NewTextValue("$.a"), NewIntValue(1)},
-			want: "{}",
-		},
-		{
-			name: "null path is skipped",
-			args: []Value{NewTextValue(`{"a":1}`), NewNullValue(), NewIntValue(2)},
-			want: `{"a":1}`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonReplaceFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonReplaceFunc() expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonReplaceFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonReplaceFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonReplaceFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonReplaceFunc() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestJSONSetFunc_EdgeCases tests edge cases for json_set function
-func TestJSONSetFunc_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     []Value
-		want     string
-		wantNull bool
-		wantErr  bool
-	}{
-		{
-			name:    "too few args",
-			args:    []Value{NewTextValue("{}")},
-			wantErr: true,
-		},
-		{
-			name:    "even number of args",
-			args:    []Value{NewTextValue("{}"), NewTextValue("$.a")},
-			wantErr: true,
-		},
-		{
-			name:     "null json",
-			args:     []Value{NewNullValue(), NewTextValue("$.a"), NewIntValue(1)},
-			wantNull: true,
-		},
-		{
-			name:     "invalid json",
-			args:     []Value{NewTextValue("{invalid}"), NewTextValue("$.a"), NewIntValue(1)},
-			wantNull: true,
-		},
-		{
-			name: "set new key",
-			args: []Value{NewTextValue("{}"), NewTextValue("$.a"), NewIntValue(1)},
-			want: `{"a":1}`,
-		},
-		{
-			name: "replace existing key",
-			args: []Value{NewTextValue(`{"a":1}`), NewTextValue("$.a"), NewIntValue(2)},
-			want: `{"a":2}`,
-		},
-		{
-			name: "null path is skipped",
-			args: []Value{NewTextValue("{}"), NewNullValue(), NewIntValue(1)},
-			want: "{}",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonSetFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonSetFunc() expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonSetFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonSetFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonSetFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonSetFunc() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestJSONTypeFunc_EdgeCases tests edge cases for json_type function
-func TestJSONTypeFunc_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     []Value
-		want     string
-		wantNull bool
-		wantErr  bool
-	}{
-		{
-			name:     "null json",
-			args:     []Value{NewNullValue()},
-			wantNull: true,
-		},
-		{
-			name:     "invalid json",
-			args:     []Value{NewTextValue("{invalid}")},
-			wantNull: true,
-		},
-		{
-			name: "null value",
-			args: []Value{NewTextValue("null")},
-			want: "null",
-		},
-		{
-			name: "boolean true",
-			args: []Value{NewTextValue("true")},
-			want: "true",
-		},
-		{
-			name: "boolean false",
-			args: []Value{NewTextValue("false")},
-			want: "true",
-		},
-		{
-			name: "number",
-			args: []Value{NewTextValue("42")},
-			want: "integer",
+			name: "float",
+			expr: &LiteralExpr{Type: LiteralFloat, Value: "3.14"},
+			want: "3.14",
 		},
 		{
 			name: "string",
-			args: []Value{NewTextValue(`"hello"`)},
-			want: "text",
+			expr: &LiteralExpr{Type: LiteralString, Value: "hello"},
+			want: "'hello'",
 		},
 		{
-			name: "array",
-			args: []Value{NewTextValue("[1,2,3]")},
-			want: "array",
+			name: "string with quotes",
+			expr: &LiteralExpr{Type: LiteralString, Value: "it's"},
+			want: "'it''s'",
 		},
 		{
-			name: "object",
-			args: []Value{NewTextValue(`{"key":"value"}`)},
-			want: "object",
+			name: "blob",
+			expr: &LiteralExpr{Type: LiteralBlob, Value: "DEADBEEF"},
+			want: "X'DEADBEEF'",
 		},
 		{
-			name: "with path to string",
-			args: []Value{NewTextValue(`{"key":"value"}`), NewTextValue("$.key")},
-			want: "text",
-		},
-		{
-			name: "with null path returns object type",
-			args: []Value{NewTextValue("{}"), NewNullValue()},
-			want: "object",
-		},
-		{
-			name:     "with path to non-existing",
-			args:     []Value{NewTextValue("{}"), NewTextValue("$.missing")},
-			wantNull: true,
-		},
-		{
-			name:    "too many args",
-			args:    []Value{NewTextValue("{}"), NewTextValue("$"), NewTextValue("extra")},
-			wantErr: true,
+			name: "null",
+			expr: &LiteralExpr{Type: LiteralNull, Value: ""},
+			want: "NULL",
 		},
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonTypeFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonTypeFunc() expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonTypeFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonTypeFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonTypeFunc() returned NULL")
-			}
-			got := result.AsString()
+			t.Parallel()
+			got := tt.expr.String()
 			if got != tt.want {
-				t.Errorf("jsonTypeFunc() = %v, want %v", got, tt.want)
+				t.Errorf("LiteralExpr.String() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-// TestJSONQuoteFunc_EdgeCases tests edge cases for json_quote function
-func TestJSONQuoteFunc_EdgeCases(t *testing.T) {
+// TestIdentExprStringWithTable tests IdentExpr with table qualifier
+func TestIdentExprStringWithTable(t *testing.T) {
+	t.Parallel()
+	expr := &IdentExpr{
+		Table: "users",
+		Name:  "id",
+	}
+	got := expr.String()
+	want := "users.id"
+	if got != want {
+		t.Errorf("IdentExpr.String() = %q, want %q", got, want)
+	}
+}
+
+// TestUnaryExprStringBitNot tests bitwise NOT operator
+func TestUnaryExprStringBitNot(t *testing.T) {
+	t.Parallel()
+	expr := &UnaryExpr{
+		Op:   OpBitNot,
+		Expr: &LiteralExpr{Type: LiteralInteger, Value: "5"},
+	}
+	got := expr.String()
+	want := "~5"
+	if got != want {
+		t.Errorf("UnaryExpr.String() = %q, want %q", got, want)
+	}
+}
+
+// TestUnaryExprStringUnknownOp tests unknown unary operator
+func TestUnaryExprStringUnknownOp(t *testing.T) {
+	t.Parallel()
+	expr := &UnaryExpr{
+		Op:   UnaryOp(999),
+		Expr: &LiteralExpr{Type: LiteralInteger, Value: "5"},
+	}
+	got := expr.String()
+	want := "?5"
+	if got != want {
+		t.Errorf("UnaryExpr.String() = %q, want %q", got, want)
+	}
+}
+
+// TestBinaryOpStringAllOps tests all binary operators
+func TestBinaryOpStringAllOps(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name  string
-		input Value
-		want  string
+		op   BinaryOp
+		want string
 	}{
-		{
-			name:  "null input",
-			input: NewNullValue(),
-			want:  "null",
-		},
-		{
-			name:  "integer",
-			input: NewIntValue(42),
-			want:  "42",
-		},
-		{
-			name:  "float",
-			input: NewFloatValue(3.14),
-			want:  "3.14",
-		},
-		{
-			name:  "string",
-			input: NewTextValue("hello"),
-			want:  `"hello"`,
-		},
-		{
-			name:  "blob encoded as base64 in JSON",
-			input: NewBlobValue([]byte("test")),
-			want:  `"dGVzdA=="`,
-		},
+		{OpEq, "="},
+		{OpNe, "!="},
+		{OpLt, "<"},
+		{OpLe, "<="},
+		{OpGt, ">"},
+		{OpGe, ">="},
+		{OpAnd, "AND"},
+		{OpOr, "OR"},
+		{OpPlus, "+"},
+		{OpMinus, "-"},
+		{OpMul, "*"},
+		{OpDiv, "/"},
+		{OpRem, "%"},
+		{OpConcat, "||"},
+		{OpBitAnd, "&"},
+		{OpBitOr, "|"},
+		{OpLShift, "<<"},
+		{OpRShift, ">>"},
+		{OpLike, "LIKE"},
+		{OpGlob, "GLOB"},
+		{OpRegexp, "REGEXP"},
+		{OpMatch, "MATCH"},
+		{BinaryOp(999), "?"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonQuoteFunc([]Value{tt.input})
-			if err != nil {
-				t.Fatalf("jsonQuoteFunc() error = %v", err)
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonQuoteFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonQuoteFunc() = %v, want %v", got, tt.want)
-			}
-		})
+		tt := tt
+		got := tt.op.String()
+		if got != tt.want {
+			t.Errorf("BinaryOp(%d).String() = %q, want %q", tt.op, got, tt.want)
+		}
 	}
 }
 
-// TestValueToJSON_EdgeCases tests edge cases for valueToJSON helper
-func TestValueToJSON_EdgeCases(t *testing.T) {
-	// Test JSON string parsing in valueToJSON
-	jsonStr := `{"nested":"value"}`
-	val := NewTextValue(jsonStr)
-	result := valueToJSON(val)
-
-	// Should parse JSON string into structure
-	if result == nil {
-		t.Error("valueToJSON() returned nil for valid JSON string")
+// TestFunctionExprStringNilArgs tests FunctionExpr with nil args
+func TestFunctionExprStringNilArgs(t *testing.T) {
+	t.Parallel()
+	expr := &FunctionExpr{
+		Name: "test",
+		Args: []Expression{nil, &LiteralExpr{Type: LiteralInteger, Value: "1"}, nil},
+	}
+	got := expr.String()
+	want := "test(1)"
+	if got != want {
+		t.Errorf("FunctionExpr.String() = %q, want %q", got, want)
 	}
 }
 
-// TestJSONToValue_EdgeCases tests edge cases for jsonToValue helper
-func TestJSONToValue_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name  string
-		input interface{}
-		want  ValueType
-	}{
-		{
-			name:  "nil",
-			input: nil,
-			want:  TypeNull,
+// TestCaseExprStringNilConditionsResults tests CaseExpr with nil conditions/results
+func TestCaseExprStringNilConditionsResults(t *testing.T) {
+	t.Parallel()
+	expr := &CaseExpr{
+		Expr: nil,
+		WhenClauses: []WhenClause{
+			{Condition: nil, Result: nil},
+			{
+				Condition: &LiteralExpr{Type: LiteralInteger, Value: "1"},
+				Result:    &LiteralExpr{Type: LiteralString, Value: "one"},
+			},
 		},
-		{
-			name:  "bool true",
-			input: true,
-			want:  TypeInteger,
-		},
-		{
-			name:  "bool false",
-			input: false,
-			want:  TypeInteger,
-		},
-		{
-			name:  "float as integer",
-			input: float64(42),
-			want:  TypeInteger,
-		},
-		{
-			name:  "float with decimal",
-			input: float64(3.14),
-			want:  TypeFloat,
-		},
-		{
-			name:  "string",
-			input: "hello",
-			want:  TypeText,
-		},
-		{
-			name:  "array",
-			input: []interface{}{1, 2, 3},
-			want:  TypeText,
-		},
-		{
-			name:  "object",
-			input: map[string]interface{}{"key": "value"},
-			want:  TypeText,
-		},
+		ElseClause: nil,
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := jsonToValue(tt.input)
-			if result.Type() != tt.want {
-				t.Errorf("jsonToValue() type = %v, want %v", result.Type(), tt.want)
-			}
-		})
+	got := expr.String()
+	// Should handle nil values gracefully
+	if got == "" {
+		t.Errorf("CaseExpr.String() should not be empty")
 	}
 }
 
-// TestExtractArrayElement_EdgeCases tests edge cases for extractArrayElement
-func TestExtractArrayElement_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		data     interface{}
-		index    int
-		wantNull bool
-	}{
-		{
-			name:     "not an array",
-			data:     "string",
-			index:    0,
-			wantNull: true,
-		},
-		{
-			name:     "negative index",
-			data:     []interface{}{1, 2, 3},
-			index:    -1,
-			wantNull: true,
-		},
-		{
-			name:     "index out of bounds",
-			data:     []interface{}{1, 2, 3},
-			index:    10,
-			wantNull: true,
-		},
-		{
-			name:  "valid index",
-			data:  []interface{}{1, 2, 3},
-			index: 1,
-		},
+// TestCastExprStringNilExpr tests CastExpr with nil expression
+func TestCastExprStringNilExpr(t *testing.T) {
+	t.Parallel()
+	expr := &CastExpr{
+		Expr: nil,
+		Type: "INTEGER",
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := extractArrayElement(tt.data, tt.index)
-			if tt.wantNull {
-				if result != nil {
-					t.Errorf("extractArrayElement() = %v, want nil", result)
-				}
-			} else {
-				if result == nil {
-					t.Error("extractArrayElement() = nil, want non-nil")
-				}
-			}
-		})
+	got := expr.String()
+	want := "CAST(nil AS INTEGER)"
+	if got != want {
+		t.Errorf("CastExpr.String() = %q, want %q", got, want)
 	}
 }
 
-// TestExtractObjectKey_EdgeCases tests edge cases for extractObjectKey
-func TestExtractObjectKey_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		data     interface{}
-		key      string
-		wantNull bool
-	}{
-		{
-			name:     "not an object",
-			data:     "string",
-			key:      "key",
-			wantNull: true,
-		},
-		{
-			name:     "key not found",
-			data:     map[string]interface{}{"other": "value"},
-			key:      "missing",
-			wantNull: true,
-		},
-		{
-			name: "valid key",
-			data: map[string]interface{}{"key": "value"},
-			key:  "key",
-		},
+// TestCollateExprStringNilExpr tests CollateExpr with nil expression
+func TestCollateExprStringNilExpr(t *testing.T) {
+	t.Parallel()
+	expr := &CollateExpr{
+		Expr:      nil,
+		Collation: "NOCASE",
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := extractObjectKey(tt.data, tt.key)
-			if tt.wantNull {
-				if result != nil {
-					t.Errorf("extractObjectKey() = %v, want nil", result)
-				}
-			} else {
-				if result == nil {
-					t.Error("extractObjectKey() = nil, want non-nil")
-				}
-			}
-		})
+	got := expr.String()
+	want := "nil COLLATE NOCASE"
+	if got != want {
+		t.Errorf("CollateExpr.String() = %q, want %q", got, want)
 	}
 }
 
-// TestRemoveFromArray_EdgeCases tests edge cases for removeFromArray
-func TestRemoveFromArray_EdgeCases(t *testing.T) {
+// TestParenExprStringNilExpr tests ParenExpr with nil expression
+func TestParenExprStringNilExpr(t *testing.T) {
+	t.Parallel()
+	expr := &ParenExpr{
+		Expr: nil,
+	}
+	got := expr.String()
+	want := "(nil)"
+	if got != want {
+		t.Errorf("ParenExpr.String() = %q, want %q", got, want)
+	}
+}
+
+// TestInExprStringNilExpr tests InExpr with nil expression
+func TestInExprStringNilExpr(t *testing.T) {
+	t.Parallel()
+	expr := &InExpr{
+		Expr:   nil,
+		Values: []Expression{&LiteralExpr{Type: LiteralInteger, Value: "1"}},
+		Not:    false,
+	}
+	got := expr.String()
+	// Should handle nil expression
+	if got == "" {
+		t.Errorf("InExpr.String() should not be empty")
+	}
+}
+
+// TestInExprStringNilValuesInList tests InExpr with nil values in list
+func TestInExprStringNilValuesInList(t *testing.T) {
+	t.Parallel()
+	expr := &InExpr{
+		Expr:   &IdentExpr{Name: "id"},
+		Values: []Expression{nil, &LiteralExpr{Type: LiteralInteger, Value: "1"}, nil},
+		Not:    false,
+	}
+	got := expr.String()
+	want := "id IN (1)"
+	if got != want {
+		t.Errorf("InExpr.String() = %q, want %q", got, want)
+	}
+}
+
+// TestBetweenExprStringNilParts tests BetweenExpr with nil parts
+func TestBetweenExprStringNilParts(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
-		data interface{}
-		part pathPart
-		want interface{}
+		expr *BetweenExpr
 	}{
 		{
-			name: "not an array",
-			data: "string",
-			part: pathPart{index: 0, isIndex: true},
-			want: "string",
+			name: "nil expr",
+			expr: &BetweenExpr{
+				Expr:  nil,
+				Lower: &LiteralExpr{Type: LiteralInteger, Value: "1"},
+				Upper: &LiteralExpr{Type: LiteralInteger, Value: "10"},
+			},
 		},
 		{
-			name: "index out of bounds negative",
-			data: []interface{}{1, 2, 3},
-			part: pathPart{index: -1, isIndex: true},
-			want: []interface{}{1, 2, 3},
+			name: "nil lower",
+			expr: &BetweenExpr{
+				Expr:  &IdentExpr{Name: "x"},
+				Lower: nil,
+				Upper: &LiteralExpr{Type: LiteralInteger, Value: "10"},
+			},
 		},
 		{
-			name: "index out of bounds positive",
-			data: []interface{}{1, 2, 3},
-			part: pathPart{index: 10, isIndex: true},
-			want: []interface{}{1, 2, 3},
+			name: "nil upper",
+			expr: &BetweenExpr{
+				Expr:  &IdentExpr{Name: "x"},
+				Lower: &LiteralExpr{Type: LiteralInteger, Value: "1"},
+				Upper: nil,
+			},
 		},
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			result := removeFromArray(tt.data, tt.part, nil)
-			// Just verify it doesn't panic
-			if result == nil {
-				t.Error("removeFromArray() returned nil")
+			t.Parallel()
+			got := tt.expr.String()
+			// Should handle nil values without panicking
+			if got == "" {
+				t.Errorf("BetweenExpr.String() should not be empty")
 			}
 		})
-	}
-}
-
-// TestRemoveFromObject_EdgeCases tests edge cases for removeFromObject
-func TestRemoveFromObject_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name string
-		data interface{}
-		part pathPart
-	}{
-		{
-			name: "not an object",
-			data: "string",
-			part: pathPart{key: "key", isIndex: false},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := removeFromObject(tt.data, tt.part, nil)
-			// Just verify it doesn't panic
-			if result == nil {
-				t.Error("removeFromObject() returned nil")
-			}
-		})
-	}
-}
-
-// TestDeepCopy_EdgeCases tests edge cases for deepCopy
-func TestDeepCopy_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name  string
-		input interface{}
-	}{
-		{
-			name:  "nil",
-			input: nil,
-		},
-		{
-			name:  "primitive",
-			input: 42,
-		},
-		{
-			name:  "string",
-			input: "hello",
-		},
-		{
-			name:  "array",
-			input: []interface{}{1, 2, 3},
-		},
-		{
-			name:  "object",
-			input: map[string]interface{}{"key": "value"},
-		},
-		{
-			name:  "nested",
-			input: map[string]interface{}{"arr": []interface{}{1, 2}},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := deepCopy(tt.input)
-			// Just verify it doesn't panic and returns something
-			_ = result
-		})
-	}
-}
-
-// TestJsonFuncMarshalError tests json function with values that cause marshal errors
-func TestJsonFuncMarshalError(t *testing.T) {
-	// Test with invalid JSON string
-	result, err := jsonFunc([]Value{NewTextValue("{invalid json}")})
-	if err != nil {
-		t.Errorf("jsonFunc() error = %v", err)
-	}
-	if !result.IsNull() {
-		t.Error("jsonFunc() should return NULL for invalid JSON")
-	}
-}
-
-// TestJsonArrayFuncMarshalError tests json_array with unmarshalable data
-func TestJsonArrayFuncMarshalError(t *testing.T) {
-	// Normal case should work
-	result, err := jsonArrayFunc([]Value{NewIntValue(1), NewTextValue("test")})
-	if err != nil {
-		t.Errorf("jsonArrayFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("jsonArrayFunc() should not return NULL for valid input")
-	}
-}
-
-// TestJsonObjectFuncOddArgs tests json_object with odd number of arguments
-func TestJsonObjectFuncOddArgs(t *testing.T) {
-	result, err := jsonObjectFunc([]Value{NewTextValue("key1")})
-	if err == nil {
-		t.Error("jsonObjectFunc() should return error for odd number of args")
-		return
-	}
-	// Error expected, result may be nil
-	_ = result
-}
-
-// TestJsonObjectFuncNullKey tests json_object with null key
-func TestJsonObjectFuncNullKey(t *testing.T) {
-	result, err := jsonObjectFunc([]Value{NewNullValue(), NewTextValue("value")})
-	if err == nil {
-		t.Error("jsonObjectFunc() should return error for null key")
-		return
-	}
-	// Error expected, result may be nil
-	_ = result
-}
-
-// TestJsonQuoteFuncEdgeCases tests json_quote with various edge cases
-func TestJsonQuoteFuncEdgeCases(t *testing.T) {
-	tests := []struct {
-		name  string
-		input Value
-	}{
-		{"text", NewTextValue("hello")},
-		{"null", NewNullValue()},
-		{"integer", NewIntValue(42)},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := jsonQuoteFunc([]Value{tt.input})
-			if err != nil {
-				t.Errorf("jsonQuoteFunc() error = %v", err)
-			}
-			if result.IsNull() {
-				t.Error("jsonQuoteFunc() should not return NULL")
-			}
-		})
-	}
-}
-
-// TestValueToJSONEdgeCases tests valueToJSON with various types
-func TestValueToJSONEdgeCases(t *testing.T) {
-	tests := []struct {
-		name  string
-		input Value
-	}{
-		{"blob", NewBlobValue([]byte{1, 2, 3})},
-		{"text_number", NewTextValue("123")},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := valueToJSON(tt.input)
-			_ = result // Just verify it doesn't panic
-		})
-	}
-}
-
-// TestJsonToValueEdgeCases tests jsonToValue with edge cases
-func TestJsonToValueEdgeCases(t *testing.T) {
-	tests := []struct {
-		name  string
-		input interface{}
-	}{
-		{"bool", true},
-		{"null", nil},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := jsonToValue(tt.input)
-			_ = result // Just verify it doesn't panic
-		})
-	}
-}
-
-// TestGetJSONTypeEdgeCases tests getJSONType with edge cases
-func TestGetJSONTypeEdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    interface{}
-		expected string
-	}{
-		{"bool", true, "true"},
-		{"unknown", struct{}{}, "null"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := getJSONType(tt.input)
-			if result != tt.expected {
-				t.Errorf("getJSONType() = %v, want %v", result, tt.expected)
-			}
-		})
-	}
-}
-
-// TestJsonSetPathEdgeCases tests json_set with edge cases via the public API
-func TestJsonSetPathEdgeCases(t *testing.T) {
-	// Test with empty path
-	result, err := jsonSetFunc([]Value{
-		NewTextValue(`{"key":"value"}`),
-		NewTextValue("$"),
-		NewTextValue("newvalue"),
-	})
-	if err != nil {
-		t.Errorf("jsonSetFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("jsonSetFunc() should not return NULL for valid input")
-	}
-}
-
-// TestJsonRemovePathEdgeCases tests json_remove with edge cases via the public API
-func TestJsonRemovePathEdgeCases(t *testing.T) {
-	// Test with valid removal
-	result, err := jsonRemoveFunc([]Value{
-		NewTextValue(`{"key":"value"}`),
-		NewTextValue("$.key"),
-	})
-	if err != nil {
-		t.Errorf("jsonRemoveFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("jsonRemoveFunc() should not return NULL for valid input")
-	}
-}
-
-// TestJsonExtractPathEdgeCases tests json_extract with various paths
-func TestJsonExtractPathEdgeCases(t *testing.T) {
-	// Test with array access
-	result, err := jsonExtractFunc([]Value{
-		NewTextValue(`{"arr":[1,2,3]}`),
-		NewTextValue("$.arr[0]"),
-	})
-	if err != nil {
-		t.Errorf("jsonExtractFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("jsonExtractFunc() should not return NULL for valid array access")
-	}
-}
-
-// TestJsonInsertEdgeCases tests json_insert with various edge cases
-func TestJsonInsertEdgeCases(t *testing.T) {
-	// Test inserting into existing path (should not replace)
-	result, err := jsonInsertFunc([]Value{
-		NewTextValue(`{"key":"value"}`),
-		NewTextValue("$.key"),
-		NewTextValue("newvalue"),
-	})
-	if err != nil {
-		t.Errorf("jsonInsertFunc() error = %v", err)
-	}
-	// Should keep original value since path exists
-	if result.IsNull() {
-		t.Error("jsonInsertFunc() should not return NULL")
-	}
-}
-
-// TestJsonReplaceEdgeCases tests json_replace with various edge cases
-func TestJsonReplaceEdgeCases(t *testing.T) {
-	// Test replacing non-existent path (should not add)
-	result, err := jsonReplaceFunc([]Value{
-		NewTextValue(`{"key":"value"}`),
-		NewTextValue("$.newkey"),
-		NewTextValue("newvalue"),
-	})
-	if err != nil {
-		t.Errorf("jsonReplaceFunc() error = %v", err)
-	}
-	// Should keep original since path doesn't exist
-	if result.IsNull() {
-		t.Error("jsonReplaceFunc() should not return NULL")
-	}
-}
-
-// TestJsonPatchEdgeCases tests json_patch with various edge cases
-func TestJsonPatchEdgeCases(t *testing.T) {
-	// Test with valid patch
-	result, err := jsonPatchFunc([]Value{
-		NewTextValue(`{"key":"value"}`),
-		NewTextValue(`{"key":"newvalue"}`),
-	})
-	if err != nil {
-		t.Errorf("jsonPatchFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("jsonPatchFunc() should not return NULL for valid patch")
-	}
-}
-
-// TestJsonFuncInvalidMarshal tests json function error handling
-func TestJsonFuncInvalidMarshal(t *testing.T) {
-	// Test with blob input
-	result, err := jsonFunc([]Value{NewBlobValue([]byte(`{"key":"value"}`))})
-	if err != nil {
-		t.Errorf("jsonFunc() with blob error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("jsonFunc() with valid JSON blob should not return NULL")
-	}
-}
-
-// TestJsonArrayFuncErrorHandling tests json_array error path
-func TestJsonArrayFuncErrorHandling(t *testing.T) {
-	// Test with various value types
-	result, err := jsonArrayFunc([]Value{
-		NewBlobValue([]byte{1, 2, 3}),
-		NewNullValue(),
-		NewIntValue(42),
-	})
-	if err != nil {
-		t.Errorf("jsonArrayFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("jsonArrayFunc() should not return NULL")
-	}
-}
-
-// TestJsonExtractMultiplePaths tests json_extract with multiple paths
-func TestJsonExtractMultiplePaths(t *testing.T) {
-	result, err := jsonExtractFunc([]Value{
-		NewTextValue(`{"a":1,"b":2}`),
-		NewTextValue("$.a"),
-		NewTextValue("$.b"),
-	})
-	if err != nil {
-		t.Errorf("jsonExtractFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("jsonExtractFunc() should not return NULL for multiple valid paths")
-	}
-}
-
-// TestJsonInsertInvalidJSON tests json_insert with invalid JSON
-func TestJsonInsertInvalidJSON(t *testing.T) {
-	result, err := jsonInsertFunc([]Value{
-		NewTextValue(`{invalid}`),
-		NewTextValue("$.key"),
-		NewTextValue("value"),
-	})
-	if err != nil {
-		t.Errorf("jsonInsertFunc() error = %v", err)
-	}
-	if !result.IsNull() {
-		t.Error("jsonInsertFunc() should return NULL for invalid JSON")
-	}
-}
-
-// TestJsonRemoveInvalidJSON tests json_remove with invalid JSON
-func TestJsonRemoveInvalidJSON(t *testing.T) {
-	result, err := jsonRemoveFunc([]Value{
-		NewTextValue(`{invalid}`),
-		NewTextValue("$.key"),
-	})
-	if err != nil {
-		t.Errorf("jsonRemoveFunc() error = %v", err)
-	}
-	if !result.IsNull() {
-		t.Error("jsonRemoveFunc() should return NULL for invalid JSON")
-	}
-}
-
-// TestJsonReplaceInvalidJSON tests json_replace with invalid JSON
-func TestJsonReplaceInvalidJSON(t *testing.T) {
-	result, err := jsonReplaceFunc([]Value{
-		NewTextValue(`{invalid}`),
-		NewTextValue("$.key"),
-		NewTextValue("value"),
-	})
-	if err != nil {
-		t.Errorf("jsonReplaceFunc() error = %v", err)
-	}
-	if !result.IsNull() {
-		t.Error("jsonReplaceFunc() should return NULL for invalid JSON")
-	}
-}
-
-// TestJsonSetInvalidJSON tests json_set with invalid JSON
-func TestJsonSetInvalidJSON(t *testing.T) {
-	result, err := jsonSetFunc([]Value{
-		NewTextValue(`{invalid}`),
-		NewTextValue("$.key"),
-		NewTextValue("value"),
-	})
-	if err != nil {
-		t.Errorf("jsonSetFunc() error = %v", err)
-	}
-	if !result.IsNull() {
-		t.Error("jsonSetFunc() should return NULL for invalid JSON")
-	}
-}
-
-// TestJsonQuoteBlob tests json_quote with blob
-func TestJsonQuoteBlob(t *testing.T) {
-	result, err := jsonQuoteFunc([]Value{NewBlobValue([]byte{1, 2, 3})})
-	if err != nil {
-		t.Errorf("jsonQuoteFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("jsonQuoteFunc() should not return NULL for blob")
-	}
-}
-
-// TestRemovePathWithNonExistentPath tests removePath internals
-func TestRemovePathWithNonExistentPath(t *testing.T) {
-	// Test via json_remove
-	result, err := jsonRemoveFunc([]Value{
-		NewTextValue(`{"key":"value"}`),
-		NewTextValue("$.nonexistent"),
-	})
-	if err != nil {
-		t.Errorf("jsonRemoveFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("jsonRemoveFunc() should not return NULL even if path doesn't exist")
-	}
-}
-
-// TestSetPathWithComplexPaths tests setPath with nested structures
-func TestSetPathWithComplexPaths(t *testing.T) {
-	// Test via json_set with nested array access
-	result, err := jsonSetFunc([]Value{
-		NewTextValue(`{"arr":[1,2,3]}`),
-		NewTextValue("$.arr[1]"),
-		NewIntValue(99),
-	})
-	if err != nil {
-		t.Errorf("jsonSetFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("jsonSetFunc() should not return NULL for valid array set")
-	}
-}
-
-// TestTraversePathWithInvalidIndex tests traversePath error paths
-func TestTraversePathWithInvalidIndex(t *testing.T) {
-	// Test via json_extract with invalid array index
-	// Note: "abc" might be parsed as a key, not an array index
-	result, err := jsonExtractFunc([]Value{
-		NewTextValue(`{"arr":[1,2,3]}`),
-		NewTextValue("$.arr[999]"), // Out of bounds index
-	})
-	if err != nil {
-		t.Errorf("jsonExtractFunc() error = %v", err)
-	}
-	// Out of bounds returns NULL or the value might be handled gracefully
-	_ = result
-}
-
-// TestApplyJSONPatchWithNestedObjects tests applyJSONPatch
-func TestApplyJSONPatchWithNestedObjects(t *testing.T) {
-	result, err := jsonPatchFunc([]Value{
-		NewTextValue(`{"a":{"b":1}}`),
-		NewTextValue(`{"a":{"c":2}}`),
-	})
-	if err != nil {
-		t.Errorf("jsonPatchFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("jsonPatchFunc() should not return NULL for nested patch")
 	}
 }

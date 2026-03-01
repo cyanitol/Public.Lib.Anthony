@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
 // Package engine implements the top-level integration for the SQLite database engine.
 // It ties together the pager, btree, schema, parser, VDBE, and function components.
 package engine

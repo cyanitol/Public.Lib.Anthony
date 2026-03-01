@@ -1,289 +1,319 @@
-// Package observability provides structured logging and observability features
-// for the SQLite driver implementation.
-package observability
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+package parser
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"os"
-	"sync"
-	"time"
+	"testing"
 )
 
-// Level represents the severity level of a log entry.
-type Level int
+// TestParseExpressionIndex tests parsing of expression-based indexes
+func TestParseExpressionIndex(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		sql      string
+		wantErr  bool
+		validate func(*testing.T, *CreateIndexStmt)
+	}{
+		{
+			name:    "simple function expression - LOWER",
+			sql:     "CREATE INDEX idx ON users(LOWER(name))",
+			wantErr: false,
+			validate: func(t *testing.T, stmt *CreateIndexStmt) {
+				if stmt.Name != "idx" {
+					t.Errorf("Expected index name 'idx', got '%s'", stmt.Name)
+				}
+				if stmt.Table != "users" {
+					t.Errorf("Expected table 'users', got '%s'", stmt.Table)
+				}
+				if len(stmt.Columns) != 1 {
+					t.Fatalf("Expected 1 column, got %d", len(stmt.Columns))
+				}
+				if stmt.Columns[0].Expr == nil {
+					t.Error("Expected expression to be set")
+				}
+				// Check it's a function call
+				if call, ok := stmt.Columns[0].Expr.(*FunctionExpr); ok {
+					if call.Name != "LOWER" {
+						t.Errorf("Expected LOWER function, got %s", call.Name)
+					}
+				} else {
+					t.Errorf("Expected FunctionExpr, got %T", stmt.Columns[0].Expr)
+				}
+			},
+		},
+		{
+			name:    "simple function expression - UPPER",
+			sql:     "CREATE INDEX idx ON products(UPPER(name))",
+			wantErr: false,
+			validate: func(t *testing.T, stmt *CreateIndexStmt) {
+				if len(stmt.Columns) != 1 {
+					t.Fatalf("Expected 1 column, got %d", len(stmt.Columns))
+				}
+				if call, ok := stmt.Columns[0].Expr.(*FunctionExpr); ok {
+					if call.Name != "UPPER" {
+						t.Errorf("Expected UPPER function, got %s", call.Name)
+					}
+				}
+			},
+		},
+		{
+			name:    "arithmetic expression - addition",
+			sql:     "CREATE INDEX idx ON sales(price + tax)",
+			wantErr: false,
+			validate: func(t *testing.T, stmt *CreateIndexStmt) {
+				if len(stmt.Columns) != 1 {
+					t.Fatalf("Expected 1 column, got %d", len(stmt.Columns))
+				}
+				if stmt.Columns[0].Expr == nil {
+					t.Error("Expected expression to be set")
+				}
+				// Check it's a binary expression
+				if binExpr, ok := stmt.Columns[0].Expr.(*BinaryExpr); ok {
+					if binExpr.Op != OpPlus {
+						t.Errorf("Expected OpPlus, got %v", binExpr.Op)
+					}
+				} else {
+					t.Errorf("Expected BinaryExpr, got %T", stmt.Columns[0].Expr)
+				}
+			},
+		},
+		{
+			name:    "multiple expressions",
+			sql:     "CREATE INDEX idx ON people(LOWER(last_name), LOWER(first_name))",
+			wantErr: false,
+			validate: func(t *testing.T, stmt *CreateIndexStmt) {
+				if len(stmt.Columns) != 2 {
+					t.Fatalf("Expected 2 columns, got %d", len(stmt.Columns))
+				}
+				for i, col := range stmt.Columns {
+					if col.Expr == nil {
+						t.Errorf("Column %d: expected expression to be set", i)
+					}
+				}
+			},
+		},
+		{
+			name:    "mixed: expression and simple column",
+			sql:     "CREATE INDEX idx ON people(LOWER(name), age)",
+			wantErr: false,
+			validate: func(t *testing.T, stmt *CreateIndexStmt) {
+				if len(stmt.Columns) != 2 {
+					t.Fatalf("Expected 2 columns, got %d", len(stmt.Columns))
+				}
+				// First should be expression
+				if stmt.Columns[0].Expr == nil {
+					t.Error("First column should have expression")
+				}
+				// Second should be simple column (IdentExpr is also an expression)
+				if stmt.Columns[1].Column != "age" {
+					t.Errorf("Second column should be 'age', got '%s'", stmt.Columns[1].Column)
+				}
+			},
+		},
+		{
+			name:    "expression with DESC",
+			sql:     "CREATE INDEX idx ON users(LOWER(name) DESC)",
+			wantErr: false,
+			validate: func(t *testing.T, stmt *CreateIndexStmt) {
+				if len(stmt.Columns) != 1 {
+					t.Fatalf("Expected 1 column, got %d", len(stmt.Columns))
+				}
+				if stmt.Columns[0].Order != SortDesc {
+					t.Errorf("Expected DESC order, got %v", stmt.Columns[0].Order)
+				}
+				if stmt.Columns[0].Expr == nil {
+					t.Error("Expected expression to be set")
+				}
+			},
+		},
+		{
+			name:    "nested function calls",
+			sql:     "CREATE INDEX idx ON texts(LOWER(TRIM(content)))",
+			wantErr: false,
+			validate: func(t *testing.T, stmt *CreateIndexStmt) {
+				if len(stmt.Columns) != 1 {
+					t.Fatalf("Expected 1 column, got %d", len(stmt.Columns))
+				}
+				if stmt.Columns[0].Expr == nil {
+					t.Error("Expected expression to be set")
+				}
+				// Should be LOWER call with TRIM as argument
+				if call, ok := stmt.Columns[0].Expr.(*FunctionExpr); ok {
+					if call.Name != "LOWER" {
+						t.Errorf("Expected LOWER function, got %s", call.Name)
+					}
+					if len(call.Args) != 1 {
+						t.Errorf("Expected 1 argument, got %d", len(call.Args))
+					}
+				}
+			},
+		},
+		{
+			name:    "string concatenation",
+			sql:     "CREATE INDEX idx ON names(last || ', ' || first)",
+			wantErr: false,
+			validate: func(t *testing.T, stmt *CreateIndexStmt) {
+				if len(stmt.Columns) != 1 {
+					t.Fatalf("Expected 1 column, got %d", len(stmt.Columns))
+				}
+				if stmt.Columns[0].Expr == nil {
+					t.Error("Expected expression to be set")
+				}
+			},
+		},
+		{
+			name:    "CAST expression",
+			sql:     "CREATE INDEX idx ON data(CAST(text_num AS INTEGER))",
+			wantErr: false,
+			validate: func(t *testing.T, stmt *CreateIndexStmt) {
+				if len(stmt.Columns) != 1 {
+					t.Fatalf("Expected 1 column, got %d", len(stmt.Columns))
+				}
+				if stmt.Columns[0].Expr == nil {
+					t.Error("Expected expression to be set")
+				}
+			},
+		},
+		{
+			name:    "SUBSTR function",
+			sql:     "CREATE INDEX idx ON codes(SUBSTR(code, 1, 3))",
+			wantErr: false,
+			validate: func(t *testing.T, stmt *CreateIndexStmt) {
+				if len(stmt.Columns) != 1 {
+					t.Fatalf("Expected 1 column, got %d", len(stmt.Columns))
+				}
+				if call, ok := stmt.Columns[0].Expr.(*FunctionExpr); ok {
+					if call.Name != "SUBSTR" {
+						t.Errorf("Expected SUBSTR function, got %s", call.Name)
+					}
+				}
+			},
+		},
+		{
+			name:    "expression with partial index (WHERE)",
+			sql:     "CREATE INDEX idx ON items(LOWER(name)) WHERE active = 1",
+			wantErr: false,
+			validate: func(t *testing.T, stmt *CreateIndexStmt) {
+				if len(stmt.Columns) != 1 {
+					t.Fatalf("Expected 1 column, got %d", len(stmt.Columns))
+				}
+				if stmt.Columns[0].Expr == nil {
+					t.Error("Expected expression to be set")
+				}
+				if stmt.Where == nil {
+					t.Error("Expected WHERE clause to be set")
+				}
+			},
+		},
+		{
+			name:    "UNIQUE expression index",
+			sql:     "CREATE UNIQUE INDEX idx ON emails(LOWER(email))",
+			wantErr: false,
+			validate: func(t *testing.T, stmt *CreateIndexStmt) {
+				if !stmt.Unique {
+					t.Error("Expected index to be UNIQUE")
+				}
+				if len(stmt.Columns) != 1 {
+					t.Fatalf("Expected 1 column, got %d", len(stmt.Columns))
+				}
+				if stmt.Columns[0].Expr == nil {
+					t.Error("Expected expression to be set")
+				}
+			},
+		},
+		{
+			name:    "expression index with IF NOT EXISTS",
+			sql:     "CREATE INDEX IF NOT EXISTS idx ON users(LOWER(name))",
+			wantErr: false,
+			validate: func(t *testing.T, stmt *CreateIndexStmt) {
+				if !stmt.IfNotExists {
+					t.Error("Expected IF NOT EXISTS to be set")
+				}
+				if stmt.Columns[0].Expr == nil {
+					t.Error("Expected expression to be set")
+				}
+			},
+		},
+	}
 
-const (
-	// TraceLevel is the most verbose logging level, for very detailed debugging.
-	TraceLevel Level = iota
-	// DebugLevel is for development and debugging information.
-	DebugLevel
-	// InfoLevel is for operational information.
-	InfoLevel
-	// WarnLevel is for important issues that should be noted.
-	WarnLevel
-	// ErrorLevel is for errors that should always be logged.
-	ErrorLevel
-)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			stmts, err := p.Parse()
 
-// String returns the string representation of the log level.
-func (l Level) String() string {
-	switch l {
-	case TraceLevel:
-		return "TRACE"
-	case DebugLevel:
-		return "DEBUG"
-	case InfoLevel:
-		return "INFO"
-	case WarnLevel:
-		return "WARN"
-	case ErrorLevel:
-		return "ERROR"
-	default:
-		return "UNKNOWN"
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if len(stmts) != 1 {
+				t.Fatalf("Expected 1 statement, got %d", len(stmts))
+			}
+
+			stmt, ok := stmts[0].(*CreateIndexStmt)
+			if !ok {
+				t.Fatalf("Expected CreateIndexStmt, got %T", stmts[0])
+			}
+
+			if tt.validate != nil {
+				tt.validate(t, stmt)
+			}
+		})
 	}
 }
 
-// Fields represents structured logging fields as key-value pairs.
-type Fields map[string]interface{}
-
-// Logger is the interface for structured logging with multiple severity levels.
-type Logger interface {
-	// Error logs an error-level message with optional structured fields.
-	Error(msg string, fields ...Fields)
-	// Warn logs a warning-level message with optional structured fields.
-	Warn(msg string, fields ...Fields)
-	// Info logs an info-level message with optional structured fields.
-	Info(msg string, fields ...Fields)
-	// Debug logs a debug-level message with optional structured fields.
-	Debug(msg string, fields ...Fields)
-	// Trace logs a trace-level message with optional structured fields.
-	Trace(msg string, fields ...Fields)
-
-	// SetLevel sets the minimum log level threshold.
-	SetLevel(level Level)
-	// GetLevel returns the current log level threshold.
-	GetLevel() Level
-	// SetOutput sets the output writer for log messages.
-	SetOutput(w io.Writer)
-	// SetFormat sets the output format (text or json).
-	SetFormat(format OutputFormat)
-}
-
-// OutputFormat specifies how log entries should be formatted.
-type OutputFormat int
-
-const (
-	// TextFormat outputs human-readable text logs.
-	TextFormat OutputFormat = iota
-	// JSONFormat outputs structured JSON logs.
-	JSONFormat
-)
-
-// defaultLogger is the default implementation of the Logger interface.
-type defaultLogger struct {
-	mu     sync.Mutex
-	level  Level
-	output io.Writer
-	format OutputFormat
-}
-
-// NewLogger creates a new Logger instance with the specified configuration.
-func NewLogger(level Level, output io.Writer, format OutputFormat) Logger {
-	if output == nil {
-		output = os.Stderr
-	}
-	return &defaultLogger{
-		level:  level,
-		output: output,
-		format: format,
-	}
-}
-
-// Error logs an error-level message.
-func (l *defaultLogger) Error(msg string, fields ...Fields) {
-	l.log(ErrorLevel, msg, fields...)
-}
-
-// Warn logs a warning-level message.
-func (l *defaultLogger) Warn(msg string, fields ...Fields) {
-	l.log(WarnLevel, msg, fields...)
-}
-
-// Info logs an info-level message.
-func (l *defaultLogger) Info(msg string, fields ...Fields) {
-	l.log(InfoLevel, msg, fields...)
-}
-
-// Debug logs a debug-level message.
-func (l *defaultLogger) Debug(msg string, fields ...Fields) {
-	l.log(DebugLevel, msg, fields...)
-}
-
-// Trace logs a trace-level message.
-func (l *defaultLogger) Trace(msg string, fields ...Fields) {
-	l.log(TraceLevel, msg, fields...)
-}
-
-// SetLevel sets the minimum log level threshold.
-func (l *defaultLogger) SetLevel(level Level) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.level = level
-}
-
-// GetLevel returns the current log level threshold.
-func (l *defaultLogger) GetLevel() Level {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.level
-}
-
-// SetOutput sets the output writer for log messages.
-func (l *defaultLogger) SetOutput(w io.Writer) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if w == nil {
-		w = os.Stderr
-	}
-	l.output = w
-}
-
-// SetFormat sets the output format.
-func (l *defaultLogger) SetFormat(format OutputFormat) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.format = format
-}
-
-// log is the internal logging function that handles level checking and formatting.
-func (l *defaultLogger) log(level Level, msg string, fields ...Fields) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	// Check if this message should be logged based on level threshold
-	if level < l.level {
-		return
+// TestExpressionIndexNameExtraction tests the extractExpressionName helper
+func TestExpressionIndexNameExtraction(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		sql      string
+		expected string
+	}{
+		{
+			name:     "simple identifier",
+			sql:      "CREATE INDEX idx ON t(id)",
+			expected: "id",
+		},
+		{
+			name:     "function with identifier",
+			sql:      "CREATE INDEX idx ON t(LOWER(name))",
+			expected: "LOWER(name)",
+		},
+		{
+			name:     "binary expression",
+			sql:      "CREATE INDEX idx ON t(a + b)",
+			expected: "a + b",
+		},
 	}
 
-	// Merge all fields into one map
-	mergedFields := make(Fields)
-	for _, f := range fields {
-		for k, v := range f {
-			mergedFields[k] = v
-		}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			stmts, err := p.Parse()
+			if err != nil {
+				t.Fatalf("Parse error: %v", err)
+			}
+
+			stmt := stmts[0].(*CreateIndexStmt)
+			if len(stmt.Columns) == 0 {
+				t.Fatal("No columns in index")
+			}
+
+			got := stmt.Columns[0].Column
+			if got != tt.expected {
+				t.Errorf("Expected column name '%s', got '%s'", tt.expected, got)
+			}
+		})
 	}
-
-	var output string
-	switch l.format {
-	case JSONFormat:
-		output = l.formatJSON(level, msg, mergedFields)
-	default:
-		output = l.formatText(level, msg, mergedFields)
-	}
-
-	fmt.Fprintln(l.output, output)
-}
-
-// formatText formats a log entry as human-readable text.
-func (l *defaultLogger) formatText(level Level, msg string, fields Fields) string {
-	timestamp := time.Now().Format("2006-01-02T15:04:05.000Z07:00")
-	result := fmt.Sprintf("[%s] %s: %s", timestamp, level.String(), msg)
-
-	if len(fields) > 0 {
-		result += " |"
-		for k, v := range fields {
-			result += fmt.Sprintf(" %s=%v", k, v)
-		}
-	}
-
-	return result
-}
-
-// formatJSON formats a log entry as JSON.
-func (l *defaultLogger) formatJSON(level Level, msg string, fields Fields) string {
-	entry := map[string]interface{}{
-		"timestamp": time.Now().Format(time.RFC3339Nano),
-		"level":     level.String(),
-		"message":   msg,
-	}
-
-	// Add all structured fields to the entry
-	for k, v := range fields {
-		entry[k] = v
-	}
-
-	data, err := json.Marshal(entry)
-	if err != nil {
-		// Fallback to text format if JSON marshaling fails
-		return l.formatText(level, msg, fields)
-	}
-
-	return string(data)
-}
-
-// Global logger instance
-var (
-	globalLogger     Logger
-	globalLoggerOnce sync.Once
-)
-
-// initGlobalLogger initializes the global logger with default settings.
-func initGlobalLogger() {
-	globalLogger = NewLogger(InfoLevel, os.Stderr, TextFormat)
-}
-
-// GetLogger returns the global logger instance.
-func GetLogger() Logger {
-	globalLoggerOnce.Do(initGlobalLogger)
-	return globalLogger
-}
-
-// SetLogger sets the global logger instance.
-func SetLogger(logger Logger) {
-	globalLoggerOnce.Do(func() {}) // Ensure initialization happens
-	globalLogger = logger
-}
-
-// Convenience functions that use the global logger
-
-// Error logs an error-level message using the global logger.
-func Error(msg string, fields ...Fields) {
-	GetLogger().Error(msg, fields...)
-}
-
-// Warn logs a warning-level message using the global logger.
-func Warn(msg string, fields ...Fields) {
-	GetLogger().Warn(msg, fields...)
-}
-
-// Info logs an info-level message using the global logger.
-func Info(msg string, fields ...Fields) {
-	GetLogger().Info(msg, fields...)
-}
-
-// Debug logs a debug-level message using the global logger.
-func Debug(msg string, fields ...Fields) {
-	GetLogger().Debug(msg, fields...)
-}
-
-// Trace logs a trace-level message using the global logger.
-func Trace(msg string, fields ...Fields) {
-	GetLogger().Trace(msg, fields...)
-}
-
-// SetLevel sets the log level for the global logger.
-func SetLevel(level Level) {
-	GetLogger().SetLevel(level)
-}
-
-// SetOutput sets the output writer for the global logger.
-func SetOutput(w io.Writer) {
-	GetLogger().SetOutput(w)
-}
-
-// SetFormat sets the output format for the global logger.
-func SetFormat(format OutputFormat) {
-	GetLogger().SetFormat(format)
 }

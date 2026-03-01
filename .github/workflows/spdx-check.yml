@@ -1,0 +1,35 @@
+name: SPDX License Header Check
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  spdx-check:
+    name: Check SPDX headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check SPDX-License-Identifier in source files
+        run: |
+          MISSING=0
+          # Check all .go and .sh files tracked by git
+          while IFS= read -r -d '' file; do
+            if ! head -20 "$file" | grep -q "SPDX-License-Identifier:"; then
+              echo "MISSING SPDX header: $file"
+              MISSING=$((MISSING + 1))
+            fi
+          done < <(git ls-files -z -- '*.go' '*.sh')
+          if [ "$MISSING" -gt 0 ]; then
+            echo ""
+            echo "ERROR: $MISSING file(s) are missing SPDX-License-Identifier headers."
+            echo "Add this line as the first line of each file:"
+            echo "  // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)"
+            exit 1
+          fi
+          echo "All source files have SPDX headers. OK."

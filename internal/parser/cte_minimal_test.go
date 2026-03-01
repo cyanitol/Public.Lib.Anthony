@@ -1,36 +1,29 @@
-package parser
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// Package constraint provides constraint-related functionality for SQLite databases.
+// Collation sequences have been moved to the internal/collation package to avoid
+// import cycles. This file now provides re-exports for backwards compatibility.
+package constraint
 
 import (
-	"testing"
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/collation"
 )
 
-// Minimal test to verify CTE parsing works
-func TestCTE_BasicParsing(t *testing.T) {
-	t.Parallel()
-	sql := "WITH cte AS (SELECT * FROM users) SELECT * FROM cte"
+// Re-export types from the collation package for backwards compatibility
+type (
+	CollationFunc     = collation.CollationFunc
+	Collation         = collation.Collation
+	CollationRegistry = collation.CollationRegistry
+)
 
-	lexer := NewLexer(sql)
-	tokens := []Token{}
-	for {
-		tok := lexer.NextToken()
-		if tok.Type != TK_SPACE && tok.Type != TK_COMMENT {
-			tokens = append(tokens, tok)
-		}
-		if tok.Type == TK_EOF {
-			break
-		}
-	}
-
-	// Verify WITH token exists
-	foundWith := false
-	for _, tok := range tokens {
-		if tok.Type == TK_WITH {
-			foundWith = true
-			break
-		}
-	}
-
-	if !foundWith {
-		t.Error("TK_WITH token not found in lexer output")
-	}
-}
+// Re-export functions from the collation package
+var (
+	NewCollationRegistry = collation.NewCollationRegistry
+	GlobalRegistry       = collation.GlobalRegistry
+	RegisterCollation    = collation.RegisterCollation
+	GetCollation         = collation.GetCollation
+	UnregisterCollation  = collation.UnregisterCollation
+	Compare              = collation.Compare
+	CompareBytes         = collation.CompareBytes
+	GetCollationFunc     = collation.GetCollationFunc
+	DefaultCollation     = collation.DefaultCollation
+)

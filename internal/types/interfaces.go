@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
 // Package types provides typed interfaces to break import cycles between packages.
 // These interfaces replace the use of interface{} in VDBEContext and other contexts
 // where circular dependencies would otherwise occur.

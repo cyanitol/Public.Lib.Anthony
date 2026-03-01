@@ -1,592 +1,609 @@
-package btree
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+package functions
 
 import (
-	"encoding/binary"
+	"math"
 	"testing"
 )
 
-// TestMergePage_WithProvider tests merge with a PageProvider
-func TestMergePage_WithProvider(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	pageSize := bt.PageSize
+// TestSumFunc_IntegerOverflow tests integer overflow in sum function
+func TestSumFunc_IntegerOverflow(t *testing.T) {
+	f := &SumFunc{}
 
-	// Create a mock provider
-	mockProvider := &MockPageProvider{
-		pages: make(map[uint32][]byte),
-	}
-	bt.Provider = mockProvider
-
-	// Create leaf page 2
-	page2Cells := []struct {
-		rowid   int64
-		payload []byte
-	}{
-		{1, []byte("row1")},
-		{2, []byte("row2")},
-	}
-	page2Data := createTestPage(2, pageSize, PageTypeLeafTable, page2Cells)
-	bt.SetPage(2, page2Data)
-	mockProvider.pages[2] = page2Data
-
-	// Create leaf page 3
-	page3Cells := []struct {
-		rowid   int64
-		payload []byte
-	}{
-		{3, []byte("row3")},
-		{4, []byte("row4")},
-	}
-	page3Data := createTestPage(3, pageSize, PageTypeLeafTable, page3Cells)
-	bt.SetPage(3, page3Data)
-	mockProvider.pages[3] = page3Data
-
-	// Create interior root page 1
-	rootCells := []struct {
-		childPage uint32
-		rowid     int64
-	}{
-		{2, 2},
-	}
-	rootData := createInteriorPage(1, pageSize, rootCells, 3)
-	bt.SetPage(1, rootData)
-	mockProvider.pages[1] = rootData
-
-	// Position cursor on page 2
-	cursor := NewCursor(bt, 1)
-	found, err := cursor.SeekRowid(1)
+	// Add a large positive integer
+	err := f.Step([]Value{NewIntValue(math.MaxInt64 - 10)})
 	if err != nil {
-		t.Fatalf("SeekRowid() error = %v", err)
-	}
-	if !found {
-		t.Fatal("SeekRowid() did not find rowid 1")
+		t.Fatalf("Step() error = %v", err)
 	}
 
-	// Attempt merge
-	merged, err := cursor.MergePage()
+	// Add another value that causes overflow
+	err = f.Step([]Value{NewIntValue(20)})
 	if err != nil {
-		t.Fatalf("MergePage() error = %v", err)
+		t.Fatalf("Step() error = %v", err)
 	}
 
-	if merged {
-		// Verify dirty pages were marked
-		if !mockProvider.dirtyPages[1] {
-			t.Error("Parent page should be marked dirty")
-		}
-		if !mockProvider.dirtyPages[2] {
-			t.Error("Left page should be marked dirty")
-		}
+	result, err := f.Final()
+	if err != nil {
+		t.Fatalf("Final() error = %v", err)
+	}
+
+	// Should have switched to float
+	if result.Type() != TypeFloat {
+		t.Errorf("Final() type = %v, want TypeFloat after overflow", result.Type())
 	}
 }
 
-// TestMergePage_LeftSibling tests merging with left sibling
-func TestMergePage_LeftSibling(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	pageSize := bt.PageSize
+// TestSumFunc_NegativeOverflow tests negative integer overflow
+func TestSumFunc_NegativeOverflow(t *testing.T) {
+	f := &SumFunc{}
 
-	// Create 3 leaf pages
-	page2Data := createTestPage(2, pageSize, PageTypeLeafTable, []struct {
-		rowid   int64
-		payload []byte
-	}{{1, []byte("a")}})
-	bt.SetPage(2, page2Data)
-
-	page3Data := createTestPage(3, pageSize, PageTypeLeafTable, []struct {
-		rowid   int64
-		payload []byte
-	}{{2, []byte("b")}})
-	bt.SetPage(3, page3Data)
-
-	page4Data := createTestPage(4, pageSize, PageTypeLeafTable, []struct {
-		rowid   int64
-		payload []byte
-	}{{3, []byte("c")}})
-	bt.SetPage(4, page4Data)
-
-	// Create interior root with 3 children
-	rootCells := []struct {
-		childPage uint32
-		rowid     int64
-	}{
-		{2, 1},
-		{3, 2},
-	}
-	rootData := createInteriorPage(1, pageSize, rootCells, 4)
-	bt.SetPage(1, rootData)
-
-	// Position cursor on middle page (3)
-	cursor := NewCursor(bt, 1)
-	found, err := cursor.SeekRowid(2)
+	// Add a large negative integer
+	err := f.Step([]Value{NewIntValue(math.MinInt64 + 10)})
 	if err != nil {
-		t.Fatalf("SeekRowid() error = %v", err)
-	}
-	if !found {
-		t.Fatal("SeekRowid() did not find rowid 2")
+		t.Fatalf("Step() error = %v", err)
 	}
 
-	// Verify cursor is on page 3
-	if cursor.CurrentPage != 3 {
-		t.Fatalf("Cursor on page %d, want page 3", cursor.CurrentPage)
-	}
-
-	// Attempt merge (should merge with left sibling page 2)
-	merged, err := cursor.MergePage()
+	// Add another negative value that causes underflow
+	err = f.Step([]Value{NewIntValue(-20)})
 	if err != nil {
-		t.Fatalf("MergePage() error = %v", err)
+		t.Fatalf("Step() error = %v", err)
 	}
 
-	if merged {
-		t.Log("Successfully merged page 3 with left sibling")
-		// Verify page 3 was freed
-		if _, ok := bt.Pages[3]; ok {
-			t.Error("Page 3 should have been freed")
-		}
+	result, err := f.Final()
+	if err != nil {
+		t.Fatalf("Final() error = %v", err)
+	}
+
+	// Should have switched to float
+	if result.Type() != TypeFloat {
+		t.Errorf("Final() type = %v, want TypeFloat after underflow", result.Type())
 	}
 }
 
-// TestMergePage_RightmostChild tests merging rightmost child
-func TestMergePage_RightmostChild(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	pageSize := bt.PageSize
+// TestSumFunc_MixedTypes tests sum with mixed integer and float
+func TestSumFunc_MixedTypes(t *testing.T) {
+	f := &SumFunc{}
 
-	// Create 2 leaf pages
-	page2Data := createTestPage(2, pageSize, PageTypeLeafTable, []struct {
-		rowid   int64
-		payload []byte
-	}{{1, []byte("a")}})
-	bt.SetPage(2, page2Data)
-
-	page3Data := createTestPage(3, pageSize, PageTypeLeafTable, []struct {
-		rowid   int64
-		payload []byte
-	}{{2, []byte("b")}})
-	bt.SetPage(3, page3Data)
-
-	// Create interior root where page 3 is the rightmost child
-	rootCells := []struct {
-		childPage uint32
-		rowid     int64
-	}{
-		{2, 1},
-	}
-	rootData := createInteriorPage(1, pageSize, rootCells, 3)
-	bt.SetPage(1, rootData)
-
-	// Position cursor on rightmost page (3)
-	cursor := NewCursor(bt, 1)
-	found, err := cursor.SeekRowid(2)
+	err := f.Step([]Value{NewIntValue(10)})
 	if err != nil {
-		t.Fatalf("SeekRowid() error = %v", err)
-	}
-	if !found {
-		t.Fatal("SeekRowid() did not find rowid 2")
+		t.Fatalf("Step() error = %v", err)
 	}
 
-	// Verify cursor is on page 3 (rightmost)
-	if cursor.CurrentPage != 3 {
-		t.Fatalf("Cursor on page %d, want page 3", cursor.CurrentPage)
-	}
-
-	// Attempt merge
-	merged, err := cursor.MergePage()
+	err = f.Step([]Value{NewFloatValue(3.14)})
 	if err != nil {
-		t.Fatalf("MergePage() error = %v", err)
+		t.Fatalf("Step() error = %v", err)
 	}
 
-	if merged {
-		t.Log("Successfully merged rightmost page")
+	result, err := f.Final()
+	if err != nil {
+		t.Fatalf("Final() error = %v", err)
+	}
+
+	if result.Type() != TypeFloat {
+		t.Errorf("Final() type = %v, want TypeFloat", result.Type())
+	}
+
+	expected := 13.14
+	got := result.AsFloat64()
+	if math.Abs(got-expected) > 0.001 {
+		t.Errorf("Final() = %v, want %v", got, expected)
 	}
 }
 
-// TestMergePage_InteriorPage tests that interior pages don't merge
-func TestMergePage_InteriorPage(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	pageSize := bt.PageSize
+// TestSumFunc_TextValue tests sum with text value
+func TestSumFunc_TextValue(t *testing.T) {
+	f := &SumFunc{}
 
-	// Create a 3-level tree
-	// Level 2: Leaf pages
-	page3Data := createTestPage(3, pageSize, PageTypeLeafTable, []struct {
-		rowid   int64
-		payload []byte
-	}{{1, []byte("a")}})
-	bt.SetPage(3, page3Data)
-
-	page4Data := createTestPage(4, pageSize, PageTypeLeafTable, []struct {
-		rowid   int64
-		payload []byte
-	}{{2, []byte("b")}})
-	bt.SetPage(4, page4Data)
-
-	// Level 1: Interior page
-	page2Cells := []struct {
-		childPage uint32
-		rowid     int64
-	}{{3, 1}}
-	page2Data := createInteriorPage(2, pageSize, page2Cells, 4)
-	bt.SetPage(2, page2Data)
-
-	// Level 0: Root interior page
-	rootCells := []struct {
-		childPage uint32
-		rowid     int64
-	}{{2, 2}}
-	rootData := createInteriorPage(1, pageSize, rootCells, 2)
-	bt.SetPage(1, rootData)
-
-	// Create cursor and navigate to leaf
-	cursor := NewCursor(bt, 1)
-	cursor.MoveToFirst()
-
-	// Manually set cursor to be on the interior page (page 2)
-	// This is artificial but tests the code path
-	cursor.CurrentPage = 2
-	cursor.Depth = 1
-
-	// Attempt merge - should return false because it's an interior page
-	merged, err := cursor.MergePage()
+	err := f.Step([]Value{NewTextValue("42.5")})
 	if err != nil {
-		t.Fatalf("MergePage() error = %v", err)
+		t.Fatalf("Step() error = %v", err)
 	}
 
-	if merged {
-		t.Error("Should not merge interior page")
+	result, err := f.Final()
+	if err != nil {
+		t.Fatalf("Final() error = %v", err)
+	}
+
+	if result.Type() != TypeFloat {
+		t.Errorf("Final() type = %v, want TypeFloat", result.Type())
 	}
 }
 
-// TestRedistributeSiblings_EdgeCases tests redistribution edge cases
-func TestRedistributeSiblings_EdgeCases(t *testing.T) {
-	t.Parallel()
-	pageSize := uint32(4096)
-
+// TestTotalFunc_EdgeCases tests edge cases for total function
+func TestTotalFunc_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name        string
-		leftCells   int
-		rightCells  int
-		shouldError bool
+		name   string
+		values []Value
+		want   float64
 	}{
 		{
-			name:        "one cell left, many right",
-			leftCells:   1,
-			rightCells:  11,
-			shouldError: false,
+			name:   "empty set",
+			values: []Value{},
+			want:   0.0,
 		},
 		{
-			name:        "many left, one cell right",
-			leftCells:   11,
-			rightCells:  1,
-			shouldError: false,
+			name:   "all null",
+			values: []Value{NewNullValue(), NewNullValue()},
+			want:   0.0,
 		},
 		{
-			name:        "both have one cell",
-			leftCells:   1,
-			rightCells:  1,
-			shouldError: false,
+			name:   "mixed with null",
+			values: []Value{NewIntValue(5), NewNullValue(), NewIntValue(10)},
+			want:   15.0,
+		},
+		{
+			name:   "text values",
+			values: []Value{NewTextValue("10"), NewTextValue("20")},
+			want:   30.0,
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			// Create left page
-			leftCells := make([]struct {
-				rowid   int64
-				payload []byte
-			}, tt.leftCells)
-			for i := 0; i < tt.leftCells; i++ {
-				leftCells[i].rowid = int64(i + 1)
-				leftCells[i].payload = []byte("data")
-			}
-			leftPageData := createTestPage(2, pageSize, PageTypeLeafTable, leftCells)
-			leftPage, err := NewBtreePage(2, leftPageData, pageSize)
-			if err != nil {
-				t.Fatalf("Failed to create left page: %v", err)
-			}
-
-			// Create right page
-			rightCells := make([]struct {
-				rowid   int64
-				payload []byte
-			}, tt.rightCells)
-			for i := 0; i < tt.rightCells; i++ {
-				rightCells[i].rowid = int64(tt.leftCells + i + 1)
-				rightCells[i].payload = []byte("data")
-			}
-			rightPageData := createTestPage(3, pageSize, PageTypeLeafTable, rightCells)
-			rightPage, err := NewBtreePage(3, rightPageData, pageSize)
-			if err != nil {
-				t.Fatalf("Failed to create right page: %v", err)
-			}
-
-			// Redistribute
-			err = RedistributeCells(leftPage, rightPage)
-
-			if tt.shouldError && err == nil {
-				t.Error("Expected error but got none")
-			}
-			if !tt.shouldError && err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-
-			if err == nil {
-				// Verify total cells preserved
-				totalCells := tt.leftCells + tt.rightCells
-				actualTotal := int(leftPage.Header.NumCells) + int(rightPage.Header.NumCells)
-				if actualTotal != totalCells {
-					t.Errorf("Total cells = %d, want %d", actualTotal, totalCells)
+			f := &TotalFunc{}
+			for _, v := range tt.values {
+				if err := f.Step([]Value{v}); err != nil {
+					t.Fatalf("Step() error = %v", err)
 				}
+			}
+			result, err := f.Final()
+			if err != nil {
+				t.Fatalf("Final() error = %v", err)
+			}
+			got := result.AsFloat64()
+			if got != tt.want {
+				t.Errorf("Final() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-// TestCanMerge_ErrorCases tests CanMerge error handling
-func TestCanMerge_ErrorCases(t *testing.T) {
-	t.Parallel()
-	pageSize := uint32(4096)
-
-	// Create valid page
-	validCells := []struct {
-		rowid   int64
-		payload []byte
-	}{{1, []byte("test")}}
-	validPageData := createTestPage(2, pageSize, PageTypeLeafTable, validCells)
-	validHeader, _ := ParsePageHeader(validPageData, 2)
-
-	// Test with corrupted cell pointer - use a valid cell pointer but with corrupted cell data
-	corruptedData := make([]byte, pageSize)
-	copy(corruptedData, validPageData)
-
-	// Get the actual cell pointer value
-	cellPtr := binary.BigEndian.Uint16(corruptedData[PageHeaderSizeLeaf:])
-
-	// Corrupt the cell data at that pointer (make payload length invalid)
-	// This will cause ParseCell to fail
-	if int(cellPtr) < len(corruptedData)-5 {
-		corruptedData[cellPtr] = 0xFF // Invalid rowid varint
-		corruptedData[cellPtr+1] = 0xFF
-		corruptedData[cellPtr+2] = 0xFF
-		corruptedData[cellPtr+3] = 0xFF
-		corruptedData[cellPtr+4] = 0xFF
-	}
-
-	_, err := CanMerge(corruptedData, validHeader, validPageData, validHeader, pageSize)
-	if err == nil {
-		t.Log("CanMerge may succeed with corrupted data depending on how it's corrupted")
-	}
-}
-
-// TestGetChildPageAt tests getChildPageAt helper
-func TestGetChildPageAt(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	pageSize := bt.PageSize
-
-	// Create interior page with multiple children
-	interiorCells := []struct {
-		childPage uint32
-		rowid     int64
-	}{
-		{10, 5},
-		{20, 10},
-		{30, 15},
-	}
-	rightChild := uint32(40)
-	pageData := createInteriorPage(1, pageSize, interiorCells, rightChild)
-	bt.SetPage(1, pageData)
-
-	cursor := NewCursor(bt, 1)
-	header, _ := ParsePageHeader(pageData, 1)
-
+// TestAvgFunc_EdgeCases tests edge cases for avg function
+func TestAvgFunc_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name      string
-		index     int
-		wantPage  uint32
-		wantError bool
+		name     string
+		values   []Value
+		want     float64
+		wantNull bool
 	}{
-		{"first child", 0, 10, false},
-		{"middle child", 1, 20, false},
-		{"last cell child", 2, 30, false},
-		{"beyond cells - rightmost", 3, 40, false},
-		{"beyond cells - rightmost 2", 4, 40, false},
+		{
+			name:     "empty set",
+			values:   []Value{},
+			wantNull: true,
+		},
+		{
+			name:     "all null",
+			values:   []Value{NewNullValue(), NewNullValue()},
+			wantNull: true,
+		},
+		{
+			name:   "integers",
+			values: []Value{NewIntValue(10), NewIntValue(20), NewIntValue(30)},
+			want:   20.0,
+		},
+		{
+			name:   "floats",
+			values: []Value{NewFloatValue(1.5), NewFloatValue(2.5)},
+			want:   2.0,
+		},
+		{
+			name:   "text values",
+			values: []Value{NewTextValue("10"), NewTextValue("20")},
+			want:   15.0,
+		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			page, err := cursor.getChildPageAt(pageData, header, tt.index)
+			f := &AvgFunc{}
+			for _, v := range tt.values {
+				if err := f.Step([]Value{v}); err != nil {
+					t.Fatalf("Step() error = %v", err)
+				}
+			}
+			result, err := f.Final()
+			if err != nil {
+				t.Fatalf("Final() error = %v", err)
+			}
+			if tt.wantNull {
+				if !result.IsNull() {
+					t.Errorf("Final() = %v, want NULL", result)
+				}
+				return
+			}
+			got := result.AsFloat64()
+			if math.Abs(got-tt.want) > 0.001 {
+				t.Errorf("Final() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
-			if tt.wantError {
-				if err == nil {
-					t.Error("Expected error but got none")
+// TestMinMaxFunc_EdgeCases tests edge cases for min/max functions
+func TestMinMaxFunc_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		fn       string
+		values   []Value
+		wantNull bool
+		validate func(Value) bool
+	}{
+		{
+			name:     "min empty set",
+			fn:       "min",
+			values:   []Value{},
+			wantNull: true,
+		},
+		{
+			name:     "max empty set",
+			fn:       "max",
+			values:   []Value{},
+			wantNull: true,
+		},
+		{
+			name:     "min all null",
+			fn:       "min",
+			values:   []Value{NewNullValue(), NewNullValue()},
+			wantNull: true,
+		},
+		{
+			name:     "max all null",
+			fn:       "max",
+			values:   []Value{NewNullValue(), NewNullValue()},
+			wantNull: true,
+		},
+		{
+			name:   "min with null",
+			fn:     "min",
+			values: []Value{NewIntValue(5), NewNullValue(), NewIntValue(3)},
+			validate: func(v Value) bool {
+				return v.AsInt64() == 3
+			},
+		},
+		{
+			name:   "max with null",
+			fn:     "max",
+			values: []Value{NewIntValue(5), NewNullValue(), NewIntValue(10)},
+			validate: func(v Value) bool {
+				return v.AsInt64() == 10
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var f interface {
+				Step([]Value) error
+				Final() (Value, error)
+			}
+
+			if tt.fn == "min" {
+				f = &MinFunc{}
+			} else {
+				f = &MaxFunc{}
+			}
+
+			for _, v := range tt.values {
+				if err := f.Step([]Value{v}); err != nil {
+					t.Fatalf("Step() error = %v", err)
+				}
+			}
+
+			result, err := f.Final()
+			if err != nil {
+				t.Fatalf("Final() error = %v", err)
+			}
+
+			if tt.wantNull {
+				if !result.IsNull() {
+					t.Errorf("Final() = %v, want NULL", result)
 				}
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("getChildPageAt() error = %v", err)
-			}
-
-			if page != tt.wantPage {
-				t.Errorf("getChildPageAt() = %d, want %d", page, tt.wantPage)
+			if tt.validate != nil && !tt.validate(result) {
+				t.Errorf("Final() validation failed for %v", result)
 			}
 		})
 	}
 }
 
-// TestMergePage_InvalidState tests merge with invalid cursor state
-func TestMergePage_InvalidState(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, _ := bt.CreateTable()
-
-	cursor := NewCursor(bt, rootPage)
-	cursor.State = CursorInvalid
-
-	merged, err := cursor.MergePage()
-	if err != nil {
-		t.Fatalf("MergePage() error = %v", err)
-	}
-
-	if merged {
-		t.Error("Should not merge with invalid cursor")
-	}
-}
-
-// TestMergePage_DepthZero tests merge at root level (depth 0)
-func TestMergePage_DepthZero(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, _ := bt.CreateTable()
-
-	cursor := NewCursor(bt, rootPage)
-	cursor.Insert(1, []byte("data"))
-	cursor.SeekRowid(1)
-
-	// Root is at depth 0
-	if cursor.Depth != 0 {
-		t.Fatalf("Expected depth 0, got %d", cursor.Depth)
-	}
-
-	merged, err := cursor.MergePage()
-	if err != nil {
-		t.Fatalf("MergePage() error = %v", err)
-	}
-
-	if merged {
-		t.Error("Should not merge at depth 0")
-	}
-}
-
-// MockPageProvider is a simple mock for testing
-type MockPageProvider struct {
-	pages      map[uint32][]byte
-	dirtyPages map[uint32]bool
-	allocCount uint32
-}
-
-func (m *MockPageProvider) GetPageData(pgno uint32) ([]byte, error) {
-	if data, ok := m.pages[pgno]; ok {
-		return data, nil
-	}
-	return nil, nil
-}
-
-func (m *MockPageProvider) AllocatePageData() (uint32, []byte, error) {
-	m.allocCount++
-	pgno := m.allocCount + 100 // Start from 100 to avoid conflicts
-	data := make([]byte, 4096)
-	m.pages[pgno] = data
-	return pgno, data, nil
-}
-
-func (m *MockPageProvider) MarkDirty(pgno uint32) error {
-	if m.dirtyPages == nil {
-		m.dirtyPages = make(map[uint32]bool)
-	}
-	m.dirtyPages[pgno] = true
-	return nil
-}
-
-// TestExtractCellFromPage tests cell extraction helper
-func TestExtractCellFromPage(t *testing.T) {
-	t.Parallel()
-	pageSize := uint32(4096)
-
-	cells := []struct {
-		rowid   int64
-		payload []byte
+// TestGroupConcatFunc_EdgeCases tests edge cases for group_concat function
+func TestGroupConcatFunc_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		values   [][]Value
+		want     string
+		wantNull bool
+		wantErr  bool
 	}{
-		{1, []byte("test1")},
-		{2, []byte("test2")},
-		{3, []byte("test3")},
+		{
+			name:     "empty set",
+			values:   [][]Value{},
+			wantNull: true,
+		},
+		{
+			name:     "all null",
+			values:   [][]Value{{NewNullValue()}, {NewNullValue()}},
+			wantNull: true,
+		},
+		{
+			name:   "default separator",
+			values: [][]Value{{NewTextValue("a")}, {NewTextValue("b")}, {NewTextValue("c")}},
+			want:   "a,b,c",
+		},
+		{
+			name:   "custom separator",
+			values: [][]Value{{NewTextValue("a"), NewTextValue("|")}, {NewTextValue("b"), NewTextValue("|")}, {NewTextValue("c"), NewTextValue("|")}},
+			want:   "a|b|c",
+		},
+		{
+			name:   "null separator",
+			values: [][]Value{{NewTextValue("a"), NewNullValue()}, {NewTextValue("b"), NewNullValue()}},
+			want:   "a,b",
+		},
+		{
+			name:   "mixed with null values",
+			values: [][]Value{{NewTextValue("a")}, {NewNullValue()}, {NewTextValue("c")}},
+			want:   "a,c",
+		},
+		{
+			name:    "too many args",
+			values:  [][]Value{{NewTextValue("a"), NewTextValue(","), NewTextValue("extra")}},
+			wantErr: true,
+		},
 	}
 
-	pageData := createTestPage(2, pageSize, PageTypeLeafTable, cells)
-	page, err := NewBtreePage(2, pageData, pageSize)
-	if err != nil {
-		t.Fatalf("NewBtreePage() error = %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &GroupConcatFunc{}
+
+			for _, args := range tt.values {
+				err := f.Step(args)
+				if tt.wantErr {
+					if err == nil {
+						t.Error("Step() expected error, got nil")
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("Step() error = %v", err)
+				}
+			}
+
+			result, err := f.Final()
+			if err != nil {
+				t.Fatalf("Final() error = %v", err)
+			}
+
+			if tt.wantNull {
+				if !result.IsNull() {
+					t.Errorf("Final() = %v, want NULL", result)
+				}
+				return
+			}
+
+			got := result.AsString()
+			if got != tt.want {
+				t.Errorf("Final() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAggregateFunc_Call tests that aggregate functions return error on Call
+func TestAggregateFunc_Call(t *testing.T) {
+	funcs := []struct {
+		name string
+		fn   interface {
+			Call([]Value) (Value, error)
+		}
+	}{
+		{"count", &CountFunc{}},
+		{"count(*)", &CountStarFunc{}},
+		{"sum", &SumFunc{}},
+		{"total", &TotalFunc{}},
+		{"avg", &AvgFunc{}},
+		{"min", &MinFunc{}},
+		{"max", &MaxFunc{}},
+		{"group_concat", &GroupConcatFunc{}},
 	}
 
-	// Extract each cell
-	for i := 0; i < len(cells); i++ {
-		cellData, err := extractCellFromPage(page, i)
-		if err != nil {
-			t.Errorf("extractCellFromPage(%d) error = %v", i, err)
-			continue
-		}
+	for _, tt := range funcs {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tt.fn.Call([]Value{})
+			if err == nil {
+				t.Errorf("%s.Call() expected error, got nil", tt.name)
+			}
+		})
+	}
+}
 
-		if len(cellData) == 0 {
-			t.Errorf("extractCellFromPage(%d) returned empty data", i)
-		}
+// TestAggregateFunc_Names tests aggregate function names
+func TestAggregateFunc_Names(t *testing.T) {
+	tests := []struct {
+		fn   interface{ Name() string }
+		want string
+	}{
+		{&CountFunc{}, "count"},
+		{&CountStarFunc{}, "count(*)"},
+		{&SumFunc{}, "sum"},
+		{&TotalFunc{}, "total"},
+		{&AvgFunc{}, "avg"},
+		{&MinFunc{}, "min"},
+		{&MaxFunc{}, "max"},
+		{&GroupConcatFunc{}, "group_concat"},
+	}
 
-		// Verify we can parse it
-		cell, err := ParseCell(PageTypeLeafTable, cellData, pageSize)
-		if err != nil {
-			t.Errorf("ParseCell() error = %v", err)
-		}
-		if cell.Key != cells[i].rowid {
-			t.Errorf("Cell key = %d, want %d", cell.Key, cells[i].rowid)
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			got := tt.fn.Name()
+			if got != tt.want {
+				t.Errorf("Name() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAggregateFunc_NumArgs tests aggregate function argument counts
+func TestAggregateFunc_NumArgs(t *testing.T) {
+	tests := []struct {
+		fn   interface{ NumArgs() int }
+		want int
+	}{
+		{&CountFunc{}, 1},
+		{&CountStarFunc{}, 0},
+		{&SumFunc{}, 1},
+		{&TotalFunc{}, 1},
+		{&AvgFunc{}, 1},
+		{&MinFunc{}, 1},
+		{&MaxFunc{}, 1},
+		{&GroupConcatFunc{}, -1},
+	}
+
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			got := tt.fn.NumArgs()
+			if got != tt.want {
+				t.Errorf("NumArgs() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMinMaxScalarFunc tests scalar versions of min/max
+func TestMinMaxScalarFunc(t *testing.T) {
+	tests := []struct {
+		name     string
+		fn       func([]Value) (Value, error)
+		fnName   string
+		args     []Value
+		want     int64
+		wantNull bool
+		wantErr  bool
+	}{
+		{
+			name:    "min no args",
+			fn:      minScalarFunc,
+			fnName:  "min",
+			args:    []Value{},
+			wantErr: true,
+		},
+		{
+			name:     "min all null",
+			fn:       minScalarFunc,
+			fnName:   "min",
+			args:     []Value{NewNullValue(), NewNullValue()},
+			wantNull: true,
+		},
+		{
+			name:   "min multiple values",
+			fn:     minScalarFunc,
+			fnName: "min",
+			args:   []Value{NewIntValue(5), NewIntValue(2), NewIntValue(8)},
+			want:   2,
+		},
+		{
+			name:   "min with null",
+			fn:     minScalarFunc,
+			fnName: "min",
+			args:   []Value{NewIntValue(5), NewNullValue(), NewIntValue(2)},
+			want:   2,
+		},
+		{
+			name:    "max no args",
+			fn:      maxScalarFunc,
+			fnName:  "max",
+			args:    []Value{},
+			wantErr: true,
+		},
+		{
+			name:     "max all null",
+			fn:       maxScalarFunc,
+			fnName:   "max",
+			args:     []Value{NewNullValue(), NewNullValue()},
+			wantNull: true,
+		},
+		{
+			name:   "max multiple values",
+			fn:     maxScalarFunc,
+			fnName: "max",
+			args:   []Value{NewIntValue(5), NewIntValue(2), NewIntValue(8)},
+			want:   8,
+		},
+		{
+			name:   "max with null",
+			fn:     maxScalarFunc,
+			fnName: "max",
+			args:   []Value{NewIntValue(5), NewNullValue(), NewIntValue(8)},
+			want:   8,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := tt.fn(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("%s() expected error, got nil", tt.fnName)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("%s() error = %v", tt.fnName, err)
+			}
+			if tt.wantNull {
+				if !result.IsNull() {
+					t.Errorf("%s() = %v, want NULL", tt.fnName, result)
+				}
+				return
+			}
+			got := result.AsInt64()
+			if got != tt.want {
+				t.Errorf("%s() = %d, want %d", tt.fnName, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsNaNHelper tests isNaN helper function
+func TestIsNaNHelper(t *testing.T) {
+	tests := []struct {
+		input float64
+		want  bool
+	}{
+		{0.0, false},
+		{1.5, false},
+		{math.NaN(), true},
+		{math.Inf(1), false},
+		{math.Inf(-1), false},
+	}
+
+	for _, tt := range tests {
+		got := isNaN(tt.input)
+		if got != tt.want {
+			t.Errorf("isNaN(%v) = %v, want %v", tt.input, got, tt.want)
 		}
 	}
 }
 
-// TestDefragmentPages tests defragmenting multiple pages
-func TestDefragmentPages(t *testing.T) {
-	t.Parallel()
-	pageSize := uint32(4096)
-
-	// Create two pages with fragmentation
-	leftCells := []struct {
-		rowid   int64
-		payload []byte
-	}{{1, []byte("a")}, {2, []byte("b")}}
-	leftPageData := createTestPage(2, pageSize, PageTypeLeafTable, leftCells)
-	leftPage, _ := NewBtreePage(2, leftPageData, pageSize)
-
-	rightCells := []struct {
-		rowid   int64
-		payload []byte
-	}{{3, []byte("c")}, {4, []byte("d")}}
-	rightPageData := createTestPage(3, pageSize, PageTypeLeafTable, rightCells)
-	rightPage, _ := NewBtreePage(3, rightPageData, pageSize)
-
-	// Add some fragmentation
-	leftPage.Header.FragmentedBytes = 10
-	rightPage.Header.FragmentedBytes = 5
-
-	err := defragmentPages(leftPage, rightPage)
-	if err != nil {
-		t.Fatalf("defragmentPages() error = %v", err)
+// TestIsInfHelper tests isInf helper function
+func TestIsInfHelper(t *testing.T) {
+	tests := []struct {
+		input float64
+		want  bool
+	}{
+		{0.0, false},
+		{1.5, false},
+		{math.NaN(), false},
+		{math.Inf(1), true},
+		{math.Inf(-1), true},
 	}
 
-	// Fragmentation should be cleared
-	if leftPage.Header.FragmentedBytes != 0 {
-		t.Errorf("Left page still has %d fragmented bytes", leftPage.Header.FragmentedBytes)
-	}
-	if rightPage.Header.FragmentedBytes != 0 {
-		t.Errorf("Right page still has %d fragmented bytes", rightPage.Header.FragmentedBytes)
+	for _, tt := range tests {
+		got := isInf(tt.input)
+		if got != tt.want {
+			t.Errorf("isInf(%v) = %v, want %v", tt.input, got, tt.want)
+		}
 	}
 }

@@ -214,17 +214,23 @@ For security vulnerabilities, please see [docs/SECURITY.md](docs/SECURITY.md) fo
 - **Configure connection pool** settings appropriately
 - **Use transactions** for bulk inserts and updates
 
+## Development status
+
+This project is open source, but we are **not accepting external code
+contributions at this time**. Issues and feedback are welcome.
+
 ## License
 
-Public Domain (SQLite License)
+Licensed under your choice of: **Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0**.
 
-The authors disclaim copyright to this source code. In place of a legal notice, here is a blessing:
+See `LICENSE` and the `LICENSE-*` files for full text.
+
+In the spirit of SQLite, the authors disclaim copyright to this source code.
+Here is the SQLite Blessing:
 
 - May you do good and not evil.
 - May you find forgiveness for yourself and forgive others.
 - May you share freely, never taking more than you give.
-
-This project honors the tradition of SQLite by placing the code in the public domain.
 
 ## Acknowledgments
 

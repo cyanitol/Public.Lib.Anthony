@@ -1,585 +1,500 @@
-package pager
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+package planner
 
 import (
-	"os"
-	"path/filepath"
-	"sync"
-	"testing"
-	"time"
+	"fmt"
+	"strings"
 )
 
-// TestWALModeSwitch tests switching to and from WAL mode
-func TestWALModeSwitch(t *testing.T) {
-	t.Parallel()
-	tempDir := t.TempDir()
-	dbFile := filepath.Join(tempDir, "test.db")
+// IndexSelector is responsible for selecting the best index for a query.
+type IndexSelector struct {
+	Table     *TableInfo
+	Terms     []*WhereTerm
+	CostModel *CostModel
+}
 
-	// Create pager with delete journal mode
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("Failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Verify initial mode
-	if pager.GetJournalMode() != JournalModeDelete {
-		t.Errorf("Expected delete mode, got %d", pager.GetJournalMode())
-	}
-
-	// Switch to WAL mode
-	if err := pager.SetJournalMode(JournalModeWAL); err != nil {
-		t.Fatalf("Failed to switch to WAL mode: %v", err)
-	}
-
-	// Verify WAL mode is active
-	if pager.GetJournalMode() != JournalModeWAL {
-		t.Errorf("Expected WAL mode, got %d", pager.GetJournalMode())
-	}
-
-	// Verify WAL files were created
-	walFile := dbFile + "-wal"
-	shmFile := dbFile + "-shm"
-
-	if _, err := os.Stat(walFile); os.IsNotExist(err) {
-		t.Errorf("WAL file was not created")
-	}
-
-	if _, err := os.Stat(shmFile); os.IsNotExist(err) {
-		t.Errorf("WAL index file was not created")
-	}
-
-	// Switch back to delete mode
-	if err := pager.SetJournalMode(JournalModeDelete); err != nil {
-		t.Fatalf("Failed to switch back to delete mode: %v", err)
-	}
-
-	// Verify mode changed
-	if pager.GetJournalMode() != JournalModeDelete {
-		t.Errorf("Expected delete mode after switch, got %d", pager.GetJournalMode())
+// NewIndexSelector creates a new index selector.
+func NewIndexSelector(table *TableInfo, terms []*WhereTerm, costModel *CostModel) *IndexSelector {
+	return &IndexSelector{
+		Table:     table,
+		Terms:     terms,
+		CostModel: costModel,
 	}
 }
 
-// TestWALModeWriteRead tests writing and reading in WAL mode
-func TestWALModeWriteRead(t *testing.T) {
-	t.Parallel()
-	tempDir := t.TempDir()
-	dbFile := filepath.Join(tempDir, "test.db")
-
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("Failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Switch to WAL mode
-	if err := pager.SetJournalMode(JournalModeWAL); err != nil {
-		t.Fatalf("Failed to switch to WAL mode: %v", err)
+// SelectBestIndex chooses the best index for the given WHERE terms.
+// Returns nil if no index is beneficial (should use full table scan).
+func (s *IndexSelector) SelectBestIndex() *IndexInfo {
+	if len(s.Table.Indexes) == 0 {
+		return nil
 	}
 
-	// Start write transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("Failed to begin write: %v", err)
+	var bestIndex *IndexInfo
+	var bestScore float64 = -1
+
+	for _, index := range s.Table.Indexes {
+		score := s.scoreIndex(index)
+		if score > bestScore {
+			bestScore = score
+			bestIndex = index
+		}
 	}
 
-	// Allocate and write a page
-	pgno, err := pager.AllocatePage()
-	if err != nil {
-		t.Fatalf("Failed to allocate page: %v", err)
+	// Only return index if it's actually beneficial
+	if bestScore > 0 {
+		return bestIndex
 	}
 
-	page, err := pager.Get(pgno)
-	if err != nil {
-		t.Fatalf("Failed to get page: %v", err)
-	}
-
-	// Write test data
-	testData := []byte("Hello WAL mode!")
-	copy(page.Data, testData)
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Failed to write page: %v", err)
-	}
-	pager.Put(page)
-
-	// Commit transaction
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Failed to commit: %v", err)
-	}
-
-	// Read page back
-	page, err = pager.Get(pgno)
-	if err != nil {
-		t.Fatalf("Failed to get page: %v", err)
-	}
-	defer pager.Put(page)
-
-	// Verify data
-	if string(page.Data[:len(testData)]) != string(testData) {
-		t.Errorf("Data mismatch: expected %q, got %q", testData, page.Data[:len(testData)])
-	}
+	return nil
 }
 
-// TestWALModeCheckpoint tests checkpointing in WAL mode
-func TestWALModeCheckpoint(t *testing.T) {
-	t.Parallel()
-	// WAL mode now implemented!
+// scoreIndex calculates a score for how well an index matches the WHERE terms.
+// Higher scores are better.
+func (s *IndexSelector) scoreIndex(index *IndexInfo) float64 {
+	score := 0.0
 
-	tempDir := t.TempDir()
-	dbFile := filepath.Join(tempDir, "test.db")
+	// Find which WHERE terms can use this index
+	usableTerms := s.findUsableTermsForIndex(index)
 
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("Failed to open pager: %v", err)
-	}
-	defer pager.Close()
+	// Score based on number of usable terms
+	score += float64(len(usableTerms)) * 10
 
-	// Switch to WAL mode
-	if err := pager.SetJournalMode(JournalModeWAL); err != nil {
-		t.Fatalf("Failed to switch to WAL mode: %v", err)
-	}
-
-	// Write multiple pages
-	pageNumbers := make([]Pgno, 0)
-	for i := 0; i < 10; i++ {
-		if err := pager.BeginWrite(); err != nil {
-			t.Fatalf("Failed to begin write: %v", err)
-		}
-
-		pgno, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("Failed to allocate page: %v", err)
-		}
-		pageNumbers = append(pageNumbers, pgno)
-
-		page, err := pager.Get(pgno)
-		if err != nil {
-			t.Fatalf("Failed to get page: %v", err)
-		}
-
-		// Write unique data
-		for j := 0; j < len(page.Data); j++ {
-			page.Data[j] = byte((i + j) % 256)
-		}
-
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("Failed to write page: %v", err)
-		}
-		pager.Put(page)
-
-		if err := pager.Commit(); err != nil {
-			t.Fatalf("Failed to commit: %v", err)
+	// Bonus for equality constraints (more selective)
+	for _, term := range usableTerms {
+		if term.Operator == WO_EQ {
+			score += 5
+		} else if term.Operator == WO_IN {
+			score += 3
+		} else if term.Operator&(WO_LT|WO_LE|WO_GT|WO_GE) != 0 {
+			score += 1
 		}
 	}
 
-	// Verify WAL has frames
-	if pager.wal.FrameCount() == 0 {
-		t.Errorf("Expected WAL to have frames")
+	// Bonus for unique index
+	if index.Unique {
+		score += 20
 	}
 
-	// Perform checkpoint
-	if err := pager.Checkpoint(); err != nil {
-		t.Fatalf("Failed to checkpoint: %v", err)
+	// Bonus for primary key
+	if index.Primary {
+		score += 15
 	}
 
-	// Close and reopen to verify data persisted
-	pager.Close()
+	// Penalty for wide indexes (more I/O)
+	score -= float64(len(index.Columns)) * 0.5
 
-	pager2, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("Failed to reopen pager: %v", err)
-	}
-	defer pager2.Close()
+	return score
+}
 
-	// Verify all pages
-	for i, pgno := range pageNumbers {
-		page, err := pager2.Get(pgno)
-		if err != nil {
-			t.Fatalf("Failed to get page %d: %v", pgno, err)
-		}
+// findUsableTermsForIndex finds all WHERE terms that can benefit from an index.
+func (s *IndexSelector) findUsableTermsForIndex(index *IndexInfo) []*WhereTerm {
+	usable := make([]*WhereTerm, 0)
 
-		// Verify data
-		for j := 0; j < len(page.Data); j++ {
-			expected := byte((i + j) % 256)
-			if page.Data[j] != expected {
-				t.Errorf("Page %d data mismatch at offset %d: expected %d, got %d", pgno, j, expected, page.Data[j])
+	// Check each index column in order
+	for i, col := range index.Columns {
+		found := false
+
+		for _, term := range s.Terms {
+			if s.termMatchesColumn(term, col) {
+				usable = append(usable, term)
+				found = true
 				break
 			}
 		}
 
-		pager2.Put(page)
+		// If no term for this column and it's not the first, we can't use later columns
+		if !found && i > 0 {
+			break
+		}
+	}
+
+	return usable
+}
+
+// termMatchesColumn checks if a WHERE term can use a specific index column.
+func (s *IndexSelector) termMatchesColumn(term *WhereTerm, col IndexColumn) bool {
+	// Term must reference this column
+	if term.LeftColumn != col.Index {
+		return false
+	}
+
+	// Must be a usable operator
+	return isUsableOperator(term.Operator)
+}
+
+// AnalyzeIndexUsage analyzes how an index would be used for given terms.
+type IndexUsage struct {
+	Index      *IndexInfo
+	EqTerms    []*WhereTerm  // Equality constraints
+	RangeTerms []*WhereTerm  // Range constraints (< > <= >=)
+	InTerms    []*WhereTerm  // IN constraints
+	StartKey   []interface{} // Start key for index seek
+	EndKey     []interface{} // End key for index seek
+	Covering   bool          // Whether index covers all needed columns
+}
+
+// AnalyzeIndexUsage determines how an index would be used.
+func (s *IndexSelector) AnalyzeIndexUsage(index *IndexInfo, neededColumns []string) *IndexUsage {
+	usage := s.createEmptyIndexUsage(index)
+
+	if !s.processIndexColumns(usage, index) {
+		return usage
+	}
+
+	usage.Covering = s.checkCovering(index, neededColumns)
+	return usage
+}
+
+// createEmptyIndexUsage creates an empty IndexUsage structure.
+func (s *IndexSelector) createEmptyIndexUsage(index *IndexInfo) *IndexUsage {
+	return &IndexUsage{
+		Index:      index,
+		EqTerms:    make([]*WhereTerm, 0),
+		RangeTerms: make([]*WhereTerm, 0),
+		InTerms:    make([]*WhereTerm, 0),
+		StartKey:   make([]interface{}, 0),
+		EndKey:     make([]interface{}, 0),
 	}
 }
 
-// TestWALModeRecovery tests recovery from WAL on database open
-func TestWALModeRecovery(t *testing.T) {
-	t.Parallel()
-	tempDir := t.TempDir()
-	dbFile := filepath.Join(tempDir, "test.db")
-
-	// Create pager and switch to WAL mode
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("Failed to open pager: %v", err)
+// processIndexColumns processes index columns and applies terms to usage.
+// Returns false if first column has no constraint, true otherwise.
+func (s *IndexSelector) processIndexColumns(usage *IndexUsage, index *IndexInfo) bool {
+	for i, col := range index.Columns {
+		term := s.findTermForColumn(col.Index)
+		if term == nil {
+			return i > 0 // First column must have constraint
+		}
+		if done := s.applyTermToUsage(term, usage); done {
+			break
+		}
 	}
+	return true
+}
 
-	if err := pager.SetJournalMode(JournalModeWAL); err != nil {
-		t.Fatalf("Failed to switch to WAL mode: %v", err)
+// applyTermToUsage applies a term to the usage and returns true if no more columns should be processed.
+func (s *IndexSelector) applyTermToUsage(term *WhereTerm, usage *IndexUsage) bool {
+	switch {
+	case term.Operator == WO_EQ:
+		usage.EqTerms = append(usage.EqTerms, term)
+		usage.StartKey = append(usage.StartKey, term.RightValue)
+		usage.EndKey = append(usage.EndKey, term.RightValue)
+		return false
+	case term.Operator == WO_IN:
+		usage.InTerms = append(usage.InTerms, term)
+		return true
+	case term.Operator&(WO_LT|WO_LE|WO_GT|WO_GE) != 0:
+		s.applyRangeTerm(term, usage)
+		return true
 	}
+	return false
+}
 
-	// Write some data
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("Failed to begin write: %v", err)
+// applyRangeTerm applies a range term to the usage.
+func (s *IndexSelector) applyRangeTerm(term *WhereTerm, usage *IndexUsage) {
+	usage.RangeTerms = append(usage.RangeTerms, term)
+	if term.Operator&(WO_GT|WO_GE) != 0 {
+		usage.StartKey = append(usage.StartKey, term.RightValue)
 	}
-
-	pgno, err := pager.AllocatePage()
-	if err != nil {
-		t.Fatalf("Failed to allocate page: %v", err)
-	}
-
-	page, err := pager.Get(pgno)
-	if err != nil {
-		t.Fatalf("Failed to get page: %v", err)
-	}
-
-	testData := []byte("Recovery test data")
-	copy(page.Data, testData)
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Failed to write page: %v", err)
-	}
-	pager.Put(page)
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Failed to commit: %v", err)
-	}
-
-	// Close without checkpointing (data remains in WAL)
-	pager.Close()
-
-	// Reopen database - should recover from WAL
-	pager2, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("Failed to reopen pager: %v", err)
-	}
-	defer pager2.Close()
-
-	// Read page and verify data was recovered
-	page2, err := pager2.Get(pgno)
-	if err != nil {
-		t.Fatalf("Failed to get page after recovery: %v", err)
-	}
-	defer pager2.Put(page2)
-
-	if string(page2.Data[:len(testData)]) != string(testData) {
-		t.Errorf("Data not recovered correctly: expected %q, got %q", testData, page2.Data[:len(testData)])
+	if term.Operator&(WO_LT|WO_LE) != 0 {
+		usage.EndKey = append(usage.EndKey, term.RightValue)
 	}
 }
 
-// TestWALModeConcurrentReads tests concurrent readers in WAL mode
-func TestWALModeConcurrentReads(t *testing.T) {
-	t.Parallel()
-	tempDir := t.TempDir()
-	dbFile := filepath.Join(tempDir, "test.db")
+// findTermForColumn finds a WHERE term that constrains a specific column.
+func (s *IndexSelector) findTermForColumn(colIdx int) *WhereTerm {
+	for _, term := range s.Terms {
+		if term.LeftColumn == colIdx && isUsableOperator(term.Operator) {
+			return term
+		}
+	}
+	return nil
+}
 
-	// Create pager and write initial data
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("Failed to open pager: %v", err)
+// checkCovering checks if an index covers all needed columns.
+func (s *IndexSelector) checkCovering(index *IndexInfo, neededColumns []string) bool {
+	indexCols := make(map[string]bool)
+	for _, col := range index.Columns {
+		indexCols[col.Name] = true
 	}
 
-	if err := pager.SetJournalMode(JournalModeWAL); err != nil {
-		t.Fatalf("Failed to switch to WAL mode: %v", err)
-	}
-
-	// Write test pages
-	numPages := 10
-	pageNumbers := make([]Pgno, 0)
-
-	for i := 0; i < numPages; i++ {
-		if err := pager.BeginWrite(); err != nil {
-			t.Fatalf("Failed to begin write: %v", err)
-		}
-
-		pgno, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("Failed to allocate page: %v", err)
-		}
-		pageNumbers = append(pageNumbers, pgno)
-
-		page, err := pager.Get(pgno)
-		if err != nil {
-			t.Fatalf("Failed to get page: %v", err)
-		}
-
-		// Write page number as data
-		for j := 0; j < len(page.Data); j++ {
-			page.Data[j] = byte((i + j) % 256)
-		}
-
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("Failed to write page: %v", err)
-		}
-		pager.Put(page)
-
-		if err := pager.Commit(); err != nil {
-			t.Fatalf("Failed to commit: %v", err)
+	for _, col := range neededColumns {
+		if !indexCols[col] {
+			return false
 		}
 	}
 
-	pager.Close()
+	return true
+}
 
-	// Open multiple readers concurrently
-	numReaders := 5
-	var wg sync.WaitGroup
-	errors := make(chan error, numReaders)
+// ExplainIndexUsage returns a human-readable explanation of index usage.
+func (usage *IndexUsage) Explain() string {
+	if usage.Index == nil {
+		return "FULL TABLE SCAN"
+	}
 
-	for reader := 0; reader < numReaders; reader++ {
-		wg.Add(1)
-		go func(readerID int) {
-			defer wg.Done()
+	parts := make([]string, 0)
+	parts = append(parts, fmt.Sprintf("INDEX %s", usage.Index.Name))
 
-			// Each reader opens its own pager
-			readerPager, err := Open(dbFile, true)
-			if err != nil {
-				errors <- err
-				return
+	// Explain constraints
+	constraints := make([]string, 0)
+
+	for _, term := range usage.EqTerms {
+		col := usage.Index.Columns[term.LeftColumn].Name
+		constraints = append(constraints, fmt.Sprintf("%s=?", col))
+	}
+
+	for _, term := range usage.InTerms {
+		col := usage.Index.Columns[term.LeftColumn].Name
+		constraints = append(constraints, fmt.Sprintf("%s IN (?)", col))
+	}
+
+	for _, term := range usage.RangeTerms {
+		col := usage.Index.Columns[term.LeftColumn].Name
+		op := operatorString(term.Operator)
+		constraints = append(constraints, fmt.Sprintf("%s%s?", col, op))
+	}
+
+	if len(constraints) > 0 {
+		parts = append(parts, "("+strings.Join(constraints, " AND ")+")")
+	}
+
+	if usage.Covering {
+		parts = append(parts, "COVERING")
+	}
+
+	return strings.Join(parts, " ")
+}
+
+// operatorStringMap maps operators to their string representations.
+var operatorStringMap = map[WhereOperator]string{
+	WO_EQ:     "=",
+	WO_LT:     "<",
+	WO_LE:     "<=",
+	WO_GT:     ">",
+	WO_GE:     ">=",
+	WO_IN:     " IN ",
+	WO_IS:     " IS ",
+	WO_ISNULL: " IS NULL",
+}
+
+// operatorString converts an operator to its string representation.
+func operatorString(op WhereOperator) string {
+	if s, ok := operatorStringMap[op]; ok {
+		return s
+	}
+	return "?"
+}
+
+// BuildIndex creates statistics for a new index.
+// This would typically be called when analyzing CREATE INDEX statements.
+func BuildIndexStats(table *TableInfo, columns []string, unique bool) *IndexInfo {
+	index := &IndexInfo{
+		Name:        fmt.Sprintf("idx_%s_%s", table.Name, strings.Join(columns, "_")),
+		Table:       table.Name,
+		Columns:     make([]IndexColumn, len(columns)),
+		Unique:      unique,
+		Primary:     false,
+		RowCount:    table.RowCount,
+		RowLogEst:   table.RowLogEst,
+		ColumnStats: make([]LogEst, len(columns)),
+	}
+
+	// Build column info
+	for i, colName := range columns {
+		// Find column in table
+		colIdx := -1
+		for j, tableCol := range table.Columns {
+			if tableCol.Name == colName {
+				colIdx = j
+				break
 			}
-			defer readerPager.Close()
+		}
 
-			// Read all pages
-			for i, pgno := range pageNumbers {
-				page, err := readerPager.Get(pgno)
-				if err != nil {
-					errors <- err
-					return
-				}
+		index.Columns[i] = IndexColumn{
+			Name:      colName,
+			Index:     colIdx,
+			Ascending: true,
+			Collation: "BINARY",
+		}
 
-				// Verify data
-				for j := 0; j < len(page.Data); j++ {
-					expected := byte((i + j) % 256)
-					if page.Data[j] != expected {
-						errors <- err
-						readerPager.Put(page)
-						return
-					}
-				}
-
-				readerPager.Put(page)
-
-				// Small delay to increase overlap
-				time.Sleep(1 * time.Millisecond)
-			}
-		}(reader)
+		// Estimate statistics for this column prefix
+		// Each additional column reduces selectivity
+		// Simple heuristic: divide by 10 for each column
+		index.ColumnStats[i] = table.RowLogEst - LogEst((i+1)*33) // 33 ~= 10*log2(10)
+		if index.ColumnStats[i] < 0 {
+			index.ColumnStats[i] = 0
+		}
 	}
 
-	// Wait for all readers
-	wg.Wait()
-	close(errors)
-
-	// Check for errors
-	for err := range errors {
-		t.Errorf("Reader error: %v", err)
+	// If unique index, last stat should be 0 (1 row)
+	if unique && len(index.ColumnStats) > 0 {
+		index.ColumnStats[len(index.ColumnStats)-1] = 0
 	}
+
+	return index
 }
 
-// TestWALModeMultipleVersions tests reading the latest version of a page
-func TestWALModeMultipleVersions(t *testing.T) {
-	t.Parallel()
-	tempDir := t.TempDir()
-	dbFile := filepath.Join(tempDir, "test.db")
-
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("Failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	if err := pager.SetJournalMode(JournalModeWAL); err != nil {
-		t.Fatalf("Failed to switch to WAL mode: %v", err)
+// CompareIndexes compares two indexes for a given set of WHERE terms.
+// Returns -1 if idx1 is better, 1 if idx2 is better, 0 if equal.
+func CompareIndexes(idx1, idx2 *IndexInfo, terms []*WhereTerm, costModel *CostModel) int {
+	selector := &IndexSelector{
+		Terms:     terms,
+		CostModel: costModel,
 	}
 
-	// Allocate a page
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("Failed to begin write: %v", err)
+	score1 := selector.scoreIndex(idx1)
+	score2 := selector.scoreIndex(idx2)
+
+	if score1 > score2 {
+		return -1
+	} else if score1 < score2 {
+		return 1
 	}
-
-	pgno, err := pager.AllocatePage()
-	if err != nil {
-		t.Fatalf("Failed to allocate page: %v", err)
-	}
-
-	// Write first version
-	page, err := pager.Get(pgno)
-	if err != nil {
-		t.Fatalf("Failed to get page: %v", err)
-	}
-
-	version1 := []byte("Version 1")
-	copy(page.Data, version1)
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Failed to write page: %v", err)
-	}
-	pager.Put(page)
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Failed to commit: %v", err)
-	}
-
-	// Write second version
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("Failed to begin write: %v", err)
-	}
-
-	page, err = pager.Get(pgno)
-	if err != nil {
-		t.Fatalf("Failed to get page: %v", err)
-	}
-
-	version2 := []byte("Version 2")
-	copy(page.Data, version2)
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Failed to write page: %v", err)
-	}
-	pager.Put(page)
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Failed to commit: %v", err)
-	}
-
-	// Write third version
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("Failed to begin write: %v", err)
-	}
-
-	page, err = pager.Get(pgno)
-	if err != nil {
-		t.Fatalf("Failed to get page: %v", err)
-	}
-
-	version3 := []byte("Version 3")
-	copy(page.Data, version3)
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Failed to write page: %v", err)
-	}
-	pager.Put(page)
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Failed to commit: %v", err)
-	}
-
-	// Read page and verify we get the latest version
-	page, err = pager.Get(pgno)
-	if err != nil {
-		t.Fatalf("Failed to get page: %v", err)
-	}
-	defer pager.Put(page)
-
-	if string(page.Data[:len(version3)]) != string(version3) {
-		t.Errorf("Expected latest version %q, got %q", version3, page.Data[:len(version3)])
-	}
+	return 0
 }
 
-// TestWALModeCheckpointModes tests different checkpoint modes
-func TestWALModeCheckpointModes(t *testing.T) {
-	t.Parallel()
-	tempDir := t.TempDir()
-	dbFile := filepath.Join(tempDir, "test.db")
+// OptimizeIndexSelection performs advanced index selection considering multiple factors.
+type OptimizeOptions struct {
+	// PreferCovering gives bonus to covering indexes
+	PreferCovering bool
 
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("Failed to open pager: %v", err)
+	// PreferUnique gives bonus to unique indexes
+	PreferUnique bool
+
+	// ConsiderOrderBy includes ORDER BY optimization
+	ConsiderOrderBy bool
+
+	// OrderBy columns if ConsiderOrderBy is true
+	OrderBy []OrderByColumn
+}
+
+// indexScore holds a scored candidate index along with its estimated cost.
+type indexScore struct {
+	index *IndexInfo
+	score float64
+	cost  LogEst
+	nOut  LogEst
+}
+
+// applyOptionsBonus adds score bonuses dictated by OptimizeOptions.
+func (s *IndexSelector) applyOptionsBonus(index *IndexInfo, opts OptimizeOptions, score float64) float64 {
+	if opts.PreferCovering && len(index.Columns) > 3 {
+		score += 10
 	}
-	defer pager.Close()
-
-	if err := pager.SetJournalMode(JournalModeWAL); err != nil {
-		t.Fatalf("Failed to switch to WAL mode: %v", err)
+	if opts.PreferUnique && index.Unique {
+		score += 15
 	}
+	if opts.ConsiderOrderBy && len(opts.OrderBy) > 0 && s.indexMatchesOrderBy(index, opts.OrderBy) {
+		score += 25 // Big bonus for avoiding sort
+	}
+	return score
+}
 
-	// Write some data
-	for i := 0; i < 5; i++ {
-		if err := pager.BeginWrite(); err != nil {
-			t.Fatalf("Failed to begin write: %v", err)
+// analyzeTermCounts counts equality constraints and detects range constraints
+// among the usable terms for an index.
+func analyzeTermCounts(usableTerms []*WhereTerm) (nEq int, hasRange bool) {
+	for _, term := range usableTerms {
+		if term.Operator == WO_EQ {
+			nEq++
+		} else if term.Operator&(WO_LT|WO_LE|WO_GT|WO_GE) != 0 {
+			hasRange = true
 		}
+	}
+	return nEq, hasRange
+}
 
-		pgno, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("Failed to allocate page: %v", err)
+// scoreIndexEntry builds a complete indexScore for one index, incorporating
+// option bonuses and the cost model estimate.
+func (s *IndexSelector) scoreIndexEntry(index *IndexInfo, opts OptimizeOptions) indexScore {
+	score := s.applyOptionsBonus(index, opts, s.scoreIndex(index))
+
+	usableTerms := s.findUsableTermsForIndex(index)
+	nEq, hasRange := analyzeTermCounts(usableTerms)
+	cost, nOut := s.CostModel.EstimateIndexScan(s.Table, index, usableTerms, nEq, hasRange, false)
+
+	return indexScore{index: index, score: score, cost: cost, nOut: nOut}
+}
+
+// pickBestScore returns the highest-scoring entry from scores, preferring lower
+// cost when scores are equal.
+func pickBestScore(scores []indexScore) indexScore {
+	best := scores[0]
+	for _, candidate := range scores[1:] {
+		if candidate.score > best.score || (candidate.score == best.score && candidate.cost < best.cost) {
+			best = candidate
 		}
+	}
+	return best
+}
 
-		page, err := pager.Get(pgno)
-		if err != nil {
-			t.Fatalf("Failed to get page: %v", err)
+// SelectBestIndexWithOptions selects the best index with advanced options.
+func (s *IndexSelector) SelectBestIndexWithOptions(opts OptimizeOptions) *IndexInfo {
+	if len(s.Table.Indexes) == 0 {
+		return nil
+	}
+
+	best := s.findBestIndexScore(opts)
+	if best.score > 0 {
+		return best.index
+	}
+	return nil
+}
+
+// findBestIndexScore finds the best index score from all available indexes.
+func (s *IndexSelector) findBestIndexScore(opts OptimizeOptions) indexScore {
+	scores := make([]indexScore, 0, len(s.Table.Indexes))
+	for _, index := range s.Table.Indexes {
+		scores = append(scores, s.scoreIndexEntry(index, opts))
+	}
+	return pickBestScore(scores)
+}
+
+// indexMatchesOrderBy checks if an index can satisfy ORDER BY without sorting.
+func (s *IndexSelector) indexMatchesOrderBy(index *IndexInfo, orderBy []OrderByColumn) bool {
+	// Simplified: check if index columns match order by columns
+	if len(orderBy) > len(index.Columns) {
+		return false
+	}
+
+	for i, ob := range orderBy {
+		if index.Columns[i].Name != ob.Column {
+			return false
 		}
-
-		for j := 0; j < len(page.Data); j++ {
-			page.Data[j] = byte((i + j) % 256)
-		}
-
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("Failed to write page: %v", err)
-		}
-		pager.Put(page)
-
-		if err := pager.Commit(); err != nil {
-			t.Fatalf("Failed to commit: %v", err)
+		if index.Columns[i].Ascending != ob.Ascending {
+			return false
 		}
 	}
 
-	// Test passive checkpoint
-	if err := pager.CheckpointMode(CheckpointPassive); err != nil {
-		t.Errorf("Passive checkpoint failed: %v", err)
+	return true
+}
+
+// EstimateIndexBuildCost estimates the cost of building a new index.
+// This is used to decide if an automatic index should be created.
+func EstimateIndexBuildCost(table *TableInfo, columns []string) LogEst {
+	// Cost to build index:
+	// 1. Scan all table rows
+	// 2. Sort them
+	// 3. Build B-tree structure
+
+	nRows := table.RowLogEst
+
+	// Scan cost
+	scanCost := nRows + costFullScan
+
+	// Sort cost: O(n log n)
+	sortCost := nRows
+	if nRows > 0 {
+		logN := LogEst(float64(nRows) * 0.3) // log2(n) approximation
+		sortCost += logN
 	}
 
-	// Test full checkpoint
-	if err := pager.CheckpointMode(CheckpointFull); err != nil {
-		t.Errorf("Full checkpoint failed: %v", err)
-	}
+	// Build cost: roughly same as sorted scan
+	buildCost := nRows + LogEst(10)
 
-	// Test restart checkpoint
-	if err := pager.CheckpointMode(CheckpointRestart); err != nil {
-		t.Errorf("Restart checkpoint failed: %v", err)
-	}
-
-	// Write more data after restart
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("Failed to begin write after restart: %v", err)
-	}
-
-	pgno, err := pager.AllocatePage()
-	if err != nil {
-		t.Fatalf("Failed to allocate page after restart: %v", err)
-	}
-
-	page, err := pager.Get(pgno)
-	if err != nil {
-		t.Fatalf("Failed to get page after restart: %v", err)
-	}
-
-	testData := []byte("After restart")
-	copy(page.Data, testData)
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Failed to write page after restart: %v", err)
-	}
-	pager.Put(page)
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Failed to commit after restart: %v", err)
-	}
-
-	// Test truncate checkpoint
-	if err := pager.CheckpointMode(CheckpointTruncate); err != nil {
-		t.Errorf("Truncate checkpoint failed: %v", err)
-	}
-
-	// Verify WAL file was truncated
-	walFile := dbFile + "-wal"
-	info, err := os.Stat(walFile)
-	if err != nil {
-		t.Fatalf("WAL file should still exist: %v", err)
+	return scanCost + sortCost + buildCost
+}
+f("WAL file should still exist: %v", err)
 	}
 
 	if info.Size() != 0 {
