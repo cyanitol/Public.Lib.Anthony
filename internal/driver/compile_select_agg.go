@@ -47,18 +47,29 @@ func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table
 	}
 
 	// COUNT(column) - count non-NULL values only
-	_, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, gen)
+	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, gen)
 	if !ok {
 		// Not a column reference, just increment
 		vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
 		return
 	}
 
+	// Handle DISTINCT if specified
+	var distinctSkipAddr int
+	if fnExpr.Distinct {
+		// Check if value is distinct, skip increment if already seen
+		distinctSkipAddr = vm.AddOp(vdbe.OpAggDistinct, tempReg, 0, accReg)
+	}
+
 	// Only increment if value is not NULL (loadAggregateColumnValue already added OpIsNull)
 	vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
 
-	// Fix the skip address to jump past the increment
-	vm.Program[skipAddr].P2 = vm.NumOps()
+	// Fix the skip addresses to jump past the increment
+	endAddr := vm.NumOps()
+	vm.Program[skipAddr].P2 = endAddr
+	if fnExpr.Distinct {
+		vm.Program[distinctSkipAddr].P2 = endAddr
+	}
 }
 
 // emitSumUpdate emits VDBE opcodes to update SUM/TOTAL accumulator
@@ -66,6 +77,13 @@ func (s *Stmt) emitSumUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, gen)
 	if !ok {
 		return
+	}
+
+	// Handle DISTINCT if specified
+	var distinctSkipAddr int
+	if fnExpr.Distinct {
+		// Check if value is distinct, skip addition if already seen
+		distinctSkipAddr = vm.AddOp(vdbe.OpAggDistinct, tempReg, 0, accReg)
 	}
 
 	// If accumulator is NOT NULL, jump to add instruction
@@ -83,6 +101,9 @@ func (s *Stmt) emitSumUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 	endAddr := vm.NumOps()
 	vm.Program[skipAddr].P2 = endAddr
 	vm.Program[skipToEndAddr].P2 = endAddr
+	if fnExpr.Distinct {
+		vm.Program[distinctSkipAddr].P2 = endAddr
+	}
 }
 
 // emitAvgUpdate emits VDBE opcodes to update AVG accumulator (sum and count)
@@ -92,7 +113,14 @@ func (s *Stmt) emitAvgUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 		return
 	}
 
-	// Increment count (always for non-NULL values)
+	// Handle DISTINCT if specified
+	var distinctSkipAddr int
+	if fnExpr.Distinct {
+		// Check if value is distinct, skip averaging if already seen
+		distinctSkipAddr = vm.AddOp(vdbe.OpAggDistinct, tempReg, 0, sumReg)
+	}
+
+	// Increment count (always for non-NULL distinct values)
 	vm.AddOp(vdbe.OpAddImm, countReg, 1, 0)
 
 	// If sum accumulator is NOT NULL, jump to add instruction
@@ -110,6 +138,9 @@ func (s *Stmt) emitAvgUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 	endAddr := vm.NumOps()
 	vm.Program[skipAddr].P2 = endAddr
 	vm.Program[skipToEndAddr].P2 = endAddr
+	if fnExpr.Distinct {
+		vm.Program[distinctSkipAddr].P2 = endAddr
+	}
 }
 
 // emitMinUpdate emits VDBE opcodes to update MIN accumulator
@@ -179,6 +210,30 @@ func (s *Stmt) initializeAggregateRegister(vm *vdbe.VDBE, funcName string, accRe
 	return avgCountReg
 }
 
+// findAggregateInExpr finds the first aggregate function in an expression tree
+func (s *Stmt) findAggregateInExpr(expr parser.Expression) *parser.FunctionExpr {
+	if expr == nil {
+		return nil
+	}
+
+	switch e := expr.(type) {
+	case *parser.FunctionExpr:
+		if s.isAggregateExpr(e) {
+			return e
+		}
+	case *parser.BinaryExpr:
+		if agg := s.findAggregateInExpr(e.Left); agg != nil {
+			return agg
+		}
+		return s.findAggregateInExpr(e.Right)
+	case *parser.UnaryExpr:
+		return s.findAggregateInExpr(e.Expr)
+	case *parser.ParenExpr:
+		return s.findAggregateInExpr(e.Expr)
+	}
+	return nil
+}
+
 // initializeAggregateAccumulators allocates and initializes accumulator registers for aggregate functions
 func (s *Stmt) initializeAggregateAccumulators(vm *vdbe.VDBE, stmt *parser.SelectStmt, gen *expr.CodeGenerator) (accRegs []int, avgCountRegs []int) {
 	numCols := len(stmt.Columns)
@@ -186,8 +241,14 @@ func (s *Stmt) initializeAggregateAccumulators(vm *vdbe.VDBE, stmt *parser.Selec
 	avgCountRegs = make([]int, numCols)
 
 	for i, col := range stmt.Columns {
-		fnExpr, isAgg := col.Expr.(*parser.FunctionExpr)
-		if !isAgg || !s.isAggregateExpr(col.Expr) {
+		// Check if this column contains any aggregates (direct or in expressions)
+		if !s.containsAggregate(col.Expr) {
+			continue
+		}
+
+		// Find the aggregate function in the expression
+		fnExpr := s.findAggregateInExpr(col.Expr)
+		if fnExpr == nil {
 			continue
 		}
 
@@ -312,8 +373,14 @@ func (s *Stmt) emitAggregateUpdates(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	gen *expr.CodeGenerator) {
 
 	for i, col := range stmt.Columns {
-		fnExpr, isAgg := col.Expr.(*parser.FunctionExpr)
-		if !isAgg || !s.isAggregateExpr(col.Expr) {
+		// Check if this column contains any aggregates
+		if !s.containsAggregate(col.Expr) {
+			continue
+		}
+
+		// Find the aggregate function (may be nested in an expression)
+		fnExpr := s.findAggregateInExpr(col.Expr)
+		if fnExpr == nil {
 			continue
 		}
 
@@ -339,28 +406,127 @@ func (s *Stmt) emitSingleAggregateUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionE
 	}
 }
 
+// emitAggregateArithmeticOutput generates code for arithmetic expressions with aggregates
+// e.g., COUNT(*) * 2, SUM(value) + 10
+func (s *Stmt) emitAggregateArithmeticOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator,
+	binExpr *parser.BinaryExpr, accReg int, avgCountReg int, targetReg int) error {
+
+	// Get the aggregate value into a temp register
+	tempReg := gen.AllocReg()
+
+	// Check if left side is aggregate
+	if fnExpr, ok := binExpr.Left.(*parser.FunctionExpr); ok && s.isAggregateExpr(fnExpr) {
+		if fnExpr.Name == "AVG" {
+			vm.AddOp(vdbe.OpDivide, accReg, avgCountReg, tempReg)
+		} else {
+			vm.AddOp(vdbe.OpCopy, accReg, tempReg, 0)
+		}
+
+		// Generate code for right side (should be a constant or column)
+		rightReg, err := gen.GenerateExpr(binExpr.Right)
+		if err != nil {
+			return err
+		}
+
+		// Apply the binary operation
+		return s.emitBinaryOp(vm, binExpr.Op, tempReg, rightReg, targetReg)
+	}
+
+	// Check if right side is aggregate
+	if fnExpr, ok := binExpr.Right.(*parser.FunctionExpr); ok && s.isAggregateExpr(fnExpr) {
+		if fnExpr.Name == "AVG" {
+			vm.AddOp(vdbe.OpDivide, accReg, avgCountReg, tempReg)
+		} else {
+			vm.AddOp(vdbe.OpCopy, accReg, tempReg, 0)
+		}
+
+		// Generate code for left side (should be a constant or column)
+		leftReg, err := gen.GenerateExpr(binExpr.Left)
+		if err != nil {
+			return err
+		}
+
+		// Apply the binary operation
+		return s.emitBinaryOp(vm, binExpr.Op, leftReg, tempReg, targetReg)
+	}
+
+	return fmt.Errorf("no aggregate found in expression")
+}
+
+// emitBinaryOp emits the appropriate VDBE opcode for a binary operation
+func (s *Stmt) emitBinaryOp(vm *vdbe.VDBE, op parser.BinaryOp, leftReg, rightReg, resultReg int) error {
+	switch op {
+	case parser.OpPlus:
+		vm.AddOp(vdbe.OpAdd, leftReg, rightReg, resultReg)
+	case parser.OpMinus:
+		vm.AddOp(vdbe.OpSubtract, leftReg, rightReg, resultReg)
+	case parser.OpMul:
+		vm.AddOp(vdbe.OpMultiply, leftReg, rightReg, resultReg)
+	case parser.OpDiv:
+		vm.AddOp(vdbe.OpDivide, leftReg, rightReg, resultReg)
+	case parser.OpRem:
+		vm.AddOp(vdbe.OpRemainder, leftReg, rightReg, resultReg)
+	default:
+		return fmt.Errorf("unsupported binary operator in aggregate expression: %v", op)
+	}
+	return nil
+}
+
+// emitAggregateExpressionOutput generates code for an expression containing aggregates
+// by substituting aggregate function calls with their accumulator register values
+func (s *Stmt) emitAggregateExpressionOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator,
+	expr parser.Expression, accReg int, avgCountReg int, targetReg int) error {
+
+	// Handle simple case: direct aggregate function
+	if fnExpr, ok := expr.(*parser.FunctionExpr); ok && s.isAggregateExpr(fnExpr) {
+		if fnExpr.Name == "AVG" {
+			vm.AddOp(vdbe.OpDivide, accReg, avgCountReg, targetReg)
+		} else {
+			vm.AddOp(vdbe.OpCopy, accReg, targetReg, 0)
+		}
+		return nil
+	}
+
+	// Handle expressions containing aggregates (e.g., COUNT(*) * 2, SUM(value) + 10)
+	if s.containsAggregate(expr) {
+		// Handle binary expressions with aggregates
+		if binExpr, ok := expr.(*parser.BinaryExpr); ok {
+			return s.emitAggregateArithmeticOutput(vm, gen, binExpr, accReg, avgCountReg, targetReg)
+		}
+	}
+
+	// Non-aggregate expression - should be constant or error
+	vm.AddOp(vdbe.OpNull, 0, targetReg, 0)
+	return nil
+}
+
 // emitAggregateOutput emits code to output aggregate results.
 func (s *Stmt) emitAggregateOutput(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	accRegs []int, avgCountRegs []int, numCols int) int {
 
 	afterScanAddr := vm.NumOps()
 
+	// Create a code generator for non-aggregate expressions
+	gen := expr.NewCodeGenerator(vm)
+	gen.SetNextReg(numCols + 10) // Start after result registers
+
 	// Finalize and copy aggregates to result registers
 	for i, col := range stmt.Columns {
-		if s.isAggregateExpr(col.Expr) {
-			fnExpr := col.Expr.(*parser.FunctionExpr)
-			if fnExpr.Name == "AVG" {
-				vm.AddOp(vdbe.OpDivide, accRegs[i], avgCountRegs[i], i)
-			} else {
-				vm.AddOp(vdbe.OpCopy, accRegs[i], i, 0)
-			}
-		} else {
-			// Non-aggregate column (should be constant or error)
+		if err := s.emitAggregateExpressionOutput(vm, gen, col.Expr, accRegs[i], avgCountRegs[i], i); err != nil {
+			// If error, just put NULL
 			vm.AddOp(vdbe.OpNull, 0, i, 0)
 		}
 	}
 
+	// Evaluate HAVING clause if present (for aggregates without GROUP BY)
+	havingSkipAddr := s.emitAggregateHavingClause(vm, stmt, accRegs, avgCountRegs, numCols)
+
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+
+	// Fix HAVING skip address to jump past the result row
+	if havingSkipAddr > 0 {
+		vm.Program[havingSkipAddr].P2 = vm.NumOps()
+	}
 
 	return afterScanAddr
 }

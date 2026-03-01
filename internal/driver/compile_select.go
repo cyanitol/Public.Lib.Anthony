@@ -644,7 +644,7 @@ func (s *Stmt) detectAggregates(stmt *parser.SelectStmt) bool {
 	}
 
 	for _, col := range stmt.Columns {
-		if s.isAggregateExpr(col.Expr) {
+		if s.containsAggregate(col.Expr) {
 			return true
 		}
 	}
@@ -670,4 +670,43 @@ func (s *Stmt) isAggregateExpr(expr parser.Expression) bool {
 	}
 
 	return aggFuncs[fnExpr.Name]
+}
+
+// containsAggregate recursively checks if an expression tree contains any aggregate functions
+func (s *Stmt) containsAggregate(expr parser.Expression) bool {
+	if expr == nil {
+		return false
+	}
+
+	switch e := expr.(type) {
+	case *parser.FunctionExpr:
+		// Check if this is an aggregate function
+		if s.isAggregateExpr(e) {
+			return true
+		}
+		// Check arguments
+		for _, arg := range e.Args {
+			if s.containsAggregate(arg) {
+				return true
+			}
+		}
+	case *parser.BinaryExpr:
+		return s.containsAggregate(e.Left) || s.containsAggregate(e.Right)
+	case *parser.UnaryExpr:
+		return s.containsAggregate(e.Expr)
+	case *parser.ParenExpr:
+		return s.containsAggregate(e.Expr)
+	case *parser.CaseExpr:
+		for _, when := range e.WhenClauses {
+			if s.containsAggregate(when.Condition) || s.containsAggregate(when.Result) {
+				return true
+			}
+		}
+		return s.containsAggregate(e.ElseClause)
+	case *parser.CastExpr:
+		return s.containsAggregate(e.Expr)
+	case *parser.CollateExpr:
+		return s.containsAggregate(e.Expr)
+	}
+	return false
 }

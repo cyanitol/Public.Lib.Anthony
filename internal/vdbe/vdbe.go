@@ -147,6 +147,9 @@ type VDBE struct {
 	// Window function support
 	WindowStates map[int]*WindowState // Window states keyed by cursor/index
 
+	// DISTINCT aggregate tracking (maps aggregate register to seen values)
+	DistinctSets map[int]map[string]bool // Tracks unique values for DISTINCT aggregates
+
 	// Debug support (Phase 9.4)
 	Debug *DebugContext // Debug context for instruction tracing and inspection
 }

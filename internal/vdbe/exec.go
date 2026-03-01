@@ -230,6 +230,7 @@ func init() {
 	OpWindowLead:       (*VDBE).execWindowLead,
 	OpWindowFirstValue: (*VDBE).execWindowFirstValue,
 	OpWindowLastValue:  (*VDBE).execWindowLastValue,
+	OpAggDistinct:      (*VDBE).execAggDistinct,
 	}
 }
 
@@ -4110,4 +4111,48 @@ func (v *VDBE) execWindowLastValue(instr *Instruction) error {
 	}
 
 	return mem.Copy(lastValue)
+}
+
+// execAggDistinct implements OpAggDistinct - Check if value is distinct for aggregate
+// P1 = input register (value to check)
+// P2 = jump address if NOT distinct (already seen)
+// P3 = aggregate register (used as key for distinct set)
+func (v *VDBE) execAggDistinct(instr *Instruction) error {
+	inputReg := instr.P1
+	jumpAddr := instr.P2
+	aggReg := instr.P3
+
+	// Get the value to check
+	mem, err := v.GetMem(inputReg)
+	if err != nil {
+		return err
+	}
+
+	// Initialize DistinctSets if needed
+	if v.DistinctSets == nil {
+		v.DistinctSets = make(map[int]map[string]bool)
+	}
+
+	// Initialize the set for this aggregate if needed
+	if v.DistinctSets[aggReg] == nil {
+		v.DistinctSets[aggReg] = make(map[string]bool)
+	}
+
+	// Convert value to string key for deduplication
+	key := mem.ToDistinctKey()
+
+	// Check if we've seen this value before
+	if v.DistinctSets[aggReg][key] {
+		// Already seen - jump to skip address
+		if jumpAddr >= 0 && jumpAddr < len(v.Program) {
+			v.PC = jumpAddr
+		}
+		return nil
+	}
+
+	// New value - mark as seen
+	v.DistinctSets[aggReg][key] = true
+
+	// Continue to next instruction (don't jump)
+	return nil
 }

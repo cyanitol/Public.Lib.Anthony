@@ -54,7 +54,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT COUNT(DISTINCT a) FROM t1",
 			want:  [][]interface{}{{int64(3)}},
-			skip:  "DISTINCT not implemented for aggregates - currently counts all values (6 instead of 3)",
 		},
 
 		// SUM tests
@@ -215,7 +214,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT category, COUNT(*) as cnt FROM t1 GROUP BY category HAVING COUNT(*) > 1 ORDER BY category",
 			want:  [][]interface{}{{"A", int64(2)}, {"C", int64(3)}},
-			skip:  "HAVING requires GROUP BY to be implemented",
 		},
 		{
 			name: "HAVING with SUM",
@@ -225,7 +223,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT category, SUM(value) FROM t1 GROUP BY category HAVING SUM(value) > 50 ORDER BY category",
 			want:  [][]interface{}{{"B", int64(100)}},
-			skip:  "HAVING requires GROUP BY to be implemented",
 		},
 
 		// Aggregate with ORDER BY
@@ -315,7 +312,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT SUM(DISTINCT value) FROM t1",
 			want:  [][]interface{}{{int64(60)}},
-			skip:  "DISTINCT not implemented for aggregates - currently sums all values (90 instead of 60)",
 		},
 		{
 			name: "AVG DISTINCT",
@@ -325,7 +321,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT AVG(DISTINCT value) FROM t1",
 			want:  [][]interface{}{{float64(20)}},
-			skip:  "DISTINCT not implemented for aggregates - currently averages all values (17.5 instead of 20)",
 		},
 
 		// Complex aggregates
@@ -337,7 +332,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT COUNT(*) * 2, SUM(value) + 10 FROM t1",
 			want:  [][]interface{}{{int64(6), int64(70)}},
-			skip:  "Arithmetic with aggregates fails - 'SUM() is an aggregate function, cannot be called as scalar'",
 		},
 		{
 			name: "aggregate in expression",
@@ -347,7 +341,7 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT COUNT(*) + SUM(value) FROM t1",
 			want:  [][]interface{}{{int64(63)}},
-			skip:  "Arithmetic with aggregates fails - 'SUM() is an aggregate function, cannot be called as scalar'",
+			skip:  "Multiple aggregates in same expression not yet supported (e.g., COUNT() + SUM())",
 		},
 
 		// Edge cases
@@ -397,7 +391,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT category, AVG(value) FROM t1 GROUP BY category HAVING AVG(value) > 50 ORDER BY category",
 			want:  [][]interface{}{{"B", float64(150)}},
-			skip:  "HAVING requires GROUP BY to be implemented",
 		},
 		{
 			name: "HAVING with MIN",
@@ -407,7 +400,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT category, MIN(value) FROM t1 GROUP BY category HAVING MIN(value) > 15 ORDER BY category",
 			want:  [][]interface{}{{"B", int64(30)}},
-			skip:  "HAVING requires GROUP BY to be implemented",
 		},
 
 		// Multiple rows with aggregates

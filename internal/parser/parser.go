@@ -261,19 +261,18 @@ func (p *Parser) parseWhereClauseInto(stmt *SelectStmt) error {
 
 // parseGroupByClauseInto parses the GROUP BY and HAVING clauses.
 func (p *Parser) parseGroupByClauseInto(stmt *SelectStmt) error {
-	if !p.match(TK_GROUP) {
-		return nil
+	if p.match(TK_GROUP) {
+		if !p.match(TK_BY) {
+			return p.error("expected BY after GROUP")
+		}
+		groupBy, err := p.parseExpressionList()
+		if err != nil {
+			return err
+		}
+		stmt.GroupBy = groupBy
 	}
-	if !p.match(TK_BY) {
-		return p.error("expected BY after GROUP")
-	}
-	groupBy, err := p.parseExpressionList()
-	if err != nil {
-		return err
-	}
-	stmt.GroupBy = groupBy
 
-	// HAVING clause
+	// HAVING clause (can appear with or without GROUP BY)
 	if p.match(TK_HAVING) {
 		having, err := p.parseExpression()
 		if err != nil {

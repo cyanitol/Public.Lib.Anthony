@@ -780,3 +780,24 @@ func (m *Mem) Remainder(other *Mem) error {
 	m.SetReal(math.Mod(v1, v2))
 	return nil
 }
+
+// ToDistinctKey converts a Mem value to a string key for DISTINCT deduplication.
+// This ensures different types with the same logical value are treated distinctly.
+func (m *Mem) ToDistinctKey() string {
+	if m.IsNull() {
+		return "NULL"
+	}
+	if m.IsInt() {
+		return fmt.Sprintf("I:%d", m.i)
+	}
+	if m.IsReal() {
+		return fmt.Sprintf("R:%g", m.r)
+	}
+	if m.IsStr() {
+		return fmt.Sprintf("S:%s", string(m.z))
+	}
+	if m.IsBlob() {
+		return fmt.Sprintf("B:%x", m.z)
+	}
+	return "UNDEFINED"
+}

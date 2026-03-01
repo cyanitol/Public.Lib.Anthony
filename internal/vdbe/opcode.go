@@ -226,6 +226,7 @@ const (
 	OpWindowLead        Opcode = 205 // LEAD() window function
 	OpWindowFirstValue  Opcode = 206 // FIRST_VALUE() window function
 	OpWindowLastValue   Opcode = 207 // LAST_VALUE() window function
+	OpAggDistinct       Opcode = 208 // Check if value is distinct for aggregate
 )
 
 // OpcodeNames maps opcodes to their string names for debugging.
@@ -390,6 +391,7 @@ var OpcodeNames = map[Opcode]string{
 	OpWindowLead:        "WindowLead",
 	OpWindowFirstValue:  "WindowFirstValue",
 	OpWindowLastValue:   "WindowLastValue",
+	OpAggDistinct:       "AggDistinct",
 }
 
 // String returns the string representation of an opcode.

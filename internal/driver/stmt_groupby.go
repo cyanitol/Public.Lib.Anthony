@@ -60,27 +60,37 @@ func (s *Stmt) initGroupByState(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *pa
 }
 
 // emitGroupComparison emits code to compare GROUP BY values and output previous group if changed
+// This function compares all GROUP BY columns. If ANY differ from the previous group, it outputs
+// the previous group's accumulated results.
 func (s *Stmt) emitGroupComparison(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, numGroupBy, numCols int) int {
 	// Check if group has changed (skip on first row)
 	skipCheckAddr := vm.AddOp(vdbe.OpIf, state.firstRowReg, 0, 0)
 
-	// Compare GROUP BY values - if any differ, output previous group
+	// Compare all GROUP BY columns to detect if group changed
+	// We need to check if ANY column differs
+	groupChangedReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpInteger, 0, groupChangedReg, 0) // Initialize to false
+
 	for i := 0; i < numGroupBy; i++ {
 		cmpReg := gen.AllocReg()
 		vm.AddOp(vdbe.OpNe, state.groupByRegs[i], state.prevGroupByRegs[i], cmpReg)
-		outputGroupAddr := vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)
-
-		// Patch to output group
-		outputAddr := vm.NumOps()
-		s.emitGroupOutput(vm, stmt, state.accRegs, state.avgCountRegs, state.prevGroupByRegs, numCols)
-		vm.Program[outputGroupAddr].P2 = outputAddr
+		// If this column differs, set groupChangedReg to true
+		vm.AddOp(vdbe.OpOr, groupChangedReg, cmpReg, groupChangedReg)
 	}
+
+	// If group changed, output the previous group
+	skipOutputAddr := vm.AddOp(vdbe.OpIfNot, groupChangedReg, 0, 0)
+	s.emitGroupOutput(vm, stmt, state.accRegs, state.avgCountRegs, state.prevGroupByRegs, numCols)
+
+	// After outputting, we'll fall through to reset accumulators
+	// Skip output jumps here
+	vm.Program[skipOutputAddr].P2 = vm.NumOps()
 
 	return skipCheckAddr
 }
 
-// updateGroupAccumulators initializes/resets accumulators and saves current GROUP BY values
-func (s *Stmt) updateGroupAccumulators(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, table *schema.Table) {
+// updateGroupAccumulatorsFromSorter updates accumulators from data extracted from sorter
+func (s *Stmt) updateGroupAccumulatorsFromSorter(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, sorterBaseReg int, numGroupBy int) {
 	// Clear first row flag
 	vm.AddOp(vdbe.OpInteger, 0, state.firstRowReg, 0)
 
@@ -98,24 +108,146 @@ func (s *Stmt) updateGroupAccumulators(vm *vdbe.VDBE, gen *expr.CodeGenerator, s
 		vm.AddOp(vdbe.OpCopy, state.groupByRegs[i], state.prevGroupByRegs[i], 0)
 	}
 
-	// Update accumulators
+	// Update accumulators from sorter data
+	regIdx := numGroupBy
 	for i, col := range stmt.Columns {
 		if !s.isAggregateExpr(col.Expr) {
 			continue
 		}
 		fnExpr := col.Expr.(*parser.FunctionExpr)
-		s.emitSingleAggregateUpdate(vm, fnExpr, table, state.accRegs[i], state.avgCountRegs[i], gen)
+
+		// COUNT(*) doesn't need column data
+		if fnExpr.Star || len(fnExpr.Args) == 0 {
+			if fnExpr.Name == "COUNT" {
+				vm.AddOp(vdbe.OpAddImm, state.accRegs[i], 1, 0)
+			}
+			continue
+		}
+
+		// Get column value from sorter data
+		valueReg := sorterBaseReg + regIdx
+		regIdx++
+
+		// Update accumulator based on function type
+		s.updateSingleAccumulator(vm, fnExpr.Name, state.accRegs[i], state.avgCountRegs[i], valueReg, gen)
 	}
 }
 
-// compileSelectWithGroupBy compiles a SELECT with GROUP BY clause using a simplified row-by-row approach.
+// updateSingleAccumulator updates a single accumulator register with a value
+func (s *Stmt) updateSingleAccumulator(vm *vdbe.VDBE, funcName string, accReg int, countReg int, valueReg int, gen *expr.CodeGenerator) {
+	// Skip NULL values
+	skipAddr := vm.AddOp(vdbe.OpIsNull, valueReg, 0, 0)
+
+	switch funcName {
+	case "COUNT":
+		vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
+
+	case "SUM", "TOTAL":
+		// If accumulator is NOT NULL, jump to add instruction
+		addAddr := vm.AddOp(vdbe.OpNotNull, accReg, 0, 0)
+		// Accumulator is NULL - copy the first value
+		vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
+		skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+		// Accumulator is not NULL - add to it
+		vm.Program[addAddr].P2 = vm.NumOps()
+		vm.AddOp(vdbe.OpAdd, accReg, valueReg, accReg)
+		endAddr := vm.NumOps()
+		vm.Program[skipToEndAddr].P2 = endAddr
+
+	case "AVG":
+		// Increment count
+		vm.AddOp(vdbe.OpAddImm, countReg, 1, 0)
+		// If sum accumulator is NOT NULL, jump to add instruction
+		addAddr := vm.AddOp(vdbe.OpNotNull, accReg, 0, 0)
+		// Sum is NULL - copy the first value
+		vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
+		skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+		// Sum is not NULL - add to it
+		vm.Program[addAddr].P2 = vm.NumOps()
+		vm.AddOp(vdbe.OpAdd, accReg, valueReg, accReg)
+		endAddr := vm.NumOps()
+		vm.Program[skipToEndAddr].P2 = endAddr
+
+	case "MIN":
+		// If accumulator is NULL, just copy the value (first value)
+		copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
+		// Accumulator is not NULL - compare
+		cmpReg := gen.AllocReg()
+		vm.AddOp(vdbe.OpLt, valueReg, accReg, cmpReg)
+		notLessAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
+		// Copy value (either first value or new min)
+		vm.Program[copyAddr].P2 = vm.NumOps()
+		vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
+		endAddr := vm.NumOps()
+		vm.Program[notLessAddr].P2 = endAddr
+
+	case "MAX":
+		// If accumulator is NULL, just copy the value (first value)
+		copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
+		// Accumulator is not NULL - compare
+		cmpReg := gen.AllocReg()
+		vm.AddOp(vdbe.OpGt, valueReg, accReg, cmpReg)
+		notGreaterAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
+		// Copy value (either first value or new max)
+		vm.Program[copyAddr].P2 = vm.NumOps()
+		vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
+		endAddr := vm.NumOps()
+		vm.Program[notGreaterAddr].P2 = endAddr
+	}
+
+	// Fix skip address for NULL values
+	vm.Program[skipAddr].P2 = vm.NumOps()
+}
+
+// calculateSorterColumns determines how many columns the sorter needs to store
+func (s *Stmt) calculateSorterColumns(stmt *parser.SelectStmt, numGroupBy int) int {
+	cols := numGroupBy
+
+	// Add columns needed for aggregate functions
+	for _, col := range stmt.Columns {
+		if s.isAggregateExpr(col.Expr) {
+			fnExpr := col.Expr.(*parser.FunctionExpr)
+			// COUNT(*) doesn't need a column
+			if !fnExpr.Star && len(fnExpr.Args) > 0 {
+				cols++
+			}
+		}
+	}
+
+	return cols
+}
+
+// createGroupBySorterKeyInfo creates sorter key information for GROUP BY
+func (s *Stmt) createGroupBySorterKeyInfo(numGroupBy int) *vdbe.SorterKeyInfo {
+	keyCols := make([]int, numGroupBy)
+	desc := make([]bool, numGroupBy)
+	collations := make([]string, numGroupBy)
+
+	for i := 0; i < numGroupBy; i++ {
+		keyCols[i] = i
+		desc[i] = false
+		collations[i] = ""
+	}
+
+	return &vdbe.SorterKeyInfo{
+		KeyCols:    keyCols,
+		Desc:       desc,
+		Collations: collations,
+	}
+}
+
+// compileSelectWithGroupBy compiles a SELECT with GROUP BY clause using sorted aggregate approach.
+// This implementation:
+// 1. Scans the table and populates a sorter with GROUP BY columns + aggregate inputs
+// 2. Sorts by GROUP BY columns
+// 3. Processes sorted data row-by-row, detecting group changes and computing aggregates
 func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	numCols := len(stmt.Columns)
 	numGroupBy := len(stmt.GroupBy)
 
 	// Setup VDBE and code generator
-	vm.AllocMemory(numCols + numGroupBy*3 + 50)
-	vm.AllocCursors(1)
+	vm.AllocMemory(numCols + numGroupBy*3 + 100)
+	vm.AllocCursors(2) // Cursor 0 for table, cursor 1 for sorter
 
 	gen := expr.NewCodeGenerator(vm)
 	gen.RegisterCursor(tableName, 0)
@@ -137,18 +269,79 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	state := s.initGroupByState(vm, gen, stmt, numGroupBy)
 
-	// Open cursor
-	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
-	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+	// Phase 1: Scan table and populate sorter
+	// We need to store: GROUP BY columns + columns needed for aggregates
+	sorterCols := s.calculateSorterColumns(stmt, numGroupBy)
 
+	// Create sorter key info (sort by all GROUP BY columns)
+	keyInfo := s.createGroupBySorterKeyInfo(numGroupBy)
+
+	// Open table and sorter
+	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
+	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, 1, sorterCols, 0)
+	vm.Program[sorterOpenAddr].P4.P = keyInfo
+
+	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
 	loopStart := vm.NumOps()
 
 	// WHERE clause
 	skipAddr := s.emitWhereClause(vm, gen, stmt)
 
-	// Evaluate GROUP BY expressions into groupByRegs
-	if err := s.evaluateGroupByExprs(vm, gen, stmt, state.groupByRegs); err != nil {
-		return nil, err
+	// Evaluate and store data for sorter
+	// Allocate base register for sorter data
+	sorterBaseReg := gen.AllocReg()
+
+	// Evaluate GROUP BY expressions
+	for i, groupExpr := range stmt.GroupBy {
+		reg, err := gen.GenerateExpr(groupExpr)
+		if err != nil {
+			return nil, fmt.Errorf("error compiling GROUP BY expression: %w", err)
+		}
+		vm.AddOp(vdbe.OpCopy, reg, sorterBaseReg+i, 0)
+	}
+
+	// Store columns needed for aggregates
+	regIdx := numGroupBy
+	for _, col := range stmt.Columns {
+		if s.isAggregateExpr(col.Expr) {
+			fnExpr := col.Expr.(*parser.FunctionExpr)
+			// For COUNT(*), we don't need to store anything extra
+			if !fnExpr.Star && len(fnExpr.Args) > 0 {
+				argReg, err := gen.GenerateExpr(fnExpr.Args[0])
+				if err == nil {
+					vm.AddOp(vdbe.OpCopy, argReg, sorterBaseReg+regIdx, 0)
+					regIdx++
+				}
+			}
+		}
+	}
+
+	// Insert into sorter
+	vm.AddOp(vdbe.OpSorterInsert, 1, sorterBaseReg, sorterCols)
+
+	// Fix WHERE skip
+	s.fixWhereSkip(vm, skipAddr)
+
+	// Next row
+	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
+
+	// Close table, sort the data
+	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+	sorterSortAddr := vm.AddOp(vdbe.OpSorterSort, 1, 0, 0)
+
+	// Phase 2: Process sorted data with group detection
+	afterScanAddr := vm.NumOps()
+
+	// Iterate over sorted data
+	sorterNextAddr := vm.AddOp(vdbe.OpSorterNext, 1, 0, 0)
+	sorterLoopStart := vm.NumOps()
+
+	// Extract data from sorter
+	vm.AddOp(vdbe.OpSorterData, 1, sorterBaseReg, sorterCols)
+
+	// Load GROUP BY values from sorter data
+	for i := 0; i < numGroupBy; i++ {
+		vm.AddOp(vdbe.OpCopy, sorterBaseReg+i, state.groupByRegs[i], 0)
 	}
 
 	// Compare GROUP BY values and output previous group if changed
@@ -158,25 +351,24 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	initAccumulatorsAddr := vm.NumOps()
 	vm.Program[skipCheckAddr].P2 = initAccumulatorsAddr
 
-	// Update accumulators and save GROUP BY values
-	s.updateGroupAccumulators(vm, gen, stmt, state, table)
+	// Update accumulators with current row data from sorter
+	s.updateGroupAccumulatorsFromSorter(vm, gen, stmt, state, sorterBaseReg, numGroupBy)
 
-	// Fix WHERE skip
-	s.fixWhereSkip(vm, skipAddr)
+	// Next sorted row
+	vm.AddOp(vdbe.OpSorterNext, 1, sorterLoopStart, 0)
 
-	// Next row
-	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
-
-	// After scan - output last group
-	afterScanAddr := vm.NumOps()
+	// After processing all sorted rows - output last group
+	finalOutputAddr := vm.NumOps()
 	s.emitFinalGroupOutput(vm, gen, stmt, state, numCols)
 
-	// Close and halt
-	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+	// Close sorter and halt
+	vm.AddOp(vdbe.OpSorterClose, 1, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
-	// Fix rewind jump
+	// Fix jumps
 	vm.Program[rewindAddr].P2 = afterScanAddr
+	vm.Program[sorterSortAddr].P2 = finalOutputAddr
+	vm.Program[sorterNextAddr].P2 = sorterLoopStart
 
 	return vm, nil
 }
@@ -228,6 +420,7 @@ func (s *Stmt) emitFinalGroupOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt
 
 // emitGroupOutput outputs a single group's results.
 func (s *Stmt) emitGroupOutput(vm *vdbe.VDBE, stmt *parser.SelectStmt, accRegs []int, avgCountRegs []int, groupByRegs []int, numCols int) {
+	// First, copy all aggregate and group values to result registers (0..numCols-1)
 	for i, col := range stmt.Columns {
 		if s.isAggregateExpr(col.Expr) {
 			fnExpr := col.Expr.(*parser.FunctionExpr)
@@ -251,7 +444,17 @@ func (s *Stmt) emitGroupOutput(vm *vdbe.VDBE, stmt *parser.SelectStmt, accRegs [
 			}
 		}
 	}
+
+	// Evaluate HAVING clause if present
+	havingSkipAddr := s.emitGroupByHavingClause(vm, stmt, accRegs, avgCountRegs, groupByRegs, numCols)
+
+	// Emit result row
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+
+	// Fix HAVING skip address to jump past the result row
+	if havingSkipAddr > 0 {
+		vm.Program[havingSkipAddr].P2 = vm.NumOps()
+	}
 }
 
 // exprsEqual checks if two expressions are equal (simplified comparison).
@@ -269,7 +472,7 @@ func exprsEqual(e1, e2 parser.Expression) bool {
 	return false
 }
 
-// emitAggregateHavingClause emits HAVING clause check for aggregate output.
+// emitAggregateHavingClause emits HAVING clause check for aggregate output (without GROUP BY).
 // Returns the address of the IfNot instruction to skip the row if HAVING fails, or 0 if no HAVING clause.
 func (s *Stmt) emitAggregateHavingClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, accRegs []int, avgCountRegs []int, numCols int) int {
 	if stmt.Having == nil {
@@ -281,6 +484,37 @@ func (s *Stmt) emitAggregateHavingClause(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 
 	// Build a map from aggregate expressions to their result registers
 	aggregateMap := s.buildAggregateMap(stmt, accRegs, avgCountRegs)
+
+	// Generate code for the HAVING expression
+	havingReg, err := s.generateHavingExpression(vm, gen, stmt.Having, aggregateMap, numCols)
+	if err != nil {
+		// If we can't generate the HAVING expression, skip it (conservative)
+		return 0
+	}
+
+	// Emit IfNot to skip the result row if HAVING condition is false
+	return vm.AddOp(vdbe.OpIfNot, havingReg, 0, 0)
+}
+
+// emitGroupByHavingClause emits HAVING clause check for GROUP BY output.
+// Returns the address of the IfNot instruction to skip the row if HAVING fails, or 0 if no HAVING clause.
+func (s *Stmt) emitGroupByHavingClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, accRegs []int, avgCountRegs []int, groupByRegs []int, numCols int) int {
+	if stmt.Having == nil {
+		return 0
+	}
+
+	// Create a code generator
+	gen := expr.NewCodeGenerator(vm)
+
+	// Build a map from aggregate expressions and GROUP BY columns to their result registers
+	aggregateMap := s.buildAggregateMap(stmt, accRegs, avgCountRegs)
+
+	// Add GROUP BY columns to the map
+	for i, groupExpr := range stmt.GroupBy {
+		if ident, ok := groupExpr.(*parser.IdentExpr); ok {
+			aggregateMap[ident.Name] = groupByRegs[i]
+		}
+	}
 
 	// Generate code for the HAVING expression
 	havingReg, err := s.generateHavingExpression(vm, gen, stmt.Having, aggregateMap, numCols)

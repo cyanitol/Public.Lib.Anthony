@@ -1051,7 +1051,6 @@ func TestSQLiteSelectGroupBy(t *testing.T) {
 
 // TestSQLiteSelectHaving tests HAVING clause from select3.test
 func TestSQLiteSelectHaving(t *testing.T) {
-	t.Skip("SELECT HAVING not yet fully implemented in internal driver")
 	db := setupSelectTestDB(t)
 	defer db.Close()
 
