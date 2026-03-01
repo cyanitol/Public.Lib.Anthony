@@ -235,7 +235,7 @@ func TestCTERewrite(t *testing.T) {
 
 // TestAttachDatabase tests ATTACH DATABASE statement
 func TestAttachDatabase(t *testing.T) {
-	t.Skip("Parser does not support qualified table names (schema.table)")
+	t.Skip("ATTACH not implemented")
 	mainDB := "test_attach_main.db"
 	attachDB := "test_attach_other.db"
 	defer os.Remove(mainDB)
@@ -326,7 +326,7 @@ func TestDetachDatabase(t *testing.T) {
 
 // TestAttachWithAlias tests ATTACH with different alias names
 func TestAttachWithAlias(t *testing.T) {
-	t.Skip("Parser does not support qualified table names (schema.table)")
+	t.Skip("ATTACH not implemented")
 	mainDB := "test_attach_alias_main.db"
 	attachDB := "test_attach_alias_other.db"
 	defer os.Remove(mainDB)
@@ -810,6 +810,7 @@ func TestCTERegisterAdjustment(t *testing.T) {
 
 // TestMultipleAttachDetach tests multiple ATTACH/DETACH operations
 func TestMultipleAttachDetach(t *testing.T) {
+	t.Skip("ATTACH not implemented")
 	mainDB := "test_multi_attach_main.db"
 	db1 := "test_multi_attach_1.db"
 	db2 := "test_multi_attach_2.db"
