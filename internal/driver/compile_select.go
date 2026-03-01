@@ -137,6 +137,7 @@ func (s *Stmt) setupSimpleSelectVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 
 	// Setup code generator
 	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
 	gen.RegisterCursor(tableName, cursorNum)
 	tableInfo := buildTableInfo(tableName, table)
 	gen.RegisterTable(tableInfo)
@@ -238,6 +239,7 @@ func (s *Stmt) compileSelectWithoutFrom(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 
 	// Create expression code generator (no table context needed)
 	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
 
 	// Set up args for parameter binding
 	argValues := make([]interface{}, len(args))

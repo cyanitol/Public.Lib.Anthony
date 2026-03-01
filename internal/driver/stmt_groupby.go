@@ -250,6 +250,7 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	vm.AllocCursors(2) // Cursor 0 for table, cursor 1 for sorter
 
 	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
 	gen.RegisterCursor(tableName, 0)
 
 	// Build result column names
@@ -481,6 +482,7 @@ func (s *Stmt) emitAggregateHavingClause(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 
 	// Create a code generator
 	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
 
 	// Build a map from aggregate expressions to their result registers
 	aggregateMap := s.buildAggregateMap(stmt, accRegs, avgCountRegs)
@@ -505,6 +507,7 @@ func (s *Stmt) emitGroupByHavingClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, a
 
 	// Create a code generator
 	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
 
 	// Build a map from aggregate expressions and GROUP BY columns to their result registers
 	aggregateMap := s.buildAggregateMap(stmt, accRegs, avgCountRegs)

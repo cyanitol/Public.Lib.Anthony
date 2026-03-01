@@ -256,6 +256,11 @@ func (w *WAL) restartWAL() error {
 	w.frameCount = 0
 	w.checkpointSeq++
 
+	// Reset checksum state
+	w.lastChecksum1 = 0
+	w.lastChecksum2 = 0
+	w.checksumCache = make(map[uint32][2]uint32)
+
 	if err := w.writeHeader(); err != nil {
 		return fmt.Errorf("failed to write new WAL header: %w", err)
 	}

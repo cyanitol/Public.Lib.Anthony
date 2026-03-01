@@ -218,6 +218,7 @@ func init() {
 	OpInitCoroutine: (*VDBE).execInitCoroutine,
 	OpEndCoroutine:  (*VDBE).execEndCoroutine,
 	OpYield:         (*VDBE).execYield,
+	OpOnce:          (*VDBE).execOnce,
 	OpOpenPseudo:    (*VDBE).execOpenPseudo,
 
 	// Window function operations
@@ -3578,6 +3579,33 @@ func (v *VDBE) execYield(instr *Instruction) error {
 	return nil
 }
 
+// execOnce executes a block of code only once.
+// P1 = register containing flag (0 = not executed, 1 = executed)
+// P2 = address to jump to if already executed
+func (v *VDBE) execOnce(instr *Instruction) error {
+	flagReg := instr.P1
+	jumpAddr := instr.P2
+
+	// Get the flag register
+	mem, err := v.GetMem(flagReg)
+	if err != nil {
+		return err
+	}
+
+	// Check if already executed
+	if mem.IsInt() && mem.IntValue() != 0 {
+		// Already executed - jump to skip address
+		v.PC = jumpAddr
+		return nil
+	}
+
+	// Mark as executed
+	mem.SetInt(1)
+
+	// Continue to next instruction (execute the once block)
+	return nil
+}
+
 // execOpenPseudo opens a pseudo-table cursor for accessing OLD/NEW row data in triggers.
 // P1 = cursor number
 // P2 = register containing the pseudo-table data (record blob)
@@ -3585,7 +3613,7 @@ func (v *VDBE) execYield(instr *Instruction) error {
 func (v *VDBE) execOpenPseudo(instr *Instruction) error {
 	cursorNum := instr.P1
 	dataReg := instr.P2
-	
+
 	// Allocate cursors if needed
 	if err := v.AllocCursors(cursorNum + 1); err != nil {
 		return err

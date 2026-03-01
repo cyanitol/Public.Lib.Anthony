@@ -15,6 +15,15 @@ func TestGenerateInSubquery(t *testing.T) {
 
 	g := NewCodeGenerator(v)
 
+	// Set up a mock subquery compiler
+	g.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
+		subVM := vdbe.New()
+		subVM.AllocMemory(10)
+		// Simulate a simple subquery that returns values
+		subVM.AddOp(vdbe.OpResultRow, 1, 1, 0)
+		return subVM, nil
+	})
+
 	// Register a table for testing
 	g.RegisterTable(TableInfo{
 		Name: "users",
@@ -91,6 +100,14 @@ func TestGenerateNotInSubquery(t *testing.T) {
 
 	g := NewCodeGenerator(v)
 
+	// Set up a mock subquery compiler
+	g.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
+		subVM := vdbe.New()
+		subVM.AllocMemory(10)
+		subVM.AddOp(vdbe.OpResultRow, 1, 1, 0)
+		return subVM, nil
+	})
+
 	g.RegisterTable(TableInfo{
 		Name: "users",
 		Columns: []ColumnInfo{
@@ -143,6 +160,14 @@ func TestGenerateScalarSubquery(t *testing.T) {
 	v.AllocMemory(100)
 
 	g := NewCodeGenerator(v)
+
+	// Set up a mock subquery compiler
+	g.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
+		subVM := vdbe.New()
+		subVM.AllocMemory(10)
+		subVM.AddOp(vdbe.OpResultRow, 1, 1, 0)
+		return subVM, nil
+	})
 
 	// Create a scalar subquery expression
 	// SELECT name, (SELECT MAX(salary) FROM employees) FROM users
@@ -224,6 +249,14 @@ func TestGenerateExists(t *testing.T) {
 
 	g := NewCodeGenerator(v)
 
+	// Set up a mock subquery compiler
+	g.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
+		subVM := vdbe.New()
+		subVM.AllocMemory(10)
+		subVM.AddOp(vdbe.OpResultRow, 1, 1, 0)
+		return subVM, nil
+	})
+
 	// Create an EXISTS expression
 	// SELECT * FROM users WHERE EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)
 	existsExpr := &parser.ExistsExpr{
@@ -299,6 +332,14 @@ func TestGenerateNotExists(t *testing.T) {
 	v.AllocMemory(100)
 
 	g := NewCodeGenerator(v)
+
+	// Set up a mock subquery compiler
+	g.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
+		subVM := vdbe.New()
+		subVM.AllocMemory(10)
+		subVM.AddOp(vdbe.OpResultRow, 1, 1, 0)
+		return subVM, nil
+	})
 
 	existsExpr := &parser.ExistsExpr{
 		Select: &parser.SelectStmt{
@@ -410,6 +451,14 @@ func TestSubqueryBytecodeComments(t *testing.T) {
 
 	g := NewCodeGenerator(v)
 
+	// Set up a mock subquery compiler
+	g.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
+		subVM := vdbe.New()
+		subVM.AllocMemory(10)
+		subVM.AddOp(vdbe.OpResultRow, 1, 1, 0)
+		return subVM, nil
+	})
+
 	// Generate IN subquery
 	inExpr := &parser.InExpr{
 		Expr:   &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
@@ -438,6 +487,14 @@ func TestSubqueryBytecodeComments(t *testing.T) {
 	v2.AllocMemory(100)
 	g2 := NewCodeGenerator(v2)
 
+	// Set up a mock subquery compiler for EXISTS
+	g2.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
+		subVM := vdbe.New()
+		subVM.AllocMemory(10)
+		subVM.AddOp(vdbe.OpResultRow, 1, 1, 0)
+		return subVM, nil
+	})
+
 	existsExpr := &parser.ExistsExpr{
 		Select: &parser.SelectStmt{},
 	}
@@ -463,6 +520,14 @@ func TestSubqueryBytecodeComments(t *testing.T) {
 	v3 := vdbe.New()
 	v3.AllocMemory(100)
 	g3 := NewCodeGenerator(v3)
+
+	// Set up a mock subquery compiler for scalar subquery
+	g3.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
+		subVM := vdbe.New()
+		subVM.AllocMemory(10)
+		subVM.AddOp(vdbe.OpResultRow, 1, 1, 0)
+		return subVM, nil
+	})
 
 	scalarExpr := &parser.SubqueryExpr{
 		Select: &parser.SelectStmt{},

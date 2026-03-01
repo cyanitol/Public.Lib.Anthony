@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 	"sync"
@@ -394,25 +395,23 @@ func (j *Journal) updatePageCount() error {
 	return nil
 }
 
-// calculateChecksum calculates a simple checksum for a journal entry.
+// calculateChecksum calculates a CRC32 checksum for a journal entry.
+// Uses CRC32-C (Castagnoli) polynomial, which is what SQLite uses.
 func (j *Journal) calculateChecksum(pageNum uint32, data []byte) uint32 {
-	// Simple checksum: XOR of all 4-byte words plus page number and nonce
-	checksum := pageNum ^ j.nonce
+	// Use CRC32-C (Castagnoli) table
+	table := crc32.MakeTable(crc32.Castagnoli)
 
-	for i := 0; i+4 <= len(data); i += 4 {
-		word := binary.BigEndian.Uint32(data[i : i+4])
-		checksum ^= word
-	}
+	// Create a buffer that includes page number, nonce, and data
+	// This ensures the checksum is unique per page and per journal instance
+	bufSize := 8 + len(data) // 4 bytes for pageNum + 4 bytes for nonce + data
+	buf := make([]byte, bufSize)
 
-	// Handle remaining bytes
-	remaining := len(data) % 4
-	if remaining > 0 {
-		lastWord := uint32(0)
-		for i := 0; i < remaining; i++ {
-			lastWord |= uint32(data[len(data)-remaining+i]) << (8 * i)
-		}
-		checksum ^= lastWord
-	}
+	binary.BigEndian.PutUint32(buf[0:4], pageNum)
+	binary.BigEndian.PutUint32(buf[4:8], j.nonce)
+	copy(buf[8:], data)
+
+	// Calculate CRC32-C checksum
+	checksum := crc32.Checksum(buf, table)
 
 	return checksum
 }

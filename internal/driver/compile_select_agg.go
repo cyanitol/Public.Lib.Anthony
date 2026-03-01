@@ -296,6 +296,7 @@ func (s *Stmt) setupAggregateVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	vm.AllocCursors(1)
 
 	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
 	gen.RegisterCursor(tableName, 0)
 
 	// Build result column names
@@ -508,6 +509,7 @@ func (s *Stmt) emitAggregateOutput(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 
 	// Create a code generator for non-aggregate expressions
 	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
 	gen.SetNextReg(numCols + 10) // Start after result registers
 
 	// Finalize and copy aggregates to result registers
@@ -561,6 +563,7 @@ func (s *Stmt) compileSelectWithWindowFunctions(vm *vdbe.VDBE, stmt *parser.Sele
 
 	// Setup code generator
 	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
 	gen.RegisterCursor(tableName, 0)
 	tableInfo := buildTableInfo(tableName, table)
 	gen.RegisterTable(tableInfo)

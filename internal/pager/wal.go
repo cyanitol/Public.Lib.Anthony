@@ -64,6 +64,14 @@ type WAL struct {
 
 	// Database file handle (needed for checkpoint)
 	dbFile *os.File
+
+	// Last frame checksums for cumulative calculation
+	lastChecksum1 uint32
+	lastChecksum2 uint32
+
+	// Checksum cache to avoid recalculating for sequential reads
+	// Maps frame number to its checksums (s1, s2)
+	checksumCache map[uint32][2]uint32
 }
 
 // WALHeader represents the 32-byte header at the beginning of a WAL file.
@@ -95,11 +103,12 @@ type WALFrame struct {
 // The WAL file is named dbFilename + "-wal".
 func NewWAL(dbFilename string, pageSize int) *WAL {
 	return &WAL{
-		filename:   dbFilename + "-wal",
-		dbFilename: dbFilename,
-		pageSize:   pageSize,
-		salt1:      generateSalt(),
-		salt2:      generateSalt(),
+		filename:      dbFilename + "-wal",
+		dbFilename:    dbFilename,
+		pageSize:      pageSize,
+		salt1:         generateSalt(),
+		salt2:         generateSalt(),
+		checksumCache: make(map[uint32][2]uint32),
 	}
 }
 
@@ -133,6 +142,15 @@ func (w *WAL) Open() error {
 			os.Remove(w.filename)
 			return w.createNewWAL()
 		}
+
+		// Validate all frames and build checksum cache
+		if err := w.validateAllFrames(); err != nil {
+			w.file.Close()
+			w.file = nil
+			// If validation fails, remove and recreate
+			os.Remove(w.filename)
+			return w.createNewWAL()
+		}
 	} else {
 		return w.createNewWAL()
 	}
@@ -158,6 +176,9 @@ func (w *WAL) createNewWAL() error {
 	w.salt2 = generateSalt()
 	w.frameCount = 0
 	w.checkpointSeq++
+	w.lastChecksum1 = 0
+	w.lastChecksum2 = 0
+	w.checksumCache = make(map[uint32][2]uint32)
 
 	// Write WAL header
 	if err := w.writeHeader(); err != nil {
@@ -212,7 +233,7 @@ func (w *WAL) WriteFrame(pgno Pgno, data []byte, dbSize uint32) error {
 		Data:       data,
 	}
 
-	// Calculate checksums
+	// Calculate checksums (cumulative)
 	w.calculateFrameChecksum(frame)
 
 	// Serialize and write frame
@@ -269,7 +290,10 @@ func (w *WAL) ReadFrame(frameNo uint32) (*WALFrame, error) {
 		return nil, fmt.Errorf("frame salt mismatch")
 	}
 
-	// TODO: Validate checksum if needed for production use
+	// Validate checksum
+	if err := w.validateFrameChecksum(frame, frameNo); err != nil {
+		return nil, fmt.Errorf("frame checksum validation failed: %w", err)
+	}
 
 	return frame, nil
 }
@@ -488,6 +512,11 @@ func (w *WAL) readHeader() error {
 		return fmt.Errorf("page size mismatch: got %d, expected %d", header.PageSize, w.pageSize)
 	}
 
+	// Validate header checksum
+	if err := w.validateHeaderChecksum(header); err != nil {
+		return fmt.Errorf("header checksum validation failed: %w", err)
+	}
+
 	// Restore state from header
 	w.salt1 = header.Salt1
 	w.salt2 = header.Salt2
@@ -556,6 +585,29 @@ func (w *WAL) calculateHeaderChecksum(header *WALHeader) {
 	header.Checksum2 = s2
 }
 
+// validateHeaderChecksum validates the checksum of the WAL header.
+func (w *WAL) validateHeaderChecksum(header *WALHeader) error {
+	// Create data array for checksum calculation (first 24 bytes)
+	data := make([]byte, 24)
+	binary.BigEndian.PutUint32(data[0:4], header.Magic)
+	binary.BigEndian.PutUint32(data[4:8], header.Version)
+	binary.BigEndian.PutUint32(data[8:12], header.PageSize)
+	binary.BigEndian.PutUint32(data[12:16], header.CheckpointSeq)
+	binary.BigEndian.PutUint32(data[16:20], header.Salt1)
+	binary.BigEndian.PutUint32(data[20:24], header.Salt2)
+
+	// Calculate checksums using SQLite algorithm
+	s1, s2 := walChecksum(data, 0, 0)
+
+	// Compare calculated checksum with stored checksum
+	if s1 != header.Checksum1 || s2 != header.Checksum2 {
+		return fmt.Errorf("checksum mismatch: expected (%d, %d), got (%d, %d)",
+			header.Checksum1, header.Checksum2, s1, s2)
+	}
+
+	return nil
+}
+
 // calculateFrameChecksum calculates the checksums for a WAL frame.
 // This is cumulative - each frame's checksum depends on previous checksums.
 func (w *WAL) calculateFrameChecksum(frame *WALFrame) {
@@ -566,13 +618,9 @@ func (w *WAL) calculateFrameChecksum(frame *WALFrame) {
 	binary.BigEndian.PutUint32(headerData[8:12], frame.Salt1)
 	binary.BigEndian.PutUint32(headerData[12:16], frame.Salt2)
 
-	// Start with previous checksums (for first frame, use 0)
-	var s1, s2 uint32
-	if w.frameCount > 0 {
-		// In production, should track previous checksums
-		// For now, calculate from scratch
-		s1, s2 = 0, 0
-	}
+	// Start with previous checksums (cumulative calculation)
+	s1 := w.lastChecksum1
+	s2 := w.lastChecksum2
 
 	// Checksum the frame header
 	s1, s2 = walChecksum(headerData, s1, s2)
@@ -582,6 +630,158 @@ func (w *WAL) calculateFrameChecksum(frame *WALFrame) {
 
 	frame.Checksum1 = s1
 	frame.Checksum2 = s2
+
+	// Update last checksums for next frame
+	w.lastChecksum1 = s1
+	w.lastChecksum2 = s2
+}
+
+// validateFrameChecksum validates the checksum of a WAL frame.
+// The checksum is cumulative, so we use a cache to avoid
+// recalculating checksums for frames we've already validated.
+func (w *WAL) validateFrameChecksum(frame *WALFrame, frameNo uint32) error {
+	// Check if we have a cached checksum for this frame
+	if cached, ok := w.checksumCache[frameNo]; ok {
+		if cached[0] == frame.Checksum1 && cached[1] == frame.Checksum2 {
+			return nil // Already validated
+		}
+	}
+
+	// Calculate expected checksum from the beginning or from last cached frame
+	var s1, s2 uint32
+	startFrame := uint32(0)
+
+	// Find the most recent cached frame before this one
+	for i := int32(frameNo) - 1; i >= 0; i-- {
+		if cached, ok := w.checksumCache[uint32(i)]; ok {
+			s1 = cached[0]
+			s2 = cached[1]
+			startFrame = uint32(i) + 1
+			break
+		}
+	}
+
+	// Calculate checksum from startFrame to frameNo
+	for i := startFrame; i <= frameNo; i++ {
+		var currentFrame *WALFrame
+		var err error
+
+		if i == frameNo {
+			// Use the frame we already have
+			currentFrame = frame
+		} else {
+			// Read previous frame for checksum calculation
+			offset := int64(WALHeaderSize) + int64(i)*(int64(WALFrameHeaderSize)+int64(w.pageSize))
+			headerData := make([]byte, WALFrameHeaderSize)
+			if _, err := w.file.ReadAt(headerData, offset); err != nil {
+				return fmt.Errorf("failed to read frame %d header: %w", i, err)
+			}
+
+			currentFrame = &WALFrame{
+				PageNumber: binary.BigEndian.Uint32(headerData[0:4]),
+				DbSize:     binary.BigEndian.Uint32(headerData[4:8]),
+				Salt1:      binary.BigEndian.Uint32(headerData[8:12]),
+				Salt2:      binary.BigEndian.Uint32(headerData[12:16]),
+				Data:       make([]byte, w.pageSize),
+			}
+
+			dataOffset := offset + int64(WALFrameHeaderSize)
+			if _, err = w.file.ReadAt(currentFrame.Data, dataOffset); err != nil {
+				return fmt.Errorf("failed to read frame %d data: %w", i, err)
+			}
+		}
+
+		// Build frame header for checksum (first 16 bytes)
+		headerData := make([]byte, 16)
+		binary.BigEndian.PutUint32(headerData[0:4], currentFrame.PageNumber)
+		binary.BigEndian.PutUint32(headerData[4:8], currentFrame.DbSize)
+		binary.BigEndian.PutUint32(headerData[8:12], currentFrame.Salt1)
+		binary.BigEndian.PutUint32(headerData[12:16], currentFrame.Salt2)
+
+		// Checksum the frame header
+		s1, s2 = walChecksum(headerData, s1, s2)
+
+		// Checksum the page data
+		s1, s2 = walChecksum(currentFrame.Data, s1, s2)
+
+		// Cache the checksum for this frame
+		w.checksumCache[i] = [2]uint32{s1, s2}
+	}
+
+	// Compare calculated checksum with stored checksum
+	if s1 != frame.Checksum1 || s2 != frame.Checksum2 {
+		return fmt.Errorf("checksum mismatch: expected (%d, %d), got (%d, %d)",
+			frame.Checksum1, frame.Checksum2, s1, s2)
+	}
+
+	return nil
+}
+
+// validateAllFrames validates all frames in the WAL on open.
+// This builds the checksum cache and sets lastChecksum for writing.
+func (w *WAL) validateAllFrames() error {
+	if w.frameCount == 0 {
+		return nil
+	}
+
+	var s1, s2 uint32
+
+	for i := uint32(0); i < w.frameCount; i++ {
+		offset := int64(WALHeaderSize) + int64(i)*(int64(WALFrameHeaderSize)+int64(w.pageSize))
+
+		headerData := make([]byte, WALFrameHeaderSize)
+		if _, err := w.file.ReadAt(headerData, offset); err != nil {
+			return fmt.Errorf("failed to read frame %d header: %w", i, err)
+		}
+
+		frame := &WALFrame{
+			PageNumber: binary.BigEndian.Uint32(headerData[0:4]),
+			DbSize:     binary.BigEndian.Uint32(headerData[4:8]),
+			Salt1:      binary.BigEndian.Uint32(headerData[8:12]),
+			Salt2:      binary.BigEndian.Uint32(headerData[12:16]),
+			Checksum1:  binary.BigEndian.Uint32(headerData[16:20]),
+			Checksum2:  binary.BigEndian.Uint32(headerData[20:24]),
+			Data:       make([]byte, w.pageSize),
+		}
+
+		dataOffset := offset + int64(WALFrameHeaderSize)
+		if _, err := w.file.ReadAt(frame.Data, dataOffset); err != nil {
+			return fmt.Errorf("failed to read frame %d data: %w", i, err)
+		}
+
+		// Validate salt
+		if frame.Salt1 != w.salt1 || frame.Salt2 != w.salt2 {
+			return fmt.Errorf("frame %d salt mismatch", i)
+		}
+
+		// Build frame header for checksum
+		checksumData := make([]byte, 16)
+		binary.BigEndian.PutUint32(checksumData[0:4], frame.PageNumber)
+		binary.BigEndian.PutUint32(checksumData[4:8], frame.DbSize)
+		binary.BigEndian.PutUint32(checksumData[8:12], frame.Salt1)
+		binary.BigEndian.PutUint32(checksumData[12:16], frame.Salt2)
+
+		// Checksum the frame header
+		s1, s2 = walChecksum(checksumData, s1, s2)
+
+		// Checksum the page data
+		s1, s2 = walChecksum(frame.Data, s1, s2)
+
+		// Validate checksum
+		if s1 != frame.Checksum1 || s2 != frame.Checksum2 {
+			return fmt.Errorf("frame %d checksum mismatch: expected (%d, %d), got (%d, %d)",
+				i, frame.Checksum1, frame.Checksum2, s1, s2)
+		}
+
+		// Cache the checksum
+		w.checksumCache[i] = [2]uint32{s1, s2}
+	}
+
+	// Set last checksums for writing new frames
+	w.lastChecksum1 = s1
+	w.lastChecksum2 = s2
+
+	return nil
 }
 
 // walChecksum implements the SQLite WAL checksum algorithm.

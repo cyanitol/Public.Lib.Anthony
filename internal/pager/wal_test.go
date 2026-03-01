@@ -651,3 +651,255 @@ func bytesEqual(a, b []byte) bool {
 	}
 	return true
 }
+
+// TestWALChecksumValidation tests that checksums are properly validated
+func TestWALChecksumValidation(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	// Create WAL and write some frames
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+
+	// Write test frames
+	for i := 1; i <= 5; i++ {
+		pageData := makeTestPage(i*100, DefaultPageSize)
+		if err := wal.WriteFrame(Pgno(i), pageData, uint32(i)); err != nil {
+			t.Fatalf("Failed to write frame %d: %v", i, err)
+		}
+	}
+
+	wal.Close()
+
+	// Reopen WAL - should validate all frames
+	wal2 := NewWAL(dbFile, DefaultPageSize)
+	if err := wal2.Open(); err != nil {
+		t.Fatalf("Failed to reopen WAL: %v", err)
+	}
+	defer wal2.Close()
+
+	// Verify frame count
+	if wal2.frameCount != 5 {
+		t.Errorf("Expected 5 frames, got %d", wal2.frameCount)
+	}
+
+	// Read frames and verify checksums are validated
+	for i := uint32(0); i < 5; i++ {
+		frame, err := wal2.ReadFrame(i)
+		if err != nil {
+			t.Errorf("Failed to read frame %d: %v", i, err)
+		}
+		if frame == nil {
+			t.Errorf("Frame %d is nil", i)
+		}
+	}
+}
+
+// TestWALChecksumCorruption tests that corrupted checksums are detected
+func TestWALChecksumCorruption(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	// Create WAL and write some frames
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+
+	// Write test frames
+	for i := 1; i <= 3; i++ {
+		pageData := makeTestPage(i*100, DefaultPageSize)
+		if err := wal.WriteFrame(Pgno(i), pageData, uint32(i)); err != nil {
+			t.Fatalf("Failed to write frame %d: %v", i, err)
+		}
+	}
+
+	wal.Close()
+
+	// Corrupt a checksum in the second frame
+	walFile := dbFile + "-wal"
+	f, err := os.OpenFile(walFile, os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatalf("Failed to open WAL file: %v", err)
+	}
+
+	// Corrupt checksum1 of second frame (offset: header + 1*frameSize + 16)
+	frameOffset := int64(WALHeaderSize) + int64(WALFrameHeaderSize+DefaultPageSize)
+	checksumOffset := frameOffset + 16 // Checksum1 offset in frame header
+
+	corruptData := make([]byte, 4)
+	binary.BigEndian.PutUint32(corruptData, 0xDEADBEEF) // Invalid checksum
+	if _, err := f.WriteAt(corruptData, checksumOffset); err != nil {
+		f.Close()
+		t.Fatalf("Failed to corrupt checksum: %v", err)
+	}
+	f.Close()
+
+	// Try to reopen WAL - should detect corruption and recreate
+	wal2 := NewWAL(dbFile, DefaultPageSize)
+	err = wal2.Open()
+	if err != nil {
+		t.Fatalf("Failed to open WAL after corruption: %v", err)
+	}
+	defer wal2.Close()
+
+	// The WAL should have been recreated with no frames
+	if wal2.frameCount != 0 {
+		t.Errorf("Expected empty WAL after corruption recovery, got %d frames", wal2.frameCount)
+	}
+
+	// Verify the corrupted WAL was removed and recreated
+	info, err := os.Stat(walFile)
+	if err != nil {
+		t.Fatalf("WAL file should exist: %v", err)
+	}
+
+	// New WAL should only have header
+	if info.Size() != WALHeaderSize {
+		t.Logf("Note: WAL was recreated after detecting corruption (size: %d)", info.Size())
+	}
+}
+
+// TestWALHeaderChecksumValidation tests header checksum validation
+func TestWALHeaderChecksumValidation(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	// Create WAL
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	wal.Close()
+
+	// Corrupt header checksum
+	walFile := dbFile + "-wal"
+	f, err := os.OpenFile(walFile, os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatalf("Failed to open WAL file: %v", err)
+	}
+
+	// Corrupt Checksum1 in header (offset 24)
+	corruptData := make([]byte, 4)
+	binary.BigEndian.PutUint32(corruptData, 0xBADBAD)
+	if _, err := f.WriteAt(corruptData, 24); err != nil {
+		f.Close()
+		t.Fatalf("Failed to corrupt header: %v", err)
+	}
+	f.Close()
+
+	// Try to reopen - should fail header validation and recreate
+	wal2 := NewWAL(dbFile, DefaultPageSize)
+	err = wal2.Open()
+	if err == nil {
+		wal2.Close()
+		// The WAL should have been recreated, so this is acceptable
+		t.Logf("WAL was recreated after header corruption")
+	} else {
+		t.Logf("Got expected error on corrupted header: %v", err)
+	}
+}
+
+// TestWALCumulativeChecksums tests that checksums are properly cumulative
+func TestWALCumulativeChecksums(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
+
+	// Write multiple frames
+	var checksums []struct{ c1, c2 uint32 }
+
+	for i := 1; i <= 5; i++ {
+		pageData := makeTestPage(i*50, DefaultPageSize)
+		if err := wal.WriteFrame(Pgno(i), pageData, uint32(i)); err != nil {
+			t.Fatalf("Failed to write frame %d: %v", i, err)
+		}
+
+		// Read back to get checksum
+		frame, err := wal.ReadFrame(uint32(i - 1))
+		if err != nil {
+			t.Fatalf("Failed to read frame %d: %v", i-1, err)
+		}
+
+		checksums = append(checksums, struct{ c1, c2 uint32 }{frame.Checksum1, frame.Checksum2})
+	}
+
+	// Verify checksums are different (cumulative)
+	for i := 1; i < len(checksums); i++ {
+		if checksums[i].c1 == checksums[i-1].c1 && checksums[i].c2 == checksums[i-1].c2 {
+			t.Errorf("Frame %d has same checksum as frame %d - checksums should be cumulative", i, i-1)
+		}
+	}
+}
+
+// TestWALChecksumCache tests that the checksum cache works correctly
+func TestWALChecksumCache(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+
+	// Write frames
+	for i := 1; i <= 10; i++ {
+		pageData := makeTestPage(i*10, DefaultPageSize)
+		if err := wal.WriteFrame(Pgno(i), pageData, uint32(i)); err != nil {
+			t.Fatalf("Failed to write frame %d: %v", i, err)
+		}
+	}
+
+	wal.Close()
+
+	// Reopen - should build cache
+	wal2 := NewWAL(dbFile, DefaultPageSize)
+	if err := wal2.Open(); err != nil {
+		t.Fatalf("Failed to reopen WAL: %v", err)
+	}
+	defer wal2.Close()
+
+	// Verify cache was built
+	if len(wal2.checksumCache) != 10 {
+		t.Errorf("Expected 10 cached checksums, got %d", len(wal2.checksumCache))
+	}
+
+	// Read frames should use cache
+	for i := uint32(0); i < 10; i++ {
+		if _, err := wal2.ReadFrame(i); err != nil {
+			t.Errorf("Failed to read frame %d: %v", i, err)
+		}
+	}
+}

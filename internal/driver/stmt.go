@@ -577,6 +577,7 @@ func (s *Stmt) setupJoinVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []st
 	vm.AllocCursors(len(tables))
 
 	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
 	for _, tbl := range tables {
 		gen.RegisterCursor(tbl.name, tbl.cursorIdx)
 	}
@@ -994,6 +995,7 @@ func (s *Stmt) setupUpdateVDBE(vm *vdbe.VDBE, table *schema.Table, stmt *parser.
 
 	// Create and configure code generator
 	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
 	gen.RegisterCursor(stmt.Table, 0)
 	tableInfo := buildTableInfo(stmt.Table, table)
 	gen.RegisterTable(tableInfo)
@@ -1142,6 +1144,7 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 	if stmt.Where != nil {
 		// Create code generator for expression compilation
 		gen := expr.NewCodeGenerator(vm)
+		s.setupSubqueryCompiler(gen)
 		gen.RegisterCursor(stmt.Table, 0)
 
 		// Register table info for column resolution

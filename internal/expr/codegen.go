@@ -733,80 +733,98 @@ func (g *CodeGenerator) negateResult(reg int) int {
 }
 
 // generateInSubquery generates code for IN (SELECT ...) expressions.
-// Strategy: Execute the subquery using a coroutine, then check if the LHS value
+// Strategy: Use a coroutine to execute the subquery, then check if the LHS value
 // matches any row returned by the subquery.
 func (g *CodeGenerator) generateInSubquery(e *parser.InExpr, exprReg int, resultReg int) (int, error) {
+	if g.subqueryCompiler == nil {
+		return 0, fmt.Errorf("subquery compiler not set")
+	}
+
 	// Initialize result to false
 	g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: init result to false")
 
-	// Open ephemeral table for subquery results
+	// Allocate a coroutine ID
+	coroutineID := g.AllocReg()
+
+	// Initialize the coroutine
+	// P1 = coroutine ID, P2 = jump past coroutine body, P3 = entry point
+	g.vdbe.AddOp(vdbe.OpInitCoroutine, coroutineID, 0, 0)
+	addrInitCoroutine := g.vdbe.NumOps() - 1
+
+	// This is the entry point for the coroutine (will be filled in)
+	addrCoroutineStart := g.vdbe.NumOps()
+
+	// Compile the subquery SELECT into the current VDBE
+	// The subquery will insert results into an ephemeral table
 	subqueryCursor := g.AllocReg()
 	g.vdbe.AddOp(vdbe.OpOpenEphemeral, subqueryCursor, 1, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: open ephemeral table")
 
-	// Emit placeholder for subquery compilation
-	g.emitSubqueryPlaceholder()
+	// Compile the SELECT statement
+	subVM, err := g.subqueryCompiler(e.Select)
+	if err != nil {
+		return 0, fmt.Errorf("failed to compile IN subquery: %w", err)
+	}
 
-	// Scan ephemeral table and check for matches
-	addrRewind, _ := g.generateInSubqueryLoop(subqueryCursor, exprReg, resultReg)
+	// Copy the subquery bytecode into the current VDBE
+	// The subquery should yield each result row
+	for i := 0; i < subVM.NumOps(); i++ {
+		instr := subVM.Program[i]
+		g.vdbe.Program = append(g.vdbe.Program, instr)
+	}
 
-	// Close ephemeral table
-	g.vdbe.AddOp(vdbe.OpClose, subqueryCursor, 0, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: close ephemeral table")
+	// End the coroutine
+	g.vdbe.AddOp(vdbe.OpEndCoroutine, coroutineID, 0, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: end coroutine")
 
-	// Patch the Rewind jump to end
-	g.vdbe.Program[addrRewind].P2 = g.vdbe.NumOps()
+	// Set the jump address to skip the coroutine body
+	addrAfterCoroutine := g.vdbe.NumOps()
+	g.vdbe.Program[addrInitCoroutine].P2 = addrAfterCoroutine
+	g.vdbe.Program[addrInitCoroutine].P3 = addrCoroutineStart
 
-	return resultReg, nil
-}
-
-// emitSubqueryPlaceholder emits placeholder comments for subquery compilation.
-func (g *CodeGenerator) emitSubqueryPlaceholder() {
-	addrSubqueryStart := g.vdbe.NumOps()
-	g.vdbe.SetComment(addrSubqueryStart, "IN subquery: start")
-	g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: TODO - compile SELECT statement")
-}
-
-// generateInSubqueryLoop generates the loop to scan subquery results and check for matches.
-// Returns the addresses of the Rewind and loop start instructions.
-func (g *CodeGenerator) generateInSubqueryLoop(cursor, exprReg, resultReg int) (int, int) {
-	addrRewind := g.vdbe.AddOp(vdbe.OpRewind, cursor, 0, 0)
+	// Now scan the ephemeral table and check for matches
+	addrRewind := g.vdbe.AddOp(vdbe.OpRewind, subqueryCursor, 0, 0)
 	addrLoop := g.vdbe.NumOps()
 
 	// Read value and compare
 	valueReg := g.AllocReg()
-	g.vdbe.AddOp(vdbe.OpColumn, cursor, 0, valueReg)
+	g.vdbe.AddOp(vdbe.OpColumn, subqueryCursor, 0, valueReg)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: read value")
 
 	cmpReg := g.AllocReg()
 	g.vdbe.AddOp(vdbe.OpEq, exprReg, valueReg, cmpReg)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: compare")
 
-	// On match, set result and break
-	g.generateInSubqueryMatchHandler(cmpReg, resultReg, addrRewind)
-
-	// Advance to next row
-	g.vdbe.AddOp(vdbe.OpNext, cursor, addrLoop, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: next row")
-
-	return addrRewind, addrLoop
-}
-
-// generateInSubqueryMatchHandler generates code to handle a match in the subquery loop.
-func (g *CodeGenerator) generateInSubqueryMatchHandler(cmpReg, resultReg int, addrEnd int) {
-	g.vdbe.AddOp(vdbe.OpIf, cmpReg, 0, 0)
-	ifMatchAddr := g.vdbe.NumOps() - 1
+	// If equal, set result to true and jump to end
+	g.vdbe.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
+	addrIfNot := g.vdbe.NumOps() - 1
 
 	g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: match found, set true")
 
-	g.vdbe.AddOp(vdbe.OpGoto, 0, addrEnd+100, 0) // Placeholder, will be patched
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: jump to end")
+	g.vdbe.AddOp(vdbe.OpGoto, 0, 0, 0)
+	addrGotoEnd := g.vdbe.NumOps() - 1
 
-	// Patch the If to continue loop if no match
-	g.vdbe.Program[ifMatchAddr].P2 = g.vdbe.NumOps()
+	// Patch the IfNot to continue loop
+	g.vdbe.Program[addrIfNot].P2 = g.vdbe.NumOps()
+
+	// Advance to next row
+	g.vdbe.AddOp(vdbe.OpNext, subqueryCursor, addrLoop, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: next row")
+
+	// Patch the Rewind jump to end if no rows
+	addrEnd := g.vdbe.NumOps()
+	g.vdbe.Program[addrRewind].P2 = addrEnd
+
+	// Patch the Goto to end
+	g.vdbe.Program[addrGotoEnd].P2 = addrEnd
+
+	// Close ephemeral table
+	g.vdbe.AddOp(vdbe.OpClose, subqueryCursor, 0, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: close ephemeral table")
+
+	return resultReg, nil
 }
 
 // generateBetween generates code for BETWEEN expressions.
@@ -872,12 +890,16 @@ func (g *CodeGenerator) generateCast(e *parser.CastExpr) (int, error) {
 
 // generateSubquery generates code for scalar subquery expressions.
 // A scalar subquery is a SELECT that returns a single value.
-// Strategy: Execute the subquery and extract the single result value.
+// Strategy: Use a coroutine to execute the subquery and extract the single result value.
 // If the subquery returns zero rows, the result is NULL.
 // If the subquery returns more than one row, it's an error.
 func (g *CodeGenerator) generateSubquery(e *parser.SubqueryExpr) (int, error) {
 	if e.Select == nil {
 		return 0, fmt.Errorf("subquery expression has no SELECT statement")
+	}
+
+	if g.subqueryCompiler == nil {
+		return 0, fmt.Errorf("subquery compiler not set")
 	}
 
 	resultReg := g.AllocReg()
@@ -887,36 +909,50 @@ func (g *CodeGenerator) generateSubquery(e *parser.SubqueryExpr) (int, error) {
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: init result to NULL")
 
 	// Use OpOnce to ensure subquery executes only once for scalar context
-	// P1 = flag register to track if already executed
+	// P1 = flag register to track if already executed, P2 = jump if already executed
 	onceReg := g.AllocReg()
 	g.vdbe.AddOp(vdbe.OpOnce, onceReg, 0, 0)
 	addrOnce := g.vdbe.NumOps() - 1
-	addrSkipSubquery := g.vdbe.NumOps() + 100 // Placeholder
 
-	// Mark the start of subquery execution
-	g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: start")
+	// Allocate a coroutine ID
+	coroutineID := g.AllocReg()
 
-	// TODO: Compile the SELECT statement from e.Select
-	// This would involve:
-	// 1. Opening cursors for tables in FROM clause
-	// 2. Generating WHERE filter code
-	// 3. Evaluating the SELECT expression(s)
-	// 4. Storing the first result value in resultReg
-	// 5. Checking if more than one row is returned (error condition)
+	// Initialize the coroutine
+	// P1 = coroutine ID, P2 = jump past coroutine body, P3 = entry point
+	g.vdbe.AddOp(vdbe.OpInitCoroutine, coroutineID, 0, 0)
+	addrInitCoroutine := g.vdbe.NumOps() - 1
+
+	// This is the entry point for the coroutine (will be filled in)
+	addrCoroutineStart := g.vdbe.NumOps()
 
 	// Allocate a cursor for the subquery result
 	subqueryCursor := g.AllocReg()
 	g.vdbe.AddOp(vdbe.OpOpenEphemeral, subqueryCursor, 1, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: open ephemeral table")
 
-	// Placeholder for subquery compilation
-	g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: TODO - compile SELECT statement")
+	// Compile the SELECT statement
+	subVM, err := g.subqueryCompiler(e.Select)
+	if err != nil {
+		return 0, fmt.Errorf("failed to compile scalar subquery: %w", err)
+	}
+
+	// Copy the subquery bytecode into the current VDBE
+	for i := 0; i < subVM.NumOps(); i++ {
+		instr := subVM.Program[i]
+		g.vdbe.Program = append(g.vdbe.Program, instr)
+	}
+
+	// End the coroutine
+	g.vdbe.AddOp(vdbe.OpEndCoroutine, coroutineID, 0, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: end coroutine")
+
+	// Set the jump address to skip the coroutine body
+	addrAfterCoroutine := g.vdbe.NumOps()
+	g.vdbe.Program[addrInitCoroutine].P2 = addrAfterCoroutine
+	g.vdbe.Program[addrInitCoroutine].P3 = addrCoroutineStart
 
 	// After subquery populates ephemeral table, extract the single value
 	addrRewind := g.vdbe.AddOp(vdbe.OpRewind, subqueryCursor, 0, 0)
-	addrNoRows := g.vdbe.NumOps() + 50 // Placeholder
 
 	// Read the first (and should be only) value
 	g.vdbe.AddOp(vdbe.OpColumn, subqueryCursor, 0, resultReg)
@@ -934,10 +970,10 @@ func (g *CodeGenerator) generateSubquery(e *parser.SubqueryExpr) (int, error) {
 	g.vdbe.SetComment(addrError, "Scalar subquery: error - too many rows")
 
 	// Patch the Next to jump past error if no second row
-	g.vdbe.Program[addrCheckSecondRow].P2 = addrError
+	g.vdbe.Program[addrCheckSecondRow].P2 = g.vdbe.NumOps()
 
-	// Patch the Rewind to jump here if no rows
-	addrNoRows = g.vdbe.NumOps()
+	// Patch the Rewind to jump here if no rows (result stays NULL)
+	addrNoRows := g.vdbe.NumOps()
 	g.vdbe.Program[addrRewind].P2 = addrNoRows
 
 	// Close the ephemeral table
@@ -945,7 +981,7 @@ func (g *CodeGenerator) generateSubquery(e *parser.SubqueryExpr) (int, error) {
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: close ephemeral table")
 
 	// Patch the Once to jump here after first execution
-	addrSkipSubquery = g.vdbe.NumOps()
+	addrSkipSubquery := g.vdbe.NumOps()
 	g.vdbe.Program[addrOnce].P2 = addrSkipSubquery
 
 	g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
@@ -1047,12 +1083,17 @@ func (g *CodeGenerator) CurrentAddr() int {
 }
 
 // generateExists generates code for EXISTS (SELECT ...) expressions.
-// Strategy: Execute the subquery with LIMIT 1, and return true if any row is returned.
+// Strategy: Use a coroutine to execute the subquery with LIMIT 1 optimization,
+// and return true if any row is returned.
 // EXISTS is optimized because it only needs to check if at least one row exists,
 // not retrieve all rows.
 func (g *CodeGenerator) generateExists(e *parser.ExistsExpr) (int, error) {
 	if e.Select == nil {
 		return 0, fmt.Errorf("EXISTS expression has no SELECT statement")
+	}
+
+	if g.subqueryCompiler == nil {
+		return 0, fmt.Errorf("subquery compiler not set")
 	}
 
 	resultReg := g.AllocReg()
@@ -1061,37 +1102,65 @@ func (g *CodeGenerator) generateExists(e *parser.ExistsExpr) (int, error) {
 	g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS: init result to false")
 
+	// Allocate a coroutine ID
+	coroutineID := g.AllocReg()
+
+	// Initialize the coroutine
+	// P1 = coroutine ID, P2 = jump past coroutine body, P3 = entry point
+	g.vdbe.AddOp(vdbe.OpInitCoroutine, coroutineID, 0, 0)
+	addrInitCoroutine := g.vdbe.NumOps() - 1
+
+	// This is the entry point for the coroutine
+	addrCoroutineStart := g.vdbe.NumOps()
+
 	// Mark the start of subquery execution
 	g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS subquery: start")
-
-	// TODO: Compile the SELECT statement from e.Select with LIMIT 1 optimization
-	// This would involve:
-	// 1. Opening cursors for tables in FROM clause
-	// 2. Generating WHERE filter code
-	// 3. On first matching row, set resultReg to 1 and break
-	// 4. The key optimization is we can stop after finding the first row
 
 	// Allocate a cursor for the subquery
 	subqueryCursor := g.AllocReg()
 	g.vdbe.AddOp(vdbe.OpOpenEphemeral, subqueryCursor, 1, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS: open ephemeral table")
 
-	// Placeholder for subquery compilation
-	// In a real implementation, this would compile the SELECT with an implicit LIMIT 1
-	g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS: TODO - compile SELECT with LIMIT 1")
+	// Compile the SELECT statement with implicit LIMIT 1
+	// We'll add a LIMIT to the SELECT if it doesn't have one
+	selectWithLimit := *e.Select
+	if selectWithLimit.Limit == nil {
+		selectWithLimit.Limit = &parser.LiteralExpr{
+			Type:  parser.LiteralInteger,
+			Value: "1",
+		}
+	}
+
+	subVM, err := g.subqueryCompiler(&selectWithLimit)
+	if err != nil {
+		return 0, fmt.Errorf("failed to compile EXISTS subquery: %w", err)
+	}
+
+	// Copy the subquery bytecode into the current VDBE
+	for i := 0; i < subVM.NumOps(); i++ {
+		instr := subVM.Program[i]
+		g.vdbe.Program = append(g.vdbe.Program, instr)
+	}
+
+	// End the coroutine
+	g.vdbe.AddOp(vdbe.OpEndCoroutine, coroutineID, 0, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS: end coroutine")
+
+	// Set the jump address to skip the coroutine body
+	addrAfterCoroutine := g.vdbe.NumOps()
+	g.vdbe.Program[addrInitCoroutine].P2 = addrAfterCoroutine
+	g.vdbe.Program[addrInitCoroutine].P3 = addrCoroutineStart
 
 	// Check if any row was returned
 	addrRewind := g.vdbe.AddOp(vdbe.OpRewind, subqueryCursor, 0, 0)
-	addrNoRows := g.vdbe.NumOps() + 10 // Placeholder
 
 	// If we get here, at least one row exists - set result to true
 	g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS: row found, set true")
 
 	// Patch the Rewind to jump here if no rows
-	addrNoRows = g.vdbe.NumOps()
+	addrNoRows := g.vdbe.NumOps()
 	g.vdbe.Program[addrRewind].P2 = addrNoRows
 
 	// Close the ephemeral table

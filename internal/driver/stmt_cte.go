@@ -58,7 +58,8 @@ func (s *Stmt) compileSelectWithCTEs(vm *vdbe.VDBE, stmt *parser.SelectStmt, arg
 	return s.compileSelect(vm, mainStmt, args)
 }
 
-// compileNonRecursiveCTE compiles a non-recursive CTE into a temporary table.
+// compileNonRecursiveCTE compiles a non-recursive CTE into a temporary table using coroutines.
+// This generates bytecode that materializes the CTE at runtime using OpInitCoroutine, OpYield, and OpEndCoroutine.
 func (s *Stmt) compileNonRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planner.CTEDefinition,
 	cteCtx *planner.CTEContext, cteTempTables map[string]*schema.Table, args []driver.NamedValue) (*schema.Table, error) {
 
@@ -70,8 +71,11 @@ func (s *Stmt) compileNonRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planne
 	cursorNum := len(vm.Cursors)
 	vm.AllocCursors(cursorNum + 1)
 
-	// Open an ephemeral table for this CTE
-	vm.AddOp(vdbe.OpOpenEphemeral, cursorNum, len(tempTable.Columns), 0)
+	// Allocate a coroutine ID
+	coroutineID := len(vm.Coroutines)
+	if vm.Coroutines == nil {
+		vm.Coroutines = make(map[int]*vdbe.CoroutineInfo)
+	}
 
 	// Store cursor number in temp table metadata for later reference
 	tempTable.RootPage = uint32(cursorNum) // Use RootPage to store cursor number for ephemeral tables
@@ -82,8 +86,8 @@ func (s *Stmt) compileNonRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planne
 	// Rewrite the CTE's SELECT to use already-materialized CTEs
 	cteSelect := s.rewriteSelectWithCTETables(def.Select, cteTempTables)
 
-	// Generate bytecode to populate the ephemeral table
-	if err := s.compileCTEPopulation(vm, cteSelect, cursorNum, len(tempTable.Columns), args); err != nil {
+	// Generate bytecode to populate the ephemeral table using a coroutine
+	if err := s.compileCTEPopulationCoroutine(vm, cteSelect, cursorNum, coroutineID, len(tempTable.Columns), args); err != nil {
 		return nil, fmt.Errorf("failed to compile CTE population: %w", err)
 	}
 
