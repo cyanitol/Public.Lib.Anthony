@@ -428,56 +428,85 @@ func (s *Stmt) compilePragmaForeignKeys(vm *vdbe.VDBE, stmt *parser.PragmaStmt) 
 // compilePragmaJournalMode compiles PRAGMA journal_mode or PRAGMA journal_mode = value
 func (s *Stmt) compilePragmaJournalMode(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
 	if stmt.Value != nil {
-		// SET operation: PRAGMA journal_mode = value
-		vm.SetReadOnly(false)
+		return s.compilePragmaJournalModeSet(vm, stmt)
+	}
+	return s.compilePragmaJournalModeGet(vm)
+}
 
-		var mode string
-		if lit, ok := stmt.Value.(*parser.LiteralExpr); ok {
-			mode = strings.ToUpper(lit.Value)
-		} else if ident, ok := stmt.Value.(*parser.IdentExpr); ok {
-			mode = strings.ToUpper(ident.Name)
-		}
+// compilePragmaJournalModeSet handles SET operation: PRAGMA journal_mode = value
+func (s *Stmt) compilePragmaJournalModeSet(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
 
-		// Map string mode to pager journal mode constant
-		modeMap := map[string]int{
-			"DELETE":   0, // JournalModeDelete
-			"TRUNCATE": 3, // JournalModeTruncate
-			"PERSIST":  1, // JournalModePersist
-			"MEMORY":   4, // JournalModeMemory
-			"WAL":      5, // JournalModeWAL
-			"OFF":      2, // JournalModeOff
-		}
-
-		pagerMode, valid := modeMap[mode]
-		if !valid {
-			return nil, fmt.Errorf("invalid journal mode: %s", mode)
-		}
-
-		// Actually set the mode in the pager if it's a concrete pager (not in-memory)
-		if concretePager, ok := s.conn.pager.(*pager.Pager); ok {
-			if err := concretePager.SetJournalMode(pagerMode); err != nil {
-				return nil, fmt.Errorf("failed to set journal mode: %w", err)
-			}
-		}
-
-		// Store the setting in the connection
-		s.conn.journalMode = mode
-
-		// Return the mode that was set
-		vm.ResultCols = []string{"journal_mode"}
-		vm.AddOp(vdbe.OpInit, 0, 0, 0)
-		vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, strings.ToLower(mode))
-		vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
-		vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-		return vm, nil
+	mode := extractJournalModeValue(stmt.Value)
+	pagerMode, err := mapJournalModeToPager(mode)
+	if err != nil {
+		return nil, err
 	}
 
-	// GET operation: PRAGMA journal_mode
-	vm.ResultCols = []string{"journal_mode"}
+	if err := s.setJournalModeInPager(pagerMode); err != nil {
+		return nil, err
+	}
 
+	s.conn.journalMode = mode
+	emitJournalModeResult(vm, strings.ToLower(mode))
+	return vm, nil
+}
+
+// compilePragmaJournalModeGet handles GET operation: PRAGMA journal_mode
+func (s *Stmt) compilePragmaJournalModeGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"journal_mode"}
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 
-	// Get current mode from pager if available
+	mode := s.getCurrentJournalMode()
+	vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, mode)
+	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// extractJournalModeValue extracts the journal mode string from a pragma value expression.
+func extractJournalModeValue(value parser.Expression) string {
+	if lit, ok := value.(*parser.LiteralExpr); ok {
+		return strings.ToUpper(lit.Value)
+	}
+	if ident, ok := value.(*parser.IdentExpr); ok {
+		return strings.ToUpper(ident.Name)
+	}
+	return ""
+}
+
+// mapJournalModeToPager maps a journal mode string to a pager constant.
+func mapJournalModeToPager(mode string) (int, error) {
+	modeMap := map[string]int{
+		"DELETE":   0, // JournalModeDelete
+		"TRUNCATE": 3, // JournalModeTruncate
+		"PERSIST":  1, // JournalModePersist
+		"MEMORY":   4, // JournalModeMemory
+		"WAL":      5, // JournalModeWAL
+		"OFF":      2, // JournalModeOff
+	}
+
+	pagerMode, valid := modeMap[mode]
+	if !valid {
+		return 0, fmt.Errorf("invalid journal mode: %s", mode)
+	}
+	return pagerMode, nil
+}
+
+// setJournalModeInPager sets the journal mode in the pager if it's a concrete pager.
+func (s *Stmt) setJournalModeInPager(pagerMode int) error {
+	concretePager, ok := s.conn.pager.(*pager.Pager)
+	if !ok {
+		return nil
+	}
+	if err := concretePager.SetJournalMode(pagerMode); err != nil {
+		return fmt.Errorf("failed to set journal mode: %w", err)
+	}
+	return nil
+}
+
+// getCurrentJournalMode retrieves the current journal mode.
+func (s *Stmt) getCurrentJournalMode() string {
 	mode := s.conn.journalMode
 	if concretePager, ok := s.conn.pager.(*pager.Pager); ok {
 		pagerModeInt := concretePager.GetJournalMode()
@@ -488,13 +517,16 @@ func (s *Stmt) compilePragmaJournalMode(vm *vdbe.VDBE, stmt *parser.PragmaStmt) 
 	}
 
 	if mode == "" {
-		mode = "delete"
-	} else {
-		mode = strings.ToLower(mode)
+		return "delete"
 	}
+	return strings.ToLower(mode)
+}
+
+// emitJournalModeResult emits VDBE opcodes for returning a journal mode result.
+func emitJournalModeResult(vm *vdbe.VDBE, mode string) {
+	vm.ResultCols = []string{"journal_mode"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, mode)
 	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
-
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
 }

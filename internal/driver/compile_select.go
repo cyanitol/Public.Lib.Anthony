@@ -682,16 +682,7 @@ func (s *Stmt) containsAggregate(expr parser.Expression) bool {
 
 	switch e := expr.(type) {
 	case *parser.FunctionExpr:
-		// Check if this is an aggregate function
-		if s.isAggregateExpr(e) {
-			return true
-		}
-		// Check arguments
-		for _, arg := range e.Args {
-			if s.containsAggregate(arg) {
-				return true
-			}
-		}
+		return s.checkFunctionAggregate(e)
 	case *parser.BinaryExpr:
 		return s.containsAggregate(e.Left) || s.containsAggregate(e.Right)
 	case *parser.UnaryExpr:
@@ -699,16 +690,34 @@ func (s *Stmt) containsAggregate(expr parser.Expression) bool {
 	case *parser.ParenExpr:
 		return s.containsAggregate(e.Expr)
 	case *parser.CaseExpr:
-		for _, when := range e.WhenClauses {
-			if s.containsAggregate(when.Condition) || s.containsAggregate(when.Result) {
-				return true
-			}
-		}
-		return s.containsAggregate(e.ElseClause)
+		return s.checkCaseAggregate(e)
 	case *parser.CastExpr:
 		return s.containsAggregate(e.Expr)
 	case *parser.CollateExpr:
 		return s.containsAggregate(e.Expr)
 	}
 	return false
+}
+
+// checkFunctionAggregate checks if a function expression contains aggregates.
+func (s *Stmt) checkFunctionAggregate(e *parser.FunctionExpr) bool {
+	if s.isAggregateExpr(e) {
+		return true
+	}
+	for _, arg := range e.Args {
+		if s.containsAggregate(arg) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkCaseAggregate checks if a CASE expression contains aggregates.
+func (s *Stmt) checkCaseAggregate(e *parser.CaseExpr) bool {
+	for _, when := range e.WhenClauses {
+		if s.containsAggregate(when.Condition) || s.containsAggregate(when.Result) {
+			return true
+		}
+	}
+	return s.containsAggregate(e.ElseClause)
 }

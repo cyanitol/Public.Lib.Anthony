@@ -554,94 +554,118 @@ func (s *Stmt) findColumnIndex(table *schema.Table, colName string) int {
 func (s *Stmt) compileSelectWithWindowFunctions(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
 
-	// Expand SELECT *
 	expandedCols, colNames := expandStarColumns(stmt.Columns, table)
 	numCols := len(expandedCols)
 
-	vm.AllocMemory(numCols + 50) // Extra memory for window state
-	vm.AllocCursors(2)            // Cursor 0 for table, cursor 1 for ephemeral table
+	vm.AllocMemory(numCols + 50)
+	vm.AllocCursors(2)
 
-	// Setup code generator
-	gen := expr.NewCodeGenerator(vm)
-	s.setupSubqueryCompiler(gen)
-	gen.RegisterCursor(tableName, 0)
-	tableInfo := buildTableInfo(tableName, table)
-	gen.RegisterTable(tableInfo)
-
-	// Setup args
-	argValues := make([]interface{}, len(args))
-	for i, a := range args {
-		argValues[i] = a.Value
-	}
-	gen.SetArgs(argValues)
-
+	gen := s.setupWindowCodeGenerator(vm, tableName, table, args)
 	vm.ResultCols = colNames
 
-	// Initialize window states for each window function
-	windowStateIdx := 0
-	windowFuncMap := make(map[int]int) // Maps column index to window state index
-
-	for i, col := range expandedCols {
-		if fnExpr, ok := col.Expr.(*parser.FunctionExpr); ok && fnExpr.Over != nil {
-			// Create window state for this window function
-			partitionCols := []int{}
-			orderByCols := []int{}
-			orderByDesc := []bool{}
-
-			// Extract ORDER BY columns from window spec
-			if fnExpr.Over.OrderBy != nil {
-				for _, orderTerm := range fnExpr.Over.OrderBy {
-					if identExpr, ok := orderTerm.Expr.(*parser.IdentExpr); ok {
-						colIdx := s.findColumnIndex(table, identExpr.Name)
-						if colIdx >= 0 {
-							orderByCols = append(orderByCols, colIdx)
-							orderByDesc = append(orderByDesc, !orderTerm.Asc)
-						}
-					}
-				}
-			}
-
-			// Create default window frame if not specified
-			frame := vdbe.DefaultWindowFrame()
-
-			// Initialize window state in VDBE
-			windowState := vdbe.NewWindowState(partitionCols, orderByCols, orderByDesc, frame)
-			vm.WindowStates[windowStateIdx] = windowState
-			windowFuncMap[i] = windowStateIdx
-			windowStateIdx++
-		}
-	}
+	s.initializeWindowStates(vm, expandedCols, table)
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
 
-	// Initialize rank tracking registers and analyze rank functions
 	rankRegs := initWindowRankRegisters(numCols)
 	rankInfo := s.analyzeWindowRankFunctions(expandedCols, table)
 	emitWindowRankSetup(vm, rankRegs, rankInfo)
 
 	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
 
-	// WHERE clause
-	skipAddr := -1
-	if stmt.Where != nil {
-		whereReg, err := gen.GenerateExpr(stmt.Where)
-		if err != nil {
-			return nil, fmt.Errorf("error compiling WHERE clause: %w", err)
-		}
-		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+	skipAddr, err := s.compileWindowWhereClause(vm, gen, stmt.Where)
+	if err != nil {
+		return nil, err
 	}
 
-	// Emit rank tracking logic
 	emitWindowRankTracking(vm, rankRegs, rankInfo, numCols)
 
-	// Extract columns
 	for i := 0; i < numCols; i++ {
 		s.emitWindowColumn(vm, gen, expandedCols[i], table, rankRegs, i)
 	}
 
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
 
+	s.finalizeWindowLoop(vm, skipAddr, rewindAddr)
+
+	return vm, nil
+}
+
+// setupWindowCodeGenerator creates and configures the code generator for window functions.
+func (s *Stmt) setupWindowCodeGenerator(vm *vdbe.VDBE, tableName string, table *schema.Table, args []driver.NamedValue) *expr.CodeGenerator {
+	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
+	gen.RegisterCursor(tableName, 0)
+	tableInfo := buildTableInfo(tableName, table)
+	gen.RegisterTable(tableInfo)
+
+	argValues := make([]interface{}, len(args))
+	for i, a := range args {
+		argValues[i] = a.Value
+	}
+	gen.SetArgs(argValues)
+
+	return gen
+}
+
+// initializeWindowStates initializes window states for each window function.
+func (s *Stmt) initializeWindowStates(vm *vdbe.VDBE, expandedCols []parser.ResultColumn, table *schema.Table) {
+	windowStateIdx := 0
+
+	for _, col := range expandedCols {
+		fnExpr, ok := col.Expr.(*parser.FunctionExpr)
+		if !ok || fnExpr.Over == nil {
+			continue
+		}
+
+		orderByCols, orderByDesc := s.extractWindowOrderBy(fnExpr.Over, table)
+		frame := vdbe.DefaultWindowFrame()
+		windowState := vdbe.NewWindowState([]int{}, orderByCols, orderByDesc, frame)
+		vm.WindowStates[windowStateIdx] = windowState
+		windowStateIdx++
+	}
+}
+
+// extractWindowOrderBy extracts ORDER BY columns from window specification.
+func (s *Stmt) extractWindowOrderBy(over *parser.WindowSpec, table *schema.Table) ([]int, []bool) {
+	var orderByCols []int
+	var orderByDesc []bool
+
+	if over.OrderBy == nil {
+		return orderByCols, orderByDesc
+	}
+
+	for _, orderTerm := range over.OrderBy {
+		identExpr, ok := orderTerm.Expr.(*parser.IdentExpr)
+		if !ok {
+			continue
+		}
+		colIdx := s.findColumnIndex(table, identExpr.Name)
+		if colIdx >= 0 {
+			orderByCols = append(orderByCols, colIdx)
+			orderByDesc = append(orderByDesc, !orderTerm.Asc)
+		}
+	}
+
+	return orderByCols, orderByDesc
+}
+
+// compileWindowWhereClause compiles the WHERE clause for window functions.
+func (s *Stmt) compileWindowWhereClause(vm *vdbe.VDBE, gen *expr.CodeGenerator, where parser.Expression) (int, error) {
+	if where == nil {
+		return -1, nil
+	}
+
+	whereReg, err := gen.GenerateExpr(where)
+	if err != nil {
+		return -1, fmt.Errorf("error compiling WHERE clause: %w", err)
+	}
+	return vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0), nil
+}
+
+// finalizeWindowLoop finalizes the window function loop.
+func (s *Stmt) finalizeWindowLoop(vm *vdbe.VDBE, skipAddr, rewindAddr int) {
 	if skipAddr >= 0 {
 		vm.Program[skipAddr].P2 = vm.NumOps()
 	}
@@ -651,6 +675,4 @@ func (s *Stmt) compileSelectWithWindowFunctions(vm *vdbe.VDBE, stmt *parser.Sele
 
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	return vm, nil
 }

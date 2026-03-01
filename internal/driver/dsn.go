@@ -101,120 +101,146 @@ func parseQueryParameters(config *DriverConfig, query string) error {
 		}
 		value := vals[0]
 
-		switch strings.ToLower(key) {
-		case "mode":
-			if err := parseModeParameter(config, value); err != nil {
-				return err
-			}
-
-		case "cache":
-			if err := parseCacheParameter(config, value); err != nil {
-				return err
-			}
-
-		case "journal_mode", "journalmode":
-			config.Pager.JournalMode = strings.ToLower(value)
-
-		case "synchronous", "sync":
-			config.Pager.SyncMode = strings.ToLower(value)
-
-		case "cache_size", "cachesize":
-			cacheSize, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid cache_size: %w", err)
-			}
-			config.Pager.CacheSize = cacheSize
-
-		case "page_size", "pagesize":
-			pageSize, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid page_size: %w", err)
-			}
-			config.Pager.PageSize = pageSize
-
-		case "locking_mode", "lockingmode":
-			config.Pager.LockingMode = strings.ToLower(value)
-
-		case "temp_store", "tempstore":
-			config.Pager.TempStore = strings.ToLower(value)
-
-		case "foreign_keys", "foreignkeys":
-			fk, err := parseBoolParameter(value)
-			if err != nil {
-				return fmt.Errorf("invalid foreign_keys: %w", err)
-			}
-			config.EnableForeignKeys = fk
-
-		case "triggers":
-			triggers, err := parseBoolParameter(value)
-			if err != nil {
-				return fmt.Errorf("invalid triggers: %w", err)
-			}
-			config.EnableTriggers = triggers
-
-		case "busy_timeout", "busytimeout":
-			timeout, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid busy_timeout: %w", err)
-			}
-			config.Pager.BusyTimeout = time.Duration(timeout) * time.Millisecond
-
-		case "auto_vacuum", "autovacuum":
-			config.AutoVacuum = strings.ToLower(value)
-
-		case "case_sensitive_like", "casesensitivelike":
-			csl, err := parseBoolParameter(value)
-			if err != nil {
-				return fmt.Errorf("invalid case_sensitive_like: %w", err)
-			}
-			config.CaseSensitiveLike = csl
-
-		case "recursive_triggers", "recursivetriggers":
-			rt, err := parseBoolParameter(value)
-			if err != nil {
-				return fmt.Errorf("invalid recursive_triggers: %w", err)
-			}
-			config.RecursiveTriggers = rt
-
-		case "wal_autocheckpoint", "walautocheckpoint":
-			checkpoint, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid wal_autocheckpoint: %w", err)
-			}
-			config.Pager.WALAutocheckpoint = checkpoint
-
-		case "query_timeout", "querytimeout":
-			timeout, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid query_timeout: %w", err)
-			}
-			config.QueryTimeout = time.Duration(timeout) * time.Millisecond
-
-		case "max_page_count", "maxpagecount":
-			maxPages, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid max_page_count: %w", err)
-			}
-			config.Pager.MaxPageCount = maxPages
-
-		case "_query_only", "queryonly":
-			// Extension: query-only mode (read-only with no locking)
-			qo, err := parseBoolParameter(value)
-			if err != nil {
-				return fmt.Errorf("invalid _query_only: %w", err)
-			}
-			if qo {
-				config.Pager.ReadOnly = true
-				config.Pager.NoLock = true
-			}
-
-		default:
-			// Ignore unknown parameters for forward compatibility
-			// Could also return an error if strict validation is desired
-			continue
+		if err := parseParameter(config, strings.ToLower(key), value); err != nil {
+			return err
 		}
 	}
 
+	return nil
+}
+
+// parseParameter parses a single DSN parameter and updates the config.
+func parseParameter(config *DriverConfig, key, value string) error {
+	// Handle string parameters
+	if parseStringParameter(config, key, value) {
+		return nil
+	}
+
+	// Handle int/timeout parameters
+	if err := parseNumericParameter(config, key, value); err == nil {
+		return nil
+	} else if err.Error() != "unknown parameter" {
+		return err
+	}
+
+	// Handle bool parameters
+	if err := parseBoolParameter2(config, key, value); err == nil {
+		return nil
+	} else if err.Error() != "unknown parameter" {
+		return err
+	}
+
+	// Handle special parameters
+	return parseSpecialParameter(config, key, value)
+}
+
+// parseStringParameter handles string-valued parameters.
+func parseStringParameter(config *DriverConfig, key, value string) bool {
+	lowerValue := strings.ToLower(value)
+	switch key {
+	case "journal_mode", "journalmode":
+		config.Pager.JournalMode = lowerValue
+	case "synchronous", "sync":
+		config.Pager.SyncMode = lowerValue
+	case "locking_mode", "lockingmode":
+		config.Pager.LockingMode = lowerValue
+	case "temp_store", "tempstore":
+		config.Pager.TempStore = lowerValue
+	case "auto_vacuum", "autovacuum":
+		config.AutoVacuum = lowerValue
+	default:
+		return false
+	}
+	return true
+}
+
+// parseNumericParameter handles integer and timeout parameters.
+func parseNumericParameter(config *DriverConfig, key, value string) error {
+	switch key {
+	case "cache_size", "cachesize":
+		return parseIntParameter(value, "cache_size", &config.Pager.CacheSize)
+	case "page_size", "pagesize":
+		return parseIntParameter(value, "page_size", &config.Pager.PageSize)
+	case "wal_autocheckpoint", "walautocheckpoint":
+		return parseIntParameter(value, "wal_autocheckpoint", &config.Pager.WALAutocheckpoint)
+	case "max_page_count", "maxpagecount":
+		return parseIntParameter(value, "max_page_count", &config.Pager.MaxPageCount)
+	case "busy_timeout", "busytimeout":
+		return parseTimeoutParameter(value, "busy_timeout", &config.Pager.BusyTimeout)
+	case "query_timeout", "querytimeout":
+		return parseTimeoutParameter(value, "query_timeout", &config.QueryTimeout)
+	}
+	return fmt.Errorf("unknown parameter")
+}
+
+// parseBoolParameter2 handles boolean parameters.
+func parseBoolParameter2(config *DriverConfig, key, value string) error {
+	switch key {
+	case "foreign_keys", "foreignkeys":
+		return parseBoolConfigParameter(value, "foreign_keys", &config.EnableForeignKeys)
+	case "triggers":
+		return parseBoolConfigParameter(value, "triggers", &config.EnableTriggers)
+	case "case_sensitive_like", "casesensitivelike":
+		return parseBoolConfigParameter(value, "case_sensitive_like", &config.CaseSensitiveLike)
+	case "recursive_triggers", "recursivetriggers":
+		return parseBoolConfigParameter(value, "recursive_triggers", &config.RecursiveTriggers)
+	}
+	return fmt.Errorf("unknown parameter")
+}
+
+// parseSpecialParameter handles special case parameters.
+func parseSpecialParameter(config *DriverConfig, key, value string) error {
+	switch key {
+	case "mode":
+		return parseModeParameter(config, value)
+	case "cache":
+		return parseCacheParameter(config, value)
+	case "_query_only", "queryonly":
+		return parseQueryOnlyParameter(config, value)
+	}
+	return nil
+}
+
+// parseIntParameter parses an integer parameter.
+func parseIntParameter(value, name string, target *int) error {
+	result, err := strconv.Atoi(value)
+	if err != nil {
+		return fmt.Errorf("invalid %s: %w", name, err)
+	}
+	*target = result
+	return nil
+}
+
+// parseTimeoutParameter parses a timeout parameter in milliseconds.
+func parseTimeoutParameter(value, name string, target *time.Duration) error {
+	timeout, err := strconv.Atoi(value)
+	if err != nil {
+		return fmt.Errorf("invalid %s: %w", name, err)
+	}
+	*target = time.Duration(timeout) * time.Millisecond
+	return nil
+}
+
+// parseBoolConfigParameter parses a boolean parameter and updates config.
+func parseBoolConfigParameter(value, name string, target *bool) error {
+	result, err := parseBoolParameter(value)
+	if err != nil {
+		return fmt.Errorf("invalid %s: %w", name, err)
+	}
+	*target = result
+	return nil
+}
+
+// parseQueryOnlyParameter parses the _query_only parameter.
+func parseQueryOnlyParameter(config *DriverConfig, value string) error {
+	qo, err := parseBoolParameter(value)
+	if err != nil {
+		return fmt.Errorf("invalid _query_only: %w", err)
+	}
+	if qo {
+		config.Pager.ReadOnly = true
+		config.Pager.NoLock = true
+	}
 	return nil
 }
 
@@ -274,49 +300,64 @@ func FormatDSN(dsn *DSN) string {
 		return ":memory:"
 	}
 
-	// Build query parameters from config
-	params := url.Values{}
-
-	if dsn.Config.Pager.ReadOnly {
-		params.Add("mode", "ro")
-	}
-
-	if dsn.Config.SharedCache {
-		params.Add("cache", "shared")
-	}
-
-	if dsn.Config.Pager.JournalMode != "delete" && dsn.Config.Pager.JournalMode != "" {
-		params.Add("journal_mode", dsn.Config.Pager.JournalMode)
-	}
-
-	if dsn.Config.Pager.SyncMode != "full" && dsn.Config.Pager.SyncMode != "" {
-		params.Add("synchronous", dsn.Config.Pager.SyncMode)
-	}
-
-	if dsn.Config.Pager.CacheSize != pager.DefaultCacheSize {
-		params.Add("cache_size", strconv.Itoa(dsn.Config.Pager.CacheSize))
-	}
-
-	if dsn.Config.Pager.PageSize != 4096 {
-		params.Add("page_size", strconv.Itoa(dsn.Config.Pager.PageSize))
-	}
-
-	if !dsn.Config.EnableForeignKeys {
-		params.Add("foreign_keys", "off")
-	}
-
-	if !dsn.Config.EnableTriggers {
-		params.Add("triggers", "off")
-	}
-
-	if dsn.Config.Pager.BusyTimeout != 5*time.Second {
-		params.Add("busy_timeout", strconv.Itoa(int(dsn.Config.Pager.BusyTimeout.Milliseconds())))
-	}
-
-	// Build final DSN
+	params := buildDSNParameters(dsn.Config)
 	if len(params) == 0 {
 		return dsn.Filename
 	}
-
 	return dsn.Filename + "?" + params.Encode()
+}
+
+// buildDSNParameters builds URL query parameters from driver config.
+func buildDSNParameters(config *DriverConfig) url.Values {
+	params := url.Values{}
+
+	addModeParameter(params, config)
+	addCacheParameter(params, config)
+	addPagerParameters(params, config)
+	addDriverParameters(params, config)
+
+	return params
+}
+
+// addModeParameter adds the mode parameter if needed.
+func addModeParameter(params url.Values, config *DriverConfig) {
+	if config.Pager.ReadOnly {
+		params.Add("mode", "ro")
+	}
+}
+
+// addCacheParameter adds the cache parameter if needed.
+func addCacheParameter(params url.Values, config *DriverConfig) {
+	if config.SharedCache {
+		params.Add("cache", "shared")
+	}
+}
+
+// addPagerParameters adds pager-related parameters.
+func addPagerParameters(params url.Values, config *DriverConfig) {
+	if config.Pager.JournalMode != "delete" && config.Pager.JournalMode != "" {
+		params.Add("journal_mode", config.Pager.JournalMode)
+	}
+	if config.Pager.SyncMode != "full" && config.Pager.SyncMode != "" {
+		params.Add("synchronous", config.Pager.SyncMode)
+	}
+	if config.Pager.CacheSize != pager.DefaultCacheSize {
+		params.Add("cache_size", strconv.Itoa(config.Pager.CacheSize))
+	}
+	if config.Pager.PageSize != 4096 {
+		params.Add("page_size", strconv.Itoa(config.Pager.PageSize))
+	}
+	if config.Pager.BusyTimeout != 5*time.Second {
+		params.Add("busy_timeout", strconv.Itoa(int(config.Pager.BusyTimeout.Milliseconds())))
+	}
+}
+
+// addDriverParameters adds driver-specific parameters.
+func addDriverParameters(params url.Values, config *DriverConfig) {
+	if !config.EnableForeignKeys {
+		params.Add("foreign_keys", "off")
+	}
+	if !config.EnableTriggers {
+		params.Add("triggers", "off")
+	}
 }
