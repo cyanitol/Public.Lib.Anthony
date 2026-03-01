@@ -39,9 +39,26 @@ func (s *Stmt) loadAggregateColumnValue(vm *vdbe.VDBE, fnExpr *parser.FunctionEx
 }
 
 // emitCountUpdate emits VDBE opcodes to update COUNT accumulator
-func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, accReg int) {
-	// COUNT(*) or COUNT(expr) - for now both just increment
+func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, accReg int, gen *expr.CodeGenerator) {
+	// COUNT(*) - count all rows
+	if fnExpr.Star || len(fnExpr.Args) == 0 {
+		vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
+		return
+	}
+
+	// COUNT(column) - count non-NULL values only
+	_, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, gen)
+	if !ok {
+		// Not a column reference, just increment
+		vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
+		return
+	}
+
+	// Only increment if value is not NULL (loadAggregateColumnValue already added OpIsNull)
 	vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
+
+	// Fix the skip address to jump past the increment
+	vm.Program[skipAddr].P2 = vm.NumOps()
 }
 
 // emitSumUpdate emits VDBE opcodes to update SUM/TOTAL accumulator
@@ -310,7 +327,7 @@ func (s *Stmt) emitSingleAggregateUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionE
 
 	switch fnExpr.Name {
 	case "COUNT":
-		s.emitCountUpdate(vm, fnExpr, accReg)
+		s.emitCountUpdate(vm, fnExpr, table, accReg, gen)
 	case "SUM", "TOTAL":
 		s.emitSumUpdate(vm, fnExpr, table, accReg, gen)
 	case "AVG":

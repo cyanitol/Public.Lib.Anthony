@@ -682,7 +682,7 @@ func TestSQLiteAlterDropColumn(t *testing.T) {
 			},
 			alter:   "ALTER TABLE t1 DROP COLUMN xyz",
 			wantErr: true,
-			errMsg:  "no such column",
+			errMsg:  "column \"xyz\" not found",
 		},
 		{
 			name: "alter-drop-3: DROP last remaining column",
@@ -790,7 +790,7 @@ func TestSQLiteAlterDropColumn(t *testing.T) {
 			},
 			alter:   "ALTER TABLE t1 RENAME COLUMN xyz TO abc",
 			wantErr: true,
-			errMsg:  "no such column",
+			errMsg:  "column \"xyz\" not found",
 		},
 		{
 			name: "alter-rename-col-4: RENAME COLUMN in view",
