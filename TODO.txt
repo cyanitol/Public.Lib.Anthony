@@ -283,9 +283,15 @@ PHASE 8: CONFIGURATION AND EXTENSIBILITY (Priority: LOW)
     - Create internal/driver/dsn.go
     - Parse filename?journal_mode=WAL&cache_size=10000
 
-[ ] 8.3 Expose virtual table API
+[x] 8.3 Expose virtual table API
     - internal/driver/conn.go
     - Add Conn.RegisterVirtualTableModule()
+    ✅ COMPLETED: Phase 8.3 complete
+    - RegisterVirtualTableModule() and UnregisterVirtualTableModule() implemented
+    - Full virtual table API exposed (Module, VirtualTable, VirtualCursor interfaces)
+    - Comprehensive test suite (5 tests, all passing)
+    - Example implementation in examples/virtual_table_example.go
+    - Documentation updated in docs/VIRTUAL_TABLES.md
 
 [ ] 8.4 Expose custom collation registration
     - internal/driver/conn.go

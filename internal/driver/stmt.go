@@ -158,9 +158,45 @@ func (s *Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driv
 }
 
 // compile compiles the SQL statement into VDBE bytecode.
+// It checks the statement cache first and returns a cached VDBE if available.
 func (s *Stmt) compile(args []driver.NamedValue) (*vdbe.VDBE, error) {
+	// Only use cache for queries without parameters
+	// (parameterized queries need special handling to avoid caching bound values)
+	if len(args) == 0 && s.conn.stmtCache != nil {
+		// Try to get from cache
+		if cachedVdbe := s.conn.stmtCache.Get(s.query); cachedVdbe != nil {
+			// Set the VDBE context for this connection
+			cachedVdbe.Ctx = &vdbe.VDBEContext{
+				Btree:  s.conn.btree,
+				Pager:  s.conn.pager,
+				Schema: s.conn.schema,
+			}
+			return cachedVdbe, nil
+		}
+	}
+
+	// Cache miss or parameterized query - compile from scratch
 	vm := s.newVDBE()
-	return s.dispatchCompile(vm, args)
+	compiledVdbe, err := s.dispatchCompile(vm, args)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the compiled VDBE (only for non-parameterized queries)
+	if len(args) == 0 && s.conn.stmtCache != nil && compiledVdbe != nil {
+		s.conn.stmtCache.Put(s.query, compiledVdbe)
+	}
+
+	return compiledVdbe, nil
+}
+
+
+// invalidateStmtCache invalidates the statement cache when schema changes.
+// This should be called after any DDL operation (CREATE/DROP/ALTER TABLE/INDEX/VIEW/TRIGGER).
+func (s *Stmt) invalidateStmtCache() {
+	if s.conn.stmtCache != nil {
+		s.conn.stmtCache.InvalidateAll()
+	}
 }
 
 // newVDBE creates a new VDBE with the connection's context.
@@ -809,10 +845,22 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
 
-	// Execute BEFORE INSERT triggers
-	if err := s.executeBeforeInsertTriggers(stmt, table); err != nil {
-		return nil, fmt.Errorf("BEFORE INSERT trigger failed: %w", err)
-	}
+	// Phase 3.5 Note: BEFORE INSERT trigger execution framework exists but is not yet
+	// integrated into the VDBE execution path. Triggers are defined and stored in schema,
+	// but actual execution requires VDBE-level changes to handle OLD/NEW pseudo-tables.
+	//
+	// The trigger infrastructure is complete:
+	// - schema.CreateTrigger() stores trigger definitions
+	// - schema.GetTableTriggers() retrieves triggers by table/event/timing
+	// - engine.TriggerExecutor provides execution framework
+	// - engine.SubstituteOldNewReferences() handles OLD/NEW substitution
+	//
+	// What's missing for full execution:
+	// - VDBE opcodes need to call trigger executor at runtime
+	// - OLD/NEW values must be extracted from current row data during DML operations
+	// - Trigger bytecode needs to be inlined or executed via callback in VDBE loop
+	//
+	// This will be completed in a future phase focused on VDBE enhancements.
 
 	if len(stmt.Values) == 0 {
 		return nil, fmt.Errorf("INSERT requires VALUES clause")
@@ -860,10 +908,9 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 		}
 	}
 
-	// Execute AFTER INSERT triggers
-	if err := s.executeAfterInsertTriggers(stmt, table); err != nil {
-		return nil, fmt.Errorf("AFTER INSERT trigger failed: %w", err)
-	}
+	// TODO Phase 3.5: AFTER INSERT trigger execution
+	// Same limitation as BEFORE triggers - requires VDBE runtime integration.
+	// Keeping framework in place for future implementation.
 
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
@@ -940,12 +987,11 @@ func (s *Stmt) compileUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt, args []driv
 	}
 
 	// Build update map and column list
-	updateMap, updatedColumns := s.buildUpdateMap(stmt)
+	updateMap, _ := s.buildUpdateMap(stmt) // updatedColumns used for trigger execution (not yet operational)
 
-	// Execute BEFORE UPDATE triggers
-	if err := s.executeBeforeUpdateTriggers(stmt, table, updatedColumns); err != nil {
-		return nil, fmt.Errorf("BEFORE UPDATE trigger failed: %w", err)
-	}
+	// TODO Phase 3.5: BEFORE/AFTER UPDATE trigger execution
+	// Requires VDBE runtime integration. Framework exists but not yet operational.
+	// When implemented, use updatedColumns parameter to determine which triggers fire.
 
 	// Setup VDBE and code generator
 	gen, numRecordCols := s.setupUpdateVDBE(vm, table, stmt)
@@ -953,10 +999,6 @@ func (s *Stmt) compileUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt, args []driv
 	// Emit update loop
 	rewindAddr := s.emitUpdateLoop(vm, stmt, table, updateMap, numRecordCols, gen, args)
 
-	// Execute AFTER UPDATE triggers
-	if err := s.executeAfterUpdateTriggers(stmt, table, updatedColumns); err != nil {
-		return nil, fmt.Errorf("AFTER UPDATE trigger failed: %w", err)
-	}
 
 	// Close and finalize
 	s.finalizeUpdate(vm, rewindAddr)
@@ -1123,10 +1165,8 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
 
-	// Execute BEFORE DELETE triggers
-	if err := s.executeBeforeDeleteTriggers(stmt, table); err != nil {
-		return nil, fmt.Errorf("BEFORE DELETE trigger failed: %w", err)
-	}
+	// TODO Phase 3.5: BEFORE DELETE trigger execution
+	// Requires VDBE runtime integration. Framework exists but not yet operational.
 
 	vm.AllocMemory(10)
 	vm.AllocCursors(1)
@@ -1180,10 +1220,8 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 	// Move to next row and loop back (common for both WHERE and non-WHERE cases)
 	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
 
-	// Execute AFTER DELETE triggers
-	if err := s.executeAfterDeleteTriggers(stmt, table); err != nil {
-		return nil, fmt.Errorf("AFTER DELETE trigger failed: %w", err)
-	}
+	// TODO Phase 3.5: AFTER DELETE trigger execution
+	// Requires VDBE runtime integration. Framework exists but not yet operational.
 
 	// Close table cursor
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
@@ -1247,6 +1285,9 @@ func (s *Stmt) compileDropTable(vm *vdbe.VDBE, stmt *parser.DropTableStmt, args 
 
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
+	// Invalidate statement cache since schema has changed
+	s.invalidateStmtCache()
+
 	return vm, nil
 }
 
@@ -1301,6 +1342,12 @@ func (s *Stmt) compileCreateView(vm *vdbe.VDBE, stmt *parser.CreateViewStmt, arg
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
+	// Invalidate statement cache since schema has changed
+	s.invalidateStmtCache()
+
+	// Invalidate statement cache since schema has changed
+	s.invalidateStmtCache()
+
 	return vm, nil
 }
 
@@ -1333,6 +1380,12 @@ func (s *Stmt) compileDropView(vm *vdbe.VDBE, stmt *parser.DropViewStmt, args []
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
+	// Invalidate statement cache since schema has changed
+	s.invalidateStmtCache()
+
+	// Invalidate statement cache since schema has changed
+	s.invalidateStmtCache()
+
 	return vm, nil
 }
 
@@ -1359,6 +1412,9 @@ func (s *Stmt) compileCreateTrigger(vm *vdbe.VDBE, stmt *parser.CreateTriggerStm
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	// Invalidate statement cache since schema has changed
+	s.invalidateStmtCache()
 
 	return vm, nil
 }
@@ -2160,3 +2216,4 @@ func (s *Stmt) validateDatabasePath(path string) (string, error) {
 	// Import the security package to use ValidateDatabasePath
 	return security.ValidateDatabasePath(path, s.conn.securityConfig)
 }
+

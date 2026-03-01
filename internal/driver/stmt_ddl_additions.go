@@ -43,6 +43,9 @@ func (s *Stmt) compileCreateIndex(vm *vdbe.VDBE, stmt *parser.CreateIndexStmt, a
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
+	// Invalidate statement cache since schema has changed
+	s.invalidateStmtCache()
+
 	return vm, nil
 }
 
@@ -75,6 +78,9 @@ func (s *Stmt) compileDropIndex(vm *vdbe.VDBE, stmt *parser.DropIndexStmt, args 
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	// Invalidate statement cache since schema has changed
+	s.invalidateStmtCache()
 
 	return vm, nil
 }

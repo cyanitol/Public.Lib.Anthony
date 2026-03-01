@@ -5,7 +5,6 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -14,36 +13,6 @@ import (
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
 )
-
-// dsnOptions holds parsed DSN options
-type dsnOptions struct {
-	filename string
-	readOnly bool
-}
-
-// parseDSN parses a SQLite DSN and extracts options.
-// Supports query parameters like ?mode=ro for read-only mode.
-func parseDSN(dsn string) dsnOptions {
-	opts := dsnOptions{filename: dsn}
-
-	// Check for query parameters
-	if idx := strings.Index(dsn, "?"); idx >= 0 {
-		opts.filename = dsn[:idx]
-		query := dsn[idx+1:]
-
-		// Parse simple query parameters
-		for _, param := range strings.Split(query, "&") {
-			if kv := strings.SplitN(param, "=", 2); len(kv) == 2 {
-				switch kv[0] {
-				case "mode":
-					opts.readOnly = kv[1] == "ro"
-				}
-			}
-		}
-	}
-
-	return opts
-}
 
 // dbState represents shared state for a database file
 type dbState struct {
@@ -85,9 +54,14 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 
 // OpenConnector returns a connector for the database.
 func (d *Driver) OpenConnector(name string) (driver.Conn, error) {
-	opts := parseDSN(name)
-	filename := opts.filename
-	isMemory := filename == "" || filename == ":memory:"
+	// Parse the DSN to extract filename and configuration
+	dsn, err := ParseDSN(name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse DSN: %w", err)
+	}
+
+	filename := dsn.Filename
+	isMemory := filename == "" || filename == ":memory:" || dsn.Config.Pager.MemoryDB
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -101,15 +75,15 @@ func (d *Driver) OpenConnector(name string) (driver.Conn, error) {
 		}
 		// Assign a unique ID to each memory database connection
 		memoryID := fmt.Sprintf(":memory:%d", atomic.AddInt64(&d.memoryCount, 1))
-		return d.createMemoryConnection(memoryID, state)
+		return d.createMemoryConnection(memoryID, state, dsn.Config)
 	}
 
-	state, exists := d.getOrCreateState(filename, opts.readOnly)
+	state, exists := d.getOrCreateState(filename, dsn.Config.Pager.ReadOnly)
 	if state == nil {
 		return nil, fmt.Errorf("failed to open database: state creation failed")
 	}
 
-	return d.createConnection(filename, state, exists)
+	return d.createConnection(filename, state, exists, dsn.Config)
 }
 
 // initMaps initializes maps if needed.
@@ -175,9 +149,13 @@ func (d *Driver) newMemoryDBState() (*dbState, error) {
 }
 
 // createConnection creates a new connection with the given state.
-func (d *Driver) createConnection(filename string, state *dbState, existed bool) (driver.Conn, error) {
-	// Create security config with database directory as sandbox root
-	secCfg := security.DefaultSecurityConfig()
+func (d *Driver) createConnection(filename string, state *dbState, existed bool, config *DriverConfig) (driver.Conn, error) {
+	// Use provided security config or default
+	secCfg := config.Security
+	if secCfg == nil {
+		secCfg = security.DefaultSecurityConfig()
+	}
+
 	if filename != "" && filename != ":memory:" {
 		// Set the database directory as the sandbox root for file operations
 		dbDir := filepath.Dir(filename)
@@ -201,12 +179,25 @@ func (d *Driver) createConnection(filename string, state *dbState, existed bool)
 		d.releaseState(filename, state)
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
+
+	// Apply DSN configuration settings via PRAGMA statements
+	if err := conn.applyConfig(config); err != nil {
+		d.releaseState(filename, state)
+		return nil, fmt.Errorf("failed to apply configuration: %w", err)
+	}
+
 	d.conns[filename] = conn
 	return conn, nil
 }
 
 // createMemoryConnection creates a new in-memory database connection.
-func (d *Driver) createMemoryConnection(memoryID string, state *dbState) (driver.Conn, error) {
+func (d *Driver) createMemoryConnection(memoryID string, state *dbState, config *DriverConfig) (driver.Conn, error) {
+	// Use provided security config or default
+	secCfg := config.Security
+	if secCfg == nil {
+		secCfg = security.DefaultSecurityConfig()
+	}
+
 	conn := &Conn{
 		driver:         d,
 		filename:       memoryID,
@@ -216,13 +207,20 @@ func (d *Driver) createMemoryConnection(memoryID string, state *dbState) (driver
 		dbRegistry:     schema.NewDatabaseRegistry(),
 		stmts:          make(map[*Stmt]struct{}),
 		stmtCache:      NewStmtCache(100), // Default cache size of 100
-		securityConfig: security.DefaultSecurityConfig(),
+		securityConfig: secCfg,
 	}
 	// Memory databases are always new, so schema never pre-loaded
 	if err := conn.openDatabase(false); err != nil {
 		state.pager.Close()
 		return nil, fmt.Errorf("failed to initialize memory database: %w", err)
 	}
+
+	// Apply DSN configuration settings via PRAGMA statements
+	if err := conn.applyConfig(config); err != nil {
+		state.pager.Close()
+		return nil, fmt.Errorf("failed to apply configuration: %w", err)
+	}
+
 	// Track memory connection (each gets unique ID)
 	d.conns[memoryID] = conn
 	return conn, nil

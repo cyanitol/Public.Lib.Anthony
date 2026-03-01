@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/pager"
@@ -176,7 +177,7 @@ func (c *DriverConfig) ApplyPragmas() []string {
 
 	// Cache size (negative value means KB, positive means pages)
 	if c.Pager.CacheSize != 0 {
-		pragmas = append(pragmas, "PRAGMA cache_size = "+string(rune(c.Pager.CacheSize)))
+		pragmas = append(pragmas, "PRAGMA cache_size = "+strconv.Itoa(c.Pager.CacheSize))
 	}
 
 	// Locking mode

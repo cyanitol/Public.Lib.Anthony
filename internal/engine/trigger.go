@@ -3,6 +3,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
@@ -166,7 +167,7 @@ func (te *TriggerExecutor) executeStatement(stmt parser.Statement, trigger *sche
 // compileAndExecuteStatement compiles and executes a trigger statement.
 func (te *TriggerExecutor) compileAndExecuteStatement(vm *vdbe.VDBE, stmt parser.Statement) error {
 	// Substitute OLD and NEW references in the statement
-	substitutedStmt, err := te.substituteOldNewReferences(stmt)
+	substitutedStmt, err := te.SubstituteOldNewReferences(stmt)
 	if err != nil {
 		return fmt.Errorf("failed to substitute OLD/NEW references: %w", err)
 	}
@@ -189,12 +190,264 @@ func (te *TriggerExecutor) compileAndExecuteStatement(vm *vdbe.VDBE, stmt parser
 	}
 }
 
-// substituteOldNewReferences walks the statement AST and replaces OLD.col and NEW.col references with actual values.
-// TODO: Full implementation pending - currently returns statement unchanged.
-func (te *TriggerExecutor) substituteOldNewReferences(stmt parser.Statement) (parser.Statement, error) {
-	// Stub implementation - returns statement unchanged
-	// Full implementation will substitute OLD.* and NEW.* references
-	return stmt, nil
+// SubstituteOldNewReferences walks the statement AST and replaces OLD.col and NEW.col references with actual values.
+// This function creates a modified copy of the statement with OLD and NEW references replaced by literal values.
+// This is exported so it can be used by the driver package during trigger compilation.
+func (te *TriggerExecutor) SubstituteOldNewReferences(stmt parser.Statement) (parser.Statement, error) {
+	// For each statement type, walk the AST and substitute OLD/NEW references
+	switch s := stmt.(type) {
+	case *parser.InsertStmt:
+		return te.substituteInInsert(s)
+	case *parser.UpdateStmt:
+		return te.substituteInUpdate(s)
+	case *parser.DeleteStmt:
+		return te.substituteInDelete(s)
+	case *parser.SelectStmt:
+		return te.substituteInSelect(s)
+	default:
+		// For unsupported statement types, return unchanged
+		return stmt, nil
+	}
+}
+
+// substituteInInsert substitutes OLD/NEW references in INSERT statements.
+func (te *TriggerExecutor) substituteInInsert(stmt *parser.InsertStmt) (parser.Statement, error) {
+	// Create a copy of the INSERT statement
+	newStmt := *stmt
+
+	// Substitute values in VALUES clause
+	if len(stmt.Values) > 0 {
+		newStmt.Values = make([][]parser.Expression, len(stmt.Values))
+		for i, row := range stmt.Values {
+			newStmt.Values[i] = make([]parser.Expression, len(row))
+			for j, expr := range row {
+				substitutedExpr, err := te.substituteExpression(expr)
+				if err != nil {
+					return nil, err
+				}
+				newStmt.Values[i][j] = substitutedExpr
+			}
+		}
+	}
+
+	return &newStmt, nil
+}
+
+// substituteInUpdate substitutes OLD/NEW references in UPDATE statements.
+func (te *TriggerExecutor) substituteInUpdate(stmt *parser.UpdateStmt) (parser.Statement, error) {
+	// Create a copy of the UPDATE statement
+	newStmt := *stmt
+
+	// Substitute in SET clauses
+	newStmt.Sets = make([]parser.Assignment, len(stmt.Sets))
+	for i, assign := range stmt.Sets {
+		substitutedValue, err := te.substituteExpression(assign.Value)
+		if err != nil {
+			return nil, err
+		}
+		newStmt.Sets[i] = parser.Assignment{
+			Column: assign.Column,
+			Value:  substitutedValue,
+		}
+	}
+
+	// Substitute in WHERE clause
+	if stmt.Where != nil {
+		substitutedWhere, err := te.substituteExpression(stmt.Where)
+		if err != nil {
+			return nil, err
+		}
+		newStmt.Where = substitutedWhere
+	}
+
+	return &newStmt, nil
+}
+
+// substituteInDelete substitutes OLD/NEW references in DELETE statements.
+func (te *TriggerExecutor) substituteInDelete(stmt *parser.DeleteStmt) (parser.Statement, error) {
+	// Create a copy of the DELETE statement
+	newStmt := *stmt
+
+	// Substitute in WHERE clause
+	if stmt.Where != nil {
+		substitutedWhere, err := te.substituteExpression(stmt.Where)
+		if err != nil {
+			return nil, err
+		}
+		newStmt.Where = substitutedWhere
+	}
+
+	return &newStmt, nil
+}
+
+// substituteInSelect substitutes OLD/NEW references in SELECT statements.
+func (te *TriggerExecutor) substituteInSelect(stmt *parser.SelectStmt) (parser.Statement, error) {
+	// Create a copy of the SELECT statement
+	newStmt := *stmt
+
+	// Substitute in WHERE clause
+	if stmt.Where != nil {
+		substitutedWhere, err := te.substituteExpression(stmt.Where)
+		if err != nil {
+			return nil, err
+		}
+		newStmt.Where = substitutedWhere
+	}
+
+	// Note: A full implementation would also substitute in:
+	// - Column expressions
+	// - HAVING clause
+	// - ORDER BY expressions
+	// For now, we handle the most common case (WHERE clause)
+
+	return &newStmt, nil
+}
+
+// substituteExpression recursively substitutes OLD/NEW references in an expression.
+func (te *TriggerExecutor) substituteExpression(expr parser.Expression) (parser.Expression, error) {
+	if expr == nil {
+		return nil, nil
+	}
+
+	switch e := expr.(type) {
+	case *parser.IdentExpr:
+		// Check if this is an OLD.col or NEW.col reference
+		if e.Table != "" {
+			return te.substituteIdentExpr(e)
+		}
+		// Unqualified column reference - leave as is
+		return expr, nil
+
+	case *parser.BinaryExpr:
+		// Recursively substitute in left and right operands
+		leftSubst, err := te.substituteExpression(e.Left)
+		if err != nil {
+			return nil, err
+		}
+		rightSubst, err := te.substituteExpression(e.Right)
+		if err != nil {
+			return nil, err
+		}
+
+		// Create a new BinaryExpr with substituted operands
+		return &parser.BinaryExpr{
+			Left:  leftSubst,
+			Op:    e.Op,
+			Right: rightSubst,
+		}, nil
+
+	case *parser.UnaryExpr:
+		// Recursively substitute in the operand
+		exprSubst, err := te.substituteExpression(e.Expr)
+		if err != nil {
+			return nil, err
+		}
+		return &parser.UnaryExpr{
+			Op:   e.Op,
+			Expr: exprSubst,
+		}, nil
+
+	case *parser.FunctionExpr:
+		// Recursively substitute in function arguments
+		newArgs := make([]parser.Expression, len(e.Args))
+		for i, arg := range e.Args {
+			argSubst, err := te.substituteExpression(arg)
+			if err != nil {
+				return nil, err
+			}
+			newArgs[i] = argSubst
+		}
+		return &parser.FunctionExpr{
+			Name: e.Name,
+			Args: newArgs,
+			Star: e.Star,
+		}, nil
+
+	default:
+		// For other expression types (literals, etc.), return unchanged
+		return expr, nil
+	}
+}
+
+// substituteIdentExpr substitutes an identifier expression (OLD.col or NEW.col) with a literal value.
+func (te *TriggerExecutor) substituteIdentExpr(expr *parser.IdentExpr) (parser.Expression, error) {
+	qualifier := strings.ToLower(expr.Table)
+	colName := strings.ToLower(expr.Name)
+
+	var value interface{}
+	var found bool
+
+	switch qualifier {
+	case "new":
+		if te.ctx.NewRow == nil {
+			return nil, fmt.Errorf("NEW is not available in this trigger context")
+		}
+		value, found = te.ctx.NewRow[colName]
+		if !found {
+			return nil, fmt.Errorf("column not found in NEW: %s", expr.Name)
+		}
+
+	case "old":
+		if te.ctx.OldRow == nil {
+			return nil, fmt.Errorf("OLD is not available in this trigger context")
+		}
+		value, found = te.ctx.OldRow[colName]
+		if !found {
+			return nil, fmt.Errorf("column not found in OLD: %s", expr.Name)
+		}
+
+	default:
+		// Not an OLD/NEW reference, return unchanged
+		return expr, nil
+	}
+
+	// Convert the value to a LiteralExpr
+	return te.valueToLiteralExpr(value), nil
+}
+
+// valueToLiteralExpr converts a Go value to a parser.LiteralExpr.
+func (te *TriggerExecutor) valueToLiteralExpr(value interface{}) *parser.LiteralExpr {
+	if value == nil {
+		return &parser.LiteralExpr{
+			Type:  parser.LiteralNull,
+			Value: "NULL",
+		}
+	}
+
+	switch v := value.(type) {
+	case int64:
+		return &parser.LiteralExpr{
+			Type:  parser.LiteralInteger,
+			Value: fmt.Sprintf("%d", v),
+		}
+	case float64:
+		return &parser.LiteralExpr{
+			Type:  parser.LiteralFloat,
+			Value: fmt.Sprintf("%g", v),
+		}
+	case string:
+		return &parser.LiteralExpr{
+			Type:  parser.LiteralString,
+			Value: v,
+		}
+	case bool:
+		if v {
+			return &parser.LiteralExpr{
+				Type:  parser.LiteralInteger,
+				Value: "1",
+			}
+		}
+		return &parser.LiteralExpr{
+			Type:  parser.LiteralInteger,
+			Value: "0",
+		}
+	default:
+		// For unknown types, return NULL
+		return &parser.LiteralExpr{
+			Type:  parser.LiteralNull,
+			Value: "NULL",
+		}
+	}
 }
 
 // Helper functions for executing different statement types

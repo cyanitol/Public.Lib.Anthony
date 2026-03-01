@@ -187,10 +187,10 @@ func NewSorter(keyCols []int, desc []bool, collations []string, numCols int) *So
 
 // Insert adds a row to the sorter. The row is copied.
 func (s *Sorter) Insert(row []*Mem) {
-	// Make a deep copy of the row
+	// Make a deep copy of the row using pooled Mem cells
 	rowCopy := make([]*Mem, len(row))
 	for i, m := range row {
-		newMem := &Mem{}
+		newMem := GetMem()
 		newMem.Copy(m)
 		rowCopy[i] = newMem
 	}
@@ -264,6 +264,18 @@ func (s *Sorter) CurrentRow() []*Mem {
 	return nil
 }
 
+// Close releases all pooled Mem cells used by the sorter.
+func (s *Sorter) Close() {
+	for _, row := range s.Rows {
+		for _, mem := range row {
+			if mem != nil {
+				PutMem(mem)
+			}
+		}
+	}
+	s.Rows = nil
+}
+
 // New creates a new VDBE instance.
 func New() *VDBE {
 	return &VDBE{
@@ -282,13 +294,13 @@ func New() *VDBE {
 // AddOp adds an instruction to the program.
 func (v *VDBE) AddOp(opcode Opcode, p1, p2, p3 int) int {
 	addr := len(v.Program)
-	instr := &Instruction{
-		Opcode: opcode,
-		P1:     p1,
-		P2:     p2,
-		P3:     p3,
-		P4Type: P4NotUsed,
-	}
+	// Use pooled instruction
+	instr := GetInstruction()
+	instr.Opcode = opcode
+	instr.P1 = p1
+	instr.P2 = p2
+	instr.P3 = p3
+	instr.P4Type = P4NotUsed
 	v.Program = append(v.Program, instr)
 	return addr
 }
@@ -338,9 +350,9 @@ func (v *VDBE) AllocMemory(n int) error {
 		return nil // Already allocated
 	}
 
-	// Expand the memory array
+	// Expand the memory array using pooled Mem cells
 	for i := len(v.Mem); i < n; i++ {
-		v.Mem = append(v.Mem, NewMem())
+		v.Mem = append(v.Mem, GetMem())
 	}
 	v.NumMem = n
 	return nil
@@ -408,9 +420,23 @@ func (v *VDBE) CloseCursor(index int) error {
 
 // Reset resets the VDBE to its initial state, ready to execute again.
 func (v *VDBE) Reset() error {
-	// Reset all memory cells
+	// Reset all memory cells (but don't release them as they're reused)
 	for _, mem := range v.Mem {
 		mem.Release()
+	}
+
+	// Return ResultRow cells to pool
+	for _, mem := range v.ResultRow {
+		if mem != nil {
+			PutMem(mem)
+		}
+	}
+
+	// Close all sorters and return pooled memory
+	for _, sorter := range v.Sorters {
+		if sorter != nil {
+			sorter.Close()
+		}
 	}
 
 	// Close all cursors
@@ -431,13 +457,36 @@ func (v *VDBE) Reset() error {
 
 // Finalize finalizes the VDBE and releases all resources.
 func (v *VDBE) Finalize() error {
-	// Release all memory cells
+	// Return all memory cells to pool
 	for _, mem := range v.Mem {
 		if mem != nil {
-			mem.Release()
+			PutMem(mem)
 		}
 	}
 	v.Mem = nil
+
+	// Return ResultRow cells to pool
+	for _, mem := range v.ResultRow {
+		if mem != nil {
+			PutMem(mem)
+		}
+	}
+	v.ResultRow = nil
+
+	// Close all sorters and return pooled memory
+	for _, sorter := range v.Sorters {
+		if sorter != nil {
+			sorter.Close()
+		}
+	}
+	v.Sorters = nil
+
+	// Return all instructions to pool
+	for _, instr := range v.Program {
+		if instr != nil {
+			PutInstruction(instr)
+		}
+	}
 
 	// Close all cursors
 	v.Cursors = nil

@@ -45,7 +45,8 @@ func NewStmtCache(capacity int) *StmtCache {
 }
 
 // Get retrieves a cached VDBE program for the given SQL statement.
-// Returns nil if not found or if the entry is invalid due to schema changes.
+// Returns a cloned VDBE if found, or nil if not found or if the entry is invalid due to schema changes.
+// The returned VDBE is a clone that can be safely executed independently.
 func (c *StmtCache) Get(sql string) *vdbe.VDBE {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -68,7 +69,9 @@ func (c *StmtCache) Get(sql string) *vdbe.VDBE {
 	c.lruList.MoveToFront(entry.element)
 
 	c.hits.Add(1)
-	return entry.vdbe
+
+	// Clone the VDBE so each execution gets its own instance
+	return c.cloneVdbe(entry.vdbe)
 }
 
 // Put adds a compiled VDBE program to the cache.
@@ -166,6 +169,24 @@ func (c *StmtCache) Capacity() int {
 	return c.capacity
 }
 
+// SetCapacity changes the cache capacity.
+// If the new capacity is smaller, entries are evicted to fit.
+func (c *StmtCache) SetCapacity(capacity int) {
+	if capacity <= 0 {
+		capacity = 100 // Default capacity
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.capacity = capacity
+
+	// Evict entries if over capacity
+	for len(c.entries) > c.capacity {
+		c.evictLRU()
+	}
+}
+
 // evictLRU removes the least recently used entry from the cache.
 // Must be called with mu held.
 func (c *StmtCache) evictLRU() {
@@ -199,4 +220,45 @@ func (c *StmtCache) remove(sql string) {
 	// Remove from map and LRU list
 	delete(c.entries, sql)
 	c.lruList.Remove(entry.element)
+}
+
+// cloneVdbe creates a deep copy of a VDBE program.
+// This allows the cached VDBE to be reused while each execution gets its own instance.
+func (c *StmtCache) cloneVdbe(original *vdbe.VDBE) *vdbe.VDBE {
+	if original == nil {
+		return nil
+	}
+
+	clone := vdbe.New()
+
+	// Copy program instructions
+	clone.Program = make([]*vdbe.Instruction, len(original.Program))
+	for i, instr := range original.Program {
+		// Create a copy of the instruction
+		instrCopy := &vdbe.Instruction{
+			Opcode:  instr.Opcode,
+			P1:      instr.P1,
+			P2:      instr.P2,
+			P3:      instr.P3,
+			P4:      instr.P4,
+			P4Type:  instr.P4Type,
+			P5:      instr.P5,
+			Comment: instr.Comment,
+		}
+		clone.Program[i] = instrCopy
+	}
+
+	// Copy result columns
+	if len(original.ResultCols) > 0 {
+		clone.ResultCols = make([]string, len(original.ResultCols))
+		copy(clone.ResultCols, original.ResultCols)
+	}
+
+	// Copy metadata
+	clone.ReadOnly = original.ReadOnly
+	clone.InTxn = original.InTxn
+	clone.NumMem = original.NumMem
+	clone.NumCursor = original.NumCursor
+
+	return clone
 }

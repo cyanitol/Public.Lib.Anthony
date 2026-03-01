@@ -1517,8 +1517,8 @@ func (v *VDBE) execResultRow(instr *Instruction) error {
 		if err != nil {
 			return err
 		}
-		// Make a copy for the result
-		v.ResultRow[i] = NewMem()
+		// Make a copy for the result using pooled Mem
+		v.ResultRow[i] = GetMem()
 		v.ResultRow[i].Copy(mem)
 	}
 
@@ -2526,7 +2526,9 @@ func (v *VDBE) execSorterData(instr *Instruction) error {
 func (v *VDBE) execSorterClose(instr *Instruction) error {
 	sorterNum := instr.P1
 
-	if sorterNum < len(v.Sorters) {
+	if sorterNum < len(v.Sorters) && v.Sorters[sorterNum] != nil {
+		// Return pooled memory to the pool
+		v.Sorters[sorterNum].Close()
 		v.Sorters[sorterNum] = nil
 	}
 	return nil

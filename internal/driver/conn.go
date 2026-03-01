@@ -282,6 +282,47 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 	return nil
 }
 
+// applyConfig applies the DSN configuration settings to the connection.
+// This is called after the connection is opened to apply settings like
+// journal_mode, cache_size, foreign_keys, etc.
+func (c *Conn) applyConfig(config *DriverConfig) error {
+	if config == nil {
+		return nil
+	}
+
+	// Store configuration settings that affect connection behavior
+	c.foreignKeysEnabled = config.EnableForeignKeys
+
+	// Apply PRAGMA settings by executing them as SQL statements
+	// We need to do this through the statement execution path to ensure
+	// all settings are properly applied
+	pragmas := config.ApplyPragmas()
+	for _, pragma := range pragmas {
+		// Execute the PRAGMA statement
+		// We use the Exec method which will prepare, execute, and close the statement
+		stmt, err := c.PrepareContext(context.Background(), pragma)
+		if err != nil {
+			return fmt.Errorf("failed to prepare pragma %q: %w", pragma, err)
+		}
+
+		// Execute the statement
+		if execer, ok := stmt.(driver.StmtExecContext); ok {
+			_, err = execer.ExecContext(context.Background(), nil)
+		} else {
+			return fmt.Errorf("statement does not support ExecContext")
+		}
+
+		// Close the statement
+		stmt.Close()
+
+		if err != nil {
+			return fmt.Errorf("failed to execute pragma %q: %w", pragma, err)
+		}
+	}
+
+	return nil
+}
+
 // CreateScalarFunction registers a user-defined scalar function.
 // The function is registered in the connection's local function registry
 // and can be used in SQL queries executed on this connection.

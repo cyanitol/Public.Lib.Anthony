@@ -31,8 +31,8 @@ func setupBenchmarkDB(b *testing.B, useMemory bool) (*sql.DB, func()) {
 	return db, cleanup
 }
 
-// BenchmarkInsertSingle benchmarks single INSERT operations
-func BenchmarkInsertSingle(b *testing.B) {
+// BenchmarkInsert benchmarks single INSERT operations
+func BenchmarkInsert(b *testing.B) {
 	db, cleanup := setupBenchmarkDB(b, true)
 	defer cleanup()
 
@@ -60,7 +60,12 @@ func BenchmarkInsertSingle(b *testing.B) {
 	}
 }
 
-// BenchmarkInsertBatch benchmarks batch INSERT operations
+// BenchmarkInsertSingle is an alias for BenchmarkInsert for backward compatibility
+func BenchmarkInsertSingle(b *testing.B) {
+	BenchmarkInsert(b)
+}
+
+// BenchmarkInsertBatch benchmarks batch INSERT operations (1000 rows per iteration)
 func BenchmarkInsertBatch(b *testing.B) {
 	db, cleanup := setupBenchmarkDB(b, true)
 	defer cleanup()
@@ -73,10 +78,10 @@ func BenchmarkInsertBatch(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	// Limit iterations to avoid cache overflow (each iteration inserts 100 rows)
+	// Limit iterations to avoid cache overflow (each iteration inserts 1000 rows)
 	iterations := b.N
-	if iterations > 100 {
-		iterations = 100
+	if iterations > 10 {
+		iterations = 10
 		b.N = iterations
 	}
 
@@ -91,8 +96,8 @@ func BenchmarkInsertBatch(b *testing.B) {
 			b.Fatalf("failed to prepare statement: %v", err)
 		}
 
-		for j := 0; j < 100; j++ {
-			_, err = stmt.Exec(fmt.Sprintf("User%d", i*100+j), 20+j%50)
+		for j := 0; j < 1000; j++ {
+			_, err = stmt.Exec(fmt.Sprintf("User%d", i*1000+j), 20+j%50)
 			if err != nil {
 				b.Fatalf("failed to insert: %v", err)
 			}
@@ -106,8 +111,8 @@ func BenchmarkInsertBatch(b *testing.B) {
 	}
 }
 
-// BenchmarkSelectSimple benchmarks simple SELECT queries
-func BenchmarkSelectSimple(b *testing.B) {
+// BenchmarkSelect benchmarks simple SELECT queries
+func BenchmarkSelect(b *testing.B) {
 	db, cleanup := setupBenchmarkDB(b, true)
 	defer cleanup()
 
@@ -135,6 +140,11 @@ func BenchmarkSelectSimple(b *testing.B) {
 		}
 		rows.Close()
 	}
+}
+
+// BenchmarkSelectSimple is an alias for BenchmarkSelect for backward compatibility
+func BenchmarkSelectSimple(b *testing.B) {
+	BenchmarkSelect(b)
 }
 
 // BenchmarkSelectFullScan benchmarks full table scans
@@ -176,8 +186,8 @@ func BenchmarkSelectFullScan(b *testing.B) {
 	}
 }
 
-// BenchmarkSelectWithWhere benchmarks SELECT with WHERE clause
-func BenchmarkSelectWithWhere(b *testing.B) {
+// BenchmarkSelectWhere benchmarks SELECT with WHERE clause
+func BenchmarkSelectWhere(b *testing.B) {
 	db, cleanup := setupBenchmarkDB(b, true)
 	defer cleanup()
 
@@ -213,6 +223,11 @@ func BenchmarkSelectWithWhere(b *testing.B) {
 		}
 		rows.Close()
 	}
+}
+
+// BenchmarkSelectWithWhere is an alias for BenchmarkSelectWhere for backward compatibility
+func BenchmarkSelectWithWhere(b *testing.B) {
+	BenchmarkSelectWhere(b)
 }
 
 // BenchmarkUpdate benchmarks UPDATE operations
@@ -270,8 +285,8 @@ func BenchmarkDelete(b *testing.B) {
 	}
 }
 
-// BenchmarkTransactionOverhead benchmarks transaction overhead
-func BenchmarkTransactionOverhead(b *testing.B) {
+// BenchmarkTransaction benchmarks BEGIN/COMMIT cycle with a simple insert
+func BenchmarkTransaction(b *testing.B) {
 	db, cleanup := setupBenchmarkDB(b, true)
 	defer cleanup()
 
@@ -307,8 +322,13 @@ func BenchmarkTransactionOverhead(b *testing.B) {
 	}
 }
 
-// BenchmarkJoinTwoTables benchmarks JOIN operations
-func BenchmarkJoinTwoTables(b *testing.B) {
+// BenchmarkTransactionOverhead is an alias for BenchmarkTransaction for backward compatibility
+func BenchmarkTransactionOverhead(b *testing.B) {
+	BenchmarkTransaction(b)
+}
+
+// BenchmarkSelectJoin benchmarks SELECT with JOIN operations
+func BenchmarkSelectJoin(b *testing.B) {
 	db, cleanup := setupBenchmarkDB(b, true)
 	defer cleanup()
 
@@ -355,6 +375,42 @@ func BenchmarkJoinTwoTables(b *testing.B) {
 			count++
 		}
 		rows.Close()
+	}
+}
+
+// BenchmarkJoinTwoTables is an alias for BenchmarkSelectJoin for backward compatibility
+func BenchmarkJoinTwoTables(b *testing.B) {
+	BenchmarkSelectJoin(b)
+}
+
+// BenchmarkAggregate benchmarks COUNT/SUM/AVG aggregate functions
+func BenchmarkAggregate(b *testing.B) {
+	db, cleanup := setupBenchmarkDB(b, true)
+	defer cleanup()
+
+	_, err := db.Exec("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, amount REAL)")
+	if err != nil {
+		b.Fatalf("failed to create table: %v", err)
+	}
+
+	tx, _ := db.Begin()
+	stmt, _ := tx.Prepare("INSERT INTO orders (user_id, amount) VALUES (?, ?)")
+	for i := 0; i < 1000; i++ {
+		stmt.Exec(i%100+1, float64(10+i%100))
+	}
+	stmt.Close()
+	tx.Commit()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		var count int
+		var sum, avg float64
+		err := db.QueryRow("SELECT COUNT(*), SUM(amount), AVG(amount) FROM orders WHERE user_id <= ?", 50).Scan(&count, &sum, &avg)
+		if err != nil {
+			b.Fatalf("failed to query: %v", err)
+		}
 	}
 }
 
@@ -456,8 +512,8 @@ func BenchmarkAggregateGroupBy(b *testing.B) {
 	}
 }
 
-// BenchmarkPreparedStatement benchmarks prepared statement reuse
-func BenchmarkPreparedStatement(b *testing.B) {
+// BenchmarkPrepare benchmarks prepared statement creation and execution
+func BenchmarkPrepare(b *testing.B) {
 	db, cleanup := setupBenchmarkDB(b, true)
 	defer cleanup()
 
@@ -488,6 +544,11 @@ func BenchmarkPreparedStatement(b *testing.B) {
 			b.Fatalf("failed to execute: %v", err)
 		}
 	}
+}
+
+// BenchmarkPreparedStatement is an alias for BenchmarkPrepare for backward compatibility
+func BenchmarkPreparedStatement(b *testing.B) {
+	BenchmarkPrepare(b)
 }
 
 // BenchmarkMemoryVsDisk compares in-memory vs disk performance for inserts
