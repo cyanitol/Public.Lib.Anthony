@@ -152,7 +152,6 @@ func TestDbPage_Write_InvalidOffset(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			err := page.Write(tt.offset, tt.data)
 			if err == nil {
 				t.Error("Write() expected error, got nil")
@@ -194,7 +193,6 @@ func TestDbPage_Read_InvalidOffset(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			_, err := page.Read(tt.offset, tt.length)
 			if err == nil {
 				t.Error("Read() expected error, got nil")

@@ -45,7 +45,6 @@ func TestNewLockManager(t *testing.T) {
 	})
 
 	t.Run("valid file", func(t *testing.T) {
-			t.Parallel()
 		f, cleanup := createTestFile(t)
 		defer cleanup()
 
@@ -155,7 +154,6 @@ func TestAcquireReleaseLock(t *testing.T) {
 
 	// Test acquiring SHARED lock
 	t.Run("acquire shared", func(t *testing.T) {
-			t.Parallel()
 		if err := lm.AcquireLock(lockShared); err != nil {
 			t.Fatalf("AcquireLock(SHARED) error = %v", err)
 		}
@@ -167,7 +165,6 @@ func TestAcquireReleaseLock(t *testing.T) {
 
 	// Test upgrading to RESERVED
 	t.Run("upgrade to reserved", func(t *testing.T) {
-			t.Parallel()
 		if err := lm.AcquireLock(lockReserved); err != nil {
 			t.Fatalf("AcquireLock(RESERVED) error = %v", err)
 		}
@@ -179,7 +176,6 @@ func TestAcquireReleaseLock(t *testing.T) {
 
 	// Test upgrading to EXCLUSIVE
 	t.Run("upgrade to exclusive", func(t *testing.T) {
-			t.Parallel()
 		if err := lm.AcquireLock(lockExclusive); err != nil {
 			t.Fatalf("AcquireLock(EXCLUSIVE) error = %v", err)
 		}
@@ -191,7 +187,6 @@ func TestAcquireReleaseLock(t *testing.T) {
 
 	// Test downgrading to SHARED
 	t.Run("downgrade to shared", func(t *testing.T) {
-			t.Parallel()
 		if err := lm.ReleaseLock(lockShared); err != nil {
 			t.Fatalf("ReleaseLock(SHARED) error = %v", err)
 		}
@@ -203,7 +198,6 @@ func TestAcquireReleaseLock(t *testing.T) {
 
 	// Test releasing all locks
 	t.Run("release all", func(t *testing.T) {
-			t.Parallel()
 		if err := lm.ReleaseLock(lockNone); err != nil {
 			t.Fatalf("ReleaseLock(NONE) error = %v", err)
 		}

@@ -147,7 +147,6 @@ func TestEncodeTableLeafCell(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			cell := EncodeTableLeafCell(tt.rowid, tt.payload)
 
 			// Verify we can parse it back
@@ -189,7 +188,6 @@ func TestEncodeTableInteriorCell(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			cell := EncodeTableInteriorCell(tt.childPage, tt.rowid)
 
 			// Verify we can parse it back
@@ -495,7 +493,6 @@ func TestCursorSeekRowid(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(fmt.Sprintf("seek_%d", tt.rowid), func(t *testing.T) {
-		t.Parallel()
 			found, err := cursor.SeekRowid(tt.rowid)
 			if err != nil {
 				t.Fatalf("SeekRowid(%d) error = %v", tt.rowid, err)

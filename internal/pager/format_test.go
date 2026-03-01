@@ -57,7 +57,6 @@ func TestParseDatabaseHeader(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			data := tt.setup()
 			header, err := ParseDatabaseHeader(data)
 
@@ -169,7 +168,6 @@ func TestDatabaseHeader_Validate(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			header := tt.setup()
 			err := header.Validate()
 
@@ -211,7 +209,6 @@ func TestDatabaseHeader_GetPageSize(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			header := &DatabaseHeader{PageSize: tt.pageSize}
 			got := header.GetPageSize()
 
@@ -229,7 +226,6 @@ func TestNewDatabaseHeader(t *testing.T) {
 	for _, pageSize := range pageSizes {
 		pageSize := pageSize
 		t.Run("page_size_"+string(rune(pageSize)), func(t *testing.T) {
-			t.Parallel()
 			header := NewDatabaseHeader(pageSize)
 
 			if header == nil {
@@ -347,7 +343,6 @@ func TestIsValidPageSize(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run("size_"+string(rune(tt.size)), func(t *testing.T) {
-			t.Parallel()
 			got := isValidPageSize(tt.size)
 			if got != tt.want {
 				t.Errorf("isValidPageSize(%d) = %v, want %v", tt.size, got, tt.want)

@@ -1053,7 +1053,6 @@ func TestLRUCacheMarkDirty(t *testing.T) {
 	cache.SetPager(writer)
 
 	t.Run("mark clean page dirty in write-back mode", func(t *testing.T) {
-			t.Parallel()
 		cache.SetMode(WriteBackMode)
 		page := NewDbPage(1, 4096)
 		cache.Put(page)
@@ -1067,7 +1066,6 @@ func TestLRUCacheMarkDirty(t *testing.T) {
 	})
 
 	t.Run("mark page dirty in write-through mode", func(t *testing.T) {
-			t.Parallel()
 		cache.SetMode(WriteThroughMode)
 		cache.Clear()
 
@@ -1089,7 +1087,6 @@ func TestLRUCacheMarkDirty(t *testing.T) {
 	})
 
 	t.Run("mark non-existent page dirty", func(t *testing.T) {
-			t.Parallel()
 		cache.SetMode(WriteBackMode)
 		page := NewDbPage(999, 4096)
 
@@ -1098,7 +1095,6 @@ func TestLRUCacheMarkDirty(t *testing.T) {
 	})
 
 	t.Run("mark dirty with write error", func(t *testing.T) {
-			t.Parallel()
 		cache.SetMode(WriteThroughMode)
 		cache.Clear()
 		writer.writeError = errors.New("write failed")

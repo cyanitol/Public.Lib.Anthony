@@ -997,7 +997,6 @@ func TestSQLiteCorrupt(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			if tt.skipFile {
 				t.Skip("Skipping test that requires file manipulation")
 				return
@@ -1026,7 +1025,6 @@ func TestSQLiteCorrupt(t *testing.T) {
 // TestSQLiteCorruptFile tests corruption detection with actual file corruption
 func TestSQLiteCorruptFile(t *testing.T) {
 	t.Run("corrupt-file-1: Invalid magic string", func(t *testing.T) {
-		t.Parallel()
 		dbPath := filepath.Join(t.TempDir(), "test.db")
 
 		// Create a valid database
@@ -1067,7 +1065,6 @@ func TestSQLiteCorruptFile(t *testing.T) {
 	})
 
 	t.Run("corrupt-file-2: Truncated database file", func(t *testing.T) {
-		t.Parallel()
 		dbPath := filepath.Join(t.TempDir(), "test.db")
 
 		// Create a valid database

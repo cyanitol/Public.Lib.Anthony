@@ -624,7 +624,6 @@ func TestSQLiteView(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			db := setupMemoryDB(t)
 			defer db.Close()
 

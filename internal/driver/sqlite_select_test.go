@@ -147,7 +147,6 @@ func TestSQLiteSelectBasic(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			// Run setup statements
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
@@ -287,7 +286,6 @@ func TestSQLiteSelectWhere(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
 					t.Fatalf("setup failed: %v", err)
@@ -415,7 +413,6 @@ func TestSQLiteSelectOrderBy(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
 					t.Fatalf("setup failed: %v", err)
@@ -510,7 +507,6 @@ func TestSQLiteSelectAliases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
 					t.Fatalf("setup failed: %v", err)
@@ -603,7 +599,6 @@ func TestSQLiteSelectDistinct(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
 					t.Fatalf("setup failed: %v", err)
@@ -719,7 +714,6 @@ func TestSQLiteSelectLimitOffset(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
 					t.Fatalf("setup failed: %v", err)
@@ -828,7 +822,6 @@ func TestSQLiteSelectJoins(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
 					t.Fatalf("setup failed: %v", err)
@@ -901,7 +894,6 @@ func TestSQLiteSelectWithoutFrom(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
 					t.Fatalf("setup failed: %v", err)
@@ -1021,7 +1013,6 @@ func TestSQLiteSelectGroupBy(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
 					t.Fatalf("setup failed: %v", err)
@@ -1123,7 +1114,6 @@ func TestSQLiteSelectHaving(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
 					t.Fatalf("setup failed: %v", err)
@@ -1211,7 +1201,6 @@ func TestSQLiteSelectTableStar(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
 					t.Fatalf("setup failed: %v", err)
@@ -1321,7 +1310,6 @@ func TestSQLiteSelectErrors(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
 					t.Fatalf("setup failed: %v", err)

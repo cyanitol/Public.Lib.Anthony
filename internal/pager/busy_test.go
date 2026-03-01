@@ -41,7 +41,6 @@ func TestDefaultBusyHandler(t *testing.T) {
 	})
 
 	t.Run("exponential backoff increases delay", func(t *testing.T) {
-			t.Parallel()
 		handler := NewDefaultBusyHandler(10 * time.Second)
 
 		// First few calls should have increasing delays
@@ -69,7 +68,6 @@ func TestDefaultBusyHandler(t *testing.T) {
 	})
 
 	t.Run("caps delay at maximum", func(t *testing.T) {
-			t.Parallel()
 		handler := NewDefaultBusyHandler(1 * time.Second)
 
 		// After many retries, delay should cap at maxDelay (100ms)
@@ -87,7 +85,6 @@ func TestDefaultBusyHandler(t *testing.T) {
 	})
 
 	t.Run("reset clears state", func(t *testing.T) {
-			t.Parallel()
 		handler := NewDefaultBusyHandler(50 * time.Millisecond)
 
 		// Use up most of the timeout
@@ -148,7 +145,6 @@ func TestBusyTimeout(t *testing.T) {
 	})
 
 	t.Run("tracks total retries", func(t *testing.T) {
-			t.Parallel()
 		handler := BusyTimeout(50 * time.Millisecond)
 		th := handler.(*TimeoutBusyHandler)
 
@@ -164,7 +160,6 @@ func TestBusyTimeout(t *testing.T) {
 	})
 
 	t.Run("zero timeout returns immediately", func(t *testing.T) {
-			t.Parallel()
 		handler := BusyTimeout(0)
 
 		start := time.Now()
@@ -206,7 +201,6 @@ func TestBusyCallback(t *testing.T) {
 	})
 
 	t.Run("nil callback returns false", func(t *testing.T) {
-			t.Parallel()
 		handler := &CallbackBusyHandler{callback: nil}
 
 		result := handler.Busy(0)
@@ -216,7 +210,6 @@ func TestBusyCallback(t *testing.T) {
 	})
 
 	t.Run("custom retry logic", func(t *testing.T) {
-			t.Parallel()
 		retries := 0
 		maxRetries := 3
 		delay := 10 * time.Millisecond
@@ -297,7 +290,6 @@ func TestPagerBusyHandler(t *testing.T) {
 	})
 
 	t.Run("busy handler is invoked on lock contention", func(t *testing.T) {
-			t.Parallel()
 		// This test verifies that the busy handler is called
 		// when a lock cannot be acquired
 		pager := newPager("test.db", DefaultPageSize, false)
@@ -327,7 +319,6 @@ func TestPagerBusyHandler(t *testing.T) {
 	})
 
 	t.Run("no handler means immediate failure", func(t *testing.T) {
-			t.Parallel()
 		pager := newPager("test.db", DefaultPageSize, false)
 		defer func() {
 			if pager.file != nil {
@@ -416,7 +407,6 @@ func TestBusyHandlerEdgeCases(t *testing.T) {
 	})
 
 	t.Run("very long timeout", func(t *testing.T) {
-			t.Parallel()
 		handler := NewDefaultBusyHandler(1 * time.Hour)
 
 		// Should be able to retry many times
@@ -434,7 +424,6 @@ func TestBusyHandlerEdgeCases(t *testing.T) {
 	})
 
 	t.Run("negative timeout treated as zero", func(t *testing.T) {
-			t.Parallel()
 		// The handler should handle negative timeouts gracefully
 		handler := BusyTimeout(-1 * time.Second)
 
@@ -445,7 +434,6 @@ func TestBusyHandlerEdgeCases(t *testing.T) {
 	})
 
 	t.Run("callback panic is not caught", func(t *testing.T) {
-			t.Parallel()
 		handler := BusyCallback(func(count int) bool {
 			if count == 0 {
 				panic("test panic")
@@ -485,7 +473,6 @@ func TestBusyHandlerTiming(t *testing.T) {
 	})
 
 	t.Run("timeout handler fixed delay", func(t *testing.T) {
-			t.Parallel()
 		handler := BusyTimeout(1 * time.Second)
 
 		// Each call should sleep for approximately 10ms
@@ -529,7 +516,6 @@ func TestBusyHandlerThreadSafety(t *testing.T) {
 	})
 
 	t.Run("concurrent set and get on pager", func(t *testing.T) {
-			t.Parallel()
 		pager := newPager("test.db", DefaultPageSize, false)
 		defer func() {
 			if pager.file != nil {

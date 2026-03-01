@@ -281,7 +281,6 @@ func TestGetTable(t *testing.T) {
 	for _, name := range tests {
 		name := name
 		t.Run(name, func(t *testing.T) {
-				t.Parallel()
 			table, ok := s.GetTable(name)
 			if !ok {
 				t.Errorf("GetTable(%q) not found", name)
@@ -407,7 +406,6 @@ func TestTableGetColumn(t *testing.T) {
 	for _, name := range tests {
 		name := name
 		t.Run(name, func(t *testing.T) {
-				t.Parallel()
 			col, ok := table.GetColumn(name)
 			if !ok {
 				t.Errorf("GetColumn(%q) not found", name)
@@ -450,7 +448,6 @@ func TestTableGetColumnIndex(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
 			got := table.GetColumnIndex(tt.name)
 			if got != tt.want {
 				t.Errorf("GetColumnIndex(%q) = %d, want %d", tt.name, got, tt.want)
@@ -473,7 +470,6 @@ func TestTableHasRowID(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
 			table := &Table{WithoutRowID: tt.withoutRowID}
 			got := table.HasRowID()
 			if got != tt.want {
@@ -686,7 +682,6 @@ func TestColumnGetEffectiveCollation(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
 			col := &Column{Collation: tt.collation}
 			got := col.GetEffectiveCollation()
 			if got != tt.want {
@@ -826,7 +821,6 @@ func TestGetIndexCaseInsensitive(t *testing.T) {
 	for _, name := range tests {
 		name := name
 		t.Run(name, func(t *testing.T) {
-				t.Parallel()
 			idx, ok := s.GetIndex(name)
 			if !ok {
 				t.Errorf("GetIndex(%q) not found", name)

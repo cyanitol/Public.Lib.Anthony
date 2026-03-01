@@ -313,7 +313,6 @@ func TestIsInternalTable(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
 			result := isInternalTable(tt.name)
 			if result != tt.expected {
 				t.Errorf("isInternalTable(%q) = %v, want %v", tt.name, result, tt.expected)
@@ -337,7 +336,6 @@ func TestIsAutoIndex(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
 			result := isAutoIndex(tt.name)
 			if result != tt.expected {
 				t.Errorf("isAutoIndex(%q) = %v, want %v", tt.name, result, tt.expected)

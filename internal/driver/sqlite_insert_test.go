@@ -490,7 +490,6 @@ func TestSQLiteInsert(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			// Create temporary database
 			tmpDir := t.TempDir()
 			dbPath := filepath.Join(tmpDir, "test.db")
@@ -608,7 +607,6 @@ func TestInsertConflictResolution(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			tmpDir := t.TempDir()
 			dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -665,7 +663,6 @@ func TestInsertRowidCaching(t *testing.T) {
 
 	// Test from insert-9.1
 	t.Run("explicit rowid with SELECT", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec("CREATE TABLE t5(x)")
 		if err != nil {
 			t.Fatalf("CREATE TABLE failed: %v", err)
@@ -702,7 +699,6 @@ func TestInsertRowidCaching(t *testing.T) {
 
 	// Test from insert-9.2
 	t.Run("INTEGER PRIMARY KEY", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec("CREATE TABLE t6(x INTEGER PRIMARY KEY, y)")
 		if err != nil {
 			t.Fatalf("CREATE TABLE failed: %v", err)
@@ -802,7 +798,6 @@ func TestInsertWithTransactions(t *testing.T) {
 	}
 
 	t.Run("commit transaction", func(t *testing.T) {
-		t.Parallel()
 		tx, err := db.Begin()
 		if err != nil {
 			t.Fatalf("BEGIN failed: %v", err)
@@ -837,7 +832,6 @@ func TestInsertWithTransactions(t *testing.T) {
 	})
 
 	t.Run("rollback transaction", func(t *testing.T) {
-		t.Parallel()
 		tx, err := db.Begin()
 		if err != nil {
 			t.Fatalf("BEGIN failed: %v", err)
@@ -935,7 +929,6 @@ func TestInsertEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			tmpDir := t.TempDir()
 			dbPath := filepath.Join(tmpDir, "test.db")
 

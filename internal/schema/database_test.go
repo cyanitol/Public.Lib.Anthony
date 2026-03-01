@@ -153,7 +153,6 @@ func TestGetDatabaseCaseInsensitive(t *testing.T) {
 	for _, name := range tests {
 		name := name
 		t.Run(name, func(t *testing.T) {
-				t.Parallel()
 			db, ok := dr.GetDatabase(name)
 			if !ok {
 				t.Errorf("GetDatabase(%q) not found", name)

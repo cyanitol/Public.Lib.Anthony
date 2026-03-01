@@ -155,7 +155,6 @@ func TestJournalValidateHeader(t *testing.T) {
 	journal := NewJournal(dbFile+"-journal", 4096, 1)
 
 	t.Run("validate valid header", func(t *testing.T) {
-			t.Parallel()
 		if err := journal.Open(); err != nil {
 			t.Fatalf("failed to open journal: %v", err)
 		}

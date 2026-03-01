@@ -243,7 +243,6 @@ func TestPageValidation(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			bt := NewBtree(4096)
 			page := tt.setupPage()
 
@@ -292,7 +291,6 @@ func TestPageValidationWithProvider(t *testing.T) {
 func TestCursorStateValidation(t *testing.T) {
 	t.Parallel()
 	t.Run("nil btree", func(t *testing.T) {
-		t.Parallel()
 		cursor := &BtCursor{
 			Btree:    nil,
 			RootPage: 1,
@@ -307,7 +305,6 @@ func TestCursorStateValidation(t *testing.T) {
 	})
 
 	t.Run("invalid root page", func(t *testing.T) {
-		t.Parallel()
 		bt := NewBtree(4096)
 		cursor := &BtCursor{
 			Btree:    bt,
@@ -323,7 +320,6 @@ func TestCursorStateValidation(t *testing.T) {
 	})
 
 	t.Run("depth exceeded", func(t *testing.T) {
-		t.Parallel()
 		bt := NewBtree(4096)
 		cursor := &BtCursor{
 			Btree:    bt,
@@ -339,7 +335,6 @@ func TestCursorStateValidation(t *testing.T) {
 	})
 
 	t.Run("valid cursor state", func(t *testing.T) {
-		t.Parallel()
 		bt := NewBtree(4096)
 		cursor := NewCursor(bt, 1)
 

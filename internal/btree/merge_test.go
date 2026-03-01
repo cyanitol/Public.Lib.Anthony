@@ -156,7 +156,6 @@ func TestCanMerge(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			// Create left page
 			leftCells := make([]struct {
 				rowid   int64
@@ -280,7 +279,6 @@ func TestRedistributeCells(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			// Create left page
 			leftCells := make([]struct {
 				rowid   int64
@@ -380,7 +378,6 @@ func TestIsUnderfull(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			// Create page
 			cells := make([]struct {
 				rowid   int64

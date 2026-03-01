@@ -214,7 +214,6 @@ func TestSQLiteWindow(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			rows, err := db.Query(tt.query)
 			if tt.wantErr {
 				if err == nil {
@@ -338,7 +337,6 @@ func TestSQLiteWindowPartitioned(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			rows, err := db.Query(tt.query)
 			if err != nil {
 				t.Fatalf("query failed: %v", err)
@@ -463,7 +461,6 @@ func TestSQLiteWindowFrames(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			rows, err := db.Query(tt.query)
 			if err != nil {
 				t.Fatalf("query failed: %v", err)

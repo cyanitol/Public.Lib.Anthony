@@ -605,7 +605,6 @@ func TestSQLiteBackup(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			// Clean database
 			tables := []string{"t1", "t2", "t3", "large", "pk_test", "uniq_test",
 				"parent", "child", "base", "types", "nulls", "collate_test",

@@ -29,7 +29,6 @@ func TestPutGetVarint(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			var buf [9]byte
 			n := PutVarint(buf[:], tt.value)
 			if n != tt.want {
@@ -65,7 +64,6 @@ func TestGetVarint32(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			var buf [9]byte
 			n := PutVarint(buf[:], uint64(tt.value))
 			if n != tt.want {
@@ -218,7 +216,6 @@ func TestGetVarintEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			buf := tt.setup()
 			got, _ := GetVarint(buf)
 			if got != tt.want {
@@ -247,7 +244,6 @@ func TestDecodeShortVarint(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			var buf [9]byte
 			n := PutVarint(buf[:], tt.value)
 			got, m := GetVarint(buf[:])
@@ -276,7 +272,6 @@ func TestSlowBtreeVarint32(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			var buf [9]byte
 			PutVarint(buf[:], uint64(tt.value))
 			got, _ := GetVarint32(buf[:])
@@ -361,7 +356,6 @@ func TestPutVarintAllSizes(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(fmt.Sprintf("size=%d", tt.size), func(t *testing.T) {
-		t.Parallel()
 			var buf [9]byte
 			n := PutVarint(buf[:], tt.value)
 			if n != tt.size {

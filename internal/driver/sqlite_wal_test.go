@@ -476,7 +476,6 @@ func TestSQLiteWAL(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			// Use a new database for each test
 			testDBPath := filepath.Join(tmpDir, tt.name+".db")
 			testDB, err := sql.Open(DriverName, testDBPath)

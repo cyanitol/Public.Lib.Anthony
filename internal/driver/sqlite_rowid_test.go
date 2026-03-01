@@ -20,7 +20,6 @@ func TestSQLiteRowid(t *testing.T) {
 
 	// Test 1: Basic rowid functionality (rowid-1.*)
 	t.Run("basic_rowid_access", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t1(x int, y int);
 			INSERT INTO t1 VALUES(1, 2);
@@ -69,7 +68,6 @@ func TestSQLiteRowid(t *testing.T) {
 
 	// Test 2: Inserting and updating rowid (rowid-2.*)
 	t.Run("insert_update_rowid", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec("DELETE FROM t1")
 		if err != nil {
 			t.Fatalf("failed to delete: %v", err)
@@ -136,7 +134,6 @@ func TestSQLiteRowid(t *testing.T) {
 
 	// Test 3: User-defined column named rowid (rowid-3.*)
 	t.Run("user_defined_rowid_column", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t2(rowid int, x int, y int);
 			INSERT INTO t2 VALUES(0, 2, 3);
@@ -182,7 +179,6 @@ func TestSQLiteRowid(t *testing.T) {
 
 	// Test 4: Joins using rowid (rowid-4.*)
 	t.Run("joins_with_rowid", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t3(a INTEGER);
 			CREATE TABLE t4(b INTEGER);
@@ -230,7 +226,6 @@ func TestRowidWithIntegerPrimaryKey(t *testing.T) {
 	defer db.Close()
 
 	t.Run("integer_primary_key_auto_increment", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t5(a INTEGER PRIMARY KEY, b);
 			INSERT INTO t5(b) VALUES(55);
@@ -298,7 +293,6 @@ func TestRowidComparisons(t *testing.T) {
 	defer db.Close()
 
 	t.Run("rowid_float_comparison", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t6(a INTEGER PRIMARY KEY, b);
 			INSERT INTO t6 VALUES(123, 'x');
@@ -367,7 +361,6 @@ func TestRowidComparisons(t *testing.T) {
 	})
 
 	t.Run("rowid_string_comparison", func(t *testing.T) {
-		t.Parallel()
 		// rowid compared to string should handle type mismatch
 		var count int64
 
@@ -404,7 +397,6 @@ func TestRowidRangeQueries(t *testing.T) {
 	defer db.Close()
 
 	t.Run("rowid_range_with_floats", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t7(a);
 			INSERT INTO t7(a) VALUES(1);
@@ -437,7 +429,6 @@ func TestRowidRangeQueries(t *testing.T) {
 		for _, tt := range tests {
 			tt := tt  // Capture range variable
 			t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
 				var count int64
 				query := "SELECT COUNT(*) FROM t7 WHERE " + tt.where
 				err := db.QueryRow(query).Scan(&count)
@@ -465,7 +456,6 @@ func TestRowidWithNegativeValues(t *testing.T) {
 	defer db.Close()
 
 	t.Run("negative_rowid_comparisons", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t8(a);
 			INSERT INTO t8(rowid, a) VALUES(-8, 8);
@@ -501,7 +491,6 @@ func TestRowidWithNegativeValues(t *testing.T) {
 		for _, tt := range tests {
 			tt := tt  // Capture range variable
 			t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
 				var count int64
 				query := "SELECT COUNT(*) FROM t8 WHERE " + tt.where
 				err := db.QueryRow(query).Scan(&count)
@@ -528,7 +517,6 @@ func TestRowidOrdering(t *testing.T) {
 	defer db.Close()
 
 	t.Run("order_by_rowid_asc", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t9(value TEXT);
 			INSERT INTO t9 VALUES('third');
@@ -564,7 +552,6 @@ func TestRowidOrdering(t *testing.T) {
 	})
 
 	t.Run("order_by_rowid_desc", func(t *testing.T) {
-		t.Parallel()
 		rows, err := db.Query("SELECT rowid, value FROM t9 ORDER BY rowid DESC")
 		if err != nil {
 			t.Fatalf("query failed: %v", err)
@@ -603,7 +590,6 @@ func TestRowidWithoutRowid(t *testing.T) {
 	defer db.Close()
 
 	t.Run("without_rowid_table", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t10(x INTEGER PRIMARY KEY, y TEXT) WITHOUT ROWID;
 			INSERT INTO t10 VALUES(1, 'one');
@@ -648,7 +634,6 @@ func TestRowidMaxValue(t *testing.T) {
 	defer db.Close()
 
 	t.Run("large_rowid_values", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t11(x INTEGER PRIMARY KEY, y);
 			INSERT INTO t11 VALUES(9223372036854775807, 'max');
@@ -697,7 +682,6 @@ func TestRowidAmbiguousInJoin(t *testing.T) {
 	defer db.Close()
 
 	t.Run("ambiguous_rowid_in_join", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t12(x);
 			CREATE TABLE t13(y);
@@ -728,7 +712,6 @@ func TestRowidUpdateConstraints(t *testing.T) {
 	defer db.Close()
 
 	t.Run("duplicate_rowid_update", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t14(a);
 			INSERT INTO t14 VALUES('first');
@@ -765,7 +748,6 @@ func TestRowidDeleteAndReuse(t *testing.T) {
 	defer db.Close()
 
 	t.Run("rowid_after_delete", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec(`
 			CREATE TABLE t15(value TEXT);
 			INSERT INTO t15 VALUES('one');

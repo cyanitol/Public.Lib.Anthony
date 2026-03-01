@@ -275,7 +275,6 @@ func TestSQLiteLikeGlob(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			rows, err := db.Query(tt.query)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("query error = %v, wantErr %v", err, tt.wantErr)
@@ -403,7 +402,6 @@ func TestLikeEscape(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			rows, err := db.Query(tt.query)
 			if err != nil {
 				t.Fatalf("query error: %v", err)
@@ -469,7 +467,6 @@ func TestLikeCaseSensitivity(t *testing.T) {
 
 	// Test default case-insensitive behavior
 	t.Run("default_case_insensitive", func(t *testing.T) {
-		t.Parallel()
 		rows, err := db.Query("SELECT x FROM t1 WHERE x LIKE 'abc' ORDER BY 1")
 		if err != nil {
 			t.Fatalf("query error: %v", err)
@@ -493,7 +490,6 @@ func TestLikeCaseSensitivity(t *testing.T) {
 
 	// Test case-sensitive LIKE (like.test lines 76-102)
 	t.Run("case_sensitive_like", func(t *testing.T) {
-		t.Parallel()
 		// Enable case-sensitive LIKE
 		_, err = db.Exec("PRAGMA case_sensitive_like=on")
 		if err != nil {
@@ -533,7 +529,6 @@ func TestLikeCaseSensitivity(t *testing.T) {
 
 	// GLOB is always case-sensitive regardless of pragma (like.test lines 372-392)
 	t.Run("glob_always_case_sensitive", func(t *testing.T) {
-		t.Parallel()
 		rows, err := db.Query("SELECT x FROM t1 WHERE x GLOB 'abc' ORDER BY 1")
 		if err != nil {
 			t.Fatalf("query error: %v", err)
@@ -612,7 +607,6 @@ func TestLikeUnicode(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result int64
 			err := db.QueryRow(tt.query).Scan(&result)
 			if err != nil {
@@ -690,7 +684,6 @@ func TestLikeSpecialCharacters(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc  // Capture range variable
 		t.Run("like_special_"+tc.char, func(t *testing.T) {
-			t.Parallel()
 			// Need to escape % and _ when they are literal characters
 			pattern := tc.char + "%"
 
@@ -708,7 +701,6 @@ func TestLikeSpecialCharacters(t *testing.T) {
 
 	// Test that backslash is treated as a regular character in LIKE (like2.test lines 702-709)
 	t.Run("backslash_not_escape", func(t *testing.T) {
-		t.Parallel()
 		var result int
 		err := db.QueryRow("SELECT x FROM t1 WHERE y LIKE '\\%'").Scan(&result)
 		if err != nil {
@@ -781,7 +773,6 @@ func TestLikeWithBlobs(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			rows, err := db.Query(tt.query)
 			if err != nil {
 				t.Fatalf("query error: %v", err)
@@ -919,7 +910,6 @@ func TestLikeEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result int64
 			err := db.QueryRow(tt.query).Scan(&result)
 			if err != nil {

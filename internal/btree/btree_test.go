@@ -105,7 +105,6 @@ func TestParsePageHeader(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			header, err := ParsePageHeader(tt.data, tt.pageNum)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParsePageHeader() error = %v, wantErr %v", err, tt.wantErr)
@@ -189,7 +188,6 @@ func TestNewBtree(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			bt := NewBtree(tt.pageSize)
 			if bt.PageSize != tt.want {
 				t.Errorf("PageSize = %d, want %d", bt.PageSize, tt.want)

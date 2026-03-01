@@ -772,7 +772,6 @@ func TestFreeListVerify(t *testing.T) {
 	fl := NewFreeList(pager)
 
 	t.Run("empty freelist is valid", func(t *testing.T) {
-			t.Parallel()
 		err := fl.Verify()
 		if err != nil {
 			t.Errorf("empty freelist should be valid: %v", err)
@@ -780,7 +779,6 @@ func TestFreeListVerify(t *testing.T) {
 	})
 
 	t.Run("verify after freeeting pages", func(t *testing.T) {
-			t.Parallel()
 		// Ensure we have pages
 		for i := Pgno(2); i <= 30; i++ {
 			page, err := pager.Get(i)

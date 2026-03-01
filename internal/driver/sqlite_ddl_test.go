@@ -719,7 +719,6 @@ func TestSQLiteDDL(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			db, cleanup := setupTestDB(t)
 			defer cleanup()
 
@@ -785,7 +784,6 @@ func TestDDLComplexScenarios(t *testing.T) {
 
 	// Test creating multiple tables and dropping them
 	t.Run("multiple-tables", func(t *testing.T) {
-		t.Parallel()
 		// Create 10 tables
 		for i := 1; i <= 10; i++ {
 			tableName := "test" + string(rune('0'+i))
@@ -839,7 +837,6 @@ func TestDDLComplexScenarios(t *testing.T) {
 
 	// Test creating table with all constraint types
 	t.Run("all-constraints", func(t *testing.T) {
-		t.Parallel()
 		sql := `CREATE TABLE users (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			username TEXT NOT NULL UNIQUE,
@@ -872,7 +869,6 @@ func TestDDLComplexScenarios(t *testing.T) {
 
 	// Test CREATE TABLE AS SELECT with joins
 	t.Run("create-as-select-join", func(t *testing.T) {
-		t.Parallel()
 		// Setup source tables
 		if _, err := db.Exec("CREATE TABLE orders (id INTEGER, user_id INTEGER, amount REAL)"); err != nil {
 			t.Fatalf("failed to create orders table: %v", err)
@@ -919,7 +915,6 @@ func TestDDLComplexScenarios(t *testing.T) {
 
 	// Test index creation on existing data
 	t.Run("index-on-existing-data", func(t *testing.T) {
-		t.Parallel()
 		// Create table and insert data
 		if _, err := db.Exec("CREATE TABLE products (id INTEGER, name TEXT, price REAL)"); err != nil {
 			t.Fatalf("failed to create products table: %v", err)

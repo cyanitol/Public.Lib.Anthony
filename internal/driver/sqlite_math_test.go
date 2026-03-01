@@ -464,7 +464,6 @@ func TestSQLiteMathFunctions(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			if tt.skip != "" {
 				// Try the query, but don't fail if it's not supported
 				var result interface{}
@@ -595,7 +594,6 @@ func TestMathFunctionsWithTable(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result interface{}
 			err := db.QueryRow(tt.query).Scan(&result)
 			if err != nil {
@@ -761,7 +759,6 @@ func TestMathFunctionErrors(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result interface{}
 			err := db.QueryRow(tt.query).Scan(&result)
 			if err == nil {
@@ -838,7 +835,6 @@ func TestArithmeticEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result interface{}
 			err := db.QueryRow(tt.query).Scan(&result)
 
@@ -938,7 +934,6 @@ func TestPrintfFormatSpecifiers(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result interface{}
 			err := db.QueryRow(tt.query).Scan(&result)
 			if err != nil {
@@ -986,7 +981,6 @@ func TestRandomFunctions(t *testing.T) {
 	defer db.Close()
 
 	t.Run("random_different_values", func(t *testing.T) {
-		t.Parallel()
 		var r1, r2 int64
 		err := db.QueryRow("SELECT random()").Scan(&r1)
 		if err != nil {
@@ -1006,7 +1000,6 @@ func TestRandomFunctions(t *testing.T) {
 	})
 
 	t.Run("randomblob_different_values", func(t *testing.T) {
-		t.Parallel()
 		var b1, b2 []byte
 		err := db.QueryRow("SELECT randomblob(16)").Scan(&b1)
 		if err != nil {
@@ -1037,7 +1030,6 @@ func TestRandomFunctions(t *testing.T) {
 	})
 
 	t.Run("randomblob_various_sizes", func(t *testing.T) {
-		t.Parallel()
 		sizes := []int{1, 10, 100, 1000}
 		for _, size := range sizes {
 			var blob []byte

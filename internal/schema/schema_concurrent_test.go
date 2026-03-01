@@ -372,7 +372,6 @@ func TestReservedNameRejection(t *testing.T) {
 	for _, name := range reservedTables {
 		name := name
 		t.Run("Table_"+name, func(t *testing.T) {
-				t.Parallel()
 			stmt := &parser.CreateTableStmt{
 				Name: name,
 				Columns: []parser.ColumnDef{
@@ -389,7 +388,6 @@ func TestReservedNameRejection(t *testing.T) {
 		})
 
 		t.Run("Index_"+name, func(t *testing.T) {
-				t.Parallel()
 			// Create a valid table first
 			tableStmt := &parser.CreateTableStmt{
 				Name: "valid_table",
@@ -413,7 +411,6 @@ func TestReservedNameRejection(t *testing.T) {
 		})
 
 		t.Run("View_"+name, func(t *testing.T) {
-				t.Parallel()
 			selectStmt := &parser.SelectStmt{
 				Columns: []parser.ResultColumn{
 					{Expr: &parser.IdentExpr{Name: "id"}},
@@ -451,7 +448,6 @@ func TestIsReservedName(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
 			result := IsReservedName(tc.name)
 			if result != tc.expected {
 				t.Errorf("IsReservedName(%q) = %v, expected %v", tc.name, result, tc.expected)

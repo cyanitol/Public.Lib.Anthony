@@ -55,7 +55,6 @@ func TestTypeAffinityBasic(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			// Test INSERT VALUES
 			_, err := db.Exec("DELETE FROM t1")
 			if err != nil {
@@ -120,7 +119,6 @@ func TestTypeAffinityInsertSelect(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			_, err := db.Exec("DELETE FROM t1")
 			if err != nil {
 				t.Fatalf("failed to delete: %v", err)
@@ -181,7 +179,6 @@ func TestTypeAffinityUpdate(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			query := "UPDATE t1 SET i = " + tt.value + ", n = " + tt.value + ", t = " + tt.value + ", o = " + tt.value
 			_, err := db.Exec(query)
 			if err != nil {
@@ -236,7 +233,6 @@ func TestIntegerStorage(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			_, err := db.Exec("INSERT INTO t1 VALUES(?)", tt.value)
 			if err != nil {
 				t.Fatalf("failed to insert: %v", err)
@@ -294,7 +290,6 @@ func TestRealStorage(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			_, err := db.Exec("INSERT INTO t2 VALUES(?)", tt.value)
 			if err != nil {
 				t.Fatalf("failed to insert: %v", err)
@@ -395,7 +390,6 @@ func TestTextStorage(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			_, err := db.Exec("INSERT INTO t4 VALUES(?)", tt.text)
 			if err != nil {
 				t.Fatalf("failed to insert: %v", err)
@@ -449,7 +443,6 @@ func TestLiteralComparisons(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result int
 			err := db.QueryRow("SELECT " + tt.expr).Scan(&result)
 			if err != nil {
@@ -496,7 +489,6 @@ func TestTextAffinityComparisons(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			_, err := db.Exec("DELETE FROM t1")
 			if err != nil {
 				t.Fatalf("failed to delete: %v", err)
@@ -557,7 +549,6 @@ func TestNumericAffinityComparisons(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			_, err := db.Exec("DELETE FROM t1")
 			if err != nil {
 				t.Fatalf("failed to delete: %v", err)
@@ -614,7 +605,6 @@ func TestBlobAffinityComparisons(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			_, err := db.Exec("DELETE FROM t1")
 			if err != nil {
 				t.Fatalf("failed to delete: %v", err)
@@ -665,7 +655,6 @@ func TestCastToText(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result, typeStr string
 			err := db.QueryRow("SELECT " + tt.expr + ", typeof(" + tt.expr + ")").Scan(&result, &typeStr)
 			if err != nil {
@@ -708,7 +697,6 @@ func TestCastToInteger(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result int64
 			var typeStr string
 			err := db.QueryRow("SELECT " + tt.expr + ", typeof(" + tt.expr + ")").Scan(&result, &typeStr)
@@ -751,7 +739,6 @@ func TestCastToReal(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result float64
 			var typeStr string
 			err := db.QueryRow("SELECT " + tt.expr + ", typeof(" + tt.expr + ")").Scan(&result, &typeStr)
@@ -799,7 +786,6 @@ func TestCastToNumeric(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var typeStr string
 			err := db.QueryRow("SELECT typeof(" + tt.expr + ")").Scan(&typeStr)
 			if err != nil {
@@ -860,7 +846,6 @@ func TestCastToBlob(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var typeStr string
 			err := db.QueryRow("SELECT typeof(" + tt.expr + ")").Scan(&typeStr)
 			if err != nil {
@@ -900,7 +885,6 @@ func TestCastNull(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var typeStr string
 			err := db.QueryRow("SELECT typeof(" + tt.expr + ")").Scan(&typeStr)
 			if err != nil {
@@ -948,7 +932,6 @@ func TestCastLeadingSpaces(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			switch exp := tt.expected.(type) {
 			case int64:
 				var result int64
@@ -999,7 +982,6 @@ func TestCastLargeIntegers(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result int64
 			err := db.QueryRow("SELECT " + tt.expr).Scan(&result)
 			if err != nil {
@@ -1040,7 +1022,6 @@ func TestCastIntegerOverflow(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result int64
 			err := db.QueryRow("SELECT " + tt.expr).Scan(&result)
 			if err != nil {
@@ -1083,7 +1064,6 @@ func TestCastExponentIgnored(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var resultInt int64
 			err := db.QueryRow("SELECT " + tt.exprInt).Scan(&resultInt)
 			if err != nil {
@@ -1137,7 +1117,6 @@ func TestCastSpecialNumeric(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			switch exp := tt.expected.(type) {
 			case int64:
 				var result int64
@@ -1203,7 +1182,6 @@ func TestAffinityWithIndexes(t *testing.T) {
 
 	// Check INTEGER column
 	t.Run("integer_column_types", func(t *testing.T) {
-		t.Parallel()
 		rows, err := db.Query("SELECT xi, typeof(xi) FROM t1 ORDER BY rowid")
 		if err != nil {
 			t.Fatalf("failed to query: %v", err)
@@ -1227,7 +1205,6 @@ func TestAffinityWithIndexes(t *testing.T) {
 
 	// Check REAL column
 	t.Run("real_column_types", func(t *testing.T) {
-		t.Parallel()
 		rows, err := db.Query("SELECT xr, typeof(xr) FROM t1 ORDER BY rowid")
 		if err != nil {
 			t.Fatalf("failed to query: %v", err)
@@ -1251,7 +1228,6 @@ func TestAffinityWithIndexes(t *testing.T) {
 
 	// Check BLOB column - no affinity, stores as-is
 	t.Run("blob_column_types", func(t *testing.T) {
-		t.Parallel()
 		rows, err := db.Query("SELECT xb, typeof(xb) FROM t1 ORDER BY rowid")
 		if err != nil {
 			t.Fatalf("failed to query: %v", err)
@@ -1275,7 +1251,6 @@ func TestAffinityWithIndexes(t *testing.T) {
 
 	// Check TEXT column
 	t.Run("text_column_types", func(t *testing.T) {
-		t.Parallel()
 		rows, err := db.Query("SELECT xt, typeof(xt) FROM t1 ORDER BY rowid")
 		if err != nil {
 			t.Fatalf("failed to query: %v", err)
@@ -1343,7 +1318,6 @@ func TestAffinityEquality(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result int
 			err := db.QueryRow("SELECT " + tt.expr + " FROM t1 WHERE rowid=1").Scan(&result)
 			if err != nil {
@@ -1388,7 +1362,6 @@ func TestTypeofFunction(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var result string
 			err := db.QueryRow("SELECT " + tt.expr).Scan(&result)
 			if err != nil {
@@ -1447,7 +1420,6 @@ func TestNumericStringComparisons(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			_, err := db.Exec("UPDATE t1 SET " + tt.setVal)
 			if err != nil {
 				t.Fatalf("failed to update: %v", err)
@@ -1563,7 +1535,6 @@ func TestStorageClassDetermination(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			_, err := db.Exec("DELETE FROM t1")
 			if err != nil {
 				t.Fatalf("failed to delete: %v", err)

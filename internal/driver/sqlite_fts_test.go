@@ -521,7 +521,6 @@ func TestSQLiteFTS(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			// Clean up
 			db.Exec("DROP TABLE IF EXISTS t1")
 			db.Exec("DROP TABLE IF EXISTS t0")
@@ -667,7 +666,6 @@ func TestFTSSpecialFunctions(t *testing.T) {
 
 	// Test offsets function
 	t.Run("offsets function", func(t *testing.T) {
-		t.Parallel()
 		var offsets string
 		err := db.QueryRow("SELECT offsets(articles) FROM articles WHERE articles MATCH 'programming'").Scan(&offsets)
 		if err != nil {
@@ -680,7 +678,6 @@ func TestFTSSpecialFunctions(t *testing.T) {
 
 	// Test snippet function
 	t.Run("snippet function", func(t *testing.T) {
-		t.Parallel()
 		var snippet string
 		err := db.QueryRow("SELECT snippet(articles) FROM articles WHERE articles MATCH 'language'").Scan(&snippet)
 		if err != nil {
@@ -693,7 +690,6 @@ func TestFTSSpecialFunctions(t *testing.T) {
 
 	// Test matchinfo function
 	t.Run("matchinfo function", func(t *testing.T) {
-		t.Parallel()
 		var matchinfo []byte
 		err := db.QueryRow("SELECT matchinfo(articles) FROM articles WHERE articles MATCH 'Go'").Scan(&matchinfo)
 		if err != nil {

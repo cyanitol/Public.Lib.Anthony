@@ -55,7 +55,6 @@ func TestBlobHandling(t *testing.T) {
 
 	// Test INSERT with BLOB
 	t.Run("INSERT_BLOB", func(t *testing.T) {
-		t.Parallel()
 		vm := vdbe.New()
 		vm.Ctx = ctx
 		vm.AllocMemory(10)
@@ -94,7 +93,6 @@ func TestBlobHandling(t *testing.T) {
 
 	// Test SELECT to retrieve BLOB
 	t.Run("SELECT_BLOB", func(t *testing.T) {
-		t.Parallel()
 		vm := vdbe.New()
 		vm.Ctx = ctx
 		vm.AllocMemory(10)
@@ -179,7 +177,6 @@ func TestBlobBinding(t *testing.T) {
 
 	for i, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			// Create a fresh btree for each test case
 			bt := btree.NewBtree(4096)
 			sch := schema.NewSchema()

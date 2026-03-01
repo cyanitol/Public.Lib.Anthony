@@ -515,7 +515,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			// Clean up from any previous test
 			if len(tt.setup) > 0 {
 				// Drop any existing tables

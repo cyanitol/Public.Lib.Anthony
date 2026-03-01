@@ -60,7 +60,6 @@ func TestDetermineAffinity(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.typeName, func(t *testing.T) {
-			t.Parallel()
 			got := DetermineAffinity(tt.typeName)
 			if got != tt.want {
 				t.Errorf("DetermineAffinity(%q) = %v, want %v",
@@ -87,7 +86,6 @@ func TestIsNumericAffinity(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(AffinityName(tt.affinity), func(t *testing.T) {
-			t.Parallel()
 			got := IsNumericAffinity(tt.affinity)
 			if got != tt.want {
 				t.Errorf("IsNumericAffinity(%v) = %v, want %v",
@@ -115,7 +113,6 @@ func TestAffinityName(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.want, func(t *testing.T) {
-			t.Parallel()
 			got := AffinityName(tt.affinity)
 			if got != tt.want {
 				t.Errorf("AffinityName(%d) = %q, want %q",

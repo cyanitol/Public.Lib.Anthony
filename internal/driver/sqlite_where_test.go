@@ -80,7 +80,6 @@ func TestSQLiteWhereSimpleComparisons(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -142,7 +141,6 @@ func TestSQLiteWhereANDOR(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -199,7 +197,6 @@ func TestSQLiteWhereIN(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -247,7 +244,6 @@ func TestSQLiteWhereINSubquery(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -299,7 +295,6 @@ func TestSQLiteWhereBETWEEN(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -356,7 +351,6 @@ func TestSQLiteWhereLIKE(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -408,7 +402,6 @@ func TestSQLiteWhereNULL(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -457,7 +450,6 @@ func TestSQLiteWhereEXISTS(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -515,7 +507,6 @@ func TestSQLiteWhereComplexNested(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -586,7 +577,6 @@ func TestSQLiteWhereJoin(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -636,7 +626,6 @@ func TestSQLiteWhereConstant(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -683,7 +672,6 @@ func TestSQLiteWhereIndexOptimization(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -735,7 +723,6 @@ func TestSQLiteWhereExpressions(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})
@@ -775,7 +762,6 @@ func TestSQLiteWhereCaseInsensitive(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := queryRows(t, db, tt.query)
 			compareRows(t, got, tt.want)
 		})

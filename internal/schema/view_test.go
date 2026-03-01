@@ -145,7 +145,6 @@ func TestGetView(t *testing.T) {
 	for _, name := range tests {
 		name := name
 		t.Run(name, func(t *testing.T) {
-				t.Parallel()
 			view, ok := s.GetView(name)
 			if !ok {
 				t.Errorf("GetView(%q) not found", name)
@@ -292,7 +291,6 @@ func TestGenerateCreateViewSQL(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
 			got := generateCreateViewSQL(tt.stmt)
 			// Just check that the SQL contains expected keywords
 			// (full SQL comparison would be too fragile)

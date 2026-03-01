@@ -456,7 +456,6 @@ func TestSQLiteIntegrityCheck(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			// Clean up
 			db.Exec("DROP TABLE IF EXISTS t1")
 			db.Exec("DROP TABLE IF EXISTS t2")
@@ -541,7 +540,6 @@ func TestIntegrityCheckEdgeCases(t *testing.T) {
 
 	// Test 1: Integrity check on fresh database
 	t.Run("fresh database", func(t *testing.T) {
-		t.Parallel()
 		var result string
 		err := db.QueryRow("PRAGMA integrity_check").Scan(&result)
 		if err != nil {
@@ -554,7 +552,6 @@ func TestIntegrityCheckEdgeCases(t *testing.T) {
 
 	// Test 2: Integrity check with limit 0 (unlimited)
 	t.Run("unlimited check", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec("CREATE TABLE t1(a INT); INSERT INTO t1 VALUES(1)")
 		if err != nil {
 			t.Fatalf("setup failed: %v", err)
@@ -573,7 +570,6 @@ func TestIntegrityCheckEdgeCases(t *testing.T) {
 
 	// Test 3: Quick check vs integrity check comparison
 	t.Run("quick vs integrity", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec("CREATE TABLE t2(x INT); INSERT INTO t2 VALUES(42)")
 		if err != nil {
 			t.Fatalf("setup failed: %v", err)
@@ -598,7 +594,6 @@ func TestIntegrityCheckEdgeCases(t *testing.T) {
 
 	// Test 4: Check with very long table name
 	t.Run("long table name", func(t *testing.T) {
-		t.Parallel()
 		longName := "table_" + strings.Repeat("x", 100)
 		_, err := db.Exec("CREATE TABLE " + longName + "(a INT)")
 		if err != nil {
@@ -618,7 +613,6 @@ func TestIntegrityCheckEdgeCases(t *testing.T) {
 
 	// Test 5: Multiple sequential checks
 	t.Run("sequential checks", func(t *testing.T) {
-		t.Parallel()
 		_, err := db.Exec("CREATE TABLE t3(a INT); INSERT INTO t3 VALUES(1)")
 		if err != nil {
 			t.Fatalf("setup failed: %v", err)
@@ -675,7 +669,6 @@ func TestPragmaIntegrityCheckOptions(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			rows, err := db.Query(tt.pragma)
 			if err != nil {
 				t.Fatalf("query failed: %v", err)

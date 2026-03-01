@@ -949,7 +949,6 @@ func TestSQLiteCollation(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			dbPath := filepath.Join(t.TempDir(), "test.db")
 			db, err := sql.Open("sqlite_internal", dbPath)
 			if err != nil {

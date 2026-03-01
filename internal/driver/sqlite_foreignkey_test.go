@@ -1144,7 +1144,6 @@ func TestSQLiteForeignKey(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			db := setupMemoryDB(t)
 			defer db.Close()
 
@@ -1253,7 +1252,6 @@ func TestSQLiteForeignKey(t *testing.T) {
 // TestForeignKey_ComplexScenarios tests complex foreign key scenarios that don't fit table-driven tests
 func TestForeignKey_ComplexScenarios(t *testing.T) {
 	t.Run("circular-deferred", func(t *testing.T) {
-		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -1290,7 +1288,6 @@ func TestForeignKey_ComplexScenarios(t *testing.T) {
 	})
 
 	t.Run("cascade-cycle", func(t *testing.T) {
-		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -1312,7 +1309,6 @@ func TestForeignKey_ComplexScenarios(t *testing.T) {
 	})
 
 	t.Run("fk-check-with-orphans", func(t *testing.T) {
-		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -1346,7 +1342,6 @@ func TestForeignKey_ComplexScenarios(t *testing.T) {
 	})
 
 	t.Run("update-cascade-chain", func(t *testing.T) {
-		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -1377,7 +1372,6 @@ func TestForeignKey_ComplexScenarios(t *testing.T) {
 	})
 
 	t.Run("composite-fk-partial-match", func(t *testing.T) {
-		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -1406,7 +1400,6 @@ func TestForeignKey_ComplexScenarios(t *testing.T) {
 // TestForeignKey_MismatchErrors tests foreign key mismatch errors
 func TestForeignKey_MismatchErrors(t *testing.T) {
 	t.Run("no-unique-parent", func(t *testing.T) {
-		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -1426,7 +1419,6 @@ func TestForeignKey_MismatchErrors(t *testing.T) {
 	})
 
 	t.Run("column-count-mismatch", func(t *testing.T) {
-		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -1441,7 +1433,6 @@ func TestForeignKey_MismatchErrors(t *testing.T) {
 	})
 
 	t.Run("missing-parent-table", func(t *testing.T) {
-		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -1459,7 +1450,6 @@ func TestForeignKey_MismatchErrors(t *testing.T) {
 // TestForeignKey_EdgeCases tests edge cases and corner scenarios
 func TestForeignKey_EdgeCases(t *testing.T) {
 	t.Run("fk-to-view-fails", func(t *testing.T) {
-		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -1476,7 +1466,6 @@ func TestForeignKey_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("null-not-equal-null", func(t *testing.T) {
-		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -1493,7 +1482,6 @@ func TestForeignKey_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("delete-all-with-self-reference", func(t *testing.T) {
-		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 
@@ -1513,7 +1501,6 @@ func TestForeignKey_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("replace-with-cascade", func(t *testing.T) {
-		t.Parallel()
 		db := setupMemoryDB(t)
 		defer db.Close()
 

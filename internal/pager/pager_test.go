@@ -156,7 +156,6 @@ func TestOpenWithPageSize(t *testing.T) {
 
 	for _, pageSize := range pageSizes {
 		t.Run("pagesize_"+string(rune(pageSize)), func(t *testing.T) {
-				t.Parallel()
 			filename := tempFile(t)
 
 			pager, err := OpenWithPageSize(filename, false, pageSize)
@@ -180,7 +179,6 @@ func TestOpenWithPageSize_InvalidSize(t *testing.T) {
 
 	for _, size := range invalidSizes {
 		t.Run("invalid_size_"+string(rune(size)), func(t *testing.T) {
-				t.Parallel()
 			_, err := OpenWithPageSize(filename, false, size)
 			if err == nil {
 				t.Error("OpenWithPageSize() with invalid size should fail")

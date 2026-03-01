@@ -49,7 +49,6 @@ func TestIsOverfull(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			page := createBalanceTestPage(tt.pageSize, PageTypeLeafTable, tt.numCells, tt.cellSizes)
 			got := isOverfull(page)
 
@@ -103,7 +102,6 @@ func TestIsUnderfullBalance(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			// Fill in default cell sizes if needed
 			cellSizes := tt.cellSizes
 			if tt.name == "well-filled page" {
@@ -278,7 +276,6 @@ func TestBalance(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			bt := NewBtree(4096)
 			cursor, err := tt.setup(bt)
 			if err != nil {
@@ -414,7 +411,6 @@ func TestBalanceInfoString(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			got := tt.info.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)

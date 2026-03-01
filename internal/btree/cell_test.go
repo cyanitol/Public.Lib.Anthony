@@ -95,7 +95,6 @@ func TestParseIndexInteriorCell(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			// Encode the cell
 			cell := EncodeIndexInteriorCell(tt.childPage, tt.payload)
 
@@ -180,7 +179,6 @@ func TestCalculateLocalPayloadValues(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			local := CalculateLocalPayload(tt.payloadSize, tt.usableSize, tt.isLeaf)
 
 			// Local should never exceed usable size

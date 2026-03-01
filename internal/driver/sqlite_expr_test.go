@@ -242,7 +242,6 @@ func TestSQLiteExpressions(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			// Setup: update the table with test values
 			if tt.setup != "" {
 				_, err := db.Exec("UPDATE test1 SET " + tt.setup)

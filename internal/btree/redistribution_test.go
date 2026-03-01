@@ -93,7 +93,6 @@ func TestRedistribution_MultipleSizes(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
 			bt := NewBtree(tc.pageSize)
 
 			// Create left page

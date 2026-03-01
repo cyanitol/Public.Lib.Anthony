@@ -248,7 +248,6 @@ func TestGetTrigger(t *testing.T) {
 	for _, name := range tests {
 		name := name
 		t.Run(name, func(t *testing.T) {
-				t.Parallel()
 			trigger, ok := s.GetTrigger(name)
 			if !ok {
 				t.Errorf("GetTrigger(%q) not found", name)
@@ -641,7 +640,6 @@ func TestEvaluateLiteralAsBool(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
 			result, err := evaluateLiteralAsBool(tt.literal)
 			if err != nil {
 				t.Fatalf("evaluateLiteralAsBool() error = %v", err)
@@ -676,7 +674,6 @@ func TestCompareValues(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
 			result, err := compareValues(tt.left, tt.right, tt.op)
 			if err != nil {
 				t.Fatalf("compareValues() error = %v", err)
@@ -710,7 +707,6 @@ func TestToBool(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
 			result := toBool(tt.value)
 			if result != tt.expected {
 				t.Errorf("toBool(%v) = %v, want %v", tt.value, result, tt.expected)

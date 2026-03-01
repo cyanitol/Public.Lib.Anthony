@@ -290,7 +290,6 @@ func TestRedistributeSiblings_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			// Create left page
 			leftCells := make([]struct {
 				rowid   int64
@@ -417,7 +416,6 @@ func TestGetChildPageAt(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			page, err := cursor.getChildPageAt(pageData, header, tt.index)
 
 			if tt.wantError {

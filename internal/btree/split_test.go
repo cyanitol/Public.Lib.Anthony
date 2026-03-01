@@ -1160,7 +1160,6 @@ func TestFindInsertionPoint(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(fmt.Sprintf("key=%d", tt.key), func(t *testing.T) {
-		t.Parallel()
 			idx := cursor.findInsertionPoint(interiorPage, tt.key)
 			if idx != tt.expected {
 				t.Errorf("findInsertionPoint(%d) = %d, want %d", tt.key, idx, tt.expected)

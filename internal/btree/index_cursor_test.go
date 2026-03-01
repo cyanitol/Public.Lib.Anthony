@@ -79,7 +79,6 @@ func TestEncodeDecodeIndexPayload(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			payload := encodeIndexPayload(tt.key, tt.rowid)
 
 			cursor := &IndexCursor{}

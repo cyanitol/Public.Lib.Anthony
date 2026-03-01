@@ -1,7 +1,6 @@
 package pager
 
 import (
-	"os"
 	"testing"
 )
 

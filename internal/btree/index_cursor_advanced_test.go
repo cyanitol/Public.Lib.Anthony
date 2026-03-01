@@ -354,7 +354,6 @@ func TestIndexCursor_ParseIndexPayloadErrors(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			_, _, err := cursor.parseIndexPayload(tt.payload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseIndexPayload() error = %v, wantErr %v", err, tt.wantErr)
@@ -413,7 +412,6 @@ func TestIndexCursor_BinarySearchEdges(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
 			idx, exact := cursor.binarySearchKey(pageData, header, tt.searchKey)
 			if exact != tt.wantExact {
 				t.Errorf("binarySearchKey(%q) exact = %v, want %v (idx=%d)",
