@@ -142,9 +142,9 @@ func TestSetCookieOpcode(t *testing.T) {
 		t.Parallel()
 		v := NewTestVDBE(10)
 
-		// Set pager to something that doesn't implement CookiePagerInterface
+		// Set pager to nil (doesn't implement CookiePagerInterface)
 		v.Ctx = &VDBEContext{
-			Pager: "not a pager",
+			Pager: nil,
 		}
 
 		instr := &Instruction{

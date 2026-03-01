@@ -86,20 +86,29 @@ type CookiePager interface {
 // without importing the schema package directly.
 type SchemaAccess interface {
 	// GetTable retrieves table metadata by name
-	GetTable(name string) (interface{}, error)
+	// Returns (table, true) if found, (nil, false) otherwise
+	GetTable(name string) (interface{}, bool)
 
 	// GetIndex retrieves index metadata by name
-	GetIndex(name string) (interface{}, error)
+	// Returns (index, true) if found, (nil, false) otherwise
+	GetIndex(name string) (interface{}, bool)
 
-	// AddTable adds a new table to the schema
-	AddTable(table interface{}) error
+	// GetTableByRootPage retrieves table metadata by root page number
+	// Returns (table, true) if found, (nil, false) otherwise
+	GetTableByRootPage(rootPage uint32) (interface{}, bool)
+}
 
-	// AddIndex adds a new index to the schema
-	AddIndex(index interface{}) error
+// CollationRegistry defines the methods needed for managing collation sequences.
+// This interface allows components to work with collations without importing
+// the collation package directly, avoiding import cycles.
+type CollationRegistry interface {
+	// Register registers a new collation sequence
+	Register(name string, fn interface{}) error
 
-	// RemoveTable removes a table from the schema
-	RemoveTable(name string) error
+	// Get retrieves a collation by name
+	// Returns (collation, true) if found, (nil, false) otherwise
+	Get(name string) (interface{}, bool)
 
-	// RemoveIndex removes an index from the schema
-	RemoveIndex(name string) error
+	// Unregister removes a collation sequence
+	Unregister(name string) error
 }

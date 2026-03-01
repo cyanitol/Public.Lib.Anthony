@@ -3,6 +3,8 @@ package vdbe
 import (
 	"fmt"
 	"time"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/types"
 )
 
 // VdbeState represents the execution state of the VDBE.
@@ -86,12 +88,14 @@ type Cursor struct {
 	Table interface{} // *schema.Table (stored as interface to avoid import cycle)
 }
 
-// VDBEContext holds runtime context for VDBE execution
+// VDBEContext holds runtime context for VDBE execution.
+// Uses typed interfaces from internal/types where possible to improve type safety.
+// Some fields remain as interface{} due to Go's type system limitations with covariant return types.
 type VDBEContext struct {
-	Btree             interface{} // *btree.Btree (stored as interface to avoid import cycle)
-	Pager             interface{} // *pager.Pager (stored as interface to avoid import cycle)
-	Schema            interface{} // Schema metadata (for future use)
-	CollationRegistry interface{} // *collation.CollationRegistry (stored as interface to avoid import cycle)
+	Btree             types.BtreeAccess  // B-tree storage layer access
+	Pager             interface{}        // *pager.Pager (kept as interface{} - InTransaction not in PagerWriter interface)
+	Schema            interface{}        // *schema.Schema (kept as interface{} due to covariant return type issues)
+	CollationRegistry interface{}        // *collation.CollationRegistry (kept as interface{} due to covariant return types)
 }
 
 // VDBE represents the Virtual Database Engine - a bytecode virtual machine.

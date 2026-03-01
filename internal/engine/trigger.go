@@ -7,6 +7,7 @@ import (
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/types"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
 )
 
@@ -141,8 +142,17 @@ func (te *TriggerExecutor) executeTriggerBody(trigger *schema.Trigger) error {
 func (te *TriggerExecutor) executeStatement(stmt parser.Statement, trigger *schema.Trigger) error {
 	// Create a VDBE for this statement
 	vm := vdbe.New()
+
+	// Type assert Btree to the typed interface
+	var btreeAccess types.BtreeAccess
+	if te.ctx.Btree != nil {
+		if bt, ok := te.ctx.Btree.(types.BtreeAccess); ok {
+			btreeAccess = bt
+		}
+	}
+
 	vm.Ctx = &vdbe.VDBEContext{
-		Btree:  te.ctx.Btree,
+		Btree:  btreeAccess,
 		Pager:  te.ctx.Pager,
 		Schema: te.ctx.Schema,
 	}
