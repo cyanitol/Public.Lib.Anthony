@@ -745,6 +745,7 @@ For detailed audit findings and implementation plans, see [SECURITY_AUDIT_PLAN.m
 - [SECURITY_AUDIT_PLAN.md](SECURITY_AUDIT_PLAN.md) - Security audit scope and methodology
 - [SECURITY_AUDIT_IMPLEMENTATION.md](SECURITY_AUDIT_IMPLEMENTATION.md) - Detailed implementation plan
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture overview
+- [SQLite Security Reference (local)](sqlite/SECURITY.md)
 
 ## License
 

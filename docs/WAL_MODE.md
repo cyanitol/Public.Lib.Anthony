@@ -352,6 +352,7 @@ func main() {
 
 ## References
 
+- [SQLite WAL Specification (local)](sqlite/WAL_SPEC.md) — complete official WAL reference
 - [SQLite Write-Ahead Logging](https://www.sqlite.org/wal.html)
 - [SQLite WAL File Format](https://www.sqlite.org/walformat.html)
 - [PRAGMA journal_mode](https://www.sqlite.org/pragma.html#pragma_journal_mode)

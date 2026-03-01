@@ -274,23 +274,38 @@ Comprehensive documentation on SQLite fundamentals as implemented in Anthony:
 
 ## SQLite Reference Documentation
 
-Official SQLite 3.51.2 documentation, converted to Markdown for offline reference.
+Complete SQLite 3.51.2 reference, converted to Markdown from official HTML docs.
+See [sqlite/README.md](sqlite/README.md) for the full index (305 files).
 
-See [docs/sqlite/README.md](sqlite/README.md) for the full index.
+### SQL Language
 
-### Key References
+[SELECT](sqlite/SELECT.md) · [INSERT](sqlite/INSERT.md) · [UPDATE](sqlite/UPDATE.md) ·
+[DELETE](sqlite/DELETE.md) · [WITH](sqlite/WITH_CTE.md) · [UPSERT](sqlite/UPSERT.md) ·
+[RETURNING](sqlite/RETURNING.md) · [Window Functions](sqlite/WINDOW_FUNCTIONS.md) ·
+[Savepoints](sqlite/SAVEPOINTS.md) · [Transactions](sqlite/TRANSACTIONS.md)
 
-- [SQL Language Overview](sqlite/SQL_LANGUAGE_OVERVIEW.md)
-- [SQL Syntax Diagrams](sqlite/syntax/)
-- [Architecture](sqlite/ARCHITECTURE.md)
-- [Datatypes](sqlite/DATATYPES.md)
-- [Full-Text Search (FTS5)](sqlite/FTS5.md)
-- [JSON Functions](sqlite/JSON1.md)
-- [WAL Mode](sqlite/WAL_SPEC.md)
-- [PRAGMA Reference](sqlite/PRAGMA_REFERENCE.md)
-- [Virtual Tables](sqlite/VIRTUAL_TABLES_SPEC.md)
-- [C API Reference](sqlite/c-api/)
-- [Session Extension](sqlite/session/)
+### Reference
+
+[PRAGMA](sqlite/PRAGMA_REFERENCE.md) · [Functions](sqlite/CORE_FUNCTIONS.md) ·
+[Aggregate](sqlite/AGGREGATE_FUNCTIONS.md) · [Math](sqlite/LANG_MATHFUNC.md) ·
+[Datatypes](sqlite/DATATYPES.md) · [Result Codes](sqlite/RESULT_CODES.md) ·
+[Limits](sqlite/LIMITS.md) · [Quirks](sqlite/QUIRKS.md) · [NULL Handling](sqlite/NULLS.md)
+
+### Extensions
+
+[FTS5](sqlite/FTS5.md) · [FTS3](sqlite/FTS3.md) · [JSON1](sqlite/JSON1.md) ·
+[RTree](sqlite/RTREE.md) · [GeoPoly](sqlite/GEOPOLY.md)
+
+### Internals
+
+[Architecture](sqlite/ARCHITECTURE.md) · [File Format](sqlite/FILE_FORMAT_SPEC.md) ·
+[WAL](sqlite/WAL_SPEC.md) · [VDBE Opcodes](sqlite/VDBE_OPCODES.md) ·
+[Locking](sqlite/LOCKING.md) · [Isolation](sqlite/ISOLATION.md)
+
+### C API & Syntax
+
+[C API Reference](sqlite/c-api/) · [Session Extension](sqlite/session/) ·
+[SQL Syntax Diagrams](sqlite/syntax/)
 
 ## License
 

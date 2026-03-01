@@ -723,9 +723,10 @@ if err != nil {
 
 ## References
 
-- [SQLite Architecture](https://www.sqlite.org/arch.html)
-- [VDBE Opcodes](https://www.sqlite.org/opcode.html)
-- [SQLite File Format](https://www.sqlite.org/fileformat.html)
+- [SQLite Architecture (local)](sqlite/ARCHITECTURE.md) ([sqlite.org](https://www.sqlite.org/arch.html))
+- [VDBE Opcodes (local)](sqlite/VDBE_OPCODES.md) ([sqlite.org](https://www.sqlite.org/opcode.html))
+- [SQLite File Format (local)](sqlite/FILE_FORMAT_SPEC.md) ([sqlite.org](https://www.sqlite.org/fileformat.html))
+- [How It Works (local)](sqlite/HOW_IT_WORKS.md)
 - [B-Trees](https://en.wikipedia.org/wiki/B-tree)
 - [Database Internals (Book by Alex Petrov)](http://www.databass.dev/)
 - [Write-Ahead Logging](https://www.sqlite.org/wal.html)

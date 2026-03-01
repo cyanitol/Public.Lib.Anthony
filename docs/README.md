@@ -243,6 +243,19 @@ The authors disclaim copyright to this source code. In place of a legal notice, 
 - May you find forgiveness for yourself and forgive others.
 - May you share freely, never taking more than you give.
 
+## Local SQLite Reference Documentation
+
+Complete SQLite 3.51.2 documentation is available offline in [sqlite/README.md](sqlite/README.md).
+Over 200 reference files covering SQL language, functions, pragmas, extensions, and internals.
+
+Quick links:
+- [SQL Language Reference](sqlite/SQL_LANGUAGE_OVERVIEW.md)
+- [PRAGMA Reference](sqlite/PRAGMA_REFERENCE.md)
+- [Core Functions](sqlite/CORE_FUNCTIONS.md)
+- [WAL Specification](sqlite/WAL_SPEC.md)
+- [File Format](sqlite/FILE_FORMAT_SPEC.md)
+- [Full index →](sqlite/README.md)
+
 ## External Resources
 
 - [SQLite Documentation](https://www.sqlite.org/docs.html)

@@ -243,3 +243,7 @@ nix-shell --run "go run ./examples/json_demo.go"
 - JSON numbers are automatically converted to SQLite INTEGER or REAL types
 - Complex JSON structures (arrays, objects) are returned as JSON strings when extracted
 - The implementation follows SQLite's JSON1 extension behavior
+
+## See Also
+
+- [SQLite JSON1 Extension Reference (local)](sqlite/JSON1.md) — complete official JSON1 docs

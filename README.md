@@ -1,7 +1,7 @@
 # Anthony - Pure Go SQLite Implementation
 
 [![Go Version](https://img.shields.io/badge/go-1.26+-blue.svg)](https://golang.org/dl/)
-[![License](https://img.shields.io/badge/license-Public%20Domain-green.svg)](https://github.com/JuniperBible/Public.Lib.Anthony/blob/main/README.md#license)
+[![License](https://img.shields.io/badge/license-Tri--License-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](#testing)
 
 A pure Go SQLite implementation for the JuniperBible project. This library provides a complete SQLite database engine written entirely in Go with no CGO dependencies, making it easy to cross-compile and deploy.

@@ -251,3 +251,7 @@ To complete full expression index support:
 ## Conclusion
 
 This implementation provides a solid foundation for expression-based indexes in the pure Go SQLite implementation. The parser correctly handles all common expression types, the schema properly stores expression metadata, and comprehensive tests verify the functionality. While full runtime support requires additional VDBE integration, the SQL syntax is now fully supported and the infrastructure is in place for future enhancements.
+
+## See Also
+
+- [SQLite Expression Indexes Reference (local)](sqlite/EXPRESSION_INDEXES.md)

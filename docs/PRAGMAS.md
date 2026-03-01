@@ -975,6 +975,7 @@ PRAGMA writable_schema = ON;   -- Can corrupt database
 - **Package:** `internal/sql` - PRAGMA execution
 - **Package:** `internal/pager` - Page management
 - **SQLite Docs:** [PRAGMA Statements](https://www.sqlite.org/pragma.html)
+- **Local SQLite Ref:** [PRAGMA Reference (local)](sqlite/PRAGMA_REFERENCE.md) — complete official PRAGMA syntax
 
 ## See Also
 
