@@ -1,453 +1,360 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package functions
+package btree
 
 import (
-	"testing"
+	"encoding/binary"
+	"fmt"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
 )
 
-// TestJSONFuncMarshalError tests json() when marshal fails (edge case)
-func TestJSONFuncMarshalError(t *testing.T) {
-	// Valid JSON that will unmarshal but might have edge cases
-	result, err := jsonFunc([]Value{NewTextValue(`{"key":"value"}`)})
+// Overflow page format (per SQLite specification):
+// - First 4 bytes: next overflow page number (0 if last page)
+// - Remaining bytes: payload data
+
+const (
+	// OverflowHeaderSize is the size of the overflow page header (next page pointer)
+	OverflowHeaderSize = 4
+)
+
+// WriteOverflow writes large payload to overflow pages
+// Returns the page number of the first overflow page
+func (c *BtCursor) WriteOverflow(payload []byte, localSize uint16, usableSize uint32) (uint32, error) {
+	if c.Btree == nil {
+		return 0, fmt.Errorf("cursor has no btree")
+	}
+
+	// Calculate how much payload goes to overflow
+	overflowSize := len(payload) - int(localSize)
+	if overflowSize <= 0 {
+		return 0, nil // No overflow needed
+	}
+
+	overflowData := payload[localSize:]
+	return writeOverflowChain(c.Btree, overflowData, usableSize)
+}
+
+// writeOverflowChain writes a chain of overflow pages for the given data
+// Returns the page number of the first overflow page
+func writeOverflowChain(bt *Btree, data []byte, usableSize uint32) (uint32, error) {
+	if len(data) == 0 {
+		return 0, nil
+	}
+
+	overflowPageCapacity := int(usableSize) - OverflowHeaderSize
+	firstPageNum, err := bt.AllocatePage()
 	if err != nil {
-		t.Errorf("jsonFunc() error = %v", err)
+		return 0, fmt.Errorf("failed to allocate first overflow page: %w", err)
 	}
-	if result.IsNull() {
-		t.Error("Expected non-NULL result for valid JSON")
-	}
-}
 
-// TestJSONArrayFuncReturnError tests json_array() marshal failure path
-func TestJSONArrayFuncReturnError(t *testing.T) {
-	// Test with values that should marshal successfully
-	result, err := jsonArrayFunc([]Value{
-		NewTextValue("test"),
-		NewIntValue(123),
-	})
+	err = writeOverflowPages(bt, data, firstPageNum, overflowPageCapacity)
 	if err != nil {
-		t.Errorf("jsonArrayFunc() error = %v", err)
+		return 0, err
 	}
-	// Should succeed
-	if result.IsNull() {
-		t.Error("Expected non-NULL result")
-	}
+
+	return firstPageNum, nil
 }
 
-// TestJSONExtractFuncUnmarshalError tests json_extract() with invalid JSON
-func TestJSONExtractFuncUnmarshalError(t *testing.T) {
-	result, err := jsonExtractFunc([]Value{
-		NewTextValue("invalid json"),
-		NewTextValue("$.path"),
-	})
-	if err != nil {
-		t.Errorf("jsonExtractFunc() error = %v", err)
-	}
-	if !result.IsNull() {
-		t.Error("Expected NULL for invalid JSON")
-	}
-}
+// writeOverflowPages writes data across a chain of overflow pages
+func writeOverflowPages(bt *Btree, data []byte, firstPageNum uint32, pageCapacity int) error {
+	prevPageNum := firstPageNum
+	offset := 0
 
-// TestJSONInsertFuncMarshalError tests json_insert() marshal failure path
-func TestJSONInsertFuncMarshalError(t *testing.T) {
-	// Valid case that should succeed
-	result, err := jsonInsertFunc([]Value{
-		NewTextValue(`{"a":1}`),
-		NewTextValue("$.b"),
-		NewIntValue(2),
-	})
-	if err != nil {
-		t.Errorf("jsonInsertFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("Expected non-NULL result")
-	}
-}
-
-// TestJSONObjectFuncMarshalError tests json_object() marshal failure path
-func TestJSONObjectFuncMarshalError(t *testing.T) {
-	// Valid case that should succeed
-	result, err := jsonObjectFunc([]Value{
-		NewTextValue("key"),
-		NewIntValue(123),
-	})
-	if err != nil {
-		t.Errorf("jsonObjectFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("Expected non-NULL result")
-	}
-}
-
-// TestJSONPatchFuncMarshalError tests json_patch() marshal failure path
-func TestJSONPatchFuncMarshalError(t *testing.T) {
-	// Valid case that should succeed
-	result, err := jsonPatchFunc([]Value{
-		NewTextValue(`{"a":1}`),
-		NewTextValue(`{"b":2}`),
-	})
-	if err != nil {
-		t.Errorf("jsonPatchFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("Expected non-NULL result")
-	}
-}
-
-// TestJSONRemoveFuncMarshalError tests json_remove() marshal failure path
-func TestJSONRemoveFuncMarshalError(t *testing.T) {
-	// Valid case that should succeed
-	result, err := jsonRemoveFunc([]Value{
-		NewTextValue(`{"a":1,"b":2}`),
-		NewTextValue("$.a"),
-	})
-	if err != nil {
-		t.Errorf("jsonRemoveFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("Expected non-NULL result")
-	}
-}
-
-// TestJSONReplaceFuncMarshalError tests json_replace() marshal failure path
-func TestJSONReplaceFuncMarshalError(t *testing.T) {
-	// Valid case that should succeed
-	result, err := jsonReplaceFunc([]Value{
-		NewTextValue(`{"a":1}`),
-		NewTextValue("$.a"),
-		NewIntValue(2),
-	})
-	if err != nil {
-		t.Errorf("jsonReplaceFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("Expected non-NULL result")
-	}
-}
-
-// TestJSONSetFuncMarshalError tests json_set() marshal failure path
-func TestJSONSetFuncMarshalError(t *testing.T) {
-	// Valid case that should succeed
-	result, err := jsonSetFunc([]Value{
-		NewTextValue(`{"a":1}`),
-		NewTextValue("$.b"),
-		NewIntValue(2),
-	})
-	if err != nil {
-		t.Errorf("jsonSetFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("Expected non-NULL result")
-	}
-}
-
-// TestJSONQuoteFuncMarshalBlob tests json_quote() with blob that succeeds
-func TestJSONQuoteFuncMarshalBlob(t *testing.T) {
-	result, err := jsonQuoteFunc([]Value{NewTextValue("test string")})
-	if err != nil {
-		t.Errorf("jsonQuoteFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Error("Expected non-NULL result")
-	}
-}
-
-// TestValueToJSONBlob tests valueToJSON with blob
-func TestValueToJSONBlob(t *testing.T) {
-	blob := []byte{1, 2, 3}
-	result := valueToJSON(NewBlobValue(blob))
-
-	// Should return the blob
-	b, ok := result.([]byte)
-	if !ok {
-		t.Error("Expected blob result")
-	}
-	if len(b) != 3 {
-		t.Errorf("Expected length 3, got %d", len(b))
-	}
-}
-
-// TestJSONToValueArray tests jsonToValue with array
-func TestJSONToValueArray(t *testing.T) {
-	arr := []interface{}{1, 2, 3}
-	result := jsonToValue(arr)
-
-	// Should return JSON string representation
-	if result.Type() != TypeText {
-		t.Error("Expected text type for array")
-	}
-}
-
-// TestJSONToValueObject tests jsonToValue with object
-func TestJSONToValueObject(t *testing.T) {
-	obj := map[string]interface{}{"key": "value"}
-	result := jsonToValue(obj)
-
-	// Should return JSON string representation
-	if result.Type() != TypeText {
-		t.Error("Expected text type for object")
-	}
-}
-
-// TestJSONToValueUnknown tests jsonToValue with unknown type
-func TestJSONToValueUnknown(t *testing.T) {
-	// Use a type that's not handled
-	result := jsonToValue(struct{}{})
-
-	// Should return NULL for unknown type
-	if !result.IsNull() {
-		t.Error("Expected NULL for unknown type")
-	}
-}
-
-// TestSetPathAfterRemovingDollar tests setPath after $ removal
-func TestSetPathAfterRemovingDollar(t *testing.T) {
-	data := map[string]interface{}{}
-	result := setPath(data, "$.key", "value")
-
-	obj, ok := result.(map[string]interface{})
-	if !ok {
-		t.Error("Expected object result")
-	}
-	if obj["key"] != "value" {
-		t.Error("Expected key to be set")
-	}
-}
-
-// TestSetPathRecursiveArrayCreation tests setPathRecursive creating array
-func TestSetPathRecursiveArrayCreation(t *testing.T) {
-	// Start with non-array data
-	data := "string"
-	parts := []pathPart{{index: 0, isIndex: true}}
-
-	result := setPathRecursive(data, parts, "value")
-
-	arr, ok := result.([]interface{})
-	if !ok {
-		t.Error("Expected array result")
-	}
-	if len(arr) != 1 {
-		t.Errorf("Expected length 1, got %d", len(arr))
-	}
-}
-
-// TestSetPathRecursiveObjectCreation tests setPathRecursive creating object
-func TestSetPathRecursiveObjectCreation(t *testing.T) {
-	// Start with non-object data
-	data := 123
-	parts := []pathPart{{key: "key", isIndex: false}}
-
-	result := setPathRecursive(data, parts, "value")
-
-	obj, ok := result.(map[string]interface{})
-	if !ok {
-		t.Error("Expected object result")
-	}
-	if obj["key"] != "value" {
-		t.Error("Expected key to be set")
-	}
-}
-
-// TestRemovePathAfterRemovingDollar tests removePath after $ removal
-func TestRemovePathAfterRemovingDollar(t *testing.T) {
-	data := map[string]interface{}{"key": "value"}
-	result := removePath(data, "$.key")
-
-	obj, ok := result.(map[string]interface{})
-	if !ok {
-		t.Error("Expected object result")
-	}
-	if _, exists := obj["key"]; exists {
-		t.Error("Expected key to be removed")
-	}
-}
-
-// TestRemoveFromArrayWithRemaining tests removeFromArray with remaining parts
-func TestRemoveFromArrayWithRemaining(t *testing.T) {
-	data := []interface{}{
-		map[string]interface{}{"a": 1},
-		map[string]interface{}{"a": 2},
-	}
-	part := pathPart{index: 0, isIndex: true}
-	remaining := []pathPart{{key: "a", isIndex: false}}
-
-	result := removeFromArray(data, part, remaining)
-
-	arr, ok := result.([]interface{})
-	if !ok {
-		t.Error("Expected array result")
-	}
-	if len(arr) != 2 {
-		t.Errorf("Expected length 2, got %d", len(arr))
-	}
-}
-
-// TestApplyJSONPatchDeleteKey tests applyJSONPatch with null value (delete)
-func TestApplyJSONPatchDeleteKey(t *testing.T) {
-	target := map[string]interface{}{"a": 1, "b": 2}
-	patch := map[string]interface{}{"a": nil}
-
-	result := applyJSONPatch(target, patch)
-
-	obj, ok := result.(map[string]interface{})
-	if !ok {
-		t.Error("Expected object result")
-	}
-	if _, exists := obj["a"]; exists {
-		t.Error("Expected key 'a' to be deleted")
-	}
-	if obj["b"] != 2 {
-		t.Error("Expected key 'b' to remain")
-	}
-}
-
-// TestApplyJSONPatchNonObjectPatch tests applyJSONPatch with non-object patch
-func TestApplyJSONPatchNonObjectPatch(t *testing.T) {
-	target := map[string]interface{}{"a": 1}
-	patch := "string value"
-
-	result := applyJSONPatch(target, patch)
-
-	// Patch should replace target
-	if result != patch {
-		t.Error("Expected patch to replace target")
-	}
-}
-
-// TestApplyJSONPatchNonMapValue tests applyJSONPatch with non-map patch value
-func TestApplyJSONPatchNonMapValue(t *testing.T) {
-	target := map[string]interface{}{"a": 1}
-	patch := map[string]interface{}{"a": 2}
-
-	result := applyJSONPatch(target, patch)
-
-	obj, ok := result.(map[string]interface{})
-	if !ok {
-		t.Error("Expected object result")
-	}
-	if obj["a"] != 2 {
-		t.Error("Expected value to be replaced")
-	}
-}
-
-// TestRoundFuncNullPrecision tests roundFunc with NULL precision
-func TestRoundFuncNullPrecision(t *testing.T) {
-	result, err := roundFunc([]Value{NewFloatValue(1.5), NewNullValue()})
-	if err != nil {
-		t.Errorf("roundFunc() error = %v", err)
-	}
-	if !result.IsNull() {
-		t.Error("Expected NULL for NULL precision")
-	}
-}
-
-// TestRoundFuncNullValue tests roundFunc with NULL value
-func TestRoundFuncNullValue(t *testing.T) {
-	result, err := roundFunc([]Value{NewNullValue()})
-	if err != nil {
-		t.Errorf("roundFunc() error = %v", err)
-	}
-	if !result.IsNull() {
-		t.Error("Expected NULL for NULL value")
-	}
-}
-
-// TestRandomFuncPositiveValue tests randomFunc ensuring positive handling
-func TestRandomFuncPositiveValue(t *testing.T) {
-	// Just verify it doesn't error
-	for i := 0; i < 5; i++ {
-		result, err := randomFunc(nil)
+	for offset < len(data) {
+		toWrite := calculateWriteAmount(offset, len(data), pageCapacity)
+		nextPageNum, err := allocateNextPageIfNeeded(bt, offset, toWrite, len(data))
 		if err != nil {
-			t.Errorf("randomFunc() error = %v", err)
+			return err
 		}
-		if result.IsNull() {
-			t.Error("Expected non-NULL result")
+
+		err = writeSingleOverflowPage(bt, prevPageNum, data, offset, toWrite, nextPageNum)
+		if err != nil {
+			return err
+		}
+
+		offset += toWrite
+		prevPageNum = nextPageNum
+	}
+
+	return nil
+}
+
+// calculateWriteAmount determines how many bytes to write to the current page
+func calculateWriteAmount(offset, dataLen, pageCapacity int) int {
+	remaining := dataLen - offset
+	if remaining > pageCapacity {
+		return pageCapacity
+	}
+	return remaining
+}
+
+// allocateNextPageIfNeeded allocates a new page if more data needs to be written
+func allocateNextPageIfNeeded(bt *Btree, offset, toWrite, dataLen int) (uint32, error) {
+	if offset+toWrite < dataLen {
+		nextPageNum, err := bt.AllocatePage()
+		if err != nil {
+			return 0, fmt.Errorf("failed to allocate overflow page: %w", err)
+		}
+		return nextPageNum, nil
+	}
+	return 0, nil
+}
+
+// writeSingleOverflowPage writes data to a single overflow page
+func writeSingleOverflowPage(bt *Btree, pageNum uint32, data []byte, offset, toWrite int, nextPageNum uint32) error {
+	pageData, err := bt.GetPage(pageNum)
+	if err != nil {
+		return fmt.Errorf("failed to get overflow page %d: %w", pageNum, err)
+	}
+
+	binary.BigEndian.PutUint32(pageData[0:4], nextPageNum)
+	copy(pageData[OverflowHeaderSize:], data[offset:offset+toWrite])
+
+	if bt.Provider != nil {
+		if err := bt.Provider.MarkDirty(pageNum); err != nil {
+			return fmt.Errorf("failed to mark overflow page %d dirty: %w", pageNum, err)
 		}
 	}
+
+	return nil
 }
 
-// TestSubstrFuncStartAtEnd tests substr() with start at the end
-func TestSubstrFuncStartAtEnd(t *testing.T) {
-	result, err := substrFunc([]Value{
-		NewTextValue("hello"),
-		NewIntValue(6), // past the end
-		NewIntValue(5),
-	})
+// ReadOverflow reads payload from an overflow page chain
+// firstOverflowPage is the page number of the first overflow page
+// totalPayloadSize is the total size of the payload (including local part)
+// localSize is the amount of payload stored locally in the cell
+// Returns the complete payload (local + overflow)
+func (c *BtCursor) ReadOverflow(localPayload []byte, firstOverflowPage uint32, totalPayloadSize uint32, usableSize uint32) ([]byte, error) {
+	if firstOverflowPage == 0 {
+		// No overflow, return local payload
+		return localPayload, nil
+	}
+
+	if c.Btree == nil {
+		return nil, fmt.Errorf("cursor has no btree")
+	}
+
+	// Allocate buffer for complete payload
+	completePayload := make([]byte, totalPayloadSize)
+
+	// Copy local payload
+	copy(completePayload, localPayload)
+
+	// Read overflow data
+	overflowSize := int(totalPayloadSize) - len(localPayload)
+	overflowData, err := readOverflowChain(c.Btree, firstOverflowPage, overflowSize, usableSize)
 	if err != nil {
-		t.Errorf("substrFunc() error = %v", err)
+		return nil, err
 	}
 
-	// Should return empty string
-	if result.AsString() != "" {
-		t.Errorf("Expected empty string, got '%s'", result.AsString())
-	}
+	// Copy overflow data
+	copy(completePayload[len(localPayload):], overflowData)
+
+	return completePayload, nil
 }
 
-// TestSubstrAdjustNegLenNegativeResult tests substrAdjustNegLen edge case
-func TestSubstrAdjustNegLenNegativeResult(t *testing.T) {
-	// When start - negLen results in negative
-	start, subLen := substrAdjustNegLen(3, -5)
-
-	if start != 0 {
-		t.Errorf("Expected start = 0, got %d", start)
-	}
-	if subLen != 3 {
-		t.Errorf("Expected subLen = 3, got %d", subLen)
-	}
-}
-
-// TestSubstrBlobResultStartPastEnd tests substrBlobResult with start >= length
-func TestSubstrBlobResultStartPastEnd(t *testing.T) {
-	blob := []byte{1, 2, 3}
-	result := substrBlobResult(blob, 10, 5, 3)
-
-	// Should return empty blob
-	if len(result.AsBlob()) != 0 {
-		t.Errorf("Expected empty blob, got length %d", len(result.AsBlob()))
-	}
-}
-
-// TestComputeJDWithMonthAdjustment tests computeJD with month <= 2
-func TestComputeJDWithMonthAdjustment(t *testing.T) {
-	dt := &DateTime{
-		year:     2000,
-		month:    1, // January
-		day:      15,
-		validYMD: true,
+// readOverflowChain reads data from a chain of overflow pages
+// firstPage is the page number of the first overflow page
+// dataSize is the number of bytes to read from the overflow chain
+func readOverflowChain(bt *Btree, firstPage uint32, dataSize int, usableSize uint32) ([]byte, error) {
+	if firstPage == 0 || dataSize <= 0 {
+		return nil, nil
 	}
 
-	dt.computeJD()
+	result := make([]byte, dataSize)
+	overflowPageCapacity := int(usableSize) - OverflowHeaderSize
+	maxPages := (dataSize / overflowPageCapacity) + 2
 
-	if !dt.validJD {
-		t.Error("Expected validJD to be true")
-	}
-	if dt.jd == 0 {
-		t.Error("Expected non-zero JD")
-	}
-}
-
-// TestApplyModifierNumeric tests applyModifier with numeric modifier
-func TestApplyModifierNumeric(t *testing.T) {
-	dt := &DateTime{
-		jd:      2451545 * msPerDay,
-		validJD: true,
-	}
-
-	// Test with "+5 days"
-	err := dt.applyModifier("+5 days")
+	offset, err := readOverflowPages(bt, firstPage, result, dataSize, overflowPageCapacity, maxPages)
 	if err != nil {
-		t.Errorf("applyModifier() error = %v", err)
+		return nil, err
 	}
+
+	if offset < dataSize {
+		return nil, fmt.Errorf("overflow chain ended prematurely, expected %d bytes, got %d", dataSize, offset)
+	}
+
+	return result, nil
 }
 
-// TestIsValidDateEdge tests isValidDate with edge values
-func TestIsValidDateEdge(t *testing.T) {
-	// Test month 12 day 31
-	if !isValidDate(2023, 12, 31) {
-		t.Error("Dec 31 should be valid")
+// readOverflowPages reads data from overflow page chain into result buffer
+func readOverflowPages(bt *Btree, firstPage uint32, result []byte, dataSize, pageCapacity, maxPages int) (int, error) {
+	currentPage := firstPage
+	offset := 0
+	pageCount := 0
+
+	for offset < dataSize && currentPage != 0 {
+		pageCount++
+		if pageCount > maxPages {
+			return 0, fmt.Errorf("overflow chain too long (possible corruption), page count: %d", pageCount)
+		}
+
+		nextPage, bytesRead, err := readSingleOverflowPage(bt, currentPage, result, offset, dataSize, pageCapacity)
+		if err != nil {
+			return 0, err
+		}
+
+		offset += bytesRead
+		currentPage = nextPage
 	}
 
-	// Test Feb in leap year
-	if !isValidDate(2024, 2, 29) {
-		t.Error("Feb 29 in leap year should be valid")
+	return offset, nil
+}
+
+// readSingleOverflowPage reads data from a single overflow page
+func readSingleOverflowPage(bt *Btree, pageNum uint32, result []byte, offset, dataSize, pageCapacity int) (uint32, int, error) {
+	pageData, err := bt.GetPage(pageNum)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get overflow page %d: %w", pageNum, err)
 	}
+
+	nextPage := binary.BigEndian.Uint32(pageData[0:4])
+	toRead := calculateReadAmount(offset, dataSize, pageCapacity)
+
+	if OverflowHeaderSize+toRead > len(pageData) {
+		return 0, 0, fmt.Errorf("overflow page %d data exceeds page bounds", pageNum)
+	}
+
+	copy(result[offset:offset+toRead], pageData[OverflowHeaderSize:OverflowHeaderSize+toRead])
+	return nextPage, toRead, nil
+}
+
+// calculateReadAmount determines how many bytes to read from the current page
+func calculateReadAmount(offset, dataSize, pageCapacity int) int {
+	remaining := dataSize - offset
+	if remaining > pageCapacity {
+		return pageCapacity
+	}
+	return remaining
+}
+
+// FreeOverflowChain frees all pages in an overflow chain
+// firstOverflowPage is the page number of the first overflow page
+// This should be called when deleting a cell with overflow pages
+func (c *BtCursor) FreeOverflowChain(firstOverflowPage uint32) error {
+	if firstOverflowPage == 0 {
+		return nil // No overflow pages to free
+	}
+
+	if c.Btree == nil {
+		return fmt.Errorf("cursor has no btree")
+	}
+
+	return freeOverflowChain(c.Btree, firstOverflowPage, c.Btree.UsableSize)
+}
+
+// freeOverflowChain frees all pages in an overflow chain
+func freeOverflowChain(bt *Btree, firstPage uint32, usableSize uint32) error {
+	currentPage := firstPage
+	pageCount := 0
+	maxPages := 1000 // Safety limit to prevent infinite loops
+
+	for currentPage != 0 {
+		pageCount++
+		if pageCount > maxPages {
+			return fmt.Errorf("overflow chain too long (possible corruption), freed %d pages", pageCount)
+		}
+
+		// Get the overflow page
+		pageData, err := bt.GetPage(currentPage)
+		if err != nil {
+			return fmt.Errorf("failed to get overflow page %d: %w", currentPage, err)
+		}
+
+		// Read next page pointer before freeing
+		nextPage := binary.BigEndian.Uint32(pageData[0:4])
+
+		// Free the current page
+		// In a full implementation, this would add the page to a freelist
+		// For now, we just remove it from the page cache
+		delete(bt.Pages, currentPage)
+
+		// Move to next page
+		currentPage = nextPage
+	}
+
+	return nil
+}
+
+// CalculateLocalPayload calculates how much of the payload should be stored
+// locally in the cell vs in overflow pages
+// This implements SQLite's overflow calculation algorithm
+func CalculateLocalPayload(totalSize uint32, pageSize uint32, isTable bool) uint16 {
+	usableSize := pageSize
+
+	maxLocal := calculateMaxLocal(usableSize, isTable)
+	minLocal := calculateMinLocal(usableSize, isTable)
+
+	if totalSize <= maxLocal {
+		// Entire payload fits locally
+		localPayload, err := security.SafeCastUint32ToUint16(totalSize)
+		if err != nil {
+			// If totalSize doesn't fit in uint16, use maxLocal
+			localPayload, err = security.SafeCastUint32ToUint16(maxLocal)
+			if err != nil {
+				return 0
+			}
+		}
+		return localPayload
+	}
+
+	// Validate usableSize to prevent underflow
+	if usableSize < 4 {
+		localPayload, err := security.SafeCastUint32ToUint16(minLocal)
+		if err != nil {
+			return 0
+		}
+		return localPayload
+	}
+
+	// Calculate surplus using SQLite's algorithm
+	surplus := minLocal + (totalSize-minLocal)%(usableSize-4)
+	if surplus <= maxLocal {
+		localPayload, err := security.SafeCastUint32ToUint16(surplus)
+		if err != nil {
+			// If surplus doesn't fit in uint16, use minLocal instead
+			localPayload, err = security.SafeCastUint32ToUint16(minLocal)
+			if err != nil {
+				return 0
+			}
+		}
+		return localPayload
+	}
+
+	localPayload, err := security.SafeCastUint32ToUint16(minLocal)
+	if err != nil {
+		return 0
+	}
+	return localPayload
+}
+
+// Helper function to get complete payload including overflow
+// This is a convenience function that automatically handles overflow reading
+func (c *BtCursor) GetCompletePayload() ([]byte, error) {
+	if c.State != CursorValid || c.CurrentCell == nil {
+		return nil, fmt.Errorf("cursor not in valid state")
+	}
+
+	// If no overflow, return local payload
+	if c.CurrentCell.OverflowPage == 0 {
+		return c.CurrentCell.Payload, nil
+	}
+
+	// Read complete payload including overflow
+	return c.ReadOverflow(
+		c.CurrentCell.Payload,
+		c.CurrentCell.OverflowPage,
+		c.CurrentCell.PayloadSize,
+		c.Btree.UsableSize,
+	)
+}
+
+// GetOverflowThreshold returns the maximum payload size that can be stored
+// locally (without overflow) for the given page size and page type
+// This implements SQLite's overflow threshold calculation
+func GetOverflowThreshold(pageSize uint32, isTable bool) uint32 {
+	// For table b-trees (leaf pages): maxLocal = pageSize - 35
+	// For index b-trees: maxLocal = pageSize - 35
+	// This is the threshold above which overflow is required
+	return calculateMaxLocal(pageSize, isTable)
 }

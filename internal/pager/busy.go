@@ -1,367 +1,416 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package parser
+package pager
 
 import (
-	"testing"
+	"math/rand"
+	"time"
 )
 
-// TestFinalEdgeCasesToReach99 covers remaining uncovered lines
-func TestFinalEdgeCasesToReach99(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-	}{
-		// parseTriggerForEachRow - error paths
-		{
-			name:    "trigger FOR without EACH",
-			sql:     "CREATE TRIGGER t1 BEFORE INSERT ON users FOR BEGIN SELECT 1; END",
-			wantErr: true,
-		},
-		{
-			name:    "trigger FOR EACH without ROW",
-			sql:     "CREATE TRIGGER t1 BEFORE INSERT ON users FOR EACH BEGIN SELECT 1; END",
-			wantErr: true,
-		},
+/*
+Busy Handler Implementation
 
-		// parseCreateIndex - UNIQUE after CREATE INDEX
-		{
-			name:    "CREATE INDEX UNIQUE - unique after INDEX",
-			sql:     "CREATE INDEX UNIQUE idx ON users (name)",
-			wantErr: false,
-		},
+This file implements SQLite-compatible busy handler functionality for handling
+database lock contention gracefully. When a database operation cannot acquire
+a necessary lock, the busy handler is invoked to determine whether to retry
+or return an error.
 
-		// parseIndexIfNotExists - error paths
-		{
-			name:    "CREATE INDEX IF without NOT",
-			sql:     "CREATE INDEX IF idx ON users (name)",
-			wantErr: true,
-		},
-		{
-			name:    "CREATE INDEX IF NOT without EXISTS",
-			sql:     "CREATE INDEX IF NOT idx ON users (name)",
-			wantErr: true,
-		},
+Design
 
-		// parseDropTable - error paths
-		{
-			name:    "DROP TABLE IF without NOT",
-			sql:     "DROP TABLE IF users",
-			wantErr: true,
-		},
-		{
-			name:    "DROP TABLE IF NOT without EXISTS",
-			sql:     "DROP TABLE IF NOT users",
-			wantErr: true,
-		},
+The busy handler interface provides a pluggable retry mechanism:
 
-		// parseDropIndex - error paths
-		{
-			name:    "DROP INDEX IF without NOT",
-			sql:     "DROP INDEX IF idx_name",
-			wantErr: true,
-		},
-		{
-			name:    "DROP INDEX IF NOT without EXISTS",
-			sql:     "DROP INDEX IF NOT idx_name",
-			wantErr: true,
-		},
+  - BusyHandler interface: Defines the contract for custom handlers
+  - DefaultBusyHandler: Exponential backoff with jitter (recommended)
+  - TimeoutBusyHandler: Simple timeout with fixed retry interval
+  - CallbackBusyHandler: Wraps a custom callback function
+  - NoBusyHandler: No retries, immediate failure
 
-		// parseCreateTrigger - error paths
-		{
-			name:    "trigger missing IF NOT EXISTS after IF",
-			sql:     "CREATE TRIGGER IF t1 BEFORE INSERT ON users BEGIN SELECT 1; END",
-			wantErr: true,
-		},
-		{
-			name:    "trigger IF NOT without EXISTS",
-			sql:     "CREATE TRIGGER IF NOT t1 BEFORE INSERT ON users BEGIN SELECT 1; END",
-			wantErr: true,
-		},
+Lock Acquisition Flow
 
-		// parseViewSelect - error paths
-		{
-			name:    "CREATE VIEW missing SELECT keyword",
-			sql:     "CREATE VIEW v AS FROM users",
-			wantErr: true,
-		},
+When a lock cannot be acquired:
 
-		// parseIndexWhereClause - error paths
-		{
-			name:    "CREATE INDEX WHERE without expression",
-			sql:     "CREATE INDEX idx ON users (name) WHERE",
-			wantErr: true,
-		},
+ 1. The pager calls invokeBusyHandler(count) where count is the retry attempt
+ 2. The busy handler decides whether to retry (returns true) or fail (returns false)
+ 3. If true, the handler typically sleeps before returning
+ 4. The pager retries the lock acquisition
+ 5. This repeats until the lock is acquired or the handler returns false
 
-		// parseForeignKeyReferences - error paths
-		{
-			name:    "FOREIGN KEY REFERENCES missing paren for columns",
-			sql:     "CREATE TABLE t (id INTEGER, FOREIGN KEY (id) REFERENCES other id))",
-			wantErr: true,
-		},
+Default Behavior
 
-		// parseCreateTableAsSelect - error paths
-		{
-			name:    "CREATE TABLE AS missing keyword",
-			sql:     "CREATE TABLE new_users * FROM users",
-			wantErr: true,
-		},
+The DefaultBusyHandler implements exponential backoff with jitter:
 
-		// parseIfNotExists - error paths for tables
-		{
-			name:    "CREATE TABLE IF without NOT",
-			sql:     "CREATE TABLE IF users (id INTEGER)",
-			wantErr: true,
-		},
-		{
-			name:    "CREATE TABLE IF NOT without EXISTS",
-			sql:     "CREATE TABLE IF NOT users (id INTEGER)",
-			wantErr: true,
-		},
+  - Initial delay: 1ms
+  - Maximum delay: 100ms (capped)
+  - Total timeout: Configurable (default 5s)
+  - Delay formula: min(minDelay * 2^count, maxDelay) ± 25% jitter
 
-		// applyConstraintDefault - error path
-		{
-			name:    "DEFAULT missing value",
-			sql:     "CREATE TABLE t (status TEXT DEFAULT)",
-			wantErr: true,
-		},
+This matches SQLite's default busy timeout behavior and provides good
+performance under typical lock contention scenarios.
 
-		// parseTableOptions - error path
-		{
-			name:    "WITHOUT missing ROWID",
-			sql:     "CREATE TABLE t (id INTEGER) WITHOUT",
-			wantErr: true,
-		},
+Usage Examples
 
-		// parseColumnOrConstraint - more coverage
-		{
-			name:    "table with only constraints no columns - allowed",
-			sql:     "CREATE TABLE t (PRIMARY KEY (id))",
-			wantErr: false, // Allowed even if semantically odd
-		},
+Basic timeout-based handler:
 
-		// parseAlterTableRename - error paths
-		{
-			name:    "ALTER TABLE RENAME TO missing name",
-			sql:     "ALTER TABLE old_name RENAME TO",
-			wantErr: true,
-		},
-		{
-			name:    "ALTER TABLE RENAME COLUMN missing column name",
-			sql:     "ALTER TABLE t RENAME COLUMN TO new_col",
-			wantErr: true,
-		},
-		{
-			name:    "ALTER TABLE RENAME COLUMN missing TO keyword",
-			sql:     "ALTER TABLE t RENAME COLUMN old_col",
-			wantErr: true,
-		},
+	p, _ := pager.Open("mydb.db", false)
+	p.WithBusyHandler(pager.BusyTimeout(5 * time.Second))
 
-		// parseTableConstraintName - error path
-		{
-			name:    "CONSTRAINT without name",
-			sql:     "CREATE TABLE t (id INTEGER, CONSTRAINT PRIMARY KEY (id))",
-			wantErr: true,
-		},
+Exponential backoff (recommended):
 
-		// parseCreateTable - more error paths
-		{
-			name:    "CREATE TABLE missing closing paren",
-			sql:     "CREATE TABLE users (id INTEGER, name TEXT",
-			wantErr: true,
-		},
+	p, _ := pager.Open("mydb.db", false)
+	handler := pager.NewDefaultBusyHandler(5 * time.Second)
+	p.WithBusyHandler(handler)
 
-		// parseDeleteOrderBy - error path
-		{
-			name:    "DELETE ORDER BY with empty list",
-			sql:     "DELETE FROM users ORDER BY LIMIT 1",
-			wantErr: true,
-		},
+Custom callback:
 
-		// parseUpdateOrderByClause - error path
-		{
-			name:    "UPDATE ORDER BY with empty list",
-			sql:     "UPDATE users SET x = 1 ORDER BY LIMIT 1",
-			wantErr: true,
-		},
+	handler := pager.BusyCallback(func(count int) bool {
+		if count > 10 {
+			return false  // Give up after 10 retries
+		}
+		time.Sleep(100 * time.Millisecond)
+		return true
+	})
+	p.WithBusyHandler(handler)
 
-		// parseSelect - more branches
-		{
-			name:    "SELECT with ALL keyword",
-			sql:     "SELECT ALL * FROM users",
-			wantErr: false,
-		},
+Integration with Pager
 
-		// Multiple constraints on same column
-		{
-			name:    "column with multiple constraints",
-			sql:     "CREATE TABLE t (id INTEGER PRIMARY KEY NOT NULL UNIQUE CHECK (id > 0) DEFAULT 1 COLLATE BINARY)",
-			wantErr: false,
-		},
+The busy handler is automatically invoked during lock acquisition:
 
-		// Trigger variations
-		{
-			name:    "trigger AFTER INSERT",
-			sql:     "CREATE TRIGGER t1 AFTER INSERT ON users BEGIN SELECT 1; END",
-			wantErr: false,
-		},
-		{
-			name:    "trigger INSTEAD OF DELETE on view",
-			sql:     "CREATE TRIGGER t1 INSTEAD OF DELETE ON user_view BEGIN SELECT 1; END",
-			wantErr: false,
-		},
-		{
-			name:    "trigger with all options",
-			sql:     "CREATE TRIGGER IF NOT EXISTS t1 BEFORE UPDATE OF name ON users FOR EACH ROW WHEN NEW.name != OLD.name BEGIN UPDATE audit SET count = count + 1; END",
-			wantErr: false,
-		},
+  - acquireSharedLock: When beginning a read transaction
+  - acquireReservedLock: When beginning a write transaction
+  - acquireExclusiveLock: When committing changes
 
-		// Index variations
-		{
-			name:    "CREATE UNIQUE INDEX IF NOT EXISTS with WHERE",
-			sql:     "CREATE UNIQUE INDEX IF NOT EXISTS idx ON users (email) WHERE deleted_at IS NULL",
-			wantErr: false,
-		},
+This ensures transparent retry behavior without requiring changes to
+higher-level code.
+*/
 
-		// View variations
-		{
-			name:    "CREATE VIEW IF NOT EXISTS with columns",
-			sql:     "CREATE VIEW IF NOT EXISTS user_emails (id, email) AS SELECT id, email FROM users",
-			wantErr: false,
-		},
+// BusyHandler is an interface for handling database lock contention.
+// When a database operation fails due to locking, the busy handler is invoked
+// to decide whether to retry the operation or return an error.
+//
+// This is based on SQLite's sqlite3_busy_handler mechanism.
+type BusyHandler interface {
+	// Busy is called when a lock cannot be acquired.
+	// count is the number of times this handler has been invoked for the current lock.
+	// Returns true to retry the operation, false to return SQLITE_BUSY error.
+	Busy(count int) bool
+}
 
-		// Table variations
-		{
-			name:    "CREATE TEMP TABLE IF NOT EXISTS",
-			sql:     "CREATE TEMP TABLE IF NOT EXISTS temp_data (id INTEGER)",
-			wantErr: false,
-		},
-		{
-			name:    "CREATE TEMPORARY TABLE IF NOT EXISTS",
-			sql:     "CREATE TEMPORARY TABLE IF NOT EXISTS temp_data (id INTEGER)",
-			wantErr: false,
-		},
+// DefaultBusyHandler implements exponential backoff with jitter for lock retries.
+// This handler sleeps for progressively longer periods between retry attempts,
+// similar to SQLite's default busy handler.
+type DefaultBusyHandler struct {
+	// timeout is the total time allowed for retry attempts
+	timeout time.Duration
 
-		// PRAGMA variations to hit IntValue, FloatValue, StringValue
-		{
-			name:    "PRAGMA with negative integer",
-			sql:     "PRAGMA cache_size = -2000",
-			wantErr: false,
-		},
-		{
-			name:    "PRAGMA with float value",
-			sql:     "PRAGMA mmap_size = 3.14159",
-			wantErr: false,
-		},
+	// startTime tracks when the first retry began
+	startTime time.Time
 
-		// More expression coverage
-		{
-			name:    "complex expression with all operators",
-			sql:     "SELECT a + b - c * d / e % f & g | h << i >> j FROM t",
-			wantErr: false,
-		},
-	}
+	// minDelay is the initial delay (default 1ms)
+	minDelay time.Duration
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
+	// maxDelay is the maximum delay between retries (default 100ms)
+	maxDelay time.Duration
+
+	// rng is used to add jitter to delays
+	rng *rand.Rand
+}
+
+// NewDefaultBusyHandler creates a new busy handler with the specified timeout.
+// The handler uses exponential backoff starting at 1ms, capping at 100ms,
+// and will retry for up to the specified timeout duration.
+func NewDefaultBusyHandler(timeout time.Duration) *DefaultBusyHandler {
+	return &DefaultBusyHandler{
+		timeout:  timeout,
+		minDelay: 1 * time.Millisecond,
+		maxDelay: 100 * time.Millisecond,
+		rng:      rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
-// TestAllStatementTypes ensures all statement types are covered
-func TestAllStatementTypes(t *testing.T) {
-	t.Parallel()
-	tests := []string{
-		"SELECT * FROM users",
-		"INSERT INTO users VALUES (1)",
-		"UPDATE users SET x = 1",
-		"DELETE FROM users",
-		"CREATE TABLE t (id INTEGER)",
-		"DROP TABLE t",
-		"CREATE INDEX idx ON t (id)",
-		"DROP INDEX idx",
-		"CREATE VIEW v AS SELECT * FROM t",
-		"DROP VIEW v",
-		"CREATE TRIGGER tr BEFORE INSERT ON t BEGIN SELECT 1; END",
-		"DROP TRIGGER tr",
-		"BEGIN",
-		"BEGIN TRANSACTION",
-		"BEGIN DEFERRED",
-		"BEGIN IMMEDIATE",
-		"BEGIN EXCLUSIVE",
-		"COMMIT",
-		// "END" and "END TRANSACTION" are not supported as standalone - use COMMIT
-		"ROLLBACK",
-		"ROLLBACK TRANSACTION",
-		"EXPLAIN SELECT * FROM t",
-		"EXPLAIN QUERY PLAN SELECT * FROM t",
-		"ATTACH DATABASE 'file.db' AS db1",
-		"DETACH DATABASE db1",
-		"PRAGMA foreign_keys",
-		"PRAGMA foreign_keys = ON",
-		"ALTER TABLE t RENAME TO new_t",
-		"ALTER TABLE t RENAME COLUMN old TO new",
-		"ALTER TABLE t ADD COLUMN new TEXT",
-		"ALTER TABLE t DROP COLUMN old",
-		"VACUUM",
-		"VACUUM main",
+// Busy implements the BusyHandler interface.
+// It sleeps for an exponentially increasing duration with jitter,
+// and returns false once the total timeout has been exceeded.
+func (h *DefaultBusyHandler) Busy(count int) bool {
+	// Initialize start time on first call or if it's been reset
+	if count == 0 || h.startTime.IsZero() {
+		h.startTime = time.Now()
 	}
 
-	for _, sql := range tests {
-		t.Run(sql, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(sql)
-			_, err := p.Parse()
-			if err != nil {
-				t.Errorf("unexpected error for %q: %v", sql, err)
-			}
-		})
+	// Check if we've exceeded the total timeout
+	elapsed := time.Since(h.startTime)
+	if elapsed >= h.timeout {
+		return false
+	}
+
+	// Calculate delay with exponential backoff
+	// delay = min(minDelay * 2^count, maxDelay)
+	delay := h.minDelay
+	for i := 0; i < count && delay < h.maxDelay; i++ {
+		delay *= 2
+	}
+	if delay > h.maxDelay {
+		delay = h.maxDelay
+	}
+
+	// Add jitter: +/- 25% of delay
+	jitter := time.Duration(h.rng.Int63n(int64(delay / 2)))
+	delay = delay - delay/4 + jitter
+
+	// Ensure we don't exceed the remaining timeout
+	remaining := h.timeout - elapsed
+	if delay > remaining {
+		delay = remaining
+	}
+
+	// Sleep for the calculated duration
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+
+	return true
+}
+
+// Reset resets the busy handler state, clearing the start time.
+// This is called when a lock is successfully acquired or the operation completes.
+func (h *DefaultBusyHandler) Reset() {
+	h.startTime = time.Time{}
+}
+
+// CallbackBusyHandler wraps a callback function as a BusyHandler.
+// This allows custom retry logic to be provided as a simple function.
+type CallbackBusyHandler struct {
+	callback func(count int) bool
+}
+
+// BusyCallback creates a BusyHandler from a callback function.
+// The callback receives the retry count and returns true to retry,
+// false to abort and return an error.
+//
+// Example:
+//
+//	handler := BusyCallback(func(count int) bool {
+//	    if count > 10 {
+//	        return false  // Give up after 10 retries
+//	    }
+//	    time.Sleep(100 * time.Millisecond)
+//	    return true  // Retry
+//	})
+func BusyCallback(callback func(count int) bool) BusyHandler {
+	return &CallbackBusyHandler{callback: callback}
+}
+
+// Busy implements the BusyHandler interface by delegating to the callback.
+func (h *CallbackBusyHandler) Busy(count int) bool {
+	if h.callback == nil {
+		return false
+	}
+	return h.callback(count)
+}
+
+// TimeoutBusyHandler is a simple busy handler that retries for a fixed duration.
+// It sleeps for a fixed interval between retries until the timeout is reached.
+type TimeoutBusyHandler struct {
+	timeout      time.Duration
+	retryDelay   time.Duration
+	startTime    time.Time
+	totalRetries int
+}
+
+// BusyTimeout creates a timeout-based busy handler.
+// The handler will retry the operation for up to the specified duration,
+// sleeping for 10ms between each retry attempt.
+//
+// This is similar to SQLite's sqlite3_busy_timeout() function.
+func BusyTimeout(timeout time.Duration) BusyHandler {
+	return &TimeoutBusyHandler{
+		timeout:    timeout,
+		retryDelay: 10 * time.Millisecond,
 	}
 }
 
-// TestErrorRecovery tests that parser properly returns errors
-func TestErrorRecovery(t *testing.T) {
-	t.Parallel()
-	errorTests := []string{
-		"",
-		"SELECT",
-		"SELECT * FROM",
-		"INSERT",
-		"INSERT INTO",
-		"INSERT INTO t",
-		"UPDATE",
-		"UPDATE SET x = 1",
-		"DELETE",
-		"CREATE",
-		"CREATE TABLE",
-		"CREATE TABLE t",
-		"DROP",
-		"DROP TABLE",
-		"BEGIN INVALID",
-		"PRAGMA",
-		"ALTER",
-		"ALTER TABLE",
-		"ALTER TABLE t",
-		"ATTACH",
-		"DETACH",
+// Busy implements the BusyHandler interface.
+// It sleeps for a fixed interval and returns false once timeout is exceeded.
+func (h *TimeoutBusyHandler) Busy(count int) bool {
+	// Initialize start time on first call or if it's been reset
+	if count == 0 || h.startTime.IsZero() {
+		h.startTime = time.Now()
+		h.totalRetries = 0
 	}
 
-	for _, sql := range errorTests {
-		t.Run(sql, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(sql)
-			_, err := p.Parse()
-			// We just want to ensure these produce some result (error or empty)
-			// and don't panic
-			_ = err
-		})
+	// Check if we've exceeded the timeout
+	elapsed := time.Since(h.startTime)
+	if elapsed >= h.timeout {
+		return false
 	}
+
+	// Increment retries only when we're actually going to retry
+	h.totalRetries++
+
+	// Calculate remaining time
+	remaining := h.timeout - elapsed
+
+	// Sleep for retry delay or remaining time, whichever is shorter
+	sleepDuration := h.retryDelay
+	if sleepDuration > remaining {
+		sleepDuration = remaining
+	}
+
+	if sleepDuration > 0 {
+		time.Sleep(sleepDuration)
+	}
+
+	return true
+}
+
+// GetTotalRetries returns the total number of retries attempted.
+func (h *TimeoutBusyHandler) GetTotalRetries() int {
+	return h.totalRetries
+}
+
+// NoBusyHandler is a busy handler that never retries.
+// Any lock contention immediately returns an error.
+type NoBusyHandler struct{}
+
+// Busy always returns false, causing immediate failure on lock contention.
+func (h *NoBusyHandler) Busy(count int) bool {
+	return false
+}
+
+// WithBusyHandler sets the busy handler for the pager.
+// The busy handler is invoked when a lock cannot be acquired,
+// allowing custom retry logic or timeout behavior.
+//
+// Pass nil to disable the busy handler (locks will fail immediately).
+func (p *Pager) WithBusyHandler(handler BusyHandler) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.busyHandler = handler
+}
+
+// GetBusyHandler returns the current busy handler, or nil if none is set.
+func (p *Pager) GetBusyHandler() BusyHandler {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.busyHandler
+}
+
+// invokeBusyHandler invokes the busy handler if one is set.
+// Returns true if the operation should be retried, false otherwise.
+func (p *Pager) invokeBusyHandler(count int) bool {
+	if p.busyHandler == nil {
+		return false
+	}
+	return p.busyHandler.Busy(count)
+}
+
+// acquireSharedLockWithRetry attempts to acquire a shared lock with busy handler support.
+// This is an enhanced version of acquireSharedLock that retries using the busy handler.
+func (p *Pager) acquireSharedLockWithRetry() error {
+	retryCount := 0
+	for {
+		// Try to acquire the lock
+		err := p.tryAcquireSharedLock()
+		if err == nil {
+			return nil
+		}
+
+		// If the error is not a lock error, return it immediately
+		if err != ErrDatabaseLocked {
+			return err
+		}
+
+		// Invoke busy handler
+		if !p.invokeBusyHandler(retryCount) {
+			return ErrDatabaseLocked
+		}
+
+		retryCount++
+	}
+}
+
+// tryAcquireSharedLock attempts to acquire a shared lock without retrying.
+// Returns ErrDatabaseLocked if the lock cannot be acquired.
+func (p *Pager) tryAcquireSharedLock() error {
+	if p.lockState >= LockShared {
+		return nil
+	}
+
+	// In a real implementation, this would use file locking (flock/fcntl)
+	// For simplicity, we just update the state
+	// TODO: Implement actual file locking that can fail with EWOULDBLOCK
+	p.lockState = LockShared
+	p.state = PagerStateReader
+
+	return nil
+}
+
+// acquireReservedLockWithRetry attempts to acquire a reserved lock with busy handler support.
+func (p *Pager) acquireReservedLockWithRetry() error {
+	retryCount := 0
+	for {
+		err := p.tryAcquireReservedLock()
+		if err == nil {
+			return nil
+		}
+
+		if err != ErrDatabaseLocked {
+			return err
+		}
+
+		if !p.invokeBusyHandler(retryCount) {
+			return ErrDatabaseLocked
+		}
+
+		retryCount++
+	}
+}
+
+// tryAcquireReservedLock attempts to acquire a reserved lock without retrying.
+func (p *Pager) tryAcquireReservedLock() error {
+	if p.readOnly {
+		return ErrReadOnly
+	}
+
+	if p.lockState >= LockReserved {
+		return nil
+	}
+
+	// In a real implementation, this would use file locking
+	// TODO: Implement actual file locking
+	p.lockState = LockReserved
+
+	return nil
+}
+
+// acquireExclusiveLockWithRetry attempts to acquire an exclusive lock with busy handler support.
+func (p *Pager) acquireExclusiveLockWithRetry() error {
+	retryCount := 0
+	for {
+		err := p.tryAcquireExclusiveLock()
+		if err == nil {
+			return nil
+		}
+
+		if err != ErrDatabaseLocked {
+			return err
+		}
+
+		if !p.invokeBusyHandler(retryCount) {
+			return ErrDatabaseLocked
+		}
+
+		retryCount++
+	}
+}
+
+// tryAcquireExclusiveLock attempts to acquire an exclusive lock without retrying.
+func (p *Pager) tryAcquireExclusiveLock() error {
+	if p.lockState >= LockExclusive {
+		return nil
+	}
+
+	// In a real implementation, this would use file locking
+	// TODO: Implement actual file locking
+	p.lockState = LockExclusive
+
+	return nil
 }

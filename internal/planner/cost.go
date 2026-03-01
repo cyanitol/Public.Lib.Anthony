@@ -1,584 +1,425 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package pager
+package planner
 
 import (
-	"encoding/binary"
-	"hash/crc32"
-	"io"
-	"os"
-	"sync"
-	"testing"
+	"math"
 )
 
-// TestStateTransitionValidation tests that state transitions are properly validated.
-func TestStateTransitionValidation(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name        string
-		fromState   int
-		toState     int
-		shouldError bool
-	}{
-		{
-			name:        "valid: open to reader",
-			fromState:   PagerStateOpen,
-			toState:     PagerStateReader,
-			shouldError: false,
-		},
-		{
-			name:        "valid: open to writer locked",
-			fromState:   PagerStateOpen,
-			toState:     PagerStateWriterLocked,
-			shouldError: false,
-		},
-		{
-			name:        "valid: reader to writer locked",
-			fromState:   PagerStateReader,
-			toState:     PagerStateWriterLocked,
-			shouldError: false,
-		},
-		{
-			name:        "valid: writer locked to cachemod",
-			fromState:   PagerStateWriterLocked,
-			toState:     PagerStateWriterCachemod,
-			shouldError: false,
-		},
-		{
-			name:        "valid: cachemod to dbmod",
-			fromState:   PagerStateWriterCachemod,
-			toState:     PagerStateWriterDbmod,
-			shouldError: false,
-		},
-		{
-			name:        "valid: dbmod to finished",
-			fromState:   PagerStateWriterDbmod,
-			toState:     PagerStateWriterFinished,
-			shouldError: false,
-		},
-		{
-			name:        "valid: finished to open",
-			fromState:   PagerStateWriterFinished,
-			toState:     PagerStateOpen,
-			shouldError: false,
-		},
-		{
-			name:        "valid: any to error",
-			fromState:   PagerStateWriterLocked,
-			toState:     PagerStateError,
-			shouldError: false,
-		},
-		{
-			name:        "invalid: open to finished",
-			fromState:   PagerStateOpen,
-			toState:     PagerStateWriterFinished,
-			shouldError: true,
-		},
-		{
-			name:        "invalid: reader to cachemod",
-			fromState:   PagerStateReader,
-			toState:     PagerStateWriterCachemod,
-			shouldError: true,
-		},
-		{
-			name:        "invalid: open to dbmod",
-			fromState:   PagerStateOpen,
-			toState:     PagerStateWriterDbmod,
-			shouldError: true,
-		},
-	}
+// Cost estimation constants
+const (
+	// Default cost values (in LogEst units)
+	costFullScan     = LogEst(100) // Cost per row for full table scan
+	costIndexSeek    = LogEst(10)  // Cost to seek to a position in index
+	costIndexNext    = LogEst(5)   // Cost to move to next index entry
+	costRowidLookup  = LogEst(19)  // Cost to lookup row by rowid (~19 = log2(500k))
+	costComparison   = LogEst(2)   // Cost of a single comparison
+	costInMemoryScan = LogEst(1)   // Cost per row when data is in memory
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			p := &Pager{state: tt.fromState}
-			err := p.validateTransition(tt.toState)
+	// Selectivity estimates (how many rows will match)
+	selectivityEq      = LogEst(-10) // x = const: ~1/1024 rows (highly selective)
+	selectivityRange   = LogEst(-3)  // x > const: ~1/8 rows
+	selectivityIn      = LogEst(-7)  // x IN (...): depends on list size
+	selectivityNull    = LogEst(-20) // x IS NULL: very few nulls
+	selectivityLikePat = LogEst(-4)  // LIKE with pattern: ~1/16 rows
 
-			if tt.shouldError && err == nil {
-				t.Errorf("expected error for transition from %d to %d, got nil", tt.fromState, tt.toState)
-			}
-			if !tt.shouldError && err != nil {
-				t.Errorf("unexpected error for transition from %d to %d: %v", tt.fromState, tt.toState, err)
-			}
-		})
+	// Heuristic adjustments
+	truthProbDefault    = LogEst(1)   // Default truth probability
+	truthProbSmallInt   = LogEst(-50) // For x=0, x=1, x=-1 (very likely)
+	truthProbLargeRange = LogEst(-5)  // For range on large index
+)
+
+// CostModel handles cost estimation for different access paths.
+type CostModel struct {
+	// Configuration options
+	UseStatistics bool // Use sqlite_stat1 statistics if available
+}
+
+// NewCostModel creates a new cost model with default settings.
+func NewCostModel() *CostModel {
+	return &CostModel{
+		UseStatistics: true,
 	}
 }
 
-// TestGetSetState tests thread-safe state access.
-func TestGetSetState(t *testing.T) {
-	t.Parallel()
-	tmpFile := createTempDB(t)
-	defer os.Remove(tmpFile)
-
-	p, err := Open(tmpFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer p.Close()
-
-	// Test getState
-	initialState := p.getState()
-	if initialState != PagerStateOpen {
-		t.Errorf("expected initial state to be PagerStateOpen (%d), got %d", PagerStateOpen, initialState)
-	}
-
-	// Test setState with valid transition
-	err = p.setState(PagerStateReader)
-	if err != nil {
-		t.Errorf("failed to set state to reader: %v", err)
-	}
-
-	newState := p.getState()
-	if newState != PagerStateReader {
-		t.Errorf("expected state to be PagerStateReader (%d), got %d", PagerStateReader, newState)
-	}
-
-	// Test setState with invalid transition (should fail)
-	err = p.setState(PagerStateWriterFinished)
-	if err == nil {
-		t.Error("expected error for invalid state transition, got nil")
-	}
+// EstimateFullScan estimates the cost of a full table scan.
+func (c *CostModel) EstimateFullScan(table *TableInfo) (cost LogEst, nOut LogEst) {
+	// Cost is approximately: number of rows * cost per row
+	nRows := table.RowLogEst
+	cost = nRows + costFullScan
+	nOut = nRows
+	return
 }
 
-// TestConcurrentStateAccess tests that concurrent state access is safe.
-func TestConcurrentStateAccess(t *testing.T) {
-	t.Parallel()
-	tmpFile := createTempDB(t)
-	defer os.Remove(tmpFile)
+// EstimateIndexScan estimates the cost of scanning an index with given constraints.
+func (c *CostModel) EstimateIndexScan(
+	table *TableInfo,
+	index *IndexInfo,
+	terms []*WhereTerm,
+	nEq int, // Number of equality constraints
+	hasRange bool, // Has range constraint (< or >)
+	covering bool, // Index is covering (doesn't need table lookup)
+) (cost LogEst, nOut LogEst) {
 
-	p, err := Open(tmpFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer p.Close()
+	// Start with the total number of rows
+	nRows := index.RowLogEst
 
-	var wg sync.WaitGroup
-	numReaders := 10
-	numIterations := 100
+	// Estimate output rows based on constraints
+	nOut = nRows
 
-	// Start multiple goroutines reading state
-	for i := 0; i < numReaders; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < numIterations; j++ {
-				_ = p.getState()
+	// Apply selectivity for equality constraints
+	if nEq > 0 {
+		if nEq < len(index.ColumnStats) {
+			// Use actual statistics if available
+			nOut = index.ColumnStats[nEq]
+		} else {
+			// Estimate: each equality reduces by ~10x
+			for i := 0; i < nEq; i++ {
+				nOut += selectivityEq
+				if nOut < 0 {
+					nOut = 0
+					break
+				}
 			}
-		}()
-	}
-
-	// Start a goroutine that changes state
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for j := 0; j < numIterations; j++ {
-			_ = p.setState(PagerStateReader)
-			_ = p.setState(PagerStateOpen)
 		}
-	}()
-
-	wg.Wait()
-
-	// Verify final state is valid
-	finalState := p.getState()
-	if finalState != PagerStateOpen && finalState != PagerStateReader {
-		t.Errorf("unexpected final state: %d", finalState)
-	}
-}
-
-// TestJournalChecksumValidation tests checksum validation during journal operations.
-func TestJournalChecksumValidation(t *testing.T) {
-	t.Parallel()
-	tmpFile := createTempDB(t)
-	defer os.Remove(tmpFile)
-	defer os.Remove(tmpFile + "-journal")
-
-	p, err := Open(tmpFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
 	}
 
-	// Get a page and modify it
-	page, err := p.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	// Write to page (this should journal it)
-	err = p.Write(page)
-	if err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-
-	// Modify the page data
-	copy(page.Data[:10], []byte("testdata12"))
-
-	p.Put(page)
-
-	// Commit to write the journal
-	err = p.Commit()
-	if err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	p.Close()
-
-	// Verify journal file exists (in persist mode) or was deleted
-	// For this test, we expect it to be deleted in default mode
-	_, err = os.Stat(tmpFile + "-journal")
-	if !os.IsNotExist(err) {
-		// If journal exists, verify it has checksums
-		t.Log("Journal file exists (may be in different mode)")
-	}
-}
-
-// TestJournalChecksumCorruption tests that corrupted checksums are detected.
-func TestJournalChecksumCorruption(t *testing.T) {
-	t.Parallel()
-	tmpFile := createTempDB(t)
-	defer os.Remove(tmpFile)
-	defer os.Remove(tmpFile + "-journal")
-
-	p, err := Open(tmpFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-
-	// Set journal mode to persist so we can manipulate it
-	p.journalMode = JournalModePersist
-
-	// Get a page and modify it
-	page, err := p.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	err = p.Write(page)
-	if err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-
-	copy(page.Data[DatabaseHeaderSize:DatabaseHeaderSize+10], []byte("testdata12"))
-	p.Put(page)
-
-	// Commit to write the journal
-	err = p.Commit()
-	if err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	p.Close()
-
-	// Now check if journal file exists and corrupt it if it does
-	journalFile, err := os.OpenFile(tmpFile+"-journal", os.O_RDWR, 0600)
-	if err != nil {
-		if os.IsNotExist(err) {
-			t.Skip("Journal file doesn't exist (deleted after commit)")
+	// Apply selectivity for range constraint
+	if hasRange {
+		nOut += selectivityRange
+		if nOut < 0 {
+			nOut = 0
 		}
-		t.Fatalf("failed to open journal: %v", err)
 	}
 
-	// Read the journal header (4 bytes)
-	header := make([]byte, 4)
-	_, err = journalFile.Read(header)
-	if err != nil {
-		journalFile.Close()
-		t.Fatalf("failed to read journal header: %v", err)
+	// Calculate seek cost: one seek to find start position
+	seekCost := costIndexSeek
+
+	// Calculate scan cost: iterate through matching rows
+	scanCost := nOut + costIndexNext
+
+	// If not covering, add cost to lookup actual rows
+	lookupCost := LogEst(0)
+	if !covering {
+		lookupCost = nOut + costRowidLookup
 	}
 
-	// Read a journal entry (if exists)
-	pageSize := int(binary.BigEndian.Uint32(header))
-	entry := make([]byte, 4+pageSize+4)
-	n, err := journalFile.Read(entry)
-	if err != nil && err != io.EOF {
-		journalFile.Close()
-		t.Fatalf("failed to read journal entry: %v", err)
+	// Total cost = seek + scan + lookup
+	cost = seekCost + scanCost + lookupCost
+
+	return
+}
+
+// EstimateIndexLookup estimates the cost of an exact index lookup (all columns = const).
+func (c *CostModel) EstimateIndexLookup(
+	table *TableInfo,
+	index *IndexInfo,
+	nEq int,
+	covering bool,
+) (cost LogEst, nOut LogEst) {
+	if index.Unique && nEq >= len(index.Columns) {
+		return c.estimateUniqueLookup(covering)
 	}
+	nOut = c.estimateOutputRows(index, nEq)
+	cost = c.calculateLookupCost(nOut, covering)
+	return
+}
 
-	if n == len(entry) {
-		// Corrupt the checksum (last 4 bytes)
-		entry[len(entry)-1] ^= 0xFF
-		entry[len(entry)-2] ^= 0xFF
+// estimateUniqueLookup returns cost for unique index with all columns specified.
+func (c *CostModel) estimateUniqueLookup(covering bool) (cost LogEst, nOut LogEst) {
+	nOut = 0
+	cost = costIndexSeek
+	if !covering {
+		cost += costRowidLookup
+	}
+	return
+}
 
-		// Write back the corrupted entry
-		_, err = journalFile.WriteAt(entry, 4)
-		if err != nil {
-			journalFile.Close()
-			t.Fatalf("failed to write corrupted entry: %v", err)
+// estimateOutputRows estimates the number of rows for a given number of equality constraints.
+func (c *CostModel) estimateOutputRows(index *IndexInfo, nEq int) LogEst {
+	if nEq > 0 && nEq <= len(index.ColumnStats) {
+		return index.ColumnStats[nEq-1]
+	}
+	return c.applySelectivityReductions(index.RowLogEst, nEq)
+}
+
+// applySelectivityReductions reduces row estimate by selectivity per equality.
+func (c *CostModel) applySelectivityReductions(nOut LogEst, nEq int) LogEst {
+	for i := 0; i < nEq; i++ {
+		nOut += selectivityEq
+		if nOut < 0 {
+			return 0
 		}
-		journalFile.Sync()
+	}
+	return nOut
+}
+
+// calculateLookupCost computes total cost for lookup.
+func (c *CostModel) calculateLookupCost(nOut LogEst, covering bool) LogEst {
+	cost := costIndexSeek + nOut + costIndexNext
+	if !covering {
+		cost += nOut + costRowidLookup
+	}
+	return cost
+}
+
+// EstimateRowidLookup estimates the cost of looking up a row by rowid/primary key.
+func (c *CostModel) EstimateRowidLookup() (cost LogEst, nOut LogEst) {
+	// Single row lookup by rowid is very fast
+	nOut = 0 // 1 row
+	cost = costIndexSeek
+	return
+}
+
+// EstimateInOperator estimates the cost and selectivity of an IN operator.
+func (c *CostModel) EstimateInOperator(
+	table *TableInfo,
+	index *IndexInfo,
+	nEq int,
+	inListSize int,
+	covering bool,
+) (cost LogEst, nOut LogEst) {
+
+	// Each value in the IN list requires a separate lookup
+	nIn := NewLogEst(int64(inListSize))
+
+	// Estimate rows per lookup
+	var rowsPerLookup LogEst
+	if nEq > 0 && nEq <= len(index.ColumnStats) {
+		rowsPerLookup = index.ColumnStats[nEq-1]
+	} else {
+		rowsPerLookup = index.RowLogEst + selectivityEq
 	}
 
-	journalFile.Close()
+	// Total output rows = in list size * rows per lookup
+	nOut = nIn + rowsPerLookup
 
-	if n != len(entry) {
-		t.Skip("No complete journal entry found to corrupt")
+	// Cost = (seek + scan) for each IN value
+	lookupCost := costIndexSeek + rowsPerLookup + costIndexNext
+	if !covering {
+		lookupCost += rowsPerLookup + costRowidLookup
 	}
 
-	// Manually create a transaction and rollback to test journal corruption detection
-	// First, open a new journal file to trigger rollback
-	p2, err := Open(tmpFile, false)
-	if err != nil {
-		t.Fatalf("failed to reopen pager: %v", err)
-	}
-	defer p2.Close()
+	cost = nIn + lookupCost
 
-	// Create a new transaction that will need to use journal
-	p2.journalMode = JournalModePersist
-	page2, _ := p2.Get(1)
-	err = p2.Write(page2)
-	if err != nil {
-		t.Logf("Write failed (expected after corruption): %v", err)
-	}
-	p2.Put(page2)
+	return
+}
 
-	// This should attempt to use the corrupted journal
-	err = p2.Rollback()
-	if err != nil {
-		// We expect a checksum error if we successfully corrupted the journal
-		t.Logf("Rollback detected corruption (expected): %v", err)
+// operatorSelectivity maps operators to their default selectivity.
+var operatorSelectivity = map[WhereOperator]LogEst{
+	WO_IN:     selectivityIn,
+	WO_ISNULL: selectivityNull,
+}
+
+// EstimateTruthProbability estimates the probability that a term is true.
+// This is used to refine selectivity estimates.
+func (c *CostModel) EstimateTruthProbability(term *WhereTerm) LogEst {
+	if term.TruthProb != 0 {
+		return term.TruthProb
+	}
+	if term.Operator == WO_EQ {
+		return c.estimateEqSelectivity(term)
+	}
+	if term.Operator&(WO_LT|WO_LE|WO_GT|WO_GE) != 0 {
+		return selectivityRange
+	}
+	if sel, ok := operatorSelectivity[term.Operator]; ok {
+		return sel
+	}
+	return truthProbDefault
+}
+
+// estimateEqSelectivity estimates selectivity for equality operator.
+func (c *CostModel) estimateEqSelectivity(term *WhereTerm) LogEst {
+	if val, ok := term.RightValue.(int); ok && val >= -1 && val <= 1 {
+		return truthProbSmallInt
+	}
+	return selectivityEq
+}
+
+// CompareCosts compares two access paths and returns true if path1 is better (lower cost).
+func (c *CostModel) CompareCosts(cost1, nOut1, cost2, nOut2 LogEst) bool {
+	// Primary criterion: lower cost
+	if cost1 < cost2 {
+		return true
+	}
+	if cost1 > cost2 {
+		return false
+	}
+
+	// Tie-breaker: fewer output rows
+	return nOut1 < nOut2
+}
+
+// AdjustCostForMultipleTerms adjusts the cost when multiple WHERE terms
+// can be evaluated together.
+func (c *CostModel) AdjustCostForMultipleTerms(baseCost LogEst, nTerms int) LogEst {
+	// Each additional term adds a small comparison cost
+	if nTerms <= 1 {
+		return baseCost
+	}
+
+	// Add comparison cost for extra terms
+	extraCost := NewLogEst(int64(nTerms-1)) + costComparison
+	return baseCost + extraCost
+}
+
+// EstimateSetupCost estimates one-time setup costs (e.g., creating temp index).
+func (c *CostModel) EstimateSetupCost(setupType SetupType, nRows LogEst) LogEst {
+	switch setupType {
+	case SetupNone:
+		return 0
+
+	case SetupAutoIndex:
+		// Cost to build automatic index: scan table + create index
+		// Roughly: nRows * (scan + insert into index)
+		return nRows + NewLogEst(50) // 50 = log2(10^5) for setup overhead
+
+	case SetupSort:
+		// Cost to sort: nRows * log(nRows)
+		if nRows <= 0 {
+			return 0
+		}
+		// Approximate: nRows + log(nRows) * 3
+		logN := LogEst(math.Log2(float64(nRows.ToInt())) * 10)
+		return nRows + logN + NewLogEst(3)
+
+	case SetupBloomFilter:
+		// Cost to build Bloom filter: scan + populate
+		return nRows + NewLogEst(10)
+
+	default:
+		return 0
 	}
 }
 
-// TestValidateJournalPage tests the checksum validation function.
-func TestValidateJournalPage(t *testing.T) {
-	t.Parallel()
-	p := &Pager{pageSize: 4096}
+// SetupType defines different types of setup operations.
+type SetupType int
 
-	testData := make([]byte, 4096)
-	for i := range testData {
-		testData[i] = byte(i % 256)
-	}
+const (
+	SetupNone SetupType = iota
+	SetupAutoIndex
+	SetupSort
+	SetupBloomFilter
+)
 
-	// Calculate correct checksum
-	correctChecksum := crc32.ChecksumIEEE(testData)
-
-	// Test with correct checksum
-	if !p.validateJournalPage(testData, correctChecksum) {
-		t.Error("validation failed with correct checksum")
-	}
-
-	// Test with incorrect checksum
-	if p.validateJournalPage(testData, correctChecksum+1) {
-		t.Error("validation succeeded with incorrect checksum")
-	}
-
-	// Test with zero checksum
-	if p.validateJournalPage(testData, 0) {
-		t.Error("validation succeeded with zero checksum")
-	}
+// CalculateLoopCost calculates the total cost of a WhereLoop.
+func (c *CostModel) CalculateLoopCost(loop *WhereLoop) LogEst {
+	// Total cost = setup cost + (run cost * number of times executed)
+	// For a single loop, it runs once, so:
+	return loop.Setup + loop.Run
 }
 
-// TestCalculateChecksum tests the checksum calculation function.
-func TestCalculateChecksum(t *testing.T) {
-	t.Parallel()
-	p := &Pager{}
-
-	testCases := []struct {
-		name string
-		data []byte
-	}{
-		{"empty", []byte{}},
-		{"single byte", []byte{0x42}},
-		{"small data", []byte{1, 2, 3, 4, 5}},
-		{"page-sized data", make([]byte, 4096)},
+// CombineLoopCosts combines costs for multiple nested loops.
+func (c *CostModel) CombineLoopCosts(loops []*WhereLoop) (totalCost LogEst, totalRows LogEst) {
+	if len(loops) == 0 {
+		return 0, 0
 	}
 
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			checksum := p.calculateChecksum(tc.data)
-			expected := crc32.ChecksumIEEE(tc.data)
+	totalCost = 0
+	totalRows = 0
 
-			if checksum != expected {
-				t.Errorf("checksum mismatch: got %d, expected %d", checksum, expected)
-			}
+	// Outer loop multiplier (how many times inner loops execute)
+	outerRows := LogEst(0) // Start with 1 row (LogEst(1) = 0)
 
-			// Verify it's deterministic
-			checksum2 := p.calculateChecksum(tc.data)
-			if checksum != checksum2 {
-				t.Error("checksum calculation is not deterministic")
-			}
-		})
+	for _, loop := range loops {
+		// Add setup cost (one-time per loop level)
+		totalCost += loop.Setup
+
+		// Run cost is multiplied by how many times this loop executes
+		// (which is the number of rows from outer loops)
+		runCost := loop.Run + outerRows
+		totalCost += runCost
+
+		// Update outer rows for next level
+		outerRows = outerRows + loop.NOut
 	}
+
+	totalRows = outerRows
+	return
 }
 
-// TestWALFrameChecksum tests WAL frame checksum validation.
-func TestWALFrameChecksum(t *testing.T) {
-	t.Parallel()
-	tmpFile := createTempDB(t)
-	defer os.Remove(tmpFile)
-	defer os.Remove(tmpFile + "-shm")
-	defer os.Remove(tmpFile + "-wal")
-
-	walIdx, err := NewWALIndex(tmpFile)
-	if err != nil {
-		t.Fatalf("failed to create WAL index: %v", err)
-	}
-	defer walIdx.Close()
-
-	// Test frame data
-	frameData := make([]byte, 4096)
-	for i := range frameData {
-		frameData[i] = byte(i % 256)
+// EstimateCoveringIndex checks if an index covers the query (all needed columns in index).
+func (c *CostModel) EstimateCoveringIndex(index *IndexInfo, neededColumns []string) bool {
+	// Build set of columns in index
+	indexCols := make(map[string]bool)
+	for _, col := range index.Columns {
+		indexCols[col.Name] = true
 	}
 
-	// Calculate checksum
-	checksum := walIdx.CalculateFrameChecksum(frameData)
-
-	// Validate with correct checksum
-	if !walIdx.ValidateFrameChecksum(frameData, checksum) {
-		t.Error("validation failed with correct checksum")
+	// Check if all needed columns are covered
+	for _, col := range neededColumns {
+		if !indexCols[col] {
+			return false
+		}
 	}
 
-	// Validate with incorrect checksum
-	if walIdx.ValidateFrameChecksum(frameData, checksum+1) {
-		t.Error("validation succeeded with incorrect checksum")
-	}
+	return true
 }
 
-// TestWALInsertFrameWithChecksum tests inserting WAL frames with checksum validation.
-func TestWALInsertFrameWithChecksum(t *testing.T) {
-	t.Parallel()
-	tmpFile := createTempDB(t)
-	defer os.Remove(tmpFile)
-	defer os.Remove(tmpFile + "-shm")
-	defer os.Remove(tmpFile + "-wal")
-
-	walIdx, err := NewWALIndex(tmpFile)
-	if err != nil {
-		t.Fatalf("failed to create WAL index: %v", err)
-	}
-	defer walIdx.Close()
-
-	frameData := make([]byte, 4096)
-	for i := range frameData {
-		frameData[i] = byte(i % 256)
+// SelectBestLoop selects the best WhereLoop from a list of candidates.
+func (c *CostModel) SelectBestLoop(loops []*WhereLoop) *WhereLoop {
+	if len(loops) == 0 {
+		return nil
 	}
 
-	correctChecksum := walIdx.CalculateFrameChecksum(frameData)
-	incorrectChecksum := correctChecksum + 1
+	best := loops[0]
+	bestCost := c.CalculateLoopCost(best)
 
-	// Test with correct checksum
-	err = walIdx.InsertFrameWithChecksum(1, 1, frameData, correctChecksum)
-	if err != nil {
-		t.Errorf("failed to insert frame with correct checksum: %v", err)
+	for i := 1; i < len(loops); i++ {
+		loop := loops[i]
+		cost := c.CalculateLoopCost(loop)
+
+		if c.CompareCosts(cost, loop.NOut, bestCost, best.NOut) {
+			best = loop
+			bestCost = cost
+		}
 	}
 
-	// Test with incorrect checksum
-	err = walIdx.InsertFrameWithChecksum(2, 2, frameData, incorrectChecksum)
-	if err == nil {
-		t.Error("expected error when inserting frame with incorrect checksum")
-	}
+	return best
 }
 
-// TestWALFrameChecksumInHeader tests updating and retrieving frame checksums in header.
-func TestWALFrameChecksumInHeader(t *testing.T) {
-	t.Parallel()
-	tmpFile := createTempDB(t)
-	defer os.Remove(tmpFile)
-	defer os.Remove(tmpFile + "-shm")
-	defer os.Remove(tmpFile + "-wal")
-
-	walIdx, err := NewWALIndex(tmpFile)
-	if err != nil {
-		t.Fatalf("failed to create WAL index: %v", err)
-	}
-	defer walIdx.Close()
-
-	// Update checksums
-	err = walIdx.UpdateFrameChecksum(0x12345678, 0xABCDEF00)
-	if err != nil {
-		t.Fatalf("failed to update frame checksum: %v", err)
-	}
-
-	// Retrieve checksums
-	cksum1, cksum2, err := walIdx.GetFrameChecksum()
-	if err != nil {
-		t.Fatalf("failed to get frame checksum: %v", err)
-	}
-
-	if cksum1 != 0x12345678 || cksum2 != 0xABCDEF00 {
-		t.Errorf("checksum mismatch: got (%x, %x), expected (12345678, ABCDEF00)", cksum1, cksum2)
-	}
+// EstimateOrderByCost estimates the cost if results need to be sorted.
+func (c *CostModel) EstimateOrderByCost(nRows LogEst) LogEst {
+	// Sorting cost: O(n log n)
+	return c.EstimateSetupCost(SetupSort, nRows)
 }
 
-// TestConcurrentStateTransitions tests that concurrent state transitions are safe.
-func TestConcurrentStateTransitions(t *testing.T) {
-	t.Parallel()
-	tmpFile := createTempDB(t)
-	defer os.Remove(tmpFile)
-
-	p, err := Open(tmpFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer p.Close()
-
-	var wg sync.WaitGroup
-	numWorkers := 5
-	numOps := 50
-
-	// Each worker performs state transitions
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-			for j := 0; j < numOps; j++ {
-				// Try to transition to reader
-				_ = p.setState(PagerStateReader)
-				// Try to transition back to open
-				_ = p.setState(PagerStateOpen)
-			}
-		}(i)
+// CheckOrderByOptimization checks if an index can satisfy ORDER BY without sorting.
+func (c *CostModel) CheckOrderByOptimization(
+	index *IndexInfo,
+	orderBy []OrderByColumn,
+	nEq int, // Number of equality constraints
+) bool {
+	// After equality constraints, remaining index columns must match ORDER BY
+	if nEq >= len(index.Columns) {
+		// All index columns used for equality, can't help with ORDER BY
+		return false
 	}
 
-	wg.Wait()
+	// Check if index columns match order by columns (after equality constraints)
+	for i, ob := range orderBy {
+		idxCol := nEq + i
+		if idxCol >= len(index.Columns) {
+			// Not enough columns in index
+			return false
+		}
 
-	// Verify pager is still in a valid state
-	finalState := p.getState()
-	if finalState != PagerStateOpen && finalState != PagerStateReader {
-		t.Errorf("pager ended in invalid state: %d", finalState)
+		// Check column name matches
+		if index.Columns[idxCol].Name != ob.Column {
+			return false
+		}
+
+		// Check sort order matches
+		if index.Columns[idxCol].Ascending != ob.Ascending {
+			return false
+		}
 	}
+
+	return true
 }
 
-// TestStateTransitionErrorRecovery tests that the pager can recover from state errors.
-func TestStateTransitionErrorRecovery(t *testing.T) {
-	t.Parallel()
-	tmpFile := createTempDB(t)
-	defer os.Remove(tmpFile)
-
-	p, err := Open(tmpFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer p.Close()
-
-	// Attempt an invalid transition
-	err = p.setState(PagerStateWriterFinished)
-	if err == nil {
-		t.Fatal("expected error for invalid state transition")
-	}
-
-	// Verify the state hasn't changed
-	if p.getState() != PagerStateOpen {
-		t.Error("state changed despite invalid transition")
-	}
-
-	// Verify we can still make valid transitions
-	err = p.setState(PagerStateReader)
-	if err != nil {
-		t.Errorf("failed to make valid transition after error: %v", err)
-	}
-}
-
-// Helper function to create a temporary database for testing
-func createTempDB(t *testing.T) string {
-	f, err := os.CreateTemp("", "pager_safety_test_*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	name := f.Name()
-	f.Close()
-	os.Remove(name) // Remove it so the pager can create it fresh
-	return name
+// OrderByColumn represents a column in ORDER BY clause.
+type OrderByColumn struct {
+	Column    string
+	Ascending bool
 }

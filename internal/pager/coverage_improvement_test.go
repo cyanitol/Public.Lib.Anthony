@@ -1,468 +1,730 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-// Package constraint provides constraint validation for SQLite-compatible databases.
-// This includes UNIQUE, CHECK, FOREIGN KEY, and other constraint types.
-package constraint
+package pager
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
-	"strings"
-
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
 )
 
-// UniqueConstraint represents a UNIQUE constraint on one or more columns.
-// According to the SQL standard, NULL values are always considered distinct,
-// so multiple NULL values are allowed in a UNIQUE column.
-type UniqueConstraint struct {
-	// Name is the optional constraint name
-	Name string
+// TestJournalRestoreEntry tests the journal restoreEntry function
+func TestJournalRestoreEntry(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_restore.db")
 
-	// TableName is the name of the table this constraint belongs to
-	TableName string
-
-	// Columns are the column names that make up the unique constraint
-	Columns []string
-
-	// IndexName is the name of the automatically-created backing index
-	// for enforcing this constraint
-	IndexName string
-
-	// Partial indicates whether this is a partial unique constraint (WHERE clause)
-	Partial bool
-
-	// Where is the WHERE clause expression for partial unique constraints
-	Where string
-}
-
-// UniqueViolationError is returned when a UNIQUE constraint is violated.
-type UniqueViolationError struct {
-	ConstraintName string
-	TableName      string
-	Columns        []string
-	ConflictValues map[string]interface{}
-}
-
-// Error implements the error interface.
-func (e *UniqueViolationError) Error() string {
-	if e.ConstraintName != "" {
-		return fmt.Sprintf("UNIQUE constraint failed: %s.%s", e.TableName, e.ConstraintName)
-	}
-	return fmt.Sprintf("UNIQUE constraint failed: %s.%s", e.TableName, strings.Join(e.Columns, ","))
-}
-
-// NewUniqueConstraint creates a new UNIQUE constraint.
-func NewUniqueConstraint(name, tableName string, columns []string) *UniqueConstraint {
-	return &UniqueConstraint{
-		Name:      name,
-		TableName: tableName,
-		Columns:   columns,
-		IndexName: generateIndexName(name, tableName, columns),
-	}
-}
-
-// generateIndexName generates an index name for a UNIQUE constraint.
-// SQLite uses the format: sqlite_autoindex_{table}_{N} for unnamed constraints
-// or uses the constraint name directly if provided.
-func generateIndexName(constraintName, tableName string, columns []string) string {
-	if constraintName != "" {
-		return fmt.Sprintf("sqlite_autoindex_%s_%s", tableName, constraintName)
-	}
-	// For unnamed constraints, use column names
-	colNames := strings.Join(columns, "_")
-	return fmt.Sprintf("sqlite_autoindex_%s_%s", tableName, colNames)
-}
-
-// Validate checks if the given row values violate this UNIQUE constraint.
-// It returns nil if the constraint is satisfied, or a UniqueViolationError if violated.
-//
-// According to SQL standard:
-// - NULL values are always distinct from each other
-// - Multiple NULLs are allowed in UNIQUE columns
-// - Only non-NULL values must be unique
-func (uc *UniqueConstraint) Validate(table *schema.Table, bt *btree.Btree, values map[string]interface{}, rowid int64) error {
-	if len(uc.Columns) == 0 {
-		return fmt.Errorf("unique constraint has no columns")
-	}
-
-	// Extract the values for the constrained columns
-	constraintValues := make(map[string]interface{})
-	hasNonNull := false
-
-	for _, colName := range uc.Columns {
-		val, exists := values[colName]
-		if !exists {
-			// Column not in values map - check default
-			col, found := table.GetColumn(colName)
-			if !found {
-				return fmt.Errorf("column %s not found in table %s", colName, table.Name)
-			}
-			val = col.Default
-		}
-
-		constraintValues[colName] = val
-
-		// Check if value is NULL
-		if val != nil {
-			hasNonNull = true
-		}
-	}
-
-	// Per SQL standard: if all constraint columns are NULL, no check is needed
-	// Multiple rows with all-NULL values are allowed
-	if !hasNonNull {
-		return nil
-	}
-
-	// Check for existing row with same non-NULL values
-	// We use the backing index to efficiently check for duplicates
-	exists, _, err := uc.checkDuplicateViaIndex(bt, table, constraintValues, rowid)
+	// Create a pager
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
 	if err != nil {
-		return fmt.Errorf("failed to check unique constraint: %w", err)
+		t.Fatalf("failed to create pager: %v", err)
 	}
 
-	if exists {
-		return &UniqueViolationError{
-			ConstraintName: uc.Name,
-			TableName:      uc.TableName,
-			Columns:        uc.Columns,
-			ConflictValues: constraintValues,
-		}
-	}
-
-	return nil
-}
-
-// checkDuplicateViaIndex checks if a duplicate value exists using the backing index.
-// Returns (exists, conflictRowid, error).
-// The conflictRowid is the rowid of the conflicting row, or 0 if no conflict.
-// The rowid parameter is the rowid of the row being inserted/updated (to skip self-check).
-func (uc *UniqueConstraint) checkDuplicateViaIndex(
-	bt *btree.Btree,
-	table *schema.Table,
-	values map[string]interface{},
-	rowid int64,
-) (bool, int64, error) {
-	// For now, we'll implement a simple linear scan
-	// In a full implementation, this would use the backing index B-tree
-
-	cursor := btree.NewCursor(bt, table.RootPage)
-	err := cursor.MoveToFirst()
+	// Write some initial data
+	page, err := pager.Get(1)
 	if err != nil {
-		// Empty table - no duplicates
-		return false, 0, nil
+		t.Fatalf("failed to get page: %v", err)
 	}
 
-	for {
-		conflictFound, conflictRowid := uc.checkCurrentRow(cursor, table, values, rowid)
-		if conflictFound {
-			return true, conflictRowid, nil
-		}
-
-		// Move to next row
-		if err := cursor.Next(); err != nil {
-			break
-		}
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("failed to write page: %v", err)
 	}
 
-	return false, 0, nil
-}
+	// Set unique data
+	testData := []byte("ORIGINAL DATA")
+	copy(page.Data[DatabaseHeaderSize:], testData)
+	pager.Put(page)
 
-// checkCurrentRow checks if the current cursor position has a conflicting value.
-// Returns (conflictFound, conflictRowid).
-func (uc *UniqueConstraint) checkCurrentRow(
-	cursor *btree.BtCursor,
-	table *schema.Table,
-	values map[string]interface{},
-	skipRowid int64,
-) (bool, int64) {
-	// Get current row's rowid
-	currentRowid := cursor.GetKey()
-
-	// Skip the row we're updating (self-check)
-	if currentRowid == skipRowid {
-		return false, 0
+	if err := pager.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
 	}
 
-	// Get current row's data and validate it
-	currentData := cursor.GetPayload()
-	if !uc.isValidRowData(currentData) {
-		return false, 0
+	// Now create a journal entry manually
+	journal := NewJournal(dbFile+"-journal", 4096, 1)
+	if err := journal.Open(); err != nil {
+		t.Fatalf("failed to open journal: %v", err)
 	}
 
-	// Parse and check for conflicts
-	currentValues, err := parseRecordValues(currentData, table)
+	// Save original page data
+	page, _ = pager.Get(1)
+	originalData := make([]byte, len(page.Data))
+	copy(originalData, page.Data)
+	pager.Put(page)
+
+	// Write to journal
+	if err := journal.WriteOriginal(1, originalData); err != nil {
+		t.Fatalf("failed to write to journal: %v", err)
+	}
+	journal.Close()
+
+	// Modify the database page
+	page, _ = pager.Get(1)
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("failed to write page: %v", err)
+	}
+	modifiedData := []byte("MODIFIED DATA")
+	copy(page.Data[DatabaseHeaderSize:], modifiedData)
+	pager.Put(page)
+
+	// Flush to disk without committing
+	if err := pager.writePage(page); err != nil {
+		t.Fatalf("failed to write page to disk: %v", err)
+	}
+
+	pager.Close()
+
+	// Reopen pager and journal
+	pager, err = OpenWithPageSize(dbFile, false, 4096)
 	if err != nil {
-		// Skip malformed rows
-		return false, 0
+		t.Fatalf("failed to reopen pager: %v", err)
+	}
+	defer pager.Close()
+
+	journal = NewJournal(dbFile+"-journal", 4096, 1)
+
+	// Rollback should restore original data
+	if err := journal.Rollback(pager); err != nil {
+		t.Fatalf("failed to rollback: %v", err)
 	}
 
-	// Check if all constraint columns match
-	if uc.valuesMatch(values, currentValues) {
-		return true, currentRowid
-	}
-
-	return false, 0
-}
-
-// isValidRowData checks if row data is valid (non-nil).
-func (uc *UniqueConstraint) isValidRowData(data []byte) bool {
-	return data != nil
-}
-
-// valuesMatch checks if the constraint column values match between two rows.
-// Returns true only if all non-NULL values match.
-// NULL values are always considered distinct (SQL standard).
-func (uc *UniqueConstraint) valuesMatch(values1, values2 map[string]interface{}) bool {
-	for _, colName := range uc.Columns {
-		val1 := values1[colName]
-		val2 := values2[colName]
-
-		// NULL is distinct from everything, including other NULLs
-		if val1 == nil || val2 == nil {
-			return false
-		}
-
-		// Compare values
-		if !valuesEqual(val1, val2) {
-			return false
-		}
-	}
-
-	return true
-}
-
-// valuesEqual compares two values for equality.
-// Handles different types according to SQLite's type affinity rules.
-func valuesEqual(v1, v2 interface{}) bool {
-	if bothNil(v1, v2) {
-		return true
-	}
-	if eitherNil(v1, v2) {
-		return false
-	}
-
-	// Type conversions for comparison
-	switch a := v1.(type) {
-	case int:
-		return compareInt(a, v2)
-	case int64:
-		return compareInt64(a, v2)
-	case float64:
-		return compareFloat64(a, v2)
-	case string:
-		return compareString(a, v2)
-	case []byte:
-		return compareBytes(a, v2)
-	}
-
-	return false
-}
-
-// bothNil returns true if both values are nil.
-func bothNil(v1, v2 interface{}) bool {
-	return v1 == nil && v2 == nil
-}
-
-// eitherNil returns true if either value is nil (but not both).
-func eitherNil(v1, v2 interface{}) bool {
-	return v1 == nil || v2 == nil
-}
-
-// compareInt compares an int value with another value that might be int or int64.
-func compareInt(a int, v2 interface{}) bool {
-	if b, ok := v2.(int); ok {
-		return a == b
-	}
-	if b, ok := v2.(int64); ok {
-		return int64(a) == b
-	}
-	return false
-}
-
-// compareInt64 compares an int64 value with another value that might be int64 or int.
-func compareInt64(a int64, v2 interface{}) bool {
-	if b, ok := v2.(int64); ok {
-		return a == b
-	}
-	if b, ok := v2.(int); ok {
-		return a == int64(b)
-	}
-	return false
-}
-
-// compareFloat64 compares two float64 values.
-func compareFloat64(a float64, v2 interface{}) bool {
-	if b, ok := v2.(float64); ok {
-		return a == b
-	}
-	return false
-}
-
-// compareString compares two string values.
-func compareString(a string, v2 interface{}) bool {
-	if b, ok := v2.(string); ok {
-		return a == b
-	}
-	return false
-}
-
-// compareBytes compares two byte slices for equality.
-func compareBytes(a []byte, v2 interface{}) bool {
-	b, ok := v2.([]byte)
-	if !ok {
-		return false
-	}
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// parseRecordValues parses a SQLite record and extracts column values.
-// This is a simplified implementation that works with the record format.
-func parseRecordValues(data []byte, table *schema.Table) (map[string]interface{}, error) {
-	// This is a placeholder implementation
-	// In a real implementation, this would:
-	// 1. Parse the record header to get serial types
-	// 2. Extract each column value based on its serial type
-	// 3. Map values to column names
-	//
-	// For now, we return an empty map as this requires integration
-	// with the record parsing logic from internal/vdbe/record.go
-
-	values := make(map[string]interface{})
-
-	// TODO: Implement proper record parsing
-	// This would use code similar to:
-	// - vdbe.DecodeRecord()
-	// - vdbe.ParseRecordHeader()
-
-	return values, nil
-}
-
-// CreateBackingIndex creates an automatic index to enforce this UNIQUE constraint.
-// This index is used for efficient duplicate detection.
-func (uc *UniqueConstraint) CreateBackingIndex(sch *schema.Schema, bt *btree.Btree) error {
-	// Check if index already exists
-	if _, exists := sch.GetIndex(uc.IndexName); exists {
-		// Index already created
-		return nil
-	}
-
-	// Create the index in the schema
-	// Note: We use CreateIndex from the schema package
-	// The index is automatically UNIQUE since it backs a UNIQUE constraint
-
-	// Check that the table exists
-	if _, tableExists := sch.GetTable(uc.TableName); !tableExists {
-		return fmt.Errorf("table %s not found", uc.TableName)
-	}
-
-	// Build indexed columns
-	indexedCols := make([]string, len(uc.Columns))
-	copy(indexedCols, uc.Columns)
-
-	// Allocate a B-tree root page for the index
-	rootPage, err := bt.CreateTable()
+	// Verify data was restored
+	page, err = pager.Get(1)
 	if err != nil {
-		return fmt.Errorf("failed to allocate index root page: %w", err)
+		t.Fatalf("failed to get page after rollback: %v", err)
 	}
+	defer pager.Put(page)
 
-	// Create the index structure
-	index := &schema.Index{
-		Name:     uc.IndexName,
-		Table:    uc.TableName,
-		RootPage: rootPage,
-		SQL:      uc.generateIndexSQL(),
-		Columns:  indexedCols,
-		Unique:   true, // This is a unique index
-		Partial:  uc.Partial,
-		Where:    uc.Where,
+	restoredData := string(page.Data[DatabaseHeaderSize : DatabaseHeaderSize+len(testData)])
+	if restoredData != string(testData) {
+		t.Errorf("data not restored correctly: got %q, want %q", restoredData, testData)
 	}
-
-	// Register the index in the schema
-	// We need to access the schema's internal map, which requires
-	// going through the public API
-	// For now, we'll manually add it (in production, this would use CreateIndex)
-	sch.Indexes[uc.IndexName] = index
-
-	return nil
 }
 
-// generateIndexSQL generates the CREATE INDEX SQL for this constraint's backing index.
-func (uc *UniqueConstraint) generateIndexSQL() string {
-	columns := strings.Join(uc.Columns, ", ")
-	sql := fmt.Sprintf("CREATE UNIQUE INDEX %s ON %s(%s)", uc.IndexName, uc.TableName, columns)
+// TestJournalRestoreEntryChecksumMismatch tests checksum validation in restoreEntry
+func TestJournalRestoreEntryChecksumMismatch(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_checksum.db")
 
-	if uc.Partial && uc.Where != "" {
-		sql += fmt.Sprintf(" WHERE %s", uc.Where)
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	journal := NewJournal(dbFile+"-journal", 4096, 1)
+	if err := journal.Open(); err != nil {
+		t.Fatalf("failed to open journal: %v", err)
 	}
 
-	return sql
+	// Create a corrupted journal entry
+	pageData := make([]byte, 4096)
+	for i := range pageData {
+		pageData[i] = byte(i % 256)
+	}
+
+	// Manually create an entry with wrong checksum
+	entry := make([]byte, 4+4096+4)
+	binary.BigEndian.PutUint32(entry[0:4], 1) // page number
+	copy(entry[4:4+4096], pageData)
+	binary.BigEndian.PutUint32(entry[4+4096:], 0xDEADBEEF) // wrong checksum
+
+	// Try to restore this corrupted entry
+	err = journal.restoreEntry(pager, entry)
+	if err == nil {
+		t.Error("expected error for checksum mismatch, got nil")
+	}
+	if err != nil && !bytes.Contains([]byte(err.Error()), []byte("checksum mismatch")) {
+		t.Errorf("expected checksum mismatch error, got: %v", err)
+	}
+
+	journal.Close()
 }
 
-// ExtractUniqueConstraints extracts all UNIQUE constraints from a table definition.
-// This includes both column-level UNIQUE constraints and table-level UNIQUE constraints.
-func ExtractUniqueConstraints(table *schema.Table) []*UniqueConstraint {
-	var constraints []*UniqueConstraint
+// TestJournalValidateHeader tests journal header validation
+func TestJournalValidateHeader(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_validate.db")
 
-	// Extract column-level UNIQUE constraints
-	for _, col := range table.Columns {
-		if col.Unique {
-			constraint := NewUniqueConstraint(
-				"", // Column-level constraints typically don't have names
-				table.Name,
-				[]string{col.Name},
-			)
-			constraints = append(constraints, constraint)
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	pager.Close()
+
+	journal := NewJournal(dbFile+"-journal", 4096, 1)
+
+	t.Run("validate valid header", func(t *testing.T) {
+		if err := journal.Open(); err != nil {
+			t.Fatalf("failed to open journal: %v", err)
+		}
+
+		// Write some data to create a valid header
+		pageData := make([]byte, 4096)
+		if err := journal.WriteOriginal(1, pageData); err != nil {
+			t.Fatalf("failed to write: %v", err)
+		}
+
+		journal.Close()
+
+		// Reopen to validate header
+		if err := journal.Open(); err != nil {
+			t.Fatalf("failed to reopen journal: %v", err)
+		}
+
+		// Validate header
+		valid, err := journal.validateHeader()
+		if err != nil {
+			t.Fatalf("failed to validate header: %v", err)
+		}
+		if !valid {
+			t.Error("valid header should pass validation")
+		}
+
+		journal.Close()
+	})
+}
+
+// TestLockUnixFcntlGetLk tests the fcntlGetLk function
+func TestLockUnixFcntlGetLk(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific test")
+	}
+
+	f, cleanup := createCoverageTestFile(t)
+	defer cleanup()
+
+	lm, err := NewLockManager(f)
+	if err != nil {
+		t.Fatalf("NewLockManager() error = %v", err)
+	}
+	defer lm.Close()
+
+	// Just verify the function returns a valid fcntl constant
+	cmd := lm.fcntlGetLk()
+	if cmd == 0 {
+		t.Error("fcntlGetLk returned 0, expected valid constant")
+	}
+}
+
+// TestLockUnixCheckReservedLock tests the CheckReservedLock function
+func TestLockUnixCheckReservedLock(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific test")
+	}
+
+	f1, cleanup1 := createCoverageTestFile(t)
+	defer cleanup1()
+
+	lm1, err := NewLockManager(f1)
+	if err != nil {
+		t.Fatalf("NewLockManager(1) error = %v", err)
+	}
+	defer lm1.Close()
+
+	// Check reserved lock when no lock is held
+	reserved, err := lm1.CheckReservedLock()
+	if err != nil {
+		t.Errorf("CheckReservedLock() error = %v", err)
+	}
+	if reserved {
+		t.Error("expected no reserved lock initially")
+	}
+
+	// Acquire shared lock then reserved
+	if err := lm1.AcquireLock(lockShared); err != nil {
+		t.Fatalf("AcquireLock(SHARED) error = %v", err)
+	}
+	if err := lm1.AcquireLock(lockReserved); err != nil {
+		t.Fatalf("AcquireLock(RESERVED) error = %v", err)
+	}
+
+	// Now check from another lock manager
+	f2, err := os.OpenFile(f1.Name(), os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatalf("failed to open file: %v", err)
+	}
+	defer f2.Close()
+
+	lm2, err := NewLockManager(f2)
+	if err != nil {
+		t.Fatalf("NewLockManager(2) error = %v", err)
+	}
+	defer lm2.Close()
+
+	reserved, err = lm2.CheckReservedLock()
+	if err != nil {
+		t.Errorf("CheckReservedLock() error = %v", err)
+	}
+	if !reserved {
+		t.Error("expected reserved lock to be detected")
+	}
+}
+
+// TestLockUnixAcquirePendingLock tests pending lock acquisition
+func TestLockUnixAcquirePendingLock(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific test")
+	}
+
+	f, cleanup := createCoverageTestFile(t)
+	defer cleanup()
+
+	lm, err := NewLockManager(f)
+	if err != nil {
+		t.Fatalf("NewLockManager() error = %v", err)
+	}
+	defer lm.Close()
+
+	// Acquire shared, then reserved, then pending
+	if err := lm.AcquireLock(lockShared); err != nil {
+		t.Fatalf("AcquireLock(SHARED) error = %v", err)
+	}
+	if err := lm.AcquireLock(lockReserved); err != nil {
+		t.Fatalf("AcquireLock(RESERVED) error = %v", err)
+	}
+	if err := lm.AcquireLock(lockPending); err != nil {
+		t.Fatalf("AcquireLock(PENDING) error = %v", err)
+	}
+
+	if lm.GetLockState() != lockPending {
+		t.Errorf("lock state = %v, want %v", lm.GetLockState(), lockPending)
+	}
+}
+
+// TestLockUnixAcquireReservedLock tests reserved lock acquisition edge cases
+func TestLockUnixAcquireReservedLock(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific test")
+	}
+
+	f1, cleanup1 := createCoverageTestFile(t)
+	defer cleanup1()
+
+	lm1, err := NewLockManager(f1)
+	if err != nil {
+		t.Fatalf("NewLockManager(1) error = %v", err)
+	}
+	defer lm1.Close()
+
+	// First acquire shared lock
+	if err := lm1.AcquireLock(lockShared); err != nil {
+		t.Fatalf("AcquireLock(SHARED) error = %v", err)
+	}
+
+	// Acquire reserved lock
+	if err := lm1.AcquireLock(lockReserved); err != nil {
+		t.Fatalf("AcquireLock(RESERVED) error = %v", err)
+	}
+
+	// Try to acquire reserved from another process (should fail)
+	f2, err := os.OpenFile(f1.Name(), os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatalf("failed to open file: %v", err)
+	}
+	defer f2.Close()
+
+	lm2, err := NewLockManager(f2)
+	if err != nil {
+		t.Fatalf("NewLockManager(2) error = %v", err)
+	}
+	defer lm2.Close()
+
+	// Acquire shared first
+	if err := lm2.AcquireLock(lockShared); err != nil {
+		t.Fatalf("AcquireLock(SHARED) error = %v", err)
+	}
+
+	// Try to acquire reserved (should fail)
+	err = lm2.AcquireLock(lockReserved)
+	if err == nil {
+		t.Error("expected error acquiring reserved when already held")
+	}
+}
+
+// TestTransactionErrorState tests transaction error state management
+func TestTransactionErrorState(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_error.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Set error state
+	testErr := fmt.Errorf("test error")
+	pager.setErrorState(testErr)
+
+	// Verify error state
+	if err := pager.validateTransactionState(); err == nil {
+		t.Error("expected error from validateTransactionState")
+	} else if err != testErr {
+		t.Errorf("expected %v, got %v", testErr, err)
+	}
+
+	// Clear error state
+	pager.clearErrorState()
+
+	// Verify cleared
+	if err := pager.validateTransactionState(); err != nil {
+		t.Errorf("expected no error after clear, got %v", err)
+	}
+}
+
+// TestTransactionUpgradeDowngradeLock tests lock upgrade/downgrade
+func TestTransactionUpgradeDowngradeLock(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_lock_updown.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Start with no lock
+	pager.lockState = LockNone
+
+	// Upgrade to write lock
+	if err := pager.upgradeToWriteLock(); err != nil {
+		t.Errorf("upgradeToWriteLock() error = %v", err)
+	}
+	if pager.lockState != LockReserved {
+		t.Errorf("lock state = %v, want %v", pager.lockState, LockReserved)
+	}
+
+	// Try to upgrade again (should be no-op)
+	if err := pager.upgradeToWriteLock(); err != nil {
+		t.Errorf("second upgradeToWriteLock() error = %v", err)
+	}
+
+	// Downgrade lock
+	if err := pager.downgradeLock(); err != nil {
+		t.Errorf("downgradeLock() error = %v", err)
+	}
+	if pager.lockState != LockShared {
+		t.Errorf("lock state = %v, want %v", pager.lockState, LockShared)
+	}
+
+	// Try to downgrade from shared (should be no-op)
+	if err := pager.downgradeLock(); err != nil {
+		t.Errorf("downgradeLock() from shared error = %v", err)
+	}
+}
+
+// TestTransactionTryUpgradeToExclusive tests exclusive lock upgrade
+func TestTransactionTryUpgradeToExclusive(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_exclusive.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Start from reserved state
+	pager.lockState = LockReserved
+
+	// Try to upgrade (should succeed if no other locks)
+	success, err := pager.TryUpgradeToExclusive()
+	if err != nil {
+		t.Errorf("TryUpgradeToExclusive() error = %v", err)
+	}
+
+	// Result depends on whether we can get exclusive lock
+	t.Logf("TryUpgradeToExclusive() success = %v", success)
+
+	// If already exclusive, should return true
+	pager.lockState = LockExclusive
+	success, err = pager.TryUpgradeToExclusive()
+	if err != nil {
+		t.Errorf("TryUpgradeToExclusive() when already exclusive error = %v", err)
+	}
+	if !success {
+		t.Error("expected success when already exclusive")
+	}
+}
+
+// TestTransactionWaitForReadersToFinish tests waiting for readers
+func TestTransactionWaitForReadersToFinish(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_wait.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Set to reserved state
+	pager.lockState = LockReserved
+
+	// Call WaitForReadersToFinish
+	err = pager.WaitForReadersToFinish()
+	// May or may not succeed depending on lock availability
+	t.Logf("WaitForReadersToFinish() error = %v", err)
+}
+
+// TestPagerJournalZeroHeader tests zeroing journal header via journal API
+func TestPagerJournalZeroHeader(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_zero.db")
+	journalFile := dbFile + "-journal"
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Start a write transaction to create journal
+	page, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("failed to write page: %v", err)
+	}
+	pager.Put(page)
+
+	// Commit to ensure journal is created and synced
+	if err := pager.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+
+	// Create a new journal for testing
+	journal := NewJournal(journalFile, 4096, 1)
+	if err := journal.Open(); err != nil {
+		t.Fatalf("failed to open journal: %v", err)
+	}
+
+	pageData := make([]byte, 4096)
+	if err := journal.WriteOriginal(1, pageData); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+	journal.Close()
+
+	// Zero the header
+	journal = NewJournal(journalFile, 4096, 1)
+	if err := journal.ZeroHeader(); err != nil {
+		t.Errorf("ZeroHeader() error = %v", err)
+	}
+
+	// Verify journal is no longer valid
+	valid, _ := journal.IsValid()
+	if valid {
+		t.Error("journal should not be valid after zeroing header")
+	}
+}
+
+// TestPagerFullCommitCycle tests complete commit cycle
+func TestPagerFullCommitCycle(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_commit_cycle.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Allocate some pages first
+	for i := 0; i < 5; i++ {
+		pgno, err := pager.AllocatePage()
+		if err != nil {
+			t.Fatalf("failed to allocate page: %v", err)
+		}
+		t.Logf("Allocated page %d", pgno)
+	}
+
+	if err := pager.Commit(); err != nil {
+		t.Fatalf("failed to commit allocation: %v", err)
+	}
+
+	// Free some pages to test freelist flush
+	if err := pager.FreePage(3); err != nil {
+		t.Fatalf("failed to free page: %v", err)
+	}
+
+	// Start new transaction
+	page, err := pager.Get(2)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("failed to write page: %v", err)
+	}
+
+	testData := []byte("COMMIT CYCLE TEST")
+	copy(page.Data[:len(testData)], testData)
+	pager.Put(page)
+
+	// Full commit should go through all phases
+	if err := pager.Commit(); err != nil {
+		t.Errorf("Commit() error = %v", err)
+	}
+
+	// Verify data persisted
+	page2, err := pager.Get(2)
+	if err != nil {
+		t.Fatalf("failed to get page after commit: %v", err)
+	}
+	defer pager.Put(page2)
+
+	if string(page2.Data[:len(testData)]) != string(testData) {
+		t.Error("data not persisted correctly after commit")
+	}
+}
+
+// TestPagerInitNewDatabase tests new database initialization
+func TestPagerInitNewDatabaseViaOpen(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_init.db")
+
+	// Open will initialize a new database
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to open pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Verify header was created
+	if pager.GetHeader() == nil {
+		t.Error("header should be initialized")
+	}
+
+	// Verify page count
+	if pager.PageCount() == 0 {
+		t.Error("page count should be > 0")
+	}
+
+	// Verify page size
+	if pager.PageSize() != 4096 {
+		t.Errorf("page size = %d, want 4096", pager.PageSize())
+	}
+}
+
+// TestFreeListProcessTrunkPage tests trunk page processing
+func TestFreeListProcessTrunkPage(t *testing.T) {
+	t.Parallel()
+	pager, cleanup := createTestPagerForFreeList(t)
+	defer cleanup()
+
+	fl := NewFreeList(pager)
+
+	// Create pages to work with
+	for i := Pgno(2); i <= 50; i++ {
+		page, err := pager.Get(i)
+		if err != nil {
+			t.Fatalf("failed to get page %d: %v", i, err)
+		}
+		if err := pager.Write(page); err != nil {
+			t.Fatalf("failed to write page %d: %v", i, err)
+		}
+		pager.Put(page)
+	}
+
+	if err := pager.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+
+	// Free many pages to create trunk structure
+	for i := Pgno(10); i <= 40; i++ {
+		if err := fl.Free(i); err != nil {
+			t.Fatalf("failed to free page %d: %v", i, err)
 		}
 	}
 
-	// Extract table-level UNIQUE constraints
-	for _, tc := range table.Constraints {
-		if tc.Type == schema.ConstraintUnique {
-			constraint := NewUniqueConstraint(
-				tc.Name,
-				table.Name,
-				tc.Columns,
-			)
-			constraints = append(constraints, constraint)
-		}
+	// Flush to create trunk pages
+	if err := fl.Flush(); err != nil {
+		t.Fatalf("failed to flush: %v", err)
 	}
 
-	return constraints
+	// Verify trunk exists
+	if fl.GetFirstTrunk() == 0 {
+		t.Fatal("expected non-zero first trunk")
+	}
+
+	// Read and verify trunk page
+	nextTrunk, leaves, err := fl.ReadTrunk(fl.GetFirstTrunk())
+	if err != nil {
+		t.Fatalf("failed to read trunk: %v", err)
+	}
+
+	t.Logf("Trunk page: next=%d, leaves=%d", nextTrunk, len(leaves))
+
+	// Verify leaves
+	if len(leaves) == 0 {
+		t.Error("expected at least one leaf page")
+	}
 }
 
-// ValidateTableRow validates all UNIQUE constraints on a table for a given row.
-// Returns the first constraint violation encountered, or nil if all constraints pass.
-func ValidateTableRow(table *schema.Table, bt *btree.Btree, values map[string]interface{}, rowid int64) error {
-	constraints := ExtractUniqueConstraints(table)
+// Helper function to create test file for coverage tests
+func createCoverageTestFile(t *testing.T) (*os.File, func()) {
+	t.Helper()
 
-	for _, constraint := range constraints {
-		if err := constraint.Validate(table, bt, values, rowid); err != nil {
-			return err
-		}
+	tmpFile, err := os.CreateTemp(t.TempDir(), "lock_test_*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
 	}
 
-	return nil
+	// Write some data to make it a valid file
+	data := make([]byte, 4096)
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		t.Fatalf("failed to write to temp file: %v", err)
+	}
+
+	cleanup := func() {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+	}
+
+	return tmpFile, cleanup
 }
 
-// EnsureUniqueIndexes creates backing indexes for all UNIQUE constraints on a table.
-// This should be called when a table is created or when constraints are added.
-func EnsureUniqueIndexes(table *schema.Table, sch *schema.Schema, bt *btree.Btree) error {
-	constraints := ExtractUniqueConstraints(table)
-
-	for _, constraint := range constraints {
-		if err := constraint.CreateBackingIndex(sch, bt); err != nil {
-			return fmt.Errorf("failed to create backing index for constraint: %w", err)
-		}
+// TestBusyHandlerRetry tests busy handler with retry logic
+func TestBusyHandlerRetry(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific test")
 	}
 
-	return nil
+	dbFile := filepath.Join(t.TempDir(), "test_busy.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Set a busy handler with timeout
+	handler := BusyTimeout(100) // 100ms timeout
+	pager.WithBusyHandler(handler)
+
+	// Try operations that might trigger busy handler
+	page, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("failed to write page: %v", err)
+	}
+	pager.Put(page)
+
+	if err := pager.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
 }

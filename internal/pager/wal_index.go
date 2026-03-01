@@ -1,783 +1,851 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package planner
+package pager
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
-	"strings"
-
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"hash/crc32"
+	"os"
+	"sync"
+	"syscall"
+	"unsafe"
 )
 
-// ExplainNode represents a node in the query plan tree.
-// This mirrors SQLite's EXPLAIN QUERY PLAN output format.
-type ExplainNode struct {
-	// ID is the node identifier (unique within the plan)
-	ID int
+// WAL index constants
+const (
+	// WALIndexHeaderSize is the size of the WAL index header
+	WALIndexHeaderSize = 136
 
-	// Parent is the ID of the parent node (-1 for root nodes)
-	Parent int
+	// WALIndexMaxReaders is the maximum number of concurrent readers
+	WALIndexMaxReaders = 5
 
-	// NotUsed is reserved for compatibility (always 0)
-	NotUsed int
+	// WALIndexHashTableSize is the number of hash table slots
+	// SQLite uses 4096 slots per hash table region
+	WALIndexHashTableSize = 4096
 
-	// Detail is the textual description of this plan step
-	Detail string
+	// WALIndexMagic is the magic number for WAL index files
+	WALIndexMagic = 0x377f0682
 
-	// Children are the child nodes in the plan tree
-	Children []*ExplainNode
+	// WALIndexVersion is the version number for the WAL index format
+	WALIndexVersion = 3007000
 
-	// Level is the nesting level (0 for root, 1 for children, etc.)
-	Level int
+	// WALIndexHashSlotSize is the size of each hash slot (8 bytes: 4 for pgno, 4 for frame)
+	WALIndexHashSlotSize = 8
+)
 
-	// Cost estimates (for enhanced EXPLAIN QUERY PLAN)
-	EstimatedRows int64   // Estimated number of rows this operation will produce
-	EstimatedCost float64 // Relative cost estimate (higher = more expensive)
+// Common errors
+var (
+	ErrWALIndexCorrupt      = errors.New("WAL index is corrupt")
+	ErrWALIndexLocked       = errors.New("WAL index is locked")
+	ErrInvalidReader        = errors.New("invalid reader ID")
+	ErrFrameNotFound        = errors.New("frame not found in WAL index")
+	ErrWALChecksumMismatch  = errors.New("WAL frame checksum mismatch")
+)
+
+// WALIndexHeader represents the header of the WAL index (shared memory).
+// This structure is based on the wal-index header in SQLite.
+type WALIndexHeader struct {
+	// Version number - used to detect format changes
+	Version uint32
+
+	// Unused padding
+	Unused uint32
+
+	// Change counter - incremented on each write
+	Change uint32
+
+	// isInit flag - 1 if initialized, 0 otherwise
+	IsInit uint8
+
+	// bigEndCksum flag - 1 if checksums are big-endian
+	BigEndCksum uint8
+
+	// Page size in bytes
+	PageSize uint16
+
+	// mxFrame - maximum frame number in the log
+	MxFrame uint32
+
+	// nPage - number of pages in the database
+	NPage uint32
+
+	// aFrameCksum - checksum of frames
+	AFrameCksum [2]uint32
+
+	// aSalt - salt values for checksum
+	ASalt [2]uint32
+
+	// aCksum - checksum of this header
+	ACksum [2]uint32
+
+	// Read marks - mark the end of frames that each reader has consumed
+	// Index 0 is unused, indices 1-5 are for readers
+	ReadMark [WALIndexMaxReaders]uint32
+
+	// Mutex/lock for header access
+	mu sync.RWMutex
 }
 
-// ExplainPlan represents a complete query execution plan.
-type ExplainPlan struct {
-	// Roots are the top-level nodes in the plan
-	Roots []*ExplainNode
-
-	// nextID is used for generating unique node IDs
-	nextID int
+// WALHashSlot represents a single slot in the hash table
+type WALHashSlot struct {
+	PageNum  uint32 // Page number
+	FrameNum uint32 // Frame number in WAL file
 }
 
-// NewExplainPlan creates a new empty explain plan.
-func NewExplainPlan() *ExplainPlan {
-	return &ExplainPlan{
-		Roots:  make([]*ExplainNode, 0),
-		nextID: 0,
-	}
+// WALIndex manages the WAL index (wal-index or shm file).
+// The WAL index provides fast lookup of pages in the WAL file using a hash table.
+// It's stored in shared memory to allow concurrent access by multiple processes.
+type WALIndex struct {
+	// File handle for the WAL index file (.db-shm)
+	file *os.File
+
+	// Filename of the WAL index
+	filename string
+
+	// Memory-mapped region (shared memory)
+	mmap []byte
+
+	// Header of the WAL index
+	header *WALIndexHeader
+
+	// Hash table for page number to frame number mapping
+	// In a full implementation, this would be backed by the mmap region
+	hashTable map[uint32]uint32
+
+	// Page size of the database
+	pageSize int
+
+	// Whether the index has been initialized
+	initialized bool
+
+	// Mutex for thread-safe operations
+	mu sync.RWMutex
 }
 
-// AddNode adds a new node to the plan and returns it.
-func (p *ExplainPlan) AddNode(parent *ExplainNode, detail string) *ExplainNode {
-	node := &ExplainNode{
-		ID:            p.nextID,
-		Parent:        -1,
-		NotUsed:       0,
-		Detail:        detail,
-		Children:      make([]*ExplainNode, 0),
-		Level:         0,
-		EstimatedRows: 0,
-		EstimatedCost: 0,
-	}
-	p.nextID++
+// NewWALIndex creates or opens a WAL index file.
+// The filename should be the database filename (the .db-shm extension will be added).
+func NewWALIndex(filename string) (*WALIndex, error) {
+	shmFilename := filename + "-shm"
 
-	if parent == nil {
-		// Root node
-		p.Roots = append(p.Roots, node)
-	} else {
-		// Child node
-		node.Parent = parent.ID
-		node.Level = parent.Level + 1
-		parent.Children = append(parent.Children, node)
+	idx := &WALIndex{
+		filename:  shmFilename,
+		hashTable: make(map[uint32]uint32),
 	}
 
-	return node
+	if err := idx.open(); err != nil {
+		return nil, err
+	}
+
+	return idx, nil
 }
 
-// AddNodeWithCost adds a new node with cost estimates to the plan and returns it.
-func (p *ExplainPlan) AddNodeWithCost(parent *ExplainNode, detail string, estimatedRows int64, estimatedCost float64) *ExplainNode {
-	node := p.AddNode(parent, detail)
-	node.EstimatedRows = estimatedRows
-	node.EstimatedCost = estimatedCost
-	return node
-}
+// open opens or creates the WAL index file.
+func (w *WALIndex) open() error {
+	var err error
 
-// FormatAsTable formats the explain plan in SQLite's table format.
-// Output format: id | parent | notused | detail
-func (p *ExplainPlan) FormatAsTable() [][]interface{} {
-	rows := make([][]interface{}, 0)
-
-	// Traverse the tree in depth-first order
-	var traverse func(*ExplainNode)
-	traverse = func(node *ExplainNode) {
-		// Add indentation to detail based on level
-		detail := strings.Repeat("  ", node.Level) + node.Detail
-
-		row := []interface{}{
-			node.ID,
-			node.Parent,
-			node.NotUsed,
-			detail,
-		}
-		rows = append(rows, row)
-
-		// Recursively traverse children
-		for _, child := range node.Children {
-			traverse(child)
-		}
+	// Open or create the WAL index file
+	w.file, err = os.OpenFile(
+		w.filename,
+		os.O_RDWR|os.O_CREATE,
+		0600,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to open WAL index file: %w", err)
 	}
 
-	// Process all root nodes
-	for _, root := range p.Roots {
-		traverse(root)
+	// Get file size
+	info, err := w.file.Stat()
+	if err != nil {
+		w.file.Close()
+		return fmt.Errorf("failed to stat WAL index file: %w", err)
 	}
 
-	return rows
-}
+	// Calculate minimum size for WAL index (header + one hash table)
+	minSize := int64(WALIndexHeaderSize + WALIndexHashTableSize*WALIndexHashSlotSize)
 
-// FormatAsText formats the explain plan as human-readable text.
-func (p *ExplainPlan) FormatAsText() string {
-	var sb strings.Builder
-
-	var traverse func(*ExplainNode)
-	traverse = func(node *ExplainNode) {
-		// Add indentation based on level
-		indent := strings.Repeat("  ", node.Level)
-		sb.WriteString(fmt.Sprintf("%s%s\n", indent, node.Detail))
-
-		// Recursively traverse children
-		for _, child := range node.Children {
-			traverse(child)
-		}
-	}
-
-	// Process all root nodes
-	for _, root := range p.Roots {
-		traverse(root)
-	}
-
-	return sb.String()
-}
-
-// GenerateExplain generates an explain plan for a SQL statement.
-// This is the main entry point for EXPLAIN QUERY PLAN functionality.
-func GenerateExplain(stmt parser.Statement) (*ExplainPlan, error) {
-	return GenerateExplainWithSchema(stmt, nil)
-}
-
-// GenerateExplainWithSchema generates an explain plan with schema information for better cost estimates.
-func GenerateExplainWithSchema(stmt parser.Statement, schemaInfo *schema.Schema) (*ExplainPlan, error) {
-	plan := NewExplainPlan()
-
-	switch s := stmt.(type) {
-	case *parser.SelectStmt:
-		return generateExplainSelect(plan, s)
-	case *parser.InsertStmt:
-		return generateExplainInsert(plan, s)
-	case *parser.UpdateStmt:
-		return generateExplainUpdate(plan, s)
-	case *parser.DeleteStmt:
-		return generateExplainDelete(plan, s)
-	default:
-		return nil, fmt.Errorf("EXPLAIN not supported for statement type: %T", stmt)
-	}
-}
-
-// generateExplainSelect generates an explain plan for a SELECT statement.
-func generateExplainSelect(plan *ExplainPlan, stmt *parser.SelectStmt) (*ExplainPlan, error) {
-	features := analyzeSelectFeatures(stmt)
-	tableName := extractMainTableName(stmt)
-
-	if features.hasSubqueries {
-		return generateExplainWithSubqueries(plan, stmt)
-	}
-
-	if features.hasJoins {
-		return generateExplainWithJoins(plan, stmt, tableName)
-	}
-
-	return generateExplainSimpleSelect(plan, stmt, tableName, features)
-}
-
-// selectFeatures represents features detected in a SELECT statement.
-type selectFeatures struct {
-	hasJoins      bool
-	hasSubqueries bool
-	hasAggregates bool
-	hasOrderBy    bool
-}
-
-// analyzeSelectFeatures analyzes a SELECT statement for various features.
-func analyzeSelectFeatures(stmt *parser.SelectStmt) selectFeatures {
-	return selectFeatures{
-		hasJoins:      stmt.From != nil && len(stmt.From.Joins) > 0,
-		hasSubqueries: hasFromSubqueries(stmt),
-		hasAggregates: detectAggregates(stmt),
-		hasOrderBy:    len(stmt.OrderBy) > 0,
-	}
-}
-
-// extractMainTableName extracts the main table name from a SELECT statement.
-func extractMainTableName(stmt *parser.SelectStmt) string {
-	if stmt.From != nil && len(stmt.From.Tables) > 0 {
-		tableName := stmt.From.Tables[0].TableName
-		if tableName == "" && stmt.From.Tables[0].Subquery != nil {
-			return "subquery"
-		}
-		return tableName
-	}
-	return ""
-}
-
-// generateExplainWithSubqueries handles EXPLAIN for queries with subqueries.
-func generateExplainWithSubqueries(plan *ExplainPlan, stmt *parser.SelectStmt) (*ExplainPlan, error) {
-	root := plan.AddNode(nil, "COMPOUND QUERY")
-	for i, table := range stmt.From.Tables {
-		if table.Subquery != nil {
-			subNode := plan.AddNode(root, fmt.Sprintf("SUBQUERY %d", i+1))
-			subPlan, err := generateExplainSelect(NewExplainPlan(), table.Subquery)
-			if err == nil && len(subPlan.Roots) > 0 {
-				for _, subRoot := range subPlan.Roots {
-					mergeSubplan(subNode, subRoot, plan)
-				}
-			}
-		}
-	}
-	return plan, nil
-}
-
-// generateExplainWithJoins handles EXPLAIN for queries with JOINs.
-func generateExplainWithJoins(plan *ExplainPlan, stmt *parser.SelectStmt, tableName string) (*ExplainPlan, error) {
-	estimator := NewCostEstimator()
-	root := plan.AddNode(nil, "QUERY PLAN")
-
-	// Estimate main table scan
-	leftRows, leftCost := estimator.EstimateTableScan(tableName, stmt.Where != nil)
-	scanDetail := formatTableScanWithCost(tableName, stmt.Where, false, leftRows, leftCost)
-	mainScan := plan.AddNodeWithCost(root, scanDetail, leftRows, leftCost)
-
-	currentRows := leftRows
-	totalCost := leftCost
-
-	for _, join := range stmt.From.Joins {
-		// Estimate right table scan
-		rightRows, rightCost := estimator.EstimateTableScan(join.Table.TableName, join.Condition.On != nil)
-
-		// Estimate join cost
-		hasIndex := false // Simplified: assume no index
-		joinRows, joinCost := estimator.EstimateJoinCost(currentRows, rightRows, join.Type, hasIndex)
-
-		joinType := formatJoinType(join.Type)
-		joinDetail := fmt.Sprintf("%s (cost=%.2f rows=%d)", joinType, joinCost, joinRows)
-		joinNode := plan.AddNodeWithCost(mainScan, joinDetail, joinRows, joinCost)
-
-		scanDetail := formatTableScanWithCost(join.Table.TableName, join.Condition.On, false, rightRows, rightCost)
-		plan.AddNodeWithCost(joinNode, scanDetail, rightRows, rightCost)
-
-		currentRows = joinRows
-		totalCost += joinCost + rightCost
-	}
-
-	return plan, nil
-}
-
-// formatJoinType returns the string representation of a join type.
-func formatJoinType(joinType parser.JoinType) string {
-	switch joinType {
-	case parser.JoinLeft:
-		return "LEFT JOIN"
-	case parser.JoinRight:
-		return "RIGHT JOIN"
-	case parser.JoinFull:
-		return "FULL JOIN"
-	case parser.JoinCross:
-		return "CROSS JOIN"
-	default:
-		return "INNER JOIN"
-	}
-}
-
-// generateExplainSimpleSelect handles EXPLAIN for simple SELECT queries.
-func generateExplainSimpleSelect(plan *ExplainPlan, stmt *parser.SelectStmt, tableName string, features selectFeatures) (*ExplainPlan, error) {
-	estimator := NewCostEstimator()
-
-	root := plan.AddNode(nil, "QUERY PLAN")
-
-	// Estimate table scan cost
-	estimatedRows, estimatedCost := estimator.EstimateTableScan(tableName, stmt.Where != nil)
-	scanDetail := formatTableScanWithCost(tableName, stmt.Where, false, estimatedRows, estimatedCost)
-	scanNode := plan.AddNodeWithCost(root, scanDetail, estimatedRows, estimatedCost)
-
-	if features.hasAggregates {
-		aggRows, aggCost := estimator.EstimateAggregateCost(estimatedRows, 0)
-		aggDetail := fmt.Sprintf("USE TEMP B-TREE FOR GROUP BY (cost=%.2f rows=%d)", aggCost, aggRows)
-		plan.AddNodeWithCost(scanNode, aggDetail, aggRows, aggCost)
-		estimatedRows = aggRows
-		estimatedCost += aggCost
-	}
-
-	if features.hasOrderBy {
-		addOrderByNodeWithCost(plan, scanNode, stmt.OrderBy, estimatedRows, estimator)
-	}
-
-	return plan, nil
-}
-
-// addOrderByNode adds an ORDER BY node to the explain plan.
-func addOrderByNode(plan *ExplainPlan, parent *ExplainNode, orderBy []parser.OrderingTerm) {
-	var orderCols []string
-	for _, term := range orderBy {
-		if ident, ok := term.Expr.(*parser.IdentExpr); ok {
-			orderCols = append(orderCols, ident.Name)
-		}
-	}
-	if len(orderCols) > 0 {
-		sortDetail := fmt.Sprintf("USE TEMP B-TREE FOR ORDER BY (%s)", strings.Join(orderCols, ", "))
-		plan.AddNode(parent, sortDetail)
-	}
-}
-
-// addOrderByNodeWithCost adds an ORDER BY node with cost estimates to the explain plan.
-func addOrderByNodeWithCost(plan *ExplainPlan, parent *ExplainNode, orderBy []parser.OrderingTerm, inputRows int64, estimator *CostEstimator) {
-	var orderCols []string
-	for _, term := range orderBy {
-		if ident, ok := term.Expr.(*parser.IdentExpr); ok {
-			orderCols = append(orderCols, ident.Name)
-		}
-	}
-	if len(orderCols) > 0 {
-		sortRows, sortCost := estimator.EstimateSortCost(inputRows)
-		sortDetail := fmt.Sprintf("USE TEMP B-TREE FOR ORDER BY (%s) (cost=%.2f rows=%d)",
-			strings.Join(orderCols, ", "), sortCost, sortRows)
-		plan.AddNodeWithCost(parent, sortDetail, sortRows, sortCost)
-	}
-}
-
-// generateExplainInsert generates an explain plan for an INSERT statement.
-func generateExplainInsert(plan *ExplainPlan, stmt *parser.InsertStmt) (*ExplainPlan, error) {
-	_ = NewCostEstimator() // Reserved for future cost estimation
-	root := plan.AddNode(nil, "QUERY PLAN")
-
-	// Estimate insert cost
-	numRows := int64(1) // Single row insert by default
-	if stmt.Select != nil {
-		numRows = 1000 // Estimate for INSERT...SELECT
-	} else if len(stmt.Values) > 0 {
-		numRows = int64(len(stmt.Values))
-	}
-
-	insertCost := float64(numRows) * 2.0 // Cost per row insert
-	detail := fmt.Sprintf("INSERT INTO %s (cost=%.2f rows=%d)", stmt.Table, insertCost, numRows)
-	insertNode := plan.AddNodeWithCost(root, detail, numRows, insertCost)
-
-	// Check if INSERT...SELECT
-	if stmt.Select != nil {
-		selectPlan, err := generateExplainSelect(NewExplainPlan(), stmt.Select)
-		if err == nil && len(selectPlan.Roots) > 0 {
-			for _, subRoot := range selectPlan.Roots {
-				mergeSubplan(insertNode, subRoot, plan)
-			}
+	// If file is too small or empty, initialize it
+	if info.Size() < minSize {
+		if err := w.initializeFile(minSize); err != nil {
+			w.file.Close()
+			return err
 		}
 	}
 
-	return plan, nil
-}
-
-// generateExplainUpdate generates an explain plan for an UPDATE statement.
-func generateExplainUpdate(plan *ExplainPlan, stmt *parser.UpdateStmt) (*ExplainPlan, error) {
-	estimator := NewCostEstimator()
-	root := plan.AddNode(nil, "QUERY PLAN")
-
-	// Estimate scan cost
-	scanRows, scanCost := estimator.EstimateTableScan(stmt.Table, stmt.Where != nil)
-
-	// Estimate update cost (scan + write)
-	updateCost := scanCost + float64(scanRows)*1.5 // Additional cost for writing
-	detail := fmt.Sprintf("UPDATE %s (cost=%.2f rows=%d)", stmt.Table, updateCost, scanRows)
-	updateNode := plan.AddNodeWithCost(root, detail, scanRows, updateCost)
-
-	// Add scan information
-	scanDetail := formatTableScanWithCost(stmt.Table, stmt.Where, true, scanRows, scanCost)
-	plan.AddNodeWithCost(updateNode, scanDetail, scanRows, scanCost)
-
-	return plan, nil
-}
-
-// generateExplainDelete generates an explain plan for a DELETE statement.
-func generateExplainDelete(plan *ExplainPlan, stmt *parser.DeleteStmt) (*ExplainPlan, error) {
-	estimator := NewCostEstimator()
-	root := plan.AddNode(nil, "QUERY PLAN")
-
-	// Estimate scan cost
-	scanRows, scanCost := estimator.EstimateTableScan(stmt.Table, stmt.Where != nil)
-
-	// Estimate delete cost (scan + delete)
-	deleteCost := scanCost + float64(scanRows)*1.0 // Additional cost for deletion
-	detail := fmt.Sprintf("DELETE FROM %s (cost=%.2f rows=%d)", stmt.Table, deleteCost, scanRows)
-	deleteNode := plan.AddNodeWithCost(root, detail, scanRows, deleteCost)
-
-	// Add scan information
-	scanDetail := formatTableScanWithCost(stmt.Table, stmt.Where, true, scanRows, scanCost)
-	plan.AddNodeWithCost(deleteNode, scanDetail, scanRows, scanCost)
-
-	return plan, nil
-}
-
-// formatTableScan formats a table scan description.
-func formatTableScan(tableName string, where parser.Expression, isWrite bool) string {
-	if tableName == "" {
-		tableName = "?"
+	// Memory-map the file
+	if err := w.mmapFile(); err != nil {
+		w.file.Close()
+		return err
 	}
 
-	// Check for index usage (simplified - real implementation would analyze WHERE clause)
-	if where == nil {
-		return fmt.Sprintf("SCAN %s", tableName)
+	// Read the header
+	if err := w.readHeader(); err != nil {
+		w.Close()
+		return err
 	}
 
-	return formatTableScanWithWhere(tableName, where)
+	w.initialized = true
+	return nil
 }
 
-// formatTableScanWithCost formats a table scan description with cost estimates.
-func formatTableScanWithCost(tableName string, where parser.Expression, isWrite bool, estimatedRows int64, estimatedCost float64) string {
-	if tableName == "" {
-		tableName = "?"
+// initializeFile initializes a new WAL index file.
+func (w *WALIndex) initializeFile(size int64) error {
+	// Truncate to the desired size
+	if err := w.file.Truncate(size); err != nil {
+		return fmt.Errorf("failed to truncate WAL index file: %w", err)
 	}
 
-	baseScan := formatTableScan(tableName, where, isWrite)
-	return fmt.Sprintf("%s (cost=%.2f rows=%d)", baseScan, estimatedCost, estimatedRows)
+	// Create a new header
+	w.header = &WALIndexHeader{
+		Version:     WALIndexVersion,
+		IsInit:      1,
+		BigEndCksum: 0, // Use little-endian checksums
+	}
+
+	// Write the header directly to the file (mmap not set up yet)
+	if err := w.writeHeaderToFile(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
-// formatTableScanWithWhere formats a table scan description when WHERE clause exists
-func formatTableScanWithWhere(tableName string, where parser.Expression) string {
-	indexable, colName := analyzeIndexability(where)
+// writeHeaderToFile writes the header directly to the file (before mmap is established).
+func (w *WALIndex) writeHeaderToFile() error {
+	buf := make([]byte, WALIndexHeaderSize)
+	offset := 0
 
-	if indexable && colName != "" {
-		// Assume we might use an index on this column
-		return fmt.Sprintf("SEARCH %s USING INDEX (POSSIBLE %s)", tableName, colName)
+	binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.Version)
+	offset += 4
+
+	binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.Unused)
+	offset += 4
+
+	binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.Change)
+	offset += 4
+
+	buf[offset] = w.header.IsInit
+	offset++
+
+	buf[offset] = w.header.BigEndCksum
+	offset++
+
+	binary.LittleEndian.PutUint16(buf[offset:offset+2], w.header.PageSize)
+	offset += 2
+
+	binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.MxFrame)
+	offset += 4
+
+	binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.NPage)
+	offset += 4
+
+	// Write frame checksums
+	for i := 0; i < 2; i++ {
+		binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.AFrameCksum[i])
+		offset += 4
 	}
 
-	// Full scan with WHERE clause
-	return fmt.Sprintf("SCAN %s", tableName)
+	// Write salt values
+	for i := 0; i < 2; i++ {
+		binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.ASalt[i])
+		offset += 4
+	}
+
+	// Write checksums
+	for i := 0; i < 2; i++ {
+		binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.ACksum[i])
+		offset += 4
+	}
+
+	// Write read marks
+	for i := 0; i < WALIndexMaxReaders; i++ {
+		binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.ReadMark[i])
+		offset += 4
+	}
+
+	// Write to file at position 0
+	_, err := w.file.WriteAt(buf, 0)
+	if err != nil {
+		return fmt.Errorf("failed to write header to file: %w", err)
+	}
+
+	return w.file.Sync()
 }
 
-// formatIndexScan formats an index scan description.
-func formatIndexScan(candidate *IndexCandidate) string {
-	if candidate.IsUnique && candidate.HasEquality {
-		return fmt.Sprintf("SEARCH %s USING INDEX %s (%s=?)",
-			candidate.TableName, candidate.IndexName, candidate.Columns[0])
+// mmapFile memory-maps the WAL index file.
+// In a production implementation, this would use syscall.Mmap for true shared memory.
+// For simplicity, we use a basic file-backed approach.
+func (w *WALIndex) mmapFile() error {
+	info, err := w.file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat file for mmap: %w", err)
 	}
 
-	if candidate.IsCovering {
-		return fmt.Sprintf("SCAN %s USING COVERING INDEX %s",
-			candidate.TableName, candidate.IndexName)
+	size := int(info.Size())
+	if size == 0 {
+		return errors.New("cannot mmap empty file")
 	}
 
-	operation := "SEARCH"
-	if !candidate.HasEquality {
-		operation = "SCAN"
+	// Use syscall.Mmap for true memory mapping
+	mmap, err := syscall.Mmap(
+		int(w.file.Fd()),
+		0,
+		size,
+		syscall.PROT_READ|syscall.PROT_WRITE,
+		syscall.MAP_SHARED,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to mmap WAL index file: %w", err)
 	}
 
-	return fmt.Sprintf("%s %s USING INDEX %s",
-		operation, candidate.TableName, candidate.IndexName)
+	w.mmap = mmap
+	return nil
 }
 
-// analyzeIndexability determines if a WHERE expression is indexable
-func analyzeIndexability(where parser.Expression) (bool, string) {
-	binExpr, ok := where.(*parser.BinaryExpr)
+// Close closes the WAL index and releases resources.
+func (w *WALIndex) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	var firstErr error
+
+	// Unmap memory
+	if w.mmap != nil {
+		if err := syscall.Munmap(w.mmap); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("failed to munmap: %w", err)
+		}
+		w.mmap = nil
+	}
+
+	// Close file
+	if w.file != nil {
+		if err := w.file.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("failed to close file: %w", err)
+		}
+		w.file = nil
+	}
+
+	w.initialized = false
+	return firstErr
+}
+
+// InsertFrame adds a frame to the WAL index.
+// This records that the given page number is stored in the given frame number.
+func (w *WALIndex) InsertFrame(pgno uint32, frameNo uint32) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if !w.initialized {
+		return errors.New("WAL index not initialized")
+	}
+
+	if pgno == 0 {
+		return ErrInvalidPageNum
+	}
+
+	// Update the hash table (in-memory for now)
+	w.hashTable[pgno] = frameNo
+
+	// Update header's max frame number
+	w.header.mu.Lock()
+	if frameNo > w.header.MxFrame {
+		w.header.MxFrame = frameNo
+	}
+	w.header.Change++
+	w.header.mu.Unlock()
+
+	// Write the entry to the memory-mapped region
+	if err := w.writeHashEntry(pgno, frameNo); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// FindFrame finds the most recent frame number for a given page number.
+// Returns the frame number or an error if not found.
+func (w *WALIndex) FindFrame(pgno uint32) (uint32, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if !w.initialized {
+		return 0, errors.New("WAL index not initialized")
+	}
+
+	if pgno == 0 {
+		return 0, ErrInvalidPageNum
+	}
+
+	// Look up in hash table
+	frameNo, ok := w.hashTable[pgno]
 	if !ok {
-		return false, ""
+		return 0, ErrFrameNotFound
 	}
 
-	ident, ok := binExpr.Left.(*parser.IdentExpr)
-	if !ok {
-		return false, ""
-	}
-
-	// Simple heuristic: = and < > operators are indexable
-	indexable := isIndexableOperator(binExpr.Op)
-	return indexable, ident.Name
+	return frameNo, nil
 }
 
-// isIndexableOperator checks if an operator can use an index
-func isIndexableOperator(op parser.BinaryOp) bool {
-	return op == parser.OpEq || op == parser.OpLt ||
-		op == parser.OpGt || op == parser.OpLe ||
-		op == parser.OpGe
+// SetReadMark sets the read mark for a given reader.
+// The read mark indicates the last frame that the reader has consumed.
+// Reader IDs are 0-4 (0 is reserved, 1-4 are for actual readers).
+func (w *WALIndex) SetReadMark(reader int, frame uint32) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if !w.initialized {
+		return errors.New("WAL index not initialized")
+	}
+
+	if reader < 0 || reader >= WALIndexMaxReaders {
+		return ErrInvalidReader
+	}
+
+	w.header.mu.Lock()
+	w.header.ReadMark[reader] = frame
+	w.header.Change++
+	w.header.mu.Unlock()
+
+	// Write the updated header to the mmap region
+	return w.writeHeader()
 }
 
-// IndexCandidate represents a potential index that could be used for a query.
-type IndexCandidate struct {
-	IndexName     string
-	TableName     string
-	Columns       []string
-	IsUnique      bool
-	IsCovering    bool
-	HasEquality   bool
-	EstimatedRows int64
-	EstimatedCost float64
+// GetReadMark gets the read mark for a given reader.
+func (w *WALIndex) GetReadMark(reader int) (uint32, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if !w.initialized {
+		return 0, errors.New("WAL index not initialized")
+	}
+
+	if reader < 0 || reader >= WALIndexMaxReaders {
+		return 0, ErrInvalidReader
+	}
+
+	w.header.mu.RLock()
+	mark := w.header.ReadMark[reader]
+	w.header.mu.RUnlock()
+
+	return mark, nil
 }
 
-// findBestIndex analyzes the WHERE clause and available indexes to find the best index.
-// Returns nil if no suitable index is found (table scan should be used).
-func findBestIndex(tableName string, where parser.Expression, schemaInfo *schema.Schema) *IndexCandidate {
-	if schemaInfo == nil || where == nil {
-		return nil
+// GetMaxFrame returns the maximum frame number in the WAL.
+func (w *WALIndex) GetMaxFrame() uint32 {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if !w.initialized || w.header == nil {
+		return 0
 	}
 
-	// Get all indexes for this table
-	indexes := schemaInfo.GetTableIndexes(tableName)
-	if len(indexes) == 0 {
-		return nil
+	w.header.mu.RLock()
+	defer w.header.mu.RUnlock()
+	return w.header.MxFrame
+}
+
+// GetPageCount returns the number of pages in the database.
+func (w *WALIndex) GetPageCount() uint32 {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if !w.initialized || w.header == nil {
+		return 0
 	}
 
-	// Analyze WHERE clause to find usable columns
-	indexable, colName := analyzeIndexability(where)
-	if !indexable || colName == "" {
-		return nil
+	w.header.mu.RLock()
+	defer w.header.mu.RUnlock()
+	return w.header.NPage
+}
+
+// SetPageCount sets the number of pages in the database.
+func (w *WALIndex) SetPageCount(nPage uint32) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if !w.initialized {
+		return errors.New("WAL index not initialized")
 	}
 
-	// Find indexes that start with the referenced column
-	var bestCandidate *IndexCandidate
-	estimator := NewCostEstimator()
+	w.header.mu.Lock()
+	w.header.NPage = nPage
+	w.header.Change++
+	w.header.mu.Unlock()
 
-	for _, idx := range indexes {
-		if len(idx.Columns) == 0 {
-			continue
+	return w.writeHeader()
+}
+
+// Clear clears all entries from the WAL index.
+// This is called when the WAL is checkpointed and reset.
+func (w *WALIndex) Clear() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if !w.initialized {
+		return errors.New("WAL index not initialized")
+	}
+
+	// Clear the hash table
+	w.hashTable = make(map[uint32]uint32)
+
+	// Reset header
+	w.header.mu.Lock()
+	w.header.MxFrame = 0
+	w.header.Change++
+	for i := range w.header.ReadMark {
+		w.header.ReadMark[i] = 0
+	}
+	w.header.mu.Unlock()
+
+	// Clear the mmap region (zero out the hash table)
+	if err := w.clearHashTable(); err != nil {
+		return err
+	}
+
+	return w.writeHeader()
+}
+
+// readHeader reads the WAL index header from the memory-mapped region.
+func (w *WALIndex) readHeader() error {
+	if len(w.mmap) < WALIndexHeaderSize {
+		return ErrWALIndexCorrupt
+	}
+
+	w.header = &WALIndexHeader{}
+	w.readHeaderFields()
+
+	// If not initialized, initialize now
+	if w.header.IsInit == 0 {
+		return w.initializeHeader()
+	}
+
+	// Validate and possibly reinitialize header
+	if err := w.validateAndFixHeader(); err != nil {
+		return err
+	}
+
+	// Load hash table from mmap
+	return w.loadHashTable()
+}
+
+// readHeaderFields reads all header fields from mmap and returns final offset.
+func (w *WALIndex) readHeaderFields() int {
+	offset := 0
+	w.header.Version = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
+	offset += 4
+
+	w.header.Unused = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
+	offset += 4
+
+	w.header.Change = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
+	offset += 4
+
+	w.header.IsInit = w.mmap[offset]
+	offset++
+
+	w.header.BigEndCksum = w.mmap[offset]
+	offset++
+
+	w.header.PageSize = binary.LittleEndian.Uint16(w.mmap[offset : offset+2])
+	offset += 2
+
+	w.header.MxFrame = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
+	offset += 4
+
+	w.header.NPage = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
+	offset += 4
+
+	offset = readUint32Array(w.mmap, offset, w.header.AFrameCksum[:])
+	offset = readUint32Array(w.mmap, offset, w.header.ASalt[:])
+	offset = readUint32Array(w.mmap, offset, w.header.ACksum[:])
+	offset = readUint32Array(w.mmap, offset, w.header.ReadMark[:])
+
+	return offset
+}
+
+// readUint32Array reads multiple uint32 values from mmap at the given offset.
+func readUint32Array(mmap []byte, offset int, dest []uint32) int {
+	for i := range dest {
+		dest[i] = binary.LittleEndian.Uint32(mmap[offset : offset+4])
+		offset += 4
+	}
+	return offset
+}
+
+// initializeHeader initializes a new WAL index header.
+func (w *WALIndex) initializeHeader() error {
+	w.header.Version = WALIndexVersion
+	w.header.IsInit = 1
+	w.header.BigEndCksum = 0
+	return w.writeHeader()
+}
+
+// validateAndFixHeader validates the header version and reinitializes if needed.
+func (w *WALIndex) validateAndFixHeader() error {
+	if w.header.Version != WALIndexVersion && w.header.Version != 0 {
+		// Version mismatch - reinitialize
+		w.header.Version = WALIndexVersion
+		w.header.IsInit = 1
+		return w.writeHeader()
+	}
+	return nil
+}
+
+// writeHeader writes the WAL index header to the memory-mapped region.
+func (w *WALIndex) writeHeader() error {
+	if len(w.mmap) < WALIndexHeaderSize {
+		return ErrWALIndexCorrupt
+	}
+
+	offset := 0
+
+	binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.Version)
+	offset += 4
+
+	binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.Unused)
+	offset += 4
+
+	binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.Change)
+	offset += 4
+
+	w.mmap[offset] = w.header.IsInit
+	offset++
+
+	w.mmap[offset] = w.header.BigEndCksum
+	offset++
+
+	binary.LittleEndian.PutUint16(w.mmap[offset:offset+2], w.header.PageSize)
+	offset += 2
+
+	binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.MxFrame)
+	offset += 4
+
+	binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.NPage)
+	offset += 4
+
+	// Write frame checksums
+	for i := 0; i < 2; i++ {
+		binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.AFrameCksum[i])
+		offset += 4
+	}
+
+	// Write salt values
+	for i := 0; i < 2; i++ {
+		binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.ASalt[i])
+		offset += 4
+	}
+
+	// Write checksums
+	for i := 0; i < 2; i++ {
+		binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.ACksum[i])
+		offset += 4
+	}
+
+	// Write read marks
+	for i := 0; i < WALIndexMaxReaders; i++ {
+		binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.ReadMark[i])
+		offset += 4
+	}
+
+	// Sync to disk
+	if err := w.syncMmap(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// writeHashEntry writes a hash table entry to the memory-mapped region.
+func (w *WALIndex) writeHashEntry(pgno, frameNo uint32) error {
+	if len(w.mmap) < WALIndexHeaderSize {
+		return ErrWALIndexCorrupt
+	}
+
+	// Calculate hash slot
+	hash := w.hashFunction(pgno)
+
+	// Offset in mmap: header + hash_slot_index * slot_size
+	offset := WALIndexHeaderSize + int(hash)*WALIndexHashSlotSize
+
+	if offset+WALIndexHashSlotSize > len(w.mmap) {
+		return ErrWALIndexCorrupt
+	}
+
+	// Write page number and frame number
+	binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], pgno)
+	binary.LittleEndian.PutUint32(w.mmap[offset+4:offset+8], frameNo)
+
+	return nil
+}
+
+// loadHashTable loads the hash table from the memory-mapped region.
+func (w *WALIndex) loadHashTable() error {
+	if len(w.mmap) < WALIndexHeaderSize {
+		return ErrWALIndexCorrupt
+	}
+
+	// Clear existing hash table
+	w.hashTable = make(map[uint32]uint32)
+
+	// Read all hash slots
+	for i := 0; i < WALIndexHashTableSize; i++ {
+		offset := WALIndexHeaderSize + i*WALIndexHashSlotSize
+
+		if offset+WALIndexHashSlotSize > len(w.mmap) {
+			break
 		}
 
-		// Check if this index can be used (first column matches WHERE column)
-		if idx.Columns[0] != colName {
-			continue
-		}
+		pgno := binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
+		frameNo := binary.LittleEndian.Uint32(w.mmap[offset+4 : offset+8])
 
-		// Determine if this is an equality condition
-		hasEquality := false
-		if binExpr, ok := where.(*parser.BinaryExpr); ok {
-			hasEquality = binExpr.Op == parser.OpEq
-		}
-
-		// Estimate cost for this index
-		rows, cost := estimator.EstimateIndexScan(idx.Name, idx.Unique, false, hasEquality)
-
-		candidate := &IndexCandidate{
-			IndexName:     idx.Name,
-			TableName:     tableName,
-			Columns:       idx.Columns,
-			IsUnique:      idx.Unique,
-			IsCovering:    false, // TODO: Determine if covering
-			HasEquality:   hasEquality,
-			EstimatedRows: rows,
-			EstimatedCost: cost,
-		}
-
-		// Select the index with the lowest cost
-		if bestCandidate == nil || candidate.EstimatedCost < bestCandidate.EstimatedCost {
-			bestCandidate = candidate
+		// Only add valid entries (pgno != 0)
+		if pgno != 0 {
+			w.hashTable[pgno] = frameNo
 		}
 	}
 
-	return bestCandidate
+	return nil
 }
 
-// mergeSubplan merges a subplan tree into the parent plan.
-func mergeSubplan(parent *ExplainNode, subRoot *ExplainNode, plan *ExplainPlan) {
-	// Create a new node with adjusted IDs and levels
-	newNode := &ExplainNode{
-		ID:       plan.nextID,
-		Parent:   parent.ID,
-		NotUsed:  0,
-		Detail:   subRoot.Detail,
-		Children: make([]*ExplainNode, 0),
-		Level:    parent.Level + 1,
+// clearHashTable clears all hash table entries in the memory-mapped region.
+func (w *WALIndex) clearHashTable() error {
+	if len(w.mmap) < WALIndexHeaderSize {
+		return ErrWALIndexCorrupt
 	}
-	plan.nextID++
 
-	parent.Children = append(parent.Children, newNode)
+	// Zero out the hash table region
+	hashTableStart := WALIndexHeaderSize
+	hashTableSize := WALIndexHashTableSize * WALIndexHashSlotSize
+	hashTableEnd := hashTableStart + hashTableSize
 
-	// Recursively merge children
-	for _, child := range subRoot.Children {
-		mergeSubplan(newNode, child, plan)
+	if hashTableEnd > len(w.mmap) {
+		hashTableEnd = len(w.mmap)
 	}
+
+	for i := hashTableStart; i < hashTableEnd; i++ {
+		w.mmap[i] = 0
+	}
+
+	return w.syncMmap()
 }
 
-// hasFromSubqueries checks if a SELECT has subqueries in the FROM clause.
-func hasFromSubqueries(stmt *parser.SelectStmt) bool {
-	if stmt.From == nil {
-		return false
-	}
-
-	for _, table := range stmt.From.Tables {
-		if table.Subquery != nil {
-			return true
-		}
-	}
-
-	for _, join := range stmt.From.Joins {
-		if join.Table.Subquery != nil {
-			return true
-		}
-	}
-
-	return false
+// hashFunction computes a hash for a page number.
+// This is a simple hash function for distributing pages across slots.
+func (w *WALIndex) hashFunction(pgno uint32) uint32 {
+	// Simple modulo hash - in production, use a better hash function
+	return pgno % WALIndexHashTableSize
 }
 
-// detectAggregates checks if a SELECT contains aggregate functions.
-func detectAggregates(stmt *parser.SelectStmt) bool {
-	for _, col := range stmt.Columns {
-		if isAggregateExpr(col.Expr) {
-			return true
-		}
+// syncMmap syncs the memory-mapped region to disk.
+func (w *WALIndex) syncMmap() error {
+	if w.mmap == nil {
+		return errors.New("mmap not initialized")
 	}
-	return false
+
+	// Use msync to flush changes to disk
+	_, _, errno := syscall.Syscall(
+		syscall.SYS_MSYNC,
+		uintptr(unsafe.Pointer(&w.mmap[0])),
+		uintptr(len(w.mmap)),
+		uintptr(syscall.MS_SYNC),
+	)
+
+	if errno != 0 {
+		return fmt.Errorf("msync failed: %v", errno)
+	}
+
+	return nil
 }
 
-// isAggregateExpr checks if an expression is an aggregate function.
-func isAggregateExpr(expr parser.Expression) bool {
-	if expr == nil {
-		return false
+// Delete deletes the WAL index file.
+func (w *WALIndex) Delete() error {
+	// Close first (which takes its own lock)
+	if err := w.Close(); err != nil {
+		return err
 	}
 
-	fnExpr, ok := expr.(*parser.FunctionExpr)
-	if !ok {
-		return false
+	// Delete the file
+	if err := os.Remove(w.filename); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete WAL index file: %w", err)
 	}
 
-	aggFuncs := map[string]bool{
-		"COUNT": true, "SUM": true, "AVG": true,
-		"MIN": true, "MAX": true, "TOTAL": true,
-		"GROUP_CONCAT": true,
-	}
-
-	return aggFuncs[fnExpr.Name]
+	return nil
 }
 
-// CostEstimator provides cost estimation for query operations.
-type CostEstimator struct {
-	// Default heuristic values when statistics are unavailable
-	defaultTableRows int64
-	defaultIndexRows int64
+// GetChangeCounter returns the change counter from the header.
+// The change counter is incremented on each write to detect concurrent modifications.
+func (w *WALIndex) GetChangeCounter() uint32 {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
 
-	// Schema information for better estimates
-	schemaInfo *schema.Schema
+	if !w.initialized || w.header == nil {
+		return 0
+	}
+
+	w.header.mu.RLock()
+	defer w.header.mu.RUnlock()
+	return w.header.Change
 }
 
-// NewCostEstimator creates a new cost estimator with default values.
-func NewCostEstimator() *CostEstimator {
-	return &CostEstimator{
-		defaultTableRows: 1000000, // Assume 1M rows by default
-		defaultIndexRows: 100000,  // Assume 100K rows for index scans
-		schemaInfo:       nil,
-	}
+// IsInitialized returns true if the WAL index has been initialized.
+func (w *WALIndex) IsInitialized() bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.initialized
 }
 
-// NewCostEstimatorWithSchema creates a new cost estimator with schema information.
-func NewCostEstimatorWithSchema(schemaInfo *schema.Schema) *CostEstimator {
-	ce := NewCostEstimator()
-	ce.schemaInfo = schemaInfo
-	return ce
+// ValidateFrameChecksum validates a WAL frame using CRC32 checksum.
+// The frame data should include the page data, and expectedChecksum is compared against it.
+func (w *WALIndex) ValidateFrameChecksum(frameData []byte, expectedChecksum uint32) bool {
+	actualChecksum := crc32.ChecksumIEEE(frameData)
+	return actualChecksum == expectedChecksum
 }
 
-// getTableRowCount returns the row count for a table from statistics or defaults.
-func (ce *CostEstimator) getTableRowCount(tableName string) int64 {
-	if ce.schemaInfo != nil {
-		if table, ok := ce.schemaInfo.GetTable(tableName); ok {
-			if stats := table.GetTableStats(); stats != nil && stats.RowCount > 0 {
-				return stats.RowCount
-			}
-		}
-	}
-	return ce.defaultTableRows
+// CalculateFrameChecksum calculates CRC32 checksum for a WAL frame.
+func (w *WALIndex) CalculateFrameChecksum(frameData []byte) uint32 {
+	return crc32.ChecksumIEEE(frameData)
 }
 
-// EstimateTableScan estimates the cost of a full table scan.
-func (ce *CostEstimator) EstimateTableScan(tableName string, hasWhere bool) (rows int64, cost float64) {
-	// Get actual or estimated row count
-	totalRows := ce.getTableRowCount(tableName)
-	rows = totalRows
-
-	// Base cost is proportional to number of rows
-	// Full table scan = 1.0 cost per row
-	cost = float64(totalRows)
-
-	// WHERE clause reduces estimated rows but still scans all
-	if hasWhere {
-		rows = totalRows / 10 // Assume WHERE filters 90% of rows
-		// Cost remains the same (still need to scan all rows)
+// InsertFrameWithChecksum adds a frame to the WAL index with checksum validation.
+// This is a safer version of InsertFrame that validates data integrity.
+func (w *WALIndex) InsertFrameWithChecksum(pgno uint32, frameNo uint32, frameData []byte, checksum uint32) error {
+	// Validate checksum before inserting
+	if !w.ValidateFrameChecksum(frameData, checksum) {
+		return fmt.Errorf("%w: frame %d page %d", ErrWALChecksumMismatch, frameNo, pgno)
 	}
 
-	return rows, cost
+	// Proceed with normal insertion
+	return w.InsertFrame(pgno, frameNo)
 }
 
-// EstimateIndexScan estimates the cost of an index scan.
-func (ce *CostEstimator) EstimateIndexScan(indexName string, isUnique bool, isCovering bool, hasEquality bool) (rows int64, cost float64) {
-	// Unique index with equality: expect 1 row
-	if isUnique && hasEquality {
-		rows = 1
-		cost = 10.0 // Log(N) probes = ~10 for 1M rows
-		return
+// UpdateFrameChecksum updates the frame checksum in the header.
+// This should be called when new frames are added to the WAL.
+func (w *WALIndex) UpdateFrameChecksum(checksum1, checksum2 uint32) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if !w.initialized {
+		return errors.New("WAL index not initialized")
 	}
 
-	// Non-unique index with equality: expect ~1% of rows
-	if hasEquality {
-		rows = ce.defaultIndexRows / 100
-		cost = float64(rows) * 0.5 // Index scan is cheaper than table scan
-	} else {
-		// Range scan: expect ~10% of rows
-		rows = ce.defaultIndexRows / 10
-		cost = float64(rows) * 0.7
-	}
+	w.header.mu.Lock()
+	w.header.AFrameCksum[0] = checksum1
+	w.header.AFrameCksum[1] = checksum2
+	w.header.Change++
+	w.header.mu.Unlock()
 
-	// Covering index is cheaper (no table lookup needed)
-	if isCovering {
-		cost = cost * 0.8
-	}
-
-	return rows, cost
+	return w.writeHeader()
 }
 
-// EstimateJoinCost estimates the cost of joining two tables.
-func (ce *CostEstimator) EstimateJoinCost(leftRows, rightRows int64, joinType parser.JoinType, hasIndexOnRight bool) (rows int64, cost float64) {
-	// Estimate result rows based on join type
-	switch joinType {
-	case parser.JoinCross:
-		// Cartesian product
-		rows = leftRows * rightRows
-	case parser.JoinInner:
-		// Assume 10% selectivity for join condition
-		rows = (leftRows * rightRows) / 10
-	case parser.JoinLeft, parser.JoinRight:
-		// At least as many as the outer table
-		rows = leftRows
-		if joinType == parser.JoinRight {
-			rows = rightRows
-		}
-	case parser.JoinFull:
-		// Sum of both tables (worst case)
-		rows = leftRows + rightRows
-	default:
-		rows = leftRows
+// GetFrameChecksum returns the current frame checksums from the header.
+func (w *WALIndex) GetFrameChecksum() (uint32, uint32, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if !w.initialized || w.header == nil {
+		return 0, 0, errors.New("WAL index not initialized")
 	}
 
-	// Cost calculation
-	if hasIndexOnRight {
-		// Nested loop with index: O(N * log M)
-		cost = float64(leftRows) * (10.0 + float64(rightRows)*0.01)
-	} else {
-		// Nested loop without index: O(N * M)
-		cost = float64(leftRows) * float64(rightRows)
-	}
-
-	return rows, cost
-}
-
-// EstimateAggregateCost estimates the cost of aggregation (GROUP BY, DISTINCT).
-func (ce *CostEstimator) EstimateAggregateCost(inputRows int64, numGroups int64) (rows int64, cost float64) {
-	if numGroups == 0 {
-		// Estimate number of groups as sqrt(input rows)
-		numGroups = int64(1000) // Conservative estimate
-		if inputRows > 10000 {
-			numGroups = inputRows / 100
-		}
-	}
-
-	rows = numGroups
-	// Aggregation requires sorting or hashing: O(N log N)
-	cost = float64(inputRows) * 1.2
-
-	return rows, cost
-}
-
-// EstimateSortCost estimates the cost of sorting (ORDER BY).
-func (ce *CostEstimator) EstimateSortCost(inputRows int64) (rows int64, cost float64) {
-	rows = inputRows
-	// Sorting cost: O(N log N)
-	if inputRows > 0 {
-		cost = float64(inputRows) * 1.5
-	}
-	return rows, cost
+	w.header.mu.RLock()
+	defer w.header.mu.RUnlock()
+	return w.header.AFrameCksum[0], w.header.AFrameCksum[1], nil
 }

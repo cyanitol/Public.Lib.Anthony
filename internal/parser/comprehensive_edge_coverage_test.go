@@ -1,415 +1,1026 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package constraint
+package parser
 
 import (
 	"testing"
-
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
 )
 
-// TestFormatErrorMessagePublic tests the public FormatErrorMessage function
-func TestFormatErrorMessagePublic(t *testing.T) {
+// TestInsertDefaultValues tests INSERT with DEFAULT VALUES
+func TestInsertDefaultValues(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name       string
-		constraint *CheckConstraint
-		expected   string
+		name      string
+		sql       string
+		wantError bool
 	}{
 		{
-			"with name",
-			&CheckConstraint{
-				Name:       "check_age",
-				ExprString: "age > 0",
-			},
-			"CHECK constraint failed: check_age (age > 0)",
+			name:      "INSERT DEFAULT VALUES",
+			sql:       "INSERT INTO t DEFAULT VALUES;",
+			wantError: false,
 		},
 		{
-			"table level no name",
-			&CheckConstraint{
-				IsTableLevel: true,
-				ExprString:   "age > 0",
-			},
-			"CHECK constraint failed: age > 0",
-		},
-		{
-			"column level",
-			&CheckConstraint{
-				IsTableLevel: false,
-				ColumnName:   "age",
-				ExprString:   "age > 0",
-			},
-			"CHECK constraint failed for column age: age > 0",
+			name:      "INSERT DEFAULT without VALUES",
+			sql:       "INSERT INTO t DEFAULT;",
+			wantError: true,
 		},
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			result := FormatErrorMessage(tt.constraint)
-			if result != tt.expected {
-				t.Errorf("Expected %q, got %q", tt.expected, result)
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
 			}
 		})
 	}
 }
 
-// TestRemoveConstraints tests RemoveConstraints function
-func TestRemoveConstraints(t *testing.T) {
-	mgr := NewForeignKeyManager()
-	constraint := &ForeignKeyConstraint{
-		Table:    "users",
-		Columns:  []string{"dept_id"},
-		RefTable: "departments",
-		OnDelete: FKActionCascade,
-	}
-
-	mgr.AddConstraint(constraint)
-	if len(mgr.GetConstraints("users")) != 1 {
-		t.Error("Expected constraint to be added")
-	}
-
-	mgr.RemoveConstraints("users")
-	if len(mgr.GetConstraints("users")) != 0 {
-		t.Error("Expected constraints to be removed")
-	}
-}
-
-// TestConvertFKActionAll tests all foreign key action conversions
-func TestConvertFKActionAll(t *testing.T) {
+// TestInsertSelectSource tests INSERT with SELECT
+func TestInsertSelectSource(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		parserAction parser.ForeignKeyAction
-		expected     ForeignKeyAction
-	}{
-		{parser.FKActionSetNull, FKActionSetNull},
-		{parser.FKActionSetDefault, FKActionSetDefault},
-		{parser.FKActionCascade, FKActionCascade},
-		{parser.FKActionRestrict, FKActionRestrict},
-		{parser.FKActionNoAction, FKActionNoAction},
-		{parser.ForeignKeyAction(99), FKActionNone},
-	}
-
-	for _, tt := range tests {
-		result := convertFKAction(tt.parserAction)
-		if result != tt.expected {
-			t.Errorf("convertFKAction(%v): expected %v, got %v", tt.parserAction, tt.expected, result)
-		}
-	}
-}
-
-// TestConvertDeferrableModeAll tests all deferrable mode conversions
-func TestConvertDeferrableModeAll(t *testing.T) {
-	tests := []struct {
-		parserMode parser.DeferrableMode
-		expected   DeferrableMode
-	}{
-		{parser.DeferrableInitiallyDeferred, DeferrableInitiallyDeferred},
-		{parser.DeferrableInitiallyImmediate, DeferrableInitiallyImmediate},
-		{parser.DeferrableMode(99), DeferrableNone},
-	}
-
-	for _, tt := range tests {
-		result := convertDeferrableMode(tt.parserMode)
-		if result != tt.expected {
-			t.Errorf("convertDeferrableMode(%v): expected %v, got %v", tt.parserMode, tt.expected, result)
-		}
-	}
-}
-
-// TestDefaultConstraintEvaluation tests default constraint evaluation
-func TestDefaultConstraintEvaluation(t *testing.T) {
-	tests := []struct {
-		name        string
-		expr        parser.Expression
-		shouldError bool
+		name      string
+		sql       string
+		wantError bool
 	}{
 		{
-			"function default",
-			&parser.FunctionExpr{Name: "random"},
-			true, // Should error for unsupported functions
+			name:      "INSERT with SELECT",
+			sql:       "INSERT INTO t SELECT * FROM other;",
+			wantError: false,
 		},
 		{
-			"expression default",
-			&parser.BinaryExpr{Op: parser.OpPlus, Left: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"}, Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "2"}},
-			true, // Should error for expressions
+			name:      "INSERT with columns and SELECT",
+			sql:       "INSERT INTO t (id, name) SELECT id, name FROM other;",
+			wantError: false,
 		},
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			dc, err := NewDefaultConstraint(tt.expr)
-			if err != nil {
-				t.Fatalf("Failed to create constraint: %v", err)
-			}
-
-			_, err = dc.Evaluate()
-			if (err != nil) != tt.shouldError {
-				t.Errorf("Expected error=%v, got error=%v", tt.shouldError, err)
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
 			}
 		})
 	}
 }
 
-// TestParseValueFunctions tests parse value functions
-func TestParseValueFunctions(t *testing.T) {
-	// Test parseIntegerValue with error
-	lit := &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "invalid"}
-	result := parseLiteralValue(lit)
-	if result != nil {
-		t.Errorf("Expected nil for invalid integer, got %v", result)
-	}
-
-	// Test parseFloatValue with error
-	lit = &parser.LiteralExpr{Type: parser.LiteralFloat, Value: "invalid"}
-	result = parseLiteralValue(lit)
-	if result != nil {
-		t.Errorf("Expected nil for invalid float, got %v", result)
-	}
-
-	// Test unknown literal type
-	lit = &parser.LiteralExpr{Type: parser.LiteralType(99), Value: "test"}
-	result = parseLiteralValue(lit)
-	if result != nil {
-		t.Errorf("Expected nil for unknown type, got %v", result)
-	}
-}
-
-// TestValidateCompositePKUpdate tests composite primary key update validation
-func TestValidateCompositePKUpdate(t *testing.T) {
-	// Create a mock table with composite primary key
-	table := &schema.Table{
-		Name: "test",
-		Columns: []*schema.Column{
-			{Name: "id1", Type: "INTEGER", PrimaryKey: true},
-			{Name: "id2", Type: "INTEGER", PrimaryKey: true},
-		},
-		PrimaryKey: []string{"id1", "id2"},
-	}
-
-	pk := NewPrimaryKeyConstraint(table, nil, nil)
-
-	// Test update that sets PK column to NULL
-	newValues := map[string]interface{}{
-		"id1": nil,
-	}
-	err := pk.ValidateUpdate(1, newValues)
-	if err == nil {
-		t.Error("Expected error for NULL in composite PK")
-	}
-}
-
-// TestFindGapInRowids tests finding gaps in rowid allocation
-func TestFindGapInRowids(t *testing.T) {
-	// This function is difficult to test without full btree integration
-	// We'll test it indirectly through generateRowid with max int64
-	table := &schema.Table{
-		Name:     "test",
-		RootPage: 1,
-		Columns:  []*schema.Column{{Name: "id", Type: "INTEGER"}},
-	}
-
-	// We can't easily test this without a real btree, but we can test the logic
-	// by creating a mock scenario
-	pk := NewPrimaryKeyConstraint(table, nil, nil)
-	if pk == nil {
-		t.Error("Expected non-nil primary key constraint")
-	}
-}
-
-// TestConvertToInt64AllTypes tests all type conversions to int64
-func TestConvertToInt64AllTypes(t *testing.T) {
-	table := &schema.Table{
-		Name:     "test",
-		RootPage: 1,
-		Columns:  []*schema.Column{{Name: "id", Type: "INTEGER"}},
-	}
-	pk := NewPrimaryKeyConstraint(table, nil, nil)
-
+// TestOnConflictConstraintName tests ON CONFLICT with constraint name
+func TestOnConflictConstraintName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name        string
-		value       interface{}
-		shouldError bool
+		name      string
+		sql       string
+		wantError bool
 	}{
-		{"int64", int64(42), false},
-		{"int", int(42), false},
-		{"int32", int32(42), false},
-		{"uint32", uint32(42), false},
-		{"float64", float64(42.5), false},
-		{"invalid type", "string", true},
+		{
+			name:      "ON CONFLICT ON CONSTRAINT",
+			sql:       "INSERT INTO t VALUES (1) ON CONFLICT ON CONSTRAINT pk_id DO NOTHING;",
+			wantError: false,
+		},
+		{
+			name:      "ON CONFLICT ON CONSTRAINT DO UPDATE",
+			sql:       "INSERT INTO t VALUES (1) ON CONFLICT ON CONSTRAINT pk_id DO UPDATE SET id = 2;",
+			wantError: false,
+		},
+		{
+			name:      "ON CONFLICT ON without CONSTRAINT",
+			sql:       "INSERT INTO t VALUES (1) ON CONFLICT ON DO NOTHING;",
+			wantError: true,
+		},
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := pk.convertToInt64(tt.value)
-			if (err != nil) != tt.shouldError {
-				t.Errorf("Expected error=%v, got error=%v", tt.shouldError, err)
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v for SQL: %s", tt.wantError, err, tt.sql)
 			}
 		})
 	}
 }
 
-// TestUniqueConstraintHelpers tests unique constraint helper functions
-func TestUniqueConstraintHelpers(t *testing.T) {
-	// Test bothNil
-	if !bothNil(nil, nil) {
-		t.Error("Expected true for both nil")
-	}
-	if bothNil(nil, 1) {
-		t.Error("Expected false when only one is nil")
-	}
-
-	// Test eitherNil
-	if !eitherNil(nil, 1) {
-		t.Error("Expected true when one is nil")
-	}
-	if !eitherNil(1, nil) {
-		t.Error("Expected true when one is nil")
-	}
-	// Note: eitherNil returns true when EITHER is nil, including when both are nil
-	if !eitherNil(nil, nil) {
-		t.Error("Expected true when both are nil (either is nil)")
-	}
-	if eitherNil(1, 2) {
-		t.Error("Expected false when neither is nil")
-	}
-
-	// Test compareInt
-	if !compareInt(5, 5) {
-		t.Error("Expected true for equal ints")
-	}
-	if !compareInt(5, int64(5)) {
-		t.Error("Expected true for int == int64")
-	}
-	if compareInt(5, 6) {
-		t.Error("Expected false for unequal ints")
-	}
-	if compareInt(5, "5") {
-		t.Error("Expected false for different types")
-	}
-
-	// Test compareInt64
-	if !compareInt64(int64(5), int64(5)) {
-		t.Error("Expected true for equal int64s")
-	}
-	if !compareInt64(int64(5), 5) {
-		t.Error("Expected true for int64 == int")
-	}
-	if compareInt64(int64(5), int64(6)) {
-		t.Error("Expected false for unequal int64s")
-	}
-
-	// Test compareFloat64
-	if !compareFloat64(3.14, 3.14) {
-		t.Error("Expected true for equal floats")
-	}
-	if compareFloat64(3.14, 2.71) {
-		t.Error("Expected false for unequal floats")
-	}
-	if compareFloat64(3.14, "3.14") {
-		t.Error("Expected false for different types")
-	}
-
-	// Test compareString
-	if !compareString("test", "test") {
-		t.Error("Expected true for equal strings")
-	}
-	if compareString("test", "TEST") {
-		t.Error("Expected false for different strings")
-	}
-	if compareString("test", 123) {
-		t.Error("Expected false for different types")
-	}
-
-	// Test compareBytes
-	if !compareBytes([]byte("test"), []byte("test")) {
-		t.Error("Expected true for equal byte slices")
-	}
-	if compareBytes([]byte("test"), []byte("TEST")) {
-		t.Error("Expected false for different byte slices")
-	}
-	if compareBytes([]byte("test"), []byte("te")) {
-		t.Error("Expected false for different length byte slices")
-	}
-	if compareBytes([]byte("test"), "test") {
-		t.Error("Expected false for different types")
-	}
-}
-
-// TestParseRecordValues tests parseRecordValues placeholder
-func TestParseRecordValues(t *testing.T) {
-	table := &schema.Table{
-		Name:    "test",
-		Columns: []*schema.Column{{Name: "id", Type: "INTEGER"}},
-	}
-
-	// This is a placeholder implementation, should return empty map
-	values, err := parseRecordValues([]byte("dummy data"), table)
-	if err != nil {
-		t.Errorf("Expected no error, got %v", err)
-	}
-	if len(values) != 0 {
-		t.Error("Expected empty values map from placeholder implementation")
-	}
-}
-
-// TestIsValidRowData tests isValidRowData helper
-func TestIsValidRowData(t *testing.T) {
-	uc := &UniqueConstraint{}
-
-	if !uc.isValidRowData([]byte("data")) {
-		t.Error("Expected true for non-nil data")
-	}
-	if uc.isValidRowData(nil) {
-		t.Error("Expected false for nil data")
-	}
-}
-
-// TestCheckCurrentRowConcept tests the concept behind checkCurrentRow
-func TestCheckCurrentRowConcept(t *testing.T) {
-	// checkCurrentRow requires a real btree cursor which we can't easily mock
-	// We test the underlying helpers instead
-	uc := &UniqueConstraint{}
-
-	// Test isValidRowData which is used by checkCurrentRow
-	if !uc.isValidRowData([]byte("test")) {
-		t.Error("Expected true for valid data")
-	}
-	if uc.isValidRowData(nil) {
-		t.Error("Expected false for nil data")
-	}
-}
-
-// TestValidateTableRow tests ValidateTableRow function
-func TestValidateTableRow(t *testing.T) {
-	table := &schema.Table{
-		Name: "test",
-		Columns: []*schema.Column{
-			{Name: "email", Type: "TEXT", Unique: true},
+// TestSelectWithCompoundOperators tests compound SELECT operators
+func TestSelectWithCompoundOperators(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "UNION",
+			sql:       "SELECT 1 UNION SELECT 2;",
+			wantError: false,
+		},
+		{
+			name:      "UNION ALL",
+			sql:       "SELECT 1 UNION ALL SELECT 2;",
+			wantError: false,
+		},
+		{
+			name:      "EXCEPT",
+			sql:       "SELECT 1 EXCEPT SELECT 2;",
+			wantError: false,
+		},
+		{
+			name:      "INTERSECT",
+			sql:       "SELECT 1 INTERSECT SELECT 2;",
+			wantError: false,
+		},
+		{
+			name:      "multiple UNION",
+			sql:       "SELECT 1 UNION SELECT 2 UNION SELECT 3;",
+			wantError: false,
 		},
 	}
 
-	// ValidateTableRow requires btree integration
-	// We test that it at least extracts constraints correctly
-	constraints := ExtractUniqueConstraints(table)
-	if len(constraints) != 1 {
-		t.Errorf("Expected 1 constraint, got %d", len(constraints))
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
 	}
 }
 
-
-// TestNotNullValidateRow tests ValidateRow error path
-func TestNotNullValidateRow(t *testing.T) {
-	table := &schema.Table{
-		Name: "test",
-		Columns: []*schema.Column{
-			{Name: "id", Type: "INTEGER", NotNull: true},
+// TestWithClauseRecursive tests WITH RECURSIVE
+func TestWithClauseRecursive(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "WITH RECURSIVE",
+			sql:       "WITH RECURSIVE cte AS (SELECT 1) SELECT * FROM cte;",
+			wantError: false,
+		},
+		{
+			name:      "WITH RECURSIVE with columns",
+			sql:       "WITH RECURSIVE cte(n) AS (SELECT 1) SELECT * FROM cte;",
+			wantError: false,
 		},
 	}
 
-	nnc := NewNotNullConstraint(table)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
 
-	// Test with missing required column
-	values := map[string]interface{}{}
-	err := nnc.ValidateRow(values)
-	if err == nil {
-		t.Error("Expected error for missing NOT NULL column")
+// TestFromClauseMultipleTables tests FROM with multiple tables
+func TestFromClauseMultipleTables(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "FROM with two tables",
+			sql:       "SELECT * FROM t1, t2;",
+			wantError: false,
+		},
+		{
+			name:      "FROM with three tables",
+			sql:       "SELECT * FROM t1, t2, t3;",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestTableAliasWithAs tests table alias with and without AS
+func TestTableAliasWithAs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "table alias with AS",
+			sql:       "SELECT * FROM users AS u;",
+			wantError: false,
+		},
+		{
+			name:      "table alias without AS",
+			sql:       "SELECT * FROM users u;",
+			wantError: false,
+		},
+		{
+			name:      "subquery alias with AS",
+			sql:       "SELECT * FROM (SELECT * FROM t) AS sub;",
+			wantError: false,
+		},
+		{
+			name:      "subquery alias without AS",
+			sql:       "SELECT * FROM (SELECT * FROM t) sub;",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestJoinTypes tests different JOIN types
+func TestJoinTypes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "INNER JOIN",
+			sql:       "SELECT * FROM t1 INNER JOIN t2 ON t1.id = t2.id;",
+			wantError: false,
+		},
+		{
+			name:      "LEFT JOIN",
+			sql:       "SELECT * FROM t1 LEFT JOIN t2 ON t1.id = t2.id;",
+			wantError: false,
+		},
+		{
+			name:      "LEFT OUTER JOIN",
+			sql:       "SELECT * FROM t1 LEFT OUTER JOIN t2 ON t1.id = t2.id;",
+			wantError: false,
+		},
+		{
+			name:      "CROSS JOIN",
+			sql:       "SELECT * FROM t1 CROSS JOIN t2;",
+			wantError: false,
+		},
+		{
+			name:      "simple JOIN",
+			sql:       "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestJoinUsingClause tests JOIN with USING clause
+func TestJoinUsingClause(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "JOIN USING single column",
+			sql:       "SELECT * FROM t1 JOIN t2 USING (id);",
+			wantError: false,
+		},
+		{
+			name:      "JOIN USING multiple columns",
+			sql:       "SELECT * FROM t1 JOIN t2 USING (id, name);",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestInsertMultipleRows tests INSERT with multiple value rows
+func TestInsertMultipleRows(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "INSERT single row",
+			sql:       "INSERT INTO t VALUES (1, 'a');",
+			wantError: false,
+		},
+		{
+			name:      "INSERT two rows",
+			sql:       "INSERT INTO t VALUES (1, 'a'), (2, 'b');",
+			wantError: false,
+		},
+		{
+			name:      "INSERT three rows",
+			sql:       "INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, 'c');",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestDoUpdateClauseWithWhere tests DO UPDATE SET with WHERE
+func TestDoUpdateClauseWithWhere(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "DO UPDATE without WHERE",
+			sql:       "INSERT INTO t VALUES (1) ON CONFLICT (id) DO UPDATE SET value = 10;",
+			wantError: false,
+		},
+		{
+			name:      "DO UPDATE with WHERE",
+			sql:       "INSERT INTO t VALUES (1) ON CONFLICT (id) DO UPDATE SET value = 10 WHERE id > 0;",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestCreateTableConstraints tests various table constraints
+func TestCreateTableConstraints(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "UNIQUE table constraint",
+			sql:       "CREATE TABLE t (id INTEGER, name TEXT, UNIQUE (id));",
+			wantError: false,
+		},
+		{
+			name:      "CHECK table constraint",
+			sql:       "CREATE TABLE t (id INTEGER, CHECK (id > 0));",
+			wantError: false,
+		},
+		{
+			name:      "FOREIGN KEY table constraint",
+			sql:       "CREATE TABLE t (id INTEGER, fk INTEGER, FOREIGN KEY (fk) REFERENCES other(id));",
+			wantError: false,
+		},
+		{
+			name:      "PRIMARY KEY table constraint single column",
+			sql:       "CREATE TABLE t (id INTEGER, name TEXT, PRIMARY KEY (id));",
+			wantError: false,
+		},
+		{
+			name:      "PRIMARY KEY table constraint multiple columns",
+			sql:       "CREATE TABLE t (id1 INTEGER, id2 INTEGER, PRIMARY KEY (id1, id2));",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v for SQL: %s", tt.wantError, err, tt.sql)
+			}
+		})
+	}
+}
+
+// TestCreateTableColumnConstraints tests column-level constraints
+func TestCreateTableColumnConstraints(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "CHECK column constraint",
+			sql:       "CREATE TABLE t (id INTEGER CHECK (id > 0));",
+			wantError: false,
+		},
+		{
+			name:      "NOT NULL column constraint",
+			sql:       "CREATE TABLE t (id INTEGER NOT NULL);",
+			wantError: false,
+		},
+		{
+			name:      "UNIQUE column constraint",
+			sql:       "CREATE TABLE t (id INTEGER UNIQUE);",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestAlterTableActions tests different ALTER TABLE actions
+func TestAlterTableActions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "ALTER TABLE RENAME TO",
+			sql:       "ALTER TABLE old_name RENAME TO new_name;",
+			wantError: false,
+		},
+		{
+			name:      "ALTER TABLE RENAME COLUMN",
+			sql:       "ALTER TABLE t RENAME COLUMN old_col TO new_col;",
+			wantError: false,
+		},
+		{
+			name:      "ALTER TABLE ADD COLUMN",
+			sql:       "ALTER TABLE t ADD COLUMN new_col TEXT;",
+			wantError: false,
+		},
+		{
+			name:      "ALTER TABLE DROP COLUMN",
+			sql:       "ALTER TABLE t DROP COLUMN old_col;",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestParseExpressionBitwiseOps tests various expression edge cases
+func TestParseExpressionBitwiseOps(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "OR expression",
+			sql:       "SELECT * FROM t WHERE a = 1 OR b = 2;",
+			wantError: false,
+		},
+		{
+			name:      "AND expression",
+			sql:       "SELECT * FROM t WHERE a = 1 AND b = 2;",
+			wantError: false,
+		},
+		{
+			name:      "IS NULL",
+			sql:       "SELECT * FROM t WHERE a IS NULL;",
+			wantError: false,
+		},
+		{
+			name:      "IS NOT NULL",
+			sql:       "SELECT * FROM t WHERE a IS NOT NULL;",
+			wantError: false,
+		},
+		{
+			name:      "bitwise AND",
+			sql:       "SELECT a & b FROM t;",
+			wantError: false,
+		},
+		{
+			name:      "bitwise OR",
+			sql:       "SELECT a | b FROM t;",
+			wantError: false,
+		},
+		{
+			name:      "left shift",
+			sql:       "SELECT a << 2 FROM t;",
+			wantError: false,
+		},
+		{
+			name:      "right shift",
+			sql:       "SELECT a >> 2 FROM t;",
+			wantError: false,
+		},
+		{
+			name:      "string concatenation",
+			sql:       "SELECT 'hello' || ' ' || 'world';",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestParseFunctionFilterClause tests function FILTER clause
+func TestParseFunctionFilterClause(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "COUNT with FILTER",
+			sql:       "SELECT COUNT(*) FILTER (WHERE id > 0) FROM t;",
+			wantError: false,
+		},
+		{
+			name:      "SUM with FILTER",
+			sql:       "SELECT SUM(value) FILTER (WHERE active = 1) FROM t;",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestParseCaseExprWithMultipleWhen tests CASE with multiple WHEN clauses
+func TestParseCaseExprWithMultipleWhen(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "CASE with multiple WHEN",
+			sql:       "SELECT CASE WHEN id = 1 THEN 'one' WHEN id = 2 THEN 'two' WHEN id = 3 THEN 'three' END FROM t;",
+			wantError: false,
+		},
+		{
+			name:      "CASE with ELSE",
+			sql:       "SELECT CASE WHEN id > 0 THEN 'positive' ELSE 'non-positive' END FROM t;",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestParseSubqueryInFromClause tests subqueries in FROM clause
+func TestParseSubqueryInFromClause(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "simple subquery",
+			sql:       "SELECT * FROM (SELECT id FROM t);",
+			wantError: false,
+		},
+		{
+			name:      "subquery with alias",
+			sql:       "SELECT * FROM (SELECT id FROM t) AS sub;",
+			wantError: false,
+		},
+		{
+			name:      "nested subquery",
+			sql:       "SELECT * FROM (SELECT * FROM (SELECT id FROM t));",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestParseCreateTriggerTiming tests trigger timing variations
+func TestParseCreateTriggerTiming(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "BEFORE INSERT",
+			sql:       "CREATE TRIGGER tr BEFORE INSERT ON t BEGIN SELECT 1; END;",
+			wantError: false,
+		},
+		{
+			name:      "AFTER UPDATE",
+			sql:       "CREATE TRIGGER tr AFTER UPDATE ON t BEGIN SELECT 1; END;",
+			wantError: false,
+		},
+		{
+			name:      "INSTEAD OF DELETE",
+			sql:       "CREATE TRIGGER tr INSTEAD OF DELETE ON t BEGIN SELECT 1; END;",
+			wantError: false,
+		},
+		{
+			name:      "UPDATE OF columns",
+			sql:       "CREATE TRIGGER tr AFTER UPDATE OF col1, col2 ON t BEGIN SELECT 1; END;",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestParseForeignKeyReferences tests foreign key reference clauses
+func TestParseForeignKeyReferences(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "FOREIGN KEY table constraint basic",
+			sql:       "CREATE TABLE t (id INTEGER, fk INTEGER, FOREIGN KEY (fk) REFERENCES other(id));",
+			wantError: false,
+		},
+		{
+			name:      "FOREIGN KEY with multiple columns",
+			sql:       "CREATE TABLE t (id1 INTEGER, id2 INTEGER, fk1 INTEGER, fk2 INTEGER, FOREIGN KEY (fk1, fk2) REFERENCES other(id1, id2));",
+			wantError: false,
+		},
+		// Note: ON DELETE/UPDATE clauses may not be fully supported in this parser
+		// so we're testing basic FOREIGN KEY functionality
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestParseOrderByCollation tests ORDER BY with COLLATE
+func TestParseOrderByCollation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "ORDER BY with COLLATE",
+			sql:       "SELECT * FROM t ORDER BY name COLLATE NOCASE;",
+			wantError: false,
+		},
+		{
+			name:      "ORDER BY with COLLATE ASC",
+			sql:       "SELECT * FROM t ORDER BY name COLLATE NOCASE ASC;",
+			wantError: false,
+		},
+		{
+			name:      "ORDER BY with COLLATE DESC",
+			sql:       "SELECT * FROM t ORDER BY name COLLATE NOCASE DESC;",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestParseGroupByHavingClause tests GROUP BY with HAVING
+func TestParseGroupByHavingClause(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "GROUP BY without HAVING",
+			sql:       "SELECT COUNT(*) FROM t GROUP BY category;",
+			wantError: false,
+		},
+		{
+			name:      "GROUP BY with HAVING",
+			sql:       "SELECT COUNT(*) FROM t GROUP BY category HAVING COUNT(*) > 5;",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestParseLimitOffset tests LIMIT with OFFSET
+func TestParseLimitOffset(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "LIMIT only",
+			sql:       "SELECT * FROM t LIMIT 10;",
+			wantError: false,
+		},
+		{
+			name:      "LIMIT with OFFSET",
+			sql:       "SELECT * FROM t LIMIT 10 OFFSET 5;",
+			wantError: false,
+		},
+		{
+			name:      "LIMIT with comma syntax",
+			sql:       "SELECT * FROM t LIMIT 5, 10;",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestParseVacuumInto tests VACUUM INTO
+func TestParseVacuumInto(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "VACUUM",
+			sql:       "VACUUM;",
+			wantError: false,
+		},
+		{
+			name:      "VACUUM schema",
+			sql:       "VACUUM main;",
+			wantError: false,
+		},
+		{
+			name:      "VACUUM INTO",
+			sql:       "VACUUM INTO 'backup.db';",
+			wantError: false,
+		},
+		{
+			name:      "VACUUM schema INTO",
+			sql:       "VACUUM main INTO 'backup.db';",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestParseParenthesizedExpression tests parenthesized vs subquery
+func TestParseParenthesizedExpression(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "simple paren",
+			sql:       "SELECT (1 + 2);",
+			wantError: false,
+		},
+		{
+			name:      "nested paren",
+			sql:       "SELECT ((1 + 2) * 3);",
+			wantError: false,
+		},
+		{
+			name:      "scalar subquery",
+			sql:       "SELECT (SELECT MAX(id) FROM t);",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
+	}
+}
+
+// TestParseIdentOrFunctionQualified tests qualified identifiers
+func TestParseIdentOrFunctionQualified(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sql       string
+		wantError bool
+	}{
+		{
+			name:      "qualified identifier",
+			sql:       "SELECT t.id FROM t;",
+			wantError: false,
+		},
+		{
+			name:      "qualified star",
+			sql:       "SELECT t.* FROM t;",
+			wantError: false,
+		},
+		{
+			name:      "unqualified identifier",
+			sql:       "SELECT id FROM t;",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+			if (err != nil) != tt.wantError {
+				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			}
+		})
 	}
 }

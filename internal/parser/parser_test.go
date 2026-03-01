@@ -1,376 +1,1058 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-//go:build unix || linux || darwin || freebsd || openbsd || netbsd
-
-package pager
+package parser
 
 import (
-	"fmt"
-	"syscall"
+	"strings"
+	"testing"
 )
 
-// Platform-specific lock implementation for Unix systems.
-// This implementation uses OFD (Open File Description) locks when available,
-// which are per-file-descriptor rather than per-process. This allows proper
-// locking between different file descriptors in the same process.
-//
-// SQLite uses byte-range locks on specific regions of the database file:
-//
-//   Byte Range         Lock Type    Lock Name
-//   -----------        ---------    ---------
-//   PENDING_BYTE       Exclusive    PENDING lock
-//   RESERVED_BYTE      Exclusive    RESERVED lock
-//   SHARED_FIRST to    Shared       SHARED lock
-//   SHARED_FIRST+510
-//
-// The SHARED lock uses multiple bytes to allow for process-specific locking.
-// SQLite uses a randomized byte within the SHARED range for each connection.
+func TestParseSelect(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		sql     string
+		wantErr bool
+	}{
+		{
+			name:    "simple select",
+			sql:     "SELECT * FROM users",
+			wantErr: false,
+		},
+		{
+			name:    "select with columns",
+			sql:     "SELECT id, name, email FROM users",
+			wantErr: false,
+		},
+		{
+			name:    "select with where",
+			sql:     "SELECT * FROM users WHERE age > 18",
+			wantErr: false,
+		},
+		{
+			name:    "select with order by",
+			sql:     "SELECT * FROM users ORDER BY name ASC",
+			wantErr: false,
+		},
+		{
+			name:    "select with limit",
+			sql:     "SELECT * FROM users LIMIT 10",
+			wantErr: false,
+		},
+		{
+			name:    "select with limit and offset",
+			sql:     "SELECT * FROM users LIMIT 10 OFFSET 5",
+			wantErr: false,
+		},
+		{
+			name:    "select with join",
+			sql:     "SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id",
+			wantErr: false,
+		},
+		{
+			name:    "select with group by",
+			sql:     "SELECT category, COUNT(*) FROM products GROUP BY category",
+			wantErr: false,
+		},
+		{
+			name:    "select with having",
+			sql:     "SELECT category, COUNT(*) FROM products GROUP BY category HAVING COUNT(*) > 5",
+			wantErr: false,
+		},
+		{
+			name:    "select distinct",
+			sql:     "SELECT DISTINCT category FROM products",
+			wantErr: false,
+		},
+		{
+			name:    "select with alias",
+			sql:     "SELECT name AS user_name, age AS user_age FROM users",
+			wantErr: false,
+		},
+		{
+			name:    "select with subquery",
+			sql:     "SELECT * FROM (SELECT id, name FROM users) AS subq",
+			wantErr: false,
+		},
+	}
 
-const (
-	// Lock byte offsets (matching SQLite's implementation)
-	// These offsets are in the region beyond the maximum database size
-	pendingByte  = 0x40000000      // 1GB mark - PENDING lock byte
-	reservedByte = pendingByte + 1 // RESERVED lock byte
-	sharedFirst  = pendingByte + 2 // Start of SHARED lock range
-	sharedSize   = 510             // Number of bytes in SHARED lock range
-)
-
-// OFD lock command constants (Linux-specific, available since kernel 3.15)
-// These provide per-file-descriptor locking instead of per-process locking
-const (
-	// F_OFD_GETLK gets the lock info for open file description locks
-	F_OFD_GETLK = 36
-	// F_OFD_SETLK sets/clears an open file description lock (non-blocking)
-	F_OFD_SETLK = 37
-	// F_OFD_SETLKW sets/clears an open file description lock (blocking)
-	F_OFD_SETLKW = 38
-)
-
-// unixLockData holds Unix-specific locking information.
-type unixLockData struct {
-	// Which shared byte we're using (randomized within the range)
-	sharedByte int64
-	// Whether OFD locks are available (detected at init time)
-	useOFD bool
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && len(stmts) != 1 {
+				t.Errorf("expected 1 statement, got %d", len(stmts))
+				return
+			}
+			if !tt.wantErr {
+				if _, ok := stmts[0].(*SelectStmt); !ok {
+					t.Errorf("expected SelectStmt, got %T", stmts[0])
+				}
+			}
+		})
+	}
 }
 
-// initPlatform initializes platform-specific lock data.
-func (lm *LockManager) initPlatform() error {
-	// Use a simple hash of the file descriptor to pick a shared byte
-	// In a real implementation, this could be randomized or based on PID
-	fd := lm.file.Fd()
-	sharedOffset := (fd % sharedSize)
-
-	data := &unixLockData{
-		sharedByte: sharedFirst + int64(sharedOffset),
-		useOFD:     true, // Try OFD locks by default
+func TestParseInsert(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		sql     string
+		wantErr bool
+	}{
+		{
+			name:    "insert with values",
+			sql:     "INSERT INTO users (name, age) VALUES ('John', 30)",
+			wantErr: false,
+		},
+		{
+			name:    "insert multiple rows",
+			sql:     "INSERT INTO users (name, age) VALUES ('John', 30), ('Jane', 25)",
+			wantErr: false,
+		},
+		{
+			name:    "insert from select",
+			sql:     "INSERT INTO users_copy SELECT * FROM users",
+			wantErr: false,
+		},
+		{
+			name:    "insert default values",
+			sql:     "INSERT INTO users DEFAULT VALUES",
+			wantErr: false,
+		},
+		{
+			name:    "insert or replace",
+			sql:     "INSERT OR REPLACE INTO users (id, name) VALUES (1, 'John')",
+			wantErr: false,
+		},
 	}
 
-	// Test if OFD locks are supported by attempting a test lock
-	testLock := syscall.Flock_t{
-		Type:   syscall.F_RDLCK,
-		Whence: 0,
-		Start:  0,
-		Len:    0, // Lock entire file
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && len(stmts) != 1 {
+				t.Errorf("expected 1 statement, got %d", len(stmts))
+				return
+			}
+			if !tt.wantErr {
+				if _, ok := stmts[0].(*InsertStmt); !ok {
+					t.Errorf("expected InsertStmt, got %T", stmts[0])
+				}
+			}
+		})
 	}
-	err := syscall.FcntlFlock(fd, F_OFD_GETLK, &testLock)
+}
+
+func TestParseUpdate(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		sql     string
+		wantErr bool
+	}{
+		{
+			name:    "simple update",
+			sql:     "UPDATE users SET name = 'John'",
+			wantErr: false,
+		},
+		{
+			name:    "update with where",
+			sql:     "UPDATE users SET name = 'John' WHERE id = 1",
+			wantErr: false,
+		},
+		{
+			name:    "update multiple columns",
+			sql:     "UPDATE users SET name = 'John', age = 30 WHERE id = 1",
+			wantErr: false,
+		},
+		{
+			name:    "update with order by and limit",
+			sql:     "UPDATE users SET active = 0 ORDER BY created_at LIMIT 10",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && len(stmts) != 1 {
+				t.Errorf("expected 1 statement, got %d", len(stmts))
+				return
+			}
+			if !tt.wantErr {
+				if _, ok := stmts[0].(*UpdateStmt); !ok {
+					t.Errorf("expected UpdateStmt, got %T", stmts[0])
+				}
+			}
+		})
+	}
+}
+
+func TestParseDelete(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		sql     string
+		wantErr bool
+	}{
+		{
+			name:    "simple delete",
+			sql:     "DELETE FROM users",
+			wantErr: false,
+		},
+		{
+			name:    "delete with where",
+			sql:     "DELETE FROM users WHERE age < 18",
+			wantErr: false,
+		},
+		{
+			name:    "delete with order by and limit",
+			sql:     "DELETE FROM users ORDER BY created_at LIMIT 10",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && len(stmts) != 1 {
+				t.Errorf("expected 1 statement, got %d", len(stmts))
+				return
+			}
+			if !tt.wantErr {
+				if _, ok := stmts[0].(*DeleteStmt); !ok {
+					t.Errorf("expected DeleteStmt, got %T", stmts[0])
+				}
+			}
+		})
+	}
+}
+
+func TestParseCreateTable(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		sql     string
+		wantErr bool
+	}{
+		{
+			name:    "simple create table",
+			sql:     "CREATE TABLE users (id INTEGER, name TEXT)",
+			wantErr: false,
+		},
+		{
+			name:    "create table with primary key",
+			sql:     "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
+			wantErr: false,
+		},
+		{
+			name:    "create table with autoincrement",
+			sql:     "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)",
+			wantErr: false,
+		},
+		{
+			name:    "create table with not null",
+			sql:     "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+			wantErr: false,
+		},
+		{
+			name:    "create table with unique",
+			sql:     "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT UNIQUE)",
+			wantErr: false,
+		},
+		{
+			name:    "create table with default",
+			sql:     "CREATE TABLE users (id INTEGER PRIMARY KEY, active INTEGER DEFAULT 1)",
+			wantErr: false,
+		},
+		{
+			name:    "create table with check",
+			sql:     "CREATE TABLE users (id INTEGER PRIMARY KEY, age INTEGER CHECK (age >= 0))",
+			wantErr: false,
+		},
+		{
+			name:    "create table if not exists",
+			sql:     "CREATE TABLE IF NOT EXISTS users (id INTEGER, name TEXT)",
+			wantErr: false,
+		},
+		{
+			name:    "create temp table",
+			sql:     "CREATE TEMP TABLE users (id INTEGER, name TEXT)",
+			wantErr: false,
+		},
+		{
+			name:    "create table without rowid",
+			sql:     "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT) WITHOUT ROWID",
+			wantErr: false,
+		},
+		{
+			name:    "create table strict",
+			sql:     "CREATE TABLE users (id INTEGER, name TEXT) STRICT",
+			wantErr: false,
+		},
+		{
+			name:    "create table as select",
+			sql:     "CREATE TABLE users_copy AS SELECT * FROM users",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && len(stmts) != 1 {
+				t.Errorf("expected 1 statement, got %d", len(stmts))
+				return
+			}
+			if !tt.wantErr {
+				if _, ok := stmts[0].(*CreateTableStmt); !ok {
+					t.Errorf("expected CreateTableStmt, got %T", stmts[0])
+				}
+			}
+		})
+	}
+}
+
+func TestParseCreateIndex(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		sql     string
+		wantErr bool
+	}{
+		{
+			name:    "simple create index",
+			sql:     "CREATE INDEX idx_name ON users (name)",
+			wantErr: false,
+		},
+		{
+			name:    "create unique index",
+			sql:     "CREATE UNIQUE INDEX idx_email ON users (email)",
+			wantErr: false,
+		},
+		{
+			name:    "create index on multiple columns",
+			sql:     "CREATE INDEX idx_name_age ON users (name, age)",
+			wantErr: false,
+		},
+		{
+			name:    "create index with order",
+			sql:     "CREATE INDEX idx_name ON users (name ASC, age DESC)",
+			wantErr: false,
+		},
+		{
+			name:    "create index if not exists",
+			sql:     "CREATE INDEX IF NOT EXISTS idx_name ON users (name)",
+			wantErr: false,
+		},
+		{
+			name:    "create index with where",
+			sql:     "CREATE INDEX idx_active ON users (name) WHERE active = 1",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && len(stmts) != 1 {
+				t.Errorf("expected 1 statement, got %d", len(stmts))
+				return
+			}
+			if !tt.wantErr {
+				if _, ok := stmts[0].(*CreateIndexStmt); !ok {
+					t.Errorf("expected CreateIndexStmt, got %T", stmts[0])
+				}
+			}
+		})
+	}
+}
+
+func TestParseDrop(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		sql      string
+		wantErr  bool
+		wantType interface{}
+	}{
+		{
+			name:     "drop table",
+			sql:      "DROP TABLE users",
+			wantErr:  false,
+			wantType: &DropTableStmt{},
+		},
+		{
+			name:     "drop table if exists",
+			sql:      "DROP TABLE IF EXISTS users",
+			wantErr:  false,
+			wantType: &DropTableStmt{},
+		},
+		{
+			name:     "drop index",
+			sql:      "DROP INDEX idx_name",
+			wantErr:  false,
+			wantType: &DropIndexStmt{},
+		},
+		{
+			name:     "drop index if exists",
+			sql:      "DROP INDEX IF EXISTS idx_name",
+			wantErr:  false,
+			wantType: &DropIndexStmt{},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && len(stmts) != 1 {
+				t.Errorf("expected 1 statement, got %d", len(stmts))
+				return
+			}
+		})
+	}
+}
+
+func TestParseExpressions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		sql     string
+		wantErr bool
+	}{
+		{
+			name:    "arithmetic expression",
+			sql:     "SELECT 1 + 2 * 3",
+			wantErr: false,
+		},
+		{
+			name:    "comparison expression",
+			sql:     "SELECT * FROM users WHERE age > 18 AND active = 1",
+			wantErr: false,
+		},
+		{
+			name:    "in expression",
+			sql:     "SELECT * FROM users WHERE id IN (1, 2, 3)",
+			wantErr: false,
+		},
+		{
+			name:    "between expression",
+			sql:     "SELECT * FROM users WHERE age BETWEEN 18 AND 65",
+			wantErr: false,
+		},
+		{
+			name:    "like expression",
+			sql:     "SELECT * FROM users WHERE name LIKE 'John%'",
+			wantErr: false,
+		},
+		{
+			name:    "is null expression",
+			sql:     "SELECT * FROM users WHERE email IS NULL",
+			wantErr: false,
+		},
+		{
+			name:    "is not null expression",
+			sql:     "SELECT * FROM users WHERE email IS NOT NULL",
+			wantErr: false,
+		},
+		{
+			name:    "case expression",
+			sql:     "SELECT CASE WHEN age < 18 THEN 'minor' ELSE 'adult' END FROM users",
+			wantErr: false,
+		},
+		{
+			name:    "cast expression",
+			sql:     "SELECT CAST(age AS TEXT) FROM users",
+			wantErr: false,
+		},
+		{
+			name:    "function call",
+			sql:     "SELECT COUNT(*) FROM users",
+			wantErr: false,
+		},
+		{
+			name:    "function with args",
+			sql:     "SELECT SUBSTR(name, 1, 10) FROM users",
+			wantErr: false,
+		},
+		{
+			name:    "subquery expression",
+			sql:     "SELECT * FROM users WHERE id = (SELECT MAX(id) FROM users)",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && len(stmts) != 1 {
+				t.Errorf("expected 1 statement, got %d", len(stmts))
+			}
+		})
+	}
+}
+
+func TestParseTransactions(t *testing.T) {
+	t.Parallel()
+	t.Skip("Transaction parsing not yet fully implemented")
+	tests := []struct {
+		name     string
+		sql      string
+		wantErr  bool
+		wantType interface{}
+	}{
+		{
+			name:     "begin",
+			sql:      "BEGIN",
+			wantErr:  false,
+			wantType: &BeginStmt{},
+		},
+		{
+			name:     "begin transaction",
+			sql:      "BEGIN TRANSACTION",
+			wantErr:  false,
+			wantType: &BeginStmt{},
+		},
+		{
+			name:     "begin deferred",
+			sql:      "BEGIN DEFERRED TRANSACTION",
+			wantErr:  false,
+			wantType: &BeginStmt{},
+		},
+		{
+			name:     "begin immediate",
+			sql:      "BEGIN IMMEDIATE TRANSACTION",
+			wantErr:  false,
+			wantType: &BeginStmt{},
+		},
+		{
+			name:     "begin exclusive",
+			sql:      "BEGIN EXCLUSIVE TRANSACTION",
+			wantErr:  false,
+			wantType: &BeginStmt{},
+		},
+		{
+			name:     "commit",
+			sql:      "COMMIT",
+			wantErr:  false,
+			wantType: &CommitStmt{},
+		},
+		{
+			name:     "rollback",
+			sql:      "ROLLBACK",
+			wantErr:  false,
+			wantType: &RollbackStmt{},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && len(stmts) != 1 {
+				t.Errorf("expected 1 statement, got %d", len(stmts))
+			}
+		})
+	}
+}
+
+func TestParseMultipleStatements(t *testing.T) {
+	t.Parallel()
+	sql := `
+		CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+		INSERT INTO users (name) VALUES ('John');
+		SELECT * FROM users;
+	`
+
+	parser := NewParser(sql)
+	stmts, err := parser.Parse()
 	if err != nil {
-		// OFD locks not supported, fall back to POSIX locks
-		data.useOFD = false
+		t.Fatalf("Parse() error = %v", err)
 	}
 
-	lm.platformData = data
-	return nil
-}
-
-// cleanupPlatform cleans up platform-specific resources.
-func (lm *LockManager) cleanupPlatform() error {
-	// Nothing special to clean up on Unix
-	return nil
-}
-
-// fcntlCmd returns the appropriate fcntl command based on OFD availability
-func (lm *LockManager) fcntlSetLk() int {
-	data := lm.platformData.(*unixLockData)
-	if data.useOFD {
-		return F_OFD_SETLK
+	if len(stmts) != 3 {
+		t.Errorf("expected 3 statements, got %d", len(stmts))
 	}
-	return syscall.F_SETLK
-}
 
-// fcntlGetLk returns the appropriate fcntl command for lock testing
-func (lm *LockManager) fcntlGetLk() int {
-	data := lm.platformData.(*unixLockData)
-	if data.useOFD {
-		return F_OFD_GETLK
+	if _, ok := stmts[0].(*CreateTableStmt); !ok {
+		t.Errorf("statement 0: expected CreateTableStmt, got %T", stmts[0])
 	}
-	return syscall.F_GETLK
-}
-
-// acquireLockPlatform performs the platform-specific lock acquisition.
-func (lm *LockManager) acquireLockPlatform(level LockLevel) error {
-	switch level {
-	case lockNone:
-		// No locks to acquire
-		return nil
-
-	case lockShared:
-		return lm.acquireSharedLock()
-
-	case lockReserved:
-		return lm.acquireReservedLock()
-
-	case lockPending:
-		return lm.acquirePendingLock()
-
-	case lockExclusive:
-		return lm.acquireExclusiveLock()
-
-	default:
-		return fmt.Errorf("unknown lock level: %d", level)
+	if _, ok := stmts[1].(*InsertStmt); !ok {
+		t.Errorf("statement 1: expected InsertStmt, got %T", stmts[1])
+	}
+	if _, ok := stmts[2].(*SelectStmt); !ok {
+		t.Errorf("statement 2: expected SelectStmt, got %T", stmts[2])
 	}
 }
 
-// shouldReleaseLock determines if a specific lock level should be released.
-func (lm *LockManager) shouldReleaseLock(currentLevel, targetLevel, lockType LockLevel) bool {
-	return lm.currentLevel >= currentLevel && targetLevel < lockType
+func TestParseComplexQuery(t *testing.T) {
+	t.Parallel()
+	sql := `
+		SELECT
+			u.id,
+			u.name,
+			COUNT(o.id) AS order_count,
+			SUM(o.total) AS total_spent
+		FROM users u
+		LEFT JOIN orders o ON u.id = o.user_id
+		WHERE u.active = 1
+			AND u.created_at >= '2020-01-01'
+		GROUP BY u.id, u.name
+		HAVING COUNT(o.id) > 5
+		ORDER BY total_spent DESC
+		LIMIT 10
+	`
+
+	parser := NewParser(sql)
+	stmts, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if len(stmts) != 1 {
+		t.Errorf("expected 1 statement, got %d", len(stmts))
+	}
+
+	stmt, ok := stmts[0].(*SelectStmt)
+	if !ok {
+		t.Fatalf("expected SelectStmt, got %T", stmts[0])
+	}
+
+	// Verify statement structure
+	if len(stmt.Columns) != 4 {
+		t.Errorf("expected 4 columns, got %d", len(stmt.Columns))
+	}
+
+	if stmt.From == nil {
+		t.Error("expected FROM clause")
+	}
+
+	if stmt.Where == nil {
+		t.Error("expected WHERE clause")
+	}
+
+	if len(stmt.GroupBy) != 2 {
+		t.Errorf("expected 2 GROUP BY expressions, got %d", len(stmt.GroupBy))
+	}
+
+	if stmt.Having == nil {
+		t.Error("expected HAVING clause")
+	}
+
+	if len(stmt.OrderBy) != 1 {
+		t.Errorf("expected 1 ORDER BY term, got %d", len(stmt.OrderBy))
+	}
+
+	if stmt.Limit == nil {
+		t.Error("expected LIMIT clause")
+	}
 }
 
-// releaseLockPlatform performs the platform-specific lock release.
-func (lm *LockManager) releaseLockPlatform(level LockLevel) error {
-	// Release locks in reverse order of acquisition
-	if lm.shouldReleaseLock(lockExclusive, level, lockExclusive) {
-		if err := lm.releaseExclusiveLock(); err != nil {
-			return err
+func TestParseErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "missing FROM",
+			sql:  "SELECT * users",
+		},
+		{
+			name: "missing table name",
+			sql:  "SELECT * FROM",
+		},
+		{
+			name: "missing column in INSERT",
+			sql:  "INSERT INTO users () VALUES (1)",
+		},
+		{
+			name: "missing SET in UPDATE",
+			sql:  "UPDATE users name = 'John'",
+		},
+		{
+			name: "missing FROM in DELETE",
+			sql:  "DELETE users",
+		},
+		{
+			name: "unclosed parenthesis",
+			sql:  "SELECT * FROM users WHERE (id = 1",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			_, err := parser.Parse()
+			if err == nil {
+				t.Errorf("expected error for invalid SQL: %q", tt.sql)
+			}
+		})
+	}
+}
+
+func TestParseString(t *testing.T) {
+	t.Parallel()
+	sql := "SELECT * FROM users"
+	stmts, err := ParseString(sql)
+	if err != nil {
+		t.Fatalf("ParseString() error = %v", err)
+	}
+
+	if len(stmts) != 1 {
+		t.Errorf("expected 1 statement, got %d", len(stmts))
+	}
+
+	if _, ok := stmts[0].(*SelectStmt); !ok {
+		t.Errorf("expected SelectStmt, got %T", stmts[0])
+	}
+}
+
+func TestLiteralValueExtraction(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		sql     string
+		extract func(Expression) (interface{}, error)
+		want    interface{}
+	}{
+		{
+			name:    "integer literal",
+			sql:     "SELECT 42",
+			extract: func(e Expression) (interface{}, error) { return IntValue(e) },
+			want:    int64(42),
+		},
+		{
+			name:    "float literal",
+			sql:     "SELECT 3.14",
+			extract: func(e Expression) (interface{}, error) { return FloatValue(e) },
+			want:    3.14,
+		},
+		{
+			name:    "string literal",
+			sql:     "SELECT 'hello'",
+			extract: func(e Expression) (interface{}, error) { return StringValue(e) },
+			want:    "hello",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+
+			stmt := stmts[0].(*SelectStmt)
+			expr := stmt.Columns[0].Expr
+
+			got, err := tt.extract(expr)
+			if err != nil {
+				t.Fatalf("value extraction error = %v", err)
+			}
+
+			if got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseJoinTypes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "inner join",
+			sql:  "SELECT * FROM a INNER JOIN b ON a.id = b.a_id",
+		},
+		{
+			name: "left join",
+			sql:  "SELECT * FROM a LEFT JOIN b ON a.id = b.a_id",
+		},
+		{
+			name: "left outer join",
+			sql:  "SELECT * FROM a LEFT OUTER JOIN b ON a.id = b.a_id",
+		},
+		{
+			name: "cross join",
+			sql:  "SELECT * FROM a CROSS JOIN b",
+		},
+		{
+			name: "natural join",
+			sql:  "SELECT * FROM a NATURAL JOIN b",
+		},
+		{
+			name: "join with using",
+			sql:  "SELECT * FROM a JOIN b USING (id)",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			if err != nil {
+				t.Errorf("Parse() error = %v", err)
+			}
+			if len(stmts) != 1 {
+				t.Errorf("expected 1 statement, got %d", len(stmts))
+			}
+		})
+	}
+}
+
+func TestParseCompoundSelect(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "union",
+			sql:  "SELECT id FROM a UNION SELECT id FROM b",
+		},
+		{
+			name: "union all",
+			sql:  "SELECT id FROM a UNION ALL SELECT id FROM b",
+		},
+		{
+			name: "except",
+			sql:  "SELECT id FROM a EXCEPT SELECT id FROM b",
+		},
+		{
+			name: "intersect",
+			sql:  "SELECT id FROM a INTERSECT SELECT id FROM b",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			if err != nil {
+				t.Errorf("Parse() error = %v", err)
+			}
+			if len(stmts) != 1 {
+				t.Errorf("expected 1 statement, got %d", len(stmts))
+			}
+
+			stmt := stmts[0].(*SelectStmt)
+			if stmt.Compound == nil {
+				t.Error("expected compound select")
+			}
+		})
+	}
+}
+
+func BenchmarkParseLexer(b *testing.B) {
+	sql := "SELECT u.id, u.name, COUNT(o.id) FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.active = 1 GROUP BY u.id, u.name ORDER BY u.name LIMIT 100"
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		lexer := NewLexer(sql)
+		for {
+			tok := lexer.NextToken()
+			if tok.Type == TK_EOF {
+				break
+			}
 		}
 	}
-
-	if lm.shouldReleaseLock(lockPending, level, lockPending) {
-		if err := lm.releasePendingLock(); err != nil {
-			return err
-		}
-	}
-
-	if lm.shouldReleaseLock(lockReserved, level, lockReserved) {
-		if err := lm.releaseReservedLock(); err != nil {
-			return err
-		}
-	}
-
-	if lm.shouldReleaseLock(lockShared, level, lockShared) {
-		if err := lm.releaseSharedLock(); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
-// acquireSharedLock acquires a SHARED lock.
-func (lm *LockManager) acquireSharedLock() error {
-	data := lm.platformData.(*unixLockData)
+func BenchmarkParseSelect(b *testing.B) {
+	sql := "SELECT u.id, u.name, COUNT(o.id) FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.active = 1 GROUP BY u.id, u.name ORDER BY u.name LIMIT 100"
 
-	// Try to acquire a shared (read) lock on one byte in the SHARED range
-	lock := syscall.Flock_t{
-		Type:   syscall.F_RDLCK, // Read lock
-		Whence: 0,               // SEEK_SET
-		Start:  data.sharedByte,
-		Len:    1,
-	}
-
-	// Use F_OFD_SETLK or F_SETLK for non-blocking lock
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
-		if err == syscall.EAGAIN || err == syscall.EACCES {
-			return ErrLockBusy
-		}
-		return fmt.Errorf("failed to acquire shared lock: %w", err)
-	}
-
-	return nil
-}
-
-// releaseSharedLock releases the SHARED lock.
-func (lm *LockManager) releaseSharedLock() error {
-	data := lm.platformData.(*unixLockData)
-
-	lock := syscall.Flock_t{
-		Type:   syscall.F_UNLCK,
-		Whence: 0,
-		Start:  data.sharedByte,
-		Len:    1,
-	}
-
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
-		return fmt.Errorf("failed to release shared lock: %w", err)
-	}
-
-	return nil
-}
-
-// acquireReservedLock acquires a RESERVED lock.
-func (lm *LockManager) acquireReservedLock() error {
-	// RESERVED lock is an exclusive lock on the RESERVED byte
-	lock := syscall.Flock_t{
-		Type:   syscall.F_WRLCK, // Write lock
-		Whence: 0,
-		Start:  reservedByte,
-		Len:    1,
-	}
-
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
-		if err == syscall.EAGAIN || err == syscall.EACCES {
-			return ErrLockBusy
-		}
-		return fmt.Errorf("failed to acquire reserved lock: %w", err)
-	}
-
-	// Must maintain the SHARED lock when acquiring RESERVED
-	if lm.currentLevel < lockShared {
-		if err := lm.acquireSharedLock(); err != nil {
-			// Rollback the reserved lock
-			lm.releaseReservedLock()
-			return err
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		parser := NewParser(sql)
+		_, err := parser.Parse()
+		if err != nil {
+			b.Fatal(err)
 		}
 	}
-
-	return nil
 }
 
-// releaseReservedLock releases the RESERVED lock.
-func (lm *LockManager) releaseReservedLock() error {
-	lock := syscall.Flock_t{
-		Type:   syscall.F_UNLCK,
-		Whence: 0,
-		Start:  reservedByte,
-		Len:    1,
-	}
+func BenchmarkParseInsert(b *testing.B) {
+	sql := "INSERT INTO users (id, name, email, age, active) VALUES (1, 'John Doe', 'john@example.com', 30, 1)"
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
-		return fmt.Errorf("failed to release reserved lock: %w", err)
-	}
-
-	return nil
-}
-
-// acquirePendingLock acquires a PENDING lock.
-func (lm *LockManager) acquirePendingLock() error {
-	// PENDING lock is an exclusive lock on the PENDING byte
-	lock := syscall.Flock_t{
-		Type:   syscall.F_WRLCK,
-		Whence: 0,
-		Start:  pendingByte,
-		Len:    1,
-	}
-
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
-		if err == syscall.EAGAIN || err == syscall.EACCES {
-			return ErrLockBusy
-		}
-		return fmt.Errorf("failed to acquire pending lock: %w", err)
-	}
-
-	// Must maintain SHARED and RESERVED locks when acquiring PENDING
-	if lm.currentLevel < lockReserved {
-		if err := lm.acquireReservedLock(); err != nil {
-			lm.releasePendingLock()
-			return err
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		parser := NewParser(sql)
+		_, err := parser.Parse()
+		if err != nil {
+			b.Fatal(err)
 		}
 	}
-
-	return nil
 }
 
-// releasePendingLock releases the PENDING lock.
-func (lm *LockManager) releasePendingLock() error {
-	lock := syscall.Flock_t{
-		Type:   syscall.F_UNLCK,
-		Whence: 0,
-		Start:  pendingByte,
-		Len:    1,
-	}
+func TestASTNodeInterfaces(t *testing.T) {
+	t.Parallel()
+	// Test that AST nodes properly implement their interfaces
+	var _ Statement = (*SelectStmt)(nil)
+	var _ Statement = (*InsertStmt)(nil)
+	var _ Statement = (*UpdateStmt)(nil)
+	var _ Statement = (*DeleteStmt)(nil)
+	var _ Statement = (*CreateTableStmt)(nil)
+	var _ Statement = (*DropTableStmt)(nil)
+	var _ Statement = (*CreateIndexStmt)(nil)
+	var _ Statement = (*DropIndexStmt)(nil)
+	var _ Statement = (*BeginStmt)(nil)
+	var _ Statement = (*CommitStmt)(nil)
+	var _ Statement = (*RollbackStmt)(nil)
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
-		return fmt.Errorf("failed to release pending lock: %w", err)
-	}
-
-	return nil
+	var _ Expression = (*BinaryExpr)(nil)
+	var _ Expression = (*UnaryExpr)(nil)
+	var _ Expression = (*LiteralExpr)(nil)
+	var _ Expression = (*IdentExpr)(nil)
+	var _ Expression = (*FunctionExpr)(nil)
+	var _ Expression = (*CaseExpr)(nil)
+	var _ Expression = (*InExpr)(nil)
+	var _ Expression = (*BetweenExpr)(nil)
+	var _ Expression = (*CastExpr)(nil)
+	var _ Expression = (*CollateExpr)(nil)
+	var _ Expression = (*ParenExpr)(nil)
+	var _ Expression = (*SubqueryExpr)(nil)
+	var _ Expression = (*VariableExpr)(nil)
 }
 
-// acquireExclusiveLock acquires an EXCLUSIVE lock.
-func (lm *LockManager) acquireExclusiveLock() error {
-	data := lm.platformData.(*unixLockData)
+func TestComplexTableConstraints(t *testing.T) {
+	t.Parallel()
+	sql := `
+		CREATE TABLE orders (
+			id INTEGER PRIMARY KEY,
+			user_id INTEGER NOT NULL,
+			product_id INTEGER NOT NULL,
+			quantity INTEGER CHECK (quantity > 0),
+			created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (user_id, product_id),
+			FOREIGN KEY (user_id) REFERENCES users(id),
+			CHECK (quantity <= 1000)
+		)
+	`
 
-	// EXCLUSIVE lock requires:
-	// 1. Exclusive lock on all bytes in the SHARED range (to block new readers)
-	// 2. Waiting for existing SHARED locks to be released
-
-	// First, acquire PENDING if not already held (to block new SHARED locks)
-	if lm.currentLevel < lockPending {
-		if err := lm.acquirePendingLock(); err != nil {
-			return err
-		}
+	parser := NewParser(sql)
+	stmts, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
 	}
 
-	// Now try to acquire exclusive lock on the entire SHARED range
-	// This will block until all readers have released their locks
-	lock := syscall.Flock_t{
-		Type:   syscall.F_WRLCK, // Write lock (exclusive)
-		Whence: 0,
-		Start:  sharedFirst,
-		Len:    sharedSize,
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(stmts))
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
-		if err == syscall.EAGAIN || err == syscall.EACCES {
-			return ErrLockBusy
-		}
-		return fmt.Errorf("failed to acquire exclusive lock: %w", err)
+	stmt, ok := stmts[0].(*CreateTableStmt)
+	if !ok {
+		t.Fatalf("expected CreateTableStmt, got %T", stmts[0])
 	}
 
-	// Release our individual SHARED lock since we now have exclusive access
-	// We ignore errors here because we might not have had a SHARED lock
-	releaseLock := syscall.Flock_t{
-		Type:   syscall.F_UNLCK,
-		Whence: 0,
-		Start:  data.sharedByte,
-		Len:    1,
+	if len(stmt.Columns) != 5 {
+		t.Errorf("expected 5 columns, got %d", len(stmt.Columns))
 	}
-	syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &releaseLock)
 
-	return nil
+	// Note: The parser currently may not fully parse all constraint types
+	// This test ensures basic parsing works without errors
 }
 
-// releaseExclusiveLock releases the EXCLUSIVE lock.
-func (lm *LockManager) releaseExclusiveLock() error {
-	// Release the exclusive lock on the SHARED range
-	lock := syscall.Flock_t{
-		Type:   syscall.F_UNLCK,
-		Whence: 0,
-		Start:  sharedFirst,
-		Len:    sharedSize,
+func TestWindowFunctions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "row number",
+			sql:  "SELECT ROW_NUMBER() OVER (ORDER BY id) FROM users",
+		},
+		{
+			name: "partition by",
+			sql:  "SELECT SUM(amount) OVER (PARTITION BY user_id ORDER BY date) FROM transactions",
+		},
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
-		return fmt.Errorf("failed to release exclusive lock: %w", err)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
+			// Note: Full window function support may not be implemented
+			// This test checks that parsing attempts don't panic
+			if err != nil && !strings.Contains(err.Error(), "window") {
+				t.Logf("Parse() error = %v (may not be fully supported)", err)
+			}
+			_ = stmts
+		})
 	}
-
-	return nil
-}
-
-// CheckReservedLock checks if any other process holds a RESERVED lock.
-// This is used to detect lock conflicts.
-func (lm *LockManager) CheckReservedLock() (bool, error) {
-	lock := syscall.Flock_t{
-		Type:   syscall.F_WRLCK,
-		Whence: 0,
-		Start:  reservedByte,
-		Len:    1,
-	}
-
-	// F_GETLK/F_OFD_GETLK checks if a lock would succeed without actually acquiring it
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlGetLk(), &lock); err != nil {
-		return false, fmt.Errorf("failed to check reserved lock: %w", err)
-	}
-
-	// If lock.Type is F_UNLCK, no conflicting lock exists
-	return lock.Type != syscall.F_UNLCK, nil
 }

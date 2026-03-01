@@ -1,915 +1,637 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package parser
+package functions
 
 import (
 	"testing"
 )
 
-// TestCastExpressionParsing tests CAST expressions to achieve 100% coverage of parseCastExpr
-func TestCastExpressionParsing(t *testing.T) {
-	t.Parallel()
+// TestScalarFuncNumArgs tests NumArgs method
+func TestScalarFuncNumArgs(t *testing.T) {
+	f := NewScalarFunc("test", 2, func(args []Value) (Value, error) {
+		return NewIntValue(42), nil
+	})
+
+	// NumArgs returns the configured number
+	if got := f.NumArgs(); got != 2 {
+		t.Errorf("NumArgs() = %d, want 2", got)
+	}
+}
+
+// TestValueAsFloat64EdgeCases tests AsFloat64 edge cases
+func TestValueAsFloat64EdgeCases(t *testing.T) {
 	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
+		name string
+		val  Value
+		want float64
 	}{
 		{
-			name:    "CAST to INTEGER",
-			sql:     "SELECT CAST(age AS INTEGER) FROM users",
-			wantErr: false,
+			name: "null value",
+			val:  NewNullValue(),
+			want: 0.0,
 		},
 		{
-			name:    "CAST to TEXT",
-			sql:     "SELECT CAST(id AS TEXT) FROM users",
-			wantErr: false,
+			name: "text value",
+			val:  NewTextValue("3.14"),
+			want: 3.14,
 		},
 		{
-			name:    "CAST to REAL",
-			sql:     "SELECT CAST(value AS REAL) FROM data",
-			wantErr: false,
-		},
-		{
-			name:    "CAST with complex expression",
-			sql:     "SELECT CAST(x + y AS INTEGER) FROM calc",
-			wantErr: false,
-		},
-		{
-			name:    "CAST in WHERE clause",
-			sql:     "SELECT * FROM users WHERE CAST(age AS TEXT) = '25'",
-			wantErr: false,
-		},
-		{
-			name:    "CAST missing opening paren",
-			sql:     "SELECT CAST age AS INTEGER) FROM users",
-			wantErr: true,
-		},
-		{
-			name:    "CAST missing AS keyword",
-			sql:     "SELECT CAST(age INTEGER) FROM users",
-			wantErr: true,
-		},
-		{
-			name:    "CAST missing type name",
-			sql:     "SELECT CAST(age AS) FROM users",
-			wantErr: true,
-		},
-		{
-			name:    "CAST missing closing paren",
-			sql:     "SELECT CAST(age AS INTEGER FROM users",
-			wantErr: true,
+			name: "blob value",
+			val:  NewBlobValue([]byte("1.5")),
+			want: 0.0, // Can't convert blob to float
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+			got := tt.val.AsFloat64()
+			if got != tt.want {
+				t.Errorf("AsFloat64() = %f, want %f", got, tt.want)
 			}
 		})
 	}
 }
 
-// TestLexerIdentifiersWithNewlines tests identifiers containing newlines
-func TestLexerIdentifiersWithNewlines(t *testing.T) {
-	t.Parallel()
+// TestValueAsStringEdgeCases tests AsString edge cases
+func TestValueAsStringEdgeCases(t *testing.T) {
 	tests := []struct {
-		name   string
-		input  string
-		wantID string
+		name string
+		val  Value
+		want string
 	}{
 		{
-			name:   "double quoted identifier with newline",
-			input:  "\"table\nname\"",
-			wantID: "\"table\nname\"",
-		},
-		{
-			name:   "backtick identifier with newline",
-			input:  "`column\nname`",
-			wantID: "`column\nname`",
-		},
-		{
-			name:   "bracketed identifier with newline",
-			input:  "[field\nname]",
-			wantID: "[field\nname]",
-		},
-		{
-			name:   "double quoted with multiple newlines",
-			input:  "\"multi\nline\nidentifier\"",
-			wantID: "\"multi\nline\nidentifier\"",
+			name: "null value",
+			val:  NewNullValue(),
+			want: "",
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			lexer := NewLexer(tt.input)
-			tok := lexer.NextToken()
-			if tok.Type != TK_ID {
-				t.Errorf("got type %s, want TK_ID", tok.Type)
-			}
-			if tok.Lexeme != tt.wantID {
-				t.Errorf("got lexeme %q, want %q", tok.Lexeme, tt.wantID)
+			got := tt.val.AsString()
+			if got != tt.want {
+				t.Errorf("AsString() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-// TestTokenizeAllWithIllegalToken tests the error path in TokenizeAll
-func TestTokenizeAllWithIllegalToken(t *testing.T) {
-	t.Parallel()
+// Bytes method is tested through scalar functions that use it
+
+// Helper functions are internal implementation details
+// and are tested through the public API functions
+
+// TestLtrimFunc tests ltrimFunc
+func TestLtrimFunc(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
-		wantErr bool
+		name string
+		args []Value
+		want string
 	}{
 		{
-			name:    "illegal character",
-			input:   "SELECT ^ FROM users",
-			wantErr: true,
+			name: "trim spaces",
+			args: []Value{NewTextValue("   hello")},
+			want: "hello",
 		},
 		{
-			name:    "unicode special character",
-			input:   "SELECT ™ FROM users",
-			wantErr: true,
+			name: "no leading spaces",
+			args: []Value{NewTextValue("hello")},
+			want: "hello",
 		},
 		{
-			name:    "valid SQL no error",
-			input:   "SELECT * FROM users",
-			wantErr: false,
+			name: "custom chars",
+			args: []Value{NewTextValue("xxhello"), NewTextValue("x")},
+			want: "hello",
+		},
+		{
+			name: "all spaces",
+			args: []Value{NewTextValue("   ")},
+			want: "",
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			_, err := TokenizeAll(tt.input)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("TokenizeAll() error = %v, wantErr %v", err, tt.wantErr)
+			result, err := ltrimFunc(tt.args)
+			if err != nil {
+				t.Errorf("ltrimFunc() error = %v", err)
+				return
+			}
+
+			if result.AsString() != tt.want {
+				t.Errorf("ltrimFunc() = %q, want %q", result.AsString(), tt.want)
 			}
 		})
 	}
 }
 
-// TestParserLowCoverageFunctions tests various parser functions with low coverage
-func TestParserLowCoverageFunctions(t *testing.T) {
-	t.Parallel()
+// TestRtrimFunc tests rtrimFunc
+func TestRtrimFunc(t *testing.T) {
 	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
+		name string
+		args []Value
+		want string
 	}{
-		// parseUpdateClauses edge cases
 		{
-			name:    "UPDATE without WHERE",
-			sql:     "UPDATE users SET name = 'John'",
-			wantErr: false,
+			name: "trim spaces",
+			args: []Value{NewTextValue("hello   ")},
+			want: "hello",
 		},
 		{
-			name:    "UPDATE with ORDER BY and LIMIT",
-			sql:     "UPDATE users SET age = age + 1 ORDER BY name LIMIT 10",
-			wantErr: false,
-		},
-
-		// parseDeleteClauses edge cases
-		{
-			name:    "DELETE without WHERE",
-			sql:     "DELETE FROM users",
-			wantErr: false,
+			name: "no trailing spaces",
+			args: []Value{NewTextValue("hello")},
+			want: "hello",
 		},
 		{
-			name:    "DELETE with ORDER BY and LIMIT",
-			sql:     "DELETE FROM users ORDER BY created_at LIMIT 5",
-			wantErr: false,
-		},
-
-		// parseCreateTable edge cases
-		{
-			name:    "CREATE TABLE without columns (should fail)",
-			sql:     "CREATE TABLE users",
-			wantErr: true,
+			name: "custom chars",
+			args: []Value{NewTextValue("helloxx"), NewTextValue("x")},
+			want: "hello",
 		},
 		{
-			name:    "CREATE TABLE AS SELECT",
-			sql:     "CREATE TABLE new_users AS SELECT * FROM users",
-			wantErr: false,
-		},
-
-		// parseColumnOrConstraint edge cases
-		{
-			name:    "CREATE TABLE with PRIMARY KEY constraint",
-			sql:     "CREATE TABLE users (id INTEGER, PRIMARY KEY (id))",
-			wantErr: false,
-		},
-		{
-			name:    "CREATE TABLE with UNIQUE constraint",
-			sql:     "CREATE TABLE users (id INTEGER, UNIQUE (id))",
-			wantErr: false,
-		},
-		{
-			name:    "CREATE TABLE with CHECK constraint",
-			sql:     "CREATE TABLE users (age INTEGER, CHECK (age > 0))",
-			wantErr: false,
-		},
-		{
-			name:    "CREATE TABLE with FOREIGN KEY",
-			sql:     "CREATE TABLE orders (user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(id))",
-			wantErr: false,
-		},
-
-		// parseColumnConstraint edge cases
-		{
-			name:    "column with DEFAULT value",
-			sql:     "CREATE TABLE users (status TEXT DEFAULT 'active')",
-			wantErr: false,
-		},
-		{
-			name:    "column with COLLATE",
-			sql:     "CREATE TABLE users (name TEXT COLLATE NOCASE)",
-			wantErr: false,
-		},
-		{
-			name:    "column with CHECK constraint",
-			sql:     "CREATE TABLE users (age INTEGER CHECK (age > 0))",
-			wantErr: false,
-		},
-
-		// parseCreateIndex edge cases
-		{
-			name:    "CREATE INDEX without IF NOT EXISTS",
-			sql:     "CREATE INDEX idx_name ON users (name)",
-			wantErr: false,
-		},
-		{
-			name:    "CREATE UNIQUE INDEX",
-			sql:     "CREATE UNIQUE INDEX idx_email ON users (email)",
-			wantErr: false,
-		},
-		{
-			name:    "CREATE INDEX with WHERE clause",
-			sql:     "CREATE INDEX idx_active ON users (name) WHERE active = 1",
-			wantErr: false,
-		},
-
-		// parseCTE edge cases
-		{
-			name:    "CTE with column list",
-			sql:     "WITH cte (id, name) AS (SELECT id, name FROM users) SELECT * FROM cte",
-			wantErr: false,
-		},
-		{
-			name:    "CTE without column list",
-			sql:     "WITH cte AS (SELECT * FROM users) SELECT * FROM cte",
-			wantErr: false,
-		},
-
-		// parseSubquery edge cases
-		{
-			name:    "subquery in FROM",
-			sql:     "SELECT * FROM (SELECT * FROM users) AS u",
-			wantErr: false,
-		},
-		{
-			name:    "subquery in WHERE",
-			sql:     "SELECT * FROM users WHERE id IN (SELECT user_id FROM orders)",
-			wantErr: false,
-		},
-
-		// parseJoinClause edge cases
-		{
-			name:    "INNER JOIN",
-			sql:     "SELECT * FROM users INNER JOIN orders ON users.id = orders.user_id",
-			wantErr: false,
-		},
-		{
-			name:    "LEFT OUTER JOIN",
-			sql:     "SELECT * FROM users LEFT OUTER JOIN orders ON users.id = orders.user_id",
-			wantErr: false,
-		},
-		{
-			name:    "CROSS JOIN",
-			sql:     "SELECT * FROM users CROSS JOIN settings",
-			wantErr: false,
-		},
-		{
-			name:    "JOIN with USING",
-			sql:     "SELECT * FROM users JOIN orders USING (user_id)",
-			wantErr: false,
-		},
-
-		// parseInsert edge cases
-		{
-			name:    "INSERT with column list",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John')",
-			wantErr: false,
-		},
-		{
-			name:    "INSERT without column list",
-			sql:     "INSERT INTO users VALUES (1, 'John')",
-			wantErr: false,
-		},
-		{
-			name:    "INSERT with SELECT",
-			sql:     "INSERT INTO new_users SELECT * FROM old_users",
-			wantErr: false,
-		},
-
-		// parseCompoundSelect edge cases
-		{
-			name:    "UNION",
-			sql:     "SELECT * FROM users UNION SELECT * FROM admins",
-			wantErr: false,
-		},
-		{
-			name:    "UNION ALL",
-			sql:     "SELECT * FROM users UNION ALL SELECT * FROM admins",
-			wantErr: false,
-		},
-		{
-			name:    "EXCEPT",
-			sql:     "SELECT * FROM users EXCEPT SELECT * FROM banned",
-			wantErr: false,
-		},
-		{
-			name:    "INTERSECT",
-			sql:     "SELECT * FROM users INTERSECT SELECT * FROM active",
-			wantErr: false,
-		},
-
-		// parseExpression edge cases
-		{
-			name:    "NOT expression",
-			sql:     "SELECT * FROM users WHERE NOT active",
-			wantErr: false,
-		},
-		{
-			name:    "BETWEEN expression",
-			sql:     "SELECT * FROM users WHERE age BETWEEN 18 AND 65",
-			wantErr: false,
-		},
-		{
-			name:    "NOT BETWEEN",
-			sql:     "SELECT * FROM users WHERE age NOT BETWEEN 0 AND 17",
-			wantErr: false,
-		},
-		{
-			name:    "IN expression with list",
-			sql:     "SELECT * FROM users WHERE status IN ('active', 'pending')",
-			wantErr: false,
-		},
-		{
-			name:    "NOT IN",
-			sql:     "SELECT * FROM users WHERE status NOT IN ('banned', 'deleted')",
-			wantErr: false,
-		},
-		{
-			name:    "IS NULL",
-			sql:     "SELECT * FROM users WHERE deleted_at IS NULL",
-			wantErr: false,
-		},
-		{
-			name:    "IS NOT NULL",
-			sql:     "SELECT * FROM users WHERE email IS NOT NULL",
-			wantErr: false,
-		},
-		{
-			name:    "LIKE pattern",
-			sql:     "SELECT * FROM users WHERE name LIKE 'John%'",
-			wantErr: false,
-		},
-		{
-			name:    "NOT LIKE - unsupported, expecting error",
-			sql:     "SELECT * FROM users WHERE name NOT LIKE 'Admin%'",
-			wantErr: true,
-		},
-		{
-			name:    "GLOB pattern",
-			sql:     "SELECT * FROM users WHERE name GLOB 'J*'",
-			wantErr: false,
-		},
-		{
-			name:    "REGEXP pattern",
-			sql:     "SELECT * FROM users WHERE email REGEXP '^[a-z]+@'",
-			wantErr: false,
-		},
-
-		// parseFunctionCall edge cases
-		{
-			name:    "function with DISTINCT",
-			sql:     "SELECT COUNT(DISTINCT email) FROM users",
-			wantErr: false,
-		},
-		{
-			name:    "function with *",
-			sql:     "SELECT COUNT(*) FROM users",
-			wantErr: false,
-		},
-		{
-			name:    "function with FILTER",
-			sql:     "SELECT COUNT(*) FILTER (WHERE active = 1) FROM users",
-			wantErr: false,
-		},
-
-		// parseCaseExpr edge cases
-		{
-			name:    "CASE with base expression",
-			sql:     "SELECT CASE status WHEN 'active' THEN 1 ELSE 0 END FROM users",
-			wantErr: false,
-		},
-		{
-			name:    "CASE without base expression",
-			sql:     "SELECT CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END FROM users",
-			wantErr: false,
-		},
-		{
-			name:    "CASE without ELSE",
-			sql:     "SELECT CASE WHEN active THEN 1 END FROM users",
-			wantErr: false,
-		},
-
-		// parsePragma edge cases
-		{
-			name:    "PRAGMA query",
-			sql:     "PRAGMA table_info(users)",
-			wantErr: false,
-		},
-		{
-			name:    "PRAGMA set value",
-			sql:     "PRAGMA foreign_keys = ON",
-			wantErr: false,
-		},
-		{
-			name:    "PRAGMA with schema",
-			sql:     "PRAGMA main.table_list",
-			wantErr: false,
-		},
-
-		// parseCreateTrigger edge cases
-		{
-			name:    "CREATE TRIGGER BEFORE INSERT",
-			sql:     "CREATE TRIGGER t1 BEFORE INSERT ON users BEGIN SELECT 1; END",
-			wantErr: false,
-		},
-		{
-			name:    "CREATE TRIGGER AFTER UPDATE",
-			sql:     "CREATE TRIGGER t2 AFTER UPDATE ON users BEGIN SELECT 1; END",
-			wantErr: false,
-		},
-		{
-			name:    "CREATE TRIGGER INSTEAD OF DELETE",
-			sql:     "CREATE TRIGGER t3 INSTEAD OF DELETE ON view1 BEGIN SELECT 1; END",
-			wantErr: false,
-		},
-		{
-			name:    "CREATE TRIGGER with FOR EACH ROW",
-			sql:     "CREATE TRIGGER t4 BEFORE INSERT ON users FOR EACH ROW BEGIN SELECT 1; END",
-			wantErr: false,
-		},
-		{
-			name:    "CREATE TRIGGER with WHEN",
-			sql:     "CREATE TRIGGER t5 BEFORE INSERT ON users WHEN NEW.age > 18 BEGIN SELECT 1; END",
-			wantErr: false,
-		},
-
-		// parseTableAlias edge cases
-		{
-			name:    "table with AS alias",
-			sql:     "SELECT * FROM users AS u",
-			wantErr: false,
-		},
-		{
-			name:    "table with implicit alias",
-			sql:     "SELECT * FROM users u",
-			wantErr: false,
-		},
-
-		// parseOptionalTypeName edge cases
-		{
-			name:    "column without type",
-			sql:     "CREATE TABLE users (id)",
-			wantErr: false,
-		},
-
-		// parseWhenClause edge cases
-		{
-			name:    "CASE with multiple WHEN",
-			sql:     "SELECT CASE WHEN x = 1 THEN 'one' WHEN x = 2 THEN 'two' ELSE 'other' END FROM t",
-			wantErr: false,
-		},
-
-		// parseConflictTarget edge cases
-		{
-			name:    "UPSERT with conflict target",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) DO UPDATE SET name = excluded.name",
-			wantErr: false,
-		},
-		{
-			name:    "UPSERT with DO NOTHING",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT DO NOTHING",
-			wantErr: false,
-		},
-
-		// parseForeignKeyReferences edge cases
-		{
-			name:    "FOREIGN KEY with column list",
-			sql:     "CREATE TABLE orders (user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users (id))",
-			wantErr: false,
-		},
-		{
-			name:    "FOREIGN KEY without column list",
-			sql:     "CREATE TABLE orders (user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users)",
-			wantErr: false,
+			name: "all spaces",
+			args: []Value{NewTextValue("   ")},
+			want: "",
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+			result, err := rtrimFunc(tt.args)
+			if err != nil {
+				t.Errorf("rtrimFunc() error = %v", err)
+				return
+			}
+
+			if result.AsString() != tt.want {
+				t.Errorf("rtrimFunc() = %q, want %q", result.AsString(), tt.want)
 			}
 		})
 	}
 }
 
-// TestParserExpressionEdgeCases tests expression parsing edge cases
-func TestParserExpressionEdgeCases(t *testing.T) {
-	t.Parallel()
+// TestUnicodeFunc tests unicodeFunc
+func TestUnicodeFunc(t *testing.T) {
 	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
+		name string
+		args []Value
+		want int64
 	}{
 		{
-			name:    "unary minus",
-			sql:     "SELECT -5 FROM users",
-			wantErr: false,
+			name: "ASCII char",
+			args: []Value{NewTextValue("A")},
+			want: 65,
 		},
 		{
-			name:    "unary plus",
-			sql:     "SELECT +5 FROM users",
-			wantErr: false,
+			name: "Unicode char",
+			args: []Value{NewTextValue("😀")},
+			want: 128512,
 		},
 		{
-			name:    "unary NOT",
-			sql:     "SELECT * FROM users WHERE NOT active",
-			wantErr: false,
-		},
-		{
-			name:    "bitwise NOT",
-			sql:     "SELECT ~flags FROM users",
-			wantErr: false,
-		},
-		{
-			name:    "bitwise AND",
-			sql:     "SELECT flags & 0x0F FROM users",
-			wantErr: false,
-		},
-		{
-			name:    "bitwise OR",
-			sql:     "SELECT flags | 0x0F FROM users",
-			wantErr: false,
-		},
-		{
-			name:    "left shift",
-			sql:     "SELECT value << 2 FROM data",
-			wantErr: false,
-		},
-		{
-			name:    "right shift",
-			sql:     "SELECT value >> 2 FROM data",
-			wantErr: false,
-		},
-		{
-			name:    "string concatenation",
-			sql:     "SELECT first_name || ' ' || last_name FROM users",
-			wantErr: false,
-		},
-		{
-			name:    "COLLATE in expression",
-			sql:     "SELECT * FROM users WHERE name = 'John' COLLATE NOCASE",
-			wantErr: false,
-		},
-		{
-			name:    "EXISTS subquery - unsupported",
-			sql:     "SELECT * FROM users WHERE EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)",
-			wantErr: true,
-		},
-		{
-			name:    "NOT EXISTS subquery - unsupported",
-			sql:     "SELECT * FROM users WHERE NOT EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)",
-			wantErr: true,
-		},
-		{
-			name:    "parenthesized expression",
-			sql:     "SELECT (age + 1) * 2 FROM users",
-			wantErr: false,
+			name: "empty string",
+			args: []Value{NewTextValue("")},
+			want: 0,
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+			result, err := unicodeFunc(tt.args)
+			if err != nil {
+				t.Errorf("unicodeFunc() error = %v", err)
+				return
+			}
+
+			if result.AsInt64() != tt.want {
+				t.Errorf("unicodeFunc() = %d, want %d", result.AsInt64(), tt.want)
 			}
 		})
 	}
 }
 
-// TestParserGroupByHaving tests GROUP BY with HAVING clause
-func TestParserGroupByHaving(t *testing.T) {
-	t.Parallel()
+// TestCharFunc tests charFunc
+func TestCharFunc(t *testing.T) {
 	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
+		name string
+		args []Value
+		want string
 	}{
 		{
-			name:    "GROUP BY with HAVING",
-			sql:     "SELECT department, COUNT(*) FROM users GROUP BY department HAVING COUNT(*) > 5",
-			wantErr: false,
+			name: "single char",
+			args: []Value{NewIntValue(65)},
+			want: "A",
 		},
 		{
-			name:    "GROUP BY without HAVING",
-			sql:     "SELECT department, COUNT(*) FROM users GROUP BY department",
-			wantErr: false,
+			name: "multiple chars",
+			args: []Value{NewIntValue(72), NewIntValue(101), NewIntValue(108), NewIntValue(108), NewIntValue(111)},
+			want: "Hello",
+		},
+		{
+			name: "unicode char",
+			args: []Value{NewIntValue(128512)},
+			want: "😀",
+		},
+		{
+			name: "null arg",
+			args: []Value{NewNullValue(), NewIntValue(65)},
+			want: "A",
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+			result, err := charFunc(tt.args)
+			if err != nil {
+				t.Errorf("charFunc() error = %v", err)
+				return
+			}
+
+			if result.AsString() != tt.want {
+				t.Errorf("charFunc() = %q, want %q", result.AsString(), tt.want)
 			}
 		})
 	}
 }
 
-// TestParserLimitOffset tests LIMIT with OFFSET clause
-func TestParserLimitOffset(t *testing.T) {
-	t.Parallel()
+// TestIfnullFunc tests ifnullFunc
+func TestIfnullFunc(t *testing.T) {
 	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
+		name string
+		args []Value
+		want int64
 	}{
 		{
-			name:    "LIMIT with OFFSET",
-			sql:     "SELECT * FROM users LIMIT 10 OFFSET 20",
-			wantErr: false,
+			name: "first null",
+			args: []Value{NewNullValue(), NewIntValue(42)},
+			want: 42,
 		},
 		{
-			name:    "LIMIT with comma syntax",
-			sql:     "SELECT * FROM users LIMIT 20, 10",
-			wantErr: false,
-		},
-		{
-			name:    "LIMIT without OFFSET",
-			sql:     "SELECT * FROM users LIMIT 10",
-			wantErr: false,
+			name: "first not null",
+			args: []Value{NewIntValue(10), NewIntValue(42)},
+			want: 10,
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+			result, err := ifnullFunc(tt.args)
+			if err != nil {
+				t.Errorf("ifnullFunc() error = %v", err)
+				return
+			}
+
+			if result.AsInt64() != tt.want {
+				t.Errorf("ifnullFunc() = %d, want %d", result.AsInt64(), tt.want)
 			}
 		})
 	}
 }
 
-// TestParserAlias tests alias parsing edge cases
-func TestParserAlias(t *testing.T) {
-	t.Parallel()
+// TestIifFunc tests iifFunc
+func TestIifFunc(t *testing.T) {
 	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
+		name string
+		args []Value
+		want int64
 	}{
 		{
-			name:    "column alias with AS",
-			sql:     "SELECT name AS n FROM users",
-			wantErr: false,
+			name: "condition true",
+			args: []Value{NewIntValue(1), NewIntValue(10), NewIntValue(20)},
+			want: 10,
 		},
 		{
-			name:    "column alias without AS",
-			sql:     "SELECT name n FROM users",
-			wantErr: false,
+			name: "condition false",
+			args: []Value{NewIntValue(0), NewIntValue(10), NewIntValue(20)},
+			want: 20,
 		},
 		{
-			name:    "column alias with keyword",
-			sql:     "SELECT name user FROM users",
-			wantErr: false,
+			name: "condition null",
+			args: []Value{NewNullValue(), NewIntValue(10), NewIntValue(20)},
+			want: 20,
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+			result, err := iifFunc(tt.args)
+			if err != nil {
+				t.Errorf("iifFunc() error = %v", err)
+				return
+			}
+
+			if result.AsInt64() != tt.want {
+				t.Errorf("iifFunc() = %d, want %d", result.AsInt64(), tt.want)
 			}
 		})
 	}
 }
 
-// TestParserConstraintNames tests named constraints
-func TestParserConstraintNames(t *testing.T) {
-	t.Parallel()
+// TestZeroblobFunc tests zeroblobFunc
+func TestZeroblobFunc(t *testing.T) {
 	tests := []struct {
 		name    string
-		sql     string
-		wantErr bool
+		args    []Value
+		wantLen int
 	}{
 		{
-			name:    "named PRIMARY KEY constraint",
-			sql:     "CREATE TABLE users (id INTEGER, CONSTRAINT pk_users PRIMARY KEY (id))",
-			wantErr: false,
+			name:    "valid size",
+			args:    []Value{NewIntValue(10)},
+			wantLen: 10,
 		},
 		{
-			name:    "named UNIQUE constraint",
-			sql:     "CREATE TABLE users (email TEXT, CONSTRAINT uk_email UNIQUE (email))",
-			wantErr: false,
-		},
-		{
-			name:    "named CHECK constraint",
-			sql:     "CREATE TABLE users (age INTEGER, CONSTRAINT chk_age CHECK (age > 0))",
-			wantErr: false,
-		},
-		{
-			name:    "named FOREIGN KEY constraint",
-			sql:     "CREATE TABLE orders (user_id INTEGER, CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id))",
-			wantErr: false,
+			name:    "zero size",
+			args:    []Value{NewIntValue(0)},
+			wantLen: 0,
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+			result, err := zeroblobFunc(tt.args)
+			if err != nil {
+				t.Errorf("zeroblobFunc() error = %v", err)
+				return
+			}
+
+			if result.Type() != TypeBlob {
+				t.Errorf("zeroblobFunc() type = %v, want TypeBlob", result.Type())
+			}
+
+			blob := result.AsBlob()
+			if len(blob) != tt.wantLen {
+				t.Errorf("zeroblobFunc() length = %d, want %d", len(blob), tt.wantLen)
+			}
+
+			// Verify all bytes are zero
+			for i, b := range blob {
+				if b != 0 {
+					t.Errorf("zeroblobFunc()[%d] = %d, want 0", i, b)
+				}
 			}
 		})
 	}
 }
 
-// TestParserIndexedColumns tests indexed column variations
-func TestParserIndexedColumns(t *testing.T) {
-	t.Parallel()
+// TestNullCompare tests nullCompare helper
+func TestNullCompare(t *testing.T) {
 	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
+		name      string
+		a         Value
+		b         Value
+		wantCmp   int
+		wantValid bool
 	}{
 		{
-			name:    "index with ASC",
-			sql:     "CREATE INDEX idx ON users (name ASC)",
-			wantErr: false,
+			name:      "both null",
+			a:         NewNullValue(),
+			b:         NewNullValue(),
+			wantCmp:   0,
+			wantValid: true,
 		},
 		{
-			name:    "index with DESC",
-			sql:     "CREATE INDEX idx ON users (name DESC)",
-			wantErr: false,
+			name:      "a null",
+			a:         NewNullValue(),
+			b:         NewIntValue(1),
+			wantCmp:   -1,
+			wantValid: true,
 		},
 		{
-			name:    "index with multiple columns",
-			sql:     "CREATE INDEX idx ON users (last_name, first_name)",
-			wantErr: false,
+			name:      "b null",
+			a:         NewIntValue(1),
+			b:         NewNullValue(),
+			wantCmp:   1,
+			wantValid: true,
 		},
 		{
-			name:    "index with expression - now supported",
-			sql:     "CREATE INDEX idx ON users (LOWER(email))",
-			wantErr: false,
+			name:      "neither null",
+			a:         NewIntValue(1),
+			b:         NewIntValue(2),
+			wantCmp:   0,
+			wantValid: false,
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+			cmp, valid := nullCompare(tt.a, tt.b)
+			if valid != tt.wantValid {
+				t.Errorf("nullCompare() valid = %v, want %v", valid, tt.wantValid)
+			}
+			if valid && cmp != tt.wantCmp {
+				t.Errorf("nullCompare() cmp = %d, want %d", cmp, tt.wantCmp)
 			}
 		})
 	}
 }
 
-// TestParserPragmaValue tests PRAGMA value variations
-func TestParserPragmaValue(t *testing.T) {
-	t.Parallel()
+// TestCompareValues tests compareValues helper
+func TestCompareValues(t *testing.T) {
 	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
+		name string
+		a    Value
+		b    Value
+		want int
 	}{
 		{
-			name:    "PRAGMA with integer value",
-			sql:     "PRAGMA cache_size = 2000",
-			wantErr: false,
+			name: "int equal",
+			a:    NewIntValue(5),
+			b:    NewIntValue(5),
+			want: 0,
 		},
 		{
-			name:    "PRAGMA with string value",
-			sql:     "PRAGMA encoding = 'UTF-8'",
-			wantErr: false,
+			name: "int less",
+			a:    NewIntValue(3),
+			b:    NewIntValue(5),
+			want: -1,
 		},
 		{
-			name:    "PRAGMA with identifier value",
-			sql:     "PRAGMA synchronous = FULL",
-			wantErr: false,
+			name: "int greater",
+			a:    NewIntValue(7),
+			b:    NewIntValue(5),
+			want: 1,
 		},
 		{
-			name:    "PRAGMA with ON value",
-			sql:     "PRAGMA foreign_keys = ON",
-			wantErr: false,
+			name: "text equal",
+			a:    NewTextValue("abc"),
+			b:    NewTextValue("abc"),
+			want: 0,
 		},
 		{
-			name:    "PRAGMA with OFF value",
-			sql:     "PRAGMA case_sensitive_like = OFF",
-			wantErr: false,
+			name: "text less",
+			a:    NewTextValue("abc"),
+			b:    NewTextValue("def"),
+			want: -1,
+		},
+		{
+			name: "text greater",
+			a:    NewTextValue("def"),
+			b:    NewTextValue("abc"),
+			want: 1,
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+			got := compareValues(tt.a, tt.b)
+			if got != tt.want {
+				t.Errorf("compareValues() = %d, want %d", got, tt.want)
 			}
 		})
 	}
 }
 
-// TestParserTriggerEvent tests trigger event variations
-func TestParserTriggerEvent(t *testing.T) {
-	t.Parallel()
+// TestHelperFunctions tests utility helper functions
+func TestIsDigit(t *testing.T) {
 	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
+		char rune
+		want bool
 	}{
-		{
-			name:    "trigger on INSERT",
-			sql:     "CREATE TRIGGER t1 BEFORE INSERT ON users BEGIN SELECT 1; END",
-			wantErr: false,
-		},
-		{
-			name:    "trigger on UPDATE",
-			sql:     "CREATE TRIGGER t2 BEFORE UPDATE ON users BEGIN SELECT 1; END",
-			wantErr: false,
-		},
-		{
-			name:    "trigger on UPDATE OF columns",
-			sql:     "CREATE TRIGGER t3 BEFORE UPDATE OF name, email ON users BEGIN SELECT 1; END",
-			wantErr: false,
-		},
-		{
-			name:    "trigger on DELETE",
-			sql:     "CREATE TRIGGER t4 BEFORE DELETE ON users BEGIN SELECT 1; END",
-			wantErr: false,
-		},
+		{'0', true},
+		{'5', true},
+		{'9', true},
+		{'a', false},
+		{' ', false},
 	}
 
 	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+		t.Run(string(tt.char), func(t *testing.T) {
+			if got := isDigit(tt.char); got != tt.want {
+				t.Errorf("isDigit(%c) = %v, want %v", tt.char, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsSpace(t *testing.T) {
+	tests := []struct {
+		char rune
+		want bool
+	}{
+		{' ', true},
+		{'\t', true},
+		{'\n', true},
+		{'a', false},
+		{'0', false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.char), func(t *testing.T) {
+			if got := isSpace(tt.char); got != tt.want {
+				t.Errorf("isSpace(%c) = %v, want %v", tt.char, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAbsHelper(t *testing.T) {
+	tests := []struct {
+		value int64
+		want  int64
+	}{
+		{5, 5},
+		{-5, 5},
+		{0, 0},
+	}
+
+	for _, tt := range tests {
+		if got := abs(tt.value); got != tt.want {
+			t.Errorf("abs(%d) = %d, want %d", tt.value, got, tt.want)
+		}
+	}
+}
+
+func TestFabsHelper(t *testing.T) {
+	tests := []struct {
+		value float64
+		want  float64
+	}{
+		{5.5, 5.5},
+		{-5.5, 5.5},
+		{0.0, 0.0},
+	}
+
+	for _, tt := range tests {
+		if got := fabs(tt.value); got != tt.want {
+			t.Errorf("fabs(%f) = %f, want %f", tt.value, got, tt.want)
+		}
+	}
+}
+
+// filterIgnoredChars is tested through unhexFunc
+
+// TestLengthFuncEdgeCases tests length function with various types
+func TestLengthFuncEdgeCases(t *testing.T) {
+	// Test with float
+	result, err := lengthFunc([]Value{NewFloatValue(3.14)})
+	if err != nil {
+		t.Errorf("lengthFunc() with float error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("lengthFunc() with float should not return NULL")
+	}
+
+	// Test with integer
+	result, err = lengthFunc([]Value{NewIntValue(42)})
+	if err != nil {
+		t.Errorf("lengthFunc() with integer error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("lengthFunc() with integer should not return NULL")
+	}
+}
+
+// TestSubstrFuncBlobEdgeCases tests substr with blob edge cases
+func TestSubstrFuncBlobEdgeCases(t *testing.T) {
+	// Test with blob and various positions
+	blob := NewBlobValue([]byte{1, 2, 3, 4, 5})
+
+	result, err := substrFunc([]Value{blob, NewIntValue(2), NewIntValue(3)})
+	if err != nil {
+		t.Errorf("substrFunc() error = %v", err)
+	}
+	if result.Type() != TypeBlob {
+		t.Errorf("substrFunc() on blob should return blob, got %v", result.Type())
+	}
+}
+
+// TestTrimFuncEdgeCases tests trim with custom characters
+func TestTrimFuncEdgeCases(t *testing.T) {
+	// Test with second argument (chars to trim)
+	result, err := trimFunc([]Value{NewTextValue("xxhelloxx"), NewTextValue("x")})
+	if err != nil {
+		t.Errorf("trimFunc() error = %v", err)
+	}
+	if result.AsString() != "hello" {
+		t.Errorf("trimFunc() = %q, want 'hello'", result.AsString())
+	}
+}
+
+// TestQuoteFuncBlob tests quote with blob
+func TestQuoteFuncBlob(t *testing.T) {
+	result, err := quoteFunc([]Value{NewBlobValue([]byte{65, 66, 67})})
+	if err != nil {
+		t.Errorf("quoteFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("quoteFunc() should not return NULL for blob")
+	}
+}
+
+// TestCompareValuesEdgeCases tests compareValues with mixed types
+func TestCompareValuesEdgeCases(t *testing.T) {
+	// Test through nullif which uses compareValues
+	result, err := nullifFunc([]Value{NewIntValue(1), NewIntValue(2)})
+	if err != nil {
+		t.Errorf("nullifFunc() error = %v", err)
+	}
+	if result.IsNull() {
+		t.Error("nullifFunc() should not return NULL when values differ")
+	}
+
+	// Test with equal values
+	result, err = nullifFunc([]Value{NewIntValue(5), NewIntValue(5)})
+	if err != nil {
+		t.Errorf("nullifFunc() error = %v", err)
+	}
+	if !result.IsNull() {
+		t.Error("nullifFunc() should return NULL when values are equal")
 	}
 }

@@ -1,266 +1,264 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package pager
+package parser
 
 import (
-	"errors"
-	"fmt"
-	"os"
-	"sync"
+	"testing"
 )
 
-// LockLevel represents the different lock levels in SQLite's locking protocol.
-// SQLite uses a five-level locking hierarchy to enable concurrent readers with
-// a single writer.
-//
-// Lock levels (defined in pager.go):
-//   - LockNone:      No locks are held. The database is unlocked.
-//   - LockShared:    A SHARED lock allows reading from the database.
-//     Multiple connections can hold SHARED locks simultaneously.
-//     A SHARED lock prevents any other connection from modifying the database.
-//   - LockReserved:  A RESERVED lock means the process is planning to write to
-//     the database at some point in the future but is currently just reading.
-//     Only one connection can hold a RESERVED lock at a time.
-//     Other connections can continue to read (hold SHARED locks).
-//   - LockPending:   A PENDING lock means the process holding the lock wants to
-//     write to the database as soon as possible and is waiting for all current
-//     SHARED locks to clear. No new SHARED locks are allowed while a PENDING
-//     lock is held, but existing SHARED locks are allowed to continue.
-//   - LockExclusive: An EXCLUSIVE lock is required to write to the database.
-//     Only one connection can hold an EXCLUSIVE lock, and no other locks of
-//     any kind can coexist with an EXCLUSIVE lock.
-type LockLevel int
+func TestParseExplain(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		sql         string
+		wantErr     bool
+		wantQP      bool // want QueryPlan flag
+		wantStmtTyp string
+	}{
+		{
+			name:        "explain select",
+			sql:         "EXPLAIN SELECT * FROM users",
+			wantErr:     false,
+			wantQP:      false,
+			wantStmtTyp: "SELECT",
+		},
+		{
+			name:        "explain query plan select",
+			sql:         "EXPLAIN QUERY PLAN SELECT * FROM users",
+			wantErr:     false,
+			wantQP:      true,
+			wantStmtTyp: "SELECT",
+		},
+		{
+			name:        "explain insert",
+			sql:         "EXPLAIN INSERT INTO users (name) VALUES ('Alice')",
+			wantErr:     false,
+			wantQP:      false,
+			wantStmtTyp: "INSERT",
+		},
+		{
+			name:        "explain query plan insert",
+			sql:         "EXPLAIN QUERY PLAN INSERT INTO users VALUES (1, 'Bob')",
+			wantErr:     false,
+			wantQP:      true,
+			wantStmtTyp: "INSERT",
+		},
+		{
+			name:        "explain update",
+			sql:         "EXPLAIN UPDATE users SET name = 'Charlie' WHERE id = 1",
+			wantErr:     false,
+			wantQP:      false,
+			wantStmtTyp: "UPDATE",
+		},
+		{
+			name:        "explain query plan update",
+			sql:         "EXPLAIN QUERY PLAN UPDATE users SET age = 30",
+			wantErr:     false,
+			wantQP:      true,
+			wantStmtTyp: "UPDATE",
+		},
+		{
+			name:        "explain delete",
+			sql:         "EXPLAIN DELETE FROM users WHERE age < 18",
+			wantErr:     false,
+			wantQP:      false,
+			wantStmtTyp: "DELETE",
+		},
+		{
+			name:        "explain query plan delete",
+			sql:         "EXPLAIN QUERY PLAN DELETE FROM users",
+			wantErr:     false,
+			wantQP:      true,
+			wantStmtTyp: "DELETE",
+		},
+		{
+			name:        "explain create table",
+			sql:         "EXPLAIN CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
+			wantErr:     false,
+			wantQP:      false,
+			wantStmtTyp: "CREATE TABLE",
+		},
+		{
+			name:        "explain query plan create index",
+			sql:         "EXPLAIN QUERY PLAN CREATE INDEX idx_name ON users(name)",
+			wantErr:     false,
+			wantQP:      true,
+			wantStmtTyp: "CREATE INDEX",
+		},
+		{
+			name:        "explain select with join",
+			sql:         "EXPLAIN SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id",
+			wantErr:     false,
+			wantQP:      false,
+			wantStmtTyp: "SELECT",
+		},
+		{
+			name:        "explain query plan select with complex query",
+			sql:         "EXPLAIN QUERY PLAN SELECT * FROM users WHERE age > 18 ORDER BY name LIMIT 10",
+			wantErr:     false,
+			wantQP:      true,
+			wantStmtTyp: "SELECT",
+		},
+		{
+			name:        "explain drop table",
+			sql:         "EXPLAIN DROP TABLE users",
+			wantErr:     false,
+			wantQP:      false,
+			wantStmtTyp: "DROP TABLE",
+		},
+		{
+			name:        "explain begin transaction",
+			sql:         "EXPLAIN BEGIN TRANSACTION",
+			wantErr:     false,
+			wantQP:      false,
+			wantStmtTyp: "BEGIN",
+		},
+		{
+			name:    "explain query without plan - error",
+			sql:     "EXPLAIN QUERY SELECT * FROM users",
+			wantErr: true,
+		},
+	}
 
-// Lock level constants as LockLevel type for convenience
-const (
-	lockNone      LockLevel = LockNone
-	lockShared    LockLevel = LockShared
-	lockReserved  LockLevel = LockReserved
-	lockPending   LockLevel = LockPending
-	lockExclusive LockLevel = LockExclusive
-)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
 
-// String returns a string representation of the lock level.
-func (l LockLevel) String() string {
-	switch l {
-	case lockNone:
-		return "NONE"
-	case lockShared:
-		return "SHARED"
-	case lockReserved:
-		return "RESERVED"
-	case lockPending:
-		return "PENDING"
-	case lockExclusive:
-		return "EXCLUSIVE"
-	default:
-		return fmt.Sprintf("UNKNOWN(%d)", l)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr {
+				return
+			}
+
+			if len(stmts) != 1 {
+				t.Errorf("expected 1 statement, got %d", len(stmts))
+				return
+			}
+
+			explainStmt, ok := stmts[0].(*ExplainStmt)
+			if !ok {
+				t.Errorf("expected ExplainStmt, got %T", stmts[0])
+				return
+			}
+
+			if explainStmt.QueryPlan != tt.wantQP {
+				t.Errorf("QueryPlan = %v, want %v", explainStmt.QueryPlan, tt.wantQP)
+			}
+
+			if explainStmt.Statement == nil {
+				t.Errorf("Statement is nil")
+				return
+			}
+
+			if explainStmt.Statement.String() != tt.wantStmtTyp {
+				t.Errorf("Statement type = %v, want %v", explainStmt.Statement.String(), tt.wantStmtTyp)
+			}
+		})
 	}
 }
 
-// Lock errors
-var (
-	ErrLockBusy    = errors.New("database is locked by another process")
-	ErrLockTimeout = errors.New("timeout acquiring lock")
-	ErrInvalidLock = errors.New("invalid lock transition")
-	ErrLockNotHeld = errors.New("lock not held")
-	ErrFileNotOpen = errors.New("file not open")
-)
-
-// LockManager manages file locks for a database file.
-// It implements the SQLite locking protocol using platform-specific file locking.
-type LockManager struct {
-	// Database file handle
-	file *os.File
-
-	// Current lock level held by this manager
-	currentLevel LockLevel
-
-	// Mutex for thread-safe lock operations
-	mu sync.RWMutex
-
-	// Platform-specific lock data (used by platform implementations)
-	platformData interface{}
-}
-
-// NewLockManager creates a new lock manager for the given file.
-// The file must be open and remain open for the lifetime of the lock manager.
-func NewLockManager(file *os.File) (*LockManager, error) {
-	if file == nil {
-		return nil, ErrFileNotOpen
+func TestParseExplainNested(t *testing.T) {
+	t.Parallel()
+	// Test that nested EXPLAIN statements work correctly
+	tests := []struct {
+		name    string
+		sql     string
+		wantErr bool
+	}{
+		{
+			name:    "nested explain - should work",
+			sql:     "EXPLAIN EXPLAIN SELECT * FROM users",
+			wantErr: false,
+		},
+		{
+			name:    "nested explain query plan",
+			sql:     "EXPLAIN QUERY PLAN EXPLAIN SELECT * FROM users",
+			wantErr: false,
+		},
 	}
 
-	lm := &LockManager{
-		file:         file,
-		currentLevel: lockNone,
-	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parser := NewParser(tt.sql)
+			stmts, err := parser.Parse()
 
-	// Initialize platform-specific lock data if needed
-	if err := lm.initPlatform(); err != nil {
-		return nil, fmt.Errorf("failed to initialize platform locks: %w", err)
-	}
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
 
-	return lm, nil
-}
+			if tt.wantErr {
+				return
+			}
 
-// AcquireLock attempts to acquire the specified lock level.
-// This follows SQLite's lock escalation rules:
-//   - NONE -> SHARED: Acquire shared lock
-//   - SHARED -> RESERVED: Acquire reserved lock (keeps shared)
-//   - RESERVED -> PENDING: Acquire pending lock
-//   - PENDING -> EXCLUSIVE: Acquire exclusive lock (releases all others)
-//   - Can also downgrade: EXCLUSIVE -> SHARED, RESERVED -> SHARED, etc.
-//
-// Returns ErrLockBusy if the lock cannot be acquired due to conflicts.
-func (lm *LockManager) AcquireLock(level LockLevel) error {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
+			if len(stmts) != 1 {
+				t.Errorf("expected 1 statement, got %d", len(stmts))
+				return
+			}
 
-	// Already have the requested lock level
-	if lm.currentLevel == level {
-		return nil
-	}
+			// First level should be ExplainStmt
+			explainStmt1, ok := stmts[0].(*ExplainStmt)
+			if !ok {
+				t.Errorf("expected ExplainStmt at top level, got %T", stmts[0])
+				return
+			}
 
-	// Validate lock transition
-	if !lm.isValidTransition(lm.currentLevel, level) {
-		return fmt.Errorf("%w: cannot transition from %s to %s",
-			ErrInvalidLock, lm.currentLevel, level)
-	}
+			// Second level should also be ExplainStmt
+			explainStmt2, ok := explainStmt1.Statement.(*ExplainStmt)
+			if !ok {
+				t.Errorf("expected ExplainStmt at second level, got %T", explainStmt1.Statement)
+				return
+			}
 
-	// Perform the lock operation
-	if err := lm.acquireLockPlatform(level); err != nil {
-		return err
-	}
-
-	lm.currentLevel = level
-	return nil
-}
-
-// ReleaseLock releases the current lock back to the specified level.
-// This is used to downgrade locks. To fully release all locks, use LockNone.
-func (lm *LockManager) ReleaseLock(level LockLevel) error {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
-
-	// Already at the requested level or lower
-	if lm.currentLevel <= level {
-		return nil
-	}
-
-	// Perform the unlock operation
-	if err := lm.releaseLockPlatform(level); err != nil {
-		return err
-	}
-
-	lm.currentLevel = level
-	return nil
-}
-
-// GetLockState returns the current lock level.
-func (lm *LockManager) GetLockState() LockLevel {
-	lm.mu.RLock()
-	defer lm.mu.RUnlock()
-	return lm.currentLevel
-}
-
-// Close releases all locks and cleans up resources.
-func (lm *LockManager) Close() error {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
-
-	if lm.currentLevel == lockNone {
-		return nil
-	}
-
-	// Release all locks
-	if err := lm.releaseLockPlatform(lockNone); err != nil {
-		return err
-	}
-
-	lm.currentLevel = lockNone
-
-	// Clean up platform-specific resources
-	if err := lm.cleanupPlatform(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// isValidTransition checks if transitioning from one lock level to another is valid.
-func (lm *LockManager) isValidTransition(from, to LockLevel) bool {
-	// Can always stay at the same level
-	if from == to {
-		return true
-	}
-
-	// Check valid transition based on source lock level
-	switch from {
-	case lockNone:
-		return lm.isValidFromNone(to)
-	case lockShared:
-		return lm.isValidFromShared(to)
-	case lockReserved:
-		return lm.isValidFromReserved(to)
-	case lockPending:
-		return lm.isValidFromPending(to)
-	case lockExclusive:
-		return lm.isValidFromExclusive(to)
-	default:
-		return false
+			// Third level should be SelectStmt
+			_, ok = explainStmt2.Statement.(*SelectStmt)
+			if !ok {
+				t.Errorf("expected SelectStmt at third level, got %T", explainStmt2.Statement)
+			}
+		})
 	}
 }
 
-// isValidFromNone checks valid transitions from NONE lock level.
-func (lm *LockManager) isValidFromNone(to LockLevel) bool {
-	// Can acquire any lock from NONE, but typically start with SHARED
-	return to == lockShared || to == lockExclusive
-}
+func TestExplainStmtString(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		stmt      *ExplainStmt
+		wantStr   string
+	}{
+		{
+			name: "explain without query plan",
+			stmt: &ExplainStmt{
+				QueryPlan: false,
+				Statement: &SelectStmt{},
+			},
+			wantStr: "EXPLAIN",
+		},
+		{
+			name: "explain with query plan",
+			stmt: &ExplainStmt{
+				QueryPlan: true,
+				Statement: &SelectStmt{},
+			},
+			wantStr: "EXPLAIN QUERY PLAN",
+		},
+	}
 
-// isValidFromShared checks valid transitions from SHARED lock level.
-func (lm *LockManager) isValidFromShared(to LockLevel) bool {
-	// From SHARED, can go to RESERVED or EXCLUSIVE, or back to NONE
-	return to == lockReserved || to == lockExclusive || to == lockNone
-}
-
-// isValidFromReserved checks valid transitions from RESERVED lock level.
-func (lm *LockManager) isValidFromReserved(to LockLevel) bool {
-	// From RESERVED, can go to PENDING or EXCLUSIVE, or downgrade to SHARED or NONE
-	return to == lockPending || to == lockExclusive || to == lockShared || to == lockNone
-}
-
-// isValidFromPending checks valid transitions from PENDING lock level.
-func (lm *LockManager) isValidFromPending(to LockLevel) bool {
-	// From PENDING, can go to EXCLUSIVE, or downgrade to SHARED or NONE
-	return to == lockExclusive || to == lockShared || to == lockNone
-}
-
-// isValidFromExclusive checks valid transitions from EXCLUSIVE lock level.
-func (lm *LockManager) isValidFromExclusive(to LockLevel) bool {
-	// From EXCLUSIVE, can only downgrade to SHARED or NONE
-	return to == lockShared || to == lockNone
-}
-
-// TryAcquireLock attempts to acquire a lock without blocking.
-// Returns ErrLockBusy immediately if the lock cannot be acquired.
-func (lm *LockManager) TryAcquireLock(level LockLevel) error {
-	// For now, this is the same as AcquireLock since our platform
-	// implementations use non-blocking locks by default.
-	// In a future implementation with timeouts, this would be different.
-	return lm.AcquireLock(level)
-}
-
-// IsLockHeld checks if a specific lock level is currently held.
-// Returns true if the current lock level is >= the specified level.
-func (lm *LockManager) IsLockHeld(level LockLevel) bool {
-	lm.mu.RLock()
-	defer lm.mu.RUnlock()
-	return lm.currentLevel >= level
-}
-
-// CanAcquire checks if acquiring a specific lock level would be valid
-// without actually acquiring it.
-func (lm *LockManager) CanAcquire(level LockLevel) bool {
-	lm.mu.RLock()
-	defer lm.mu.RUnlock()
-	return lm.isValidTransition(lm.currentLevel, level)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.stmt.String()
+			if got != tt.wantStr {
+				t.Errorf("String() = %v, want %v", got, tt.wantStr)
+			}
+		})
+	}
 }

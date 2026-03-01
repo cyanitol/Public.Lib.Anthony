@@ -1,1026 +1,990 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package parser
+package functions
 
 import (
+	"math"
 	"testing"
 )
 
-// TestInsertDefaultValues tests INSERT with DEFAULT VALUES
-func TestInsertDefaultValues(t *testing.T) {
-	t.Parallel()
+// Comprehensive tests for math.go functions
+
+func TestRegisterMathFunctions(t *testing.T) {
+	r := NewRegistry()
+	RegisterMathFunctions(r)
+
+	// Check that functions are registered
+	funcs := []string{
+		"abs", "round", "random", "randomblob",
+		"ceil", "ceiling", "floor", "sqrt", "power", "pow",
+		"exp", "ln", "log", "log10", "log2",
+		"sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+		"sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
+		"sign", "mod", "pi", "radians", "degrees",
+	}
+
+	for _, name := range funcs {
+		if _, ok := r.Lookup(name); !ok {
+			t.Errorf("Function %s not registered", name)
+		}
+	}
+}
+
+func TestAbsFuncInteger(t *testing.T) {
 	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
+		input    Value
+		expected int64
 	}{
-		{
-			name:      "INSERT DEFAULT VALUES",
-			sql:       "INSERT INTO t DEFAULT VALUES;",
-			wantError: false,
-		},
-		{
-			name:      "INSERT DEFAULT without VALUES",
-			sql:       "INSERT INTO t DEFAULT;",
-			wantError: true,
-		},
+		{NewIntValue(5), 5},
+		{NewIntValue(-5), 5},
+		{NewIntValue(0), 0},
+		{NewIntValue(100), 100},
+		{NewIntValue(-100), 100},
 	}
 
 	for _, tt := range tests {
-		tt := tt
+		result, err := absFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("absFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if result.AsInt64() != tt.expected {
+			t.Errorf("absFunc(%v) = %d, want %d", tt.input, result.AsInt64(), tt.expected)
+		}
+	}
+}
+
+func TestAbsFuncFloat(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected float64
+	}{
+		{NewFloatValue(5.5), 5.5},
+		{NewFloatValue(-5.5), 5.5},
+		{NewFloatValue(0.0), 0.0},
+		{NewFloatValue(-0.0), 0.0},
+	}
+
+	for _, tt := range tests {
+		result, err := absFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("absFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if result.AsFloat64() != tt.expected {
+			t.Errorf("absFunc(%v) = %f, want %f", tt.input, result.AsFloat64(), tt.expected)
+		}
+	}
+}
+
+func TestAbsFuncOverflow(t *testing.T) {
+	// Test MinInt64 overflow
+	input := NewIntValue(math.MinInt64)
+	_, err := absFunc([]Value{input})
+	if err == nil {
+		t.Error("Expected overflow error for MinInt64")
+	}
+}
+
+func TestAbsFuncNull(t *testing.T) {
+	result, err := absFunc([]Value{NewNullValue()})
+	if err != nil {
+		t.Errorf("absFunc(NULL) error: %v", err)
+	}
+	if !result.IsNull() {
+		t.Error("Expected NULL result")
+	}
+}
+
+func TestRoundFuncBasic(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected float64
+	}{
+		{NewFloatValue(5.5), 6.0},
+		{NewFloatValue(5.4), 5.0},
+		{NewFloatValue(-5.5), -6.0},
+		{NewFloatValue(-5.4), -5.0},
+	}
+
+	for _, tt := range tests {
+		result, err := roundFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("roundFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if result.AsFloat64() != tt.expected {
+			t.Errorf("roundFunc(%v) = %f, want %f", tt.input, result.AsFloat64(), tt.expected)
+		}
+	}
+}
+
+func TestRoundFuncWithPrecision(t *testing.T) {
+	tests := []struct {
+		input     Value
+		precision Value
+		expected  float64
+	}{
+		{NewFloatValue(5.555), NewIntValue(2), 5.56},
+		{NewFloatValue(5.554), NewIntValue(2), 5.55},
+		{NewFloatValue(123.456), NewIntValue(1), 123.5},
+		{NewFloatValue(123.456), NewIntValue(0), 123.0},
+	}
+
+	for _, tt := range tests {
+		result, err := roundFunc([]Value{tt.input, tt.precision})
+		if err != nil {
+			t.Errorf("roundFunc(%v, %v) error: %v", tt.input, tt.precision, err)
+			continue
+		}
+		if math.Abs(result.AsFloat64()-tt.expected) > 0.01 {
+			t.Errorf("roundFunc(%v, %v) = %f, want %f", tt.input, tt.precision, result.AsFloat64(), tt.expected)
+		}
+	}
+}
+
+func TestRoundFuncSpecialValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		input Value
+	}{
+		{"NaN", NewFloatValue(math.NaN())},
+		{"Inf", NewFloatValue(math.Inf(1))},
+		{"-Inf", NewFloatValue(math.Inf(-1))},
+	}
+
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			result, err := roundFunc([]Value{tt.input})
+			if err != nil {
+				t.Errorf("roundFunc(%s) error: %v", tt.name, err)
+			}
+			// Should return the same value
+			if math.IsNaN(tt.input.AsFloat64()) && !math.IsNaN(result.AsFloat64()) {
+				t.Error("Expected NaN result")
+			}
+			if math.IsInf(tt.input.AsFloat64(), 1) && !math.IsInf(result.AsFloat64(), 1) {
+				t.Error("Expected +Inf result")
 			}
 		})
 	}
 }
 
-// TestInsertSelectSource tests INSERT with SELECT
-func TestInsertSelectSource(t *testing.T) {
-	t.Parallel()
+func TestRandomFunc(t *testing.T) {
+	// Generate multiple random values
+	for i := 0; i < 10; i++ {
+		result, err := randomFunc([]Value{})
+		if err != nil {
+			t.Errorf("randomFunc() error: %v", err)
+		}
+		if result.Type() != TypeInteger {
+			t.Error("Expected integer result")
+		}
+	}
+}
+
+func TestRandomBlobFunc(t *testing.T) {
+	tests := []int64{1, 10, 100, 1000}
+
+	for _, n := range tests {
+		result, err := randomblobFunc([]Value{NewIntValue(n)})
+		if err != nil {
+			t.Errorf("randomblobFunc(%d) error: %v", n, err)
+			continue
+		}
+		if result.Type() != TypeBlob {
+			t.Error("Expected blob result")
+		}
+		blob := result.AsBlob()
+		if int64(len(blob)) != n {
+			t.Errorf("Expected blob of size %d, got %d", n, len(blob))
+		}
+	}
+}
+
+func TestRandomBlobFuncNull(t *testing.T) {
+	result, err := randomblobFunc([]Value{NewNullValue()})
+	if err != nil {
+		t.Errorf("randomblobFunc(NULL) error: %v", err)
+	}
+	if !result.IsNull() {
+		t.Error("Expected NULL result")
+	}
+}
+
+func TestCeilFunc(t *testing.T) {
 	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
+		input    Value
+		expected float64
 	}{
-		{
-			name:      "INSERT with SELECT",
-			sql:       "INSERT INTO t SELECT * FROM other;",
-			wantError: false,
-		},
-		{
-			name:      "INSERT with columns and SELECT",
-			sql:       "INSERT INTO t (id, name) SELECT id, name FROM other;",
-			wantError: false,
-		},
+		{NewFloatValue(5.1), 6.0},
+		{NewFloatValue(5.9), 6.0},
+		{NewFloatValue(-5.1), -5.0},
+		{NewFloatValue(-5.9), -5.0},
+		{NewFloatValue(5.0), 5.0},
 	}
 
 	for _, tt := range tests {
-		tt := tt
+		result, err := ceilFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("ceilFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if result.AsFloat64() != tt.expected {
+			t.Errorf("ceilFunc(%v) = %f, want %f", tt.input, result.AsFloat64(), tt.expected)
+		}
+	}
+}
+
+func TestFloorFunc(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected float64
+	}{
+		{NewFloatValue(5.1), 5.0},
+		{NewFloatValue(5.9), 5.0},
+		{NewFloatValue(-5.1), -6.0},
+		{NewFloatValue(-5.9), -6.0},
+		{NewFloatValue(5.0), 5.0},
+	}
+
+	for _, tt := range tests {
+		result, err := floorFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("floorFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if result.AsFloat64() != tt.expected {
+			t.Errorf("floorFunc(%v) = %f, want %f", tt.input, result.AsFloat64(), tt.expected)
+		}
+	}
+}
+
+func TestSqrtFunc(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected float64
+	}{
+		{NewFloatValue(4.0), 2.0},
+		{NewFloatValue(9.0), 3.0},
+		{NewFloatValue(0.0), 0.0},
+		{NewFloatValue(2.0), math.Sqrt(2.0)},
+	}
+
+	for _, tt := range tests {
+		result, err := sqrtFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("sqrtFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if math.Abs(result.AsFloat64()-tt.expected) > 1e-10 {
+			t.Errorf("sqrtFunc(%v) = %f, want %f", tt.input, result.AsFloat64(), tt.expected)
+		}
+	}
+}
+
+func TestSqrtFuncNegative(t *testing.T) {
+	result, err := sqrtFunc([]Value{NewFloatValue(-1.0)})
+	if err != nil {
+		t.Errorf("sqrtFunc(-1) error: %v", err)
+	}
+	if !math.IsNaN(result.AsFloat64()) {
+		t.Error("Expected NaN for sqrt of negative number")
+	}
+}
+
+func TestPowerFunc(t *testing.T) {
+	tests := []struct {
+		base     Value
+		exponent Value
+		expected float64
+	}{
+		{NewFloatValue(2.0), NewFloatValue(3.0), 8.0},
+		{NewFloatValue(10.0), NewFloatValue(2.0), 100.0},
+		{NewFloatValue(2.0), NewFloatValue(0.0), 1.0},
+		{NewFloatValue(5.0), NewFloatValue(-1.0), 0.2},
+	}
+
+	for _, tt := range tests {
+		result, err := powerFunc([]Value{tt.base, tt.exponent})
+		if err != nil {
+			t.Errorf("powerFunc(%v, %v) error: %v", tt.base, tt.exponent, err)
+			continue
+		}
+		if math.Abs(result.AsFloat64()-tt.expected) > 1e-10 {
+			t.Errorf("powerFunc(%v, %v) = %f, want %f", tt.base, tt.exponent, result.AsFloat64(), tt.expected)
+		}
+	}
+}
+
+func TestExpFunc(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected float64
+	}{
+		{NewFloatValue(0.0), 1.0},
+		{NewFloatValue(1.0), math.E},
+		{NewFloatValue(2.0), math.Exp(2.0)},
+	}
+
+	for _, tt := range tests {
+		result, err := expFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("expFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if math.Abs(result.AsFloat64()-tt.expected) > 1e-10 {
+			t.Errorf("expFunc(%v) = %f, want %f", tt.input, result.AsFloat64(), tt.expected)
+		}
+	}
+}
+
+func TestLnFunc(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected float64
+	}{
+		{NewFloatValue(1.0), 0.0},
+		{NewFloatValue(math.E), 1.0},
+		{NewFloatValue(math.E * math.E), 2.0},
+	}
+
+	for _, tt := range tests {
+		result, err := lnFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("lnFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if math.Abs(result.AsFloat64()-tt.expected) > 1e-10 {
+			t.Errorf("lnFunc(%v) = %f, want %f", tt.input, result.AsFloat64(), tt.expected)
+		}
+	}
+}
+
+func TestLnFuncNegative(t *testing.T) {
+	result, err := lnFunc([]Value{NewFloatValue(-1.0)})
+	if err != nil {
+		t.Errorf("lnFunc(-1) error: %v", err)
+	}
+	if !math.IsNaN(result.AsFloat64()) {
+		t.Error("Expected NaN for ln of negative number")
+	}
+}
+
+func TestLog10Func(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected float64
+	}{
+		{NewFloatValue(10.0), 1.0},
+		{NewFloatValue(100.0), 2.0},
+		{NewFloatValue(1000.0), 3.0},
+	}
+
+	for _, tt := range tests {
+		result, err := log10Func([]Value{tt.input})
+		if err != nil {
+			t.Errorf("log10Func(%v) error: %v", tt.input, err)
+			continue
+		}
+		if math.Abs(result.AsFloat64()-tt.expected) > 1e-10 {
+			t.Errorf("log10Func(%v) = %f, want %f", tt.input, result.AsFloat64(), tt.expected)
+		}
+	}
+}
+
+func TestLog2Func(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected float64
+	}{
+		{NewFloatValue(2.0), 1.0},
+		{NewFloatValue(4.0), 2.0},
+		{NewFloatValue(8.0), 3.0},
+	}
+
+	for _, tt := range tests {
+		result, err := log2Func([]Value{tt.input})
+		if err != nil {
+			t.Errorf("log2Func(%v) error: %v", tt.input, err)
+			continue
+		}
+		if math.Abs(result.AsFloat64()-tt.expected) > 1e-10 {
+			t.Errorf("log2Func(%v) = %f, want %f", tt.input, result.AsFloat64(), tt.expected)
+		}
+	}
+}
+
+func TestTrigFunctions(t *testing.T) {
+	tests := []struct {
+		name     string
+		fn       func([]Value) (Value, error)
+		input    Value
+		expected float64
+	}{
+		{"sin(0)", sinFunc, NewFloatValue(0.0), 0.0},
+		{"sin(π/2)", sinFunc, NewFloatValue(math.Pi / 2), 1.0},
+		{"cos(0)", cosFunc, NewFloatValue(0.0), 1.0},
+		{"cos(π)", cosFunc, NewFloatValue(math.Pi), -1.0},
+		{"tan(0)", tanFunc, NewFloatValue(0.0), 0.0},
+		{"tan(π/4)", tanFunc, NewFloatValue(math.Pi / 4), 1.0},
+	}
+
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			result, err := tt.fn([]Value{tt.input})
+			if err != nil {
+				t.Errorf("%s error: %v", tt.name, err)
+				return
+			}
+			if math.Abs(result.AsFloat64()-tt.expected) > 1e-10 {
+				t.Errorf("%s = %f, want %f", tt.name, result.AsFloat64(), tt.expected)
 			}
 		})
 	}
 }
 
-// TestOnConflictConstraintName tests ON CONFLICT with constraint name
-func TestOnConflictConstraintName(t *testing.T) {
-	t.Parallel()
+func TestAsinFunc(t *testing.T) {
 	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
+		input    Value
+		expected float64
+		isNaN    bool
 	}{
-		{
-			name:      "ON CONFLICT ON CONSTRAINT",
-			sql:       "INSERT INTO t VALUES (1) ON CONFLICT ON CONSTRAINT pk_id DO NOTHING;",
-			wantError: false,
-		},
-		{
-			name:      "ON CONFLICT ON CONSTRAINT DO UPDATE",
-			sql:       "INSERT INTO t VALUES (1) ON CONFLICT ON CONSTRAINT pk_id DO UPDATE SET id = 2;",
-			wantError: false,
-		},
-		{
-			name:      "ON CONFLICT ON without CONSTRAINT",
-			sql:       "INSERT INTO t VALUES (1) ON CONFLICT ON DO NOTHING;",
-			wantError: true,
-		},
+		{NewFloatValue(0.0), 0.0, false},
+		{NewFloatValue(1.0), math.Pi / 2, false},
+		{NewFloatValue(-1.0), -math.Pi / 2, false},
+		{NewFloatValue(2.0), 0.0, true}, // Out of range
 	}
 
 	for _, tt := range tests {
-		tt := tt
+		result, err := asinFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("asinFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if tt.isNaN {
+			if !math.IsNaN(result.AsFloat64()) {
+				t.Errorf("asinFunc(%v) should be NaN", tt.input)
+			}
+		} else {
+			if math.Abs(result.AsFloat64()-tt.expected) > 1e-10 {
+				t.Errorf("asinFunc(%v) = %f, want %f", tt.input, result.AsFloat64(), tt.expected)
+			}
+		}
+	}
+}
+
+func TestAcosFunc(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected float64
+		isNaN    bool
+	}{
+		{NewFloatValue(1.0), 0.0, false},
+		{NewFloatValue(0.0), math.Pi / 2, false},
+		{NewFloatValue(-1.0), math.Pi, false},
+		{NewFloatValue(2.0), 0.0, true}, // Out of range
+	}
+
+	for _, tt := range tests {
+		result, err := acosFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("acosFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if tt.isNaN {
+			if !math.IsNaN(result.AsFloat64()) {
+				t.Errorf("acosFunc(%v) should be NaN", tt.input)
+			}
+		} else {
+			if math.Abs(result.AsFloat64()-tt.expected) > 1e-10 {
+				t.Errorf("acosFunc(%v) = %f, want %f", tt.input, result.AsFloat64(), tt.expected)
+			}
+		}
+	}
+}
+
+func TestAtanFunc(t *testing.T) {
+	result, err := atanFunc([]Value{NewFloatValue(1.0)})
+	if err != nil {
+		t.Errorf("atanFunc(1) error: %v", err)
+	}
+	expected := math.Pi / 4
+	if math.Abs(result.AsFloat64()-expected) > 1e-10 {
+		t.Errorf("atanFunc(1) = %f, want %f", result.AsFloat64(), expected)
+	}
+}
+
+func TestAtan2Func(t *testing.T) {
+	result, err := atan2Func([]Value{NewFloatValue(1.0), NewFloatValue(1.0)})
+	if err != nil {
+		t.Errorf("atan2Func(1, 1) error: %v", err)
+	}
+	expected := math.Pi / 4
+	if math.Abs(result.AsFloat64()-expected) > 1e-10 {
+		t.Errorf("atan2Func(1, 1) = %f, want %f", result.AsFloat64(), expected)
+	}
+}
+
+func TestHyperbolicFunctions(t *testing.T) {
+	tests := []struct {
+		name string
+		fn   func([]Value) (Value, error)
+	}{
+		{"sinh", sinhFunc},
+		{"cosh", coshFunc},
+		{"tanh", tanhFunc},
+		{"asinh", asinhFunc},
+	}
+
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v for SQL: %s", tt.wantError, err, tt.sql)
+			result, err := tt.fn([]Value{NewFloatValue(0.5)})
+			if err != nil {
+				t.Errorf("%s(0.5) error: %v", tt.name, err)
+			}
+			if result.Type() != TypeFloat {
+				t.Errorf("%s should return float", tt.name)
 			}
 		})
 	}
 }
 
-// TestSelectWithCompoundOperators tests compound SELECT operators
-func TestSelectWithCompoundOperators(t *testing.T) {
-	t.Parallel()
+func TestAcoshFunc(t *testing.T) {
 	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
+		input Value
+		isNaN bool
 	}{
-		{
-			name:      "UNION",
-			sql:       "SELECT 1 UNION SELECT 2;",
-			wantError: false,
-		},
-		{
-			name:      "UNION ALL",
-			sql:       "SELECT 1 UNION ALL SELECT 2;",
-			wantError: false,
-		},
-		{
-			name:      "EXCEPT",
-			sql:       "SELECT 1 EXCEPT SELECT 2;",
-			wantError: false,
-		},
-		{
-			name:      "INTERSECT",
-			sql:       "SELECT 1 INTERSECT SELECT 2;",
-			wantError: false,
-		},
-		{
-			name:      "multiple UNION",
-			sql:       "SELECT 1 UNION SELECT 2 UNION SELECT 3;",
-			wantError: false,
-		},
+		{NewFloatValue(1.0), false},
+		{NewFloatValue(2.0), false},
+		{NewFloatValue(0.5), true}, // Out of range
 	}
 
 	for _, tt := range tests {
-		tt := tt
+		result, err := acoshFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("acoshFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if tt.isNaN && !math.IsNaN(result.AsFloat64()) {
+			t.Errorf("acoshFunc(%v) should be NaN", tt.input)
+		}
+	}
+}
+
+func TestAtanhFunc(t *testing.T) {
+	tests := []struct {
+		input Value
+		isNaN bool
+	}{
+		{NewFloatValue(0.0), false},
+		{NewFloatValue(0.5), false},
+		{NewFloatValue(1.0), true},  // Out of range
+		{NewFloatValue(-1.0), true}, // Out of range
+	}
+
+	for _, tt := range tests {
+		result, err := atanhFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("atanhFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if tt.isNaN && !math.IsNaN(result.AsFloat64()) {
+			t.Errorf("atanhFunc(%v) should be NaN", tt.input)
+		}
+	}
+}
+
+func TestSignFunc(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected int64
+	}{
+		{NewFloatValue(5.0), 1},
+		{NewFloatValue(-5.0), -1},
+		{NewFloatValue(0.0), 0},
+		{NewIntValue(100), 1},
+		{NewIntValue(-100), -1},
+	}
+
+	for _, tt := range tests {
+		result, err := signFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("signFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if result.AsInt64() != tt.expected {
+			t.Errorf("signFunc(%v) = %d, want %d", tt.input, result.AsInt64(), tt.expected)
+		}
+	}
+}
+
+func TestModFunc(t *testing.T) {
+	tests := []struct {
+		x        Value
+		y        Value
+		expected int64
+		isNull   bool
+	}{
+		{NewIntValue(10), NewIntValue(3), 1, false},
+		{NewIntValue(10), NewIntValue(5), 0, false},
+		{NewIntValue(-10), NewIntValue(3), -1, false},
+		{NewIntValue(10), NewIntValue(0), 0, true}, // Division by zero
+	}
+
+	for _, tt := range tests {
+		result, err := modFunc([]Value{tt.x, tt.y})
+		if err != nil {
+			t.Errorf("modFunc(%v, %v) error: %v", tt.x, tt.y, err)
+			continue
+		}
+		if tt.isNull {
+			if !result.IsNull() {
+				t.Errorf("modFunc(%v, %v) should be NULL", tt.x, tt.y)
+			}
+		} else {
+			if result.AsInt64() != tt.expected {
+				t.Errorf("modFunc(%v, %v) = %d, want %d", tt.x, tt.y, result.AsInt64(), tt.expected)
+			}
+		}
+	}
+}
+
+func TestPiFunc(t *testing.T) {
+	result, err := piFunc([]Value{})
+	if err != nil {
+		t.Errorf("piFunc() error: %v", err)
+	}
+	if math.Abs(result.AsFloat64()-math.Pi) > 1e-10 {
+		t.Errorf("piFunc() = %f, want %f", result.AsFloat64(), math.Pi)
+	}
+}
+
+func TestRadiansFunc(t *testing.T) {
+	tests := []struct {
+		degrees  Value
+		expected float64
+	}{
+		{NewFloatValue(0.0), 0.0},
+		{NewFloatValue(180.0), math.Pi},
+		{NewFloatValue(90.0), math.Pi / 2},
+	}
+
+	for _, tt := range tests {
+		result, err := radiansFunc([]Value{tt.degrees})
+		if err != nil {
+			t.Errorf("radiansFunc(%v) error: %v", tt.degrees, err)
+			continue
+		}
+		if math.Abs(result.AsFloat64()-tt.expected) > 1e-10 {
+			t.Errorf("radiansFunc(%v) = %f, want %f", tt.degrees, result.AsFloat64(), tt.expected)
+		}
+	}
+}
+
+func TestDegreesFunc(t *testing.T) {
+	tests := []struct {
+		radians  Value
+		expected float64
+	}{
+		{NewFloatValue(0.0), 0.0},
+		{NewFloatValue(math.Pi), 180.0},
+		{NewFloatValue(math.Pi / 2), 90.0},
+	}
+
+	for _, tt := range tests {
+		result, err := degreesFunc([]Value{tt.radians})
+		if err != nil {
+			t.Errorf("degreesFunc(%v) error: %v", tt.radians, err)
+			continue
+		}
+		if math.Abs(result.AsFloat64()-tt.expected) > 1e-10 {
+			t.Errorf("degreesFunc(%v) = %f, want %f", tt.radians, result.AsFloat64(), tt.expected)
+		}
+	}
+}
+
+// Test helper functions
+func TestRoundParsePrecision(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []Value
+		expectP   int64
+		expectOK  bool
+		expectErr bool
+	}{
+		{"one arg", []Value{NewFloatValue(5.5)}, 0, true, false},
+		{"two args", []Value{NewFloatValue(5.5), NewIntValue(2)}, 2, true, false},
+		{"null precision", []Value{NewFloatValue(5.5), NewNullValue()}, 0, false, false},
+		{"large precision", []Value{NewFloatValue(5.5), NewIntValue(50)}, 30, true, false},
+		{"negative precision", []Value{NewFloatValue(5.5), NewIntValue(-5)}, 0, true, false},
+	}
+
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			p, ok, err := roundParsePrecision(tt.args)
+			if (err != nil) != tt.expectErr {
+				t.Errorf("Expected error=%v, got %v", tt.expectErr, err)
+			}
+			if ok != tt.expectOK {
+				t.Errorf("Expected ok=%v, got %v", tt.expectOK, ok)
+			}
+			if ok && p != tt.expectP {
+				t.Errorf("Expected precision=%d, got %d", tt.expectP, p)
 			}
 		})
 	}
 }
 
-// TestWithClauseRecursive tests WITH RECURSIVE
-func TestWithClauseRecursive(t *testing.T) {
-	t.Parallel()
+func TestRoundIsPassthrough(t *testing.T) {
 	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
+		value    float64
+		expected bool
 	}{
-		{
-			name:      "WITH RECURSIVE",
-			sql:       "WITH RECURSIVE cte AS (SELECT 1) SELECT * FROM cte;",
-			wantError: false,
-		},
-		{
-			name:      "WITH RECURSIVE with columns",
-			sql:       "WITH RECURSIVE cte(n) AS (SELECT 1) SELECT * FROM cte;",
-			wantError: false,
-		},
+		{math.NaN(), true},
+		{math.Inf(1), true},
+		{math.Inf(-1), true},
+		{4503599627370496.0, true},
+		{123.456, false},
 	}
 
 	for _, tt := range tests {
-		tt := tt
+		result := roundIsPassthrough(tt.value)
+		if result != tt.expected {
+			t.Errorf("roundIsPassthrough(%v) = %v, want %v", tt.value, result, tt.expected)
+		}
+	}
+}
+
+func TestRoundToIntValue(t *testing.T) {
+	tests := []struct {
+		rounded      float64
+		expectedType ValueType
+	}{
+		{5.0, TypeInteger},
+		{100.0, TypeInteger},
+		{float64(math.MaxInt64), TypeInteger},
+		{float64(math.MaxInt64) + 1e10, TypeFloat},
+	}
+
+	for _, tt := range tests {
+		result := roundToIntValue(tt.rounded)
+		if result.Type() != tt.expectedType {
+			t.Errorf("roundToIntValue(%v) type = %v, want %v", tt.rounded, result.Type(), tt.expectedType)
+		}
+	}
+}
+
+// Test NULL handling for all math functions
+func TestMathFunctionsNullHandling(t *testing.T) {
+	tests := []struct {
+		name string
+		fn   func([]Value) (Value, error)
+		args []Value
+	}{
+		{"ceil", ceilFunc, []Value{NewNullValue()}},
+		{"floor", floorFunc, []Value{NewNullValue()}},
+		{"exp", expFunc, []Value{NewNullValue()}},
+		{"log10", log10Func, []Value{NewNullValue()}},
+		{"log2", log2Func, []Value{NewNullValue()}},
+		{"sin", sinFunc, []Value{NewNullValue()}},
+		{"cos", cosFunc, []Value{NewNullValue()}},
+		{"tan", tanFunc, []Value{NewNullValue()}},
+		{"atan", atanFunc, []Value{NewNullValue()}},
+		{"sinh", sinhFunc, []Value{NewNullValue()}},
+		{"cosh", coshFunc, []Value{NewNullValue()}},
+		{"tanh", tanhFunc, []Value{NewNullValue()}},
+		{"asinh", asinhFunc, []Value{NewNullValue()}},
+		{"power", powerFunc, []Value{NewNullValue(), NewFloatValue(2.0)}},
+		{"power_null_exp", powerFunc, []Value{NewFloatValue(2.0), NewNullValue()}},
+		{"atan2", atan2Func, []Value{NewNullValue(), NewFloatValue(1.0)}},
+		{"atan2_null_x", atan2Func, []Value{NewFloatValue(1.0), NewNullValue()}},
+		{"radians", radiansFunc, []Value{NewNullValue()}},
+		{"degrees", degreesFunc, []Value{NewNullValue()}},
+		{"mod", modFunc, []Value{NewNullValue(), NewIntValue(5)}},
+		{"mod_null_y", modFunc, []Value{NewIntValue(10), NewNullValue()}},
+		{"sign_null", signFunc, []Value{NewNullValue()}},
+	}
+
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			result, err := tt.fn(tt.args)
+			if err != nil {
+				t.Errorf("%s error: %v", tt.name, err)
+				return
+			}
+			if !result.IsNull() {
+				t.Errorf("%s should return NULL for null input, got %v", tt.name, result)
 			}
 		})
 	}
 }
 
-// TestFromClauseMultipleTables tests FROM with multiple tables
-func TestFromClauseMultipleTables(t *testing.T) {
-	t.Parallel()
+// Test edge cases for log functions with invalid inputs
+func TestLogFunctionsInvalidInputs(t *testing.T) {
 	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
+		name  string
+		fn    func([]Value) (Value, error)
+		input Value
 	}{
-		{
-			name:      "FROM with two tables",
-			sql:       "SELECT * FROM t1, t2;",
-			wantError: false,
-		},
-		{
-			name:      "FROM with three tables",
-			sql:       "SELECT * FROM t1, t2, t3;",
-			wantError: false,
-		},
+		{"log10_zero", log10Func, NewFloatValue(0.0)},
+		{"log10_negative", log10Func, NewFloatValue(-1.0)},
+		{"log2_zero", log2Func, NewFloatValue(0.0)},
+		{"log2_negative", log2Func, NewFloatValue(-1.0)},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+			result, err := tt.fn([]Value{tt.input})
+			if err != nil {
+				t.Errorf("%s error: %v", tt.name, err)
+				return
+			}
+			if !math.IsNaN(result.AsFloat64()) {
+				t.Errorf("%s should return NaN for invalid input, got %v", tt.name, result.AsFloat64())
 			}
 		})
 	}
 }
 
-// TestTableAliasWithAs tests table alias with and without AS
-func TestTableAliasWithAs(t *testing.T) {
-	t.Parallel()
+// Test atanh edge cases for values at boundaries
+func TestAtanhBoundaries(t *testing.T) {
 	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
+		input    Value
+		expected float64
+		isInf    bool
 	}{
-		{
-			name:      "table alias with AS",
-			sql:       "SELECT * FROM users AS u;",
-			wantError: false,
-		},
-		{
-			name:      "table alias without AS",
-			sql:       "SELECT * FROM users u;",
-			wantError: false,
-		},
-		{
-			name:      "subquery alias with AS",
-			sql:       "SELECT * FROM (SELECT * FROM t) AS sub;",
-			wantError: false,
-		},
-		{
-			name:      "subquery alias without AS",
-			sql:       "SELECT * FROM (SELECT * FROM t) sub;",
-			wantError: false,
-		},
+		{NewFloatValue(0.9999), 0.0, false}, // Valid value
+		{NewFloatValue(2.0), 0.0, true},     // Out of range
 	}
 
 	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
+		result, err := atanhFunc([]Value{tt.input})
+		if err != nil {
+			t.Errorf("atanhFunc(%v) error: %v", tt.input, err)
+			continue
+		}
+		if tt.isInf {
+			if !math.IsNaN(result.AsFloat64()) && !math.IsInf(result.AsFloat64(), 0) {
+				t.Errorf("atanhFunc(%v) should be NaN or Inf for out of range value", tt.input)
 			}
-		})
+		}
 	}
 }
 
-// TestJoinTypes tests different JOIN types
-func TestJoinTypes(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "INNER JOIN",
-			sql:       "SELECT * FROM t1 INNER JOIN t2 ON t1.id = t2.id;",
-			wantError: false,
-		},
-		{
-			name:      "LEFT JOIN",
-			sql:       "SELECT * FROM t1 LEFT JOIN t2 ON t1.id = t2.id;",
-			wantError: false,
-		},
-		{
-			name:      "LEFT OUTER JOIN",
-			sql:       "SELECT * FROM t1 LEFT OUTER JOIN t2 ON t1.id = t2.id;",
-			wantError: false,
-		},
-		{
-			name:      "CROSS JOIN",
-			sql:       "SELECT * FROM t1 CROSS JOIN t2;",
-			wantError: false,
-		},
-		{
-			name:      "simple JOIN",
-			sql:       "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;",
-			wantError: false,
-		},
+// TestAbsFuncText tests abs with text value
+func TestAbsFuncText(t *testing.T) {
+	result, err := absFunc([]Value{NewTextValue("-42")})
+	if err != nil {
+		t.Errorf("absFunc() with text error: %v", err)
 	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
+	if result.AsInt64() != 42 {
+		t.Errorf("absFunc('-42') = %d, want 42", result.AsInt64())
 	}
 }
 
-// TestJoinUsingClause tests JOIN with USING clause
-func TestJoinUsingClause(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "JOIN USING single column",
-			sql:       "SELECT * FROM t1 JOIN t2 USING (id);",
-			wantError: false,
-		},
-		{
-			name:      "JOIN USING multiple columns",
-			sql:       "SELECT * FROM t1 JOIN t2 USING (id, name);",
-			wantError: false,
-		},
+// TestRoundFuncText tests round with text value
+func TestRoundFuncText(t *testing.T) {
+	result, err := roundFunc([]Value{NewTextValue("5.5")})
+	if err != nil {
+		t.Errorf("roundFunc() with text error: %v", err)
 	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
+	if result.AsFloat64() != 6.0 {
+		t.Errorf("roundFunc('5.5') = %f, want 6.0", result.AsFloat64())
 	}
 }
 
-// TestInsertMultipleRows tests INSERT with multiple value rows
-func TestInsertMultipleRows(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "INSERT single row",
-			sql:       "INSERT INTO t VALUES (1, 'a');",
-			wantError: false,
-		},
-		{
-			name:      "INSERT two rows",
-			sql:       "INSERT INTO t VALUES (1, 'a'), (2, 'b');",
-			wantError: false,
-		},
-		{
-			name:      "INSERT three rows",
-			sql:       "INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, 'c');",
-			wantError: false,
-		},
+// TestSqrtFuncText tests sqrt with text value
+func TestSqrtFuncText(t *testing.T) {
+	result, err := sqrtFunc([]Value{NewTextValue("4")})
+	if err != nil {
+		t.Errorf("sqrtFunc() with text error: %v", err)
 	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
+	if result.AsFloat64() != 2.0 {
+		t.Errorf("sqrtFunc('4') = %f, want 2.0", result.AsFloat64())
 	}
 }
 
-// TestDoUpdateClauseWithWhere tests DO UPDATE SET with WHERE
-func TestDoUpdateClauseWithWhere(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "DO UPDATE without WHERE",
-			sql:       "INSERT INTO t VALUES (1) ON CONFLICT (id) DO UPDATE SET value = 10;",
-			wantError: false,
-		},
-		{
-			name:      "DO UPDATE with WHERE",
-			sql:       "INSERT INTO t VALUES (1) ON CONFLICT (id) DO UPDATE SET value = 10 WHERE id > 0;",
-			wantError: false,
-		},
+// TestLnFuncText tests ln with text value
+func TestLnFuncText(t *testing.T) {
+	result, err := lnFunc([]Value{NewTextValue("2.718281828")})
+	if err != nil {
+		t.Errorf("lnFunc() with text error: %v", err)
 	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
+	expected := math.Log(2.718281828)
+	if math.Abs(result.AsFloat64()-expected) > 0.01 {
+		t.Errorf("lnFunc('2.718281828') = %f, want %f", result.AsFloat64(), expected)
 	}
 }
 
-// TestCreateTableConstraints tests various table constraints
-func TestCreateTableConstraints(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "UNIQUE table constraint",
-			sql:       "CREATE TABLE t (id INTEGER, name TEXT, UNIQUE (id));",
-			wantError: false,
-		},
-		{
-			name:      "CHECK table constraint",
-			sql:       "CREATE TABLE t (id INTEGER, CHECK (id > 0));",
-			wantError: false,
-		},
-		{
-			name:      "FOREIGN KEY table constraint",
-			sql:       "CREATE TABLE t (id INTEGER, fk INTEGER, FOREIGN KEY (fk) REFERENCES other(id));",
-			wantError: false,
-		},
-		{
-			name:      "PRIMARY KEY table constraint single column",
-			sql:       "CREATE TABLE t (id INTEGER, name TEXT, PRIMARY KEY (id));",
-			wantError: false,
-		},
-		{
-			name:      "PRIMARY KEY table constraint multiple columns",
-			sql:       "CREATE TABLE t (id1 INTEGER, id2 INTEGER, PRIMARY KEY (id1, id2));",
-			wantError: false,
-		},
+// TestTrigFuncText tests trig functions with text
+func TestTrigFuncText(t *testing.T) {
+	result, err := asinFunc([]Value{NewTextValue("0.5")})
+	if err != nil {
+		t.Errorf("asinFunc() with text error: %v", err)
+	}
+	if result.Type() != TypeFloat {
+		t.Error("asinFunc('0.5') should return float")
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v for SQL: %s", tt.wantError, err, tt.sql)
-			}
-		})
+	result, err = acosFunc([]Value{NewTextValue("0.5")})
+	if err != nil {
+		t.Errorf("acosFunc() with text error: %v", err)
+	}
+	if result.Type() != TypeFloat {
+		t.Error("acosFunc('0.5') should return float")
+	}
+
+	result, err = acoshFunc([]Value{NewTextValue("2")})
+	if err != nil {
+		t.Errorf("acoshFunc() with text error: %v", err)
+	}
+	if result.Type() != TypeFloat {
+		t.Error("acoshFunc('2') should return float")
+	}
+
+	result, err = atanhFunc([]Value{NewTextValue("0.5")})
+	if err != nil {
+		t.Errorf("atanhFunc() with text error: %v", err)
+	}
+	if result.Type() != TypeFloat {
+		t.Error("atanhFunc('0.5') should return float")
 	}
 }
 
-// TestCreateTableColumnConstraints tests column-level constraints
-func TestCreateTableColumnConstraints(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "CHECK column constraint",
-			sql:       "CREATE TABLE t (id INTEGER CHECK (id > 0));",
-			wantError: false,
-		},
-		{
-			name:      "NOT NULL column constraint",
-			sql:       "CREATE TABLE t (id INTEGER NOT NULL);",
-			wantError: false,
-		},
-		{
-			name:      "UNIQUE column constraint",
-			sql:       "CREATE TABLE t (id INTEGER UNIQUE);",
-			wantError: false,
-		},
+// TestRandomBlobFuncZero tests randomblob with zero (becomes 1)
+func TestRandomBlobFuncZero(t *testing.T) {
+	result, err := randomblobFunc([]Value{NewIntValue(0)})
+	if err != nil {
+		t.Errorf("randomblobFunc(0) error: %v", err)
 	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
+	if result.Type() != TypeBlob {
+		t.Error("randomblobFunc(0) should return blob")
+	}
+	blob := result.AsBlob()
+	if len(blob) != 1 {
+		t.Errorf("randomblobFunc(0) = blob of size %d, want 1", len(blob))
 	}
 }
 
-// TestAlterTableActions tests different ALTER TABLE actions
-func TestAlterTableActions(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "ALTER TABLE RENAME TO",
-			sql:       "ALTER TABLE old_name RENAME TO new_name;",
-			wantError: false,
-		},
-		{
-			name:      "ALTER TABLE RENAME COLUMN",
-			sql:       "ALTER TABLE t RENAME COLUMN old_col TO new_col;",
-			wantError: false,
-		},
-		{
-			name:      "ALTER TABLE ADD COLUMN",
-			sql:       "ALTER TABLE t ADD COLUMN new_col TEXT;",
-			wantError: false,
-		},
-		{
-			name:      "ALTER TABLE DROP COLUMN",
-			sql:       "ALTER TABLE t DROP COLUMN old_col;",
-			wantError: false,
-		},
+// TestRandomFuncError tests random function error path
+func TestRandomFuncError(t *testing.T) {
+	// Random function takes no args, just test it executes
+	result, err := randomFunc([]Value{})
+	if err != nil {
+		t.Errorf("randomFunc() error: %v", err)
 	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
+	if result.Type() != TypeInteger {
+		t.Error("randomFunc() should return integer")
 	}
 }
 
-// TestParseExpressionBitwiseOps tests various expression edge cases
-func TestParseExpressionBitwiseOps(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "OR expression",
-			sql:       "SELECT * FROM t WHERE a = 1 OR b = 2;",
-			wantError: false,
-		},
-		{
-			name:      "AND expression",
-			sql:       "SELECT * FROM t WHERE a = 1 AND b = 2;",
-			wantError: false,
-		},
-		{
-			name:      "IS NULL",
-			sql:       "SELECT * FROM t WHERE a IS NULL;",
-			wantError: false,
-		},
-		{
-			name:      "IS NOT NULL",
-			sql:       "SELECT * FROM t WHERE a IS NOT NULL;",
-			wantError: false,
-		},
-		{
-			name:      "bitwise AND",
-			sql:       "SELECT a & b FROM t;",
-			wantError: false,
-		},
-		{
-			name:      "bitwise OR",
-			sql:       "SELECT a | b FROM t;",
-			wantError: false,
-		},
-		{
-			name:      "left shift",
-			sql:       "SELECT a << 2 FROM t;",
-			wantError: false,
-		},
-		{
-			name:      "right shift",
-			sql:       "SELECT a >> 2 FROM t;",
-			wantError: false,
-		},
-		{
-			name:      "string concatenation",
-			sql:       "SELECT 'hello' || ' ' || 'world';",
-			wantError: false,
-		},
+// TestRoundParsePrecisionText tests roundParsePrecision with text precision
+func TestRoundParsePrecisionText(t *testing.T) {
+	_, ok, err := roundParsePrecision([]Value{NewFloatValue(5.5), NewTextValue("2")})
+	if err != nil {
+		t.Errorf("roundParsePrecision() with text precision error: %v", err)
 	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
-	}
-}
-
-// TestParseFunctionFilterClause tests function FILTER clause
-func TestParseFunctionFilterClause(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "COUNT with FILTER",
-			sql:       "SELECT COUNT(*) FILTER (WHERE id > 0) FROM t;",
-			wantError: false,
-		},
-		{
-			name:      "SUM with FILTER",
-			sql:       "SELECT SUM(value) FILTER (WHERE active = 1) FROM t;",
-			wantError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
-	}
-}
-
-// TestParseCaseExprWithMultipleWhen tests CASE with multiple WHEN clauses
-func TestParseCaseExprWithMultipleWhen(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "CASE with multiple WHEN",
-			sql:       "SELECT CASE WHEN id = 1 THEN 'one' WHEN id = 2 THEN 'two' WHEN id = 3 THEN 'three' END FROM t;",
-			wantError: false,
-		},
-		{
-			name:      "CASE with ELSE",
-			sql:       "SELECT CASE WHEN id > 0 THEN 'positive' ELSE 'non-positive' END FROM t;",
-			wantError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
-	}
-}
-
-// TestParseSubqueryInFromClause tests subqueries in FROM clause
-func TestParseSubqueryInFromClause(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "simple subquery",
-			sql:       "SELECT * FROM (SELECT id FROM t);",
-			wantError: false,
-		},
-		{
-			name:      "subquery with alias",
-			sql:       "SELECT * FROM (SELECT id FROM t) AS sub;",
-			wantError: false,
-		},
-		{
-			name:      "nested subquery",
-			sql:       "SELECT * FROM (SELECT * FROM (SELECT id FROM t));",
-			wantError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
-	}
-}
-
-// TestParseCreateTriggerTiming tests trigger timing variations
-func TestParseCreateTriggerTiming(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "BEFORE INSERT",
-			sql:       "CREATE TRIGGER tr BEFORE INSERT ON t BEGIN SELECT 1; END;",
-			wantError: false,
-		},
-		{
-			name:      "AFTER UPDATE",
-			sql:       "CREATE TRIGGER tr AFTER UPDATE ON t BEGIN SELECT 1; END;",
-			wantError: false,
-		},
-		{
-			name:      "INSTEAD OF DELETE",
-			sql:       "CREATE TRIGGER tr INSTEAD OF DELETE ON t BEGIN SELECT 1; END;",
-			wantError: false,
-		},
-		{
-			name:      "UPDATE OF columns",
-			sql:       "CREATE TRIGGER tr AFTER UPDATE OF col1, col2 ON t BEGIN SELECT 1; END;",
-			wantError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
-	}
-}
-
-// TestParseForeignKeyReferences tests foreign key reference clauses
-func TestParseForeignKeyReferences(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "FOREIGN KEY table constraint basic",
-			sql:       "CREATE TABLE t (id INTEGER, fk INTEGER, FOREIGN KEY (fk) REFERENCES other(id));",
-			wantError: false,
-		},
-		{
-			name:      "FOREIGN KEY with multiple columns",
-			sql:       "CREATE TABLE t (id1 INTEGER, id2 INTEGER, fk1 INTEGER, fk2 INTEGER, FOREIGN KEY (fk1, fk2) REFERENCES other(id1, id2));",
-			wantError: false,
-		},
-		// Note: ON DELETE/UPDATE clauses may not be fully supported in this parser
-		// so we're testing basic FOREIGN KEY functionality
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
-	}
-}
-
-// TestParseOrderByCollation tests ORDER BY with COLLATE
-func TestParseOrderByCollation(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "ORDER BY with COLLATE",
-			sql:       "SELECT * FROM t ORDER BY name COLLATE NOCASE;",
-			wantError: false,
-		},
-		{
-			name:      "ORDER BY with COLLATE ASC",
-			sql:       "SELECT * FROM t ORDER BY name COLLATE NOCASE ASC;",
-			wantError: false,
-		},
-		{
-			name:      "ORDER BY with COLLATE DESC",
-			sql:       "SELECT * FROM t ORDER BY name COLLATE NOCASE DESC;",
-			wantError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
-	}
-}
-
-// TestParseGroupByHavingClause tests GROUP BY with HAVING
-func TestParseGroupByHavingClause(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "GROUP BY without HAVING",
-			sql:       "SELECT COUNT(*) FROM t GROUP BY category;",
-			wantError: false,
-		},
-		{
-			name:      "GROUP BY with HAVING",
-			sql:       "SELECT COUNT(*) FROM t GROUP BY category HAVING COUNT(*) > 5;",
-			wantError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
-	}
-}
-
-// TestParseLimitOffset tests LIMIT with OFFSET
-func TestParseLimitOffset(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "LIMIT only",
-			sql:       "SELECT * FROM t LIMIT 10;",
-			wantError: false,
-		},
-		{
-			name:      "LIMIT with OFFSET",
-			sql:       "SELECT * FROM t LIMIT 10 OFFSET 5;",
-			wantError: false,
-		},
-		{
-			name:      "LIMIT with comma syntax",
-			sql:       "SELECT * FROM t LIMIT 5, 10;",
-			wantError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
-	}
-}
-
-// TestParseVacuumInto tests VACUUM INTO
-func TestParseVacuumInto(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "VACUUM",
-			sql:       "VACUUM;",
-			wantError: false,
-		},
-		{
-			name:      "VACUUM schema",
-			sql:       "VACUUM main;",
-			wantError: false,
-		},
-		{
-			name:      "VACUUM INTO",
-			sql:       "VACUUM INTO 'backup.db';",
-			wantError: false,
-		},
-		{
-			name:      "VACUUM schema INTO",
-			sql:       "VACUUM main INTO 'backup.db';",
-			wantError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
-	}
-}
-
-// TestParseParenthesizedExpression tests parenthesized vs subquery
-func TestParseParenthesizedExpression(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "simple paren",
-			sql:       "SELECT (1 + 2);",
-			wantError: false,
-		},
-		{
-			name:      "nested paren",
-			sql:       "SELECT ((1 + 2) * 3);",
-			wantError: false,
-		},
-		{
-			name:      "scalar subquery",
-			sql:       "SELECT (SELECT MAX(id) FROM t);",
-			wantError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
-	}
-}
-
-// TestParseIdentOrFunctionQualified tests qualified identifiers
-func TestParseIdentOrFunctionQualified(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantError bool
-	}{
-		{
-			name:      "qualified identifier",
-			sql:       "SELECT t.id FROM t;",
-			wantError: false,
-		},
-		{
-			name:      "qualified star",
-			sql:       "SELECT t.* FROM t;",
-			wantError: false,
-		},
-		{
-			name:      "unqualified identifier",
-			sql:       "SELECT id FROM t;",
-			wantError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			p := NewParser(tt.sql)
-			_, err := p.Parse()
-			if (err != nil) != tt.wantError {
-				t.Errorf("wantError=%v, got error=%v", tt.wantError, err)
-			}
-		})
+	if !ok {
+		t.Error("roundParsePrecision() with text precision should succeed")
 	}
 }

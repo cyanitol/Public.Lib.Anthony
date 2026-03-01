@@ -1,1119 +1,875 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package btree
+package functions
 
 import (
 	"fmt"
+	"math"
 	"testing"
 )
 
-func TestPutGetVarint(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		value uint64
-		want  int // expected length
-	}{
-		{"1-byte", 0x00, 1},
-		{"1-byte max", 0x7f, 1},
-		{"2-byte min", 0x80, 2},
-		{"2-byte", 0x100, 2},
-		{"2-byte max", 0x3fff, 2},
-		{"3-byte min", 0x4000, 3},
-		{"3-byte", 0x12345, 3},
-		{"3-byte max", 0x1fffff, 3},
-		{"4-byte min", 0x200000, 4},
-		{"4-byte", 0x1234567, 4},
-		{"5-byte", 0x12345678, 5},
-		{"9-byte max", 0xffffffffffffffff, 9},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			var buf [9]byte
-			n := PutVarint(buf[:], tt.value)
-			if n != tt.want {
-				t.Errorf("PutVarint() length = %d, want %d", n, tt.want)
-			}
-
-			got, m := GetVarint(buf[:])
-			if got != tt.value {
-				t.Errorf("GetVarint() = %d, want %d", got, tt.value)
-			}
-			if m != n {
-				t.Errorf("GetVarint() length = %d, want %d", m, n)
-			}
-		})
-	}
+// Test helper to create test values
+func testInt(v int64) Value {
+	return NewIntValue(v)
 }
 
-func TestGetVarint32(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		value uint32
-		want  int
-	}{
-		{"1-byte", 0x00, 1},
-		{"1-byte max", 0x7f, 1},
-		{"2-byte", 0x80, 2},
-		{"3-byte", 0x4000, 3},
-		{"4-byte", 0x200000, 4},
-		{"max uint32", 0xffffffff, 5},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			var buf [9]byte
-			n := PutVarint(buf[:], uint64(tt.value))
-			if n != tt.want {
-				t.Errorf("PutVarint() length = %d, want %d", n, tt.want)
-			}
-
-			got, m := GetVarint32(buf[:])
-			if got != tt.value {
-				t.Errorf("GetVarint32() = %d, want %d", got, tt.value)
-			}
-			if m != n {
-				t.Errorf("GetVarint32() length = %d, want %d", m, n)
-			}
-		})
-	}
+func testFloat(v float64) Value {
+	return NewFloatValue(v)
 }
 
-func TestVarintLen(t *testing.T) {
-	t.Parallel()
+func testText(v string) Value {
+	return NewTextValue(v)
+}
+
+func testBlob(v []byte) Value {
+	return NewBlobValue(v)
+}
+
+func testNull() Value {
+	return NewNullValue()
+}
+
+// Test String Functions
+
+func TestLength(t *testing.T) {
 	tests := []struct {
-		value uint64
-		want  int
+		input    Value
+		expected int64
 	}{
-		{0x00, 1},
-		{0x7f, 1},
-		{0x80, 2},
-		{0x3fff, 2},
-		{0x4000, 3},
-		{0x1fffff, 3},
-		{0x200000, 4},
-		{0xfffffff, 4},
-		{0x10000000, 5},
-		{0xffffffffffffffff, 9},
+		{testText("hello"), 5},
+		{testText("世界"), 2}, // UTF-8 characters
+		{testText(""), 0},
+		{testBlob([]byte{1, 2, 3}), 3},
+		{testInt(12345), 8}, // int64 size
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		got := VarintLen(tt.value)
-		if got != tt.want {
-			t.Errorf("VarintLen(0x%x) = %d, want %d", tt.value, got, tt.want)
+	for _, test := range tests {
+		result, err := lengthFunc([]Value{test.input})
+		if err != nil {
+			t.Errorf("lengthFunc failed: %v", err)
+			continue
+		}
+		if result.AsInt64() != test.expected {
+			t.Errorf("lengthFunc(%v) = %d, want %d", test.input, result.AsInt64(), test.expected)
 		}
 	}
 }
 
-func TestVarintRoundTrip(t *testing.T) {
-	t.Parallel()
-	// Test all powers of 2 and nearby values
-	for i := uint(0); i < 64; i++ {
-		values := []uint64{
-			1 << i,
-			(1 << i) - 1,
-			(1 << i) + 1,
-		}
-
-		for _, v := range values {
-			var buf [9]byte
-			n := PutVarint(buf[:], v)
-			got, m := GetVarint(buf[:])
-
-			if got != v {
-				t.Errorf("RoundTrip(%d): got %d", v, got)
-			}
-			if m != n {
-				t.Errorf("RoundTrip(%d): length mismatch: put=%d, get=%d", v, n, m)
-			}
-		}
-	}
-}
-
-func BenchmarkPutVarint1Byte(b *testing.B) {
-	var buf [9]byte
-	for i := 0; i < b.N; i++ {
-		PutVarint(buf[:], 0x7f)
-	}
-}
-
-func BenchmarkPutVarint9Byte(b *testing.B) {
-	var buf [9]byte
-	for i := 0; i < b.N; i++ {
-		PutVarint(buf[:], 0xffffffffffffffff)
-	}
-}
-
-func BenchmarkGetVarint1Byte(b *testing.B) {
-	var buf [9]byte
-	PutVarint(buf[:], 0x7f)
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		GetVarint(buf[:])
-	}
-}
-
-func BenchmarkGetVarint9Byte(b *testing.B) {
-	var buf [9]byte
-	PutVarint(buf[:], 0xffffffffffffffff)
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		GetVarint(buf[:])
-	}
-}
-
-// TestGetVarintEdgeCases tests edge cases for GetVarint
-func TestGetVarintEdgeCases(t *testing.T) {
-	t.Parallel()
+func TestSubstr(t *testing.T) {
 	tests := []struct {
-		name  string
-		setup func() []byte
-		want  uint64
+		str      Value
+		start    Value
+		length   Value
+		expected string
 	}{
-		{
-			name: "single byte zero",
-			setup: func() []byte {
-				var buf [9]byte
-				PutVarint(buf[:], 0)
-				return buf[:]
-			},
-			want: 0,
-		},
-		{
-			name: "single byte max",
-			setup: func() []byte {
-				var buf [9]byte
-				PutVarint(buf[:], 0x7f)
-				return buf[:]
-			},
-			want: 0x7f,
-		},
-		{
-			name: "two byte boundary",
-			setup: func() []byte {
-				var buf [9]byte
-				PutVarint(buf[:], 0x80)
-				return buf[:]
-			},
-			want: 0x80,
-		},
-		{
-			name: "max 9-byte value",
-			setup: func() []byte {
-				var buf [9]byte
-				PutVarint(buf[:], 0xffffffffffffffff)
-				return buf[:]
-			},
-			want: 0xffffffffffffffff,
-		},
+		{testText("hello"), testInt(1), testInt(2), "he"},
+		{testText("hello"), testInt(2), testInt(3), "ell"},
+		{testText("hello"), testInt(-2), testInt(2), "lo"},
+		{testText("hello"), testInt(1), testInt(100), "hello"},
+		{testText("世界你好"), testInt(1), testInt(2), "世界"},
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			buf := tt.setup()
-			got, _ := GetVarint(buf)
-			if got != tt.want {
-				t.Errorf("GetVarint() = %d, want %d", got, tt.want)
-			}
-		})
+	for _, test := range tests {
+		var result Value
+		var err error
+		if test.length != nil {
+			result, err = substrFunc([]Value{test.str, test.start, test.length})
+		} else {
+			result, err = substrFunc([]Value{test.str, test.start})
+		}
+
+		if err != nil {
+			t.Errorf("substrFunc failed: %v", err)
+			continue
+		}
+		if result.AsString() != test.expected {
+			t.Errorf("substrFunc(%v, %v, %v) = %s, want %s",
+				test.str, test.start, test.length, result.AsString(), test.expected)
+		}
 	}
 }
 
-// TestDecodeShortVarint tests the short varint decoding path
-func TestDecodeShortVarint(t *testing.T) {
-	t.Parallel()
+func TestUpper(t *testing.T) {
 	tests := []struct {
-		name  string
-		value uint64
+		input    Value
+		expected string
 	}{
-		{"zero", 0},
-		{"one", 1},
-		{"127", 127},
-		{"128", 128},
-		{"255", 255},
-		{"256", 256},
-		{"16383", 16383},
+		{testText("hello"), "HELLO"},
+		{testText("Hello World"), "HELLO WORLD"},
+		{testText("123abc"), "123ABC"},
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			var buf [9]byte
-			n := PutVarint(buf[:], tt.value)
-			got, m := GetVarint(buf[:])
-			if got != tt.value {
-				t.Errorf("GetVarint() = %d, want %d", got, tt.value)
-			}
-			if m != n {
-				t.Errorf("GetVarint() length = %d, want %d", m, n)
-			}
-		})
+	for _, test := range tests {
+		result, err := upperFunc([]Value{test.input})
+		if err != nil {
+			t.Errorf("upperFunc failed: %v", err)
+			continue
+		}
+		if result.AsString() != test.expected {
+			t.Errorf("upperFunc(%v) = %s, want %s", test.input, result.AsString(), test.expected)
+		}
 	}
 }
 
-// TestSlowBtreeVarint32 tests the slow path for GetVarint32
-func TestSlowBtreeVarint32(t *testing.T) {
-	t.Parallel()
+func TestLower(t *testing.T) {
 	tests := []struct {
-		name  string
-		value uint32
+		input    Value
+		expected string
 	}{
-		{"boundary 0x4000", 0x4000},
-		{"boundary 0x200000", 0x200000},
-		{"max uint32", 0xffffffff},
+		{testText("HELLO"), "hello"},
+		{testText("Hello World"), "hello world"},
+		{testText("123ABC"), "123abc"},
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			var buf [9]byte
-			PutVarint(buf[:], uint64(tt.value))
-			got, _ := GetVarint32(buf[:])
-			if got != tt.value {
-				t.Errorf("GetVarint32() = %d, want %d", got, tt.value)
-			}
-		})
-	}
-}
-
-// TestGetVarintBufferTooSmall tests behavior with insufficient buffer
-func TestGetVarintBufferTooSmall(t *testing.T) {
-	t.Parallel()
-	var buf [9]byte
-	PutVarint(buf[:], 0xffffffffffffffff)
-
-	// Try to decode with only first few bytes
-	// Should still work or return partial result
-	got, n := GetVarint(buf[:9])
-	if n != 9 {
-		t.Errorf("Expected 9 bytes read, got %d", n)
-	}
-	if got != 0xffffffffffffffff {
-		t.Errorf("GetVarint() = 0x%x, want 0xffffffffffffffff", got)
+	for _, test := range tests {
+		result, err := lowerFunc([]Value{test.input})
+		if err != nil {
+			t.Errorf("lowerFunc failed: %v", err)
+			continue
+		}
+		if result.AsString() != test.expected {
+			t.Errorf("lowerFunc(%v) = %s, want %s", test.input, result.AsString(), test.expected)
+		}
 	}
 }
 
-// TestVarintLenBoundaries tests VarintLen at all boundaries
-func TestVarintLenBoundaries(t *testing.T) {
-	t.Parallel()
+func TestReplace(t *testing.T) {
 	tests := []struct {
-		value uint64
-		want  int
+		str      Value
+		old      Value
+		new      Value
+		expected string
 	}{
-		{0, 1},
-		{0x7f, 1},
-		{0x80, 2},
-		{0x3fff, 2},
-		{0x4000, 3},
-		{0x1fffff, 3},
-		{0x200000, 4},
-		{0xfffffff, 4},
-		{0x10000000, 5},
-		{0x7ffffffff, 5},
-		{0x800000000, 6},
-		{0x3ffffffffff, 6},
-		{0x40000000000, 7},
-		{0x1ffffffffffff, 7},
-		{0x2000000000000, 8},
-		{0xffffffffffffff, 8},
-		{0x100000000000000, 9},
-		{0xffffffffffffffff, 9},
+		{testText("hello world"), testText("world"), testText("there"), "hello there"},
+		{testText("aaa"), testText("a"), testText("b"), "bbb"},
+		{testText("test"), testText("x"), testText("y"), "test"},
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		got := VarintLen(tt.value)
-		if got != tt.want {
-			t.Errorf("VarintLen(0x%x) = %d, want %d", tt.value, got, tt.want)
+	for _, test := range tests {
+		result, err := replaceFunc([]Value{test.str, test.old, test.new})
+		if err != nil {
+			t.Errorf("replaceFunc failed: %v", err)
+			continue
+		}
+		if result.AsString() != test.expected {
+			t.Errorf("replaceFunc(%v, %v, %v) = %s, want %s",
+				test.str, test.old, test.new, result.AsString(), test.expected)
 		}
 	}
 }
 
-// TestPutVarintAllSizes tests PutVarint for all possible sizes
-func TestPutVarintAllSizes(t *testing.T) {
-	t.Parallel()
+func TestInstr(t *testing.T) {
 	tests := []struct {
-		value uint64
-		size  int
+		haystack Value
+		needle   Value
+		expected int64
 	}{
-		{0x00, 1},
-		{0x80, 2},
-		{0x4000, 3},
-		{0x200000, 4},
-		{0x10000000, 5},
-		{0x800000000, 6},
-		{0x40000000000, 7},
-		{0x2000000000000, 8},
-		{0x100000000000000, 9},
+		{testText("hello world"), testText("world"), 7},
+		{testText("hello"), testText("x"), 0},
+		{testText("hello"), testText(""), 1},
+		{testText("世界你好"), testText("你"), 3},
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(fmt.Sprintf("size=%d", tt.size), func(t *testing.T) {
-			var buf [9]byte
-			n := PutVarint(buf[:], tt.value)
-			if n != tt.size {
-				t.Errorf("PutVarint(0x%x) size = %d, want %d", tt.value, n, tt.size)
+	for _, test := range tests {
+		result, err := instrFunc([]Value{test.haystack, test.needle})
+		if err != nil {
+			t.Errorf("instrFunc failed: %v", err)
+			continue
+		}
+		if result.AsInt64() != test.expected {
+			t.Errorf("instrFunc(%v, %v) = %d, want %d",
+				test.haystack, test.needle, result.AsInt64(), test.expected)
+		}
+	}
+}
+
+func TestHex(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected string
+	}{
+		{testBlob([]byte{0x12, 0x34, 0xAB, 0xCD}), "1234ABCD"},
+		{testText("hello"), "68656C6C6F"},
+		{testBlob([]byte{}), ""},
+	}
+
+	for _, test := range tests {
+		result, err := hexFunc([]Value{test.input})
+		if err != nil {
+			t.Errorf("hexFunc failed: %v", err)
+			continue
+		}
+		if result.AsString() != test.expected {
+			t.Errorf("hexFunc(%v) = %s, want %s", test.input, result.AsString(), test.expected)
+		}
+	}
+}
+
+func TestQuote(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected string
+	}{
+		{testInt(42), "42"},
+		{testFloat(3.14), "3.14"},
+		{testText("hello"), "'hello'"},
+		{testText("it's"), "'it''s'"},
+		{testNull(), "NULL"},
+	}
+
+	for _, test := range tests {
+		result, err := quoteFunc([]Value{test.input})
+		if err != nil {
+			t.Errorf("quoteFunc failed: %v", err)
+			continue
+		}
+		if result.AsString() != test.expected {
+			t.Errorf("quoteFunc(%v) = %s, want %s", test.input, result.AsString(), test.expected)
+		}
+	}
+}
+
+// Test Type Functions
+
+func TestTypeof(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected string
+	}{
+		{testInt(42), "integer"},
+		{testFloat(3.14), "real"},
+		{testText("hello"), "text"},
+		{testBlob([]byte{1, 2}), "blob"},
+		{testNull(), "null"},
+	}
+
+	for _, test := range tests {
+		result, err := typeofFunc([]Value{test.input})
+		if err != nil {
+			t.Errorf("typeofFunc failed: %v", err)
+			continue
+		}
+		if result.AsString() != test.expected {
+			t.Errorf("typeofFunc(%v) = %s, want %s", test.input, result.AsString(), test.expected)
+		}
+	}
+}
+
+func TestCoalesce(t *testing.T) {
+	tests := []struct {
+		args     []Value
+		expected Value
+	}{
+		{[]Value{testNull(), testInt(42), testInt(100)}, testInt(42)},
+		{[]Value{testInt(1), testInt(2)}, testInt(1)},
+		{[]Value{testNull(), testNull(), testText("hello")}, testText("hello")},
+		{[]Value{testNull(), testNull()}, testNull()},
+	}
+
+	for _, test := range tests {
+		result, err := coalesceFunc(test.args)
+		if err != nil {
+			t.Errorf("coalesceFunc failed: %v", err)
+			continue
+		}
+
+		if result.IsNull() != test.expected.IsNull() {
+			t.Errorf("coalesceFunc null mismatch")
+			continue
+		}
+
+		if !result.IsNull() && result.AsString() != test.expected.AsString() {
+			t.Errorf("coalesceFunc(...) = %v, want %v", result, test.expected)
+		}
+	}
+}
+
+func TestNullif(t *testing.T) {
+	tests := []struct {
+		x        Value
+		y        Value
+		expected Value
+	}{
+		{testInt(42), testInt(42), testNull()},
+		{testInt(42), testInt(100), testInt(42)},
+		{testText("hello"), testText("hello"), testNull()},
+		{testText("hello"), testText("world"), testText("hello")},
+	}
+
+	for _, test := range tests {
+		result, err := nullifFunc([]Value{test.x, test.y})
+		if err != nil {
+			t.Errorf("nullifFunc failed: %v", err)
+			continue
+		}
+
+		if result.IsNull() != test.expected.IsNull() {
+			t.Errorf("nullifFunc(%v, %v) null mismatch", test.x, test.y)
+			continue
+		}
+
+		if !result.IsNull() && result.AsInt64() != test.expected.AsInt64() {
+			t.Errorf("nullifFunc(%v, %v) = %v, want %v", test.x, test.y, result, test.expected)
+		}
+	}
+}
+
+// Test Math Functions
+
+func TestAbs(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected Value
+	}{
+		{testInt(-42), testInt(42)},
+		{testInt(42), testInt(42)},
+		{testFloat(-3.14), testFloat(3.14)},
+		{testFloat(3.14), testFloat(3.14)},
+	}
+
+	for _, test := range tests {
+		result, err := absFunc([]Value{test.input})
+		if err != nil {
+			t.Errorf("absFunc failed: %v", err)
+			continue
+		}
+
+		if result.Type() != test.expected.Type() {
+			t.Errorf("absFunc type mismatch")
+			continue
+		}
+
+		if result.Type() == TypeInteger {
+			if result.AsInt64() != test.expected.AsInt64() {
+				t.Errorf("absFunc(%v) = %d, want %d",
+					test.input, result.AsInt64(), test.expected.AsInt64())
 			}
-
-			// Verify we can decode it back
-			got, m := GetVarint(buf[:])
-			if got != tt.value {
-				t.Errorf("Round trip failed: got 0x%x, want 0x%x", got, tt.value)
+		} else {
+			if result.AsFloat64() != test.expected.AsFloat64() {
+				t.Errorf("absFunc(%v) = %f, want %f",
+					test.input, result.AsFloat64(), test.expected.AsFloat64())
 			}
-			if m != n {
-				t.Errorf("Decode size %d != encode size %d", m, n)
-			}
-		})
-	}
-}
-
-// TestGetVarint32Overflow tests GetVarint32 with values that fit in uint32
-func TestGetVarint32Overflow(t *testing.T) {
-	t.Parallel()
-	var buf [9]byte
-
-	// Test with max uint32
-	PutVarint(buf[:], 0xffffffff)
-	got, n := GetVarint32(buf[:])
-	if got != 0xffffffff {
-		t.Errorf("GetVarint32(max) = 0x%x, want 0xffffffff", got)
-	}
-	if n != 5 {
-		t.Errorf("GetVarint32(max) size = %d, want 5", n)
-	}
-}
-
-// TestVarintZeroValue tests zero value encoding/decoding
-func TestVarintZeroValue(t *testing.T) {
-	t.Parallel()
-	var buf [9]byte
-	n := PutVarint(buf[:], 0)
-	if n != 1 {
-		t.Errorf("PutVarint(0) size = %d, want 1", n)
-	}
-
-	got, m := GetVarint(buf[:])
-	if got != 0 {
-		t.Errorf("GetVarint() = %d, want 0", got)
-	}
-	if m != 1 {
-		t.Errorf("GetVarint() size = %d, want 1", m)
-	}
-
-	length := VarintLen(0)
-	if length != 1 {
-		t.Errorf("VarintLen(0) = %d, want 1", length)
-	}
-}
-t      *SelectStmt
-	IfNotExists bool
-	Temporary   bool
-}
-
-func (c *CreateViewStmt) node()      {}
-func (c *CreateViewStmt) statement() {}
-func (c *CreateViewStmt) String() string {
-	return "CREATE VIEW"
-}
-
-// DropViewStmt represents a DROP VIEW statement.
-type DropViewStmt struct {
-	Name     string
-	IfExists bool
-}
-
-func (d *DropViewStmt) node()      {}
-func (d *DropViewStmt) statement() {}
-func (d *DropViewStmt) String() string {
-	return "DROP VIEW"
-}
-
-// CreateTriggerStmt represents a CREATE TRIGGER statement.
-type CreateTriggerStmt struct {
-	Name        string
-	Temp        bool
-	IfNotExists bool
-	Timing      TriggerTiming
-	Event       TriggerEvent
-	UpdateOf    []string // columns for UPDATE OF
-	Table       string
-	ForEachRow  bool
-	When        Expression
-	Body        []Statement
-}
-
-func (c *CreateTriggerStmt) node()      {}
-func (c *CreateTriggerStmt) statement() {}
-func (c *CreateTriggerStmt) String() string {
-	return "CREATE TRIGGER"
-}
-
-// TriggerTiming represents when a trigger fires.
-type TriggerTiming int
-
-const (
-	TriggerBefore TriggerTiming = iota
-	TriggerAfter
-	TriggerInsteadOf
-)
-
-// TriggerEvent represents the event that activates a trigger.
-type TriggerEvent int
-
-const (
-	TriggerInsert TriggerEvent = iota
-	TriggerUpdate
-	TriggerDelete
-)
-
-// DropTriggerStmt represents a DROP TRIGGER statement.
-type DropTriggerStmt struct {
-	Name     string
-	IfExists bool
-}
-
-func (d *DropTriggerStmt) node()      {}
-func (d *DropTriggerStmt) statement() {}
-func (d *DropTriggerStmt) String() string {
-	return "DROP TRIGGER"
-}
-
-// BeginStmt represents a BEGIN/START TRANSACTION statement.
-type BeginStmt struct {
-	Mode TransactionMode
-}
-
-func (b *BeginStmt) node()      {}
-func (b *BeginStmt) statement() {}
-func (b *BeginStmt) String() string {
-	return "BEGIN"
-}
-
-type TransactionMode int
-
-const (
-	TransactionDeferred TransactionMode = iota
-	TransactionImmediate
-	TransactionExclusive
-)
-
-// CommitStmt represents a COMMIT statement.
-type CommitStmt struct{}
-
-func (c *CommitStmt) node()      {}
-func (c *CommitStmt) statement() {}
-func (c *CommitStmt) String() string {
-	return "COMMIT"
-}
-
-// RollbackStmt represents a ROLLBACK statement.
-type RollbackStmt struct {
-	Savepoint string
-}
-
-func (r *RollbackStmt) node()      {}
-func (r *RollbackStmt) statement() {}
-func (r *RollbackStmt) String() string {
-	return "ROLLBACK"
-}
-
-// ExplainStmt represents an EXPLAIN or EXPLAIN QUERY PLAN statement.
-type ExplainStmt struct {
-	QueryPlan bool      // true for EXPLAIN QUERY PLAN, false for EXPLAIN
-	Statement Statement // the statement being explained
-}
-
-func (e *ExplainStmt) node()      {}
-func (e *ExplainStmt) statement() {}
-func (e *ExplainStmt) String() string {
-	if e.QueryPlan {
-		return "EXPLAIN QUERY PLAN"
-	}
-	return "EXPLAIN"
-}
-
-
-// AttachStmt represents an ATTACH DATABASE statement.
-type AttachStmt struct {
-	Filename   Expression // String literal or expression for the database file path
-	SchemaName string     // The schema name to attach as
-}
-
-func (a *AttachStmt) node()      {}
-func (a *AttachStmt) statement() {}
-func (a *AttachStmt) String() string {
-	return "ATTACH"
-}
-
-// DetachStmt represents a DETACH DATABASE statement.
-type DetachStmt struct {
-	SchemaName string // The schema name to detach
-}
-
-func (d *DetachStmt) node()      {}
-func (d *DetachStmt) statement() {}
-func (d *DetachStmt) String() string {
-	return "DETACH"
-}
-
-// PragmaStmt represents a PRAGMA statement.
-type PragmaStmt struct {
-	Schema string     // optional schema name
-	Name   string     // pragma name
-	Value  Expression // optional value (for = or () syntax)
-}
-
-func (p *PragmaStmt) node()      {}
-func (p *PragmaStmt) statement() {}
-func (p *PragmaStmt) String() string {
-	return "PRAGMA"
-}
-
-// AlterTableStmt represents an ALTER TABLE statement.
-type AlterTableStmt struct {
-	Table  string
-	Action AlterTableAction
-}
-
-func (a *AlterTableStmt) node()      {}
-func (a *AlterTableStmt) statement() {}
-func (a *AlterTableStmt) String() string {
-	return "ALTER TABLE"
-}
-
-// VacuumStmt represents a VACUUM statement.
-type VacuumStmt struct {
-	Schema    string // optional schema name
-	Into      string // optional INTO filename
-	IntoParam bool   // true if INTO filename comes from a parameter
-}
-
-func (v *VacuumStmt) node()      {}
-func (v *VacuumStmt) statement() {}
-func (v *VacuumStmt) String() string {
-	if v.Into != "" || v.IntoParam {
-		return "VACUUM INTO"
-	}
-	return "VACUUM"
-}
-
-// AlterTableAction represents the action to perform in ALTER TABLE.
-type AlterTableAction interface {
-	Node
-	alterTableAction()
-}
-
-// RenameTableAction represents RENAME TO newname.
-type RenameTableAction struct {
-	NewName string
-}
-
-func (r *RenameTableAction) node()             {}
-func (r *RenameTableAction) alterTableAction() {}
-func (r *RenameTableAction) String() string {
-	return "RENAME TO"
-}
-
-// RenameColumnAction represents RENAME COLUMN oldname TO newname.
-type RenameColumnAction struct {
-	OldName string
-	NewName string
-}
-
-func (r *RenameColumnAction) node()             {}
-func (r *RenameColumnAction) alterTableAction() {}
-func (r *RenameColumnAction) String() string {
-	return "RENAME COLUMN"
-}
-
-// AddColumnAction represents ADD COLUMN column_def.
-type AddColumnAction struct {
-	Column ColumnDef
-}
-
-func (a *AddColumnAction) node()             {}
-func (a *AddColumnAction) alterTableAction() {}
-func (a *AddColumnAction) String() string {
-	return "ADD COLUMN"
-}
-
-// DropColumnAction represents DROP COLUMN [IF EXISTS] column_name.
-type DropColumnAction struct {
-	ColumnName string
-	IfExists   bool
-}
-
-func (d *DropColumnAction) node()             {}
-func (d *DropColumnAction) alterTableAction() {}
-func (d *DropColumnAction) String() string {
-	return "DROP COLUMN"
-}
-
-// =============================================================================
-// Expressions
-// =============================================================================
-
-// BinaryExpr represents a binary expression.
-type BinaryExpr struct {
-	Left  Expression
-	Op    BinaryOp
-	Right Expression
-}
-
-func (b *BinaryExpr) node()       {}
-func (b *BinaryExpr) expression() {}
-func (b *BinaryExpr) String() string {
-	left := "nil"
-	right := "nil"
-	if b.Left != nil {
-		left = b.Left.String()
-	}
-	if b.Right != nil {
-		right = b.Right.String()
-	}
-	return left + " " + b.Op.String() + " " + right
-}
-
-type BinaryOp int
-
-const (
-	OpEq BinaryOp = iota
-	OpNe
-	OpLt
-	OpLe
-	OpGt
-	OpGe
-	OpAnd
-	OpOr
-	OpPlus
-	OpMinus
-	OpMul
-	OpDiv
-	OpRem
-	OpConcat
-	OpBitAnd
-	OpBitOr
-	OpLShift
-	OpRShift
-	OpLike
-	OpGlob
-	OpRegexp
-	OpMatch
-)
-
-var binaryOpStrings = map[BinaryOp]string{
-	OpEq:     "=",
-	OpNe:     "!=",
-	OpLt:     "<",
-	OpLe:     "<=",
-	OpGt:     ">",
-	OpGe:     ">=",
-	OpAnd:    "AND",
-	OpOr:     "OR",
-	OpPlus:   "+",
-	OpMinus:  "-",
-	OpMul:    "*",
-	OpDiv:    "/",
-	OpRem:    "%",
-	OpConcat: "||",
-	OpBitAnd: "&",
-	OpBitOr:  "|",
-	OpLShift: "<<",
-	OpRShift: ">>",
-	OpLike:   "LIKE",
-	OpGlob:   "GLOB",
-	OpRegexp: "REGEXP",
-	OpMatch:  "MATCH",
-}
-
-func (o BinaryOp) String() string {
-	if s, ok := binaryOpStrings[o]; ok {
-		return s
-	}
-	return "?"
-}
-
-// UnaryExpr represents a unary expression.
-type UnaryExpr struct {
-	Op   UnaryOp
-	Expr Expression
-}
-
-func (u *UnaryExpr) node()       {}
-func (u *UnaryExpr) expression() {}
-func (u *UnaryExpr) String() string {
-	expr := "nil"
-	if u.Expr != nil {
-		expr = u.Expr.String()
-	}
-	switch u.Op {
-	case OpNot:
-		return "NOT " + expr
-	case OpNeg:
-		return "-" + expr
-	case OpBitNot:
-		return "~" + expr
-	case OpIsNull:
-		return expr + " IS NULL"
-	case OpNotNull:
-		return expr + " IS NOT NULL"
-	default:
-		return "?" + expr
-	}
-}
-
-type UnaryOp int
-
-const (
-	OpNot UnaryOp = iota
-	OpNeg
-	OpBitNot
-	OpIsNull
-	OpNotNull
-)
-
-// LiteralExpr represents a literal value.
-type LiteralExpr struct {
-	Type  LiteralType
-	Value string
-}
-
-func (l *LiteralExpr) node()       {}
-func (l *LiteralExpr) expression() {}
-func (l *LiteralExpr) String() string {
-	switch l.Type {
-	case LiteralNull:
-		return "NULL"
-	case LiteralString:
-		// Escape single quotes by doubling them
-		escaped := strings.ReplaceAll(l.Value, "'", "''")
-		return "'" + escaped + "'"
-	case LiteralBlob:
-		return "X'" + l.Value + "'"
-	default:
-		// Integer and Float are returned as-is
-		return l.Value
-	}
-}
-
-type LiteralType int
-
-const (
-	LiteralInteger LiteralType = iota
-	LiteralFloat
-	LiteralString
-	LiteralBlob
-	LiteralNull
-)
-
-// IdentExpr represents an identifier (column name).
-type IdentExpr struct {
-	Name  string
-	Table string // optional table qualifier
-}
-
-func (i *IdentExpr) node()       {}
-func (i *IdentExpr) expression() {}
-func (i *IdentExpr) String() string {
-	if i.Table != "" {
-		return i.Table + "." + i.Name
-	}
-	return i.Name
-}
-
-// FunctionExpr represents a function call.
-type FunctionExpr struct {
-	Name     string
-	Args     []Expression
-	Distinct bool
-	Star     bool // for COUNT(*)
-	Filter   Expression
-	Over     *WindowSpec
-}
-
-func (f *FunctionExpr) node()       {}
-func (f *FunctionExpr) expression() {}
-func (f *FunctionExpr) String() string {
-	if f.Star {
-		return f.Name + "(*)"
-	}
-	var args []string
-	for _, arg := range f.Args {
-		if arg != nil {
-			args = append(args, arg.String())
 		}
 	}
-	prefix := ""
-	if f.Distinct {
-		prefix = "DISTINCT "
+}
+
+func TestRound(t *testing.T) {
+	tests := []struct {
+		value     Value
+		precision Value
+		expected  float64
+	}{
+		{testFloat(3.14159), testInt(2), 3.14},
+		{testFloat(3.14159), testInt(0), 3.0},
+		{testFloat(2.5), testInt(0), 3.0},
+		{testFloat(-2.5), testInt(0), -3.0},
 	}
-	return f.Name + "(" + prefix + strings.Join(args, ", ") + ")"
-}
 
-// WindowSpec represents a window specification for window functions.
-type WindowSpec struct {
-	PartitionBy []Expression
-	OrderBy     []OrderingTerm
-	Frame       *FrameSpec
-}
-
-// FrameSpec represents a frame specification in a window.
-type FrameSpec struct {
-	Mode  FrameMode
-	Start FrameBound
-	End   FrameBound
-}
-
-type FrameMode int
-
-const (
-	FrameRange FrameMode = iota
-	FrameRows
-	FrameGroups
-)
-
-// FrameBound represents a frame boundary.
-type FrameBound struct {
-	Type   FrameBoundType
-	Offset Expression
-}
-
-type FrameBoundType int
-
-const (
-	BoundUnboundedPreceding FrameBoundType = iota
-	BoundPreceding
-	BoundCurrentRow
-	BoundFollowing
-	BoundUnboundedFollowing
-)
-
-// CaseExpr represents a CASE expression.
-type CaseExpr struct {
-	Expr        Expression // optional CASE expr
-	WhenClauses []WhenClause
-	ElseClause  Expression
-}
-
-func (c *CaseExpr) node()       {}
-func (c *CaseExpr) expression() {}
-func (c *CaseExpr) String() string {
-	var sb strings.Builder
-	sb.WriteString("CASE")
-	if c.Expr != nil {
-		sb.WriteString(" ")
-		sb.WriteString(c.Expr.String())
-	}
-	for _, w := range c.WhenClauses {
-		sb.WriteString(" WHEN ")
-		if w.Condition != nil {
-			sb.WriteString(w.Condition.String())
+	for _, test := range tests {
+		result, err := roundFunc([]Value{test.value, test.precision})
+		if err != nil {
+			t.Errorf("roundFunc failed: %v", err)
+			continue
 		}
-		sb.WriteString(" THEN ")
-		if w.Result != nil {
-			sb.WriteString(w.Result.String())
+
+		got := result.AsFloat64()
+		if math.Abs(got-test.expected) > 0.0001 {
+			t.Errorf("roundFunc(%v, %v) = %f, want %f",
+				test.value, test.precision, got, test.expected)
 		}
 	}
-	if c.ElseClause != nil {
-		sb.WriteString(" ELSE ")
-		sb.WriteString(c.ElseClause.String())
-	}
-	sb.WriteString(" END")
-	return sb.String()
 }
 
-// WhenClause represents a WHEN clause in a CASE expression.
-type WhenClause struct {
-	Condition Expression
-	Result    Expression
-}
-
-// InExpr represents an IN expression.
-type InExpr struct {
-	Expr   Expression
-	Values []Expression
-	Select *SelectStmt
-	Not    bool
-}
-
-func (i *InExpr) node()       {}
-func (i *InExpr) expression() {}
-func (i *InExpr) String() string {
-	var sb strings.Builder
-	if i.Expr != nil {
-		sb.WriteString(i.Expr.String())
+func TestPower(t *testing.T) {
+	tests := []struct {
+		base     Value
+		exponent Value
+		expected float64
+	}{
+		{testFloat(2), testFloat(3), 8.0},
+		{testFloat(10), testFloat(2), 100.0},
+		{testFloat(2), testFloat(-1), 0.5},
 	}
-	if i.Not {
-		sb.WriteString(" NOT")
-	}
-	sb.WriteString(" IN (")
-	var vals []string
-	for _, v := range i.Values {
-		if v != nil {
-			vals = append(vals, v.String())
+
+	for _, test := range tests {
+		result, err := powerFunc([]Value{test.base, test.exponent})
+		if err != nil {
+			t.Errorf("powerFunc failed: %v", err)
+			continue
+		}
+
+		got := result.AsFloat64()
+		if math.Abs(got-test.expected) > 0.0001 {
+			t.Errorf("powerFunc(%v, %v) = %f, want %f",
+				test.base, test.exponent, got, test.expected)
 		}
 	}
-	sb.WriteString(strings.Join(vals, ", "))
-	sb.WriteString(")")
-	return sb.String()
 }
 
-// BetweenExpr represents a BETWEEN expression.
-type BetweenExpr struct {
-	Expr  Expression
-	Lower Expression
-	Upper Expression
-	Not   bool
-}
-
-func (b *BetweenExpr) node()       {}
-func (b *BetweenExpr) expression() {}
-func (b *BetweenExpr) String() string {
-	var sb strings.Builder
-	if b.Expr != nil {
-		sb.WriteString(b.Expr.String())
+func TestSqrt(t *testing.T) {
+	tests := []struct {
+		input    Value
+		expected float64
+	}{
+		{testFloat(4), 2.0},
+		{testFloat(9), 3.0},
+		{testFloat(2), math.Sqrt(2)},
 	}
-	if b.Not {
-		sb.WriteString(" NOT")
+
+	for _, test := range tests {
+		result, err := sqrtFunc([]Value{test.input})
+		if err != nil {
+			t.Errorf("sqrtFunc failed: %v", err)
+			continue
+		}
+
+		got := result.AsFloat64()
+		if math.Abs(got-test.expected) > 0.0001 {
+			t.Errorf("sqrtFunc(%v) = %f, want %f", test.input, got, test.expected)
+		}
 	}
-	sb.WriteString(" BETWEEN ")
-	if b.Lower != nil {
-		sb.WriteString(b.Lower.String())
+}
+
+// Test Aggregate Functions
+
+func TestCountAggregate(t *testing.T) {
+	f := &CountFunc{}
+
+	values := []Value{
+		testInt(1),
+		testInt(2),
+		testNull(),
+		testInt(3),
 	}
-	sb.WriteString(" AND ")
-	if b.Upper != nil {
-		sb.WriteString(b.Upper.String())
+
+	for _, v := range values {
+		if err := f.Step([]Value{v}); err != nil {
+			t.Errorf("CountFunc.Step failed: %v", err)
+		}
 	}
-	return sb.String()
-}
 
-// CastExpr represents a CAST expression.
-type CastExpr struct {
-	Expr Expression
-	Type string
-}
-
-func (c *CastExpr) node()       {}
-func (c *CastExpr) expression() {}
-func (c *CastExpr) String() string {
-	expr := "nil"
-	if c.Expr != nil {
-		expr = c.Expr.String()
+	result, err := f.Final()
+	if err != nil {
+		t.Errorf("CountFunc.Final failed: %v", err)
 	}
-	return "CAST(" + expr + " AS " + c.Type + ")"
-}
 
-// CollateExpr represents a COLLATE expression.
-type CollateExpr struct {
-	Expr      Expression
-	Collation string
-}
-
-func (c *CollateExpr) node()       {}
-func (c *CollateExpr) expression() {}
-func (c *CollateExpr) String() string {
-	expr := "nil"
-	if c.Expr != nil {
-		expr = c.Expr.String()
+	// Should count only non-NULL values
+	if result.AsInt64() != 3 {
+		t.Errorf("CountFunc result = %d, want 3", result.AsInt64())
 	}
-	return expr + " COLLATE " + c.Collation
 }
 
-// ParenExpr represents a parenthesized expression.
-type ParenExpr struct {
-	Expr Expression
-}
+func TestSumAggregate(t *testing.T) {
+	f := &SumFunc{}
 
-func (p *ParenExpr) node()       {}
-func (p *ParenExpr) expression() {}
-func (p *ParenExpr) String() string {
-	expr := "nil"
-	if p.Expr != nil {
-		expr = p.Expr.String()
+	values := []Value{
+		testInt(10),
+		testInt(20),
+		testNull(),
+		testInt(30),
 	}
-	return "(" + expr + ")"
-}
 
-// SubqueryExpr represents a subquery expression.
-type SubqueryExpr struct {
-	Select *SelectStmt
-}
-
-func (s *SubqueryExpr) node()       {}
-func (s *SubqueryExpr) expression() {}
-func (s *SubqueryExpr) String() string {
-	// We can't easily convert a full SELECT statement to string here,
-	// so we return a placeholder. Full subquery serialization would require
-	// implementing String() on SelectStmt as well.
-	return "(SELECT ...)"
-}
-
-// ExistsExpr represents an EXISTS (SELECT ...) expression.
-type ExistsExpr struct {
-	Select *SelectStmt
-	Not    bool // true for NOT EXISTS
-}
-
-func (e *ExistsExpr) node()       {}
-func (e *ExistsExpr) expression() {}
-func (e *ExistsExpr) String() string {
-	if e.Not {
-		return "NOT EXISTS (SELECT ...)"
+	for _, v := range values {
+		if err := f.Step([]Value{v}); err != nil {
+			t.Errorf("SumFunc.Step failed: %v", err)
+		}
 	}
-	return "EXISTS (SELECT ...)"
-}
 
-// VariableExpr represents a parameter placeholder.
-type VariableExpr struct {
-	Name string
-}
-
-func (v *VariableExpr) node()       {}
-func (v *VariableExpr) expression() {}
-func (v *VariableExpr) String() string {
-	// SQL parameters are typically represented as ? or :name or $name
-	if v.Name == "" {
-		return "?"
+	result, err := f.Final()
+	if err != nil {
+		t.Errorf("SumFunc.Final failed: %v", err)
 	}
-	return ":" + v.Name
+
+	if result.AsInt64() != 60 {
+		t.Errorf("SumFunc result = %d, want 60", result.AsInt64())
+	}
 }
 
-// =============================================================================
-// UPSERT (ON CONFLICT) Clause
-// =============================================================================
+func TestAvgAggregate(t *testing.T) {
+	f := &AvgFunc{}
 
-// UpsertClause represents an ON CONFLICT clause in an INSERT statement.
-type UpsertClause struct {
-	Target *ConflictTarget
-	Action ConflictAction
-	Update *DoUpdateClause
+	values := []Value{
+		testInt(10),
+		testInt(20),
+		testNull(),
+		testInt(30),
+	}
+
+	for _, v := range values {
+		if err := f.Step([]Value{v}); err != nil {
+			t.Errorf("AvgFunc.Step failed: %v", err)
+		}
+	}
+
+	result, err := f.Final()
+	if err != nil {
+		t.Errorf("AvgFunc.Final failed: %v", err)
+	}
+
+	expected := 20.0
+	got := result.AsFloat64()
+	if math.Abs(got-expected) > 0.0001 {
+		t.Errorf("AvgFunc result = %f, want %f", got, expected)
+	}
 }
 
-// ConflictTarget specifies which conflict to handle.
-type ConflictTarget struct {
-	Columns        []IndexedColumn // columns for ON CONFLICT (col1, col2)
-	Where          Expression      // WHERE clause for partial indexes
-	ConstraintName string          // ON CONSTRAINT name
+func TestMinMaxAggregate(t *testing.T) {
+	minFunc := &MinFunc{}
+	maxFunc := &MaxFunc{}
+
+	values := []Value{
+		testInt(30),
+		testInt(10),
+		testNull(),
+		testInt(20),
+	}
+
+	for _, v := range values {
+		minFunc.Step([]Value{v})
+		maxFunc.Step([]Value{v})
+	}
+
+	minResult, _ := minFunc.Final()
+	maxResult, _ := maxFunc.Final()
+
+	if minResult.AsInt64() != 10 {
+		t.Errorf("MinFunc result = %d, want 10", minResult.AsInt64())
+	}
+
+	if maxResult.AsInt64() != 30 {
+		t.Errorf("MaxFunc result = %d, want 30", maxResult.AsInt64())
+	}
 }
 
-// ConflictAction specifies what to do on conflict.
-type ConflictAction int
+func TestGroupConcatAggregate(t *testing.T) {
+	f := &GroupConcatFunc{}
 
-const (
-	ConflictDoNothing ConflictAction = iota
-	ConflictDoUpdate
-)
+	values := []Value{
+		testText("hello"),
+		testText("world"),
+		testNull(),
+		testText("test"),
+	}
 
-// DoUpdateClause represents DO UPDATE SET clause.
-type DoUpdateClause struct {
-	Sets  []Assignment // SET column = value
-	Where Expression   // WHERE clause for conditional updates
+	for _, v := range values {
+		if err := f.Step([]Value{v}); err != nil {
+			t.Errorf("GroupConcatFunc.Step failed: %v", err)
+		}
+	}
+
+	result, err := f.Final()
+	if err != nil {
+		t.Errorf("GroupConcatFunc.Final failed: %v", err)
+	}
+
+	expected := "hello,world,test"
+	if result.AsString() != expected {
+		t.Errorf("GroupConcatFunc result = %s, want %s", result.AsString(), expected)
+	}
+}
+
+// Test Registry
+
+func TestRegistry(t *testing.T) {
+	r := DefaultRegistry()
+
+	// Test that functions are registered
+	funcs := []string{
+		"length", "upper", "lower", "substr", "replace",
+		"abs", "round", "sqrt",
+		"count", "sum", "avg", "min", "max",
+		"date", "time", "datetime", "julianday",
+	}
+
+	for _, name := range funcs {
+		if _, ok := r.Lookup(name); !ok {
+			t.Errorf("Function %s not found in registry", name)
+		}
+	}
+}
+
+func TestScalarFuncExecution(t *testing.T) {
+	r := DefaultRegistry()
+
+	// Test length function through registry
+	lenFunc, ok := r.Lookup("length")
+	if !ok {
+		t.Fatal("length function not found")
+	}
+
+	result, err := lenFunc.Call([]Value{testText("hello")})
+	if err != nil {
+		t.Errorf("Failed to call length: %v", err)
+	}
+
+	if result.AsInt64() != 5 {
+		t.Errorf("length('hello') = %d, want 5", result.AsInt64())
+	}
+}
+
+// TestValueTypeStringUnknown tests ValueType.String for unknown type
+func TestValueTypeStringUnknown(t *testing.T) {
+	var vt ValueType = 99 // Invalid type
+	result := vt.String()
+	if result != "unknown" {
+		t.Errorf("Unknown ValueType.String() = %q, want 'unknown'", result)
+	}
+}
+
+// TestScalarFuncCallError tests ScalarFunc.Call with function that returns error
+func TestScalarFuncCallError(t *testing.T) {
+	sf := NewScalarFunc("test", 1, func(args []Value) (Value, error) {
+		return NewNullValue(), fmt.Errorf("test error")
+	})
+
+	_, err := sf.Call([]Value{NewIntValue(1)})
+	if err == nil {
+		t.Error("Call() should propagate error from function")
+	}
+}
+
+// TestValueAsInt64NullValue tests AsInt64 on null value
+func TestValueAsInt64NullValue(t *testing.T) {
+	v := NewNullValue()
+	result := v.AsInt64()
+	if result != 0 {
+		t.Errorf("NULL AsInt64() = %d, want 0", result)
+	}
+}
+
+// TestValueAsStringNonTextValue tests AsString on non-text value
+func TestValueAsStringNonTextValue(t *testing.T) {
+	// Test with blob - returns string representation
+	v := NewBlobValue([]byte{1, 2, 3})
+	result := v.AsString()
+	if result != string([]byte{1, 2, 3}) {
+		t.Errorf("Blob AsString() = %q, want byte string", result)
+	}
+
+	// Test with integer
+	v = NewIntValue(42)
+	result = v.AsString()
+	if result != "42" {
+		t.Errorf("Integer AsString() = %q, want '42'", result)
+	}
+}
+
+// TestValueAsBlobNonBlobValue tests AsBlob on non-blob value
+func TestValueAsBlobNonBlobValue(t *testing.T) {
+	// Test with integer
+	v := NewIntValue(42)
+	result := v.AsBlob()
+	if result != nil {
+		t.Errorf("Integer AsBlob() = %v, want nil", result)
+	}
+
+	// Test with null
+	v = NewNullValue()
+	result = v.AsBlob()
+	if result != nil {
+		t.Errorf("NULL AsBlob() = %v, want nil", result)
+	}
+}
+
+// TestValueBytesForDifferentTypes tests Bytes on different value types
+func TestValueBytesForDifferentTypes(t *testing.T) {
+	// Test with text
+	v := NewTextValue("hello")
+	result := v.Bytes()
+	if result != 5 {
+		t.Errorf("Text Bytes() = %d, want 5", result)
+	}
+
+	// Test with integer (should return 8 for int64 size)
+	v = NewIntValue(42)
+	result = v.Bytes()
+	if result != 8 {
+		t.Errorf("Integer Bytes() = %d, want 8", result)
+	}
+
+	// Test with float (should return 8 for float64 size)
+	v = NewFloatValue(3.14)
+	result = v.Bytes()
+	if result != 8 {
+		t.Errorf("Float Bytes() = %d, want 8", result)
+	}
+
+	// Test with NULL (should return 0)
+	v = NewNullValue()
+	result = v.Bytes()
+	if result != 0 {
+		t.Errorf("NULL Bytes() = %d, want 0", result)
+	}
+}
+
+// TestRegistryLookupNonExistent tests Lookup with non-existent function
+func TestRegistryLookupNonExistent(t *testing.T) {
+	r := NewRegistry()
+	_, ok := r.Lookup("nonexistent")
+	if ok {
+		t.Error("Lookup() should return false for non-existent function")
+	}
+}
+
+// TestRegistryLookupWithArgsNoMatch tests LookupWithArgs with no matching overload
+func TestRegistryLookupWithArgsNoMatch(t *testing.T) {
+	r := NewRegistry()
+	// Register a user function with specific arg count
+	testFunc := NewScalarFunc("test", 2, func(args []Value) (Value, error) {
+		return NewIntValue(42), nil
+	})
+	r.RegisterUser(testFunc, 2)
+
+	// Lookup with matching arg count should work
+	_, ok := r.LookupWithArgs("test", 2)
+	if !ok {
+		t.Error("LookupWithArgs() should find function with matching arg count")
+	}
+
+	// Try to look up with different arg count when no variadic version exists
+	_, ok = r.LookupWithArgs("nonexistent", 5)
+	if ok {
+		t.Error("LookupWithArgs() should return false for non-existent function")
+	}
+}
+
+// TestRegistryUnregisterNonExistent tests Unregister with non-existent function
+func TestRegistryUnregisterNonExistent(t *testing.T) {
+	r := NewRegistry()
+	// Unregistering non-existent function should not panic
+	result := r.Unregister("nonexistent", 1)
+	if result {
+		t.Error("Unregister() should return false for non-existent function")
+	}
+}
+
+// TestRegistryGetAllFunctionsEmpty tests GetAllFunctions on empty registry
+func TestRegistryGetAllFunctionsEmpty(t *testing.T) {
+	r := NewRegistry()
+	funcs := r.GetAllFunctions()
+	if len(funcs) != 0 {
+		t.Errorf("GetAllFunctions() on empty registry = %d functions, want 0", len(funcs))
+	}
+}
+
+// TestValueAsInt64WithFloat tests AsInt64 on float value
+func TestValueAsInt64WithFloat(t *testing.T) {
+	v := NewFloatValue(42.7)
+	result := v.AsInt64()
+	if result != 42 {
+		t.Errorf("Float AsInt64() = %d, want 42", result)
+	}
+}
+
+// TestValueAsStringWithFloat tests AsString on float value
+func TestValueAsStringWithFloat(t *testing.T) {
+	v := NewFloatValue(3.14)
+	result := v.AsString()
+	if result != "3.14" {
+		t.Errorf("Float AsString() = %q, want '3.14'", result)
+	}
+}
+
+// TestRegistryLookupUserFunction tests user function priority
+func TestRegistryLookupUserFunction(t *testing.T) {
+	r := NewRegistry()
+
+	// Register a built-in
+	r.Register(NewScalarFunc("test", 1, func(args []Value) (Value, error) {
+		return NewIntValue(1), nil
+	}))
+
+	// Register a user function with same name (should have priority)
+	userFunc := NewScalarFunc("test", 1, func(args []Value) (Value, error) {
+		return NewIntValue(2), nil
+	})
+	r.RegisterUser(userFunc, 1)
+
+	// Lookup should find user function via LookupWithArgs
+	fn, ok := r.LookupWithArgs("test", 1)
+	if !ok {
+		t.Fatal("LookupWithArgs() should find test function")
+	}
+
+	result, err := fn.Call([]Value{NewIntValue(0)})
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	if result.AsInt64() != 2 {
+		t.Errorf("User function should be used, got result = %d, want 2", result.AsInt64())
+	}
+}
+
+// TestRegistryUnregisterVariadic tests unregistering variadic function
+func TestRegistryUnregisterVariadic(t *testing.T) {
+	r := NewRegistry()
+
+	// Register a variadic function
+	varFunc := NewScalarFunc("vfunc", -1, func(args []Value) (Value, error) {
+		return NewIntValue(int64(len(args))), nil
+	})
+	r.RegisterUser(varFunc, -1)
+
+	// Verify it's there
+	_, ok := r.Lookup("vfunc")
+	if !ok {
+		t.Error("Variadic function should be registered")
+	}
+
+	// Unregister it
+	removed := r.Unregister("vfunc", -1)
+	if !removed {
+		t.Error("Unregister() should return true")
+	}
+
+	// Verify it's gone
+	_, ok = r.Lookup("vfunc")
+	if ok {
+		t.Error("Variadic function should be unregistered")
+	}
+}
+
+// TestRegistryGetAllFunctionsWithUserFuncs tests GetAllFunctions with user functions
+func TestRegistryGetAllFunctionsWithUserFuncs(t *testing.T) {
+	r := NewRegistry()
+
+	// Register some functions
+	r.Register(NewScalarFunc("builtin", 1, func(args []Value) (Value, error) {
+		return NewIntValue(1), nil
+	}))
+
+	userFunc := NewScalarFunc("user", 1, func(args []Value) (Value, error) {
+		return NewIntValue(2), nil
+	})
+	r.RegisterUser(userFunc, 1)
+
+	funcs := r.GetAllFunctions()
+	if len(funcs) < 1 {
+		t.Errorf("GetAllFunctions() = %d functions, want at least 1", len(funcs))
+	}
+}
+
+// TestRegistryLookupVariadicFallback tests variadic fallback in Lookup
+func TestRegistryLookupVariadicFallback(t *testing.T) {
+	r := NewRegistry()
+
+	// Only register variadic version
+	varFunc := NewScalarFunc("vfunc", -1, func(args []Value) (Value, error) {
+		return NewIntValue(int64(len(args))), nil
+	})
+	r.RegisterUser(varFunc, -1)
+
+	// Lookup without args should find variadic
+	fn, ok := r.Lookup("vfunc")
+	if !ok {
+		t.Error("Lookup() should find variadic function")
+	}
+
+	// Should work with any number of args
+	result, err := fn.Call([]Value{NewIntValue(1), NewIntValue(2), NewIntValue(3)})
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	if result.AsInt64() != 3 {
+		t.Errorf("Variadic function result = %d, want 3", result.AsInt64())
+	}
 }

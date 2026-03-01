@@ -21,9 +21,8 @@ func TestVDBEInsertAndSelect(t *testing.T) {
 		Btree: bt,
 	}
 
-	// Test INSERT
+	// Test INSERT (not parallel - parent checks page data after this completes)
 	t.Run("INSERT", func(t *testing.T) {
-		t.Parallel()
 		vm := New()
 		vm.Ctx = ctx
 		vm.AllocMemory(10)
@@ -77,9 +76,8 @@ func TestVDBEInsertAndSelect(t *testing.T) {
 		t.Fatalf("Expected 1 cell after INSERT, got %d", header.NumCells)
 	}
 
-	// Test SELECT
+	// Test SELECT (not parallel - depends on INSERT having completed)
 	t.Run("SELECT", func(t *testing.T) {
-		t.Parallel()
 		vm := New()
 		vm.Ctx = ctx
 		vm.AllocMemory(10)

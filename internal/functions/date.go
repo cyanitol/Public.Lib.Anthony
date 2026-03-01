@@ -1,540 +1,841 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package btree
+package functions
 
 import (
-	"encoding/binary"
-	"testing"
+	"fmt"
+	"math"
+	"strconv"
+	"strings"
+	"time"
 )
 
-// TestCursor_InsertValidationErrors tests insert validation edge cases (65.0% -> higher)
-func TestCursor_InsertValidationErrors(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
+// RegisterDateTimeFunctions registers all date/time functions.
+func RegisterDateTimeFunctions(r *Registry) {
+	r.Register(NewScalarFunc("date", -1, dateFunc))
+	r.Register(NewScalarFunc("time", -1, timeFunc))
+	r.Register(NewScalarFunc("datetime", -1, datetimeFunc))
+	r.Register(NewScalarFunc("julianday", -1, juliandayFunc))
+	r.Register(NewScalarFunc("unixepoch", -1, unixepochFunc))
+	r.Register(NewScalarFunc("strftime", -1, strftimeFunc))
+	r.Register(NewScalarFunc("current_date", 0, currentDateFunc))
+	r.Register(NewScalarFunc("current_time", 0, currentTimeFunc))
+	r.Register(NewScalarFunc("current_timestamp", 0, currentTimestampFunc))
+}
+
+// DateTime represents a date/time value in SQLite's internal format.
+type DateTime struct {
+	// Julian day number (milliseconds * 86400000)
+	jd int64
+
+	// Year, Month, Day, Hour, Minute, Second
+	year   int
+	month  int
+	day    int
+	hour   int
+	minute int
+	second float64
+
+	// Timezone offset in minutes
+	tz int
+
+	// Validity flags
+	validJD  bool
+	validYMD bool
+	validHMS bool
+
+	// Other flags
+	useSubsec bool
+	isError   bool
+}
+
+const (
+	// Julian day for 1970-01-01 00:00:00
+	unixEpochJD = 2440587.5
+
+	// Milliseconds per day
+	msPerDay = 86400000
+)
+
+// parseDateTime parses a date/time string or value.
+func parseDateTime(v Value) (*DateTime, error) {
+	dt := &DateTime{}
+
+	if v.IsNull() {
+		return nil, fmt.Errorf("null value")
 	}
 
-	cursor := NewCursor(bt, rootPage)
+	switch v.Type() {
+	case TypeInteger, TypeFloat:
+		// Numeric value - could be Julian day or Unix timestamp
+		f := v.AsFloat64()
+		dt.setRawNumber(f)
 
-	// Insert successfully first
-	cursor.MoveToFirst()
-	err = cursor.Insert(1, []byte("data1"))
-	if err != nil {
-		t.Logf("Insert() error = %v", err)
+	case TypeText:
+		s := v.AsString()
+		if strings.ToLower(s) == "now" {
+			dt.setNow()
+		} else if err := dt.parseString(s); err != nil {
+			return nil, err
+		}
+
+	default:
+		return nil, fmt.Errorf("invalid date/time value")
 	}
 
-	// Try to insert from invalid cursor state
-	cursor.State = CursorInvalid
-	err = cursor.Insert(100, []byte("test"))
-	if err != nil {
-		t.Logf("Insert() from invalid cursor failed as expected: %v", err)
+	return dt, nil
+}
+
+// setNow sets the DateTime to the current time.
+func (dt *DateTime) setNow() {
+	now := time.Now().UTC()
+	dt.year = now.Year()
+	dt.month = int(now.Month())
+	dt.day = now.Day()
+	dt.hour = now.Hour()
+	dt.minute = now.Minute()
+	dt.second = float64(now.Second()) + float64(now.Nanosecond())/1e9
+	dt.validYMD = true
+	dt.validHMS = true
+	dt.computeJD()
+}
+
+// setRawNumber sets the DateTime from a numeric value.
+func (dt *DateTime) setRawNumber(f float64) {
+	// If in valid Julian day range, treat as Julian day
+	if f >= 0.0 && f < 5373484.5 {
+		dt.jd = int64(f*float64(msPerDay) + 0.5)
+		dt.validJD = true
 	} else {
-		t.Log("Insert() from invalid cursor succeeded (may not be validated)")
-	}
-
-	// Try to insert duplicate rowid
-	err = cursor.Insert(1, []byte("data2"))
-	if err != nil {
-		t.Logf("Duplicate insert error: %v (expected)", err)
+		// Treat as Unix timestamp
+		dt.jd = int64((f+unixEpochJD*86400.0)*1000.0 + 0.5)
+		dt.validJD = true
 	}
 }
 
-// TestCursor_SplitPageEdgeCases tests page splitting edge cases (60.0% -> higher)
-func TestCursor_SplitPageEdgeCases(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
+// parseString parses a date/time string.
+func (dt *DateTime) parseString(s string) error {
+	// Try YYYY-MM-DD format
+	if dt.parseYMD(s) {
+		return nil
 	}
 
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert at beginning
-	for i := int64(1); i <= 50; i++ {
-		err := cursor.Insert(i, make([]byte, 30))
-		if err != nil {
-			t.Logf("Insert %d error = %v", i, err)
-			break
-		}
+	// Try HH:MM:SS format
+	if dt.parseHMS(s) {
+		return nil
 	}
 
-	// Insert in middle
-	for i := int64(25); i <= 75; i += 2 {
-		err := cursor.Insert(i+100, make([]byte, 30))
-		if err != nil {
-			break
-		}
+	// Try as number
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		dt.setRawNumber(f)
+		return nil
 	}
 
-	// Insert at end
-	for i := int64(200); i <= 250; i++ {
-		err := cursor.Insert(i, make([]byte, 30))
-		if err != nil {
-			break
-		}
-	}
-
-	t.Log("Split testing with various insertion points completed")
+	return fmt.Errorf("invalid date/time format: %s", s)
 }
 
-// TestCell_ParseIndexInteriorCell tests index interior cell parsing (65.5% -> higher)
-func TestCell_ParseIndexInteriorCell(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
+// splitDateTimeParts splits a date/time string on '-', ' ', and 'T' delimiters.
+func splitDateTimeParts(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return r == '-' || r == ' ' || r == 'T'
+	})
+}
 
-	// Create an interior index page manually
-	pageData := make([]byte, 4096)
-	offset := FileHeaderSize
-	pageData[offset+PageHeaderOffsetType] = PageTypeInteriorIndex
-	binary.BigEndian.PutUint16(pageData[offset+PageHeaderOffsetNumCells:], 1)
-	binary.BigEndian.PutUint32(pageData[offset+PageHeaderOffsetRightChild:], 10)
+// parseYearField converts a string to a valid year integer.
+// Returns the year and true on success, or 0 and false if invalid.
+func parseYearField(s string) (int, bool) {
+	year, err := strconv.Atoi(s)
+	if err != nil || year < 0 || year > 9999 {
+		return 0, false
+	}
+	return year, true
+}
 
-	// Create an interior cell
-	childPage := uint32(5)
-	key := []byte("testkey")
-	rowid := int64(42)
+// parseMonthField converts a string to a valid month integer.
+// Returns the month and true on success, or 0 and false if invalid.
+func parseMonthField(s string) (int, bool) {
+	month, err := strconv.Atoi(s)
+	if err != nil || month < 1 || month > 12 {
+		return 0, false
+	}
+	return month, true
+}
 
-	// Encode payload
-	payload := make([]byte, 0, len(key)+20)
-	payload = append(payload, byte(len(key)))
-	payload = append(payload, key...)
-	rowidBuf := make([]byte, 9)
-	n := PutVarint(rowidBuf, uint64(rowid))
-	payload = append(payload, rowidBuf[:n]...)
+// parseDayField converts a string to a valid day integer.
+// Returns the day and true on success, or 0 and false if invalid.
+func parseDayField(s string) (int, bool) {
+	day, err := strconv.Atoi(s)
+	if err != nil || day < 1 || day > 31 {
+		return 0, false
+	}
+	return day, true
+}
 
-	cellData := EncodeIndexInteriorCell(childPage, payload)
+// parseTimeComponent attempts to parse a time component from a date/time string.
+// It first tries joining the trailing parts[], and falls back to scanning s for a
+// ' ' or 'T' separator and parsing the substring that follows.
+func (dt *DateTime) parseTimeComponent(s string, parts []string) {
+	timePart := strings.Join(parts, " ")
+	if dt.parseHMS(timePart) {
+		return
+	}
+	// Fallback: locate the separator in the original string
+	idx := strings.IndexAny(s, " T")
+	if idx > 0 && idx < len(s)-1 {
+		dt.parseHMS(s[idx+1:])
+	}
+}
 
-	// Write cell to page
-	cellOffset := uint32(4000)
-	copy(pageData[cellOffset:], cellData)
-
-	// Write cell pointer
-	cellPtrOffset := offset + PageHeaderSizeInterior
-	binary.BigEndian.PutUint16(pageData[cellPtrOffset:], uint16(cellOffset))
-	binary.BigEndian.PutUint16(pageData[offset+PageHeaderOffsetCellStart:], uint16(cellOffset))
-
-	bt.SetPage(1, pageData)
-
-	// Parse the cell
-	header, err := ParsePageHeader(pageData, 1)
-	if err != nil {
-		t.Fatalf("ParsePageHeader() error = %v", err)
+// parseYMD parses YYYY-MM-DD [HH:MM:SS] format.
+func (dt *DateTime) parseYMD(s string) bool {
+	parts := splitDateTimeParts(s)
+	if len(parts) < 3 {
+		return false
 	}
 
-	cell, err := ParseCell(header.PageType, pageData[cellOffset:], bt.UsableSize)
-	if err != nil {
-		t.Errorf("ParseCell() error = %v", err)
+	year, ok := parseYearField(parts[0])
+	if !ok {
+		return false
+	}
+
+	month, ok := parseMonthField(parts[1])
+	if !ok {
+		return false
+	}
+
+	day, ok := parseDayField(parts[2])
+	if !ok {
+		return false
+	}
+
+	dt.year = year
+	dt.month = month
+	dt.day = day
+	dt.validYMD = true
+
+	if len(parts) > 3 {
+		dt.parseTimeComponent(s, parts[3:])
+	}
+
+	return true
+}
+
+func parseHourField(s string) (int, bool) {
+	h, err := strconv.Atoi(s)
+	if err != nil || h < 0 || h > 23 {
+		return 0, false
+	}
+	return h, true
+}
+
+func parseMinuteField(s string) (int, bool) {
+	m, err := strconv.Atoi(s)
+	if err != nil || m < 0 || m > 59 {
+		return 0, false
+	}
+	return m, true
+}
+
+func parseSecondField(s string) (float64, bool) {
+	sec, err := strconv.ParseFloat(s, 64)
+	if err != nil || sec < 0 || sec >= 60 {
+		return 0, false
+	}
+	return sec, true
+}
+
+func (dt *DateTime) parseHMS(s string) bool {
+	parts := strings.Split(s, ":")
+	if len(parts) < 2 {
+		return false
+	}
+
+	hour, ok := parseHourField(parts[0])
+	if !ok {
+		return false
+	}
+
+	minute, ok := parseMinuteField(parts[1])
+	if !ok {
+		return false
+	}
+
+	second := 0.0
+	if len(parts) > 2 {
+		sec, ok := parseSecondField(parts[2])
+		if !ok {
+			return false
+		}
+		second = sec
+	}
+
+	dt.hour = hour
+	dt.minute = minute
+	dt.second = second
+	dt.validHMS = true
+
+	return true
+}
+
+// computeJD computes the Julian day number from YMD and HMS.
+func (dt *DateTime) computeJD() {
+	if dt.validJD {
+		return
+	}
+
+	year := dt.year
+	month := dt.month
+	day := dt.day
+
+	if !dt.validYMD {
+		year = 2000
+		month = 1
+		day = 1
+	}
+
+	// Meeus algorithm for Julian day calculation
+	if month <= 2 {
+		year--
+		month += 12
+	}
+
+	a := year / 100
+	b := 2 - a + a/4
+
+	jd := int64(365.25*float64(year+4716)) +
+		int64(30.6001*float64(month+1)) +
+		int64(day) + int64(b) - 1524
+
+	dt.jd = jd * msPerDay
+
+	if dt.validHMS {
+		dt.jd += int64(dt.hour)*3600000 +
+			int64(dt.minute)*60000 +
+			int64(dt.second*1000.0+0.5)
+	}
+
+	// Adjust for timezone
+	if dt.tz != 0 {
+		dt.jd -= int64(dt.tz) * 60000
+	}
+
+	dt.validJD = true
+}
+
+// computeYMD computes year, month, day from Julian day.
+func (dt *DateTime) computeYMD() {
+	if dt.validYMD {
+		return
+	}
+
+	if !dt.validJD {
+		dt.year = 2000
+		dt.month = 1
+		dt.day = 1
+		dt.validYMD = true
+		return
+	}
+
+	// Convert Julian day to calendar date (Meeus algorithm)
+	z := int((dt.jd+43200000)/msPerDay) + 1
+	alpha := int((float64(z) - 1867216.25) / 36524.25)
+	a := z + 1 + alpha - alpha/4
+
+	b := a + 1524
+	c := int((float64(b) - 122.1) / 365.25)
+	d := int(365.25 * float64(c))
+	e := int(float64(b-d) / 30.6001)
+
+	dt.day = b - d - int(30.6001*float64(e))
+	if e < 14 {
+		dt.month = e - 1
 	} else {
-		t.Logf("Parsed interior index cell: childPage=%d, payload len=%d",
-			cell.ChildPage, len(cell.Payload))
+		dt.month = e - 13
 	}
+
+	if dt.month > 2 {
+		dt.year = c - 4716
+	} else {
+		dt.year = c - 4715
+	}
+
+	dt.validYMD = true
 }
 
-// TestCursor_AdvanceWithinPageComplete tests within-page advancement (66.7% -> higher)
-func TestCursor_AdvanceWithinPageComplete(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
+// computeHMS computes hour, minute, second from Julian day.
+func (dt *DateTime) computeHMS() {
+	if dt.validHMS {
+		return
 	}
 
-	cursor := NewCursor(bt, rootPage)
+	dt.computeJD()
 
-	// Insert many entries to stay on one page
-	for i := int64(1); i <= 30; i++ {
-		err := cursor.Insert(i, []byte{byte(i)})
-		if err != nil {
-			t.Fatalf("Insert() error = %v", err)
-		}
-	}
+	dayMs := int((dt.jd + 43200000) % msPerDay)
+	dt.second = float64(dayMs%60000) / 1000.0
+	dayMin := dayMs / 60000
+	dt.minute = dayMin % 60
+	dt.hour = dayMin / 60
 
-	// Navigate through all entries on the page
-	cursor.MoveToFirst()
-	count := 0
-	initialPage := cursor.CurrentPage
-
-	for cursor.IsValid() && count < 40 {
-		count++
-		err := cursor.Next()
-		if err != nil {
-			break
-		}
-		if cursor.CurrentPage != initialPage {
-			t.Log("Moved to different page")
-			break
-		}
-	}
-
-	t.Logf("Advanced within page %d times", count)
+	dt.validHMS = true
 }
 
-// TestCursor_LoadCellAtCurrentIndexErrors tests cell loading error paths (60.0% -> higher)
-func TestCursor_LoadCellAtCurrentIndexErrors(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
+// applyModifier applies a modifier to the DateTime.
+func (dt *DateTime) applyModifier(mod string) error {
+	mod = strings.TrimSpace(strings.ToLower(mod))
+
+	// Handle 'start of' modifiers
+	if strings.HasPrefix(mod, "start of ") {
+		unit := strings.TrimPrefix(mod, "start of ")
+		return dt.startOf(unit)
 	}
 
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert entries
-	for i := int64(1); i <= 20; i++ {
-		payload := make([]byte, 15)
-		binary.BigEndian.PutUint64(payload, uint64(i*100))
-		err := cursor.Insert(i, payload)
-		if err != nil {
-			t.Fatalf("Insert() error = %v", err)
-		}
-	}
-
-	// Navigate and verify cell loading
-	cursor.MoveToFirst()
-	for i := 0; i < 15; i++ {
-		if !cursor.IsValid() {
-			break
-		}
-
-		key := cursor.GetKey()
-		payload := cursor.GetPayload()
-
-		if key < 1 || key > 20 {
-			t.Errorf("Unexpected key: %d", key)
-		}
-		if len(payload) == 0 {
-			t.Error("Empty payload loaded")
-		}
-
-		err := cursor.Next()
-		if err != nil {
-			t.Logf("Next() error = %v", err)
-			break
-		}
-	}
-}
-
-// TestIndexCursor_AdvanceWithinPageComplete tests index advancement (60.0% -> higher)
-func TestIndexCursor_AdvanceWithinPageComplete(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := createIndexPage(bt)
-	if err != nil {
-		t.Fatalf("createIndexPage() error = %v", err)
-	}
-
-	cursor := NewIndexCursor(bt, rootPage)
-
-	// Insert entries to stay on one page
-	for i := 0; i < 18; i++ {
-		key := []byte{byte('A' + i)}
-		err := cursor.InsertIndex(key, int64(i))
-		if err != nil {
-			t.Fatalf("InsertIndex() error = %v", err)
-		}
-	}
-
-	// Navigate through all entries
-	cursor.MoveToFirst()
-	count := 0
-	initialPage := cursor.CurrentPage
-
-	for cursor.IsValid() && count < 25 {
-		count++
-		err := cursor.NextIndex()
-		if err != nil {
-			break
-		}
-		if cursor.CurrentPage != initialPage {
-			t.Log("Moved to different page in index")
-			break
-		}
-	}
-
-	t.Logf("Index advanced within page %d times", count)
-}
-
-// TestIndexCursor_ClimbToNextParentComplete tests parent climbing (68.0% -> higher)
-func TestIndexCursor_ClimbToNextParentComplete(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := createIndexPage(bt)
-	if err != nil {
-		t.Fatalf("createIndexPage() error = %v", err)
-	}
-
-	cursor := NewIndexCursor(bt, rootPage)
-
-	// Create multi-page index
-	for i := 0; i < 180; i++ {
-		key := make([]byte, 13)
-		binary.BigEndian.PutUint64(key, uint64(i))
-		binary.BigEndian.PutUint32(key[8:], uint32(i*7))
-		err := cursor.InsertIndex(key, int64(i))
-		if err != nil {
-			break
-		}
-	}
-
-	// Full scan forward - will climb parents multiple times
-	cursor.MoveToFirst()
-	scanCount := 0
-	maxDepth := 0
-
-	for cursor.IsValid() && scanCount < 250 {
-		scanCount++
-		if cursor.Depth > maxDepth {
-			maxDepth = cursor.Depth
-		}
-		err := cursor.NextIndex()
-		if err != nil {
-			break
-		}
-	}
-
-	t.Logf("Index scanned %d entries, max depth %d (climbToNextParent)", scanCount, maxDepth)
-}
-
-// TestMerge_ExtractCellData tests cell extraction during merge (71.4% -> higher)
-func TestMerge_ExtractCellData(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Create pages with cells
-	for i := int64(1); i <= 95; i++ {
-		err := cursor.Insert(i, make([]byte, 18))
-		if err != nil {
-			break
-		}
-	}
-
-	// Delete to trigger merge operations
-	for i := int64(30); i <= 65; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
-	}
-
-	// Attempt merge
-	cursor.SeekRowid(40)
-	if cursor.IsValid() && cursor.Depth > 0 {
-		merged, err := cursor.MergePage()
-		if err != nil {
-			t.Logf("MergePage() error = %v", err)
-		} else {
-			t.Logf("Merge result: %v (extractCellData tested)", merged)
-		}
-	}
-}
-
-// TestMerge_FindSiblingPages tests sibling finding (62.5% -> higher)
-func TestMerge_FindSiblingPages(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Create multi-page tree
-	for i := int64(1); i <= 110; i++ {
-		err := cursor.Insert(i, make([]byte, 19))
-		if err != nil {
-			break
-		}
-	}
-
-	// Delete from various positions
-	positions := []int64{15, 45, 75, 105}
-	for _, pos := range positions {
-		for j := pos; j < pos+5; j++ {
-			cursor.SeekRowid(j)
-			if cursor.IsValid() {
-				cursor.Delete()
+	// Handle numeric modifiers (+/- N units)
+	if strings.Contains(mod, " ") {
+		parts := strings.Fields(mod)
+		if len(parts) >= 2 {
+			amount, err := strconv.ParseFloat(parts[0], 64)
+			if err == nil {
+				unit := parts[1]
+				if strings.HasSuffix(unit, "s") {
+					unit = unit[:len(unit)-1]
+				}
+				return dt.add(amount, unit)
 			}
 		}
 	}
 
-	// Try merge at different positions
-	for _, pos := range positions {
-		cursor.SeekRowid(pos + 2)
-		if cursor.IsValid() && cursor.Depth > 0 {
-			merged, err := cursor.MergePage()
-			if err != nil {
-				t.Logf("MergePage() at %d error = %v", pos, err)
-			} else if merged {
-				t.Logf("Merged at position %d (findSiblingPages)", pos)
+	// Handle special modifiers
+	switch mod {
+	case "utc", "localtime", "auto", "subsec", "subsecond":
+		// These would require more complex implementation
+		return nil
+	default:
+		return fmt.Errorf("unknown modifier: %s", mod)
+	}
+}
+
+// startOf sets the DateTime to the start of a time unit.
+func (dt *DateTime) startOf(unit string) error {
+	dt.computeYMD()
+	dt.computeHMS()
+
+	switch unit {
+	case "day":
+		dt.hour = 0
+		dt.minute = 0
+		dt.second = 0
+		dt.validJD = false
+
+	case "month":
+		dt.day = 1
+		dt.hour = 0
+		dt.minute = 0
+		dt.second = 0
+		dt.validJD = false
+
+	case "year":
+		dt.month = 1
+		dt.day = 1
+		dt.hour = 0
+		dt.minute = 0
+		dt.second = 0
+		dt.validJD = false
+
+	default:
+		return fmt.Errorf("invalid unit for 'start of': %s", unit)
+	}
+
+	return nil
+}
+
+// timeUnitMs maps time units to their millisecond multipliers.
+var timeUnitMs = map[string]float64{
+	"second": 1000,
+	"minute": 60000,
+	"hour":   3600000,
+	"day":    float64(msPerDay),
+}
+
+// add adds an amount of time to the DateTime.
+func (dt *DateTime) add(amount float64, unit string) error {
+	dt.computeJD()
+
+	if unit == "month" {
+		return dt.addMonths(int(amount))
+	}
+	if unit == "year" {
+		return dt.addYears(int(amount))
+	}
+	if mult, ok := timeUnitMs[unit]; ok {
+		dt.jd += int64(amount * mult)
+		dt.validYMD = false
+		dt.validHMS = false
+		return nil
+	}
+	return fmt.Errorf("unknown time unit: %s", unit)
+}
+
+// addMonths adds months to the DateTime.
+func (dt *DateTime) addMonths(months int) error {
+	dt.computeYMD()
+	dt.month += months
+	dt.normalizeMonth()
+	dt.validJD = false
+	return nil
+}
+
+// addYears adds years to the DateTime.
+func (dt *DateTime) addYears(years int) error {
+	dt.computeYMD()
+	dt.year += years
+	dt.validJD = false
+	return nil
+}
+
+// normalizeMonth normalizes month to be within 1-12.
+func (dt *DateTime) normalizeMonth() {
+	for dt.month > 12 {
+		dt.month -= 12
+		dt.year++
+	}
+	for dt.month < 1 {
+		dt.month += 12
+		dt.year--
+	}
+}
+
+// formatDate formats as YYYY-MM-DD.
+func (dt *DateTime) formatDate() string {
+	dt.computeYMD()
+	return fmt.Sprintf("%04d-%02d-%02d", dt.year, dt.month, dt.day)
+}
+
+// formatTime formats as HH:MM:SS.
+func (dt *DateTime) formatTime() string {
+	dt.computeHMS()
+	if dt.useSubsec {
+		return fmt.Sprintf("%02d:%02d:%06.3f", dt.hour, dt.minute, dt.second)
+	}
+	return fmt.Sprintf("%02d:%02d:%02d", dt.hour, dt.minute, int(dt.second))
+}
+
+// formatDateTime formats as YYYY-MM-DD HH:MM:SS.
+func (dt *DateTime) formatDateTime() string {
+	return fmt.Sprintf("%s %s", dt.formatDate(), dt.formatTime())
+}
+
+// getJulianDay returns the Julian day number.
+func (dt *DateTime) getJulianDay() float64 {
+	dt.computeJD()
+	return float64(dt.jd) / float64(msPerDay)
+}
+
+// getUnixEpoch returns seconds since Unix epoch.
+func (dt *DateTime) getUnixEpoch() float64 {
+	dt.computeJD()
+	jdDays := float64(dt.jd) / float64(msPerDay)
+	return (jdDays - unixEpochJD) * 86400.0
+}
+
+// Date/time function implementations
+
+func dateFunc(args []Value) (Value, error) {
+	if len(args) == 0 {
+		dt := &DateTime{}
+		dt.setNow()
+		return NewTextValue(dt.formatDate()), nil
+	}
+
+	dt, err := parseDateTime(args[0])
+	if err != nil {
+		return NewNullValue(), nil
+	}
+
+	// Apply modifiers
+	for i := 1; i < len(args); i++ {
+		if args[i].IsNull() {
+			return NewNullValue(), nil
+		}
+		if err := dt.applyModifier(args[i].AsString()); err != nil {
+			return NewNullValue(), nil
+		}
+	}
+
+	return NewTextValue(dt.formatDate()), nil
+}
+
+func timeFunc(args []Value) (Value, error) {
+	if len(args) == 0 {
+		dt := &DateTime{}
+		dt.setNow()
+		return NewTextValue(dt.formatTime()), nil
+	}
+
+	dt, err := parseDateTime(args[0])
+	if err != nil {
+		return NewNullValue(), nil
+	}
+
+	// Apply modifiers
+	for i := 1; i < len(args); i++ {
+		if args[i].IsNull() {
+			return NewNullValue(), nil
+		}
+		if err := dt.applyModifier(args[i].AsString()); err != nil {
+			return NewNullValue(), nil
+		}
+	}
+
+	return NewTextValue(dt.formatTime()), nil
+}
+
+func datetimeFunc(args []Value) (Value, error) {
+	if len(args) == 0 {
+		dt := &DateTime{}
+		dt.setNow()
+		return NewTextValue(dt.formatDateTime()), nil
+	}
+
+	dt, err := parseDateTime(args[0])
+	if err != nil {
+		return NewNullValue(), nil
+	}
+
+	// Apply modifiers
+	for i := 1; i < len(args); i++ {
+		if args[i].IsNull() {
+			return NewNullValue(), nil
+		}
+		if err := dt.applyModifier(args[i].AsString()); err != nil {
+			return NewNullValue(), nil
+		}
+	}
+
+	return NewTextValue(dt.formatDateTime()), nil
+}
+
+func juliandayFunc(args []Value) (Value, error) {
+	if len(args) == 0 {
+		dt := &DateTime{}
+		dt.setNow()
+		return NewFloatValue(dt.getJulianDay()), nil
+	}
+
+	dt, err := parseDateTime(args[0])
+	if err != nil {
+		return NewNullValue(), nil
+	}
+
+	// Apply modifiers
+	for i := 1; i < len(args); i++ {
+		if args[i].IsNull() {
+			return NewNullValue(), nil
+		}
+		if err := dt.applyModifier(args[i].AsString()); err != nil {
+			return NewNullValue(), nil
+		}
+	}
+
+	return NewFloatValue(dt.getJulianDay()), nil
+}
+
+func unixepochFunc(args []Value) (Value, error) {
+	dt, err := getDateTimeForUnixEpoch(args)
+	if err != nil {
+		return NewNullValue(), nil
+	}
+	return formatEpochResult(dt), nil
+}
+
+// getDateTimeForUnixEpoch parses args and applies modifiers for unixepoch.
+func getDateTimeForUnixEpoch(args []Value) (*DateTime, error) {
+	if len(args) == 0 {
+		dt := &DateTime{}
+		dt.setNow()
+		return dt, nil
+	}
+
+	dt, err := parseDateTime(args[0])
+	if err != nil {
+		return nil, err
+	}
+
+	if err := applyUnixEpochModifiers(dt, args[1:]); err != nil {
+		return nil, err
+	}
+	return dt, nil
+}
+
+// applyUnixEpochModifiers applies modifiers including subsec handling.
+func applyUnixEpochModifiers(dt *DateTime, modifiers []Value) error {
+	for _, arg := range modifiers {
+		if arg.IsNull() {
+			return fmt.Errorf("null modifier")
+		}
+		mod := arg.AsString()
+		lowerMod := strings.ToLower(mod)
+		if lowerMod == "subsec" || lowerMod == "subsecond" {
+			dt.useSubsec = true
+		}
+		if err := dt.applyModifier(mod); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// formatEpochResult returns the epoch as float or int based on subsec flag.
+func formatEpochResult(dt *DateTime) Value {
+	epoch := dt.getUnixEpoch()
+	if dt.useSubsec {
+		return NewFloatValue(epoch)
+	}
+	return NewIntValue(int64(epoch))
+}
+
+func strftimeFunc(args []Value) (Value, error) {
+	if len(args) < 1 {
+		return NewNullValue(), nil
+	}
+
+	format := args[0].AsString()
+
+	var dt *DateTime
+	if len(args) == 1 {
+		dt = &DateTime{}
+		dt.setNow()
+	} else {
+		var err error
+		dt, err = parseDateTime(args[1])
+		if err != nil {
+			return NewNullValue(), nil
+		}
+
+		// Apply modifiers
+		for i := 2; i < len(args); i++ {
+			if args[i].IsNull() {
+				return NewNullValue(), nil
+			}
+			if err := dt.applyModifier(args[i].AsString()); err != nil {
+				return NewNullValue(), nil
 			}
 		}
 	}
+
+	dt.computeYMD()
+	dt.computeHMS()
+
+	result := dt.strftime(format)
+	return NewTextValue(result), nil
 }
 
-// TestMerge_LoadPageHeaders tests header loading during merge (69.2% -> higher)
-func TestMerge_LoadPageHeaders(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Build tree
-	for i := int64(1); i <= 100; i++ {
-		err := cursor.Insert(i, make([]byte, 20))
-		if err != nil {
-			break
-		}
-	}
-
-	// Delete to make underfull
-	for i := int64(35); i <= 65; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
-	}
-
-	// Multiple merge attempts
-	for _, rowid := range []int64{40, 45, 50, 55} {
-		cursor.SeekRowid(rowid)
-		if cursor.IsValid() && cursor.Depth > 0 {
-			cursor.MergePage()
-		}
-	}
-
-	t.Log("Merge attempts completed (loadPageHeaders)")
+// strftimeHandlers maps each format specifier byte to a function that
+// renders the corresponding field of a DateTime as a string.
+// Specifiers that need access to computed sub-fields (e.g. 's', 'J') call
+// the appropriate getter; all others read already-computed struct fields.
+var strftimeHandlers = map[byte]func(*DateTime) string{
+	'd': func(dt *DateTime) string { return fmt.Sprintf("%02d", dt.day) },
+	'm': func(dt *DateTime) string { return fmt.Sprintf("%02d", dt.month) },
+	'Y': func(dt *DateTime) string { return fmt.Sprintf("%04d", dt.year) },
+	'H': func(dt *DateTime) string { return fmt.Sprintf("%02d", dt.hour) },
+	'M': func(dt *DateTime) string { return fmt.Sprintf("%02d", dt.minute) },
+	'S': func(dt *DateTime) string { return fmt.Sprintf("%02d", int(dt.second)) },
+	'f': func(dt *DateTime) string { return fmt.Sprintf("%06.3f", dt.second) },
+	's': func(dt *DateTime) string { return fmt.Sprintf("%d", int64(dt.getUnixEpoch())) },
+	'J': func(dt *DateTime) string { return fmt.Sprintf("%.16g", dt.getJulianDay()) },
 }
 
-// TestMerge_MoveRightToLeft tests cell movement (63.6% -> higher)
-func TestMerge_MoveRightToLeft(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
+// strftimeSpecifier resolves a single format specifier byte and appends its
+// rendered value to result.  It handles the literal '%%' escape and falls back
+// to writing the raw "%<c>" pair for any unrecognised specifier.
+func (dt *DateTime) strftimeSpecifier(result *strings.Builder, spec byte) {
+	if spec == '%' {
+		result.WriteByte('%')
+		return
 	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Create imbalanced pages
-	for i := int64(1); i <= 105; i++ {
-		err := cursor.Insert(i, make([]byte, 17))
-		if err != nil {
-			break
-		}
+	if handler, ok := strftimeHandlers[spec]; ok {
+		result.WriteString(handler(dt))
+		return
 	}
+	// Unknown specifier: pass through verbatim.
+	result.WriteByte('%')
+	result.WriteByte(spec)
+}
 
-	// Delete from left side
-	for i := int64(10); i <= 40; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
-	}
+// strftime formats the DateTime according to the format string.
+func (dt *DateTime) strftime(format string) string {
+	var result strings.Builder
 
-	// Try to redistribute (may move cells right to left)
-	cursor.SeekRowid(25)
-	if cursor.IsValid() && cursor.Depth > 0 {
-		merged, err := cursor.MergePage()
-		if err != nil {
-			t.Logf("MergePage() error = %v", err)
+	for i := 0; i < len(format); i++ {
+		if format[i] == '%' && i+1 < len(format) {
+			i++
+			dt.strftimeSpecifier(&result, format[i])
 		} else {
-			t.Logf("Merge/redistribute result: %v (moveRightToLeft)", merged)
+			result.WriteByte(format[i])
 		}
+	}
+
+	return result.String()
+}
+
+func currentDateFunc(args []Value) (Value, error) {
+	dt := &DateTime{}
+	dt.setNow()
+	return NewTextValue(dt.formatDate()), nil
+}
+
+func currentTimeFunc(args []Value) (Value, error) {
+	dt := &DateTime{}
+	dt.setNow()
+	return NewTextValue(dt.formatTime()), nil
+}
+
+func currentTimestampFunc(args []Value) (Value, error) {
+	dt := &DateTime{}
+	dt.setNow()
+	return NewTextValue(dt.formatDateTime()), nil
+}
+
+// Helper to check for leap year
+func isLeapYear(year int) bool {
+	return year%4 == 0 && (year%100 != 0 || year%400 == 0)
+}
+
+// Helper to get days in month
+func daysInMonth(year, month int) int {
+	switch month {
+	case 4, 6, 9, 11:
+		return 30
+	case 2:
+		if isLeapYear(year) {
+			return 29
+		}
+		return 28
+	default:
+		return 31
 	}
 }
 
-// TestMerge_MoveLeftToRight tests cell movement other direction (66.7% -> higher)
-func TestMerge_MoveLeftToRight(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
+// Helper to validate date
+func isValidDate(year, month, day int) bool {
+	if year < 0 || year > 9999 {
+		return false
 	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Create imbalanced pages
-	for i := int64(1); i <= 105; i++ {
-		err := cursor.Insert(i, make([]byte, 17))
-		if err != nil {
-			break
-		}
+	if month < 1 || month > 12 {
+		return false
 	}
-
-	// Delete from right side
-	for i := int64(70); i <= 100; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
+	if day < 1 || day > daysInMonth(year, month) {
+		return false
 	}
-
-	// Try to redistribute (may move cells left to right)
-	cursor.SeekRowid(85)
-	if cursor.IsValid() && cursor.Depth > 0 {
-		merged, err := cursor.MergePage()
-		if err != nil {
-			t.Logf("MergePage() error = %v", err)
-		} else {
-			t.Logf("Merge/redistribute result: %v (moveLeftToRight)", merged)
-		}
-	}
+	return true
 }
 
-// TestMerge_GetChildPageAt tests child page retrieval (77.8% -> higher)
-func TestMerge_GetChildPageAt(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
+// Helper for safe float to int conversion
+func safeFloatToInt(f float64) int64 {
+	if f > float64(math.MaxInt64) {
+		return math.MaxInt64
 	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Create interior pages
-	for i := int64(1); i <= 115; i++ {
-		err := cursor.Insert(i, make([]byte, 24))
-		if err != nil {
-			break
-		}
+	if f < float64(math.MinInt64) {
+		return math.MinInt64
 	}
-
-	// Seek to various positions to navigate tree
-	for _, rowid := range []int64{1, 30, 60, 90, 115} {
-		cursor.SeekRowid(rowid)
-		if cursor.IsValid() {
-			t.Logf("Seeked to rowid %d at depth %d", rowid, cursor.Depth)
-		}
-	}
-
-	// Delete and attempt merge
-	for i := int64(40); i <= 70; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
-	}
-
-	cursor.SeekRowid(55)
-	if cursor.IsValid() && cursor.Depth > 0 {
-		cursor.MergePage()
-		t.Log("Merge completed (getChildPageAt)")
-	}
+	return int64(f)
 }

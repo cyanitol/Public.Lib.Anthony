@@ -1,480 +1,426 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package btree
+// Package functions implements SQLite's built-in SQL functions.
+package functions
 
-// Variable-length integer encoding/decoding (SQLite format)
-// Based on SQLite's varint implementation
+import (
+	"fmt"
+	"strings"
+)
 
-// PutVarint writes a 64-bit unsigned integer to p and returns the number of bytes written.
-// The integer is encoded as a variable-length integer using SQLite's encoding:
-// - Lower 7 bits of each byte are used for data
-// - High bit (0x80) set on all bytes except the last
-// - Most significant byte first (big-endian)
-// - Maximum of 9 bytes (last byte uses all 8 bits)
-// Returns 0 if buffer is too small.
-func PutVarint(p []byte, v uint64) int {
-	// Validate minimum buffer length
-	if len(p) == 0 {
+// Value represents a SQL value with its type.
+type Value interface {
+	// Type returns the type of the value
+	Type() ValueType
+
+	// AsInt64 returns the value as int64
+	AsInt64() int64
+
+	// AsFloat64 returns the value as float64
+	AsFloat64() float64
+
+	// AsString returns the value as string
+	AsString() string
+
+	// AsBlob returns the value as byte slice
+	AsBlob() []byte
+
+	// IsNull returns true if the value is NULL
+	IsNull() bool
+
+	// Bytes returns the number of bytes in the value
+	Bytes() int
+}
+
+// ValueType represents SQL value types.
+type ValueType int
+
+const (
+	TypeNull ValueType = iota
+	TypeInteger
+	TypeFloat
+	TypeText
+	TypeBlob
+)
+
+// String returns the string representation of the type
+func (t ValueType) String() string {
+	switch t {
+	case TypeNull:
+		return "null"
+	case TypeInteger:
+		return "integer"
+	case TypeFloat:
+		return "real"
+	case TypeText:
+		return "text"
+	case TypeBlob:
+		return "blob"
+	default:
+		return "unknown"
+	}
+}
+
+// Function is the interface for all SQL functions.
+type Function interface {
+	// Name returns the function name
+	Name() string
+
+	// NumArgs returns the number of arguments (-1 for variadic)
+	NumArgs() int
+
+	// Call executes the function with the given arguments
+	Call(args []Value) (Value, error)
+}
+
+// AggregateFunction is the interface for aggregate SQL functions.
+type AggregateFunction interface {
+	Function
+
+	// Step processes one row of data
+	Step(args []Value) error
+
+	// Final returns the final aggregate result
+	Final() (Value, error)
+
+	// Reset resets the aggregate state
+	Reset()
+}
+
+// WindowFunction is the interface for window SQL functions.
+// Window functions can access rows relative to the current row
+// and can have frame specifications (ROWS, RANGE, GROUPS).
+type WindowFunction interface {
+	Function
+
+	// Inverse removes a value from the window (for sliding frames)
+	// Only needed for aggregates in window context with sliding frames
+	Inverse(args []Value) error
+
+	// Value returns the current window function value
+	Value() (Value, error)
+
+	// Reset resets the window function state
+	Reset()
+}
+
+// ScalarFunc is a simple scalar function implementation.
+type ScalarFunc struct {
+	name    string
+	numArgs int
+	fn      func(args []Value) (Value, error)
+}
+
+// NewScalarFunc creates a new scalar function.
+func NewScalarFunc(name string, numArgs int, fn func(args []Value) (Value, error)) *ScalarFunc {
+	return &ScalarFunc{
+		name:    name,
+		numArgs: numArgs,
+		fn:      fn,
+	}
+}
+
+func (f *ScalarFunc) Name() string {
+	return f.name
+}
+
+func (f *ScalarFunc) NumArgs() int {
+	return f.numArgs
+}
+
+func (f *ScalarFunc) Call(args []Value) (Value, error) {
+	if f.numArgs >= 0 && len(args) != f.numArgs {
+		return nil, fmt.Errorf("%s() takes exactly %d arguments (%d given)", f.name, f.numArgs, len(args))
+	}
+	return f.fn(args)
+}
+
+// SimpleValue is a basic implementation of the Value interface.
+type SimpleValue struct {
+	typ    ValueType
+	intVal int64
+	fltVal float64
+	strVal string
+	blbVal []byte
+}
+
+// NewNullValue creates a NULL value
+func NewNullValue() Value {
+	return &SimpleValue{typ: TypeNull}
+}
+
+// NewIntValue creates an integer value
+func NewIntValue(v int64) Value {
+	return &SimpleValue{typ: TypeInteger, intVal: v}
+}
+
+// NewFloatValue creates a float value
+func NewFloatValue(v float64) Value {
+	return &SimpleValue{typ: TypeFloat, fltVal: v}
+}
+
+// NewTextValue creates a text value
+func NewTextValue(v string) Value {
+	return &SimpleValue{typ: TypeText, strVal: v}
+}
+
+// NewBlobValue creates a blob value
+func NewBlobValue(v []byte) Value {
+	return &SimpleValue{typ: TypeBlob, blbVal: v}
+}
+
+func (v *SimpleValue) Type() ValueType {
+	return v.typ
+}
+
+func (v *SimpleValue) AsInt64() int64 {
+	switch v.typ {
+	case TypeInteger:
+		return v.intVal
+	case TypeFloat:
+		return int64(v.fltVal)
+	case TypeText:
+		// Parse string to int
+		var i int64
+		fmt.Sscanf(v.strVal, "%d", &i)
+		return i
+	default:
 		return 0
 	}
+}
 
-	if v <= 0x7f {
-		p[0] = byte(v & 0x7f)
-		return 1
+func (v *SimpleValue) AsFloat64() float64 {
+	switch v.typ {
+	case TypeFloat:
+		return v.fltVal
+	case TypeInteger:
+		return float64(v.intVal)
+	case TypeText:
+		// Parse string to float
+		var f float64
+		fmt.Sscanf(v.strVal, "%f", &f)
+		return f
+	default:
+		return 0.0
 	}
+}
 
-	if len(p) < 2 {
+func (v *SimpleValue) AsString() string {
+	switch v.typ {
+	case TypeText:
+		return v.strVal
+	case TypeInteger:
+		return fmt.Sprintf("%d", v.intVal)
+	case TypeFloat:
+		return fmt.Sprintf("%g", v.fltVal)
+	case TypeBlob:
+		return string(v.blbVal)
+	default:
+		return ""
+	}
+}
+
+func (v *SimpleValue) AsBlob() []byte {
+	switch v.typ {
+	case TypeBlob:
+		return v.blbVal
+	case TypeText:
+		return []byte(v.strVal)
+	default:
+		return nil
+	}
+}
+
+func (v *SimpleValue) IsNull() bool {
+	return v.typ == TypeNull
+}
+
+func (v *SimpleValue) Bytes() int {
+	switch v.typ {
+	case TypeText:
+		return len(v.strVal)
+	case TypeBlob:
+		return len(v.blbVal)
+	case TypeInteger:
+		return 8 // int64 size
+	case TypeFloat:
+		return 8 // float64 size
+	default:
 		return 0
 	}
-
-	if v <= 0x3fff {
-		p[0] = byte((v>>7)&0x7f) | 0x80
-		p[1] = byte(v & 0x7f)
-		return 2
-	}
-
-	return putVarint64(p, v)
 }
 
-// putVarint64 handles the general case of encoding a 64-bit varint
-func putVarint64(p []byte, v uint64) int {
-	// Check for 9-byte case first (values with top bits set)
-	if v&(uint64(0xff000000)<<32) != 0 {
-		if len(p) < 9 {
-			return 0
+// functionKey is used for function overloading by argument count.
+type functionKey struct {
+	name    string
+	numArgs int
+}
+
+// Registry holds all registered functions.
+// It supports function overloading by argument count and prioritizes
+// user-defined functions over built-in functions.
+type Registry struct {
+	// Built-in functions indexed by name only (legacy)
+	builtins map[string]Function
+
+	// User-defined functions with overloading support
+	// Key includes both name and arg count for overloading
+	userFuncs map[functionKey]Function
+
+	// Variadic user functions (numArgs = -1)
+	// These are tried last during lookup
+	variadicUser map[string]Function
+}
+
+// NewRegistry creates a new function registry.
+func NewRegistry() *Registry {
+	return &Registry{
+		builtins:     make(map[string]Function),
+		userFuncs:    make(map[functionKey]Function),
+		variadicUser: make(map[string]Function),
+	}
+}
+
+// Register registers a built-in function.
+// This is used for standard SQLite functions.
+// Function names are normalized to lowercase for case-insensitive lookup.
+func (r *Registry) Register(fn Function) {
+	r.builtins[strings.ToLower(fn.Name())] = fn
+}
+
+// RegisterUser registers a user-defined function with overloading support.
+// numArgs should match fn.NumArgs() and is used for overloading.
+// Function names are normalized to lowercase for case-insensitive lookup.
+func (r *Registry) RegisterUser(fn Function, numArgs int) {
+	name := strings.ToLower(fn.Name())
+	if numArgs < 0 {
+		// Variadic function
+		r.variadicUser[name] = fn
+	} else {
+		// Fixed-arg function with overloading
+		key := functionKey{name: name, numArgs: numArgs}
+		r.userFuncs[key] = fn
+	}
+}
+
+// Unregister removes a user-defined function.
+// Returns true if a function was removed.
+// Function names are case-insensitive (converted to lowercase).
+func (r *Registry) Unregister(name string, numArgs int) bool {
+	// Normalize to lowercase for case-insensitive lookup
+	name = strings.ToLower(name)
+
+	if numArgs < 0 {
+		if _, ok := r.variadicUser[name]; ok {
+			delete(r.variadicUser, name)
+			return true
 		}
-		// 9-byte case: all 8 bits of the 9th byte are used
-		p[8] = byte(v)
-		v >>= 8
-		for i := 7; i >= 0; i-- {
-			p[i] = byte((v & 0x7f) | 0x80)
-			v >>= 7
-		}
-		return 9
+		return false
 	}
 
-	// Build varint in forward order
-	// Count how many 7-bit groups we need
-	n := 1 // At least one byte needed
-	temp := v >> 7
-	for temp > 0 {
-		n++
-		temp >>= 7
+	key := functionKey{name: name, numArgs: numArgs}
+	if _, ok := r.userFuncs[key]; ok {
+		delete(r.userFuncs, key)
+		return true
 	}
-
-	// Validate we have enough buffer space
-	if len(p) < n {
-		return 0
-	}
-
-	// Encode from most significant to least significant
-	for i := n - 1; i >= 0; i-- {
-		shift := uint(i * 7)
-		b := byte((v >> shift) & 0x7f)
-		if i > 0 {
-			b |= 0x80 // Set continuation bit for all except last byte
-		}
-		p[n-1-i] = b
-	}
-	return n
+	return false
 }
 
-func decodeShortVarint(p []byte) (uint64, int) {
-	const SLOT_2_0 = 0x001fc07f
+// Lookup finds a function by name.
+// User-defined functions are checked before built-in functions.
+// For user functions, exact argument count match is preferred.
+// Function names are case-insensitive (converted to lowercase).
+func (r *Registry) Lookup(name string) (Function, bool) {
+	// Normalize to lowercase for case-insensitive lookup
+	name = strings.ToLower(name)
 
-	a := uint32(p[0])<<14 | uint32(p[2])
-	b := uint32(p[1])
-
-	if a&0x80 == 0 {
-		return uint64((b&0x7f)<<7 | a&SLOT_2_0), 3
+	// First check variadic user functions
+	if fn, ok := r.variadicUser[name]; ok {
+		return fn, true
 	}
 
-	if len(p) < 4 {
-		return 0, 0
+	// Then check built-in functions
+	if fn, ok := r.builtins[name]; ok {
+		return fn, true
 	}
 
-	b = (b&0x7f)<<14 | uint32(p[3])
-	if b&0x80 == 0 {
-		return uint64((a&SLOT_2_0)<<7 | b&SLOT_2_0), 4
-	}
-
-	return 0, 0
+	return nil, false
 }
 
-func decodeMultiByteVarint(p []byte) (uint64, int) {
-	// This function should only be called when len(p) >= 9 is verified
-	// by the caller (GetVarint), but we add an extra safety check
-	if len(p) < 9 {
-		return 0, 0
+// LookupWithArgs finds a function by name and argument count.
+// This supports function overloading for user-defined functions.
+// Lookup priority:
+//  1. User-defined function with exact arg count match
+//  2. User-defined variadic function
+//  3. Built-in function
+// Function names are case-insensitive (converted to lowercase).
+func (r *Registry) LookupWithArgs(name string, numArgs int) (Function, bool) {
+	// Normalize to lowercase for case-insensitive lookup
+	name = strings.ToLower(name)
+
+	// First try exact match in user functions
+	key := functionKey{name: name, numArgs: numArgs}
+	if fn, ok := r.userFuncs[key]; ok {
+		return fn, true
 	}
 
-	var v uint64
-	for i := 0; i < 8; i++ {
-		v = (v << 7) | uint64(p[i]&0x7f)
-		if p[i]&0x80 == 0 {
-			return v, i + 1
-		}
+	// Then try variadic user functions
+	if fn, ok := r.variadicUser[name]; ok {
+		return fn, true
 	}
-	return (v << 8) | uint64(p[8]), 9
+
+	// Finally fall back to built-in functions
+	if fn, ok := r.builtins[name]; ok {
+		return fn, true
+	}
+
+	return nil, false
 }
 
-// GetVarint reads a 64-bit variable-length integer from p and returns
-// the value and the number of bytes read.
-func GetVarint(p []byte) (uint64, int) {
-	// Validate minimum buffer length
-	if len(p) == 0 {
-		return 0, 0
+// GetAllFunctions returns all registered functions.
+func (r *Registry) GetAllFunctions() []Function {
+	// Calculate total size
+	total := len(r.builtins) + len(r.userFuncs) + len(r.variadicUser)
+	result := make([]Function, 0, total)
+
+	// Add built-ins
+	for _, fn := range r.builtins {
+		result = append(result, fn)
 	}
 
-	if p[0] < 0x80 {
-		return uint64(p[0]), 1
+	// Add user functions
+	for _, fn := range r.userFuncs {
+		result = append(result, fn)
 	}
 
-	if len(p) > 1 && p[1] < 0x80 {
-		return (uint64(p[0]&0x7f) << 7) | uint64(p[1]), 2
+	// Add variadic user functions
+	for _, fn := range r.variadicUser {
+		result = append(result, fn)
 	}
 
-	if len(p) < 3 {
-		return 0, 0
-	}
-
-	if v, n := decodeShortVarint(p); n > 0 {
-		return v, n
-	}
-
-	if len(p) < 9 {
-		return 0, 0
-	}
-
-	return decodeMultiByteVarint(p)
+	return result
 }
 
-// GetVarint32 reads a 32-bit variable-length integer from p and returns
-// the value and the number of bytes read. If the varint is larger than
-// 32 bits, it returns 0xffffffff.
-func GetVarint32(p []byte) (uint32, int) {
-	if v, n, ok := tryFastBtreeVarint32(p); ok {
-		return v, n
-	}
-	return slowBtreeVarint32(p)
-}
+// DefaultRegistry returns a registry with all standard SQLite functions.
+func DefaultRegistry() *Registry {
+	r := NewRegistry()
 
-func tryFastBtreeVarint32(p []byte) (uint32, int, bool) {
-	if len(p) > 0 && p[0] < 0x80 {
-		return uint32(p[0]), 1, true
-	}
-	if len(p) > 1 && p[1] < 0x80 {
-		return (uint32(p[0]&0x7f) << 7) | uint32(p[1]), 2, true
-	}
-	if len(p) > 2 && p[2] < 0x80 {
-		return (uint32(p[0]&0x7f) << 14) | (uint32(p[1]&0x7f) << 7) | uint32(p[2]), 3, true
-	}
-	return 0, 0, false
-}
+	// Register scalar functions
+	RegisterScalarFunctions(r)
 
-func slowBtreeVarint32(p []byte) (uint32, int) {
-	v64, n := GetVarint(p)
-	if n > 3 && n <= 9 {
-		if v64 > 0xffffffff {
-			return 0xffffffff, n
-		}
-		return uint32(v64), n
-	}
-	return 0, 0
-}
+	// Register aggregate functions
+	RegisterAggregateFunctions(r)
 
-// varintLenThresholds defines the upper bounds for each varint size.
-var varintLenThresholds = [8]uint64{
-	0x7f, 0x3fff, 0x1fffff, 0xfffffff,
-	0x7ffffffff, 0x3ffffffffff, 0x1ffffffffffff, 0xffffffffffffff,
-}
+	// Register date/time functions
+	RegisterDateTimeFunctions(r)
 
-// VarintLen returns the number of bytes required to encode v as a varint
-func VarintLen(v uint64) int {
-	for i, thresh := range varintLenThresholds {
-		if v <= thresh {
-			return i + 1
-		}
-	}
-	return 9
-}
-,
-		{
-			name:    "trigger body with update",
-			sql:     "CREATE TRIGGER t AFTER INSERT ON table1 BEGIN UPDATE stats SET count = count + 1; END",
-			wantErr: false,
-		},
-	}
+	// Register math functions
+	RegisterMathFunctions(r)
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			parser := NewParser(tt.sql)
-			_, err := parser.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
+	// Register JSON functions
+	RegisterJSONFunctions(r)
 
-func TestParseExpressionOperatorChains(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-	}{
-		{
-			name:    "expression with or operators",
-			sql:     "SELECT * FROM t WHERE a = 1 OR b = 2 OR c = 3",
-			wantErr: false,
-		},
-		{
-			name:    "expression with and operators",
-			sql:     "SELECT * FROM t WHERE a = 1 AND b = 2 AND c = 3",
-			wantErr: false,
-		},
-		{
-			name:    "in expression with empty list error",
-			sql:     "SELECT * FROM t WHERE x IN ()",
-			wantErr: true,
-		},
-		{
-			name:    "parenthesized expression error",
-			sql:     "SELECT (1 + 2 FROM t",
-			wantErr: true,
-		},
-	}
+	// Register window functions
+	RegisterWindowFunctions(r)
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			parser := NewParser(tt.sql)
-			_, err := parser.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestParseAliasEdgeCases(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-	}{
-		{
-			name:    "column alias with as",
-			sql:     "SELECT x AS column_name FROM t",
-			wantErr: false,
-		},
-		{
-			name:    "column alias without as",
-			sql:     "SELECT x column_name FROM t",
-			wantErr: false,
-		},
-		{
-			name:    "table alias with as",
-			sql:     "SELECT * FROM table1 AS t1",
-			wantErr: false,
-		},
-		{
-			name:    "table alias without as",
-			sql:     "SELECT * FROM table1 t1",
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			parser := NewParser(tt.sql)
-			_, err := parser.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestParseCaseExpressionEdgeCases(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-	}{
-		{
-			name:    "case with no when clauses error",
-			sql:     "SELECT CASE END FROM t",
-			wantErr: true,
-		},
-		{
-			name:    "case with base expression and multiple when",
-			sql:     "SELECT CASE status WHEN 1 THEN 'active' WHEN 2 THEN 'inactive' ELSE 'unknown' END FROM t",
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			parser := NewParser(tt.sql)
-			_, err := parser.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestParseCreateViewColumnListEdgeCases(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-	}{
-		{
-			name:    "create view error - empty column list",
-			sql:     "CREATE VIEW v () AS SELECT * FROM t",
-			wantErr: true,
-		},
-		{
-			name:    "create view with single column",
-			sql:     "CREATE VIEW v (col1) AS SELECT x FROM t",
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			parser := NewParser(tt.sql)
-			_, err := parser.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestParseDropIndexEdgeCases2(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-	}{
-		{
-			name:    "drop index error - missing index name",
-			sql:     "DROP INDEX",
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			parser := NewParser(tt.sql)
-			_, err := parser.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestParseUpdateAssignmentsEdgeCases(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-	}{
-		{
-			name:    "update assignment error - missing value",
-			sql:     "UPDATE t SET x =",
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			parser := NewParser(tt.sql)
-			_, err := parser.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestParseCreateTableAsSelectEdgeCases(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-	}{
-		{
-			name:    "create table as select error - missing select",
-			sql:     "CREATE TABLE t AS",
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			parser := NewParser(tt.sql)
-			_, err := parser.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestParseColumnOrConstraintEdgeCases(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-	}{
-		{
-			name:    "table constraint without name",
-			sql:     "CREATE TABLE t (id INTEGER, PRIMARY KEY (id))",
-			wantErr: false,
-		},
-		{
-			name:    "multiple column definitions",
-			sql:     "CREATE TABLE t (id INTEGER, name TEXT, age INTEGER)",
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			parser := NewParser(tt.sql)
-			_, err := parser.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
+	return r
 }

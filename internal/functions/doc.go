@@ -1,650 +1,265 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package btree
-
-import (
-	"encoding/binary"
-	"fmt"
-)
-
-// SplitResult contains the information about a page split
-type SplitResult struct {
-	DividerKey   int64  // The key that divides the two pages
-	NewPageNum   uint32 // The newly allocated page number
-	LeftPageNum  uint32 // The left page (original page)
-	RightPageNum uint32 // The right page (new page)
-}
-
-// splitLeafPage splits a full leaf page when inserting a new cell
-// The algorithm:
-// 1. Allocate a new sibling page
-// 2. Find the median key among all cells (including the new one)
-// 3. Move cells >= median to the new page
-// 4. Insert the new cell in the appropriate page
-// 5. Update parent with divider key
-func (c *BtCursor) splitLeafPage(key int64, payload []byte) error {
-	if c.CurrentHeader == nil || !c.CurrentHeader.IsLeaf {
-		return fmt.Errorf("splitLeafPage called on non-leaf page")
-	}
-
-	oldPage, cells, keys, err := c.prepareLeafSplit(key, payload)
-	if err != nil {
-		return err
-	}
-
-	medianIdx := len(cells) / 2
-	newPage, newPageNum, err := c.allocateAndInitializeLeafPage()
-	if err != nil {
-		return err
-	}
-
-	if err := c.markPagesAsDirty(c.CurrentPage, newPageNum); err != nil {
-		return err
-	}
+/*
+Package functions implements SQLite's built-in SQL functions in pure Go.
 
-	if err := c.redistributeLeafCells(oldPage, newPage, cells, medianIdx); err != nil {
-		return err
-	}
+This package is a pure Go implementation based on SQLite source code.
+SQLite is in the public domain: https://sqlite.org/copyright.html
 
-	dividerKey := keys[medianIdx]
-	if err := c.updateParentAfterSplit(c.CurrentPage, newPageNum, dividerKey); err != nil {
-		return fmt.Errorf("failed to update parent: %w", err)
-	}
+# Overview
 
-	_, err = c.SeekRowid(key)
-	return err
-}
-
-// splitInteriorPage splits a full interior page when inserting a new cell
-func (c *BtCursor) splitInteriorPage(key int64, childPgno uint32) error {
-	if c.CurrentHeader == nil || !c.CurrentHeader.IsInterior {
-		return fmt.Errorf("splitInteriorPage called on non-interior page")
-	}
+This package provides a comprehensive implementation of SQLite's standard library
+functions, including string manipulation, mathematical operations, aggregation,
+and date/time handling. All functions are implemented based on the SQLite 3.51.2
+reference implementation.
 
-	oldPage, cells, keys, childPages, err := c.prepareInteriorSplit(key, childPgno)
-	if err != nil {
-		return err
-	}
+# Function Categories
 
-	medianIdx := len(cells) / 2
-	newPage, newPageNum, err := c.allocateAndInitializeInteriorPage()
-	if err != nil {
-		return err
-	}
+The package includes 75+ functions organized into categories:
 
-	if err := c.markPagesAsDirty(c.CurrentPage, newPageNum); err != nil {
-		return err
-	}
+  - String Functions (21): length, substr, upper, lower, trim, replace, etc.
+  - Type Functions (5): typeof, coalesce, ifnull, nullif, iif
+  - Math Functions (30): abs, round, sqrt, power, trigonometry, etc.
+  - Aggregate Functions (8): count, sum, avg, min, max, group_concat
+  - Date/Time Functions (10): date, time, datetime, julianday, strftime
+  - Blob Functions (1): zeroblob
 
-	if err := c.redistributeInteriorCells(oldPage, newPage, cells, childPages, medianIdx, newPageNum); err != nil {
-		return err
-	}
+# Quick Start
 
-	dividerKey := keys[medianIdx]
-	if err := c.updateParentAfterSplit(c.CurrentPage, newPageNum, dividerKey); err != nil {
-		return fmt.Errorf("failed to update parent: %w", err)
-	}
+	// Create a registry with all standard functions
+	registry := functions.DefaultRegistry()
 
-	return nil
-}
-
-// prepareLeafSplit prepares the current page for splitting by collecting all cells
-func (c *BtCursor) prepareLeafSplit(key int64, payload []byte) (*BtreePage, [][]byte, []int64, error) {
-	pageData, err := c.Btree.GetPage(c.CurrentPage)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to get current page: %w", err)
-	}
+	// Look up and call a scalar function
+	upperFunc, _ := registry.Lookup("upper")
+	result, _ := upperFunc.Call([]functions.Value{
+	    functions.NewTextValue("hello world"),
+	})
+	fmt.Println(result.AsString())  // Output: HELLO WORLD
 
-	oldPage, err := NewBtreePage(c.CurrentPage, pageData, c.Btree.UsableSize)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create BtreePage: %w", err)
+	// Use an aggregate function
+	sumFunc := &functions.SumFunc{}
+	for _, value := range values {
+	    sumFunc.Step([]functions.Value{value})
 	}
+	result, _ := sumFunc.Final()
+	fmt.Println(result.AsInt64())
 
-	cells, keys, err := c.collectLeafCellsForSplit(oldPage, key, payload)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to collect cells: %w", err)
-	}
+# Architecture
 
-	return oldPage, cells, keys, nil
-}
-
-// prepareInteriorSplit prepares the current page for splitting by collecting all cells
-func (c *BtCursor) prepareInteriorSplit(key int64, childPgno uint32) (*BtreePage, [][]byte, []int64, []uint32, error) {
-	pageData, err := c.Btree.GetPage(c.CurrentPage)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("failed to get current page: %w", err)
-	}
+The package is built around three core interfaces:
 
-	oldPage, err := NewBtreePage(c.CurrentPage, pageData, c.Btree.UsableSize)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("failed to create BtreePage: %w", err)
-	}
+Value Interface - Represents SQL values with type information:
 
-	cells, keys, childPages, err := c.collectInteriorCellsForSplit(oldPage, key, childPgno)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("failed to collect cells: %w", err)
+	type Value interface {
+	    Type() ValueType
+	    AsInt64() int64
+	    AsFloat64() float64
+	    AsString() string
+	    AsBlob() []byte
+	    IsNull() bool
+	    Bytes() int
 	}
 
-	return oldPage, cells, keys, childPages, nil
-}
-
-// allocateAndInitializeLeafPage allocates and initializes a new leaf page
-func (c *BtCursor) allocateAndInitializeLeafPage() (*BtreePage, uint32, error) {
-	newPageNum, err := c.Btree.AllocatePage()
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to allocate new page: %w", err)
-	}
+Function Interface - Base interface for all SQL functions:
 
-	newPageData, err := c.Btree.GetPage(newPageNum)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get new page: %w", err)
+	type Function interface {
+	    Name() string
+	    NumArgs() int  // -1 for variadic
+	    Call(args []Value) (Value, error)
 	}
 
-	if err := initializeLeafPage(newPageData, newPageNum, c.Btree.UsableSize); err != nil {
-		return nil, 0, fmt.Errorf("failed to initialize new page: %w", err)
-	}
+AggregateFunction Interface - Extended interface for aggregate functions:
 
-	newPage, err := NewBtreePage(newPageNum, newPageData, c.Btree.UsableSize)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create new BtreePage: %w", err)
+	type AggregateFunction interface {
+	    Function
+	    Step(args []Value) error
+	    Final() (Value, error)
+	    Reset()
 	}
 
-	return newPage, newPageNum, nil
-}
-
-// allocateAndInitializeInteriorPage allocates and initializes a new interior page
-func (c *BtCursor) allocateAndInitializeInteriorPage() (*BtreePage, uint32, error) {
-	newPageNum, err := c.Btree.AllocatePage()
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to allocate new page: %w", err)
-	}
+# String Functions
 
-	newPageData, err := c.Btree.GetPage(newPageNum)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get new page: %w", err)
-	}
+String functions are fully UTF-8 aware and handle Unicode correctly:
 
-	if err := initializeInteriorPage(newPageData, newPageNum, c.Btree.UsableSize); err != nil {
-		return nil, 0, fmt.Errorf("failed to initialize new page: %w", err)
-	}
+	length("hello")              // 5
+	length("世界")               // 2 (characters, not bytes)
+	substr("hello", 2, 3)        // "ell"
+	upper("hello")               // "HELLO"
+	replace("hello", "l", "L")   // "heLLo"
+	hex("ABC")                   // "414243"
+	quote("it's")                // "'it''s'"
 
-	newPage, err := NewBtreePage(newPageNum, newPageData, c.Btree.UsableSize)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create new BtreePage: %w", err)
-	}
+# Math Functions
 
-	return newPage, newPageNum, nil
-}
+Comprehensive mathematical operations:
 
-// markPagesAsDirty marks both pages as dirty in the pager
-func (c *BtCursor) markPagesAsDirty(page1, page2 uint32) error {
-	if c.Btree.Provider == nil {
-		return nil
-	}
+	abs(-42)                     // 42
+	round(3.14159, 2)            // 3.14
+	sqrt(16)                     // 4.0
+	power(2, 10)                 // 1024.0
+	sin(pi()/2)                  // 1.0
+	random()                     // random int64
 
-	if err := c.Btree.Provider.MarkDirty(page1); err != nil {
-		return err
-	}
-	if err := c.Btree.Provider.MarkDirty(page2); err != nil {
-		return err
-	}
-	return nil
-}
-
-// redistributeLeafCells distributes cells between left and right leaf pages
-func (c *BtCursor) redistributeLeafCells(oldPage, newPage *BtreePage, cells [][]byte, medianIdx int) error {
-	if err := clearPageCells(oldPage); err != nil {
-		return fmt.Errorf("failed to clear old page: %w", err)
-	}
+# Aggregate Functions
 
-	for i := 0; i < medianIdx; i++ {
-		if err := oldPage.InsertCell(i, cells[i]); err != nil {
-			return fmt.Errorf("failed to insert cell %d into left page: %w", i, err)
-		}
-	}
+Statistical and grouping operations:
 
-	for i := medianIdx; i < len(cells); i++ {
-		if err := newPage.InsertCell(i-medianIdx, cells[i]); err != nil {
-			return fmt.Errorf("failed to insert cell %d into right page: %w", i, err)
-		}
-	}
+	count(*)                     // count all rows
+	count(column)                // count non-NULL values
+	sum(amount)                  // sum (NULL if empty)
+	total(amount)                // sum (0.0 if empty)
+	avg(score)                   // average
+	min(value), max(value)       // extremes
+	group_concat(name, ', ')     // concatenate with separator
 
-	if err := oldPage.Defragment(); err != nil {
-		return fmt.Errorf("failed to defragment left page: %w", err)
-	}
-	if err := newPage.Defragment(); err != nil {
-		return fmt.Errorf("failed to defragment right page: %w", err)
-	}
+# Date/Time Functions
 
-	return nil
-}
+Full date and time manipulation based on Julian day numbers:
 
-// redistributeInteriorCells distributes cells between left and right interior pages
-func (c *BtCursor) redistributeInteriorCells(oldPage, newPage *BtreePage, cells [][]byte, childPages []uint32, medianIdx int, newPageNum uint32) error {
-	if err := clearPageCells(oldPage); err != nil {
-		return fmt.Errorf("failed to clear old page: %w", err)
-	}
+	date('now')                           // "2024-01-15"
+	time('now')                           // "12:34:56"
+	datetime('now')                       // "2024-01-15 12:34:56"
+	julianday('2000-01-01')              // 2451544.5
+	unixepoch('now')                     // 1705323296
+	strftime('%Y-%m-%d', 'now')          // "2024-01-15"
 
-	for i := 0; i < medianIdx; i++ {
-		if err := oldPage.InsertCell(i, cells[i]); err != nil {
-			return fmt.Errorf("failed to insert cell %d into left page: %w", i, err)
-		}
-	}
+Date modifiers:
 
-	headerOffset := getHeaderOffset(c.CurrentPage)
-	binary.BigEndian.PutUint32(oldPage.Data[headerOffset+PageHeaderOffsetRightChild:], childPages[medianIdx])
+	date('now', '+1 day')                // tomorrow
+	date('now', '-1 month')              // last month
+	date('2024-01-15', 'start of month') // "2024-01-01"
+	datetime('now', 'start of day')      // today at 00:00:00
 
-	for i := medianIdx + 1; i < len(cells); i++ {
-		if err := newPage.InsertCell(i-medianIdx-1, cells[i]); err != nil {
-			return fmt.Errorf("failed to insert cell %d into right page: %w", i, err)
-		}
-	}
+# Type System
 
-	newHeaderOffset := getHeaderOffset(newPageNum)
-	if medianIdx+1 < len(childPages) {
-		binary.BigEndian.PutUint32(newPage.Data[newHeaderOffset+PageHeaderOffsetRightChild:], childPages[len(childPages)-1])
-	}
+The package implements SQLite's type system with five types:
 
-	if err := oldPage.Defragment(); err != nil {
-		return fmt.Errorf("failed to defragment left page: %w", err)
-	}
-	if err := newPage.Defragment(); err != nil {
-		return fmt.Errorf("failed to defragment right page: %w", err)
-	}
+  - TypeNull: SQL NULL value
+  - TypeInteger: 64-bit signed integer
+  - TypeFloat: 64-bit floating point
+  - TypeText: UTF-8 string
+  - TypeBlob: Byte array
 
-	return nil
-}
-
-// collectLeafCellsForSplit collects all existing cells plus the new cell to be inserted
-// Returns cells in sorted order by key
-// Properly handles overflow pages when encoding the new cell
-func (c *BtCursor) collectLeafCellsForSplit(page *BtreePage, newKey int64, newPayload []byte) ([][]byte, []int64, error) {
-	newCellData, err := c.encodeNewCellWithOverflow(newKey, newPayload)
-	if err != nil {
-		return nil, nil, err
-	}
+Type affinity ordering: NULL < INTEGER < FLOAT < TEXT < BLOB
 
-	return c.mergeNewCellWithExisting(page, newKey, newCellData)
-}
-
-// encodeNewCellWithOverflow encodes the new cell with proper overflow handling.
-func (c *BtCursor) encodeNewCellWithOverflow(newKey int64, newPayload []byte) ([]byte, error) {
-	payloadSize := uint32(len(newPayload))
-	localSize := CalculateLocalPayload(payloadSize, c.Btree.UsableSize, true)
-
-	if payloadSize > uint32(localSize) {
-		overflowPage, err := c.WriteOverflow(newPayload, localSize, c.Btree.UsableSize)
-		if err != nil {
-			return nil, fmt.Errorf("failed to write overflow for split: %w", err)
-		}
-		return c.encodeTableLeafCellWithOverflow(newKey, newPayload[:localSize], overflowPage, payloadSize), nil
-	}
-	return EncodeTableLeafCell(newKey, newPayload), nil
-}
-
-// mergeNewCellWithExisting merges the new cell with existing cells in sorted order.
-func (c *BtCursor) mergeNewCellWithExisting(page *BtreePage, newKey int64, newCellData []byte) ([][]byte, []int64, error) {
-	numCells := int(page.Header.NumCells)
-	cells := make([][]byte, 0, numCells+1)
-	keys := make([]int64, 0, numCells+1)
-	inserted := false
-
-	for i := 0; i < numCells; i++ {
-		if !inserted {
-			inserted = c.tryInsertNewCell(&cells, &keys, newKey, newCellData, i, page)
-		}
-
-		cellData, cellKey, err := c.copyExistingCell(page, i)
-		if err != nil {
-			return nil, nil, err
-		}
-		cells = append(cells, cellData)
-		keys = append(keys, cellKey)
-	}
+# NULL Handling
 
-	if !inserted {
-		cells = append(cells, newCellData)
-		keys = append(keys, newKey)
-	}
+Most functions follow these rules:
 
-	return cells, keys, nil
-}
-
-// tryInsertNewCell inserts the new cell if its key is less than the current cell's key.
-func (c *BtCursor) tryInsertNewCell(cells *[][]byte, keys *[]int64, newKey int64, newCellData []byte, idx int, page *BtreePage) bool {
-	cellPtr, err := page.Header.GetCellPointer(page.Data, idx)
-	if err != nil {
-		return false
-	}
+  - f(NULL) returns NULL
+  - Aggregates skip NULL values
+  - Type functions may handle NULL specially
 
-	cellInfo, err := ParseCell(page.Header.PageType, page.Data[cellPtr:], page.UsableSize)
-	if err != nil {
-		return false
-	}
+Exceptions:
 
-	if newKey < cellInfo.Key {
-		*cells = append(*cells, newCellData)
-		*keys = append(*keys, newKey)
-		return true
-	}
-	return false
-}
-
-// copyExistingCell copies an existing cell from the page.
-func (c *BtCursor) copyExistingCell(page *BtreePage, idx int) ([]byte, int64, error) {
-	cellPtr, err := page.Header.GetCellPointer(page.Data, idx)
-	if err != nil {
-		return nil, 0, err
-	}
+	coalesce(NULL, NULL, 42)     // 42
+	ifnull(NULL, "default")      // "default"
+	typeof(NULL)                 // "null"
+	count(*)                     // counts NULL rows
 
-	cellInfo, err := ParseCell(page.Header.PageType, page.Data[cellPtr:], page.UsableSize)
-	if err != nil {
-		return nil, 0, err
-	}
+# Custom Functions
 
-	cellData := make([]byte, cellInfo.CellSize)
-	copy(cellData, page.Data[cellPtr:cellPtr+uint16(cellInfo.CellSize)])
-	return cellData, cellInfo.Key, nil
-}
-
-// collectInteriorCellsForSplit collects all existing interior cells plus the new cell
-func (c *BtCursor) collectInteriorCellsForSplit(page *BtreePage, newKey int64, newChildPgno uint32) ([][]byte, []int64, []uint32, error) {
-	numCells := int(page.Header.NumCells)
-	cells := make([][]byte, 0, numCells+1)
-	keys := make([]int64, 0, numCells+1)
-	childPages := make([]uint32, 0, numCells+2)
-
-	newCellData := EncodeTableInteriorCell(newChildPgno, newKey)
-	inserted := false
-
-	for i := 0; i < numCells; i++ {
-		inserted = c.tryInsertInteriorCell(&cells, &keys, &childPages, newKey, newChildPgno, newCellData, inserted, page, i)
-
-		cellData, cellKey, childPage, err := c.copyExistingInteriorCell(page, i)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		cells = append(cells, cellData)
-		keys = append(keys, cellKey)
-		childPages = append(childPages, childPage)
-	}
+Register custom functions easily:
 
-	return c.finalizeInteriorCellCollection(cells, keys, childPages, newCellData, newKey, newChildPgno, page.Header.RightChild, inserted)
-}
+	registry := functions.NewRegistry()
 
-// tryInsertInteriorCell attempts to insert the new interior cell in sorted position.
-func (c *BtCursor) tryInsertInteriorCell(cells *[][]byte, keys *[]int64, childPages *[]uint32, newKey int64, newChildPgno uint32, newCellData []byte, inserted bool, page *BtreePage, idx int) bool {
-	if inserted {
-		return true
-	}
+	doubleFunc := functions.NewScalarFunc("double", 1,
+	    func(args []functions.Value) (functions.Value, error) {
+	        if args[0].IsNull() {
+	            return functions.NewNullValue(), nil
+	        }
+	        return functions.NewIntValue(args[0].AsInt64() * 2), nil
+	    })
 
-	cellPtr, err := page.Header.GetCellPointer(page.Data, idx)
-	if err != nil {
-		return false
-	}
+	registry.Register(doubleFunc)
 
-	cellInfo, err := ParseCell(page.Header.PageType, page.Data[cellPtr:], page.UsableSize)
-	if err != nil {
-		return false
-	}
+# Performance
 
-	if newKey < cellInfo.Key {
-		*cells = append(*cells, newCellData)
-		*keys = append(*keys, newKey)
-		*childPages = append(*childPages, newChildPgno)
-		return true
-	}
-	return false
-}
-
-// copyExistingInteriorCell copies an existing interior cell from the page.
-func (c *BtCursor) copyExistingInteriorCell(page *BtreePage, idx int) ([]byte, int64, uint32, error) {
-	cellPtr, err := page.Header.GetCellPointer(page.Data, idx)
-	if err != nil {
-		return nil, 0, 0, err
-	}
+The implementation is optimized for:
 
-	cellInfo, err := ParseCell(page.Header.PageType, page.Data[cellPtr:], page.UsableSize)
-	if err != nil {
-		return nil, 0, 0, err
-	}
+  - UTF-8 string operations with minimal allocations
+  - Efficient aggregate state management
+  - Lazy date/time computation
+  - Zero-copy value passing where possible
 
-	cellData := make([]byte, cellInfo.CellSize)
-	copy(cellData, page.Data[cellPtr:cellPtr+uint16(cellInfo.CellSize)])
-	return cellData, cellInfo.Key, cellInfo.ChildPage, nil
-}
-
-// finalizeInteriorCellCollection finalizes the collection by adding the rightmost child and potentially the new cell.
-func (c *BtCursor) finalizeInteriorCellCollection(cells [][]byte, keys []int64, childPages []uint32, newCellData []byte, newKey int64, newChildPgno uint32, rightChild uint32, inserted bool) ([][]byte, []int64, []uint32, error) {
-	childPages = append(childPages, rightChild)
-
-	if !inserted {
-		cells = append(cells, newCellData)
-		keys = append(keys, newKey)
-		childPages = append(childPages[:len(childPages)-1], newChildPgno, rightChild)
-	}
+# SQLite Compatibility
 
-	return cells, keys, childPages, nil
-}
-
-// updateParentAfterSplit updates the parent page after a split
-// If the current page is root, creates a new root
-func (c *BtCursor) updateParentAfterSplit(leftPage, rightPage uint32, dividerKey int64) error {
-	if c.Depth == 0 || leftPage == c.RootPage {
-		return c.createNewRoot(leftPage, rightPage, dividerKey)
-	}
+This implementation aims for full compatibility with SQLite 3.51.2:
 
-	parentDepth := c.Depth - 1
-	parentPage := c.PageStack[parentDepth]
+  - All core scalar functions
+  - All aggregate functions
+  - Core date/time functions
+  - SQLite type system and semantics
 
-	parent, dividerCell, err := c.loadParentAndCreateDivider(parentPage, leftPage, dividerKey)
-	if err != nil {
-		return err
-	}
+Not included:
 
-	if len(dividerCell) > parent.FreeSpace() {
-		return c.splitParentRecursively(parentPage, parentDepth, dividerKey, leftPage, parent)
-	}
+  - Extension functions (FTS, JSON, R*Tree)
+  - Window functions
+  - Custom collations
+  - Compiled regular expressions
 
-	return c.insertDividerIntoParent(parent, parentPage, rightPage, dividerKey, dividerCell)
-}
-
-// loadParentAndCreateDivider loads the parent page and creates the divider cell.
-func (c *BtCursor) loadParentAndCreateDivider(parentPage, leftPage uint32, dividerKey int64) (*BtreePage, []byte, error) {
-	parentData, err := c.Btree.GetPage(parentPage)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get parent page: %w", err)
-	}
+# Error Handling
 
-	parent, err := NewBtreePage(parentPage, parentData, c.Btree.UsableSize)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create parent BtreePage: %w", err)
-	}
+Functions return errors for:
 
-	dividerCell := EncodeTableInteriorCell(leftPage, dividerKey)
-	return parent, dividerCell, nil
-}
-
-// splitParentRecursively splits the parent page when it's full.
-func (c *BtCursor) splitParentRecursively(parentPage uint32, parentDepth int, dividerKey int64, leftPage uint32, parent *BtreePage) error {
-	savedPage, savedIdx, savedDepth, savedHeader := c.saveCursorState()
-	c.positionOnParent(parentPage, parentDepth, parent)
-	err := c.splitInteriorPage(dividerKey, leftPage)
-	c.restoreCursorState(savedPage, savedIdx, savedDepth, savedHeader)
-	return err
-}
-
-// saveCursorState saves the current cursor state for restoration.
-func (c *BtCursor) saveCursorState() (uint32, int, int, *PageHeader) {
-	return c.CurrentPage, c.CurrentIndex, c.Depth, c.CurrentHeader
-}
-
-// restoreCursorState restores a previously saved cursor state.
-func (c *BtCursor) restoreCursorState(savedPage uint32, savedIndex, savedDepth int, savedHeader *PageHeader) {
-	c.CurrentPage = savedPage
-	c.CurrentIndex = savedIndex
-	c.Depth = savedDepth
-	c.CurrentHeader = savedHeader
-}
-
-// positionOnParent positions the cursor on the parent page.
-func (c *BtCursor) positionOnParent(parentPage uint32, parentDepth int, parent *BtreePage) {
-	c.CurrentPage = parentPage
-	c.Depth = parentDepth
-	c.CurrentHeader = parent.Header
-}
-
-// insertDividerIntoParent inserts the divider cell into the parent page.
-func (c *BtCursor) insertDividerIntoParent(parent *BtreePage, parentPage, rightPage uint32, dividerKey int64, dividerCell []byte) error {
-	if c.Btree.Provider != nil {
-		if err := c.Btree.Provider.MarkDirty(parentPage); err != nil {
-			return err
-		}
-	}
+  - Invalid argument counts
+  - Type conversion failures
+  - Domain errors (sqrt of negative)
+  - Overflow conditions
 
-	insertIdx := c.findInsertionPoint(parent, dividerKey)
+Functions return NULL (not error) for:
 
-	if err := parent.InsertCell(insertIdx, dividerCell); err != nil {
-		return fmt.Errorf("failed to insert divider into parent: %w", err)
-	}
+  - NULL input
+  - Invalid format strings
+  - Parse failures
 
-	c.updateRightChildIfNeeded(parent, parentPage, rightPage, insertIdx)
-	return nil
-}
-
-// findInsertionPoint finds the correct insertion point for the divider key.
-func (c *BtCursor) findInsertionPoint(parent *BtreePage, dividerKey int64) int {
-	for i := 0; i < int(parent.Header.NumCells); i++ {
-		cellPtr, err := parent.Header.GetCellPointer(parent.Data, i)
-		if err != nil {
-			return i
-		}
-
-		cellInfo, err := ParseCell(parent.Header.PageType, parent.Data[cellPtr:], parent.UsableSize)
-		if err != nil {
-			return i
-		}
-
-		if dividerKey < cellInfo.Key {
-			return i
-		}
-	}
-	return int(parent.Header.NumCells)
-}
-
-// updateRightChildIfNeeded updates the rightmost child pointer if necessary.
-func (c *BtCursor) updateRightChildIfNeeded(parent *BtreePage, parentPage, rightPage uint32, insertIdx int) {
-	if insertIdx == int(parent.Header.NumCells)-1 {
-		headerOffset := getHeaderOffset(parentPage)
-		binary.BigEndian.PutUint32(parent.Data[headerOffset+PageHeaderOffsetRightChild:], rightPage)
-	}
-}
-
-// createNewRoot creates a new root page after splitting the old root
-func (c *BtCursor) createNewRoot(leftPage, rightPage uint32, dividerKey int64) error {
-	// Allocate new root page
-	newRootNum, err := c.Btree.AllocatePage()
-	if err != nil {
-		return fmt.Errorf("failed to allocate new root: %w", err)
-	}
+# Examples
 
-	// Get new root page data
-	newRootData, err := c.Btree.GetPage(newRootNum)
-	if err != nil {
-		return fmt.Errorf("failed to get new root page: %w", err)
-	}
+See examples_test.go for comprehensive usage examples:
 
-	// Initialize as interior page
-	if err := initializeInteriorPage(newRootData, newRootNum, c.Btree.UsableSize); err != nil {
-		return fmt.Errorf("failed to initialize new root: %w", err)
-	}
+	go test -v -run Example
 
-	// Mark as dirty
-	if c.Btree.Provider != nil {
-		if err := c.Btree.Provider.MarkDirty(newRootNum); err != nil {
-			return err
-		}
-	}
+# Testing
 
-	// Create new root page wrapper
-	newRoot, err := NewBtreePage(newRootNum, newRootData, c.Btree.UsableSize)
-	if err != nil {
-		return fmt.Errorf("failed to create new root BtreePage: %w", err)
-	}
+Run the full test suite:
 
-	// Insert divider cell pointing to left page
-	dividerCell := EncodeTableInteriorCell(leftPage, dividerKey)
-	if err := newRoot.InsertCell(0, dividerCell); err != nil {
-		return fmt.Errorf("failed to insert divider into new root: %w", err)
-	}
+	go test -v ./core/sqlite/internal/functions/
+	go test -cover ./core/sqlite/internal/functions/
 
-	// Set rightmost child to right page
-	headerOffset := getHeaderOffset(newRootNum)
-	binary.BigEndian.PutUint32(newRoot.Data[headerOffset+PageHeaderOffsetRightChild:], rightPage)
+# Documentation
 
-	// Update cursor's root page
-	c.RootPage = newRootNum
+  - README.md: User documentation and function reference
+  - IMPLEMENTATION.md: Implementation details and design decisions
+  - QUICK_REFERENCE.md: Quick lookup guide for all functions
+  - examples_test.go: Runnable examples
 
-	return nil
-}
+# Thread Safety
 
-// Helper functions
+Functions are not thread-safe:
 
-// initializeLeafPage initializes a page as an empty leaf table page
-func initializeLeafPage(pageData []byte, pageNum uint32, usableSize uint32) error {
-	headerOffset := getHeaderOffset(pageNum)
+  - Each function call is independent and safe
+  - Aggregate functions maintain mutable state
+  - Use separate instances per goroutine
+  - Registry reads are safe, writes require synchronization
 
-	// Set page type to leaf table
-	pageData[headerOffset+PageHeaderOffsetType] = PageTypeLeafTable
+# Dependencies
 
-	// Initialize header fields
-	binary.BigEndian.PutUint16(pageData[headerOffset+PageHeaderOffsetFreeblock:], 0)
-	binary.BigEndian.PutUint16(pageData[headerOffset+PageHeaderOffsetNumCells:], 0)
-	binary.BigEndian.PutUint16(pageData[headerOffset+PageHeaderOffsetCellStart:], 0)
-	pageData[headerOffset+PageHeaderOffsetFragmented] = 0
+The package uses only Go standard library:
 
-	return nil
-}
+  - strings, bytes: string operations
+  - math: mathematical functions
+  - time: date/time operations
+  - crypto/rand: secure random generation
 
-// initializeInteriorPage initializes a page as an empty interior table page
-func initializeInteriorPage(pageData []byte, pageNum uint32, usableSize uint32) error {
-	headerOffset := getHeaderOffset(pageNum)
+No external dependencies required.
 
-	// Set page type to interior table
-	pageData[headerOffset+PageHeaderOffsetType] = PageTypeInteriorTable
+# Version
 
-	// Initialize header fields
-	binary.BigEndian.PutUint16(pageData[headerOffset+PageHeaderOffsetFreeblock:], 0)
-	binary.BigEndian.PutUint16(pageData[headerOffset+PageHeaderOffsetNumCells:], 0)
-	binary.BigEndian.PutUint16(pageData[headerOffset+PageHeaderOffsetCellStart:], 0)
-	pageData[headerOffset+PageHeaderOffsetFragmented] = 0
-	binary.BigEndian.PutUint32(pageData[headerOffset+PageHeaderOffsetRightChild:], 0)
+Based on SQLite 3.51.2 reference implementation.
 
-	return nil
-}
+# References
 
-// getHeaderOffset returns the offset where the page header starts
-func getHeaderOffset(pageNum uint32) int {
-	if pageNum == 1 {
-		return FileHeaderSize
-	}
-	return 0
-}
-
-// clearPageCells removes all cells from a page, resetting it to empty
-func clearPageCells(page *BtreePage) error {
-	headerOffset := getHeaderOffset(page.PageNum)
-
-	// Reset cell count
-	binary.BigEndian.PutUint16(page.Data[headerOffset+PageHeaderOffsetNumCells:], 0)
-	page.Header.NumCells = 0
-
-	// Reset cell content start (0 means end of usable space)
-	binary.BigEndian.PutUint16(page.Data[headerOffset+PageHeaderOffsetCellStart:], 0)
-	page.Header.CellContentStart = 0
-
-	// Reset fragmented bytes
-	page.Data[headerOffset+PageHeaderOffsetFragmented] = 0
-	page.Header.FragmentedBytes = 0
-
-	return nil
-}
+  - SQLite Core Functions: https://sqlite.org/lang_corefunc.html
+  - SQLite Date Functions: https://sqlite.org/lang_datefunc.html
+  - SQLite Aggregate Functions: https://sqlite.org/lang_aggfunc.html
+*/
+package functions

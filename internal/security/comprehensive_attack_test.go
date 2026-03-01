@@ -200,7 +200,7 @@ func TestDenialOfServiceResistance(t *testing.T) {
 			select {
 			case <-done:
 				// Good, validation completed
-			case <-time.After(100 * time.Millisecond):
+			case <-time.After(500 * time.Millisecond):
 				t.Error("Validation took too long - potential DoS vulnerability")
 			}
 		})

@@ -56,7 +56,6 @@ func TestIndexCursorBasicOperations(t *testing.T) {
 
 	// Test insertion
 	t.Run("Insert", func(t *testing.T) {
-		t.Parallel()
 		if err := idxCursor.InsertIndex([]byte("apple"), 100); err != nil {
 			t.Fatalf("failed to insert 'apple': %v", err)
 		}
@@ -72,7 +71,6 @@ func TestIndexCursorBasicOperations(t *testing.T) {
 
 	// Test seeking
 	t.Run("Seek", func(t *testing.T) {
-		t.Parallel()
 		found, err := idxCursor.SeekIndex([]byte("apple"))
 		if err != nil {
 			t.Fatalf("failed to seek 'apple': %v", err)
@@ -107,7 +105,6 @@ func TestIndexCursorBasicOperations(t *testing.T) {
 
 	// Test iteration from first
 	t.Run("Iteration", func(t *testing.T) {
-		t.Parallel()
 		err := idxCursor.MoveToFirst()
 		if err != nil {
 			t.Fatalf("failed to move to first: %v", err)
@@ -134,7 +131,6 @@ func TestIndexCursorBasicOperations(t *testing.T) {
 
 	// Test deletion
 	t.Run("Delete", func(t *testing.T) {
-		t.Parallel()
 		// Delete 'banana' (key, rowid pair)
 		if err := idxCursor.DeleteIndex([]byte("banana"), 200); err != nil {
 			t.Fatalf("failed to delete 'banana': %v", err)
