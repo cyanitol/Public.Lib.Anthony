@@ -683,7 +683,7 @@ func TestGenerateLiteralBlob(t *testing.T) {
 
 	expr := &parser.LiteralExpr{
 		Type:  parser.LiteralBlob,
-		Value: "\x01\x02\x03",
+		Value: "X'010203'",
 	}
 
 	_, err := gen.GenerateExpr(expr)

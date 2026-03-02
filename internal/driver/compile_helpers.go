@@ -24,7 +24,8 @@ type stmtTableInfo struct {
 	cursorIdx int
 }
 
-// compileSelectWithJoins compiles a SELECT statement with JOIN clauses.
+// compileSelectWithJoins compiles a SELECT statement with JOIN clauses
+// and implicit cross joins (comma-separated tables in FROM).
 func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	// Collect all tables involved in the query
 	tables, err := s.collectJoinTables(stmt, tableName, table)
@@ -32,8 +33,8 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 		return nil, err
 	}
 
-	// Setup VDBE and code generator
-	numCols, gen := s.setupJoinVDBE(vm, stmt, tables)
+	// Setup VDBE and code generator (with table info and args for WHERE)
+	numCols, gen := s.setupJoinVDBE(vm, stmt, tables, args)
 
 	// Emit scan preamble and open cursors
 	rewindAddr := s.emitJoinScanSetup(vm, tables)
@@ -42,8 +43,8 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 	// Setup nested loops for joined tables
 	innerLoopStarts := s.emitJoinNestedLoops(vm, tables)
 
-	// Emit column reads and result
-	if err := s.emitJoinColumns(vm, stmt, tables, numCols, gen); err != nil {
+	// Emit WHERE filter, column reads, and result
+	if err := s.emitJoinColumnsWithWhere(vm, stmt, tables, numCols, gen); err != nil {
 		return nil, err
 	}
 
@@ -54,6 +55,7 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 }
 
 // collectJoinTables collects all tables involved in a JOIN query.
+// This handles both explicit JOINs and implicit cross joins (comma-separated tables).
 func (s *Stmt) collectJoinTables(stmt *parser.SelectStmt, tableName string, table *schema.Table) ([]stmtTableInfo, error) {
 	baseTableAlias := tableName
 	if len(stmt.From.Tables) > 0 && stmt.From.Tables[0].Alias != "" {
@@ -61,7 +63,28 @@ func (s *Stmt) collectJoinTables(stmt *parser.SelectStmt, tableName string, tabl
 	}
 	tables := []stmtTableInfo{{name: baseTableAlias, table: table, cursorIdx: 0}}
 
-	for i, join := range stmt.From.Joins {
+	cursorIdx := 1
+
+	// Add comma-separated tables (implicit cross joins) from From.Tables[1:]
+	for i := 1; i < len(stmt.From.Tables); i++ {
+		crossTable, ok := s.conn.schema.GetTable(stmt.From.Tables[i].TableName)
+		if !ok {
+			return nil, fmt.Errorf("table not found: %s", stmt.From.Tables[i].TableName)
+		}
+		crossTableAlias := stmt.From.Tables[i].TableName
+		if stmt.From.Tables[i].Alias != "" {
+			crossTableAlias = stmt.From.Tables[i].Alias
+		}
+		tables = append(tables, stmtTableInfo{
+			name:      crossTableAlias,
+			table:     crossTable,
+			cursorIdx: cursorIdx,
+		})
+		cursorIdx++
+	}
+
+	// Add explicit JOIN tables
+	for _, join := range stmt.From.Joins {
 		joinTable, ok := s.conn.schema.GetTable(join.Table.TableName)
 		if !ok {
 			return nil, fmt.Errorf("table not found: %s", join.Table.TableName)
@@ -73,24 +96,34 @@ func (s *Stmt) collectJoinTables(stmt *parser.SelectStmt, tableName string, tabl
 		tables = append(tables, stmtTableInfo{
 			name:      joinTableAlias,
 			table:     joinTable,
-			cursorIdx: i + 1,
+			cursorIdx: cursorIdx,
 		})
+		cursorIdx++
 	}
 
 	return tables, nil
 }
 
 // setupJoinVDBE initializes VDBE and code generator for JOIN query.
-func (s *Stmt) setupJoinVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo) (int, *expr.CodeGenerator) {
+func (s *Stmt) setupJoinVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, args []driver.NamedValue) (int, *expr.CodeGenerator) {
 	numCols := len(stmt.Columns)
-	vm.AllocMemory(numCols + 10)
+	vm.AllocMemory(numCols + 30)
 	vm.AllocCursors(len(tables))
 
 	gen := expr.NewCodeGenerator(vm)
 	s.setupSubqueryCompiler(gen)
 	for _, tbl := range tables {
 		gen.RegisterCursor(tbl.name, tbl.cursorIdx)
+		tableInfo := buildTableInfo(tbl.name, tbl.table)
+		gen.RegisterTable(tableInfo)
 	}
+
+	// Setup args for parameter binding
+	argValues := make([]interface{}, len(args))
+	for i, a := range args {
+		argValues[i] = a.Value
+	}
+	gen.SetArgs(argValues)
 
 	vm.ResultCols = s.buildMultiTableColumnNames(stmt.Columns, tables)
 
@@ -118,14 +151,31 @@ func (s *Stmt) emitJoinNestedLoops(vm *vdbe.VDBE, tables []stmtTableInfo) []int 
 	return innerLoopStarts
 }
 
-// emitJoinColumns emits column read operations and result row for JOIN.
-func (s *Stmt) emitJoinColumns(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int, gen *expr.CodeGenerator) error {
+// emitJoinColumnsWithWhere emits WHERE filter, column read operations, and result row for JOIN.
+func (s *Stmt) emitJoinColumnsWithWhere(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int, gen *expr.CodeGenerator) error {
+	// Emit WHERE clause filter
+	var skipAddr int
+	hasWhere := stmt.Where != nil
+	if hasWhere {
+		whereReg, err := gen.GenerateExpr(stmt.Where)
+		if err != nil {
+			return fmt.Errorf("failed to compile WHERE clause: %w", err)
+		}
+		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+	}
+
 	for i, col := range stmt.Columns {
 		if err := s.emitSelectColumnOpMultiTable(vm, tables, col, i, gen); err != nil {
 			return err
 		}
 	}
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+
+	// Fix WHERE skip target to jump past the result row
+	if hasWhere {
+		vm.Program[skipAddr].P2 = vm.NumOps()
+	}
+
 	return nil
 }
 

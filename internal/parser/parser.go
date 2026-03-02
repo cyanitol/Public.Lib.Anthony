@@ -3049,7 +3049,7 @@ func (p *Parser) isExpressionIdentifier() bool {
 
 // parseFunctionCall parses a function call after the opening paren.
 func (p *Parser) parseFunctionCall(name string) (Expression, error) {
-	fn := &FunctionExpr{Name: name}
+	fn := &FunctionExpr{Name: strings.ToUpper(name)}
 
 	if p.match(TK_DISTINCT) {
 		fn.Distinct = true

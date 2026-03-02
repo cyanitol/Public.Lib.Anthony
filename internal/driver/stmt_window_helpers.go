@@ -44,8 +44,8 @@ func (s *Stmt) analyzeWindowRankFunctions(expandedCols []parser.ResultColumn, ta
 			continue
 		}
 
-		if fnExpr.Name == "rank" || fnExpr.Name == "dense_rank" {
-			if fnExpr.Name == "rank" {
+		if fnExpr.Name == "RANK" || fnExpr.Name == "DENSE_RANK" {
+			if fnExpr.Name == "RANK" {
 				info.hasRank = true
 			} else {
 				info.hasDenseRank = true
@@ -156,11 +156,11 @@ func emitWindowRankUpdate(vm *vdbe.VDBE, regs rankRegisters, valuesChangedReg in
 // emitWindowFunctionColumn emits code for a window function result column
 func emitWindowFunctionColumn(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, regs rankRegisters, colIdx int) {
 	switch fnExpr.Name {
-	case "row_number", "ntile":
+	case "ROW_NUMBER", "NTILE":
 		vm.AddOp(vdbe.OpCopy, regs.rowCount, colIdx, 0)
-	case "rank":
+	case "RANK":
 		vm.AddOp(vdbe.OpCopy, regs.rank, colIdx, 0)
-	case "dense_rank":
+	case "DENSE_RANK":
 		vm.AddOp(vdbe.OpCopy, regs.denseRank, colIdx, 0)
 	default:
 		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)

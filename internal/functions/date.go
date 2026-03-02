@@ -305,7 +305,12 @@ func (dt *DateTime) computeJD() {
 		int64(30.6001*float64(month+1)) +
 		int64(day) + int64(b) - 1524
 
-	dt.jd = jd * msPerDay
+	// The Meeus algorithm produces the Julian Day Number (JDN), which by
+	// definition refers to noon (12:00 UTC) of the given date.  Subtract
+	// half a day so the base represents midnight (00:00 UTC), matching
+	// SQLite's convention that a date without a time component corresponds
+	// to midnight.
+	dt.jd = jd*msPerDay - msPerDay/2
 
 	if dt.validHMS {
 		dt.jd += int64(dt.hour)*3600000 +
@@ -335,8 +340,10 @@ func (dt *DateTime) computeYMD() {
 		return
 	}
 
-	// Convert Julian day to calendar date (Meeus algorithm)
-	z := int((dt.jd+43200000)/msPerDay) + 1
+	// Convert Julian day to calendar date (Meeus algorithm).
+	// Adding 43200000 (half a day in ms) rounds to the nearest noon,
+	// recovering the Julian Day Number used by the forward algorithm.
+	z := int((dt.jd + 43200000) / msPerDay)
 	alpha := int((float64(z) - 1867216.25) / 36524.25)
 	a := z + 1 + alpha - alpha/4
 
