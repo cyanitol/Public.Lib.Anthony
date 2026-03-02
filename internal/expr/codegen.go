@@ -539,12 +539,22 @@ func (g *CodeGenerator) generateUnary(e *parser.UnaryExpr) (int, error) {
 		g.vdbe.SetComment(g.vdbe.NumOps()-1, "BITNOT")
 
 	case parser.OpIsNull:
-		g.vdbe.AddOp(vdbe.OpIsNull, operandReg, resultReg, 0)
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, "IS NULL")
+		// OpIsNull is a jump instruction: jumps to P2 if P1 is NULL.
+		// Emit a boolean-producing sequence instead of using it directly.
+		g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
+		isNullAddr := g.vdbe.AddOp(vdbe.OpIsNull, operandReg, 0, 0)
+		g.vdbe.SetComment(isNullAddr, "IS NULL")
+		g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
+		g.vdbe.Program[isNullAddr].P2 = g.vdbe.NumOps()
 
 	case parser.OpNotNull:
-		g.vdbe.AddOp(vdbe.OpNotNull, operandReg, resultReg, 0)
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, "NOT NULL")
+		// OpNotNull is a jump instruction: jumps to P2 if P1 is NOT NULL.
+		// Emit a boolean-producing sequence instead of using it directly.
+		g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
+		notNullAddr := g.vdbe.AddOp(vdbe.OpNotNull, operandReg, 0, 0)
+		g.vdbe.SetComment(notNullAddr, "NOT NULL")
+		g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
+		g.vdbe.Program[notNullAddr].P2 = g.vdbe.NumOps()
 
 	default:
 		return 0, fmt.Errorf("unsupported unary operator: %v", e.Op)
