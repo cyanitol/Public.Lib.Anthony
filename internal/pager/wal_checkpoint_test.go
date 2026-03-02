@@ -1,403 +1,430 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package planner_test
+package pager
 
 import (
-	"fmt"
-
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/planner"
+	"os"
+	"path/filepath"
+	"testing"
 )
 
-// Example demonstrates basic query planning
-func Example_basicQuery() {
-	// Create a table with indexes
-	table := &planner.TableInfo{
-		Name:      "products",
-		Cursor:    0,
-		RowCount:  100000,
-		RowLogEst: planner.NewLogEst(100000),
-		Columns: []planner.ColumnInfo{
-			{Name: "id", Index: 0, Type: "INTEGER", NotNull: true},
-			{Name: "name", Index: 1, Type: "TEXT", NotNull: true},
-			{Name: "category", Index: 2, Type: "TEXT", NotNull: true},
-			{Name: "price", Index: 3, Type: "REAL", NotNull: false},
-		},
-		Indexes: []*planner.IndexInfo{
-			{
-				Name:      "pk_products",
-				Table:     "products",
-				Unique:    true,
-				Primary:   true,
-				RowCount:  100000,
-				RowLogEst: planner.NewLogEst(100000),
-				Columns: []planner.IndexColumn{
-					{Name: "id", Index: 0, Ascending: true},
-				},
-				ColumnStats: []planner.LogEst{0}, // Unique
-			},
-			{
-				Name:      "idx_category_price",
-				Table:     "products",
-				Unique:    false,
-				Primary:   false,
-				RowCount:  100000,
-				RowLogEst: planner.NewLogEst(100000),
-				Columns: []planner.IndexColumn{
-					{Name: "category", Index: 2, Ascending: true},
-					{Name: "price", Index: 3, Ascending: true},
-				},
-				ColumnStats: []planner.LogEst{
-					planner.NewLogEst(50), // ~2000 rows per category
-					planner.NewLogEst(5),  // ~32 rows per category+price
-				},
-			},
-		},
-	}
+// Test helper functions
 
-	// Create WHERE clause: category = 'Electronics' AND price < 100
-	whereClause := &planner.WhereClause{
-		Terms: []*planner.WhereTerm{
-			{
-				Operator:   planner.WO_EQ,
-				LeftCursor: 0,
-				LeftColumn: 2, // category
-				RightValue: "Electronics",
-			},
-			{
-				Operator:   planner.WO_LT,
-				LeftCursor: 0,
-				LeftColumn: 3, // price
-				RightValue: 100.0,
-			},
-		},
-	}
+func createTestWALForCheckpoint(t *testing.T) (*WAL, string) {
+	t.Helper()
 
-	// Plan the query
-	p := planner.NewPlanner()
-	info, err := p.PlanQuery([]*planner.TableInfo{table}, whereClause)
+	// Create temp directory
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	// Create empty database file with proper size for writing
+	f, err := os.Create(dbFile)
 	if err != nil {
-		panic(err)
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	// Explain the plan
-	fmt.Println(p.ExplainPlan(info))
+	// Write enough space for test pages (allocate 100 pages)
+	emptyPage := make([]byte, DefaultPageSize)
+	for i := 0; i < 100; i++ {
+		if _, err := f.Write(emptyPage); err != nil {
+			t.Fatalf("Failed to write empty pages: %v", err)
+		}
+	}
+	f.Close()
 
-	// Output should show use of idx_category_price
+	// Create WAL
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to open WAL: %v", err)
+	}
+
+	return wal, dbFile
 }
 
-// Example demonstrates join planning
-func Example_joinQuery() {
-	// Create tables
-	customers := &planner.TableInfo{
-		Name:      "customers",
-		Cursor:    0,
-		RowCount:  10000,
-		RowLogEst: planner.NewLogEst(10000),
-		Columns: []planner.ColumnInfo{
-			{Name: "id", Index: 0, Type: "INTEGER", NotNull: true},
-			{Name: "name", Index: 1, Type: "TEXT", NotNull: true},
-			{Name: "country", Index: 2, Type: "TEXT", NotNull: false},
-		},
-		Indexes: []*planner.IndexInfo{
-			{
-				Name:        "pk_customers",
-				Table:       "customers",
-				Unique:      true,
-				Primary:     true,
-				RowCount:    10000,
-				RowLogEst:   planner.NewLogEst(10000),
-				Columns:     []planner.IndexColumn{{Name: "id", Index: 0}},
-				ColumnStats: []planner.LogEst{0},
-			},
-		},
+func writeTestFrameToWAL(t *testing.T, wal *WAL, pageNum Pgno, content byte, dbSize uint32) {
+	t.Helper()
+
+	pageData := make([]byte, wal.pageSize)
+	// Fill page with a recognizable pattern
+	for i := range pageData {
+		pageData[i] = content
 	}
 
-	orders := &planner.TableInfo{
-		Name:      "orders",
-		Cursor:    1,
-		RowCount:  100000,
-		RowLogEst: planner.NewLogEst(100000),
-		Columns: []planner.ColumnInfo{
-			{Name: "id", Index: 0, Type: "INTEGER", NotNull: true},
-			{Name: "customer_id", Index: 1, Type: "INTEGER", NotNull: true},
-			{Name: "amount", Index: 2, Type: "REAL", NotNull: true},
-		},
-		Indexes: []*planner.IndexInfo{
-			{
-				Name:        "idx_customer_id",
-				Table:       "orders",
-				Unique:      false,
-				RowCount:    100000,
-				RowLogEst:   planner.NewLogEst(100000),
-				Columns:     []planner.IndexColumn{{Name: "customer_id", Index: 1}},
-				ColumnStats: []planner.LogEst{planner.NewLogEst(10)}, // ~10 orders per customer
-			},
-		},
+	if err := wal.WriteFrame(pageNum, pageData, dbSize); err != nil {
+		t.Fatalf("Failed to write frame: %v", err)
 	}
+}
 
-	// WHERE clause: customers.id = 123 AND orders.customer_id = customers.id
-	whereClause := &planner.WhereClause{
-		Terms: []*planner.WhereTerm{
-			{
-				Operator:   planner.WO_EQ,
-				LeftCursor: 0,
-				LeftColumn: 0, // customers.id
-				RightValue: 123,
-			},
-			{
-				Operator:    planner.WO_EQ,
-				LeftCursor:  1,
-				LeftColumn:  1,                       // orders.customer_id
-				PrereqRight: planner.Bitmask(1 << 0), // References customers
-			},
-		},
-	}
+func verifyPageInDatabase(t *testing.T, dbFile string, pageNum Pgno, expectedContent byte, pageSize int) {
+	t.Helper()
 
-	// Plan the query
-	p := planner.NewPlanner()
-	info, err := p.PlanQuery([]*planner.TableInfo{customers, orders}, whereClause)
+	f, err := os.Open(dbFile)
 	if err != nil {
-		panic(err)
+		t.Fatalf("Failed to open database: %v", err)
 	}
+	defer f.Close()
 
-	fmt.Println(p.ExplainPlan(info))
-
-	// Should show nested loop join with customers first (has constant constraint)
-}
-
-// Example demonstrates index selection
-func Example_indexSelection() {
-	// Create table with multiple indexes
-	table := &planner.TableInfo{
-		Name:      "events",
-		Cursor:    0,
-		RowCount:  1000000,
-		RowLogEst: planner.NewLogEst(1000000),
-		Columns: []planner.ColumnInfo{
-			{Name: "id", Index: 0, Type: "INTEGER"},
-			{Name: "user_id", Index: 1, Type: "INTEGER"},
-			{Name: "timestamp", Index: 2, Type: "INTEGER"},
-			{Name: "type", Index: 3, Type: "TEXT"},
-		},
-		Indexes: []*planner.IndexInfo{
-			{
-				Name:        "idx_user_id",
-				Table:       "events",
-				Columns:     []planner.IndexColumn{{Name: "user_id", Index: 1}},
-				RowLogEst:   planner.NewLogEst(1000000),
-				ColumnStats: []planner.LogEst{planner.NewLogEst(100)}, // ~100 events per user
-			},
-			{
-				Name:        "idx_timestamp",
-				Table:       "events",
-				Columns:     []planner.IndexColumn{{Name: "timestamp", Index: 2}},
-				RowLogEst:   planner.NewLogEst(1000000),
-				ColumnStats: []planner.LogEst{planner.NewLogEst(1000)}, // Less selective
-			},
-			{
-				Name:  "idx_user_timestamp",
-				Table: "events",
-				Columns: []planner.IndexColumn{
-					{Name: "user_id", Index: 1},
-					{Name: "timestamp", Index: 2},
-				},
-				RowLogEst: planner.NewLogEst(1000000),
-				ColumnStats: []planner.LogEst{
-					planner.NewLogEst(100), // By user
-					planner.NewLogEst(1),   // By user+time
-				},
-			},
-		},
-	}
-
-	// WHERE clause: user_id = 42 AND timestamp > 1000000
-	terms := []*planner.WhereTerm{
-		{
-			Operator:   planner.WO_EQ,
-			LeftCursor: 0,
-			LeftColumn: 1, // user_id
-			RightValue: 42,
-		},
-		{
-			Operator:   planner.WO_GT,
-			LeftCursor: 0,
-			LeftColumn: 2, // timestamp
-			RightValue: 1000000,
-		},
-	}
-
-	// Select best index
-	cm := planner.NewCostModel()
-	selector := planner.NewIndexSelector(table, terms, cm)
-	bestIndex := selector.SelectBestIndex()
-
-	if bestIndex != nil {
-		fmt.Printf("Selected index: %s\n", bestIndex.Name)
-
-		// Analyze how the index will be used
-		usage := selector.AnalyzeIndexUsage(bestIndex, []string{"id", "type"})
-		fmt.Printf("Usage: %s\n", usage.Explain())
-	}
-
-	// Should select idx_user_timestamp (compound index on both constrained columns)
-}
-
-// Example demonstrates cost comparison
-func Example_costComparison() {
-	cm := planner.NewCostModel()
-
-	// Create a simple table
-	table := &planner.TableInfo{
-		Name:      "items",
-		RowCount:  50000,
-		RowLogEst: planner.NewLogEst(50000),
-	}
-
-	// Compare full scan vs index scan
-	fullScanCost, fullScanRows := cm.EstimateFullScan(table)
-
-	// Simulate an index with selectivity
-	index := &planner.IndexInfo{
-		Name:        "idx_items",
-		RowLogEst:   table.RowLogEst,
-		ColumnStats: []planner.LogEst{planner.NewLogEst(100)}, // 1% selectivity
-	}
-
-	indexCost, indexRows := cm.EstimateIndexScan(table, index, nil, 1, false, false)
-
-	fmt.Printf("Full scan: cost=%d, rows=%d\n", fullScanCost.ToInt(), fullScanRows.ToInt())
-	fmt.Printf("Index scan: cost=%d, rows=%d\n", indexCost.ToInt(), indexRows.ToInt())
-
-	if cm.CompareCosts(indexCost, indexRows, fullScanCost, fullScanRows) {
-		fmt.Println("Index scan is better")
-	} else {
-		fmt.Println("Full scan is better")
-	}
-}
-
-// Example demonstrates query optimization with expressions
-func Example_queryOptimization() {
-	p := planner.NewPlanner()
-
-	// Create table
-	table := &planner.TableInfo{
-		Name:      "employees",
-		Cursor:    0,
-		RowCount:  5000,
-		RowLogEst: planner.NewLogEst(5000),
-		Columns: []planner.ColumnInfo{
-			{Name: "id", Index: 0, Type: "INTEGER"},
-			{Name: "dept", Index: 1, Type: "TEXT"},
-			{Name: "salary", Index: 2, Type: "REAL"},
-		},
-		Indexes: []*planner.IndexInfo{
-			{
-				Name: "idx_dept_salary",
-				Columns: []planner.IndexColumn{
-					{Name: "dept", Index: 1},
-					{Name: "salary", Index: 2},
-				},
-				RowLogEst:   planner.NewLogEst(5000),
-				ColumnStats: []planner.LogEst{planner.NewLogEst(50), planner.NewLogEst(5)},
-			},
-		},
-	}
-
-	// Build WHERE expression: dept = 'Sales' AND salary > 50000
-	col1 := &planner.ColumnExpr{Table: "employees", Column: "dept", Cursor: 0}
-	val1 := &planner.ValueExpr{Value: "Sales"}
-	expr1 := &planner.BinaryExpr{Op: "=", Left: col1, Right: val1}
-
-	col2 := &planner.ColumnExpr{Table: "employees", Column: "salary", Cursor: 0}
-	val2 := &planner.ValueExpr{Value: 50000.0}
-	expr2 := &planner.BinaryExpr{Op: ">", Left: col2, Right: val2}
-
-	andExpr := &planner.AndExpr{Terms: []planner.Expr{expr1, expr2}}
-
-	// Optimize WHERE clause
-	whereClause, err := p.OptimizeWhereClause(andExpr, []*planner.TableInfo{table})
+	pageData := make([]byte, pageSize)
+	offset := int64(pageNum-1) * int64(pageSize)
+	n, err := f.ReadAt(pageData, offset)
 	if err != nil {
-		panic(err)
+		t.Fatalf("Failed to read page: %v", err)
+	}
+	if n != pageSize {
+		t.Fatalf("Read incomplete page: got %d bytes, expected %d", n, pageSize)
 	}
 
-	fmt.Printf("Optimized WHERE clause has %d terms\n", len(whereClause.Terms))
-
-	// Plan the query
-	info, err := p.PlanQuery([]*planner.TableInfo{table}, whereClause)
-	if err != nil {
-		panic(err)
+	// Verify content (check first few bytes as sample)
+	for i := 0; i < 100 && i < len(pageData); i++ {
+		if pageData[i] != expectedContent {
+			t.Errorf("Page %d byte %d mismatch: got 0x%02x, expected 0x%02x",
+				pageNum, i, pageData[i], expectedContent)
+			break
+		}
 	}
-
-	fmt.Println(p.ExplainPlan(info))
 }
 
-// Example demonstrates practical query planning scenario
-func Example_practicalScenario() {
-	// Scenario: E-commerce database with products and orders
+// Basic checkpoint mode tests
 
-	// Products table
-	products := &planner.TableInfo{
-		Name:      "products",
-		Cursor:    0,
-		RowCount:  10000,
-		RowLogEst: planner.NewLogEst(10000),
-		Columns: []planner.ColumnInfo{
-			{Name: "id", Index: 0},
-			{Name: "category", Index: 1},
-			{Name: "price", Index: 2},
-		},
-		Indexes: []*planner.IndexInfo{
-			{
-				Name:        "pk_products",
-				Unique:      true,
-				Primary:     true,
-				Columns:     []planner.IndexColumn{{Name: "id", Index: 0}},
-				RowLogEst:   planner.NewLogEst(10000),
-				ColumnStats: []planner.LogEst{0},
-			},
-		},
+func TestCheckpointMode_Constants(t *testing.T) {
+	t.Parallel()
+	// Verify checkpoint mode constants are distinct
+	modes := []CheckpointMode{
+		CheckpointPassive,
+		CheckpointFull,
+		CheckpointRestart,
+		CheckpointTruncate,
 	}
 
-	// Query: SELECT * FROM products WHERE category = 'Electronics' AND price BETWEEN 100 AND 500
-	whereClause := &planner.WhereClause{
-		Terms: []*planner.WhereTerm{
-			{
-				Operator:   planner.WO_EQ,
-				LeftCursor: 0,
-				LeftColumn: 1,
-				RightValue: "Electronics",
-			},
-			{
-				Operator:   planner.WO_GE,
-				LeftCursor: 0,
-				LeftColumn: 2,
-				RightValue: 100.0,
-			},
-			{
-				Operator:   planner.WO_LE,
-				LeftCursor: 0,
-				LeftColumn: 2,
-				RightValue: 500.0,
-			},
-		},
+	seen := make(map[CheckpointMode]bool)
+	for _, mode := range modes {
+		if seen[mode] {
+			t.Errorf("Duplicate checkpoint mode value: %d", mode)
+		}
+		seen[mode] = true
 	}
 
-	p := planner.NewPlanner()
-	info, err := p.PlanQuery([]*planner.TableInfo{products}, whereClause)
-	if err != nil {
-		panic(err)
+	// Verify they have expected values
+	if CheckpointPassive != 0 {
+		t.Errorf("CheckpointPassive should be 0, got %d", CheckpointPassive)
 	}
-
-	// Validate the plan
-	if err := p.ValidatePlan(info); err != nil {
-		panic(err)
+	if CheckpointFull != 1 {
+		t.Errorf("CheckpointFull should be 1, got %d", CheckpointFull)
 	}
-
-	fmt.Printf("Query plan is valid\n")
-	fmt.Printf("Estimated rows: %d\n", info.NOut.ToInt())
-	fmt.Println("\nDetailed plan:")
-	fmt.Println(p.ExplainPlan(info))
+	if CheckpointRestart != 2 {
+		t.Errorf("CheckpointRestart should be 2, got %d", CheckpointRestart)
+	}
+	if CheckpointTruncate != 3 {
+		t.Errorf("CheckpointTruncate should be 3, got %d", CheckpointTruncate)
+	}
 }
-size before=%d, size after=%d",
+
+func TestCheckpointPassive_EmptyWAL(t *testing.T) {
+	t.Parallel()
+	wal, _ := createTestWALForCheckpoint(t)
+	defer wal.Close()
+
+	checkpointed, remaining, err := wal.CheckpointWithMode(CheckpointPassive)
+	if err != nil {
+		t.Fatalf("Checkpoint failed: %v", err)
+	}
+
+	if checkpointed != 0 {
+		t.Errorf("Expected 0 frames checkpointed, got %d", checkpointed)
+	}
+
+	if remaining != 0 {
+		t.Errorf("Expected 0 frames remaining, got %d", remaining)
+	}
+}
+
+func TestCheckpointPassive_SingleFrame(t *testing.T) {
+	t.Parallel()
+	wal, dbFile := createTestWALForCheckpoint(t)
+	defer wal.Close()
+
+	// Write a frame
+	pageNum := Pgno(1)
+	writeTestFrameToWAL(t, wal, pageNum, 0xAB, 1)
+
+	// Verify frame was written to WAL
+	if wal.FrameCount() != 1 {
+		t.Fatalf("Expected 1 frame in WAL, got %d", wal.FrameCount())
+	}
+
+	// Checkpoint
+	checkpointed, _, err := wal.CheckpointWithMode(CheckpointPassive)
+	if err != nil {
+		t.Fatalf("Checkpoint failed: %v", err)
+	}
+
+	if checkpointed != 1 {
+		t.Errorf("Expected 1 frame checkpointed, got %d", checkpointed)
+	}
+
+	// Verify data was written to database
+	verifyPageInDatabase(t, dbFile, pageNum, 0xAB, DefaultPageSize)
+}
+
+func TestCheckpointPassive_MultipleFrames(t *testing.T) {
+	t.Parallel()
+	wal, dbFile := createTestWALForCheckpoint(t)
+	defer wal.Close()
+
+	// Write multiple frames
+	numFrames := 5
+	for i := 1; i <= numFrames; i++ {
+		writeTestFrameToWAL(t, wal, Pgno(i), byte(i*10), uint32(i))
+	}
+
+	// Checkpoint
+	checkpointed, _, err := wal.CheckpointWithMode(CheckpointPassive)
+	if err != nil {
+		t.Fatalf("Checkpoint failed: %v", err)
+	}
+
+	if checkpointed != numFrames {
+		t.Errorf("Expected %d frames checkpointed, got %d", numFrames, checkpointed)
+	}
+
+	// Verify all pages were written to database
+	for i := 1; i <= numFrames; i++ {
+		verifyPageInDatabase(t, dbFile, Pgno(i), byte(i*10), DefaultPageSize)
+	}
+}
+
+func TestCheckpointFull_SingleFrame(t *testing.T) {
+	t.Parallel()
+	wal, dbFile := createTestWALForCheckpoint(t)
+	defer wal.Close()
+
+	// Write a frame
+	pageNum := Pgno(1)
+	writeTestFrameToWAL(t, wal, pageNum, 0xCD, 1)
+
+	// Full checkpoint
+	checkpointed, _, err := wal.CheckpointWithMode(CheckpointFull)
+	if err != nil {
+		t.Fatalf("Checkpoint failed: %v", err)
+	}
+
+	if checkpointed != 1 {
+		t.Errorf("Expected 1 frame checkpointed, got %d", checkpointed)
+	}
+
+	// Verify data was written to database
+	verifyPageInDatabase(t, dbFile, pageNum, 0xCD, DefaultPageSize)
+}
+
+func TestCheckpointFull_MultipleFrames(t *testing.T) {
+	t.Parallel()
+	wal, dbFile := createTestWALForCheckpoint(t)
+	defer wal.Close()
+
+	// Write multiple frames
+	numFrames := 10
+	for i := 1; i <= numFrames; i++ {
+		writeTestFrameToWAL(t, wal, Pgno(i), byte(i*20), uint32(i))
+	}
+
+	// Full checkpoint
+	checkpointed, _, err := wal.CheckpointWithMode(CheckpointFull)
+	if err != nil {
+		t.Fatalf("Checkpoint failed: %v", err)
+	}
+
+	if checkpointed != numFrames {
+		t.Errorf("Expected %d frames checkpointed, got %d", numFrames, checkpointed)
+	}
+
+	// Verify all pages were written to database
+	for i := 1; i <= numFrames; i++ {
+		verifyPageInDatabase(t, dbFile, Pgno(i), byte(i*20), DefaultPageSize)
+	}
+}
+
+func TestCheckpointRestart_ResetsWAL(t *testing.T) {
+	t.Parallel()
+	wal, dbFile := createTestWALForCheckpoint(t)
+	defer wal.Close()
+
+	// Write frames
+	numFrames := 3
+	for i := 1; i <= numFrames; i++ {
+		writeTestFrameToWAL(t, wal, Pgno(i), byte(i*30), uint32(i))
+	}
+
+	// Get checkpoint sequence before
+	initialSeq := wal.checkpointSeq
+
+	// Restart checkpoint
+	checkpointed, remaining, err := wal.CheckpointWithMode(CheckpointRestart)
+	if err != nil {
+		t.Fatalf("Checkpoint failed: %v", err)
+	}
+
+	if checkpointed != numFrames {
+		t.Errorf("Expected %d frames checkpointed, got %d", numFrames, checkpointed)
+	}
+
+	if remaining != 0 {
+		t.Errorf("Expected 0 frames remaining after restart, got %d", remaining)
+	}
+
+	// Verify data was written to database
+	for i := 1; i <= numFrames; i++ {
+		verifyPageInDatabase(t, dbFile, Pgno(i), byte(i*30), DefaultPageSize)
+	}
+
+	// Verify WAL was reset
+	if wal.FrameCount() != 0 {
+		t.Errorf("WAL should be empty after restart, got %d frames", wal.FrameCount())
+	}
+
+	// Verify checkpoint sequence was incremented
+	if wal.checkpointSeq != initialSeq+1 {
+		t.Errorf("Checkpoint sequence should be incremented: got %d, expected %d",
+			wal.checkpointSeq, initialSeq+1)
+	}
+
+	// Verify WAL file still exists and has just the header
+	info, err := os.Stat(wal.filename)
+	if err != nil {
+		t.Fatalf("WAL file should still exist: %v", err)
+	}
+
+	if info.Size() != WALHeaderSize {
+		t.Errorf("WAL file size should be %d (header only), got %d",
+			WALHeaderSize, info.Size())
+	}
+}
+
+func TestCheckpointTruncate_RemovesWAL(t *testing.T) {
+	t.Parallel()
+	wal, dbFile := createTestWALForCheckpoint(t)
+	walFilename := wal.filename
+
+	// Write frames
+	numFrames := 3
+	for i := 1; i <= numFrames; i++ {
+		writeTestFrameToWAL(t, wal, Pgno(i), byte(i*40), uint32(i))
+	}
+
+	// Truncate checkpoint
+	checkpointed, remaining, err := wal.CheckpointWithMode(CheckpointTruncate)
+	if err != nil {
+		t.Fatalf("Checkpoint failed: %v", err)
+	}
+
+	if checkpointed != numFrames {
+		t.Errorf("Expected %d frames checkpointed, got %d", numFrames, checkpointed)
+	}
+
+	if remaining != 0 {
+		t.Errorf("Expected 0 frames remaining after truncate, got %d", remaining)
+	}
+
+	// Verify data was written to database
+	for i := 1; i <= numFrames; i++ {
+		verifyPageInDatabase(t, dbFile, Pgno(i), byte(i*40), DefaultPageSize)
+	}
+
+	// Verify WAL was truncated
+	if wal.FrameCount() != 0 {
+		t.Errorf("WAL should be empty after truncate, got %d frames", wal.FrameCount())
+	}
+
+	// Verify WAL file was truncated to zero
+	info, err := os.Stat(walFilename)
+	if err != nil {
+		t.Fatalf("Failed to stat WAL file: %v", err)
+	}
+
+	if info.Size() != 0 {
+		t.Errorf("WAL file should be truncated to 0 bytes, got %d", info.Size())
+	}
+
+	// File handle should be closed
+	if wal.file != nil {
+		t.Error("WAL file should be closed after truncate")
+	}
+}
+
+func TestCheckpointInvalidMode(t *testing.T) {
+	t.Parallel()
+	wal, _ := createTestWALForCheckpoint(t)
+	defer wal.Close()
+
+	// Invalid checkpoint mode
+	_, _, err := wal.CheckpointWithMode(CheckpointMode(999))
+	if err != ErrCheckpointInvalidMode {
+		t.Errorf("Expected ErrCheckpointInvalidMode, got: %v", err)
+	}
+}
+
+// Test checkpointing with updated pages
+
+func TestCheckpoint_UpdatedPages(t *testing.T) {
+	t.Parallel()
+	wal, dbFile := createTestWALForCheckpoint(t)
+	defer wal.Close()
+
+	pageNum := Pgno(1)
+
+	// Write initial version
+	writeTestFrameToWAL(t, wal, pageNum, 0xAA, 1)
+
+	// Update the page
+	writeTestFrameToWAL(t, wal, pageNum, 0xBB, 1)
+
+	// Update again
+	writeTestFrameToWAL(t, wal, pageNum, 0xCC, 1)
+
+	// Checkpoint - should write the latest version
+	checkpointed, _, err := wal.CheckpointWithMode(CheckpointFull)
+	if err != nil {
+		t.Fatalf("Checkpoint failed: %v", err)
+	}
+
+	// We wrote 3 frames but only 1 unique page
+	if checkpointed != 1 {
+		t.Errorf("Expected 1 unique page checkpointed, got %d", checkpointed)
+	}
+
+	// Verify the latest version is in the database
+	verifyPageInDatabase(t, dbFile, pageNum, 0xCC, DefaultPageSize)
+}
+
+// Test CheckpointWithInfo
+
+func TestCheckpointWithInfo_Passive(t *testing.T) {
+	t.Parallel()
+	wal, _ := createTestWALForCheckpoint(t)
+	defer wal.Close()
+
+	// Write frames
+	for i := 1; i <= 5; i++ {
+		writeTestFrameToWAL(t, wal, Pgno(i), byte(i), uint32(i))
+	}
+
+	// Checkpoint with info
+	info, err := wal.CheckpointWithInfo(CheckpointPassive)
+	if err != nil {
+		t.Fatalf("Checkpoint failed: %v", err)
+	}
+
+	if info == nil {
+		t.Fatal("CheckpointInfo should not be nil")
+	}
+
+	if info.FramesCheckpointed != 5 {
+		t.Errorf("Expected 5 frames checkpointed, got %d", info.FramesCheckpointed)
+	}
+
+	if info.WALSizeBefore == 0 {
+		t.Error("WAL size before should be non-zero")
+	}
+
+	t.Logf("Checkpoint info: checkpointed=%d, remaining=%d, size before=%d, size after=%d",
 		info.FramesCheckpointed, info.FramesRemaining, info.WALSizeBefore, info.WALSizeAfter)
 }
 

@@ -308,13 +308,13 @@ func TestSubstituteOldNewReferences(t *testing.T) {
 	executor := NewTriggerExecutor(ctx)
 	stmt := &parser.InsertStmt{Table: "test"}
 
-	// Should not error (current implementation is a no-op)
-	result, err := executor.substituteOldNewReferences(stmt)
+	// Should not error - creates a copy with OLD/NEW refs substituted
+	result, err := executor.SubstituteOldNewReferences(stmt)
 	if err != nil {
-		t.Errorf("substituteOldNewReferences() returned error: %v", err)
+		t.Errorf("SubstituteOldNewReferences() returned error: %v", err)
 	}
-	if result != stmt {
-		t.Error("substituteOldNewReferences() should return same statement")
+	if result == nil {
+		t.Error("SubstituteOldNewReferences() should return a non-nil statement")
 	}
 }
 

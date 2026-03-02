@@ -20,7 +20,7 @@ func main() {
 	defer os.Remove("demo.db")
 
 	fmt.Println("SQLite JSON Functions Demo")
-	fmt.Println("===========================\n")
+	fmt.Println("===========================")
 
 	// Test 1: json_valid
 	fmt.Println("1. Testing json_valid():")

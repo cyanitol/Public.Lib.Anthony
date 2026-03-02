@@ -1,590 +1,501 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package pager
+package planner
 
 import (
-	"encoding/binary"
-	"os"
+	"strings"
 	"testing"
-	"time"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 )
 
-// TestAcquireSharedLockWithRetryFailure tests when busy handler returns false
-func TestAcquireSharedLockWithRetryFailure(t *testing.T) {
-	t.Parallel()
-	tmpFile, err := os.CreateTemp("", "lock_fail_*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
-
-	pager, err := Open(tmpFile.Name(), false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Set handler that immediately returns false
-	callCount := 0
-	handler := BusyCallback(func(count int) bool {
-		callCount++
-		return false
-	})
-	pager.WithBusyHandler(handler)
-
-	// Should succeed since there's no actual contention
-	err = pager.acquireSharedLockWithRetry()
-	if err != nil && err != ErrDatabaseLocked {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-// TestAcquireReservedLockWithRetryFailure tests reserved lock with failing busy handler
-func TestAcquireReservedLockWithRetryFailure(t *testing.T) {
-	t.Parallel()
-	tmpFile, err := os.CreateTemp("", "lock_reserved_fail_*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
-
-	pager, err := Open(tmpFile.Name(), false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Set handler
-	pager.WithBusyHandler(BusyCallback(func(count int) bool {
-		return false
-	}))
-
-	// Begin write to allow reserved lock
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
+// TestCalculateMaxDependencyLevelComprehensive tests the calculateMaxDependencyLevel function comprehensively.
+func TestCalculateMaxDependencyLevelComprehensive(t *testing.T) {
+	tests := []struct {
+		name        string
+		sql         string
+		cteName     string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "CTE with no dependencies",
+			sql:     "WITH a AS (SELECT 1) SELECT * FROM a",
+			cteName: "a",
+			wantErr: false,
+		},
+		{
+			name:    "CTE with single dependency",
+			sql:     "WITH a AS (SELECT 1), b AS (SELECT * FROM a) SELECT * FROM b",
+			cteName: "b",
+			wantErr: false,
+		},
+		{
+			name:    "CTE with multiple dependencies",
+			sql:     "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT * FROM a UNION SELECT * FROM b) SELECT * FROM c",
+			cteName: "c",
+			wantErr: false,
+		},
+		{
+			name:    "Recursive CTE self-reference",
+			sql:     "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 5) SELECT * FROM cte",
+			cteName: "cte",
+			wantErr: false,
+		},
+		{
+			name:    "CTE with dependency chain",
+			sql:     "WITH a AS (SELECT 1), b AS (SELECT * FROM a), c AS (SELECT * FROM b) SELECT * FROM c",
+			cteName: "c",
+			wantErr: false,
+		},
 	}
 
-	// Try to acquire reserved lock
-	err = pager.acquireReservedLockWithRetry()
-	if err != nil && err != ErrDatabaseLocked && err != ErrReadOnly {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := parser.NewParser(tt.sql)
+			stmts, err := p.Parse()
+			if err != nil {
+				t.Fatalf("Parse failed: %v", err)
+			}
 
-// TestAcquireExclusiveLockWithRetryFailure tests exclusive lock with failing busy handler
-func TestAcquireExclusiveLockWithRetryFailure(t *testing.T) {
-	t.Parallel()
-	tmpFile, err := os.CreateTemp("", "lock_exclusive_fail_*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
+			selectStmt := stmts[0].(*parser.SelectStmt)
+			ctx, err := NewCTEContext(selectStmt.With)
 
-	pager, err := Open(tmpFile.Name(), false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Set handler
-	pager.WithBusyHandler(BusyCallback(func(count int) bool {
-		return false
-	}))
-
-	// Begin write
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	// Try to acquire exclusive lock
-	err = pager.acquireExclusiveLockWithRetry()
-	if err != nil && err != ErrDatabaseLocked {
-		t.Errorf("unexpected error: %v", err)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error containing '%s', got nil", tt.errContains)
+				} else if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Expected error containing '%s', got '%s'", tt.errContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if ctx != nil {
+					def, exists := ctx.GetCTE(tt.cteName)
+					if exists && def.Level < 0 {
+						t.Errorf("Expected non-negative level, got %d", def.Level)
+					}
+				}
+			}
+		})
 	}
 }
 
-// TestCacheRemoveLockedDirtyPage tests removing a dirty page
-func TestCacheRemoveLockedDirtyPage(t *testing.T) {
-	t.Parallel()
-	cache, err := NewLRUCache(LRUCacheConfig{
-		PageSize: 4096,
-		MaxPages: 10,
-	})
-	if err != nil {
-		t.Fatalf("failed to create cache: %v", err)
+// TestCheckCircularDependencyComprehensive tests circular dependency detection thoroughly.
+func TestCheckCircularDependencyComprehensive(t *testing.T) {
+	tests := []struct {
+		name        string
+		sql         string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "No circular dependency - linear chain",
+			sql:     "WITH a AS (SELECT 1), b AS (SELECT * FROM a), c AS (SELECT * FROM b) SELECT * FROM c",
+			wantErr: false,
+		},
+		{
+			name:    "No circular dependency - independent CTEs",
+			sql:     "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT 3) SELECT * FROM a, b, c",
+			wantErr: false,
+		},
+		{
+			name:    "Recursive CTE allowed to reference itself",
+			sql:     "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 10) SELECT * FROM cte",
+			wantErr: false,
+		},
+		{
+			name:    "Complex dependency graph without cycles",
+			sql:     "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT * FROM a), d AS (SELECT * FROM b), e AS (SELECT * FROM c UNION SELECT * FROM d) SELECT * FROM e",
+			wantErr: false,
+		},
+		{
+			name:    "Multiple independent CTEs",
+			sql:     "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT 3) SELECT * FROM a UNION SELECT * FROM b UNION SELECT * FROM c",
+			wantErr: false,
+		},
 	}
 
-	// Add dirty page
-	page := &DbPage{
-		Pgno:  1,
-		Data:  make([]byte, 4096),
-		Flags: PageFlagDirty,
-	}
-	cache.Put(page)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := parser.NewParser(tt.sql)
+			stmts, err := p.Parse()
+			if err != nil {
+				t.Fatalf("Parse failed: %v", err)
+			}
 
-	// Remove it
-	cache.Remove(1)
+			selectStmt := stmts[0].(*parser.SelectStmt)
+			ctx, err := NewCTEContext(selectStmt.With)
+			if err != nil && !tt.wantErr {
+				t.Fatalf("NewCTEContext failed: %v", err)
+			}
 
-	// Should be gone
-	retrieved := cache.Get(1)
-	if retrieved != nil {
-		t.Error("page should have been removed")
-	}
-}
-
-// TestCacheMarkDirtyCleanPage tests marking a clean page dirty
-func TestCacheMarkDirtyCleanPage(t *testing.T) {
-	t.Parallel()
-	cache, err := NewLRUCache(LRUCacheConfig{
-		PageSize: 4096,
-		MaxPages: 10,
-	})
-	if err != nil {
-		t.Fatalf("failed to create cache: %v", err)
-	}
-
-	// Add clean page
-	page := &DbPage{
-		Pgno:  1,
-		Data:  make([]byte, 4096),
-		Flags: PageFlagClean,
-	}
-	cache.Put(page)
-
-	// Verify it's clean
-	dirtyPages := cache.GetDirtyPages()
-	if len(dirtyPages) != 0 {
-		t.Fatalf("should have 0 dirty pages, got %d", len(dirtyPages))
-	}
-
-	// Mark it dirty
-	cache.MarkDirty(page)
-
-	// Should now be dirty
-	dirtyPages = cache.GetDirtyPages()
-	if len(dirtyPages) != 1 {
-		t.Errorf("should have 1 dirty page, got %d", len(dirtyPages))
-	}
-}
-
-// TestFreeListProcessTrunkPageWithSpace tests trunk page with available space
-func TestFreeListProcessTrunkPageWithSpace(t *testing.T) {
-	t.Parallel()
-	tmpFile, err := os.CreateTemp("", "freelist_trunk_space_*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
-
-	pager, err := Open(tmpFile.Name(), false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	// Allocate some pages
-	for i := 0; i < 5; i++ {
-		_, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("failed to allocate: %v", err)
-		}
-	}
-
-	// Setup trunk page with space
-	trunkPgno := Pgno(2)
-	trunk, err := pager.Get(trunkPgno)
-	if err != nil {
-		t.Fatalf("failed to get trunk: %v", err)
-	}
-	pager.Write(trunk)
-
-	// Initialize trunk header with space
-	binary.BigEndian.PutUint32(trunk.Data[0:4], 0) // next trunk
-	binary.BigEndian.PutUint32(trunk.Data[4:8], 1) // 1 leaf page
-
-	pager.Put(trunk)
-
-	// Set as trunk
-	fl := pager.freeList
-	fl.firstTrunk = trunkPgno
-	fl.pendingFree = []Pgno{50}
-
-	// Process - should add to trunk
-	maxLeaves := (int(pager.PageSize()) - FreeListTrunkHeaderSize) / 4
-	err = fl.processTrunkPage(maxLeaves)
-	if err != nil {
-		t.Errorf("processTrunkPage failed: %v", err)
-	}
-
-	pager.Rollback()
-}
-
-// TestFreeListCreateNewTrunkSuccess tests successful trunk creation
-func TestFreeListCreateNewTrunkSuccess(t *testing.T) {
-	t.Parallel()
-	tmpFile, err := os.CreateTemp("", "freelist_newtrunk_ok_*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
-
-	pager, err := Open(tmpFile.Name(), false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	fl := pager.freeList
-
-	// Add pending pages
-	fl.pendingFree = []Pgno{10, 11, 12}
-	fl.firstTrunk = 5
-
-	// Create new trunk
-	err = fl.createNewTrunk()
-	if err != nil {
-		t.Errorf("createNewTrunk failed: %v", err)
-	}
-
-	// Verify trunk was created
-	if fl.firstTrunk == 5 {
-		t.Error("first trunk should have changed")
-	}
-
-	pager.Rollback()
-}
-
-// TestFreeListFlushPendingWithPages tests flushing with pending pages
-func TestFreeListFlushPendingWithPages(t *testing.T) {
-	t.Parallel()
-	tmpFile, err := os.CreateTemp("", "freelist_flush_pages_*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
-
-	pager, err := Open(tmpFile.Name(), false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	// Allocate pages
-	for i := 0; i < 10; i++ {
-		_, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("failed to allocate: %v", err)
-		}
-	}
-
-	fl := pager.freeList
-
-	// Add pending pages
-	fl.pendingFree = []Pgno{3, 4, 5}
-
-	// Flush
-	err = fl.flushPending()
-	if err != nil {
-		t.Errorf("flushPending failed: %v", err)
-	}
-
-	pager.Rollback()
-}
-
-// TestFreeListIterateWithPages tests iteration over freelist
-func TestFreeListIterateWithPages(t *testing.T) {
-	t.Parallel()
-	tmpFile, err := os.CreateTemp("", "freelist_iterate_*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
-
-	pager, err := Open(tmpFile.Name(), false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	// Allocate and free some pages
-	for i := 0; i < 10; i++ {
-		pgno, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("failed to allocate: %v", err)
-		}
-		if i >= 5 {
-			pager.freeList.Free(pgno)
-		}
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Iterate
-	count := 0
-	err = pager.freeList.Iterate(func(pgno Pgno) bool {
-		count++
-		return true
-	})
-
-	if err != nil {
-		t.Errorf("iterate failed: %v", err)
-	}
-
-	t.Logf("iterated over %d free pages", count)
-}
-
-// TestFreeListVerifyValid tests verification of valid freelist
-func TestFreeListVerifyValid(t *testing.T) {
-	t.Parallel()
-	tmpFile, err := os.CreateTemp("", "freelist_verify_valid_*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
-
-	pager, err := Open(tmpFile.Name(), false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	// Allocate and free pages
-	for i := 0; i < 5; i++ {
-		pgno, _ := pager.AllocatePage()
-		if i > 2 {
-			pager.freeList.Free(pgno)
-		}
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Verify
-	err = pager.freeList.Verify()
-	if err != nil {
-		t.Errorf("verify failed: %v", err)
+			if ctx != nil {
+				err = ctx.ValidateCTEs()
+				if tt.wantErr {
+					if err == nil {
+						t.Errorf("Expected error containing '%s', got nil", tt.errContains)
+					} else if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+						t.Errorf("Expected error containing '%s', got '%s'", tt.errContains, err.Error())
+					}
+				} else {
+					if err != nil {
+						t.Errorf("Unexpected error: %v", err)
+					}
+				}
+			}
+		})
 	}
 }
 
-// TestJournalOpenCreateNew tests opening a new journal
-func TestJournalOpenCreateNew(t *testing.T) {
-	t.Parallel()
-	journalFile := "test_open_new.db-journal"
-	defer os.Remove(journalFile)
-
-	journal := NewJournal(journalFile, 4096, 1)
-
-	// Open should create new file
-	err := journal.Open()
-	if err != nil {
-		t.Fatalf("failed to open journal: %v", err)
-	}
-	defer journal.Close()
-
-	// Verify file exists
-	if !journal.Exists() {
-		t.Error("journal file should exist")
-	}
-
-	// Verify it's open
-	if !journal.IsOpen() {
-		t.Error("journal should be open")
-	}
-}
-
-// TestJournalWriteOriginalValidSize tests writing with correct size
-func TestJournalWriteOriginalValidSize(t *testing.T) {
-	t.Parallel()
-	journalFile := "test_write_valid.db-journal"
-	defer os.Remove(journalFile)
-
-	journal := NewJournal(journalFile, 4096, 1)
-	if err := journal.Open(); err != nil {
-		t.Fatalf("failed to open: %v", err)
-	}
-	defer journal.Close()
-
-	// Write with correct size
-	pageData := make([]byte, 4096)
-	for i := range pageData {
-		pageData[i] = byte(i % 256)
+// TestFormatJoinTypeComprehensive tests all join type formatting.
+func TestFormatJoinTypeComprehensive(t *testing.T) {
+	tests := []struct {
+		name     string
+		joinType parser.JoinType
+		expected string
+	}{
+		{
+			name:     "LEFT JOIN",
+			joinType: parser.JoinLeft,
+			expected: "LEFT JOIN",
+		},
+		{
+			name:     "RIGHT JOIN",
+			joinType: parser.JoinRight,
+			expected: "RIGHT JOIN",
+		},
+		{
+			name:     "FULL JOIN",
+			joinType: parser.JoinFull,
+			expected: "FULL JOIN",
+		},
+		{
+			name:     "CROSS JOIN",
+			joinType: parser.JoinCross,
+			expected: "CROSS JOIN",
+		},
+		{
+			name:     "INNER JOIN (default)",
+			joinType: parser.JoinInner,
+			expected: "INNER JOIN",
+		},
+		{
+			name:     "Unknown join type defaults to INNER",
+			joinType: parser.JoinType(999),
+			expected: "INNER JOIN",
+		},
 	}
 
-	err := journal.WriteOriginal(1, pageData)
-	if err != nil {
-		t.Errorf("write should succeed: %v", err)
-	}
-
-	// Verify page count
-	count := journal.GetPageCount()
-	if count != 1 {
-		t.Errorf("expected page count 1, got %d", count)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatJoinType(tt.joinType)
+			if result != tt.expected {
+				t.Errorf("Expected '%s', got '%s'", tt.expected, result)
+			}
+		})
 	}
 }
 
-// TestJournalRollbackSuccess tests successful rollback
-func TestJournalRollbackSuccess(t *testing.T) {
-	t.Parallel()
-	// This is a complex integration test, skip for now
-	t.Skip("Rollback integration test is complex")
+// TestFormatTableScanComprehensive tests table scan formatting with various WHERE conditions.
+func TestFormatTableScanComprehensive(t *testing.T) {
+	tests := []struct {
+		name        string
+		tableName   string
+		where       parser.Expression
+		isWrite     bool
+		expectScan  bool
+		expectIndex bool
+	}{
+		{
+			name:       "No WHERE clause",
+			tableName:  "users",
+			where:      nil,
+			isWrite:    false,
+			expectScan: true,
+		},
+		{
+			name:      "Equality WHERE",
+			tableName: "users",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpEq,
+				Left:  &parser.IdentExpr{Name: "id"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
+			},
+			isWrite:     false,
+			expectIndex: true,
+		},
+		{
+			name:      "Range WHERE with GT",
+			tableName: "users",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpGt,
+				Left:  &parser.IdentExpr{Name: "age"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "18"},
+			},
+			isWrite:     false,
+			expectIndex: true,
+		},
+		{
+			name:      "Range WHERE with LT",
+			tableName: "users",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpLt,
+				Left:  &parser.IdentExpr{Name: "age"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "65"},
+			},
+			isWrite:     false,
+			expectIndex: true,
+		},
+		{
+			name:      "Range WHERE with GE",
+			tableName: "users",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpGe,
+				Left:  &parser.IdentExpr{Name: "score"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "100"},
+			},
+			isWrite:     false,
+			expectIndex: true,
+		},
+		{
+			name:      "Range WHERE with LE",
+			tableName: "users",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpLe,
+				Left:  &parser.IdentExpr{Name: "score"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "200"},
+			},
+			isWrite:     false,
+			expectIndex: true,
+		},
+		{
+			name:      "LIKE expression",
+			tableName: "users",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpLike,
+				Left:  &parser.IdentExpr{Name: "name"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralString, Value: "John%"},
+			},
+			isWrite:     false,
+			expectIndex: true,
+		},
+		{
+			name:      "IN expression",
+			tableName: "users",
+			where: &parser.InExpr{
+				Expr: &parser.IdentExpr{Name: "status"},
+				Values: []parser.Expression{
+					&parser.LiteralExpr{Type: parser.LiteralString, Value: "active"},
+					&parser.LiteralExpr{Type: parser.LiteralString, Value: "pending"},
+				},
+			},
+			isWrite:     false,
+			expectIndex: true,
+		},
+		{
+			name:      "Write operation",
+			tableName: "users",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpEq,
+				Left:  &parser.IdentExpr{Name: "id"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
+			},
+			isWrite:     true,
+			expectIndex: true,
+		},
+		{
+			name:      "AND expression",
+			tableName: "users",
+			where: &parser.BinaryExpr{
+				Op: parser.OpAnd,
+				Left: &parser.BinaryExpr{
+					Op:    parser.OpEq,
+					Left:  &parser.IdentExpr{Name: "age"},
+					Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "25"},
+				},
+				Right: &parser.BinaryExpr{
+					Op:    parser.OpEq,
+					Left:  &parser.IdentExpr{Name: "status"},
+					Right: &parser.LiteralExpr{Type: parser.LiteralString, Value: "active"},
+				},
+			},
+			isWrite:     false,
+			expectIndex: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatTableScan(tt.tableName, tt.where, tt.isWrite)
+
+			if result == "" {
+				t.Error("formatTableScan returned empty string")
+			}
+
+			if !strings.Contains(result, tt.tableName) {
+				t.Errorf("Expected result to contain table name '%s', got '%s'", tt.tableName, result)
+			}
+
+			if tt.expectScan && !strings.Contains(result, "SCAN") {
+				t.Errorf("Expected result to contain 'SCAN', got '%s'", result)
+			}
+
+			if tt.expectIndex && tt.where != nil {
+				if !strings.Contains(result, "SEARCH") && !strings.Contains(result, "SCAN") {
+					t.Errorf("Expected result to contain 'SEARCH' or 'SCAN', got '%s'", result)
+				}
+			}
+		})
+	}
 }
 
-// TestJournalFinalizeSuccess tests successful finalize
-func TestJournalFinalizeSuccess(t *testing.T) {
-	t.Parallel()
-	journalFile := "test_finalize_ok.db-journal"
-	defer os.Remove(journalFile)
-
-	journal := NewJournal(journalFile, 4096, 1)
-	if err := journal.Open(); err != nil {
-		t.Fatalf("failed to open: %v", err)
+// TestFormatTableScanWithWhereDetails tests the formatTableScanWithWhere function.
+func TestFormatTableScanWithWhereDetails(t *testing.T) {
+	tests := []struct {
+		name      string
+		tableName string
+		where     parser.Expression
+	}{
+		{
+			name:      "NULL WHERE",
+			tableName: "users",
+			where:     nil,
+		},
+		{
+			name:      "Binary expression WHERE",
+			tableName: "users",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpEq,
+				Left:  &parser.IdentExpr{Name: "id"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
+			},
+		},
+		{
+			name:      "IN expression WHERE",
+			tableName: "users",
+			where: &parser.InExpr{
+				Expr: &parser.IdentExpr{Name: "id"},
+			},
+		},
+		{
+			name:      "Other expression type",
+			tableName: "users",
+			where:     &parser.UnaryExpr{Op: parser.OpNot, Expr: &parser.IdentExpr{Name: "deleted"}},
+		},
 	}
 
-	// Write data
-	pageData := make([]byte, 4096)
-	journal.WriteOriginal(1, pageData)
-
-	// Finalize
-	err := journal.Finalize()
-	if err != nil {
-		t.Errorf("finalize failed: %v", err)
-	}
-
-	// File should be deleted
-	if journal.Exists() {
-		t.Error("journal should not exist after finalize")
-	}
-}
-
-// TestJournalDeleteSuccess tests successful delete
-func TestJournalDeleteSuccess(t *testing.T) {
-	t.Parallel()
-	journalFile := "test_delete_ok.db-journal"
-	defer os.Remove(journalFile)
-
-	journal := NewJournal(journalFile, 4096, 1)
-	if err := journal.Open(); err != nil {
-		t.Fatalf("failed to open: %v", err)
-	}
-
-	// Delete
-	err := journal.Delete()
-	if err != nil {
-		t.Errorf("delete failed: %v", err)
-	}
-
-	// Should not exist
-	if journal.Exists() {
-		t.Error("journal should not exist after delete")
-	}
-
-	// Should not be open
-	if journal.IsOpen() {
-		t.Error("journal should not be open after delete")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatTableScanWithWhere(tt.tableName, tt.where)
+			if result == "" {
+				t.Error("formatTableScanWithWhere returned empty string")
+			}
+			if !strings.Contains(result, tt.tableName) {
+				t.Errorf("Expected result to contain table name '%s', got '%s'", tt.tableName, result)
+			}
+		})
 	}
 }
 
-// TestJournalIsValidAfterWrite tests validation after writing
-func TestJournalIsValidAfterWrite(t *testing.T) {
-	t.Parallel()
-	journalFile := "test_valid_after_write.db-journal"
-	defer os.Remove(journalFile)
-
-	journal := NewJournal(journalFile, 4096, 1)
-	if err := journal.Open(); err != nil {
-		t.Fatalf("failed to open: %v", err)
-	}
-
-	// Write data
-	pageData := make([]byte, 4096)
-	journal.WriteOriginal(1, pageData)
-	journal.Sync()
-	journal.Close()
-
-	// Check validity
-	valid, err := journal.IsValid()
-	if err != nil {
-		t.Logf("IsValid returned error: %v", err)
-	}
-	t.Logf("Journal validity: %v", valid)
-}
-
-// TestParseDBHeaderValid tests parsing valid header
-func TestParseDBHeaderValid(t *testing.T) {
-	t.Parallel()
-	// Create valid header
-	header := make([]byte, 100)
-	copy(header[0:16], []byte("SQLite format 3\x00"))
-	binary.BigEndian.PutUint16(header[16:18], 4096) // page size
-	header[18] = 1 // file format write version
-	header[19] = 1 // file format read version
-
-	parsed, err := ParseDatabaseHeader(header)
-	if err != nil {
-		t.Errorf("failed to parse valid header: %v", err)
-	}
-
-	if parsed.PageSize != 4096 {
-		t.Errorf("expected page size 4096, got %d", parsed.PageSize)
-	}
-}
-
-// TestBusyHandlerMultipleRetries tests handler with multiple retries
-func TestBusyHandlerMultipleRetries(t *testing.T) {
-	t.Parallel()
-	retries := 0
-	maxRetries := 3
-
-	handler := BusyCallback(func(count int) bool {
-		retries++
-		time.Sleep(1 * time.Millisecond)
-		return count < maxRetries
-	})
-
-	// Simulate retries
-	count := 0
-	for handler.Busy(count) {
-		count++
-		if count > 10 {
-			break
-		}
-	}
-
-	if retries != maxRetries+1 {
-		t.Errorf("expected %d retries, got %d", maxRetries+1, retries)
-	}
-}
-LiteralInteger, Value: "2"},
+// TestAnalyzeIndexabilityComprehensive tests the analyzeIndexability function.
+func TestAnalyzeIndexabilityComprehensive(t *testing.T) {
+	tests := []struct {
+		name            string
+		where           parser.Expression
+		expectIndexable bool
+		expectColName   string
+	}{
+		{
+			name:            "Nil expression",
+			where:           nil,
+			expectIndexable: false,
+			expectColName:   "",
+		},
+		{
+			name: "Equality expression",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpEq,
+				Left:  &parser.IdentExpr{Name: "id"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
+			},
+			expectIndexable: true,
+			expectColName:   "id",
+		},
+		{
+			name: "Greater than expression",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpGt,
+				Left:  &parser.IdentExpr{Name: "age"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "18"},
+			},
+			expectIndexable: true,
+			expectColName:   "age",
+		},
+		{
+			name: "Less than expression",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpLt,
+				Left:  &parser.IdentExpr{Name: "age"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "65"},
+			},
+			expectIndexable: true,
+			expectColName:   "age",
+		},
+		{
+			name: "Greater or equal expression",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpGe,
+				Left:  &parser.IdentExpr{Name: "score"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "100"},
+			},
+			expectIndexable: true,
+			expectColName:   "score",
+		},
+		{
+			name: "Less or equal expression",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpLe,
+				Left:  &parser.IdentExpr{Name: "score"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "200"},
+			},
+			expectIndexable: true,
+			expectColName:   "score",
+		},
+		{
+			name: "LIKE expression (not indexable in simple analysis)",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpLike,
+				Left:  &parser.IdentExpr{Name: "name"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralString, Value: "John%"},
+			},
+			expectIndexable: false,
+			expectColName:   "name", // Still extracts column name
+		},
+		{
+			name: "Non-binary expression (IN)",
+			where: &parser.InExpr{
+				Expr: &parser.IdentExpr{Name: "status"},
+			},
+			expectIndexable: false,
+			expectColName:   "",
+		},
+		{
+			name: "Non-indexable binary expression (OR)",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpOr,
+				Left:  &parser.IdentExpr{Name: "a"},
+				Right: &parser.IdentExpr{Name: "b"},
+			},
+			expectIndexable: false,
+			expectColName:   "a", // Still extracts column name even if not indexable
+		},
+		{
+			name: "Binary expression with non-ident left side",
+			where: &parser.BinaryExpr{
+				Op:    parser.OpEq,
+				Left:  &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
+				Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "2"},
 			},
 			expectIndexable: false,
 			expectColName:   "",

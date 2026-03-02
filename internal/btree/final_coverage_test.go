@@ -251,7 +251,7 @@ func TestAllErrorPaths(t *testing.T) {
 	// Try operations on empty cursor
 	indexCursor.GetKey()
 	indexCursor.GetRowid()
-	indexCursor.String()
+	_ = indexCursor.String()
 }
 
 // TestEdgeCasesInNavigation tests edge cases in tree navigation

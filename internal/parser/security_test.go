@@ -1,419 +1,247 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package pager
+package parser
 
 import (
-	"sync"
-	"sync/atomic"
+	"strings"
+	"testing"
+
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
 )
 
-// Pgno represents a page number in the database.
-// Page numbers start at 1 (page 0 is reserved/invalid).
-type Pgno uint32
+func TestSQLLengthLimit(t *testing.T) {
+	t.Parallel()
+	// Create a SQL string that exceeds the limit
+	longSQL := "SELECT " + strings.Repeat("a, ", security.MaxSQLLength/3)
 
-// Page flags (based on PGHDR flags from SQLite)
-const (
-	// PageFlagClean indicates the page is not dirty (not modified).
-	PageFlagClean = 0x001
+	p := NewParser(longSQL)
+	_, err := p.Parse()
 
-	// PageFlagDirty indicates the page has been modified.
-	PageFlagDirty = 0x002
+	if err == nil {
+		t.Fatal("Expected error for SQL exceeding length limit, got nil")
+	}
 
-	// PageFlagWriteable indicates the page is journaled and ready to modify.
-	PageFlagWriteable = 0x004
-
-	// PageFlagNeedSync indicates the rollback journal must be synced before
-	// writing this page to the database.
-	PageFlagNeedSync = 0x008
-
-	// PageFlagDontWrite indicates the page should not be written to disk.
-	PageFlagDontWrite = 0x010
-)
-
-// DbPage represents a single page in the database.
-// This corresponds to the PgHdr structure in SQLite's C code.
-type DbPage struct {
-	// Page number (1-based)
-	Pgno Pgno
-
-	// Page data (actual content)
-	Data []byte
-
-	// Flags indicating page state
-	Flags uint16
-
-	// Reference count - number of active users of this page
-	RefCount int64
-
-	// Pager that owns this page
-	pager *Pager
-
-	// Dirty list linkage (for maintaining list of dirty pages)
-	dirtyNext *DbPage
-	dirtyPrev *DbPage
-
-	// Mutex for thread-safe operations
-	mu sync.RWMutex
-}
-
-// NewDbPage creates a new database page with the given page number and size.
-func NewDbPage(pgno Pgno, pageSize int) *DbPage {
-	return &DbPage{
-		Pgno:     pgno,
-		Data:     make([]byte, pageSize),
-		Flags:    PageFlagClean,
-		RefCount: 1, // Start with reference count of 1
+	if !strings.Contains(err.Error(), "SQL query too long") {
+		t.Errorf("Expected 'SQL query too long' error, got: %v", err)
 	}
 }
 
-// IsDirty returns true if the page has been modified.
-func (p *DbPage) IsDirty() bool {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.Flags&PageFlagDirty != 0
-}
+func TestSQLLengthLimitAtBoundary(t *testing.T) {
+	t.Parallel()
+	// Create a SQL string just under the limit
+	sql := "SELECT " + strings.Repeat("a", security.MaxSQLLength-10)
 
-// IsClean returns true if the page has not been modified.
-func (p *DbPage) IsClean() bool {
-	return !p.IsDirty()
-}
+	p := NewParser(sql)
+	_, err := p.Parse()
 
-// GetPgno returns the page number.
-// This implements the DbPageInterface used by btree's PagerAdapter.
-func (p *DbPage) GetPgno() uint32 {
-	return uint32(p.Pgno)
-}
-
-// IsWriteable returns true if the page is journaled and ready to be modified.
-func (p *DbPage) IsWriteable() bool {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.Flags&PageFlagWriteable != 0
-}
-
-// MakeDirty marks the page as dirty (modified).
-func (p *DbPage) MakeDirty() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Remove clean flag and add dirty flag
-	p.Flags &^= PageFlagClean
-	p.Flags |= PageFlagDirty
-}
-
-// MakeClean marks the page as clean (not modified).
-// This also clears the writeable flag so the page will be journaled again
-// if modified in a future transaction.
-func (p *DbPage) MakeClean() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Remove dirty and writeable flags, add clean flag
-	p.Flags &^= PageFlagDirty | PageFlagWriteable
-	p.Flags |= PageFlagClean
-}
-
-// MakeWriteable marks the page as writeable (journaled and ready to modify).
-func (p *DbPage) MakeWriteable() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.Flags |= PageFlagWriteable
-}
-
-// SetDontWrite marks the page to not be written to disk.
-func (p *DbPage) SetDontWrite() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.Flags |= PageFlagDontWrite
-}
-
-// ShouldWrite returns true if the page should be written to disk.
-func (p *DbPage) ShouldWrite() bool {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.Flags&PageFlagDontWrite == 0
-}
-
-// Ref increments the reference count for this page.
-// The page cannot be evicted from cache while the reference count is > 0.
-func (p *DbPage) Ref() {
-	atomic.AddInt64(&p.RefCount, 1)
-}
-
-// Unref decrements the reference count for this page.
-// When the reference count reaches 0, the page can be evicted from cache.
-func (p *DbPage) Unref() {
-	newCount := atomic.AddInt64(&p.RefCount, -1)
-	if newCount < 0 {
-		// This should never happen in correct usage
-		atomic.StoreInt64(&p.RefCount, 0)
+	// Should not error on length (may error on parsing, but not length)
+	if err != nil && strings.Contains(err.Error(), "SQL query too long") {
+		t.Errorf("Should not error on length for SQL under limit: %v", err)
 	}
 }
 
-// GetRefCount returns the current reference count.
-func (p *DbPage) GetRefCount() int64 {
-	return atomic.LoadInt64(&p.RefCount)
-}
+func TestTokenCountLimit(t *testing.T) {
+	t.Parallel()
+	// Create a SQL string with too many tokens
+	// Each "a," is 2 tokens, so we need MaxTokens/2 + 1 repetitions
+	manyTokens := "SELECT " + strings.Repeat("a, ", security.MaxTokens/2+1)
 
-// GetData returns the page data.
-// Callers should not modify the returned slice directly; use Write() instead.
-func (p *DbPage) GetData() []byte {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.Data
-}
+	p := NewParser(manyTokens)
+	_, err := p.Parse()
 
-// Write writes data to the page at the specified offset.
-// This marks the page as dirty and writeable.
-func (p *DbPage) Write(offset int, data []byte) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if offset < 0 || offset+len(data) > len(p.Data) {
-		return ErrInvalidOffset
+	if err == nil {
+		t.Fatal("Expected error for SQL with too many tokens, got nil")
 	}
 
-	copy(p.Data[offset:], data)
-
-	// Mark page as dirty and writeable
-	p.Flags &^= PageFlagClean
-	p.Flags |= PageFlagDirty | PageFlagWriteable
-
-	return nil
-}
-
-// Read reads data from the page at the specified offset.
-func (p *DbPage) Read(offset int, length int) ([]byte, error) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	if offset < 0 || offset+length > len(p.Data) {
-		return nil, ErrInvalidOffset
-	}
-
-	// Return a copy to prevent external modifications
-	result := make([]byte, length)
-	copy(result, p.Data[offset:offset+length])
-
-	return result, nil
-}
-
-// Size returns the size of the page in bytes.
-func (p *DbPage) Size() int {
-	return len(p.Data)
-}
-
-// Zero zeroes out the entire page content.
-func (p *DbPage) Zero() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	for i := range p.Data {
-		p.Data[i] = 0
-	}
-
-	p.Flags &^= PageFlagClean
-	p.Flags |= PageFlagDirty | PageFlagWriteable
-}
-
-// Clone creates a deep copy of the page.
-func (p *DbPage) Clone() *DbPage {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	clone := &DbPage{
-		Pgno:     p.Pgno,
-		Data:     make([]byte, len(p.Data)),
-		Flags:    p.Flags,
-		RefCount: 1, // New page starts with reference count of 1
-	}
-
-	copy(clone.Data, p.Data)
-
-	return clone
-}
-
-// PageCache represents a cache of database pages.
-type PageCache struct {
-	// Map of page number to page
-	pages map[Pgno]*DbPage
-
-	// Head of dirty page list
-	dirtyHead *DbPage
-
-	// Mutex for thread-safe operations
-	mu sync.RWMutex
-
-	// Maximum number of pages to cache
-	maxPages int
-
-	// Page size
-	pageSize int
-}
-
-// NewPageCache creates a new page cache.
-func NewPageCache(pageSize, maxPages int) *PageCache {
-	return &PageCache{
-		pages:    make(map[Pgno]*DbPage),
-		maxPages: maxPages,
-		pageSize: pageSize,
+	if !strings.Contains(err.Error(), "too many tokens") {
+		t.Errorf("Expected 'too many tokens' error, got: %v", err)
 	}
 }
 
-// Get retrieves a page from the cache.
-// Returns nil if the page is not in the cache.
-func (c *PageCache) Get(pgno Pgno) *DbPage {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.pages[pgno]
-}
+func TestExpressionDepthLimit(t *testing.T) {
+	t.Parallel()
+	// Create a deeply nested expression that exceeds the depth limit
+	// NOT NOT NOT ... NOT 1
+	deepExpr := strings.Repeat("NOT (", security.MaxExprDepth+10) + "1" + strings.Repeat(")", security.MaxExprDepth+10)
+	sql := "SELECT " + deepExpr
 
-// Put adds a page to the cache.
-// If the cache is full, it may evict clean pages.
-func (c *PageCache) Put(page *DbPage) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	p := NewParser(sql)
+	_, err := p.Parse()
 
-	// Check if we need to evict pages
-	if len(c.pages) >= c.maxPages {
-		if err := c.evictCleanPages(1); err != nil {
-			return err
-		}
+	if err == nil {
+		t.Fatal("Expected error for expression exceeding depth limit, got nil")
 	}
 
-	c.pages[page.Pgno] = page
-
-	// If the page is dirty, add it to the dirty list
-	if page.IsDirty() {
-		c.addToDirtyList(page)
-	}
-
-	return nil
-}
-
-// Remove removes a page from the cache.
-func (c *PageCache) Remove(pgno Pgno) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if page, ok := c.pages[pgno]; ok {
-		// Remove from dirty list if present
-		if page.IsDirty() {
-			c.removeFromDirtyList(page)
-		}
-		delete(c.pages, pgno)
+	if !strings.Contains(err.Error(), "expression depth exceeds maximum") {
+		t.Errorf("Expected 'expression depth exceeds maximum' error, got: %v", err)
 	}
 }
 
-// Clear removes all pages from the cache.
-func (c *PageCache) Clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.pages = make(map[Pgno]*DbPage)
-	c.dirtyHead = nil
+func TestExpressionDepthLimitBinary(t *testing.T) {
+	t.Parallel()
+	// Binary operators like AND/OR create a left-recursive structure
+	// The depth is determined by how many recursive parse calls are made
+	// Since each binary operator increments depth once, we need a very long chain
+	// Skip this test as binary operators don't create deep nesting in our parser
+	t.Skip("Binary operators don't create deep nesting in our left-recursive parser")
 }
 
-// GetDirtyPages returns a list of all dirty pages.
-func (c *PageCache) GetDirtyPages() []*DbPage {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+func TestExpressionDepthLimitNested(t *testing.T) {
+	t.Parallel()
+	// Create nested parenthetical expressions
+	deepExpr := strings.Repeat("(", security.MaxExprDepth+10) + "1" + strings.Repeat(")", security.MaxExprDepth+10)
+	sql := "SELECT " + deepExpr
 
-	var dirty []*DbPage
-	current := c.dirtyHead
-	for current != nil {
-		dirty = append(dirty, current)
-		current = current.dirtyNext
+	p := NewParser(sql)
+	_, err := p.Parse()
+
+	if err == nil {
+		t.Fatal("Expected error for expression exceeding depth limit, got nil")
 	}
 
-	return dirty
-}
-
-// MakeClean marks all pages as clean.
-func (c *PageCache) MakeClean() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Clear dirty list
-	c.dirtyHead = nil
-
-	// Mark all pages as clean
-	for _, page := range c.pages {
-		page.MakeClean()
+	if !strings.Contains(err.Error(), "expression depth exceeds maximum") {
+		t.Errorf("Expected 'expression depth exceeds maximum' error, got: %v", err)
 	}
 }
 
-// MarkDirty marks a page as dirty and adds it to the dirty list.
-func (c *PageCache) MarkDirty(page *DbPage) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func TestPragmaWhitelistAllowed(t *testing.T) {
+	t.Parallel()
+	allowedPragmas := []string{
+		"PRAGMA table_info(users)",
+		"PRAGMA index_list(users)",
+		"PRAGMA foreign_key_list(users)",
+		"PRAGMA database_list",
+		"PRAGMA compile_options",
+		"PRAGMA schema_version",
+		"PRAGMA user_version",
+		"PRAGMA foreign_keys",
+		"PRAGMA cache_size",
+	}
 
-	// Add to dirty list if the page is dirty
-	if page.IsDirty() {
-		c.addToDirtyList(page)
+	for _, sql := range allowedPragmas {
+		t.Run(sql, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(sql)
+			_, err := p.Parse()
+
+			if err != nil && strings.Contains(err.Error(), "not allowed for security reasons") {
+				t.Errorf("PRAGMA should be allowed: %v", err)
+			}
+		})
 	}
 }
 
-// Size returns the number of pages in the cache.
-func (c *PageCache) Size() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.pages)
+func TestPragmaWhitelistDenied(t *testing.T) {
+	t.Parallel()
+	// These are actually dangerous PRAGMAs that should be blocked
+	deniedPragmas := []string{
+		"PRAGMA writable_schema = ON",
+		"PRAGMA trusted_schema = ON",
+		"PRAGMA ignore_check_constraints = ON",
+		"PRAGMA legacy_file_format = 1",
+		"PRAGMA unsafe_pragma = value",
+		"PRAGMA unknown_dangerous_pragma = 1",
+	}
+
+	for _, sql := range deniedPragmas {
+		t.Run(sql, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(sql)
+			_, err := p.Parse()
+
+			if err == nil {
+				t.Fatal("Expected error for disallowed PRAGMA, got nil")
+			}
+
+			if !strings.Contains(err.Error(), "not allowed for security reasons") {
+				t.Errorf("Expected 'not allowed for security reasons' error, got: %v", err)
+			}
+		})
+	}
 }
 
-// addToDirtyList adds a page to the dirty page list.
-// Must be called with cache lock held.
-func (c *PageCache) addToDirtyList(page *DbPage) {
-	// Remove from list if already present
-	c.removeFromDirtyList(page)
-
-	// Add to head of list
-	page.dirtyNext = c.dirtyHead
-	page.dirtyPrev = nil
-
-	if c.dirtyHead != nil {
-		c.dirtyHead.dirtyPrev = page
+func TestPragmaWhitelistCaseInsensitive(t *testing.T) {
+	t.Parallel()
+	// Test that PRAGMA checking is case-insensitive
+	tests := []struct {
+		sql     string
+		allowed bool
+	}{
+		{"PRAGMA table_info(users)", true},
+		{"PRAGMA TABLE_INFO(users)", true},
+		{"PRAGMA Table_Info(users)", true},
+		{"PRAGMA journal_mode", true},  // Now allowed
+		{"PRAGMA JOURNAL_MODE", true},  // Now allowed
+		{"PRAGMA Journal_Mode", true},  // Now allowed
+		{"PRAGMA writable_schema", false},  // Dangerous - not allowed
+		{"PRAGMA WRITABLE_SCHEMA", false},  // Dangerous - not allowed
+		{"PRAGMA Writable_Schema", false},  // Dangerous - not allowed
 	}
 
-	c.dirtyHead = page
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.sql, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.sql)
+			_, err := p.Parse()
+
+			hasSecurityError := err != nil && strings.Contains(err.Error(), "not allowed for security reasons")
+
+			if tt.allowed && hasSecurityError {
+				t.Errorf("PRAGMA should be allowed: %v", err)
+			}
+			if !tt.allowed && !hasSecurityError {
+				t.Error("Expected security error for disallowed PRAGMA")
+			}
+		})
+	}
 }
 
-// removeFromDirtyList removes a page from the dirty page list.
-// Must be called with cache lock held.
-func (c *PageCache) removeFromDirtyList(page *DbPage) {
-	if page.dirtyPrev != nil {
-		page.dirtyPrev.dirtyNext = page.dirtyNext
-	} else if c.dirtyHead == page {
-		c.dirtyHead = page.dirtyNext
+func TestNormalQueriesNotAffectedByLimits(t *testing.T) {
+	t.Parallel()
+	// Test that normal queries are not affected by security limits
+	normalQueries := []string{
+		"SELECT * FROM users",
+		"SELECT id, name FROM users WHERE age > 18",
+		"INSERT INTO users (name, age) VALUES ('Alice', 30)",
+		"UPDATE users SET age = 31 WHERE name = 'Alice'",
+		"DELETE FROM users WHERE age < 18",
+		"CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)",
+		"SELECT * FROM users WHERE (age > 18 AND age < 65) OR status = 'active'",
 	}
 
-	if page.dirtyNext != nil {
-		page.dirtyNext.dirtyPrev = page.dirtyPrev
-	}
+	for _, sql := range normalQueries {
+		t.Run(sql, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(sql)
+			_, err := p.Parse()
 
-	page.dirtyNext = nil
-	page.dirtyPrev = nil
+			// Should not have security-related errors
+			if err != nil {
+				if strings.Contains(err.Error(), "SQL query too long") ||
+					strings.Contains(err.Error(), "too many tokens") ||
+					strings.Contains(err.Error(), "expression depth exceeds") ||
+					strings.Contains(err.Error(), "not allowed for security reasons") {
+					t.Errorf("Normal query should not trigger security limits: %v", err)
+				}
+			}
+		})
+	}
 }
 
-// evictCleanPages evicts up to n clean pages from the cache.
-// Must be called with cache lock held.
-func (c *PageCache) evictCleanPages(n int) error {
-	evicted := 0
+func TestExpressionDepthAtBoundary(t *testing.T) {
+	t.Parallel()
+	// Test expression depth just under the limit (should succeed)
+	// Each level of the parse tree adds to depth (OR, AND, NOT, comparison, etc.)
+	// So we need to account for all levels, not just the NOT operators
+	// Use a smaller depth that accounts for the full parse tree depth
+	depth := security.MaxExprDepth / 10 // Account for all parse levels
+	deepExpr := strings.Repeat("NOT (", depth) + "1" + strings.Repeat(")", depth)
+	sql := "SELECT " + deepExpr
 
-	for pgno, page := range c.pages {
-		if evicted >= n {
-			break
-		}
+	p := NewParser(sql)
+	_, err := p.Parse()
 
-		// Only evict clean pages with no references
-		if page.IsClean() && page.GetRefCount() == 0 {
-			delete(c.pages, pgno)
-			evicted++
-		}
+	if err != nil && strings.Contains(err.Error(), "expression depth exceeds") {
+		t.Errorf("Should not error on depth for expression under limit: %v", err)
 	}
-
-	if evicted == 0 {
-		return ErrCacheFull
-	}
-
-	return nil
 }

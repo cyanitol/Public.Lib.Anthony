@@ -1,1165 +1,906 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package planner
+package pager
 
 import (
+	"encoding/binary"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
-// TestNewIndexSelector tests creating a new index selector.
-func TestNewIndexSelector(t *testing.T) {
-	table := &TableInfo{
-		Name: "users",
-		Indexes: []*IndexInfo{
-			{Name: "idx_name", Columns: []IndexColumn{{Name: "name", Index: 0}}},
-		},
-	}
-	terms := []*WhereTerm{
-		{LeftColumn: 0, Operator: WO_EQ, RightValue: "test"},
-	}
-	costModel := NewCostModel()
+// TestWALCreation tests creating a new WAL file
+func TestWALCreation(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
 
-	selector := NewIndexSelector(table, terms, costModel)
-	if selector == nil {
-		t.Fatal("NewIndexSelector returned nil")
+	// Create empty database file
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
-	if selector.Table != table {
-		t.Error("Table not set correctly")
+
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
 	}
-	if len(selector.Terms) != 1 {
-		t.Errorf("Expected 1 term, got %d", len(selector.Terms))
+	defer wal.Close()
+
+	// Verify WAL file was created
+	walFile := dbFile + "-wal"
+	if _, err := os.Stat(walFile); os.IsNotExist(err) {
+		t.Errorf("WAL file was not created")
 	}
-	if selector.CostModel == nil {
-		t.Error("CostModel not set")
+
+	// Verify WAL is initialized
+	if !wal.initialized {
+		t.Errorf("WAL not marked as initialized")
+	}
+
+	// Verify frame count is 0
+	if wal.frameCount != 0 {
+		t.Errorf("Expected frameCount=0, got %d", wal.frameCount)
 	}
 }
 
-// TestSelectBestIndex tests index selection.
-func TestSelectBestIndex(t *testing.T) {
-	tests := []struct {
-		name        string
-		table       *TableInfo
-		terms       []*WhereTerm
-		wantIndex   string
-		wantNil     bool
+// TestWALHeader tests WAL header serialization and parsing
+func TestWALHeader(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+
+	originalSalt1 := wal.salt1
+	originalSalt2 := wal.salt2
+	originalCheckpoint := wal.checkpointSeq
+
+	wal.Close()
+
+	// Reopen and verify header was persisted
+	wal2 := NewWAL(dbFile, DefaultPageSize)
+	if err := wal2.Open(); err != nil {
+		t.Fatalf("Failed to reopen WAL: %v", err)
+	}
+	defer wal2.Close()
+
+	if wal2.salt1 != originalSalt1 {
+		t.Errorf("Salt1 mismatch: expected %d, got %d", originalSalt1, wal2.salt1)
+	}
+
+	if wal2.salt2 != originalSalt2 {
+		t.Errorf("Salt2 mismatch: expected %d, got %d", originalSalt2, wal2.salt2)
+	}
+
+	if wal2.checkpointSeq != originalCheckpoint {
+		t.Errorf("Checkpoint seq mismatch: expected %d, got %d", originalCheckpoint, wal2.checkpointSeq)
+	}
+}
+
+// TestWALWriteFrame tests writing frames to the WAL
+func TestWALWriteFrame(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
+
+	// Create test page data
+	pageData := make([]byte, DefaultPageSize)
+	for i := range pageData {
+		pageData[i] = byte(i % 256)
+	}
+
+	// Write frame
+	if err := wal.WriteFrame(1, pageData, 1); err != nil {
+		t.Fatalf("Failed to write frame: %v", err)
+	}
+
+	// Verify frame count
+	if wal.frameCount != 1 {
+		t.Errorf("Expected frameCount=1, got %d", wal.frameCount)
+	}
+
+	// Write another frame
+	pageData2 := make([]byte, DefaultPageSize)
+	for i := range pageData2 {
+		pageData2[i] = byte((i + 100) % 256)
+	}
+
+	if err := wal.WriteFrame(2, pageData2, 2); err != nil {
+		t.Fatalf("Failed to write second frame: %v", err)
+	}
+
+	if wal.frameCount != 2 {
+		t.Errorf("Expected frameCount=2, got %d", wal.frameCount)
+	}
+}
+
+// TestWALReadFrame tests reading frames from the WAL
+func TestWALReadFrame(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
+
+	// Create and write test pages
+	testPages := []struct {
+		pgno Pgno
+		data []byte
 	}{
-		{
-			name: "no indexes",
-			table: &TableInfo{
-				Name:    "users",
-				Indexes: []*IndexInfo{},
-			},
-			terms:   []*WhereTerm{},
-			wantNil: true,
-		},
-		{
-			name: "single index matching term",
-			table: &TableInfo{
-				Name: "users",
-				Indexes: []*IndexInfo{
-					{
-						Name: "idx_name",
-						Columns: []IndexColumn{
-							{Name: "name", Index: 0},
-						},
-					},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: "test"},
-			},
-			wantIndex: "idx_name",
-		},
-		{
-			name: "multiple indexes choose best",
-			table: &TableInfo{
-				Name: "users",
-				Indexes: []*IndexInfo{
-					{
-						Name: "idx_name",
-						Columns: []IndexColumn{
-							{Name: "name", Index: 0},
-						},
-					},
-					{
-						Name:    "idx_pk",
-						Primary: true,
-						Unique:  true,
-						Columns: []IndexColumn{
-							{Name: "id", Index: 1},
-						},
-					},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 1, Operator: WO_EQ, RightValue: 1},
-			},
-			wantIndex: "idx_pk",
-		},
-		{
-			name: "unique index preferred",
-			table: &TableInfo{
-				Name: "users",
-				Indexes: []*IndexInfo{
-					{
-						Name: "idx_email",
-						Unique: true,
-						Columns: []IndexColumn{
-							{Name: "email", Index: 0},
-						},
-					},
-					{
-						Name: "idx_name",
-						Columns: []IndexColumn{
-							{Name: "name", Index: 1},
-						},
-					},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: "test@test.com"},
-				{LeftColumn: 1, Operator: WO_EQ, RightValue: "test"},
-			},
-			wantIndex: "idx_email",
-		},
-		{
-			name: "no usable index returns nil",
-			table: &TableInfo{
-				Name: "users",
-				Indexes: []*IndexInfo{
-					{
-						Name: "idx_name",
-						Columns: []IndexColumn{
-							{Name: "name", Index: 0},
-						},
-					},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 1, Operator: WO_EQ, RightValue: "test"},
-			},
-			wantNil: true,
-		},
+		{1, makeTestPage(1, DefaultPageSize)},
+		{2, makeTestPage(2, DefaultPageSize)},
+		{3, makeTestPage(3, DefaultPageSize)},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			selector := NewIndexSelector(tt.table, tt.terms, NewCostModel())
-			result := selector.SelectBestIndex()
+	for i, tp := range testPages {
+		if err := wal.WriteFrame(tp.pgno, tp.data, uint32(i+1)); err != nil {
+			t.Fatalf("Failed to write frame %d: %v", i, err)
+		}
+	}
 
-			if tt.wantNil {
-				if result != nil {
-					t.Errorf("Expected nil, got index %s", result.Name)
-				}
-			} else {
-				if result == nil {
-					t.Fatalf("Expected index %s, got nil", tt.wantIndex)
-				}
-				if result.Name != tt.wantIndex {
-					t.Errorf("Expected index %s, got %s", tt.wantIndex, result.Name)
-				}
-			}
-		})
+	// Read frames back
+	for i, tp := range testPages {
+		frame, err := wal.ReadFrame(uint32(i))
+		if err != nil {
+			t.Fatalf("Failed to read frame %d: %v", i, err)
+		}
+
+		if frame.PageNumber != uint32(tp.pgno) {
+			t.Errorf("Frame %d: wrong page number, expected %d, got %d", i, tp.pgno, frame.PageNumber)
+		}
+
+		if !bytesEqual(frame.Data, tp.data) {
+			t.Errorf("Frame %d: data mismatch", i)
+		}
 	}
 }
 
-// TestScoreIndex tests index scoring algorithm.
-func TestScoreIndex(t *testing.T) {
-	tests := []struct {
-		name      string
-		index     *IndexInfo
-		terms     []*WhereTerm
-		minScore  float64
-		maxScore  float64
-	}{
-		{
-			name: "equality constraint",
-			index: &IndexInfo{
-				Name: "idx_name",
-				Columns: []IndexColumn{
-					{Name: "name", Index: 0},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: "test"},
-			},
-			minScore: 10.0,
-		},
-		{
-			name: "unique index bonus",
-			index: &IndexInfo{
-				Name:   "idx_email",
-				Unique: true,
-				Columns: []IndexColumn{
-					{Name: "email", Index: 0},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: "test@test.com"},
-			},
-			minScore: 30.0, // 10 (term) + 5 (eq) + 20 (unique)
-		},
-		{
-			name: "primary key bonus",
-			index: &IndexInfo{
-				Name:    "idx_pk",
-				Primary: true,
-				Columns: []IndexColumn{
-					{Name: "id", Index: 0},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: 1},
-			},
-			minScore: 25.0, // 10 (term) + 5 (eq) + 15 (primary)
-		},
-		{
-			name: "range operator lower score",
-			index: &IndexInfo{
-				Name: "idx_age",
-				Columns: []IndexColumn{
-					{Name: "age", Index: 0},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_GT, RightValue: 18},
-			},
-			minScore: 10.0, // 10 (term) + 1 (range)
-		},
-		{
-			name: "IN operator",
-			index: &IndexInfo{
-				Name: "idx_status",
-				Columns: []IndexColumn{
-					{Name: "status", Index: 0},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_IN},
-			},
-			minScore: 10.0, // 10 (term) + 3 (IN)
-		},
-		{
-			name: "multi-column index penalty",
-			index: &IndexInfo{
-				Name: "idx_compound",
-				Columns: []IndexColumn{
-					{Name: "col1", Index: 0},
-					{Name: "col2", Index: 1},
-					{Name: "col3", Index: 2},
-					{Name: "col4", Index: 3},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: 1},
-			},
-			maxScore: 20.0, // Gets penalty for wide index
-		},
+// TestWALFindPage tests finding the latest version of a page
+func TestWALFindPage(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			selector := NewIndexSelector(&TableInfo{}, tt.terms, NewCostModel())
-			score := selector.scoreIndex(tt.index)
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
 
-			if tt.minScore > 0 && score < tt.minScore {
-				t.Errorf("Score %f is less than minimum %f", score, tt.minScore)
-			}
-			if tt.maxScore > 0 && score > tt.maxScore {
-				t.Errorf("Score %f is greater than maximum %f", score, tt.maxScore)
-			}
-		})
+	// Write multiple versions of page 1
+	page1v1 := makeTestPage(1, DefaultPageSize)
+	page1v2 := makeTestPage(100, DefaultPageSize)
+	page1v3 := makeTestPage(200, DefaultPageSize)
+
+	if err := wal.WriteFrame(1, page1v1, 1); err != nil {
+		t.Fatalf("Failed to write frame: %v", err)
+	}
+
+	if err := wal.WriteFrame(2, makeTestPage(2, DefaultPageSize), 2); err != nil {
+		t.Fatalf("Failed to write frame: %v", err)
+	}
+
+	if err := wal.WriteFrame(1, page1v2, 2); err != nil {
+		t.Fatalf("Failed to write frame: %v", err)
+	}
+
+	if err := wal.WriteFrame(1, page1v3, 2); err != nil {
+		t.Fatalf("Failed to write frame: %v", err)
+	}
+
+	// Find page 1 - should return the latest version
+	frame, err := wal.FindPage(1)
+	if err != nil {
+		t.Fatalf("Failed to find page: %v", err)
+	}
+
+	if frame == nil {
+		t.Fatalf("Page not found in WAL")
+	}
+
+	if !bytesEqual(frame.Data, page1v3) {
+		t.Errorf("FindPage returned wrong version of page 1")
+	}
+
+	// Find page that doesn't exist
+	frame, err = wal.FindPage(999)
+	if err != nil {
+		t.Fatalf("Error finding non-existent page: %v", err)
+	}
+
+	if frame != nil {
+		t.Errorf("Expected nil for non-existent page, got frame")
 	}
 }
 
-// TestFindUsableTermsForIndex tests finding usable WHERE terms for an index.
-func TestFindUsableTermsForIndex(t *testing.T) {
-	tests := []struct {
-		name      string
-		index     *IndexInfo
-		terms     []*WhereTerm
-		wantCount int
-	}{
-		{
-			name: "single column match",
-			index: &IndexInfo{
-				Columns: []IndexColumn{
-					{Name: "name", Index: 0},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: "test"},
-			},
-			wantCount: 1,
-		},
-		{
-			name: "multi-column all match",
-			index: &IndexInfo{
-				Columns: []IndexColumn{
-					{Name: "col1", Index: 0},
-					{Name: "col2", Index: 1},
-					{Name: "col3", Index: 2},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: 1},
-				{LeftColumn: 1, Operator: WO_EQ, RightValue: 2},
-				{LeftColumn: 2, Operator: WO_EQ, RightValue: 3},
-			},
-			wantCount: 3,
-		},
-		{
-			name: "multi-column partial match",
-			index: &IndexInfo{
-				Columns: []IndexColumn{
-					{Name: "col1", Index: 0},
-					{Name: "col2", Index: 1},
-					{Name: "col3", Index: 2},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: 1},
-				{LeftColumn: 2, Operator: WO_EQ, RightValue: 3}, // Skip col2
-			},
-			wantCount: 1, // Stops at col1 because col2 not found
-		},
-		{
-			name: "no match",
-			index: &IndexInfo{
-				Columns: []IndexColumn{
-					{Name: "col1", Index: 0},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 1, Operator: WO_EQ, RightValue: 1},
-			},
-			wantCount: 0,
-		},
+// TestWALCheckpoint tests checkpointing the WAL to the database
+func TestWALCheckpoint(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	// Create database file with initial page
+	dbData := make([]byte, DefaultPageSize*3)
+	if err := os.WriteFile(dbFile, dbData, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			selector := NewIndexSelector(&TableInfo{}, tt.terms, NewCostModel())
-			usable := selector.findUsableTermsForIndex(tt.index)
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
 
-			if len(usable) != tt.wantCount {
-				t.Errorf("Expected %d usable terms, got %d", tt.wantCount, len(usable))
-			}
-		})
+	// Write test pages to WAL
+	testPages := map[Pgno][]byte{
+		1: makeTestPage(1, DefaultPageSize),
+		2: makeTestPage(2, DefaultPageSize),
+		3: makeTestPage(3, DefaultPageSize),
+	}
+
+	for pgno, data := range testPages {
+		if err := wal.WriteFrame(pgno, data, 3); err != nil {
+			t.Fatalf("Failed to write frame for page %d: %v", pgno, err)
+		}
+	}
+
+	// Checkpoint the WAL
+	if err := wal.Checkpoint(); err != nil {
+		t.Fatalf("Failed to checkpoint WAL: %v", err)
+	}
+
+	// Verify WAL was reset
+	if wal.frameCount != 0 {
+		t.Errorf("WAL not reset after checkpoint, frameCount=%d", wal.frameCount)
+	}
+
+	// Verify pages were written to database
+	dbFileHandle, err := os.Open(dbFile)
+	if err != nil {
+		t.Fatalf("Failed to open database file: %v", err)
+	}
+	defer dbFileHandle.Close()
+
+	for pgno, expectedData := range testPages {
+		offset := int64(pgno-1) * int64(DefaultPageSize)
+		actualData := make([]byte, DefaultPageSize)
+
+		if _, err := dbFileHandle.ReadAt(actualData, offset); err != nil {
+			t.Fatalf("Failed to read page %d from database: %v", pgno, err)
+		}
+
+		if !bytesEqual(actualData, expectedData) {
+			t.Errorf("Page %d data mismatch after checkpoint", pgno)
+		}
 	}
 }
 
-// TestTermMatchesColumn tests term matching logic.
-func TestTermMatchesColumn(t *testing.T) {
-	tests := []struct {
-		name    string
-		term    *WhereTerm
-		column  IndexColumn
-		matches bool
-	}{
-		{
-			name:    "exact match",
-			term:    &WhereTerm{LeftColumn: 0, Operator: WO_EQ},
-			column:  IndexColumn{Index: 0},
-			matches: true,
-		},
-		{
-			name:    "different column",
-			term:    &WhereTerm{LeftColumn: 1, Operator: WO_EQ},
-			column:  IndexColumn{Index: 0},
-			matches: false,
-		},
-		{
-			name:    "unusable operator",
-			term:    &WhereTerm{LeftColumn: 0, Operator: WO_NOOP},
-			column:  IndexColumn{Index: 0},
-			matches: false,
-		},
+// TestWALCheckpointOverwrite tests that checkpoint handles multiple versions correctly
+func TestWALCheckpointOverwrite(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	// Create database file
+	dbData := make([]byte, DefaultPageSize*2)
+	if err := os.WriteFile(dbFile, dbData, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			selector := NewIndexSelector(&TableInfo{}, nil, NewCostModel())
-			matches := selector.termMatchesColumn(tt.term, tt.column)
-
-			if matches != tt.matches {
-				t.Errorf("Expected matches = %v, got %v", tt.matches, matches)
-			}
-		})
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
 	}
-}
+	defer wal.Close()
 
-// TestAnalyzeIndexUsage tests analyzing how an index would be used.
-func TestAnalyzeIndexUsage(t *testing.T) {
-	tests := []struct {
-		name           string
-		index          *IndexInfo
-		terms          []*WhereTerm
-		neededColumns  []string
-		wantEqTerms    int
-		wantRangeTerms int
-		wantInTerms    int
-		wantCovering   bool
-	}{
-		{
-			name: "equality constraint",
-			index: &IndexInfo{
-				Name: "idx_name",
-				Columns: []IndexColumn{
-					{Name: "name", Index: 0},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: "test"},
-			},
-			neededColumns:  []string{"name"},
-			wantEqTerms:    1,
-			wantRangeTerms: 0,
-			wantInTerms:    0,
-			wantCovering:   true,
-		},
-		{
-			name: "range constraint",
-			index: &IndexInfo{
-				Name: "idx_age",
-				Columns: []IndexColumn{
-					{Name: "age", Index: 0},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_GT, RightValue: 18},
-			},
-			neededColumns:  []string{"age"},
-			wantEqTerms:    0,
-			wantRangeTerms: 1,
-			wantInTerms:    0,
-			wantCovering:   true,
-		},
-		{
-			name: "IN constraint",
-			index: &IndexInfo{
-				Name: "idx_status",
-				Columns: []IndexColumn{
-					{Name: "status", Index: 0},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_IN},
-			},
-			neededColumns:  []string{"status"},
-			wantEqTerms:    0,
-			wantRangeTerms: 0,
-			wantInTerms:    1,
-			wantCovering:   true,
-		},
-		{
-			name: "multiple equality constraints",
-			index: &IndexInfo{
-				Name: "idx_compound",
-				Columns: []IndexColumn{
-					{Name: "col1", Index: 0},
-					{Name: "col2", Index: 1},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: 1},
-				{LeftColumn: 1, Operator: WO_EQ, RightValue: 2},
-			},
-			neededColumns:  []string{"col1", "col2"},
-			wantEqTerms:    2,
-			wantRangeTerms: 0,
-			wantInTerms:    0,
-			wantCovering:   true,
-		},
-		{
-			name: "not covering",
-			index: &IndexInfo{
-				Name: "idx_name",
-				Columns: []IndexColumn{
-					{Name: "name", Index: 0},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: "test"},
-			},
-			neededColumns:  []string{"name", "email", "age"},
-			wantEqTerms:    1,
-			wantRangeTerms: 0,
-			wantInTerms:    0,
-			wantCovering:   false,
-		},
+	// Write multiple versions of page 1
+	page1v1 := makeTestPage(1, DefaultPageSize)
+	page1v2 := makeTestPage(100, DefaultPageSize)
+
+	if err := wal.WriteFrame(1, page1v1, 1); err != nil {
+		t.Fatalf("Failed to write frame: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			selector := NewIndexSelector(&TableInfo{}, tt.terms, NewCostModel())
-			usage := selector.AnalyzeIndexUsage(tt.index, tt.neededColumns)
+	if err := wal.WriteFrame(1, page1v2, 1); err != nil {
+		t.Fatalf("Failed to write frame: %v", err)
+	}
 
-			if usage == nil {
-				t.Fatal("AnalyzeIndexUsage returned nil")
-			}
+	// Checkpoint
+	if err := wal.Checkpoint(); err != nil {
+		t.Fatalf("Failed to checkpoint: %v", err)
+	}
 
-			if len(usage.EqTerms) != tt.wantEqTerms {
-				t.Errorf("Expected %d eq terms, got %d", tt.wantEqTerms, len(usage.EqTerms))
-			}
-			if len(usage.RangeTerms) != tt.wantRangeTerms {
-				t.Errorf("Expected %d range terms, got %d", tt.wantRangeTerms, len(usage.RangeTerms))
-			}
-			if len(usage.InTerms) != tt.wantInTerms {
-				t.Errorf("Expected %d IN terms, got %d", tt.wantInTerms, len(usage.InTerms))
-			}
-			if usage.Covering != tt.wantCovering {
-				t.Errorf("Expected covering = %v, got %v", tt.wantCovering, usage.Covering)
-			}
-		})
+	// Verify only the latest version was written
+	dbFileHandle, err := os.Open(dbFile)
+	if err != nil {
+		t.Fatalf("Failed to open database file: %v", err)
+	}
+	defer dbFileHandle.Close()
+
+	actualData := make([]byte, DefaultPageSize)
+	if _, err := dbFileHandle.ReadAt(actualData, 0); err != nil {
+		t.Fatalf("Failed to read page from database: %v", err)
+	}
+
+	if !bytesEqual(actualData, page1v2) {
+		t.Errorf("Expected latest version of page after checkpoint")
 	}
 }
 
-// TestExplainIndexUsage tests explaining index usage.
-func TestExplainIndexUsage(t *testing.T) {
-	tests := []struct {
-		name      string
-		usage     *IndexUsage
-		wantEmpty bool
-	}{
-		{
-			name: "nil index",
-			usage: &IndexUsage{
-				Index: nil,
-			},
-			wantEmpty: false, // Returns "FULL TABLE SCAN"
-		},
-		{
-			name: "simple index",
-			usage: &IndexUsage{
-				Index: &IndexInfo{
-					Name: "idx_name",
-					Columns: []IndexColumn{
-						{Name: "name", Index: 0},
-					},
-				},
-				EqTerms: []*WhereTerm{
-					{LeftColumn: 0, Operator: WO_EQ},
-				},
-			},
-			wantEmpty: false,
-		},
-		{
-			name: "covering index",
-			usage: &IndexUsage{
-				Index: &IndexInfo{
-					Name: "idx_name",
-					Columns: []IndexColumn{
-						{Name: "name", Index: 0},
-					},
-				},
-				EqTerms: []*WhereTerm{
-					{LeftColumn: 0, Operator: WO_EQ},
-				},
-				Covering: true,
-			},
-			wantEmpty: false,
-		},
+// TestWALInvalidPageSize tests error handling for invalid page sizes
+func TestWALInvalidPageSize(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := tt.usage.Explain()
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
 
-			if tt.wantEmpty && result != "" {
-				t.Errorf("Expected empty string, got %s", result)
-			}
-			if !tt.wantEmpty && result == "" {
-				t.Error("Expected non-empty string, got empty")
-			}
-		})
+	// Try to write frame with wrong size
+	wrongSizeData := make([]byte, DefaultPageSize/2)
+	err := wal.WriteFrame(1, wrongSizeData, 1)
+
+	if err == nil {
+		t.Errorf("Expected error for wrong page size, got nil")
 	}
 }
 
-// TestOperatorStringIndex tests operator string conversion in index context.
-func TestOperatorStringIndex(t *testing.T) {
-	tests := []struct {
-		operator WhereOperator
-		want     string
-	}{
-		{WO_EQ, "="},
-		{WO_LT, "<"},
-		{WO_LE, "<="},
-		{WO_GT, ">"},
-		{WO_GE, ">="},
-		{WO_IN, " IN "},
-		{WO_IS, " IS "},
-		{WO_ISNULL, " IS NULL"},
-		{WO_NOOP, "?"}, // Unknown operator
+// TestWALInvalidPageNumber tests error handling for invalid page numbers
+func TestWALInvalidPageNumber(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.want, func(t *testing.T) {
-			result := operatorString(tt.operator)
-			if result != tt.want {
-				t.Errorf("Expected %s, got %s", tt.want, result)
-			}
-		})
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
+
+	// Try to write frame with page number 0
+	pageData := make([]byte, DefaultPageSize)
+	err := wal.WriteFrame(0, pageData, 1)
+
+	if err == nil {
+		t.Errorf("Expected error for page number 0, got nil")
 	}
 }
 
-// TestBuildIndexStats tests building index statistics.
-func TestBuildIndexStats(t *testing.T) {
-	table := &TableInfo{
-		Name:      "users",
-		RowCount:  10000,
-		RowLogEst: NewLogEst(10000),
-		Columns: []ColumnInfo{
-			{Name: "id", Index: 0},
-			{Name: "name", Index: 1},
-			{Name: "email", Index: 2},
-		},
+// TestWALDelete tests deleting the WAL file
+func TestWALDelete(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	tests := []struct {
-		name    string
-		columns []string
-		unique  bool
-	}{
-		{
-			name:    "single column",
-			columns: []string{"name"},
-			unique:  false,
-		},
-		{
-			name:    "multi-column",
-			columns: []string{"name", "email"},
-			unique:  false,
-		},
-		{
-			name:    "unique index",
-			columns: []string{"email"},
-			unique:  true,
-		},
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			index := BuildIndexStats(table, tt.columns, tt.unique)
+	walFile := dbFile + "-wal"
 
-			if index == nil {
-				t.Fatal("BuildIndexStats returned nil")
-			}
-			if index.Table != table.Name {
-				t.Errorf("Expected table %s, got %s", table.Name, index.Table)
-			}
-			if len(index.Columns) != len(tt.columns) {
-				t.Errorf("Expected %d columns, got %d", len(tt.columns), len(index.Columns))
-			}
-			if index.Unique != tt.unique {
-				t.Errorf("Expected unique = %v, got %v", tt.unique, index.Unique)
-			}
-			if len(index.ColumnStats) != len(tt.columns) {
-				t.Errorf("Expected %d column stats, got %d", len(tt.columns), len(index.ColumnStats))
-			}
-		})
+	// Verify WAL file exists
+	if _, err := os.Stat(walFile); os.IsNotExist(err) {
+		t.Fatalf("WAL file was not created")
+	}
+
+	// Delete WAL
+	if err := wal.Delete(); err != nil {
+		t.Fatalf("Failed to delete WAL: %v", err)
+	}
+
+	// Verify WAL file is gone
+	if _, err := os.Stat(walFile); !os.IsNotExist(err) {
+		t.Errorf("WAL file still exists after delete")
+	}
+
+	// Verify state was reset
+	if wal.initialized {
+		t.Errorf("WAL still marked as initialized after delete")
+	}
+
+	if wal.frameCount != 0 {
+		t.Errorf("Frame count not reset after delete")
 	}
 }
 
-// TestCompareIndexes tests comparing two indexes.
-func TestCompareIndexes(t *testing.T) {
-	tests := []struct {
-		name     string
-		idx1     *IndexInfo
-		idx2     *IndexInfo
-		terms    []*WhereTerm
-		expected int
-	}{
-		{
-			name: "first index better",
-			idx1: &IndexInfo{
-				Name:   "idx_pk",
-				Unique: true,
-				Columns: []IndexColumn{
-					{Name: "id", Index: 0},
-				},
-			},
-			idx2: &IndexInfo{
-				Name: "idx_name",
-				Columns: []IndexColumn{
-					{Name: "name", Index: 1},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: 1},
-			},
-			expected: -1,
-		},
-		{
-			name: "second index better",
-			idx1: &IndexInfo{
-				Name: "idx_name",
-				Columns: []IndexColumn{
-					{Name: "name", Index: 1},
-				},
-			},
-			idx2: &IndexInfo{
-				Name:   "idx_pk",
-				Unique: true,
-				Columns: []IndexColumn{
-					{Name: "id", Index: 0},
-				},
-			},
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: 1},
-			},
-			expected: 1,
-		},
+// TestWALSync tests syncing the WAL to disk
+func TestWALSync(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := CompareIndexes(tt.idx1, tt.idx2, tt.terms, NewCostModel())
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
 
-			if (tt.expected < 0 && result >= 0) ||
-				(tt.expected > 0 && result <= 0) ||
-				(tt.expected == 0 && result != 0) {
-				t.Errorf("Expected %d, got %d", tt.expected, result)
-			}
-		})
+	// Write some frames
+	pageData := makeTestPage(1, DefaultPageSize)
+	if err := wal.WriteFrame(1, pageData, 1); err != nil {
+		t.Fatalf("Failed to write frame: %v", err)
+	}
+
+	// Sync WAL
+	if err := wal.Sync(); err != nil {
+		t.Errorf("Failed to sync WAL: %v", err)
 	}
 }
 
-// TestSelectBestIndexWithOptions tests advanced index selection.
-func TestSelectBestIndexWithOptions(t *testing.T) {
-	table := &TableInfo{
-		Name: "users",
-		Indexes: []*IndexInfo{
-			{
-				Name: "idx_name",
-				Columns: []IndexColumn{
-					{Name: "name", Index: 0},
-				},
-			},
-			{
-				Name:   "idx_email",
-				Unique: true,
-				Columns: []IndexColumn{
-					{Name: "email", Index: 1},
-					{Name: "name", Index: 0},
-					{Name: "age", Index: 2},
-					{Name: "city", Index: 3},
-				},
-			},
-		},
+// TestWALShouldCheckpoint tests the checkpoint threshold
+func TestWALShouldCheckpoint(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	tests := []struct {
-		name      string
-		terms     []*WhereTerm
-		options   OptimizeOptions
-		wantIndex string
-	}{
-		{
-			name: "prefer unique",
-			terms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ, RightValue: "test"},
-				{LeftColumn: 1, Operator: WO_EQ, RightValue: "test@test.com"},
-			},
-			options: OptimizeOptions{
-				PreferUnique: true,
-			},
-			wantIndex: "idx_email",
-		},
-		{
-			name: "prefer covering",
-			terms: []*WhereTerm{
-				{LeftColumn: 1, Operator: WO_EQ, RightValue: "test@test.com"},
-			},
-			options: OptimizeOptions{
-				PreferCovering: true,
-			},
-			wantIndex: "idx_email",
-		},
-		{
-			name: "order by optimization",
-			terms: []*WhereTerm{
-				{LeftColumn: 1, Operator: WO_EQ, RightValue: "test@test.com"},
-			},
-			options: OptimizeOptions{
-				ConsiderOrderBy: true,
-				OrderBy: []OrderByColumn{
-					{Column: "email", Ascending: true},
-					{Column: "name", Ascending: true},
-				},
-			},
-			wantIndex: "idx_email",
-		},
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
+
+	// Initially should not need checkpoint
+	if wal.ShouldCheckpoint() {
+		t.Errorf("Should not need checkpoint with 0 frames")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			selector := NewIndexSelector(table, tt.terms, NewCostModel())
-			result := selector.SelectBestIndexWithOptions(tt.options)
+	// Set frame count to threshold
+	wal.frameCount = WALMinCheckpointFrames
 
-			if result == nil {
-				t.Fatal("Expected index, got nil")
-			}
-			if result.Name != tt.wantIndex {
-				t.Errorf("Expected index %s, got %s", tt.wantIndex, result.Name)
-			}
-		})
+	// Now should need checkpoint
+	if !wal.ShouldCheckpoint() {
+		t.Errorf("Should need checkpoint at threshold")
 	}
 }
 
-// TestIndexMatchesOrderBy tests ORDER BY matching.
-func TestIndexMatchesOrderBy(t *testing.T) {
-	tests := []struct {
-		name    string
-		index   *IndexInfo
-		orderBy []OrderByColumn
-		matches bool
-	}{
-		{
-			name: "exact match",
-			index: &IndexInfo{
-				Columns: []IndexColumn{
-					{Name: "name", Ascending: true},
-					{Name: "age", Ascending: true},
-				},
-			},
-			orderBy: []OrderByColumn{
-				{Column: "name", Ascending: true},
-				{Column: "age", Ascending: true},
-			},
-			matches: true,
-		},
-		{
-			name: "partial match",
-			index: &IndexInfo{
-				Columns: []IndexColumn{
-					{Name: "name", Ascending: true},
-					{Name: "age", Ascending: true},
-					{Name: "city", Ascending: true},
-				},
-			},
-			orderBy: []OrderByColumn{
-				{Column: "name", Ascending: true},
-			},
-			matches: true,
-		},
-		{
-			name: "direction mismatch",
-			index: &IndexInfo{
-				Columns: []IndexColumn{
-					{Name: "name", Ascending: true},
-				},
-			},
-			orderBy: []OrderByColumn{
-				{Column: "name", Ascending: false},
-			},
-			matches: false,
-		},
-		{
-			name: "column mismatch",
-			index: &IndexInfo{
-				Columns: []IndexColumn{
-					{Name: "name", Ascending: true},
-				},
-			},
-			orderBy: []OrderByColumn{
-				{Column: "age", Ascending: true},
-			},
-			matches: false,
-		},
-		{
-			name: "order by longer than index",
-			index: &IndexInfo{
-				Columns: []IndexColumn{
-					{Name: "name", Ascending: true},
-				},
-			},
-			orderBy: []OrderByColumn{
-				{Column: "name", Ascending: true},
-				{Column: "age", Ascending: true},
-			},
-			matches: false,
-		},
+// TestWALHeaderFormat tests the exact WAL header format
+func TestWALHeaderFormat(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			selector := NewIndexSelector(&TableInfo{}, nil, NewCostModel())
-			matches := selector.indexMatchesOrderBy(tt.index, tt.orderBy)
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
 
-			if matches != tt.matches {
-				t.Errorf("Expected matches = %v, got %v", tt.matches, matches)
-			}
-		})
+	// Read raw header
+	walFile := dbFile + "-wal"
+	f, err := os.Open(walFile)
+	if err != nil {
+		t.Fatalf("Failed to open WAL file: %v", err)
+	}
+	defer f.Close()
+
+	headerData := make([]byte, WALHeaderSize)
+	if _, err := f.Read(headerData); err != nil {
+		t.Fatalf("Failed to read header: %v", err)
+	}
+
+	// Verify magic number
+	magic := binary.BigEndian.Uint32(headerData[0:4])
+	if magic != WALMagic {
+		t.Errorf("Wrong magic number: expected 0x%x, got 0x%x", WALMagic, magic)
+	}
+
+	// Verify version
+	version := binary.BigEndian.Uint32(headerData[4:8])
+	if version != WALFormatVersion {
+		t.Errorf("Wrong version: expected %d, got %d", WALFormatVersion, version)
+	}
+
+	// Verify page size
+	pageSize := binary.BigEndian.Uint32(headerData[8:12])
+	if pageSize != uint32(DefaultPageSize) {
+		t.Errorf("Wrong page size: expected %d, got %d", DefaultPageSize, pageSize)
 	}
 }
 
-// TestEstimateIndexBuildCost tests estimating index build cost.
-func TestEstimateIndexBuildCost(t *testing.T) {
-	tests := []struct {
-		name      string
-		table     *TableInfo
-		columns   []string
-		expectMin LogEst
-	}{
-		{
-			name: "single column index",
-			table: &TableInfo{
-				Name:      "users",
-				RowCount:  1000,
-				RowLogEst: NewLogEst(1000),
-			},
-			columns:   []string{"name"},
-			expectMin: 0,
-		},
-		{
-			name: "multi-column index",
-			table: &TableInfo{
-				Name:      "users",
-				RowCount:  10000,
-				RowLogEst: NewLogEst(10000),
-			},
-			columns:   []string{"name", "age", "city"},
-			expectMin: 0,
-		},
-		{
-			name: "large table",
-			table: &TableInfo{
-				Name:      "events",
-				RowCount:  1000000,
-				RowLogEst: NewLogEst(1000000),
-			},
-			columns:   []string{"event_type"},
-			expectMin: 0,
-		},
+// TestWALFrameFormat tests the exact WAL frame format
+func TestWALFrameFormat(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cost := EstimateIndexBuildCost(tt.table, tt.columns)
-
-			if cost < tt.expectMin {
-				t.Errorf("Cost %d is less than expected minimum %d", cost, tt.expectMin)
-			}
-
-			// Cost should be positive for non-empty tables
-			if tt.table.RowCount > 0 && cost <= 0 {
-				t.Error("Expected positive cost for non-empty table")
-			}
-		})
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
 	}
-}
+	defer wal.Close()
 
-// TestAnalyzeTermCounts tests analyzing WHERE term counts.
-func TestAnalyzeTermCounts(t *testing.T) {
-	tests := []struct {
-		name         string
-		terms        []*WhereTerm
-		wantEq       int
-		wantHasRange bool
-	}{
-		{
-			name: "only equality",
-			terms: []*WhereTerm{
-				{Operator: WO_EQ},
-				{Operator: WO_EQ},
-			},
-			wantEq:       2,
-			wantHasRange: false,
-		},
-		{
-			name: "equality and range",
-			terms: []*WhereTerm{
-				{Operator: WO_EQ},
-				{Operator: WO_GT},
-			},
-			wantEq:       1,
-			wantHasRange: true,
-		},
-		{
-			name: "only range",
-			terms: []*WhereTerm{
-				{Operator: WO_LT},
-				{Operator: WO_GE},
-			},
-			wantEq:       0,
-			wantHasRange: true,
-		},
-		{
-			name:         "no terms",
-			terms:        []*WhereTerm{},
-			wantEq:       0,
-			wantHasRange: false,
-		},
+	// Write a frame
+	testPage := makeTestPage(42, DefaultPageSize)
+	if err := wal.WriteFrame(5, testPage, 10); err != nil {
+		t.Fatalf("Failed to write frame: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			nEq, hasRange := analyzeTermCounts(tt.terms)
+	// Read raw frame
+	walFile := dbFile + "-wal"
+	f, err := os.Open(walFile)
+	if err != nil {
+		t.Fatalf("Failed to open WAL file: %v", err)
+	}
+	defer f.Close()
 
-			if nEq != tt.wantEq {
-				t.Errorf("Expected %d equality terms, got %d", tt.wantEq, nEq)
-			}
-			if hasRange != tt.wantHasRange {
-				t.Errorf("Expected hasRange = %v, got %v", tt.wantHasRange, hasRange)
-			}
-		})
+	// Skip header
+	if _, err := f.Seek(WALHeaderSize, 0); err != nil {
+		t.Fatalf("Failed to seek: %v", err)
+	}
+
+	// Read frame header
+	frameHeader := make([]byte, WALFrameHeaderSize)
+	if _, err := f.Read(frameHeader); err != nil {
+		t.Fatalf("Failed to read frame header: %v", err)
+	}
+
+	// Verify page number
+	pageNum := binary.BigEndian.Uint32(frameHeader[0:4])
+	if pageNum != 5 {
+		t.Errorf("Wrong page number: expected 5, got %d", pageNum)
+	}
+
+	// Verify database size
+	dbSize := binary.BigEndian.Uint32(frameHeader[4:8])
+	if dbSize != 10 {
+		t.Errorf("Wrong db size: expected 10, got %d", dbSize)
+	}
+
+	// Verify salt values
+	salt1 := binary.BigEndian.Uint32(frameHeader[8:12])
+	salt2 := binary.BigEndian.Uint32(frameHeader[12:16])
+
+	if salt1 != wal.salt1 {
+		t.Errorf("Wrong salt1: expected %d, got %d", wal.salt1, salt1)
+	}
+
+	if salt2 != wal.salt2 {
+		t.Errorf("Wrong salt2: expected %d, got %d", wal.salt2, salt2)
+	}
+
+	// Read and verify page data
+	pageData := make([]byte, DefaultPageSize)
+	if _, err := f.Read(pageData); err != nil {
+		t.Fatalf("Failed to read page data: %v", err)
+	}
+
+	if !bytesEqual(pageData, testPage) {
+		t.Errorf("Page data mismatch")
 	}
 }
 
-// TestScoreIndexEntry tests scoring an index entry.
-func TestScoreIndexEntry(t *testing.T) {
-	table := &TableInfo{
-		Name:      "users",
-		RowCount:  1000,
-		RowLogEst: NewLogEst(1000),
+// Helper functions
+
+// makeTestPage creates a test page with a recognizable pattern
+func makeTestPage(seed int, size int) []byte {
+	data := make([]byte, size)
+	for i := range data {
+		data[i] = byte((i + seed) % 256)
+	}
+	return data
+}
+
+// bytesEqual compares two byte slices
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestWALChecksumValidation tests that checksums are properly validated
+func TestWALChecksumValidation(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	index := &IndexInfo{
-		Name: "idx_name",
-		Columns: []IndexColumn{
-			{Name: "name", Index: 0},
-		},
-		RowCount:    1000,
-		RowLogEst:   NewLogEst(1000),
-		ColumnStats: []LogEst{NewLogEst(100)},
+	// Create WAL and write some frames
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
 	}
 
-	terms := []*WhereTerm{
-		{LeftColumn: 0, Operator: WO_EQ, RightValue: "test"},
+	// Write test frames
+	for i := 1; i <= 5; i++ {
+		pageData := makeTestPage(i*100, DefaultPageSize)
+		if err := wal.WriteFrame(Pgno(i), pageData, uint32(i)); err != nil {
+			t.Fatalf("Failed to write frame %d: %v", i, err)
+		}
 	}
 
-	selector := NewIndexSelector(table, terms, NewCostModel())
-	score := selector.scoreIndexEntry(index, OptimizeOptions{})
+	wal.Close()
 
-	if score.index != index {
-		t.Error("Index not set correctly in score")
+	// Reopen WAL - should validate all frames
+	wal2 := NewWAL(dbFile, DefaultPageSize)
+	if err := wal2.Open(); err != nil {
+		t.Fatalf("Failed to reopen WAL: %v", err)
 	}
-	if score.score <= 0 {
-		t.Error("Expected positive score")
+	defer wal2.Close()
+
+	// Verify frame count
+	if wal2.frameCount != 5 {
+		t.Errorf("Expected 5 frames, got %d", wal2.frameCount)
+	}
+
+	// Read frames and verify checksums are validated
+	for i := uint32(0); i < 5; i++ {
+		frame, err := wal2.ReadFrame(i)
+		if err != nil {
+			t.Errorf("Failed to read frame %d: %v", i, err)
+		}
+		if frame == nil {
+			t.Errorf("Frame %d is nil", i)
+		}
 	}
 }
 
-// TestPickBestScore tests picking the best score from candidates.
-func TestPickBestScore(t *testing.T) {
-	scores := []indexScore{
-		{score: 10.0, cost: 100},
-		{score: 20.0, cost: 50},
-		{score: 15.0, cost: 75},
+// TestWALChecksumCorruption tests that corrupted checksums are detected
+func TestWALChecksumCorruption(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	best := pickBestScore(scores)
-
-	if best.score != 20.0 {
-		t.Errorf("Expected score 20.0, got %f", best.score)
-	}
-}
-
-// TestApplyOptionsBonus tests applying option bonuses.
-func TestApplyOptionsBonus(t *testing.T) {
-	tests := []struct {
-		name      string
-		index     *IndexInfo
-		options   OptimizeOptions
-		baseScore float64
-		wantMore  bool
-	}{
-		{
-			name: "covering bonus",
-			index: &IndexInfo{
-				Columns: []IndexColumn{
-					{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"},
-				},
-			},
-			options: OptimizeOptions{
-				PreferCovering: true,
-			},
-			baseScore: 10.0,
-			wantMore:  true,
-		},
-		{
-			name: "unique bonus",
-			index: &IndexInfo{
-				Unique: true,
-			},
-			options: OptimizeOptions{
-				PreferUnique: true,
-			},
-			baseScore: 10.0,
-			wantMore:  true,
-		},
-		{
-			name:  "order by bonus",
-			index: &IndexInfo{
-				Columns: []IndexColumn{
-					{Name: "name", Ascending: true},
-				},
-			},
-			options: OptimizeOptions{
-				ConsiderOrderBy: true,
-				OrderBy: []OrderByColumn{
-					{Column: "name", Ascending: true},
-				},
-			},
-			baseScore: 10.0,
-			wantMore:  true,
-		},
+	// Create WAL and write some frames
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			selector := NewIndexSelector(&TableInfo{}, nil, NewCostModel())
-			result := selector.applyOptionsBonus(tt.index, tt.options, tt.baseScore)
+	// Write test frames
+	for i := 1; i <= 3; i++ {
+		pageData := makeTestPage(i*100, DefaultPageSize)
+		if err := wal.WriteFrame(Pgno(i), pageData, uint32(i)); err != nil {
+			t.Fatalf("Failed to write frame %d: %v", i, err)
+		}
+	}
 
-			if tt.wantMore && result <= tt.baseScore {
-				t.Errorf("Expected score > %f, got %f", tt.baseScore, result)
-			}
-			if !tt.wantMore && result != tt.baseScore {
-				t.Errorf("Expected score = %f, got %f", tt.baseScore, result)
-			}
-		})
+	wal.Close()
+
+	// Corrupt a checksum in the second frame
+	walFile := dbFile + "-wal"
+	f, err := os.OpenFile(walFile, os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatalf("Failed to open WAL file: %v", err)
+	}
+
+	// Corrupt checksum1 of second frame (offset: header + 1*frameSize + 16)
+	frameOffset := int64(WALHeaderSize) + int64(WALFrameHeaderSize+DefaultPageSize)
+	checksumOffset := frameOffset + 16 // Checksum1 offset in frame header
+
+	corruptData := make([]byte, 4)
+	binary.BigEndian.PutUint32(corruptData, 0xDEADBEEF) // Invalid checksum
+	if _, err := f.WriteAt(corruptData, checksumOffset); err != nil {
+		f.Close()
+		t.Fatalf("Failed to corrupt checksum: %v", err)
+	}
+	f.Close()
+
+	// Try to reopen WAL - should detect corruption and recreate
+	wal2 := NewWAL(dbFile, DefaultPageSize)
+	err = wal2.Open()
+	if err != nil {
+		t.Fatalf("Failed to open WAL after corruption: %v", err)
+	}
+	defer wal2.Close()
+
+	// The WAL should have been recreated with no frames
+	if wal2.frameCount != 0 {
+		t.Errorf("Expected empty WAL after corruption recovery, got %d frames", wal2.frameCount)
+	}
+
+	// Verify the corrupted WAL was removed and recreated
+	info, err := os.Stat(walFile)
+	if err != nil {
+		t.Fatalf("WAL file should exist: %v", err)
+	}
+
+	// New WAL should only have header
+	if info.Size() != WALHeaderSize {
+		t.Logf("Note: WAL was recreated after detecting corruption (size: %d)", info.Size())
 	}
 }
 
-// TestFindBestIndexScore tests finding the best index score.
-func TestFindBestIndexScore(t *testing.T) {
-	table := &TableInfo{
-		Name:      "users",
-		RowCount:  1000,
-		RowLogEst: NewLogEst(1000),
-		Indexes: []*IndexInfo{
-			{
-				Name: "idx_name",
-				Columns: []IndexColumn{
-					{Name: "name", Index: 0},
-				},
-				RowCount:    1000,
-				RowLogEst:   NewLogEst(1000),
-				ColumnStats: []LogEst{NewLogEst(100)},
-			},
-			{
-				Name:   "idx_email",
-				Unique: true,
-				Columns: []IndexColumn{
-					{Name: "email", Index: 1},
-				},
-				RowCount:    1000,
-				RowLogEst:   NewLogEst(1000),
-				ColumnStats: []LogEst{NewLogEst(1000)},
-			},
-		},
+// TestWALHeaderChecksumValidation tests header checksum validation
+func TestWALHeaderChecksumValidation(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
 	}
 
-	terms := []*WhereTerm{
-		{LeftColumn: 1, Operator: WO_EQ, RightValue: "test@test.com"},
+	// Create WAL
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	wal.Close()
+
+	// Corrupt header checksum
+	walFile := dbFile + "-wal"
+	f, err := os.OpenFile(walFile, os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatalf("Failed to open WAL file: %v", err)
 	}
 
-	selector := NewIndexSelector(table, terms, NewCostModel())
-	best := selector.findBestIndexScore(OptimizeOptions{})
-
-	if best.index == nil {
-		t.Fatal("Expected index, got nil")
+	// Corrupt Checksum1 in header (offset 24)
+	corruptData := make([]byte, 4)
+	binary.BigEndian.PutUint32(corruptData, 0xBADBAD)
+	if _, err := f.WriteAt(corruptData, 24); err != nil {
+		f.Close()
+		t.Fatalf("Failed to corrupt header: %v", err)
 	}
-	if best.score <= 0 {
-		t.Error("Expected positive score")
+	f.Close()
+
+	// Try to reopen - should fail header validation and recreate
+	wal2 := NewWAL(dbFile, DefaultPageSize)
+	err = wal2.Open()
+	if err == nil {
+		wal2.Close()
+		// The WAL should have been recreated, so this is acceptable
+		t.Logf("WAL was recreated after header corruption")
+	} else {
+		t.Logf("Got expected error on corrupted header: %v", err)
+	}
+}
+
+// TestWALCumulativeChecksums tests that checksums are properly cumulative
+func TestWALCumulativeChecksums(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
+
+	// Write multiple frames
+	var checksums []struct{ c1, c2 uint32 }
+
+	for i := 1; i <= 5; i++ {
+		pageData := makeTestPage(i*50, DefaultPageSize)
+		if err := wal.WriteFrame(Pgno(i), pageData, uint32(i)); err != nil {
+			t.Fatalf("Failed to write frame %d: %v", i, err)
+		}
+
+		// Read back to get checksum
+		frame, err := wal.ReadFrame(uint32(i - 1))
+		if err != nil {
+			t.Fatalf("Failed to read frame %d: %v", i-1, err)
+		}
+
+		checksums = append(checksums, struct{ c1, c2 uint32 }{frame.Checksum1, frame.Checksum2})
+	}
+
+	// Verify checksums are different (cumulative)
+	for i := 1; i < len(checksums); i++ {
+		if checksums[i].c1 == checksums[i-1].c1 && checksums[i].c2 == checksums[i-1].c2 {
+			t.Errorf("Frame %d has same checksum as frame %d - checksums should be cumulative", i, i-1)
+		}
+	}
+}
+
+// TestWALChecksumCache tests that the checksum cache works correctly
+func TestWALChecksumCache(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	wal := NewWAL(dbFile, DefaultPageSize)
+	if err := wal.Open(); err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+
+	// Write frames
+	for i := 1; i <= 10; i++ {
+		pageData := makeTestPage(i*10, DefaultPageSize)
+		if err := wal.WriteFrame(Pgno(i), pageData, uint32(i)); err != nil {
+			t.Fatalf("Failed to write frame %d: %v", i, err)
+		}
+	}
+
+	wal.Close()
+
+	// Reopen - should build cache
+	wal2 := NewWAL(dbFile, DefaultPageSize)
+	if err := wal2.Open(); err != nil {
+		t.Fatalf("Failed to reopen WAL: %v", err)
+	}
+	defer wal2.Close()
+
+	// Verify cache was built
+	if len(wal2.checksumCache) != 10 {
+		t.Errorf("Expected 10 cached checksums, got %d", len(wal2.checksumCache))
+	}
+
+	// Read frames should use cache
+	for i := uint32(0); i < 10; i++ {
+		if _, err := wal2.ReadFrame(i); err != nil {
+			t.Errorf("Failed to read frame %d: %v", i, err)
+		}
 	}
 }

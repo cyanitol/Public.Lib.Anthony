@@ -1,175 +1,241 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-// Package constraint implements constraint checking for SQLite.
-// This includes CHECK constraints, foreign keys, and other data integrity rules.
-package constraint
+package parser
 
 import (
-	"fmt"
-
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"testing"
 )
 
-// CheckConstraint represents a CHECK constraint with its expression and metadata.
-type CheckConstraint struct {
-	// Name is the optional constraint name (may be empty for unnamed constraints)
-	Name string
+// Comprehensive tests to maximize coverage of all parser paths
 
-	// Expression is the parsed CHECK expression from the schema
-	Expression parser.Expression
+func TestParserAllSQLKeywordVariations(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+	}{
+		// Comprehensive SELECT variations
+		{"SELECT with *", "SELECT * FROM t"},
+		{"SELECT with table.*", "SELECT users.* FROM users"},
+		{"SELECT multiple columns", "SELECT id, name, email FROM users"},
+		{"SELECT with aliases", "SELECT name AS user_name, id AS user_id FROM users"},
+		{"SELECT with AS keyword", "SELECT name AS username FROM users"},
+		{"SELECT without AS", "SELECT name username FROM users"},
 
-	// ExprString is the string representation of the expression (for error messages)
-	ExprString string
+		// WHERE clause variations
+		{"WHERE with equality", "SELECT * FROM t WHERE id = 1"},
+		{"WHERE with inequality", "SELECT * FROM t WHERE id != 1"},
+		{"WHERE with <", "SELECT * FROM t WHERE id < 10"},
+		{"WHERE with <=", "SELECT * FROM t WHERE id <= 10"},
+		{"WHERE with >", "SELECT * FROM t WHERE id > 10"},
+		{"WHERE with >=", "SELECT * FROM t WHERE id >= 10"},
+		{"WHERE with AND", "SELECT * FROM t WHERE a = 1 AND b = 2"},
+		{"WHERE with OR", "SELECT * FROM t WHERE a = 1 OR b = 2"},
+		{"WHERE with NOT", "SELECT * FROM t WHERE NOT active"},
 
-	// IsTableLevel indicates if this is a table-level constraint (vs column-level)
-	IsTableLevel bool
+		// JOIN variations
+		{"LEFT OUTER JOIN", "SELECT * FROM a LEFT OUTER JOIN b ON a.id = b.id"},
+		{"RIGHT JOIN", "SELECT * FROM a RIGHT JOIN b ON a.id = b.id"},
+		{"RIGHT OUTER JOIN", "SELECT * FROM a RIGHT OUTER JOIN b ON a.id = b.id"},
+		{"FULL JOIN", "SELECT * FROM a FULL JOIN b ON a.id = b.id"},
+		{"NATURAL JOIN", "SELECT * FROM a NATURAL JOIN b"},
+		{"NATURAL LEFT JOIN", "SELECT * FROM a NATURAL LEFT JOIN b"},
+		{"NATURAL LEFT OUTER JOIN", "SELECT * FROM a NATURAL LEFT OUTER JOIN b"},
 
-	// ColumnName is set for column-level constraints
-	ColumnName string
-}
+		// Expression variations
+		{"Expression with parentheses", "SELECT (a + b) * c FROM t"},
+		{"Expression with multiple ops", "SELECT a + b - c * d / e % f FROM t"},
+		{"Expression with bitwise NOT", "SELECT ~flags FROM t"},
 
-// CheckValidator validates CHECK constraints during INSERT and UPDATE operations.
-type CheckValidator struct {
-	constraints []*CheckConstraint
-	table       *schema.Table
-}
+		// Function variations
+		{"Function no args", "SELECT RANDOM()"},
+		{"Function one arg", "SELECT ABS(x) FROM t"},
+		{"Function multiple args", "SELECT SUBSTR(name, 1, 5) FROM t"},
+		{"Function COUNT(*)", "SELECT COUNT(*) FROM t"},
+		{"Function COUNT with column", "SELECT COUNT(id) FROM t"},
+		{"Function with DISTINCT", "SELECT COUNT(DISTINCT id) FROM t"},
 
-// NewCheckValidator creates a new CHECK constraint validator for a table.
-func NewCheckValidator(table *schema.Table) *CheckValidator {
-	return &CheckValidator{
-		constraints: extractCheckConstraints(table),
-		table:       table,
+		// ORDER BY variations
+		{"ORDER BY ASC", "SELECT * FROM t ORDER BY name ASC"},
+		{"ORDER BY DESC", "SELECT * FROM t ORDER BY name DESC"},
+		{"ORDER BY default", "SELECT * FROM t ORDER BY name"},
+		{"ORDER BY multiple", "SELECT * FROM t ORDER BY name ASC, id DESC"},
+		{"ORDER BY with COLLATE", "SELECT * FROM t ORDER BY name COLLATE NOCASE"},
+
+		// GROUP BY variations
+		{"GROUP BY simple", "SELECT category, COUNT(*) FROM t GROUP BY category"},
+		{"GROUP BY multiple", "SELECT category, type, COUNT(*) FROM t GROUP BY category, type"},
+		{"GROUP BY with HAVING", "SELECT category FROM t GROUP BY category HAVING COUNT(*) > 5"},
+
+		// LIMIT and OFFSET
+		{"LIMIT only", "SELECT * FROM t LIMIT 10"},
+		{"LIMIT with OFFSET", "SELECT * FROM t LIMIT 10 OFFSET 5"},
+
+		// Set operations
+		{"UNION DISTINCT", "SELECT * FROM a UNION SELECT * FROM b"},
+		{"UNION ALL explicit", "SELECT * FROM a UNION ALL SELECT * FROM b"},
+
+		// CREATE TABLE variations
+		{"CREATE TABLE with PRIMARY KEY", "CREATE TABLE t (id INTEGER PRIMARY KEY)"},
+		{"CREATE TABLE with AUTOINCREMENT", "CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT)"},
+		{"CREATE TABLE with NOT NULL", "CREATE TABLE t (name TEXT NOT NULL)"},
+		{"CREATE TABLE with UNIQUE", "CREATE TABLE t (email TEXT UNIQUE)"},
+		{"CREATE TABLE with DEFAULT", "CREATE TABLE t (active INTEGER DEFAULT 1)"},
+		{"CREATE TABLE with CHECK", "CREATE TABLE t (age INTEGER CHECK (age >= 0))"},
+		{"CREATE TABLE with COLLATE", "CREATE TABLE t (name TEXT COLLATE NOCASE)"},
+		{"CREATE TABLE with table constraint", "CREATE TABLE t (id INT, name TEXT, PRIMARY KEY (id))"},
+		{"CREATE TABLE with UNIQUE constraint", "CREATE TABLE t (id INT, email TEXT, UNIQUE (email))"},
+		{"CREATE TABLE with CHECK constraint", "CREATE TABLE t (age INT, CHECK (age >= 0))"},
+		{"CREATE TABLE WITHOUT ROWID", "CREATE TABLE t (id TEXT PRIMARY KEY) WITHOUT ROWID"},
+		{"CREATE TABLE STRICT", "CREATE TABLE t (id INTEGER PRIMARY KEY) STRICT"},
+
+		// CREATE INDEX variations
+		{"CREATE INDEX IF NOT EXISTS", "CREATE INDEX IF NOT EXISTS idx ON t (col)"},
+		{"CREATE UNIQUE INDEX", "CREATE UNIQUE INDEX idx ON t (col)"},
+		{"CREATE INDEX multiple columns", "CREATE INDEX idx ON t (col1, col2)"},
+		{"CREATE INDEX with ASC", "CREATE INDEX idx ON t (col ASC)"},
+		{"CREATE INDEX with DESC", "CREATE INDEX idx ON t (col DESC)"},
+		{"CREATE INDEX with WHERE", "CREATE INDEX idx ON t (col) WHERE active = 1"},
+
+		// INSERT variations
+		{"INSERT with column list", "INSERT INTO t (a, b) VALUES (1, 2)"},
+		{"INSERT multiple values", "INSERT INTO t VALUES (1, 2), (3, 4)"},
+		{"INSERT OR REPLACE", "INSERT OR REPLACE INTO t VALUES (1)"},
+		{"INSERT OR IGNORE", "INSERT OR IGNORE INTO t VALUES (1)"},
+		{"INSERT OR ABORT", "INSERT OR ABORT INTO t VALUES (1)"},
+		{"INSERT OR FAIL", "INSERT OR FAIL INTO t VALUES (1)"},
+		{"INSERT OR ROLLBACK", "INSERT OR ROLLBACK INTO t VALUES (1)"},
+
+		// UPDATE variations
+		{"UPDATE with WHERE", "UPDATE t SET a = 1 WHERE id = 1"},
+		{"UPDATE multiple columns", "UPDATE t SET a = 1, b = 2 WHERE id = 1"},
+		{"UPDATE without WHERE", "UPDATE t SET active = 0"},
+		{"UPDATE OR IGNORE", "UPDATE OR IGNORE t SET a = 1"},
+		{"UPDATE OR REPLACE", "UPDATE OR REPLACE t SET a = 1"},
+
+		// DELETE variations
+		{"DELETE with WHERE", "DELETE FROM t WHERE id = 1"},
+		{"DELETE without WHERE", "DELETE FROM t"},
+		{"DELETE with ORDER BY", "DELETE FROM t WHERE active = 0 ORDER BY created_at"},
+		{"DELETE with LIMIT", "DELETE FROM t WHERE active = 0 LIMIT 10"},
+
+		// Transaction variations
+		{"BEGIN IMMEDIATE", "BEGIN IMMEDIATE"},
+		{"BEGIN EXCLUSIVE", "BEGIN EXCLUSIVE"},
+
+		// Literal variations
+		{"NULL literal", "SELECT NULL"},
+		{"Integer literal", "SELECT 42"},
+		{"Negative integer", "SELECT -42"},
+		{"Float literal", "SELECT 3.14"},
+		{"String literal", "SELECT 'hello'"},
+		{"String with escaped quote", "SELECT 'it''s'"},
+		{"Blob literal uppercase", "SELECT X'DEADBEEF'"},
+		{"Blob literal lowercase", "SELECT x'deadbeef'"},
+		{"Hex integer", "SELECT 0xABCD"},
+
+		// Parameter placeholders
+		{"? placeholder", "SELECT * FROM t WHERE id = ?"},
+		{"?N placeholder", "SELECT * FROM t WHERE id = ?1"},
+		{":name placeholder", "SELECT * FROM t WHERE id = :id"},
+		{"@name placeholder", "SELECT * FROM t WHERE id = @id"},
+		{"$name placeholder", "SELECT * FROM t WHERE id = $id"},
 	}
-}
 
-// extractCheckConstraints extracts all CHECK constraints from a table schema.
-func extractCheckConstraints(table *schema.Table) []*CheckConstraint {
-	var constraints []*CheckConstraint
-
-	// Extract column-level CHECK constraints
-	for _, col := range table.Columns {
-		if col.Check != "" {
-			// Parse the CHECK expression
-			p := parser.NewParser(col.Check)
-			expr, err := p.ParseExpression()
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.input)
+			_, err := p.Parse()
 			if err != nil {
-				// If parsing fails, skip this constraint
-				// In a production system, we might want to log this
-				continue
+				t.Errorf("Parse failed: %v", err)
 			}
+		})
+	}
+}
 
-			constraints = append(constraints, &CheckConstraint{
-				Name:         "", // Column-level constraints typically don't have explicit names
-				Expression:   expr,
-				ExprString:   col.Check,
-				IsTableLevel: false,
-				ColumnName:   col.Name,
-			})
-		}
+func TestParserSubqueryVariations(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"Subquery in FROM with AS", "SELECT * FROM (SELECT id FROM users) AS t"},
+		{"Subquery in FROM without AS", "SELECT * FROM (SELECT id FROM users) t"},
+		{"IN with value list", "SELECT * FROM t WHERE id IN (1, 2, 3)"},
+		{"IN with subquery", "SELECT * FROM t WHERE id IN (SELECT user_id FROM orders)"},
+		{"NOT IN with list", "SELECT * FROM t WHERE id NOT IN (1, 2, 3)"},
+		{"NOT IN with subquery", "SELECT * FROM t WHERE id NOT IN (SELECT user_id FROM orders)"},
 	}
 
-	// Extract table-level CHECK constraints
-	for _, tc := range table.Constraints {
-		if tc.Type == schema.ConstraintCheck && tc.Expression != "" {
-			// Parse the CHECK expression
-			p := parser.NewParser(tc.Expression)
-			expr, err := p.ParseExpression()
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.input)
+			_, err := p.Parse()
 			if err != nil {
-				// If parsing fails, skip this constraint
-				continue
+				t.Errorf("Parse failed: %v", err)
 			}
-
-			constraints = append(constraints, &CheckConstraint{
-				Name:         tc.Name,
-				Expression:   expr,
-				ExprString:   tc.Expression,
-				IsTableLevel: true,
-				ColumnName:   "",
-			})
-		}
+		})
 	}
-
-	return constraints
 }
 
-// CheckCodeGenerator is an interface that allows CHECK constraint validation
-// code generation without directly depending on the vdbe package.
-// This breaks the import cycle between constraint and vdbe packages.
-type CheckCodeGenerator interface {
-	// GenerateCheckConstraint generates code to validate a single CHECK constraint.
-	// Returns an error if code generation fails.
-	GenerateCheckConstraint(constraint *CheckConstraint, errorMsg string) error
-}
-
-// ValidateInsertWithGenerator validates all CHECK constraints for an INSERT operation.
-// It uses the provided code generator to emit validation bytecode.
-//
-// Parameters:
-//   - gen: A code generator that implements CheckCodeGenerator
-//
-// Returns error if code generation fails.
-func (cv *CheckValidator) ValidateInsertWithGenerator(gen CheckCodeGenerator) error {
-	if len(cv.constraints) == 0 {
-		return nil
+func TestParserAllOperators(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"==", "SELECT * FROM t WHERE a == b"},
+		{"<>", "SELECT * FROM t WHERE a <> b"},
+		{"Concatenation ||", "SELECT 'a' || 'b'"},
+		{"Bitwise &", "SELECT a & b FROM t"},
+		{"Bitwise |", "SELECT a | b FROM t"},
+		{"Bitwise ~", "SELECT ~a FROM t"},
+		{"Left shift <<", "SELECT a << 2 FROM t"},
+		{"Right shift >>", "SELECT a >> 2 FROM t"},
+		{"Modulo %", "SELECT a % b FROM t"},
+		{"LIKE", "SELECT * FROM t WHERE name LIKE 'test%'"},
+		{"GLOB", "SELECT * FROM t WHERE name GLOB 'test*'"},
+		{"REGEXP", "SELECT * FROM t WHERE name REGEXP '[0-9]+'"},
+		{"MATCH", "SELECT * FROM t WHERE content MATCH 'search'"},
 	}
 
-	// Validate each CHECK constraint
-	for _, constraint := range cv.constraints {
-		errorMsg := cv.formatErrorMessage(constraint)
-		if err := gen.GenerateCheckConstraint(constraint, errorMsg); err != nil {
-			return err
-		}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.input)
+			_, err := p.Parse()
+			if err != nil {
+				t.Errorf("Parse failed: %v", err)
+			}
+		})
 	}
-
-	return nil
 }
 
-// ValidateUpdateWithGenerator validates all CHECK constraints for an UPDATE operation.
-// This is called after the new values have been computed but before the update is applied.
-//
-// Parameters:
-//   - gen: A code generator that implements CheckCodeGenerator
-//
-// Returns error if code generation fails.
-func (cv *CheckValidator) ValidateUpdateWithGenerator(gen CheckCodeGenerator) error {
-	// UPDATE validation is the same as INSERT validation - we check the new values
-	return cv.ValidateInsertWithGenerator(gen)
-}
-
-// formatErrorMessage creates a user-friendly error message for constraint violations.
-func (cv *CheckValidator) formatErrorMessage(constraint *CheckConstraint) string {
-	if constraint.Name != "" {
-		return fmt.Sprintf("CHECK constraint failed: %s (%s)", constraint.Name, constraint.ExprString)
+func TestParserCaseExpressionVariations(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"CASE without base", "SELECT CASE WHEN x > 0 THEN 1 ELSE 0 END FROM t"},
+		{"CASE with base", "SELECT CASE status WHEN 1 THEN 'active' WHEN 0 THEN 'inactive' END FROM t"},
+		{"CASE without ELSE", "SELECT CASE WHEN x > 0 THEN 1 END FROM t"},
+		{"CASE with multiple WHEN", "SELECT CASE WHEN x < 0 THEN -1 WHEN x > 0 THEN 1 ELSE 0 END FROM t"},
 	}
 
-	if constraint.IsTableLevel {
-		return fmt.Sprintf("CHECK constraint failed: %s", constraint.ExprString)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewParser(tt.input)
+			_, err := p.Parse()
+			if err != nil {
+				t.Errorf("Parse failed: %v", err)
+			}
+		})
 	}
-
-	// Column-level constraint
-	return fmt.Sprintf("CHECK constraint failed for column %s: %s", constraint.ColumnName, constraint.ExprString)
-}
-
-// FormatErrorMessage is a public version of formatErrorMessage for use by external code generators.
-func FormatErrorMessage(constraint *CheckConstraint) string {
-	if constraint.Name != "" {
-		return fmt.Sprintf("CHECK constraint failed: %s (%s)", constraint.Name, constraint.ExprString)
-	}
-
-	if constraint.IsTableLevel {
-		return fmt.Sprintf("CHECK constraint failed: %s", constraint.ExprString)
-	}
-
-	// Column-level constraint
-	return fmt.Sprintf("CHECK constraint failed for column %s: %s", constraint.ColumnName, constraint.ExprString)
-}
-
-// HasCheckConstraints returns true if the table has any CHECK constraints.
-func (cv *CheckValidator) HasCheckConstraints() bool {
-	return len(cv.constraints) > 0
-}
-
-// GetConstraints returns all CHECK constraints for the table.
-func (cv *CheckValidator) GetConstraints() []*CheckConstraint {
-	return cv.constraints
 }

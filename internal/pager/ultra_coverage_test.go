@@ -1,702 +1,729 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package planner
+package pager
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
-
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 )
 
-// TestCheckCircularDependencyAllPaths tests all code paths in checkCircularDependency.
-func TestCheckCircularDependencyAllPaths(t *testing.T) {
-	// Test case 1: Visiting a CTE that's already being visited (recursive case)
-	t.Run("Recursive CTE visiting itself", func(t *testing.T) {
-		sql := "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 10) SELECT * FROM cte"
-		p := parser.NewParser(sql)
-		stmts, err := p.Parse()
-		if err != nil {
-			t.Fatalf("Parse failed: %v", err)
-		}
-
-		selectStmt := stmts[0].(*parser.SelectStmt)
-		ctx, err := NewCTEContext(selectStmt.With)
-		if err != nil {
-			t.Fatalf("NewCTEContext failed: %v", err)
-		}
-
-		// Manually call checkCircularDependency to test recursive path
-		visiting := make(map[string]bool)
-		err = ctx.checkCircularDependency("cte", visiting)
-		if err != nil {
-			t.Errorf("checkCircularDependency should succeed for recursive CTE, got: %v", err)
-		}
-	})
-
-	// Test case 2: CTE that doesn't exist in the map
-	t.Run("Non-existent CTE", func(t *testing.T) {
-		ctx := &CTEContext{
-			CTEs:        make(map[string]*CTEDefinition),
-			IsRecursive: false,
-		}
-
-		visiting := make(map[string]bool)
-		err := ctx.checkCircularDependency("non_existent", visiting)
-		if err != nil {
-			t.Errorf("checkCircularDependency should succeed for non-existent CTE, got: %v", err)
-		}
-	})
-
-	// Test case 3: CTE with dependencies that form valid chain
-	t.Run("Valid dependency chain", func(t *testing.T) {
-		sql := "WITH a AS (SELECT 1), b AS (SELECT * FROM a), c AS (SELECT * FROM b) SELECT * FROM c"
-		p := parser.NewParser(sql)
-		stmts, err := p.Parse()
-		if err != nil {
-			t.Fatalf("Parse failed: %v", err)
-		}
-
-		selectStmt := stmts[0].(*parser.SelectStmt)
-		ctx, err := NewCTEContext(selectStmt.With)
-		if err != nil {
-			t.Fatalf("NewCTEContext failed: %v", err)
-		}
-
-		visiting := make(map[string]bool)
-		err = ctx.checkCircularDependency("c", visiting)
-		if err != nil {
-			t.Errorf("checkCircularDependency should succeed for valid chain, got: %v", err)
-		}
-	})
-
-	// Test case 4: Test the path where we delete from visiting map
-	t.Run("Cleanup visiting map", func(t *testing.T) {
-		sql := "WITH a AS (SELECT 1), b AS (SELECT * FROM a) SELECT * FROM b"
-		p := parser.NewParser(sql)
-		stmts, err := p.Parse()
-		if err != nil {
-			t.Fatalf("Parse failed: %v", err)
-		}
-
-		selectStmt := stmts[0].(*parser.SelectStmt)
-		ctx, err := NewCTEContext(selectStmt.With)
-		if err != nil {
-			t.Fatalf("NewCTEContext failed: %v", err)
-		}
-
-		visiting := make(map[string]bool)
-		err = ctx.checkCircularDependency("b", visiting)
-		if err != nil {
-			t.Errorf("checkCircularDependency failed: %v", err)
-		}
-
-		// Verify visiting map was cleaned up
-		if visiting["b"] {
-			t.Error("Expected 'b' to be removed from visiting map")
-		}
-	})
-}
-
-// TestCalculateMaxDependencyLevelAllPaths tests all paths in calculateMaxDependencyLevel.
-func TestCalculateMaxDependencyLevelAllPaths(t *testing.T) {
-	// Test case 1: Dependency that's the CTE itself (recursive)
-	t.Run("Self-reference in recursive CTE", func(t *testing.T) {
-		sql := "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 10) SELECT * FROM cte"
-		p := parser.NewParser(sql)
-		stmts, err := p.Parse()
-		if err != nil {
-			t.Fatalf("Parse failed: %v", err)
-		}
-
-		selectStmt := stmts[0].(*parser.SelectStmt)
-		ctx, err := NewCTEContext(selectStmt.With)
-		if err != nil {
-			t.Fatalf("NewCTEContext failed: %v", err)
-		}
-
-		// The CTE should be created successfully
-		def, exists := ctx.GetCTE("cte")
-		if !exists {
-			t.Fatal("CTE 'cte' not found")
-		}
-
-		if def.Level <= 0 {
-			t.Errorf("Expected positive level for recursive CTE, got %d", def.Level)
-		}
-	})
-
-	// Test case 2: CTE with multiple dependencies
-	t.Run("Multiple dependencies with max level calculation", func(t *testing.T) {
-		sql := "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT * FROM a), d AS (SELECT * FROM c UNION SELECT * FROM b) SELECT * FROM d"
-		p := parser.NewParser(sql)
-		stmts, err := p.Parse()
-		if err != nil {
-			t.Fatalf("Parse failed: %v", err)
-		}
-
-		selectStmt := stmts[0].(*parser.SelectStmt)
-		ctx, err := NewCTEContext(selectStmt.With)
-		if err != nil {
-			t.Fatalf("NewCTEContext failed: %v", err)
-		}
-
-		// CTE 'd' depends on both 'c' and 'b'
-		// 'c' depends on 'a'
-		// So level of 'd' should be highest
-		defA, _ := ctx.GetCTE("a")
-		defB, _ := ctx.GetCTE("b")
-		defC, _ := ctx.GetCTE("c")
-		defD, _ := ctx.GetCTE("d")
-
-		if defD.Level <= defC.Level {
-			t.Errorf("Expected level of 'd' (%d) > level of 'c' (%d)", defD.Level, defC.Level)
-		}
-
-		if defC.Level <= defA.Level {
-			t.Errorf("Expected level of 'c' (%d) > level of 'a' (%d)", defC.Level, defA.Level)
-		}
-
-		if defD.Level <= defB.Level {
-			t.Errorf("Expected level of 'd' (%d) > level of 'b' (%d)", defD.Level, defB.Level)
-		}
-	})
-}
-
-// TestSelectBestIndexWithOptionsAllPaths tests all paths in SelectBestIndexWithOptions.
-func TestSelectBestIndexWithOptionsAllPaths(t *testing.T) {
-	// Test case 1: No indexes available
-	t.Run("No indexes", func(t *testing.T) {
-		table := &TableInfo{
-			Name:    "users",
-			Indexes: []*IndexInfo{},
-		}
-
-		terms := []*WhereTerm{
-			{LeftColumn: 0, Operator: WO_EQ, RightValue: "test"},
-		}
-
-		selector := NewIndexSelector(table, terms, NewCostModel())
-		result := selector.SelectBestIndexWithOptions(OptimizeOptions{})
-
-		if result != nil {
-			t.Errorf("Expected nil when no indexes, got %v", result)
-		}
-	})
-
-	// Test case 2: Index with all option bonuses
-	t.Run("All option bonuses", func(t *testing.T) {
-		table := &TableInfo{
-			Name: "users",
-			Indexes: []*IndexInfo{
-				{
-					Name:   "idx_compound",
-					Unique: true,
-					Columns: []IndexColumn{
-						{Name: "email", Index: 0, Ascending: true},
-						{Name: "name", Index: 1, Ascending: true},
-						{Name: "age", Index: 2, Ascending: true},
-						{Name: "city", Index: 3, Ascending: true},
-					},
-					RowLogEst:   NewLogEst(1000),
-					ColumnStats: []LogEst{NewLogEst(1000), NewLogEst(100), NewLogEst(50), NewLogEst(10)},
-				},
-			},
-		}
-
-		terms := []*WhereTerm{
-			{LeftColumn: 0, Operator: WO_EQ, RightValue: "test@test.com"},
-		}
-
-		options := OptimizeOptions{
-			PreferUnique:    true,
-			PreferCovering:  true,
-			ConsiderOrderBy: true,
-			OrderBy: []OrderByColumn{
-				{Column: "email", Ascending: true},
-			},
-		}
-
-		selector := NewIndexSelector(table, terms, NewCostModel())
-		result := selector.SelectBestIndexWithOptions(options)
-
-		if result == nil {
-			t.Fatal("Expected index to be selected")
-		}
-
-		if result.Name != "idx_compound" {
-			t.Errorf("Expected 'idx_compound', got %s", result.Name)
-		}
-	})
-
-	// Test case 3: Multiple indexes to compare
-	t.Run("Multiple indexes comparison", func(t *testing.T) {
-		table := &TableInfo{
-			Name: "users",
-			Indexes: []*IndexInfo{
-				{
-					Name: "idx_name",
-					Columns: []IndexColumn{
-						{Name: "name", Index: 0},
-					},
-					RowLogEst:   NewLogEst(1000),
-					ColumnStats: []LogEst{NewLogEst(100)},
-				},
-				{
-					Name:   "idx_email",
-					Unique: true,
-					Columns: []IndexColumn{
-						{Name: "email", Index: 1},
-					},
-					RowLogEst:   NewLogEst(1000),
-					ColumnStats: []LogEst{NewLogEst(1000)},
-				},
-			},
-		}
-
-		terms := []*WhereTerm{
-			{LeftColumn: 1, Operator: WO_EQ, RightValue: "test@test.com"},
-		}
-
-		options := OptimizeOptions{
-			PreferUnique: true,
-		}
-
-		selector := NewIndexSelector(table, terms, NewCostModel())
-		result := selector.SelectBestIndexWithOptions(options)
-
-		if result == nil {
-			t.Fatal("Expected index to be selected")
-		}
-
-		// Should prefer the unique index
-		if result.Name != "idx_email" {
-			t.Errorf("Expected 'idx_email' (unique), got %s", result.Name)
-		}
-	})
-}
-
-// TestIndexUsageExplainEdgeCases tests edge cases in IndexUsage.Explain().
-func TestIndexUsageExplainEdgeCases(t *testing.T) {
-	// Test case 1: Nil index (full table scan)
-	t.Run("Nil index", func(t *testing.T) {
-		usage := &IndexUsage{
-			Index: nil,
-		}
-
-		result := usage.Explain()
-		if result != "FULL TABLE SCAN" {
-			t.Errorf("Expected 'FULL TABLE SCAN', got '%s'", result)
-		}
-	})
-
-	// Test case 2: Index with no terms
-	t.Run("Index with no terms", func(t *testing.T) {
-		usage := &IndexUsage{
-			Index: &IndexInfo{
-				Name: "idx_test",
-			},
-			EqTerms:    []*WhereTerm{},
-			RangeTerms: []*WhereTerm{},
-			InTerms:    []*WhereTerm{},
-		}
-
-		result := usage.Explain()
-		if result == "" {
-			t.Error("Expected non-empty explanation")
-		}
-	})
-
-	// Test case 3: Index with all term types
-	t.Run("Index with all term types", func(t *testing.T) {
-		usage := &IndexUsage{
-			Index: &IndexInfo{
-				Name: "idx_compound",
-				Columns: []IndexColumn{
-					{Name: "col1", Index: 0},
-					{Name: "col2", Index: 1},
-					{Name: "col3", Index: 2},
-				},
-			},
-			EqTerms: []*WhereTerm{
-				{LeftColumn: 0, Operator: WO_EQ},
-			},
-			RangeTerms: []*WhereTerm{
-				{LeftColumn: 1, Operator: WO_GT},
-			},
-			InTerms: []*WhereTerm{
-				{LeftColumn: 2, Operator: WO_IN},
-			},
-			Covering: true,
-		}
-
-		result := usage.Explain()
-		if result == "" {
-			t.Error("Expected non-empty explanation")
-		}
-		// Should mention covering
-		// Note: The actual Explain() implementation may vary
-	})
-}
-
-// TestFindTermForColumnEdgeCases tests edge cases in findTermForColumn.
-func TestFindTermForColumnEdgeCases(t *testing.T) {
-	// Test case 1: No terms
-	t.Run("No terms", func(t *testing.T) {
-		selector := NewIndexSelector(&TableInfo{}, []*WhereTerm{}, NewCostModel())
-		result := selector.findTermForColumn(0)
-
-		if result != nil {
-			t.Errorf("Expected nil when no terms, got %v", result)
-		}
-	})
-
-	// Test case 2: Multiple terms for same column
-	t.Run("Multiple terms same column", func(t *testing.T) {
-		terms := []*WhereTerm{
-			{LeftColumn: 0, Operator: WO_GT, RightValue: 10},
-			{LeftColumn: 0, Operator: WO_LT, RightValue: 100},
-			{LeftColumn: 1, Operator: WO_EQ, RightValue: "test"},
-		}
-
-		selector := NewIndexSelector(&TableInfo{}, terms, NewCostModel())
-		result := selector.findTermForColumn(0)
-
-		if result == nil {
-			t.Error("Expected to find a term for column 0")
-		}
-	})
-
-	// Test case 3: Term for different column
-	t.Run("Term for different column", func(t *testing.T) {
-		terms := []*WhereTerm{
-			{LeftColumn: 1, Operator: WO_EQ, RightValue: "test"},
-		}
-
-		selector := NewIndexSelector(&TableInfo{}, terms, NewCostModel())
-		result := selector.findTermForColumn(0)
-
-		if result != nil {
-			t.Error("Expected nil when searching for different column")
-		}
-	})
-}
-
-// TestApplyRangeTermEdgeCases tests edge cases in applyRangeTerm.
-func TestApplyRangeTermEdgeCases(t *testing.T) {
-	// Test case 1: GT operator
-	t.Run("Greater than operator", func(t *testing.T) {
-		index := &IndexInfo{
-			Columns: []IndexColumn{
-				{Name: "age", Index: 0},
-			},
-		}
-
-		term := &WhereTerm{
-			LeftColumn: 0,
-			Operator:   WO_GT,
-			RightValue: 18,
-		}
-
-		selector := NewIndexSelector(&TableInfo{}, []*WhereTerm{term}, NewCostModel())
-		usage := &IndexUsage{
-			Index:      index,
-			EqTerms:    []*WhereTerm{},
-			RangeTerms: []*WhereTerm{},
-			StartKey:   []interface{}{},
-			EndKey:     []interface{}{},
-		}
-
-		selector.applyRangeTerm(term, usage)
-
-		if len(usage.RangeTerms) != 1 {
-			t.Errorf("Expected 1 range term, got %d", len(usage.RangeTerms))
-		}
-		if len(usage.StartKey) != 1 {
-			t.Errorf("Expected 1 start key, got %d", len(usage.StartKey))
-		}
-	})
-
-	// Test case 2: LT operator
-	t.Run("Less than operator", func(t *testing.T) {
-		index := &IndexInfo{
-			Columns: []IndexColumn{
-				{Name: "age", Index: 0},
-			},
-		}
-
-		term := &WhereTerm{
-			LeftColumn: 0,
-			Operator:   WO_LT,
-			RightValue: 65,
-		}
-
-		selector := NewIndexSelector(&TableInfo{}, []*WhereTerm{term}, NewCostModel())
-		usage := &IndexUsage{
-			Index:      index,
-			EqTerms:    []*WhereTerm{},
-			RangeTerms: []*WhereTerm{},
-			StartKey:   []interface{}{},
-			EndKey:     []interface{}{},
-		}
-
-		selector.applyRangeTerm(term, usage)
-
-		if len(usage.RangeTerms) != 1 {
-			t.Errorf("Expected 1 range term, got %d", len(usage.RangeTerms))
-		}
-		if len(usage.EndKey) != 1 {
-			t.Errorf("Expected 1 end key, got %d", len(usage.EndKey))
-		}
-	})
-
-	// Test case 3: GE operator
-	t.Run("Greater or equal operator", func(t *testing.T) {
-		term := &WhereTerm{
-			LeftColumn: 0,
-			Operator:   WO_GE,
-			RightValue: 18,
-		}
-
-		selector := NewIndexSelector(&TableInfo{}, []*WhereTerm{term}, NewCostModel())
-		usage := &IndexUsage{
-			Index:      &IndexInfo{},
-			EqTerms:    []*WhereTerm{},
-			RangeTerms: []*WhereTerm{},
-			StartKey:   []interface{}{},
-			EndKey:     []interface{}{},
-		}
-
-		selector.applyRangeTerm(term, usage)
-
-		if len(usage.StartKey) != 1 {
-			t.Errorf("Expected 1 start key, got %d", len(usage.StartKey))
-		}
-	})
-
-	// Test case 4: LE operator
-	t.Run("Less or equal operator", func(t *testing.T) {
-		term := &WhereTerm{
-			LeftColumn: 0,
-			Operator:   WO_LE,
-			RightValue: 65,
-		}
-
-		selector := NewIndexSelector(&TableInfo{}, []*WhereTerm{term}, NewCostModel())
-		usage := &IndexUsage{
-			Index:      &IndexInfo{},
-			EqTerms:    []*WhereTerm{},
-			RangeTerms: []*WhereTerm{},
-			StartKey:   []interface{}{},
-			EndKey:     []interface{}{},
-		}
-
-		selector.applyRangeTerm(term, usage)
-
-		if len(usage.EndKey) != 1 {
-			t.Errorf("Expected 1 end key, got %d", len(usage.EndKey))
-		}
-	})
-}
-
-// TestProcessIndexColumnsEdgeCases tests edge cases in processIndexColumns.
-func TestProcessIndexColumnsEdgeCases(t *testing.T) {
-	// Test case 1: Equality term found
-	t.Run("Equality term found", func(t *testing.T) {
-		index := &IndexInfo{
-			Columns: []IndexColumn{
-				{Name: "id", Index: 0},
-			},
-		}
-
-		terms := []*WhereTerm{
-			{LeftColumn: 0, Operator: WO_EQ, RightValue: 1},
-		}
-
-		selector := NewIndexSelector(&TableInfo{}, terms, NewCostModel())
-		usage := &IndexUsage{
-			Index:      index,
-			EqTerms:    []*WhereTerm{},
-			RangeTerms: []*WhereTerm{},
-			StartKey:   []interface{}{},
-			EndKey:     []interface{}{},
-		}
-
-		result := selector.processIndexColumns(usage, index)
-
-		if !result {
-			t.Error("Expected true when first column has constraint")
-		}
-		if len(usage.EqTerms) != 1 {
-			t.Errorf("Expected 1 eq term, got %d", len(usage.EqTerms))
-		}
-	})
-
-	// Test case 2: Range term found
-	t.Run("Range term found", func(t *testing.T) {
-		index := &IndexInfo{
-			Columns: []IndexColumn{
-				{Name: "age", Index: 0},
-			},
-		}
-
-		terms := []*WhereTerm{
-			{LeftColumn: 0, Operator: WO_GT, RightValue: 18},
-		}
-
-		selector := NewIndexSelector(&TableInfo{}, terms, NewCostModel())
-		usage := &IndexUsage{
-			Index:      index,
-			EqTerms:    []*WhereTerm{},
-			RangeTerms: []*WhereTerm{},
-			StartKey:   []interface{}{},
-			EndKey:     []interface{}{},
-		}
-
-		result := selector.processIndexColumns(usage, index)
-
-		if !result {
-			t.Error("Expected true when first column has constraint")
-		}
-		if len(usage.RangeTerms) != 1 {
-			t.Errorf("Expected 1 range term, got %d", len(usage.RangeTerms))
-		}
-	})
-
-	// Test case 3: No matching term (stops processing)
-	t.Run("No matching term", func(t *testing.T) {
-		index := &IndexInfo{
-			Columns: []IndexColumn{
-				{Name: "col1", Index: 0},
-				{Name: "col2", Index: 1},
-			},
-		}
-
-		terms := []*WhereTerm{
-			{LeftColumn: 1, Operator: WO_EQ, RightValue: "test"},
-		}
-
-		selector := NewIndexSelector(&TableInfo{}, terms, NewCostModel())
-		usage := &IndexUsage{
-			Index:      index,
-			EqTerms:    []*WhereTerm{},
-			RangeTerms: []*WhereTerm{},
-			StartKey:   []interface{}{},
-			EndKey:     []interface{}{},
-		}
-
-		result := selector.processIndexColumns(usage, index)
-
-		if result {
-			t.Error("Expected false when first column has no constraint")
-		}
-		// Should stop at first column since no term found
-		if len(usage.EqTerms) != 0 {
-			t.Errorf("Expected 0 eq terms, got %d", len(usage.EqTerms))
-		}
-	})
-}
-
-// TestExtractMainTableNameEdgeCases tests edge cases in extractMainTableName.
-func TestExtractMainTableNameEdgeCases(t *testing.T) {
-	// Test case 1: Nil FROM clause
-	t.Run("Nil FROM clause", func(t *testing.T) {
-		stmt := &parser.SelectStmt{
-			From: nil,
-		}
-
-		result := extractMainTableName(stmt)
-		if result != "" {
-			t.Errorf("Expected empty string for nil FROM, got '%s'", result)
-		}
-	})
-
-	// Test case 2: Empty tables slice
-	t.Run("Empty tables", func(t *testing.T) {
-		stmt := &parser.SelectStmt{
-			From: &parser.FromClause{
-				Tables: []parser.TableOrSubquery{},
-			},
-		}
-
-		result := extractMainTableName(stmt)
-		if result != "" {
-			t.Errorf("Expected empty string for empty tables, got '%s'", result)
-		}
-	})
-
-	// Test case 3: Subquery instead of table name
-	t.Run("Subquery in FROM", func(t *testing.T) {
-		stmt := &parser.SelectStmt{
-			From: &parser.FromClause{
-				Tables: []parser.TableOrSubquery{
-					{
-						Subquery: &parser.SelectStmt{},
-					},
-				},
-			},
-		}
-
-		result := extractMainTableName(stmt)
-		if result != "subquery" {
-			t.Errorf("Expected 'subquery', got '%s'", result)
-		}
-	})
-
-	// Test case 4: Valid table name
-	t.Run("Valid table name", func(t *testing.T) {
-		stmt := &parser.SelectStmt{
-			From: &parser.FromClause{
-				Tables: []parser.TableOrSubquery{
-					{TableName: "users"},
-				},
-			},
-		}
-
-		result := extractMainTableName(stmt)
-		if result != "users" {
-			t.Errorf("Expected 'users', got '%s'", result)
-		}
-	})
-}
-
-// TestJoinAlgorithmStringMethod tests the String() method of JoinAlgorithm.
-func TestJoinAlgorithmStringMethod(t *testing.T) {
-	tests := []struct {
-		name      string
-		algorithm JoinAlgorithm
-		want      string
-	}{
-		{
-			name:      "Nested loop join",
-			algorithm: JoinNestedLoop,
-			want:      "NestedLoop",
-		},
-		{
-			name:      "Hash join",
-			algorithm: JoinHash,
-			want:      "Hash",
-		},
-		{
-			name:      "Merge join",
-			algorithm: JoinMerge,
-			want:      "Merge",
-		},
-		{
-			name:      "Unknown join algorithm",
-			algorithm: JoinAlgorithm(999),
-			want:      "Unknown",
-		},
+// TestPagerReadPageCoverage tests readPage function coverage
+func TestPagerReadPageCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_read_page.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Write some data to page 1
+	page1, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page 1: %v", err)
+	}
+	if err := pager.Write(page1); err != nil {
+		t.Fatalf("failed to write page: %v", err)
+	}
+	testData := []byte("test data for read")
+	copy(page1.Data[DatabaseHeaderSize:], testData)
+	pager.Put(page1)
+
+	if err := pager.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := tt.algorithm.String()
-			if result != tt.want {
-				t.Errorf("Expected '%s', got '%s'", tt.want, result)
-			}
-		})
+	// Now test reading the page back
+	pager.cache.Clear()
+	page2, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page after clear: %v", err)
+	}
+	defer pager.Put(page2)
+
+	// Verify data was read correctly
+	if !bytes.Equal(page2.Data[DatabaseHeaderSize:DatabaseHeaderSize+len(testData)], testData) {
+		t.Error("page data not read correctly from disk")
 	}
 }
-k()
+
+// TestPagerWritePageCoverage tests writePage function coverage
+func TestPagerWritePageCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_write_page.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Create multiple pages
+	for i := Pgno(1); i <= 5; i++ {
+		page, err := pager.Get(i)
+		if err != nil {
+			t.Fatalf("failed to get page %d: %v", i, err)
+		}
+		if err := pager.Write(page); err != nil {
+			t.Fatalf("failed to write page %d: %v", i, err)
+		}
+		data := []byte{byte(i)}
+		if i == 1 {
+			copy(page.Data[DatabaseHeaderSize:], data)
+		} else {
+			copy(page.Data[:], data)
+		}
+		pager.Put(page)
+	}
+
+	// Commit and verify all pages were written
+	if err := pager.Commit(); err != nil {
+		t.Errorf("Commit() error = %v", err)
+	}
+
+	// Reopen and verify
+	pager.Close()
+	pager2, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to reopen: %v", err)
+	}
+	defer pager2.Close()
+
+	for i := Pgno(1); i <= 5; i++ {
+		page, err := pager2.Get(i)
+		if err != nil {
+			t.Fatalf("failed to get page %d after reopen: %v", i, err)
+		}
+		pager2.Put(page)
+	}
+}
+
+// TestAcquireSharedLockCoverage tests acquireSharedLock coverage
+func TestAcquireSharedLockCoverage(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific test")
+	}
+
+	dbFile := filepath.Join(t.TempDir(), "test_acquire_shared.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Test acquiring shared lock from NONE state
+	pager.lockState = LockNone
+	if err := pager.acquireSharedLock(); err != nil {
+		t.Errorf("acquireSharedLock() error = %v", err)
+	}
+
+	// Verify lock state changed
+	if pager.lockState != LockShared {
+		t.Errorf("lock state = %v, want %v", pager.lockState, LockShared)
+	}
+}
+
+// TestBeginWriteTransactionCoverage tests beginWriteTransaction coverage
+func TestBeginWriteTransactionCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_begin_write.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Get a page to start write transaction
+	page, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+
+	// Write to trigger transaction begin
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	// Verify transaction state
+	if pager.state < PagerStateWriterLocked {
+		t.Error("expected write transaction to be started")
+	}
+
+	pager.Put(page)
+
+	// Commit to cleanup
+	if err := pager.Commit(); err != nil {
+		t.Errorf("Commit() error = %v", err)
+	}
+}
+
+// TestJournalPageCoverage tests journalPage coverage
+func TestJournalPageCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_journal_page.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Start write transaction
+	page, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	// Modify page
+	copy(page.Data[DatabaseHeaderSize:], []byte("journal test"))
+	pager.Put(page)
+
+	// Verify we're in a write transaction
+	if pager.state < PagerStateWriterLocked {
+		t.Error("expected write transaction to be active")
+	}
+
+	// Commit
+	if err := pager.Commit(); err != nil {
+		t.Errorf("Commit() error = %v", err)
+	}
+}
+
+// TestOpenJournalCoverage tests openJournal coverage
+func TestOpenJournalCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_open_journal.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Start transaction to trigger journal opening
+	page, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	pager.Put(page)
+
+	// Verify we're in a write transaction
+	if pager.state < PagerStateWriterLocked {
+		t.Error("expected write transaction to be active")
+	}
+
+	// Cleanup
+	pager.Rollback()
+}
+
+// TestRollbackJournalCoverage tests rollbackJournal coverage
+func TestRollbackJournalCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_rollback_journal.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Write initial data
+	page, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	originalData := []byte("original data")
+	copy(page.Data[DatabaseHeaderSize:], originalData)
+	pager.Put(page)
+
+	if err := pager.Commit(); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+
+	// Start new transaction and modify
+	page, err = pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	modifiedData := []byte("modified data")
+	copy(page.Data[DatabaseHeaderSize:], modifiedData)
+	pager.Put(page)
+
+	// Rollback
+	if err := pager.Rollback(); err != nil {
+		t.Errorf("Rollback() error = %v", err)
+	}
+
+	// Verify data was restored
+	page, err = pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page after rollback: %v", err)
+	}
+	defer pager.Put(page)
+
+	if !bytes.Equal(page.Data[DatabaseHeaderSize:DatabaseHeaderSize+len(originalData)], originalData) {
+		t.Error("data not restored correctly after rollback")
+	}
+}
+
+// TestFinalizeJournalCoverage tests finalizeJournal coverage
+func TestFinalizeJournalCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_finalize_journal.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Create a transaction with journal
+	page, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	pager.Put(page)
+
+	// Commit should finalize journal
+	if err := pager.Commit(); err != nil {
+		t.Errorf("Commit() error = %v", err)
+	}
+
+	// Journal file should be gone
+	if _, err := os.Stat(pager.journalFilename); !os.IsNotExist(err) {
+		t.Error("journal file should be deleted after commit")
+	}
+}
+
+// TestUpdateDatabaseHeaderCoverage tests updateDatabaseHeader coverage
+func TestUpdateDatabaseHeaderCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_update_header.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Allocate pages to trigger header update
+	initialSize := pager.dbSize
+	for i := 0; i < 5; i++ {
+		_, err := pager.AllocatePage()
+		if err != nil {
+			t.Fatalf("failed to allocate page: %v", err)
+		}
+	}
+
+	if err := pager.Commit(); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+
+	// Verify header was updated
+	if pager.dbSize == initialSize {
+		t.Error("database size should have increased")
+	}
+
+	if pager.header.DatabaseSize != uint32(pager.dbSize) {
+		t.Error("header database size not updated")
+	}
+}
+
+// TestAllocatePageCoverage tests AllocatePage coverage
+func TestAllocatePageCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_allocate.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Allocate several pages
+	allocatedPages := make(map[Pgno]bool)
+	for i := 0; i < 10; i++ {
+		pgno, err := pager.AllocatePage()
+		if err != nil {
+			t.Fatalf("AllocatePage() error = %v", err)
+		}
+
+		if allocatedPages[pgno] {
+			t.Errorf("page %d allocated twice", pgno)
+		}
+		allocatedPages[pgno] = true
+	}
+
+	// Commit
+	if err := pager.Commit(); err != nil {
+		t.Errorf("Commit() error = %v", err)
+	}
+
+	// Verify pages exist
+	for pgno := range allocatedPages {
+		page, err := pager.Get(pgno)
+		if err != nil {
+			t.Errorf("failed to get allocated page %d: %v", pgno, err)
+		} else {
+			pager.Put(page)
+		}
+	}
+}
+
+// TestFreePageCoverage tests FreePage coverage
+func TestFreePageCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_free.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Allocate pages
+	pgno1, err := pager.AllocatePage()
+	if err != nil {
+		t.Fatalf("AllocatePage() error = %v", err)
+	}
+	pgno2, err := pager.AllocatePage()
+	if err != nil {
+		t.Fatalf("AllocatePage() error = %v", err)
+	}
+
+	if err := pager.Commit(); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+
+	// Free a page
+	if err := pager.FreePage(pgno1); err != nil {
+		t.Errorf("FreePage() error = %v", err)
+	}
+
+	if err := pager.Commit(); err != nil {
+		t.Errorf("Commit() error = %v", err)
+	}
+
+	// Verify free page count increased
+	freeCount := pager.GetFreePageCount()
+	if freeCount == 0 {
+		t.Error("expected non-zero free page count")
+	}
+
+	// Allocate should reuse freed page
+	pgno3, err := pager.AllocatePage()
+	if err != nil {
+		t.Fatalf("AllocatePage() after free error = %v", err)
+	}
+
+	// Should get the freed page back (might be pgno1)
+	t.Logf("Allocated page %d after freeing %d (also allocated %d)", pgno3, pgno1, pgno2)
+}
+
+// TestReadHeaderCoverage tests readHeader coverage
+func TestReadHeaderCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_read_header.db")
+
+	// Create a database
+	pager1, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+
+	// Write something to ensure header is complete
+	page, err := pager1.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+	if err := pager1.Write(page); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	pager1.Put(page)
+	if err := pager1.Commit(); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	pager1.Close()
+
+	// Reopen to trigger header reading
+	pager2, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to reopen: %v", err)
+	}
+	defer pager2.Close()
+
+	// Verify header was read
+	if pager2.header == nil {
+		t.Error("header should be read from file")
+	}
+
+	if pager2.header.GetPageSize() != 4096 {
+		t.Errorf("header page size = %d, want 4096", pager2.header.GetPageSize())
+	}
+}
+
+// TestInitializeNewDatabaseCoverage tests initializeNewDatabase coverage
+func TestInitializeNewDatabaseCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_init_new.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Verify initialization happened
+	if pager.header == nil {
+		t.Error("header should be initialized")
+	}
+
+	if pager.dbSize == 0 {
+		t.Error("database size should be > 0")
+	}
+
+	// Verify page 1 exists and has header
+	page, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page 1: %v", err)
+	}
+	defer pager.Put(page)
+
+	// Check magic string
+	magic := string(page.Data[:16])
+	if magic != MagicHeaderString {
+		t.Errorf("magic string = %q, want %q", magic, MagicHeaderString)
+	}
+}
+
+// TestWriteDirtyPagesCoverage tests writeDirtyPages coverage
+func TestWriteDirtyPagesCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_dirty_pages.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Create multiple dirty pages
+	for i := Pgno(1); i <= 5; i++ {
+		page, err := pager.Get(i)
+		if err != nil {
+			t.Fatalf("failed to get page %d: %v", i, err)
+		}
+		if err := pager.Write(page); err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+		data := []byte{byte(i * 10)}
+		if i == 1 {
+			copy(page.Data[DatabaseHeaderSize:], data)
+		} else {
+			copy(page.Data[:], data)
+		}
+		pager.Put(page)
+	}
+
+	// Get dirty pages before commit
+	dirtyPages := pager.cache.GetDirtyPages()
+	if len(dirtyPages) == 0 {
+		t.Error("expected dirty pages")
+	}
+
+	// Commit should write all dirty pages
+	if err := pager.Commit(); err != nil {
+		t.Errorf("Commit() error = %v", err)
+	}
+
+	// After commit, no dirty pages should remain
+	dirtyPages = pager.cache.GetDirtyPages()
+	if len(dirtyPages) > 0 {
+		t.Error("expected no dirty pages after commit")
+	}
+}
+
+// TestTryAcquireReservedLockAlreadyHeld tests acquiring reserved when already held
+func TestTryAcquireReservedLockAlreadyHeld(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_reserved_held.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Set to reserved
+	pager.lockState = LockReserved
+
+	// Try to acquire again (should be no-op)
+	err = pager.tryAcquireReservedLock()
+	if err != nil {
+		t.Errorf("tryAcquireReservedLock() error = %v", err)
+	}
+}
+
+// TestTryAcquireExclusiveLockReadOnly tests acquiring exclusive on read-only
+func TestTryAcquireExclusiveLockReadOnly(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_exclusive_ro.db")
+
+	// Create database
+	pager1, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	pager1.Close()
+
+	// Open read-only
+	pager2, err := OpenWithPageSize(dbFile, true, 4096)
+	if err != nil {
+		t.Fatalf("failed to open read-only: %v", err)
+	}
+	defer pager2.Close()
+
+	// Try to acquire exclusive (should fail or be no-op for read-only)
+	err = pager2.tryAcquireExclusiveLock()
+	// Read-only pagers may handle this differently
+	t.Logf("tryAcquireExclusiveLock() on read-only: error = %v", err)
+}
+
+// TestCachePeekMiss tests cache Peek with cache miss
+func TestCachePeekMiss(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_peek.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Try to peek at a page not in cache
+	if lruCache, ok := pager.cache.(*LRUCache); ok {
+		page := lruCache.Peek(999)
+		if page != nil {
+			t.Error("expected nil for cache miss on peek")
+		}
+	}
+}
+
+// TestCacheRemoveNonExistent tests removing non-existent page
+func TestCacheRemoveNonExistent(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_remove.db")
+
+	pager, err := OpenWithPageSize(dbFile, false, 4096)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Try to remove page not in cache
+	pager.cache.Remove(999)
+	// Should not error, just be a no-op
+}
+
+// TestCacheShrink tests cache shrinking
+func TestCacheShrink(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_shrink.db")
+
+	config := DefaultLRUCacheConfig(4096)
+	config.MaxPages = 20 // Increased to avoid "cache full" error
+	pager, err := OpenWithLRUCache(dbFile, false, 4096, config)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Add many pages to cache
+	for i := Pgno(1); i <= 15; i++ {
+		page, err := pager.Get(i)
+		if err != nil {
+			t.Fatalf("failed to get page %d: %v", i, err)
+		}
+		if err := pager.Write(page); err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+		pager.Put(page)
+	}
+
+	if lruCache, ok := pager.cache.(*LRUCache); ok {
+		// Shrink cache
+		evicted := lruCache.Shrink(5)
+		t.Logf("Shrunk cache, evicted %d pages", evicted)
+
+		// Verify size is reduced (may not be exactly 5 due to dirty pages)
+		if lruCache.Size() > 15 {
+			t.Errorf("cache size = %d, want <= 15", lruCache.Size())
+		}
+	}
+
+	// Cleanup
+	pager.Rollback()
+}
+
+// TestCacheFlushPage tests flushing individual page
+func TestCacheFlushPage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_flush_page.db")
+
+	config := DefaultLRUCacheConfig(4096)
+	pager, err := OpenWithLRUCache(dbFile, false, 4096, config)
+	if err != nil {
+		t.Fatalf("failed to create pager: %v", err)
+	}
+	defer pager.Close()
+
+	// Create a dirty page
+	page, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	copy(page.Data[DatabaseHeaderSize:], []byte("flush test"))
+	pager.Put(page)
+
+	if lruCache, ok := pager.cache.(*LRUCache); ok {
+		lruCache.SetPager(pager)
+
+		// Flush the page
+		err := lruCache.FlushPage(1)
+		if err != nil {
+			t.Errorf("FlushPage() error = %v", err)
+		}
+	}
+
+	// Cleanup
+	pager.Rollback()
 }
 
 // TestCacheEvict tests cache eviction

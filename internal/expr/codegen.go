@@ -2,8 +2,10 @@
 package expr
 
 import (
+	"encoding/hex"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
@@ -264,7 +266,17 @@ func (g *CodeGenerator) generateLiteral(e *parser.LiteralExpr) (int, error) {
 		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("STRING '%s'", e.Value))
 
 	case parser.LiteralBlob:
-		g.vdbe.AddOpWithP4Str(vdbe.OpBlob, len(e.Value), reg, 0, e.Value)
+		// e.Value is the raw lexeme like X'01020304' or x'ABCDEF'.
+		// Strip the X'...' wrapper to get the hex digits, then decode to []byte.
+		hexStr := e.Value
+		if len(hexStr) >= 3 && (hexStr[0] == 'X' || hexStr[0] == 'x') && hexStr[1] == '\'' && hexStr[len(hexStr)-1] == '\'' {
+			hexStr = hexStr[2 : len(hexStr)-1]
+		}
+		blobData, err := hex.DecodeString(strings.ToUpper(hexStr))
+		if err != nil {
+			return 0, fmt.Errorf("invalid blob literal %q: %w", e.Value, err)
+		}
+		g.vdbe.AddOpWithP4Blob(vdbe.OpBlob, len(blobData), reg, 0, blobData)
 		g.vdbe.SetComment(g.vdbe.NumOps()-1, "BLOB")
 
 	default:
@@ -527,12 +539,22 @@ func (g *CodeGenerator) generateUnary(e *parser.UnaryExpr) (int, error) {
 		g.vdbe.SetComment(g.vdbe.NumOps()-1, "BITNOT")
 
 	case parser.OpIsNull:
-		g.vdbe.AddOp(vdbe.OpIsNull, operandReg, resultReg, 0)
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, "IS NULL")
+		// OpIsNull is a jump instruction: jumps to P2 if P1 is NULL.
+		// Emit a boolean-producing sequence instead of using it directly.
+		g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
+		isNullAddr := g.vdbe.AddOp(vdbe.OpIsNull, operandReg, 0, 0)
+		g.vdbe.SetComment(isNullAddr, "IS NULL")
+		g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
+		g.vdbe.Program[isNullAddr].P2 = g.vdbe.NumOps()
 
 	case parser.OpNotNull:
-		g.vdbe.AddOp(vdbe.OpNotNull, operandReg, resultReg, 0)
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, "NOT NULL")
+		// OpNotNull is a jump instruction: jumps to P2 if P1 is NOT NULL.
+		// Emit a boolean-producing sequence instead of using it directly.
+		g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
+		notNullAddr := g.vdbe.AddOp(vdbe.OpNotNull, operandReg, 0, 0)
+		g.vdbe.SetComment(notNullAddr, "NOT NULL")
+		g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
+		g.vdbe.Program[notNullAddr].P2 = g.vdbe.NumOps()
 
 	default:
 		return 0, fmt.Errorf("unsupported unary operator: %v", e.Op)

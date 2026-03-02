@@ -36,8 +36,14 @@ func (s *Stmt) compileSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driv
 	return s.compileSimpleSelect(vm, stmt, tableName, table, args)
 }
 
-// handleSpecialSelectTypes handles CTEs, views, subqueries, and no-FROM selects.
+// handleSpecialSelectTypes handles compounds, CTEs, views, subqueries, and no-FROM selects.
 func (s *Stmt) handleSpecialSelectTypes(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	// Handle compound SELECT (UNION, UNION ALL, INTERSECT, EXCEPT)
+	if stmt.Compound != nil {
+		result, err := s.compileCompoundSelect(vm, stmt, args)
+		return result, err, true
+	}
+
 	// Handle WITH clause (CTEs)
 	if stmt.With != nil {
 		result, err := s.compileSelectWithCTEs(vm, stmt, args)
@@ -85,8 +91,8 @@ func (s *Stmt) resolveSelectTable(stmt *parser.SelectStmt) (string, *schema.Tabl
 func (s *Stmt) routeSpecializedSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
 
-	// Handle JOINs
-	if stmt.From != nil && len(stmt.From.Joins) > 0 {
+	// Handle JOINs (explicit JOIN or implicit cross join via comma-separated tables)
+	if stmt.From != nil && (len(stmt.From.Joins) > 0 || len(stmt.From.Tables) > 1) {
 		result, err := s.compileSelectWithJoins(vm, stmt, tableName, table, args)
 		return result, err, true
 	}

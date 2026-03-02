@@ -1,619 +1,438 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
-package planner
+package pager
 
 import (
-	"testing"
-
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+	"errors"
+	"fmt"
+	"os"
 )
 
-// TestNewCTEContext tests creating a CTE context from a WITH clause.
-func TestNewCTEContext(t *testing.T) {
-	tests := []struct {
-		name      string
-		sql       string
-		wantCTEs  int
-		wantRecur bool
-		wantErr   bool
-	}{
-		{
-			name:      "simple CTE",
-			sql:       "WITH cte AS (SELECT * FROM users) SELECT * FROM cte",
-			wantCTEs:  1,
-			wantRecur: false,
-			wantErr:   false,
-		},
-		{
-			name:      "multiple CTEs",
-			sql:       "WITH a AS (SELECT 1), b AS (SELECT 2) SELECT * FROM a, b",
-			wantCTEs:  2,
-			wantRecur: false,
-			wantErr:   false,
-		},
-		{
-			name:      "recursive CTE",
-			sql:       "WITH RECURSIVE cte AS (SELECT 1 UNION ALL SELECT 2) SELECT * FROM cte",
-			wantCTEs:  1,
-			wantRecur: true,
-			wantErr:   false,
-		},
-	}
+// CheckpointMode represents the different modes of WAL checkpointing.
+// These modes match SQLite's checkpoint modes for compatibility.
+type CheckpointMode int
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := parser.NewParser(tt.sql)
-			stmts, err := p.Parse()
-			if err != nil {
-				t.Fatalf("Parse failed: %v", err)
-			}
+const (
+	// CheckpointPassive attempts to checkpoint as many frames as possible
+	// without blocking readers or writers. Returns immediately if it would
+	// have to block waiting for readers or writers.
+	// This is the least aggressive checkpoint mode.
+	CheckpointPassive CheckpointMode = iota
 
-			if len(stmts) != 1 {
-				t.Fatalf("expected 1 statement, got %d", len(stmts))
-			}
+	// CheckpointFull blocks new writers but allows existing readers to continue.
+	// Waits for all readers to finish, then checkpoints all frames.
+	// This ensures all WAL frames are copied to the database.
+	CheckpointFull
 
-			selectStmt, ok := stmts[0].(*parser.SelectStmt)
-			if !ok {
-				t.Fatalf("expected SelectStmt, got %T", stmts[0])
-			}
+	// CheckpointRestart is like FULL but also resets the WAL to the beginning
+	// after checkpointing. This allows the WAL to be reused from the start,
+	// preventing the WAL from growing indefinitely.
+	CheckpointRestart
 
-			ctx, err := NewCTEContext(selectStmt.With)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewCTEContext() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
+	// CheckpointTruncate is like RESTART but also truncates the WAL file to
+	// zero bytes after checkpointing. This is the most aggressive mode and
+	// ensures the WAL file is completely removed.
+	CheckpointTruncate
+)
 
-			if !tt.wantErr {
-				if ctx == nil {
-					t.Fatal("expected CTEContext, got nil")
-				}
+// CheckpointMode errors
+var (
+	ErrCheckpointInvalidMode = errors.New("invalid checkpoint mode")
+	ErrCheckpointBusy        = errors.New("checkpoint busy - readers or writers active")
+)
 
-				if len(ctx.CTEs) != tt.wantCTEs {
-					t.Errorf("expected %d CTEs, got %d", tt.wantCTEs, len(ctx.CTEs))
-				}
-
-				if ctx.IsRecursive != tt.wantRecur {
-					t.Errorf("expected IsRecursive = %v, got %v", tt.wantRecur, ctx.IsRecursive)
-				}
-			}
-		})
+// CheckpointWithMode performs a checkpoint with the specified mode.
+// Returns the number of frames checkpointed and the number of frames remaining.
+//
+// For PASSIVE mode:
+//   - Checkpoints frames that can be written without blocking
+//   - Returns immediately if blocking would be required
+//   - May not checkpoint all frames
+//
+// For FULL mode:
+//   - Waits for readers to finish
+//   - Checkpoints all frames
+//   - Returns error if readers are still active (simplified implementation)
+//
+// For RESTART mode:
+//   - Same as FULL but resets the WAL afterward
+//   - Allows WAL to be reused from the beginning
+//
+// For TRUNCATE mode:
+//   - Same as RESTART but removes the WAL file entirely
+//   - Most aggressive cleanup
+func (w *WAL) CheckpointWithMode(mode CheckpointMode) (framesCheckpointed int, framesRemaining int, err error) {
+	switch mode {
+	case CheckpointPassive:
+		return w.checkpointPassive()
+	case CheckpointFull:
+		return w.checkpointFull()
+	case CheckpointRestart:
+		return w.checkpointRestart()
+	case CheckpointTruncate:
+		return w.checkpointTruncate()
+	default:
+		return 0, 0, ErrCheckpointInvalidMode
 	}
 }
 
-// TestCTEDependencies tests CTE dependency detection.
-func TestCTEDependencies(t *testing.T) {
-	tests := []struct {
-		name     string
-		sql      string
-		cteName  string
-		wantDeps []string
-	}{
-		{
-			name:     "no dependencies",
-			sql:      "WITH cte AS (SELECT * FROM users) SELECT * FROM cte",
-			cteName:  "cte",
-			wantDeps: []string{},
-		},
-		{
-			name:     "one dependency",
-			sql:      "WITH a AS (SELECT 1), b AS (SELECT * FROM a) SELECT * FROM b",
-			cteName:  "b",
-			wantDeps: []string{"a"},
-		},
-		{
-			name:     "multiple dependencies",
-			sql:      "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT * FROM a JOIN b) SELECT * FROM c",
-			cteName:  "c",
-			wantDeps: []string{"a", "b"},
-		},
+// checkpointPassive performs a passive checkpoint.
+// Copies as many WAL frames as possible to the database without blocking.
+func (w *WAL) checkpointPassive() (int, int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.file == nil {
+		return 0, 0, errors.New("WAL not open")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := parser.NewParser(tt.sql)
-			stmts, err := p.Parse()
-			if err != nil {
-				t.Fatalf("Parse failed: %v", err)
-			}
-
-			selectStmt := stmts[0].(*parser.SelectStmt)
-			ctx, err := NewCTEContext(selectStmt.With)
-			if err != nil {
-				t.Fatalf("NewCTEContext failed: %v", err)
-			}
-
-			def, exists := ctx.GetCTE(tt.cteName)
-			if !exists {
-				t.Fatalf("CTE %s not found", tt.cteName)
-			}
-
-			if len(def.DependsOn) != len(tt.wantDeps) {
-				t.Errorf("expected %d dependencies, got %d", len(tt.wantDeps), len(def.DependsOn))
-				t.Logf("  want: %v", tt.wantDeps)
-				t.Logf("  got:  %v", def.DependsOn)
-			}
-		})
+	initialFrameCount := int(w.frameCount)
+	if initialFrameCount == 0 {
+		return 0, 0, nil
 	}
+
+	// Open database file and checkpoint frames
+	framesCheckpointed, err := w.checkpointFramesPassive(initialFrameCount)
+	if err != nil {
+		return 0, initialFrameCount, err
+	}
+
+	framesRemaining := initialFrameCount - framesCheckpointed
+	return framesCheckpointed, framesRemaining, nil
 }
 
-// TestCTEDependencyOrder tests topological sorting of CTEs.
-func TestCTEDependencyOrder(t *testing.T) {
-	sql := "WITH a AS (SELECT 1), b AS (SELECT * FROM a), c AS (SELECT * FROM b) SELECT * FROM c"
+// checkpointFramesPassive handles the frame checkpointing for passive mode.
+func (w *WAL) checkpointFramesPassive(initialFrameCount int) (int, error) {
+	// Open database file if not already open
+	if err := w.ensureDBFileOpen(); err != nil {
+		return 0, fmt.Errorf("failed to open database file: %w", err)
+	}
 
-	p := parser.NewParser(sql)
-	stmts, err := p.Parse()
+	// Build map of page number to latest frame index
+	pageFrames, err := w.buildPageFrameMap()
 	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
+		return 0, err
 	}
 
-	selectStmt := stmts[0].(*parser.SelectStmt)
-	ctx, err := NewCTEContext(selectStmt.With)
+	// Write frames to database
+	if err := w.writeFramesToDB(pageFrames); err != nil {
+		return 0, err
+	}
+
+	// Sync database file
+	if err := w.dbFile.Sync(); err != nil {
+		return 0, fmt.Errorf("failed to sync database: %w", err)
+	}
+
+	return len(pageFrames), nil
+}
+
+// checkpointFull performs a full checkpoint.
+// Blocks new writers and waits for readers, then checkpoints all frames.
+func (w *WAL) checkpointFull() (int, int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.file == nil {
+		return 0, 0, errors.New("WAL not open")
+	}
+
+	initialFrameCount := int(w.frameCount)
+	if initialFrameCount == 0 {
+		return 0, 0, nil
+	}
+
+	// In a full implementation, we would:
+	// 1. Acquire exclusive lock to block new writers
+	// 2. Wait for all readers to finish
+	// 3. Checkpoint all frames
+	// For this simplified version, we just checkpoint everything
+
+	// Open database file and checkpoint frames
+	framesCheckpointed, err := w.checkpointFramesFull(initialFrameCount)
 	if err != nil {
-		t.Fatalf("NewCTEContext failed: %v", err)
+		return 0, initialFrameCount, err
 	}
 
-	// Check that order is correct (a before b, b before c)
-	order := ctx.CTEOrder
-	if len(order) != 3 {
-		t.Fatalf("expected 3 CTEs in order, got %d", len(order))
+	framesRemaining := initialFrameCount - framesCheckpointed
+	return framesCheckpointed, framesRemaining, nil
+}
+
+// checkpointFramesFull handles the frame checkpointing for full mode.
+func (w *WAL) checkpointFramesFull(initialFrameCount int) (int, error) {
+	// Open database file if not already open
+	if err := w.ensureDBFileOpen(); err != nil {
+		return 0, fmt.Errorf("failed to open database file: %w", err)
 	}
 
-	aIdx, bIdx, cIdx := -1, -1, -1
-	for i, name := range order {
-		switch name {
-		case "a":
-			aIdx = i
-		case "b":
-			bIdx = i
-		case "c":
-			cIdx = i
+	// Build map of page number to latest frame index
+	pageFrames, err := w.buildPageFrameMap()
+	if err != nil {
+		return 0, err
+	}
+
+	// Write frames to database
+	if err := w.writeFramesToDB(pageFrames); err != nil {
+		return 0, err
+	}
+
+	// Sync database file
+	if err := w.dbFile.Sync(); err != nil {
+		return 0, fmt.Errorf("failed to sync database: %w", err)
+	}
+
+	return len(pageFrames), nil
+}
+
+// checkpointRestart performs a restart checkpoint.
+// Like FULL but also resets the WAL to the beginning.
+func (w *WAL) checkpointRestart() (int, int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.file == nil {
+		return 0, 0, errors.New("WAL not open")
+	}
+
+	initialFrameCount := int(w.frameCount)
+	if initialFrameCount == 0 {
+		// Nothing to checkpoint, but still reset the WAL
+		return 0, 0, nil
+	}
+
+	// Open database file and checkpoint frames
+	framesCheckpointed, err := w.checkpointFramesForRestart(initialFrameCount)
+	if err != nil {
+		return 0, initialFrameCount, err
+	}
+
+	// Now reset the WAL (RESTART mode behavior)
+	if err := w.restartWAL(); err != nil {
+		return framesCheckpointed, 0, err
+	}
+
+	return framesCheckpointed, 0, nil
+}
+
+// checkpointFramesForRestart handles the frame checkpointing phase of restart checkpoint.
+func (w *WAL) checkpointFramesForRestart(initialFrameCount int) (int, error) {
+	// Open database file if not already open
+	if err := w.ensureDBFileOpen(); err != nil {
+		return 0, fmt.Errorf("failed to open database file: %w", err)
+	}
+
+	// Build map of page number to latest frame index
+	pageFrames, err := w.buildPageFrameMap()
+	if err != nil {
+		return 0, err
+	}
+
+	// Write frames to database
+	if err := w.writeFramesToDB(pageFrames); err != nil {
+		return 0, err
+	}
+
+	// Sync database file
+	if err := w.dbFile.Sync(); err != nil {
+		return 0, fmt.Errorf("failed to sync database: %w", err)
+	}
+
+	return len(pageFrames), nil
+}
+
+// restartWAL resets the WAL file to the beginning with a fresh header.
+func (w *WAL) restartWAL() error {
+	// Truncate and reset WAL
+	if err := w.file.Truncate(0); err != nil {
+		return fmt.Errorf("failed to truncate WAL: %w", err)
+	}
+
+	// Seek to beginning and write fresh header
+	if _, err := w.file.Seek(0, 0); err != nil {
+		return fmt.Errorf("failed to seek WAL: %w", err)
+	}
+
+	// Generate new salt and increment checkpoint sequence
+	w.salt1 = generateSalt()
+	w.salt2 = generateSalt()
+	w.frameCount = 0
+	w.checkpointSeq++
+
+	// Reset checksum state
+	w.lastChecksum1 = 0
+	w.lastChecksum2 = 0
+	w.checksumCache = make(map[uint32][2]uint32)
+
+	if err := w.writeHeader(); err != nil {
+		return fmt.Errorf("failed to write new WAL header: %w", err)
+	}
+
+	return nil
+}
+
+// checkpointTruncate performs a truncate checkpoint.
+// Like RESTART but also truncates the WAL file to zero bytes.
+func (w *WAL) checkpointTruncate() (int, int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.file == nil {
+		return 0, 0, errors.New("WAL not open")
+	}
+
+	initialFrameCount := int(w.frameCount)
+
+	// Open database file if needed and checkpoint frames
+	framesCheckpointed, err := w.checkpointFramesForTruncate(initialFrameCount)
+	if err != nil {
+		return 0, initialFrameCount, err
+	}
+
+	// TRUNCATE mode: completely remove the WAL file
+	if err := w.truncateWALFile(); err != nil {
+		return framesCheckpointed, 0, err
+	}
+
+	return framesCheckpointed, 0, nil
+}
+
+// checkpointFramesForTruncate handles the frame checkpointing phase of truncate checkpoint.
+func (w *WAL) checkpointFramesForTruncate(initialFrameCount int) (int, error) {
+	// No frames to checkpoint
+	if initialFrameCount == 0 {
+		return 0, nil
+	}
+
+	// Open database file if not already open
+	if err := w.ensureDBFileOpen(); err != nil {
+		return 0, fmt.Errorf("failed to open database file: %w", err)
+	}
+
+	// Build map of page number to latest frame index
+	pageFrames, err := w.buildPageFrameMap()
+	if err != nil {
+		return 0, err
+	}
+
+	// Write frames to database
+	if err := w.writeFramesToDB(pageFrames); err != nil {
+		return 0, err
+	}
+
+	// Sync database file
+	if err := w.dbFile.Sync(); err != nil {
+		return 0, fmt.Errorf("failed to sync database: %w", err)
+	}
+
+	return len(pageFrames), nil
+}
+
+// truncateWALFile closes and truncates the WAL file to zero bytes.
+func (w *WAL) truncateWALFile() error {
+	// Close the WAL file
+	if w.file != nil {
+		w.file.Close()
+		w.file = nil
+	}
+
+	// Truncate to zero bytes (effectively deleting content)
+	if err := os.Truncate(w.filename, 0); err != nil {
+		return fmt.Errorf("failed to truncate WAL file: %w", err)
+	}
+
+	// Reset internal state
+	w.frameCount = 0
+	w.initialized = false
+
+	return nil
+}
+
+// ensureDBFileOpen opens the database file if it's not already open.
+func (w *WAL) ensureDBFileOpen() error {
+	if w.dbFile != nil {
+		return nil
+	}
+
+	var err error
+	w.dbFile, err = os.OpenFile(w.dbFilename, os.O_RDWR, 0600)
+	return err
+}
+
+// buildPageFrameMap builds a map of page number to latest frame index.
+func (w *WAL) buildPageFrameMap() (map[uint32]uint32, error) {
+	pageFrames := make(map[uint32]uint32)
+	for i := uint32(0); i < w.frameCount; i++ {
+		frame, err := w.readFrameAtIndex(i)
+		if err != nil {
+			return nil, err
+		}
+		// Later frames override earlier ones
+		pageFrames[frame.PageNumber] = i
+	}
+	return pageFrames, nil
+}
+
+// writeFramesToDB writes the frames in pageFrames map to the database file.
+func (w *WAL) writeFramesToDB(pageFrames map[uint32]uint32) error {
+	for pgno, frameIdx := range pageFrames {
+		frame, err := w.readFrameAtIndex(frameIdx)
+		if err != nil {
+			return fmt.Errorf("failed to read frame %d: %w", frameIdx, err)
+		}
+
+		offset := int64(pgno-1) * int64(w.pageSize)
+		if _, err := w.dbFile.WriteAt(frame.Data, offset); err != nil {
+			return fmt.Errorf("failed to write page %d to database: %w", pgno, err)
 		}
 	}
-
-	if aIdx == -1 || bIdx == -1 || cIdx == -1 {
-		t.Fatal("not all CTEs found in order")
-	}
-
-	if aIdx >= bIdx || bIdx >= cIdx {
-		t.Errorf("CTE order incorrect: a=%d, b=%d, c=%d", aIdx, bIdx, cIdx)
-	}
+	return nil
 }
 
-// TestRecursiveCTEDetection tests detecting recursive CTEs.
-func TestRecursiveCTEDetection(t *testing.T) {
-	tests := []struct {
-		name          string
-		sql           string
-		cteName       string
-		wantRecursive bool
-	}{
-		{
-			name:          "non-recursive",
-			sql:           "WITH cte AS (SELECT 1) SELECT * FROM cte",
-			cteName:       "cte",
-			wantRecursive: false,
-		},
-		{
-			name:          "recursive self-reference",
-			sql:           "WITH RECURSIVE cte AS (SELECT 1 UNION ALL SELECT n+1 FROM cte) SELECT * FROM cte",
-			cteName:       "cte",
-			wantRecursive: true,
-		},
-	}
+// CheckpointInfo represents information about a checkpoint operation.
+type CheckpointInfo struct {
+	// Number of frames successfully checkpointed
+	FramesCheckpointed int
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := parser.NewParser(tt.sql)
-			stmts, err := p.Parse()
-			if err != nil {
-				t.Fatalf("Parse failed: %v", err)
-			}
+	// Number of frames remaining in the WAL after checkpoint
+	FramesRemaining int
 
-			selectStmt := stmts[0].(*parser.SelectStmt)
-			ctx, err := NewCTEContext(selectStmt.With)
-			if err != nil {
-				t.Fatalf("NewCTEContext failed: %v", err)
-			}
+	// Size of WAL file before checkpoint (bytes)
+	WALSizeBefore int64
 
-			def, exists := ctx.GetCTE(tt.cteName)
-			if !exists {
-				t.Fatalf("CTE %s not found", tt.cteName)
-			}
-
-			if def.IsRecursive != tt.wantRecursive {
-				t.Errorf("expected IsRecursive = %v, got %v", tt.wantRecursive, def.IsRecursive)
-			}
-		})
-	}
+	// Size of WAL file after checkpoint (bytes)
+	WALSizeAfter int64
 }
 
-// TestExpandCTE tests expanding a CTE to a TableInfo.
-func TestExpandCTE(t *testing.T) {
-	sql := "WITH users_cte(id, name) AS (SELECT id, name FROM users) SELECT * FROM users_cte"
-
-	p := parser.NewParser(sql)
-	stmts, err := p.Parse()
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
-	}
-
-	selectStmt := stmts[0].(*parser.SelectStmt)
-	ctx, err := NewCTEContext(selectStmt.With)
-	if err != nil {
-		t.Fatalf("NewCTEContext failed: %v", err)
-	}
-
-	// Expand the CTE
-	table, err := ctx.ExpandCTE("users_cte", 0)
-	if err != nil {
-		t.Fatalf("ExpandCTE failed: %v", err)
-	}
-
-	if table == nil {
-		t.Fatal("expected TableInfo, got nil")
-	}
-
-	if table.Name != "users_cte" {
-		t.Errorf("expected Name = 'users_cte', got '%s'", table.Name)
-	}
-
-	if len(table.Columns) != 2 {
-		t.Errorf("expected 2 columns, got %d", len(table.Columns))
-	}
-
-	if table.Cursor != 0 {
-		t.Errorf("expected Cursor = 0, got %d", table.Cursor)
-	}
-}
-
-// TestCTEColumnInference tests column inference from SELECT.
-func TestCTEColumnInference(t *testing.T) {
-	tests := []struct {
-		name        string
-		sql         string
-		cteName     string
-		wantColumns int
-	}{
-		{
-			name:        "explicit column list",
-			sql:         "WITH cte(a, b, c) AS (SELECT 1, 2, 3) SELECT * FROM cte",
-			cteName:     "cte",
-			wantColumns: 3,
-		},
-		{
-			name:        "inferred from SELECT",
-			sql:         "WITH cte AS (SELECT id, name, email FROM users) SELECT * FROM cte",
-			cteName:     "cte",
-			wantColumns: 3,
-		},
-		{
-			name:        "with aliases",
-			sql:         "WITH cte AS (SELECT id AS user_id, name AS user_name FROM users) SELECT * FROM cte",
-			cteName:     "cte",
-			wantColumns: 2,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := parser.NewParser(tt.sql)
-			stmts, err := p.Parse()
-			if err != nil {
-				t.Fatalf("Parse failed: %v", err)
-			}
-
-			selectStmt := stmts[0].(*parser.SelectStmt)
-			ctx, err := NewCTEContext(selectStmt.With)
-			if err != nil {
-				t.Fatalf("NewCTEContext failed: %v", err)
-			}
-
-			def, exists := ctx.GetCTE(tt.cteName)
-			if !exists {
-				t.Fatalf("CTE %s not found", tt.cteName)
-			}
-
-			columns := ctx.inferColumns(def)
-			if len(columns) != tt.wantColumns {
-				t.Errorf("expected %d columns, got %d", tt.wantColumns, len(columns))
-			}
-		})
-	}
-}
-
-// TestCTEValidation tests CTE validation.
-func TestCTEValidation(t *testing.T) {
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-	}{
-		{
-			name:    "valid simple CTE",
-			sql:     "WITH cte AS (SELECT 1) SELECT * FROM cte",
-			wantErr: false,
-		},
-		{
-			name:    "valid recursive CTE",
-			sql:     "WITH RECURSIVE cte AS (SELECT 1 UNION ALL SELECT n+1 FROM cte WHERE n < 10) SELECT * FROM cte",
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := parser.NewParser(tt.sql)
-			stmts, err := p.Parse()
-			if err != nil {
-				t.Fatalf("Parse failed: %v", err)
-			}
-
-			selectStmt := stmts[0].(*parser.SelectStmt)
-			ctx, err := NewCTEContext(selectStmt.With)
-			if err != nil {
-				t.Fatalf("NewCTEContext failed: %v", err)
-			}
-
-			err = ctx.ValidateCTEs()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateCTEs() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-// TestRewriteQueryWithCTEs tests rewriting queries with CTEs.
-func TestRewriteQueryWithCTEs(t *testing.T) {
-	sql := "WITH cte AS (SELECT * FROM users) SELECT * FROM cte"
-
-	p := parser.NewParser(sql)
-	stmts, err := p.Parse()
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
-	}
-
-	selectStmt := stmts[0].(*parser.SelectStmt)
-	ctx, err := NewCTEContext(selectStmt.With)
-	if err != nil {
-		t.Fatalf("NewCTEContext failed: %v", err)
-	}
-
-	// Create a mock table reference to CTE
-	tables := []*TableInfo{
-		{
-			Name:   "cte",
-			Cursor: 0,
-		},
-	}
-
-	// Rewrite
-	rewritten, err := ctx.RewriteQueryWithCTEs(tables)
-	if err != nil {
-		t.Fatalf("RewriteQueryWithCTEs failed: %v", err)
-	}
-
-	if len(rewritten) != 1 {
-		t.Fatalf("expected 1 table, got %d", len(rewritten))
-	}
-
-	// The table should now have columns from CTE
-	if rewritten[0].Name != "cte" {
-		t.Errorf("expected table name 'cte', got '%s'", rewritten[0].Name)
-	}
-}
-
-// TestPlannerWithCTEs tests integrating CTEs with the planner.
-func TestPlannerWithCTEs(t *testing.T) {
-	sql := "WITH cte AS (SELECT 1 AS x) SELECT * FROM cte"
-
-	p := parser.NewParser(sql)
-	stmts, err := p.Parse()
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
-	}
-
-	selectStmt := stmts[0].(*parser.SelectStmt)
-
-	// Create CTE context
-	ctx, err := NewCTEContext(selectStmt.With)
-	if err != nil {
-		t.Fatalf("NewCTEContext failed: %v", err)
-	}
-
-	// Create planner
-	planner := NewPlanner()
-	planner.SetCTEContext(ctx)
-
-	// Create tables list (referencing CTE)
-	tables := []*TableInfo{
-		{
-			Name:   "cte",
-			Cursor: 0,
-		},
-	}
-
-	// Plan the query
-	info, err := planner.PlanQuery(tables, nil)
-	if err != nil {
-		t.Fatalf("PlanQuery failed: %v", err)
-	}
-
-	if info == nil {
-		t.Fatal("expected WhereInfo, got nil")
-	}
-
-	if len(info.Tables) == 0 {
-		t.Fatal("expected at least one table in plan")
-	}
-}
-
-// TestMultipleCTEs tests planning with multiple CTEs.
-func TestMultipleCTEs(t *testing.T) {
-	sql := "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT * FROM a JOIN b) SELECT * FROM c"
-
-	p := parser.NewParser(sql)
-	stmts, err := p.Parse()
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
-	}
-
-	selectStmt := stmts[0].(*parser.SelectStmt)
-	ctx, err := NewCTEContext(selectStmt.With)
-	if err != nil {
-		t.Fatalf("NewCTEContext failed: %v", err)
-	}
-
-	if len(ctx.CTEs) != 3 {
-		t.Errorf("expected 3 CTEs, got %d", len(ctx.CTEs))
-	}
-
-	// Check order: a and b should come before c
-	order := ctx.CTEOrder
-	cIdx := -1
-	for i, name := range order {
-		if name == "c" {
-			cIdx = i
+// CheckpointWithInfo performs a checkpoint and returns detailed information.
+func (w *WAL) CheckpointWithInfo(mode CheckpointMode) (*CheckpointInfo, error) {
+	w.mu.RLock()
+	var walSizeBefore int64
+	if w.file != nil {
+		info, err := w.file.Stat()
+		if err == nil {
+			walSizeBefore = info.Size()
 		}
 	}
+	w.mu.RUnlock()
 
-	if cIdx == -1 {
-		t.Fatal("CTE 'c' not found in order")
+	framesCheckpointed, framesRemaining, err := w.CheckpointWithMode(mode)
+	if err != nil {
+		return nil, err
 	}
 
-	// Both a and b should appear before c
-	for i := cIdx; i < len(order); i++ {
-		if order[i] == "a" || order[i] == "b" {
-			t.Errorf("CTE '%s' appears after 'c' in order", order[i])
+	w.mu.RLock()
+	var walSizeAfter int64
+	if w.file != nil {
+		info, err := w.file.Stat()
+		if err == nil {
+			walSizeAfter = info.Size()
 		}
 	}
-}
+	w.mu.RUnlock()
 
-// TestRecursiveCTEStructure tests recursive CTE structure validation.
-func TestRecursiveCTEStructure(t *testing.T) {
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-	}{
-		{
-			name:    "valid recursive with UNION ALL",
-			sql:     "WITH RECURSIVE cte AS (SELECT 1 UNION ALL SELECT 2) SELECT * FROM cte",
-			wantErr: false,
-		},
-		{
-			name:    "valid recursive with UNION",
-			sql:     "WITH RECURSIVE cte AS (SELECT 1 UNION SELECT 2) SELECT * FROM cte",
-			wantErr: false,
-		},
-		{
-			name:    "recursive without UNION",
-			sql:     "WITH RECURSIVE cte AS (SELECT 1) SELECT * FROM cte",
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := parser.NewParser(tt.sql)
-			stmts, err := p.Parse()
-			if err != nil {
-				t.Fatalf("Parse failed: %v", err)
-			}
-
-			selectStmt := stmts[0].(*parser.SelectStmt)
-			ctx, err := NewCTEContext(selectStmt.With)
-			if err != nil {
-				t.Fatalf("NewCTEContext failed: %v", err)
-			}
-
-			err = ctx.ValidateCTEs()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateCTEs() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-// TestMaterializeCTE tests CTE materialization.
-func TestMaterializeCTE(t *testing.T) {
-	sql := "WITH cte AS (SELECT * FROM users) SELECT * FROM cte"
-
-	p := parser.NewParser(sql)
-	stmts, err := p.Parse()
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
-	}
-
-	selectStmt := stmts[0].(*parser.SelectStmt)
-	ctx, err := NewCTEContext(selectStmt.With)
-	if err != nil {
-		t.Fatalf("NewCTEContext failed: %v", err)
-	}
-
-	// Materialize the CTE
-	mat, err := ctx.MaterializeCTE("cte")
-	if err != nil {
-		t.Fatalf("MaterializeCTE failed: %v", err)
-	}
-
-	if mat == nil {
-		t.Fatal("expected MaterializedCTE, got nil")
-	}
-
-	if mat.Name != "cte" {
-		t.Errorf("expected Name = 'cte', got '%s'", mat.Name)
-	}
-
-	if mat.TempTable == "" {
-		t.Error("expected non-empty TempTable")
-	}
-
-	// Check that it's cached
-	mat2, err := ctx.MaterializeCTE("cte")
-	if err != nil {
-		t.Fatalf("second MaterializeCTE failed: %v", err)
-	}
-
-	if mat != mat2 {
-		t.Error("expected same MaterializedCTE instance")
-	}
-}
-
-// TestCTEsInSubqueries tests CTEs referenced in subqueries.
-func TestCTEsInSubqueries(t *testing.T) {
-	sql := "WITH cte AS (SELECT * FROM users) SELECT * FROM cte WHERE id IN (SELECT id FROM cte)"
-
-	p := parser.NewParser(sql)
-	stmts, err := p.Parse()
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
-	}
-
-	selectStmt := stmts[0].(*parser.SelectStmt)
-	ctx, err := NewCTEContext(selectStmt.With)
-	if err != nil {
-		t.Fatalf("NewCTEContext failed: %v", err)
-	}
-
-	if len(ctx.CTEs) != 1 {
-		t.Errorf("expected 1 CTE, got %d", len(ctx.CTEs))
-	}
-
-	// The CTE should be expandable multiple times
-	table1, err := ctx.ExpandCTE("cte", 0)
-	if err != nil {
-		t.Fatalf("first ExpandCTE failed: %v", err)
-	}
-
-	table2, err := ctx.ExpandCTE("cte", 1)
-	if err != nil {
-		t.Fatalf("second ExpandCTE failed: %v", err)
-	}
-
-	if table1.Name != table2.Name {
-		t.Error("expected same CTE name for both expansions")
-	}
-
-	if table1.Cursor == table2.Cursor {
-		t.Error("expected different cursor numbers for each expansion")
-	}
+	return &CheckpointInfo{
+		FramesCheckpointed: framesCheckpointed,
+		FramesRemaining:    framesRemaining,
+		WALSizeBefore:      walSizeBefore,
+		WALSizeAfter:       walSizeAfter,
+	}, nil
 }
