@@ -679,7 +679,7 @@ func TestFault_InvalidCast(t *testing.T) {
 // =============================================================================
 
 func TestFault_AggregateWithGroupBy(t *testing.T) {
-	t.Skip("pre-existing failure - needs GROUP BY with aggregate implementation")
+	// GROUP BY with aggregates fixed - remove skip
 	db := setupMemoryDB(t)
 	defer db.Close()
 

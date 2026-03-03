@@ -139,7 +139,7 @@ func TestJoinWithWhereClause(t *testing.T) {
 
 // TestAggregateWithGroupBy tests aggregate functions with GROUP BY
 func TestAggregateWithGroupBy(t *testing.T) {
-	t.Skip("GROUP BY aggregates have issues")
+	// GROUP BY with aggregates fixed - remove skip
 	dbFile := "test_agg_groupby.db"
 	defer os.Remove(dbFile)
 
