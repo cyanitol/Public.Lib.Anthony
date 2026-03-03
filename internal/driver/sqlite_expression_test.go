@@ -623,21 +623,18 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=2",
 			query: "SELECT CASE a WHEN 1 THEN 'one' WHEN 2 THEN 'two' WHEN 3 THEN 'three' ELSE 'other' END FROM expr_test",
 			want:  "two",
-			skip:  "pre-existing failure - simple CASE returns wrong branch after UPDATE",
 		},
 		{
 			name:  "case-simple-else",
 			setup: "a=99",
 			query: "SELECT CASE a WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'other' END FROM expr_test",
 			want:  "other",
-			skip:  "pre-existing failure - simple CASE returns wrong branch after UPDATE",
 		},
 		{
 			name:  "case-simple-no-else",
 			setup: "a=99",
 			query: "SELECT CASE a WHEN 1 THEN 'one' WHEN 2 THEN 'two' END FROM expr_test",
 			want:  nil,
-			skip:  "pre-existing failure - simple CASE without ELSE returns wrong result after UPDATE",
 		},
 		{
 			name:  "case-searched-true",
@@ -670,7 +667,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=NULL",
 			query: "SELECT CASE a WHEN 1 THEN 'one' WHEN NULL THEN 'null' ELSE 'other' END FROM expr_test",
 			want:  "other",
-			skip:  "pre-existing failure - simple CASE with NULL returns wrong branch after UPDATE",
 		},
 		{
 			name:  "case-null-comparison",

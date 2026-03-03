@@ -76,7 +76,7 @@ func TestSQLiteCaseExpressions(t *testing.T) {
 			setup: "i1=2",
 			expr:  "CASE i1 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'error' END",
 			want:  "two",
-			skip:  "Known issue: simple CASE expression evaluation not fully implemented",
+			skip:  "",
 		},
 		{
 			name:  "case-2.2-simple-match-one",
@@ -89,21 +89,21 @@ func TestSQLiteCaseExpressions(t *testing.T) {
 			setup: "i1=2",
 			expr:  "CASE i1 WHEN 1 THEN 'one' WHEN NULL THEN 'two' ELSE 'error' END",
 			want:  "error",
-			skip:  "Known issue: simple CASE expression evaluation not fully implemented",
+			skip:  "",
 		},
 		{
 			name:  "case-2.4-simple-no-match",
 			setup: "i1=3",
 			expr:  "CASE i1 WHEN 1 THEN 'one' WHEN NULL THEN 'two' ELSE 'error' END",
 			want:  "error",
-			skip:  "Known issue: simple CASE expression evaluation not fully implemented",
+			skip:  "",
 		},
 		{
 			name:  "case-2.5-simple-else",
 			setup: "i1=3",
 			expr:  "CASE i1 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'error' END",
 			want:  "error",
-			skip:  "Known issue: simple CASE expression evaluation not fully implemented",
+			skip:  "",
 		},
 
 		// CASE without ELSE (returns NULL)
@@ -112,14 +112,14 @@ func TestSQLiteCaseExpressions(t *testing.T) {
 			setup: "i1=3",
 			expr:  "CASE i1 WHEN 1 THEN 'one' WHEN 2 THEN 'two' END",
 			want:  nil,
-			skip:  "Known issue: simple CASE expression evaluation not fully implemented",
+			skip:  "",
 		},
 		{
 			name:  "case-3.2-null-expr-no-else",
 			setup: "i1=null",
 			expr:  "CASE i1 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 3 END",
 			want:  int64(3),
-			skip:  "Known issue: simple CASE expression evaluation not fully implemented",
+			skip:  "",
 		},
 		{
 			name:  "case-3.3-null-result",
@@ -249,7 +249,7 @@ func TestSQLiteCaseExpressions(t *testing.T) {
 			setup: "t1='abc'",
 			expr:  "CASE t1 WHEN 'abc' THEN 'match' WHEN 'def' THEN 'no' ELSE 'none' END",
 			want:  "match",
-			skip:  "Known issue: simple CASE expression evaluation not fully implemented",
+			skip:  "",
 		},
 
 		// CASE with boolean expressions

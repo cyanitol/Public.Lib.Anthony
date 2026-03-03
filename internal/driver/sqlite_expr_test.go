@@ -229,11 +229,11 @@ func TestSQLiteExpressions(t *testing.T) {
 		{name: "expr-case.1", setup: "i1=1, i2=2", expr: "CASE WHEN i1 = i2 THEN 'eq' ELSE 'ne' END", want: "ne"},
 		{name: "expr-case.2", setup: "i1=2, i2=2", expr: "CASE WHEN i1 = i2 THEN 'eq' ELSE 'ne' END", want: "eq", skip: "pre-existing failure - CASE WHEN returns wrong result after UPDATE"},
 		{name: "expr-case.3", setup: "i1=NULL, i2=2", expr: "CASE WHEN i1 = i2 THEN 'eq' ELSE 'ne' END", want: "ne", skip: "pre-existing failure - CASE WHEN with NULL comparison fails after UPDATE"},
-		{name: "expr-case.5", setup: "i1=2", expr: "CASE i1 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'error' END", want: "two", skip: "pre-existing failure - simple CASE returns wrong branch after UPDATE"},
+		{name: "expr-case.5", setup: "i1=2", expr: "CASE i1 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'error' END", want: "two"},
 		{name: "expr-case.6", setup: "i1=1", expr: "CASE i1 WHEN 1 THEN 'one' WHEN NULL THEN 'two' ELSE 'error' END", want: "one"},
-		{name: "expr-case.9", setup: "i1=3", expr: "CASE i1 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'error' END", want: "error", skip: "pre-existing failure - simple CASE returns wrong branch after UPDATE"},
-		{name: "expr-case.10", setup: "i1=3", expr: "CASE i1 WHEN 1 THEN 'one' WHEN 2 THEN 'two' END", want: nil, skip: "pre-existing failure - simple CASE without ELSE returns wrong result after UPDATE"},
-		{name: "expr-case.11", setup: "i1=null", expr: "CASE i1 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 3 END", want: int64(3), skip: "pre-existing failure - simple CASE with null subject returns wrong branch after UPDATE"},
+		{name: "expr-case.9", setup: "i1=3", expr: "CASE i1 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'error' END", want: "error"},
+		{name: "expr-case.10", setup: "i1=3", expr: "CASE i1 WHEN 1 THEN 'one' WHEN 2 THEN 'two' END", want: nil},
+		{name: "expr-case.11", setup: "i1=null", expr: "CASE i1 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 3 END", want: int64(3)},
 		{name: "expr-case.13", setup: "i1=7", expr: "CASE WHEN i1 < 5 THEN 'low' WHEN i1 < 10 THEN 'medium' WHEN i1 < 15 THEN 'high' ELSE 'error' END", want: "medium"},
 
 		// CAST expressions

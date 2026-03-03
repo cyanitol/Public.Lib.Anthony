@@ -617,12 +617,37 @@ func (g *CodeGenerator) generateCase(e *parser.CaseExpr) (int, error) {
 	// Track jump addresses to patch
 	var endJumps []int
 
-	// Generate code for each WHEN clause
-	for _, when := range e.WhenClauses {
-		// Evaluate WHEN condition
-		condReg, err := g.GenerateExpr(when.Condition)
+	// For simple CASE (CASE x WHEN v1 THEN r1 ...), evaluate x once
+	var caseExprReg int
+	if e.Expr != nil {
+		var err error
+		caseExprReg, err = g.GenerateExpr(e.Expr)
 		if err != nil {
 			return 0, err
+		}
+	}
+
+	// Generate code for each WHEN clause
+	for _, when := range e.WhenClauses {
+		var condReg int
+		var err error
+
+		if e.Expr != nil {
+			// Simple CASE: compare CASE expression with WHEN value
+			// CASE x WHEN v1 THEN r1 ... => compare x = v1
+			whenValueReg, err := g.GenerateExpr(when.Condition)
+			if err != nil {
+				return 0, err
+			}
+			// Generate comparison: caseExprReg == whenValueReg
+			condReg = g.AllocReg()
+			g.vdbe.AddOp(vdbe.OpEq, caseExprReg, whenValueReg, condReg)
+		} else {
+			// Searched CASE: evaluate WHEN condition directly
+			condReg, err = g.GenerateExpr(when.Condition)
+			if err != nil {
+				return 0, err
+			}
 		}
 
 		// If condition is false, jump to next WHEN
