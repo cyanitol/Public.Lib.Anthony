@@ -137,7 +137,7 @@ func main() {
 ```
 
 **Output:**
-```
+```text
 Inserted user with ID: 1
 
 Users:

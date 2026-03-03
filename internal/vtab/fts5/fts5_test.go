@@ -414,7 +414,6 @@ func TestFTS5Module(t *testing.T) {
 
 	// Test Insert
 	t.Run("insert documents", func(t *testing.T) {
-			t.Parallel()
 		// INSERT: argv[0]=NULL, argv[1]=NULL/rowid, argv[2+]=column values
 		rowid, err := ftsTable.Update(4, []interface{}{nil, nil, "First Document", "This is the body of the first document"})
 		if err != nil {
@@ -435,7 +434,6 @@ func TestFTS5Module(t *testing.T) {
 
 	// Test Open and Filter
 	t.Run("query documents", func(t *testing.T) {
-			t.Parallel()
 		cursor, err := ftsTable.Open()
 		if err != nil {
 			t.Fatalf("Failed to open cursor: %v", err)
@@ -480,7 +478,6 @@ func TestFTS5Module(t *testing.T) {
 
 	// Test Delete
 	t.Run("delete document", func(t *testing.T) {
-			t.Parallel()
 		// DELETE: argc=1, argv[0]=rowid
 		_, err := ftsTable.Update(1, []interface{}{int64(1)})
 		if err != nil {
@@ -711,9 +708,11 @@ func TestFTS5CursorRowid(t *testing.T) {
 // TestRegisterFTS5 tests FTS5 registration.
 func TestRegisterFTS5(t *testing.T) {
 	t.Parallel()
+
+	// Try to register, but it may already be registered from a previous test run
 	err := RegisterFTS5()
-	if err != nil {
-		t.Fatalf("RegisterFTS5 failed: %v", err)
+	if err != nil && err.Error() != `virtual table module "fts5" already registered` {
+		t.Fatalf("RegisterFTS5 failed with unexpected error: %v", err)
 	}
 
 	// Verify module is registered

@@ -9,6 +9,7 @@ import (
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
 )
 
 // UniqueConstraint represents a UNIQUE constraint on one or more columns.
@@ -325,23 +326,31 @@ func compareBytes(a []byte, v2 interface{}) bool {
 }
 
 // parseRecordValues parses a SQLite record and extracts column values.
-// This is a simplified implementation that works with the record format.
+// It decodes the SQLite record format and maps values to column names.
 func parseRecordValues(data []byte, table *schema.Table) (map[string]interface{}, error) {
-	// This is a placeholder implementation
-	// In a real implementation, this would:
-	// 1. Parse the record header to get serial types
-	// 2. Extract each column value based on its serial type
-	// 3. Map values to column names
-	//
-	// For now, we return an empty map as this requires integration
-	// with the record parsing logic from internal/vdbe/record.go
+	if len(data) == 0 {
+		return make(map[string]interface{}), nil
+	}
 
+	// Decode the record using vdbe.DecodeRecord
+	rawValues, err := vdbe.DecodeRecord(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode record: %w", err)
+	}
+
+	// Map the decoded values to column names
 	values := make(map[string]interface{})
 
-	// TODO: Implement proper record parsing
-	// This would use code similar to:
-	// - vdbe.DecodeRecord()
-	// - vdbe.ParseRecordHeader()
+	// Map each value to its corresponding column name
+	// The values are in the same order as the table columns
+	for i, col := range table.Columns {
+		if i < len(rawValues) {
+			values[col.Name] = rawValues[i]
+		} else {
+			// If record has fewer values than columns, use default
+			values[col.Name] = col.Default
+		}
+	}
 
 	return values, nil
 }

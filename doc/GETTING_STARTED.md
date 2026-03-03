@@ -109,7 +109,7 @@ func main() {
 ```
 
 **Output:**
-```
+```text
 Created user with ID: 1
 User: Alice (alice@example.com)
 ```
@@ -900,7 +900,7 @@ if err != nil {
 fmt.Printf("SQLite version: %s\n", version)
 ```
 
-For detailed compatibility information, see [docs/COMPATIBILITY.md](COMPATIBILITY.md).
+For detailed compatibility information, see [COMPATIBILITY.md](COMPATIBILITY.md).
 
 ## Next Steps
 
@@ -969,7 +969,7 @@ db.Exec("ANALYZE")
 
 - **SQLite Documentation:** [https://www.sqlite.org/docs.html](https://www.sqlite.org/docs.html)
 - **Go database/sql:** [https://pkg.go.dev/database/sql](https://pkg.go.dev/database/sql)
-- **Documentation Index:** [docs/INDEX.md](INDEX.md)
+- **Documentation Index:** [INDEX.md](INDEX.md)
 
 ### Contributing
 

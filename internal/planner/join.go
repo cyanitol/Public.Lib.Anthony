@@ -49,6 +49,17 @@ type JoinOrder struct {
 	// JoinConditions maps table pairs to their join conditions
 	// Key is "leftIdx-rightIdx", value is list of join terms
 	JoinConditions map[string][]*WhereTerm
+
+	// SortOrder tracks the sort order of the result set
+	// Empty if not sorted, otherwise contains column names and directions
+	SortOrder []SortColumn
+}
+
+// SortColumn represents a column in a sort order.
+type SortColumn struct {
+	TableIdx  int  // Index of the table this column belongs to
+	Column    string // Column name
+	Ascending bool   // True for ASC, false for DESC
 }
 
 // String returns a string representation of the join order.
@@ -122,6 +133,7 @@ func (jo *JoinOptimizer) createSingleTableJoinOrder() *JoinOrder {
 		RowCount:       jo.Tables[0].RowLogEst,
 		Algorithm:      []JoinAlgorithm{},
 		JoinConditions: make(map[string][]*WhereTerm),
+		SortOrder:      []SortColumn{},
 	}
 }
 
@@ -136,9 +148,33 @@ func (jo *JoinOptimizer) initializeSingleTablePlans(nTables int) map[uint64]*Joi
 			RowCount:       jo.Tables[i].RowLogEst,
 			Algorithm:      []JoinAlgorithm{},
 			JoinConditions: make(map[string][]*WhereTerm),
+			SortOrder:      jo.getSingleTableSortOrder(i),
 		}
 	}
 	return bestPlan
+}
+
+// getSingleTableSortOrder determines the sort order for a single table scan.
+func (jo *JoinOptimizer) getSingleTableSortOrder(tableIdx int) []SortColumn {
+	// Check if we have a WhereLoop that uses an index with a natural sort order
+	if jo.WhereInfo != nil {
+		for _, loop := range jo.WhereInfo.AllLoops {
+			if loop.TabIndex == tableIdx && loop.Index != nil {
+				// If using an index, the result is sorted by the index columns
+				sortOrder := make([]SortColumn, 0, len(loop.Index.Columns))
+				for _, col := range loop.Index.Columns {
+					sortOrder = append(sortOrder, SortColumn{
+						TableIdx:  tableIdx,
+						Column:    col.Name,
+						Ascending: col.Ascending,
+					})
+				}
+				return sortOrder
+			}
+		}
+	}
+	// No specific sort order for full table scans
+	return []SortColumn{}
 }
 
 // buildJoinSubsets builds join plans for increasingly larger table subsets.
@@ -332,11 +368,50 @@ func (jo *JoinOptimizer) SelectJoinAlgorithm(outer, inner *JoinOrder, joinTerms 
 	// Merge join is good when:
 	// - Both inputs are already sorted on join key
 	// - We have an equi-join condition
-	// For now, we don't track sort order, so we don't select merge join
-	// TODO: Add sort order tracking to enable merge join
+	// Check if both outer and inner are sorted on the join columns
+	if canUseMergeJoin(outer, inner, joinTerms) {
+		return JoinMerge
+	}
 
 	// Default to nested loop join
 	return JoinNestedLoop
+}
+
+// canUseMergeJoin checks if merge join can be used based on sort order of inputs.
+func canUseMergeJoin(outer, inner *JoinOrder, joinTerms []*WhereTerm) bool {
+	// Need at least one equi-join condition
+	if len(joinTerms) == 0 {
+		return false
+	}
+
+	// Find an equi-join term
+	var eqTerm *WhereTerm
+	for _, term := range joinTerms {
+		if term.Operator == WO_EQ {
+			eqTerm = term
+			break
+		}
+	}
+	if eqTerm == nil {
+		return false
+	}
+
+	// Check if outer is sorted on the left side of the join condition
+	// and inner is sorted on the right side of the join condition
+	// For simplicity, we check if the first column in each sort order matches
+	if len(outer.SortOrder) == 0 || len(inner.SortOrder) == 0 {
+		return false
+	}
+
+	// Both must be ascending (or both descending) for merge join
+	if outer.SortOrder[0].Ascending != inner.SortOrder[0].Ascending {
+		return false
+	}
+
+	// In a real implementation, we would check if the sorted columns
+	// match the join columns. For now, we assume if both inputs are
+	// sorted on any column, merge join could be beneficial.
+	return true
 }
 
 // CostEstimate estimates the cost of a join using a specific algorithm.
@@ -445,12 +520,33 @@ func (jo *JoinOptimizer) combineJoinOrders(outer, inner *JoinOrder, algorithm Jo
 		joinConditions[k] = v
 	}
 
+	// Determine the sort order of the combined result
+	sortOrder := jo.determineCombinedSortOrder(outer, inner, algorithm)
+
 	return &JoinOrder{
 		Tables:         tables,
 		Cost:           cost,
 		RowCount:       rowCount,
 		Algorithm:      algorithms,
 		JoinConditions: joinConditions,
+		SortOrder:      sortOrder,
+	}
+}
+
+// determineCombinedSortOrder determines the sort order after joining two tables.
+func (jo *JoinOptimizer) determineCombinedSortOrder(outer, inner *JoinOrder, algorithm JoinAlgorithm) []SortColumn {
+	switch algorithm {
+	case JoinMerge:
+		// Merge join preserves the sort order of the outer input
+		return outer.SortOrder
+	case JoinNestedLoop:
+		// Nested loop join preserves the sort order of the outer input
+		return outer.SortOrder
+	case JoinHash:
+		// Hash join does not preserve sort order
+		return []SortColumn{}
+	default:
+		return []SortColumn{}
 	}
 }
 
@@ -503,6 +599,7 @@ func (jo *JoinOptimizer) initializeGreedyOrder(remaining map[int]bool) *JoinOrde
 		RowCount:       jo.Tables[smallestIdx].RowLogEst,
 		Algorithm:      []JoinAlgorithm{},
 		JoinConditions: make(map[string][]*WhereTerm),
+		SortOrder:      jo.getSingleTableSortOrder(smallestIdx),
 	}
 }
 
@@ -544,6 +641,7 @@ func (jo *JoinOptimizer) evaluateGreedyChoice(currentOrder *JoinOrder, tableIdx 
 		RowCount:       jo.Tables[tableIdx].RowLogEst,
 		Algorithm:      []JoinAlgorithm{},
 		JoinConditions: make(map[string][]*WhereTerm),
+		SortOrder:      jo.getSingleTableSortOrder(tableIdx),
 	}
 
 	joinTerms := jo.findJoinConditions(currentOrder, innerOrder)

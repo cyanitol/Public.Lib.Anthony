@@ -114,7 +114,7 @@ All public operations are thread-safe:
 
 This is a simplified implementation compared to full SQLite:
   - No WAL (Write-Ahead Logging) support
-  - Simplified file locking (OS-specific locking not implemented)
+  - Simplified file locking in Pager (use LockManager for OS-level locking)
   - No memory-mapped I/O
   - No hot journal recovery
   - No savepoints (nested transactions)

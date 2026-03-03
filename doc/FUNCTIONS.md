@@ -181,7 +181,7 @@ length(X)
 **Examples:**
 ```sql
 SELECT length('Hello');      -- Returns: 5
-SELECT length('Hello 世界');  -- Returns: 8 (UTF-8 aware)
+SELECT length('Hello World');  -- Returns: 11 (UTF-8 aware)
 SELECT length(X'0A0B0C');    -- Returns: 3 (bytes)
 SELECT length(NULL);         -- Returns: NULL
 ```
@@ -486,7 +486,7 @@ unicode(X)
 ```sql
 SELECT unicode('A');         -- Returns: 65
 SELECT unicode('Hello');     -- Returns: 72 (code for 'H')
-SELECT unicode('世');        -- Returns: 19990
+SELECT unicode('X');         -- Returns: 88
 ```
 
 **Implementation:** `internal/functions/scalar.go`
@@ -1037,7 +1037,7 @@ SELECT log2(1024);       -- Returns: 10.0
 
 ### pi()
 
-Returns the value of pi (pi).
+Returns the value of pi (3.14159...).
 
 **Syntax:**
 ```sql

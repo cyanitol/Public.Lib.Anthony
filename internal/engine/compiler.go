@@ -113,9 +113,21 @@ func (c *Compiler) compileSelectScan(vm *vdbe.VDBE, stmt *parser.SelectStmt, tab
 	loopStart, innerLoopStarts := c.setupNestedLoops(vm, tables)
 
 	// Evaluate WHERE clause if present (including JOIN conditions)
+	var skipLabel int
 	if stmt.Where != nil {
-		// TODO: Compile WHERE expression; no filtering for now.
-		_ = len(stmt.Columns) // whereReg would be numCols
+		// Create code generator for WHERE expression
+		codegen := c.createMultiTableCodeGenerator(vm, tables)
+
+		// Generate WHERE condition
+		whereReg, err := codegen.GenerateExpr(stmt.Where)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compile WHERE clause: %w", err)
+		}
+
+		// If WHERE is false, skip this row combination
+		skipLabel = vm.NumOps() + 100 // Will be patched later
+		vm.AddOp(vdbe.OpIfNot, whereReg, skipLabel, 0)
+		vm.SetComment(vm.NumOps()-1, "Skip row if WHERE is false")
 	}
 
 	if err := emitColumnOpsMultiTable(vm, stmt.Columns, tables); err != nil {
@@ -123,6 +135,18 @@ func (c *Compiler) compileSelectScan(vm *vdbe.VDBE, stmt *parser.SelectStmt, tab
 	}
 
 	vm.AddOp(vdbe.OpResultRow, 0, len(stmt.Columns), 0)
+
+	// Patch the skip label if WHERE clause exists
+	if stmt.Where != nil {
+		currentAddr := vm.NumOps()
+		// Find and patch the OpIfNot instruction
+		for i := loopStart; i < vm.NumOps(); i++ {
+			if vm.Program[i].Opcode == vdbe.OpIfNot && vm.Program[i].P2 > vm.NumOps() {
+				vm.Program[i].P2 = currentAddr
+				break
+			}
+		}
+	}
 
 	// Close nested loops and cursors
 	c.closeNestedLoops(vm, tables, loopStart, innerLoopStarts)
@@ -742,6 +766,41 @@ func createCodeGenerator(vm *vdbe.VDBE, tableName string, table *schema.Table, c
 
 	// Set next register to avoid conflicts
 	codegen.SetNextReg(len(table.Columns) + 1)
+
+	return codegen
+}
+
+// createMultiTableCodeGenerator creates a code generator for multi-table queries (JOINs).
+func (c *Compiler) createMultiTableCodeGenerator(vm *vdbe.VDBE, tables []tableInfo) *expr.CodeGenerator {
+	codegen := expr.NewCodeGenerator(vm)
+
+	// Calculate total number of columns across all tables
+	totalCols := 0
+	for _, tbl := range tables {
+		totalCols += len(tbl.table.Columns)
+	}
+
+	// Register all tables and their cursors
+	for _, tbl := range tables {
+		codegen.RegisterCursor(tbl.name, tbl.cursorIdx)
+
+		// Register table columns
+		columns := make([]expr.ColumnInfo, len(tbl.table.Columns))
+		for i, col := range tbl.table.Columns {
+			columns[i] = expr.ColumnInfo{
+				Name:  col.Name,
+				Index: i,
+			}
+		}
+
+		codegen.RegisterTable(expr.TableInfo{
+			Name:    tbl.name,
+			Columns: columns,
+		})
+	}
+
+	// Set next register to avoid conflicts
+	codegen.SetNextReg(totalCols + 1)
 
 	return codegen
 }

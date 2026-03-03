@@ -49,18 +49,41 @@ func (s *Stmt) compileDropTable(vm *vdbe.VDBE, stmt *parser.DropTableStmt, args 
 	vm.SetReadOnly(false)
 	vm.AllocMemory(10)
 
-	// In a real implementation, this would:
-	// 1. Remove entry from sqlite_master
+	// Check if table exists
+	table, exists := s.conn.schema.GetTable(stmt.Name)
+	if !exists {
+		if stmt.IfExists {
+			// IF EXISTS was specified, silently succeed
+			vm.AddOp(vdbe.OpInit, 0, 0, 0)
+			vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+			return vm, nil
+		}
+		return nil, fmt.Errorf("table not found: %s", stmt.Name)
+	}
+
+	// Drop the table from the schema
+	// This simplified implementation removes the table from memory
+	// A full implementation would also:
+	// 1. Delete entry from sqlite_master table
 	// 2. Free all pages used by the table
-	// 3. Update the schema in memory
+	// 3. Update the schema cookie
+	if err := s.conn.schema.DropTable(stmt.Name); err != nil {
+		return nil, err
+	}
+
+	// Free table pages if btree is available
+	if s.conn.btree != nil && table.RootPage > 0 {
+		// In a full implementation, would call btree.FreePage(table.RootPage)
+		// and recursively free all pages in the table's btree
+		// For now, we just note that the page should be freed
+	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
-	// TODO: Generate bytecode to:
-	// - Delete from sqlite_master table
-	// - Free table pages
-	// - Update schema cookie
-
+	// In a full implementation with sqlite_master:
+	// - OpOpenWrite on sqlite_master cursor
+	// - OpSeek to find the table entry
+	// - OpDelete to remove it
+	// - OpSetCookie to update schema version
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
 	// Invalidate statement cache since schema has changed
@@ -218,7 +241,7 @@ func (s *Stmt) compileCommit(vm *vdbe.VDBE, stmt *parser.CommitStmt, args []driv
 	vm.SetReadOnly(false)
 
 	vm.AddOp(vdbe.OpInit, 0, 3, 0)
-	// TODO: Add commit opcode
+	vm.AddOp(vdbe.OpCommit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
 	return vm, nil
@@ -229,7 +252,7 @@ func (s *Stmt) compileRollback(vm *vdbe.VDBE, stmt *parser.RollbackStmt, args []
 	vm.SetReadOnly(false)
 
 	vm.AddOp(vdbe.OpInit, 0, 3, 0)
-	// TODO: Add rollback opcode
+	vm.AddOp(vdbe.OpRollback, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
 	return vm, nil

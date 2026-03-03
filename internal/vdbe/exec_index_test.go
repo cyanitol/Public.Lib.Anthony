@@ -414,7 +414,6 @@ func TestIdxCompareOpcodes(t *testing.T) {
 	}
 
 	t.Run("OpIdxLT", func(t *testing.T) {
-		t.Parallel()
 		// Compare "banana" < "cherry" (should be true, so jump)
 		v.Mem[1].SetBlob([]byte("cherry"))
 		v.PC = 0
@@ -450,7 +449,6 @@ func TestIdxCompareOpcodes(t *testing.T) {
 	})
 
 	t.Run("OpIdxGT", func(t *testing.T) {
-		t.Parallel()
 		// Compare "banana" > "apple" (should be true, so jump)
 		v.Mem[1].SetBlob([]byte("apple"))
 		v.PC = 0
@@ -473,7 +471,6 @@ func TestIdxCompareOpcodes(t *testing.T) {
 	})
 
 	t.Run("OpIdxLE", func(t *testing.T) {
-		t.Parallel()
 		// Compare "banana" <= "banana" (should be true, so jump)
 		v.Mem[1].SetBlob([]byte("banana"))
 		v.PC = 0
@@ -509,7 +506,6 @@ func TestIdxCompareOpcodes(t *testing.T) {
 	})
 
 	t.Run("OpIdxGE", func(t *testing.T) {
-		t.Parallel()
 		// Compare "banana" >= "banana" (should be true, so jump)
 		v.Mem[1].SetBlob([]byte("banana"))
 		v.PC = 0

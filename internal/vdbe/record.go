@@ -17,6 +17,12 @@ var (
 // MaxRecordSize is the maximum allowed size for a record (1GB)
 const MaxRecordSize = 1_000_000_000
 
+// DecodeRecord decodes a SQLite record back to a slice of values.
+// This is exported to allow other packages to parse SQLite record format.
+func DecodeRecord(data []byte) ([]interface{}, error) {
+	return decodeRecord(data)
+}
+
 // decodeRecord decodes a SQLite record back to a slice of values
 func decodeRecord(data []byte) ([]interface{}, error) {
 	if len(data) == 0 {

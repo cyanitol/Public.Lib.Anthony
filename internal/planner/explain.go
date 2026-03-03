@@ -505,6 +505,13 @@ type IndexCandidate struct {
 // findBestIndex analyzes the WHERE clause and available indexes to find the best index.
 // Returns nil if no suitable index is found (table scan should be used).
 func findBestIndex(tableName string, where parser.Expression, schemaInfo *schema.Schema) *IndexCandidate {
+	return findBestIndexWithColumns(tableName, where, schemaInfo, nil)
+}
+
+// findBestIndexWithColumns analyzes the WHERE clause and available indexes to find the best index.
+// The neededColumns parameter specifies which columns are needed by the query for covering index detection.
+// Returns nil if no suitable index is found (table scan should be used).
+func findBestIndexWithColumns(tableName string, where parser.Expression, schemaInfo *schema.Schema, neededColumns []string) *IndexCandidate {
 	if schemaInfo == nil || where == nil {
 		return nil
 	}
@@ -541,15 +548,18 @@ func findBestIndex(tableName string, where parser.Expression, schemaInfo *schema
 			hasEquality = binExpr.Op == parser.OpEq
 		}
 
+		// Determine if this is a covering index
+		isCovering := isIndexCovering(idx, neededColumns)
+
 		// Estimate cost for this index
-		rows, cost := estimator.EstimateIndexScan(idx.Name, idx.Unique, false, hasEquality)
+		rows, cost := estimator.EstimateIndexScan(idx.Name, idx.Unique, isCovering, hasEquality)
 
 		candidate := &IndexCandidate{
 			IndexName:     idx.Name,
 			TableName:     tableName,
 			Columns:       idx.Columns,
 			IsUnique:      idx.Unique,
-			IsCovering:    false, // TODO: Determine if covering
+			IsCovering:    isCovering,
 			HasEquality:   hasEquality,
 			EstimatedRows: rows,
 			EstimatedCost: cost,
@@ -562,6 +572,35 @@ func findBestIndex(tableName string, where parser.Expression, schemaInfo *schema
 	}
 
 	return bestCandidate
+}
+
+// isIndexCovering determines if an index covers all needed columns.
+// A covering index contains all columns needed by the query, so no table lookup is required.
+func isIndexCovering(idx *schema.Index, neededColumns []string) bool {
+	// If we don't know what columns are needed, assume it's not covering
+	if len(neededColumns) == 0 {
+		return false
+	}
+
+	// Build a map of columns available in the index
+	indexColumns := make(map[string]bool)
+	for _, col := range idx.Columns {
+		indexColumns[strings.ToLower(col)] = true
+	}
+
+	// Check if all needed columns are in the index
+	for _, needed := range neededColumns {
+		neededLower := strings.ToLower(needed)
+		// Special case: rowid/oid/_rowid_ is always available
+		if neededLower == "rowid" || neededLower == "oid" || neededLower == "_rowid_" {
+			continue
+		}
+		if !indexColumns[neededLower] {
+			return false
+		}
+	}
+
+	return true
 }
 
 // mergeSubplan merges a subplan tree into the parent plan.

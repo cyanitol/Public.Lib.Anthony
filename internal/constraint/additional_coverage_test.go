@@ -333,20 +333,26 @@ func TestUniqueConstraintHelpers(t *testing.T) {
 	}
 }
 
-// TestParseRecordValues tests parseRecordValues placeholder
+// TestParseRecordValues tests parseRecordValues function
 func TestParseRecordValues(t *testing.T) {
 	table := &schema.Table{
 		Name:    "test",
 		Columns: []*schema.Column{{Name: "id", Type: "INTEGER"}},
 	}
 
-	// This is a placeholder implementation, should return empty map
-	values, err := parseRecordValues([]byte("dummy data"), table)
+	// Test with empty data - should return empty map
+	values, err := parseRecordValues([]byte{}, table)
 	if err != nil {
-		t.Errorf("Expected no error, got %v", err)
+		t.Errorf("Expected no error for empty data, got %v", err)
 	}
 	if len(values) != 0 {
-		t.Error("Expected empty values map from placeholder implementation")
+		t.Error("Expected empty values map for empty data")
+	}
+
+	// Test with invalid data - should return error
+	_, err = parseRecordValues([]byte("dummy data"), table)
+	if err == nil {
+		t.Error("Expected error for invalid record data, got nil")
 	}
 }
 

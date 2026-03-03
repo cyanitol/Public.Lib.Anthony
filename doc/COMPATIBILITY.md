@@ -738,7 +738,7 @@ Minimal reproduction:
 
 ## Local SQLite Reference
 
-Complete SQLite 3.51.2 SQL reference is available locally in [docs/sqlite/](sqlite/README.md):
+Complete SQLite 3.51.2 SQL reference is available locally in [doc/sqlite/](sqlite/README.md):
 
 - [Window Functions](sqlite/WINDOW_FUNCTIONS.md) * [RETURNING clause](sqlite/RETURNING.md)
 - [UPSERT](sqlite/UPSERT.md) * [STRICT Tables](sqlite/STRICT_TABLES.md)
