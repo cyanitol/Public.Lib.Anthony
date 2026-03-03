@@ -847,7 +847,7 @@ func TestSQLiteConflict(t *testing.T) {
 
 		{
 			name: "conflict-edge-3: Multiple NULL values in UNIQUE column",
-			skip: "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
+			skip: "",
 			setup: []string{
 				"CREATE TABLE t1(a UNIQUE, b)",
 			},

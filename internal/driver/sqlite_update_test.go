@@ -588,7 +588,7 @@ func TestSQLiteUpdate(t *testing.T) {
 		// UPDATE with IS NULL in WHERE
 		{
 			name: "update_is_null_where",
-			skip: "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
+			skip: "",
 			setup: []string{
 				"CREATE TABLE t1(a INTEGER PRIMARY KEY, b, c)",
 				"INSERT INTO t1 VALUES(1, NULL, 1)",
@@ -607,7 +607,7 @@ func TestSQLiteUpdate(t *testing.T) {
 		// UPDATE with IS NOT NULL in WHERE
 		{
 			name: "update_is_not_null_where",
-			skip: "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
+			skip: "",
 			setup: []string{
 				"CREATE TABLE t1(a INTEGER PRIMARY KEY, b, c)",
 				"INSERT INTO t1 VALUES(1, NULL, 1)",

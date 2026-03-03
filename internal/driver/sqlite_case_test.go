@@ -200,21 +200,21 @@ func TestSQLiteCaseExpressions(t *testing.T) {
 			setup: "i1=NULL, i2=8",
 			expr:  "CASE WHEN i1 IS NULL THEN 'null' ELSE 'not null' END",
 			want:  "null",
-			skip:  "Known issue: IS NULL in CASE WHEN causes infinite loop in VDBE",
+			skip:  "",
 		},
 		{
 			name:  "case-7.2-is-not-null",
 			setup: "i1=8, i2=NULL",
 			expr:  "CASE WHEN i1 IS NOT NULL THEN 'not null' ELSE 'null' END",
 			want:  "not null",
-			skip:  "Known issue: IS NOT NULL in CASE WHEN causes infinite loop in VDBE",
+			skip:  "",
 		},
 		{
 			name:  "case-7.3-multiple-null-checks",
 			setup: "i1=NULL, i2=NULL",
 			expr:  "CASE WHEN i1 IS NULL AND i2 IS NULL THEN 'both null' ELSE 'not both null' END",
 			want:  "both null",
-			skip:  "Known issue: IS NULL in CASE WHEN causes infinite loop in VDBE",
+			skip:  "",
 		},
 
 		// CASE with arithmetic

@@ -610,7 +610,7 @@ func TestSQLiteViewAdvanced(t *testing.T) {
 		},
 		{
 			name: "view-null-filtering filtering NULL in view",
-			skip: "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
+			skip: "",
 			setup: []string{
 				"CREATE TABLE optional(id INTEGER, name TEXT)",
 				"INSERT INTO optional VALUES(1, 'Alice'), (2, NULL), (3, 'Charlie'), (4, NULL)",

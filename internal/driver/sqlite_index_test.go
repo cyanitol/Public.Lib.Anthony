@@ -475,7 +475,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		{
 			name: "Index on NULL values",
-			skip: "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
+			skip: "",
 			setup: []string{
 				"CREATE TABLE t1(a, b)",
 				"CREATE INDEX i1 ON t1(a)",

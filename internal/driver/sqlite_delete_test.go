@@ -343,7 +343,7 @@ func TestSQLiteDelete(t *testing.T) {
 		// Additional test: Delete with IS NULL
 		{
 			name: "delete_with_is_null",
-			skip: "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
+			skip: "",
 			setup: []string{
 				"CREATE TABLE data(value INTEGER)",
 				"INSERT INTO data VALUES(1)",
@@ -360,7 +360,7 @@ func TestSQLiteDelete(t *testing.T) {
 		// Additional test: Delete with IS NOT NULL
 		{
 			name: "delete_with_is_not_null",
-			skip: "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
+			skip: "",
 			setup: []string{
 				"CREATE TABLE nullable(val INTEGER)",
 				"INSERT INTO nullable VALUES(10)",

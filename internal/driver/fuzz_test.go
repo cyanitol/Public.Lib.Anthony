@@ -10,7 +10,6 @@ import (
 
 // FuzzSQL tests the driver with random SQL statements to ensure it doesn't panic
 func FuzzSQL(f *testing.F) {
-	f.Skip("pre-existing failure - fuzz seed corpus contains IS NULL which causes VDBE infinite loop")
 	// Add seed corpus with various SQL statements
 	seeds := []string{
 		// Basic queries
