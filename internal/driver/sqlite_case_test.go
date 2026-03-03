@@ -329,7 +329,6 @@ func TestSQLiteCaseExpressions(t *testing.T) {
 
 // TestSQLiteCaseInSelectList tests CASE expressions in SELECT lists
 func TestSQLiteCaseInSelectList(t *testing.T) {
-	t.Skip("pre-existing failure - CASE in SELECT list incomplete")
 	db := setupCaseTestDB(t)
 	defer db.Close()
 
