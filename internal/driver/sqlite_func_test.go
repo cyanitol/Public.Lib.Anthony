@@ -11,7 +11,7 @@ import (
 // TestSQLiteFunctions tests SQLite built-in scalar functions
 // Converted from contrib/sqlite/sqlite-src-3510200/test/func*.test
 func TestSQLiteFunctions(t *testing.T) {
-	t.Skip("pre-existing failure - needs function implementation fixes")
+	// Removed function-level skip - triage individual subtests instead
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "func_test.db")
 
@@ -91,6 +91,7 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "substr_negative_start",
 			expr: "SELECT substr('hello', -2, 2)",
 			want: "lo",
+			skip: "substr with negative index not implemented",
 		},
 		{
 			name: "substr_no_length",
@@ -101,6 +102,7 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "substr_zero_start",
 			expr: "SELECT substr('Supercalifragilisticexpialidocious', 0, 2)",
 			want: "S",
+			skip: "substr with zero/negative index not implemented correctly",
 		},
 		{
 			name: "substr_position_one",
@@ -111,6 +113,7 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "substr_negative_position",
 			expr: "SELECT substr('Supercalifragilisticexpialidocious', -5, 5)",
 			want: "cious",
+			skip: "substr with negative index not implemented",
 		},
 
 		// lower() and upper() functions (func.test lines 358-375)
@@ -192,6 +195,7 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "round_negative",
 			expr: "SELECT round(-2.7)",
 			want: -3.0,
+			skip: "round() negative number returns wrong sign",
 		},
 		{
 			name: "round_half_up",
@@ -312,6 +316,7 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "replace_null_replacement",
 			expr: "SELECT replace('hello', 'l', NULL)",
 			want: nil,
+			skip: "replace with NULL replacement returns original instead of NULL",
 		},
 
 		// trim(), ltrim(), rtrim() functions (func.test lines 1077-1144)
@@ -334,16 +339,19 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "trim_custom_chars",
 			expr: "SELECT trim('xyz', 'xyhelloxy')",
 			want: "ello",
+			skip: "trim with custom chars has wrong argument order",
 		},
 		{
 			name: "ltrim_custom_chars",
 			expr: "SELECT ltrim('xyz', 'xyhelloxy')",
 			want: "elloxy",
+			skip: "ltrim with custom chars has wrong argument order",
 		},
 		{
 			name: "rtrim_custom_chars",
 			expr: "SELECT rtrim('xyz', 'xyhelloxy')",
 			want: "xyhello",
+			skip: "rtrim with custom chars has wrong argument order",
 		},
 		{
 			name: "trim_null",
@@ -395,31 +403,37 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "min_two_args",
 			expr: "SELECT min(1, 2)",
 			want: int64(1),
+			skip: "scalar MIN not implemented - only aggregate MIN",
 		},
 		{
 			name: "min_three_args",
 			expr: "SELECT min(3, 1, 2)",
 			want: int64(1),
+			skip: "scalar MIN not implemented - only aggregate MIN",
 		},
 		{
 			name: "max_two_args",
 			expr: "SELECT max(1, 2)",
 			want: int64(2),
+			skip: "scalar MAX not implemented - only aggregate MAX",
 		},
 		{
 			name: "max_three_args",
 			expr: "SELECT max(3, 1, 2)",
 			want: int64(3),
+			skip: "scalar MAX not implemented - only aggregate MAX",
 		},
 		{
 			name: "min_with_null",
 			expr: "SELECT min(1, NULL, 2)",
 			want: int64(1),
+			skip: "scalar MIN not implemented - only aggregate MIN",
 		},
 		{
 			name: "max_with_null",
 			expr: "SELECT max(1, NULL, 2)",
 			want: int64(2),
+			skip: "scalar MAX not implemented - only aggregate MAX",
 		},
 
 		// random() function tests (func.test lines 488-513)
@@ -489,16 +503,19 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "printf_string",
 			expr: "SELECT printf('Hello %s', 'World')",
 			want: "Hello World",
+			skip: "PRINTF function not implemented",
 		},
 		{
 			name: "printf_integer",
 			expr: "SELECT printf('Number: %d', 42)",
 			want: "Number: 42",
+			skip: "PRINTF function not implemented",
 		},
 		{
 			name: "printf_float",
 			expr: "SELECT printf('Pi: %.2f', 3.14159)",
 			want: "Pi: 3.14",
+			skip: "PRINTF function not implemented",
 		},
 
 		// Date/time functions (basic tests)
@@ -526,26 +543,31 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "likely_passthrough",
 			expr: "SELECT likely(42)",
 			want: int64(42),
+			skip: "likely() function not implemented",
 		},
 		{
 			name: "unlikely_passthrough",
 			expr: "SELECT unlikely(42)",
 			want: int64(42),
+			skip: "unlikely() function not implemented",
 		},
 		{
 			name: "likelihood_passthrough",
 			expr: "SELECT likelihood(42, 0.5)",
 			want: int64(42),
+			skip: "likelihood() function not implemented",
 		},
 		{
 			name: "likely_null",
 			expr: "SELECT likely(NULL)",
 			want: nil,
+			skip: "likely() function not implemented",
 		},
 		{
 			name: "unlikely_null",
 			expr: "SELECT unlikely(NULL)",
 			want: nil,
+			skip: "unlikely() function not implemented",
 		},
 	}
 
