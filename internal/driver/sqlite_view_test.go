@@ -313,7 +313,7 @@ func TestSQLiteView(t *testing.T) {
 		},
 		{
 			name: "view-8.6 join view with subquery",
-			skip: "Known issue: GROUP BY aggregate in subquery/CTE/view causes infinite loop in VDBE",
+			skip: "",
 			setup: []string{
 				"CREATE TABLE t1(x,a,b,c)",
 				"INSERT INTO t1 VALUES(1,2,3,4)",
@@ -514,7 +514,7 @@ func TestSQLiteView(t *testing.T) {
 		// Views with aggregates and group by (view-26.0)
 		{
 			name: "view-26.0 view with max/min and group by",
-			skip: "Known issue: GROUP BY aggregate in subquery/CTE/view causes infinite loop in VDBE",
+			skip: "",
 			setup: []string{
 				"CREATE TABLE t16(a, b, c UNIQUE)",
 				"INSERT INTO t16 VALUES(1, 1, 1)",

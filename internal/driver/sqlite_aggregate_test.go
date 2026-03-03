@@ -172,7 +172,7 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT category, SUM(value) FROM t1 GROUP BY category ORDER BY category",
 			want:  [][]interface{}{{"A", int64(40)}, {"B", int64(60)}},
-			skip:  "GROUP BY not implemented - returns ungrouped rows",
+			skip:  "",
 		},
 		{
 			name: "GROUP BY with COUNT",
@@ -182,7 +182,7 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT category, COUNT(*) FROM t1 GROUP BY category ORDER BY category",
 			want:  [][]interface{}{{"A", int64(2)}, {"B", int64(1)}},
-			skip:  "GROUP BY not implemented - returns ungrouped rows",
+			skip:  "",
 		},
 		{
 			name: "GROUP BY with multiple aggregates",
@@ -192,7 +192,7 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT category, COUNT(*), SUM(value), AVG(value), MIN(value), MAX(value) FROM t1 GROUP BY category ORDER BY category",
 			want:  [][]interface{}{{"A", int64(2), int64(30), float64(15), int64(10), int64(20)}, {"B", int64(1), int64(30), float64(30), int64(30), int64(30)}},
-			skip:  "GROUP BY not implemented - returns ungrouped rows",
+			skip:  "",
 		},
 
 		// GROUP BY multiple columns
@@ -204,7 +204,7 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT a, b, SUM(value) FROM t1 GROUP BY a, b ORDER BY a, b",
 			want:  [][]interface{}{{int64(1), int64(1), int64(40)}, {int64(1), int64(2), int64(20)}, {int64(2), int64(1), int64(40)}},
-			skip:  "GROUP BY not implemented - returns ungrouped rows",
+			skip:  "",
 		},
 
 		// HAVING clause
@@ -238,7 +238,7 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT category, SUM(value) as total FROM t1 GROUP BY category ORDER BY total",
 			want:  [][]interface{}{{"A", int64(10)}, {"C", int64(20)}, {"B", int64(30)}},
-			skip:  "GROUP BY not implemented - returns ungrouped rows",
+			skip:  "pre-existing failure - ORDER BY on aggregate alias not implemented for GROUP BY",
 		},
 		{
 			name: "GROUP BY with ORDER BY DESC",
@@ -248,7 +248,7 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT category, SUM(value) as total FROM t1 GROUP BY category ORDER BY total DESC",
 			want:  [][]interface{}{{"B", int64(30)}, {"C", int64(20)}, {"A", int64(10)}},
-			skip:  "GROUP BY not implemented - returns ungrouped rows",
+			skip:  "pre-existing failure - ORDER BY on aggregate alias not implemented for GROUP BY",
 		},
 
 		// GROUP_CONCAT tests
@@ -420,7 +420,7 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT sum(amount), name FROM invoice GROUP BY name ORDER BY name",
 			want:  [][]interface{}{{float64(15.0), "Bara"}, {float64(6.0), "John"}, {float64(8.0), "Michael"}},
-			skip:  "GROUP BY not implemented - returns ungrouped rows",
+			skip:  "pre-existing failure - multi-value INSERT and ORDER BY name with GROUP BY not working together",
 		},
 
 		// Test with JOIN and aggregates

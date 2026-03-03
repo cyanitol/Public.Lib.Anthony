@@ -87,7 +87,7 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 		},
 		{
 			name: "aggregate_subqueries_join",
-			skip: "Known issue: GROUP BY aggregate in subquery/CTE/view causes infinite loop in VDBE",
+			skip: "",
 			setup: []string{
 				"CREATE TABLE t1(x, y)",
 				"INSERT INTO t1 VALUES(1, 1)",
@@ -105,7 +105,7 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 		},
 		{
 			name: "subquery_with_aliases",
-			skip: "Known issue: VDBE infinite loop with GROUP BY aggregate in subquery with aliases",
+			skip: "",
 			setup: []string{
 				"CREATE TABLE t1(x, y)",
 				"INSERT INTO t1 VALUES(1, 1)",

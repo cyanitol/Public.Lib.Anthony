@@ -60,11 +60,13 @@ func (s *Stmt) initGroupByState(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *pa
 	return state
 }
 
-// emitGroupComparison emits code to compare GROUP BY values and output previous group if changed
+// emitGroupComparison emits code to compare GROUP BY values and output previous group if changed.
 // This function compares all GROUP BY columns. If ANY differ from the previous group, it outputs
-// the previous group's accumulated results.
+// the previous group's accumulated results and then initializes accumulators for the new group.
+// For the first row, it skips comparison and just initializes accumulators.
+// Returns the address to jump to for updating accumulators (when group hasn't changed).
 func (s *Stmt) emitGroupComparison(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, numGroupBy, numCols int) int {
-	// Check if group has changed (skip on first row)
+	// Check if first row - if so, skip comparison and go straight to initialization
 	skipCheckAddr := vm.AddOp(vdbe.OpIf, state.firstRowReg, 0, 0)
 
 	// Compare all GROUP BY columns to detect if group changed
@@ -79,36 +81,63 @@ func (s *Stmt) emitGroupComparison(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt 
 		vm.AddOp(vdbe.OpOr, groupChangedReg, cmpReg, groupChangedReg)
 	}
 
-	// If group changed, output the previous group
-	skipOutputAddr := vm.AddOp(vdbe.OpIfNot, groupChangedReg, 0, 0)
+	// If group hasn't changed, skip to accumulator update (don't output or reinitialize)
+	skipToUpdateAddr := vm.AddOp(vdbe.OpIfNot, groupChangedReg, 0, 0)
+
+	// Group changed - output previous group results
 	s.emitGroupOutput(vm, stmt, state.accRegs, state.avgCountRegs, state.prevGroupByRegs, numCols)
 
-	// After outputting, we'll fall through to reset accumulators
-	// Skip output jumps here
-	vm.Program[skipOutputAddr].P2 = vm.NumOps()
+	// Fall through to initialization (for first row or after group change)
+	// First row jumps here too
+	initAddr := vm.NumOps()
+	vm.Program[skipCheckAddr].P2 = initAddr
 
-	return skipCheckAddr
+	// Initialize accumulators for new group
+	s.initializeGroupAccumulators(vm, gen, stmt, state)
+
+	// Both paths (group changed initialization AND "no change" skip) continue to accumulator update
+	updateAddr := vm.NumOps()
+	vm.Program[skipToUpdateAddr].P2 = updateAddr
+
+	return updateAddr // Not used anymore but keeping signature compatible
 }
 
-// updateGroupAccumulatorsFromSorter updates accumulators from data extracted from sorter
-func (s *Stmt) updateGroupAccumulatorsFromSorter(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, sorterBaseReg int, numGroupBy int) {
+// initializeGroupAccumulators initializes/resets accumulators for a new group.
+// This should only be called when starting a new group (first row or group change).
+func (s *Stmt) initializeGroupAccumulators(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState) {
 	// Clear first row flag
 	vm.AddOp(vdbe.OpInteger, 0, state.firstRowReg, 0)
 
 	// Initialize/reset accumulators
+	// NOTE: We use the registers already allocated in state, NOT calling initializeAggregateRegister
+	// which would allocate new registers and cause inconsistency with emitGroupOutput
 	for i, col := range stmt.Columns {
 		if !s.isAggregateExpr(col.Expr) {
 			continue
 		}
 		fnExpr := col.Expr.(*parser.FunctionExpr)
-		state.avgCountRegs[i] = s.initializeAggregateRegister(vm, fnExpr.Name, state.accRegs[i], gen)
+		switch fnExpr.Name {
+		case "COUNT":
+			vm.AddOp(vdbe.OpInteger, 0, state.accRegs[i], 0)
+		case "AVG":
+			vm.AddOp(vdbe.OpNull, 0, state.accRegs[i], 0)
+			vm.AddOp(vdbe.OpInteger, 0, state.avgCountRegs[i], 0)
+		case "TOTAL":
+			vm.AddOpWithP4Real(vdbe.OpReal, 0, state.accRegs[i], 0, 0.0)
+		case "SUM", "MIN", "MAX":
+			vm.AddOp(vdbe.OpNull, 0, state.accRegs[i], 0)
+		}
 	}
 
 	// Save current GROUP BY values to prev
 	for i := 0; i < len(state.groupByRegs); i++ {
 		vm.AddOp(vdbe.OpCopy, state.groupByRegs[i], state.prevGroupByRegs[i], 0)
 	}
+}
 
+// updateGroupAccumulatorsFromSorter updates accumulators from data extracted from sorter.
+// This should be called for every row to accumulate values.
+func (s *Stmt) updateGroupAccumulatorsFromSorter(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, sorterBaseReg int, numGroupBy int) {
 	// Update accumulators from sorter data
 	regIdx := numGroupBy
 	for i, col := range stmt.Columns {
@@ -273,6 +302,12 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	// Setup args
 	s.setupAggregateArgs(gen, args)
 
+	// Reserve registers 0 to numCols-1 for result row output.
+	// This prevents internal state registers from overlapping with output registers.
+	for i := 0; i < numCols; i++ {
+		gen.AllocReg()
+	}
+
 	// Initialize GROUP BY state
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	state := s.initGroupByState(vm, gen, stmt, numGroupBy)
@@ -299,8 +334,12 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	skipAddr := s.emitWhereClause(vm, gen, stmt)
 
 	// Evaluate and store data for sorter
-	// Allocate base register for sorter data
+	// Allocate enough registers for all sorter columns (GROUP BY + aggregate inputs)
 	sorterBaseReg := gen.AllocReg()
+	// Reserve additional registers so they won't be used by other allocations
+	for i := 1; i < sorterCols; i++ {
+		gen.AllocReg()
+	}
 
 	// Evaluate GROUP BY expressions
 	for i, groupExpr := range stmt.GroupBy {
@@ -357,12 +396,9 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 		vm.AddOp(vdbe.OpCopy, sorterBaseReg+i, state.groupByRegs[i], 0)
 	}
 
-	// Compare GROUP BY values and output previous group if changed
-	skipCheckAddr := s.emitGroupComparison(vm, gen, stmt, state, numGroupBy, numCols)
-
-	// Patch first row skip
-	initAccumulatorsAddr := vm.NumOps()
-	vm.Program[skipCheckAddr].P2 = initAccumulatorsAddr
+	// Compare GROUP BY values, output previous group if changed, and initialize accumulators
+	// This handles first row detection, group change detection, output, and initialization
+	s.emitGroupComparison(vm, gen, stmt, state, numGroupBy, numCols)
 
 	// Update accumulators with current row data from sorter
 	s.updateGroupAccumulatorsFromSorter(vm, gen, stmt, state, sorterBaseReg, numGroupBy)

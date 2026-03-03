@@ -250,7 +250,7 @@ func TestSQLiteCTE(t *testing.T) {
 		},
 		{
 			name: "cte_aggregates",
-			skip: "Known issue: GROUP BY aggregate in subquery/CTE/view causes infinite loop in VDBE",
+			skip: "",
 			setup: []string{
 				"CREATE TABLE orders(customer_id INTEGER, amount REAL)",
 				"INSERT INTO orders VALUES(1, 100.0)",
