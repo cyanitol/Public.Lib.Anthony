@@ -71,9 +71,23 @@ func (c *Conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, e
 		return nil, fmt.Errorf("no statements found")
 	}
 
-	// For now, only support single statements
+	// Support multiple statements by creating a MultiStmt
 	if len(stmts) > 1 {
-		return nil, fmt.Errorf("multiple statements not supported")
+		multiStmt := &MultiStmt{
+			conn:  c,
+			query: query,
+			stmts: make([]*Stmt, len(stmts)),
+		}
+		for i, ast := range stmts {
+			// Use unique query string per sub-statement to avoid cache collisions
+			subQuery := fmt.Sprintf("%s#%d", query, i)
+			multiStmt.stmts[i] = &Stmt{
+				conn:  c,
+				query: subQuery,
+				ast:   ast,
+			}
+		}
+		return multiStmt, nil
 	}
 
 	stmt := &Stmt{

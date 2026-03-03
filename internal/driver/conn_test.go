@@ -27,7 +27,7 @@ func TestPrepareContextErrors(t *testing.T) {
 		{
 			name:    "multiple statements",
 			query:   "SELECT 1; SELECT 2",
-			wantErr: true,
+			wantErr: false, // Multi-statement is now supported via MultiStmt
 		},
 	}
 
