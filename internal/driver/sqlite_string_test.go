@@ -10,7 +10,7 @@ import (
 // TestSQLiteStringFunctions tests SQLite string functions (substr, instr, replace, trim, etc.)
 // Converted from contrib/sqlite/sqlite-src-3510200/test/substr.test and instr.test
 func TestSQLiteStringFunctions(t *testing.T) {
-	t.Skip("pre-existing failure - needs string function fixes")
+	// Removed function-level skip - triage individual subtests instead
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "string_test.db")
 
@@ -31,6 +31,7 @@ func TestSQLiteStringFunctions(t *testing.T) {
 		query   string
 		want    interface{}
 		wantErr bool
+		skip    string
 	}{
 		// SUBSTR tests (from substr.test)
 		{
@@ -57,31 +58,37 @@ func TestSQLiteStringFunctions(t *testing.T) {
 			name:  "substr_zero_start",
 			query: "SELECT substr('abcdefg', 0, 2)",
 			want:  "a",
+			skip:  "substr with zero/negative index not implemented correctly",
 		},
 		{
 			name:  "substr_negative_start",
 			query: "SELECT substr('abcdefg', -1, 1)",
 			want:  "g",
+			skip:  "substr with negative index not implemented",
 		},
 		{
 			name:  "substr_negative_start_multi",
 			query: "SELECT substr('abcdefg', -1, 10)",
 			want:  "g",
+			skip:  "substr with negative index not implemented",
 		},
 		{
 			name:  "substr_negative_offset",
 			query: "SELECT substr('abcdefg', -5, 3)",
 			want:  "cde",
+			skip:  "substr with negative index not implemented",
 		},
 		{
 			name:  "substr_negative_from_start",
 			query: "SELECT substr('abcdefg', -7, 3)",
 			want:  "abc",
+			skip:  "substr with negative index not implemented",
 		},
 		{
 			name:  "substr_large_negative",
 			query: "SELECT substr('abcdefg', -100, 98)",
 			want:  "abcde",
+			skip:  "substr with negative index not implemented",
 		},
 		{
 			name:  "substr_out_of_bounds",
@@ -112,11 +119,13 @@ func TestSQLiteStringFunctions(t *testing.T) {
 			name:  "substr_two_args_negative",
 			query: "SELECT substr('abcdef', -5)",
 			want:  "bcdef",
+			skip:  "substr with negative index not implemented",
 		},
 		{
 			name:  "substring_alias",
 			query: "SELECT substring('hello world', 7, 5)",
 			want:  "world",
+			skip:  "SUBSTRING alias not recognized - only SUBSTR",
 		},
 
 		// INSTR tests (from instr.test)
@@ -266,6 +275,7 @@ func TestSQLiteStringFunctions(t *testing.T) {
 			name:  "replace_null_replacement",
 			query: "SELECT replace('hello', 'l', NULL)",
 			want:  nil,
+			skip:  "replace with NULL replacement returns original instead of NULL",
 		},
 
 		// TRIM, LTRIM, RTRIM tests
@@ -293,16 +303,19 @@ func TestSQLiteStringFunctions(t *testing.T) {
 			name:  "trim_custom_chars",
 			query: "SELECT trim('xyz', 'xyhelloxy')",
 			want:  "ello",
+			skip:  "trim with custom chars has wrong argument order",
 		},
 		{
 			name:  "ltrim_custom_chars",
 			query: "SELECT ltrim('xyz', 'xyhelloxy')",
 			want:  "elloxy",
+			skip:  "ltrim with custom chars has wrong argument order",
 		},
 		{
 			name:  "rtrim_custom_chars",
 			query: "SELECT rtrim('xyz', 'xyhelloxy')",
 			want:  "xyhello",
+			skip:  "rtrim with custom chars has wrong argument order",
 		},
 		{
 			name:  "trim_null",
@@ -433,6 +446,7 @@ func TestSQLiteStringFunctions(t *testing.T) {
 			name:  "hex_number",
 			query: "SELECT hex(255)",
 			want:  "FF",
+			skip:  "hex() of integer returns different format",
 		},
 
 		// PRINTF tests
@@ -440,32 +454,41 @@ func TestSQLiteStringFunctions(t *testing.T) {
 			name:  "printf_string",
 			query: "SELECT printf('Hello %s', 'World')",
 			want:  "Hello World",
+			skip:  "PRINTF function not implemented",
 		},
 		{
 			name:  "printf_integer",
 			query: "SELECT printf('Number: %d', 42)",
 			want:  "Number: 42",
+			skip:  "PRINTF function not implemented",
 		},
 		{
 			name:  "printf_float",
 			query: "SELECT printf('Pi: %.2f', 3.14159)",
 			want:  "Pi: 3.14",
+			skip:  "PRINTF function not implemented",
 		},
 		{
 			name:  "printf_hex",
 			query: "SELECT printf('%x', 255)",
 			want:  "ff",
+			skip:  "PRINTF function not implemented",
 		},
 		{
 			name:  "printf_multiple",
 			query: "SELECT printf('%s: %d', 'Answer', 42)",
 			want:  "Answer: 42",
+			skip:  "PRINTF function not implemented",
 		},
 	}
 
 	for _, tt := range tests {
 		tt := tt  // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.skip != "" {
+				t.Skip(tt.skip)
+			}
+
 			var result interface{}
 			err := db.QueryRow(tt.query).Scan(&result)
 
@@ -530,7 +553,7 @@ func TestSQLiteStringFunctions(t *testing.T) {
 
 // TestStringFunctionsWithTable tests string functions with table data
 func TestStringFunctionsWithTable(t *testing.T) {
-	t.Skip("pre-existing failure - needs string function fixes")
+	// Removed function-level skip - test individual operations
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "string_table_test.db")
 
@@ -656,39 +679,13 @@ func TestStringFunctionsWithTable(t *testing.T) {
 		t.Errorf("expected 1 row containing 'world', got %d", count)
 	}
 
-	// Test 11: UPDATE with string functions
-	_, err = db.Exec("UPDATE strings SET text = upper(text) WHERE id = 6")
-	if err != nil {
-		t.Fatalf("UPDATE with function failed: %v", err)
-	}
+	// Test 11: UPDATE with string functions - SKIPPED
+	// UPDATE with function in SET clause not supported (parse error)
+	// _, err = db.Exec("UPDATE strings SET text = upper(text) WHERE id = 6")
 
-	err = db.QueryRow("SELECT text FROM strings WHERE id = 6").Scan(&result)
-	if err != nil {
-		t.Fatalf("query after update failed: %v", err)
-	}
-	if result != "MIXEDCASE" {
-		t.Errorf("expected 'MIXEDCASE' after update, got %q", result)
-	}
-
-	// Test 12: ORDER BY with string function
-	rows, err := db.Query("SELECT text FROM strings ORDER BY length(text) DESC LIMIT 3")
-	if err != nil {
-		t.Fatalf("ORDER BY with function failed: %v", err)
-	}
-	defer rows.Close()
-
-	var prevLen int = 999
-	for rows.Next() {
-		var text string
-		if err := rows.Scan(&text); err != nil {
-			t.Fatalf("scan failed: %v", err)
-		}
-		currentLen := len(text)
-		if currentLen > prevLen {
-			t.Errorf("ORDER BY length DESC failed: %d > %d", currentLen, prevLen)
-		}
-		prevLen = currentLen
-	}
+	// Test 12: ORDER BY with string function - SKIPPED
+	// ORDER BY with function expression DESC not implemented correctly
+	// rows, err := db.Query("SELECT text FROM strings ORDER BY length(text) DESC LIMIT 3")
 }
 
 // TestStringFunctionsEdgeCases tests edge cases for string functions
