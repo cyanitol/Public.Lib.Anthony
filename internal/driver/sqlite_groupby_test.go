@@ -13,7 +13,6 @@ import (
 // Tests GROUP BY with single/multiple columns, expressions, aggregates, NULL values,
 // ORDER BY, LIMIT, COLLATE, HAVING, and compound SELECT statements
 func TestSQLiteGroupBy(t *testing.T) {
-	t.Skip("pre-existing failure - needs GROUP BY implementation")
 	tests := []struct {
 		name    string
 		setup   []string        // CREATE + INSERT test data
@@ -101,6 +100,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// GROUP BY with column number
 		{
 			name: "GROUP BY column number - 1st column",
+			skip: "GROUP BY column number not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(log int, n int)",
 				"INSERT INTO t1 VALUES(0,1),(1,2),(0,3),(1,4)",
@@ -110,6 +110,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY column number - error case (0)",
+			skip: "GROUP BY column number validation not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(log int, n int)",
 				"INSERT INTO t1 VALUES(0,1)",
@@ -119,6 +120,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY column number - error case (out of range)",
+			skip: "GROUP BY column number validation not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(log int, n int)",
 				"INSERT INTO t1 VALUES(0,1)",
@@ -130,6 +132,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// GROUP BY with expressions
 		{
 			name: "GROUP BY expression - arithmetic",
+			skip: "GROUP BY expression output returns NULL",
 			setup: []string{
 				"CREATE TABLE t1(log int, n int)",
 				"INSERT INTO t1 VALUES(0,1),(1,2),(2,3),(3,5)",
@@ -139,6 +142,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY expression with alias",
+			skip: "GROUP BY alias not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(log int, n int)",
 				"INSERT INTO t1 VALUES(0,1),(1,2),(0,3),(1,4)",
@@ -148,6 +152,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY expression - function call",
+			skip: "GROUP BY function expression not yet supported",
 			setup: []string{
 				"CREATE TABLE t2(a TEXT, b INT, c INT)",
 				"INSERT INTO t2 VALUES('abc', 1, 2), ('ABC', 3, 4), ('def', 5, 6)",
@@ -157,6 +162,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with expression in SELECT and GROUP BY",
+			skip: "GROUP BY expression returns NULL",
 			setup: []string{
 				"CREATE TABLE t1(a INT, b INT)",
 				"INSERT INTO t1 VALUES(1,10), (1,20), (2,30)",
@@ -197,6 +203,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with aggregate arithmetic",
+			skip: "aggregate arithmetic expression returns NULL",
 			setup: []string{
 				"CREATE TABLE t1(log int, n int)",
 				"INSERT INTO t1 VALUES(0,1),(1,2),(2,3)",
@@ -208,6 +215,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// GROUP BY with NULL values
 		{
 			name: "GROUP BY with NULL values in grouped column",
+			skip: "NULL grouping handling incorrect",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), (NULL, 20), ('A', 30), (NULL, 40)",
@@ -246,6 +254,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with ORDER BY DESC",
+			skip: "ORDER BY DESC not applying correctly",
 			setup: []string{
 				"CREATE TABLE t1(log int, n int)",
 				"INSERT INTO t1 VALUES(0,1),(1,2),(2,5)",
@@ -264,6 +273,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with ORDER BY aggregate",
+			skip: "ORDER BY aggregate alias not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('B', 30), ('C', 20)",
@@ -273,6 +283,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with ORDER BY aggregate DESC",
+			skip: "ORDER BY aggregate alias not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('B', 30), ('C', 20)",
@@ -282,6 +293,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with ORDER BY multiple columns",
+			skip: "GROUP BY alias expression returns NULL",
 			setup: []string{
 				"CREATE TABLE t1(log int, n int)",
 				"INSERT INTO t1 VALUES(1,2),(0,1),(1,3)",
@@ -293,6 +305,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// GROUP BY with LIMIT
 		{
 			name: "GROUP BY with LIMIT",
+			skip: "LIMIT with GROUP BY not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(a INTEGER, b INTEGER)",
 				"INSERT INTO t1 VALUES(1,10), (2,20), (3,30), (4,40)",
@@ -302,6 +315,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with LIMIT and ORDER BY",
+			skip: "LIMIT with GROUP BY not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 40), ('B', 10), ('C', 30), ('D', 20)",
@@ -311,6 +325,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with LIMIT and aggregate",
+			skip: "LIMIT with GROUP BY not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(x INT, y INT)",
 				"INSERT INTO t1 VALUES(1,10), (2,20), (1,30), (3,40), (2,50)",
@@ -322,6 +337,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// GROUP BY with HAVING
 		{
 			name: "GROUP BY with HAVING on aggregate COUNT",
+			skip: "HAVING clause not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(log int, n int)",
 				"INSERT INTO t1 VALUES(0,1),(1,2),(2,3),(2,4),(3,5),(3,6),(3,7),(3,8)",
@@ -331,6 +347,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with HAVING on aggregate SUM",
+			skip: "HAVING clause not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 100)",
@@ -340,6 +357,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with HAVING on aggregate AVG",
+			skip: "HAVING clause not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 100), ('B', 200)",
@@ -349,6 +367,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with HAVING on grouped column",
+			skip: "HAVING clause not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(log int, n int)",
 				"INSERT INTO t1 VALUES(0,1),(1,2),(2,3),(3,5),(4,9),(5,17)",
@@ -358,6 +377,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with HAVING using alias",
+			skip: "HAVING clause not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(log int, n int)",
 				"INSERT INTO t1 VALUES(0,1),(1,2),(2,3),(2,4),(3,5),(3,6),(3,7)",
@@ -369,6 +389,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// GROUP BY with COLLATE
 		{
 			name: "GROUP BY with COLLATE NOCASE",
+			skip: "COLLATE in GROUP BY not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(a TEXT, b INTEGER)",
 				"INSERT INTO t1 VALUES('a', 1), ('A', 2), ('b', 3), ('B', 4)",
@@ -378,6 +399,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY multiple columns with COLLATE",
+			skip: "COLLATE in GROUP BY not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(a TEXT, b TEXT, c INTEGER)",
 				"INSERT INTO t1 VALUES('a', 'X', 1), ('A', 'x', 2), ('a', 'X', 3)",
@@ -389,6 +411,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// GROUP BY with compound SELECT (UNION)
 		{
 			name: "GROUP BY with UNION ALL",
+			skip: "UNION ALL subquery causes panic",
 			setup: []string{
 				"CREATE TABLE t1(a INT, b INT)",
 				"CREATE TABLE t2(a INT, b INT)",
@@ -400,6 +423,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY after UNION",
+			skip: "UNION ALL subquery causes panic",
 			setup: []string{
 				"CREATE TABLE t1(x INT)",
 				"CREATE TABLE t2(x INT)",
@@ -413,6 +437,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// GROUP BY edge cases
 		{
 			name: "GROUP BY on empty table",
+			skip: "empty table handling incorrect",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 			},
@@ -459,6 +484,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with JOIN",
+			skip: "JOIN with GROUP BY not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER, value INTEGER)",
 				"CREATE TABLE t2(id INTEGER, category TEXT)",
@@ -470,6 +496,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with subquery in FROM",
+			skip: "subquery in FROM with GROUP BY not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(x INT, y INT)",
 				"INSERT INTO t1 VALUES(1,5), (2,6), (3,7), (4,8), (5,9), (6,10)",
@@ -479,6 +506,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with REAL type conversion",
+			skip: "typeof function not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(a1 DOUBLE, a2 VARCHAR, a3 DOUBLE)",
 				"INSERT INTO t1 VALUES(1000, 'ABC', 100), (1000, 'ABC', 200)",
@@ -490,6 +518,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// HAVING with complex nested conditions
 		{
 			name: "HAVING with nested OR and AND conditions",
+			skip: "HAVING clause not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 5), ('B', 10), ('C', 100)",
@@ -499,6 +528,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "HAVING with multiple aggregate functions and complex logic",
+			skip: "HAVING clause not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('A', 30), ('B', 5), ('B', 5), ('C', 50)",
@@ -508,6 +538,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "HAVING with arithmetic on aggregates",
+			skip: "HAVING clause not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(a INTEGER, b INTEGER)",
 				"INSERT INTO t1 VALUES(1, 10), (1, 20), (2, 5), (2, 15)",
@@ -517,6 +548,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "HAVING with BETWEEN on aggregate",
+			skip: "HAVING clause not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 50), ('C', 5), ('C', 10), ('C', 15)",
@@ -526,6 +558,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 			},
 		{
 			name: "HAVING with IN clause on aggregate",
+			skip: "HAVING clause not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 5), ('B', 5), ('B', 5), ('C', 100)",
@@ -569,6 +602,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// GROUP BY with CASE expressions
 		{
 			name: "GROUP BY with CASE expression",
+			skip: "GROUP BY alias not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(value INTEGER)",
 				"INSERT INTO t1 VALUES(5), (15), (25), (35), (45)",
@@ -589,6 +623,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// GROUP BY with window function context (subquery)
 		{
 			name: "GROUP BY in subquery with outer aggregate",
+			skip: "subquery in FROM with GROUP BY not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 30)",
@@ -598,6 +633,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with correlated subquery in HAVING",
+			skip: "HAVING clause not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER, category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES(1, 'A', 10), (2, 'A', 20), (3, 'B', 30), (4, 'B', 40), (5, 'C', 5)",
@@ -609,6 +645,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// GROUP BY with mathematical functions
 		{
 			name: "GROUP BY with ABS function",
+			skip: "GROUP BY alias not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(value INTEGER)",
 				"INSERT INTO t1 VALUES(-5), (5), (-10), (10)",
@@ -618,6 +655,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with ROUND in expression",
+			skip: "ROUND function not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value REAL)",
 				"INSERT INTO t1 VALUES('A', 10.4), ('A', 10.6), ('B', 20.1)",
@@ -629,6 +667,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// GROUP BY with LIMIT and OFFSET combinations
 		{
 			name: "GROUP BY with LIMIT and OFFSET",
+			skip: "LIMIT/OFFSET with GROUP BY not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('B', 20), ('C', 30), ('D', 40), ('E', 50)",
@@ -638,6 +677,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with aggregate and LIMIT OFFSET",
+			skip: "LIMIT/OFFSET with GROUP BY not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(a INTEGER, b INTEGER)",
 				"INSERT INTO t1 VALUES(1, 10), (2, 20), (1, 30), (3, 40), (2, 50)",
@@ -671,6 +711,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// GROUP BY with all NULL group
 		{
 			name: "GROUP BY with all NULL values in group",
+			skip: "NULL grouping handling incorrect",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES(NULL, 10), (NULL, 20), ('A', 30)",
@@ -682,6 +723,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// Error cases
 		{
 			name: "GROUP BY with invalid column reference",
+			skip: "error validation not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(x INT, y INT)",
 				"INSERT INTO t1 VALUES(1, 5)",
@@ -691,6 +733,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with invalid function",
+			skip: "error validation not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(x INT, y INT)",
 				"INSERT INTO t1 VALUES(1, 5)",
@@ -700,6 +743,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "HAVING with invalid column reference",
+			skip: "error validation not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(x INT, y INT)",
 				"INSERT INTO t1 VALUES(1, 5)",
@@ -711,6 +755,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		// Additional edge cases from select3.test
 		{
 			name: "GROUP BY with complex ORDER BY expression",
+			skip: "GROUP BY alias not yet supported",
 			setup: []string{
 				"CREATE TABLE t1(log int, n int)",
 				"INSERT INTO t1 VALUES(0,1),(1,2),(2,4),(3,8),(4,16)",
@@ -730,6 +775,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 		},
 		{
 			name: "GROUP BY with index on grouped column DESC",
+			skip: "ORDER BY DESC not applying correctly",
 			setup: []string{
 				"CREATE TABLE t1(log int, n int)",
 				"INSERT INTO t1 VALUES(0,1),(1,2),(2,3),(3,5),(4,9),(5,17)",
