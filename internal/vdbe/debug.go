@@ -314,48 +314,48 @@ func (v *VDBE) DumpCursors() string {
 	sb.WriteString("─────────────────────────────────────────\n")
 
 	for i, cursor := range v.Cursors {
-		if cursor == nil {
-			sb.WriteString(fmt.Sprintf("C%-4d: <CLOSED>\n", i))
-			continue
-		}
+		sb.WriteString(v.formatCursorDump(i, cursor))
+	}
 
-		curType := "UNKNOWN"
-		switch cursor.CurType {
-		case CursorBTree:
-			curType = "BTREE"
-		case CursorSorter:
-			curType = "SORTER"
-		case CursorVTab:
-			curType = "VTAB"
-		case CursorPseudo:
-			curType = "PSEUDO"
-		}
+	return sb.String()
+}
 
-		sb.WriteString(fmt.Sprintf("C%-4d: Type=%s", i, curType))
+// formatCursorDump formats a single cursor for dump output.
+func (v *VDBE) formatCursorDump(index int, cursor *Cursor) string {
+	if cursor == nil {
+		return fmt.Sprintf("C%-4d: <CLOSED>\n", index)
+	}
 
-		if cursor.IsTable {
-			sb.WriteString(" [TABLE]")
-		} else {
-			sb.WriteString(" [INDEX]")
-		}
+	curType := getCursorTypeName(cursor.CurType)
+	flags := buildCursorDumpFlags(cursor)
 
-		if cursor.Writable {
-			sb.WriteString(" [WRITABLE]")
-		}
+	return fmt.Sprintf("C%-4d: Type=%s%s\n", index, curType, flags)
+}
 
-		if cursor.NullRow {
-			sb.WriteString(" [NULL ROW]")
-		}
+// buildCursorDumpFlags builds the flag string for cursor dump output.
+func buildCursorDumpFlags(cursor *Cursor) string {
+	var sb strings.Builder
 
-		if cursor.EOF {
-			sb.WriteString(" [EOF]")
-		}
+	if cursor.IsTable {
+		sb.WriteString(" [TABLE]")
+	} else {
+		sb.WriteString(" [INDEX]")
+	}
 
-		if cursor.RootPage > 0 {
-			sb.WriteString(fmt.Sprintf(" Root=%d", cursor.RootPage))
-		}
+	if cursor.Writable {
+		sb.WriteString(" [WRITABLE]")
+	}
 
-		sb.WriteString("\n")
+	if cursor.NullRow {
+		sb.WriteString(" [NULL ROW]")
+	}
+
+	if cursor.EOF {
+		sb.WriteString(" [EOF]")
+	}
+
+	if cursor.RootPage > 0 {
+		sb.WriteString(fmt.Sprintf(" Root=%d", cursor.RootPage))
 	}
 
 	return sb.String()
@@ -520,92 +520,149 @@ func (v *VDBE) logAffectedCursors(pc int, instr *Instruction) {
 		return
 	}
 
-	// Determine which cursors might be affected based on opcode
 	affectedCursors := v.getAffectedCursors(instr)
-
 	for _, curIdx := range affectedCursors {
-		if curIdx < 0 || curIdx >= len(v.Cursors) {
-			continue
-		}
-
-		cursor := v.Cursors[curIdx]
-		if cursor == nil {
-			v.logToObservability(v.Debug.LogLevel, "  [CURSOR] C%d: <CLOSED>", curIdx)
-			continue
-		}
-
-		curType := "UNKNOWN"
-		switch cursor.CurType {
-		case CursorBTree:
-			curType = "BTREE"
-		case CursorSorter:
-			curType = "SORTER"
-		case CursorVTab:
-			curType = "VTAB"
-		case CursorPseudo:
-			curType = "PSEUDO"
-		}
-
-		flags := ""
-		if cursor.EOF {
-			flags += " EOF"
-		}
-		if cursor.NullRow {
-			flags += " NULL"
-		}
-
-		v.logToObservability(v.Debug.LogLevel, "  [CURSOR] C%d: Type=%s%s", curIdx, curType, flags)
+		v.logSingleCursor(curIdx)
 	}
+}
+
+// logSingleCursor logs the state of a single cursor.
+func (v *VDBE) logSingleCursor(curIdx int) {
+	if curIdx < 0 || curIdx >= len(v.Cursors) {
+		return
+	}
+
+	cursor := v.Cursors[curIdx]
+	if cursor == nil {
+		v.logToObservability(v.Debug.LogLevel, "  [CURSOR] C%d: <CLOSED>", curIdx)
+		return
+	}
+
+	curType := getCursorTypeName(cursor.CurType)
+	flags := formatCursorFlags(cursor)
+	v.logToObservability(v.Debug.LogLevel, "  [CURSOR] C%d: Type=%s%s", curIdx, curType, flags)
+}
+
+// getCursorTypeName returns the string name for a cursor type.
+func getCursorTypeName(curType CursorType) string {
+	switch curType {
+	case CursorBTree:
+		return "BTREE"
+	case CursorSorter:
+		return "SORTER"
+	case CursorVTab:
+		return "VTAB"
+	case CursorPseudo:
+		return "PSEUDO"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// formatCursorFlags returns a string representation of cursor flags.
+func formatCursorFlags(cursor *Cursor) string {
+	flags := ""
+	if cursor.EOF {
+		flags += " EOF"
+	}
+	if cursor.NullRow {
+		flags += " NULL"
+	}
+	return flags
+}
+
+// registerPattern defines how an opcode affects registers.
+type registerPattern int
+
+const (
+	regPatternP2        registerPattern = iota // Write to P2
+	regPatternP1P2                             // Read P1, write P2
+	regPatternP3                               // Write to P3
+	regPatternP1RangeP3                        // Read P1..P1+P2, write P3
+	regPatternP1Range                          // Read P1..P1+P2
+	regPatternP1P2P3                           // P1, P2, P3 all affected
+	regPatternDefault                          // Check all valid register indices
+)
+
+// opcodeRegisterPatterns maps opcodes to their register access patterns.
+var opcodeRegisterPatterns = map[Opcode]registerPattern{
+	OpInteger: regPatternP2,
+	OpInt64:   regPatternP2,
+	OpReal:    regPatternP2,
+	OpString:  regPatternP2,
+	OpString8: regPatternP2,
+	OpBlob:    regPatternP2,
+	OpNull:    regPatternP2,
+
+	OpCopy:  regPatternP1P2,
+	OpSCopy: regPatternP1P2,
+	OpMove:  regPatternP1P2,
+
+	OpColumn:  regPatternP3,
+	OpRowData: regPatternP3,
+
+	OpMakeRecord: regPatternP1RangeP3,
+	OpConcat:     regPatternP1RangeP3,
+
+	OpResultRow: regPatternP1Range,
+
+	OpAdd:       regPatternP1P2P3,
+	OpSubtract:  regPatternP1P2P3,
+	OpMultiply:  regPatternP1P2P3,
+	OpDivide:    regPatternP1P2P3,
+	OpRemainder: regPatternP1P2P3,
 }
 
 // getAffectedRegisters returns the list of register indices potentially affected by an instruction.
 func (v *VDBE) getAffectedRegisters(instr *Instruction) []int {
-	affected := make([]int, 0, 3)
-
-	// Most instructions affect P1, P2, or P3 as register destinations
-	switch instr.Opcode {
-	case OpInteger, OpInt64, OpReal, OpString, OpString8, OpBlob, OpNull:
-		// These write to P2
-		affected = append(affected, instr.P2)
-	case OpCopy, OpSCopy, OpMove:
-		// These write to P2 and read from P1
-		affected = append(affected, instr.P1, instr.P2)
-	case OpColumn, OpRowData:
-		// These write to P3
-		affected = append(affected, instr.P3)
-	case OpMakeRecord:
-		// Writes to P3, reads from P1..P1+P2
-		affected = append(affected, instr.P3)
-		for i := instr.P1; i < instr.P1+instr.P2; i++ {
-			affected = append(affected, i)
-		}
-	case OpResultRow:
-		// Reads from P1..P1+P2
-		for i := instr.P1; i < instr.P1+instr.P2; i++ {
-			affected = append(affected, i)
-		}
-	case OpAdd, OpSubtract, OpMultiply, OpDivide, OpRemainder:
-		// Binary operations: P1 op P2 -> P3
-		affected = append(affected, instr.P1, instr.P2, instr.P3)
-	case OpConcat:
-		// P1..P1+P2 -> P3
-		affected = append(affected, instr.P3)
-		for i := instr.P1; i < instr.P1+instr.P2; i++ {
-			affected = append(affected, i)
-		}
-	default:
-		// For unknown opcodes, check if any operand looks like a register index
-		if instr.P1 >= 0 && instr.P1 < len(v.Mem) {
-			affected = append(affected, instr.P1)
-		}
-		if instr.P2 >= 0 && instr.P2 < len(v.Mem) {
-			affected = append(affected, instr.P2)
-		}
-		if instr.P3 >= 0 && instr.P3 < len(v.Mem) {
-			affected = append(affected, instr.P3)
-		}
+	pattern, found := opcodeRegisterPatterns[instr.Opcode]
+	if !found {
+		pattern = regPatternDefault
 	}
 
+	return v.applyRegisterPattern(pattern, instr)
+}
+
+// applyRegisterPattern applies a register pattern to an instruction.
+func (v *VDBE) applyRegisterPattern(pattern registerPattern, instr *Instruction) []int {
+	affected := make([]int, 0, 3)
+
+	switch pattern {
+	case regPatternP2:
+		affected = append(affected, instr.P2)
+	case regPatternP1P2:
+		affected = append(affected, instr.P1, instr.P2)
+	case regPatternP3:
+		affected = append(affected, instr.P3)
+	case regPatternP1RangeP3:
+		affected = append(affected, instr.P3)
+		affected = v.appendRegisterRange(affected, instr.P1, instr.P1+instr.P2)
+	case regPatternP1Range:
+		affected = v.appendRegisterRange(affected, instr.P1, instr.P1+instr.P2)
+	case regPatternP1P2P3:
+		affected = append(affected, instr.P1, instr.P2, instr.P3)
+	case regPatternDefault:
+		affected = v.appendValidRegisters(affected, instr.P1, instr.P2, instr.P3)
+	}
+
+	return affected
+}
+
+// appendRegisterRange appends a range of register indices to the slice.
+func (v *VDBE) appendRegisterRange(affected []int, start, end int) []int {
+	for i := start; i < end; i++ {
+		affected = append(affected, i)
+	}
+	return affected
+}
+
+// appendValidRegisters appends register indices that are within valid range.
+func (v *VDBE) appendValidRegisters(affected []int, indices ...int) []int {
+	for _, idx := range indices {
+		if idx >= 0 && idx < len(v.Mem) {
+			affected = append(affected, idx)
+		}
+	}
 	return affected
 }
 

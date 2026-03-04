@@ -461,55 +461,107 @@ func valueToJSONSmart(v Value) interface{} {
 	case TypeFloat:
 		return v.AsFloat64()
 	case TypeText:
-		s := v.AsString()
-		// Check if this looks like it could be JSON output from json() function
-		// We parse JSON objects {} or arrays/objects with specific characteristics
-		if len(s) > 0 && s[0] == '{' {
-			// Objects are more likely from json() - parse them
-			var data interface{}
-			if err := json.Unmarshal([]byte(s), &data); err == nil {
-				if _, ok := data.(map[string]interface{}); ok {
-					// Check if minified (indicates it's from json())
-					minified, err := json.Marshal(data)
-					if err == nil && string(minified) == s {
-						return data
-					}
-				}
-			}
-		} else if len(s) > 0 && s[0] == '[' {
-			// For arrays: only parse if they contain strings or nested structures
-			// Arrays with only numbers like [97,96] are treated as string literals
-			// This is a heuristic since we lack SQLite's subtype system
-			var data interface{}
-			if err := json.Unmarshal([]byte(s), &data); err == nil {
-				if arr, ok := data.([]interface{}); ok {
-					// Check if array contains strings or complex types
-					hasStringOrComplex := false
-					for _, item := range arr {
-						switch item.(type) {
-						case string, map[string]interface{}, []interface{}:
-							hasStringOrComplex = true
-							break
-						}
-					}
-
-					if hasStringOrComplex {
-						// Contains non-numeric types - parse as JSON
-						minified, err := json.Marshal(data)
-						if err == nil && string(minified) == s {
-							return data
-						}
-					}
-				}
-			}
-		}
-		// Otherwise it's a plain string
-		return s
+		return convertStringToJSON(v.AsString())
 	case TypeBlob:
 		return v.AsBlob()
 	default:
 		return nil
 	}
+}
+
+// convertStringToJSON attempts to parse a string as JSON if it looks like JSON.
+// Returns the parsed JSON structure or the original string.
+func convertStringToJSON(s string) interface{} {
+	if len(s) == 0 {
+		return s
+	}
+
+	// Try parsing as JSON object
+	if s[0] == '{' {
+		if parsed := tryParseJSONObject(s); parsed != nil {
+			return parsed
+		}
+		return s
+	}
+
+	// Try parsing as JSON array
+	if s[0] == '[' {
+		if parsed := tryParseJSONArray(s); parsed != nil {
+			return parsed
+		}
+		return s
+	}
+
+	// Plain string
+	return s
+}
+
+// tryParseJSONObject attempts to parse a string as a JSON object.
+// Returns the parsed object if it's minified JSON, nil otherwise.
+func tryParseJSONObject(s string) interface{} {
+	var data interface{}
+	if err := json.Unmarshal([]byte(s), &data); err != nil {
+		return nil
+	}
+
+	obj, ok := data.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	// Check if minified (indicates it's from json())
+	if isMinifiedJSON(data, s) {
+		return obj
+	}
+
+	return nil
+}
+
+// tryParseJSONArray attempts to parse a string as a JSON array.
+// Only returns the parsed array if it contains strings or complex types.
+func tryParseJSONArray(s string) interface{} {
+	var data interface{}
+	if err := json.Unmarshal([]byte(s), &data); err != nil {
+		return nil
+	}
+
+	arr, ok := data.([]interface{})
+	if !ok {
+		return nil
+	}
+
+	// Only parse arrays with strings or complex types
+	if !arrayHasStringOrComplex(arr) {
+		return nil
+	}
+
+	// Check if minified (indicates it's from json())
+	if isMinifiedJSON(data, s) {
+		return arr
+	}
+
+	return nil
+}
+
+// arrayHasStringOrComplex checks if an array contains strings or complex types.
+// Arrays with only numbers like [97,96] are treated as string literals.
+func arrayHasStringOrComplex(arr []interface{}) bool {
+	for _, item := range arr {
+		switch item.(type) {
+		case string, map[string]interface{}, []interface{}:
+			return true
+		}
+	}
+	return false
+}
+
+// isMinifiedJSON checks if the string representation matches the minified JSON.
+func isMinifiedJSON(data interface{}, s string) bool {
+	minified, err := json.Marshal(data)
+	if err != nil {
+		return false
+	}
+	return string(minified) == s
 }
 
 // jsonToValue converts a JSON value to a SQL Value

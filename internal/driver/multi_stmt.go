@@ -47,18 +47,10 @@ func (m *MultiStmt) Exec(args []driver.Value) (driver.Result, error) {
 
 // ExecContext executes all statements in sequence with context.
 func (m *MultiStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
-	m.mu.Lock()
-	if m.closed {
-		m.mu.Unlock()
-		return nil, driver.ErrBadConn
+	if err := m.checkClosed(); err != nil {
+		return nil, err
 	}
-	m.mu.Unlock()
 
-	var lastResult driver.Result
-	var totalRowsAffected int64
-
-	// Execute all statements in a single "batch" - we need to manage transaction state
-	// to ensure all statements see consistent state
 	m.conn.mu.Lock()
 	defer m.conn.mu.Unlock()
 
@@ -66,11 +58,37 @@ func (m *MultiStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (
 		return nil, driver.ErrBadConn
 	}
 
+	lastResult, totalRowsAffected, err := m.executeAllStmts(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := m.commitIfNeeded(); err != nil {
+		return nil, err
+	}
+
+	return m.buildResult(lastResult, totalRowsAffected), nil
+}
+
+// checkClosed checks if the multi-statement is closed.
+func (m *MultiStmt) checkClosed() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return driver.ErrBadConn
+	}
+	return nil
+}
+
+// executeAllStmts executes all statements and aggregates results.
+func (m *MultiStmt) executeAllStmts(ctx context.Context, args []driver.NamedValue) (driver.Result, int64, error) {
+	var lastResult driver.Result
+	var totalRowsAffected int64
+
 	for _, stmt := range m.stmts {
-		// Execute directly without going through ExecContext (which would try to lock again)
 		result, err := m.execSingleStmt(ctx, stmt, args)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		lastResult = result
 		if result != nil {
@@ -80,23 +98,29 @@ func (m *MultiStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (
 		}
 	}
 
-	// Commit at the end if we're in autocommit mode
+	return lastResult, totalRowsAffected, nil
+}
+
+// commitIfNeeded commits the transaction if in autocommit mode.
+func (m *MultiStmt) commitIfNeeded() error {
 	if !m.conn.inTx && m.conn.pager.InWriteTransaction() {
 		if err := m.conn.pager.Commit(); err != nil {
-			return nil, errors.New("auto-commit error: " + err.Error())
+			return errors.New("auto-commit error: " + err.Error())
 		}
 	}
+	return nil
+}
 
-	// Return a combined result
+// buildResult constructs the final result from the execution.
+func (m *MultiStmt) buildResult(lastResult driver.Result, totalRowsAffected int64) driver.Result {
 	if lastResult != nil {
 		lastInsertId, _ := lastResult.LastInsertId()
 		return &Result{
 			lastInsertID: lastInsertId,
 			rowsAffected: totalRowsAffected,
-		}, nil
+		}
 	}
-
-	return &Result{rowsAffected: totalRowsAffected}, nil
+	return &Result{rowsAffected: totalRowsAffected}
 }
 
 // execSingleStmt executes a single statement without locking (caller must hold lock).

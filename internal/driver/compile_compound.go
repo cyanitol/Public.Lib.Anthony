@@ -445,40 +445,67 @@ func typeOrder(v interface{}) int {
 
 // applyLimitOffset applies LIMIT and OFFSET to the result set.
 func applyLimitOffset(rows [][]interface{}, limitExpr, offsetExpr parser.Expression) [][]interface{} {
-	offset := 0
-	limit := -1 // -1 means no limit
+	offset := parseOffsetExpr(offsetExpr)
+	limit := parseLimitExpr(limitExpr)
 
-	if offsetExpr != nil {
-		if lit, ok := offsetExpr.(*parser.LiteralExpr); ok {
-			var v int64
-			if _, err := fmt.Sscanf(lit.Value, "%d", &v); err == nil && v > 0 {
-				offset = int(v)
-			}
-		}
+	rows = applyOffset(rows, offset)
+	rows = applyLimit(rows, limit)
+
+	return rows
+}
+
+// parseOffsetExpr extracts the offset value from the expression.
+func parseOffsetExpr(offsetExpr parser.Expression) int {
+	if offsetExpr == nil {
+		return 0
 	}
 
-	if limitExpr != nil {
-		if lit, ok := limitExpr.(*parser.LiteralExpr); ok {
-			var v int64
-			if _, err := fmt.Sscanf(lit.Value, "%d", &v); err == nil {
-				limit = int(v)
-			}
-		}
+	lit, ok := offsetExpr.(*parser.LiteralExpr)
+	if !ok {
+		return 0
 	}
 
-	// Apply offset
-	if offset > 0 {
+	var v int64
+	if _, err := fmt.Sscanf(lit.Value, "%d", &v); err == nil && v > 0 {
+		return int(v)
+	}
+	return 0
+}
+
+// parseLimitExpr extracts the limit value from the expression.
+func parseLimitExpr(limitExpr parser.Expression) int {
+	if limitExpr == nil {
+		return -1 // -1 means no limit
+	}
+
+	lit, ok := limitExpr.(*parser.LiteralExpr)
+	if !ok {
+		return -1
+	}
+
+	var v int64
+	if _, err := fmt.Sscanf(lit.Value, "%d", &v); err == nil {
+		return int(v)
+	}
+	return -1
+}
+
+// applyOffset applies the offset to the result set.
+func applyOffset(rows [][]interface{}, offset int) [][]interface{} {
+	if offset <= 0 || offset >= len(rows) {
 		if offset >= len(rows) {
 			return nil
 		}
-		rows = rows[offset:]
+		return rows
 	}
+	return rows[offset:]
+}
 
-	// Apply limit
+// applyLimit applies the limit to the result set.
+func applyLimit(rows [][]interface{}, limit int) [][]interface{} {
 	if limit >= 0 && limit < len(rows) {
-		rows = rows[:limit]
+		return rows[:limit]
 	}
-
 	return rows
 }
 

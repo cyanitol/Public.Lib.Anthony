@@ -160,35 +160,25 @@ func parseTableInteriorCell(cellData []byte) (*CellInfo, error) {
 	return info, nil
 }
 
-// parseIndexLeafCell parses an index leaf cell
-// Format: varint(payload_size), payload
-func parseIndexLeafCell(cellData []byte, usableSize uint32) (*CellInfo, error) {
-	if len(cellData) == 0 {
-		return nil, fmt.Errorf("empty cell data")
-	}
-
-	info := &CellInfo{}
-	offset := 0
-
-	// Read payload size (varint)
+// readIndexPayloadVarint reads payload size varint and sets PayloadSize and Key.
+func readIndexPayloadVarint(info *CellInfo, cellData []byte, offset int) (int, error) {
 	payloadSize64, n := GetVarint(cellData[offset:])
 	if n == 0 {
-		return nil, fmt.Errorf("failed to read payload size")
+		return 0, fmt.Errorf("failed to read payload size")
 	}
 	if payloadSize64 > math.MaxUint32 {
-		return nil, security.ErrIntegerOverflow
+		return 0, security.ErrIntegerOverflow
+	}
+	if payloadSize64 > math.MaxInt64 {
+		return 0, security.ErrIntegerOverflow
 	}
 	info.PayloadSize = uint32(payloadSize64)
-	if payloadSize64 > math.MaxInt64 {
-		return nil, security.ErrIntegerOverflow
-	}
 	info.Key = int64(payloadSize64) // For index pages, key is payload size
-	offset += n
+	return offset + n, nil
+}
 
-	// Calculate local payload size
-	maxLocal := calculateMaxLocal(usableSize, false)
-	minLocal := calculateMinLocal(usableSize, false)
-
+// computeIndexCellSizeAndLocal calculates LocalPayload and CellSize for index cells.
+func computeIndexCellSizeAndLocal(info *CellInfo, offset int, maxLocal, minLocal, usableSize uint32) {
 	if info.PayloadSize <= maxLocal {
 		// Entire payload fits locally
 		localPayload, err := security.SafeCastUint32ToUint16(info.PayloadSize)
@@ -214,10 +204,13 @@ func parseIndexLeafCell(cellData []byte, usableSize uint32) (*CellInfo, error) {
 		}
 		info.CellSize = cellSize
 	}
+}
 
+// extractIndexPayloadAndOverflow extracts the payload slice and overflow page if present.
+func extractIndexPayloadAndOverflow(info *CellInfo, cellData []byte, offset int, maxLocal uint32) error {
 	// Extract payload pointer
 	if offset+int(info.LocalPayload) > len(cellData) {
-		return nil, fmt.Errorf("cell data truncated")
+		return fmt.Errorf("cell data truncated")
 	}
 	info.Payload = cellData[offset : offset+int(info.LocalPayload)]
 
@@ -225,12 +218,46 @@ func parseIndexLeafCell(cellData []byte, usableSize uint32) (*CellInfo, error) {
 	if info.PayloadSize > maxLocal {
 		overflowOffset := offset + int(info.LocalPayload)
 		if overflowOffset+4 > len(cellData) {
-			return nil, fmt.Errorf("overflow page number truncated")
+			return fmt.Errorf("overflow page number truncated")
 		}
 		info.OverflowPage = binary.BigEndian.Uint32(cellData[overflowOffset:])
 	}
+	return nil
+}
+
+// completeIndexCellParse completes parsing of an index cell after reading the payload size.
+func completeIndexCellParse(info *CellInfo, cellData []byte, offset int, usableSize uint32) (*CellInfo, error) {
+	maxLocal := calculateMaxLocal(usableSize, false)
+	minLocal := calculateMinLocal(usableSize, false)
+
+	computeIndexCellSizeAndLocal(info, offset, maxLocal, minLocal, usableSize)
+
+	if err := extractIndexPayloadAndOverflow(info, cellData, offset, maxLocal); err != nil {
+		return nil, err
+	}
 
 	return info, nil
+}
+
+// parseIndexLeafCell parses an index leaf cell
+// Format: varint(payload_size), payload
+func parseIndexLeafCell(cellData []byte, usableSize uint32) (*CellInfo, error) {
+	if len(cellData) == 0 {
+		return nil, fmt.Errorf("empty cell data")
+	}
+
+	info := &CellInfo{}
+	offset := 0
+
+	// Read payload size and set key
+	var err error
+	offset, err = readIndexPayloadVarint(info, cellData, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	// Complete the index cell parsing
+	return completeIndexCellParse(info, cellData, offset, usableSize)
 }
 
 // parseIndexInteriorCell parses an index interior cell
@@ -246,67 +273,15 @@ func parseIndexInteriorCell(cellData []byte, usableSize uint32) (*CellInfo, erro
 	info.ChildPage = binary.BigEndian.Uint32(cellData[0:4])
 	offset := 4
 
-	// Read payload size (varint)
-	payloadSize64, n := GetVarint(cellData[offset:])
-	if n == 0 {
-		return nil, fmt.Errorf("failed to read payload size")
-	}
-	if payloadSize64 > math.MaxUint32 {
-		return nil, security.ErrIntegerOverflow
-	}
-	info.PayloadSize = uint32(payloadSize64)
-	if payloadSize64 > math.MaxInt64 {
-		return nil, security.ErrIntegerOverflow
-	}
-	info.Key = int64(payloadSize64)
-	offset += n
-
-	// Calculate local payload size
-	maxLocal := calculateMaxLocal(usableSize, false)
-	minLocal := calculateMinLocal(usableSize, false)
-
-	if info.PayloadSize <= maxLocal {
-		// Entire payload fits locally
-		localPayload, err := security.SafeCastUint32ToUint16(info.PayloadSize)
-		if err != nil {
-			localPayload = uint16(maxLocal)
-		}
-		info.LocalPayload = localPayload
-
-		cellSize, err := security.SafeCastIntToUint16(offset + int(info.PayloadSize))
-		if err != nil {
-			cellSize = 4
-		}
-		info.CellSize = cellSize
-		if info.CellSize < 4 {
-			info.CellSize = 4
-		}
-	} else {
-		// Payload spills to overflow pages
-		info.LocalPayload = calculateLocalPayload(info.PayloadSize, minLocal, maxLocal, usableSize)
-		cellSize, err := security.SafeCastIntToUint16(offset + int(info.LocalPayload) + 4)
-		if err != nil {
-			cellSize = uint16(offset) + info.LocalPayload + 4
-		}
-		info.CellSize = cellSize
+	// Read payload size and set key
+	var err error
+	offset, err = readIndexPayloadVarint(info, cellData, offset)
+	if err != nil {
+		return nil, err
 	}
 
-	// Extract payload pointer
-	if offset+int(info.LocalPayload) > len(cellData) {
-		return nil, fmt.Errorf("cell data truncated")
-	}
-	info.Payload = cellData[offset : offset+int(info.LocalPayload)]
-
-	// Read overflow page if present
-	if info.PayloadSize > maxLocal {
-		overflowOffset := offset + int(info.LocalPayload)
-		if overflowOffset+4 > len(cellData) {
-			return nil, fmt.Errorf("overflow page number truncated")
-		}
-		info.OverflowPage = binary.BigEndian.Uint32(cellData[overflowOffset:])
-	}
-
-	return info, nil
+	// Complete the index cell parsing
+	return completeIndexCellParse(info, cellData, offset, usableSize)
 }
 
 // calculateMaxLocal calculates the maximum amount of payload that can be stored locally

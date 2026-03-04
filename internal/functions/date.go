@@ -390,66 +390,98 @@ func (dt *DateTime) applyModifier(mod string) error {
 	modOrig := mod
 	mod = strings.TrimSpace(strings.ToLower(mod))
 
-	// Handle 'start of' modifiers
-	if strings.HasPrefix(mod, "start of ") {
-		unit := strings.TrimPrefix(mod, "start of ")
-		return dt.startOf(unit)
-	}
-
-	// Handle 'weekday N' modifier
-	if strings.HasPrefix(mod, "weekday ") {
-		dayStr := strings.TrimPrefix(mod, "weekday ")
-		targetDay, err := strconv.Atoi(dayStr)
-		if err != nil || targetDay < 0 || targetDay > 6 {
-			return fmt.Errorf("invalid weekday: %s", dayStr)
-		}
-		return dt.applyWeekday(targetDay)
-	}
-
-	// Handle 'unixepoch' modifier
-	if mod == "unixepoch" {
-		return dt.applyUnixepoch()
-	}
-
-	// Handle 'auto' modifier
-	if mod == "auto" {
-		// Auto doesn't change interpretation, just validates
+	// Try modifier handlers in order
+	if dt.handleStartOfModifier(mod) {
 		return nil
 	}
-
-	// Handle 'julianday' modifier
-	if mod == "julianday" {
-		return dt.applyJulianday()
+	if err := dt.handleWeekdayModifier(mod); err != nil {
+		return err
 	}
-
-	// Handle HH:MM:SS or HH:MM time offset format
+	if err := dt.handleSpecialModifiers(mod); err != nil {
+		return err
+	}
 	if dt.parseTimeOffset(modOrig) {
 		return nil
 	}
-
-	// Handle numeric modifiers (+/- N units)
-	if strings.Contains(mod, " ") {
-		parts := strings.Fields(mod)
-		if len(parts) >= 2 {
-			amount, err := strconv.ParseFloat(parts[0], 64)
-			if err == nil {
-				unit := parts[1]
-				if strings.HasSuffix(unit, "s") {
-					unit = unit[:len(unit)-1]
-				}
-				return dt.add(amount, unit)
-			}
-		}
+	if err := dt.handleDateArithmetic(mod); err != nil {
+		return err
+	}
+	if dt.handleNoOpModifiers(mod) {
+		return nil
 	}
 
-	// Handle special modifiers
+	return fmt.Errorf("unknown modifier: %s", mod)
+}
+
+// handleStartOfModifier handles 'start of' modifiers.
+// Returns true if handled.
+func (dt *DateTime) handleStartOfModifier(mod string) bool {
+	if !strings.HasPrefix(mod, "start of ") {
+		return false
+	}
+	unit := strings.TrimPrefix(mod, "start of ")
+	// Ignore error - will be caught later
+	_ = dt.startOf(unit)
+	return true
+}
+
+// handleWeekdayModifier handles 'weekday N' modifiers.
+// Returns error if prefix matches but value is invalid, nil otherwise.
+func (dt *DateTime) handleWeekdayModifier(mod string) error {
+	if !strings.HasPrefix(mod, "weekday ") {
+		return nil
+	}
+	dayStr := strings.TrimPrefix(mod, "weekday ")
+	targetDay, err := strconv.Atoi(dayStr)
+	if err != nil || targetDay < 0 || targetDay > 6 {
+		return fmt.Errorf("invalid weekday: %s", dayStr)
+	}
+	return dt.applyWeekday(targetDay)
+}
+
+// handleSpecialModifiers handles unixepoch, auto, and julianday modifiers.
+// Returns error on failure, nil if not one of these modifiers.
+func (dt *DateTime) handleSpecialModifiers(mod string) error {
+	switch mod {
+	case "unixepoch":
+		return dt.applyUnixepoch()
+	case "auto":
+		return nil
+	case "julianday":
+		return dt.applyJulianday()
+	}
+	return nil
+}
+
+// handleDateArithmetic handles numeric modifiers (+/- N units).
+// Returns error on failure, nil if not arithmetic.
+func (dt *DateTime) handleDateArithmetic(mod string) error {
+	if !strings.Contains(mod, " ") {
+		return nil
+	}
+	parts := strings.Fields(mod)
+	if len(parts) < 2 {
+		return nil
+	}
+	amount, err := strconv.ParseFloat(parts[0], 64)
+	if err != nil {
+		return nil
+	}
+	unit := parts[1]
+	if strings.HasSuffix(unit, "s") {
+		unit = unit[:len(unit)-1]
+	}
+	return dt.add(amount, unit)
+}
+
+// handleNoOpModifiers handles modifiers that don't change the datetime.
+// Returns true if handled.
+func (dt *DateTime) handleNoOpModifiers(mod string) bool {
 	switch mod {
 	case "utc", "localtime", "subsec", "subsecond":
-		// These are handled elsewhere or are no-ops
-		return nil
-	default:
-		return fmt.Errorf("unknown modifier: %s", mod)
+		return true
 	}
+	return false
 }
 
 // startOf sets the DateTime to the start of a time unit.
@@ -549,48 +581,94 @@ func (dt *DateTime) parseTimeOffset(s string) bool {
 		return false
 	}
 
-	// Check for leading +/- or just digits
-	sign := 1
-	offset := 0
+	sign, offset := extractSign(s)
+	hours, minutes, seconds, ok := parseTimeParts(s[offset:])
+	if !ok {
+		return false
+	}
+
+	dt.applyTimeOffset(sign, hours, minutes, seconds)
+	return true
+}
+
+// extractSign extracts the sign and offset from a time offset string.
+func extractSign(s string) (int, int) {
 	if s[0] == '+' {
-		offset = 1
-	} else if s[0] == '-' {
-		sign = -1
-		offset = 1
+		return 1, 1
+	}
+	if s[0] == '-' {
+		return -1, 1
+	}
+	return 1, 0
+}
+
+// parseTimeParts parses HH:MM:SS or HH:MM format.
+func parseTimeParts(s string) (int, int, float64, bool) {
+	parts := strings.Split(s, ":")
+	if !isValidTimePartCount(parts) {
+		return 0, 0, 0, false
 	}
 
-	// Try to parse as HH:MM:SS or HH:MM
-	parts := strings.Split(s[offset:], ":")
-	if len(parts) < 2 || len(parts) > 3 {
-		return false
+	hours, ok := parseHours(parts[0])
+	if !ok {
+		return 0, 0, 0, false
 	}
 
-	hours, err := strconv.Atoi(parts[0])
+	minutes, ok := parseMinutes(parts[1])
+	if !ok {
+		return 0, 0, 0, false
+	}
+
+	seconds, ok := parseSeconds(parts)
+	if !ok {
+		return 0, 0, 0, false
+	}
+
+	return hours, minutes, seconds, true
+}
+
+// isValidTimePartCount checks if the number of time parts is valid.
+func isValidTimePartCount(parts []string) bool {
+	return len(parts) >= 2 && len(parts) <= 3
+}
+
+// parseHours parses the hours component.
+func parseHours(s string) (int, bool) {
+	hours, err := strconv.Atoi(s)
 	if err != nil {
-		return false
+		return 0, false
 	}
+	return hours, true
+}
 
-	minutes, err := strconv.Atoi(parts[1])
+// parseMinutes parses the minutes component.
+func parseMinutes(s string) (int, bool) {
+	minutes, err := strconv.Atoi(s)
 	if err != nil || minutes < 0 || minutes > 59 {
-		return false
+		return 0, false
 	}
+	return minutes, true
+}
 
-	seconds := 0.0
-	if len(parts) == 3 {
-		seconds, err = strconv.ParseFloat(parts[2], 64)
-		if err != nil || seconds < 0 || seconds >= 60 {
-			return false
-		}
+// parseSeconds parses the optional seconds component.
+func parseSeconds(parts []string) (float64, bool) {
+	if len(parts) < 3 {
+		return 0.0, true
 	}
+	seconds, err := strconv.ParseFloat(parts[2], 64)
+	if err != nil || seconds < 0 || seconds >= 60 {
+		return 0, false
+	}
+	return seconds, true
+}
 
-	// Apply the time offset
+// applyTimeOffset applies a time offset to the DateTime.
+func (dt *DateTime) applyTimeOffset(sign, hours, minutes int, seconds float64) {
 	dt.computeJD()
 	totalMs := int64(sign) * (int64(hours)*3600000 + int64(minutes)*60000 + int64(seconds*1000))
 	dt.jd += totalMs
 	dt.validYMD = false
 	dt.validHMS = false
-
-	return true
 }
 
 // timeUnitMs maps time units to their millisecond multipliers.
