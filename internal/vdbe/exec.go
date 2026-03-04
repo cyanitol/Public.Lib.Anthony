@@ -1235,36 +1235,56 @@ func (v *VDBE) execDeferredSeek(instr *Instruction) error {
 		return err
 	}
 
-	// Get the rowid to seek to
-	var rowid int64
-	if instr.P3 == 0 {
-		// P3=0 means get rowid from the index cursor P1
-		indexCursor, err := v.GetCursor(instr.P1)
-		if err != nil {
-			return err
-		}
-		if idxCursor, ok := indexCursor.BtreeCursor.(*btree.IndexCursor); ok && idxCursor != nil {
-			rowid = idxCursor.GetRowid()
-		} else {
-			tableCursor.EOF = true
-			return nil
-		}
-	} else {
-		// Get rowid from register P3
-		rowidReg, err := v.GetMem(instr.P3)
-		if err != nil {
-			return err
-		}
-		rowid = rowidReg.IntValue()
+	rowid, err := v.getDeferredSeekRowid(instr, tableCursor)
+	if err != nil {
+		return err
 	}
 
+	return v.performDeferredSeek(tableCursor, rowid)
+}
+
+// getDeferredSeekRowid extracts the rowid to seek to from either index cursor or register
+func (v *VDBE) getDeferredSeekRowid(instr *Instruction, tableCursor *Cursor) (int64, error) {
+	if instr.P3 != 0 {
+		return v.getRowidFromRegister(instr.P3)
+	}
+	return v.getRowidFromIndexCursor(instr.P1, tableCursor)
+}
+
+// getRowidFromRegister retrieves rowid from a register
+func (v *VDBE) getRowidFromRegister(regNum int) (int64, error) {
+	rowidReg, err := v.GetMem(regNum)
+	if err != nil {
+		return 0, err
+	}
+	return rowidReg.IntValue(), nil
+}
+
+// getRowidFromIndexCursor retrieves rowid from an index cursor
+func (v *VDBE) getRowidFromIndexCursor(cursorNum int, tableCursor *Cursor) (int64, error) {
+	indexCursor, err := v.GetCursor(cursorNum)
+	if err != nil {
+		return 0, err
+	}
+
+	idxCursor, ok := indexCursor.BtreeCursor.(*btree.IndexCursor)
+	if !ok || idxCursor == nil {
+		tableCursor.EOF = true
+		return 0, nil
+	}
+
+	return idxCursor.GetRowid(), nil
+}
+
+// performDeferredSeek executes the actual seek operation on the table cursor
+func (v *VDBE) performDeferredSeek(tableCursor *Cursor, rowid int64) error {
 	btCursor := seekGetBtCursor(tableCursor)
 	if btCursor == nil {
 		tableCursor.EOF = true
 		return nil
 	}
 
-	if err = btCursor.MoveToFirst(); err != nil {
+	if err := btCursor.MoveToFirst(); err != nil {
 		tableCursor.EOF = true
 		return nil
 	}
@@ -1274,13 +1294,10 @@ func (v *VDBE) execDeferredSeek(instr *Instruction) error {
 		return err
 	}
 
-	if !found {
-		tableCursor.EOF = true
-		return nil
+	tableCursor.EOF = !found
+	if found {
+		v.IncrCacheCtr()
 	}
-
-	tableCursor.EOF = false
-	v.IncrCacheCtr()
 	return nil
 }
 

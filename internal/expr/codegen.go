@@ -1095,83 +1095,94 @@ func (g *CodeGenerator) generateSubquery(e *parser.SubqueryExpr) (int, error) {
 	}
 
 	resultReg := g.AllocReg()
+	g.initSubqueryResult(resultReg)
 
-	// Initialize result to NULL (default if subquery returns no rows)
-	g.vdbe.AddOp(vdbe.OpNull, 0, resultReg, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: init result to NULL")
-
-	// Compile the SELECT statement
 	subVM, err := g.subqueryCompiler(e.Select)
 	if err != nil {
 		return 0, fmt.Errorf("failed to compile scalar subquery: %w", err)
 	}
 
-	// Record subquery start address
 	addrSubqueryStart := g.vdbe.NumOps()
-
-	// NOTE: setupSubqueryCompiler already handles:
-	// - Register adjustment (adjustSubqueryRegisters)
-	// - Cursor adjustment (adjustSubqueryCursors)
-	// - Memory/cursor allocation in parent VDBE
-	// We adjust jump targets here while copying instructions to account for
-	// instruction replacements (e.g., OpResultRow becomes 2 instructions)
-
-	// Build address mapping from subquery addresses to parent addresses
-	// This maps each instruction's original position to its final position
-	addrMap := make(map[int]int)
-	currentAddr := addrSubqueryStart
-	for i := 0; i < subVM.NumOps(); i++ {
-		addrMap[i] = currentAddr
-		switch subVM.Program[i].Opcode {
-		case vdbe.OpResultRow:
-			currentAddr += 2 // Becomes OpCopy + OpGoto
-		default:
-			currentAddr += 1 // Copied as-is or replaced with 1 instruction
-		}
-	}
-	// Add mapping for address just past the last instruction (common jump target)
-	addrMap[subVM.NumOps()] = currentAddr
-
-	// Track addresses where ResultRow is replaced with Goto (need to patch later)
-	var resultRowGotoAddrs []int
-
-	// Copy the subquery bytecode, adjusting jumps and replacing special opcodes
-	for i := 0; i < subVM.NumOps(); i++ {
-		instr := subVM.Program[i]
-		switch instr.Opcode {
-		case vdbe.OpResultRow:
-			// Copy first result column to resultReg
-			g.vdbe.AddOp(vdbe.OpCopy, instr.P1, resultReg, 0)
-			g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: copy result")
-			// Goto past subquery (will patch address later)
-			resultRowGotoAddrs = append(resultRowGotoAddrs, g.vdbe.NumOps())
-			g.vdbe.AddOp(vdbe.OpGoto, 0, 0, 0)
-			g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: done, skip to end")
-		case vdbe.OpHalt:
-			// Convert Halt to Noop - subquery shouldn't halt main program
-			g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
-			g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: stripped Halt")
-		default:
-			// Copy instruction and adjust jump targets using address map
-			instrCopy := *instr
-			g.adjustInstructionJumps(&instrCopy, addrMap)
-			g.vdbe.Program = append(g.vdbe.Program, &instrCopy)
-		}
-	}
-
-	// NOTE: Do NOT update g.nextReg here - setupSubqueryCompiler already
-	// ensured the parent VDBE has enough registers allocated via findMaxRegister().
-
-	// End of subquery - patch all ResultRow Goto addresses to point here
-	addrAfterSubquery := g.vdbe.NumOps()
-	for _, addr := range resultRowGotoAddrs {
-		g.vdbe.Program[addr].P2 = addrAfterSubquery
-	}
+	addrMap := g.buildSubqueryAddressMap(subVM, addrSubqueryStart)
+	resultRowGotoAddrs := g.copySubqueryInstructions(subVM, addrMap, resultReg)
+	g.patchResultRowGotos(resultRowGotoAddrs)
 
 	g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: end")
 
 	return resultReg, nil
+}
+
+// initSubqueryResult initializes the result register to NULL.
+func (g *CodeGenerator) initSubqueryResult(resultReg int) {
+	g.vdbe.AddOp(vdbe.OpNull, 0, resultReg, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: init result to NULL")
+}
+
+// buildSubqueryAddressMap builds a mapping from subquery addresses to parent addresses.
+// This accounts for instruction replacements (e.g., OpResultRow becomes 2 instructions).
+func (g *CodeGenerator) buildSubqueryAddressMap(subVM *vdbe.VDBE, startAddr int) map[int]int {
+	addrMap := make(map[int]int)
+	currentAddr := startAddr
+	for i := 0; i < subVM.NumOps(); i++ {
+		addrMap[i] = currentAddr
+		if subVM.Program[i].Opcode == vdbe.OpResultRow {
+			currentAddr += 2 // Becomes OpCopy + OpGoto
+		} else {
+			currentAddr += 1 // Copied as-is or replaced with 1 instruction
+		}
+	}
+	addrMap[subVM.NumOps()] = currentAddr
+	return addrMap
+}
+
+// copySubqueryInstructions copies and adjusts subquery bytecode into parent VDBE.
+// Returns the addresses of ResultRow Goto instructions that need patching.
+func (g *CodeGenerator) copySubqueryInstructions(subVM *vdbe.VDBE, addrMap map[int]int, resultReg int) []int {
+	var resultRowGotoAddrs []int
+	for i := 0; i < subVM.NumOps(); i++ {
+		instr := subVM.Program[i]
+		switch instr.Opcode {
+		case vdbe.OpResultRow:
+			resultRowGotoAddrs = g.emitResultRowReplacement(instr, resultReg, resultRowGotoAddrs)
+		case vdbe.OpHalt:
+			g.emitHaltReplacement()
+		default:
+			g.copyAndAdjustInstruction(instr, addrMap)
+		}
+	}
+	return resultRowGotoAddrs
+}
+
+// emitResultRowReplacement replaces OpResultRow with OpCopy + OpGoto.
+func (g *CodeGenerator) emitResultRowReplacement(instr *vdbe.Instruction, resultReg int, gotoAddrs []int) []int {
+	g.vdbe.AddOp(vdbe.OpCopy, instr.P1, resultReg, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: copy result")
+	gotoAddrs = append(gotoAddrs, g.vdbe.NumOps())
+	g.vdbe.AddOp(vdbe.OpGoto, 0, 0, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: done, skip to end")
+	return gotoAddrs
+}
+
+// emitHaltReplacement replaces OpHalt with OpNoop.
+func (g *CodeGenerator) emitHaltReplacement() {
+	g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: stripped Halt")
+}
+
+// copyAndAdjustInstruction copies an instruction and adjusts its jump targets.
+func (g *CodeGenerator) copyAndAdjustInstruction(instr *vdbe.Instruction, addrMap map[int]int) {
+	instrCopy := *instr
+	g.adjustInstructionJumps(&instrCopy, addrMap)
+	g.vdbe.Program = append(g.vdbe.Program, &instrCopy)
+}
+
+// patchResultRowGotos patches all ResultRow Goto addresses to point to the end.
+func (g *CodeGenerator) patchResultRowGotos(gotoAddrs []int) {
+	addrAfterSubquery := g.vdbe.NumOps()
+	for _, addr := range gotoAddrs {
+		g.vdbe.Program[addr].P2 = addrAfterSubquery
+	}
 }
 
 // generateLikeExpr generates code for LIKE expressions.

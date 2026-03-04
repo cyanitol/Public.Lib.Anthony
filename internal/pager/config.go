@@ -78,6 +78,27 @@ func DefaultPagerConfig() *PagerConfig {
 	}
 }
 
+// stringValidator defines a validation rule for a string field.
+type stringValidator struct {
+	field        *string
+	validValues  []string
+	defaultValue string
+}
+
+// intValidator defines a validation rule for an integer field.
+type intValidator struct {
+	field        *int
+	minValue     int
+	defaultValue int
+}
+
+// durationValidator defines a validation rule for a duration field.
+type durationValidator struct {
+	field        *time.Duration
+	minValue     time.Duration
+	defaultValue time.Duration
+}
+
 // Validate checks if the configuration values are valid.
 func (c *PagerConfig) Validate() error {
 	// Validate page size (must be power of 2 between 512 and 65536)
@@ -88,54 +109,62 @@ func (c *PagerConfig) Validate() error {
 		return ErrInvalidPageSize
 	}
 
-	// Validate cache size (must be positive)
-	if c.CacheSize <= 0 {
-		c.CacheSize = DefaultCacheSize
+	// Table-driven string field validations
+	stringRules := []stringValidator{
+		{&c.JournalMode, []string{"delete", "truncate", "persist", "memory", "wal", "off"}, "delete"},
+		{&c.SyncMode, []string{"off", "normal", "full", "extra"}, "full"},
+		{&c.LockingMode, []string{"normal", "exclusive"}, "normal"},
+		{&c.TempStore, []string{"default", "file", "memory"}, "default"},
 	}
 
-	// Validate journal mode
-	switch c.JournalMode {
-	case "delete", "truncate", "persist", "memory", "wal", "off":
-		// Valid
-	default:
-		c.JournalMode = "delete"
+	for _, rule := range stringRules {
+		validateStringField(rule)
 	}
 
-	// Validate sync mode
-	switch c.SyncMode {
-	case "off", "normal", "full", "extra":
-		// Valid
-	default:
-		c.SyncMode = "full"
+	// Table-driven integer field validations
+	intRules := []intValidator{
+		{&c.CacheSize, 1, DefaultCacheSize},
+		{&c.WALAutocheckpoint, 1, 1000},
 	}
 
-	// Validate locking mode
-	switch c.LockingMode {
-	case "normal", "exclusive":
-		// Valid
-	default:
-		c.LockingMode = "normal"
+	for _, rule := range intRules {
+		validateIntField(rule)
 	}
 
-	// Validate temp store
-	switch c.TempStore {
-	case "default", "file", "memory":
-		// Valid
-	default:
-		c.TempStore = "default"
+	// Duration field validation
+	durationRules := []durationValidator{
+		{&c.BusyTimeout, 0, 5 * time.Second},
 	}
 
-	// Validate busy timeout
-	if c.BusyTimeout < 0 {
-		c.BusyTimeout = 5 * time.Second
-	}
-
-	// Validate WAL autocheckpoint
-	if c.WALAutocheckpoint <= 0 {
-		c.WALAutocheckpoint = 1000
+	for _, rule := range durationRules {
+		validateDurationField(rule)
 	}
 
 	return nil
+}
+
+// validateStringField validates and sets default for a string field.
+func validateStringField(rule stringValidator) {
+	for _, valid := range rule.validValues {
+		if *rule.field == valid {
+			return
+		}
+	}
+	*rule.field = rule.defaultValue
+}
+
+// validateIntField validates and sets default for an integer field.
+func validateIntField(rule intValidator) {
+	if *rule.field < rule.minValue {
+		*rule.field = rule.defaultValue
+	}
+}
+
+// validateDurationField validates and sets default for a duration field.
+func validateDurationField(rule durationValidator) {
+	if *rule.field < rule.minValue {
+		*rule.field = rule.defaultValue
+	}
 }
 
 // JournalModeValue returns the integer value for the journal mode.

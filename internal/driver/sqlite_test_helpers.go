@@ -205,7 +205,6 @@ func rowsEqual(a, b []interface{}) bool {
 
 // valuesEqual compares two values for equality, handling type conversions
 func valuesEqual(a, b interface{}) bool {
-	// Handle nil
 	if a == nil && b == nil {
 		return true
 	}
@@ -213,43 +212,65 @@ func valuesEqual(a, b interface{}) bool {
 		return false
 	}
 
-	// Handle numeric conversions
+	// Try type-specific comparisons
 	switch aVal := a.(type) {
 	case int64:
-		switch bVal := b.(type) {
-		case int64:
-			return aVal == bVal
-		case int:
-			return aVal == int64(bVal)
-		case float64:
-			return float64(aVal) == bVal
-		}
+		return equalInt64(aVal, b)
 	case int:
-		switch bVal := b.(type) {
-		case int64:
-			return int64(aVal) == bVal
-		case int:
-			return aVal == bVal
-		case float64:
-			return float64(aVal) == bVal
-		}
+		return equalInt(aVal, b)
 	case float64:
-		switch bVal := b.(type) {
-		case int64:
-			return aVal == float64(bVal)
-		case int:
-			return aVal == float64(bVal)
-		case float64:
-			return aVal == bVal
-		}
+		return equalFloat64(aVal, b)
 	case string:
-		if bVal, ok := b.(string); ok {
-			return aVal == bVal
-		}
+		return equalString(aVal, b)
 	}
 
 	// Fallback to reflect.DeepEqual
 	return reflect.DeepEqual(a, b)
+}
+
+// equalInt64 compares an int64 with another value
+func equalInt64(a int64, b interface{}) bool {
+	switch bVal := b.(type) {
+	case int64:
+		return a == bVal
+	case int:
+		return a == int64(bVal)
+	case float64:
+		return float64(a) == bVal
+	}
+	return false
+}
+
+// equalInt compares an int with another value
+func equalInt(a int, b interface{}) bool {
+	switch bVal := b.(type) {
+	case int64:
+		return int64(a) == bVal
+	case int:
+		return a == bVal
+	case float64:
+		return float64(a) == bVal
+	}
+	return false
+}
+
+// equalFloat64 compares a float64 with another value
+func equalFloat64(a float64, b interface{}) bool {
+	switch bVal := b.(type) {
+	case int64:
+		return a == float64(bVal)
+	case int:
+		return a == float64(bVal)
+	case float64:
+		return a == bVal
+	}
+	return false
+}
+
+// equalString compares a string with another value
+func equalString(a string, b interface{}) bool {
+	bVal, ok := b.(string)
+	return ok && a == bVal
 }
 
 // mustExec executes a statement and returns the result, failing the test on error

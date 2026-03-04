@@ -114,6 +114,39 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 
 // compileInsertSelect compiles an INSERT...SELECT statement.
 func (s *Stmt) compileInsertSelect(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	// Prepare tables and columns
+	ctx, err := s.prepareInsertSelectContext(vm, stmt, args)
+	if err != nil {
+		return nil, err
+	}
+
+	// Initialize VDBE program
+	s.initializeInsertSelect(vm, ctx)
+
+	// Emit the main SELECT loop
+	rewindAddr := s.emitInsertSelectLoop(vm, stmt.Select, ctx)
+
+	// Finalize program
+	s.finalizeInsertSelect(vm, ctx, rewindAddr)
+
+	return vm, nil
+}
+
+// insertSelectContext holds the context for INSERT...SELECT compilation.
+type insertSelectContext struct {
+	targetTable    *schema.Table
+	sourceTable    *schema.Table
+	targetColNames []string
+	selectCols     []parser.ResultColumn
+	rowidColIdx    int
+	numRecordCols  int
+	gen            *expr.CodeGenerator
+	skipAddr       int
+	hasWhereClause bool
+}
+
+// prepareInsertSelectContext sets up the context for INSERT...SELECT compilation.
+func (s *Stmt) prepareInsertSelectContext(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driver.NamedValue) (*insertSelectContext, error) {
 	// Get target table schema
 	targetTable, ok := s.conn.schema.GetTable(stmt.Table)
 	if !ok {
@@ -130,15 +163,8 @@ func (s *Stmt) compileInsertSelect(vm *vdbe.VDBE, stmt *parser.InsertStmt, args 
 		numRecordCols--
 	}
 
-	// Allocate memory and cursors
-	// Cursor 0 will be the target table
-	// Cursor 1 will be the source table (for SELECT)
-	vm.AllocMemory(numRecordCols + 30)
-	vm.AllocCursors(2)
-
 	// Get source table from SELECT
-	selectStmt := stmt.Select
-	sourceTableName, err := selectFromTableName(selectStmt)
+	sourceTableName, err := selectFromTableName(stmt.Select)
 	if err != nil {
 		return nil, fmt.Errorf("INSERT...SELECT requires FROM clause: %w", err)
 	}
@@ -149,6 +175,32 @@ func (s *Stmt) compileInsertSelect(vm *vdbe.VDBE, stmt *parser.InsertStmt, args 
 	}
 
 	// Setup code generator for expression evaluation
+	gen := s.setupInsertSelectGenerator(vm, sourceTableName, sourceTable, args)
+
+	// Expand SELECT * if needed and validate column count
+	selectCols, err := resolveSelectColumns(stmt.Select, sourceTable, targetColNames)
+	if err != nil {
+		return nil, err
+	}
+
+	// Allocate memory and cursors
+	vm.AllocMemory(numRecordCols + 30)
+	vm.AllocCursors(2)
+
+	return &insertSelectContext{
+		targetTable:    targetTable,
+		sourceTable:    sourceTable,
+		targetColNames: targetColNames,
+		selectCols:     selectCols,
+		rowidColIdx:    rowidColIdx,
+		numRecordCols:  numRecordCols,
+		gen:            gen,
+		hasWhereClause: stmt.Select.Where != nil,
+	}, nil
+}
+
+// setupInsertSelectGenerator creates and configures the code generator.
+func (s *Stmt) setupInsertSelectGenerator(vm *vdbe.VDBE, sourceTableName string, sourceTable *schema.Table, args []driver.NamedValue) *expr.CodeGenerator {
 	gen := expr.NewCodeGenerator(vm)
 	s.setupSubqueryCompiler(gen)
 	gen.RegisterCursor(sourceTableName, 1)
@@ -162,38 +214,11 @@ func (s *Stmt) compileInsertSelect(vm *vdbe.VDBE, stmt *parser.InsertStmt, args 
 	}
 	gen.SetArgs(argValues)
 
-	// Register layout:
-	//   reg 1         - rowid for target
-	//   reg 2..N+1    - record column values (non-rowid only)
-	//   reg N+2       - assembled record
-	const rowidReg = 1
-	const recordStartReg = 2
+	return gen
+}
 
-	// Initialize
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
-	// Open target table for writing (cursor 0)
-	vm.AddOp(vdbe.OpOpenWrite, 0, int(targetTable.RootPage), len(targetTable.Columns))
-
-	// Open source table for reading (cursor 1)
-	if !sourceTable.Temp {
-		vm.AddOp(vdbe.OpOpenRead, 1, int(sourceTable.RootPage), len(sourceTable.Columns))
-	}
-
-	// Rewind source table
-	rewindAddr := vm.AddOp(vdbe.OpRewind, 1, 0, 0)
-
-	// WHERE clause evaluation (if present)
-	var skipAddr int
-	if selectStmt.Where != nil {
-		whereReg, err := gen.GenerateExpr(selectStmt.Where)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile WHERE clause: %w", err)
-		}
-		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
-	}
-
-	// Expand SELECT * if needed
+// resolveSelectColumns expands SELECT * if needed and validates column count.
+func resolveSelectColumns(selectStmt *parser.SelectStmt, sourceTable *schema.Table, targetColNames []string) ([]parser.ResultColumn, error) {
 	selectCols := selectStmt.Columns
 	if len(selectCols) > 0 && selectCols[0].Star {
 		selectCols = expandStarToColumns(sourceTable)
@@ -204,53 +229,98 @@ func (s *Stmt) compileInsertSelect(vm *vdbe.VDBE, stmt *parser.InsertStmt, args 
 		return nil, fmt.Errorf("column count mismatch: SELECT returns %d columns, but INSERT expects %d", len(selectCols), len(targetColNames))
 	}
 
-	// Generate rowid for target row
-	if rowidColIdx >= 0 {
-		// One of the SELECT columns maps to the rowid column
-		// Evaluate that SELECT column expression and store in rowidReg
-		selectCol := selectCols[rowidColIdx]
-		if err := emitSelectColumnOp(vm, sourceTable, selectCol, rowidReg, gen); err != nil {
-			return nil, fmt.Errorf("failed to generate rowid column: %w", err)
-		}
-	} else {
-		// Generate new rowid
-		vm.AddOp(vdbe.OpNewRowid, 0, 0, rowidReg)
+	return selectCols, nil
+}
+
+// initializeInsertSelect emits initialization opcodes.
+func (s *Stmt) initializeInsertSelect(vm *vdbe.VDBE, ctx *insertSelectContext) {
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	// Open target table for writing (cursor 0)
+	vm.AddOp(vdbe.OpOpenWrite, 0, int(ctx.targetTable.RootPage), len(ctx.targetTable.Columns))
+
+	// Open source table for reading (cursor 1)
+	if !ctx.sourceTable.Temp {
+		vm.AddOp(vdbe.OpOpenRead, 1, int(ctx.sourceTable.RootPage), len(ctx.sourceTable.Columns))
+	}
+}
+
+// emitInsertSelectLoop emits the main loop that reads from source and inserts into target.
+func (s *Stmt) emitInsertSelectLoop(vm *vdbe.VDBE, selectStmt *parser.SelectStmt, ctx *insertSelectContext) int {
+	const rowidReg = 1
+	const recordStartReg = 2
+
+	// Rewind source table
+	rewindAddr := vm.AddOp(vdbe.OpRewind, 1, 0, 0)
+
+	// WHERE clause evaluation (if present)
+	if ctx.hasWhereClause {
+		ctx.skipAddr = s.emitInsertSelectWhere(vm, selectStmt, ctx.gen)
 	}
 
-	// Read SELECT columns into record registers (skip rowid column if present)
-	recordReg := recordStartReg
-	for i, selectCol := range selectCols {
-		if i == rowidColIdx {
-			continue // Skip rowid - already handled
-		}
-		if err := emitSelectColumnOp(vm, sourceTable, selectCol, recordReg, gen); err != nil {
-			return nil, fmt.Errorf("failed to generate column %d: %w", i, err)
-		}
-		recordReg++
-	}
+	// Generate rowid and record columns
+	s.emitInsertSelectRowid(vm, ctx, rowidReg)
+	s.emitInsertSelectRecordColumns(vm, ctx, recordStartReg)
 
-	// Make record
-	resultReg := recordStartReg + numRecordCols
-	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
+	// Make record and insert
+	resultReg := recordStartReg + ctx.numRecordCols
+	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, ctx.numRecordCols, resultReg)
 
-	// Insert row
 	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidReg)
 
 	// For AUTOINCREMENT tables, pass table name
-	if _, hasAutoincrement := targetTable.HasAutoincrementColumn(); hasAutoincrement {
-		vm.Program[insertOp].P4.Z = targetTable.Name
+	if _, hasAutoincrement := ctx.targetTable.HasAutoincrementColumn(); hasAutoincrement {
+		vm.Program[insertOp].P4.Z = ctx.targetTable.Name
 	}
 
 	// Fix WHERE skip address
-	if selectStmt.Where != nil {
-		vm.Program[skipAddr].P2 = vm.NumOps()
+	if ctx.hasWhereClause {
+		vm.Program[ctx.skipAddr].P2 = vm.NumOps()
 	}
 
 	// Next row in source table
 	vm.AddOp(vdbe.OpNext, 1, rewindAddr+1, 0)
 
+	return rewindAddr
+}
+
+// emitInsertSelectWhere emits WHERE clause evaluation.
+func (s *Stmt) emitInsertSelectWhere(vm *vdbe.VDBE, selectStmt *parser.SelectStmt, gen *expr.CodeGenerator) int {
+	whereReg, err := gen.GenerateExpr(selectStmt.Where)
+	if err != nil {
+		return 0
+	}
+	return vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+}
+
+// emitInsertSelectRowid generates rowid for the target row.
+func (s *Stmt) emitInsertSelectRowid(vm *vdbe.VDBE, ctx *insertSelectContext, rowidReg int) {
+	if ctx.rowidColIdx >= 0 {
+		// One of the SELECT columns maps to the rowid column
+		selectCol := ctx.selectCols[ctx.rowidColIdx]
+		emitSelectColumnOp(vm, ctx.sourceTable, selectCol, rowidReg, ctx.gen)
+	} else {
+		// Generate new rowid
+		vm.AddOp(vdbe.OpNewRowid, 0, 0, rowidReg)
+	}
+}
+
+// emitInsertSelectRecordColumns reads SELECT columns into record registers.
+func (s *Stmt) emitInsertSelectRecordColumns(vm *vdbe.VDBE, ctx *insertSelectContext, recordStartReg int) {
+	recordReg := recordStartReg
+	for i, selectCol := range ctx.selectCols {
+		if i == ctx.rowidColIdx {
+			continue // Skip rowid - already handled
+		}
+		emitSelectColumnOp(vm, ctx.sourceTable, selectCol, recordReg, ctx.gen)
+		recordReg++
+	}
+}
+
+// finalizeInsertSelect closes tables and adds halt instruction.
+func (s *Stmt) finalizeInsertSelect(vm *vdbe.VDBE, ctx *insertSelectContext, rewindAddr int) {
 	// Close tables
-	if !sourceTable.Temp {
+	if !ctx.sourceTable.Temp {
 		vm.AddOp(vdbe.OpClose, 1, 0, 0)
 	}
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
@@ -260,8 +330,6 @@ func (s *Stmt) compileInsertSelect(vm *vdbe.VDBE, stmt *parser.InsertStmt, args 
 
 	// Fix rewind jump target
 	vm.Program[rewindAddr].P2 = haltAddr
-
-	return vm, nil
 }
 
 // expandStarToColumns expands SELECT * to explicit column references.

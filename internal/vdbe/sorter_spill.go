@@ -348,16 +348,68 @@ func (s *SorterWithSpill) deserializeRow(data []byte) ([]*Mem, error) {
 	return row, nil
 }
 
+// deserializeMemNull handles NULL type deserialization.
+func (s *SorterWithSpill) deserializeMemNull(mem *Mem) {
+	mem.SetNull()
+}
+
+// deserializeMemInt handles integer type deserialization.
+func (s *SorterWithSpill) deserializeMemInt(mem *Mem, data []byte, dataLen uint32, offset int) error {
+	if dataLen != 8 {
+		return fmt.Errorf("invalid integer data length")
+	}
+	val := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+	mem.SetInt(val)
+	return nil
+}
+
+// deserializeMemReal handles real/float type deserialization.
+func (s *SorterWithSpill) deserializeMemReal(mem *Mem, data []byte, dataLen uint32, offset int) error {
+	if dataLen != 8 {
+		return fmt.Errorf("invalid real data length")
+	}
+	bits := binary.LittleEndian.Uint64(data[offset : offset+8])
+	val := *(*float64)(unsafe.Pointer(&bits))
+	mem.SetReal(val)
+	return nil
+}
+
+// deserializeMemStrBlob handles string and blob type deserialization.
+func (s *SorterWithSpill) deserializeMemStrBlob(mem *Mem, flags MemFlags, data []byte, dataLen uint32, offset int) error {
+	valueData := make([]byte, dataLen)
+	copy(valueData, data[offset:offset+int(dataLen)])
+
+	if flags&MemStr != 0 {
+		return mem.SetStr(string(valueData))
+	}
+	return mem.SetBlob(valueData)
+}
+
+// deserializeMemByType handles type-specific deserialization.
+func (s *SorterWithSpill) deserializeMemByType(mem *Mem, flags MemFlags, data []byte, dataLen uint32, offset int) error {
+	switch {
+	case flags&MemNull != 0:
+		s.deserializeMemNull(mem)
+		return nil
+	case flags&MemInt != 0:
+		return s.deserializeMemInt(mem, data, dataLen, offset)
+	case flags&MemReal != 0:
+		return s.deserializeMemReal(mem, data, dataLen, offset)
+	case flags&(MemStr|MemBlob) != 0:
+		return s.deserializeMemStrBlob(mem, flags, data, dataLen, offset)
+	default:
+		mem.flags = MemUndefined
+		return nil
+	}
+}
+
 // deserializeMem converts bytes back to a Mem cell.
 func (s *SorterWithSpill) deserializeMem(data []byte) (*Mem, int, error) {
 	if len(data) < 6 {
 		return nil, 0, fmt.Errorf("mem data too short")
 	}
 
-	// Read flags
 	flags := MemFlags(binary.LittleEndian.Uint16(data[0:2]))
-
-	// Read data length
 	dataLen := binary.LittleEndian.Uint32(data[2:6])
 	offset := 6
 
@@ -368,43 +420,11 @@ func (s *SorterWithSpill) deserializeMem(data []byte) (*Mem, int, error) {
 	mem := GetMem()
 	mem.flags = flags
 
-	// Read data based on type
-	switch {
-	case flags&MemNull != 0:
-		mem.SetNull()
-
-	case flags&MemInt != 0:
-		if dataLen != 8 {
-			return nil, 0, fmt.Errorf("invalid integer data length")
-		}
-		val := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
-		mem.SetInt(val)
-
-	case flags&MemReal != 0:
-		if dataLen != 8 {
-			return nil, 0, fmt.Errorf("invalid real data length")
-		}
-		bits := binary.LittleEndian.Uint64(data[offset : offset+8])
-		val := *(*float64)(unsafe.Pointer(&bits))
-		mem.SetReal(val)
-
-	case flags&(MemStr|MemBlob) != 0:
-		valueData := make([]byte, dataLen)
-		copy(valueData, data[offset:offset+int(dataLen)])
-
-		if flags&MemStr != 0 {
-			mem.SetStr(string(valueData))
-		} else {
-			mem.SetBlob(valueData)
-		}
-
-	default:
-		// Undefined or other
-		mem.flags = MemUndefined
+	if err := s.deserializeMemByType(mem, flags, data, dataLen, offset); err != nil {
+		return nil, 0, err
 	}
 
-	totalBytes := offset + int(dataLen)
-	return mem, totalBytes, nil
+	return mem, offset + int(dataLen), nil
 }
 
 // Sort performs the final sort, merging all spilled runs if necessary.

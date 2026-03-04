@@ -281,51 +281,52 @@ func freeOverflowChain(bt *Btree, firstPage uint32, usableSize uint32) error {
 // This implements SQLite's overflow calculation algorithm
 func CalculateLocalPayload(totalSize uint32, pageSize uint32, isTable bool) uint16 {
 	usableSize := pageSize
-
 	maxLocal := calculateMaxLocal(usableSize, isTable)
 	minLocal := calculateMinLocal(usableSize, isTable)
 
 	if totalSize <= maxLocal {
-		// Entire payload fits locally
-		localPayload, err := security.SafeCastUint32ToUint16(totalSize)
-		if err != nil {
-			// If totalSize doesn't fit in uint16, use maxLocal
-			localPayload, err = security.SafeCastUint32ToUint16(maxLocal)
+		return safePayloadSize(totalSize, maxLocal)
+	}
+
+	if usableSize < 4 {
+		return safePayloadSize(minLocal, 0)
+	}
+
+	surplus := minLocal + (totalSize-minLocal)%(usableSize-4)
+	if surplus <= maxLocal {
+		return safePayloadSizeWithFallback(surplus, minLocal)
+	}
+
+	return safePayloadSize(minLocal, 0)
+}
+
+// safePayloadSize safely converts a uint32 to uint16, returning fallback on error
+func safePayloadSize(size uint32, fallback uint32) uint16 {
+	result, err := security.SafeCastUint32ToUint16(size)
+	if err != nil {
+		if fallback > 0 {
+			result, err = security.SafeCastUint32ToUint16(fallback)
 			if err != nil {
 				return 0
 			}
+			return result
 		}
-		return localPayload
+		return 0
 	}
+	return result
+}
 
-	// Validate usableSize to prevent underflow
-	if usableSize < 4 {
-		localPayload, err := security.SafeCastUint32ToUint16(minLocal)
+// safePayloadSizeWithFallback converts primary value, falling back to secondary on error
+func safePayloadSizeWithFallback(primary uint32, fallback uint32) uint16 {
+	result, err := security.SafeCastUint32ToUint16(primary)
+	if err != nil {
+		result, err = security.SafeCastUint32ToUint16(fallback)
 		if err != nil {
 			return 0
 		}
-		return localPayload
+		return result
 	}
-
-	// Calculate surplus using SQLite's algorithm
-	surplus := minLocal + (totalSize-minLocal)%(usableSize-4)
-	if surplus <= maxLocal {
-		localPayload, err := security.SafeCastUint32ToUint16(surplus)
-		if err != nil {
-			// If surplus doesn't fit in uint16, use minLocal instead
-			localPayload, err = security.SafeCastUint32ToUint16(minLocal)
-			if err != nil {
-				return 0
-			}
-		}
-		return localPayload
-	}
-
-	localPayload, err := security.SafeCastUint32ToUint16(minLocal)
-	if err != nil {
-		return 0
-	}
-	return localPayload
+	return result
 }
 
 // Helper function to get complete payload including overflow
