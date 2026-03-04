@@ -651,6 +651,17 @@ func adjustSubqueryRegisters(vm *vdbe.VDBE, offset int) {
 			vm.Program[i].P1 += offset
 			vm.Program[i].P2 += offset
 			vm.Program[i].P3 += offset
+
+		// AddImm (P1 = register to modify, P2 = immediate value)
+		case vdbe.OpAddImm:
+			vm.Program[i].P1 += offset
+			// P2 is immediate value, don't adjust
+
+		// AggDistinct (P1 = input reg, P2 = jump target, P3 = aggregate reg)
+		case vdbe.OpAggDistinct:
+			vm.Program[i].P1 += offset
+			// P2 is jump target, don't adjust
+			vm.Program[i].P3 += offset
 		}
 	}
 }
@@ -734,6 +745,14 @@ func findMaxRegister(vm *vdbe.VDBE) int {
 				}
 			}
 
+		case vdbe.OpAggDistinct:
+			if vm.Program[i].P1 > maxReg {
+				maxReg = vm.Program[i].P1
+			}
+			if vm.Program[i].P3 > maxReg {
+				maxReg = vm.Program[i].P3
+			}
+
 		case vdbe.OpAnd, vdbe.OpOr:
 			if vm.Program[i].P1 > maxReg {
 				maxReg = vm.Program[i].P1
@@ -747,7 +766,8 @@ func findMaxRegister(vm *vdbe.VDBE) int {
 
 		case vdbe.OpIf, vdbe.OpIfNot, vdbe.OpIfPos, vdbe.OpIfNotZero,
 			vdbe.OpIsNull, vdbe.OpNotNull, vdbe.OpGosub, vdbe.OpReturn,
-			vdbe.OpInitCoroutine, vdbe.OpEndCoroutine, vdbe.OpYield, vdbe.OpAggFinal:
+			vdbe.OpInitCoroutine, vdbe.OpEndCoroutine, vdbe.OpYield, vdbe.OpAggFinal,
+			vdbe.OpAddImm:
 			if vm.Program[i].P1 > maxReg {
 				maxReg = vm.Program[i].P1
 			}

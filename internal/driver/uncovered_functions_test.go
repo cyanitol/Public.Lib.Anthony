@@ -173,8 +173,15 @@ func TestEmitUnqualifiedColumnWithJoin(t *testing.T) {
 
 // TestCompileInSubquery tests the compileInSubquery function with 0% coverage
 func TestCompileInSubquery(t *testing.T) {
-	dbFile := "test_in_subquery.db"
+	dbFile := "test_compile_in_subquery.db"
 	defer os.Remove(dbFile)
+
+	// Clean up any leftover state from the singleton driver
+	// This is necessary because the driver caches dbState across test runs
+	drv := GetDriver()
+	drv.mu.Lock()
+	delete(drv.dbs, dbFile)
+	drv.mu.Unlock()
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
