@@ -312,8 +312,8 @@ func (s *Stmt) compileExplainQueryPlan(vm *vdbe.VDBE, stmt *parser.ExplainStmt, 
 	// Format the plan as table rows
 	rows := plan.FormatAsTable()
 
-	// Set up result columns: id, parent, notused, detail
-	vm.ResultCols = []string{"id", "parent", "notused", "detail"}
+	// Set up result columns: selectid, order, from, detail (SQLite format)
+	vm.ResultCols = []string{"selectid", "order", "from", "detail"}
 
 	// Allocate memory for result columns (4 columns)
 	vm.AllocMemory(10)

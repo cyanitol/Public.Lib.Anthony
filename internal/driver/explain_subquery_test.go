@@ -33,10 +33,10 @@ func TestExplain(t *testing.T) {
 	hasRows := false
 	for rows.Next() {
 		hasRows = true
-		// EXPLAIN returns opcode information
-		var opcode, p1, p2, p3 int
-		var p4, comment string
-		err = rows.Scan(&opcode, &p1, &p2, &p3, &p4, &comment)
+		// EXPLAIN returns opcode information: addr, opcode, p1, p2, p3, p4, p5, comment
+		var addr, p1, p2, p3, p5 int
+		var opcode, p4, comment string
+		err = rows.Scan(&addr, &opcode, &p1, &p2, &p3, &p4, &p5, &comment)
 		if err != nil {
 			t.Logf("Scan row: %v", err)
 		}
@@ -569,9 +569,9 @@ func TestExplainOpcodesExtended(t *testing.T) {
 		rowCount := 0
 		for rows.Next() {
 			rowCount++
-			var opcode, p1, p2, p3 int
-			var p4, comment string
-			err = rows.Scan(&opcode, &p1, &p2, &p3, &p4, &comment)
+			var addr, p1, p2, p3, p5 int
+			var opcode, p4, comment string
+			err = rows.Scan(&addr, &opcode, &p1, &p2, &p3, &p4, &p5, &comment)
 			if err != nil {
 				t.Logf("Scan error for %q: %v", query, err)
 			}
