@@ -215,6 +215,8 @@ func (s *Stmt) tryGetCachedVdbe() *vdbe.VDBE {
 	if cachedVdbe == nil {
 		return nil
 	}
+	// Reset the VDBE to initial state before re-execution
+	cachedVdbe.Reset()
 	s.setVdbeContext(cachedVdbe)
 	return cachedVdbe
 }
@@ -231,9 +233,17 @@ func (s *Stmt) setVdbeContext(vm *vdbe.VDBE) {
 
 // cacheVdbeIfAppropriate caches VDBE if conditions are met
 func (s *Stmt) cacheVdbeIfAppropriate(vm *vdbe.VDBE, args []driver.NamedValue) {
-	if len(args) == 0 && s.conn.stmtCache != nil && vm != nil {
+	if len(args) == 0 && s.conn.stmtCache != nil && vm != nil && s.isCacheable() {
 		s.conn.stmtCache.Put(s.query, vm)
 	}
+}
+
+// isCacheable returns true if this statement can be safely cached.
+// PRAGMAs that return connection state cannot be cached because they
+// embed the current value at compile time.
+func (s *Stmt) isCacheable() bool {
+	_, isPragma := s.ast.(*parser.PragmaStmt)
+	return !isPragma
 }
 
 // invalidateStmtCache invalidates the statement cache when schema changes.

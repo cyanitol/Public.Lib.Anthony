@@ -50,8 +50,9 @@ func RegisterScalarFunctions(r *Registry) {
 	r.RegisterUser(NewScalarFunc("min", -1, minScalarFunc), -1)
 	r.RegisterUser(NewScalarFunc("max", -1, maxScalarFunc), -1)
 
-	// Printf function
+	// Printf and format functions (format is an alias for printf)
 	r.Register(NewScalarFunc("printf", -1, printfFunc))
+	r.Register(NewScalarFunc("format", -1, printfFunc))
 }
 
 // lengthFunc implements length(X)
@@ -669,26 +670,99 @@ func likelihoodFunc(args []Value) (Value, error) {
 
 // printfFormatSpec holds parsed format specifier information
 type printfFormatSpec struct {
-	width     int
-	precision int
-	specifier byte
+	width      int
+	precision  int
+	specifier  byte
+	leftAlign  bool // -
+	showSign   bool // +
+	spaceSign  bool // ' '
+	altForm    bool // #
+	zeroPad    bool // 0
+	thousands  bool // ,
+	widthStar  bool // * for dynamic width
+	precStar   bool // * for dynamic precision
 }
 
-// isFormatFlag checks if a byte is a printf format flag character
-func isFormatFlag(b byte) bool {
-	return b == '-' || b == '+' || b == ' ' || b == '#' || b == '0'
-}
+// parsePrintfFormatSpec parses a format specifier starting at pos (after the %)
+// Returns the parsed spec, the new position, and number of extra args consumed for * specifiers
+func parsePrintfFormatSpec(format string, pos int, args []Value, argIdx *int) (printfFormatSpec, int) {
+	spec := printfFormatSpec{precision: -1}
 
-// skipWhile advances pos while the predicate function returns true
-func skipWhile(format string, pos int, predicate func(byte) bool) int {
-	for pos < len(format) && predicate(format[pos]) {
+	// Parse flags
+	for pos < len(format) {
+		switch format[pos] {
+		case '-':
+			spec.leftAlign = true
+			pos++
+		case '+':
+			spec.showSign = true
+			pos++
+		case ' ':
+			spec.spaceSign = true
+			pos++
+		case '#':
+			spec.altForm = true
+			pos++
+		case '0':
+			spec.zeroPad = true
+			pos++
+		case ',':
+			spec.thousands = true
+			pos++
+		default:
+			goto parseWidth
+		}
+	}
+
+parseWidth:
+	// Parse width (may be * for dynamic)
+	if pos < len(format) && format[pos] == '*' {
+		spec.widthStar = true
+		if *argIdx < len(args) {
+			spec.width = int(args[*argIdx].AsInt64())
+			*argIdx++
+		}
+		pos++
+	} else {
+		spec.width, pos = parseDecimalNumber(format, pos)
+	}
+
+	// Parse precision
+	if pos < len(format) && format[pos] == '.' {
+		pos++ // skip '.'
+		if pos < len(format) && format[pos] == '*' {
+			spec.precStar = true
+			if *argIdx < len(args) {
+				spec.precision = int(args[*argIdx].AsInt64())
+				*argIdx++
+			}
+			pos++
+		} else {
+			spec.precision, pos = parseDecimalNumber(format, pos)
+		}
+	}
+
+	// Skip length modifiers (ll, l, h, hh, etc.)
+	// Note: 'z' is a format specifier in SQLite, not a length modifier
+	for pos < len(format) {
+		c := format[pos]
+		if c == 'l' || c == 'h' || c == 'L' || c == 'j' || c == 't' {
+			pos++
+		} else {
+			break
+		}
+	}
+
+	// Parse specifier
+	if pos < len(format) {
+		spec.specifier = format[pos]
 		pos++
 	}
-	return pos
+
+	return spec, pos
 }
 
 // parseDecimalNumber parses a decimal number starting at pos
-// Returns the parsed number and the new position
 func parseDecimalNumber(format string, pos int) (int, int) {
 	num := 0
 	for pos < len(format) && format[pos] >= '0' && format[pos] <= '9' {
@@ -698,101 +772,198 @@ func parseDecimalNumber(format string, pos int) (int, int) {
 	return num, pos
 }
 
-// parsePrintfFormatSpec parses a format specifier starting at pos (after the %)
-// Returns the parsed spec and the new position in the format string
-func parsePrintfFormatSpec(format string, pos int) (printfFormatSpec, int) {
-	spec := printfFormatSpec{precision: -1}
-
-	pos = skipWhile(format, pos, isFormatFlag)
-	spec.width, pos = parseDecimalNumber(format, pos)
-	spec.precision, pos = parsePrecision(format, pos)
-	spec.specifier, pos = parseSpecifier(format, pos)
-
-	return spec, pos
-}
-
-// parsePrecision parses the optional precision field (.NNN)
-func parsePrecision(format string, pos int) (int, int) {
-	if pos >= len(format) || format[pos] != '.' {
-		return -1, pos
-	}
-	pos++ // skip '.'
-	precision, pos := parseDecimalNumber(format, pos)
-	return precision, pos
-}
-
-// parseSpecifier extracts the format specifier character
-func parseSpecifier(format string, pos int) (byte, int) {
-	if pos >= len(format) {
-		return 0, pos
-	}
-	return format[pos], pos + 1
-}
-
 // formatPrintfInteger formats integer values (%d, %i, %u)
 func formatPrintfInteger(spec printfFormatSpec, arg Value) string {
+	var val int64
 	if arg.IsNull() {
-		return "0"
+		val = 0
+	} else {
+		val = arg.AsInt64()
 	}
+
+	var numStr string
 	if spec.specifier == 'u' {
-		return fmt.Sprintf("%d", uint64(arg.AsInt64()))
+		numStr = fmt.Sprintf("%d", uint64(val))
+	} else {
+		numStr = fmt.Sprintf("%d", val)
 	}
-	return fmt.Sprintf("%d", arg.AsInt64())
+
+	// Handle thousands separator
+	if spec.thousands && val != 0 {
+		numStr = addThousandsSeparator(numStr)
+	}
+
+	// Handle sign
+	if val >= 0 {
+		if spec.showSign {
+			numStr = "+" + numStr
+		} else if spec.spaceSign {
+			numStr = " " + numStr
+		}
+	}
+
+	// Apply width padding
+	return applyPadding(numStr, spec)
+}
+
+// addThousandsSeparator adds commas to a numeric string
+func addThousandsSeparator(s string) string {
+	negative := s[0] == '-'
+	if negative {
+		s = s[1:]
+	}
+	var result strings.Builder
+	n := len(s)
+	for i, c := range s {
+		if i > 0 && (n-i)%3 == 0 {
+			result.WriteByte(',')
+		}
+		result.WriteRune(c)
+	}
+	if negative {
+		return "-" + result.String()
+	}
+	return result.String()
+}
+
+// applyPadding applies width and alignment to a formatted value
+func applyPadding(s string, spec printfFormatSpec) string {
+	if spec.width <= len(s) {
+		return s
+	}
+	padding := spec.width - len(s)
+	if spec.leftAlign {
+		return s + strings.Repeat(" ", padding)
+	}
+	if spec.zeroPad && !spec.leftAlign {
+		// For zero padding, put zeros after sign
+		if len(s) > 0 && (s[0] == '-' || s[0] == '+' || s[0] == ' ') {
+			return string(s[0]) + strings.Repeat("0", padding) + s[1:]
+		}
+		return strings.Repeat("0", padding) + s
+	}
+	return strings.Repeat(" ", padding) + s
 }
 
 // formatPrintfFloat formats floating-point values (%f, %F, %e, %E, %g, %G)
 func formatPrintfFloat(spec printfFormatSpec, arg Value) string {
+	var val float64
 	if arg.IsNull() {
-		if spec.specifier == 'e' || spec.specifier == 'E' {
-			return "0.0e+00"
-		}
-		if spec.specifier == 'g' || spec.specifier == 'G' {
-			return "0"
-		}
-		return "0.0"
+		val = 0
+	} else {
+		val = arg.AsFloat64()
 	}
 
-	formatStr := "%" + string(spec.specifier)
+	prec := 6 // default precision
 	if spec.precision >= 0 {
-		return fmt.Sprintf("%.*"+string(spec.specifier), spec.precision, arg.AsFloat64())
+		prec = spec.precision
 	}
-	return fmt.Sprintf(formatStr, arg.AsFloat64())
+
+	var numStr string
+	switch spec.specifier {
+	case 'e', 'E':
+		numStr = fmt.Sprintf("%.*"+string(spec.specifier), prec, val)
+	case 'g', 'G':
+		numStr = fmt.Sprintf("%.*"+string(spec.specifier), prec, val)
+	default:
+		numStr = fmt.Sprintf("%.*f", prec, val)
+	}
+
+	// Handle sign
+	if val >= 0 {
+		if spec.showSign {
+			numStr = "+" + numStr
+		} else if spec.spaceSign {
+			numStr = " " + numStr
+		}
+	}
+
+	return applyPadding(numStr, spec)
 }
 
 // formatPrintfHex formats hexadecimal values (%x, %X)
 func formatPrintfHex(spec printfFormatSpec, arg Value) string {
+	var val int64
 	if arg.IsNull() {
-		return "0"
+		val = 0
+	} else {
+		val = arg.AsInt64()
 	}
-	return fmt.Sprintf("%"+string(spec.specifier), arg.AsInt64())
+
+	var numStr string
+	if spec.specifier == 'X' {
+		numStr = fmt.Sprintf("%X", uint64(val))
+	} else {
+		numStr = fmt.Sprintf("%x", uint64(val))
+	}
+
+	if spec.altForm && val != 0 {
+		if spec.specifier == 'X' {
+			numStr = "0X" + numStr
+		} else {
+			numStr = "0x" + numStr
+		}
+	}
+
+	return applyPadding(numStr, spec)
 }
 
 // formatPrintfOctal formats octal values (%o)
 func formatPrintfOctal(spec printfFormatSpec, arg Value) string {
+	var val int64
 	if arg.IsNull() {
-		return "0"
+		val = 0
+	} else {
+		val = arg.AsInt64()
 	}
-	return fmt.Sprintf("%o", arg.AsInt64())
+
+	numStr := fmt.Sprintf("%o", val)
+	if spec.altForm && val != 0 {
+		numStr = "0" + numStr
+	}
+	return applyPadding(numStr, spec)
 }
 
 // formatPrintfString formats string values (%s)
 func formatPrintfString(spec printfFormatSpec, arg Value) string {
 	if arg.IsNull() {
-		return ""
+		return applyPadding("", spec)
 	}
 	s := arg.AsString()
 	if spec.precision >= 0 && spec.precision < len(s) {
 		s = s[:spec.precision]
 	}
-	return s
+	return applyPadding(s, spec)
 }
 
 // formatPrintfChar formats character values (%c)
 func formatPrintfChar(spec printfFormatSpec, arg Value) string {
+	var ch string
 	if arg.IsNull() {
-		return ""
+		ch = ""
+	} else if arg.Type() == TypeText {
+		// For string argument, use first character
+		s := arg.AsString()
+		if len(s) > 0 {
+			r, _ := utf8.DecodeRuneInString(s)
+			ch = string(r)
+		}
+	} else {
+		// For integer, interpret as Unicode code point
+		val := arg.AsInt64()
+		if val == 0 {
+			ch = ""
+		} else {
+			ch = string(rune(val))
+		}
 	}
-	return string(rune(arg.AsInt64()))
+
+	// SQLite's %c with precision repeats the character
+	if spec.precision > 0 && len(ch) > 0 {
+		ch = strings.Repeat(ch, spec.precision)
+	}
+
+	return applyPadding(ch, spec)
 }
 
 // formatPrintfQuoted formats SQL-quoted string values (%q, %Q)
@@ -826,13 +997,14 @@ var printfFormatHandlers = map[byte]printfFormatHandler{
 	'X': formatPrintfHex,
 	'o': formatPrintfOctal,
 	's': formatPrintfString,
+	'z': formatPrintfString, // %z is like %s but for compatibility
 	'c': formatPrintfChar,
 	'q': formatPrintfQuoted,
 	'Q': formatPrintfQuoted,
 }
 
 // processPrintfFormatCode handles a format specifier at the current position
-// Returns the new position and whether to continue processing
+// Returns the new position
 func processPrintfFormatCode(format string, pos int, args []Value, argIdx *int, result *strings.Builder) int {
 	// Handle %%
 	if format[pos] == '%' {
@@ -840,8 +1012,24 @@ func processPrintfFormatCode(format string, pos int, args []Value, argIdx *int, 
 		return pos + 1
 	}
 
-	// Parse format specifier
-	spec, newPos := parsePrintfFormatSpec(format, pos)
+	// Parse format specifier (may consume args for * width/precision)
+	spec, newPos := parsePrintfFormatSpec(format, pos, args, argIdx)
+
+	// Handle special specifiers
+	switch spec.specifier {
+	case 'n':
+		// %n is silently ignored in SQLite
+		return newPos
+	case 'p':
+		// %p formats as uppercase hex
+		var val int64
+		if *argIdx < len(args) {
+			val = args[*argIdx].AsInt64()
+			*argIdx++
+		}
+		result.WriteString(fmt.Sprintf("%X", val))
+		return newPos
+	}
 
 	// Get argument value
 	var arg Value
@@ -858,7 +1046,9 @@ func processPrintfFormatCode(format string, pos int, args []Value, argIdx *int, 
 	} else {
 		// Unknown specifier, output as-is
 		result.WriteByte('%')
-		result.WriteByte(spec.specifier)
+		if spec.specifier != 0 {
+			result.WriteByte(spec.specifier)
+		}
 	}
 
 	return newPos
@@ -866,9 +1056,11 @@ func processPrintfFormatCode(format string, pos int, args []Value, argIdx *int, 
 
 // printfFunc implements printf(FORMAT, ...) - formatted string output
 func printfFunc(args []Value) (Value, error) {
-	if len(args) < 1 {
+	// printf() and format() require at least one argument (the format string)
+	if len(args) == 0 {
 		return nil, fmt.Errorf("printf() requires at least 1 argument")
 	}
+	// If format string is NULL, return NULL
 	if args[0].IsNull() {
 		return NewNullValue(), nil
 	}

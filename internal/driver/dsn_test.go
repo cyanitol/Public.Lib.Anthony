@@ -25,8 +25,9 @@ func TestParseDSN(t *testing.T) {
 			wantErr:    false,
 			wantMemory: false,
 			checkConfig: func(t *testing.T, cfg *DriverConfig) {
-				if cfg.EnableForeignKeys != true {
-					t.Errorf("expected EnableForeignKeys=true, got %v", cfg.EnableForeignKeys)
+				// Default is false to match SQLite behavior
+				if cfg.EnableForeignKeys != false {
+					t.Errorf("expected EnableForeignKeys=false (SQLite default), got %v", cfg.EnableForeignKeys)
 				}
 			},
 		},

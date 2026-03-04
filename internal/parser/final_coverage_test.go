@@ -176,31 +176,31 @@ func TestParserEdgeCasesForHighCoverage(t *testing.T) {
 			wantErr: false,
 		},
 
-		// parseForeignKeyReferences edge cases - ON DELETE/UPDATE not fully supported
+		// parseForeignKeyReferences edge cases - ON DELETE/UPDATE now supported
 		{
-			name:    "FOREIGN KEY with ON DELETE CASCADE - unsupported",
+			name:    "FOREIGN KEY with ON DELETE CASCADE",
 			sql:     "CREATE TABLE orders (user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
-			name:    "FOREIGN KEY with ON UPDATE SET NULL - unsupported",
+			name:    "FOREIGN KEY with ON UPDATE SET NULL",
 			sql:     "CREATE TABLE orders (user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE SET NULL)",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
-			name:    "FOREIGN KEY with ON DELETE SET DEFAULT - unsupported",
+			name:    "FOREIGN KEY with ON DELETE SET DEFAULT",
 			sql:     "CREATE TABLE orders (user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET DEFAULT)",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
-			name:    "FOREIGN KEY with ON UPDATE RESTRICT - unsupported",
+			name:    "FOREIGN KEY with ON UPDATE RESTRICT",
 			sql:     "CREATE TABLE orders (user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE RESTRICT)",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
-			name:    "FOREIGN KEY with ON DELETE NO ACTION - unsupported",
+			name:    "FOREIGN KEY with ON DELETE NO ACTION",
 			sql:     "CREATE TABLE orders (user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE NO ACTION)",
-			wantErr: true,
+			wantErr: false,
 		},
 
 		// parseForeignKeyColumns edge cases

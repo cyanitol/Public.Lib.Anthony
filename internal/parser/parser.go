@@ -1537,7 +1537,7 @@ func (p *Parser) applyConstraintCollate(c *ColumnConstraint) error {
 	return nil
 }
 
-// applyConstraintReferences handles REFERENCES table [(column)].
+// applyConstraintReferences handles REFERENCES table [(column)] [ON DELETE/UPDATE action] [MATCH name] [DEFERRABLE].
 func (p *Parser) applyConstraintReferences(c *ColumnConstraint) error {
 	c.Type = ConstraintForeignKey
 	if !p.check(TK_ID) {
@@ -1561,7 +1561,82 @@ func (p *Parser) applyConstraintReferences(c *ColumnConstraint) error {
 		}
 	}
 
+	// Parse optional ON DELETE/UPDATE, MATCH, DEFERRABLE clauses
+	return p.parseForeignKeyActions(c.ForeignKey)
+}
+
+// parseForeignKeyActions parses ON DELETE/UPDATE, MATCH, and DEFERRABLE clauses.
+func (p *Parser) parseForeignKeyActions(fk *ForeignKeyConstraint) error {
+	for {
+		if p.match(TK_ON) {
+			if p.match(TK_DELETE) {
+				action, err := p.parseForeignKeyAction()
+				if err != nil {
+					return err
+				}
+				fk.OnDelete = action
+			} else if p.match(TK_UPDATE) {
+				action, err := p.parseForeignKeyAction()
+				if err != nil {
+					return err
+				}
+				fk.OnUpdate = action
+			} else {
+				return p.error("expected DELETE or UPDATE after ON")
+			}
+		} else if p.match(TK_MATCH) {
+			if !p.check(TK_ID) {
+				return p.error("expected match name")
+			}
+			fk.Match = Unquote(p.advance().Lexeme)
+		} else if p.match(TK_NOT) {
+			if !p.match(TK_DEFERRABLE) {
+				return p.error("expected DEFERRABLE after NOT")
+			}
+			fk.Deferrable = DeferrableNone
+		} else if p.match(TK_DEFERRABLE) {
+			if p.match(TK_INITIALLY) {
+				if p.match(TK_DEFERRED) {
+					fk.Deferrable = DeferrableInitiallyDeferred
+				} else if p.match(TK_IMMEDIATE) {
+					fk.Deferrable = DeferrableInitiallyImmediate
+				} else {
+					return p.error("expected DEFERRED or IMMEDIATE after INITIALLY")
+				}
+			} else {
+				fk.Deferrable = DeferrableInitiallyImmediate
+			}
+		} else {
+			break
+		}
+	}
 	return nil
+}
+
+// parseForeignKeyAction parses an FK action (CASCADE, RESTRICT, SET NULL, SET DEFAULT, NO ACTION).
+func (p *Parser) parseForeignKeyAction() (ForeignKeyAction, error) {
+	if p.match(TK_CASCADE) {
+		return FKActionCascade, nil
+	}
+	if p.match(TK_RESTRICT) {
+		return FKActionRestrict, nil
+	}
+	if p.match(TK_SET) {
+		if p.match(TK_NULL) {
+			return FKActionSetNull, nil
+		}
+		if p.match(TK_DEFAULT) {
+			return FKActionSetDefault, nil
+		}
+		return FKActionNone, p.error("expected NULL or DEFAULT after SET")
+	}
+	if p.match(TK_NO) {
+		if !p.match(TK_ACTION) {
+			return FKActionNone, p.error("expected ACTION after NO")
+		}
+		return FKActionNoAction, nil
+	}
+	return FKActionNone, p.error("expected foreign key action (CASCADE, RESTRICT, SET NULL, SET DEFAULT, NO ACTION)")
 }
 
 // applyConstraintGenerated handles GENERATED ALWAYS AS (expr) or AS (expr).
@@ -1727,18 +1802,20 @@ func (p *Parser) applyTableConstraintForeignKey(c *TableConstraint) error {
 	}
 
 	// Create the foreign key constraint
-	fk := ForeignKeyConstraint{
+	fk := &ForeignKeyConstraint{
 		Table:   refTable,
 		Columns: refColumns,
 	}
 
-	// Parse ON DELETE/UPDATE actions (optional, we'll skip for now for simplicity)
-	// This can be extended later to support ON DELETE CASCADE, etc.
+	// Parse ON DELETE/UPDATE actions, MATCH, DEFERRABLE
+	if err := p.parseForeignKeyActions(fk); err != nil {
+		return err
+	}
 
 	c.Type = ConstraintForeignKey
 	c.ForeignKey = &ForeignKeyTableConstraint{
 		Columns:    columns,
-		ForeignKey: fk,
+		ForeignKey: *fk,
 	}
 
 	return nil
@@ -1810,66 +1887,6 @@ func (p *Parser) parseForeignKeyRefColumns() ([]string, error) {
 	}
 
 	return refColumns, nil
-}
-
-// parseForeignKeyActions parses optional ON DELETE and ON UPDATE actions.
-func (p *Parser) parseForeignKeyActions(fk *ForeignKeyConstraint) error {
-	for {
-		if !p.match(TK_ON) {
-			break
-		}
-
-		if p.match(TK_DELETE) {
-			action, err := p.parseForeignKeyAction()
-			if err != nil {
-				return err
-			}
-			fk.OnDelete = action
-		} else if p.match(TK_UPDATE) {
-			action, err := p.parseForeignKeyAction()
-			if err != nil {
-				return err
-			}
-			fk.OnUpdate = action
-		} else {
-			return p.error("expected DELETE or UPDATE after ON")
-		}
-	}
-	return nil
-}
-
-// parseForeignKeyAction parses a single foreign key action (CASCADE, SET NULL, etc.).
-func (p *Parser) parseForeignKeyAction() (ForeignKeyAction, error) {
-	if p.match(TK_CASCADE) {
-		return FKActionCascade, nil
-	}
-	if p.match(TK_RESTRICT) {
-		return FKActionRestrict, nil
-	}
-	if p.match(TK_SET) {
-		return p.parseForeignKeySetAction()
-	}
-	if p.match(TK_NO) {
-		return p.parseForeignKeyNoAction()
-	}
-	return FKActionNone, p.error("expected foreign key action (CASCADE, RESTRICT, SET NULL, SET DEFAULT, or NO ACTION)")
-}
-
-func (p *Parser) parseForeignKeySetAction() (ForeignKeyAction, error) {
-	if p.match(TK_NULL) {
-		return FKActionSetNull, nil
-	}
-	if p.match(TK_DEFAULT) {
-		return FKActionSetDefault, nil
-	}
-	return FKActionNone, p.error("expected NULL or DEFAULT after SET")
-}
-
-func (p *Parser) parseForeignKeyNoAction() (ForeignKeyAction, error) {
-	if !p.match(TK_ACTION) {
-		return FKActionNone, p.error("expected ACTION after NO")
-	}
-	return FKActionNoAction, nil
 }
 
 func (p *Parser) parseCreateIndex(unique bool) (*CreateIndexStmt, error) {

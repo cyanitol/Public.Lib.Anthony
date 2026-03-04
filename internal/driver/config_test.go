@@ -51,13 +51,13 @@ func TestApplyPragmasDefaults(t *testing.T) {
 		t.Logf("  %d: %s", i, p)
 	}
 
-	// With defaults, we should get just foreign_keys = ON
+	// With defaults, we should get foreign_keys = OFF (matches SQLite default)
 	if len(pragmas) == 0 {
 		t.Fatal("expected at least one pragma")
 	}
 
-	if pragmas[0] != "PRAGMA foreign_keys = ON" {
-		t.Errorf("expected first pragma to be foreign_keys = ON, got %q", pragmas[0])
+	if pragmas[0] != "PRAGMA foreign_keys = OFF" {
+		t.Errorf("expected first pragma to be foreign_keys = OFF, got %q", pragmas[0])
 	}
 }
 

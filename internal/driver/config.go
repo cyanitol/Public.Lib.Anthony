@@ -42,7 +42,7 @@ type DriverConfig struct {
 	ConnectionMaxIdleTime time.Duration
 
 	// EnableForeignKeys enables foreign key constraint enforcement.
-	// Default is true.
+	// Default is false (matches SQLite behavior).
 	EnableForeignKeys bool
 
 	// EnableTriggers enables trigger execution.
@@ -85,7 +85,7 @@ func DefaultDriverConfig() *DriverConfig {
 		MaxIdleConnections:    2,
 		ConnectionMaxLifetime: 0,
 		ConnectionMaxIdleTime: 0,
-		EnableForeignKeys:     true,
+		EnableForeignKeys:     false,
 		EnableTriggers:        true,
 		EnableQueryLog:        false,
 		CaseSensitiveLike:     false,
