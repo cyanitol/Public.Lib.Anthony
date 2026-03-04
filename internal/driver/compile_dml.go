@@ -60,6 +60,11 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 		return nil, fmt.Errorf("INSERT requires VALUES clause")
 	}
 
+	// Check for UPSERT clause (INSERT...ON CONFLICT)
+	if stmt.Upsert != nil {
+		return s.compileInsertUpsert(vm, stmt, args)
+	}
+
 	// Use first row to determine structure
 	firstRow := stmt.Values[0]
 	colNames := resolveInsertColumns(stmt, table)
@@ -84,6 +89,9 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 
 	paramIdx := 0
 
+	// Determine conflict resolution mode for INSERT OR IGNORE/REPLACE
+	conflictMode := getConflictMode(stmt.OnConflict)
+
 	// Loop over all rows in VALUES clause
 	for _, row := range stmt.Values {
 		s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, &paramIdx)
@@ -93,10 +101,12 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 		vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
 
 		// OpInsert: P1=cursor, P2=record register, P3=rowid register
+		// P4.I = conflict mode (0=abort, 1=ignore, 2=replace)
 		insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidReg)
+		vm.Program[insertOp].P4.I = conflictMode
 
 		// For AUTOINCREMENT tables, we need to pass table metadata to the Insert handler
-		// Store table name in P4 string for sequence management
+		// Store table name in P4.Z string for sequence management
 		if _, hasAutoincrement := table.HasAutoincrementColumn(); hasAutoincrement {
 			vm.Program[insertOp].P4.Z = table.Name
 		}
@@ -821,4 +831,38 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 	vm.Program[rewindAddr].P2 = haltAddr
 
 	return vm, nil
+}
+
+// ============================================================================
+// UPSERT (ON CONFLICT) Helpers
+// ============================================================================
+
+// getConflictMode returns the conflict resolution mode based on the OnConflict clause.
+// Maps parser.OnConflictClause to VDBE P4.I values
+func getConflictMode(onConflict parser.OnConflictClause) int32 {
+	switch onConflict {
+	case parser.OnConflictIgnore:
+		return 3
+	case parser.OnConflictReplace:
+		return 4
+	case parser.OnConflictRollback:
+		return 1
+	case parser.OnConflictFail:
+		return 2
+	default:
+		return 0 // OnConflictAbort is the default
+	}
+}
+
+// compileInsertUpsert compiles an INSERT with ON CONFLICT (UPSERT) clause.
+// This is a stub implementation that currently falls back to regular INSERT.
+func (s *Stmt) compileInsertUpsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	// TODO: Implement full UPSERT support
+	// For now, ignore the UPSERT clause and fall through to regular INSERT
+	// by clearing the Upsert field temporarily
+	savedUpsert := stmt.Upsert
+	stmt.Upsert = nil
+	result, err := s.compileInsert(vm, stmt, args)
+	stmt.Upsert = savedUpsert
+	return result, err
 }

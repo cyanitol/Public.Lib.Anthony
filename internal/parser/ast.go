@@ -106,6 +106,7 @@ type FromClause struct {
 
 // TableOrSubquery represents a table or subquery in FROM.
 type TableOrSubquery struct {
+	Schema    string      // optional schema name for qualified table references
 	TableName string
 	Alias     string
 	Subquery  *SelectStmt
@@ -144,6 +145,7 @@ type OrderingTerm struct {
 
 // InsertStmt represents an INSERT statement.
 type InsertStmt struct {
+	Schema      string // optional schema name for qualified table references
 	Table       string
 	Columns     []string
 	Values      [][]Expression
@@ -172,6 +174,7 @@ const (
 
 // UpdateStmt represents an UPDATE statement.
 type UpdateStmt struct {
+	Schema     string // optional schema name for qualified table references
 	Table      string
 	Sets       []Assignment
 	Where      Expression
@@ -194,6 +197,7 @@ type Assignment struct {
 
 // DeleteStmt represents a DELETE statement.
 type DeleteStmt struct {
+	Schema  string // optional schema name for qualified table references
 	Table   string
 	Where   Expression
 	OrderBy []OrderingTerm
@@ -208,6 +212,7 @@ func (d *DeleteStmt) String() string {
 
 // CreateTableStmt represents a CREATE TABLE statement.
 type CreateTableStmt struct {
+	Schema       string // optional schema name for qualified table references
 	Name         string
 	IfNotExists  bool
 	Temp         bool

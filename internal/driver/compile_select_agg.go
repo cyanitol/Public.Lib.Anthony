@@ -50,12 +50,24 @@ func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table
 		return
 	}
 
-	// COUNT(column) - count non-NULL values only
+	// COUNT(column) or COUNT(expression) - count non-NULL values only
 	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, tableName, gen)
 	if !ok {
-		// Not a column reference, just increment
-		vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
-		return
+		// Not a simple column reference - evaluate the expression
+		if len(fnExpr.Args) > 0 {
+			exprReg, err := gen.GenerateExpr(fnExpr.Args[0])
+			if err != nil {
+				// If we can't generate the expression, don't count it
+				return
+			}
+			tempReg = exprReg
+			// Skip NULL values from the expression
+			skipAddr = vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0)
+		} else {
+			// No argument, shouldn't happen but handle safely
+			vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
+			return
+		}
 	}
 
 	// Handle DISTINCT if specified
@@ -65,7 +77,7 @@ func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table
 		distinctSkipAddr = vm.AddOp(vdbe.OpAggDistinct, tempReg, 0, accReg)
 	}
 
-	// Only increment if value is not NULL (loadAggregateColumnValue already added OpIsNull)
+	// Only increment if value is not NULL (skipAddr already added OpIsNull)
 	vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
 
 	// Fix the skip addresses to jump past the increment
@@ -80,7 +92,18 @@ func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table
 func (s *Stmt) emitSumUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, accReg int, gen *expr.CodeGenerator) {
 	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, tableName, gen)
 	if !ok {
-		return
+		// Not a simple column reference - evaluate the expression
+		if len(fnExpr.Args) > 0 {
+			exprReg, err := gen.GenerateExpr(fnExpr.Args[0])
+			if err != nil {
+				return
+			}
+			tempReg = exprReg
+			// Skip NULL values from the expression
+			skipAddr = vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0)
+		} else {
+			return
+		}
 	}
 
 	// Handle DISTINCT if specified

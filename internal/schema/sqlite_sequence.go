@@ -148,6 +148,28 @@ func (t *Table) GetAutoincrementColumnIndex() int {
 	return -1
 }
 
+// ValidateWithoutRowIDConstraints validates that WITHOUT ROWID tables meet requirements.
+// WITHOUT ROWID tables must have a PRIMARY KEY and cannot use AUTOINCREMENT.
+func (t *Table) ValidateWithoutRowIDConstraints() error {
+	if !t.WithoutRowID {
+		return nil // Not a WITHOUT ROWID table, no special validation needed
+	}
+
+	// WITHOUT ROWID requires a PRIMARY KEY
+	if len(t.PrimaryKey) == 0 {
+		return fmt.Errorf("WITHOUT ROWID requires a PRIMARY KEY")
+	}
+
+	// WITHOUT ROWID cannot use AUTOINCREMENT
+	for _, col := range t.Columns {
+		if col.Autoincrement {
+			return fmt.Errorf("AUTOINCREMENT not allowed on WITHOUT ROWID tables")
+		}
+	}
+
+	return nil
+}
+
 // ValidateAutoincrementColumn validates that AUTOINCREMENT is only used correctly.
 // AUTOINCREMENT can only be used on INTEGER PRIMARY KEY columns.
 func (t *Table) ValidateAutoincrementColumn() error {

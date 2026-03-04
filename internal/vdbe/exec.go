@@ -190,153 +190,153 @@ var opcodeDispatch map[Opcode]opcodeHandler
 
 func init() {
 	opcodeDispatch = map[Opcode]opcodeHandler{
-	// Control flow opcodes
-	OpInit:   (*VDBE).execInit,
-	OpGoto:   (*VDBE).execGoto,
-	OpGosub:  (*VDBE).execGosub,
-	OpReturn: (*VDBE).execReturn,
-	OpHalt:   (*VDBE).execHalt,
-	OpIf:     (*VDBE).execIf,
-	OpIfNot:  (*VDBE).execIfNot,
-	OpIfPos:  (*VDBE).execIfPos,
+		// Control flow opcodes
+		OpInit:   (*VDBE).execInit,
+		OpGoto:   (*VDBE).execGoto,
+		OpGosub:  (*VDBE).execGosub,
+		OpReturn: (*VDBE).execReturn,
+		OpHalt:   (*VDBE).execHalt,
+		OpIf:     (*VDBE).execIf,
+		OpIfNot:  (*VDBE).execIfNot,
+		OpIfPos:  (*VDBE).execIfPos,
 
-	// Register operations
-	OpInteger: (*VDBE).execInteger,
-	OpInt64:   (*VDBE).execInt64,
-	OpReal:    (*VDBE).execReal,
-	OpString:  (*VDBE).execString,
-	OpString8: (*VDBE).execString,
-	OpBlob:    (*VDBE).execBlob,
-	OpNull:    (*VDBE).execNull,
-	OpCopy:    (*VDBE).execCopy,
-	OpMove:    (*VDBE).execMove,
-	OpSCopy:   (*VDBE).execSCopy,
+		// Register operations
+		OpInteger: (*VDBE).execInteger,
+		OpInt64:   (*VDBE).execInt64,
+		OpReal:    (*VDBE).execReal,
+		OpString:  (*VDBE).execString,
+		OpString8: (*VDBE).execString,
+		OpBlob:    (*VDBE).execBlob,
+		OpNull:    (*VDBE).execNull,
+		OpCopy:    (*VDBE).execCopy,
+		OpMove:    (*VDBE).execMove,
+		OpSCopy:   (*VDBE).execSCopy,
 
-	// Cursor operations
-	OpOpenRead:      (*VDBE).execOpenRead,
-	OpOpenWrite:     (*VDBE).execOpenWrite,
-	OpOpenEphemeral: (*VDBE).execOpenEphemeral,
-	OpClose:         (*VDBE).execClose,
-	OpRewind:        (*VDBE).execRewind,
-	OpNext:          (*VDBE).execNext,
-	OpPrev:          (*VDBE).execPrev,
-	OpSeekGE:        (*VDBE).execSeekGE,
-	OpSeekGT:        (*VDBE).execSeekGT,
-	OpSeekLE:        (*VDBE).execSeekLE,
-	OpSeekLT:        (*VDBE).execSeekLT,
-	OpSeekRowid:     (*VDBE).execSeekRowid,
-	OpNotExists:     (*VDBE).execNotExists,
-	OpDeferredSeek:  (*VDBE).execDeferredSeek,
+		// Cursor operations
+		OpOpenRead:      (*VDBE).execOpenRead,
+		OpOpenWrite:     (*VDBE).execOpenWrite,
+		OpOpenEphemeral: (*VDBE).execOpenEphemeral,
+		OpClose:         (*VDBE).execClose,
+		OpRewind:        (*VDBE).execRewind,
+		OpNext:          (*VDBE).execNext,
+		OpPrev:          (*VDBE).execPrev,
+		OpSeekGE:        (*VDBE).execSeekGE,
+		OpSeekGT:        (*VDBE).execSeekGT,
+		OpSeekLE:        (*VDBE).execSeekLE,
+		OpSeekLT:        (*VDBE).execSeekLT,
+		OpSeekRowid:     (*VDBE).execSeekRowid,
+		OpNotExists:     (*VDBE).execNotExists,
+		OpDeferredSeek:  (*VDBE).execDeferredSeek,
 
-	// Data retrieval
-	OpColumn:    (*VDBE).execColumn,
-	OpRowid:     (*VDBE).execRowid,
-	OpResultRow: (*VDBE).execResultRow,
+		// Data retrieval
+		OpColumn:    (*VDBE).execColumn,
+		OpRowid:     (*VDBE).execRowid,
+		OpResultRow: (*VDBE).execResultRow,
 
-	// Data modification
-	OpNewRowid:   (*VDBE).execNewRowid,
-	OpMakeRecord: (*VDBE).execMakeRecord,
-	OpInsert:     (*VDBE).execInsert,
-	OpDelete:     (*VDBE).execDelete,
+		// Data modification
+		OpNewRowid:   (*VDBE).execNewRowid,
+		OpMakeRecord: (*VDBE).execMakeRecord,
+		OpInsert:     (*VDBE).execInsert,
+		OpDelete:     (*VDBE).execDelete,
 
-	// Comparison
-	OpEq:      (*VDBE).execEq,
-	OpNe:      (*VDBE).execNe,
-	OpLt:      (*VDBE).execLt,
-	OpLe:      (*VDBE).execLe,
-	OpGt:      (*VDBE).execGt,
-	OpGe:      (*VDBE).execGe,
-	OpIsNull:  (*VDBE).execIsNull,
-	OpNotNull: (*VDBE).execNotNull,
+		// Comparison
+		OpEq:      (*VDBE).execEq,
+		OpNe:      (*VDBE).execNe,
+		OpLt:      (*VDBE).execLt,
+		OpLe:      (*VDBE).execLe,
+		OpGt:      (*VDBE).execGt,
+		OpGe:      (*VDBE).execGe,
+		OpIsNull:  (*VDBE).execIsNull,
+		OpNotNull: (*VDBE).execNotNull,
 
-	// Arithmetic
-	OpAdd:       (*VDBE).execAdd,
-	OpSubtract:  (*VDBE).execSubtract,
-	OpMultiply:  (*VDBE).execMultiply,
-	OpDivide:    (*VDBE).execDivide,
-	OpRemainder: (*VDBE).execRemainder,
-	OpAddImm:    (*VDBE).execAddImm,
+		// Arithmetic
+		OpAdd:       (*VDBE).execAdd,
+		OpSubtract:  (*VDBE).execSubtract,
+		OpMultiply:  (*VDBE).execMultiply,
+		OpDivide:    (*VDBE).execDivide,
+		OpRemainder: (*VDBE).execRemainder,
+		OpAddImm:    (*VDBE).execAddImm,
 
-	// String operations
-	OpConcat: (*VDBE).execConcat,
+		// String operations
+		OpConcat: (*VDBE).execConcat,
 
-	// Bitwise operations
-	OpBitAnd:     (*VDBE).execBitAnd,
-	OpBitOr:      (*VDBE).execBitOr,
-	OpBitNot:     (*VDBE).execBitNot,
-	OpShiftLeft:  (*VDBE).execShiftLeft,
-	OpShiftRight: (*VDBE).execShiftRight,
+		// Bitwise operations
+		OpBitAnd:     (*VDBE).execBitAnd,
+		OpBitOr:      (*VDBE).execBitOr,
+		OpBitNot:     (*VDBE).execBitNot,
+		OpShiftLeft:  (*VDBE).execShiftLeft,
+		OpShiftRight: (*VDBE).execShiftRight,
 
-	// Logical operations
-	OpAnd: (*VDBE).execAnd,
-	OpOr:  (*VDBE).execOr,
-	OpNot: (*VDBE).execNot,
+		// Logical operations
+		OpAnd: (*VDBE).execAnd,
+		OpOr:  (*VDBE).execOr,
+		OpNot: (*VDBE).execNot,
 
-	// Aggregate functions
-	OpAggStep:  (*VDBE).execAggStep,
-	OpAggFinal: (*VDBE).execAggFinal,
+		// Aggregate functions
+		OpAggStep:  (*VDBE).execAggStep,
+		OpAggFinal: (*VDBE).execAggFinal,
 
-	// Function calls
-	OpFunction: (*VDBE).execFunction,
+		// Function calls
+		OpFunction: (*VDBE).execFunction,
 
-	// Transaction operations
-	OpTransaction:  (*VDBE).execTransaction,
-	OpCommit:       (*VDBE).execCommit,
-	OpRollback:     (*VDBE).execRollback,
-	OpAutocommit:   (*VDBE).execAutoCommit,
-	OpSavepoint:    (*VDBE).execSavepoint,
-	OpVerifyCookie: (*VDBE).execVerifyCookie,
-	OpSetCookie:    (*VDBE).execSetCookie,
+		// Transaction operations
+		OpTransaction:  (*VDBE).execTransaction,
+		OpCommit:       (*VDBE).execCommit,
+		OpRollback:     (*VDBE).execRollback,
+		OpAutocommit:   (*VDBE).execAutoCommit,
+		OpSavepoint:    (*VDBE).execSavepoint,
+		OpVerifyCookie: (*VDBE).execVerifyCookie,
+		OpSetCookie:    (*VDBE).execSetCookie,
 
-	// Sorter operations
-	OpSorterOpen:   (*VDBE).execSorterOpen,
-	OpSorterInsert: (*VDBE).execSorterInsert,
-	OpSorterSort:   (*VDBE).execSorterSort,
-	OpSorterNext:   (*VDBE).execSorterNext,
-	OpSorterData:   (*VDBE).execSorterData,
-	OpSorterClose:  (*VDBE).execSorterClose,
+		// Sorter operations
+		OpSorterOpen:   (*VDBE).execSorterOpen,
+		OpSorterInsert: (*VDBE).execSorterInsert,
+		OpSorterSort:   (*VDBE).execSorterSort,
+		OpSorterNext:   (*VDBE).execSorterNext,
+		OpSorterData:   (*VDBE).execSorterData,
+		OpSorterClose:  (*VDBE).execSorterClose,
 
-	// No operation
-	OpNoop: (*VDBE).execNoop,
+		// No operation
+		OpNoop: (*VDBE).execNoop,
 
-	// Type conversion operations
-	OpCast:      (*VDBE).execCast,
-	OpToText:    (*VDBE).execToText,
-	OpToBlob:    (*VDBE).execToBlob,
-	OpToNumeric: (*VDBE).execToNumeric,
-	OpToInt:     (*VDBE).execToInt,
-	OpToReal:    (*VDBE).execToReal,
+		// Type conversion operations
+		OpCast:      (*VDBE).execCast,
+		OpToText:    (*VDBE).execToText,
+		OpToBlob:    (*VDBE).execToBlob,
+		OpToNumeric: (*VDBE).execToNumeric,
+		OpToInt:     (*VDBE).execToInt,
+		OpToReal:    (*VDBE).execToReal,
 
-	// Index operations
-	OpIdxInsert: (*VDBE).execIdxInsert,
-	OpIdxDelete: (*VDBE).execIdxDelete,
-	OpIdxRowid:  (*VDBE).execIdxRowid,
-	OpIdxLT:     (*VDBE).execIdxLT,
-	OpIdxGT:     (*VDBE).execIdxGT,
-	OpIdxLE:     (*VDBE).execIdxLE,
-	OpIdxGE:     (*VDBE).execIdxGE,
+		// Index operations
+		OpIdxInsert: (*VDBE).execIdxInsert,
+		OpIdxDelete: (*VDBE).execIdxDelete,
+		OpIdxRowid:  (*VDBE).execIdxRowid,
+		OpIdxLT:     (*VDBE).execIdxLT,
+		OpIdxGT:     (*VDBE).execIdxGT,
+		OpIdxLE:     (*VDBE).execIdxLE,
+		OpIdxGE:     (*VDBE).execIdxGE,
 
-	// Trigger and sub-program operations
-	OpProgram:       (*VDBE).execProgram,
-	OpParam:         (*VDBE).execParam,
-	OpInitCoroutine: (*VDBE).execInitCoroutine,
-	OpEndCoroutine:  (*VDBE).execEndCoroutine,
-	OpYield:         (*VDBE).execYield,
-	OpOnce:          (*VDBE).execOnce,
-	OpOpenPseudo:    (*VDBE).execOpenPseudo,
+		// Trigger and sub-program operations
+		OpProgram:       (*VDBE).execProgram,
+		OpParam:         (*VDBE).execParam,
+		OpInitCoroutine: (*VDBE).execInitCoroutine,
+		OpEndCoroutine:  (*VDBE).execEndCoroutine,
+		OpYield:         (*VDBE).execYield,
+		OpOnce:          (*VDBE).execOnce,
+		OpOpenPseudo:    (*VDBE).execOpenPseudo,
 
-	// Window function operations
-	OpAggStepWindow:    (*VDBE).execAggStepWindow,
-	OpWindowRowNum:     (*VDBE).execWindowRowNum,
-	OpWindowRank:       (*VDBE).execWindowRank,
-	OpWindowDenseRank:  (*VDBE).execWindowDenseRank,
-	OpWindowNtile:      (*VDBE).execWindowNtile,
-	OpWindowLag:        (*VDBE).execWindowLag,
-	OpWindowLead:       (*VDBE).execWindowLead,
-	OpWindowFirstValue: (*VDBE).execWindowFirstValue,
-	OpWindowLastValue:  (*VDBE).execWindowLastValue,
-	OpAggDistinct:      (*VDBE).execAggDistinct,
-	OpDistinctRow:      (*VDBE).execDistinctRow,
+		// Window function operations
+		OpAggStepWindow:    (*VDBE).execAggStepWindow,
+		OpWindowRowNum:     (*VDBE).execWindowRowNum,
+		OpWindowRank:       (*VDBE).execWindowRank,
+		OpWindowDenseRank:  (*VDBE).execWindowDenseRank,
+		OpWindowNtile:      (*VDBE).execWindowNtile,
+		OpWindowLag:        (*VDBE).execWindowLag,
+		OpWindowLead:       (*VDBE).execWindowLead,
+		OpWindowFirstValue: (*VDBE).execWindowFirstValue,
+		OpWindowLastValue:  (*VDBE).execWindowLastValue,
+		OpAggDistinct:      (*VDBE).execAggDistinct,
+		OpDistinctRow:      (*VDBE).execDistinctRow,
 	}
 }
 
@@ -1029,13 +1029,13 @@ func (v *VDBE) execOpenEphemeral(instr *Instruction) error {
 
 	// Create the cursor
 	cursor := &Cursor{
-		CurType:      CursorBTree,
-		IsTable:      true,
-		Writable:     true,
-		BtreeCursor:  btCursor,
-		RootPage:     rootPage,
-		CachedCols:   make([][]byte, 0),
-		CacheStatus:  0,
+		CurType:     CursorBTree,
+		IsTable:     true,
+		Writable:    true,
+		BtreeCursor: btCursor,
+		RootPage:    rootPage,
+		CachedCols:  make([][]byte, 0),
+		CacheStatus: 0,
 	}
 
 	v.Cursors[instr.P1] = cursor
@@ -1920,9 +1920,9 @@ func encodeValue(val interface{}) (uint64, []byte) {
 }
 
 var int64Ranges = []struct {
-	lo      int64
-	hi      int64
-	serial  uint64
+	lo     int64
+	hi     int64
+	serial uint64
 }{
 	{-128, 127, 1},
 	{-32768, 32767, 2},
@@ -2864,12 +2864,12 @@ type affinityFunc func(*Mem) error
 
 // affinityHandlers maps affinity codes to their conversion functions.
 var affinityHandlers = map[int]affinityFunc{
-	0: func(mem *Mem) error { return nil },           // NONE/BLOB affinity - keep as-is
-	1: castToBlob,                                     // BLOB affinity - convert to blob
-	2: (*Mem).Stringify,                               // TEXT affinity - convert to text
-	3: castToInteger,                                  // INTEGER affinity - convert to integer
-	4: (*Mem).Realify,                                 // REAL affinity - convert to real
-	5: castToNumeric,                                  // NUMERIC affinity - try int then float
+	0: func(mem *Mem) error { return nil }, // NONE/BLOB affinity - keep as-is
+	1: castToBlob,                          // BLOB affinity - convert to blob
+	2: (*Mem).Stringify,                    // TEXT affinity - convert to text
+	3: castToInteger,                       // INTEGER affinity - convert to integer
+	4: (*Mem).Realify,                      // REAL affinity - convert to real
+	5: castToNumeric,                       // NUMERIC affinity - try int then float
 }
 
 // execCast converts the value in register P1 to the type specified by P2 affinity.
@@ -3804,31 +3804,31 @@ func (v *VDBE) execProgram(instr *Instruction) error {
 		if instr.P4.P == nil {
 			return fmt.Errorf("OpProgram: sub-program is nil")
 		}
-		
+
 		// The sub-program should be a *VDBE
 		var subProg *VDBE
 		subProg, ok = instr.P4.P.(*VDBE)
 		if !ok {
 			return fmt.Errorf("OpProgram: P4 is not a *VDBE")
 		}
-		
+
 		// Set up parent relationship
 		subProg.Parent = v
 		subProg.Ctx = v.Ctx // Share execution context
-		
+
 		v.SubPrograms[subID] = subProg
 		subVdbe = subProg
 	}
-	
+
 	// Execute the sub-program until completion
 	err := subVdbe.Run()
 	if err != nil {
 		return fmt.Errorf("sub-program execution failed: %w", err)
 	}
-	
+
 	// Reset the sub-program for next execution
 	subVdbe.Reset()
-	
+
 	return nil
 }
 
@@ -3840,19 +3840,19 @@ func (v *VDBE) execParam(instr *Instruction) error {
 	if v.Parent == nil {
 		return fmt.Errorf("OpParam: no parent VDBE available")
 	}
-	
+
 	// Get the parameter from parent's register
 	parentReg, err := v.Parent.GetMem(instr.P1)
 	if err != nil {
 		return fmt.Errorf("OpParam: failed to get parent register %d: %w", instr.P1, err)
 	}
-	
+
 	// Copy to our destination register
 	destReg, err := v.GetMem(instr.P2)
 	if err != nil {
 		return err
 	}
-	
+
 	return destReg.Copy(parentReg)
 }
 
@@ -3864,19 +3864,19 @@ func (v *VDBE) execInitCoroutine(instr *Instruction) error {
 	coroutineID := instr.P1
 	jumpAddr := instr.P2
 	entryPoint := instr.P3
-	
+
 	// Create coroutine info
 	v.Coroutines[coroutineID] = &CoroutineInfo{
 		EntryPoint: entryPoint,
 		YieldAddr:  0,
 		Active:     false,
 	}
-	
+
 	// Jump past the coroutine body (don't execute it during init)
 	if jumpAddr > 0 {
 		v.PC = jumpAddr
 	}
-	
+
 	return nil
 }
 
@@ -3884,25 +3884,25 @@ func (v *VDBE) execInitCoroutine(instr *Instruction) error {
 // P1 = coroutine ID
 func (v *VDBE) execEndCoroutine(instr *Instruction) error {
 	coroutineID := instr.P1
-	
+
 	// Get coroutine info
 	coInfo, ok := v.Coroutines[coroutineID]
 	if !ok {
 		return fmt.Errorf("OpEndCoroutine: coroutine %d not initialized", coroutineID)
 	}
-	
+
 	if !coInfo.Active {
 		return fmt.Errorf("OpEndCoroutine: coroutine %d is not active", coroutineID)
 	}
-	
+
 	// Return to the yield address
 	if coInfo.YieldAddr > 0 {
 		v.PC = coInfo.YieldAddr
 	}
-	
+
 	// Mark as inactive
 	coInfo.Active = false
-	
+
 	return nil
 }
 
@@ -3911,13 +3911,13 @@ func (v *VDBE) execEndCoroutine(instr *Instruction) error {
 // P2 = register containing return address (or 0 to use PC)
 func (v *VDBE) execYield(instr *Instruction) error {
 	coroutineID := instr.P1
-	
+
 	// Get coroutine info
 	coInfo, ok := v.Coroutines[coroutineID]
 	if !ok {
 		return fmt.Errorf("OpYield: coroutine %d not initialized", coroutineID)
 	}
-	
+
 	// If P2 is specified, get return address from register
 	// Otherwise, use current PC as return address
 	returnAddr := v.PC
@@ -3930,12 +3930,12 @@ func (v *VDBE) execYield(instr *Instruction) error {
 			returnAddr = int(regMem.IntValue())
 		}
 	}
-	
+
 	// Save return address and jump to entry point
 	coInfo.YieldAddr = returnAddr
 	coInfo.Active = true
 	v.PC = coInfo.EntryPoint
-	
+
 	return nil
 }
 
@@ -3988,7 +3988,7 @@ func (v *VDBE) execOpenPseudo(instr *Instruction) error {
 	if err := v.AllocCursors(cursorNum + 1); err != nil {
 		return err
 	}
-	
+
 	// Create pseudo-table cursor
 	cursor := &Cursor{
 		CurType:     CursorPseudo,
@@ -3999,7 +3999,7 @@ func (v *VDBE) execOpenPseudo(instr *Instruction) error {
 		NullRow:     false,
 		EOF:         false,
 	}
-	
+
 	v.Cursors[cursorNum] = cursor
 	return nil
 }
