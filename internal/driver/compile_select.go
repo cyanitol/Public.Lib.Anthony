@@ -741,12 +741,21 @@ func (s *Stmt) containsAggregate(expr parser.Expression) bool {
 		return s.checkFunctionAggregate(e)
 	case *parser.BinaryExpr:
 		return s.containsAggregate(e.Left) || s.containsAggregate(e.Right)
+	case *parser.CaseExpr:
+		return s.checkCaseAggregate(e)
+	default:
+		// Handle simple wrapper expressions with single child
+		return s.checkWrappedAggregate(e)
+	}
+}
+
+// checkWrappedAggregate handles expression types that simply wrap a single child expression.
+func (s *Stmt) checkWrappedAggregate(expr parser.Expression) bool {
+	switch e := expr.(type) {
 	case *parser.UnaryExpr:
 		return s.containsAggregate(e.Expr)
 	case *parser.ParenExpr:
 		return s.containsAggregate(e.Expr)
-	case *parser.CaseExpr:
-		return s.checkCaseAggregate(e)
 	case *parser.CastExpr:
 		return s.containsAggregate(e.Expr)
 	case *parser.CollateExpr:

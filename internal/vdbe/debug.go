@@ -488,28 +488,52 @@ func (v *VDBE) logAffectedRegisters(pc int, instr *Instruction) {
 	// Determine which registers might be affected based on opcode
 	affectedRegs := v.getAffectedRegisters(instr)
 
-	// Log changes
-	for _, regIdx := range affectedRegs {
-		if regIdx < 0 || regIdx >= len(v.Mem) {
-			continue
-		}
-
-		oldVal := snapshot[regIdx]
-		newVal := v.Mem[regIdx].String()
-
-		if oldVal != newVal {
-			msg := fmt.Sprintf("R%d: %s -> %s", regIdx, oldVal, newVal)
-			v.logToObservability(v.Debug.LogLevel, "  [REG CHANGE] %s", msg)
-		}
-	}
+	// Log changes for each affected register
+	v.logRegisterChanges(affectedRegs, snapshot)
 
 	// Clean up old snapshots to prevent memory leaks
-	if len(v.Debug.RegisterSnapshots) > 100 {
-		// Keep only the last 100 snapshots
-		for oldPC := range v.Debug.RegisterSnapshots {
-			if oldPC < pc-100 {
-				delete(v.Debug.RegisterSnapshots, oldPC)
-			}
+	v.cleanupOldSnapshots(pc)
+}
+
+// logRegisterChanges logs changes for a set of registers.
+func (v *VDBE) logRegisterChanges(affectedRegs []int, snapshot map[int]string) {
+	for _, regIdx := range affectedRegs {
+		if v.isValidRegisterIndex(regIdx) {
+			v.logRegisterChange(regIdx, snapshot)
+		}
+	}
+}
+
+// isValidRegisterIndex checks if a register index is within valid bounds.
+func (v *VDBE) isValidRegisterIndex(regIdx int) bool {
+	return regIdx >= 0 && regIdx < len(v.Mem)
+}
+
+// logRegisterChange logs a change to a single register if it has changed.
+func (v *VDBE) logRegisterChange(regIdx int, snapshot map[int]string) {
+	oldVal := snapshot[regIdx]
+	newVal := v.Mem[regIdx].String()
+
+	if oldVal != newVal {
+		msg := fmt.Sprintf("R%d: %s -> %s", regIdx, oldVal, newVal)
+		v.logToObservability(v.Debug.LogLevel, "  [REG CHANGE] %s", msg)
+	}
+}
+
+// cleanupOldSnapshots removes old register snapshots to prevent memory leaks.
+func (v *VDBE) cleanupOldSnapshots(currentPC int) {
+	const maxSnapshots = 100
+	const snapshotWindow = 100
+
+	if len(v.Debug.RegisterSnapshots) <= maxSnapshots {
+		return
+	}
+
+	// Keep only the last 100 snapshots
+	cutoffPC := currentPC - snapshotWindow
+	for oldPC := range v.Debug.RegisterSnapshots {
+		if oldPC < cutoffPC {
+			delete(v.Debug.RegisterSnapshots, oldPC)
 		}
 	}
 }

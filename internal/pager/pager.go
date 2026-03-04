@@ -1034,6 +1034,82 @@ func (p *Pager) openJournal() error {
 	return nil
 }
 
+// journalEntry represents a parsed journal entry.
+type journalEntry struct {
+	pgno     Pgno
+	pageData []byte
+	checksum uint32
+	hasChecksum bool
+}
+
+// readJournalEntry reads and parses a single journal entry from the journal file.
+func (p *Pager) readJournalEntry() (*journalEntry, error) {
+	entry := make([]byte, 4+p.pageSize+4)
+	n, err := p.journalFile.Read(entry)
+
+	if err == io.EOF {
+		return nil, io.EOF
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read journal: %w", err)
+	}
+
+	// Check if we have a complete entry with checksum
+	if n >= 4+p.pageSize+4 {
+		return p.parseJournalEntryWithChecksum(entry), nil
+	}
+
+	// Check if we have old format without checksum
+	if n == 4+p.pageSize {
+		return p.parseJournalEntryWithoutChecksum(entry), nil
+	}
+
+	// Incomplete entry - end of journal
+	return nil, io.EOF
+}
+
+// parseJournalEntryWithChecksum parses an entry that includes checksum.
+func (p *Pager) parseJournalEntryWithChecksum(entry []byte) *journalEntry {
+	pgno := Pgno(entry[0])<<24 | Pgno(entry[1])<<16 | Pgno(entry[2])<<8 | Pgno(entry[3])
+	pageData := entry[4 : 4+p.pageSize]
+	checksum := binary.BigEndian.Uint32(entry[4+p.pageSize:])
+
+	return &journalEntry{
+		pgno:        pgno,
+		pageData:    pageData,
+		checksum:    checksum,
+		hasChecksum: true,
+	}
+}
+
+// parseJournalEntryWithoutChecksum parses an entry without checksum (old format).
+func (p *Pager) parseJournalEntryWithoutChecksum(entry []byte) *journalEntry {
+	pgno := Pgno(entry[0])<<24 | Pgno(entry[1])<<16 | Pgno(entry[2])<<8 | Pgno(entry[3])
+	pageData := entry[4 : 4+p.pageSize]
+
+	return &journalEntry{
+		pgno:        pgno,
+		pageData:    pageData,
+		hasChecksum: false,
+	}
+}
+
+// restorePageFromJournal writes page data back to the database file.
+func (p *Pager) restorePageFromJournal(entry *journalEntry) error {
+	// Validate checksum if present
+	if entry.hasChecksum && !p.validateJournalPage(entry.pageData, entry.checksum) {
+		return fmt.Errorf("%w: page %d in journal has invalid checksum", ErrChecksumMismatch, entry.pgno)
+	}
+
+	// Write page data back to database
+	offset := int64(entry.pgno-1) * int64(p.pageSize)
+	if _, err := p.file.WriteAt(entry.pageData, offset); err != nil {
+		return fmt.Errorf("failed to rollback page %d: %w", entry.pgno, err)
+	}
+
+	return nil
+}
+
 // rollbackJournal rolls back changes using the journal file with checksum validation.
 func (p *Pager) rollbackJournal() error {
 	if p.journalFile == nil {
@@ -1047,45 +1123,16 @@ func (p *Pager) rollbackJournal() error {
 
 	// Read and apply journal entries with checksum validation
 	for {
-		// Entry format: [4 bytes page number][pageSize bytes data][4 bytes checksum]
-		entry := make([]byte, 4+p.pageSize+4)
-		n, err := p.journalFile.Read(entry)
-
+		entry, err := p.readJournalEntry()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("failed to read journal: %w", err)
-		}
-		if n < 4+p.pageSize+4 {
-			// Old format without checksum - still support it
-			if n == 4+p.pageSize {
-				pgno := Pgno(entry[0])<<24 | Pgno(entry[1])<<16 | Pgno(entry[2])<<8 | Pgno(entry[3])
-				offset := int64(pgno-1) * int64(p.pageSize)
-				if _, err := p.file.WriteAt(entry[4:4+p.pageSize], offset); err != nil {
-					return fmt.Errorf("failed to rollback page %d: %w", pgno, err)
-				}
-				continue
-			}
-			break
+			return err
 		}
 
-		// Parse page number
-		pgno := Pgno(entry[0])<<24 | Pgno(entry[1])<<16 | Pgno(entry[2])<<8 | Pgno(entry[3])
-
-		// Extract page data and checksum
-		pageData := entry[4 : 4+p.pageSize]
-		expectedChecksum := binary.BigEndian.Uint32(entry[4+p.pageSize:])
-
-		// Validate checksum before applying
-		if !p.validateJournalPage(pageData, expectedChecksum) {
-			return fmt.Errorf("%w: page %d in journal has invalid checksum", ErrChecksumMismatch, pgno)
-		}
-
-		// Write original page data back to database
-		offset := int64(pgno-1) * int64(p.pageSize)
-		if _, err := p.file.WriteAt(pageData, offset); err != nil {
-			return fmt.Errorf("failed to rollback page %d: %w", pgno, err)
+		if err := p.restorePageFromJournal(entry); err != nil {
+			return err
 		}
 	}
 

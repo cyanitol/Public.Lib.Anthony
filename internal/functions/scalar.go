@@ -654,39 +654,59 @@ type printfFormatSpec struct {
 	specifier byte
 }
 
+// isFormatFlag checks if a byte is a printf format flag character
+func isFormatFlag(b byte) bool {
+	return b == '-' || b == '+' || b == ' ' || b == '#' || b == '0'
+}
+
+// skipWhile advances pos while the predicate function returns true
+func skipWhile(format string, pos int, predicate func(byte) bool) int {
+	for pos < len(format) && predicate(format[pos]) {
+		pos++
+	}
+	return pos
+}
+
+// parseDecimalNumber parses a decimal number starting at pos
+// Returns the parsed number and the new position
+func parseDecimalNumber(format string, pos int) (int, int) {
+	num := 0
+	for pos < len(format) && format[pos] >= '0' && format[pos] <= '9' {
+		num = num*10 + int(format[pos]-'0')
+		pos++
+	}
+	return num, pos
+}
+
 // parsePrintfFormatSpec parses a format specifier starting at pos (after the %)
 // Returns the parsed spec and the new position in the format string
 func parsePrintfFormatSpec(format string, pos int) (printfFormatSpec, int) {
 	spec := printfFormatSpec{precision: -1}
-	i := pos
 
-	// Skip flags
-	for i < len(format) && (format[i] == '-' || format[i] == '+' || format[i] == ' ' || format[i] == '#' || format[i] == '0') {
-		i++
+	pos = skipWhile(format, pos, isFormatFlag)
+	spec.width, pos = parseDecimalNumber(format, pos)
+	spec.precision, pos = parsePrecision(format, pos)
+	spec.specifier, pos = parseSpecifier(format, pos)
+
+	return spec, pos
+}
+
+// parsePrecision parses the optional precision field (.NNN)
+func parsePrecision(format string, pos int) (int, int) {
+	if pos >= len(format) || format[pos] != '.' {
+		return -1, pos
 	}
+	pos++ // skip '.'
+	precision, pos := parseDecimalNumber(format, pos)
+	return precision, pos
+}
 
-	// Parse width
-	for i < len(format) && format[i] >= '0' && format[i] <= '9' {
-		spec.width = spec.width*10 + int(format[i]-'0')
-		i++
+// parseSpecifier extracts the format specifier character
+func parseSpecifier(format string, pos int) (byte, int) {
+	if pos >= len(format) {
+		return 0, pos
 	}
-
-	// Parse precision
-	if i < len(format) && format[i] == '.' {
-		i++
-		spec.precision = 0
-		for i < len(format) && format[i] >= '0' && format[i] <= '9' {
-			spec.precision = spec.precision*10 + int(format[i]-'0')
-			i++
-		}
-	}
-
-	if i < len(format) {
-		spec.specifier = format[i]
-		i++
-	}
-
-	return spec, i
+	return format[pos], pos + 1
 }
 
 // formatPrintfInteger formats integer values (%d, %i, %u)

@@ -155,56 +155,85 @@ func (c *DriverConfig) Clone() *DriverConfig {
 	return clone
 }
 
+// pragmaHandler is a function that conditionally appends a pragma to the list.
+type pragmaHandler func(*DriverConfig, *[]string)
+
 // ApplyPragmas returns a list of PRAGMA statements to execute on connection.
 func (c *DriverConfig) ApplyPragmas() []string {
 	pragmas := []string{}
 
-	// Foreign keys
-	if c.EnableForeignKeys {
-		pragmas = append(pragmas, "PRAGMA foreign_keys = ON")
-	} else {
-		pragmas = append(pragmas, "PRAGMA foreign_keys = OFF")
+	// Table-driven approach: each handler checks one condition and appends if needed
+	handlers := []pragmaHandler{
+		c.applyForeignKeys,
+		c.applyJournalMode,
+		c.applySyncMode,
+		c.applyCacheSize,
+		c.applyLockingMode,
+		c.applyAutoVacuum,
+		c.applyCaseSensitiveLike,
+		c.applyRecursiveTriggers,
+		c.applyTempStore,
 	}
 
-	// Journal mode
-	if c.Pager.JournalMode != "" {
-		pragmas = append(pragmas, "PRAGMA journal_mode = "+c.Pager.JournalMode)
-	}
-
-	// Synchronous mode
-	if c.Pager.SyncMode != "" {
-		pragmas = append(pragmas, "PRAGMA synchronous = "+c.Pager.SyncMode)
-	}
-
-	// Cache size (negative value means KB, positive means pages)
-	if c.Pager.CacheSize != 0 {
-		pragmas = append(pragmas, "PRAGMA cache_size = "+strconv.Itoa(c.Pager.CacheSize))
-	}
-
-	// Locking mode
-	if c.Pager.LockingMode != "" {
-		pragmas = append(pragmas, "PRAGMA locking_mode = "+c.Pager.LockingMode)
-	}
-
-	// Auto-vacuum
-	if c.AutoVacuum != "none" {
-		pragmas = append(pragmas, "PRAGMA auto_vacuum = "+c.AutoVacuum)
-	}
-
-	// Case-sensitive LIKE
-	if c.CaseSensitiveLike {
-		pragmas = append(pragmas, "PRAGMA case_sensitive_like = ON")
-	}
-
-	// Recursive triggers
-	if c.RecursiveTriggers {
-		pragmas = append(pragmas, "PRAGMA recursive_triggers = ON")
-	}
-
-	// Temp store
-	if c.Pager.TempStore != "default" {
-		pragmas = append(pragmas, "PRAGMA temp_store = "+c.Pager.TempStore)
+	for _, handler := range handlers {
+		handler(c, &pragmas)
 	}
 
 	return pragmas
+}
+
+func (c *DriverConfig) applyForeignKeys(_ *DriverConfig, pragmas *[]string) {
+	if c.EnableForeignKeys {
+		*pragmas = append(*pragmas, "PRAGMA foreign_keys = ON")
+	} else {
+		*pragmas = append(*pragmas, "PRAGMA foreign_keys = OFF")
+	}
+}
+
+func (c *DriverConfig) applyJournalMode(_ *DriverConfig, pragmas *[]string) {
+	if c.Pager.JournalMode != "" {
+		*pragmas = append(*pragmas, "PRAGMA journal_mode = "+c.Pager.JournalMode)
+	}
+}
+
+func (c *DriverConfig) applySyncMode(_ *DriverConfig, pragmas *[]string) {
+	if c.Pager.SyncMode != "" {
+		*pragmas = append(*pragmas, "PRAGMA synchronous = "+c.Pager.SyncMode)
+	}
+}
+
+func (c *DriverConfig) applyCacheSize(_ *DriverConfig, pragmas *[]string) {
+	if c.Pager.CacheSize != 0 {
+		*pragmas = append(*pragmas, "PRAGMA cache_size = "+strconv.Itoa(c.Pager.CacheSize))
+	}
+}
+
+func (c *DriverConfig) applyLockingMode(_ *DriverConfig, pragmas *[]string) {
+	if c.Pager.LockingMode != "" {
+		*pragmas = append(*pragmas, "PRAGMA locking_mode = "+c.Pager.LockingMode)
+	}
+}
+
+func (c *DriverConfig) applyAutoVacuum(_ *DriverConfig, pragmas *[]string) {
+	if c.AutoVacuum != "none" {
+		*pragmas = append(*pragmas, "PRAGMA auto_vacuum = "+c.AutoVacuum)
+	}
+}
+
+func (c *DriverConfig) applyCaseSensitiveLike(_ *DriverConfig, pragmas *[]string) {
+	if c.CaseSensitiveLike {
+		*pragmas = append(*pragmas, "PRAGMA case_sensitive_like = ON")
+	}
+}
+
+func (c *DriverConfig) applyRecursiveTriggers(_ *DriverConfig, pragmas *[]string) {
+	if c.RecursiveTriggers {
+		*pragmas = append(*pragmas, "PRAGMA recursive_triggers = ON")
+	}
+}
+
+func (c *DriverConfig) applyTempStore(_ *DriverConfig, pragmas *[]string) {
+	if c.Pager.TempStore != "default" {
+		*pragmas = append(*pragmas, "PRAGMA temp_store = "+c.Pager.TempStore)
+	}
 }

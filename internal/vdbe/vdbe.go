@@ -240,27 +240,38 @@ func (s *Sorter) Sort() {
 	s.Sorted = true
 }
 
+// isColumnInBounds checks if the column index is valid for both rows.
+func (s *Sorter) isColumnInBounds(colIdx int, a, b []*Mem) bool {
+	return colIdx < len(a) && colIdx < len(b)
+}
+
+// compareColumn compares a single column from two rows using the appropriate collation.
+func (s *Sorter) compareColumn(a, b *Mem, keyIdx int) int {
+	if len(s.Collations) > keyIdx && s.Collations[keyIdx] != "" {
+		return a.CompareWithCollationRegistry(b, s.Collations[keyIdx], s.CollationRegistry)
+	}
+	return a.Compare(b)
+}
+
+// applySortDirection applies the sort direction (ASC/DESC) to a comparison result.
+func (s *Sorter) applySortDirection(cmp int, keyIdx int) int {
+	if len(s.Desc) > keyIdx && s.Desc[keyIdx] {
+		return -cmp // Reverse for DESC
+	}
+	return cmp
+}
+
 // compareRows compares two rows based on key columns.
 // Returns negative if a < b, positive if a > b, 0 if equal.
 func (s *Sorter) compareRows(a, b []*Mem) int {
 	for i, colIdx := range s.KeyCols {
-		if colIdx >= len(a) || colIdx >= len(b) {
+		if !s.isColumnInBounds(colIdx, a, b) {
 			continue
 		}
 
-		// Use collation if specified for this key column
-		var cmp int
-		if len(s.Collations) > i && s.Collations[i] != "" {
-			cmp = a[colIdx].CompareWithCollationRegistry(b[colIdx], s.Collations[i], s.CollationRegistry)
-		} else {
-			cmp = a[colIdx].Compare(b[colIdx])
-		}
-
+		cmp := s.compareColumn(a[colIdx], b[colIdx], i)
 		if cmp != 0 {
-			if len(s.Desc) > i && s.Desc[i] {
-				return -cmp // Reverse for DESC
-			}
-			return cmp
+			return s.applySortDirection(cmp, i)
 		}
 	}
 	return 0
@@ -501,36 +512,10 @@ func (v *VDBE) Reset() error {
 
 // Finalize finalizes the VDBE and releases all resources.
 func (v *VDBE) Finalize() error {
-	// Return all memory cells to pool
-	for _, mem := range v.Mem {
-		if mem != nil {
-			PutMem(mem)
-		}
-	}
-	v.Mem = nil
-
-	// Return ResultRow cells to pool
-	for _, mem := range v.ResultRow {
-		if mem != nil {
-			PutMem(mem)
-		}
-	}
-	v.ResultRow = nil
-
-	// Close all sorters and return pooled memory
-	for _, sorter := range v.Sorters {
-		if sorter != nil {
-			sorter.Close()
-		}
-	}
-	v.Sorters = nil
-
-	// Return all instructions to pool
-	for _, instr := range v.Program {
-		if instr != nil {
-			PutInstruction(instr)
-		}
-	}
+	v.releaseMemoryCells()
+	v.releaseResultRow()
+	v.releaseSorters()
+	v.releaseInstructions()
 
 	// Close all cursors
 	v.Cursors = nil
@@ -540,6 +525,45 @@ func (v *VDBE) Finalize() error {
 
 	v.State = StateHalt
 	return nil
+}
+
+// releaseMemoryCells returns all memory cells to the pool.
+func (v *VDBE) releaseMemoryCells() {
+	for _, mem := range v.Mem {
+		if mem != nil {
+			PutMem(mem)
+		}
+	}
+	v.Mem = nil
+}
+
+// releaseResultRow returns ResultRow cells to the pool.
+func (v *VDBE) releaseResultRow() {
+	for _, mem := range v.ResultRow {
+		if mem != nil {
+			PutMem(mem)
+		}
+	}
+	v.ResultRow = nil
+}
+
+// releaseSorters closes all sorters and returns pooled memory.
+func (v *VDBE) releaseSorters() {
+	for _, sorter := range v.Sorters {
+		if sorter != nil {
+			sorter.Close()
+		}
+	}
+	v.Sorters = nil
+}
+
+// releaseInstructions returns all instructions to the pool.
+func (v *VDBE) releaseInstructions() {
+	for _, instr := range v.Program {
+		if instr != nil {
+			PutInstruction(instr)
+		}
+	}
 }
 
 // SetError sets an error message on the VDBE.

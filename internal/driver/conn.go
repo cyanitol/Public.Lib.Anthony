@@ -108,10 +108,29 @@ func (c *Conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, e
 // Phase 4: Close pager
 func (c *Conn) Close() error {
 	// Phase 1: Mark closed and collect cleanup items under conn lock
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
+	stmts, inTx, pager := c.markClosedAndCollect()
+	if stmts == nil {
 		return nil // Already closed
+	}
+
+	// Phase 2: Close statements without holding conn lock
+	c.closeStatements(stmts)
+
+	// Phase 3: Remove from driver (only driver lock needed)
+	c.removeFromDriver()
+
+	// Phase 4: Close pager (no locks needed)
+	return c.closePager(pager, inTx)
+}
+
+// markClosedAndCollect marks the connection as closed and collects cleanup items.
+// Returns nil stmts if already closed.
+func (c *Conn) markClosedAndCollect() ([]*Stmt, bool, pager.PagerInterface) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return nil, false, nil // Already closed
 	}
 	c.closed = true
 
@@ -122,13 +141,12 @@ func (c *Conn) Close() error {
 	}
 	c.stmts = nil
 
-	// Collect transaction state and pager reference
-	inTx := c.inTx
-	pager := c.pager
-	c.mu.Unlock()
+	return stmts, c.inTx, c.pager
+}
 
-	// Phase 2: Close statements without holding conn lock
-	// This avoids deadlock since stmt.Close() calls removeStmt() which needs conn.mu
+// closeStatements closes all statements without holding conn lock.
+// This avoids deadlock since stmt.Close() calls removeStmt() which needs conn.mu.
+func (c *Conn) closeStatements(stmts []*Stmt) {
 	for _, stmt := range stmts {
 		stmt.mu.Lock()
 		stmt.closed = true
@@ -138,31 +156,33 @@ func (c *Conn) Close() error {
 		}
 		stmt.mu.Unlock()
 	}
+}
 
-	// Phase 3: Remove from driver (only driver lock needed)
-	// This respects the lock hierarchy: Driver.mu should be acquired before Conn.mu
+// removeFromDriver removes the connection from the driver's connection map.
+// This respects the lock hierarchy: Driver.mu should be acquired before Conn.mu.
+func (c *Conn) removeFromDriver() {
 	if c.driver != nil {
 		c.driver.mu.Lock()
 		delete(c.driver.conns, c.filename)
 		c.driver.mu.Unlock()
 	}
+}
 
-	// Phase 4: Close pager (no locks needed)
-	if pager != nil {
-		// Rollback any active transaction
-		if inTx {
-			if err := pager.Rollback(); err != nil {
-				return err
-			}
-		}
+// closePager closes the pager, rolling back any active transaction first.
+func (c *Conn) closePager(pager pager.PagerInterface, inTx bool) error {
+	if pager == nil {
+		return nil
+	}
 
-		// Close pager
-		if err := pager.Close(); err != nil {
+	// Rollback any active transaction
+	if inTx {
+		if err := pager.Rollback(); err != nil {
 			return err
 		}
 	}
 
-	return nil
+	// Close pager
+	return pager.Close()
 }
 
 // Begin starts a transaction.

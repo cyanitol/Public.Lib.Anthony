@@ -247,38 +247,63 @@ func (s *Schema) DropTable(name string) error {
 	return nil
 }
 
+// checkNameConflict checks if a name conflicts with existing tables or indexes.
+// Caller must hold the schema lock.
+func (s *Schema) checkNameConflict(name string) error {
+	lowerName := strings.ToLower(name)
+
+	for tableName := range s.Tables {
+		if strings.ToLower(tableName) == lowerName {
+			return fmt.Errorf("there is already another table or index with this name: %s", name)
+		}
+	}
+
+	for indexName := range s.Indexes {
+		if strings.ToLower(indexName) == lowerName {
+			return fmt.Errorf("there is already another table or index with this name: %s", name)
+		}
+	}
+
+	return nil
+}
+
+// findTableName finds the actual table name (case-insensitive lookup).
+// Returns the actual name and true if found, empty string and false otherwise.
+// Caller must hold the schema lock.
+func (s *Schema) findTableName(name string) (string, bool) {
+	lowerName := strings.ToLower(name)
+	for tableName := range s.Tables {
+		if strings.ToLower(tableName) == lowerName {
+			return tableName, true
+		}
+	}
+	return "", false
+}
+
+// updateIndexTableReferences updates all index references from oldName to newName.
+// Caller must hold the schema lock.
+func (s *Schema) updateIndexTableReferences(oldName, newName string) {
+	lowerOldName := strings.ToLower(oldName)
+	for _, idx := range s.Indexes {
+		if strings.ToLower(idx.Table) == lowerOldName {
+			idx.Table = newName
+		}
+	}
+}
+
 // RenameTable renames a table in the schema.
 func (s *Schema) RenameTable(oldName, newName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	lowerOldName := strings.ToLower(oldName)
-	lowerNewName := strings.ToLower(newName)
-
-	// Check if new name conflicts with existing table
-	for tableName := range s.Tables {
-		if strings.ToLower(tableName) == lowerNewName {
-			return fmt.Errorf("there is already another table or index with this name: %s", newName)
-		}
-	}
-
-	// Check if new name conflicts with existing index
-	for indexName := range s.Indexes {
-		if strings.ToLower(indexName) == lowerNewName {
-			return fmt.Errorf("there is already another table or index with this name: %s", newName)
-		}
+	// Check if new name conflicts with existing table or index
+	if err := s.checkNameConflict(newName); err != nil {
+		return err
 	}
 
 	// Find the old table
-	var actualOldName string
-	for tableName := range s.Tables {
-		if strings.ToLower(tableName) == lowerOldName {
-			actualOldName = tableName
-			break
-		}
-	}
-
-	if actualOldName == "" {
+	actualOldName, found := s.findTableName(oldName)
+	if !found {
 		return fmt.Errorf("table not found: %s", oldName)
 	}
 
@@ -289,11 +314,7 @@ func (s *Schema) RenameTable(oldName, newName string) error {
 	s.Tables[newName] = table
 
 	// Update index references
-	for _, idx := range s.Indexes {
-		if strings.ToLower(idx.Table) == lowerOldName {
-			idx.Table = newName
-		}
-	}
+	s.updateIndexTableReferences(oldName, newName)
 
 	return nil
 }

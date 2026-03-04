@@ -729,82 +729,123 @@ func (g *CodeGenerator) generateFunction(e *parser.FunctionExpr) (int, error) {
 func (g *CodeGenerator) generateCase(e *parser.CaseExpr) (int, error) {
 	resultReg := g.AllocReg()
 
-	// Track jump addresses to patch
-	var endJumps []int
-
-	// For simple CASE (CASE x WHEN v1 THEN r1 ...), evaluate x once
-	var caseExprReg int
-	if e.Expr != nil {
-		var err error
-		caseExprReg, err = g.GenerateExpr(e.Expr)
-		if err != nil {
-			return 0, err
-		}
+	// Evaluate the CASE expression once if present (for simple CASE)
+	caseExprReg, err := g.evaluateCaseExpr(e)
+	if err != nil {
+		return 0, err
 	}
 
 	// Generate code for each WHEN clause
-	for _, when := range e.WhenClauses {
-		var condReg int
-		var err error
-
-		if e.Expr != nil {
-			// Simple CASE: compare CASE expression with WHEN value
-			// CASE x WHEN v1 THEN r1 ... => compare x = v1
-			whenValueReg, err := g.GenerateExpr(when.Condition)
-			if err != nil {
-				return 0, err
-			}
-			// Generate comparison: caseExprReg == whenValueReg
-			condReg = g.AllocReg()
-			g.vdbe.AddOp(vdbe.OpEq, caseExprReg, whenValueReg, condReg)
-		} else {
-			// Searched CASE: evaluate WHEN condition directly
-			condReg, err = g.GenerateExpr(when.Condition)
-			if err != nil {
-				return 0, err
-			}
-		}
-
-		// If condition is false, jump to next WHEN
-		nextWhenAddr := g.vdbe.NumOps() + 100 // Placeholder
-		g.vdbe.AddOp(vdbe.OpIfNot, condReg, nextWhenAddr, 0)
-		jumpToNext := g.vdbe.NumOps() - 1
-
-		// Evaluate THEN result
-		thenReg, err := g.GenerateExpr(when.Result)
-		if err != nil {
-			return 0, err
-		}
-
-		// Copy result
-		g.vdbe.AddOp(vdbe.OpCopy, thenReg, resultReg, 0)
-
-		// Jump to end
-		g.vdbe.AddOp(vdbe.OpGoto, 0, 0, 0)
-		endJumps = append(endJumps, g.vdbe.NumOps()-1)
-
-		// Patch jump to next WHEN
-		g.vdbe.Program[jumpToNext].P2 = g.vdbe.NumOps()
+	endJumps, err := g.generateWhenClauses(e, caseExprReg, resultReg)
+	if err != nil {
+		return 0, err
 	}
 
 	// Generate ELSE clause (or NULL if not present)
+	if err := g.generateElseClause(e, resultReg); err != nil {
+		return 0, err
+	}
+
+	// Patch all end jumps
+	g.patchJumpsToEnd(endJumps)
+
+	return resultReg, nil
+}
+
+// evaluateCaseExpr evaluates the CASE expression for simple CASE statements.
+// Returns the register containing the evaluated expression, or 0 if not present.
+func (g *CodeGenerator) evaluateCaseExpr(e *parser.CaseExpr) (int, error) {
+	if e.Expr == nil {
+		return 0, nil
+	}
+	return g.GenerateExpr(e.Expr)
+}
+
+// generateWhenClauses generates code for all WHEN clauses.
+// Returns a slice of jump addresses that need to be patched to point to the end.
+func (g *CodeGenerator) generateWhenClauses(e *parser.CaseExpr, caseExprReg, resultReg int) ([]int, error) {
+	var endJumps []int
+
+	for _, when := range e.WhenClauses {
+		// Generate condition evaluation
+		condReg, err := g.generateWhenCondition(e, &when, caseExprReg)
+		if err != nil {
+			return nil, err
+		}
+
+		// Generate THEN clause and collect end jump
+		endJump, err := g.generateThenClause(&when, condReg, resultReg)
+		if err != nil {
+			return nil, err
+		}
+		endJumps = append(endJumps, endJump)
+	}
+
+	return endJumps, nil
+}
+
+// generateWhenCondition generates code for a single WHEN condition.
+// For simple CASE, compares the case expression with the when value.
+// For searched CASE, evaluates the condition directly.
+func (g *CodeGenerator) generateWhenCondition(e *parser.CaseExpr, when *parser.WhenClause, caseExprReg int) (int, error) {
+	if e.Expr != nil {
+		// Simple CASE: compare CASE expression with WHEN value
+		return g.generateSimpleCaseCondition(when, caseExprReg)
+	}
+	// Searched CASE: evaluate WHEN condition directly
+	return g.GenerateExpr(when.Condition)
+}
+
+// generateSimpleCaseCondition generates comparison code for simple CASE.
+func (g *CodeGenerator) generateSimpleCaseCondition(when *parser.WhenClause, caseExprReg int) (int, error) {
+	whenValueReg, err := g.GenerateExpr(when.Condition)
+	if err != nil {
+		return 0, err
+	}
+	condReg := g.AllocReg()
+	g.vdbe.AddOp(vdbe.OpEq, caseExprReg, whenValueReg, condReg)
+	return condReg, nil
+}
+
+// generateThenClause generates code for a THEN clause.
+// Returns the address of the jump to end that needs to be patched.
+func (g *CodeGenerator) generateThenClause(when *parser.WhenClause, condReg, resultReg int) (int, error) {
+	// If condition is false, jump to next WHEN
+	nextWhenAddr := g.vdbe.NumOps() + 100 // Placeholder
+	g.vdbe.AddOp(vdbe.OpIfNot, condReg, nextWhenAddr, 0)
+	jumpToNext := g.vdbe.NumOps() - 1
+
+	// Evaluate THEN result
+	thenReg, err := g.GenerateExpr(when.Result)
+	if err != nil {
+		return 0, err
+	}
+
+	// Copy result
+	g.vdbe.AddOp(vdbe.OpCopy, thenReg, resultReg, 0)
+
+	// Jump to end
+	g.vdbe.AddOp(vdbe.OpGoto, 0, 0, 0)
+	endJump := g.vdbe.NumOps() - 1
+
+	// Patch jump to next WHEN
+	g.vdbe.Program[jumpToNext].P2 = g.vdbe.NumOps()
+
+	return endJump, nil
+}
+
+// generateElseClause generates code for the ELSE clause or NULL if not present.
+func (g *CodeGenerator) generateElseClause(e *parser.CaseExpr, resultReg int) error {
 	if e.ElseClause != nil {
 		elseReg, err := g.GenerateExpr(e.ElseClause)
 		if err != nil {
-			return 0, err
+			return err
 		}
 		g.vdbe.AddOp(vdbe.OpCopy, elseReg, resultReg, 0)
 	} else {
 		g.vdbe.AddOp(vdbe.OpNull, 0, resultReg, 0)
 	}
-
-	// Patch all end jumps
-	endAddr := g.vdbe.NumOps()
-	for _, jumpAddr := range endJumps {
-		g.vdbe.Program[jumpAddr].P2 = endAddr
-	}
-
-	return resultReg, nil
+	return nil
 }
 
 // generateIn generates code for IN expressions.
@@ -1292,88 +1333,96 @@ func (g *CodeGenerator) generateExists(e *parser.ExistsExpr) (int, error) {
 	}
 
 	resultReg := g.AllocReg()
+	g.initExistsResult(resultReg)
 
-	// Initialize result to false (0) - will be set to 1 if any row is produced
+	selectWithLimit := g.applyExistsLimit(e.Select)
+	subVM, err := g.subqueryCompiler(selectWithLimit)
+	if err != nil {
+		return 0, fmt.Errorf("failed to compile EXISTS subquery: %w", err)
+	}
+
+	addrSubqueryStart := g.vdbe.NumOps()
+	g.adjustSubqueryJumpTargets(subVM, addrSubqueryStart)
+	resultRowGotoAddrs := g.embedExistsSubquery(subVM, resultReg)
+	g.finalizeExistsSubquery(resultReg, resultRowGotoAddrs)
+
+	return g.applyExistsNegation(e.Not, resultReg), nil
+}
+
+// initExistsResult initializes the EXISTS result register to false.
+func (g *CodeGenerator) initExistsResult(resultReg int) {
 	g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS: init result to false")
+}
 
-	// Add LIMIT 1 to the SELECT if it doesn't have one
-	// EXISTS only needs to check if at least one row exists
-	selectWithLimit := *e.Select
+// applyExistsLimit adds LIMIT 1 to the SELECT if it doesn't have one.
+// EXISTS only needs to check if at least one row exists.
+func (g *CodeGenerator) applyExistsLimit(selectStmt *parser.SelectStmt) *parser.SelectStmt {
+	selectWithLimit := *selectStmt
 	if selectWithLimit.Limit == nil {
 		selectWithLimit.Limit = &parser.LiteralExpr{
 			Type:  parser.LiteralInteger,
 			Value: "1",
 		}
 	}
+	return &selectWithLimit
+}
 
-	// Compile the SELECT statement
-	subVM, err := g.subqueryCompiler(&selectWithLimit)
-	if err != nil {
-		return 0, fmt.Errorf("failed to compile EXISTS subquery: %w", err)
-	}
-
-	// Record subquery start address for jump target adjustment
-	addrSubqueryStart := g.vdbe.NumOps()
-
-	// NOTE: setupSubqueryCompiler already handles:
-	// - Register adjustment (adjustSubqueryRegisters)
-	// - Cursor adjustment (adjustSubqueryCursors)
-	// - Memory/cursor allocation in parent VDBE
-	// We only need to adjust jump targets here for the embedding position
-
-	// Adjust jump targets in subquery bytecode for embedding position
-	g.adjustSubqueryJumpTargets(subVM, addrSubqueryStart)
-
-	// Track addresses where ResultRow is replaced with assignment (need to patch later)
+// embedExistsSubquery embeds subquery bytecode, replacing ResultRow and Halt opcodes.
+// Returns the addresses of ResultRow Goto instructions that need patching.
+func (g *CodeGenerator) embedExistsSubquery(subVM *vdbe.VDBE, resultReg int) []int {
 	var resultRowGotoAddrs []int
-
-	// Copy the subquery bytecode into the current VDBE
-	// Replace ResultRow with: Set result to 1 (true), then Goto past subquery
-	// Replace Halt with Noop (don't halt the main program)
 	for i := 0; i < subVM.NumOps(); i++ {
 		instr := subVM.Program[i]
 		switch instr.Opcode {
 		case vdbe.OpResultRow:
-			// For EXISTS, any row means true - set result to 1
-			g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
-			g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS: row found, set true")
-			// Goto past subquery (will patch address later)
-			resultRowGotoAddrs = append(resultRowGotoAddrs, g.vdbe.NumOps())
-			g.vdbe.AddOp(vdbe.OpGoto, 0, 0, 0)
-			g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS: done, skip to end")
+			resultRowGotoAddrs = g.emitExistsResultRow(resultReg, resultRowGotoAddrs)
 		case vdbe.OpHalt:
-			// Convert Halt to Noop - subquery shouldn't halt main program
-			g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
-			g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS: stripped Halt")
+			g.emitExistsHalt()
 		default:
-			// Create a copy of the instruction to avoid aliasing
 			instrCopy := *instr
 			g.vdbe.Program = append(g.vdbe.Program, &instrCopy)
 		}
 	}
-
-	// Update nextReg to account for registers used by subquery
 	g.nextReg += subVM.NumMem
+	return resultRowGotoAddrs
+}
 
-	// End of subquery - patch all ResultRow Goto addresses to point here
+// emitExistsResultRow emits code to set result to true and jump to end.
+func (g *CodeGenerator) emitExistsResultRow(resultReg int, gotoAddrs []int) []int {
+	g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS: row found, set true")
+	gotoAddrs = append(gotoAddrs, g.vdbe.NumOps())
+	g.vdbe.AddOp(vdbe.OpGoto, 0, 0, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS: done, skip to end")
+	return gotoAddrs
+}
+
+// emitExistsHalt replaces Halt with Noop in EXISTS subquery.
+func (g *CodeGenerator) emitExistsHalt() {
+	g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS: stripped Halt")
+}
+
+// finalizeExistsSubquery patches jump addresses and adds end marker.
+func (g *CodeGenerator) finalizeExistsSubquery(resultReg int, resultRowGotoAddrs []int) {
 	addrAfterSubquery := g.vdbe.NumOps()
 	for _, addr := range resultRowGotoAddrs {
 		g.vdbe.Program[addr].P2 = addrAfterSubquery
 	}
-
 	g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS subquery: end")
+}
 
-	// Handle NOT EXISTS
-	if e.Not {
+// applyExistsNegation handles NOT EXISTS by negating the result.
+func (g *CodeGenerator) applyExistsNegation(not bool, resultReg int) int {
+	if not {
 		notReg := g.AllocReg()
 		g.vdbe.AddOp(vdbe.OpNot, resultReg, notReg, 0)
 		g.vdbe.SetComment(g.vdbe.NumOps()-1, "NOT EXISTS: negate result")
-		return notReg, nil
+		return notReg
 	}
-
-	return resultReg, nil
+	return resultReg
 }
 
 // generateVariable generates code for parameter placeholders (?, ?1, :name, etc.).
