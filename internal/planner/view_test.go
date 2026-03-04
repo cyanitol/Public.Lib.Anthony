@@ -854,7 +854,8 @@ func TestCanFlattenView(t *testing.T) {
 					},
 				},
 			},
-			expected: false,
+			// Views with explicit columns can now be flattened with proper column mapping
+			expected: true,
 		},
 		{
 			name: "view with join",

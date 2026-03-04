@@ -283,9 +283,9 @@ func hasNoComplexFeatures(sel *parser.SelectStmt) bool {
 
 // hasNoExplicitColumns checks if view has no explicit column names.
 func hasNoExplicitColumns(view *schema.View) bool {
-	// Don't flatten views with explicit column names
-	// because flattening loses the column name mapping
-	return len(view.Columns) == 0
+	// We can flatten views with explicit column names as long as we
+	// properly apply the column name mapping during flattening
+	return true
 }
 
 // flattenSimpleView flattens a simple view into the outer query.
@@ -312,6 +312,15 @@ func flattenSimpleView(outer *parser.SelectStmt, tableIdx int, view *schema.View
 	outer.From.Tables[tableIdx].TableName = underlyingTable
 	outer.From.Tables[tableIdx].Subquery = nil
 
+	// If the view has explicit column names, we need to map the outer query's
+	// column references to the view's underlying columns
+	if len(view.Columns) > 0 {
+		err := applyViewColumnMapping(outer, view, viewSelect)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Handle SELECT * from the view - replace with view's columns
 	if isSelectStar(outer) {
 		outer.Columns = viewSelect.Columns
@@ -332,6 +341,145 @@ func flattenSimpleView(outer *parser.SelectStmt, tableIdx int, view *schema.View
 	}
 
 	return outer, nil
+}
+
+// applyViewColumnMapping maps column references from the view's explicit column
+// names to the underlying table's column names.
+func applyViewColumnMapping(outer *parser.SelectStmt, view *schema.View, viewSelect *parser.SelectStmt) error {
+	// Create a mapping from view column names to underlying column expressions
+	columnMap := make(map[string]parser.Expression)
+	for i, viewColName := range view.Columns {
+		if i < len(viewSelect.Columns) {
+			columnMap[viewColName] = viewSelect.Columns[i].Expr
+		}
+	}
+
+	// Rewrite column references in the outer query's SELECT columns
+	// Preserve the original column names as aliases
+	for i := range outer.Columns {
+		origName := ""
+		if ident, ok := outer.Columns[i].Expr.(*parser.IdentExpr); ok && ident.Table == "" {
+			origName = ident.Name
+		}
+		outer.Columns[i].Expr = rewriteColumnReferences(outer.Columns[i].Expr, columnMap)
+		// Set alias to preserve the original column name from the view
+		if origName != "" && outer.Columns[i].Alias == "" {
+			outer.Columns[i].Alias = origName
+		}
+	}
+
+	// Rewrite column references in WHERE clause
+	if outer.Where != nil {
+		outer.Where = rewriteColumnReferences(outer.Where, columnMap)
+	}
+
+	// Rewrite column references in ORDER BY clause
+	for i := range outer.OrderBy {
+		outer.OrderBy[i].Expr = rewriteColumnReferences(outer.OrderBy[i].Expr, columnMap)
+	}
+
+	// Rewrite column references in GROUP BY clause
+	for i := range outer.GroupBy {
+		outer.GroupBy[i] = rewriteColumnReferences(outer.GroupBy[i], columnMap)
+	}
+
+	// Rewrite column references in HAVING clause
+	if outer.Having != nil {
+		outer.Having = rewriteColumnReferences(outer.Having, columnMap)
+	}
+
+	return nil
+}
+
+// copyExpression creates a deep copy of an expression to avoid shared references.
+func copyExpression(expr parser.Expression) parser.Expression {
+	if expr == nil {
+		return nil
+	}
+
+	switch e := expr.(type) {
+	case *parser.IdentExpr:
+		copy := *e
+		return &copy
+	case *parser.LiteralExpr:
+		copy := *e
+		return &copy
+	case *parser.BinaryExpr:
+		copy := *e
+		copy.Left = copyExpression(e.Left)
+		copy.Right = copyExpression(e.Right)
+		return &copy
+	case *parser.UnaryExpr:
+		copy := *e
+		copy.Expr = copyExpression(e.Expr)
+		return &copy
+	case *parser.FunctionExpr:
+		copy := *e
+		copy.Args = make([]parser.Expression, len(e.Args))
+		for i, arg := range e.Args {
+			copy.Args[i] = copyExpression(arg)
+		}
+		return &copy
+	default:
+		// For other types, return as-is (might need more cases)
+		return expr
+	}
+}
+
+// rewriteColumnReferences recursively rewrites column references using the mapping.
+func rewriteColumnReferences(expr parser.Expression, columnMap map[string]parser.Expression) parser.Expression {
+	if expr == nil {
+		return nil
+	}
+
+	switch e := expr.(type) {
+	case *parser.IdentExpr:
+		// Check if this is a view column that needs to be mapped
+		if mapped, ok := columnMap[e.Name]; ok {
+			// Return a copy of the mapped expression to avoid shared references
+			return copyExpression(mapped)
+		}
+		return expr
+
+	case *parser.BinaryExpr:
+		e.Left = rewriteColumnReferences(e.Left, columnMap)
+		e.Right = rewriteColumnReferences(e.Right, columnMap)
+		return e
+
+	case *parser.UnaryExpr:
+		e.Expr = rewriteColumnReferences(e.Expr, columnMap)
+		return e
+
+	case *parser.FunctionExpr:
+		for i := range e.Args {
+			e.Args[i] = rewriteColumnReferences(e.Args[i], columnMap)
+		}
+		return e
+
+	case *parser.CaseExpr:
+		for i := range e.WhenClauses {
+			e.WhenClauses[i].Condition = rewriteColumnReferences(e.WhenClauses[i].Condition, columnMap)
+			e.WhenClauses[i].Result = rewriteColumnReferences(e.WhenClauses[i].Result, columnMap)
+		}
+		e.ElseClause = rewriteColumnReferences(e.ElseClause, columnMap)
+		return e
+
+	case *parser.CastExpr:
+		e.Expr = rewriteColumnReferences(e.Expr, columnMap)
+		return e
+
+	case *parser.CollateExpr:
+		e.Expr = rewriteColumnReferences(e.Expr, columnMap)
+		return e
+
+	case *parser.ParenExpr:
+		e.Expr = rewriteColumnReferences(e.Expr, columnMap)
+		return e
+
+	default:
+		// For other expression types (literals, etc.), return as-is
+		return expr
+	}
 }
 
 // isSelectStar checks if a SELECT statement uses SELECT *.

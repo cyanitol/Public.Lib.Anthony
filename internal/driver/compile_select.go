@@ -277,6 +277,20 @@ func (s *Stmt) compileSelectWithoutFrom(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	// Initialize VM
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 
+	// Handle WHERE clause if present
+	// For SELECT without FROM, we evaluate the WHERE once and skip result if false
+	addrHalt := -1
+	if stmt.Where != nil {
+		// Evaluate WHERE condition
+		whereReg, err := gen.GenerateExpr(stmt.Where)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate WHERE condition: %w", err)
+		}
+		// If WHERE is false, jump to Halt (skip ResultRow)
+		vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+		addrHalt = vm.NumOps() - 1
+	}
+
 	// Evaluate each column expression
 	for i, col := range stmt.Columns {
 		// Generate code for the expression
@@ -290,9 +304,14 @@ func (s *Stmt) compileSelectWithoutFrom(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 		}
 	}
 
-	// Return single row with the computed values
+	// Return single row with the computed values (only if WHERE passed)
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+
+	// Halt instruction - patch WHERE jump to point here if condition was false
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	if addrHalt >= 0 {
+		vm.Program[addrHalt].P2 = vm.NumOps() - 1
+	}
 
 	return vm, nil
 }
@@ -569,8 +588,13 @@ func (s *Stmt) emitOrderBySorterPopulation(vm *vdbe.VDBE, stmt *parser.SelectStm
 func (s *Stmt) emitExtraOrderByColumn(vm *vdbe.VDBE, table *schema.Table, colName string, targetReg int) {
 	tableColIdx := table.GetColumnIndex(colName)
 	if tableColIdx >= 0 {
-		recordIdx := schemaRecordIdx(table.Columns, tableColIdx)
-		vm.AddOp(vdbe.OpColumn, 0, recordIdx, targetReg)
+		// Check if this is a rowid column (INTEGER PRIMARY KEY)
+		if schemaColIsRowid(table.Columns[tableColIdx]) {
+			vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
+		} else {
+			recordIdx := schemaRecordIdx(table.Columns, tableColIdx)
+			vm.AddOp(vdbe.OpColumn, 0, recordIdx, targetReg)
+		}
 	} else {
 		vm.AddOp(vdbe.OpNull, 0, targetReg, 0)
 	}
