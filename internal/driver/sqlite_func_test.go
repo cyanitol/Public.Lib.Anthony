@@ -396,37 +396,31 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "min_two_args",
 			expr: "SELECT min(1, 2)",
 			want: int64(1),
-			skip: "scalar MIN not implemented - only aggregate MIN",
 		},
 		{
 			name: "min_three_args",
 			expr: "SELECT min(3, 1, 2)",
 			want: int64(1),
-			skip: "scalar MIN not implemented - only aggregate MIN",
 		},
 		{
 			name: "max_two_args",
 			expr: "SELECT max(1, 2)",
 			want: int64(2),
-			skip: "scalar MAX not implemented - only aggregate MAX",
 		},
 		{
 			name: "max_three_args",
 			expr: "SELECT max(3, 1, 2)",
 			want: int64(3),
-			skip: "scalar MAX not implemented - only aggregate MAX",
 		},
 		{
 			name: "min_with_null",
 			expr: "SELECT min(1, NULL, 2)",
 			want: int64(1),
-			skip: "scalar MIN not implemented - only aggregate MIN",
 		},
 		{
 			name: "max_with_null",
 			expr: "SELECT max(1, NULL, 2)",
 			want: int64(2),
-			skip: "scalar MAX not implemented - only aggregate MAX",
 		},
 
 		// random() function tests (func.test lines 488-513)
@@ -496,19 +490,16 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "printf_string",
 			expr: "SELECT printf('Hello %s', 'World')",
 			want: "Hello World",
-			skip: "PRINTF function not implemented",
 		},
 		{
 			name: "printf_integer",
 			expr: "SELECT printf('Number: %d', 42)",
 			want: "Number: 42",
-			skip: "PRINTF function not implemented",
 		},
 		{
 			name: "printf_float",
 			expr: "SELECT printf('Pi: %.2f', 3.14159)",
 			want: "Pi: 3.14",
-			skip: "PRINTF function not implemented",
 		},
 
 		// Date/time functions (basic tests)

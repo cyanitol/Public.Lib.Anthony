@@ -38,7 +38,8 @@ func NewFunctionContextWithRegistry(registry *functions.Registry) *FunctionConte
 
 // ExecuteFunction runs a scalar function
 func (fc *FunctionContext) ExecuteFunction(name string, args []*Mem) (*Mem, error) {
-	fn, ok := fc.registry.Lookup(name)
+	// Use LookupWithArgs to support function overloading (e.g., scalar min/max vs aggregate)
+	fn, ok := fc.registry.LookupWithArgs(name, len(args))
 	if !ok {
 		return nil, fmt.Errorf("unknown function: %s", name)
 	}

@@ -44,6 +44,14 @@ func RegisterScalarFunctions(r *Registry) {
 
 	// Blob functions
 	r.Register(NewScalarFunc("zeroblob", 1, zeroblobFunc))
+
+	// Scalar min/max (multi-arg versions, different from aggregate min/max)
+	// Use RegisterUser with -1 (variadic) to give them priority over aggregate versions
+	r.RegisterUser(NewScalarFunc("min", -1, minScalarFunc), -1)
+	r.RegisterUser(NewScalarFunc("max", -1, maxScalarFunc), -1)
+
+	// Printf function
+	r.Register(NewScalarFunc("printf", -1, printfFunc))
 }
 
 // lengthFunc implements length(X)
@@ -637,4 +645,178 @@ func likelihoodFunc(args []Value) (Value, error) {
 		}
 	}
 	return args[0], nil
+}
+
+// printfFunc implements printf(FORMAT, ...) - formatted string output
+func printfFunc(args []Value) (Value, error) {
+	if len(args) < 1 {
+		return nil, fmt.Errorf("printf() requires at least 1 argument")
+	}
+	if args[0].IsNull() {
+		return NewNullValue(), nil
+	}
+
+	format := args[0].AsString()
+	argIdx := 1
+	var result strings.Builder
+
+	i := 0
+	for i < len(format) {
+		if format[i] != '%' {
+			result.WriteByte(format[i])
+			i++
+			continue
+		}
+
+		// Found %, check next char
+		i++
+		if i >= len(format) {
+			result.WriteByte('%')
+			break
+		}
+
+		// Handle %%
+		if format[i] == '%' {
+			result.WriteByte('%')
+			i++
+			continue
+		}
+
+		// Parse format specifier: %[flags][width][.precision]specifier
+		// Skip flags
+		for i < len(format) && (format[i] == '-' || format[i] == '+' || format[i] == ' ' || format[i] == '#' || format[i] == '0') {
+			i++
+		}
+
+		// Parse width
+		width := 0
+		for i < len(format) && format[i] >= '0' && format[i] <= '9' {
+			width = width*10 + int(format[i]-'0')
+			i++
+		}
+
+		// Parse precision
+		precision := -1
+		if i < len(format) && format[i] == '.' {
+			i++
+			precision = 0
+			for i < len(format) && format[i] >= '0' && format[i] <= '9' {
+				precision = precision*10 + int(format[i]-'0')
+				i++
+			}
+		}
+
+		if i >= len(format) {
+			break
+		}
+
+		specifier := format[i]
+		i++
+
+		// Get argument value
+		var arg Value
+		if argIdx < len(args) {
+			arg = args[argIdx]
+			argIdx++
+		} else {
+			arg = NewNullValue()
+		}
+
+		// Format based on specifier
+		switch specifier {
+		case 'd', 'i':
+			if arg.IsNull() {
+				result.WriteString("0")
+			} else {
+				result.WriteString(fmt.Sprintf("%d", arg.AsInt64()))
+			}
+		case 'u':
+			if arg.IsNull() {
+				result.WriteString("0")
+			} else {
+				result.WriteString(fmt.Sprintf("%d", uint64(arg.AsInt64())))
+			}
+		case 'f', 'F':
+			if arg.IsNull() {
+				result.WriteString("0.0")
+			} else {
+				if precision >= 0 {
+					result.WriteString(fmt.Sprintf("%.*f", precision, arg.AsFloat64()))
+				} else {
+					result.WriteString(fmt.Sprintf("%f", arg.AsFloat64()))
+				}
+			}
+		case 'e', 'E':
+			if arg.IsNull() {
+				result.WriteString("0.0e+00")
+			} else {
+				if precision >= 0 {
+					result.WriteString(fmt.Sprintf("%.*e", precision, arg.AsFloat64()))
+				} else {
+					result.WriteString(fmt.Sprintf("%e", arg.AsFloat64()))
+				}
+			}
+		case 'g', 'G':
+			if arg.IsNull() {
+				result.WriteString("0")
+			} else {
+				if precision >= 0 {
+					result.WriteString(fmt.Sprintf("%.*g", precision, arg.AsFloat64()))
+				} else {
+					result.WriteString(fmt.Sprintf("%g", arg.AsFloat64()))
+				}
+			}
+		case 'x':
+			if arg.IsNull() {
+				result.WriteString("0")
+			} else {
+				result.WriteString(fmt.Sprintf("%x", arg.AsInt64()))
+			}
+		case 'X':
+			if arg.IsNull() {
+				result.WriteString("0")
+			} else {
+				result.WriteString(fmt.Sprintf("%X", arg.AsInt64()))
+			}
+		case 'o':
+			if arg.IsNull() {
+				result.WriteString("0")
+			} else {
+				result.WriteString(fmt.Sprintf("%o", arg.AsInt64()))
+			}
+		case 's':
+			if arg.IsNull() {
+				// SQLite prints nothing for NULL with %s
+			} else {
+				s := arg.AsString()
+				if precision >= 0 && precision < len(s) {
+					s = s[:precision]
+				}
+				result.WriteString(s)
+			}
+		case 'c':
+			if !arg.IsNull() {
+				c := rune(arg.AsInt64())
+				result.WriteRune(c)
+			}
+		case 'q', 'Q':
+			// SQL quoted string
+			if arg.IsNull() {
+				if specifier == 'Q' {
+					result.WriteString("NULL")
+				}
+			} else {
+				s := arg.AsString()
+				escaped := strings.ReplaceAll(s, "'", "''")
+				result.WriteString("'" + escaped + "'")
+			}
+		default:
+			// Unknown specifier, output as-is
+			result.WriteByte('%')
+			result.WriteByte(specifier)
+		}
+		_ = width // width not fully implemented yet
+	}
+
+	return NewTextValue(result.String()), nil
 }

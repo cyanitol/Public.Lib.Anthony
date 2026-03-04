@@ -442,31 +442,26 @@ func TestSQLiteStringFunctions(t *testing.T) {
 			name:  "printf_string",
 			query: "SELECT printf('Hello %s', 'World')",
 			want:  "Hello World",
-			skip:  "PRINTF function not implemented",
 		},
 		{
 			name:  "printf_integer",
 			query: "SELECT printf('Number: %d', 42)",
 			want:  "Number: 42",
-			skip:  "PRINTF function not implemented",
 		},
 		{
 			name:  "printf_float",
 			query: "SELECT printf('Pi: %.2f', 3.14159)",
 			want:  "Pi: 3.14",
-			skip:  "PRINTF function not implemented",
 		},
 		{
 			name:  "printf_hex",
 			query: "SELECT printf('%x', 255)",
 			want:  "ff",
-			skip:  "PRINTF function not implemented",
 		},
 		{
 			name:  "printf_multiple",
 			query: "SELECT printf('%s: %d', 'Answer', 42)",
 			want:  "Answer: 42",
-			skip:  "PRINTF function not implemented",
 		},
 	}
 
