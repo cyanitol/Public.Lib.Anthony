@@ -4,6 +4,7 @@ package driver
 import (
 	"database/sql/driver"
 	"fmt"
+	"strconv"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/expr"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
@@ -344,9 +345,9 @@ func (s *Stmt) emitInsertRecordValues(vm *vdbe.VDBE, row []parser.Expression, ro
 // compileValue compiles a value expression into bytecode that stores the result in reg.
 // CC=3
 func (s *Stmt) compileValue(vm *vdbe.VDBE, val parser.Expression, reg int, args []driver.NamedValue, paramIdx *int) {
-	switch val.(type) {
+	switch v := val.(type) {
 	case *parser.LiteralExpr:
-		compileLiteralExpr(vm, val.(*parser.LiteralExpr), reg)
+		compileLiteralExpr(vm, v, reg)
 	case *parser.VariableExpr:
 		if *paramIdx >= len(args) {
 			vm.AddOp(vdbe.OpNull, 0, reg, 0)
@@ -355,6 +356,22 @@ func (s *Stmt) compileValue(vm *vdbe.VDBE, val parser.Expression, reg int, args 
 		arg := args[*paramIdx]
 		*paramIdx++
 		compileArgValue(vm, arg.Value, reg)
+	case *parser.UnaryExpr:
+		if v.Op == parser.OpNeg {
+			if lit, ok := v.Expr.(*parser.LiteralExpr); ok {
+				switch lit.Type {
+				case parser.LiteralInteger:
+					intVal, _ := strconv.ParseInt(lit.Value, 10, 64)
+					vm.AddOp(vdbe.OpInteger, int(-intVal), reg, 0)
+					return
+				case parser.LiteralFloat:
+					floatVal, _ := strconv.ParseFloat(lit.Value, 64)
+					vm.AddOpWithP4Real(vdbe.OpReal, 0, reg, 0, -floatVal)
+					return
+				}
+			}
+		}
+		vm.AddOp(vdbe.OpNull, 0, reg, 0)
 	default:
 		vm.AddOp(vdbe.OpNull, 0, reg, 0)
 	}
@@ -384,6 +401,13 @@ func compileArgValue(vm *vdbe.VDBE, val driver.Value, reg int) {
 	switch v := val.(type) {
 	case nil:
 		vm.AddOp(vdbe.OpNull, 0, reg, 0)
+	case bool:
+		// SQLite stores booleans as integers: 1 for true, 0 for false
+		intVal := 0
+		if v {
+			intVal = 1
+		}
+		vm.AddOp(vdbe.OpInteger, intVal, reg, 0)
 	case int:
 		vm.AddOp(vdbe.OpInteger, v, reg, 0)
 	case int64:

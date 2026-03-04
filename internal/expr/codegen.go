@@ -271,7 +271,7 @@ func (g *CodeGenerator) generateLiteral(e *parser.LiteralExpr) (int, error) {
 		if val >= -2147483648 && val <= 2147483647 {
 			g.vdbe.AddOp(vdbe.OpInteger, int(val), reg, 0)
 		} else {
-			g.vdbe.AddOpWithP4Int(vdbe.OpInt64, 0, reg, 0, int32(val))
+			g.vdbe.AddOpWithP4Int64(vdbe.OpInt64, 0, reg, 0, val)
 		}
 		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("INT %s", e.Value))
 
@@ -775,7 +775,7 @@ func (g *CodeGenerator) generateInValueComparison(exprReg int, val parser.Expres
 	g.vdbe.AddOp(vdbe.OpEq, exprReg, valReg, cmpReg)
 
 	// If true, set result to true and jump to end
-	g.vdbe.AddOp(vdbe.OpIf, cmpReg, 0, 0)
+	g.vdbe.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
 	ifAddr := g.vdbe.NumOps() - 1
 
 	g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
@@ -1336,7 +1336,7 @@ func (g *CodeGenerator) emitInt64Value(reg int, v int64) {
 	if v >= -2147483648 && v <= 2147483647 {
 		g.vdbe.AddOp(vdbe.OpInteger, int(v), reg, 0)
 	} else {
-		g.vdbe.AddOpWithP4Int(vdbe.OpInt64, 0, reg, 0, int32(v))
+		g.vdbe.AddOpWithP4Int64(vdbe.OpInt64, 0, reg, 0, v)
 	}
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param INT64 %d", v))
 }

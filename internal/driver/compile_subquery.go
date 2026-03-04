@@ -550,6 +550,7 @@ func findMaxCursor(vm *vdbe.VDBE) int {
 	return maxCursor
 }
 
+
 // adjustSubqueryRegisters adds an offset to all register references in the bytecode.
 // This prevents register conflicts between parent and subquery execution contexts.
 func adjustSubqueryRegisters(vm *vdbe.VDBE, offset int) {
@@ -557,111 +558,12 @@ func adjustSubqueryRegisters(vm *vdbe.VDBE, offset int) {
 		return
 	}
 
-	// Opcodes that use registers - we need to adjust P1, P2, and/or P3
-	// depending on the opcode's register usage pattern
 	for i := range vm.Program {
 		op := vm.Program[i].Opcode
 
-		// Most opcodes use P1 and P2 as registers
-		// We need to be selective about which ones to adjust
-		switch op {
-		// Register operations (P1 = target register, P2 = source register)
-		case vdbe.OpMove, vdbe.OpCopy, vdbe.OpSCopy:
-			vm.Program[i].P1 += offset
-			vm.Program[i].P2 += offset
-
-		// Arithmetic operations (P1 = left reg, P2 = right reg, P3 = result reg)
-		case vdbe.OpAdd, vdbe.OpSubtract, vdbe.OpMultiply, vdbe.OpDivide, vdbe.OpRemainder,
-			vdbe.OpConcat, vdbe.OpBitAnd, vdbe.OpBitOr, vdbe.OpShiftLeft, vdbe.OpShiftRight:
-			vm.Program[i].P1 += offset
-			vm.Program[i].P2 += offset
-			vm.Program[i].P3 += offset
-
-		// Comparison operations (P1 = left reg, P2 = right reg, P3 = result reg)
-		case vdbe.OpEq, vdbe.OpNe, vdbe.OpLt, vdbe.OpLe, vdbe.OpGt, vdbe.OpGe:
-			vm.Program[i].P1 += offset
-			vm.Program[i].P2 += offset
-			vm.Program[i].P3 += offset
-
-		// Column operations (P1 = cursor, P2 = column, P3 = target reg)
-		case vdbe.OpColumn:
-			vm.Program[i].P3 += offset
-
-		// Integer/String/Null (P1 = ignored, P2 = target reg)
-		case vdbe.OpInteger, vdbe.OpString8, vdbe.OpNull, vdbe.OpRowid:
-			vm.Program[i].P2 += offset
-
-		// ResultRow (P1 = start reg, P2 = num regs)
-		case vdbe.OpResultRow:
-			vm.Program[i].P1 += offset
-
-		// Function calls (P2 = first arg reg, P3 = result reg, P5 = arg count)
-		// Aggregate functions (P1 = not used, P2 = first arg, P3 = accum reg)
-		case vdbe.OpFunction, vdbe.OpAggStep:
-			vm.Program[i].P2 += offset
-			vm.Program[i].P3 += offset
-
-		// Aggregate final (P1 = dest reg)
-		case vdbe.OpAggFinal:
-			vm.Program[i].P1 += offset
-
-		// If/IfNot (P1 = condition reg, P2 = jump target)
-		case vdbe.OpIf, vdbe.OpIfNot, vdbe.OpIfPos, vdbe.OpIfNotZero:
-			vm.Program[i].P1 += offset
-
-		// Other register-using opcodes (P1 = source reg, P2 = dest reg or jump)
-		case vdbe.OpNot, vdbe.OpBitNot:
-			vm.Program[i].P1 += offset
-			vm.Program[i].P2 += offset
-
-		// Opcodes where P1 is register, P2 is jump target
-		case vdbe.OpIsNull, vdbe.OpNotNull:
-			vm.Program[i].P1 += offset
-			// P2 is jump target, don't adjust
-
-		// MakeRecord (P1 = first reg, P2 = count, P3 = dest reg)
-		case vdbe.OpMakeRecord:
-			vm.Program[i].P1 += offset
-			vm.Program[i].P3 += offset
-
-		// Gosub/Return/Coroutine opcodes (P1 = return addr reg)
-		case vdbe.OpGosub, vdbe.OpReturn, vdbe.OpInitCoroutine, vdbe.OpEndCoroutine, vdbe.OpYield:
-			vm.Program[i].P1 += offset
-
-		// Cast (P1 = source reg, P2 = dest reg)
-		case vdbe.OpCast:
-			vm.Program[i].P1 += offset
-			vm.Program[i].P2 += offset
-
-		// Real, Int64, Blob (P2 = dest reg)
-		case vdbe.OpReal, vdbe.OpInt64, vdbe.OpBlob:
-			vm.Program[i].P2 += offset
-
-		// Insert/SorterInsert (P2 = key reg, P3 = data reg)
-		case vdbe.OpInsert, vdbe.OpSorterInsert:
-			vm.Program[i].P2 += offset
-			vm.Program[i].P3 += offset
-
-		// SorterData (P2 = dest reg)
-		case vdbe.OpSorterData:
-			vm.Program[i].P2 += offset
-
-		// And/Or (P1 = left reg, P2 = right reg, P3 = result reg)
-		case vdbe.OpAnd, vdbe.OpOr:
-			vm.Program[i].P1 += offset
-			vm.Program[i].P2 += offset
-			vm.Program[i].P3 += offset
-
-		// AddImm (P1 = register to modify, P2 = immediate value)
-		case vdbe.OpAddImm:
-			vm.Program[i].P1 += offset
-			// P2 is immediate value, don't adjust
-
-		// AggDistinct (P1 = input reg, P2 = jump target, P3 = aggregate reg)
-		case vdbe.OpAggDistinct:
-			vm.Program[i].P1 += offset
-			// P2 is jump target, don't adjust
-			vm.Program[i].P3 += offset
+		// Use the table-driven register adjuster if available
+		if adjuster, ok := opcodeRegisterAdjusters[op]; ok {
+			adjuster(vm.Program[i], offset)
 		}
 	}
 }
@@ -673,104 +575,10 @@ func findMaxRegister(vm *vdbe.VDBE) int {
 	for i := range vm.Program {
 		op := vm.Program[i].Opcode
 
-		// Check all parameter positions that might contain register indices
-		switch op {
-		case vdbe.OpMove, vdbe.OpCopy, vdbe.OpSCopy:
-			if vm.Program[i].P1 > maxReg {
-				maxReg = vm.Program[i].P1
-			}
-			if vm.Program[i].P2 > maxReg {
-				maxReg = vm.Program[i].P2
-			}
-
-		case vdbe.OpAdd, vdbe.OpSubtract, vdbe.OpMultiply, vdbe.OpDivide, vdbe.OpRemainder,
-			vdbe.OpConcat, vdbe.OpBitAnd, vdbe.OpBitOr, vdbe.OpShiftLeft, vdbe.OpShiftRight,
-			vdbe.OpEq, vdbe.OpNe, vdbe.OpLt, vdbe.OpLe, vdbe.OpGt, vdbe.OpGe:
-			if vm.Program[i].P1 > maxReg {
-				maxReg = vm.Program[i].P1
-			}
-			if vm.Program[i].P2 > maxReg {
-				maxReg = vm.Program[i].P2
-			}
-			if vm.Program[i].P3 > maxReg {
-				maxReg = vm.Program[i].P3
-			}
-
-		case vdbe.OpColumn:
-			if vm.Program[i].P3 > maxReg {
-				maxReg = vm.Program[i].P3
-			}
-
-		case vdbe.OpInteger, vdbe.OpString8, vdbe.OpNull, vdbe.OpRowid,
-			vdbe.OpReal, vdbe.OpInt64, vdbe.OpBlob, vdbe.OpSorterData:
-			if vm.Program[i].P2 > maxReg {
-				maxReg = vm.Program[i].P2
-			}
-
-		case vdbe.OpResultRow:
-			// P1 = start reg, P2 = count
-			endReg := vm.Program[i].P1 + vm.Program[i].P2 - 1
-			if endReg > maxReg {
-				maxReg = endReg
-			}
-
-		case vdbe.OpMakeRecord, vdbe.OpInsert, vdbe.OpSorterInsert:
-			if vm.Program[i].P1 > maxReg {
-				maxReg = vm.Program[i].P1
-			}
-			if vm.Program[i].P3 > maxReg {
-				maxReg = vm.Program[i].P3
-			}
-
-		case vdbe.OpNot, vdbe.OpBitNot, vdbe.OpCast:
-			if vm.Program[i].P1 > maxReg {
-				maxReg = vm.Program[i].P1
-			}
-			if vm.Program[i].P2 > maxReg {
-				maxReg = vm.Program[i].P2
-			}
-
-		case vdbe.OpFunction, vdbe.OpAggStep:
-			if vm.Program[i].P2 > maxReg {
-				maxReg = vm.Program[i].P2
-			}
-			if vm.Program[i].P3 > maxReg {
-				maxReg = vm.Program[i].P3
-			}
-			// Account for function argument range
-			if instr := vm.Program[i]; instr.P2 > 0 && instr.P5 > 0 {
-				argEnd := instr.P2 + int(instr.P5) - 1
-				if argEnd > maxReg {
-					maxReg = argEnd
-				}
-			}
-
-		case vdbe.OpAggDistinct:
-			if vm.Program[i].P1 > maxReg {
-				maxReg = vm.Program[i].P1
-			}
-			if vm.Program[i].P3 > maxReg {
-				maxReg = vm.Program[i].P3
-			}
-
-		case vdbe.OpAnd, vdbe.OpOr:
-			if vm.Program[i].P1 > maxReg {
-				maxReg = vm.Program[i].P1
-			}
-			if vm.Program[i].P2 > maxReg {
-				maxReg = vm.Program[i].P2
-			}
-			if vm.Program[i].P3 > maxReg {
-				maxReg = vm.Program[i].P3
-			}
-
-		case vdbe.OpIf, vdbe.OpIfNot, vdbe.OpIfPos, vdbe.OpIfNotZero,
-			vdbe.OpIsNull, vdbe.OpNotNull, vdbe.OpGosub, vdbe.OpReturn,
-			vdbe.OpInitCoroutine, vdbe.OpEndCoroutine, vdbe.OpYield, vdbe.OpAggFinal,
-			vdbe.OpAddImm:
-			if vm.Program[i].P1 > maxReg {
-				maxReg = vm.Program[i].P1
-			}
+		// Use the table-driven register extractor if available
+		if extractor, ok := opcodeRegisterExtractors[op]; ok {
+			regs := extractor(vm.Program[i])
+			updateMaxFromRegs(&maxReg, regs)
 		}
 	}
 

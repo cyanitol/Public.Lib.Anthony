@@ -647,6 +647,183 @@ func likelihoodFunc(args []Value) (Value, error) {
 	return args[0], nil
 }
 
+// printfFormatSpec holds parsed format specifier information
+type printfFormatSpec struct {
+	width     int
+	precision int
+	specifier byte
+}
+
+// parsePrintfFormatSpec parses a format specifier starting at pos (after the %)
+// Returns the parsed spec and the new position in the format string
+func parsePrintfFormatSpec(format string, pos int) (printfFormatSpec, int) {
+	spec := printfFormatSpec{precision: -1}
+	i := pos
+
+	// Skip flags
+	for i < len(format) && (format[i] == '-' || format[i] == '+' || format[i] == ' ' || format[i] == '#' || format[i] == '0') {
+		i++
+	}
+
+	// Parse width
+	for i < len(format) && format[i] >= '0' && format[i] <= '9' {
+		spec.width = spec.width*10 + int(format[i]-'0')
+		i++
+	}
+
+	// Parse precision
+	if i < len(format) && format[i] == '.' {
+		i++
+		spec.precision = 0
+		for i < len(format) && format[i] >= '0' && format[i] <= '9' {
+			spec.precision = spec.precision*10 + int(format[i]-'0')
+			i++
+		}
+	}
+
+	if i < len(format) {
+		spec.specifier = format[i]
+		i++
+	}
+
+	return spec, i
+}
+
+// formatPrintfInteger formats integer values (%d, %i, %u)
+func formatPrintfInteger(spec printfFormatSpec, arg Value) string {
+	if arg.IsNull() {
+		return "0"
+	}
+	if spec.specifier == 'u' {
+		return fmt.Sprintf("%d", uint64(arg.AsInt64()))
+	}
+	return fmt.Sprintf("%d", arg.AsInt64())
+}
+
+// formatPrintfFloat formats floating-point values (%f, %F, %e, %E, %g, %G)
+func formatPrintfFloat(spec printfFormatSpec, arg Value) string {
+	if arg.IsNull() {
+		if spec.specifier == 'e' || spec.specifier == 'E' {
+			return "0.0e+00"
+		}
+		if spec.specifier == 'g' || spec.specifier == 'G' {
+			return "0"
+		}
+		return "0.0"
+	}
+
+	formatStr := "%" + string(spec.specifier)
+	if spec.precision >= 0 {
+		return fmt.Sprintf("%.*"+string(spec.specifier), spec.precision, arg.AsFloat64())
+	}
+	return fmt.Sprintf(formatStr, arg.AsFloat64())
+}
+
+// formatPrintfHex formats hexadecimal values (%x, %X)
+func formatPrintfHex(spec printfFormatSpec, arg Value) string {
+	if arg.IsNull() {
+		return "0"
+	}
+	return fmt.Sprintf("%"+string(spec.specifier), arg.AsInt64())
+}
+
+// formatPrintfOctal formats octal values (%o)
+func formatPrintfOctal(spec printfFormatSpec, arg Value) string {
+	if arg.IsNull() {
+		return "0"
+	}
+	return fmt.Sprintf("%o", arg.AsInt64())
+}
+
+// formatPrintfString formats string values (%s)
+func formatPrintfString(spec printfFormatSpec, arg Value) string {
+	if arg.IsNull() {
+		return ""
+	}
+	s := arg.AsString()
+	if spec.precision >= 0 && spec.precision < len(s) {
+		s = s[:spec.precision]
+	}
+	return s
+}
+
+// formatPrintfChar formats character values (%c)
+func formatPrintfChar(spec printfFormatSpec, arg Value) string {
+	if arg.IsNull() {
+		return ""
+	}
+	return string(rune(arg.AsInt64()))
+}
+
+// formatPrintfQuoted formats SQL-quoted string values (%q, %Q)
+func formatPrintfQuoted(spec printfFormatSpec, arg Value) string {
+	if arg.IsNull() {
+		if spec.specifier == 'Q' {
+			return "NULL"
+		}
+		return ""
+	}
+	s := arg.AsString()
+	escaped := strings.ReplaceAll(s, "'", "''")
+	return "'" + escaped + "'"
+}
+
+// printfFormatHandler is a function that formats a value according to a format spec
+type printfFormatHandler func(printfFormatSpec, Value) string
+
+// printfFormatHandlers maps format specifiers to their handler functions
+var printfFormatHandlers = map[byte]printfFormatHandler{
+	'd': formatPrintfInteger,
+	'i': formatPrintfInteger,
+	'u': formatPrintfInteger,
+	'f': formatPrintfFloat,
+	'F': formatPrintfFloat,
+	'e': formatPrintfFloat,
+	'E': formatPrintfFloat,
+	'g': formatPrintfFloat,
+	'G': formatPrintfFloat,
+	'x': formatPrintfHex,
+	'X': formatPrintfHex,
+	'o': formatPrintfOctal,
+	's': formatPrintfString,
+	'c': formatPrintfChar,
+	'q': formatPrintfQuoted,
+	'Q': formatPrintfQuoted,
+}
+
+// processPrintfFormatCode handles a format specifier at the current position
+// Returns the new position and whether to continue processing
+func processPrintfFormatCode(format string, pos int, args []Value, argIdx *int, result *strings.Builder) int {
+	// Handle %%
+	if format[pos] == '%' {
+		result.WriteByte('%')
+		return pos + 1
+	}
+
+	// Parse format specifier
+	spec, newPos := parsePrintfFormatSpec(format, pos)
+
+	// Get argument value
+	var arg Value
+	if *argIdx < len(args) {
+		arg = args[*argIdx]
+		*argIdx++
+	} else {
+		arg = NewNullValue()
+	}
+
+	// Look up handler and format
+	if handler, ok := printfFormatHandlers[spec.specifier]; ok {
+		result.WriteString(handler(spec, arg))
+	} else {
+		// Unknown specifier, output as-is
+		result.WriteByte('%')
+		result.WriteByte(spec.specifier)
+	}
+
+	return newPos
+}
+
 // printfFunc implements printf(FORMAT, ...) - formatted string output
 func printfFunc(args []Value) (Value, error) {
 	if len(args) < 1 {
@@ -668,154 +845,14 @@ func printfFunc(args []Value) (Value, error) {
 			continue
 		}
 
-		// Found %, check next char
+		// Found %
 		i++
 		if i >= len(format) {
 			result.WriteByte('%')
 			break
 		}
 
-		// Handle %%
-		if format[i] == '%' {
-			result.WriteByte('%')
-			i++
-			continue
-		}
-
-		// Parse format specifier: %[flags][width][.precision]specifier
-		// Skip flags
-		for i < len(format) && (format[i] == '-' || format[i] == '+' || format[i] == ' ' || format[i] == '#' || format[i] == '0') {
-			i++
-		}
-
-		// Parse width
-		width := 0
-		for i < len(format) && format[i] >= '0' && format[i] <= '9' {
-			width = width*10 + int(format[i]-'0')
-			i++
-		}
-
-		// Parse precision
-		precision := -1
-		if i < len(format) && format[i] == '.' {
-			i++
-			precision = 0
-			for i < len(format) && format[i] >= '0' && format[i] <= '9' {
-				precision = precision*10 + int(format[i]-'0')
-				i++
-			}
-		}
-
-		if i >= len(format) {
-			break
-		}
-
-		specifier := format[i]
-		i++
-
-		// Get argument value
-		var arg Value
-		if argIdx < len(args) {
-			arg = args[argIdx]
-			argIdx++
-		} else {
-			arg = NewNullValue()
-		}
-
-		// Format based on specifier
-		switch specifier {
-		case 'd', 'i':
-			if arg.IsNull() {
-				result.WriteString("0")
-			} else {
-				result.WriteString(fmt.Sprintf("%d", arg.AsInt64()))
-			}
-		case 'u':
-			if arg.IsNull() {
-				result.WriteString("0")
-			} else {
-				result.WriteString(fmt.Sprintf("%d", uint64(arg.AsInt64())))
-			}
-		case 'f', 'F':
-			if arg.IsNull() {
-				result.WriteString("0.0")
-			} else {
-				if precision >= 0 {
-					result.WriteString(fmt.Sprintf("%.*f", precision, arg.AsFloat64()))
-				} else {
-					result.WriteString(fmt.Sprintf("%f", arg.AsFloat64()))
-				}
-			}
-		case 'e', 'E':
-			if arg.IsNull() {
-				result.WriteString("0.0e+00")
-			} else {
-				if precision >= 0 {
-					result.WriteString(fmt.Sprintf("%.*e", precision, arg.AsFloat64()))
-				} else {
-					result.WriteString(fmt.Sprintf("%e", arg.AsFloat64()))
-				}
-			}
-		case 'g', 'G':
-			if arg.IsNull() {
-				result.WriteString("0")
-			} else {
-				if precision >= 0 {
-					result.WriteString(fmt.Sprintf("%.*g", precision, arg.AsFloat64()))
-				} else {
-					result.WriteString(fmt.Sprintf("%g", arg.AsFloat64()))
-				}
-			}
-		case 'x':
-			if arg.IsNull() {
-				result.WriteString("0")
-			} else {
-				result.WriteString(fmt.Sprintf("%x", arg.AsInt64()))
-			}
-		case 'X':
-			if arg.IsNull() {
-				result.WriteString("0")
-			} else {
-				result.WriteString(fmt.Sprintf("%X", arg.AsInt64()))
-			}
-		case 'o':
-			if arg.IsNull() {
-				result.WriteString("0")
-			} else {
-				result.WriteString(fmt.Sprintf("%o", arg.AsInt64()))
-			}
-		case 's':
-			if arg.IsNull() {
-				// SQLite prints nothing for NULL with %s
-			} else {
-				s := arg.AsString()
-				if precision >= 0 && precision < len(s) {
-					s = s[:precision]
-				}
-				result.WriteString(s)
-			}
-		case 'c':
-			if !arg.IsNull() {
-				c := rune(arg.AsInt64())
-				result.WriteRune(c)
-			}
-		case 'q', 'Q':
-			// SQL quoted string
-			if arg.IsNull() {
-				if specifier == 'Q' {
-					result.WriteString("NULL")
-				}
-			} else {
-				s := arg.AsString()
-				escaped := strings.ReplaceAll(s, "'", "''")
-				result.WriteString("'" + escaped + "'")
-			}
-		default:
-			// Unknown specifier, output as-is
-			result.WriteByte('%')
-			result.WriteByte(specifier)
-		}
-		_ = width // width not fully implemented yet
+		i = processPrintfFormatCode(format, i, args, &argIdx, &result)
 	}
 
 	return NewTextValue(result.String()), nil

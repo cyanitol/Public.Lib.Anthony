@@ -506,7 +506,6 @@ func TestBindEmptyString(t *testing.T) {
 
 // TestBindBooleanAsInteger tests binding boolean values
 func TestBindBooleanAsInteger(t *testing.T) {
-	t.Skip("pre-existing failure - boolean parameter binding incomplete")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "bind_bool.db")
 
@@ -531,21 +530,32 @@ func TestBindBooleanAsInteger(t *testing.T) {
 		t.Fatalf("failed to insert false: %v", err)
 	}
 
-	var trueVal, falseVal int
-	err = db.QueryRow("SELECT flag FROM t1 LIMIT 1").Scan(&trueVal)
+	// Query all rows to verify boolean binding worked
+	rows, err := db.Query("SELECT flag FROM t1 ORDER BY rowid")
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
-	if trueVal != 1 {
-		t.Errorf("true: got %d, want 1", trueVal)
+	defer rows.Close()
+
+	var vals []int
+	for rows.Next() {
+		var v int
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("failed to scan: %v", err)
+		}
+		vals = append(vals, v)
 	}
 
-	err = db.QueryRow("SELECT flag FROM t1 LIMIT 1 OFFSET 1").Scan(&falseVal)
-	if err != nil {
-		t.Fatalf("failed to query: %v", err)
+	if len(vals) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(vals))
 	}
-	if falseVal != 0 {
-		t.Errorf("false: got %d, want 0", falseVal)
+
+	if vals[0] != 1 {
+		t.Errorf("first row (true): got %d, want 1", vals[0])
+	}
+
+	if vals[1] != 0 {
+		t.Errorf("second row (false): got %d, want 0", vals[1])
 	}
 }
 
@@ -678,7 +688,6 @@ func TestBindPreparedStatement(t *testing.T) {
 
 // TestBindInExpression tests parameter binding in IN expression
 func TestBindInExpression(t *testing.T) {
-	t.Skip("pre-existing failure - IN expression parameter binding incomplete")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "bind_in.db")
 

@@ -505,7 +505,6 @@ func TestBetweenReversedBounds(t *testing.T) {
 
 // TestBetweenNegativeNumbers tests BETWEEN with negative numbers
 func TestBetweenNegativeNumbers(t *testing.T) {
-	t.Skip("pre-existing failure - negative number handling")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "between_negative.db")
 
@@ -922,7 +921,6 @@ func TestBetweenHexValues(t *testing.T) {
 
 // TestBetweenUnaryMinus tests BETWEEN with unary minus
 func TestBetweenUnaryMinus(t *testing.T) {
-	t.Skip("pre-existing failure - unary minus expression")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "between_unary.db")
 

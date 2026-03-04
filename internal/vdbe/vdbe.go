@@ -336,6 +336,14 @@ func (v *VDBE) AddOpWithP4Int(opcode Opcode, p1, p2, p3 int, p4 int32) int {
 	return addr
 }
 
+// AddOpWithP4Int64 adds an instruction with a P4 int64 operand.
+func (v *VDBE) AddOpWithP4Int64(opcode Opcode, p1, p2, p3 int, p4 int64) int {
+	addr := v.AddOp(opcode, p1, p2, p3)
+	v.Program[addr].P4.I64 = p4
+	v.Program[addr].P4Type = P4Int64
+	return addr
+}
+
 // AddOpWithP4Str adds an instruction with a P4 string operand.
 func (v *VDBE) AddOpWithP4Str(opcode Opcode, p1, p2, p3 int, p4 string) int {
 	addr := v.AddOp(opcode, p1, p2, p3)

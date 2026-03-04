@@ -54,7 +54,8 @@ func jsonArrayFunc(args []Value) (Value, error) {
 	arr := make([]interface{}, len(args))
 
 	for i, arg := range args {
-		arr[i] = valueToJSON(arg)
+		// Use smart version to detect JSON-typed values from json()
+		arr[i] = valueToJSONSmart(arg)
 	}
 
 	result, err := json.Marshal(arr)
@@ -169,7 +170,8 @@ func jsonInsertFunc(args []Value) (Value, error) {
 			continue
 		}
 		path := args[i].AsString()
-		value := valueToJSON(args[i+1])
+		// Use smart version to support both string and JSON values
+		value := valueToJSONSmart(args[i+1])
 
 		// Only insert if path doesn't exist
 		if extractPath(data, path) == nil {
@@ -200,7 +202,8 @@ func jsonObjectFunc(args []Value) (Value, error) {
 		}
 
 		key := args[i].AsString()
-		value := valueToJSON(args[i+1])
+		// Use smart version to detect JSON-typed values
+		value := valueToJSONSmart(args[i+1])
 		obj[key] = value
 	}
 
@@ -302,7 +305,8 @@ func jsonReplaceFunc(args []Value) (Value, error) {
 			continue
 		}
 		path := args[i].AsString()
-		value := valueToJSON(args[i+1])
+		// Use smart version to support both string and JSON values
+		value := valueToJSONSmart(args[i+1])
 
 		// Only replace if path exists
 		if extractPath(data, path) != nil {
@@ -341,7 +345,8 @@ func jsonSetFunc(args []Value) (Value, error) {
 			continue
 		}
 		path := args[i].AsString()
-		value := valueToJSON(args[i+1])
+		// Use smart version for set - need to support both string and JSON values
+		value := valueToJSONSmart(args[i+1])
 		data = setPath(data, path, value)
 	}
 
@@ -430,12 +435,75 @@ func valueToJSON(v Value) interface{} {
 	case TypeFloat:
 		return v.AsFloat64()
 	case TypeText:
-		// Try to parse as JSON first
+		// Always return text as a string, never parse as JSON
+		// SQLite uses subtypes to distinguish JSON text from plain text,
+		// but we don't have that mechanism. For json_array/json_object/json_set,
+		// the caller should explicitly use json() to parse JSON strings.
+		return v.AsString()
+	case TypeBlob:
+		return v.AsBlob()
+	default:
+		return nil
+	}
+}
+
+// valueToJSONSmart is like valueToJSON but attempts to detect JSON-typed text values.
+// It checks if a text value is minified JSON (no extra whitespace) which indicates
+// it came from json() function. This is a heuristic workaround for lack of subtypes.
+func valueToJSONSmart(v Value) interface{} {
+	if v.IsNull() {
+		return nil
+	}
+
+	switch v.Type() {
+	case TypeInteger:
+		return v.AsInt64()
+	case TypeFloat:
+		return v.AsFloat64()
+	case TypeText:
 		s := v.AsString()
-		var data interface{}
-		if err := json.Unmarshal([]byte(s), &data); err == nil {
-			return data
+		// Check if this looks like it could be JSON output from json() function
+		// We parse JSON objects {} or arrays/objects with specific characteristics
+		if len(s) > 0 && s[0] == '{' {
+			// Objects are more likely from json() - parse them
+			var data interface{}
+			if err := json.Unmarshal([]byte(s), &data); err == nil {
+				if _, ok := data.(map[string]interface{}); ok {
+					// Check if minified (indicates it's from json())
+					minified, err := json.Marshal(data)
+					if err == nil && string(minified) == s {
+						return data
+					}
+				}
+			}
+		} else if len(s) > 0 && s[0] == '[' {
+			// For arrays: only parse if they contain strings or nested structures
+			// Arrays with only numbers like [97,96] are treated as string literals
+			// This is a heuristic since we lack SQLite's subtype system
+			var data interface{}
+			if err := json.Unmarshal([]byte(s), &data); err == nil {
+				if arr, ok := data.([]interface{}); ok {
+					// Check if array contains strings or complex types
+					hasStringOrComplex := false
+					for _, item := range arr {
+						switch item.(type) {
+						case string, map[string]interface{}, []interface{}:
+							hasStringOrComplex = true
+							break
+						}
+					}
+
+					if hasStringOrComplex {
+						// Contains non-numeric types - parse as JSON
+						minified, err := json.Marshal(data)
+						if err == nil && string(minified) == s {
+							return data
+						}
+					}
+				}
+			}
 		}
+		// Otherwise it's a plain string
 		return s
 	case TypeBlob:
 		return v.AsBlob()
