@@ -641,16 +641,34 @@ func (w *WAL) calculateFrameChecksum(frame *WALFrame) {
 // The checksum is cumulative, so we use a cache to avoid
 // recalculating checksums for frames we've already validated.
 func (w *WAL) validateFrameChecksum(frame *WALFrame, frameNo uint32) error {
-	// Check if we have a cached checksum for this frame
-	if cached, ok := w.checksumCache[frameNo]; ok {
-		if cached[0] == frame.Checksum1 && cached[1] == frame.Checksum2 {
-			return nil // Already validated
-		}
+	// Check cache - early return if already validated
+	if w.isCachedChecksumValid(frame, frameNo) {
+		return nil
 	}
 
-	// Calculate expected checksum from the beginning or from last cached frame
-	var s1, s2 uint32
-	startFrame := uint32(0)
+	// Find starting point for checksum calculation
+	s1, s2, startFrame := w.findChecksumStartPoint(frameNo)
+
+	// Calculate checksum from startFrame to frameNo
+	s1, s2, err := w.calculateCumulativeChecksum(frame, frameNo, startFrame, s1, s2)
+	if err != nil {
+		return err
+	}
+
+	// Validate the calculated checksum
+	return w.verifyChecksum(frame, s1, s2)
+}
+
+// isCachedChecksumValid checks if we have a valid cached checksum for this frame.
+func (w *WAL) isCachedChecksumValid(frame *WALFrame, frameNo uint32) bool {
+	cached, ok := w.checksumCache[frameNo]
+	return ok && cached[0] == frame.Checksum1 && cached[1] == frame.Checksum2
+}
+
+// findChecksumStartPoint finds the most recent cached frame to start checksum calculation.
+func (w *WAL) findChecksumStartPoint(frameNo uint32) (s1, s2, startFrame uint32) {
+	startFrame = 0
+	s1, s2 = 0, 0
 
 	// Find the most recent cached frame before this one
 	for i := int32(frameNo) - 1; i >= 0; i-- {
@@ -662,59 +680,84 @@ func (w *WAL) validateFrameChecksum(frame *WALFrame, frameNo uint32) error {
 		}
 	}
 
-	// Calculate checksum from startFrame to frameNo
+	return s1, s2, startFrame
+}
+
+// calculateCumulativeChecksum calculates the cumulative checksum from startFrame to frameNo.
+func (w *WAL) calculateCumulativeChecksum(targetFrame *WALFrame, frameNo, startFrame, s1, s2 uint32) (uint32, uint32, error) {
 	for i := startFrame; i <= frameNo; i++ {
-		var currentFrame *WALFrame
-		var err error
-
-		if i == frameNo {
-			// Use the frame we already have
-			currentFrame = frame
-		} else {
-			// Read previous frame for checksum calculation
-			offset := int64(WALHeaderSize) + int64(i)*(int64(WALFrameHeaderSize)+int64(w.pageSize))
-			headerData := make([]byte, WALFrameHeaderSize)
-			if _, err := w.file.ReadAt(headerData, offset); err != nil {
-				return fmt.Errorf("failed to read frame %d header: %w", i, err)
-			}
-
-			currentFrame = &WALFrame{
-				PageNumber: binary.BigEndian.Uint32(headerData[0:4]),
-				DbSize:     binary.BigEndian.Uint32(headerData[4:8]),
-				Salt1:      binary.BigEndian.Uint32(headerData[8:12]),
-				Salt2:      binary.BigEndian.Uint32(headerData[12:16]),
-				Data:       make([]byte, w.pageSize),
-			}
-
-			dataOffset := offset + int64(WALFrameHeaderSize)
-			if _, err = w.file.ReadAt(currentFrame.Data, dataOffset); err != nil {
-				return fmt.Errorf("failed to read frame %d data: %w", i, err)
-			}
+		currentFrame, err := w.getFrameForChecksum(targetFrame, i, frameNo)
+		if err != nil {
+			return 0, 0, err
 		}
 
-		// Build frame header for checksum (first 16 bytes)
-		headerData := make([]byte, 16)
-		binary.BigEndian.PutUint32(headerData[0:4], currentFrame.PageNumber)
-		binary.BigEndian.PutUint32(headerData[4:8], currentFrame.DbSize)
-		binary.BigEndian.PutUint32(headerData[8:12], currentFrame.Salt1)
-		binary.BigEndian.PutUint32(headerData[12:16], currentFrame.Salt2)
-
-		// Checksum the frame header
-		s1, s2 = walChecksum(headerData, s1, s2)
-
-		// Checksum the page data
-		s1, s2 = walChecksum(currentFrame.Data, s1, s2)
+		// Calculate checksum for this frame
+		s1, s2 = w.checksumFrame(currentFrame, s1, s2)
 
 		// Cache the checksum for this frame
 		w.checksumCache[i] = [2]uint32{s1, s2}
 	}
 
-	// Compare calculated checksum with stored checksum
+	return s1, s2, nil
+}
+
+// getFrameForChecksum gets the frame to checksum - either the target frame or reads from disk.
+func (w *WAL) getFrameForChecksum(targetFrame *WALFrame, currentIdx, targetIdx uint32) (*WALFrame, error) {
+	if currentIdx == targetIdx {
+		return targetFrame, nil
+	}
+	return w.readFrameForChecksum(currentIdx)
+}
+
+// readFrameForChecksum reads a frame from disk for checksum calculation.
+func (w *WAL) readFrameForChecksum(frameIdx uint32) (*WALFrame, error) {
+	offset := int64(WALHeaderSize) + int64(frameIdx)*(int64(WALFrameHeaderSize)+int64(w.pageSize))
+
+	headerData := make([]byte, WALFrameHeaderSize)
+	if _, err := w.file.ReadAt(headerData, offset); err != nil {
+		return nil, fmt.Errorf("failed to read frame %d header: %w", frameIdx, err)
+	}
+
+	frame := &WALFrame{
+		PageNumber: binary.BigEndian.Uint32(headerData[0:4]),
+		DbSize:     binary.BigEndian.Uint32(headerData[4:8]),
+		Salt1:      binary.BigEndian.Uint32(headerData[8:12]),
+		Salt2:      binary.BigEndian.Uint32(headerData[12:16]),
+		Data:       make([]byte, w.pageSize),
+	}
+
+	dataOffset := offset + int64(WALFrameHeaderSize)
+	if _, err := w.file.ReadAt(frame.Data, dataOffset); err != nil {
+		return nil, fmt.Errorf("failed to read frame %d data: %w", frameIdx, err)
+	}
+
+	return frame, nil
+}
+
+// checksumFrame calculates the checksum for a single frame.
+func (w *WAL) checksumFrame(frame *WALFrame, s1, s2 uint32) (uint32, uint32) {
+	// Build frame header for checksum (first 16 bytes)
+	headerData := make([]byte, 16)
+	binary.BigEndian.PutUint32(headerData[0:4], frame.PageNumber)
+	binary.BigEndian.PutUint32(headerData[4:8], frame.DbSize)
+	binary.BigEndian.PutUint32(headerData[8:12], frame.Salt1)
+	binary.BigEndian.PutUint32(headerData[12:16], frame.Salt2)
+
+	// Checksum the frame header
+	s1, s2 = walChecksum(headerData, s1, s2)
+
+	// Checksum the page data
+	s1, s2 = walChecksum(frame.Data, s1, s2)
+
+	return s1, s2
+}
+
+// verifyChecksum compares calculated checksum with stored checksum.
+func (w *WAL) verifyChecksum(frame *WALFrame, s1, s2 uint32) error {
 	if s1 != frame.Checksum1 || s2 != frame.Checksum2 {
 		return fmt.Errorf("checksum mismatch: expected (%d, %d), got (%d, %d)",
 			frame.Checksum1, frame.Checksum2, s1, s2)
 	}
-
 	return nil
 }
 

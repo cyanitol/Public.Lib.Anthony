@@ -322,62 +322,78 @@ func (te *TriggerExecutor) substituteExpression(expr parser.Expression) (parser.
 
 	switch e := expr.(type) {
 	case *parser.IdentExpr:
-		// Check if this is an OLD.col or NEW.col reference
-		if e.Table != "" {
-			return te.substituteIdentExpr(e)
-		}
-		// Unqualified column reference - leave as is
-		return expr, nil
-
+		return te.handleIdentExpr(e)
 	case *parser.BinaryExpr:
-		// Recursively substitute in left and right operands
-		leftSubst, err := te.substituteExpression(e.Left)
-		if err != nil {
-			return nil, err
-		}
-		rightSubst, err := te.substituteExpression(e.Right)
-		if err != nil {
-			return nil, err
-		}
-
-		// Create a new BinaryExpr with substituted operands
-		return &parser.BinaryExpr{
-			Left:  leftSubst,
-			Op:    e.Op,
-			Right: rightSubst,
-		}, nil
-
+		return te.handleBinaryExpr(e)
 	case *parser.UnaryExpr:
-		// Recursively substitute in the operand
-		exprSubst, err := te.substituteExpression(e.Expr)
-		if err != nil {
-			return nil, err
-		}
-		return &parser.UnaryExpr{
-			Op:   e.Op,
-			Expr: exprSubst,
-		}, nil
-
+		return te.handleUnaryExpr(e)
 	case *parser.FunctionExpr:
-		// Recursively substitute in function arguments
-		newArgs := make([]parser.Expression, len(e.Args))
-		for i, arg := range e.Args {
-			argSubst, err := te.substituteExpression(arg)
-			if err != nil {
-				return nil, err
-			}
-			newArgs[i] = argSubst
-		}
-		return &parser.FunctionExpr{
-			Name: e.Name,
-			Args: newArgs,
-			Star: e.Star,
-		}, nil
-
+		return te.handleFunctionExpr(e)
 	default:
 		// For other expression types (literals, etc.), return unchanged
 		return expr, nil
 	}
+}
+
+// handleIdentExpr handles identifier expressions (OLD.col or NEW.col).
+func (te *TriggerExecutor) handleIdentExpr(e *parser.IdentExpr) (parser.Expression, error) {
+	// Check if this is an OLD.col or NEW.col reference
+	if e.Table != "" {
+		return te.substituteIdentExpr(e)
+	}
+	// Unqualified column reference - leave as is
+	return e, nil
+}
+
+// handleBinaryExpr handles binary expressions.
+func (te *TriggerExecutor) handleBinaryExpr(e *parser.BinaryExpr) (parser.Expression, error) {
+	// Recursively substitute in left and right operands
+	leftSubst, err := te.substituteExpression(e.Left)
+	if err != nil {
+		return nil, err
+	}
+	rightSubst, err := te.substituteExpression(e.Right)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a new BinaryExpr with substituted operands
+	return &parser.BinaryExpr{
+		Left:  leftSubst,
+		Op:    e.Op,
+		Right: rightSubst,
+	}, nil
+}
+
+// handleUnaryExpr handles unary expressions.
+func (te *TriggerExecutor) handleUnaryExpr(e *parser.UnaryExpr) (parser.Expression, error) {
+	// Recursively substitute in the operand
+	exprSubst, err := te.substituteExpression(e.Expr)
+	if err != nil {
+		return nil, err
+	}
+	return &parser.UnaryExpr{
+		Op:   e.Op,
+		Expr: exprSubst,
+	}, nil
+}
+
+// handleFunctionExpr handles function expressions.
+func (te *TriggerExecutor) handleFunctionExpr(e *parser.FunctionExpr) (parser.Expression, error) {
+	// Recursively substitute in function arguments
+	newArgs := make([]parser.Expression, len(e.Args))
+	for i, arg := range e.Args {
+		argSubst, err := te.substituteExpression(arg)
+		if err != nil {
+			return nil, err
+		}
+		newArgs[i] = argSubst
+	}
+	return &parser.FunctionExpr{
+		Name: e.Name,
+		Args: newArgs,
+		Star: e.Star,
+	}, nil
 }
 
 // substituteIdentExpr substitutes an identifier expression (OLD.col or NEW.col) with a literal value.

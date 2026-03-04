@@ -512,66 +512,80 @@ func findBestIndex(tableName string, where parser.Expression, schemaInfo *schema
 // The neededColumns parameter specifies which columns are needed by the query for covering index detection.
 // Returns nil if no suitable index is found (table scan should be used).
 func findBestIndexWithColumns(tableName string, where parser.Expression, schemaInfo *schema.Schema, neededColumns []string) *IndexCandidate {
-	if schemaInfo == nil || where == nil {
+	if !canUseIndex(schemaInfo, where) {
 		return nil
 	}
 
-	// Get all indexes for this table
 	indexes := schemaInfo.GetTableIndexes(tableName)
-	if len(indexes) == 0 {
-		return nil
-	}
-
-	// Analyze WHERE clause to find usable columns
 	indexable, colName := analyzeIndexability(where)
 	if !indexable || colName == "" {
 		return nil
 	}
 
-	// Find indexes that start with the referenced column
+	return selectBestIndex(tableName, where, indexes, colName, neededColumns)
+}
+
+// canUseIndex checks if index usage is possible given schema and WHERE clause.
+func canUseIndex(schemaInfo *schema.Schema, where parser.Expression) bool {
+	return schemaInfo != nil && where != nil
+}
+
+// selectBestIndex finds the best index from available indexes for the given column.
+func selectBestIndex(tableName string, where parser.Expression, indexes []*schema.Index, colName string, neededColumns []string) *IndexCandidate {
 	var bestCandidate *IndexCandidate
 	estimator := NewCostEstimator()
 
 	for _, idx := range indexes {
-		if len(idx.Columns) == 0 {
-			continue
-		}
-
-		// Check if this index can be used (first column matches WHERE column)
-		if idx.Columns[0] != colName {
-			continue
-		}
-
-		// Determine if this is an equality condition
-		hasEquality := false
-		if binExpr, ok := where.(*parser.BinaryExpr); ok {
-			hasEquality = binExpr.Op == parser.OpEq
-		}
-
-		// Determine if this is a covering index
-		isCovering := isIndexCovering(idx, neededColumns)
-
-		// Estimate cost for this index
-		rows, cost := estimator.EstimateIndexScan(idx.Name, idx.Unique, isCovering, hasEquality)
-
-		candidate := &IndexCandidate{
-			IndexName:     idx.Name,
-			TableName:     tableName,
-			Columns:       idx.Columns,
-			IsUnique:      idx.Unique,
-			IsCovering:    isCovering,
-			HasEquality:   hasEquality,
-			EstimatedRows: rows,
-			EstimatedCost: cost,
-		}
-
-		// Select the index with the lowest cost
-		if bestCandidate == nil || candidate.EstimatedCost < bestCandidate.EstimatedCost {
-			bestCandidate = candidate
+		candidate := evaluateIndex(tableName, where, idx, colName, neededColumns, estimator)
+		if candidate != nil {
+			bestCandidate = selectLowerCostCandidate(bestCandidate, candidate)
 		}
 	}
 
 	return bestCandidate
+}
+
+// evaluateIndex evaluates a single index and returns a candidate if usable.
+func evaluateIndex(tableName string, where parser.Expression, idx *schema.Index, colName string, neededColumns []string, estimator *CostEstimator) *IndexCandidate {
+	if !isIndexUsable(idx, colName) {
+		return nil
+	}
+
+	hasEquality := detectEqualityCondition(where)
+	isCovering := isIndexCovering(idx, neededColumns)
+	rows, cost := estimator.EstimateIndexScan(idx.Name, idx.Unique, isCovering, hasEquality)
+
+	return &IndexCandidate{
+		IndexName:     idx.Name,
+		TableName:     tableName,
+		Columns:       idx.Columns,
+		IsUnique:      idx.Unique,
+		IsCovering:    isCovering,
+		HasEquality:   hasEquality,
+		EstimatedRows: rows,
+		EstimatedCost: cost,
+	}
+}
+
+// isIndexUsable checks if an index can be used for the given column.
+func isIndexUsable(idx *schema.Index, colName string) bool {
+	return len(idx.Columns) > 0 && idx.Columns[0] == colName
+}
+
+// detectEqualityCondition checks if the WHERE clause uses an equality operator.
+func detectEqualityCondition(where parser.Expression) bool {
+	if binExpr, ok := where.(*parser.BinaryExpr); ok {
+		return binExpr.Op == parser.OpEq
+	}
+	return false
+}
+
+// selectLowerCostCandidate returns the candidate with the lower cost.
+func selectLowerCostCandidate(current, candidate *IndexCandidate) *IndexCandidate {
+	if current == nil || candidate.EstimatedCost < current.EstimatedCost {
+		return candidate
+	}
+	return current
 }
 
 // isIndexCovering determines if an index covers all needed columns.

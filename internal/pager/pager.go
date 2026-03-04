@@ -379,40 +379,64 @@ func (p *Pager) getLocked(pgno Pgno) (*DbPage, error) {
 		return nil, ErrInvalidPageNum
 	}
 
-	// Check cache first
+	// Check cache first - early return for common case
 	if page := p.cache.Get(pgno); page != nil {
 		page.Ref()
 		return page, nil
 	}
 
-	// Not in cache - need to read from disk
-	// Ensure we have at least a shared lock
+	// Not in cache - ensure we have proper lock
+	if err := p.ensureSharedLock(); err != nil {
+		return nil, err
+	}
+
+	// Try to load from WAL if in WAL mode
+	if page, err := p.tryLoadFromWAL(pgno); err != nil {
+		return nil, err
+	} else if page != nil {
+		return page, nil
+	}
+
+	// Load from disk and cache
+	return p.loadPageFromDisk(pgno)
+}
+
+// ensureSharedLock ensures we have at least a shared lock for reading.
+func (p *Pager) ensureSharedLock() error {
 	if p.state == PagerStateOpen {
-		if err := p.acquireSharedLock(); err != nil {
-			return nil, err
-		}
+		return p.acquireSharedLock()
+	}
+	return nil
+}
+
+// tryLoadFromWAL attempts to load a page from the WAL if in WAL mode.
+// Returns nil page if not in WAL mode or page not found in WAL.
+func (p *Pager) tryLoadFromWAL(pgno Pgno) (*DbPage, error) {
+	if p.journalMode != JournalModeWAL || p.wal == nil {
+		return nil, nil
 	}
 
-	// In WAL mode, check WAL first
-	if p.journalMode == JournalModeWAL && p.wal != nil {
-		if frame, err := p.wal.FindPage(pgno); err == nil && frame != nil {
-			page := NewDbPage(pgno, p.pageSize)
-			copy(page.Data, frame.Data)
-			page.pager = p
-			if err := p.cache.Put(page); err != nil {
-				return nil, err
-			}
-			return page, nil
-		}
+	frame, err := p.wal.FindPage(pgno)
+	if err != nil || frame == nil {
+		return nil, nil
 	}
 
-	// Read page from disk
+	page := NewDbPage(pgno, p.pageSize)
+	copy(page.Data, frame.Data)
+	page.pager = p
+	if err := p.cache.Put(page); err != nil {
+		return nil, err
+	}
+	return page, nil
+}
+
+// loadPageFromDisk reads a page from disk and adds it to cache.
+func (p *Pager) loadPageFromDisk(pgno Pgno) (*DbPage, error) {
 	page, err := p.readPage(pgno)
 	if err != nil {
 		return nil, err
 	}
 
-	// Add to cache
 	if err := p.cache.Put(page); err != nil {
 		return nil, err
 	}

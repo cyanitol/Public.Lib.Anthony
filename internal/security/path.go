@@ -43,28 +43,64 @@ func ValidateDatabasePath(path string, config *SecurityConfig) (string, error) {
 
 // validatePathCharacters checks for malicious characters and patterns (Layer 1).
 func validatePathCharacters(path string, config *SecurityConfig) error {
-	// Block null bytes
-	if config.BlockNullBytes {
-		if strings.Contains(path, "\x00") {
-			return ErrNullByte
-		}
-
-		// Block control characters (0x00-0x1F except tab, newline, carriage return which are unlikely in paths)
-		for _, char := range path {
-			if char < 0x20 && char != '\t' && char != '\n' && char != '\r' {
-				return ErrNullByte // Using same error for all control characters
-			}
-		}
+	if err := checkNullAndControlBytes(path, config); err != nil {
+		return err
 	}
 
-	// Block path traversal patterns
-	if config.BlockTraversal {
-		// Check for .. patterns
-		if strings.Contains(path, "..") {
-			return ErrTraversal
-		}
+	if err := checkTraversalPattern(path, config); err != nil {
+		return err
 	}
 
+	if err := checkAbsolutePath(path, config); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// checkNullAndControlBytes validates null bytes and control characters.
+func checkNullAndControlBytes(path string, config *SecurityConfig) error {
+	if !config.BlockNullBytes {
+		return nil
+	}
+
+	if strings.Contains(path, "\x00") {
+		return ErrNullByte
+	}
+
+	return checkControlCharacters(path)
+}
+
+// checkControlCharacters validates control characters in the path.
+func checkControlCharacters(path string) error {
+	for _, char := range path {
+		if isControlChar(char) {
+			return ErrNullByte // Using same error for all control characters
+		}
+	}
+	return nil
+}
+
+// isControlChar returns true if the character is a control character.
+func isControlChar(char rune) bool {
+	return char < 0x20 && char != '\t' && char != '\n' && char != '\r'
+}
+
+// checkTraversalPattern validates path traversal patterns.
+func checkTraversalPattern(path string, config *SecurityConfig) error {
+	if !config.BlockTraversal {
+		return nil
+	}
+
+	if strings.Contains(path, "..") {
+		return ErrTraversal
+	}
+
+	return nil
+}
+
+// checkAbsolutePath validates absolute path restrictions.
+func checkAbsolutePath(path string, config *SecurityConfig) error {
 	// Block absolute paths only if sandbox is not enforced
 	// When sandbox is enforced, the sandbox resolution handles path security
 	if config.BlockAbsolutePaths && !config.EnforceSandbox && filepath.IsAbs(path) {
@@ -163,41 +199,44 @@ func checkSymlinks(path string, config *SecurityConfig) error {
 	}
 
 	// Check if the path (or any parent) is a symlink
-	// We need to check each component of the path
+	return walkPathForSymlinks(path)
+}
+
+// walkPathForSymlinks walks up the path hierarchy checking for symlinks.
+func walkPathForSymlinks(path string) error {
 	currentPath := path
 
-	for {
-		// Check if current path exists and is a symlink
-		info, err := os.Lstat(currentPath)
-		if err != nil {
-			// If the path doesn't exist yet, that's okay (it's a new database file)
-			// Check the parent directory instead
+	for !isRootPath(currentPath) {
+		if err := checkPathSymlink(currentPath); err != nil {
 			if os.IsNotExist(err) {
-				parent := filepath.Dir(currentPath)
-				if parent == currentPath || parent == "." || parent == "/" {
-					// Reached the root, no symlinks found
-					break
-				}
-				currentPath = parent
+				currentPath = filepath.Dir(currentPath)
 				continue
 			}
-			// Other errors are real problems
 			return err
 		}
 
-		// Check if it's a symlink
-		if info.Mode()&os.ModeSymlink != 0 {
-			return ErrSymlink
-		}
-
-		// Move to parent directory
-		parent := filepath.Dir(currentPath)
-		if parent == currentPath || parent == "." || parent == "/" {
-			// Reached the root
-			break
-		}
-		currentPath = parent
+		currentPath = filepath.Dir(currentPath)
 	}
 
 	return nil
+}
+
+// checkPathSymlink checks if the given path is a symlink.
+func checkPathSymlink(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		return ErrSymlink
+	}
+
+	return nil
+}
+
+// isRootPath returns true if the path is a root path.
+func isRootPath(path string) bool {
+	parent := filepath.Dir(path)
+	return parent == path || parent == "." || parent == "/"
 }

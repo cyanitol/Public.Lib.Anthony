@@ -409,45 +409,82 @@ func (c *Compiler) CompileUpdate(stmt *parser.UpdateStmt) (*vdbe.VDBE, error) {
 	vm := vdbe.New()
 	vm.SetReadOnly(false)
 
-	// Get table
-	table, ok := c.engine.schema.GetTable(stmt.Table)
-	if !ok {
-		return nil, fmt.Errorf("table not found: %s", stmt.Table)
+	// Validate and get table
+	table, numCols, err := c.validateAndGetTable(stmt.Table)
+	if err != nil {
+		return nil, err
 	}
 
-	numCols := len(table.Columns)
-	vm.AllocMemory(numCols*2 + 20) // Extra registers for temps, SET expressions, etc.
+	// Setup cursor and code generator
+	cursorIdx := c.setupUpdateCursor(vm, stmt.Table, table, numCols)
+	codegen := createCodeGenerator(vm, stmt.Table, table, cursorIdx)
 
-	// Open cursor for table (read-write)
+	// Setup table scan loop
+	loopStart := c.setupTableScanLoop(vm, cursorIdx)
+
+	// Compile WHERE clause if present
+	if err := c.compileUpdateWhere(vm, stmt, codegen, loopStart); err != nil {
+		return nil, err
+	}
+
+	// Compile SET clause
+	if err := c.compileUpdateSet(vm, stmt, table, codegen, cursorIdx, numCols); err != nil {
+		return nil, err
+	}
+
+	// Close loop and cursor
+	c.closeUpdateLoop(vm, cursorIdx, loopStart)
+
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// validateAndGetTable validates table existence and returns table info.
+func (c *Compiler) validateAndGetTable(tableName string) (*schema.Table, int, error) {
+	table, ok := c.engine.schema.GetTable(tableName)
+	if !ok {
+		return nil, 0, fmt.Errorf("table not found: %s", tableName)
+	}
+	return table, len(table.Columns), nil
+}
+
+// setupUpdateCursor sets up the cursor for UPDATE operation.
+func (c *Compiler) setupUpdateCursor(vm *vdbe.VDBE, tableName string, table *schema.Table, numCols int) int {
+	vm.AllocMemory(numCols*2 + 20) // Extra registers for temps, SET expressions, etc.
 	cursorIdx := 0
 	vm.AllocCursors(1)
 	vm.AddOp(vdbe.OpOpenWrite, cursorIdx, int(table.RootPage), 0)
-	vm.SetComment(vm.NumOps()-1, fmt.Sprintf("Open cursor for UPDATE on %s", stmt.Table))
+	vm.SetComment(vm.NumOps()-1, fmt.Sprintf("Open cursor for UPDATE on %s", tableName))
+	return cursorIdx
+}
 
-	// Create code generator for expressions
-	codegen := createCodeGenerator(vm, stmt.Table, table, cursorIdx)
-
-	// Start table scan: Rewind to first row
+// setupTableScanLoop sets up the table scan loop and returns the loop start address.
+func (c *Compiler) setupTableScanLoop(vm *vdbe.VDBE, cursorIdx int) int {
 	endLabel := vm.NumOps() + 1000 // Will be patched
 	vm.AddOp(vdbe.OpRewind, cursorIdx, endLabel, 0)
-	loopStart := vm.NumOps()
+	return vm.NumOps()
+}
 
-	// Evaluate WHERE clause if present
-	var whereReg int
-	if stmt.Where != nil {
-		reg, err := codegen.GenerateExpr(stmt.Where)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile WHERE clause: %w", err)
-		}
-		whereReg = reg
-
-		// If WHERE is false, skip this row
-		skipLabel := vm.NumOps() + 100 // Will be calculated
-		vm.AddOp(vdbe.OpIfNot, whereReg, skipLabel, 0)
+// compileUpdateWhere compiles the WHERE clause for UPDATE.
+func (c *Compiler) compileUpdateWhere(vm *vdbe.VDBE, stmt *parser.UpdateStmt, codegen *expr.CodeGenerator, loopStart int) error {
+	if stmt.Where == nil {
+		return nil
 	}
 
+	whereReg, err := codegen.GenerateExpr(stmt.Where)
+	if err != nil {
+		return fmt.Errorf("failed to compile WHERE clause: %w", err)
+	}
+
+	// If WHERE is false, skip this row
+	skipLabel := vm.NumOps() + 100 // Will be calculated
+	vm.AddOp(vdbe.OpIfNot, whereReg, skipLabel, 0)
+	return nil
+}
+
+// compileUpdateSet compiles the SET clause for UPDATE.
+func (c *Compiler) compileUpdateSet(vm *vdbe.VDBE, stmt *parser.UpdateStmt, table *schema.Table, codegen *expr.CodeGenerator, cursorIdx, numCols int) error {
 	// Read current row into registers for OLD values
-	// This is needed because SET expressions might reference current column values
 	oldValueBase := codegen.AllocRegs(numCols)
 	for i := 0; i < numCols; i++ {
 		vm.AddOp(vdbe.OpColumn, cursorIdx, i, oldValueBase+i)
@@ -465,20 +502,8 @@ func (c *Compiler) CompileUpdate(stmt *parser.UpdateStmt) (*vdbe.VDBE, error) {
 	}
 
 	// Update columns based on SET assignments
-	for _, assignment := range stmt.Sets {
-		colIdx := table.GetColumnIndex(assignment.Column)
-		if colIdx < 0 {
-			return nil, fmt.Errorf("column not found: %s", assignment.Column)
-		}
-
-		// Evaluate the SET expression
-		valueReg, err := codegen.GenerateExpr(assignment.Value)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile SET expression for %s: %w", assignment.Column, err)
-		}
-
-		// Copy the new value to the appropriate position
-		vm.AddOp(vdbe.OpCopy, valueReg, newValueBase+colIdx, 0)
+	if err := c.applySetAssignments(vm, stmt, table, codegen, newValueBase); err != nil {
+		return err
 	}
 
 	// Create new record from updated values
@@ -489,22 +514,56 @@ func (c *Compiler) CompileUpdate(stmt *parser.UpdateStmt) (*vdbe.VDBE, error) {
 	vm.AddOp(vdbe.OpInsert, cursorIdx, recordReg, rowidReg)
 	vm.SetComment(vm.NumOps()-1, "Update row")
 
-	// Patch the skip label if WHERE clause exists
-	if stmt.Where != nil {
-		skipLabel := vm.NumOps()
-		// Find and patch the OpIfNot instruction
-		for i := loopStart; i < vm.NumOps(); i++ {
-			if vm.Program[i].Opcode == vdbe.OpIfNot && vm.Program[i].P2 > vm.NumOps() {
-				vm.Program[i].P2 = skipLabel
-				break
-			}
+	return nil
+}
+
+// applySetAssignments applies the SET assignments to update columns.
+func (c *Compiler) applySetAssignments(vm *vdbe.VDBE, stmt *parser.UpdateStmt, table *schema.Table, codegen *expr.CodeGenerator, newValueBase int) error {
+	for _, assignment := range stmt.Sets {
+		colIdx := table.GetColumnIndex(assignment.Column)
+		if colIdx < 0 {
+			return fmt.Errorf("column not found: %s", assignment.Column)
 		}
+
+		// Evaluate the SET expression
+		valueReg, err := codegen.GenerateExpr(assignment.Value)
+		if err != nil {
+			return fmt.Errorf("failed to compile SET expression for %s: %w", assignment.Column, err)
+		}
+
+		// Copy the new value to the appropriate position
+		vm.AddOp(vdbe.OpCopy, valueReg, newValueBase+colIdx, 0)
 	}
+	return nil
+}
+
+// closeUpdateLoop closes the UPDATE loop and patches labels.
+func (c *Compiler) closeUpdateLoop(vm *vdbe.VDBE, cursorIdx, loopStart int) {
+	// Patch the skip label if WHERE clause exists
+	patchWhereSkipLabel(vm, loopStart)
 
 	// Next row
 	vm.AddOp(vdbe.OpNext, cursorIdx, loopStart, 0)
 
 	// Close cursor - patch end label
+	patchRewindEndLabel(vm)
+
+	vm.AddOp(vdbe.OpClose, cursorIdx, 0, 0)
+}
+
+// patchWhereSkipLabel patches the skip label for WHERE clause.
+func patchWhereSkipLabel(vm *vdbe.VDBE, loopStart int) {
+	skipLabel := vm.NumOps()
+	for i := loopStart; i < vm.NumOps(); i++ {
+		if vm.Program[i].Opcode == vdbe.OpIfNot && vm.Program[i].P2 > vm.NumOps() {
+			vm.Program[i].P2 = skipLabel
+			break
+		}
+	}
+}
+
+// patchRewindEndLabel patches the end label for Rewind instruction.
+func patchRewindEndLabel(vm *vdbe.VDBE) {
 	endAddr := vm.NumOps()
 	for i := 0; i < vm.NumOps(); i++ {
 		if vm.Program[i].Opcode == vdbe.OpRewind && vm.Program[i].P2 > vm.NumOps() {
@@ -512,11 +571,6 @@ func (c *Compiler) CompileUpdate(stmt *parser.UpdateStmt) (*vdbe.VDBE, error) {
 			break
 		}
 	}
-
-	vm.AddOp(vdbe.OpClose, cursorIdx, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	return vm, nil
 }
 
 // CompileDelete compiles a DELETE statement.
@@ -524,81 +578,80 @@ func (c *Compiler) CompileDelete(stmt *parser.DeleteStmt) (*vdbe.VDBE, error) {
 	vm := vdbe.New()
 	vm.SetReadOnly(false)
 
-	// Get table
-	table, ok := c.engine.schema.GetTable(stmt.Table)
-	if !ok {
-		return nil, fmt.Errorf("table not found: %s", stmt.Table)
+	// Validate and get table
+	table, numCols, err := c.validateAndGetTable(stmt.Table)
+	if err != nil {
+		return nil, err
 	}
 
-	numCols := len(table.Columns)
-	vm.AllocMemory(numCols + 10) // Extra registers for temps
-
-	// Open cursor for table (read-write)
-	cursorIdx := 0
-	vm.AllocCursors(1)
-	vm.AddOp(vdbe.OpOpenWrite, cursorIdx, int(table.RootPage), 0)
-	vm.SetComment(vm.NumOps()-1, fmt.Sprintf("Open cursor for DELETE on %s", stmt.Table))
-
-	// Create code generator for WHERE expressions
+	// Setup cursor and code generator
+	cursorIdx := c.setupDeleteCursor(vm, stmt.Table, table, numCols)
 	codegen := createCodeGenerator(vm, stmt.Table, table, cursorIdx)
 
-	// Start table scan: Rewind to first row
-	endLabel := vm.NumOps() + 1000 // Will be patched
-	vm.AddOp(vdbe.OpRewind, cursorIdx, endLabel, 0)
-	loopStart := vm.NumOps()
+	// Setup table scan loop
+	loopStart := c.setupTableScanLoop(vm, cursorIdx)
 
-	// Evaluate WHERE clause if present
-	var whereReg int
-	if stmt.Where != nil {
-		// Read all columns into registers (needed for WHERE evaluation)
-		colBase := codegen.AllocRegs(numCols)
-		for i := 0; i < numCols; i++ {
-			vm.AddOp(vdbe.OpColumn, cursorIdx, i, colBase+i)
-		}
-
-		reg, err := codegen.GenerateExpr(stmt.Where)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile WHERE clause: %w", err)
-		}
-		whereReg = reg
-
-		// If WHERE is false, skip deletion and go to next row
-		skipLabel := vm.NumOps() + 10 // Will be calculated
-		vm.AddOp(vdbe.OpIfNot, whereReg, skipLabel, 0)
+	// Compile WHERE clause if present
+	if err := c.compileDeleteWhere(vm, stmt, codegen, cursorIdx, numCols, loopStart); err != nil {
+		return nil, err
 	}
 
 	// Delete the current row
 	vm.AddOp(vdbe.OpDelete, cursorIdx, 0, 0)
 	vm.SetComment(vm.NumOps()-1, "Delete row")
 
-	// Patch the skip label if WHERE clause exists
-	if stmt.Where != nil {
-		skipLabel := vm.NumOps()
-		// Find and patch the OpIfNot instruction
-		for i := loopStart; i < vm.NumOps(); i++ {
-			if vm.Program[i].Opcode == vdbe.OpIfNot && vm.Program[i].P2 > vm.NumOps() {
-				vm.Program[i].P2 = skipLabel
-				break
-			}
-		}
+	// Close loop and cursor
+	c.closeDeleteLoop(vm, cursorIdx, loopStart)
+
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// setupDeleteCursor sets up the cursor for DELETE operation.
+func (c *Compiler) setupDeleteCursor(vm *vdbe.VDBE, tableName string, table *schema.Table, numCols int) int {
+	vm.AllocMemory(numCols + 10) // Extra registers for temps
+	cursorIdx := 0
+	vm.AllocCursors(1)
+	vm.AddOp(vdbe.OpOpenWrite, cursorIdx, int(table.RootPage), 0)
+	vm.SetComment(vm.NumOps()-1, fmt.Sprintf("Open cursor for DELETE on %s", tableName))
+	return cursorIdx
+}
+
+// compileDeleteWhere compiles the WHERE clause for DELETE.
+func (c *Compiler) compileDeleteWhere(vm *vdbe.VDBE, stmt *parser.DeleteStmt, codegen *expr.CodeGenerator, cursorIdx, numCols, loopStart int) error {
+	if stmt.Where == nil {
+		return nil
 	}
+
+	// Read all columns into registers (needed for WHERE evaluation)
+	colBase := codegen.AllocRegs(numCols)
+	for i := 0; i < numCols; i++ {
+		vm.AddOp(vdbe.OpColumn, cursorIdx, i, colBase+i)
+	}
+
+	whereReg, err := codegen.GenerateExpr(stmt.Where)
+	if err != nil {
+		return fmt.Errorf("failed to compile WHERE clause: %w", err)
+	}
+
+	// If WHERE is false, skip deletion and go to next row
+	skipLabel := vm.NumOps() + 10 // Will be calculated
+	vm.AddOp(vdbe.OpIfNot, whereReg, skipLabel, 0)
+	return nil
+}
+
+// closeDeleteLoop closes the DELETE loop and patches labels.
+func (c *Compiler) closeDeleteLoop(vm *vdbe.VDBE, cursorIdx, loopStart int) {
+	// Patch the skip label if WHERE clause exists
+	patchWhereSkipLabel(vm, loopStart)
 
 	// Next row
 	vm.AddOp(vdbe.OpNext, cursorIdx, loopStart, 0)
 
 	// Close cursor - patch end label
-	endAddr := vm.NumOps()
-	for i := 0; i < vm.NumOps(); i++ {
-		if vm.Program[i].Opcode == vdbe.OpRewind && vm.Program[i].P2 > vm.NumOps() {
-			vm.Program[i].P2 = endAddr
-			break
-		}
-	}
+	patchRewindEndLabel(vm)
 
 	vm.AddOp(vdbe.OpClose, cursorIdx, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	return vm, nil
 }
 
 // CompileCreateTable compiles a CREATE TABLE statement.

@@ -46,6 +46,20 @@ var keywordsAsIdentifiers = map[TokenType]bool{
 	TK_ROWID:        true,
 }
 
+// columnConstraintKeywords lists keywords that indicate the start of a column constraint.
+var columnConstraintKeywords = map[TokenType]bool{
+	TK_CONSTRAINT: true,
+	TK_PRIMARY:    true,
+	TK_NOT:        true,
+	TK_UNIQUE:     true,
+	TK_CHECK:      true,
+	TK_DEFAULT:    true,
+	TK_COLLATE:    true,
+	TK_REFERENCES: true,
+	TK_GENERATED:  true,
+	TK_AS:         true,
+}
+
 // Parser implements a recursive descent parser for SQL.
 type Parser struct {
 	lexer     *Lexer
@@ -2412,9 +2426,28 @@ func (p *Parser) consumeSchemaIdentifier() string {
 func (p *Parser) parsePragma() (*PragmaStmt, error) {
 	stmt := &PragmaStmt{}
 
-	// Parse optional schema name (can be identifier or keyword like "temp", "main")
+	// Parse schema.name or just name
+	if err := p.parsePragmaName(stmt); err != nil {
+		return nil, err
+	}
+
+	// Security check
+	if !security.IsSafePragma(stmt.Name) {
+		return nil, p.error("PRAGMA '%s' is not allowed for security reasons", stmt.Name)
+	}
+
+	// Parse optional value assignment
+	if err := p.parsePragmaAssignment(stmt); err != nil {
+		return nil, err
+	}
+
+	return stmt, nil
+}
+
+// parsePragmaName parses the pragma name, which can be "name" or "schema.name".
+func (p *Parser) parsePragmaName(stmt *PragmaStmt) error {
 	if !p.isPragmaIdentifier() {
-		return nil, p.error("expected pragma name")
+		return p.error("expected pragma name")
 	}
 
 	firstID := p.consumePragmaIdentifier()
@@ -2423,39 +2456,48 @@ func (p *Parser) parsePragma() (*PragmaStmt, error) {
 	if p.match(TK_DOT) {
 		stmt.Schema = firstID
 		if !p.isPragmaIdentifier() {
-			return nil, p.error("expected pragma name after schema")
+			return p.error("expected pragma name after schema")
 		}
 		stmt.Name = p.consumePragmaIdentifier()
 	} else {
 		stmt.Name = firstID
 	}
 
-	// Security: Check PRAGMA whitelist to prevent dangerous operations
-	if !security.IsSafePragma(stmt.Name) {
-		return nil, p.error("PRAGMA '%s' is not allowed for security reasons", stmt.Name)
-	}
+	return nil
+}
 
-	// Check for value assignment or function call syntax
+// parsePragmaAssignment parses the optional PRAGMA value assignment (= or function call syntax).
+func (p *Parser) parsePragmaAssignment(stmt *PragmaStmt) error {
 	if p.match(TK_EQ) {
-		// PRAGMA name = value - parse value allowing keywords as identifiers
-		value, err := p.parsePragmaValue()
-		if err != nil {
-			return nil, err
-		}
-		stmt.Value = value
-	} else if p.match(TK_LP) {
-		// PRAGMA name(value) - parse value allowing keywords as identifiers
-		value, err := p.parsePragmaValue()
-		if err != nil {
-			return nil, err
-		}
-		stmt.Value = value
-		if !p.match(TK_RP) {
-			return nil, p.error("expected ) after pragma value")
-		}
+		return p.parsePragmaEqValue(stmt)
 	}
+	if p.match(TK_LP) {
+		return p.parsePragmaParenValue(stmt)
+	}
+	return nil
+}
 
-	return stmt, nil
+// parsePragmaEqValue parses "PRAGMA name = value" syntax.
+func (p *Parser) parsePragmaEqValue(stmt *PragmaStmt) error {
+	value, err := p.parsePragmaValue()
+	if err != nil {
+		return err
+	}
+	stmt.Value = value
+	return nil
+}
+
+// parsePragmaParenValue parses "PRAGMA name(value)" syntax.
+func (p *Parser) parsePragmaParenValue(stmt *PragmaStmt) error {
+	value, err := p.parsePragmaValue()
+	if err != nil {
+		return err
+	}
+	stmt.Value = value
+	if !p.match(TK_RP) {
+		return p.error("expected ) after pragma value")
+	}
+	return nil
 }
 
 // isPragmaIdentifier checks if the current token can be used as a pragma/schema name.
@@ -3411,10 +3453,10 @@ func (p *Parser) isJoinKeyword() bool {
 }
 
 func (p *Parser) isColumnConstraint() bool {
-	return p.check(TK_CONSTRAINT) || p.check(TK_PRIMARY) || p.check(TK_NOT) ||
-		p.check(TK_UNIQUE) || p.check(TK_CHECK) || p.check(TK_DEFAULT) ||
-		p.check(TK_COLLATE) || p.check(TK_REFERENCES) || p.check(TK_GENERATED) ||
-		p.check(TK_AS)
+	if p.isAtEnd() {
+		return false
+	}
+	return columnConstraintKeywords[p.peek().Type]
 }
 
 func (p *Parser) peek() Token {
