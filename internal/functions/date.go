@@ -387,12 +387,44 @@ func (dt *DateTime) computeHMS() {
 
 // applyModifier applies a modifier to the DateTime.
 func (dt *DateTime) applyModifier(mod string) error {
+	modOrig := mod
 	mod = strings.TrimSpace(strings.ToLower(mod))
 
 	// Handle 'start of' modifiers
 	if strings.HasPrefix(mod, "start of ") {
 		unit := strings.TrimPrefix(mod, "start of ")
 		return dt.startOf(unit)
+	}
+
+	// Handle 'weekday N' modifier
+	if strings.HasPrefix(mod, "weekday ") {
+		dayStr := strings.TrimPrefix(mod, "weekday ")
+		targetDay, err := strconv.Atoi(dayStr)
+		if err != nil || targetDay < 0 || targetDay > 6 {
+			return fmt.Errorf("invalid weekday: %s", dayStr)
+		}
+		return dt.applyWeekday(targetDay)
+	}
+
+	// Handle 'unixepoch' modifier
+	if mod == "unixepoch" {
+		return dt.applyUnixepoch()
+	}
+
+	// Handle 'auto' modifier
+	if mod == "auto" {
+		// Auto doesn't change interpretation, just validates
+		return nil
+	}
+
+	// Handle 'julianday' modifier
+	if mod == "julianday" {
+		return dt.applyJulianday()
+	}
+
+	// Handle HH:MM:SS or HH:MM time offset format
+	if dt.parseTimeOffset(modOrig) {
+		return nil
 	}
 
 	// Handle numeric modifiers (+/- N units)
@@ -412,8 +444,8 @@ func (dt *DateTime) applyModifier(mod string) error {
 
 	// Handle special modifiers
 	switch mod {
-	case "utc", "localtime", "auto", "subsec", "subsecond":
-		// These would require more complex implementation
+	case "utc", "localtime", "subsec", "subsecond":
+		// These are handled elsewhere or are no-ops
 		return nil
 	default:
 		return fmt.Errorf("unknown modifier: %s", mod)
@@ -452,6 +484,113 @@ func (dt *DateTime) startOf(unit string) error {
 	}
 
 	return nil
+}
+
+// applyWeekday advances the date to the next occurrence of the given weekday.
+// Weekday 0 = Sunday, 1 = Monday, ..., 6 = Saturday.
+func (dt *DateTime) applyWeekday(targetDay int) error {
+	dt.computeYMD()
+	dt.computeJD()
+
+	// Calculate current day of week from Julian day
+	// Julian day 0 is a Monday, so adjust accordingly
+	currentJD := (dt.jd + 43200000) / msPerDay
+	currentDay := int((currentJD + 1) % 7) // 0=Sunday, 1=Monday, etc.
+
+	// Calculate days to add to reach target weekday
+	daysToAdd := (targetDay - currentDay + 7) % 7
+	if daysToAdd == 0 {
+		// Already on the target day, don't add any days
+		return nil
+	}
+
+	dt.jd += int64(daysToAdd) * msPerDay
+	dt.validYMD = false
+	dt.validHMS = false
+
+	return nil
+}
+
+// applyUnixepoch reinterprets the current value as a Unix timestamp.
+// This should only be used when the initial value was numeric.
+func (dt *DateTime) applyUnixepoch() error {
+	if !dt.validJD {
+		return fmt.Errorf("unixepoch requires numeric input")
+	}
+
+	// Get the current value as Julian day
+	jdDays := float64(dt.jd) / float64(msPerDay)
+
+	// Reinterpret as Unix timestamp (seconds since 1970-01-01)
+	unixSeconds := jdDays
+	dt.jd = int64((unixSeconds/86400.0+unixEpochJD)*float64(msPerDay) + 0.5)
+	dt.validYMD = false
+	dt.validHMS = false
+
+	return nil
+}
+
+// applyJulianday ensures the value is interpreted as a Julian day number.
+// This is only valid as the first modifier.
+func (dt *DateTime) applyJulianday() error {
+	// If we already have a JD, this is a no-op
+	// This modifier validates that we're starting with a numeric Julian day
+	if !dt.validJD {
+		return fmt.Errorf("julianday requires numeric input")
+	}
+	return nil
+}
+
+// parseTimeOffset parses time offset modifiers like "+12:30:00" or "-01:20:30".
+// Returns true if successfully parsed and applied.
+func (dt *DateTime) parseTimeOffset(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 4 {
+		return false
+	}
+
+	// Check for leading +/- or just digits
+	sign := 1
+	offset := 0
+	if s[0] == '+' {
+		offset = 1
+	} else if s[0] == '-' {
+		sign = -1
+		offset = 1
+	}
+
+	// Try to parse as HH:MM:SS or HH:MM
+	parts := strings.Split(s[offset:], ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return false
+	}
+
+	hours, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return false
+	}
+
+	minutes, err := strconv.Atoi(parts[1])
+	if err != nil || minutes < 0 || minutes > 59 {
+		return false
+	}
+
+	seconds := 0.0
+	if len(parts) == 3 {
+		seconds, err = strconv.ParseFloat(parts[2], 64)
+		if err != nil || seconds < 0 || seconds >= 60 {
+			return false
+		}
+	}
+
+	// Apply the time offset
+	dt.computeJD()
+	totalMs := int64(sign) * (int64(hours)*3600000 + int64(minutes)*60000 + int64(seconds*1000))
+	dt.jd += totalMs
+	dt.validYMD = false
+	dt.validHMS = false
+
+	return true
 }
 
 // timeUnitMs maps time units to their millisecond multipliers.
@@ -733,6 +872,53 @@ func strftimeFunc(args []Value) (Value, error) {
 
 	result := dt.strftime(format)
 	return NewTextValue(result), nil
+}
+
+// getWeekday returns the day of week (0=Sunday, 1=Monday, ..., 6=Saturday).
+func (dt *DateTime) getWeekday() int {
+	dt.computeJD()
+	// Julian day 0 is a Monday, so adjust accordingly
+	currentJD := (dt.jd + 43200000) / msPerDay
+	return int((currentJD + 1) % 7) // 0=Sunday, 1=Monday, etc.
+}
+
+// getWeekNumber returns the week number of the year (00-53).
+// Week 01 is the first week containing a Monday.
+func (dt *DateTime) getWeekNumber() int {
+	dt.computeYMD()
+
+	// Get day of year
+	dayOfYear := dt.getDayOfYear()
+
+	// Get weekday of January 1
+	jan1 := &DateTime{year: dt.year, month: 1, day: 1, validYMD: true}
+	jan1.computeJD()
+	jan1Weekday := jan1.getWeekday()
+
+	// Calculate week number
+	// Days until first Monday
+	daysUntilMonday := (8 - jan1Weekday) % 7
+	if daysUntilMonday == 0 {
+		daysUntilMonday = 7
+	}
+
+	if dayOfYear < daysUntilMonday {
+		return 0
+	}
+
+	return (dayOfYear - daysUntilMonday) / 7 + 1
+}
+
+// getDayOfYear returns the day of year (1-366).
+func (dt *DateTime) getDayOfYear() int {
+	dt.computeYMD()
+
+	dayOfYear := dt.day
+	for m := 1; m < dt.month; m++ {
+		dayOfYear += daysInMonth(dt.year, m)
+	}
+
+	return dayOfYear
 }
 
 // strftimeHandlers maps each format specifier byte to a function that

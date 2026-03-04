@@ -266,22 +266,17 @@ func (s *Stmt) createGroupBySorterKeyInfo(numGroupBy int) *vdbe.SorterKeyInfo {
 	}
 }
 
-// compileSelectWithGroupBy compiles a SELECT with GROUP BY clause using sorted aggregate approach.
-// This implementation:
-// 1. Scans the table and populates a sorter with GROUP BY columns + aggregate inputs
-// 2. Sorts by GROUP BY columns
-// 3. Processes sorted data row-by-row, detecting group changes and computing aggregates
-func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
-	numCols := len(stmt.Columns)
-	numGroupBy := len(stmt.GroupBy)
+// groupByCursors holds cursor numbers for GROUP BY processing
+type groupByCursors struct {
+	tableCursor  int
+	sorterCursor int
+}
 
-	// Setup VDBE and code generator
+// setupGroupByCursorsAndState initializes cursors, code generator, and GROUP BY state
+func (s *Stmt) setupGroupByCursorsAndState(vm *vdbe.VDBE, stmt *parser.SelectStmt, tableName string, table *schema.Table, args []driver.NamedValue, numCols, numGroupBy int) (*expr.CodeGenerator, groupByCursors, groupByState) {
 	vm.AllocMemory(numCols + numGroupBy*3 + 100)
 
-	// Determine cursor number for source table (handles both regular and ephemeral tables)
 	tableCursor := s.determineCursorNum(table, vm)
-
-	// Allocate sorter cursor (next available cursor)
 	sorterCursor := len(vm.Cursors)
 	vm.AllocCursors(sorterCursor + 1)
 
@@ -289,73 +284,49 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	s.setupSubqueryCompiler(gen)
 	gen.RegisterCursor(tableName, tableCursor)
 
-	// Build result column names
 	vm.ResultCols = make([]string, numCols)
 	for i, col := range stmt.Columns {
 		vm.ResultCols[i] = selectColName(col, i)
 	}
 
-	// Register table info
 	tableInfo := buildTableInfo(tableName, table)
 	gen.RegisterTable(tableInfo)
-
-	// Setup args
 	s.setupAggregateArgs(gen, args)
 
-	// Reserve registers 0 to numCols-1 for result row output.
-	// This prevents internal state registers from overlapping with output registers.
 	for i := 0; i < numCols; i++ {
 		gen.AllocReg()
 	}
 
-	// Initialize GROUP BY state
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	state := s.initGroupByState(vm, gen, stmt, numGroupBy)
 
-	// Phase 1: Scan table and populate sorter
-	// We need to store: GROUP BY columns + columns needed for aggregates
-	sorterCols := s.calculateSorterColumns(stmt, numGroupBy)
+	cursors := groupByCursors{tableCursor: tableCursor, sorterCursor: sorterCursor}
+	return gen, cursors, state
+}
 
-	// Create sorter key info (sort by all GROUP BY columns)
-	keyInfo := s.createGroupBySorterKeyInfo(numGroupBy)
-
-	// Open table and sorter
-	// Only open the table cursor if it's not already open (e.g., for ephemeral CTE tables)
+// openTableAndSorter opens table and sorter cursors
+func (s *Stmt) openTableAndSorter(vm *vdbe.VDBE, table *schema.Table, cursors groupByCursors, sorterCols int, keyInfo *vdbe.SorterKeyInfo) {
 	if !table.Temp {
-		vm.AddOp(vdbe.OpOpenRead, tableCursor, int(table.RootPage), len(table.Columns))
+		vm.AddOp(vdbe.OpOpenRead, cursors.tableCursor, int(table.RootPage), len(table.Columns))
 	}
-	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, sorterCursor, sorterCols, 0)
+	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, cursors.sorterCursor, sorterCols, 0)
 	vm.Program[sorterOpenAddr].P4.P = keyInfo
+}
 
-	rewindAddr := vm.AddOp(vdbe.OpRewind, tableCursor, 0, 0)
-	loopStart := vm.NumOps()
-
-	// WHERE clause
-	skipAddr := s.emitWhereClause(vm, gen, stmt)
-
-	// Evaluate and store data for sorter
-	// Allocate enough registers for all sorter columns (GROUP BY + aggregate inputs)
-	sorterBaseReg := gen.AllocReg()
-	// Reserve additional registers so they won't be used by other allocations
-	for i := 1; i < sorterCols; i++ {
-		gen.AllocReg()
-	}
-
-	// Evaluate GROUP BY expressions
+// populateSorterData evaluates and copies GROUP BY and aggregate expressions to sorter registers
+func (s *Stmt) populateSorterData(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, sorterBaseReg, numGroupBy int) error {
 	for i, groupExpr := range stmt.GroupBy {
 		reg, err := gen.GenerateExpr(groupExpr)
 		if err != nil {
-			return nil, fmt.Errorf("error compiling GROUP BY expression: %w", err)
+			return fmt.Errorf("error compiling GROUP BY expression: %w", err)
 		}
 		vm.AddOp(vdbe.OpCopy, reg, sorterBaseReg+i, 0)
 	}
 
-	// Store columns needed for aggregates
 	regIdx := numGroupBy
 	for _, col := range stmt.Columns {
 		if s.isAggregateExpr(col.Expr) {
 			fnExpr := col.Expr.(*parser.FunctionExpr)
-			// For COUNT(*), we don't need to store anything extra
 			if !fnExpr.Star && len(fnExpr.Args) > 0 {
 				argReg, err := gen.GenerateExpr(fnExpr.Args[0])
 				if err == nil {
@@ -365,56 +336,83 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 			}
 		}
 	}
+	return nil
+}
 
-	// Insert into sorter
-	vm.AddOp(vdbe.OpSorterInsert, sorterCursor, sorterBaseReg, sorterCols)
+// scanAndPopulateSorter implements Phase 1: scan table and populate sorter
+func (s *Stmt) scanAndPopulateSorter(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, table *schema.Table, cursors groupByCursors, numGroupBy, sorterCols int) (rewindAddr, sorterSortAddr, sorterBaseReg int, err error) {
+	keyInfo := s.createGroupBySorterKeyInfo(numGroupBy)
+	s.openTableAndSorter(vm, table, cursors, sorterCols, keyInfo)
 
-	// Fix WHERE skip
-	s.fixWhereSkip(vm, skipAddr)
+	rewindAddr = vm.AddOp(vdbe.OpRewind, cursors.tableCursor, 0, 0)
+	loopStart := vm.NumOps()
 
-	// Next row
-	vm.AddOp(vdbe.OpNext, tableCursor, loopStart, 0)
+	skipAddr := s.emitWhereClause(vm, gen, stmt)
 
-	// Close table (if we opened it), sort the data
-	if !table.Temp {
-		vm.AddOp(vdbe.OpClose, tableCursor, 0, 0)
+	sorterBaseReg = gen.AllocReg()
+	for i := 1; i < sorterCols; i++ {
+		gen.AllocReg()
 	}
-	sorterSortAddr := vm.AddOp(vdbe.OpSorterSort, sorterCursor, 0, 0)
 
-	// Phase 2: Process sorted data with group detection
-	afterScanAddr := vm.NumOps()
+	if err := s.populateSorterData(vm, gen, stmt, sorterBaseReg, numGroupBy); err != nil {
+		return 0, 0, 0, err
+	}
 
-	// Iterate over sorted data
-	sorterNextAddr := vm.AddOp(vdbe.OpSorterNext, sorterCursor, 0, 0)
-	sorterLoopStart := vm.NumOps()
+	vm.AddOp(vdbe.OpSorterInsert, cursors.sorterCursor, sorterBaseReg, sorterCols)
+	s.fixWhereSkip(vm, skipAddr)
+	vm.AddOp(vdbe.OpNext, cursors.tableCursor, loopStart, 0)
 
-	// Extract data from sorter
+	if !table.Temp {
+		vm.AddOp(vdbe.OpClose, cursors.tableCursor, 0, 0)
+	}
+	sorterSortAddr = vm.AddOp(vdbe.OpSorterSort, cursors.sorterCursor, 0, 0)
+	return rewindAddr, sorterSortAddr, sorterBaseReg, nil
+}
+
+// processSortedDataWithGrouping implements Phase 2: process sorted data
+func (s *Stmt) processSortedDataWithGrouping(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, sorterCursor, sorterBaseReg, numGroupBy, numCols, sorterCols int) (sorterNextAddr, sorterLoopStart int) {
+	sorterNextAddr = vm.AddOp(vdbe.OpSorterNext, sorterCursor, 0, 0)
+	sorterLoopStart = vm.NumOps()
+
 	vm.AddOp(vdbe.OpSorterData, sorterCursor, sorterBaseReg, sorterCols)
 
-	// Load GROUP BY values from sorter data
 	for i := 0; i < numGroupBy; i++ {
 		vm.AddOp(vdbe.OpCopy, sorterBaseReg+i, state.groupByRegs[i], 0)
 	}
 
-	// Compare GROUP BY values, output previous group if changed, and initialize accumulators
-	// This handles first row detection, group change detection, output, and initialization
 	s.emitGroupComparison(vm, gen, stmt, state, numGroupBy, numCols)
-
-	// Update accumulators with current row data from sorter
 	s.updateGroupAccumulatorsFromSorter(vm, gen, stmt, state, sorterBaseReg, numGroupBy)
-
-	// Next sorted row
 	vm.AddOp(vdbe.OpSorterNext, sorterCursor, sorterLoopStart, 0)
 
-	// After processing all sorted rows - output last group
+	return sorterNextAddr, sorterLoopStart
+}
+
+// compileSelectWithGroupBy compiles a SELECT with GROUP BY clause using sorted aggregate approach.
+// This implementation:
+// 1. Scans the table and populates a sorter with GROUP BY columns + aggregate inputs
+// 2. Sorts by GROUP BY columns
+// 3. Processes sorted data row-by-row, detecting group changes and computing aggregates
+func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	numCols := len(stmt.Columns)
+	numGroupBy := len(stmt.GroupBy)
+
+	gen, cursors, state := s.setupGroupByCursorsAndState(vm, stmt, tableName, table, args, numCols, numGroupBy)
+	sorterCols := s.calculateSorterColumns(stmt, numGroupBy)
+
+	rewindAddr, sorterSortAddr, sorterBaseReg, err := s.scanAndPopulateSorter(vm, gen, stmt, table, cursors, numGroupBy, sorterCols)
+	if err != nil {
+		return nil, err
+	}
+
+	afterScanAddr := vm.NumOps()
+	sorterNextAddr, sorterLoopStart := s.processSortedDataWithGrouping(vm, gen, stmt, state, cursors.sorterCursor, sorterBaseReg, numGroupBy, numCols, sorterCols)
+
 	finalOutputAddr := vm.NumOps()
 	s.emitFinalGroupOutput(vm, gen, stmt, state, numCols)
 
-	// Close sorter and halt
-	vm.AddOp(vdbe.OpSorterClose, sorterCursor, 0, 0)
+	vm.AddOp(vdbe.OpSorterClose, cursors.sorterCursor, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
-	// Fix jumps
 	vm.Program[rewindAddr].P2 = afterScanAddr
 	vm.Program[sorterSortAddr].P2 = finalOutputAddr
 	vm.Program[sorterNextAddr].P2 = sorterLoopStart
