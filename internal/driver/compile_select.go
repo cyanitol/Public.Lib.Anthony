@@ -198,8 +198,20 @@ func (s *Stmt) emitSimpleSelectScan(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 		}
 	}
 
+	// Handle DISTINCT - check if row is unique before outputting
+	var distinctSkipAddr int
+	if stmt.Distinct {
+		// OpDistinctRow: P1=first reg, P2=jump if not distinct, P3=num cols
+		distinctSkipAddr = vm.AddOp(vdbe.OpDistinctRow, 0, 0, numCols)
+	}
+
 	// Output row
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+
+	// Fix DISTINCT skip - jump to after ResultRow (to OpNext)
+	if stmt.Distinct {
+		vm.Program[distinctSkipAddr].P2 = vm.NumOps()
+	}
 
 	// Fix WHERE skip
 	if stmt.Where != nil {
@@ -492,7 +504,7 @@ func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	// Emit sorter output loop
 	sorterSortAddr, limitInfo := s.emitOrderBySorterSort(vm, stmt, gen)
 	sorterNextAddr, haltJumpAddr, sorterLoopAddr := s.emitOrderByOutputSetup(vm)
-	offsetSkipAddr, limitJumpAddr, nextRowAddr := s.emitOrderByOutputLoop(vm, numCols, limitInfo, gen, sorterLoopAddr)
+	offsetSkipAddr, limitJumpAddr, nextRowAddr := s.emitOrderByOutputLoop(vm, stmt, numCols, limitInfo, gen, sorterLoopAddr)
 	haltAddr := s.emitOrderByCleanup(vm)
 
 	// Fix all addresses
@@ -589,11 +601,24 @@ func (s *Stmt) emitOrderByOutputSetup(vm *vdbe.VDBE) (int, int, int) {
 }
 
 // emitOrderByOutputLoop emits the sorter output loop with LIMIT/OFFSET checks.
-func (s *Stmt) emitOrderByOutputLoop(vm *vdbe.VDBE, numCols int, limitInfo *limitOffsetInfo, gen *expr.CodeGenerator, sorterLoopAddr int) (int, int, int) {
+func (s *Stmt) emitOrderByOutputLoop(vm *vdbe.VDBE, stmt *parser.SelectStmt, numCols int, limitInfo *limitOffsetInfo, gen *expr.CodeGenerator, sorterLoopAddr int) (int, int, int) {
 	vm.AddOp(vdbe.OpSorterData, 0, 0, numCols)
 	offsetSkipAddr, limitJumpAddr := s.emitLimitOffsetChecks(vm, limitInfo, gen)
+
+	// Handle DISTINCT - check if row is unique before outputting
+	var distinctSkipAddr int
+	if stmt.Distinct {
+		distinctSkipAddr = vm.AddOp(vdbe.OpDistinctRow, 0, 0, numCols)
+	}
+
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+
+	// Fix DISTINCT skip - jump to SorterNext
 	nextRowAddr := vm.AddOp(vdbe.OpSorterNext, 0, sorterLoopAddr, 0)
+	if stmt.Distinct {
+		vm.Program[distinctSkipAddr].P2 = nextRowAddr
+	}
+
 	return offsetSkipAddr, limitJumpAddr, nextRowAddr
 }
 

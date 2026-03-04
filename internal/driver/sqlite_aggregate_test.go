@@ -49,7 +49,7 @@ func TestSQLiteAggregate(t *testing.T) {
 		},
 		{
 			name: "COUNT(DISTINCT column)",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(a INTEGER)",
 				"INSERT INTO t1 VALUES(1), (2), (2), (3), (3), (3)",
@@ -310,7 +310,7 @@ func TestSQLiteAggregate(t *testing.T) {
 		// Aggregate with DISTINCT
 		{
 			name: "SUM DISTINCT",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(value INTEGER)",
 				"INSERT INTO t1 VALUES(10), (20), (10), (30), (20)",
@@ -320,7 +320,7 @@ func TestSQLiteAggregate(t *testing.T) {
 		},
 		{
 			name: "AVG DISTINCT",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(value INTEGER)",
 				"INSERT INTO t1 VALUES(10), (20), (10), (30)",

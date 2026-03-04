@@ -412,7 +412,7 @@ func TestSQLiteCTE(t *testing.T) {
 		// Graph traversal
 		{
 			name: "recursive_graph_traversal",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE edges(from_node INTEGER, to_node INTEGER)",
 				"INSERT INTO edges VALUES(1, 2)",
@@ -557,7 +557,7 @@ func TestSQLiteCTE(t *testing.T) {
 		// CTE with DISTINCT
 		{
 			name: "cte_with_distinct",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE duplicates(value INTEGER)",
 				"INSERT INTO duplicates VALUES(1)",
@@ -667,7 +667,7 @@ func TestSQLiteCTE(t *testing.T) {
 		// Recursive ancestors
 		{
 			name: "recursive_ancestors",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE person(id INTEGER, parent_id INTEGER, name TEXT)",
 				"INSERT INTO person VALUES(1, NULL, 'Grandparent')",
@@ -700,7 +700,7 @@ func TestSQLiteCTE(t *testing.T) {
 		// Recursive binary tree traversal
 		{
 			name: "recursive_binary_tree",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE btree(id INTEGER, left_id INTEGER, right_id INTEGER, value TEXT)",
 				"INSERT INTO btree VALUES(1, 2, 3, 'root')",

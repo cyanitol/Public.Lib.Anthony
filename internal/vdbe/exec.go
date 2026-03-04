@@ -281,6 +281,7 @@ func init() {
 	OpWindowFirstValue: (*VDBE).execWindowFirstValue,
 	OpWindowLastValue:  (*VDBE).execWindowLastValue,
 	OpAggDistinct:      (*VDBE).execAggDistinct,
+	OpDistinctRow:      (*VDBE).execDistinctRow,
 	}
 }
 
@@ -505,16 +506,25 @@ func (v *VDBE) execNull(instr *Instruction) error {
 }
 
 func (v *VDBE) execCopy(instr *Instruction) error {
-	// Copy register P1 to register P2
-	src, err := v.GetMem(instr.P1)
-	if err != nil {
-		return err
+	// Copy P3+1 registers starting at P1 to starting at P2
+	// SQLite OP_Copy: Make a copy of registers P1..P1+P3 into registers P2..P2+P3
+	// This makes a deep copy of the value (string/blob data is duplicated)
+	count := instr.P3 + 1
+
+	for i := 0; i < count; i++ {
+		src, err := v.GetMem(instr.P1 + i)
+		if err != nil {
+			return err
+		}
+		dst, err := v.GetMem(instr.P2 + i)
+		if err != nil {
+			return err
+		}
+		if err := dst.Copy(src); err != nil {
+			return err
+		}
 	}
-	dst, err := v.GetMem(instr.P2)
-	if err != nil {
-		return err
-	}
-	return dst.Copy(src)
+	return nil
 }
 
 func (v *VDBE) execMove(instr *Instruction) error {
@@ -3668,29 +3678,39 @@ func (v *VDBE) execYield(instr *Instruction) error {
 }
 
 // execOnce executes a block of code only once.
-// P1 = register containing flag (0 = not executed, 1 = executed)
-// P2 = address to jump to if already executed
+//
+// OP_Once is used to ensure a block of code runs only once per program invocation.
+// It uses self-modifying code for top-level programs and a bitmask for subprograms.
+//
+// P1 = Initial value that is set on OP_Init
+// P2 = Address to jump to on subsequent executions
+//
+// On first execution: fall through to next instruction and set P1 = OP_Init.P1
+// On subsequent executions: jump to P2
 func (v *VDBE) execOnce(instr *Instruction) error {
-	flagReg := instr.P1
 	jumpAddr := instr.P2
 
-	// Get the flag register
-	mem, err := v.GetMem(flagReg)
-	if err != nil {
-		return err
+	// Get the OP_Init instruction (should always be at position 0)
+	if len(v.Program) == 0 || v.Program[0].Opcode != OpInit {
+		return fmt.Errorf("OpOnce requires OP_Init at position 0")
 	}
+	initInstr := v.Program[0]
 
-	// Check if already executed
-	if mem.IsInt() && mem.IntValue() != 0 {
-		// Already executed - jump to skip address
+	// For now, we implement the self-modifying code approach for top-level programs.
+	// Check if this instruction's P1 matches the Init instruction's P1.
+	// If they match, we've already executed this once - jump.
+	// If they differ, this is the first execution - fall through and update P1.
+
+	if instr.P1 == initInstr.P1 {
+		// Already executed in this invocation - jump to P2
 		v.PC = jumpAddr
 		return nil
 	}
 
-	// Mark as executed
-	mem.SetInt(1)
+	// First execution - set P1 to match OP_Init.P1 (self-modify)
+	instr.P1 = initInstr.P1
 
-	// Continue to next instruction (execute the once block)
+	// Fall through to next instruction (execute the once block)
 	return nil
 }
 
@@ -4268,6 +4288,57 @@ func (v *VDBE) execAggDistinct(instr *Instruction) error {
 
 	// New value - mark as seen
 	v.DistinctSets[aggReg][key] = true
+
+	// Continue to next instruction (don't jump)
+	return nil
+}
+
+// execDistinctRow implements OpDistinctRow - Check if row is distinct for SELECT DISTINCT
+// P1 = first register of the row
+// P2 = jump address if NOT distinct (already seen)
+// P3 = number of columns in the row
+func (v *VDBE) execDistinctRow(instr *Instruction) error {
+	firstReg := instr.P1
+	jumpAddr := instr.P2
+	numCols := instr.P3
+
+	// Build a composite key from all columns
+	var key string
+	for i := 0; i < numCols; i++ {
+		mem, err := v.GetMem(firstReg + i)
+		if err != nil {
+			return err
+		}
+		if i > 0 {
+			key += "\x00" // Separator
+		}
+		key += mem.ToDistinctKey()
+	}
+
+	// Use a special set ID (-1) for SELECT DISTINCT rows
+	const distinctRowSetID = -1
+
+	// Initialize DistinctSets if needed
+	if v.DistinctSets == nil {
+		v.DistinctSets = make(map[int]map[string]bool)
+	}
+
+	// Initialize the set for distinct rows if needed
+	if v.DistinctSets[distinctRowSetID] == nil {
+		v.DistinctSets[distinctRowSetID] = make(map[string]bool)
+	}
+
+	// Check if we've seen this row before
+	if v.DistinctSets[distinctRowSetID][key] {
+		// Already seen - jump to skip address
+		if jumpAddr >= 0 && jumpAddr < len(v.Program) {
+			v.PC = jumpAddr
+		}
+		return nil
+	}
+
+	// New row - mark as seen
+	v.DistinctSets[distinctRowSetID][key] = true
 
 	// Continue to next instruction (don't jump)
 	return nil

@@ -129,6 +129,7 @@ type SubqueryCompiler func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error)
 type CodeGenerator struct {
 	vdbe             *vdbe.VDBE
 	nextReg          int
+	nextCursor       int                  // next cursor index to allocate for subqueries
 	cursorMap        map[string]int       // table name -> cursor number
 	tableInfo        map[string]TableInfo // table name -> table info
 	args             []interface{}        // bound parameter values
@@ -139,9 +140,12 @@ type CodeGenerator struct {
 
 // NewCodeGenerator creates a new code generator.
 func NewCodeGenerator(v *vdbe.VDBE) *CodeGenerator {
+	// Start cursor allocation after any cursors already allocated
+	startCursor := len(v.Cursors)
 	return &CodeGenerator{
 		vdbe:             v,
 		nextReg:          1,
+		nextCursor:       startCursor,
 		cursorMap:        make(map[string]int),
 		tableInfo:        make(map[string]TableInfo),
 		args:             nil,
@@ -199,6 +203,25 @@ func (g *CodeGenerator) AllocRegs(n int) int {
 		g.vdbe.AllocMemory(g.nextReg)
 	}
 	return reg
+}
+
+// AllocCursor allocates a new cursor index and returns it.
+// This is separate from register allocation - cursors are used for
+// OpOpenRead, OpOpenWrite, OpOpenEphemeral, OpRewind, OpNext, etc.
+func (g *CodeGenerator) AllocCursor() int {
+	cursor := g.nextCursor
+	g.nextCursor++
+	// Ensure VDBE has enough cursors allocated
+	g.vdbe.AllocCursors(g.nextCursor)
+	return cursor
+}
+
+// SetNextCursor sets the next cursor index to allocate.
+// Use this to reserve cursor indices for tables in the query.
+func (g *CodeGenerator) SetNextCursor(next int) {
+	if next > g.nextCursor {
+		g.nextCursor = next
+	}
 }
 
 // RegisterCursor associates a table name with a cursor number.
@@ -781,88 +804,135 @@ func (g *CodeGenerator) negateResult(reg int) int {
 }
 
 // generateInSubquery generates code for IN (SELECT ...) expressions.
-// Strategy: Use a coroutine to execute the subquery, then check if the LHS value
-// matches any row returned by the subquery.
+// Strategy: Similar to SQLite's approach - create an ephemeral table,
+// populate it with subquery results, then use OP_Found to check membership.
 func (g *CodeGenerator) generateInSubquery(e *parser.InExpr, exprReg int, resultReg int) (int, error) {
 	if g.subqueryCompiler == nil {
 		return 0, fmt.Errorf("subquery compiler not set")
 	}
 
-	// Initialize result to false
+	// Initialize result to false (0)
 	g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: init result to false")
 
-	// Allocate a coroutine ID
-	coroutineID := g.AllocReg()
+	// Allocate a cursor for the ephemeral table that will hold subquery results
+	subqueryCursor := g.AllocCursor()
 
-	// Initialize the coroutine
-	// P1 = coroutine ID, P2 = jump past coroutine body, P3 = entry point
-	g.vdbe.AddOp(vdbe.OpInitCoroutine, coroutineID, 0, 0)
-	addrInitCoroutine := g.vdbe.NumOps() - 1
-
-	// This is the entry point for the coroutine (will be filled in)
-	addrCoroutineStart := g.vdbe.NumOps()
-
-	// Compile the subquery SELECT into the current VDBE
-	// The subquery will insert results into an ephemeral table
-	subqueryCursor := g.AllocReg()
+	// Open ephemeral table with 1 column
 	g.vdbe.AddOp(vdbe.OpOpenEphemeral, subqueryCursor, 1, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: open ephemeral table")
 
 	// Compile the SELECT statement
+	// The subquery compiler should generate code that uses ResultRow
 	subVM, err := g.subqueryCompiler(e.Select)
 	if err != nil {
 		return 0, fmt.Errorf("failed to compile IN subquery: %w", err)
 	}
 
-	// Copy the subquery bytecode into the current VDBE
-	// The subquery should yield each result row
-	for i := 0; i < subVM.NumOps(); i++ {
-		instr := subVM.Program[i]
-		g.vdbe.Program = append(g.vdbe.Program, instr)
+	// Record where we'll insert the subquery bytecode
+	addrSubqueryStart := g.vdbe.NumOps()
+
+	// Calculate register offset for subquery
+	regOffset := g.nextReg
+
+	// Ensure parent VDBE has enough memory and cursors for subquery
+	if subVM.NumMem > 0 {
+		requiredMem := subVM.NumMem + regOffset
+		if requiredMem > g.vdbe.NumMem {
+			g.vdbe.AllocMemory(requiredMem)
+		}
 	}
 
-	// End the coroutine
-	g.vdbe.AddOp(vdbe.OpEndCoroutine, coroutineID, 0, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: end coroutine")
+	// Ensure parent VDBE has enough cursors for subquery
+	// Need to have at least as many cursors as parent + subquery cursors
+	cursorOffset := 0
+	if len(subVM.Cursors) > 0 {
+		cursorOffset = len(g.vdbe.Cursors)
+		totalCursorsNeeded := len(g.vdbe.Cursors) + len(subVM.Cursors)
+		g.vdbe.AllocCursors(totalCursorsNeeded)
+	}
 
-	// Set the jump address to skip the coroutine body
-	addrAfterCoroutine := g.vdbe.NumOps()
-	g.vdbe.Program[addrInitCoroutine].P2 = addrAfterCoroutine
-	g.vdbe.Program[addrInitCoroutine].P3 = addrCoroutineStart
+	// Adjust jump targets, register references, and cursor references in subquery bytecode before embedding
+	g.adjustSubqueryJumpTargets(subVM, addrSubqueryStart)
+	g.adjustSubqueryRegisters(subVM, regOffset)
+	g.adjustSubqueryCursors(subVM, cursorOffset)
 
-	// Now scan the ephemeral table and check for matches
+	// Copy the subquery bytecode into the current VDBE
+	// Replace ResultRow instructions with code to insert into ephemeral table
+	// Skip Halt instructions (they would terminate execution)
+	for i := 0; i < subVM.NumOps(); i++ {
+		instr := *subVM.Program[i] // Copy instruction
+		if instr.Opcode == vdbe.OpHalt {
+			// Skip Halt - we want execution to continue after subquery
+			g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
+			g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: skip halt (replaced with noop)")
+			continue
+		} else if instr.Opcode == vdbe.OpResultRow {
+			// Replace ResultRow with: MakeRecord + Insert into ephemeral table
+			// P1 = source register (already adjusted), P2 = number of columns (should be 1)
+			// For IN subqueries, we only care about the first column
+
+			// Allocate register for the record
+			recReg := g.AllocReg()
+
+			// MakeRecord: create a record from the result column(s)
+			// P1 = first source reg, P2 = num regs, P3 = dest reg
+			g.vdbe.AddOp(vdbe.OpMakeRecord, instr.P1, 1, recReg)
+			g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: make record")
+
+			// Insert: insert record into ephemeral table
+			// P1 = cursor, P2 = record reg, P3 = unused (0)
+			g.vdbe.AddOp(vdbe.OpInsert, subqueryCursor, recReg, 0)
+			g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: insert into ephemeral")
+		} else {
+			g.vdbe.Program = append(g.vdbe.Program, &instr)
+		}
+	}
+
+	// Update nextReg to account for registers used by subquery
+	g.nextReg += subVM.NumMem
+
+	// Now check if the LHS value exists in the ephemeral table
+	// First, rewind the ephemeral table cursor
 	addrRewind := g.vdbe.AddOp(vdbe.OpRewind, subqueryCursor, 0, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: rewind")
+
+	// Loop through ephemeral table
 	addrLoop := g.vdbe.NumOps()
 
-	// Read value and compare
+	// Read the value from the current row
 	valueReg := g.AllocReg()
 	g.vdbe.AddOp(vdbe.OpColumn, subqueryCursor, 0, valueReg)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: read value")
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: read column 0")
 
+	// Compare with LHS value
 	cmpReg := g.AllocReg()
 	g.vdbe.AddOp(vdbe.OpEq, exprReg, valueReg, cmpReg)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: compare")
 
-	// If equal, set result to true and jump to end
+	// If not equal, skip to next row
 	g.vdbe.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
 	addrIfNot := g.vdbe.NumOps() - 1
 
+	// Found a match - set result to true (1)
 	g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: match found, set true")
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: match found")
 
+	// Jump to end
 	g.vdbe.AddOp(vdbe.OpGoto, 0, 0, 0)
 	addrGotoEnd := g.vdbe.NumOps() - 1
 
-	// Patch the IfNot to continue loop
+	// Patch the IfNot to continue to next iteration
 	g.vdbe.Program[addrIfNot].P2 = g.vdbe.NumOps()
 
-	// Advance to next row
+	// Next: advance to next row and loop
 	g.vdbe.AddOp(vdbe.OpNext, subqueryCursor, addrLoop, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: next row")
 
-	// Patch the Rewind jump to end if no rows
+	// End of loop - no match found (result stays 0)
 	addrEnd := g.vdbe.NumOps()
+
+	// Patch the Rewind jump to end if no rows
 	g.vdbe.Program[addrRewind].P2 = addrEnd
 
 	// Patch the Goto to end
@@ -870,7 +940,7 @@ func (g *CodeGenerator) generateInSubquery(e *parser.InExpr, exprReg int, result
 
 	// Close ephemeral table
 	g.vdbe.AddOp(vdbe.OpClose, subqueryCursor, 0, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: close ephemeral table")
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: close ephemeral")
 
 	return resultReg, nil
 }
@@ -938,9 +1008,9 @@ func (g *CodeGenerator) generateCast(e *parser.CastExpr) (int, error) {
 
 // generateSubquery generates code for scalar subquery expressions.
 // A scalar subquery is a SELECT that returns a single value.
-// Strategy: Use a coroutine to execute the subquery and extract the single result value.
+// Strategy: Inline the subquery code directly. The subquery's ResultRow is
+// replaced with a Goto to skip further processing, capturing the result.
 // If the subquery returns zero rows, the result is NULL.
-// If the subquery returns more than one row, it's an error.
 func (g *CodeGenerator) generateSubquery(e *parser.SubqueryExpr) (int, error) {
 	if e.Select == nil {
 		return 0, fmt.Errorf("subquery expression has no SELECT statement")
@@ -956,81 +1026,60 @@ func (g *CodeGenerator) generateSubquery(e *parser.SubqueryExpr) (int, error) {
 	g.vdbe.AddOp(vdbe.OpNull, 0, resultReg, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: init result to NULL")
 
-	// Use OpOnce to ensure subquery executes only once for scalar context
-	// P1 = flag register to track if already executed, P2 = jump if already executed
-	onceReg := g.AllocReg()
-	g.vdbe.AddOp(vdbe.OpOnce, onceReg, 0, 0)
-	addrOnce := g.vdbe.NumOps() - 1
-
-	// Allocate a coroutine ID
-	coroutineID := g.AllocReg()
-
-	// Initialize the coroutine
-	// P1 = coroutine ID, P2 = jump past coroutine body, P3 = entry point
-	g.vdbe.AddOp(vdbe.OpInitCoroutine, coroutineID, 0, 0)
-	addrInitCoroutine := g.vdbe.NumOps() - 1
-
-	// This is the entry point for the coroutine (will be filled in)
-	addrCoroutineStart := g.vdbe.NumOps()
-
-	// Allocate a cursor for the subquery result
-	subqueryCursor := g.AllocReg()
-	g.vdbe.AddOp(vdbe.OpOpenEphemeral, subqueryCursor, 1, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: open ephemeral table")
-
 	// Compile the SELECT statement
 	subVM, err := g.subqueryCompiler(e.Select)
 	if err != nil {
 		return 0, fmt.Errorf("failed to compile scalar subquery: %w", err)
 	}
 
+	// Record subquery start address for jump target adjustment
+	addrSubqueryStart := g.vdbe.NumOps()
+
+	// NOTE: setupSubqueryCompiler already handles:
+	// - Register adjustment (adjustSubqueryRegisters)
+	// - Cursor adjustment (adjustSubqueryCursors)
+	// - Memory/cursor allocation in parent VDBE
+	// We only need to adjust jump targets here for the embedding position
+
+	// Adjust jump targets in subquery bytecode for embedding position
+	g.adjustSubqueryJumpTargets(subVM, addrSubqueryStart)
+
+	// Track addresses where ResultRow is replaced with Goto (need to patch later)
+	var resultRowGotoAddrs []int
+
 	// Copy the subquery bytecode into the current VDBE
+	// Replace ResultRow with: Copy result to our register, then Goto past subquery
+	// Replace Halt with Noop (don't halt the main program)
 	for i := 0; i < subVM.NumOps(); i++ {
 		instr := subVM.Program[i]
-		g.vdbe.Program = append(g.vdbe.Program, instr)
+		switch instr.Opcode {
+		case vdbe.OpResultRow:
+			// Copy first result column to resultReg
+			g.vdbe.AddOp(vdbe.OpCopy, instr.P1, resultReg, 0)
+			g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: copy result")
+			// Goto past subquery (will patch address later)
+			resultRowGotoAddrs = append(resultRowGotoAddrs, g.vdbe.NumOps())
+			g.vdbe.AddOp(vdbe.OpGoto, 0, 0, 0)
+			g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: done, skip to end")
+		case vdbe.OpHalt:
+			// Convert Halt to Noop - subquery shouldn't halt main program
+			g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
+			g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: stripped Halt")
+		default:
+			// Create a copy of the instruction to avoid aliasing
+			instrCopy := *instr
+			g.vdbe.Program = append(g.vdbe.Program, &instrCopy)
+		}
 	}
 
-	// End the coroutine
-	g.vdbe.AddOp(vdbe.OpEndCoroutine, coroutineID, 0, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: end coroutine")
+	// Update nextReg to account for registers used by subquery
+	g.nextReg += subVM.NumMem
 
-	// Set the jump address to skip the coroutine body
-	addrAfterCoroutine := g.vdbe.NumOps()
-	g.vdbe.Program[addrInitCoroutine].P2 = addrAfterCoroutine
-	g.vdbe.Program[addrInitCoroutine].P3 = addrCoroutineStart
-
-	// After subquery populates ephemeral table, extract the single value
-	addrRewind := g.vdbe.AddOp(vdbe.OpRewind, subqueryCursor, 0, 0)
-
-	// Read the first (and should be only) value
-	g.vdbe.AddOp(vdbe.OpColumn, subqueryCursor, 0, resultReg)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: read result")
-
-	// Check if there's a second row (which would be an error)
-	g.vdbe.AddOp(vdbe.OpNext, subqueryCursor, 0, 0)
-	addrCheckSecondRow := g.vdbe.NumOps() - 1
-
-	// If there is a second row, halt with error
-	g.vdbe.AddOp(vdbe.OpHalt, 1, 0, 0)
-	addrError := g.vdbe.NumOps() - 1
-	g.vdbe.Program[addrError].P4.Z = "scalar subquery returned more than one row"
-	g.vdbe.Program[addrError].P4Type = vdbe.P4Static
-	g.vdbe.SetComment(addrError, "Scalar subquery: error - too many rows")
-
-	// Patch the Next to jump past error if no second row
-	g.vdbe.Program[addrCheckSecondRow].P2 = g.vdbe.NumOps()
-
-	// Patch the Rewind to jump here if no rows (result stays NULL)
-	addrNoRows := g.vdbe.NumOps()
-	g.vdbe.Program[addrRewind].P2 = addrNoRows
-
-	// Close the ephemeral table
-	g.vdbe.AddOp(vdbe.OpClose, subqueryCursor, 0, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: close ephemeral table")
-
-	// Patch the Once to jump here after first execution
-	addrSkipSubquery := g.vdbe.NumOps()
-	g.vdbe.Program[addrOnce].P2 = addrSkipSubquery
+	// End of subquery - patch all ResultRow Goto addresses to point here
+	addrAfterSubquery := g.vdbe.NumOps()
+	for _, addr := range resultRowGotoAddrs {
+		g.vdbe.Program[addr].P2 = addrAfterSubquery
+	}
 
 	g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: end")
@@ -1166,7 +1215,7 @@ func (g *CodeGenerator) generateExists(e *parser.ExistsExpr) (int, error) {
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS subquery: start")
 
 	// Allocate a cursor for the subquery
-	subqueryCursor := g.AllocReg()
+	subqueryCursor := g.AllocCursor()
 	g.vdbe.AddOp(vdbe.OpOpenEphemeral, subqueryCursor, 1, 0)
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "EXISTS: open ephemeral table")
 
@@ -1185,11 +1234,42 @@ func (g *CodeGenerator) generateExists(e *parser.ExistsExpr) (int, error) {
 		return 0, fmt.Errorf("failed to compile EXISTS subquery: %w", err)
 	}
 
+	// Record where we'll insert the subquery bytecode
+	addrSubqueryInsert := g.vdbe.NumOps()
+
+	// Calculate register offset for subquery
+	regOffset := g.nextReg
+
+	// Ensure parent VDBE has enough memory for subquery registers
+	if subVM.NumMem > 0 {
+		requiredMem := subVM.NumMem + regOffset
+		if requiredMem > g.vdbe.NumMem {
+			g.vdbe.AllocMemory(requiredMem)
+		}
+	}
+
+	// Ensure parent VDBE has enough cursors for subquery
+	// Need to have at least as many cursors as parent + subquery cursors
+	cursorOffset := 0
+	if len(subVM.Cursors) > 0 {
+		cursorOffset = len(g.vdbe.Cursors)
+		totalCursorsNeeded := len(g.vdbe.Cursors) + len(subVM.Cursors)
+		g.vdbe.AllocCursors(totalCursorsNeeded)
+	}
+
+	// Adjust jump targets, register references, and cursor references in subquery bytecode before embedding
+	g.adjustSubqueryJumpTargets(subVM, addrSubqueryInsert)
+	g.adjustSubqueryRegisters(subVM, regOffset)
+	g.adjustSubqueryCursors(subVM, cursorOffset)
+
 	// Copy the subquery bytecode into the current VDBE
 	for i := 0; i < subVM.NumOps(); i++ {
 		instr := subVM.Program[i]
 		g.vdbe.Program = append(g.vdbe.Program, instr)
 	}
+
+	// Update nextReg to account for registers used by subquery
+	g.nextReg += subVM.NumMem
 
 	// End the coroutine
 	g.vdbe.AddOp(vdbe.OpEndCoroutine, coroutineID, 0, 0)
@@ -1349,4 +1429,256 @@ func (g *CodeGenerator) generateCollate(e *parser.CollateExpr) (int, error) {
 	g.collations[reg] = e.Collation
 
 	return reg, nil
+}
+
+// adjustSubqueryJumpTargets adjusts all jump targets in the subquery bytecode.
+// When subquery bytecode is embedded into a parent VDBE at address baseAddr,
+// all absolute jump targets (in P2) must be adjusted by adding baseAddr.
+// This ensures jumps land at the correct locations in the combined program.
+//
+// Jump targets are used in opcodes like:
+// - OpGoto, OpGosub: P2 = absolute jump target
+// - OpIf, OpIfNot, OpIfPos, OpIfNeg: P2 = jump if condition met
+// - OpOnce: P2 = jump if already executed
+// - OpRewind, OpNext, OpPrev, OpLast, OpFirst: P2 = jump on end/no rows
+// - OpSeekGE, OpSeekGT, OpSeekLE, OpSeekLT: P2 = jump if not found
+// - OpSeekRowid, OpNotExists: P2 = jump if not found
+// - OpInitCoroutine: P2 = jump past coroutine body, P3 = entry point
+// - OpSorterSort, OpSorterNext: P2 = jump when done
+func (g *CodeGenerator) adjustSubqueryJumpTargets(subVM *vdbe.VDBE, baseAddr int) {
+	if baseAddr == 0 {
+		return // No adjustment needed
+	}
+
+	// Opcodes that use P2 as a jump target
+	jumpOpcodes := map[vdbe.Opcode]bool{
+		// Conditional jumps
+		vdbe.OpIf:        true,
+		vdbe.OpIfNot:     true,
+		vdbe.OpIfPos:     true,
+		vdbe.OpIfNotZero: true,
+		vdbe.OpIfNullRow: true,
+		vdbe.OpIsNull:    true, // Jump if P1 is NULL
+		vdbe.OpNotNull:   true, // Jump if P1 is not NULL
+
+		// Unconditional jumps
+		vdbe.OpGoto:  true,
+		vdbe.OpGosub: true,
+
+		// Loop control
+		vdbe.OpRewind: true,
+		vdbe.OpNext:   true,
+		vdbe.OpPrev:   true,
+		vdbe.OpLast:   true,
+		vdbe.OpFirst:  true,
+
+		// Seek operations
+		vdbe.OpSeekGE:    true,
+		vdbe.OpSeekGT:    true,
+		vdbe.OpSeekLE:    true,
+		vdbe.OpSeekLT:    true,
+		vdbe.OpSeekRowid: true,
+		vdbe.OpNotExists: true,
+
+		// Sorter operations
+		vdbe.OpSorterSort: true,
+		vdbe.OpSorterNext: true,
+
+		// Special control flow
+		vdbe.OpOnce: true,
+	}
+
+	// Opcodes that use both P2 and P3 as jump targets
+	dualJumpOpcodes := map[vdbe.Opcode]bool{
+		vdbe.OpInitCoroutine: true, // P2 = skip address, P3 = entry point
+	}
+
+	for i := range subVM.Program {
+		op := subVM.Program[i].Opcode
+
+		// Adjust P2 for jump opcodes
+		if jumpOpcodes[op] && subVM.Program[i].P2 > 0 {
+			subVM.Program[i].P2 += baseAddr
+		}
+
+		// Adjust both P2 and P3 for dual-jump opcodes
+		if dualJumpOpcodes[op] {
+			if subVM.Program[i].P2 > 0 {
+				subVM.Program[i].P2 += baseAddr
+			}
+			if subVM.Program[i].P3 > 0 {
+				subVM.Program[i].P3 += baseAddr
+			}
+		}
+	}
+}
+
+// adjustSubqueryCursors adjusts all cursor references in subquery bytecode.
+// When subquery bytecode is embedded into a parent VDBE, cursor numbers from the
+// subquery must be offset to avoid colliding with cursors already allocated in the
+// parent VDBE. This function adds cursorOffset to all P1, P2, P3 fields that reference cursors.
+func (g *CodeGenerator) adjustSubqueryCursors(subVM *vdbe.VDBE, cursorOffset int) {
+	if cursorOffset == 0 {
+		return // No adjustment needed
+	}
+
+	// Opcodes where P1 is a cursor number
+	cursorP1Opcodes := map[vdbe.Opcode]bool{
+		vdbe.OpOpenRead:      true,
+		vdbe.OpOpenWrite:     true,
+		vdbe.OpOpenEphemeral: true,
+		vdbe.OpRewind:        true,
+		vdbe.OpNext:          true,
+		vdbe.OpPrev:          true,
+		vdbe.OpLast:          true,
+		vdbe.OpFirst:         true,
+		vdbe.OpColumn:        true,
+		vdbe.OpClose:         true,
+		vdbe.OpSeekRowid:     true,
+		vdbe.OpSeekGE:        true,
+		vdbe.OpSeekGT:        true,
+		vdbe.OpSeekLE:        true,
+		vdbe.OpSeekLT:        true,
+		vdbe.OpInsert:        true,
+		vdbe.OpDelete:        true,
+		vdbe.OpUpdate:        true,
+		vdbe.OpMakeRecord:    true,
+		vdbe.OpSorterOpen:    true,
+		vdbe.OpSorterInsert:  true,
+		vdbe.OpSorterNext:    true,
+		vdbe.OpSorterSort:    true,
+		vdbe.OpSorterData:    true,
+		vdbe.OpSorterClose:   true,
+	}
+
+	for i := range subVM.Program {
+		op := subVM.Program[i].Opcode
+
+		// Adjust P1 if it's a cursor number
+		if cursorP1Opcodes[op] {
+			subVM.Program[i].P1 += cursorOffset
+		}
+	}
+}
+
+// adjustSubqueryRegisters adjusts all register references in subquery bytecode.
+// When subquery bytecode is embedded into a parent VDBE, register numbers from the
+// subquery (starting from 1) must be offset to avoid colliding with registers
+// already allocated in the parent VDBE. This function adds regOffset to all P1, P3,
+// and other register-referencing parameters.
+//
+// Registers are referenced in P1, P2 (for some opcodes), and P3 of instructions.
+// Jump targets (P2) should NOT be adjusted here - use adjustSubqueryJumpTargets for that.
+func (g *CodeGenerator) adjustSubqueryRegisters(subVM *vdbe.VDBE, regOffset int) {
+	if regOffset == 0 {
+		return // No adjustment needed
+	}
+
+	// Opcodes where P1 is a register (source or destination)
+	registerP1Opcodes := map[vdbe.Opcode]bool{
+		// Arithmetic
+		vdbe.OpAdd:        true,
+		vdbe.OpSubtract:   true,
+		vdbe.OpMultiply:   true,
+		vdbe.OpDivide:     true,
+		vdbe.OpRemainder:  true,
+		vdbe.OpBitNot:     true,
+		vdbe.OpBitAnd:     true,
+		vdbe.OpBitOr:      true,
+		vdbe.OpShiftLeft:  true,
+		vdbe.OpShiftRight: true,
+		// Logic
+		vdbe.OpLt:      true,
+		vdbe.OpLe:      true,
+		vdbe.OpGt:      true,
+		vdbe.OpGe:      true,
+		vdbe.OpEq:      true,
+		vdbe.OpNe:      true,
+		vdbe.OpAnd:     true,
+		vdbe.OpOr:      true,
+		vdbe.OpNot:     true,
+		vdbe.OpIsNull:  true,
+		vdbe.OpNotNull: true,
+		// String
+		vdbe.OpConcat: true,
+		// Type conversion
+		vdbe.OpCast: true,
+		// Load/Store
+		vdbe.OpCopy:    true,
+		vdbe.OpMove:    true,
+		vdbe.OpInteger: true,
+		vdbe.OpReal:    true,
+		vdbe.OpString8: true,
+		vdbe.OpNull:    true,
+		// Column operations
+		vdbe.OpColumn: true,
+		// Result
+		vdbe.OpResultRow: true,
+		// Aggregates
+		vdbe.OpAggDistinct: true,
+		vdbe.OpAddImm:      true,
+		// Function calls
+		vdbe.OpFunction: true,
+		// Conditional jumps that use P1 as condition register
+		vdbe.OpIf:        true,
+		vdbe.OpIfNot:     true,
+		vdbe.OpIfPos:     true,
+		vdbe.OpIfNotZero: true,
+		// Gosub uses P1 for return address register
+		vdbe.OpGosub:  true,
+		vdbe.OpReturn: true,
+		// Compare uses P1 as left operand
+		vdbe.OpCompare: true,
+	}
+
+	// Opcodes where P3 is a destination register
+	registerP3Opcodes := map[vdbe.Opcode]bool{
+		vdbe.OpAdd:        true,
+		vdbe.OpSubtract:   true,
+		vdbe.OpMultiply:   true,
+		vdbe.OpDivide:     true,
+		vdbe.OpRemainder:  true,
+		vdbe.OpBitNot:     true,
+		vdbe.OpBitAnd:     true,
+		vdbe.OpBitOr:      true,
+		vdbe.OpShiftLeft:  true,
+		vdbe.OpShiftRight: true,
+		vdbe.OpLt:  true,
+		vdbe.OpLe:  true,
+		vdbe.OpGt:  true,
+		vdbe.OpGe:  true,
+		vdbe.OpEq:  true,
+		vdbe.OpNe:  true,
+		vdbe.OpAnd: true,
+		vdbe.OpOr:  true,
+		vdbe.OpNot: true,
+		vdbe.OpConcat:   true,
+		vdbe.OpCast:     true,
+		vdbe.OpFunction: true,
+		vdbe.OpCompare:  true,
+	}
+
+	for i := range subVM.Program {
+		op := subVM.Program[i].Opcode
+
+		// Adjust P1 if it's a register
+		if registerP1Opcodes[op] {
+			subVM.Program[i].P1 += regOffset
+		}
+
+		// Adjust P3 if it's a register
+		if registerP3Opcodes[op] {
+			subVM.Program[i].P3 += regOffset
+		}
+
+		// For some opcodes, P2 might also be a register (not a jump target)
+		// OpSorterInsert, OpResultRow use P2 for count, OpAddImm uses P2 for increment
+		if op == vdbe.OpSorterInsert && subVM.Program[i].P2 > 0 {
+			// P2 is number of columns, not a register - no adjustment
+		} else if op == vdbe.OpResultRow && subVM.Program[i].P2 > 0 {
+			// P2 is number of columns, not a register - no adjustment
+		} else if op == vdbe.OpAddImm && subVM.Program[i].P2 > 0 {
+			// P2 is the immediate value to add, not a register - no adjustment
+		}
+	}
 }

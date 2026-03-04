@@ -16,6 +16,9 @@ pkgs.mkShell {
     # Git
     git
 
+    # Fossil for SQLite source code
+    fossil
+
     # SQLite for reference/testing
     sqlite
   ];

@@ -525,7 +525,7 @@ func TestSQLiteCollation(t *testing.T) {
 
 		{
 			name: "collate5-1.1: DISTINCT with NOCASE column",
-			skip: "DISTINCT not yet implemented",
+			skip: "DISTINCT with COLLATE NOCASE not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(a COLLATE NOCASE, b COLLATE BINARY)",
 			},
@@ -554,7 +554,7 @@ func TestSQLiteCollation(t *testing.T) {
 
 		{
 			name: "collate5-1.2: DISTINCT with BINARY column",
-			skip: "DISTINCT not yet implemented",
+			skip: "DISTINCT with COLLATE not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(a COLLATE NOCASE, b COLLATE BINARY)",
 			},
@@ -583,7 +583,7 @@ func TestSQLiteCollation(t *testing.T) {
 
 		{
 			name: "collate5-1.3: DISTINCT with multiple columns",
-			skip: "DISTINCT not yet implemented",
+			skip: "DISTINCT with COLLATE not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(a COLLATE NOCASE, b COLLATE BINARY)",
 			},

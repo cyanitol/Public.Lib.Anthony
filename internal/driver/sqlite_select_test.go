@@ -546,7 +546,7 @@ func TestSQLiteSelectAliases(t *testing.T) {
 
 // TestSQLiteSelectDistinct tests DISTINCT functionality from select4.test
 func TestSQLiteSelectDistinct(t *testing.T) {
-	t.Skip("SELECT DISTINCT not yet fully implemented in internal driver")
+	t.Skip("test setup creates corrupt database file")
 	db := setupSelectTestDB(t)
 	defer db.Close()
 

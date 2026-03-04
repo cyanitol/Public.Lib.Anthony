@@ -63,7 +63,7 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 		},
 		{
 			name: "count_distinct_from_subquery",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(x, y)",
 				"INSERT INTO t1 VALUES(1, 1)",
@@ -75,7 +75,7 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 		},
 		{
 			name: "nested_subquery_distinct",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(x, y)",
 				"INSERT INTO t1 VALUES(1, 1)",
@@ -238,7 +238,7 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 		// From select8.test - LIMIT and OFFSET with GROUP BY
 		{
 			name: "limit_offset_with_groupby",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE songs(songid, artist, timesplayed)",
 				"INSERT INTO songs VALUES(1,'one',1)",
@@ -252,7 +252,7 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 		},
 		{
 			name: "limit_offset_groupby_multiple",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE songs(songid, artist, timesplayed)",
 				"INSERT INTO songs VALUES(1,'one',1)",
@@ -905,7 +905,7 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 		// ====== DISTINCT with Multiple Columns ======
 		{
 			name: "distinct_multiple_columns",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE data(a, b)",
 				"INSERT INTO data VALUES(1, 'x')",
@@ -922,7 +922,7 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 		},
 		{
 			name: "distinct_with_null",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE data(a, b)",
 				"INSERT INTO data VALUES(1, NULL)",
@@ -937,7 +937,7 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 		},
 		{
 			name: "distinct_all_columns",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE data(x, y, z)",
 				"INSERT INTO data VALUES(1, 2, 3)",
@@ -1394,7 +1394,7 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 		},
 		{
 			name: "count_distinct",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE data(x)",
 				"INSERT INTO data VALUES(1)",
@@ -1407,7 +1407,7 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 		},
 		{
 			name: "count_distinct_with_nulls",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE data(x)",
 				"INSERT INTO data VALUES(1)",

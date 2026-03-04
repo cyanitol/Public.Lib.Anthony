@@ -302,7 +302,7 @@ func TestSQLiteSubquery(t *testing.T) {
 		// Tests from subquery2.test
 		{
 			name: "subquery2-1.1 complex correlated subquery with DISTINCT",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(a,b)",
 				"INSERT INTO t1 VALUES(1,2)",
@@ -437,7 +437,7 @@ func TestSQLiteSubquery(t *testing.T) {
 		},
 		{
 			name: "subquery2-6.3 DISTINCT with LIMIT offset beyond result",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(x)",
 				"INSERT INTO t1 VALUES(1234)",
@@ -449,7 +449,7 @@ func TestSQLiteSubquery(t *testing.T) {
 		},
 		{
 			name: "subquery2-7.1 DISTINCT with indexed ORDER BY and offset",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(x)",
 				"CREATE INDEX i1 ON t1(x)",
@@ -462,7 +462,7 @@ func TestSQLiteSubquery(t *testing.T) {
 		},
 		{
 			name: "subquery2-7.4 DISTINCT with unique index and ORDER BY",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(x)",
 				"CREATE UNIQUE INDEX i1 ON t1(x)",

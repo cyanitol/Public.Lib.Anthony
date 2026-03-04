@@ -933,7 +933,7 @@ func TestSQLiteJoin(t *testing.T) {
 		// JOIN with DISTINCT
 		{
 			name: "join with distinct",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(a INTEGER)",
 				"CREATE TABLE t2(a INTEGER, b TEXT)",

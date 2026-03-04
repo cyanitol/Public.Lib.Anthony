@@ -298,7 +298,7 @@ func TestSQLiteWAL(t *testing.T) {
 		// WAL with DISTINCT
 		{
 			name: "wal_distinct",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"PRAGMA journal_mode = wal",
 				"CREATE TABLE t16(a INTEGER)",

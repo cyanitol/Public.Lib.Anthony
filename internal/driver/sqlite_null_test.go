@@ -382,7 +382,7 @@ func TestSQLiteNull(t *testing.T) {
 		// null-5.1 - DISTINCT with NULL
 		{
 			name: "null-5.1 DISTINCT treats NULL as distinct",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(a,b,c)",
 				"INSERT INTO t1 VALUES(1,0,0)",

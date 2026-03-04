@@ -2921,6 +2921,20 @@ func (p *Parser) parseUnaryExpression() (Expression, error) {
 			Op:   OpBitNot,
 			Expr: expr,
 		}, nil
+	} else if p.match(TK_NOT) {
+		// Handle NOT EXISTS specifically
+		if p.match(TK_EXISTS) {
+			return p.parseExistsExpr(true)
+		}
+		// For other NOT expressions, treat as unary NOT
+		expr, err := p.parseUnaryExpression()
+		if err != nil {
+			return nil, err
+		}
+		return &UnaryExpr{
+			Op:   OpNot,
+			Expr: expr,
+		}, nil
 	}
 
 	return p.parsePostfixExpression()
@@ -2971,6 +2985,11 @@ func (p *Parser) parsePrimaryExpression() (Expression, error) {
 	// CAST expression
 	if p.match(TK_CAST) {
 		return p.parseCastExpr()
+	}
+
+	// EXISTS expression
+	if p.match(TK_EXISTS) {
+		return p.parseExistsExpr(false)
 	}
 
 	// Parenthesized expression or subquery
@@ -3269,6 +3288,24 @@ func (p *Parser) parseCastExpr() (Expression, error) {
 		return nil, p.error("expected ) after CAST")
 	}
 	return &CastExpr{Expr: expr, Type: typeName}, nil
+}
+
+// parseExistsExpr parses an EXISTS or NOT EXISTS expression after the EXISTS keyword.
+func (p *Parser) parseExistsExpr(not bool) (Expression, error) {
+	if !p.match(TK_LP) {
+		return nil, p.error("expected ( after EXISTS")
+	}
+	if !p.match(TK_SELECT) {
+		return nil, p.error("expected SELECT in EXISTS subquery")
+	}
+	sel, err := p.parseSelect()
+	if err != nil {
+		return nil, err
+	}
+	if !p.match(TK_RP) {
+		return nil, p.error("expected ) after EXISTS subquery")
+	}
+	return &ExistsExpr{Select: sel, Not: not}, nil
 }
 
 // parseParenOrSubquery parses a parenthesized expression or subquery.

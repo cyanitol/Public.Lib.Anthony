@@ -307,8 +307,6 @@ func TestInsertMultipleRows(t *testing.T) {
 }
 
 func TestSelectDistinct(t *testing.T) {
-	t.Skip("DISTINCT not yet implemented")
-
 	dbFile := "test_distinct.db"
 	defer os.Remove(dbFile)
 

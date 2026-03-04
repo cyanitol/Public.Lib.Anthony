@@ -89,7 +89,6 @@ func TestExplainQueryPlanExtended(t *testing.T) {
 
 // TestScalarSubquery tests scalar subqueries
 func TestScalarSubquery(t *testing.T) {
-	t.Skip("Once opcode not implemented")
 	dbFile := "test_scalar_subquery.db"
 	defer os.Remove(dbFile)
 
@@ -126,7 +125,6 @@ func TestScalarSubquery(t *testing.T) {
 
 // TestExistsSubquery tests EXISTS subqueries
 func TestExistsSubquery(t *testing.T) {
-	t.Skip("EXISTS not supported by parser")
 	dbFile := "test_exists.db"
 	defer os.Remove(dbFile)
 
@@ -181,7 +179,6 @@ func TestExistsSubquery(t *testing.T) {
 
 // TestInSubquery tests IN with subqueries
 func TestInSubquery(t *testing.T) {
-	t.Skip("IN subquery implementation incomplete")
 	dbFile := "test_in_subquery.db"
 	defer os.Remove(dbFile)
 
@@ -244,7 +241,6 @@ func TestInSubquery(t *testing.T) {
 
 // TestFromSubquery tests subqueries in FROM clause
 func TestFromSubquery(t *testing.T) {
-	t.Skip("FROM subquery implementation incomplete")
 	dbFile := "test_from_subquery.db"
 	defer os.Remove(dbFile)
 
@@ -282,7 +278,6 @@ func TestFromSubquery(t *testing.T) {
 
 // TestComplexSubquery tests nested and complex subqueries
 func TestComplexSubquery(t *testing.T) {
-	t.Skip("Once opcode not implemented")
 	dbFile := "test_complex_subquery.db"
 	defer os.Remove(dbFile)
 

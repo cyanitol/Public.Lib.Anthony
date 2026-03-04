@@ -399,6 +399,38 @@ LOW PRIORITY:
 8. Observability features (Phase 9)
 
 ================================================================================
+SQLITE SOURCE REFERENCE
+================================================================================
+
+SQLite source code is available at: sqlite-src/
+Cloned from: https://sqlite.org/src (Fossil repository)
+
+Key SQLite source files for reference:
+- sqlite-src/src/select.c     - SELECT statement compilation
+- sqlite-src/src/expr.c       - Expression code generation (sqlite3CodeSubselect)
+- sqlite-src/src/where.c      - WHERE clause optimization
+- sqlite-src/src/vdbe.c       - VDBE implementation
+- sqlite-src/src/vdbeInt.h    - VDBE internal structures
+- sqlite-src/src/vdbeaux.c    - VDBE auxiliary functions
+- sqlite-src/src/insert.c     - INSERT statement compilation
+- sqlite-src/src/update.c     - UPDATE statement compilation
+- sqlite-src/src/delete.c     - DELETE statement compilation
+- sqlite-src/src/trigger.c    - Trigger implementation
+
+Subquery Implementation Pattern (from sqlite3CodeSubselect in expr.c):
+1. Scalar subqueries compile directly into parent VDBE
+2. Use SRT_Mem destination to store result in register
+3. No separate VDBE creation - share cursor/register pools
+4. Use BeginSubrtn/Return pattern for subroutine flow
+5. Cursor indices continue from parent's allocation
+
+Key SQLite opcodes for subqueries:
+- OP_BeginSubrtn  - Start subroutine (saves return address)
+- OP_Return       - Return from subroutine
+- OP_Gosub        - Call subroutine
+- OP_Once         - Execute block only once
+
+================================================================================
 NOTES
 ================================================================================
 
@@ -411,4 +443,5 @@ NOTES
 - All path inputs validated through 4-layer security checks
 - Integer and buffer safety protections in place
 - Comprehensive security documentation published
+- SQLite source available locally for reference (sqlite-src/)
 

@@ -108,47 +108,49 @@ const (
 	OpMultiply  Opcode = 73 // Multiplication
 	OpDivide    Opcode = 74 // Division
 	OpRemainder Opcode = 75 // Modulo/remainder
+	OpPower     Opcode = 76 // Exponentiation (power)
+	OpNegate    Opcode = 77 // Negate value
 
 	// Bitwise opcodes
-	OpBitAnd     Opcode = 76 // Bitwise AND
-	OpBitOr      Opcode = 77 // Bitwise OR
-	OpBitNot     Opcode = 78 // Bitwise NOT
-	OpShiftLeft  Opcode = 79 // Left shift
-	OpShiftRight Opcode = 80 // Right shift
+	OpBitAnd     Opcode = 78 // Bitwise AND
+	OpBitOr      Opcode = 79 // Bitwise OR
+	OpBitNot     Opcode = 80 // Bitwise NOT
+	OpShiftLeft  Opcode = 81 // Left shift
+	OpShiftRight Opcode = 82 // Right shift
 
 	// Logical opcodes
-	OpAnd Opcode = 81 // Logical AND
-	OpOr  Opcode = 82 // Logical OR
-	OpNot Opcode = 83 // Logical NOT
+	OpAnd Opcode = 83 // Logical AND
+	OpOr  Opcode = 84 // Logical OR
+	OpNot Opcode = 85 // Logical NOT
 
 	// Aggregate function opcodes
-	OpAggStep  Opcode = 84 // Execute aggregate step function
-	OpAggFinal Opcode = 85 // Execute aggregate finalization
-	OpAggValue Opcode = 86 // Get aggregate intermediate value
+	OpAggStep  Opcode = 86 // Execute aggregate step function
+	OpAggFinal Opcode = 87 // Execute aggregate finalization
+	OpAggValue Opcode = 88 // Get aggregate intermediate value
 
 	// Scalar function opcodes
-	OpFunction Opcode = 87 // Call scalar function
-	OpPureFunc Opcode = 88 // Call pure function (cacheable)
+	OpFunction Opcode = 89 // Call scalar function
+	OpPureFunc Opcode = 90 // Call pure function (cacheable)
 
 	// Transaction opcodes
-	OpTransaction Opcode = 89 // Begin transaction
-	OpCommit      Opcode = 90 // Commit transaction
-	OpRollback    Opcode = 91 // Rollback transaction
-	OpSavepoint   Opcode = 92 // Create savepoint
-	OpRelease     Opcode = 93 // Release savepoint
+	OpTransaction Opcode = 91 // Begin transaction
+	OpCommit      Opcode = 92 // Commit transaction
+	OpRollback    Opcode = 93 // Rollback transaction
+	OpSavepoint   Opcode = 94 // Create savepoint
+	OpRelease     Opcode = 95 // Release savepoint
 
 	// Schema opcodes
-	OpVerifyCookie Opcode = 94 // Verify schema cookie
-	OpSetCookie    Opcode = 95 // Set schema cookie
-	OpOpenPseudo   Opcode = 96 // Open pseudo-cursor
+	OpVerifyCookie Opcode = 96 // Verify schema cookie
+	OpSetCookie    Opcode = 97 // Set schema cookie
+	OpOpenPseudo   Opcode = 98 // Open pseudo-cursor
 
 	// Sorting opcodes
-	OpSorterOpen   Opcode = 97  // Open sorter
-	OpSorterInsert Opcode = 98  // Insert into sorter
-	OpSorterNext   Opcode = 99  // Get next from sorter
-	OpSorterSort   Opcode = 100 // Sort the sorter
-	OpSorterData   Opcode = 101 // Get data from sorter
-	OpSorterClose  Opcode = 102 // Close sorter
+	OpSorterOpen   Opcode = 99  // Open sorter
+	OpSorterInsert Opcode = 100 // Insert into sorter
+	OpSorterNext   Opcode = 101 // Get next from sorter
+	OpSorterSort   Opcode = 102 // Sort the sorter
+	OpSorterData   Opcode = 103 // Get data from sorter
+	OpSorterClose  Opcode = 104 // Close sorter
 
 	// Program flow opcodes
 	OpProgram       Opcode = 150 // Execute sub-program
@@ -206,28 +208,34 @@ const (
 	OpToNumeric Opcode = 190 // Convert to numeric
 	OpToInt     Opcode = 191 // Convert to integer
 	OpToReal    Opcode = 192 // Convert to real
+	OpLength    Opcode = 193 // Get string/blob length
+
+	// Conditional jump opcodes (additional)
+	OpIfNeg  Opcode = 194 // Jump if negative
+	OpIfZero Opcode = 195 // Jump if zero
 
 	// Debugging/profiling opcodes
-	OpTrace      Opcode = 193 // Debug trace point
-	OpScanStatus Opcode = 194 // Scan status tracking
+	OpTrace      Opcode = 196 // Debug trace point
+	OpScanStatus Opcode = 197 // Scan status tracking
 
 	// Join operation opcodes
-	OpHashJoin   Opcode = 195 // Hash join operation
-	OpMergeJoin  Opcode = 196 // Merge join operation
-	OpBuildHash  Opcode = 197 // Build hash table for join
-	OpProbeHash  Opcode = 198 // Probe hash table for join
+	OpHashJoin   Opcode = 198 // Hash join operation
+	OpMergeJoin  Opcode = 199 // Merge join operation
+	OpBuildHash  Opcode = 200 // Build hash table for join
+	OpProbeHash  Opcode = 201 // Probe hash table for join
 
 	// Window function opcodes
-	OpAggStepWindow     Opcode = 199 // Step aggregate in window context
-	OpWindowRowNum      Opcode = 200 // ROW_NUMBER() window function
-	OpWindowRank        Opcode = 201 // RANK() window function
-	OpWindowDenseRank   Opcode = 202 // DENSE_RANK() window function
-	OpWindowNtile       Opcode = 203 // NTILE() window function
-	OpWindowLag         Opcode = 204 // LAG() window function
-	OpWindowLead        Opcode = 205 // LEAD() window function
-	OpWindowFirstValue  Opcode = 206 // FIRST_VALUE() window function
-	OpWindowLastValue   Opcode = 207 // LAST_VALUE() window function
-	OpAggDistinct       Opcode = 208 // Check if value is distinct for aggregate
+	OpAggStepWindow     Opcode = 202 // Step aggregate in window context
+	OpWindowRowNum      Opcode = 203 // ROW_NUMBER() window function
+	OpWindowRank        Opcode = 204 // RANK() window function
+	OpWindowDenseRank   Opcode = 205 // DENSE_RANK() window function
+	OpWindowNtile       Opcode = 206 // NTILE() window function
+	OpWindowLag         Opcode = 207 // LAG() window function
+	OpWindowLead        Opcode = 208 // LEAD() window function
+	OpWindowFirstValue  Opcode = 209 // FIRST_VALUE() window function
+	OpWindowLastValue   Opcode = 210 // LAST_VALUE() window function
+	OpAggDistinct       Opcode = 211 // Check if value is distinct for aggregate
+	OpDistinctRow       Opcode = 212 // Check if row is distinct for SELECT DISTINCT
 )
 
 // OpcodeNames maps opcodes to their string names for debugging.
@@ -307,6 +315,8 @@ var OpcodeNames = map[Opcode]string{
 	OpMultiply:      "Multiply",
 	OpDivide:        "Divide",
 	OpRemainder:     "Remainder",
+	OpPower:         "Power",
+	OpNegate:        "Negate",
 	OpBitAnd:        "BitAnd",
 	OpBitOr:         "BitOr",
 	OpBitNot:        "BitNot",
@@ -372,11 +382,14 @@ var OpcodeNames = map[Opcode]string{
 	OpLast:          "Last",
 	OpFirst:         "First",
 	OpSorterCompare: "SorterCompare",
-	OpToText:        "ToText",
-	OpToBlob:        "ToBlob",
-	OpToNumeric:     "ToNumeric",
-	OpToInt:         "ToInt",
+	OpToText:            "ToText",
+	OpToBlob:            "ToBlob",
+	OpToNumeric:         "ToNumeric",
+	OpToInt:             "ToInt",
 	OpToReal:            "ToReal",
+	OpLength:            "Length",
+	OpIfNeg:             "IfNeg",
+	OpIfZero:            "IfZero",
 	OpTrace:             "Trace",
 	OpScanStatus:        "ScanStatus",
 	OpHashJoin:          "HashJoin",
@@ -393,6 +406,7 @@ var OpcodeNames = map[Opcode]string{
 	OpWindowFirstValue:  "WindowFirstValue",
 	OpWindowLastValue:   "WindowLastValue",
 	OpAggDistinct:       "AggDistinct",
+	OpDistinctRow:       "DistinctRow",
 }
 
 // String returns the string representation of an opcode.

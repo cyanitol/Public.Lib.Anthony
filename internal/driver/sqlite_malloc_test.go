@@ -194,7 +194,7 @@ func TestSQLiteMemoryAllocation(t *testing.T) {
 		},
 		{
 			name: "malloc_distinct",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(a int)",
 				"INSERT INTO t1 VALUES(1), (2), (1), (3), (2)",

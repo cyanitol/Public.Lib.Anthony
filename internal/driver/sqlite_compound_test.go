@@ -1144,7 +1144,7 @@ func TestSQLiteCompoundComplex(t *testing.T) {
 		},
 		{
 			name: "UNION with DISTINCT and common table",
-			skip: "DISTINCT not yet implemented",
+			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE events(id INTEGER, event_type TEXT, user_id INTEGER)",
 				"INSERT INTO events VALUES(1, 'login', 100)",
