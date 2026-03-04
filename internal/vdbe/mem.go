@@ -599,6 +599,16 @@ func (m *Mem) CompareWithCollation(other *Mem, collName string) int {
 	return m.CompareWithCollationRegistry(other, collName, nil)
 }
 
+// shouldCompareNumeric returns true if both values are numeric.
+func shouldCompareNumeric(mIsNumeric, otherIsNumeric bool) bool {
+	return mIsNumeric && otherIsNumeric
+}
+
+// shouldCompareMixed returns true if one value is numeric and the other is text.
+func shouldCompareMixed(mIsNumeric, otherIsNumeric, mIsText, otherIsText bool) bool {
+	return (mIsNumeric && otherIsText) || (otherIsNumeric && mIsText)
+}
+
 // CompareWithCollationRegistry compares two memory cells using the specified collation,
 // with support for connection-specific collation registries.
 // The registry parameter allows using custom collations registered on a specific connection.
@@ -614,12 +624,12 @@ func (m *Mem) CompareWithCollationRegistry(other *Mem, collName string, registry
 	otherIsText := (other.flags & MemStr) != 0
 
 	// Both numeric: numeric comparison
-	if mIsNumeric && otherIsNumeric {
+	if shouldCompareNumeric(mIsNumeric, otherIsNumeric) {
 		return compareNumeric(m, other)
 	}
 
 	// One numeric, one text: try to convert text to numeric
-	if (mIsNumeric && otherIsText) || (otherIsNumeric && mIsText) {
+	if shouldCompareMixed(mIsNumeric, otherIsNumeric, mIsText, otherIsText) {
 		if result, handled := compareMixedNumericText(m, other, mIsNumeric, mIsText); handled {
 			return result
 		}

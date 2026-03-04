@@ -2537,55 +2537,36 @@ func (v *VDBE) execAutoCommit(instr *Instruction) error {
 	// Set autocommit mode or begin/commit transaction
 	// P1: 1 for commit/enable autocommit, 0 for begin/disable autocommit
 	// P2: rollback flag - if non-zero and P1=1, do rollback instead of commit
-	pager, err := v.getAutoCommitPager()
-	if err != nil {
-		return err
-	}
-
-	if instr.P1 == 0 {
-		return v.execBeginTransaction(pager)
-	}
-	return v.execCommitOrRollback(pager, instr.P2)
-}
-
-// getAutoCommitPager validates and returns the pager for autocommit operations
-func (v *VDBE) getAutoCommitPager() (types.PagerWriter, error) {
 	if v.Ctx == nil || v.Ctx.Pager == nil {
-		return nil, fmt.Errorf("no pager context available")
+		return fmt.Errorf("no pager context available")
 	}
 
 	pager, ok := v.Ctx.Pager.(types.PagerWriter)
 	if !ok {
-		return nil, fmt.Errorf("pager does not implement types.PagerWriter")
+		return fmt.Errorf("pager does not implement types.PagerWriter")
 	}
 
-	return pager, nil
-}
-
-// execBeginTransaction begins a write transaction if not already in one
-func (v *VDBE) execBeginTransaction(pager types.PagerWriter) error {
-	// P1=0: Begin transaction (disable autocommit)
-	// Only start a transaction if not already in one
-	if !pager.InTransaction() {
-		return pager.BeginWrite()
-	}
-	return nil
-}
-
-// execCommitOrRollback commits or rolls back the current transaction
-func (v *VDBE) execCommitOrRollback(pager types.PagerWriter, rollbackFlag int) error {
-	// P1=1: Commit or rollback transaction (enable autocommit)
-	if pager.InWriteTransaction() {
-		if rollbackFlag != 0 {
-			// P2 non-zero: rollback
-			return pager.Rollback()
+	if instr.P1 == 0 {
+		// P1=0: Begin transaction (disable autocommit)
+		// Only start a transaction if not already in one
+		if !pager.InTransaction() {
+			return pager.BeginWrite()
 		}
-		// P2 zero: commit
-		return pager.Commit()
+	} else {
+		// P1=1: Commit or rollback transaction (enable autocommit)
+		if pager.InWriteTransaction() {
+			if instr.P2 != 0 {
+				// P2 non-zero: rollback
+				return pager.Rollback()
+			}
+			// P2 zero: commit
+			return pager.Commit()
+		}
+		if pager.InTransaction() {
+			return pager.EndRead()
+		}
 	}
-	if pager.InTransaction() {
-		return pager.EndRead()
-	}
+
 	return nil
 }
 
@@ -2859,19 +2840,6 @@ func (v *VDBE) execSorterClose(instr *Instruction) error {
 
 // Type conversion opcode implementations
 
-// affinityFunc is a function that applies an affinity conversion to a memory value.
-type affinityFunc func(*Mem) error
-
-// affinityHandlers maps affinity codes to their conversion functions.
-var affinityHandlers = map[int]affinityFunc{
-	0: func(mem *Mem) error { return nil },           // NONE/BLOB affinity - keep as-is
-	1: castToBlob,                                     // BLOB affinity - convert to blob
-	2: (*Mem).Stringify,                               // TEXT affinity - convert to text
-	3: castToInteger,                                  // INTEGER affinity - convert to integer
-	4: (*Mem).Realify,                                 // REAL affinity - convert to real
-	5: castToNumeric,                                  // NUMERIC affinity - try int then float
-}
-
 // execCast converts the value in register P1 to the type specified by P2 affinity.
 // P1 = register containing value to convert
 // P2 = affinity code (NONE=0, BLOB=1, TEXT=2, INTEGER=3, REAL=4, NUMERIC=5)
@@ -2894,13 +2862,23 @@ func (v *VDBE) execCast(instr *Instruction) error {
 		return nil
 	}
 
-	// Look up the affinity handler
-	handler, ok := affinityHandlers[instr.P2]
-	if !ok {
-		return fmt.Errorf("unknown affinity code: %d", instr.P2)
+	affinity := instr.P2
+	switch affinity {
+	case 0: // NONE/BLOB affinity - keep as-is
+		return nil
+	case 1: // BLOB affinity - convert to blob
+		return castToBlob(mem)
+	case 2: // TEXT affinity - convert to text
+		return mem.Stringify()
+	case 3: // INTEGER affinity - convert to integer, NULL if not numeric
+		return castToInteger(mem)
+	case 4: // REAL affinity - convert to real
+		return mem.Realify()
+	case 5: // NUMERIC affinity - try int, then float, keep text if neither works
+		return castToNumeric(mem)
+	default:
+		return fmt.Errorf("unknown affinity code: %d", affinity)
 	}
-
-	return handler(mem)
 }
 
 // castToBlob converts a memory value to blob affinity.
@@ -4565,21 +4543,37 @@ func (v *VDBE) execDistinctRow(instr *Instruction) error {
 	numCols := instr.P3
 
 	// Build a composite key from all columns
-	key, err := v.buildDistinctKey(firstReg, numCols)
-	if err != nil {
-		return err
+	var key string
+	for i := 0; i < numCols; i++ {
+		mem, err := v.GetMem(firstReg + i)
+		if err != nil {
+			return err
+		}
+		if i > 0 {
+			key += "\x00" // Separator
+		}
+		key += mem.ToDistinctKey()
 	}
 
 	// Use a special set ID (-1) for SELECT DISTINCT rows
 	const distinctRowSetID = -1
 
-	// Ensure the distinct set is initialized
-	v.ensureDistinctSet(distinctRowSetID)
+	// Initialize DistinctSets if needed
+	if v.DistinctSets == nil {
+		v.DistinctSets = make(map[int]map[string]bool)
+	}
+
+	// Initialize the set for distinct rows if needed
+	if v.DistinctSets[distinctRowSetID] == nil {
+		v.DistinctSets[distinctRowSetID] = make(map[string]bool)
+	}
 
 	// Check if we've seen this row before
 	if v.DistinctSets[distinctRowSetID][key] {
 		// Already seen - jump to skip address
-		v.jumpIfValid(jumpAddr)
+		if jumpAddr >= 0 && jumpAddr < len(v.Program) {
+			v.PC = jumpAddr
+		}
 		return nil
 	}
 
@@ -4588,37 +4582,4 @@ func (v *VDBE) execDistinctRow(instr *Instruction) error {
 
 	// Continue to next instruction (don't jump)
 	return nil
-}
-
-// buildDistinctKey creates a composite key from multiple register values
-func (v *VDBE) buildDistinctKey(firstReg, numCols int) (string, error) {
-	var key string
-	for i := 0; i < numCols; i++ {
-		mem, err := v.GetMem(firstReg + i)
-		if err != nil {
-			return "", err
-		}
-		if i > 0 {
-			key += "\x00" // Separator
-		}
-		key += mem.ToDistinctKey()
-	}
-	return key, nil
-}
-
-// ensureDistinctSet initializes the distinct set map for a given set ID if needed
-func (v *VDBE) ensureDistinctSet(setID int) {
-	if v.DistinctSets == nil {
-		v.DistinctSets = make(map[int]map[string]bool)
-	}
-	if v.DistinctSets[setID] == nil {
-		v.DistinctSets[setID] = make(map[string]bool)
-	}
-}
-
-// jumpIfValid performs a jump to the given address if it is valid
-func (v *VDBE) jumpIfValid(jumpAddr int) {
-	if jumpAddr >= 0 && jumpAddr < len(v.Program) {
-		v.PC = jumpAddr
-	}
 }

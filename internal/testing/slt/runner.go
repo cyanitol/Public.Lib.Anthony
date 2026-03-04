@@ -387,6 +387,24 @@ func (r *Runner) executeStatement(test *Test, sql string, result TestResult) Tes
 // executeQuery executes a query test
 func (r *Runner) executeQuery(test *Test, sql string, result TestResult) TestResult {
 	ctx := context.Background()
+	rows, columns, err := r.executeAndValidateQuery(ctx, sql, test, &result)
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+
+	actualRows, err := r.collectQueryRows(rows, columns, &result)
+	if err != nil {
+		return result
+	}
+
+	actualRows = r.applySorting(actualRows, test.SortMode)
+
+	return r.compareQueryResults(test, actualRows, result)
+}
+
+// executeAndValidateQuery executes the query and validates column count
+func (r *Runner) executeAndValidateQuery(ctx context.Context, sql string, test *Test, result *TestResult) (*sql.Rows, []string, error) {
 	rows, err := r.db.QueryContext(ctx, sql)
 	if err != nil {
 		result.Expected = formatExpected(test.Expected)
@@ -394,20 +412,17 @@ func (r *Runner) executeQuery(test *Test, sql string, result TestResult) TestRes
 		result.Passed = false
 		result.Error = err
 		r.failedTests++
-		return result
+		return nil, nil, err
 	}
-	defer rows.Close()
 
-	// Get column count
 	columns, err := rows.Columns()
 	if err != nil {
 		result.Error = err
 		result.Passed = false
 		r.failedTests++
-		return result
+		return nil, nil, err
 	}
 
-	// Validate column count matches expected types
 	if len(test.ColumnTypes) != len(columns) {
 		result.Expected = formatExpected(test.Expected)
 		result.Actual = fmt.Sprintf("column count mismatch: expected %d, got %d",
@@ -415,13 +430,16 @@ func (r *Runner) executeQuery(test *Test, sql string, result TestResult) TestRes
 		result.Passed = false
 		result.Error = fmt.Errorf("column count mismatch")
 		r.failedTests++
-		return result
+		return nil, nil, fmt.Errorf("column count mismatch")
 	}
 
-	// Collect all rows
+	return rows, columns, nil
+}
+
+// collectQueryRows collects all rows from the query result
+func (r *Runner) collectQueryRows(rows *sql.Rows, columns []string, result *TestResult) ([][]string, error) {
 	var actualRows [][]string
 	for rows.Next() {
-		// Create a slice of interface{} to hold each column value
 		values := make([]interface{}, len(columns))
 		valuePtrs := make([]interface{}, len(columns))
 		for i := range values {
@@ -432,10 +450,9 @@ func (r *Runner) executeQuery(test *Test, sql string, result TestResult) TestRes
 			result.Error = err
 			result.Passed = false
 			r.failedTests++
-			return result
+			return nil, err
 		}
 
-		// Convert values to strings
 		row := make([]string, len(columns))
 		for i, val := range values {
 			row[i] = formatValue(val)
@@ -447,18 +464,17 @@ func (r *Runner) executeQuery(test *Test, sql string, result TestResult) TestRes
 		result.Error = err
 		result.Passed = false
 		r.failedTests++
-		return result
+		return nil, err
 	}
 
-	// Apply sorting if specified
-	actualRows = r.applySorting(actualRows, test.SortMode)
+	return actualRows, nil
+}
 
-	// Check if we should use hash comparison
+// compareQueryResults compares query results using hash or direct comparison
+func (r *Runner) compareQueryResults(test *Test, actualRows [][]string, result TestResult) TestResult {
 	if len(actualRows) > r.hashThreshold {
 		return r.compareWithHash(test, actualRows, result)
 	}
-
-	// Compare results
 	return r.compareResults(test, actualRows, result)
 }
 

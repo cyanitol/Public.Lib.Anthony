@@ -402,7 +402,18 @@ func (v *VDBE) DumpState() string {
 	sb.WriteString("VDBE STATE DUMP\n")
 	sb.WriteString("═════════════════════════════════════════════════════════════════════════════\n\n")
 
-	// Basic state
+	v.dumpBasicState(&sb)
+	v.dumpStatistics(&sb)
+	v.dumpDebugSections(&sb)
+	v.dumpRecentInstructions(&sb)
+
+	sb.WriteString("═════════════════════════════════════════════════════════════════════════════\n")
+
+	return sb.String()
+}
+
+// dumpBasicState writes the basic VDBE state information to the string builder.
+func (v *VDBE) dumpBasicState(sb *strings.Builder) {
 	sb.WriteString(fmt.Sprintf("State: %v\n", v.State))
 	sb.WriteString(fmt.Sprintf("PC: %d / %d\n", v.PC, len(v.Program)))
 	sb.WriteString(fmt.Sprintf("Num Steps: %d\n", v.NumSteps))
@@ -415,49 +426,56 @@ func (v *VDBE) DumpState() string {
 	}
 
 	sb.WriteString("\n")
+}
 
-	// Statistics
-	if v.Stats != nil {
-		sb.WriteString("Statistics:\n")
-		sb.WriteString(fmt.Sprintf("  Instructions: %d\n", v.Stats.NumInstructions))
-		sb.WriteString(fmt.Sprintf("  Rows Read: %d\n", v.Stats.RowsRead))
-		sb.WriteString(fmt.Sprintf("  Rows Written: %d\n", v.Stats.RowsWritten))
-		sb.WriteString(fmt.Sprintf("  Page Reads: %d\n", v.Stats.PageReads))
-		sb.WriteString(fmt.Sprintf("  Page Writes: %d\n", v.Stats.PageWrites))
-		sb.WriteString("\n")
+// dumpStatistics writes the statistics information to the string builder.
+func (v *VDBE) dumpStatistics(sb *strings.Builder) {
+	if v.Stats == nil {
+		return
 	}
 
-	// Registers
+	sb.WriteString("Statistics:\n")
+	sb.WriteString(fmt.Sprintf("  Instructions: %d\n", v.Stats.NumInstructions))
+	sb.WriteString(fmt.Sprintf("  Rows Read: %d\n", v.Stats.RowsRead))
+	sb.WriteString(fmt.Sprintf("  Rows Written: %d\n", v.Stats.RowsWritten))
+	sb.WriteString(fmt.Sprintf("  Page Reads: %d\n", v.Stats.PageReads))
+	sb.WriteString(fmt.Sprintf("  Page Writes: %d\n", v.Stats.PageWrites))
+	sb.WriteString("\n")
+}
+
+// dumpDebugSections writes the debug-enabled sections (registers and cursors).
+func (v *VDBE) dumpDebugSections(sb *strings.Builder) {
 	if v.IsDebugEnabled(DebugRegisters) {
 		sb.WriteString(v.DumpRegisters())
 		sb.WriteString("\n")
 	}
 
-	// Cursors
 	if v.IsDebugEnabled(DebugCursors) {
 		sb.WriteString(v.DumpCursors())
 		sb.WriteString("\n")
 	}
+}
 
-	// Recent instruction log
-	if v.Debug != nil && len(v.Debug.InstructionLog) > 0 {
-		sb.WriteString("Recent Instructions:\n")
-		sb.WriteString("─────────────────────────────────────────\n")
-		// Show last 10 instructions
-		start := 0
-		if len(v.Debug.InstructionLog) > 10 {
-			start = len(v.Debug.InstructionLog) - 10
-		}
-		for i := start; i < len(v.Debug.InstructionLog); i++ {
-			sb.WriteString(v.Debug.InstructionLog[i])
-			sb.WriteString("\n")
-		}
-		sb.WriteString("\n")
+// dumpRecentInstructions writes the recent instruction log to the string builder.
+func (v *VDBE) dumpRecentInstructions(sb *strings.Builder) {
+	if v.Debug == nil || len(v.Debug.InstructionLog) == 0 {
+		return
 	}
 
-	sb.WriteString("═════════════════════════════════════════════════════════════════════════════\n")
+	sb.WriteString("Recent Instructions:\n")
+	sb.WriteString("─────────────────────────────────────────\n")
 
-	return sb.String()
+	// Show last 10 instructions
+	start := 0
+	if len(v.Debug.InstructionLog) > 10 {
+		start = len(v.Debug.InstructionLog) - 10
+	}
+
+	for i := start; i < len(v.Debug.InstructionLog); i++ {
+		sb.WriteString(v.Debug.InstructionLog[i])
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n")
 }
 
 // captureRegisterSnapshot captures the current state of all registers before execution.
