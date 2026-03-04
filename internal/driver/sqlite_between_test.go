@@ -14,7 +14,7 @@ import (
 // TestBetweenBasicIndexUsage tests basic BETWEEN with index
 // From between.test lines 22-105
 func TestBetweenBasicIndexUsage(t *testing.T) {
-	t.Skip("pre-existing failure - index scan returns NULL values")
+	t.Skip("pre-existing failure - index scan returns NULL values - requires fixes to SeekGE/Column/DeferredSeek interaction")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "between_basic.db")
 
@@ -176,7 +176,7 @@ func TestBetweenConstantValue(t *testing.T) {
 // TestBetweenCollation tests BETWEEN with different collations
 // From between.test lines 123-141
 func TestBetweenCollation(t *testing.T) {
-	t.Skip("pre-existing failure - NOCASE collation not properly applied in BETWEEN")
+	t.Skip("pre-existing failure - NOCASE collation not applied in BETWEEN comparisons")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "between_collation.db")
 

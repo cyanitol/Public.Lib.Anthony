@@ -217,142 +217,209 @@ func exceptRows(left, right [][]interface{}) [][]interface{} {
 	return result
 }
 
+// orderSpec defines a column to sort by and its direction.
+type orderSpec struct {
+	colIdx int
+	desc   bool
+}
+
 // sortCompoundRows sorts the in-memory result set according to ORDER BY terms.
 func sortCompoundRows(rows [][]interface{}, orderBy []parser.OrderingTerm, numCols int, colNames []string) {
 	if len(rows) == 0 || len(orderBy) == 0 {
 		return
 	}
 
-	// Resolve ORDER BY column indices
-	type orderSpec struct {
-		colIdx int
-		desc   bool
-	}
+	specs := buildOrderSpecs(orderBy, numCols, colNames)
+	sort.SliceStable(rows, func(i, j int) bool {
+		return compareCompoundRows(rows[i], rows[j], specs)
+	})
+}
+
+// buildOrderSpecs converts ORDER BY terms into orderSpec structures.
+func buildOrderSpecs(orderBy []parser.OrderingTerm, numCols int, colNames []string) []orderSpec {
 	specs := make([]orderSpec, 0, len(orderBy))
-
 	for _, term := range orderBy {
-		baseExpr := term.Expr
-		if collateExpr, ok := term.Expr.(*parser.CollateExpr); ok {
-			baseExpr = collateExpr.Expr
-		}
-
-		colIdx := -1
-		if ident, ok := baseExpr.(*parser.IdentExpr); ok {
-			// Try to find in column names
-			for j, name := range colNames {
-				if name == ident.Name {
-					colIdx = j
-					break
-				}
-			}
-			// If not found by name, try as an alias of the first column
-			if colIdx < 0 {
-				colIdx = 0 // Default to first column
-			}
-		} else if lit, ok := baseExpr.(*parser.LiteralExpr); ok && lit.Type == parser.LiteralInteger {
-			// ORDER BY 1, 2, etc. (1-based column index)
-			var idx int64
-			if _, err := fmt.Sscanf(lit.Value, "%d", &idx); err == nil && idx >= 1 && int(idx) <= numCols {
-				colIdx = int(idx) - 1
-			}
-		}
-		if colIdx < 0 {
-			colIdx = 0
-		}
-
+		colIdx := resolveOrderByColumn(term, numCols, colNames)
 		specs = append(specs, orderSpec{colIdx: colIdx, desc: !term.Asc})
 	}
+	return specs
+}
 
-	sort.SliceStable(rows, func(i, j int) bool {
-		for _, spec := range specs {
-			ci := spec.colIdx
-			if ci >= len(rows[i]) || ci >= len(rows[j]) {
-				continue
-			}
-			cmp := cmpCompoundValues(rows[i][ci], rows[j][ci])
-			if cmp == 0 {
-				continue
-			}
-			if spec.desc {
-				return cmp > 0
-			}
-			return cmp < 0
+// resolveOrderByColumn determines the column index for an ORDER BY term.
+func resolveOrderByColumn(term parser.OrderingTerm, numCols int, colNames []string) int {
+	baseExpr := extractBaseExpr(term.Expr)
+
+	if colIdx := resolveIdentExpr(baseExpr, colNames); colIdx >= 0 {
+		return colIdx
+	}
+	if colIdx := resolveLiteralExpr(baseExpr, numCols); colIdx >= 0 {
+		return colIdx
+	}
+	return 0 // Default to first column
+}
+
+// extractBaseExpr unwraps a COLLATE expression if present.
+func extractBaseExpr(expr parser.Expression) parser.Expression {
+	if collateExpr, ok := expr.(*parser.CollateExpr); ok {
+		return collateExpr.Expr
+	}
+	return expr
+}
+
+// resolveIdentExpr resolves a column name identifier to its index.
+func resolveIdentExpr(expr parser.Expression, colNames []string) int {
+	ident, ok := expr.(*parser.IdentExpr)
+	if !ok {
+		return -1
+	}
+	for j, name := range colNames {
+		if name == ident.Name {
+			return j
 		}
-		return false
-	})
+	}
+	return -1
+}
+
+// resolveLiteralExpr resolves a literal integer (1-based column index).
+func resolveLiteralExpr(expr parser.Expression, numCols int) int {
+	lit, ok := expr.(*parser.LiteralExpr)
+	if !ok || lit.Type != parser.LiteralInteger {
+		return -1
+	}
+	var idx int64
+	if _, err := fmt.Sscanf(lit.Value, "%d", &idx); err == nil && idx >= 1 && int(idx) <= numCols {
+		return int(idx) - 1
+	}
+	return -1
+}
+
+// compareCompoundRows compares two rows according to orderSpecs.
+func compareCompoundRows(row1, row2 []interface{}, specs []orderSpec) bool {
+	for _, spec := range specs {
+		ci := spec.colIdx
+		if ci >= len(row1) || ci >= len(row2) {
+			continue
+		}
+		cmp := cmpCompoundValues(row1[ci], row2[ci])
+		if cmp == 0 {
+			continue
+		}
+		if spec.desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	}
+	return false
 }
 
 // cmpCompoundValues compares two interface{} values using SQLite-like ordering.
 // NULL < integers < floats < strings < blobs
 func cmpCompoundValues(a, b interface{}) int {
-	// Handle NULLs
+	// Handle NULLs first with early returns
+	if cmp, handled := cmpNulls(a, b); handled {
+		return cmp
+	}
+
+	// Compare different types by their type order
+	if cmp, handled := cmpDifferentTypes(a, b); handled {
+		return cmp
+	}
+
+	// Same type comparison - dispatch to type-specific comparers
+	return cmpSameType(a, b)
+}
+
+// cmpNulls handles NULL comparison. Returns (comparison, true) if either value is NULL.
+func cmpNulls(a, b interface{}) (int, bool) {
 	if a == nil && b == nil {
-		return 0
+		return 0, true
 	}
 	if a == nil {
-		return -1
+		return -1, true
 	}
 	if b == nil {
-		return 1
+		return 1, true
 	}
+	return 0, false
+}
 
-	// Get type order for comparison between different types
+// cmpDifferentTypes compares values of different types by type order.
+// Returns (comparison, true) if types differ, (0, false) if types are the same.
+func cmpDifferentTypes(a, b interface{}) (int, bool) {
 	aOrder := typeOrder(a)
 	bOrder := typeOrder(b)
-	if aOrder != bOrder {
-		if aOrder < bOrder {
-			return -1
-		}
-		return 1
+	if aOrder == bOrder {
+		return 0, false
 	}
+	if aOrder < bOrder {
+		return -1, true
+	}
+	return 1, true
+}
 
-	// Same type comparison
+// cmpSameType dispatches to type-specific comparison functions.
+func cmpSameType(a, b interface{}) int {
 	switch av := a.(type) {
 	case int64:
-		bv := b.(int64)
-		if av < bv {
-			return -1
-		}
-		if av > bv {
-			return 1
-		}
-		return 0
+		return cmpIntegers(av, b.(int64))
 	case float64:
-		bv := b.(float64)
-		if av < bv {
-			return -1
-		}
-		if av > bv {
-			return 1
-		}
-		return 0
+		return cmpFloats(av, b.(float64))
 	case string:
-		bv := b.(string)
-		if av < bv {
-			return -1
-		}
-		if av > bv {
-			return 1
-		}
-		return 0
+		return cmpStrings(av, b.(string))
 	case []byte:
-		bv := b.([]byte)
-		// Compare byte slices
-		for i := 0; i < len(av) && i < len(bv); i++ {
-			if av[i] < bv[i] {
-				return -1
-			}
-			if av[i] > bv[i] {
-				return 1
-			}
-		}
-		if len(av) < len(bv) {
+		return cmpBytes(av, b.([]byte))
+	}
+	return 0
+}
+
+// cmpIntegers compares two int64 values.
+func cmpIntegers(a, b int64) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
+}
+
+// cmpFloats compares two float64 values.
+func cmpFloats(a, b float64) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
+}
+
+// cmpStrings compares two string values.
+func cmpStrings(a, b string) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
+}
+
+// cmpBytes compares two byte slices lexicographically.
+func cmpBytes(a, b []byte) int {
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i] < b[i] {
 			return -1
 		}
-		if len(av) > len(bv) {
+		if a[i] > b[i] {
 			return 1
 		}
-		return 0
+	}
+	if len(a) < len(b) {
+		return -1
+	}
+	if len(a) > len(b) {
+		return 1
 	}
 	return 0
 }

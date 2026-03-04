@@ -47,67 +47,122 @@ func (v *VDBE) prepareForStep() error {
 // runUntilRowOrHalt executes instructions until a row is ready or the program halts.
 func (v *VDBE) runUntilRowOrHalt() (bool, error) {
 	for {
-		if v.PC >= len(v.Program) {
-			v.State = StateHalt
-			// End statistics tracking if enabled
-			if v.Stats != nil && v.Stats.EndTime == 0 {
-				v.Stats.End()
-			}
+		// Check if program has ended
+		if hasEnded, result := v.handleProgramEnd(); hasEnded {
+			return result, nil
+		}
+
+		// Fetch next instruction and update PC
+		instr, currentPC := v.fetchNextInstruction()
+
+		// Record instruction stats
+		v.updateExecutionStats(instr)
+
+		// Handle debug breakpoint before execution
+		if shouldPause := v.handleDebugBreakpoint(currentPC, instr); shouldPause {
 			return false, nil
 		}
-		instr := v.Program[v.PC]
-		currentPC := v.PC // Save PC before incrementing for debug logging
-		v.PC++
-		v.NumSteps++
 
-		// Track instruction execution if stats enabled
-		if v.Stats != nil {
-			v.Stats.RecordInstruction(instr.Opcode)
-		}
-
-		// Trace instruction before execution (if debug mode enabled)
-		if v.Debug != nil {
-			shouldContinue := v.TraceInstruction(currentPC, instr)
-			if !shouldContinue {
-				// Breakpoint or step mode - pause execution
-				v.PC = currentPC // Restore PC so next step re-executes this instruction
-				v.State = StateHalt
-				return false, nil
-			}
-		}
-
-		// Execute the instruction
-		if err := v.execInstruction(instr); err != nil {
-			v.SetError(err.Error())
-			v.State = StateHalt
-			// End statistics tracking if enabled
-			if v.Stats != nil && v.Stats.EndTime == 0 {
-				v.Stats.End()
-			}
-
-			// Log error in debug mode
-			if v.Debug != nil && v.IsDebugEnabled(DebugStack) {
-				v.logToObservability(observability.ErrorLevel, "Error at PC=%d: %s", currentPC, err.Error())
-			}
-
+		// Execute instruction and handle error
+		if hasError, err := v.handleExecutionError(instr, currentPC); hasError {
 			return false, err
 		}
 
-		// Trace instruction after execution (log register/cursor changes)
-		if v.Debug != nil {
-			v.TraceInstructionAfter(currentPC, instr)
-		}
+		// Trace after execution
+		v.traceAfterExecution(currentPC, instr)
 
-		if v.State == StateHalt {
-			// End statistics tracking if enabled
-			if v.Stats != nil && v.Stats.EndTime == 0 {
-				v.Stats.End()
-			}
-			return false, nil
+		// Check state transitions
+		if isReady := v.checkStateTransition(); isReady != nil {
+			return *isReady, nil
 		}
-		if v.State == StateRowReady {
-			return true, nil
-		}
+	}
+}
+
+// handleProgramEnd checks if PC exceeds program length and halts if needed.
+func (v *VDBE) handleProgramEnd() (bool, bool) {
+	if v.PC >= len(v.Program) {
+		v.State = StateHalt
+		v.endStatsIfNeeded()
+		return true, false
+	}
+	return false, false
+}
+
+// fetchNextInstruction gets the next instruction and increments PC.
+func (v *VDBE) fetchNextInstruction() (*Instruction, int) {
+	instr := v.Program[v.PC]
+	currentPC := v.PC
+	v.PC++
+	v.NumSteps++
+	return instr, currentPC
+}
+
+// updateExecutionStats records instruction execution if stats are enabled.
+func (v *VDBE) updateExecutionStats(instr *Instruction) {
+	if v.Stats != nil {
+		v.Stats.RecordInstruction(instr.Opcode)
+	}
+}
+
+// handleDebugBreakpoint checks for debug breakpoints and pauses if needed.
+func (v *VDBE) handleDebugBreakpoint(currentPC int, instr *Instruction) bool {
+	if v.Debug == nil {
+		return false
+	}
+	shouldContinue := v.TraceInstruction(currentPC, instr)
+	if !shouldContinue {
+		// Breakpoint or step mode - pause execution
+		v.PC = currentPC // Restore PC so next step re-executes this instruction
+		v.State = StateHalt
+		return true
+	}
+	return false
+}
+
+// handleExecutionError executes instruction and handles any errors.
+func (v *VDBE) handleExecutionError(instr *Instruction, currentPC int) (bool, error) {
+	err := v.execInstruction(instr)
+	if err == nil {
+		return false, nil
+	}
+
+	v.SetError(err.Error())
+	v.State = StateHalt
+	v.endStatsIfNeeded()
+
+	// Log error in debug mode
+	if v.Debug != nil && v.IsDebugEnabled(DebugStack) {
+		v.logToObservability(observability.ErrorLevel, "Error at PC=%d: %s", currentPC, err.Error())
+	}
+
+	return true, err
+}
+
+// traceAfterExecution traces instruction after execution if debug enabled.
+func (v *VDBE) traceAfterExecution(currentPC int, instr *Instruction) {
+	if v.Debug != nil {
+		v.TraceInstructionAfter(currentPC, instr)
+	}
+}
+
+// checkStateTransition checks if state indicates halt or row ready.
+func (v *VDBE) checkStateTransition() *bool {
+	if v.State == StateHalt {
+		v.endStatsIfNeeded()
+		result := false
+		return &result
+	}
+	if v.State == StateRowReady {
+		result := true
+		return &result
+	}
+	return nil
+}
+
+// endStatsIfNeeded ends statistics tracking if enabled and not already ended.
+func (v *VDBE) endStatsIfNeeded() {
+	if v.Stats != nil && v.Stats.EndTime == 0 {
+		v.Stats.End()
 	}
 }
 
@@ -794,6 +849,9 @@ func (v *VDBE) execPrev(instr *Instruction) error {
 
 func (v *VDBE) execSeekGE(instr *Instruction) error {
 	// Seek cursor P1 to entry >= key in register P3
+	// P1 = cursor number
+	// P2 = jump target if not found
+	// P3 = register containing search key
 	cursor, err := v.GetCursor(instr.P1)
 	if err != nil {
 		return err
@@ -804,10 +862,41 @@ func (v *VDBE) execSeekGE(instr *Instruction) error {
 		return err
 	}
 
-	// In a real implementation, this would perform a B-tree seek
-	_ = keyReg
-	cursor.EOF = false
+	// Handle index cursors
+	if idxCursor, ok := cursor.BtreeCursor.(*btree.IndexCursor); ok && idxCursor != nil {
+		// For index seek, we need to encode the search key as a record
+		// The key register contains the value(s) to search for
+		// P4 typically indicates number of columns, but we'll encode the single value as a record
 
+		// Encode the search key as a SQLite record
+		searchKey := encodeValueAsRecord(keyReg)
+
+		// Seek to the first entry >= searchKey
+		found, err := idxCursor.SeekIndex(searchKey)
+		if err != nil {
+			return err
+		}
+
+		if !found {
+			// No exact match, but cursor is positioned at first entry > searchKey
+			// This is correct for SeekGE (greater than or equal)
+			// Check if cursor is still valid
+			if !idxCursor.IsValid() {
+				cursor.EOF = true
+				// Jump to P2 if specified
+				if instr.P2 != 0 {
+					v.PC = instr.P2
+				}
+				return nil
+			}
+		}
+
+		cursor.EOF = false
+		return nil
+	}
+
+	// Handle table cursors - simplified implementation
+	cursor.EOF = false
 	return nil
 }
 
@@ -1135,7 +1224,7 @@ func (v *VDBE) execDeferredSeek(instr *Instruction) error {
 	// Seek cursor but defer until data needed
 	// P1 = index cursor number
 	// P2 = table cursor number
-	// P3 = rowid register
+	// P3 = rowid register (or 0 to use rowid from index cursor P1)
 	//
 	// This is an optimization opcode that defers seeking the table cursor
 	// until data is actually needed from it. For this simplified implementation,
@@ -1146,9 +1235,27 @@ func (v *VDBE) execDeferredSeek(instr *Instruction) error {
 		return err
 	}
 
-	rowidReg, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
+	// Get the rowid to seek to
+	var rowid int64
+	if instr.P3 == 0 {
+		// P3=0 means get rowid from the index cursor P1
+		indexCursor, err := v.GetCursor(instr.P1)
+		if err != nil {
+			return err
+		}
+		if idxCursor, ok := indexCursor.BtreeCursor.(*btree.IndexCursor); ok && idxCursor != nil {
+			rowid = idxCursor.GetRowid()
+		} else {
+			tableCursor.EOF = true
+			return nil
+		}
+	} else {
+		// Get rowid from register P3
+		rowidReg, err := v.GetMem(instr.P3)
+		if err != nil {
+			return err
+		}
+		rowid = rowidReg.IntValue()
 	}
 
 	btCursor := seekGetBtCursor(tableCursor)
@@ -1162,7 +1269,7 @@ func (v *VDBE) execDeferredSeek(instr *Instruction) error {
 		return nil
 	}
 
-	found, err := seekLinearScan(btCursor, rowidReg.IntValue())
+	found, err := seekLinearScan(btCursor, rowid)
 	if err != nil {
 		return err
 	}
@@ -1227,6 +1334,17 @@ func (v *VDBE) getPseudoCursorPayload(cursor *Cursor, dst *Mem) []byte {
 
 // getBtreeCursorPayload returns payload from a btree cursor
 func (v *VDBE) getBtreeCursorPayload(cursor *Cursor, dst *Mem) []byte {
+	// Handle index cursors
+	if idxCursor, ok := cursor.BtreeCursor.(*btree.IndexCursor); ok && idxCursor != nil {
+		// For index cursors, the "payload" is the index key (which contains the indexed column values)
+		key := idxCursor.GetKey()
+		if key == nil {
+			dst.SetNull()
+		}
+		return key
+	}
+
+	// Handle table cursors
 	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
 	if !ok || btCursor == nil {
 		dst.SetNull()
@@ -2694,9 +2812,12 @@ func castToInteger(mem *Mem) error {
 	if mem.IsInt() {
 		return nil
 	}
-	// Try to convert to integer
+	// For real numbers: only convert if no fractional part
 	if mem.IsReal() {
-		mem.SetInt(int64(mem.RealValue()))
+		if mem.r == float64(int64(mem.r)) {
+			mem.SetInt(int64(mem.r))
+		}
+		// Otherwise keep as real (SQLite behavior for INTEGER affinity)
 		return nil
 	}
 	if mem.IsString() || mem.IsBlob() {
@@ -2715,7 +2836,15 @@ func castToInteger(mem *Mem) error {
 
 // castToNumeric tries int, then float, keeps text if neither works.
 func castToNumeric(mem *Mem) error {
-	if mem.IsNumeric() {
+	// If already numeric, check if real can be converted to integer
+	if mem.IsReal() {
+		// Convert real to integer if it has no fractional part
+		if mem.r == float64(int64(mem.r)) {
+			mem.SetInt(int64(mem.r))
+		}
+		return nil
+	}
+	if mem.IsInt() {
 		return nil
 	}
 	if mem.IsString() || mem.IsBlob() {
@@ -2727,7 +2856,12 @@ func castToNumeric(mem *Mem) error {
 		}
 		// Try real
 		if val, err := strconv.ParseFloat(str, 64); err == nil {
-			mem.SetReal(val)
+			// If real has no fractional part, store as integer
+			if val == float64(int64(val)) {
+				mem.SetInt(int64(val))
+			} else {
+				mem.SetReal(val)
+			}
 			return nil
 		}
 		// Keep as text if neither works
@@ -3495,6 +3629,14 @@ func extractKeyAsBlob(keyMem *Mem) []byte {
 	}
 	keyMem.Stringify()
 	return []byte(keyMem.StrValue())
+}
+
+// encodeValueAsRecord encodes a single value as a SQLite record
+// This is used for index seeks where the search key needs to be in record format
+func encodeValueAsRecord(mem *Mem) []byte {
+	// Convert Mem to interface{} and encode as a single-column record
+	val := memToInterface(mem)
+	return encodeSimpleRecord([]interface{}{val})
 }
 
 // compareBytes compares two byte slices lexicographically.

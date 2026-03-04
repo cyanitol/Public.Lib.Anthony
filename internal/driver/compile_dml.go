@@ -87,7 +87,7 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 	// Loop over all rows in VALUES clause
 	for _, row := range stmt.Values {
 		s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, &paramIdx)
-		s.emitInsertRecordValues(vm, row, rowidColIdx, recordStartReg, args, &paramIdx)
+		s.emitInsertRecordValues(vm, table, colNames, row, rowidColIdx, recordStartReg, args, &paramIdx)
 
 		resultReg := recordStartReg + numRecordCols
 		vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
@@ -330,15 +330,46 @@ func (s *Stmt) emitInsertRowid(vm *vdbe.VDBE, table *schema.Table, row []parser.
 }
 
 // emitInsertRecordValues emits OpXxx opcodes that load each non-rowid value
-// from row into consecutive registers beginning at startReg.
-func (s *Stmt) emitInsertRecordValues(vm *vdbe.VDBE, row []parser.Expression, rowidColIdx int, startReg int, args []driver.NamedValue, paramIdx *int) {
+// from row into consecutive registers beginning at startReg, applying column
+// affinity as needed.
+func (s *Stmt) emitInsertRecordValues(vm *vdbe.VDBE, table *schema.Table, colNames []string, row []parser.Expression, rowidColIdx int, startReg int, args []driver.NamedValue, paramIdx *int) {
 	reg := startReg
 	for i, val := range row {
 		if i == rowidColIdx {
 			continue // rowid already loaded separately
 		}
 		s.compileValue(vm, val, reg, args, paramIdx)
+
+		// Apply column affinity if column exists in schema
+		colName := colNames[i]
+		if colIdx := table.GetColumnIndex(colName); colIdx >= 0 {
+			col := table.Columns[colIdx]
+			if col.Affinity != schema.AffinityNone && col.Affinity != schema.AffinityBlob {
+				// Convert affinity to OpCast P2 encoding
+				affinityCode := affinityToOpCastCode(col.Affinity)
+				vm.AddOp(vdbe.OpCast, reg, affinityCode, 0)
+			}
+		}
 		reg++
+	}
+}
+
+// affinityToOpCastCode converts a schema.Affinity to the OpCast P2 encoding.
+// OpCast P2 values: 0=NONE/BLOB, 1=BLOB, 2=TEXT, 3=INTEGER, 4=REAL, 5=NUMERIC
+func affinityToOpCastCode(aff schema.Affinity) int {
+	switch aff {
+	case schema.AffinityBlob:
+		return 1
+	case schema.AffinityText:
+		return 2
+	case schema.AffinityInteger:
+		return 3
+	case schema.AffinityReal:
+		return 4
+	case schema.AffinityNumeric:
+		return 5
+	default:
+		return 0
 	}
 }
 
@@ -378,8 +409,8 @@ func (s *Stmt) compileValue(vm *vdbe.VDBE, val parser.Expression, reg int, args 
 }
 
 // compileLiteralExpr emits the VDBE opcode for a literal value into register reg.
-// Float, String, and Blob literals all map to OpString8; Integer and Null have
-// dedicated opcodes. CC=4
+// Float literals use OpReal, String and Blob literals use OpString8, Integer and
+// Null have dedicated opcodes. CC=4
 func compileLiteralExpr(vm *vdbe.VDBE, expr *parser.LiteralExpr, reg int) {
 	switch expr.Type {
 	case parser.LiteralInteger:
@@ -388,7 +419,10 @@ func compileLiteralExpr(vm *vdbe.VDBE, expr *parser.LiteralExpr, reg int) {
 		vm.AddOp(vdbe.OpInteger, int(intVal), reg, 0)
 	case parser.LiteralNull:
 		vm.AddOp(vdbe.OpNull, 0, reg, 0)
-	case parser.LiteralFloat, parser.LiteralString, parser.LiteralBlob:
+	case parser.LiteralFloat:
+		floatVal, _ := strconv.ParseFloat(expr.Value, 64)
+		vm.AddOpWithP4Real(vdbe.OpReal, 0, reg, 0, floatVal)
+	case parser.LiteralString, parser.LiteralBlob:
 		vm.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, expr.Value)
 	default:
 		vm.AddOp(vdbe.OpNull, 0, reg, 0)

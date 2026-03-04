@@ -19,7 +19,6 @@ import (
 // TestTypeAffinityBasic tests basic type affinity for different column types
 // From types.test lines 46-91
 func TestTypeAffinityBasic(t *testing.T) {
-	t.Skip("pre-existing failure")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "types_test.db")
 
@@ -94,7 +93,7 @@ func TestTypeAffinityBasic(t *testing.T) {
 // TestTypeAffinityInsertSelect tests type affinity with INSERT SELECT
 // From types.test lines 93-110
 func TestTypeAffinityInsertSelect(t *testing.T) {
-	t.Skip("pre-existing failure")
+	t.Skip("INSERT SELECT not fully implemented")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "types_insert_select.db")
 
@@ -149,7 +148,7 @@ func TestTypeAffinityInsertSelect(t *testing.T) {
 // TestTypeAffinityUpdate tests type affinity with UPDATE
 // From types.test lines 112-128
 func TestTypeAffinityUpdate(t *testing.T) {
-	t.Skip("pre-existing failure")
+	t.Skip("UPDATE affinity not yet implemented")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "types_update.db")
 

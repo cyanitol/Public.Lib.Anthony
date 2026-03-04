@@ -310,7 +310,8 @@ func (m *Mem) Stringify() error {
 
 	m.z = []byte(str)
 	m.n = len(str)
-	m.flags |= MemStr | MemTerm
+	// Clear affinity flags first, then set string flags
+	m.flags = (m.flags &^ MemAffMask) | MemStr | MemTerm
 	return nil
 }
 
@@ -323,7 +324,8 @@ func (m *Mem) Integerify() error {
 
 	if m.flags&MemReal != 0 {
 		m.i = int64(m.r)
-		m.flags = MemInt
+		// Clear affinity flags first, then set integer flag
+		m.flags = (m.flags &^ MemAffMask) | MemInt
 		return nil
 	}
 
@@ -333,19 +335,22 @@ func (m *Mem) Integerify() error {
 			// Try parsing as float first, then convert to int
 			if fval, ferr := strconv.ParseFloat(string(m.z), 64); ferr == nil {
 				m.i = int64(fval)
-				m.flags = MemInt
+				// Clear affinity flags first, then set integer flag
+				m.flags = (m.flags &^ MemAffMask) | MemInt
 				return nil
 			}
 			return fmt.Errorf("cannot convert to integer: %w", err)
 		}
 		m.i = val
-		m.flags = MemInt
+		// Clear affinity flags first, then set integer flag
+		m.flags = (m.flags &^ MemAffMask) | MemInt
 		return nil
 	}
 
 	if m.flags&MemNull != 0 {
 		m.i = 0
-		m.flags = MemInt
+		// Clear affinity flags first, then set integer flag
+		m.flags = (m.flags &^ MemAffMask) | MemInt
 		return nil
 	}
 
@@ -361,7 +366,8 @@ func (m *Mem) Realify() error {
 
 	if m.flags&MemInt != 0 {
 		m.r = float64(m.i)
-		m.flags = MemReal
+		// Clear affinity flags first, then set real flag
+		m.flags = (m.flags &^ MemAffMask) | MemReal
 		return nil
 	}
 
@@ -371,13 +377,15 @@ func (m *Mem) Realify() error {
 			return fmt.Errorf("cannot convert to real: %w", err)
 		}
 		m.r = val
-		m.flags = MemReal
+		// Clear affinity flags first, then set real flag
+		m.flags = (m.flags &^ MemAffMask) | MemReal
 		return nil
 	}
 
 	if m.flags&MemNull != 0 {
 		m.r = 0.0
-		m.flags = MemReal
+		// Clear affinity flags first, then set real flag
+		m.flags = (m.flags &^ MemAffMask) | MemReal
 		return nil
 	}
 

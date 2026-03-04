@@ -53,6 +53,81 @@ var binarySpecialHandlers = map[parser.BinaryOp]binarySpecialHandler{
 	parser.OpGlob: (*CodeGenerator).generateGlobExpr,
 }
 
+// literalHandler is the signature for literal-type dispatch handlers.
+type literalHandler func(g *CodeGenerator, e *parser.LiteralExpr, reg int) error
+
+// literalHandlers maps literal types to their code-generation handlers.
+var literalHandlers = map[parser.LiteralType]literalHandler{
+	parser.LiteralNull:    (*CodeGenerator).generateNullLiteralValue,
+	parser.LiteralInteger: (*CodeGenerator).generateIntegerLiteral,
+	parser.LiteralFloat:   (*CodeGenerator).generateFloatLiteral,
+	parser.LiteralString:  (*CodeGenerator).generateStringLiteral,
+	parser.LiteralBlob:    (*CodeGenerator).generateBlobLiteral,
+}
+
+// registerAdjustmentRule defines which parameters need register adjustment for an opcode.
+type registerAdjustmentRule struct {
+	adjustP1 bool // Whether P1 is a register that needs adjustment
+	adjustP3 bool // Whether P3 is a register that needs adjustment
+}
+
+// registerAdjustmentRules maps opcodes to their register adjustment rules.
+var registerAdjustmentRules = map[vdbe.Opcode]registerAdjustmentRule{
+	// Arithmetic operations
+	vdbe.OpAdd:        {adjustP1: true, adjustP3: true},
+	vdbe.OpSubtract:   {adjustP1: true, adjustP3: true},
+	vdbe.OpMultiply:   {adjustP1: true, adjustP3: true},
+	vdbe.OpDivide:     {adjustP1: true, adjustP3: true},
+	vdbe.OpRemainder:  {adjustP1: true, adjustP3: true},
+	vdbe.OpBitNot:     {adjustP1: true, adjustP3: true},
+	vdbe.OpBitAnd:     {adjustP1: true, adjustP3: true},
+	vdbe.OpBitOr:      {adjustP1: true, adjustP3: true},
+	vdbe.OpShiftLeft:  {adjustP1: true, adjustP3: true},
+	vdbe.OpShiftRight: {adjustP1: true, adjustP3: true},
+	// Comparison operations
+	vdbe.OpLt:      {adjustP1: true, adjustP3: true},
+	vdbe.OpLe:      {adjustP1: true, adjustP3: true},
+	vdbe.OpGt:      {adjustP1: true, adjustP3: true},
+	vdbe.OpGe:      {adjustP1: true, adjustP3: true},
+	vdbe.OpEq:      {adjustP1: true, adjustP3: true},
+	vdbe.OpNe:      {adjustP1: true, adjustP3: true},
+	vdbe.OpAnd:     {adjustP1: true, adjustP3: true},
+	vdbe.OpOr:      {adjustP1: true, adjustP3: true},
+	vdbe.OpNot:     {adjustP1: true, adjustP3: true},
+	vdbe.OpIsNull:  {adjustP1: true, adjustP3: false},
+	vdbe.OpNotNull: {adjustP1: true, adjustP3: false},
+	// String operations
+	vdbe.OpConcat: {adjustP1: true, adjustP3: true},
+	// Type conversion
+	vdbe.OpCast: {adjustP1: true, adjustP3: true},
+	// Data movement
+	vdbe.OpCopy:    {adjustP1: true, adjustP3: false},
+	vdbe.OpMove:    {adjustP1: true, adjustP3: false},
+	vdbe.OpInteger: {adjustP1: false, adjustP3: false},
+	vdbe.OpReal:    {adjustP1: false, adjustP3: false},
+	vdbe.OpString8: {adjustP1: false, adjustP3: false},
+	vdbe.OpNull:    {adjustP1: false, adjustP3: false},
+	// Column operations
+	vdbe.OpColumn: {adjustP1: false, adjustP3: true},
+	// Result operations
+	vdbe.OpResultRow: {adjustP1: true, adjustP3: false},
+	// Aggregate operations
+	vdbe.OpAggDistinct: {adjustP1: true, adjustP3: false},
+	vdbe.OpAddImm:      {adjustP1: true, adjustP3: false},
+	// Function calls
+	vdbe.OpFunction: {adjustP1: true, adjustP3: true},
+	// Control flow with register operands
+	vdbe.OpIf:        {adjustP1: true, adjustP3: false},
+	vdbe.OpIfNot:     {adjustP1: true, adjustP3: false},
+	vdbe.OpIfPos:     {adjustP1: true, adjustP3: false},
+	vdbe.OpIfNotZero: {adjustP1: true, adjustP3: false},
+	// Subroutine control
+	vdbe.OpGosub:  {adjustP1: true, adjustP3: false},
+	vdbe.OpReturn: {adjustP1: true, adjustP3: false},
+	// Comparison operations
+	vdbe.OpCompare: {adjustP1: true, adjustP3: true},
+}
+
 // exprHandler is the signature for expression-type dispatch handlers.
 type exprHandler func(g *CodeGenerator, e parser.Expression) (int, error)
 
@@ -255,58 +330,75 @@ func (g *CodeGenerator) generateNullLiteral() (int, error) {
 	return reg, nil
 }
 
-// generateLiteral generates code for literal values.
+// generateLiteral generates code for literal values using a table-driven dispatch.
 func (g *CodeGenerator) generateLiteral(e *parser.LiteralExpr) (int, error) {
 	reg := g.AllocReg()
 
-	switch e.Type {
-	case parser.LiteralNull:
-		g.vdbe.AddOp(vdbe.OpNull, 0, reg, 0)
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, "NULL")
-
-	case parser.LiteralInteger:
-		// Parse integer value
-		var val int64
-		fmt.Sscanf(e.Value, "%d", &val)
-		if val >= -2147483648 && val <= 2147483647 {
-			g.vdbe.AddOp(vdbe.OpInteger, int(val), reg, 0)
-		} else {
-			g.vdbe.AddOpWithP4Int64(vdbe.OpInt64, 0, reg, 0, val)
-		}
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("INT %s", e.Value))
-
-	case parser.LiteralFloat:
-		// Parse float value
-		var val float64
-		fmt.Sscanf(e.Value, "%f", &val)
-		addr := g.vdbe.AddOp(vdbe.OpReal, 0, reg, 0)
-		g.vdbe.Program[addr].P4.R = val
-		g.vdbe.Program[addr].P4Type = vdbe.P4Real
-		g.vdbe.SetComment(addr, fmt.Sprintf("REAL %s", e.Value))
-
-	case parser.LiteralString:
-		g.vdbe.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, e.Value)
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("STRING '%s'", e.Value))
-
-	case parser.LiteralBlob:
-		// e.Value is the raw lexeme like X'01020304' or x'ABCDEF'.
-		// Strip the X'...' wrapper to get the hex digits, then decode to []byte.
-		hexStr := e.Value
-		if len(hexStr) >= 3 && (hexStr[0] == 'X' || hexStr[0] == 'x') && hexStr[1] == '\'' && hexStr[len(hexStr)-1] == '\'' {
-			hexStr = hexStr[2 : len(hexStr)-1]
-		}
-		blobData, err := hex.DecodeString(strings.ToUpper(hexStr))
-		if err != nil {
-			return 0, fmt.Errorf("invalid blob literal %q: %w", e.Value, err)
-		}
-		g.vdbe.AddOpWithP4Blob(vdbe.OpBlob, len(blobData), reg, 0, blobData)
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, "BLOB")
-
-	default:
+	handler, ok := literalHandlers[e.Type]
+	if !ok {
 		return 0, fmt.Errorf("unsupported literal type: %v", e.Type)
 	}
 
+	if err := handler(g, e, reg); err != nil {
+		return 0, err
+	}
+
 	return reg, nil
+}
+
+// generateNullLiteralValue generates code for NULL literals.
+func (g *CodeGenerator) generateNullLiteralValue(e *parser.LiteralExpr, reg int) error {
+	g.vdbe.AddOp(vdbe.OpNull, 0, reg, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "NULL")
+	return nil
+}
+
+// generateIntegerLiteral generates code for integer literals.
+func (g *CodeGenerator) generateIntegerLiteral(e *parser.LiteralExpr, reg int) error {
+	var val int64
+	fmt.Sscanf(e.Value, "%d", &val)
+	if val >= -2147483648 && val <= 2147483647 {
+		g.vdbe.AddOp(vdbe.OpInteger, int(val), reg, 0)
+	} else {
+		g.vdbe.AddOpWithP4Int64(vdbe.OpInt64, 0, reg, 0, val)
+	}
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("INT %s", e.Value))
+	return nil
+}
+
+// generateFloatLiteral generates code for float literals.
+func (g *CodeGenerator) generateFloatLiteral(e *parser.LiteralExpr, reg int) error {
+	var val float64
+	fmt.Sscanf(e.Value, "%f", &val)
+	addr := g.vdbe.AddOp(vdbe.OpReal, 0, reg, 0)
+	g.vdbe.Program[addr].P4.R = val
+	g.vdbe.Program[addr].P4Type = vdbe.P4Real
+	g.vdbe.SetComment(addr, fmt.Sprintf("REAL %s", e.Value))
+	return nil
+}
+
+// generateStringLiteral generates code for string literals.
+func (g *CodeGenerator) generateStringLiteral(e *parser.LiteralExpr, reg int) error {
+	g.vdbe.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, e.Value)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("STRING '%s'", e.Value))
+	return nil
+}
+
+// generateBlobLiteral generates code for blob literals.
+func (g *CodeGenerator) generateBlobLiteral(e *parser.LiteralExpr, reg int) error {
+	// e.Value is the raw lexeme like X'01020304' or x'ABCDEF'.
+	// Strip the X'...' wrapper to get the hex digits, then decode to []byte.
+	hexStr := e.Value
+	if len(hexStr) >= 3 && (hexStr[0] == 'X' || hexStr[0] == 'x') && hexStr[1] == '\'' && hexStr[len(hexStr)-1] == '\'' {
+		hexStr = hexStr[2 : len(hexStr)-1]
+	}
+	blobData, err := hex.DecodeString(strings.ToUpper(hexStr))
+	if err != nil {
+		return fmt.Errorf("invalid blob literal %q: %w", e.Value, err)
+	}
+	g.vdbe.AddOpWithP4Blob(vdbe.OpBlob, len(blobData), reg, 0, blobData)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "BLOB")
+	return nil
 }
 
 // generateColumn generates code for column references.
@@ -1576,124 +1668,32 @@ func (g *CodeGenerator) adjustSubqueryCursors(subVM *vdbe.VDBE, cursorOffset int
 	}
 }
 
-// adjustSubqueryRegisters adjusts all register references in subquery bytecode.
-// When subquery bytecode is embedded into a parent VDBE, register numbers from the
-// subquery (starting from 1) must be offset to avoid colliding with registers
-// already allocated in the parent VDBE. This function adds regOffset to all P1, P3,
-// and other register-referencing parameters.
-//
-// Registers are referenced in P1, P2 (for some opcodes), and P3 of instructions.
-// Jump targets (P2) should NOT be adjusted here - use adjustSubqueryJumpTargets for that.
+// adjustSubqueryRegisters adjusts all register references in subquery bytecode
+// using a table-driven approach. When subquery bytecode is embedded into a parent
+// VDBE, register numbers from the subquery (starting from 1) must be offset to
+// avoid colliding with registers already allocated in the parent VDBE.
 func (g *CodeGenerator) adjustSubqueryRegisters(subVM *vdbe.VDBE, regOffset int) {
 	if regOffset == 0 {
 		return // No adjustment needed
 	}
 
-	// Opcodes where P1 is a register (source or destination)
-	registerP1Opcodes := map[vdbe.Opcode]bool{
-		// Arithmetic
-		vdbe.OpAdd:        true,
-		vdbe.OpSubtract:   true,
-		vdbe.OpMultiply:   true,
-		vdbe.OpDivide:     true,
-		vdbe.OpRemainder:  true,
-		vdbe.OpBitNot:     true,
-		vdbe.OpBitAnd:     true,
-		vdbe.OpBitOr:      true,
-		vdbe.OpShiftLeft:  true,
-		vdbe.OpShiftRight: true,
-		// Logic
-		vdbe.OpLt:      true,
-		vdbe.OpLe:      true,
-		vdbe.OpGt:      true,
-		vdbe.OpGe:      true,
-		vdbe.OpEq:      true,
-		vdbe.OpNe:      true,
-		vdbe.OpAnd:     true,
-		vdbe.OpOr:      true,
-		vdbe.OpNot:     true,
-		vdbe.OpIsNull:  true,
-		vdbe.OpNotNull: true,
-		// String
-		vdbe.OpConcat: true,
-		// Type conversion
-		vdbe.OpCast: true,
-		// Load/Store
-		vdbe.OpCopy:    true,
-		vdbe.OpMove:    true,
-		vdbe.OpInteger: true,
-		vdbe.OpReal:    true,
-		vdbe.OpString8: true,
-		vdbe.OpNull:    true,
-		// Column operations
-		vdbe.OpColumn: true,
-		// Result
-		vdbe.OpResultRow: true,
-		// Aggregates
-		vdbe.OpAggDistinct: true,
-		vdbe.OpAddImm:      true,
-		// Function calls
-		vdbe.OpFunction: true,
-		// Conditional jumps that use P1 as condition register
-		vdbe.OpIf:        true,
-		vdbe.OpIfNot:     true,
-		vdbe.OpIfPos:     true,
-		vdbe.OpIfNotZero: true,
-		// Gosub uses P1 for return address register
-		vdbe.OpGosub:  true,
-		vdbe.OpReturn: true,
-		// Compare uses P1 as left operand
-		vdbe.OpCompare: true,
-	}
-
-	// Opcodes where P3 is a destination register
-	registerP3Opcodes := map[vdbe.Opcode]bool{
-		vdbe.OpAdd:        true,
-		vdbe.OpSubtract:   true,
-		vdbe.OpMultiply:   true,
-		vdbe.OpDivide:     true,
-		vdbe.OpRemainder:  true,
-		vdbe.OpBitNot:     true,
-		vdbe.OpBitAnd:     true,
-		vdbe.OpBitOr:      true,
-		vdbe.OpShiftLeft:  true,
-		vdbe.OpShiftRight: true,
-		vdbe.OpLt:  true,
-		vdbe.OpLe:  true,
-		vdbe.OpGt:  true,
-		vdbe.OpGe:  true,
-		vdbe.OpEq:  true,
-		vdbe.OpNe:  true,
-		vdbe.OpAnd: true,
-		vdbe.OpOr:  true,
-		vdbe.OpNot: true,
-		vdbe.OpConcat:   true,
-		vdbe.OpCast:     true,
-		vdbe.OpFunction: true,
-		vdbe.OpCompare:  true,
-	}
-
 	for i := range subVM.Program {
-		op := subVM.Program[i].Opcode
+		g.adjustInstructionRegisters(subVM.Program[i], regOffset)
+	}
+}
 
-		// Adjust P1 if it's a register
-		if registerP1Opcodes[op] {
-			subVM.Program[i].P1 += regOffset
-		}
+// adjustInstructionRegisters adjusts register references in a single instruction.
+func (g *CodeGenerator) adjustInstructionRegisters(instr *vdbe.Instruction, regOffset int) {
+	rule, ok := registerAdjustmentRules[instr.Opcode]
+	if !ok {
+		return // No register adjustment needed for this opcode
+	}
 
-		// Adjust P3 if it's a register
-		if registerP3Opcodes[op] {
-			subVM.Program[i].P3 += regOffset
-		}
+	if rule.adjustP1 {
+		instr.P1 += regOffset
+	}
 
-		// For some opcodes, P2 might also be a register (not a jump target)
-		// OpSorterInsert, OpResultRow use P2 for count, OpAddImm uses P2 for increment
-		if op == vdbe.OpSorterInsert && subVM.Program[i].P2 > 0 {
-			// P2 is number of columns, not a register - no adjustment
-		} else if op == vdbe.OpResultRow && subVM.Program[i].P2 > 0 {
-			// P2 is number of columns, not a register - no adjustment
-		} else if op == vdbe.OpAddImm && subVM.Program[i].P2 > 0 {
-			// P2 is the immediate value to add, not a register - no adjustment
-		}
+	if rule.adjustP3 {
+		instr.P3 += regOffset
 	}
 }
