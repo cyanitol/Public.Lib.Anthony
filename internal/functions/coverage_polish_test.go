@@ -329,7 +329,7 @@ func TestSubstrFuncWrongArgCount(t *testing.T) {
 // TestSubstrAdjustStartNegativeOverflow tests substrAdjustStart with large negative
 func TestSubstrAdjustStartNegativeOverflow(t *testing.T) {
 	// Negative start that overflows with negative length
-	newStart, newSubLen, null := substrAdjustStart(NewIntValue(-20), -20, -5, 10)
+	newStart, newSubLen, null := substrAdjustStart(NewIntValue(-20), -20, -5, 10, false)
 	if null {
 		t.Error("Expected null = false")
 	}

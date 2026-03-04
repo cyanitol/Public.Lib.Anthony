@@ -16,6 +16,7 @@ func RegisterScalarFunctions(r *Registry) {
 	// String functions
 	r.Register(NewScalarFunc("length", 1, lengthFunc))
 	r.Register(NewScalarFunc("substr", -1, substrFunc)) // 2 or 3 args
+	r.Register(NewScalarFunc("substring", -1, substrFunc)) // alias for substr
 	r.Register(NewScalarFunc("upper", 1, upperFunc))
 	r.Register(NewScalarFunc("lower", 1, lowerFunc))
 	r.Register(NewScalarFunc("trim", -1, trimFunc))   // 1 or 2 args
@@ -35,6 +36,11 @@ func RegisterScalarFunctions(r *Registry) {
 	r.Register(NewScalarFunc("ifnull", 2, ifnullFunc))
 	r.Register(NewScalarFunc("nullif", 2, nullifFunc))
 	r.Register(NewScalarFunc("iif", 3, iifFunc))
+
+	// Optimization hint functions
+	r.Register(NewScalarFunc("likely", 1, likelyFunc))
+	r.Register(NewScalarFunc("unlikely", 1, unlikelyFunc))
+	r.Register(NewScalarFunc("likelihood", 2, likelihoodFunc))
 
 	// Blob functions
 	r.Register(NewScalarFunc("zeroblob", 1, zeroblobFunc))
@@ -78,7 +84,8 @@ func substrFunc(args []Value) (Value, error) {
 		return NewNullValue(), nil
 	}
 
-	start, subLen, null = substrAdjustStart(args[1], start, subLen, length)
+	hasExplicitLength := len(args) == 3
+	start, subLen, null = substrAdjustStart(args[1], start, subLen, length, hasExplicitLength)
 	if null {
 		return NewNullValue(), nil
 	}
@@ -115,7 +122,7 @@ func substrParseLength(args []Value, length int) (subLen int64, returnNull bool)
 // substrAdjustStart converts the 1-based SQLite start position to a 0-based
 // index and adjusts subLen when a negative start overflows the left boundary.
 // The third return value is true when the caller must return NULL.
-func substrAdjustStart(startArg Value, start, subLen int64, length int) (int64, int64, bool) {
+func substrAdjustStart(startArg Value, start, subLen int64, length int, hasExplicitLength bool) (int64, int64, bool) {
 	switch {
 	case start < 0:
 		start = int64(length) + start
@@ -133,6 +140,12 @@ func substrAdjustStart(startArg Value, start, subLen int64, length int) (int64, 
 		if startArg.IsNull() {
 			return 0, 0, true
 		}
+		// Position 0 in SQLite means "start before the first character"
+		// This wastes one character of length, but only when length is explicit
+		if hasExplicitLength && subLen > 0 {
+			subLen--
+		}
+		start = 0
 	}
 	return start, subLen, false
 }
@@ -265,16 +278,13 @@ func rtrimFunc(args []Value) (Value, error) {
 // replaceFunc implements replace(X, Y, Z)
 // Replaces all occurrences of Y in X with Z
 func replaceFunc(args []Value) (Value, error) {
-	if args[0].IsNull() || args[1].IsNull() {
+	if args[0].IsNull() || args[1].IsNull() || args[2].IsNull() {
 		return NewNullValue(), nil
 	}
 
 	x := args[0].AsString()
 	y := args[1].AsString()
-	z := ""
-	if !args[2].IsNull() {
-		z = args[2].AsString()
-	}
+	z := args[2].AsString()
 
 	// Handle empty pattern
 	if y == "" {
@@ -322,12 +332,22 @@ func instrFunc(args []Value) (Value, error) {
 
 // hexFunc implements hex(X)
 // Returns hex representation of X
+// SQLite converts all values to their text representation first, then hex encodes the UTF-8 bytes
 func hexFunc(args []Value) (Value, error) {
 	if args[0].IsNull() {
 		return NewNullValue(), nil
 	}
 
-	data := args[0].AsBlob()
+	// Convert to string first (matching SQLite behavior)
+	// For integers: 123 -> "123" -> hex("123") = "313233"
+	// For text/blob: use as-is
+	var data []byte
+	if args[0].Type() == TypeBlob {
+		data = args[0].AsBlob()
+	} else {
+		// Convert to string representation, then to bytes
+		data = []byte(args[0].AsString())
+	}
 	return NewTextValue(strings.ToUpper(hex.EncodeToString(data))), nil
 }
 
@@ -587,4 +607,34 @@ func abs(n int64) int64 {
 // fabs returns the absolute value of a float
 func fabs(f float64) float64 {
 	return math.Abs(f)
+}
+
+// likelyFunc implements likely(X)
+// Returns the argument X unchanged. It's a hint to the query planner that X is probably TRUE.
+func likelyFunc(args []Value) (Value, error) {
+	return args[0], nil
+}
+
+// unlikelyFunc implements unlikely(X)
+// Returns the argument X unchanged. It's a hint to the query planner that X is probably FALSE.
+func unlikelyFunc(args []Value) (Value, error) {
+	return args[0], nil
+}
+
+// likelihoodFunc implements likelihood(X, P)
+// Returns the argument X unchanged. P is a probability between 0.0 and 1.0 that is a hint
+// to the query planner about the likelihood of X being TRUE. For our implementation,
+// it just passes through the first value and optionally validates the probability argument.
+func likelihoodFunc(args []Value) (Value, error) {
+	if len(args) != 2 {
+		return nil, fmt.Errorf("likelihood() requires exactly 2 arguments")
+	}
+	// Optionally validate that args[1] is a number between 0 and 1
+	if !args[1].IsNull() {
+		prob := args[1].AsFloat64()
+		if prob < 0.0 || prob > 1.0 {
+			return nil, fmt.Errorf("likelihood probability must be between 0.0 and 1.0")
+		}
+	}
+	return args[0], nil
 }

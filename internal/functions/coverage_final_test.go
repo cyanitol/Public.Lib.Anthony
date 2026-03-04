@@ -513,7 +513,7 @@ func TestLengthFuncDefault(t *testing.T) {
 
 // TestSubstrAdjustStartPositive tests substrAdjustStart with positive start
 func TestSubstrAdjustStartPositive(t *testing.T) {
-	start, subLen, null := substrAdjustStart(NewIntValue(5), 5, 10, 20)
+	start, subLen, null := substrAdjustStart(NewIntValue(5), 5, 10, 20, false)
 	if null {
 		t.Error("Expected null = false")
 	}

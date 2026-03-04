@@ -528,10 +528,10 @@ func (g *CodeGenerator) generateUnary(e *parser.UnaryExpr) (int, error) {
 		g.vdbe.SetComment(g.vdbe.NumOps()-1, "NOT")
 
 	case parser.OpNeg:
-		// Negate: load zero, then subtract
+		// Negate: load zero, then subtract (zero - operand)
 		zeroReg := g.AllocReg()
 		g.vdbe.AddOp(vdbe.OpInteger, 0, zeroReg, 0)
-		g.vdbe.AddOp(vdbe.OpSubtract, operandReg, zeroReg, resultReg)
+		g.vdbe.AddOp(vdbe.OpSubtract, zeroReg, operandReg, resultReg)
 		g.vdbe.SetComment(g.vdbe.NumOps()-1, "NEG")
 
 	case parser.OpBitNot:

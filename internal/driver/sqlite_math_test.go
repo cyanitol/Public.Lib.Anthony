@@ -105,7 +105,6 @@ func TestSQLiteMathFunctions(t *testing.T) {
 			name:  "round_negative_number",
 			query: "SELECT round(-2.7)",
 			want:  -3.0,
-			skip:  "round() negative number returns wrong sign",
 		},
 		{
 			name:  "round_half_up",
@@ -116,7 +115,6 @@ func TestSQLiteMathFunctions(t *testing.T) {
 			name:  "round_negative_half",
 			query: "SELECT round(-2.5)",
 			want:  -3.0,
-			skip:  "round() negative number returns wrong sign",
 		},
 		{
 			name:  "round_large_number",
@@ -293,8 +291,7 @@ func TestSQLiteMathFunctions(t *testing.T) {
 		{
 			name:  "hex_number",
 			query: "SELECT hex(123)",
-			want:  "313233",
-			skip:  "hex() of integer returns different format",
+			want:  "313233", // hex of string "123"
 		},
 		{
 			name:  "unhex_basic",

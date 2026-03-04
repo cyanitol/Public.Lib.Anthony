@@ -58,37 +58,31 @@ func TestSQLiteStringFunctions(t *testing.T) {
 			name:  "substr_zero_start",
 			query: "SELECT substr('abcdefg', 0, 2)",
 			want:  "a",
-			skip:  "substr with zero/negative index not implemented correctly",
 		},
 		{
 			name:  "substr_negative_start",
 			query: "SELECT substr('abcdefg', -1, 1)",
 			want:  "g",
-			skip:  "substr with negative index not implemented",
 		},
 		{
 			name:  "substr_negative_start_multi",
 			query: "SELECT substr('abcdefg', -1, 10)",
 			want:  "g",
-			skip:  "substr with negative index not implemented",
 		},
 		{
 			name:  "substr_negative_offset",
 			query: "SELECT substr('abcdefg', -5, 3)",
 			want:  "cde",
-			skip:  "substr with negative index not implemented",
 		},
 		{
 			name:  "substr_negative_from_start",
 			query: "SELECT substr('abcdefg', -7, 3)",
 			want:  "abc",
-			skip:  "substr with negative index not implemented",
 		},
 		{
 			name:  "substr_large_negative",
 			query: "SELECT substr('abcdefg', -100, 98)",
 			want:  "abcde",
-			skip:  "substr with negative index not implemented",
 		},
 		{
 			name:  "substr_out_of_bounds",
@@ -119,13 +113,12 @@ func TestSQLiteStringFunctions(t *testing.T) {
 			name:  "substr_two_args_negative",
 			query: "SELECT substr('abcdef', -5)",
 			want:  "bcdef",
-			skip:  "substr with negative index not implemented",
 		},
 		{
 			name:  "substring_alias",
 			query: "SELECT substring('hello world', 7, 5)",
 			want:  "world",
-			skip:  "SUBSTRING alias not recognized - only SUBSTR",
+			
 		},
 
 		// INSTR tests (from instr.test)
@@ -275,7 +268,6 @@ func TestSQLiteStringFunctions(t *testing.T) {
 			name:  "replace_null_replacement",
 			query: "SELECT replace('hello', 'l', NULL)",
 			want:  nil,
-			skip:  "replace with NULL replacement returns original instead of NULL",
 		},
 
 		// TRIM, LTRIM, RTRIM tests
@@ -301,21 +293,18 @@ func TestSQLiteStringFunctions(t *testing.T) {
 		},
 		{
 			name:  "trim_custom_chars",
-			query: "SELECT trim('xyz', 'xyhelloxy')",
-			want:  "ello",
-			skip:  "trim with custom chars has wrong argument order",
+			query: "SELECT trim('xyhelloxy', 'xyz')",
+			want:  "hello",
 		},
 		{
 			name:  "ltrim_custom_chars",
-			query: "SELECT ltrim('xyz', 'xyhelloxy')",
-			want:  "elloxy",
-			skip:  "ltrim with custom chars has wrong argument order",
+			query: "SELECT ltrim('xyhelloxy', 'xyz')",
+			want:  "helloxy",
 		},
 		{
 			name:  "rtrim_custom_chars",
-			query: "SELECT rtrim('xyz', 'xyhelloxy')",
+			query: "SELECT rtrim('xyhelloxy', 'xyz')",
 			want:  "xyhello",
-			skip:  "rtrim with custom chars has wrong argument order",
 		},
 		{
 			name:  "trim_null",
@@ -445,8 +434,7 @@ func TestSQLiteStringFunctions(t *testing.T) {
 		{
 			name:  "hex_number",
 			query: "SELECT hex(255)",
-			want:  "FF",
-			skip:  "hex() of integer returns different format",
+			want:  "323535", // hex of string "255"
 		},
 
 		// PRINTF tests
