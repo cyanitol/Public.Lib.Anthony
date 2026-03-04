@@ -150,13 +150,14 @@ var statementParsers = map[TokenType]statementParser{
 	TK_DETACH:   func(p *Parser) (Statement, error) { return p.parseDetach() },
 	TK_PRAGMA:   func(p *Parser) (Statement, error) { return p.parsePragma() },
 	TK_VACUUM:   func(p *Parser) (Statement, error) { return p.parseVacuum() },
+	TK_REINDEX:  func(p *Parser) (Statement, error) { return p.parseReindex() },
 	TK_WITH:     func(p *Parser) (Statement, error) { return p.parseSelect() }, // WITH starts a CTE, parsed as part of SELECT
 }
 
 var statementParserOrder = []TokenType{
 	TK_WITH, TK_SELECT, TK_INSERT, TK_UPDATE, TK_DELETE,
 	TK_CREATE, TK_DROP, TK_ALTER, TK_BEGIN, TK_COMMIT, TK_ROLLBACK,
-	TK_ATTACH, TK_DETACH, TK_PRAGMA, TK_VACUUM,
+	TK_ATTACH, TK_DETACH, TK_PRAGMA, TK_VACUUM, TK_REINDEX,
 }
 
 func (p *Parser) parseStatement() (Statement, error) {

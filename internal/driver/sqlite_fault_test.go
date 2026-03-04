@@ -82,7 +82,7 @@ func TestFault_AutoRollbackOnError(t *testing.T) {
 // =============================================================================
 
 func TestFault_PrimaryKeyViolation(t *testing.T) {
-	t.Skip("pre-existing failure - needs constraint/fault handling implementation")
+	// t.Skip("pre-existing failure - needs constraint/fault handling implementation")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -103,7 +103,7 @@ func TestFault_PrimaryKeyViolation(t *testing.T) {
 }
 
 func TestFault_UniqueConstraintViolation(t *testing.T) {
-	t.Skip("pre-existing failure - needs constraint/fault handling implementation")
+	t.Skip("SKIP: UNIQUE constraint violation detection needed")
 	db := setupMemoryDB(t)
 	defer db.Close()
 

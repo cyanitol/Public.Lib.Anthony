@@ -10,7 +10,7 @@ import (
 // TestSQLiteRowid tests the rowid, _rowid_, and oid columns
 // Converted from contrib/sqlite/sqlite-src-3510200/test/rowid.test
 func TestSQLiteRowid(t *testing.T) {
-	t.Skip("pre-existing failure - needs ROWID implementation")
+	t.Skip("SKIP: ROWID INSERT/UPDATE and JOINs not yet supported")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "rowid_test.db")
 

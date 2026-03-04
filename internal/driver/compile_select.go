@@ -493,6 +493,19 @@ func (s *Stmt) extractOrderByExpression(orderTerm parser.OrderingTerm, termIdx i
 
 // findOrderByColumnInSelect searches for ORDER BY column in SELECT columns.
 func (s *Stmt) findOrderByColumnInSelect(baseExpr parser.Expression, stmt *parser.SelectStmt) (string, int) {
+	// Check if it's a column number (literal integer)
+	if litExpr, ok := baseExpr.(*parser.LiteralExpr); ok {
+		var colNum int
+		if _, err := fmt.Sscanf(litExpr.Value, "%d", &colNum); err == nil {
+			// Column numbers are 1-indexed in SQL
+			if colNum >= 1 && colNum <= len(stmt.Columns) {
+				return "", colNum - 1
+			}
+		}
+		return "", -1
+	}
+
+	// Check if it's a column name
 	ident, ok := baseExpr.(*parser.IdentExpr)
 	if !ok {
 		return "", -1
@@ -621,7 +634,7 @@ func (s *Stmt) emitOrderBySorterPopulation(vm *vdbe.VDBE, stmt *parser.SelectStm
 
 // emitExtraOrderByColumn emits code to read an extra ORDER BY column.
 func (s *Stmt) emitExtraOrderByColumn(vm *vdbe.VDBE, table *schema.Table, colName string, targetReg int) {
-	tableColIdx := table.GetColumnIndex(colName)
+	tableColIdx := table.GetColumnIndexWithRowidAliases(colName)
 	if tableColIdx >= 0 {
 		// Check if this is a rowid column (INTEGER PRIMARY KEY)
 		if schemaColIsRowid(table.Columns[tableColIdx]) {
@@ -630,6 +643,9 @@ func (s *Stmt) emitExtraOrderByColumn(vm *vdbe.VDBE, table *schema.Table, colNam
 			recordIdx := schemaRecordIdx(table.Columns, tableColIdx)
 			vm.AddOp(vdbe.OpColumn, 0, recordIdx, targetReg)
 		}
+	} else if tableColIdx == -2 {
+		// This is a rowid alias but no INTEGER PRIMARY KEY exists
+		vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
 	} else {
 		vm.AddOp(vdbe.OpNull, 0, targetReg, 0)
 	}

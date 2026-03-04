@@ -284,9 +284,15 @@ func (s *Stmt) emitUnqualifiedColumn(vm *vdbe.VDBE, tables []stmtTableInfo, iden
 
 // emitColumnFromTable emits opcodes to read a specific column from a table.
 func (s *Stmt) emitColumnFromTable(vm *vdbe.VDBE, tbl stmtTableInfo, colName string, targetReg int) error {
-	colIdx := tbl.table.GetColumnIndex(colName)
+	colIdx := tbl.table.GetColumnIndexWithRowidAliases(colName)
 	if colIdx == -1 {
 		return fmt.Errorf("column not found: %s.%s", tbl.name, colName)
+	}
+
+	if colIdx == -2 {
+		// This is a rowid alias but no INTEGER PRIMARY KEY exists
+		vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, targetReg, 0)
+		return nil
 	}
 
 	if schemaColIsRowid(tbl.table.Columns[colIdx]) {

@@ -359,6 +359,35 @@ func (t *Table) GetColumnIndex(name string) int {
 	return -1
 }
 
+// GetColumnIndexWithRowidAliases returns the index of a column by name,
+// handling both regular column names and special rowid aliases (rowid, _rowid_, oid).
+// Returns -1 if not found. Returns -2 if the name is a rowid alias but no
+// INTEGER PRIMARY KEY column exists (indicating implicit rowid should be used).
+func (t *Table) GetColumnIndexWithRowidAliases(name string) int {
+	// First try exact match
+	idx := t.GetColumnIndex(name)
+	if idx >= 0 {
+		return idx
+	}
+
+	// Check if this is a rowid alias
+	lowerName := strings.ToLower(name)
+	isRowidAlias := lowerName == "rowid" || lowerName == "_rowid_" || lowerName == "oid"
+
+	if isRowidAlias {
+		// Look for INTEGER PRIMARY KEY column
+		for i, col := range t.Columns {
+			if col.PrimaryKey && (col.Type == "INTEGER" || col.Type == "INT") {
+				return i
+			}
+		}
+		// No INTEGER PRIMARY KEY, but this is a rowid alias - return special marker
+		return -2
+	}
+
+	return -1
+}
+
 // GetColumnCollation returns the collation for a column by index.
 // Returns empty string if column doesn't exist or has no explicit collation.
 func (t *Table) GetColumnCollation(index int) string {

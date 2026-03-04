@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/observability"
@@ -2053,6 +2054,10 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 		return err
 	}
 	if err = btCursor.Insert(rowid, payload); err != nil {
+		// Check if this is a duplicate key error and convert to SQL constraint error
+		if strings.Contains(err.Error(), "duplicate key") {
+			return fmt.Errorf("UNIQUE constraint failed: PRIMARY KEY must be unique")
+		}
 		return fmt.Errorf("btree insert failed: %w", err)
 	}
 	cursor.LastRowid = rowid

@@ -585,6 +585,18 @@ func (v *VacuumStmt) String() string {
 	return "VACUUM"
 }
 
+// ReindexStmt represents a REINDEX statement that rebuilds indexes.
+type ReindexStmt struct {
+	Schema string
+	Name   string
+}
+
+func (r *ReindexStmt) node()      {}
+func (r *ReindexStmt) statement() {}
+func (r *ReindexStmt) String() string {
+	return "REINDEX"
+}
+
 // AlterTableAction represents the action to perform in ALTER TABLE.
 type AlterTableAction interface {
 	Node

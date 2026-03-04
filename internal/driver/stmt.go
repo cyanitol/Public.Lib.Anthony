@@ -424,6 +424,9 @@ func (s *Stmt) dispatchOtherStatements(vm *vdbe.VDBE, args []driver.NamedValue) 
 	case *parser.VacuumStmt:
 		result, err := s.compileVacuum(vm, stmt, args)
 		return result, err, true
+	case *parser.ReindexStmt:
+		result, err := s.compileReindex(vm, stmt, args)
+		return result, err, true
 	default:
 		return nil, nil, false
 	}
@@ -515,9 +518,15 @@ func emitSelectColumnOp(vm *vdbe.VDBE, table *schema.Table, col parser.ResultCol
 
 // emitSimpleColumnRef emits opcodes for simple column reference
 func emitSimpleColumnRef(vm *vdbe.VDBE, table *schema.Table, ident *parser.IdentExpr, targetReg int) error {
-	colIdx := table.GetColumnIndex(ident.Name)
+	colIdx := table.GetColumnIndexWithRowidAliases(ident.Name)
 	if colIdx == -1 {
 		return fmt.Errorf("column not found: %s", ident.Name)
+	}
+
+	if colIdx == -2 {
+		// This is a rowid alias but no INTEGER PRIMARY KEY exists
+		vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
+		return nil
 	}
 
 	if schemaColIsRowid(table.Columns[colIdx]) {

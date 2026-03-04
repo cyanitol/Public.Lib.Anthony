@@ -257,3 +257,41 @@ func (s *Stmt) compileRollback(vm *vdbe.VDBE, stmt *parser.RollbackStmt, args []
 
 	return vm, nil
 }
+
+// ============================================================================
+// REINDEX Statement
+// ============================================================================
+
+// compileReindex compiles a REINDEX statement.
+// REINDEX is used to rebuild indexes. In this implementation:
+// - For in-memory databases, REINDEX is a no-op (indexes don't get corrupted)
+// - For disk databases, we validate the target exists but don't rebuild
+// - The statement always succeeds unless the target doesn't exist
+func (s *Stmt) compileReindex(vm *vdbe.VDBE, stmt *parser.ReindexStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(true)
+
+	// If a name is specified, validate that it exists (either as a table or index)
+	if stmt.Name != "" {
+		// Check if it's a table
+		_, isTable := s.conn.schema.GetTable(stmt.Name)
+
+		// Check if it's an index
+		_, isIndex := s.conn.schema.GetIndex(stmt.Name)
+
+		// Must be one or the other
+		if !isTable && !isIndex {
+			return nil, fmt.Errorf("no such table or index: %s", stmt.Name)
+		}
+	}
+	// If no name is specified, REINDEX all databases (which we support as a no-op)
+
+	// REINDEX is essentially a no-op in this implementation
+	// In a full SQLite implementation, this would:
+	// 1. Drop and recreate the index(es)
+	// 2. Rebuild the index b-tree structure
+	// 3. Update statistics
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}

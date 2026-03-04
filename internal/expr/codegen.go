@@ -441,8 +441,18 @@ func (g *CodeGenerator) resolveTableForColumn(e *parser.IdentExpr) (string, int,
 	return tableName, cursor, nil
 }
 
+// isRowidAlias checks if a column name is one of the special rowid aliases.
+// SQLite recognizes "rowid", "_rowid_", and "oid" as aliases for the rowid.
+func isRowidAlias(colName string) bool {
+	lower := strings.ToLower(colName)
+	return lower == "rowid" || lower == "_rowid_" || lower == "oid"
+}
+
 // findTableWithColumn searches for a table that contains the given column name.
+// It also handles special rowid aliases (rowid, _rowid_, oid) by checking if
+// the table has any rowid column (INTEGER PRIMARY KEY).
 func (g *CodeGenerator) findTableWithColumn(colName string) (string, int) {
+	// First try exact column name match
 	for name, info := range g.tableInfo {
 		for _, col := range info.Columns {
 			if col.Name == colName {
@@ -450,20 +460,46 @@ func (g *CodeGenerator) findTableWithColumn(colName string) (string, int) {
 			}
 		}
 	}
+
+	// If no exact match and this is a rowid alias, find a table with a rowid column
+	if isRowidAlias(colName) {
+		for name, info := range g.tableInfo {
+			for _, col := range info.Columns {
+				if col.IsRowid {
+					return name, g.cursorMap[name]
+				}
+			}
+		}
+	}
+
 	return "", 0
 }
 
 // lookupColumnInfo finds the column index and rowid flag for a column in a table.
+// It handles both exact column name matches and special rowid aliases.
 func (g *CodeGenerator) lookupColumnInfo(tableName, colName string) (int, bool, error) {
 	info, ok := g.tableInfo[tableName]
 	if !ok {
 		return 0, false, nil
 	}
 
+	// First try exact column name match
 	for _, col := range info.Columns {
 		if col.Name == colName {
 			return col.Index, col.IsRowid, nil
 		}
+	}
+
+	// If no exact match but this is a rowid alias, find the rowid column
+	if isRowidAlias(colName) {
+		for _, col := range info.Columns {
+			if col.IsRowid {
+				return col.Index, true, nil
+			}
+		}
+		// If no INTEGER PRIMARY KEY column exists, still return rowid
+		// (SQLite always has an implicit rowid for regular tables)
+		return 0, true, nil
 	}
 
 	return 0, false, fmt.Errorf("column not found: %s", colName)
