@@ -125,14 +125,10 @@ func (s *Stmt) emitInsertRow(vm *vdbe.VDBE, table *schema.Table, colNames []stri
 
 	// OpInsert: P1=cursor, P2=record register, P3=rowid register
 	// P4.I = conflict mode (0=abort, 1=ignore, 2=replace)
+	// P4.Z = table name (for UNIQUE constraint checking and AUTOINCREMENT)
 	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidReg)
 	vm.Program[insertOp].P4.I = conflictMode
-
-	// For AUTOINCREMENT tables, we need to pass table metadata to the Insert handler
-	// Store table name in P4.Z string for sequence management
-	if _, hasAutoincrement := table.HasAutoincrementColumn(); hasAutoincrement {
-		vm.Program[insertOp].P4.Z = table.Name
-	}
+	vm.Program[insertOp].P4.Z = table.Name
 }
 
 // compileInsertSelect compiles an INSERT...SELECT statement.
@@ -290,11 +286,8 @@ func (s *Stmt) emitInsertSelectLoop(vm *vdbe.VDBE, selectStmt *parser.SelectStmt
 	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, ctx.numRecordCols, resultReg)
 
 	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidReg)
-
-	// For AUTOINCREMENT tables, pass table name
-	if _, hasAutoincrement := ctx.targetTable.HasAutoincrementColumn(); hasAutoincrement {
-		vm.Program[insertOp].P4.Z = ctx.targetTable.Name
-	}
+	// Pass table name for UNIQUE constraint checking and AUTOINCREMENT
+	vm.Program[insertOp].P4.Z = ctx.targetTable.Name
 
 	// Fix WHERE skip address
 	if ctx.hasWhereClause {

@@ -87,6 +87,21 @@ func (c *Column) GetDefault() interface{} {
 	return c.Default
 }
 
+// GetName returns the column name (for interface access from vdbe).
+func (c *Column) GetName() string {
+	return c.Name
+}
+
+// IsUniqueColumn returns true if this column has a UNIQUE constraint (for interface access from vdbe).
+func (c *Column) IsUniqueColumn() bool {
+	return c.Unique
+}
+
+// IsPrimaryKeyColumn returns true if this column is part of the PRIMARY KEY (for interface access from vdbe).
+func (c *Column) IsPrimaryKeyColumn() bool {
+	return c.PrimaryKey
+}
+
 // TableConstraint represents a table-level constraint.
 type TableConstraint struct {
 	Type       ConstraintType
@@ -132,6 +147,17 @@ func (s *Schema) GetTable(name string) (*Table, bool) {
 		}
 	}
 	return nil, false
+}
+
+// GetTableByName retrieves a table by name (case-insensitive).
+// Returns the table (as interface{}) and true if found, nil and false otherwise.
+// The return type is interface{} to avoid import cycles with the vdbe package.
+func (s *Schema) GetTableByName(name string) (interface{}, bool) {
+	table, found := s.GetTable(name)
+	if !found {
+		return nil, false
+	}
+	return table, true
 }
 
 // GetTableByRootPage retrieves a table by its root page number.

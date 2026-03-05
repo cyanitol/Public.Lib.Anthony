@@ -2053,6 +2053,15 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 	if err != nil {
 		return err
 	}
+
+	// Check UNIQUE column constraints before inserting
+	// P4.Z contains the table name (passed from compiler)
+	if instr.P4.Z != "" {
+		if err := v.checkUniqueConstraints(instr.P4.Z, payload, btCursor, rowid); err != nil {
+			return err
+		}
+	}
+
 	if err = btCursor.Insert(rowid, payload); err != nil {
 		// Check if this is a duplicate key error and convert to SQL constraint error
 		if strings.Contains(err.Error(), "duplicate key") {
@@ -2124,6 +2133,196 @@ func (v *VDBE) getInsertRowid(p3 int, cursor *Cursor) (int64, error) {
 		return 0, err
 	}
 	return rowidMem.IntValue(), nil
+}
+
+// checkUniqueConstraints verifies that inserting the given payload doesn't violate
+// any UNIQUE column constraints in the table.
+func (v *VDBE) checkUniqueConstraints(tableName string, payload []byte, btCursor *btree.BtCursor, newRowid int64) error {
+	// Get the table schema from the context
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return nil // No schema available, skip check
+	}
+
+	// Type assert to get the schema with GetTableByName method
+	// Returns interface{} to avoid import cycle with schema package
+	type schemaWithGetTableByName interface {
+		GetTableByName(name string) (interface{}, bool)
+	}
+
+	schema, ok := v.Ctx.Schema.(schemaWithGetTableByName)
+	if !ok {
+		return nil // Schema doesn't support GetTableByName, skip check
+	}
+
+	// Get the table definition
+	tableIface, exists := schema.GetTableByName(tableName)
+	if !exists {
+		return nil // Table not found in schema, skip check
+	}
+
+	// Type assert to access table columns via GetColumns() method
+	type tableWithColumns interface {
+		GetColumns() []interface{}
+	}
+
+	table, ok := tableIface.(tableWithColumns)
+	if !ok {
+		return nil // Can't access columns, skip check
+	}
+
+	columns := table.GetColumns()
+
+	// Define interface for column info (matches schema.Column methods)
+	type columnInfo interface {
+		GetName() string
+		IsUniqueColumn() bool
+		IsPrimaryKeyColumn() bool
+	}
+
+	// Check each column for UNIQUE constraint
+	for colIdx, colIface := range columns {
+		// Type assert to access column info
+		col, ok := colIface.(columnInfo)
+		if !ok {
+			continue
+		}
+
+		// Skip if not a UNIQUE column (PRIMARY KEY is handled by btree)
+		if !col.IsUniqueColumn() || col.IsPrimaryKeyColumn() {
+			continue
+		}
+
+		// Extract the value from the new record for this column
+		newValueMem := NewMem()
+		if err := parseRecordColumn(payload, colIdx, newValueMem); err != nil {
+			continue // Skip if can't parse
+		}
+
+		// Scan the table to check for duplicates
+		if err := v.scanTableForDuplicate(btCursor, colIdx, newValueMem, newRowid, col.GetName()); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// scanTableForDuplicate scans the entire table to check if the given column value
+// already exists in any row (excluding the row with newRowid for UPDATE operations).
+func (v *VDBE) scanTableForDuplicate(btCursor *btree.BtCursor, colIdx int, newValue *Mem, newRowid int64, colName string) error {
+	// Move to the first record
+	if err := btCursor.MoveToFirst(); err != nil {
+		// Table is empty, no duplicates possible
+		return nil
+	}
+
+	// Iterate through all records
+	for btCursor.IsValid() {
+		// Get current rowid
+		currentRowid := btCursor.GetKey()
+
+		// Skip if this is the row we're inserting/updating (for UPDATE operations)
+		// For INSERT operations, newRowid won't match any existing row
+		if currentRowid != newRowid {
+			// Get the record data
+			recordData, err := btCursor.GetPayloadWithOverflow()
+			if err != nil {
+				// Skip if can't get payload
+				if err := btCursor.Next(); err != nil {
+					break
+				}
+				continue
+			}
+
+			// Extract the column value from this record
+			existingValueMem := NewMem()
+			if err := parseRecordColumn(recordData, colIdx, existingValueMem); err != nil {
+				// Skip records that can't be parsed
+				if err := btCursor.Next(); err != nil {
+					break
+				}
+				continue
+			}
+
+			// Compare the values
+			if v.compareMemValues(existingValueMem, newValue) == 0 {
+				// Duplicate found!
+				return fmt.Errorf("UNIQUE constraint failed: %s", colName)
+			}
+		}
+
+		// Move to next record
+		if err := btCursor.Next(); err != nil {
+			break
+		}
+	}
+
+	return nil
+}
+
+// compareMemValues compares two Mem values and returns:
+// -1 if a < b, 0 if a == b, 1 if a > b
+func (v *VDBE) compareMemValues(a, b *Mem) int {
+	// Handle NULL values
+	if a.IsNull() && b.IsNull() {
+		return 0
+	}
+	if a.IsNull() {
+		return -1
+	}
+	if b.IsNull() {
+		return 1
+	}
+
+	// Compare based on type
+	if a.IsInt() && b.IsInt() {
+		aVal := a.IntValue()
+		bVal := b.IntValue()
+		if aVal < bVal {
+			return -1
+		} else if aVal > bVal {
+			return 1
+		}
+		return 0
+	}
+
+	if a.IsReal() && b.IsReal() {
+		aVal := a.RealValue()
+		bVal := b.RealValue()
+		if aVal < bVal {
+			return -1
+		} else if aVal > bVal {
+			return 1
+		}
+		return 0
+	}
+
+	if a.IsString() && b.IsString() {
+		aVal := a.StringValue()
+		bVal := b.StringValue()
+		if aVal < bVal {
+			return -1
+		} else if aVal > bVal {
+			return 1
+		}
+		return 0
+	}
+
+	if a.IsBlob() && b.IsBlob() {
+		aVal := a.BlobValue()
+		bVal := b.BlobValue()
+		return compareBytes(aVal, bVal)
+	}
+
+	// Mixed types - try string comparison
+	aStr := fmt.Sprintf("%v", a.Value())
+	bStr := fmt.Sprintf("%v", b.Value())
+	if aStr < bStr {
+		return -1
+	} else if aStr > bStr {
+		return 1
+	}
+	return 0
 }
 
 func (v *VDBE) execDelete(instr *Instruction) error {

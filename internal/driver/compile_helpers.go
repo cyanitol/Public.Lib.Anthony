@@ -36,6 +36,11 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 	// Setup VDBE and code generator (with table info and args for WHERE)
 	numCols, gen := s.setupJoinVDBE(vm, stmt, tables, args)
 
+	// Handle ORDER BY - requires sorter
+	if len(stmt.OrderBy) > 0 {
+		return s.compileSelectWithJoinsAndOrderBy(vm, stmt, tables, numCols, gen)
+	}
+
 	// Emit scan preamble and open cursors
 	rewindAddr := s.emitJoinScanSetup(vm, tables)
 	loopStart := vm.NumOps()
@@ -52,6 +57,182 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 	s.emitJoinLoopCleanup(vm, tables, innerLoopStarts, loopStart, rewindAddr)
 
 	return vm, nil
+}
+
+// compileSelectWithJoinsAndOrderBy compiles a SELECT with JOINs and ORDER BY using a sorter.
+func (s *Stmt) compileSelectWithJoinsAndOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int, gen *expr.CodeGenerator) (*vdbe.VDBE, error) {
+	// Resolve ORDER BY columns and setup sorter
+	orderInfo := s.resolveOrderByColumnsMultiTable(stmt, tables, numCols, gen)
+	gen.SetNextReg(orderInfo.sorterCols)
+	keyInfo := s.createSorterKeyInfo(orderInfo)
+
+	// Emit initialization, open all cursors, and sorter
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	for _, tbl := range tables {
+		vm.AddOp(vdbe.OpOpenRead, tbl.cursorIdx, int(tbl.table.RootPage), len(tbl.table.Columns))
+	}
+	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, 0, orderInfo.sorterCols, 0)
+	vm.Program[sorterOpenAddr].P4.P = keyInfo
+
+	// Setup nested loops for joined tables
+	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+	loopStart := vm.NumOps()
+	innerLoopStarts, innerRewindAddrs := s.emitJoinNestedLoopsWithRewinds(vm, tables)
+
+	// Emit WHERE filter and populate sorter
+	if err := s.emitJoinSorterPopulation(vm, stmt, tables, orderInfo, numCols, gen); err != nil {
+		return nil, err
+	}
+
+	// Close all cursors after populating sorter
+	for i := len(tables) - 1; i > 0; i-- {
+		vm.AddOp(vdbe.OpNext, i, innerLoopStarts[i-1], 0)
+		vm.AddOp(vdbe.OpClose, i, 0, 0)
+	}
+	outerNextAddr := vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
+	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+
+	// Fix inner loop Rewind addresses to jump to outer Next if empty
+	for _, addr := range innerRewindAddrs {
+		vm.Program[addr].P2 = outerNextAddr
+	}
+
+	// Emit sorter output loop
+	sorterSortAddr, limitInfo := s.emitOrderBySorterSort(vm, stmt, gen)
+	sorterNextAddr, haltJumpAddr, sorterLoopAddr := s.emitOrderByOutputSetup(vm)
+	offsetSkipAddr, limitJumpAddr, nextRowAddr := s.emitOrderByOutputLoop(vm, stmt, numCols, limitInfo, gen, sorterLoopAddr)
+	haltAddr := s.emitOrderByCleanup(vm)
+
+	// Fix addresses
+	vm.Program[rewindAddr].P2 = sorterSortAddr + 1
+	s.fixOrderByAddresses(vm, rewindAddr, sorterSortAddr, sorterNextAddr, haltJumpAddr,
+		offsetSkipAddr, limitJumpAddr, nextRowAddr, haltAddr, limitInfo, sorterLoopAddr)
+
+	return vm, nil
+}
+
+// resolveOrderByColumnsMultiTable resolves ORDER BY columns for multi-table queries.
+func (s *Stmt) resolveOrderByColumnsMultiTable(stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int, gen *expr.CodeGenerator) *orderByColumnInfo {
+	info := &orderByColumnInfo{
+		keyCols:      make([]int, len(stmt.OrderBy)),
+		desc:         make([]bool, len(stmt.OrderBy)),
+		collations:   make([]string, len(stmt.OrderBy)),
+		extraCols:    make([]string, 0),
+		extraColRegs: make([]int, 0),
+	}
+
+	for i, orderTerm := range stmt.OrderBy {
+		s.resolveOrderByTermMultiTable(orderTerm, i, stmt, tables, numCols, gen, info)
+	}
+
+	info.sorterCols = numCols + len(info.extraCols)
+	return info
+}
+
+// resolveOrderByTermMultiTable resolves a single ORDER BY term for multi-table queries.
+func (s *Stmt) resolveOrderByTermMultiTable(orderTerm parser.OrderingTerm, termIdx int,
+	stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int,
+	gen *expr.CodeGenerator, info *orderByColumnInfo) {
+
+	// Extract base expression and collation
+	baseExpr, collation := s.extractOrderByExpression(orderTerm, termIdx, info)
+
+	// Try to find column in SELECT list
+	orderColName, colIdx := s.findOrderByColumnInSelect(baseExpr, stmt)
+
+	// Look up collation from schema if not explicitly specified
+	if collation == "" && orderColName != "" {
+		collation = s.findCollationInSchemaMultiTable(orderColName, tables)
+	}
+	info.collations[termIdx] = collation
+
+	// Handle column not in SELECT list
+	if colIdx < 0 && orderColName != "" {
+		colIdx = s.addExtraOrderByColumn(orderColName, numCols, gen, info)
+	}
+
+	// Default to first column if not found
+	if colIdx < 0 {
+		colIdx = 0
+	}
+
+	info.keyCols[termIdx] = colIdx
+	info.desc[termIdx] = !orderTerm.Asc
+}
+
+// findCollationInSchemaMultiTable looks up collation from multi-table schema.
+func (s *Stmt) findCollationInSchemaMultiTable(colName string, tables []stmtTableInfo) string {
+	// Check each table for the column
+	for _, tbl := range tables {
+		colIdx := tbl.table.GetColumnIndexWithRowidAliases(colName)
+		if colIdx >= 0 && colIdx < len(tbl.table.Columns) {
+			return tbl.table.Columns[colIdx].Collation
+		}
+	}
+	return ""
+}
+
+// emitJoinSorterPopulation emits WHERE filter and inserts joined rows into sorter.
+func (s *Stmt) emitJoinSorterPopulation(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, orderInfo *orderByColumnInfo, numCols int, gen *expr.CodeGenerator) error {
+	// Emit WHERE clause filter
+	var skipAddr int
+	hasWhere := stmt.Where != nil
+	if hasWhere {
+		whereReg, err := gen.GenerateExpr(stmt.Where)
+		if err != nil {
+			return fmt.Errorf("failed to compile WHERE clause: %w", err)
+		}
+		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+	}
+
+	// Read SELECT columns
+	for i, col := range stmt.Columns {
+		if err := s.emitSelectColumnOpMultiTable(vm, tables, col, i, gen); err != nil {
+			return err
+		}
+	}
+
+	// Read extra ORDER BY columns
+	for i, colName := range orderInfo.extraCols {
+		s.emitExtraOrderByColumnMultiTable(vm, tables, colName, orderInfo.extraColRegs[i])
+	}
+
+	// Copy extra columns to contiguous registers and insert
+	for i := range orderInfo.extraCols {
+		vm.AddOp(vdbe.OpCopy, orderInfo.extraColRegs[i], numCols+i, 0)
+	}
+	vm.AddOp(vdbe.OpSorterInsert, 0, 0, orderInfo.sorterCols)
+
+	// Fix WHERE skip target to jump past the sorter insert
+	if hasWhere {
+		vm.Program[skipAddr].P2 = vm.NumOps()
+	}
+
+	return nil
+}
+
+// emitExtraOrderByColumnMultiTable emits code to read an extra ORDER BY column from multi-table context.
+func (s *Stmt) emitExtraOrderByColumnMultiTable(vm *vdbe.VDBE, tables []stmtTableInfo, colName string, targetReg int) {
+	// Try to find the column in any of the tables
+	for _, tbl := range tables {
+		tableColIdx := tbl.table.GetColumnIndexWithRowidAliases(colName)
+		if tableColIdx >= 0 && tableColIdx < len(tbl.table.Columns) {
+			// Check if this is a rowid column (INTEGER PRIMARY KEY)
+			if schemaColIsRowid(tbl.table.Columns[tableColIdx]) {
+				vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, targetReg, 0)
+			} else {
+				recordIdx := schemaRecordIdx(tbl.table.Columns, tableColIdx)
+				vm.AddOp(vdbe.OpColumn, tbl.cursorIdx, recordIdx, targetReg)
+			}
+			return
+		} else if tableColIdx == -2 {
+			// This is a rowid alias but no INTEGER PRIMARY KEY exists
+			vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, targetReg, 0)
+			return
+		}
+	}
+	// Column not found in any table, emit NULL
+	vm.AddOp(vdbe.OpNull, 0, targetReg, 0)
 }
 
 // collectJoinTables collects all tables involved in a JOIN query.
@@ -185,6 +366,18 @@ func (s *Stmt) emitJoinNestedLoops(vm *vdbe.VDBE, tables []stmtTableInfo) []int 
 		innerLoopStarts = append(innerLoopStarts, vm.NumOps())
 	}
 	return innerLoopStarts
+}
+
+// emitJoinNestedLoopsWithRewinds sets up nested loops and returns both loop starts and rewind addresses.
+func (s *Stmt) emitJoinNestedLoopsWithRewinds(vm *vdbe.VDBE, tables []stmtTableInfo) ([]int, []int) {
+	var innerLoopStarts []int
+	var innerRewindAddrs []int
+	for i := 1; i < len(tables); i++ {
+		rewindAddr := vm.AddOp(vdbe.OpRewind, i, 0, 0)
+		innerRewindAddrs = append(innerRewindAddrs, rewindAddr)
+		innerLoopStarts = append(innerLoopStarts, vm.NumOps())
+	}
+	return innerLoopStarts, innerRewindAddrs
 }
 
 // emitJoinColumnsWithWhere emits WHERE filter, column read operations, and result row for JOIN.

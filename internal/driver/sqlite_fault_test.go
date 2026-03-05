@@ -103,7 +103,6 @@ func TestFault_PrimaryKeyViolation(t *testing.T) {
 }
 
 func TestFault_UniqueConstraintViolation(t *testing.T) {
-	t.Skip("SKIP: UNIQUE constraint violation detection needed")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
