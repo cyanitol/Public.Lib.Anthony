@@ -2180,28 +2180,41 @@ func (v *VDBE) checkUniqueConstraints(tableName string, payload []byte, btCursor
 	}
 
 	// Check each column for UNIQUE constraint
-	for colIdx, colIface := range columns {
+	// Track recordIdx separately (skips INTEGER PRIMARY KEY columns which are stored as rowid)
+	recordIdx := 0
+	for _, colIface := range columns {
 		// Type assert to access column info
 		col, ok := colIface.(columnInfo)
 		if !ok {
+			recordIdx++
 			continue
 		}
 
+		// INTEGER PRIMARY KEY columns are stored as rowid, not in the record
+		isPK := col.IsPrimaryKeyColumn()
+
 		// Skip if not a UNIQUE column (PRIMARY KEY is handled by btree)
-		if !col.IsUniqueColumn() || col.IsPrimaryKeyColumn() {
+		if !col.IsUniqueColumn() || isPK {
+			if !isPK {
+				recordIdx++
+			}
 			continue
 		}
 
 		// Extract the value from the new record for this column
+		// Use recordIdx (not colIdx) because INTEGER PRIMARY KEY columns don't appear in record
 		newValueMem := NewMem()
-		if err := parseRecordColumn(payload, colIdx, newValueMem); err != nil {
+		if err := parseRecordColumn(payload, recordIdx, newValueMem); err != nil {
+			recordIdx++
 			continue // Skip if can't parse
 		}
 
 		// Scan the table to check for duplicates
-		if err := v.scanTableForDuplicate(btCursor, colIdx, newValueMem, newRowid, col.GetName()); err != nil {
+		if err := v.scanTableForDuplicate(btCursor, recordIdx, newValueMem, newRowid, col.GetName()); err != nil {
 			return err
 		}
+
+		recordIdx++
 	}
 
 	return nil
@@ -2209,26 +2222,30 @@ func (v *VDBE) checkUniqueConstraints(tableName string, payload []byte, btCursor
 
 // scanTableForDuplicate scans the entire table to check if the given column value
 // already exists in any row (excluding the row with newRowid for UPDATE operations).
-func (v *VDBE) scanTableForDuplicate(btCursor *btree.BtCursor, colIdx int, newValue *Mem, newRowid int64, colName string) error {
+// IMPORTANT: Creates a separate read cursor to avoid disturbing the insert cursor position.
+func (v *VDBE) scanTableForDuplicate(insertCursor *btree.BtCursor, colIdx int, newValue *Mem, newRowid int64, colName string) error {
+	// Create a separate read cursor for scanning to avoid disturbing the insert cursor
+	scanCursor := btree.NewCursor(insertCursor.Btree, insertCursor.RootPage)
+
 	// Move to the first record
-	if err := btCursor.MoveToFirst(); err != nil {
+	if err := scanCursor.MoveToFirst(); err != nil {
 		// Table is empty, no duplicates possible
 		return nil
 	}
 
 	// Iterate through all records
-	for btCursor.IsValid() {
+	for scanCursor.IsValid() {
 		// Get current rowid
-		currentRowid := btCursor.GetKey()
+		currentRowid := scanCursor.GetKey()
 
 		// Skip if this is the row we're inserting/updating (for UPDATE operations)
 		// For INSERT operations, newRowid won't match any existing row
 		if currentRowid != newRowid {
 			// Get the record data
-			recordData, err := btCursor.GetPayloadWithOverflow()
+			recordData, err := scanCursor.GetPayloadWithOverflow()
 			if err != nil {
 				// Skip if can't get payload
-				if err := btCursor.Next(); err != nil {
+				if err := scanCursor.Next(); err != nil {
 					break
 				}
 				continue
@@ -2238,7 +2255,7 @@ func (v *VDBE) scanTableForDuplicate(btCursor *btree.BtCursor, colIdx int, newVa
 			existingValueMem := NewMem()
 			if err := parseRecordColumn(recordData, colIdx, existingValueMem); err != nil {
 				// Skip records that can't be parsed
-				if err := btCursor.Next(); err != nil {
+				if err := scanCursor.Next(); err != nil {
 					break
 				}
 				continue
@@ -2252,7 +2269,7 @@ func (v *VDBE) scanTableForDuplicate(btCursor *btree.BtCursor, colIdx int, newVa
 		}
 
 		// Move to next record
-		if err := btCursor.Next(); err != nil {
+		if err := scanCursor.Next(); err != nil {
 			break
 		}
 	}
