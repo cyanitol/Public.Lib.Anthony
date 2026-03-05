@@ -197,48 +197,37 @@ func TestGenerateScalarSubquery(t *testing.T) {
 	}
 
 	// Verify bytecode structure
+	// The scalar subquery implementation embeds subquery bytecode directly
 	foundNull := false        // Should initialize to NULL
-	foundOnce := false        // Should use OpOnce for single execution
-	foundOpenEphemeral := false
-	foundRewind := false
-	foundClose := false
-	foundHalt := false        // Should check for multiple rows
+	foundCopy := false        // Should use OpCopy to capture result
+	foundGoto := false        // Should use OpGoto to skip to end
+	foundNoop := false        // Should replace OpHalt with OpNoop
 
 	for i := 0; i < v.NumOps(); i++ {
 		op := v.Program[i]
 		switch op.Opcode {
 		case vdbe.OpNull:
 			foundNull = true
-		case vdbe.OpOnce:
-			foundOnce = true
-		case vdbe.OpOpenEphemeral:
-			foundOpenEphemeral = true
-		case vdbe.OpRewind:
-			foundRewind = true
-		case vdbe.OpClose:
-			foundClose = true
-		case vdbe.OpHalt:
-			foundHalt = true
+		case vdbe.OpCopy:
+			foundCopy = true
+		case vdbe.OpGoto:
+			foundGoto = true
+		case vdbe.OpNoop:
+			foundNoop = true
 		}
 	}
 
 	if !foundNull {
 		t.Error("expected OpNull to initialize result to NULL")
 	}
-	if !foundOnce {
-		t.Error("expected OpOnce to guard single execution")
+	if !foundCopy {
+		t.Error("expected OpCopy to capture subquery result")
 	}
-	if !foundOpenEphemeral {
-		t.Error("expected OpOpenEphemeral for subquery results")
+	if !foundGoto {
+		t.Error("expected OpGoto to skip to end after capturing result")
 	}
-	if !foundRewind {
-		t.Error("expected OpRewind to iterate results")
-	}
-	if !foundClose {
-		t.Error("expected OpClose to close ephemeral table")
-	}
-	if !foundHalt {
-		t.Error("expected OpHalt to check for multiple rows error")
+	if !foundNoop {
+		t.Error("expected OpNoop (replaced OpHalt from subquery)")
 	}
 }
 
@@ -279,11 +268,10 @@ func TestGenerateExists(t *testing.T) {
 	}
 
 	// Verify bytecode structure
+	// The EXISTS implementation embeds subquery bytecode directly
 	foundInitFalse := false   // Should initialize to false
-	foundOpenEphemeral := false
-	foundRewind := false
-	foundClose := false
 	foundSetTrue := false     // Should set to true if row found
+	foundGoto := false        // Should use Goto to skip to end when found
 
 	initToFalseFound := false
 	setToTrueFound := false
@@ -300,29 +288,19 @@ func TestGenerateExists(t *testing.T) {
 				foundSetTrue = true
 				setToTrueFound = true
 			}
-		case vdbe.OpOpenEphemeral:
-			foundOpenEphemeral = true
-		case vdbe.OpRewind:
-			foundRewind = true
-		case vdbe.OpClose:
-			foundClose = true
+		case vdbe.OpGoto:
+			foundGoto = true
 		}
 	}
 
 	if !foundInitFalse {
 		t.Error("expected OpInteger(0) to initialize result to false")
 	}
-	if !foundOpenEphemeral {
-		t.Error("expected OpOpenEphemeral for subquery")
-	}
-	if !foundRewind {
-		t.Error("expected OpRewind to check for rows")
-	}
-	if !foundClose {
-		t.Error("expected OpClose to close ephemeral table")
-	}
 	if !foundSetTrue {
 		t.Error("expected OpInteger(1) to set result to true when row found")
+	}
+	if !foundGoto {
+		t.Error("expected OpGoto to skip to end when row found")
 	}
 }
 

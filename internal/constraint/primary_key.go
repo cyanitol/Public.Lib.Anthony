@@ -275,19 +275,23 @@ func (pk *PrimaryKeyConstraint) convertToInt64(value interface{}) (int64, error)
 	case uint32:
 		return int64(v), nil
 	case float64:
-		// SQLite allows float to int conversion for PRIMARY KEY
 		return int64(v), nil
 	case *vdbe.Mem:
-		if v.IsInt() {
-			return v.IntValue(), nil
-		}
-		if v.IsReal() {
-			return int64(v.RealValue()), nil
-		}
-		return 0, fmt.Errorf("cannot convert to INTEGER")
+		return pk.convertMemToInt64(v)
 	default:
 		return 0, fmt.Errorf("invalid type for INTEGER PRIMARY KEY: %T", value)
 	}
+}
+
+// convertMemToInt64 converts a vdbe.Mem value to int64.
+func (pk *PrimaryKeyConstraint) convertMemToInt64(mem *vdbe.Mem) (int64, error) {
+	if mem.IsInt() {
+		return mem.IntValue(), nil
+	}
+	if mem.IsReal() {
+		return int64(mem.RealValue()), nil
+	}
+	return 0, fmt.Errorf("cannot convert to INTEGER")
 }
 
 // GetPrimaryKeyColumns returns the list of primary key column names.

@@ -459,46 +459,58 @@ func (s *Stmt) emitSingleAggregateUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionE
 func (s *Stmt) emitAggregateArithmeticOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator,
 	binExpr *parser.BinaryExpr, accReg int, avgCountReg int, targetReg int) error {
 
-	// Get the aggregate value into a temp register
 	tempReg := gen.AllocReg()
 
 	// Check if left side is aggregate
 	if fnExpr, ok := binExpr.Left.(*parser.FunctionExpr); ok && s.isAggregateExpr(fnExpr) {
-		if fnExpr.Name == "AVG" {
-			vm.AddOp(vdbe.OpDivide, accReg, avgCountReg, tempReg)
-		} else {
-			vm.AddOp(vdbe.OpCopy, accReg, tempReg, 0)
-		}
-
-		// Generate code for right side (should be a constant or column)
-		rightReg, err := gen.GenerateExpr(binExpr.Right)
-		if err != nil {
-			return err
-		}
-
-		// Apply the binary operation
-		return s.emitBinaryOp(vm, binExpr.Op, tempReg, rightReg, targetReg)
+		return s.emitLeftAggregateOutput(vm, gen, binExpr, fnExpr, accReg, avgCountReg, tempReg, targetReg)
 	}
 
 	// Check if right side is aggregate
 	if fnExpr, ok := binExpr.Right.(*parser.FunctionExpr); ok && s.isAggregateExpr(fnExpr) {
-		if fnExpr.Name == "AVG" {
-			vm.AddOp(vdbe.OpDivide, accReg, avgCountReg, tempReg)
-		} else {
-			vm.AddOp(vdbe.OpCopy, accReg, tempReg, 0)
-		}
-
-		// Generate code for left side (should be a constant or column)
-		leftReg, err := gen.GenerateExpr(binExpr.Left)
-		if err != nil {
-			return err
-		}
-
-		// Apply the binary operation
-		return s.emitBinaryOp(vm, binExpr.Op, leftReg, tempReg, targetReg)
+		return s.emitRightAggregateOutput(vm, gen, binExpr, fnExpr, accReg, avgCountReg, tempReg, targetReg)
 	}
 
 	return fmt.Errorf("no aggregate found in expression")
+}
+
+// emitLeftAggregateOutput handles binary expressions with aggregate on the left side.
+func (s *Stmt) emitLeftAggregateOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator,
+	binExpr *parser.BinaryExpr, fnExpr *parser.FunctionExpr,
+	accReg int, avgCountReg int, tempReg int, targetReg int) error {
+
+	s.emitAggregateCopy(vm, fnExpr.Name, accReg, avgCountReg, tempReg)
+
+	rightReg, err := gen.GenerateExpr(binExpr.Right)
+	if err != nil {
+		return err
+	}
+
+	return s.emitBinaryOp(vm, binExpr.Op, tempReg, rightReg, targetReg)
+}
+
+// emitRightAggregateOutput handles binary expressions with aggregate on the right side.
+func (s *Stmt) emitRightAggregateOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator,
+	binExpr *parser.BinaryExpr, fnExpr *parser.FunctionExpr,
+	accReg int, avgCountReg int, tempReg int, targetReg int) error {
+
+	s.emitAggregateCopy(vm, fnExpr.Name, accReg, avgCountReg, tempReg)
+
+	leftReg, err := gen.GenerateExpr(binExpr.Left)
+	if err != nil {
+		return err
+	}
+
+	return s.emitBinaryOp(vm, binExpr.Op, leftReg, tempReg, targetReg)
+}
+
+// emitAggregateCopy copies aggregate value to target register (divides for AVG).
+func (s *Stmt) emitAggregateCopy(vm *vdbe.VDBE, funcName string, accReg int, avgCountReg int, targetReg int) {
+	if funcName == "AVG" {
+		vm.AddOp(vdbe.OpDivide, accReg, avgCountReg, targetReg)
+	} else {
+		vm.AddOp(vdbe.OpCopy, accReg, targetReg, 0)
+	}
 }
 
 // emitBinaryOp emits the appropriate VDBE opcode for a binary operation

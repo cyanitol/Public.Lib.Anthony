@@ -493,7 +493,7 @@ func jsonQuoteFunc(args []Value) (Value, error) {
 		return NewTextValue("null"), nil
 	}
 
-	value := valueToJSON(args[0])
+	value := valueToJSONSmart(args[0])
 
 	// Marshal the value to get proper JSON representation
 	result, err := json.Marshal(value)
@@ -601,7 +601,7 @@ func tryParseJSONObject(s string) interface{} {
 }
 
 // tryParseJSONArray attempts to parse a string as a JSON array.
-// Only returns the parsed array if it contains strings or complex types.
+// Returns the parsed array if it's minified JSON (indicating it came from json()).
 func tryParseJSONArray(s string) interface{} {
 	var data interface{}
 	if err := json.Unmarshal([]byte(s), &data); err != nil {
@@ -613,29 +613,12 @@ func tryParseJSONArray(s string) interface{} {
 		return nil
 	}
 
-	// Only parse arrays with strings or complex types
-	if !arrayHasStringOrComplex(arr) {
-		return nil
-	}
-
 	// Check if minified (indicates it's from json())
 	if isMinifiedJSON(data, s) {
 		return arr
 	}
 
 	return nil
-}
-
-// arrayHasStringOrComplex checks if an array contains strings or complex types.
-// Arrays with only numbers like [97,96] are treated as string literals.
-func arrayHasStringOrComplex(arr []interface{}) bool {
-	for _, item := range arr {
-		switch item.(type) {
-		case string, map[string]interface{}, []interface{}:
-			return true
-		}
-	}
-	return false
 }
 
 // isMinifiedJSON checks if the string representation matches the minified JSON.

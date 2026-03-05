@@ -86,37 +86,57 @@ func (uc *UniqueConstraint) Validate(table *schema.Table, bt *btree.Btree, value
 		return fmt.Errorf("unique constraint has no columns")
 	}
 
-	// Extract the values for the constrained columns
+	constraintValues, hasNonNull, err := uc.extractConstraintValues(table, values)
+	if err != nil {
+		return err
+	}
+
+	// Per SQL standard: if all constraint columns are NULL, no check is needed
+	if !hasNonNull {
+		return nil
+	}
+
+	return uc.checkForDuplicates(bt, table, constraintValues, rowid)
+}
+
+// extractConstraintValues extracts and validates constraint column values.
+// Returns the values map, whether any non-NULL values exist, and any error.
+func (uc *UniqueConstraint) extractConstraintValues(table *schema.Table, values map[string]interface{}) (map[string]interface{}, bool, error) {
 	constraintValues := make(map[string]interface{})
 	hasNonNull := false
 
 	for _, colName := range uc.Columns {
-		val, exists := values[colName]
-		if !exists {
-			// Column not in values map - check default
-			col, found := table.GetColumn(colName)
-			if !found {
-				return fmt.Errorf("column %s not found in table %s", colName, table.Name)
-			}
-			val = col.Default
+		val, err := uc.getColumnValue(table, values, colName)
+		if err != nil {
+			return nil, false, err
 		}
 
 		constraintValues[colName] = val
-
-		// Check if value is NULL
 		if val != nil {
 			hasNonNull = true
 		}
 	}
 
-	// Per SQL standard: if all constraint columns are NULL, no check is needed
-	// Multiple rows with all-NULL values are allowed
-	if !hasNonNull {
-		return nil
+	return constraintValues, hasNonNull, nil
+}
+
+// getColumnValue retrieves the value for a column, using default if not provided.
+func (uc *UniqueConstraint) getColumnValue(table *schema.Table, values map[string]interface{}, colName string) (interface{}, error) {
+	val, exists := values[colName]
+	if exists {
+		return val, nil
 	}
 
-	// Check for existing row with same non-NULL values
-	// We use the backing index to efficiently check for duplicates
+	// Column not in values map - check default
+	col, found := table.GetColumn(colName)
+	if !found {
+		return nil, fmt.Errorf("column %s not found in table %s", colName, table.Name)
+	}
+	return col.Default, nil
+}
+
+// checkForDuplicates checks if duplicate values exist and returns appropriate error.
+func (uc *UniqueConstraint) checkForDuplicates(bt *btree.Btree, table *schema.Table, constraintValues map[string]interface{}, rowid int64) error {
 	exists, _, err := uc.checkDuplicateViaIndex(bt, table, constraintValues, rowid)
 	if err != nil {
 		return fmt.Errorf("failed to check unique constraint: %w", err)

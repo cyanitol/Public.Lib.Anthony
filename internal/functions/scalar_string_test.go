@@ -466,9 +466,9 @@ func TestReplaceFunc_EdgeCases(t *testing.T) {
 		wantNull bool
 	}{
 		{
-			name: "replace with null replacement",
-			args: []Value{NewTextValue("hello world"), NewTextValue("world"), NewNullValue()},
-			want: "hello ",
+			name:     "replace with null replacement",
+			args:     []Value{NewTextValue("hello world"), NewTextValue("world"), NewNullValue()},
+			wantNull: true, // SQLite returns NULL when any argument is NULL
 		},
 		{
 			name: "replace empty pattern",

@@ -57,51 +57,87 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 // collectJoinTables collects all tables involved in a JOIN query.
 // This handles both explicit JOINs and implicit cross joins (comma-separated tables).
 func (s *Stmt) collectJoinTables(stmt *parser.SelectStmt, tableName string, table *schema.Table) ([]stmtTableInfo, error) {
+	tables := []stmtTableInfo{s.createBaseTableInfo(stmt, tableName, table)}
+	cursorIdx := 1
+
+	// Add comma-separated tables (implicit cross joins)
+	newTables, newCursorIdx, err := s.collectCrossJoinTables(stmt, cursorIdx)
+	if err != nil {
+		return nil, err
+	}
+	tables = append(tables, newTables...)
+	cursorIdx = newCursorIdx
+
+	// Add explicit JOIN tables
+	joinTables, err := s.collectExplicitJoinTables(stmt, cursorIdx)
+	if err != nil {
+		return nil, err
+	}
+	tables = append(tables, joinTables...)
+
+	return tables, nil
+}
+
+// createBaseTableInfo creates the base table info with alias resolution.
+func (s *Stmt) createBaseTableInfo(stmt *parser.SelectStmt, tableName string, table *schema.Table) stmtTableInfo {
 	baseTableAlias := tableName
 	if len(stmt.From.Tables) > 0 && stmt.From.Tables[0].Alias != "" {
 		baseTableAlias = stmt.From.Tables[0].Alias
 	}
-	tables := []stmtTableInfo{{name: baseTableAlias, table: table, cursorIdx: 0}}
+	return stmtTableInfo{name: baseTableAlias, table: table, cursorIdx: 0}
+}
 
-	cursorIdx := 1
+// collectCrossJoinTables collects comma-separated tables (implicit cross joins).
+func (s *Stmt) collectCrossJoinTables(stmt *parser.SelectStmt, startCursorIdx int) ([]stmtTableInfo, int, error) {
+	var tables []stmtTableInfo
+	cursorIdx := startCursorIdx
 
-	// Add comma-separated tables (implicit cross joins) from From.Tables[1:]
 	for i := 1; i < len(stmt.From.Tables); i++ {
-		crossTable, ok := s.conn.schema.GetTable(stmt.From.Tables[i].TableName)
-		if !ok {
-			return nil, fmt.Errorf("table not found: %s", stmt.From.Tables[i].TableName)
+		tableInfo, err := s.createTableInfoFromRef(stmt.From.Tables[i], cursorIdx)
+		if err != nil {
+			return nil, cursorIdx, err
 		}
-		crossTableAlias := stmt.From.Tables[i].TableName
-		if stmt.From.Tables[i].Alias != "" {
-			crossTableAlias = stmt.From.Tables[i].Alias
-		}
-		tables = append(tables, stmtTableInfo{
-			name:      crossTableAlias,
-			table:     crossTable,
-			cursorIdx: cursorIdx,
-		})
+		tables = append(tables, tableInfo)
 		cursorIdx++
 	}
 
-	// Add explicit JOIN tables
+	return tables, cursorIdx, nil
+}
+
+// collectExplicitJoinTables collects tables from explicit JOIN clauses.
+func (s *Stmt) collectExplicitJoinTables(stmt *parser.SelectStmt, startCursorIdx int) ([]stmtTableInfo, error) {
+	var tables []stmtTableInfo
+	cursorIdx := startCursorIdx
+
 	for _, join := range stmt.From.Joins {
-		joinTable, ok := s.conn.schema.GetTable(join.Table.TableName)
-		if !ok {
-			return nil, fmt.Errorf("table not found: %s", join.Table.TableName)
+		tableInfo, err := s.createTableInfoFromRef(join.Table, cursorIdx)
+		if err != nil {
+			return nil, err
 		}
-		joinTableAlias := join.Table.TableName
-		if join.Table.Alias != "" {
-			joinTableAlias = join.Table.Alias
-		}
-		tables = append(tables, stmtTableInfo{
-			name:      joinTableAlias,
-			table:     joinTable,
-			cursorIdx: cursorIdx,
-		})
+		tables = append(tables, tableInfo)
 		cursorIdx++
 	}
 
 	return tables, nil
+}
+
+// createTableInfoFromRef creates a stmtTableInfo from a table reference.
+func (s *Stmt) createTableInfoFromRef(tableRef parser.TableOrSubquery, cursorIdx int) (stmtTableInfo, error) {
+	table, ok := s.conn.schema.GetTable(tableRef.TableName)
+	if !ok {
+		return stmtTableInfo{}, fmt.Errorf("table not found: %s", tableRef.TableName)
+	}
+
+	tableAlias := tableRef.TableName
+	if tableRef.Alias != "" {
+		tableAlias = tableRef.Alias
+	}
+
+	return stmtTableInfo{
+		name:      tableAlias,
+		table:     table,
+		cursorIdx: cursorIdx,
+	}, nil
 }
 
 // setupJoinVDBE initializes VDBE and code generator for JOIN query.
@@ -420,28 +456,66 @@ func (s *Stmt) compileExplainOpcodes(vm *vdbe.VDBE, stmt *parser.ExplainStmt, ar
 	return vm, nil
 }
 
-// compileInnerStatement compiles the inner statement of an EXPLAIN.
-func (s *Stmt) compileInnerStatement(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
-	switch innerStmt := stmt.(type) {
-	case *parser.SelectStmt:
-		return s.compileSelect(vm, innerStmt, args)
-	case *parser.InsertStmt:
-		return s.compileInsert(vm, innerStmt, args)
-	case *parser.UpdateStmt:
-		return s.compileUpdate(vm, innerStmt, args)
-	case *parser.DeleteStmt:
-		return s.compileDelete(vm, innerStmt, args)
-	case *parser.CreateTableStmt:
-		return s.compileCreateTable(vm, innerStmt, args)
-	case *parser.DropTableStmt:
-		return s.compileDropTable(vm, innerStmt, args)
-	case *parser.CreateViewStmt:
-		return s.compileCreateView(vm, innerStmt, args)
-	case *parser.DropViewStmt:
-		return s.compileDropView(vm, innerStmt, args)
-	default:
-		return nil, fmt.Errorf("EXPLAIN not supported for statement type: %T", stmt)
+// statementCompiler is a function type for compiling specific statement types.
+type statementCompiler func(*vdbe.VDBE, parser.Statement, []driver.NamedValue) (*vdbe.VDBE, error)
+
+// getStatementCompilerMap returns the map of statement types to their compilers.
+func (s *Stmt) getStatementCompilerMap() map[string]statementCompiler {
+	return map[string]statementCompiler{
+		"*parser.SelectStmt":      s.compileSelectWrapper,
+		"*parser.InsertStmt":      s.compileInsertWrapper,
+		"*parser.UpdateStmt":      s.compileUpdateWrapper,
+		"*parser.DeleteStmt":      s.compileDeleteWrapper,
+		"*parser.CreateTableStmt": s.compileCreateTableWrapper,
+		"*parser.DropTableStmt":   s.compileDropTableWrapper,
+		"*parser.CreateViewStmt":  s.compileCreateViewWrapper,
+		"*parser.DropViewStmt":    s.compileDropViewWrapper,
 	}
+}
+
+// Wrapper functions for type-specific compilation
+func (s *Stmt) compileSelectWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	return s.compileSelect(vm, stmt.(*parser.SelectStmt), args)
+}
+
+func (s *Stmt) compileInsertWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	return s.compileInsert(vm, stmt.(*parser.InsertStmt), args)
+}
+
+func (s *Stmt) compileUpdateWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	return s.compileUpdate(vm, stmt.(*parser.UpdateStmt), args)
+}
+
+func (s *Stmt) compileDeleteWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	return s.compileDelete(vm, stmt.(*parser.DeleteStmt), args)
+}
+
+func (s *Stmt) compileCreateTableWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	return s.compileCreateTable(vm, stmt.(*parser.CreateTableStmt), args)
+}
+
+func (s *Stmt) compileDropTableWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	return s.compileDropTable(vm, stmt.(*parser.DropTableStmt), args)
+}
+
+func (s *Stmt) compileCreateViewWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	return s.compileCreateView(vm, stmt.(*parser.CreateViewStmt), args)
+}
+
+func (s *Stmt) compileDropViewWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	return s.compileDropView(vm, stmt.(*parser.DropViewStmt), args)
+}
+
+// compileInnerStatement compiles the inner statement of an EXPLAIN using table-driven dispatch.
+func (s *Stmt) compileInnerStatement(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	compilerMap := s.getStatementCompilerMap()
+	stmtType := fmt.Sprintf("%T", stmt)
+
+	if compiler, ok := compilerMap[stmtType]; ok {
+		return compiler(vm, stmt, args)
+	}
+
+	return nil, fmt.Errorf("EXPLAIN not supported for statement type: %T", stmt)
 }
 
 // ============================================================================

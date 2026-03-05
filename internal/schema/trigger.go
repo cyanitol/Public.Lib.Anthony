@@ -11,16 +11,16 @@ import (
 
 // Trigger represents a database trigger definition.
 type Trigger struct {
-	Name        string                 // Trigger name
-	Table       string                 // Table name this trigger is attached to
-	Timing      parser.TriggerTiming   // BEFORE, AFTER, or INSTEAD OF
-	Event       parser.TriggerEvent    // INSERT, UPDATE, or DELETE
-	UpdateOf    []string               // Column names for UPDATE OF (nil if not UPDATE OF)
-	ForEachRow  bool                   // True if FOR EACH ROW specified
-	When        parser.Expression      // Optional WHEN condition
-	Body        []parser.Statement     // Trigger body statements
-	SQL         string                 // Original CREATE TRIGGER statement
-	Temp        bool                   // True for temporary triggers
+	Name       string               // Trigger name
+	Table      string               // Table name this trigger is attached to
+	Timing     parser.TriggerTiming // BEFORE, AFTER, or INSTEAD OF
+	Event      parser.TriggerEvent  // INSERT, UPDATE, or DELETE
+	UpdateOf   []string             // Column names for UPDATE OF (nil if not UPDATE OF)
+	ForEachRow bool                 // True if FOR EACH ROW specified
+	When       parser.Expression    // Optional WHEN condition
+	Body       []parser.Statement   // Trigger body statements
+	SQL        string               // Original CREATE TRIGGER statement
+	Temp       bool                 // True for temporary triggers
 }
 
 // CreateTrigger creates a trigger from a CREATE TRIGGER statement.
@@ -221,7 +221,7 @@ func evaluateLogicalOp(expr *parser.BinaryExpr, oldRow, newRow map[string]interf
 // isComparisonOp checks if an operator is a comparison operator.
 func isComparisonOp(op parser.BinaryOp) bool {
 	return op == parser.OpEq || op == parser.OpNe || op == parser.OpLt ||
-	       op == parser.OpLe || op == parser.OpGt || op == parser.OpGe
+		op == parser.OpLe || op == parser.OpGt || op == parser.OpGe
 }
 
 // evaluateComparisonOp evaluates comparison operations.
@@ -373,23 +373,47 @@ func compareGreaterThanOrEqual(left, right interface{}) bool {
 
 // compareEqual compares two values for equality
 func compareEqual(left, right interface{}) bool {
-	// Simple type-based comparison
-	switch l := left.(type) {
-	case int64:
-		r, ok := right.(int64)
-		return ok && l == r
-	case float64:
-		r, ok := right.(float64)
-		return ok && l == r
-	case string:
-		r, ok := right.(string)
-		return ok && l == r
-	case bool:
-		r, ok := right.(bool)
-		return ok && l == r
-	default:
-		return false
+	if compareInt64Equal(left, right) {
+		return true
 	}
+	if compareFloat64Equal(left, right) {
+		return true
+	}
+	if compareStringEqual(left, right) {
+		return true
+	}
+	if compareBoolEqual(left, right) {
+		return true
+	}
+	return false
+}
+
+// compareInt64Equal checks if both values are int64 and equal
+func compareInt64Equal(left, right interface{}) bool {
+	l, okL := left.(int64)
+	r, okR := right.(int64)
+	return okL && okR && l == r
+}
+
+// compareFloat64Equal checks if both values are float64 and equal
+func compareFloat64Equal(left, right interface{}) bool {
+	l, okL := left.(float64)
+	r, okR := right.(float64)
+	return okL && okR && l == r
+}
+
+// compareStringEqual checks if both values are string and equal
+func compareStringEqual(left, right interface{}) bool {
+	l, okL := left.(string)
+	r, okR := right.(string)
+	return okL && okR && l == r
+}
+
+// compareBoolEqual checks if both values are bool and equal
+func compareBoolEqual(left, right interface{}) bool {
+	l, okL := left.(bool)
+	r, okR := right.(bool)
+	return okL && okR && l == r
 }
 
 // compareLessThan compares if left < right

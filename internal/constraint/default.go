@@ -200,53 +200,65 @@ func ApplyDefaults(
 	insertCols []string,
 	insertVals []interface{},
 ) ([]interface{}, error) {
-	// Build a map of which columns are being inserted
+	insertColMap := buildInsertColumnMap(insertCols)
+	result := make([]interface{}, len(tableCols))
+
+	for i, col := range tableCols {
+		val, err := resolveColumnValue(col, insertColMap, insertVals)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = val
+	}
+
+	return result, nil
+}
+
+// buildInsertColumnMap creates a map from column names to their index in the INSERT values.
+func buildInsertColumnMap(insertCols []string) map[string]int {
 	insertColMap := make(map[string]int)
 	for i, colName := range insertCols {
 		insertColMap[strings.ToLower(colName)] = i
 	}
+	return insertColMap
+}
 
-	// Build result values for all table columns
-	result := make([]interface{}, len(tableCols))
+// resolveColumnValue determines the final value for a column, applying defaults if needed.
+func resolveColumnValue(col *ColumnInfo, insertColMap map[string]int, insertVals []interface{}) (interface{}, error) {
+	colNameLower := strings.ToLower(col.Name)
+	idx, exists := insertColMap[colNameLower]
 
-	for i, col := range tableCols {
-		colNameLower := strings.ToLower(col.Name)
-
-		// Check if this column has a value in the INSERT
-		if idx, exists := insertColMap[colNameLower]; exists {
-			// Value was provided
-			val := insertVals[idx]
-			valueIsNull := (val == nil)
-
-			// Determine if we should apply the default
-			if col.DefaultConstraint != nil &&
-				ShouldApplyDefault(true, valueIsNull, col.AllowsNull) {
-				// Apply default instead of provided value
-				defaultVal, err := col.DefaultConstraint.Evaluate()
-				if err != nil {
-					return nil, fmt.Errorf("failed to evaluate default for column %s: %w", col.Name, err)
-				}
-				result[i] = defaultVal
-			} else {
-				// Use provided value
-				result[i] = val
-			}
-		} else {
-			// No value provided - apply default if available
-			if col.DefaultConstraint != nil {
-				defaultVal, err := col.DefaultConstraint.Evaluate()
-				if err != nil {
-					return nil, fmt.Errorf("failed to evaluate default for column %s: %w", col.Name, err)
-				}
-				result[i] = defaultVal
-			} else {
-				// No default - use NULL
-				result[i] = nil
-			}
-		}
+	if exists {
+		return handleProvidedValue(col, insertVals[idx])
 	}
+	return handleMissingValue(col)
+}
 
-	return result, nil
+// handleProvidedValue processes a value that was explicitly provided in the INSERT.
+func handleProvidedValue(col *ColumnInfo, val interface{}) (interface{}, error) {
+	valueIsNull := (val == nil)
+
+	if col.DefaultConstraint != nil && ShouldApplyDefault(true, valueIsNull, col.AllowsNull) {
+		return evaluateDefault(col)
+	}
+	return val, nil
+}
+
+// handleMissingValue processes a column that was not provided in the INSERT.
+func handleMissingValue(col *ColumnInfo) (interface{}, error) {
+	if col.DefaultConstraint != nil {
+		return evaluateDefault(col)
+	}
+	return nil, nil
+}
+
+// evaluateDefault evaluates a default constraint and returns the result.
+func evaluateDefault(col *ColumnInfo) (interface{}, error) {
+	defaultVal, err := col.DefaultConstraint.Evaluate()
+	if err != nil {
+		return nil, fmt.Errorf("failed to evaluate default for column %s: %w", col.Name, err)
+	}
+	return defaultVal, nil
 }
 
 // ColumnInfo represents column information needed for default value application.

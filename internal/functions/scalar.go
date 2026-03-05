@@ -286,6 +286,7 @@ func rtrimFunc(args []Value) (Value, error) {
 // replaceFunc implements replace(X, Y, Z)
 // Replaces all occurrences of Y in X with Z
 func replaceFunc(args []Value) (Value, error) {
+	// SQLite returns NULL if ANY argument is NULL
 	if args[0].IsNull() || args[1].IsNull() || args[2].IsNull() {
 		return NewNullValue(), nil
 	}

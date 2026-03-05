@@ -348,17 +348,29 @@ func (n *Node) FindEntry(target *Entry) (*Node, int) {
 		}
 	}
 
-	// Search in children
-	if !n.IsLeaf {
-		for _, entry := range n.Entries {
-			if entry.Child != nil && entry.BBox.Overlaps(target.BBox) {
-				if node, idx := entry.Child.FindEntry(target); node != nil {
-					return node, idx
-				}
-			}
+	return n.findEntryInChildren(target)
+}
+
+// findEntryInChildren searches for entry in child nodes
+func (n *Node) findEntryInChildren(target *Entry) (*Node, int) {
+	if n.IsLeaf {
+		return nil, -1
+	}
+
+	for _, entry := range n.Entries {
+		if node, idx := n.searchChildEntry(entry, target); node != nil {
+			return node, idx
 		}
 	}
 
+	return nil, -1
+}
+
+// searchChildEntry searches a specific child for the target entry
+func (n *Node) searchChildEntry(entry *Entry, target *Entry) (*Node, int) {
+	if entry.Child != nil && entry.BBox.Overlaps(target.BBox) {
+		return entry.Child.FindEntry(target)
+	}
 	return nil, -1
 }
 

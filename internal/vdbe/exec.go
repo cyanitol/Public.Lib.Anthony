@@ -4388,44 +4388,15 @@ func (v *VDBE) execWindowNtile(instr *Instruction) error {
 // P4 = offset (default 1)
 // P5 = default value register (if row doesn't exist)
 func (v *VDBE) execWindowLag(instr *Instruction) error {
-	windowIdx := instr.P1
-	outputReg := instr.P2
-	colIdx := instr.P3
-	offset := 1
-	if instr.P4.I > 0 {
-		offset = int(instr.P4.I)
-	}
-
-	// Get window state
-	windowState, ok := v.WindowStates[windowIdx]
-	if !ok {
-		return fmt.Errorf("window state %d not found", windowIdx)
-	}
-
-	// Get the lag row
-	lagRow := windowState.GetLagRow(offset)
-
-	// Store result
-	mem, err := v.GetMem(outputReg)
+	windowState, err := v.getWindowState(instr.P1)
 	if err != nil {
 		return err
 	}
 
-	if lagRow == nil || colIdx >= len(lagRow) {
-		// Use default value if provided in P5, otherwise NULL
-		if instr.P5 > 0 {
-			defaultMem, err := v.GetMem(int(instr.P5))
-			if err != nil {
-				return err
-			}
-			return mem.Copy(defaultMem)
-		}
-		mem.SetNull()
-	} else {
-		return mem.Copy(lagRow[colIdx])
-	}
+	offset := v.getWindowOffset(instr)
+	lagRow := windowState.GetLagRow(offset)
 
-	return nil
+	return v.setWindowResult(instr.P2, instr.P3, lagRow, instr.P5)
 }
 
 // execWindowLead implements OpWindowLead - LEAD() window function
@@ -4435,44 +4406,15 @@ func (v *VDBE) execWindowLag(instr *Instruction) error {
 // P4 = offset (default 1)
 // P5 = default value register (if row doesn't exist)
 func (v *VDBE) execWindowLead(instr *Instruction) error {
-	windowIdx := instr.P1
-	outputReg := instr.P2
-	colIdx := instr.P3
-	offset := 1
-	if instr.P4.I > 0 {
-		offset = int(instr.P4.I)
-	}
-
-	// Get window state
-	windowState, ok := v.WindowStates[windowIdx]
-	if !ok {
-		return fmt.Errorf("window state %d not found", windowIdx)
-	}
-
-	// Get the lead row
-	leadRow := windowState.GetLeadRow(offset)
-
-	// Store result
-	mem, err := v.GetMem(outputReg)
+	windowState, err := v.getWindowState(instr.P1)
 	if err != nil {
 		return err
 	}
 
-	if leadRow == nil || colIdx >= len(leadRow) {
-		// Use default value if provided in P5, otherwise NULL
-		if instr.P5 > 0 {
-			defaultMem, err := v.GetMem(int(instr.P5))
-			if err != nil {
-				return err
-			}
-			return mem.Copy(defaultMem)
-		}
-		mem.SetNull()
-	} else {
-		return mem.Copy(leadRow[colIdx])
-	}
+	offset := v.getWindowOffset(instr)
+	leadRow := windowState.GetLeadRow(offset)
 
-	return nil
+	return v.setWindowResult(instr.P2, instr.P3, leadRow, instr.P5)
 }
 
 // execWindowFirstValue implements OpWindowFirstValue - FIRST_VALUE() window function
@@ -4527,6 +4469,49 @@ func (v *VDBE) execWindowLastValue(instr *Instruction) error {
 	}
 
 	return mem.Copy(lastValue)
+}
+
+// getWindowState retrieves a window state by index.
+func (v *VDBE) getWindowState(windowIdx int) (*WindowState, error) {
+	windowState, ok := v.WindowStates[windowIdx]
+	if !ok {
+		return nil, fmt.Errorf("window state %d not found", windowIdx)
+	}
+	return windowState, nil
+}
+
+// getWindowOffset extracts the offset from an instruction (default 1).
+func (v *VDBE) getWindowOffset(instr *Instruction) int {
+	if instr.P4.I > 0 {
+		return int(instr.P4.I)
+	}
+	return 1
+}
+
+// setWindowResult stores a window function result, handling NULL/default values.
+func (v *VDBE) setWindowResult(outputReg, colIdx int, row []*Mem, defaultReg uint16) error {
+	mem, err := v.GetMem(outputReg)
+	if err != nil {
+		return err
+	}
+
+	if row == nil || colIdx >= len(row) {
+		return v.setWindowDefault(mem, defaultReg)
+	}
+	return mem.Copy(row[colIdx])
+}
+
+// setWindowDefault sets a default value or NULL for window functions.
+func (v *VDBE) setWindowDefault(mem *Mem, defaultReg uint16) error {
+	if defaultReg > 0 {
+		defaultMem, err := v.GetMem(int(defaultReg))
+		if err != nil {
+			return err
+		}
+		return mem.Copy(defaultMem)
+	}
+	mem.SetNull()
+	return nil
 }
 
 // execAggDistinct implements OpAggDistinct - Check if value is distinct for aggregate

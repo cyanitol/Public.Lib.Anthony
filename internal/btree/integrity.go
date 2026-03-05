@@ -248,13 +248,21 @@ func countPageRows(bt *Btree, pageNum uint32, header *PageHeader, cells []*CellI
 
 // checkPageFormat validates the page format
 func checkPageFormat(bt *Btree, pageNum uint32, pageData []byte, header *PageHeader, result *IntegrityResult) {
-	// Check page size
+	checkPageSize(bt, pageNum, pageData, result)
+	checkCellContentArea(bt, pageNum, header, result)
+	checkInteriorPageRightChild(pageNum, header, result)
+}
+
+// checkPageSize validates the page size matches btree page size
+func checkPageSize(bt *Btree, pageNum uint32, pageData []byte, result *IntegrityResult) {
 	if uint32(len(pageData)) != bt.PageSize {
 		result.AddError(pageNum, "invalid_page_size",
 			fmt.Sprintf("page size %d doesn't match btree page size %d", len(pageData), bt.PageSize))
 	}
+}
 
-	// Check cell content area doesn't overlap with header and cell pointer array
+// checkCellContentArea validates cell content area boundaries
+func checkCellContentArea(bt *Btree, pageNum uint32, header *PageHeader, result *IntegrityResult) {
 	cellPtrArrayEnd := header.CellPtrOffset + (int(header.NumCells) * 2)
 	cellContentStart := int(header.CellContentStart)
 	if cellContentStart == 0 {
@@ -267,29 +275,30 @@ func checkPageFormat(bt *Btree, pageNum uint32, pageData []byte, header *PageHea
 				cellContentStart, cellPtrArrayEnd))
 	}
 
-	// Check cell content start is within page bounds
 	if cellContentStart > int(bt.UsableSize) {
 		result.AddError(pageNum, "content_out_of_bounds",
 			fmt.Sprintf("cell content start %d exceeds usable size %d",
 				cellContentStart, bt.UsableSize))
 	}
 
-	// Check number of cells is reasonable
-	maxCells := (int(bt.UsableSize) - header.HeaderSize) / 6 // Minimum cell overhead
+	maxCells := (int(bt.UsableSize) - header.HeaderSize) / 6
 	if int(header.NumCells) > maxCells {
 		result.AddError(pageNum, "too_many_cells",
 			fmt.Sprintf("cell count %d exceeds reasonable maximum %d",
 				header.NumCells, maxCells))
 	}
+}
 
-	// For interior pages, check right child pointer
-	if header.IsInterior {
-		if header.RightChild == 0 {
-			result.AddError(pageNum, "invalid_right_child", "interior page has right child pointer of 0")
-		}
-		if header.RightChild == pageNum {
-			result.AddError(pageNum, "self_reference", "interior page right child points to itself")
-		}
+// checkInteriorPageRightChild validates interior page right child pointer
+func checkInteriorPageRightChild(pageNum uint32, header *PageHeader, result *IntegrityResult) {
+	if !header.IsInterior {
+		return
+	}
+	if header.RightChild == 0 {
+		result.AddError(pageNum, "invalid_right_child", "interior page has right child pointer of 0")
+	}
+	if header.RightChild == pageNum {
+		result.AddError(pageNum, "self_reference", "interior page right child points to itself")
 	}
 }
 
@@ -438,67 +447,99 @@ func CheckPageIntegrity(bt *Btree, pageNum uint32) *IntegrityResult {
 		return result
 	}
 
-	// Get page data
+	pageData, header := loadPageAndHeader(bt, pageNum, result)
+	if pageData == nil || header == nil {
+		return result
+	}
+
+	checkPageFormat(bt, pageNum, pageData, header, result)
+
+	cellPointers := validateCellPointers(bt, pageNum, pageData, header, result)
+	if cellPointers == nil {
+		return result
+	}
+
+	cells, cellOffsets, cellSizes := parseAndCollectCells(bt, pageNum, pageData, header, cellPointers, result)
+
+	checkOverlappingCells(pageNum, cellOffsets, cellSizes, result)
+	checkKeyOrder(pageNum, cells, nil, nil, result)
+
+	finalizeResult(result, header, cells)
+	return result
+}
+
+// loadPageAndHeader loads page data and parses the header.
+func loadPageAndHeader(bt *Btree, pageNum uint32, result *IntegrityResult) ([]byte, *PageHeader) {
 	pageData, err := bt.GetPage(pageNum)
 	if err != nil {
 		result.AddError(pageNum, "page_not_found", fmt.Sprintf("failed to get page: %v", err))
-		return result
+		return nil, nil
 	}
 
-	// Parse header
 	header, err := ParsePageHeader(pageData, pageNum)
 	if err != nil {
 		result.AddError(pageNum, "invalid_header", fmt.Sprintf("failed to parse page header: %v", err))
-		return result
+		return nil, nil
 	}
 
-	// Check page format
-	checkPageFormat(bt, pageNum, pageData, header, result)
+	return pageData, header
+}
 
-	// Get cell pointers
+// validateCellPointers gets and validates cell pointers.
+func validateCellPointers(bt *Btree, pageNum uint32, pageData []byte, header *PageHeader, result *IntegrityResult) []uint16 {
 	cellPointers, err := header.GetCellPointers(pageData)
 	if err != nil {
 		result.AddError(pageNum, "invalid_cell_pointers", fmt.Sprintf("failed to get cell pointers: %v", err))
-		return result
+		return nil
 	}
 
-	// Check cell pointers sorted
 	checkCellPointersSorted(pageNum, cellPointers, result)
+	return cellPointers
+}
 
-	// Parse cells and check overlaps
+// parseAndCollectCells parses all cells and collects their information.
+func parseAndCollectCells(bt *Btree, pageNum uint32, pageData []byte, header *PageHeader, cellPointers []uint16, result *IntegrityResult) ([]*CellInfo, []int, []int) {
 	cellOffsets := make([]int, 0, header.NumCells)
 	cellSizes := make([]int, 0, header.NumCells)
 	cells := make([]*CellInfo, 0, header.NumCells)
 
 	for i := 0; i < int(header.NumCells); i++ {
-		cellOffset := int(cellPointers[i])
-		if cellOffset >= len(pageData) {
-			result.AddError(pageNum, "cell_out_of_bounds",
-				fmt.Sprintf("cell %d offset %d exceeds page size %d", i, cellOffset, len(pageData)))
-			continue
+		cell, offset, size := parseSingleCell(bt, pageNum, pageData, header, cellPointers, i, result)
+		if cell != nil {
+			cells = append(cells, cell)
+			cellOffsets = append(cellOffsets, offset)
+			cellSizes = append(cellSizes, size)
 		}
-
-		cellData := pageData[cellOffset:]
-		cell, err := ParseCell(header.PageType, cellData, bt.UsableSize)
-		if err != nil {
-			result.AddError(pageNum, "invalid_cell", fmt.Sprintf("cell %d parse error: %v", i, err))
-			continue
-		}
-
-		cells = append(cells, cell)
-		cellOffsets = append(cellOffsets, cellOffset)
-		cellSizes = append(cellSizes, int(cell.CellSize))
 	}
 
-	checkOverlappingCells(pageNum, cellOffsets, cellSizes, result)
-	checkKeyOrder(pageNum, cells, nil, nil, result)
+	return cells, cellOffsets, cellSizes
+}
 
+// parseSingleCell parses a single cell at the given index.
+func parseSingleCell(bt *Btree, pageNum uint32, pageData []byte, header *PageHeader, cellPointers []uint16, i int, result *IntegrityResult) (*CellInfo, int, int) {
+	cellOffset := int(cellPointers[i])
+	if cellOffset >= len(pageData) {
+		result.AddError(pageNum, "cell_out_of_bounds",
+			fmt.Sprintf("cell %d offset %d exceeds page size %d", i, cellOffset, len(pageData)))
+		return nil, 0, 0
+	}
+
+	cellData := pageData[cellOffset:]
+	cell, err := ParseCell(header.PageType, cellData, bt.UsableSize)
+	if err != nil {
+		result.AddError(pageNum, "invalid_cell", fmt.Sprintf("cell %d parse error: %v", i, err))
+		return nil, 0, 0
+	}
+
+	return cell, cellOffset, int(cell.CellSize)
+}
+
+// finalizeResult sets the final counts in the result.
+func finalizeResult(result *IntegrityResult, header *PageHeader, cells []*CellInfo) {
 	result.PageCount = 1
 	if header.IsLeaf {
 		result.RowCount = int64(len(cells))
 	}
-
-	return result
 }
 
 // ValidateFreeBlockList checks the integrity of the free block list on a page

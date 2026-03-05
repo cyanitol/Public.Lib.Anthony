@@ -224,6 +224,19 @@ func (c *BtCursor) redistributeInteriorCells(oldPage, newPage *BtreePage, cells 
 		return fmt.Errorf("failed to clear old page: %w", err)
 	}
 
+	if err := c.populateLeftInteriorPage(oldPage, cells, childPages, medianIdx); err != nil {
+		return err
+	}
+
+	if err := c.populateRightInteriorPage(newPage, newPageNum, cells, childPages, medianIdx); err != nil {
+		return err
+	}
+
+	return c.defragmentBothPages(oldPage, newPage)
+}
+
+// populateLeftInteriorPage inserts cells into the left page and sets its right child.
+func (c *BtCursor) populateLeftInteriorPage(oldPage *BtreePage, cells [][]byte, childPages []uint32, medianIdx int) error {
 	for i := 0; i < medianIdx; i++ {
 		if err := oldPage.InsertCell(i, cells[i]); err != nil {
 			return fmt.Errorf("failed to insert cell %d into left page: %w", i, err)
@@ -232,7 +245,11 @@ func (c *BtCursor) redistributeInteriorCells(oldPage, newPage *BtreePage, cells 
 
 	headerOffset := getHeaderOffset(c.CurrentPage)
 	binary.BigEndian.PutUint32(oldPage.Data[headerOffset+PageHeaderOffsetRightChild:], childPages[medianIdx])
+	return nil
+}
 
+// populateRightInteriorPage inserts cells into the right page and sets its right child.
+func (c *BtCursor) populateRightInteriorPage(newPage *BtreePage, newPageNum uint32, cells [][]byte, childPages []uint32, medianIdx int) error {
 	for i := medianIdx + 1; i < len(cells); i++ {
 		if err := newPage.InsertCell(i-medianIdx-1, cells[i]); err != nil {
 			return fmt.Errorf("failed to insert cell %d into right page: %w", i, err)
@@ -243,14 +260,17 @@ func (c *BtCursor) redistributeInteriorCells(oldPage, newPage *BtreePage, cells 
 	if medianIdx+1 < len(childPages) {
 		binary.BigEndian.PutUint32(newPage.Data[newHeaderOffset+PageHeaderOffsetRightChild:], childPages[len(childPages)-1])
 	}
+	return nil
+}
 
+// defragmentBothPages defragments both the old and new pages.
+func (c *BtCursor) defragmentBothPages(oldPage, newPage *BtreePage) error {
 	if err := oldPage.Defragment(); err != nil {
 		return fmt.Errorf("failed to defragment left page: %w", err)
 	}
 	if err := newPage.Defragment(); err != nil {
 		return fmt.Errorf("failed to defragment right page: %w", err)
 	}
-
 	return nil
 }
 

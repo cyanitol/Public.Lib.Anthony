@@ -470,44 +470,62 @@ func (v *VDBE) CloseCursor(index int) error {
 
 // Reset resets the VDBE to its initial state, ready to execute again.
 func (v *VDBE) Reset() error {
-	// Reset all memory cells (but don't release them as they're reused)
+	v.resetMemoryCells()
+	v.resetResultRow()
+	v.resetSorters()
+	v.resetCursors()
+	v.resetExecutionState()
+	v.resetStatistics()
+	return nil
+}
+
+// resetMemoryCells resets all memory cells but keeps them allocated.
+func (v *VDBE) resetMemoryCells() {
 	for _, mem := range v.Mem {
 		mem.Release()
 	}
+}
 
-	// Return ResultRow cells to pool
+// resetResultRow returns ResultRow cells to pool.
+func (v *VDBE) resetResultRow() {
 	for _, mem := range v.ResultRow {
 		if mem != nil {
 			PutMem(mem)
 		}
 	}
+	v.ResultRow = nil
+}
 
-	// Close all sorters and return pooled memory
+// resetSorters closes all sorters and returns pooled memory.
+func (v *VDBE) resetSorters() {
 	for _, sorter := range v.Sorters {
 		if sorter != nil {
 			sorter.Close()
 		}
 	}
+}
 
-	// Close all cursors
+// resetCursors closes all cursors.
+func (v *VDBE) resetCursors() {
 	for i := range v.Cursors {
 		v.Cursors[i] = nil
 	}
+}
 
-	// Reset execution state
+// resetExecutionState resets the execution state variables.
+func (v *VDBE) resetExecutionState() {
 	v.PC = 0
 	v.State = StateReady
 	v.RC = 0
-	v.ResultRow = nil
 	v.ErrorMsg = ""
 	v.NumSteps = 0
+}
 
-	// Reset statistics if enabled
+// resetStatistics resets statistics if enabled.
+func (v *VDBE) resetStatistics() {
 	if v.Stats != nil {
 		v.Stats = NewQueryStatistics()
 	}
-
-	return nil
 }
 
 // Finalize finalizes the VDBE and releases all resources.
@@ -582,32 +600,42 @@ func (v *VDBE) ExplainProgram() string {
 		return "Empty program"
 	}
 
-	result := "addr  opcode         p1    p2    p3    p4             p5  comment\n"
-	result += "----  -------------  ----  ----  ----  -------------  --  -------\n"
-
+	result := v.explainHeader()
 	for i, instr := range v.Program {
-		p4str := ""
-		switch instr.P4Type {
-		case P4Int32:
-			p4str = fmt.Sprintf("%d", instr.P4.I)
-		case P4Int64:
-			p4str = fmt.Sprintf("%d", instr.P4.I64)
-		case P4Real:
-			p4str = fmt.Sprintf("%g", instr.P4.R)
-		case P4Static, P4Dynamic:
-			p4str = fmt.Sprintf("%q", instr.P4.Z)
-		}
-
-		comment := ""
-		if instr.Comment != "" {
-			comment = instr.Comment
-		}
-
-		result += fmt.Sprintf("%-4d  %-13s  %-4d  %-4d  %-4d  %-13s  %-2d  %s\n",
-			i, instr.Opcode.String(), instr.P1, instr.P2, instr.P3, p4str, instr.P5, comment)
+		result += v.explainInstruction(i, instr)
 	}
 
 	return result
+}
+
+// explainHeader returns the header for the explain output.
+func (v *VDBE) explainHeader() string {
+	return "addr  opcode         p1    p2    p3    p4             p5  comment\n" +
+		"----  -------------  ----  ----  ----  -------------  --  -------\n"
+}
+
+// explainInstruction formats a single instruction for explain output.
+func (v *VDBE) explainInstruction(addr int, instr *Instruction) string {
+	p4str := v.formatP4(instr)
+	comment := instr.Comment
+	return fmt.Sprintf("%-4d  %-13s  %-4d  %-4d  %-4d  %-13s  %-2d  %s\n",
+		addr, instr.Opcode.String(), instr.P1, instr.P2, instr.P3, p4str, instr.P5, comment)
+}
+
+// formatP4 formats the P4 operand based on its type.
+func (v *VDBE) formatP4(instr *Instruction) string {
+	switch instr.P4Type {
+	case P4Int32:
+		return fmt.Sprintf("%d", instr.P4.I)
+	case P4Int64:
+		return fmt.Sprintf("%d", instr.P4.I64)
+	case P4Real:
+		return fmt.Sprintf("%g", instr.P4.R)
+	case P4Static, P4Dynamic:
+		return fmt.Sprintf("%q", instr.P4.Z)
+	default:
+		return ""
+	}
 }
 
 // IsReadOnly returns true if this is a read-only statement.
@@ -714,23 +742,42 @@ func getCurrentTimeNanos() int64 {
 // RecordInstruction records execution of an instruction.
 func (s *QueryStatistics) RecordInstruction(opcode Opcode) {
 	s.NumInstructions++
+	s.trackOperationType(opcode)
+}
 
-	// Track specific operation types
-	switch opcode {
-	case OpGoto, OpIf, OpIfNot, OpIfPos, OpIfNotZero:
-		s.NumJumps++
-	case OpEq, OpNe, OpLt, OpLe, OpGt, OpGe:
-		s.NumComparisons++
-	case OpRewind, OpSeekGE, OpSeekGT, OpSeekLE, OpSeekLT, OpSeekRowid:
-		s.CursorSeeks++
-	case OpNext, OpPrev:
-		s.CursorSteps++
-	case OpRowData, OpColumn:
-		s.RowsRead++
-	case OpInsert, OpDelete:
-		s.RowsWritten++
-	case OpIdxInsert, OpIdxDelete:
-		s.IndexLookups++
+// opcodeStatCategory maps opcodes to their statistic categories
+var opcodeStatCategory = map[Opcode]func(*QueryStatistics){
+	OpGoto: func(s *QueryStatistics) { s.NumJumps++ },
+	OpIf: func(s *QueryStatistics) { s.NumJumps++ },
+	OpIfNot: func(s *QueryStatistics) { s.NumJumps++ },
+	OpIfPos: func(s *QueryStatistics) { s.NumJumps++ },
+	OpIfNotZero: func(s *QueryStatistics) { s.NumJumps++ },
+	OpEq: func(s *QueryStatistics) { s.NumComparisons++ },
+	OpNe: func(s *QueryStatistics) { s.NumComparisons++ },
+	OpLt: func(s *QueryStatistics) { s.NumComparisons++ },
+	OpLe: func(s *QueryStatistics) { s.NumComparisons++ },
+	OpGt: func(s *QueryStatistics) { s.NumComparisons++ },
+	OpGe: func(s *QueryStatistics) { s.NumComparisons++ },
+	OpRewind: func(s *QueryStatistics) { s.CursorSeeks++ },
+	OpSeekGE: func(s *QueryStatistics) { s.CursorSeeks++ },
+	OpSeekGT: func(s *QueryStatistics) { s.CursorSeeks++ },
+	OpSeekLE: func(s *QueryStatistics) { s.CursorSeeks++ },
+	OpSeekLT: func(s *QueryStatistics) { s.CursorSeeks++ },
+	OpSeekRowid: func(s *QueryStatistics) { s.CursorSeeks++ },
+	OpNext: func(s *QueryStatistics) { s.CursorSteps++ },
+	OpPrev: func(s *QueryStatistics) { s.CursorSteps++ },
+	OpRowData: func(s *QueryStatistics) { s.RowsRead++ },
+	OpColumn: func(s *QueryStatistics) { s.RowsRead++ },
+	OpInsert: func(s *QueryStatistics) { s.RowsWritten++ },
+	OpDelete: func(s *QueryStatistics) { s.RowsWritten++ },
+	OpIdxInsert: func(s *QueryStatistics) { s.IndexLookups++ },
+	OpIdxDelete: func(s *QueryStatistics) { s.IndexLookups++ },
+}
+
+// trackOperationType tracks specific operation types for statistics.
+func (s *QueryStatistics) trackOperationType(opcode Opcode) {
+	if fn, ok := opcodeStatCategory[opcode]; ok {
+		fn(s)
 	}
 }
 

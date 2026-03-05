@@ -46,46 +46,61 @@ func (bm25 *BM25Ranker) Score(index *InvertedIndex, docID DocumentID, terms []st
 		return 0.0
 	}
 
-	avgdl := index.GetAverageDocumentLength()
-	docLen := float64(index.GetDocumentLength(docID))
+	params := bm25ScoreParams{
+		avgdl:  index.GetAverageDocumentLength(),
+		docLen: float64(index.GetDocumentLength(docID)),
+		N:      N,
+		K1:     bm25.K1,
+		B:      bm25.B,
+	}
 
+	return bm25.calculateTotalScore(index, docID, terms, params)
+}
+
+// bm25ScoreParams holds parameters for BM25 score calculation.
+type bm25ScoreParams struct {
+	avgdl  float64
+	docLen float64
+	N      float64
+	K1     float64
+	B      float64
+}
+
+// calculateTotalScore calculates the total BM25 score across all terms.
+func (bm25 *BM25Ranker) calculateTotalScore(index *InvertedIndex, docID DocumentID, terms []string, params bm25ScoreParams) float64 {
 	score := 0.0
 
-	// Calculate score for each term
 	for _, term := range terms {
 		postings := index.GetPostingList(term)
 		if len(postings) == 0 {
 			continue
 		}
 
-		// Find posting for this document
-		var termFreq int
-		found := false
-		for _, posting := range postings {
-			if posting.DocID == docID {
-				termFreq = posting.Frequency
-				found = true
-				break
-			}
-		}
-
+		termFreq, found := findTermFrequency(postings, docID)
 		if !found {
 			continue
 		}
 
-		// Calculate IDF
-		df := float64(len(postings)) // document frequency
-		idf := math.Log((N-df+0.5)/(df+0.5) + 1.0)
-
-		// Calculate BM25 score component for this term
-		tf := float64(termFreq)
-		numerator := tf * (bm25.K1 + 1.0)
-		denominator := tf + bm25.K1*(1.0-bm25.B+bm25.B*docLen/avgdl)
-
-		score += idf * (numerator / denominator)
+		score += bm25.calculateTermScore(termFreq, len(postings), params)
 	}
 
 	return score
+}
+
+// calculateTermScore calculates the BM25 score component for a single term.
+func (bm25 *BM25Ranker) calculateTermScore(termFreq int, df int, params bm25ScoreParams) float64 {
+	idf := calculateBM25IDF(params.N, float64(df))
+	tf := float64(termFreq)
+
+	numerator := tf * (params.K1 + 1.0)
+	denominator := tf + params.K1*(1.0-params.B+params.B*params.docLen/params.avgdl)
+
+	return idf * (numerator / denominator)
+}
+
+// calculateBM25IDF calculates the IDF component for BM25.
+func calculateBM25IDF(N, df float64) float64 {
+	return math.Log((N-df+0.5)/(df+0.5) + 1.0)
 }
 
 // TFIDFRanker implements TF-IDF ranking.
@@ -117,6 +132,11 @@ func (tfidf *TFIDFRanker) Score(index *InvertedIndex, docID DocumentID, terms []
 		return 0.0
 	}
 
+	return tfidf.calculateTotalScore(index, docID, terms, N, docLen)
+}
+
+// calculateTotalScore calculates the total TF-IDF score across all terms.
+func (tfidf *TFIDFRanker) calculateTotalScore(index *InvertedIndex, docID DocumentID, terms []string, N, docLen float64) float64 {
 	score := 0.0
 
 	for _, term := range terms {
@@ -125,32 +145,38 @@ func (tfidf *TFIDFRanker) Score(index *InvertedIndex, docID DocumentID, terms []
 			continue
 		}
 
-		// Find posting for this document
-		var termFreq int
-		found := false
-		for _, posting := range postings {
-			if posting.DocID == docID {
-				termFreq = posting.Frequency
-				found = true
-				break
-			}
-		}
-
+		termFreq, found := findTermFrequency(postings, docID)
 		if !found {
 			continue
 		}
 
-		// Calculate TF
-		tf := float64(termFreq) / docLen
-
-		// Calculate IDF
-		df := float64(len(postings))
-		idf := math.Log(N / df)
-
-		score += tf * idf
+		score += tfidf.calculateTermScore(termFreq, len(postings), N, docLen)
 	}
 
 	return score
+}
+
+// calculateTermScore calculates the TF-IDF score component for a single term.
+func (tfidf *TFIDFRanker) calculateTermScore(termFreq int, df int, N, docLen float64) float64 {
+	tf := float64(termFreq) / docLen
+	idf := calculateTFIDFIDF(N, float64(df))
+	return tf * idf
+}
+
+// calculateTFIDFIDF calculates the IDF component for TF-IDF.
+func calculateTFIDFIDF(N, df float64) float64 {
+	return math.Log(N / df)
+}
+
+// findTermFrequency finds the frequency of a term in a document from posting list.
+// Returns the frequency and whether it was found.
+func findTermFrequency(postings []PostingList, docID DocumentID) (int, bool) {
+	for _, posting := range postings {
+		if posting.DocID == docID {
+			return posting.Frequency, true
+		}
+	}
+	return 0, false
 }
 
 // SimpleRanker implements a simple frequency-based ranking.

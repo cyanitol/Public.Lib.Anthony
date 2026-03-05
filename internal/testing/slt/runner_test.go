@@ -11,10 +11,7 @@ import (
 
 // TestRunnerBasicStatement tests basic statement execution
 func TestRunnerBasicStatement(t *testing.T) {
-	db, err := sql.Open("sqlite_internal", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := openTestDB(t)
 	defer db.Close()
 
 	runner := NewRunner(db)
@@ -31,25 +28,50 @@ statement ok
 INSERT INTO t VALUES (2, 'Bob')
 `
 
-	results, err := runner.RunString(testContent)
+	results := runTestString(t, runner, testContent)
+	verifyResultCount(t, results, 3)
+	verifyAllPassed(t, results)
+	verifyStats(t, runner, 3, 3, 0)
+}
+
+// openTestDB opens a test database connection
+func openTestDB(t *testing.T) *sql.DB {
+	db, err := sql.Open("sqlite_internal", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	return db
+}
+
+// runTestString runs a test string and returns results
+func runTestString(t *testing.T, runner *Runner, content string) []TestResult {
+	results, err := runner.RunString(content)
 	if err != nil {
 		t.Fatalf("RunString failed: %v", err)
 	}
+	return results
+}
 
-	// Should have 3 tests
-	if len(results) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(results))
+// verifyResultCount checks if result count matches expected
+func verifyResultCount(t *testing.T, results []TestResult, expected int) {
+	if len(results) != expected {
+		t.Fatalf("expected %d results, got %d", expected, len(results))
 	}
+}
 
-	// All should pass
+// verifyAllPassed checks if all results passed
+func verifyAllPassed(t *testing.T, results []TestResult) {
 	for i, result := range results {
 		if !result.Passed {
 			t.Errorf("test %d failed: %v\nSQL: %s", i, result.Error, result.SQL)
 		}
 	}
+}
 
+// verifyStats checks if runner stats match expected values
+func verifyStats(t *testing.T, runner *Runner, expectedTotal, expectedPassed, expectedFailed int) {
 	total, passed, failed, _ := runner.GetStats()
-	if total != 3 || passed != 3 || failed != 0 {
+	if total != expectedTotal || passed != expectedPassed || failed != expectedFailed {
 		t.Errorf("stats mismatch: total=%d, passed=%d, failed=%d", total, passed, failed)
 	}
 }
@@ -423,24 +445,34 @@ func TestApplySorting(t *testing.T) {
 		{"2", "Bob"},
 	}
 
-	// Test nosort (no change)
+	testNoSort(t, runner, rows)
+	testRowSort(t, runner, rows)
+	testValueSort(t, runner)
+}
+
+// testNoSort verifies nosort mode doesn't change order
+func testNoSort(t *testing.T, runner *Runner, rows [][]string) {
 	sorted := runner.applySorting(rows, "nosort")
 	if sorted[0][0] != "3" {
 		t.Errorf("nosort should not change order")
 	}
+}
 
-	// Test rowsort
-	sorted = runner.applySorting(rows, "rowsort")
+// testRowSort verifies rowsort mode sorts by rows
+func testRowSort(t *testing.T, runner *Runner, rows [][]string) {
+	sorted := runner.applySorting(rows, "rowsort")
 	if sorted[0][0] != "1" || sorted[1][0] != "2" || sorted[2][0] != "3" {
 		t.Errorf("rowsort failed: got %v", sorted)
 	}
+}
 
-	// Test valuesort
-	rows2 := [][]string{
+// testValueSort verifies valuesort mode sorts all values
+func testValueSort(t *testing.T, runner *Runner) {
+	rows := [][]string{
 		{"c", "d"},
 		{"a", "b"},
 	}
-	sorted = runner.applySorting(rows2, "valuesort")
+	sorted := runner.applySorting(rows, "valuesort")
 	if sorted[0][0] != "a" || sorted[0][1] != "b" || sorted[1][0] != "c" || sorted[1][1] != "d" {
 		t.Errorf("valuesort failed: got %v", sorted)
 	}
@@ -605,10 +637,7 @@ SELECT * FROM t
 
 // TestRunnerStats tests statistics tracking
 func TestRunnerStats(t *testing.T) {
-	db, err := sql.Open("sqlite_internal", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := openTestDB(t)
 	defer db.Close()
 
 	runner := NewRunner(db)
@@ -626,34 +655,34 @@ SELECT * FROM t
 1
 `
 
-	results, err := runner.RunString(testContent)
-	if err != nil {
-		t.Fatalf("RunString failed: %v", err)
-	}
+	results := runTestString(t, runner, testContent)
+	verifyStatsAfterRun(t, runner, results)
+	verifyStatsAfterReset(t, runner)
+}
 
+// verifyStatsAfterRun checks stats match expected after running tests
+func verifyStatsAfterRun(t *testing.T, runner *Runner, results []TestResult) {
 	total, passed, failed, skipped := runner.GetStats()
-
 	expectedTotal := len(results)
+
 	if total != expectedTotal {
 		t.Errorf("total: got %d, want %d", total, expectedTotal)
 	}
-
-	// All tests should pass
 	if passed != expectedTotal {
 		t.Errorf("passed: got %d, want %d", passed, expectedTotal)
 	}
-
 	if failed != 0 {
 		t.Errorf("failed: got %d, want 0", failed)
 	}
-
 	if skipped != 0 {
 		t.Errorf("skipped: got %d, want 0", skipped)
 	}
+}
 
-	// Test reset
+// verifyStatsAfterReset checks stats are zeroed after reset
+func verifyStatsAfterReset(t *testing.T, runner *Runner) {
 	runner.ResetStats()
-	total, passed, failed, skipped = runner.GetStats()
+	total, passed, failed, skipped := runner.GetStats()
 	if total != 0 || passed != 0 || failed != 0 || skipped != 0 {
 		t.Errorf("after reset: got (%d, %d, %d, %d), want all zeros",
 			total, passed, failed, skipped)

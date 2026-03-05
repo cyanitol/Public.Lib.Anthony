@@ -290,57 +290,70 @@ func hasNoExplicitColumns(view *schema.View) bool {
 
 // flattenSimpleView flattens a simple view into the outer query.
 func flattenSimpleView(outer *parser.SelectStmt, tableIdx int, view *schema.View, s *schema.Schema, depth int) (*parser.SelectStmt, error) {
-	viewSelect := view.Select
-
-	// Get the underlying table name from the view
-	underlyingTable := viewSelect.From.Tables[0].TableName
-
-	// Check if the underlying table is also a view (recursive view resolution)
-	if innerView, exists := s.GetView(underlyingTable); exists {
-		if canFlattenView(innerView) {
-			// Recursively flatten
-			flattenedInner, err := flattenSimpleView(viewSelect, 0, innerView, s, depth+1)
-			if err != nil {
-				return nil, err
-			}
-			viewSelect = flattenedInner
-			underlyingTable = viewSelect.From.Tables[0].TableName
-		}
+	viewSelect, underlyingTable, err := resolveViewSelect(view, s, depth)
+	if err != nil {
+		return nil, err
 	}
 
-	// Replace the view reference with the underlying table
-	outer.From.Tables[tableIdx].TableName = underlyingTable
-	outer.From.Tables[tableIdx].Subquery = nil
+	replaceViewWithTable(outer, tableIdx, underlyingTable)
 
-	// If the view has explicit column names, we need to map the outer query's
-	// column references to the view's underlying columns
 	if len(view.Columns) > 0 {
-		err := applyViewColumnMapping(outer, view, viewSelect)
-		if err != nil {
+		if err := applyViewColumnMapping(outer, view, viewSelect); err != nil {
 			return nil, err
 		}
 	}
 
-	// Handle SELECT * from the view - replace with view's columns
+	handleSelectStar(outer, viewSelect)
+	mergeWhereClauses(outer, viewSelect)
+
+	return outer, nil
+}
+
+// resolveViewSelect resolves a view's SELECT, recursively flattening nested views
+func resolveViewSelect(view *schema.View, s *schema.Schema, depth int) (*parser.SelectStmt, string, error) {
+	viewSelect := view.Select
+	underlyingTable := viewSelect.From.Tables[0].TableName
+
+	innerView, exists := s.GetView(underlyingTable)
+	if !exists || !canFlattenView(innerView) {
+		return viewSelect, underlyingTable, nil
+	}
+
+	flattenedInner, err := flattenSimpleView(viewSelect, 0, innerView, s, depth+1)
+	if err != nil {
+		return nil, "", err
+	}
+	return flattenedInner, flattenedInner.From.Tables[0].TableName, nil
+}
+
+// replaceViewWithTable replaces a view reference with its underlying table
+func replaceViewWithTable(outer *parser.SelectStmt, tableIdx int, underlyingTable string) {
+	outer.From.Tables[tableIdx].TableName = underlyingTable
+	outer.From.Tables[tableIdx].Subquery = nil
+}
+
+// handleSelectStar replaces SELECT * with the view's columns
+func handleSelectStar(outer, viewSelect *parser.SelectStmt) {
 	if isSelectStar(outer) {
 		outer.Columns = viewSelect.Columns
 	}
+}
 
-	// Merge WHERE clauses
-	if viewSelect.Where != nil {
-		if outer.Where != nil {
-			// Combine with AND
-			outer.Where = &parser.BinaryExpr{
-				Left:  outer.Where,
-				Op:    parser.OpAnd,
-				Right: viewSelect.Where,
-			}
-		} else {
-			outer.Where = viewSelect.Where
-		}
+// mergeWhereClauses combines the outer and view WHERE clauses
+func mergeWhereClauses(outer, viewSelect *parser.SelectStmt) {
+	if viewSelect.Where == nil {
+		return
 	}
 
-	return outer, nil
+	if outer.Where != nil {
+		outer.Where = &parser.BinaryExpr{
+			Left:  outer.Where,
+			Op:    parser.OpAnd,
+			Right: viewSelect.Where,
+		}
+	} else {
+		outer.Where = viewSelect.Where
+	}
 }
 
 // applyViewColumnMapping maps column references from the view's explicit column

@@ -108,35 +108,54 @@ func (dr *DatabaseRegistry) GetTable(schemaName, tableName string) (*Table, stri
 	defer dr.mu.RUnlock()
 
 	if schemaName != "" {
-		// Qualified lookup: schema.table
-		lowerSchema := strings.ToLower(schemaName)
-		db, ok := dr.databases[lowerSchema]
-		if !ok {
-			return nil, "", false
-		}
-		table, ok := db.Schema.GetTable(tableName)
-		return table, schemaName, ok
+		return dr.getQualifiedTable(schemaName, tableName)
 	}
 
-	// Unqualified lookup: search main first, then temp, then others
+	return dr.searchUnqualifiedTable(tableName)
+}
+
+// getQualifiedTable retrieves a table using a qualified schema.table name
+func (dr *DatabaseRegistry) getQualifiedTable(schemaName, tableName string) (*Table, string, bool) {
+	lowerSchema := strings.ToLower(schemaName)
+	db, ok := dr.databases[lowerSchema]
+	if !ok {
+		return nil, "", false
+	}
+	table, ok := db.Schema.GetTable(tableName)
+	return table, schemaName, ok
+}
+
+// searchUnqualifiedTable searches for a table across all databases in priority order
+func (dr *DatabaseRegistry) searchUnqualifiedTable(tableName string) (*Table, string, bool) {
+	searchOrder := dr.buildSearchOrder()
+
+	for _, dbName := range searchOrder {
+		if table, ok := dr.findTableInDatabase(dbName, tableName); ok {
+			return table, dbName, true
+		}
+	}
+
+	return nil, "", false
+}
+
+// buildSearchOrder creates the database search priority: main, temp, then others
+func (dr *DatabaseRegistry) buildSearchOrder() []string {
 	searchOrder := []string{"main", "temp"}
 	for name := range dr.databases {
 		if name != "main" && name != "temp" {
 			searchOrder = append(searchOrder, name)
 		}
 	}
+	return searchOrder
+}
 
-	for _, dbName := range searchOrder {
-		db, ok := dr.databases[dbName]
-		if !ok {
-			continue
-		}
-		if table, ok := db.Schema.GetTable(tableName); ok {
-			return table, dbName, true
-		}
+// findTableInDatabase looks up a table in a specific database
+func (dr *DatabaseRegistry) findTableInDatabase(dbName, tableName string) (*Table, bool) {
+	db, ok := dr.databases[dbName]
+	if !ok {
+		return nil, false
 	}
-
-	return nil, "", false
+	return db.Schema.GetTable(tableName)
 }
 
 // ListDatabases returns a list of all attached database names.

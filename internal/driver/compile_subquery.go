@@ -39,62 +39,82 @@ func (s *Stmt) hasFromSubqueries(stmt *parser.SelectStmt) bool {
 
 // compileSelectWithFromSubqueries compiles a SELECT with FROM subqueries.
 func (s *Stmt) compileSelectWithFromSubqueries(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
-	// Special case: if we have a single FROM subquery and the outer query is simple
-	// (just selecting columns, possibly with WHERE/ORDER BY), we can optimize by
-	// compiling the subquery directly and handling column references
-	if len(stmt.From.Tables) == 1 && stmt.From.Tables[0].Subquery != nil && len(stmt.From.Joins) == 0 {
+	// Special case: single FROM subquery
+	if s.isSingleFromSubquery(stmt) {
 		return s.compileSingleFromSubquery(vm, stmt, args)
 	}
 
-	// Strategy: compile each FROM subquery into a temp table, then compile main query
-	// This is a more complex case with multiple subqueries or joins
+	// Multiple subqueries or joins
+	return s.compileMultipleFromSubqueries(vm, stmt, args)
+}
 
+// isSingleFromSubquery checks if statement has exactly one FROM subquery with no joins.
+func (s *Stmt) isSingleFromSubquery(stmt *parser.SelectStmt) bool {
+	return len(stmt.From.Tables) == 1 &&
+		stmt.From.Tables[0].Subquery != nil &&
+		len(stmt.From.Joins) == 0
+}
+
+// compileMultipleFromSubqueries handles multiple FROM subqueries or joins.
+func (s *Stmt) compileMultipleFromSubqueries(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	// Allocate cursors for all subqueries and main query
 	numSubqueries := s.countFromSubqueries(stmt)
 	vm.AllocCursors(numSubqueries + 1)
 	vm.AllocMemory(50)
-
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 
 	// Compile each FROM subquery
+	if err := s.compileFromTableSubqueries(vm, stmt, args); err != nil {
+		return nil, err
+	}
+
+	// Compile main query or emit placeholder
+	return s.finalizeFromSubqueriesCompilation(vm, stmt, args)
+}
+
+// compileFromTableSubqueries compiles subqueries from FROM tables.
+func (s *Stmt) compileFromTableSubqueries(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) error {
 	cursorIdx := 0
 	for _, table := range stmt.From.Tables {
 		if table.Subquery != nil {
-			// Compile the subquery
-			subVM, err := s.compileSelect(vdbe.New(), table.Subquery, args)
-			if err != nil {
-				return nil, fmt.Errorf("failed to compile FROM subquery: %w", err)
+			if err := s.compileAndMergeSubquery(vm, table.Subquery, cursorIdx, args); err != nil {
+				return err
 			}
-
-			// Create a temp table to hold results
-			// In a full implementation, would:
-			// 1. Execute subVM to get results
-			// 2. Store results in temp table
-			// 3. Use temp table in main query
-
-			// For now, emit a comment
-			commentOp := vm.AddOp(vdbe.OpNoop, 0, 0, 0)
-			vm.Program[commentOp].Comment = fmt.Sprintf("FROM subquery compiled for cursor %d", cursorIdx)
 			cursorIdx++
-
-			// Merge the subquery program into main VM
-			// This is simplified - real implementation would properly handle temp tables
-			vm.Program = append(vm.Program, subVM.Program...)
 		}
 	}
+	return nil
+}
 
-	// Now compile the main query as normal, but referencing the temp tables
-	// For this simplified implementation, we'll just compile it normally
-	// A full implementation would track temp table schemas and use them
+// compileAndMergeSubquery compiles a single subquery and merges it into the main VM.
+func (s *Stmt) compileAndMergeSubquery(vm *vdbe.VDBE, subquery *parser.SelectStmt, cursorIdx int, args []driver.NamedValue) error {
+	subVM, err := s.compileSelect(vdbe.New(), subquery, args)
+	if err != nil {
+		return fmt.Errorf("failed to compile FROM subquery: %w", err)
+	}
 
+	// Emit a comment and merge the subquery program
+	commentOp := vm.AddOp(vdbe.OpNoop, 0, 0, 0)
+	vm.Program[commentOp].Comment = fmt.Sprintf("FROM subquery compiled for cursor %d", cursorIdx)
+	vm.Program = append(vm.Program, subVM.Program...)
+	return nil
+}
+
+// finalizeFromSubqueriesCompilation finishes compilation after processing subqueries.
+func (s *Stmt) finalizeFromSubqueriesCompilation(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	// Simplified: compile as if no subquery (assumes flattening occurred)
-	if len(stmt.From.Tables) > 0 && stmt.From.Tables[0].Subquery == nil {
+	if s.hasNonSubqueryTable(stmt) {
 		return s.compileSelect(vm, stmt, args)
 	}
 
 	// If all tables are subqueries, emit a placeholder result
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	return vm, nil
+}
+
+// hasNonSubqueryTable checks if any FROM table is not a subquery.
+func (s *Stmt) hasNonSubqueryTable(stmt *parser.SelectStmt) bool {
+	return len(stmt.From.Tables) > 0 && stmt.From.Tables[0].Subquery == nil
 }
 
 // compileSingleFromSubquery compiles a SELECT with a single FROM subquery.

@@ -25,7 +25,7 @@ func insertFirstRow(stmt *parser.InsertStmt) ([]parser.Expression, error) {
 	return stmt.Values[0], nil
 }
 
-// compileInsert compiles an INSERT statement. CC=3
+// compileInsert compiles an INSERT statement. CC=4
 func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
 
@@ -56,13 +56,18 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 		return s.compileInsertSelect(vm, stmt, args)
 	}
 
-	if len(stmt.Values) == 0 {
-		return nil, fmt.Errorf("INSERT requires VALUES clause")
-	}
-
 	// Check for UPSERT clause (INSERT...ON CONFLICT)
 	if stmt.Upsert != nil {
 		return s.compileInsertUpsert(vm, stmt, args)
+	}
+
+	return s.compileInsertValues(vm, stmt, table, args)
+}
+
+// compileInsertValues compiles a regular INSERT...VALUES statement.
+func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	if len(stmt.Values) == 0 {
+		return nil, fmt.Errorf("INSERT requires VALUES clause")
 	}
 
 	// Use first row to determine structure
@@ -94,22 +99,7 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 
 	// Loop over all rows in VALUES clause
 	for _, row := range stmt.Values {
-		s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, &paramIdx)
-		s.emitInsertRecordValues(vm, table, colNames, row, rowidColIdx, recordStartReg, args, &paramIdx)
-
-		resultReg := recordStartReg + numRecordCols
-		vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
-
-		// OpInsert: P1=cursor, P2=record register, P3=rowid register
-		// P4.I = conflict mode (0=abort, 1=ignore, 2=replace)
-		insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidReg)
-		vm.Program[insertOp].P4.I = conflictMode
-
-		// For AUTOINCREMENT tables, we need to pass table metadata to the Insert handler
-		// Store table name in P4.Z string for sequence management
-		if _, hasAutoincrement := table.HasAutoincrementColumn(); hasAutoincrement {
-			vm.Program[insertOp].P4.Z = table.Name
-		}
+		s.emitInsertRow(vm, table, colNames, row, rowidColIdx, rowidReg, recordStartReg, numRecordCols, conflictMode, args, &paramIdx)
 	}
 
 	// TODO Phase 3.5: AFTER INSERT trigger execution
@@ -120,6 +110,29 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
 	return vm, nil
+}
+
+// emitInsertRow emits bytecode for inserting a single row.
+func (s *Stmt) emitInsertRow(vm *vdbe.VDBE, table *schema.Table, colNames []string, row []parser.Expression,
+	rowidColIdx, rowidReg, recordStartReg, numRecordCols int, conflictMode int32,
+	args []driver.NamedValue, paramIdx *int) {
+
+	s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, paramIdx)
+	s.emitInsertRecordValues(vm, table, colNames, row, rowidColIdx, recordStartReg, args, paramIdx)
+
+	resultReg := recordStartReg + numRecordCols
+	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
+
+	// OpInsert: P1=cursor, P2=record register, P3=rowid register
+	// P4.I = conflict mode (0=abort, 1=ignore, 2=replace)
+	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidReg)
+	vm.Program[insertOp].P4.I = conflictMode
+
+	// For AUTOINCREMENT tables, we need to pass table metadata to the Insert handler
+	// Store table name in P4.Z string for sequence management
+	if _, hasAutoincrement := table.HasAutoincrementColumn(); hasAutoincrement {
+		vm.Program[insertOp].P4.Z = table.Name
+	}
 }
 
 // compileInsertSelect compiles an INSERT...SELECT statement.
@@ -452,38 +465,65 @@ func affinityToOpCastCode(aff schema.Affinity) int {
 }
 
 // compileValue compiles a value expression into bytecode that stores the result in reg.
-// CC=3
+// CC=4
 func (s *Stmt) compileValue(vm *vdbe.VDBE, val parser.Expression, reg int, args []driver.NamedValue, paramIdx *int) {
 	switch v := val.(type) {
 	case *parser.LiteralExpr:
 		compileLiteralExpr(vm, v, reg)
 	case *parser.VariableExpr:
-		if *paramIdx >= len(args) {
-			vm.AddOp(vdbe.OpNull, 0, reg, 0)
-			return
-		}
-		arg := args[*paramIdx]
-		*paramIdx++
-		compileArgValue(vm, arg.Value, reg)
+		compileVariableExpr(vm, v, reg, args, paramIdx)
 	case *parser.UnaryExpr:
-		if v.Op == parser.OpNeg {
-			if lit, ok := v.Expr.(*parser.LiteralExpr); ok {
-				switch lit.Type {
-				case parser.LiteralInteger:
-					intVal, _ := strconv.ParseInt(lit.Value, 10, 64)
-					vm.AddOp(vdbe.OpInteger, int(-intVal), reg, 0)
-					return
-				case parser.LiteralFloat:
-					floatVal, _ := strconv.ParseFloat(lit.Value, 64)
-					vm.AddOpWithP4Real(vdbe.OpReal, 0, reg, 0, -floatVal)
-					return
-				}
-			}
-		}
-		vm.AddOp(vdbe.OpNull, 0, reg, 0)
+		compileUnaryExpr(vm, v, reg)
 	default:
 		vm.AddOp(vdbe.OpNull, 0, reg, 0)
 	}
+}
+
+// compileVariableExpr compiles a variable (parameter placeholder) expression.
+func compileVariableExpr(vm *vdbe.VDBE, v *parser.VariableExpr, reg int, args []driver.NamedValue, paramIdx *int) {
+	if *paramIdx >= len(args) {
+		vm.AddOp(vdbe.OpNull, 0, reg, 0)
+		return
+	}
+	arg := args[*paramIdx]
+	*paramIdx++
+	compileArgValue(vm, arg.Value, reg)
+}
+
+// compileUnaryExpr compiles a unary expression (currently only handles negation).
+func compileUnaryExpr(vm *vdbe.VDBE, v *parser.UnaryExpr, reg int) {
+	if v.Op != parser.OpNeg {
+		vm.AddOp(vdbe.OpNull, 0, reg, 0)
+		return
+	}
+
+	if compileNegatedLiteral(vm, v, reg) {
+		return
+	}
+
+	vm.AddOp(vdbe.OpNull, 0, reg, 0)
+}
+
+// compileNegatedLiteral attempts to compile a negated literal expression.
+// Returns true if successful, false otherwise.
+func compileNegatedLiteral(vm *vdbe.VDBE, v *parser.UnaryExpr, reg int) bool {
+	lit, ok := v.Expr.(*parser.LiteralExpr)
+	if !ok {
+		return false
+	}
+
+	switch lit.Type {
+	case parser.LiteralInteger:
+		intVal, _ := strconv.ParseInt(lit.Value, 10, 64)
+		vm.AddOp(vdbe.OpInteger, int(-intVal), reg, 0)
+		return true
+	case parser.LiteralFloat:
+		floatVal, _ := strconv.ParseFloat(lit.Value, 64)
+		vm.AddOpWithP4Real(vdbe.OpReal, 0, reg, 0, -floatVal)
+		return true
+	}
+
+	return false
 }
 
 // compileLiteralExpr emits the VDBE opcode for a literal value into register reg.
@@ -508,31 +548,78 @@ func compileLiteralExpr(vm *vdbe.VDBE, expr *parser.LiteralExpr, reg int) {
 }
 
 // compileArgValue emits the VDBE opcode for a concrete bound-parameter value
-// into register reg. CC=6
+// into register reg. CC=2
 func compileArgValue(vm *vdbe.VDBE, val driver.Value, reg int) {
-	switch v := val.(type) {
-	case nil:
+	if val == nil {
 		vm.AddOp(vdbe.OpNull, 0, reg, 0)
-	case bool:
-		// SQLite stores booleans as integers: 1 for true, 0 for false
-		intVal := 0
-		if v {
-			intVal = 1
-		}
-		vm.AddOp(vdbe.OpInteger, intVal, reg, 0)
-	case int:
-		vm.AddOp(vdbe.OpInteger, v, reg, 0)
-	case int64:
-		vm.AddOp(vdbe.OpInteger, int(v), reg, 0)
-	case float64:
-		vm.AddOpWithP4Real(vdbe.OpReal, 0, reg, 0, v)
-	case string:
-		vm.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, v)
-	case []byte:
-		vm.AddOpWithP4Blob(vdbe.OpBlob, len(v), reg, 0, v)
-	default:
-		vm.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, fmt.Sprintf("%v", v))
+		return
 	}
+
+	handler := getArgValueHandler(val)
+	handler(vm, val, reg)
+}
+
+// argValueHandler is a function type for handling specific argument types.
+type argValueHandler func(vm *vdbe.VDBE, val driver.Value, reg int)
+
+// getArgValueHandler returns the appropriate handler for the given value type.
+func getArgValueHandler(val driver.Value) argValueHandler {
+	switch val.(type) {
+	case bool:
+		return compileBoolArg
+	case int:
+		return compileIntArg
+	case int64:
+		return compileInt64Arg
+	case float64:
+		return compileFloat64Arg
+	case string:
+		return compileStringArg
+	case []byte:
+		return compileBlobArg
+	default:
+		return compileDefaultArg
+	}
+}
+
+// compileBoolArg compiles a boolean argument value.
+func compileBoolArg(vm *vdbe.VDBE, val driver.Value, reg int) {
+	intVal := 0
+	if val.(bool) {
+		intVal = 1
+	}
+	vm.AddOp(vdbe.OpInteger, intVal, reg, 0)
+}
+
+// compileIntArg compiles an int argument value.
+func compileIntArg(vm *vdbe.VDBE, val driver.Value, reg int) {
+	vm.AddOp(vdbe.OpInteger, val.(int), reg, 0)
+}
+
+// compileInt64Arg compiles an int64 argument value.
+func compileInt64Arg(vm *vdbe.VDBE, val driver.Value, reg int) {
+	vm.AddOp(vdbe.OpInteger, int(val.(int64)), reg, 0)
+}
+
+// compileFloat64Arg compiles a float64 argument value.
+func compileFloat64Arg(vm *vdbe.VDBE, val driver.Value, reg int) {
+	vm.AddOpWithP4Real(vdbe.OpReal, 0, reg, 0, val.(float64))
+}
+
+// compileStringArg compiles a string argument value.
+func compileStringArg(vm *vdbe.VDBE, val driver.Value, reg int) {
+	vm.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, val.(string))
+}
+
+// compileBlobArg compiles a []byte argument value.
+func compileBlobArg(vm *vdbe.VDBE, val driver.Value, reg int) {
+	v := val.([]byte)
+	vm.AddOpWithP4Blob(vdbe.OpBlob, len(v), reg, 0, v)
+}
+
+// compileDefaultArg compiles an unknown argument value.
+func compileDefaultArg(vm *vdbe.VDBE, val driver.Value, reg int) {
+	vm.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, fmt.Sprintf("%v", val))
 }
 
 // ============================================================================

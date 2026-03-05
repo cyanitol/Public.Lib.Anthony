@@ -394,18 +394,26 @@ func (dt *DateTime) applyModifier(mod string) error {
 	if dt.handleStartOfModifier(mod) {
 		return nil
 	}
-	if err := dt.handleWeekdayModifier(mod); err != nil {
+
+	handled, err := dt.handleWeekdayModifier(mod)
+	if handled {
 		return err
 	}
-	if err := dt.handleSpecialModifiers(mod); err != nil {
+
+	handled, err = dt.handleSpecialModifiers(mod)
+	if handled {
 		return err
 	}
+
 	if dt.parseTimeOffset(modOrig) {
 		return nil
 	}
-	if err := dt.handleDateArithmetic(mod); err != nil {
+
+	handled, err = dt.handleDateArithmetic(mod)
+	if handled {
 		return err
 	}
+
 	if dt.handleNoOpModifiers(mod) {
 		return nil
 	}
@@ -426,52 +434,52 @@ func (dt *DateTime) handleStartOfModifier(mod string) bool {
 }
 
 // handleWeekdayModifier handles 'weekday N' modifiers.
-// Returns error if prefix matches but value is invalid, nil otherwise.
-func (dt *DateTime) handleWeekdayModifier(mod string) error {
+// Returns (handled, error). If handled is true, the error indicates success/failure.
+func (dt *DateTime) handleWeekdayModifier(mod string) (bool, error) {
 	if !strings.HasPrefix(mod, "weekday ") {
-		return nil
+		return false, nil
 	}
 	dayStr := strings.TrimPrefix(mod, "weekday ")
 	targetDay, err := strconv.Atoi(dayStr)
 	if err != nil || targetDay < 0 || targetDay > 6 {
-		return fmt.Errorf("invalid weekday: %s", dayStr)
+		return true, fmt.Errorf("invalid weekday: %s", dayStr)
 	}
-	return dt.applyWeekday(targetDay)
+	return true, dt.applyWeekday(targetDay)
 }
 
 // handleSpecialModifiers handles unixepoch, auto, and julianday modifiers.
-// Returns error on failure, nil if not one of these modifiers.
-func (dt *DateTime) handleSpecialModifiers(mod string) error {
+// Returns (handled, error). If handled is true, the error indicates success/failure.
+func (dt *DateTime) handleSpecialModifiers(mod string) (bool, error) {
 	switch mod {
 	case "unixepoch":
-		return dt.applyUnixepoch()
+		return true, dt.applyUnixepoch()
 	case "auto":
-		return nil
+		return true, nil
 	case "julianday":
-		return dt.applyJulianday()
+		return true, dt.applyJulianday()
 	}
-	return nil
+	return false, nil
 }
 
 // handleDateArithmetic handles numeric modifiers (+/- N units).
-// Returns error on failure, nil if not arithmetic.
-func (dt *DateTime) handleDateArithmetic(mod string) error {
+// Returns (handled, error). If handled is true, the error indicates success/failure.
+func (dt *DateTime) handleDateArithmetic(mod string) (bool, error) {
 	if !strings.Contains(mod, " ") {
-		return nil
+		return false, nil
 	}
 	parts := strings.Fields(mod)
 	if len(parts) < 2 {
-		return nil
+		return false, nil
 	}
 	amount, err := strconv.ParseFloat(parts[0], 64)
 	if err != nil {
-		return nil
+		return false, nil
 	}
 	unit := parts[1]
 	if strings.HasSuffix(unit, "s") {
 		unit = unit[:len(unit)-1]
 	}
-	return dt.add(amount, unit)
+	return true, dt.add(amount, unit)
 }
 
 // handleNoOpModifiers handles modifiers that don't change the datetime.

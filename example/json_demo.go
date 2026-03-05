@@ -185,29 +185,35 @@ func testJSONObject(db *sql.DB) {
 }
 
 func testRealWorld(db *sql.DB) {
-	// Create a table with JSON data
+	setupUsersTable(db)
+	insertUserData(db)
+	queryUserNames(db)
+	queryUsersByAge(db)
+	validateJSONProfiles(db)
+}
+
+func setupUsersTable(db *sql.DB) {
 	_, err := db.Exec(`CREATE TABLE users (id INTEGER, profile TEXT)`)
 	if err != nil {
 		log.Fatal(err)
 	}
+}
 
-	// Insert some users with JSON profiles
-	_, err = db.Exec(`INSERT INTO users VALUES (1, '{"name":"Alice","age":30,"city":"NYC"}')`)
-	if err != nil {
-		log.Fatal(err)
+func insertUserData(db *sql.DB) {
+	users := []string{
+		`INSERT INTO users VALUES (1, '{"name":"Alice","age":30,"city":"NYC"}')`,
+		`INSERT INTO users VALUES (2, '{"name":"Bob","age":25,"city":"LA"}')`,
+		`INSERT INTO users VALUES (3, '{"name":"Charlie","age":35,"city":"SF"}')`,
 	}
 
-	_, err = db.Exec(`INSERT INTO users VALUES (2, '{"name":"Bob","age":25,"city":"LA"}')`)
-	if err != nil {
-		log.Fatal(err)
+	for _, query := range users {
+		if _, err := db.Exec(query); err != nil {
+			log.Fatal(err)
+		}
 	}
+}
 
-	_, err = db.Exec(`INSERT INTO users VALUES (3, '{"name":"Charlie","age":35,"city":"SF"}')`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Query 1: Extract all names
+func queryUserNames(db *sql.DB) {
 	fmt.Println("   Query: SELECT id, json_extract(profile, '$.name') AS name FROM users")
 	rows, err := db.Query(`SELECT id, json_extract(profile, '$.name') AS name FROM users ORDER BY id`)
 	if err != nil {
@@ -223,10 +229,11 @@ func testRealWorld(db *sql.DB) {
 		}
 		fmt.Printf("      User %d: %s\n", id, name)
 	}
+}
 
-	// Query 2: Filter by age > 28
+func queryUsersByAge(db *sql.DB) {
 	fmt.Println("\n   Query: SELECT id, json_extract(profile, '$.name'), json_extract(profile, '$.age') FROM users WHERE json_extract(profile, '$.age') > 28")
-	rows, err = db.Query(`SELECT id, json_extract(profile, '$.name'), json_extract(profile, '$.age') FROM users WHERE json_extract(profile, '$.age') > 28 ORDER BY id`)
+	rows, err := db.Query(`SELECT id, json_extract(profile, '$.name'), json_extract(profile, '$.age') FROM users WHERE json_extract(profile, '$.age') > 28 ORDER BY id`)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -241,11 +248,12 @@ func testRealWorld(db *sql.DB) {
 		}
 		fmt.Printf("      User %d: %s (age: %d)\n", id, name, age)
 	}
+}
 
-	// Query 3: Validate all profiles
+func validateJSONProfiles(db *sql.DB) {
 	fmt.Println("\n   Query: SELECT COUNT(*) FROM users WHERE json_valid(profile) = 1")
 	var count int
-	err = db.QueryRow(`SELECT COUNT(*) FROM users WHERE json_valid(profile) = 1`).Scan(&count)
+	err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE json_valid(profile) = 1`).Scan(&count)
 	if err != nil {
 		log.Fatal(err)
 	}

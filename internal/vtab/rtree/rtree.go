@@ -37,14 +37,37 @@ func (m *RTreeModule) Connect(db interface{}, moduleName string, dbName string, 
 
 // createTable creates or connects to an R-Tree table.
 func (m *RTreeModule) createTable(db interface{}, moduleName string, dbName string, tableName string, args []string) (vtab.VirtualTable, string, error) {
-	// R-Tree requires at least 3 columns: id, minX, maxX
-	// For 2D: id, minX, maxX, minY, maxY (5 columns)
-	// For 3D: id, minX, maxX, minY, maxY, minZ, maxZ (7 columns)
-	if len(args) < 5 {
-		return nil, "", fmt.Errorf("R-Tree table requires at least 5 columns (id, minX, maxX, minY, maxY)")
+	columns, err := parseRTreeColumns(args)
+	if err != nil {
+		return nil, "", err
 	}
 
-	// Parse column definitions
+	dimensions, err := validateRTreeDimensions(columns)
+	if err != nil {
+		return nil, "", err
+	}
+
+	schema := fmt.Sprintf("CREATE TABLE %s(%s)", tableName, strings.Join(columns, ", "))
+
+	table := &RTree{
+		tableName:  tableName,
+		columns:    columns,
+		idColumn:   columns[0],
+		dimensions: dimensions,
+		root:       nil,
+		entries:    make(map[int64]*Entry),
+		nextID:     1,
+	}
+
+	return table, schema, nil
+}
+
+// parseRTreeColumns parses and validates the column arguments
+func parseRTreeColumns(args []string) ([]string, error) {
+	if len(args) < 5 {
+		return nil, fmt.Errorf("R-Tree table requires at least 5 columns (id, minX, maxX, minY, maxY)")
+	}
+
 	columns := make([]string, 0, len(args))
 	for _, arg := range args {
 		colName := strings.TrimSpace(arg)
@@ -54,39 +77,25 @@ func (m *RTreeModule) createTable(db interface{}, moduleName string, dbName stri
 	}
 
 	if len(columns) < 5 {
-		return nil, "", fmt.Errorf("R-Tree table requires at least 5 columns")
+		return nil, fmt.Errorf("R-Tree table requires at least 5 columns")
 	}
 
-	// First column must be the ID
-	idColumn := columns[0]
+	return columns, nil
+}
 
-	// Validate that we have pairs of min/max coordinates
-	// Format: id, min1, max1, min2, max2, [min3, max3, ...]
+// validateRTreeDimensions validates the coordinate columns and returns dimensions
+func validateRTreeDimensions(columns []string) (int, error) {
 	coordColumns := columns[1:]
 	if len(coordColumns)%2 != 0 {
-		return nil, "", fmt.Errorf("R-Tree coordinate columns must come in min/max pairs")
+		return 0, fmt.Errorf("R-Tree coordinate columns must come in min/max pairs")
 	}
 
 	dimensions := len(coordColumns) / 2
 	if dimensions < 1 || dimensions > 5 {
-		return nil, "", fmt.Errorf("R-Tree supports 1-5 dimensions, got %d", dimensions)
+		return 0, fmt.Errorf("R-Tree supports 1-5 dimensions, got %d", dimensions)
 	}
 
-	// Build schema SQL
-	schema := fmt.Sprintf("CREATE TABLE %s(%s)", tableName, strings.Join(columns, ", "))
-
-	// Create the R-Tree table
-	table := &RTree{
-		tableName:  tableName,
-		columns:    columns,
-		idColumn:   idColumn,
-		dimensions: dimensions,
-		root:       nil,
-		entries:    make(map[int64]*Entry),
-		nextID:     1,
-	}
-
-	return table, schema, nil
+	return dimensions, nil
 }
 
 // RTree represents an R-Tree virtual table instance.
@@ -109,42 +118,72 @@ type RTree struct {
 // BestIndex analyzes the query and determines the best index strategy.
 // For R-Tree, we look for spatial constraints like range queries and overlaps.
 func (t *RTree) BestIndex(info *vtab.IndexInfo) error {
-	// Track which constraints we can use
 	argvIndex := 1
 	usedConstraints := 0
 
-	// Look for constraints on coordinate columns
-	// We can optimize queries like:
-	// - WHERE minX <= ? AND maxX >= ? AND minY <= ? AND maxY >= ?
-	// - WHERE id = ?
 	for i, constraint := range info.Constraints {
 		if !constraint.Usable {
 			continue
 		}
 
-		// ID column (column 0) - exact match
-		if constraint.Column == 0 && constraint.Op == vtab.ConstraintEQ {
-			info.SetConstraintUsage(i, argvIndex, true)
-			argvIndex++
-			usedConstraints++
-			info.IdxNum |= (1 << 0) // Set bit 0 for ID constraint
-		}
-
-		// Spatial constraints on coordinate columns (columns 1+)
-		// We support LE (<=), GE (>=), LT (<), GT (>) for range queries
-		if constraint.Column > 0 && constraint.Column < len(t.columns) {
-			switch constraint.Op {
-			case vtab.ConstraintLE, vtab.ConstraintGE, vtab.ConstraintLT, vtab.ConstraintGT:
-				info.SetConstraintUsage(i, argvIndex, true)
-				argvIndex++
-				usedConstraints++
-				// Mark which column has a constraint (bit offset by column number)
-				info.IdxNum |= (1 << constraint.Column)
-			}
+		if t.processConstraint(info, &constraint, i, &argvIndex, &usedConstraints) {
+			continue
 		}
 	}
 
-	// Set cost estimates
+	t.setIndexCostEstimates(info, usedConstraints)
+	return nil
+}
+
+// processConstraint processes a single constraint and updates index info.
+// Returns true if the constraint was processed.
+func (t *RTree) processConstraint(info *vtab.IndexInfo, constraint *vtab.IndexConstraint, constraintIdx int, argvIndex, usedConstraints *int) bool {
+	if t.processIDConstraint(info, constraint, constraintIdx, argvIndex, usedConstraints) {
+		return true
+	}
+
+	return t.processSpatialConstraint(info, constraint, constraintIdx, argvIndex, usedConstraints)
+}
+
+// processIDConstraint handles ID column constraints.
+func (t *RTree) processIDConstraint(info *vtab.IndexInfo, constraint *vtab.IndexConstraint, constraintIdx int, argvIndex, usedConstraints *int) bool {
+	if constraint.Column != 0 || constraint.Op != vtab.ConstraintEQ {
+		return false
+	}
+
+	info.SetConstraintUsage(constraintIdx, *argvIndex, true)
+	*argvIndex++
+	*usedConstraints++
+	info.IdxNum |= (1 << 0) // Set bit 0 for ID constraint
+	return true
+}
+
+// processSpatialConstraint handles spatial coordinate column constraints.
+func (t *RTree) processSpatialConstraint(info *vtab.IndexInfo, constraint *vtab.IndexConstraint, constraintIdx int, argvIndex, usedConstraints *int) bool {
+	if constraint.Column <= 0 || constraint.Column >= len(t.columns) {
+		return false
+	}
+
+	if !t.isSpatialOperator(constraint.Op) {
+		return false
+	}
+
+	info.SetConstraintUsage(constraintIdx, *argvIndex, true)
+	*argvIndex++
+	*usedConstraints++
+	// Mark which column has a constraint (bit offset by column number)
+	info.IdxNum |= (1 << constraint.Column)
+	return true
+}
+
+// isSpatialOperator checks if the operator is valid for spatial queries.
+func (t *RTree) isSpatialOperator(op vtab.ConstraintOp) bool {
+	return op == vtab.ConstraintLE || op == vtab.ConstraintGE ||
+		op == vtab.ConstraintLT || op == vtab.ConstraintGT
+}
+
+// setIndexCostEstimates sets the cost estimates for the index.
+func (t *RTree) setIndexCostEstimates(info *vtab.IndexInfo, usedConstraints int) {
 	if usedConstraints > 0 {
 		// Spatial index lookup is very efficient
 		// Cost decreases with more constraints
@@ -155,8 +194,6 @@ func (t *RTree) BestIndex(info *vtab.IndexInfo) error {
 		info.EstimatedCost = float64(len(t.entries))
 		info.EstimatedRows = int64(len(t.entries))
 	}
-
-	return nil
 }
 
 // Open creates a new cursor for scanning the R-Tree table.
@@ -416,39 +453,70 @@ func (c *RTreeCursor) Filter(idxNum int, idxStr string, argv []interface{}) erro
 	c.constraint = argv
 	c.results = make([]*Entry, 0)
 
-	// Check if we have an ID constraint (bit 0 set)
-	if idxNum&1 != 0 && len(argv) > 0 {
-		// ID lookup
-		if id, ok := argv[0].(int64); ok {
-			c.queryID = &id
-			if entry, exists := c.table.entries[id]; exists {
-				c.results = append(c.results, entry)
-			}
-		}
-	} else if len(argv) > 0 {
-		// Spatial query - build bounding box from constraints
-		// This is a simplified version that assumes range query format
-		// A full implementation would parse the specific constraints used
+	c.applyFilterConstraints(idxNum, argv)
+	c.positionCursor()
 
-		// For now, perform a full scan (will be optimized with proper constraint parsing)
-		for _, entry := range c.table.entries {
-			c.results = append(c.results, entry)
-		}
-	} else {
-		// No constraints - return all entries
-		for _, entry := range c.table.entries {
-			c.results = append(c.results, entry)
-		}
+	return nil
+}
+
+// applyFilterConstraints applies the appropriate filter based on constraints.
+func (c *RTreeCursor) applyFilterConstraints(idxNum int, argv []interface{}) {
+	if c.hasIDConstraint(idxNum, argv) {
+		c.applyIDFilter(argv)
+		return
 	}
 
-	// Position at first result
+	if len(argv) > 0 {
+		c.applySpatialFilter()
+	} else {
+		c.applyFullScan()
+	}
+}
+
+// hasIDConstraint checks if there's an ID constraint.
+func (c *RTreeCursor) hasIDConstraint(idxNum int, argv []interface{}) bool {
+	return idxNum&1 != 0 && len(argv) > 0
+}
+
+// applyIDFilter applies an ID-based filter.
+func (c *RTreeCursor) applyIDFilter(argv []interface{}) {
+	id, ok := argv[0].(int64)
+	if !ok {
+		return
+	}
+
+	c.queryID = &id
+	if entry, exists := c.table.entries[id]; exists {
+		c.results = append(c.results, entry)
+	}
+}
+
+// applySpatialFilter applies a spatial query filter.
+func (c *RTreeCursor) applySpatialFilter() {
+	// Spatial query - build bounding box from constraints
+	// This is a simplified version that assumes range query format
+	// A full implementation would parse the specific constraints used
+
+	// For now, perform a full scan (will be optimized with proper constraint parsing)
+	for _, entry := range c.table.entries {
+		c.results = append(c.results, entry)
+	}
+}
+
+// applyFullScan performs a full scan of all entries.
+func (c *RTreeCursor) applyFullScan() {
+	for _, entry := range c.table.entries {
+		c.results = append(c.results, entry)
+	}
+}
+
+// positionCursor positions the cursor at the first result or EOF.
+func (c *RTreeCursor) positionCursor() {
 	if len(c.results) > 0 {
 		c.pos = 0
 	} else {
 		c.pos = -1
 	}
-
-	return nil
 }
 
 // Next advances to the next result.

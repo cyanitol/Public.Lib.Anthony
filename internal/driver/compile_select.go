@@ -252,68 +252,82 @@ func (s *Stmt) emitSimpleSelectWhere(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 // compileSelectWithoutFrom handles SELECT statements without a FROM clause.
 // This is used for queries like SELECT 1, SELECT 1+1, or recursive CTE anchors.
 func (s *Stmt) compileSelectWithoutFrom(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
-	// Allocate memory for result columns
 	numCols := len(stmt.Columns)
 	vm.AllocMemory(numCols + 10)
 
-	// Create expression code generator (no table context needed)
+	gen := s.setupNoFromCodeGenerator(vm, stmt, args, numCols)
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	// Handle WHERE clause and get halt address for patching
+	addrHalt := s.emitNoFromWhereClause(vm, stmt, gen)
+
+	// Evaluate column expressions
+	if err := s.emitNoFromColumns(vm, stmt, numCols, gen); err != nil {
+		return nil, err
+	}
+
+	// Emit result row and halt
+	s.finalizeNoFromSelect(vm, numCols, addrHalt)
+
+	return vm, nil
+}
+
+// setupNoFromCodeGenerator initializes code generator for SELECT without FROM.
+func (s *Stmt) setupNoFromCodeGenerator(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue, numCols int) *expr.CodeGenerator {
 	gen := expr.NewCodeGenerator(vm)
 	s.setupSubqueryCompiler(gen)
 
-	// Set up args for parameter binding
 	argValues := make([]interface{}, len(args))
 	for i, a := range args {
 		argValues[i] = a.Value
 	}
 	gen.SetArgs(argValues)
 
-	// Build result column names
 	colNames := make([]string, numCols)
 	for i, col := range stmt.Columns {
 		colNames[i] = selectColName(col, i)
 	}
 	vm.ResultCols = colNames
 
-	// Initialize VM
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	return gen
+}
 
-	// Handle WHERE clause if present
-	// For SELECT without FROM, we evaluate the WHERE once and skip result if false
-	addrHalt := -1
-	if stmt.Where != nil {
-		// Evaluate WHERE condition
-		whereReg, err := gen.GenerateExpr(stmt.Where)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate WHERE condition: %w", err)
-		}
-		// If WHERE is false, jump to Halt (skip ResultRow)
-		vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
-		addrHalt = vm.NumOps() - 1
+// emitNoFromWhereClause emits WHERE clause for SELECT without FROM and returns halt address.
+func (s *Stmt) emitNoFromWhereClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, gen *expr.CodeGenerator) int {
+	if stmt.Where == nil {
+		return -1
 	}
 
-	// Evaluate each column expression
+	whereReg, err := gen.GenerateExpr(stmt.Where)
+	if err != nil {
+		return -1
+	}
+
+	vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+	return vm.NumOps() - 1
+}
+
+// emitNoFromColumns evaluates and emits column expressions for SELECT without FROM.
+func (s *Stmt) emitNoFromColumns(vm *vdbe.VDBE, stmt *parser.SelectStmt, numCols int, gen *expr.CodeGenerator) error {
 	for i, col := range stmt.Columns {
-		// Generate code for the expression
 		reg, err := gen.GenerateExpr(col.Expr)
 		if err != nil {
-			return nil, fmt.Errorf("failed to generate expression for column %d: %w", i, err)
+			return fmt.Errorf("failed to generate expression for column %d: %w", i, err)
 		}
-		// Copy result to target register if needed
 		if reg != i {
 			vm.AddOp(vdbe.OpCopy, reg, i, 0)
 		}
 	}
+	return nil
+}
 
-	// Return single row with the computed values (only if WHERE passed)
+// finalizeNoFromSelect emits result row, halt, and patches WHERE jump.
+func (s *Stmt) finalizeNoFromSelect(vm *vdbe.VDBE, numCols int, addrHalt int) {
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
-
-	// Halt instruction - patch WHERE jump to point here if condition was false
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	if addrHalt >= 0 {
 		vm.Program[addrHalt].P2 = vm.NumOps() - 1
 	}
-
-	return vm, nil
 }
 
 // orderByColumnInfo holds information about ORDER BY columns

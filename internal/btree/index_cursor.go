@@ -747,42 +747,55 @@ func (c *IndexCursor) deleteExactMatch(key []byte, rowid int64) error {
 }
 
 func (c *IndexCursor) deleteCurrentEntry() error {
+	if err := c.validateDeleteState(); err != nil {
+		return err
+	}
+
+	if err := c.markPageDirtyForDelete(); err != nil {
+		return err
+	}
+
+	btreePage, err := c.getBtreePageForDelete()
+	if err != nil {
+		return err
+	}
+
+	if err := btreePage.DeleteCell(c.CurrentIndex); err != nil {
+		return err
+	}
+
+	c.State = CursorInvalid
+	return nil
+}
+
+// validateDeleteState checks if cursor is in valid state for deletion
+func (c *IndexCursor) validateDeleteState() error {
 	if c.State != CursorValid {
 		return fmt.Errorf("cursor not in valid state")
 	}
-
 	if c.CurrentHeader == nil || !c.CurrentHeader.IsLeaf {
 		return fmt.Errorf("cursor not positioned at leaf page")
 	}
+	return nil
+}
 
-	// Mark page dirty BEFORE modification for journal support
+// markPageDirtyForDelete marks the page dirty before deletion
+func (c *IndexCursor) markPageDirtyForDelete() error {
 	if c.Btree.Provider != nil {
 		if err := c.Btree.Provider.MarkDirty(c.CurrentPage); err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
-	// Get the current page
+// getBtreePageForDelete gets and wraps the page for deletion
+func (c *IndexCursor) getBtreePageForDelete() (*BtreePage, error) {
 	pageData, err := c.Btree.GetPage(c.CurrentPage)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	// Wrap in BtreePage for write operations
-	btreePage, err := NewBtreePage(c.CurrentPage, pageData, c.Btree.UsableSize)
-	if err != nil {
-		return err
-	}
-
-	// Delete the cell
-	if err := btreePage.DeleteCell(c.CurrentIndex); err != nil {
-		return err
-	}
-
-	// Invalidate cursor
-	c.State = CursorInvalid
-
-	return nil
+	return NewBtreePage(c.CurrentPage, pageData, c.Btree.UsableSize)
 }
 
 func (c *IndexCursor) splitPage(key []byte, rowid int64) error {

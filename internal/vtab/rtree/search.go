@@ -18,54 +18,77 @@ func (n *Node) NearestNeighborSearch(point []float64, k int) []*Entry {
 		return nil
 	}
 
-	// Priority queue for search (min-heap by distance)
-	pq := NewPriorityQueue()
-
-	// Initialize with root node
-	rootDist := n.minDistanceToPoint(point)
-	pq.Push(&SearchItem{
-		Node:     n,
-		Distance: rootDist,
-	})
-
+	pq := initializePriorityQueue(n, point)
 	results := make([]*Entry, 0, k)
 
 	for pq.Len() > 0 {
 		item := pq.Pop()
 
-		// If this is a leaf node entry
-		if item.Entry != nil {
-			results = append(results, item.Entry)
-			if len(results) >= k {
-				break
-			}
-			continue
+		if processLeafEntry(item, &results, k) {
+			break
 		}
 
-		// Expand node
-		node := item.Node
-		if node.IsLeaf {
-			// Add all leaf entries to priority queue
-			for _, entry := range node.Entries {
-				dist := distanceToPoint(entry.BBox, point)
-				pq.Push(&SearchItem{
-					Entry:    entry,
-					Distance: dist,
-				})
-			}
-		} else {
-			// Add child nodes to priority queue
-			for _, entry := range node.Entries {
-				dist := entry.Child.minDistanceToPoint(point)
-				pq.Push(&SearchItem{
-					Node:     entry.Child,
-					Distance: dist,
-				})
-			}
-		}
+		expandNode(item.Node, point, pq)
 	}
 
 	return results
+}
+
+// initializePriorityQueue creates and initializes the priority queue with the root node.
+func initializePriorityQueue(n *Node, point []float64) *PriorityQueue {
+	pq := NewPriorityQueue()
+	rootDist := n.minDistanceToPoint(point)
+	pq.Push(&SearchItem{
+		Node:     n,
+		Distance: rootDist,
+	})
+	return pq
+}
+
+// processLeafEntry processes a leaf entry and adds it to results if applicable.
+// Returns true if we've collected enough results.
+func processLeafEntry(item *SearchItem, results *[]*Entry, k int) bool {
+	if item.Entry == nil {
+		return false
+	}
+
+	*results = append(*results, item.Entry)
+	return len(*results) >= k
+}
+
+// expandNode expands a node by adding its entries to the priority queue.
+func expandNode(node *Node, point []float64, pq *PriorityQueue) {
+	if node == nil {
+		return
+	}
+
+	if node.IsLeaf {
+		addLeafEntriesToQueue(node, point, pq)
+	} else {
+		addChildNodesToQueue(node, point, pq)
+	}
+}
+
+// addLeafEntriesToQueue adds all leaf entries to the priority queue.
+func addLeafEntriesToQueue(node *Node, point []float64, pq *PriorityQueue) {
+	for _, entry := range node.Entries {
+		dist := distanceToPoint(entry.BBox, point)
+		pq.Push(&SearchItem{
+			Entry:    entry,
+			Distance: dist,
+		})
+	}
+}
+
+// addChildNodesToQueue adds child nodes to the priority queue.
+func addChildNodesToQueue(node *Node, point []float64, pq *PriorityQueue) {
+	for _, entry := range node.Entries {
+		dist := entry.Child.minDistanceToPoint(point)
+		pq.Push(&SearchItem{
+			Node:     entry.Child,
+			Distance: dist,
+		})
+	}
 }
 
 // minDistanceToPoint calculates the minimum distance from this node's bounding box to a point.

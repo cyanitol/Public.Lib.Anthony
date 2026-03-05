@@ -705,13 +705,8 @@ func (ctx *CTEContext) ValidateCTEs() error {
 
 // checkCircularDependency checks for circular dependencies.
 func (ctx *CTEContext) checkCircularDependency(name string, visiting map[string]bool) error {
-	if visiting[name] {
-		// Allow self-reference in recursive CTEs
-		def := ctx.CTEs[name]
-		if def.IsRecursive {
-			return nil
-		}
-		return fmt.Errorf("circular dependency in non-recursive CTE: %s", name)
+	if err := ctx.checkVisitingCycle(name, visiting); err != nil {
+		return err
 	}
 
 	def, exists := ctx.CTEs[name]
@@ -720,20 +715,48 @@ func (ctx *CTEContext) checkCircularDependency(name string, visiting map[string]
 	}
 
 	visiting[name] = true
+	defer delete(visiting, name)
 
-	for _, dep := range def.DependsOn {
-		if dep == name && !def.IsRecursive {
-			return fmt.Errorf("non-recursive CTE cannot reference itself: %s", name)
-		}
-		if dep != name {
-			if err := ctx.checkCircularDependency(dep, visiting); err != nil {
-				return err
-			}
-		}
+	return ctx.checkDependencies(name, def, visiting)
+}
+
+// checkVisitingCycle checks if we're revisiting a CTE that's already being processed
+func (ctx *CTEContext) checkVisitingCycle(name string, visiting map[string]bool) error {
+	if !visiting[name] {
+		return nil
 	}
 
-	delete(visiting, name)
+	def := ctx.CTEs[name]
+	if def.IsRecursive {
+		return nil
+	}
+	return fmt.Errorf("circular dependency in non-recursive CTE: %s", name)
+}
+
+// checkDependencies validates all dependencies of a CTE
+func (ctx *CTEContext) checkDependencies(name string, def *CTEDefinition, visiting map[string]bool) error {
+	for _, dep := range def.DependsOn {
+		if err := ctx.validateDependency(name, dep, def.IsRecursive, visiting); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// validateDependency checks a single dependency for validity
+func (ctx *CTEContext) validateDependency(name, dep string, isRecursive bool, visiting map[string]bool) error {
+	if dep == name {
+		return ctx.validateSelfReference(name, isRecursive)
+	}
+	return ctx.checkCircularDependency(dep, visiting)
+}
+
+// validateSelfReference checks if a CTE can reference itself
+func (ctx *CTEContext) validateSelfReference(name string, isRecursive bool) error {
+	if isRecursive {
+		return nil
+	}
+	return fmt.Errorf("non-recursive CTE cannot reference itself: %s", name)
 }
 
 // validateRecursiveCTE validates a recursive CTE structure.

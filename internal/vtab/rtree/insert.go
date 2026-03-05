@@ -389,11 +389,16 @@ func (n *Node) handleRootAfterRemoval() *Node {
 
 // handleUnderflow handles node underflow after deletion.
 func (n *Node) handleUnderflow(node *Node) *Node {
-	// Collect entries from the underflowed node
 	orphanedEntries := make([]*Entry, len(node.Entries))
 	copy(orphanedEntries, node.Entries)
 
-	// Remove the node from its parent
+	n = removeNodeFromParent(n, node)
+	root := findRoot(n)
+	return reinsertOrphanedEntries(root, orphanedEntries)
+}
+
+// removeNodeFromParent removes a node from its parent and handles parent underflow
+func removeNodeFromParent(n *Node, node *Node) *Node {
 	parent := node.Parent
 	for i, entry := range parent.Entries {
 		if entry.Child == node {
@@ -402,23 +407,29 @@ func (n *Node) handleUnderflow(node *Node) *Node {
 		}
 	}
 
-	// If parent underflows, handle recursively
 	if parent.Parent != nil && parent.IsUnderflow() {
-		n = n.handleUnderflow(parent)
+		return n.handleUnderflow(parent)
 	} else if parent.Parent != nil {
 		parent.AdjustBoundingBoxes()
 	}
 
-	// Reinsert orphaned entries
+	return n
+}
+
+// findRoot traverses up to find the root node
+func findRoot(n *Node) *Node {
 	root := n
 	for root.Parent != nil {
 		root = root.Parent
 	}
+	return root
+}
 
-	for _, entry := range orphanedEntries {
+// reinsertOrphanedEntries reinserts entries back into the tree
+func reinsertOrphanedEntries(root *Node, entries []*Entry) *Node {
+	for _, entry := range entries {
 		root = root.Insert(entry)
 	}
-
 	return root
 }
 

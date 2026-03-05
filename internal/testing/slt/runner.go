@@ -98,19 +98,11 @@ func (r *Runner) runTests(reader io.Reader) ([]TestResult, error) {
 		r.lineNumber++
 		line := scanner.Text()
 
-		// Skip comments and empty lines
-		if strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "" {
+		if r.shouldSkipLine(line) {
 			continue
 		}
 
-		// Handle directives that complete the previous test and start a new one
-		if r.handleStatementDirective(line, &currentTest, &currentSQL, &results) {
-			continue
-		}
-		if r.handleQueryDirective(line, &currentTest, &currentSQL, &results) {
-			continue
-		}
-		if r.handleHashDirective(line, &results) {
+		if r.processDirectiveLine(line, &currentTest, &currentSQL, &results) {
 			continue
 		}
 
@@ -118,16 +110,44 @@ func (r *Runner) runTests(reader io.Reader) ([]TestResult, error) {
 		r.accumulateTestData(line, currentTest, &currentSQL)
 	}
 
-	// Execute final test if exists
-	if currentTest != nil {
-		result := r.executeTest(currentTest, currentSQL.String())
-		results = append(results, result)
-	}
+	r.executeRemainingTest(&results, currentTest, &currentSQL)
 
+	return r.checkScannerError(scanner, results)
+}
+
+// shouldSkipLine checks if a line should be skipped
+func (r *Runner) shouldSkipLine(line string) bool {
+	return strings.HasPrefix(line, "#") || strings.TrimSpace(line) == ""
+}
+
+// processDirectiveLine processes directive lines and returns true if handled
+func (r *Runner) processDirectiveLine(line string, currentTest **Test, currentSQL *strings.Builder, results *[]TestResult) bool {
+	if r.handleStatementDirective(line, currentTest, currentSQL, results) {
+		return true
+	}
+	if r.handleQueryDirective(line, currentTest, currentSQL, results) {
+		return true
+	}
+	if r.handleHashDirective(line, results) {
+		return true
+	}
+	return false
+}
+
+// executeRemainingTest executes the final test if one exists
+func (r *Runner) executeRemainingTest(results *[]TestResult, currentTest *Test, currentSQL *strings.Builder) {
+	if currentTest == nil {
+		return
+	}
+	result := r.executeTest(currentTest, currentSQL.String())
+	*results = append(*results, result)
+}
+
+// checkScannerError checks for scanner errors and returns results
+func (r *Runner) checkScannerError(scanner *bufio.Scanner, results []TestResult) ([]TestResult, error) {
 	if err := scanner.Err(); err != nil {
 		return results, fmt.Errorf("error reading test file: %w", err)
 	}
-
 	return results, nil
 }
 
@@ -485,30 +505,54 @@ func (r *Runner) applySorting(rows [][]string, sortMode string) [][]string {
 	}
 
 	if sortMode == "rowsort" {
-		// Sort by entire rows
-		sort.Slice(rows, func(i, j int) bool {
-			return strings.Join(rows[i], "\t") < strings.Join(rows[j], "\t")
-		})
-	} else if sortMode == "valuesort" {
-		// Flatten all values and sort them
-		var values []string
-		for _, row := range rows {
-			values = append(values, row...)
-		}
-		sort.Strings(values)
-
-		// Reconstruct rows from sorted values
-		colCount := len(rows[0])
-		rows = make([][]string, 0)
-		for i := 0; i < len(values); i += colCount {
-			end := i + colCount
-			if end > len(values) {
-				end = len(values)
-			}
-			rows = append(rows, values[i:end])
-		}
+		return r.applyRowSort(rows)
 	}
 
+	if sortMode == "valuesort" {
+		return r.applyValueSort(rows)
+	}
+
+	return rows
+}
+
+// applyRowSort sorts by entire rows
+func (r *Runner) applyRowSort(rows [][]string) [][]string {
+	sort.Slice(rows, func(i, j int) bool {
+		return strings.Join(rows[i], "\t") < strings.Join(rows[j], "\t")
+	})
+	return rows
+}
+
+// applyValueSort flattens, sorts, and reconstructs rows
+func (r *Runner) applyValueSort(rows [][]string) [][]string {
+	if len(rows) == 0 {
+		return rows
+	}
+
+	values := r.flattenRows(rows)
+	sort.Strings(values)
+	return r.reconstructRows(values, len(rows[0]))
+}
+
+// flattenRows flattens all row values into a single slice
+func (r *Runner) flattenRows(rows [][]string) []string {
+	var values []string
+	for _, row := range rows {
+		values = append(values, row...)
+	}
+	return values
+}
+
+// reconstructRows reconstructs rows from flattened sorted values
+func (r *Runner) reconstructRows(values []string, colCount int) [][]string {
+	var rows [][]string
+	for i := 0; i < len(values); i += colCount {
+		end := i + colCount
+		if end > len(values) {
+			end = len(values)
+		}
+		rows = append(rows, values[i:end])
+	}
 	return rows
 }
 
@@ -571,16 +615,20 @@ func formatValue(val interface{}) string {
 	case int64:
 		return strconv.FormatInt(v, 10)
 	case float64:
-		// Format float in a consistent way
 		return strconv.FormatFloat(v, 'f', -1, 64)
 	case bool:
-		if v {
-			return "1"
-		}
-		return "0"
+		return formatBool(v)
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// formatBool converts a boolean to "1" or "0"
+func formatBool(v bool) string {
+	if v {
+		return "1"
+	}
+	return "0"
 }
 
 // formatExpected formats the expected results for display
