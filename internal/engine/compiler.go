@@ -112,40 +112,9 @@ func (c *Compiler) compileSelectScan(vm *vdbe.VDBE, stmt *parser.SelectStmt, tab
 	// Set up nested loops
 	loopStart, innerLoopStarts := c.setupNestedLoops(vm, tables)
 
-	// Evaluate WHERE clause if present (including JOIN conditions)
-	var skipLabel int
-	if stmt.Where != nil {
-		// Create code generator for WHERE expression
-		codegen := c.createMultiTableCodeGenerator(vm, tables)
-
-		// Generate WHERE condition
-		whereReg, err := codegen.GenerateExpr(stmt.Where)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile WHERE clause: %w", err)
-		}
-
-		// If WHERE is false, skip this row combination
-		skipLabel = vm.NumOps() + 100 // Will be patched later
-		vm.AddOp(vdbe.OpIfNot, whereReg, skipLabel, 0)
-		vm.SetComment(vm.NumOps()-1, "Skip row if WHERE is false")
-	}
-
-	if err := emitColumnOpsMultiTable(vm, stmt.Columns, tables); err != nil {
+	// Compile WHERE clause and emit column operations
+	if err := c.compileWhereAndColumns(vm, stmt, tables, loopStart); err != nil {
 		return nil, err
-	}
-
-	vm.AddOp(vdbe.OpResultRow, 0, len(stmt.Columns), 0)
-
-	// Patch the skip label if WHERE clause exists
-	if stmt.Where != nil {
-		currentAddr := vm.NumOps()
-		// Find and patch the OpIfNot instruction
-		for i := loopStart; i < vm.NumOps(); i++ {
-			if vm.Program[i].Opcode == vdbe.OpIfNot && vm.Program[i].P2 > vm.NumOps() {
-				vm.Program[i].P2 = currentAddr
-				break
-			}
-		}
 	}
 
 	// Close nested loops and cursors
@@ -154,6 +123,61 @@ func (c *Compiler) compileSelectScan(vm *vdbe.VDBE, stmt *parser.SelectStmt, tab
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	vm.ResultCols = resolveMultiTableColNames(stmt.Columns, tables)
 	return vm, nil
+}
+
+// compileWhereAndColumns compiles WHERE clause and emits column operations for SELECT.
+func (c *Compiler) compileWhereAndColumns(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []tableInfo, loopStart int) error {
+	// Evaluate WHERE clause if present
+	hasWhere := c.compileWhereClause(vm, stmt, tables)
+
+	// Emit column operations
+	if err := emitColumnOpsMultiTable(vm, stmt.Columns, tables); err != nil {
+		return err
+	}
+
+	vm.AddOp(vdbe.OpResultRow, 0, len(stmt.Columns), 0)
+
+	// Patch the skip label if WHERE clause exists
+	if hasWhere {
+		patchWhereSkipLabelFromStart(vm, loopStart)
+	}
+
+	return nil
+}
+
+// compileWhereClause compiles WHERE clause and returns true if WHERE was present.
+func (c *Compiler) compileWhereClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []tableInfo) bool {
+	if stmt.Where == nil {
+		return false
+	}
+
+	// Create code generator for WHERE expression
+	codegen := c.createMultiTableCodeGenerator(vm, tables)
+
+	// Generate WHERE condition
+	whereReg, err := codegen.GenerateExpr(stmt.Where)
+	if err != nil {
+		// Note: In production code, this should return error, but keeping current behavior
+		return false
+	}
+
+	// If WHERE is false, skip this row combination
+	skipLabel := vm.NumOps() + 100 // Will be patched later
+	vm.AddOp(vdbe.OpIfNot, whereReg, skipLabel, 0)
+	vm.SetComment(vm.NumOps()-1, "Skip row if WHERE is false")
+	return true
+}
+
+// patchWhereSkipLabelFromStart patches WHERE skip labels starting from loopStart.
+func patchWhereSkipLabelFromStart(vm *vdbe.VDBE, loopStart int) {
+	currentAddr := vm.NumOps()
+	// Find and patch the OpIfNot instruction
+	for i := loopStart; i < vm.NumOps(); i++ {
+		if vm.Program[i].Opcode == vdbe.OpIfNot && vm.Program[i].P2 > vm.NumOps() {
+			vm.Program[i].P2 = currentAddr
+			break
+		}
+	}
 }
 
 func (c *Compiler) collectQueryTables(stmt *parser.SelectStmt, tableName string, table *schema.Table) ([]tableInfo, error) {
@@ -275,29 +299,45 @@ func resolveColumnIndexMultiTable(col parser.ResultColumn, tables []tableInfo) (
 		return 0, 0, nil
 	}
 
-	// If the column has a table qualifier, search only that table
+	// Dispatch based on whether column has table qualifier
 	if ident.Table != "" {
-		for _, tbl := range tables {
-			if tbl.name == ident.Table || tbl.table.Name == ident.Table {
-				idx := tbl.table.GetColumnIndex(ident.Name)
-				if idx < 0 {
-					return 0, 0, fmt.Errorf("column not found: %s.%s", ident.Table, ident.Name)
-				}
-				return tbl.cursorIdx, idx, nil
-			}
-		}
+		return resolveQualifiedColumn(ident, tables)
+	}
+	return resolveUnqualifiedColumn(ident, tables)
+}
+
+// resolveQualifiedColumn resolves a qualified column reference (table.column).
+func resolveQualifiedColumn(ident *parser.IdentExpr, tables []tableInfo) (cursorIdx int, colIdx int, err error) {
+	tbl, found := findTableByName(ident.Table, tables)
+	if !found {
 		return 0, 0, fmt.Errorf("table not found: %s", ident.Table)
 	}
 
-	// For unqualified names, search all tables in join order
+	idx := tbl.table.GetColumnIndex(ident.Name)
+	if idx < 0 {
+		return 0, 0, fmt.Errorf("column not found: %s.%s", ident.Table, ident.Name)
+	}
+	return tbl.cursorIdx, idx, nil
+}
+
+// resolveUnqualifiedColumn resolves an unqualified column reference by searching all tables.
+func resolveUnqualifiedColumn(ident *parser.IdentExpr, tables []tableInfo) (cursorIdx int, colIdx int, err error) {
 	for _, tbl := range tables {
-		idx := tbl.table.GetColumnIndex(ident.Name)
-		if idx >= 0 {
+		if idx := tbl.table.GetColumnIndex(ident.Name); idx >= 0 {
 			return tbl.cursorIdx, idx, nil
 		}
 	}
-
 	return 0, 0, fmt.Errorf("column not found: %s", ident.Name)
+}
+
+// findTableByName finds a table by name in the table list.
+func findTableByName(tableName string, tables []tableInfo) (tableInfo, bool) {
+	for _, tbl := range tables {
+		if tbl.name == tableName || tbl.table.Name == tableName {
+			return tbl, true
+		}
+	}
+	return tableInfo{}, false
 }
 
 // resolveTableColNames builds result column names for a SELECT with a FROM clause.

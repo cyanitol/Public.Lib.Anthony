@@ -618,76 +618,67 @@ func generateCreateIndexSQL(stmt *parser.CreateIndexStmt) string {
 
 // CompileCreateView generates VDBE bytecode for CREATE VIEW.
 func CompileCreateView(stmt *parser.CreateViewStmt, schema *Schema, bt *btree.Btree) (*vdbe.VDBE, error) {
-	// Check if view already exists
+	if v, done, err := checkViewExists(stmt, schema); done {
+		return v, err
+	}
+	if err := validateViewDefinition(stmt, schema); err != nil {
+		return nil, err
+	}
+	return buildCreateViewVDBE(stmt), nil
+}
+
+// checkViewExists returns early if view already exists or conflicts with a table.
+func checkViewExists(stmt *parser.CreateViewStmt, schema *Schema) (*vdbe.VDBE, bool, error) {
 	if existingView, exists := schema.Views[stmt.Name]; existingView != nil && exists {
 		if stmt.IfNotExists {
-			// IF NOT EXISTS - just return success without error
 			v := vdbe.New()
 			v.AddOp(vdbe.OpHalt, 0, 0, 0)
-			return v, nil
+			return v, true, nil
 		}
-		return nil, fmt.Errorf("view %q already exists", stmt.Name)
+		return nil, true, fmt.Errorf("view %q already exists", stmt.Name)
 	}
-
-	// Check if a table with the same name exists
 	if existingTable := schema.GetTable(stmt.Name); existingTable != nil {
-		return nil, fmt.Errorf("table %q already exists", stmt.Name)
+		return nil, true, fmt.Errorf("table %q already exists", stmt.Name)
 	}
+	return nil, false, nil
+}
 
-	// Validate view name
+// validateViewDefinition validates view name and SELECT statement.
+func validateViewDefinition(stmt *parser.CreateViewStmt, schema *Schema) error {
 	if stmt.Name == "" {
-		return nil, fmt.Errorf("view name cannot be empty")
+		return fmt.Errorf("view name cannot be empty")
 	}
 	if strings.ToLower(stmt.Name) == "sqlite_master" || strings.ToLower(stmt.Name) == "sqlite_schema" {
-		return nil, fmt.Errorf("view name %q is reserved", stmt.Name)
+		return fmt.Errorf("view name %q is reserved", stmt.Name)
 	}
-
-	// Validate that the SELECT statement exists
 	if stmt.Select == nil {
-		return nil, fmt.Errorf("view must have a SELECT statement")
+		return fmt.Errorf("view must have a SELECT statement")
 	}
+	return nil
+}
 
-	// Create the CREATE VIEW SQL statement text for sqlite_master
+// buildCreateViewVDBE generates VDBE bytecode to insert view definition into sqlite_master.
+func buildCreateViewVDBE(stmt *parser.CreateViewStmt) *vdbe.VDBE {
 	createSQL := generateCreateViewSQL(stmt)
-
-	// Generate VDBE bytecode
 	v := vdbe.New()
 	v.SetReadOnly(false)
-
-	// Initialize the program
 	v.AddOp(vdbe.OpInit, 0, 0, 0)
 
-	// Register allocation:
-	// R[1] = "view"
-	// R[2] = view name
-	// R[3] = view name (same as name)
-	// R[4] = 0 (views don't have a root page)
-	// R[5] = CREATE VIEW SQL text
-	v.AllocMemory(6) // Allocate 6 registers (0-5)
+	v.AllocMemory(6)
+	v.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, "view")
+	v.AddOpWithP4Str(vdbe.OpString, 0, 2, 0, stmt.Name)
+	v.AddOpWithP4Str(vdbe.OpString, 0, 3, 0, stmt.Name)
+	v.AddOpWithP4Int(vdbe.OpInteger, 0, 4, 0, 0)
+	v.AddOpWithP4Str(vdbe.OpString, 0, 5, 0, createSQL)
 
-	// Load values into registers
-	v.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, "view")           // R[1] = "view"
-	v.AddOpWithP4Str(vdbe.OpString, 0, 2, 0, stmt.Name)        // R[2] = view name
-	v.AddOpWithP4Str(vdbe.OpString, 0, 3, 0, stmt.Name)        // R[3] = view name
-	v.AddOpWithP4Int(vdbe.OpInteger, 0, 4, 0, 0)               // R[4] = 0 (no rootpage)
-	v.AddOpWithP4Str(vdbe.OpString, 0, 5, 0, createSQL)        // R[5] = SQL
-
-	// Open cursor 0 on sqlite_master for writing
-	// sqlite_master is always at root page 1
 	v.AllocCursors(1)
-	v.AddOp(vdbe.OpOpenWrite, 0, 1, 0) // Cursor 0, root page 1
-
-	// Create a record from registers 1-5 and insert into sqlite_master
-	v.AddOp(vdbe.OpMakeRecord, 1, 5, 6) // Make record from R[1..5] into R[6]
-	v.AddOp(vdbe.OpInsert, 0, 6, 0)     // Insert R[6] into cursor 0
-
-	// Close cursor
+	v.AddOp(vdbe.OpOpenWrite, 0, 1, 0)
+	v.AddOp(vdbe.OpMakeRecord, 1, 5, 6)
+	v.AddOp(vdbe.OpInsert, 0, 6, 0)
 	v.AddOp(vdbe.OpClose, 0, 0, 0)
-
-	// Halt with success
 	v.AddOp(vdbe.OpHalt, 0, 0, 0)
 
-	return v, nil
+	return v
 }
 
 // CompileDropView generates VDBE bytecode for DROP VIEW.

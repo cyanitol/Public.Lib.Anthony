@@ -25,38 +25,63 @@ func DecodeRecord(data []byte) ([]interface{}, error) {
 
 // decodeRecord decodes a SQLite record back to a slice of values
 func decodeRecord(data []byte) ([]interface{}, error) {
+	if err := decodeValidateData(data); err != nil {
+		return nil, err
+	}
+
+	headerSize, offset, err := decodeReadHeaderSize(data)
+	if err != nil {
+		return nil, err
+	}
+
+	serialTypes, offset, err := decodeReadSerialTypes(data, headerSize, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	return decodeReadValues(data, serialTypes, offset)
+}
+
+// validateRecordData checks basic record data constraints
+func decodeValidateData(data []byte) error {
 	if len(data) == 0 {
-		return nil, fmt.Errorf("empty record")
+		return fmt.Errorf("empty record")
 	}
-
-	// Enforce maximum record size to prevent memory exhaustion attacks
 	if len(data) > MaxRecordSize {
-		return nil, ErrRecordTooLarge
+		return ErrRecordTooLarge
 	}
+	return nil
+}
 
-	// Read header size
+// readHeaderSize reads and validates the header size varint
+func decodeReadHeaderSize(data []byte) (uint64, int, error) {
 	headerSize, n := getVarint(data, 0)
 	if n == 0 {
-		return nil, fmt.Errorf("invalid header size")
+		return 0, 0, fmt.Errorf("invalid header size")
 	}
+	return headerSize, n, nil
+}
 
-	offset := n
-
-	// Read serial types from header
-	serialTypes := make([]uint64, 0)
+// readSerialTypes reads all serial type varints from the header
+func decodeReadSerialTypes(data []byte, headerSize uint64, offset int) ([]uint64, int, error) {
 	if headerSize > math.MaxInt {
-		return nil, fmt.Errorf("header size too large")
+		return nil, 0, fmt.Errorf("header size too large")
 	}
+
+	serialTypes := make([]uint64, 0)
 	for offset < int(headerSize) {
 		st, n := getVarint(data, offset)
 		if n == 0 {
-			return nil, fmt.Errorf("invalid serial type at offset %d", offset)
+			return nil, 0, fmt.Errorf("invalid serial type at offset %d", offset)
 		}
 		serialTypes = append(serialTypes, st)
 		offset += n
 	}
+	return serialTypes, offset, nil
+}
 
-	// Read values from body
+// readValues decodes all values from the record body
+func decodeReadValues(data []byte, serialTypes []uint64, offset int) ([]interface{}, error) {
 	values := make([]interface{}, len(serialTypes))
 	for i, st := range serialTypes {
 		val, n, err := decodeValue(data, offset, st)
@@ -66,7 +91,6 @@ func decodeRecord(data []byte) ([]interface{}, error) {
 		values[i] = val
 		offset += n
 	}
-
 	return values, nil
 }
 

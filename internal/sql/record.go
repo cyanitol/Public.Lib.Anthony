@@ -329,32 +329,55 @@ func ParseRecord(data []byte) (*Record, error) {
 		return nil, errors.New("empty record")
 	}
 
-	// Read header size
+	headerSize, offset, err := parseRecordHeader(data)
+	if err != nil {
+		return nil, err
+	}
+
+	serialTypes, offset, err := parseSerialTypes(data, offset, headerSize)
+	if err != nil {
+		return nil, err
+	}
+
+	values, err := parseRecordValues(data, offset, serialTypes)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Record{Values: values}, nil
+}
+
+// parseRecordHeader reads and validates the header size varint.
+func parseRecordHeader(data []byte) (uint64, int, error) {
 	headerSize, n := GetVarint(data, 0)
 	if n == 0 {
-		return nil, errors.New("invalid header size")
+		return 0, 0, errors.New("invalid header size")
 	}
+	return headerSize, n, nil
+}
 
-	offset := n
-
-	// Read serial types from header
-	var serialTypes []SerialType
+// parseSerialTypes reads all serial type varints from the header.
+func parseSerialTypes(data []byte, offset int, headerSize uint64) ([]SerialType, int, error) {
 	if headerSize > math.MaxInt {
-		return nil, errors.New("header size too large")
+		return nil, 0, errors.New("header size too large")
 	}
+	var serialTypes []SerialType
 	for offset < int(headerSize) {
 		st, n := GetVarint(data, offset)
 		if n == 0 {
-			return nil, errors.New("invalid serial type")
+			return nil, 0, errors.New("invalid serial type")
 		}
 		if st > math.MaxUint32 {
-			return nil, errors.New("serial type too large")
+			return nil, 0, errors.New("serial type too large")
 		}
 		serialTypes = append(serialTypes, SerialType(st))
 		offset += n
 	}
+	return serialTypes, offset, nil
+}
 
-	// Read values from body
+// parseRecordValues reads all values from the record body.
+func parseRecordValues(data []byte, offset int, serialTypes []SerialType) ([]Value, error) {
 	values := make([]Value, len(serialTypes))
 	for i, st := range serialTypes {
 		val, n, err := parseValue(data, offset, st)
@@ -364,8 +387,7 @@ func ParseRecord(data []byte) (*Record, error) {
 		values[i] = val
 		offset += n
 	}
-
-	return &Record{Values: values}, nil
+	return values, nil
 }
 
 // parseZeroWidthConst maps zero-width serial types to their pre-built Values.

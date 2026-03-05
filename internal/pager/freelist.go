@@ -413,54 +413,82 @@ func (fl *FreeList) Verify() error {
 
 	trunkPgno := fl.firstTrunk
 	for trunkPgno != 0 {
-		// Check for cycles
-		if seen[trunkPgno] {
-			return ErrFreeListCorrupt
-		}
-		seen[trunkPgno] = true
-		count++ // Count the trunk page itself
-
-		trunkPage, err := fl.pager.getLocked(trunkPgno)
+		nextTrunk, err := fl.verifyTrunkPage(trunkPgno, seen, &count)
 		if err != nil {
 			return err
 		}
-
-		nextTrunk := Pgno(binary.BigEndian.Uint32(trunkPage.Data[0:4]))
-		leafCount := binary.BigEndian.Uint32(trunkPage.Data[4:8])
-
-		maxLeaves := uint32(FreeListMaxLeafPages(fl.pageSize))
-		if leafCount > maxLeaves {
-			fl.pager.Put(trunkPage)
-			return ErrFreeListCorrupt
-		}
-
-		// Verify leaf pages
-		for i := uint32(0); i < leafCount; i++ {
-			offset := FreeListTrunkHeaderSize + int(i)*4
-			leafPgno := Pgno(binary.BigEndian.Uint32(trunkPage.Data[offset : offset+4]))
-
-			if leafPgno == 0 {
-				fl.pager.Put(trunkPage)
-				return ErrFreeListCorrupt
-			}
-
-			if seen[leafPgno] {
-				fl.pager.Put(trunkPage)
-				return ErrFreeListCorrupt
-			}
-			seen[leafPgno] = true
-			count++
-		}
-
-		fl.pager.Put(trunkPage)
 		trunkPgno = nextTrunk
 	}
 
-	// Verify count matches
-	if count != fl.totalFree {
+	return fl.verifyTotalCount(count)
+}
+
+// verifyTrunkPage verifies a single trunk page and its leaves.
+func (fl *FreeList) verifyTrunkPage(trunkPgno Pgno, seen map[Pgno]bool, count *uint32) (Pgno, error) {
+	if seen[trunkPgno] {
+		return 0, ErrFreeListCorrupt
+	}
+	seen[trunkPgno] = true
+	*count++
+
+	trunkPage, err := fl.pager.getLocked(trunkPgno)
+	if err != nil {
+		return 0, err
+	}
+	defer fl.pager.Put(trunkPage)
+
+	nextTrunk := Pgno(binary.BigEndian.Uint32(trunkPage.Data[0:4]))
+	leafCount := binary.BigEndian.Uint32(trunkPage.Data[4:8])
+
+	if err := fl.verifyLeafCount(leafCount); err != nil {
+		return 0, err
+	}
+
+	if err := fl.verifyLeafPages(trunkPage, leafCount, seen, count); err != nil {
+		return 0, err
+	}
+
+	return nextTrunk, nil
+}
+
+// verifyLeafCount checks if leaf count is within valid range.
+func (fl *FreeList) verifyLeafCount(leafCount uint32) error {
+	maxLeaves := uint32(FreeListMaxLeafPages(fl.pageSize))
+	if leafCount > maxLeaves {
+		return ErrFreeListCorrupt
+	}
+	return nil
+}
+
+// verifyLeafPages verifies all leaf pages in a trunk.
+func (fl *FreeList) verifyLeafPages(trunkPage *DbPage, leafCount uint32, seen map[Pgno]bool, count *uint32) error {
+	for i := uint32(0); i < leafCount; i++ {
+		if err := fl.verifyLeafPage(trunkPage, i, seen, count); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// verifyLeafPage verifies a single leaf page.
+func (fl *FreeList) verifyLeafPage(trunkPage *DbPage, idx uint32, seen map[Pgno]bool, count *uint32) error {
+	offset := FreeListTrunkHeaderSize + int(idx)*4
+	leafPgno := Pgno(binary.BigEndian.Uint32(trunkPage.Data[offset : offset+4]))
+
+	if leafPgno == 0 || seen[leafPgno] {
 		return ErrFreeListCorrupt
 	}
 
+	seen[leafPgno] = true
+	*count++
+	return nil
+}
+
+// verifyTotalCount verifies the total count matches.
+func (fl *FreeList) verifyTotalCount(count uint32) error {
+	if count != fl.totalFree {
+		return ErrFreeListCorrupt
+	}
 	return nil
 }
 

@@ -31,12 +31,12 @@ func TestOpCast(t *testing.T) {
 		{"TEXT affinity on text", "hello", 2, "string", "hello"},
 		{"TEXT affinity on blob", []byte("world"), 2, "string", "world"},
 
-		// INTEGER affinity (3)
+		// INTEGER affinity (3) - SQLite behavior: preserves non-whole numbers
 		{"INTEGER affinity on int", int64(42), 3, "int", int64(42)},
-		{"INTEGER affinity on real", 3.14, 3, "int", int64(3)},
+		{"INTEGER affinity on real", 3.14, 3, "real", 3.14}, // SQLite keeps fractional reals
 		{"INTEGER affinity on text valid", "123", 3, "int", int64(123)},
-		{"INTEGER affinity on text invalid", "hello", 3, "null", nil},
-		{"INTEGER affinity on text float", "3.14", 3, "int", int64(3)},
+		{"INTEGER affinity on text invalid", "hello", 3, "string", "hello"}, // SQLite keeps text
+		{"INTEGER affinity on text float", "3.14", 3, "real", 3.14},         // SQLite keeps as real
 
 		// REAL affinity (4)
 		{"REAL affinity on int", int64(42), 4, "real", 42.0},

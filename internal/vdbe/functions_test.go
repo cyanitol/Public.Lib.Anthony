@@ -253,7 +253,14 @@ func TestAggregateFunctions(t *testing.T) {
 			fc := NewFunctionContext()
 
 			// Look up the aggregate function
-			fn, ok := fc.registry.Lookup(tt.funcName)
+			// Use LookupBuiltin for min/max since scalar versions have priority in Lookup
+			var fn functions.Function
+			var ok bool
+			if tt.funcName == "min" || tt.funcName == "max" {
+				fn, ok = fc.registry.LookupBuiltin(tt.funcName)
+			} else {
+				fn, ok = fc.registry.Lookup(tt.funcName)
+			}
 			if !ok {
 				t.Fatalf("Function %s not found", tt.funcName)
 			}

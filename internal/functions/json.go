@@ -14,13 +14,14 @@ func RegisterJSONFunctions(r *Registry) {
 	r.Register(NewScalarFunc("json_array", -1, jsonArrayFunc))
 	r.Register(NewScalarFunc("json_array_length", -1, jsonArrayLengthFunc)) // 1 or 2 args
 	r.Register(NewScalarFunc("json_extract", -1, jsonExtractFunc))          // 2+ args
+	r.Register(NewScalarFunc("json_extract_text", 2, jsonExtractTextFunc))  // For ->> operator
 	r.Register(NewScalarFunc("json_insert", -1, jsonInsertFunc))            // 3+ args (odd)
 	r.Register(NewScalarFunc("json_object", -1, jsonObjectFunc))            // even args
 	r.Register(NewScalarFunc("json_patch", 2, jsonPatchFunc))
 	r.Register(NewScalarFunc("json_remove", -1, jsonRemoveFunc)) // 2+ args
 	r.Register(NewScalarFunc("json_replace", -1, jsonReplaceFunc))
 	r.Register(NewScalarFunc("json_set", -1, jsonSetFunc))
-	r.Register(NewScalarFunc("json_type", -1, jsonTypeFunc))   // 1 or 2 args
+	r.Register(NewScalarFunc("json_type", -1, jsonTypeFunc)) // 1 or 2 args
 	r.Register(NewScalarFunc("json_valid", 1, jsonValidFunc))
 	r.Register(NewScalarFunc("json_quote", 1, jsonQuoteFunc))
 }
@@ -73,26 +74,44 @@ func jsonArrayLengthFunc(args []Value) (Value, error) {
 		return nil, fmt.Errorf("json_array_length() requires 1 or 2 arguments")
 	}
 
-	if args[0].IsNull() {
+	data, err := parseJSONArg(args[0])
+	if err != nil {
 		return NewNullValue(), nil
 	}
 
-	jsonStr := args[0].AsString()
+	data = applyPathIfPresent(data, args, 1)
+	return getArrayLength(data)
+}
+
+// parseJSONArg parses the first argument as JSON
+func parseJSONArg(arg Value) (interface{}, error) {
+	if arg.IsNull() {
+		return nil, fmt.Errorf("null argument")
+	}
+
+	jsonStr := arg.AsString()
 	var data interface{}
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// applyPathIfPresent applies a path if the argument at the given index is present
+func applyPathIfPresent(data interface{}, args []Value, pathIndex int) interface{} {
+	if len(args) > pathIndex && !args[pathIndex].IsNull() {
+		path := args[pathIndex].AsString()
+		return extractPath(data, path)
+	}
+	return data
+}
+
+// getArrayLength returns the length of a JSON array
+func getArrayLength(data interface{}) (Value, error) {
+	if data == nil {
 		return NewNullValue(), nil
 	}
 
-	// If path is provided, extract the value at that path
-	if len(args) == 2 && !args[1].IsNull() {
-		path := args[1].AsString()
-		data = extractPath(data, path)
-		if data == nil {
-			return NewNullValue(), nil
-		}
-	}
-
-	// Check if it's an array
 	arr, ok := data.([]interface{})
 	if !ok {
 		return NewNullValue(), nil
@@ -108,35 +127,35 @@ func jsonExtractFunc(args []Value) (Value, error) {
 		return nil, fmt.Errorf("json_extract() requires at least 2 arguments")
 	}
 
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	jsonStr := args[0].AsString()
-	var data interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+	data, err := parseJSONArg(args[0])
+	if err != nil {
 		return NewNullValue(), nil
 	}
 
 	// If only one path, return single value
 	if len(args) == 2 {
-		if args[1].IsNull() {
-			return NewNullValue(), nil
-		}
-		path := args[1].AsString()
-		result := extractPath(data, path)
-		return jsonToValue(result), nil
+		return extractSinglePath(data, args[1])
 	}
 
 	// Multiple paths: return array of results
-	results := make([]interface{}, len(args)-1)
-	for i := 1; i < len(args); i++ {
-		if args[i].IsNull() {
-			results[i-1] = nil
-		} else {
-			path := args[i].AsString()
-			results[i-1] = extractPath(data, path)
-		}
+	return extractMultiplePaths(data, args[1:])
+}
+
+// extractSinglePath extracts a single path from JSON data
+func extractSinglePath(data interface{}, pathArg Value) (Value, error) {
+	if pathArg.IsNull() {
+		return NewNullValue(), nil
+	}
+	path := pathArg.AsString()
+	result := extractPath(data, path)
+	return jsonToValue(result), nil
+}
+
+// extractMultiplePaths extracts multiple paths from JSON data and returns as array
+func extractMultiplePaths(data interface{}, pathArgs []Value) (Value, error) {
+	results := make([]interface{}, len(pathArgs))
+	for i, pathArg := range pathArgs {
+		results[i] = extractPathOrNil(data, pathArg)
 	}
 
 	jsonResult, err := json.Marshal(results)
@@ -147,44 +166,97 @@ func jsonExtractFunc(args []Value) (Value, error) {
 	return NewTextValue(string(jsonResult)), nil
 }
 
-// jsonInsertFunc implements json_insert(X, path1, value1, path2, value2, ...)
-// Inserts values into JSON (only if path doesn't exist)
-func jsonInsertFunc(args []Value) (Value, error) {
-	if len(args) < 3 || len(args)%2 == 0 {
-		return nil, fmt.Errorf("json_insert() requires odd number of arguments (at least 3)")
+// extractPathOrNil extracts a path or returns nil for null arguments
+func extractPathOrNil(data interface{}, pathArg Value) interface{} {
+	if pathArg.IsNull() {
+		return nil
+	}
+	path := pathArg.AsString()
+	return extractPath(data, path)
+}
+
+// jsonExtractTextFunc implements the ->> operator (json_extract returning text)
+// Like json_extract but always returns unquoted text value
+func jsonExtractTextFunc(args []Value) (Value, error) {
+	if len(args) < 2 {
+		return nil, fmt.Errorf("json_extract_text() requires 2 arguments")
 	}
 
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	jsonStr := args[0].AsString()
-	var data interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-		return NewNullValue(), nil
-	}
-
-	// Process path-value pairs
-	for i := 1; i < len(args); i += 2 {
-		if args[i].IsNull() {
-			continue
-		}
-		path := args[i].AsString()
-		// Use smart version to support both string and JSON values
-		value := valueToJSONSmart(args[i+1])
-
-		// Only insert if path doesn't exist
-		if extractPath(data, path) == nil {
-			data = setPath(data, path, value)
-		}
-	}
-
-	result, err := json.Marshal(data)
+	data, err := parseJSONArg(args[0])
 	if err != nil {
 		return NewNullValue(), nil
 	}
 
-	return NewTextValue(string(result)), nil
+	result := applyPathIfPresent(data, args, 1)
+	return convertResultToText(result)
+}
+
+// textConverter is a function that converts a specific type to text
+type textConverter func(interface{}) (Value, error)
+
+// textConverters maps type names to their converter functions
+var textConverters = map[string]textConverter{
+	"string":  convertStringToText,
+	"float64": convertFloat64ToText,
+	"bool":    convertBoolToText,
+}
+
+// convertResultToText converts a JSON result to a text value
+func convertResultToText(result interface{}) (Value, error) {
+	if result == nil {
+		return NewNullValue(), nil
+	}
+
+	// Try to find a specific converter
+	typeName := fmt.Sprintf("%T", result)
+	if converter, ok := textConverters[typeName]; ok {
+		return converter(result)
+	}
+
+	// Default: marshal as JSON for complex types
+	return marshalAsJSONText(result)
+}
+
+// convertStringToText converts a string to text
+func convertStringToText(v interface{}) (Value, error) {
+	return NewTextValue(v.(string)), nil
+}
+
+// convertFloat64ToText converts a float64 to text
+func convertFloat64ToText(v interface{}) (Value, error) {
+	f := v.(float64)
+	if f == float64(int64(f)) {
+		return NewTextValue(strconv.FormatInt(int64(f), 10)), nil
+	}
+	return NewTextValue(strconv.FormatFloat(f, 'f', -1, 64)), nil
+}
+
+// convertBoolToText converts a bool to text
+func convertBoolToText(v interface{}) (Value, error) {
+	if v.(bool) {
+		return NewTextValue("true"), nil
+	}
+	return NewTextValue("false"), nil
+}
+
+// marshalAsJSONText marshals a value as JSON text
+func marshalAsJSONText(result interface{}) (Value, error) {
+	jsonResult, err := json.Marshal(result)
+	if err != nil {
+		return NewNullValue(), nil
+	}
+	return NewTextValue(string(jsonResult)), nil
+}
+
+// jsonInsertFunc implements json_insert(X, path1, value1, path2, value2, ...)
+// Inserts values into JSON (only if path doesn't exist)
+func jsonInsertFunc(args []Value) (Value, error) {
+	return processPathValuePairs(args, "json_insert", shouldInsertPath)
+}
+
+// shouldInsertPath checks if a path should be inserted (path doesn't exist)
+func shouldInsertPath(data interface{}, path string) bool {
+	return extractPath(data, path) == nil
 }
 
 // jsonObjectFunc implements json_object(key1, value1, key2, value2, ...)
@@ -285,34 +357,29 @@ func jsonRemoveFunc(args []Value) (Value, error) {
 // jsonReplaceFunc implements json_replace(X, path1, value1, path2, value2, ...)
 // Replaces values in JSON (only if path exists)
 func jsonReplaceFunc(args []Value) (Value, error) {
+	return processPathValuePairs(args, "json_replace", shouldReplacePath)
+}
+
+// shouldReplacePath checks if a path should be replaced (path exists)
+func shouldReplacePath(data interface{}, path string) bool {
+	return extractPath(data, path) != nil
+}
+
+// pathConditionFunc is a function that checks whether a path should be modified
+type pathConditionFunc func(data interface{}, path string) bool
+
+// processPathValuePairs processes path-value pairs with a condition function
+func processPathValuePairs(args []Value, funcName string, shouldSet pathConditionFunc) (Value, error) {
 	if len(args) < 3 || len(args)%2 == 0 {
-		return nil, fmt.Errorf("json_replace() requires odd number of arguments (at least 3)")
+		return nil, fmt.Errorf("%s() requires odd number of arguments (at least 3)", funcName)
 	}
 
-	if args[0].IsNull() {
+	data, err := parseJSONArg(args[0])
+	if err != nil {
 		return NewNullValue(), nil
 	}
 
-	jsonStr := args[0].AsString()
-	var data interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-		return NewNullValue(), nil
-	}
-
-	// Process path-value pairs
-	for i := 1; i < len(args); i += 2 {
-		if args[i].IsNull() {
-			continue
-		}
-		path := args[i].AsString()
-		// Use smart version to support both string and JSON values
-		value := valueToJSONSmart(args[i+1])
-
-		// Only replace if path exists
-		if extractPath(data, path) != nil {
-			data = setPath(data, path, value)
-		}
-	}
+	data = applyPathValuePairs(data, args[1:], shouldSet)
 
 	result, err := json.Marshal(data)
 	if err != nil {
@@ -320,6 +387,22 @@ func jsonReplaceFunc(args []Value) (Value, error) {
 	}
 
 	return NewTextValue(string(result)), nil
+}
+
+// applyPathValuePairs applies path-value pairs with a condition check
+func applyPathValuePairs(data interface{}, pathValueArgs []Value, shouldSet pathConditionFunc) interface{} {
+	for i := 0; i < len(pathValueArgs); i += 2 {
+		if pathValueArgs[i].IsNull() {
+			continue
+		}
+		path := pathValueArgs[i].AsString()
+		value := valueToJSONSmart(pathValueArgs[i+1])
+
+		if shouldSet(data, path) {
+			data = setPath(data, path, value)
+		}
+	}
+	return data
 }
 
 // jsonSetFunc implements json_set(X, path1, value1, path2, value2, ...)
@@ -745,21 +828,20 @@ func setPathRecursive(data interface{}, parts []pathPart, value interface{}) int
 			arr[part.index] = setPathRecursive(arr[part.index], remaining, value)
 		}
 		return arr
-	} else {
-		// Object access
-		obj, ok := data.(map[string]interface{})
-		if !ok {
-			// Create new object if needed
-			obj = make(map[string]interface{})
-		}
-
-		if len(remaining) == 0 {
-			obj[part.key] = value
-		} else {
-			obj[part.key] = setPathRecursive(obj[part.key], remaining, value)
-		}
-		return obj
 	}
+	// Object access
+	obj, ok := data.(map[string]interface{})
+	if !ok {
+		// Create new object if needed
+		obj = make(map[string]interface{})
+	}
+
+	if len(remaining) == 0 {
+		obj[part.key] = value
+	} else {
+		obj[part.key] = setPathRecursive(obj[part.key], remaining, value)
+	}
+	return obj
 }
 
 // removePath removes a value from JSON at the given path

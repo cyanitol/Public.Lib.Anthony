@@ -174,41 +174,43 @@ func (c *LRUCache) Put(page *DbPage) error {
 
 // putLocked adds a page to the cache (must hold lock).
 func (c *LRUCache) putLocked(page *DbPage) error {
-	// Check if page already exists
 	if entry, ok := c.entries[page.Pgno]; ok {
-		// Update existing entry
-		oldPage := entry.page
-		entry.page = page
-		c.moveToFront(entry)
-
-		// Update dirty list if needed
-		if oldPage.IsDirty() && !page.IsDirty() {
-			c.removeFromDirtyList(oldPage)
-		} else if !oldPage.IsDirty() && page.IsDirty() {
-			c.addToDirtyList(page)
-		}
-
-		return nil
+		return c.updateExistingEntry(entry, page)
 	}
+	return c.addNewEntry(page)
+}
 
-	// Need to evict if at capacity
+// updateExistingEntry updates an existing cache entry.
+func (c *LRUCache) updateExistingEntry(entry *CacheEntry, page *DbPage) error {
+	oldPage := entry.page
+	entry.page = page
+	c.moveToFront(entry)
+	c.updateDirtyListForReplacement(oldPage, page)
+	return nil
+}
+
+// updateDirtyListForReplacement updates dirty list when replacing a page.
+func (c *LRUCache) updateDirtyListForReplacement(oldPage, newPage *DbPage) {
+	if oldPage.IsDirty() && !newPage.IsDirty() {
+		c.removeFromDirtyList(oldPage)
+	} else if !oldPage.IsDirty() && newPage.IsDirty() {
+		c.addToDirtyList(newPage)
+	}
+}
+
+// addNewEntry adds a new page to the cache.
+func (c *LRUCache) addNewEntry(page *DbPage) error {
 	if c.isAtCapacity() {
 		if err := c.evictLRU(1); err != nil {
 			return err
 		}
 	}
 
-	// Create new entry
 	entry := &CacheEntry{page: page}
 	c.entries[page.Pgno] = entry
-
-	// Add to front of LRU list
 	c.addToFront(entry)
-
-	// Update memory usage
 	c.memoryUsage += int64(c.pageSize)
 
-	// Add to dirty list if dirty
 	if page.IsDirty() {
 		c.addToDirtyList(page)
 	}

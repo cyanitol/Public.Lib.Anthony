@@ -599,14 +599,14 @@ func TestParserExpressionEdgeCases(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "EXISTS subquery - unsupported",
+			name:    "EXISTS subquery",
 			sql:     "SELECT * FROM users WHERE EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
-			name:    "NOT EXISTS subquery - unsupported",
+			name:    "NOT EXISTS subquery",
 			sql:     "SELECT * FROM users WHERE NOT EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name:    "parenthesized expression",

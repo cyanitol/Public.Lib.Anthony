@@ -174,53 +174,66 @@ func (p *Pager) reloadDatabaseAfterVacuum() error {
 // 3. Copies all used pages in sequential order
 // 4. Skips all free pages
 func (p *Pager) vacuumToFile(targetFilename string) error {
-	// Open target pager
 	targetPager, err := OpenWithPageSize(targetFilename, false, p.pageSize)
 	if err != nil {
 		return fmt.Errorf("failed to open target file: %w", err)
 	}
 	defer targetPager.Close()
 
-	// Copy database header from source to target
-	if err = p.copyHeader(targetPager); err != nil {
+	if err = p.copyDatabaseToTarget(targetPager); err != nil {
+		return err
+	}
+
+	if err = p.updateTargetHeader(targetPager); err != nil {
+		return err
+	}
+
+	return p.commitTargetPager(targetPager)
+}
+
+// copyDatabaseToTarget copies header and live pages to target pager.
+func (p *Pager) copyDatabaseToTarget(targetPager *Pager) error {
+	if err := p.copyHeader(targetPager); err != nil {
 		return fmt.Errorf("failed to copy header: %w", err)
 	}
 
-	// Copy all live pages, compacting as we go
-	if err = p.copyLivePages(targetPager); err != nil {
+	if err := p.copyLivePages(targetPager); err != nil {
 		return fmt.Errorf("failed to copy pages: %w", err)
 	}
 
-	// Update target header to reflect new state (no free pages)
+	return nil
+}
+
+// updateTargetHeader updates the target pager's header.
+func (p *Pager) updateTargetHeader(targetPager *Pager) error {
 	targetPager.header.FreelistTrunk = 0
 	targetPager.header.FreelistCount = 0
 	targetPager.header.FileChangeCounter++
 
-	// Write updated header to page 1 (use regular Get/Write since we don't hold target's lock)
 	page1, err := targetPager.Get(1)
 	if err != nil {
 		return fmt.Errorf("failed to get page 1: %w", err)
 	}
+	defer targetPager.Put(page1)
 
-	// Mark page as dirty before modifying
 	if err = targetPager.Write(page1); err != nil {
-		targetPager.Put(page1)
 		return fmt.Errorf("failed to mark page 1 dirty: %w", err)
 	}
 
 	headerData := targetPager.header.Serialize()
 	copy(page1.Data, headerData)
-	targetPager.Put(page1)
 
-	// Commit target pager
+	return nil
+}
+
+// commitTargetPager commits the target pager if needed.
+func (p *Pager) commitTargetPager(targetPager *Pager) error {
 	if targetPager.state == PagerStateWriterCachemod ||
-	   targetPager.state == PagerStateWriterDbmod {
-		err = targetPager.Commit()
-		if err != nil {
+		targetPager.state == PagerStateWriterDbmod {
+		if err := targetPager.Commit(); err != nil {
 			return fmt.Errorf("failed to commit target: %w", err)
 		}
 	}
-
 	return nil
 }
 

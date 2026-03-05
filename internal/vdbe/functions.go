@@ -199,7 +199,9 @@ func (v *VDBE) ensureAggFuncSlot(aggState *AggregateState, funcIndex int, funcNa
 	if aggState.funcs[funcIndex] != nil {
 		return nil
 	}
-	fn, ok := v.funcCtx.registry.Lookup(funcName)
+	// Use LookupBuiltin to get the aggregate version of the function
+	// This is necessary because scalar min/max have priority in Lookup
+	fn, ok := v.funcCtx.registry.LookupBuiltin(funcName)
 	if !ok {
 		return fmt.Errorf("unknown aggregate function: %s", funcName)
 	}

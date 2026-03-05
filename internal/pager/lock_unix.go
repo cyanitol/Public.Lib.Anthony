@@ -135,30 +135,26 @@ func (lm *LockManager) shouldReleaseLock(currentLevel, targetLevel, lockType Loc
 	return lm.currentLevel >= currentLevel && targetLevel < lockType
 }
 
+// lockReleaseStep represents a lock release operation.
+type lockReleaseStep struct {
+	level       LockLevel
+	releaseFunc func() error
+}
+
 // releaseLockPlatform performs the platform-specific lock release.
 func (lm *LockManager) releaseLockPlatform(level LockLevel) error {
-	// Release locks in reverse order of acquisition
-	if lm.shouldReleaseLock(lockExclusive, level, lockExclusive) {
-		if err := lm.releaseExclusiveLock(); err != nil {
-			return err
-		}
+	steps := []lockReleaseStep{
+		{lockExclusive, lm.releaseExclusiveLock},
+		{lockPending, lm.releasePendingLock},
+		{lockReserved, lm.releaseReservedLock},
+		{lockShared, lm.releaseSharedLock},
 	}
 
-	if lm.shouldReleaseLock(lockPending, level, lockPending) {
-		if err := lm.releasePendingLock(); err != nil {
-			return err
-		}
-	}
-
-	if lm.shouldReleaseLock(lockReserved, level, lockReserved) {
-		if err := lm.releaseReservedLock(); err != nil {
-			return err
-		}
-	}
-
-	if lm.shouldReleaseLock(lockShared, level, lockShared) {
-		if err := lm.releaseSharedLock(); err != nil {
-			return err
+	for _, step := range steps {
+		if lm.shouldReleaseLock(step.level, level, step.level) {
+			if err := step.releaseFunc(); err != nil {
+				return err
+			}
 		}
 	}
 

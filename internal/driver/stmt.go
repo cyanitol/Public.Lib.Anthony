@@ -68,52 +68,86 @@ func (s *Stmt) Exec(args []driver.Value) (driver.Result, error) {
 
 // ExecContext executes a statement that doesn't return rows.
 func (s *Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil, driver.ErrBadConn
+	if err := s.checkStmtClosed(); err != nil {
+		return nil, err
 	}
-	s.mu.Unlock()
 
 	// Lock connection for entire execution to prevent concurrent access to pager
 	s.conn.mu.Lock()
 	defer s.conn.mu.Unlock()
 
-	inTx := s.conn.inTx
-	if s.conn.closed {
-		return nil, driver.ErrBadConn
+	if err := s.checkConnClosed(); err != nil {
+		return nil, err
 	}
 
-	// Compile the statement to VDBE bytecode
+	inTx := s.conn.inTx
+	return s.executeAndCommit(args, inTx)
+}
+
+// checkStmtClosed checks if the statement is closed
+func (s *Stmt) checkStmtClosed() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return driver.ErrBadConn
+	}
+	return nil
+}
+
+// checkConnClosed checks if the connection is closed
+func (s *Stmt) checkConnClosed() error {
+	if s.conn.closed {
+		return driver.ErrBadConn
+	}
+	return nil
+}
+
+// executeAndCommit compiles, executes, and commits the statement
+func (s *Stmt) executeAndCommit(args []driver.NamedValue, inTx bool) (driver.Result, error) {
 	vm, err := s.compile(args)
 	if err != nil {
 		return nil, fmt.Errorf("compile error: %w", err)
 	}
 	defer vm.Finalize()
 
-	// Execute the statement
+	if err := s.runVMWithRollback(vm, inTx); err != nil {
+		return nil, err
+	}
+
+	if err := s.autoCommitIfNeeded(inTx); err != nil {
+		return nil, err
+	}
+
+	return s.buildResult(vm), nil
+}
+
+// runVMWithRollback runs the VM and rolls back on error if in autocommit mode
+func (s *Stmt) runVMWithRollback(vm *vdbe.VDBE, inTx bool) error {
 	if err := vm.Run(); err != nil {
-		// Rollback on error if in autocommit mode
 		if !inTx {
 			s.conn.pager.Rollback()
 		}
-		return nil, fmt.Errorf("execution error: %w", err)
+		return fmt.Errorf("execution error: %w", err)
 	}
+	return nil
+}
 
-	// Auto-commit if not in explicit transaction and pager has a write transaction
+// autoCommitIfNeeded commits if not in a transaction and a write transaction exists
+func (s *Stmt) autoCommitIfNeeded(inTx bool) error {
 	if !inTx && s.conn.pager.InWriteTransaction() {
 		if err := s.conn.pager.Commit(); err != nil {
-			return nil, fmt.Errorf("auto-commit error: %w", err)
+			return fmt.Errorf("auto-commit error: %w", err)
 		}
 	}
+	return nil
+}
 
-	// Return result
-	result := &Result{
+// buildResult creates a Result from the VDBE execution
+func (s *Stmt) buildResult(vm *vdbe.VDBE) *Result {
+	return &Result{
 		lastInsertID: vm.LastInsertID,
 		rowsAffected: vm.NumChanges,
 	}
-
-	return result, nil
 }
 
 // Query executes a query that returns rows.

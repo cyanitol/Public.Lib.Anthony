@@ -346,6 +346,16 @@ func (r *Registry) Lookup(name string) (Function, bool) {
 	return nil, false
 }
 
+// LookupBuiltin finds a built-in function by name, skipping user-defined functions.
+// This is useful for tests that need to access aggregate functions even when
+// scalar versions with the same name have been registered as user functions.
+// Function names are case-insensitive (converted to lowercase).
+func (r *Registry) LookupBuiltin(name string) (Function, bool) {
+	name = strings.ToLower(name)
+	fn, ok := r.builtins[name]
+	return fn, ok
+}
+
 // LookupWithArgs finds a function by name and argument count.
 // This supports function overloading for user-defined functions.
 // Lookup priority:

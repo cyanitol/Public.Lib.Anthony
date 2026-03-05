@@ -39,24 +39,50 @@ func initWindowRankRegisters(numCols int) rankRegisters {
 func (s *Stmt) analyzeWindowRankFunctions(expandedCols []parser.ResultColumn, table *schema.Table) rankFunctionInfo {
 	info := rankFunctionInfo{}
 	for _, col := range expandedCols {
-		fnExpr, ok := col.Expr.(*parser.FunctionExpr)
-		if !ok || fnExpr.Over == nil {
+		if !isWindowFunction(col) {
 			continue
 		}
-
-		if fnExpr.Name == "RANK" || fnExpr.Name == "DENSE_RANK" {
-			if fnExpr.Name == "RANK" {
-				info.hasRank = true
-			} else {
-				info.hasDenseRank = true
-			}
-
-			if fnExpr.Over.OrderBy != nil && len(info.orderByCols) == 0 {
-				info.orderByCols = s.extractWindowOrderByCols(fnExpr.Over.OrderBy, table)
-			}
-		}
+		s.processWindowRankFunction(col.Expr.(*parser.FunctionExpr), &info, table)
 	}
 	return info
+}
+
+// isWindowFunction checks if a result column is a window function
+func isWindowFunction(col parser.ResultColumn) bool {
+	fnExpr, ok := col.Expr.(*parser.FunctionExpr)
+	return ok && fnExpr.Over != nil
+}
+
+// processWindowRankFunction processes a single window rank function
+func (s *Stmt) processWindowRankFunction(fnExpr *parser.FunctionExpr, info *rankFunctionInfo, table *schema.Table) {
+	if !isRankFunction(fnExpr.Name) {
+		return
+	}
+
+	updateRankInfo(fnExpr.Name, info)
+
+	if shouldExtractOrderBy(fnExpr, info) {
+		info.orderByCols = s.extractWindowOrderByCols(fnExpr.Over.OrderBy, table)
+	}
+}
+
+// isRankFunction checks if a function name is a rank function
+func isRankFunction(name string) bool {
+	return name == "RANK" || name == "DENSE_RANK"
+}
+
+// updateRankInfo updates the rank info flags based on function name
+func updateRankInfo(name string, info *rankFunctionInfo) {
+	if name == "RANK" {
+		info.hasRank = true
+	} else if name == "DENSE_RANK" {
+		info.hasDenseRank = true
+	}
+}
+
+// shouldExtractOrderBy checks if ORDER BY columns should be extracted
+func shouldExtractOrderBy(fnExpr *parser.FunctionExpr, info *rankFunctionInfo) bool {
+	return fnExpr.Over.OrderBy != nil && len(info.orderByCols) == 0
 }
 
 // extractWindowOrderByCols extracts column indices from ORDER BY terms

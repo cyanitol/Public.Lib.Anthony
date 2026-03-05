@@ -326,35 +326,66 @@ func (c *SelectCompiler) applyOffsetFilter(sort *SortCtx, sel *Select, iContinue
 
 // disposeResult emits code to deliver the current result row to dest.
 func (c *SelectCompiler) disposeResult(dest *SelectDest, nResultCol int, regResult int) error {
-	vdbe := c.parse.GetVdbe()
-	switch dest.Dest {
-	case SRT_Output:
-		vdbe.AddOp2(OP_ResultRow, regResult, nResultCol)
-
-	case SRT_Mem:
-		if regResult != dest.SDParm {
-			vdbe.AddOp3(OP_Copy, regResult, dest.SDParm, nResultCol-1)
-		}
-
-	case SRT_Set, SRT_Union:
-		c.disposeResultWithRecord(dest, nResultCol, regResult, OP_IdxInsert)
-
-	case SRT_Except:
-		c.disposeResultWithRecord(dest, nResultCol, regResult, OP_IdxDelete)
-
-	case SRT_Table, SRT_EphemTab:
-		c.disposeResultAsTableInsert(dest, nResultCol, regResult)
-
-	case SRT_Exists:
-		vdbe.AddOp2(OP_Integer, 1, dest.SDParm)
-
-	case SRT_Coroutine:
-		vdbe.AddOp1(OP_Yield, dest.SDParm)
-
-	default:
+	handler, ok := resultDisposers[dest.Dest]
+	if !ok {
 		return fmt.Errorf("unsupported destination type: %d", dest.Dest)
 	}
+	handler(c, dest, nResultCol, regResult)
 	return nil
+}
+
+// resultDisposer is a function that emits VDBE code for a specific result disposition.
+type resultDisposer func(*SelectCompiler, *SelectDest, int, int)
+
+// resultDisposers maps each SelectDestType to its disposal handler.
+var resultDisposers = map[SelectDestType]resultDisposer{
+	SRT_Output:    disposeAsOutput,
+	SRT_Mem:       disposeAsMem,
+	SRT_Set:       disposeAsSet,
+	SRT_Union:     disposeAsUnion,
+	SRT_Except:    disposeAsExcept,
+	SRT_Table:     disposeAsTable,
+	SRT_EphemTab:  disposeAsEphemTab,
+	SRT_Exists:    disposeAsExists,
+	SRT_Coroutine: disposeAsCoroutine,
+}
+
+func disposeAsOutput(c *SelectCompiler, dest *SelectDest, nResultCol int, regResult int) {
+	c.parse.GetVdbe().AddOp2(OP_ResultRow, regResult, nResultCol)
+}
+
+func disposeAsMem(c *SelectCompiler, dest *SelectDest, nResultCol int, regResult int) {
+	if regResult != dest.SDParm {
+		c.parse.GetVdbe().AddOp3(OP_Copy, regResult, dest.SDParm, nResultCol-1)
+	}
+}
+
+func disposeAsSet(c *SelectCompiler, dest *SelectDest, nResultCol int, regResult int) {
+	c.disposeResultWithRecord(dest, nResultCol, regResult, OP_IdxInsert)
+}
+
+func disposeAsUnion(c *SelectCompiler, dest *SelectDest, nResultCol int, regResult int) {
+	c.disposeResultWithRecord(dest, nResultCol, regResult, OP_IdxInsert)
+}
+
+func disposeAsExcept(c *SelectCompiler, dest *SelectDest, nResultCol int, regResult int) {
+	c.disposeResultWithRecord(dest, nResultCol, regResult, OP_IdxDelete)
+}
+
+func disposeAsTable(c *SelectCompiler, dest *SelectDest, nResultCol int, regResult int) {
+	c.disposeResultAsTableInsert(dest, nResultCol, regResult)
+}
+
+func disposeAsEphemTab(c *SelectCompiler, dest *SelectDest, nResultCol int, regResult int) {
+	c.disposeResultAsTableInsert(dest, nResultCol, regResult)
+}
+
+func disposeAsExists(c *SelectCompiler, dest *SelectDest, nResultCol int, regResult int) {
+	c.parse.GetVdbe().AddOp2(OP_Integer, 1, dest.SDParm)
+}
+
+func disposeAsCoroutine(c *SelectCompiler, dest *SelectDest, nResultCol int, regResult int) {
+	c.parse.GetVdbe().AddOp1(OP_Yield, dest.SDParm)
 }
 
 func (c *SelectCompiler) disposeResultWithRecord(dest *SelectDest, nResultCol int, regResult int, op Opcode) {

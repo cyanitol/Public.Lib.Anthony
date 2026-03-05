@@ -19,21 +19,6 @@ import (
 // TestTypeAffinityBasic tests basic type affinity for different column types
 // From types.test lines 46-91
 func TestTypeAffinityBasic(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "types_test.db")
-
-	db, err := sql.Open(DriverName, dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
-
-	// Create table with different affinity columns
-	_, err = db.Exec("CREATE TABLE t1(i INTEGER, n NUMERIC, t TEXT, o BLOB)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
 	tests := []struct {
 		name     string
 		value    string // SQL literal value
@@ -54,12 +39,22 @@ func TestTypeAffinityBasic(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			// Test INSERT VALUES
-			_, err := db.Exec("DELETE FROM t1")
+			// Use unique database per subtest for isolation
+			tmpDir := t.TempDir()
+			dbPath := filepath.Join(tmpDir, "types_test.db")
+
+			db, err := sql.Open(DriverName, dbPath)
 			if err != nil {
-				t.Fatalf("failed to delete: %v", err)
+				t.Fatalf("failed to open database: %v", err)
+			}
+			defer db.Close()
+
+			// Create table with different affinity columns
+			_, err = db.Exec("CREATE TABLE t1(i INTEGER, n NUMERIC, t TEXT, o BLOB)")
+			if err != nil {
+				t.Fatalf("failed to create table: %v", err)
 			}
 
 			query := "INSERT INTO t1 VALUES(" + tt.value + ", " + tt.value + ", " + tt.value + ", " + tt.value + ")"

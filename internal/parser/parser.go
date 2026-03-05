@@ -909,41 +909,52 @@ func (p *Parser) parseUpsertClause() (*UpsertClause, error) {
 func (p *Parser) parseConflictTarget(upsert *UpsertClause) error {
 	// ON CONSTRAINT name
 	if p.match(TK_ON) {
-		if !p.match(TK_CONSTRAINT) {
-			return p.error("expected CONSTRAINT after ON")
-		}
-		if !p.check(TK_ID) {
-			return p.error("expected constraint name")
-		}
-		upsert.Target = &ConflictTarget{
-			ConstraintName: Unquote(p.advance().Lexeme),
-		}
-		return nil
+		return p.parseConstraintTarget(upsert)
 	}
 
 	// (columns) [WHERE expr]
 	if p.match(TK_LP) {
-		cols, err := p.parseIndexedColumns()
+		return p.parseColumnsTarget(upsert)
+	}
+
+	return nil
+}
+
+// parseConstraintTarget handles ON CONSTRAINT name syntax.
+func (p *Parser) parseConstraintTarget(upsert *UpsertClause) error {
+	if !p.match(TK_CONSTRAINT) {
+		return p.error("expected CONSTRAINT after ON")
+	}
+	if !p.check(TK_ID) {
+		return p.error("expected constraint name")
+	}
+	upsert.Target = &ConflictTarget{
+		ConstraintName: Unquote(p.advance().Lexeme),
+	}
+	return nil
+}
+
+// parseColumnsTarget handles (columns) [WHERE expr] syntax.
+func (p *Parser) parseColumnsTarget(upsert *UpsertClause) error {
+	cols, err := p.parseIndexedColumns()
+	if err != nil {
+		return err
+	}
+	if !p.match(TK_RP) {
+		return p.error("expected ) after conflict columns")
+	}
+	target := &ConflictTarget{Columns: cols}
+
+	// Optional WHERE clause
+	if p.match(TK_WHERE) {
+		where, err := p.parseExpression()
 		if err != nil {
 			return err
 		}
-		if !p.match(TK_RP) {
-			return p.error("expected ) after conflict columns")
-		}
-		target := &ConflictTarget{Columns: cols}
-
-		// Optional WHERE clause
-		if p.match(TK_WHERE) {
-			where, err := p.parseExpression()
-			if err != nil {
-				return err
-			}
-			target.Where = where
-		}
-
-		upsert.Target = target
+		target.Where = where
 	}
 
+	upsert.Target = target
 	return nil
 }
 
@@ -956,19 +967,34 @@ func (p *Parser) parseDoUpdateClause(upsert *UpsertClause) (*UpsertClause, error
 	doUpdate := &DoUpdateClause{}
 
 	// Parse SET assignments
+	if err := p.parseSetAssignments(doUpdate); err != nil {
+		return nil, err
+	}
+
+	// Optional WHERE clause
+	if err := p.parseOptionalWhereExpr(&doUpdate.Where); err != nil {
+		return nil, err
+	}
+
+	upsert.Update = doUpdate
+	return upsert, nil
+}
+
+// parseSetAssignments parses a comma-separated list of column assignments.
+func (p *Parser) parseSetAssignments(doUpdate *DoUpdateClause) error {
 	for {
 		if !p.check(TK_ID) {
-			return nil, p.error("expected column name")
+			return p.error("expected column name")
 		}
 		column := Unquote(p.advance().Lexeme)
 
 		if !p.match(TK_EQ) {
-			return nil, p.error("expected = after column name")
+			return p.error("expected = after column name")
 		}
 
 		value, err := p.parseExpression()
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		doUpdate.Sets = append(doUpdate.Sets, Assignment{Column: column, Value: value})
@@ -977,18 +1003,19 @@ func (p *Parser) parseDoUpdateClause(upsert *UpsertClause) (*UpsertClause, error
 			break
 		}
 	}
+	return nil
+}
 
-	// Optional WHERE clause
+// parseOptionalWhereExpr parses an optional WHERE clause.
+func (p *Parser) parseOptionalWhereExpr(where *Expression) error {
 	if p.match(TK_WHERE) {
-		where, err := p.parseExpression()
+		expr, err := p.parseExpression()
 		if err != nil {
-			return nil, err
+			return err
 		}
-		doUpdate.Where = where
+		*where = expr
 	}
-
-	upsert.Update = doUpdate
-	return upsert, nil
+	return nil
 }
 
 // =============================================================================
@@ -1263,19 +1290,22 @@ func (p *Parser) parseCreateTableBody(stmt *CreateTableStmt) error {
 	return nil
 }
 
+// tableConstraintKeywords contains tokens that start a table constraint.
+var tableConstraintKeywords = map[TokenType]bool{
+	TK_CONSTRAINT: true,
+	TK_PRIMARY:    true,
+	TK_UNIQUE:     true,
+	TK_CHECK:      true,
+	TK_FOREIGN:    true,
+}
+
 // parseColumnOrConstraint attempts to parse one column definition; on failure
 // it falls back to a table constraint.
 func (p *Parser) parseColumnOrConstraint(stmt *CreateTableStmt) error {
 	// Check if current token is a table constraint keyword
 	// If so, parse it as a constraint directly to avoid misleading error messages
-	if p.check(TK_CONSTRAINT) || p.check(TK_PRIMARY) || p.check(TK_UNIQUE) ||
-	   p.check(TK_CHECK) || p.check(TK_FOREIGN) {
-		constraint, err := p.parseTableConstraint()
-		if err != nil {
-			return err
-		}
-		stmt.Constraints = append(stmt.Constraints, *constraint)
-		return nil
+	if p.isTableConstraintKeyword() {
+		return p.parseAndAppendTableConstraint(stmt)
 	}
 
 	// Try to parse as a column definition
@@ -1289,6 +1319,21 @@ func (p *Parser) parseColumnOrConstraint(stmt *CreateTableStmt) error {
 	constraint, err := p.parseTableConstraint()
 	if err != nil {
 		return colErr // return the original column-parse error
+	}
+	stmt.Constraints = append(stmt.Constraints, *constraint)
+	return nil
+}
+
+// isTableConstraintKeyword checks if current token starts a table constraint.
+func (p *Parser) isTableConstraintKeyword() bool {
+	return tableConstraintKeywords[p.peek().Type]
+}
+
+// parseAndAppendTableConstraint parses a table constraint and appends it to stmt.
+func (p *Parser) parseAndAppendTableConstraint(stmt *CreateTableStmt) error {
+	constraint, err := p.parseTableConstraint()
+	if err != nil {
+		return err
 	}
 	stmt.Constraints = append(stmt.Constraints, *constraint)
 	return nil
@@ -2098,48 +2143,56 @@ func (p *Parser) parseDropView() (*DropViewStmt, error) {
 func (p *Parser) parseCreateTrigger(temp bool) (*CreateTriggerStmt, error) {
 	stmt := &CreateTriggerStmt{Temp: temp}
 
-	// IF NOT EXISTS
-	if err := p.parseIfNotExists(&stmt.IfNotExists); err != nil {
+	// Parse trigger header: IF NOT EXISTS and name
+	if err := p.parseTriggerHeader(stmt); err != nil {
 		return nil, err
 	}
 
-	// Trigger name
-	if !p.check(TK_ID) {
-		return nil, p.error("expected trigger name")
-	}
-	stmt.Name = Unquote(p.advance().Lexeme)
-
-	// Timing: BEFORE, AFTER, or INSTEAD OF
-	if err := p.parseTriggerTiming(stmt); err != nil {
+	// Parse trigger specification: timing, event, table
+	if err := p.parseTriggerSpec(stmt); err != nil {
 		return nil, err
 	}
 
-	// Event: INSERT, UPDATE, or DELETE
-	if err := p.parseTriggerEvent(stmt); err != nil {
-		return nil, err
-	}
-
-	// ON table
-	if err := p.parseTriggerTable(stmt); err != nil {
-		return nil, err
-	}
-
-	// FOR EACH ROW (optional)
-	if err := p.parseTriggerForEachRow(stmt); err != nil {
-		return nil, err
-	}
-
-	// WHEN expr (optional)
-	if err := p.parseTriggerWhen(stmt); err != nil {
-		return nil, err
-	}
-
-	// Parse trigger body: BEGIN statements END
-	if err := p.parseTriggerBody(stmt); err != nil {
+	// Parse optional clauses and body
+	if err := p.parseTriggerOptionalAndBody(stmt); err != nil {
 		return nil, err
 	}
 
 	return stmt, nil
+}
+
+// parseTriggerHeader parses IF NOT EXISTS and the trigger name.
+func (p *Parser) parseTriggerHeader(stmt *CreateTriggerStmt) error {
+	if err := p.parseIfNotExists(&stmt.IfNotExists); err != nil {
+		return err
+	}
+	if !p.check(TK_ID) {
+		return p.error("expected trigger name")
+	}
+	stmt.Name = Unquote(p.advance().Lexeme)
+	return nil
+}
+
+// parseTriggerSpec parses timing, event, and table clauses.
+func (p *Parser) parseTriggerSpec(stmt *CreateTriggerStmt) error {
+	if err := p.parseTriggerTiming(stmt); err != nil {
+		return err
+	}
+	if err := p.parseTriggerEvent(stmt); err != nil {
+		return err
+	}
+	return p.parseTriggerTable(stmt)
+}
+
+// parseTriggerOptionalAndBody parses FOR EACH ROW, WHEN, and BEGIN...END.
+func (p *Parser) parseTriggerOptionalAndBody(stmt *CreateTriggerStmt) error {
+	if err := p.parseTriggerForEachRow(stmt); err != nil {
+		return err
+	}
+	if err := p.parseTriggerWhen(stmt); err != nil {
+		return err
+	}
+	return p.parseTriggerBody(stmt)
 }
 
 // parseTriggerTiming parses the trigger timing (BEFORE, AFTER, INSTEAD OF).
@@ -2942,44 +2995,41 @@ func (p *Parser) parseMultiplicativeExpression() (Expression, error) {
 	return left, nil
 }
 
+// unaryOperatorMap maps tokens to their corresponding unary operators.
+var unaryOperatorMap = map[TokenType]UnaryOp{
+	TK_MINUS:  OpNeg,
+	TK_BITNOT: OpBitNot,
+	TK_NOT:    OpNot,
+}
+
 func (p *Parser) parseUnaryExpression() (Expression, error) {
-	if p.match(TK_MINUS) {
-		expr, err := p.parseUnaryExpression()
-		if err != nil {
-			return nil, err
-		}
-		return &UnaryExpr{
-			Op:   OpNeg,
-			Expr: expr,
-		}, nil
-	} else if p.match(TK_PLUS) {
+	// Handle unary plus (no-op)
+	if p.match(TK_PLUS) {
 		return p.parseUnaryExpression()
-	} else if p.match(TK_BITNOT) {
-		expr, err := p.parseUnaryExpression()
-		if err != nil {
-			return nil, err
+	}
+
+	// Handle NOT EXISTS
+	if p.match(TK_NOT) && p.match(TK_EXISTS) {
+		return p.parseExistsExpr(true)
+	}
+
+	// Handle other unary operators using map lookup
+	for tok, op := range unaryOperatorMap {
+		if p.match(tok) {
+			return p.parseUnaryExprWithOp(op)
 		}
-		return &UnaryExpr{
-			Op:   OpBitNot,
-			Expr: expr,
-		}, nil
-	} else if p.match(TK_NOT) {
-		// Handle NOT EXISTS specifically
-		if p.match(TK_EXISTS) {
-			return p.parseExistsExpr(true)
-		}
-		// For other NOT expressions, treat as unary NOT
-		expr, err := p.parseUnaryExpression()
-		if err != nil {
-			return nil, err
-		}
-		return &UnaryExpr{
-			Op:   OpNot,
-			Expr: expr,
-		}, nil
 	}
 
 	return p.parsePostfixExpression()
+}
+
+// parseUnaryExprWithOp parses a unary expression with the given operator.
+func (p *Parser) parseUnaryExprWithOp(op UnaryOp) (Expression, error) {
+	expr, err := p.parseUnaryExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &UnaryExpr{Op: op, Expr: expr}, nil
 }
 
 func (p *Parser) parsePostfixExpression() (Expression, error) {
@@ -3551,77 +3601,113 @@ func StringValue(expr Expression) (string, error) {
 }
 
 // parseFrameSpec parses a window frame specification (ROWS/RANGE/GROUPS BETWEEN...).
+// frameModeMap maps tokens to frame modes.
+var frameModeMap = map[TokenType]FrameMode{
+	TK_ROWS:   FrameRows,
+	TK_RANGE:  FrameRange,
+	TK_GROUPS: FrameGroups,
+}
+
 func (p *Parser) parseFrameSpec() (*FrameSpec, error) {
 	frameSpec := &FrameSpec{}
 
-	// Parse frame mode (ROWS, RANGE, or GROUPS)
-	if p.match(TK_ROWS) {
-		frameSpec.Mode = FrameRows
-	} else if p.match(TK_RANGE) {
-		frameSpec.Mode = FrameRange
-	} else if p.match(TK_GROUPS) {
-		frameSpec.Mode = FrameGroups
-	} else {
-		return nil, p.error("expected ROWS, RANGE, or GROUPS")
+	// Parse frame mode using map lookup
+	if err := p.parseFrameMode(frameSpec); err != nil {
+		return nil, err
 	}
 
 	// Parse BETWEEN clause or simple frame bound
 	if p.match(TK_BETWEEN) {
-		// Parse start bound
-		start, err := p.parseFrameBound()
-		if err != nil {
-			return nil, err
-		}
-		frameSpec.Start = start
+		return p.parseFrameBetween(frameSpec)
+	}
+	return p.parseFrameSingleBound(frameSpec)
+}
 
-		if !p.match(TK_AND) {
-			return nil, p.error("expected AND in frame specification")
+// parseFrameMode parses the frame mode (ROWS, RANGE, or GROUPS).
+func (p *Parser) parseFrameMode(frameSpec *FrameSpec) error {
+	for tok, mode := range frameModeMap {
+		if p.match(tok) {
+			frameSpec.Mode = mode
+			return nil
 		}
+	}
+	return p.error("expected ROWS, RANGE, or GROUPS")
+}
 
-		// Parse end bound
-		end, err := p.parseFrameBound()
-		if err != nil {
-			return nil, err
-		}
-		frameSpec.End = end
-	} else {
-		// Single bound (implicitly UNBOUNDED PRECEDING to specified bound)
-		bound, err := p.parseFrameBound()
-		if err != nil {
-			return nil, err
-		}
-		// For single bound, start is UNBOUNDED PRECEDING and end is the specified bound
-		frameSpec.Start = FrameBound{Type: BoundUnboundedPreceding}
-		frameSpec.End = bound
+// parseFrameBetween parses a BETWEEN start AND end clause.
+func (p *Parser) parseFrameBetween(frameSpec *FrameSpec) (*FrameSpec, error) {
+	start, err := p.parseFrameBound()
+	if err != nil {
+		return nil, err
+	}
+	frameSpec.Start = start
+
+	if !p.match(TK_AND) {
+		return nil, p.error("expected AND in frame specification")
 	}
 
+	end, err := p.parseFrameBound()
+	if err != nil {
+		return nil, err
+	}
+	frameSpec.End = end
+	return frameSpec, nil
+}
+
+// parseFrameSingleBound parses a single bound (implicitly UNBOUNDED PRECEDING to specified bound).
+func (p *Parser) parseFrameSingleBound(frameSpec *FrameSpec) (*FrameSpec, error) {
+	bound, err := p.parseFrameBound()
+	if err != nil {
+		return nil, err
+	}
+	frameSpec.Start = FrameBound{Type: BoundUnboundedPreceding}
+	frameSpec.End = bound
 	return frameSpec, nil
 }
 
 // parseFrameBound parses a single frame boundary.
 func (p *Parser) parseFrameBound() (FrameBound, error) {
-	bound := FrameBound{}
-
+	// Try UNBOUNDED PRECEDING/FOLLOWING
 	if p.match(TK_UNBOUNDED) {
-		if p.match(TK_PRECEDING) {
-			bound.Type = BoundUnboundedPreceding
-		} else if p.match(TK_FOLLOWING) {
-			bound.Type = BoundUnboundedFollowing
-		} else {
-			return bound, p.error("expected PRECEDING or FOLLOWING after UNBOUNDED")
-		}
-		return bound, nil
+		return p.parseUnboundedBound()
 	}
 
+	// Try CURRENT ROW
 	if p.match(TK_CURRENT) {
-		if !p.match(TK_ROW) {
-			return bound, p.error("expected ROW after CURRENT")
-		}
-		bound.Type = BoundCurrentRow
-		return bound, nil
+		return p.parseCurrentRowBound()
 	}
 
-	// Parse numeric offset
+	// Parse numeric offset with PRECEDING/FOLLOWING
+	return p.parseOffsetBound()
+}
+
+// parseUnboundedBound parses UNBOUNDED PRECEDING or UNBOUNDED FOLLOWING.
+func (p *Parser) parseUnboundedBound() (FrameBound, error) {
+	bound := FrameBound{}
+	if p.match(TK_PRECEDING) {
+		bound.Type = BoundUnboundedPreceding
+		return bound, nil
+	}
+	if p.match(TK_FOLLOWING) {
+		bound.Type = BoundUnboundedFollowing
+		return bound, nil
+	}
+	return bound, p.error("expected PRECEDING or FOLLOWING after UNBOUNDED")
+}
+
+// parseCurrentRowBound parses CURRENT ROW.
+func (p *Parser) parseCurrentRowBound() (FrameBound, error) {
+	bound := FrameBound{}
+	if !p.match(TK_ROW) {
+		return bound, p.error("expected ROW after CURRENT")
+	}
+	bound.Type = BoundCurrentRow
+	return bound, nil
+}
+
+// parseOffsetBound parses N PRECEDING or N FOLLOWING.
+func (p *Parser) parseOffsetBound() (FrameBound, error) {
+	bound := FrameBound{}
 	expr, err := p.parsePrimaryExpression()
 	if err != nil {
 		return bound, err
@@ -3630,12 +3716,12 @@ func (p *Parser) parseFrameBound() (FrameBound, error) {
 	if p.match(TK_PRECEDING) {
 		bound.Type = BoundPreceding
 		bound.Offset = expr
-	} else if p.match(TK_FOLLOWING) {
+		return bound, nil
+	}
+	if p.match(TK_FOLLOWING) {
 		bound.Type = BoundFollowing
 		bound.Offset = expr
-	} else {
-		return bound, p.error("expected PRECEDING or FOLLOWING after offset")
+		return bound, nil
 	}
-
-	return bound, nil
+	return bound, p.error("expected PRECEDING or FOLLOWING after offset")
 }

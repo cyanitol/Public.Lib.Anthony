@@ -1547,53 +1547,67 @@ func (g *CodeGenerator) generateCollate(e *parser.CollateExpr) (int, error) {
 	return reg, nil
 }
 
+// jumpAdjustmentRule defines which parameters need jump target adjustment for an opcode.
+type jumpAdjustmentRule struct {
+	adjustP2 bool // Whether P2 is a jump target that needs adjustment
+	adjustP3 bool // Whether P3 is a jump target that needs adjustment
+}
+
+// jumpAdjustmentRules maps opcodes to their jump target adjustment rules.
+var jumpAdjustmentRules = map[vdbe.Opcode]jumpAdjustmentRule{
+	// Conditional jumps
+	vdbe.OpIf:        {adjustP2: true, adjustP3: false},
+	vdbe.OpIfNot:     {adjustP2: true, adjustP3: false},
+	vdbe.OpIfPos:     {adjustP2: true, adjustP3: false},
+	vdbe.OpIfNotZero: {adjustP2: true, adjustP3: false},
+	vdbe.OpIfNullRow: {adjustP2: true, adjustP3: false},
+	vdbe.OpIsNull:    {adjustP2: true, adjustP3: false},
+	vdbe.OpNotNull:   {adjustP2: true, adjustP3: false},
+	// Unconditional jumps
+	vdbe.OpGoto:  {adjustP2: true, adjustP3: false},
+	vdbe.OpGosub: {adjustP2: true, adjustP3: false},
+	// Loop control
+	vdbe.OpRewind: {adjustP2: true, adjustP3: false},
+	vdbe.OpNext:   {adjustP2: true, adjustP3: false},
+	vdbe.OpPrev:   {adjustP2: true, adjustP3: false},
+	vdbe.OpLast:   {adjustP2: true, adjustP3: false},
+	vdbe.OpFirst:  {adjustP2: true, adjustP3: false},
+	// Seek operations
+	vdbe.OpSeekGE:    {adjustP2: true, adjustP3: false},
+	vdbe.OpSeekGT:    {adjustP2: true, adjustP3: false},
+	vdbe.OpSeekLE:    {adjustP2: true, adjustP3: false},
+	vdbe.OpSeekLT:    {adjustP2: true, adjustP3: false},
+	vdbe.OpSeekRowid: {adjustP2: true, adjustP3: false},
+	vdbe.OpNotExists: {adjustP2: true, adjustP3: false},
+	// Sorter operations
+	vdbe.OpSorterSort: {adjustP2: true, adjustP3: false},
+	vdbe.OpSorterNext: {adjustP2: true, adjustP3: false},
+	// Special control flow
+	vdbe.OpOnce:          {adjustP2: true, adjustP3: false},
+	vdbe.OpInitCoroutine: {adjustP2: true, adjustP3: true},
+}
+
 // adjustInstructionJumps adjusts jump targets in a single instruction using the address map.
 func (g *CodeGenerator) adjustInstructionJumps(instr *vdbe.Instruction, addrMap map[int]int) {
-	// Opcodes that use P2 as a jump target
-	jumpOpcodes := map[vdbe.Opcode]bool{
-		vdbe.OpIf:        true,
-		vdbe.OpIfNot:     true,
-		vdbe.OpIfPos:     true,
-		vdbe.OpIfNotZero: true,
-		vdbe.OpIfNullRow: true,
-		vdbe.OpIsNull:    true,
-		vdbe.OpNotNull:   true,
-		vdbe.OpGoto:      true,
-		vdbe.OpGosub:     true,
-		vdbe.OpRewind:    true,
-		vdbe.OpNext:      true,
-		vdbe.OpPrev:      true,
-		vdbe.OpLast:      true,
-		vdbe.OpFirst:     true,
-		vdbe.OpSeekGE:    true,
-		vdbe.OpSeekGT:    true,
-		vdbe.OpSeekLE:    true,
-		vdbe.OpSeekLT:    true,
-		vdbe.OpSeekRowid: true,
-		vdbe.OpNotExists: true,
-		vdbe.OpSorterSort: true,
-		vdbe.OpSorterNext: true,
-		vdbe.OpOnce:       true,
+	rule, ok := jumpAdjustmentRules[instr.Opcode]
+	if !ok {
+		return // No jump adjustment needed for this opcode
 	}
 
-	// Adjust P2 for jump opcodes
-	if jumpOpcodes[instr.Opcode] && instr.P2 > 0 {
-		if mapped, ok := addrMap[instr.P2]; ok {
-			instr.P2 = mapped
-		}
+	if rule.adjustP2 {
+		g.adjustJumpTarget(&instr.P2, addrMap)
 	}
 
-	// Adjust both P2 and P3 for InitCoroutine
-	if instr.Opcode == vdbe.OpInitCoroutine {
-		if instr.P2 > 0 {
-			if mapped, ok := addrMap[instr.P2]; ok {
-				instr.P2 = mapped
-			}
-		}
-		if instr.P3 > 0 {
-			if mapped, ok := addrMap[instr.P3]; ok {
-				instr.P3 = mapped
-			}
+	if rule.adjustP3 {
+		g.adjustJumpTarget(&instr.P3, addrMap)
+	}
+}
+
+// adjustJumpTarget adjusts a single jump target parameter using the address map.
+func (g *CodeGenerator) adjustJumpTarget(param *int, addrMap map[int]int) {
+	if *param > 0 {
+		if mapped, ok := addrMap[*param]; ok {
+			*param = mapped
 		}
 	}
 }

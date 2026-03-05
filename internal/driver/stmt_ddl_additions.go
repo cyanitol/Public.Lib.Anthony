@@ -376,45 +376,33 @@ func calculatePrimaryKeyIndex(col *schema.Column, table *schema.Table) int {
 // compilePragmaForeignKeys compiles PRAGMA foreign_keys or PRAGMA foreign_keys = value
 func (s *Stmt) compilePragmaForeignKeys(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
 	if stmt.Value != nil {
-		// SET operation: PRAGMA foreign_keys = value
-		vm.SetReadOnly(false)
+		return s.compilePragmaForeignKeysSet(vm, stmt)
+	}
+	return s.compilePragmaForeignKeysGet(vm)
+}
 
-		// Parse the value (ON/OFF, 1/0, true/false)
-		var enabled bool
-		if lit, ok := stmt.Value.(*parser.LiteralExpr); ok {
-			switch strings.ToUpper(lit.Value) {
-			case "ON", "TRUE", "1":
-				enabled = true
-			case "OFF", "FALSE", "0":
-				enabled = false
-			default:
-				return nil, fmt.Errorf("invalid value for PRAGMA foreign_keys: %s", lit.Value)
-			}
-		} else if ident, ok := stmt.Value.(*parser.IdentExpr); ok {
-			switch strings.ToUpper(ident.Name) {
-			case "ON", "TRUE":
-				enabled = true
-			case "OFF", "FALSE":
-				enabled = false
-			default:
-				return nil, fmt.Errorf("invalid value for PRAGMA foreign_keys: %s", ident.Name)
-			}
-		}
+// compilePragmaForeignKeysSet handles SET operation: PRAGMA foreign_keys = value
+func (s *Stmt) compilePragmaForeignKeysSet(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
 
-		// Store the setting in the connection
-		s.conn.foreignKeysEnabled = enabled
-
-		vm.AddOp(vdbe.OpInit, 0, 0, 0)
-		vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-		return vm, nil
+	enabled, err := parseForeignKeysValue(stmt.Value)
+	if err != nil {
+		return nil, err
 	}
 
-	// GET operation: PRAGMA foreign_keys
+	s.conn.foreignKeysEnabled = enabled
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaForeignKeysGet handles GET operation: PRAGMA foreign_keys
+func (s *Stmt) compilePragmaForeignKeysGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
 	vm.ResultCols = []string{"foreign_keys"}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 
-	// Return current value
 	value := 0
 	if s.conn.foreignKeysEnabled {
 		value = 1
@@ -424,6 +412,42 @@ func (s *Stmt) compilePragmaForeignKeys(vm *vdbe.VDBE, stmt *parser.PragmaStmt) 
 
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	return vm, nil
+}
+
+// parseForeignKeysValue parses a PRAGMA foreign_keys value into a boolean
+func parseForeignKeysValue(value parser.Expression) (bool, error) {
+	// Map of valid values to their boolean equivalents
+	validValues := map[string]bool{
+		"ON":    true,
+		"TRUE":  true,
+		"1":     true,
+		"OFF":   false,
+		"FALSE": false,
+		"0":     false,
+	}
+
+	valueStr := extractPragmaValueString(value)
+	if valueStr == "" {
+		return false, fmt.Errorf("invalid value for PRAGMA foreign_keys")
+	}
+
+	enabled, ok := validValues[strings.ToUpper(valueStr)]
+	if !ok {
+		return false, fmt.Errorf("invalid value for PRAGMA foreign_keys: %s", valueStr)
+	}
+
+	return enabled, nil
+}
+
+// extractPragmaValueString extracts a string value from a pragma expression
+func extractPragmaValueString(value parser.Expression) string {
+	if lit, ok := value.(*parser.LiteralExpr); ok {
+		return lit.Value
+	}
+	if ident, ok := value.(*parser.IdentExpr); ok {
+		return ident.Name
+	}
+	return ""
 }
 
 // compilePragmaJournalMode compiles PRAGMA journal_mode or PRAGMA journal_mode = value

@@ -127,10 +127,24 @@ func (s *SorterWithSpill) spillCurrentRun() error {
 		return nil
 	}
 
-	// Sort the current batch
 	s.Sorter.Sort()
 
-	// Create temporary file
+	filePath, err := s.createSpillFilePath()
+	if err != nil {
+		return err
+	}
+
+	numRows := len(s.Rows)
+	if err := s.writeAndRecordSpill(filePath, numRows); err != nil {
+		return err
+	}
+
+	s.clearInMemoryRows()
+	return nil
+}
+
+// createSpillFilePath generates a unique temporary file path for spilling
+func (s *SorterWithSpill) createSpillFilePath() (string, error) {
 	tempDir := s.Config.TempDir
 	if tempDir == "" {
 		tempDir = os.TempDir()
@@ -138,35 +152,37 @@ func (s *SorterWithSpill) spillCurrentRun() error {
 
 	s.spillCounter++
 	fileName := fmt.Sprintf("anthony_sorter_spill_%d_%d.tmp", os.Getpid(), s.spillCounter)
-	filePath := filepath.Join(tempDir, fileName)
+	return filepath.Join(tempDir, fileName), nil
+}
 
+// writeAndRecordSpill writes rows to a spill file and records the spilled run
+func (s *SorterWithSpill) writeAndRecordSpill(filePath string, numRows int) error {
 	file, err := os.Create(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to create spill file: %w", err)
 	}
 
-	// Write rows to file
-	numRows := len(s.Rows)
 	if err := s.writeRunToFile(file, s.Rows); err != nil {
 		file.Close()
 		os.Remove(filePath)
 		return fmt.Errorf("failed to write spill file: %w", err)
 	}
 
-	// Create spilled run record
-	spilledRun := &SpilledRun{
-		FilePath: filePath,
-		File:     nil, // Will be opened during merge
-		NumRows:  numRows,
-	}
-	s.spilledRuns = append(s.spilledRuns, spilledRun)
-
-	// Close the file for now (we'll reopen during merge)
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("failed to close spill file: %w", err)
 	}
 
-	// Clear in-memory rows and reset memory counter
+	s.spilledRuns = append(s.spilledRuns, &SpilledRun{
+		FilePath: filePath,
+		File:     nil,
+		NumRows:  numRows,
+	})
+
+	return nil
+}
+
+// clearInMemoryRows releases all in-memory rows and resets counters
+func (s *SorterWithSpill) clearInMemoryRows() {
 	for _, row := range s.Rows {
 		for _, mem := range row {
 			if mem != nil {
@@ -177,8 +193,6 @@ func (s *SorterWithSpill) spillCurrentRun() error {
 	s.Rows = s.Rows[:0]
 	s.currentMemBytes = 0
 	s.Sorted = false
-
-	return nil
 }
 
 // writeRunToFile writes sorted rows to a file.

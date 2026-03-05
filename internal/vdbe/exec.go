@@ -847,6 +847,26 @@ func (v *VDBE) execPrev(instr *Instruction) error {
 	return nil
 }
 
+// handleIndexSeekGE performs SeekGE on an index cursor.
+func (v *VDBE) handleIndexSeekGE(cursor *Cursor, idxCursor *btree.IndexCursor, keyReg *Mem, jumpAddr int) error {
+	// Encode the search key as a SQLite record
+	searchKey := encodeValueAsRecord(keyReg)
+
+	// Seek to the first entry >= searchKey
+	found, err := idxCursor.SeekIndex(searchKey)
+	if err != nil {
+		return err
+	}
+
+	// Check if cursor is still valid after seek
+	if !found && !idxCursor.IsValid() {
+		return v.seekNotFound(cursor, jumpAddr)
+	}
+
+	cursor.EOF = false
+	return nil
+}
+
 func (v *VDBE) execSeekGE(instr *Instruction) error {
 	// Seek cursor P1 to entry >= key in register P3
 	// P1 = cursor number
@@ -864,35 +884,7 @@ func (v *VDBE) execSeekGE(instr *Instruction) error {
 
 	// Handle index cursors
 	if idxCursor, ok := cursor.BtreeCursor.(*btree.IndexCursor); ok && idxCursor != nil {
-		// For index seek, we need to encode the search key as a record
-		// The key register contains the value(s) to search for
-		// P4 typically indicates number of columns, but we'll encode the single value as a record
-
-		// Encode the search key as a SQLite record
-		searchKey := encodeValueAsRecord(keyReg)
-
-		// Seek to the first entry >= searchKey
-		found, err := idxCursor.SeekIndex(searchKey)
-		if err != nil {
-			return err
-		}
-
-		if !found {
-			// No exact match, but cursor is positioned at first entry > searchKey
-			// This is correct for SeekGE (greater than or equal)
-			// Check if cursor is still valid
-			if !idxCursor.IsValid() {
-				cursor.EOF = true
-				// Jump to P2 if specified
-				if instr.P2 != 0 {
-					v.PC = instr.P2
-				}
-				return nil
-			}
-		}
-
-		cursor.EOF = false
-		return nil
+		return v.handleIndexSeekGE(cursor, idxCursor, keyReg, instr.P2)
 	}
 
 	// Handle table cursors - simplified implementation
@@ -1042,6 +1034,20 @@ func (v *VDBE) execOpenEphemeral(instr *Instruction) error {
 	return nil
 }
 
+// seekLinearScanGT scans btree to find first row > targetRowid.
+func seekLinearScanGT(btCursor *btree.BtCursor, targetRowid int64) (bool, error) {
+	for {
+		currentRowid := btCursor.GetKey()
+		if currentRowid > targetRowid {
+			return true, nil
+		}
+		if err := btCursor.Next(); err != nil {
+			// Reached end without finding
+			return false, nil
+		}
+	}
+}
+
 func (v *VDBE) execSeekGT(instr *Instruction) error {
 	// Position cursor to first row > key
 	// P1 = cursor number
@@ -1068,21 +1074,8 @@ func (v *VDBE) execSeekGT(instr *Instruction) error {
 	}
 
 	// Linear scan to find first entry > key
-	targetRowid := keyReg.IntValue()
-	found := false
-	for {
-		currentRowid := btCursor.GetKey()
-		if currentRowid > targetRowid {
-			found = true
-			break
-		}
-		if err = btCursor.Next(); err != nil {
-			// Reached end without finding
-			break
-		}
-	}
-
-	if !found {
+	found, err := seekLinearScanGT(btCursor, keyReg.IntValue())
+	if err != nil || !found {
 		return v.seekNotFound(cursor, instr.P2)
 	}
 
@@ -2920,25 +2913,50 @@ func castToBlob(mem *Mem) error {
 }
 
 // castToInteger converts a memory value to integer affinity, NULL if not numeric.
+// castIntegerFromReal converts real to integer if no fractional part.
+func castIntegerFromReal(mem *Mem) {
+	if mem.r == float64(int64(mem.r)) {
+		mem.SetInt(int64(mem.r))
+	}
+	// Otherwise keep as real (SQLite behavior for INTEGER affinity)
+}
+
+// castIntegerFromStringOrBlob implements SQLite INTEGER affinity for strings/blobs.
+// SQLite behavior:
+// - Strings that parse as integers → integer
+// - Strings that parse as reals with fractional part → real (not truncated)
+// - Non-numeric strings → keep as text (not NULL)
+func castIntegerFromStringOrBlob(mem *Mem) {
+	str := string(mem.z)
+	// Try to parse as integer first
+	if val, err := strconv.ParseInt(str, 10, 64); err == nil {
+		mem.SetInt(val)
+		return
+	}
+	// Try to parse as real - if it has a fractional part, keep as real
+	if val, err := strconv.ParseFloat(str, 64); err == nil {
+		if val == float64(int64(val)) {
+			// Whole number like "5.0" - store as integer
+			mem.SetInt(int64(val))
+		} else {
+			// Fractional like "5.1" - store as real
+			mem.SetReal(val)
+		}
+		return
+	}
+	// Not numeric - keep as text (SQLite INTEGER affinity doesn't nullify text)
+}
+
 func castToInteger(mem *Mem) error {
 	if mem.IsInt() {
 		return nil
 	}
-	// For real numbers: only convert if no fractional part
 	if mem.IsReal() {
-		if mem.r == float64(int64(mem.r)) {
-			mem.SetInt(int64(mem.r))
-		}
-		// Otherwise keep as real (SQLite behavior for INTEGER affinity)
+		castIntegerFromReal(mem)
 		return nil
 	}
 	if mem.IsString() || mem.IsBlob() {
-		// Try to parse as integer
-		err := mem.Integerify()
-		if err != nil {
-			// Not a valid integer - set to NULL
-			mem.SetNull()
-		}
+		castIntegerFromStringOrBlob(mem)
 		return nil
 	}
 	// Can't convert to integer - set to NULL
@@ -3081,6 +3099,20 @@ func (v *VDBE) execToNumeric(instr *Instruction) error {
 	return nil
 }
 
+// convertStringToInt tries to parse string as integer, returns 0 if it fails.
+func convertStringToInt(str string) int64 {
+	// Try parsing as integer directly
+	if val, err := strconv.ParseInt(str, 10, 64); err == nil {
+		return val
+	}
+	// Try parsing as float and truncating
+	if val, err := strconv.ParseFloat(str, 64); err == nil {
+		return int64(val)
+	}
+	// Can't convert - return 0
+	return 0
+}
+
 // execToInt forces the value in register P1 to integer type.
 // P1 = register to convert
 // Truncates real numbers to integers.
@@ -3106,21 +3138,9 @@ func (v *VDBE) execToInt(instr *Instruction) error {
 		return nil
 	}
 
-	// Try to parse string/blob as integer
+	// Try to parse string/blob as integer, default to 0
 	if mem.IsString() || mem.IsBlob() {
-		str := mem.StrValue()
-		// Try parsing as integer directly
-		if val, err := strconv.ParseInt(str, 10, 64); err == nil {
-			mem.SetInt(val)
-			return nil
-		}
-		// Try parsing as float and truncating
-		if val, err := strconv.ParseFloat(str, 64); err == nil {
-			mem.SetInt(int64(val))
-			return nil
-		}
-		// Can't convert - set to 0
-		mem.SetInt(0)
+		mem.SetInt(convertStringToInt(mem.StrValue()))
 		return nil
 	}
 
@@ -3283,6 +3303,23 @@ func (v *VDBE) execShiftLeft(instr *Instruction) error {
 	return nil
 }
 
+// computeShiftRight computes right shift with SQLite semantics.
+func computeShiftRight(shift, val int64) int64 {
+	// SQLite behavior: negative shift amounts result in 0
+	if shift < 0 {
+		return 0
+	}
+	// Shifts >= 64: sign-extend for negative values, 0 otherwise
+	if shift >= 64 {
+		if val < 0 {
+			return -1
+		}
+		return 0
+	}
+	// Perform right shift (arithmetic shift in Go for signed integers)
+	return val >> uint(shift)
+}
+
 func (v *VDBE) execShiftRight(instr *Instruction) error {
 	// P3 = P2 >> P1
 	// Note: P1 is shift amount, P2 is value to shift
@@ -3307,29 +3344,10 @@ func (v *VDBE) execShiftRight(instr *Instruction) error {
 		return nil
 	}
 
-	// Convert operands to integers
+	// Convert operands to integers and perform shift
 	shift := shiftAmount.IntValue()
 	val := value.IntValue()
-
-	// SQLite behavior: negative shift amounts result in 0
-	// Shifts >= 64 also result in 0 (or -1 for negative values with arithmetic shift)
-	if shift < 0 {
-		result.SetInt(0)
-		return nil
-	}
-
-	if shift >= 64 {
-		// Arithmetic right shift: sign-extend
-		if val < 0 {
-			result.SetInt(-1)
-		} else {
-			result.SetInt(0)
-		}
-		return nil
-	}
-
-	// Perform right shift (arithmetic shift in Go for signed integers)
-	result.SetInt(val >> uint(shift))
+	result.SetInt(computeShiftRight(shift, val))
 	return nil
 }
 

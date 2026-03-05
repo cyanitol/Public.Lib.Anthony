@@ -130,19 +130,36 @@ func NewDefaultBusyHandler(timeout time.Duration) *DefaultBusyHandler {
 // It sleeps for an exponentially increasing duration with jitter,
 // and returns false once the total timeout has been exceeded.
 func (h *DefaultBusyHandler) Busy(count int) bool {
-	// Initialize start time on first call or if it's been reset
-	if count == 0 || h.startTime.IsZero() {
-		h.startTime = time.Now()
-	}
+	h.initializeStartTime(count)
 
-	// Check if we've exceeded the total timeout
 	elapsed := time.Since(h.startTime)
 	if elapsed >= h.timeout {
 		return false
 	}
 
-	// Calculate delay with exponential backoff
-	// delay = min(minDelay * 2^count, maxDelay)
+	delay := h.calculateDelayWithBackoff(count, elapsed)
+	h.sleepWithDelay(delay)
+
+	return true
+}
+
+// initializeStartTime initializes the start time on first call.
+func (h *DefaultBusyHandler) initializeStartTime(count int) {
+	if count == 0 || h.startTime.IsZero() {
+		h.startTime = time.Now()
+	}
+}
+
+// calculateDelayWithBackoff calculates the delay with exponential backoff and jitter.
+func (h *DefaultBusyHandler) calculateDelayWithBackoff(count int, elapsed time.Duration) time.Duration {
+	delay := h.calculateExponentialDelay(count)
+	delay = h.addJitter(delay)
+	delay = h.capDelayToRemaining(delay, elapsed)
+	return delay
+}
+
+// calculateExponentialDelay calculates exponential backoff delay.
+func (h *DefaultBusyHandler) calculateExponentialDelay(count int) time.Duration {
 	delay := h.minDelay
 	for i := 0; i < count && delay < h.maxDelay; i++ {
 		delay *= 2
@@ -150,23 +167,29 @@ func (h *DefaultBusyHandler) Busy(count int) bool {
 	if delay > h.maxDelay {
 		delay = h.maxDelay
 	}
+	return delay
+}
 
-	// Add jitter: +/- 25% of delay
+// addJitter adds +/- 25% jitter to the delay.
+func (h *DefaultBusyHandler) addJitter(delay time.Duration) time.Duration {
 	jitter := time.Duration(h.rng.Int63n(int64(delay / 2)))
-	delay = delay - delay/4 + jitter
+	return delay - delay/4 + jitter
+}
 
-	// Ensure we don't exceed the remaining timeout
+// capDelayToRemaining ensures delay doesn't exceed remaining timeout.
+func (h *DefaultBusyHandler) capDelayToRemaining(delay, elapsed time.Duration) time.Duration {
 	remaining := h.timeout - elapsed
 	if delay > remaining {
-		delay = remaining
+		return remaining
 	}
+	return delay
+}
 
-	// Sleep for the calculated duration
+// sleepWithDelay sleeps for the specified duration if positive.
+func (h *DefaultBusyHandler) sleepWithDelay(delay time.Duration) {
 	if delay > 0 {
 		time.Sleep(delay)
 	}
-
-	return true
 }
 
 // Reset resets the busy handler state, clearing the start time.
