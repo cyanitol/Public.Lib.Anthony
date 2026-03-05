@@ -2216,24 +2216,32 @@ func (p *Parser) parseTriggerTiming(stmt *CreateTriggerStmt) error {
 func (p *Parser) parseTriggerEvent(stmt *CreateTriggerStmt) error {
 	if p.match(TK_INSERT) {
 		stmt.Event = TriggerInsert
-	} else if p.match(TK_DELETE) {
+		return nil
+	}
+	if p.match(TK_DELETE) {
 		stmt.Event = TriggerDelete
-	} else if p.match(TK_UPDATE) {
+		return nil
+	}
+	if p.match(TK_UPDATE) {
 		stmt.Event = TriggerUpdate
-		// UPDATE OF column1, column2, ...
-		if p.match(TK_OF) {
-			for {
-				if !p.check(TK_ID) {
-					return p.error("expected column name after UPDATE OF")
-				}
-				stmt.UpdateOf = append(stmt.UpdateOf, Unquote(p.advance().Lexeme))
-				if !p.match(TK_COMMA) {
-					break
-				}
-			}
+		return p.parseTriggerUpdateOf(stmt)
+	}
+	return p.error("expected INSERT, UPDATE, or DELETE")
+}
+
+// parseTriggerUpdateOf parses the optional UPDATE OF column list.
+func (p *Parser) parseTriggerUpdateOf(stmt *CreateTriggerStmt) error {
+	if !p.match(TK_OF) {
+		return nil
+	}
+	for {
+		if !p.check(TK_ID) {
+			return p.error("expected column name after UPDATE OF")
 		}
-	} else {
-		return p.error("expected INSERT, UPDATE, or DELETE")
+		stmt.UpdateOf = append(stmt.UpdateOf, Unquote(p.advance().Lexeme))
+		if !p.match(TK_COMMA) {
+			break
+		}
 	}
 	return nil
 }
@@ -3069,26 +3077,24 @@ func (p *Parser) parsePrimaryExpression() (Expression, error) {
 		return p.parseIdentOrFunction()
 	}
 
-	// CASE expression
+	// Try parsing special expression forms
+	return p.parseSpecialExpression()
+}
+
+// parseSpecialExpression parses CASE, CAST, EXISTS, or parenthesized expressions.
+func (p *Parser) parseSpecialExpression() (Expression, error) {
 	if p.match(TK_CASE) {
 		return p.parseCaseExpr()
 	}
-
-	// CAST expression
 	if p.match(TK_CAST) {
 		return p.parseCastExpr()
 	}
-
-	// EXISTS expression
 	if p.match(TK_EXISTS) {
 		return p.parseExistsExpr(false)
 	}
-
-	// Parenthesized expression or subquery
 	if p.match(TK_LP) {
 		return p.parseParenOrSubquery()
 	}
-
 	return nil, p.error("expected expression, got %s", p.peek().Type)
 }
 

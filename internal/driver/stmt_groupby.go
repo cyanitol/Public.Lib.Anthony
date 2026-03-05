@@ -102,6 +102,21 @@ func (s *Stmt) emitGroupComparison(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt 
 	return updateAddr // Not used anymore but keeping signature compatible
 }
 
+// initializeGroupAccumulator initializes a single accumulator register based on function type.
+func (s *Stmt) initializeGroupAccumulator(vm *vdbe.VDBE, funcName string, accReg, avgCountReg int) {
+	switch funcName {
+	case "COUNT":
+		vm.AddOp(vdbe.OpInteger, 0, accReg, 0)
+	case "AVG":
+		vm.AddOp(vdbe.OpNull, 0, accReg, 0)
+		vm.AddOp(vdbe.OpInteger, 0, avgCountReg, 0)
+	case "TOTAL":
+		vm.AddOpWithP4Real(vdbe.OpReal, 0, accReg, 0, 0.0)
+	case "SUM", "MIN", "MAX":
+		vm.AddOp(vdbe.OpNull, 0, accReg, 0)
+	}
+}
+
 // initializeGroupAccumulators initializes/resets accumulators for a new group.
 // This should only be called when starting a new group (first row or group change).
 func (s *Stmt) initializeGroupAccumulators(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState) {
@@ -116,17 +131,7 @@ func (s *Stmt) initializeGroupAccumulators(vm *vdbe.VDBE, gen *expr.CodeGenerato
 			continue
 		}
 		fnExpr := col.Expr.(*parser.FunctionExpr)
-		switch fnExpr.Name {
-		case "COUNT":
-			vm.AddOp(vdbe.OpInteger, 0, state.accRegs[i], 0)
-		case "AVG":
-			vm.AddOp(vdbe.OpNull, 0, state.accRegs[i], 0)
-			vm.AddOp(vdbe.OpInteger, 0, state.avgCountRegs[i], 0)
-		case "TOTAL":
-			vm.AddOpWithP4Real(vdbe.OpReal, 0, state.accRegs[i], 0, 0.0)
-		case "SUM", "MIN", "MAX":
-			vm.AddOp(vdbe.OpNull, 0, state.accRegs[i], 0)
-		}
+		s.initializeGroupAccumulator(vm, fnExpr.Name, state.accRegs[i], state.avgCountRegs[i])
 	}
 
 	// Save current GROUP BY values to prev

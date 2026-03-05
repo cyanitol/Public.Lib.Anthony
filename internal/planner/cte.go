@@ -564,32 +564,16 @@ func (ctx *CTEContext) MaterializeCTE(name string) (*MaterializedCTE, error) {
 		return nil, fmt.Errorf("undefined CTE: %s", name)
 	}
 
-	// Check if already materialized
-	if mat, exists := ctx.MaterializedCTEs[name]; exists {
+	if mat := ctx.getExistingMaterialization(name); mat != nil {
 		return mat, nil
 	}
 
-	// Materialize dependencies first
-	for _, dep := range def.DependsOn {
-		if dep == name {
-			continue // Skip self-reference in recursive CTEs
-		}
-		if _, err := ctx.MaterializeCTE(dep); err != nil {
-			return nil, err
-		}
+	if err := ctx.materializeDependencies(name, def.DependsOn); err != nil {
+		return nil, err
 	}
 
-	// Create materialized CTE
-	mat := &MaterializedCTE{
-		Name:        name,
-		TempTable:   fmt.Sprintf("_cte_%s", name),
-		Columns:     ctx.inferColumns(def),
-		RowCount:    def.EstimatedRows.ToInt(),
-		IsRecursive: def.IsRecursive,
-		Iterations:  0,
-	}
+	mat := ctx.createMaterializedCTE(name, def)
 
-	// If recursive, handle specially
 	if def.IsRecursive {
 		if err := ctx.materializeRecursiveCTE(def, mat); err != nil {
 			return nil, err
@@ -598,6 +582,39 @@ func (ctx *CTEContext) MaterializeCTE(name string) (*MaterializedCTE, error) {
 
 	ctx.MaterializedCTEs[name] = mat
 	return mat, nil
+}
+
+// getExistingMaterialization checks if CTE is already materialized.
+func (ctx *CTEContext) getExistingMaterialization(name string) *MaterializedCTE {
+	if mat, exists := ctx.MaterializedCTEs[name]; exists {
+		return mat
+	}
+	return nil
+}
+
+// materializeDependencies materializes all dependencies for a CTE.
+func (ctx *CTEContext) materializeDependencies(name string, deps []string) error {
+	for _, dep := range deps {
+		if dep == name {
+			continue // Skip self-reference in recursive CTEs
+		}
+		if _, err := ctx.MaterializeCTE(dep); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// createMaterializedCTE creates a new MaterializedCTE instance.
+func (ctx *CTEContext) createMaterializedCTE(name string, def *CTEDefinition) *MaterializedCTE {
+	return &MaterializedCTE{
+		Name:        name,
+		TempTable:   fmt.Sprintf("_cte_%s", name),
+		Columns:     ctx.inferColumns(def),
+		RowCount:    def.EstimatedRows.ToInt(),
+		IsRecursive: def.IsRecursive,
+		Iterations:  0,
+	}
 }
 
 // materializeRecursiveCTE handles recursive CTE materialization.

@@ -136,20 +136,33 @@ func (r *Rows) ColumnTypeScanType(index int) interface{} {
 // The column metadata could also be retrieved from the schema, but the
 // actual type affinity comes from the data stored in btree cells.
 func (r *Rows) ColumnTypeDatabaseTypeName(index int) string {
-	// SQLite doesn't have static column types, but we can inspect the result
-	if r.vdbe.ResultRow != nil && index < len(r.vdbe.ResultRow) {
-		mem := r.vdbe.ResultRow[index]
-		if mem.IsNull() {
-			return "NULL"
-		} else if mem.IsInt() {
-			return "INTEGER"
-		} else if mem.IsReal() {
-			return "REAL"
-		} else if mem.IsStr() {
-			return "TEXT"
-		} else if mem.IsBlob() {
-			return "BLOB"
-		}
+	if !r.hasValidResultRow(index) {
+		return ""
+	}
+	return getMemTypeName(r.vdbe.ResultRow[index])
+}
+
+// hasValidResultRow checks if we have a valid result row with the given index.
+func (r *Rows) hasValidResultRow(index int) bool {
+	return r.vdbe.ResultRow != nil && index < len(r.vdbe.ResultRow)
+}
+
+// getMemTypeName returns the type name for a memory cell.
+func getMemTypeName(mem *vdbe.Mem) string {
+	if mem.IsNull() {
+		return "NULL"
+	}
+	if mem.IsInt() {
+		return "INTEGER"
+	}
+	if mem.IsReal() {
+		return "REAL"
+	}
+	if mem.IsStr() {
+		return "TEXT"
+	}
+	if mem.IsBlob() {
+		return "BLOB"
 	}
 	return ""
 }

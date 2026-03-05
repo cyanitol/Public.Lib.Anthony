@@ -390,32 +390,43 @@ func (s *Stmt) setupSubqueryCompiler(gen *expr.CodeGenerator) {
 // of the subquery by subtracting the OpInit's position.
 func stripSubqueryControlFlow(vm *vdbe.VDBE) {
 	// First pass: find OpInit's jump target
-	startAddr := 0
+	startAddr := findOpInitTarget(vm)
+
+	// Second pass: strip control flow opcodes
+	for i := range vm.Program {
+		stripOpcodeIfNeeded(vm, i, startAddr)
+	}
+}
+
+// findOpInitTarget finds the jump target of OpInit instruction
+func findOpInitTarget(vm *vdbe.VDBE) int {
 	for i := range vm.Program {
 		if vm.Program[i].Opcode == vdbe.OpInit {
-			startAddr = vm.Program[i].P2
-			break
+			return vm.Program[i].P2
 		}
 	}
+	return 0
+}
 
-	// If we found an OpInit, we'll mark instructions before the start address as Noop
-	// and also convert OpInit and OpHalt to Noop
-	for i := range vm.Program {
-		switch vm.Program[i].Opcode {
-		case vdbe.OpInit:
-			vm.Program[i].Opcode = vdbe.OpNoop
-			vm.Program[i].Comment = "subquery: stripped OpInit"
-		case vdbe.OpHalt:
-			vm.Program[i].Opcode = vdbe.OpNoop
-			vm.Program[i].Comment = "subquery: stripped OpHalt"
-		default:
-			// If this instruction is before the start address (initialization code),
-			// convert it to Noop as it shouldn't be executed when embedded
-			if i < startAddr && startAddr > 0 {
-				vm.Program[i].Opcode = vdbe.OpNoop
-				vm.Program[i].Comment = "subquery: stripped init code"
-			}
-		}
+// stripOpcodeIfNeeded converts control flow opcodes to Noop
+func stripOpcodeIfNeeded(vm *vdbe.VDBE, i int, startAddr int) {
+	switch vm.Program[i].Opcode {
+	case vdbe.OpInit:
+		vm.Program[i].Opcode = vdbe.OpNoop
+		vm.Program[i].Comment = "subquery: stripped OpInit"
+	case vdbe.OpHalt:
+		vm.Program[i].Opcode = vdbe.OpNoop
+		vm.Program[i].Comment = "subquery: stripped OpHalt"
+	default:
+		stripInitCodeIfNeeded(vm, i, startAddr)
+	}
+}
+
+// stripInitCodeIfNeeded converts initialization code to Noop
+func stripInitCodeIfNeeded(vm *vdbe.VDBE, i int, startAddr int) {
+	if i < startAddr && startAddr > 0 {
+		vm.Program[i].Opcode = vdbe.OpNoop
+		vm.Program[i].Comment = "subquery: stripped init code"
 	}
 }
 

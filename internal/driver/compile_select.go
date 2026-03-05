@@ -181,34 +181,57 @@ func (s *Stmt) emitSimpleSelectScan(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 
-	// Open cursor for regular tables
-	if !table.Temp {
-		vm.AddOp(vdbe.OpOpenRead, cursorNum, int(table.RootPage), len(table.Columns))
-	}
-
-	rewindAddr := vm.AddOp(vdbe.OpRewind, cursorNum, 0, 0)
+	// Open cursor and start scan loop
+	rewindAddr := s.emitScanLoopSetup(vm, table, cursorNum)
 
 	// WHERE clause
 	skipAddr := s.emitSimpleSelectWhere(vm, stmt, gen)
 
 	// SELECT columns
+	if err := s.emitScanColumns(vm, table, expandedCols, gen); err != nil {
+		return nil, err
+	}
+
+	// Handle DISTINCT and output row
+	distinctSkipAddr := s.emitDistinctAndOutput(vm, stmt, numCols)
+
+	// Fix addresses and close loop
+	s.fixScanAddresses(vm, stmt, rewindAddr, skipAddr, distinctSkipAddr, cursorNum, table)
+
+	return vm, nil
+}
+
+// emitScanLoopSetup opens cursor and starts the scan loop.
+func (s *Stmt) emitScanLoopSetup(vm *vdbe.VDBE, table *schema.Table, cursorNum int) int {
+	if !table.Temp {
+		vm.AddOp(vdbe.OpOpenRead, cursorNum, int(table.RootPage), len(table.Columns))
+	}
+	return vm.AddOp(vdbe.OpRewind, cursorNum, 0, 0)
+}
+
+// emitScanColumns emits code to read all SELECT columns.
+func (s *Stmt) emitScanColumns(vm *vdbe.VDBE, table *schema.Table, expandedCols []parser.ResultColumn, gen *expr.CodeGenerator) error {
 	for i, col := range expandedCols {
 		if err := emitSelectColumnOp(vm, table, col, i, gen); err != nil {
-			return nil, err
+			return err
 		}
 	}
+	return nil
+}
 
-	// Handle DISTINCT - check if row is unique before outputting
+// emitDistinctAndOutput handles DISTINCT check and result row emission.
+func (s *Stmt) emitDistinctAndOutput(vm *vdbe.VDBE, stmt *parser.SelectStmt, numCols int) int {
 	var distinctSkipAddr int
 	if stmt.Distinct {
-		// OpDistinctRow: P1=first reg, P2=jump if not distinct, P3=num cols
 		distinctSkipAddr = vm.AddOp(vdbe.OpDistinctRow, 0, 0, numCols)
 	}
-
-	// Output row
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+	return distinctSkipAddr
+}
 
-	// Fix DISTINCT skip - jump to after ResultRow (to OpNext)
+// fixScanAddresses fixes all jump addresses and closes the scan loop.
+func (s *Stmt) fixScanAddresses(vm *vdbe.VDBE, stmt *parser.SelectStmt, rewindAddr, skipAddr, distinctSkipAddr, cursorNum int, table *schema.Table) {
+	// Fix DISTINCT skip
 	if stmt.Distinct {
 		vm.Program[distinctSkipAddr].P2 = vm.NumOps()
 	}
@@ -229,8 +252,6 @@ func (s *Stmt) emitSimpleSelectScan(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	// Halt
 	haltAddr := vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	vm.Program[rewindAddr].P2 = haltAddr
-
-	return vm, nil
 }
 
 // emitSimpleSelectWhere emits WHERE clause for simple SELECT.

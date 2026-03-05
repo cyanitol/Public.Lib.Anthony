@@ -15,63 +15,91 @@ import (
 func (s *Stmt) compileCompoundSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(true)
 
-	compound := stmt.Compound
+	// Parse compound structure
+	ops, selects, orderBy, limit, offset := s.parseCompoundStructure(stmt.Compound)
 
-	// Collect all leaf SELECTs and their operators in left-to-right order.
-	// A chain like A UNION B INTERSECT C becomes [{UNION, A, B}, {INTERSECT, _, C}]
+	// Execute all sub-SELECTs and collect results
+	allResults, numCols, err := s.executeCompoundParts(vm, selects, ops, args)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply set operations and post-processing
+	result := s.applyCompoundOperations(allResults, ops, numCols, orderBy, limit, offset, vm.ResultCols)
+
+	// Emit bytecode to return the collected rows
+	return emitCompoundResult(vm, result, numCols)
+}
+
+// parseCompoundStructure extracts the compound query structure.
+func (s *Stmt) parseCompoundStructure(compound *parser.CompoundSelect) ([]parser.CompoundOp, []*parser.SelectStmt, []parser.OrderingTerm, parser.Expression, parser.Expression) {
 	ops, selects := flattenCompound(compound)
-
-	// Extract ORDER BY and LIMIT/OFFSET from the compound statement BEFORE compiling
-	// sub-SELECTs. In the parser, ORDER BY/LIMIT on a compound ends up attached to
-	// the rightmost leaf SELECT, but they apply to the compound result, not to that
-	// individual SELECT. We must strip them before compilation to avoid errors when
-	// the ORDER BY references column names from the first SELECT.
 	orderBy, limit, offset := extractCompoundOrderByLimit(compound)
+	return ops, selects, orderBy, limit, offset
+}
 
-	// Execute each leaf SELECT and collect rows.
+// executeCompoundParts executes all sub-SELECTs and collects their results.
+func (s *Stmt) executeCompoundParts(vm *vdbe.VDBE, selects []*parser.SelectStmt, ops []parser.CompoundOp, args []driver.NamedValue) ([][][]interface{}, int, error) {
 	allResults := make([][][]interface{}, len(selects))
 	var numCols int
+
 	for i, sel := range selects {
-		subVM := vdbe.New()
-		subVM.Ctx = vm.Ctx
-		compiled, err := s.compileSelect(subVM, sel, args)
+		compiled, cols, err := s.compileAndExecuteSubSelect(vm, sel, args, i)
 		if err != nil {
-			return nil, fmt.Errorf("compound SELECT part %d: %w", i+1, err)
+			return nil, 0, err
 		}
 
-		// Determine column count from the compiled VM's result columns
-		cols := len(compiled.ResultCols)
+		if err := s.validateColumnCount(i, cols, numCols, ops); err != nil {
+			return nil, 0, err
+		}
+
 		if i == 0 {
 			numCols = cols
 			vm.ResultCols = compiled.ResultCols
-		} else if cols != numCols {
-			return nil, fmt.Errorf("SELECTs to the left and right of %s do not have the same number of result columns", ops[i-1].String())
 		}
 
 		rows, err := s.collectRows(compiled, cols, fmt.Sprintf("compound part %d", i+1))
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		allResults[i] = rows
 	}
 
-	// Apply set operations left to right.
+	return allResults, numCols, nil
+}
+
+// compileAndExecuteSubSelect compiles a single sub-SELECT.
+func (s *Stmt) compileAndExecuteSubSelect(vm *vdbe.VDBE, sel *parser.SelectStmt, args []driver.NamedValue, index int) (*vdbe.VDBE, int, error) {
+	subVM := vdbe.New()
+	subVM.Ctx = vm.Ctx
+	compiled, err := s.compileSelect(subVM, sel, args)
+	if err != nil {
+		return nil, 0, fmt.Errorf("compound SELECT part %d: %w", index+1, err)
+	}
+	return compiled, len(compiled.ResultCols), nil
+}
+
+// validateColumnCount checks that column counts match across compound parts.
+func (s *Stmt) validateColumnCount(index, cols, numCols int, ops []parser.CompoundOp) error {
+	if index > 0 && cols != numCols {
+		return fmt.Errorf("SELECTs to the left and right of %s do not have the same number of result columns", ops[index-1].String())
+	}
+	return nil
+}
+
+// applyCompoundOperations applies set operations and post-processing.
+func (s *Stmt) applyCompoundOperations(allResults [][][]interface{}, ops []parser.CompoundOp, numCols int, orderBy []parser.OrderingTerm, limit, offset parser.Expression, colNames []string) [][]interface{} {
 	result := allResults[0]
 	for i, op := range ops {
 		right := allResults[i+1]
 		result = applySetOperation(op, result, right, numCols)
 	}
 
-	// Apply ORDER BY to the in-memory result set.
 	if len(orderBy) > 0 {
-		sortCompoundRows(result, orderBy, numCols, vm.ResultCols)
+		sortCompoundRows(result, orderBy, numCols, colNames)
 	}
 
-	// Apply LIMIT/OFFSET.
-	result = applyLimitOffset(result, limit, offset)
-
-	// Emit bytecode to return the collected rows.
-	return emitCompoundResult(vm, result, numCols)
+	return applyLimitOffset(result, limit, offset)
 }
 
 // flattenCompound walks the compound tree and returns operators and leaf SELECTs

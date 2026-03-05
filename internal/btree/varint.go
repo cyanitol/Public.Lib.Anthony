@@ -39,34 +39,47 @@ func PutVarint(p []byte, v uint64) int {
 func putVarint64(p []byte, v uint64) int {
 	// Check for 9-byte case first (values with top bits set)
 	if v&(uint64(0xff000000)<<32) != 0 {
-		if len(p) < 9 {
-			return 0
-		}
-		// 9-byte case: all 8 bits of the 9th byte are used
-		p[8] = byte(v)
-		v >>= 8
-		for i := 7; i >= 0; i-- {
-			p[i] = byte((v & 0x7f) | 0x80)
-			v >>= 7
-		}
-		return 9
+		return encodeVarint9Bytes(p, v)
 	}
 
 	// Build varint in forward order
-	// Count how many 7-bit groups we need
+	n := countVarintBytes(v)
+	if len(p) < n {
+		return 0
+	}
+
+	encodeVarintBytes(p, v, n)
+	return n
+}
+
+// encodeVarint9Bytes encodes a varint that requires 9 bytes
+func encodeVarint9Bytes(p []byte, v uint64) int {
+	if len(p) < 9 {
+		return 0
+	}
+	// 9-byte case: all 8 bits of the 9th byte are used
+	p[8] = byte(v)
+	v >>= 8
+	for i := 7; i >= 0; i-- {
+		p[i] = byte((v & 0x7f) | 0x80)
+		v >>= 7
+	}
+	return 9
+}
+
+// countVarintBytes counts how many bytes are needed to encode v
+func countVarintBytes(v uint64) int {
 	n := 1 // At least one byte needed
 	temp := v >> 7
 	for temp > 0 {
 		n++
 		temp >>= 7
 	}
+	return n
+}
 
-	// Validate we have enough buffer space
-	if len(p) < n {
-		return 0
-	}
-
-	// Encode from most significant to least significant
+// encodeVarintBytes encodes v into p using n bytes
+func encodeVarintBytes(p []byte, v uint64, n int) {
 	for i := n - 1; i >= 0; i-- {
 		shift := uint(i * 7)
 		b := byte((v >> shift) & 0x7f)
@@ -75,7 +88,6 @@ func putVarint64(p []byte, v uint64) int {
 		}
 		p[n-1-i] = b
 	}
-	return n
 }
 
 func decodeShortVarint(p []byte) (uint64, int) {

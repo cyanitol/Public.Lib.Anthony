@@ -369,6 +369,14 @@ func CompileInsertWithAutoInc(stmt *InsertStmt, tableRoot int, hasAutoInc bool) 
 
 // ValidateInsert performs validation on an INSERT statement
 func ValidateInsert(stmt *InsertStmt) error {
+	if err := validateInsertBasics(stmt); err != nil {
+		return err
+	}
+
+	return validateInsertRowCounts(stmt)
+}
+
+func validateInsertBasics(stmt *InsertStmt) error {
 	if stmt == nil {
 		return errors.New("nil insert statement")
 	}
@@ -381,7 +389,10 @@ func ValidateInsert(stmt *InsertStmt) error {
 		return errors.New("no values to insert")
 	}
 
-	// Check that all rows have the same number of columns
+	return nil
+}
+
+func validateInsertRowCounts(stmt *InsertStmt) error {
 	numCols := len(stmt.Columns)
 	if numCols == 0 && len(stmt.Values) > 0 {
 		numCols = len(stmt.Values[0])
