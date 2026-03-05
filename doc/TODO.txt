@@ -1,49 +1,47 @@
 # Anthony SQLite Driver - TODO List
 # Format: https://github.com/todotxt/todo.txt
 # Generated: 2026-02-27 | Updated: 2026-03-05 (v0.1.0)
-# Stats: 12,306 passing | ~499 skipped | 0 failing | 96%+ pass rate
+# Stats: 634 passing | 497 skipped | 0 failing | 56% pass rate (driver tests)
 
 # ============================================================================
-# PRIORITY 1: IMPLEMENTED BUT BROKEN - FIX FIRST
+# PRIORITY 1: MAJOR SKIP CATEGORIES (145 skips)
 # ============================================================================
 
-(A) Fix foreign key runtime enforcement (34 skips) +BrokenFeatures @driver skips:34
-(A) Fix constraint/fault handling (34 skips) +BrokenFeatures @driver skips:34
+(A) Fix foreign key runtime enforcement (36 skips) +BrokenFeatures @driver skips:36
+(A) Fix fault/constraint edge cases (34 skips) +BrokenFeatures @driver skips:34
 (A) Fix VACUUM operations (29 skips) +BrokenFeatures @driver skips:29
 (A) Fix WITHOUT ROWID tables (23 skips) +BrokenFeatures @driver skips:23
 (A) Fix stress/concurrent tests (18 skips) +BrokenFeatures @driver skips:18
-(A) Fix CTE integration (5 skips) +BrokenFeatures @driver skips:5
-(A) Fix JSON implementation (2 skips) +BrokenFeatures @functions skips:2
-(A) Fix window functions (2 skips) +BrokenFeatures @driver skips:2
-(A) Fix PRAGMA integrity_check (2 skips) +BrokenFeatures @driver skips:2
+(A) Fix CTE integration edge cases (5 skips) +BrokenFeatures @driver skips:5
 
 # ============================================================================
-# PRIORITY 2: PARTIALLY IMPLEMENTED (128 skips) - COMPLETE THESE
+# PRIORITY 2: SCATTERED SKIPS (~350 individual tests)
 # ============================================================================
 
-(B) Complete WHERE clause expression evaluation (14 skips) +PartialFeatures @driver skips:14
-(B) Complete BLOB operations in JOIN/ORDER BY/GROUP BY (20 skips) +PartialFeatures @driver skips:20
-(B) Complete LIMIT with JOIN/GROUP BY/DISTINCT (13 skips) +PartialFeatures @driver skips:13
-(B) Complete SELECT variants (10 skips) +PartialFeatures @driver skips:10
-(B) Complete ORDER BY sorter bytecode (8 skips) +PartialFeatures @driver skips:8
-(B) Complete DML/DDL UPDATE/DELETE compilation (8 skips) +PartialFeatures @driver skips:8
-(B) Complete parameter binding edge cases (8 skips) +PartialFeatures @driver skips:8
-(B) Complete EXPLAIN QUERY PLAN integration (7 skips) +PartialFeatures @planner skips:7
-(B) Complete CTE bytecode materialization/inlining (6 skips) +PartialFeatures @driver skips:6
-(B) Complete UDF VDBE integration (6 skips) +PartialFeatures @vdbe skips:6
-(B) Complete database initialization in tests (7 skips) +PartialFeatures @testing skips:7
-(B) Complete error handling and recovery (4 skips) +PartialFeatures @driver skips:4
+(B) ATTACH database (24 skips) +PartialFeatures @driver skips:24
+(B) Transaction edge cases (15 skips) +PartialFeatures @driver skips:15
+(B) SQLite* compatibility tests (100+ skips) +PartialFeatures @driver
+(B) BLOB edge cases (15 skips) +PartialFeatures @driver skips:15
+(B) BETWEEN/LIKE edge cases (15 skips) +PartialFeatures @driver skips:15
+(B) Savepoint operations (10 skips) +PartialFeatures @driver skips:10
+(B) ROWID edge cases (10 skips) +PartialFeatures @driver skips:10
+(B) REINDEX edge cases (9 skips) +PartialFeatures @driver skips:9
+(B) ORDER BY edge cases (12 skips) +PartialFeatures @driver skips:12
+(B) LIMIT edge cases (15 skips) +PartialFeatures @driver skips:15
+(B) EXPLAIN edge cases (7 skips) +PartialFeatures @driver skips:7
+(B) UDF integration (4 skips) +PartialFeatures @vdbe skips:4
+(B) Window functions (3 skips) +PartialFeatures @driver skips:3
+(B) Trigger operations (7 skips) +PartialFeatures @driver skips:7
+(B) Cast operations (10 skips) +PartialFeatures @driver skips:10
 
 # ============================================================================
-# PRIORITY 3: NOT IMPLEMENTED (32 skips) - DEFER TO v2.0
+# PRIORITY 3: NOT IMPLEMENTED - DEFER TO v2.0
 # ============================================================================
 
-(C) Implement ATTACH database multi-db support (24 skips) +NotImplemented @driver skips:24 defer:v2.0
-(C) Implement ANALYZE query optimizer stats (3 skips) +NotImplemented @driver skips:3 defer:v2.0
-(C) Implement BACKUP online backup API (2 skips) +NotImplemented @driver skips:2 defer:v2.0
-(C) Implement WITHOUT ROWID clustered tables (1 skip) +NotImplemented @btree skips:1 defer:v2.0
-(C) Implement sqlite_master virtual table (1 skip) +NotImplemented @vtab skips:1
-(C) Implement multi-table SELECT * expansion (1 skip) +NotImplemented @driver skips:1
+(C) Implement ANALYZE query optimizer stats +NotImplemented @driver defer:v2.0
+(C) Implement BACKUP online backup API +NotImplemented @driver defer:v2.0
+(C) Implement FTS5 full-text search +NotImplemented @vtab defer:v2.0
+(C) Implement R-Tree spatial index +NotImplemented @vtab defer:v2.0
 
 # ============================================================================
 # PHASE 2: STORAGE LAYER HARDENING
@@ -58,10 +56,12 @@ x 2026-03-04 2026-02-27 Add journal crash recovery +Phase2 @pager
 # PHASE 3: FEATURE COMPLETION
 # ============================================================================
 
-(B) Complete CTE bytecode materialization using coroutines +Phase3 @driver file:internal/driver/stmt_cte.go
+x 2026-03-05 2026-03-05 CTE bytecode register adjustment +Phase3 @driver
+x 2026-03-05 2026-03-05 UNIQUE constraint enforcement +Phase3 @vdbe
+x 2026-03-05 2026-03-05 NOT NULL constraint enforcement +Phase3 @vdbe
+x 2026-03-05 2026-03-05 PRIMARY KEY constraint error messages +Phase3 @vdbe
+(B) Complete recursive CTE support +Phase3 @driver file:internal/driver/stmt_cte.go
 (B) Complete subquery compilation for scalar/IN/EXISTS +Phase3 @expr file:internal/expr/codegen.go
-(B) Implement ORDER BY execution with sorter bytecode +Phase3 @engine file:internal/engine/compiler.go
-(B) Complete UPDATE/DELETE with SET/WHERE expressions +Phase3 @engine file:internal/engine/compiler.go
 (B) Hook trigger execution to INSERT/UPDATE/DELETE +Phase3 @engine file:internal/engine/trigger.go
 
 # ============================================================================
@@ -86,7 +86,7 @@ x 2026-02-28 2026-02-27 Create typed error hierarchy with SQLite codes +Phase5 @
 # PHASE 7: TESTING AND QUALITY
 # ============================================================================
 
-(B) Enable skipped tests as features are fixed +Phase7 @testing skips:759
+(B) Enable skipped tests as features are fixed +Phase7 @testing skips:497
 x 2026-02-28 2026-02-27 Add concurrency tests with race detector +Phase7 @testing
 x 2026-02-28 2026-02-27 Add fuzzing tests for parser and btree +Phase7 @testing
 (C) Add performance benchmarks for CRUD operations +Phase7 @testing file:internal/driver/benchmark_test.go
@@ -96,7 +96,7 @@ x 2026-02-28 2026-02-27 Add fuzzing tests for parser and btree +Phase7 @testing
 # ============================================================================
 
 (C) Add PagerConfig and DriverConfig structures +Phase8 @driver
-(C) Add DSN parameter parsing for connection strings +Phase8 @driver file:internal/driver/dsn.go
+x 2026-03-05 2026-03-05 DSN parameter parsing for connection strings +Phase8 @driver file:internal/driver/dsn.go
 x 2026-02-28 2026-02-27 Expose virtual table registration API +Phase8 @driver
 (C) Expose custom collation registration +Phase8 @driver
 
