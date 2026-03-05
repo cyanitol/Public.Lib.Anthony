@@ -1449,26 +1449,51 @@ func (g *CodeGenerator) emitNullParameter(reg int, name string) {
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param %s (no value)", name))
 }
 
-// emitParameterValue emits the appropriate opcode for a parameter value.
-func (g *CodeGenerator) emitParameterValue(reg int, arg interface{}) {
+// emitScalarParameterValue emits opcodes for int, int64, float64.
+func (g *CodeGenerator) emitScalarParameterValue(reg int, arg interface{}) bool {
 	switch v := arg.(type) {
-	case nil:
-		g.emitNullValue(reg)
 	case int:
 		g.emitIntValue(reg, v)
+		return true
 	case int64:
 		g.emitInt64Value(reg, v)
+		return true
 	case float64:
 		g.emitFloatValue(reg, v)
+		return true
+	}
+	return false
+}
+
+// emitComplexParameterValue emits opcodes for string, []byte, bool.
+func (g *CodeGenerator) emitComplexParameterValue(reg int, arg interface{}) bool {
+	switch v := arg.(type) {
 	case string:
 		g.emitStringValue(reg, v)
+		return true
 	case []byte:
 		g.emitBlobValue(reg, v)
+		return true
 	case bool:
 		g.emitBoolValue(reg, v)
-	default:
-		g.emitDefaultValue(reg, v)
+		return true
 	}
+	return false
+}
+
+// emitParameterValue emits the appropriate opcode for a parameter value.
+func (g *CodeGenerator) emitParameterValue(reg int, arg interface{}) {
+	if arg == nil {
+		g.emitNullValue(reg)
+		return
+	}
+	if g.emitScalarParameterValue(reg, arg) {
+		return
+	}
+	if g.emitComplexParameterValue(reg, arg) {
+		return
+	}
+	g.emitDefaultValue(reg, arg)
 }
 
 // emitNullValue emits a NULL parameter value.
@@ -1612,84 +1637,43 @@ func (g *CodeGenerator) adjustJumpTarget(param *int, addrMap map[int]int) {
 	}
 }
 
+// adjustJumpP2 adjusts P2 jump target for an instruction.
+func adjustJumpP2(instr *vdbe.Instruction, baseAddr int) {
+	if instr.P2 > 0 {
+		instr.P2 += baseAddr
+	}
+}
+
+// adjustDualJump adjusts both P2 and P3 jump targets for an instruction.
+func adjustDualJump(instr *vdbe.Instruction, baseAddr int) {
+	if instr.P2 > 0 {
+		instr.P2 += baseAddr
+	}
+	if instr.P3 > 0 {
+		instr.P3 += baseAddr
+	}
+}
+
 // adjustSubqueryJumpTargets adjusts all jump targets in the subquery bytecode.
 // When subquery bytecode is embedded into a parent VDBE at address baseAddr,
 // all absolute jump targets (in P2) must be adjusted by adding baseAddr.
 // This ensures jumps land at the correct locations in the combined program.
-//
-// Jump targets are used in opcodes like:
-// - OpGoto, OpGosub: P2 = absolute jump target
-// - OpIf, OpIfNot, OpIfPos, OpIfNeg: P2 = jump if condition met
-// - OpOnce: P2 = jump if already executed
-// - OpRewind, OpNext, OpPrev, OpLast, OpFirst: P2 = jump on end/no rows
-// - OpSeekGE, OpSeekGT, OpSeekLE, OpSeekLT: P2 = jump if not found
-// - OpSeekRowid, OpNotExists: P2 = jump if not found
-// - OpInitCoroutine: P2 = jump past coroutine body, P3 = entry point
-// - OpSorterSort, OpSorterNext: P2 = jump when done
 func (g *CodeGenerator) adjustSubqueryJumpTargets(subVM *vdbe.VDBE, baseAddr int) {
 	if baseAddr == 0 {
 		return // No adjustment needed
 	}
 
-	// Opcodes that use P2 as a jump target
-	jumpOpcodes := map[vdbe.Opcode]bool{
-		// Conditional jumps
-		vdbe.OpIf:        true,
-		vdbe.OpIfNot:     true,
-		vdbe.OpIfPos:     true,
-		vdbe.OpIfNotZero: true,
-		vdbe.OpIfNullRow: true,
-		vdbe.OpIsNull:    true, // Jump if P1 is NULL
-		vdbe.OpNotNull:   true, // Jump if P1 is not NULL
-
-		// Unconditional jumps
-		vdbe.OpGoto:  true,
-		vdbe.OpGosub: true,
-
-		// Loop control
-		vdbe.OpRewind: true,
-		vdbe.OpNext:   true,
-		vdbe.OpPrev:   true,
-		vdbe.OpLast:   true,
-		vdbe.OpFirst:  true,
-
-		// Seek operations
-		vdbe.OpSeekGE:    true,
-		vdbe.OpSeekGT:    true,
-		vdbe.OpSeekLE:    true,
-		vdbe.OpSeekLT:    true,
-		vdbe.OpSeekRowid: true,
-		vdbe.OpNotExists: true,
-
-		// Sorter operations
-		vdbe.OpSorterSort: true,
-		vdbe.OpSorterNext: true,
-
-		// Special control flow
-		vdbe.OpOnce: true,
-	}
-
-	// Opcodes that use both P2 and P3 as jump targets
-	dualJumpOpcodes := map[vdbe.Opcode]bool{
-		vdbe.OpInitCoroutine: true, // P2 = skip address, P3 = entry point
-	}
-
 	for i := range subVM.Program {
-		op := subVM.Program[i].Opcode
-
-		// Adjust P2 for jump opcodes
-		if jumpOpcodes[op] && subVM.Program[i].P2 > 0 {
-			subVM.Program[i].P2 += baseAddr
+		instr := subVM.Program[i]
+		rule, ok := jumpAdjustmentRules[instr.Opcode]
+		if !ok {
+			continue
 		}
 
-		// Adjust both P2 and P3 for dual-jump opcodes
-		if dualJumpOpcodes[op] {
-			if subVM.Program[i].P2 > 0 {
-				subVM.Program[i].P2 += baseAddr
-			}
-			if subVM.Program[i].P3 > 0 {
-				subVM.Program[i].P3 += baseAddr
-			}
+		if rule.adjustP2 && rule.adjustP3 {
+			adjustDualJump(instr, baseAddr)
+		} else if rule.adjustP2 {
+			adjustJumpP2(instr, baseAddr)
 		}
 	}
 }

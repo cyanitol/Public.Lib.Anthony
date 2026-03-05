@@ -591,30 +591,42 @@ func selectLowerCostCandidate(current, candidate *IndexCandidate) *IndexCandidat
 // isIndexCovering determines if an index covers all needed columns.
 // A covering index contains all columns needed by the query, so no table lookup is required.
 func isIndexCovering(idx *schema.Index, neededColumns []string) bool {
-	// If we don't know what columns are needed, assume it's not covering
 	if len(neededColumns) == 0 {
 		return false
 	}
 
-	// Build a map of columns available in the index
-	indexColumns := make(map[string]bool)
-	for _, col := range idx.Columns {
-		indexColumns[strings.ToLower(col)] = true
-	}
+	indexColumns := buildIndexColumnMap(idx)
 
-	// Check if all needed columns are in the index
 	for _, needed := range neededColumns {
-		neededLower := strings.ToLower(needed)
-		// Special case: rowid/oid/_rowid_ is always available
-		if neededLower == "rowid" || neededLower == "oid" || neededLower == "_rowid_" {
-			continue
-		}
-		if !indexColumns[neededLower] {
+		if !isColumnAvailable(needed, indexColumns) {
 			return false
 		}
 	}
 
 	return true
+}
+
+// buildIndexColumnMap creates a map of columns available in an index.
+func buildIndexColumnMap(idx *schema.Index) map[string]bool {
+	indexColumns := make(map[string]bool)
+	for _, col := range idx.Columns {
+		indexColumns[strings.ToLower(col)] = true
+	}
+	return indexColumns
+}
+
+// isColumnAvailable checks if a column is available (either in index or is rowid).
+func isColumnAvailable(column string, indexColumns map[string]bool) bool {
+	neededLower := strings.ToLower(column)
+	if isRowidColumn(neededLower) {
+		return true
+	}
+	return indexColumns[neededLower]
+}
+
+// isRowidColumn checks if a column name is a rowid alias.
+func isRowidColumn(column string) bool {
+	return column == "rowid" || column == "oid" || column == "_rowid_"
 }
 
 // mergeSubplan merges a subplan tree into the parent plan.

@@ -94,49 +94,11 @@ func analyzeTableIndexes(table *Table, rowCount int64, schema *Schema) []*IndexA
 
 // analyzeIndex analyzes a single index.
 func analyzeIndex(table *Table, index *Index, rowCount int64) *IndexAnalysis {
-	// In a real implementation, this would:
-	// 1. Scan the index B-tree
-	// 2. Sample entries to estimate distinct values
-	// 3. Compute statistics
-	//
-	// For now, we'll use heuristics
-
 	numCols := len(index.Columns)
 	distinctCounts := make([]int64, numCols)
 	avgEq := make([]int64, numCols)
 
-	// Estimate distinct values for each column prefix
-	for i := 0; i < numCols; i++ {
-		// Heuristic: each column reduces cardinality by ~10x
-		// First column: ~rowCount/10 distinct values
-		// Second column: ~rowCount/100 distinct values, etc.
-		divisor := int64(1)
-		for j := 0; j <= i; j++ {
-			divisor *= 10
-		}
-
-		distinctCounts[i] = rowCount / divisor
-		if distinctCounts[i] < 1 {
-			distinctCounts[i] = 1
-		}
-
-		// For unique indexes, the last column should have rowCount distinct values
-		if index.Unique && i == numCols-1 {
-			distinctCounts[i] = rowCount
-		}
-
-		// Compute avgEq
-		if distinctCounts[i] > 0 {
-			avgEq[i] = rowCount / distinctCounts[i]
-			if avgEq[i] < 1 {
-				avgEq[i] = 1
-			}
-		} else {
-			avgEq[i] = rowCount
-		}
-	}
-
-	// Build stat string
+	computeIndexStatistics(index, rowCount, numCols, distinctCounts, avgEq)
 	statString := buildStatString(rowCount, avgEq)
 
 	return &IndexAnalysis{
@@ -147,6 +109,42 @@ func analyzeIndex(table *Table, index *Index, rowCount int64) *IndexAnalysis {
 		AvgEq:          avgEq,
 		StatString:     statString,
 	}
+}
+
+// computeIndexStatistics computes distinct counts and avgEq for each column prefix.
+func computeIndexStatistics(index *Index, rowCount int64, numCols int, distinctCounts, avgEq []int64) {
+	for i := 0; i < numCols; i++ {
+		distinctCounts[i] = estimateDistinctCount(i, rowCount)
+		if index.Unique && i == numCols-1 {
+			distinctCounts[i] = rowCount
+		}
+		avgEq[i] = computeAvgEq(rowCount, distinctCounts[i])
+	}
+}
+
+// estimateDistinctCount estimates distinct values for a column prefix.
+func estimateDistinctCount(colIndex int, rowCount int64) int64 {
+	divisor := int64(1)
+	for j := 0; j <= colIndex; j++ {
+		divisor *= 10
+	}
+	distinct := rowCount / divisor
+	if distinct < 1 {
+		return 1
+	}
+	return distinct
+}
+
+// computeAvgEq computes the average rows per distinct value.
+func computeAvgEq(rowCount, distinctCount int64) int64 {
+	if distinctCount > 0 {
+		avgEq := rowCount / distinctCount
+		if avgEq < 1 {
+			return 1
+		}
+		return avgEq
+	}
+	return rowCount
 }
 
 // buildStatString builds the sqlite_stat1 format statistics string.

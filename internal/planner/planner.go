@@ -346,39 +346,21 @@ func (p *Planner) splitAnd(expr Expr) []Expr {
 func (p *Planner) analyzeExpr(expr Expr, tables []*TableInfo) (*WhereTerm, error) {
 	binExpr, ok := expr.(*BinaryExpr)
 	if !ok {
-		// Not a binary expression, might be OR or other complex expr
-		if orExpr, ok := expr.(*OrExpr); ok {
-			return p.analyzeOrExpr(orExpr, tables)
-		}
-		return nil, nil
+		return p.analyzeNonBinaryExpr(expr, tables)
 	}
 
-	// Extract column reference
 	colExpr, ok := binExpr.Left.(*ColumnExpr)
 	if !ok {
 		return nil, nil
 	}
 
-	// Determine operator
 	op := p.parseOperator(binExpr.Op)
 	if op == 0 {
-		return nil, nil // Unknown operator
+		return nil, nil
 	}
 
-	// Find column index
-	colIdx := -1
-	for i, col := range tables[colExpr.Cursor].Columns {
-		if col.Name == colExpr.Column {
-			colIdx = i
-			break
-		}
-	}
-
-	// Extract right-side value
-	var rightValue interface{}
-	if valExpr, ok := binExpr.Right.(*ValueExpr); ok {
-		rightValue = valExpr.Value
-	}
+	colIdx := findColumnIndex(tables[colExpr.Cursor], colExpr.Column)
+	rightValue := extractRightValue(binExpr.Right)
 
 	term := &WhereTerm{
 		Expr:        expr,
@@ -388,12 +370,38 @@ func (p *Planner) analyzeExpr(expr Expr, tables []*TableInfo) (*WhereTerm, error
 		RightValue:  rightValue,
 		PrereqRight: binExpr.Right.UsedTables(),
 		PrereqAll:   expr.UsedTables(),
-		TruthProb:   0, // Will be estimated later
+		TruthProb:   0,
 		Flags:       0,
 		Parent:      -1,
 	}
 
 	return term, nil
+}
+
+// analyzeNonBinaryExpr handles non-binary expressions.
+func (p *Planner) analyzeNonBinaryExpr(expr Expr, tables []*TableInfo) (*WhereTerm, error) {
+	if orExpr, ok := expr.(*OrExpr); ok {
+		return p.analyzeOrExpr(orExpr, tables)
+	}
+	return nil, nil
+}
+
+// findColumnIndex finds the index of a column in a table.
+func findColumnIndex(table *TableInfo, columnName string) int {
+	for i, col := range table.Columns {
+		if col.Name == columnName {
+			return i
+		}
+	}
+	return -1
+}
+
+// extractRightValue extracts the value from the right side of a binary expression.
+func extractRightValue(expr Expr) interface{} {
+	if valExpr, ok := expr.(*ValueExpr); ok {
+		return valExpr.Value
+	}
+	return nil
 }
 
 // analyzeOrExpr handles OR expressions specially.

@@ -26,17 +26,37 @@ func (c *BtCursor) splitLeafPage(key int64, payload []byte) error {
 		return fmt.Errorf("splitLeafPage called on non-leaf page")
 	}
 
-	oldPage, cells, keys, err := c.prepareLeafSplit(key, payload)
+	oldPage, cells, keys, newPage, newPageNum, err := c.prepareLeafSplitPages(key, payload)
 	if err != nil {
 		return err
 	}
 
 	medianIdx := len(cells) / 2
-	newPage, newPageNum, err := c.allocateAndInitializeLeafPage()
-	if err != nil {
+	if err := c.executeLeafSplit(oldPage, newPage, cells, keys, medianIdx, newPageNum, key); err != nil {
 		return err
 	}
 
+	_, err = c.SeekRowid(key)
+	return err
+}
+
+// prepareLeafSplitPages prepares both old and new pages for splitting.
+func (c *BtCursor) prepareLeafSplitPages(key int64, payload []byte) (*BtreePage, [][]byte, []int64, *BtreePage, uint32, error) {
+	oldPage, cells, keys, err := c.prepareLeafSplit(key, payload)
+	if err != nil {
+		return nil, nil, nil, nil, 0, err
+	}
+
+	newPage, newPageNum, err := c.allocateAndInitializeLeafPage()
+	if err != nil {
+		return nil, nil, nil, nil, 0, err
+	}
+
+	return oldPage, cells, keys, newPage, newPageNum, nil
+}
+
+// executeLeafSplit performs the actual leaf split operation.
+func (c *BtCursor) executeLeafSplit(oldPage, newPage *BtreePage, cells [][]byte, keys []int64, medianIdx int, newPageNum uint32, key int64) error {
 	if err := c.markPagesAsDirty(c.CurrentPage, newPageNum); err != nil {
 		return err
 	}
@@ -46,12 +66,7 @@ func (c *BtCursor) splitLeafPage(key int64, payload []byte) error {
 	}
 
 	dividerKey := keys[medianIdx]
-	if err := c.updateParentAfterSplit(c.CurrentPage, newPageNum, dividerKey); err != nil {
-		return fmt.Errorf("failed to update parent: %w", err)
-	}
-
-	_, err = c.SeekRowid(key)
-	return err
+	return c.updateParentAfterSplit(c.CurrentPage, newPageNum, dividerKey)
 }
 
 // splitInteriorPage splits a full interior page when inserting a new cell
@@ -60,17 +75,32 @@ func (c *BtCursor) splitInteriorPage(key int64, childPgno uint32) error {
 		return fmt.Errorf("splitInteriorPage called on non-interior page")
 	}
 
-	oldPage, cells, keys, childPages, err := c.prepareInteriorSplit(key, childPgno)
+	oldPage, cells, keys, childPages, newPage, newPageNum, err := c.prepareInteriorSplitPages(key, childPgno)
 	if err != nil {
 		return err
 	}
 
 	medianIdx := len(cells) / 2
-	newPage, newPageNum, err := c.allocateAndInitializeInteriorPage()
+	return c.executeInteriorSplit(oldPage, newPage, cells, keys, childPages, medianIdx, newPageNum)
+}
+
+// prepareInteriorSplitPages prepares both old and new pages for interior split.
+func (c *BtCursor) prepareInteriorSplitPages(key int64, childPgno uint32) (*BtreePage, [][]byte, []int64, []uint32, *BtreePage, uint32, error) {
+	oldPage, cells, keys, childPages, err := c.prepareInteriorSplit(key, childPgno)
 	if err != nil {
-		return err
+		return nil, nil, nil, nil, nil, 0, err
 	}
 
+	newPage, newPageNum, err := c.allocateAndInitializeInteriorPage()
+	if err != nil {
+		return nil, nil, nil, nil, nil, 0, err
+	}
+
+	return oldPage, cells, keys, childPages, newPage, newPageNum, nil
+}
+
+// executeInteriorSplit performs the actual interior split operation.
+func (c *BtCursor) executeInteriorSplit(oldPage, newPage *BtreePage, cells [][]byte, keys []int64, childPages []uint32, medianIdx int, newPageNum uint32) error {
 	if err := c.markPagesAsDirty(c.CurrentPage, newPageNum); err != nil {
 		return err
 	}
@@ -80,11 +110,7 @@ func (c *BtCursor) splitInteriorPage(key int64, childPgno uint32) error {
 	}
 
 	dividerKey := keys[medianIdx]
-	if err := c.updateParentAfterSplit(c.CurrentPage, newPageNum, dividerKey); err != nil {
-		return fmt.Errorf("failed to update parent: %w", err)
-	}
-
-	return nil
+	return c.updateParentAfterSplit(c.CurrentPage, newPageNum, dividerKey)
 }
 
 // prepareLeafSplit prepares the current page for splitting by collecting all cells
@@ -196,25 +222,45 @@ func (c *BtCursor) redistributeLeafCells(oldPage, newPage *BtreePage, cells [][]
 		return fmt.Errorf("failed to clear old page: %w", err)
 	}
 
+	if err := c.populateLeftPage(oldPage, cells, medianIdx); err != nil {
+		return err
+	}
+
+	if err := c.populateRightPage(newPage, cells, medianIdx); err != nil {
+		return err
+	}
+
+	return c.defragmentBothLeafPages(oldPage, newPage)
+}
+
+// populateLeftPage inserts cells into the left (old) page.
+func (c *BtCursor) populateLeftPage(oldPage *BtreePage, cells [][]byte, medianIdx int) error {
 	for i := 0; i < medianIdx; i++ {
 		if err := oldPage.InsertCell(i, cells[i]); err != nil {
 			return fmt.Errorf("failed to insert cell %d into left page: %w", i, err)
 		}
 	}
+	return nil
+}
 
+// populateRightPage inserts cells into the right (new) page.
+func (c *BtCursor) populateRightPage(newPage *BtreePage, cells [][]byte, medianIdx int) error {
 	for i := medianIdx; i < len(cells); i++ {
 		if err := newPage.InsertCell(i-medianIdx, cells[i]); err != nil {
 			return fmt.Errorf("failed to insert cell %d into right page: %w", i, err)
 		}
 	}
+	return nil
+}
 
+// defragmentBothLeafPages defragments both pages after redistribution.
+func (c *BtCursor) defragmentBothLeafPages(oldPage, newPage *BtreePage) error {
 	if err := oldPage.Defragment(); err != nil {
 		return fmt.Errorf("failed to defragment left page: %w", err)
 	}
 	if err := newPage.Defragment(); err != nil {
 		return fmt.Errorf("failed to defragment right page: %w", err)
 	}
-
 	return nil
 }
 
@@ -561,49 +607,64 @@ func (c *BtCursor) updateRightChildIfNeeded(parent *BtreePage, parentPage, right
 
 // createNewRoot creates a new root page after splitting the old root
 func (c *BtCursor) createNewRoot(leftPage, rightPage uint32, dividerKey int64) error {
-	// Allocate new root page
+	newRootNum, newRoot, err := c.allocateAndSetupNewRoot()
+	if err != nil {
+		return err
+	}
+
+	if err := c.populateNewRoot(newRoot, newRootNum, leftPage, rightPage, dividerKey); err != nil {
+		return err
+	}
+
+	c.RootPage = newRootNum
+	return nil
+}
+
+// allocateAndSetupNewRoot allocates and initializes a new root page.
+func (c *BtCursor) allocateAndSetupNewRoot() (uint32, *BtreePage, error) {
 	newRootNum, err := c.Btree.AllocatePage()
 	if err != nil {
-		return fmt.Errorf("failed to allocate new root: %w", err)
+		return 0, nil, fmt.Errorf("failed to allocate new root: %w", err)
 	}
 
-	// Get new root page data
 	newRootData, err := c.Btree.GetPage(newRootNum)
 	if err != nil {
-		return fmt.Errorf("failed to get new root page: %w", err)
+		return 0, nil, fmt.Errorf("failed to get new root page: %w", err)
 	}
 
-	// Initialize as interior page
 	if err := initializeInteriorPage(newRootData, newRootNum, c.Btree.UsableSize); err != nil {
-		return fmt.Errorf("failed to initialize new root: %w", err)
+		return 0, nil, fmt.Errorf("failed to initialize new root: %w", err)
 	}
 
-	// Mark as dirty
-	if c.Btree.Provider != nil {
-		if err := c.Btree.Provider.MarkDirty(newRootNum); err != nil {
-			return err
-		}
+	if err := c.markNewRootDirty(newRootNum); err != nil {
+		return 0, nil, err
 	}
 
-	// Create new root page wrapper
 	newRoot, err := NewBtreePage(newRootNum, newRootData, c.Btree.UsableSize)
 	if err != nil {
-		return fmt.Errorf("failed to create new root BtreePage: %w", err)
+		return 0, nil, fmt.Errorf("failed to create new root BtreePage: %w", err)
 	}
 
-	// Insert divider cell pointing to left page
+	return newRootNum, newRoot, nil
+}
+
+// markNewRootDirty marks the new root page as dirty if provider exists.
+func (c *BtCursor) markNewRootDirty(newRootNum uint32) error {
+	if c.Btree.Provider != nil {
+		return c.Btree.Provider.MarkDirty(newRootNum)
+	}
+	return nil
+}
+
+// populateNewRoot inserts the divider cell and sets right child.
+func (c *BtCursor) populateNewRoot(newRoot *BtreePage, newRootNum, leftPage, rightPage uint32, dividerKey int64) error {
 	dividerCell := EncodeTableInteriorCell(leftPage, dividerKey)
 	if err := newRoot.InsertCell(0, dividerCell); err != nil {
 		return fmt.Errorf("failed to insert divider into new root: %w", err)
 	}
 
-	// Set rightmost child to right page
 	headerOffset := getHeaderOffset(newRootNum)
 	binary.BigEndian.PutUint32(newRoot.Data[headerOffset+PageHeaderOffsetRightChild:], rightPage)
-
-	// Update cursor's root page
-	c.RootPage = newRootNum
-
 	return nil
 }
 

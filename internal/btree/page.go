@@ -319,81 +319,88 @@ func (p *BtreePage) AllocateSpace(size int) (offset int, err error) {
 
 // Defragment defragments the page by compacting all cells
 func (p *BtreePage) Defragment() error {
-	// Calculate correct offset for CellContentStart field
 	cellStartOffset := p.Header.CellPtrOffset - p.Header.HeaderSize + PageHeaderOffsetCellStart
 
 	if p.Header.NumCells == 0 {
-		// Empty page - just reset content start
-		p.Header.CellContentStart = 0
-		binary.BigEndian.PutUint16(p.Data[cellStartOffset:], 0)
-		return nil
+		return resetEmptyPage(p, cellStartOffset)
 	}
 
-	// Get all cell pointers
 	cellPointers, err := p.Header.GetCellPointers(p.Data)
 	if err != nil {
 		return err
 	}
 
-	// Parse all cells to get their sizes
-	type cellData struct {
-		offset int
-		data   []byte
+	cells, err := extractAllCellsForDefrag(p, cellPointers)
+	if err != nil {
+		return err
 	}
-	cells := make([]cellData, len(cellPointers))
+
+	compactCells(p, cells)
+	updateDefragmentedHeader(p, cellStartOffset)
+	return nil
+}
+
+// resetEmptyPage resets an empty page's content start.
+func resetEmptyPage(p *BtreePage, cellStartOffset int) error {
+	p.Header.CellContentStart = 0
+	binary.BigEndian.PutUint16(p.Data[cellStartOffset:], 0)
+	return nil
+}
+
+// cellDataForDefrag holds cell data during defragmentation.
+type cellDataForDefrag struct {
+	offset int
+	data   []byte
+}
+
+// extractAllCellsForDefrag extracts and copies all cell data.
+func extractAllCellsForDefrag(p *BtreePage, cellPointers []uint16) ([]cellDataForDefrag, error) {
+	cells := make([]cellDataForDefrag, len(cellPointers))
 
 	for i, ptr := range cellPointers {
 		cellOffset := int(ptr)
 		if cellOffset >= len(p.Data) {
-			return fmt.Errorf("invalid cell offset: %d", cellOffset)
+			return nil, fmt.Errorf("invalid cell offset: %d", cellOffset)
 		}
 
-		// Parse cell to determine size
 		cell, err := ParseCell(p.Header.PageType, p.Data[cellOffset:], p.UsableSize)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
-		// Bounds check to prevent slice overflow
 		cellEnd := cellOffset + int(cell.CellSize)
 		if cellEnd > len(p.Data) {
 			cellEnd = len(p.Data)
 		}
-		// Make a copy of the cell data to avoid corruption during compaction
-		// (since we're modifying p.Data in place, slices into it would become invalid)
+
 		cellDataCopy := make([]byte, cellEnd-cellOffset)
 		copy(cellDataCopy, p.Data[cellOffset:cellEnd])
-		cells[i] = cellData{
-			offset: cellOffset,
-			data:   cellDataCopy,
-		}
+		cells[i] = cellDataForDefrag{offset: cellOffset, data: cellDataCopy}
 	}
 
-	// Compact cells from end of page backwards
+	return cells, nil
+}
+
+// compactCells compacts cells from end of page backwards.
+func compactCells(p *BtreePage, cells []cellDataForDefrag) {
 	newContentStart := int(p.UsableSize)
 	for i := len(cells) - 1; i >= 0; i-- {
 		cellSize := len(cells[i].data)
 		newContentStart -= cellSize
-
-		// Copy cell to new location
 		copy(p.Data[newContentStart:], cells[i].data)
 
-		// Update cell pointer
 		cellPtrOffset := p.Header.CellPtrOffset + (i * 2)
 		binary.BigEndian.PutUint16(p.Data[cellPtrOffset:], uint16(newContentStart))
 	}
-
-	// Update header
 	p.Header.CellContentStart = uint16(newContentStart)
-	binary.BigEndian.PutUint16(p.Data[cellStartOffset:], uint16(newContentStart))
+}
 
-	// Clear fragmented bytes
+// updateDefragmentedHeader updates header after defragmentation.
+func updateDefragmentedHeader(p *BtreePage, cellStartOffset int) {
+	binary.BigEndian.PutUint16(p.Data[cellStartOffset:], p.Header.CellContentStart)
 	p.Header.FragmentedBytes = 0
-	// Calculate correct offset for FragmentedBytes field
 	fragmentedOffset := p.Header.CellPtrOffset - p.Header.HeaderSize + PageHeaderOffsetFragmented
 	p.Data[fragmentedOffset] = 0
-
-	return nil
 }
 
 // FreeSpace returns the amount of free space on the page

@@ -113,20 +113,39 @@ func GetCollSeq(e *Expr) *CollSeq {
 	return CollSeqBinary
 }
 
+// getExplicitCollation returns collation if expression has EP_Collate property.
+func getExplicitCollation(e *Expr) *CollSeq {
+	if e != nil && e.HasProperty(EP_Collate) {
+		return GetCollSeq(e)
+	}
+	return nil
+}
+
+// getImplicitCollation returns non-binary collation from expression.
+func getImplicitCollation(e *Expr) *CollSeq {
+	if e == nil {
+		return nil
+	}
+	coll := GetCollSeq(e)
+	if coll != CollSeqBinary {
+		return coll
+	}
+	return nil
+}
+
 // GetBinaryCompareCollSeq returns the collation for a binary comparison.
 // Left operand takes precedence over right operand.
 func GetBinaryCompareCollSeq(left, right *Expr) *CollSeq {
-	if left != nil && left.HasProperty(EP_Collate) {
-		return GetCollSeq(left)
+	// Check for explicit collation (EP_Collate flag)
+	if coll := getExplicitCollation(left); coll != nil {
+		return coll
 	}
-	if right != nil && right.HasProperty(EP_Collate) {
-		return GetCollSeq(right)
+	if coll := getExplicitCollation(right); coll != nil {
+		return coll
 	}
-	if left != nil {
-		coll := GetCollSeq(left)
-		if coll != CollSeqBinary {
-			return coll
-		}
+	// Check for implicit non-binary collation
+	if coll := getImplicitCollation(left); coll != nil {
+		return coll
 	}
 	if right != nil {
 		return GetCollSeq(right)
@@ -518,6 +537,25 @@ func CoerceToNumeric(v interface{}) interface{} {
 	}
 }
 
+// coerceStringToInt attempts to convert a string to integer.
+func coerceStringToInt(val string) (int64, bool) {
+	if i, err := strconv.ParseInt(val, 10, 64); err == nil {
+		return i, true
+	}
+	if f, err := strconv.ParseFloat(val, 64); err == nil {
+		return int64(f), true
+	}
+	return 0, false
+}
+
+// coerceBoolToInt converts a boolean to integer (0 or 1).
+func coerceBoolToInt(val bool) (int64, bool) {
+	if val {
+		return 1, true
+	}
+	return 0, true
+}
+
 // CoerceToInteger attempts to convert a value to integer.
 func CoerceToInteger(v interface{}) (int64, bool) {
 	switch val := v.(type) {
@@ -526,18 +564,9 @@ func CoerceToInteger(v interface{}) (int64, bool) {
 	case float64:
 		return int64(val), true
 	case string:
-		if i, err := strconv.ParseInt(val, 10, 64); err == nil {
-			return i, true
-		}
-		if f, err := strconv.ParseFloat(val, 64); err == nil {
-			return int64(f), true
-		}
-		return 0, false
+		return coerceStringToInt(val)
 	case bool:
-		if val {
-			return 1, true
-		}
-		return 0, true
+		return coerceBoolToInt(val)
 	default:
 		return 0, false
 	}

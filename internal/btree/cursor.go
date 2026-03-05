@@ -521,25 +521,23 @@ func (c *BtCursor) SeekRowid(rowid int64) (found bool, err error) {
 		return false, err
 	}
 
-	// Start from root
+	c.initializeSeek()
+	return c.navigateToRowid(c.RootPage, rowid)
+}
+
+// initializeSeek initializes cursor state for seeking.
+func (c *BtCursor) initializeSeek() {
 	c.Depth = 0
 	c.PageStack[0] = c.RootPage
 	c.IndexStack[0] = 0
+}
 
-	pageNum := c.RootPage
-
-	// Navigate down the tree
+// navigateToRowid navigates down the tree to find the rowid.
+func (c *BtCursor) navigateToRowid(pageNum uint32, rowid int64) (bool, error) {
 	for {
-		pageData, err := c.Btree.GetPage(pageNum)
+		pageData, header, err := c.loadPageForSeek(pageNum)
 		if err != nil {
-			c.State = CursorInvalid
-			return false, fmt.Errorf("failed to get page %d: %w", pageNum, err)
-		}
-
-		header, err := ParsePageHeader(pageData, pageNum)
-		if err != nil {
-			c.State = CursorInvalid
-			return false, fmt.Errorf("failed to parse page %d: %w", pageNum, err)
+			return false, err
 		}
 
 		idx, exactMatch := c.binarySearch(pageData, header, rowid)
@@ -548,21 +546,47 @@ func (c *BtCursor) SeekRowid(rowid int64) (found bool, err error) {
 			return c.seekLeafPage(pageData, header, pageNum, idx, exactMatch)
 		}
 
-		childPage, err := c.resolveChildPage(pageData, header, idx)
+		childPage, err := c.advanceToChildPage(pageData, header, idx)
 		if err != nil {
 			return false, err
 		}
-
-		c.Depth++
-		if c.Depth >= MaxBtreeDepth {
-			c.State = CursorInvalid
-			return false, fmt.Errorf("btree depth exceeded")
-		}
-
 		pageNum = childPage
-		c.PageStack[c.Depth] = pageNum
-		c.IndexStack[c.Depth] = 0
 	}
+}
+
+// loadPageForSeek loads and parses a page during seek operation.
+func (c *BtCursor) loadPageForSeek(pageNum uint32) ([]byte, *PageHeader, error) {
+	pageData, err := c.Btree.GetPage(pageNum)
+	if err != nil {
+		c.State = CursorInvalid
+		return nil, nil, fmt.Errorf("failed to get page %d: %w", pageNum, err)
+	}
+
+	header, err := ParsePageHeader(pageData, pageNum)
+	if err != nil {
+		c.State = CursorInvalid
+		return nil, nil, fmt.Errorf("failed to parse page %d: %w", pageNum, err)
+	}
+
+	return pageData, header, nil
+}
+
+// advanceToChildPage advances to the child page and updates cursor depth.
+func (c *BtCursor) advanceToChildPage(pageData []byte, header *PageHeader, idx int) (uint32, error) {
+	childPage, err := c.resolveChildPage(pageData, header, idx)
+	if err != nil {
+		return 0, err
+	}
+
+	c.Depth++
+	if c.Depth >= MaxBtreeDepth {
+		c.State = CursorInvalid
+		return 0, fmt.Errorf("btree depth exceeded")
+	}
+
+	c.PageStack[c.Depth] = childPage
+	c.IndexStack[c.Depth] = 0
+	return childPage, nil
 }
 
 // seekLeafPage positions the cursor on a leaf page after a binary search and

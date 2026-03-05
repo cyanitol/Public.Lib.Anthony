@@ -345,21 +345,23 @@ func (f *GroupConcatFunc) Step(args []Value) error {
 		return nil
 	}
 
-	// Set separator from second argument (only first time)
-	if len(args) == 2 && !f.hasSep {
-		if !args[1].IsNull() {
-			f.separator = args[1].AsString()
-		} else {
-			f.separator = ","
-		}
-		f.hasSep = true
-	} else if !f.hasSep {
-		f.separator = ","
-		f.hasSep = true
-	}
-
+	f.initializeSeparator(args)
 	f.values = append(f.values, args[0].AsString())
 	return nil
+}
+
+// initializeSeparator sets the separator on first call
+func (f *GroupConcatFunc) initializeSeparator(args []Value) {
+	if f.hasSep {
+		return
+	}
+
+	if len(args) == 2 && !args[1].IsNull() {
+		f.separator = args[1].AsString()
+	} else {
+		f.separator = ","
+	}
+	f.hasSep = true
 }
 
 func (f *GroupConcatFunc) Final() (Value, error) {

@@ -91,35 +91,49 @@ func balance(cursor *BtCursor) error {
 		return fmt.Errorf("cannot balance: cursor not in valid state")
 	}
 
-	// Get current page
+	page, err := loadPageForBalance(cursor)
+	if err != nil {
+		return err
+	}
+
+	return executeBalance(cursor, page)
+}
+
+// loadPageForBalance loads and wraps the current page for balancing.
+func loadPageForBalance(cursor *BtCursor) (*BtreePage, error) {
 	pageData, err := cursor.Btree.GetPage(cursor.CurrentPage)
 	if err != nil {
-		return fmt.Errorf("failed to get page %d: %w", cursor.CurrentPage, err)
+		return nil, fmt.Errorf("failed to get page %d: %w", cursor.CurrentPage, err)
 	}
 
-	// Wrap in BtreePage for analysis
 	page, err := NewBtreePage(cursor.CurrentPage, pageData, cursor.Btree.UsableSize)
 	if err != nil {
-		return fmt.Errorf("failed to parse page %d: %w", cursor.CurrentPage, err)
+		return nil, fmt.Errorf("failed to parse page %d: %w", cursor.CurrentPage, err)
 	}
 
-	// Check if page is overfull
+	return page, nil
+}
+
+// executeBalance determines and executes the appropriate balance operation.
+func executeBalance(cursor *BtCursor, page *BtreePage) error {
 	if isOverfull(page) {
 		return handleOverfullPage(cursor, page)
 	}
 
-	// Check if page is underfull
 	if isUnderfull(page) {
 		return handleUnderfullPage(cursor, page)
 	}
 
-	// Page is balanced - may still benefit from defragmentation
+	return defragmentIfNeeded(cursor, page)
+}
+
+// defragmentIfNeeded defragments the page if it has fragmented bytes.
+func defragmentIfNeeded(cursor *BtCursor, page *BtreePage) error {
 	if page.Header.FragmentedBytes > 0 {
 		if err := defragmentPage(page); err != nil {
 			return fmt.Errorf("failed to defragment page %d: %w", cursor.CurrentPage, err)
 		}
 	}
-
 	return nil
 }
 

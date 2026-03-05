@@ -1507,32 +1507,30 @@ func (v *VDBE) execRowid(instr *Instruction) error {
 		return err
 	}
 
-	// Check for null row or EOF
-	if cursor.NullRow || cursor.EOF {
+	v.extractRowidFromCursor(cursor, dst)
+	return nil
+}
+
+// extractRowidFromCursor extracts the rowid from a cursor and sets it in the destination memory.
+func (v *VDBE) extractRowidFromCursor(cursor *Cursor, dst *Mem) {
+	if shouldSetRowidToNull(cursor) {
 		dst.SetNull()
-		return nil
+		return
 	}
 
-	// Handle pseudo-table cursors (they don't have rowids, set to NULL)
-	if cursor.CurType == CursorPseudo {
-		// Pseudo-tables for OLD/NEW don't have meaningful rowids
-		// Set to NULL or could use a stored rowid if needed
-		dst.SetNull()
-		return nil
-	}
-
-	// Get btree cursor
 	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
 	if !ok || btCursor == nil {
 		dst.SetNull()
-		return nil
+		return
 	}
 
-	// Get rowid (key) from current cell
 	rowid := btCursor.GetKey()
 	dst.SetInt(rowid)
+}
 
-	return nil
+// shouldSetRowidToNull checks if the rowid should be NULL based on cursor state.
+func shouldSetRowidToNull(cursor *Cursor) bool {
+	return cursor.NullRow || cursor.EOF || cursor.CurType == CursorPseudo
 }
 
 // parseRecordColumn parses a specific column from a SQLite record
@@ -1691,24 +1689,29 @@ func parseSerialInt(data []byte, offset int, st uint64, mem *Mem) error {
 		return fmt.Errorf("truncated int%d", size*8)
 	}
 
-	var v int64
-	switch st {
-	case 1:
-		v = int64(int8(data[offset]))
-	case 2:
-		v = int64(int16(binary.BigEndian.Uint16(data[offset:])))
-	case 3:
-		v = parseSignedInt24(data[offset:])
-	case 4:
-		v = int64(int32(binary.BigEndian.Uint32(data[offset:])))
-	case 5:
-		v = parseSignedInt48(data[offset:])
-	case 6:
-		// Allow conversion even if value > MaxInt64 - preserves bit pattern
-		v = int64(binary.BigEndian.Uint64(data[offset:]))
-	}
+	v := decodeSerialIntValue(data, offset, st)
 	mem.SetInt(v)
 	return nil
+}
+
+// decodeSerialIntValue decodes an integer value based on serial type.
+func decodeSerialIntValue(data []byte, offset int, st uint64) int64 {
+	switch st {
+	case 1:
+		return int64(int8(data[offset]))
+	case 2:
+		return int64(int16(binary.BigEndian.Uint16(data[offset:])))
+	case 3:
+		return parseSignedInt24(data[offset:])
+	case 4:
+		return int64(int32(binary.BigEndian.Uint32(data[offset:])))
+	case 5:
+		return parseSignedInt48(data[offset:])
+	case 6:
+		return int64(binary.BigEndian.Uint64(data[offset:]))
+	default:
+		return 0
+	}
 }
 
 // parseSignedInt24 decodes a 3-byte big-endian signed integer.
@@ -3066,37 +3069,41 @@ func (v *VDBE) execToNumeric(instr *Instruction) error {
 		return err
 	}
 
-	// NULL remains NULL
-	if mem.IsNull() {
+	if mem.IsNull() || mem.IsNumeric() {
 		return nil
 	}
 
-	// Already numeric, nothing to do
-	if mem.IsNumeric() {
-		return nil
-	}
-
-	// Try to convert to numeric
-	if mem.IsString() || mem.IsBlob() {
-		str := mem.StrValue()
-
-		// Try integer first
-		if val, err := strconv.ParseInt(str, 10, 64); err == nil {
-			mem.SetInt(val)
-			return nil
-		}
-
-		// Try real
-		if val, err := strconv.ParseFloat(str, 64); err == nil {
-			mem.SetReal(val)
-			return nil
-		}
-
-		// Keep as text if neither conversion works
-		return nil
-	}
-
+	v.convertMemToNumeric(mem)
 	return nil
+}
+
+// convertMemToNumeric attempts to convert a memory value to numeric.
+func (v *VDBE) convertMemToNumeric(mem *Mem) {
+	if !mem.IsString() && !mem.IsBlob() {
+		return
+	}
+
+	str := mem.StrValue()
+	if tryConvertToInt(mem, str) {
+		return
+	}
+	tryConvertToReal(mem, str)
+}
+
+// tryConvertToInt attempts to convert a string to integer, returns true if successful.
+func tryConvertToInt(mem *Mem, str string) bool {
+	if val, err := strconv.ParseInt(str, 10, 64); err == nil {
+		mem.SetInt(val)
+		return true
+	}
+	return false
+}
+
+// tryConvertToReal attempts to convert a string to real.
+func tryConvertToReal(mem *Mem, str string) {
+	if val, err := strconv.ParseFloat(str, 64); err == nil {
+		mem.SetReal(val)
+	}
 }
 
 // convertStringToInt tries to parse string as integer, returns 0 if it fails.
@@ -3265,42 +3272,48 @@ func (v *VDBE) execBitNot(instr *Instruction) error {
 }
 
 func (v *VDBE) execShiftLeft(instr *Instruction) error {
-	// P3 = P2 << P1
-	// Note: P1 is shift amount, P2 is value to shift
-	shiftAmount, err := v.GetMem(instr.P1)
+	shiftAmount, value, result, err := v.getShiftOperands(instr)
 	if err != nil {
 		return err
 	}
 
-	value, err := v.GetMem(instr.P2)
-	if err != nil {
-		return err
-	}
-
-	result, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
-	}
-
-	// NULL propagation: if either operand is NULL, result is NULL
 	if shiftAmount.IsNull() || value.IsNull() {
 		result.SetNull()
 		return nil
 	}
 
-	// Convert operands to integers
 	shift := shiftAmount.IntValue()
 	val := value.IntValue()
+	result.SetInt(computeLeftShift(shift, val))
+	return nil
+}
 
-	// SQLite behavior: negative shift amounts or shifts >= 64 result in 0
-	if shift < 0 || shift >= 64 {
-		result.SetInt(0)
-		return nil
+// getShiftOperands retrieves the three memory operands for shift operations.
+func (v *VDBE) getShiftOperands(instr *Instruction) (*Mem, *Mem, *Mem, error) {
+	shiftAmount, err := v.GetMem(instr.P1)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
-	// Perform left shift
-	result.SetInt(val << uint(shift))
-	return nil
+	value, err := v.GetMem(instr.P2)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	result, err := v.GetMem(instr.P3)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return shiftAmount, value, result, nil
+}
+
+// computeLeftShift computes left shift with SQLite semantics.
+func computeLeftShift(shift, val int64) int64 {
+	if shift < 0 || shift >= 64 {
+		return 0
+	}
+	return val << uint(shift)
 }
 
 // computeShiftRight computes right shift with SQLite semantics.
@@ -3625,41 +3638,39 @@ func seekAndDeleteIndexEntry(idxCursor *btree.IndexCursor, key []byte) error {
 // P1 = cursor number (index cursor)
 // P2 = destination register for rowid
 func (v *VDBE) execIdxRowid(instr *Instruction) error {
-	// Get the index cursor
 	cursor, err := v.GetCursor(instr.P1)
 	if err != nil {
 		return err
 	}
 
-	// Verify this is an index cursor
 	if cursor.IsTable {
 		return fmt.Errorf("cursor %d is not an index cursor", instr.P1)
 	}
 
-	// Get destination register
 	dst, err := v.GetMem(instr.P2)
 	if err != nil {
 		return err
 	}
 
-	// Check for EOF or null row
+	v.extractIndexRowid(cursor, dst)
+	return nil
+}
+
+// extractIndexRowid extracts the rowid from an index cursor.
+func (v *VDBE) extractIndexRowid(cursor *Cursor, dst *Mem) {
 	if cursor.EOF || cursor.NullRow {
 		dst.SetNull()
-		return nil
+		return
 	}
 
-	// Get the index cursor (btree.IndexCursor)
 	idxCursor, ok := cursor.BtreeCursor.(*btree.IndexCursor)
 	if !ok || idxCursor == nil {
 		dst.SetNull()
-		return nil
+		return
 	}
 
-	// Get the rowid from the current index entry
 	rowid := idxCursor.GetRowid()
 	dst.SetInt(rowid)
-
-	return nil
 }
 
 // execIdxLT jumps if the index key at cursor < key in register.
@@ -4075,26 +4086,26 @@ func (v *VDBE) execVFilter(instr *Instruction) error {
 		return fmt.Errorf("OpVFilter: cursor %d is not a virtual table cursor", instr.P1)
 	}
 
-	// Get the virtual cursor from the virtual table
-	// This requires casting the interface{} to vtab.VirtualTable
-	// For now, we'll assume it has an Open() method
+	v.ensureVTabCursorOpen(cursor)
+	argv := v.buildVFilterArguments(instr)
+	cursor.EOF = false
+	_ = argv // Suppress unused warning until we implement actual Filter call
+
+	return nil
+}
+
+// ensureVTabCursorOpen ensures the virtual table cursor is open.
+func (v *VDBE) ensureVTabCursorOpen(cursor *Cursor) {
 	if cursor.VTabCursor == nil {
-		// Open the cursor if not already open
-		// This would call vtable.Open() in a real implementation
-		// For now, just set a placeholder
 		cursor.VTabCursor = nil // Will be set by actual implementation
 	}
+}
 
-	// Get idxNum and idxStr
-	_ = instr.P3 // idxNum - will be used when implementing actual Filter call
-	_ = ""       // idxStr - will be used when implementing actual Filter call
-	if instr.P4Type == P4Static || instr.P4Type == P4Dynamic {
-		_ = instr.P4.Z // Will be used for idxStr
-	}
-
-	// Get constraint values from registers
+// buildVFilterArguments builds the argument array for the VFilter operation.
+func (v *VDBE) buildVFilterArguments(instr *Instruction) []interface{} {
 	argc := instr.P2
 	argv := make([]interface{}, argc)
+
 	for i := 0; i < argc; i++ {
 		regIdx := int(instr.P5) + i
 		if regIdx < len(v.Mem) {
@@ -4102,13 +4113,7 @@ func (v *VDBE) execVFilter(instr *Instruction) error {
 		}
 	}
 
-	// Call Filter on the virtual cursor
-	// This would be: cursor.VTabCursor.Filter(idxNum, idxStr, argv)
-	// For now, just mark the cursor as not at EOF
-	cursor.EOF = false
-	_ = argv // Suppress unused warning until we implement actual Filter call
-
-	return nil
+	return argv
 }
 
 // execVColumn reads a column from a virtual table cursor.

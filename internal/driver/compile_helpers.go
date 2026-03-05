@@ -388,72 +388,76 @@ func (s *Stmt) compileExplainQueryPlan(vm *vdbe.VDBE, stmt *parser.ExplainStmt, 
 
 // compileExplainOpcodes compiles basic EXPLAIN (show VDBE opcodes).
 func (s *Stmt) compileExplainOpcodes(vm *vdbe.VDBE, stmt *parser.ExplainStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
-	// Compile the inner statement to get its VDBE program
+	compiledVM, err := s.compileInnerStatementForExplain(stmt, args)
+	if err != nil {
+		return nil, err
+	}
+
+	s.setupExplainVM(vm)
+	s.emitExplainInstructions(vm, compiledVM.Program)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
+// compileInnerStatementForExplain compiles the inner statement for EXPLAIN
+func (s *Stmt) compileInnerStatementForExplain(stmt *parser.ExplainStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	innerVM := s.newVDBE()
 	compiledVM, err := s.compileInnerStatement(innerVM, stmt.Statement, args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile inner statement: %w", err)
 	}
+	return compiledVM, nil
+}
 
-	// Set up result columns for EXPLAIN output
-	// Format: addr, opcode, p1, p2, p3, p4, p5, comment
+// setupExplainVM sets up the VM for EXPLAIN output
+func (s *Stmt) setupExplainVM(vm *vdbe.VDBE) {
 	vm.ResultCols = []string{"addr", "opcode", "p1", "p2", "p3", "p4", "p5", "comment"}
-
-	// Allocate memory for result columns (8 columns)
 	vm.AllocMemory(20)
-
-	// Emit Init opcode
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+}
 
-	// For each instruction in the compiled program, emit it as a result row
-	for i, instr := range compiledVM.Program {
-		// Register 0: addr (instruction address)
-		vm.AddOp(vdbe.OpInteger, i, 0, 0)
-
-		// Register 1: opcode (as string)
-		vm.AddOpWithP4Str(vdbe.OpString8, 0, 1, 0, instr.Opcode.String())
-
-		// Register 2: p1
-		vm.AddOp(vdbe.OpInteger, instr.P1, 2, 0)
-
-		// Register 3: p2
-		vm.AddOp(vdbe.OpInteger, instr.P2, 3, 0)
-
-		// Register 4: p3
-		vm.AddOp(vdbe.OpInteger, instr.P3, 4, 0)
-
-		// Register 5: p4 (format based on type)
-		p4str := ""
-		switch instr.P4Type {
-		case vdbe.P4Int32:
-			p4str = fmt.Sprintf("%d", instr.P4.I)
-		case vdbe.P4Int64:
-			p4str = fmt.Sprintf("%d", instr.P4.I64)
-		case vdbe.P4Real:
-			p4str = fmt.Sprintf("%g", instr.P4.R)
-		case vdbe.P4Static, vdbe.P4Dynamic:
-			p4str = instr.P4.Z
-		}
-		vm.AddOpWithP4Str(vdbe.OpString8, 0, 5, 0, p4str)
-
-		// Register 6: p5
-		vm.AddOp(vdbe.OpInteger, int(instr.P5), 6, 0)
-
-		// Register 7: comment
-		comment := ""
-		if instr.Comment != "" {
-			comment = instr.Comment
-		}
-		vm.AddOpWithP4Str(vdbe.OpString8, 0, 7, 0, comment)
-
-		// Emit result row
-		vm.AddOp(vdbe.OpResultRow, 0, 8, 0)
+// emitExplainInstructions emits EXPLAIN rows for each instruction
+func (s *Stmt) emitExplainInstructions(vm *vdbe.VDBE, program []*vdbe.Instruction) {
+	for i, instr := range program {
+		s.emitExplainRow(vm, i, instr)
 	}
+}
 
-	// Halt
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+// emitExplainRow emits a single EXPLAIN result row
+func (s *Stmt) emitExplainRow(vm *vdbe.VDBE, addr int, instr *vdbe.Instruction) {
+	vm.AddOp(vdbe.OpInteger, addr, 0, 0)
+	vm.AddOpWithP4Str(vdbe.OpString8, 0, 1, 0, instr.Opcode.String())
+	vm.AddOp(vdbe.OpInteger, instr.P1, 2, 0)
+	vm.AddOp(vdbe.OpInteger, instr.P2, 3, 0)
+	vm.AddOp(vdbe.OpInteger, instr.P3, 4, 0)
+	vm.AddOpWithP4Str(vdbe.OpString8, 0, 5, 0, formatP4(instr))
+	vm.AddOp(vdbe.OpInteger, int(instr.P5), 6, 0)
+	vm.AddOpWithP4Str(vdbe.OpString8, 0, 7, 0, getComment(instr))
+	vm.AddOp(vdbe.OpResultRow, 0, 8, 0)
+}
 
-	return vm, nil
+// formatP4 formats the P4 parameter for display
+func formatP4(instr *vdbe.Instruction) string {
+	switch instr.P4Type {
+	case vdbe.P4Int32:
+		return fmt.Sprintf("%d", instr.P4.I)
+	case vdbe.P4Int64:
+		return fmt.Sprintf("%d", instr.P4.I64)
+	case vdbe.P4Real:
+		return fmt.Sprintf("%g", instr.P4.R)
+	case vdbe.P4Static, vdbe.P4Dynamic:
+		return instr.P4.Z
+	}
+	return ""
+}
+
+// getComment returns the comment or empty string
+func getComment(instr *vdbe.Instruction) string {
+	if instr.Comment != "" {
+		return instr.Comment
+	}
+	return ""
 }
 
 // statementCompiler is a function type for compiling specific statement types.

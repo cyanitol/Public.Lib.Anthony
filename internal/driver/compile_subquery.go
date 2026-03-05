@@ -153,13 +153,13 @@ func (s *Stmt) tryFlattenFromSubquery(outer *parser.SelectStmt, subquery *parser
 
 	// Create flattened statement
 	flattened := &parser.SelectStmt{
-		Columns:  outer.Columns,   // Keep outer columns (may include aggregates)
-		From:     subquery.From,    // Use subquery's FROM clause
-		Where:    subquery.Where,   // Use subquery's WHERE (or merge with outer WHERE if needed)
-		GroupBy:  outer.GroupBy,    // Keep outer GROUP BY
-		Having:   outer.Having,     // Keep outer HAVING
-		OrderBy:  outer.OrderBy,    // Keep outer ORDER BY
-		Limit:    outer.Limit,      // Keep outer LIMIT
+		Columns: outer.Columns,  // Keep outer columns (may include aggregates)
+		From:    subquery.From,  // Use subquery's FROM clause
+		Where:   subquery.Where, // Use subquery's WHERE (or merge with outer WHERE if needed)
+		GroupBy: outer.GroupBy,  // Keep outer GROUP BY
+		Having:  outer.Having,   // Keep outer HAVING
+		OrderBy: outer.OrderBy,  // Keep outer ORDER BY
+		Limit:   outer.Limit,    // Keep outer LIMIT
 	}
 
 	// If outer has a WHERE clause, we'd need to merge it (complex)
@@ -446,52 +446,37 @@ func stripInitCodeIfNeeded(vm *vdbe.VDBE, i int, startAddr int) {
 // - OpSorterSort, OpSorterNext: P2 = jump when done
 func adjustSubqueryJumpTargets(vm *vdbe.VDBE, baseAddr int) {
 	if baseAddr == 0 {
-		return // No adjustment needed
+		return
 	}
 
-	// Opcodes that use P2 as a jump target
-	jumpOpcodes := map[vdbe.Opcode]bool{
-		// Conditional jumps
-		vdbe.OpIf:        true,
-		vdbe.OpIfNot:     true,
-		vdbe.OpIfPos:     true,
-		vdbe.OpIfNotZero: true,
-		vdbe.OpIfNullRow: true,
-		vdbe.OpIsNull:    true, // Jump if P1 is NULL
-		vdbe.OpNotNull:   true, // Jump if P1 is not NULL
+	jumpOpcodes := buildJumpOpcodeMap()
+	dualJumpOpcodes := buildDualJumpOpcodeMap()
 
-		// Unconditional jumps
-		vdbe.OpGoto:  true,
-		vdbe.OpGosub: true,
+	adjustJumpTargetsInProgram(vm, baseAddr, jumpOpcodes, dualJumpOpcodes)
+}
 
-		// Loop control
-		vdbe.OpRewind: true,
-		vdbe.OpNext:   true,
-		vdbe.OpPrev:   true,
-		vdbe.OpLast:   true,
-		vdbe.OpFirst:  true,
-
-		// Seek operations
-		vdbe.OpSeekGE:    true,
-		vdbe.OpSeekGT:    true,
-		vdbe.OpSeekLE:    true,
-		vdbe.OpSeekLT:    true,
-		vdbe.OpSeekRowid: true,
-		vdbe.OpNotExists: true,
-
-		// Sorter operations
-		vdbe.OpSorterSort: true,
-		vdbe.OpSorterNext: true,
-
-		// Special control flow
-		vdbe.OpOnce: true,
+// buildJumpOpcodeMap returns opcodes that use P2 as jump target
+func buildJumpOpcodeMap() map[vdbe.Opcode]bool {
+	return map[vdbe.Opcode]bool{
+		vdbe.OpIf: true, vdbe.OpIfNot: true, vdbe.OpIfPos: true, vdbe.OpIfNotZero: true,
+		vdbe.OpIfNullRow: true, vdbe.OpIsNull: true, vdbe.OpNotNull: true,
+		vdbe.OpGoto: true, vdbe.OpGosub: true,
+		vdbe.OpRewind: true, vdbe.OpNext: true, vdbe.OpPrev: true, vdbe.OpLast: true, vdbe.OpFirst: true,
+		vdbe.OpSeekGE: true, vdbe.OpSeekGT: true, vdbe.OpSeekLE: true, vdbe.OpSeekLT: true,
+		vdbe.OpSeekRowid: true, vdbe.OpNotExists: true,
+		vdbe.OpSorterSort: true, vdbe.OpSorterNext: true, vdbe.OpOnce: true,
 	}
+}
 
-	// Opcodes that use both P2 and P3 as jump targets
-	dualJumpOpcodes := map[vdbe.Opcode]bool{
-		vdbe.OpInitCoroutine: true, // P2 = skip address, P3 = entry point
+// buildDualJumpOpcodeMap returns opcodes that use both P2 and P3 as jump targets
+func buildDualJumpOpcodeMap() map[vdbe.Opcode]bool {
+	return map[vdbe.Opcode]bool{
+		vdbe.OpInitCoroutine: true,
 	}
+}
 
+// adjustJumpTargetsInProgram adjusts jump targets in entire program
+func adjustJumpTargetsInProgram(vm *vdbe.VDBE, baseAddr int, jumpOpcodes, dualJumpOpcodes map[vdbe.Opcode]bool) {
 	for i := range vm.Program {
 		op := vm.Program[i].Opcode
 
@@ -580,7 +565,6 @@ func findMaxCursor(vm *vdbe.VDBE) int {
 
 	return maxCursor
 }
-
 
 // adjustSubqueryRegisters adds an offset to all register references in the bytecode.
 // This prevents register conflicts between parent and subquery execution contexts.

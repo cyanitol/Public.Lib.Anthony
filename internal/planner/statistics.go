@@ -131,47 +131,63 @@ func (s *Statistics) loadIndexStats(tableName, indexName, statString string) err
 		return fmt.Errorf("empty stat string")
 	}
 
-	// First number is total row count
 	rowCount, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid row count: %w", err)
 	}
 
-	// Remaining numbers are average rows per distinct value for each column prefix
-	avgEq := make([]int64, len(parts)-1)
-	for i := 1; i < len(parts); i++ {
-		avgEq[i-1], err = strconv.ParseInt(parts[i], 10, 64)
-		if err != nil {
-			return fmt.Errorf("invalid avgEq value at position %d: %w", i, err)
-		}
+	avgEq, err := parseAvgEqValues(parts[1:])
+	if err != nil {
+		return err
 	}
 
-	// Convert to LogEst estimates
-	columnStats := make([]LogEst, len(avgEq))
-	for i, avg := range avgEq {
-		if avg > 0 {
-			// Estimate distinct values: rowCount / avgEq
-			distinctValues := rowCount / avg
-			if distinctValues < 1 {
-				distinctValues = 1
-			}
-			columnStats[i] = NewLogEst(distinctValues)
-		} else {
-			columnStats[i] = NewLogEst(rowCount)
-		}
-	}
+	columnStats := convertToColumnStats(avgEq, rowCount)
 
 	s.IndexStats[indexName] = &IndexStatistics{
 		IndexName:   indexName,
 		TableName:   tableName,
 		Stat:        statString,
 		RowCount:    rowCount,
-		SampleSize:  rowCount, // Assume full table scan for now
+		SampleSize:  rowCount,
 		AvgEq:       avgEq,
 		ColumnStats: columnStats,
 	}
 
 	return nil
+}
+
+// parseAvgEqValues parses average equality values from string parts.
+func parseAvgEqValues(parts []string) ([]int64, error) {
+	avgEq := make([]int64, len(parts))
+	for i, part := range parts {
+		val, err := strconv.ParseInt(part, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid avgEq value at position %d: %w", i+1, err)
+		}
+		avgEq[i] = val
+	}
+	return avgEq, nil
+}
+
+// convertToColumnStats converts avgEq values to LogEst column statistics.
+func convertToColumnStats(avgEq []int64, rowCount int64) []LogEst {
+	columnStats := make([]LogEst, len(avgEq))
+	for i, avg := range avgEq {
+		columnStats[i] = computeColumnStat(avg, rowCount)
+	}
+	return columnStats
+}
+
+// computeColumnStat computes a single column statistic from avgEq.
+func computeColumnStat(avg, rowCount int64) LogEst {
+	if avg > 0 {
+		distinctValues := rowCount / avg
+		if distinctValues < 1 {
+			distinctValues = 1
+		}
+		return NewLogEst(distinctValues)
+	}
+	return NewLogEst(rowCount)
 }
 
 // SaveStatistics converts statistics to sqlite_stat1 format rows.
@@ -213,41 +229,49 @@ func (s *Statistics) GetIndexStats(indexName string) *IndexStatistics {
 // for a query using the given index with nEq equality constraints.
 func EstimateRows(indexStats *IndexStatistics, nEq int, hasRange bool) LogEst {
 	if indexStats == nil {
-		// No statistics available, use default estimate
-		return LogEst(100) // Assume ~1000 rows
+		return LogEst(100) // Default: ~1000 rows
 	}
 
-	// Start with total row count
 	nOut := NewLogEst(indexStats.RowCount)
+	nOut = applyEqualitySelectivity(indexStats, nEq, nOut)
+	nOut = applyRangeSelectivity(hasRange, nOut)
+	return nOut
+}
 
-	// Apply selectivity for equality constraints
-	if nEq > 0 {
-		if nEq <= len(indexStats.ColumnStats) {
-			// Use actual statistics
-			nOut = indexStats.ColumnStats[nEq-1]
-		} else {
-			// Extrapolate from last available stat
-			lastStat := indexStats.ColumnStats[len(indexStats.ColumnStats)-1]
-			// Each additional equality reduces by ~10x
-			for i := len(indexStats.ColumnStats); i < nEq; i++ {
-				lastStat += selectivityEq
-				if lastStat < 0 {
-					lastStat = 0
-					break
-				}
-			}
-			nOut = lastStat
-		}
+// applyEqualitySelectivity applies selectivity for equality constraints.
+func applyEqualitySelectivity(indexStats *IndexStatistics, nEq int, nOut LogEst) LogEst {
+	if nEq <= 0 {
+		return nOut
 	}
 
-	// Apply selectivity for range constraint
-	if hasRange {
-		nOut += selectivityRange
-		if nOut < 0 {
-			nOut = 0
-		}
+	if nEq <= len(indexStats.ColumnStats) {
+		return indexStats.ColumnStats[nEq-1]
 	}
 
+	return extrapolateSelectivity(indexStats, nEq)
+}
+
+// extrapolateSelectivity extrapolates selectivity beyond available statistics.
+func extrapolateSelectivity(indexStats *IndexStatistics, nEq int) LogEst {
+	lastStat := indexStats.ColumnStats[len(indexStats.ColumnStats)-1]
+	for i := len(indexStats.ColumnStats); i < nEq; i++ {
+		lastStat += selectivityEq
+		if lastStat < 0 {
+			return 0
+		}
+	}
+	return lastStat
+}
+
+// applyRangeSelectivity applies selectivity for range constraints.
+func applyRangeSelectivity(hasRange bool, nOut LogEst) LogEst {
+	if !hasRange {
+		return nOut
+	}
+	nOut += selectivityRange
+	if nOut < 0 {
+		return 0
+	}
 	return nOut
 }
 
@@ -471,30 +495,54 @@ func (s *Statistics) ClearStatistics(tableName string) {
 
 // ValidateStatistics performs sanity checks on statistics.
 func (s *Statistics) ValidateStatistics() error {
-	// Check table statistics
+	if err := s.validateTableStats(); err != nil {
+		return err
+	}
+	return s.validateIndexStats()
+}
+
+// validateTableStats validates table-level statistics.
+func (s *Statistics) validateTableStats() error {
 	for name, stat := range s.TableStats {
 		if stat.RowCount < 0 {
 			return fmt.Errorf("table %s has negative row count: %d", name, stat.RowCount)
 		}
 	}
+	return nil
+}
 
-	// Check index statistics
+// validateIndexStats validates index-level statistics.
+func (s *Statistics) validateIndexStats() error {
 	for name, stat := range s.IndexStats {
-		if stat.RowCount < 0 {
-			return fmt.Errorf("index %s has negative row count: %d", name, stat.RowCount)
-		}
-
-		// Check that avgEq values are reasonable
-		for i, avg := range stat.AvgEq {
-			if avg < 1 {
-				return fmt.Errorf("index %s has invalid avgEq[%d]: %d", name, i, avg)
-			}
-			if avg > stat.RowCount {
-				return fmt.Errorf("index %s has avgEq[%d]=%d > rowCount=%d", name, i, avg, stat.RowCount)
-			}
+		if err := validateIndexStat(name, stat); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
+// validateIndexStat validates a single index statistic.
+func validateIndexStat(name string, stat *IndexStatistics) error {
+	if stat.RowCount < 0 {
+		return fmt.Errorf("index %s has negative row count: %d", name, stat.RowCount)
+	}
+
+	for i, avg := range stat.AvgEq {
+		if err := validateAvgEq(name, i, avg, stat.RowCount); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateAvgEq validates a single avgEq value.
+func validateAvgEq(indexName string, index int, avg, rowCount int64) error {
+	if avg < 1 {
+		return fmt.Errorf("index %s has invalid avgEq[%d]: %d", indexName, index, avg)
+	}
+	if avg > rowCount {
+		return fmt.Errorf("index %s has avgEq[%d]=%d > rowCount=%d", indexName, index, avg, rowCount)
+	}
 	return nil
 }
 

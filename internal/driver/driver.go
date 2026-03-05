@@ -151,37 +151,14 @@ func (d *Driver) newMemoryDBState() (*dbState, error) {
 
 // createConnection creates a new connection with the given state.
 func (d *Driver) createConnection(filename string, state *dbState, existed bool, config *DriverConfig) (driver.Conn, error) {
-	// Use provided security config or default
-	secCfg := config.Security
-	if secCfg == nil {
-		secCfg = security.DefaultSecurityConfig()
-	}
+	secCfg := d.getSecurityConfig(filename, config)
+	conn := d.buildConnection(filename, state, secCfg)
 
-	if filename != "" && filename != ":memory:" {
-		// Set the database directory as the sandbox root for file operations
-		dbDir := filepath.Dir(filename)
-		if dbDir != "" && dbDir != "." {
-			secCfg.DatabaseRoot = dbDir
-		}
-	}
-
-	conn := &Conn{
-		driver:         d,
-		filename:       filename,
-		pager:          state.pager,
-		btree:          state.btree,
-		schema:         state.schema,
-		dbRegistry:     schema.NewDatabaseRegistry(),
-		stmts:          make(map[*Stmt]struct{}),
-		stmtCache:      NewStmtCache(100), // Default cache size of 100
-		securityConfig: secCfg,
-	}
 	if err := conn.openDatabase(existed); err != nil {
 		d.releaseState(filename, state)
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 
-	// Apply DSN configuration settings via PRAGMA statements
 	if err := conn.applyConfig(config); err != nil {
 		d.releaseState(filename, state)
 		return nil, fmt.Errorf("failed to apply configuration: %w", err)
@@ -189,6 +166,38 @@ func (d *Driver) createConnection(filename string, state *dbState, existed bool,
 
 	d.conns[filename] = conn
 	return conn, nil
+}
+
+// getSecurityConfig gets or creates security config for connection
+func (d *Driver) getSecurityConfig(filename string, config *DriverConfig) *security.SecurityConfig {
+	secCfg := config.Security
+	if secCfg == nil {
+		secCfg = security.DefaultSecurityConfig()
+	}
+
+	if filename != "" && filename != ":memory:" {
+		dbDir := filepath.Dir(filename)
+		if dbDir != "" && dbDir != "." {
+			secCfg.DatabaseRoot = dbDir
+		}
+	}
+
+	return secCfg
+}
+
+// buildConnection constructs a new Conn object
+func (d *Driver) buildConnection(filename string, state *dbState, secCfg *security.SecurityConfig) *Conn {
+	return &Conn{
+		driver:         d,
+		filename:       filename,
+		pager:          state.pager,
+		btree:          state.btree,
+		schema:         state.schema,
+		dbRegistry:     schema.NewDatabaseRegistry(),
+		stmts:          make(map[*Stmt]struct{}),
+		stmtCache:      NewStmtCache(100),
+		securityConfig: secCfg,
+	}
 }
 
 // createMemoryConnection creates a new in-memory database connection.

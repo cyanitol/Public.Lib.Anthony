@@ -320,28 +320,41 @@ func (s *Stmt) openTableAndSorter(vm *vdbe.VDBE, table *schema.Table, cursors gr
 
 // populateSorterData evaluates and copies GROUP BY and aggregate expressions to sorter registers
 func (s *Stmt) populateSorterData(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, sorterBaseReg, numGroupBy int) error {
-	for i, groupExpr := range stmt.GroupBy {
+	if err := s.populateGroupByExprs(vm, gen, stmt.GroupBy, sorterBaseReg); err != nil {
+		return err
+	}
+	s.populateAggregateArgs(vm, gen, stmt.Columns, sorterBaseReg, numGroupBy)
+	return nil
+}
+
+// populateGroupByExprs populates GROUP BY expressions into sorter
+func (s *Stmt) populateGroupByExprs(vm *vdbe.VDBE, gen *expr.CodeGenerator, groupBy []parser.Expression, baseReg int) error {
+	for i, groupExpr := range groupBy {
 		reg, err := gen.GenerateExpr(groupExpr)
 		if err != nil {
 			return fmt.Errorf("error compiling GROUP BY expression: %w", err)
 		}
-		vm.AddOp(vdbe.OpCopy, reg, sorterBaseReg+i, 0)
-	}
-
-	regIdx := numGroupBy
-	for _, col := range stmt.Columns {
-		if s.isAggregateExpr(col.Expr) {
-			fnExpr := col.Expr.(*parser.FunctionExpr)
-			if !fnExpr.Star && len(fnExpr.Args) > 0 {
-				argReg, err := gen.GenerateExpr(fnExpr.Args[0])
-				if err == nil {
-					vm.AddOp(vdbe.OpCopy, argReg, sorterBaseReg+regIdx, 0)
-					regIdx++
-				}
-			}
-		}
+		vm.AddOp(vdbe.OpCopy, reg, baseReg+i, 0)
 	}
 	return nil
+}
+
+// populateAggregateArgs populates aggregate function arguments into sorter
+func (s *Stmt) populateAggregateArgs(vm *vdbe.VDBE, gen *expr.CodeGenerator, cols []parser.ResultColumn, baseReg, startIdx int) {
+	regIdx := startIdx
+	for _, col := range cols {
+		if !s.isAggregateExpr(col.Expr) {
+			continue
+		}
+		fnExpr := col.Expr.(*parser.FunctionExpr)
+		if fnExpr.Star || len(fnExpr.Args) == 0 {
+			continue
+		}
+		if argReg, err := gen.GenerateExpr(fnExpr.Args[0]); err == nil {
+			vm.AddOp(vdbe.OpCopy, argReg, baseReg+regIdx, 0)
+			regIdx++
+		}
+	}
 }
 
 // scanAndPopulateSorter implements Phase 1: scan table and populate sorter
@@ -472,41 +485,44 @@ func (s *Stmt) emitFinalGroupOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt
 
 // emitGroupOutput outputs a single group's results.
 func (s *Stmt) emitGroupOutput(vm *vdbe.VDBE, stmt *parser.SelectStmt, accRegs []int, avgCountRegs []int, groupByRegs []int, numCols int) {
-	// First, copy all aggregate and group values to result registers (0..numCols-1)
-	for i, col := range stmt.Columns {
-		if s.isAggregateExpr(col.Expr) {
-			fnExpr := col.Expr.(*parser.FunctionExpr)
-			if fnExpr.Name == "AVG" {
-				vm.AddOp(vdbe.OpDivide, accRegs[i], avgCountRegs[i], i)
-			} else {
-				vm.AddOp(vdbe.OpCopy, accRegs[i], i, 0)
-			}
-		} else {
-			// Non-aggregate column - use GROUP BY value if it matches
-			found := false
-			for j, groupExpr := range stmt.GroupBy {
-				if exprsEqual(col.Expr, groupExpr) {
-					vm.AddOp(vdbe.OpCopy, groupByRegs[j], i, 0)
-					found = true
-					break
-				}
-			}
-			if !found {
-				vm.AddOp(vdbe.OpNull, 0, i, 0)
-			}
-		}
-	}
-
-	// Evaluate HAVING clause if present
+	s.copyColumnsToResults(vm, stmt, accRegs, avgCountRegs, groupByRegs)
 	havingSkipAddr := s.emitGroupByHavingClause(vm, stmt, accRegs, avgCountRegs, groupByRegs, numCols)
-
-	// Emit result row
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
 
-	// Fix HAVING skip address to jump past the result row
 	if havingSkipAddr > 0 {
 		vm.Program[havingSkipAddr].P2 = vm.NumOps()
 	}
+}
+
+// copyColumnsToResults copies all column values to result registers
+func (s *Stmt) copyColumnsToResults(vm *vdbe.VDBE, stmt *parser.SelectStmt, accRegs, avgCountRegs, groupByRegs []int) {
+	for i, col := range stmt.Columns {
+		if s.isAggregateExpr(col.Expr) {
+			s.copyAggregateResult(vm, col.Expr.(*parser.FunctionExpr), accRegs[i], avgCountRegs[i], i)
+		} else {
+			s.copyNonAggregateResult(vm, col.Expr, stmt.GroupBy, groupByRegs, i)
+		}
+	}
+}
+
+// copyAggregateResult copies aggregate value to result register
+func (s *Stmt) copyAggregateResult(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, accReg, countReg, targetReg int) {
+	if fnExpr.Name == "AVG" {
+		vm.AddOp(vdbe.OpDivide, accReg, countReg, targetReg)
+	} else {
+		vm.AddOp(vdbe.OpCopy, accReg, targetReg, 0)
+	}
+}
+
+// copyNonAggregateResult copies non-aggregate value to result register
+func (s *Stmt) copyNonAggregateResult(vm *vdbe.VDBE, expr parser.Expression, groupBy []parser.Expression, groupByRegs []int, targetReg int) {
+	for j, groupExpr := range groupBy {
+		if exprsEqual(expr, groupExpr) {
+			vm.AddOp(vdbe.OpCopy, groupByRegs[j], targetReg, 0)
+			return
+		}
+	}
+	vm.AddOp(vdbe.OpNull, 0, targetReg, 0)
 }
 
 // exprsEqual checks if two expressions are equal (simplified comparison).
@@ -618,35 +634,38 @@ func (s *Stmt) aggregateKey(fnExpr *parser.FunctionExpr) string {
 func (s *Stmt) generateHavingExpression(vm *vdbe.VDBE, gen *expr.CodeGenerator, havingExpr parser.Expression,
 	aggregateMap map[string]int, baseReg int) (int, error) {
 
-	// Handle different expression types
 	switch expr := havingExpr.(type) {
 	case *parser.BinaryExpr:
 		return s.generateHavingBinaryExpr(vm, gen, expr, aggregateMap, baseReg)
 	case *parser.FunctionExpr:
-		// Check if this is an aggregate function
-		if s.isAggregateExpr(expr) {
-			key := s.aggregateKey(expr)
-			if reg, ok := aggregateMap[key]; ok {
-				// Return the register where this aggregate is already computed
-				return reg, nil
-			}
-		}
-		// Not an aggregate or not found, generate normally
-		return gen.GenerateExpr(expr)
+		return s.generateHavingFunctionExpr(gen, expr, aggregateMap)
 	case *parser.IdentExpr:
-		// Check if this is an alias for an aggregate
-		if reg, ok := aggregateMap[expr.Name]; ok {
-			return reg, nil
-		}
-		// Generate normally (column reference)
-		return gen.GenerateExpr(expr)
+		return s.generateHavingIdentExpr(gen, expr, aggregateMap)
 	case *parser.LiteralExpr:
-		// Simple literal, generate normally
 		return gen.GenerateExpr(expr)
 	default:
-		// For other expressions, try to generate them
 		return gen.GenerateExpr(havingExpr)
 	}
+}
+
+// generateHavingFunctionExpr handles function expressions in HAVING
+func (s *Stmt) generateHavingFunctionExpr(gen *expr.CodeGenerator, expr *parser.FunctionExpr, aggregateMap map[string]int) (int, error) {
+	if !s.isAggregateExpr(expr) {
+		return gen.GenerateExpr(expr)
+	}
+	key := s.aggregateKey(expr)
+	if reg, ok := aggregateMap[key]; ok {
+		return reg, nil
+	}
+	return gen.GenerateExpr(expr)
+}
+
+// generateHavingIdentExpr handles identifier expressions in HAVING
+func (s *Stmt) generateHavingIdentExpr(gen *expr.CodeGenerator, expr *parser.IdentExpr, aggregateMap map[string]int) (int, error) {
+	if reg, ok := aggregateMap[expr.Name]; ok {
+		return reg, nil
+	}
+	return gen.GenerateExpr(expr)
 }
 
 // binaryOpToVdbeOpcode maps parser binary operators to VDBE opcodes.

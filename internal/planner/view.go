@@ -441,31 +441,55 @@ func copyExpression(expr parser.Expression) parser.Expression {
 
 	switch e := expr.(type) {
 	case *parser.IdentExpr:
-		copy := *e
-		return &copy
+		return copyIdentExpr(e)
 	case *parser.LiteralExpr:
-		copy := *e
-		return &copy
+		return copyLiteralExpr(e)
 	case *parser.BinaryExpr:
-		copy := *e
-		copy.Left = copyExpression(e.Left)
-		copy.Right = copyExpression(e.Right)
-		return &copy
+		return copyBinaryExpr(e)
 	case *parser.UnaryExpr:
-		copy := *e
-		copy.Expr = copyExpression(e.Expr)
-		return &copy
+		return copyUnaryExpr(e)
 	case *parser.FunctionExpr:
-		copy := *e
-		copy.Args = make([]parser.Expression, len(e.Args))
-		for i, arg := range e.Args {
-			copy.Args[i] = copyExpression(arg)
-		}
-		return &copy
+		return copyFunctionExpr(e)
 	default:
-		// For other types, return as-is (might need more cases)
 		return expr
 	}
+}
+
+// copyIdentExpr creates a copy of an IdentExpr.
+func copyIdentExpr(e *parser.IdentExpr) parser.Expression {
+	copy := *e
+	return &copy
+}
+
+// copyLiteralExpr creates a copy of a LiteralExpr.
+func copyLiteralExpr(e *parser.LiteralExpr) parser.Expression {
+	copy := *e
+	return &copy
+}
+
+// copyBinaryExpr creates a deep copy of a BinaryExpr.
+func copyBinaryExpr(e *parser.BinaryExpr) parser.Expression {
+	copy := *e
+	copy.Left = copyExpression(e.Left)
+	copy.Right = copyExpression(e.Right)
+	return &copy
+}
+
+// copyUnaryExpr creates a deep copy of a UnaryExpr.
+func copyUnaryExpr(e *parser.UnaryExpr) parser.Expression {
+	copy := *e
+	copy.Expr = copyExpression(e.Expr)
+	return &copy
+}
+
+// copyFunctionExpr creates a deep copy of a FunctionExpr.
+func copyFunctionExpr(e *parser.FunctionExpr) parser.Expression {
+	copy := *e
+	copy.Args = make([]parser.Expression, len(e.Args))
+	for i, arg := range e.Args {
+		copy.Args[i] = copyExpression(arg)
+	}
+	return &copy
 }
 
 // rewriteColumnReferences recursively rewrites column references using the mapping.

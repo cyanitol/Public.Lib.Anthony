@@ -355,24 +355,29 @@ func checkOverlappingCells(pageNum uint32, offsets []int, sizes []int, result *I
 // checkKeyOrder verifies keys are in ascending order and within bounds
 func checkKeyOrder(pageNum uint32, cells []*CellInfo, minKey, maxKey *int64, result *IntegrityResult) {
 	for i := 0; i < len(cells); i++ {
-		key := cells[i].Key
+		checkKeyBounds(pageNum, i, cells[i].Key, minKey, maxKey, result)
+		checkKeySequence(pageNum, i, cells, result)
+	}
+}
 
-		// Check against bounds
-		if minKey != nil && key <= *minKey {
-			result.AddError(pageNum, "key_out_of_range",
-				fmt.Sprintf("cell %d key %d is not greater than minimum bound %d", i, key, *minKey))
-		}
-		if maxKey != nil && key > *maxKey {
-			result.AddError(pageNum, "key_out_of_range",
-				fmt.Sprintf("cell %d key %d is greater than maximum bound %d", i, key, *maxKey))
-		}
+// checkKeyBounds validates a key is within the specified bounds.
+func checkKeyBounds(pageNum uint32, idx int, key int64, minKey, maxKey *int64, result *IntegrityResult) {
+	if minKey != nil && key <= *minKey {
+		result.AddError(pageNum, "key_out_of_range",
+			fmt.Sprintf("cell %d key %d is not greater than minimum bound %d", idx, key, *minKey))
+	}
+	if maxKey != nil && key > *maxKey {
+		result.AddError(pageNum, "key_out_of_range",
+			fmt.Sprintf("cell %d key %d is greater than maximum bound %d", idx, key, *maxKey))
+	}
+}
 
-		// Check ascending order
-		if i > 0 && key <= cells[i-1].Key {
-			result.AddError(pageNum, "keys_not_sorted",
-				fmt.Sprintf("cell %d key %d is not greater than previous key %d",
-					i, key, cells[i-1].Key))
-		}
+// checkKeySequence validates keys are in ascending order.
+func checkKeySequence(pageNum uint32, idx int, cells []*CellInfo, result *IntegrityResult) {
+	if idx > 0 && cells[idx].Key <= cells[idx-1].Key {
+		result.AddError(pageNum, "keys_not_sorted",
+			fmt.Sprintf("cell %d key %d is not greater than previous key %d",
+				idx, cells[idx].Key, cells[idx-1].Key))
 	}
 }
 

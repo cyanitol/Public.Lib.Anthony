@@ -417,6 +417,18 @@ func propagateAffinityNegate(e *Expr) {
 	}
 }
 
+// unifyAffinity unifies two affinities: returns NONE if they disagree,
+// otherwise returns the non-NONE affinity.
+func unifyAffinity(current, candidate Affinity) Affinity {
+	if current == AFF_NONE {
+		return candidate
+	}
+	if current != candidate {
+		return AFF_NONE
+	}
+	return current
+}
+
 // propagateAffinityCase handles the OpCase case: affinity is taken from
 // THEN/ELSE clauses and unified to NONE on disagreement.
 func propagateAffinityCase(e *Expr) {
@@ -428,22 +440,14 @@ func propagateAffinityCase(e *Expr) {
 	// CASE list layout: WHEN1, THEN1, WHEN2, THEN2, ..., [ELSE]
 	for i := 1; i < len(e.List.Items); i += 2 {
 		thenAff := GetExprAffinity(e.List.Items[i].Expr)
-		if resultAff == AFF_NONE {
-			resultAff = thenAff
-		} else if resultAff != thenAff {
-			resultAff = AFF_NONE
-		}
+		resultAff = unifyAffinity(resultAff, thenAff)
 	}
 
 	// Check optional ELSE clause (present when item count is odd).
 	if len(e.List.Items)%2 == 1 {
 		elseIdx := len(e.List.Items) - 1
 		elseAff := GetExprAffinity(e.List.Items[elseIdx].Expr)
-		if resultAff == AFF_NONE {
-			resultAff = elseAff
-		} else if resultAff != elseAff {
-			resultAff = AFF_NONE
-		}
+		resultAff = unifyAffinity(resultAff, elseAff)
 	}
 
 	e.Affinity = resultAff

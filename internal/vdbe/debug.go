@@ -668,25 +668,35 @@ func (v *VDBE) getAffectedRegisters(instr *Instruction) []int {
 // applyRegisterPattern applies a register pattern to an instruction.
 func (v *VDBE) applyRegisterPattern(pattern registerPattern, instr *Instruction) []int {
 	affected := make([]int, 0, 3)
+	return v.applyPatternToRegisters(affected, pattern, instr)
+}
 
-	switch pattern {
-	case regPatternP2:
-		affected = append(affected, instr.P2)
-	case regPatternP1P2:
-		affected = append(affected, instr.P1, instr.P2)
-	case regPatternP3:
+// applyPatternToRegisters applies a specific pattern to collect affected registers.
+func (v *VDBE) applyPatternToRegisters(affected []int, pattern registerPattern, instr *Instruction) []int {
+	if pattern == regPatternP1RangeP3 {
 		affected = append(affected, instr.P3)
-	case regPatternP1RangeP3:
-		affected = append(affected, instr.P3)
-		affected = v.appendRegisterRange(affected, instr.P1, instr.P1+instr.P2)
-	case regPatternP1Range:
-		affected = v.appendRegisterRange(affected, instr.P1, instr.P1+instr.P2)
-	case regPatternP1P2P3:
-		affected = append(affected, instr.P1, instr.P2, instr.P3)
-	case regPatternDefault:
-		affected = v.appendValidRegisters(affected, instr.P1, instr.P2, instr.P3)
+		return v.appendRegisterRange(affected, instr.P1, instr.P1+instr.P2)
 	}
 
+	return v.applySimplePattern(affected, pattern, instr)
+}
+
+// applySimplePattern applies simple register patterns.
+func (v *VDBE) applySimplePattern(affected []int, pattern registerPattern, instr *Instruction) []int {
+	switch pattern {
+	case regPatternP2:
+		return append(affected, instr.P2)
+	case regPatternP1P2:
+		return append(affected, instr.P1, instr.P2)
+	case regPatternP3:
+		return append(affected, instr.P3)
+	case regPatternP1Range:
+		return v.appendRegisterRange(affected, instr.P1, instr.P1+instr.P2)
+	case regPatternP1P2P3:
+		return append(affected, instr.P1, instr.P2, instr.P3)
+	case regPatternDefault:
+		return v.appendValidRegisters(affected, instr.P1, instr.P2, instr.P3)
+	}
 	return affected
 }
 
@@ -749,25 +759,28 @@ func (v *VDBE) logInstructionToObservability(pc int, instr *Instruction) {
 
 // logToObservability logs a message to the observability logger.
 func (v *VDBE) logToObservability(level observability.Level, format string, args ...interface{}) {
-	if v.Debug == nil {
+	if v.Debug == nil || v.Debug.Logger == nil {
 		return
 	}
 
 	msg := fmt.Sprintf(format, args...)
+	v.logMessageAtLevel(level, msg)
+}
 
-	// Use custom logger if set
-	if v.Debug.Logger != nil {
-		switch level {
-		case observability.TraceLevel:
-			v.Debug.Logger.Trace(msg, observability.Fields{})
-		case observability.DebugLevel:
-			v.Debug.Logger.Debug(msg, observability.Fields{})
-		case observability.InfoLevel:
-			v.Debug.Logger.Info(msg, observability.Fields{})
-		case observability.WarnLevel:
-			v.Debug.Logger.Warn(msg, observability.Fields{})
-		case observability.ErrorLevel:
-			v.Debug.Logger.Error(msg, observability.Fields{})
-		}
+// logMessageAtLevel logs a message at the specified level using the debug logger.
+func (v *VDBE) logMessageAtLevel(level observability.Level, msg string) {
+	fields := observability.Fields{}
+
+	switch level {
+	case observability.TraceLevel:
+		v.Debug.Logger.Trace(msg, fields)
+	case observability.DebugLevel:
+		v.Debug.Logger.Debug(msg, fields)
+	case observability.InfoLevel:
+		v.Debug.Logger.Info(msg, fields)
+	case observability.WarnLevel:
+		v.Debug.Logger.Warn(msg, fields)
+	case observability.ErrorLevel:
+		v.Debug.Logger.Error(msg, fields)
 	}
 }

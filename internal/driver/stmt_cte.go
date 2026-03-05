@@ -13,48 +13,64 @@ import (
 
 // compileSelectWithCTEs compiles a SELECT statement with a WITH clause (CTEs).
 func (s *Stmt) compileSelectWithCTEs(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
-	// Create CTE context from WITH clause
-	cteCtx, err := planner.NewCTEContext(stmt.With)
+	cteCtx, err := s.createAndValidateCTEContext(stmt.With)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create CTE context: %w", err)
-	}
-
-	// Validate CTEs
-	if err := cteCtx.ValidateCTEs(); err != nil {
-		return nil, fmt.Errorf("CTE validation failed: %w", err)
+		return nil, err
 	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 
-	// Materialize CTEs in dependency order
-	cteTempTables := make(map[string]*schema.Table)
-	for _, cteName := range cteCtx.CTEOrder {
-		def, exists := cteCtx.GetCTE(cteName)
-		if !exists {
-			return nil, fmt.Errorf("CTE not found in context: %s", cteName)
-		}
-
-		if def.IsRecursive {
-			// Handle recursive CTE
-			tempTable, err := s.compileRecursiveCTE(vm, cteName, def, cteCtx, cteTempTables, args)
-			if err != nil {
-				return nil, fmt.Errorf("failed to compile recursive CTE %s: %w", cteName, err)
-			}
-			cteTempTables[cteName] = tempTable
-		} else {
-			// Handle non-recursive CTE
-			tempTable, err := s.compileNonRecursiveCTE(vm, cteName, def, cteCtx, cteTempTables, args)
-			if err != nil {
-				return nil, fmt.Errorf("failed to compile CTE %s: %w", cteName, err)
-			}
-			cteTempTables[cteName] = tempTable
-		}
+	cteTempTables, err := s.materializeAllCTEs(vm, cteCtx, args)
+	if err != nil {
+		return nil, err
 	}
 
-	// Now compile the main query, replacing CTE references with temp tables
-	mainStmt := s.rewriteSelectWithCTETables(stmt, cteTempTables)
+	return s.compileMainQueryWithCTEs(vm, stmt, cteTempTables, args)
+}
 
-	// Compile the main query (without the WITH clause)
+// createAndValidateCTEContext creates and validates the CTE context
+func (s *Stmt) createAndValidateCTEContext(with *parser.WithClause) (*planner.CTEContext, error) {
+	cteCtx, err := planner.NewCTEContext(with)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CTE context: %w", err)
+	}
+
+	if err := cteCtx.ValidateCTEs(); err != nil {
+		return nil, fmt.Errorf("CTE validation failed: %w", err)
+	}
+
+	return cteCtx, nil
+}
+
+// materializeAllCTEs materializes all CTEs in dependency order
+func (s *Stmt) materializeAllCTEs(vm *vdbe.VDBE, cteCtx *planner.CTEContext, args []driver.NamedValue) (map[string]*schema.Table, error) {
+	cteTempTables := make(map[string]*schema.Table)
+	for _, cteName := range cteCtx.CTEOrder {
+		tempTable, err := s.compileSingleCTE(vm, cteName, cteCtx, cteTempTables, args)
+		if err != nil {
+			return nil, err
+		}
+		cteTempTables[cteName] = tempTable
+	}
+	return cteTempTables, nil
+}
+
+// compileSingleCTE compiles a single CTE (recursive or non-recursive)
+func (s *Stmt) compileSingleCTE(vm *vdbe.VDBE, cteName string, cteCtx *planner.CTEContext, cteTempTables map[string]*schema.Table, args []driver.NamedValue) (*schema.Table, error) {
+	def, exists := cteCtx.GetCTE(cteName)
+	if !exists {
+		return nil, fmt.Errorf("CTE not found in context: %s", cteName)
+	}
+
+	if def.IsRecursive {
+		return s.compileRecursiveCTE(vm, cteName, def, cteCtx, cteTempTables, args)
+	}
+	return s.compileNonRecursiveCTE(vm, cteName, def, cteCtx, cteTempTables, args)
+}
+
+// compileMainQueryWithCTEs compiles the main query with CTE references rewritten
+func (s *Stmt) compileMainQueryWithCTEs(vm *vdbe.VDBE, stmt *parser.SelectStmt, cteTempTables map[string]*schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	mainStmt := s.rewriteSelectWithCTETables(stmt, cteTempTables)
 	mainStmt.With = nil
 	return s.compileSelect(vm, mainStmt, args)
 }
@@ -286,38 +302,67 @@ func adjustCursorOpRegisters(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int,
 
 // adjustNonCursorOpRegisters handles register adjustment for non-cursor operations.
 func adjustNonCursorOpRegisters(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int, int) {
-	switch op {
-	case vdbe.OpInteger, vdbe.OpReal, vdbe.OpString8, vdbe.OpBlob, vdbe.OpNull:
-		// P1=value/size, P2=dest register, P3=unused
+	switch {
+	case isValueLoadOp(op):
 		return p1, p2 + baseReg, p3
-
-	case vdbe.OpResultRow, vdbe.OpMakeRecord:
-		// P1=start register, P2=count, P3=dest register (for MakeRecord)
+	case isRecordOp(op):
 		return p1 + baseReg, p2, p3 + baseReg
-
-	case vdbe.OpCopy, vdbe.OpSCopy:
-		// P1=src register, P2=dest register
+	case isCopyOp(op) || isUnaryOp(op):
 		return p1 + baseReg, p2 + baseReg, p3
-
-	case vdbe.OpAdd, vdbe.OpSubtract, vdbe.OpMultiply, vdbe.OpDivide, vdbe.OpRemainder,
-		vdbe.OpConcat, vdbe.OpEq, vdbe.OpNe, vdbe.OpLt, vdbe.OpLe, vdbe.OpGt, vdbe.OpGe:
+	case isArithmeticOrComparisonOp(op):
 		return adjustArithmeticAndComparisonOps(op, p1, p2, p3, baseReg)
-
-	case vdbe.OpNot, vdbe.OpBitNot:
-		// P1=src register, P2=dest register
-		return p1 + baseReg, p2 + baseReg, p3
-
-	case vdbe.OpGoto, vdbe.OpIf, vdbe.OpIfNot, vdbe.OpIfPos:
+	case isJumpOp(op):
 		return adjustJumpOps(op, p1, p2, p3, baseReg)
-
-	case vdbe.OpInit, vdbe.OpHalt, vdbe.OpNoop:
-		// No register adjustments needed
-		return p1, p2, p3
-
 	default:
-		// Conservative default: don't adjust
 		return p1, p2, p3
 	}
+}
+
+// isValueLoadOp checks if op is a value loading operation
+func isValueLoadOp(op vdbe.Opcode) bool {
+	return op == vdbe.OpInteger || op == vdbe.OpReal || op == vdbe.OpString8 || op == vdbe.OpBlob || op == vdbe.OpNull
+}
+
+// isRecordOp checks if op is a record operation
+func isRecordOp(op vdbe.Opcode) bool {
+	return op == vdbe.OpResultRow || op == vdbe.OpMakeRecord
+}
+
+// isCopyOp checks if op is a copy operation
+func isCopyOp(op vdbe.Opcode) bool {
+	return op == vdbe.OpCopy || op == vdbe.OpSCopy
+}
+
+// isArithmeticOrComparisonOp checks if op is arithmetic or comparison
+func isArithmeticOrComparisonOp(op vdbe.Opcode) bool {
+	return isArithmeticOp(op) || isComparisonOp(op)
+}
+
+// isArithmeticOp checks if op is an arithmetic operation
+func isArithmeticOp(op vdbe.Opcode) bool {
+	return op == vdbe.OpAdd || op == vdbe.OpSubtract || op == vdbe.OpMultiply ||
+		op == vdbe.OpDivide || op == vdbe.OpRemainder || op == vdbe.OpConcat
+}
+
+// isComparisonOp checks if op is a comparison operation
+func isComparisonOp(op vdbe.Opcode) bool {
+	return op == vdbe.OpEq || op == vdbe.OpNe || op == vdbe.OpLt ||
+		op == vdbe.OpLe || op == vdbe.OpGt || op == vdbe.OpGe
+}
+
+// isUnaryOp checks if op is a unary operation
+func isUnaryOp(op vdbe.Opcode) bool {
+	return op == vdbe.OpNot || op == vdbe.OpBitNot
+}
+
+// isJumpOp checks if op is a jump operation
+func isJumpOp(op vdbe.Opcode) bool {
+	return op == vdbe.OpGoto || op == vdbe.OpIf || op == vdbe.OpIfNot || op == vdbe.OpIfPos
+}
+
+// isControlFlowOp checks if op is a control flow operation
+func isControlFlowOp(op vdbe.Opcode) bool {
+	return op == vdbe.OpInit || op == vdbe.OpHalt || op == vdbe.OpNoop
 }
 
 // adjustArithmeticAndComparisonOps handles register adjustment for arithmetic and comparison operations.
@@ -551,45 +596,58 @@ func (s *Stmt) executeRecursiveMember(vm *vdbe.VDBE, recursiveMember *parser.Sel
 }
 
 func (s *Stmt) createCTETempTable(tableName string, def *planner.CTEDefinition) *schema.Table {
-	// Infer columns from CTE definition
 	var columns []*schema.Column
 
 	if len(def.Columns) > 0 {
-		// Use explicit column list
-		columns = make([]*schema.Column, len(def.Columns))
-		for i, colName := range def.Columns {
-			columns[i] = &schema.Column{
-				Name:    colName,
-				Type:    "ANY",
-				NotNull: false,
-			}
-		}
+		columns = s.createColumnsFromExplicitList(def.Columns)
 	} else if def.Select != nil && len(def.Select.Columns) > 0 {
-		// Infer from SELECT columns
-		columns = make([]*schema.Column, len(def.Select.Columns))
-		for i, col := range def.Select.Columns {
-			colName := col.Alias
-			if colName == "" {
-				if ident, ok := col.Expr.(*parser.IdentExpr); ok {
-					colName = ident.Name
-				} else {
-					colName = fmt.Sprintf("column_%d", i+1)
-				}
-			}
-			columns[i] = &schema.Column{
-				Name:    colName,
-				Type:    "ANY",
-				NotNull: false,
-			}
-		}
+		columns = s.createColumnsFromSelect(def.Select.Columns)
 	}
 
 	return &schema.Table{
 		Name:     tableName,
 		Columns:  columns,
-		RootPage: 0,    // Will be set to cursor number
-		Temp:     true, // Mark as temporary/ephemeral table
+		RootPage: 0,
+		Temp:     true,
 	}
+}
+
+// createColumnsFromExplicitList creates columns from explicit column list
+func (s *Stmt) createColumnsFromExplicitList(columnNames []string) []*schema.Column {
+	columns := make([]*schema.Column, len(columnNames))
+	for i, colName := range columnNames {
+		columns[i] = &schema.Column{
+			Name:    colName,
+			Type:    "ANY",
+			NotNull: false,
+		}
+	}
+	return columns
+}
+
+// createColumnsFromSelect creates columns from SELECT columns
+func (s *Stmt) createColumnsFromSelect(selectCols []parser.ResultColumn) []*schema.Column {
+	columns := make([]*schema.Column, len(selectCols))
+	for i, col := range selectCols {
+		colName := s.inferColumnName(col, i)
+		columns[i] = &schema.Column{
+			Name:    colName,
+			Type:    "ANY",
+			NotNull: false,
+		}
+	}
+	return columns
+}
+
+// inferColumnName infers column name from result column
+func (s *Stmt) inferColumnName(col parser.ResultColumn, index int) string {
+	if col.Alias != "" {
+		return col.Alias
+	}
+	if ident, ok := col.Expr.(*parser.IdentExpr); ok {
+		return ident.Name
+	}
+	return fmt.Sprintf("column_%d", index+1)
 }
 
 // rewriteSelectWithCTETables rewrites a SELECT statement to replace CTE references

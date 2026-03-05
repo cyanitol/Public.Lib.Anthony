@@ -235,72 +235,77 @@ func (lc *LimitCompiler) GenerateLimitedScan(
 	destReg int,
 ) error {
 	vdbe := lc.parse.GetVdbe()
-
-	// Open cursor
 	vdbe.AddOp2(OP_OpenRead, cursor, rootPage)
 
-	// Rewind to start
 	addrEnd := vdbe.MakeLabel()
 	vdbe.AddOp2(OP_Rewind, cursor, addrEnd)
 
-	// Initialize offset counter if needed
-	var regOffset int
+	regOffset, regLimit := lc.initializeCounters(offset, limit)
+	addrLoop := vdbe.CurrentAddr()
+	lc.generateScanLoop(offset, limit, regOffset, regLimit, addrEnd)
+	vdbe.AddOp2(OP_Next, cursor, addrLoop)
+
+	vdbe.ResolveLabel(addrEnd)
+	vdbe.AddOp1(OP_Close, cursor)
+	lc.cleanupCounters(regOffset, regLimit)
+
+	return nil
+}
+
+// initializeCounters initializes offset and limit counters.
+func (lc *LimitCompiler) initializeCounters(offset, limit int) (regOffset, regLimit int) {
+	vdbe := lc.parse.GetVdbe()
 	if offset > 0 {
 		regOffset = lc.parse.AllocReg()
 		vdbe.AddOp2(OP_Integer, offset, regOffset)
 	}
-
-	// Initialize limit counter if needed
-	var regLimit int
 	if limit > 0 {
 		regLimit = lc.parse.AllocReg()
 		vdbe.AddOp2(OP_Integer, limit, regLimit)
 	}
+	return
+}
 
-	// Loop through rows
-	addrLoop := vdbe.CurrentAddr()
-
-	// Check offset
+// generateScanLoop generates the main scan loop logic.
+func (lc *LimitCompiler) generateScanLoop(offset, limit, regOffset, regLimit, addrEnd int) {
 	if offset > 0 {
-		addrSkip := vdbe.MakeLabel()
-		// If offset counter > 0, decrement and skip
-		vdbe.AddOp3(OP_IfPos, regOffset, addrSkip, -1)
-
-		// Process row (would extract columns here)
-
-		// Check limit
-		if limit > 0 {
-			vdbe.AddOp2(OP_AddImm, regLimit, -1)
-			vdbe.AddOp3(OP_IfNot, regLimit, addrEnd, 1)
-		}
-
-		vdbe.ResolveLabel(addrSkip)
+		lc.generateScanWithOffset(limit, regOffset, regLimit, addrEnd)
 	} else {
-		// No offset - just process row
-
-		// Check limit
-		if limit > 0 {
-			vdbe.AddOp2(OP_AddImm, regLimit, -1)
-			vdbe.AddOp3(OP_IfNot, regLimit, addrEnd, 1)
-		}
+		lc.generateScanNoOffset(limit, regLimit, addrEnd)
 	}
+}
 
-	// Move to next row
-	vdbe.AddOp2(OP_Next, cursor, addrLoop)
+// generateScanWithOffset generates scan logic with offset handling.
+func (lc *LimitCompiler) generateScanWithOffset(limit, regOffset, regLimit, addrEnd int) {
+	vdbe := lc.parse.GetVdbe()
+	addrSkip := vdbe.MakeLabel()
+	vdbe.AddOp3(OP_IfPos, regOffset, addrSkip, -1)
+	lc.applyLimitInLoop(limit, regLimit, addrEnd)
+	vdbe.ResolveLabel(addrSkip)
+}
 
-	// Done
-	vdbe.ResolveLabel(addrEnd)
-	vdbe.AddOp1(OP_Close, cursor)
+// generateScanNoOffset generates scan logic without offset.
+func (lc *LimitCompiler) generateScanNoOffset(limit, regLimit, addrEnd int) {
+	lc.applyLimitInLoop(limit, regLimit, addrEnd)
+}
 
-	// Clean up registers
+// applyLimitInLoop applies limit check in the scan loop.
+func (lc *LimitCompiler) applyLimitInLoop(limit, regLimit, addrEnd int) {
+	if limit > 0 {
+		vdbe := lc.parse.GetVdbe()
+		vdbe.AddOp2(OP_AddImm, regLimit, -1)
+		vdbe.AddOp3(OP_IfNot, regLimit, addrEnd, 1)
+	}
+}
+
+// cleanupCounters releases allocated counter registers.
+func (lc *LimitCompiler) cleanupCounters(regOffset, regLimit int) {
 	if regOffset != 0 {
 		lc.parse.ReleaseReg(regOffset)
 	}
 	if regLimit != 0 {
 		lc.parse.ReleaseReg(regLimit)
 	}
-
-	return nil
 }
 
 // CombineLimitOffset combines LIMIT and OFFSET into effective limit.

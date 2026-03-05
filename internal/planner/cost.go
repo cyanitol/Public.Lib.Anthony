@@ -55,58 +55,76 @@ func (c *CostModel) EstimateIndexScan(
 	table *TableInfo,
 	index *IndexInfo,
 	terms []*WhereTerm,
-	nEq int, // Number of equality constraints
-	hasRange bool, // Has range constraint (< or >)
-	covering bool, // Index is covering (doesn't need table lookup)
+	nEq int,
+	hasRange bool,
+	covering bool,
 ) (cost LogEst, nOut LogEst) {
 
-	// Start with the total number of rows
 	nRows := index.RowLogEst
-
-	// Estimate output rows based on constraints
-	nOut = nRows
-
-	// Apply selectivity for equality constraints
-	if nEq > 0 {
-		if nEq < len(index.ColumnStats) {
-			// Use actual statistics if available
-			nOut = index.ColumnStats[nEq]
-		} else {
-			// Estimate: each equality reduces by ~10x
-			for i := 0; i < nEq; i++ {
-				nOut += selectivityEq
-				if nOut < 0 {
-					nOut = 0
-					break
-				}
-			}
-		}
-	}
-
-	// Apply selectivity for range constraint
-	if hasRange {
-		nOut += selectivityRange
-		if nOut < 0 {
-			nOut = 0
-		}
-	}
-
-	// Calculate seek cost: one seek to find start position
-	seekCost := costIndexSeek
-
-	// Calculate scan cost: iterate through matching rows
-	scanCost := nOut + costIndexNext
-
-	// If not covering, add cost to lookup actual rows
-	lookupCost := LogEst(0)
-	if !covering {
-		lookupCost = nOut + costRowidLookup
-	}
-
-	// Total cost = seek + scan + lookup
-	cost = seekCost + scanCost + lookupCost
+	nOut = estimateOutputRows(index, nRows, nEq, hasRange)
+	cost = calculateScanCost(nOut, covering)
 
 	return
+}
+
+// estimateOutputRows estimates the number of output rows based on constraints.
+func estimateOutputRows(index *IndexInfo, nRows LogEst, nEq int, hasRange bool) LogEst {
+	nOut := nRows
+	nOut = applyEqConstraints(index, nOut, nEq)
+	nOut = applyRangeConstraint(nOut, hasRange)
+	return nOut
+}
+
+// applyEqConstraints applies equality constraint selectivity.
+func applyEqConstraints(index *IndexInfo, nOut LogEst, nEq int) LogEst {
+	if nEq <= 0 {
+		return nOut
+	}
+
+	if nEq < len(index.ColumnStats) {
+		return index.ColumnStats[nEq]
+	}
+
+	return estimateWithExtrapolation(nOut, nEq)
+}
+
+// estimateWithExtrapolation estimates output with extrapolated selectivity.
+func estimateWithExtrapolation(nOut LogEst, nEq int) LogEst {
+	for i := 0; i < nEq; i++ {
+		nOut += selectivityEq
+		if nOut < 0 {
+			return 0
+		}
+	}
+	return nOut
+}
+
+// applyRangeConstraint applies range constraint selectivity.
+func applyRangeConstraint(nOut LogEst, hasRange bool) LogEst {
+	if !hasRange {
+		return nOut
+	}
+	nOut += selectivityRange
+	if nOut < 0 {
+		return 0
+	}
+	return nOut
+}
+
+// calculateScanCost calculates total scan cost.
+func calculateScanCost(nOut LogEst, covering bool) LogEst {
+	seekCost := costIndexSeek
+	scanCost := nOut + costIndexNext
+	lookupCost := calculateLookupCost(nOut, covering)
+	return seekCost + scanCost + lookupCost
+}
+
+// calculateLookupCost calculates the cost of row lookups.
+func calculateLookupCost(nOut LogEst, covering bool) LogEst {
+	if covering {
+		return 0
+	}
+	return nOut + costRowidLookup
 }
 
 // EstimateIndexLookup estimates the cost of an exact index lookup (all columns = const).

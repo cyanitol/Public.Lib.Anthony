@@ -193,35 +193,47 @@ func (s *Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driv
 // compile compiles the SQL statement into VDBE bytecode.
 // It checks the statement cache first and returns a cached VDBE if available.
 func (s *Stmt) compile(args []driver.NamedValue) (*vdbe.VDBE, error) {
-	// Only use cache for queries without parameters
-	// (parameterized queries need special handling to avoid caching bound values)
 	if len(args) == 0 && s.conn.stmtCache != nil {
-		// Try to get from cache
-		if cachedVdbe := s.conn.stmtCache.Get(s.query); cachedVdbe != nil {
-			// Set the VDBE context for this connection
-			cachedVdbe.Ctx = &vdbe.VDBEContext{
-				Btree:             s.conn.btree,
-				Pager:             interface{}(s.conn.pager),
-				Schema:            interface{}(s.conn.schema),
-				CollationRegistry: interface{}(s.conn.collRegistry),
-			}
+		if cachedVdbe := s.tryGetCachedVdbe(); cachedVdbe != nil {
 			return cachedVdbe, nil
 		}
 	}
 
-	// Cache miss or parameterized query - compile from scratch
 	vm := s.newVDBE()
 	compiledVdbe, err := s.dispatchCompile(vm, args)
 	if err != nil {
 		return nil, err
 	}
 
-	// Cache the compiled VDBE (only for non-parameterized queries)
-	if len(args) == 0 && s.conn.stmtCache != nil && compiledVdbe != nil {
-		s.conn.stmtCache.Put(s.query, compiledVdbe)
-	}
-
+	s.cacheVdbeIfAppropriate(compiledVdbe, args)
 	return compiledVdbe, nil
+}
+
+// tryGetCachedVdbe attempts to retrieve cached VDBE
+func (s *Stmt) tryGetCachedVdbe() *vdbe.VDBE {
+	cachedVdbe := s.conn.stmtCache.Get(s.query)
+	if cachedVdbe == nil {
+		return nil
+	}
+	s.setVdbeContext(cachedVdbe)
+	return cachedVdbe
+}
+
+// setVdbeContext sets the VDBE context for this connection
+func (s *Stmt) setVdbeContext(vm *vdbe.VDBE) {
+	vm.Ctx = &vdbe.VDBEContext{
+		Btree:             s.conn.btree,
+		Pager:             interface{}(s.conn.pager),
+		Schema:            interface{}(s.conn.schema),
+		CollationRegistry: interface{}(s.conn.collRegistry),
+	}
+}
+
+// cacheVdbeIfAppropriate caches VDBE if conditions are met
+func (s *Stmt) cacheVdbeIfAppropriate(vm *vdbe.VDBE, args []driver.NamedValue) {
+	if len(args) == 0 && s.conn.stmtCache != nil && vm != nil {
+		s.conn.stmtCache.Put(s.query, vm)
+	}
 }
 
 // invalidateStmtCache invalidates the statement cache when schema changes.
@@ -478,46 +490,50 @@ func schemaRecordIdx(columns []*schema.Column, colIdx int) int {
 // column into register i. It returns an error when the named column is not
 // found in the table.
 func emitSelectColumnOp(vm *vdbe.VDBE, table *schema.Table, col parser.ResultColumn, i int, gen *expr.CodeGenerator) error {
-	// Check if this is a simple column reference
 	ident, ok := col.Expr.(*parser.IdentExpr)
 	if ok {
-		// Simple column reference - use optimized path
-		colIdx := table.GetColumnIndex(ident.Name)
-		if colIdx == -1 {
-			return fmt.Errorf("column not found: %s", ident.Name)
-		}
-
-		if schemaColIsRowid(table.Columns[colIdx]) {
-			vm.AddOp(vdbe.OpRowid, 0, i, 0)
-			return nil
-		}
-
-		vm.AddOp(vdbe.OpColumn, 0, schemaRecordIdx(table.Columns, colIdx), i)
-		return nil
+		return emitSimpleColumnRef(vm, table, ident, i)
 	}
 
-	// Check if this is a function expression (COUNT, SUM, etc.)
 	fnExpr, isFn := col.Expr.(*parser.FunctionExpr)
 	if isFn {
-		// Handle aggregate function with proper accumulator
 		return emitAggregateFunction(vm, fnExpr, i, gen)
 	}
 
-	// For other complex expressions, use the expression code generator
-	if gen != nil {
-		reg, err := gen.GenerateExpr(col.Expr)
-		if err != nil {
-			return fmt.Errorf("failed to generate expression: %w", err)
-		}
-		// Copy result to target register if needed
-		if reg != i {
-			vm.AddOp(vdbe.OpCopy, reg, i, 0)
-		}
+	return emitComplexExpression(vm, col.Expr, i, gen)
+}
+
+// emitSimpleColumnRef emits opcodes for simple column reference
+func emitSimpleColumnRef(vm *vdbe.VDBE, table *schema.Table, ident *parser.IdentExpr, targetReg int) error {
+	colIdx := table.GetColumnIndex(ident.Name)
+	if colIdx == -1 {
+		return fmt.Errorf("column not found: %s", ident.Name)
+	}
+
+	if schemaColIsRowid(table.Columns[colIdx]) {
+		vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
 		return nil
 	}
 
-	// Fallback: emit NULL placeholder
-	vm.AddOp(vdbe.OpNull, 0, i, 0)
+	vm.AddOp(vdbe.OpColumn, 0, schemaRecordIdx(table.Columns, colIdx), targetReg)
+	return nil
+}
+
+// emitComplexExpression emits opcodes for complex expression
+func emitComplexExpression(vm *vdbe.VDBE, expr parser.Expression, targetReg int, gen *expr.CodeGenerator) error {
+	if gen == nil {
+		vm.AddOp(vdbe.OpNull, 0, targetReg, 0)
+		return nil
+	}
+
+	reg, err := gen.GenerateExpr(expr)
+	if err != nil {
+		return fmt.Errorf("failed to generate expression: %w", err)
+	}
+
+	if reg != targetReg {
+		vm.AddOp(vdbe.OpCopy, reg, targetReg, 0)
+	}
 	return nil
 }
 

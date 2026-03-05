@@ -336,18 +336,43 @@ func addCacheParameter(params url.Values, config *DriverConfig) {
 
 // addPagerParameters adds pager-related parameters.
 func addPagerParameters(params url.Values, config *DriverConfig) {
+	addJournalModeParam(params, config)
+	addSyncModeParam(params, config)
+	addCacheSizeParam(params, config)
+	addPageSizeParam(params, config)
+	addBusyTimeoutParam(params, config)
+}
+
+// addJournalModeParam adds journal mode parameter if non-default
+func addJournalModeParam(params url.Values, config *DriverConfig) {
 	if config.Pager.JournalMode != "delete" && config.Pager.JournalMode != "" {
 		params.Add("journal_mode", config.Pager.JournalMode)
 	}
+}
+
+// addSyncModeParam adds sync mode parameter if non-default
+func addSyncModeParam(params url.Values, config *DriverConfig) {
 	if config.Pager.SyncMode != "full" && config.Pager.SyncMode != "" {
 		params.Add("synchronous", config.Pager.SyncMode)
 	}
+}
+
+// addCacheSizeParam adds cache size parameter if non-default
+func addCacheSizeParam(params url.Values, config *DriverConfig) {
 	if config.Pager.CacheSize != pager.DefaultCacheSize {
 		params.Add("cache_size", strconv.Itoa(config.Pager.CacheSize))
 	}
+}
+
+// addPageSizeParam adds page size parameter if non-default
+func addPageSizeParam(params url.Values, config *DriverConfig) {
 	if config.Pager.PageSize != 4096 {
 		params.Add("page_size", strconv.Itoa(config.Pager.PageSize))
 	}
+}
+
+// addBusyTimeoutParam adds busy timeout parameter if non-default
+func addBusyTimeoutParam(params url.Values, config *DriverConfig) {
 	if config.Pager.BusyTimeout != 5*time.Second {
 		params.Add("busy_timeout", strconv.Itoa(int(config.Pager.BusyTimeout.Milliseconds())))
 	}

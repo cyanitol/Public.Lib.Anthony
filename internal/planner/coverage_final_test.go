@@ -452,7 +452,7 @@ func TestHandleSimpleWrapperExpr(t *testing.T) {
 			},
 		},
 	}
-	ctx.handleSimpleWrapperExpr(unaryExpr, deps)
+	ctx.handleWrapperExpr(unaryExpr, deps)
 	if !deps["test_cte"] {
 		t.Error("UnaryExpr should detect CTE dependency")
 	}
@@ -470,7 +470,7 @@ func TestHandleSimpleWrapperExpr(t *testing.T) {
 			},
 		},
 	}
-	ctx.handleSimpleWrapperExpr(parenExpr, deps2)
+	ctx.handleWrapperExpr(parenExpr, deps2)
 	if !deps2["test_cte"] {
 		t.Error("ParenExpr should detect CTE dependency")
 	}
@@ -489,7 +489,7 @@ func TestHandleSimpleWrapperExpr(t *testing.T) {
 		},
 		Type: "INTEGER",
 	}
-	ctx.handleSimpleWrapperExpr(castExpr, deps3)
+	ctx.handleWrapperExpr(castExpr, deps3)
 	if !deps3["test_cte"] {
 		t.Error("CastExpr should detect CTE dependency")
 	}
@@ -508,7 +508,7 @@ func TestHandleSimpleWrapperExpr(t *testing.T) {
 		},
 		Collation: "NOCASE",
 	}
-	ctx.handleSimpleWrapperExpr(collateExpr, deps4)
+	ctx.handleWrapperExpr(collateExpr, deps4)
 	if !deps4["test_cte"] {
 		t.Error("CollateExpr should detect CTE dependency")
 	}
@@ -516,7 +516,7 @@ func TestHandleSimpleWrapperExpr(t *testing.T) {
 	// Test non-matching expression type
 	deps5 := make(map[string]bool)
 	literalExpr := &parser.LiteralExpr{Value: "test"}
-	ctx.handleSimpleWrapperExpr(literalExpr, deps5)
+	ctx.handleWrapperExpr(literalExpr, deps5)
 	// Should not panic
 }
 

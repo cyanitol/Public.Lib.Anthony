@@ -520,30 +520,28 @@ func (obc *OrderByCompiler) resolveOrderByExpr(sel *Select, expr *Expr) error {
 	if expr == nil {
 		return nil
 	}
-
 	switch expr.Op {
 	case TK_COLUMN:
-		// Resolve column reference
 		return obc.resolveColumnInOrderBy(sel, expr)
-
 	case TK_DOT:
-		// Qualified column reference
 		return obc.resolveQualifiedColumnInOrderBy(sel, expr)
-
 	default:
-		// Recurse into child expressions
-		if expr.Left != nil {
-			if err := obc.resolveOrderByExpr(sel, expr.Left); err != nil {
-				return err
-			}
-		}
-		if expr.Right != nil {
-			if err := obc.resolveOrderByExpr(sel, expr.Right); err != nil {
-				return err
-			}
+		return obc.resolveChildExpressions(sel, expr)
+	}
+}
+
+// resolveChildExpressions recursively resolves column references in child expressions.
+func (obc *OrderByCompiler) resolveChildExpressions(sel *Select, expr *Expr) error {
+	if expr.Left != nil {
+		if err := obc.resolveOrderByExpr(sel, expr.Left); err != nil {
+			return err
 		}
 	}
-
+	if expr.Right != nil {
+		if err := obc.resolveOrderByExpr(sel, expr.Right); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

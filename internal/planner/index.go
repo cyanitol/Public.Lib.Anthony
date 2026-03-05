@@ -379,14 +379,32 @@ type indexScore struct {
 
 // applyOptionsBonus adds score bonuses dictated by OptimizeOptions.
 func (s *IndexSelector) applyOptionsBonus(index *IndexInfo, opts OptimizeOptions, score float64) float64 {
+	score = applyCoveringBonus(index, opts, score)
+	score = applyUniqueBonus(index, opts, score)
+	score = applyOrderByBonus(s, index, opts, score)
+	return score
+}
+
+// applyCoveringBonus adds bonus for covering indexes.
+func applyCoveringBonus(index *IndexInfo, opts OptimizeOptions, score float64) float64 {
 	if opts.PreferCovering && len(index.Columns) > 3 {
-		score += 10
+		return score + 10
 	}
+	return score
+}
+
+// applyUniqueBonus adds bonus for unique indexes.
+func applyUniqueBonus(index *IndexInfo, opts OptimizeOptions, score float64) float64 {
 	if opts.PreferUnique && index.Unique {
-		score += 15
+		return score + 15
 	}
+	return score
+}
+
+// applyOrderByBonus adds bonus for order-by matching indexes.
+func applyOrderByBonus(s *IndexSelector, index *IndexInfo, opts OptimizeOptions, score float64) float64 {
 	if opts.ConsiderOrderBy && len(opts.OrderBy) > 0 && s.indexMatchesOrderBy(index, opts.OrderBy) {
-		score += 25 // Big bonus for avoiding sort
+		return score + 25
 	}
 	return score
 }

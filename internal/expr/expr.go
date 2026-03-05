@@ -508,6 +508,28 @@ var isBinaryOp = map[OpCode]bool{
 	OpEq: true, OpNe: true, OpLt: true, OpLe: true, OpGt: true, OpGe: true, OpAnd: true, OpOr: true,
 }
 
+// checkUnaryConstant checks if unary expression is constant.
+func (e *Expr) checkUnaryConstant() bool {
+	return e.Left.IsConstant()
+}
+
+// checkBinaryConstant checks if binary expression is constant.
+func (e *Expr) checkBinaryConstant() bool {
+	return e.Left.IsConstant() && e.Right.IsConstant()
+}
+
+// checkFunctionConstant checks if function expression is constant.
+func (e *Expr) checkFunctionConstant() bool {
+	if e.List != nil {
+		for _, item := range e.List.Items {
+			if !item.Expr.IsConstant() {
+				return false
+			}
+		}
+	}
+	return !e.HasProperty(EP_HasFunc | EP_VarSelect)
+}
+
 // IsConstant checks if the expression is a constant (does not reference tables).
 func (e *Expr) IsConstant() bool {
 	if e == nil {
@@ -520,26 +542,15 @@ func (e *Expr) IsConstant() bool {
 		return false
 	}
 	if isUnaryOp[e.Op] {
-		return e.Left.IsConstant()
+		return e.checkUnaryConstant()
 	}
 	if isBinaryOp[e.Op] {
-		return e.Left.IsConstant() && e.Right.IsConstant()
+		return e.checkBinaryConstant()
 	}
 	if e.Op == OpFunction {
-		return e.isFunctionConstant()
+		return e.checkFunctionConstant()
 	}
 	return false
-}
-
-func (e *Expr) isFunctionConstant() bool {
-	if e.List != nil {
-		for _, item := range e.List.Items {
-			if !item.Expr.IsConstant() {
-				return false
-			}
-		}
-	}
-	return !e.HasProperty(EP_HasFunc | EP_VarSelect)
 }
 
 // exprUnaryPrefix maps unary OpCodes to their prefix symbols.

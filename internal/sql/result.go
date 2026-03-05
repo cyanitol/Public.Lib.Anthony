@@ -225,25 +225,35 @@ func (rc *ResultCompiler) GenerateColumnNames(sel *Select) error {
 
 // computeColumnName determines the column name for a result column.
 func (rc *ResultCompiler) computeColumnName(sel *Select, item *ExprListItem, idx int) string {
-	// If AS clause is present, use it
+	if name := rc.tryGetExplicitName(item); name != "" {
+		return name
+	}
+	if name := rc.tryGetImplicitName(item); name != "" {
+		return name
+	}
+	return fmt.Sprintf("column%d", idx+1)
+}
+
+// tryGetExplicitName attempts to get an explicit name from AS clause.
+func (rc *ResultCompiler) tryGetExplicitName(item *ExprListItem) string {
 	if item.Name != "" && !item.BNoExpand {
 		return item.Name
 	}
+	return ""
+}
 
-	// If expression is a simple column reference, use column name
-	if item.Expr != nil && item.Expr.Op == TK_COLUMN {
-		if item.Expr.ColumnRef != nil {
-			return item.Expr.ColumnRef.Name
-		}
+// tryGetImplicitName attempts to derive a name from the expression.
+func (rc *ResultCompiler) tryGetImplicitName(item *ExprListItem) string {
+	if item.Expr == nil {
+		return ""
 	}
-
-	// If expression is an identifier, use it
-	if item.Expr != nil && item.Expr.Op == TK_ID {
+	if item.Expr.Op == TK_COLUMN && item.Expr.ColumnRef != nil {
+		return item.Expr.ColumnRef.Name
+	}
+	if item.Expr.Op == TK_ID {
 		return item.Expr.StringValue
 	}
-
-	// Default: generate column name
-	return fmt.Sprintf("column%d", idx+1)
+	return ""
 }
 
 // computeDeclaredType determines the declared type for a result column.
@@ -251,31 +261,29 @@ func (rc *ResultCompiler) computeDeclaredType(sel *Select, expr *Expr) string {
 	if expr == nil {
 		return ""
 	}
-
-	switch expr.Op {
-	case TK_COLUMN:
-		// Get type from source table column
-		if expr.ColumnRef != nil {
-			return expr.ColumnRef.DeclType
-		}
-		return ""
-
-	case TK_INTEGER:
-		return "INTEGER"
-
-	case TK_FLOAT:
-		return "REAL"
-
-	case TK_STRING, TK_BLOB:
-		return "TEXT"
-
-	case TK_NULL:
-		return ""
-
-	default:
-		// For complex expressions, type inference would be needed
-		return ""
+	if declType, ok := tryGetDeclaredType(expr); ok {
+		return declType
 	}
+	return ""
+}
+
+// declTypeMap maps token operators to their declared types.
+var declTypeMap = map[int]string{
+	TK_INTEGER: "INTEGER",
+	TK_FLOAT:   "REAL",
+	TK_STRING:  "TEXT",
+	TK_BLOB:    "TEXT",
+}
+
+// tryGetDeclaredType attempts to get the declared type for an expression.
+func tryGetDeclaredType(expr *Expr) (string, bool) {
+	if expr.Op == TK_COLUMN && expr.ColumnRef != nil {
+		return expr.ColumnRef.DeclType, true
+	}
+	if declType, ok := declTypeMap[expr.Op]; ok {
+		return declType, true
+	}
+	return "", false
 }
 
 // ResolveResultColumns resolves column references in result expressions.
@@ -342,36 +350,43 @@ func (rc *ResultCompiler) resolveColumnRef(sel *Select, expr *Expr) error {
 	if expr.Op != TK_COLUMN {
 		return nil
 	}
-
-	// Column reference by name
 	colName := expr.StringValue
 	if colName == "" {
 		return nil // Already resolved (has cursor/column index)
 	}
+	if sel.Src == nil {
+		return fmt.Errorf("no such column: %s", colName)
+	}
+	return rc.searchColumnInSrc(sel.Src, colName, expr)
+}
 
-	// Search for column in FROM clause tables
-	if sel.Src != nil {
-		for i := 0; i < sel.Src.Len(); i++ {
-			srcItem := sel.Src.Get(i)
-			if srcItem.Table == nil {
-				continue
-			}
-
-			table := srcItem.Table
-			for colIdx := 0; colIdx < table.NumColumns; colIdx++ {
-				col := table.GetColumn(colIdx)
-				if col.Name == colName {
-					// Found it - bind to this column
-					expr.Table = srcItem.Cursor
-					expr.Column = colIdx
-					expr.ColumnRef = col
-					return nil
-				}
-			}
+// searchColumnInSrc searches for a column in the FROM clause tables.
+func (rc *ResultCompiler) searchColumnInSrc(src *SrcList, colName string, expr *Expr) error {
+	for i := 0; i < src.Len(); i++ {
+		srcItem := src.Get(i)
+		if srcItem.Table == nil {
+			continue
+		}
+		if rc.bindColumnFromTable(srcItem, colName, expr) {
+			return nil
 		}
 	}
-
 	return fmt.Errorf("no such column: %s", colName)
+}
+
+// bindColumnFromTable attempts to bind a column from a table to an expression.
+func (rc *ResultCompiler) bindColumnFromTable(srcItem *SrcListItem, colName string, expr *Expr) bool {
+	table := srcItem.Table
+	for colIdx := 0; colIdx < table.NumColumns; colIdx++ {
+		col := table.GetColumn(colIdx)
+		if col.Name == colName {
+			expr.Table = srcItem.Cursor
+			expr.Column = colIdx
+			expr.ColumnRef = col
+			return true
+		}
+	}
+	return false
 }
 
 // resolveQualifiedColumn resolves a qualified column reference (table.column).

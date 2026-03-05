@@ -412,26 +412,12 @@ func jsonSetFunc(args []Value) (Value, error) {
 		return nil, fmt.Errorf("json_set() requires odd number of arguments (at least 3)")
 	}
 
-	if args[0].IsNull() {
+	data, err := parseJSONArg(args[0])
+	if err != nil {
 		return NewNullValue(), nil
 	}
 
-	jsonStr := args[0].AsString()
-	var data interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-		return NewNullValue(), nil
-	}
-
-	// Process path-value pairs
-	for i := 1; i < len(args); i += 2 {
-		if args[i].IsNull() {
-			continue
-		}
-		path := args[i].AsString()
-		// Use smart version for set - need to support both string and JSON values
-		value := valueToJSONSmart(args[i+1])
-		data = setPath(data, path, value)
-	}
+	data = applySetPathPairs(data, args[1:])
 
 	result, err := json.Marshal(data)
 	if err != nil {
@@ -441,6 +427,19 @@ func jsonSetFunc(args []Value) (Value, error) {
 	return NewTextValue(string(result)), nil
 }
 
+// applySetPathPairs applies all path-value pairs for json_set
+func applySetPathPairs(data interface{}, pathValueArgs []Value) interface{} {
+	for i := 0; i < len(pathValueArgs); i += 2 {
+		if pathValueArgs[i].IsNull() {
+			continue
+		}
+		path := pathValueArgs[i].AsString()
+		value := valueToJSONSmart(pathValueArgs[i+1])
+		data = setPath(data, path, value)
+	}
+	return data
+}
+
 // jsonTypeFunc implements json_type(X [, path])
 // Returns the JSON type of a value
 func jsonTypeFunc(args []Value) (Value, error) {
@@ -448,17 +447,16 @@ func jsonTypeFunc(args []Value) (Value, error) {
 		return nil, fmt.Errorf("json_type() requires 1 or 2 arguments")
 	}
 
-	if args[0].IsNull() {
+	data, err := parseJSONArg(args[0])
+	if err != nil {
 		return NewNullValue(), nil
 	}
 
-	jsonStr := args[0].AsString()
-	var data interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-		return NewNullValue(), nil
-	}
+	return jsonTypeWithPath(data, args)
+}
 
-	// If path is provided, extract the value at that path
+// jsonTypeWithPath applies path if present and returns the JSON type
+func jsonTypeWithPath(data interface{}, args []Value) (Value, error) {
 	if len(args) == 2 && !args[1].IsNull() {
 		path := args[1].AsString()
 		data = extractPath(data, path)
@@ -640,25 +638,38 @@ func jsonToValue(data interface{}) Value {
 
 	switch v := data.(type) {
 	case bool:
-		if v {
-			return NewIntValue(1)
-		}
-		return NewIntValue(0)
+		return jsonBoolToValue(v)
 	case float64:
-		// Check if it's actually an integer
-		if v == float64(int64(v)) {
-			return NewIntValue(int64(v))
-		}
-		return NewFloatValue(v)
+		return jsonFloat64ToValue(v)
 	case string:
 		return NewTextValue(v)
 	case []interface{}, map[string]interface{}:
-		// Return as JSON string
-		jsonBytes, _ := json.Marshal(v)
-		return NewTextValue(string(jsonBytes))
+		return jsonComplexToValue(v)
 	default:
 		return NewNullValue()
 	}
+}
+
+// jsonBoolToValue converts a JSON boolean to a SQL Value
+func jsonBoolToValue(v bool) Value {
+	if v {
+		return NewIntValue(1)
+	}
+	return NewIntValue(0)
+}
+
+// jsonFloat64ToValue converts a JSON number to a SQL Value
+func jsonFloat64ToValue(v float64) Value {
+	if v == float64(int64(v)) {
+		return NewIntValue(int64(v))
+	}
+	return NewFloatValue(v)
+}
+
+// jsonComplexToValue converts JSON objects/arrays to SQL Values (as JSON strings)
+func jsonComplexToValue(v interface{}) Value {
+	jsonBytes, _ := json.Marshal(v)
+	return NewTextValue(string(jsonBytes))
 }
 
 // getJSONType returns the SQLite JSON type string for a value
@@ -793,29 +804,35 @@ func setPathRecursive(data interface{}, parts []pathPart, value interface{}) int
 	remaining := parts[1:]
 
 	if part.isIndex {
-		// Array access
-		arr, ok := data.([]interface{})
-		if !ok {
-			// Create new array if needed
-			arr = make([]interface{}, 0)
-		}
-
-		// Ensure array is large enough
-		for len(arr) <= part.index {
-			arr = append(arr, nil)
-		}
-
-		if len(remaining) == 0 {
-			arr[part.index] = value
-		} else {
-			arr[part.index] = setPathRecursive(arr[part.index], remaining, value)
-		}
-		return arr
+		return setPathInArray(data, part, remaining, value)
 	}
-	// Object access
+	return setPathInObject(data, part, remaining, value)
+}
+
+// setPathInArray sets a value in a JSON array at the specified path
+func setPathInArray(data interface{}, part pathPart, remaining []pathPart, value interface{}) interface{} {
+	arr, ok := data.([]interface{})
+	if !ok {
+		arr = make([]interface{}, 0)
+	}
+
+	// Ensure array is large enough
+	for len(arr) <= part.index {
+		arr = append(arr, nil)
+	}
+
+	if len(remaining) == 0 {
+		arr[part.index] = value
+	} else {
+		arr[part.index] = setPathRecursive(arr[part.index], remaining, value)
+	}
+	return arr
+}
+
+// setPathInObject sets a value in a JSON object at the specified path
+func setPathInObject(data interface{}, part pathPart, remaining []pathPart, value interface{}) interface{} {
 	obj, ok := data.(map[string]interface{})
 	if !ok {
-		// Create new object if needed
 		obj = make(map[string]interface{})
 	}
 
@@ -983,43 +1000,51 @@ func addIndexPart(current *strings.Builder, parts *[]pathPart) {
 func applyJSONPatch(target, patch interface{}) interface{} {
 	patchMap, ok := patch.(map[string]interface{})
 	if !ok {
-		// If patch is not an object, it replaces the target
 		return patch
 	}
 
-	targetMap, ok := target.(map[string]interface{})
-	if !ok {
-		// If target is not an object, patch replaces it
-		targetMap = make(map[string]interface{})
+	targetMap := ensureTargetMap(target)
+	result := copyMap(targetMap)
+	return mergePatchIntoResult(result, patchMap)
+}
+
+// ensureTargetMap converts target to a map or returns an empty map
+func ensureTargetMap(target interface{}) map[string]interface{} {
+	if targetMap, ok := target.(map[string]interface{}); ok {
+		return targetMap
 	}
+	return make(map[string]interface{})
+}
 
-	// Create a new map for the result
+// copyMap creates a shallow copy of a map
+func copyMap(m map[string]interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
-
-	// Copy existing target values
-	for k, v := range targetMap {
+	for k, v := range m {
 		result[k] = v
 	}
+	return result
+}
 
-	// Apply patch
+// mergePatchIntoResult applies patch entries to the result map
+func mergePatchIntoResult(result, patchMap map[string]interface{}) interface{} {
 	for k, v := range patchMap {
 		if v == nil {
-			// null in patch means delete
 			delete(result, k)
 		} else if vMap, ok := v.(map[string]interface{}); ok {
-			// Recursively merge objects
-			if targetVal, exists := result[k]; exists {
-				result[k] = applyJSONPatch(targetVal, vMap)
-			} else {
-				result[k] = v
-			}
+			result[k] = mergeObjectPatch(result[k], vMap)
 		} else {
-			// Replace value
 			result[k] = v
 		}
 	}
-
 	return result
+}
+
+// mergeObjectPatch recursively merges object patches
+func mergeObjectPatch(targetVal interface{}, vMap map[string]interface{}) interface{} {
+	if _, exists := targetVal.(map[string]interface{}); exists {
+		return applyJSONPatch(targetVal, vMap)
+	}
+	return vMap
 }
 
 // deepCopy creates a deep copy of a JSON-compatible data structure

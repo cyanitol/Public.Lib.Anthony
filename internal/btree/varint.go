@@ -132,19 +132,32 @@ func decodeMultiByteVarint(p []byte) (uint64, int) {
 // GetVarint reads a 64-bit variable-length integer from p and returns
 // the value and the number of bytes read.
 func GetVarint(p []byte) (uint64, int) {
-	// Validate minimum buffer length
 	if len(p) == 0 {
 		return 0, 0
 	}
 
+	if v, n, ok := tryGetVarintFast(p); ok {
+		return v, n
+	}
+
+	return tryGetVarintSlow(p)
+}
+
+// tryGetVarintFast attempts fast-path decoding for 1-2 byte varints.
+func tryGetVarintFast(p []byte) (uint64, int, bool) {
 	if p[0] < 0x80 {
-		return uint64(p[0]), 1
+		return uint64(p[0]), 1, true
 	}
 
 	if len(p) > 1 && p[1] < 0x80 {
-		return (uint64(p[0]&0x7f) << 7) | uint64(p[1]), 2
+		return (uint64(p[0]&0x7f) << 7) | uint64(p[1]), 2, true
 	}
 
+	return 0, 0, false
+}
+
+// tryGetVarintSlow handles 3-9 byte varints.
+func tryGetVarintSlow(p []byte) (uint64, int) {
 	if len(p) < 3 {
 		return 0, 0
 	}

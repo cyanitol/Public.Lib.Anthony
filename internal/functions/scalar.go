@@ -131,31 +131,40 @@ func substrParseLength(args []Value, length int) (subLen int64, returnNull bool)
 // index and adjusts subLen when a negative start overflows the left boundary.
 // The third return value is true when the caller must return NULL.
 func substrAdjustStart(startArg Value, start, subLen int64, length int, hasExplicitLength bool) (int64, int64, bool) {
-	switch {
-	case start < 0:
-		start = int64(length) + start
-		if start < 0 {
-			if subLen >= 0 {
-				subLen += start
-			} else {
-				subLen = 0
-			}
-			start = 0
-		}
-	case start > 0:
-		start-- // convert to 0-based index
-	default: // start == 0
-		if startArg.IsNull() {
-			return 0, 0, true
-		}
-		// Position 0 in SQLite means "start before the first character"
-		// This wastes one character of length, but only when length is explicit
-		if hasExplicitLength && subLen > 0 {
-			subLen--
+	if start < 0 {
+		return adjustNegativeStart(start, subLen, length)
+	}
+	if start > 0 {
+		return start - 1, subLen, false
+	}
+	return adjustZeroStart(startArg, subLen, hasExplicitLength)
+}
+
+// adjustNegativeStart handles negative start positions in substr
+func adjustNegativeStart(start, subLen int64, length int) (int64, int64, bool) {
+	start = int64(length) + start
+	if start < 0 {
+		if subLen >= 0 {
+			subLen += start
+		} else {
+			subLen = 0
 		}
 		start = 0
 	}
 	return start, subLen, false
+}
+
+// adjustZeroStart handles zero start position in substr
+func adjustZeroStart(startArg Value, subLen int64, hasExplicitLength bool) (int64, int64, bool) {
+	if startArg.IsNull() {
+		return 0, 0, true
+	}
+	// Position 0 in SQLite means "start before the first character"
+	// This wastes one character of length, but only when length is explicit
+	if hasExplicitLength && subLen > 0 {
+		subLen--
+	}
+	return 0, subLen, false
 }
 
 // substrAdjustNegLen handles a negative subLen, which in SQLite means
@@ -310,32 +319,42 @@ func instrFunc(args []Value) (Value, error) {
 		return NewNullValue(), nil
 	}
 
-	haystack := args[0].AsString()
-	needle := args[1].AsString()
-
 	// Handle both as blobs
 	if args[0].Type() == TypeBlob && args[1].Type() == TypeBlob {
-		haystackBytes := args[0].AsBlob()
-		needleBytes := args[1].AsBlob()
-		idx := bytes.Index(haystackBytes, needleBytes)
-		if idx < 0 {
-			return NewIntValue(0), nil
-		}
-		return NewIntValue(int64(idx + 1)), nil
+		return instrBlobSearch(args[0], args[1])
 	}
 
 	// Text-based search (UTF-8 aware)
-	if needle == "" {
+	return instrTextSearch(args[0], args[1])
+}
+
+// instrBlobSearch performs binary search in blob data
+func instrBlobSearch(haystack, needle Value) (Value, error) {
+	haystackBytes := haystack.AsBlob()
+	needleBytes := needle.AsBlob()
+	idx := bytes.Index(haystackBytes, needleBytes)
+	if idx < 0 {
+		return NewIntValue(0), nil
+	}
+	return NewIntValue(int64(idx + 1)), nil
+}
+
+// instrTextSearch performs UTF-8 aware text search
+func instrTextSearch(haystack, needle Value) (Value, error) {
+	haystackStr := haystack.AsString()
+	needleStr := needle.AsString()
+
+	if needleStr == "" {
 		return NewIntValue(1), nil
 	}
 
-	idx := strings.Index(haystack, needle)
+	idx := strings.Index(haystackStr, needleStr)
 	if idx < 0 {
 		return NewIntValue(0), nil
 	}
 
 	// Convert byte index to character index
-	charIdx := utf8.RuneCountInString(haystack[:idx])
+	charIdx := utf8.RuneCountInString(haystackStr[:idx])
 	return NewIntValue(int64(charIdx + 1)), nil
 }
 

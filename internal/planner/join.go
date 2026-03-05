@@ -379,39 +379,45 @@ func (jo *JoinOptimizer) SelectJoinAlgorithm(outer, inner *JoinOrder, joinTerms 
 
 // canUseMergeJoin checks if merge join can be used based on sort order of inputs.
 func canUseMergeJoin(outer, inner *JoinOrder, joinTerms []*WhereTerm) bool {
-	// Need at least one equi-join condition
-	if len(joinTerms) == 0 {
+	if !hasJoinTerms(joinTerms) {
 		return false
 	}
 
-	// Find an equi-join term
-	var eqTerm *WhereTerm
-	for _, term := range joinTerms {
-		if term.Operator == WO_EQ {
-			eqTerm = term
-			break
-		}
-	}
+	eqTerm := findEquiJoinTerm(joinTerms)
 	if eqTerm == nil {
 		return false
 	}
 
-	// Check if outer is sorted on the left side of the join condition
-	// and inner is sorted on the right side of the join condition
-	// For simplicity, we check if the first column in each sort order matches
-	if len(outer.SortOrder) == 0 || len(inner.SortOrder) == 0 {
+	if !bothInputsSorted(outer, inner) {
 		return false
 	}
 
-	// Both must be ascending (or both descending) for merge join
-	if outer.SortOrder[0].Ascending != inner.SortOrder[0].Ascending {
-		return false
-	}
+	return haveSameSortDirection(outer, inner)
+}
 
-	// In a real implementation, we would check if the sorted columns
-	// match the join columns. For now, we assume if both inputs are
-	// sorted on any column, merge join could be beneficial.
-	return true
+// hasJoinTerms checks if there are any join terms.
+func hasJoinTerms(joinTerms []*WhereTerm) bool {
+	return len(joinTerms) > 0
+}
+
+// findEquiJoinTerm finds an equi-join term from the join terms.
+func findEquiJoinTerm(joinTerms []*WhereTerm) *WhereTerm {
+	for _, term := range joinTerms {
+		if term.Operator == WO_EQ {
+			return term
+		}
+	}
+	return nil
+}
+
+// bothInputsSorted checks if both inputs have sort order.
+func bothInputsSorted(outer, inner *JoinOrder) bool {
+	return len(outer.SortOrder) > 0 && len(inner.SortOrder) > 0
+}
+
+// haveSameSortDirection checks if inputs have matching sort direction.
+func haveSameSortDirection(outer, inner *JoinOrder) bool {
+	return outer.SortOrder[0].Ascending == inner.SortOrder[0].Ascending
 }
 
 // CostEstimate estimates the cost of a join using a specific algorithm.

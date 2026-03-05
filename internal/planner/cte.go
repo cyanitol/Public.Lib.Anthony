@@ -276,36 +276,61 @@ func (ctx *CTEContext) collectCTEReferencesInExpr(expr parser.Expression, deps m
 		return
 	}
 
+	// Handle complex expressions
+	if ctx.tryHandleComplexExpr(expr, deps) {
+		return
+	}
+
+	// Handle simple wrapper expressions
+	ctx.handleWrapperExpr(expr, deps)
+}
+
+// tryHandleComplexExpr handles complex expressions that need special processing.
+func (ctx *CTEContext) tryHandleComplexExpr(expr parser.Expression, deps map[string]bool) bool {
 	switch e := expr.(type) {
 	case *parser.SubqueryExpr:
 		ctx.handleSubqueryExpr(e, deps)
+		return true
 	case *parser.InExpr:
 		ctx.handleInExpr(e, deps)
+		return true
 	case *parser.BinaryExpr:
 		ctx.handleBinaryExpr(e, deps)
+		return true
 	case *parser.CaseExpr:
 		ctx.handleCaseExpr(e, deps)
+		return true
 	case *parser.BetweenExpr:
 		ctx.handleBetweenExpr(e, deps)
+		return true
 	case *parser.FunctionExpr:
 		ctx.handleFunctionExpr(e, deps)
-	default:
-		ctx.handleSimpleWrapperExpr(e, deps)
+		return true
+	}
+	return false
+}
+
+// handleWrapperExpr handles expressions that simply wrap another expression.
+func (ctx *CTEContext) handleWrapperExpr(expr parser.Expression, deps map[string]bool) {
+	inner := extractWrappedExpr(expr)
+	if inner != nil {
+		ctx.collectCTEReferencesInExpr(inner, deps)
 	}
 }
 
-// handleSimpleWrapperExpr handles expression types that simply wrap another expression
-func (ctx *CTEContext) handleSimpleWrapperExpr(expr parser.Expression, deps map[string]bool) {
+// extractWrappedExpr extracts the inner expression from wrapper types.
+func extractWrappedExpr(expr parser.Expression) parser.Expression {
 	switch e := expr.(type) {
 	case *parser.UnaryExpr:
-		ctx.collectCTEReferencesInExpr(e.Expr, deps)
+		return e.Expr
 	case *parser.ParenExpr:
-		ctx.collectCTEReferencesInExpr(e.Expr, deps)
+		return e.Expr
 	case *parser.CastExpr:
-		ctx.collectCTEReferencesInExpr(e.Expr, deps)
+		return e.Expr
 	case *parser.CollateExpr:
-		ctx.collectCTEReferencesInExpr(e.Expr, deps)
+		return e.Expr
 	}
+	return nil
 }
 
 // handleSubqueryExpr handles subquery expressions.
@@ -365,24 +390,44 @@ func (ctx *CTEContext) handleFunctionExpr(e *parser.FunctionExpr, deps map[strin
 
 // buildDependencyOrder creates a topological sort of CTEs based on dependencies.
 func (ctx *CTEContext) buildDependencyOrder() error {
-	// Calculate dependency levels
+	if err := ctx.calculateAllLevels(); err != nil {
+		return err
+	}
+
+	leveledCTEs := ctx.buildLeveledList()
+	sortByLevel(leveledCTEs)
+	ctx.extractOrder(leveledCTEs)
+
+	return nil
+}
+
+// calculateAllLevels calculates dependency levels for all CTEs.
+func (ctx *CTEContext) calculateAllLevels() error {
 	for name := range ctx.CTEs {
 		if err := ctx.calculateLevel(name, make(map[string]bool)); err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
-	// Build ordered list
-	type levelCTE struct {
-		name  string
-		level int
-	}
+// levelCTE represents a CTE with its dependency level.
+type levelCTE struct {
+	name  string
+	level int
+}
+
+// buildLeveledList creates a list of CTEs with their levels.
+func (ctx *CTEContext) buildLeveledList() []levelCTE {
 	leveledCTEs := make([]levelCTE, 0, len(ctx.CTEs))
 	for name, def := range ctx.CTEs {
 		leveledCTEs = append(leveledCTEs, levelCTE{name, def.Level})
 	}
+	return leveledCTEs
+}
 
-	// Sort by level
+// sortByLevel sorts CTEs by their dependency level.
+func sortByLevel(leveledCTEs []levelCTE) {
 	for i := 0; i < len(leveledCTEs); i++ {
 		for j := i + 1; j < len(leveledCTEs); j++ {
 			if leveledCTEs[j].level < leveledCTEs[i].level {
@@ -390,13 +435,13 @@ func (ctx *CTEContext) buildDependencyOrder() error {
 			}
 		}
 	}
+}
 
-	// Build order
+// extractOrder extracts the CTE names in order.
+func (ctx *CTEContext) extractOrder(leveledCTEs []levelCTE) {
 	for _, lc := range leveledCTEs {
 		ctx.CTEOrder = append(ctx.CTEOrder, lc.name)
 	}
-
-	return nil
 }
 
 // calculateLevel calculates the dependency level for a CTE.

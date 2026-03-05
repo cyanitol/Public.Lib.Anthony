@@ -106,23 +106,48 @@ func analyzeTermConstraints(terms []*WhereTerm) termConstraints {
 
 func computeIndexFlags(c termConstraints, terms []*WhereTerm, index *IndexInfo, covering bool) WhereFlags {
 	flags := WHERE_INDEXED
+	flags = addEqualityFlags(c, flags)
+	flags = addRangeFlags(c, terms, flags)
+	flags = addCoveringFlag(covering, flags)
+	flags = addUniqueFlag(index, c, flags)
+	return flags
+}
+
+// addEqualityFlags adds flags for equality constraints.
+func addEqualityFlags(c termConstraints, flags WhereFlags) WhereFlags {
 	if c.nEq > 0 {
-		flags |= WHERE_COLUMN_EQ
+		return flags | WHERE_COLUMN_EQ
 	}
-	if c.hasRange {
-		flags |= WHERE_COLUMN_RANGE
-		if hasLowerBound(terms) {
-			flags |= WHERE_BTM_LIMIT
-		}
-		if hasUpperBound(terms) {
-			flags |= WHERE_TOP_LIMIT
-		}
+	return flags
+}
+
+// addRangeFlags adds flags for range constraints.
+func addRangeFlags(c termConstraints, terms []*WhereTerm, flags WhereFlags) WhereFlags {
+	if !c.hasRange {
+		return flags
 	}
+	flags |= WHERE_COLUMN_RANGE
+	if hasLowerBound(terms) {
+		flags |= WHERE_BTM_LIMIT
+	}
+	if hasUpperBound(terms) {
+		flags |= WHERE_TOP_LIMIT
+	}
+	return flags
+}
+
+// addCoveringFlag adds flag for covering index.
+func addCoveringFlag(covering bool, flags WhereFlags) WhereFlags {
 	if covering {
-		flags |= WHERE_IDX_ONLY
+		return flags | WHERE_IDX_ONLY
 	}
+	return flags
+}
+
+// addUniqueFlag adds flag for unique constraint satisfaction.
+func addUniqueFlag(index *IndexInfo, c termConstraints, flags WhereFlags) WhereFlags {
 	if index.Unique && c.nEq >= len(index.Columns) {
-		flags |= WHERE_ONEROW
+		return flags | WHERE_ONEROW
 	}
 	return flags
 }
@@ -424,27 +449,32 @@ func (loop *WhereLoop) String() string {
 	}
 
 	s += fmt.Sprintf(" cost=%d nOut=%d", loop.Run, loop.NOut)
+	s += formatWhereLoopFlags(loop.Flags)
+	s += "]"
+	return s
+}
 
-	if loop.Flags&WHERE_ONEROW != 0 {
+// formatWhereLoopFlags formats WhereFlags for display.
+func formatWhereLoopFlags(flags WhereFlags) string {
+	var s string
+	if flags&WHERE_ONEROW != 0 {
 		s += " ONEROW"
 	}
-	if loop.Flags&WHERE_COLUMN_EQ != 0 {
+	if flags&WHERE_COLUMN_EQ != 0 {
 		s += " EQ"
 	}
-	if loop.Flags&WHERE_COLUMN_RANGE != 0 {
+	if flags&WHERE_COLUMN_RANGE != 0 {
 		s += " RANGE"
 	}
-	if loop.Flags&WHERE_COLUMN_IN != 0 {
+	if flags&WHERE_COLUMN_IN != 0 {
 		s += " IN"
 	}
-	if loop.Flags&WHERE_IDX_ONLY != 0 {
+	if flags&WHERE_IDX_ONLY != 0 {
 		s += " COVERING"
 	}
-	if loop.Flags&WHERE_SKIPSCAN != 0 {
+	if flags&WHERE_SKIPSCAN != 0 {
 		s += " SKIPSCAN"
 	}
-
-	s += "]"
 	return s
 }
 

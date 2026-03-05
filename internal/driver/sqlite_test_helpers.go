@@ -52,48 +52,80 @@ func execSQL(t *testing.T, db *sql.DB, stmts ...string) {
 // queryRows executes query and returns all rows as [][]interface{}
 func queryRows(t *testing.T, db *sql.DB, query string, args ...interface{}) [][]interface{} {
 	t.Helper()
-	rows, err := db.Query(query, args...)
-	if err != nil {
-		t.Fatalf("query %q failed: %v", query, err)
-	}
+	rows := mustOpenRows(t, db, query, args...)
 	defer rows.Close()
 
-	cols, err := rows.Columns()
-	if err != nil {
-		t.Fatalf("failed to get columns: %v", err)
-	}
-
-	var result [][]interface{}
-	for rows.Next() {
-		// Create a slice of interface{} to hold the row values
-		values := make([]interface{}, len(cols))
-		valuePtrs := make([]interface{}, len(cols))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			t.Fatalf("failed to scan row: %v", err)
-		}
-
-		// Convert []byte to string for comparison
-		row := make([]interface{}, len(values))
-		for i, v := range values {
-			if b, ok := v.([]byte); ok {
-				row[i] = string(b)
-			} else {
-				row[i] = v
-			}
-		}
-
-		result = append(result, row)
-	}
+	result := scanAllRows(t, rows)
 
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows iteration error: %v", err)
 	}
 
 	return result
+}
+
+// mustOpenRows opens query rows or fails test
+func mustOpenRows(t *testing.T, db *sql.DB, query string, args ...interface{}) *sql.Rows {
+	t.Helper()
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		t.Fatalf("query %q failed: %v", query, err)
+	}
+	return rows
+}
+
+// mustGetColumns gets column names or fails test
+func mustGetColumns(t *testing.T, rows *sql.Rows) []string {
+	t.Helper()
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("failed to get columns: %v", err)
+	}
+	return cols
+}
+
+// scanAllRows scans all rows from query result
+func scanAllRows(t *testing.T, rows *sql.Rows) [][]interface{} {
+	t.Helper()
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("failed to get columns: %v", err)
+	}
+	var result [][]interface{}
+	for rows.Next() {
+		row := scanSingleRow(t, rows, len(cols))
+		result = append(result, row)
+	}
+	return result
+}
+
+// scanSingleRow scans a single row and converts byte slices to strings
+func scanSingleRow(t *testing.T, rows *sql.Rows, numCols int) []interface{} {
+	t.Helper()
+	values := make([]interface{}, numCols)
+	valuePtrs := make([]interface{}, numCols)
+	for i := range values {
+		valuePtrs[i] = &values[i]
+	}
+
+	if err := rows.Scan(valuePtrs...); err != nil {
+		t.Fatalf("failed to scan row: %v", err)
+	}
+
+	return convertBytesToStrings(values)
+}
+
+// convertBytesToStrings converts []byte values to strings in a row
+func convertBytesToStrings(values []interface{}) []interface{} {
+	row := make([]interface{}, len(values))
+	for i, v := range values {
+		if b, ok := v.([]byte); ok {
+			row[i] = string(b)
+		} else {
+			row[i] = v
+		}
+	}
+	return row
 }
 
 // queryRow executes a query that returns a single row
@@ -163,26 +195,38 @@ func compareRowsUnordered(t *testing.T, got, want [][]interface{}) {
 		t.Fatalf("row count mismatch: got %d rows, want %d rows", len(got), len(want))
 	}
 
-	// Create a map to track matched rows
 	matched := make([]bool, len(want))
+	matchGotRows(t, got, want, matched)
+	reportMissingRows(t, want, matched)
+}
 
+// matchGotRows matches each got row against want rows
+func matchGotRows(t *testing.T, got, want [][]interface{}, matched []bool) {
+	t.Helper()
 	for _, gotRow := range got {
-		found := false
-		for i, wantRow := range want {
-			if matched[i] {
-				continue
-			}
-			if rowsEqual(gotRow, wantRow) {
-				matched[i] = true
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !findMatchingRow(gotRow, want, matched) {
 			t.Errorf("unexpected row: %v", gotRow)
 		}
 	}
+}
 
+// findMatchingRow finds a matching want row for the got row
+func findMatchingRow(gotRow []interface{}, want [][]interface{}, matched []bool) bool {
+	for i, wantRow := range want {
+		if matched[i] {
+			continue
+		}
+		if rowsEqual(gotRow, wantRow) {
+			matched[i] = true
+			return true
+		}
+	}
+	return false
+}
+
+// reportMissingRows reports any want rows that weren't matched
+func reportMissingRows(t *testing.T, want [][]interface{}, matched []bool) {
+	t.Helper()
 	for i, m := range matched {
 		if !m {
 			t.Errorf("missing expected row: %v", want[i])
@@ -205,27 +249,33 @@ func rowsEqual(a, b []interface{}) bool {
 
 // valuesEqual compares two values for equality, handling type conversions
 func valuesEqual(a, b interface{}) bool {
-	if a == nil && b == nil {
+	if bothNil := a == nil && b == nil; bothNil {
 		return true
 	}
-	if a == nil || b == nil {
+	if eitherNil := a == nil || b == nil; eitherNil {
 		return false
 	}
 
-	// Try type-specific comparisons
-	switch aVal := a.(type) {
-	case int64:
-		return equalInt64(aVal, b)
-	case int:
-		return equalInt(aVal, b)
-	case float64:
-		return equalFloat64(aVal, b)
-	case string:
-		return equalString(aVal, b)
+	if equal, ok := tryTypeSpecificComparison(a, b); ok {
+		return equal
 	}
 
-	// Fallback to reflect.DeepEqual
 	return reflect.DeepEqual(a, b)
+}
+
+// tryTypeSpecificComparison attempts type-specific comparison
+func tryTypeSpecificComparison(a, b interface{}) (bool, bool) {
+	switch aVal := a.(type) {
+	case int64:
+		return equalInt64(aVal, b), true
+	case int:
+		return equalInt(aVal, b), true
+	case float64:
+		return equalFloat64(aVal, b), true
+	case string:
+		return equalString(aVal, b), true
+	}
+	return false, false
 }
 
 // equalInt64 compares an int64 with another value

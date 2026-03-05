@@ -179,30 +179,35 @@ func EvaluateUnary(op OpCode, operand interface{}) interface{} {
 	}
 }
 
+// negateInt64 negates an int64, handling MinInt64 overflow.
+func negateInt64(val int64) interface{} {
+	if val == math.MinInt64 {
+		return -float64(val)
+	}
+	return -val
+}
+
+// negateString attempts to parse and negate a string value.
+func negateString(val string) interface{} {
+	if i, err := strconv.ParseInt(val, 10, 64); err == nil {
+		return negateInt64(i)
+	}
+	if f, err := strconv.ParseFloat(val, 64); err == nil {
+		return -f
+	}
+	// Non-numeric string becomes 0
+	return int64(0)
+}
+
 // negate performs unary negation.
 func negate(v interface{}) interface{} {
 	switch val := v.(type) {
 	case int64:
-		// Check for overflow (negating MinInt64)
-		if val == math.MinInt64 {
-			return -float64(val)
-		}
-		return -val
+		return negateInt64(val)
 	case float64:
 		return -val
 	case string:
-		// Try to parse as number
-		if i, err := strconv.ParseInt(val, 10, 64); err == nil {
-			if i == math.MinInt64 {
-				return -float64(i)
-			}
-			return -i
-		}
-		if f, err := strconv.ParseFloat(val, 64); err == nil {
-			return -f
-		}
-		// Non-numeric string becomes 0
-		return int64(0)
+		return negateString(val)
 	default:
 		return int64(0)
 	}
@@ -281,6 +286,14 @@ func EvaluateConcat(left, right interface{}) interface{} {
 	return leftStr + rightStr
 }
 
+// formatBoolToString converts a bool to "0" or "1".
+func formatBoolToString(val bool) string {
+	if val {
+		return "1"
+	}
+	return "0"
+}
+
 // valueToString converts a value to string for concatenation.
 func valueToString(v interface{}) string {
 	if v == nil {
@@ -293,15 +306,11 @@ func valueToString(v interface{}) string {
 	case int64:
 		return strconv.FormatInt(val, 10)
 	case float64:
-		// Use SQLite's float formatting
 		return formatFloat(val)
 	case []byte:
 		return string(val)
 	case bool:
-		if val {
-			return "1"
-		}
-		return "0"
+		return formatBoolToString(val)
 	default:
 		return fmt.Sprintf("%v", val)
 	}

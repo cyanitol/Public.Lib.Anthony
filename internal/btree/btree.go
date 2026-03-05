@@ -59,19 +59,33 @@ func NewBtree(pageSize uint32) *Btree {
 
 // validatePage validates a page's integrity before caching
 func (bt *Btree) validatePage(data []byte, pageNum uint32) error {
-	// Check minimum page size
-	if len(data) < int(bt.PageSize) {
-		return fmt.Errorf("%w: page size mismatch (expected %d, got %d)",
-			ErrCorruptedPage, bt.PageSize, len(data))
+	if err := bt.validatePageSize(data); err != nil {
+		return err
 	}
 
-	// Try to parse the page header to validate structure
 	header, err := ParsePageHeader(data, pageNum)
 	if err != nil {
 		return fmt.Errorf("%w: failed to parse header: %v", ErrCorruptedPage, err)
 	}
 
-	// Validate page type is one of the known types
+	if err := validatePageTypeForBtree(header.PageType); err != nil {
+		return err
+	}
+
+	return validatePageStructure(header, data)
+}
+
+// validatePageSize checks if the page data size matches expected size.
+func (bt *Btree) validatePageSize(data []byte) error {
+	if len(data) < int(bt.PageSize) {
+		return fmt.Errorf("%w: page size mismatch (expected %d, got %d)",
+			ErrCorruptedPage, bt.PageSize, len(data))
+	}
+	return nil
+}
+
+// validatePageTypeForBtree checks if the page type is valid for btree validation.
+func validatePageTypeForBtree(pageType byte) error {
 	validTypes := map[byte]bool{
 		PageTypeLeafTable:     true,
 		PageTypeInteriorTable: true,
@@ -79,27 +93,27 @@ func (bt *Btree) validatePage(data []byte, pageNum uint32) error {
 		PageTypeInteriorIndex: true,
 	}
 
-	if !validTypes[header.PageType] {
-		return fmt.Errorf("%w: 0x%02x", ErrInvalidPageType, header.PageType)
+	if !validTypes[pageType] {
+		return fmt.Errorf("%w: 0x%02x", ErrInvalidPageType, pageType)
 	}
+	return nil
+}
 
-	// Validate cell count is reasonable (not corrupted)
-	// Cell pointer array must fit in the page
+// validatePageStructure validates cell pointer array and content area.
+func validatePageStructure(header *PageHeader, data []byte) error {
 	cellPtrArraySize := int(header.NumCells) * 2
 	if header.CellPtrOffset+cellPtrArraySize > len(data) {
 		return fmt.Errorf("%w: cell pointer array exceeds page bounds", ErrCorruptedPage)
 	}
 
-	// Validate cell content start
 	cellContentStart := int(header.CellContentStart)
 	if cellContentStart == 0 {
-		cellContentStart = len(data) // 0 means end of page
+		cellContentStart = len(data)
 	}
 	if cellContentStart > len(data) {
 		return fmt.Errorf("%w: invalid cell content start", ErrCorruptedPage)
 	}
 
-	// Ensure cell pointer array doesn't overlap with cell content
 	cellPtrArrayEnd := header.CellPtrOffset + cellPtrArraySize
 	if cellPtrArrayEnd > cellContentStart {
 		return fmt.Errorf("%w: cell pointers overlap with cell content", ErrCorruptedPage)

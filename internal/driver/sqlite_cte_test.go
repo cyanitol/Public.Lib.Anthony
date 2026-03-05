@@ -1000,34 +1000,3 @@ func TestSQLiteCTE(t *testing.T) {
 		})
 	}
 }
-
-// scanAllRows is a helper function to scan all rows from a result set
-func scanAllRows(t *testing.T, rows *sql.Rows) [][]interface{} {
-	t.Helper()
-
-	cols, err := rows.Columns()
-	if err != nil {
-		t.Fatalf("failed to get columns: %v", err)
-	}
-
-	var gotRows [][]interface{}
-	for rows.Next() {
-		values := make([]interface{}, len(cols))
-		valuePtrs := make([]interface{}, len(cols))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			t.Fatalf("failed to scan row: %v", err)
-		}
-
-		gotRows = append(gotRows, values)
-	}
-
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows iteration error: %v", err)
-	}
-
-	return gotRows
-}
