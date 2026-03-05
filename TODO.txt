@@ -1,6 +1,6 @@
 # Anthony SQLite Driver - Best Practices Improvement TODO
 # Generated: 2026-02-27
-# Updated: 2026-02-28 (Security Audit Complete)
+# Updated: 2026-03-04 (v0.1.0 Release + Test Triage)
 # Status: [ ] Pending  [x] Complete  [~] In Progress
 
 ================================================================================
@@ -101,9 +101,11 @@ SECURITY AUDIT (11 Agents) ✅ COMPLETE
 CYCLOMATIC COMPLEXITY REDUCTION ✅ COMPLETE
 ================================================================================
 
-[x] Reduce all function cyclomatic complexity to ≤10
-    - Completed across all packages
-    - All functions now have complexity ≤10
+[x] Reduce all function cyclomatic complexity to ≤7
+    - Wave 1: 107 → 97 functions with complexity >7
+    - Wave 2: 97 → 73 functions with complexity >7
+    - Wave 3: 73 → 0 functions with complexity >7
+    - All non-test functions now have complexity ≤7
     - Improved code maintainability and testability
 
 ================================================================================
@@ -321,26 +323,229 @@ PHASE 9: OBSERVABILITY (Priority: LOW)
 SUMMARY
 ================================================================================
 
-Total Tasks: 47 (including security audit)
+v0.1.0 Test Statistics:
+- Passing:  12,306 tests (94.2%)
+- Skipped:     759 tests (5.8%)
+- Failing:       0 tests (0%)
+
+Skipped Tests Breakdown:
+- Priority 1: Implemented but Broken - 231 skips (FIX FIRST)
+- Priority 2: Partially Implemented  - 128 skips (COMPLETE)
+- Priority 3: Not Implemented        -  32 skips (DEFER/IMPLEMENT)
+- Priority 4: Other (short mode, etc) - 368 skips (LOW PRIORITY)
+
+Phase Progress:
 Phase 1 (Critical):       4 tasks  [x] COMPLETE
 Security Audit (11 agents): 11 tasks [x] COMPLETE
-Complexity Reduction:     1 task   [x] COMPLETE
-Phase 2 (Storage):        4 tasks  [ ] 0/4 complete
+Complexity Reduction:     1 task   [x] COMPLETE (≤7)
+Phase 2 (Storage):        4 tasks  [~] 2/4 complete
 Phase 3 (Features):       5 tasks  [ ] 0/5 complete
 Phase 4 (Performance):    4 tasks  [ ] 0/4 complete
 Phase 5 (Architecture):   4 tasks  [~] 2/4 complete
 Phase 6 (Security):       4 tasks  [x] COMPLETE
 Phase 7 (Testing):        4 tasks  [~] 2/4 complete
-Phase 8 (Config):         4 tasks  [~] 0.25/4 complete
+Phase 8 (Config):         4 tasks  [~] 1/4 complete
 Phase 9 (Observability):  4 tasks  [ ] 0/4 complete
 
-Completed: 22/47 tasks (46.8%)
-In Progress: 2 tasks
-Pending: 23 tasks
+Completed: 24/47 tasks (51.1%)
+In Progress: 4 tasks
+Pending: 19 tasks
 
 ================================================================================
-RECENT ACCOMPLISHMENTS (2026-02-28)
+SKIPPED TESTS TRIAGE (v0.1.0 - 2026-03-04)
 ================================================================================
+
+Test Statistics:
+- Passing:  12,306 tests
+- Skipped:     759 tests
+- Failing:       0 tests
+- Pass Rate: 94.2%
+
+--------------------------------------------------------------------------------
+PRIORITY 1: IMPLEMENTED BUT BROKEN (231 skips) - FIX THESE FIRST
+--------------------------------------------------------------------------------
+Code exists but has bugs. These are the highest priority to fix.
+
+[ ] 1.1 Foreign Key Constraints (39 skips)
+    - "pre-existing failure - needs foreign key implementation"
+    - Files: sqlite_foreign_key_test.go, constraint tests
+    - Fix: Complete FK validation in INSERT/UPDATE/DELETE paths
+
+[ ] 1.2 Constraint/Fault Handling (22 skips)
+    - "pre-existing failure - needs constraint/fault handling implementation"
+    - Files: sqlite_constraint_test.go, sqlite_fault_test.go
+    - Fix: Complete constraint checks and error handling
+
+[ ] 1.3 ROWID Handling (11 skips)
+    - "pre-existing failure - needs ROWID implementation"
+    - Files: sqlite_rowid_test.go
+    - Fix: Expose rowid in SELECT, handle rowid aliases
+
+[ ] 1.4 REINDEX (10 skips)
+    - "pre-existing failure - needs REINDEX implementation"
+    - Files: sqlite_reindex_test.go
+    - Fix: Implement REINDEX statement compilation/execution
+
+[ ] 1.5 ORDER BY Fixes (10 skips)
+    - "pre-existing failure - needs ORDER BY fixes"
+    - "pre-existing failure - needs ORDER BY with JOIN fixes"
+    - "pre-existing failure - needs ORDER BY NULL handling"
+    - Files: sqlite_orderby_test.go, orderby_test.go
+    - Fix: ORDER BY with JOINs, NULL ordering, index usage
+
+[ ] 1.6 NULL Function Handling (4 skips)
+    - "pre-existing failure - needs NULL function fixes"
+    - Files: sqlite_null_test.go
+    - Fix: Proper NULL propagation in function calls
+
+[ ] 1.7 Printf Implementation (4 skips)
+    - "pre-existing failure - needs printf implementation"
+    - "pre-existing failure - needs printf NULL handling"
+    - Files: sqlite_math_test.go
+    - Fix: Complete printf format specifiers
+
+[ ] 1.8 JSON Implementation (2 skips)
+    - "pre-existing failure - needs JSON implementation"
+    - Files: sqlite_json_test.go
+    - Fix: Complete json_extract, json_set, etc.
+
+[ ] 1.9 Window Functions (2 skips)
+    - "pre-existing failure - needs window function implementation"
+    - Files: sqlite_window_test.go, window_basic_test.go
+    - Fix: ROW_NUMBER, RANK, DENSE_RANK, LEAD, LAG
+
+[ ] 1.10 Integrity Check (2 skips)
+    - "pre-existing failure - needs integrity check implementation"
+    - Files: sqlite_integrity_test.go
+    - Fix: PRAGMA integrity_check implementation
+
+[ ] 1.11 Generic Pre-existing Failures (117 skips)
+    - Various tests marked "pre-existing failure" without specifics
+    - Review each and categorize or fix individually
+
+--------------------------------------------------------------------------------
+PRIORITY 2: PARTIALLY IMPLEMENTED (128 skips) - COMPLETE THESE
+--------------------------------------------------------------------------------
+Features started but incomplete - code exists with gaps.
+
+[ ] 2.1 WHERE Clause (14 skips)
+    - "WHERE clause not yet fully implemented in internal driver"
+    - Files: sqlite_where_test.go
+    - Fix: Complete WHERE expression evaluation for all operators
+
+[ ] 2.2 BLOB Operations (20 skips)
+    - Multiple blob-related incomplete features
+    - Files: various blob tests
+    - Fix: BLOB in JOIN, ORDER BY, GROUP BY, aggregate, comparison
+
+[ ] 2.3 LIMIT Operations (13 skips)
+    - "LIMIT not yet fully implemented in internal driver"
+    - Files: final_coverage_boost_test.go, limit tests
+    - Fix: LIMIT with JOIN, GROUP BY, DISTINCT, subqueries
+
+[ ] 2.4 SELECT Variants (10 skips)
+    - SELECT without FROM, table.*, aliases, errors
+    - Files: various select tests
+    - Fix: Complete all SELECT compilation variants
+
+[ ] 2.5 ORDER BY Operations (8 skips)
+    - "ORDER BY not yet fully implemented in internal driver"
+    - Files: orderby_test.go
+    - Fix: Integrate sorter bytecode
+
+[ ] 2.6 DML/DDL Operations (8 skips)
+    - "DML not yet fully implemented"
+    - "DDL not yet fully implemented"
+    - Fix: Complete UPDATE, DELETE compilation
+
+[ ] 2.7 Parameter Binding Edge Cases (8 skips)
+    - Various binding issues with JOIN, GROUP BY, LIKE, etc.
+    - Fix: Complete parameter substitution in all contexts
+
+[ ] 2.8 EXPLAIN QUERY PLAN (7 skips)
+    - "EXPLAIN QUERY PLAN requires full query planning integration"
+    - Files: explain_test.go
+    - Fix: Integrate with query planner output
+
+[ ] 2.9 CTE Bytecode (6 skips)
+    - "CTE execution requires bytecode inlining architecture"
+    - "Recursive CTE requires bytecode loop generation"
+    - Files: cte_integration_test.go
+    - Fix: Implement CTE materialization/inlining
+
+[ ] 2.10 UDF Integration (6 skips)
+    - "UDF integration requires full VDBE function execution support"
+    - Files: udf_example_test.go
+    - Fix: Hook user-defined functions into VDBE
+
+[ ] 2.11 Database Initialization (7 skips)
+    - "requires properly initialized database file"
+    - Files: integration_test.go
+    - Fix: Proper test setup or feature completion
+
+[ ] 2.12 Error Handling (4 skips)
+    - "Error recovery not yet fully implemented"
+    - Fix: Complete error handling and recovery paths
+
+--------------------------------------------------------------------------------
+PRIORITY 3: NOT IMPLEMENTED (32 skips) - DEFER OR IMPLEMENT
+--------------------------------------------------------------------------------
+Features that were never started - no code exists.
+
+[ ] 3.1 ATTACH Database (24 skips)
+    - "ATTACH not implemented"
+    - Files: sqlite_attach_test.go, cte_attach_test.go
+    - Defer: Multi-database support is a v2.0 feature
+
+[ ] 3.2 ANALYZE (3 skips)
+    - "ANALYZE not implemented"
+    - Files: sqlite_analyze_test.go
+    - Defer: Query optimizer statistics gathering
+
+[ ] 3.3 BACKUP (2 skips)
+    - "BACKUP not implemented"
+    - Files: sqlite_backup_test.go
+    - Defer: Online backup API
+
+[ ] 3.4 WITHOUT ROWID (1 skip)
+    - "WITHOUT ROWID not supported"
+    - Defer: Clustered index tables
+
+[ ] 3.5 sqlite_master (1 skip)
+    - "sqlite_master not implemented"
+    - Fix: Expose schema as virtual table
+
+[ ] 3.6 Multi-table SELECT * (1 skip)
+    - "Multi-table SELECT * column name expansion not implemented"
+    - Fix: Expand * for multiple tables in JOIN
+
+--------------------------------------------------------------------------------
+PRIORITY 4: OTHER SKIPS (368 skips) - LOW PRIORITY
+--------------------------------------------------------------------------------
+
+- Concurrent tests skipped in short mode (~50 skips)
+- Table-driven test cases with individual skip flags (~200+ skips)
+- Subtests inheriting parent skip reasons (~100+ skips)
+
+These can be addressed as parent features are fixed.
+
+================================================================================
+RECENT ACCOMPLISHMENTS (2026-02-28 to 2026-03-04)
+================================================================================
+
+✅ v0.1.0 Release (2026-03-04)
+   - Tagged and pushed v0.1.0 release
+   - 12,306 tests passing (94.2% pass rate)
+   - 759 tests skipped (deferred features)
+   - 0 tests failing
+   - Cyclomatic complexity: 0 functions > 7
+
+✅ Cyclomatic complexity reduction to ≤7 (2026-03-04)
+   - Wave 1: 107 → 97 high-complexity functions
+   - Wave 2: 97 → 73 high-complexity functions
+   - Wave 3: 73 → 0 high-complexity functions
+   - All non-test functions now have complexity ≤7
+   - Refactoring techniques: helper extraction, table-driven dispatch, early returns
 
 ✅ Complete 11-agent security audit
    - 23 security vulnerabilities identified and fixed
@@ -372,31 +577,34 @@ RECENT ACCOMPLISHMENTS (2026-02-28)
    - Graceful handling of read-only mode
 
 ================================================================================
-NEXT PRIORITIES
+NEXT PRIORITIES (Post v0.1.0)
 ================================================================================
 
-HIGH PRIORITY:
-1. Complete Phase 2: Storage Layer Hardening
-   - Windows file locking (cross-platform support)
-   - Journal crash recovery (data safety)
-   - WAL frame validation (transaction durability)
+HIGHEST PRIORITY - Fix Broken Features (231 skipped tests):
+1. Foreign Key Constraints (39 skips) - Complete FK validation
+2. Constraint/Fault Handling (22 skips) - Error handling paths
+3. ORDER BY Fixes (10 skips) - JOINs, NULLs, index usage
+4. ROWID Handling (11 skips) - Expose rowid properly
+5. REINDEX (10 skips) - Statement compilation/execution
+6. Generic "pre-existing failure" (117 skips) - Triage individually
 
-2. Complete Phase 3: Feature Completion
-   - CTE bytecode materialization
-   - Subquery compilation
-   - ORDER BY execution
-   - UPDATE/DELETE operations
-   - Trigger execution
+HIGH PRIORITY - Complete Partial Implementations (128 skips):
+7. WHERE Clause (14 skips) - Expression evaluation
+8. BLOB Operations (20 skips) - JOIN, ORDER BY, aggregates
+9. LIMIT Operations (13 skips) - JOIN, GROUP BY, subqueries
+10. CTE Bytecode (6 skips) - Materialization/inlining
 
-MEDIUM PRIORITY:
-3. Enable remaining skipped tests (Phase 7.1)
-4. Add performance benchmarks (Phase 7.4)
-5. Complete configuration structures (Phase 8.1-8.2)
+MEDIUM PRIORITY - Storage & Infrastructure:
+11. Complete Phase 2: Storage Layer Hardening
+    - Journal checksums (CRC32 vs XOR)
+    - WAL frame validation
+12. Add performance benchmarks (Phase 7.4)
 
-LOW PRIORITY:
-6. Code architecture improvements (Phase 5)
-7. Performance optimizations (Phase 4)
-8. Observability features (Phase 9)
+LOW PRIORITY - Defer to v2.0:
+13. ATTACH Database (24 skips) - Multi-database support
+14. ANALYZE (3 skips) - Query optimizer statistics
+15. Performance optimizations (Phase 4)
+16. Observability features (Phase 9)
 
 ================================================================================
 SQLITE SOURCE REFERENCE
@@ -434,14 +642,25 @@ Key SQLite opcodes for subqueries:
 NOTES
 ================================================================================
 
-- Security audit complete: All critical, high, and medium severity issues resolved
-- Phase 1 complete: All race conditions and deadlocks fixed
-- Complexity reduction complete: All functions ≤10 complexity
-- Lock ordering documented and enforced
-- Test coverage significantly improved across all packages
-- Security model: Layered + Sandbox architecture implemented
+v0.1.0 Release (2026-03-04):
+- Tagged and released v0.1.0
+- 12,306 tests passing, 0 failing
+- All functions have cyclomatic complexity ≤7
+- Security audit complete with all issues resolved
+
+Technical Debt:
+- 231 skipped tests for broken features (Priority 1)
+- 128 skipped tests for partial implementations (Priority 2)
+- 32 skipped tests for unimplemented features (Priority 3)
+
+Architecture:
+- Security model: Layered + Sandbox architecture
+- Lock ordering: Driver -> Conn -> Pager -> Schema -> Btree
 - All path inputs validated through 4-layer security checks
 - Integer and buffer safety protections in place
-- Comprehensive security documentation published
-- SQLite source available locally for reference (sqlite-src/)
+
+References:
+- SQLite source available locally: sqlite-src/
+- Security documentation: docs/SECURITY.md
+- Lock ordering: docs/LOCK_ORDERING.md
 
