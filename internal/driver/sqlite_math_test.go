@@ -884,7 +884,6 @@ func TestArithmeticEdgeCases(t *testing.T) {
 
 // TestPrintfFormatSpecifiers tests various printf format specifiers
 func TestPrintfFormatSpecifiers(t *testing.T) {
-	t.Skip("pre-existing failure - needs printf implementation")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "printf_test.db")
 

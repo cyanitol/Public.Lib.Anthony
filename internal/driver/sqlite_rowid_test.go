@@ -10,7 +10,6 @@ import (
 // TestSQLiteRowid tests the rowid, _rowid_, and oid columns
 // Converted from contrib/sqlite/sqlite-src-3510200/test/rowid.test
 func TestSQLiteRowid(t *testing.T) {
-	t.Skip("SKIP: ROWID INSERT/UPDATE and JOINs not yet supported")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "rowid_test.db")
 
@@ -70,6 +69,7 @@ func TestSQLiteRowid(t *testing.T) {
 
 	// Test 2: Inserting and updating rowid (rowid-2.*)
 	t.Run("insert_update_rowid", func(t *testing.T) {
+		t.Skip("pre-existing failure - needs ROWID INSERT/UPDATE support")
 		_, err := db.Exec("DELETE FROM t1")
 		if err != nil {
 			t.Fatalf("failed to delete: %v", err)
@@ -181,6 +181,7 @@ func TestSQLiteRowid(t *testing.T) {
 
 	// Test 4: Joins using rowid (rowid-4.*)
 	t.Run("joins_with_rowid", func(t *testing.T) {
+		t.Skip("pre-existing failure - needs JOIN with ROWID support")
 		_, err := db.Exec(`
 			CREATE TABLE t3(a INTEGER);
 			CREATE TABLE t4(b INTEGER);
@@ -218,7 +219,6 @@ func TestSQLiteRowid(t *testing.T) {
 // TestRowidWithIntegerPrimaryKey tests INTEGER PRIMARY KEY behavior
 // Based on rowid-7.* tests
 func TestRowidWithIntegerPrimaryKey(t *testing.T) {
-	t.Skip("pre-existing failure - needs ROWID implementation")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "rowid_ipk_test.db")
 
@@ -286,7 +286,6 @@ func TestRowidWithIntegerPrimaryKey(t *testing.T) {
 // TestRowidComparisons tests rowid comparisons with different types
 // Based on rowid-9.* and rowid-10.* tests
 func TestRowidComparisons(t *testing.T) {
-	t.Skip("pre-existing failure - needs ROWID implementation")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "rowid_compare_test.db")
 
@@ -451,7 +450,6 @@ func TestRowidRangeQueries(t *testing.T) {
 // TestRowidWithNegativeValues tests rowid with negative values
 // Based on rowid-10.30+ tests
 func TestRowidWithNegativeValues(t *testing.T) {
-	t.Skip("pre-existing failure - needs ROWID implementation")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "rowid_negative_test.db")
 
@@ -513,7 +511,6 @@ func TestRowidWithNegativeValues(t *testing.T) {
 
 // TestRowidOrdering tests ORDER BY with rowid
 func TestRowidOrdering(t *testing.T) {
-	t.Skip("pre-existing failure - needs ROWID implementation")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "rowid_order_test.db")
 
@@ -587,7 +584,6 @@ func TestRowidOrdering(t *testing.T) {
 // TestRowidWithoutRowid tests tables without rowid
 // Based on rowid-16.* tests
 func TestRowidWithoutRowid(t *testing.T) {
-	t.Skip("pre-existing failure - needs ROWID implementation")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "rowid_without_test.db")
 
@@ -632,7 +628,6 @@ func TestRowidWithoutRowid(t *testing.T) {
 
 // TestRowidMaxValue tests behavior when approaching maximum rowid
 func TestRowidMaxValue(t *testing.T) {
-	t.Skip("pre-existing failure - needs ROWID implementation")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "rowid_max_test.db")
 
@@ -681,7 +676,6 @@ func TestRowidMaxValue(t *testing.T) {
 // TestRowidAmbiguousInJoin tests ambiguous rowid in joins
 // Based on rowid-16.9
 func TestRowidAmbiguousInJoin(t *testing.T) {
-	t.Skip("pre-existing failure - needs ROWID implementation")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "rowid_ambiguous_test.db")
 
@@ -712,7 +706,6 @@ func TestRowidAmbiguousInJoin(t *testing.T) {
 
 // TestRowidUpdateConstraints tests updating rowid with constraints
 func TestRowidUpdateConstraints(t *testing.T) {
-	t.Skip("pre-existing failure - needs ROWID implementation")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "rowid_constraints_test.db")
 
@@ -749,7 +742,6 @@ func TestRowidUpdateConstraints(t *testing.T) {
 
 // TestRowidDeleteAndReuse tests rowid reuse after deletion
 func TestRowidDeleteAndReuse(t *testing.T) {
-	t.Skip("pre-existing failure - needs ROWID implementation")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "rowid_reuse_test.db")
 
