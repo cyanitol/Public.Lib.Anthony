@@ -1,666 +1,158 @@
-# Anthony SQLite Driver - Best Practices Improvement TODO
-# Generated: 2026-02-27
-# Updated: 2026-03-04 (v0.1.0 Release + Test Triage)
-# Status: [ ] Pending  [x] Complete  [~] In Progress
-
-================================================================================
-PHASE 1: CRITICAL STABILITY FIXES (Priority: IMMEDIATE) ✅ COMPLETE
-================================================================================
-
-[x] 1.1 Fix race condition in Conn.Close()
-    - internal/driver/conn.go (lines 87-96)
-    - Add mutex to Stmt struct
-    - Create local copy of statements before iteration
-    ✅ COMPLETED: Two-phase close pattern implemented
-
-[x] 1.2 Add atomic operations for memoryCount
-    - internal/driver/driver.go (line 68)
-    - Change memoryCount to int64, use atomic.AddInt64()
-    ✅ COMPLETED: Atomic operations in place
-
-[x] 1.3 Fix Btree Pages map race condition
-    - internal/btree/btree.go (lines 50-82)
-    - Add sync.RWMutex to Btree struct
-    - Protect all Pages map access
-    ✅ COMPLETED: RWMutex protection added
-
-[x] 1.4 Document lock ordering
-    - Create docs/LOCK_ORDERING.md
-    - Establish hierarchy: Driver -> Conn -> Pager -> Schema -> Btree
-    ✅ COMPLETED: Comprehensive lock ordering documentation created
-
-================================================================================
-SECURITY AUDIT (11 Agents) ✅ COMPLETE
-================================================================================
-
-[x] Security Agent 1: Path Traversal Prevention
-    - Created internal/security/config.go
-    - Created internal/security/path.go
-    - Created internal/security/errors.go
-    - Integrated in stmt_attach.go and stmt_vacuum.go
-    - 4-layer validation: Dangerous patterns, Sandbox, Allowlist, Symlinks
-
-[x] Security Agent 2: Statement Concurrency Fixes
-    - Fixed race condition in inTx checks
-    - Fixed deadlock in Stmt.Close()
-    - Fixed TOCTOU in ExecContext
-    - Added proper lock ordering
-
-[x] Security Agent 3: Connection Concurrency Fixes
-    - Fixed lock ordering violation in Conn.Close()
-    - Implemented two-phase close pattern
-    - Updated docs/LOCK_ORDERING.md
-
-[x] Security Agent 4: Integer Safety
-    - Created internal/security/arithmetic.go
-    - Safe arithmetic functions (SafeCast, SafeAdd, SafeSub, SafeMul)
-    - Fixed integer overflows in cell.go and overflow.go
-    - Added boundary tests
-
-[x] Security Agent 5: Buffer Safety
-    - Added bounds checking to record.go
-    - Fixed decodeInt24Value and decodeInt48Value
-    - Added record size limits
-    - Fixed varint edge cases
-
-[x] Security Agent 6: Resource Limits
-    - Created internal/security/limits.go
-    - SQL parsing limits (MaxSQLLength, MaxTokens, MaxExprDepth)
-    - Memory limits (MaxMemoryDBPages, MaxRecordSize, MaxBlobSize)
-    - Operation limits (MaxAttachedDBs, MaxTriggerDepth)
-
-[x] Security Agent 7: Schema Safety
-    - Added sync.RWMutex to Schema struct
-    - Protected all schema reads/writes
-    - Added concurrent schema access tests
-
-[x] Security Agent 8: Btree Safety
-    - Fixed GetPage() double-check pattern
-    - Added page reference counting
-    - Added page integrity checks
-
-[x] Security Agent 9: Pager Safety
-    - Added state synchronization
-    - File permission enforcement (0600 default)
-    - Enhanced lock state validation
-
-[x] Security Agent 10: Security Tests
-    - Created internal/security/*_test.go
-    - 50+ path traversal attack vectors
-    - Integer overflow boundary tests
-    - Buffer overflow tests
-    - Concurrent execution tests
-
-[x] Security Agent 11: Security Documentation
-    - Created docs/SECURITY.md (comprehensive guide)
-    - Updated docs/LOCK_ORDERING.md (complete hierarchy)
-    - Security best practices and checklist
-    - Vulnerability reporting process
-
-================================================================================
-CYCLOMATIC COMPLEXITY REDUCTION ✅ COMPLETE
-================================================================================
-
-[x] Reduce all function cyclomatic complexity to ≤7
-    - Wave 1: 107 → 97 functions with complexity >7
-    - Wave 2: 97 → 73 functions with complexity >7
-    - Wave 3: 73 → 0 functions with complexity >7
-    - All non-test functions now have complexity ≤7
-    - Improved code maintainability and testability
-
-================================================================================
-PHASE 2: STORAGE LAYER HARDENING (Priority: HIGH)
-================================================================================
-
-[x] 2.1 Implement Windows file locking
-    - internal/pager/lock_windows.go
-    - Use golang.org/x/sys/windows LockFileEx/UnlockFileEx
-    ✅ COMPLETED: Full implementation using LockFileEx/UnlockFileEx
-    - Added golang.org/x/sys dependency
-    - Implemented SharedLock, ReservedLock, PendingLock, ExclusiveLock
-    - Cross-platform build tags working correctly
-
-[x] 2.2 Add journal crash recovery
-    - internal/pager/pager.go
-    - Hot journal detection in OpenWithPageSize()
-    - Implement recoverHotJournal() method
-    ✅ COMPLETED: Hot journal detection and recovery implemented
-    - Added recoverHotJournal() in readExistingDatabase()
-    - Validates journal magic number and format
-    - Replays journal with checksum validation
-    - Handles read-only mode gracefully
-    - Cleans up journal after successful recovery
-
-[ ] 2.3 Fix journal checksums
-    - internal/pager/journal.go (lines 397-418)
-    - Replace XOR checksum with CRC32
-
-[ ] 2.4 Complete WAL frame validation
-    - internal/pager/wal.go (line 272)
-    - Implement checksum validation
-    - Add WAL recovery on database open
-
-================================================================================
-PHASE 3: FEATURE COMPLETION (Priority: HIGH)
-================================================================================
-
-[ ] 3.1 Complete CTE bytecode materialization
-    - internal/driver/stmt_cte.go
-    - Refactor compileNonRecursiveCTE() to use coroutines
-    - Generate runtime bytecode, not compile-time execution
-
-[ ] 3.2 Complete subquery compilation
-    - internal/expr/codegen.go (lines 711-928)
-    - Complete generateSubquery() for scalar subqueries
-    - Complete generateInSubquery() for IN clauses
-    - Complete generateExists() for EXISTS clauses
-
-[ ] 3.3 Implement ORDER BY execution
-    - internal/sql/orderby.go
-    - internal/engine/compiler.go
-    - Integrate sorter bytecode chain
-
-[ ] 3.4 Complete UPDATE/DELETE operations
-    - internal/engine/compiler.go (lines 368-407)
-    - Implement full CompileUpdate() with SET expressions
-    - Implement full CompileDelete() with WHERE conditions
-
-[ ] 3.5 Hook trigger execution to DML
-    - internal/engine/trigger.go
-    - Complete substituteOldNewReferences() (lines 194-207)
-    - Hook triggers into INSERT/UPDATE/DELETE compilation
-
-================================================================================
-PHASE 4: PERFORMANCE OPTIMIZATION (Priority: MEDIUM)
-================================================================================
-
-[ ] 4.1 Add prepared statement caching
-    - Create internal/driver/stmt_cache.go
-    - LRU cache for compiled VDBE programs
-    - Schema version tracking for invalidation
-
-[ ] 4.2 Add query plan caching
-    - Create internal/planner/plan_cache.go
-    - Cache optimized query plans by SQL hash
-
-[ ] 4.3 Add memory pooling
-    - Create internal/vdbe/pool.go
-    - sync.Pool for Mem cells, Instructions, page buffers
-
-[ ] 4.4 Add spill-to-disk for large operations
-    - Create internal/vdbe/sorter_spill.go
-    - Configurable memory limits for sorters
-
-================================================================================
-PHASE 5: CODE ARCHITECTURE IMPROVEMENTS (Priority: MEDIUM)
-================================================================================
-
-[ ] 5.1 Split stmt.go (3,051 lines)
-    - Create compile_select.go (~600 lines)
-    - Create compile_select_agg.go (~400 lines)
-    - Create compile_select_join.go (~350 lines)
-    - Create compile_dml.go (~500 lines)
-    - Create compile_ddl.go (~400 lines)
-    - Create compile_subquery.go (~250 lines)
-
-[x] 5.2 Segregate PagerInterface (23 methods)
-    - internal/pager/pager_interface.go
-    - Create PagerReader, PagerWriter, PagerTransaction interfaces
-    ✅ COMPLETED: Segregated into 3 specialized interfaces
-
-[x] 5.3 Create typed error hierarchy
-    - Create internal/errors/errors.go
-    - ConstraintError, UniqueViolationError, ForeignKeyError
-    - SyntaxError, LockError with proper error codes
-    ✅ COMPLETED: 11 typed error types with SQLite-compatible error codes
-
-[ ] 5.4 Eliminate interface{} in VDBEContext
-    - Create internal/types/ package
-    - Define BtreeAccess, PagerWriter, SchemaAccess interfaces
-
-================================================================================
-PHASE 6: SECURITY AND ROBUSTNESS (Priority: MEDIUM) ✅ COMPLETE
-================================================================================
-
-[x] 6.1 Path traversal prevention
-    - internal/driver/stmt_attach.go
-    - internal/pager/pager.go
-    - Validate database paths for "..", null bytes
-    ✅ COMPLETED: Security Agent 1
-
-[x] 6.2 Integer overflow protection
-    - internal/pager/pager.go
-    - internal/btree/btree.go
-    - Add checked arithmetic for page offsets
-    ✅ COMPLETED: Security Agent 4
-
-[x] 6.3 Input size limits
-    - internal/parser/parser.go
-    - Add MaxSQLLength, MaxTokens, MaxExprDepth limits
-    ✅ COMPLETED: Security Agent 6
-
-[x] 6.4 Memory limits
-    - internal/btree/btree.go
-    - internal/vdbe/record.go
-    - Add configurable cache size limits
-    ✅ COMPLETED: Security Agent 6
-
-================================================================================
-PHASE 7: TESTING AND QUALITY (Priority: MEDIUM)
-================================================================================
-
-[~] 7.1 Enable skipped tests
-    - Phase 7.1a: Integration tests (9 tests)
-    - Phase 7.1b: Parser/Planner tests (9 tests)
-    - Phase 7.1c: Storage layer tests (9 tests)
-    - Phase 7.1d: Feature tests (CTE, triggers, etc.)
-    STATUS: Many tests added, coverage significantly improved
-
-[x] 7.2 Add concurrency tests
-    - Create internal/driver/concurrent_test.go
-    - Multiple readers, reader-writer isolation
-    - Connection pool stress tests
-    ✅ COMPLETED: Race detector tests added
-
-[x] 7.3 Add fuzzing tests
-    - Create internal/parser/fuzz_test.go
-    - Create internal/btree/fuzz_test.go
-    ✅ COMPLETED: Fuzz test stubs created
-
-[ ] 7.4 Add performance benchmarks
-    - Create internal/driver/benchmark_test.go
-    - Insert/Select/Update/Delete benchmarks
-
-================================================================================
-PHASE 8: CONFIGURATION AND EXTENSIBILITY (Priority: LOW)
-================================================================================
-
-[~] 8.1 Add configuration structures
-    - Create internal/pager/config.go
-    - Create internal/driver/config.go
-    - PagerConfig, DriverConfig structs
-    STATUS: SecurityConfig created, others pending
-
-[ ] 8.2 Add DSN parameter parsing
-    - Create internal/driver/dsn.go
-    - Parse filename?journal_mode=WAL&cache_size=10000
-
-[x] 8.3 Expose virtual table API
-    - internal/driver/conn.go
-    - Add Conn.RegisterVirtualTableModule()
-    ✅ COMPLETED: Phase 8.3 complete
-    - RegisterVirtualTableModule() and UnregisterVirtualTableModule() implemented
-    - Full virtual table API exposed (Module, VirtualTable, VirtualCursor interfaces)
-    - Comprehensive test suite (5 tests, all passing)
-    - Example implementation in examples/virtual_table_example.go
-    - Documentation updated in docs/VIRTUAL_TABLES.md
-
-[ ] 8.4 Expose custom collation registration
-    - internal/driver/conn.go
-    - Add Conn.CreateCollation()
-
-================================================================================
-PHASE 9: OBSERVABILITY (Priority: LOW)
-================================================================================
-
-[ ] 9.1 Add structured logging
-    - Create internal/observability/ package
-    - Leveled logging (Error, Warn, Info, Debug, Trace)
-
-[ ] 9.2 Add query statistics
-    - internal/vdbe/vdbe.go
-    - Track execution time, rows scanned, I/O operations
-
-[ ] 9.3 Complete EXPLAIN QUERY PLAN
-    - internal/planner/planner.go
-    - Add cost estimates to EXPLAIN output
-
-[ ] 9.4 Add VDBE debug mode
-    - Create internal/vdbe/debug.go
-    - Instruction tracing, register inspection
-
-================================================================================
-SUMMARY
-================================================================================
-
-v0.1.0 Test Statistics:
-- Passing:  12,306 tests (94.2%)
-- Skipped:     759 tests (5.8%)
-- Failing:       0 tests (0%)
-
-Skipped Tests Breakdown:
-- Priority 1: Implemented but Broken - 231 skips (FIX FIRST)
-- Priority 2: Partially Implemented  - 128 skips (COMPLETE)
-- Priority 3: Not Implemented        -  32 skips (DEFER/IMPLEMENT)
-- Priority 4: Other (short mode, etc) - 368 skips (LOW PRIORITY)
-
-Phase Progress:
-Phase 1 (Critical):       4 tasks  [x] COMPLETE
-Security Audit (11 agents): 11 tasks [x] COMPLETE
-Complexity Reduction:     1 task   [x] COMPLETE (≤7)
-Phase 2 (Storage):        4 tasks  [~] 2/4 complete
-Phase 3 (Features):       5 tasks  [ ] 0/5 complete
-Phase 4 (Performance):    4 tasks  [ ] 0/4 complete
-Phase 5 (Architecture):   4 tasks  [~] 2/4 complete
-Phase 6 (Security):       4 tasks  [x] COMPLETE
-Phase 7 (Testing):        4 tasks  [~] 2/4 complete
-Phase 8 (Config):         4 tasks  [~] 1/4 complete
-Phase 9 (Observability):  4 tasks  [ ] 0/4 complete
-
-Completed: 24/47 tasks (51.1%)
-In Progress: 4 tasks
-Pending: 19 tasks
-
-================================================================================
-SKIPPED TESTS TRIAGE (v0.1.0 - 2026-03-04)
-================================================================================
-
-Test Statistics:
-- Passing:  12,306 tests
-- Skipped:     759 tests
-- Failing:       0 tests
-- Pass Rate: 94.2%
-
---------------------------------------------------------------------------------
-PRIORITY 1: IMPLEMENTED BUT BROKEN (231 skips) - FIX THESE FIRST
---------------------------------------------------------------------------------
-Code exists but has bugs. These are the highest priority to fix.
-
-[ ] 1.1 Foreign Key Constraints (39 skips)
-    - "pre-existing failure - needs foreign key implementation"
-    - Files: sqlite_foreign_key_test.go, constraint tests
-    - Fix: Complete FK validation in INSERT/UPDATE/DELETE paths
-
-[ ] 1.2 Constraint/Fault Handling (22 skips)
-    - "pre-existing failure - needs constraint/fault handling implementation"
-    - Files: sqlite_constraint_test.go, sqlite_fault_test.go
-    - Fix: Complete constraint checks and error handling
-
-[ ] 1.3 ROWID Handling (11 skips)
-    - "pre-existing failure - needs ROWID implementation"
-    - Files: sqlite_rowid_test.go
-    - Fix: Expose rowid in SELECT, handle rowid aliases
-
-[ ] 1.4 REINDEX (10 skips)
-    - "pre-existing failure - needs REINDEX implementation"
-    - Files: sqlite_reindex_test.go
-    - Fix: Implement REINDEX statement compilation/execution
-
-[ ] 1.5 ORDER BY Fixes (10 skips)
-    - "pre-existing failure - needs ORDER BY fixes"
-    - "pre-existing failure - needs ORDER BY with JOIN fixes"
-    - "pre-existing failure - needs ORDER BY NULL handling"
-    - Files: sqlite_orderby_test.go, orderby_test.go
-    - Fix: ORDER BY with JOINs, NULL ordering, index usage
-
-[ ] 1.6 NULL Function Handling (4 skips)
-    - "pre-existing failure - needs NULL function fixes"
-    - Files: sqlite_null_test.go
-    - Fix: Proper NULL propagation in function calls
-
-[ ] 1.7 Printf Implementation (4 skips)
-    - "pre-existing failure - needs printf implementation"
-    - "pre-existing failure - needs printf NULL handling"
-    - Files: sqlite_math_test.go
-    - Fix: Complete printf format specifiers
-
-[ ] 1.8 JSON Implementation (2 skips)
-    - "pre-existing failure - needs JSON implementation"
-    - Files: sqlite_json_test.go
-    - Fix: Complete json_extract, json_set, etc.
-
-[ ] 1.9 Window Functions (2 skips)
-    - "pre-existing failure - needs window function implementation"
-    - Files: sqlite_window_test.go, window_basic_test.go
-    - Fix: ROW_NUMBER, RANK, DENSE_RANK, LEAD, LAG
-
-[ ] 1.10 Integrity Check (2 skips)
-    - "pre-existing failure - needs integrity check implementation"
-    - Files: sqlite_integrity_test.go
-    - Fix: PRAGMA integrity_check implementation
-
-[ ] 1.11 Generic Pre-existing Failures (117 skips)
-    - Various tests marked "pre-existing failure" without specifics
-    - Review each and categorize or fix individually
-
---------------------------------------------------------------------------------
-PRIORITY 2: PARTIALLY IMPLEMENTED (128 skips) - COMPLETE THESE
---------------------------------------------------------------------------------
-Features started but incomplete - code exists with gaps.
-
-[ ] 2.1 WHERE Clause (14 skips)
-    - "WHERE clause not yet fully implemented in internal driver"
-    - Files: sqlite_where_test.go
-    - Fix: Complete WHERE expression evaluation for all operators
-
-[ ] 2.2 BLOB Operations (20 skips)
-    - Multiple blob-related incomplete features
-    - Files: various blob tests
-    - Fix: BLOB in JOIN, ORDER BY, GROUP BY, aggregate, comparison
-
-[ ] 2.3 LIMIT Operations (13 skips)
-    - "LIMIT not yet fully implemented in internal driver"
-    - Files: final_coverage_boost_test.go, limit tests
-    - Fix: LIMIT with JOIN, GROUP BY, DISTINCT, subqueries
-
-[ ] 2.4 SELECT Variants (10 skips)
-    - SELECT without FROM, table.*, aliases, errors
-    - Files: various select tests
-    - Fix: Complete all SELECT compilation variants
-
-[ ] 2.5 ORDER BY Operations (8 skips)
-    - "ORDER BY not yet fully implemented in internal driver"
-    - Files: orderby_test.go
-    - Fix: Integrate sorter bytecode
-
-[ ] 2.6 DML/DDL Operations (8 skips)
-    - "DML not yet fully implemented"
-    - "DDL not yet fully implemented"
-    - Fix: Complete UPDATE, DELETE compilation
-
-[ ] 2.7 Parameter Binding Edge Cases (8 skips)
-    - Various binding issues with JOIN, GROUP BY, LIKE, etc.
-    - Fix: Complete parameter substitution in all contexts
-
-[ ] 2.8 EXPLAIN QUERY PLAN (7 skips)
-    - "EXPLAIN QUERY PLAN requires full query planning integration"
-    - Files: explain_test.go
-    - Fix: Integrate with query planner output
-
-[ ] 2.9 CTE Bytecode (6 skips)
-    - "CTE execution requires bytecode inlining architecture"
-    - "Recursive CTE requires bytecode loop generation"
-    - Files: cte_integration_test.go
-    - Fix: Implement CTE materialization/inlining
-
-[ ] 2.10 UDF Integration (6 skips)
-    - "UDF integration requires full VDBE function execution support"
-    - Files: udf_example_test.go
-    - Fix: Hook user-defined functions into VDBE
-
-[ ] 2.11 Database Initialization (7 skips)
-    - "requires properly initialized database file"
-    - Files: integration_test.go
-    - Fix: Proper test setup or feature completion
-
-[ ] 2.12 Error Handling (4 skips)
-    - "Error recovery not yet fully implemented"
-    - Fix: Complete error handling and recovery paths
-
---------------------------------------------------------------------------------
-PRIORITY 3: NOT IMPLEMENTED (32 skips) - DEFER OR IMPLEMENT
---------------------------------------------------------------------------------
-Features that were never started - no code exists.
-
-[ ] 3.1 ATTACH Database (24 skips)
-    - "ATTACH not implemented"
-    - Files: sqlite_attach_test.go, cte_attach_test.go
-    - Defer: Multi-database support is a v2.0 feature
-
-[ ] 3.2 ANALYZE (3 skips)
-    - "ANALYZE not implemented"
-    - Files: sqlite_analyze_test.go
-    - Defer: Query optimizer statistics gathering
-
-[ ] 3.3 BACKUP (2 skips)
-    - "BACKUP not implemented"
-    - Files: sqlite_backup_test.go
-    - Defer: Online backup API
-
-[ ] 3.4 WITHOUT ROWID (1 skip)
-    - "WITHOUT ROWID not supported"
-    - Defer: Clustered index tables
-
-[ ] 3.5 sqlite_master (1 skip)
-    - "sqlite_master not implemented"
-    - Fix: Expose schema as virtual table
-
-[ ] 3.6 Multi-table SELECT * (1 skip)
-    - "Multi-table SELECT * column name expansion not implemented"
-    - Fix: Expand * for multiple tables in JOIN
-
---------------------------------------------------------------------------------
-PRIORITY 4: OTHER SKIPS (368 skips) - LOW PRIORITY
---------------------------------------------------------------------------------
-
-- Concurrent tests skipped in short mode (~50 skips)
-- Table-driven test cases with individual skip flags (~200+ skips)
-- Subtests inheriting parent skip reasons (~100+ skips)
-
-These can be addressed as parent features are fixed.
-
-================================================================================
-RECENT ACCOMPLISHMENTS (2026-02-28 to 2026-03-04)
-================================================================================
-
-✅ v0.1.0 Release (2026-03-04)
-   - Tagged and pushed v0.1.0 release
-   - 12,306 tests passing (94.2% pass rate)
-   - 759 tests skipped (deferred features)
-   - 0 tests failing
-   - Cyclomatic complexity: 0 functions > 7
-
-✅ Cyclomatic complexity reduction to ≤7 (2026-03-04)
-   - Wave 1: 107 → 97 high-complexity functions
-   - Wave 2: 97 → 73 high-complexity functions
-   - Wave 3: 73 → 0 high-complexity functions
-   - All non-test functions now have complexity ≤7
-   - Refactoring techniques: helper extraction, table-driven dispatch, early returns
-
-✅ Complete 11-agent security audit
-   - 23 security vulnerabilities identified and fixed
-   - 4 CRITICAL, 8 HIGH, 11 MEDIUM severity issues resolved
-   - Created internal/security package with comprehensive protections
-   - Added 100+ security tests with attack vectors
-   - Published comprehensive SECURITY.md documentation
-
-✅ Cyclomatic complexity reduction
-   - All functions reduced to complexity ≤10
-   - Improved code maintainability across entire codebase
-
-✅ Test coverage improvements
-   - Added extensive test suites across all packages
-   - Race detector tests for concurrency safety
-   - Fuzz tests for parser and record handling
-
-✅ Phase 2.1: Windows file locking (COMPLETE)
-   - Implemented full Windows locking using LockFileEx/UnlockFileEx
-   - Added golang.org/x/sys/windows dependency
-   - All lock levels implemented: Shared, Reserved, Pending, Exclusive
-   - Cross-platform build tags working correctly
-
-✅ Phase 2.2: Journal crash recovery (COMPLETE)
-   - Hot journal detection in OpenWithPageSize()
-   - recoverHotJournal() method with full validation
-   - Checksum verification during recovery
-   - Automatic journal cleanup after recovery
-   - Graceful handling of read-only mode
-
-================================================================================
-NEXT PRIORITIES (Post v0.1.0)
-================================================================================
-
-HIGHEST PRIORITY - Fix Broken Features (231 skipped tests):
-1. Foreign Key Constraints (39 skips) - Complete FK validation
-2. Constraint/Fault Handling (22 skips) - Error handling paths
-3. ORDER BY Fixes (10 skips) - JOINs, NULLs, index usage
-4. ROWID Handling (11 skips) - Expose rowid properly
-5. REINDEX (10 skips) - Statement compilation/execution
-6. Generic "pre-existing failure" (117 skips) - Triage individually
-
-HIGH PRIORITY - Complete Partial Implementations (128 skips):
-7. WHERE Clause (14 skips) - Expression evaluation
-8. BLOB Operations (20 skips) - JOIN, ORDER BY, aggregates
-9. LIMIT Operations (13 skips) - JOIN, GROUP BY, subqueries
-10. CTE Bytecode (6 skips) - Materialization/inlining
-
-MEDIUM PRIORITY - Storage & Infrastructure:
-11. Complete Phase 2: Storage Layer Hardening
-    - Journal checksums (CRC32 vs XOR)
-    - WAL frame validation
-12. Add performance benchmarks (Phase 7.4)
-
-LOW PRIORITY - Defer to v2.0:
-13. ATTACH Database (24 skips) - Multi-database support
-14. ANALYZE (3 skips) - Query optimizer statistics
-15. Performance optimizations (Phase 4)
-16. Observability features (Phase 9)
-
-================================================================================
-SQLITE SOURCE REFERENCE
-================================================================================
-
-SQLite source code is available at: sqlite-src/
-Cloned from: https://sqlite.org/src (Fossil repository)
-
-Key SQLite source files for reference:
-- sqlite-src/src/select.c     - SELECT statement compilation
-- sqlite-src/src/expr.c       - Expression code generation (sqlite3CodeSubselect)
-- sqlite-src/src/where.c      - WHERE clause optimization
-- sqlite-src/src/vdbe.c       - VDBE implementation
-- sqlite-src/src/vdbeInt.h    - VDBE internal structures
-- sqlite-src/src/vdbeaux.c    - VDBE auxiliary functions
-- sqlite-src/src/insert.c     - INSERT statement compilation
-- sqlite-src/src/update.c     - UPDATE statement compilation
-- sqlite-src/src/delete.c     - DELETE statement compilation
-- sqlite-src/src/trigger.c    - Trigger implementation
-
-Subquery Implementation Pattern (from sqlite3CodeSubselect in expr.c):
-1. Scalar subqueries compile directly into parent VDBE
-2. Use SRT_Mem destination to store result in register
-3. No separate VDBE creation - share cursor/register pools
-4. Use BeginSubrtn/Return pattern for subroutine flow
-5. Cursor indices continue from parent's allocation
-
-Key SQLite opcodes for subqueries:
-- OP_BeginSubrtn  - Start subroutine (saves return address)
-- OP_Return       - Return from subroutine
-- OP_Gosub        - Call subroutine
-- OP_Once         - Execute block only once
-
-================================================================================
-NOTES
-================================================================================
-
-v0.1.0 Release (2026-03-04):
-- Tagged and released v0.1.0
-- 12,306 tests passing, 0 failing
-- All functions have cyclomatic complexity ≤7
-- Security audit complete with all issues resolved
-
-Technical Debt:
-- 231 skipped tests for broken features (Priority 1)
-- 128 skipped tests for partial implementations (Priority 2)
-- 32 skipped tests for unimplemented features (Priority 3)
-
-Architecture:
-- Security model: Layered + Sandbox architecture
-- Lock ordering: Driver -> Conn -> Pager -> Schema -> Btree
-- All path inputs validated through 4-layer security checks
-- Integer and buffer safety protections in place
-
-References:
-- SQLite source available locally: sqlite-src/
-- Security documentation: docs/SECURITY.md
-- Lock ordering: docs/LOCK_ORDERING.md
-
+# Anthony SQLite Driver - TODO List
+# Format: https://github.com/todotxt/todo.txt
+# Generated: 2026-02-27 | Updated: 2026-03-04 (v0.1.0)
+# Stats: 12,306 passing | 759 skipped | 0 failing | 94.2% pass rate
+
+# ============================================================================
+# PRIORITY 1: IMPLEMENTED BUT BROKEN (231 skips) - FIX FIRST
+# ============================================================================
+
+(A) Fix foreign key constraints (39 skips) +BrokenFeatures @driver skips:39
+(A) Fix constraint/fault handling (22 skips) +BrokenFeatures @driver skips:22
+(A) Fix ROWID handling (11 skips) +BrokenFeatures @driver skips:11
+(A) Fix REINDEX implementation (10 skips) +BrokenFeatures @driver skips:10
+(A) Fix ORDER BY with JOINs, NULLs, index usage (10 skips) +BrokenFeatures @driver skips:10
+(A) Fix NULL function handling (4 skips) +BrokenFeatures @functions skips:4
+(A) Fix printf implementation (4 skips) +BrokenFeatures @functions skips:4
+(A) Fix JSON implementation (2 skips) +BrokenFeatures @functions skips:2
+(A) Fix window functions (2 skips) +BrokenFeatures @driver skips:2
+(A) Fix PRAGMA integrity_check (2 skips) +BrokenFeatures @driver skips:2
+(A) Triage generic pre-existing failures (117 skips) +BrokenFeatures @driver skips:117
+
+# ============================================================================
+# PRIORITY 2: PARTIALLY IMPLEMENTED (128 skips) - COMPLETE THESE
+# ============================================================================
+
+(B) Complete WHERE clause expression evaluation (14 skips) +PartialFeatures @driver skips:14
+(B) Complete BLOB operations in JOIN/ORDER BY/GROUP BY (20 skips) +PartialFeatures @driver skips:20
+(B) Complete LIMIT with JOIN/GROUP BY/DISTINCT (13 skips) +PartialFeatures @driver skips:13
+(B) Complete SELECT variants (10 skips) +PartialFeatures @driver skips:10
+(B) Complete ORDER BY sorter bytecode (8 skips) +PartialFeatures @driver skips:8
+(B) Complete DML/DDL UPDATE/DELETE compilation (8 skips) +PartialFeatures @driver skips:8
+(B) Complete parameter binding edge cases (8 skips) +PartialFeatures @driver skips:8
+(B) Complete EXPLAIN QUERY PLAN integration (7 skips) +PartialFeatures @planner skips:7
+(B) Complete CTE bytecode materialization/inlining (6 skips) +PartialFeatures @driver skips:6
+(B) Complete UDF VDBE integration (6 skips) +PartialFeatures @vdbe skips:6
+(B) Complete database initialization in tests (7 skips) +PartialFeatures @testing skips:7
+(B) Complete error handling and recovery (4 skips) +PartialFeatures @driver skips:4
+
+# ============================================================================
+# PRIORITY 3: NOT IMPLEMENTED (32 skips) - DEFER TO v2.0
+# ============================================================================
+
+(C) Implement ATTACH database multi-db support (24 skips) +NotImplemented @driver skips:24 defer:v2.0
+(C) Implement ANALYZE query optimizer stats (3 skips) +NotImplemented @driver skips:3 defer:v2.0
+(C) Implement BACKUP online backup API (2 skips) +NotImplemented @driver skips:2 defer:v2.0
+(C) Implement WITHOUT ROWID clustered tables (1 skip) +NotImplemented @btree skips:1 defer:v2.0
+(C) Implement sqlite_master virtual table (1 skip) +NotImplemented @vtab skips:1
+(C) Implement multi-table SELECT * expansion (1 skip) +NotImplemented @driver skips:1
+
+# ============================================================================
+# PHASE 2: STORAGE LAYER HARDENING
+# ============================================================================
+
+x 2026-03-04 2026-02-27 Implement Windows file locking +Phase2 @pager
+x 2026-03-04 2026-02-27 Add journal crash recovery +Phase2 @pager
+(B) Fix journal checksums - replace XOR with CRC32 +Phase2 @pager file:internal/pager/journal.go
+(B) Complete WAL frame validation and recovery +Phase2 @pager file:internal/pager/wal.go
+
+# ============================================================================
+# PHASE 3: FEATURE COMPLETION
+# ============================================================================
+
+(B) Complete CTE bytecode materialization using coroutines +Phase3 @driver file:internal/driver/stmt_cte.go
+(B) Complete subquery compilation for scalar/IN/EXISTS +Phase3 @expr file:internal/expr/codegen.go
+(B) Implement ORDER BY execution with sorter bytecode +Phase3 @engine file:internal/engine/compiler.go
+(B) Complete UPDATE/DELETE with SET/WHERE expressions +Phase3 @engine file:internal/engine/compiler.go
+(B) Hook trigger execution to INSERT/UPDATE/DELETE +Phase3 @engine file:internal/engine/trigger.go
+
+# ============================================================================
+# PHASE 4: PERFORMANCE OPTIMIZATION
+# ============================================================================
+
+(C) Add prepared statement LRU cache +Phase4 @driver file:internal/driver/stmt_cache.go
+(C) Add query plan cache by SQL hash +Phase4 @planner file:internal/planner/plan_cache.go
+(C) Add memory pooling with sync.Pool +Phase4 @vdbe file:internal/vdbe/pool.go
+(C) Add spill-to-disk for large sorter operations +Phase4 @vdbe file:internal/vdbe/sorter_spill.go
+
+# ============================================================================
+# PHASE 5: CODE ARCHITECTURE
+# ============================================================================
+
+(C) Split stmt.go into compile_*.go files +Phase5 @driver file:internal/driver/stmt.go
+x 2026-02-28 2026-02-27 Segregate PagerInterface into Reader/Writer/Transaction +Phase5 @pager
+x 2026-02-28 2026-02-27 Create typed error hierarchy with SQLite codes +Phase5 @errors
+(C) Eliminate interface{} in VDBEContext +Phase5 @types file:internal/types/
+
+# ============================================================================
+# PHASE 7: TESTING AND QUALITY
+# ============================================================================
+
+(B) Enable skipped tests as features are fixed +Phase7 @testing skips:759
+x 2026-02-28 2026-02-27 Add concurrency tests with race detector +Phase7 @testing
+x 2026-02-28 2026-02-27 Add fuzzing tests for parser and btree +Phase7 @testing
+(C) Add performance benchmarks for CRUD operations +Phase7 @testing file:internal/driver/benchmark_test.go
+
+# ============================================================================
+# PHASE 8: CONFIGURATION AND EXTENSIBILITY
+# ============================================================================
+
+(C) Add PagerConfig and DriverConfig structures +Phase8 @driver
+(C) Add DSN parameter parsing for connection strings +Phase8 @driver file:internal/driver/dsn.go
+x 2026-02-28 2026-02-27 Expose virtual table registration API +Phase8 @driver
+(C) Expose custom collation registration +Phase8 @driver
+
+# ============================================================================
+# PHASE 9: OBSERVABILITY
+# ============================================================================
+
+(D) Add structured leveled logging +Phase9 @observability
+(D) Add query execution statistics +Phase9 @vdbe
+(D) Complete EXPLAIN QUERY PLAN with cost estimates +Phase9 @planner
+(D) Add VDBE instruction tracing debug mode +Phase9 @vdbe
+
+# ============================================================================
+# COMPLETED - PHASE 1: CRITICAL STABILITY
+# ============================================================================
+
+x 2026-02-28 2026-02-27 Fix race condition in Conn.Close() +Phase1 @driver
+x 2026-02-28 2026-02-27 Add atomic operations for memoryCount +Phase1 @driver
+x 2026-02-28 2026-02-27 Fix Btree Pages map race condition +Phase1 @btree
+x 2026-02-28 2026-02-27 Document lock ordering hierarchy +Phase1 @docs
+
+# ============================================================================
+# COMPLETED - SECURITY AUDIT (11 Agents)
+# ============================================================================
+
+x 2026-02-28 2026-02-28 Security Agent 1: Path traversal prevention +Security @security
+x 2026-02-28 2026-02-28 Security Agent 2: Statement concurrency fixes +Security @driver
+x 2026-02-28 2026-02-28 Security Agent 3: Connection concurrency fixes +Security @driver
+x 2026-02-28 2026-02-28 Security Agent 4: Integer safety with checked arithmetic +Security @security
+x 2026-02-28 2026-02-28 Security Agent 5: Buffer safety with bounds checking +Security @vdbe
+x 2026-02-28 2026-02-28 Security Agent 6: Resource limits for SQL/memory/ops +Security @security
+x 2026-02-28 2026-02-28 Security Agent 7: Schema safety with RWMutex +Security @schema
+x 2026-02-28 2026-02-28 Security Agent 8: Btree safety with page ref counting +Security @btree
+x 2026-02-28 2026-02-28 Security Agent 9: Pager safety with state sync +Security @pager
+x 2026-02-28 2026-02-28 Security Agent 10: Security test suite (100+ tests) +Security @testing
+x 2026-02-28 2026-02-28 Security Agent 11: Security documentation +Security @docs
+
+# ============================================================================
+# COMPLETED - PHASE 6: SECURITY AND ROBUSTNESS
+# ============================================================================
+
+x 2026-02-28 2026-02-27 Path traversal prevention for database paths +Phase6 @security
+x 2026-02-28 2026-02-27 Integer overflow protection for page offsets +Phase6 @security
+x 2026-02-28 2026-02-27 Input size limits for SQL parsing +Phase6 @security
+x 2026-02-28 2026-02-27 Memory limits for cache and records +Phase6 @security
+
+# ============================================================================
+# COMPLETED - COMPLEXITY REDUCTION
+# ============================================================================
+
+x 2026-03-04 2026-02-27 Reduce cyclomatic complexity to <=10 for all functions +Complexity @refactor waves:3 before:107 after:0
+
+# ============================================================================
+# COMPLETED - v0.1.0 RELEASE
+# ============================================================================
+
+x 2026-03-04 2026-03-04 Tag and release v0.1.0 +Release @git tests:12306 skipped:759 failing:0
