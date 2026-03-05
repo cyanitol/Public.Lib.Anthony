@@ -1,23 +1,21 @@
 # Anthony SQLite Driver - TODO List
 # Format: https://github.com/todotxt/todo.txt
-# Generated: 2026-02-27 | Updated: 2026-03-04 (v0.1.0)
-# Stats: 12,306 passing | 759 skipped | 0 failing | 94.2% pass rate
+# Generated: 2026-02-27 | Updated: 2026-03-05 (v0.1.0)
+# Stats: 12,306 passing | ~499 skipped | 0 failing | 96%+ pass rate
 
 # ============================================================================
-# PRIORITY 1: IMPLEMENTED BUT BROKEN (231 skips) - FIX FIRST
+# PRIORITY 1: IMPLEMENTED BUT BROKEN - FIX FIRST
 # ============================================================================
 
-(A) Fix foreign key constraints (39 skips) +BrokenFeatures @driver skips:39
-(A) Fix constraint/fault handling (22 skips) +BrokenFeatures @driver skips:22
-(A) Fix ROWID handling (11 skips) +BrokenFeatures @driver skips:11
-(A) Fix REINDEX implementation (10 skips) +BrokenFeatures @driver skips:10
-(A) Fix ORDER BY with JOINs, NULLs, index usage (10 skips) +BrokenFeatures @driver skips:10
-(A) Fix NULL function handling (4 skips) +BrokenFeatures @functions skips:4
-(A) Fix printf implementation (4 skips) +BrokenFeatures @functions skips:4
+(A) Fix foreign key runtime enforcement (34 skips) +BrokenFeatures @driver skips:34
+(A) Fix constraint/fault handling (34 skips) +BrokenFeatures @driver skips:34
+(A) Fix VACUUM operations (29 skips) +BrokenFeatures @driver skips:29
+(A) Fix WITHOUT ROWID tables (23 skips) +BrokenFeatures @driver skips:23
+(A) Fix stress/concurrent tests (18 skips) +BrokenFeatures @driver skips:18
+(A) Fix CTE integration (5 skips) +BrokenFeatures @driver skips:5
 (A) Fix JSON implementation (2 skips) +BrokenFeatures @functions skips:2
 (A) Fix window functions (2 skips) +BrokenFeatures @driver skips:2
 (A) Fix PRAGMA integrity_check (2 skips) +BrokenFeatures @driver skips:2
-(A) Triage generic pre-existing failures (117 skips) +BrokenFeatures @driver skips:117
 
 # ============================================================================
 # PRIORITY 2: PARTIALLY IMPLEMENTED (128 skips) - COMPLETE THESE
@@ -156,3 +154,19 @@ x 2026-03-04 2026-02-27 Reduce cyclomatic complexity to <=10 for all functions +
 # ============================================================================
 
 x 2026-03-04 2026-03-04 Tag and release v0.1.0 +Release @git tests:12306 skipped:759 failing:0
+
+# ============================================================================
+# COMPLETED - 2026-03-05 CONSTRAINT & CTE IMPROVEMENTS
+# ============================================================================
+
+x 2026-03-05 2026-03-05 Fix foreign key parser (ON DELETE/UPDATE/etc) +Constraints @parser
+x 2026-03-05 2026-03-05 Fix printf/format function implementation +Functions @vdbe
+x 2026-03-05 2026-03-05 Implement REINDEX parser and compiler +Parser @parser
+x 2026-03-05 2026-03-05 Add ROWID alias recognition (_rowid_, oid) +Parser @driver
+x 2026-03-05 2026-03-05 Add PRIMARY KEY constraint error messages +Constraints @vdbe
+x 2026-03-05 2026-03-05 Implement UNIQUE constraint violation detection +Constraints @vdbe
+x 2026-03-05 2026-03-05 Fix UNIQUE constraint cursor bug (separate read cursor) +Constraints @vdbe
+x 2026-03-05 2026-03-05 Implement NOT NULL constraint checking +Constraints @vdbe
+x 2026-03-05 2026-03-05 Fix CTE register adjustment for comparison opcodes +CTE @driver
+x 2026-03-05 2026-03-05 Fix CTE jump target vs comparison opcode handling +CTE @driver
+x 2026-03-05 2026-03-05 Add FK infrastructure (schema getters, PRAGMA support) +FK @schema

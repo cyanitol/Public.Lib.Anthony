@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- NOT NULL constraint checking at runtime with proper error messages
+- CHECK constraint framework (ready for expression evaluation)
+- UNIQUE constraint violation detection with table scanning
+- Foreign key parser support (ON DELETE/UPDATE CASCADE/SET NULL/RESTRICT/NO ACTION)
+- Foreign key infrastructure (schema getters, PRAGMA foreign_keys support)
+- REINDEX statement parser and compiler
+- ROWID alias recognition (_rowid_, oid, rowid)
+- Schema getter methods for constraint access (IsNotNull, GetCheck, GetSQL, etc.)
+- CTE SELECT * expansion for CTE definitions
 - Comprehensive documentation across all major components
 - TCL to Go test conversions (batches 1-5) for SQLite compatibility testing
   - Batch 1: Core functionality tests
@@ -110,6 +119,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cleaned up contrib directory (removed SQLite C source, kept documentation)
 
 ### Fixed
+- UNIQUE constraint cursor position bug (use separate read cursor for scanning)
+- UNIQUE constraint record index calculation (skip INTEGER PRIMARY KEY columns)
+- CTE register adjustment for comparison opcodes (P2 is register, not jump target)
+- CTE jump target adjustment logic (separate jump vs comparison opcodes)
+- printf/format function implementation
+- PRIMARY KEY constraint error messages
 - Function call opcode parameter order (P5 for arg count)
 - B-tree split operations
 - Pager lock management
