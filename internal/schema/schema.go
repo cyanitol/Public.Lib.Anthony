@@ -900,3 +900,18 @@ func (t *Table) GetTableStats() *TableStats {
 func (t *Table) SetTableStats(stats *TableStats) {
 	t.Stats = stats
 }
+
+// IsNotNull returns true if this column has a NOT NULL constraint (for interface access from vdbe).
+func (c *Column) IsNotNull() bool {
+	return c.NotNull
+}
+
+// GetNotNull returns true if this column has a NOT NULL constraint (for interface access from vdbe).
+func (c *Column) GetNotNull() bool {
+	return c.NotNull
+}
+
+// GetCheck returns the CHECK constraint expression for this column (for interface access from vdbe).
+func (c *Column) GetCheck() string {
+	return c.Check
+}

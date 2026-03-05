@@ -244,12 +244,18 @@ func (s *Stmt) handleSpecialOpcode(vm *vdbe.VDBE, instr *vdbe.Instruction, newIn
 // adjustJumpTarget adjusts jump target addresses for jump opcodes.
 func (s *Stmt) adjustJumpTarget(vm *vdbe.VDBE, instr *vdbe.Instruction, addr int, offsets cteInlineOffsets) {
 	switch instr.Opcode {
-	case vdbe.OpGoto, vdbe.OpIf, vdbe.OpIfNot, vdbe.OpIfPos,
-		vdbe.OpEq, vdbe.OpNe, vdbe.OpLt, vdbe.OpLe, vdbe.OpGt, vdbe.OpGe,
-		vdbe.OpRewind, vdbe.OpNext, vdbe.OpPrev:
+	case vdbe.OpGoto, vdbe.OpIf, vdbe.OpIfNot, vdbe.OpIfPos:
+		// These opcodes use P2 as a jump target
 		if instr.P2 > 0 {
 			vm.Program[addr].P2 = instr.P2 + offsets.startAddr
 		}
+	case vdbe.OpRewind, vdbe.OpNext, vdbe.OpPrev:
+		// These opcodes use P2 as a jump target
+		if instr.P2 > 0 {
+			vm.Program[addr].P2 = instr.P2 + offsets.startAddr
+		}
+	// Note: OpEq, OpNe, OpLt, OpLe, OpGt, OpGe use P2 as a register, not a jump target
+	// They are handled by adjustRegisterNumbers instead
 	}
 }
 
@@ -367,16 +373,11 @@ func isControlFlowOp(op vdbe.Opcode) bool {
 
 // adjustArithmeticAndComparisonOps handles register adjustment for arithmetic and comparison operations.
 func adjustArithmeticAndComparisonOps(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int, int) {
-	// P1=left register, P2=right register or jump, P3=dest register
-	// Note: comparison ops use P2 for jump target, not register
-	switch op {
-	case vdbe.OpEq, vdbe.OpNe, vdbe.OpLt, vdbe.OpLe, vdbe.OpGt, vdbe.OpGe:
-		// P1=register, P2=jump target, P3=register
-		return p1 + baseReg, p2, p3 + baseReg
-	default:
-		// Arithmetic ops: P1, P2, P3 all registers
-		return p1 + baseReg, p2 + baseReg, p3 + baseReg
-	}
+	// Both arithmetic and comparison ops use P1, P2, P3 as registers
+	// P1 = left operand register
+	// P2 = right operand register
+	// P3 = result/destination register
+	return p1 + baseReg, p2 + baseReg, p3 + baseReg
 }
 
 // adjustJumpOps handles register adjustment for jump operations.
@@ -601,7 +602,9 @@ func (s *Stmt) createCTETempTable(tableName string, def *planner.CTEDefinition) 
 	if len(def.Columns) > 0 {
 		columns = s.createColumnsFromExplicitList(def.Columns)
 	} else if def.Select != nil && len(def.Select.Columns) > 0 {
-		columns = s.createColumnsFromSelect(def.Select.Columns)
+		// Expand SELECT * to actual columns before creating temp table
+		expandedCols := s.expandStarColumns(def.Select)
+		columns = s.createColumnsFromSelect(expandedCols)
 	}
 
 	return &schema.Table{
@@ -627,14 +630,15 @@ func (s *Stmt) createColumnsFromExplicitList(columnNames []string) []*schema.Col
 
 // createColumnsFromSelect creates columns from SELECT columns
 func (s *Stmt) createColumnsFromSelect(selectCols []parser.ResultColumn) []*schema.Column {
-	columns := make([]*schema.Column, len(selectCols))
+	var columns []*schema.Column
+
 	for i, col := range selectCols {
 		colName := s.inferColumnName(col, i)
-		columns[i] = &schema.Column{
+		columns = append(columns, &schema.Column{
 			Name:    colName,
 			Type:    "ANY",
 			NotNull: false,
-		}
+		})
 	}
 	return columns
 }
@@ -648,6 +652,37 @@ func (s *Stmt) inferColumnName(col parser.ResultColumn, index int) string {
 		return ident.Name
 	}
 	return fmt.Sprintf("column_%d", index+1)
+}
+
+// expandStarColumns expands SELECT * to individual columns from the source table(s)
+func (s *Stmt) expandStarColumns(stmt *parser.SelectStmt) []parser.ResultColumn {
+	var expandedCols []parser.ResultColumn
+
+	for _, col := range stmt.Columns {
+		if col.Star {
+			// Get the table(s) from FROM clause and expand their columns
+			if stmt.From != nil && len(stmt.From.Tables) > 0 {
+				for _, tableOrSub := range stmt.From.Tables {
+					if tableOrSub.TableName != "" {
+						// Look up the table in schema
+						if table, ok := s.conn.schema.GetTable(tableOrSub.TableName); ok {
+							// Add each column from the table
+							for _, schemaCol := range table.Columns {
+								expandedCols = append(expandedCols, parser.ResultColumn{
+									Expr: &parser.IdentExpr{Name: schemaCol.Name},
+								})
+							}
+						}
+					}
+				}
+			}
+		} else {
+			// Keep non-star columns as-is
+			expandedCols = append(expandedCols, col)
+		}
+	}
+
+	return expandedCols
 }
 
 // rewriteSelectWithCTETables rewrites a SELECT statement to replace CTE references

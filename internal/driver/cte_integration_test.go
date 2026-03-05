@@ -8,7 +8,7 @@ import (
 
 // TestCTEIntegration_Simple tests basic CTE functionality.
 func TestCTEIntegration_Simple(t *testing.T) {
-	t.Skip("CTE execution requires bytecode inlining architecture - not yet implemented")
+	t.Skip("Known issue: duplicate rows when CTE uses SELECT * - columns expand correctly but iteration has bug")
 
 	db, err := sql.Open(DriverName, ":memory:")
 	if err != nil {
@@ -35,6 +35,14 @@ func TestCTEIntegration_Simple(t *testing.T) {
 	}
 	defer rows.Close()
 
+	// Debug: print bytecode if available (commented out - rows is *sql.Rows, not *driver.Rows)
+	// if r, ok := rows.(*Rows); ok && r.vdbe != nil {
+	// 	t.Logf("VDBE Program:\n%s", r.vdbe.ExplainProgram())
+	// }
+
+	cols, _ := rows.Columns()
+	t.Logf("Columns: %v (count: %d)", cols, len(cols))
+
 	count := 0
 	for rows.Next() {
 		var id int
@@ -43,6 +51,7 @@ func TestCTEIntegration_Simple(t *testing.T) {
 		if err := rows.Scan(&id, &name, &age); err != nil {
 			t.Fatalf("scan failed: %v", err)
 		}
+		t.Logf("Row %d: id=%d, name=%s, age=%d", count+1, id, name, age)
 		count++
 	}
 
@@ -53,7 +62,7 @@ func TestCTEIntegration_Simple(t *testing.T) {
 
 // TestCTEIntegration_Multiple tests multiple CTEs with dependencies.
 func TestCTEIntegration_Multiple(t *testing.T) {
-	t.Skip("CTE execution requires bytecode inlining architecture - not yet implemented")
+	t.Skip("Known issue: multiple CTEs with subqueries return 0 rows - needs investigation")
 
 	db, err := sql.Open(DriverName, ":memory:")
 	if err != nil {
@@ -187,7 +196,7 @@ func TestCTEIntegration_RecursiveHierarchy(t *testing.T) {
 
 // TestCTEIntegration_WithColumnList tests CTEs with explicit column lists.
 func TestCTEIntegration_WithColumnList(t *testing.T) {
-	t.Skip("CTE execution requires bytecode inlining architecture - not yet implemented")
+	// t.Skip("CTE execution requires bytecode inlining architecture - not yet implemented")
 
 	db, err := sql.Open(DriverName, ":memory:")
 	if err != nil {
@@ -234,7 +243,7 @@ func TestCTEIntegration_WithColumnList(t *testing.T) {
 
 // TestCTEIntegration_NestedReference tests CTEs referenced multiple times.
 func TestCTEIntegration_NestedReference(t *testing.T) {
-	t.Skip("CTE execution requires bytecode inlining architecture - not yet implemented")
+	t.Skip("Known issue: UNION ALL with CTEs fails with 'insert data must be a blob' - compound select integration needed")
 
 	db, err := sql.Open(DriverName, ":memory:")
 	if err != nil {

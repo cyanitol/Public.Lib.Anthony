@@ -2054,9 +2054,17 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 		return err
 	}
 
-	// Check UNIQUE column constraints before inserting
-	// P4.Z contains the table name (passed from compiler)
+	// Check constraints before inserting - P4.Z contains the table name
 	if instr.P4.Z != "" {
+		// Check NOT NULL constraints
+		if err := v.checkNotNullConstraints(instr.P4.Z, payload); err != nil {
+			return err
+		}
+		// Check CHECK constraints
+		if err := v.checkCheckConstraints(instr.P4.Z, payload, rowid); err != nil {
+			return err
+		}
+		// Check UNIQUE column constraints
 		if err := v.checkUniqueConstraints(instr.P4.Z, payload, btCursor, rowid); err != nil {
 			return err
 		}

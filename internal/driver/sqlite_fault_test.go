@@ -136,7 +136,7 @@ func TestFault_CheckConstraintViolation(t *testing.T) {
 }
 
 func TestFault_NotNullConstraintViolation(t *testing.T) {
-	t.Skip("pre-existing failure - needs constraint/fault handling implementation")
+	// NOT NULL constraint is now implemented
 	db := setupMemoryDB(t)
 	defer db.Close()
 
