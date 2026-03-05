@@ -1,7 +1,7 @@
 # Anthony SQLite Driver - TODO List
 # Format: https://github.com/todotxt/todo.txt
 # Generated: 2026-02-27 | Updated: 2026-03-05 (v0.1.0)
-# Stats: 634 passing | 497 skipped | 0 failing | 56% pass rate (driver tests)
+# Stats: 655 passing | 476 skipped | 0 failing | 58% pass rate (driver tests)
 
 # ============================================================================
 # PRIORITY 1: MAJOR SKIP CATEGORIES (145 skips)
