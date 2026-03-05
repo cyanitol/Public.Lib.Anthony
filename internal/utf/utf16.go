@@ -289,15 +289,23 @@ func UTF16ByteLen(data []byte, enc Encoding, nChar int) int {
 	i := 0
 
 	for i < len(data)-1 && count < nChar {
-		c := readUint16(data[i:], enc)
-		i += 2
-
-		if isHighSurrogate(c) && i < len(data)-1 && isLowSurrogate(readUint16(data[i:], enc)) {
-			i += 2
-		}
-
+		bytesRead := utf16CharByteLen(data[i:], enc)
+		i += bytesRead
 		count++
 	}
 
 	return i
+}
+
+// utf16CharByteLen returns the number of bytes for a single UTF-16 character.
+func utf16CharByteLen(data []byte, enc Encoding) int {
+	if len(data) < 2 {
+		return 0
+	}
+
+	c := readUint16(data, enc)
+	if isHighSurrogate(c) && len(data) >= 4 && isLowSurrogate(readUint16(data[2:], enc)) {
+		return 4
+	}
+	return 2
 }

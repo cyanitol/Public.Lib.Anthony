@@ -56,27 +56,35 @@ func (p *Pager) Savepoint(name string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Can only create savepoints in a write transaction
+	if err := p.validateSavepointCreate(name); err != nil {
+		return err
+	}
+
+	sp := p.createSavepointState(name)
+	p.addSavepoint(sp)
+
+	return nil
+}
+
+func (p *Pager) validateSavepointCreate(name string) error {
 	if p.state < PagerStateWriterLocked {
 		return errors.New("savepoint requires active write transaction")
 	}
-
 	if p.state == PagerStateError {
 		return p.errCode
 	}
-
 	if name == "" {
 		return errors.New("savepoint name cannot be empty")
 	}
-
-	// Check if savepoint with this name already exists
 	for _, sp := range p.getSavepoints() {
 		if sp.Name == name {
 			return fmt.Errorf("savepoint %s already exists", name)
 		}
 	}
+	return nil
+}
 
-	// Create new savepoint
+func (p *Pager) createSavepointState(name string) *Savepoint {
 	sp := &Savepoint{
 		Name:             name,
 		DbSize:           p.dbSize,
@@ -84,18 +92,14 @@ func (p *Pager) Savepoint(name string) error {
 		JournalPageCount: 0,
 	}
 
-	// If journal is open, record its current state
 	if p.journalFile != nil {
-		offset, err := p.journalFile.Seek(0, 1) // Get current position
+		offset, err := p.journalFile.Seek(0, 1)
 		if err == nil {
 			sp.JournalOffset = offset
 		}
 	}
 
-	// Add to savepoint stack
-	p.addSavepoint(sp)
-
-	return nil
+	return sp
 }
 
 // Release releases a savepoint and all savepoints created after it.
@@ -137,42 +141,44 @@ func (p *Pager) RollbackTo(name string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Can only rollback to savepoints in a write transaction
-	if p.state < PagerStateWriterLocked {
-		return errors.New("rollback to savepoint requires active write transaction")
+	if err := p.validateRollbackState(); err != nil {
+		return err
 	}
 
-	if p.state == PagerStateError {
-		return p.errCode
+	targetSavepoint, index, err := p.findSavepoint(name)
+	if err != nil {
+		return err
 	}
 
-	// Find the savepoint
-	savepoints := p.getSavepoints()
-	index := -1
-	var targetSavepoint *Savepoint
-	for i, sp := range savepoints {
-		if sp.Name == name {
-			index = i
-			targetSavepoint = sp
-			break
-		}
-	}
-
-	if index == -1 {
-		return fmt.Errorf("no such savepoint: %s", name)
-	}
-
-	// Restore page states from newer savepoints
 	if err := p.restoreToSavepoint(targetSavepoint, index); err != nil {
 		return err
 	}
 
-	// Remove newer savepoints (but keep the target savepoint)
 	if index > 0 {
 		p.releaseSavepoints(index - 1)
 	}
 
 	return nil
+}
+
+func (p *Pager) validateRollbackState() error {
+	if p.state < PagerStateWriterLocked {
+		return errors.New("rollback to savepoint requires active write transaction")
+	}
+	if p.state == PagerStateError {
+		return p.errCode
+	}
+	return nil
+}
+
+func (p *Pager) findSavepoint(name string) (*Savepoint, int, error) {
+	savepoints := p.getSavepoints()
+	for i, sp := range savepoints {
+		if sp.Name == name {
+			return sp, i, nil
+		}
+	}
+	return nil, -1, fmt.Errorf("no such savepoint: %s", name)
 }
 
 // ClearSavepoints removes all savepoints.

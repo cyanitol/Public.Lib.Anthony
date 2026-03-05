@@ -113,46 +113,51 @@ func checkAbsolutePath(path string, config *SecurityConfig) error {
 // resolveSandboxPath resolves the path within the sandbox (Layer 2).
 func resolveSandboxPath(path string, config *SecurityConfig) (string, error) {
 	if !config.EnforceSandbox {
-		// If sandbox not enforced, just clean the path
 		return filepath.Clean(path), nil
 	}
 
-	// Get the sandbox root
 	sandboxRoot := config.DatabaseRoot
 	if sandboxRoot == "" {
-		// No sandbox root configured - if absolute paths are blocked, reject them
-		// Otherwise allow relative paths only
-		if config.BlockAbsolutePaths && filepath.IsAbs(path) {
-			return "", ErrAbsolutePath
-		}
-		return filepath.Clean(path), nil
+		return handleNoSandboxRoot(path, config)
 	}
 
-	// Clean the sandbox root
-	sandboxRoot = filepath.Clean(sandboxRoot)
+	return resolveSandboxedPath(path, filepath.Clean(sandboxRoot))
+}
 
-	var resolvedPath string
-	if filepath.IsAbs(path) {
-		// If path is already absolute, check if it's within sandbox
-		resolvedPath = filepath.Clean(path)
-	} else {
-		// Join the relative path with the sandbox root
-		resolvedPath = filepath.Join(sandboxRoot, path)
+// handleNoSandboxRoot handles path resolution when no sandbox root is configured.
+func handleNoSandboxRoot(path string, config *SecurityConfig) (string, error) {
+	if config.BlockAbsolutePaths && filepath.IsAbs(path) {
+		return "", ErrAbsolutePath
 	}
+	return filepath.Clean(path), nil
+}
 
-	// Ensure the resolved path is within the sandbox
-	// We need to check that the resolved path has the sandbox as a prefix
-	if !strings.HasPrefix(resolvedPath, sandboxRoot) {
-		return "", ErrEscapesSandbox
+// resolveSandboxedPath resolves a path within a sandbox root.
+func resolveSandboxedPath(path, sandboxRoot string) (string, error) {
+	resolvedPath := computeResolvedPath(path, sandboxRoot)
+	if err := validateSandboxPrefix(resolvedPath, sandboxRoot); err != nil {
+		return "", err
 	}
-
-	// Additional check: ensure no path traversal escaped the sandbox
-	// by comparing the cleaned joined path with a clean version of the concatenation
-	if !strings.HasPrefix(filepath.Clean(resolvedPath), filepath.Clean(sandboxRoot)) {
-		return "", ErrEscapesSandbox
-	}
-
 	return resolvedPath, nil
+}
+
+// computeResolvedPath computes the resolved path based on whether it's absolute or relative.
+func computeResolvedPath(path, sandboxRoot string) string {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	return filepath.Join(sandboxRoot, path)
+}
+
+// validateSandboxPrefix validates that the resolved path is within the sandbox.
+func validateSandboxPrefix(resolvedPath, sandboxRoot string) error {
+	if !strings.HasPrefix(resolvedPath, sandboxRoot) {
+		return ErrEscapesSandbox
+	}
+	if !strings.HasPrefix(filepath.Clean(resolvedPath), filepath.Clean(sandboxRoot)) {
+		return ErrEscapesSandbox
+	}
+	return nil
 }
 
 // checkAllowlist verifies the path is in an allowed subdirectory (Layer 3).

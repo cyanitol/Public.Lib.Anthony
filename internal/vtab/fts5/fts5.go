@@ -297,46 +297,78 @@ func (c *FTS5Cursor) Filter(idxNum int, idxStr string, argv []interface{}) error
 	c.table.mu.RLock()
 	defer c.table.mu.RUnlock()
 
-	// If we have a MATCH query (idxNum == 1), execute it
 	if idxNum == 1 && len(argv) > 0 {
-		if queryStr, ok := argv[0].(string); ok {
-			c.query = queryStr
-
-			// Parse and execute the query
-			parser := NewQueryParser(c.table.tokenizer)
-			query, err := parser.Parse(queryStr)
-			if err != nil {
-				return fmt.Errorf("invalid FTS query: %v", err)
-			}
-
-			executor := NewQueryExecutor(c.table.index, c.table.ranker)
-			results, err := executor.Execute(query)
-			if err != nil {
-				return fmt.Errorf("query execution failed: %v", err)
-			}
-
-			c.results = results
-		}
-	} else {
-		// No MATCH constraint - return all documents
-		docIDs := c.table.index.GetAllDocuments()
-		c.results = make([]SearchResult, len(docIDs))
-		for i, docID := range docIDs {
-			c.results[i] = SearchResult{
-				DocID: docID,
-				Score: 0.0,
-			}
-		}
+		return c.executeMatchQuery(argv[0])
 	}
 
-	// Position at first result
+	c.loadAllDocuments()
+	c.positionAtFirst()
+	return nil
+}
+
+// executeMatchQuery executes a MATCH query and populates results.
+func (c *FTS5Cursor) executeMatchQuery(arg interface{}) error {
+	queryStr, ok := arg.(string)
+	if !ok {
+		return nil
+	}
+
+	c.query = queryStr
+
+	query, err := c.parseQuery(queryStr)
+	if err != nil {
+		return err
+	}
+
+	results, err := c.executeQuery(query)
+	if err != nil {
+		return err
+	}
+
+	c.results = results
+	c.positionAtFirst()
+	return nil
+}
+
+// parseQuery parses the query string.
+func (c *FTS5Cursor) parseQuery(queryStr string) (*Query, error) {
+	parser := NewQueryParser(c.table.tokenizer)
+	query, err := parser.Parse(queryStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid FTS query: %v", err)
+	}
+	return query, nil
+}
+
+// executeQuery executes the parsed query.
+func (c *FTS5Cursor) executeQuery(query *Query) ([]SearchResult, error) {
+	executor := NewQueryExecutor(c.table.index, c.table.ranker)
+	results, err := executor.Execute(query)
+	if err != nil {
+		return nil, fmt.Errorf("query execution failed: %v", err)
+	}
+	return results, nil
+}
+
+// loadAllDocuments loads all documents when no MATCH constraint is present.
+func (c *FTS5Cursor) loadAllDocuments() {
+	docIDs := c.table.index.GetAllDocuments()
+	c.results = make([]SearchResult, len(docIDs))
+	for i, docID := range docIDs {
+		c.results[i] = SearchResult{
+			DocID: docID,
+			Score: 0.0,
+		}
+	}
+}
+
+// positionAtFirst positions the cursor at the first result.
+func (c *FTS5Cursor) positionAtFirst() {
 	if len(c.results) > 0 {
 		c.pos = 0
 	} else {
 		c.pos = -1
 	}
-
-	return nil
 }
 
 // Next advances to the next result.

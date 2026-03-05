@@ -127,17 +127,24 @@ func DecodeRuneLimited(data []byte, n int) (r rune, size int) {
 	}
 
 	c := uint32(data[0])
-	size = 1
+	if c < 0xC0 {
+		return rune(c), 1
+	}
 
-	if c >= 0xC0 {
-		c = uint32(utf8Trans1[c-0xC0])
-		if n > 4 {
-			n = 4
-		}
-		for size < n && size < len(data) && (data[size]&0xC0) == 0x80 {
-			c = (c << 6) + uint32(data[size]&0x3F)
-			size++
-		}
+	return decodeMultiByteLimited(data, c, n)
+}
+
+// decodeMultiByteLimited decodes a multi-byte UTF-8 sequence with a limit.
+func decodeMultiByteLimited(data []byte, c uint32, n int) (rune, int) {
+	c = uint32(utf8Trans1[c-0xC0])
+	if n > 4 {
+		n = 4
+	}
+
+	size := 1
+	for size < n && size < len(data) && (data[size]&0xC0) == 0x80 {
+		c = (c << 6) + uint32(data[size]&0x3F)
+		size++
 	}
 
 	return rune(c), size
@@ -148,64 +155,49 @@ func DecodeRuneLimited(data []byte, n int) (r rune, size int) {
 // If nByte >= 0, counts characters in the first nByte bytes or until 0x00.
 func CharCount(s string, nByte int) int {
 	data := []byte(s)
-	var count int
-	var limit int
+	limit := computeCharCountLimit(len(data), nByte)
+	return countUTF8Chars(data, limit)
+}
 
-	if nByte >= 0 {
-		limit = nByte
-		if limit > len(data) {
-			limit = len(data)
-		}
-	} else {
-		limit = len(data)
+// computeCharCountLimit computes the limit for character counting.
+func computeCharCountLimit(dataLen, nByte int) int {
+	if nByte < 0 {
+		return dataLen
 	}
+	if nByte > dataLen {
+		return dataLen
+	}
+	return nByte
+}
 
+// countUTF8Chars counts UTF-8 characters up to limit or null byte.
+func countUTF8Chars(data []byte, limit int) int {
+	count := 0
 	i := 0
 	for i < limit && data[i] != 0 {
-		// Skip UTF-8 sequence
-		if data[i] >= 0xC0 {
-			i++
-			for i < limit && (data[i]&0xC0) == 0x80 {
-				i++
-			}
-		} else {
-			i++
-		}
+		i += skipUTF8Sequence(data[i:], limit-i)
 		count++
 	}
-
 	return count
+}
+
+// skipUTF8Sequence skips a single UTF-8 character sequence.
+func skipUTF8Sequence(data []byte, limit int) int {
+	if data[0] < 0xC0 {
+		return 1
+	}
+
+	i := 1
+	for i < limit && i < len(data) && (data[i]&0xC0) == 0x80 {
+		i++
+	}
+	return i
 }
 
 // CharCountBytes is like CharCount but works with byte slices.
 func CharCountBytes(data []byte, nByte int) int {
-	var count int
-	var limit int
-
-	if nByte >= 0 {
-		limit = nByte
-		if limit > len(data) {
-			limit = len(data)
-		}
-	} else {
-		limit = len(data)
-	}
-
-	i := 0
-	for i < limit && data[i] != 0 {
-		// Skip UTF-8 sequence
-		if data[i] >= 0xC0 {
-			i++
-			for i < limit && (data[i]&0xC0) == 0x80 {
-				i++
-			}
-		} else {
-			i++
-		}
-		count++
-	}
-
-	return count
+	limit := computeCharCountLimit(len(data), nByte)
+	return countUTF8Chars(data, limit)
 }
 
 // ValidateUTF8 validates that data contains valid UTF-8.

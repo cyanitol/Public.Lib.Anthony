@@ -259,23 +259,59 @@ type ForeignKeyError struct {
 
 // Error implements the error interface.
 func (e *ForeignKeyError) Error() string {
-	msg := "FOREIGN KEY constraint violation"
-	if e.ConstraintName != "" {
-		msg = fmt.Sprintf("%s (%s)", msg, e.ConstraintName)
-	}
-	if e.TableName != "" && e.ColumnName != "" {
-		msg = fmt.Sprintf("%s: %s.%s", msg, e.TableName, e.ColumnName)
-	}
-	if e.ParentTable != "" && e.ParentColumn != "" {
-		msg = fmt.Sprintf("%s references %s.%s", msg, e.ParentTable, e.ParentColumn)
-	}
-	if e.Action != "" {
-		msg = fmt.Sprintf("%s during %s", msg, e.Action)
-	}
-	if e.ChildValue != nil {
-		msg = fmt.Sprintf("%s: value %v not found in parent table", msg, e.ChildValue)
-	}
+	msg := buildForeignKeyErrorMsg(e)
 	return fmt.Sprintf("%s (code %d)", msg, e.Code)
+}
+
+// buildForeignKeyErrorMsg builds the detailed error message for foreign key violations.
+func buildForeignKeyErrorMsg(e *ForeignKeyError) string {
+	msg := "FOREIGN KEY constraint violation"
+	msg = addConstraintName(msg, e.ConstraintName)
+	msg = addTableAndColumn(msg, e.TableName, e.ColumnName)
+	msg = addParentReference(msg, e.ParentTable, e.ParentColumn)
+	msg = addAction(msg, e.Action)
+	msg = addChildValue(msg, e.ChildValue)
+	return msg
+}
+
+// addConstraintName adds constraint name to the message if present.
+func addConstraintName(msg, constraintName string) string {
+	if constraintName != "" {
+		return fmt.Sprintf("%s (%s)", msg, constraintName)
+	}
+	return msg
+}
+
+// addTableAndColumn adds table and column info to the message if present.
+func addTableAndColumn(msg, tableName, columnName string) string {
+	if tableName != "" && columnName != "" {
+		return fmt.Sprintf("%s: %s.%s", msg, tableName, columnName)
+	}
+	return msg
+}
+
+// addParentReference adds parent table reference to the message if present.
+func addParentReference(msg, parentTable, parentColumn string) string {
+	if parentTable != "" && parentColumn != "" {
+		return fmt.Sprintf("%s references %s.%s", msg, parentTable, parentColumn)
+	}
+	return msg
+}
+
+// addAction adds the action to the message if present.
+func addAction(msg, action string) string {
+	if action != "" {
+		return fmt.Sprintf("%s during %s", msg, action)
+	}
+	return msg
+}
+
+// addChildValue adds the child value to the message if present.
+func addChildValue(msg string, childValue interface{}) string {
+	if childValue != nil {
+		return fmt.Sprintf("%s: value %v not found in parent table", msg, childValue)
+	}
+	return msg
 }
 
 // NewForeignKeyError creates a new ForeignKeyError.

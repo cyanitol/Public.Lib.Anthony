@@ -47,49 +47,60 @@ func extractCheckConstraints(table *schema.Table) []*CheckConstraint {
 	var constraints []*CheckConstraint
 
 	// Extract column-level CHECK constraints
-	for _, col := range table.Columns {
-		if col.Check != "" {
-			// Parse the CHECK expression
-			p := parser.NewParser(col.Check)
-			expr, err := p.ParseExpression()
-			if err != nil {
-				// If parsing fails, skip this constraint
-				// In a production system, we might want to log this
-				continue
-			}
-
-			constraints = append(constraints, &CheckConstraint{
-				Name:         "", // Column-level constraints typically don't have explicit names
-				Expression:   expr,
-				ExprString:   col.Check,
-				IsTableLevel: false,
-				ColumnName:   col.Name,
-			})
-		}
-	}
+	constraints = extractColumnCheckConstraints(table, constraints)
 
 	// Extract table-level CHECK constraints
-	for _, tc := range table.Constraints {
-		if tc.Type == schema.ConstraintCheck && tc.Expression != "" {
-			// Parse the CHECK expression
-			p := parser.NewParser(tc.Expression)
-			expr, err := p.ParseExpression()
-			if err != nil {
-				// If parsing fails, skip this constraint
-				continue
-			}
-
-			constraints = append(constraints, &CheckConstraint{
-				Name:         tc.Name,
-				Expression:   expr,
-				ExprString:   tc.Expression,
-				IsTableLevel: true,
-				ColumnName:   "",
-			})
-		}
-	}
+	constraints = extractTableCheckConstraints(table, constraints)
 
 	return constraints
+}
+
+// extractColumnCheckConstraints extracts column-level CHECK constraints.
+func extractColumnCheckConstraints(table *schema.Table, constraints []*CheckConstraint) []*CheckConstraint {
+	for _, col := range table.Columns {
+		if col.Check == "" {
+			continue
+		}
+
+		constraint := parseCheckConstraint(col.Check, "", col.Name, false)
+		if constraint != nil {
+			constraints = append(constraints, constraint)
+		}
+	}
+	return constraints
+}
+
+// extractTableCheckConstraints extracts table-level CHECK constraints.
+func extractTableCheckConstraints(table *schema.Table, constraints []*CheckConstraint) []*CheckConstraint {
+	for _, tc := range table.Constraints {
+		if tc.Type != schema.ConstraintCheck || tc.Expression == "" {
+			continue
+		}
+
+		constraint := parseCheckConstraint(tc.Expression, tc.Name, "", true)
+		if constraint != nil {
+			constraints = append(constraints, constraint)
+		}
+	}
+	return constraints
+}
+
+// parseCheckConstraint parses a CHECK expression and creates a constraint.
+func parseCheckConstraint(exprStr, name, colName string, isTableLevel bool) *CheckConstraint {
+	p := parser.NewParser(exprStr)
+	expr, err := p.ParseExpression()
+	if err != nil {
+		// If parsing fails, skip this constraint
+		return nil
+	}
+
+	return &CheckConstraint{
+		Name:         name,
+		Expression:   expr,
+		ExprString:   exprStr,
+		IsTableLevel: isTableLevel,
+		ColumnName:   colName,
+	}
 }
 
 // CheckCodeGenerator is an interface that allows CHECK constraint validation

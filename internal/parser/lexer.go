@@ -333,15 +333,13 @@ func (l *Lexer) readIdentifierOrKeyword() Token {
 	startCol := l.col
 
 	// Handle X'...' blob literals
-	if (l.ch == 'x' || l.ch == 'X') && l.peekChar() == '\'' {
+	if l.isBlobLiteralStart() {
 		l.readChar() // consume 'x' or 'X'
 		l.readChar() // consume '\''
 		return l.readBlobLiteral(startPos, startLine, startCol)
 	}
 
-	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' || l.ch == '$' {
-		l.readChar()
-	}
+	l.readIdentifierChars()
 
 	lexeme := l.input[startPos:l.pos]
 	tokType := lookupKeyword(lexeme)
@@ -352,6 +350,16 @@ func (l *Lexer) readIdentifierOrKeyword() Token {
 		Pos:    startPos,
 		Line:   startLine,
 		Col:    startCol,
+	}
+}
+
+func (l *Lexer) isBlobLiteralStart() bool {
+	return (l.ch == 'x' || l.ch == 'X') && l.peekChar() == '\''
+}
+
+func (l *Lexer) readIdentifierChars() {
+	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' || l.ch == '$' {
+		l.readChar()
 	}
 }
 

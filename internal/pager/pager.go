@@ -1317,30 +1317,44 @@ func (p *Pager) writeDirtyPagesToWAL() error {
 		return errors.New("WAL not initialized")
 	}
 
-	dirtyPages := p.cache.GetDirtyPages()
-
-	for _, page := range dirtyPages {
-		if err := p.wal.WriteFrame(page.Pgno, page.Data, uint32(p.dbSize)); err != nil {
-			return fmt.Errorf("failed to write page %d to WAL: %w", page.Pgno, err)
-		}
-
-		// Update WAL index
-		if p.walIndex != nil {
-			frameNo := p.wal.FrameCount() - 1
-			if err := p.walIndex.InsertFrame(uint32(page.Pgno), frameNo); err != nil {
-				return fmt.Errorf("failed to update WAL index for page %d: %w", page.Pgno, err)
-			}
-		}
+	if err := p.writePageFramesToWAL(); err != nil {
+		return err
 	}
 
 	if err := p.setStateLocked(PagerStateWriterFinished); err != nil {
 		return err
 	}
 
-	// Auto-checkpoint if WAL is getting large
-	if p.wal.ShouldCheckpoint() {
-		_ = p.wal.Checkpoint() // Ignore checkpoint errors for now
+	p.autoCheckpointWAL()
+	return nil
+}
+
+func (p *Pager) writePageFramesToWAL() error {
+	dirtyPages := p.cache.GetDirtyPages()
+	for _, page := range dirtyPages {
+		if err := p.writePageFrameToWAL(page); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Pager) writePageFrameToWAL(page *DbPage) error {
+	if err := p.wal.WriteFrame(page.Pgno, page.Data, uint32(p.dbSize)); err != nil {
+		return fmt.Errorf("failed to write page %d to WAL: %w", page.Pgno, err)
 	}
 
+	if p.walIndex != nil {
+		frameNo := p.wal.FrameCount() - 1
+		if err := p.walIndex.InsertFrame(uint32(page.Pgno), frameNo); err != nil {
+			return fmt.Errorf("failed to update WAL index for page %d: %w", page.Pgno, err)
+		}
+	}
 	return nil
+}
+
+func (p *Pager) autoCheckpointWAL() {
+	if p.wal.ShouldCheckpoint() {
+		_ = p.wal.Checkpoint()
+	}
 }

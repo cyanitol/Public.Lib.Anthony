@@ -262,8 +262,11 @@ func valuesEqual(v1, v2 interface{}) bool {
 	if eitherNil(v1, v2) {
 		return false
 	}
+	return compareTypedValues(v1, v2)
+}
 
-	// Type conversions for comparison
+// compareTypedValues dispatches comparison based on type.
+func compareTypedValues(v1, v2 interface{}) bool {
 	switch a := v1.(type) {
 	case int:
 		return compareInt(a, v2)
@@ -276,7 +279,6 @@ func valuesEqual(v1, v2 interface{}) bool {
 	case []byte:
 		return compareBytes(a, v2)
 	}
-
 	return false
 }
 

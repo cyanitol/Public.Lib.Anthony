@@ -299,15 +299,24 @@ func (n *Node) pickSeeds(entries []*Entry) (int, int) {
 // Returns the index of the entry with maximum difference in enlargement.
 func (n *Node) pickNext(entries []*Entry, assigned []bool, group1, group2 []*Entry) int {
 	if len(group1) == 0 || len(group2) == 0 {
-		// Find first unassigned entry
-		for i := 0; i < len(entries); i++ {
-			if !assigned[i] {
-				return i
-			}
-		}
-		return -1
+		return findFirstUnassigned(entries, assigned)
 	}
 
+	return findMaxEnlargementDiff(entries, assigned, group1, group2)
+}
+
+// findFirstUnassigned finds the first unassigned entry.
+func findFirstUnassigned(entries []*Entry, assigned []bool) int {
+	for i := 0; i < len(entries); i++ {
+		if !assigned[i] {
+			return i
+		}
+	}
+	return -1
+}
+
+// findMaxEnlargementDiff finds the entry with maximum enlargement difference.
+func findMaxEnlargementDiff(entries []*Entry, assigned []bool, group1, group2 []*Entry) int {
 	bbox1 := calculateGroupBBox(group1)
 	bbox2 := calculateGroupBBox(group2)
 
@@ -319,12 +328,7 @@ func (n *Node) pickNext(entries []*Entry, assigned []bool, group1, group2 []*Ent
 			continue
 		}
 
-		entry := entries[i]
-		enlargement1 := bbox1.EnlargementNeeded(entry.BBox)
-		enlargement2 := bbox2.EnlargementNeeded(entry.BBox)
-
-		diff := math.Abs(enlargement1 - enlargement2)
-
+		diff := computeEnlargementDiff(entries[i], bbox1, bbox2)
 		if diff > maxDiff {
 			maxDiff = diff
 			bestIdx = i
@@ -332,6 +336,13 @@ func (n *Node) pickNext(entries []*Entry, assigned []bool, group1, group2 []*Ent
 	}
 
 	return bestIdx
+}
+
+// computeEnlargementDiff computes the absolute difference in enlargement.
+func computeEnlargementDiff(entry *Entry, bbox1, bbox2 *BoundingBox) float64 {
+	enlargement1 := bbox1.EnlargementNeeded(entry.BBox)
+	enlargement2 := bbox2.EnlargementNeeded(entry.BBox)
+	return math.Abs(enlargement1 - enlargement2)
 }
 
 // calculateGroupBBox calculates the bounding box for a group of entries.

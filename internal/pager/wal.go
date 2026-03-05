@@ -252,24 +252,40 @@ func (w *WAL) ReadFrame(frameNo uint32) (*WALFrame, error) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
+	if err := w.validateReadFrame(frameNo); err != nil {
+		return nil, err
+	}
+
+	frame, err := w.readFrameData(frameNo)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := w.validateFrame(frame, frameNo); err != nil {
+		return nil, err
+	}
+
+	return frame, nil
+}
+
+func (w *WAL) validateReadFrame(frameNo uint32) error {
 	if w.file == nil {
-		return nil, errors.New("WAL not open")
+		return errors.New("WAL not open")
 	}
-
 	if frameNo >= w.frameCount {
-		return nil, fmt.Errorf("frame %d out of range (total: %d)", frameNo, w.frameCount)
+		return fmt.Errorf("frame %d out of range (total: %d)", frameNo, w.frameCount)
 	}
+	return nil
+}
 
-	// Calculate offset: header + (frameNo * (frame header + page data))
+func (w *WAL) readFrameData(frameNo uint32) (*WALFrame, error) {
 	offset := int64(WALHeaderSize) + int64(frameNo)*(int64(WALFrameHeaderSize)+int64(w.pageSize))
 
-	// Read frame header
 	headerData := make([]byte, WALFrameHeaderSize)
 	if _, err := w.file.ReadAt(headerData, offset); err != nil {
 		return nil, fmt.Errorf("failed to read frame header: %w", err)
 	}
 
-	// Parse frame header
 	frame := &WALFrame{
 		PageNumber: binary.BigEndian.Uint32(headerData[0:4]),
 		DbSize:     binary.BigEndian.Uint32(headerData[4:8]),
@@ -280,23 +296,22 @@ func (w *WAL) ReadFrame(frameNo uint32) (*WALFrame, error) {
 		Data:       make([]byte, w.pageSize),
 	}
 
-	// Read page data
 	dataOffset := offset + int64(WALFrameHeaderSize)
 	if _, err := w.file.ReadAt(frame.Data, dataOffset); err != nil {
 		return nil, fmt.Errorf("failed to read frame data: %w", err)
 	}
 
-	// Validate salt values
-	if frame.Salt1 != w.salt1 || frame.Salt2 != w.salt2 {
-		return nil, fmt.Errorf("frame salt mismatch")
-	}
-
-	// Validate checksum
-	if err := w.validateFrameChecksum(frame, frameNo); err != nil {
-		return nil, fmt.Errorf("frame checksum validation failed: %w", err)
-	}
-
 	return frame, nil
+}
+
+func (w *WAL) validateFrame(frame *WALFrame, frameNo uint32) error {
+	if frame.Salt1 != w.salt1 || frame.Salt2 != w.salt2 {
+		return fmt.Errorf("frame salt mismatch")
+	}
+	if err := w.validateFrameChecksum(frame, frameNo); err != nil {
+		return fmt.Errorf("frame checksum validation failed: %w", err)
+	}
+	return nil
 }
 
 // FindPage searches the WAL for the most recent frame containing the given page.

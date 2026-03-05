@@ -168,46 +168,60 @@ func (s *Stmt) compileAlterTableRenameColumn(vm *vdbe.VDBE, table *schema.Table,
 
 // compileAlterTableAddColumn handles ALTER TABLE ... ADD COLUMN ...
 func (s *Stmt) compileAlterTableAddColumn(vm *vdbe.VDBE, table *schema.Table, colDef *parser.ColumnDef) (*vdbe.VDBE, error) {
-	// Check if column already exists
-	if _, exists := table.GetColumn(colDef.Name); exists {
-		return nil, fmt.Errorf("column %q already exists in table %q", colDef.Name, table.Name)
+	if err := s.validateColumnAddition(table, colDef); err != nil {
+		return nil, err
 	}
 
-	// Create new column
+	newCol := s.createNewColumn(colDef)
+	table.Columns = append(table.Columns, newCol)
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
+// validateColumnAddition checks if a column can be added to the table.
+func (s *Stmt) validateColumnAddition(table *schema.Table, colDef *parser.ColumnDef) error {
+	if _, exists := table.GetColumn(colDef.Name); exists {
+		return fmt.Errorf("column %q already exists in table %q", colDef.Name, table.Name)
+	}
+	return nil
+}
+
+// createNewColumn creates a new column from a column definition.
+func (s *Stmt) createNewColumn(colDef *parser.ColumnDef) *schema.Column {
 	newCol := &schema.Column{
 		Name:     colDef.Name,
 		Type:     colDef.Type,
 		Affinity: schema.DetermineAffinity(colDef.Type),
 	}
 
-	// Apply constraints
-	for _, constraint := range colDef.Constraints {
-		switch constraint.Type {
-		case parser.ConstraintNotNull:
-			newCol.NotNull = true
-		case parser.ConstraintUnique:
-			newCol.Unique = true
-		case parser.ConstraintDefault:
-			if constraint.Default != nil {
-				newCol.Default = constraint.Default.String()
-			}
-		case parser.ConstraintCollate:
-			newCol.Collation = constraint.Collate
-		}
+	s.applyColumnConstraints(newCol, colDef.Constraints)
+	return newCol
+}
+
+// applyColumnConstraints applies constraints to a column.
+func (s *Stmt) applyColumnConstraints(col *schema.Column, constraints []parser.ColumnConstraint) {
+	for _, constraint := range constraints {
+		s.applyColumnConstraint(col, constraint)
 	}
+}
 
-	// Add column to table
-	table.Columns = append(table.Columns, newCol)
-
-	// In a full implementation, this would:
-	// 1. Update sqlite_master table
-	// 2. Add default values to all existing rows
-	// 3. Update the schema cookie
-
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	return vm, nil
+// applyColumnConstraint applies a single constraint to a column.
+func (s *Stmt) applyColumnConstraint(col *schema.Column, constraint parser.ColumnConstraint) {
+	switch constraint.Type {
+	case parser.ConstraintNotNull:
+		col.NotNull = true
+	case parser.ConstraintUnique:
+		col.Unique = true
+	case parser.ConstraintDefault:
+		if constraint.Default != nil {
+			col.Default = constraint.Default.String()
+		}
+	case parser.ConstraintCollate:
+		col.Collation = constraint.Collate
+	}
 }
 
 // compileAlterTableDropColumn handles ALTER TABLE ... DROP COLUMN ...

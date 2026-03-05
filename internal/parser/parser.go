@@ -1780,26 +1780,36 @@ func (p *Parser) parseForeignKeyReferences() (string, []string, error) {
 	}
 	refTable := Unquote(p.advance().Lexeme)
 
-	// Parse referenced columns (optional)
-	var refColumns []string
-	if p.match(TK_LP) {
-		for {
-			if !p.check(TK_ID) {
-				return "", nil, p.error("expected column name")
-			}
-			refColumns = append(refColumns, Unquote(p.advance().Lexeme))
-
-			if !p.match(TK_COMMA) {
-				break
-			}
-		}
-
-		if !p.match(TK_RP) {
-			return "", nil, p.error("expected ) after referenced columns")
-		}
+	refColumns, err := p.parseForeignKeyRefColumns()
+	if err != nil {
+		return "", nil, err
 	}
 
 	return refTable, refColumns, nil
+}
+
+func (p *Parser) parseForeignKeyRefColumns() ([]string, error) {
+	if !p.match(TK_LP) {
+		return nil, nil
+	}
+
+	var refColumns []string
+	for {
+		if !p.check(TK_ID) {
+			return nil, p.error("expected column name")
+		}
+		refColumns = append(refColumns, Unquote(p.advance().Lexeme))
+
+		if !p.match(TK_COMMA) {
+			break
+		}
+	}
+
+	if !p.match(TK_RP) {
+		return nil, p.error("expected ) after referenced columns")
+	}
+
+	return refColumns, nil
 }
 
 // parseForeignKeyActions parses optional ON DELETE and ON UPDATE actions.
@@ -1837,21 +1847,29 @@ func (p *Parser) parseForeignKeyAction() (ForeignKeyAction, error) {
 		return FKActionRestrict, nil
 	}
 	if p.match(TK_SET) {
-		if p.match(TK_NULL) {
-			return FKActionSetNull, nil
-		}
-		if p.match(TK_DEFAULT) {
-			return FKActionSetDefault, nil
-		}
-		return FKActionNone, p.error("expected NULL or DEFAULT after SET")
+		return p.parseForeignKeySetAction()
 	}
 	if p.match(TK_NO) {
-		if !p.match(TK_ACTION) {
-			return FKActionNone, p.error("expected ACTION after NO")
-		}
-		return FKActionNoAction, nil
+		return p.parseForeignKeyNoAction()
 	}
 	return FKActionNone, p.error("expected foreign key action (CASCADE, RESTRICT, SET NULL, SET DEFAULT, or NO ACTION)")
+}
+
+func (p *Parser) parseForeignKeySetAction() (ForeignKeyAction, error) {
+	if p.match(TK_NULL) {
+		return FKActionSetNull, nil
+	}
+	if p.match(TK_DEFAULT) {
+		return FKActionSetDefault, nil
+	}
+	return FKActionNone, p.error("expected NULL or DEFAULT after SET")
+}
+
+func (p *Parser) parseForeignKeyNoAction() (ForeignKeyAction, error) {
+	if !p.match(TK_ACTION) {
+		return FKActionNone, p.error("expected ACTION after NO")
+	}
+	return FKActionNoAction, nil
 }
 
 func (p *Parser) parseCreateIndex(unique bool) (*CreateIndexStmt, error) {
@@ -2927,6 +2945,13 @@ func (p *Parser) matchBitwiseOp() (BinaryOp, bool) {
 	return 0, false
 }
 
+// additiveTokenOps maps tokens to additive operators.
+var additiveTokenOps = map[TokenType]BinaryOp{
+	TK_PLUS:   OpPlus,
+	TK_MINUS:  OpMinus,
+	TK_CONCAT: OpConcat,
+}
+
 func (p *Parser) parseAdditiveExpression() (Expression, error) {
 	left, err := p.parseMultiplicativeExpression()
 	if err != nil {
@@ -2934,19 +2959,7 @@ func (p *Parser) parseAdditiveExpression() (Expression, error) {
 	}
 
 	for {
-		var op BinaryOp
-		matched := false
-		if p.match(TK_PLUS) {
-			op = OpPlus
-			matched = true
-		} else if p.match(TK_MINUS) {
-			op = OpMinus
-			matched = true
-		} else if p.match(TK_CONCAT) {
-			op = OpConcat
-			matched = true
-		}
-
+		op, matched := p.matchAdditiveOp()
 		if !matched {
 			break
 		}
@@ -2965,6 +2978,22 @@ func (p *Parser) parseAdditiveExpression() (Expression, error) {
 	return left, nil
 }
 
+func (p *Parser) matchAdditiveOp() (BinaryOp, bool) {
+	for tk, op := range additiveTokenOps {
+		if p.match(tk) {
+			return op, true
+		}
+	}
+	return 0, false
+}
+
+// multiplicativeTokenOps maps tokens to multiplicative operators.
+var multiplicativeTokenOps = map[TokenType]BinaryOp{
+	TK_STAR:  OpMul,
+	TK_SLASH: OpDiv,
+	TK_REM:   OpRem,
+}
+
 func (p *Parser) parseMultiplicativeExpression() (Expression, error) {
 	left, err := p.parseUnaryExpression()
 	if err != nil {
@@ -2972,19 +3001,7 @@ func (p *Parser) parseMultiplicativeExpression() (Expression, error) {
 	}
 
 	for {
-		var op BinaryOp
-		matched := false
-		if p.match(TK_STAR) {
-			op = OpMul
-			matched = true
-		} else if p.match(TK_SLASH) {
-			op = OpDiv
-			matched = true
-		} else if p.match(TK_REM) {
-			op = OpRem
-			matched = true
-		}
-
+		op, matched := p.matchMultiplicativeOp()
 		if !matched {
 			break
 		}
@@ -3001,6 +3018,15 @@ func (p *Parser) parseMultiplicativeExpression() (Expression, error) {
 	}
 
 	return left, nil
+}
+
+func (p *Parser) matchMultiplicativeOp() (BinaryOp, bool) {
+	for tk, op := range multiplicativeTokenOps {
+		if p.match(tk) {
+			return op, true
+		}
+	}
+	return 0, false
 }
 
 // unaryOperatorMap maps tokens to their corresponding unary operators.
@@ -3168,6 +3194,18 @@ func (p *Parser) isExpressionIdentifier() bool {
 func (p *Parser) parseFunctionCall(name string) (Expression, error) {
 	fn := &FunctionExpr{Name: strings.ToUpper(name)}
 
+	if err := p.parseFunctionArgs(fn); err != nil {
+		return nil, err
+	}
+
+	if err := p.parseFunctionClauses(fn); err != nil {
+		return nil, err
+	}
+
+	return fn, nil
+}
+
+func (p *Parser) parseFunctionArgs(fn *FunctionExpr) error {
 	if p.match(TK_DISTINCT) {
 		fn.Distinct = true
 	}
@@ -3177,25 +3215,22 @@ func (p *Parser) parseFunctionCall(name string) (Expression, error) {
 	} else if !p.check(TK_RP) {
 		args, err := p.parseExpressionList()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		fn.Args = args
 	}
 
 	if !p.match(TK_RP) {
-		return nil, p.error("expected ) after function arguments")
+		return p.error("expected ) after function arguments")
 	}
+	return nil
+}
 
+func (p *Parser) parseFunctionClauses(fn *FunctionExpr) error {
 	if err := p.parseFunctionFilter(fn); err != nil {
-		return nil, err
+		return err
 	}
-
-	// Parse optional OVER clause for window functions
-	if err := p.parseFunctionOver(fn); err != nil {
-		return nil, err
-	}
-
-	return fn, nil
+	return p.parseFunctionOver(fn)
 }
 
 // parseFunctionFilter parses the optional FILTER clause for a function.

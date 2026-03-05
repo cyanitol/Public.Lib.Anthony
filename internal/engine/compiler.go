@@ -390,58 +390,75 @@ func (c *Compiler) CompileInsert(stmt *parser.InsertStmt) (*vdbe.VDBE, error) {
 	vm := vdbe.New()
 	vm.SetReadOnly(false)
 
-	// Get table
 	table, ok := c.engine.schema.GetTable(stmt.Table)
 	if !ok {
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
 
-	// Allocate registers for values
+	cursorIdx := setupInsertVM(vm, table)
+
+	for _, values := range stmt.Values {
+		if err := compileInsertRow(vm, values, cursorIdx, len(table.Columns)); err != nil {
+			return nil, err
+		}
+	}
+
+	finalizeInsertVM(vm, cursorIdx)
+	return vm, nil
+}
+
+// setupInsertVM sets up the VM for INSERT operations.
+func setupInsertVM(vm *vdbe.VDBE, table *schema.Table) int {
 	numCols := len(table.Columns)
 	vm.AllocMemory(numCols + 10)
 
-	// Open cursor for table
 	cursorIdx := 0
 	vm.AllocCursors(1)
 	vm.AddOp(vdbe.OpOpenWrite, cursorIdx, int(table.RootPage), 0)
+	return cursorIdx
+}
 
-	// For each row to insert
-	for _, values := range stmt.Values {
-		// Generate new rowid
-		rowidReg := numCols
-		vm.AddOp(vdbe.OpNewRowid, cursorIdx, rowidReg, 0)
+// compileInsertRow compiles bytecode for inserting a single row.
+func compileInsertRow(vm *vdbe.VDBE, values []parser.Expression, cursorIdx, numCols int) error {
+	rowidReg := numCols
+	vm.AddOp(vdbe.OpNewRowid, cursorIdx, rowidReg, 0)
 
-		// Load values into registers
-		for i, val := range values {
-			reg := i
-			if lit, ok := val.(*parser.LiteralExpr); ok {
-				switch lit.Type {
-				case parser.LiteralInteger:
-					// Parse the integer from string
-					intVal := int64(0)
-					fmt.Sscanf(lit.Value, "%d", &intVal)
-					vm.AddOp(vdbe.OpInteger, int(intVal), reg, 0)
-				case parser.LiteralString:
-					vm.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, lit.Value)
-				case parser.LiteralNull:
-					vm.AddOp(vdbe.OpNull, 0, reg, 0)
-				}
-			}
+	loadInsertValues(vm, values)
+
+	recordReg := numCols + 1
+	vm.AddOp(vdbe.OpMakeRecord, 0, len(values), recordReg)
+	vm.AddOp(vdbe.OpInsert, cursorIdx, recordReg, rowidReg)
+
+	return nil
+}
+
+// loadInsertValues loads literal values into registers for INSERT.
+func loadInsertValues(vm *vdbe.VDBE, values []parser.Expression) {
+	for i, val := range values {
+		if lit, ok := val.(*parser.LiteralExpr); ok {
+			loadLiteralValue(vm, lit, i)
 		}
-
-		// Create record from registers
-		recordReg := numCols + 1
-		vm.AddOp(vdbe.OpMakeRecord, 0, len(values), recordReg)
-
-		// Insert the record
-		vm.AddOp(vdbe.OpInsert, cursorIdx, recordReg, rowidReg)
 	}
+}
 
-	// Close cursor and halt
+// loadLiteralValue loads a single literal value into a register.
+func loadLiteralValue(vm *vdbe.VDBE, lit *parser.LiteralExpr, reg int) {
+	switch lit.Type {
+	case parser.LiteralInteger:
+		intVal := int64(0)
+		fmt.Sscanf(lit.Value, "%d", &intVal)
+		vm.AddOp(vdbe.OpInteger, int(intVal), reg, 0)
+	case parser.LiteralString:
+		vm.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, lit.Value)
+	case parser.LiteralNull:
+		vm.AddOp(vdbe.OpNull, 0, reg, 0)
+	}
+}
+
+// finalizeInsertVM finalizes the INSERT VM by closing cursor and halting.
+func finalizeInsertVM(vm *vdbe.VDBE, cursorIdx int) {
 	vm.AddOp(vdbe.OpClose, cursorIdx, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	return vm, nil
 }
 
 // CompileUpdate compiles an UPDATE statement.

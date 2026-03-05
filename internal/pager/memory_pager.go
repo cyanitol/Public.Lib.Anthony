@@ -361,30 +361,38 @@ func (mp *MemoryPager) AllocatePage() (Pgno, error) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
+	if err := mp.validateAllocation(); err != nil {
+		return 0, err
+	}
+
+	if err := mp.ensureWriteTransaction(); err != nil {
+		return 0, err
+	}
+
+	return mp.allocatePageInternal()
+}
+
+func (mp *MemoryPager) validateAllocation() error {
 	if mp.readOnly {
-		return 0, ErrReadOnly
+		return ErrReadOnly
 	}
+	return nil
+}
 
-	// Ensure we have a write transaction
-	if mp.state == PagerStateOpen || mp.state == PagerStateReader {
-		if err := mp.beginWriteTransaction(); err != nil {
-			return 0, err
-		}
-	}
-
-	// Try to allocate from the free list first
+func (mp *MemoryPager) allocatePageInternal() (Pgno, error) {
 	pgno, err := mp.freeList.Allocate()
 	if err != nil {
 		return 0, err
 	}
 
-	// If we got a free page, return it
 	if pgno != 0 {
 		return pgno, nil
 	}
 
-	// No free pages available - allocate new page at end
-	// Security: Check page count limit to prevent memory exhaustion
+	return mp.allocateNewPage()
+}
+
+func (mp *MemoryPager) allocateNewPage() (Pgno, error) {
 	if mp.dbSize >= Pgno(security.MaxMemoryDBPages) {
 		return 0, fmt.Errorf("memory database page limit exceeded: %d pages (limit: %d)", mp.dbSize, security.MaxMemoryDBPages)
 	}
