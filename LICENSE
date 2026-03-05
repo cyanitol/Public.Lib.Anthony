@@ -1,37 +1,37 @@
 Preamble (Gratitude + Intent)
 
-This project is indebted to the SQLite project—technically, culturally, and
-philosophically. SQLite demonstrated that small, careful software can power
-a large fraction of civilization, and it did so while keeping reuse friction
-as close to zero as the law allows.
+This project is indebted to the SQLite project: technically, culturally, and
+philosophically. SQLite demonstrated that small, careful software can power a
+large fraction of civilization, and it did so while keeping reuse friction as
+close to zero as the law allows.
 
-Intent: Public Domain, SQLite-Style
+Intent: Free Access, Free Use
 
 Our intent is that all original code and improvements in this repository be
-dedicated to the public domain in the same spirit as SQLite.
+freely accessible as possible.
 
 In that spirit, and in honor of SQLite, we include the SQLite Blessing:
 
-  The author disclaims copyright to this source code. In place of a legal
-  notice, here is a blessing:
+In place of a legal notice, here is a blessing:
 
-  May you do good and not evil.
-  May you find forgiveness for yourself and forgive others.
-  May you share freely, never taking more than you give.
+May you do good and not evil.
+May you find forgiveness for yourself and forgive others.
+May you share freely, never taking more than you give.
 
 Legal Reality: Jurisdictions and Policies Vary
 
-Some jurisdictions do not fully recognize public domain dedications, and some
-users require an OSI-approved license for compliance, redistribution, or internal
-policy. Therefore, in addition to the public-domain intent above, we offer this
-project under a tri-license so you can choose what fits your situation.
+Some jurisdictions do not fully recognize public-domain dedications, and some
+users require an OSI-approved license for compliance, redistribution, or
+internal policy. Therefore, in addition to the blessing above, we
+offer this project under a tri-license so you can choose what fits your
+situation.
 
 License (Choose One)
 
 This project is available under your choice of ONE of the following licenses:
 
-  - Apache License 2.0 (Apache-2.0)            see LICENSE-APACHE
-  - GNU GPL v2.0 or later (GPL-2.0-or-later)   see LICENSE-GPL-2.0
-  - CC0 1.0 Universal (CC0-1.0)                see LICENSE-CC0-1.0
+* Apache License 2.0 (Apache-2.0)            see LICENSE-APACHE
+* GNU GPL v2.0 or later (GPL-2.0-or-later)   see LICENSE-GPL-2.0
+* CC0 1.0 Universal (CC0-1.0)                see LICENSE-CC0-1.0
 
 SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)

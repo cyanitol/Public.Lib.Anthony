@@ -223,14 +223,18 @@ contributions at this time**. Issues and feedback are welcome.
 
 Licensed under your choice of: **Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0**.
 
-See `LICENSE` and the `LICENSE-*` files for full text.
+See `LICENSE` and the `LICENSE-*` files for the full text.
 
-In the spirit of SQLite, the authors disclaim copyright to this source code.
+The model and patterns of this software are heavily influenced by SQLite. The
+author of this code recognizes the gift given by the SQLite creators and wishes
+to continue that tradition.
+
 Here is the SQLite Blessing:
 
-- May you do good and not evil.
-- May you find forgiveness for yourself and forgive others.
-- May you share freely, never taking more than you give.
+* May you do good and not evil.
+* May you find forgiveness for yourself and forgive others.
+* May you share freely, never taking more than you give.
+
 
 ## Acknowledgments
 
