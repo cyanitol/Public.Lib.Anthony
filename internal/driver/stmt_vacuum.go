@@ -49,6 +49,22 @@ func (s *Stmt) validateVacuumContext() error {
 	if s.conn.inTx {
 		return fmt.Errorf("cannot VACUUM inside a transaction")
 	}
+	// Auto-commit any pending write transaction before VACUUM
+	// This is needed because VACUUM requires no active transactions
+	if s.conn.pager.InWriteTransaction() {
+		if err := s.conn.pager.Commit(); err != nil {
+			return fmt.Errorf("failed to commit pending write transaction before VACUUM: %w", err)
+		}
+	}
+	// Also try to end any read transaction - VACUUM requires no active transactions at all
+	// We don't check first since there's no InReadTransaction() in the interface,
+	// so we just try to end it and ignore "no transaction" errors
+	if err := s.conn.pager.EndRead(); err != nil {
+		// Only return error if it's not a "no transaction" error
+		if err.Error() != "no transaction active" && err.Error() != "no read transaction to end" {
+			return fmt.Errorf("failed to end read transaction before VACUUM: %w", err)
+		}
+	}
 	return nil
 }
 

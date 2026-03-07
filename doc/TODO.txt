@@ -1,18 +1,60 @@
 # Anthony SQLite Driver - TODO List
 # Format: https://github.com/todotxt/todo.txt
-# Generated: 2026-02-27 | Updated: 2026-03-05 (v0.1.0)
-# Stats: 655 passing | 476 skipped | 0 failing | 58% pass rate (driver tests)
+# Generated: 2026-02-27 | Updated: 2026-03-06 (v0.1.0)
+# Stats: 655 passing | 690 skipped | 0 failing | 48% pass rate (driver tests)
 
 # ============================================================================
-# PRIORITY 1: MAJOR SKIP CATEGORIES (145 skips)
+# PRIORITY 1: MAJOR SKIP CATEGORIES (~145 skips) - COMPLETE ALL - IN PROGRESS
 # ============================================================================
 
-(A) Fix foreign key runtime enforcement (36 skips) +BrokenFeatures @driver skips:36
-(A) Fix fault/constraint edge cases (34 skips) +BrokenFeatures @driver skips:34
-(A) Fix VACUUM operations (29 skips) +BrokenFeatures @driver skips:29
-(A) Fix WITHOUT ROWID tables (23 skips) +BrokenFeatures @driver skips:23
-(A) Fix stress/concurrent tests (18 skips) +BrokenFeatures @driver skips:18
-(A) Fix CTE integration edge cases (5 skips) +BrokenFeatures @driver skips:5
+# --- Foreign Key Runtime Enforcement (38 skips) ---
+(A) Add FKManager field to VDBEContext +FK @vdbe file:internal/vdbe/vdbe.go:95
+(A) Add ForeignKeysEnabled flag to VDBEContext +FK @vdbe file:internal/vdbe/vdbe.go:95
+(A) Wire FKManager from Conn to VDBE +FK @driver file:internal/driver/stmt.go
+(A) Add checkForeignKeyConstraints in execInsert +FK @vdbe file:internal/vdbe/exec.go:2070
+(A) Add FK validation in execDelete +FK @vdbe file:internal/vdbe/exec.go:2353
+(A) Implement RowReader adapter for VDBE cursors +FK @vdbe file:internal/vdbe/fk_adapter.go
+(A) Implement RowDeleter adapter for CASCADE +FK @vdbe file:internal/vdbe/fk_adapter.go
+(A) Enable sqlite_fkey_test.go tests (38) +FK @driver file:internal/driver/sqlite_fkey_test.go
+
+# --- Fault/Constraint Edge Cases (19 skips) ---
+(A) Audit constraint error paths +Constraints @vdbe file:internal/vdbe/constraints.go
+(A) Fix error message formatting +Constraints @vdbe file:internal/vdbe/exec.go
+(A) Ensure proper transaction rollback on failure +Constraints @driver file:internal/driver/stmt.go
+(A) Enable sqlite_fault_test.go tests (19) +Constraints @driver file:internal/driver/sqlite_fault_test.go
+
+# --- VACUUM Operations (30 skips) ---
+(A) Fix sqlite_master persistence after VACUUM +VACUUM @driver file:internal/driver/stmt_vacuum.go
+(A) Add schema cookie update in vacuum +VACUUM @pager file:internal/pager/vacuum.go
+(A) Test VACUUM on empty database +VACUUM @driver file:internal/driver/vacuum_test.go
+(A) Test VACUUM after DELETE operations +VACUUM @driver file:internal/driver/vacuum_test.go
+(A) Test VACUUM with indexes +VACUUM @driver file:internal/driver/vacuum_test.go
+(A) Enable vacuum_test.go tests (30) +VACUUM @driver file:internal/driver/vacuum_test.go
+
+# --- WITHOUT ROWID Tables (23 skips) ---
+(A) Check table.WithoutRowID in DML compilation +ROWID @driver file:internal/driver/compile_dml.go
+(A) Skip OpNewRowid for WITHOUT ROWID tables +ROWID @driver file:internal/driver/compile_insert.go
+(A) Use PRIMARY KEY columns as key instead +ROWID @driver file:internal/driver/compile_dml.go
+(A) Add PRIMARY KEY requirement validation +ROWID @driver file:internal/driver/stmt_ddl.go
+(A) Reject AUTOINCREMENT on WITHOUT ROWID +ROWID @driver file:internal/driver/stmt_ddl.go
+(A) Remove rowid/_rowid_/oid aliases for WITHOUT ROWID +ROWID @schema file:internal/schema/schema.go
+(A) Enable sqlite_without_rowid_test.go tests (23) +ROWID @driver file:internal/driver/sqlite_without_rowid_test.go
+
+# --- Stress/Concurrent Tests (18 skips) ---
+(A) Verify PRAGMA journal_mode=WAL works +Concurrent @pager file:internal/pager/wal.go
+(A) Enable TestConcurrentExec (WAL needed) +Concurrent @driver file:internal/driver/concurrent_security_test.go:90
+(A) Enable TestConcurrentReadWrite (WAL needed) +Concurrent @driver file:internal/driver/concurrent_security_test.go:180
+(A) Enable TestSecurityConcurrentTransactions (WAL needed) +Concurrent @driver file:internal/driver/concurrent_security_test.go:324
+(A) Enable TestConcurrentConnections (WAL needed) +Concurrent @driver file:internal/driver/concurrent_security_test.go:459
+(A) Fix bulk insert performance +Concurrent @driver file:internal/driver/sqlite_stress_test.go:35
+
+# --- CTE Integration Edge Cases (17 skips) ---
+(A) Fix OpMakeRecord/OpInsert register mismatch +CTE @driver file:internal/driver/stmt_cte.go:221
+(A) Fix SELECT * duplicate rows bug +CTE @driver file:internal/driver/stmt_cte.go:658
+(A) Fix multiple CTE dependencies +CTE @planner file:internal/planner/cte.go
+(A) Implement recursive CTE bytecode generation +CTE @driver file:internal/driver/stmt_cte.go:392
+(A) Fix UNION ALL with CTEs record serialization +CTE @driver file:internal/driver/stmt_cte.go
+(A) Enable cte_integration_test.go tests (17) +CTE @driver file:internal/driver/cte_integration_test.go
 
 # ============================================================================
 # PRIORITY 2: SCATTERED SKIPS (~350 individual tests)
@@ -35,22 +77,50 @@
 (B) Cast operations (10 skips) +PartialFeatures @driver skips:10
 
 # ============================================================================
-# PRIORITY 3: NOT IMPLEMENTED - DEFER TO v2.0
+# PRIORITY 3: v2.0 FEATURES - IMPLEMENT IN PHASE 3
 # ============================================================================
 
-(C) Implement ANALYZE query optimizer stats +NotImplemented @driver defer:v2.0
-(C) Implement BACKUP online backup API +NotImplemented @driver defer:v2.0
-(C) Implement FTS5 full-text search +NotImplemented @vtab defer:v2.0
-(C) Implement R-Tree spatial index +NotImplemented @vtab defer:v2.0
+# --- ANALYZE Query Optimizer Stats ---
+(C) Parse ANALYZE statement +ANALYZE @parser file:internal/parser/parser_analyze.go
+(C) Create sqlite_stat1 table for statistics +ANALYZE @schema file:internal/schema/sqlite_stat.go
+(C) Implement index usage statistics collection +ANALYZE @planner file:internal/planner/stats.go
+(C) Integrate statistics into query cost estimation +ANALYZE @planner file:internal/planner/cost.go
+
+# --- BACKUP Online Backup API ---
+(C) Parse BACKUP/RESTORE statements +BACKUP @parser file:internal/parser/parser_backup.go
+(C) Implement online backup mechanism +BACKUP @pager file:internal/pager/backup.go
+(C) Add progress callback support +BACKUP @driver file:internal/driver/backup.go
+(C) Handle concurrent access during backup +BACKUP @pager file:internal/pager/backup.go
+
+# --- FTS5 Full-Text Search ---
+(C) Implement FTS5 virtual table module +FTS5 @vtab file:internal/vtab/fts5/module.go
+(C) Add tokenizer interface +FTS5 @vtab file:internal/vtab/fts5/tokenizer.go
+(C) Implement inverted index storage +FTS5 @vtab file:internal/vtab/fts5/index.go
+(C) Add MATCH expression evaluation +FTS5 @vtab file:internal/vtab/fts5/match.go
+
+# --- R-Tree Spatial Index ---
+(C) Implement R-Tree virtual table module +RTree @vtab file:internal/vtab/rtree/module.go
+(C) Add spatial index node structure +RTree @vtab file:internal/vtab/rtree/node.go
+(C) Implement spatial query operators +RTree @vtab file:internal/vtab/rtree/query.go
+(C) Add insert/delete with node splitting +RTree @vtab file:internal/vtab/rtree/modify.go
 
 # ============================================================================
-# PHASE 2: STORAGE LAYER HARDENING
+# PHASE 2: STORAGE LAYER HARDENING - AFTER PRIORITY 1
 # ============================================================================
 
 x 2026-03-04 2026-02-27 Implement Windows file locking +Phase2 @pager
 x 2026-03-04 2026-02-27 Add journal crash recovery +Phase2 @pager
-(B) Fix journal checksums - replace XOR with CRC32 +Phase2 @pager file:internal/pager/journal.go
-(B) Complete WAL frame validation and recovery +Phase2 @pager file:internal/pager/wal.go
+
+# --- Journal Improvements ---
+x 2026-03-06 2026-02-27 Replace XOR checksum with CRC32 +Phase2 @pager file:internal/pager/journal.go
+x 2026-03-06 2026-02-27 Add journal file header validation +Phase2 @pager file:internal/pager/journal.go
+x 2026-03-06 2026-02-27 Add journal page count validation +Phase2 @pager file:internal/pager/journal.go
+
+# --- WAL Improvements ---
+x 2026-03-06 2026-02-27 Complete WAL frame validation +Phase2 @pager file:internal/pager/wal.go
+(B) Add WAL recovery from incomplete transactions +Phase2 @pager file:internal/pager/wal.go
+(B) Add WAL checkpoint implementation +Phase2 @pager file:internal/pager/wal.go
+(B) Add WAL-index (shm) file support +Phase2 @pager file:internal/pager/wal_index.go
 
 # ============================================================================
 # PHASE 3: FEATURE COMPLETION

@@ -47,7 +47,16 @@ func (v *VDBE) prepareForStep() error {
 
 // runUntilRowOrHalt executes instructions until a row is ready or the program halts.
 func (v *VDBE) runUntilRowOrHalt() (bool, error) {
+	const maxInstructions = 1000000 // Safety limit to detect infinite loops
+	instructionCount := 0
+
 	for {
+		// Safety check: prevent infinite loops
+		instructionCount++
+		if instructionCount > maxInstructions {
+			return false, fmt.Errorf("VDBE execution exceeded maximum instruction count (%d) - possible infinite loop at PC=%d", maxInstructions, v.PC)
+		}
+
 		// Check if program has ended
 		if hasEnded, result := v.handleProgramEnd(); hasEnded {
 			return result, nil
@@ -2053,43 +2062,54 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 	if err != nil {
 		return err
 	}
-
-	// Check constraints before inserting - P4.Z contains the table name
-	if instr.P4.Z != "" {
-		// Check NOT NULL constraints
-		if err := v.checkNotNullConstraints(instr.P4.Z, payload); err != nil {
-			return err
-		}
-		// Check CHECK constraints
-		if err := v.checkCheckConstraints(instr.P4.Z, payload, rowid); err != nil {
-			return err
-		}
-		// Check UNIQUE column constraints
-		if err := v.checkUniqueConstraints(instr.P4.Z, payload, btCursor, rowid); err != nil {
-			return err
-		}
+	if err := v.validateInsertConstraints(instr.P4.Z, payload, btCursor, rowid); err != nil {
+		return err
 	}
+	if err := v.performInsert(cursor, btCursor, rowid, payload, int64(instr.P4.I)); err != nil {
+		return err
+	}
+	return nil
+}
 
-	if err = btCursor.Insert(rowid, payload); err != nil {
-		// Check if this is a duplicate key error and convert to SQL constraint error
-		if strings.Contains(err.Error(), "duplicate key") {
-			return fmt.Errorf("UNIQUE constraint failed: PRIMARY KEY must be unique")
-		}
-		return fmt.Errorf("btree insert failed: %w", err)
+// validateInsertConstraints checks all constraints before insert.
+func (v *VDBE) validateInsertConstraints(tableName string, payload []byte, btCursor *btree.BtCursor, rowid int64) error {
+	if tableName == "" {
+		return nil
+	}
+	if err := v.checkNotNullConstraints(tableName, payload); err != nil {
+		return err
+	}
+	if err := v.checkCheckConstraints(tableName, payload, rowid); err != nil {
+		return err
+	}
+	if err := v.checkUniqueConstraints(tableName, payload, btCursor, rowid); err != nil {
+		return err
+	}
+	return v.checkForeignKeyConstraints(tableName, payload)
+}
+
+// performInsert executes the actual btree insert and updates counters.
+func (v *VDBE) performInsert(cursor *Cursor, btCursor *btree.BtCursor, rowid int64, payload []byte, updateFlag int64) error {
+	if err := btCursor.Insert(rowid, payload); err != nil {
+		return v.wrapInsertError(err)
 	}
 	cursor.LastRowid = rowid
-	v.LastInsertID = rowid // Track last insert ID for database/sql driver
-	// P4.I == 1 means this is part of UPDATE (paired with Delete), don't double-count
-	if instr.P4.I != 1 {
+	v.LastInsertID = rowid
+	if updateFlag != 1 {
 		v.NumChanges++
 	}
-
-	// Track row written
 	if v.Stats != nil {
 		v.Stats.RowsWritten++
 	}
-
 	return nil
+}
+
+// wrapInsertError converts btree errors to SQL constraint errors.
+func (v *VDBE) wrapInsertError(err error) error {
+	if strings.Contains(err.Error(), "duplicate key") {
+		return fmt.Errorf("UNIQUE constraint failed: PRIMARY KEY must be unique")
+	}
+	return fmt.Errorf("btree insert failed: %w", err)
 }
 
 // getWritableBtreeCursor returns a writable btree cursor for the given cursor number.
@@ -2146,86 +2166,51 @@ func (v *VDBE) getInsertRowid(p3 int, cursor *Cursor) (int64, error) {
 // checkUniqueConstraints verifies that inserting the given payload doesn't violate
 // any UNIQUE column constraints in the table.
 func (v *VDBE) checkUniqueConstraints(tableName string, payload []byte, btCursor *btree.BtCursor, newRowid int64) error {
-	// Get the table schema from the context
-	if v.Ctx == nil || v.Ctx.Schema == nil {
-		return nil // No schema available, skip check
-	}
-
-	// Type assert to get the schema with GetTableByName method
-	// Returns interface{} to avoid import cycle with schema package
-	type schemaWithGetTableByName interface {
-		GetTableByName(name string) (interface{}, bool)
-	}
-
-	schema, ok := v.Ctx.Schema.(schemaWithGetTableByName)
+	columns, ok := v.getTableColumns(tableName)
 	if !ok {
-		return nil // Schema doesn't support GetTableByName, skip check
+		return nil
 	}
+	return v.validateUniqueColumns(columns, payload, btCursor, newRowid)
+}
 
-	// Get the table definition
-	tableIface, exists := schema.GetTableByName(tableName)
-	if !exists {
-		return nil // Table not found in schema, skip check
-	}
+// uniqueColumnInfo is an interface for unique constraint column info.
+type uniqueColumnInfo interface {
+	GetName() string
+	IsUniqueColumn() bool
+	IsPrimaryKeyColumn() bool
+}
 
-	// Type assert to access table columns via GetColumns() method
-	type tableWithColumns interface {
-		GetColumns() []interface{}
-	}
-
-	table, ok := tableIface.(tableWithColumns)
-	if !ok {
-		return nil // Can't access columns, skip check
-	}
-
-	columns := table.GetColumns()
-
-	// Define interface for column info (matches schema.Column methods)
-	type columnInfo interface {
-		GetName() string
-		IsUniqueColumn() bool
-		IsPrimaryKeyColumn() bool
-	}
-
-	// Check each column for UNIQUE constraint
-	// Track recordIdx separately (skips INTEGER PRIMARY KEY columns which are stored as rowid)
+// validateUniqueColumns checks UNIQUE constraints on columns.
+func (v *VDBE) validateUniqueColumns(columns []interface{}, payload []byte, btCursor *btree.BtCursor, newRowid int64) error {
 	recordIdx := 0
 	for _, colIface := range columns {
-		// Type assert to access column info
-		col, ok := colIface.(columnInfo)
+		col, ok := colIface.(uniqueColumnInfo)
 		if !ok {
 			recordIdx++
 			continue
 		}
-
-		// INTEGER PRIMARY KEY columns are stored as rowid, not in the record
 		isPK := col.IsPrimaryKeyColumn()
-
-		// Skip if not a UNIQUE column (PRIMARY KEY is handled by btree)
 		if !col.IsUniqueColumn() || isPK {
 			if !isPK {
 				recordIdx++
 			}
 			continue
 		}
-
-		// Extract the value from the new record for this column
-		// Use recordIdx (not colIdx) because INTEGER PRIMARY KEY columns don't appear in record
-		newValueMem := NewMem()
-		if err := parseRecordColumn(payload, recordIdx, newValueMem); err != nil {
-			recordIdx++
-			continue // Skip if can't parse
-		}
-
-		// Scan the table to check for duplicates
-		if err := v.scanTableForDuplicate(btCursor, recordIdx, newValueMem, newRowid, col.GetName()); err != nil {
+		if err := v.checkColumnUnique(col, payload, btCursor, recordIdx, newRowid); err != nil {
 			return err
 		}
-
 		recordIdx++
 	}
-
 	return nil
+}
+
+// checkColumnUnique checks a single column's UNIQUE constraint.
+func (v *VDBE) checkColumnUnique(col uniqueColumnInfo, payload []byte, btCursor *btree.BtCursor, recordIdx int, newRowid int64) error {
+	newValueMem := NewMem()
+	if err := parseRecordColumn(payload, recordIdx, newValueMem); err != nil {
+		return nil // Skip if can't parse
+	}
+	return v.scanTableForDuplicate(btCursor, recordIdx, newValueMem, newRowid, col.GetName())
 }
 
 // scanTableForDuplicate scans the entire table to check if the given column value
@@ -2285,6 +2270,36 @@ func (v *VDBE) scanTableForDuplicate(insertCursor *btree.BtCursor, colIdx int, n
 	return nil
 }
 
+// compareInts returns -1 if a < b, 0 if a == b, 1 if a > b
+func compareInts(a, b int64) int {
+	if a < b {
+		return -1
+	} else if a > b {
+		return 1
+	}
+	return 0
+}
+
+// compareReals returns -1 if a < b, 0 if a == b, 1 if a > b
+func compareReals(a, b float64) int {
+	if a < b {
+		return -1
+	} else if a > b {
+		return 1
+	}
+	return 0
+}
+
+// cmpStrings returns -1 if a < b, 0 if a == b, 1 if a > b
+func cmpStrings(a, b string) int {
+	if a < b {
+		return -1
+	} else if a > b {
+		return 1
+	}
+	return 0
+}
+
 // compareMemValues compares two Mem values and returns:
 // -1 if a < b, 0 if a == b, 1 if a > b
 func (v *VDBE) compareMemValues(a, b *Mem) int {
@@ -2298,93 +2313,220 @@ func (v *VDBE) compareMemValues(a, b *Mem) int {
 	if b.IsNull() {
 		return 1
 	}
-
 	// Compare based on type
+	return v.compareNonNullMemValues(a, b)
+}
+
+// compareNonNullMemValues compares two non-null Mem values
+func (v *VDBE) compareNonNullMemValues(a, b *Mem) int {
 	if a.IsInt() && b.IsInt() {
-		aVal := a.IntValue()
-		bVal := b.IntValue()
-		if aVal < bVal {
-			return -1
-		} else if aVal > bVal {
-			return 1
-		}
-		return 0
+		return compareInts(a.IntValue(), b.IntValue())
 	}
-
 	if a.IsReal() && b.IsReal() {
-		aVal := a.RealValue()
-		bVal := b.RealValue()
-		if aVal < bVal {
-			return -1
-		} else if aVal > bVal {
-			return 1
-		}
-		return 0
+		return compareReals(a.RealValue(), b.RealValue())
 	}
-
 	if a.IsString() && b.IsString() {
-		aVal := a.StringValue()
-		bVal := b.StringValue()
-		if aVal < bVal {
-			return -1
-		} else if aVal > bVal {
-			return 1
-		}
-		return 0
+		return cmpStrings(a.StringValue(), b.StringValue())
 	}
-
 	if a.IsBlob() && b.IsBlob() {
-		aVal := a.BlobValue()
-		bVal := b.BlobValue()
-		return compareBytes(aVal, bVal)
+		return compareBytes(a.BlobValue(), b.BlobValue())
+	}
+	// Mixed types - use string comparison
+	return cmpStrings(fmt.Sprintf("%v", a.Value()), fmt.Sprintf("%v", b.Value()))
+}
+
+// checkForeignKeyConstraints validates foreign key constraints for an INSERT operation.
+func (v *VDBE) checkForeignKeyConstraints(tableName string, payload []byte) error {
+	// Check if foreign keys are enabled
+	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled {
+		return nil
 	}
 
-	// Mixed types - try string comparison
-	aStr := fmt.Sprintf("%v", a.Value())
-	bStr := fmt.Sprintf("%v", b.Value())
-	if aStr < bStr {
-		return -1
-	} else if aStr > bStr {
-		return 1
+	// Get the ForeignKeyManager from context
+	if v.Ctx.FKManager == nil {
+		return nil
 	}
-	return 0
+
+	// Type assert to get the ForeignKeyManager interface
+	type fkManager interface {
+		ValidateInsert(tableName string, values map[string]interface{}, schemaObj interface{}, rowReader interface{}) error
+	}
+
+	mgr, ok := v.Ctx.FKManager.(fkManager)
+	if !ok {
+		return nil
+	}
+
+	// Get schema from context
+	if v.Ctx.Schema == nil {
+		return nil
+	}
+
+	// Extract values from payload
+	values, err := v.extractValuesFromPayload(tableName, payload)
+	if err != nil {
+		return nil // Skip FK check if we can't extract values
+	}
+
+	// Create a RowReader adapter for the VDBE
+	rowReader := NewVDBERowReader(v)
+
+	// Validate the insert
+	return mgr.ValidateInsert(tableName, values, v.Ctx.Schema, rowReader)
+}
+
+// extractValuesFromPayload extracts column values from a record payload.
+func (v *VDBE) extractValuesFromPayload(tableName string, payload []byte) (map[string]interface{}, error) {
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return nil, fmt.Errorf("no schema available")
+	}
+
+	// Type assert to get the schema with GetTableByName method
+	type schemaWithGetTableByName interface {
+		GetTableByName(name string) (interface{}, bool)
+	}
+
+	schema, ok := v.Ctx.Schema.(schemaWithGetTableByName)
+	if !ok {
+		return nil, fmt.Errorf("schema doesn't support GetTableByName")
+	}
+
+	// Get the table definition
+	tableIface, exists := schema.GetTableByName(tableName)
+	if !exists {
+		return nil, fmt.Errorf("table not found: %s", tableName)
+	}
+
+	// Type assert to access table columns
+	type tableWithColumns interface {
+		GetColumns() []interface{}
+	}
+
+	table, ok := tableIface.(tableWithColumns)
+	if !ok {
+		return nil, fmt.Errorf("can't access columns")
+	}
+
+	columns := table.GetColumns()
+
+	// Extract values into a map
+	values := make(map[string]interface{})
+	recordIdx := 0
+
+	for _, colIface := range columns {
+		// Type assert to access column info
+		type columnInfo interface {
+			GetName() string
+			IsPrimaryKeyColumn() bool
+		}
+
+		col, ok := colIface.(columnInfo)
+		if !ok {
+			recordIdx++
+			continue
+		}
+
+		// INTEGER PRIMARY KEY columns are stored as rowid, not in the record
+		if col.IsPrimaryKeyColumn() {
+			continue
+		}
+
+		// Extract the value from the record
+		valueMem := NewMem()
+		if err := parseRecordColumn(payload, recordIdx, valueMem); err != nil {
+			recordIdx++
+			continue
+		}
+
+		// Convert Mem to interface{} value
+		values[col.GetName()] = valueMem.Value()
+		recordIdx++
+	}
+
+	return values, nil
+}
+
+// checkForeignKeyDeleteConstraints validates foreign key constraints for a DELETE operation.
+func (v *VDBE) checkForeignKeyDeleteConstraints(tableName string, values map[string]interface{}) error {
+	// Check if foreign keys are enabled
+	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled {
+		return nil
+	}
+
+	// Get the ForeignKeyManager from context
+	if v.Ctx.FKManager == nil {
+		return nil
+	}
+
+	// Type assert to get the ForeignKeyManager interface
+	type fkManager interface {
+		ValidateDelete(tableName string, values map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowDeleter interface{}, rowUpdater interface{}) error
+	}
+
+	mgr, ok := v.Ctx.FKManager.(fkManager)
+	if !ok {
+		return nil
+	}
+
+	// Get schema from context
+	if v.Ctx.Schema == nil {
+		return nil
+	}
+
+	// Validate the delete (pass nil for rowReader, rowDeleter, and rowUpdater for now)
+	return mgr.ValidateDelete(tableName, values, v.Ctx.Schema, nil, nil, nil)
 }
 
 func (v *VDBE) execDelete(instr *Instruction) error {
-	// Delete current record from cursor P1
-	cursor, err := v.GetCursor(instr.P1)
+	_, btCursor, err := v.getDeleteCursor(instr.P1)
 	if err != nil {
 		return err
 	}
-
-	// Verify cursor is writable
-	if !cursor.Writable {
-		return fmt.Errorf("cursor %d is not writable (opened with OpenRead instead of OpenWrite)", instr.P1)
+	if err := v.validateDeleteConstraints(instr.P4.Z, btCursor); err != nil {
+		return err
 	}
+	return v.performDelete(btCursor)
+}
 
-	// Get the btree cursor
+// getDeleteCursor returns a validated writable btree cursor for delete operations.
+func (v *VDBE) getDeleteCursor(cursorNum int) (*Cursor, *btree.BtCursor, error) {
+	cursor, err := v.GetCursor(cursorNum)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !cursor.Writable {
+		return nil, nil, fmt.Errorf("cursor %d is not writable (opened with OpenRead instead of OpenWrite)", cursorNum)
+	}
 	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
 	if !ok || btCursor == nil {
-		return fmt.Errorf("invalid btree cursor for delete operation")
+		return nil, nil, fmt.Errorf("invalid btree cursor for delete operation")
 	}
+	return cursor, btCursor, nil
+}
 
-	// Delete the current row from the btree
-	err = btCursor.Delete()
+// validateDeleteConstraints checks FK constraints before delete.
+func (v *VDBE) validateDeleteConstraints(tableName string, btCursor *btree.BtCursor) error {
+	if tableName == "" || v.Ctx == nil || !v.Ctx.ForeignKeysEnabled {
+		return nil
+	}
+	payload := btCursor.GetPayload()
+	values, err := v.extractValuesFromPayload(tableName, payload)
 	if err != nil {
+		return nil // Skip if can't extract values
+	}
+	return v.checkForeignKeyDeleteConstraints(tableName, values)
+}
+
+// performDelete executes the btree delete and updates counters.
+func (v *VDBE) performDelete(btCursor *btree.BtCursor) error {
+	if err := btCursor.Delete(); err != nil {
 		return fmt.Errorf("failed to delete from btree: %w", err)
 	}
-
-	// Invalidate column cache since cursor state changed
 	v.IncrCacheCtr()
-
-	// Update change counter
 	v.NumChanges++
-
-	// Track row written (deleted)
 	if v.Stats != nil {
 		v.Stats.RowsWritten++
 	}
-
 	return nil
 }
 

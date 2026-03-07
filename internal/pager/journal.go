@@ -328,6 +328,21 @@ func (j *Journal) validateHeader() (bool, error) {
 	if int(header.PageSize) != j.pageSize {
 		return false, nil
 	}
+	if header.FormatVersion != JournalFormatVersion {
+		return false, nil
+	}
+	// Validate that page count is reasonable (not corrupted)
+	// PageCount should not exceed file size bounds
+	if j.file != nil {
+		info, err := j.file.Stat()
+		if err == nil {
+			entrySize := int64(4 + j.pageSize + 4)
+			maxPages := (info.Size() - JournalHeaderSize) / entrySize
+			if int64(header.PageCount) > maxPages {
+				return false, nil
+			}
+		}
+	}
 	return true, nil
 }
 

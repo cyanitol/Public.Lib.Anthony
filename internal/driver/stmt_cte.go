@@ -18,8 +18,6 @@ func (s *Stmt) compileSelectWithCTEs(vm *vdbe.VDBE, stmt *parser.SelectStmt, arg
 		return nil, err
 	}
 
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
 	cteTempTables, err := s.materializeAllCTEs(vm, cteCtx, args)
 	if err != nil {
 		return nil, err
@@ -700,6 +698,23 @@ func (s *Stmt) rewriteSelectWithCTETables(stmt *parser.SelectStmt, cteTempTables
 		rewritten.From = s.rewriteFromClause(rewritten.From, cteTempTables)
 	}
 
+	// Rewrite WHERE clause subqueries
+	if rewritten.Where != nil {
+		rewritten.Where = s.rewriteExpressionSubqueries(rewritten.Where, cteTempTables)
+	}
+
+	// Rewrite HAVING clause subqueries
+	if rewritten.Having != nil {
+		rewritten.Having = s.rewriteExpressionSubqueries(rewritten.Having, cteTempTables)
+	}
+
+	// Rewrite SELECT column subqueries
+	for i := range rewritten.Columns {
+		if rewritten.Columns[i].Expr != nil {
+			rewritten.Columns[i].Expr = s.rewriteExpressionSubqueries(rewritten.Columns[i].Expr, cteTempTables)
+		}
+	}
+
 	// Recursively rewrite compound queries
 	if rewritten.Compound != nil {
 		compound := *rewritten.Compound
@@ -758,4 +773,141 @@ func (s *Stmt) rewriteTableOrSubquery(table parser.TableOrSubquery, cteTempTable
 	}
 
 	return table
+}
+
+// rewriteExpressionSubqueries recursively rewrites subqueries in expressions.
+func (s *Stmt) rewriteExpressionSubqueries(expr parser.Expression, cteTempTables map[string]*schema.Table) parser.Expression {
+	if expr == nil {
+		return nil
+	}
+	if rewritten := s.rewriteSubqueryTypes(expr, cteTempTables); rewritten != nil {
+		return rewritten
+	}
+	if rewritten := s.rewriteCompoundTypes(expr, cteTempTables); rewritten != nil {
+		return rewritten
+	}
+	return expr
+}
+
+// rewriteSubqueryTypes handles subquery-related expression types.
+func (s *Stmt) rewriteSubqueryTypes(expr parser.Expression, cteTempTables map[string]*schema.Table) parser.Expression {
+	switch e := expr.(type) {
+	case *parser.SubqueryExpr:
+		return s.rewriteSubqueryExpr(e, cteTempTables)
+	case *parser.InExpr:
+		return s.rewriteInExpr(e, cteTempTables)
+	default:
+		return nil
+	}
+}
+
+// rewriteCompoundTypes handles compound and nested expression types.
+func (s *Stmt) rewriteCompoundTypes(expr parser.Expression, cteTempTables map[string]*schema.Table) parser.Expression {
+	switch e := expr.(type) {
+	case *parser.BinaryExpr:
+		return s.rewriteBinaryExpr(e, cteTempTables)
+	case *parser.UnaryExpr:
+		return s.rewriteUnaryExpr(e, cteTempTables)
+	case *parser.CaseExpr:
+		return s.rewriteCaseExpr(e, cteTempTables)
+	case *parser.BetweenExpr:
+		return s.rewriteBetweenExpr(e, cteTempTables)
+	case *parser.FunctionExpr:
+		return s.rewriteFunctionExpr(e, cteTempTables)
+	case *parser.ParenExpr:
+		return s.rewriteParenExpr(e, cteTempTables)
+	case *parser.CastExpr:
+		return s.rewriteCastExpr(e, cteTempTables)
+	case *parser.CollateExpr:
+		return s.rewriteCollateExpr(e, cteTempTables)
+	default:
+		return nil
+	}
+}
+
+func (s *Stmt) rewriteSubqueryExpr(e *parser.SubqueryExpr, cteTempTables map[string]*schema.Table) parser.Expression {
+	rewritten := *e
+	if e.Select != nil {
+		rewritten.Select = s.rewriteSelectWithCTETables(e.Select, cteTempTables)
+	}
+	return &rewritten
+}
+
+func (s *Stmt) rewriteInExpr(e *parser.InExpr, cteTempTables map[string]*schema.Table) parser.Expression {
+	rewritten := *e
+	if e.Select != nil {
+		rewritten.Select = s.rewriteSelectWithCTETables(e.Select, cteTempTables)
+	}
+	if e.Expr != nil {
+		rewritten.Expr = s.rewriteExpressionSubqueries(e.Expr, cteTempTables)
+	}
+	for i, val := range e.Values {
+		rewritten.Values[i] = s.rewriteExpressionSubqueries(val, cteTempTables)
+	}
+	return &rewritten
+}
+
+func (s *Stmt) rewriteBinaryExpr(e *parser.BinaryExpr, cteTempTables map[string]*schema.Table) parser.Expression {
+	rewritten := *e
+	rewritten.Left = s.rewriteExpressionSubqueries(e.Left, cteTempTables)
+	rewritten.Right = s.rewriteExpressionSubqueries(e.Right, cteTempTables)
+	return &rewritten
+}
+
+func (s *Stmt) rewriteUnaryExpr(e *parser.UnaryExpr, cteTempTables map[string]*schema.Table) parser.Expression {
+	rewritten := *e
+	rewritten.Expr = s.rewriteExpressionSubqueries(e.Expr, cteTempTables)
+	return &rewritten
+}
+
+func (s *Stmt) rewriteCaseExpr(e *parser.CaseExpr, cteTempTables map[string]*schema.Table) parser.Expression {
+	rewritten := *e
+	if e.Expr != nil {
+		rewritten.Expr = s.rewriteExpressionSubqueries(e.Expr, cteTempTables)
+	}
+	for i := range e.WhenClauses {
+		rewritten.WhenClauses[i].Condition = s.rewriteExpressionSubqueries(e.WhenClauses[i].Condition, cteTempTables)
+		rewritten.WhenClauses[i].Result = s.rewriteExpressionSubqueries(e.WhenClauses[i].Result, cteTempTables)
+	}
+	if e.ElseClause != nil {
+		rewritten.ElseClause = s.rewriteExpressionSubqueries(e.ElseClause, cteTempTables)
+	}
+	return &rewritten
+}
+
+func (s *Stmt) rewriteBetweenExpr(e *parser.BetweenExpr, cteTempTables map[string]*schema.Table) parser.Expression {
+	rewritten := *e
+	rewritten.Expr = s.rewriteExpressionSubqueries(e.Expr, cteTempTables)
+	rewritten.Lower = s.rewriteExpressionSubqueries(e.Lower, cteTempTables)
+	rewritten.Upper = s.rewriteExpressionSubqueries(e.Upper, cteTempTables)
+	return &rewritten
+}
+
+func (s *Stmt) rewriteFunctionExpr(e *parser.FunctionExpr, cteTempTables map[string]*schema.Table) parser.Expression {
+	rewritten := *e
+	for i, arg := range e.Args {
+		rewritten.Args[i] = s.rewriteExpressionSubqueries(arg, cteTempTables)
+	}
+	if e.Filter != nil {
+		rewritten.Filter = s.rewriteExpressionSubqueries(e.Filter, cteTempTables)
+	}
+	return &rewritten
+}
+
+func (s *Stmt) rewriteParenExpr(e *parser.ParenExpr, cteTempTables map[string]*schema.Table) parser.Expression {
+	rewritten := *e
+	rewritten.Expr = s.rewriteExpressionSubqueries(e.Expr, cteTempTables)
+	return &rewritten
+}
+
+func (s *Stmt) rewriteCastExpr(e *parser.CastExpr, cteTempTables map[string]*schema.Table) parser.Expression {
+	rewritten := *e
+	rewritten.Expr = s.rewriteExpressionSubqueries(e.Expr, cteTempTables)
+	return &rewritten
+}
+
+func (s *Stmt) rewriteCollateExpr(e *parser.CollateExpr, cteTempTables map[string]*schema.Table) parser.Expression {
+	rewritten := *e
+	rewritten.Expr = s.rewriteExpressionSubqueries(e.Expr, cteTempTables)
+	return &rewritten
 }

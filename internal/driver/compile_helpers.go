@@ -221,7 +221,7 @@ func (s *Stmt) emitExtraOrderByColumnMultiTable(vm *vdbe.VDBE, tables []stmtTabl
 			if schemaColIsRowid(tbl.table.Columns[tableColIdx]) {
 				vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, targetReg, 0)
 			} else {
-				recordIdx := schemaRecordIdx(tbl.table.Columns, tableColIdx)
+				recordIdx := schemaRecordIdxForTable(tbl.table, tableColIdx)
 				vm.AddOp(vdbe.OpColumn, tbl.cursorIdx, recordIdx, targetReg)
 			}
 			return
@@ -493,7 +493,7 @@ func (s *Stmt) emitColumnFromTable(vm *vdbe.VDBE, tbl stmtTableInfo, colName str
 		return nil
 	}
 
-	vm.AddOp(vdbe.OpColumn, tbl.cursorIdx, schemaRecordIdx(tbl.table.Columns, colIdx), targetReg)
+	vm.AddOp(vdbe.OpColumn, tbl.cursorIdx, schemaRecordIdxForTable(tbl.table, colIdx), targetReg)
 	return nil
 }
 

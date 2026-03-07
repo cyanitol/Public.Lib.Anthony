@@ -683,67 +683,57 @@ type printfFormatSpec struct {
 	precStar   bool // * for dynamic precision
 }
 
-// parsePrintfFormatSpec parses a format specifier starting at pos (after the %)
-// Returns the parsed spec, the new position, and number of extra args consumed for * specifiers
-func parsePrintfFormatSpec(format string, pos int, args []Value, argIdx *int) (printfFormatSpec, int) {
-	spec := printfFormatSpec{precision: -1}
-
-	// Parse flags
+// parsePrintfFlags parses format flags (-+#0 etc) and returns new position
+func parsePrintfFlags(format string, pos int, spec *printfFormatSpec) int {
+	flagMap := map[byte]*bool{
+		'-': &spec.leftAlign, '+': &spec.showSign, ' ': &spec.spaceSign,
+		'#': &spec.altForm, '0': &spec.zeroPad, ',': &spec.thousands,
+	}
 	for pos < len(format) {
-		switch format[pos] {
-		case '-':
-			spec.leftAlign = true
+		if ptr, ok := flagMap[format[pos]]; ok {
+			*ptr = true
 			pos++
-		case '+':
-			spec.showSign = true
-			pos++
-		case ' ':
-			spec.spaceSign = true
-			pos++
-		case '#':
-			spec.altForm = true
-			pos++
-		case '0':
-			spec.zeroPad = true
-			pos++
-		case ',':
-			spec.thousands = true
-			pos++
-		default:
-			goto parseWidth
+		} else {
+			break
 		}
 	}
+	return pos
+}
 
-parseWidth:
-	// Parse width (may be * for dynamic)
+// parsePrintfWidth parses width specifier (number or *) and returns new position
+func parsePrintfWidth(format string, pos int, args []Value, argIdx *int, spec *printfFormatSpec) int {
 	if pos < len(format) && format[pos] == '*' {
 		spec.widthStar = true
 		if *argIdx < len(args) {
 			spec.width = int(args[*argIdx].AsInt64())
 			*argIdx++
 		}
-		pos++
-	} else {
-		spec.width, pos = parseDecimalNumber(format, pos)
+		return pos + 1
 	}
+	spec.width, pos = parseDecimalNumber(format, pos)
+	return pos
+}
 
-	// Parse precision
-	if pos < len(format) && format[pos] == '.' {
-		pos++ // skip '.'
-		if pos < len(format) && format[pos] == '*' {
-			spec.precStar = true
-			if *argIdx < len(args) {
-				spec.precision = int(args[*argIdx].AsInt64())
-				*argIdx++
-			}
-			pos++
-		} else {
-			spec.precision, pos = parseDecimalNumber(format, pos)
+// parsePrintfPrecision parses precision specifier (.number or .*) and returns new position
+func parsePrintfPrecision(format string, pos int, args []Value, argIdx *int, spec *printfFormatSpec) int {
+	if pos >= len(format) || format[pos] != '.' {
+		return pos
+	}
+	pos++ // skip '.'
+	if pos < len(format) && format[pos] == '*' {
+		spec.precStar = true
+		if *argIdx < len(args) {
+			spec.precision = int(args[*argIdx].AsInt64())
+			*argIdx++
 		}
+		return pos + 1
 	}
+	spec.precision, pos = parseDecimalNumber(format, pos)
+	return pos
+}
 
-	// Skip length modifiers (ll, l, h, hh, etc.)
-	// Note: 'z' is a format specifier in SQLite, not a length modifier
+// skipLengthModifiers skips C-style length modifiers (l, h, L, j, t)
+func skipLengthModifiers(format string, pos int) int {
 	for pos < len(format) {
 		c := format[pos]
 		if c == 'l' || c == 'h' || c == 'L' || c == 'j' || c == 't' {
@@ -752,13 +742,20 @@ parseWidth:
 			break
 		}
 	}
+	return pos
+}
 
-	// Parse specifier
+// parsePrintfFormatSpec parses a format specifier starting at pos (after the %)
+func parsePrintfFormatSpec(format string, pos int, args []Value, argIdx *int) (printfFormatSpec, int) {
+	spec := printfFormatSpec{precision: -1}
+	pos = parsePrintfFlags(format, pos, &spec)
+	pos = parsePrintfWidth(format, pos, args, argIdx, &spec)
+	pos = parsePrintfPrecision(format, pos, args, argIdx, &spec)
+	pos = skipLengthModifiers(format, pos)
 	if pos < len(format) {
 		spec.specifier = format[pos]
 		pos++
 	}
-
 	return spec, pos
 }
 

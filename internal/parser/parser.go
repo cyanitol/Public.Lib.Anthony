@@ -1566,24 +1566,50 @@ func (p *Parser) applyConstraintReferences(c *ColumnConstraint) error {
 	return p.parseForeignKeyActions(c.ForeignKey)
 }
 
+// parseFKOnClause parses ON DELETE/UPDATE action
+func (p *Parser) parseFKOnClause(fk *ForeignKeyConstraint) error {
+	if p.match(TK_DELETE) {
+		action, err := p.parseForeignKeyAction()
+		if err != nil {
+			return err
+		}
+		fk.OnDelete = action
+		return nil
+	}
+	if p.match(TK_UPDATE) {
+		action, err := p.parseForeignKeyAction()
+		if err != nil {
+			return err
+		}
+		fk.OnUpdate = action
+		return nil
+	}
+	return p.error("expected DELETE or UPDATE after ON")
+}
+
+// parseFKDeferrable parses DEFERRABLE INITIALLY DEFERRED/IMMEDIATE
+func (p *Parser) parseFKDeferrable(fk *ForeignKeyConstraint) error {
+	if !p.match(TK_INITIALLY) {
+		fk.Deferrable = DeferrableInitiallyImmediate
+		return nil
+	}
+	if p.match(TK_DEFERRED) {
+		fk.Deferrable = DeferrableInitiallyDeferred
+		return nil
+	}
+	if p.match(TK_IMMEDIATE) {
+		fk.Deferrable = DeferrableInitiallyImmediate
+		return nil
+	}
+	return p.error("expected DEFERRED or IMMEDIATE after INITIALLY")
+}
+
 // parseForeignKeyActions parses ON DELETE/UPDATE, MATCH, and DEFERRABLE clauses.
 func (p *Parser) parseForeignKeyActions(fk *ForeignKeyConstraint) error {
 	for {
 		if p.match(TK_ON) {
-			if p.match(TK_DELETE) {
-				action, err := p.parseForeignKeyAction()
-				if err != nil {
-					return err
-				}
-				fk.OnDelete = action
-			} else if p.match(TK_UPDATE) {
-				action, err := p.parseForeignKeyAction()
-				if err != nil {
-					return err
-				}
-				fk.OnUpdate = action
-			} else {
-				return p.error("expected DELETE or UPDATE after ON")
+			if err := p.parseFKOnClause(fk); err != nil {
+				return err
 			}
 		} else if p.match(TK_MATCH) {
 			if !p.check(TK_ID) {
@@ -1596,16 +1622,8 @@ func (p *Parser) parseForeignKeyActions(fk *ForeignKeyConstraint) error {
 			}
 			fk.Deferrable = DeferrableNone
 		} else if p.match(TK_DEFERRABLE) {
-			if p.match(TK_INITIALLY) {
-				if p.match(TK_DEFERRED) {
-					fk.Deferrable = DeferrableInitiallyDeferred
-				} else if p.match(TK_IMMEDIATE) {
-					fk.Deferrable = DeferrableInitiallyImmediate
-				} else {
-					return p.error("expected DEFERRED or IMMEDIATE after INITIALLY")
-				}
-			} else {
-				fk.Deferrable = DeferrableInitiallyImmediate
+			if err := p.parseFKDeferrable(fk); err != nil {
+				return err
 			}
 		} else {
 			break

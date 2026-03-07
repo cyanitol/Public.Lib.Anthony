@@ -224,10 +224,12 @@ func (s *Stmt) tryGetCachedVdbe() *vdbe.VDBE {
 // setVdbeContext sets the VDBE context for this connection
 func (s *Stmt) setVdbeContext(vm *vdbe.VDBE) {
 	vm.Ctx = &vdbe.VDBEContext{
-		Btree:             s.conn.btree,
-		Pager:             interface{}(s.conn.pager),
-		Schema:            interface{}(s.conn.schema),
-		CollationRegistry: interface{}(s.conn.collRegistry),
+		Btree:              s.conn.btree,
+		Pager:              interface{}(s.conn.pager),
+		Schema:             interface{}(s.conn.schema),
+		CollationRegistry:  interface{}(s.conn.collRegistry),
+		FKManager:          interface{}(s.conn.fkManager),
+		ForeignKeysEnabled: s.conn.foreignKeysEnabled,
 	}
 }
 
@@ -258,10 +260,12 @@ func (s *Stmt) invalidateStmtCache() {
 func (s *Stmt) newVDBE() *vdbe.VDBE {
 	vm := vdbe.New()
 	vm.Ctx = &vdbe.VDBEContext{
-		Btree:             s.conn.btree,
-		Pager:             interface{}(s.conn.pager),
-		Schema:            interface{}(s.conn.schema),
-		CollationRegistry: interface{}(s.conn.collRegistry),
+		Btree:              s.conn.btree,
+		Pager:              interface{}(s.conn.pager),
+		Schema:             interface{}(s.conn.schema),
+		CollationRegistry:  interface{}(s.conn.collRegistry),
+		FKManager:          interface{}(s.conn.fkManager),
+		ForeignKeysEnabled: s.conn.foreignKeysEnabled,
 	}
 	return vm
 }
@@ -488,7 +492,9 @@ func expandStarColumns(columns []parser.ResultColumn, table *schema.Table) ([]pa
 }
 
 // schemaRecordIdx computes the B-tree record index for column colIdx in table.
-// It equals the number of non-rowid columns that precede position colIdx.
+// For normal tables: equals the number of non-rowid columns that precede position colIdx.
+// For WITHOUT ROWID tables: equals colIdx (all columns are in the record).
+// This is a legacy function - prefer using schemaRecordIdxForTable.
 func schemaRecordIdx(columns []*schema.Column, colIdx int) int {
 	recordIdx := 0
 	for j := 0; j < colIdx; j++ {
@@ -497,6 +503,18 @@ func schemaRecordIdx(columns []*schema.Column, colIdx int) int {
 		}
 	}
 	return recordIdx
+}
+
+// schemaRecordIdxForTable computes the B-tree record index for column colIdx in a table.
+// For normal tables: equals the number of non-rowid columns that precede position colIdx.
+// For WITHOUT ROWID tables: equals colIdx (all columns are in the record).
+func schemaRecordIdxForTable(table *schema.Table, colIdx int) int {
+	if table.WithoutRowID {
+		// For WITHOUT ROWID tables, all columns are in the record
+		return colIdx
+	}
+	// For normal tables, skip rowid columns
+	return schemaRecordIdx(table.Columns, colIdx)
 }
 
 // emitSelectColumnOp emits the VDBE opcode(s) required to read the i-th SELECT
@@ -534,7 +552,7 @@ func emitSimpleColumnRef(vm *vdbe.VDBE, table *schema.Table, ident *parser.Ident
 		return nil
 	}
 
-	vm.AddOp(vdbe.OpColumn, 0, schemaRecordIdx(table.Columns, colIdx), targetReg)
+	vm.AddOp(vdbe.OpColumn, 0, schemaRecordIdxForTable(table, colIdx), targetReg)
 	return nil
 }
 

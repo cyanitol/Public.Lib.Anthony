@@ -75,14 +75,16 @@ func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table
 	colNames := resolveInsertColumns(stmt, table)
 	rowidColIdx := findInsertRowidCol(colNames, table)
 
+	// For WITHOUT ROWID tables, all columns go in the record
+	// For normal tables, only non-rowid columns go in the record
 	numRecordCols := len(firstRow)
-	if rowidColIdx >= 0 {
+	if !table.WithoutRowID && rowidColIdx >= 0 {
 		numRecordCols--
 	}
 
 	// Register layout:
 	//   reg 1         - rowid  (P3=0 is special in OpInsert, so start at 1)
-	//   reg 2..N+1    - record column values (non-rowid only)
+	//   reg 2..N+1    - record column values (non-rowid only for normal tables, all for WITHOUT ROWID)
 	//   reg N+2       - assembled record
 	const rowidReg = 1
 	const recordStartReg = 2
@@ -117,16 +119,24 @@ func (s *Stmt) emitInsertRow(vm *vdbe.VDBE, table *schema.Table, colNames []stri
 	rowidColIdx, rowidReg, recordStartReg, numRecordCols int, conflictMode int32,
 	args []driver.NamedValue, paramIdx *int) {
 
-	s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, paramIdx)
+	// For WITHOUT ROWID tables, we don't generate a rowid
+	if !table.WithoutRowID {
+		s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, paramIdx)
+	}
 	s.emitInsertRecordValues(vm, table, colNames, row, rowidColIdx, recordStartReg, args, paramIdx)
 
 	resultReg := recordStartReg + numRecordCols
 	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
 
 	// OpInsert: P1=cursor, P2=record register, P3=rowid register
+	// For WITHOUT ROWID tables, P3 is set to 0 (no rowid)
 	// P4.I = conflict mode (0=abort, 1=ignore, 2=replace)
 	// P4.Z = table name (for UNIQUE constraint checking and AUTOINCREMENT)
-	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidReg)
+	rowidRegToUse := rowidReg
+	if table.WithoutRowID {
+		rowidRegToUse = 0
+	}
+	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidRegToUse)
 	vm.Program[insertOp].P4.I = conflictMode
 	vm.Program[insertOp].P4.Z = table.Name
 }
@@ -177,8 +187,10 @@ func (s *Stmt) prepareInsertSelectContext(vm *vdbe.VDBE, stmt *parser.InsertStmt
 	rowidColIdx := findInsertRowidCol(targetColNames, targetTable)
 
 	// Count non-rowid columns for record
+	// For WITHOUT ROWID tables, all columns go in the record
+	// For normal tables, only non-rowid columns go in the record
 	numRecordCols := len(targetColNames)
-	if rowidColIdx >= 0 {
+	if !targetTable.WithoutRowID && rowidColIdx >= 0 {
 		numRecordCols--
 	}
 
@@ -285,7 +297,12 @@ func (s *Stmt) emitInsertSelectLoop(vm *vdbe.VDBE, selectStmt *parser.SelectStmt
 	resultReg := recordStartReg + ctx.numRecordCols
 	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, ctx.numRecordCols, resultReg)
 
-	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidReg)
+	// For WITHOUT ROWID tables, P3 is set to 0 (no rowid)
+	rowidRegToUse := rowidReg
+	if ctx.targetTable.WithoutRowID {
+		rowidRegToUse = 0
+	}
+	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidRegToUse)
 	// Pass table name for UNIQUE constraint checking and AUTOINCREMENT
 	vm.Program[insertOp].P4.Z = ctx.targetTable.Name
 
@@ -310,7 +327,14 @@ func (s *Stmt) emitInsertSelectWhere(vm *vdbe.VDBE, selectStmt *parser.SelectStm
 }
 
 // emitInsertSelectRowid generates rowid for the target row.
+// For WITHOUT ROWID tables, this is a no-op since they don't use rowids.
 func (s *Stmt) emitInsertSelectRowid(vm *vdbe.VDBE, ctx *insertSelectContext, rowidReg int) {
+	// WITHOUT ROWID tables don't use OpNewRowid
+	if ctx.targetTable.WithoutRowID {
+		// No rowid needed - PRIMARY KEY columns are in the record
+		return
+	}
+
 	if ctx.rowidColIdx >= 0 {
 		// One of the SELECT columns maps to the rowid column
 		selectCol := ctx.selectCols[ctx.rowidColIdx]
@@ -322,10 +346,13 @@ func (s *Stmt) emitInsertSelectRowid(vm *vdbe.VDBE, ctx *insertSelectContext, ro
 }
 
 // emitInsertSelectRecordColumns reads SELECT columns into record registers.
+// For WITHOUT ROWID tables, includes PRIMARY KEY columns in the record.
 func (s *Stmt) emitInsertSelectRecordColumns(vm *vdbe.VDBE, ctx *insertSelectContext, recordStartReg int) {
 	recordReg := recordStartReg
 	for i, selectCol := range ctx.selectCols {
-		if i == ctx.rowidColIdx {
+		// For normal tables, skip the rowid column (it's stored separately)
+		// For WITHOUT ROWID tables, include all columns (even PRIMARY KEY)
+		if !ctx.targetTable.WithoutRowID && i == ctx.rowidColIdx {
 			continue // Skip rowid - already handled
 		}
 		emitSelectColumnOp(vm, ctx.sourceTable, selectCol, recordReg, ctx.gen)
@@ -391,6 +418,7 @@ func findInsertRowidCol(names []string, table *schema.Table) int {
 // When the INSERT specifies an explicit rowid value it is loaded from the
 // VALUES clause; otherwise OpNewRowid generates a fresh rowid.
 // For AUTOINCREMENT columns, special handling ensures rowids are never reused.
+// For WITHOUT ROWID tables, this function should not be called as they don't use rowids.
 func (s *Stmt) emitInsertRowid(vm *vdbe.VDBE, table *schema.Table, row []parser.Expression, rowidColIdx int, rowidReg int, args []driver.NamedValue, paramIdx *int) {
 	if rowidColIdx >= 0 {
 		s.compileValue(vm, row[rowidColIdx], rowidReg, args, paramIdx)
@@ -409,6 +437,15 @@ func (s *Stmt) emitInsertRowid(vm *vdbe.VDBE, table *schema.Table, row []parser.
 		}
 		return
 	}
+
+	// WITHOUT ROWID tables don't use OpNewRowid - they use PRIMARY KEY columns
+	if table.WithoutRowID {
+		// PRIMARY KEY values should already be in the record
+		// Set rowidReg to 0 as a sentinel - OpInsert will handle this specially
+		vm.AddOp(vdbe.OpInteger, 0, rowidReg, 0)
+		return
+	}
+
 	// OpNewRowid: P1=cursor, P3=destination register
 	vm.AddOp(vdbe.OpNewRowid, 0, 0, rowidReg)
 }
@@ -416,10 +453,13 @@ func (s *Stmt) emitInsertRowid(vm *vdbe.VDBE, table *schema.Table, row []parser.
 // emitInsertRecordValues emits OpXxx opcodes that load each non-rowid value
 // from row into consecutive registers beginning at startReg, applying column
 // affinity as needed.
+// For WITHOUT ROWID tables, includes PRIMARY KEY columns in the record.
 func (s *Stmt) emitInsertRecordValues(vm *vdbe.VDBE, table *schema.Table, colNames []string, row []parser.Expression, rowidColIdx int, startReg int, args []driver.NamedValue, paramIdx *int) {
 	reg := startReg
 	for i, val := range row {
-		if i == rowidColIdx {
+		// For normal tables, skip the rowid column (it's stored separately)
+		// For WITHOUT ROWID tables, include all columns (even PRIMARY KEY)
+		if !table.WithoutRowID && i == rowidColIdx {
 			continue // rowid already loaded separately
 		}
 		s.compileValue(vm, val, reg, args, paramIdx)
@@ -769,7 +809,7 @@ func (s *Stmt) emitUpdateRecordBuild(vm *vdbe.VDBE, table *schema.Table,
 			vm.AddOp(vdbe.OpCopy, valReg, reg, 0)
 		} else {
 			// Column is not updated - load existing value
-			recordIdx := schemaRecordIdx(table.Columns, colIdx)
+			recordIdx := schemaRecordIdxForTable(table, colIdx)
 			vm.AddOp(vdbe.OpColumn, 0, recordIdx, reg)
 		}
 		reg++

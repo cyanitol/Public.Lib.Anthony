@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/constraint"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
 )
@@ -38,10 +39,86 @@ func (s *Stmt) compileCreateTable(vm *vdbe.VDBE, stmt *parser.CreateTableStmt, a
 		table.RootPage = 2
 	}
 
+	// Register foreign key constraints with the FK manager
+	if err := s.registerForeignKeyConstraints(table, stmt); err != nil {
+		return nil, err
+	}
+
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
 	return vm, nil
+}
+
+// registerForeignKeyConstraints registers foreign key constraints from a CREATE TABLE statement
+// with the connection's ForeignKeyManager.
+func (s *Stmt) registerForeignKeyConstraints(table interface{}, stmt *parser.CreateTableStmt) error {
+	if s.conn.fkManager == nil {
+		return nil
+	}
+	s.registerTableLevelFKs(table, stmt.Name)
+	s.registerColumnLevelFKs(stmt)
+	return nil
+}
+
+// tableWithConstraints provides access to table constraints.
+type tableWithConstraints interface {
+	GetConstraints() []interface{}
+}
+
+// foreignKeyConstraint provides access to FK definition.
+type foreignKeyConstraint interface {
+	GetForeignKey() interface{}
+}
+
+// constraintWithColumns provides access to constraint columns.
+type constraintWithColumns interface {
+	GetColumns() []string
+}
+
+// registerTableLevelFKs registers table-level FOREIGN KEY constraints.
+func (s *Stmt) registerTableLevelFKs(table interface{}, tableName string) {
+	tableObj, ok := table.(tableWithConstraints)
+	if !ok {
+		return
+	}
+	for _, constraintIface := range tableObj.GetConstraints() {
+		s.tryRegisterTableFK(constraintIface, tableName)
+	}
+}
+
+// tryRegisterTableFK attempts to register a single table-level FK constraint.
+func (s *Stmt) tryRegisterTableFK(constraintIface interface{}, tableName string) {
+	fkConstraint, ok := constraintIface.(foreignKeyConstraint)
+	if !ok {
+		return
+	}
+	fkDef := fkConstraint.GetForeignKey()
+	if fkDef == nil {
+		return
+	}
+	parserfk, ok := fkDef.(*parser.ForeignKeyConstraint)
+	if !ok {
+		return
+	}
+	var columns []string
+	if colConstraint, ok := constraintIface.(constraintWithColumns); ok {
+		columns = colConstraint.GetColumns()
+	}
+	fk := constraint.CreateForeignKeyFromParser(tableName, columns, parserfk, "")
+	s.conn.fkManager.AddConstraint(fk)
+}
+
+// registerColumnLevelFKs registers column-level FOREIGN KEY constraints.
+func (s *Stmt) registerColumnLevelFKs(stmt *parser.CreateTableStmt) {
+	for _, col := range stmt.Columns {
+		for _, colConstraint := range col.Constraints {
+			if colConstraint.Type == parser.ConstraintForeignKey && colConstraint.ForeignKey != nil {
+				fk := constraint.CreateForeignKeyFromParser(stmt.Name, []string{col.Name}, colConstraint.ForeignKey, "")
+				s.conn.fkManager.AddConstraint(fk)
+			}
+		}
+	}
 }
 
 // compileDropTable compiles a DROP TABLE statement.

@@ -33,7 +33,7 @@ func (s *Stmt) loadAggregateColumnValue(vm *vdbe.VDBE, fnExpr *parser.FunctionEx
 
 	// Load column value into a temp register
 	tempReg := gen.AllocReg()
-	recordIdx := schemaRecordIdx(table.Columns, colIdx)
+	recordIdx := schemaRecordIdxForTable(table, colIdx)
 	vm.AddOp(vdbe.OpColumn, tableCursor, recordIdx, tempReg)
 
 	// Skip NULL values

@@ -154,6 +154,9 @@ func (p *Pager) reloadDatabaseAfterVacuum() error {
 		return fmt.Errorf("failed to read header after vacuum: %w", err)
 	}
 
+	// Increment schema cookie in current pager to match the vacuumed database
+	p.header.SchemaCookie++
+
 	stat, err := p.file.Stat()
 	if err != nil {
 		return fmt.Errorf("failed to stat database: %w", err)
@@ -209,6 +212,8 @@ func (p *Pager) updateTargetHeader(targetPager *Pager) error {
 	targetPager.header.FreelistTrunk = 0
 	targetPager.header.FreelistCount = 0
 	targetPager.header.FileChangeCounter++
+	// Increment schema cookie to indicate schema was rebuilt
+	targetPager.header.SchemaCookie++
 
 	page1, err := targetPager.Get(1)
 	if err != nil {

@@ -640,7 +640,7 @@ func (s *Stmt) emitExtraOrderByColumn(vm *vdbe.VDBE, table *schema.Table, colNam
 		if schemaColIsRowid(table.Columns[tableColIdx]) {
 			vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
 		} else {
-			recordIdx := schemaRecordIdx(table.Columns, tableColIdx)
+			recordIdx := schemaRecordIdxForTable(table, tableColIdx)
 			vm.AddOp(vdbe.OpColumn, 0, recordIdx, targetReg)
 		}
 	} else if tableColIdx == -2 {

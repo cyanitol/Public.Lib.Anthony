@@ -93,10 +93,14 @@ type Cursor struct {
 // Uses typed interfaces from internal/types where possible to improve type safety.
 // Some fields remain as interface{} due to Go's type system limitations with covariant return types.
 type VDBEContext struct {
-	Btree             types.BtreeAccess  // B-tree storage layer access
-	Pager             interface{}        // *pager.Pager (kept as interface{} - InTransaction not in PagerWriter interface)
-	Schema            interface{}        // *schema.Schema (kept as interface{} due to covariant return type issues)
-	CollationRegistry interface{}        // *collation.CollationRegistry (kept as interface{} due to covariant return types)
+	Btree             types.BtreeAccess // B-tree storage layer access
+	Pager             interface{}       // *pager.Pager (kept as interface{} - InTransaction not in PagerWriter interface)
+	Schema            interface{}       // *schema.Schema (kept as interface{} due to covariant return type issues)
+	CollationRegistry interface{}       // *collation.CollationRegistry (kept as interface{} due to covariant return types)
+
+	// Foreign key constraint support
+	FKManager          interface{} // *constraint.ForeignKeyManager
+	ForeignKeysEnabled bool        // PRAGMA foreign_keys setting
 }
 
 // VDBE represents the Virtual Database Engine - a bytecode virtual machine.

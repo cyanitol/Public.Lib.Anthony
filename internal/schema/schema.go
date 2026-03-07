@@ -664,6 +664,11 @@ func (s *Schema) CreateTable(stmt *parser.CreateTableStmt) (*Table, error) {
 		return nil, err
 	}
 
+	// Validate WITHOUT ROWID constraints
+	if err := table.ValidateWithoutRowIDConstraints(); err != nil {
+		return nil, err
+	}
+
 	// Initialize sequence if table has AUTOINCREMENT column
 	if _, hasAutoincrement := table.HasAutoincrementColumn(); hasAutoincrement {
 		s.Sequences.InitSequence(stmt.Name)

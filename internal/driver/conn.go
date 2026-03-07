@@ -9,6 +9,7 @@ import (
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/collation"
+	"github.com/JuniperBible/Public.Lib.Anthony/internal/constraint"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/functions"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/pager"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
@@ -44,6 +45,9 @@ type Conn struct {
 	// Virtual table and collation registries
 	vtabRegistry *vtab.ModuleRegistry
 	collRegistry *collation.CollationRegistry
+
+	// Foreign key constraint manager
+	fkManager *constraint.ForeignKeyManager
 }
 
 // Prepare prepares a SQL statement.
@@ -313,6 +317,9 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 	// Initialize virtual table and collation registries
 	c.vtabRegistry = vtab.NewModuleRegistry()
 	c.collRegistry = collation.NewCollationRegistry()
+
+	// Initialize foreign key constraint manager
+	c.fkManager = constraint.NewForeignKeyManager()
 
 	return nil
 }
