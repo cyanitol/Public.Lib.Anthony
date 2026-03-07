@@ -450,7 +450,11 @@ func (s *Stmt) emitWhereClause(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *par
 	return vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
 }
 
-// evaluateGroupByExprs evaluates GROUP BY expressions into registers
+// evaluateGroupByExprs evaluates GROUP BY expressions into registers.
+//
+// SCAFFOLDING: Alternative GROUP BY implementation using direct evaluation.
+// Currently unused - active implementation generates bytecode inline in compileGroupBy.
+// Will be used for complex GROUP BY expressions requiring separate evaluation pass.
 func (s *Stmt) evaluateGroupByExprs(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, groupByRegs []int) error {
 	for i, groupExpr := range stmt.GroupBy {
 		reg, err := gen.GenerateExpr(groupExpr)

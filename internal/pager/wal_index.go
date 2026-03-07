@@ -114,6 +114,7 @@ type WALIndex struct {
 	hashTable map[uint32]uint32
 
 	// Page size of the database
+	// SCAFFOLDING: For page size validation during WAL operations
 	pageSize int
 
 	// Whether the index has been initialized

@@ -21,20 +21,35 @@ const (
 )
 
 // TransactionManager manages transaction state and operations for the pager.
+//
+// SCAFFOLDING: Fields marked below are prepared for advanced transaction features:
+// - journal: For rollback journal integration with pager
+// - readRefs: For multi-reader concurrency tracking
+// - writeOwner: For deadlock detection in concurrent writes
+// - mu: For thread-safe transaction state management
+//
+// Currently using simplified transaction model; will be activated for:
+// 1. WAL mode concurrent readers
+// 2. Deadlock detection
+// 3. Connection-level transaction isolation
 type TransactionManager struct {
 	// Current transaction state
 	state TransactionState
 
 	// Journal for write transactions
+	// SCAFFOLDING: For direct journal integration
 	journal *Journal
 
 	// Read transaction reference count
+	// SCAFFOLDING: For multi-reader tracking
 	readRefs int
 
 	// Write transaction owner (only one write transaction allowed)
+	// SCAFFOLDING: For deadlock detection
 	writeOwner interface{}
 
 	// Mutex for thread-safe operations
+	// SCAFFOLDING: For concurrent access protection
 	mu sync.RWMutex
 }
 

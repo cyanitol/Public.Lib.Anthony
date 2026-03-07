@@ -45,6 +45,7 @@ type MemoryPager struct {
 	readOnly bool
 
 	// Change counter done flag
+	// SCAFFOLDING: For consistency with file-based pager commit protocol
 	changeCountDone bool
 
 	// Error code for error state

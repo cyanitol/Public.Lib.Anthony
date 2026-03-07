@@ -1,0 +1,201 @@
+# Anthony - Pure Go SQLite Implementation - TODO
+#
+# Test Status: ~655 passing, ~476 skipped (run `go test ./...` for current counts)
+# Code Quality: Cyclomatic complexity <= 10 for all production code
+# Last Updated: 2026-03-06
+
+================================================================================
+SCAFFOLDING CODE - Prepared but waiting for activation
+================================================================================
+
+The following code is intentionally unused, prepared for future features.
+Each section documents what the code is waiting for.
+
+## Phase 3.5: Trigger Execution
+Location: internal/driver/compile_helpers.go
+Functions:
+  - executeBeforeInsertTriggers()
+  - executeAfterInsertTriggers()
+  - executeBeforeUpdateTriggers()
+  - executeAfterUpdateTriggers()
+  - executeBeforeDeleteTriggers()
+  - executeAfterDeleteTriggers()
+  - prepareNewRowForInsert()
+Waiting for:
+  - VDBE runtime integration (triggers execute during row ops, not compilation)
+  - NEW/OLD row pseudo-tables populated from actual row data
+  - Recursive statement execution within trigger body
+See: compile_dml.go TODO Phase 3.5 comments
+
+## Subquery Optimization
+Location: internal/driver/compile_subquery.go
+Functions:
+  - adjustSubqueryJumpTargets()
+  - buildJumpOpcodeMap()
+  - buildDualJumpOpcodeMap()
+  - adjustJumpTargetsInProgram()
+  - compileInSubquery()
+Location: internal/expr/codegen.go
+  - registerAdjustmentRule (type)
+  - registerAdjustmentRules (var)
+  - adjustSubqueryCursors()
+  - adjustSubqueryRegisters()
+  - adjustInstructionRegisters()
+Waiting for:
+  - Subquery flattening optimization
+  - Inline scalar subquery evaluation
+  - Materialized IN subquery optimization
+
+## CTE Bytecode Inlining
+Location: internal/driver/stmt_cte.go
+Functions:
+  - compileCTEPopulation()
+  - inlineCTEBytecode()
+  - handleSpecialOpcode()
+  - isControlFlowOp()
+Waiting for:
+  - CTE materialization optimization for multiple references
+  - Recursive CTE support (iterative bytecode generation)
+Currently using coroutine-based implementation (compileCTEPopulationCoroutine)
+
+## GROUP BY Evaluation
+Location: internal/driver/stmt_groupby.go
+Functions:
+  - evaluateGroupByExprs()
+Waiting for:
+  - Complex GROUP BY expressions requiring separate evaluation pass
+Currently using inline bytecode generation in compileGroupBy
+
+## Transaction Management
+Location: internal/pager/transaction.go
+Fields:
+  - journal: For direct journal integration
+  - readRefs: For multi-reader tracking
+  - writeOwner: For deadlock detection
+  - mu: For concurrent access protection
+Waiting for:
+  - WAL mode concurrent readers
+  - Deadlock detection
+  - Connection-level transaction isolation
+
+## Pager Infrastructure
+Location: internal/pager/pager.go
+  - tempFile: For temp database support (ATTACH ':memory:')
+  - changeCountDone: For file header change counter updates
+Location: internal/pager/journal.go
+  - headerSynced: For atomic commit tracking
+Location: internal/pager/memory_pager.go
+  - changeCountDone: For consistency with file-based pager
+Location: internal/pager/savepoint.go
+  - mu: For concurrent savepoint access
+Location: internal/pager/wal_index.go
+  - pageSize: For page size validation during WAL ops
+Location: internal/pager/vacuum.go
+  - allocateLocked(): For incremental/auto-vacuum modes
+
+## Date/Time Functions
+Location: internal/functions/date.go
+  - isError: For error propagation in date parsing chains
+  - getWeekday(): For strftime %w and %u format specifiers
+  - getWeekNumber(): For strftime %W format specifier
+  - getDayOfYear(): For strftime %j format specifier
+
+## EXPLAIN Infrastructure
+Location: internal/planner/explain.go
+  - addOrderByNode(): Simplified version without cost estimates
+  - formatIndexScan(): For detailed EXPLAIN with index info
+Location: internal/planner/planner.go
+  - explainLoop(): For EXPLAIN QUERY PLAN output
+
+## R-Tree Virtual Table
+Location: internal/vtab/rtree/rtree.go
+  - queryBBox: For spatial range queries (overlap, contains, within)
+  - queryType: For distinguishing spatial query operations
+
+================================================================================
+v0.1.x - Current Development
+================================================================================
+
+## Completed
+[x] Core Infrastructure (B-tree, Pager, VDBE, Parser)
+[x] SQL Features (Constraints, CTEs, Subqueries, DDL)
+[x] Built-in Functions (String, Math, Date/Time, Aggregate)
+[x] Query Optimization (Index selection, cost estimation)
+[x] Code Quality (Cyclomatic complexity <= 10)
+[x] Pre-commit validation (make commit)
+[x] SPDX license headers on all files
+[x] Documentation scaffolding comments
+
+## In Progress
+[ ] Foreign Key Runtime Enforcement (38 tests skipped)
+    - FK manager not passed to VDBE context
+    - No FK validation calls in execInsert/execDelete
+[ ] CTE Edge Cases (17 tests skipped)
+    - Correlated subquery in CTE WHERE causes infinite loop
+    - Recursive CTE bytecode generation incomplete
+[ ] WITHOUT ROWID Tables (23 tests skipped)
+    - DML compilation uses OpNewRowid for ALL tables
+    - Need to use PRIMARY KEY columns as key instead
+[ ] VACUUM Operations (30 tests skipped)
+    - sqlite_master table persistence after VACUUM
+    - Schema cookie management
+
+================================================================================
+v0.2.0 - Planned Features
+================================================================================
+
+[ ] ANALYZE - Query optimizer statistics
+    - Collect histogram data for table columns
+    - Store in sqlite_stat1/sqlite_stat4 tables
+    - Integrate with cost estimator
+
+[ ] BACKUP - Online backup API
+    - Incremental backup support
+    - Progress callback
+    - Concurrent read access during backup
+
+[ ] FTS5 - Full-text search
+    - Tokenizer infrastructure (internal/vtab/fts5/)
+    - Index management
+    - Search operators (MATCH, NEAR, etc.)
+    - Ranking functions (bm25, etc.)
+
+[ ] R-Tree - Spatial indexing
+    - Bounding box queries (internal/vtab/rtree/)
+    - Insert/Update/Delete operations
+    - Index maintenance
+
+================================================================================
+Future Phases
+================================================================================
+
+## Phase 4: Performance
+[ ] Prepared statement caching
+[ ] Connection pooling improvements
+[ ] Memory limits and spill-to-disk for large sorts
+[ ] Query plan caching
+
+## Phase 5: Security
+[ ] Input validation hardening
+[ ] Resource limits enforcement
+[ ] SQL injection prevention audit
+
+## Phase 6: Testing
+[ ] Fuzzing infrastructure
+[ ] Benchmarks vs reference SQLite
+[ ] Stress testing
+
+## Phase 7: Configuration
+[ ] DSN parsing improvements
+[ ] Custom collation support
+[ ] Extension loading
+
+================================================================================
+Known Limitations
+================================================================================
+
+- Windows file locking not implemented
+- ORDER BY bytecode generation incomplete for complex cases
+- Trigger execution is compile-time only (should be runtime)
+- No spill-to-disk for large sort operations
+- ATTACH DATABASE partially implemented

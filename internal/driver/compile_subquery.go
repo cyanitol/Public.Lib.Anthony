@@ -430,6 +430,18 @@ func stripInitCodeIfNeeded(vm *vdbe.VDBE, i int, startAddr int) {
 	}
 }
 
+// ============================================================================
+// Subquery Jump Target Adjustment Functions
+// ============================================================================
+//
+// SCAFFOLDING: These functions support advanced subquery bytecode embedding.
+// Currently unused because:
+// 1. Current subquery implementation uses coroutines (OpInitCoroutine/OpYield)
+// 2. Jump target adjustment needed for inline subquery expansion (optimization)
+// 3. Will be used when implementing subquery flattening optimization
+//
+// ============================================================================
+
 // adjustSubqueryJumpTargets adjusts all jump targets in the subquery bytecode.
 // When subquery bytecode is embedded into a parent VDBE at address baseAddr,
 // all absolute jump targets (in P2) must be adjusted by adding baseAddr.
@@ -653,6 +665,12 @@ func (s *Stmt) compileExistsSubquery(vm *vdbe.VDBE, subquery *parser.SelectStmt,
 }
 
 // compileInSubquery compiles an IN subquery.
+//
+// SCAFFOLDING: Alternative IN subquery implementation using ephemeral tables.
+// Currently unused - the active implementation uses OpInSubquery opcode.
+// This function will be used when implementing:
+// 1. Materialized IN subquery optimization (for repeated evaluation)
+// 2. Large IN list optimization using ephemeral B-tree index
 func (s *Stmt) compileInSubquery(vm *vdbe.VDBE, leftExpr parser.Expression, subquery *parser.SelectStmt, targetReg int, gen *expr.CodeGenerator, args []driver.NamedValue) error {
 	// Compile the left expression
 	leftReg, err := gen.GenerateExpr(leftExpr)

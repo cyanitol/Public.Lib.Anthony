@@ -33,6 +33,7 @@ type SavepointManager struct {
 	savepoints []*Savepoint
 
 	// Mutex for thread-safe operations
+	// SCAFFOLDING: For concurrent savepoint access from multiple goroutines
 	mu sync.RWMutex
 }
 

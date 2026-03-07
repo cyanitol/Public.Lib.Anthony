@@ -45,7 +45,8 @@ type DateTime struct {
 
 	// Other flags
 	useSubsec bool
-	isError   bool
+	// SCAFFOLDING: For error propagation in date parsing chains
+	isError bool
 }
 
 const (
@@ -958,6 +959,7 @@ func strftimeFunc(args []Value) (Value, error) {
 }
 
 // getWeekday returns the day of week (0=Sunday, 1=Monday, ..., 6=Saturday).
+// SCAFFOLDING: For strftime %w and %u format specifiers.
 func (dt *DateTime) getWeekday() int {
 	dt.computeJD()
 	// Julian day 0 is a Monday, so adjust accordingly
@@ -967,6 +969,7 @@ func (dt *DateTime) getWeekday() int {
 
 // getWeekNumber returns the week number of the year (00-53).
 // Week 01 is the first week containing a Monday.
+// SCAFFOLDING: For strftime %W format specifier.
 func (dt *DateTime) getWeekNumber() int {
 	dt.computeYMD()
 
@@ -993,6 +996,7 @@ func (dt *DateTime) getWeekNumber() int {
 }
 
 // getDayOfYear returns the day of year (1-366).
+// SCAFFOLDING: For strftime %j format specifier.
 func (dt *DateTime) getDayOfYear() int {
 	dt.computeYMD()
 

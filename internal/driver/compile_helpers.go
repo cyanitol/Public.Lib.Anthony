@@ -724,6 +724,15 @@ func (s *Stmt) compileInnerStatement(vm *vdbe.VDBE, stmt parser.Statement, args 
 // ============================================================================
 // Trigger Execution Helper Functions
 // ============================================================================
+//
+// SCAFFOLDING: These functions are prepared for Phase 3.5 trigger execution.
+// Currently unused because trigger execution requires:
+// 1. VDBE runtime integration (triggers execute during row operations, not compilation)
+// 2. NEW/OLD row pseudo-tables populated from actual row data
+// 3. Recursive statement execution within trigger body
+//
+// See compile_dml.go for TODO comments marking where these will be called.
+// ============================================================================
 
 // executeBeforeInsertTriggers executes all BEFORE INSERT triggers for the given table.
 func (s *Stmt) executeBeforeInsertTriggers(stmt *parser.InsertStmt, table *schema.Table) error {

@@ -309,6 +309,7 @@ func generateExplainSimpleSelect(plan *ExplainPlan, stmt *parser.SelectStmt, tab
 }
 
 // addOrderByNode adds an ORDER BY node to the explain plan.
+// SCAFFOLDING: Simplified version without cost estimates, for basic EXPLAIN.
 func addOrderByNode(plan *ExplainPlan, parent *ExplainNode, orderBy []parser.OrderingTerm) {
 	var orderCols []string
 	for _, term := range orderBy {
@@ -446,6 +447,7 @@ func formatTableScanWithWhere(tableName string, where parser.Expression) string 
 }
 
 // formatIndexScan formats an index scan description.
+// SCAFFOLDING: For detailed EXPLAIN output with index information.
 func formatIndexScan(candidate *IndexCandidate) string {
 	if candidate.IsUnique && candidate.HasEquality {
 		return fmt.Sprintf("SEARCH %s USING INDEX %s (%s=?)",

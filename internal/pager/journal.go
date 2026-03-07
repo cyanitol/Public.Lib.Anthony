@@ -49,6 +49,7 @@ type Journal struct {
 	initialized bool
 
 	// Whether the journal header has been synced
+	// SCAFFOLDING: For atomic commit - tracks when header is safely on disk
 	headerSynced bool
 
 	// Mutex for thread-safe operations

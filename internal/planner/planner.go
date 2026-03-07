@@ -537,6 +537,7 @@ func (p *Planner) ExplainPlan(info *WhereInfo) string {
 }
 
 // explainLoop returns a human-readable explanation for a single loop.
+// SCAFFOLDING: For EXPLAIN QUERY PLAN output showing query execution details.
 func (p *Planner) explainLoop(info *WhereInfo, loop *WhereLoop, i int) string {
 	table := info.Tables[loop.TabIndex]
 	indent := makeIndent(i)

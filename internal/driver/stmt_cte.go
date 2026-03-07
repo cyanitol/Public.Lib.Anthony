@@ -110,6 +110,12 @@ func (s *Stmt) compileNonRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planne
 }
 
 // compileCTEPopulation generates bytecode to populate an ephemeral table with CTE results.
+//
+// SCAFFOLDING: Alternative CTE population using bytecode inlining.
+// Currently unused - the active implementation uses coroutines (compileCTEPopulationCoroutine).
+// This function will be used when implementing:
+// 1. CTE materialization optimization for multiple references
+// 2. Recursive CTE support (requires iterative bytecode generation)
 func (s *Stmt) compileCTEPopulation(vm *vdbe.VDBE, cteSelect *parser.SelectStmt, cursorNum int, numColumns int, args []driver.NamedValue) error {
 	// Compile the CTE SELECT to generate rows
 	compiledCTE, err := s.compileCTESelect(vm, cteSelect, args)
@@ -174,6 +180,9 @@ func (s *Stmt) allocateCTEResources(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE) cteIn
 }
 
 // inlineCTEBytecode copies CTE bytecode into main VM with necessary adjustments.
+//
+// SCAFFOLDING: Used by compileCTEPopulation for bytecode inlining approach.
+// See compileCTEPopulation comment for when this will be activated.
 func (s *Stmt) inlineCTEBytecode(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE, cursorNum int, offsets cteInlineOffsets) {
 	for _, instr := range compiledCTE.Program {
 		newInstr := s.adjustInstructionParameters(instr, offsets)
@@ -217,6 +226,9 @@ func (s *Stmt) adjustInstructionParameters(instr *vdbe.Instruction, offsets cteI
 }
 
 // handleSpecialOpcode handles ResultRow and Halt opcodes specially. Returns true if handled.
+//
+// SCAFFOLDING: Used by inlineCTEBytecode for opcode transformation.
+// See compileCTEPopulation comment for when this will be activated.
 func (s *Stmt) handleSpecialOpcode(vm *vdbe.VDBE, instr *vdbe.Instruction, newInstr *vdbe.Instruction, cursorNum int, offsets cteInlineOffsets) bool {
 	switch instr.Opcode {
 	case vdbe.OpResultRow:
@@ -364,7 +376,8 @@ func isJumpOp(op vdbe.Opcode) bool {
 	return op == vdbe.OpGoto || op == vdbe.OpIf || op == vdbe.OpIfNot || op == vdbe.OpIfPos
 }
 
-// isControlFlowOp checks if op is a control flow operation
+// isControlFlowOp checks if op is a control flow operation.
+// SCAFFOLDING: Helper for bytecode analysis, will be used in recursive CTE implementation.
 func isControlFlowOp(op vdbe.Opcode) bool {
 	return op == vdbe.OpInit || op == vdbe.OpHalt || op == vdbe.OpNoop
 }

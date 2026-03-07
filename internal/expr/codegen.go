@@ -65,6 +65,17 @@ var literalHandlers = map[parser.LiteralType]literalHandler{
 	parser.LiteralBlob:    (*CodeGenerator).generateBlobLiteral,
 }
 
+// ============================================================================
+// Register Adjustment Rules for Subquery Compilation
+// ============================================================================
+//
+// SCAFFOLDING: These types and mappings support subquery bytecode embedding.
+// Currently unused because subqueries use coroutine-based execution.
+// Will be activated when implementing:
+// 1. Subquery flattening optimization
+// 2. Inline scalar subquery evaluation
+// ============================================================================
+
 // registerAdjustmentRule defines which parameters need register adjustment for an opcode.
 type registerAdjustmentRule struct {
 	adjustP1 bool // Whether P1 is a register that needs adjustment
@@ -1718,6 +1729,8 @@ func (g *CodeGenerator) adjustSubqueryJumpTargets(subVM *vdbe.VDBE, baseAddr int
 // When subquery bytecode is embedded into a parent VDBE, cursor numbers from the
 // subquery must be offset to avoid colliding with cursors already allocated in the
 // parent VDBE. This function adds cursorOffset to all P1, P2, P3 fields that reference cursors.
+//
+// SCAFFOLDING: See registerAdjustmentRules comment for when this will be activated.
 func (g *CodeGenerator) adjustSubqueryCursors(subVM *vdbe.VDBE, cursorOffset int) {
 	if cursorOffset == 0 {
 		return // No adjustment needed
@@ -1766,6 +1779,8 @@ func (g *CodeGenerator) adjustSubqueryCursors(subVM *vdbe.VDBE, cursorOffset int
 // using a table-driven approach. When subquery bytecode is embedded into a parent
 // VDBE, register numbers from the subquery (starting from 1) must be offset to
 // avoid colliding with registers already allocated in the parent VDBE.
+//
+// SCAFFOLDING: See registerAdjustmentRules comment for when this will be activated.
 func (g *CodeGenerator) adjustSubqueryRegisters(subVM *vdbe.VDBE, regOffset int) {
 	if regOffset == 0 {
 		return // No adjustment needed
@@ -1777,6 +1792,8 @@ func (g *CodeGenerator) adjustSubqueryRegisters(subVM *vdbe.VDBE, regOffset int)
 }
 
 // adjustInstructionRegisters adjusts register references in a single instruction.
+//
+// SCAFFOLDING: See registerAdjustmentRules comment for when this will be activated.
 func (g *CodeGenerator) adjustInstructionRegisters(instr *vdbe.Instruction, regOffset int) {
 	rule, ok := registerAdjustmentRules[instr.Opcode]
 	if !ok {

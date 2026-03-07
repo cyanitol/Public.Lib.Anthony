@@ -163,9 +163,11 @@ type Pager struct {
 	readOnly bool
 
 	// Temporary file flag
+	// SCAFFOLDING: For temp database support (ATTACH ':memory:' style)
 	tempFile bool
 
 	// Change counter done flag
+	// SCAFFOLDING: For file header change counter updates on commit
 	changeCountDone bool
 
 	// Error code for error state

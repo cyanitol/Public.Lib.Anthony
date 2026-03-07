@@ -397,6 +397,9 @@ func (p *Pager) collectLeafPages(data []byte, numLeaves uint32, freePages map[Pg
 
 // allocateLocked allocates a new page without acquiring the lock.
 // The caller must hold the pager lock.
+//
+// SCAFFOLDING: Internal allocation function for lock-aware callers.
+// Will be used when implementing incremental vacuum and auto-vacuum modes.
 func (p *Pager) allocateLocked() (*DbPage, error) {
 	// Increment database size
 	p.dbSize++

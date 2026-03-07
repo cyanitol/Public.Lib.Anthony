@@ -423,12 +423,14 @@ func (t *RTree) Destroy() error {
 // RTreeCursor represents a cursor for scanning R-Tree results.
 type RTreeCursor struct {
 	vtab.BaseCursor
-	table      *RTree
-	results    []*Entry
-	pos        int
-	queryBBox  *BoundingBox  // For spatial queries
-	queryID    *int64        // For ID queries
-	queryType  QueryType     // Type of spatial query
+	table   *RTree
+	results []*Entry
+	pos     int
+	// SCAFFOLDING: queryBBox for spatial range queries (overlap, contains, within)
+	queryBBox *BoundingBox
+	queryID   *int64 // For ID queries
+	// SCAFFOLDING: queryType for distinguishing spatial query operations
+	queryType  QueryType
 	idxNum     int           // From BestIndex
 	constraint []interface{} // Constraint values
 }
