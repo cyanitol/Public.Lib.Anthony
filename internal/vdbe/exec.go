@@ -14,6 +14,8 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/withoutrowid"
 )
 
+var compositeInsertDebug int
+
 // Step executes the VDBE program until a result row is ready or the program halts.
 // Returns true if a row is ready, false if halted.
 // This mirrors SQLite's sqlite3_step() behavior.
@@ -676,6 +678,12 @@ func (v *VDBE) execOpenRead(instr *Instruction) error {
 
 	// Check if this is a WITHOUT ROWID table
 	isWithoutRowID := v.isTableWithoutRowID(table)
+	if table == nil {
+		fmt.Printf("OpenRead root=%d: table lookup nil\n", instr.P2)
+	}
+	if t, ok := table.(interface{ HasRowID() bool }); ok {
+		fmt.Printf("OpenRead root=%d hasRowid=%v\n", instr.P2, t.HasRowID())
+	}
 
 	// Create btree cursor with composite key mode for WITHOUT ROWID tables
 	btCursor := btree.NewCursorWithOptions(bt, uint32(instr.P2), isWithoutRowID)
@@ -718,6 +726,12 @@ func (v *VDBE) execOpenWrite(instr *Instruction) error {
 
 	// Check if this is a WITHOUT ROWID table
 	isWithoutRowID := v.isTableWithoutRowID(table)
+	if table == nil {
+		fmt.Printf("OpenWrite root=%d: table lookup nil\n", instr.P2)
+	}
+	if t, ok := table.(interface{ HasRowID() bool }); ok {
+		fmt.Printf("OpenWrite root=%d hasRowid=%v\n", instr.P2, t.HasRowID())
+	}
 
 	// Create btree cursor with composite key mode for WITHOUT ROWID tables
 	btCursor := btree.NewCursorWithOptions(bt, uint32(instr.P2), isWithoutRowID)
@@ -786,15 +800,6 @@ func (v *VDBE) execRewind(instr *Instruction) error {
 	// Move to first entry
 	err = btCursor.MoveToFirst()
 	if err != nil {
-		fmt.Printf("Rewind cursor %d error: %v\n", instr.P1, err)
-		if data, hdrErr := btCursor.Btree.GetPage(btCursor.RootPage); hdrErr == nil {
-			if hdr, parseErr := btree.ParsePageHeader(data, btCursor.RootPage); parseErr == nil {
-				fmt.Printf("Root page %d header: type=0x%02x numCells=%d isLeaf=%t right=%d\n",
-					btCursor.RootPage, hdr.PageType, hdr.NumCells, hdr.IsLeaf, hdr.RightChild)
-			} else {
-				fmt.Printf("Root page %d parse error: %v\n", btCursor.RootPage, parseErr)
-			}
-		}
 		// Empty table or error - jump to P2
 		if instr.P2 > 0 {
 			v.PC = instr.P2
@@ -2142,6 +2147,15 @@ func (v *VDBE) execInsertWithoutRowID(cursor *Cursor, btCursor *btree.BtCursor, 
 			v.restorePendingUpdate()
 		}
 		return err
+	}
+
+	if compositeInsertDebug < 5 {
+		if data, err := btCursor.Btree.GetPage(btCursor.RootPage); err == nil {
+			if hdr, err := btree.ParsePageHeader(data, btCursor.RootPage); err == nil {
+				fmt.Printf("After insert composite root=%d type=0x%02x cells=%d\n", btCursor.RootPage, hdr.PageType, hdr.NumCells)
+			}
+		}
+		compositeInsertDebug++
 	}
 
 	if isUpdate {

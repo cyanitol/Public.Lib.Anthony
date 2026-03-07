@@ -911,75 +911,75 @@ func (c *BtCursor) updateRightChildIfNeeded(parent *BtreePage, parentPage, right
 
 // createNewRoot creates a new root page after splitting the old root
 func (c *BtCursor) createNewRoot(leftPage, rightPage uint32, dividerKey int64, dividerKeyBytes []byte) error {
-	newRootNum, newRoot, err := c.allocateAndSetupNewRoot()
+	// Clone current root content into a new left child page.
+	leftChild, err := c.clonePageExact(leftPage)
 	if err != nil {
 		return err
 	}
 
-	if err := c.populateNewRoot(newRoot, newRootNum, leftPage, rightPage, dividerKey, dividerKeyBytes); err != nil {
-		return err
-	}
-
-	c.RootPage = newRootNum
-	fmt.Printf("createNewRoot: oldLeft=%d right=%d newRoot=%d composite=%t\n", leftPage, rightPage, newRootNum, c.CompositePK)
-	return nil
-}
-
-// allocateAndSetupNewRoot allocates and initializes a new root page.
-func (c *BtCursor) allocateAndSetupNewRoot() (uint32, *BtreePage, error) {
-	newRootNum, err := c.Btree.AllocatePage()
+	// Reinitialize the existing root page as an interior page (root page number stays the same).
+	rootData, err := c.Btree.GetPage(leftPage)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to allocate new root: %w", err)
-	}
-
-	newRootData, err := c.Btree.GetPage(newRootNum)
-	if err != nil {
-		return 0, nil, fmt.Errorf("failed to get new root page: %w", err)
+		return fmt.Errorf("failed to get root page: %w", err)
 	}
 
 	pageType := byte(PageTypeInteriorTable)
 	if c.CompositePK {
 		pageType = byte(PageTypeInteriorTableNo)
 	}
-	if err := initializeInteriorPage(newRootData, newRootNum, c.Btree.UsableSize, pageType); err != nil {
-		return 0, nil, fmt.Errorf("failed to initialize new root: %w", err)
+	if err := initializeInteriorPage(rootData, leftPage, c.Btree.UsableSize, pageType); err != nil {
+		return fmt.Errorf("failed to initialize new root: %w", err)
 	}
 
-	if err := c.markNewRootDirty(newRootNum); err != nil {
-		return 0, nil, err
-	}
-
-	newRoot, err := NewBtreePage(newRootNum, newRootData, c.Btree.UsableSize)
-	if err != nil {
-		return 0, nil, fmt.Errorf("failed to create new root BtreePage: %w", err)
-	}
-
-	return newRootNum, newRoot, nil
-}
-
-// markNewRootDirty marks the new root page as dirty if provider exists.
-func (c *BtCursor) markNewRootDirty(newRootNum uint32) error {
 	if c.Btree.Provider != nil {
-		return c.Btree.Provider.MarkDirty(newRootNum)
+		_ = c.Btree.Provider.MarkDirty(leftPage)
+		_ = c.Btree.Provider.MarkDirty(leftChild)
 	}
-	return nil
-}
 
-// populateNewRoot inserts the divider cell and sets right child.
-func (c *BtCursor) populateNewRoot(newRoot *BtreePage, newRootNum, leftPage, rightPage uint32, dividerKey int64, dividerKeyBytes []byte) error {
+	rootPage, err := NewBtreePage(leftPage, rootData, c.Btree.UsableSize)
+	if err != nil {
+		return fmt.Errorf("failed to wrap new root: %w", err)
+	}
+
 	var dividerCell []byte
 	if c.CompositePK {
-		dividerCell = EncodeTableInteriorCompositeCell(leftPage, dividerKeyBytes)
+		dividerCell = EncodeTableInteriorCompositeCell(leftChild, dividerKeyBytes)
 	} else {
-		dividerCell = EncodeTableInteriorCell(leftPage, dividerKey)
+		dividerCell = EncodeTableInteriorCell(leftChild, dividerKey)
 	}
-	if err := newRoot.InsertCell(0, dividerCell); err != nil {
+	if err := rootPage.InsertCell(0, dividerCell); err != nil {
 		return fmt.Errorf("failed to insert divider into new root: %w", err)
 	}
 
-	headerOffset := getHeaderOffset(newRootNum)
-	binary.BigEndian.PutUint32(newRoot.Data[headerOffset+PageHeaderOffsetRightChild:], rightPage)
+	headerOffset := getHeaderOffset(leftPage)
+	binary.BigEndian.PutUint32(rootPage.Data[headerOffset+PageHeaderOffsetRightChild:], rightPage)
+
+	// Root page number remains unchanged.
+	c.RootPage = leftPage
 	return nil
+}
+
+// clonePageExact allocates a new page and copies the entire source page into it.
+func (c *BtCursor) clonePageExact(srcPage uint32) (uint32, error) {
+	srcData, err := c.Btree.GetPage(srcPage)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get source page %d: %w", srcPage, err)
+	}
+
+	dstPage, err := c.Btree.AllocatePage()
+	if err != nil {
+		return 0, fmt.Errorf("failed to allocate clone page: %w", err)
+	}
+
+	dstData, err := c.Btree.GetPage(dstPage)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get clone page %d: %w", dstPage, err)
+	}
+
+	srcOffset := getHeaderOffset(srcPage)
+	dstOffset := getHeaderOffset(dstPage)
+	copy(dstData[dstOffset:], srcData[srcOffset:])
+	return dstPage, nil
 }
 
 // Helper functions
@@ -1006,6 +1006,10 @@ func initializeInteriorPage(pageData []byte, pageNum uint32, usableSize uint32, 
 
 	// Set page type to interior table
 	pageData[headerOffset+PageHeaderOffsetType] = pageType
+	// Clear header region and cell pointer area to avoid stale data when reusing a root page.
+	for i := headerOffset + 1; i < len(pageData); i++ {
+		pageData[i] = 0
+	}
 
 	// Initialize header fields
 	binary.BigEndian.PutUint16(pageData[headerOffset+PageHeaderOffsetFreeblock:], 0)

@@ -298,6 +298,11 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 			return fmt.Errorf("failed to initialize sqlite_master: %w", err)
 		}
 
+		// Ensure page 1 exists in the btree for sqlite_master.
+		if err := c.ensureMasterPage(); err != nil {
+			return fmt.Errorf("failed to initialize sqlite_master page: %w", err)
+		}
+
 		if err := c.schema.LoadFromMaster(c.btree); err != nil {
 			// Schema loading may fail for new empty databases (no sqlite_master table yet),
 			// which is expected and safe to ignore. The schema will be populated as tables
@@ -322,6 +327,22 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 	c.fkManager = constraint.NewForeignKeyManager()
 
 	return nil
+}
+
+// ensureMasterPage makes sure page 1 exists in the btree for sqlite_master.
+func (c *Conn) ensureMasterPage() error {
+	if c.btree == nil {
+		return nil
+	}
+	if _, err := c.btree.GetPage(1); err == nil {
+		return nil
+	}
+
+	page := make([]byte, c.btree.PageSize)
+	headerOffset := btree.FileHeaderSize
+	page[headerOffset+btree.PageHeaderOffsetType] = btree.PageTypeLeafTable
+	// NumCells, CellContentStart, Fragmented already zeroed
+	return c.btree.SetPage(1, page)
 }
 
 // applyConfig applies the DSN configuration settings to the connection.
