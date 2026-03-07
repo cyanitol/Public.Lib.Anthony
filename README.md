@@ -93,6 +93,7 @@ For more examples, see [doc/QUICKSTART.md](doc/QUICKSTART.md).
 - **[Architecture Overview](doc/ARCHITECTURE.md)** - System design and internals
 - **[Documentation Index](doc/INDEX.md)** - Complete documentation index
 - **[Security Guide](doc/SECURITY.md)** - Security model and best practices
+- **Development Environment** - Nix-based for reproducibility; run `nix-shell` for a fully configured toolchain
 
 ### Feature Documentation
 - **[Common Table Expressions (CTEs)](doc/CTE_USAGE_GUIDE.md)** - Recursive and non-recursive CTEs
