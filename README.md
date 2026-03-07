@@ -101,6 +101,7 @@ For more examples, see [doc/QUICKSTART.md](doc/QUICKSTART.md).
 - **[ALTER TABLE](doc/ALTER_TABLE_QUICK_REFERENCE.md)** - Schema modifications
 - **[VACUUM](doc/VACUUM_USAGE.md)** - Database compaction
 - **[Triggers](doc/TRIGGER_INTEGRATION_REPORT.md)** - Trigger support
+- **[Roadmap](doc/ROADMAP.md)** - Current priorities and completion plan
 
 ### Package Documentation
 - **[btree](internal/btree)** - B-tree storage engine

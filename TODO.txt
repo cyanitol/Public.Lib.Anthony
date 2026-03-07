@@ -2,7 +2,39 @@
 #
 # Test Status: ~655 passing, ~476 skipped (run `go test ./...` for current counts)
 # Code Quality: Cyclomatic complexity <= 10 for all production code
+# Coverage Snapshot: ~58% feature parity vs reference SQLite; window functions/FTS5/R-Tree/WITHOUT ROWID/foreign keys incomplete
 # Last Updated: 2026-03-06
+
+================================================================================
+HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
+================================================================================
+
+[ ] Foreign Key Runtime Enforcement (38 tests skipped)
+    - Enforce immediate/deferred constraints at statement/txn boundaries
+    - Implement ON DELETE/UPDATE CASCADE|SET NULL|SET DEFAULT|RESTRICT
+    - Wire FK manager through VDBE context; add pragma coverage/validation
+
+[ ] WITHOUT ROWID Tables (23 tests skipped)
+    - Implement alt btree layout using PRIMARY KEY as key (no rowid)
+    - Route DML/DDL paths correctly; ensure index selection and VACUUM support
+
+[ ] Window Functions
+    - Executor support for ROW_NUMBER/RANK/DENSE_RANK and SUM/AVG/COUNT/MIN/MAX windows
+    - PARTITION BY/ORDER BY, ROWS/RANGE frames, frame edge correctness
+    - Extend to LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTILE
+
+[ ] FTS5 Virtual Table
+    - Tokenizer pipeline, segment storage/merge, MATCH/NEAR/prefix queries
+    - bm25 ranking, highlight/offsets, content/contentless tables
+
+[ ] R-Tree Virtual Table
+    - R*-tree insertion/split/reinsertion, delete/repack
+    - 2D/3D configs, bounding box queries (overlap/contains/within)
+
+[ ] Durability & Conformance Hardening
+    - Run sqllogictest subsets vs reference SQLite; diff drift
+    - Fuzz parser and record decoder; add crash-replay tests for WAL/journal
+    - Target ≥80% coverage in pager/vdbe/btree/parser/engine
 
 ================================================================================
 SCAFFOLDING CODE - Prepared but waiting for activation
@@ -139,6 +171,10 @@ v0.1.x - Current Development
 [ ] VACUUM Operations (30 tests skipped)
     - sqlite_master table persistence after VACUUM
     - Schema cookie management
+[ ] Window Functions
+    - Planner/VDBE execution for window frame ops (rows/range)
+    - Initial functions: ROW_NUMBER, RANK, DENSE_RANK, SUM/AVG/COUNT/MIN/MAX
+    - Extended functions: LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTILE
 
 ================================================================================
 v0.2.0 - Planned Features
@@ -156,14 +192,13 @@ v0.2.0 - Planned Features
 
 [ ] FTS5 - Full-text search
     - Tokenizer infrastructure (internal/vtab/fts5/)
-    - Index management
-    - Search operators (MATCH, NEAR, etc.)
-    - Ranking functions (bm25, etc.)
+    - Segment storage/merge, search operators (MATCH, NEAR, prefix)
+    - Ranking functions (bm25, etc.), highlight/offsets support
 
 [ ] R-Tree - Spatial indexing
     - Bounding box queries (internal/vtab/rtree/)
-    - Insert/Update/Delete operations
-    - Index maintenance
+    - Insert/Update/Delete operations and reinsertion/pack
+    - Index maintenance and 2D/3D configurations
 
 ================================================================================
 Future Phases
