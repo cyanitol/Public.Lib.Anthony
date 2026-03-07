@@ -353,7 +353,8 @@ func (m *ForeignKeyManager) applyDeleteAction(
 	rowUpdater RowUpdater,
 ) error {
 	switch fk.OnDelete {
-	case FKActionRestrict, FKActionNoAction:
+	case FKActionNone, FKActionRestrict, FKActionNoAction:
+		// FKActionNone is the default when no ON DELETE is specified, which is equivalent to NO ACTION
 		return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", fk.Table)
 
 	case FKActionCascade:
@@ -564,7 +565,8 @@ func (m *ForeignKeyManager) applyUpdateAction(
 	rowUpdater RowUpdater,
 ) error {
 	switch fk.OnUpdate {
-	case FKActionRestrict, FKActionNoAction:
+	case FKActionNone, FKActionRestrict, FKActionNoAction:
+		// FKActionNone is the default when no ON UPDATE is specified, which is equivalent to NO ACTION
 		return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", fk.Table)
 
 	case FKActionCascade:

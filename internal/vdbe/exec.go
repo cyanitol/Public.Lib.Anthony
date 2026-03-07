@@ -2087,7 +2087,7 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 	}
 
 	if isUpdate && tableName != "" {
-		if err := v.validateUpdateConstraints(tableName, payload); err != nil {
+		if err := v.validateUpdateConstraintsWithRowid(tableName, payload, rowid); err != nil {
 			v.restorePendingUpdate()
 			return err
 		}
@@ -2201,6 +2201,42 @@ func (v *VDBE) performInsertWithCompositeKey(cursor *Cursor, btCursor *btree.BtC
 	return nil
 }
 
+// validateUpdateConstraintsWithRowid validates FK constraints with the new rowid for INTEGER PRIMARY KEY updates.
+func (v *VDBE) validateUpdateConstraintsWithRowid(tableName string, newPayload []byte, newRowid int64) error {
+	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil {
+		return nil
+	}
+	if v.pendingFKUpdate == nil || v.pendingFKUpdate.table != tableName || v.Ctx.Schema == nil {
+		return nil
+	}
+
+	type fkManager interface {
+		ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
+	}
+
+	mgr, ok := v.Ctx.FKManager.(fkManager)
+	if !ok {
+		return nil
+	}
+
+	// Use the NEW rowid to include updated PRIMARY KEY values in new values
+	newValues, err := v.extractValuesFromPayloadWithRowid(tableName, newPayload, newRowid)
+	if err != nil {
+		return err
+	}
+
+	if v.isWithoutRowidTable(tableName) && v.pkChanged(v.pendingFKUpdate.oldValues, newValues) {
+		if err := v.checkWithoutRowidPKUniqueness(tableName, newPayload, v.pendingFKUpdate.rowid, v.pendingFKUpdate.rowid); err != nil {
+			return err
+		}
+	}
+
+	rowReader := NewVDBERowReader(v)
+	rowUpdater := NewVDBERowModifier(v)
+
+	return mgr.ValidateUpdate(tableName, v.pendingFKUpdate.oldValues, newValues, v.Ctx.Schema, rowReader, rowUpdater)
+}
+
 func (v *VDBE) validateUpdateConstraints(tableName string, newPayload []byte) error {
 	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil {
 		return nil
@@ -2218,7 +2254,8 @@ func (v *VDBE) validateUpdateConstraints(tableName string, newPayload []byte) er
 		return nil
 	}
 
-	newValues, err := v.extractValuesFromPayload(tableName, newPayload)
+	// Use rowid from pending update context to include PRIMARY KEY values in new values
+	newValues, err := v.extractValuesFromPayloadWithRowid(tableName, newPayload, v.pendingFKUpdate.rowid)
 	if err != nil {
 		return err
 	}
@@ -2572,6 +2609,41 @@ func (v *VDBE) checkForeignKeyConstraints(tableName string, payload []byte) erro
 	return mgr.ValidateInsert(tableName, values, v.Ctx.Schema, rowReader)
 }
 
+// extractValuesFromPayloadWithRowid extracts column values including rowid for INTEGER PRIMARY KEY.
+func (v *VDBE) extractValuesFromPayloadWithRowid(tableName string, payload []byte, rowid int64) (map[string]interface{}, error) {
+	values, err := v.extractValuesFromPayload(tableName, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	// Add rowid for INTEGER PRIMARY KEY column
+	if v.Ctx != nil && v.Ctx.Schema != nil {
+		type schemaWithGetTableByName interface {
+			GetTableByName(name string) (interface{}, bool)
+		}
+		if schema, ok := v.Ctx.Schema.(schemaWithGetTableByName); ok {
+			if tableIface, exists := schema.GetTableByName(tableName); exists {
+				type tableWithColumns interface {
+					GetColumns() []interface{}
+				}
+				if table, ok := tableIface.(tableWithColumns); ok {
+					for _, colIface := range table.GetColumns() {
+						type columnInfo interface {
+							GetName() string
+							IsPrimaryKeyColumn() bool
+						}
+						if col, ok := colIface.(columnInfo); ok && col.IsPrimaryKeyColumn() {
+							values[col.GetName()] = rowid
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return values, nil
+}
+
 // extractValuesFromPayload extracts column values from a record payload.
 func (v *VDBE) extractValuesFromPayload(tableName string, payload []byte) (map[string]interface{}, error) {
 	if v.Ctx == nil || v.Ctx.Schema == nil {
@@ -2689,13 +2761,14 @@ func (v *VDBE) capturePendingUpdate(tableName string, btCursor *btree.BtCursor) 
 	if err != nil {
 		return err
 	}
-	values, err := v.extractValuesFromPayload(tableName, payload)
+	rowid := btCursor.GetKey()
+	values, err := v.extractValuesFromPayloadWithRowid(tableName, payload, rowid)
 	if err != nil {
 		return err
 	}
 	v.pendingFKUpdate = &fkUpdateContext{
 		table:     tableName,
-		rowid:     btCursor.GetKey(),
+		rowid:     rowid,
 		payload:   payload,
 		oldValues: values,
 		rootPage:  btCursor.RootPage,
@@ -3036,7 +3109,8 @@ func (v *VDBE) validateDeleteConstraints(tableName string, btCursor *btree.BtCur
 		return nil
 	}
 	payload := btCursor.GetPayload()
-	values, err := v.extractValuesFromPayload(tableName, payload)
+	rowid := btCursor.GetKey()
+	values, err := v.extractValuesFromPayloadWithRowid(tableName, payload, rowid)
 	if err != nil {
 		return nil // Skip if can't extract values
 	}

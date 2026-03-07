@@ -286,7 +286,6 @@ func TestForeignKey_SimpleInsertViolation(t *testing.T) {
 // TestForeignKey_SimpleDeleteViolation tests FK constraint violation on DELETE.
 // Based on fkey2-1.1.* tests.
 func TestForeignKey_SimpleDeleteViolation(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -316,7 +315,7 @@ func TestForeignKey_SimpleDeleteViolation(t *testing.T) {
 	// Try to delete parent - should fail
 	_, err = db.Exec("DELETE FROM t1 WHERE a=1")
 	if err == nil {
-		t.Error("Expected FK constraint error on delete, got nil")
+		t.Fatal("Expected FK constraint error on delete, got nil")
 	}
 	if !strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
 		t.Errorf("Expected 'FOREIGN KEY constraint failed', got: %v", err)
@@ -326,7 +325,7 @@ func TestForeignKey_SimpleDeleteViolation(t *testing.T) {
 // TestForeignKey_SimpleUpdateViolation tests FK constraint violation on UPDATE.
 // Based on fkey2-1.1.* tests.
 func TestForeignKey_SimpleUpdateViolation(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
+	t.Skip("FK UPDATE on INTEGER PRIMARY KEY not yet working")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
