@@ -4,6 +4,7 @@ package vdbe
 import (
 	"encoding/binary"
 	"fmt"
+	"hash"
 	"hash/fnv"
 	"math"
 	"strconv"
@@ -2761,7 +2762,48 @@ func (v *VDBE) pkChanged(oldValues, newValues map[string]interface{}) bool {
 	return false
 }
 
-func writeMemToHash(h *fnv.Hash64a, m *Mem) {
+func valuesEqualLoose(a, b interface{}) bool {
+	switch va := a.(type) {
+	case int:
+		switch vb := b.(type) {
+		case int:
+			return va == vb
+		case int64:
+			return int64(va) == vb
+		case float64:
+			return float64(va) == vb
+		}
+	case int64:
+		switch vb := b.(type) {
+		case int:
+			return va == int64(vb)
+		case int64:
+			return va == vb
+		case float64:
+			return float64(va) == vb
+		}
+	case float64:
+		switch vb := b.(type) {
+		case int:
+			return va == float64(vb)
+		case int64:
+			return va == float64(vb)
+		case float64:
+			return va == vb
+		}
+	case string:
+		if vb, ok := b.(string); ok {
+			return va == vb
+		}
+	case []byte:
+		if vb, ok := b.([]byte); ok {
+			return string(va) == string(vb)
+		}
+	}
+	return false
+}
+
+func writeMemToHash(h hash.Hash64, m *Mem) {
 	switch {
 	case m.IsNull():
 		h.Write([]byte{0})

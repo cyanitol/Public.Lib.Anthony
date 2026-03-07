@@ -339,6 +339,35 @@ func (bt *Btree) CreateTable() (rootPage uint32, err error) {
 	return rootPage, nil
 }
 
+// CreateWithoutRowidTable creates a new WITHOUT ROWID table B-tree root.
+func (bt *Btree) CreateWithoutRowidTable() (rootPage uint32, err error) {
+	rootPage, err = bt.AllocatePage()
+	if err != nil {
+		return 0, err
+	}
+
+	pageData, err := bt.GetPage(rootPage)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get allocated page: %w", err)
+	}
+
+	headerOffset := 0
+	if rootPage == 1 {
+		headerOffset = FileHeaderSize
+	}
+
+	pageData[headerOffset+PageHeaderOffsetType] = PageTypeLeafTableNoInt
+	pageData[headerOffset+PageHeaderOffsetFreeblock] = 0
+	pageData[headerOffset+PageHeaderOffsetFreeblock+1] = 0
+	pageData[headerOffset+PageHeaderOffsetNumCells] = 0
+	pageData[headerOffset+PageHeaderOffsetNumCells+1] = 0
+	pageData[headerOffset+PageHeaderOffsetCellStart] = 0
+	pageData[headerOffset+PageHeaderOffsetCellStart+1] = 0
+	pageData[headerOffset+PageHeaderOffsetFragmented] = 0
+
+	return rootPage, nil
+}
+
 // DropTable drops a table B-tree by freeing all its pages
 func (bt *Btree) DropTable(rootPage uint32) error {
 	if rootPage == 0 {
