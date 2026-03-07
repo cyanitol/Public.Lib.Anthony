@@ -4,6 +4,7 @@ package vdbe
 import (
 	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"strconv"
 	"strings"
@@ -2065,6 +2066,13 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 	isUpdate := instr.P4.I == 1
 	tableName := instr.P4.Z
 
+	if v.isWithoutRowidTable(tableName) {
+		rowid, err = v.computeWithoutRowidKey(tableName, payload)
+		if err != nil {
+			return err
+		}
+	}
+
 	if isUpdate && tableName != "" {
 		if err := v.validateUpdateConstraints(tableName, payload); err != nil {
 			v.restorePendingUpdate()
@@ -2573,6 +2581,114 @@ func (v *VDBE) capturePendingUpdate(tableName string, btCursor *btree.BtCursor) 
 		rootPage:  btCursor.RootPage,
 	}
 	return nil
+}
+
+func (v *VDBE) isWithoutRowidTable(tableName string) bool {
+	if v.Ctx == nil || v.Ctx.Schema == nil || tableName == "" {
+		return false
+	}
+	type schemaWithGetTable interface {
+		GetTable(name string) (interface{}, bool)
+	}
+	schemaObj, ok := v.Ctx.Schema.(schemaWithGetTable)
+	if !ok {
+		return false
+	}
+	tableIface, ok := schemaObj.GetTable(tableName)
+	if !ok {
+		return false
+	}
+	type tableWithRowid interface {
+		HasRowID() bool
+	}
+	if t, ok := tableIface.(tableWithRowid); ok {
+		return !t.HasRowID()
+	}
+	return false
+}
+
+func (v *VDBE) computeWithoutRowidKey(tableName string, payload []byte) (int64, error) {
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return 0, fmt.Errorf("no schema available for WITHOUT ROWID computation")
+	}
+
+	type schemaWithGetTable interface {
+		GetTable(name string) (interface{}, bool)
+	}
+	schemaObj, ok := v.Ctx.Schema.(schemaWithGetTable)
+	if !ok {
+		return 0, fmt.Errorf("invalid schema type for WITHOUT ROWID computation")
+	}
+
+	tableIface, ok := schemaObj.GetTable(tableName)
+	if !ok {
+		return 0, fmt.Errorf("table not found for WITHOUT ROWID computation: %s", tableName)
+	}
+
+	type tableWithColumns interface {
+		GetColumns() []interface{}
+	}
+	colsProvider, ok := tableIface.(tableWithColumns)
+	if !ok {
+		return 0, fmt.Errorf("table missing columns metadata for WITHOUT ROWID computation")
+	}
+
+	columns := colsProvider.GetColumns()
+	type colMeta interface {
+		GetName() string
+		IsPrimaryKeyColumn() bool
+	}
+
+	hash := fnv.New64a()
+	pkCount := 0
+
+	for idx, colIface := range columns {
+		col, ok := colIface.(colMeta)
+		if !ok {
+			continue
+		}
+		if !col.IsPrimaryKeyColumn() {
+			continue
+		}
+		pkCount++
+
+		mem := NewMem()
+		if err := parseRecordColumn(payload, idx, mem); err != nil {
+			return 0, fmt.Errorf("cannot read PK column %s: %w", col.GetName(), err)
+		}
+		writeMemToHash(hash, mem)
+	}
+
+	if pkCount == 0 {
+		return 0, fmt.Errorf("WITHOUT ROWID table %s missing primary key columns", tableName)
+	}
+
+	sum := int64(hash.Sum64())
+	if sum == 0 {
+		sum = 1 // avoid zero rowid sentinel
+	}
+	return sum, nil
+}
+
+func writeMemToHash(h *fnv.Hash64a, m *Mem) {
+	switch {
+	case m.IsNull():
+		h.Write([]byte{0})
+	case m.IsInt():
+		var buf [8]byte
+		binary.LittleEndian.PutUint64(buf[:], uint64(m.IntValue()))
+		h.Write(buf[:])
+	case m.IsReal():
+		var buf [8]byte
+		binary.LittleEndian.PutUint64(buf[:], math.Float64bits(m.RealValue()))
+		h.Write(buf[:])
+	case m.IsString():
+		h.Write([]byte(m.StringValue()))
+	case m.IsBlob():
+		h.Write(m.BlobValue())
+	default:
+		h.Write([]byte(fmt.Sprintf("%v", memToInterface(m))))
+	}
 }
 
 func (v *VDBE) execDelete(instr *Instruction) error {
