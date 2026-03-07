@@ -9,7 +9,7 @@
 HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
 ================================================================================
 
-[~] Foreign Key Runtime Enforcement (35 tests skipped -> 10 now passing)
+[~] Foreign Key Runtime Enforcement (35 tests skipped -> 12 now passing)
     - [DONE] Wire FK manager through VDBE context
     - [DONE] INSERT FK validation (ValidateInsert) - blocks invalid child inserts
     - [DONE] DELETE FK validation (ValidateDelete) - blocks parent deletes when referenced
@@ -169,8 +169,8 @@ v0.1.x - Current Development
 [~] Foreign Key Runtime Enforcement (partial)
     - [DONE] FK manager wired through VDBE context
     - [DONE] INSERT/DELETE/UPDATE FK validation working
-    - [DONE] CASCADE/SET NULL actions working
-    - Remaining: SET DEFAULT, deferred constraints
+    - [DONE] CASCADE/SET NULL/SET DEFAULT/RESTRICT actions working
+    - Remaining: Deferred constraints
 [ ] CTE Edge Cases (17 tests skipped)
     - Correlated subquery in CTE WHERE causes infinite loop
     - Recursive CTE bytecode generation incomplete

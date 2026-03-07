@@ -667,7 +667,7 @@ func TestForeignKey_OnUpdateSetNull(t *testing.T) {
 // TestForeignKey_SelfReferencing tests self-referencing foreign keys.
 // Based on fkey1-5.* and fkey3-3.* tests.
 func TestForeignKey_SelfReferencing(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
+	t.Skip("Self-referencing FK requires recursive CASCADE")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -724,7 +724,7 @@ func TestForeignKey_SelfReferencing(t *testing.T) {
 // TestForeignKey_SelfReferencingInsert tests inserting self-referencing rows.
 // Based on fkey3-3.* tests.
 func TestForeignKey_SelfReferencingInsert(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
+	t.Skip("Self-referencing FK requires special handling")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1003,7 +1003,6 @@ func TestForeignKey_ForeignKeyCheckSpecificTable(t *testing.T) {
 // TestForeignKey_NoActionOnInsert tests that FK checks happen on INSERT.
 // Based on fkey2-1.1.* tests.
 func TestForeignKey_NoActionOnInsert(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1042,7 +1041,6 @@ func TestForeignKey_NoActionOnInsert(t *testing.T) {
 // TestForeignKey_IntegerPrimaryKey tests FK with INTEGER PRIMARY KEY.
 // Based on fkey2-4.* tests.
 func TestForeignKey_IntegerPrimaryKey(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
