@@ -168,6 +168,12 @@ v0.1.x - Current Development
 [ ] WITHOUT ROWID Tables (23 tests skipped)
     - DML compilation uses OpNewRowid for ALL tables
     - Need to use PRIMARY KEY columns as key instead
+    - Implement composite PK key encoding (collation-aware, stable ordering)
+    - Update cursor seek/compare to honor PK ordering (no implicit rowid)
+    - Enforce PK uniqueness and constraint errors (no silent hash collisions)
+    - Adjust planner/codegen: insert/update/delete/select use PK key ops
+    - Update VACUUM/ANALYZE paths for WITHOUT ROWID btrees
+    - Add CRUD/regression tests: PK updates, composite PK, collations, vacuum
 [ ] VACUUM Operations (30 tests skipped)
     - sqlite_master table persistence after VACUUM
     - Schema cookie management
