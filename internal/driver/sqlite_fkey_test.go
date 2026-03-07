@@ -325,7 +325,6 @@ func TestForeignKey_SimpleDeleteViolation(t *testing.T) {
 // TestForeignKey_SimpleUpdateViolation tests FK constraint violation on UPDATE.
 // Based on fkey2-1.1.* tests.
 func TestForeignKey_SimpleUpdateViolation(t *testing.T) {
-	t.Skip("FK UPDATE on INTEGER PRIMARY KEY not yet working")
 	db := setupMemoryDB(t)
 	defer db.Close()
 

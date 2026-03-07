@@ -756,10 +756,16 @@ func (s *Stmt) emitUpdateLoop(vm *vdbe.VDBE, stmt *parser.UpdateStmt, table *sch
 	gen.SetArgs(argValues)
 
 	// Build updated record
-	recordStartReg := s.emitUpdateRecordBuild(vm, table, updateMap, numRecordCols, gen)
+	recordStartReg, newRowidReg := s.emitUpdateRecordBuild(vm, table, updateMap, numRecordCols, gen)
+
+	// Use new rowid if IPK is being updated, otherwise use old rowid
+	effectiveRowidReg := rowidReg
+	if newRowidReg != 0 {
+		effectiveRowidReg = newRowidReg
+	}
 
 	// Create record, delete old, insert new
-	s.emitUpdateRowReplacement(vm, recordStartReg, numRecordCols, rowidReg, table.Name, gen)
+	s.emitUpdateRowReplacement(vm, recordStartReg, numRecordCols, effectiveRowidReg, table.Name, gen)
 
 	// Fix WHERE skip target
 	if stmt.Where != nil {
@@ -795,15 +801,24 @@ func (s *Stmt) emitUpdateWhereClause(vm *vdbe.VDBE, stmt *parser.UpdateStmt,
 }
 
 // emitUpdateRecordBuild builds the updated record in registers.
+// Returns (recordStartReg, newRowidReg) where newRowidReg is non-zero
+// if INTEGER PRIMARY KEY is being updated.
 func (s *Stmt) emitUpdateRecordBuild(vm *vdbe.VDBE, table *schema.Table,
 	updateMap map[string]parser.Expression, numRecordCols int,
-	gen *expr.CodeGenerator) int {
+	gen *expr.CodeGenerator) (int, int) {
 
 	recordStartReg := gen.AllocRegs(numRecordCols)
 	reg := recordStartReg
+	newRowidReg := 0
 
 	for colIdx, col := range table.Columns {
 		if schemaColIsRowidForTable(table, col) {
+			// Check if IPK is being updated
+			if updateExpr, isUpdated := updateMap[col.Name]; isUpdated {
+				valReg, _ := gen.GenerateExpr(updateExpr)
+				newRowidReg = gen.AllocReg()
+				vm.AddOp(vdbe.OpCopy, valReg, newRowidReg, 0)
+			}
 			continue
 		}
 
@@ -819,7 +834,7 @@ func (s *Stmt) emitUpdateRecordBuild(vm *vdbe.VDBE, table *schema.Table,
 		reg++
 	}
 
-	return recordStartReg
+	return recordStartReg, newRowidReg
 }
 
 // emitUpdateRowReplacement emits bytecode to replace the row.

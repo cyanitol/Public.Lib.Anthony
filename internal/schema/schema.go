@@ -102,6 +102,11 @@ func (c *Column) GetName() string {
 	return c.Name
 }
 
+// GetType returns the declared type for this column (for interface access from vdbe).
+func (c *Column) GetType() string {
+	return c.Type
+}
+
 // IsUniqueColumn returns true if this column has a UNIQUE constraint (for interface access from vdbe).
 func (c *Column) IsUniqueColumn() bool {
 	return c.Unique

@@ -2631,9 +2631,14 @@ func (v *VDBE) extractValuesFromPayloadWithRowid(tableName string, payload []byt
 						type columnInfo interface {
 							GetName() string
 							IsPrimaryKeyColumn() bool
+							GetType() string
 						}
+						// Only use rowid for INTEGER PRIMARY KEY (rowid alias)
 						if col, ok := colIface.(columnInfo); ok && col.IsPrimaryKeyColumn() {
-							values[col.GetName()] = rowid
+							colType := col.GetType()
+							if colType == "INTEGER" || colType == "INT" {
+								values[col.GetName()] = rowid
+							}
 						}
 					}
 				}
@@ -2687,6 +2692,7 @@ func (v *VDBE) extractValuesFromPayload(tableName string, payload []byte) (map[s
 		type columnInfo interface {
 			GetName() string
 			IsPrimaryKeyColumn() bool
+			GetType() string
 		}
 
 		col, ok := colIface.(columnInfo)
@@ -2695,9 +2701,13 @@ func (v *VDBE) extractValuesFromPayload(tableName string, payload []byte) (map[s
 			continue
 		}
 
-		// INTEGER PRIMARY KEY columns are stored as rowid, not in the record
+		// Only INTEGER PRIMARY KEY columns are stored as rowid, not in the record
+		// Other PRIMARY KEY columns (without INTEGER type) are stored normally
 		if col.IsPrimaryKeyColumn() {
-			continue
+			colType := col.GetType()
+			if colType == "INTEGER" || colType == "INT" {
+				continue
+			}
 		}
 
 		// Extract the value from the record
