@@ -15,6 +15,7 @@ import (
 )
 
 var compositeInsertDebug int
+var rewindDebugLimit int
 
 // Step executes the VDBE program until a result row is ready or the program halts.
 // Returns true if a row is ready, false if halted.
@@ -2147,15 +2148,6 @@ func (v *VDBE) execInsertWithoutRowID(cursor *Cursor, btCursor *btree.BtCursor, 
 			v.restorePendingUpdate()
 		}
 		return err
-	}
-
-	if compositeInsertDebug < 5 {
-		if data, err := btCursor.Btree.GetPage(btCursor.RootPage); err == nil {
-			if hdr, err := btree.ParsePageHeader(data, btCursor.RootPage); err == nil {
-				fmt.Printf("After insert composite root=%d type=0x%02x cells=%d\n", btCursor.RootPage, hdr.PageType, hdr.NumCells)
-			}
-		}
-		compositeInsertDebug++
 	}
 
 	if isUpdate {

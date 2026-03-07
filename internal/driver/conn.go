@@ -298,11 +298,6 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 			return fmt.Errorf("failed to initialize sqlite_master: %w", err)
 		}
 
-		// Ensure page 1 exists in the btree for sqlite_master.
-		if err := c.ensureMasterPage(); err != nil {
-			return fmt.Errorf("failed to initialize sqlite_master page: %w", err)
-		}
-
 		if err := c.schema.LoadFromMaster(c.btree); err != nil {
 			// Schema loading may fail for new empty databases (no sqlite_master table yet),
 			// which is expected and safe to ignore. The schema will be populated as tables

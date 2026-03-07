@@ -60,9 +60,6 @@ func TestWithoutRowID_SplitsMaintainOrder(t *testing.T) {
 	mustExec(t, db, `PRAGMA page_size = 512`)
 	mustExec(t, db, `CREATE TABLE split_demo(a TEXT, b TEXT, c TEXT, PRIMARY KEY(a, b)) WITHOUT ROWID`)
 
-	rootpage := queryRows(t, db, `SELECT rootpage FROM sqlite_master WHERE name='split_demo'`)
-	t.Logf("split_demo rootpage: %v", rootpage)
-
 	payload := strings.Repeat("x", 400)
 
 	if rows := queryRows(t, db, `SELECT a, b FROM split_demo`); len(rows) != 0 {
@@ -96,6 +93,7 @@ func TestWithoutRowID_SplitsMaintainOrder(t *testing.T) {
 		if count != i+1 {
 			t.Fatalf("row count mismatch after insert %d: got %d, want %d", i, count, i+1)
 		}
+
 	}
 
 	assertRowCount(t, db, "split_demo", 25)

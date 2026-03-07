@@ -441,7 +441,6 @@ func (c *BtCursor) markInvalidAndReturn(err error) error {
 
 func (c *BtCursor) setupLeafFirst(pageNum uint32, pageData []byte, header *PageHeader) error {
 	if header.NumCells == 0 {
-		fmt.Printf("MoveToFirst empty leaf pg=%d type=0x%02x composite=%t\n", pageNum, header.PageType, c.CompositePK)
 		return c.markInvalidAndReturn(fmt.Errorf("empty leaf"))
 	}
 
