@@ -78,6 +78,9 @@ func (c *BtCursor) MoveToFirst() error {
 		return err
 	}
 	c.resetToRoot()
+	if c.CompositePK {
+		return c.descendToFirstComposite(c.RootPage)
+	}
 	if err := c.descendToFirst(c.RootPage); err != nil {
 		return err
 	}
@@ -91,6 +94,9 @@ func (c *BtCursor) MoveToLast() error {
 		return err
 	}
 	c.resetForMoveToLast()
+	if c.CompositePK {
+		return c.navigateToRightmostLeafComposite(c.RootPage)
+	}
 	return c.navigateToRightmostLeaf(c.RootPage)
 }
 
@@ -118,6 +124,22 @@ func (c *BtCursor) navigateToRightmostLeaf(pageNum uint32) error {
 		if err != nil {
 			return err
 		}
+	}
+}
+
+func (c *BtCursor) navigateToRightmostLeafComposite(pageNum uint32) error {
+	for {
+		pageData, header, err := c.getPageAndHeader(pageNum)
+		if err != nil {
+			return err
+		}
+
+		if header.IsLeaf {
+			return c.positionAtLastCell(pageNum, pageData, header)
+		}
+
+		// Right child pointer for interior pages
+		pageNum = header.RightChild
 	}
 }
 
@@ -620,6 +642,38 @@ func (c *BtCursor) advanceToChildPage(pageData []byte, header *PageHeader, idx i
 	c.PageStack[c.Depth] = childPage
 	c.IndexStack[c.Depth] = 0
 	return childPage, nil
+}
+
+// descendToFirstComposite descends to the first entry for composite-key trees.
+func (c *BtCursor) descendToFirstComposite(pageNum uint32) error {
+	for {
+		c.Depth++
+		if c.Depth >= MaxBtreeDepth {
+			return c.markInvalidAndReturn(fmt.Errorf("btree depth exceeded"))
+		}
+		c.PageStack[c.Depth] = pageNum
+		c.IndexStack[c.Depth] = 0
+
+		pageData, header, err := c.getPageAndHeader(pageNum)
+		if err != nil {
+			return c.markInvalidAndReturn(err)
+		}
+
+		if header.IsLeaf {
+			c.CurrentPage = pageNum
+			c.CurrentIndex = 0
+			c.CurrentHeader = header
+			c.State = CursorValid
+			c.AtFirst = true
+			c.tryLoadCell(pageData, header, 0)
+			return nil
+		}
+
+		pageNum, err = c.getFirstChildPage(header, pageData)
+		if err != nil {
+			return c.markInvalidAndReturn(err)
+		}
+	}
 }
 
 // advanceToChildPageComposite mirrors advanceToChildPage for composite keys.
