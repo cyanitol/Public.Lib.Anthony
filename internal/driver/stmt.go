@@ -114,6 +114,12 @@ func (s *Stmt) executeAndCommit(args []driver.NamedValue, inTx bool) (driver.Res
 		return nil, err
 	}
 
+	// Check if schema changed during execution (e.g., root page split)
+	// If so, invalidate the statement cache
+	if vm.SchemaChanged && s.conn.stmtCache != nil {
+		s.conn.stmtCache.InvalidateAll()
+	}
+
 	if err := s.autoCommitIfNeeded(inTx); err != nil {
 		return nil, err
 	}
@@ -442,8 +448,20 @@ func (s *Stmt) dispatchOtherStatements(vm *vdbe.VDBE, args []driver.NamedValue) 
 
 // schemaColIsRowid reports whether a *schema.Column is an INTEGER PRIMARY KEY
 // (a rowid alias). Such columns are not stored in the B-tree record itself.
+// For WITHOUT ROWID tables, INTEGER PRIMARY KEY is NOT a rowid alias - it's
+// stored in the record like any other column.
 func schemaColIsRowid(col *schema.Column) bool {
 	return col.PrimaryKey && (col.Type == "INTEGER" || col.Type == "INT")
+}
+
+// schemaColIsRowidForTable checks if a column is a rowid alias, considering
+// the table's WITHOUT ROWID status. For WITHOUT ROWID tables, returns false
+// since all columns are stored in the record.
+func schemaColIsRowidForTable(table *schema.Table, col *schema.Column) bool {
+	if table != nil && table.WithoutRowID {
+		return false // WITHOUT ROWID tables store all columns in the record
+	}
+	return schemaColIsRowid(col)
 }
 
 // selectFromTableName returns the first table name from a SELECT FROM clause.
@@ -541,13 +559,14 @@ func emitSimpleColumnRef(vm *vdbe.VDBE, table *schema.Table, ident *parser.Ident
 		return fmt.Errorf("column not found: %s", ident.Name)
 	}
 
-	if colIdx == -2 {
+	if colIdx == -2 && !table.WithoutRowID {
 		// This is a rowid alias but no INTEGER PRIMARY KEY exists
+		// (not applicable for WITHOUT ROWID tables)
 		vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
 		return nil
 	}
 
-	if schemaColIsRowid(table.Columns[colIdx]) {
+	if schemaColIsRowidForTable(table, table.Columns[colIdx]) {
 		vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
 		return nil
 	}
@@ -655,7 +674,7 @@ func buildTableInfo(tableName string, table *schema.Table) expr.TableInfo {
 	var columns []expr.ColumnInfo
 	recordIdx := 0
 	for _, col := range table.Columns {
-		isRowid := schemaColIsRowid(col)
+		isRowid := schemaColIsRowidForTable(table, col)
 		colInfo := expr.ColumnInfo{
 			Name:    col.Name,
 			Index:   recordIdx,

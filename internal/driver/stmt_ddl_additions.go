@@ -267,6 +267,8 @@ func (s *Stmt) compilePragma(vm *vdbe.VDBE, stmt *parser.PragmaStmt, args []driv
 		return s.compilePragmaForeignKeys(vm, stmt)
 	case "journal_mode":
 		return s.compilePragmaJournalMode(vm, stmt)
+	case "page_count":
+		return s.compilePragmaPageCount(vm)
 	default:
 		// For unsupported PRAGMAs, return empty result
 		vm.AddOp(vdbe.OpInit, 0, 0, 0)
@@ -501,6 +503,19 @@ func (s *Stmt) compilePragmaJournalModeGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
 
 	mode := s.getCurrentJournalMode()
 	vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, mode)
+	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaPageCount handles PRAGMA page_count
+func (s *Stmt) compilePragmaPageCount(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"page_count"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	// Get page count from pager
+	pageCount := int64(s.conn.pager.PageCount())
+	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 1, 0, pageCount)
 	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	return vm, nil

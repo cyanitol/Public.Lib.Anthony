@@ -324,6 +324,22 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 	return nil
 }
 
+// ensureMasterPage makes sure page 1 exists in the btree for sqlite_master.
+func (c *Conn) ensureMasterPage() error {
+	if c.btree == nil {
+		return nil
+	}
+	if _, err := c.btree.GetPage(1); err == nil {
+		return nil
+	}
+
+	page := make([]byte, c.btree.PageSize)
+	headerOffset := btree.FileHeaderSize
+	page[headerOffset+btree.PageHeaderOffsetType] = btree.PageTypeLeafTable
+	// NumCells, CellContentStart, Fragmented already zeroed
+	return c.btree.SetPage(1, page)
+}
+
 // applyConfig applies the DSN configuration settings to the connection.
 // This is called after the connection is opened to apply settings like
 // journal_mode, cache_size, foreign_keys, etc.

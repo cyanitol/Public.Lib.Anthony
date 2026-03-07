@@ -276,7 +276,7 @@ func TestInitializeLeafPage(t *testing.T) {
 	pageData := make([]byte, 4096)
 	pageNum := uint32(2) // Not page 1
 
-	err := initializeLeafPage(pageData, pageNum, 4096)
+	err := initializeLeafPage(pageData, pageNum, 4096, PageTypeLeafTable)
 	if err != nil {
 		t.Fatalf("initializeLeafPage failed: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestInitializeInteriorPage(t *testing.T) {
 	pageData := make([]byte, 4096)
 	pageNum := uint32(2)
 
-	err := initializeInteriorPage(pageData, pageNum, 4096)
+	err := initializeInteriorPage(pageData, pageNum, 4096, PageTypeInteriorTable)
 	if err != nil {
 		t.Fatalf("initializeInteriorPage failed: %v", err)
 	}
@@ -631,7 +631,7 @@ func TestSplitLeafPageErrors(t *testing.T) {
 	cursor := NewCursor(bt, 1)
 
 	// Test with non-existent page
-	err := cursor.splitLeafPage(100, []byte{1, 2, 3})
+	err := cursor.splitLeafPage(100, nil, []byte{1, 2, 3})
 	if err == nil {
 		t.Error("Expected error when splitting non-existent page, got nil")
 	}
@@ -675,7 +675,7 @@ func TestSplitLeafPageErrors(t *testing.T) {
 			cursor2.Depth = 0
 
 			// Try to split as leaf (should fail)
-			err = cursor2.splitLeafPage(999, []byte{1})
+			err = cursor2.splitLeafPage(999, nil, []byte{1})
 			if err == nil {
 				t.Error("Expected error when calling splitLeafPage on interior page, got nil")
 			}
@@ -711,7 +711,7 @@ func TestSplitInteriorPageErrors(t *testing.T) {
 	cursor.Depth = 0
 
 	// Try to split as interior (should fail because it's a leaf)
-	err = cursor.splitInteriorPage(100, 2)
+	err = cursor.splitInteriorPage(100, nil, 2)
 	if err == nil {
 		t.Error("Expected error when calling splitInteriorPage on leaf page, got nil")
 	}
@@ -797,7 +797,7 @@ func TestAllocateAndInitializePages(t *testing.T) {
 	cursor := NewCursor(bt, rootPage)
 
 	// Test allocateAndInitializeLeafPage
-	leafPage, leafPageNum, err := cursor.allocateAndInitializeLeafPage()
+	leafPage, leafPageNum, err := cursor.allocateAndInitializeLeafPage(PageTypeLeafTable)
 	if err != nil {
 		t.Fatalf("allocateAndInitializeLeafPage failed: %v", err)
 	}
@@ -815,7 +815,7 @@ func TestAllocateAndInitializePages(t *testing.T) {
 	}
 
 	// Test allocateAndInitializeInteriorPage
-	interiorPage, interiorPageNum, err := cursor.allocateAndInitializeInteriorPage()
+	interiorPage, interiorPageNum, err := cursor.allocateAndInitializeInteriorPage(PageTypeInteriorTable)
 	if err != nil {
 		t.Fatalf("allocateAndInitializeInteriorPage failed: %v", err)
 	}
@@ -885,12 +885,12 @@ func TestRedistributeLeafCells(t *testing.T) {
 	cursor := NewCursor(bt, rootPage)
 
 	// Create two pages
-	leftPage, _, err := cursor.allocateAndInitializeLeafPage()
+	leftPage, _, err := cursor.allocateAndInitializeLeafPage(PageTypeLeafTable)
 	if err != nil {
 		t.Fatalf("Failed to allocate left page: %v", err)
 	}
 
-	rightPage, _, err := cursor.allocateAndInitializeLeafPage()
+	rightPage, _, err := cursor.allocateAndInitializeLeafPage(PageTypeLeafTable)
 	if err != nil {
 		t.Fatalf("Failed to allocate right page: %v", err)
 	}
@@ -936,12 +936,12 @@ func TestRedistributeInteriorCells(t *testing.T) {
 	cursor.CurrentPage = rootPage
 
 	// Create two interior pages
-	leftPage, leftPageNum, err := cursor.allocateAndInitializeInteriorPage()
+	leftPage, leftPageNum, err := cursor.allocateAndInitializeInteriorPage(PageTypeInteriorTable)
 	if err != nil {
 		t.Fatalf("Failed to allocate left page: %v", err)
 	}
 
-	rightPage, rightPageNum, err := cursor.allocateAndInitializeInteriorPage()
+	rightPage, rightPageNum, err := cursor.allocateAndInitializeInteriorPage(PageTypeInteriorTable)
 	if err != nil {
 		t.Fatalf("Failed to allocate right page: %v", err)
 	}
@@ -1000,7 +1000,7 @@ func TestCollectInteriorCellsForSplit(t *testing.T) {
 	cursor := NewCursor(bt, rootPage)
 
 	// Create an interior page manually
-	interiorPage, interiorPageNum, err := cursor.allocateAndInitializeInteriorPage()
+	interiorPage, interiorPageNum, err := cursor.allocateAndInitializeInteriorPage(PageTypeInteriorTable)
 	if err != nil {
 		t.Fatalf("Failed to allocate interior page: %v", err)
 	}
@@ -1136,7 +1136,7 @@ func TestFindInsertionPoint(t *testing.T) {
 	cursor := NewCursor(bt, rootPage)
 
 	// Create an interior page with some cells
-	interiorPage, _, err := cursor.allocateAndInitializeInteriorPage()
+	interiorPage, _, err := cursor.allocateAndInitializeInteriorPage(PageTypeInteriorTable)
 	if err != nil {
 		t.Fatalf("Failed to allocate page: %v", err)
 	}
@@ -1161,7 +1161,7 @@ func TestFindInsertionPoint(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(fmt.Sprintf("key=%d", tt.key), func(t *testing.T) {
-			idx := cursor.findInsertionPoint(interiorPage, tt.key)
+			idx := cursor.findInsertionPoint(interiorPage, tt.key, nil)
 			if idx != tt.expected {
 				t.Errorf("findInsertionPoint(%d) = %d, want %d", tt.key, idx, tt.expected)
 			}
@@ -1180,7 +1180,7 @@ func TestUpdateRightChildIfNeeded(t *testing.T) {
 
 	cursor := NewCursor(bt, rootPage)
 
-	interiorPage, interiorPageNum, err := cursor.allocateAndInitializeInteriorPage()
+	interiorPage, interiorPageNum, err := cursor.allocateAndInitializeInteriorPage(PageTypeInteriorTable)
 	if err != nil {
 		t.Fatalf("Failed to allocate page: %v", err)
 	}
@@ -1232,7 +1232,7 @@ func TestCreateNewRoot(t *testing.T) {
 	dividerKey := int64(50)
 
 	// Create new root
-	err = cursor.createNewRoot(leftPage, rightPage, dividerKey)
+	err = cursor.createNewRoot(leftPage, rightPage, dividerKey, nil)
 	if err != nil {
 		t.Fatalf("createNewRoot failed: %v", err)
 	}

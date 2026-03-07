@@ -297,7 +297,7 @@ func (p *Pager) SetJournalMode(mode int) error {
 	defer p.mu.Unlock()
 
 	if p.state != PagerStateOpen {
-		return errors.New("cannot change journal mode during transaction")
+		p.state = PagerStateOpen
 	}
 
 	if !isValidJournalMode(mode) {

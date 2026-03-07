@@ -67,11 +67,13 @@ tidy:
 clean:
 	rm -f *.out *.cov *.html coverage.txt
 	rm -f internal/driver/coverage.out
-	rm -f test_explain
+	rm -f test_explain driver.test
+	rm -rf build/
 	go clean -testcache
 
-# Full clean including test cache
+# Full clean including test cache and go cache
 clean-all: clean
+	rm -rf .gocache/
 	go clean -cache -testcache
 
 # Pre-commit validation - run before committing

@@ -52,11 +52,12 @@ const (
 
 // Cursor represents a database cursor in the VDBE.
 type Cursor struct {
-	CurType    CursorType // Type of cursor
-	IsTable    bool       // True for rowid tables, false for indexes
-	Writable   bool       // True if cursor supports write operations
-	NullRow    bool       // True if pointing to a row with no data
-	SeekResult int        // Result of previous seek operation
+	CurType      CursorType // Type of cursor
+	IsTable      bool       // True for rowid tables, false for indexes
+	Writable     bool       // True if cursor supports write operations
+	NullRow      bool       // True if pointing to a row with no data
+	SeekResult   int        // Result of previous seek operation
+	WithoutRowID bool       // True for WITHOUT ROWID tables (use composite PK keys)
 
 	// B-tree cursor data (for CursorBTree)
 	RootPage    uint32      // Root page of the B-tree
@@ -142,8 +143,9 @@ type VDBE struct {
 	funcCtx *FunctionContext // Function registry and aggregate state
 
 	// Flags
-	Explain  bool // True if EXPLAIN mode
-	ReadOnly bool // True for read-only statements
+	Explain       bool // True if EXPLAIN mode
+	ReadOnly      bool // True for read-only statements
+	SchemaChanged bool // True if schema changed (root page split), requires cache invalidation
 
 	// Runtime context
 	Ctx *VDBEContext // Execution context (btree, schema, etc.)

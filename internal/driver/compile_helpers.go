@@ -218,15 +218,16 @@ func (s *Stmt) emitExtraOrderByColumnMultiTable(vm *vdbe.VDBE, tables []stmtTabl
 		tableColIdx := tbl.table.GetColumnIndexWithRowidAliases(colName)
 		if tableColIdx >= 0 && tableColIdx < len(tbl.table.Columns) {
 			// Check if this is a rowid column (INTEGER PRIMARY KEY)
-			if schemaColIsRowid(tbl.table.Columns[tableColIdx]) {
+			if schemaColIsRowidForTable(tbl.table, tbl.table.Columns[tableColIdx]) {
 				vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, targetReg, 0)
 			} else {
 				recordIdx := schemaRecordIdxForTable(tbl.table, tableColIdx)
 				vm.AddOp(vdbe.OpColumn, tbl.cursorIdx, recordIdx, targetReg)
 			}
 			return
-		} else if tableColIdx == -2 {
+		} else if tableColIdx == -2 && !tbl.table.WithoutRowID {
 			// This is a rowid alias but no INTEGER PRIMARY KEY exists
+			// (not applicable for WITHOUT ROWID tables)
 			vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, targetReg, 0)
 			return
 		}
@@ -482,13 +483,14 @@ func (s *Stmt) emitColumnFromTable(vm *vdbe.VDBE, tbl stmtTableInfo, colName str
 		return fmt.Errorf("column not found: %s.%s", tbl.name, colName)
 	}
 
-	if colIdx == -2 {
+	if colIdx == -2 && !tbl.table.WithoutRowID {
 		// This is a rowid alias but no INTEGER PRIMARY KEY exists
+		// (not applicable for WITHOUT ROWID tables)
 		vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, targetReg, 0)
 		return nil
 	}
 
-	if schemaColIsRowid(tbl.table.Columns[colIdx]) {
+	if schemaColIsRowidForTable(tbl.table, tbl.table.Columns[colIdx]) {
 		vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, targetReg, 0)
 		return nil
 	}

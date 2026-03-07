@@ -29,7 +29,14 @@ func (s *Stmt) compileCreateTable(vm *vdbe.VDBE, stmt *parser.CreateTableStmt, a
 
 	// Allocate a root page for the table btree
 	if s.conn.btree != nil {
-		rootPage, err := s.conn.btree.CreateTable()
+		var rootPage uint32
+		var err error
+		if stmt.WithoutRowID {
+			// WITHOUT ROWID tables use a different page type for composite keys
+			rootPage, err = s.conn.btree.CreateWithoutRowidTable()
+		} else {
+			rootPage, err = s.conn.btree.CreateTable()
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to allocate table root page: %w", err)
 		}

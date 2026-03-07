@@ -17,6 +17,8 @@ func setupMemoryDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	return db
 }
 

@@ -59,6 +59,22 @@ func NewCursorWithOptions(bt *Btree, rootPage uint32, compositePK bool) *BtCurso
 	return cur
 }
 
+// compareKeys compares two keys based on cursor mode.
+// For composite cursors, compares byte keys; otherwise compares int rowids.
+func (c *BtCursor) compareKeys(aKey int64, aBytes []byte, bKey int64, bBytes []byte) int {
+	if c.CompositePK {
+		return bytes.Compare(aBytes, bBytes)
+	}
+	switch {
+	case aKey == bKey:
+		return 0
+	case aKey < bKey:
+		return -1
+	default:
+		return 1
+	}
+}
+
 // validateCursorState validates that the cursor is in a valid state for operations
 func (c *BtCursor) validateCursorState() error {
 	if c.Btree == nil {
@@ -86,7 +102,11 @@ func (c *BtCursor) MoveToFirst() error {
 	}
 	c.resetToRoot()
 	if c.CompositePK {
-		return c.descendToFirstComposite(c.RootPage)
+		if err := c.descendToFirstComposite(c.RootPage); err != nil {
+			return err
+		}
+		c.AtFirst = true
+		return nil
 	}
 	if err := c.descendToFirst(c.RootPage); err != nil {
 		return err
@@ -162,6 +182,9 @@ func (c *BtCursor) getPageAndHeader(pageNum uint32) ([]byte, *PageHeader, error)
 	if err != nil {
 		c.State = CursorInvalid
 		return nil, nil, fmt.Errorf("failed to parse page %d: %w", pageNum, err)
+	}
+	if header.PageType == PageTypeLeafTableNoInt || header.PageType == PageTypeInteriorTableNo {
+		c.CompositePK = true
 	}
 	return pageData, header, nil
 }
@@ -287,12 +310,22 @@ func (c *BtCursor) tryAdvanceInParent() (uint32, bool, error) {
 		return 0, false, err
 	}
 
-	if parentIndex >= int(parentHeader.NumCells)-1 {
+	if parentIndex >= int(parentHeader.NumCells) {
 		return 0, false, nil
 	}
 
-	c.IndexStack[c.Depth] = parentIndex + 1
-	return c.getChildPageFromParent(parentData, parentHeader, parentIndex+1)
+	if parentIndex < int(parentHeader.NumCells)-1 {
+		c.IndexStack[c.Depth] = parentIndex + 1
+		return c.getChildPageFromParent(parentData, parentHeader, parentIndex+1)
+	}
+
+	// When at the last cell, advance to the rightmost child.
+	if parentHeader.RightChild != 0 {
+		c.IndexStack[c.Depth] = int(parentHeader.NumCells)
+		return parentHeader.RightChild, true, nil
+	}
+
+	return 0, false, nil
 }
 
 // loadParentPage loads and parses a parent page.
@@ -638,6 +671,10 @@ func (c *BtCursor) loadPageForSeek(pageNum uint32) ([]byte, *PageHeader, error) 
 		return nil, nil, fmt.Errorf("failed to parse page %d: %w", pageNum, err)
 	}
 
+	if header.PageType == PageTypeLeafTableNoInt || header.PageType == PageTypeInteriorTableNo {
+		c.CompositePK = true
+	}
+
 	return pageData, header, nil
 }
 
@@ -675,13 +712,7 @@ func (c *BtCursor) descendToFirstComposite(pageNum uint32) error {
 		}
 
 		if header.IsLeaf {
-			c.CurrentPage = pageNum
-			c.CurrentIndex = 0
-			c.CurrentHeader = header
-			c.State = CursorValid
-			c.AtFirst = true
-			c.tryLoadCell(pageData, header, 0)
-			return nil
+			return c.setupLeafFirst(pageNum, pageData, header)
 		}
 
 		pageNum, err = c.getFirstChildPage(header, pageData)
@@ -905,8 +936,29 @@ func (c *BtCursor) InsertWithComposite(key int64, keyBytes []byte, payload []byt
 	}
 
 	if len(cellData) > btreePage.FreeSpace() {
-		c.cleanupOverflowOnError(overflowPage)
-		return c.splitPage(key, payload)
+		// If the page is empty, try re-encoding with minimal local payload using overflow
+		// before forcing a split. This prevents pathological splits with empty left/right.
+		if btreePage.Header.NumCells == 0 && len(payload) > 0 {
+			c.cleanupOverflowOnError(overflowPage)
+			overflowPage = 0
+
+			minLocal := calculateMinLocal(c.Btree.UsableSize, true)
+			if minLocal > uint32(len(payload)) {
+				minLocal = uint32(len(payload))
+			}
+			localSize := uint16(minLocal)
+
+			var err error
+			overflowPage, err = c.WriteOverflow(payload, localSize, c.Btree.UsableSize)
+			if err == nil {
+				cellData = c.encodeTableLeafCellWithOverflow(key, keyBytes, payload[:localSize], overflowPage, uint32(len(payload)))
+			}
+		}
+
+		if len(cellData) > btreePage.FreeSpace() {
+			c.cleanupOverflowOnError(overflowPage)
+			return c.splitPage(key, keyBytes, payload)
+		}
 	}
 
 	if err := c.markPageDirty(); err != nil {
@@ -1027,9 +1079,9 @@ func (c *BtCursor) validateInsertPosition(key int64, keyBytes []byte) error {
 	}
 	if found {
 		if c.CompositePK {
-			return fmt.Errorf("duplicate composite key")
+			return fmt.Errorf("UNIQUE constraint failed: duplicate composite key")
 		}
-		return fmt.Errorf("duplicate key: %d", key)
+		return fmt.Errorf("UNIQUE constraint failed: duplicate key %d", key)
 	}
 	if c.CurrentHeader == nil || !c.CurrentHeader.IsLeaf {
 		return fmt.Errorf("cursor not positioned at leaf page")
@@ -1151,13 +1203,13 @@ func (c *BtCursor) loadCellAtCurrentIndex(pageData []byte) error {
 
 // splitPage splits a full page when inserting a new cell
 // Delegates to splitLeafPage or splitInteriorPage based on page type
-func (c *BtCursor) splitPage(key int64, payload []byte) error {
+func (c *BtCursor) splitPage(key int64, keyBytes []byte, payload []byte) error {
 	if c.CurrentHeader == nil {
 		return fmt.Errorf("cursor not positioned at valid page")
 	}
 
 	if c.CurrentHeader.IsLeaf {
-		return c.splitLeafPage(key, payload)
+		return c.splitLeafPage(key, keyBytes, payload)
 	}
 
 	// For interior pages, we need the child page number

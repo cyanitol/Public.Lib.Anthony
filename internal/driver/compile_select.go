@@ -637,14 +637,15 @@ func (s *Stmt) emitExtraOrderByColumn(vm *vdbe.VDBE, table *schema.Table, colNam
 	tableColIdx := table.GetColumnIndexWithRowidAliases(colName)
 	if tableColIdx >= 0 {
 		// Check if this is a rowid column (INTEGER PRIMARY KEY)
-		if schemaColIsRowid(table.Columns[tableColIdx]) {
+		if schemaColIsRowidForTable(table, table.Columns[tableColIdx]) {
 			vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
 		} else {
 			recordIdx := schemaRecordIdxForTable(table, tableColIdx)
 			vm.AddOp(vdbe.OpColumn, 0, recordIdx, targetReg)
 		}
-	} else if tableColIdx == -2 {
+	} else if tableColIdx == -2 && !table.WithoutRowID {
 		// This is a rowid alias but no INTEGER PRIMARY KEY exists
+		// (not applicable for WITHOUT ROWID tables)
 		vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
 	} else {
 		vm.AddOp(vdbe.OpNull, 0, targetReg, 0)
