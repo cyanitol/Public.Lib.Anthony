@@ -168,8 +168,8 @@ v0.1.x - Current Development
 [ ] WITHOUT ROWID Tables (23 tests skipped)
     - DML compilation uses OpNewRowid for ALL tables
     - Need to use PRIMARY KEY columns as key instead
-    - Implement composite PK key encoding (collation-aware, stable ordering)
-    - Add btree support for composite byte keys (seek/next/prev) and PK uniqueness via comparator
+    - Implement composite PK key encoding (collation-aware, stable ordering) (encoder added)
+    - Add btree support for composite byte keys (seek/next/prev) and PK uniqueness via comparator (cursor comparator/scaffolding added; splits/merges pending)
     - Update VDBE/planner to use composite keys for inserts/updates/deletes/seeks (no surrogate rowid)
     - Update cursor seek/compare to honor PK ordering (no implicit rowid)
     - Enforce PK uniqueness and constraint errors (no silent hash collisions)
