@@ -59,6 +59,22 @@ func NewCursorWithOptions(bt *Btree, rootPage uint32, compositePK bool) *BtCurso
 	return cur
 }
 
+// compareKeys compares two keys based on cursor mode.
+// For composite cursors, compares byte keys; otherwise compares int rowids.
+func (c *BtCursor) compareKeys(aKey int64, aBytes []byte, bKey int64, bBytes []byte) int {
+	if c.CompositePK {
+		return bytes.Compare(aBytes, bBytes)
+	}
+	switch {
+	case aKey == bKey:
+		return 0
+	case aKey < bKey:
+		return -1
+	default:
+		return 1
+	}
+}
+
 // validateCursorState validates that the cursor is in a valid state for operations
 func (c *BtCursor) validateCursorState() error {
 	if c.Btree == nil {
@@ -162,6 +178,9 @@ func (c *BtCursor) getPageAndHeader(pageNum uint32) ([]byte, *PageHeader, error)
 	if err != nil {
 		c.State = CursorInvalid
 		return nil, nil, fmt.Errorf("failed to parse page %d: %w", pageNum, err)
+	}
+	if header.PageType == PageTypeLeafTableNoInt || header.PageType == PageTypeInteriorTableNo {
+		c.CompositePK = true
 	}
 	return pageData, header, nil
 }
