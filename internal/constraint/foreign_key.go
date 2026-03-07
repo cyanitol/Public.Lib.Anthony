@@ -116,8 +116,8 @@ func (m *ForeignKeyManager) RemoveConstraints(tableName string) {
 func (m *ForeignKeyManager) ValidateInsert(
 	tableName string,
 	values map[string]interface{},
-	schemaObj *schema.Schema,
-	rowReader RowReader,
+	schemaObj interface{},
+	rowReader interface{},
 ) error {
 	if !m.IsEnabled() {
 		return nil
@@ -126,6 +126,18 @@ func (m *ForeignKeyManager) ValidateInsert(
 	constraints := m.GetConstraints(tableName)
 	if len(constraints) == 0 {
 		return nil
+	}
+
+	// Type assert the schema
+	schemaTyped, ok := schemaObj.(*schema.Schema)
+	if !ok {
+		return nil // Can't validate without proper schema
+	}
+
+	// Type assert the row reader
+	reader, ok := rowReader.(RowReader)
+	if !ok {
+		return nil // Can't validate without proper row reader
 	}
 
 	for _, fk := range constraints {
@@ -138,7 +150,7 @@ func (m *ForeignKeyManager) ValidateInsert(
 			continue
 		}
 
-		if err := m.validateReference(fk, fkValues, schemaObj, rowReader); err != nil {
+		if err := m.validateReference(fk, fkValues, schemaTyped, reader); err != nil {
 			return err
 		}
 	}
@@ -152,21 +164,35 @@ func (m *ForeignKeyManager) ValidateUpdate(
 	tableName string,
 	oldValues map[string]interface{},
 	newValues map[string]interface{},
-	schemaObj *schema.Schema,
-	rowReader RowReader,
-	rowUpdater RowUpdater,
+	schemaObj interface{},
+	rowReader interface{},
+	rowUpdater interface{},
 ) error {
 	if !m.IsEnabled() {
 		return nil
 	}
 
+	// Type assertions
+	schemaTyped, ok := schemaObj.(*schema.Schema)
+	if !ok {
+		return nil
+	}
+	reader, ok := rowReader.(RowReader)
+	if !ok {
+		return nil
+	}
+	updater, ok := rowUpdater.(RowUpdater)
+	if !ok {
+		return nil
+	}
+
 	// 1. Check outgoing foreign keys (this table references others)
-	if err := m.validateOutgoingReferences(tableName, oldValues, newValues, schemaObj, rowReader); err != nil {
+	if err := m.validateOutgoingReferences(tableName, oldValues, newValues, schemaTyped, reader); err != nil {
 		return err
 	}
 
 	// 2. Check incoming foreign keys (other tables reference this one)
-	if err := m.validateIncomingReferences(tableName, oldValues, newValues, schemaObj, rowReader, rowUpdater); err != nil {
+	if err := m.validateIncomingReferences(tableName, oldValues, newValues, schemaTyped, reader, updater); err != nil {
 		return err
 	}
 
@@ -227,12 +253,30 @@ func extractForeignKeyValues(values map[string]interface{}, columns []string) ([
 func (m *ForeignKeyManager) ValidateDelete(
 	tableName string,
 	values map[string]interface{},
-	schemaObj *schema.Schema,
-	rowReader RowReader,
-	rowDeleter RowDeleter,
-	rowUpdater RowUpdater,
+	schemaObj interface{},
+	rowReader interface{},
+	rowDeleter interface{},
+	rowUpdater interface{},
 ) error {
 	if !m.IsEnabled() {
+		return nil
+	}
+
+	// Type assertions
+	schemaTyped, ok := schemaObj.(*schema.Schema)
+	if !ok {
+		return nil
+	}
+	reader, ok := rowReader.(RowReader)
+	if !ok {
+		return nil
+	}
+	deleter, ok := rowDeleter.(RowDeleter)
+	if !ok {
+		return nil
+	}
+	updater, ok := rowUpdater.(RowUpdater)
+	if !ok {
 		return nil
 	}
 
@@ -241,13 +285,13 @@ func (m *ForeignKeyManager) ValidateDelete(
 		return nil
 	}
 
-	table, ok := schemaObj.GetTable(tableName)
-	if !ok {
+	table, tableOk := schemaTyped.GetTable(tableName)
+	if !tableOk {
 		return fmt.Errorf("table not found: %s", tableName)
 	}
 
 	for _, fk := range referencingConstraints {
-		if err := m.handleDeleteConstraint(fk, table, values, schemaObj, rowReader, rowDeleter, rowUpdater); err != nil {
+		if err := m.handleDeleteConstraint(fk, table, values, schemaTyped, reader, deleter, updater); err != nil {
 			return err
 		}
 	}

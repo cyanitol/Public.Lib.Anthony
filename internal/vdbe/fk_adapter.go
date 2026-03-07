@@ -94,23 +94,32 @@ type columnInfo struct {
 
 // getTable retrieves table metadata from the schema.
 func (r *VDBERowReader) getTable(tableName string) (*tableInfo, error) {
-	// Type assert to get schema with GetTable method
-	type schemaWithGetTable interface {
-		GetTable(name string) (interface{}, bool)
+	// Try GetTableByName first (returns interface{}, bool)
+	type schemaWithGetTableByName interface {
+		GetTableByName(name string) (interface{}, bool)
 	}
 
-	schemaObj, ok := r.vdbe.Ctx.Schema.(schemaWithGetTable)
-	if !ok {
-		return nil, fmt.Errorf("invalid schema type")
+	if schemaObj, ok := r.vdbe.Ctx.Schema.(schemaWithGetTableByName); ok {
+		tableIface, found := schemaObj.GetTableByName(tableName)
+		if !found {
+			return nil, fmt.Errorf("table not found: %s", tableName)
+		}
+		return r.extractTableInfo(tableIface)
 	}
 
-	tableIface, ok := schemaObj.GetTable(tableName)
-	if !ok {
+	// Fallback: try GetTable with *Table return type using reflection
+	val := reflect.ValueOf(r.vdbe.Ctx.Schema)
+	method := val.MethodByName("GetTable")
+	if !method.IsValid() {
+		return nil, fmt.Errorf("invalid schema type: no GetTable method")
+	}
+
+	results := method.Call([]reflect.Value{reflect.ValueOf(tableName)})
+	if len(results) != 2 || !results[1].Bool() {
 		return nil, fmt.Errorf("table not found: %s", tableName)
 	}
 
-	// Extract table metadata
-	return r.extractTableInfo(tableIface)
+	return r.extractTableInfo(results[0].Interface())
 }
 
 // extractTableInfo extracts table information from the schema table object
@@ -215,7 +224,9 @@ func (r *VDBERowReader) findMatchingRow(cursorNum int, table *tableInfo, columns
 
 	// Rewind to start
 	if err := btCursor.MoveToFirst(); err != nil {
-		if err.Error() == "empty table" {
+		// Empty table/leaf means no rows - not an error for FK check, just return false
+		errStr := err.Error()
+		if strings.Contains(errStr, "empty") {
 			return false, nil
 		}
 		return false, err

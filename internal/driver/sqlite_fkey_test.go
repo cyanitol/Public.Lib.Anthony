@@ -240,7 +240,6 @@ func TestForeignKey_OnUpdateActions(t *testing.T) {
 // TestForeignKey_SimpleInsertViolation tests basic FK constraint violation on INSERT.
 // Based on fkey2-1.1.* tests.
 func TestForeignKey_SimpleInsertViolation(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
