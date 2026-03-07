@@ -133,9 +133,10 @@ type VDBE struct {
 	Stats    *QueryStatistics // Query execution statistics (Phase 9.2)
 
 	// Transaction and change tracking
-	InTxn        bool  // True if in a transaction
-	NumChanges   int64 // Number of database changes
-	LastInsertID int64 // Last inserted rowid (for database/sql driver)
+	InTxn           bool             // True if in a transaction
+	NumChanges      int64            // Number of database changes
+	LastInsertID    int64            // Last inserted rowid (for database/sql driver)
+	pendingFKUpdate *fkUpdateContext // Captures old row data during UPDATE for FK checks
 
 	// Function execution context
 	funcCtx *FunctionContext // Function registry and aggregate state

@@ -755,7 +755,7 @@ func (s *Stmt) emitUpdateLoop(vm *vdbe.VDBE, stmt *parser.UpdateStmt, table *sch
 	recordStartReg := s.emitUpdateRecordBuild(vm, table, updateMap, numRecordCols, gen)
 
 	// Create record, delete old, insert new
-	s.emitUpdateRowReplacement(vm, recordStartReg, numRecordCols, rowidReg, gen)
+	s.emitUpdateRowReplacement(vm, recordStartReg, numRecordCols, rowidReg, table.Name, gen)
 
 	// Fix WHERE skip target
 	if stmt.Where != nil {
@@ -820,14 +820,17 @@ func (s *Stmt) emitUpdateRecordBuild(vm *vdbe.VDBE, table *schema.Table,
 
 // emitUpdateRowReplacement emits bytecode to replace the row.
 func (s *Stmt) emitUpdateRowReplacement(vm *vdbe.VDBE, recordStartReg int,
-	numRecordCols int, rowidReg int, gen *expr.CodeGenerator) {
+	numRecordCols int, rowidReg int, tableName string, gen *expr.CodeGenerator) {
 
 	resultReg := gen.AllocReg()
 	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
-	vm.AddOp(vdbe.OpDelete, 0, 0, 0)
+	delAddr := vm.AddOp(vdbe.OpDelete, 0, 0, 0)
+	vm.Program[delAddr].P4.Z = tableName
+	vm.Program[delAddr].P5 = 1 // mark as update delete for FK handling
 
 	insertAddr := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidReg)
 	vm.Program[insertAddr].P4.I = 1 // Don't double-count in NumChanges
+	vm.Program[insertAddr].P4.Z = tableName
 }
 
 // finalizeUpdate closes cursor and adds halt instruction.
@@ -926,13 +929,15 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 		skipAddr := vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
 
 		// Delete the current row (only if WHERE is true)
-		vm.AddOp(vdbe.OpDelete, 0, 0, 0)
+		delAddr := vm.AddOp(vdbe.OpDelete, 0, 0, 0)
+		vm.Program[delAddr].P4.Z = table.Name
 
 		// Fix up the skip target to point past the Delete to the Next instruction
 		vm.Program[skipAddr].P2 = vm.NumOps()
 	} else {
 		// No WHERE clause: delete current row unconditionally
-		vm.AddOp(vdbe.OpDelete, 0, 0, 0)
+		delAddr := vm.AddOp(vdbe.OpDelete, 0, 0, 0)
+		vm.Program[delAddr].P4.Z = table.Name
 	}
 
 	// Move to next row and loop back (common for both WHERE and non-WHERE cases)

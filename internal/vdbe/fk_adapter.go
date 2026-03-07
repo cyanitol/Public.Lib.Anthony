@@ -20,6 +20,16 @@ func NewVDBERowReader(v *VDBE) *VDBERowReader {
 	return &VDBERowReader{vdbe: v}
 }
 
+// VDBERowModifier implements RowDeleter and RowUpdater for FK cascades.
+type VDBERowModifier struct {
+	reader *VDBERowReader
+}
+
+// NewVDBERowModifier creates a new modifier using VDBE cursor operations.
+func NewVDBERowModifier(v *VDBE) *VDBERowModifier {
+	return &VDBERowModifier{reader: NewVDBERowReader(v)}
+}
+
 // RowExists checks if a row exists with the given column values in the referenced table.
 // It returns true if a matching row is found, false otherwise.
 func (r *VDBERowReader) RowExists(tableName string, columns []string, values []interface{}) (bool, error) {
@@ -344,4 +354,115 @@ func compareMemToFloat64(mem *Mem, v float64) bool {
 		return float64(mem.IntValue()) == v
 	}
 	return false
+}
+
+// DeleteRow deletes a row by rowid using a writable cursor.
+func (m *VDBERowModifier) DeleteRow(table string, rowid int64) error {
+	tableInfo, err := m.reader.getTable(table)
+	if err != nil {
+		return err
+	}
+
+	cursorNum := m.reader.allocTempCursor()
+	defer m.reader.closeTempCursor(cursorNum)
+
+	btCursor, err := m.openWriteCursor(cursorNum, tableInfo.RootPage)
+	if err != nil {
+		return err
+	}
+
+	found, err := btCursor.SeekRowid(rowid)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("rowid %d not found in table %s", rowid, table)
+	}
+
+	return btCursor.Delete()
+}
+
+// UpdateRow updates specific columns on a rowid using a delete/insert cycle.
+func (m *VDBERowModifier) UpdateRow(table string, rowid int64, values map[string]interface{}) error {
+	tableInfo, err := m.reader.getTable(table)
+	if err != nil {
+		return err
+	}
+
+	cursorNum := m.reader.allocTempCursor()
+	defer m.reader.closeTempCursor(cursorNum)
+
+	btCursor, err := m.openWriteCursor(cursorNum, tableInfo.RootPage)
+	if err != nil {
+		return err
+	}
+
+	found, err := btCursor.SeekRowid(rowid)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("rowid %d not found in table %s", rowid, table)
+	}
+
+	payload, err := btCursor.GetPayloadWithOverflow()
+	if err != nil {
+		return err
+	}
+
+	currentValues, err := m.readRowValues(tableInfo, payload)
+	if err != nil {
+		return err
+	}
+
+	for colIdx, col := range tableInfo.Columns {
+		if newVal, ok := values[col.Name]; ok {
+			currentValues[colIdx] = newVal
+		}
+	}
+
+	if err := btCursor.Delete(); err != nil {
+		return err
+	}
+
+	newPayload := encodeSimpleRecord(currentValues)
+	return btCursor.Insert(rowid, newPayload)
+}
+
+// openWriteCursor opens a writable cursor on the given root page.
+func (m *VDBERowModifier) openWriteCursor(cursorNum int, rootPage uint32) (*btree.BtCursor, error) {
+	bt, ok := m.reader.vdbe.Ctx.Btree.(*btree.Btree)
+	if !ok {
+		return nil, fmt.Errorf("invalid btree type")
+	}
+
+	if err := m.reader.vdbe.AllocCursors(cursorNum + 1); err != nil {
+		return nil, err
+	}
+
+	btCursor := btree.NewCursor(bt, rootPage)
+	m.reader.vdbe.Cursors[cursorNum] = &Cursor{
+		CurType:     CursorBTree,
+		IsTable:     true,
+		Writable:    true,
+		RootPage:    rootPage,
+		BtreeCursor: btCursor,
+		CachedCols:  make([][]byte, 0),
+		CacheStatus: 0,
+	}
+
+	return btCursor, nil
+}
+
+// readRowValues decodes all column values for a row payload.
+func (m *VDBERowModifier) readRowValues(table *tableInfo, payload []byte) ([]interface{}, error) {
+	values := make([]interface{}, len(table.Columns))
+	for i, col := range table.Columns {
+		mem := NewMem()
+		if err := parseRecordColumn(payload, i, mem); err != nil {
+			return nil, fmt.Errorf("read column %s: %w", col.Name, err)
+		}
+		values[i] = memToInterface(mem)
+	}
+	return values, nil
 }

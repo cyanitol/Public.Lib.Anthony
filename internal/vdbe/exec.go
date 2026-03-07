@@ -2062,13 +2062,82 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 	if err != nil {
 		return err
 	}
-	if err := v.validateInsertConstraints(instr.P4.Z, payload, btCursor, rowid); err != nil {
+	isUpdate := instr.P4.I == 1
+	tableName := instr.P4.Z
+
+	if isUpdate && tableName != "" {
+		if err := v.validateUpdateConstraints(tableName, payload); err != nil {
+			v.restorePendingUpdate()
+			return err
+		}
+	}
+
+	if err := v.validateInsertConstraints(tableName, payload, btCursor, rowid); err != nil {
+		if isUpdate {
+			v.restorePendingUpdate()
+		}
 		return err
 	}
 	if err := v.performInsert(cursor, btCursor, rowid, payload, int64(instr.P4.I)); err != nil {
+		if isUpdate {
+			v.restorePendingUpdate()
+		}
 		return err
 	}
+	if isUpdate {
+		v.pendingFKUpdate = nil
+	}
 	return nil
+}
+
+func (v *VDBE) validateUpdateConstraints(tableName string, newPayload []byte) error {
+	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil {
+		return nil
+	}
+	if v.pendingFKUpdate == nil || v.pendingFKUpdate.table != tableName || v.Ctx.Schema == nil {
+		return nil
+	}
+
+	type fkManager interface {
+		ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
+	}
+
+	mgr, ok := v.Ctx.FKManager.(fkManager)
+	if !ok {
+		return nil
+	}
+
+	newValues, err := v.extractValuesFromPayload(tableName, newPayload)
+	if err != nil {
+		return err
+	}
+
+	rowReader := NewVDBERowReader(v)
+	rowUpdater := NewVDBERowModifier(v)
+
+	return mgr.ValidateUpdate(tableName, v.pendingFKUpdate.oldValues, newValues, v.Ctx.Schema, rowReader, rowUpdater)
+}
+
+func (v *VDBE) restorePendingUpdate() {
+	ctx := v.pendingFKUpdate
+	if ctx == nil {
+		return
+	}
+	defer func() {
+		v.pendingFKUpdate = nil
+	}()
+
+	bt, ok := v.Ctx.Btree.(*btree.Btree)
+	if !ok || bt == nil {
+		return
+	}
+
+	cursor := btree.NewCursor(bt, ctx.rootPage)
+	found, err := cursor.SeekRowid(ctx.rowid)
+	if err == nil && found {
+		return
+	}
+	_ = cursor.Insert(ctx.rowid, ctx.payload)
 }
 
 // validateInsertConstraints checks all constraints before insert.
@@ -2473,8 +2542,37 @@ func (v *VDBE) checkForeignKeyDeleteConstraints(tableName string, values map[str
 		return nil
 	}
 
-	// Validate the delete (pass nil for rowReader, rowDeleter, and rowUpdater for now)
-	return mgr.ValidateDelete(tableName, values, v.Ctx.Schema, nil, nil, nil)
+	rowReader := NewVDBERowReader(v)
+	modifier := NewVDBERowModifier(v)
+
+	return mgr.ValidateDelete(tableName, values, v.Ctx.Schema, rowReader, modifier, modifier)
+}
+
+type fkUpdateContext struct {
+	table     string
+	rowid     int64
+	payload   []byte
+	oldValues map[string]interface{}
+	rootPage  uint32
+}
+
+func (v *VDBE) capturePendingUpdate(tableName string, btCursor *btree.BtCursor) error {
+	payload, err := btCursor.GetPayloadWithOverflow()
+	if err != nil {
+		return err
+	}
+	values, err := v.extractValuesFromPayload(tableName, payload)
+	if err != nil {
+		return err
+	}
+	v.pendingFKUpdate = &fkUpdateContext{
+		table:     tableName,
+		rowid:     btCursor.GetKey(),
+		payload:   payload,
+		oldValues: values,
+		rootPage:  btCursor.RootPage,
+	}
+	return nil
 }
 
 func (v *VDBE) execDelete(instr *Instruction) error {
@@ -2482,8 +2580,16 @@ func (v *VDBE) execDelete(instr *Instruction) error {
 	if err != nil {
 		return err
 	}
-	if err := v.validateDeleteConstraints(instr.P4.Z, btCursor); err != nil {
-		return err
+	isUpdateDelete := instr.P5 == 1
+	if isUpdateDelete && instr.P4.Z != "" && v.Ctx != nil && v.Ctx.ForeignKeysEnabled {
+		if err := v.capturePendingUpdate(instr.P4.Z, btCursor); err != nil {
+			return err
+		}
+	}
+	if !isUpdateDelete {
+		if err := v.validateDeleteConstraints(instr.P4.Z, btCursor); err != nil {
+			return err
+		}
 	}
 	return v.performDelete(btCursor)
 }
