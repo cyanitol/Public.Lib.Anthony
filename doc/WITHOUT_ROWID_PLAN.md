@@ -4,6 +4,7 @@ Current state:
 - Synthetic rowid derived from PK is used for inserts/updates (hash-based).
 - PK uniqueness check added via row scan for WITHOUT ROWID tables.
 - Order-preserving composite key encoder added at `internal/withoutrowid`.
+- B-tree scaffolding for composite keys added (composite page types, cursor support, encode/decode helpers) — navigation still uses int keys and must be completed.
 
 Next steps (must complete for correctness):
 1) **B-tree key model**

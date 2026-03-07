@@ -103,6 +103,7 @@ For more examples, see [doc/QUICKSTART.md](doc/QUICKSTART.md).
 - **[VACUUM](doc/VACUUM_USAGE.md)** - Database compaction
 - **[Triggers](doc/TRIGGER_INTEGRATION_REPORT.md)** - Trigger support
 - **[Roadmap](doc/ROADMAP.md)** - Current priorities and completion plan
+- **[WITHOUT ROWID Plan](doc/WITHOUT_ROWID_PLAN.md)** - Composite key design and remaining work
 
 ### Package Documentation
 - **[btree](internal/btree)** - B-tree storage engine
