@@ -9,16 +9,15 @@
 HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
 ================================================================================
 
-[~] Foreign Key Runtime Enforcement (35 tests skipped -> 8 now passing)
+[~] Foreign Key Runtime Enforcement (35 tests skipped -> 10 now passing)
     - [DONE] Wire FK manager through VDBE context
     - [DONE] INSERT FK validation (ValidateInsert) - blocks invalid child inserts
     - [DONE] DELETE FK validation (ValidateDelete) - blocks parent deletes when referenced
     - [DONE] UPDATE FK validation (ValidateUpdate) - blocks parent updates when referenced
-    - [DONE] ON DELETE CASCADE - child rows auto-deleted
-    - [DONE] ON DELETE SET NULL - FK columns set to NULL
-    - [DONE] ON UPDATE CASCADE - FK columns updated to new parent value
-    - [DONE] ON UPDATE SET NULL - FK columns set to NULL
-    - Remaining: ON DELETE/UPDATE SET DEFAULT actions
+    - [DONE] ON DELETE/UPDATE CASCADE - child rows auto-deleted/updated
+    - [DONE] ON DELETE/UPDATE SET NULL - FK columns set to NULL
+    - [DONE] ON DELETE/UPDATE SET DEFAULT - FK columns set to default
+    - [DONE] RESTRICT action (same as NO ACTION for immediate constraints)
     - Remaining: Deferred constraint checking at transaction boundaries
 
 [ ] WITHOUT ROWID Tables (23 tests skipped)

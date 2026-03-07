@@ -1406,7 +1406,6 @@ func TestForeignKey_PartialNullMultiColumn(t *testing.T) {
 // TestForeignKey_Restrict tests RESTRICT action.
 // Based on fkey2-12.* tests.
 func TestForeignKey_Restrict(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1675,7 +1674,6 @@ func TestForeignKey_ForeignKeyMismatch(t *testing.T) {
 // TestForeignKey_SetDefault tests SET DEFAULT action.
 // Based on fkey2-9.* tests.
 func TestForeignKey_SetDefault(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
