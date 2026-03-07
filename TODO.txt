@@ -9,10 +9,11 @@
 HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
 ================================================================================
 
-[~] Foreign Key Runtime Enforcement (38 tests skipped -> some now passing)
+[~] Foreign Key Runtime Enforcement (35 tests skipped -> 3 now passing)
     - [DONE] Wire FK manager through VDBE context
-    - [DONE] Basic INSERT FK validation (ValidateInsert)
-    - Remaining: DELETE/UPDATE validation (ValidateDelete/ValidateUpdate need testing)
+    - [DONE] INSERT FK validation (ValidateInsert) - blocks invalid child inserts
+    - [DONE] DELETE FK validation (ValidateDelete) - blocks parent deletes when referenced
+    - [WIP] UPDATE FK validation - INTEGER PRIMARY KEY updates need rowid propagation
     - Remaining: ON DELETE/UPDATE CASCADE|SET NULL|SET DEFAULT actions
     - Remaining: Deferred constraint checking at transaction boundaries
 
