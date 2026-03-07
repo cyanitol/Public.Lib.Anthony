@@ -395,7 +395,7 @@ var opAffinityTable = map[OpCode]Affinity{
 	OpGt: AFF_INTEGER, OpGe: AFF_INTEGER,
 	OpAnd: AFF_INTEGER, OpOr: AFF_INTEGER,
 	OpNot: AFF_INTEGER,
-	OpIs: AFF_INTEGER, OpIsNot: AFF_INTEGER,
+	OpIs:  AFF_INTEGER, OpIsNot: AFF_INTEGER,
 	OpIsNull: AFF_INTEGER, OpNotNull: AFF_INTEGER,
 	OpIn: AFF_INTEGER, OpNotIn: AFF_INTEGER,
 	OpBetween: AFF_INTEGER, OpNotBetween: AFF_INTEGER,

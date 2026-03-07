@@ -80,10 +80,10 @@ func TestRedistribution_ExplicitScenario(t *testing.T) {
 func TestRedistribution_MultipleSizes(t *testing.T) {
 	t.Parallel()
 	testCases := []struct {
-		name     string
-		pageSize uint32
-		cellSize int
-		leftCount int
+		name       string
+		pageSize   uint32
+		cellSize   int
+		leftCount  int
 		rightCount int
 	}{
 		{"small pages", 512, 15, 15, 15},

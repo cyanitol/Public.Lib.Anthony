@@ -441,7 +441,7 @@ func TestSQLiteAutoincrement(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			// Run setup statements
 			for _, stmt := range tt.setup {

@@ -184,9 +184,9 @@ func init() {
 
 // ColumnInfo contains column metadata for code generation.
 type ColumnInfo struct {
-	Name     string
-	Index    int  // Column index in the record
-	IsRowid  bool // True if this is the INTEGER PRIMARY KEY (alias for rowid)
+	Name    string
+	Index   int  // Column index in the record
+	IsRowid bool // True if this is the INTEGER PRIMARY KEY (alias for rowid)
 }
 
 // TableInfo contains table metadata for code generation.

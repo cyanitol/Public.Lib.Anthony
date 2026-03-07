@@ -431,7 +431,7 @@ func TestRowidRangeQueries(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			tt := tt  // Capture range variable
+			tt := tt // Capture range variable
 			t.Run(tt.name, func(t *testing.T) {
 				var count int64
 				query := "SELECT COUNT(*) FROM t7 WHERE " + tt.where
@@ -493,7 +493,7 @@ func TestRowidWithNegativeValues(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			tt := tt  // Capture range variable
+			tt := tt // Capture range variable
 			t.Run(tt.name, func(t *testing.T) {
 				var count int64
 				query := "SELECT COUNT(*) FROM t8 WHERE " + tt.where

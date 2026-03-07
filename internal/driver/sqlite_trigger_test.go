@@ -489,7 +489,7 @@ func TestSQLiteTrigger(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()
@@ -586,9 +586,9 @@ func TestSQLiteTriggerErrors(t *testing.T) {
 			errMsg: "cannot create AFTER trigger on view",
 		},
 		{
-			name: "error-1.9 trigger on sqlite_master",
-			setup: []string{},
-			query: `CREATE TRIGGER tr1 AFTER INSERT ON sqlite_master BEGIN SELECT 1; END`,
+			name:   "error-1.9 trigger on sqlite_master",
+			setup:  []string{},
+			query:  `CREATE TRIGGER tr1 AFTER INSERT ON sqlite_master BEGIN SELECT 1; END`,
 			errMsg: "cannot create trigger on system table",
 		},
 		{
@@ -681,7 +681,7 @@ func TestSQLiteTriggerErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()
@@ -821,7 +821,7 @@ func TestSQLiteTriggerTransactions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()
@@ -882,7 +882,7 @@ func TestSQLiteTriggerNaming(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()

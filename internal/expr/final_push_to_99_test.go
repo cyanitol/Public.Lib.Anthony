@@ -212,9 +212,9 @@ func TestPropagateAffinityCaseFirstELSE(t *testing.T) {
 		Op: OpCase,
 		List: &ExprList{
 			Items: []*ExprListItem{
-				{Expr: &Expr{Op: OpInteger}},                        // WHEN
-				{Expr: &Expr{Op: OpInteger, Affinity: AFF_NONE}},    // THEN (NONE)
-				{Expr: &Expr{Op: OpString, Affinity: AFF_TEXT}},     // ELSE
+				{Expr: &Expr{Op: OpInteger}},                     // WHEN
+				{Expr: &Expr{Op: OpInteger, Affinity: AFF_NONE}}, // THEN (NONE)
+				{Expr: &Expr{Op: OpString, Affinity: AFF_TEXT}},  // ELSE
 			},
 		},
 	}

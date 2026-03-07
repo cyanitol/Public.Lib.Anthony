@@ -21,7 +21,7 @@ func TestNewOrderByCompiler(t *testing.T) {
 func TestSetupOrderBy(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)
@@ -102,7 +102,7 @@ func TestSetupOrderByEmpty(t *testing.T) {
 func TestGenerateSortTailWithLimit(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	obc := NewOrderByCompiler(parse)
@@ -151,7 +151,7 @@ func TestGenerateSortTailWithLimit(t *testing.T) {
 func TestGenerateSortTail(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	obc := NewOrderByCompiler(parse)
@@ -196,7 +196,7 @@ func TestGenerateSortTail(t *testing.T) {
 func TestPushOntoSorter(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	obc := NewOrderByCompiler(parse)
@@ -238,7 +238,7 @@ func TestPushOntoSorter(t *testing.T) {
 func TestPushOntoSorterEphemeral(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	obc := NewOrderByCompiler(parse)
@@ -280,7 +280,7 @@ func TestPushOntoSorterEphemeral(t *testing.T) {
 func TestCompileOrderBy(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	obc := NewOrderByCompiler(parse)
@@ -643,7 +643,7 @@ func TestTableMatches(t *testing.T) {
 func TestCodeOffset(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	obc := NewOrderByCompiler(parse)
 
@@ -708,7 +708,7 @@ func TestOrderByCompileExpr(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem: 1,
+				Mem:  1,
 			}
 			obc := NewOrderByCompiler(parse)
 
@@ -766,7 +766,7 @@ func TestOutputSortedRow(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem:    1,
+				Mem:  1,
 				Tabs: 0,
 			}
 			obc := NewOrderByCompiler(parse)
@@ -798,7 +798,7 @@ func TestOutputSortedRow(t *testing.T) {
 func TestOutputSortedRowUnsupported(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	obc := NewOrderByCompiler(parse)
@@ -834,7 +834,7 @@ func TestAllocateResultRegisters(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem: 1,
+				Mem:  1,
 			}
 			obc := NewOrderByCompiler(parse)
 
@@ -868,7 +868,7 @@ func TestAllocateResultRegisters(t *testing.T) {
 func TestGenerateSorterLoop(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	obc := NewOrderByCompiler(parse)
@@ -912,7 +912,7 @@ func TestGenerateSorterLoop(t *testing.T) {
 func TestGenerateEphemeralLoop(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	obc := NewOrderByCompiler(parse)
@@ -952,7 +952,7 @@ func TestGenerateEphemeralLoop(t *testing.T) {
 func TestExtractResultColumns(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	obc := NewOrderByCompiler(parse)
 
@@ -998,7 +998,7 @@ func TestCleanupResultRegisters(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem: 100,
+				Mem:  100,
 			}
 			obc := NewOrderByCompiler(parse)
 
@@ -1140,13 +1140,13 @@ func TestResolveOrderByExprComprehensive(t *testing.T) {
 			expr: &Expr{
 				Op: TK_PLUS,
 				Left: &Expr{
-					Op:    TK_COLUMN,
+					Op:          TK_COLUMN,
 					StringValue: "id",
 				},
 				Right: &Expr{
 					Op: TK_STAR,
 					Left: &Expr{
-						Op:    TK_COLUMN,
+						Op:          TK_COLUMN,
 						StringValue: "name",
 					},
 					Right: &Expr{Op: TK_INTEGER, IntValue: 2},
@@ -1170,7 +1170,7 @@ func TestResolveOrderByExprComprehensive(t *testing.T) {
 func TestSelectCompilerGenerateSortTail(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)

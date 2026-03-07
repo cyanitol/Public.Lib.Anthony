@@ -192,7 +192,7 @@ func TestStringValue(t *testing.T) {
 func TestParserHelpers(t *testing.T) {
 	t.Parallel()
 	t.Run("peek at end", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		p := NewParser("")
 		tok := p.peek()
 		if tok.Type != TK_EOF {
@@ -201,7 +201,7 @@ func TestParserHelpers(t *testing.T) {
 	})
 
 	t.Run("checkIdentifier at end", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		p := NewParser("")
 		if p.checkIdentifier() {
 			t.Error("checkIdentifier() at end should be false")

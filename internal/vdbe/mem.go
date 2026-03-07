@@ -591,8 +591,9 @@ func compareMixedNumericText(m, other *Mem, mIsNumeric, mIsText bool) (int, bool
 // 1. NULL is less than everything else
 // 2. If both are numeric (INT or REAL), compare numerically
 // 3. If one is numeric and one is text, try to convert text to numeric:
-//    - If successful, compare numerically
-//    - If unsuccessful, numeric < text (return -1 or 1)
+//   - If successful, compare numerically
+//   - If unsuccessful, numeric < text (return -1 or 1)
+//
 // 4. If both are text, compare using collation
 // 5. If one is text and one is blob, text < blob
 func (m *Mem) CompareWithCollation(other *Mem, collName string) int {

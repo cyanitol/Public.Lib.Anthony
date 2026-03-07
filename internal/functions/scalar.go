@@ -15,7 +15,7 @@ import (
 func RegisterScalarFunctions(r *Registry) {
 	// String functions
 	r.Register(NewScalarFunc("length", 1, lengthFunc))
-	r.Register(NewScalarFunc("substr", -1, substrFunc)) // 2 or 3 args
+	r.Register(NewScalarFunc("substr", -1, substrFunc))    // 2 or 3 args
 	r.Register(NewScalarFunc("substring", -1, substrFunc)) // alias for substr
 	r.Register(NewScalarFunc("upper", 1, upperFunc))
 	r.Register(NewScalarFunc("lower", 1, lowerFunc))
@@ -670,17 +670,17 @@ func likelihoodFunc(args []Value) (Value, error) {
 
 // printfFormatSpec holds parsed format specifier information
 type printfFormatSpec struct {
-	width      int
-	precision  int
-	specifier  byte
-	leftAlign  bool // -
-	showSign   bool // +
-	spaceSign  bool // ' '
-	altForm    bool // #
-	zeroPad    bool // 0
-	thousands  bool // ,
-	widthStar  bool // * for dynamic width
-	precStar   bool // * for dynamic precision
+	width     int
+	precision int
+	specifier byte
+	leftAlign bool // -
+	showSign  bool // +
+	spaceSign bool // ' '
+	altForm   bool // #
+	zeroPad   bool // 0
+	thousands bool // ,
+	widthStar bool // * for dynamic width
+	precStar  bool // * for dynamic precision
 }
 
 // parsePrintfFlags parses format flags (-+#0 etc) and returns new position

@@ -11,7 +11,7 @@ import (
 // TestNewUniqueConstraint tests creating a new UNIQUE constraint.
 func TestNewUniqueConstraint(t *testing.T) {
 	tests := []struct {
-		name          string
+		name           string
 		constraintName string
 		tableName      string
 		columns        []string
@@ -262,10 +262,10 @@ func TestValuesMatch(t *testing.T) {
 // TestExtractUniqueConstraints tests extracting UNIQUE constraints from table definitions.
 func TestExtractUniqueConstraints(t *testing.T) {
 	tests := []struct {
-		name       string
-		table      *schema.Table
-		wantCount  int
-		wantCols   [][]string
+		name      string
+		table     *schema.Table
+		wantCount int
+		wantCols  [][]string
 	}{
 		{
 			name: "no constraints",

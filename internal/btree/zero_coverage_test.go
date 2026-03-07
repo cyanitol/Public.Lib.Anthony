@@ -117,8 +117,8 @@ func TestMerge_GetSiblingWithLeftPage(t *testing.T) {
 		childPage uint32
 		rowid     int64
 	}{
-		{2, 1},  // First child: page 2, max key 1
-		{3, 5},  // Second child: page 3, max key 5
+		{2, 1}, // First child: page 2, max key 1
+		{3, 5}, // Second child: page 3, max key 5
 	}
 	rootData := createInteriorPage(1, pageSize, rootCells, 4) // Right child is page 4
 	bt.SetPage(1, rootData)
@@ -298,33 +298,33 @@ func TestSplit_SplitParentRecursively(t *testing.T) {
 func TestPageHeader_String(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		pageType byte
-		numCells uint16
+		name       string
+		pageType   byte
+		numCells   uint16
 		wantSubstr string
 	}{
 		{
-			name:     "leaf table page",
-			pageType: PageTypeLeafTable,
-			numCells: 5,
+			name:       "leaf table page",
+			pageType:   PageTypeLeafTable,
+			numCells:   5,
 			wantSubstr: "PageHeader",
 		},
 		{
-			name:     "interior table page",
-			pageType: PageTypeInteriorTable,
-			numCells: 10,
+			name:       "interior table page",
+			pageType:   PageTypeInteriorTable,
+			numCells:   10,
 			wantSubstr: "PageHeader",
 		},
 		{
-			name:     "leaf index page",
-			pageType: PageTypeLeafIndex,
-			numCells: 3,
+			name:       "leaf index page",
+			pageType:   PageTypeLeafIndex,
+			numCells:   3,
 			wantSubstr: "PageHeader",
 		},
 		{
-			name:     "interior index page",
-			pageType: PageTypeInteriorIndex,
-			numCells: 7,
+			name:       "interior index page",
+			pageType:   PageTypeInteriorIndex,
+			numCells:   7,
 			wantSubstr: "PageHeader",
 		},
 	}

@@ -49,7 +49,7 @@ func TestTokenizer(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			tokens := tokenizer.Tokenize(tt.text)
 			if len(tokens) != len(tt.expected) {
 				t.Errorf("Expected %d tokens, got %d", len(tt.expected), len(tokens))
@@ -256,7 +256,7 @@ func TestQueryParser(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			query, err := parser.Parse(tt.query)
 			if err != nil {
 				t.Fatalf("Failed to parse query: %v", err)
@@ -296,7 +296,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test simple query
 	t.Run("simple query", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		query, _ := parser.Parse("quick brown")
 		results, err := executor.Execute(query)
 		if err != nil {
@@ -317,7 +317,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test phrase query
 	t.Run("phrase query", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		query, _ := parser.Parse(`"quick brown"`)
 		results, err := executor.Execute(query)
 		if err != nil {
@@ -333,7 +333,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test AND query
 	t.Run("AND query", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		query, _ := parser.Parse("quick AND fox")
 		results, err := executor.Execute(query)
 		if err != nil {
@@ -348,7 +348,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test OR query
 	t.Run("OR query", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		query, _ := parser.Parse("cat OR dog")
 		results, err := executor.Execute(query)
 		if err != nil {
@@ -363,7 +363,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test NOT query
 	t.Run("NOT query", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		query, _ := parser.Parse("quick NOT fox")
 		results, err := executor.Execute(query)
 		if err != nil {
@@ -1246,7 +1246,7 @@ func TestHighlightTextEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := HighlightText(tt.text, tt.terms, "<b>", "</b>")
 
 			// Should not crash and return valid string
@@ -1447,7 +1447,7 @@ func TestRankersWithEmptyIndex(t *testing.T) {
 	for _, r := range rankers {
 		r := r
 		t.Run(r.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			score := r.ranker.Score(index, 1, []string{"test"})
 			if score != 0 {
 				t.Errorf("Expected score 0 for empty index, got %f", score)
@@ -1488,7 +1488,7 @@ func TestGenerateSnippetEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			snippet := GenerateSnippet(tt.text, tt.positions, tt.maxLen)
 			// Should not crash
 			t.Logf("Snippet: %s", snippet)
@@ -1515,7 +1515,7 @@ func TestTokenizerEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			tokens := tokenizer.Tokenize(tt.text)
 			t.Logf("Tokens for '%s': %v", tt.name, tokens)
 		})
@@ -1559,7 +1559,7 @@ func TestMatchOperatorFunction(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			matches, err := MatchOperator(index, tt.queryStr, tt.docID)
 			if err != nil {
 				t.Errorf("MatchOperator failed: %v", err)
@@ -1598,7 +1598,7 @@ func TestStopWordIsStopWordFunction(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.word, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := IsStopWord(tt.word)
 			if result != tt.isStopWord {
 				t.Errorf("IsStopWord(%q) = %v, want %v", tt.word, result, tt.isStopWord)
@@ -1628,7 +1628,7 @@ func TestParseColumnFilterParsing(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			query, err := parser.Parse(tt.queryStr)
 			if err != nil && tt.name != "empty after colon" {
 				t.Errorf("Parse failed: %v", err)
@@ -1767,7 +1767,7 @@ func TestAddEllipsisEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			snippet := GenerateSnippet(text, tt.positions, tt.maxLen)
 			t.Logf("Snippet: %s", snippet)
 		})
@@ -1977,10 +1977,10 @@ func TestPrefixTokenizerEdgeCases(t *testing.T) {
 	base := NewSimpleTokenizer()
 
 	tests := []struct {
-		name       string
-		minPrefix  int
-		maxPrefix  int
-		text       string
+		name      string
+		minPrefix int
+		maxPrefix int
+		text      string
 	}{
 		{"min equals max", 3, 3, "testing"},
 		{"min larger than word", 10, 15, "short"},
@@ -1992,7 +1992,7 @@ func TestPrefixTokenizerEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			tokenizer := NewPrefixTokenizer(base, tt.minPrefix, tt.maxPrefix)
 			tokens := tokenizer.Tokenize(tt.text)
 			t.Logf("Prefix tokens for '%s' (min=%d, max=%d): %d tokens", tt.text, tt.minPrefix, tt.maxPrefix, len(tokens))
@@ -2412,7 +2412,7 @@ func TestParseColumnFilterEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			_, err := parser.Parse(tt.query)
 			// Should handle gracefully
 			if err != nil {

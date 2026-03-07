@@ -25,10 +25,10 @@ func TestSQLiteConstraints(t *testing.T) {
 
 		// Basic CHECK constraints - check-1.*
 		{
-			name:     "check-1.1: Create table with CHECK constraints",
-			setup:    []string{"CREATE TABLE t1(x INTEGER CHECK( x<5 ), y REAL CHECK( y>x ))"},
-			inserts:  []string{},
-			wantErr:  false,
+			name:    "check-1.1: Create table with CHECK constraints",
+			setup:   []string{"CREATE TABLE t1(x INTEGER CHECK( x<5 ), y REAL CHECK( y>x ))"},
+			inserts: []string{},
+			wantErr: false,
 		},
 		{
 			name:     "check-1.2: Valid INSERT satisfying CHECK constraints",
@@ -38,18 +38,18 @@ func TestSQLiteConstraints(t *testing.T) {
 			wantRows: 1,
 		},
 		{
-			name:     "check-1.3: CHECK constraint violation on x<5",
-			setup:    []string{"CREATE TABLE t1(x INTEGER CHECK( x<5 ), y REAL CHECK( y>x ))"},
-			inserts:  []string{"INSERT INTO t1 VALUES(6,7)"},
-			wantErr:  true,
-			errMsg:   "CHECK constraint failed",
+			name:    "check-1.3: CHECK constraint violation on x<5",
+			setup:   []string{"CREATE TABLE t1(x INTEGER CHECK( x<5 ), y REAL CHECK( y>x ))"},
+			inserts: []string{"INSERT INTO t1 VALUES(6,7)"},
+			wantErr: true,
+			errMsg:  "CHECK constraint failed",
 		},
 		{
-			name:     "check-1.5: CHECK constraint violation on y>x",
-			setup:    []string{"CREATE TABLE t1(x INTEGER CHECK( x<5 ), y REAL CHECK( y>x ))"},
-			inserts:  []string{"INSERT INTO t1 VALUES(4,3)"},
-			wantErr:  true,
-			errMsg:   "CHECK constraint failed",
+			name:    "check-1.5: CHECK constraint violation on y>x",
+			setup:   []string{"CREATE TABLE t1(x INTEGER CHECK( x<5 ), y REAL CHECK( y>x ))"},
+			inserts: []string{"INSERT INTO t1 VALUES(4,3)"},
+			wantErr: true,
+			errMsg:  "CHECK constraint failed",
 		},
 		{
 			name:     "check-1.7: NULL values pass CHECK constraints",
@@ -687,8 +687,8 @@ func TestSQLiteConstraints(t *testing.T) {
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER PRIMARY KEY, name TEXT)",
 			},
-			inserts: []string{"INSERT INTO t1 VALUES(NULL, 'test')"},
-			verify:  "SELECT id FROM t1 WHERE name='test'",
+			inserts:  []string{"INSERT INTO t1 VALUES(NULL, 'test')"},
+			verify:   "SELECT id FROM t1 WHERE name='test'",
 			wantRows: 1, // SQLite auto-generates rowid
 		},
 		{
@@ -696,8 +696,8 @@ func TestSQLiteConstraints(t *testing.T) {
 			setup: []string{
 				"CREATE TABLE t1(id INT PRIMARY KEY, email TEXT UNIQUE NOT NULL)",
 			},
-			inserts: []string{"INSERT INTO t1 VALUES(1, 'test@example.com')"},
-			verify:  "SELECT * FROM t1",
+			inserts:  []string{"INSERT INTO t1 VALUES(1, 'test@example.com')"},
+			verify:   "SELECT * FROM t1",
 			wantRows: 1,
 		},
 		{
@@ -871,7 +871,7 @@ func TestSQLiteConstraints(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			// Create temporary database
 			tmpDir := t.TempDir()

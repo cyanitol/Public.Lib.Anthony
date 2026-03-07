@@ -456,7 +456,7 @@ func TestSQLiteIntegrityCheck(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			// Clean up
 			db.Exec("DROP TABLE IF EXISTS t1")
@@ -671,7 +671,7 @@ func TestPragmaIntegrityCheckOptions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			rows, err := db.Query(tt.pragma)
 			if err != nil {

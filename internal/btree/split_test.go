@@ -26,7 +26,7 @@ func TestSplitLeafPageBasic(t *testing.T) {
 	numCells := 250
 
 	for i := 1; i <= numCells; i++ {
-		key := int64(i * 2) // Use even numbers so we can test insertion in middle
+		key := int64(i * 2)         // Use even numbers so we can test insertion in middle
 		payload := make([]byte, 50) // 50 bytes payload
 		for j := range payload {
 			payload[j] = byte(i % 256)
@@ -1150,12 +1150,12 @@ func TestFindInsertionPoint(t *testing.T) {
 		key      int64
 		expected int
 	}{
-		{50, 0},   // Before all keys
-		{150, 1},  // Between 100 and 300
-		{350, 2},  // Between 300 and 500
-		{600, 3},  // After all keys
-		{100, 1},  // Equal to first
-		{300, 2},  // Equal to middle
+		{50, 0},  // Before all keys
+		{150, 1}, // Between 100 and 300
+		{350, 2}, // Between 300 and 500
+		{600, 3}, // After all keys
+		{100, 1}, // Equal to first
+		{300, 2}, // Equal to middle
 	}
 
 	for _, tt := range tests {

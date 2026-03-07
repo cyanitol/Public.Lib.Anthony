@@ -195,9 +195,9 @@ func TestBetweenCollation(t *testing.T) {
 	}
 
 	tests := []struct {
-		name  string
-		expr  string
-		want  int
+		name string
+		expr string
+		want int
 	}{
 		{"text_between_numeric", "x BETWEEN 1 AND '5'", 0},
 		{"text_binary_between", "x COLLATE binary BETWEEN 1 AND '5'", 0},
@@ -209,7 +209,7 @@ func TestBetweenCollation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result int
 			query := "SELECT " + tt.expr + " FROM t1"
@@ -874,7 +874,7 @@ func TestBetweenBoundaryValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var count int
 			err := db.QueryRow("SELECT COUNT(*) FROM t WHERE n BETWEEN ? AND ?", tt.lower, tt.upper).Scan(&count)

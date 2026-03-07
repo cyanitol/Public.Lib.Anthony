@@ -527,36 +527,31 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "likely_passthrough",
 			expr: "SELECT likely(42)",
 			want: int64(42),
-
 		},
 		{
 			name: "unlikely_passthrough",
 			expr: "SELECT unlikely(42)",
 			want: int64(42),
-
 		},
 		{
 			name: "likelihood_passthrough",
 			expr: "SELECT likelihood(42, 0.5)",
 			want: int64(42),
-
 		},
 		{
 			name: "likely_null",
 			expr: "SELECT likely(NULL)",
 			want: nil,
-
 		},
 		{
 			name: "unlikely_null",
 			expr: "SELECT unlikely(NULL)",
 			want: nil,
-
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -719,7 +714,7 @@ func TestAggregateFunctions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result interface{}
 			err := db.QueryRow(tt.expr).Scan(&result)
@@ -868,7 +863,7 @@ func TestFunctionErrorCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result interface{}
 			err := db.QueryRow(tt.expr).Scan(&result)
@@ -918,7 +913,7 @@ func TestNullHandling(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result interface{}
 			err := db.QueryRow(tt.expr).Scan(&result)

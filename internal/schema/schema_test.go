@@ -627,8 +627,8 @@ func TestGetColumnCollation(t *testing.T) {
 		{0, ""},
 		{1, "NOCASE"},
 		{2, "RTRIM"},
-		{-1, ""},     // Invalid index
-		{10, ""},     // Out of bounds
+		{-1, ""}, // Invalid index
+		{10, ""}, // Out of bounds
 	}
 
 	for _, tt := range tests {

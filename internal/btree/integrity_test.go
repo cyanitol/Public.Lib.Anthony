@@ -788,9 +788,9 @@ func TestCheckIntegrity_DepthExceeded(t *testing.T) {
 	for i := 0; i <= MaxBtreeDepth+1; i++ {
 		page := make([]byte, 4096)
 		page[0] = PageTypeInteriorTable
-		binary.BigEndian.PutUint16(page[3:], 0)                    // NumCells = 0
+		binary.BigEndian.PutUint16(page[3:], 0)                     // NumCells = 0
 		binary.BigEndian.PutUint32(page[8:], uint32(startPage+i+1)) // RightChild = next page
-		binary.BigEndian.PutUint16(page[5:], 4096)                 // CellContentStart
+		binary.BigEndian.PutUint16(page[5:], 4096)                  // CellContentStart
 
 		bt.Pages[uint32(startPage+i)] = page
 	}

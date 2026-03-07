@@ -101,7 +101,7 @@ func TestStrNICmpEdgeCases(t *testing.T) {
 	}{
 		{"n equals limit", "hello", "hello", 5, 0},
 		{"n less than limit, strings differ after", "helloaaa", "hellobbb", 5, 0},
-		{"n greater, a shorter", "hi", "hello", 10, 1}, // Returns positive (length diff)
+		{"n greater, a shorter", "hi", "hello", 10, 1},  // Returns positive (length diff)
 		{"n greater, b shorter", "hello", "hi", 10, -1}, // Returns negative (length diff)
 		{"n greater, equal", "hello", "HELLO", 10, 0},
 	}

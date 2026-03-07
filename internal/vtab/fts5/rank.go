@@ -220,10 +220,10 @@ func RankResults(results []SearchResult) {
 
 // HighlightMatch represents a highlighted portion of text.
 type HighlightMatch struct {
-	Text      string
-	IsMatch   bool
-	StartPos  int
-	EndPos    int
+	Text     string
+	IsMatch  bool
+	StartPos int
+	EndPos   int
 }
 
 // GenerateSnippet creates a snippet of text around matched terms.

@@ -254,7 +254,7 @@ func TestOpSavepoint(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name        string
-		operation   int    // 0=begin, 1=release, 2=rollback
+		operation   int // 0=begin, 1=release, 2=rollback
 		spName      string
 		setupTxn    bool
 		setupSp     []string // savepoints to create before test

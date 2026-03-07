@@ -14,11 +14,11 @@ import (
 
 // TriggerContext holds the context needed for trigger execution.
 type TriggerContext struct {
-	Schema  *schema.Schema
-	Pager   interface{} // pager.Pager interface
-	Btree   interface{} // btree.BTree interface
-	OldRow  map[string]interface{}
-	NewRow  map[string]interface{}
+	Schema    *schema.Schema
+	Pager     interface{} // pager.Pager interface
+	Btree     interface{} // btree.BTree interface
+	OldRow    map[string]interface{}
+	NewRow    map[string]interface{}
 	TableName string
 }
 

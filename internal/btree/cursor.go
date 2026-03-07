@@ -474,7 +474,6 @@ func (c *BtCursor) enterPage(pageNum uint32) ([]byte, *PageHeader, error) {
 	return pageData, header, nil
 }
 
-
 // IsValid returns true if the cursor is pointing to a valid entry
 func (c *BtCursor) IsValid() bool {
 	return c.State == CursorValid

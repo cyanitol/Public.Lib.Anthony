@@ -115,10 +115,10 @@ func TestParseCollateInColumn(t *testing.T) {
 func TestParseCollateInOrderBy(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		sql        string
-		wantErr    bool
-		checkStmt  func(*testing.T, *SelectStmt)
+		name      string
+		sql       string
+		wantErr   bool
+		checkStmt func(*testing.T, *SelectStmt)
 	}{
 		{
 			name:    "ORDER BY with COLLATE NOCASE",

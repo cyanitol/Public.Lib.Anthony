@@ -36,11 +36,11 @@ func TestNewIndexSelector(t *testing.T) {
 // TestSelectBestIndex tests index selection.
 func TestSelectBestIndex(t *testing.T) {
 	tests := []struct {
-		name        string
-		table       *TableInfo
-		terms       []*WhereTerm
-		wantIndex   string
-		wantNil     bool
+		name      string
+		table     *TableInfo
+		terms     []*WhereTerm
+		wantIndex string
+		wantNil   bool
 	}{
 		{
 			name: "no indexes",
@@ -101,7 +101,7 @@ func TestSelectBestIndex(t *testing.T) {
 				Name: "users",
 				Indexes: []*IndexInfo{
 					{
-						Name: "idx_email",
+						Name:   "idx_email",
 						Unique: true,
 						Columns: []IndexColumn{
 							{Name: "email", Index: 0},
@@ -165,11 +165,11 @@ func TestSelectBestIndex(t *testing.T) {
 // TestScoreIndex tests index scoring algorithm.
 func TestScoreIndex(t *testing.T) {
 	tests := []struct {
-		name      string
-		index     *IndexInfo
-		terms     []*WhereTerm
-		minScore  float64
-		maxScore  float64
+		name     string
+		index    *IndexInfo
+		terms    []*WhereTerm
+		minScore float64
+		maxScore float64
 	}{
 		{
 			name: "equality constraint",
@@ -1088,7 +1088,7 @@ func TestApplyOptionsBonus(t *testing.T) {
 			wantMore:  true,
 		},
 		{
-			name:  "order by bonus",
+			name: "order by bonus",
 			index: &IndexInfo{
 				Columns: []IndexColumn{
 					{Name: "name", Ascending: true},

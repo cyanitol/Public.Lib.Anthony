@@ -478,7 +478,7 @@ func TestCompareOperationsErrorPaths(t *testing.T) {
 
 	for _, op := range opcodes {
 		t.Run(op.name+"_InvalidLeft", func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(3)
 			instr := &Instruction{
 				Opcode: op.opcode,
@@ -493,7 +493,7 @@ func TestCompareOperationsErrorPaths(t *testing.T) {
 		})
 
 		t.Run(op.name+"_InvalidRight", func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(3)
 			v.Mem[0].SetInt(10)
 			instr := &Instruction{
@@ -509,7 +509,7 @@ func TestCompareOperationsErrorPaths(t *testing.T) {
 		})
 
 		t.Run(op.name+"_InvalidResult", func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(3)
 			v.Mem[0].SetInt(10)
 			v.Mem[1].SetInt(20)

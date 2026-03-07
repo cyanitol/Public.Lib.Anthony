@@ -104,8 +104,9 @@ func (s *Stmt) applyCompoundOperations(allResults [][][]interface{}, ops []parse
 
 // flattenCompound walks the compound tree and returns operators and leaf SELECTs
 // in left-to-right order. For "A UNION B INTERSECT C":
-//   ops = [UNION, INTERSECT]
-//   selects = [A, B, C]
+//
+//	ops = [UNION, INTERSECT]
+//	selects = [A, B, C]
 func flattenCompound(c *parser.CompoundSelect) ([]parser.CompoundOp, []*parser.SelectStmt) {
 	var ops []parser.CompoundOp
 	var selects []*parser.SelectStmt

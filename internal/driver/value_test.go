@@ -41,7 +41,7 @@ func TestConvertValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := vc.ConvertValue(tt.input)
 			if (err != nil) != tt.wantErr {
@@ -92,7 +92,7 @@ func TestIsNativeDriverValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			result := isNativeDriverValue(tt.input)
 			if result != tt.expected {
@@ -118,7 +118,7 @@ func TestConvertUint64(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := convertUint64(tt.input)
 			if (err != nil) != tt.wantErr {
@@ -136,10 +136,10 @@ func TestConvertUint64(t *testing.T) {
 
 func TestConvertToInt64(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     interface{}
-		expected  int64
-		expectOk  bool
+		name     string
+		input    interface{}
+		expected int64
+		expectOk bool
 	}{
 		{"int", int(42), 42, true},
 		{"int8", int8(42), 42, true},
@@ -161,7 +161,7 @@ func TestConvertToInt64(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			result, ok := convertToInt64(tt.input)
 			if ok != tt.expectOk {

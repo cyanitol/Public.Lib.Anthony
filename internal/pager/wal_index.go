@@ -36,11 +36,11 @@ const (
 
 // Common errors
 var (
-	ErrWALIndexCorrupt      = errors.New("WAL index is corrupt")
-	ErrWALIndexLocked       = errors.New("WAL index is locked")
-	ErrInvalidReader        = errors.New("invalid reader ID")
-	ErrFrameNotFound        = errors.New("frame not found in WAL index")
-	ErrWALChecksumMismatch  = errors.New("WAL frame checksum mismatch")
+	ErrWALIndexCorrupt     = errors.New("WAL index is corrupt")
+	ErrWALIndexLocked      = errors.New("WAL index is locked")
+	ErrInvalidReader       = errors.New("invalid reader ID")
+	ErrFrameNotFound       = errors.New("frame not found in WAL index")
+	ErrWALChecksumMismatch = errors.New("WAL frame checksum mismatch")
 )
 
 // WALIndexHeader represents the header of the WAL index (shared memory).

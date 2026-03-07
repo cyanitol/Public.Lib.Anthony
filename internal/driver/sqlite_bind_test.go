@@ -80,7 +80,7 @@ func TestBindInteger32(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
+		name    string
 		a, b, c int
 	}{
 		{"small_positive", 123, 456, 789},
@@ -88,7 +88,7 @@ func TestBindInteger32(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", tt.a, tt.b, tt.c)
 			if err != nil {
@@ -183,7 +183,7 @@ func TestBindDouble(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
+		name    string
 		a, b, c float64
 	}{
 		{"normal_values", 1234.1234, 0.00001, 123456789.0},
@@ -191,7 +191,7 @@ func TestBindDouble(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", tt.a, tt.b, tt.c)
 			if err != nil {
@@ -989,7 +989,7 @@ func TestBindMultipleQueries(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(fmt.Sprintf("threshold_%d", tt.threshold), func(t *testing.T) {
 			var count int
 			err := db.QueryRow("SELECT COUNT(*) FROM t1 WHERE n > ?", tt.threshold).Scan(&count)

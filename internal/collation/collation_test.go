@@ -84,7 +84,7 @@ func TestRegisterErrors(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			err := cr.Register(tt.colName, tt.fn)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Register() error = %v, wantErr %v", err, tt.wantErr)
@@ -123,7 +123,7 @@ func TestUnregisterBuiltinProtection(t *testing.T) {
 	for _, name := range builtins {
 		name := name
 		t.Run(name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			err := cr.Unregister(name)
 			if err == nil {
 				t.Errorf("Unregister(%q) should error for built-in collation", name)
@@ -179,7 +179,7 @@ func TestGetCollation(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			coll, ok := GetCollation(tt.colName)
 			if ok != tt.wantOk {
 				t.Errorf("GetCollation(%q) ok = %v, want %v", tt.colName, ok, tt.wantOk)
@@ -227,7 +227,7 @@ func TestCompare(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := Compare(tt.a, tt.b, tt.collation)
 			// Check sign of result
 			if (result < 0) != (tt.want < 0) || (result > 0) != (tt.want > 0) || (result == 0) != (tt.want == 0) {
@@ -253,7 +253,7 @@ func TestCompareBytes(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := CompareBytes(tt.a, tt.b, tt.collation)
 			if (result < 0) != (tt.want < 0) || (result > 0) != (tt.want > 0) || (result == 0) != (tt.want == 0) {
 				t.Errorf("CompareBytes(%q, %q, %q) = %d, want %d", tt.a, tt.b, tt.collation, result, tt.want)

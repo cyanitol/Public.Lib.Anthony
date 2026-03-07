@@ -486,9 +486,9 @@ func TestCompileInsertRowsMultiple(t *testing.T) {
 // Test addValueLoad with different value types
 func TestAddValueLoadTypes(t *testing.T) {
 	tests := []struct {
-		name      string
-		value     Value
-		expectOp  OpCode
+		name     string
+		value    Value
+		expectOp OpCode
 	}{
 		{
 			name:     "integer",

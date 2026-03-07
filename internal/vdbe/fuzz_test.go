@@ -54,10 +54,10 @@ func FuzzDecodeRecordExtended(f *testing.F) {
 		{},
 
 		// Incomplete records (should error gracefully)
-		{0x02}, // Missing serial type
-		{0x02, 0x01}, // Missing value for 1-byte int
+		{0x02},             // Missing serial type
+		{0x02, 0x01},       // Missing value for 1-byte int
 		{0x02, 0x02, 0x01}, // Incomplete 2-byte int
-		{0x02, 0x11, 'h'}, // Incomplete text
+		{0x02, 0x11, 'h'},  // Incomplete text
 
 		// Invalid header size
 		{0xff}, // Large header size but no data
@@ -233,10 +233,10 @@ func FuzzVarint(f *testing.F) {
 	// Seed with various sizes
 	f.Add(uint64(0))
 	f.Add(uint64(1))
-	f.Add(uint64(127))      // Max 1-byte varint
-	f.Add(uint64(128))      // Min 2-byte varint
-	f.Add(uint64(16383))    // Max 2-byte varint
-	f.Add(uint64(16384))    // Min 3-byte varint
+	f.Add(uint64(127))        // Max 1-byte varint
+	f.Add(uint64(128))        // Min 2-byte varint
+	f.Add(uint64(16383))      // Max 2-byte varint
+	f.Add(uint64(16384))      // Min 3-byte varint
 	f.Add(uint64(0x7fffffff)) // Large value
 
 	f.Fuzz(func(t *testing.T, val uint64) {
@@ -316,16 +316,16 @@ func buildComplexRecord() []byte {
 	// Serial types: 0, 8, 9, 1, 7, 17 (text 2 bytes), 16 (blob 2 bytes)
 
 	result := []byte{
-		0x08,             // header size (8 bytes)
-		0x00,             // NULL
-		0x08,             // int 0
-		0x09,             // int 1
-		0x01,             // 1-byte int
-		0x07,             // float64
-		0x11,             // text (2 bytes)
-		0x10,             // blob (2 bytes)
+		0x08, // header size (8 bytes)
+		0x00, // NULL
+		0x08, // int 0
+		0x09, // int 1
+		0x01, // 1-byte int
+		0x07, // float64
+		0x11, // text (2 bytes)
+		0x10, // blob (2 bytes)
 		// Values:
-		0x2a,             // 42 (for serial type 1)
+		0x2a, // 42 (for serial type 1)
 	}
 
 	// Add float64 for 3.14
@@ -350,13 +350,13 @@ func TestFuzzRegressionVdbe(t *testing.T) {
 		{},
 
 		// Truncated records
-		{0x02},           // Header size but no serial type
-		{0x02, 0x01},     // Serial type for 1-byte int but no data
+		{0x02},             // Header size but no serial type
+		{0x02, 0x01},       // Serial type for 1-byte int but no data
 		{0x02, 0x02, 0x01}, // Incomplete 2-byte int
 
 		// Invalid header sizes
-		{0xff},                     // Large header but no data
-		{0xff, 0xff, 0xff, 0xff},   // Multiple large varints
+		{0xff},                   // Large header but no data
+		{0xff, 0xff, 0xff, 0xff}, // Multiple large varints
 
 		// Extremely large serial types (should not crash but may return error)
 		{0x02, 0xff}, // Large serial type
@@ -381,7 +381,7 @@ func TestFuzzRegressionVdbe(t *testing.T) {
 
 	for i, input := range regressionInputs {
 		t.Run(string(rune('A'+i)), func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			defer func() {
 				if r := recover(); r != nil {
 					t.Errorf("Panic on regression input %d: %v\nInput: %x", i, r, input)
@@ -425,7 +425,7 @@ func TestFuzzEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			defer func() {
 				if r := recover(); r != nil {
 					t.Errorf("Panic on %s: %v", tt.name, r)

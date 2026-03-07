@@ -98,7 +98,7 @@ func TestComprehensiveSafeAdd(t *testing.T) {
 		{"zero sum", 0, 0, 0, false},
 		{"max safe", math.MaxUint32 - 1, 1, math.MaxUint32, false},
 		{"overflow by 1", math.MaxUint32, 1, 0, true},
-		{"large overflow", math.MaxUint32 / 2, math.MaxUint32 / 2 + 2, 0, true},
+		{"large overflow", math.MaxUint32 / 2, math.MaxUint32/2 + 2, 0, true},
 		{"both max", math.MaxUint32, math.MaxUint32, 0, true},
 		{"boundary test", math.MaxUint32 - 100, 100, math.MaxUint32, false},
 		{"just over boundary", math.MaxUint32 - 100, 101, 0, true},

@@ -277,7 +277,7 @@ func TestReindexAfterInsert(t *testing.T) {
 		if err != nil {
 			t.Fatalf("sum query failed: %v", err)
 		}
-		expectedSum := int64(50+51+52+53+54+55+56+57+58+59)
+		expectedSum := int64(50 + 51 + 52 + 53 + 54 + 55 + 56 + 57 + 58 + 59)
 		if sum != expectedSum {
 			t.Errorf("expected sum %d, got %d", expectedSum, sum)
 		}

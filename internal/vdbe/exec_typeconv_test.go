@@ -433,9 +433,9 @@ func TestTypeConversionIntegration(t *testing.T) {
 	// Test program that performs various type conversions
 	v.Program = []*Instruction{
 		// Load test values
-		{Opcode: OpInteger, P1: 42, P2: 1},       // r1 = 42
-		{Opcode: OpReal, P2: 2, P4Type: P4Real, P4: P4Union{R: 3.14}}, // r2 = 3.14
-		{Opcode: OpString, P2: 3, P4Type: P4Static, P4: P4Union{Z: "123"}}, // r3 = "123"
+		{Opcode: OpInteger, P1: 42, P2: 1},                                   // r1 = 42
+		{Opcode: OpReal, P2: 2, P4Type: P4Real, P4: P4Union{R: 3.14}},        // r2 = 3.14
+		{Opcode: OpString, P2: 3, P4Type: P4Static, P4: P4Union{Z: "123"}},   // r3 = "123"
 		{Opcode: OpString, P2: 4, P4Type: P4Static, P4: P4Union{Z: "hello"}}, // r4 = "hello"
 
 		// Test conversions

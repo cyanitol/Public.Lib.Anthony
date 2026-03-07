@@ -63,7 +63,7 @@ func TestGetVarint(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got, gotN := getVarint(tt.data, tt.offset)
 			if got != tt.want || gotN != tt.wantN {
 				t.Errorf("getVarint(%v, %d) = (%d, %d), want (%d, %d)",
@@ -116,7 +116,7 @@ func TestParseSignedInt24(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := parseSignedInt24(tt.data)
 			if got != tt.want {
 				t.Errorf("parseSignedInt24(%v) = %d, want %d", tt.data, got, tt.want)
@@ -163,7 +163,7 @@ func TestParseSignedInt48(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := parseSignedInt48(tt.data)
 			if got != tt.want {
 				t.Errorf("parseSignedInt48(%v) = %d, want %d", tt.data, got, tt.want)
@@ -222,7 +222,7 @@ func TestParseSerialFloat(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			mem := NewMem()
 			err := parseSerialFloat(tt.data, tt.offset, mem)
 
@@ -255,7 +255,7 @@ func TestEncodeVarint(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			buf := encodeVarint(tt.value)
 
 			// Decode it back
@@ -293,7 +293,7 @@ func TestVarintLen(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run("", func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := varintLen(tt.value)
 			if got != tt.want {
 				t.Errorf("varintLen(%d) = %d, want %d", tt.value, got, tt.want)
@@ -309,31 +309,31 @@ func TestSerialTypeLen(t *testing.T) {
 		serialType uint64
 		want       int
 	}{
-		{0, 0},  // NULL
-		{1, 1},  // int8
-		{2, 2},  // int16
-		{3, 3},  // int24
-		{4, 4},  // int32
-		{5, 6},  // int48
-		{6, 8},  // int64
-		{7, 8},  // float64
-		{8, 0},  // constant 0
-		{9, 0},  // constant 1
-		{10, 0}, // reserved
-		{11, 0}, // reserved
-		{12, 0}, // blob/text length 0
-		{13, 0}, // blob/text length 0
-		{14, 1}, // blob length 1
-		{15, 1}, // text length 1
-		{16, 2}, // blob length 2
-		{17, 2}, // text length 2
+		{0, 0},    // NULL
+		{1, 1},    // int8
+		{2, 2},    // int16
+		{3, 3},    // int24
+		{4, 4},    // int32
+		{5, 6},    // int48
+		{6, 8},    // int64
+		{7, 8},    // float64
+		{8, 0},    // constant 0
+		{9, 0},    // constant 1
+		{10, 0},   // reserved
+		{11, 0},   // reserved
+		{12, 0},   // blob/text length 0
+		{13, 0},   // blob/text length 0
+		{14, 1},   // blob length 1
+		{15, 1},   // text length 1
+		{16, 2},   // blob length 2
+		{17, 2},   // text length 2
 		{100, 44}, // (100-12)/2 = 44
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run("", func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := serialTypeLen(tt.serialType)
 			if got != tt.want {
 				t.Errorf("serialTypeLen(%d) = %d, want %d", tt.serialType, got, tt.want)
@@ -400,7 +400,7 @@ func TestMemToInterface(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			mem := tt.setup()
 			got := memToInterface(mem)
 

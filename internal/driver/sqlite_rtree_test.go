@@ -44,7 +44,7 @@ func TestSQLiteRTree(t *testing.T) {
 
 	// Test 4: Insert multiple rectangles
 	rectangles := []struct {
-		id                       int
+		id                     int
 		minx, maxx, miny, maxy float64
 	}{
 		{2, 5, 15, 5, 15},

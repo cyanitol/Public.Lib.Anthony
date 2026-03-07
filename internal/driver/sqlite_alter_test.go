@@ -500,7 +500,7 @@ func TestSQLiteAlter(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()
@@ -904,7 +904,7 @@ func TestSQLiteAlterDropColumn(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()
@@ -1072,7 +1072,7 @@ func TestAlterTableWithIndexes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()
@@ -1243,7 +1243,7 @@ func TestAlterTableWithTriggers(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()
@@ -1353,7 +1353,7 @@ func TestAlterTableWithViews(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()
@@ -1487,7 +1487,7 @@ func TestAlterTableWithForeignKeys(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()
@@ -1646,7 +1646,7 @@ func TestAlterTableEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()

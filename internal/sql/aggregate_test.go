@@ -21,7 +21,7 @@ func TestNewAggregateCompiler(t *testing.T) {
 func TestCompileGroupBy(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	ac := NewAggregateCompiler(parse)
@@ -46,7 +46,7 @@ func TestCompileGroupBy(t *testing.T) {
 			Items: []ExprListItem{
 				{Expr: &Expr{Op: TK_COLUMN, Table: 0, Column: 0}},
 				{Expr: &Expr{
-					Op: TK_AGG_FUNCTION,
+					Op:      TK_AGG_FUNCTION,
 					FuncDef: &FuncDef{Name: "sum"},
 					List: &ExprList{
 						Items: []ExprListItem{
@@ -86,10 +86,10 @@ func TestAnalyzeAggregates(t *testing.T) {
 	ac := NewAggregateCompiler(parse)
 
 	tests := []struct {
-		name            string
-		sel             *Select
-		wantNumFuncs    int
-		wantNumGroupBy  int
+		name           string
+		sel            *Select
+		wantNumFuncs   int
+		wantNumGroupBy int
 	}{
 		{
 			name: "count",
@@ -269,16 +269,16 @@ func TestInitializeAccumulators(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem: 1,
+				Mem:  1,
 			}
 			ac := NewAggregateCompiler(parse)
 
 			aggInfo := &AggInfo{
 				AggFuncs: []AggFunc{
 					{
-						Expr:    &Expr{Op: TK_AGG_FUNCTION},
-						Func:    &FuncDef{Name: tt.funcName},
-						RegAcc:  0,
+						Expr:   &Expr{Op: TK_AGG_FUNCTION},
+						Func:   &FuncDef{Name: tt.funcName},
+						RegAcc: 0,
 					},
 				},
 			}
@@ -317,7 +317,7 @@ func TestUpdateCount(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem: 1,
+				Mem:  1,
 			}
 			ac := NewAggregateCompiler(parse)
 
@@ -352,7 +352,7 @@ func TestUpdateCount(t *testing.T) {
 func TestUpdateSum(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	ac := NewAggregateCompiler(parse)
 
@@ -386,7 +386,7 @@ func TestUpdateSum(t *testing.T) {
 func TestUpdateAvg(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	ac := NewAggregateCompiler(parse)
 
@@ -414,7 +414,7 @@ func TestUpdateAvg(t *testing.T) {
 func TestUpdateMin(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	ac := NewAggregateCompiler(parse)
 
@@ -448,7 +448,7 @@ func TestUpdateMin(t *testing.T) {
 func TestUpdateMax(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	ac := NewAggregateCompiler(parse)
 
@@ -482,7 +482,7 @@ func TestUpdateMax(t *testing.T) {
 func TestUpdateGroupConcat(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	ac := NewAggregateCompiler(parse)
 
@@ -509,9 +509,9 @@ func TestUpdateGroupConcat(t *testing.T) {
 // Test evalArgReg
 func TestEvalArgReg(t *testing.T) {
 	tests := []struct {
-		name        string
-		aggFunc     *AggFunc
-		wantReg     bool
+		name    string
+		aggFunc *AggFunc
+		wantReg bool
 	}{
 		{
 			name: "count_star",
@@ -543,7 +543,7 @@ func TestEvalArgReg(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem: 1,
+				Mem:  1,
 			}
 			ac := NewAggregateCompiler(parse)
 
@@ -563,7 +563,7 @@ func TestEvalArgReg(t *testing.T) {
 func TestUpdateAccumulators(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	ac := NewAggregateCompiler(parse)
 
@@ -597,7 +597,7 @@ func TestUpdateAccumulators(t *testing.T) {
 func TestFinalizeAggregates(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	ac := NewAggregateCompiler(parse)
 
@@ -643,7 +643,7 @@ func TestFinalizeAggregates(t *testing.T) {
 func TestFinalizeAggregatesWithHaving(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	ac := NewAggregateCompiler(parse)
 
@@ -703,7 +703,7 @@ func TestOutputAggregateRow(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem: 1,
+				Mem:  1,
 			}
 			ac := NewAggregateCompiler(parse)
 
@@ -725,7 +725,7 @@ func TestOutputAggregateRow(t *testing.T) {
 func TestSetupGroupBySorter(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	ac := NewAggregateCompiler(parse)
@@ -769,7 +769,7 @@ func TestSetupGroupBySorter(t *testing.T) {
 func TestOpenSourceTables(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	ac := NewAggregateCompiler(parse)
@@ -816,7 +816,7 @@ func TestOpenSourceTables(t *testing.T) {
 func TestAggregateCompileWhereClause(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	ac := NewAggregateCompiler(parse)
 
@@ -845,7 +845,7 @@ func TestAggregateCompileWhereClause(t *testing.T) {
 func TestEmitNextRow(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	ac := NewAggregateCompiler(parse)
@@ -886,7 +886,7 @@ func TestEmitNextRow(t *testing.T) {
 func TestCheckNewGroup(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	ac := NewAggregateCompiler(parse)
 
@@ -942,7 +942,7 @@ func TestFinalizeResultExpr(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem: 1,
+				Mem:  1,
 			}
 			ac := NewAggregateCompiler(parse)
 
@@ -984,7 +984,7 @@ func TestAggregateCompileExpr(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem: 1,
+				Mem:  1,
 			}
 			ac := NewAggregateCompiler(parse)
 
@@ -1069,7 +1069,7 @@ func TestFindAggsInSelectComprehensive(t *testing.T) {
 func TestOpenSourceTablesEdgeCases(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	ac := NewAggregateCompiler(parse)
@@ -1107,7 +1107,7 @@ func TestOpenSourceTablesEdgeCases(t *testing.T) {
 func TestEmitNextRowEdgeCases(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	ac := NewAggregateCompiler(parse)
@@ -1230,7 +1230,7 @@ func TestFindAggsInChildrenComplex(t *testing.T) {
 func TestInitializeAccumulatorsUnsupported(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	ac := NewAggregateCompiler(parse)
 
@@ -1274,7 +1274,7 @@ func TestUpdateAggregateFunctionsNullHandling(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem: 1,
+				Mem:  1,
 			}
 			ac := NewAggregateCompiler(parse)
 
@@ -1314,7 +1314,7 @@ func TestUpdateMinMaxZeroArg(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem: 1,
+				Mem:  1,
 			}
 			ac := NewAggregateCompiler(parse)
 
@@ -1337,7 +1337,7 @@ func TestUpdateMinMaxZeroArg(t *testing.T) {
 func TestCheckNewGroupNilGroupBy(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	ac := NewAggregateCompiler(parse)
 
@@ -1361,7 +1361,7 @@ func TestCheckNewGroupNilGroupBy(t *testing.T) {
 func TestFinalizeResultExprBinaryOps(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem: 1,
+		Mem:  1,
 	}
 	ac := NewAggregateCompiler(parse)
 

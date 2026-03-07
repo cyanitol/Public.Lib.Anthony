@@ -251,10 +251,10 @@ func TestParseVacuum_AST(t *testing.T) {
 func TestParseVacuum_WithParameter(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name        string
-		sql         string
-		wantErr     bool
-		wantParam   bool
+		name      string
+		sql       string
+		wantErr   bool
+		wantParam bool
 	}{
 		{
 			name:      "vacuum into with ? parameter",

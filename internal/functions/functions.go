@@ -362,6 +362,7 @@ func (r *Registry) LookupBuiltin(name string) (Function, bool) {
 //  1. User-defined function with exact arg count match
 //  2. User-defined variadic function
 //  3. Built-in function
+//
 // Function names are case-insensitive (converted to lowercase).
 func (r *Registry) LookupWithArgs(name string, numArgs int) (Function, bool) {
 	// Normalize to lowercase for case-insensitive lookup

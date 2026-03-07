@@ -413,10 +413,10 @@ func TestPagerAdapter(t *testing.T) {
 
 // MockPager for testing pager adapter
 type MockPager struct {
-	pages      map[uint32][]byte
-	pageSize   int
-	pageCount  uint32
-	nextPage   uint32
+	pages     map[uint32][]byte
+	pageSize  int
+	pageCount uint32
+	nextPage  uint32
 }
 
 func (m *MockPager) Get(pageNum uint32) (interface{}, error) {
@@ -449,8 +449,8 @@ func (m *MockPager) AllocatePage() (uint32, error) {
 
 // MockDbPage implements DbPageInterface
 type MockDbPage struct {
-	data  []byte
-	pgno  uint32
+	data []byte
+	pgno uint32
 }
 
 func (p *MockDbPage) GetData() []byte {

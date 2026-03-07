@@ -100,7 +100,7 @@ func TestCompareValues(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := CompareValues(tt.left, tt.right, tt.aff, tt.coll)
 			if result != tt.expected {
 				t.Errorf("CompareValues() = %v, want %v", result, tt.expected)
@@ -206,7 +206,7 @@ func TestEvaluateComparison(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateComparison(tt.op, tt.left, tt.right, tt.aff, tt.coll)
 			if result != tt.expected {
 				t.Errorf("EvaluateComparison() = %v, want %v", result, tt.expected)
@@ -292,7 +292,7 @@ func TestEvaluateLike(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateLike(tt.pattern, tt.str, tt.escape)
 			if result != tt.expected {
 				t.Errorf("EvaluateLike(%q, %q, %v) = %v, want %v",
@@ -339,7 +339,7 @@ func TestEvaluateGlob(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateGlob(tt.pattern, tt.str)
 			if result != tt.expected {
 				t.Errorf("EvaluateGlob(%q, %q) = %v, want %v",
@@ -419,7 +419,7 @@ func TestEvaluateBetween(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateBetween(tt.value, tt.low, tt.high, tt.aff, tt.coll)
 			if result != tt.expected {
 				t.Errorf("EvaluateBetween() = %v, want %v", result, tt.expected)
@@ -483,7 +483,7 @@ func TestEvaluateIn(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateIn(tt.value, tt.list, tt.aff, tt.coll)
 			if result != tt.expected {
 				t.Errorf("EvaluateIn() = %v, want %v", result, tt.expected)
@@ -529,7 +529,7 @@ func TestCoerceToNumeric(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := CoerceToNumeric(tt.value)
 			if result != tt.expected {
 				t.Errorf("CoerceToNumeric(%v) = %v, want %v",
@@ -594,7 +594,7 @@ func TestCoerceToInteger(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result, ok := CoerceToInteger(tt.value)
 			if result != tt.expected || ok != tt.expectOk {
 				t.Errorf("CoerceToInteger(%v) = (%v, %v), want (%v, %v)",
@@ -666,7 +666,7 @@ func TestCoerceToBoolean(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := CoerceToBoolean(tt.value)
 			if result != tt.expected {
 				t.Errorf("CoerceToBoolean(%v) = %v, want %v",
@@ -718,7 +718,7 @@ func TestCollationSequences(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := tt.collSeq.Compare(tt.a, tt.b)
 			if (result < 0 && tt.expected >= 0) ||
 				(result > 0 && tt.expected <= 0) ||
@@ -815,7 +815,7 @@ func TestLikeEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateLike(tt.pattern, tt.str, tt.escape)
 			if result != tt.expected {
 				t.Errorf("EvaluateLike(%q, %q, %v) = %v, want %v",
@@ -869,7 +869,7 @@ func TestGlobEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateGlob(tt.pattern, tt.str)
 			if result != tt.expected {
 				t.Errorf("EvaluateGlob(%q, %q) = %v, want %v",
@@ -946,7 +946,7 @@ func TestGetBinaryCompareCollSeq(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := GetBinaryCompareCollSeq(tt.left, tt.right)
 			if result != tt.expected {
 				t.Errorf("GetBinaryCompareCollSeq() = %v, want %v", result.Name, tt.expected.Name)

@@ -12,10 +12,10 @@ func ExampleQueryStatistics() {
 	// Statistics are enabled by default
 	// Create a simple program that loads and returns values
 	vdbe.AllocMemory(3)
-	vdbe.AddOp(OpInteger, 0, 1, 100)   // Load 100 into r1
-	vdbe.AddOp(OpInteger, 0, 2, 200)   // Load 200 into r2
-	vdbe.AddOp(OpResultRow, 1, 2, 0)   // Return r1, r2
-	vdbe.AddOp(OpHalt, 0, 0, 0)        // Halt
+	vdbe.AddOp(OpInteger, 0, 1, 100) // Load 100 into r1
+	vdbe.AddOp(OpInteger, 0, 2, 200) // Load 200 into r2
+	vdbe.AddOp(OpResultRow, 1, 2, 0) // Return r1, r2
+	vdbe.AddOp(OpHalt, 0, 0, 0)      // Halt
 
 	// Run the program
 	_ = vdbe.Run()
@@ -54,11 +54,11 @@ func ExampleVDBE_GetStatistics() {
 
 	// Simple program with arithmetic and comparisons
 	vdbe.AllocMemory(4)
-	vdbe.AddOp(OpInteger, 0, 1, 10)    // r1 = 10
-	vdbe.AddOp(OpInteger, 0, 2, 20)    // r2 = 20
-	vdbe.AddOp(OpAdd, 1, 2, 3)         // r3 = r1 + r2
-	vdbe.AddOp(OpGt, 3, 0, 1)          // r3 > r1? (comparison)
-	vdbe.AddOp(OpResultRow, 3, 1, 0)   // return r3
+	vdbe.AddOp(OpInteger, 0, 1, 10)  // r1 = 10
+	vdbe.AddOp(OpInteger, 0, 2, 20)  // r2 = 20
+	vdbe.AddOp(OpAdd, 1, 2, 3)       // r3 = r1 + r2
+	vdbe.AddOp(OpGt, 3, 0, 1)        // r3 > r1? (comparison)
+	vdbe.AddOp(OpResultRow, 3, 1, 0) // return r3
 	vdbe.AddOp(OpHalt, 0, 0, 0)
 
 	_ = vdbe.Run()

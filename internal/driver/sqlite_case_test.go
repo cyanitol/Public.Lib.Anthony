@@ -276,7 +276,7 @@ func TestSQLiteCaseExpressions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -378,7 +378,7 @@ func TestSQLiteCaseInSelectList(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			rows, err := db.Query(tt.query)
 			if err != nil {
@@ -463,7 +463,7 @@ func TestSQLiteCaseInWhereClause(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			rows, err := db.Query(tt.query)
 			if err != nil {
@@ -539,7 +539,7 @@ func TestSQLiteCaseInOrderBy(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			rows, err := db.Query(tt.query)
 			if err != nil {
@@ -629,7 +629,7 @@ func TestSQLiteCaseWithAggregates(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			// Check if we expect multiple rows
 			if slice, ok := tt.want.([]interface{}); ok {
@@ -749,7 +749,7 @@ func TestSQLiteCaseNullHandling(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result interface{}
 			err := db.QueryRow(tt.query).Scan(&result)
@@ -791,7 +791,7 @@ func TestSQLiteCaseSyntaxErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Query(tt.query)
 			if err == nil {

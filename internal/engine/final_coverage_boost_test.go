@@ -26,12 +26,12 @@ func TestTriggerExecuteBeforeWithWhenError(t *testing.T) {
 
 	// Manually create a trigger with a WHEN clause that will be evaluated
 	trigger := &schema.Trigger{
-		Name:    "test_trigger",
-		Table:   "test",
-		Timing:  parser.TriggerBefore,
-		Event:   parser.TriggerInsert,
-		When:    &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
-		Body:    []parser.Statement{},
+		Name:     "test_trigger",
+		Table:    "test",
+		Timing:   parser.TriggerBefore,
+		Event:    parser.TriggerInsert,
+		When:     &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
+		Body:     []parser.Statement{},
 		UpdateOf: nil,
 	}
 

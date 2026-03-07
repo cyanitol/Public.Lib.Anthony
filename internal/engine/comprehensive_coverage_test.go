@@ -20,21 +20,21 @@ func TestCompilerMultiTableQueries(t *testing.T) {
 		wantError bool
 	}{
 		{
-			name:  "qualified column name",
-			setup: []string{"CREATE TABLE users (id INTEGER)", "CREATE TABLE posts (user_id INTEGER)"},
-			query: "SELECT users.id FROM users JOIN posts",
+			name:      "qualified column name",
+			setup:     []string{"CREATE TABLE users (id INTEGER)", "CREATE TABLE posts (user_id INTEGER)"},
+			query:     "SELECT users.id FROM users JOIN posts",
 			wantError: false,
 		},
 		{
-			name:  "ambiguous column name - table not found",
-			setup: []string{"CREATE TABLE users (id INTEGER)"},
-			query: "SELECT nonexistent.id FROM users",
+			name:      "ambiguous column name - table not found",
+			setup:     []string{"CREATE TABLE users (id INTEGER)"},
+			query:     "SELECT nonexistent.id FROM users",
 			wantError: true,
 		},
 		{
-			name:  "column not in specified table",
-			setup: []string{"CREATE TABLE users (id INTEGER)", "CREATE TABLE posts (pid INTEGER)"},
-			query: "SELECT users.pid FROM users JOIN posts",
+			name:      "column not in specified table",
+			setup:     []string{"CREATE TABLE users (id INTEGER)", "CREATE TABLE posts (pid INTEGER)"},
+			query:     "SELECT users.pid FROM users JOIN posts",
 			wantError: true,
 		},
 	}

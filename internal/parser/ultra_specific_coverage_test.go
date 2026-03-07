@@ -377,7 +377,6 @@ func TestParseIsExpressions(t *testing.T) {
 	}
 }
 
-
 func TestParseExplainVariants(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

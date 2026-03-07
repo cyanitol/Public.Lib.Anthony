@@ -17,8 +17,8 @@ func (f *simpleUserFunc) Invoke(args []Value) (Value, error) {
 // TestUserScalarFunc_NumArgs tests NumArgs method for user scalar functions
 func TestUserScalarFunc_NumArgs(t *testing.T) {
 	config := FunctionConfig{
-		Name:         "test",
-		NumArgs:      3,
+		Name:          "test",
+		NumArgs:       3,
 		Deterministic: true,
 	}
 	fn := NewUserScalarFunc(config, &simpleUserFunc{value: 42})

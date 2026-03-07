@@ -3,10 +3,11 @@ package parser
 
 // parseVacuum parses a VACUUM statement.
 // Syntax:
-//   VACUUM
-//   VACUUM schema_name
-//   VACUUM INTO filename
-//   VACUUM schema_name INTO filename
+//
+//	VACUUM
+//	VACUUM schema_name
+//	VACUUM INTO filename
+//	VACUUM schema_name INTO filename
 func (p *Parser) parseVacuum() (*VacuumStmt, error) {
 	stmt := &VacuumStmt{}
 

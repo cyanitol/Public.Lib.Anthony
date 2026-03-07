@@ -12,12 +12,12 @@ import (
 // TestParseDSN tests the DSN parsing functionality
 func TestParseDSN(t *testing.T) {
 	tests := []struct {
-		name        string
-		dsn         string
-		wantErr     bool
-		wantMemory  bool
+		name         string
+		dsn          string
+		wantErr      bool
+		wantMemory   bool
 		wantReadOnly bool
-		checkConfig func(*testing.T, *DriverConfig)
+		checkConfig  func(*testing.T, *DriverConfig)
 	}{
 		{
 			name:       "simple filename",

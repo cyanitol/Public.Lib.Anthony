@@ -10,7 +10,8 @@ import (
 
 // TestSQLiteCollation is a comprehensive test suite converted from SQLite's TCL collation tests
 // (collate1.test, collate2.test, collate3.test, collate4.test, collate5.test, collate6.test,
-//  collate7.test, collate8.test, collate9.test, collateA.test, collateB.test)
+//
+//	collate7.test, collate8.test, collate9.test, collateA.test, collateB.test)
 //
 // These tests cover:
 // - COLLATE BINARY (case-sensitive, default)
@@ -27,14 +28,14 @@ import (
 // - Index usage with collations
 func TestSQLiteCollation(t *testing.T) {
 	tests := []struct {
-		name     string
-		setup    []string // CREATE TABLE statements and other setup
-		inserts  []string // INSERT statements to test
-		query    string   // Query to execute
-		verify   func(*testing.T, *sql.Rows)
-		wantErr  bool
-		errMsg   string
-		skip     string
+		name    string
+		setup   []string // CREATE TABLE statements and other setup
+		inserts []string // INSERT statements to test
+		query   string   // Query to execute
+		verify  func(*testing.T, *sql.Rows)
+		wantErr bool
+		errMsg  string
+		skip    string
 	}{
 		// ===== BASIC ORDER BY TESTS (from collate1.test) =====
 
@@ -960,7 +961,7 @@ func TestSQLiteCollation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)

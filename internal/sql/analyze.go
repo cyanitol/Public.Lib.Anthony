@@ -14,12 +14,12 @@ import (
 // sqlite_stat1 table.
 //
 // Algorithm:
-// 1. Count total rows in the table
-// 2. For each index on the table:
-//    a. Scan the index to count total entries
-//    b. Sample index entries to estimate distinct values for each column prefix
-//    c. Compute avgEq = rowCount / distinctValues
-//    d. Store results in sqlite_stat1 format
+//  1. Count total rows in the table
+//  2. For each index on the table:
+//     a. Scan the index to count total entries
+//     b. Sample index entries to estimate distinct values for each column prefix
+//     c. Compute avgEq = rowCount / distinctValues
+//     d. Store results in sqlite_stat1 format
 func AnalyzeTable(tableName string, schema *Schema) (*AnalyzeResult, error) {
 	table := schema.GetTable(tableName)
 	if table == nil {
@@ -27,11 +27,11 @@ func AnalyzeTable(tableName string, schema *Schema) (*AnalyzeResult, error) {
 	}
 
 	result := &AnalyzeResult{
-		TableName:    tableName,
-		TableStats:   nil,
-		IndexStats:   make([]*IndexAnalysis, 0),
-		RowsScanned:  0,
-		IndexesSeen:  0,
+		TableName:   tableName,
+		TableStats:  nil,
+		IndexStats:  make([]*IndexAnalysis, 0),
+		RowsScanned: 0,
+		IndexesSeen: 0,
 	}
 
 	// Step 1: Count rows in table
@@ -233,7 +233,8 @@ type Stat1Row struct {
 
 // CreateStat1Table creates the sqlite_stat1 table if it doesn't exist.
 // The table schema is:
-//   CREATE TABLE sqlite_stat1(tbl TEXT, idx TEXT, stat TEXT);
+//
+//	CREATE TABLE sqlite_stat1(tbl TEXT, idx TEXT, stat TEXT);
 func CreateStat1Table(schema *Schema) error {
 	// Check if sqlite_stat1 already exists
 	if schema.GetTable("sqlite_stat1") != nil {
@@ -408,10 +409,10 @@ func ExecuteAnalyze(schema *Schema, opts AnalyzeOptions) (*AnalyzeReport, error)
 
 	// Generate report
 	report := &AnalyzeReport{
-		TablesAnalyzed: len(results),
+		TablesAnalyzed:  len(results),
 		IndexesAnalyzed: 0,
-		RowsScanned: 0,
-		Stat1Rows: stat1Rows,
+		RowsScanned:     0,
+		Stat1Rows:       stat1Rows,
 	}
 
 	for _, result := range results {

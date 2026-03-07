@@ -30,16 +30,16 @@ type SorterConfig struct {
 func DefaultSorterConfig() *SorterConfig {
 	return &SorterConfig{
 		MaxMemoryBytes: 10 * 1024 * 1024, // 10 MB
-		TempDir:        "",                // Use os.TempDir()
+		TempDir:        "",               // Use os.TempDir()
 		EnableSpill:    true,
 	}
 }
 
 // SpilledRun represents a sorted run that has been written to disk.
 type SpilledRun struct {
-	FilePath string // Path to the temporary file
+	FilePath string   // Path to the temporary file
 	File     *os.File // Open file handle
-	NumRows  int    // Number of rows in this run
+	NumRows  int      // Number of rows in this run
 }
 
 // SorterWithSpill extends the basic Sorter with spill-to-disk capability.

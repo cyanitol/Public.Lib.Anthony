@@ -124,7 +124,7 @@ func TestEvaluateArithmetic(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateArithmetic(tt.op, tt.left, tt.right)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("EvaluateArithmetic(%v, %v, %v) = %v, want %v",
@@ -195,7 +195,7 @@ func TestEvaluateUnary(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateUnary(tt.op, tt.operand)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("EvaluateUnary(%v, %v) = %v, want %v",
@@ -261,7 +261,7 @@ func TestEvaluateBitwise(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateBitwise(tt.op, tt.left, tt.right)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("EvaluateBitwise(%v, %v, %v) = %v, want %v",
@@ -314,7 +314,7 @@ func TestEvaluateConcat(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateConcat(tt.left, tt.right)
 			if result != tt.expected {
 				t.Errorf("EvaluateConcat(%v, %v) = %v, want %v",
@@ -446,7 +446,7 @@ func TestEvaluateLogical(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateLogical(tt.op, tt.left, tt.right)
 			if result != tt.expected {
 				t.Errorf("EvaluateLogical(%v, %v, %v) = %v, want %v",
@@ -565,7 +565,7 @@ func TestEvaluateCast(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateCast(tt.value, tt.targetType)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("EvaluateCast(%v, %q) = %v, want %v",
@@ -613,7 +613,7 @@ func TestCastToReal(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := castToReal(tt.value)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("castToReal(%v) = %v, want %v", tt.value, result, tt.expected)
@@ -660,7 +660,7 @@ func TestCastToNumeric(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := castToNumeric(tt.value)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("castToNumeric(%v) = %v, want %v", tt.value, result, tt.expected)
@@ -712,7 +712,7 @@ func TestCastToBlob(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := castToBlob(tt.value)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("castToBlob(%v) = %v, want %v", tt.value, result, tt.expected)
@@ -773,7 +773,7 @@ func TestValueToString(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := valueToString(tt.value)
 			if result != tt.expected {
 				t.Errorf("valueToString(%v) = %q, want %q",
@@ -817,7 +817,7 @@ func TestArithmeticOverflow(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateArithmetic(tt.op, tt.left, tt.right)
 			if result == nil {
 				t.Error("Expected result, got nil")

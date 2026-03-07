@@ -114,7 +114,7 @@ func TestTypeAffinityInsertSelect(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec("DELETE FROM t1")
 			if err != nil {
@@ -175,7 +175,7 @@ func TestTypeAffinityUpdate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			query := "UPDATE t1 SET i = " + tt.value + ", n = " + tt.value + ", t = " + tt.value + ", o = " + tt.value
 			_, err := db.Exec(query)
@@ -229,7 +229,7 @@ func TestIntegerStorage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec("INSERT INTO t1 VALUES(?)", tt.value)
 			if err != nil {
@@ -286,7 +286,7 @@ func TestRealStorage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec("INSERT INTO t2 VALUES(?)", tt.value)
 			if err != nil {
@@ -386,7 +386,7 @@ func TestTextStorage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec("INSERT INTO t4 VALUES(?)", tt.text)
 			if err != nil {
@@ -440,7 +440,7 @@ func TestLiteralComparisons(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result int
 			err := db.QueryRow("SELECT " + tt.expr).Scan(&result)
@@ -487,7 +487,7 @@ func TestTextAffinityComparisons(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec("DELETE FROM t1")
 			if err != nil {
@@ -547,7 +547,7 @@ func TestNumericAffinityComparisons(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec("DELETE FROM t1")
 			if err != nil {
@@ -604,7 +604,7 @@ func TestBlobAffinityComparisons(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec("DELETE FROM t1")
 			if err != nil {
@@ -655,10 +655,10 @@ func TestCastToText(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result, typeStr string
-			err := db.QueryRow("SELECT " + tt.expr + ", typeof(" + tt.expr + ")").Scan(&result, &typeStr)
+			err := db.QueryRow("SELECT "+tt.expr+", typeof("+tt.expr+")").Scan(&result, &typeStr)
 			if err != nil {
 				t.Fatalf("failed to query: %v", err)
 			}
@@ -698,11 +698,11 @@ func TestCastToInteger(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result int64
 			var typeStr string
-			err := db.QueryRow("SELECT " + tt.expr + ", typeof(" + tt.expr + ")").Scan(&result, &typeStr)
+			err := db.QueryRow("SELECT "+tt.expr+", typeof("+tt.expr+")").Scan(&result, &typeStr)
 			if err != nil {
 				t.Fatalf("failed to query: %v", err)
 			}
@@ -741,11 +741,11 @@ func TestCastToReal(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result float64
 			var typeStr string
-			err := db.QueryRow("SELECT " + tt.expr + ", typeof(" + tt.expr + ")").Scan(&result, &typeStr)
+			err := db.QueryRow("SELECT "+tt.expr+", typeof("+tt.expr+")").Scan(&result, &typeStr)
 			if err != nil {
 				t.Fatalf("failed to query: %v", err)
 			}
@@ -789,7 +789,7 @@ func TestCastToNumeric(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var typeStr string
 			err := db.QueryRow("SELECT typeof(" + tt.expr + ")").Scan(&typeStr)
@@ -850,7 +850,7 @@ func TestCastToBlob(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var typeStr string
 			err := db.QueryRow("SELECT typeof(" + tt.expr + ")").Scan(&typeStr)
@@ -889,7 +889,7 @@ func TestCastNull(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var typeStr string
 			err := db.QueryRow("SELECT typeof(" + tt.expr + ")").Scan(&typeStr)
@@ -937,7 +937,7 @@ func TestCastLeadingSpaces(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			switch exp := tt.expected.(type) {
 			case int64:
@@ -988,7 +988,7 @@ func TestCastLargeIntegers(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result int64
 			err := db.QueryRow("SELECT " + tt.expr).Scan(&result)
@@ -1029,7 +1029,7 @@ func TestCastIntegerOverflow(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result int64
 			err := db.QueryRow("SELECT " + tt.expr).Scan(&result)
@@ -1072,7 +1072,7 @@ func TestCastExponentIgnored(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var resultInt int64
 			err := db.QueryRow("SELECT " + tt.exprInt).Scan(&resultInt)
@@ -1126,7 +1126,7 @@ func TestCastSpecialNumeric(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			switch exp := tt.expected.(type) {
 			case int64:
@@ -1328,7 +1328,7 @@ func TestAffinityEquality(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result int
 			err := db.QueryRow("SELECT " + tt.expr + " FROM t1 WHERE rowid=1").Scan(&result)
@@ -1373,7 +1373,7 @@ func TestTypeofFunction(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result string
 			err := db.QueryRow("SELECT " + tt.expr).Scan(&result)
@@ -1432,7 +1432,7 @@ func TestNumericStringComparisons(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec("UPDATE t1 SET " + tt.setVal)
 			if err != nil {
@@ -1534,12 +1534,12 @@ func TestStorageClassDetermination(t *testing.T) {
 
 	// Test that affinity affects storage class
 	tests := []struct {
-		name       string
-		insertVal  interface{}
-		intType    string
-		numType    string
-		textType   string
-		blobType   string
+		name      string
+		insertVal interface{}
+		intType   string
+		numType   string
+		textType  string
+		blobType  string
 	}{
 		{"string_123", "123", "integer", "integer", "text", "text"},
 		{"string_123.0", "123.0", "integer", "integer", "text", "text"},
@@ -1549,7 +1549,7 @@ func TestStorageClassDetermination(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec("DELETE FROM t1")
 			if err != nil {

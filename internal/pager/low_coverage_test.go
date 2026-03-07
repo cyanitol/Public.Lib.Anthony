@@ -1064,7 +1064,6 @@ func TestJournalTruncateError(t *testing.T) {
 	}
 }
 
-
 // TestCommitWithHeaderUpdate tests commit that requires header update
 func TestCommitWithHeaderUpdate(t *testing.T) {
 	t.Parallel()

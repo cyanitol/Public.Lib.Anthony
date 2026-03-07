@@ -2045,7 +2045,8 @@ func extractExpressionName(expr Expression) string {
 
 // parseCreateView parses a CREATE VIEW statement.
 // Syntax:
-//   CREATE [TEMP|TEMPORARY] VIEW [IF NOT EXISTS] view_name [(column_list)] AS select_stmt
+//
+//	CREATE [TEMP|TEMPORARY] VIEW [IF NOT EXISTS] view_name [(column_list)] AS select_stmt
 func (p *Parser) parseCreateView(temp bool) (*CreateViewStmt, error) {
 	stmt := &CreateViewStmt{Temporary: temp}
 
@@ -2191,9 +2192,10 @@ func (p *Parser) parseDropView() (*DropViewStmt, error) {
 
 // parseCreateTrigger parses a CREATE TRIGGER statement.
 // Syntax: CREATE [TEMP] TRIGGER [IF NOT EXISTS] name
-//         {BEFORE|AFTER|INSTEAD OF} {INSERT|UPDATE|DELETE} ON table
-//         [FOR EACH ROW] [WHEN expr]
-//         BEGIN statements END
+//
+//	{BEFORE|AFTER|INSTEAD OF} {INSERT|UPDATE|DELETE} ON table
+//	[FOR EACH ROW] [WHEN expr]
+//	BEGIN statements END
 func (p *Parser) parseCreateTrigger(temp bool) (*CreateTriggerStmt, error) {
 	stmt := &CreateTriggerStmt{Temp: temp}
 
@@ -2408,8 +2410,9 @@ func (p *Parser) parseDropTrigger() (*DropTriggerStmt, error) {
 
 // parseExplain parses an EXPLAIN or EXPLAIN QUERY PLAN statement.
 // Syntax:
-//   EXPLAIN statement
-//   EXPLAIN QUERY PLAN statement
+//
+//	EXPLAIN statement
+//	EXPLAIN QUERY PLAN statement
 func (p *Parser) parseExplain() (*ExplainStmt, error) {
 	stmt := &ExplainStmt{}
 
@@ -2532,12 +2535,13 @@ func (p *Parser) consumeSchemaIdentifier() string {
 
 // parsePragma parses a PRAGMA statement.
 // Syntax:
-//   PRAGMA name
-//   PRAGMA name = value
-//   PRAGMA name(value)
-//   PRAGMA schema.name
-//   PRAGMA schema.name = value
-//   PRAGMA schema.name(value)
+//
+//	PRAGMA name
+//	PRAGMA name = value
+//	PRAGMA name(value)
+//	PRAGMA schema.name
+//	PRAGMA schema.name = value
+//	PRAGMA schema.name(value)
 func (p *Parser) parsePragma() (*PragmaStmt, error) {
 	stmt := &PragmaStmt{}
 

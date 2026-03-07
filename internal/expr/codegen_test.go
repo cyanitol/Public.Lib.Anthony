@@ -57,7 +57,7 @@ func TestSimpleArithmetic(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -126,7 +126,7 @@ func TestComparisons(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -182,7 +182,7 @@ func TestLogicalOperators(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -252,7 +252,7 @@ func TestFunctionCalls(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -452,7 +452,7 @@ func TestUnaryOperators(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -505,7 +505,7 @@ func TestNullChecks(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -606,7 +606,7 @@ func TestLiteralValues(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 
@@ -857,7 +857,7 @@ func TestGenerateBinaryAllOperators(t *testing.T) {
 	for _, op := range operators {
 		op := op
 		t.Run(op.String(), func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			v := vdbe.New()
 			g := NewCodeGenerator(v)
 

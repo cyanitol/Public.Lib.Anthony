@@ -16,16 +16,16 @@ import (
 
 // Runner executes SQL Logic Tests from .test files
 type Runner struct {
-	db              *sql.DB
-	hashThreshold   int // Number of rows above which to use hash comparison
-	skipOnError     bool
-	verbose         bool
-	currentFile     string
-	lineNumber      int
-	totalTests      int
-	passedTests     int
-	failedTests     int
-	skippedTests    int
+	db            *sql.DB
+	hashThreshold int // Number of rows above which to use hash comparison
+	skipOnError   bool
+	verbose       bool
+	currentFile   string
+	lineNumber    int
+	totalTests    int
+	passedTests   int
+	failedTests   int
+	skippedTests  int
 }
 
 // NewRunner creates a new SLT runner with the given database connection
@@ -55,14 +55,14 @@ func (r *Runner) SetVerbose(verbose bool) {
 
 // TestResult represents the result of running a single test
 type TestResult struct {
-	File       string
-	Line       int
-	TestType   string // "statement", "query", "hash-threshold"
-	SQL        string
-	Expected   string
-	Actual     string
-	Passed     bool
-	Error      error
+	File     string
+	Line     int
+	TestType string // "statement", "query", "hash-threshold"
+	SQL      string
+	Expected string
+	Actual   string
+	Passed   bool
+	Error    error
 }
 
 // RunFile executes all tests in a .test file
@@ -236,15 +236,15 @@ func (r *Runner) accumulateSQLOrResults(line string, currentTest *Test, currentS
 
 // Test represents a single SLT test
 type Test struct {
-	Type         string   // "statement" or "query"
-	Line         int
-	ExpectOK     bool     // For statements: expect success
-	ExpectError  bool     // For statements: expect error
-	ColumnTypes  string   // For queries: I=int, T=text, R=real
-	SortMode     string   // For queries: nosort, rowsort, valuesort
-	Label        string   // Optional test label
-	Expected     []string // Expected results (for queries)
-	State        string   // "sql" or "results"
+	Type        string // "statement" or "query"
+	Line        int
+	ExpectOK    bool     // For statements: expect success
+	ExpectError bool     // For statements: expect error
+	ColumnTypes string   // For queries: I=int, T=text, R=real
+	SortMode    string   // For queries: nosort, rowsort, valuesort
+	Label       string   // Optional test label
+	Expected    []string // Expected results (for queries)
+	State       string   // "sql" or "results"
 }
 
 // parseStatementDirective parses a statement directive line

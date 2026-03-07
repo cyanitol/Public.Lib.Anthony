@@ -118,11 +118,11 @@ func Example() {
 	)
 
 	// Log at different levels
-	logger.Trace("Very detailed trace information")   // Won't be logged (below Info)
-	logger.Debug("Debug information")                 // Won't be logged (below Info)
-	logger.Info("Application started")                // Will be logged
-	logger.Warn("Configuration file not found")       // Will be logged
-	logger.Error("Failed to connect to database")     // Will be logged
+	logger.Trace("Very detailed trace information") // Won't be logged (below Info)
+	logger.Debug("Debug information")               // Won't be logged (below Info)
+	logger.Info("Application started")              // Will be logged
+	logger.Warn("Configuration file not found")     // Will be logged
+	logger.Error("Failed to connect to database")   // Will be logged
 
 	// Log with structured fields
 	logger.Info("User logged in", observability.Fields{
@@ -138,7 +138,7 @@ func Example() {
 	// Switch to JSON format for structured logging
 	logger.SetFormat(observability.JSONFormat)
 	logger.Info("This will be output as JSON", observability.Fields{
-		"event": "user_action",
+		"event":  "user_action",
 		"action": "file_upload",
 	})
 }
@@ -200,7 +200,7 @@ func ExampleTextFormat() {
 
 	logger.Info("Simple message")
 	logger.Warn("Warning message", observability.Fields{
-		"code": 1001,
+		"code":   1001,
 		"detail": "Something needs attention",
 	})
 
@@ -222,8 +222,8 @@ func ExampleJSONFormat() {
 	)
 
 	logger.Info("Operation completed", observability.Fields{
-		"operation": "database_backup",
+		"operation":   "database_backup",
 		"duration_ms": 1234,
-		"success": true,
+		"success":     true,
 	})
 }

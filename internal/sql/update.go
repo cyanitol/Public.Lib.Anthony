@@ -104,17 +104,17 @@ func validateUpdateStmt(stmt *UpdateStmt) error {
 
 // updateCompiler holds state for compiling an UPDATE statement.
 type updateCompiler struct {
-	stmt       *UpdateStmt
-	tableRoot  int
-	numColumns int
-	prog       *Program
-	cursorNum  int
-	regRowid   int
+	stmt        *UpdateStmt
+	tableRoot   int
+	numColumns  int
+	prog        *Program
+	cursorNum   int
+	regRowid    int
 	regNewRowid int
-	regOldCols int
-	regNewCols int
-	regRecord  int
-	regWhere   int
+	regOldCols  int
+	regNewCols  int
+	regRecord   int
+	regWhere    int
 }
 
 func newUpdateCompiler(stmt *UpdateStmt, tableRoot, numColumns int) *updateCompiler {

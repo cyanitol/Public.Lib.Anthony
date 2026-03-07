@@ -275,12 +275,12 @@ func TestBuildKeyFromValues(t *testing.T) {
 
 func TestEstimateDistinct(t *testing.T) {
 	tests := []struct {
-		name             string
-		sampleSize       int64
-		uniqueInSample   int64
-		totalCount       int64
-		wantMin          int64
-		wantMax          int64
+		name           string
+		sampleSize     int64
+		uniqueInSample int64
+		totalCount     int64
+		wantMin        int64
+		wantMax        int64
 	}{
 		{
 			name:           "zero sample size",

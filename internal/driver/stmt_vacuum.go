@@ -15,10 +15,11 @@ import (
 // compileVacuum compiles a VACUUM statement.
 // VACUUM rebuilds the database file, removing unused pages and defragmenting.
 // Syntax:
-//   VACUUM                        - vacuum the main database
-//   VACUUM schema_name            - vacuum the specified attached database
-//   VACUUM INTO filename          - vacuum main database into a new file
-//   VACUUM schema_name INTO file  - vacuum schema into a new file
+//
+//	VACUUM                        - vacuum the main database
+//	VACUUM schema_name            - vacuum the specified attached database
+//	VACUUM INTO filename          - vacuum main database into a new file
+//	VACUUM schema_name INTO file  - vacuum schema into a new file
 func (s *Stmt) compileVacuum(vm *vdbe.VDBE, stmt *parser.VacuumStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
 

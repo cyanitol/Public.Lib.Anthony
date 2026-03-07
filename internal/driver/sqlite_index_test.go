@@ -14,11 +14,11 @@ func TestSQLiteIndex(t *testing.T) {
 	t.Skip("pre-existing failure - needs index implementation fixes")
 	tests := []struct {
 		name     string
-		setup    []string              // CREATE TABLE + CREATE INDEX statements
-		query    string                // Query to execute
-		wantRows [][]interface{}       // Expected rows
-		wantErr  bool                  // Whether an error is expected
-		errMsg   string                // Expected error message substring
+		setup    []string        // CREATE TABLE + CREATE INDEX statements
+		query    string          // Query to execute
+		wantRows [][]interface{} // Expected rows
+		wantErr  bool            // Whether an error is expected
+		errMsg   string          // Expected error message substring
 		skip     string
 	}{
 		// index.test - Basic index creation
@@ -78,7 +78,7 @@ func TestSQLiteIndex(t *testing.T) {
 				"CREATE INDEX index04 ON test1(f4)",
 				"CREATE INDEX index05 ON test1(f5)",
 			},
-			query: "SELECT count(*) FROM sqlite_master WHERE type='index' AND tbl_name='test1'",
+			query:    "SELECT count(*) FROM sqlite_master WHERE type='index' AND tbl_name='test1'",
 			wantRows: [][]interface{}{{int64(5)}},
 		},
 		{
@@ -277,7 +277,7 @@ func TestSQLiteIndex(t *testing.T) {
 			setup: []string{
 				"CREATE TABLE t7(c, d UNIQUE, UNIQUE(c), PRIMARY KEY(c, d))",
 			},
-			query: "SELECT count(*) FROM sqlite_master WHERE tbl_name='t7' AND type='index' AND name LIKE 'sqlite_autoindex_%'",
+			query:    "SELECT count(*) FROM sqlite_master WHERE tbl_name='t7' AND type='index' AND name LIKE 'sqlite_autoindex_%'",
 			wantRows: [][]interface{}{{int64(3)}},
 		},
 		{
@@ -290,9 +290,9 @@ func TestSQLiteIndex(t *testing.T) {
 			errMsg:  "cannot be dropped",
 		},
 		{
-			name: "index-17.4 - DROP INDEX IF EXISTS on non-existent",
-			setup: []string{},
-			query: "DROP INDEX IF EXISTS no_such_index",
+			name:    "index-17.4 - DROP INDEX IF EXISTS on non-existent",
+			setup:   []string{},
+			query:   "DROP INDEX IF EXISTS no_such_index",
 			wantErr: false,
 		},
 		// index.test - Reserved names
@@ -511,7 +511,7 @@ func TestSQLiteIndex(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)

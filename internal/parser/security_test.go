@@ -169,12 +169,12 @@ func TestPragmaWhitelistCaseInsensitive(t *testing.T) {
 		{"PRAGMA table_info(users)", true},
 		{"PRAGMA TABLE_INFO(users)", true},
 		{"PRAGMA Table_Info(users)", true},
-		{"PRAGMA journal_mode", true},  // Now allowed
-		{"PRAGMA JOURNAL_MODE", true},  // Now allowed
-		{"PRAGMA Journal_Mode", true},  // Now allowed
-		{"PRAGMA writable_schema", false},  // Dangerous - not allowed
-		{"PRAGMA WRITABLE_SCHEMA", false},  // Dangerous - not allowed
-		{"PRAGMA Writable_Schema", false},  // Dangerous - not allowed
+		{"PRAGMA journal_mode", true},     // Now allowed
+		{"PRAGMA JOURNAL_MODE", true},     // Now allowed
+		{"PRAGMA Journal_Mode", true},     // Now allowed
+		{"PRAGMA writable_schema", false}, // Dangerous - not allowed
+		{"PRAGMA WRITABLE_SCHEMA", false}, // Dangerous - not allowed
+		{"PRAGMA Writable_Schema", false}, // Dangerous - not allowed
 	}
 
 	for _, tt := range tests {

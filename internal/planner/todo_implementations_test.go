@@ -257,7 +257,7 @@ func TestSortOrderTracking(t *testing.T) {
 			},
 		}
 		inner := &JoinOrder{
-			Tables: []int{1},
+			Tables:    []int{1},
 			SortOrder: []SortColumn{},
 		}
 
@@ -275,7 +275,7 @@ func TestSortOrderTracking(t *testing.T) {
 			},
 		}
 		inner := &JoinOrder{
-			Tables: []int{1},
+			Tables:    []int{1},
 			SortOrder: []SortColumn{},
 		}
 
@@ -315,8 +315,8 @@ func TestFindBestIndexWithColumns(t *testing.T) {
 
 	// Create a WHERE clause: name = 'test'
 	whereClause := &parser.BinaryExpr{
-		Op:   parser.OpEq,
-		Left: &parser.IdentExpr{Name: "name"},
+		Op:    parser.OpEq,
+		Left:  &parser.IdentExpr{Name: "name"},
 		Right: &parser.LiteralExpr{Value: "test"},
 	}
 

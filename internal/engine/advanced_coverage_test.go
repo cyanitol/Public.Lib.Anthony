@@ -112,9 +112,9 @@ func TestTriggerMatchesUpdateColumns(t *testing.T) {
 
 	// Test matching columns
 	tests := []struct {
-		name           string
-		updateColumns  []string
-		expectedMatch  bool
+		name          string
+		updateColumns []string
+		expectedMatch bool
 	}{
 		{
 			name:          "matches one column",

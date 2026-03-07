@@ -78,7 +78,7 @@ func TestFormatFloatSpecialValues(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := formatFloat(tt.value)
 			if !tt.check(result) {
 				t.Errorf("formatFloat(%f) = %q, expected special value", tt.value, result)

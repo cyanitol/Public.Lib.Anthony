@@ -46,7 +46,7 @@ func TestSQLiteTable(t *testing.T) {
 				"CREATE TABLE test1 (one varchar(10), two text)",
 				"DROP TABLE test1",
 			},
-			query: "SELECT name FROM sqlite_master WHERE name='test1'",
+			query:    "SELECT name FROM sqlite_master WHERE name='test1'",
 			wantRows: [][]interface{}{},
 		},
 		{
@@ -261,7 +261,7 @@ func TestSQLiteTable(t *testing.T) {
 				"INSERT INTO t2 VALUES(4,5,6)",
 				"DELETE FROM t2",
 			},
-			query: "SELECT * FROM t2",
+			query:    "SELECT * FROM t2",
 			wantRows: [][]interface{}{},
 		},
 		{
@@ -309,7 +309,7 @@ func TestSQLiteTable(t *testing.T) {
 				"INSERT INTO t2 VALUES(1,2)",
 				"CREATE INDEX i2 ON t2(x)",
 			},
-			query: "SELECT name FROM sqlite_master WHERE type='index' AND name='i2'",
+			query:    "SELECT name FROM sqlite_master WHERE type='index' AND name='i2'",
 			wantRows: [][]interface{}{},
 		},
 		{
@@ -457,7 +457,7 @@ func TestSQLiteTable(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			dbPath := filepath.Join(t.TempDir(), "test.db")
 			db, err := sql.Open("sqlite_internal", dbPath)

@@ -111,9 +111,9 @@ func (t *SimpleTokenizer) finalizeToken(tokens *[]Token, currentToken *strings.B
 // PrefixTokenizer wraps another tokenizer and also generates prefix tokens.
 // This enables prefix matching queries like "hel*".
 type PrefixTokenizer struct {
-	base           Tokenizer
-	minPrefixLen   int
-	maxPrefixLen   int
+	base         Tokenizer
+	minPrefixLen int
+	maxPrefixLen int
 }
 
 // NewPrefixTokenizer creates a new prefix tokenizer.

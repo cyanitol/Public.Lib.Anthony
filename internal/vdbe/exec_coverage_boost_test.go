@@ -88,7 +88,7 @@ func TestExecIfPos(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(5)
 			tt.setupMem(v)
 			v.PC = 0
@@ -148,7 +148,7 @@ func TestExecInt64(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(5)
 			instr := &Instruction{
 				Opcode: OpInt64,
@@ -210,7 +210,7 @@ func TestExecReal(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(5)
 			instr := &Instruction{
 				Opcode: OpReal,
@@ -272,7 +272,7 @@ func TestExecString(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(5)
 			instr := &Instruction{
 				Opcode: OpString,
@@ -334,7 +334,7 @@ func TestExecCopy(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(5)
 			tt.setupSrc(v.Mem[0])
 
@@ -481,7 +481,7 @@ func TestCastToBlob(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			mem := NewMem()
 			tt.setup(mem)
 
@@ -656,7 +656,7 @@ func TestArithmeticOperations(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(5)
 
 			// Setup operands
@@ -723,7 +723,7 @@ func TestArithmeticWithNulls(t *testing.T) {
 
 	for _, op := range opcodes {
 		t.Run(op.name+"_LeftNull", func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(5)
 			v.Mem[0].SetNull()
 			v.Mem[1].SetInt(10)
@@ -746,7 +746,7 @@ func TestArithmeticWithNulls(t *testing.T) {
 		})
 
 		t.Run(op.name+"_RightNull", func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(5)
 			v.Mem[0].SetInt(10)
 			v.Mem[1].SetNull()
@@ -790,7 +790,7 @@ func TestMemRealifyExtended(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			mem := NewMem()
 			tt.setup(mem)
 

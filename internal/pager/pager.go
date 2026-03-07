@@ -1036,9 +1036,9 @@ func (p *Pager) openJournal() error {
 
 // journalEntry represents a parsed journal entry.
 type journalEntry struct {
-	pgno     Pgno
-	pageData []byte
-	checksum uint32
+	pgno        Pgno
+	pageData    []byte
+	checksum    uint32
 	hasChecksum bool
 }
 

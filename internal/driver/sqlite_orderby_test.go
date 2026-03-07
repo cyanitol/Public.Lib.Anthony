@@ -80,11 +80,11 @@ func TestSQLiteOrderBySingleColumn(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "ORDER BY integer ASC",
@@ -143,7 +143,7 @@ func TestSQLiteOrderBySingleColumn(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -171,11 +171,11 @@ func TestSQLiteOrderByMultipleColumns(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "ORDER BY two columns ASC",
@@ -249,7 +249,7 @@ func TestSQLiteOrderByMultipleColumns(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -276,11 +276,11 @@ func TestSQLiteOrderByColumnNumber(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "ORDER BY column position 1",
@@ -319,7 +319,7 @@ func TestSQLiteOrderByColumnNumber(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -346,11 +346,11 @@ func TestSQLiteOrderByExpression(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "ORDER BY substr expression",
@@ -382,7 +382,7 @@ func TestSQLiteOrderByExpression(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -409,11 +409,11 @@ func TestSQLiteOrderByWithNulls(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "ORDER BY with NULLs ASC (NULLs first)",
@@ -454,7 +454,7 @@ func TestSQLiteOrderByWithNulls(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -480,11 +480,11 @@ func TestSQLiteOrderByWithLimit(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "ORDER BY with LIMIT",
@@ -517,7 +517,7 @@ func TestSQLiteOrderByWithLimit(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -544,11 +544,11 @@ func TestSQLiteOrderByJoin(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "JOIN with ORDER BY",
@@ -612,7 +612,7 @@ func TestSQLiteOrderByJoin(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -638,11 +638,11 @@ func TestSQLiteOrderByCompoundSelect(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name:  "UNION ALL with ORDER BY",
@@ -673,7 +673,7 @@ func TestSQLiteOrderByCompoundSelect(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -701,11 +701,11 @@ func TestSQLiteOrderByRowid(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "ORDER BY rowid DESC",
@@ -728,7 +728,7 @@ func TestSQLiteOrderByRowid(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -754,11 +754,11 @@ func TestSQLiteOrderByTypeMixing(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "ORDER BY mixed integer storage",
@@ -790,7 +790,7 @@ func TestSQLiteOrderByTypeMixing(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -817,11 +817,11 @@ func TestSQLiteOrderByComplexQueries(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "Nested subquery with ORDER BY",
@@ -878,7 +878,7 @@ func TestSQLiteOrderByComplexQueries(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -953,7 +953,7 @@ func TestSQLiteOrderByEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -989,11 +989,11 @@ func TestSQLiteOrderByCollation(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "Case-sensitive text ordering",
@@ -1025,7 +1025,7 @@ func TestSQLiteOrderByCollation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -1097,11 +1097,11 @@ func TestSQLiteOrderByASCExplicit(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "Explicit ASC single column",
@@ -1133,7 +1133,7 @@ func TestSQLiteOrderByASCExplicit(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -1160,11 +1160,11 @@ func TestSQLiteOrderByJoinUnique(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "Join with unique constraint - order matters",
@@ -1191,7 +1191,7 @@ func TestSQLiteOrderByJoinUnique(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -1286,11 +1286,11 @@ func TestSQLiteOrderByPrimaryKey(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "Multi-column primary key ORDER BY",
@@ -1343,7 +1343,7 @@ func TestSQLiteOrderByPrimaryKey(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -1370,11 +1370,11 @@ func TestSQLiteOrderByWithIndex(t *testing.T) {
 	defer db.Close()
 
 	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		skip    string
+		name  string
+		setup []string
+		query string
+		want  [][]interface{}
+		skip  string
 	}{
 		{
 			name: "Single column index ORDER BY",
@@ -1433,7 +1433,7 @@ func TestSQLiteOrderByWithIndex(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)

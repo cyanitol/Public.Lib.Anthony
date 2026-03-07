@@ -168,11 +168,11 @@ func TestParseDetach(t *testing.T) {
 func TestParseAttachDetachCombined(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		sql        string
-		wantErr    bool
-		stmtCount  int
-		stmtTypes  []string
+		name      string
+		sql       string
+		wantErr   bool
+		stmtCount int
+		stmtTypes []string
 	}{
 		{
 			name:      "multiple attach statements",

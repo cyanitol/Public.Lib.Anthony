@@ -25,39 +25,39 @@ func TestCreateRTreeTable(t *testing.T) {
 	module := NewRTreeModule()
 
 	tests := []struct {
-		name      string
-		args      []string
-		wantErr   bool
-		wantDims  int
+		name     string
+		args     []string
+		wantErr  bool
+		wantDims int
 	}{
 		{
-			name:      "2D R-Tree",
-			args:      []string{"id", "minX", "maxX", "minY", "maxY"},
-			wantErr:   false,
-			wantDims:  2,
+			name:     "2D R-Tree",
+			args:     []string{"id", "minX", "maxX", "minY", "maxY"},
+			wantErr:  false,
+			wantDims: 2,
 		},
 		{
-			name:      "3D R-Tree",
-			args:      []string{"id", "minX", "maxX", "minY", "maxY", "minZ", "maxZ"},
-			wantErr:   false,
-			wantDims:  3,
+			name:     "3D R-Tree",
+			args:     []string{"id", "minX", "maxX", "minY", "maxY", "minZ", "maxZ"},
+			wantErr:  false,
+			wantDims: 3,
 		},
 		{
-			name:      "Too few columns",
-			args:      []string{"id", "minX", "maxX"},
-			wantErr:   true,
+			name:    "Too few columns",
+			args:    []string{"id", "minX", "maxX"},
+			wantErr: true,
 		},
 		{
-			name:      "Odd number of coordinate columns",
-			args:      []string{"id", "minX", "maxX", "minY"},
-			wantErr:   true,
+			name:    "Odd number of coordinate columns",
+			args:    []string{"id", "minX", "maxX", "minY"},
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			table, schema, err := module.Create(nil, "rtree", "main", "test_rtree", tt.args)
 
 			if tt.wantErr {
@@ -108,12 +108,12 @@ func TestRTreeInsert(t *testing.T) {
 
 	// Insert a rectangle
 	args := []interface{}{
-		nil,       // old rowid (nil for INSERT)
-		nil,       // new rowid (nil for auto-generate)
-		0.0,       // minX
-		10.0,      // maxX
-		0.0,       // minY
-		10.0,      // maxY
+		nil,  // old rowid (nil for INSERT)
+		nil,  // new rowid (nil for auto-generate)
+		0.0,  // minX
+		10.0, // maxX
+		0.0,  // minY
+		10.0, // maxY
 	}
 	id, err := rtree.Update(len(args), args)
 
@@ -324,7 +324,7 @@ func TestRTreeSearchOverlap(t *testing.T) {
 
 	// Insert non-overlapping rectangles
 	rects := []struct {
-		id   int64
+		id                     int64
 		minX, maxX, minY, maxY float64
 	}{
 		{1, 0, 10, 0, 10},
@@ -388,13 +388,13 @@ func TestRTreeSearchWithin(t *testing.T) {
 
 	// Insert rectangles
 	rects := []struct {
-		id   int64
+		id                     int64
 		minX, maxX, minY, maxY float64
 	}{
-		{1, 5, 15, 5, 15},     // Inside query box
-		{2, 8, 12, 8, 12},     // Inside query box
-		{3, 0, 30, 0, 30},     // Contains query box
-		{4, 25, 35, 25, 35},   // Outside query box
+		{1, 5, 15, 5, 15},   // Inside query box
+		{2, 8, 12, 8, 12},   // Inside query box
+		{3, 0, 30, 0, 30},   // Contains query box
+		{4, 25, 35, 25, 35}, // Outside query box
 	}
 
 	for _, r := range rects {
@@ -440,7 +440,7 @@ func TestRTreeSearchContains(t *testing.T) {
 
 	// Insert rectangles
 	rects := []struct {
-		id   int64
+		id                     int64
 		minX, maxX, minY, maxY float64
 	}{
 		{1, 0, 10, 0, 10},
@@ -825,9 +825,9 @@ func TestRTree3D(t *testing.T) {
 	// Insert 3D box
 	args3d := []interface{}{
 		nil, int64(1),
-		0.0, 10.0,  // X
-		0.0, 10.0,  // Y
-		0.0, 10.0,  // Z
+		0.0, 10.0, // X
+		0.0, 10.0, // Y
+		0.0, 10.0, // Z
 	}
 	_, err = rtree.Update(len(args3d), args3d)
 	if err != nil {
@@ -1587,7 +1587,7 @@ func TestParseCoordinateErrors(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			_, err := rtree.Update(len(tt.args), tt.args)
 			if err == nil {
 				t.Error("Expected error for invalid coordinate")
@@ -1696,7 +1696,7 @@ func TestRTreeUpdateEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			_, err := rtree.Update(len(tt.args), tt.args)
 			if err != nil {
 				t.Logf("Update %s: %v", tt.name, err)
@@ -1736,7 +1736,7 @@ func TestRTreeBestIndexVariousConstraints(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			info := vtab.NewIndexInfo(1)
 			info.Constraints[0].Column = tt.column
 			info.Constraints[0].Op = tt.op
@@ -1819,7 +1819,7 @@ func TestNodeEnlargementEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			enlargement := bbox1.EnlargementNeeded(tt.bbox)
 			t.Logf("Enlargement for %s: %f", tt.name, enlargement)
 		})
@@ -1867,7 +1867,7 @@ func TestNodeChooseSubtreeEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			chosenEntry := node.ChooseSubtree(tt.entry)
 			if chosenEntry == nil {
 				t.Error("Expected non-nil entry from ChooseSubtree")
@@ -1995,7 +1995,7 @@ func TestCompactEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			entries := make([]*Entry, tt.count)
 			for i := 0; i < tt.count; i++ {
 				entries[i] = &Entry{
@@ -2112,7 +2112,7 @@ func TestExpandBoundingBox(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			bbox := bbox1.Clone()
 			bbox.Expand(tt.other)
 
@@ -2131,27 +2131,27 @@ func TestExpandBoundingBox(t *testing.T) {
 func TestEnlargementNeededEdgeCases(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		bbox     *BoundingBox
-		other    *BoundingBox
+		name        string
+		bbox        *BoundingBox
+		other       *BoundingBox
 		minExpected float64
 	}{
 		{
-			name:     "identical boxes",
-			bbox:     &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
-			other:    &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+			name:        "identical boxes",
+			bbox:        &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+			other:       &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
 			minExpected: 0,
 		},
 		{
-			name:     "contained box",
-			bbox:     &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
-			other:    &BoundingBox{Min: []float64{2, 2}, Max: []float64{8, 8}},
+			name:        "contained box",
+			bbox:        &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+			other:       &BoundingBox{Min: []float64{2, 2}, Max: []float64{8, 8}},
 			minExpected: 0,
 		},
 		{
-			name:     "larger box",
-			bbox:     &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
-			other:    &BoundingBox{Min: []float64{-5, -5}, Max: []float64{15, 15}},
+			name:        "larger box",
+			bbox:        &BoundingBox{Min: []float64{0, 0}, Max: []float64{10, 10}},
+			other:       &BoundingBox{Min: []float64{-5, -5}, Max: []float64{15, 15}},
 			minExpected: 1,
 		},
 	}
@@ -2159,7 +2159,7 @@ func TestEnlargementNeededEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			enlargement := tt.bbox.EnlargementNeeded(tt.other)
 			if enlargement < tt.minExpected {
 				t.Errorf("EnlargementNeeded = %f, want >= %f", enlargement, tt.minExpected)
@@ -2269,7 +2269,7 @@ func TestDistanceToPointEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			dist := distanceToPoint(bbox, tt.point)
 			t.Logf("Distance from bbox to %v: %f", tt.point, dist)
 		})
@@ -2452,7 +2452,7 @@ func TestDistanceBetweenBoxesEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			dist := DistanceBetweenBoxes(tt.bbox1, tt.bbox2)
 			t.Logf("Distance for %s: %f", tt.name, dist)
 		})
@@ -2487,7 +2487,7 @@ func TestOverlapAreaEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			area := OverlapArea(tt.bbox1, tt.bbox2)
 			t.Logf("Overlap area for %s: %f", tt.name, area)
 		})
@@ -3059,7 +3059,7 @@ func TestParseCoordinateDifferentTypes(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			args := []interface{}{nil, int64(1), tt.value, 20.0, 0.0, 10.0}
 			_, err := rtree.Update(len(args), args)
 			if err != nil {
@@ -3380,7 +3380,7 @@ func TestProcessSpatialJoinPairAllCases(t *testing.T) {
 	t.Parallel()
 	// Test both internal nodes case
 	t.Run("BothInternal", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		internal1 := NewInternalNode()
 		internal2 := NewInternalNode()
 		leaf1 := NewLeafNode()
@@ -3413,7 +3413,7 @@ func TestProcessSpatialJoinPairAllCases(t *testing.T) {
 
 	// Test n1 internal, n2 leaf case
 	t.Run("N1InternalN2Leaf", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		internal1 := NewInternalNode()
 		leaf1 := NewLeafNode()
 		leaf2 := NewLeafNode()
@@ -3458,7 +3458,7 @@ func TestAssignEntryOnTieAllBranches(t *testing.T) {
 
 	// Test tie case with equal areas and equal sizes
 	t.Run("TieEqualSizes", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		group1 := []*Entry{}
 		group2 := []*Entry{}
 
@@ -3927,8 +3927,8 @@ func TestBulkOperations(t *testing.T) {
 		bbox := NewBoundingBox(2)
 		x := float64(i % 10 * 15)
 		y := float64(i / 10 * 15)
-		bbox.Min[0], bbox.Max[0] = x, x + 10
-		bbox.Min[1], bbox.Max[1] = y, y + 10
+		bbox.Min[0], bbox.Max[0] = x, x+10
+		bbox.Min[1], bbox.Max[1] = y, y+10
 		entries[i] = NewEntry(int64(i+1), bbox)
 	}
 
@@ -4001,7 +4001,7 @@ func TestAssignEntryOnTieAllCases(t *testing.T) {
 		// Create entries with same area to trigger ties
 		x := float64(i * 15)
 		bbox.Min[0], bbox.Max[0] = x, x+10
-		bbox.Min[1], bbox.Max[1] = 0, 10  // Same height for all
+		bbox.Min[1], bbox.Max[1] = 0, 10 // Same height for all
 		entry := NewEntry(int64(i+1), bbox)
 		root = root.Insert(entry)
 	}
@@ -4022,7 +4022,7 @@ func TestAssignEntryOnTieAllCases(t *testing.T) {
 
 	bbox2 := NewBoundingBox(2)
 	bbox2.Min[0], bbox2.Max[0] = 20, 30
-	bbox2.Min[1], bbox2.Max[1] = 0, 10  // Same area as entry1
+	bbox2.Min[1], bbox2.Max[1] = 0, 10 // Same area as entry1
 	entry2 := NewEntry(2, bbox2)
 
 	group1 := []*Entry{entry1}
@@ -4046,7 +4046,7 @@ func TestAssignEntryOnTieAllCases(t *testing.T) {
 
 	// Test with different areas - group2 smaller area
 	bbox3 := NewBoundingBox(2)
-	bbox3.Min[0], bbox3.Max[0] = 40, 45  // Smaller area
+	bbox3.Min[0], bbox3.Max[0] = 40, 45 // Smaller area
 	bbox3.Min[1], bbox3.Max[1] = 0, 5
 	entry3 := NewEntry(4, bbox3)
 	group3 := []*Entry{entry1}
@@ -4390,7 +4390,7 @@ func TestChooseSubtreeEdgeCases(t *testing.T) {
 
 	bbox4 := NewBoundingBox(2)
 	bbox4.Min[0], bbox4.Max[0] = 20, 30
-	bbox4.Min[1], bbox4.Max[1] = 0, 10  // Same area
+	bbox4.Min[1], bbox4.Max[1] = 0, 10 // Same area
 	entry4 := NewEntry(4, bbox4)
 
 	node2.AddEntry(entry3)
@@ -4997,14 +4997,14 @@ func TestAssignEntryOnTieArea2Smaller(t *testing.T) {
 
 	// Create group1 with larger area
 	bbox1 := NewBoundingBox(2)
-	bbox1.Min[0], bbox1.Max[0] = 0, 20  // Area = 20 * 10 = 200
+	bbox1.Min[0], bbox1.Max[0] = 0, 20 // Area = 20 * 10 = 200
 	bbox1.Min[1], bbox1.Max[1] = 0, 10
 	entry1 := NewEntry(1, bbox1)
 	group1 := []*Entry{entry1}
 
 	// Create group2 with smaller area
 	bbox2 := NewBoundingBox(2)
-	bbox2.Min[0], bbox2.Max[0] = 30, 35  // Area = 5 * 5 = 25
+	bbox2.Min[0], bbox2.Max[0] = 30, 35 // Area = 5 * 5 = 25
 	bbox2.Min[1], bbox2.Max[1] = 0, 5
 	entry2 := NewEntry(2, bbox2)
 	group2 := []*Entry{entry2}
@@ -5061,7 +5061,7 @@ func TestQuadraticSplitWithTies(t *testing.T) {
 		// Create overlapping entries to trigger ties
 		x := float64(i * 3)
 		bbox.Min[0], bbox.Max[0] = x, x+10
-		bbox.Min[1], bbox.Max[1] = 0, 10  // Same y-dimension for all
+		bbox.Min[1], bbox.Max[1] = 0, 10 // Same y-dimension for all
 		entry := NewEntry(int64(i+1), bbox)
 		node.AddEntry(entry)
 	}
@@ -5165,8 +5165,8 @@ func TestDistanceBetweenBoxesSeparatedInOneDimension(t *testing.T) {
 
 	// Separated in X dimension only
 	bbox2 := NewBoundingBox(2)
-	bbox2.Min[0], bbox2.Max[0] = 20, 30  // Gap of 10 in X
-	bbox2.Min[1], bbox2.Max[1] = 5, 15   // Overlapping in Y
+	bbox2.Min[0], bbox2.Max[0] = 20, 30 // Gap of 10 in X
+	bbox2.Min[1], bbox2.Max[1] = 5, 15  // Overlapping in Y
 
 	dist := DistanceBetweenBoxes(bbox1, bbox2)
 	expected := 10.0
@@ -5176,8 +5176,8 @@ func TestDistanceBetweenBoxesSeparatedInOneDimension(t *testing.T) {
 
 	// Separated in Y dimension only
 	bbox3 := NewBoundingBox(2)
-	bbox3.Min[0], bbox3.Max[0] = 5, 15   // Overlapping in X
-	bbox3.Min[1], bbox3.Max[1] = 20, 30  // Gap of 10 in Y
+	bbox3.Min[0], bbox3.Max[0] = 5, 15  // Overlapping in X
+	bbox3.Min[1], bbox3.Max[1] = 20, 30 // Gap of 10 in Y
 
 	dist = DistanceBetweenBoxes(bbox1, bbox3)
 	if math.Abs(dist-expected) > 0.0001 {
@@ -5198,7 +5198,7 @@ func TestOverlapAreaWithDifferentOverlaps(t *testing.T) {
 	bbox2.Min[1], bbox2.Max[1] = 5, 15
 
 	area := OverlapArea(bbox1, bbox2)
-	expected := 5.0 * 5.0  // 25
+	expected := 5.0 * 5.0 // 25
 	if math.Abs(area-expected) > 0.0001 {
 		t.Errorf("Expected area %f, got %f", expected, area)
 	}
@@ -5209,7 +5209,7 @@ func TestOverlapAreaWithDifferentOverlaps(t *testing.T) {
 	bbox3.Min[1], bbox3.Max[1] = 2, 8
 
 	area = OverlapArea(bbox1, bbox3)
-	expected = 6.0 * 6.0  // 36
+	expected = 6.0 * 6.0 // 36
 	if math.Abs(area-expected) > 0.0001 {
 		t.Errorf("Expected area %f, got %f", expected, area)
 	}
@@ -5241,7 +5241,7 @@ func TestIntersectionBoxWithPartialOverlap(t *testing.T) {
 
 	// Verify intersection area
 	area := result.Area()
-	expected := 5.0 * 7.0  // 35
+	expected := 5.0 * 7.0 // 35
 	if math.Abs(area-expected) > 0.0001 {
 		t.Errorf("Expected intersection area %f, got %f", expected, area)
 	}
@@ -5260,7 +5260,7 @@ func TestAssignEntryOnTieGroup2FewerEntries(t *testing.T) {
 	entry1b := NewEntry(2, bbox1.Clone())
 
 	bbox2 := NewBoundingBox(2)
-	bbox2.Min[0], bbox2.Max[0] = 20, 30  // Same area = 10*10 = 100
+	bbox2.Min[0], bbox2.Max[0] = 20, 30 // Same area = 10*10 = 100
 	bbox2.Min[1], bbox2.Max[1] = 0, 10
 	entry2 := NewEntry(3, bbox2)
 

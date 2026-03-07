@@ -6,23 +6,23 @@ type ConstraintOp int
 
 const (
 	// Constraint operation types - these match SQLite's SQLITE_INDEX_CONSTRAINT_* constants
-	ConstraintEQ         ConstraintOp = 2   // =
-	ConstraintGT         ConstraintOp = 4   // >
-	ConstraintLE         ConstraintOp = 8   // <=
-	ConstraintLT         ConstraintOp = 16  // <
-	ConstraintGE         ConstraintOp = 32  // >=
-	ConstraintMatch      ConstraintOp = 64  // MATCH
-	ConstraintLike       ConstraintOp = 65  // LIKE
-	ConstraintGlob       ConstraintOp = 66  // GLOB
-	ConstraintRegexp     ConstraintOp = 67  // REGEXP
-	ConstraintNE         ConstraintOp = 68  // != or <>
-	ConstraintIsNot      ConstraintOp = 69  // IS NOT
-	ConstraintIsNotNull  ConstraintOp = 70  // IS NOT NULL
-	ConstraintIsNull     ConstraintOp = 71  // IS NULL
-	ConstraintIs         ConstraintOp = 72  // IS
-	ConstraintLimit      ConstraintOp = 73  // LIMIT
-	ConstraintOffset     ConstraintOp = 74  // OFFSET
-	ConstraintFunction   ConstraintOp = 150 // Function constraint (undocumented)
+	ConstraintEQ        ConstraintOp = 2   // =
+	ConstraintGT        ConstraintOp = 4   // >
+	ConstraintLE        ConstraintOp = 8   // <=
+	ConstraintLT        ConstraintOp = 16  // <
+	ConstraintGE        ConstraintOp = 32  // >=
+	ConstraintMatch     ConstraintOp = 64  // MATCH
+	ConstraintLike      ConstraintOp = 65  // LIKE
+	ConstraintGlob      ConstraintOp = 66  // GLOB
+	ConstraintRegexp    ConstraintOp = 67  // REGEXP
+	ConstraintNE        ConstraintOp = 68  // != or <>
+	ConstraintIsNot     ConstraintOp = 69  // IS NOT
+	ConstraintIsNotNull ConstraintOp = 70  // IS NOT NULL
+	ConstraintIsNull    ConstraintOp = 71  // IS NULL
+	ConstraintIs        ConstraintOp = 72  // IS
+	ConstraintLimit     ConstraintOp = 73  // LIMIT
+	ConstraintOffset    ConstraintOp = 74  // OFFSET
+	ConstraintFunction  ConstraintOp = 150 // Function constraint (undocumented)
 )
 
 // constraintOpStrings is a lookup table for constraint operation string representations.

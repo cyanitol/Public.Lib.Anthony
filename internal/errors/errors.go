@@ -10,49 +10,49 @@ import (
 // Reference: https://www.sqlite.org/rescode.html
 const (
 	// Primary result codes (low byte)
-	SQLITE_OK         = 0  // Successful result
-	SQLITE_ERROR      = 1  // Generic error
-	SQLITE_INTERNAL   = 2  // Internal logic error in SQLite
-	SQLITE_PERM       = 3  // Access permission denied
-	SQLITE_ABORT      = 4  // Callback routine requested an abort
-	SQLITE_BUSY       = 5  // The database file is locked
-	SQLITE_LOCKED     = 6  // A table in the database is locked
-	SQLITE_NOMEM      = 7  // A malloc() failed
-	SQLITE_READONLY   = 8  // Attempt to write a readonly database
-	SQLITE_INTERRUPT  = 9  // Operation terminated by sqlite3_interrupt()
-	SQLITE_IOERR      = 10 // Some kind of disk I/O error occurred
-	SQLITE_CORRUPT    = 11 // The database disk image is malformed
-	SQLITE_NOTFOUND   = 12 // Unknown opcode in sqlite3_file_control()
-	SQLITE_FULL       = 13 // Insertion failed because database is full
-	SQLITE_CANTOPEN   = 14 // Unable to open the database file
-	SQLITE_PROTOCOL   = 15 // Database lock protocol error
-	SQLITE_EMPTY      = 16 // Internal use only
-	SQLITE_SCHEMA     = 17 // The database schema changed
-	SQLITE_TOOBIG     = 18 // String or BLOB exceeds size limit
-	SQLITE_CONSTRAINT = 19 // Abort due to constraint violation
-	SQLITE_MISMATCH   = 20 // Data type mismatch
-	SQLITE_MISUSE     = 21 // Library used incorrectly
-	SQLITE_NOLFS      = 22 // Uses OS features not supported on host
-	SQLITE_AUTH       = 23 // Authorization denied
-	SQLITE_FORMAT     = 24 // Not used
-	SQLITE_RANGE      = 25 // 2nd parameter to sqlite3_bind out of range
-	SQLITE_NOTADB     = 26 // File opened that is not a database file
-	SQLITE_NOTICE     = 27 // Notifications from sqlite3_log()
-	SQLITE_WARNING    = 28 // Warnings from sqlite3_log()
+	SQLITE_OK         = 0   // Successful result
+	SQLITE_ERROR      = 1   // Generic error
+	SQLITE_INTERNAL   = 2   // Internal logic error in SQLite
+	SQLITE_PERM       = 3   // Access permission denied
+	SQLITE_ABORT      = 4   // Callback routine requested an abort
+	SQLITE_BUSY       = 5   // The database file is locked
+	SQLITE_LOCKED     = 6   // A table in the database is locked
+	SQLITE_NOMEM      = 7   // A malloc() failed
+	SQLITE_READONLY   = 8   // Attempt to write a readonly database
+	SQLITE_INTERRUPT  = 9   // Operation terminated by sqlite3_interrupt()
+	SQLITE_IOERR      = 10  // Some kind of disk I/O error occurred
+	SQLITE_CORRUPT    = 11  // The database disk image is malformed
+	SQLITE_NOTFOUND   = 12  // Unknown opcode in sqlite3_file_control()
+	SQLITE_FULL       = 13  // Insertion failed because database is full
+	SQLITE_CANTOPEN   = 14  // Unable to open the database file
+	SQLITE_PROTOCOL   = 15  // Database lock protocol error
+	SQLITE_EMPTY      = 16  // Internal use only
+	SQLITE_SCHEMA     = 17  // The database schema changed
+	SQLITE_TOOBIG     = 18  // String or BLOB exceeds size limit
+	SQLITE_CONSTRAINT = 19  // Abort due to constraint violation
+	SQLITE_MISMATCH   = 20  // Data type mismatch
+	SQLITE_MISUSE     = 21  // Library used incorrectly
+	SQLITE_NOLFS      = 22  // Uses OS features not supported on host
+	SQLITE_AUTH       = 23  // Authorization denied
+	SQLITE_FORMAT     = 24  // Not used
+	SQLITE_RANGE      = 25  // 2nd parameter to sqlite3_bind out of range
+	SQLITE_NOTADB     = 26  // File opened that is not a database file
+	SQLITE_NOTICE     = 27  // Notifications from sqlite3_log()
+	SQLITE_WARNING    = 28  // Warnings from sqlite3_log()
 	SQLITE_ROW        = 100 // sqlite3_step() has another row ready
 	SQLITE_DONE       = 101 // sqlite3_step() has finished executing
 
 	// Extended result codes for SQLITE_CONSTRAINT (19)
-	SQLITE_CONSTRAINT_CHECK       = (SQLITE_CONSTRAINT | (1 << 8))  // 275
-	SQLITE_CONSTRAINT_COMMITHOOK  = (SQLITE_CONSTRAINT | (2 << 8))  // 531
-	SQLITE_CONSTRAINT_FOREIGNKEY  = (SQLITE_CONSTRAINT | (3 << 8))  // 787
-	SQLITE_CONSTRAINT_FUNCTION    = (SQLITE_CONSTRAINT | (4 << 8))  // 1043
-	SQLITE_CONSTRAINT_NOTNULL     = (SQLITE_CONSTRAINT | (5 << 8))  // 1299
-	SQLITE_CONSTRAINT_PRIMARYKEY  = (SQLITE_CONSTRAINT | (6 << 8))  // 1555
-	SQLITE_CONSTRAINT_TRIGGER     = (SQLITE_CONSTRAINT | (7 << 8))  // 1811
-	SQLITE_CONSTRAINT_UNIQUE      = (SQLITE_CONSTRAINT | (8 << 8))  // 2067
-	SQLITE_CONSTRAINT_VTAB        = (SQLITE_CONSTRAINT | (9 << 8))  // 2323
-	SQLITE_CONSTRAINT_ROWID       = (SQLITE_CONSTRAINT | (10 << 8)) // 2579
+	SQLITE_CONSTRAINT_CHECK      = (SQLITE_CONSTRAINT | (1 << 8))  // 275
+	SQLITE_CONSTRAINT_COMMITHOOK = (SQLITE_CONSTRAINT | (2 << 8))  // 531
+	SQLITE_CONSTRAINT_FOREIGNKEY = (SQLITE_CONSTRAINT | (3 << 8))  // 787
+	SQLITE_CONSTRAINT_FUNCTION   = (SQLITE_CONSTRAINT | (4 << 8))  // 1043
+	SQLITE_CONSTRAINT_NOTNULL    = (SQLITE_CONSTRAINT | (5 << 8))  // 1299
+	SQLITE_CONSTRAINT_PRIMARYKEY = (SQLITE_CONSTRAINT | (6 << 8))  // 1555
+	SQLITE_CONSTRAINT_TRIGGER    = (SQLITE_CONSTRAINT | (7 << 8))  // 1811
+	SQLITE_CONSTRAINT_UNIQUE     = (SQLITE_CONSTRAINT | (8 << 8))  // 2067
+	SQLITE_CONSTRAINT_VTAB       = (SQLITE_CONSTRAINT | (9 << 8))  // 2323
+	SQLITE_CONSTRAINT_ROWID      = (SQLITE_CONSTRAINT | (10 << 8)) // 2579
 
 	// Extended result codes for SQLITE_IOERR (10)
 	SQLITE_IOERR_READ              = (SQLITE_IOERR | (1 << 8))  // 266
@@ -90,25 +90,25 @@ const (
 	SQLITE_BUSY_SNAPSHOT = (SQLITE_BUSY | (2 << 8)) // 517
 
 	// Extended result codes for SQLITE_CORRUPT (11)
-	SQLITE_CORRUPT_VTAB   = (SQLITE_CORRUPT | (1 << 8)) // 267
-	SQLITE_CORRUPT_INDEX  = (SQLITE_CORRUPT | (2 << 8)) // 523
+	SQLITE_CORRUPT_VTAB     = (SQLITE_CORRUPT | (1 << 8)) // 267
+	SQLITE_CORRUPT_INDEX    = (SQLITE_CORRUPT | (2 << 8)) // 523
 	SQLITE_CORRUPT_SEQUENCE = (SQLITE_CORRUPT | (3 << 8)) // 779
 
 	// Extended result codes for SQLITE_READONLY (8)
-	SQLITE_READONLY_RECOVERY     = (SQLITE_READONLY | (1 << 8)) // 264
-	SQLITE_READONLY_CANTLOCK     = (SQLITE_READONLY | (2 << 8)) // 520
-	SQLITE_READONLY_ROLLBACK     = (SQLITE_READONLY | (3 << 8)) // 776
-	SQLITE_READONLY_DBMOVED      = (SQLITE_READONLY | (4 << 8)) // 1032
-	SQLITE_READONLY_CANTINIT     = (SQLITE_READONLY | (5 << 8)) // 1288
-	SQLITE_READONLY_DIRECTORY    = (SQLITE_READONLY | (6 << 8)) // 1544
+	SQLITE_READONLY_RECOVERY  = (SQLITE_READONLY | (1 << 8)) // 264
+	SQLITE_READONLY_CANTLOCK  = (SQLITE_READONLY | (2 << 8)) // 520
+	SQLITE_READONLY_ROLLBACK  = (SQLITE_READONLY | (3 << 8)) // 776
+	SQLITE_READONLY_DBMOVED   = (SQLITE_READONLY | (4 << 8)) // 1032
+	SQLITE_READONLY_CANTINIT  = (SQLITE_READONLY | (5 << 8)) // 1288
+	SQLITE_READONLY_DIRECTORY = (SQLITE_READONLY | (6 << 8)) // 1544
 
 	// Extended result codes for SQLITE_CANTOPEN (14)
-	SQLITE_CANTOPEN_NOTEMPDIR  = (SQLITE_CANTOPEN | (1 << 8)) // 270
-	SQLITE_CANTOPEN_ISDIR      = (SQLITE_CANTOPEN | (2 << 8)) // 526
-	SQLITE_CANTOPEN_FULLPATH   = (SQLITE_CANTOPEN | (3 << 8)) // 782
-	SQLITE_CANTOPEN_CONVPATH   = (SQLITE_CANTOPEN | (4 << 8)) // 1038
-	SQLITE_CANTOPEN_DIRTYWAL   = (SQLITE_CANTOPEN | (5 << 8)) // 1294
-	SQLITE_CANTOPEN_SYMLINK    = (SQLITE_CANTOPEN | (6 << 8)) // 1550
+	SQLITE_CANTOPEN_NOTEMPDIR = (SQLITE_CANTOPEN | (1 << 8)) // 270
+	SQLITE_CANTOPEN_ISDIR     = (SQLITE_CANTOPEN | (2 << 8)) // 526
+	SQLITE_CANTOPEN_FULLPATH  = (SQLITE_CANTOPEN | (3 << 8)) // 782
+	SQLITE_CANTOPEN_CONVPATH  = (SQLITE_CANTOPEN | (4 << 8)) // 1038
+	SQLITE_CANTOPEN_DIRTYWAL  = (SQLITE_CANTOPEN | (5 << 8)) // 1294
+	SQLITE_CANTOPEN_SYMLINK   = (SQLITE_CANTOPEN | (6 << 8)) // 1550
 
 	// Extended result codes for SQLITE_ABORT (4)
 	SQLITE_ABORT_ROLLBACK = (SQLITE_ABORT | (2 << 8)) // 516
@@ -209,7 +209,7 @@ func NewConstraintError(code int, constraintType, message string) *ConstraintErr
 type UniqueViolationError struct {
 	ConstraintError
 	ConflictingValue interface{} // The value that caused the conflict
-	IndexName        string       // Name of the unique index, if applicable
+	IndexName        string      // Name of the unique index, if applicable
 }
 
 // Error implements the error interface.
@@ -434,10 +434,10 @@ func NewSyntaxError(message, token string, position int) *SyntaxError {
 // LockError represents a database locking error.
 type LockError struct {
 	SQLiteError
-	LockType   string // Type of lock (SHARED, RESERVED, PENDING, EXCLUSIVE)
-	Database   string // Name of the database file
-	IsTimeout  bool   // True if the error is due to a timeout
-	IsBusy     bool   // True if the database is busy
+	LockType  string // Type of lock (SHARED, RESERVED, PENDING, EXCLUSIVE)
+	Database  string // Name of the database file
+	IsTimeout bool   // True if the error is due to a timeout
+	IsBusy    bool   // True if the database is busy
 }
 
 // Error implements the error interface.
@@ -467,9 +467,9 @@ func NewLockError(code int, lockType, database, message string) *LockError {
 			Code:    code,
 			Message: message,
 		},
-		LockType: lockType,
-		Database: database,
-		IsBusy:   code == SQLITE_BUSY || code == SQLITE_BUSY_RECOVERY || code == SQLITE_BUSY_SNAPSHOT,
+		LockType:  lockType,
+		Database:  database,
+		IsBusy:    code == SQLITE_BUSY || code == SQLITE_BUSY_RECOVERY || code == SQLITE_BUSY_SNAPSHOT,
 		IsTimeout: message != "" && (code == SQLITE_BUSY || code == SQLITE_LOCKED),
 	}
 }

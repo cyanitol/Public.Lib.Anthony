@@ -228,21 +228,21 @@ func TestReadWriteOverflowRoundtrip(t *testing.T) {
 	cursor := NewCursor(bt, rootPage)
 
 	tests := []struct {
-		name        string
-		payload     []byte
-		localSize   uint16
+		name         string
+		payload      []byte
+		localSize    uint16
 		wantOverflow bool
 	}{
 		{
-			name:        "no overflow needed",
-			payload:     []byte("Short payload"),
-			localSize:   13,
+			name:         "no overflow needed",
+			payload:      []byte("Short payload"),
+			localSize:    13,
 			wantOverflow: false,
 		},
 		{
-			name:        "overflow needed",
-			payload:     make([]byte, 5000),
-			localSize:   496,
+			name:         "overflow needed",
+			payload:      make([]byte, 5000),
+			localSize:    496,
 			wantOverflow: true,
 		},
 	}
@@ -580,33 +580,33 @@ func TestInsertWithOverflow(t *testing.T) {
 	cursor := NewCursor(bt, rootPage)
 
 	tests := []struct {
-		name        string
-		rowid       int64
-		payloadSize int
+		name         string
+		rowid        int64
+		payloadSize  int
 		wantOverflow bool
 	}{
 		{
-			name:        "small payload - no overflow",
-			rowid:       1,
-			payloadSize: 100,
+			name:         "small payload - no overflow",
+			rowid:        1,
+			payloadSize:  100,
 			wantOverflow: false,
 		},
 		{
-			name:        "medium payload - no overflow",
-			rowid:       2,
-			payloadSize: 2000,
+			name:         "medium payload - no overflow",
+			rowid:        2,
+			payloadSize:  2000,
 			wantOverflow: false,
 		},
 		{
-			name:        "large payload - requires overflow",
-			rowid:       3,
-			payloadSize: 10000,
+			name:         "large payload - requires overflow",
+			rowid:        3,
+			payloadSize:  10000,
 			wantOverflow: true,
 		},
 		{
-			name:        "very large payload - multiple overflow pages",
-			rowid:       4,
-			payloadSize: 50000,
+			name:         "very large payload - multiple overflow pages",
+			rowid:        4,
+			payloadSize:  50000,
 			wantOverflow: true,
 		},
 	}
@@ -747,9 +747,9 @@ func TestMultipleRowsWithOverflow(t *testing.T) {
 		rowid       int64
 		payloadSize int
 	}{
-		{1, 100},    // Small - no overflow
-		{2, 6000},   // Medium with overflow
-		{3, 500},    // Small - no overflow
+		{1, 100},  // Small - no overflow
+		{2, 6000}, // Medium with overflow
+		{3, 500},  // Small - no overflow
 	}
 
 	// Insert all rows

@@ -150,7 +150,7 @@ func TestParseSerialValue(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			mem := NewMem()
 			err := parseSerialValue(tt.data, tt.offset, tt.serialType, mem)
 			if (err != nil) != tt.wantErr {
@@ -250,7 +250,7 @@ func TestParseSerialInt(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			mem := NewMem()
 			err := parseSerialInt(tt.data, tt.offset, tt.serialType, mem)
 			if (err != nil) != tt.wantErr {
@@ -365,8 +365,8 @@ func TestGetBtreeCursorPayload(t *testing.T) {
 		t.Parallel()
 		v := NewTestVDBE(5)
 		cursor := &Cursor{
-			CurType:      CursorBTree,
-			BtreeCursor:  nil,
+			CurType:     CursorBTree,
+			BtreeCursor: nil,
 		}
 		dst := NewMem()
 
@@ -383,8 +383,8 @@ func TestGetBtreeCursorPayload(t *testing.T) {
 		t.Parallel()
 		v := NewTestVDBE(5)
 		cursor := &Cursor{
-			CurType:      CursorBTree,
-			BtreeCursor:  "not a cursor", // Invalid type
+			CurType:     CursorBTree,
+			BtreeCursor: "not a cursor", // Invalid type
 		}
 		dst := NewMem()
 
@@ -681,7 +681,6 @@ func TestExecIdxRowid(t *testing.T) {
 		}
 	})
 
-
 }
 
 // TestExecDeferredSeek tests execDeferredSeek function (68.2% coverage)
@@ -839,7 +838,6 @@ func TestGetSavepointPager(t *testing.T) {
 	})
 }
 
-
 // TestMemRealValue tests RealValue function (50% coverage)
 func TestMemRealValue(t *testing.T) {
 	t.Parallel()
@@ -975,7 +973,7 @@ func TestOpcodeString(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.want, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := tt.opcode.String()
 			if got != tt.want {
 				t.Errorf("Opcode.String() = %v, want %v", got, tt.want)

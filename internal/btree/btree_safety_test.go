@@ -11,11 +11,11 @@ import (
 
 // SafetyTestProvider is a thread-safe mock page provider for safety tests
 type SafetyTestProvider struct {
-	mu         sync.RWMutex
-	pages      map[uint32][]byte
-	dirty      map[uint32]bool
-	callCount  int
-	getCalls   func(uint32) ([]byte, error)
+	mu        sync.RWMutex
+	pages     map[uint32][]byte
+	dirty     map[uint32]bool
+	callCount int
+	getCalls  func(uint32) ([]byte, error)
 }
 
 func NewSafetyTestProvider() *SafetyTestProvider {
@@ -220,7 +220,7 @@ func TestPageValidation(t *testing.T) {
 			setupPage: func() []byte {
 				page := make([]byte, 4096)
 				page[0] = PageTypeLeafTable
-				binary.BigEndian.PutUint16(page[3:5], 0) // NumCells = 0
+				binary.BigEndian.PutUint16(page[3:5], 0)     // NumCells = 0
 				binary.BigEndian.PutUint16(page[5:7], 65535) // Invalid cell start
 				return page
 			},
@@ -233,7 +233,7 @@ func TestPageValidation(t *testing.T) {
 				page := make([]byte, 4096)
 				page[0] = PageTypeLeafTable
 				binary.BigEndian.PutUint16(page[3:5], 100) // NumCells = 100
-				binary.BigEndian.PutUint16(page[5:7], 20) // Cell content starts too early
+				binary.BigEndian.PutUint16(page[5:7], 20)  // Cell content starts too early
 				return page
 			},
 			wantErr: true,

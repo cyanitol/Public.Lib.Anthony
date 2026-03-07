@@ -100,7 +100,6 @@ func TestParserErrorPaths(t *testing.T) {
 
 		// Foreign Key
 		{"CREATE TABLE with FOREIGN KEY", "CREATE TABLE t (id INT, user_id INT, FOREIGN KEY (user_id) REFERENCES users(id))", false},
-
 	}
 
 	for _, tt := range tests {

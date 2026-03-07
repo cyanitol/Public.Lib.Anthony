@@ -1,4 +1,4 @@
-.PHONY: all build test test-fast test-ci test-short test-cover test-race lint clean help
+.PHONY: all build test test-fast test-ci test-short test-cover test-race lint clean help commit check-spdx check-complexity check-fmt
 
 # Test configuration
 TEST_PARALLEL ?= 4
@@ -74,6 +74,41 @@ clean:
 clean-all: clean
 	go clean -cache -testcache
 
+# Pre-commit validation - run before committing
+commit: check-fmt check-spdx check-complexity vet build test
+	@echo ""
+	@echo "✓ All pre-commit checks passed!"
+	@echo "Ready to commit."
+
+# Check that go fmt produces no changes
+check-fmt:
+	@echo "Checking go fmt..."
+	@test -z "$$(gofmt -l .)" || (echo "Files need formatting:"; gofmt -l .; exit 1)
+	@echo "✓ Code is properly formatted"
+
+# Check that all .go files have SPDX license headers
+check-spdx:
+	@echo "Checking SPDX headers..."
+	@missing=$$(find . -name '*.go' -not -path './vendor/*' -exec grep -L 'SPDX-License-Identifier' {} \;); \
+	if [ -n "$$missing" ]; then \
+		echo "Files missing SPDX-License-Identifier:"; \
+		echo "$$missing"; \
+		exit 1; \
+	fi
+	@echo "✓ All files have SPDX headers"
+
+# Check cyclomatic complexity (max 10 for non-test files)
+check-complexity:
+	@echo "Checking cyclomatic complexity (max 10)..."
+	@which gocyclo > /dev/null || go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+	@violations=$$(gocyclo -over 10 . 2>/dev/null | grep -v '_test.go' || true); \
+	if [ -n "$$violations" ]; then \
+		echo "Functions with complexity > 10:"; \
+		echo "$$violations"; \
+		exit 1; \
+	fi
+	@echo "✓ All functions have complexity ≤ 10"
+
 # Show help
 help:
 	@echo "Available targets:"
@@ -93,4 +128,8 @@ help:
 	@echo "  tidy             - Tidy go.mod"
 	@echo "  clean            - Remove generated files"
 	@echo "  clean-all        - Remove all caches and generated files"
+	@echo "  commit           - Pre-commit checks (fmt, spdx, complexity, vet, build, test)"
+	@echo "  check-fmt        - Check code is formatted"
+	@echo "  check-spdx       - Check SPDX headers"
+	@echo "  check-complexity - Check cyclomatic complexity ≤ 10"
 	@echo "  help             - Show this help"

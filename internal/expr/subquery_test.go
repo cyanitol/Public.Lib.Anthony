@@ -198,10 +198,10 @@ func TestGenerateScalarSubquery(t *testing.T) {
 
 	// Verify bytecode structure
 	// The scalar subquery implementation embeds subquery bytecode directly
-	foundNull := false        // Should initialize to NULL
-	foundCopy := false        // Should use OpCopy to capture result
-	foundGoto := false        // Should use OpGoto to skip to end
-	foundNoop := false        // Should replace OpHalt with OpNoop
+	foundNull := false // Should initialize to NULL
+	foundCopy := false // Should use OpCopy to capture result
+	foundGoto := false // Should use OpGoto to skip to end
+	foundNoop := false // Should replace OpHalt with OpNoop
 
 	for i := 0; i < v.NumOps(); i++ {
 		op := v.Program[i]
@@ -269,9 +269,9 @@ func TestGenerateExists(t *testing.T) {
 
 	// Verify bytecode structure
 	// The EXISTS implementation embeds subquery bytecode directly
-	foundInitFalse := false   // Should initialize to false
-	foundSetTrue := false     // Should set to true if row found
-	foundGoto := false        // Should use Goto to skip to end when found
+	foundInitFalse := false // Should initialize to false
+	foundSetTrue := false   // Should set to true if row found
+	foundGoto := false      // Should use Goto to skip to end when found
 
 	initToFalseFound := false
 	setToTrueFound := false

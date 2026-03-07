@@ -9,10 +9,10 @@ import (
 
 // Free list errors
 var (
-	ErrFreeListCorrupt   = errors.New("free list is corrupt")
-	ErrNoFreePages       = errors.New("no free pages available")
-	ErrInvalidTrunkPage  = errors.New("invalid trunk page")
-	ErrFreeListOverflow  = errors.New("free list overflow")
+	ErrFreeListCorrupt  = errors.New("free list is corrupt")
+	ErrNoFreePages      = errors.New("no free pages available")
+	ErrInvalidTrunkPage = errors.New("invalid trunk page")
+	ErrFreeListOverflow = errors.New("free list overflow")
 )
 
 // Free list page structure constants (matching SQLite format)
@@ -504,11 +504,11 @@ func (fl *FreeList) Clear() {
 
 // FreeListInfo contains information about the free list state.
 type FreeListInfo struct {
-	FirstTrunk   Pgno
-	TotalFree    uint32
-	PendingFree  int
-	TrunkCount   int
-	LeafCount    int
+	FirstTrunk  Pgno
+	TotalFree   uint32
+	PendingFree int
+	TrunkCount  int
+	LeafCount   int
 }
 
 // Info returns information about the free list state.

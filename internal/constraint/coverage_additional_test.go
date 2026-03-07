@@ -203,18 +203,18 @@ func TestDefaultConstraint_ApplyDefaults(t *testing.T) {
 			},
 		},
 		{
-			Name:       "name",
-			AllowsNull: true,
+			Name:              "name",
+			AllowsNull:        true,
 			DefaultConstraint: nil,
 		},
 	}
 
 	tests := []struct {
-		name        string
-		insertCols  []string
-		insertVals  []interface{}
-		wantValues  []interface{}
-		wantError   bool
+		name       string
+		insertCols []string
+		insertVals []interface{}
+		wantValues []interface{}
+		wantError  bool
 	}{
 		{
 			name:       "apply defaults for missing columns",

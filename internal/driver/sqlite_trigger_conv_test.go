@@ -209,14 +209,20 @@ func testCreateAndDropTrigger(t *testing.T, db *sql.DB) {
 		}
 		defer rows.Close()
 
-		results := []struct{ a int; b string }{}
+		results := []struct {
+			a int
+			b string
+		}{}
 		for rows.Next() {
 			var a int
 			var b string
 			if err := rows.Scan(&a, &b); err != nil {
 				t.Fatalf("failed to scan: %v", err)
 			}
-			results = append(results, struct{ a int; b string }{a, b})
+			results = append(results, struct {
+				a int
+				b string
+			}{a, b})
 		}
 		if len(results) != 2 || results[0].a != 2 || results[1].a != 4 {
 			t.Errorf("expected [(2, 'b'), (4, 'd')], got %v", results)

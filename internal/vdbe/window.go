@@ -53,16 +53,16 @@ type WindowState struct {
 	Frame WindowFrame // Frame definition
 
 	// Partition data
-	Partitions      []*WindowPartition // All partitions
-	CurrentPartIdx  int                // Index of current partition
-	CurrentPartRow  int                // Row index within current partition
-	TotalRowsSeen   int                // Total rows processed across all partitions
+	Partitions     []*WindowPartition // All partitions
+	CurrentPartIdx int                // Index of current partition
+	CurrentPartRow int                // Row index within current partition
+	TotalRowsSeen  int                // Total rows processed across all partitions
 
 	// Ranking state (for RANK, DENSE_RANK)
-	LastRankRow     []*Mem // Last row used for ranking comparison
-	CurrentRank     int64  // Current rank value
-	CurrentDenseRank int64 // Current dense rank value
-	RowsAtCurrentRank int64 // Number of rows with current rank
+	LastRankRow       []*Mem // Last row used for ranking comparison
+	CurrentRank       int64  // Current rank value
+	CurrentDenseRank  int64  // Current dense rank value
+	RowsAtCurrentRank int64  // Number of rows with current rank
 
 	// Row buffer for LAG/LEAD
 	RowBuffer [][]*Mem // Buffer of rows for accessing past/future rows
@@ -74,18 +74,18 @@ type WindowState struct {
 // NewWindowState creates a new window state
 func NewWindowState(partitionCols, orderByCols []int, orderByDesc []bool, frame WindowFrame) *WindowState {
 	return &WindowState{
-		PartitionCols:    partitionCols,
-		OrderByCols:      orderByCols,
-		OrderByDesc:      orderByDesc,
-		Frame:            frame,
-		Partitions:       make([]*WindowPartition, 0),
-		CurrentPartIdx:   -1,
-		CurrentPartRow:   -1,
-		TotalRowsSeen:    0,
-		CurrentRank:      0,
-		CurrentDenseRank: 0,
+		PartitionCols:     partitionCols,
+		OrderByCols:       orderByCols,
+		OrderByDesc:       orderByDesc,
+		Frame:             frame,
+		Partitions:        make([]*WindowPartition, 0),
+		CurrentPartIdx:    -1,
+		CurrentPartRow:    -1,
+		TotalRowsSeen:     0,
+		CurrentRank:       0,
+		CurrentDenseRank:  0,
 		RowsAtCurrentRank: 0,
-		RowBuffer:        make([][]*Mem, 0),
+		RowBuffer:         make([][]*Mem, 0),
 	}
 }
 

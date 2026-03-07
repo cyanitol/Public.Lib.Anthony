@@ -138,34 +138,34 @@ func TestParseCTE_Recursive(t *testing.T) {
 func TestParseCTE_Multiple(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		sql      string
-		wantErr  bool
-		numCTEs  int
+		name    string
+		sql     string
+		wantErr bool
+		numCTEs int
 	}{
 		{
-			name:     "two CTEs",
-			sql:      "WITH a AS (SELECT 1), b AS (SELECT 2) SELECT * FROM a, b",
-			wantErr:  false,
-			numCTEs:  2,
+			name:    "two CTEs",
+			sql:     "WITH a AS (SELECT 1), b AS (SELECT 2) SELECT * FROM a, b",
+			wantErr: false,
+			numCTEs: 2,
 		},
 		{
-			name:     "three CTEs",
-			sql:      "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT 3) SELECT * FROM a, b, c",
-			wantErr:  false,
-			numCTEs:  3,
+			name:    "three CTEs",
+			sql:     "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT 3) SELECT * FROM a, b, c",
+			wantErr: false,
+			numCTEs: 3,
 		},
 		{
-			name:     "CTEs with column lists",
-			sql:      "WITH a(x) AS (SELECT 1), b(y) AS (SELECT 2) SELECT * FROM a, b",
-			wantErr:  false,
-			numCTEs:  2,
+			name:    "CTEs with column lists",
+			sql:     "WITH a(x) AS (SELECT 1), b(y) AS (SELECT 2) SELECT * FROM a, b",
+			wantErr: false,
+			numCTEs: 2,
 		},
 		{
-			name:     "mixed CTEs with and without column lists",
-			sql:      "WITH a AS (SELECT 1), b(y, z) AS (SELECT 2, 3), c AS (SELECT 4) SELECT * FROM a, b, c",
-			wantErr:  false,
-			numCTEs:  3,
+			name:    "mixed CTEs with and without column lists",
+			sql:     "WITH a AS (SELECT 1), b(y, z) AS (SELECT 2, 3), c AS (SELECT 4) SELECT * FROM a, b, c",
+			wantErr: false,
+			numCTEs: 3,
 		},
 	}
 

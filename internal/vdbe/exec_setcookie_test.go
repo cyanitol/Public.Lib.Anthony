@@ -32,13 +32,13 @@ func (m *MockCookiePager) GetCookie(dbIndex, cookieType int) (uint32, error) {
 }
 
 // Implement PagerInterface methods (not used in these tests)
-func (m *MockCookiePager) BeginRead() error                    { return nil }
-func (m *MockCookiePager) EndRead() error                      { return nil }
-func (m *MockCookiePager) BeginWrite() error                   { return nil }
-func (m *MockCookiePager) Commit() error                       { return nil }
-func (m *MockCookiePager) Rollback() error                     { return nil }
-func (m *MockCookiePager) InTransaction() bool                 { return false }
-func (m *MockCookiePager) InWriteTransaction() bool            { return false }
+func (m *MockCookiePager) BeginRead() error         { return nil }
+func (m *MockCookiePager) EndRead() error           { return nil }
+func (m *MockCookiePager) BeginWrite() error        { return nil }
+func (m *MockCookiePager) Commit() error            { return nil }
+func (m *MockCookiePager) Rollback() error          { return nil }
+func (m *MockCookiePager) InTransaction() bool      { return false }
+func (m *MockCookiePager) InWriteTransaction() bool { return false }
 
 // TestSetCookieOpcode tests the OpSetCookie opcode
 func TestSetCookieOpcode(t *testing.T) {
@@ -54,9 +54,9 @@ func TestSetCookieOpcode(t *testing.T) {
 
 		instr := &Instruction{
 			Opcode: OpSetCookie,
-			P1:     0,    // database index
-			P2:     1,    // cookie type
-			P3:     42,   // cookie value
+			P1:     0,  // database index
+			P2:     1,  // cookie type
+			P3:     42, // cookie value
 		}
 
 		err := v.execSetCookie(instr)

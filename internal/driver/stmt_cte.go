@@ -252,8 +252,8 @@ func (s *Stmt) adjustJumpTarget(vm *vdbe.VDBE, instr *vdbe.Instruction, addr int
 		if instr.P2 > 0 {
 			vm.Program[addr].P2 = instr.P2 + offsets.startAddr
 		}
-	// Note: OpEq, OpNe, OpLt, OpLe, OpGt, OpGe use P2 as a register, not a jump target
-	// They are handled by adjustRegisterNumbers instead
+		// Note: OpEq, OpNe, OpLt, OpLe, OpGt, OpGe use P2 as a register, not a jump target
+		// They are handled by adjustRegisterNumbers instead
 	}
 }
 

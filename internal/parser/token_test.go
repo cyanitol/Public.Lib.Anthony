@@ -48,8 +48,8 @@ func TestTokenTypeIsKeyword(t *testing.T) {
 		{TK_INSERT, true},
 		{TK_UPDATE, true},
 		{TK_DELETE, true},
-		{TK_STORED, true}, // Last keyword in the range
-		{TK_INSTEAD, false},  // After the keyword range
+		{TK_STORED, true},   // Last keyword in the range
+		{TK_INSTEAD, false}, // After the keyword range
 		{TK_DO, false},
 		{TK_NOTHING, false},
 		{TK_INTEGER, false},

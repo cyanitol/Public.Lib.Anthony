@@ -10,11 +10,11 @@ import (
 
 // View represents a database view definition.
 type View struct {
-	Name      string          // View name
-	Columns   []string        // Optional explicit column names
+	Name      string             // View name
+	Columns   []string           // Optional explicit column names
 	Select    *parser.SelectStmt // The SELECT statement defining the view
-	SQL       string          // CREATE VIEW statement
-	Temporary bool            // True for temporary views
+	SQL       string             // CREATE VIEW statement
+	Temporary bool               // True for temporary views
 }
 
 // GetView retrieves a view by name.

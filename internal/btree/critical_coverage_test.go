@@ -29,8 +29,8 @@ func TestGetSiblingWithLeftPage_ActualMerge(t *testing.T) {
 		childPage uint32
 		rowid     int64
 	}{
-		{2, 1},  // First child: page 2
-		{3, 5},  // Second child: page 3 (has left sibling)
+		{2, 1}, // First child: page 2
+		{3, 5}, // Second child: page 3 (has left sibling)
 	}
 	rootData := createInteriorPage(1, pageSize, rootCells, 4)
 	bt.SetPage(1, rootData)
@@ -617,7 +617,7 @@ func createIndexPage2(bt *Btree) (uint32, error) {
 func containsStr2(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
 		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
-		 containsMiddle2(s, substr)))
+			containsMiddle2(s, substr)))
 }
 
 func containsMiddle2(s, substr string) bool {

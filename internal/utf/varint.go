@@ -106,12 +106,12 @@ func decodeVarint3to5(b9 *[9]byte) (uint64, int, uint32, uint32, uint32) {
 	a := uint32(b9[0])<<14 | uint32(b9[2])
 	b := uint32(b9[1])
 	if a&0x80 == 0 {
-		return uint64((a&varintSlot20)|((b&0x7f)<<7)), 3, 0, 0, 0
+		return uint64((a & varintSlot20) | ((b & 0x7f) << 7)), 3, 0, 0, 0
 	}
 	a &= varintSlot20
 	b = b<<14 | uint32(b9[3])
 	if b&0x80 == 0 {
-		return uint64((a<<7)|(b&varintSlot20)), 4, 0, 0, 0
+		return uint64((a << 7) | (b & varintSlot20)), 4, 0, 0, 0
 	}
 	b &= varintSlot20
 	s := a

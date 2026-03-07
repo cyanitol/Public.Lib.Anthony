@@ -12,9 +12,9 @@ const (
 	MaxParameters  = 32_767
 
 	// Memory limits
-	MaxMemoryDBPages  = 100_000       // ~400MB at 4KB pages
-	MaxRecordSize     = 1_000_000_000 // 1GB
-	MaxBlobSize       = 1_000_000_000 // 1GB
+	MaxMemoryDBPages = 100_000       // ~400MB at 4KB pages
+	MaxRecordSize    = 1_000_000_000 // 1GB
+	MaxBlobSize      = 1_000_000_000 // 1GB
 
 	// Operation limits
 	MaxAttachedDBs  = 10
@@ -26,22 +26,22 @@ const (
 // operational pragmas that are safe for normal use.
 var SafePragmas = map[string]bool{
 	// Informational (read-only)
-	"table_info":       true,
-	"index_list":       true,
-	"index_info":       true,
-	"index_xinfo":      true,
-	"foreign_key_list": true,
+	"table_info":        true,
+	"index_list":        true,
+	"index_info":        true,
+	"index_xinfo":       true,
+	"foreign_key_list":  true,
 	"foreign_key_check": true,
-	"database_list":    true,
-	"compile_options":  true,
-	"collation_list":   true,
-	"data_version":     true,
-	"integrity_check":  true,
-	"quick_check":      true,
-	"table_list":       true,
-	"function_list":    true,
-	"module_list":      true,
-	"pragma_list":      true,
+	"database_list":     true,
+	"compile_options":   true,
+	"collation_list":    true,
+	"data_version":      true,
+	"integrity_check":   true,
+	"quick_check":       true,
+	"table_list":        true,
+	"function_list":     true,
+	"module_list":       true,
+	"pragma_list":       true,
 	// Configuration (safe to modify)
 	"schema_version":      true,
 	"user_version":        true,

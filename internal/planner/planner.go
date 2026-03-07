@@ -522,8 +522,8 @@ func (p *Planner) ExplainPlan(info *WhereInfo) string {
 	totalCost := float64(info.BestPath.Cost)
 	if totalCost > 0 {
 		result += fmt.Sprintf("├─ Cost breakdown:\n")
-		cpuCost := totalCost * 0.6  // Estimated 60% CPU
-		ioCost := totalCost * 0.4   // Estimated 40% I/O
+		cpuCost := totalCost * 0.6 // Estimated 60% CPU
+		ioCost := totalCost * 0.4  // Estimated 40% I/O
 		result += fmt.Sprintf("│  ├─ CPU cost: %.2f (%.1f%%)\n", cpuCost, 60.0)
 		result += fmt.Sprintf("│  └─ I/O cost: %.2f (%.1f%%)\n", ioCost, 40.0)
 	}

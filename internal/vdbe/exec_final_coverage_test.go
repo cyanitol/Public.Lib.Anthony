@@ -19,17 +19,17 @@ func TestExecFunctionCoverage(t *testing.T) {
 	// Test function call with 1 argument - upper("hello") -> "HELLO"
 	instr := &Instruction{
 		Opcode: OpFunction,
-		P1:     0,  // constant mask
-		P2:     1,  // first arg register
-		P3:     5,  // output register
+		P1:     0, // constant mask
+		P2:     1, // first arg register
+		P3:     5, // output register
 		P4:     P4Union{Z: "upper"},
 		P4Type: P4Static,
-		P5:     1,  // number of arguments
+		P5:     1, // number of arguments
 	}
 
 	// Add instruction to program and set PC so it can access it
 	v.Program = append(v.Program, instr)
-	v.PC = 1  // Set to 1 so PC-1 = 0 (the instruction we just added)
+	v.PC = 1 // Set to 1 so PC-1 = 0 (the instruction we just added)
 
 	err := v.execFunction(instr)
 	if err != nil {
@@ -56,11 +56,11 @@ func TestExecAggStepWindowCoverage(t *testing.T) {
 	// Test window aggregate step
 	instr := &Instruction{
 		Opcode: OpAggStepWindow,
-		P1:     0,  // window index
-		P2:     1,  // first arg register
+		P1:     0, // window index
+		P2:     1, // first arg register
 		P4:     P4Union{Z: "count"},
 		P4Type: P4Static,
-		P5:     2,  // number of arguments
+		P5:     2, // number of arguments
 	}
 
 	err := v.execAggStepWindow(instr)
@@ -127,7 +127,7 @@ func TestDecodeInt48ValueCoverage(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			result, err := decodeInt48Value(tt.data, tt.offset)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
@@ -203,7 +203,7 @@ func TestExecDeleteComprehensive(t *testing.T) {
 		cursor := &Cursor{
 			CurType:  CursorBTree,
 			IsTable:  true,
-			Writable: false,  // Not writable
+			Writable: false, // Not writable
 		}
 		v.Cursors[0] = cursor
 
@@ -227,7 +227,7 @@ func TestExecDeleteComprehensive(t *testing.T) {
 			CurType:     CursorBTree,
 			IsTable:     true,
 			Writable:    true,
-			BtreeCursor: &MockBTreeCursor{},  // Wrong type - not *btree.BtCursor
+			BtreeCursor: &MockBTreeCursor{}, // Wrong type - not *btree.BtCursor
 		}
 		v.Cursors[0] = cursor
 
@@ -255,8 +255,8 @@ func TestSeekGEAndLEComprehensive(t *testing.T) {
 			CurType: CursorBTree,
 			IsTable: true,
 			BtreeCursor: &MockBTreeCursor{
-				valid:       true,
-				currentKey:  []byte{0, 0, 0, 0, 0, 0, 0, 5},
+				valid:        true,
+				currentKey:   []byte{0, 0, 0, 0, 0, 0, 0, 5},
 				currentRowid: 5,
 			},
 		}
@@ -266,9 +266,9 @@ func TestSeekGEAndLEComprehensive(t *testing.T) {
 		v.PC = 0
 		instr := &Instruction{
 			Opcode: OpSeekGE,
-			P1:     0,   // cursor
-			P2:     10,  // jump if not found
-			P3:     1,   // register with value
+			P1:     0,  // cursor
+			P2:     10, // jump if not found
+			P3:     1,  // register with value
 		}
 
 		err := v.execSeekGE(instr)
@@ -313,8 +313,8 @@ func TestSeekGEAndLEComprehensive(t *testing.T) {
 			CurType: CursorBTree,
 			IsTable: true,
 			BtreeCursor: &MockBTreeCursor{
-				valid:       true,
-				currentKey:  []byte{0, 0, 0, 0, 0, 0, 0, 3},
+				valid:        true,
+				currentKey:   []byte{0, 0, 0, 0, 0, 0, 0, 3},
 				currentRowid: 3,
 			},
 		}

@@ -55,7 +55,7 @@ func TestAffinityHandleSelect(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -122,7 +122,7 @@ func TestAffinityHandleSelectColumn(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -172,7 +172,7 @@ func TestAffinityHandleVector(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -223,7 +223,7 @@ func TestAffinityHandleFunction(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -274,7 +274,7 @@ func TestAffinityHandleTransparent(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -313,7 +313,7 @@ func TestAffinityHandleRegister(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -384,7 +384,7 @@ func TestGetComparisonAffinity(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := GetComparisonAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -445,7 +445,7 @@ func TestPropagateAffinityCase(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			PropagateAffinity(tt.expr)
 			if tt.expr.Affinity != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, tt.expr.Affinity)
@@ -496,7 +496,7 @@ func TestApplyNumericAffinity(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := ApplyAffinity(tt.value, AFF_NUMERIC)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -504,7 +504,6 @@ func TestApplyNumericAffinity(t *testing.T) {
 		})
 	}
 }
-
 
 // ============================================================================
 // CodeGen Tests - Uncovered Functions
@@ -661,7 +660,7 @@ func TestGenerateVariable(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			v := vdbe.New()
 			gen := NewCodeGenerator(v)
 			gen.SetArgs(tt.args)
@@ -693,7 +692,7 @@ func TestGenerateCollate(t *testing.T) {
 	gen := NewCodeGenerator(v)
 
 	expr := &parser.CollateExpr{
-		Expr:        &parser.LiteralExpr{Type: parser.LiteralString, Value: "test"},
+		Expr:      &parser.LiteralExpr{Type: parser.LiteralString, Value: "test"},
 		Collation: "NOCASE",
 	}
 
@@ -773,7 +772,6 @@ func TestCollSeqFromCollateOp(t *testing.T) {
 	}
 }
 
-
 func TestEvaluateIsAndIsNot(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -851,7 +849,7 @@ func TestEvaluateIsAndIsNot(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateComparison(tt.op, tt.left, tt.right, AFF_INTEGER, CollSeqBinary)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -904,7 +902,7 @@ func TestNegateString(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateUnary(OpNegate, tt.value)
 			if !compareResults(result, tt.expected) {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -951,7 +949,7 @@ func TestOpCodeString(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.expected, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := tt.op.String()
 			if result != tt.expected {
 				t.Errorf("Expected %s, got %s", tt.expected, result)
@@ -1026,7 +1024,7 @@ func TestVectorSizeExpr(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := tt.expr.VectorSize()
 			if result != tt.expected {
 				t.Errorf("Expected %d, got %d", tt.expected, result)
@@ -1140,7 +1138,7 @@ func TestIsFunctionConstant(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := tt.expr.IsConstant()
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -1216,7 +1214,7 @@ func TestStringLiteral(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := tt.expr.String()
 			if result != tt.expected {
 				t.Errorf("Expected %s, got %s", tt.expected, result)

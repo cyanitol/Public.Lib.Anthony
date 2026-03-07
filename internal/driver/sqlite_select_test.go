@@ -146,7 +146,7 @@ func TestSQLiteSelectBasic(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			// Run setup statements
 			for _, stmt := range tt.setup {
@@ -285,7 +285,7 @@ func TestSQLiteSelectWhere(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
@@ -412,7 +412,7 @@ func TestSQLiteSelectOrderBy(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
@@ -506,7 +506,7 @@ func TestSQLiteSelectAliases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
@@ -598,7 +598,7 @@ func TestSQLiteSelectDistinct(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
@@ -713,7 +713,7 @@ func TestSQLiteSelectLimitOffset(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
@@ -821,7 +821,7 @@ func TestSQLiteSelectJoins(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
@@ -893,7 +893,7 @@ func TestSQLiteSelectWithoutFrom(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
@@ -1012,7 +1012,7 @@ func TestSQLiteSelectGroupBy(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
@@ -1113,7 +1113,7 @@ func TestSQLiteSelectHaving(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
@@ -1200,7 +1200,7 @@ func TestSQLiteSelectTableStar(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {
@@ -1309,7 +1309,7 @@ func TestSQLiteSelectErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			for _, stmt := range tt.setup {
 				if _, err := db.Exec(stmt); err != nil {

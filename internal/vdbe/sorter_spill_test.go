@@ -56,10 +56,10 @@ func TestSorterWithSpill_NoSpill(t *testing.T) {
 	}
 
 	sorter := NewSorterWithSpill(
-		[]int{0},       // Sort by first column
-		[]bool{false},  // Ascending
-		[]string{""},   // Default collation
-		2,              // 2 columns
+		[]int{0},      // Sort by first column
+		[]bool{false}, // Ascending
+		[]string{""},  // Default collation
+		2,             // 2 columns
 		config,
 	)
 	defer sorter.Close()
@@ -423,7 +423,7 @@ func TestSorterWithSpill_SpillDisabled(t *testing.T) {
 	t.Parallel()
 
 	config := &SorterConfig{
-		MaxMemoryBytes: 100, // Small limit
+		MaxMemoryBytes: 100,   // Small limit
 		EnableSpill:    false, // But spill disabled
 	}
 

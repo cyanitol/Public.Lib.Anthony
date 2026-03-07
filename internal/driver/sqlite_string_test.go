@@ -118,7 +118,6 @@ func TestSQLiteStringFunctions(t *testing.T) {
 			name:  "substring_alias",
 			query: "SELECT substring('hello world', 7, 5)",
 			want:  "world",
-			
 		},
 
 		// INSTR tests (from instr.test)
@@ -466,7 +465,7 @@ func TestSQLiteStringFunctions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)

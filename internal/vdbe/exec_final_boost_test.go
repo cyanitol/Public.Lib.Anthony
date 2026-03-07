@@ -10,11 +10,11 @@ func TestExecGotoExtended(t *testing.T) {
 	t.Parallel()
 	v := NewTestVDBE(5)
 	// Add some instructions to the program
-	v.AddOp(OpNoop, 0, 0, 0)   // 0
-	v.AddOp(OpNoop, 0, 0, 0)   // 1
-	v.AddOp(OpNoop, 0, 0, 0)   // 2
-	v.AddOp(OpGoto, 0, 1, 0)   // 3 - goto instruction
-	v.AddOp(OpHalt, 0, 0, 0)   // 4
+	v.AddOp(OpNoop, 0, 0, 0) // 0
+	v.AddOp(OpNoop, 0, 0, 0) // 1
+	v.AddOp(OpNoop, 0, 0, 0) // 2
+	v.AddOp(OpGoto, 0, 1, 0) // 3 - goto instruction
+	v.AddOp(OpHalt, 0, 0, 0) // 4
 
 	v.PC = 3
 
@@ -139,7 +139,7 @@ func TestExecIf(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(5)
 			tt.setupMem(v)
 			v.PC = 0
@@ -204,7 +204,7 @@ func TestExecIfNot(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(5)
 			tt.setupMem(v)
 			v.PC = 0
@@ -374,7 +374,7 @@ func TestExecAddImm(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(5)
 			v.Mem[0].SetInt(tt.initial)
 
@@ -424,7 +424,7 @@ func TestExecIsNull(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(5)
 			tt.setupMem(v.Mem[0])
 
@@ -477,7 +477,7 @@ func TestExecNotNull(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(5)
 			tt.setupMem(v.Mem[0])
 
@@ -649,7 +649,7 @@ func TestEvalMemAsBool(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			mem := NewMem()
 			tt.setupMem(mem)
 

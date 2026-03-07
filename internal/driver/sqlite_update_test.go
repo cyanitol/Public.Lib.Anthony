@@ -12,12 +12,12 @@ func TestSQLiteUpdate(t *testing.T) {
 	t.Skip("pre-existing failure")
 	tests := []struct {
 		name       string
-		setup      []string          // CREATE + INSERT statements
-		update     string            // UPDATE statement to test
-		verify     string            // SELECT to verify results
-		wantRows   [][]interface{}  // Expected results
-		wantErr    bool             // Whether an error is expected
-		skipVerify bool             // For updates that just test execution
+		setup      []string        // CREATE + INSERT statements
+		update     string          // UPDATE statement to test
+		verify     string          // SELECT to verify results
+		wantRows   [][]interface{} // Expected results
+		wantErr    bool            // Whether an error is expected
+		skipVerify bool            // For updates that just test execution
 		skip       string
 	}{
 		// update-1.1: Try to update a non-existent table
@@ -741,7 +741,7 @@ func TestSQLiteUpdate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)

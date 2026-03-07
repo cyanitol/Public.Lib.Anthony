@@ -3,10 +3,11 @@ package parser
 
 // parseReindex parses a REINDEX statement.
 // Syntax:
-//   REINDEX
-//   REINDEX collation-name
-//   REINDEX table-or-index-name
-//   REINDEX database-name.table-or-index-name
+//
+//	REINDEX
+//	REINDEX collation-name
+//	REINDEX table-or-index-name
+//	REINDEX database-name.table-or-index-name
 func (p *Parser) parseReindex() (*ReindexStmt, error) {
 	stmt := &ReindexStmt{}
 

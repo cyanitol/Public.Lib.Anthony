@@ -57,7 +57,7 @@ type JoinOrder struct {
 
 // SortColumn represents a column in a sort order.
 type SortColumn struct {
-	TableIdx  int  // Index of the table this column belongs to
+	TableIdx  int    // Index of the table this column belongs to
 	Column    string // Column name
 	Ascending bool   // True for ASC, false for DESC
 }

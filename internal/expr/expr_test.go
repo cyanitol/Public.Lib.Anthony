@@ -43,7 +43,7 @@ func TestExprCreation(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := tt.expr.String()
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
@@ -86,7 +86,7 @@ func TestBinaryExpressions(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := tt.expr.String()
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
@@ -117,7 +117,7 @@ func TestUnaryExpressions(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := tt.expr.String()
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
@@ -230,7 +230,7 @@ func TestIsConstant(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := tt.expr.IsConstant()
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
@@ -268,7 +268,7 @@ func TestExprHeight(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			if tt.expr.Height != tt.expected {
 				t.Errorf("Expected height %d, got %d", tt.expected, tt.expr.Height)
 			}
@@ -544,7 +544,7 @@ func TestExprStringEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := tt.expr.String()
 			if !strings.Contains(result, tt.contains) {
 				t.Errorf("Expected String() to contain %q, got %q", tt.contains, result)

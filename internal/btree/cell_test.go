@@ -64,11 +64,11 @@ func TestEncodeIndexInteriorCell(t *testing.T) {
 func TestParseIndexInteriorCell(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name        string
-		childPage   uint32
-		payload     []byte
-		usableSize  uint32
-		wantErr     bool
+		name       string
+		childPage  uint32
+		payload    []byte
+		usableSize uint32
+		wantErr    bool
 	}{
 		{
 			name:       "small payload",

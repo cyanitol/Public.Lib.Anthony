@@ -32,8 +32,8 @@ func TestRankFunction(t *testing.T) {
 	}{
 		{"Alice", 100},
 		{"Bob", 90},
-		{"Charlie", 90},  // Tied with Bob at rank 2
-		{"David", 85},    // Rank should be 4, not 3
+		{"Charlie", 90}, // Tied with Bob at rank 2
+		{"David", 85},   // Rank should be 4, not 3
 		{"Eve", 85},
 		{"Frank", 85},
 	}
@@ -59,8 +59,8 @@ func TestRankFunction(t *testing.T) {
 	}{
 		{"Alice", 100, 1},
 		{"Bob", 90, 2},
-		{"Charlie", 90, 2},   // Same rank as Bob
-		{"David", 85, 4},     // Rank jumps to 4 (not 3) because of the tie
+		{"Charlie", 90, 2}, // Same rank as Bob
+		{"David", 85, 4},   // Rank jumps to 4 (not 3) because of the tie
 		{"Eve", 85, 4},
 		{"Frank", 85, 4},
 	}
@@ -114,8 +114,8 @@ func TestDenseRankFunction(t *testing.T) {
 	}{
 		{"Alice", 100},
 		{"Bob", 90},
-		{"Charlie", 90},  // Tied with Bob
-		{"David", 85},    // Dense rank should be 3, not 4
+		{"Charlie", 90}, // Tied with Bob
+		{"David", 85},   // Dense rank should be 3, not 4
 		{"Eve", 85},
 		{"Frank", 85},
 	}
@@ -141,8 +141,8 @@ func TestDenseRankFunction(t *testing.T) {
 	}{
 		{"Alice", 100, 1},
 		{"Bob", 90, 2},
-		{"Charlie", 90, 2},   // Same rank as Bob
-		{"David", 85, 3},     // Dense rank is 3 (no gap)
+		{"Charlie", 90, 2}, // Same rank as Bob
+		{"David", 85, 3},   // Dense rank is 3 (no gap)
 		{"Eve", 85, 3},
 		{"Frank", 85, 3},
 	}

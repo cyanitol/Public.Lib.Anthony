@@ -245,9 +245,9 @@ func FuzzTransaction(f *testing.F) {
 		"BEGIN; INSERT INTO t VALUES (1); COMMIT",
 		"BEGIN; UPDATE t SET id = 2; ROLLBACK",
 		"BEGIN; DELETE FROM t; COMMIT",
-		"SELECT 1", // No transaction
-		"COMMIT", // Commit without begin
-		"ROLLBACK", // Rollback without begin
+		"SELECT 1",             // No transaction
+		"COMMIT",               // Commit without begin
+		"ROLLBACK",             // Rollback without begin
 		"BEGIN; BEGIN; COMMIT", // Nested begin
 	}
 

@@ -540,9 +540,9 @@ func TestMultiColumnSortWithCustomCollation(t *testing.T) {
 		category string
 		name     string
 	}{
-		{"A", "zebra"},  // A category, name in reverse (z before a)
+		{"A", "zebra"}, // A category, name in reverse (z before a)
 		{"A", "apple"},
-		{"B", "zebra"},  // B category, name in reverse (z before a)
+		{"B", "zebra"}, // B category, name in reverse (z before a)
 		{"B", "apple"},
 	}
 

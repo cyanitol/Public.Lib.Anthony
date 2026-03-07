@@ -92,7 +92,7 @@ func TestAggregateFunctionCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			dbFile := "test_agg_cov_" + tt.name + ".db"
 			defer os.Remove(dbFile)
@@ -146,7 +146,7 @@ func TestHelperFunctionCoverage(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			tt := tt  // Capture range variable
+			tt := tt // Capture range variable
 			t.Run(tt.name, func(t *testing.T) {
 				got := isCountStar(tt.fn)
 				if got != tt.want {
@@ -174,7 +174,7 @@ func TestHelperFunctionCoverage(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			tt := tt  // Capture range variable
+			tt := tt // Capture range variable
 			t.Run(tt.name, func(t *testing.T) {
 				got := isKnownAggregateFunction(tt.funcName)
 				if got != tt.want {
@@ -250,7 +250,7 @@ func TestMultiTableColumnCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Query(tt.sql)
 			if (err != nil) != tt.wantErr {
@@ -295,7 +295,7 @@ func TestInsertFirstRowCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			row, err := insertFirstRow(tt.stmt)
 			if (err != nil) != tt.wantErr {
@@ -473,7 +473,7 @@ func TestCountExprParamsCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			count := countExprParams(tt.expr)
 			if count != tt.wantCount {
@@ -518,7 +518,7 @@ func TestValueExtractionCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Stmt{}
 			val := s.extractValueFromExpression(tt.expr)
@@ -568,7 +568,7 @@ func TestCompileArgValueCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			vm := vdbe.New()
 			targetReg := 1
@@ -611,7 +611,7 @@ func TestLiteralCompilationCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			vm := vdbe.New()
 			targetReg := 1
@@ -666,7 +666,7 @@ func TestTransactionCompilationCoverage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec(tt.sql)
 			if (err != nil) != tt.wantErr {
@@ -715,7 +715,7 @@ func TestFromSubqueryHelpersCoverage(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			tt := tt  // Capture range variable
+			tt := tt // Capture range variable
 			t.Run(tt.name, func(t *testing.T) {
 				s := &Stmt{}
 				got := s.isSimpleSelectStar(tt.stmt)
@@ -751,7 +751,7 @@ func TestFromSubqueryHelpersCoverage(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			tt := tt  // Capture range variable
+			tt := tt // Capture range variable
 			t.Run(tt.name, func(t *testing.T) {
 				// Use the package-level function
 				got := isSelectStar(tt.stmt)

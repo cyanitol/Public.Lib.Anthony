@@ -992,7 +992,7 @@ func (dt *DateTime) getWeekNumber() int {
 		return 0
 	}
 
-	return (dayOfYear - daysUntilMonday) / 7 + 1
+	return (dayOfYear-daysUntilMonday)/7 + 1
 }
 
 // getDayOfYear returns the day of year (1-366).

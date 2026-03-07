@@ -186,8 +186,8 @@ func TestSafeAddUint32(t *testing.T) {
 		},
 		{
 			name:      "large + large (overflow)",
-			a:         math.MaxUint32 / 2 + 1,
-			b:         math.MaxUint32 / 2 + 1,
+			a:         math.MaxUint32/2 + 1,
+			b:         math.MaxUint32/2 + 1,
 			want:      0,
 			wantError: true,
 		},

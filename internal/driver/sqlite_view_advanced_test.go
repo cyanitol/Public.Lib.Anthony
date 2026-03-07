@@ -304,7 +304,7 @@ func TestSQLiteViewAdvanced(t *testing.T) {
 				"CREATE VIEW v1 AS SELECT * FROM t1",
 				"DROP VIEW IF EXISTS v1",
 			},
-			query: "SELECT name FROM sqlite_master WHERE type='view' AND name='v1'",
+			query:    "SELECT name FROM sqlite_master WHERE type='view' AND name='v1'",
 			wantRows: [][]interface{}{},
 		},
 		{
@@ -641,7 +641,7 @@ func TestSQLiteViewAdvanced(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -757,8 +757,8 @@ func TestSQLiteViewErrors(t *testing.T) {
 			errMsg: "expected 3 columns",
 		},
 		{
-			name: "view-error-drop-nonexistent DROP VIEW on non-existent view",
-			setup: []string{},
+			name:   "view-error-drop-nonexistent DROP VIEW on non-existent view",
+			setup:  []string{},
 			query:  "DROP VIEW nonexistent_view",
 			errMsg: "no such view",
 		},
@@ -780,8 +780,8 @@ func TestSQLiteViewErrors(t *testing.T) {
 			errMsg: "table v1 already exists",
 		},
 		{
-			name: "view-error-no-table view references non-existent table",
-			setup: []string{},
+			name:   "view-error-no-table view references non-existent table",
+			setup:  []string{},
 			query:  "CREATE VIEW v1 AS SELECT * FROM nonexistent_table",
 			errMsg: "no such table",
 		},
@@ -796,7 +796,7 @@ func TestSQLiteViewErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()

@@ -11,11 +11,11 @@ import (
 func TestIsOverfull(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		pageSize   uint32
-		numCells   int
-		cellSizes  []int
-		wantFull   bool
+		name      string
+		pageSize  uint32
+		numCells  int
+		cellSizes []int
+		wantFull  bool
 	}{
 		{
 			name:      "empty page",
@@ -64,11 +64,11 @@ func TestIsOverfull(t *testing.T) {
 func TestIsUnderfullBalance(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		pageSize   uint32
-		numCells   int
-		cellSizes  []int
-		wantUnder  bool
+		name      string
+		pageSize  uint32
+		numCells  int
+		cellSizes []int
+		wantUnder bool
 	}{
 		{
 			name:      "empty page",
@@ -371,12 +371,12 @@ func TestBalanceInfoString(t *testing.T) {
 		{
 			name: "balanced page",
 			info: BalanceInfo{
-				PageNum:      1,
-				NumCells:     10,
-				UsedSpace:    500,
-				UsableSize:   4096,
-				FillFactor:   0.122,
-				IsBalanced:   true,
+				PageNum:         1,
+				NumCells:        10,
+				UsedSpace:       500,
+				UsableSize:      4096,
+				FillFactor:      0.122,
+				IsBalanced:      true,
 				FragmentedBytes: 0,
 			},
 			want: "Page 1: 10 cells, 500/4096 bytes used (12.2%), balanced, fragmented=0",
@@ -384,12 +384,12 @@ func TestBalanceInfoString(t *testing.T) {
 		{
 			name: "overfull page",
 			info: BalanceInfo{
-				PageNum:      2,
-				NumCells:     100,
-				UsedSpace:    4000,
-				UsableSize:   4096,
-				FillFactor:   0.977,
-				IsOverfull:   true,
+				PageNum:         2,
+				NumCells:        100,
+				UsedSpace:       4000,
+				UsableSize:      4096,
+				FillFactor:      0.977,
+				IsOverfull:      true,
 				FragmentedBytes: 5,
 			},
 			want: "Page 2: 100 cells, 4000/4096 bytes used (97.7%), OVERFULL, fragmented=5",
@@ -397,12 +397,12 @@ func TestBalanceInfoString(t *testing.T) {
 		{
 			name: "underfull page",
 			info: BalanceInfo{
-				PageNum:      3,
-				NumCells:     2,
-				UsedSpace:    50,
-				UsableSize:   4096,
-				FillFactor:   0.012,
-				IsUnderfull:  true,
+				PageNum:         3,
+				NumCells:        2,
+				UsedSpace:       50,
+				UsableSize:      4096,
+				FillFactor:      0.012,
+				IsUnderfull:     true,
 				FragmentedBytes: 0,
 			},
 			want: "Page 3: 2 cells, 50/4096 bytes used (1.2%), UNDERFULL, fragmented=0",

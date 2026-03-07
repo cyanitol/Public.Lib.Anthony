@@ -557,8 +557,9 @@ func (c *SelectCompiler) compileUnion(sel *Select, dest *SelectDest) error {
 // Algorithm:
 // 1. Execute left query and store results in ephemeral table A
 // 2. Execute right query and for each row:
-//    - Check if it exists in table A
-//    - If yes, insert into result table B
+//   - Check if it exists in table A
+//   - If yes, insert into result table B
+//
 // 3. Read from result table B and output
 func (c *SelectCompiler) compileIntersect(sel *Select, dest *SelectDest) error {
 	vdbe := c.parse.GetVdbe()
@@ -650,11 +651,11 @@ func (c *SelectCompiler) compileIntersect(sel *Select, dest *SelectDest) error {
 	} else {
 		// For other destinations, use disposeResult
 		tempDest := &SelectDest{
-			Dest:  dest.Dest,
-			SDParm: dest.SDParm,
+			Dest:    dest.Dest,
+			SDParm:  dest.SDParm,
 			SDParm2: dest.SDParm2,
-			Sdst:  regOutput,
-			NSdst: nCol,
+			Sdst:    regOutput,
+			NSdst:   nCol,
 		}
 		if err := c.disposeResult(tempDest, nCol, regOutput); err != nil {
 			return err
@@ -674,7 +675,8 @@ func (c *SelectCompiler) compileIntersect(sel *Select, dest *SelectDest) error {
 // Algorithm:
 // 1. Execute left query and store results in ephemeral table A
 // 2. Execute right query and for each row:
-//    - Delete matching row from table A (using SRT_Except)
+//   - Delete matching row from table A (using SRT_Except)
+//
 // 3. Read remaining rows from table A and output
 func (c *SelectCompiler) compileExcept(sel *Select, dest *SelectDest) error {
 	vdbe := c.parse.GetVdbe()

@@ -408,7 +408,7 @@ func TestSQLiteExplain(t *testing.T) {
 				"CREATE TABLE orders(id INT, customer_id INT, total REAL)",
 				"CREATE TABLE customers(id INT, name TEXT)",
 			},
-			query: "EXPLAIN QUERY PLAN SELECT * FROM customers WHERE id IN (SELECT customer_id FROM orders WHERE total > 100)",
+			query:     "EXPLAIN QUERY PLAN SELECT * FROM customers WHERE id IN (SELECT customer_id FROM orders WHERE total > 100)",
 			wantMatch: []string{"SCAN customers", "LIST SUBQUERY", "SCAN orders"},
 			isEQP:     true,
 		},
@@ -427,7 +427,7 @@ func TestSQLiteExplain(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			// Clean up and run setup
 			_, err := db.Exec("DROP TABLE IF EXISTS t1")
@@ -617,7 +617,7 @@ func TestExplainQueryPlanMultipleStatements(t *testing.T) {
 	}
 
 	for _, q := range queries {
-		q := q  // Capture range variable
+		q := q // Capture range variable
 		t.Run(q.name, func(t *testing.T) {
 			rows, err := db.Query(q.sql)
 			if err != nil {

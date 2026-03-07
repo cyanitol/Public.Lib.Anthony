@@ -140,7 +140,7 @@ func TestCollationRTrim(t *testing.T) {
 		value string
 	}{
 		{1, "apple"},
-		{2, "apple  "},    // 2 trailing spaces
+		{2, "apple  "},   // 2 trailing spaces
 		{3, "banana   "}, // 3 trailing spaces
 		{4, "banana"},
 		{5, "cherry    "}, // 4 trailing spaces
@@ -416,10 +416,10 @@ func TestMultipleCollationsInOrderBy(t *testing.T) {
 		lastname  string
 		firstname string
 	}{
-		{"jones", "Charlie"},  // jones group, Charlie < alice (uppercase C < lowercase a)
-		{"Jones", "alice"},    // jones group
-		{"SMITH", "Bob"},      // Smith group, Bob < alice (uppercase B < lowercase a)
-		{"Smith", "alice"},    // Smith group
+		{"jones", "Charlie"}, // jones group, Charlie < alice (uppercase C < lowercase a)
+		{"Jones", "alice"},   // jones group
+		{"SMITH", "Bob"},     // Smith group, Bob < alice (uppercase B < lowercase a)
+		{"Smith", "alice"},   // Smith group
 	}
 
 	for i, exp := range expectedOrder {

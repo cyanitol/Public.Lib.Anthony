@@ -287,10 +287,10 @@ func TestTrimFunc_EdgeCases(t *testing.T) {
 		wantErr  bool
 	}{
 		{
-			name:   "trim null input",
-			fn:     trimFunc,
-			fnName: "trim",
-			args:   []Value{NewNullValue()},
+			name:     "trim null input",
+			fn:       trimFunc,
+			fnName:   "trim",
+			args:     []Value{NewNullValue()},
 			wantNull: true,
 		},
 		{
@@ -301,10 +301,10 @@ func TestTrimFunc_EdgeCases(t *testing.T) {
 			want:   "hello",
 		},
 		{
-			name:   "ltrim null input",
-			fn:     ltrimFunc,
-			fnName: "ltrim",
-			args:   []Value{NewNullValue()},
+			name:     "ltrim null input",
+			fn:       ltrimFunc,
+			fnName:   "ltrim",
+			args:     []Value{NewNullValue()},
 			wantNull: true,
 		},
 		{
@@ -315,10 +315,10 @@ func TestTrimFunc_EdgeCases(t *testing.T) {
 			want:   "hello  ",
 		},
 		{
-			name:   "rtrim null input",
-			fn:     rtrimFunc,
-			fnName: "rtrim",
-			args:   []Value{NewNullValue()},
+			name:     "rtrim null input",
+			fn:       rtrimFunc,
+			fnName:   "rtrim",
+			args:     []Value{NewNullValue()},
 			wantNull: true,
 		},
 		{
@@ -692,9 +692,9 @@ func TestUnicodeFunc_EdgeCases(t *testing.T) {
 // TestCharFunc_EdgeCases tests edge cases for char function
 func TestCharFunc_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name  string
-		args  []Value
-		want  string
+		name string
+		args []Value
+		want string
 	}{
 		{
 			name: "single character",
@@ -760,8 +760,8 @@ func TestCoalesceFunc_EdgeCases(t *testing.T) {
 			want: NewIntValue(42),
 		},
 		{
-			name: "all null",
-			args: []Value{NewNullValue(), NewNullValue(), NewNullValue()},
+			name:     "all null",
+			args:     []Value{NewNullValue(), NewNullValue(), NewNullValue()},
 			wantNull: true,
 		},
 		{

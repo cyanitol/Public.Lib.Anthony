@@ -400,7 +400,6 @@ func TestValidateTableRow(t *testing.T) {
 	}
 }
 
-
 // TestNotNullValidateRow tests ValidateRow error path
 func TestNotNullValidateRow(t *testing.T) {
 	table := &schema.Table{

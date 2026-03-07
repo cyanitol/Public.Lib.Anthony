@@ -96,9 +96,9 @@ func decodeReadValues(data []byte, serialTypes []uint64, offset int) ([]interfac
 
 // decodeZeroWidthConst maps serial types with no stored data to their Go values.
 var decodeZeroWidthConst = map[uint64]interface{}{
-	0: nil,       // NULL
-	8: int64(0),  // integer constant 0
-	9: int64(1),  // integer constant 1
+	0: nil,      // NULL
+	8: int64(0), // integer constant 0
+	9: int64(1), // integer constant 1
 }
 
 // decodeIntWidth maps serial type 1–6 to their byte widths.

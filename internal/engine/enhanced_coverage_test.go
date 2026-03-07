@@ -975,7 +975,6 @@ func TestTxRollbackWithoutTransaction(t *testing.T) {
 	}
 }
 
-
 // TestRowsCloseIdempotent tests that closing Rows multiple times is safe
 func TestRowsCloseIdempotent(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -1142,7 +1141,6 @@ func TestTriggerWithStatements(t *testing.T) {
 	// but we're covering the code paths
 	_ = err // Error is expected
 }
-
 
 // TestOpenWithLoadSchemaError tests error handling when loading schema fails
 func TestOpenWithLoadSchemaError(t *testing.T) {

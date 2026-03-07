@@ -174,11 +174,11 @@ func TestParsePragma(t *testing.T) {
 func TestParsePragmaMultiple(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		sql        string
-		wantErr    bool
-		wantCount  int
-		wantNames  []string
+		name      string
+		sql       string
+		wantErr   bool
+		wantCount int
+		wantNames []string
 	}{
 		{
 			name:      "multiple pragma statements",

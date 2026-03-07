@@ -93,12 +93,12 @@ func TestComputeLimitOffset(t *testing.T) {
 	lc := NewLimitCompiler(p)
 
 	tests := []struct {
-		name        string
-		limitExpr   *Expr
-		offsetExpr  *Expr
-		wantLimit   int
-		wantOffset  int
-		wantErr     bool
+		name       string
+		limitExpr  *Expr
+		offsetExpr *Expr
+		wantLimit  int
+		wantOffset int
+		wantErr    bool
 	}{
 		{
 			name:       "both limit and offset",

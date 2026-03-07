@@ -128,8 +128,8 @@ type VDBE struct {
 	ErrorAction uint8  // Recovery action on error
 
 	// Statistics and counters
-	CacheCtr uint32          // Cursor cache generation counter
-	NumSteps int64           // Number of VM steps executed
+	CacheCtr uint32           // Cursor cache generation counter
+	NumSteps int64            // Number of VM steps executed
 	Stats    *QueryStatistics // Query execution statistics (Phase 9.2)
 
 	// Transaction and change tracking
@@ -674,10 +674,10 @@ func (v *VDBE) IncrCacheCtr() {
 // This provides observability into query performance and resource usage.
 type QueryStatistics struct {
 	// Execution timing
-	StartTime    int64 // Start time in nanoseconds (time.Now().UnixNano())
-	EndTime      int64 // End time in nanoseconds
-	ExecutionNS  int64 // Total execution time in nanoseconds
-	ExecutionMS  int64 // Total execution time in milliseconds (derived)
+	StartTime   int64 // Start time in nanoseconds (time.Now().UnixNano())
+	EndTime     int64 // End time in nanoseconds
+	ExecutionNS int64 // Total execution time in nanoseconds
+	ExecutionMS int64 // Total execution time in milliseconds (derived)
 
 	// Instruction counts
 	NumInstructions int64 // Total number of instructions executed
@@ -751,29 +751,29 @@ func (s *QueryStatistics) RecordInstruction(opcode Opcode) {
 
 // opcodeStatCategory maps opcodes to their statistic categories
 var opcodeStatCategory = map[Opcode]func(*QueryStatistics){
-	OpGoto: func(s *QueryStatistics) { s.NumJumps++ },
-	OpIf: func(s *QueryStatistics) { s.NumJumps++ },
-	OpIfNot: func(s *QueryStatistics) { s.NumJumps++ },
-	OpIfPos: func(s *QueryStatistics) { s.NumJumps++ },
+	OpGoto:      func(s *QueryStatistics) { s.NumJumps++ },
+	OpIf:        func(s *QueryStatistics) { s.NumJumps++ },
+	OpIfNot:     func(s *QueryStatistics) { s.NumJumps++ },
+	OpIfPos:     func(s *QueryStatistics) { s.NumJumps++ },
 	OpIfNotZero: func(s *QueryStatistics) { s.NumJumps++ },
-	OpEq: func(s *QueryStatistics) { s.NumComparisons++ },
-	OpNe: func(s *QueryStatistics) { s.NumComparisons++ },
-	OpLt: func(s *QueryStatistics) { s.NumComparisons++ },
-	OpLe: func(s *QueryStatistics) { s.NumComparisons++ },
-	OpGt: func(s *QueryStatistics) { s.NumComparisons++ },
-	OpGe: func(s *QueryStatistics) { s.NumComparisons++ },
-	OpRewind: func(s *QueryStatistics) { s.CursorSeeks++ },
-	OpSeekGE: func(s *QueryStatistics) { s.CursorSeeks++ },
-	OpSeekGT: func(s *QueryStatistics) { s.CursorSeeks++ },
-	OpSeekLE: func(s *QueryStatistics) { s.CursorSeeks++ },
-	OpSeekLT: func(s *QueryStatistics) { s.CursorSeeks++ },
+	OpEq:        func(s *QueryStatistics) { s.NumComparisons++ },
+	OpNe:        func(s *QueryStatistics) { s.NumComparisons++ },
+	OpLt:        func(s *QueryStatistics) { s.NumComparisons++ },
+	OpLe:        func(s *QueryStatistics) { s.NumComparisons++ },
+	OpGt:        func(s *QueryStatistics) { s.NumComparisons++ },
+	OpGe:        func(s *QueryStatistics) { s.NumComparisons++ },
+	OpRewind:    func(s *QueryStatistics) { s.CursorSeeks++ },
+	OpSeekGE:    func(s *QueryStatistics) { s.CursorSeeks++ },
+	OpSeekGT:    func(s *QueryStatistics) { s.CursorSeeks++ },
+	OpSeekLE:    func(s *QueryStatistics) { s.CursorSeeks++ },
+	OpSeekLT:    func(s *QueryStatistics) { s.CursorSeeks++ },
 	OpSeekRowid: func(s *QueryStatistics) { s.CursorSeeks++ },
-	OpNext: func(s *QueryStatistics) { s.CursorSteps++ },
-	OpPrev: func(s *QueryStatistics) { s.CursorSteps++ },
-	OpRowData: func(s *QueryStatistics) { s.RowsRead++ },
-	OpColumn: func(s *QueryStatistics) { s.RowsRead++ },
-	OpInsert: func(s *QueryStatistics) { s.RowsWritten++ },
-	OpDelete: func(s *QueryStatistics) { s.RowsWritten++ },
+	OpNext:      func(s *QueryStatistics) { s.CursorSteps++ },
+	OpPrev:      func(s *QueryStatistics) { s.CursorSteps++ },
+	OpRowData:   func(s *QueryStatistics) { s.RowsRead++ },
+	OpColumn:    func(s *QueryStatistics) { s.RowsRead++ },
+	OpInsert:    func(s *QueryStatistics) { s.RowsWritten++ },
+	OpDelete:    func(s *QueryStatistics) { s.RowsWritten++ },
 	OpIdxInsert: func(s *QueryStatistics) { s.IndexLookups++ },
 	OpIdxDelete: func(s *QueryStatistics) { s.IndexLookups++ },
 }

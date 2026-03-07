@@ -60,10 +60,10 @@ func TestNewLoggerNilOutput(t *testing.T) {
 // TestLogLevels verifies that log level filtering works correctly.
 func TestLogLevels(t *testing.T) {
 	tests := []struct {
-		name       string
-		setLevel   Level
-		logLevel   Level
-		shouldLog  bool
+		name      string
+		setLevel  Level
+		logLevel  Level
+		shouldLog bool
 	}{
 		{"Trace with Trace level", TraceLevel, TraceLevel, true},
 		{"Debug with Trace level", TraceLevel, DebugLevel, true},

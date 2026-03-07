@@ -229,9 +229,9 @@ func TestParseExplainNested(t *testing.T) {
 func TestExplainStmtString(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name      string
-		stmt      *ExplainStmt
-		wantStr   string
+		name    string
+		stmt    *ExplainStmt
+		wantStr string
 	}{
 		{
 			name: "explain without query plan",

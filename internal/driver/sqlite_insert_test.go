@@ -13,56 +13,56 @@ import (
 func TestSQLiteInsert(t *testing.T) {
 	t.Skip("pre-existing failure - needs INSERT implementation fixes")
 	tests := []struct {
-		name      string
-		setup     []string // CREATE TABLE statements and other setup
-		inserts   []string // INSERT statements to test
-		verify    string   // SELECT to verify results
-		wantRows  int      // Expected number of rows
-		wantErr   bool     // Whether we expect an error
-		errMsg    string   // Expected error message substring
+		name     string
+		setup    []string // CREATE TABLE statements and other setup
+		inserts  []string // INSERT statements to test
+		verify   string   // SELECT to verify results
+		wantRows int      // Expected number of rows
+		wantErr  bool     // Whether we expect an error
+		errMsg   string   // Expected error message substring
 	}{
 		// Basic INSERT tests (from insert.test)
 		{
-			name:     "insert-1.1: INSERT into non-existent table",
-			setup:    []string{},
-			inserts:  []string{"INSERT INTO test1 VALUES(1,2,3)"},
-			wantErr:  true,
-			errMsg:   "no such table",
+			name:    "insert-1.1: INSERT into non-existent table",
+			setup:   []string{},
+			inserts: []string{"INSERT INTO test1 VALUES(1,2,3)"},
+			wantErr: true,
+			errMsg:  "no such table",
 		},
 		{
-			name:     "insert-1.3: wrong number of values - too few",
-			setup:    []string{"CREATE TABLE test1(one int, two int, three int)"},
-			inserts:  []string{"INSERT INTO test1 VALUES(1,2)"},
-			wantErr:  true,
-			errMsg:   "columns",
+			name:    "insert-1.3: wrong number of values - too few",
+			setup:   []string{"CREATE TABLE test1(one int, two int, three int)"},
+			inserts: []string{"INSERT INTO test1 VALUES(1,2)"},
+			wantErr: true,
+			errMsg:  "columns",
 		},
 		{
-			name:     "insert-1.3b: wrong number of values - too many",
-			setup:    []string{"CREATE TABLE test1(one int, two int, three int)"},
-			inserts:  []string{"INSERT INTO test1 VALUES(1,2,3,4)"},
-			wantErr:  true,
-			errMsg:   "columns",
+			name:    "insert-1.3b: wrong number of values - too many",
+			setup:   []string{"CREATE TABLE test1(one int, two int, three int)"},
+			inserts: []string{"INSERT INTO test1 VALUES(1,2,3,4)"},
+			wantErr: true,
+			errMsg:  "columns",
 		},
 		{
-			name:     "insert-1.3c: column list with wrong number of values - too many",
-			setup:    []string{"CREATE TABLE test1(one int, two int, three int)"},
-			inserts:  []string{"INSERT INTO test1(one,two) VALUES(1,2,3,4)"},
-			wantErr:  true,
-			errMsg:   "values",
+			name:    "insert-1.3c: column list with wrong number of values - too many",
+			setup:   []string{"CREATE TABLE test1(one int, two int, three int)"},
+			inserts: []string{"INSERT INTO test1(one,two) VALUES(1,2,3,4)"},
+			wantErr: true,
+			errMsg:  "values",
 		},
 		{
-			name:     "insert-1.3d: column list with wrong number of values - too few",
-			setup:    []string{"CREATE TABLE test1(one int, two int, three int)"},
-			inserts:  []string{"INSERT INTO test1(one,two) VALUES(1)"},
-			wantErr:  true,
-			errMsg:   "values",
+			name:    "insert-1.3d: column list with wrong number of values - too few",
+			setup:   []string{"CREATE TABLE test1(one int, two int, three int)"},
+			inserts: []string{"INSERT INTO test1(one,two) VALUES(1)"},
+			wantErr: true,
+			errMsg:  "values",
 		},
 		{
-			name:     "insert-1.4: INSERT into non-existent column",
-			setup:    []string{"CREATE TABLE test1(one int, two int, three int)"},
-			inserts:  []string{"INSERT INTO test1(one,four) VALUES(1,2)"},
-			wantErr:  true,
-			errMsg:   "no column named",
+			name:    "insert-1.4: INSERT into non-existent column",
+			setup:   []string{"CREATE TABLE test1(one int, two int, three int)"},
+			inserts: []string{"INSERT INTO test1(one,four) VALUES(1,2)"},
+			wantErr: true,
+			errMsg:  "no column named",
 		},
 		{
 			name:     "insert-1.5: basic INSERT works",
@@ -72,7 +72,7 @@ func TestSQLiteInsert(t *testing.T) {
 			wantRows: 1,
 		},
 		{
-			name: "insert-1.5b: multiple INSERT statements",
+			name:  "insert-1.5b: multiple INSERT statements",
 			setup: []string{"CREATE TABLE test1(one int, two int, three int)"},
 			inserts: []string{
 				"INSERT INTO test1 VALUES(1,2,3)",
@@ -82,7 +82,7 @@ func TestSQLiteInsert(t *testing.T) {
 			wantRows: 2,
 		},
 		{
-			name: "insert-1.5c: three INSERT statements",
+			name:  "insert-1.5c: three INSERT statements",
 			setup: []string{"CREATE TABLE test1(one int, two int, three int)"},
 			inserts: []string{
 				"INSERT INTO test1 VALUES(1,2,3)",
@@ -100,7 +100,7 @@ func TestSQLiteInsert(t *testing.T) {
 			wantRows: 1,
 		},
 		{
-			name: "insert-1.6b: INSERT different column combinations",
+			name:  "insert-1.6b: INSERT different column combinations",
 			setup: []string{"CREATE TABLE test1(one int, two int, three int)"},
 			inserts: []string{
 				"INSERT INTO test1(one,two) VALUES(1,2)",
@@ -110,7 +110,7 @@ func TestSQLiteInsert(t *testing.T) {
 			wantRows: 2,
 		},
 		{
-			name: "insert-1.6c: INSERT with reordered columns",
+			name:  "insert-1.6c: INSERT with reordered columns",
 			setup: []string{"CREATE TABLE test1(one int, two int, three int)"},
 			inserts: []string{
 				"INSERT INTO test1(one,two) VALUES(1,2)",
@@ -207,11 +207,11 @@ func TestSQLiteInsert(t *testing.T) {
 			wantRows: 1,
 		},
 		{
-			name:     "insert-4.6: non-existent function",
-			setup:    []string{"CREATE TABLE t3(a,b,c)"},
-			inserts:  []string{"INSERT INTO t3 VALUES(notafunc(2,3),2,3)"},
-			wantErr:  true,
-			errMsg:   "no such function",
+			name:    "insert-4.6: non-existent function",
+			setup:   []string{"CREATE TABLE t3(a,b,c)"},
+			inserts: []string{"INSERT INTO t3 VALUES(notafunc(2,3),2,3)"},
+			wantErr: true,
+			errMsg:  "no such function",
 		},
 		{
 			name:     "insert-4.7: min/max functions in INSERT",
@@ -223,10 +223,10 @@ func TestSQLiteInsert(t *testing.T) {
 
 		// Multi-row INSERT tests (from insert.test insert-10.x)
 		{
-			name:    "insert-10.1: multiple VALUES clauses",
-			setup:   []string{"CREATE TABLE t10(a,b,c)"},
-			inserts: []string{"INSERT INTO t10 VALUES(1,2,3), (4,5,6), (7,8,9)"},
-			verify:  "SELECT a, b, c FROM t10 ORDER BY a",
+			name:     "insert-10.1: multiple VALUES clauses",
+			setup:    []string{"CREATE TABLE t10(a,b,c)"},
+			inserts:  []string{"INSERT INTO t10 VALUES(1,2,3), (4,5,6), (7,8,9)"},
+			verify:   "SELECT a, b, c FROM t10 ORDER BY a",
 			wantRows: 3,
 		},
 		{
@@ -336,7 +336,7 @@ func TestSQLiteInsert(t *testing.T) {
 			wantRows: 1,
 		},
 		{
-			name: "insert-null-2: NULL from omitted columns",
+			name:     "insert-null-2: NULL from omitted columns",
 			setup:    []string{"CREATE TABLE t1(a, b, c)"},
 			inserts:  []string{"INSERT INTO t1(a, c) VALUES(1, 3)"},
 			verify:   "SELECT a, b, c FROM t1",
@@ -490,7 +490,7 @@ func TestSQLiteInsert(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			// Create temporary database
 			tmpDir := t.TempDir()
@@ -608,7 +608,7 @@ func TestInsertConflictResolution(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
 			dbPath := filepath.Join(tmpDir, "test.db")
@@ -933,7 +933,7 @@ func TestInsertEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
 			dbPath := filepath.Join(tmpDir, "test.db")

@@ -93,8 +93,8 @@ func DefaultLRUCacheConfig(pageSize int) LRUCacheConfig {
 	return LRUCacheConfig{
 		PageSize:  pageSize,
 		MaxPages:  DefaultCacheSize,
-		MaxMemory: 0,                // Use MaxPages instead
-		Mode:      WriteBackMode,    // Default to write-back for better performance
+		MaxMemory: 0,             // Use MaxPages instead
+		Mode:      WriteBackMode, // Default to write-back for better performance
 	}
 }
 

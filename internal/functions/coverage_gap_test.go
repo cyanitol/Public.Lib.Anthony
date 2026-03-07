@@ -327,8 +327,8 @@ func TestIsValidDateBoundaries(t *testing.T) {
 		day   int
 		want  bool
 	}{
-		{9999, 12, 31, true},  // maximum valid date
-		{0, 1, 1, true},       // minimum year
+		{9999, 12, 31, true}, // maximum valid date
+		{0, 1, 1, true},      // minimum year
 	}
 
 	for _, tt := range tests {

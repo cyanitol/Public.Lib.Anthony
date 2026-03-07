@@ -537,8 +537,8 @@ func TestValidateStatisticsComplex(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "empty statistics",
-			stats: NewStatistics(),
+			name:    "empty statistics",
+			stats:   NewStatistics(),
 			wantErr: false,
 		},
 		{

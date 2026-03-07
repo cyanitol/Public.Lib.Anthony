@@ -18,9 +18,9 @@ func TestOpenPseudoOpcode(t *testing.T) {
 
 		instr := &Instruction{
 			Opcode: OpOpenPseudo,
-			P1:     1,  // cursor number
-			P2:     2,  // register containing data
-			P3:     3,  // number of columns
+			P1:     1, // cursor number
+			P2:     2, // register containing data
+			P3:     3, // number of columns
 		}
 
 		err := v.execOpenPseudo(instr)
@@ -62,7 +62,7 @@ func TestOpenPseudoOpcode(t *testing.T) {
 
 		instr := &Instruction{
 			Opcode: OpOpenPseudo,
-			P1:     5,  // cursor number beyond current size
+			P1:     5, // cursor number beyond current size
 			P2:     1,
 			P3:     1,
 		}
@@ -94,7 +94,7 @@ func TestVirtualTableOpcodes(t *testing.T) {
 
 		instr := &Instruction{
 			Opcode: OpVOpen,
-			P1:     0,  // cursor number
+			P1:     0, // cursor number
 			P2:     0,
 			P3:     0,
 			P4:     P4Union{P: mockVTable},
@@ -162,10 +162,10 @@ func TestVirtualTableOpcodes(t *testing.T) {
 		// Create a virtual table cursor
 		v.Cursors = make([]*Cursor, 2)
 		v.Cursors[0] = &Cursor{
-			CurType:     CursorVTab,
-			VTable:      "mock_vtable",
-			VTabCursor:  nil,
-			EOF:         true,
+			CurType:    CursorVTab,
+			VTable:     "mock_vtable",
+			VTabCursor: nil,
+			EOF:        true,
 		}
 
 		// Set up constraint values
@@ -174,12 +174,12 @@ func TestVirtualTableOpcodes(t *testing.T) {
 
 		instr := &Instruction{
 			Opcode: OpVFilter,
-			P1:     0,  // cursor
-			P2:     2,  // argc
-			P3:     1,  // idxNum
+			P1:     0, // cursor
+			P2:     2, // argc
+			P3:     1, // idxNum
 			P4:     P4Union{Z: "idxStr"},
 			P4Type: P4Static,
-			P5:     1,  // start register for args
+			P5:     1, // start register for args
 		}
 
 		err := v.execVFilter(instr)
@@ -230,9 +230,9 @@ func TestVirtualTableOpcodes(t *testing.T) {
 
 		instr := &Instruction{
 			Opcode: OpVColumn,
-			P1:     0,  // cursor
-			P2:     1,  // column number
-			P3:     5,  // destination register
+			P1:     0, // cursor
+			P2:     1, // column number
+			P3:     5, // destination register
 		}
 
 		err := v.execVColumn(instr)
@@ -374,8 +374,8 @@ func TestVirtualTableOpcodes(t *testing.T) {
 
 		// Call execVRowid directly since there's no OpVRowid opcode
 		instr := &Instruction{
-			P1: 0,  // cursor
-			P2: 3,  // destination register
+			P1: 0, // cursor
+			P2: 3, // destination register
 		}
 
 		err := v.execVRowid(instr)

@@ -12,9 +12,9 @@ import (
 
 // PrimaryKeyConstraint enforces PRIMARY KEY constraints.
 type PrimaryKeyConstraint struct {
-	Table      *schema.Table
-	Btree      *btree.Btree
-	Pager      interface{} // *pager.Pager for marking pages dirty
+	Table *schema.Table
+	Btree *btree.Btree
+	Pager interface{} // *pager.Pager for marking pages dirty
 }
 
 // NewPrimaryKeyConstraint creates a new primary key constraint validator.

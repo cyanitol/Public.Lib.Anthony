@@ -401,8 +401,8 @@ func TestRegisterAndCursorTracing(t *testing.T) {
 	v.SetDebugLogger(logger)
 
 	// Build a program that modifies registers (no cursor ops that require btree)
-	v.AddOp(OpInteger, 42, 0, 0)    // Set R0 = 42
-	v.AddOp(OpInteger, 99, 1, 0)    // Set R1 = 99
+	v.AddOp(OpInteger, 42, 0, 0) // Set R0 = 42
+	v.AddOp(OpInteger, 99, 1, 0) // Set R1 = 99
 	v.AddOp(OpHalt, 0, 0, 0)
 
 	v.AllocMemory(2)

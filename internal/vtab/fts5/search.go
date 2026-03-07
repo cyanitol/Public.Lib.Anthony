@@ -10,20 +10,20 @@ import (
 type QueryType int
 
 const (
-	QuerySimple  QueryType = iota // Simple term search
-	QueryPhrase                   // Phrase search "term1 term2"
-	QueryAND                      // Boolean AND: term1 AND term2
-	QueryOR                       // Boolean OR: term1 OR term2
-	QueryNOT                      // Boolean NOT: term1 NOT term2
-	QueryPrefix                   // Prefix search: term*
+	QuerySimple QueryType = iota // Simple term search
+	QueryPhrase                  // Phrase search "term1 term2"
+	QueryAND                     // Boolean AND: term1 AND term2
+	QueryOR                      // Boolean OR: term1 OR term2
+	QueryNOT                     // Boolean NOT: term1 NOT term2
+	QueryPrefix                  // Prefix search: term*
 )
 
 // Query represents a parsed FTS search query.
 type Query struct {
 	Type     QueryType
-	Terms    []string  // Search terms
-	Children []*Query  // Child queries for boolean operations
-	Column   int       // Specific column to search (-1 for all)
+	Terms    []string // Search terms
+	Children []*Query // Child queries for boolean operations
+	Column   int      // Specific column to search (-1 for all)
 }
 
 // QueryParser parses FTS query strings into Query objects.

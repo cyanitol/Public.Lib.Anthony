@@ -57,18 +57,18 @@ func FuzzDecodeRecord(f *testing.F) {
 // FuzzGetVarint tests the varint decoder
 func FuzzGetVarint(f *testing.F) {
 	// Valid varints
-	f.Add([]byte{0x00}, 0)                      // 0
-	f.Add([]byte{0x7F}, 0)                      // 127
-	f.Add([]byte{0x81, 0x00}, 0)                // 128
-	f.Add([]byte{0xFF, 0x7F}, 0)                // max 2-byte
-	f.Add([]byte{0x81, 0x80, 0x00}, 0)          // 3-byte
-	f.Add([]byte{0x81, 0x80, 0x80, 0x00}, 0)    // 4-byte
+	f.Add([]byte{0x00}, 0)                         // 0
+	f.Add([]byte{0x7F}, 0)                         // 127
+	f.Add([]byte{0x81, 0x00}, 0)                   // 128
+	f.Add([]byte{0xFF, 0x7F}, 0)                   // max 2-byte
+	f.Add([]byte{0x81, 0x80, 0x00}, 0)             // 3-byte
+	f.Add([]byte{0x81, 0x80, 0x80, 0x00}, 0)       // 4-byte
 	f.Add([]byte{0x81, 0x80, 0x80, 0x80, 0x00}, 0) // 5-byte
 
 	// Truncated varints
-	f.Add([]byte{0x81}, 0)          // incomplete
-	f.Add([]byte{0x81, 0x80}, 0)    // incomplete
-	f.Add([]byte{}, 0)              // empty
+	f.Add([]byte{0x81}, 0)       // incomplete
+	f.Add([]byte{0x81, 0x80}, 0) // incomplete
+	f.Add([]byte{}, 0)           // empty
 
 	// Maximum length varint
 	f.Add([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F}, 0)
@@ -92,10 +92,10 @@ func FuzzGetVarint(f *testing.F) {
 // FuzzDecodeValue tests individual value decoding
 func FuzzDecodeValue(f *testing.F) {
 	// Various serial types with data
-	f.Add([]byte{0x00}, 0, uint64(0))  // NULL
-	f.Add([]byte{0x00}, 0, uint64(8))  // int 0
-	f.Add([]byte{0x00}, 0, uint64(9))  // int 1
-	f.Add([]byte{0x2A}, 0, uint64(1))  // int8
+	f.Add([]byte{0x00}, 0, uint64(0))       // NULL
+	f.Add([]byte{0x00}, 0, uint64(8))       // int 0
+	f.Add([]byte{0x00}, 0, uint64(9))       // int 1
+	f.Add([]byte{0x2A}, 0, uint64(1))       // int8
 	f.Add([]byte{0x03, 0xE8}, 0, uint64(2)) // int16
 
 	// Blob
@@ -105,7 +105,7 @@ func FuzzDecodeValue(f *testing.F) {
 	f.Add([]byte{'h', 'i'}, 0, uint64(17)) // 2-byte string (13 + 4)
 
 	// Truncated data
-	f.Add([]byte{}, 0, uint64(1))  // claims int8 but no data
+	f.Add([]byte{}, 0, uint64(1))     // claims int8 but no data
 	f.Add([]byte{0x00}, 0, uint64(2)) // claims int16 but only 1 byte
 
 	f.Fuzz(func(t *testing.T, data []byte, offset int, serialType uint64) {
@@ -134,7 +134,7 @@ func TestFuzzCorpusRegression(t *testing.T) {
 
 	for i, input := range regressionInputs {
 		t.Run(string(rune('A'+i)), func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			defer func() {
 				if r := recover(); r != nil {
 					t.Errorf("Panic on regression input %d: %v\nInput: %x", i, r, input)

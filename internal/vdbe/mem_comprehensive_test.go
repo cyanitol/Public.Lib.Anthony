@@ -43,7 +43,7 @@ func TestMemGetFlags(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			m := tt.setup()
 			if got := m.GetFlags(); got != tt.expected {
 				t.Errorf("GetFlags() = %v, want %v", got, tt.expected)
@@ -90,7 +90,7 @@ func TestMemStringValue(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := tt.mem.StringValue()
 			if got != tt.expected {
 				t.Errorf("StringValue() = %q, want %q", got, tt.expected)
@@ -137,7 +137,7 @@ func TestMemValue(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := tt.mem.Value()
 			switch v := tt.expected.(type) {
 			case nil:
@@ -222,7 +222,7 @@ func TestMemNumerify(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			m := tt.setup()
 			err := m.Numerify()
 			if (err != nil) != tt.wantErr {
@@ -305,7 +305,7 @@ func TestMemApplyAffinity(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			err := tt.mem.ApplyAffinity(tt.affinity)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ApplyAffinity() error = %v, wantErr %v", err, tt.wantErr)
@@ -361,7 +361,7 @@ func TestMemString(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := tt.mem.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
@@ -427,7 +427,7 @@ func TestMemCompareWithDirection(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := tt.m1.CompareWithDirection(tt.m2, tt.direction)
 			if got != tt.want {
 				t.Errorf("CompareWithDirection() = %v, want %v", got, tt.want)
@@ -468,7 +468,7 @@ func TestMemCompareStrings(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got := compareStrings(tt.m1, tt.m2)
 			if got != tt.want {
 				t.Errorf("compareStrings() = %v, want %v", got, tt.want)
@@ -520,7 +520,7 @@ func TestCompareNumericWithText(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			result, ok := compareNumericWithText(tt.numericVal, tt.textBytes)
 			if ok != tt.wantOk {
 				t.Errorf("compareNumericWithText() ok = %v, want %v", ok, tt.wantOk)
@@ -594,7 +594,7 @@ func TestCompareMixedNumericText(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			result, handled := compareMixedNumericText(tt.m, tt.other, tt.mIsNumeric, tt.mIsText)
 			if handled != tt.wantHandled {
 				t.Errorf("compareMixedNumericText() handled = %v, want %v", handled, tt.wantHandled)

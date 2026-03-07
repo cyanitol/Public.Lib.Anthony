@@ -68,9 +68,9 @@ func (e *IntegrityError) Error() string {
 
 // IntegrityResult contains the results of an integrity check
 type IntegrityResult struct {
-	Errors   []*IntegrityError // All errors found
-	PageCount uint32           // Number of pages checked
-	RowCount  int64            // Total rows found
+	Errors    []*IntegrityError // All errors found
+	PageCount uint32            // Number of pages checked
+	RowCount  int64             // Total rows found
 }
 
 // OK returns true if no errors were found
@@ -323,9 +323,9 @@ func checkOverlappingCells(pageNum uint32, offsets []int, sizes []int, result *I
 
 	// Create a list of cell ranges and sort by offset
 	type cellRange struct {
-		index  int
-		start  int
-		end    int
+		index int
+		start int
+		end   int
 	}
 	ranges := make([]cellRange, len(offsets))
 	for i := 0; i < len(offsets); i++ {

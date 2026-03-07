@@ -214,7 +214,7 @@ func TestSQLiteWindow(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			rows, err := db.Query(tt.query)
 			if tt.wantErr {
@@ -338,7 +338,7 @@ func TestSQLiteWindowPartitioned(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			rows, err := db.Query(tt.query)
 			if err != nil {
@@ -463,7 +463,7 @@ func TestSQLiteWindowFrames(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			rows, err := db.Query(tt.query)
 			if err != nil {

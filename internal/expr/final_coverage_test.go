@@ -47,7 +47,7 @@ func TestOpCodeStringUncovered(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.expected, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := tt.op.String()
 			if result != tt.expected {
 				t.Errorf("Expected %s, got %s", tt.expected, result)
@@ -316,7 +316,7 @@ func TestGenerateBinaryUncoveredOps(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			expr := &parser.BinaryExpr{
 				Left:  &parser.IdentExpr{Name: "a"},
 				Op:    tt.op,

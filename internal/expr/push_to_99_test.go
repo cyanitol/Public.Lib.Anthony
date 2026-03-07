@@ -146,7 +146,7 @@ func TestEvaluateCastVariants(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := EvaluateCast(tt.value, tt.targetType)
 			if result == nil {
 				t.Error("Expected non-nil result")

@@ -78,11 +78,11 @@ type Index struct {
 
 // View represents a database view.
 type View struct {
-	Name      string              // View name
-	Columns   []string            // Optional explicit column names
-	Select    *parser.SelectStmt  // The SELECT statement defining the view
-	SQL       string              // CREATE VIEW statement
-	Temporary bool                // True for temporary views
+	Name      string             // View name
+	Columns   []string           // Optional explicit column names
+	Select    *parser.SelectStmt // The SELECT statement defining the view
+	SQL       string             // CREATE VIEW statement
+	Temporary bool               // True for temporary views
 }
 
 // CompileCreateTable generates VDBE bytecode for CREATE TABLE.
@@ -815,11 +815,11 @@ func CompileCreateTrigger(stmt *parser.CreateTriggerStmt, schema *Schema, bt *bt
 	v.AllocMemory(6) // Allocate 6 registers (0-5)
 
 	// Load values into registers
-	v.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, "trigger")      // R[1] = "trigger"
-	v.AddOpWithP4Str(vdbe.OpString, 0, 2, 0, stmt.Name)      // R[2] = trigger name
-	v.AddOpWithP4Str(vdbe.OpString, 0, 3, 0, stmt.Table)     // R[3] = table name
-	v.AddOpWithP4Int(vdbe.OpInteger, 0, 4, 0, 0)             // R[4] = 0 (no rootpage)
-	v.AddOpWithP4Str(vdbe.OpString, 0, 5, 0, createSQL)      // R[5] = SQL
+	v.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, "trigger")  // R[1] = "trigger"
+	v.AddOpWithP4Str(vdbe.OpString, 0, 2, 0, stmt.Name)  // R[2] = trigger name
+	v.AddOpWithP4Str(vdbe.OpString, 0, 3, 0, stmt.Table) // R[3] = table name
+	v.AddOpWithP4Int(vdbe.OpInteger, 0, 4, 0, 0)         // R[4] = 0 (no rootpage)
+	v.AddOpWithP4Str(vdbe.OpString, 0, 5, 0, createSQL)  // R[5] = SQL
 
 	// Open cursor 0 on sqlite_master for writing
 	// sqlite_master is always at root page 1

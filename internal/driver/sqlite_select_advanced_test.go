@@ -609,19 +609,19 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 
 		// Subquery with no FROM clause
 		{
-			name: "subquery_no_from",
+			name:  "subquery_no_from",
 			setup: []string{},
 			query: "SELECT * FROM (SELECT 1)",
 			want:  [][]interface{}{{int64(1)}},
 		},
 		{
-			name: "subquery_no_from_multiple_columns",
+			name:  "subquery_no_from_multiple_columns",
 			setup: []string{},
 			query: "SELECT c,b,a FROM (SELECT 1 AS 'a', 2 AS 'b', 'abc' AS 'c')",
 			want:  [][]interface{}{{"abc", int64(2), int64(1)}},
 		},
 		{
-			name: "subquery_no_from_with_where_false",
+			name:  "subquery_no_from_with_where_false",
 			setup: []string{},
 			query: "SELECT * FROM (SELECT 1 AS 'a', 2 AS 'b' WHERE 0)",
 			want:  [][]interface{}{},
@@ -1522,7 +1522,7 @@ func TestSQLiteSelectAdvanced(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
@@ -1586,7 +1586,7 @@ func TestSQLiteSelectAdvancedErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()

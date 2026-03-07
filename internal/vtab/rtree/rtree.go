@@ -426,10 +426,10 @@ type RTreeCursor struct {
 	table      *RTree
 	results    []*Entry
 	pos        int
-	queryBBox  *BoundingBox // For spatial queries
-	queryID    *int64       // For ID queries
-	queryType  QueryType    // Type of spatial query
-	idxNum     int          // From BestIndex
+	queryBBox  *BoundingBox  // For spatial queries
+	queryID    *int64        // For ID queries
+	queryType  QueryType     // Type of spatial query
+	idxNum     int           // From BestIndex
 	constraint []interface{} // Constraint values
 }
 

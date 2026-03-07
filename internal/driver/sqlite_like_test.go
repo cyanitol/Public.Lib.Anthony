@@ -138,8 +138,8 @@ func TestSQLiteLikeGlob(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		query    string      // SQL query to execute
-		expected []string    // expected results (ordered)
+		query    string   // SQL query to execute
+		expected []string // expected results (ordered)
 		wantErr  bool
 	}{
 		// LIKE with exact match - case insensitive by default (like.test lines 53-72)
@@ -264,17 +264,17 @@ func TestSQLiteLikeGlob(t *testing.T) {
 		{
 			name:     "like_null_pattern",
 			query:    "SELECT 'test' LIKE NULL",
-			expected: []string{},  // Returns NULL which shows as no rows
+			expected: []string{}, // Returns NULL which shows as no rows
 		},
 		{
 			name:     "like_null_subject",
 			query:    "SELECT NULL LIKE 'test'",
-			expected: []string{},  // Returns NULL which shows as no rows
+			expected: []string{}, // Returns NULL which shows as no rows
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			rows, err := db.Query(tt.query)
 			if (err != nil) != tt.wantErr {
@@ -396,12 +396,12 @@ func TestLikeEscape(t *testing.T) {
 		{
 			name:     "escape_percent_literal",
 			query:    "SELECT 'x' LIKE '%' ESCAPE '_'",
-			expected: []int64{1},  // Returns 1 (true)
+			expected: []int64{1}, // Returns 1 (true)
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			rows, err := db.Query(tt.query)
 			if err != nil {
@@ -606,7 +606,7 @@ func TestLikeUnicode(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result int64
 			err := db.QueryRow(tt.query).Scan(&result)
@@ -646,14 +646,14 @@ func TestLikeSpecialCharacters(t *testing.T) {
 		char     string
 		expected int
 	}{
-		{" ", 32},   // space
+		{" ", 32}, // space
 		{"!", 33},
 		{"#", 35},
 		{"$", 36},
-		{"%", 37},   // wildcard in LIKE
+		{"%", 37}, // wildcard in LIKE
 		{"&", 38},
-		{"'", 39},   // single quote
-		{"*", 42},   // wildcard in GLOB
+		{"'", 39}, // single quote
+		{"*", 42}, // wildcard in GLOB
 		{"+", 43},
 		{"-", 45},
 		{".", 46},
@@ -662,10 +662,10 @@ func TestLikeSpecialCharacters(t *testing.T) {
 		{"9", 57},
 		{"A", 65},
 		{"Z", 90},
-		{"[", 91},   // special in GLOB
-		{"\\", 92},  // escape character
-		{"]", 93},   // special in GLOB
-		{"_", 95},   // wildcard in LIKE
+		{"[", 91},  // special in GLOB
+		{"\\", 92}, // escape character
+		{"]", 93},  // special in GLOB
+		{"_", 95},  // wildcard in LIKE
 		{"a", 97},
 		{"z", 122},
 		{"{", 123},
@@ -683,7 +683,7 @@ func TestLikeSpecialCharacters(t *testing.T) {
 
 	// Test LIKE with special characters
 	for _, tc := range tests {
-		tc := tc  // Capture range variable
+		tc := tc // Capture range variable
 		t.Run("like_special_"+tc.char, func(t *testing.T) {
 			// Need to escape % and _ when they are literal characters
 			pattern := tc.char + "%"
@@ -772,7 +772,7 @@ func TestLikeWithBlobs(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			rows, err := db.Query(tt.query)
 			if err != nil {
@@ -909,7 +909,7 @@ func TestLikeEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result int64
 			err := db.QueryRow(tt.query).Scan(&result)
@@ -930,13 +930,13 @@ func TestLikeEdgeCases(t *testing.T) {
 func TestLikeTestSuiteReady(t *testing.T) {
 	// Verify test file structure
 	testCases := map[string]bool{
-		"TestSQLiteLikeGlob":          true,
-		"TestLikeEscape":              true,
-		"TestLikeCaseSensitivity":     true,
-		"TestLikeUnicode":             true,
-		"TestLikeSpecialCharacters":   true,
-		"TestLikeWithBlobs":           true,
-		"TestLikeEdgeCases":           true,
+		"TestSQLiteLikeGlob":        true,
+		"TestLikeEscape":            true,
+		"TestLikeCaseSensitivity":   true,
+		"TestLikeUnicode":           true,
+		"TestLikeSpecialCharacters": true,
+		"TestLikeWithBlobs":         true,
+		"TestLikeEdgeCases":         true,
 	}
 
 	// Count test functions

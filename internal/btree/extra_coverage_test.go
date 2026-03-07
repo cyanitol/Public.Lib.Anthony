@@ -367,7 +367,7 @@ func TestDefragmentPages2(t *testing.T) {
 	leftPageData := make([]byte, pageSize)
 	leftPageData[0] = PageTypeLeafTable
 	binary.BigEndian.PutUint16(leftPageData[3:], 3) // 3 cells
-	leftPageData[7] = 20 // FragmentedBytes
+	leftPageData[7] = 20                            // FragmentedBytes
 
 	// Add cells with gaps
 	cell1 := EncodeTableLeafCell(1, []byte("a"))

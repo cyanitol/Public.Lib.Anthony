@@ -451,7 +451,7 @@ func TestFormatJoinType(t *testing.T) {
 
 func TestGenerateExplainForInsertWithValues(t *testing.T) {
 	insert := &parser.InsertStmt{
-		Table: "users",
+		Table:   "users",
 		Columns: []string{"id", "name"},
 		Values: [][]parser.Expression{
 			{

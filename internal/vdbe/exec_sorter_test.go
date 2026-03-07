@@ -14,15 +14,15 @@ func TestSorterOperations(t *testing.T) {
 
 		// Test SorterOpen
 		keyInfo := &SorterKeyInfo{
-			KeyCols:    []int{0},        // Sort by first column
-			Desc:       []bool{false},   // Ascending order
-			Collations: []string{""},    // Default collation
+			KeyCols:    []int{0},      // Sort by first column
+			Desc:       []bool{false}, // Ascending order
+			Collations: []string{""},  // Default collation
 		}
 
 		openInstr := &Instruction{
 			Opcode: OpSorterOpen,
-			P1:     0,              // Sorter cursor 0
-			P2:     2,              // 2 columns
+			P1:     0, // Sorter cursor 0
+			P2:     2, // 2 columns
 			P4:     P4Union{P: keyInfo},
 			P4Type: P4Dynamic,
 		}
@@ -52,9 +52,9 @@ func TestSorterOperations(t *testing.T) {
 
 			insertInstr := &Instruction{
 				Opcode: OpSorterInsert,
-				P1:     0,  // Sorter cursor 0
-				P2:     0,  // Start register
-				P3:     2,  // 2 columns
+				P1:     0, // Sorter cursor 0
+				P2:     0, // Start register
+				P3:     2, // 2 columns
 			}
 
 			err := v.execSorterInsert(insertInstr)
@@ -70,8 +70,8 @@ func TestSorterOperations(t *testing.T) {
 		// Sort the rows
 		sortInstr := &Instruction{
 			Opcode: OpSorterSort,
-			P1:     0,   // Sorter cursor 0
-			P2:     99,  // Jump to 99 if empty (should not jump)
+			P1:     0,  // Sorter cursor 0
+			P2:     99, // Jump to 99 if empty (should not jump)
 		}
 
 		v.PC = 10
@@ -95,8 +95,8 @@ func TestSorterOperations(t *testing.T) {
 		// Iterate through sorted results
 		nextInstr := &Instruction{
 			Opcode: OpSorterNext,
-			P1:     0,   // Sorter cursor 0
-			P2:     15,  // Jump to 15 if more rows available
+			P1:     0,  // Sorter cursor 0
+			P2:     15, // Jump to 15 if more rows available
 		}
 
 		expectedOrder := []int64{1, 2, 3}
@@ -136,9 +136,9 @@ func TestSorterOperations(t *testing.T) {
 		v.Sorters[0].Current = 0 // Reset to first row
 		dataInstr := &Instruction{
 			Opcode: OpSorterData,
-			P1:     0,   // Sorter cursor 0
-			P2:     10,  // Destination register 10
-			P3:     2,   // Copy 2 columns
+			P1:     0,  // Sorter cursor 0
+			P2:     10, // Destination register 10
+			P3:     2,  // Copy 2 columns
 		}
 
 		err = v.execSorterData(dataInstr)
@@ -157,7 +157,7 @@ func TestSorterOperations(t *testing.T) {
 		// Test SorterClose
 		closeInstr := &Instruction{
 			Opcode: OpSorterClose,
-			P1:     0,  // Sorter cursor 0
+			P1:     0, // Sorter cursor 0
 		}
 
 		err = v.execSorterClose(closeInstr)
@@ -177,7 +177,7 @@ func TestSorterOperations(t *testing.T) {
 		// Sort in descending order
 		keyInfo := &SorterKeyInfo{
 			KeyCols:    []int{0},
-			Desc:       []bool{true},  // Descending
+			Desc:       []bool{true}, // Descending
 			Collations: []string{""},
 		}
 
@@ -235,7 +235,7 @@ func TestSorterOperations(t *testing.T) {
 		v.execSorterSort(&Instruction{
 			Opcode: OpSorterSort,
 			P1:     0,
-			P2:     99,  // Jump address for empty
+			P2:     99, // Jump address for empty
 		})
 
 		if v.PC != 99 {
@@ -250,7 +250,7 @@ func TestSorterOperations(t *testing.T) {
 		// Try to insert into non-existent sorter
 		err := v.execSorterInsert(&Instruction{
 			Opcode: OpSorterInsert,
-			P1:     99,  // Invalid sorter
+			P1:     99, // Invalid sorter
 			P2:     0,
 			P3:     1,
 		})
@@ -323,8 +323,8 @@ func TestSorterOperations(t *testing.T) {
 
 		// Sort by two columns
 		keyInfo := &SorterKeyInfo{
-			KeyCols:    []int{0, 1},           // Sort by first two columns
-			Desc:       []bool{false, true},   // First ASC, second DESC
+			KeyCols:    []int{0, 1},         // Sort by first two columns
+			Desc:       []bool{false, true}, // First ASC, second DESC
 			Collations: []string{"", ""},
 		}
 

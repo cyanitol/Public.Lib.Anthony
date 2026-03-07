@@ -163,9 +163,9 @@ func (b *BoundingBox) Center() []float64 {
 
 // Entry represents an entry in the R-Tree (either a data entry or a child node reference).
 type Entry struct {
-	ID    int64         // ID of the data entry (0 for internal node entries)
-	BBox  *BoundingBox  // Bounding box of this entry
-	Child *Node         // Child node (nil for leaf entries)
+	ID    int64        // ID of the data entry (0 for internal node entries)
+	BBox  *BoundingBox // Bounding box of this entry
+	Child *Node        // Child node (nil for leaf entries)
 }
 
 // NewEntry creates a new entry with the given bounding box.

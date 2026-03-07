@@ -107,7 +107,7 @@ func TestIsValidPageSize(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			got := IsValidPageSize(tt.size)
 			if got != tt.want {
 				t.Errorf("IsValidPageSize(%d) = %v, want %v", tt.size, got, tt.want)
@@ -123,7 +123,7 @@ func TestNewHeader(t *testing.T) {
 	for _, pageSize := range pageSizes {
 		pageSize := pageSize
 		t.Run("", func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			h := NewHeader(pageSize)
 
 			if h == nil {
@@ -241,7 +241,7 @@ func TestHeader_Parse(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			data := tt.setup()
 			h := &Header{}
 			err := h.Parse(data)
@@ -342,7 +342,7 @@ func TestHeader_GetPageSize(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			h := &Header{PageSize: tt.pageSize}
 			got := h.GetPageSize()
 
@@ -543,7 +543,7 @@ func TestHeader_Validate(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			h := tt.setup()
 			err := h.Validate()
 

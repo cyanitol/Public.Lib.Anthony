@@ -236,12 +236,12 @@ func TestRedistributeCells(t *testing.T) {
 	pageSize := uint32(4096)
 
 	tests := []struct {
-		name           string
-		leftCells      int
-		rightCells     int
-		expectedLeft   int
-		expectedRight  int
-		payloadSize    int
+		name          string
+		leftCells     int
+		rightCells    int
+		expectedLeft  int
+		expectedRight int
+		payloadSize   int
 	}{
 		{
 			name:          "unbalanced left heavy",
@@ -339,39 +339,39 @@ func TestIsUnderfull(t *testing.T) {
 	pageSize := uint32(4096)
 
 	tests := []struct {
-		name         string
-		numCells     int
-		payloadSize  int
+		name          string
+		numCells      int
+		payloadSize   int
 		wantUnderfull bool
 	}{
 		{
-			name:         "one cell is underfull",
-			numCells:     1,
-			payloadSize:  10,
+			name:          "one cell is underfull",
+			numCells:      1,
+			payloadSize:   10,
 			wantUnderfull: true,
 		},
 		{
-			name:         "minimum cells is not underfull",
-			numCells:     MinCellsPerPage,
-			payloadSize:  500, // Large payload to use significant space
+			name:          "minimum cells is not underfull",
+			numCells:      MinCellsPerPage,
+			payloadSize:   500, // Large payload to use significant space
 			wantUnderfull: false,
 		},
 		{
-			name:         "many cells is not underfull",
-			numCells:     20,
-			payloadSize:  100, // Larger payload to ensure page is well-filled
+			name:          "many cells is not underfull",
+			numCells:      20,
+			payloadSize:   100, // Larger payload to ensure page is well-filled
 			wantUnderfull: false,
 		},
 		{
-			name:         "empty page is not underfull",
-			numCells:     0,
-			payloadSize:  0,
+			name:          "empty page is not underfull",
+			numCells:      0,
+			payloadSize:   0,
 			wantUnderfull: false, // Empty pages are valid and not considered underfull
 		},
 		{
-			name:         "small cells underfull by space",
-			numCells:     5,
-			payloadSize:  10,
+			name:          "small cells underfull by space",
+			numCells:      5,
+			payloadSize:   10,
 			wantUnderfull: true,
 		},
 	}

@@ -224,7 +224,7 @@ func TestMemToValue(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			val := memToValue(tt.mem)
 			if tt.wantType == "nil" {
 				if val != nil {
@@ -282,7 +282,7 @@ func TestGetVarintGeneral(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			val, n := getVarintGeneral(tt.data, tt.offset)
 			if tt.wantErr {
 				if n > 0 {
@@ -345,7 +345,7 @@ func TestDecodeIntValue(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			got, err := decodeIntValue(tt.data, tt.offset, tt.st)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)

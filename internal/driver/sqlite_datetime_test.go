@@ -585,7 +585,7 @@ func TestSQLiteDateTimeFunctions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result interface{}
 			err := db.QueryRow(tt.expr).Scan(&result)
@@ -732,7 +732,7 @@ func TestSQLiteDateTimeEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result interface{}
 			err := db.QueryRow(tt.expr).Scan(&result)
@@ -823,7 +823,7 @@ func TestSQLiteDateTimeWithTable(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result string
 			err := db.QueryRow(tt.query).Scan(&result)

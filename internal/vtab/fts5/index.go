@@ -45,11 +45,11 @@ type InvertedIndex struct {
 // NewInvertedIndex creates a new inverted index.
 func NewInvertedIndex(columnNames []string) *InvertedIndex {
 	return &InvertedIndex{
-		index:       make(map[string][]PostingList),
-		docLengths:  make(map[DocumentID]int),
-		docColumns:  make(map[DocumentID]map[int]string),
-		columnNames: columnNames,
-		totalDocs:   0,
+		index:        make(map[string][]PostingList),
+		docLengths:   make(map[DocumentID]int),
+		docColumns:   make(map[DocumentID]map[int]string),
+		columnNames:  columnNames,
+		totalDocs:    0,
 		avgDocLength: 0.0,
 	}
 }
@@ -245,9 +245,9 @@ func (idx *InvertedIndex) GetAllDocuments() []DocumentID {
 
 // SearchResult represents a document matching a search query.
 type SearchResult struct {
-	DocID     DocumentID
-	Score     float64
-	Matches   []MatchInfo // Information about matched terms
+	DocID   DocumentID
+	Score   float64
+	Matches []MatchInfo // Information about matched terms
 }
 
 // MatchInfo contains information about a matched term in a document.

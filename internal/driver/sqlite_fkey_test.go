@@ -161,7 +161,7 @@ func TestForeignKey_OnDeleteActions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec(`DROP TABLE IF EXISTS child`)
 			if err != nil {
@@ -209,7 +209,7 @@ func TestForeignKey_OnUpdateActions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := db.Exec(`DROP TABLE IF EXISTS child`)
 			if err != nil {

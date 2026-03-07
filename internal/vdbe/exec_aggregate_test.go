@@ -17,12 +17,12 @@ func TestAggregateOpcodes(t *testing.T) {
 		v.Program = []*Instruction{
 			{
 				Opcode: OpAggStep,
-				P1:     0,  // cursor
-				P2:     1,  // first arg register
-				P3:     0,  // function index
+				P1:     0, // cursor
+				P2:     1, // first arg register
+				P3:     0, // function index
 				P4:     P4Union{Z: "count"},
 				P4Type: P4Static,
-				P5:     1,  // 1 argument
+				P5:     1, // 1 argument
 			},
 		}
 
@@ -40,9 +40,9 @@ func TestAggregateOpcodes(t *testing.T) {
 		// Finalize
 		finalInstr := &Instruction{
 			Opcode: OpAggFinal,
-			P1:     0,  // cursor
-			P2:     5,  // output register
-			P3:     0,  // function index
+			P1:     0, // cursor
+			P2:     5, // output register
+			P3:     0, // function index
 		}
 
 		err := v.execAggFinal(finalInstr)
@@ -238,7 +238,7 @@ func TestAggregateOpcodes(t *testing.T) {
 		v.Program = []*Instruction{
 			{
 				Opcode: OpAggStep,
-				P1:     0,  // Group 0
+				P1:     0, // Group 0
 				P2:     1,
 				P3:     0,
 				P4:     P4Union{Z: "sum"},
@@ -247,7 +247,7 @@ func TestAggregateOpcodes(t *testing.T) {
 			},
 			{
 				Opcode: OpAggStep,
-				P1:     1,  // Group 1
+				P1:     1, // Group 1
 				P2:     1,
 				P3:     0,
 				P4:     P4Union{Z: "sum"},

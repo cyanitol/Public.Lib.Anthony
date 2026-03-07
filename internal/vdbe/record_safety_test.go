@@ -63,7 +63,7 @@ func TestDecodeInt24ValueBufferOverflow(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			_, err := decodeInt24Value(tt.data, tt.offset)
 			if tt.expectErr {
 				if err == nil {
@@ -137,7 +137,7 @@ func TestDecodeInt48ValueBufferOverflow(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			_, err := decodeInt48Value(tt.data, tt.offset)
 			if tt.expectErr {
 				if err == nil {
@@ -199,7 +199,7 @@ func TestDecodeInt24ValueCorrectness(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			result, err := decodeInt24Value(tt.data, tt.offset)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -255,7 +255,7 @@ func TestDecodeInt48ValueCorrectness(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			result, err := decodeInt48Value(tt.data, tt.offset)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -340,7 +340,7 @@ func TestDecodeRecordTruncated(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			_, err := decodeRecord(tt.data)
 			if err == nil {
 				t.Error("expected error for truncated data")
@@ -372,7 +372,7 @@ func TestDecodeRecordIntEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			// Encode the value
 			encoded := encodeSimpleRecord([]interface{}{tt.value})
 
@@ -403,8 +403,8 @@ func TestDecodeRecordOffsetEdgeCases(t *testing.T) {
 	t.Parallel()
 	// Create a valid record with multiple values
 	values := []interface{}{
-		int64(100),   // serial type 1 (1 byte)
-		int64(1000),  // serial type 2 (2 bytes)
+		int64(100),    // serial type 1 (1 byte)
+		int64(1000),   // serial type 2 (2 bytes)
 		int64(100000), // serial type 3 (3 bytes)
 	}
 
@@ -450,7 +450,7 @@ func TestDecodeRecordBlobAndText(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			encoded := encodeSimpleRecord([]interface{}{tt.value})
 			decoded, err := decodeRecord(encoded)
 			if err != nil {

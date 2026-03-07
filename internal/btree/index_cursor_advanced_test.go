@@ -570,12 +570,12 @@ func TestIndexCursor_DepthExceeded(t *testing.T) {
 	interiorPage := uint32(10)
 	interiorData := make([]byte, 4096)
 	interiorData[0] = PageTypeInteriorIndex
-	binary.BigEndian.PutUint16(interiorData[3:], 1) // NumCells = 1
+	binary.BigEndian.PutUint16(interiorData[3:], 1)  // NumCells = 1
 	binary.BigEndian.PutUint32(interiorData[8:], 11) // RightChild = 11
 
 	// Cell pointing to another page
 	cellOffset := uint32(4096 - 10)
-	binary.BigEndian.PutUint32(interiorData[cellOffset:], 12) // Child page
+	binary.BigEndian.PutUint32(interiorData[cellOffset:], 12)         // Child page
 	binary.BigEndian.PutUint16(interiorData[12:], uint16(cellOffset)) // Cell pointer
 
 	bt.SetPage(interiorPage, interiorData)

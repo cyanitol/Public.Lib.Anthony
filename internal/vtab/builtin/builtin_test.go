@@ -413,7 +413,7 @@ func TestPragmaTableCreate(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			vtable, schema, err := tt.module.Create(nil, "pragma_"+tt.name, "main", tt.wantSchema, nil)
 			if err != nil {
 				t.Fatalf("Create failed: %v", err)
@@ -574,7 +574,7 @@ func TestPragmaFunctionModule(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			vtable, schema, err := module.Connect(nil, tt.moduleName, "main", "test", nil)
 			if err != nil {
 				t.Fatalf("Connect failed: %v", err)
@@ -904,4 +904,3 @@ func TestSQLiteMasterColumnAllTypes(t *testing.T) {
 		}
 	}
 }
-

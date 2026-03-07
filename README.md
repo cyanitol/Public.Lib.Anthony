@@ -133,6 +133,46 @@ internal/
 └── vtab/        - Virtual table support
 ```
 
+## Development
+
+### Using Nix Shell
+
+This project uses Nix for reproducible development environments:
+
+```bash
+# Enter the development shell
+nix-shell
+
+# All Go commands work inside nix-shell
+go build ./...
+go test ./...
+```
+
+### Pre-Commit Checks
+
+Before committing, run the validation checks:
+
+```bash
+# Run all pre-commit checks
+make commit
+```
+
+This runs:
+1. **Format check** - Ensures code is `gofmt` formatted
+2. **SPDX check** - All `.go` files must have SPDX license headers
+3. **Complexity check** - No function may have cyclomatic complexity > 10
+4. **go vet** - Static analysis for bugs
+5. **Build** - Ensures project compiles
+6. **Tests** - All tests must pass
+
+Individual checks:
+```bash
+make check-fmt         # Check formatting
+make check-spdx        # Check license headers
+make check-complexity  # Check function complexity
+make vet               # Run go vet
+```
+
 ## Testing
 
 ```bash
@@ -148,6 +188,12 @@ go test -race ./...
 # Run specific package tests
 go test ./internal/driver/...
 go test ./internal/btree/...
+
+# Using Make
+make test         # All tests
+make test-fast    # Parallel tests
+make test-short   # Skip slow tests
+make test-cover   # With coverage
 ```
 
 ## Known Limitations

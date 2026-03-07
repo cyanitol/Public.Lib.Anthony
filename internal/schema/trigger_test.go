@@ -363,8 +363,8 @@ func TestListTriggers(t *testing.T) {
 func TestShouldExecuteTriggerNoWhen(t *testing.T) {
 	t.Parallel()
 	trigger := &Trigger{
-		Name:  "my_trigger",
-		When:  nil,
+		Name: "my_trigger",
+		When: nil,
 	}
 
 	should, err := trigger.ShouldExecuteTrigger(nil, nil)

@@ -183,16 +183,16 @@ func handleUnderfullPage(cursor *BtCursor, page *BtreePage) error {
 
 // BalanceInfo provides information about page balance state
 type BalanceInfo struct {
-	PageNum        uint32  // Page number
-	NumCells       uint16  // Number of cells on page
-	FreeSpace      int     // Free space in bytes
-	UsedSpace      int     // Used space in bytes
-	UsableSize     int     // Total usable size
-	FillFactor     float64 // Percentage of space used (0.0 - 1.0)
-	IsOverfull     bool    // True if page is overfull
-	IsUnderfull    bool    // True if page is underfull
-	IsBalanced     bool    // True if page is balanced
-	FragmentedBytes byte   // Fragmented free bytes
+	PageNum         uint32  // Page number
+	NumCells        uint16  // Number of cells on page
+	FreeSpace       int     // Free space in bytes
+	UsedSpace       int     // Used space in bytes
+	UsableSize      int     // Total usable size
+	FillFactor      float64 // Percentage of space used (0.0 - 1.0)
+	IsOverfull      bool    // True if page is overfull
+	IsUnderfull     bool    // True if page is underfull
+	IsBalanced      bool    // True if page is balanced
+	FragmentedBytes byte    // Fragmented free bytes
 }
 
 // GetBalanceInfo returns detailed balance information for a page

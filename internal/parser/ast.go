@@ -27,7 +27,7 @@ type Expression interface {
 
 // SelectStmt represents a SELECT statement.
 type SelectStmt struct {
-	With     *WithClause     // Common Table Expressions (WITH clause)
+	With     *WithClause // Common Table Expressions (WITH clause)
 	Distinct bool
 	Columns  []ResultColumn
 	From     *FromClause
@@ -55,8 +55,8 @@ type WithClause struct {
 // CTE represents a Common Table Expression.
 type CTE struct {
 	Name    string
-	Columns []string      // Optional column list
-	Select  *SelectStmt   // The SELECT query defining the CTE
+	Columns []string    // Optional column list
+	Select  *SelectStmt // The SELECT query defining the CTE
 }
 
 // CompoundSelect represents compound SELECT operators (UNION, EXCEPT, INTERSECT).
@@ -106,7 +106,7 @@ type FromClause struct {
 
 // TableOrSubquery represents a table or subquery in FROM.
 type TableOrSubquery struct {
-	Schema    string      // optional schema name for qualified table references
+	Schema    string // optional schema name for qualified table references
 	TableName string
 	Alias     string
 	Subquery  *SelectStmt
@@ -519,7 +519,6 @@ func (e *ExplainStmt) String() string {
 	}
 	return "EXPLAIN"
 }
-
 
 // AttachStmt represents an ATTACH DATABASE statement.
 type AttachStmt struct {

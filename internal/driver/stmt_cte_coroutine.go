@@ -12,12 +12,12 @@ import (
 // This allows the CTE to materialize at runtime instead of compile time.
 //
 // Bytecode pattern:
-//   OpOpenEphemeral cursorNum, numColumns  // Open cursor OUTSIDE coroutine
-//   OpInitCoroutine coroutineID, jumpPastBody, entryPoint
-//   [coroutine body - executes SELECT and inserts into cursor]
-//   OpEndCoroutine coroutineID
-//   OpYield coroutineID  // Call the coroutine to materialize results
 //
+//	OpOpenEphemeral cursorNum, numColumns  // Open cursor OUTSIDE coroutine
+//	OpInitCoroutine coroutineID, jumpPastBody, entryPoint
+//	[coroutine body - executes SELECT and inserts into cursor]
+//	OpEndCoroutine coroutineID
+//	OpYield coroutineID  // Call the coroutine to materialize results
 func (s *Stmt) compileCTEPopulationCoroutine(vm *vdbe.VDBE, cteSelect *parser.SelectStmt, cursorNum int, coroutineID int, numColumns int, args []driver.NamedValue) error {
 	// CRITICAL: Open the ephemeral table BEFORE the coroutine, not inside it.
 	// This ensures the cursor stays open after the coroutine completes.

@@ -76,7 +76,7 @@ func TestCompileSelectNil(t *testing.T) {
 func TestCompileSelectSimple(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)
@@ -109,7 +109,7 @@ func TestCompileSelectSimple(t *testing.T) {
 func TestCompileSelectWithFrom(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)
@@ -167,7 +167,7 @@ func TestCompileSelectWithFrom(t *testing.T) {
 func TestCompileSelectWithWhere(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)
@@ -218,7 +218,7 @@ func TestCompileSelectWithWhere(t *testing.T) {
 func TestCompileSelectWithDistinct(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)
@@ -246,7 +246,7 @@ func TestCompileSelectWithDistinct(t *testing.T) {
 func TestCompileSelectWithOrderBy(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)
@@ -290,7 +290,7 @@ func TestCompileSelectWithOrderBy(t *testing.T) {
 func TestCompileSelectUnion(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)
@@ -342,7 +342,7 @@ func TestCompileSelectUnion(t *testing.T) {
 func TestCompileSelectIntersect(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)
@@ -391,7 +391,7 @@ func TestCompileSelectIntersect(t *testing.T) {
 func TestCompileSelectExcept(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)
@@ -447,7 +447,7 @@ func TestDisposeResultDestinations(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem:    1,
+				Mem:  1,
 				Tabs: 0,
 			}
 			sc := NewSelectCompiler(parse)
@@ -476,7 +476,7 @@ func TestDisposeResultDestinations(t *testing.T) {
 func TestDisposeResultUnsupported(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)
@@ -526,7 +526,7 @@ func TestCompileExpr(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem: 1,
+				Mem:  1,
 			}
 			sc := NewSelectCompiler(parse)
 
@@ -548,7 +548,7 @@ func TestCompileExpr(t *testing.T) {
 // Test codeDistinct
 func TestCodeDistinct(t *testing.T) {
 	tests := []struct {
-		name       string
+		name         string
 		distinctType uint8
 	}{
 		{"ordered", WHERE_DISTINCT_ORDERED},
@@ -559,7 +559,7 @@ func TestCodeDistinct(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			parse := &Parse{
 				Vdbe: NewVdbe(nil),
-				Mem:    1,
+				Mem:  1,
 				Tabs: 0,
 			}
 			sc := NewSelectCompiler(parse)
@@ -652,7 +652,7 @@ func TestCanUseOrderedDistinct(t *testing.T) {
 func TestCompileSelectWithLimit(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)
@@ -680,7 +680,7 @@ func TestCompileSelectWithLimit(t *testing.T) {
 func TestCompileSelectWithOffset(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)
@@ -708,7 +708,7 @@ func TestCompileSelectWithOffset(t *testing.T) {
 func TestCompileSelectWithLimitAndOffset(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
-		Mem:    1,
+		Mem:  1,
 		Tabs: 0,
 	}
 	sc := NewSelectCompiler(parse)
@@ -861,7 +861,7 @@ func TestSelectCompilerCompileGroupBy(t *testing.T) {
 			Items: []ExprListItem{
 				{Expr: &Expr{Op: TK_COLUMN, Table: 0, Column: 0}},
 				{Expr: &Expr{
-					Op: TK_AGG_FUNCTION,
+					Op:      TK_AGG_FUNCTION,
 					FuncDef: &FuncDef{Name: "sum"},
 					List: &ExprList{
 						Items: []ExprListItem{

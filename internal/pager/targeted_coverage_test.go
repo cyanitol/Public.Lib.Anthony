@@ -546,8 +546,8 @@ func TestParseDBHeaderValid(t *testing.T) {
 	header := make([]byte, 100)
 	copy(header[0:16], []byte("SQLite format 3\x00"))
 	binary.BigEndian.PutUint16(header[16:18], 4096) // page size
-	header[18] = 1 // file format write version
-	header[19] = 1 // file format read version
+	header[18] = 1                                  // file format write version
+	header[19] = 1                                  // file format read version
 
 	parsed, err := ParseDatabaseHeader(header)
 	if err != nil {

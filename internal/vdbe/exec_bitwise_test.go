@@ -24,7 +24,7 @@ func TestBitAnd(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(10)
 
 			// Set up operands
@@ -104,17 +104,17 @@ func TestBitOr(t *testing.T) {
 		right    int64
 		expected int64
 	}{
-		{"basic or", 12, 10, 14},      // 1100 | 1010 = 1110
-		{"no bits set", 0, 0, 0},      // 0000 | 0000 = 0000
-		{"one zero", 15, 0, 15},       // 1111 | 0000 = 1111
-		{"combine bits", 8, 4, 12},    // 1000 | 0100 = 1100
+		{"basic or", 12, 10, 14},        // 1100 | 1010 = 1110
+		{"no bits set", 0, 0, 0},        // 0000 | 0000 = 0000
+		{"one zero", 15, 0, 15},         // 1111 | 0000 = 1111
+		{"combine bits", 8, 4, 12},      // 1000 | 0100 = 1100
 		{"negative numbers", -1, 0, -1}, // all bits set
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(10)
 
 			v.Mem[1].SetInt(tt.left)
@@ -154,15 +154,15 @@ func TestBitNot(t *testing.T) {
 	}{
 		{"zero", 0, -1},
 		{"all ones", -1, 0},
-		{"positive", 15, -16},  // ~0000...1111 = 1111...0000
-		{"negative", -16, 15},  // ~1111...0000 = 0000...1111
-		{"one", 1, -2},         // ~0000...0001 = 1111...1110
+		{"positive", 15, -16}, // ~0000...1111 = 1111...0000
+		{"negative", -16, 15}, // ~1111...0000 = 0000...1111
+		{"one", 1, -2},        // ~0000...0001 = 1111...1110
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(10)
 
 			v.Mem[1].SetInt(tt.value)
@@ -199,18 +199,18 @@ func TestShiftLeft(t *testing.T) {
 		shift    int64
 		expected int64
 	}{
-		{"basic shift", 1, 3, 8},       // 1 << 3 = 8
-		{"shift by zero", 42, 0, 42},   // 42 << 0 = 42
-		{"large shift", 1, 10, 1024},   // 1 << 10 = 1024
-		{"negative shift", 8, -1, 0},   // negative shift = 0
-		{"shift >= 64", 1, 64, 0},      // shift too large = 0
+		{"basic shift", 1, 3, 8},          // 1 << 3 = 8
+		{"shift by zero", 42, 0, 42},      // 42 << 0 = 42
+		{"large shift", 1, 10, 1024},      // 1 << 10 = 1024
+		{"negative shift", 8, -1, 0},      // negative shift = 0
+		{"shift >= 64", 1, 64, 0},         // shift too large = 0
 		{"shift multiple bits", 5, 2, 20}, // 0101 << 2 = 10100
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(10)
 
 			v.Mem[1].SetInt(tt.shift)
@@ -249,19 +249,19 @@ func TestShiftRight(t *testing.T) {
 		shift    int64
 		expected int64
 	}{
-		{"basic shift", 8, 3, 1},        // 8 >> 3 = 1
-		{"shift by zero", 42, 0, 42},    // 42 >> 0 = 42
-		{"shift to zero", 7, 3, 0},      // 0111 >> 3 = 0000
-		{"negative shift", 8, -1, 0},    // negative shift = 0
-		{"shift >= 64 positive", 100, 64, 0}, // large shift of positive = 0
+		{"basic shift", 8, 3, 1},               // 8 >> 3 = 1
+		{"shift by zero", 42, 0, 42},           // 42 >> 0 = 42
+		{"shift to zero", 7, 3, 0},             // 0111 >> 3 = 0000
+		{"negative shift", 8, -1, 0},           // negative shift = 0
+		{"shift >= 64 positive", 100, 64, 0},   // large shift of positive = 0
 		{"shift >= 64 negative", -100, 64, -1}, // large shift of negative = -1
-		{"negative value", -8, 2, -2},   // arithmetic shift preserves sign
+		{"negative value", -8, 2, -2},          // arithmetic shift preserves sign
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(10)
 
 			v.Mem[1].SetInt(tt.shift)
@@ -316,7 +316,7 @@ func TestLogicalAnd(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(10)
 
 			if tt.left == nil {
@@ -386,7 +386,7 @@ func TestLogicalOr(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(10)
 
 			if tt.left == nil {
@@ -450,7 +450,7 @@ func TestLogicalNot(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-		t.Parallel()
+			t.Parallel()
 			v := NewTestVDBE(10)
 
 			if tt.value == nil {

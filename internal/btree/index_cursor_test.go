@@ -70,7 +70,7 @@ func TestEncodeDecodeIndexPayload(t *testing.T) {
 	}{
 		{"simple", []byte("test"), 1},
 		{"empty key", []byte(""), 42},
-		{"large rowid", []byte("key"), 1<<20},
+		{"large rowid", []byte("key"), 1 << 20},
 		// Note: Keys containing bytes >= 0x80 may cause issues with varint parsing
 		// This is a known limitation of the current encoding
 		{"binary key low bytes", []byte{0x00, 0x01, 0x7F}, 100},

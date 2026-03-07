@@ -64,9 +64,9 @@ func TestJSONFunc_EdgeCases(t *testing.T) {
 // TestJSONArrayFunc_EdgeCases tests edge cases for json_array function
 func TestJSONArrayFunc_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name  string
-		args  []Value
-		want  string
+		name string
+		args []Value
+		want string
 	}{
 		{
 			name: "empty array",

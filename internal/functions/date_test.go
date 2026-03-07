@@ -379,9 +379,9 @@ func TestDateTimeRawNumber(t *testing.T) {
 		value    float64
 		isJulian bool
 	}{
-		{"Julian day", 2451545.0, true},  // Valid Julian day
-		{"Unix timestamp", 1609459200.0, false}, // Outside Julian range
-		{"Small Julian", 100.5, true},    // Small Julian day
+		{"Julian day", 2451545.0, true},          // Valid Julian day
+		{"Unix timestamp", 1609459200.0, false},  // Outside Julian range
+		{"Small Julian", 100.5, true},            // Small Julian day
 		{"Large timestamp", 9999999999.0, false}, // Large Unix timestamp
 	}
 
@@ -445,11 +445,11 @@ func TestDateTimeComputeHMS(t *testing.T) {
 // TestDateTimeNormalizeMonth tests normalizeMonth with edge cases
 func TestDateTimeNormalizeMonth(t *testing.T) {
 	tests := []struct {
-		name       string
-		initMonth  int
-		initYear   int
-		wantMonth  int
-		wantYear   int
+		name      string
+		initMonth int
+		initYear  int
+		wantMonth int
+		wantYear  int
 	}{
 		{"Month 13", 13, 2020, 1, 2021},
 		{"Month 0", 0, 2020, 12, 2019},

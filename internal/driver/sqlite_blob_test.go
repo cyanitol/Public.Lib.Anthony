@@ -42,7 +42,7 @@ func TestBlobLiteralBasic(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result []byte
 			query := "SELECT " + tt.literal
@@ -72,14 +72,14 @@ func TestBlobLiteralErrors(t *testing.T) {
 	defer db.Close()
 
 	invalidLiterals := []string{
-		"X'01020k304'",  // invalid hex char 'k'
-		"X'01001'",      // odd number of hex digits
-		"x'012G45'",     // invalid hex char 'G'
-		"x'012g45'",     // invalid hex char 'g'
+		"X'01020k304'", // invalid hex char 'k'
+		"X'01001'",     // odd number of hex digits
+		"x'012G45'",    // invalid hex char 'G'
+		"x'012g45'",    // invalid hex char 'g'
 	}
 
 	for _, literal := range invalidLiterals {
-		literal := literal  // Capture range variable
+		literal := literal // Capture range variable
 		t.Run(literal, func(t *testing.T) {
 			_, err := db.Query("SELECT " + literal)
 			if err == nil {
@@ -762,7 +762,7 @@ func TestBlobLength(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(fmt.Sprintf("length_%d", tt.length), func(t *testing.T) {
 			var length int
 			query := "SELECT length(" + tt.blob + ")"
@@ -1226,7 +1226,7 @@ func TestBlobLiteralVariations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result []byte
 			query := "SELECT " + tt.literal

@@ -555,7 +555,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 			},
 			query: "SELECT category, SUM(value) FROM t1 GROUP BY category HAVING SUM(value) BETWEEN 20 AND 40 ORDER BY category",
 			want:  [][]interface{}{{"A", int64(30)}, {"C", int64(30)}},
-			},
+		},
 		{
 			name: "HAVING with IN clause on aggregate",
 			skip: "HAVING clause not yet supported",
@@ -787,7 +787,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)

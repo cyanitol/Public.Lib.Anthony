@@ -7,39 +7,39 @@ import (
 
 func TestParseReindex(t *testing.T) {
 	tests := []struct {
-		name     string
-		sql      string
-		wantName string
+		name       string
+		sql        string
+		wantName   string
 		wantSchema string
 	}{
 		{
-			name:     "REINDEX all",
-			sql:      "REINDEX",
-			wantName: "",
+			name:       "REINDEX all",
+			sql:        "REINDEX",
+			wantName:   "",
 			wantSchema: "",
 		},
 		{
-			name:     "REINDEX table",
-			sql:      "REINDEX t1",
-			wantName: "t1",
+			name:       "REINDEX table",
+			sql:        "REINDEX t1",
+			wantName:   "t1",
 			wantSchema: "",
 		},
 		{
-			name:     "REINDEX index",
-			sql:      "REINDEX idx1",
-			wantName: "idx1",
+			name:       "REINDEX index",
+			sql:        "REINDEX idx1",
+			wantName:   "idx1",
 			wantSchema: "",
 		},
 		{
-			name:     "REINDEX with schema",
-			sql:      "REINDEX main.t1",
-			wantName: "t1",
+			name:       "REINDEX with schema",
+			sql:        "REINDEX main.t1",
+			wantName:   "t1",
 			wantSchema: "main",
 		},
 		{
-			name:     "REINDEX index with schema",
-			sql:      "REINDEX main.idx1",
-			wantName: "idx1",
+			name:       "REINDEX index with schema",
+			sql:        "REINDEX main.idx1",
+			wantName:   "idx1",
 			wantSchema: "main",
 		},
 	}

@@ -15,9 +15,9 @@ func TestPagerWithLRUCache(t *testing.T) {
 
 	// Create pager with LRU cache
 	cacheConfig := LRUCacheConfig{
-		PageSize:  4096,
-		MaxPages:  5,
-		Mode:      WriteBackMode,
+		PageSize: 4096,
+		MaxPages: 5,
+		Mode:     WriteBackMode,
 	}
 
 	pager, err := OpenWithLRUCache(tmpFile, false, 4096, cacheConfig)
@@ -75,9 +75,9 @@ func TestPagerWithLRUCache_WriteThroughMode(t *testing.T) {
 
 	// Create pager with LRU cache in write-through mode
 	cacheConfig := LRUCacheConfig{
-		PageSize:  4096,
-		MaxPages:  10,
-		Mode:      WriteThroughMode,
+		PageSize: 4096,
+		MaxPages: 10,
+		Mode:     WriteThroughMode,
 	}
 
 	pager, err := OpenWithLRUCache(tmpFile, false, 4096, cacheConfig)
@@ -107,9 +107,9 @@ func TestPagerWithLRUCache_LargeWorkload(t *testing.T) {
 
 	// Create pager with small LRU cache
 	cacheConfig := LRUCacheConfig{
-		PageSize:  4096,
-		MaxPages:  10,
-		Mode:      WriteBackMode,
+		PageSize: 4096,
+		MaxPages: 10,
+		Mode:     WriteBackMode,
 	}
 
 	pager, err := OpenWithLRUCache(tmpFile, false, 4096, cacheConfig)
@@ -256,9 +256,9 @@ func BenchmarkPagerWithLRUCache(b *testing.B) {
 	defer os.Remove(tmpFile + "-journal")
 
 	cacheConfig := LRUCacheConfig{
-		PageSize:  4096,
-		MaxPages:  100,
-		Mode:      WriteBackMode,
+		PageSize: 4096,
+		MaxPages: 100,
+		Mode:     WriteBackMode,
 	}
 
 	pager, err := OpenWithLRUCache(tmpFile, false, 4096, cacheConfig)

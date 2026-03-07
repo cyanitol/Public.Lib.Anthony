@@ -204,7 +204,7 @@ func TestPlanQueryWithSubqueries(t *testing.T) {
 
 	// Create a simple subquery expression
 	subquery := &SubqueryExpr{
-		Type: SubqueryScalar,
+		Type:  SubqueryScalar,
 		Query: &ValueExpr{Value: "test"},
 	}
 

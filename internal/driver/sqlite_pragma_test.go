@@ -404,7 +404,7 @@ func TestSQLitePragma(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			// Cleanup
 			_, _ = db.Exec("DROP TABLE IF EXISTS t1")
@@ -608,7 +608,7 @@ func TestPragmaJournalModeSwitch(t *testing.T) {
 	modes := []string{"DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL"}
 
 	for _, mode := range modes {
-		mode := mode  // Capture range variable
+		mode := mode // Capture range variable
 		t.Run(mode, func(t *testing.T) {
 			var result string
 			query := "PRAGMA journal_mode=" + mode

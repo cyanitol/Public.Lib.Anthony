@@ -96,7 +96,7 @@ func TestSQLiteCTE(t *testing.T) {
 			},
 		},
 		{
-			name: "multiple_ctes_values",
+			name:  "multiple_ctes_values",
 			setup: []string{},
 			query: "WITH cte1(a) AS (VALUES(1)), cte2(b) AS (VALUES(2)) SELECT a+b FROM cte1, cte2",
 			wantRows: [][]interface{}{
@@ -118,7 +118,7 @@ func TestSQLiteCTE(t *testing.T) {
 			},
 		},
 		{
-			name: "cte_chain_three_deep",
+			name:  "cte_chain_three_deep",
 			setup: []string{},
 			query: "WITH cte1(a) AS (VALUES(10)), cte2(b) AS (SELECT a*2 FROM cte1), cte3(c) AS (SELECT b*3 FROM cte2) SELECT c FROM cte3",
 			wantRows: [][]interface{}{
@@ -127,7 +127,7 @@ func TestSQLiteCTE(t *testing.T) {
 		},
 		// Recursive CTEs with UNION ALL
 		{
-			name: "recursive_simple_counter",
+			name:  "recursive_simple_counter",
 			setup: []string{},
 			query: "WITH RECURSIVE cnt(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM cnt WHERE x<5) SELECT x FROM cnt",
 			wantRows: [][]interface{}{
@@ -139,7 +139,7 @@ func TestSQLiteCTE(t *testing.T) {
 			},
 		},
 		{
-			name: "recursive_counter_limit",
+			name:  "recursive_counter_limit",
 			setup: []string{},
 			query: "WITH RECURSIVE cnt(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM cnt WHERE x<10) SELECT x FROM cnt LIMIT 3",
 			wantRows: [][]interface{}{
@@ -149,7 +149,7 @@ func TestSQLiteCTE(t *testing.T) {
 			},
 		},
 		{
-			name: "recursive_counter_with_step",
+			name:  "recursive_counter_with_step",
 			setup: []string{},
 			query: "WITH RECURSIVE cnt(x) AS (VALUES(0) UNION ALL SELECT x+2 FROM cnt WHERE x<8) SELECT x FROM cnt",
 			wantRows: [][]interface{}{
@@ -162,7 +162,7 @@ func TestSQLiteCTE(t *testing.T) {
 		},
 		// Recursive CTE with UNION (removes duplicates)
 		{
-			name: "recursive_union_distinct",
+			name:  "recursive_union_distinct",
 			setup: []string{},
 			query: "WITH RECURSIVE cnt(x) AS (VALUES(1) UNION SELECT (x+1)%5 FROM cnt WHERE x<10) SELECT x FROM cnt ORDER BY x",
 			wantRows: [][]interface{}{
@@ -303,7 +303,7 @@ func TestSQLiteCTE(t *testing.T) {
 		},
 		// Fibonacci sequence
 		{
-			name: "recursive_fibonacci",
+			name:  "recursive_fibonacci",
 			setup: []string{},
 			query: "WITH RECURSIVE fib(n, a, b) AS (VALUES(0, 0, 1) UNION ALL SELECT n+1, b, a+b FROM fib WHERE n < 7) SELECT a FROM fib",
 			wantRows: [][]interface{}{
@@ -319,7 +319,7 @@ func TestSQLiteCTE(t *testing.T) {
 		},
 		// Factorial
 		{
-			name: "recursive_factorial",
+			name:  "recursive_factorial",
 			setup: []string{},
 			query: "WITH RECURSIVE fact(n, f) AS (VALUES(1, 1) UNION ALL SELECT n+1, f*(n+1) FROM fact WHERE n < 5) SELECT n, f FROM fact",
 			wantRows: [][]interface{}{
@@ -332,7 +332,7 @@ func TestSQLiteCTE(t *testing.T) {
 		},
 		// Nested CTEs
 		{
-			name: "nested_cte_basic",
+			name:  "nested_cte_basic",
 			setup: []string{},
 			query: "WITH outer_cte AS (WITH inner_cte(x) AS (VALUES(10)) SELECT x*2 AS y FROM inner_cte) SELECT y FROM outer_cte",
 			wantRows: [][]interface{}{
@@ -340,7 +340,7 @@ func TestSQLiteCTE(t *testing.T) {
 			},
 		},
 		{
-			name: "nested_cte_multiple",
+			name:  "nested_cte_multiple",
 			setup: []string{},
 			query: "WITH outer AS (WITH inner1(a) AS (VALUES(1)), inner2(b) AS (VALUES(2)) SELECT a+b AS c FROM inner1, inner2) SELECT c*3 FROM outer",
 			wantRows: [][]interface{}{
@@ -465,7 +465,7 @@ func TestSQLiteCTE(t *testing.T) {
 		},
 		// Multiple recursive references
 		{
-			name: "recursive_multiple_base_cases",
+			name:  "recursive_multiple_base_cases",
 			setup: []string{},
 			query: "WITH RECURSIVE nums(n) AS (SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT n+2 FROM nums WHERE n < 6) SELECT DISTINCT n FROM nums ORDER BY n",
 			wantRows: [][]interface{}{
@@ -545,7 +545,7 @@ func TestSQLiteCTE(t *testing.T) {
 		},
 		// Recursive with multiple columns
 		{
-			name: "recursive_multiple_columns",
+			name:  "recursive_multiple_columns",
 			setup: []string{},
 			query: "WITH RECURSIVE nums(x, y) AS (SELECT 1, 10 UNION ALL SELECT x+1, y+10 FROM nums WHERE x < 3) SELECT x, y FROM nums",
 			wantRows: [][]interface{}{
@@ -575,7 +575,7 @@ func TestSQLiteCTE(t *testing.T) {
 		},
 		// Recursive number generation
 		{
-			name: "recursive_number_series",
+			name:  "recursive_number_series",
 			setup: []string{},
 			query: "WITH RECURSIVE series(n) AS (SELECT 10 UNION ALL SELECT n-1 FROM series WHERE n > 5) SELECT n FROM series ORDER BY n",
 			wantRows: [][]interface{}{
@@ -604,7 +604,7 @@ func TestSQLiteCTE(t *testing.T) {
 		},
 		// Recursive with arithmetic progression
 		{
-			name: "recursive_arithmetic_progression",
+			name:  "recursive_arithmetic_progression",
 			setup: []string{},
 			query: "WITH RECURSIVE ap(n, term) AS (SELECT 1, 5 UNION ALL SELECT n+1, term+3 FROM ap WHERE n < 5) SELECT term FROM ap",
 			wantRows: [][]interface{}{
@@ -633,7 +633,7 @@ func TestSQLiteCTE(t *testing.T) {
 		},
 		// Recursive with geometric progression
 		{
-			name: "recursive_geometric_progression",
+			name:  "recursive_geometric_progression",
 			setup: []string{},
 			query: "WITH RECURSIVE gp(n, term) AS (SELECT 1, 2 UNION ALL SELECT n+1, term*2 FROM gp WHERE n < 5) SELECT term FROM gp",
 			wantRows: [][]interface{}{
@@ -737,7 +737,7 @@ func TestSQLiteCTE(t *testing.T) {
 		},
 		// Recursive date range generation (using integers)
 		{
-			name: "recursive_date_range",
+			name:  "recursive_date_range",
 			setup: []string{},
 			query: "WITH RECURSIVE dates(d) AS (SELECT 20230101 UNION ALL SELECT d+1 FROM dates WHERE d < 20230105) SELECT d FROM dates",
 			wantRows: [][]interface{}{
@@ -779,7 +779,7 @@ func TestSQLiteCTE(t *testing.T) {
 		},
 		// Recursive with string concatenation
 		{
-			name: "recursive_string_concat",
+			name:  "recursive_string_concat",
 			setup: []string{},
 			query: "WITH RECURSIVE str(n, s) AS (SELECT 1, 'A' UNION ALL SELECT n+1, s || 'B' FROM str WHERE n < 3) SELECT s FROM str",
 			wantRows: [][]interface{}{
@@ -858,7 +858,7 @@ func TestSQLiteCTE(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt  // Capture range variable
+		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)

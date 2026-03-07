@@ -144,14 +144,14 @@ func TestOpSeekGT(t *testing.T) {
 	// NotFound: Integer -1 -> r2
 	// End: Halt
 
-	v.AddOp(OpOpenRead, 0, 1, 2)   // 0
-	v.AddOp(OpInteger, 25, 1, 0)   // 1: r1 = 25
-	v.AddOp(OpSeekGT, 0, 6, 1)     // 2: seek > 25, jump to 6 if not found
-	v.AddOp(OpRowid, 0, 2, 0)      // 3: r2 = rowid
-	v.AddOp(OpGoto, 0, 7, 0)       // 4: goto 7
-	v.AddOp(OpInteger, -1, 2, 0)   // 5: not used (spacing)
-	v.AddOp(OpInteger, -1, 2, 0)   // 6: r2 = -1 (not found)
-	v.AddOp(OpHalt, 0, 0, 0)       // 7
+	v.AddOp(OpOpenRead, 0, 1, 2) // 0
+	v.AddOp(OpInteger, 25, 1, 0) // 1: r1 = 25
+	v.AddOp(OpSeekGT, 0, 6, 1)   // 2: seek > 25, jump to 6 if not found
+	v.AddOp(OpRowid, 0, 2, 0)    // 3: r2 = rowid
+	v.AddOp(OpGoto, 0, 7, 0)     // 4: goto 7
+	v.AddOp(OpInteger, -1, 2, 0) // 5: not used (spacing)
+	v.AddOp(OpInteger, -1, 2, 0) // 6: r2 = -1 (not found)
+	v.AddOp(OpHalt, 0, 0, 0)     // 7
 
 	err := v.Run()
 	if err != nil {
@@ -177,11 +177,11 @@ func TestOpSeekGTNotFound(t *testing.T) {
 
 	// Seek for rowid > 50 (should not find anything)
 	v.AddOp(OpOpenRead, 0, 1, 2)
-	v.AddOp(OpInteger, 50, 1, 0)   // r1 = 50
-	v.AddOp(OpSeekGT, 0, 5, 1)     // jump to 5 if not found
-	v.AddOp(OpInteger, 1, 2, 0)    // r2 = 1 (found - shouldn't execute)
+	v.AddOp(OpInteger, 50, 1, 0) // r1 = 50
+	v.AddOp(OpSeekGT, 0, 5, 1)   // jump to 5 if not found
+	v.AddOp(OpInteger, 1, 2, 0)  // r2 = 1 (found - shouldn't execute)
 	v.AddOp(OpGoto, 0, 6, 0)
-	v.AddOp(OpInteger, 0, 2, 0)    // r2 = 0 (not found)
+	v.AddOp(OpInteger, 0, 2, 0) // r2 = 0 (not found)
 	v.AddOp(OpHalt, 0, 0, 0)
 
 	err := v.Run()
@@ -216,12 +216,12 @@ func TestOpSeekLT(t *testing.T) {
 	// End: Halt
 
 	v.AddOp(OpOpenRead, 0, 1, 2)
-	v.AddOp(OpInteger, 35, 1, 0)   // r1 = 35
-	v.AddOp(OpSeekLT, 0, 6, 1)     // seek < 35, jump to 6 if not found
-	v.AddOp(OpRowid, 0, 2, 0)      // r2 = rowid
+	v.AddOp(OpInteger, 35, 1, 0) // r1 = 35
+	v.AddOp(OpSeekLT, 0, 6, 1)   // seek < 35, jump to 6 if not found
+	v.AddOp(OpRowid, 0, 2, 0)    // r2 = rowid
 	v.AddOp(OpGoto, 0, 7, 0)
-	v.AddOp(OpInteger, -1, 2, 0)   // spacing
-	v.AddOp(OpInteger, -1, 2, 0)   // r2 = -1 (not found)
+	v.AddOp(OpInteger, -1, 2, 0) // spacing
+	v.AddOp(OpInteger, -1, 2, 0) // r2 = -1 (not found)
 	v.AddOp(OpHalt, 0, 0, 0)
 
 	err := v.Run()
@@ -248,11 +248,11 @@ func TestOpSeekLTNotFound(t *testing.T) {
 
 	// Seek for rowid < 10 (should not find anything)
 	v.AddOp(OpOpenRead, 0, 1, 2)
-	v.AddOp(OpInteger, 10, 1, 0)   // r1 = 10
-	v.AddOp(OpSeekLT, 0, 5, 1)     // jump to 5 if not found
-	v.AddOp(OpInteger, 1, 2, 0)    // r2 = 1 (found - shouldn't execute)
+	v.AddOp(OpInteger, 10, 1, 0) // r1 = 10
+	v.AddOp(OpSeekLT, 0, 5, 1)   // jump to 5 if not found
+	v.AddOp(OpInteger, 1, 2, 0)  // r2 = 1 (found - shouldn't execute)
 	v.AddOp(OpGoto, 0, 6, 0)
-	v.AddOp(OpInteger, 0, 2, 0)    // r2 = 0 (not found)
+	v.AddOp(OpInteger, 0, 2, 0) // r2 = 0 (not found)
 	v.AddOp(OpHalt, 0, 0, 0)
 
 	err := v.Run()
@@ -279,11 +279,11 @@ func TestOpNotExists(t *testing.T) {
 
 	// Test 1: Check for existing rowid (30) - should NOT jump
 	v.AddOp(OpOpenRead, 0, 1, 2)
-	v.AddOp(OpInteger, 30, 1, 0)   // r1 = 30 (exists)
-	v.AddOp(OpNotExists, 0, 5, 1)  // jump to 5 if NOT exists
-	v.AddOp(OpInteger, 1, 2, 0)    // r2 = 1 (exists)
+	v.AddOp(OpInteger, 30, 1, 0)  // r1 = 30 (exists)
+	v.AddOp(OpNotExists, 0, 5, 1) // jump to 5 if NOT exists
+	v.AddOp(OpInteger, 1, 2, 0)   // r2 = 1 (exists)
 	v.AddOp(OpGoto, 0, 6, 0)
-	v.AddOp(OpInteger, 0, 2, 0)    // r2 = 0 (doesn't exist)
+	v.AddOp(OpInteger, 0, 2, 0) // r2 = 0 (doesn't exist)
 	v.AddOp(OpHalt, 0, 0, 0)
 
 	err := v.Run()
@@ -310,11 +310,11 @@ func TestOpNotExistsJumps(t *testing.T) {
 
 	// Test 2: Check for non-existing rowid (25) - should jump
 	v.AddOp(OpOpenRead, 0, 1, 2)
-	v.AddOp(OpInteger, 25, 1, 0)   // r1 = 25 (doesn't exist)
-	v.AddOp(OpNotExists, 0, 5, 1)  // jump to 5 if NOT exists
-	v.AddOp(OpInteger, 1, 2, 0)    // r2 = 1 (exists - shouldn't execute)
+	v.AddOp(OpInteger, 25, 1, 0)  // r1 = 25 (doesn't exist)
+	v.AddOp(OpNotExists, 0, 5, 1) // jump to 5 if NOT exists
+	v.AddOp(OpInteger, 1, 2, 0)   // r2 = 1 (exists - shouldn't execute)
 	v.AddOp(OpGoto, 0, 6, 0)
-	v.AddOp(OpInteger, 0, 2, 0)    // r2 = 0 (doesn't exist)
+	v.AddOp(OpInteger, 0, 2, 0) // r2 = 0 (doesn't exist)
 	v.AddOp(OpHalt, 0, 0, 0)
 
 	err := v.Run()
@@ -385,7 +385,7 @@ func TestOpDeferredSeekNotFound(t *testing.T) {
 	// Seek for non-existing rowid 99
 	v.AddOp(OpOpenRead, 0, 1, 2)
 	v.AddOp(OpOpenRead, 1, 1, 2)
-	v.AddOp(OpInteger, 99, 1, 0)     // r1 = 99 (doesn't exist)
+	v.AddOp(OpInteger, 99, 1, 0) // r1 = 99 (doesn't exist)
 	v.AddOp(OpDeferredSeek, 0, 1, 1)
 	v.AddOp(OpHalt, 0, 0, 0)
 

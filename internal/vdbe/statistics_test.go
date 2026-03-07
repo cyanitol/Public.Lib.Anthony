@@ -180,10 +180,10 @@ func TestVDBEStatisticsIntegration(t *testing.T) {
 
 	// Add a simple program
 	vdbe.AllocMemory(3)
-	vdbe.AddOp(OpInteger, 0, 1, 42)    // Load 42 into register 1
-	vdbe.AddOp(OpInteger, 0, 2, 10)    // Load 10 into register 2
-	vdbe.AddOp(OpResultRow, 1, 2, 0)   // Return registers 1 and 2
-	vdbe.AddOp(OpHalt, 0, 0, 0)        // Halt
+	vdbe.AddOp(OpInteger, 0, 1, 42)  // Load 42 into register 1
+	vdbe.AddOp(OpInteger, 0, 2, 10)  // Load 10 into register 2
+	vdbe.AddOp(OpResultRow, 1, 2, 0) // Return registers 1 and 2
+	vdbe.AddOp(OpHalt, 0, 0, 0)      // Halt
 
 	// Run the program
 	err := vdbe.Run()

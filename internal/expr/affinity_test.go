@@ -30,7 +30,7 @@ func TestAffinityFromType(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.typeName, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := AffinityFromType(tt.typeName)
 			if result != tt.expected {
 				t.Errorf("AffinityFromType(%q) = %v, want %v",
@@ -83,7 +83,7 @@ func TestGetExprAffinity(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := GetExprAffinity(tt.expr)
 			if result != tt.expected {
 				t.Errorf("GetExprAffinity() = %v, want %v", result, tt.expected)
@@ -129,7 +129,7 @@ func TestCompareAffinity(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := CompareAffinity(tt.left, tt.right)
 			if result != tt.expected {
 				t.Errorf("CompareAffinity() = %v, want %v", result, tt.expected)
@@ -193,7 +193,7 @@ func TestApplyAffinity(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := ApplyAffinity(tt.value, tt.affinity)
 			if result != tt.expected {
 				t.Errorf("ApplyAffinity(%v, %v) = %v, want %v",
@@ -245,7 +245,7 @@ func TestPropagateAffinity(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			PropagateAffinity(tt.expr)
 			if tt.expr.Affinity != tt.expected {
 				t.Errorf("After PropagateAffinity, affinity = %v, want %v",
@@ -272,7 +272,7 @@ func TestIsNumericAffinity(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.affinity.String(), func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := IsNumericAffinity(tt.affinity)
 			if result != tt.expected {
 				t.Errorf("IsNumericAffinity(%v) = %v, want %v",
@@ -317,7 +317,7 @@ func TestAffinityString(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.expected, func(t *testing.T) {
-				t.Parallel()
+			t.Parallel()
 			result := tt.affinity.String()
 			if result != tt.expected {
 				t.Errorf("String() = %q, want %q", result, tt.expected)

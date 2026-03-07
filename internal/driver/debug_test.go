@@ -2,9 +2,9 @@
 package driver
 
 import (
-	"testing"
-	"fmt"
 	"database/sql"
+	"fmt"
+	"testing"
 )
 
 func TestDebugCrossJoin(t *testing.T) {

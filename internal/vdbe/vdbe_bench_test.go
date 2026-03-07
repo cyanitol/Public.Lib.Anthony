@@ -52,7 +52,7 @@ func BenchmarkVDBEJumps(b *testing.B) {
 	vm.AddOp(OpInit, 0, 0, 0)
 	vm.AddOp(OpInteger, 1, 0, 0)
 	vm.AddOp(OpInteger, 2, 1, 0)
-	vm.AddOp(OpLt, 0, 6, 1)      // if reg[0] < reg[1] goto 6
+	vm.AddOp(OpLt, 0, 6, 1) // if reg[0] < reg[1] goto 6
 	vm.AddOp(OpInteger, 100, 2, 0)
 	vm.AddOp(OpGoto, 0, 7, 0)
 	vm.AddOp(OpInteger, 200, 2, 0)
@@ -113,12 +113,12 @@ func BenchmarkVDBELoop(b *testing.B) {
 
 	// Loop from 0 to 9
 	vm.AddOp(OpInit, 0, 0, 0)
-	vm.AddOp(OpInteger, 0, 0, 0)    // counter in reg[0]
-	vm.AddOp(OpInteger, 10, 1, 0)   // limit in reg[1]
+	vm.AddOp(OpInteger, 0, 0, 0)  // counter in reg[0]
+	vm.AddOp(OpInteger, 10, 1, 0) // limit in reg[1]
 	// Loop start at address 3
-	vm.AddOp(OpLt, 0, 6, 1)         // if counter < limit goto 6 (exit)
-	vm.AddOp(OpAdd, 0, 0, 0)        // dummy operation
-	vm.AddOp(OpGoto, 0, 3, 0)       // goto loop start
+	vm.AddOp(OpLt, 0, 6, 1)   // if counter < limit goto 6 (exit)
+	vm.AddOp(OpAdd, 0, 0, 0)  // dummy operation
+	vm.AddOp(OpGoto, 0, 3, 0) // goto loop start
 	vm.AddOp(OpHalt, 0, 0, 0)
 
 	b.ResetTimer()

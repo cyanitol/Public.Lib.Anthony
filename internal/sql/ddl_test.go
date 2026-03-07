@@ -1629,7 +1629,6 @@ func TestTypeNameToAffinityWithNumbers(t *testing.T) {
 	}
 }
 
-
 // Test CompileCreateIndex with DESC order
 func TestCompileCreateIndexDescOrder(t *testing.T) {
 	schema := NewSchema()
