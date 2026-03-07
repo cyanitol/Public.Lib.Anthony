@@ -114,6 +114,12 @@ func (s *Stmt) executeAndCommit(args []driver.NamedValue, inTx bool) (driver.Res
 		return nil, err
 	}
 
+	// Check if schema changed during execution (e.g., root page split)
+	// If so, invalidate the statement cache
+	if vm.SchemaChanged && s.conn.stmtCache != nil {
+		s.conn.stmtCache.InvalidateAll()
+	}
+
 	if err := s.autoCommitIfNeeded(inTx); err != nil {
 		return nil, err
 	}

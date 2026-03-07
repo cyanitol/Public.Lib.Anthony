@@ -143,8 +143,9 @@ type VDBE struct {
 	funcCtx *FunctionContext // Function registry and aggregate state
 
 	// Flags
-	Explain  bool // True if EXPLAIN mode
-	ReadOnly bool // True for read-only statements
+	Explain       bool // True if EXPLAIN mode
+	ReadOnly      bool // True for read-only statements
+	SchemaChanged bool // True if schema changed (root page split), requires cache invalidation
 
 	// Runtime context
 	Ctx *VDBEContext // Execution context (btree, schema, etc.)

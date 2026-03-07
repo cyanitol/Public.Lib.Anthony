@@ -53,8 +53,28 @@ func TestWithoutRowID_BasicOperations(t *testing.T) {
 	compareRows(t, rows, expected)
 }
 
+// Minimal regression for WITHOUT ROWID rewind/COUNT after small inserts.
+func TestWithoutRowID_RewindAfterInsert(t *testing.T) {
+	db := setupMemoryDB(t)
+	defer db.Close()
+
+	mustExec(t, db, `PRAGMA page_size = 512`)
+	mustExec(t, db, `CREATE TABLE wr(a TEXT, b TEXT, c BLOB, PRIMARY KEY(a, b)) WITHOUT ROWID`)
+
+	payload := strings.Repeat("x", 400)
+	mustExec(t, db, `INSERT INTO wr VALUES('a0','b0',?)`, payload)
+	mustExec(t, db, `INSERT INTO wr VALUES('a1','b1',?)`, payload)
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM wr`).Scan(&count); err != nil {
+		t.Fatalf("count failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("count mismatch: got %d, want 2", count)
+	}
+}
+
 func TestWithoutRowID_SplitsMaintainOrder(t *testing.T) {
-	t.Skip("pending fix: COUNT on WITHOUT ROWID tree returns no rows after split path")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -73,28 +93,13 @@ func TestWithoutRowID_SplitsMaintainOrder(t *testing.T) {
 		mustExec(t, db, `INSERT INTO split_demo VALUES(?, ?, ?)`, a, b, payload)
 
 		// Ensure no rows are lost after each insert (guards split path).
-		rows, err := db.Query(`SELECT COUNT(*) FROM split_demo`)
-		if err != nil {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM split_demo`).Scan(&count); err != nil {
 			t.Fatalf("row count query failed after insert %d: %v", i, err)
 		}
-		var count int
-		if rows.Next() {
-			if err := rows.Scan(&count); err != nil {
-				t.Fatalf("row count scan failed after insert %d: %v", i, err)
-			}
-		} else if err := rows.Err(); err != nil {
-			t.Fatalf("row iteration error after insert %d: %v", i, err)
-		} else {
-			sample := queryRows(t, db, `SELECT a, b FROM split_demo ORDER BY a, b LIMIT 5`)
-			prog := queryRows(t, db, `EXPLAIN SELECT COUNT(*) FROM split_demo`)
-			sampleProg := queryRows(t, db, `EXPLAIN SELECT a, b FROM split_demo ORDER BY a, b LIMIT 5`)
-			t.Fatalf("row count query returned no rows after insert %d (sample rows: %v, explain=%v, sampleExplain=%v)", i, sample, prog, sampleProg)
-		}
-		rows.Close()
 		if count != i+1 {
 			t.Fatalf("row count mismatch after insert %d: got %d, want %d", i, count, i+1)
 		}
-
 	}
 
 	assertRowCount(t, db, "split_demo", 25)

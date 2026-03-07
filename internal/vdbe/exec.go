@@ -2180,9 +2180,13 @@ func (v *VDBE) performInsertWithCompositeKey(cursor *Cursor, btCursor *btree.BtC
 	}
 
 	// Root page can change after a split; keep cursor and schema in sync.
-	cursor.RootPage = btCursor.RootPage
-	if tbl, ok := cursor.Table.(interface{ SetRootPage(uint32) }); ok && tbl != nil {
-		tbl.SetRootPage(btCursor.RootPage)
+	if cursor.RootPage != btCursor.RootPage {
+		cursor.RootPage = btCursor.RootPage
+		if tbl, ok := cursor.Table.(interface{ SetRootPage(uint32) }); ok && tbl != nil {
+			tbl.SetRootPage(btCursor.RootPage)
+		}
+		// Signal that schema changed - statement cache needs invalidation
+		v.SchemaChanged = true
 	}
 
 	// For WITHOUT ROWID tables, we don't have a rowid to track
@@ -2277,9 +2281,13 @@ func (v *VDBE) performInsert(cursor *Cursor, btCursor *btree.BtCursor, rowid int
 	}
 
 	// Root page can change after a split; keep cursor and schema in sync.
-	cursor.RootPage = btCursor.RootPage
-	if tbl, ok := cursor.Table.(interface{ SetRootPage(uint32) }); ok && tbl != nil {
-		tbl.SetRootPage(btCursor.RootPage)
+	if cursor.RootPage != btCursor.RootPage {
+		cursor.RootPage = btCursor.RootPage
+		if tbl, ok := cursor.Table.(interface{ SetRootPage(uint32) }); ok && tbl != nil {
+			tbl.SetRootPage(btCursor.RootPage)
+		}
+		// Signal that schema changed - statement cache needs invalidation
+		v.SchemaChanged = true
 	}
 
 	cursor.LastRowid = rowid

@@ -5,6 +5,12 @@
 *.so
 *.dylib
 
+# Build output directory
+build/
+
+# Go cache directory
+.gocache/
+
 # Test binary, built with `go test -c`
 *.test
 
@@ -43,6 +49,7 @@ Thumbs.db
 
 # Binary output
 /test_explain
+/driver.test
 
 # Temporary files
 *.tmp

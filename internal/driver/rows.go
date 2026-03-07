@@ -35,6 +35,11 @@ func (r *Rows) Close() error {
 	r.closed = true
 
 	if r.vdbe != nil {
+		// Check if schema changed during execution (e.g., root page split)
+		// If so, invalidate the statement cache
+		if r.vdbe.SchemaChanged && r.stmt != nil && r.stmt.conn != nil && r.stmt.conn.stmtCache != nil {
+			r.stmt.conn.stmtCache.InvalidateAll()
+		}
 		r.vdbe.Finalize()
 		r.vdbe = nil
 	}

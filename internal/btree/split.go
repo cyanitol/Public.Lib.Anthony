@@ -911,11 +911,28 @@ func (c *BtCursor) updateRightChildIfNeeded(parent *BtreePage, parentPage, right
 
 // createNewRoot creates a new root page after splitting the old root
 func (c *BtCursor) createNewRoot(leftPage, rightPage uint32, dividerKey int64, dividerKeyBytes []byte) error {
-	newRootNum, newRoot, err := c.allocateAndSetupNewRoot()
+	newRootNum, err := c.Btree.AllocatePage()
 	if err != nil {
 		return err
 	}
-
+	newRootData, err := c.Btree.GetPage(newRootNum)
+	if err != nil {
+		return err
+	}
+	pageType := byte(PageTypeInteriorTable)
+	if c.CompositePK {
+		pageType = byte(PageTypeInteriorTableNo)
+	}
+	if err := initializeInteriorPage(newRootData, newRootNum, c.Btree.UsableSize, pageType); err != nil {
+		return err
+	}
+	if c.Btree.Provider != nil {
+		_ = c.Btree.Provider.MarkDirty(newRootNum)
+	}
+	newRoot, err := NewBtreePage(newRootNum, newRootData, c.Btree.UsableSize)
+	if err != nil {
+		return err
+	}
 	if err := c.populateNewRoot(newRoot, newRootNum, leftPage, rightPage, dividerKey, dividerKeyBytes); err != nil {
 		return err
 	}
@@ -987,6 +1004,11 @@ func (c *BtCursor) populateNewRoot(newRoot *BtreePage, newRootNum, leftPage, rig
 func initializeLeafPage(pageData []byte, pageNum uint32, usableSize uint32, pageType byte) error {
 	headerOffset := getHeaderOffset(pageNum)
 
+	// Avoid clobbering an existing populated page (e.g., root) during reuse.
+	if pageData[headerOffset+PageHeaderOffsetNumCells] != 0 || pageData[headerOffset+PageHeaderOffsetNumCells+1] != 0 {
+		return nil
+	}
+
 	// Set page type to leaf table
 	pageData[headerOffset+PageHeaderOffsetType] = pageType
 
@@ -1002,6 +1024,11 @@ func initializeLeafPage(pageData []byte, pageNum uint32, usableSize uint32, page
 // initializeInteriorPage initializes a page as an empty interior table page
 func initializeInteriorPage(pageData []byte, pageNum uint32, usableSize uint32, pageType byte) error {
 	headerOffset := getHeaderOffset(pageNum)
+
+	// Avoid clobbering an existing populated page (e.g., root) during reuse.
+	if pageData[headerOffset+PageHeaderOffsetNumCells] != 0 || pageData[headerOffset+PageHeaderOffsetNumCells+1] != 0 {
+		return nil
+	}
 
 	// Set page type to interior table
 	pageData[headerOffset+PageHeaderOffsetType] = pageType
