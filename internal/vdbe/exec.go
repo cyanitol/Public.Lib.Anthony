@@ -2120,6 +2120,12 @@ func (v *VDBE) validateUpdateConstraints(tableName string, newPayload []byte) er
 		return err
 	}
 
+	if v.isWithoutRowidTable(tableName) && v.pkChanged(v.pendingFKUpdate.oldValues, newValues) {
+		if err := v.checkWithoutRowidPKUniqueness(tableName, newPayload, v.pendingFKUpdate.rowid, v.pendingFKUpdate.rowid); err != nil {
+			return err
+		}
+	}
+
 	rowReader := NewVDBERowReader(v)
 	rowUpdater := NewVDBERowModifier(v)
 
@@ -2668,6 +2674,91 @@ func (v *VDBE) computeWithoutRowidKey(tableName string, payload []byte) (int64, 
 		sum = 1 // avoid zero rowid sentinel
 	}
 	return sum, nil
+}
+
+func (v *VDBE) checkWithoutRowidPKUniqueness(tableName string, payload []byte, newRowid int64, currentRowid int64) error {
+	rowReader := NewVDBERowReader(v)
+	pkCols, pkValues, err := v.extractPKColumns(tableName, payload)
+	if err != nil {
+		return err
+	}
+	if len(pkCols) == 0 {
+		return fmt.Errorf("WITHOUT ROWID table %s missing primary key columns", tableName)
+	}
+	rowids, err := rowReader.FindReferencingRows(tableName, pkCols, pkValues)
+	if err != nil {
+		return err
+	}
+	for _, rid := range rowids {
+		if currentRowid != 0 && rid == currentRowid {
+			continue
+		}
+		return fmt.Errorf("UNIQUE constraint failed: PRIMARY KEY for WITHOUT ROWID table %s", tableName)
+	}
+	return nil
+}
+
+func (v *VDBE) extractPKColumns(tableName string, payload []byte) ([]string, []interface{}, error) {
+	type schemaWithGetTable interface {
+		GetTable(name string) (interface{}, bool)
+	}
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return nil, nil, fmt.Errorf("no schema for PK extraction")
+	}
+	schemaObj, ok := v.Ctx.Schema.(schemaWithGetTable)
+	if !ok {
+		return nil, nil, fmt.Errorf("invalid schema type for PK extraction")
+	}
+	tableIface, ok := schemaObj.GetTable(tableName)
+	if !ok {
+		return nil, nil, fmt.Errorf("table not found: %s", tableName)
+	}
+	type tableWithColumns interface {
+		GetColumns() []interface{}
+	}
+	colsProvider, ok := tableIface.(tableWithColumns)
+	if !ok {
+		return nil, nil, fmt.Errorf("table missing columns for PK extraction")
+	}
+	columns := colsProvider.GetColumns()
+	type colMeta interface {
+		GetName() string
+		IsPrimaryKeyColumn() bool
+	}
+
+	var pkCols []string
+	var pkValues []interface{}
+	for idx, colIface := range columns {
+		col, ok := colIface.(colMeta)
+		if !ok || !col.IsPrimaryKeyColumn() {
+			continue
+		}
+		mem := NewMem()
+		if err := parseRecordColumn(payload, idx, mem); err != nil {
+			return nil, nil, err
+		}
+		pkCols = append(pkCols, col.GetName())
+		pkValues = append(pkValues, memToInterface(mem))
+	}
+	return pkCols, pkValues, nil
+}
+
+func (v *VDBE) pkChanged(oldValues, newValues map[string]interface{}) bool {
+	for k := range oldValues {
+		if strings.EqualFold(k, "rowid") || strings.EqualFold(k, "_rowid_") {
+			delete(oldValues, k)
+		}
+	}
+	for key, oldVal := range oldValues {
+		newVal, ok := newValues[key]
+		if !ok {
+			continue
+		}
+		if !valuesEqualLoose(oldVal, newVal) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeMemToHash(h *fnv.Hash64a, m *Mem) {
