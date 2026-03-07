@@ -936,9 +936,9 @@ func (c *BtCursor) allocateAndSetupNewRoot() (uint32, *BtreePage, error) {
 		return 0, nil, fmt.Errorf("failed to get new root page: %w", err)
 	}
 
-	pageType := PageTypeInteriorTable
+	pageType := byte(PageTypeInteriorTable)
 	if c.CompositePK {
-		pageType = PageTypeInteriorTableNo
+		pageType = byte(PageTypeInteriorTableNo)
 	}
 	if err := initializeInteriorPage(newRootData, newRootNum, c.Btree.UsableSize, pageType); err != nil {
 		return 0, nil, fmt.Errorf("failed to initialize new root: %w", err)

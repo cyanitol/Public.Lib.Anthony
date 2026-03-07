@@ -657,6 +657,10 @@ func (c *BtCursor) loadPageForSeek(pageNum uint32) ([]byte, *PageHeader, error) 
 		return nil, nil, fmt.Errorf("failed to parse page %d: %w", pageNum, err)
 	}
 
+	if header.PageType == PageTypeLeafTableNoInt || header.PageType == PageTypeInteriorTableNo {
+		c.CompositePK = true
+	}
+
 	return pageData, header, nil
 }
 
