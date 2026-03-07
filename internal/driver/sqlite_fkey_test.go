@@ -56,7 +56,6 @@ func TestForeignKey_PragmaForeignKeys(t *testing.T) {
 // TestForeignKey_BasicDefinition tests basic foreign key definition.
 // Based on fkey1-1.* tests.
 func TestForeignKey_BasicDefinition(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 

@@ -9,10 +9,12 @@
 HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
 ================================================================================
 
-[ ] Foreign Key Runtime Enforcement (38 tests skipped)
-    - Enforce immediate/deferred constraints at statement/txn boundaries
-    - Implement ON DELETE/UPDATE CASCADE|SET NULL|SET DEFAULT|RESTRICT
-    - Wire FK manager through VDBE context; add pragma coverage/validation
+[~] Foreign Key Runtime Enforcement (38 tests skipped -> some now passing)
+    - [DONE] Wire FK manager through VDBE context
+    - [DONE] Basic INSERT FK validation (ValidateInsert)
+    - Remaining: DELETE/UPDATE validation (ValidateDelete/ValidateUpdate need testing)
+    - Remaining: ON DELETE/UPDATE CASCADE|SET NULL|SET DEFAULT actions
+    - Remaining: Deferred constraint checking at transaction boundaries
 
 [ ] WITHOUT ROWID Tables (23 tests skipped)
     - Implement alt btree layout using PRIMARY KEY as key (no rowid)
@@ -160,9 +162,10 @@ v0.1.x - Current Development
 [x] Documentation scaffolding comments
 
 ## In Progress
-[ ] Foreign Key Runtime Enforcement (38 tests skipped)
-    - FK manager not passed to VDBE context
-    - No FK validation calls in execInsert/execDelete
+[~] Foreign Key Runtime Enforcement (partial)
+    - [DONE] FK manager wired through VDBE context
+    - [DONE] INSERT FK validation working
+    - Remaining: DELETE/UPDATE cascade actions
 [ ] CTE Edge Cases (17 tests skipped)
     - Correlated subquery in CTE WHERE causes infinite loop
     - Recursive CTE bytecode generation incomplete
