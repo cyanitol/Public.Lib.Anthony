@@ -342,7 +342,7 @@ func (c *BtCursor) encodeNewCellWithOverflow(newKey int64, newPayload []byte) ([
 		if err != nil {
 			return nil, fmt.Errorf("failed to write overflow for split: %w", err)
 		}
-		return c.encodeTableLeafCellWithOverflow(newKey, newPayload[:localSize], overflowPage, payloadSize), nil
+		return c.encodeTableLeafCellWithOverflow(newKey, nil, newPayload[:localSize], overflowPage, payloadSize), nil
 	}
 	return EncodeTableLeafCell(newKey, newPayload), nil
 }

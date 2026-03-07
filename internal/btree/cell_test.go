@@ -219,7 +219,7 @@ func TestEncodeTableLeafCellWithOverflow(t *testing.T) {
 	totalSize := uint32(len(payload))
 
 	// Use the actual local payload
-	cell := cursor.encodeTableLeafCellWithOverflow(100, payload[:localSize], overflowPage, totalSize)
+	cell := cursor.encodeTableLeafCellWithOverflow(100, nil, payload[:localSize], overflowPage, totalSize)
 
 	if len(cell) == 0 {
 		t.Error("encodeTableLeafCellWithOverflow() returned empty cell")

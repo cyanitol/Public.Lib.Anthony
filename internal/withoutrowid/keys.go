@@ -73,5 +73,6 @@ func encodeFloat64(v float64) []byte {
 }
 
 func formatUnknown(v interface{}) string {
+	// Ensure no embedded NULs to avoid prefix ambiguity.
 	return string(bytes.ReplaceAll([]byte(fmt.Sprintf("%v", v)), []byte{0x00}, []byte{0x01}))
 }
