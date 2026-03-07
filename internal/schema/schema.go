@@ -457,6 +457,17 @@ func (t *Table) HasRowID() bool {
 	return !t.WithoutRowID
 }
 
+// GetPrimaryKey returns the primary key column names in constraint order.
+// For WITHOUT ROWID tables, this determines the order of key encoding.
+func (t *Table) GetPrimaryKey() []string {
+	return t.PrimaryKey
+}
+
+// GetRootPage returns the B-tree root page number for this table.
+func (t *Table) GetRootPage() uint32 {
+	return t.RootPage
+}
+
 // checkTableExists checks if a table already exists in the schema.
 // Returns the existing table if found and ifNotExists is true, otherwise an error.
 func (s *Schema) checkTableExists(name string, ifNotExists bool) (*Table, error) {

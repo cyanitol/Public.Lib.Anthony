@@ -400,8 +400,12 @@ func resolveInsertColumns(stmt *parser.InsertStmt, table *schema.Table) []string
 }
 
 // findInsertRowidCol returns the index within names of the INTEGER PRIMARY KEY
-// column, or -1 when none exists.
+// column, or -1 when none exists. For WITHOUT ROWID tables, always returns -1
+// since they don't have a rowid column.
 func findInsertRowidCol(names []string, table *schema.Table) int {
+	if table.WithoutRowID {
+		return -1 // WITHOUT ROWID tables don't have a rowid column
+	}
 	for i, name := range names {
 		idx := table.GetColumnIndex(name)
 		if idx < 0 {
@@ -701,10 +705,10 @@ func (s *Stmt) buildUpdateMap(stmt *parser.UpdateStmt) (map[string]parser.Expres
 
 // setupUpdateVDBE initializes VDBE and code generator for UPDATE.
 func (s *Stmt) setupUpdateVDBE(vm *vdbe.VDBE, table *schema.Table, stmt *parser.UpdateStmt) (*expr.CodeGenerator, int) {
-	// Count non-rowid columns
+	// Count non-rowid columns (for WITHOUT ROWID tables, all columns are in the record)
 	numRecordCols := 0
 	for _, col := range table.Columns {
-		if !schemaColIsRowid(col) {
+		if !schemaColIsRowidForTable(table, col) {
 			numRecordCols++
 		}
 	}
@@ -799,7 +803,7 @@ func (s *Stmt) emitUpdateRecordBuild(vm *vdbe.VDBE, table *schema.Table,
 	reg := recordStartReg
 
 	for colIdx, col := range table.Columns {
-		if schemaColIsRowid(col) {
+		if schemaColIsRowidForTable(table, col) {
 			continue
 		}
 

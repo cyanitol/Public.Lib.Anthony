@@ -925,7 +925,7 @@ func (c *BtCursor) InsertWithComposite(key int64, keyBytes []byte, payload []byt
 
 	if len(cellData) > btreePage.FreeSpace() {
 		c.cleanupOverflowOnError(overflowPage)
-		return c.splitPage(key, payload)
+		return c.splitPage(key, keyBytes, payload)
 	}
 
 	if err := c.markPageDirty(); err != nil {
@@ -1046,9 +1046,9 @@ func (c *BtCursor) validateInsertPosition(key int64, keyBytes []byte) error {
 	}
 	if found {
 		if c.CompositePK {
-			return fmt.Errorf("duplicate composite key")
+			return fmt.Errorf("UNIQUE constraint failed: duplicate composite key")
 		}
-		return fmt.Errorf("duplicate key: %d", key)
+		return fmt.Errorf("UNIQUE constraint failed: duplicate key %d", key)
 	}
 	if c.CurrentHeader == nil || !c.CurrentHeader.IsLeaf {
 		return fmt.Errorf("cursor not positioned at leaf page")
@@ -1170,13 +1170,13 @@ func (c *BtCursor) loadCellAtCurrentIndex(pageData []byte) error {
 
 // splitPage splits a full page when inserting a new cell
 // Delegates to splitLeafPage or splitInteriorPage based on page type
-func (c *BtCursor) splitPage(key int64, payload []byte) error {
+func (c *BtCursor) splitPage(key int64, keyBytes []byte, payload []byte) error {
 	if c.CurrentHeader == nil {
 		return fmt.Errorf("cursor not positioned at valid page")
 	}
 
 	if c.CurrentHeader.IsLeaf {
-		return c.splitLeafPage(key, payload)
+		return c.splitLeafPage(key, keyBytes, payload)
 	}
 
 	// For interior pages, we need the child page number

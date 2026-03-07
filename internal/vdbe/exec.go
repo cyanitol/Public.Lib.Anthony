@@ -4,8 +4,6 @@ package vdbe
 import (
 	"encoding/binary"
 	"fmt"
-	"hash"
-	"hash/fnv"
 	"math"
 	"strconv"
 	"strings"
@@ -13,6 +11,7 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/observability"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/types"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/withoutrowid"
 )
 
 // Step executes the VDBE program until a result row is ready or the program halts.
@@ -672,21 +671,26 @@ func (v *VDBE) execOpenRead(instr *Instruction) error {
 		return err
 	}
 
-	// Create btree cursor
-	btCursor := btree.NewCursor(bt, uint32(instr.P2))
+	// Store table metadata if available (for handling ALTER TABLE ADD COLUMN defaults)
+	table := v.findTableByRootPage(uint32(instr.P2))
+
+	// Check if this is a WITHOUT ROWID table
+	isWithoutRowID := v.isTableWithoutRowID(table)
+
+	// Create btree cursor with composite key mode for WITHOUT ROWID tables
+	btCursor := btree.NewCursorWithOptions(bt, uint32(instr.P2), isWithoutRowID)
 
 	// Create VDBE cursor
 	cursor := &Cursor{
-		CurType:     CursorBTree,
-		IsTable:     true,
-		RootPage:    uint32(instr.P2),
-		BtreeCursor: btCursor,
-		CachedCols:  make([][]byte, 0),
-		CacheStatus: 0,
+		CurType:      CursorBTree,
+		IsTable:      true,
+		WithoutRowID: isWithoutRowID,
+		RootPage:     uint32(instr.P2),
+		BtreeCursor:  btCursor,
+		CachedCols:   make([][]byte, 0),
+		CacheStatus:  0,
+		Table:        table,
 	}
-
-	// Store table metadata if available (for handling ALTER TABLE ADD COLUMN defaults)
-	cursor.Table = v.findTableByRootPage(uint32(instr.P2))
 
 	v.Cursors[instr.P1] = cursor
 	return nil
@@ -709,22 +713,27 @@ func (v *VDBE) execOpenWrite(instr *Instruction) error {
 		return err
 	}
 
-	// Create btree cursor (same as read cursor - btree cursors support both read and write)
-	btCursor := btree.NewCursor(bt, uint32(instr.P2))
+	// Store table metadata if available (for handling ALTER TABLE ADD COLUMN defaults)
+	table := v.findTableByRootPage(uint32(instr.P2))
+
+	// Check if this is a WITHOUT ROWID table
+	isWithoutRowID := v.isTableWithoutRowID(table)
+
+	// Create btree cursor with composite key mode for WITHOUT ROWID tables
+	btCursor := btree.NewCursorWithOptions(bt, uint32(instr.P2), isWithoutRowID)
 
 	// Create VDBE cursor with writable flag set
 	cursor := &Cursor{
-		CurType:     CursorBTree,
-		IsTable:     true,
-		Writable:    true, // Mark as writable for write operations
-		RootPage:    uint32(instr.P2),
-		BtreeCursor: btCursor,
-		CachedCols:  make([][]byte, 0),
-		CacheStatus: 0,
+		CurType:      CursorBTree,
+		IsTable:      true,
+		Writable:     true, // Mark as writable for write operations
+		WithoutRowID: isWithoutRowID,
+		RootPage:     uint32(instr.P2),
+		BtreeCursor:  btCursor,
+		CachedCols:   make([][]byte, 0),
+		CacheStatus:  0,
+		Table:        table,
 	}
-
-	// Store table metadata if available (for handling ALTER TABLE ADD COLUMN defaults)
-	cursor.Table = v.findTableByRootPage(uint32(instr.P2))
 
 	v.Cursors[instr.P1] = cursor
 	return nil
@@ -2060,18 +2069,18 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 	if err != nil {
 		return err
 	}
-	rowid, err := v.getInsertRowid(instr.P3, cursor)
-	if err != nil {
-		return err
-	}
 	isUpdate := instr.P4.I == 1
 	tableName := instr.P4.Z
 
-	if v.isWithoutRowidTable(tableName) {
-		rowid, err = v.computeWithoutRowidKey(tableName, payload)
-		if err != nil {
-			return err
-		}
+	// Handle WITHOUT ROWID tables using composite key
+	if cursor.WithoutRowID {
+		return v.execInsertWithoutRowID(cursor, btCursor, payload, tableName, isUpdate)
+	}
+
+	// Regular rowid-based insert
+	rowid, err := v.getInsertRowid(instr.P3, cursor)
+	if err != nil {
+		return err
 	}
 
 	if isUpdate && tableName != "" {
@@ -2095,6 +2104,85 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 	}
 	if isUpdate {
 		v.pendingFKUpdate = nil
+	}
+	return nil
+}
+
+// execInsertWithoutRowID handles INSERT for WITHOUT ROWID tables using composite keys.
+func (v *VDBE) execInsertWithoutRowID(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, tableName string, isUpdate bool) error {
+	// Compute composite key from primary key columns
+	keyBytes, err := v.computeCompositeKeyBytes(tableName, payload)
+	if err != nil {
+		if isUpdate {
+			v.restorePendingUpdate()
+		}
+		return err
+	}
+
+	// Validate update constraints for FK if this is an update
+	if isUpdate && tableName != "" {
+		if err := v.validateUpdateConstraintsWithoutRowID(tableName, payload, keyBytes); err != nil {
+			v.restorePendingUpdate()
+			return err
+		}
+	}
+
+	// Perform the insert using composite key
+	if err := v.performInsertWithCompositeKey(cursor, btCursor, keyBytes, payload, isUpdate); err != nil {
+		if isUpdate {
+			v.restorePendingUpdate()
+		}
+		return err
+	}
+
+	if isUpdate {
+		v.pendingFKUpdate = nil
+	}
+	return nil
+}
+
+// validateUpdateConstraintsWithoutRowID validates FK constraints for WITHOUT ROWID table updates.
+func (v *VDBE) validateUpdateConstraintsWithoutRowID(tableName string, payload []byte, keyBytes []byte) error {
+	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil {
+		return nil
+	}
+	if v.pendingFKUpdate == nil || v.pendingFKUpdate.table != tableName || v.Ctx.Schema == nil {
+		return nil
+	}
+
+	type fkManager interface {
+		ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
+	}
+
+	mgr, ok := v.Ctx.FKManager.(fkManager)
+	if !ok {
+		return nil
+	}
+
+	newValues, err := v.extractValuesFromPayload(tableName, payload)
+	if err != nil {
+		return err
+	}
+
+	rowReader := NewVDBERowReader(v)
+	rowUpdater := NewVDBERowModifier(v)
+
+	return mgr.ValidateUpdate(tableName, v.pendingFKUpdate.oldValues, newValues, v.Ctx.Schema, rowReader, rowUpdater)
+}
+
+// performInsertWithCompositeKey inserts a row using composite key for WITHOUT ROWID tables.
+func (v *VDBE) performInsertWithCompositeKey(cursor *Cursor, btCursor *btree.BtCursor, keyBytes []byte, payload []byte, isUpdate bool) error {
+	if err := btCursor.InsertWithComposite(0, keyBytes, payload); err != nil {
+		return v.wrapInsertError(err)
+	}
+	// For WITHOUT ROWID tables, we don't have a rowid to track
+	cursor.LastRowid = 0
+	cursor.CurrentKey = keyBytes
+	if !isUpdate {
+		v.NumChanges++
+	}
+	if v.Stats != nil {
+		v.Stats.RowsWritten++
 	}
 	return nil
 }
@@ -2595,113 +2683,169 @@ func (v *VDBE) isWithoutRowidTable(tableName string) bool {
 		return false
 	}
 	type schemaWithGetTable interface {
-		GetTable(name string) (interface{}, bool)
+		GetTableByName(name string) (interface{}, bool)
 	}
 	schemaObj, ok := v.Ctx.Schema.(schemaWithGetTable)
 	if !ok {
 		return false
 	}
-	tableIface, ok := schemaObj.GetTable(tableName)
+	tableIface, ok := schemaObj.GetTableByName(tableName)
 	if !ok {
+		return false
+	}
+	return v.isTableWithoutRowID(tableIface)
+}
+
+// isTableWithoutRowID checks if a table interface represents a WITHOUT ROWID table.
+func (v *VDBE) isTableWithoutRowID(table interface{}) bool {
+	if table == nil {
 		return false
 	}
 	type tableWithRowid interface {
 		HasRowID() bool
 	}
-	if t, ok := tableIface.(tableWithRowid); ok {
+	if t, ok := table.(tableWithRowid); ok {
 		return !t.HasRowID()
 	}
 	return false
 }
 
-func (v *VDBE) computeWithoutRowidKey(tableName string, payload []byte) (int64, error) {
+// computeCompositeKeyBytes encodes the primary key columns from a record payload
+// into order-preserving composite key bytes for WITHOUT ROWID tables.
+// The key is encoded in the order specified by table.PrimaryKey.
+func (v *VDBE) computeCompositeKeyBytes(tableName string, payload []byte) ([]byte, error) {
 	if v.Ctx == nil || v.Ctx.Schema == nil {
-		return 0, fmt.Errorf("no schema available for WITHOUT ROWID computation")
+		return nil, fmt.Errorf("no schema available for WITHOUT ROWID computation")
+	}
+
+	// Extract PK column names and values from payload
+	pkCols, pkValues, err := v.extractPKColumns(tableName, payload)
+	if err != nil {
+		return nil, err
+	}
+	if len(pkCols) == 0 {
+		return nil, fmt.Errorf("WITHOUT ROWID table %s missing primary key columns", tableName)
+	}
+
+	// Build a map from column name to value for reordering
+	pkMap := make(map[string]interface{})
+	for i, name := range pkCols {
+		pkMap[name] = pkValues[i]
+	}
+
+	// Get the table's PrimaryKey order
+	pkOrder := v.getTablePrimaryKeyOrder(tableName)
+	if len(pkOrder) == 0 {
+		// Fallback to definition order if PrimaryKey slice not available
+		pkOrder = pkCols
+	}
+
+	// Reorder values according to PrimaryKey definition order
+	orderedVals := make([]interface{}, 0, len(pkOrder))
+	for _, colName := range pkOrder {
+		val, ok := pkMap[colName]
+		if !ok {
+			// Column not found - this shouldn't happen for valid tables
+			return nil, fmt.Errorf("primary key column %s not found in payload", colName)
+		}
+		// Check for NULL values - SQLite doesn't allow NULL in WITHOUT ROWID PK
+		if val == nil {
+			return nil, fmt.Errorf("NOT NULL constraint failed: %s (PRIMARY KEY columns cannot be NULL in WITHOUT ROWID tables)", colName)
+		}
+		orderedVals = append(orderedVals, val)
+	}
+
+	// Encode using order-preserving composite key encoder
+	return withoutrowid.EncodeCompositeKey(orderedVals), nil
+}
+
+// getTablePrimaryKeyOrder returns the PrimaryKey column names in constraint order.
+func (v *VDBE) getTablePrimaryKeyOrder(tableName string) []string {
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return nil
 	}
 
 	type schemaWithGetTable interface {
-		GetTable(name string) (interface{}, bool)
+		GetTableByName(name string) (interface{}, bool)
 	}
 	schemaObj, ok := v.Ctx.Schema.(schemaWithGetTable)
 	if !ok {
-		return 0, fmt.Errorf("invalid schema type for WITHOUT ROWID computation")
+		return nil
 	}
 
-	tableIface, ok := schemaObj.GetTable(tableName)
+	tableIface, ok := schemaObj.GetTableByName(tableName)
 	if !ok {
-		return 0, fmt.Errorf("table not found for WITHOUT ROWID computation: %s", tableName)
+		return nil
 	}
 
-	type tableWithColumns interface {
-		GetColumns() []interface{}
+	type tableWithPK interface {
+		GetPrimaryKey() []string
 	}
-	colsProvider, ok := tableIface.(tableWithColumns)
-	if !ok {
-		return 0, fmt.Errorf("table missing columns metadata for WITHOUT ROWID computation")
+	if t, ok := tableIface.(tableWithPK); ok {
+		return t.GetPrimaryKey()
 	}
-
-	columns := colsProvider.GetColumns()
-	type colMeta interface {
-		GetName() string
-		IsPrimaryKeyColumn() bool
-	}
-
-	hash := fnv.New64a()
-	pkCount := 0
-
-	for idx, colIface := range columns {
-		col, ok := colIface.(colMeta)
-		if !ok {
-			continue
-		}
-		if !col.IsPrimaryKeyColumn() {
-			continue
-		}
-		pkCount++
-
-		mem := NewMem()
-		if err := parseRecordColumn(payload, idx, mem); err != nil {
-			return 0, fmt.Errorf("cannot read PK column %s: %w", col.GetName(), err)
-		}
-		writeMemToHash(hash, mem)
-	}
-
-	if pkCount == 0 {
-		return 0, fmt.Errorf("WITHOUT ROWID table %s missing primary key columns", tableName)
-	}
-
-	sum := int64(hash.Sum64())
-	if sum == 0 {
-		sum = 1 // avoid zero rowid sentinel
-	}
-	return sum, nil
+	return nil
 }
 
-func (v *VDBE) checkWithoutRowidPKUniqueness(tableName string, payload []byte, newRowid int64, currentRowid int64) error {
-	rowReader := NewVDBERowReader(v)
-	pkCols, pkValues, err := v.extractPKColumns(tableName, payload)
+// checkWithoutRowidPKUniqueness verifies that the composite key in payload
+// doesn't already exist in the table (unless it's the current row being updated).
+func (v *VDBE) checkWithoutRowidPKUniqueness(tableName string, payload []byte, _ int64, _ int64) error {
+	// Compute the composite key for the new row
+	keyBytes, err := v.computeCompositeKeyBytes(tableName, payload)
 	if err != nil {
 		return err
 	}
-	if len(pkCols) == 0 {
-		return fmt.Errorf("WITHOUT ROWID table %s missing primary key columns", tableName)
-	}
-	rowids, err := rowReader.FindReferencingRows(tableName, pkCols, pkValues)
+
+	// Find the table's root page and create a cursor to check for duplicates
+	rootPage, err := v.getTableRootPage(tableName)
 	if err != nil {
 		return err
 	}
-	for _, rid := range rowids {
-		if currentRowid != 0 && rid == currentRowid {
-			continue
-		}
+
+	bt, ok := v.Ctx.Btree.(*btree.Btree)
+	if !ok {
+		return fmt.Errorf("invalid btree context")
+	}
+
+	// Create a temporary cursor to check for the key
+	tempCursor := btree.NewCursorWithOptions(bt, rootPage, true)
+	found, err := tempCursor.SeekComposite(keyBytes)
+	if err != nil {
+		return fmt.Errorf("failed to seek for uniqueness check: %w", err)
+	}
+
+	// If found, we have a duplicate PK (note: the current row would have been deleted first in UPDATE)
+	if found {
 		return fmt.Errorf("UNIQUE constraint failed: PRIMARY KEY for WITHOUT ROWID table %s", tableName)
 	}
 	return nil
 }
 
+// getTableRootPage returns the root page number for a table.
+func (v *VDBE) getTableRootPage(tableName string) (uint32, error) {
+	type schemaWithGetTable interface {
+		GetTableByName(name string) (interface{}, bool)
+	}
+	schemaObj, ok := v.Ctx.Schema.(schemaWithGetTable)
+	if !ok {
+		return 0, fmt.Errorf("invalid schema type")
+	}
+	tableIface, ok := schemaObj.GetTableByName(tableName)
+	if !ok {
+		return 0, fmt.Errorf("table not found: %s", tableName)
+	}
+	type tableWithRootPage interface {
+		GetRootPage() uint32
+	}
+	if t, ok := tableIface.(tableWithRootPage); ok {
+		return t.GetRootPage(), nil
+	}
+	return 0, fmt.Errorf("table missing root page info: %s", tableName)
+}
+
 func (v *VDBE) extractPKColumns(tableName string, payload []byte) ([]string, []interface{}, error) {
 	type schemaWithGetTable interface {
-		GetTable(name string) (interface{}, bool)
+		GetTableByName(name string) (interface{}, bool)
 	}
 	if v.Ctx == nil || v.Ctx.Schema == nil {
 		return nil, nil, fmt.Errorf("no schema for PK extraction")
@@ -2710,10 +2854,25 @@ func (v *VDBE) extractPKColumns(tableName string, payload []byte) ([]string, []i
 	if !ok {
 		return nil, nil, fmt.Errorf("invalid schema type for PK extraction")
 	}
-	tableIface, ok := schemaObj.GetTable(tableName)
+	tableIface, ok := schemaObj.GetTableByName(tableName)
 	if !ok {
 		return nil, nil, fmt.Errorf("table not found: %s", tableName)
 	}
+
+	// Get PK column names from the table's PrimaryKey slice (handles table-level constraints)
+	type tableWithPK interface {
+		GetPrimaryKey() []string
+	}
+	pkProvider, ok := tableIface.(tableWithPK)
+	if !ok {
+		return nil, nil, fmt.Errorf("table missing PK info for extraction")
+	}
+	pkColNames := pkProvider.GetPrimaryKey()
+	if len(pkColNames) == 0 {
+		return nil, nil, fmt.Errorf("table %s has no primary key columns", tableName)
+	}
+
+	// Get columns for index lookup
 	type tableWithColumns interface {
 		GetColumns() []interface{}
 	}
@@ -2722,23 +2881,31 @@ func (v *VDBE) extractPKColumns(tableName string, payload []byte) ([]string, []i
 		return nil, nil, fmt.Errorf("table missing columns for PK extraction")
 	}
 	columns := colsProvider.GetColumns()
+
+	// Build column name to index map
 	type colMeta interface {
 		GetName() string
-		IsPrimaryKeyColumn() bool
+	}
+	colNameToIdx := make(map[string]int)
+	for idx, colIface := range columns {
+		if col, ok := colIface.(colMeta); ok {
+			colNameToIdx[strings.ToLower(col.GetName())] = idx
+		}
 	}
 
+	// Extract PK values in definition order (order they appear in columns)
 	var pkCols []string
 	var pkValues []interface{}
-	for idx, colIface := range columns {
-		col, ok := colIface.(colMeta)
-		if !ok || !col.IsPrimaryKeyColumn() {
-			continue
+	for _, pkColName := range pkColNames {
+		idx, found := colNameToIdx[strings.ToLower(pkColName)]
+		if !found {
+			return nil, nil, fmt.Errorf("PK column %s not found in table columns", pkColName)
 		}
 		mem := NewMem()
 		if err := parseRecordColumn(payload, idx, mem); err != nil {
 			return nil, nil, err
 		}
-		pkCols = append(pkCols, col.GetName())
+		pkCols = append(pkCols, pkColName)
 		pkValues = append(pkValues, memToInterface(mem))
 	}
 	return pkCols, pkValues, nil
@@ -2801,27 +2968,6 @@ func valuesEqualLoose(a, b interface{}) bool {
 		}
 	}
 	return false
-}
-
-func writeMemToHash(h hash.Hash64, m *Mem) {
-	switch {
-	case m.IsNull():
-		h.Write([]byte{0})
-	case m.IsInt():
-		var buf [8]byte
-		binary.LittleEndian.PutUint64(buf[:], uint64(m.IntValue()))
-		h.Write(buf[:])
-	case m.IsReal():
-		var buf [8]byte
-		binary.LittleEndian.PutUint64(buf[:], math.Float64bits(m.RealValue()))
-		h.Write(buf[:])
-	case m.IsString():
-		h.Write([]byte(m.StringValue()))
-	case m.IsBlob():
-		h.Write(m.BlobValue())
-	default:
-		h.Write([]byte(fmt.Sprintf("%v", memToInterface(m))))
-	}
 }
 
 func (v *VDBE) execDelete(instr *Instruction) error {
