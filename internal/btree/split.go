@@ -921,6 +921,7 @@ func (c *BtCursor) createNewRoot(leftPage, rightPage uint32, dividerKey int64, d
 	}
 
 	c.RootPage = newRootNum
+	fmt.Printf("createNewRoot: oldLeft=%d right=%d newRoot=%d composite=%t\n", leftPage, rightPage, newRootNum, c.CompositePK)
 	return nil
 }
 

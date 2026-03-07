@@ -123,11 +123,19 @@ func completeLeafCellParse(info *CellInfo, cellData []byte, offset int, usableSi
 	calculateCellSizeAndLocal(info, offset, maxLocal, minLocal, usableSize)
 
 	if offset+int(info.LocalPayload) > len(cellData) {
-		return nil, fmt.Errorf("cell data truncated")
+		// If the encoded payload is larger than available, but there is room for an
+		// overflow pointer, treat the extra bytes as overflow rather than corrupt data.
+		available := len(cellData) - offset
+		if available <= 4 {
+			return nil, fmt.Errorf("cell data truncated")
+		}
+		local := available - 4
+		info.LocalPayload = uint16(local)
+		info.CellSize = uint16(offset + local + 4)
 	}
 	info.Payload = cellData[offset : offset+int(info.LocalPayload)]
 
-	return extractOverflowPage(info, cellData, offset, maxLocal)
+	return extractOverflowPage(info, cellData, offset)
 }
 
 // calculateCellSizeAndLocal sets LocalPayload and CellSize.
@@ -161,8 +169,8 @@ func calculateCellSizeAndLocal(info *CellInfo, offset int, maxLocal, minLocal, u
 }
 
 // extractOverflowPage reads the overflow page number if present.
-func extractOverflowPage(info *CellInfo, cellData []byte, offset int, maxLocal uint32) (*CellInfo, error) {
-	if info.PayloadSize <= maxLocal {
+func extractOverflowPage(info *CellInfo, cellData []byte, offset int) (*CellInfo, error) {
+	if info.PayloadSize <= uint32(info.LocalPayload) {
 		return info, nil
 	}
 	overflowOffset := offset + int(info.LocalPayload)

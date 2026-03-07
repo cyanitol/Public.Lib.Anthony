@@ -786,6 +786,15 @@ func (v *VDBE) execRewind(instr *Instruction) error {
 	// Move to first entry
 	err = btCursor.MoveToFirst()
 	if err != nil {
+		fmt.Printf("Rewind cursor %d error: %v\n", instr.P1, err)
+		if data, hdrErr := btCursor.Btree.GetPage(btCursor.RootPage); hdrErr == nil {
+			if hdr, parseErr := btree.ParsePageHeader(data, btCursor.RootPage); parseErr == nil {
+				fmt.Printf("Root page %d header: type=0x%02x numCells=%d isLeaf=%t right=%d\n",
+					btCursor.RootPage, hdr.PageType, hdr.NumCells, hdr.IsLeaf, hdr.RightChild)
+			} else {
+				fmt.Printf("Root page %d parse error: %v\n", btCursor.RootPage, parseErr)
+			}
+		}
 		// Empty table or error - jump to P2
 		if instr.P2 > 0 {
 			v.PC = instr.P2
@@ -2175,6 +2184,13 @@ func (v *VDBE) performInsertWithCompositeKey(cursor *Cursor, btCursor *btree.BtC
 	if err := btCursor.InsertWithComposite(0, keyBytes, payload); err != nil {
 		return v.wrapInsertError(err)
 	}
+
+	// Root page can change after a split; keep cursor and schema in sync.
+	cursor.RootPage = btCursor.RootPage
+	if tbl, ok := cursor.Table.(interface{ SetRootPage(uint32) }); ok && tbl != nil {
+		tbl.SetRootPage(btCursor.RootPage)
+	}
+
 	// For WITHOUT ROWID tables, we don't have a rowid to track
 	cursor.LastRowid = 0
 	cursor.CurrentKey = keyBytes
@@ -2265,6 +2281,13 @@ func (v *VDBE) performInsert(cursor *Cursor, btCursor *btree.BtCursor, rowid int
 	if err := btCursor.Insert(rowid, payload); err != nil {
 		return v.wrapInsertError(err)
 	}
+
+	// Root page can change after a split; keep cursor and schema in sync.
+	cursor.RootPage = btCursor.RootPage
+	if tbl, ok := cursor.Table.(interface{ SetRootPage(uint32) }); ok && tbl != nil {
+		tbl.SetRootPage(btCursor.RootPage)
+	}
+
 	cursor.LastRowid = rowid
 	v.LastInsertID = rowid
 	if updateFlag != 1 {

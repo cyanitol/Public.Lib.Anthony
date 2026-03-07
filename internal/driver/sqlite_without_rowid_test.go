@@ -54,18 +54,48 @@ func TestWithoutRowID_BasicOperations(t *testing.T) {
 }
 
 func TestWithoutRowID_SplitsMaintainOrder(t *testing.T) {
-	t.Skip("WITHOUT ROWID splits still drop rows; enable once composite split path is fully wired")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
 	mustExec(t, db, `PRAGMA page_size = 512`)
 	mustExec(t, db, `CREATE TABLE split_demo(a TEXT, b TEXT, c TEXT, PRIMARY KEY(a, b)) WITHOUT ROWID`)
 
+	rootpage := queryRows(t, db, `SELECT rootpage FROM sqlite_master WHERE name='split_demo'`)
+	t.Logf("split_demo rootpage: %v", rootpage)
+
 	payload := strings.Repeat("x", 400)
+
+	if rows := queryRows(t, db, `SELECT a, b FROM split_demo`); len(rows) != 0 {
+		t.Fatalf("expected empty table after creation, got %d rows: %v", len(rows), rows)
+	}
+
 	for i := 0; i < 25; i++ {
 		a := fmt.Sprintf("a%02d", i)
 		b := fmt.Sprintf("b%02d", i%5)
 		mustExec(t, db, `INSERT INTO split_demo VALUES(?, ?, ?)`, a, b, payload)
+
+		// Ensure no rows are lost after each insert (guards split path).
+		rows, err := db.Query(`SELECT COUNT(*) FROM split_demo`)
+		if err != nil {
+			t.Fatalf("row count query failed after insert %d: %v", i, err)
+		}
+		var count int
+		if rows.Next() {
+			if err := rows.Scan(&count); err != nil {
+				t.Fatalf("row count scan failed after insert %d: %v", i, err)
+			}
+		} else if err := rows.Err(); err != nil {
+			t.Fatalf("row iteration error after insert %d: %v", i, err)
+		} else {
+			sample := queryRows(t, db, `SELECT a, b FROM split_demo ORDER BY a, b LIMIT 5`)
+			prog := queryRows(t, db, `EXPLAIN SELECT COUNT(*) FROM split_demo`)
+			sampleProg := queryRows(t, db, `EXPLAIN SELECT a, b FROM split_demo ORDER BY a, b LIMIT 5`)
+			t.Fatalf("row count query returned no rows after insert %d (sample rows: %v, explain=%v, sampleExplain=%v)", i, sample, prog, sampleProg)
+		}
+		rows.Close()
+		if count != i+1 {
+			t.Fatalf("row count mismatch after insert %d: got %d, want %d", i, count, i+1)
+		}
 	}
 
 	assertRowCount(t, db, "split_demo", 25)

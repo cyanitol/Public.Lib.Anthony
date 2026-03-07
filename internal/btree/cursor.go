@@ -102,7 +102,11 @@ func (c *BtCursor) MoveToFirst() error {
 	}
 	c.resetToRoot()
 	if c.CompositePK {
-		return c.descendToFirstComposite(c.RootPage)
+		if err := c.descendToFirstComposite(c.RootPage); err != nil {
+			return err
+		}
+		c.AtFirst = true
+		return nil
 	}
 	if err := c.descendToFirst(c.RootPage); err != nil {
 		return err
@@ -306,12 +310,22 @@ func (c *BtCursor) tryAdvanceInParent() (uint32, bool, error) {
 		return 0, false, err
 	}
 
-	if parentIndex >= int(parentHeader.NumCells)-1 {
+	if parentIndex >= int(parentHeader.NumCells) {
 		return 0, false, nil
 	}
 
-	c.IndexStack[c.Depth] = parentIndex + 1
-	return c.getChildPageFromParent(parentData, parentHeader, parentIndex+1)
+	if parentIndex < int(parentHeader.NumCells)-1 {
+		c.IndexStack[c.Depth] = parentIndex + 1
+		return c.getChildPageFromParent(parentData, parentHeader, parentIndex+1)
+	}
+
+	// When at the last cell, advance to the rightmost child.
+	if parentHeader.RightChild != 0 {
+		c.IndexStack[c.Depth] = int(parentHeader.NumCells)
+		return parentHeader.RightChild, true, nil
+	}
+
+	return 0, false, nil
 }
 
 // loadParentPage loads and parses a parent page.
@@ -698,13 +712,7 @@ func (c *BtCursor) descendToFirstComposite(pageNum uint32) error {
 		}
 
 		if header.IsLeaf {
-			c.CurrentPage = pageNum
-			c.CurrentIndex = 0
-			c.CurrentHeader = header
-			c.State = CursorValid
-			c.AtFirst = true
-			c.tryLoadCell(pageData, header, 0)
-			return nil
+			return c.setupLeafFirst(pageNum, pageData, header)
 		}
 
 		pageNum, err = c.getFirstChildPage(header, pageData)
@@ -928,8 +936,29 @@ func (c *BtCursor) InsertWithComposite(key int64, keyBytes []byte, payload []byt
 	}
 
 	if len(cellData) > btreePage.FreeSpace() {
-		c.cleanupOverflowOnError(overflowPage)
-		return c.splitPage(key, keyBytes, payload)
+		// If the page is empty, try re-encoding with minimal local payload using overflow
+		// before forcing a split. This prevents pathological splits with empty left/right.
+		if btreePage.Header.NumCells == 0 && len(payload) > 0 {
+			c.cleanupOverflowOnError(overflowPage)
+			overflowPage = 0
+
+			minLocal := calculateMinLocal(c.Btree.UsableSize, true)
+			if minLocal > uint32(len(payload)) {
+				minLocal = uint32(len(payload))
+			}
+			localSize := uint16(minLocal)
+
+			var err error
+			overflowPage, err = c.WriteOverflow(payload, localSize, c.Btree.UsableSize)
+			if err == nil {
+				cellData = c.encodeTableLeafCellWithOverflow(key, keyBytes, payload[:localSize], overflowPage, uint32(len(payload)))
+			}
+		}
+
+		if len(cellData) > btreePage.FreeSpace() {
+			c.cleanupOverflowOnError(overflowPage)
+			return c.splitPage(key, keyBytes, payload)
+		}
 	}
 
 	if err := c.markPageDirty(); err != nil {

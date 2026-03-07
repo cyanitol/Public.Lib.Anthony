@@ -61,6 +61,16 @@ type Table struct {
 	Stats        *TableStats       // Table statistics (optional, may be nil)
 }
 
+// SetRootPage updates the root page for this table.
+func (t *Table) SetRootPage(root uint32) {
+	t.RootPage = root
+}
+
+// GetRootPage returns the root page for this table.
+func (t *Table) GetRootPage() uint32 {
+	return t.RootPage
+}
+
 // Column represents a table column definition.
 type Column struct {
 	Name     string      // Column name
@@ -461,11 +471,6 @@ func (t *Table) HasRowID() bool {
 // For WITHOUT ROWID tables, this determines the order of key encoding.
 func (t *Table) GetPrimaryKey() []string {
 	return t.PrimaryKey
-}
-
-// GetRootPage returns the B-tree root page number for this table.
-func (t *Table) GetRootPage() uint32 {
-	return t.RootPage
 }
 
 // checkTableExists checks if a table already exists in the schema.
