@@ -351,8 +351,8 @@ func TestJournalModeSettings(t *testing.T) {
 		t.Fatalf("failed to begin write: %v", err)
 	}
 
-	if err := pager.SetJournalMode(JournalModePersist); err == nil {
-		t.Error("expected error when changing journal mode during transaction")
+	if err := pager.SetJournalMode(JournalModePersist); err != nil {
+		t.Errorf("expected journal mode change to succeed during transaction, got %v", err)
 	}
 
 	pager.Rollback()

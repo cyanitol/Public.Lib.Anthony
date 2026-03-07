@@ -132,34 +132,8 @@ func (s *Schema) SaveToMaster(bt *btree.Btree) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Build master rows from current schema
-	var rows []MasterRow
-
-	// Add tables
-	for _, table := range s.Tables {
-		// Skip sqlite_master itself
-		if table.Name == "sqlite_master" {
-			continue
-		}
-
-		if table.RootPage == 0 {
-			continue
-		}
-
-		rows = append(rows, MasterRow{
-			Type:     "table",
-			Name:     table.Name,
-			TblName:  table.Name,
-			RootPage: table.RootPage,
-			SQL:      table.SQL,
-		})
-	}
-
-	// Write rows to sqlite_master (page 1)
+	// Build master rows from current schema (stubbed for now)
 	_ = bt
-	_ = rows
-	// master persistence is stubbed out; schema uses in-memory Tables map for now
-	// to avoid corrupting page 1 while WITHOUT ROWID refactor is in progress.
 
 	return nil
 }
@@ -197,35 +171,6 @@ func (s *Schema) parseMasterPage(bt *btree.Btree, pageNum uint32) ([]MasterRow, 
 
 // writeMasterPage writes rows to the sqlite_master page.
 func (s *Schema) writeMasterPage(bt *btree.Btree, pageNum uint32, rows []MasterRow) error {
-	// Re-initialize page as empty leaf table
-	page, err := bt.GetPage(pageNum)
-	if err != nil {
-		// Allocate page 1 if missing
-		if pageNum != 1 {
-			return err
-		}
-		newPageNum, errAlloc := bt.AllocatePage()
-		if errAlloc != nil {
-			return errAlloc
-		}
-		if newPageNum != 1 {
-			return fmt.Errorf("expected page 1 allocation, got %d", newPageNum)
-		}
-		page, err = bt.GetPage(pageNum)
-		if err != nil {
-			return err
-		}
-	}
-	headerOffset := btree.FileHeaderSize
-	page[headerOffset+btree.PageHeaderOffsetType] = btree.PageTypeLeafTable
-	for i := headerOffset + 1; i < headerOffset+btree.PageHeaderSizeLeaf; i++ {
-		page[i] = 0
-	}
-	for i := headerOffset + btree.PageHeaderSizeLeaf; i < len(page); i++ {
-		page[i] = 0
-	}
-
-	// Stubbed: no-op until full master writer is implemented.
 	return nil
 }
 

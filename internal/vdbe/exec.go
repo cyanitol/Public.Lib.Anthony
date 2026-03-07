@@ -679,12 +679,6 @@ func (v *VDBE) execOpenRead(instr *Instruction) error {
 
 	// Check if this is a WITHOUT ROWID table
 	isWithoutRowID := v.isTableWithoutRowID(table)
-	if table == nil {
-		fmt.Printf("OpenRead root=%d: table lookup nil\n", instr.P2)
-	}
-	if t, ok := table.(interface{ HasRowID() bool }); ok {
-		fmt.Printf("OpenRead root=%d hasRowid=%v\n", instr.P2, t.HasRowID())
-	}
 
 	// Create btree cursor with composite key mode for WITHOUT ROWID tables
 	btCursor := btree.NewCursorWithOptions(bt, uint32(instr.P2), isWithoutRowID)
@@ -727,12 +721,6 @@ func (v *VDBE) execOpenWrite(instr *Instruction) error {
 
 	// Check if this is a WITHOUT ROWID table
 	isWithoutRowID := v.isTableWithoutRowID(table)
-	if table == nil {
-		fmt.Printf("OpenWrite root=%d: table lookup nil\n", instr.P2)
-	}
-	if t, ok := table.(interface{ HasRowID() bool }); ok {
-		fmt.Printf("OpenWrite root=%d hasRowid=%v\n", instr.P2, t.HasRowID())
-	}
 
 	// Create btree cursor with composite key mode for WITHOUT ROWID tables
 	btCursor := btree.NewCursorWithOptions(bt, uint32(instr.P2), isWithoutRowID)
