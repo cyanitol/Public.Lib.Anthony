@@ -1,6 +1,6 @@
 # Anthony - Pure Go SQLite Implementation - TODO
 #
-# Test Status: ~655 passing, ~476 skipped (run `go test ./...` for current counts)
+# Test Status: ~655 passing, ~476 skipped (run `go test ./...` for current counts; WITHOUT ROWID split regression currently failing)
 # Code Quality: Cyclomatic complexity <= 10 for all production code
 # Coverage Snapshot: ~58% feature parity vs reference SQLite; window functions/FTS5/R-Tree/WITHOUT ROWID/foreign keys incomplete
 # Last Updated: 2026-03-06
@@ -17,6 +17,7 @@ HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
 [ ] WITHOUT ROWID Tables (23 tests skipped)
     - Implement alt btree layout using PRIMARY KEY as key (no rowid)
     - Route DML/DDL paths correctly; ensure index selection and VACUUM support
+    - Fix split/rewind regression: WITHOUT ROWID roots become empty after split; COUNT/rewind sees empty leaf (see TestWithoutRowID_SplitsMaintainOrder)
 
 [ ] Window Functions
     - Executor support for ROW_NUMBER/RANK/DENSE_RANK and SUM/AVG/COUNT/MIN/MAX windows
