@@ -52,6 +52,13 @@ func NewCursor(bt *Btree, rootPage uint32) *BtCursor {
 	}
 }
 
+// NewCursorWithOptions creates a new cursor with optional composite key mode.
+func NewCursorWithOptions(bt *Btree, rootPage uint32, compositePK bool) *BtCursor {
+	cur := NewCursor(bt, rootPage)
+	cur.CompositePK = compositePK
+	return cur
+}
+
 // validateCursorState validates that the cursor is in a valid state for operations
 func (c *BtCursor) validateCursorState() error {
 	if c.Btree == nil {
