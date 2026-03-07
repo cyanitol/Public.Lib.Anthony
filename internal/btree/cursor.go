@@ -814,9 +814,10 @@ func (c *BtCursor) binarySearch(pageData []byte, header *PageHeader, rowid int64
 			return left, false
 		}
 
-		if cell.Key == rowid {
+		comp := c.compareCellKey(cell, rowid, nil)
+		if comp == 0 {
 			return mid, true
-		} else if cell.Key < rowid {
+		} else if comp < 0 {
 			left = mid + 1
 		} else {
 			right = mid
@@ -844,7 +845,7 @@ func (c *BtCursor) binarySearchComposite(pageData []byte, header *PageHeader, ke
 			return left, false
 		}
 
-		comp := bytes.Compare(cell.KeyBytes, key)
+		comp := c.compareCellKey(cell, 0, key)
 		if comp == 0 {
 			return mid, true
 		} else if comp < 0 {
@@ -855,6 +856,21 @@ func (c *BtCursor) binarySearchComposite(pageData []byte, header *PageHeader, ke
 	}
 
 	return left, false
+}
+
+// compareCellKey compares a cell key to a target. When CompositePK is true,
+// the compositeKey parameter is used and compared with KeyBytes; otherwise, rowid is used.
+func (c *BtCursor) compareCellKey(cell *CellInfo, rowid int64, compositeKey []byte) int {
+	if c.CompositePK && compositeKey != nil {
+		return bytes.Compare(cell.KeyBytes, compositeKey)
+	}
+	if cell.Key == rowid {
+		return 0
+	}
+	if cell.Key < rowid {
+		return -1
+	}
+	return 1
 }
 
 // Insert inserts a new row with the given key and payload
