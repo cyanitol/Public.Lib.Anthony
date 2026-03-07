@@ -196,6 +196,42 @@ make test-short   # Skip slow tests
 make test-cover   # With coverage
 ```
 
+## Repository Guidelines
+
+### Project Structure & Module Organization
+- Core library resides in `internal/` with major components such as `btree/`, `pager/`, `parser/`, `vdbe/`, `engine/`, and `driver/`; tests live alongside code in the same packages.
+- CLI helpers for debugging and demonstrations are under `cmd/test_dsn` and `cmd/test_explain`.
+- Documentation is in `doc/` (architecture, testing, security); examples are in `example/`; repository entrypoint wiring sits in `anthony.go`.
+
+### Build, Test, and Development Commands
+- Preferred workflow uses the reproducible `nix-shell`.
+- Quick build: `make build` (or `go build ./...`).
+- Test suite: `make test` (CGO disabled); faster iterations `make test-fast TEST_PKG_PARALLEL=16 TEST_PARALLEL=8`; skip slow cases with `make test-short`.
+- Coverage and race: `make test-cover`, `make test-race`, or `make test-cover-report` to emit `coverage.html`.
+- Full pre-commit gate: `make commit` (runs fmt, SPDX check, complexity, vet, build, test). Run this before opening review.
+
+### Coding Style & Naming Conventions
+- Go code must be formatted with `gofmt`; no diffs should appear from `gofmt -w .`.
+- Every `.go` file requires an `SPDX-License-Identifier` header; `make check-spdx` enforces this.
+- Maintain cyclomatic complexity ≤ 10 for non-test functions (`make check-complexity`); refactor or split functions if they drift higher.
+- Follow idiomatic Go naming; keep exported APIs minimal. Use clear package prefixes for helpers instead of stuttered names (e.g., `pager.Cache`, not `pager.PagerCache`).
+- Tests favor table-driven layouts with underscore-separated scenario names (e.g., `TestPlanBuilder_NestedCTE`).
+
+### Testing Guidelines
+- Primary framework is the standard `go test`. Run `go test ./...` for quick local validation when outside `nix-shell`.
+- Coverage targets: critical packages (driver, vdbe, security) 80%+, core packages (parser, pager, btree) 75%+, overall 75%+. Use `go tool cover -func=coverage.out` after `go test -coverprofile=coverage.out ./...`.
+- Use `-short` for slow paths and parallelize with `-p`/`-parallel` (mirrored by `TEST_PKG_PARALLEL` and `TEST_PARALLEL` in Makefile).
+- Keep examples as `ExampleType_Method` and add fuzz/benchmarks where they provide regression protection.
+
+### Commit & Pull Request Guidelines
+- External PRs are currently declined (see `CONTRIBUTING.md`), but internal changes should still follow review discipline.
+- Commit messages in history are short and imperative (e.g., “Add AREWETHEREYET.md feature comparison document”); use similar style and keep commits scoped.
+- PRs should describe the behavior change, list test commands run (`make commit` expected), and link issues or design notes. Include coverage or performance notes for critical areas and screenshots only when UI tooling is involved.
+
+### Security & Configuration Tips
+- Default builds and tests run with `CGO_ENABLED=0`; avoid adding CGO dependencies without approval.
+- Review `doc/SECURITY.md` before modifying pager, btree, or WAL paths; highlight any changes that affect file formats, locking, or crash safety in your PR description.
+
 ## Known Limitations
 
 - **Windows File Locking** - File locking on Windows is not yet implemented (Phase 2.1)
