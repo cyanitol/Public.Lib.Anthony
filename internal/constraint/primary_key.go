@@ -4,6 +4,7 @@ package constraint
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
 	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
@@ -229,7 +230,7 @@ func (pk *PrimaryKeyConstraint) generateRowid() (int64, error) {
 	maxRowid := cursor.GetKey()
 
 	// SQLite behavior: if max rowid is at max int64, reuse lower values
-	if maxRowid >= 9223372036854775807 {
+	if maxRowid == math.MaxInt64 {
 		// Try to find a gap by scanning from 1
 		return pk.findGapInRowids()
 	}
