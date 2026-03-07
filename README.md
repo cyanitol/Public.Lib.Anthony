@@ -84,23 +84,23 @@ func main() {
 
 The driver registers as `sqlite_internal` to avoid conflicts with other SQLite drivers.
 
-For more examples, see [docs/QUICKSTART.md](docs/QUICKSTART.md).
+For more examples, see [doc/QUICKSTART.md](doc/QUICKSTART.md).
 
 ## Documentation
 
 ### Core Documentation
-- **[Quick Start Guide](docs/QUICKSTART.md)** - Get started with code examples
-- **[Architecture Overview](docs/ARCHITECTURE.md)** - System design and internals
-- **[Documentation Index](docs/INDEX.md)** - Complete documentation index
-- **[Security Guide](docs/SECURITY.md)** - Security model and best practices
+- **[Quick Start Guide](doc/QUICKSTART.md)** - Get started with code examples
+- **[Architecture Overview](doc/ARCHITECTURE.md)** - System design and internals
+- **[Documentation Index](doc/INDEX.md)** - Complete documentation index
+- **[Security Guide](doc/SECURITY.md)** - Security model and best practices
 
 ### Feature Documentation
-- **[Common Table Expressions (CTEs)](docs/CTE_USAGE_GUIDE.md)** - Recursive and non-recursive CTEs
-- **[Subqueries](docs/SUBQUERY_ARCHITECTURE.md)** - Scalar, IN, and EXISTS subqueries
-- **[PRAGMA Statements](docs/PRAGMA_QUICK_REFERENCE.md)** - Database configuration
-- **[ALTER TABLE](docs/ALTER_TABLE_QUICK_REFERENCE.md)** - Schema modifications
-- **[VACUUM](docs/VACUUM_USAGE.md)** - Database compaction
-- **[Triggers](docs/TRIGGER_INTEGRATION_REPORT.md)** - Trigger support
+- **[Common Table Expressions (CTEs)](doc/CTE_USAGE_GUIDE.md)** - Recursive and non-recursive CTEs
+- **[Subqueries](doc/SUBQUERY_ARCHITECTURE.md)** - Scalar, IN, and EXISTS subqueries
+- **[PRAGMA Statements](doc/PRAGMA_QUICK_REFERENCE.md)** - Database configuration
+- **[ALTER TABLE](doc/ALTER_TABLE_QUICK_REFERENCE.md)** - Schema modifications
+- **[VACUUM](doc/VACUUM_USAGE.md)** - Database compaction
+- **[Triggers](doc/TRIGGER_INTEGRATION_REPORT.md)** - Trigger support
 
 ### Package Documentation
 - **[btree](internal/btree)** - B-tree storage engine
@@ -110,7 +110,7 @@ For more examples, see [docs/QUICKSTART.md](docs/QUICKSTART.md).
 - **[functions](internal/functions)** - Built-in SQL functions
 - **[driver](internal/driver)** - database/sql driver interface
 
-See [docs/INDEX.md](docs/INDEX.md) for the complete documentation index.
+See [doc/INDEX.md](doc/INDEX.md) for the complete documentation index.
 
 ## Package Structure
 
@@ -238,7 +238,7 @@ Contributions are welcome! When contributing:
    - Document all public APIs
    - Use the standard Go formatting (`gofmt`)
 3. **Write tests first** - Use Test-Driven Development (TDD)
-4. **Follow the lock hierarchy** - See [docs/LOCK_ORDERING.md](docs/LOCK_ORDERING.md)
+4. **Follow the lock hierarchy** - See [doc/LOCK_ORDERING.md](doc/LOCK_ORDERING.md)
 5. **Run tests with race detector** - `go test -race ./...`
 6. **Update documentation** - Keep docs synchronized with code changes
 
@@ -250,7 +250,7 @@ Contributions are welcome! When contributing:
 - [ ] Tests cover the new functionality
 - [ ] Documentation updated
 
-For security vulnerabilities, please see [docs/SECURITY.md](docs/SECURITY.md) for responsible disclosure.
+For security vulnerabilities, please see [doc/SECURITY.md](doc/SECURITY.md) for responsible disclosure.
 
 ## Performance Tips
 
