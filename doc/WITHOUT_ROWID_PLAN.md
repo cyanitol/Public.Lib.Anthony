@@ -10,7 +10,7 @@ Next steps (must complete for correctness):
 1) **B-tree key model**
    - Add support for byte-composite keys (collation-aware) alongside int64 rowids.
    - Ensure comparator uses SQLite ordering (binary for now).
-   - Update cursor seek/Next/Prev to operate on composite keys for WITHOUT ROWID tables.
+   - Update cursor seek/Next/Prev to operate on composite keys for WITHOUT ROWID tables (helpers added; needs full comparator and page-type wiring).
 
 2) **Planner/VDBE integration**
    - Change DML codegen for WITHOUT ROWID to encode PK via `withoutrowid.EncodeCompositeKey` and pass to btree ops.

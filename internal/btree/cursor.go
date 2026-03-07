@@ -518,6 +518,14 @@ func (c *BtCursor) GetKey() int64 {
 	return c.CurrentCell.Key
 }
 
+// GetKeyBytes returns the composite key bytes for WITHOUT ROWID cursors.
+func (c *BtCursor) GetKeyBytes() []byte {
+	if c.Btree == nil || c.State != CursorValid || c.CurrentCell == nil {
+		return nil
+	}
+	return c.CurrentCell.KeyBytes
+}
+
 // GetPayload returns the local payload of the current entry
 // Note: This only returns the portion stored locally in the cell.
 // For cells with overflow pages, use GetCompletePayload() to get the full payload.
