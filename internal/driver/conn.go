@@ -334,6 +334,9 @@ func (c *Conn) applyConfig(config *DriverConfig) error {
 
 	// Store configuration settings that affect connection behavior
 	c.foreignKeysEnabled = config.EnableForeignKeys
+	if c.fkManager != nil {
+		c.fkManager.SetEnabled(c.foreignKeysEnabled)
+	}
 
 	// Apply PRAGMA settings by executing them as SQL statements
 	// We need to do this through the statement execution path to ensure

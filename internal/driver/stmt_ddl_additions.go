@@ -405,6 +405,9 @@ func (s *Stmt) compilePragmaForeignKeysSet(vm *vdbe.VDBE, stmt *parser.PragmaStm
 	}
 
 	s.conn.foreignKeysEnabled = enabled
+	if s.conn.fkManager != nil {
+		s.conn.fkManager.SetEnabled(enabled)
+	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
