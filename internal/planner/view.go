@@ -55,9 +55,7 @@ func copySelectStmt(stmt *parser.SelectStmt) *parser.SelectStmt {
 func copyResultColumns(dst, src *parser.SelectStmt) {
 	if len(src.Columns) > 0 {
 		dst.Columns = make([]parser.ResultColumn, len(src.Columns))
-		for i := range src.Columns {
-			dst.Columns[i] = src.Columns[i]
-		}
+		copy(dst.Columns, src.Columns)
 	}
 }
 
@@ -65,9 +63,7 @@ func copyResultColumns(dst, src *parser.SelectStmt) {
 func copyGroupByClause(dst, src *parser.SelectStmt) {
 	if len(src.GroupBy) > 0 {
 		dst.GroupBy = make([]parser.Expression, len(src.GroupBy))
-		for i := range src.GroupBy {
-			dst.GroupBy[i] = src.GroupBy[i]
-		}
+		copy(dst.GroupBy, src.GroupBy)
 	}
 }
 
@@ -75,9 +71,7 @@ func copyGroupByClause(dst, src *parser.SelectStmt) {
 func copyOrderByClause(dst, src *parser.SelectStmt) {
 	if len(src.OrderBy) > 0 {
 		dst.OrderBy = make([]parser.OrderingTerm, len(src.OrderBy))
-		for i := range src.OrderBy {
-			dst.OrderBy[i] = src.OrderBy[i]
-		}
+		copy(dst.OrderBy, src.OrderBy)
 	}
 }
 
@@ -95,9 +89,7 @@ func copyFromClause(dst, src *parser.SelectStmt) {
 func copyFromTables(dst, src *parser.FromClause) {
 	if len(src.Tables) > 0 {
 		dst.Tables = make([]parser.TableOrSubquery, len(src.Tables))
-		for i := range src.Tables {
-			dst.Tables[i] = src.Tables[i]
-		}
+		copy(dst.Tables, src.Tables)
 	}
 }
 
@@ -105,9 +97,7 @@ func copyFromTables(dst, src *parser.FromClause) {
 func copyFromJoins(dst, src *parser.FromClause) {
 	if len(src.Joins) > 0 {
 		dst.Joins = make([]parser.JoinClause, len(src.Joins))
-		for i := range src.Joins {
-			dst.Joins[i] = src.Joins[i]
-		}
+		copy(dst.Joins, src.Joins)
 	}
 }
 

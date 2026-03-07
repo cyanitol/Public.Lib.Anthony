@@ -713,9 +713,7 @@ func normalizeJSONPath(path string) string {
 	}
 
 	// Remove leading $ if present
-	if strings.HasPrefix(path, "$") {
-		path = path[1:]
-	}
+	path = strings.TrimPrefix(path, "$")
 
 	return path
 }
@@ -775,9 +773,7 @@ func setPath(data interface{}, path string, value interface{}) interface{} {
 	}
 
 	// Remove leading $ if present
-	if strings.HasPrefix(path, "$") {
-		path = path[1:]
-	}
+	path = strings.TrimPrefix(path, "$")
 
 	if path == "" {
 		return value
@@ -851,9 +847,7 @@ func removePath(data interface{}, path string) interface{} {
 	}
 
 	// Remove leading $ if present
-	if strings.HasPrefix(path, "$") {
-		path = path[1:]
-	}
+	path = strings.TrimPrefix(path, "$")
 
 	if path == "" {
 		return nil

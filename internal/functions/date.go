@@ -475,10 +475,7 @@ func (dt *DateTime) handleDateArithmetic(mod string) (bool, error) {
 	if err != nil {
 		return false, nil
 	}
-	unit := parts[1]
-	if strings.HasSuffix(unit, "s") {
-		unit = unit[:len(unit)-1]
-	}
+	unit := strings.TrimSuffix(parts[1], "s")
 	return true, dt.add(amount, unit)
 }
 
