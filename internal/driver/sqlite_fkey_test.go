@@ -466,7 +466,6 @@ func TestForeignKey_DeferredConstraintViolation(t *testing.T) {
 // TestForeignKey_OnDeleteCascade tests CASCADE delete action.
 // Based on fkey2-11.* tests.
 func TestForeignKey_OnDeleteCascade(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -521,7 +520,6 @@ func TestForeignKey_OnDeleteCascade(t *testing.T) {
 // TestForeignKey_OnDeleteSetNull tests SET NULL delete action.
 // Based on fkey2-9.* tests.
 func TestForeignKey_OnDeleteSetNull(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -571,7 +569,6 @@ func TestForeignKey_OnDeleteSetNull(t *testing.T) {
 // TestForeignKey_OnUpdateCascade tests CASCADE update action.
 // Based on fkey2-11.* tests.
 func TestForeignKey_OnUpdateCascade(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -621,7 +618,6 @@ func TestForeignKey_OnUpdateCascade(t *testing.T) {
 // TestForeignKey_OnUpdateSetNull tests SET NULL update action.
 // Based on fkey3-2.* tests.
 func TestForeignKey_OnUpdateSetNull(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 

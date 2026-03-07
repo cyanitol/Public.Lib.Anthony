@@ -89,7 +89,9 @@ type tableInfo struct {
 
 // columnInfo represents column metadata
 type columnInfo struct {
-	Name string
+	Name            string
+	IsIntegerPK     bool // true if INTEGER PRIMARY KEY (rowid alias)
+	PayloadColIndex int  // index in payload (-1 if stored as rowid)
 }
 
 // getTable retrieves table metadata from the schema.
@@ -152,20 +154,49 @@ func (r *VDBERowReader) extractTableInfo(tableIface interface{}) (*tableInfo, er
 		Columns:  make([]columnInfo, 0),
 	}
 
-	// Extract column names
+	// Extract column info including INTEGER PRIMARY KEY detection
+	payloadIdx := 0
 	for _, colIface := range table.GetColumns() {
-		type columnWithName interface {
+		type columnWithInfo interface {
 			GetName() string
+			IsPrimaryKeyColumn() bool
+			GetType() string
 		}
 
-		col, ok := colIface.(columnWithName)
+		col, ok := colIface.(columnWithInfo)
 		if !ok {
+			// Fallback for minimal interface
+			type columnWithName interface {
+				GetName() string
+			}
+			if minCol, minOk := colIface.(columnWithName); minOk {
+				info.Columns = append(info.Columns, columnInfo{
+					Name:            minCol.GetName(),
+					IsIntegerPK:     false,
+					PayloadColIndex: payloadIdx,
+				})
+				payloadIdx++
+			}
 			continue
 		}
 
-		info.Columns = append(info.Columns, columnInfo{
-			Name: col.GetName(),
-		})
+		// Check if this is INTEGER PRIMARY KEY (rowid alias)
+		isIPK := col.IsPrimaryKeyColumn() && (col.GetType() == "INTEGER" || col.GetType() == "INT")
+
+		if isIPK {
+			info.Columns = append(info.Columns, columnInfo{
+				Name:            col.GetName(),
+				IsIntegerPK:     true,
+				PayloadColIndex: -1, // Not in payload, stored as rowid
+			})
+		} else {
+			info.Columns = append(info.Columns, columnInfo{
+				Name:            col.GetName(),
+				IsIntegerPK:     false,
+				PayloadColIndex: payloadIdx,
+			})
+			payloadIdx++
+		}
 	}
 
 	return info, nil
@@ -297,6 +328,8 @@ func (r *VDBERowReader) checkRowMatch(cursor *Cursor, table *tableInfo, columns 
 		return false, err
 	}
 
+	rowid := btCursor.GetKey()
+
 	// Parse the record and check column values
 	for i, colName := range columns {
 		colIdx := r.findColumnIndex(table, colName)
@@ -304,10 +337,17 @@ func (r *VDBERowReader) checkRowMatch(cursor *Cursor, table *tableInfo, columns 
 			return false, fmt.Errorf("column not found: %s", colName)
 		}
 
-		// Extract column value from payload
+		colInfo := table.Columns[colIdx]
 		colValue := NewMem()
-		if err := parseRecordColumn(payload, colIdx, colValue); err != nil {
-			return false, err
+
+		if colInfo.IsIntegerPK {
+			// INTEGER PRIMARY KEY is stored as rowid, not in payload
+			colValue.SetInt(rowid)
+		} else {
+			// Regular column: extract from payload using PayloadColIndex
+			if err := parseRecordColumn(payload, colInfo.PayloadColIndex, colValue); err != nil {
+				return false, err
+			}
 		}
 
 		// Compare with expected value
@@ -421,7 +461,7 @@ func (m *VDBERowModifier) UpdateRow(table string, rowid int64, values map[string
 		return err
 	}
 
-	currentValues, err := m.readRowValues(tableInfo, payload)
+	currentValues, err := m.readRowValues(tableInfo, payload, rowid)
 	if err != nil {
 		return err
 	}
@@ -436,7 +476,15 @@ func (m *VDBERowModifier) UpdateRow(table string, rowid int64, values map[string
 		return err
 	}
 
-	newPayload := encodeSimpleRecord(currentValues)
+	// Build payload excluding INTEGER PRIMARY KEY columns (they're stored as rowid)
+	payloadValues := make([]interface{}, 0, len(currentValues))
+	for i, col := range tableInfo.Columns {
+		if !col.IsIntegerPK {
+			payloadValues = append(payloadValues, currentValues[i])
+		}
+	}
+
+	newPayload := encodeSimpleRecord(payloadValues)
 	return btCursor.Insert(rowid, newPayload)
 }
 
@@ -466,14 +514,19 @@ func (m *VDBERowModifier) openWriteCursor(cursorNum int, rootPage uint32) (*btre
 }
 
 // readRowValues decodes all column values for a row payload.
-func (m *VDBERowModifier) readRowValues(table *tableInfo, payload []byte) ([]interface{}, error) {
+func (m *VDBERowModifier) readRowValues(table *tableInfo, payload []byte, rowid int64) ([]interface{}, error) {
 	values := make([]interface{}, len(table.Columns))
 	for i, col := range table.Columns {
-		mem := NewMem()
-		if err := parseRecordColumn(payload, i, mem); err != nil {
-			return nil, fmt.Errorf("read column %s: %w", col.Name, err)
+		if col.IsIntegerPK {
+			// INTEGER PRIMARY KEY is stored as rowid, not in payload
+			values[i] = rowid
+		} else {
+			mem := NewMem()
+			if err := parseRecordColumn(payload, col.PayloadColIndex, mem); err != nil {
+				return nil, fmt.Errorf("read column %s: %w", col.Name, err)
+			}
+			values[i] = memToInterface(mem)
 		}
-		values[i] = memToInterface(mem)
 	}
 	return values, nil
 }
