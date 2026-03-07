@@ -4,7 +4,7 @@ package expr_test
 import (
 	"fmt"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/expr"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 )
 
 // Example demonstrates creating and evaluating a simple arithmetic expression

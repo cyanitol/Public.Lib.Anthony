@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/observability"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/types"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/observability"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/types"
 )
 
 // Step executes the VDBE program until a result row is ready or the program halts.

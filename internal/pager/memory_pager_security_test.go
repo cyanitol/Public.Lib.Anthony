@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/security"
 )
 
 func TestMemoryPagerPageLimit(t *testing.T) {

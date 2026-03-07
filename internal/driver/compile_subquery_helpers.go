@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
 package driver
 
-import "github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
+import "github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 
 // registerExtractor is a function that extracts register indices from an instruction
 type registerExtractor func(*vdbe.Instruction) []int

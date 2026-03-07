@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vtab"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab"
 )
 
 // FTS5Module implements the FTS5 virtual table module.

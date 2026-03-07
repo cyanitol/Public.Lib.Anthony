@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/types"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/types"
 )
 
 // VdbeState represents the execution state of the VDBE.

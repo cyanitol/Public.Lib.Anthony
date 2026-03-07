@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/pager"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/pager"
 )
 
 // Database represents an attached database with its own schema.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vtab"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab"
 )
 
 // TestTokenizer tests the simple tokenizer.

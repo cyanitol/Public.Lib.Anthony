@@ -148,7 +148,7 @@ DETACH `my-schema`
 ## Testing
 To run the tests:
 ```bash
-cd /home/justin/Programming/Workspace/JuniperBible/Public.Lib.Anthony
+cd /home/justin/Programming/Workspace/cyanitol/Public.Lib.Anthony
 go test -v ./internal/parser -run TestParseAttach
 go test -v ./internal/parser -run TestParseDetach
 go test -v ./internal/parser -run TestParseAttachDetachCombined

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
 // TestParseLiteralValue tests parsing of literal values.

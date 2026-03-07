@@ -4,8 +4,8 @@ package builtin
 import (
 	"fmt"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vtab"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab"
 )
 
 // SQLiteMasterModule implements a virtual table module for sqlite_master.

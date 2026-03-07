@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
 // reservedNames contains SQLite reserved schema object names that should not be used.

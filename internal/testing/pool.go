@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	_ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver" // Register SQLite driver
+	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver" // Register SQLite driver
 )
 
 // testDBPool provides a pool of reusable in-memory database connections.

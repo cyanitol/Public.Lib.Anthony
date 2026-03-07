@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
 // TestConcurrentReads tests that multiple goroutines can safely read from the schema simultaneously.

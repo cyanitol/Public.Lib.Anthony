@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // StmtCacheEntry represents a cached prepared statement with its compiled VDBE.

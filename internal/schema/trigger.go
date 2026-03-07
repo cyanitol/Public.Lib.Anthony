@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
 // Trigger represents a database trigger definition.

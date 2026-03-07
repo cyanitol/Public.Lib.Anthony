@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/utf"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/utf"
 )
 
 // CollationFunc is a function type for custom collation comparison.

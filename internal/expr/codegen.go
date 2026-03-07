@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // binaryOpEntry holds the VDBE opcode and comment string for a binary operator.

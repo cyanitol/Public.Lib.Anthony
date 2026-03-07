@@ -52,7 +52,7 @@ Periodically, the WAL file is "checkpointed" - its contents are transferred back
 ```go
 import (
     "database/sql"
-    _ "github.com/JuniperBible/Public.Lib.Anthony"
+    _ "github.com/cyanitol/Public.Lib.Anthony"
 )
 
 db, err := sql.Open("sqlite_internal", "database.db")
@@ -265,7 +265,7 @@ import (
     "fmt"
     "log"
 
-    _ "github.com/JuniperBible/Public.Lib.Anthony"
+    _ "github.com/cyanitol/Public.Lib.Anthony"
 )
 
 func main() {

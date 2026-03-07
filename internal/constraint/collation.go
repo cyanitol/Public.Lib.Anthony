@@ -5,7 +5,7 @@
 package constraint
 
 import (
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/collation"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/collation"
 )
 
 // Re-export types from the collation package for backwards compatibility

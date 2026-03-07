@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/pager"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/pager"
 )
 
 // ExampleDefaultBusyHandler demonstrates using the default busy handler with exponential backoff.

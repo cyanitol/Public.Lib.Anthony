@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 )
 
 func TestPagerIntegration(t *testing.T) {

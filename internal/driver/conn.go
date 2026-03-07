@@ -7,15 +7,15 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/collation"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/constraint"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/functions"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/pager"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vtab"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/collation"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/constraint"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/pager"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/security"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab"
 )
 
 // Conn implements database/sql/driver.Conn for SQLite.

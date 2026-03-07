@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/pager"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/pager"
 )
 
 // DSN represents a parsed Data Source Name with all configuration options.

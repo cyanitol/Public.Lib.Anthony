@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 // ExampleParseDSN demonstrates how to parse DSN strings

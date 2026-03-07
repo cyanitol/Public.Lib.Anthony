@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // Schema represents the database schema containing tables and indexes.

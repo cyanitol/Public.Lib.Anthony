@@ -5,12 +5,12 @@ import (
 	"database/sql/driver"
 	"fmt"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/engine"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/expr"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/planner"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/engine"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/planner"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // ============================================================================

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/types"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/types"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // TriggerContext holds the context needed for trigger execution.

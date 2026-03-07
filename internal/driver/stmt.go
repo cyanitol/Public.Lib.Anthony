@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/expr"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/security"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // Stmt implements database/sql/driver.Stmt for SQLite.

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
 func main() {

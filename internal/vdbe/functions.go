@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/functions"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
 )
 
 // FunctionContext holds function execution state

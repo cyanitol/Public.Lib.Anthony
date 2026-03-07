@@ -4,7 +4,7 @@ package functions_test
 import (
 	"fmt"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/functions"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
 )
 
 // Example demonstrates basic usage of scalar functions

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 // TestRunnerBasicStatement tests basic statement execution

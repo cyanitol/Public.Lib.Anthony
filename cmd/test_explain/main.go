@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 func main() {

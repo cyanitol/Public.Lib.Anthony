@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 func main() {

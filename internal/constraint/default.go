@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
 // DefaultConstraint represents a DEFAULT value constraint for a column.

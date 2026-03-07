@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/sql"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/sql"
 )
 
 // ExampleMakeRecord demonstrates encoding values into SQLite record format

@@ -4,7 +4,7 @@ package planner
 import (
 	"fmt"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
 // CTEContext manages Common Table Expressions during query planning.

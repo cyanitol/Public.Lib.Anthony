@@ -4,7 +4,7 @@ package builtin
 import (
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vtab"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab"
 )
 
 // TestSQLiteMasterModule tests the sqlite_master virtual table module.

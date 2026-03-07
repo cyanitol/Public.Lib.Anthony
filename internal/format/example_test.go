@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/format"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/format"
 )
 
 // Example demonstrates creating a new SQLite database header.

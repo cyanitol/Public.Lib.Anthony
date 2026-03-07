@@ -3,7 +3,7 @@ package btree_test
 
 import (
 	"fmt"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 )
 
 // Example demonstrating basic integrity checking

@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/pager"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/pager"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/security"
 )
 
 // DriverConfig represents configuration options for the SQLite driver.

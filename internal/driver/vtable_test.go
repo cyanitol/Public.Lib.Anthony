@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vtab"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab"
 )
 
 var ctx = context.Background()

@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-Tri--License-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](#testing)
 
-A pure Go SQLite implementation for the JuniperBible project. This library provides a complete SQLite database engine written entirely in Go with no CGO dependencies, making it easy to cross-compile and deploy.
+A pure Go SQLite implementation for the cyanitol project. This library provides a complete SQLite database engine written entirely in Go with no CGO dependencies, making it easy to cross-compile and deploy.
 
 ## Features
 
@@ -29,7 +29,7 @@ A pure Go SQLite implementation for the JuniperBible project. This library provi
 ## Installation
 
 ```bash
-go get github.com/JuniperBible/Public.Lib.Anthony
+go get github.com/cyanitol/Public.Lib.Anthony
 ```
 
 **Requirements**: Go 1.26 or later
@@ -43,7 +43,7 @@ import (
     "database/sql"
     "log"
 
-    _ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+    _ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 func main() {
@@ -288,6 +288,6 @@ This implementation is inspired by SQLite's design and architecture. We are grat
 
 ## Links
 
-- **Repository**: [github.com/JuniperBible/Public.Lib.Anthony](https://github.com/JuniperBible/Public.Lib.Anthony)
+- **Repository**: [github.com/cyanitol/Public.Lib.Anthony](https://github.com/cyanitol/Public.Lib.Anthony)
 - **SQLite Documentation**: [sqlite.org/docs.html](https://www.sqlite.org/docs.html)
 - **Go database/sql**: [pkg.go.dev/database/sql](https://pkg.go.dev/database/sql)

@@ -1347,8 +1347,8 @@ import (
     "os"
     "path/filepath"
 
-    "github.com/JuniperBible/Public.Lib.Anthony/internal/tclparse"
-    "github.com/JuniperBible/Public.Lib.Anthony/internal/codegen"
+    "github.com/cyanitol/Public.Lib.Anthony/internal/tclparse"
+    "github.com/cyanitol/Public.Lib.Anthony/internal/codegen"
 )
 
 func main() {

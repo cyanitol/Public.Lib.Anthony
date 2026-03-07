@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // compileCompoundSelect compiles a compound SELECT (UNION, UNION ALL, INTERSECT, EXCEPT).

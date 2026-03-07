@@ -4,7 +4,7 @@ package planner_test
 import (
 	"fmt"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/planner"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/planner"
 )
 
 // Example demonstrates basic query planning

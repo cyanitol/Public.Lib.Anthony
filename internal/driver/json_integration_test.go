@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	_ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 // TestJSONFunctionsIntegration tests JSON functions via SQL queries

@@ -4,8 +4,8 @@ package constraint
 import (
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 )
 
 // createTestTablePK creates a test table with the given schema (simplified without btree initialization).

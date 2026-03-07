@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/observability"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/observability"
 )
 
 // ExampleNewLogger demonstrates creating a custom logger.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 )
 
 // createTestTable creates a test table with various column configurations

@@ -43,7 +43,7 @@ Anthony is a pure Go implementation of SQLite that provides full compatibility w
 Install Anthony using Go modules:
 
 ```bash
-go get github.com/JuniperBible/Public.Lib.Anthony
+go get github.com/cyanitol/Public.Lib.Anthony
 ```
 
 **Requirements:** Go 1.26 or later
@@ -51,7 +51,7 @@ go get github.com/JuniperBible/Public.Lib.Anthony
 **Verify Installation:**
 
 ```bash
-go list -m github.com/JuniperBible/Public.Lib.Anthony
+go list -m github.com/cyanitol/Public.Lib.Anthony
 ```
 
 ## Quick Start
@@ -66,7 +66,7 @@ import (
     "fmt"
     "log"
 
-    _ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+    _ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 func main() {
@@ -1223,7 +1223,7 @@ db.Exec("CREATE INDEX ...")
 
 - **SQLite Documentation:** https://www.sqlite.org/docs.html
 - **Go database/sql:** https://pkg.go.dev/database/sql
-- **Repository:** https://github.com/JuniperBible/Public.Lib.Anthony
+- **Repository:** https://github.com/cyanitol/Public.Lib.Anthony
 
 ## License
 

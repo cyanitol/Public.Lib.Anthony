@@ -36,7 +36,7 @@ Anthony is perfect for:
 Install Anthony using `go get`:
 
 ```bash
-go get github.com/JuniperBible/Public.Lib.Anthony
+go get github.com/cyanitol/Public.Lib.Anthony
 ```
 
 **Requirements:**
@@ -55,7 +55,7 @@ import (
     "fmt"
     "log"
 
-    _ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+    _ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 func main() {
@@ -123,7 +123,7 @@ Open or create a database file on disk:
 ```go
 import (
     "database/sql"
-    _ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+    _ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 // Basic file database

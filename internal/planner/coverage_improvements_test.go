@@ -4,7 +4,7 @@ package planner
 import (
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
 // Tests for CTE expression handling functions

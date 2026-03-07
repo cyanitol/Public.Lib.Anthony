@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 )
 
 // ExplainNode represents a node in the query plan tree.

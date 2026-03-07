@@ -5,7 +5,7 @@ package constraint
 import (
 	"fmt"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 )
 
 // NotNullConstraint represents a NOT NULL constraint validator.

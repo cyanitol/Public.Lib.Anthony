@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/constraint"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/constraint"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // Example_checkConstraintValidation demonstrates how to use CHECK constraint validation

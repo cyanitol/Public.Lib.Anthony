@@ -4,7 +4,7 @@ package utf_test
 import (
 	"fmt"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/utf"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/utf"
 )
 
 // Example demonstrates UTF-8 encoding and decoding

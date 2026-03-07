@@ -4,7 +4,7 @@ package vdbe
 import (
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 )
 
 func TestBtreeCursorBasic(t *testing.T) {

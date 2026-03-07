@@ -6,8 +6,8 @@ package constraint
 import (
 	"fmt"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 )
 
 // CheckConstraint represents a CHECK constraint with its expression and metadata.

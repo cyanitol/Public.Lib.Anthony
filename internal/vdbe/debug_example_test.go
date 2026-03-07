@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/observability"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/observability"
 )
 
 // example_debugMode demonstrates using VDBE debug mode with instruction tracing.

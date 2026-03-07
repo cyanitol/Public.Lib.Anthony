@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
 // Example demonstrates basic usage of the SQL parser.

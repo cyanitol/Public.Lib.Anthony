@@ -1342,7 +1342,7 @@ COMMIT;
 ### Parser API
 
 ```go
-import "github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+import "github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 
 // Parse a SQL statement
 p := parser.NewParser(sql)

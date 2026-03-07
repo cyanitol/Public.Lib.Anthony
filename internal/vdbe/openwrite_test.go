@@ -4,7 +4,7 @@ package vdbe
 import (
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 )
 
 // TestOpenWriteCreatesWritableCursor tests that OpenWrite creates a cursor with Writable=true

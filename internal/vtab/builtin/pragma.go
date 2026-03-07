@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vtab"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab"
 )
 
 // PragmaModule implements virtual table modules for various PRAGMA tables.

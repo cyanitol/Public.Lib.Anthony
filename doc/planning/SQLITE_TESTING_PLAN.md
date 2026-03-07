@@ -1877,7 +1877,7 @@ jobs:
 ```dockerfile
 # projects/anthony/Dockerfile
 FROM gcr.io/oss-fuzz-base/base-builder-go
-RUN git clone https://github.com/JuniperBible/Public.Lib.Anthony anthony
+RUN git clone https://github.com/cyanitol/Public.Lib.Anthony anthony
 WORKDIR anthony
 COPY build.sh $SRC/
 ```
@@ -1889,9 +1889,9 @@ COPY build.sh $SRC/
 go get github.com/AdamKorcz/go-118-fuzz-build/testing
 
 # Compile fuzzers
-compile_go_fuzzer github.com/JuniperBible/Public.Lib.Anthony/internal/parser FuzzParser fuzz_parser
-compile_go_fuzzer github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe FuzzRecordDecoder fuzz_record
-compile_go_fuzzer github.com/JuniperBible/Public.Lib.Anthony/internal/pager FuzzDatabaseFile fuzz_database
+compile_go_fuzzer github.com/cyanitol/Public.Lib.Anthony/internal/parser FuzzParser fuzz_parser
+compile_go_fuzzer github.com/cyanitol/Public.Lib.Anthony/internal/vdbe FuzzRecordDecoder fuzz_record
+compile_go_fuzzer github.com/cyanitol/Public.Lib.Anthony/internal/pager FuzzDatabaseFile fuzz_database
 ```
 
 ### 7.3 Nightly Test Runs

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vtab"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab"
 )
 
 // RTreeModule implements the R-Tree virtual table module for spatial indexing.

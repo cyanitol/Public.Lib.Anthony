@@ -626,7 +626,7 @@ The `internal/testing` package provides helper functions for efficient database 
 ```go
 import (
     "testing"
-    testutil "github.com/JuniperBible/Public.Lib.Anthony/internal/testing"
+    testutil "github.com/cyanitol/Public.Lib.Anthony/internal/testing"
 )
 
 func TestDatabaseOperation(t *testing.T) {
@@ -1080,7 +1080,7 @@ go test -timeout=5m ./...
 
 4. **Use Connection Pooling** for database tests:
    ```go
-   import testutil "github.com/JuniperBible/Public.Lib.Anthony/internal/testing"
+   import testutil "github.com/cyanitol/Public.Lib.Anthony/internal/testing"
 
    func TestDatabaseFeature(t *testing.T) {
        t.Parallel()

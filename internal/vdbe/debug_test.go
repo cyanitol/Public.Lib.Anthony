@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/observability"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/observability"
 )
 
 // TestDebugModeOff verifies that debug mode is off by default.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/observability"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/observability"
 )
 
 // DebugMode controls VDBE debugging features.

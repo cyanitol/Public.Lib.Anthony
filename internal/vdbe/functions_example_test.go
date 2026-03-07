@@ -4,7 +4,7 @@ package vdbe_test
 import (
 	"fmt"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // ExampleVDBE_scalarFunctions demonstrates executing scalar functions

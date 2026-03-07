@@ -311,8 +311,8 @@ import (
     "fmt"
     "log"
 
-    _ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
-    "github.com/JuniperBible/Public.Lib.Anthony/internal/testing/slt"
+    _ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
+    "github.com/cyanitol/Public.Lib.Anthony/internal/testing/slt"
 )
 
 func main() {

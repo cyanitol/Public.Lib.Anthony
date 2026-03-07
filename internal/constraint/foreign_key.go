@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 )
 
 // ForeignKeyAction defines the action to take on DELETE/UPDATE.

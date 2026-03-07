@@ -4,9 +4,9 @@ package engine
 import (
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // TestTriggerExecuteBeforeWithWhenError tests ExecuteBeforeTriggers when WHEN clause errors

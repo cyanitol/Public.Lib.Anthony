@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/functions"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
 )
 
 // Example user-defined scalar function: double

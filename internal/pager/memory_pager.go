@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/security"
 )
 
 // MemoryPager implements a fully in-memory pager that stores pages in a map.

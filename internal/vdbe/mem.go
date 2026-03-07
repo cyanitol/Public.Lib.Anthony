@@ -6,7 +6,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/collation"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/collation"
 )
 
 // MemFlags represents the type and state flags for a Mem structure.

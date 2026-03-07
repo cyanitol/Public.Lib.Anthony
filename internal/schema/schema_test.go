@@ -4,7 +4,7 @@ package schema
 import (
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
 func TestNewSchema(t *testing.T) {

@@ -81,7 +81,7 @@ package main
 
 import (
     "database/sql"
-    _ "github.com/JuniperBible/Public.Lib.Anthony"
+    _ "github.com/cyanitol/Public.Lib.Anthony"
 )
 
 func main() {

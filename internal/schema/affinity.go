@@ -4,7 +4,7 @@ package schema
 import (
 	"strings"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/expr"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 )
 
 // Affinity represents SQLite type affinity.

@@ -4,7 +4,7 @@ package schema
 import (
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/expr"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 )
 
 func TestDetermineAffinity(t *testing.T) {

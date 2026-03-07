@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/security"
 )
 
 // CellInfo contains parsed information about a B-tree cell

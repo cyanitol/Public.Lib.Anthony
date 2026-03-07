@@ -108,7 +108,7 @@ g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
 g.vdbe.SetComment(g.vdbe.NumOps()-1, "IN subquery: TODO - compile SELECT statement")
 
 // Use:
-import "github.com/JuniperBible/Public.Lib.Anthony/internal/sql"
+import "github.com/cyanitol/Public.Lib.Anthony/internal/sql"
 
 selectCompiler := sql.NewSelectCompiler(parse)
 dest := &sql.SelectDest{

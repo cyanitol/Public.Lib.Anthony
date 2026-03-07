@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/engine"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/engine"
 )
 
 // Example_basic demonstrates basic database operations.

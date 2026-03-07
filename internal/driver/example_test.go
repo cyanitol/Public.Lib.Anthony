@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 
-	_ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 // ExampleDriver demonstrates basic usage of the SQLite driver.

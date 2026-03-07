@@ -4,7 +4,7 @@ package vdbe
 import (
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/functions"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
 )
 
 // TestScalarFunctions tests scalar function execution

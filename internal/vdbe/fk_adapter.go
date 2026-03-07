@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/btree"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 )
 
 // VDBERowReader implements the constraint.RowReader interface for foreign key validation.

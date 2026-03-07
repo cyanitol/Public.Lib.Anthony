@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/security"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/security"
 )
 
 // keywordsAsIdentifiers lists keywords that can also be used as identifiers (column/table names)

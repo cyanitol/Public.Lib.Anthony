@@ -3,7 +3,7 @@
 //
 // Import this package to register the "sqlite_internal" driver with database/sql:
 //
-//	import _ "github.com/JuniperBible/Public.Lib.Anthony"
+//	import _ "github.com/cyanitol/Public.Lib.Anthony"
 //
 // Then open a database:
 //
@@ -17,7 +17,7 @@ package anthony
 import (
 	"database/sql"
 
-	_ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver" // Register driver
+	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver" // Register driver
 )
 
 // DriverName is the name registered with database/sql.

@@ -4,8 +4,8 @@ package engine
 import (
 	"testing"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/parser"
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 )
 
 // TestCompileSelectNoFromAllPaths tests all code paths in compileSelectNoFrom

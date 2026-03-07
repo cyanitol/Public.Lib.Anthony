@@ -22,12 +22,12 @@ Anthony is a pure Go implementation of SQLite that provides full compatibility w
 
 **Driver Name:** `sqlite_internal`
 
-**Import Path:** `github.com/JuniperBible/Public.Lib.Anthony`
+**Import Path:** `github.com/cyanitol/Public.Lib.Anthony`
 
 ## Installation
 
 ```bash
-go get github.com/JuniperBible/Public.Lib.Anthony
+go get github.com/cyanitol/Public.Lib.Anthony
 ```
 
 ## Database/SQL Compatibility
@@ -61,7 +61,7 @@ Anthony supports these optional `database/sql` interfaces:
 import (
     "database/sql"
 
-    _ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+    _ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 func main() {
@@ -83,7 +83,7 @@ func main() {
 
 ```go
 import (
-    "github.com/JuniperBible/Public.Lib.Anthony"
+    "github.com/cyanitol/Public.Lib.Anthony"
 )
 
 func main() {
@@ -756,7 +756,7 @@ See [VACUUM Usage](VACUUM_USAGE.md) for details.
 ```go
 import (
     "database/sql"
-    _ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+    _ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 func main() {
@@ -885,7 +885,7 @@ import (
     "fmt"
     "log"
 
-    _ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+    _ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 func main() {
@@ -957,8 +957,8 @@ Anthony allows registering custom SQL functions that can be used in queries.
 
 ```go
 import (
-    "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
-    "github.com/JuniperBible/Public.Lib.Anthony/internal/functions"
+    "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
+    "github.com/cyanitol/Public.Lib.Anthony/internal/functions"
 )
 
 // Define a custom function
@@ -1126,7 +1126,7 @@ By default, Anthony enables:
 ### Security Config Structure
 
 ```go
-import "github.com/JuniperBible/Public.Lib.Anthony/internal/security"
+import "github.com/cyanitol/Public.Lib.Anthony/internal/security"
 
 type SecurityConfig struct {
     // DatabaseRoot: Root directory for database files (sandbox)

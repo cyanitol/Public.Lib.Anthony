@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/JuniperBible/Public.Lib.Anthony/internal/vdbe"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // Result represents the result of executing a SQL statement.

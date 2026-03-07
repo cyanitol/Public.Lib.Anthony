@@ -88,7 +88,7 @@ if errors.Is(err, driver.ErrBadConn) {
 Security errors are defined in `internal/security/errors.go`:
 
 ```go
-import "github.com/JuniperBible/Public.Lib.Anthony/internal/security"
+import "github.com/cyanitol/Public.Lib.Anthony/internal/security"
 
 var (
     // Path security errors
@@ -358,7 +358,7 @@ db, err := sql.Open("sqlite_internal", path)
 **Solution:** Use validated paths only
 
 ```go
-import "github.com/JuniperBible/Public.Lib.Anthony/internal/security"
+import "github.com/cyanitol/Public.Lib.Anthony/internal/security"
 
 // Validate path before use
 validPath, err := security.ValidatePath(userPath, config)
@@ -379,7 +379,7 @@ package main
 import (
     "database/sql"
     "log"
-    _ "github.com/JuniperBible/Public.Lib.Anthony/internal/driver"
+    _ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 func main() {
@@ -1203,7 +1203,7 @@ func getUserByEmail(db *sql.DB, email string) (*User, error) {
 ### 9. Log Security Events
 
 ```go
-import "github.com/JuniperBible/Public.Lib.Anthony/internal/security"
+import "github.com/cyanitol/Public.Lib.Anthony/internal/security"
 
 // Monitor security violations
 _, err := db.Exec("ATTACH DATABASE ? AS backup", userPath)
