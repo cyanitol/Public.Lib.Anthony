@@ -8,15 +8,43 @@ import (
 	"testing"
 )
 
+// verifyType defines the type of verification to perform
+type verifyType int
+
+const (
+	verifyNone verifyType = iota
+	verifySingleInt
+	verifyCount
+	verifyString
+	verifyCustomSQL
+	verifyUpdateConflict
+	verifyUpdateReplace
+	verifyUpdateIgnore
+	verifyManyIgnores
+	verifyManyReplaces
+	verifyMultipleChecks
+)
+
 // conflictTestCase defines a single conflict test scenario
 type conflictTestCase struct {
 	name    string
 	setup   []string // CREATE TABLE statements and other setup
 	stmts   []string // Statements to execute
-	verify  func(*testing.T, *sql.DB)
 	wantErr bool
 	errMsg  string
 	skip    string
+
+	// Declarative verification
+	verifyType    verifyType
+	verifyQuery   string
+	verifyExpect  interface{} // int, string, or []interface{} for multiple values
+	verifyQueries []verifyQuery
+}
+
+// verifyQuery defines a single query verification
+type verifyQuery struct {
+	query  string
+	expect interface{}
 }
 
 // TestSQLiteConflict is a comprehensive test suite converted from SQLite's TCL conflict tests
@@ -68,9 +96,7 @@ func runConflictTest(t *testing.T, tt conflictTestCase) {
 	checkConflictError(t, lastErr, tt.wantErr, tt.errMsg)
 
 	// Verify
-	if tt.verify != nil {
-		tt.verify(t, db)
-	}
+	runVerification(t, db, tt)
 }
 
 // executeConflictSetup runs setup SQL statements for conflict tests
@@ -140,16 +166,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(1,2,3)",
 				"INSERT OR IGNORE INTO t1 VALUES(1,2,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var c int
-				err := db.QueryRow("SELECT c FROM t1").Scan(&c)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if c != 3 {
-					t.Errorf("Expected c=3, got c=%d", c)
-				}
-			},
+			verifyType:   verifySingleInt,
+			verifyQuery:  "SELECT c FROM t1",
+			verifyExpect: 3,
 		},
 
 		{
@@ -161,16 +180,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(1,2,3)",
 				"INSERT OR REPLACE INTO t1 VALUES(1,2,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var c int
-				err := db.QueryRow("SELECT c FROM t1").Scan(&c)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if c != 4 {
-					t.Errorf("Expected c=4, got c=%d", c)
-				}
-			},
+			verifyType:   verifySingleInt,
+			verifyQuery:  "SELECT c FROM t1",
+			verifyExpect: 4,
 		},
 
 		{
@@ -182,16 +194,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(1,2,3)",
 				"REPLACE INTO t1 VALUES(1,2,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var c int
-				err := db.QueryRow("SELECT c FROM t1").Scan(&c)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if c != 4 {
-					t.Errorf("Expected c=4, got c=%d", c)
-				}
-			},
+			verifyType:   verifySingleInt,
+			verifyQuery:  "SELECT c FROM t1",
+			verifyExpect: 4,
 		},
 
 		{
@@ -238,19 +243,11 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t2 VALUES(1)",
 				"INSERT OR ROLLBACK INTO t1 VALUES(1,2,4)",
 			},
-			wantErr: true,
-			errMsg:  "UNIQUE constraint failed",
-			verify: func(t *testing.T, db *sql.DB) {
-				// Transaction should be rolled back, so t2 should be empty
-				var count int
-				err := db.QueryRow("SELECT COUNT(*) FROM t2").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if count != 0 {
-					t.Errorf("Expected t2 to be empty after ROLLBACK, got %d rows", count)
-				}
-			},
+			wantErr:      true,
+			errMsg:       "UNIQUE constraint failed",
+			verifyType:   verifyCount,
+			verifyQuery:  "SELECT COUNT(*) FROM t2",
+			verifyExpect: 0,
 		},
 
 		// ===== PRIMARY KEY CONFLICTS (from conflict.test) =====
@@ -280,16 +277,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(1,2,3)",
 				"INSERT OR IGNORE INTO t1 VALUES(1,2,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var c int
-				err := db.QueryRow("SELECT c FROM t1 WHERE a=1").Scan(&c)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if c != 3 {
-					t.Errorf("Expected c=3, got c=%d", c)
-				}
-			},
+			verifyType:   verifySingleInt,
+			verifyQuery:  "SELECT c FROM t1 WHERE a=1",
+			verifyExpect: 3,
 		},
 
 		{
@@ -301,16 +291,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(1,2,3)",
 				"INSERT OR REPLACE INTO t1 VALUES(1,2,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var c int
-				err := db.QueryRow("SELECT c FROM t1 WHERE a=1").Scan(&c)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if c != 4 {
-					t.Errorf("Expected c=4, got c=%d", c)
-				}
-			},
+			verifyType:   verifySingleInt,
+			verifyQuery:  "SELECT c FROM t1 WHERE a=1",
+			verifyExpect: 4,
 		},
 
 		// ===== ON CONFLICT clause in CREATE TABLE (from conflict.test) =====
@@ -340,16 +323,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(1,2,3)",
 				"INSERT INTO t1 VALUES(1,2,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var c int
-				err := db.QueryRow("SELECT c FROM t1").Scan(&c)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if c != 4 {
-					t.Errorf("Expected c=4, got c=%d", c)
-				}
-			},
+			verifyType:   verifySingleInt,
+			verifyQuery:  "SELECT c FROM t1",
+			verifyExpect: 4,
 		},
 
 		{
@@ -361,16 +337,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(1,2,3)",
 				"INSERT INTO t1 VALUES(1,2,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var c int
-				err := db.QueryRow("SELECT c FROM t1").Scan(&c)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if c != 3 {
-					t.Errorf("Expected c=3, got c=%d", c)
-				}
-			},
+			verifyType:   verifySingleInt,
+			verifyQuery:  "SELECT c FROM t1",
+			verifyExpect: 3,
 		},
 
 		{
@@ -382,17 +351,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(1,2,3)",
 				"INSERT OR IGNORE INTO t1 VALUES(1,2,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var c int
-				err := db.QueryRow("SELECT c FROM t1").Scan(&c)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				// IGNORE overrides REPLACE
-				if c != 3 {
-					t.Errorf("Expected c=3 (IGNORE overrides), got c=%d", c)
-				}
-			},
+			verifyType:   verifySingleInt,
+			verifyQuery:  "SELECT c FROM t1",
+			verifyExpect: 3,
 		},
 
 		{
@@ -404,17 +365,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(1,2,3)",
 				"INSERT OR REPLACE INTO t1 VALUES(1,2,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var c int
-				err := db.QueryRow("SELECT c FROM t1").Scan(&c)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				// REPLACE overrides IGNORE
-				if c != 4 {
-					t.Errorf("Expected c=4 (REPLACE overrides), got c=%d", c)
-				}
-			},
+			verifyType:   verifySingleInt,
+			verifyQuery:  "SELECT c FROM t1",
+			verifyExpect: 4,
 		},
 
 		// ===== NOT NULL CONFLICTS (from conflict.test) =====
@@ -442,16 +395,9 @@ func conflictTestCases() []conflictTestCase {
 			stmts: []string{
 				"INSERT INTO t1 VALUES(1,2,NULL)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var c int
-				err := db.QueryRow("SELECT c FROM t1").Scan(&c)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if c != 5 {
-					t.Errorf("Expected c=5 (default), got c=%d", c)
-				}
-			},
+			verifyType:   verifySingleInt,
+			verifyQuery:  "SELECT c FROM t1",
+			verifyExpect: 5,
 		},
 
 		{
@@ -462,16 +408,9 @@ func conflictTestCases() []conflictTestCase {
 			stmts: []string{
 				"INSERT INTO t1 VALUES(1,2,NULL)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var count int
-				err := db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if count != 0 {
-					t.Errorf("Expected 0 rows (IGNORE), got %d", count)
-				}
-			},
+			verifyType:   verifyCount,
+			verifyQuery:  "SELECT COUNT(*) FROM t1",
+			verifyExpect: 0,
 		},
 
 		// ===== UPDATE CONFLICTS (from conflict.test) =====
@@ -487,29 +426,7 @@ func conflictTestCases() []conflictTestCase {
 				"CREATE TABLE t3(x)",
 				"INSERT INTO t3 VALUES(1)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				// Create t1 and try UPDATE
-				_, err := db.Exec("CREATE TABLE IF NOT EXISTS t1(a,b,c, UNIQUE(a))")
-				if err != nil {
-					t.Fatalf("CREATE TABLE failed: %v", err)
-				}
-				_, err = db.Exec("INSERT INTO t1 SELECT * FROM t2")
-				if err != nil {
-					t.Fatalf("INSERT failed: %v", err)
-				}
-				_, err = db.Exec("BEGIN")
-				if err != nil {
-					t.Fatalf("BEGIN failed: %v", err)
-				}
-				_, err = db.Exec("UPDATE t1 SET b=b*2")
-				if err != nil {
-					t.Fatalf("UPDATE failed: %v", err)
-				}
-				_, err = db.Exec("UPDATE t1 SET a=c+5")
-				if err == nil {
-					t.Error("Expected UNIQUE constraint error, got nil")
-				}
-			},
+			verifyType: verifyUpdateConflict,
 		},
 
 		{
@@ -521,29 +438,7 @@ func conflictTestCases() []conflictTestCase {
 			stmts: []string{
 				"INSERT INTO t2 VALUES(1,2,1), (2,3,2), (3,4,1), (4,5,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				_, err := db.Exec("INSERT INTO t1 SELECT * FROM t2")
-				if err != nil {
-					t.Fatalf("INSERT failed: %v", err)
-				}
-				_, err = db.Exec("UPDATE t1 SET b=b*2")
-				if err != nil {
-					t.Fatalf("UPDATE failed: %v", err)
-				}
-				_, err = db.Exec("UPDATE t1 SET a=c+5")
-				if err != nil {
-					t.Fatalf("UPDATE failed: %v", err)
-				}
-				// Some rows should be replaced
-				var count int
-				err = db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if count != 3 {
-					t.Errorf("Expected 3 rows after REPLACE, got %d", count)
-				}
-			},
+			verifyType: verifyUpdateReplace,
 		},
 
 		{
@@ -555,29 +450,7 @@ func conflictTestCases() []conflictTestCase {
 			stmts: []string{
 				"INSERT INTO t2 VALUES(1,2,1), (2,3,2), (3,4,1), (4,5,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				_, err := db.Exec("INSERT INTO t1 SELECT * FROM t2")
-				if err != nil {
-					t.Fatalf("INSERT failed: %v", err)
-				}
-				_, err = db.Exec("UPDATE t1 SET b=b*2")
-				if err != nil {
-					t.Fatalf("UPDATE failed: %v", err)
-				}
-				_, err = db.Exec("UPDATE t1 SET a=c+5")
-				if err != nil {
-					t.Fatalf("UPDATE failed: %v", err)
-				}
-				// All 4 rows should remain
-				var count int
-				err = db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if count != 4 {
-					t.Errorf("Expected 4 rows with IGNORE, got %d", count)
-				}
-			},
+			verifyType: verifyUpdateIgnore,
 		},
 
 		// ===== MULTIPLE IGNORES (from conflict.test) =====
@@ -587,39 +460,8 @@ func conflictTestCases() []conflictTestCase {
 			setup: []string{
 				"CREATE TABLE t1(a UNIQUE, b)",
 			},
-			stmts: func() []string {
-				stmts := []string{}
-				for i := 1; i <= 50; i++ {
-					stmts = append(stmts, "INSERT INTO t1 VALUES(?, ?)")
-				}
-				return stmts
-			}(),
-			verify: func(t *testing.T, db *sql.DB) {
-				// Insert 50 rows
-				for i := 1; i <= 50; i++ {
-					_, err := db.Exec("INSERT INTO t1 VALUES(?, ?)", i, i+1)
-					if err != nil {
-						t.Fatalf("INSERT failed: %v", err)
-					}
-				}
-				// UPDATE OR IGNORE - should update only first row
-				res, err := db.Exec("UPDATE OR IGNORE t1 SET a=1000")
-				if err != nil {
-					t.Fatalf("UPDATE failed: %v", err)
-				}
-				affected, _ := res.RowsAffected()
-				if affected != 1 {
-					t.Errorf("Expected 1 row affected, got %d", affected)
-				}
-				var count int
-				err = db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if count != 50 {
-					t.Errorf("Expected 50 rows, got %d", count)
-				}
-			},
+			stmts:      []string{},
+			verifyType: verifyManyIgnores,
 		},
 
 		{
@@ -627,29 +469,8 @@ func conflictTestCases() []conflictTestCase {
 			setup: []string{
 				"CREATE TABLE t1(a UNIQUE, b)",
 			},
-			stmts: []string{},
-			verify: func(t *testing.T, db *sql.DB) {
-				// Insert 50 rows
-				for i := 1; i <= 50; i++ {
-					_, err := db.Exec("INSERT INTO t1 VALUES(?, ?)", i, i+1)
-					if err != nil {
-						t.Fatalf("INSERT failed: %v", err)
-					}
-				}
-				// UPDATE OR REPLACE - should replace all
-				_, err := db.Exec("UPDATE OR REPLACE t1 SET a=1001")
-				if err != nil {
-					t.Fatalf("UPDATE failed: %v", err)
-				}
-				var count int
-				err = db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if count != 1 {
-					t.Errorf("Expected 1 row after REPLACE, got %d", count)
-				}
-			},
+			stmts:      []string{},
+			verifyType: verifyManyReplaces,
 		},
 
 		// ===== MULTIPLE CONSTRAINTS (from conflict3.test) =====
@@ -662,16 +483,9 @@ func conflictTestCases() []conflictTestCase {
 			stmts: []string{
 				"INSERT INTO t1(a,b,c) VALUES(1,2,3), (2,3,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var count int
-				err := db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if count != 2 {
-					t.Errorf("Expected 2 rows, got %d", count)
-				}
-			},
+			verifyType:   verifyCount,
+			verifyQuery:  "SELECT COUNT(*) FROM t1",
+			verifyExpect: 2,
 		},
 
 		{
@@ -683,17 +497,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1(a,b,c) VALUES(1,2,3), (2,3,4)",
 				"INSERT INTO t1(a,b,c) VALUES(3,2,5)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var count int
-				err := db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				// Should be ignored
-				if count != 2 {
-					t.Errorf("Expected 2 rows (insert ignored), got %d", count)
-				}
-			},
+			verifyType:   verifyCount,
+			verifyQuery:  "SELECT COUNT(*) FROM t1",
+			verifyExpect: 2,
 		},
 
 		{
@@ -705,19 +511,11 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1(a,b,c) VALUES(1,2,3), (2,3,4)",
 				"INSERT INTO t1(a,b,c) VALUES(4,5,6), (5,6,4)",
 			},
-			wantErr: true,
-			errMsg:  "UNIQUE constraint failed",
-			verify: func(t *testing.T, db *sql.DB) {
-				// First insert should have succeeded
-				var count int
-				err := db.QueryRow("SELECT COUNT(*) FROM t1 WHERE a=4").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if count != 1 {
-					t.Errorf("Expected first insert to succeed, got %d rows with a=4", count)
-				}
-			},
+			wantErr:      true,
+			errMsg:       "UNIQUE constraint failed",
+			verifyType:   verifyCount,
+			verifyQuery:  "SELECT COUNT(*) FROM t1 WHERE a=4",
+			verifyExpect: 1,
 		},
 
 		// ===== WITHOUT ROWID TESTS (from conflict2.test) =====
@@ -747,16 +545,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(1,2,3)",
 				"INSERT OR IGNORE INTO t1 VALUES(1,2,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var c int
-				err := db.QueryRow("SELECT c FROM t1").Scan(&c)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if c != 3 {
-					t.Errorf("Expected c=3, got c=%d", c)
-				}
-			},
+			verifyType:   verifySingleInt,
+			verifyQuery:  "SELECT c FROM t1",
+			verifyExpect: 3,
 		},
 
 		{
@@ -768,16 +559,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(1,2,3)",
 				"INSERT OR REPLACE INTO t1 VALUES(1,2,4)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var c int
-				err := db.QueryRow("SELECT c FROM t1").Scan(&c)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if c != 4 {
-					t.Errorf("Expected c=4, got c=%d", c)
-				}
-			},
+			verifyType:   verifySingleInt,
+			verifyQuery:  "SELECT c FROM t1",
+			verifyExpect: 4,
 		},
 
 		// ===== COMPLEX SCENARIOS =====
@@ -791,16 +575,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t2 VALUES(1,1,1,1,1)",
 				"INSERT INTO t2 VALUES(2,2,2,2,2)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var count int
-				err := db.QueryRow("SELECT COUNT(*) FROM t2").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if count != 2 {
-					t.Errorf("Expected 2 rows, got %d", count)
-				}
-			},
+			verifyType:   verifyCount,
+			verifyQuery:  "SELECT COUNT(*) FROM t2",
+			verifyExpect: 2,
 		},
 
 		{
@@ -813,17 +590,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t2 VALUES(2,2,2,2,2)",
 				"INSERT INTO t2 VALUES(1,3,3,3,3)",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var count int
-				err := db.QueryRow("SELECT COUNT(*) FROM t2").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				// Third insert should be ignored
-				if count != 2 {
-					t.Errorf("Expected 2 rows (ignored), got %d", count)
-				}
-			},
+			verifyType:   verifyCount,
+			verifyQuery:  "SELECT COUNT(*) FROM t2",
+			verifyExpect: 2,
 		},
 
 		{
@@ -884,23 +653,10 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(3, 'third')",
 				"REPLACE INTO t1 VALUES(1, 'replaced')",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var b string
-				err := db.QueryRow("SELECT b FROM t1 WHERE a=1").Scan(&b)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if b != "replaced" {
-					t.Errorf("Expected b='replaced', got b=%q", b)
-				}
-				var count int
-				err = db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if count != 3 {
-					t.Errorf("Expected 3 rows, got %d", count)
-				}
+			verifyType: verifyMultipleChecks,
+			verifyQueries: []verifyQuery{
+				{query: "SELECT b FROM t1 WHERE a=1", expect: "replaced"},
+				{query: "SELECT COUNT(*) FROM t1", expect: 3},
 			},
 		},
 
@@ -913,16 +669,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(1, 'first')",
 				"INSERT OR IGNORE INTO t1 VALUES(2, 'second')",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var count int
-				err := db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				if count != 2 {
-					t.Errorf("Expected 2 rows, got %d", count)
-				}
-			},
+			verifyType:   verifyCount,
+			verifyQuery:  "SELECT COUNT(*) FROM t1",
+			verifyExpect: 2,
 		},
 
 		{
@@ -936,17 +685,9 @@ func conflictTestCases() []conflictTestCase {
 				"INSERT INTO t1 VALUES(NULL, 'second')",
 				"INSERT INTO t1 VALUES(1, 'third')",
 			},
-			verify: func(t *testing.T, db *sql.DB) {
-				var count int
-				err := db.QueryRow("SELECT COUNT(*) FROM t1 WHERE a IS NULL").Scan(&count)
-				if err != nil {
-					t.Fatalf("Query failed: %v", err)
-				}
-				// NULL values don't conflict with each other
-				if count != 2 {
-					t.Errorf("Expected 2 NULL rows, got %d", count)
-				}
-			},
+			verifyType:   verifyCount,
+			verifyQuery:  "SELECT COUNT(*) FROM t1 WHERE a IS NULL",
+			verifyExpect: 2,
 		},
 	}
 }
@@ -954,4 +695,182 @@ func conflictTestCases() []conflictTestCase {
 func containsConflict(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
 		(len(s) > 0 && len(substr) > 0 && strings.Contains(strings.ToLower(s), strings.ToLower(substr))))
+}
+
+// runVerification executes the verification logic based on test case type
+func runVerification(t *testing.T, db *sql.DB, tt conflictTestCase) {
+	if tt.verifyType == verifyNone {
+		return
+	}
+
+	if runBasicVerification(t, db, tt) {
+		return
+	}
+
+	runComplexVerification(t, db, tt)
+}
+
+// runBasicVerification handles simple query-based verifications
+func runBasicVerification(t *testing.T, db *sql.DB, tt conflictTestCase) bool {
+	switch tt.verifyType {
+	case verifySingleInt:
+		verifySingleIntValue(t, db, tt.verifyQuery, tt.verifyExpect.(int))
+		return true
+	case verifyCount:
+		verifyCountValue(t, db, tt.verifyQuery, tt.verifyExpect.(int))
+		return true
+	case verifyString:
+		verifySingleStringValue(t, db, tt.verifyQuery, tt.verifyExpect.(string))
+		return true
+	case verifyCustomSQL:
+		verifyCustomSQLCheck(t, db, tt.verifyQueries)
+		return true
+	case verifyMultipleChecks:
+		verifyMultipleChecksBehavior(t, db, tt.verifyQueries)
+		return true
+	}
+	return false
+}
+
+// runComplexVerification handles behavior-based verifications
+func runComplexVerification(t *testing.T, db *sql.DB, tt conflictTestCase) {
+	switch tt.verifyType {
+	case verifyUpdateConflict:
+		verifyUpdateConflictBehavior(t, db)
+	case verifyUpdateReplace:
+		verifyUpdateReplaceBehavior(t, db)
+	case verifyUpdateIgnore:
+		verifyUpdateIgnoreBehavior(t, db)
+	case verifyManyIgnores:
+		verifyManyIgnoresBehavior(t, db)
+	case verifyManyReplaces:
+		verifyManyReplacesBehavior(t, db)
+	}
+}
+
+// verifySingleIntValue checks a single integer value from a query
+func verifySingleIntValue(t *testing.T, db *sql.DB, query string, expected int) {
+	var result int
+	if err := db.QueryRow(query).Scan(&result); err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if result != expected {
+		t.Errorf("Expected %d, got %d", expected, result)
+	}
+}
+
+// verifyCountValue checks a count value from a query
+func verifyCountValue(t *testing.T, db *sql.DB, query string, expected int) {
+	var count int
+	if err := db.QueryRow(query).Scan(&count); err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if count != expected {
+		t.Errorf("Expected %d rows, got %d", expected, count)
+	}
+}
+
+// verifySingleStringValue checks a single string value from a query
+func verifySingleStringValue(t *testing.T, db *sql.DB, query string, expected string) {
+	var result string
+	if err := db.QueryRow(query).Scan(&result); err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if result != expected {
+		t.Errorf("Expected %q, got %q", expected, result)
+	}
+}
+
+// verifyCustomSQLCheck runs multiple custom SQL checks
+func verifyCustomSQLCheck(t *testing.T, db *sql.DB, queries []verifyQuery) {
+	for _, vq := range queries {
+		switch expected := vq.expect.(type) {
+		case int:
+			verifySingleIntValue(t, db, vq.query, expected)
+		case string:
+			verifySingleStringValue(t, db, vq.query, expected)
+		}
+	}
+}
+
+// verifyUpdateConflictBehavior verifies UPDATE conflict behavior
+func verifyUpdateConflictBehavior(t *testing.T, db *sql.DB) {
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS t1(a,b,c, UNIQUE(a))"); err != nil {
+		t.Fatalf("CREATE TABLE failed: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO t1 SELECT * FROM t2"); err != nil {
+		t.Fatalf("INSERT failed: %v", err)
+	}
+	if _, err := db.Exec("BEGIN"); err != nil {
+		t.Fatalf("BEGIN failed: %v", err)
+	}
+	if _, err := db.Exec("UPDATE t1 SET b=b*2"); err != nil {
+		t.Fatalf("UPDATE failed: %v", err)
+	}
+	if _, err := db.Exec("UPDATE t1 SET a=c+5"); err == nil {
+		t.Error("Expected UNIQUE constraint error, got nil")
+	}
+}
+
+// verifyUpdateReplaceBehavior verifies UPDATE OR REPLACE behavior
+func verifyUpdateReplaceBehavior(t *testing.T, db *sql.DB) {
+	if _, err := db.Exec("INSERT INTO t1 SELECT * FROM t2"); err != nil {
+		t.Fatalf("INSERT failed: %v", err)
+	}
+	if _, err := db.Exec("UPDATE t1 SET b=b*2"); err != nil {
+		t.Fatalf("UPDATE failed: %v", err)
+	}
+	if _, err := db.Exec("UPDATE t1 SET a=c+5"); err != nil {
+		t.Fatalf("UPDATE failed: %v", err)
+	}
+	verifyCountValue(t, db, "SELECT COUNT(*) FROM t1", 3)
+}
+
+// verifyUpdateIgnoreBehavior verifies UPDATE OR IGNORE behavior
+func verifyUpdateIgnoreBehavior(t *testing.T, db *sql.DB) {
+	if _, err := db.Exec("INSERT INTO t1 SELECT * FROM t2"); err != nil {
+		t.Fatalf("INSERT failed: %v", err)
+	}
+	if _, err := db.Exec("UPDATE t1 SET b=b*2"); err != nil {
+		t.Fatalf("UPDATE failed: %v", err)
+	}
+	if _, err := db.Exec("UPDATE t1 SET a=c+5"); err != nil {
+		t.Fatalf("UPDATE failed: %v", err)
+	}
+	verifyCountValue(t, db, "SELECT COUNT(*) FROM t1", 4)
+}
+
+// verifyManyIgnoresBehavior verifies UPDATE OR IGNORE with many conflicts
+func verifyManyIgnoresBehavior(t *testing.T, db *sql.DB) {
+	for i := 1; i <= 50; i++ {
+		if _, err := db.Exec("INSERT INTO t1 VALUES(?, ?)", i, i+1); err != nil {
+			t.Fatalf("INSERT failed: %v", err)
+		}
+	}
+	res, err := db.Exec("UPDATE OR IGNORE t1 SET a=1000")
+	if err != nil {
+		t.Fatalf("UPDATE failed: %v", err)
+	}
+	if affected, _ := res.RowsAffected(); affected != 1 {
+		t.Errorf("Expected 1 row affected, got %d", affected)
+	}
+	verifyCountValue(t, db, "SELECT COUNT(*) FROM t1", 50)
+}
+
+// verifyManyReplacesBehavior verifies UPDATE OR REPLACE with many conflicts
+func verifyManyReplacesBehavior(t *testing.T, db *sql.DB) {
+	for i := 1; i <= 50; i++ {
+		if _, err := db.Exec("INSERT INTO t1 VALUES(?, ?)", i, i+1); err != nil {
+			t.Fatalf("INSERT failed: %v", err)
+		}
+	}
+	if _, err := db.Exec("UPDATE OR REPLACE t1 SET a=1001"); err != nil {
+		t.Fatalf("UPDATE failed: %v", err)
+	}
+	verifyCountValue(t, db, "SELECT COUNT(*) FROM t1", 1)
+}
+
+// verifyMultipleChecksBehavior runs multiple checks with custom queries
+func verifyMultipleChecksBehavior(t *testing.T, db *sql.DB, queries []verifyQuery) {
+	verifyCustomSQLCheck(t, db, queries)
 }

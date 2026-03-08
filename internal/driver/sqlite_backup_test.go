@@ -8,12 +8,18 @@ import (
 	"testing"
 )
 
+// verifyFunc defines a verification function type
+type verifyFunc func(t *testing.T, src, dst *sql.DB, tc backupTestCase)
+
 // backupTestCase defines a single backup test scenario
 type backupTestCase struct {
-	name    string
-	setup   []string
-	verify  func(t *testing.T, src, dst *sql.DB)
-	wantErr bool
+	name         string
+	setup        []string
+	verify       verifyFunc
+	verifyTable  string
+	verifyColumn string
+	expectCount  int64
+	expectValue  string
 }
 
 // TestSQLiteBackup tests database backup and restore functionality
@@ -63,7 +69,7 @@ func runBackupTest(t *testing.T, tt backupTestCase, srcDB *sql.DB, srcPath, dstP
 
 	// Run verification
 	if tt.verify != nil {
-		tt.verify(t, srcDB, dstDB)
+		tt.verify(t, srcDB, dstDB, tt)
 	}
 }
 
@@ -115,10 +121,445 @@ func performBackup(t *testing.T, srcDB *sql.DB, srcPath, dstPath string) *sql.DB
 	return dstDB
 }
 
+// Verification function wrappers that match verifyFunc signature
+
+func verifyRowCount(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyRowCountHelper(t, dst, tc.verifyTable, tc.expectCount)
+}
+
+func verifyTableExists(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyTableExistsHelper(t, dst, tc.verifyTable)
+}
+
+func verifyIndexCount(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyIndexCountHelper(t, dst, tc.verifyTable, tc.expectCount)
+}
+
+func verifyTableCount(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyTableCountHelper(t, dst, tc.expectCount)
+}
+
+func verifyRowCountMatch(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyRowCountMatchHelper(t, src, dst, tc.verifyTable)
+}
+
+func verifyPrimaryKey(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyPrimaryKeyHelper(t, dst, tc.verifyTable, tc.expectValue)
+}
+
+func verifyUniqueConstraint(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyUniqueConstraintHelper(t, dst, tc.verifyTable, tc.verifyColumn, tc.expectValue)
+}
+
+func verifyForeignKey(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyForeignKeyHelper(t, dst, tc.verifyTable, tc.expectCount)
+}
+
+func verifyView(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyViewHelper(t, dst, tc.verifyTable)
+}
+
+func verifyColumnTypes(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyColumnTypesHelper(t, dst, tc.verifyTable)
+}
+
+func verifyNullCount(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyNullCountHelper(t, dst, tc.verifyTable, tc.verifyColumn, tc.expectCount)
+}
+
+func verifyDistinctCount(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyDistinctCountHelper(t, dst, tc.verifyTable, tc.verifyColumn, tc.expectCount)
+}
+
+func verifyCheckConstraint(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyCheckConstraintHelper(t, dst, tc.verifyTable)
+}
+
+func verifyDefaultValue(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyDefaultValueHelper(t, dst, tc.verifyTable, tc.verifyColumn, tc.expectValue)
+}
+
+func verifyAutoIncrement(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyAutoIncrementHelper(t, dst)
+}
+
+func verifyCompositeKey(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyCompositeKeyHelper(t, dst, tc.verifyTable, tc.expectValue)
+}
+
+func verifyIndexCount4Plus(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyIndexCount4PlusHelper(t, dst, tc.verifyTable)
+}
+
+func verifyComputedValue(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyComputedValueHelper(t, dst, tc.verifyTable, tc.expectCount)
+}
+
+func verifyBlobCount(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyBlobCountHelper(t, dst, tc.verifyTable, tc.expectCount)
+}
+
+func verifyTransactionData(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyTransactionDataHelper(t, dst, tc.verifyTable, tc.expectCount)
+}
+
+func verifyEmptyTable(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyEmptyTableHelper(t, dst, tc.verifyTable)
+}
+
+func verifyDataIntegrity(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyDataIntegrityHelper(t, dst, tc.verifyTable)
+}
+
+func verifySpecialChars(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifySpecialCharsHelper(t, dst, tc.verifyTable, tc.expectCount)
+}
+
+func verifyLongText(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyLongTextHelper(t, dst, tc.verifyTable, tc.expectCount)
+}
+
+func verifyRowid(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyRowidHelper(t, dst, tc.verifyTable, tc.expectValue)
+}
+
+func verifyWithoutRowid(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyWithoutRowidHelper(t, dst, tc.verifyTable, tc.expectValue)
+}
+
+func verifyPartialIndex(t *testing.T, src, dst *sql.DB, tc backupTestCase) {
+	verifyPartialIndexHelper(t, dst, tc.verifyTable, tc.expectCount)
+}
+
+// verifyRowCountHelper verifies row count in a table
+func verifyRowCountHelper(t *testing.T, dst *sql.DB, table string, expectCount int64) {
+	var count int64
+	err := dst.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
+	if err != nil {
+		t.Errorf("failed to query backup: %v", err)
+	}
+	if count != expectCount {
+		t.Errorf("expected %d rows, got %d", expectCount, count)
+	}
+}
+
+// verifyTableExistsHelper verifies table exists in backup
+func verifyTableExistsHelper(t *testing.T, dst *sql.DB, table string) {
+	var name string
+	err := dst.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)
+	if err != nil {
+		t.Errorf("table not found in backup: %v", err)
+	}
+}
+
+// verifyIndexCountHelper verifies index count for a table
+func verifyIndexCountHelper(t *testing.T, dst *sql.DB, table string, minCount int64) {
+	var count int64
+	err := dst.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND tbl_name=?", table).Scan(&count)
+	if err != nil {
+		t.Errorf("failed to count indices: %v", err)
+	}
+	if count < minCount {
+		t.Errorf("expected at least %d indices, got %d", minCount, count)
+	}
+}
+
+// verifyTableCountHelper verifies number of tables in database
+func verifyTableCountHelper(t *testing.T, dst *sql.DB, expectCount int64) {
+	var count int64
+	err := dst.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").Scan(&count)
+	if err != nil {
+		t.Errorf("failed to count tables: %v", err)
+	}
+	if count != expectCount {
+		t.Errorf("expected %d tables, got %d", expectCount, count)
+	}
+}
+
+// verifyRowCountMatchHelper verifies row counts match between src and dst
+func verifyRowCountMatchHelper(t *testing.T, src, dst *sql.DB, table string) {
+	var srcCount, dstCount int64
+	src.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&srcCount)
+	dst.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&dstCount)
+	if srcCount != dstCount {
+		t.Errorf("row count mismatch: src=%d, dst=%d", srcCount, dstCount)
+	}
+}
+
+// verifyPrimaryKeyHelper verifies primary key constraint works
+func verifyPrimaryKeyHelper(t *testing.T, dst *sql.DB, table string, expectValue string) {
+	var val string
+	err := dst.QueryRow("SELECT val FROM " + table + " WHERE id=1").Scan(&val)
+	if err != nil {
+		t.Errorf("failed to query by primary key: %v", err)
+	}
+	if val != expectValue {
+		t.Errorf("expected '%s', got '%s'", expectValue, val)
+	}
+}
+
+// verifyUniqueConstraintHelper verifies unique constraint is preserved
+func verifyUniqueConstraintHelper(t *testing.T, dst *sql.DB, table, column, value string) {
+	_, err := dst.Exec("INSERT INTO " + table + " VALUES(2, '" + value + "')")
+	if err == nil {
+		t.Error("expected UNIQUE constraint error")
+	}
+}
+
+// verifyForeignKeyHelper verifies foreign key data exists
+func verifyForeignKeyHelper(t *testing.T, dst *sql.DB, table string, expectCount int64) {
+	var count int64
+	err := dst.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
+	if err != nil {
+		t.Errorf("failed to query child table: %v", err)
+	}
+	if count != expectCount {
+		t.Errorf("expected %d row, got %d", expectCount, count)
+	}
+}
+
+// verifyViewHelper verifies view exists in backup
+func verifyViewHelper(t *testing.T, dst *sql.DB, viewName string) {
+	var name string
+	err := dst.QueryRow("SELECT name FROM sqlite_master WHERE type='view' AND name=?", viewName).Scan(&name)
+	if err != nil {
+		t.Errorf("view not found in backup: %v", err)
+	}
+}
+
+// verifyColumnTypesHelper verifies different column types are preserved
+func verifyColumnTypesHelper(t *testing.T, dst *sql.DB, table string) {
+	var i int64
+	var txt string
+	var r float64
+	err := dst.QueryRow("SELECT i, t, r FROM " + table).Scan(&i, &txt, &r)
+	if err != nil {
+		t.Errorf("failed to query types: %v", err)
+	}
+	if i != 42 || txt != "text" {
+		t.Errorf("data mismatch: i=%d, t=%s", i, txt)
+	}
+}
+
+// verifyNullCountHelper verifies NULL values are preserved
+func verifyNullCountHelper(t *testing.T, dst *sql.DB, table, column string, expectCount int64) {
+	var count int64
+	err := dst.QueryRow("SELECT COUNT(*) FROM " + table + " WHERE " + column + " IS NULL").Scan(&count)
+	if err != nil {
+		t.Errorf("failed to query nulls: %v", err)
+	}
+	if count != expectCount {
+		t.Errorf("expected %d null, got %d", expectCount, count)
+	}
+}
+
+// verifyDistinctCountHelper verifies distinct count (e.g., for collation)
+func verifyDistinctCountHelper(t *testing.T, dst *sql.DB, table, column string, expectCount int64) {
+	var count int64
+	err := dst.QueryRow("SELECT COUNT(DISTINCT " + column + ") FROM " + table).Scan(&count)
+	if err != nil {
+		t.Errorf("failed to query collation: %v", err)
+	}
+	if count != expectCount {
+		t.Errorf("expected %d distinct name, got %d", expectCount, count)
+	}
+}
+
+// verifyCheckConstraintHelper verifies CHECK constraint is preserved
+func verifyCheckConstraintHelper(t *testing.T, dst *sql.DB, table string) {
+	_, err := dst.Exec("INSERT INTO " + table + " VALUES(-1)")
+	if err == nil {
+		t.Error("expected CHECK constraint error")
+	}
+}
+
+// verifyDefaultValueHelper verifies DEFAULT values work
+func verifyDefaultValueHelper(t *testing.T, dst *sql.DB, table, column, expectValue string) {
+	var status string
+	err := dst.QueryRow("SELECT " + column + " FROM " + table + " WHERE id=1").Scan(&status)
+	if err != nil {
+		t.Errorf("failed to query defaults: %v", err)
+	}
+	if status != expectValue {
+		t.Errorf("expected '%s', got '%s'", expectValue, status)
+	}
+}
+
+// verifyAutoIncrementHelper verifies AUTOINCREMENT is preserved
+func verifyAutoIncrementHelper(t *testing.T, dst *sql.DB) {
+	var name string
+	err := dst.QueryRow("SELECT name FROM sqlite_master WHERE name='sqlite_sequence'").Scan(&name)
+	if err != nil {
+		t.Errorf("sqlite_sequence not found: %v", err)
+	}
+}
+
+// verifyCompositeKeyHelper verifies composite primary key works
+func verifyCompositeKeyHelper(t *testing.T, dst *sql.DB, table, expectValue string) {
+	var data string
+	err := dst.QueryRow("SELECT data FROM " + table + " WHERE a=1 AND b=2").Scan(&data)
+	if err != nil {
+		t.Errorf("failed to query composite key: %v", err)
+	}
+	if data != expectValue {
+		t.Errorf("expected '%s', got '%s'", expectValue, data)
+	}
+}
+
+// verifyIndexCount4PlusHelper verifies at least 4 indices exist
+func verifyIndexCount4PlusHelper(t *testing.T, dst *sql.DB, table string) {
+	var count int64
+	err := dst.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND tbl_name=?", table).Scan(&count)
+	if err != nil {
+		t.Errorf("failed to count indices: %v", err)
+	}
+	if count < 4 {
+		t.Errorf("expected at least 4 indices, got %d", count)
+	}
+}
+
+// verifyComputedValueHelper verifies computed values work
+func verifyComputedValueHelper(t *testing.T, dst *sql.DB, table string, expectSum int64) {
+	var sum int64
+	err := dst.QueryRow("SELECT a+b FROM " + table + " WHERE c=5").Scan(&sum)
+	if err != nil {
+		t.Errorf("failed to compute: %v", err)
+	}
+	if sum != expectSum {
+		t.Errorf("expected %d, got %d", expectSum, sum)
+	}
+}
+
+// verifyBlobCountHelper verifies BLOB data is preserved
+func verifyBlobCountHelper(t *testing.T, dst *sql.DB, table string, expectCount int64) {
+	var count int64
+	err := dst.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
+	if err != nil {
+		t.Errorf("failed to query blobs: %v", err)
+	}
+	if count != expectCount {
+		t.Errorf("expected %d rows, got %d", expectCount, count)
+	}
+}
+
+// verifyTransactionDataHelper verifies transaction data is preserved
+func verifyTransactionDataHelper(t *testing.T, dst *sql.DB, table string, expectCount int64) {
+	var count int64
+	err := dst.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
+	if err != nil {
+		t.Errorf("failed to query txn: %v", err)
+	}
+	if count != expectCount {
+		t.Errorf("expected %d rows, got %d", expectCount, count)
+	}
+}
+
+// verifyEmptyTableHelper verifies empty table exists
+func verifyEmptyTableHelper(t *testing.T, dst *sql.DB, table string) {
+	var count int64
+	err := dst.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
+	if err != nil {
+		t.Errorf("failed to query empty table: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 rows, got %d", count)
+	}
+}
+
+// verifyDataIntegrityHelper verifies all data matches expected values
+func verifyDataIntegrityHelper(t *testing.T, dst *sql.DB, table string) {
+	rows, err := dst.Query("SELECT id, data FROM " + table + " ORDER BY id")
+	if err != nil {
+		t.Errorf("failed to query integrity: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	expected := []struct {
+		id   int64
+		data string
+	}{
+		{1, "test data 1"},
+		{2, "test data 2"},
+		{3, "test data 3"},
+	}
+
+	i := 0
+	for rows.Next() {
+		var id int64
+		var data string
+		rows.Scan(&id, &data)
+		if i < len(expected) && (id != expected[i].id || data != expected[i].data) {
+			t.Errorf("row %d mismatch: got (%d, %s), want (%d, %s)",
+				i, id, data, expected[i].id, expected[i].data)
+		}
+		i++
+	}
+}
+
+// verifySpecialCharsHelper verifies special characters are preserved
+func verifySpecialCharsHelper(t *testing.T, dst *sql.DB, table string, expectCount int64) {
+	var count int64
+	err := dst.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
+	if err != nil {
+		t.Errorf("failed to query special chars: %v", err)
+	}
+	if count != expectCount {
+		t.Errorf("expected %d rows, got %d", expectCount, count)
+	}
+}
+
+// verifyLongTextHelper verifies long text is preserved
+func verifyLongTextHelper(t *testing.T, dst *sql.DB, table string, expectLength int64) {
+	var content string
+	err := dst.QueryRow("SELECT content FROM " + table + " WHERE id=1").Scan(&content)
+	if err != nil {
+		t.Errorf("failed to query long text: %v", err)
+	}
+	if int64(len(content)) != expectLength {
+		t.Errorf("expected length %d, got %d", expectLength, len(content))
+	}
+}
+
+// verifyRowidHelper verifies rowid is preserved
+func verifyRowidHelper(t *testing.T, dst *sql.DB, table, expectValue string) {
+	var data string
+	err := dst.QueryRow("SELECT data FROM " + table + " WHERE rowid=2").Scan(&data)
+	if err != nil {
+		t.Errorf("failed to query by rowid: %v", err)
+	}
+	if data != expectValue {
+		t.Errorf("expected '%s', got '%s'", expectValue, data)
+	}
+}
+
+// verifyWithoutRowidHelper verifies WITHOUT ROWID table works
+func verifyWithoutRowidHelper(t *testing.T, dst *sql.DB, table, expectValue string) {
+	var val string
+	err := dst.QueryRow("SELECT val FROM " + table + " WHERE id=1").Scan(&val)
+	if err != nil {
+		t.Errorf("failed to query without rowid: %v", err)
+	}
+	if val != expectValue {
+		t.Errorf("expected '%s', got '%s'", expectValue, val)
+	}
+}
+
+// verifyPartialIndexHelper verifies partial index data
+func verifyPartialIndexHelper(t *testing.T, dst *sql.DB, table string, expectCount int64) {
+	var count int64
+	err := dst.QueryRow("SELECT COUNT(*) FROM " + table + " WHERE status='active'").Scan(&count)
+	if err != nil {
+		t.Errorf("failed to query partial index: %v", err)
+	}
+	if count != expectCount {
+		t.Errorf("expected %d active rows, got %d", expectCount, count)
+	}
+}
+
 // backupTestCases returns all backup test cases
 func backupTestCases() []backupTestCase {
 	return []backupTestCase{
-		// backup.test 1.1 - Basic table creation
 		{
 			name: "backup_basic_table",
 			setup: []string{
@@ -127,18 +568,10 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO t1 VALUES(1, 'test')",
 				"INSERT INTO t1 VALUES(2, 'data')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var count int64
-				err := dst.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-				if err != nil {
-					t.Errorf("failed to query backup: %v", err)
-				}
-				if count != 2 {
-					t.Errorf("expected 2 rows, got %d", count)
-				}
-			},
+			verify:      verifyRowCount,
+			verifyTable: "t1",
+			expectCount: 2,
 		},
-		// backup.test 1.4 - Copy complete database
 		{
 			name: "backup_complete_database",
 			setup: []string{
@@ -148,16 +581,9 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO t1 VALUES(2, 'beta')",
 				"INSERT INTO t1 VALUES(3, 'gamma')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				// Verify table exists
-				var name string
-				err := dst.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='t1'").Scan(&name)
-				if err != nil {
-					t.Errorf("table not found in backup: %v", err)
-				}
-			},
+			verify:  verifyTableExists,
+			verifyTable: "t1",
 		},
-		// backup2.test - Backup with indices and triggers
 		{
 			name: "backup_with_indices",
 			setup: []string{
@@ -169,19 +595,10 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO t2 VALUES(2, 20)",
 				"INSERT INTO t2 VALUES(3, 30)",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				// Count indices
-				var count int64
-				err := dst.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND tbl_name='t2'").Scan(&count)
-				if err != nil {
-					t.Errorf("failed to count indices: %v", err)
-				}
-				if count < 2 {
-					t.Errorf("expected at least 2 indices, got %d", count)
-				}
-			},
+			verify:  verifyIndexCount,
+			verifyTable: "t2",
+			expectCount: 2,
 		},
-		// Test backup with multiple tables
 		{
 			name: "backup_multiple_tables",
 			setup: []string{
@@ -195,18 +612,9 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO t2 VALUES('test')",
 				"INSERT INTO t3 VALUES(3.14)",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var count int64
-				err := dst.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").Scan(&count)
-				if err != nil {
-					t.Errorf("failed to count tables: %v", err)
-				}
-				if count != 3 {
-					t.Errorf("expected 3 tables, got %d", count)
-				}
-			},
+			verify:  verifyTableCount,
+			expectCount: 3,
 		},
-		// Test backup with large data
 		{
 			name: "backup_large_data",
 			setup: []string{
@@ -218,16 +626,9 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO large SELECT id+4, data FROM large",
 				"INSERT INTO large SELECT id+8, data FROM large",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var srcCount, dstCount int64
-				src.QueryRow("SELECT COUNT(*) FROM large").Scan(&srcCount)
-				dst.QueryRow("SELECT COUNT(*) FROM large").Scan(&dstCount)
-				if srcCount != dstCount {
-					t.Errorf("row count mismatch: src=%d, dst=%d", srcCount, dstCount)
-				}
-			},
+			verify:  verifyRowCountMatch,
+			verifyTable: "large",
 		},
-		// Test backup preserves PRIMARY KEY
 		{
 			name: "backup_primary_key",
 			setup: []string{
@@ -236,18 +637,10 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO pk_test VALUES(1, 'first')",
 				"INSERT INTO pk_test VALUES(2, 'second')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var val string
-				err := dst.QueryRow("SELECT val FROM pk_test WHERE id=1").Scan(&val)
-				if err != nil {
-					t.Errorf("failed to query by primary key: %v", err)
-				}
-				if val != "first" {
-					t.Errorf("expected 'first', got '%s'", val)
-				}
-			},
+			verify:  verifyPrimaryKey,
+			verifyTable: "pk_test",
+			expectValue: "first",
 		},
-		// Test backup preserves UNIQUE constraints
 		{
 			name: "backup_unique_constraint",
 			setup: []string{
@@ -255,15 +648,11 @@ func backupTestCases() []backupTestCase {
 				"CREATE TABLE uniq_test(id INTEGER, email TEXT UNIQUE)",
 				"INSERT INTO uniq_test VALUES(1, 'test@example.com')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				// Try to insert duplicate - should fail
-				_, err := dst.Exec("INSERT INTO uniq_test VALUES(2, 'test@example.com')")
-				if err == nil {
-					t.Error("expected UNIQUE constraint error")
-				}
-			},
+			verify:   verifyUniqueConstraint,
+			verifyTable:  "uniq_test",
+			verifyColumn: "email",
+			expectValue:  "test@example.com",
 		},
-		// Test backup with foreign keys
 		{
 			name: "backup_foreign_keys",
 			setup: []string{
@@ -274,18 +663,10 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO parent VALUES(1)",
 				"INSERT INTO child VALUES(1, 1)",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var count int64
-				err := dst.QueryRow("SELECT COUNT(*) FROM child").Scan(&count)
-				if err != nil {
-					t.Errorf("failed to query child table: %v", err)
-				}
-				if count != 1 {
-					t.Errorf("expected 1 row, got %d", count)
-				}
-			},
+			verify:  verifyForeignKey,
+			verifyTable: "child",
+			expectCount: 1,
 		},
-		// Test backup with views
 		{
 			name: "backup_with_views",
 			setup: []string{
@@ -296,15 +677,9 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO base VALUES(3, 4)",
 				"CREATE VIEW v1 AS SELECT x, y, x+y AS sum FROM base",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var name string
-				err := dst.QueryRow("SELECT name FROM sqlite_master WHERE type='view' AND name='v1'").Scan(&name)
-				if err != nil {
-					t.Errorf("view not found in backup: %v", err)
-				}
-			},
+			verify:  verifyView,
+			verifyTable: "v1",
 		},
-		// Test backup with different column types
 		{
 			name: "backup_column_types",
 			setup: []string{
@@ -312,20 +687,9 @@ func backupTestCases() []backupTestCase {
 				"CREATE TABLE types(i INTEGER, t TEXT, r REAL, b BLOB, n NULL)",
 				"INSERT INTO types VALUES(42, 'text', 3.14, X'DEADBEEF', NULL)",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var i int64
-				var txt string
-				var r float64
-				err := dst.QueryRow("SELECT i, t, r FROM types").Scan(&i, &txt, &r)
-				if err != nil {
-					t.Errorf("failed to query types: %v", err)
-				}
-				if i != 42 || txt != "text" {
-					t.Errorf("data mismatch: i=%d, t=%s", i, txt)
-				}
-			},
+			verify:  verifyColumnTypes,
+			verifyTable: "types",
 		},
-		// Test backup preserves NULL values
 		{
 			name: "backup_null_values",
 			setup: []string{
@@ -334,18 +698,11 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO nulls VALUES(1, NULL, 3.14)",
 				"INSERT INTO nulls VALUES(NULL, 'text', NULL)",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var count int64
-				err := dst.QueryRow("SELECT COUNT(*) FROM nulls WHERE b IS NULL").Scan(&count)
-				if err != nil {
-					t.Errorf("failed to query nulls: %v", err)
-				}
-				if count != 1 {
-					t.Errorf("expected 1 null, got %d", count)
-				}
-			},
+			verify:   verifyNullCount,
+			verifyTable:  "nulls",
+			verifyColumn: "b",
+			expectCount:  1,
 		},
-		// Test backup with collation
 		{
 			name: "backup_collation",
 			setup: []string{
@@ -355,19 +712,11 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO collate_test VALUES('alice')",
 				"INSERT INTO collate_test VALUES('ALICE')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var count int64
-				err := dst.QueryRow("SELECT COUNT(DISTINCT name) FROM collate_test").Scan(&count)
-				if err != nil {
-					t.Errorf("failed to query collation: %v", err)
-				}
-				// With NOCASE, all three should be considered the same
-				if count != 1 {
-					t.Errorf("expected 1 distinct name, got %d", count)
-				}
-			},
+			verify:   verifyDistinctCount,
+			verifyTable:  "collate_test",
+			verifyColumn: "name",
+			expectCount:  1,
 		},
-		// Test backup with CHECK constraints
 		{
 			name: "backup_check_constraint",
 			setup: []string{
@@ -375,15 +724,9 @@ func backupTestCases() []backupTestCase {
 				"CREATE TABLE checked(age INTEGER CHECK(age >= 0))",
 				"INSERT INTO checked VALUES(25)",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				// Try to insert invalid data
-				_, err := dst.Exec("INSERT INTO checked VALUES(-1)")
-				if err == nil {
-					t.Error("expected CHECK constraint error")
-				}
-			},
+			verify:  verifyCheckConstraint,
+			verifyTable: "checked",
 		},
-		// Test backup with DEFAULT values
 		{
 			name: "backup_default_values",
 			setup: []string{
@@ -391,18 +734,11 @@ func backupTestCases() []backupTestCase {
 				"CREATE TABLE defaults(id INTEGER PRIMARY KEY, status TEXT DEFAULT 'active', created INTEGER DEFAULT 0)",
 				"INSERT INTO defaults(id) VALUES(1)",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var status string
-				err := dst.QueryRow("SELECT status FROM defaults WHERE id=1").Scan(&status)
-				if err != nil {
-					t.Errorf("failed to query defaults: %v", err)
-				}
-				if status != "active" {
-					t.Errorf("expected 'active', got '%s'", status)
-				}
-			},
+			verify:   verifyDefaultValue,
+			verifyTable:  "defaults",
+			verifyColumn: "status",
+			expectValue:  "active",
 		},
-		// Test backup preserves AUTOINCREMENT
 		{
 			name: "backup_autoincrement",
 			setup: []string{
@@ -411,16 +747,8 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO auto_test(data) VALUES('first')",
 				"INSERT INTO auto_test(data) VALUES('second')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				// Check if sqlite_sequence exists
-				var name string
-				err := dst.QueryRow("SELECT name FROM sqlite_master WHERE name='sqlite_sequence'").Scan(&name)
-				if err != nil {
-					t.Errorf("sqlite_sequence not found: %v", err)
-				}
-			},
+			verify: verifyAutoIncrement,
 		},
-		// Test backup with composite primary key
 		{
 			name: "backup_composite_key",
 			setup: []string{
@@ -429,18 +757,10 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO composite VALUES(1, 1, 'test')",
 				"INSERT INTO composite VALUES(1, 2, 'test2')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var data string
-				err := dst.QueryRow("SELECT data FROM composite WHERE a=1 AND b=2").Scan(&data)
-				if err != nil {
-					t.Errorf("failed to query composite key: %v", err)
-				}
-				if data != "test2" {
-					t.Errorf("expected 'test2', got '%s'", data)
-				}
-			},
+			verify:  verifyCompositeKey,
+			verifyTable: "composite",
+			expectValue: "test2",
 		},
-		// Test backup with multiple indices on same table
 		{
 			name: "backup_multiple_indices",
 			setup: []string{
@@ -452,18 +772,9 @@ func backupTestCases() []backupTestCase {
 				"CREATE INDEX idx_ab ON multi_idx(a, b)",
 				"INSERT INTO multi_idx VALUES(1, 2, 3)",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var count int64
-				err := dst.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND tbl_name='multi_idx'").Scan(&count)
-				if err != nil {
-					t.Errorf("failed to count indices: %v", err)
-				}
-				if count < 4 {
-					t.Errorf("expected at least 4 indices, got %d", count)
-				}
-			},
+			verify:  verifyIndexCount4Plus,
+			verifyTable: "multi_idx",
 		},
-		// Test backup with generated columns (if supported)
 		{
 			name: "backup_computed_data",
 			setup: []string{
@@ -472,18 +783,10 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO computed VALUES(2, 3, 5)",
 				"INSERT INTO computed VALUES(4, 5, 9)",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var sum int64
-				err := dst.QueryRow("SELECT a+b FROM computed WHERE c=5").Scan(&sum)
-				if err != nil {
-					t.Errorf("failed to compute: %v", err)
-				}
-				if sum != 5 {
-					t.Errorf("expected 5, got %d", sum)
-				}
-			},
+			verify:  verifyComputedValue,
+			verifyTable: "computed",
+			expectCount: 5,
 		},
-		// Test backup with BLOB data
 		{
 			name: "backup_blob_data",
 			setup: []string{
@@ -492,18 +795,10 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO blobs VALUES(1, X'DEADBEEF')",
 				"INSERT INTO blobs VALUES(2, X'CAFEBABE')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var count int64
-				err := dst.QueryRow("SELECT COUNT(*) FROM blobs").Scan(&count)
-				if err != nil {
-					t.Errorf("failed to query blobs: %v", err)
-				}
-				if count != 2 {
-					t.Errorf("expected 2 rows, got %d", count)
-				}
-			},
+			verify:  verifyBlobCount,
+			verifyTable: "blobs",
+			expectCount: 2,
 		},
-		// Test backup with transaction data
 		{
 			name: "backup_transaction_data",
 			setup: []string{
@@ -514,18 +809,10 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO txn VALUES(2, 200)",
 				"COMMIT",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var count int64
-				err := dst.QueryRow("SELECT COUNT(*) FROM txn").Scan(&count)
-				if err != nil {
-					t.Errorf("failed to query txn: %v", err)
-				}
-				if count != 2 {
-					t.Errorf("expected 2 rows, got %d", count)
-				}
-			},
+			verify:  verifyTransactionData,
+			verifyTable: "txn",
+			expectCount: 2,
 		},
-		// Test backup with empty tables
 		{
 			name: "backup_empty_tables",
 			setup: []string{
@@ -534,18 +821,9 @@ func backupTestCases() []backupTestCase {
 				"CREATE TABLE empty1(x INTEGER)",
 				"CREATE TABLE empty2(y TEXT)",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var count int64
-				err := dst.QueryRow("SELECT COUNT(*) FROM empty1").Scan(&count)
-				if err != nil {
-					t.Errorf("failed to query empty table: %v", err)
-				}
-				if count != 0 {
-					t.Errorf("expected 0 rows, got %d", count)
-				}
-			},
+			verify:  verifyEmptyTable,
+			verifyTable: "empty1",
 		},
-		// Test backup data integrity with checksums
 		{
 			name: "backup_data_integrity",
 			setup: []string{
@@ -555,38 +833,9 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO integrity VALUES(2, 'test data 2')",
 				"INSERT INTO integrity VALUES(3, 'test data 3')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				// Verify all data matches
-				rows, err := dst.Query("SELECT id, data FROM integrity ORDER BY id")
-				if err != nil {
-					t.Errorf("failed to query integrity: %v", err)
-					return
-				}
-				defer rows.Close()
-
-				expected := []struct {
-					id   int64
-					data string
-				}{
-					{1, "test data 1"},
-					{2, "test data 2"},
-					{3, "test data 3"},
-				}
-
-				i := 0
-				for rows.Next() {
-					var id int64
-					var data string
-					rows.Scan(&id, &data)
-					if i < len(expected) && (id != expected[i].id || data != expected[i].data) {
-						t.Errorf("row %d mismatch: got (%d, %s), want (%d, %s)",
-							i, id, data, expected[i].id, expected[i].data)
-					}
-					i++
-				}
-			},
+			verify:  verifyDataIntegrity,
+			verifyTable: "integrity",
 		},
-		// Test backup with special characters in data
 		{
 			name: "backup_special_chars",
 			setup: []string{
@@ -596,18 +845,10 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO special VALUES('こんにちは')",
 				"INSERT INTO special VALUES('🚀')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var count int64
-				err := dst.QueryRow("SELECT COUNT(*) FROM special").Scan(&count)
-				if err != nil {
-					t.Errorf("failed to query special chars: %v", err)
-				}
-				if count != 3 {
-					t.Errorf("expected 3 rows, got %d", count)
-				}
-			},
+			verify:  verifySpecialChars,
+			verifyTable: "special",
+			expectCount: 3,
 		},
-		// Test backup with very long TEXT values
 		{
 			name: "backup_long_text",
 			setup: []string{
@@ -615,18 +856,10 @@ func backupTestCases() []backupTestCase {
 				"CREATE TABLE longtext(id INTEGER, content TEXT)",
 				"INSERT INTO longtext VALUES(1, '0123456789')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var content string
-				err := dst.QueryRow("SELECT content FROM longtext WHERE id=1").Scan(&content)
-				if err != nil {
-					t.Errorf("failed to query long text: %v", err)
-				}
-				if len(content) != 10 {
-					t.Errorf("expected length 10, got %d", len(content))
-				}
-			},
+			verify:  verifyLongText,
+			verifyTable: "longtext",
+			expectCount: 10,
 		},
-		// Test backup preserves rowid
 		{
 			name: "backup_rowid",
 			setup: []string{
@@ -636,18 +869,10 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO rowid_test VALUES('second')",
 				"INSERT INTO rowid_test VALUES('third')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var data string
-				err := dst.QueryRow("SELECT data FROM rowid_test WHERE rowid=2").Scan(&data)
-				if err != nil {
-					t.Errorf("failed to query by rowid: %v", err)
-				}
-				if data != "second" {
-					t.Errorf("expected 'second', got '%s'", data)
-				}
-			},
+			verify:  verifyRowid,
+			verifyTable: "rowid_test",
+			expectValue: "second",
 		},
-		// Test backup with WITHOUT ROWID tables
 		{
 			name: "backup_without_rowid",
 			setup: []string{
@@ -656,18 +881,10 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO no_rowid VALUES(1, 'test')",
 				"INSERT INTO no_rowid VALUES(2, 'data')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var val string
-				err := dst.QueryRow("SELECT val FROM no_rowid WHERE id=1").Scan(&val)
-				if err != nil {
-					t.Errorf("failed to query without rowid: %v", err)
-				}
-				if val != "test" {
-					t.Errorf("expected 'test', got '%s'", val)
-				}
-			},
+			verify:  verifyWithoutRowid,
+			verifyTable: "no_rowid",
+			expectValue: "test",
 		},
-		// Test backup with partial indices
 		{
 			name: "backup_partial_index",
 			setup: []string{
@@ -678,16 +895,9 @@ func backupTestCases() []backupTestCase {
 				"INSERT INTO partial VALUES(2, 'inactive')",
 				"INSERT INTO partial VALUES(3, 'active')",
 			},
-			verify: func(t *testing.T, src, dst *sql.DB) {
-				var count int64
-				err := dst.QueryRow("SELECT COUNT(*) FROM partial WHERE status='active'").Scan(&count)
-				if err != nil {
-					t.Errorf("failed to query partial index: %v", err)
-				}
-				if count != 2 {
-					t.Errorf("expected 2 active rows, got %d", count)
-				}
-			},
+			verify:  verifyPartialIndex,
+			verifyTable: "partial",
+			expectCount: 2,
 		},
 	}
 }
@@ -699,15 +909,30 @@ func TestBackupIntegrity(t *testing.T) {
 	srcPath := filepath.Join(tmpDir, "integrity_src.db")
 	dstPath := filepath.Join(tmpDir, "integrity_dst.db")
 
-	// Create source database
+	srcDB := setupIntegrityTestDB(t, srcPath)
+	defer srcDB.Close()
+
+	dstDB := copyAndOpenBackupDB(t, srcPath, dstPath)
+	defer dstDB.Close()
+
+	verifyIntegritySchema(t, dstDB)
+	verifyIntegrityData(t, dstDB)
+}
+
+func setupIntegrityTestDB(t *testing.T, srcPath string) *sql.DB {
 	srcDB, err := sql.Open(DriverName, srcPath)
 	if err != nil {
 		t.Fatalf("failed to open source: %v", err)
 	}
-	defer srcDB.Close()
 
-	// Create complex schema
-	_, err = srcDB.Exec(`
+	createIntegritySchema(t, srcDB)
+	insertIntegrityData(t, srcDB)
+
+	return srcDB
+}
+
+func createIntegritySchema(t *testing.T, srcDB *sql.DB) {
+	_, err := srcDB.Exec(`
 		CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT, email TEXT UNIQUE);
 		CREATE TABLE posts(id INTEGER PRIMARY KEY, user_id INTEGER, content TEXT,
 			FOREIGN KEY(user_id) REFERENCES users(id));
@@ -717,9 +942,10 @@ func TestBackupIntegrity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create schema: %v", err)
 	}
+}
 
-	// Insert data
-	_, err = srcDB.Exec("INSERT INTO users VALUES(1, 'Alice', 'alice@example.com')")
+func insertIntegrityData(t *testing.T, srcDB *sql.DB) {
+	_, err := srcDB.Exec("INSERT INTO users VALUES(1, 'Alice', 'alice@example.com')")
 	if err != nil {
 		t.Fatalf("failed to insert user: %v", err)
 	}
@@ -728,10 +954,9 @@ func TestBackupIntegrity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to insert post: %v", err)
 	}
+}
 
-	// Flush and copy
-	srcDB.Close()
-
+func copyAndOpenBackupDB(t *testing.T, srcPath, dstPath string) *sql.DB {
 	data, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Fatalf("failed to read source: %v", err)
@@ -742,16 +967,17 @@ func TestBackupIntegrity(t *testing.T) {
 		t.Fatalf("failed to write backup: %v", err)
 	}
 
-	// Open backup and verify
 	dstDB, err := sql.Open(DriverName, dstPath)
 	if err != nil {
 		t.Fatalf("failed to open backup: %v", err)
 	}
-	defer dstDB.Close()
 
-	// Verify schema
+	return dstDB
+}
+
+func verifyIntegritySchema(t *testing.T, dstDB *sql.DB) {
 	var tableCount int64
-	err = dstDB.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").Scan(&tableCount)
+	err := dstDB.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").Scan(&tableCount)
 	if err != nil {
 		t.Fatalf("failed to count tables: %v", err)
 	}
@@ -759,10 +985,11 @@ func TestBackupIntegrity(t *testing.T) {
 	if tableCount != 2 {
 		t.Errorf("expected 2 tables, got %d", tableCount)
 	}
+}
 
-	// Verify data
+func verifyIntegrityData(t *testing.T, dstDB *sql.DB) {
 	var name, content string
-	err = dstDB.QueryRow("SELECT name, content FROM user_posts").Scan(&name, &content)
+	err := dstDB.QueryRow("SELECT name, content FROM user_posts").Scan(&name, &content)
 	if err != nil {
 		t.Fatalf("failed to query view: %v", err)
 	}

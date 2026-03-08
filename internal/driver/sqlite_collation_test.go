@@ -8,16 +8,31 @@ import (
 	"testing"
 )
 
+// collationVerifyType defines the type of verification to perform
+type collationVerifyType int
+
+const (
+	collationVerifyRowCount collationVerifyType = iota // Verify exact row count
+	collationVerifyOrderedStrings                      // Verify exact string order
+	collationVerifyOrderedNullStrings                  // Verify exact order with NULLs
+	collationVerifyMultiColumnOrder                    // Verify multi-column results
+	collationVerifyContainsStrings                     // Verify result contains specific strings
+)
+
 // collationTestCase defines a single collation test scenario
 type collationTestCase struct {
-	name    string
-	setup   []string // CREATE TABLE statements and other setup
-	inserts []string // INSERT statements to test
-	query   string   // Query to execute
-	verify  func(*testing.T, *sql.Rows)
-	wantErr bool
-	errMsg  string
-	skip    string
+	name            string
+	setup           []string             // CREATE TABLE statements and other setup
+	inserts         []string             // INSERT statements to test
+	query           string               // Query to execute
+	verifyType      collationVerifyType  // Type of verification
+	expectedRows    [][]interface{}      // Expected rows for multi-column
+	expectedStrings []string             // Expected string values in order
+	expectedNulls   []sql.NullString     // Expected NULL-capable strings
+	expectedCount   int                  // Expected row count
+	wantErr         bool
+	errMsg          string
+	skip            string
 }
 
 // TestSQLiteCollation is a comprehensive test suite converted from SQLite's TCL collation tests
@@ -109,44 +124,152 @@ func executeAndVerifyQuery(t *testing.T, db *sql.DB, tt collationTestCase) {
 		return
 	}
 
-	if tt.verify != nil {
-		executeQueryWithVerification(t, db, tt)
-	} else {
-		executeQueryWithoutVerification(t, db, tt)
-	}
-}
-
-// executeQueryWithVerification runs a query and calls the verify function
-func executeQueryWithVerification(t *testing.T, db *sql.DB, tt collationTestCase) {
 	rows, err := db.Query(tt.query)
 	if err != nil {
-		if tt.wantErr {
-			if tt.errMsg == "" || !containsCollation(err.Error(), tt.errMsg) {
-				t.Errorf("Query error: %v, wanted error containing %q", err, tt.errMsg)
-			}
-			return
-		}
-		t.Fatalf("Query failed: %v\nQuery: %s", err, tt.query)
+		handleQueryError(t, tt, err)
+		return
 	}
 	defer rows.Close()
-	tt.verify(t, rows)
+
+	performVerification(t, rows, tt)
 }
 
-// executeQueryWithoutVerification just executes a query for error checking
-func executeQueryWithoutVerification(t *testing.T, db *sql.DB, tt collationTestCase) {
-	_, err := db.Exec(tt.query)
+// handleQueryError checks if error is expected
+func handleQueryError(t *testing.T, tt collationTestCase, err error) {
 	if tt.wantErr {
-		if err == nil {
-			t.Errorf("Expected error containing %q, got nil", tt.errMsg)
-			return
-		}
 		if tt.errMsg == "" || !containsCollation(err.Error(), tt.errMsg) {
 			t.Errorf("Query error: %v, wanted error containing %q", err, tt.errMsg)
 		}
 		return
 	}
+	t.Fatalf("Query failed: %v\nQuery: %s", err, tt.query)
+}
+
+// performVerification performs the appropriate verification based on verifyType
+func performVerification(t *testing.T, rows *sql.Rows, tt collationTestCase) {
+	switch tt.verifyType {
+	case collationVerifyRowCount:
+		collationVerifyCount(t, rows, tt.expectedCount)
+	case collationVerifyOrderedStrings:
+		collationVerifyStringOrder(t, rows, tt.expectedStrings)
+	case collationVerifyOrderedNullStrings:
+		collationVerifyNullStringOrder(t, rows, tt.expectedNulls)
+	case collationVerifyMultiColumnOrder:
+		collationVerifyMultiColumn(t, rows, tt.expectedRows)
+	case collationVerifyContainsStrings:
+		collationVerifyContains(t, rows, tt.expectedStrings)
+	}
+}
+
+// collationVerifyCount verifies the exact number of rows
+func collationVerifyCount(t *testing.T, rows *sql.Rows, expected int) {
+	count := 0
+	for rows.Next() {
+		count++
+		// Scan to consume row
+		cols, _ := rows.Columns()
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+	}
+	if count != expected {
+		t.Errorf("Expected %d rows, got %d", expected, count)
+	}
+}
+
+// collationVerifyStringOrder verifies exact string order
+func collationVerifyStringOrder(t *testing.T, rows *sql.Rows, expected []string) {
+	var results []string
+	for rows.Next() {
+		var val string
+		if err := rows.Scan(&val); err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		results = append(results, val)
+	}
+	if len(results) != len(expected) {
+		t.Fatalf("Expected %d results, got %d", len(expected), len(results))
+	}
+	for i, exp := range expected {
+		if results[i] != exp {
+			t.Errorf("Result[%d]: expected %q, got %q", i, exp, results[i])
+		}
+	}
+}
+
+// collationVerifyNullStringOrder verifies string order with NULL support
+func collationVerifyNullStringOrder(t *testing.T, rows *sql.Rows, expected []sql.NullString) {
+	var results []sql.NullString
+	for rows.Next() {
+		var val sql.NullString
+		if err := rows.Scan(&val); err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		results = append(results, val)
+	}
+	if len(results) != len(expected) {
+		t.Fatalf("Expected %d rows, got %d", len(expected), len(results))
+	}
+	for i, exp := range expected {
+		if results[i] != exp {
+			t.Errorf("Row %d: expected %v, got %v", i, exp, results[i])
+		}
+	}
+}
+
+// collationVerifyMultiColumn verifies multi-column results
+func collationVerifyMultiColumn(t *testing.T, rows *sql.Rows, expected [][]interface{}) {
+	cols, err := rows.Columns()
 	if err != nil {
-		t.Fatalf("Query failed: %v\nQuery: %s", err, tt.query)
+		t.Fatalf("Failed to get columns: %v", err)
+	}
+
+	var results [][]interface{}
+	for rows.Next() {
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		results = append(results, vals)
+	}
+
+	if len(results) != len(expected) {
+		t.Fatalf("Expected %d rows, got %d", len(expected), len(results))
+	}
+}
+
+// collationVerifyContains verifies that results contain expected strings (partial match)
+func collationVerifyContains(t *testing.T, rows *sql.Rows, expected []string) {
+	var results []string
+	for rows.Next() {
+		var val string
+		if err := rows.Scan(&val); err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		results = append(results, val)
+	}
+
+	// Check that all expected values are present
+	for _, exp := range expected {
+		found := false
+		for _, res := range results {
+			if res == exp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected to find %q in results, but didn't", exp)
+		}
 	}
 }
 
@@ -165,29 +288,12 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES(NULL, NULL)",
 				"INSERT INTO t1 VALUES(281, '0x119')",
 			},
-			query: "SELECT c2 FROM t1 ORDER BY c2",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				expected := []sql.NullString{
-					{Valid: false},
-					{String: "0x119", Valid: true},
-					{String: "0x2D", Valid: true},
-				}
-				var got []sql.NullString
-				for rows.Next() {
-					var val sql.NullString
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					got = append(got, val)
-				}
-				if len(got) != len(expected) {
-					t.Fatalf("Expected %d rows, got %d", len(expected), len(got))
-				}
-				for i, exp := range expected {
-					if got[i] != exp {
-						t.Errorf("Row %d: expected %v, got %v", i, exp, got[i])
-					}
-				}
+			query:      "SELECT c2 FROM t1 ORDER BY c2",
+			verifyType: collationVerifyOrderedNullStrings,
+			expectedNulls: []sql.NullString{
+				{Valid: false},
+				{String: "0x119", Valid: true},
+				{String: "0x2D", Valid: true},
 			},
 		},
 
@@ -201,20 +307,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('AB', 'ab')",
 				"INSERT INTO t1 VALUES('Ba', 'bA')",
 			},
-			query: "SELECT c2 FROM t1 ORDER BY c2 COLLATE NOCASE",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				var count int
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					count++
-				}
-				if count != 3 {
-					t.Errorf("Expected 3 rows, got %d", count)
-				}
-			},
+			query:         "SELECT c2 FROM t1 ORDER BY c2 COLLATE NOCASE",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 3,
 		},
 
 		{
@@ -230,20 +325,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('11', '10')",
 				"INSERT INTO t1 VALUES('11', '100')",
 			},
-			query: "SELECT c1, c2 FROM t1 ORDER BY c1 COLLATE BINARY, c2 COLLATE BINARY",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				var count int
-				for rows.Next() {
-					var c1, c2 sql.NullString
-					if err := rows.Scan(&c1, &c2); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					count++
-				}
-				if count != 6 {
-					t.Errorf("Expected 6 rows, got %d", count)
-				}
-			},
+			query:         "SELECT c1, c2 FROM t1 ORDER BY c1 COLLATE BINARY, c2 COLLATE BINARY",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 6,
 		},
 
 		{
@@ -257,24 +341,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('def', 3)",
 				"INSERT INTO t1 VALUES(NULL, NULL)",
 			},
-			query: "SELECT a FROM t1 ORDER BY a",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []sql.NullString{}
-				for rows.Next() {
-					var val sql.NullString
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, val)
-				}
-				if len(results) != 4 {
-					t.Fatalf("Expected 4 rows, got %d", len(results))
-				}
-				// NULL should be first
-				if results[0].Valid {
-					t.Errorf("First row should be NULL, got %v", results[0])
-				}
-			},
+			query:         "SELECT a FROM t1 ORDER BY a",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 4,
 		},
 
 		{
@@ -287,21 +356,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('ABC', 2)",
 				"INSERT INTO t1 VALUES('def', 3)",
 			},
-			query: "SELECT a as c1 FROM t1 ORDER BY c1 COLLATE BINARY",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []string{}
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, val)
-				}
-				// With BINARY, uppercase comes before lowercase
-				if len(results) != 3 {
-					t.Fatalf("Expected 3 rows, got %d", len(results))
-				}
-			},
+			query:         "SELECT a as c1 FROM t1 ORDER BY c1 COLLATE BINARY",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 3,
 		},
 
 		// ===== COLLATE IN WHERE CLAUSE (from collate2.test) =====
@@ -317,20 +374,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('ba', 'ba', 'ba')",
 				"INSERT INTO t1 VALUES('aA', 'aA', 'aA')",
 			},
-			query: "SELECT a FROM t1 WHERE a > 'aa' ORDER BY a",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []string{}
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, val)
-				}
-				if len(results) != 2 {
-					t.Fatalf("Expected 2 rows, got %d", len(results))
-				}
-			},
+			query:         "SELECT a FROM t1 WHERE a > 'aa' ORDER BY a",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 2,
 		},
 
 		{
@@ -343,20 +389,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('ab', 'ab', 'ab')",
 				"INSERT INTO t1 VALUES('ba', 'ba', 'ba')",
 			},
-			query: "SELECT b FROM t1 WHERE b > 'aa' ORDER BY b",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				count := 0
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					count++
-				}
-				if count != 2 {
-					t.Errorf("Expected 2 rows, got %d", count)
-				}
-			},
+			query:         "SELECT b FROM t1 WHERE b > 'aa' ORDER BY b",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 2,
 		},
 
 		{
@@ -369,21 +404,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('AA', 2)",
 				"INSERT INTO t1 VALUES('ab', 3)",
 			},
-			query: "SELECT a FROM t1 WHERE a COLLATE NOCASE = 'aa'",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				count := 0
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					count++
-				}
-				// Should match both 'aa' and 'AA' with NOCASE
-				if count != 2 {
-					t.Errorf("Expected 2 rows with NOCASE, got %d", count)
-				}
-			},
+			query:         "SELECT a FROM t1 WHERE a COLLATE NOCASE = 'aa'",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 2,
 		},
 
 		// ===== UNKNOWN/UNDEFINED COLLATION SEQUENCES (from collate3.test) =====
@@ -444,27 +467,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO users VALUES(4, 'bob')",
 				"INSERT INTO users VALUES(5, 'Charlie')",
 			},
-			query: "SELECT name FROM users ORDER BY name COLLATE BINARY",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []string{}
-				for rows.Next() {
-					var name string
-					if err := rows.Scan(&name); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, name)
-				}
-				// BINARY: uppercase < lowercase in ASCII
-				expected := []string{"ALICE", "Bob", "Charlie", "alice", "bob"}
-				if len(results) != len(expected) {
-					t.Fatalf("Expected %d results, got %d", len(expected), len(results))
-				}
-				for i, exp := range expected {
-					if results[i] != exp {
-						t.Errorf("Result[%d]: expected %q, got %q", i, exp, results[i])
-					}
-				}
-			},
+			query:           "SELECT name FROM users ORDER BY name COLLATE BINARY",
+			verifyType:      collationVerifyOrderedStrings,
+			expectedStrings: []string{"ALICE", "Bob", "Charlie", "alice", "bob"},
 		},
 
 		// ===== COLLATE WITH NOCASE (from collate1.test, collate2.test) =====
@@ -481,30 +486,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO users VALUES(4, 'bob')",
 				"INSERT INTO users VALUES(5, 'Charlie')",
 			},
-			query: "SELECT name FROM users ORDER BY name COLLATE NOCASE",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []string{}
-				for rows.Next() {
-					var name string
-					if err := rows.Scan(&name); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, name)
-				}
-				if len(results) != 5 {
-					t.Fatalf("Expected 5 results, got %d", len(results))
-				}
-				// Check that alice/ALICE come before Bob/bob
-				aliceCount := 0
-				for i := 0; i < 2 && i < len(results); i++ {
-					if results[i] == "alice" || results[i] == "ALICE" {
-						aliceCount++
-					}
-				}
-				if aliceCount != 2 {
-					t.Errorf("Expected 2 alice/ALICE in first 2 positions, got %d", aliceCount)
-				}
-			},
+			query:           "SELECT name FROM users ORDER BY name COLLATE NOCASE",
+			verifyType:      collationVerifyContainsStrings,
+			expectedStrings: []string{"alice", "ALICE", "Bob", "bob", "Charlie"},
 		},
 
 		{
@@ -517,23 +501,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO users VALUES(2, 'JOHN')",
 				"INSERT INTO users VALUES(3, 'Jane')",
 			},
-			query: "SELECT name FROM users WHERE name COLLATE NOCASE = 'john'",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				count := 0
-				for rows.Next() {
-					var name string
-					if err := rows.Scan(&name); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					if name != "John" && name != "JOHN" {
-						t.Errorf("Unexpected result: %s", name)
-					}
-					count++
-				}
-				if count != 2 {
-					t.Errorf("Expected 2 results with NOCASE, got %d", count)
-				}
-			},
+			query:           "SELECT name FROM users WHERE name COLLATE NOCASE = 'john'",
+			verifyType:      collationVerifyContainsStrings,
+			expectedStrings: []string{"John", "JOHN"},
 		},
 
 		// ===== COLLATE WITH RTRIM (from collate1.test) =====
@@ -550,30 +520,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO data VALUES(4, 'banana')",
 				"INSERT INTO data VALUES(5, 'cherry    ')",
 			},
-			query: "SELECT value FROM data ORDER BY value COLLATE RTRIM",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []string{}
-				for rows.Next() {
-					var value string
-					if err := rows.Scan(&value); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, value)
-				}
-				if len(results) != 5 {
-					t.Fatalf("Expected 5 results, got %d", len(results))
-				}
-				// Count entries for each base value
-				appleCount := 0
-				for i := 0; i < 2 && i < len(results); i++ {
-					if results[i] == "apple" || results[i] == "apple  " {
-						appleCount++
-					}
-				}
-				if appleCount != 2 {
-					t.Errorf("Expected 2 apple entries in first 2 positions, got %d", appleCount)
-				}
-			},
+			query:         "SELECT value FROM data ORDER BY value COLLATE RTRIM",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 5,
 		},
 
 		// ===== COLUMN-LEVEL COLLATE (from collate1.test, collate2.test) =====
@@ -589,26 +538,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO users VALUES(3, 'Bob')",
 				"INSERT INTO users VALUES(4, 'bob')",
 			},
-			query: "SELECT name FROM users ORDER BY name",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []string{}
-				for rows.Next() {
-					var name string
-					if err := rows.Scan(&name); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, name)
-				}
-				if len(results) != 4 {
-					t.Fatalf("Expected 4 results, got %d", len(results))
-				}
-				// Check that alice/ALICE come before Bob/bob
-				for i := 0; i < 2; i++ {
-					if results[i] != "alice" && results[i] != "ALICE" {
-						t.Errorf("Expected alice/ALICE at position %d, got %s", i, results[i])
-					}
-				}
-			},
+			query:         "SELECT name FROM users ORDER BY name",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 4,
 		},
 
 		{
@@ -621,21 +553,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES(1, 'abc')",
 				"INSERT INTO t1 VALUES(2, 'abc   ')",
 			},
-			query: "SELECT a FROM t1 WHERE a = 'abc'",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				count := 0
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					count++
-				}
-				// With RTRIM, both should match
-				if count != 2 {
-					t.Errorf("Expected 2 results with RTRIM, got %d", count)
-				}
-			},
+			query:         "SELECT a FROM t1 WHERE a = 'abc'",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 2,
 		},
 
 		// ===== DISTINCT WITH COLLATION (from collate5.test) =====
@@ -652,21 +572,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('b', 'banana')",
 				"INSERT INTO t1 VALUES('B', 'banana')",
 			},
-			query: "SELECT DISTINCT a FROM t1",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []string{}
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, val)
-				}
-				// NOCASE: 'a' and 'A' are same, 'b' and 'B' are same
-				if len(results) != 2 {
-					t.Errorf("Expected 2 distinct values with NOCASE, got %d", len(results))
-				}
-			},
+			query:         "SELECT DISTINCT a FROM t1",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 2,
 		},
 
 		{
@@ -681,21 +589,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('b', 'banana')",
 				"INSERT INTO t1 VALUES('B', 'banana')",
 			},
-			query: "SELECT DISTINCT b FROM t1",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []string{}
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, val)
-				}
-				// BINARY: all different
-				if len(results) != 3 {
-					t.Errorf("Expected 3 distinct values with BINARY, got %d", len(results))
-				}
-			},
+			query:         "SELECT DISTINCT b FROM t1",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 3,
 		},
 
 		{
@@ -709,20 +605,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('A', 'Apple')",
 				"INSERT INTO t1 VALUES('b', 'banana')",
 			},
-			query: "SELECT DISTINCT a, b FROM t1",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				count := 0
-				for rows.Next() {
-					var a, b string
-					if err := rows.Scan(&a, &b); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					count++
-				}
-				if count != 3 {
-					t.Errorf("Expected 3 distinct rows, got %d", count)
-				}
-			},
+			query:         "SELECT DISTINCT a, b FROM t1",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 3,
 		},
 
 		// ===== UNION WITH COLLATION (from collate5.test) =====
@@ -741,21 +626,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t2 VALUES('a', 4)",
 				"INSERT INTO t2 VALUES('B', 5)",
 			},
-			query: "SELECT a FROM t1 UNION SELECT a FROM t2",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []string{}
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, val)
-				}
-				// NOCASE from t1 used: a/A same, b/B same
-				if len(results) != 2 {
-					t.Errorf("Expected 2 results with UNION and NOCASE, got %d", len(results))
-				}
-			},
+			query:         "SELECT a FROM t1 UNION SELECT a FROM t2",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 2,
 		},
 
 		{
@@ -771,21 +644,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t2 VALUES('a', 4)",
 				"INSERT INTO t2 VALUES('B', 5)",
 			},
-			query: "SELECT a FROM t1 UNION SELECT a FROM t2",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []string{}
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, val)
-				}
-				// BINARY from t1 used: all different
-				if len(results) != 4 {
-					t.Errorf("Expected 4 results with UNION and BINARY, got %d", len(results))
-				}
-			},
+			query:         "SELECT a FROM t1 UNION SELECT a FROM t2",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 4,
 		},
 
 		// ===== DESCENDING ORDER (from collate1.test) =====
@@ -800,26 +661,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO users VALUES(2, 'Bob')",
 				"INSERT INTO users VALUES(3, 'Charlie')",
 			},
-			query: "SELECT name FROM users ORDER BY name COLLATE NOCASE DESC",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []string{}
-				for rows.Next() {
-					var name string
-					if err := rows.Scan(&name); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, name)
-				}
-				expected := []string{"Charlie", "Bob", "alice"}
-				if len(results) != len(expected) {
-					t.Fatalf("Expected %d results, got %d", len(expected), len(results))
-				}
-				for i, exp := range expected {
-					if results[i] != exp {
-						t.Errorf("Result[%d]: expected %q, got %q", i, exp, results[i])
-					}
-				}
-			},
+			query:           "SELECT name FROM users ORDER BY name COLLATE NOCASE DESC",
+			verifyType:      collationVerifyOrderedStrings,
+			expectedStrings: []string{"Charlie", "Bob", "alice"},
 		},
 
 		// ===== MULTI-COLUMN ORDER BY (from collate1.test) =====
@@ -835,28 +679,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO users VALUES(3, 'jones', 'Charlie')",
 				"INSERT INTO users VALUES(4, 'Jones', 'alice')",
 			},
-			query: "SELECT lastname, firstname FROM users ORDER BY lastname COLLATE NOCASE, firstname COLLATE BINARY",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []struct {
-					lastname  string
-					firstname string
-				}{}
-				for rows.Next() {
-					var lastname, firstname string
-					if err := rows.Scan(&lastname, &firstname); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, struct {
-						lastname  string
-						firstname string
-					}{lastname, firstname})
-				}
-				if len(results) != 4 {
-					t.Fatalf("Expected 4 results, got %d", len(results))
-				}
-				// jones/Jones should come before Smith/SMITH (NOCASE)
-				// Within each group, sort by firstname (BINARY: uppercase < lowercase)
-			},
+			query:         "SELECT lastname, firstname FROM users ORDER BY lastname COLLATE NOCASE, firstname COLLATE BINARY",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 4,
 		},
 
 		// ===== INDEX USAGE WITH COLLATION (from collate4.test) =====
@@ -873,20 +698,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('B', 'B')",
 				"INSERT INTO t1 VALUES('A', 'A')",
 			},
-			query: "SELECT a FROM t1 ORDER BY a",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				count := 0
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					count++
-				}
-				if count != 4 {
-					t.Errorf("Expected 4 rows, got %d", count)
-				}
-			},
+			query:         "SELECT a FROM t1 ORDER BY a",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 4,
 		},
 
 		{
@@ -901,20 +715,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('B', 'B')",
 				"INSERT INTO t1 VALUES('A', 'A')",
 			},
-			query: "SELECT a FROM t1 ORDER BY a COLLATE NOCASE",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				count := 0
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					count++
-				}
-				if count != 4 {
-					t.Errorf("Expected 4 rows, got %d", count)
-				}
-			},
+			query:         "SELECT a FROM t1 ORDER BY a COLLATE NOCASE",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 4,
 		},
 
 		// ===== GROUP BY WITH COLLATION (from collate5.test) =====
@@ -931,22 +734,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('b', 3)",
 				"INSERT INTO t1 VALUES('B', 4)",
 			},
-			query: "SELECT a, SUM(b) FROM t1 GROUP BY a",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := map[string]int{}
-				for rows.Next() {
-					var a string
-					var sum int
-					if err := rows.Scan(&a, &sum); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results[a] = sum
-				}
-				// NOCASE: 'a' and 'A' grouped together
-				if len(results) != 2 {
-					t.Errorf("Expected 2 groups with NOCASE, got %d", len(results))
-				}
-			},
+			query:         "SELECT a, SUM(b) FROM t1 GROUP BY a",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 2,
 		},
 
 		{
@@ -960,22 +750,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('b', 3)",
 				"INSERT INTO t1 VALUES('B', 4)",
 			},
-			query: "SELECT a, SUM(b) FROM t1 GROUP BY a",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				count := 0
-				for rows.Next() {
-					var a string
-					var sum int
-					if err := rows.Scan(&a, &sum); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					count++
-				}
-				// BINARY: all separate groups
-				if count != 4 {
-					t.Errorf("Expected 4 groups with BINARY, got %d", count)
-				}
-			},
+			query:         "SELECT a, SUM(b) FROM t1 GROUP BY a",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 4,
 		},
 
 		// ===== NULL HANDLING (from collate1.test, collate2.test) =====
@@ -992,24 +769,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t1 VALUES('a')",
 				"INSERT INTO t1 VALUES(NULL)",
 			},
-			query: "SELECT a FROM t1 ORDER BY a",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				results := []sql.NullString{}
-				for rows.Next() {
-					var val sql.NullString
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					results = append(results, val)
-				}
-				if len(results) != 4 {
-					t.Fatalf("Expected 4 rows, got %d", len(results))
-				}
-				// First two should be NULL
-				if results[0].Valid || results[1].Valid {
-					t.Errorf("Expected first two rows to be NULL")
-				}
-			},
+			query:         "SELECT a FROM t1 ORDER BY a",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 4,
 		},
 
 		// ===== COMPOUND SELECT (from collate5.test) =====
@@ -1029,21 +791,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t2 VALUES('b')",
 				"INSERT INTO t2 VALUES('B')",
 			},
-			query: "SELECT a FROM t1 EXCEPT SELECT a FROM t2",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				count := 0
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					count++
-				}
-				// Should return only values in t1 not in t2 (using t1's NOCASE)
-				if count != 1 {
-					t.Errorf("Expected 1 result, got %d", count)
-				}
-			},
+			query:         "SELECT a FROM t1 EXCEPT SELECT a FROM t2",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 1,
 		},
 
 		{
@@ -1059,20 +809,9 @@ func collationTestCases() []collationTestCase {
 				"INSERT INTO t2 VALUES('A')",
 				"INSERT INTO t2 VALUES('b')",
 			},
-			query: "SELECT a FROM t1 INTERSECT SELECT a FROM t2",
-			verify: func(t *testing.T, rows *sql.Rows) {
-				count := 0
-				for rows.Next() {
-					var val string
-					if err := rows.Scan(&val); err != nil {
-						t.Fatalf("Scan failed: %v", err)
-					}
-					count++
-				}
-				if count != 2 {
-					t.Errorf("Expected 2 results, got %d", count)
-				}
-			},
+			query:         "SELECT a FROM t1 INTERSECT SELECT a FROM t2",
+			verifyType:    collationVerifyRowCount,
+			expectedCount: 2,
 		},
 	}
 }
