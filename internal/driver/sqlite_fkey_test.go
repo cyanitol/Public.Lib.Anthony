@@ -1115,7 +1115,6 @@ func TestForeignKey_CollationHandling(t *testing.T) {
 // TestForeignKey_RecursiveCascade tests recursive CASCADE operations.
 // Based on fkey2-4.* tests.
 func TestForeignKey_RecursiveCascade(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
