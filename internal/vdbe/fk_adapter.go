@@ -34,8 +34,8 @@ func NewVDBERowModifier(v *VDBE) *VDBERowModifier {
 // RowExists checks if a row exists with the given column values in the referenced table.
 // It returns true if a matching row is found, false otherwise.
 func (r *VDBERowReader) RowExists(tableName string, columns []string, values []interface{}) (bool, error) {
-	if r.vdbe == nil || r.vdbe.Ctx == nil {
-		return false, fmt.Errorf("vdbe context not available")
+	if err := r.validateContext(); err != nil {
+		return false, err
 	}
 
 	// Get the table from schema
@@ -59,8 +59,8 @@ func (r *VDBERowReader) RowExists(tableName string, columns []string, values []i
 // FindReferencingRows finds all rowids of rows that reference the given values.
 // This is used for ON DELETE/UPDATE CASCADE operations.
 func (r *VDBERowReader) FindReferencingRows(tableName string, columns []string, values []interface{}) ([]int64, error) {
-	if r.vdbe == nil || r.vdbe.Ctx == nil {
-		return nil, fmt.Errorf("vdbe context not available")
+	if err := r.validateContext(); err != nil {
+		return nil, err
 	}
 
 	table, err := r.getTable(tableName)
@@ -81,8 +81,8 @@ func (r *VDBERowReader) FindReferencingRows(tableName string, columns []string, 
 // ReadRowByRowid reads a row's values by its rowid.
 // Used for recursive CASCADE operations.
 func (r *VDBERowReader) ReadRowByRowid(tableName string, rowid int64) (map[string]interface{}, error) {
-	if r.vdbe == nil || r.vdbe.Ctx == nil {
-		return nil, fmt.Errorf("vdbe context not available")
+	if err := r.validateContext(); err != nil {
+		return nil, err
 	}
 
 	table, err := r.getTable(tableName)
@@ -90,7 +90,6 @@ func (r *VDBERowReader) ReadRowByRowid(tableName string, rowid int64) (map[strin
 		return nil, err
 	}
 
-	// WITHOUT ROWID tables don't have rowids, so this function only works for regular tables
 	if table.WithoutRowID {
 		return nil, fmt.Errorf("ReadRowByRowid not supported for WITHOUT ROWID table: %s", tableName)
 	}
@@ -102,6 +101,28 @@ func (r *VDBERowReader) ReadRowByRowid(tableName string, rowid int64) (map[strin
 		return nil, err
 	}
 
+	cursor, err := r.getBTreeCursor(cursorNum)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := r.seekToRowid(cursor, rowid); err != nil {
+		return nil, err
+	}
+
+	return r.readRowValuesFromCursor(r.vdbe.Cursors[cursorNum], table)
+}
+
+// validateContext checks if VDBE context is available
+func (r *VDBERowReader) validateContext() error {
+	if r.vdbe == nil || r.vdbe.Ctx == nil {
+		return fmt.Errorf("vdbe context not available")
+	}
+	return nil
+}
+
+// getBTreeCursor retrieves and validates the btree cursor at the given cursor number
+func (r *VDBERowReader) getBTreeCursor(cursorNum int) (*btree.BtCursor, error) {
 	cursor := r.vdbe.Cursors[cursorNum]
 	if cursor == nil {
 		return nil, fmt.Errorf("cursor not found")
@@ -112,17 +133,19 @@ func (r *VDBERowReader) ReadRowByRowid(tableName string, rowid int64) (map[strin
 		return nil, fmt.Errorf("invalid cursor type")
 	}
 
-	// Seek to the row with the given rowid
+	return btCursor, nil
+}
+
+// seekToRowid seeks to a specific rowid and validates it was found
+func (r *VDBERowReader) seekToRowid(btCursor *btree.BtCursor, rowid int64) error {
 	found, err := btCursor.SeekRowid(rowid)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if !found {
-		return nil, fmt.Errorf("row not found: rowid %d", rowid)
+		return fmt.Errorf("row not found: rowid %d", rowid)
 	}
-
-	// Read the row values using the existing readRowValuesFromCursor method
-	return r.readRowValuesFromCursor(cursor, table)
+	return nil
 }
 
 // readRowValuesFromCursor reads all column values from the current cursor position.
@@ -347,37 +370,47 @@ func (r *VDBERowReader) closeTempCursor(cursorNum int) {
 
 // findMatchingRow scans the table to find a row matching the given values.
 func (r *VDBERowReader) findMatchingRow(cursorNum int, table *tableInfo, columns []string, values []interface{}) (bool, error) {
-	cursor := r.vdbe.Cursors[cursorNum]
-	if cursor == nil {
-		return false, fmt.Errorf("cursor not found")
-	}
-
-	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
-	if !ok {
-		return false, fmt.Errorf("invalid cursor type")
-	}
-
-	// Rewind to start
-	if err := btCursor.MoveToFirst(); err != nil {
-		// Empty table/leaf means no rows - not an error for FK check, just return false
-		errStr := err.Error()
-		if strings.Contains(errStr, "empty") {
-			return false, nil
-		}
+	btCursor, err := r.getBTreeCursor(cursorNum)
+	if err != nil {
 		return false, err
 	}
 
-	// Scan all rows
+	isEmpty, err := r.moveToFirstRow(btCursor)
+	if err != nil {
+		return false, err
+	}
+	if isEmpty {
+		return false, nil // Empty table means no match
+	}
+
+	return r.scanForMatch(r.vdbe.Cursors[cursorNum], btCursor, table, columns, values)
+}
+
+// moveToFirstRow moves cursor to the first row, returns (isEmpty, error).
+// isEmpty is true if the table is empty (cursor not valid), false if positioned at first row.
+func (r *VDBERowReader) moveToFirstRow(btCursor *btree.BtCursor) (bool, error) {
+	if err := btCursor.MoveToFirst(); err != nil {
+		if r.isEmptyTableError(err) {
+			return true, nil // Table is empty
+		}
+		return false, err
+	}
+	return false, nil // Cursor is at first row
+}
+
+// scanForMatch scans through rows looking for a match
+func (r *VDBERowReader) scanForMatch(cursor *Cursor, btCursor *btree.BtCursor, table *tableInfo, columns []string, values []interface{}) (bool, error) {
 	for {
-		if match, err := r.checkRowMatch(cursor, table, columns, values); err != nil {
+		match, err := r.checkRowMatch(cursor, table, columns, values)
+		if err != nil {
 			return false, err
-		} else if match {
+		}
+		if match {
 			return true, nil
 		}
 
-		// Move to next row
 		if err := btCursor.Next(); err != nil {
-			break // End of table
+			break
 		}
 	}
 
@@ -386,29 +419,32 @@ func (r *VDBERowReader) findMatchingRow(cursorNum int, table *tableInfo, columns
 
 // collectMatchingRowids finds all rowids that match the given column values.
 func (r *VDBERowReader) collectMatchingRowids(cursorNum int, table *tableInfo, columns []string, values []interface{}) ([]int64, error) {
-	cursor := r.vdbe.Cursors[cursorNum]
-	if cursor == nil {
-		return nil, fmt.Errorf("cursor not found")
-	}
-
-	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
-	if !ok {
-		return nil, fmt.Errorf("invalid cursor type")
-	}
-
-	var rowids []int64
-
-	if err := btCursor.MoveToFirst(); err != nil {
-		if r.isEmptyTableError(err) {
-			return rowids, nil
-		}
+	btCursor, err := r.getBTreeCursor(cursorNum)
+	if err != nil {
 		return nil, err
 	}
 
+	isEmpty, err := r.moveToFirstRow(btCursor)
+	if err != nil {
+		return nil, err
+	}
+	if isEmpty {
+		return []int64{}, nil // Empty table means no matches
+	}
+
+	return r.collectAllMatchingRowids(r.vdbe.Cursors[cursorNum], btCursor, table, columns, values)
+}
+
+// collectAllMatchingRowids scans all rows and collects matching rowids
+func (r *VDBERowReader) collectAllMatchingRowids(cursor *Cursor, btCursor *btree.BtCursor, table *tableInfo, columns []string, values []interface{}) ([]int64, error) {
+	var rowids []int64
+
 	for {
-		if match, err := r.checkRowMatch(cursor, table, columns, values); err != nil {
+		match, err := r.checkRowMatch(cursor, table, columns, values)
+		if err != nil {
 			return nil, err
-		} else if match {
+		}
+		if match {
 			rowids = append(rowids, btCursor.GetKey())
 		}
 
@@ -490,20 +526,66 @@ func (r *VDBERowReader) valuesEqual(mem *Mem, value interface{}) bool {
 
 // compareMemToInterface compares a non-null Mem value with an interface{} value.
 func compareMemToInterface(mem *Mem, value interface{}) bool {
-	switch v := value.(type) {
-	case int:
-		return mem.IsInt() && mem.IntValue() == int64(v)
-	case int64:
-		return mem.IsInt() && mem.IntValue() == v
-	case float64:
-		return compareMemToFloat64(mem, v)
-	case string:
-		return mem.IsString() && mem.StringValue() == v
-	case []byte:
-		return mem.IsBlob() && string(mem.BlobValue()) == string(v)
-	default:
-		return false
+	handlers := []func(*Mem, interface{}) (bool, bool){
+		compareMemToInt,
+		compareMemToInt64,
+		compareMemToFloat64Handler,
+		compareMemToString,
+		compareMemToBlob,
 	}
+
+	for _, handler := range handlers {
+		if matched, handled := handler(mem, value); handled {
+			return matched
+		}
+	}
+
+	return false
+}
+
+// compareMemToInt checks if mem matches an int value
+func compareMemToInt(mem *Mem, value interface{}) (bool, bool) {
+	v, ok := value.(int)
+	if !ok {
+		return false, false
+	}
+	return mem.IsInt() && mem.IntValue() == int64(v), true
+}
+
+// compareMemToInt64 checks if mem matches an int64 value
+func compareMemToInt64(mem *Mem, value interface{}) (bool, bool) {
+	v, ok := value.(int64)
+	if !ok {
+		return false, false
+	}
+	return mem.IsInt() && mem.IntValue() == v, true
+}
+
+// compareMemToFloat64Handler checks if mem matches a float64 value
+func compareMemToFloat64Handler(mem *Mem, value interface{}) (bool, bool) {
+	v, ok := value.(float64)
+	if !ok {
+		return false, false
+	}
+	return compareMemToFloat64(mem, v), true
+}
+
+// compareMemToString checks if mem matches a string value
+func compareMemToString(mem *Mem, value interface{}) (bool, bool) {
+	v, ok := value.(string)
+	if !ok {
+		return false, false
+	}
+	return mem.IsString() && mem.StringValue() == v, true
+}
+
+// compareMemToBlob checks if mem matches a []byte value
+func compareMemToBlob(mem *Mem, value interface{}) (bool, bool) {
+	v, ok := value.([]byte)
+	if !ok {
+		return false, false
+	}
+	return mem.IsBlob() && string(mem.BlobValue()) == string(v), true
 }
 
 // compareMemToFloat64 compares a Mem value with a float64.
@@ -567,31 +649,44 @@ func toInt64(v interface{}) (int64, bool) {
 	return 0, false
 }
 
+// affinityRule defines a type affinity matching rule
+type affinityRule struct {
+	keywords []string
+	apply    func(interface{}) interface{}
+}
+
 // applyColumnAffinity applies SQLite type affinity to value based on column type.
 func applyColumnAffinity(value interface{}, columnType string) interface{} {
+	if columnType == "" {
+		return value
+	}
+
 	upper := strings.ToUpper(columnType)
 
-	// INTEGER affinity
-	if strings.Contains(upper, "INT") {
-		return applyIntegerAffinity(value)
+	rules := []affinityRule{
+		{keywords: []string{"INT"}, apply: applyIntegerAffinity},
+		{keywords: []string{"CHAR", "CLOB", "TEXT"}, apply: applyTextAffinity},
+		{keywords: []string{"REAL", "FLOA", "DOUB"}, apply: applyRealAffinity},
 	}
 
-	// TEXT affinity
-	if strings.Contains(upper, "CHAR") || strings.Contains(upper, "CLOB") || strings.Contains(upper, "TEXT") {
-		return applyTextAffinity(value)
-	}
-
-	// REAL affinity
-	if strings.Contains(upper, "REAL") || strings.Contains(upper, "FLOA") || strings.Contains(upper, "DOUB") {
-		return applyRealAffinity(value)
+	for _, rule := range rules {
+		if matchesAnyKeyword(upper, rule.keywords) {
+			return rule.apply(value)
+		}
 	}
 
 	// NUMERIC affinity (default for non-empty types)
-	if columnType != "" {
-		return applyNumericAffinity(value)
-	}
+	return applyNumericAffinity(value)
+}
 
-	return value
+// matchesAnyKeyword checks if str contains any of the keywords
+func matchesAnyKeyword(str string, keywords []string) bool {
+	for _, keyword := range keywords {
+		if strings.Contains(str, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 // applyIntegerAffinity converts value to int64 when possible.

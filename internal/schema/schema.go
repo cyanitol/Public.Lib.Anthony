@@ -400,6 +400,23 @@ func (t *Table) GetColumnIndex(name string) int {
 	return -1
 }
 
+// isRowidAlias checks if a name is a special rowid alias.
+func isRowidAlias(name string) bool {
+	lowerName := strings.ToLower(name)
+	return lowerName == "rowid" || lowerName == "_rowid_" || lowerName == "oid"
+}
+
+// findIntegerPrimaryKeyIndex searches for an INTEGER PRIMARY KEY column.
+// Returns the column index or -1 if not found.
+func (t *Table) findIntegerPrimaryKeyIndex() int {
+	for i, col := range t.Columns {
+		if col.PrimaryKey && (col.Type == "INTEGER" || col.Type == "INT") {
+			return i
+		}
+	}
+	return -1
+}
+
 // GetColumnIndexWithRowidAliases returns the index of a column by name,
 // handling both regular column names and special rowid aliases (rowid, _rowid_, oid).
 // Returns -1 if not found. Returns -2 if the name is a rowid alias but no
@@ -412,21 +429,17 @@ func (t *Table) GetColumnIndexWithRowidAliases(name string) int {
 	}
 
 	// Check if this is a rowid alias
-	lowerName := strings.ToLower(name)
-	isRowidAlias := lowerName == "rowid" || lowerName == "_rowid_" || lowerName == "oid"
-
-	if isRowidAlias {
-		// Look for INTEGER PRIMARY KEY column
-		for i, col := range t.Columns {
-			if col.PrimaryKey && (col.Type == "INTEGER" || col.Type == "INT") {
-				return i
-			}
-		}
-		// No INTEGER PRIMARY KEY, but this is a rowid alias - return special marker
-		return -2
+	if !isRowidAlias(name) {
+		return -1
 	}
 
-	return -1
+	// Look for INTEGER PRIMARY KEY column
+	if idx := t.findIntegerPrimaryKeyIndex(); idx >= 0 {
+		return idx
+	}
+
+	// No INTEGER PRIMARY KEY, but this is a rowid alias - return special marker
+	return -2
 }
 
 // GetColumnCollation returns the collation for a column by index.

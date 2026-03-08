@@ -307,6 +307,30 @@ func selfReferenceMatches(values map[string]interface{}, fkColumns, parentColumn
 	return true
 }
 
+// validateDeleteTypeAssertions performs type assertions for ValidateDelete.
+// Returns the typed objects or nil if any assertion fails.
+func (m *ForeignKeyManager) validateDeleteTypeAssertions(
+	schemaObj, rowReader, rowDeleter, rowUpdater interface{},
+) (*schema.Schema, RowReader, RowDeleter, RowUpdater, bool) {
+	schemaTyped, ok := schemaObj.(*schema.Schema)
+	if !ok {
+		return nil, nil, nil, nil, false
+	}
+	reader, ok := rowReader.(RowReader)
+	if !ok {
+		return nil, nil, nil, nil, false
+	}
+	deleter, ok := rowDeleter.(RowDeleter)
+	if !ok {
+		return nil, nil, nil, nil, false
+	}
+	updater, ok := rowUpdater.(RowUpdater)
+	if !ok {
+		return nil, nil, nil, nil, false
+	}
+	return schemaTyped, reader, deleter, updater, true
+}
+
 // ValidateDelete validates foreign key constraints for a DELETE operation.
 // Returns an error if any constraint is violated, or performs cascade actions.
 func (m *ForeignKeyManager) ValidateDelete(
@@ -321,20 +345,8 @@ func (m *ForeignKeyManager) ValidateDelete(
 		return nil
 	}
 
-	// Type assertions
-	schemaTyped, ok := schemaObj.(*schema.Schema)
-	if !ok {
-		return nil
-	}
-	reader, ok := rowReader.(RowReader)
-	if !ok {
-		return nil
-	}
-	deleter, ok := rowDeleter.(RowDeleter)
-	if !ok {
-		return nil
-	}
-	updater, ok := rowUpdater.(RowUpdater)
+	schemaTyped, reader, deleter, updater, ok := m.validateDeleteTypeAssertions(
+		schemaObj, rowReader, rowDeleter, rowUpdater)
 	if !ok {
 		return nil
 	}
@@ -414,6 +426,11 @@ func (m *ForeignKeyManager) handleDeleteConstraint(
 	return m.applyDeleteAction(fk, referencingRows, schemaObj, rowDeleter, rowUpdater, rowReader)
 }
 
+// applyDeleteActionRestrict returns an error for RESTRICT/NO ACTION/default behavior.
+func (m *ForeignKeyManager) applyDeleteActionRestrict(fk *ForeignKeyConstraint) error {
+	return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", fk.Table)
+}
+
 // applyDeleteAction applies the appropriate ON DELETE action.
 func (m *ForeignKeyManager) applyDeleteAction(
 	fk *ForeignKeyConstraint,
@@ -423,21 +440,17 @@ func (m *ForeignKeyManager) applyDeleteAction(
 	rowUpdater RowUpdater,
 	rowReader RowReader,
 ) error {
-	// No referencing rows means no action needed
 	if len(referencingRows) == 0 {
 		return nil
 	}
+
 	switch fk.OnDelete {
 	case FKActionNone, FKActionRestrict, FKActionNoAction:
-		// FKActionNone is the default when no ON DELETE is specified, which is equivalent to NO ACTION
-		return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", fk.Table)
-
+		return m.applyDeleteActionRestrict(fk)
 	case FKActionCascade:
 		return m.cascadeDelete(fk.Table, referencingRows, schemaObj, rowDeleter, rowUpdater, rowReader)
-
 	case FKActionSetNull:
 		return m.setNullOnRows(fk.Table, fk.Columns, referencingRows, rowUpdater)
-
 	case FKActionSetDefault:
 		return m.setDefaultOnRows(fk.Table, fk.Columns, referencingRows, schemaObj, rowUpdater)
 	}

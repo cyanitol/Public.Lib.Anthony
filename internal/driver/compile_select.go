@@ -494,15 +494,8 @@ func (s *Stmt) extractOrderByExpression(orderTerm parser.OrderingTerm, termIdx i
 // findOrderByColumnInSelect searches for ORDER BY column in SELECT columns.
 func (s *Stmt) findOrderByColumnInSelect(baseExpr parser.Expression, stmt *parser.SelectStmt) (string, int) {
 	// Check if it's a column number (literal integer)
-	if litExpr, ok := baseExpr.(*parser.LiteralExpr); ok {
-		var colNum int
-		if _, err := fmt.Sscanf(litExpr.Value, "%d", &colNum); err == nil {
-			// Column numbers are 1-indexed in SQL
-			if colNum >= 1 && colNum <= len(stmt.Columns) {
-				return "", colNum - 1
-			}
-		}
-		return "", -1
+	if colIdx := s.tryParseColumnNumber(baseExpr, stmt); colIdx >= 0 {
+		return "", colIdx
 	}
 
 	// Check if it's a column name
@@ -511,21 +504,44 @@ func (s *Stmt) findOrderByColumnInSelect(baseExpr parser.Expression, stmt *parse
 		return "", -1
 	}
 
-	orderColName := ident.Name
-
 	// Search by alias or column name
-	for j, selCol := range stmt.Columns {
+	orderColName := ident.Name
+	colIdx := s.searchColumnByName(orderColName, stmt.Columns)
+	return orderColName, colIdx
+}
+
+// tryParseColumnNumber attempts to parse a column number from a literal expression.
+func (s *Stmt) tryParseColumnNumber(baseExpr parser.Expression, stmt *parser.SelectStmt) int {
+	litExpr, ok := baseExpr.(*parser.LiteralExpr)
+	if !ok {
+		return -1
+	}
+
+	var colNum int
+	if _, err := fmt.Sscanf(litExpr.Value, "%d", &colNum); err != nil {
+		return -1
+	}
+
+	// Column numbers are 1-indexed in SQL
+	if colNum >= 1 && colNum <= len(stmt.Columns) {
+		return colNum - 1
+	}
+	return -1
+}
+
+// searchColumnByName searches for a column by alias or name in SELECT columns.
+func (s *Stmt) searchColumnByName(orderColName string, columns []parser.ResultColumn) int {
+	for j, selCol := range columns {
 		if selCol.Alias == orderColName {
-			return orderColName, j
+			return j
 		}
 		if selColIdent, ok := selCol.Expr.(*parser.IdentExpr); ok {
 			if selColIdent.Name == orderColName {
-				return orderColName, j
+				return j
 			}
 		}
 	}
-
-	return orderColName, -1
+	return -1
 }
 
 // findCollationInSchema looks up collation from table schema.

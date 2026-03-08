@@ -823,6 +823,19 @@ func addThousandsSeparator(s string) string {
 	return result.String()
 }
 
+// hasSignPrefix checks if the string starts with a sign character.
+func hasSignPrefix(s string) bool {
+	return len(s) > 0 && (s[0] == '-' || s[0] == '+' || s[0] == ' ')
+}
+
+// applyZeroPadding applies zero padding to a string, respecting sign prefix.
+func applyZeroPadding(s string, padding int) string {
+	if hasSignPrefix(s) {
+		return string(s[0]) + strings.Repeat("0", padding) + s[1:]
+	}
+	return strings.Repeat("0", padding) + s
+}
+
 // applyPadding applies width and alignment to a formatted value
 func applyPadding(s string, spec printfFormatSpec) string {
 	if spec.width <= len(s) {
@@ -833,11 +846,7 @@ func applyPadding(s string, spec printfFormatSpec) string {
 		return s + strings.Repeat(" ", padding)
 	}
 	if spec.zeroPad && !spec.leftAlign {
-		// For zero padding, put zeros after sign
-		if len(s) > 0 && (s[0] == '-' || s[0] == '+' || s[0] == ' ') {
-			return string(s[0]) + strings.Repeat("0", padding) + s[1:]
-		}
-		return strings.Repeat("0", padding) + s
+		return applyZeroPadding(s, padding)
 	}
 	return strings.Repeat(" ", padding) + s
 }

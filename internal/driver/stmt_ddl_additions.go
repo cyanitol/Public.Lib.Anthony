@@ -737,25 +737,44 @@ func newDriverRowReader(conn *Conn) *driverRowReader {
 
 // RowExists checks if a row exists with the given column values.
 func (r *driverRowReader) RowExists(tableName string, columns []string, values []interface{}) (bool, error) {
+	cursor, err := r.initializeCursor(tableName)
+	if err != nil {
+		return false, err
+	}
+
+	table, _ := r.conn.schema.GetTable(tableName)
+	return r.scanForMatch(cursor, table, columns, values)
+}
+
+// initializeCursor initializes and positions a cursor for table scanning.
+func (r *driverRowReader) initializeCursor(tableName string) (*btree.BtCursor, error) {
 	table, ok := r.conn.schema.GetTable(tableName)
 	if !ok {
-		return false, fmt.Errorf("table not found: %s", tableName)
+		return nil, fmt.Errorf("table not found: %s", tableName)
 	}
 
 	if r.conn.btree == nil {
-		return false, fmt.Errorf("btree not available")
+		return nil, fmt.Errorf("btree not available")
 	}
 
 	cursor := btree.NewCursor(r.conn.btree, table.RootPage)
 	if err := cursor.MoveToFirst(); err != nil {
 		// Empty table
 		if strings.Contains(err.Error(), "empty") {
-			return false, nil
+			return nil, nil
 		}
-		return false, err
+		return nil, err
 	}
 
-	// Scan all rows
+	return cursor, nil
+}
+
+// scanForMatch scans all rows looking for a match.
+func (r *driverRowReader) scanForMatch(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}) (bool, error) {
+	if cursor == nil {
+		return false, nil
+	}
+
 	for {
 		if match, err := r.checkRowMatch(cursor, table, columns, values); err != nil {
 			return false, err
@@ -773,23 +792,21 @@ func (r *driverRowReader) RowExists(tableName string, columns []string, values [
 
 // FindReferencingRows finds all rowids of rows with matching column values.
 func (r *driverRowReader) FindReferencingRows(tableName string, columns []string, values []interface{}) ([]int64, error) {
-	table, ok := r.conn.schema.GetTable(tableName)
-	if !ok {
-		return nil, fmt.Errorf("table not found: %s", tableName)
-	}
-
-	if r.conn.btree == nil {
-		return nil, fmt.Errorf("btree not available")
-	}
-
-	cursor := btree.NewCursor(r.conn.btree, table.RootPage)
-	if err := cursor.MoveToFirst(); err != nil {
-		if strings.Contains(err.Error(), "empty") {
-			return []int64{}, nil
-		}
+	cursor, err := r.initializeCursor(tableName)
+	if err != nil {
 		return nil, err
 	}
 
+	if cursor == nil {
+		return []int64{}, nil
+	}
+
+	table, _ := r.conn.schema.GetTable(tableName)
+	return r.collectMatchingRowids(cursor, table, columns, values)
+}
+
+// collectMatchingRowids scans all rows and collects rowids that match.
+func (r *driverRowReader) collectMatchingRowids(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}) ([]int64, error) {
 	var rowids []int64
 	for {
 		if match, err := r.checkRowMatch(cursor, table, columns, values); err != nil {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/constraint"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
@@ -105,57 +106,68 @@ func (s *Stmt) compileDropTable(vm *vdbe.VDBE, stmt *parser.DropTableStmt, args 
 	// Check if table exists
 	table, exists := s.conn.schema.GetTable(stmt.Name)
 	if !exists {
-		if stmt.IfExists {
-			// IF EXISTS was specified, silently succeed
-			vm.AddOp(vdbe.OpInit, 0, 0, 0)
-			vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-			return vm, nil
-		}
-		return nil, fmt.Errorf("table not found: %s", stmt.Name)
+		return s.handleMissingTable(vm, stmt)
 	}
 
-	// Check if foreign keys are enabled and any FK constraints reference this table
-	if s.conn.fkManager != nil && s.conn.fkManager.IsEnabled() {
-		referencingConstraints := s.conn.fkManager.FindReferencingConstraints(stmt.Name)
-		if len(referencingConstraints) > 0 {
-			return nil, fmt.Errorf("FOREIGN KEY constraint failed: cannot drop table %s, referenced by foreign key constraint", stmt.Name)
-		}
-	}
-
-	// Drop the table from the schema
-	// This simplified implementation removes the table from memory
-	// A full implementation would also:
-	// 1. Delete entry from sqlite_master table
-	// 2. Free all pages used by the table
-	// 3. Update the schema cookie
-	if err := s.conn.schema.DropTable(stmt.Name); err != nil {
+	// Check foreign key constraints
+	if err := s.checkDropTableForeignKeys(stmt.Name); err != nil {
 		return nil, err
+	}
+
+	// Drop table and cleanup
+	if err := s.performDropTable(stmt.Name, table); err != nil {
+		return nil, err
+	}
+
+	// Emit bytecode
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	s.invalidateStmtCache()
+	return vm, nil
+}
+
+// handleMissingTable handles the case when a table doesn't exist.
+func (s *Stmt) handleMissingTable(vm *vdbe.VDBE, stmt *parser.DropTableStmt) (*vdbe.VDBE, error) {
+	if stmt.IfExists {
+		// IF EXISTS was specified, silently succeed
+		vm.AddOp(vdbe.OpInit, 0, 0, 0)
+		vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+		return vm, nil
+	}
+	return nil, fmt.Errorf("table not found: %s", stmt.Name)
+}
+
+// checkDropTableForeignKeys checks if foreign key constraints prevent dropping the table.
+func (s *Stmt) checkDropTableForeignKeys(tableName string) error {
+	if s.conn.fkManager == nil || !s.conn.fkManager.IsEnabled() {
+		return nil
+	}
+
+	referencingConstraints := s.conn.fkManager.FindReferencingConstraints(tableName)
+	if len(referencingConstraints) > 0 {
+		return fmt.Errorf("FOREIGN KEY constraint failed: cannot drop table %s, referenced by foreign key constraint", tableName)
+	}
+	return nil
+}
+
+// performDropTable removes the table from schema and performs cleanup.
+func (s *Stmt) performDropTable(tableName string, _ *schema.Table) error {
+	// Drop the table from the schema
+	if err := s.conn.schema.DropTable(tableName); err != nil {
+		return err
 	}
 
 	// Remove FK constraints that belonged to this table
 	if s.conn.fkManager != nil {
-		s.conn.fkManager.RemoveConstraints(stmt.Name)
+		s.conn.fkManager.RemoveConstraints(tableName)
 	}
 
 	// Free table pages if btree is available
-	if s.conn.btree != nil && table.RootPage > 0 {
-		// In a full implementation, would call btree.FreePage(table.RootPage)
-		// and recursively free all pages in the table's btree
-		// For now, we just note that the page should be freed
-	}
+	// In a full implementation, would call btree.FreePage(table.RootPage)
+	// and recursively free all pages in the table's btree
 
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	// In a full implementation with sqlite_master:
-	// - OpOpenWrite on sqlite_master cursor
-	// - OpSeek to find the table entry
-	// - OpDelete to remove it
-	// - OpSetCookie to update schema version
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	// Invalidate statement cache since schema has changed
-	s.invalidateStmtCache()
-
-	return vm, nil
+	return nil
 }
 
 // ============================================================================

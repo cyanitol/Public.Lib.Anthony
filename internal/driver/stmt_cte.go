@@ -671,28 +671,45 @@ func (s *Stmt) expandStarColumns(stmt *parser.SelectStmt) []parser.ResultColumn 
 
 	for _, col := range stmt.Columns {
 		if col.Star {
-			// Get the table(s) from FROM clause and expand their columns
-			if stmt.From != nil && len(stmt.From.Tables) > 0 {
-				for _, tableOrSub := range stmt.From.Tables {
-					if tableOrSub.TableName != "" {
-						// Look up the table in schema
-						if table, ok := s.conn.schema.GetTable(tableOrSub.TableName); ok {
-							// Add each column from the table
-							for _, schemaCol := range table.Columns {
-								expandedCols = append(expandedCols, parser.ResultColumn{
-									Expr: &parser.IdentExpr{Name: schemaCol.Name},
-								})
-							}
-						}
-					}
-				}
-			}
+			expandedCols = append(expandedCols, s.expandStarColumn(stmt)...)
 		} else {
-			// Keep non-star columns as-is
 			expandedCols = append(expandedCols, col)
 		}
 	}
 
+	return expandedCols
+}
+
+// expandStarColumn expands a single star column to all table columns.
+func (s *Stmt) expandStarColumn(stmt *parser.SelectStmt) []parser.ResultColumn {
+	if stmt.From == nil || len(stmt.From.Tables) == 0 {
+		return nil
+	}
+
+	var expandedCols []parser.ResultColumn
+	for _, tableOrSub := range stmt.From.Tables {
+		expandedCols = append(expandedCols, s.expandTableColumns(tableOrSub)...)
+	}
+	return expandedCols
+}
+
+// expandTableColumns expands columns from a single table reference.
+func (s *Stmt) expandTableColumns(tableOrSub parser.TableOrSubquery) []parser.ResultColumn {
+	if tableOrSub.TableName == "" {
+		return nil
+	}
+
+	table, ok := s.conn.schema.GetTable(tableOrSub.TableName)
+	if !ok {
+		return nil
+	}
+
+	expandedCols := make([]parser.ResultColumn, 0, len(table.Columns))
+	for _, schemaCol := range table.Columns {
+		expandedCols = append(expandedCols, parser.ResultColumn{
+			Expr: &parser.IdentExpr{Name: schemaCol.Name},
+		})
+	}
 	return expandedCols
 }
 
@@ -816,6 +833,17 @@ func (s *Stmt) rewriteSubqueryTypes(expr parser.Expression, cteTempTables map[st
 
 // rewriteCompoundTypes handles compound and nested expression types.
 func (s *Stmt) rewriteCompoundTypes(expr parser.Expression, cteTempTables map[string]*schema.Table) parser.Expression {
+	// Group 1: Basic compound expressions
+	if result := s.tryRewriteBasicCompoundExpr(expr, cteTempTables); result != nil {
+		return result
+	}
+
+	// Group 2: Wrapper expressions
+	return s.tryRewriteWrapperExpr(expr, cteTempTables)
+}
+
+// tryRewriteBasicCompoundExpr tries to rewrite basic compound expression types.
+func (s *Stmt) tryRewriteBasicCompoundExpr(expr parser.Expression, cteTempTables map[string]*schema.Table) parser.Expression {
 	switch e := expr.(type) {
 	case *parser.BinaryExpr:
 		return s.rewriteBinaryExpr(e, cteTempTables)
@@ -827,15 +855,21 @@ func (s *Stmt) rewriteCompoundTypes(expr parser.Expression, cteTempTables map[st
 		return s.rewriteBetweenExpr(e, cteTempTables)
 	case *parser.FunctionExpr:
 		return s.rewriteFunctionExpr(e, cteTempTables)
+	}
+	return nil
+}
+
+// tryRewriteWrapperExpr tries to rewrite wrapper expression types.
+func (s *Stmt) tryRewriteWrapperExpr(expr parser.Expression, cteTempTables map[string]*schema.Table) parser.Expression {
+	switch e := expr.(type) {
 	case *parser.ParenExpr:
 		return s.rewriteParenExpr(e, cteTempTables)
 	case *parser.CastExpr:
 		return s.rewriteCastExpr(e, cteTempTables)
 	case *parser.CollateExpr:
 		return s.rewriteCollateExpr(e, cteTempTables)
-	default:
-		return nil
 	}
+	return nil
 }
 
 func (s *Stmt) rewriteSubqueryExpr(e *parser.SubqueryExpr, cteTempTables map[string]*schema.Table) parser.Expression {

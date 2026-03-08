@@ -2182,19 +2182,12 @@ func (v *VDBE) validateWithoutRowIDConstraints(tableName string, payload []byte,
 
 // validateUpdateConstraintsWithoutRowID validates FK constraints for WITHOUT ROWID table updates.
 func (v *VDBE) validateUpdateConstraintsWithoutRowID(tableName string, payload []byte, keyBytes []byte) error {
-	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil {
-		return nil
-	}
-	if v.pendingFKUpdate == nil || v.pendingFKUpdate.table != tableName || v.Ctx.Schema == nil {
+	if !v.shouldValidateWithoutRowIDUpdate(tableName) {
 		return nil
 	}
 
-	type fkManager interface {
-		ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
-	}
-
-	mgr, ok := v.Ctx.FKManager.(fkManager)
-	if !ok {
+	mgr, err := v.getTypedFKManager()
+	if err != nil {
 		return nil
 	}
 
@@ -2207,6 +2200,32 @@ func (v *VDBE) validateUpdateConstraintsWithoutRowID(tableName string, payload [
 	rowUpdater := NewVDBERowModifier(v)
 
 	return mgr.ValidateUpdate(tableName, v.pendingFKUpdate.oldValues, newValues, v.Ctx.Schema, rowReader, rowUpdater)
+}
+
+// shouldValidateWithoutRowIDUpdate checks if WITHOUT ROWID update validation is needed.
+func (v *VDBE) shouldValidateWithoutRowIDUpdate(tableName string) bool {
+	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil {
+		return false
+	}
+	if v.pendingFKUpdate == nil || v.pendingFKUpdate.table != tableName || v.Ctx.Schema == nil {
+		return false
+	}
+	return true
+}
+
+// getTypedFKManager returns a type-asserted FK manager with ValidateUpdate support.
+func (v *VDBE) getTypedFKManager() (interface {
+	ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
+}, error) {
+	type fkManager interface {
+		ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
+	}
+
+	mgr, ok := v.Ctx.FKManager.(fkManager)
+	if !ok {
+		return nil, fmt.Errorf("invalid FK manager type")
+	}
+	return mgr, nil
 }
 
 // performInsertWithCompositeKey inserts a row using composite key for WITHOUT ROWID tables.
@@ -2504,57 +2523,58 @@ func (v *VDBE) checkColumnUnique(col uniqueColumnInfo, payload []byte, btCursor 
 // already exists in any row (excluding the row with newRowid for UPDATE operations).
 // IMPORTANT: Creates a separate read cursor to avoid disturbing the insert cursor position.
 func (v *VDBE) scanTableForDuplicate(insertCursor *btree.BtCursor, colIdx int, newValue *Mem, newRowid int64, colName string) error {
-	// Create a separate read cursor for scanning to avoid disturbing the insert cursor
 	scanCursor := btree.NewCursor(insertCursor.Btree, insertCursor.RootPage)
 
-	// Move to the first record
 	if err := scanCursor.MoveToFirst(); err != nil {
-		// Table is empty, no duplicates possible
-		return nil
+		return nil // Table is empty, no duplicates possible
 	}
 
-	// Iterate through all records
 	for scanCursor.IsValid() {
-		// Get current rowid
-		currentRowid := scanCursor.GetKey()
-
-		// Skip if this is the row we're inserting/updating (for UPDATE operations)
-		// For INSERT operations, newRowid won't match any existing row
-		if currentRowid != newRowid {
-			// Get the record data
-			recordData, err := scanCursor.GetPayloadWithOverflow()
-			if err != nil {
-				// Skip if can't get payload
-				if err := scanCursor.Next(); err != nil {
-					break
-				}
-				continue
-			}
-
-			// Extract the column value from this record
-			existingValueMem := NewMem()
-			if err := parseRecordColumn(recordData, colIdx, existingValueMem); err != nil {
-				// Skip records that can't be parsed
-				if err := scanCursor.Next(); err != nil {
-					break
-				}
-				continue
-			}
-
-			// Compare the values
-			if v.compareMemValues(existingValueMem, newValue) == 0 {
-				// Duplicate found!
-				return fmt.Errorf("UNIQUE constraint failed: %s", colName)
-			}
+		if err := v.checkRowForDuplicate(scanCursor, colIdx, newValue, newRowid, colName); err != nil {
+			return err
 		}
-
-		// Move to next record
 		if err := scanCursor.Next(); err != nil {
 			break
 		}
 	}
 
 	return nil
+}
+
+// checkRowForDuplicate checks a single row for duplicate value.
+func (v *VDBE) checkRowForDuplicate(scanCursor *btree.BtCursor, colIdx int, newValue *Mem, newRowid int64, colName string) error {
+	currentRowid := scanCursor.GetKey()
+
+	// Skip if this is the row we're inserting/updating
+	if currentRowid == newRowid {
+		return nil
+	}
+
+	existingValue, err := v.extractColumnValue(scanCursor, colIdx)
+	if err != nil {
+		return nil // Skip records that can't be parsed
+	}
+
+	if v.compareMemValues(existingValue, newValue) == 0 {
+		return fmt.Errorf("UNIQUE constraint failed: %s", colName)
+	}
+
+	return nil
+}
+
+// extractColumnValue extracts a column value from the cursor's current record.
+func (v *VDBE) extractColumnValue(scanCursor *btree.BtCursor, colIdx int) (*Mem, error) {
+	recordData, err := scanCursor.GetPayloadWithOverflow()
+	if err != nil {
+		return nil, err
+	}
+
+	existingValueMem := NewMem()
+	if err := parseRecordColumn(recordData, colIdx, existingValueMem); err != nil {
+		return nil, err
+	}
+
+	return existingValueMem, nil
 }
 
 // compareInts returns -1 if a < b, 0 if a == b, 1 if a > b
@@ -2606,20 +2626,45 @@ func (v *VDBE) compareMemValues(a, b *Mem) int {
 
 // compareNonNullMemValues compares two non-null Mem values
 func (v *VDBE) compareNonNullMemValues(a, b *Mem) int {
-	if a.IsInt() && b.IsInt() {
-		return compareInts(a.IntValue(), b.IntValue())
+	// Try each comparison type in order
+	if result, ok := v.tryTypedComparison(a, b); ok {
+		return result
 	}
-	if a.IsReal() && b.IsReal() {
-		return compareReals(a.RealValue(), b.RealValue())
-	}
-	if a.IsString() && b.IsString() {
-		return cmpStrings(a.StringValue(), b.StringValue())
-	}
-	if a.IsBlob() && b.IsBlob() {
-		return compareBytes(a.BlobValue(), b.BlobValue())
-	}
-	// Mixed types - use string comparison
+	// Mixed types - use string comparison as fallback
 	return cmpStrings(fmt.Sprintf("%v", a.Value()), fmt.Sprintf("%v", b.Value()))
+}
+
+// tryTypedComparison attempts to compare values of the same type.
+func (v *VDBE) tryTypedComparison(a, b *Mem) (int, bool) {
+	comparators := []struct {
+		check   func(*Mem, *Mem) bool
+		compare func(*Mem, *Mem) int
+	}{
+		{
+			check:   func(x, y *Mem) bool { return x.IsInt() && y.IsInt() },
+			compare: func(x, y *Mem) int { return compareInts(x.IntValue(), y.IntValue()) },
+		},
+		{
+			check:   func(x, y *Mem) bool { return x.IsReal() && y.IsReal() },
+			compare: func(x, y *Mem) int { return compareReals(x.RealValue(), y.RealValue()) },
+		},
+		{
+			check:   func(x, y *Mem) bool { return x.IsString() && y.IsString() },
+			compare: func(x, y *Mem) int { return cmpStrings(x.StringValue(), y.StringValue()) },
+		},
+		{
+			check:   func(x, y *Mem) bool { return x.IsBlob() && y.IsBlob() },
+			compare: func(x, y *Mem) int { return compareBytes(x.BlobValue(), y.BlobValue()) },
+		},
+	}
+
+	for _, comp := range comparators {
+		if comp.check(a, b) {
+			return comp.compare(a, b), true
+		}
+	}
+
+	return 0, false
 }
 
 // checkForeignKeyConstraints validates foreign key constraints for an INSERT operation.
@@ -2937,45 +2982,60 @@ func (v *VDBE) computeCompositeKeyBytes(tableName string, payload []byte) ([]byt
 		return nil, fmt.Errorf("no schema available for WITHOUT ROWID computation")
 	}
 
-	// Extract PK column names and values from payload
 	pkCols, pkValues, err := v.extractPKColumns(tableName, payload)
 	if err != nil {
 		return nil, err
 	}
-	if len(pkCols) == 0 {
+
+	pkMap := v.buildPKMap(pkCols, pkValues, tableName)
+	if pkMap == nil {
 		return nil, fmt.Errorf("WITHOUT ROWID table %s missing primary key columns", tableName)
 	}
 
-	// Build a map from column name to value for reordering
+	pkOrder := v.resolvePKOrder(tableName, pkCols)
+	orderedVals, err := v.orderAndValidatePKValues(pkMap, pkOrder)
+	if err != nil {
+		return nil, err
+	}
+
+	return withoutrowid.EncodeCompositeKey(orderedVals), nil
+}
+
+// buildPKMap creates a map from column name to value.
+func (v *VDBE) buildPKMap(pkCols []string, pkValues []interface{}, tableName string) map[string]interface{} {
+	if len(pkCols) == 0 {
+		return nil
+	}
 	pkMap := make(map[string]interface{})
 	for i, name := range pkCols {
 		pkMap[name] = pkValues[i]
 	}
+	return pkMap
+}
 
-	// Get the table's PrimaryKey order
+// resolvePKOrder determines the primary key column order.
+func (v *VDBE) resolvePKOrder(tableName string, pkCols []string) []string {
 	pkOrder := v.getTablePrimaryKeyOrder(tableName)
 	if len(pkOrder) == 0 {
-		// Fallback to definition order if PrimaryKey slice not available
-		pkOrder = pkCols
+		return pkCols
 	}
+	return pkOrder
+}
 
-	// Reorder values according to PrimaryKey definition order
+// orderAndValidatePKValues reorders values and validates for NULL.
+func (v *VDBE) orderAndValidatePKValues(pkMap map[string]interface{}, pkOrder []string) ([]interface{}, error) {
 	orderedVals := make([]interface{}, 0, len(pkOrder))
 	for _, colName := range pkOrder {
 		val, ok := pkMap[colName]
 		if !ok {
-			// Column not found - this shouldn't happen for valid tables
 			return nil, fmt.Errorf("primary key column %s not found in payload", colName)
 		}
-		// Check for NULL values - SQLite doesn't allow NULL in WITHOUT ROWID PK
 		if val == nil {
 			return nil, fmt.Errorf("NOT NULL constraint failed: %s (PRIMARY KEY columns cannot be NULL in WITHOUT ROWID tables)", colName)
 		}
 		orderedVals = append(orderedVals, val)
 	}
-
-	// Encode using order-preserving composite key encoder
-	return withoutrowid.EncodeCompositeKey(orderedVals), nil
+	return orderedVals, nil
 }
 
 // getTablePrimaryKeyOrder returns the PrimaryKey column names in constraint order.
@@ -3215,18 +3275,29 @@ func (v *VDBE) execDelete(instr *Instruction) error {
 	if err != nil {
 		return err
 	}
+
 	isUpdateDelete := instr.P5 == 1
-	if isUpdateDelete && instr.P4.Z != "" && v.Ctx != nil && v.Ctx.ForeignKeysEnabled {
-		if err := v.capturePendingUpdate(instr.P4.Z, btCursor); err != nil {
-			return err
-		}
+	if err := v.handleDeleteConstraints(instr, btCursor, isUpdateDelete); err != nil {
+		return err
 	}
-	if !isUpdateDelete {
-		if err := v.validateDeleteConstraints(instr.P4.Z, btCursor); err != nil {
-			return err
-		}
-	}
+
 	return v.performDelete(btCursor)
+}
+
+// handleDeleteConstraints manages FK constraints for delete operations.
+func (v *VDBE) handleDeleteConstraints(instr *Instruction, btCursor *btree.BtCursor, isUpdateDelete bool) error {
+	if isUpdateDelete {
+		return v.handleUpdateDeleteConstraints(instr.P4.Z, btCursor)
+	}
+	return v.validateDeleteConstraints(instr.P4.Z, btCursor)
+}
+
+// handleUpdateDeleteConstraints captures pending update for FK validation.
+func (v *VDBE) handleUpdateDeleteConstraints(tableName string, btCursor *btree.BtCursor) error {
+	if tableName == "" || v.Ctx == nil || !v.Ctx.ForeignKeysEnabled {
+		return nil
+	}
+	return v.capturePendingUpdate(tableName, btCursor)
 }
 
 // getDeleteCursor returns a validated writable btree cursor for delete operations.

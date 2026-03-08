@@ -1604,6 +1604,24 @@ func (p *Parser) parseFKDeferrable(fk *ForeignKeyConstraint) error {
 	return p.error("expected DEFERRED or IMMEDIATE after INITIALLY")
 }
 
+// parseFKMatchClause parses the MATCH clause of a foreign key.
+func (p *Parser) parseFKMatchClause(fk *ForeignKeyConstraint) error {
+	if !p.check(TK_ID) {
+		return p.error("expected match name")
+	}
+	fk.Match = Unquote(p.advance().Lexeme)
+	return nil
+}
+
+// parseFKNotDeferrable parses the NOT DEFERRABLE clause.
+func (p *Parser) parseFKNotDeferrable(fk *ForeignKeyConstraint) error {
+	if !p.match(TK_DEFERRABLE) {
+		return p.error("expected DEFERRABLE after NOT")
+	}
+	fk.Deferrable = DeferrableNone
+	return nil
+}
+
 // parseForeignKeyActions parses ON DELETE/UPDATE, MATCH, and DEFERRABLE clauses.
 func (p *Parser) parseForeignKeyActions(fk *ForeignKeyConstraint) error {
 	for {
@@ -1612,15 +1630,13 @@ func (p *Parser) parseForeignKeyActions(fk *ForeignKeyConstraint) error {
 				return err
 			}
 		} else if p.match(TK_MATCH) {
-			if !p.check(TK_ID) {
-				return p.error("expected match name")
+			if err := p.parseFKMatchClause(fk); err != nil {
+				return err
 			}
-			fk.Match = Unquote(p.advance().Lexeme)
 		} else if p.match(TK_NOT) {
-			if !p.match(TK_DEFERRABLE) {
-				return p.error("expected DEFERRABLE after NOT")
+			if err := p.parseFKNotDeferrable(fk); err != nil {
+				return err
 			}
-			fk.Deferrable = DeferrableNone
 		} else if p.match(TK_DEFERRABLE) {
 			if err := p.parseFKDeferrable(fk); err != nil {
 				return err
