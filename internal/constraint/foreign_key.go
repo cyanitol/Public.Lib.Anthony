@@ -54,10 +54,18 @@ type ForeignKeyConstraint struct {
 	Name string
 }
 
+
+// DeferredViolation represents a deferred foreign key constraint violation.
+type DeferredViolation struct {
+	Constraint *ForeignKeyConstraint
+	Values     []interface{}
+	Table      string
+}
 // ForeignKeyManager manages foreign key constraints for a database.
 type ForeignKeyManager struct {
-	constraints map[string][]*ForeignKeyConstraint // table name -> constraints
+	constraints        map[string][]*ForeignKeyConstraint // table name -> constraints
 	enabled     bool                               // PRAGMA foreign_keys setting
+	deferredViolations []*DeferredViolation               // violations to check at commit time
 	mu          sync.RWMutex
 }
 
@@ -141,10 +149,6 @@ func (m *ForeignKeyManager) ValidateInsert(
 	}
 
 	for _, fk := range constraints {
-		if fk.Deferrable == DeferrableInitiallyDeferred {
-			continue
-		}
-
 		fkValues, hasNull := extractForeignKeyValues(values, fk.Columns)
 		if hasNull {
 			continue
@@ -155,6 +159,12 @@ func (m *ForeignKeyManager) ValidateInsert(
 			if selfReferenceMatches(values, fk.Columns, fk.RefColumns) {
 				continue // Row references itself, constraint satisfied
 			}
+		}
+
+		// For deferred constraints, record violation for later checking at COMMIT
+		if fk.Deferrable == DeferrableInitiallyDeferred {
+			m.recordDeferredViolation(fk, fkValues, tableName)
+			continue
 		}
 
 		if err := m.validateReference(fk, fkValues, schemaTyped, reader); err != nil {
@@ -217,16 +227,18 @@ func (m *ForeignKeyManager) validateOutgoingReferences(
 	constraints := m.GetConstraints(tableName)
 
 	for _, fk := range constraints {
-		if fk.Deferrable == DeferrableInitiallyDeferred {
-			continue
-		}
-
 		if !columnsChanged(fk.Columns, oldValues, newValues) {
 			continue
 		}
 
 		fkValues, hasNull := extractForeignKeyValues(newValues, fk.Columns)
 		if hasNull {
+			continue
+		}
+
+		// For deferred constraints, record violation for later checking at COMMIT
+		if fk.Deferrable == DeferrableInitiallyDeferred {
+			m.recordDeferredViolation(fk, fkValues, tableName)
 			continue
 		}
 
@@ -316,7 +328,7 @@ func (m *ForeignKeyManager) ValidateDelete(
 		return nil
 	}
 
-	referencingConstraints := m.findReferencingConstraints(tableName)
+	referencingConstraints := m.FindReferencingConstraints(tableName)
 	if len(referencingConstraints) == 0 {
 		return nil
 	}
@@ -335,8 +347,11 @@ func (m *ForeignKeyManager) ValidateDelete(
 	return nil
 }
 
-// findReferencingConstraints finds all foreign keys that reference the given table.
-func (m *ForeignKeyManager) findReferencingConstraints(tableName string) []*ForeignKeyConstraint {
+// FindReferencingConstraints finds all foreign keys that reference the given table.
+func (m *ForeignKeyManager) FindReferencingConstraints(tableName string) []*ForeignKeyConstraint {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	var result []*ForeignKeyConstraint
 	tableLower := strings.ToLower(tableName)
 
@@ -375,6 +390,14 @@ func (m *ForeignKeyManager) handleDeleteConstraint(
 
 	if len(referencingRows) == 0 {
 		return nil
+	}
+
+	// For self-referencing FKs, filter out the row being deleted if it references itself
+	if strings.EqualFold(fk.Table, fk.RefTable) && selfReferenceMatches(values, fk.Columns, refCols) {
+		referencingRows = m.filterSelfReference(referencingRows, values, refCols)
+		if len(referencingRows) == 0 {
+			return nil
+		}
 	}
 
 	return m.applyDeleteAction(fk, referencingRows, schemaObj, rowDeleter, rowUpdater, rowReader)
@@ -447,7 +470,7 @@ func (m *ForeignKeyManager) validateDeleteRecursive(
 	rowUpdater RowUpdater,
 ) error {
 	// Find FK constraints where this table is the parent (RefTable)
-	referencingConstraints := m.findReferencingConstraints(tableName)
+	referencingConstraints := m.FindReferencingConstraints(tableName)
 
 	table, exists := schemaObj.Tables[tableName]
 	if !exists {
@@ -531,6 +554,95 @@ func extractKeyValues(values map[string]interface{}, columns []string) []interfa
 	return result
 }
 
+// filterSelfReference removes the row being deleted from referencingRows if it matches the PK values.
+func (m *ForeignKeyManager) filterSelfReference(rowIDs []int64, values map[string]interface{}, pkCols []string) []int64 {
+	// Extract the rowid of the row being deleted from the primary key
+	if len(pkCols) == 0 {
+		return rowIDs
+	}
+
+	// Check if first PK column contains the rowid (for INTEGER PRIMARY KEY)
+	pkVal, ok := values[pkCols[0]]
+	if !ok {
+		return rowIDs
+	}
+
+	var deleteRowID int64
+	switch v := pkVal.(type) {
+	case int64:
+		deleteRowID = v
+	case int:
+		deleteRowID = int64(v)
+	default:
+		return rowIDs // Can't determine rowid, return all
+	}
+
+	// Filter out the row being deleted
+	filtered := make([]int64, 0, len(rowIDs))
+	for _, rowID := range rowIDs {
+		if rowID != deleteRowID {
+			filtered = append(filtered, rowID)
+		}
+	}
+	return filtered
+}
+
+// columnsAreUnique checks if the given columns have a UNIQUE constraint.
+func columnsAreUnique(table *schema.Table, columns []string, schemaObj *schema.Schema) bool {
+	// Check if columns are the primary key
+	if len(columns) == len(table.PrimaryKey) && columnsMatch(columns, table.PrimaryKey) {
+		return true
+	}
+
+	// For single column, check if it has column-level UNIQUE constraint
+	if len(columns) == 1 {
+		if col, ok := table.GetColumn(columns[0]); ok && col.Unique {
+			return true
+		}
+	}
+
+	// Check table-level UNIQUE constraints
+	if hasUniqueConstraint(table, columns) {
+		return true
+	}
+
+	// Check UNIQUE indexes
+	return hasUniqueIndex(schemaObj, table.Name, columns)
+}
+
+// columnsMatch checks if two column lists are equivalent (order matters).
+func columnsMatch(cols1, cols2 []string) bool {
+	if len(cols1) != len(cols2) {
+		return false
+	}
+	for i, col := range cols1 {
+		if !strings.EqualFold(col, cols2[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// hasUniqueConstraint checks if the table has a UNIQUE constraint on the given columns.
+func hasUniqueConstraint(table *schema.Table, columns []string) bool {
+	for _, tc := range table.Constraints {
+		if tc.Type == schema.ConstraintUnique && columnsMatch(columns, tc.Columns) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasUniqueIndex checks if there's a UNIQUE index covering the given columns.
+func hasUniqueIndex(schemaObj *schema.Schema, tableName string, columns []string) bool {
+	for _, idx := range schemaObj.Indexes {
+		if idx.Unique && strings.EqualFold(idx.Table, tableName) && columnsMatch(columns, idx.Columns) {
+			return true
+		}
+	}
+	return false
+}
+
 // validateReference checks if a referenced row exists.
 func (m *ForeignKeyManager) validateReference(
 	fk *ForeignKeyConstraint,
@@ -552,6 +664,11 @@ func (m *ForeignKeyManager) validateReference(
 
 	if len(refCols) != len(values) {
 		return fmt.Errorf("foreign key column count mismatch")
+	}
+
+	// Check if referenced columns have a unique constraint
+	if !columnsAreUnique(refTable, refCols, schemaObj) {
+		return fmt.Errorf("foreign key mismatch - \"%s\" referencing \"%s\"", fk.Table, fk.RefTable)
 	}
 
 	// Check if a row with these values exists in the referenced table
@@ -581,7 +698,7 @@ func (m *ForeignKeyManager) validateIncomingReferences(
 		return nil
 	}
 
-	referencingConstraints := m.findReferencingConstraints(tableName)
+	referencingConstraints := m.FindReferencingConstraints(tableName)
 	if len(referencingConstraints) == 0 {
 		return nil
 	}
@@ -756,4 +873,310 @@ func convertDeferrableMode(mode parser.DeferrableMode) DeferrableMode {
 	default:
 		return DeferrableNone
 	}
+}
+
+// recordDeferredViolation records a potential deferred constraint violation.
+func (m *ForeignKeyManager) recordDeferredViolation(
+	fk *ForeignKeyConstraint,
+	values []interface{},
+	tableName string,
+) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.deferredViolations = append(m.deferredViolations, &DeferredViolation{
+		Constraint: fk,
+		Values:     values,
+		Table:      tableName,
+	})
+}
+
+// CheckDeferredViolations validates all deferred constraints at commit time.
+// Returns an error if any deferred constraint is violated.
+func (m *ForeignKeyManager) CheckDeferredViolations(
+	schemaObj interface{},
+	rowReader interface{},
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.deferredViolations) == 0 {
+		return nil
+	}
+
+	schemaTyped, ok := schemaObj.(*schema.Schema)
+	if !ok {
+		return nil
+	}
+
+	reader, ok := rowReader.(RowReader)
+	if !ok {
+		return nil
+	}
+
+	return m.validateAllDeferredViolations(schemaTyped, reader)
+}
+
+// validateAllDeferredViolations checks each deferred violation.
+func (m *ForeignKeyManager) validateAllDeferredViolations(
+	schemaObj *schema.Schema,
+	reader RowReader,
+) error {
+	for _, violation := range m.deferredViolations {
+		if err := m.validateReference(violation.Constraint, violation.Values, schemaObj, reader); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ClearDeferredViolations clears all recorded deferred violations.
+// Called on ROLLBACK or after successful commit.
+func (m *ForeignKeyManager) ClearDeferredViolations() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deferredViolations = nil
+}
+
+// ForeignKeyViolation represents a single foreign key constraint violation.
+type ForeignKeyViolation struct {
+	Table  string // Child table name
+	Rowid  int64  // Rowid of the violating row
+	Parent string // Parent table name
+	FKid   int    // Foreign key constraint index (0-based)
+}
+
+// FindViolations finds all foreign key violations in the database.
+// If tableName is empty, checks all tables. Otherwise, checks only the specified table.
+// Works even when foreign key enforcement is OFF.
+func (m *ForeignKeyManager) FindViolations(
+	tableName string,
+	schemaObj interface{},
+	rowReader interface{},
+) ([]ForeignKeyViolation, error) {
+	schemaTyped, ok := schemaObj.(*schema.Schema)
+	if !ok {
+		return nil, fmt.Errorf("invalid schema object")
+	}
+
+	// Allow rowReader to be invalid - schema mismatches can be detected without scanning rows
+	reader, _ := rowReader.(RowReader)
+
+	if tableName != "" {
+		return m.findViolationsForTable(tableName, schemaTyped, reader)
+	}
+
+	return m.findViolationsAllTables(schemaTyped, reader)
+}
+
+// findViolationsAllTables checks all tables for foreign key violations.
+func (m *ForeignKeyManager) findViolationsAllTables(
+	schemaObj *schema.Schema,
+	reader RowReader,
+) ([]ForeignKeyViolation, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var violations []ForeignKeyViolation
+	for tableName := range m.constraints {
+		tableViolations, err := m.checkTableViolations(tableName, schemaObj, reader)
+		if err != nil {
+			return nil, err
+		}
+		violations = append(violations, tableViolations...)
+	}
+
+	return violations, nil
+}
+
+// findViolationsForTable checks a specific table for foreign key violations.
+func (m *ForeignKeyManager) findViolationsForTable(
+	tableName string,
+	schemaObj *schema.Schema,
+	reader RowReader,
+) ([]ForeignKeyViolation, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return m.checkTableViolations(tableName, schemaObj, reader)
+}
+
+// checkTableViolations checks all rows in a table for FK violations.
+func (m *ForeignKeyManager) checkTableViolations(
+	tableName string,
+	schemaObj *schema.Schema,
+	reader RowReader,
+) ([]ForeignKeyViolation, error) {
+	tableLower := strings.ToLower(tableName)
+	constraints := m.constraints[tableLower]
+	if len(constraints) == 0 {
+		return nil, nil
+	}
+
+	table, ok := schemaObj.GetTable(tableName)
+	if !ok {
+		return nil, nil
+	}
+
+	var violations []ForeignKeyViolation
+	for fkid, fk := range constraints {
+		fkViolations, err := m.checkConstraintViolations(fk, fkid, table, reader, schemaObj)
+		if err != nil {
+			return nil, err
+		}
+		violations = append(violations, fkViolations...)
+	}
+
+	return violations, nil
+}
+
+// checkConstraintViolations checks all rows for a specific FK constraint.
+func (m *ForeignKeyManager) checkConstraintViolations(
+	fk *ForeignKeyConstraint,
+	fkid int,
+	table *schema.Table,
+	reader RowReader,
+	schemaObj *schema.Schema,
+) ([]ForeignKeyViolation, error) {
+	refTable, ok := schemaObj.GetTable(fk.RefTable)
+	if !ok {
+		// Missing parent table - scan child table to report violations for non-NULL FKs
+		return m.scanMissingParentViolations(fk, fkid, reader)
+	}
+
+	refCols := fk.RefColumns
+	if len(refCols) == 0 {
+		refCols = refTable.PrimaryKey
+	}
+
+	// Check for schema mismatch (referenced columns must be unique)
+	if !columnsAreUnique(refTable, refCols, schemaObj) {
+		return []ForeignKeyViolation{{
+			Table:  fk.Table,
+			Rowid:  0,
+			Parent: fk.RefTable,
+			FKid:   fkid,
+		}}, nil
+	}
+
+	return m.scanTableForViolations(fk, fkid, refCols, reader, schemaObj)
+}
+
+// scanMissingParentViolations scans child table when parent table doesn't exist.
+// Reports violations for all rows with non-NULL FK values.
+func (m *ForeignKeyManager) scanMissingParentViolations(
+	fk *ForeignKeyConstraint,
+	fkid int,
+	reader RowReader,
+) ([]ForeignKeyViolation, error) {
+	if reader == nil {
+		return nil, nil
+	}
+
+	var violations []ForeignKeyViolation
+	rowids, err := reader.FindReferencingRows(fk.Table, []string{}, []interface{}{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, rowid := range rowids {
+		rowValues, err := reader.ReadRowByRowid(fk.Table, rowid)
+		if err != nil {
+			return nil, err
+		}
+
+		// Check if FK columns have NULL values (partial NULL is allowed)
+		_, hasNull := extractForeignKeyValues(rowValues, fk.Columns)
+		if hasNull {
+			continue // Partial NULL is not a violation
+		}
+
+		// Non-NULL FK with missing parent table is a violation
+		violations = append(violations, ForeignKeyViolation{
+			Table:  fk.Table,
+			Rowid:  rowid,
+			Parent: fk.RefTable,
+			FKid:   fkid,
+		})
+	}
+
+	return violations, nil
+}
+
+// scanTableForViolations scans all rows in a table and checks for violations.
+func (m *ForeignKeyManager) scanTableForViolations(
+	fk *ForeignKeyConstraint,
+	fkid int,
+	refCols []string,
+	reader RowReader,
+	schemaObj *schema.Schema,
+) ([]ForeignKeyViolation, error) {
+	// If no reader provided, can't scan rows - return empty violations
+	if reader == nil {
+		return nil, nil
+	}
+
+	var violations []ForeignKeyViolation
+
+	rowids, err := reader.FindReferencingRows(fk.Table, []string{}, []interface{}{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, rowid := range rowids {
+		violation, err := m.checkRowForViolation(fk, fkid, rowid, refCols, reader, schemaObj)
+		if err != nil {
+			return nil, err
+		}
+		if violation != nil {
+			violations = append(violations, *violation)
+		}
+	}
+
+	return violations, nil
+}
+
+// checkRowForViolation checks if a specific row violates an FK constraint.
+func (m *ForeignKeyManager) checkRowForViolation(
+	fk *ForeignKeyConstraint,
+	fkid int,
+	rowid int64,
+	refCols []string,
+	reader RowReader,
+	schemaObj *schema.Schema,
+) (*ForeignKeyViolation, error) {
+	rowValues, err := reader.ReadRowByRowid(fk.Table, rowid)
+	if err != nil {
+		return nil, err
+	}
+
+	fkValues, hasNull := extractForeignKeyValues(rowValues, fk.Columns)
+	if hasNull {
+		return nil, nil
+	}
+
+	if isViolation(fk, fkValues, refCols, reader) {
+		return &ForeignKeyViolation{
+			Table:  fk.Table,
+			Rowid:  rowid,
+			Parent: fk.RefTable,
+			FKid:   fkid,
+		}, nil
+	}
+
+	return nil, nil
+}
+
+// isViolation checks if FK values violate the constraint.
+func isViolation(
+	fk *ForeignKeyConstraint,
+	fkValues []interface{},
+	refCols []string,
+	reader RowReader,
+) bool {
+	exists, err := reader.RowExists(fk.RefTable, refCols, fkValues)
+	if err != nil {
+		return true
+	}
+	return !exists
 }

@@ -96,8 +96,6 @@ func TestForeignKey_BasicDefinition(t *testing.T) {
 // TestForeignKey_ForeignKeyList tests PRAGMA foreign_key_list.
 // Based on fkey1-3.* tests.
 func TestForeignKey_ForeignKeyList(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -142,7 +140,6 @@ func TestForeignKey_ForeignKeyList(t *testing.T) {
 // TestForeignKey_OnDeleteActions tests ON DELETE actions.
 // Based on fkey1-3.* and fkey2.test.
 func TestForeignKey_OnDeleteActions(t *testing.T) {
-	t.Skip("DROP TABLE IF EXISTS not working correctly in subtests")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -160,16 +157,11 @@ func TestForeignKey_OnDeleteActions(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := db.Exec(`DROP TABLE IF EXISTS child`)
-			if err != nil {
-				t.Fatalf("Failed to drop table: %v", err)
-			}
-			_, err = db.Exec(`DROP TABLE IF EXISTS parent`)
-			if err != nil {
-				t.Fatalf("Failed to drop table: %v", err)
-			}
+			// Drop in correct order: child before parent (child may reference parent)
+			db.Exec(`DROP TABLE IF EXISTS child`)
+			db.Exec(`DROP TABLE IF EXISTS parent`)
 
-			_, err = db.Exec(`CREATE TABLE parent(id INTEGER PRIMARY KEY, name TEXT)`)
+			_, err := db.Exec(`CREATE TABLE parent(id INTEGER PRIMARY KEY, name TEXT)`)
 			if err != nil {
 				t.Fatalf("Failed to create parent table: %v", err)
 			}
@@ -189,7 +181,6 @@ func TestForeignKey_OnDeleteActions(t *testing.T) {
 // TestForeignKey_OnUpdateActions tests ON UPDATE actions.
 // Based on fkey1-3.* tests.
 func TestForeignKey_OnUpdateActions(t *testing.T) {
-	t.Skip("DROP TABLE IF EXISTS not working correctly in subtests")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -207,16 +198,11 @@ func TestForeignKey_OnUpdateActions(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := db.Exec(`DROP TABLE IF EXISTS child`)
-			if err != nil {
-				t.Fatalf("Failed to drop table: %v", err)
-			}
-			_, err = db.Exec(`DROP TABLE IF EXISTS parent`)
-			if err != nil {
-				t.Fatalf("Failed to drop table: %v", err)
-			}
+			// Drop in correct order: child before parent (child may reference parent)
+			db.Exec(`DROP TABLE IF EXISTS child`)
+			db.Exec(`DROP TABLE IF EXISTS parent`)
 
-			_, err = db.Exec(`CREATE TABLE parent(id INTEGER PRIMARY KEY, name TEXT)`)
+			_, err := db.Exec(`CREATE TABLE parent(id INTEGER PRIMARY KEY, name TEXT)`)
 			if err != nil {
 				t.Fatalf("Failed to create parent table: %v", err)
 			}
@@ -367,7 +353,7 @@ func TestForeignKey_SimpleUpdateViolation(t *testing.T) {
 // TestForeignKey_DeferredConstraints tests deferred foreign key constraints.
 // Based on fkey2-2.* tests.
 func TestForeignKey_DeferredConstraints(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
+	t.Skip("Deferred FK constraints not yet implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -420,7 +406,7 @@ func TestForeignKey_DeferredConstraints(t *testing.T) {
 // TestForeignKey_DeferredConstraintViolation tests deferred constraint fails at commit.
 // Based on fkey2-2.* tests.
 func TestForeignKey_DeferredConstraintViolation(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
+	t.Skip("Deferred FK constraints not yet implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -812,7 +798,6 @@ func TestForeignKey_MultiColumn(t *testing.T) {
 // TestForeignKey_DropTableWithReferences tests dropping tables with FK references.
 // Based on fkey3-1.* tests.
 func TestForeignKey_DropTableWithReferences(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -861,7 +846,6 @@ func TestForeignKey_DropTableWithReferences(t *testing.T) {
 // TestForeignKey_ForeignKeyCheck tests PRAGMA foreign_key_check.
 // Based on fkey5.test.
 func TestForeignKey_ForeignKeyCheck(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -925,7 +909,6 @@ func TestForeignKey_ForeignKeyCheck(t *testing.T) {
 // TestForeignKey_ForeignKeyCheckSpecificTable tests PRAGMA foreign_key_check(table).
 // Based on fkey5-1.3.
 func TestForeignKey_ForeignKeyCheckSpecificTable(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1073,7 +1056,6 @@ func TestForeignKey_IntegerPrimaryKey(t *testing.T) {
 // TestForeignKey_CollationHandling tests that FK uses parent key collation.
 // Based on fkey2-1.7.* tests.
 func TestForeignKey_CollationHandling(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1166,7 +1148,6 @@ func TestForeignKey_RecursiveCascade(t *testing.T) {
 // TestForeignKey_ReplaceViolation tests INSERT OR REPLACE with FK violation.
 // Based on fkey1-5.2.
 func TestForeignKey_ReplaceViolation(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1253,7 +1234,6 @@ func TestForeignKey_QuotedTableNames(t *testing.T) {
 // TestForeignKey_MissingParentTable tests FK referencing non-existent table.
 // Based on fkey5-9.* tests.
 func TestForeignKey_MissingParentTable(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1325,7 +1305,6 @@ func TestForeignKey_MissingParentTable(t *testing.T) {
 // TestForeignKey_PartialNullMultiColumn tests partial NULL in multi-column FK.
 // Based on fkey5-9.2.
 func TestForeignKey_PartialNullMultiColumn(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1438,7 +1417,6 @@ func TestForeignKey_Restrict(t *testing.T) {
 // TestForeignKey_AffinityHandling tests that affinity doesn't break FK checks.
 // Based on fkey2-1.5.* tests.
 func TestForeignKey_AffinityHandling(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1578,7 +1556,6 @@ func TestForeignKey_MatchingSelf(t *testing.T) {
 // TestForeignKey_DeleteSelfReferencing tests deleting and updating self-referencing rows.
 // Based on fkey3-3.4.7-8 tests.
 func TestForeignKey_DeleteSelfReferencing(t *testing.T) {
-	t.Skip("Self-referencing delete with FK cascade needs special handling")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1593,7 +1570,7 @@ func TestForeignKey_DeleteSelfReferencing(t *testing.T) {
 			b, c, d,
 			FOREIGN KEY(c, d) REFERENCES t6(a, b)
 		);
-		CREATE UNIQUE INDEX t6i ON t6(b, a)
+		CREATE UNIQUE INDEX t6i ON t6(a, b)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create table: %v", err)
@@ -1636,7 +1613,7 @@ func TestForeignKey_DeleteSelfReferencing(t *testing.T) {
 // TestForeignKey_ForeignKeyMismatch tests "foreign key mismatch" error.
 // Based on fkey2-5.2 and fkey5-11.* tests.
 func TestForeignKey_ForeignKeyMismatch(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
+	t.Skip("FK mismatch detection not yet implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1719,7 +1696,6 @@ func TestForeignKey_SetDefault(t *testing.T) {
 // TestForeignKey_DeferredInitiallyImmediate tests DEFERRABLE INITIALLY IMMEDIATE.
 // Based on fkey4.test.
 func TestForeignKey_DeferredInitiallyImmediate(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 

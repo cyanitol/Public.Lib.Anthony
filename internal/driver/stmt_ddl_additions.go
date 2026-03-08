@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cyanitol/Public.Lib.Anthony/internal/constraint"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/pager"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
@@ -265,6 +266,10 @@ func (s *Stmt) compilePragma(vm *vdbe.VDBE, stmt *parser.PragmaStmt, args []driv
 		return s.compilePragmaTableInfo(vm, stmt)
 	case "foreign_keys":
 		return s.compilePragmaForeignKeys(vm, stmt)
+	case "foreign_key_check":
+		return s.compilePragmaForeignKeyCheck(vm, stmt)
+	case "foreign_key_list":
+		return s.compilePragmaForeignKeyList(vm, stmt)
 	case "journal_mode":
 		return s.compilePragmaJournalMode(vm, stmt)
 	case "page_count":
@@ -587,3 +592,133 @@ func emitJournalModeResult(vm *vdbe.VDBE, mode string) {
 	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 }
+
+// compilePragmaForeignKeyCheck compiles PRAGMA foreign_key_check or PRAGMA foreign_key_check(table)
+func (s *Stmt) compilePragmaForeignKeyCheck(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	tableName := extractOptionalTableName(stmt)
+
+	if s.conn.fkManager == nil {
+		return s.emptyForeignKeyCheckResult(vm)
+	}
+
+	violations, err := s.conn.fkManager.FindViolations(tableName, s.conn.schema, s)
+	if err != nil {
+		return nil, fmt.Errorf("foreign_key_check failed: %w", err)
+	}
+
+	return s.emitForeignKeyCheckResults(vm, violations)
+}
+
+// extractOptionalTableName extracts the optional table name from PRAGMA foreign_key_check.
+func extractOptionalTableName(stmt *parser.PragmaStmt) string {
+	if stmt.Value == nil {
+		return ""
+	}
+
+	if lit, ok := stmt.Value.(*parser.LiteralExpr); ok {
+		return lit.Value
+	}
+
+	if ident, ok := stmt.Value.(*parser.IdentExpr); ok {
+		return ident.Name
+	}
+
+	return ""
+}
+
+// emptyForeignKeyCheckResult returns an empty result set.
+func (s *Stmt) emptyForeignKeyCheckResult(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"table", "rowid", "parent", "fkid"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// emitForeignKeyCheckResults emits violations as VDBE result rows.
+func (s *Stmt) emitForeignKeyCheckResults(vm *vdbe.VDBE, violations []constraint.ForeignKeyViolation) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"table", "rowid", "parent", "fkid"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	for _, v := range violations {
+		s.emitViolationRow(vm, v)
+	}
+
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// emitViolationRow emits a single violation row.
+func (s *Stmt) emitViolationRow(vm *vdbe.VDBE, v constraint.ForeignKeyViolation) {
+	vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, v.Table)
+	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 2, 0, v.Rowid)
+	vm.AddOpWithP4Str(vdbe.OpString, 0, 3, 0, v.Parent)
+	vm.AddOpWithP4Int(vdbe.OpInteger, v.FKid, 4, 0, int32(v.FKid))
+	vm.AddOp(vdbe.OpResultRow, 1, 4, 0)
+}
+
+// compilePragmaForeignKeyList compiles PRAGMA foreign_key_list(tablename)
+func (s *Stmt) compilePragmaForeignKeyList(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	tableName := extractOptionalTableName(stmt)
+	if tableName == "" {
+		return nil, fmt.Errorf("PRAGMA foreign_key_list requires a table name")
+	}
+
+	vm.ResultCols = []string{"id", "seq", "table", "from", "to", "on_update", "on_delete", "match"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	if s.conn.fkManager == nil {
+		vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+		return vm, nil
+	}
+
+	constraints := s.conn.fkManager.GetConstraints(tableName)
+	for id, fk := range constraints {
+		s.emitForeignKeyListRows(vm, id, fk)
+	}
+
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// emitForeignKeyListRows emits rows for a single FK constraint (one per column).
+func (s *Stmt) emitForeignKeyListRows(vm *vdbe.VDBE, id int, fk *constraint.ForeignKeyConstraint) {
+	onUpdate := fkActionToString(fk.OnUpdate)
+	onDelete := fkActionToString(fk.OnDelete)
+
+	for seq, col := range fk.Columns {
+		toCol := ""
+		if seq < len(fk.RefColumns) {
+			toCol = fk.RefColumns[seq]
+		}
+
+		vm.AddOpWithP4Int(vdbe.OpInteger, id, 1, 0, int32(id))
+		vm.AddOpWithP4Int(vdbe.OpInteger, seq, 2, 0, int32(seq))
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 3, 0, fk.RefTable)
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 4, 0, col)
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 5, 0, toCol)
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 6, 0, onUpdate)
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 7, 0, onDelete)
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 8, 0, "NONE")
+		vm.AddOp(vdbe.OpResultRow, 1, 8, 0)
+	}
+}
+
+// fkActionToString converts a foreign key action to its string representation.
+func fkActionToString(action constraint.ForeignKeyAction) string {
+	switch action {
+	case constraint.FKActionCascade:
+		return "CASCADE"
+	case constraint.FKActionSetNull:
+		return "SET NULL"
+	case constraint.FKActionSetDefault:
+		return "SET DEFAULT"
+	case constraint.FKActionRestrict:
+		return "RESTRICT"
+	case constraint.FKActionNoAction:
+		return "NO ACTION"
+	default:
+		return "NO ACTION"
+	}
+}
+
+// simpleRowReader is a minimal RowReader implementation for foreign_key_check.

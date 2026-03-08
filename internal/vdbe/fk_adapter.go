@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
+	"strconv"
 )
 
 // VDBERowReader implements the constraint.RowReader interface for foreign key validation.
@@ -161,6 +162,7 @@ type tableInfo struct {
 // columnInfo represents column metadata
 type columnInfo struct {
 	Name            string
+	Type            string // Column type for affinity determination
 	IsIntegerPK     bool // true if INTEGER PRIMARY KEY (rowid alias)
 	PayloadColIndex int  // index in payload (-1 if stored as rowid)
 }
@@ -243,6 +245,7 @@ func (r *VDBERowReader) extractTableInfo(tableIface interface{}) (*tableInfo, er
 			if minCol, minOk := colIface.(columnWithName); minOk {
 				info.Columns = append(info.Columns, columnInfo{
 					Name:            minCol.GetName(),
+				Type:            "",
 					IsIntegerPK:     false,
 					PayloadColIndex: payloadIdx,
 				})
@@ -252,17 +255,20 @@ func (r *VDBERowReader) extractTableInfo(tableIface interface{}) (*tableInfo, er
 		}
 
 		// Check if this is INTEGER PRIMARY KEY (rowid alias)
-		isIPK := col.IsPrimaryKeyColumn() && (col.GetType() == "INTEGER" || col.GetType() == "INT")
+	colType := col.GetType()
+		isIPK := col.IsPrimaryKeyColumn() && (colType == "INTEGER" || colType == "INT")
 
 		if isIPK {
 			info.Columns = append(info.Columns, columnInfo{
 				Name:            col.GetName(),
+				Type:            colType,
 				IsIntegerPK:     true,
 				PayloadColIndex: -1, // Not in payload, stored as rowid
 			})
 		} else {
 			info.Columns = append(info.Columns, columnInfo{
 				Name:            col.GetName(),
+				Type:            colType,
 				IsIntegerPK:     false,
 				PayloadColIndex: payloadIdx,
 			})
@@ -424,7 +430,7 @@ func (r *VDBERowReader) checkRowMatch(cursor *Cursor, table *tableInfo, columns 
 		}
 
 		// Compare with expected value
-		if !r.valuesEqual(colValue, values[i]) {
+		if !r.valuesEqualWithAffinity(colValue, values[i], colInfo.Type) {
 			return false, nil
 		}
 	}
@@ -478,6 +484,156 @@ func compareMemToFloat64(mem *Mem, v float64) bool {
 		return float64(mem.IntValue()) == v
 	}
 	return false
+}
+
+// valuesEqualWithAffinity compares mem with value, applying parent column affinity for FK matching.
+func (r *VDBERowReader) valuesEqualWithAffinity(mem *Mem, value interface{}, columnType string) bool {
+	if mem.IsNull() {
+		return value == nil
+	}
+
+	// Apply affinity to both sides for consistent comparison
+	if columnType != "" {
+		value = applyColumnAffinity(value, columnType)
+		// Also apply affinity to the stored mem value
+		memValue := memToInterface(mem)
+		memValue = applyColumnAffinity(memValue, columnType)
+		// Now compare the affinity-converted values directly
+		return valuesEqualDirect(memValue, value)
+	}
+
+	return compareMemToInterface(mem, value)
+}
+
+// valuesEqualDirect compares two interface{} values directly.
+func valuesEqualDirect(v1, v2 interface{}) bool {
+	// After affinity conversion, types should match exactly
+	// Just handle the common cases
+	if v1 == v2 {
+		return true
+	}
+
+	// Handle int/int64 equivalence
+	n1, ok1 := toInt64(v1)
+	n2, ok2 := toInt64(v2)
+	if ok1 && ok2 {
+		return n1 == n2
+	}
+
+	return false
+}
+
+// toInt64 converts various integer types to int64.
+func toInt64(v interface{}) (int64, bool) {
+	switch n := v.(type) {
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	case float64:
+		return int64(n), true
+	}
+	return 0, false
+}
+
+// applyColumnAffinity applies SQLite type affinity to value based on column type.
+func applyColumnAffinity(value interface{}, columnType string) interface{} {
+	upper := strings.ToUpper(columnType)
+
+	// INTEGER affinity
+	if strings.Contains(upper, "INT") {
+		return applyIntegerAffinity(value)
+	}
+
+	// TEXT affinity
+	if strings.Contains(upper, "CHAR") || strings.Contains(upper, "CLOB") || strings.Contains(upper, "TEXT") {
+		return applyTextAffinity(value)
+	}
+
+	// REAL affinity
+	if strings.Contains(upper, "REAL") || strings.Contains(upper, "FLOA") || strings.Contains(upper, "DOUB") {
+		return applyRealAffinity(value)
+	}
+
+	// NUMERIC affinity (default for non-empty types)
+	if columnType != "" {
+		return applyNumericAffinity(value)
+	}
+
+	return value
+}
+
+// applyIntegerAffinity converts value to int64 when possible.
+func applyIntegerAffinity(value interface{}) interface{} {
+	switch v := value.(type) {
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case float64:
+		return int64(v)
+	case string:
+		if i, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return i
+		}
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return int64(f)
+		}
+		return v
+	default:
+		return value
+	}
+}
+
+// applyRealAffinity converts value to float64 when possible.
+func applyRealAffinity(value interface{}) interface{} {
+	switch v := value.(type) {
+	case float64:
+		return v
+	case int64:
+		return float64(v)
+	case int:
+		return float64(v)
+	case string:
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+		return v
+	default:
+		return value
+	}
+}
+
+// applyNumericAffinity converts value to numeric type when possible.
+func applyNumericAffinity(value interface{}) interface{} {
+	switch v := value.(type) {
+	case string:
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+		if i, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return i
+		}
+		return v
+	default:
+		return value
+	}
+}
+
+// applyTextAffinity converts value to string when possible.
+func applyTextAffinity(value interface{}) interface{} {
+	switch v := value.(type) {
+	case string:
+		return v
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case float64:
+		return strconv.FormatFloat(v, 'g', -1, 64)
+	default:
+		return value
+	}
 }
 
 // DeleteRow deletes a row by rowid using a writable cursor.

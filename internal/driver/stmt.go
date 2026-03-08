@@ -247,11 +247,17 @@ func (s *Stmt) cacheVdbeIfAppropriate(vm *vdbe.VDBE, args []driver.NamedValue) {
 }
 
 // isCacheable returns true if this statement can be safely cached.
-// PRAGMAs that return connection state cannot be cached because they
-// embed the current value at compile time.
+// DDL statements and PRAGMAs cannot be cached because they
+// embed schema state or connection state at compile time.
 func (s *Stmt) isCacheable() bool {
-	_, isPragma := s.ast.(*parser.PragmaStmt)
-	return !isPragma
+	switch s.ast.(type) {
+	case *parser.PragmaStmt, *parser.CreateTableStmt, *parser.DropTableStmt,
+		*parser.CreateIndexStmt, *parser.DropIndexStmt, *parser.AlterTableStmt,
+		*parser.CreateViewStmt, *parser.DropViewStmt:
+		return false
+	default:
+		return true
+	}
 }
 
 // invalidateStmtCache invalidates the statement cache when schema changes.
