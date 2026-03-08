@@ -675,10 +675,20 @@ func TestForeignKeyManager_ValidateReference_ColumnCountMismatch(t *testing.T) {
 func TestForeignKeyManager_CascadeDelete_Error(t *testing.T) {
 	mgr := NewForeignKeyManager()
 
+	// Set up schema
+	sch := schema.NewSchema()
+	ordersTable := &schema.Table{
+		Name:    "orders",
+		Columns: []*schema.Column{{Name: "id", Type: "INTEGER", PrimaryKey: true}},
+	}
+	sch.Tables["orders"] = ordersTable
+
 	// Mock deleter that fails
 	deleter := &MockRowDeleterWithError{shouldFail: true}
+	updater := NewMockRowUpdater()
+	reader := NewMockRowReader()
 
-	err := mgr.cascadeDelete("orders", []int64{1, 2, 3}, deleter)
+	err := mgr.cascadeDelete("orders", []int64{1, 2, 3}, sch, deleter, updater, reader)
 	if err == nil {
 		t.Error("Expected error from cascade delete")
 	}

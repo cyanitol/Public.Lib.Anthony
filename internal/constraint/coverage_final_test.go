@@ -220,9 +220,10 @@ func TestForeignKeyManager_ApplyDeleteAction_None(t *testing.T) {
 	sch := schema.NewSchema()
 	deleter := NewMockRowDeleter()
 	updater := NewMockRowUpdater()
+	reader := NewMockRowReader()
 
-	// Should succeed without error for FKActionNone
-	err := mgr.applyDeleteAction(fk, []int64{1}, sch, deleter, updater)
+	// Should succeed without error for FKActionNone when no referencing rows
+	err := mgr.applyDeleteAction(fk, []int64{}, sch, deleter, updater, reader)
 	if err != nil {
 		t.Errorf("applyDeleteAction with FKActionNone should succeed: %v", err)
 	}
@@ -241,9 +242,9 @@ func TestForeignKeyManager_ApplyUpdateAction_None(t *testing.T) {
 	sch := schema.NewSchema()
 	updater := NewMockRowUpdater()
 
-	err := mgr.applyUpdateAction(fk, []interface{}{100}, []int64{1}, sch, updater)
+	err := mgr.applyUpdateAction(fk, []interface{}{100}, []int64{}, sch, updater)
 	if err != nil {
-		t.Errorf("applyUpdateAction with FKActionNone should succeed: %v", err)
+		t.Errorf("applyUpdateAction with FKActionNone should succeed when no referencing rows: %v", err)
 	}
 }
 

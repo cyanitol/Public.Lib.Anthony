@@ -164,8 +164,8 @@ type tableInfo struct {
 type columnInfo struct {
 	Name            string
 	Type            string // Column type for affinity determination
-	IsIntegerPK     bool // true if INTEGER PRIMARY KEY (rowid alias)
-	PayloadColIndex int  // index in payload (-1 if stored as rowid)
+	IsIntegerPK     bool   // true if INTEGER PRIMARY KEY (rowid alias)
+	PayloadColIndex int    // index in payload (-1 if stored as rowid)
 }
 
 // getTable retrieves table metadata from the schema.
@@ -210,22 +210,9 @@ func (r *VDBERowReader) extractTableInfo(tableIface interface{}) (*tableInfo, er
 		return nil, fmt.Errorf("invalid table type")
 	}
 
-	// Extract RootPage and WithoutRowID using reflection
-	val := reflect.ValueOf(tableIface)
-	if val.Kind() == reflect.Ptr {
-		val = val.Elem()
-	}
-
-	rootPageField := val.FieldByName("RootPage")
-	if !rootPageField.IsValid() {
-		return nil, fmt.Errorf("table type does not have RootPage field")
-	}
-	rootPage := uint32(rootPageField.Uint())
-
-	// Check for WithoutRowID flag
-	withoutRowID := false
-	if wField := val.FieldByName("WithoutRowID"); wField.IsValid() {
-		withoutRowID = wField.Bool()
+	rootPage, withoutRowID, err := r.extractTableMetadata(tableIface)
+	if err != nil {
+		return nil, err
 	}
 
 	info := &tableInfo{
@@ -235,56 +222,87 @@ func (r *VDBERowReader) extractTableInfo(tableIface interface{}) (*tableInfo, er
 	}
 
 	// Extract column info
-	// For WITHOUT ROWID tables, all columns are in the payload (no INTEGER PK alias to rowid)
 	payloadIdx := 0
 	for _, colIface := range table.GetColumns() {
-		type columnWithInfo interface {
-			GetName() string
-			IsPrimaryKeyColumn() bool
-			GetType() string
-		}
-
-		col, ok := colIface.(columnWithInfo)
-		if !ok {
-			// Fallback for minimal interface
-			type columnWithName interface {
-				GetName() string
-			}
-			if minCol, minOk := colIface.(columnWithName); minOk {
-				info.Columns = append(info.Columns, columnInfo{
-					Name:            minCol.GetName(),
-					Type:            "",
-					IsIntegerPK:     false,
-					PayloadColIndex: payloadIdx,
-				})
-				payloadIdx++
-			}
-			continue
-		}
-
-		colType := col.GetType()
-		// INTEGER PRIMARY KEY only acts as rowid alias for regular tables (not WITHOUT ROWID)
-		isIPK := !withoutRowID && col.IsPrimaryKeyColumn() && (colType == "INTEGER" || colType == "INT")
-
-		if isIPK {
-			info.Columns = append(info.Columns, columnInfo{
-				Name:            col.GetName(),
-				Type:            colType,
-				IsIntegerPK:     true,
-				PayloadColIndex: -1, // Not in payload, stored as rowid
-			})
-		} else {
-			info.Columns = append(info.Columns, columnInfo{
-				Name:            col.GetName(),
-				Type:            colType,
-				IsIntegerPK:     false,
-				PayloadColIndex: payloadIdx,
-			})
-			payloadIdx++
-		}
+		colInfo, payloadIncrement := r.buildColumnInfo(colIface, withoutRowID, payloadIdx)
+		info.Columns = append(info.Columns, colInfo)
+		payloadIdx += payloadIncrement
 	}
 
 	return info, nil
+}
+
+// extractTableMetadata extracts RootPage and WithoutRowID from table using reflection
+func (r *VDBERowReader) extractTableMetadata(tableIface interface{}) (uint32, bool, error) {
+	val := reflect.ValueOf(tableIface)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+
+	rootPageField := val.FieldByName("RootPage")
+	if !rootPageField.IsValid() {
+		return 0, false, fmt.Errorf("table type does not have RootPage field")
+	}
+	rootPage := uint32(rootPageField.Uint())
+
+	withoutRowID := false
+	if wField := val.FieldByName("WithoutRowID"); wField.IsValid() {
+		withoutRowID = wField.Bool()
+	}
+
+	return rootPage, withoutRowID, nil
+}
+
+// buildColumnInfo creates columnInfo from column interface and returns payload increment
+func (r *VDBERowReader) buildColumnInfo(colIface interface{}, withoutRowID bool, payloadIdx int) (columnInfo, int) {
+	type columnWithInfo interface {
+		GetName() string
+		IsPrimaryKeyColumn() bool
+		GetType() string
+	}
+
+	col, ok := colIface.(columnWithInfo)
+	if !ok {
+		return r.buildMinimalColumnInfo(colIface, payloadIdx)
+	}
+
+	colType := col.GetType()
+	// INTEGER PRIMARY KEY only acts as rowid alias for regular tables (not WITHOUT ROWID)
+	isIPK := !withoutRowID && col.IsPrimaryKeyColumn() && (colType == "INTEGER" || colType == "INT")
+
+	if isIPK {
+		return columnInfo{
+			Name:            col.GetName(),
+			Type:            colType,
+			IsIntegerPK:     true,
+			PayloadColIndex: -1,
+		}, 0
+	}
+
+	return columnInfo{
+		Name:            col.GetName(),
+		Type:            colType,
+		IsIntegerPK:     false,
+		PayloadColIndex: payloadIdx,
+	}, 1
+}
+
+// buildMinimalColumnInfo handles columns with minimal interface
+func (r *VDBERowReader) buildMinimalColumnInfo(colIface interface{}, payloadIdx int) (columnInfo, int) {
+	type columnWithName interface {
+		GetName() string
+	}
+
+	if minCol, ok := colIface.(columnWithName); ok {
+		return columnInfo{
+			Name:            minCol.GetName(),
+			Type:            "",
+			IsIntegerPK:     false,
+			PayloadColIndex: payloadIdx,
+		}, 1
+	}
+
+	return columnInfo{}, 0
 }
 
 // allocTempCursor allocates a temporary cursor number.
@@ -381,9 +399,7 @@ func (r *VDBERowReader) collectMatchingRowids(cursorNum int, table *tableInfo, c
 	var rowids []int64
 
 	if err := btCursor.MoveToFirst(); err != nil {
-		// Handle empty table/leaf errors - both indicate no rows to scan
-		errMsg := err.Error()
-		if errMsg == "empty table" || errMsg == "empty leaf" || strings.Contains(errMsg, "empty leaf page") {
+		if r.isEmptyTableError(err) {
 			return rowids, nil
 		}
 		return nil, err
@@ -402,6 +418,12 @@ func (r *VDBERowReader) collectMatchingRowids(cursorNum int, table *tableInfo, c
 	}
 
 	return rowids, nil
+}
+
+// isEmptyTableError checks if error indicates an empty table
+func (r *VDBERowReader) isEmptyTableError(err error) bool {
+	errMsg := err.Error()
+	return errMsg == "empty table" || errMsg == "empty leaf" || strings.Contains(errMsg, "empty leaf page")
 }
 
 // checkRowMatch checks if the current row matches the given column values.
@@ -686,22 +708,32 @@ func (m *VDBERowModifier) UpdateRow(table string, rowid int64, values map[string
 		return err
 	}
 
-	found, err := btCursor.SeekRowid(rowid)
+	currentValues, err := m.fetchAndMergeValues(btCursor, tableInfo, rowid, table, values)
 	if err != nil {
 		return err
 	}
+
+	return m.replaceRow(btCursor, tableInfo, rowid, currentValues)
+}
+
+// fetchAndMergeValues retrieves current row values and merges with update values
+func (m *VDBERowModifier) fetchAndMergeValues(btCursor *btree.BtCursor, tableInfo *tableInfo, rowid int64, tableName string, values map[string]interface{}) ([]interface{}, error) {
+	found, err := btCursor.SeekRowid(rowid)
+	if err != nil {
+		return nil, err
+	}
 	if !found {
-		return fmt.Errorf("rowid %d not found in table %s", rowid, table)
+		return nil, fmt.Errorf("rowid %d not found in table %s", rowid, tableName)
 	}
 
 	payload, err := btCursor.GetPayloadWithOverflow()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	currentValues, err := m.readRowValues(tableInfo, payload, rowid)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for colIdx, col := range tableInfo.Columns {
@@ -710,20 +742,29 @@ func (m *VDBERowModifier) UpdateRow(table string, rowid int64, values map[string
 		}
 	}
 
+	return currentValues, nil
+}
+
+// replaceRow deletes the current row and inserts updated values
+func (m *VDBERowModifier) replaceRow(btCursor *btree.BtCursor, tableInfo *tableInfo, rowid int64, currentValues []interface{}) error {
 	if err := btCursor.Delete(); err != nil {
 		return err
 	}
 
-	// Build payload excluding INTEGER PRIMARY KEY columns (they're stored as rowid)
+	payloadValues := m.buildPayloadValues(tableInfo, currentValues)
+	newPayload := encodeSimpleRecord(payloadValues)
+	return btCursor.Insert(rowid, newPayload)
+}
+
+// buildPayloadValues creates payload excluding INTEGER PRIMARY KEY columns
+func (m *VDBERowModifier) buildPayloadValues(tableInfo *tableInfo, currentValues []interface{}) []interface{} {
 	payloadValues := make([]interface{}, 0, len(currentValues))
 	for i, col := range tableInfo.Columns {
 		if !col.IsIntegerPK {
 			payloadValues = append(payloadValues, currentValues[i])
 		}
 	}
-
-	newPayload := encodeSimpleRecord(payloadValues)
-	return btCursor.Insert(rowid, newPayload)
+	return payloadValues
 }
 
 // openWriteCursor opens a writable cursor on the given root page.

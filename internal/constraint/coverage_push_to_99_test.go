@@ -72,6 +72,13 @@ func (m *MockRowReaderWithError) FindReferencingRows(table string, columns []str
 	return []int64{}, nil
 }
 
+func (m *MockRowReaderWithError) ReadRowByRowid(table string, rowid int64) (map[string]interface{}, error) {
+	if m.shouldFail {
+		return nil, &mockReadError{}
+	}
+	return make(map[string]interface{}), nil
+}
+
 type mockReadError struct{}
 
 func (e *mockReadError) Error() string {

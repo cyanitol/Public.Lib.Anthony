@@ -71,6 +71,12 @@ func (m *MockRowReader) AddReferencingRows(table string, rowids []int64) {
 	m.referencingRows[key] = rowids
 }
 
+// ReadRowByRowid reads a row's column values by rowid (needed for recursive CASCADE)
+func (m *MockRowReader) ReadRowByRowid(table string, rowid int64) (map[string]interface{}, error) {
+	// Return empty row for mock - CASCADE tests don't need actual row values
+	return make(map[string]interface{}), nil
+}
+
 // MockRowDeleter implements RowDeleter for testing
 type MockRowDeleter struct {
 	deletedRows map[string][]int64 // table -> rowids

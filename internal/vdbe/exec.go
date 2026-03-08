@@ -2087,17 +2087,39 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 	isUpdate := instr.P4.I == 1
 	tableName := instr.P4.Z
 
-	// Handle WITHOUT ROWID tables using composite key
 	if cursor.WithoutRowID {
 		return v.execInsertWithoutRowID(cursor, btCursor, payload, tableName, isUpdate)
 	}
 
-	// Regular rowid-based insert
-	rowid, err := v.getInsertRowid(instr.P3, cursor)
+	return v.execInsertWithRowID(cursor, btCursor, payload, tableName, isUpdate, instr.P3, int64(instr.P4.I))
+}
+
+// execInsertWithRowID handles INSERT for regular rowid-based tables.
+func (v *VDBE) execInsertWithRowID(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, tableName string, isUpdate bool, rowidReg int, updateFlag int64) error {
+	rowid, err := v.getInsertRowid(rowidReg, cursor)
 	if err != nil {
 		return err
 	}
 
+	if err := v.validateInsertWithRowID(tableName, payload, btCursor, rowid, isUpdate); err != nil {
+		return err
+	}
+
+	if err := v.performInsert(cursor, btCursor, rowid, payload, updateFlag); err != nil {
+		if isUpdate {
+			v.restorePendingUpdate()
+		}
+		return err
+	}
+
+	if isUpdate {
+		v.pendingFKUpdate = nil
+	}
+	return nil
+}
+
+// validateInsertWithRowID validates constraints for rowid-based inserts.
+func (v *VDBE) validateInsertWithRowID(tableName string, payload []byte, btCursor *btree.BtCursor, rowid int64, isUpdate bool) error {
 	if isUpdate && tableName != "" {
 		if err := v.validateUpdateConstraintsWithRowid(tableName, payload, rowid); err != nil {
 			v.restorePendingUpdate()
@@ -2111,21 +2133,11 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 		}
 		return err
 	}
-	if err := v.performInsert(cursor, btCursor, rowid, payload, int64(instr.P4.I)); err != nil {
-		if isUpdate {
-			v.restorePendingUpdate()
-		}
-		return err
-	}
-	if isUpdate {
-		v.pendingFKUpdate = nil
-	}
 	return nil
 }
 
 // execInsertWithoutRowID handles INSERT for WITHOUT ROWID tables using composite keys.
 func (v *VDBE) execInsertWithoutRowID(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, tableName string, isUpdate bool) error {
-	// Compute composite key from primary key columns
 	keyBytes, err := v.computeCompositeKeyBytes(tableName, payload)
 	if err != nil {
 		if isUpdate {
@@ -2134,22 +2146,10 @@ func (v *VDBE) execInsertWithoutRowID(cursor *Cursor, btCursor *btree.BtCursor, 
 		return err
 	}
 
-	// Validate update constraints for FK if this is an update
-	if isUpdate && tableName != "" {
-		if err := v.validateUpdateConstraintsWithoutRowID(tableName, payload, keyBytes); err != nil {
-			v.restorePendingUpdate()
-			return err
-		}
+	if err := v.validateWithoutRowIDConstraints(tableName, payload, keyBytes, isUpdate); err != nil {
+		return err
 	}
 
-	// Validate FK constraints for new inserts (not updates)
-	if !isUpdate && tableName != "" {
-		if err := v.checkForeignKeyConstraintsWithoutRowID(tableName, payload); err != nil {
-			return err
-		}
-	}
-
-	// Perform the insert using composite key
 	if err := v.performInsertWithCompositeKey(cursor, btCursor, keyBytes, payload, isUpdate); err != nil {
 		if isUpdate {
 			v.restorePendingUpdate()
@@ -2160,6 +2160,23 @@ func (v *VDBE) execInsertWithoutRowID(cursor *Cursor, btCursor *btree.BtCursor, 
 	if isUpdate {
 		v.pendingFKUpdate = nil
 	}
+	return nil
+}
+
+// validateWithoutRowIDConstraints validates constraints for WITHOUT ROWID inserts.
+func (v *VDBE) validateWithoutRowIDConstraints(tableName string, payload []byte, keyBytes []byte, isUpdate bool) error {
+	if isUpdate && tableName != "" {
+		if err := v.validateUpdateConstraintsWithoutRowID(tableName, payload, keyBytes); err != nil {
+			v.restorePendingUpdate()
+			return err
+		}
+		return nil
+	}
+
+	if !isUpdate && tableName != "" {
+		return v.checkForeignKeyConstraintsWithoutRowID(tableName, payload)
+	}
+
 	return nil
 }
 
@@ -2222,32 +2239,22 @@ func (v *VDBE) performInsertWithCompositeKey(cursor *Cursor, btCursor *btree.BtC
 
 // validateUpdateConstraintsWithRowid validates FK constraints with the new rowid for INTEGER PRIMARY KEY updates.
 func (v *VDBE) validateUpdateConstraintsWithRowid(tableName string, newPayload []byte, newRowid int64) error {
-	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil {
-		return nil
-	}
-	if v.pendingFKUpdate == nil || v.pendingFKUpdate.table != tableName || v.Ctx.Schema == nil {
+	if !v.shouldValidateUpdate(tableName) {
 		return nil
 	}
 
-	type fkManager interface {
-		ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
-	}
-
-	mgr, ok := v.Ctx.FKManager.(fkManager)
-	if !ok {
+	mgr, err := v.getFKManager()
+	if err != nil {
 		return nil
 	}
 
-	// Use the NEW rowid to include updated PRIMARY KEY values in new values
 	newValues, err := v.extractValuesFromPayloadWithRowid(tableName, newPayload, newRowid)
 	if err != nil {
 		return err
 	}
 
-	if v.isWithoutRowidTable(tableName) && v.pkChanged(v.pendingFKUpdate.oldValues, newValues) {
-		if err := v.checkWithoutRowidPKUniqueness(tableName, newPayload, v.pendingFKUpdate.rowid, v.pendingFKUpdate.rowid); err != nil {
-			return err
-		}
+	if err := v.checkPKUniquenessIfChanged(tableName, newPayload, newValues); err != nil {
+		return err
 	}
 
 	rowReader := NewVDBERowReader(v)
@@ -2257,38 +2264,59 @@ func (v *VDBE) validateUpdateConstraintsWithRowid(tableName string, newPayload [
 }
 
 func (v *VDBE) validateUpdateConstraints(tableName string, newPayload []byte) error {
-	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil {
-		return nil
-	}
-	if v.pendingFKUpdate == nil || v.pendingFKUpdate.table != tableName || v.Ctx.Schema == nil {
+	if !v.shouldValidateUpdate(tableName) {
 		return nil
 	}
 
-	type fkManager interface {
-		ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
-	}
-
-	mgr, ok := v.Ctx.FKManager.(fkManager)
-	if !ok {
+	mgr, err := v.getFKManager()
+	if err != nil {
 		return nil
 	}
 
-	// Use rowid from pending update context to include PRIMARY KEY values in new values
 	newValues, err := v.extractValuesFromPayloadWithRowid(tableName, newPayload, v.pendingFKUpdate.rowid)
 	if err != nil {
 		return err
 	}
 
-	if v.isWithoutRowidTable(tableName) && v.pkChanged(v.pendingFKUpdate.oldValues, newValues) {
-		if err := v.checkWithoutRowidPKUniqueness(tableName, newPayload, v.pendingFKUpdate.rowid, v.pendingFKUpdate.rowid); err != nil {
-			return err
-		}
+	if err := v.checkPKUniquenessIfChanged(tableName, newPayload, newValues); err != nil {
+		return err
 	}
 
 	rowReader := NewVDBERowReader(v)
 	rowUpdater := NewVDBERowModifier(v)
 
 	return mgr.ValidateUpdate(tableName, v.pendingFKUpdate.oldValues, newValues, v.Ctx.Schema, rowReader, rowUpdater)
+}
+
+// shouldValidateUpdate checks if update validation is needed.
+func (v *VDBE) shouldValidateUpdate(tableName string) bool {
+	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil {
+		return false
+	}
+	return v.pendingFKUpdate != nil && v.pendingFKUpdate.table == tableName && v.Ctx.Schema != nil
+}
+
+// getFKManager retrieves the foreign key manager interface.
+func (v *VDBE) getFKManager() (interface {
+	ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
+}, error) {
+	type fkManager interface {
+		ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
+	}
+
+	mgr, ok := v.Ctx.FKManager.(fkManager)
+	if !ok {
+		return nil, fmt.Errorf("FK manager doesn't support ValidateUpdate")
+	}
+	return mgr, nil
+}
+
+// checkPKUniquenessIfChanged validates PK uniqueness if primary key changed.
+func (v *VDBE) checkPKUniquenessIfChanged(tableName string, newPayload []byte, newValues map[string]interface{}) error {
+	if v.isWithoutRowidTable(tableName) && v.pkChanged(v.pendingFKUpdate.oldValues, newValues) {
+		return v.checkWithoutRowidPKUniqueness(tableName, newPayload, v.pendingFKUpdate.rowid, v.pendingFKUpdate.rowid)
+	}
+	return nil
 }
 
 func (v *VDBE) restorePendingUpdate() {
@@ -2670,37 +2698,47 @@ func (v *VDBE) extractValuesFromPayloadWithRowid(tableName string, payload []byt
 		return nil, err
 	}
 
-	// Add rowid for INTEGER PRIMARY KEY column
-	if v.Ctx != nil && v.Ctx.Schema != nil {
-		type schemaWithGetTableByName interface {
-			GetTableByName(name string) (interface{}, bool)
-		}
-		if schema, ok := v.Ctx.Schema.(schemaWithGetTableByName); ok {
-			if tableIface, exists := schema.GetTableByName(tableName); exists {
-				type tableWithColumns interface {
-					GetColumns() []interface{}
-				}
-				if table, ok := tableIface.(tableWithColumns); ok {
-					for _, colIface := range table.GetColumns() {
-						type columnInfo interface {
-							GetName() string
-							IsPrimaryKeyColumn() bool
-							GetType() string
-						}
-						// Only use rowid for INTEGER PRIMARY KEY (rowid alias)
-						if col, ok := colIface.(columnInfo); ok && col.IsPrimaryKeyColumn() {
-							colType := col.GetType()
-							if colType == "INTEGER" || colType == "INT" {
-								values[col.GetName()] = rowid
-							}
-						}
-					}
-				}
-			}
-		}
+	if err := v.addRowidToValues(tableName, rowid, values); err != nil {
+		return values, nil // Ignore errors, just return values without rowid
 	}
 
 	return values, nil
+}
+
+// addRowidToValues adds the rowid value for INTEGER PRIMARY KEY columns.
+func (v *VDBE) addRowidToValues(tableName string, rowid int64, values map[string]interface{}) error {
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return fmt.Errorf("no schema available")
+	}
+
+	columns, err := v.getTableColumnsForExtraction(tableName)
+	if err != nil {
+		return err
+	}
+
+	addRowidForIntegerPK(columns, rowid, values)
+	return nil
+}
+
+// addRowidForIntegerPK adds rowid to values for INTEGER PRIMARY KEY columns.
+func addRowidForIntegerPK(columns []interface{}, rowid int64, values map[string]interface{}) {
+	type columnInfo interface {
+		GetName() string
+		IsPrimaryKeyColumn() bool
+		GetType() string
+	}
+
+	for _, colIface := range columns {
+		col, ok := colIface.(columnInfo)
+		if !ok || !col.IsPrimaryKeyColumn() {
+			continue
+		}
+
+		colType := col.GetType()
+		if colType == "INTEGER" || colType == "INT" {
+			values[col.GetName()] = rowid
+		}
+	}
 }
 
 // extractValuesFromPayload extracts column values from a record payload.
@@ -2709,7 +2747,16 @@ func (v *VDBE) extractValuesFromPayload(tableName string, payload []byte) (map[s
 		return nil, fmt.Errorf("no schema available")
 	}
 
-	// Type assert to get the schema with GetTableByName method
+	columns, err := v.getTableColumnsForExtraction(tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	return extractValuesFromColumns(columns, payload)
+}
+
+// getTableColumnsForExtraction retrieves table columns for value extraction.
+func (v *VDBE) getTableColumnsForExtraction(tableName string) ([]interface{}, error) {
 	type schemaWithGetTableByName interface {
 		GetTableByName(name string) (interface{}, bool)
 	}
@@ -2719,13 +2766,11 @@ func (v *VDBE) extractValuesFromPayload(tableName string, payload []byte) (map[s
 		return nil, fmt.Errorf("schema doesn't support GetTableByName")
 	}
 
-	// Get the table definition
 	tableIface, exists := schema.GetTableByName(tableName)
 	if !exists {
 		return nil, fmt.Errorf("table not found: %s", tableName)
 	}
 
-	// Type assert to access table columns
 	type tableWithColumns interface {
 		GetColumns() []interface{}
 	}
@@ -2735,48 +2780,60 @@ func (v *VDBE) extractValuesFromPayload(tableName string, payload []byte) (map[s
 		return nil, fmt.Errorf("can't access columns")
 	}
 
-	columns := table.GetColumns()
+	return table.GetColumns(), nil
+}
 
-	// Extract values into a map
+// extractValuesFromColumns extracts values from payload based on column definitions.
+func extractValuesFromColumns(columns []interface{}, payload []byte) (map[string]interface{}, error) {
 	values := make(map[string]interface{})
 	recordIdx := 0
 
-	for _, colIface := range columns {
-		// Type assert to access column info
-		type columnInfo interface {
-			GetName() string
-			IsPrimaryKeyColumn() bool
-			GetType() string
-		}
+	type columnInfo interface {
+		GetName() string
+		IsPrimaryKeyColumn() bool
+		GetType() string
+	}
 
+	for _, colIface := range columns {
 		col, ok := colIface.(columnInfo)
 		if !ok {
 			recordIdx++
 			continue
 		}
 
-		// Only INTEGER PRIMARY KEY columns are stored as rowid, not in the record
-		// Other PRIMARY KEY columns (without INTEGER type) are stored normally
-		if col.IsPrimaryKeyColumn() {
-			colType := col.GetType()
-			if colType == "INTEGER" || colType == "INT" {
-				continue
-			}
-		}
-
-		// Extract the value from the record
-		valueMem := NewMem()
-		if err := parseRecordColumn(payload, recordIdx, valueMem); err != nil {
-			recordIdx++
+		if shouldSkipColumn(col) {
 			continue
 		}
 
-		// Convert Mem to interface{} value
-		values[col.GetName()] = valueMem.Value()
+		if value, err := extractColumnValue(payload, recordIdx); err == nil {
+			values[col.GetName()] = value
+		}
 		recordIdx++
 	}
 
 	return values, nil
+}
+
+// shouldSkipColumn determines if a column should be skipped during extraction.
+func shouldSkipColumn(col interface{}) bool {
+	type columnInfo interface {
+		IsPrimaryKeyColumn() bool
+		GetType() string
+	}
+	if c, ok := col.(columnInfo); ok && c.IsPrimaryKeyColumn() {
+		colType := c.GetType()
+		return colType == "INTEGER" || colType == "INT"
+	}
+	return false
+}
+
+// extractColumnValue extracts a single column value from payload.
+func extractColumnValue(payload []byte, recordIdx int) (interface{}, error) {
+	valueMem := NewMem()
+	if err := parseRecordColumn(payload, recordIdx, valueMem); err != nil {
+		return nil, err
+	}
+	return valueMem.Value(), nil
 }
 
 // checkForeignKeyDeleteConstraints validates foreign key constraints for a DELETE operation.
@@ -3006,22 +3063,39 @@ func (v *VDBE) getTableRootPage(tableName string) (uint32, error) {
 }
 
 func (v *VDBE) extractPKColumns(tableName string, payload []byte) ([]string, []interface{}, error) {
-	type schemaWithGetTable interface {
-		GetTableByName(name string) (interface{}, bool)
+	tableIface, pkColNames, err := v.getPKColumnNames(tableName)
+	if err != nil {
+		return nil, nil, err
 	}
+
+	columns, err := getColumnsFromTable(tableIface)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	colNameToIdx := buildColumnIndexMap(columns)
+	return extractPKValues(pkColNames, colNameToIdx, payload)
+}
+
+// getPKColumnNames retrieves the primary key column names for a table.
+func (v *VDBE) getPKColumnNames(tableName string) (interface{}, []string, error) {
 	if v.Ctx == nil || v.Ctx.Schema == nil {
 		return nil, nil, fmt.Errorf("no schema for PK extraction")
+	}
+
+	type schemaWithGetTable interface {
+		GetTableByName(name string) (interface{}, bool)
 	}
 	schemaObj, ok := v.Ctx.Schema.(schemaWithGetTable)
 	if !ok {
 		return nil, nil, fmt.Errorf("invalid schema type for PK extraction")
 	}
+
 	tableIface, ok := schemaObj.GetTableByName(tableName)
 	if !ok {
 		return nil, nil, fmt.Errorf("table not found: %s", tableName)
 	}
 
-	// Get PK column names from the table's PrimaryKey slice (handles table-level constraints)
 	type tableWithPK interface {
 		GetPrimaryKey() []string
 	}
@@ -3029,22 +3103,29 @@ func (v *VDBE) extractPKColumns(tableName string, payload []byte) ([]string, []i
 	if !ok {
 		return nil, nil, fmt.Errorf("table missing PK info for extraction")
 	}
+
 	pkColNames := pkProvider.GetPrimaryKey()
 	if len(pkColNames) == 0 {
 		return nil, nil, fmt.Errorf("table %s has no primary key columns", tableName)
 	}
 
-	// Get columns for index lookup
+	return tableIface, pkColNames, nil
+}
+
+// getColumnsFromTable retrieves the columns from a table interface.
+func getColumnsFromTable(tableIface interface{}) ([]interface{}, error) {
 	type tableWithColumns interface {
 		GetColumns() []interface{}
 	}
 	colsProvider, ok := tableIface.(tableWithColumns)
 	if !ok {
-		return nil, nil, fmt.Errorf("table missing columns for PK extraction")
+		return nil, fmt.Errorf("table missing columns for PK extraction")
 	}
-	columns := colsProvider.GetColumns()
+	return colsProvider.GetColumns(), nil
+}
 
-	// Build column name to index map
+// buildColumnIndexMap creates a map from column name to index.
+func buildColumnIndexMap(columns []interface{}) map[string]int {
 	type colMeta interface {
 		GetName() string
 	}
@@ -3054,8 +3135,11 @@ func (v *VDBE) extractPKColumns(tableName string, payload []byte) ([]string, []i
 			colNameToIdx[strings.ToLower(col.GetName())] = idx
 		}
 	}
+	return colNameToIdx
+}
 
-	// Extract PK values in definition order (order they appear in columns)
+// extractPKValues extracts primary key values from payload based on column names.
+func extractPKValues(pkColNames []string, colNameToIdx map[string]int, payload []byte) ([]string, []interface{}, error) {
 	var pkCols []string
 	var pkValues []interface{}
 	for _, pkColName := range pkColNames {
@@ -3092,44 +3176,38 @@ func (v *VDBE) pkChanged(oldValues, newValues map[string]interface{}) bool {
 }
 
 func valuesEqualLoose(a, b interface{}) bool {
-	switch va := a.(type) {
-	case int:
-		switch vb := b.(type) {
-		case int:
-			return va == vb
-		case int64:
-			return int64(va) == vb
-		case float64:
-			return float64(va) == vb
+	// Convert both values to float64 for numeric comparison
+	aNum, aIsNum := toNumeric(a)
+	bNum, bIsNum := toNumeric(b)
+	if aIsNum && bIsNum {
+		return aNum == bNum
+	}
+	// String comparison
+	if aStr, ok := a.(string); ok {
+		if bStr, ok := b.(string); ok {
+			return aStr == bStr
 		}
-	case int64:
-		switch vb := b.(type) {
-		case int:
-			return va == int64(vb)
-		case int64:
-			return va == vb
-		case float64:
-			return float64(va) == vb
-		}
-	case float64:
-		switch vb := b.(type) {
-		case int:
-			return va == float64(vb)
-		case int64:
-			return va == float64(vb)
-		case float64:
-			return va == vb
-		}
-	case string:
-		if vb, ok := b.(string); ok {
-			return va == vb
-		}
-	case []byte:
-		if vb, ok := b.([]byte); ok {
-			return string(va) == string(vb)
+	}
+	// Blob comparison
+	if aBytes, ok := a.([]byte); ok {
+		if bBytes, ok := b.([]byte); ok {
+			return string(aBytes) == string(bBytes)
 		}
 	}
 	return false
+}
+
+// toNumeric converts a value to float64 for numeric comparison.
+func toNumeric(v interface{}) (float64, bool) {
+	switch val := v.(type) {
+	case int:
+		return float64(val), true
+	case int64:
+		return float64(val), true
+	case float64:
+		return val, true
+	}
+	return 0, false
 }
 
 func (v *VDBE) execDelete(instr *Instruction) error {

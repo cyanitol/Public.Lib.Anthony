@@ -54,19 +54,19 @@ type ForeignKeyConstraint struct {
 	Name string
 }
 
-
 // DeferredViolation represents a deferred foreign key constraint violation.
 type DeferredViolation struct {
 	Constraint *ForeignKeyConstraint
 	Values     []interface{}
 	Table      string
 }
+
 // ForeignKeyManager manages foreign key constraints for a database.
 type ForeignKeyManager struct {
 	constraints        map[string][]*ForeignKeyConstraint // table name -> constraints
-	enabled     bool                               // PRAGMA foreign_keys setting
+	enabled            bool                               // PRAGMA foreign_keys setting
 	deferredViolations []*DeferredViolation               // violations to check at commit time
-	mu          sync.RWMutex
+	mu                 sync.RWMutex
 }
 
 // NewForeignKeyManager creates a new foreign key constraint manager.
@@ -149,30 +149,41 @@ func (m *ForeignKeyManager) ValidateInsert(
 	}
 
 	for _, fk := range constraints {
-		fkValues, hasNull := extractForeignKeyValues(values, fk.Columns)
-		if hasNull {
-			continue
-		}
-
-		// Check for self-referencing row (row references itself)
-		if strings.EqualFold(fk.Table, fk.RefTable) {
-			if selfReferenceMatches(values, fk.Columns, fk.RefColumns) {
-				continue // Row references itself, constraint satisfied
-			}
-		}
-
-		// For deferred constraints, record violation for later checking at COMMIT
-		if fk.Deferrable == DeferrableInitiallyDeferred {
-			m.recordDeferredViolation(fk, fkValues, tableName)
-			continue
-		}
-
-		if err := m.validateReference(fk, fkValues, schemaTyped, reader); err != nil {
+		if err := m.validateInsertConstraint(fk, tableName, values, schemaTyped, reader); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// validateInsertConstraint validates a single foreign key constraint for an INSERT operation.
+func (m *ForeignKeyManager) validateInsertConstraint(
+	fk *ForeignKeyConstraint,
+	tableName string,
+	values map[string]interface{},
+	schemaTyped *schema.Schema,
+	reader RowReader,
+) error {
+	fkValues, hasNull := extractForeignKeyValues(values, fk.Columns)
+	if hasNull {
+		return nil
+	}
+
+	// Check for self-referencing row (row references itself)
+	if strings.EqualFold(fk.Table, fk.RefTable) {
+		if selfReferenceMatches(values, fk.Columns, fk.RefColumns) {
+			return nil // Row references itself, constraint satisfied
+		}
+	}
+
+	// For deferred constraints, record violation for later checking at COMMIT
+	if fk.Deferrable == DeferrableInitiallyDeferred {
+		m.recordDeferredViolation(fk, fkValues, tableName)
+		return nil
+	}
+
+	return m.validateReference(fk, fkValues, schemaTyped, reader)
 }
 
 // ValidateUpdate validates foreign key constraints for an UPDATE operation.
@@ -412,6 +423,10 @@ func (m *ForeignKeyManager) applyDeleteAction(
 	rowUpdater RowUpdater,
 	rowReader RowReader,
 ) error {
+	// No referencing rows means no action needed
+	if len(referencingRows) == 0 {
+		return nil
+	}
 	switch fk.OnDelete {
 	case FKActionNone, FKActionRestrict, FKActionNoAction:
 		// FKActionNone is the default when no ON DELETE is specified, which is equivalent to NO ACTION
@@ -784,6 +799,10 @@ func (m *ForeignKeyManager) applyUpdateAction(
 	schemaObj *schema.Schema,
 	rowUpdater RowUpdater,
 ) error {
+	// No referencing rows means no action needed
+	if len(referencingRows) == 0 {
+		return nil
+	}
 	switch fk.OnUpdate {
 	case FKActionNone, FKActionRestrict, FKActionNoAction:
 		// FKActionNone is the default when no ON UPDATE is specified, which is equivalent to NO ACTION
