@@ -2142,6 +2142,13 @@ func (v *VDBE) execInsertWithoutRowID(cursor *Cursor, btCursor *btree.BtCursor, 
 		}
 	}
 
+	// Validate FK constraints for new inserts (not updates)
+	if !isUpdate && tableName != "" {
+		if err := v.checkForeignKeyConstraintsWithoutRowID(tableName, payload); err != nil {
+			return err
+		}
+	}
+
 	// Perform the insert using composite key
 	if err := v.performInsertWithCompositeKey(cursor, btCursor, keyBytes, payload, isUpdate); err != nil {
 		if isUpdate {
@@ -2624,6 +2631,35 @@ func (v *VDBE) checkForeignKeyConstraints(tableName string, payload []byte, rowi
 	rowReader := NewVDBERowReader(v)
 
 	// Validate the insert
+	return mgr.ValidateInsert(tableName, values, v.Ctx.Schema, rowReader)
+}
+
+// checkForeignKeyConstraintsWithoutRowID validates FK constraints for WITHOUT ROWID table inserts.
+func (v *VDBE) checkForeignKeyConstraintsWithoutRowID(tableName string, payload []byte) error {
+	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil {
+		return nil
+	}
+
+	type fkManager interface {
+		ValidateInsert(tableName string, values map[string]interface{}, schemaObj interface{}, rowReader interface{}) error
+	}
+
+	mgr, ok := v.Ctx.FKManager.(fkManager)
+	if !ok {
+		return nil
+	}
+
+	if v.Ctx.Schema == nil {
+		return nil
+	}
+
+	// For WITHOUT ROWID tables, extract values directly from payload (no rowid)
+	values, err := v.extractValuesFromPayload(tableName, payload)
+	if err != nil {
+		return nil // Skip FK check if we can't extract values
+	}
+
+	rowReader := NewVDBERowReader(v)
 	return mgr.ValidateInsert(tableName, values, v.Ctx.Schema, rowReader)
 }
 

@@ -44,14 +44,11 @@ func (r *VDBERowReader) RowExists(tableName string, columns []string, values []i
 		return false, err
 	}
 
-	// Find the root page for the table
-	rootPage := table.RootPage
-
 	// Open a temporary cursor for reading
 	cursorNum := r.allocTempCursor()
 	defer r.closeTempCursor(cursorNum)
 
-	if err := r.openReadCursor(cursorNum, rootPage); err != nil {
+	if err := r.openReadCursorForTable(cursorNum, table); err != nil {
 		return false, err
 	}
 
@@ -71,11 +68,10 @@ func (r *VDBERowReader) FindReferencingRows(tableName string, columns []string, 
 		return nil, err
 	}
 
-	rootPage := table.RootPage
 	cursorNum := r.allocTempCursor()
 	defer r.closeTempCursor(cursorNum)
 
-	if err := r.openReadCursor(cursorNum, rootPage); err != nil {
+	if err := r.openReadCursorForTable(cursorNum, table); err != nil {
 		return nil, err
 	}
 
@@ -94,11 +90,15 @@ func (r *VDBERowReader) ReadRowByRowid(tableName string, rowid int64) (map[strin
 		return nil, err
 	}
 
-	rootPage := table.RootPage
+	// WITHOUT ROWID tables don't have rowids, so this function only works for regular tables
+	if table.WithoutRowID {
+		return nil, fmt.Errorf("ReadRowByRowid not supported for WITHOUT ROWID table: %s", tableName)
+	}
+
 	cursorNum := r.allocTempCursor()
 	defer r.closeTempCursor(cursorNum)
 
-	if err := r.openReadCursor(cursorNum, rootPage); err != nil {
+	if err := r.openReadCursorForTable(cursorNum, table); err != nil {
 		return nil, err
 	}
 
@@ -155,8 +155,9 @@ func (r *VDBERowReader) readRowValuesFromCursor(cursor *Cursor, table *tableInfo
 
 // tableInfo represents table metadata needed for FK validation
 type tableInfo struct {
-	RootPage uint32
-	Columns  []columnInfo
+	RootPage     uint32
+	Columns      []columnInfo
+	WithoutRowID bool // true for WITHOUT ROWID tables
 }
 
 // columnInfo represents column metadata
@@ -209,7 +210,7 @@ func (r *VDBERowReader) extractTableInfo(tableIface interface{}) (*tableInfo, er
 		return nil, fmt.Errorf("invalid table type")
 	}
 
-	// Extract RootPage using reflection since it's a field, not a method
+	// Extract RootPage and WithoutRowID using reflection
 	val := reflect.ValueOf(tableIface)
 	if val.Kind() == reflect.Ptr {
 		val = val.Elem()
@@ -219,15 +220,22 @@ func (r *VDBERowReader) extractTableInfo(tableIface interface{}) (*tableInfo, er
 	if !rootPageField.IsValid() {
 		return nil, fmt.Errorf("table type does not have RootPage field")
 	}
-
 	rootPage := uint32(rootPageField.Uint())
 
-	info := &tableInfo{
-		RootPage: rootPage,
-		Columns:  make([]columnInfo, 0),
+	// Check for WithoutRowID flag
+	withoutRowID := false
+	if wField := val.FieldByName("WithoutRowID"); wField.IsValid() {
+		withoutRowID = wField.Bool()
 	}
 
-	// Extract column info including INTEGER PRIMARY KEY detection
+	info := &tableInfo{
+		RootPage:     rootPage,
+		Columns:      make([]columnInfo, 0),
+		WithoutRowID: withoutRowID,
+	}
+
+	// Extract column info
+	// For WITHOUT ROWID tables, all columns are in the payload (no INTEGER PK alias to rowid)
 	payloadIdx := 0
 	for _, colIface := range table.GetColumns() {
 		type columnWithInfo interface {
@@ -245,7 +253,7 @@ func (r *VDBERowReader) extractTableInfo(tableIface interface{}) (*tableInfo, er
 			if minCol, minOk := colIface.(columnWithName); minOk {
 				info.Columns = append(info.Columns, columnInfo{
 					Name:            minCol.GetName(),
-				Type:            "",
+					Type:            "",
 					IsIntegerPK:     false,
 					PayloadColIndex: payloadIdx,
 				})
@@ -254,9 +262,9 @@ func (r *VDBERowReader) extractTableInfo(tableIface interface{}) (*tableInfo, er
 			continue
 		}
 
-		// Check if this is INTEGER PRIMARY KEY (rowid alias)
-	colType := col.GetType()
-		isIPK := col.IsPrimaryKeyColumn() && (colType == "INTEGER" || colType == "INT")
+		colType := col.GetType()
+		// INTEGER PRIMARY KEY only acts as rowid alias for regular tables (not WITHOUT ROWID)
+		isIPK := !withoutRowID && col.IsPrimaryKeyColumn() && (colType == "INTEGER" || colType == "INT")
 
 		if isIPK {
 			info.Columns = append(info.Columns, columnInfo{
@@ -285,8 +293,8 @@ func (r *VDBERowReader) allocTempCursor() int {
 	return len(r.vdbe.Cursors) + 1000
 }
 
-// openReadCursor opens a cursor for reading on the given root page.
-func (r *VDBERowReader) openReadCursor(cursorNum int, rootPage uint32) error {
+// openReadCursorForTable opens a cursor for reading, handling both regular and WITHOUT ROWID tables.
+func (r *VDBERowReader) openReadCursorForTable(cursorNum int, table *tableInfo) error {
 	bt, ok := r.vdbe.Ctx.Btree.(*btree.Btree)
 	if !ok {
 		return fmt.Errorf("invalid btree type")
@@ -297,15 +305,16 @@ func (r *VDBERowReader) openReadCursor(cursorNum int, rootPage uint32) error {
 		return err
 	}
 
-	// Create and store the cursor
-	btCursor := btree.NewCursor(bt, rootPage)
+	// Create cursor with appropriate options for WITHOUT ROWID
+	btCursor := btree.NewCursorWithOptions(bt, table.RootPage, table.WithoutRowID)
 	r.vdbe.Cursors[cursorNum] = &Cursor{
-		CurType:     CursorBTree,
-		IsTable:     true,
-		RootPage:    rootPage,
-		BtreeCursor: btCursor,
-		CachedCols:  make([][]byte, 0),
-		CacheStatus: 0,
+		CurType:      CursorBTree,
+		IsTable:      true,
+		RootPage:     table.RootPage,
+		BtreeCursor:  btCursor,
+		CachedCols:   make([][]byte, 0),
+		CacheStatus:  0,
+		WithoutRowID: table.WithoutRowID,
 	}
 
 	return nil

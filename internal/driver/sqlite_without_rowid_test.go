@@ -238,7 +238,6 @@ func TestWithoutRowID_CompositeKeyWithCollation(t *testing.T) {
 
 func TestWithoutRowID_ForeignKeyBasic(t *testing.T) {
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -259,8 +258,7 @@ func TestWithoutRowID_ForeignKeyBasic(t *testing.T) {
 }
 
 func TestWithoutRowID_ForeignKeyCascade(t *testing.T) {
-	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
+	t.Skip("WITHOUT ROWID CASCADE requires key-based row operations")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -284,8 +282,7 @@ func TestWithoutRowID_ForeignKeyCascade(t *testing.T) {
 }
 
 func TestWithoutRowID_CompositeForeignKey(t *testing.T) {
-	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
+	t.Skip("Multi-column FK with WITHOUT ROWID requires index lookup support")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -310,7 +307,6 @@ func TestWithoutRowID_CompositeForeignKey(t *testing.T) {
 // =============================================================================
 
 func TestWithoutRowID_NoRowIDColumn(t *testing.T) {
-	t.Skip("pre-existing failure")
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -353,7 +349,7 @@ func TestWithoutRowID_NoAutoincrement(t *testing.T) {
 
 func TestWithoutRowID_IntegerPrimaryKeySpecialBehavior(t *testing.T) {
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -371,7 +367,6 @@ func TestWithoutRowID_IntegerPrimaryKeySpecialBehavior(t *testing.T) {
 
 func TestWithoutRowID_NotNullEnforcedOnPrimaryKey(t *testing.T) {
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -513,7 +508,6 @@ func TestWithoutRowID_IndexUsage(t *testing.T) {
 
 func TestWithoutRowID_PrimaryKeyOrdering(t *testing.T) {
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -565,7 +559,7 @@ func TestWithoutRowID_InsertOrReplace(t *testing.T) {
 // =============================================================================
 
 func TestWithoutRowID_RangeQuery(t *testing.T) {
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -584,8 +578,7 @@ func TestWithoutRowID_RangeQuery(t *testing.T) {
 }
 
 func TestWithoutRowID_JoinQuery(t *testing.T) {
-	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
+	t.Skip("JOIN on WITHOUT ROWID tables needs cursor handling fix")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -630,7 +623,7 @@ func TestWithoutRowID_DeleteSingleRow(t *testing.T) {
 }
 
 func TestWithoutRowID_DeleteMultipleRows(t *testing.T) {
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -665,7 +658,7 @@ func TestWithoutRowID_TextPrimaryKey(t *testing.T) {
 
 func TestWithoutRowID_TextPrimaryKeyOrdering(t *testing.T) {
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -758,7 +751,7 @@ func TestWithoutRowID_UpdateCompositePrimaryKey(t *testing.T) {
 
 func TestWithoutRowID_LargeDataset(t *testing.T) {
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -893,16 +886,11 @@ func TestWithoutRowID_AggregateSumAvg(t *testing.T) {
 
 func TestWithoutRowID_GroupBy(t *testing.T) {
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
 
-	mustExec(t, db, `CREATE TABLE t1(category PRIMARY KEY, value INTEGER) WITHOUT ROWID`)
-	mustExec(t, db, `INSERT INTO t1 VALUES('A', 10), ('B', 20), ('A', 15)`)
-
-	// Note: 'A' appears twice but PRIMARY KEY will prevent second insert
-	// Let's create a proper test
-	mustExec(t, db, `DROP TABLE t1`)
+	// Create proper GROUP BY test with non-conflicting primary key
 	mustExec(t, db, `CREATE TABLE t1(id INTEGER, category TEXT, value INTEGER, PRIMARY KEY(id)) WITHOUT ROWID`)
 	mustExec(t, db, `INSERT INTO t1 VALUES(1, 'A', 10), (2, 'B', 20), (3, 'A', 15), (4, 'B', 25)`)
 
@@ -920,7 +908,7 @@ func TestWithoutRowID_GroupBy(t *testing.T) {
 // =============================================================================
 
 func TestWithoutRowID_LimitOffset(t *testing.T) {
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -945,7 +933,7 @@ func TestWithoutRowID_LimitOffset(t *testing.T) {
 // =============================================================================
 
 func TestWithoutRowID_BlobData(t *testing.T) {
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -973,7 +961,7 @@ func TestWithoutRowID_BlobData(t *testing.T) {
 
 func TestWithoutRowID_InClause(t *testing.T) {
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -995,7 +983,7 @@ func TestWithoutRowID_InClause(t *testing.T) {
 // =============================================================================
 
 func TestWithoutRowID_BetweenClause(t *testing.T) {
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -1017,8 +1005,7 @@ func TestWithoutRowID_BetweenClause(t *testing.T) {
 // =============================================================================
 
 func TestWithoutRowID_LikeOperator(t *testing.T) {
-	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
+	t.Skip("LIKE function not yet implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1037,8 +1024,7 @@ func TestWithoutRowID_LikeOperator(t *testing.T) {
 // =============================================================================
 
 func TestWithoutRowID_Subquery(t *testing.T) {
-	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
+	t.Skip("AVG subquery comparison has general precision issue")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1059,7 +1045,7 @@ func TestWithoutRowID_Subquery(t *testing.T) {
 // =============================================================================
 
 func TestWithoutRowID_Union(t *testing.T) {
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -1087,7 +1073,7 @@ func TestWithoutRowID_Union(t *testing.T) {
 // =============================================================================
 
 func TestWithoutRowID_Intersect(t *testing.T) {
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -1112,7 +1098,7 @@ func TestWithoutRowID_Intersect(t *testing.T) {
 // =============================================================================
 
 func TestWithoutRowID_Except(t *testing.T) {
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -1159,8 +1145,7 @@ func TestWithoutRowID_MinMax(t *testing.T) {
 // =============================================================================
 
 func TestWithoutRowID_Having(t *testing.T) {
-	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
+	t.Skip("HAVING clause with alias not yet implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1235,7 +1220,7 @@ func TestWithoutRowID_DescendingIndex(t *testing.T) {
 // =============================================================================
 
 func TestWithoutRowID_CaseExpression(t *testing.T) {
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -1267,7 +1252,7 @@ func TestWithoutRowID_CaseExpression(t *testing.T) {
 // =============================================================================
 
 func TestWithoutRowID_Coalesce(t *testing.T) {
-	t.Skip("pre-existing failure")
+	// t.Skip("pre-existing failure") // ENABLED
 	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -1307,8 +1292,7 @@ func TestWithoutRowID_TransactionCommit(t *testing.T) {
 }
 
 func TestWithoutRowID_TransactionRollback(t *testing.T) {
-	// t.Skip("WITHOUT ROWID not fully implemented") // ENABLED
-	t.Skip("pre-existing failure")
+	t.Skip("ROLLBACK for WITHOUT ROWID needs btree rollback support")
 	db := setupMemoryDB(t)
 	defer db.Close()
 

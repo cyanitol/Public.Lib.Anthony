@@ -17,9 +17,9 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 
 | Metric | Count |
 |--------|-------|
-| **Passing Tests** | ~655 |
-| **Skipped Tests** | ~476 |
-| **Coverage Target** | 58% feature parity |
+| **Passing Tests** | ~680 |
+| **Skipped Tests** | ~450 |
+| **Coverage Target** | 60% feature parity |
 
 ---
 
@@ -145,7 +145,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | CHECK | :white_check_mark: | |
 | DEFAULT | :white_check_mark: | |
 | FOREIGN KEY (syntax) | :white_check_mark: | Parsed correctly |
-| FOREIGN KEY (runtime) | :construction: | 38 tests skipped - FK manager not integrated |
+| FOREIGN KEY (runtime) | :large_orange_diamond: | 31 passing, 9 skipped - deferred constraints pending |
 | COLLATE | :white_check_mark: | BINARY, NOCASE, RTRIM |
 | AUTOINCREMENT | :white_check_mark: | |
 
@@ -156,7 +156,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Regular tables | :white_check_mark: | |
-| WITHOUT ROWID tables | :construction: | 23 tests skipped - uses OpNewRowid incorrectly |
+| WITHOUT ROWID tables | :large_orange_diamond: | 38 passing, 13 skipped - JOIN/ROLLBACK issues pending |
 | Temporary tables | :large_orange_diamond: | Basic support |
 | Virtual tables | :large_orange_diamond: | Infrastructure only |
 
@@ -345,8 +345,8 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 - Memory and file databases
 
 ### Known Gaps (v0.1.x blockers)
-- Foreign key runtime enforcement (38 tests)
-- WITHOUT ROWID tables (23 tests)
+- Foreign key deferred constraints (9 tests)
+- WITHOUT ROWID edge cases (13 tests)
 - Recursive CTEs (17 tests)
 - VACUUM operations (30 tests)
 
@@ -359,5 +359,5 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 
 ---
 
-*Last updated: 2026-03-06*
+*Last updated: 2026-03-08*
 *Reference: [SQLite Documentation](https://sqlite.org/docs.html)*

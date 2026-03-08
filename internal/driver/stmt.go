@@ -565,9 +565,13 @@ func emitSimpleColumnRef(vm *vdbe.VDBE, table *schema.Table, ident *parser.Ident
 		return fmt.Errorf("column not found: %s", ident.Name)
 	}
 
-	if colIdx == -2 && !table.WithoutRowID {
-		// This is a rowid alias but no INTEGER PRIMARY KEY exists
-		// (not applicable for WITHOUT ROWID tables)
+	// colIdx == -2 means it's a rowid alias (rowid, _rowid_, oid)
+	if colIdx == -2 {
+		if table.WithoutRowID {
+			// WITHOUT ROWID tables don't have rowid - return error
+			return fmt.Errorf("no such column: %s", ident.Name)
+		}
+		// Regular tables: emit OpRowid
 		vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
 		return nil
 	}
