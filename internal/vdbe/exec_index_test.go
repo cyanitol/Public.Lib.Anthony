@@ -40,72 +40,75 @@ func createIndexPage(bt *btree.Btree) (uint32, error) {
 	return pageNum, nil
 }
 
-// TestIndexCursorBasicOperations tests basic index cursor operations
-func TestIndexCursorBasicOperations(t *testing.T) {
-	t.Parallel()
-	// Create in-memory btree
+// Helper to setup index cursor with test data
+func setupIndexCursor(t *testing.T) (*btree.Btree, *btree.IndexCursor, uint32) {
+	t.Helper()
 	bt := btree.NewBtree(4096)
-
-	// Create an index page (not a table page)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
 		t.Fatalf("failed to create index page: %v", err)
 	}
-
-	// Create index cursor
 	idxCursor := btree.NewIndexCursor(bt, rootPage)
+	return bt, idxCursor, rootPage
+}
 
-	// Test insertion
+// Helper to insert test data
+func insertTestData(t *testing.T, idxCursor *btree.IndexCursor) {
+	t.Helper()
+	testData := []struct {
+		key   string
+		rowid int64
+	}{
+		{"apple", 100},
+		{"banana", 200},
+		{"cherry", 300},
+	}
+	for _, td := range testData {
+		if err := idxCursor.InsertIndex([]byte(td.key), td.rowid); err != nil {
+			t.Fatalf("failed to insert '%s': %v", td.key, err)
+		}
+	}
+}
+
+// Helper to verify seek result
+func verifySeek(t *testing.T, idxCursor *btree.IndexCursor, key string, expectedRowid int64, shouldFind bool) {
+	t.Helper()
+	found, err := idxCursor.SeekIndex([]byte(key))
+	if err != nil {
+		t.Fatalf("failed to seek '%s': %v", key, err)
+	}
+	if found != shouldFind {
+		t.Errorf("seek '%s': expected found=%v, got %v", key, shouldFind, found)
+	}
+	if shouldFind && idxCursor.GetRowid() != expectedRowid {
+		t.Errorf("expected rowid %d for '%s', got %d", expectedRowid, key, idxCursor.GetRowid())
+	}
+}
+
+// TestIndexCursorBasicOperations tests basic index cursor operations
+func TestIndexCursorBasicOperations(t *testing.T) {
+	t.Parallel()
 	t.Run("Insert", func(t *testing.T) {
-		if err := idxCursor.InsertIndex([]byte("apple"), 100); err != nil {
-			t.Fatalf("failed to insert 'apple': %v", err)
-		}
-
-		if err := idxCursor.InsertIndex([]byte("banana"), 200); err != nil {
-			t.Fatalf("failed to insert 'banana': %v", err)
-		}
-
-		if err := idxCursor.InsertIndex([]byte("cherry"), 300); err != nil {
-			t.Fatalf("failed to insert 'cherry': %v", err)
-		}
+		t.Parallel()
+		_, idxCursor, _ := setupIndexCursor(t)
+		insertTestData(t, idxCursor)
 	})
 
-	// Test seeking
 	t.Run("Seek", func(t *testing.T) {
-		found, err := idxCursor.SeekIndex([]byte("apple"))
-		if err != nil {
-			t.Fatalf("failed to seek 'apple': %v", err)
-		}
-		if !found {
-			t.Errorf("expected to find 'apple' in index")
-		}
-		if rowid := idxCursor.GetRowid(); rowid != 100 {
-			t.Errorf("expected rowid 100 for 'apple', got %d", rowid)
-		}
+		t.Parallel()
+		_, idxCursor, _ := setupIndexCursor(t)
+		insertTestData(t, idxCursor)
 
-		found, err = idxCursor.SeekIndex([]byte("banana"))
-		if err != nil {
-			t.Fatalf("failed to seek 'banana': %v", err)
-		}
-		if !found {
-			t.Errorf("expected to find 'banana' in index")
-		}
-		if rowid := idxCursor.GetRowid(); rowid != 200 {
-			t.Errorf("expected rowid 200 for 'banana', got %d", rowid)
-		}
-
-		// Test seeking non-existent key
-		found, err = idxCursor.SeekIndex([]byte("aardvark"))
-		if err != nil {
-			t.Fatalf("failed to seek 'aardvark': %v", err)
-		}
-		if found {
-			t.Errorf("expected not to find 'aardvark' in index")
-		}
+		verifySeek(t, idxCursor, "apple", 100, true)
+		verifySeek(t, idxCursor, "banana", 200, true)
+		verifySeek(t, idxCursor, "aardvark", 0, false)
 	})
 
-	// Test iteration from first
 	t.Run("Iteration", func(t *testing.T) {
+		t.Parallel()
+		_, idxCursor, _ := setupIndexCursor(t)
+		insertTestData(t, idxCursor)
+
 		err := idxCursor.MoveToFirst()
 		if err != nil {
 			t.Fatalf("failed to move to first: %v", err)
@@ -115,7 +118,7 @@ func TestIndexCursorBasicOperations(t *testing.T) {
 		for idxCursor.IsValid() {
 			keys = append(keys, string(idxCursor.GetKey()))
 			if err := idxCursor.NextIndex(); err != nil {
-				break // Reached end
+				break
 			}
 		}
 
@@ -130,30 +133,17 @@ func TestIndexCursorBasicOperations(t *testing.T) {
 		}
 	})
 
-	// Test deletion
 	t.Run("Delete", func(t *testing.T) {
-		// Delete 'banana' (key, rowid pair)
+		t.Parallel()
+		_, idxCursor, _ := setupIndexCursor(t)
+		insertTestData(t, idxCursor)
+
 		if err := idxCursor.DeleteIndex([]byte("banana"), 200); err != nil {
 			t.Fatalf("failed to delete 'banana': %v", err)
 		}
 
-		// Verify deletion
-		found, err := idxCursor.SeekIndex([]byte("banana"))
-		if err != nil {
-			t.Fatalf("failed to seek 'banana' after delete: %v", err)
-		}
-		if found {
-			t.Errorf("expected 'banana' to be deleted")
-		}
-
-		// Verify other entries still exist
-		found, err = idxCursor.SeekIndex([]byte("apple"))
-		if err != nil {
-			t.Fatalf("failed to seek 'apple': %v", err)
-		}
-		if !found {
-			t.Errorf("expected 'apple' to still exist")
-		}
+		verifySeek(t, idxCursor, "banana", 0, false)
+		verifySeek(t, idxCursor, "apple", 100, true)
 	})
 }
 

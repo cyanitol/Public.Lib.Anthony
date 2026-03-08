@@ -144,12 +144,80 @@ func FuzzEncodeRecord(f *testing.F) {
 	})
 }
 
+// Helper to verify decoded value matches expected
+func verifyDecodedValue(t *testing.T, index int, expected, decoded interface{}) {
+	t.Helper()
+	switch exp := expected.(type) {
+	case nil:
+		if decoded != nil {
+			t.Errorf("Index %d: expected nil, got %v", index, decoded)
+		}
+	case int64:
+		verifyInt64(t, index, exp, decoded)
+	case float64:
+		verifyFloat64(t, index, exp, decoded)
+	case string:
+		verifyString(t, index, exp, decoded)
+	case []byte:
+		verifyBytes(t, index, exp, decoded)
+	}
+}
+
+func verifyInt64(t *testing.T, index int, expected int64, decoded interface{}) {
+	t.Helper()
+	dv, ok := decoded.(int64)
+	if !ok {
+		t.Errorf("Index %d: expected int64, got %T", index, decoded)
+		return
+	}
+	if dv != expected {
+		if !(expected == 0 && dv == 0) && !(expected == 1 && dv == 1) {
+			t.Errorf("Index %d: expected %d, got %d", index, expected, dv)
+		}
+	}
+}
+
+func verifyFloat64(t *testing.T, index int, expected float64, decoded interface{}) {
+	t.Helper()
+	dv, ok := decoded.(float64)
+	if !ok {
+		t.Errorf("Index %d: expected float64, got %T", index, decoded)
+		return
+	}
+	if math.Abs(dv-expected) > 0.0001 {
+		t.Errorf("Index %d: expected %f, got %f", index, expected, dv)
+	}
+}
+
+func verifyString(t *testing.T, index int, expected string, decoded interface{}) {
+	t.Helper()
+	dv, ok := decoded.(string)
+	if !ok {
+		t.Errorf("Index %d: expected string, got %T", index, decoded)
+		return
+	}
+	if dv != expected {
+		t.Errorf("Index %d: expected %q, got %q", index, expected, dv)
+	}
+}
+
+func verifyBytes(t *testing.T, index int, expected []byte, decoded interface{}) {
+	t.Helper()
+	dv, ok := decoded.([]byte)
+	if !ok {
+		t.Errorf("Index %d: expected []byte, got %T", index, decoded)
+		return
+	}
+	if string(dv) != string(expected) {
+		t.Errorf("Index %d: byte mismatch", index)
+	}
+}
+
 // FuzzEncodeDecodeRoundTrip tests that encode->decode is a valid round trip
 func FuzzEncodeDecodeRoundTrip(f *testing.F) {
 	f.Add("hello", int64(42), float64(3.14))
 
 	f.Fuzz(func(t *testing.T, str string, i int64, fl float64) {
-		// Skip very long strings to prevent timeout
 		if len(str) > 10000 {
 			t.Skip("string too long")
 		}
@@ -160,70 +228,20 @@ func FuzzEncodeDecodeRoundTrip(f *testing.F) {
 			}
 		}()
 
-		// Create values with various types
-		values := []interface{}{
-			nil,
-			int64(0),
-			int64(1),
-			i,
-			fl,
-			str,
-			[]byte(str),
-		}
+		values := []interface{}{nil, int64(0), int64(1), i, fl, str, []byte(str)}
 
-		// Encode
 		encoded := encodeSimpleRecord(values)
-
-		// Decode
 		decoded, err := decodeRecord(encoded)
 		if err != nil {
 			t.Fatalf("Failed to decode: %v", err)
 		}
 
-		// Verify length
 		if len(decoded) != len(values) {
 			t.Fatalf("Length mismatch: expected %d, got %d", len(values), len(decoded))
 		}
 
-		// Verify each value type
 		for i, val := range values {
-			decodedVal := decoded[i]
-
-			// Type assertions and comparisons
-			switch v := val.(type) {
-			case nil:
-				if decodedVal != nil {
-					t.Errorf("Index %d: expected nil, got %v", i, decodedVal)
-				}
-			case int64:
-				if dv, ok := decodedVal.(int64); !ok {
-					t.Errorf("Index %d: expected int64, got %T", i, decodedVal)
-				} else if dv != v {
-					// Allow some flexibility for small integers (may be encoded as constants)
-					if !(v == 0 && dv == 0) && !(v == 1 && dv == 1) {
-						t.Errorf("Index %d: expected %d, got %d", i, v, dv)
-					}
-				}
-			case float64:
-				if dv, ok := decodedVal.(float64); !ok {
-					t.Errorf("Index %d: expected float64, got %T", i, decodedVal)
-				} else if math.Abs(dv-v) > 0.0001 {
-					// Allow small floating point errors
-					t.Errorf("Index %d: expected %f, got %f", i, v, dv)
-				}
-			case string:
-				if dv, ok := decodedVal.(string); !ok {
-					t.Errorf("Index %d: expected string, got %T", i, decodedVal)
-				} else if dv != v {
-					t.Errorf("Index %d: expected %q, got %q", i, v, dv)
-				}
-			case []byte:
-				if dv, ok := decodedVal.([]byte); !ok {
-					t.Errorf("Index %d: expected []byte, got %T", i, decodedVal)
-				} else if string(dv) != string(v) {
-					t.Errorf("Index %d: byte mismatch", i)
-				}
-			}
+			verifyDecodedValue(t, i, val, decoded[i])
 		}
 	})
 }

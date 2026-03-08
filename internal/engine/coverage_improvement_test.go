@@ -223,6 +223,29 @@ func TestMemToInterfaceAllTypes(t *testing.T) {
 	}
 }
 
+// testScanType is a helper that tests scanning a specific column into a specific type
+func testScanType(t *testing.T, db *Engine, query string, dest interface{}, checkFn func(*testing.T, interface{})) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Expected at least one row")
+	}
+
+	if err := rows.Scan(dest); err != nil {
+		t.Errorf("Scan failed: %v", err)
+		return
+	}
+
+	if checkFn != nil {
+		checkFn(t, dest)
+	}
+}
+
 // TestScanTypedAllTypes tests scanTyped with all supported types
 func TestScanTypedAllTypes(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -249,96 +272,63 @@ func TestScanTypedAllTypes(t *testing.T) {
 		t.Fatalf("Failed to insert: %v", err)
 	}
 
-	rows, err := db.Query(`SELECT * FROM test`)
-	if err != nil {
-		t.Fatalf("Failed to query: %v", err)
-	}
-	defer rows.Close()
-
-	if rows.Next() {
+	// Test scanning into int
+	t.Run("scan_int", func(t *testing.T) {
 		var intVal int
+		testScanType(t, db, `SELECT int_val FROM test`, &intVal, func(t *testing.T, dest interface{}) {
+			if v := dest.(*int); *v != 42 {
+				t.Errorf("Expected 42, got %d", *v)
+			}
+		})
+	})
+
+	// Test scanning into int64
+	t.Run("scan_int64", func(t *testing.T) {
 		var int64Val int64
+		testScanType(t, db, `SELECT int_val FROM test`, &int64Val, func(t *testing.T, dest interface{}) {
+			if v := dest.(*int64); *v != 42 {
+				t.Errorf("Expected 42, got %d", *v)
+			}
+		})
+	})
+
+	// Test scanning into string
+	t.Run("scan_string", func(t *testing.T) {
 		var textVal string
+		testScanType(t, db, `SELECT text_val FROM test`, &textVal, func(t *testing.T, dest interface{}) {
+			if v := dest.(*string); *v != "hello" {
+				t.Errorf("Expected 'hello', got %s", *v)
+			}
+		})
+	})
+
+	// Test scanning into float64
+	t.Run("scan_float64", func(t *testing.T) {
 		var realVal float64
+		testScanType(t, db, `SELECT real_val FROM test`, &realVal, nil)
+	})
 
-		// Test scanning into int
-		rows2, _ := db.Query(`SELECT int_val FROM test`)
-		if rows2.Next() {
-			if err := rows2.Scan(&intVal); err != nil {
-				t.Errorf("Failed to scan into int: %v", err)
-			}
-			if intVal != 42 {
-				t.Errorf("Expected 42, got %d", intVal)
-			}
-		}
-		rows2.Close()
-
-		// Test scanning into int64
-		rows3, _ := db.Query(`SELECT int_val FROM test`)
-		if rows3.Next() {
-			if err := rows3.Scan(&int64Val); err != nil {
-				t.Errorf("Failed to scan into int64: %v", err)
-			}
-			if int64Val != 42 {
-				t.Errorf("Expected 42, got %d", int64Val)
-			}
-		}
-		rows3.Close()
-
-		// Test scanning into string
-		rows4, _ := db.Query(`SELECT text_val FROM test`)
-		if rows4.Next() {
-			if err := rows4.Scan(&textVal); err != nil {
-				t.Errorf("Failed to scan into string: %v", err)
-			}
-			if textVal != "hello" {
-				t.Errorf("Expected 'hello', got %s", textVal)
-			}
-		}
-		rows4.Close()
-
-		// Test scanning into float64
-		rows5, _ := db.Query(`SELECT real_val FROM test`)
-		if rows5.Next() {
-			if err := rows5.Scan(&realVal); err != nil {
-				t.Errorf("Failed to scan into float64: %v", err)
-			}
-		}
-		rows5.Close()
-
-		// Test scanning into bool
-		rows6, _ := db.Query(`SELECT bool_val FROM test`)
-		if rows6.Next() {
-			var boolVal bool
-			if err := rows6.Scan(&boolVal); err != nil {
-				t.Errorf("Failed to scan into bool: %v", err)
-			}
-			if !boolVal {
+	// Test scanning into bool
+	t.Run("scan_bool", func(t *testing.T) {
+		var boolVal bool
+		testScanType(t, db, `SELECT bool_val FROM test`, &boolVal, func(t *testing.T, dest interface{}) {
+			if v := dest.(*bool); !*v {
 				t.Error("Expected true")
 			}
-		}
-		rows6.Close()
+		})
+	})
 
-		// Test scanning into []byte
-		rows7, _ := db.Query(`SELECT text_val FROM test`)
-		if rows7.Next() {
-			var blobVal []byte
-			if err := rows7.Scan(&blobVal); err != nil {
-				t.Errorf("Failed to scan into []byte: %v", err)
-			}
-		}
-		rows7.Close()
+	// Test scanning into []byte
+	t.Run("scan_bytes", func(t *testing.T) {
+		var blobVal []byte
+		testScanType(t, db, `SELECT text_val FROM test`, &blobVal, nil)
+	})
 
-		// Test scanning into interface{}
-		rows8, _ := db.Query(`SELECT int_val FROM test`)
-		if rows8.Next() {
-			var anyVal interface{}
-			if err := rows8.Scan(&anyVal); err != nil {
-				t.Errorf("Failed to scan into interface{}: %v", err)
-			}
-		}
-		rows8.Close()
-	}
+	// Test scanning into interface{}
+	t.Run("scan_interface", func(t *testing.T) {
+		var anyVal interface{}
+		testScanType(t, db, `SELECT int_val FROM test`, &anyVal, nil)
+	})
 }
 
 // TestQueryNonSelectStatement tests Query with non-SELECT statement

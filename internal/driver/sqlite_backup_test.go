@@ -8,6 +8,14 @@ import (
 	"testing"
 )
 
+// backupTestCase defines a single backup test scenario
+type backupTestCase struct {
+	name    string
+	setup   []string
+	verify  func(t *testing.T, src, dst *sql.DB)
+	wantErr bool
+}
+
 // TestSQLiteBackup tests database backup and restore functionality
 // Converted from contrib/sqlite/sqlite-src-3510200/test/backup*.test
 // Note: Go's database/sql doesn't expose SQLite's backup API directly,
@@ -25,12 +33,91 @@ func TestSQLiteBackup(t *testing.T) {
 	}
 	defer srcDB.Close()
 
-	tests := []struct {
-		name    string
-		setup   []string
-		verify  func(t *testing.T, src, dst *sql.DB)
-		wantErr bool
-	}{
+	tests := backupTestCases()
+
+	for _, tt := range tests {
+		tt := tt // Capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			runBackupTest(t, tt, srcDB, srcPath, dstPath)
+		})
+	}
+}
+
+// runBackupTest executes a single backup test case
+func runBackupTest(t *testing.T, tt backupTestCase, srcDB *sql.DB, srcPath, dstPath string) {
+	cleanupBackupTest(t, srcDB)
+
+	// Run setup
+	executeBackupSetup(t, srcDB, tt.setup)
+
+	// Perform backup
+	dstDB := performBackup(t, srcDB, srcPath, dstPath)
+	defer dstDB.Close()
+
+	// Reopen source
+	var err error
+	srcDB, err = sql.Open(DriverName, srcPath)
+	if err != nil {
+		t.Fatalf("failed to reopen source database: %v", err)
+	}
+
+	// Run verification
+	if tt.verify != nil {
+		tt.verify(t, srcDB, dstDB)
+	}
+}
+
+// cleanupBackupTest cleans up tables before each test
+func cleanupBackupTest(t *testing.T, srcDB *sql.DB) {
+	tables := []string{"t1", "t2", "t3", "large", "pk_test", "uniq_test",
+		"parent", "child", "base", "types", "nulls", "collate_test",
+		"checked", "defaults", "auto_test", "composite", "multi_idx",
+		"computed", "blobs", "txn", "empty1", "empty2", "integrity",
+		"special", "longtext", "rowid_test", "no_rowid", "partial"}
+	for _, table := range tables {
+		srcDB.Exec("DROP TABLE IF EXISTS " + table)
+	}
+	srcDB.Exec("DROP VIEW IF EXISTS v1")
+}
+
+// executeBackupSetup runs setup SQL statements
+func executeBackupSetup(t *testing.T, srcDB *sql.DB, setup []string) {
+	for _, stmt := range setup {
+		_, err := srcDB.Exec(stmt)
+		if err != nil {
+			t.Logf("setup failed (may be expected): %v", err)
+		}
+	}
+}
+
+// performBackup performs the database file copy and returns the opened backup DB
+func performBackup(t *testing.T, srcDB *sql.DB, srcPath, dstPath string) *sql.DB {
+	// Close source to ensure data is flushed
+	srcDB.Close()
+
+	// Copy database file (simulating backup)
+	srcData, err := os.ReadFile(srcPath)
+	if err != nil {
+		t.Fatalf("failed to read source database: %v", err)
+	}
+
+	err = os.WriteFile(dstPath, srcData, 0644)
+	if err != nil {
+		t.Fatalf("failed to write backup database: %v", err)
+	}
+
+	// Open backup database
+	dstDB, err := sql.Open(DriverName, dstPath)
+	if err != nil {
+		t.Fatalf("failed to open backup database: %v", err)
+	}
+
+	return dstDB
+}
+
+// backupTestCases returns all backup test cases
+func backupTestCases() []backupTestCase {
+	return []backupTestCase{
 		// backup.test 1.1 - Basic table creation
 		{
 			name: "backup_basic_table",
@@ -133,7 +220,7 @@ func TestSQLiteBackup(t *testing.T) {
 			},
 			verify: func(t *testing.T, src, dst *sql.DB) {
 				var srcCount, dstCount int64
-				srcDB.QueryRow("SELECT COUNT(*) FROM large").Scan(&srcCount)
+				src.QueryRow("SELECT COUNT(*) FROM large").Scan(&srcCount)
 				dst.QueryRow("SELECT COUNT(*) FROM large").Scan(&dstCount)
 				if srcCount != dstCount {
 					t.Errorf("row count mismatch: src=%d, dst=%d", srcCount, dstCount)
@@ -602,62 +689,6 @@ func TestSQLiteBackup(t *testing.T) {
 				}
 			},
 		},
-	}
-
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			// Clean database
-			tables := []string{"t1", "t2", "t3", "large", "pk_test", "uniq_test",
-				"parent", "child", "base", "types", "nulls", "collate_test",
-				"checked", "defaults", "auto_test", "composite", "multi_idx",
-				"computed", "blobs", "txn", "empty1", "empty2", "integrity",
-				"special", "longtext", "rowid_test", "no_rowid", "partial"}
-			for _, table := range tables {
-				srcDB.Exec("DROP TABLE IF EXISTS " + table)
-			}
-			srcDB.Exec("DROP VIEW IF EXISTS v1")
-
-			// Run setup
-			for _, stmt := range tt.setup {
-				_, err := srcDB.Exec(stmt)
-				if err != nil {
-					t.Logf("setup failed (may be expected): %v", err)
-				}
-			}
-
-			// Close source to ensure data is flushed
-			srcDB.Close()
-
-			// Copy database file (simulating backup)
-			srcData, err := os.ReadFile(srcPath)
-			if err != nil {
-				t.Fatalf("failed to read source database: %v", err)
-			}
-
-			err = os.WriteFile(dstPath, srcData, 0644)
-			if err != nil {
-				t.Fatalf("failed to write backup database: %v", err)
-			}
-
-			// Reopen source
-			srcDB, err = sql.Open(DriverName, srcPath)
-			if err != nil {
-				t.Fatalf("failed to reopen source database: %v", err)
-			}
-
-			// Open backup database
-			dstDB, err := sql.Open(DriverName, dstPath)
-			if err != nil {
-				t.Fatalf("failed to open backup database: %v", err)
-			}
-			defer dstDB.Close()
-
-			// Run verification
-			if tt.verify != nil {
-				tt.verify(t, srcDB, dstDB)
-			}
-		})
 	}
 }
 

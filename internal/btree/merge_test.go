@@ -521,6 +521,51 @@ func TestMergePage_RootPage(t *testing.T) {
 	}
 }
 
+// verifyCellKeyOrdering verifies that keys are in ascending order within a page
+func verifyCellKeyOrdering(t *testing.T, page *BtreePage, pageSize uint32, pageName string) {
+	t.Helper()
+	for i := 0; i < int(page.Header.NumCells)-1; i++ {
+		cell1 := getCellAtIndex(t, page, i, pageSize)
+		cell2 := getCellAtIndex(t, page, i+1, pageSize)
+
+		if cell1.Key >= cell2.Key {
+			t.Errorf("Keys out of order in %s: cell[%d].key=%d >= cell[%d].key=%d",
+				pageName, i, cell1.Key, i+1, cell2.Key)
+		}
+	}
+}
+
+// getCellAtIndex retrieves and parses a cell at a given index
+func getCellAtIndex(t *testing.T, page *BtreePage, index int, pageSize uint32) *CellInfo {
+	t.Helper()
+	cellOffset, err := page.Header.GetCellPointer(page.Data, index)
+	if err != nil {
+		t.Fatalf("Failed to get cell pointer for cell %d: %v", index, err)
+	}
+
+	cell, err := ParseCell(page.Header.PageType, page.Data[cellOffset:], pageSize)
+	if err != nil {
+		t.Fatalf("Failed to parse cell %d at offset %d: %v", index, cellOffset, err)
+	}
+
+	return cell
+}
+
+// verifyPageSeparation verifies that all keys in left page are less than all keys in right page
+func verifyPageSeparation(t *testing.T, leftPage, rightPage *BtreePage, pageSize uint32) {
+	t.Helper()
+	if leftPage.Header.NumCells == 0 || rightPage.Header.NumCells == 0 {
+		return
+	}
+
+	lastLeftCell := getCellAtIndex(t, leftPage, int(leftPage.Header.NumCells)-1, pageSize)
+	firstRightCell := getCellAtIndex(t, rightPage, 0, pageSize)
+
+	if lastLeftCell.Key >= firstRightCell.Key {
+		t.Errorf("Last left key (%d) >= first right key (%d)", lastLeftCell.Key, firstRightCell.Key)
+	}
+}
+
 func TestRedistributeCells_KeyOrdering(t *testing.T) {
 	t.Parallel()
 	pageSize := uint32(4096)
@@ -566,81 +611,13 @@ func TestRedistributeCells_KeyOrdering(t *testing.T) {
 	}
 
 	// Verify keys are still in order on left page
-	for i := 0; i < int(leftPage.Header.NumCells)-1; i++ {
-		cellOffset1, err := leftPage.Header.GetCellPointer(leftPage.Data, i)
-		if err != nil {
-			t.Fatalf("Failed to get cell pointer for left page cell %d: %v", i, err)
-		}
-		cell1, err := ParseCell(leftPage.Header.PageType, leftPage.Data[cellOffset1:], pageSize)
-		if err != nil {
-			t.Fatalf("Failed to parse left page cell %d at offset %d: %v", i, cellOffset1, err)
-		}
-
-		cellOffset2, err := leftPage.Header.GetCellPointer(leftPage.Data, i+1)
-		if err != nil {
-			t.Fatalf("Failed to get cell pointer for left page cell %d: %v", i+1, err)
-		}
-		cell2, err := ParseCell(leftPage.Header.PageType, leftPage.Data[cellOffset2:], pageSize)
-		if err != nil {
-			t.Fatalf("Failed to parse left page cell %d at offset %d: %v", i+1, cellOffset2, err)
-		}
-
-		if cell1.Key >= cell2.Key {
-			t.Errorf("Keys out of order in left page: cell[%d].key=%d >= cell[%d].key=%d",
-				i, cell1.Key, i+1, cell2.Key)
-		}
-	}
+	verifyCellKeyOrdering(t, leftPage, pageSize, "left page")
 
 	// Verify keys are still in order on right page
-	for i := 0; i < int(rightPage.Header.NumCells)-1; i++ {
-		cellOffset1, err := rightPage.Header.GetCellPointer(rightPage.Data, i)
-		if err != nil {
-			t.Fatalf("Failed to get cell pointer for right page cell %d: %v", i, err)
-		}
-		cell1, err := ParseCell(rightPage.Header.PageType, rightPage.Data[cellOffset1:], pageSize)
-		if err != nil {
-			t.Fatalf("Failed to parse right page cell %d at offset %d: %v", i, cellOffset1, err)
-		}
-
-		cellOffset2, err := rightPage.Header.GetCellPointer(rightPage.Data, i+1)
-		if err != nil {
-			t.Fatalf("Failed to get cell pointer for right page cell %d: %v", i+1, err)
-		}
-		cell2, err := ParseCell(rightPage.Header.PageType, rightPage.Data[cellOffset2:], pageSize)
-		if err != nil {
-			t.Fatalf("Failed to parse right page cell %d at offset %d: %v", i+1, cellOffset2, err)
-		}
-
-		if cell1.Key >= cell2.Key {
-			t.Errorf("Keys out of order in right page: cell[%d].key=%d >= cell[%d].key=%d",
-				i, cell1.Key, i+1, cell2.Key)
-		}
-	}
+	verifyCellKeyOrdering(t, rightPage, pageSize, "right page")
 
 	// Verify all keys from left page are less than all keys from right page
-	if leftPage.Header.NumCells > 0 && rightPage.Header.NumCells > 0 {
-		lastLeftOffset, err := leftPage.Header.GetCellPointer(leftPage.Data, int(leftPage.Header.NumCells)-1)
-		if err != nil {
-			t.Fatalf("Failed to get last left cell pointer: %v", err)
-		}
-		lastLeftCell, err := ParseCell(leftPage.Header.PageType, leftPage.Data[lastLeftOffset:], pageSize)
-		if err != nil {
-			t.Fatalf("Failed to parse last left cell: %v", err)
-		}
-
-		firstRightOffset, err := rightPage.Header.GetCellPointer(rightPage.Data, 0)
-		if err != nil {
-			t.Fatalf("Failed to get first right cell pointer: %v", err)
-		}
-		firstRightCell, err := ParseCell(rightPage.Header.PageType, rightPage.Data[firstRightOffset:], pageSize)
-		if err != nil {
-			t.Fatalf("Failed to parse first right cell: %v", err)
-		}
-
-		if lastLeftCell.Key >= firstRightCell.Key {
-			t.Errorf("Last left key (%d) >= first right key (%d)", lastLeftCell.Key, firstRightCell.Key)
-		}
-	}
+	verifyPageSeparation(t, leftPage, rightPage, pageSize)
 }
 
 func TestCanMerge_EmptyPages(t *testing.T) {

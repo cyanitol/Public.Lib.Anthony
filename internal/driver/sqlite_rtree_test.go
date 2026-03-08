@@ -20,8 +20,18 @@ func TestSQLiteRTree(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Test 1: Create basic R-Tree virtual table (2D)
-	_, err = db.Exec("CREATE VIRTUAL TABLE rt1 USING rtree(id, minx, maxx, miny, maxy)")
+	// Run test groups
+	test2DRTree(t, db)
+	test3DRTree(t, db)
+	test1DRTree(t, db)
+	testRTreeAuxData(t, db)
+	testRTreeEdgeCases(t, db)
+	testRTreeSpatialOperations(t, db)
+}
+
+// test2DRTree tests basic 2D R-Tree operations
+func test2DRTree(t *testing.T, db *sql.DB) {
+	_, err := db.Exec("CREATE VIRTUAL TABLE rt1 USING rtree(id, minx, maxx, miny, maxy)")
 	if err != nil {
 		t.Fatalf("failed to create rtree virtual table: %v", err)
 	}
@@ -119,9 +129,11 @@ func TestSQLiteRTree(t *testing.T) {
 	if count != 4 {
 		t.Errorf("expected 4 entries after delete, got %d", count)
 	}
+}
 
-	// Test 11: Create 3D rtree
-	_, err = db.Exec("CREATE VIRTUAL TABLE rt3d USING rtree(id, minx, maxx, miny, maxy, minz, maxz)")
+// test3DRTree tests 3D R-Tree operations
+func test3DRTree(t *testing.T, db *sql.DB) {
+	_, err := db.Exec("CREATE VIRTUAL TABLE rt3d USING rtree(id, minx, maxx, miny, maxy, minz, maxz)")
 	if err != nil {
 		t.Fatalf("failed to create 3D rtree: %v", err)
 	}
@@ -141,9 +153,11 @@ func TestSQLiteRTree(t *testing.T) {
 	if minz != 0 || maxz != 10 {
 		t.Errorf("3D data mismatch: expected (0, 10), got (%v, %v)", minz, maxz)
 	}
+}
 
-	// Test 14: Create 1D rtree (interval tree)
-	_, err = db.Exec("CREATE VIRTUAL TABLE rt1d USING rtree(id, min_val, max_val)")
+// test1DRTree tests 1D R-Tree (interval tree) operations
+func test1DRTree(t *testing.T, db *sql.DB) {
+	_, err := db.Exec("CREATE VIRTUAL TABLE rt1d USING rtree(id, min_val, max_val)")
 	if err != nil {
 		t.Fatalf("failed to create 1D rtree: %v", err)
 	}
@@ -166,14 +180,14 @@ func TestSQLiteRTree(t *testing.T) {
 		}
 	}
 
-	// Test 16: Find overlapping intervals
-	rows, err = db.Query("SELECT id FROM rt1d WHERE min_val <= 12 AND max_val >= 8")
+	// Find overlapping intervals
+	rows, err := db.Query("SELECT id FROM rt1d WHERE min_val <= 12 AND max_val >= 8")
 	if err != nil {
 		t.Fatalf("failed interval query: %v", err)
 	}
 	defer rows.Close()
 
-	foundIDs = nil
+	var foundIDs []int64
 	for rows.Next() {
 		var foundID int64
 		if err := rows.Scan(&foundID); err != nil {
@@ -185,14 +199,21 @@ func TestSQLiteRTree(t *testing.T) {
 		t.Errorf("expected at least 1 overlapping interval, got %d", len(foundIDs))
 	}
 
-	// Test 17: Test point containment
-	err = db.QueryRow("SELECT id FROM rt1 WHERE minx <= 7 AND maxx >= 7 AND miny <= 7 AND maxy >= 7 LIMIT 1").Scan(&id)
+	testPointContainment(t, db)
+}
+
+// testPointContainment tests point-in-rectangle queries
+func testPointContainment(t *testing.T, db *sql.DB) {
+	var id float64
+	err := db.QueryRow("SELECT id FROM rt1 WHERE minx <= 7 AND maxx >= 7 AND miny <= 7 AND maxy >= 7 LIMIT 1").Scan(&id)
 	if err != nil {
 		t.Fatalf("failed point containment query: %v", err)
 	}
+}
 
-	// Test 18: Create rtree with auxiliary data
-	_, err = db.Exec("CREATE VIRTUAL TABLE rt_aux USING rtree(id, minx, maxx, miny, maxy, +data)")
+// testRTreeAuxData tests R-Tree with auxiliary data columns
+func testRTreeAuxData(t *testing.T, db *sql.DB) {
+	_, err := db.Exec("CREATE VIRTUAL TABLE rt_aux USING rtree(id, minx, maxx, miny, maxy, +data)")
 	if err != nil {
 		t.Fatalf("failed to create rtree with aux column: %v", err)
 	}
@@ -212,9 +233,13 @@ func TestSQLiteRTree(t *testing.T) {
 	if auxData != "metadata" {
 		t.Errorf("aux data mismatch: expected 'metadata', got %q", auxData)
 	}
+}
 
-	// Test 21: Test empty rtree
-	_, err = db.Exec("CREATE VIRTUAL TABLE rt_empty USING rtree(id, x1, x2)")
+// testRTreeEdgeCases tests edge cases like empty rtrees, negative coordinates, etc.
+func testRTreeEdgeCases(t *testing.T, db *sql.DB) {
+	var count int64
+
+	_, err := db.Exec("CREATE VIRTUAL TABLE rt_empty USING rtree(id, x1, x2)")
 	if err != nil {
 		t.Fatalf("failed to create empty rtree: %v", err)
 	}
@@ -245,8 +270,15 @@ func TestSQLiteRTree(t *testing.T) {
 		t.Errorf("expected 0 after delete all, got %d", count)
 	}
 
-	// Test 24: Test negative coordinates
-	_, err = db.Exec("INSERT INTO rt1 VALUES(100, -50, -40, -30, -20)")
+	testNegativeAndFloatingCoordinates(t, db)
+	testZeroWidthRectangle(t, db)
+}
+
+// testNegativeAndFloatingCoordinates tests negative and floating point coordinates
+func testNegativeAndFloatingCoordinates(t *testing.T, db *sql.DB) {
+	var minx, maxx float64
+
+	_, err := db.Exec("INSERT INTO rt1 VALUES(100, -50, -40, -30, -20)")
 	if err != nil {
 		t.Fatalf("failed to insert negative coords: %v", err)
 	}
@@ -260,14 +292,35 @@ func TestSQLiteRTree(t *testing.T) {
 		t.Errorf("negative coords mismatch: expected (-50, -40), got (%v, %v)", minx, maxx)
 	}
 
-	// Test 26: Test floating point precision
 	_, err = db.Exec("INSERT INTO rt1 VALUES(101, 1.5, 2.5, 3.7, 4.9)")
 	if err != nil {
 		t.Fatalf("failed to insert floating point coords: %v", err)
 	}
+}
 
-	// Test 27: Query with WHERE clause on id
-	err = db.QueryRow("SELECT COUNT(*) FROM rt1 WHERE id = 101").Scan(&count)
+// testZeroWidthRectangle tests zero-width/height rectangles
+func testZeroWidthRectangle(t *testing.T, db *sql.DB) {
+	var minx, maxx float64
+
+	_, err := db.Exec("INSERT INTO rt1 VALUES(200, 5, 5, 10, 10)")
+	if err != nil {
+		t.Fatalf("failed to insert zero-width rectangle: %v", err)
+	}
+
+	err = db.QueryRow("SELECT minx, maxx FROM rt1 WHERE id = 200").Scan(&minx, &maxx)
+	if err != nil {
+		t.Fatalf("failed to query zero-width rectangle: %v", err)
+	}
+	if minx != 5 || maxx != 5 {
+		t.Errorf("zero-width rectangle mismatch: expected (5, 5), got (%v, %v)", minx, maxx)
+	}
+}
+
+// testRTreeSpatialOperations tests spatial queries and operations
+func testRTreeSpatialOperations(t *testing.T, db *sql.DB) {
+	var count int64
+
+	err := db.QueryRow("SELECT COUNT(*) FROM rt1 WHERE id = 101").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to query by id: %v", err)
 	}
@@ -275,7 +328,6 @@ func TestSQLiteRTree(t *testing.T) {
 		t.Errorf("expected 1 entry with id=101, got %d", count)
 	}
 
-	// Test 28: Test range query on id
 	err = db.QueryRow("SELECT COUNT(*) FROM rt1 WHERE id >= 1 AND id <= 4").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed range query on id: %v", err)
@@ -284,8 +336,7 @@ func TestSQLiteRTree(t *testing.T) {
 		// Should find some entries
 	}
 
-	// Test 29: Test ORDER BY
-	rows, err = db.Query("SELECT id FROM rt1 ORDER BY id LIMIT 3")
+	rows, err := db.Query("SELECT id FROM rt1 ORDER BY id LIMIT 3")
 	if err != nil {
 		t.Fatalf("failed ORDER BY query: %v", err)
 	}
@@ -303,45 +354,36 @@ func TestSQLiteRTree(t *testing.T) {
 		prevID = currentID
 	}
 
-	// Test 30: Test DROP TABLE
-	_, err = db.Exec("DROP TABLE rt_empty")
+	testDropAndSpatialJoin(t, db)
+	testLargeCoordinates(t, db)
+}
+
+// testDropAndSpatialJoin tests DROP TABLE and spatial joins
+func testDropAndSpatialJoin(t *testing.T, db *sql.DB) {
+	var count int64
+
+	_, err := db.Exec("DROP TABLE rt_empty")
 	if err != nil {
 		t.Fatalf("failed to drop rtree table: %v", err)
 	}
 
-	// Test 31: Verify table is dropped
 	err = db.QueryRow("SELECT COUNT(*) FROM rt_empty").Scan(&count)
 	if err == nil {
 		t.Error("expected error querying dropped table, got none")
 	}
 
-	// Test 32: Test rtree with zero-width rectangle
-	_, err = db.Exec("INSERT INTO rt1 VALUES(200, 5, 5, 10, 10)")
-	if err != nil {
-		t.Fatalf("failed to insert zero-width rectangle: %v", err)
-	}
+	performSpatialJoin(t, db)
+	testMatchOperator(t, db)
+}
 
-	// Test 33: Query zero-width rectangle
-	err = db.QueryRow("SELECT minx, maxx FROM rt1 WHERE id = 200").Scan(&minx, &maxx)
-	if err != nil {
-		t.Fatalf("failed to query zero-width rectangle: %v", err)
-	}
-	if minx != 5 || maxx != 5 {
-		t.Errorf("zero-width rectangle mismatch: expected (5, 5), got (%v, %v)", minx, maxx)
-	}
-
-	// Test 34: Test spatial join
-	_, err = db.Exec("CREATE VIRTUAL TABLE rt2 USING rtree(id, minx, maxx, miny, maxy)")
-	if err != nil {
-		t.Fatalf("failed to create rt2: %v", err)
-	}
-	_, err = db.Exec("INSERT INTO rt2 VALUES(1, 0, 5, 0, 5)")
+// performSpatialJoin tests spatial join operations
+func performSpatialJoin(t *testing.T, db *sql.DB) {
+	_, err := db.Exec("CREATE VIRTUAL TABLE rt2 USING rtree(id, minx, maxx, miny, maxy)")
 	if err != nil {
 		t.Fatalf("failed to insert into rt2: %v", err)
 	}
 
-	// Test 35: Spatial join query
-	rows, err = db.Query(`
+	rows, err := db.Query(`
 		SELECT rt1.id, rt2.id
 		FROM rt1, rt2
 		WHERE rt1.minx <= rt2.maxx
@@ -366,22 +408,27 @@ func TestSQLiteRTree(t *testing.T) {
 	if joinCount == 0 {
 		t.Error("expected at least one join result")
 	}
+}
 
-	// Test 36: Test MATCH operator (if supported)
-	// Some SQLite builds support MATCH for rtree queries
-	err = db.QueryRow("SELECT COUNT(*) FROM rt1 WHERE id MATCH 1").Scan(&count)
+// testMatchOperator tests the MATCH operator (if supported)
+func testMatchOperator(t *testing.T, db *sql.DB) {
+	var count int64
+	err := db.QueryRow("SELECT COUNT(*) FROM rt1 WHERE id MATCH 1").Scan(&count)
 	// This may or may not be supported, so we don't fail on error
 	if err == nil && count != 1 {
 		t.Logf("MATCH operator returned unexpected count: %d", count)
 	}
+}
 
-	// Test 37: Test large coordinates
-	_, err = db.Exec("INSERT INTO rt1 VALUES(300, -1e10, 1e10, -1e10, 1e10)")
+// testLargeCoordinates tests very large coordinate values
+func testLargeCoordinates(t *testing.T, db *sql.DB) {
+	var id float64
+
+	_, err := db.Exec("INSERT INTO rt1 VALUES(300, -1e10, 1e10, -1e10, 1e10)")
 	if err != nil {
 		t.Fatalf("failed to insert large coordinates: %v", err)
 	}
 
-	// Test 38: Query large coordinates
 	err = db.QueryRow("SELECT id FROM rt1 WHERE id = 300").Scan(&id)
 	if err != nil {
 		t.Fatalf("failed to query large coordinates: %v", err)

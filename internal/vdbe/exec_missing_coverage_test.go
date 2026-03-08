@@ -5,396 +5,288 @@ import (
 	"testing"
 )
 
+// Helper to assert no error occurred
+func assertNoError(t *testing.T, err error, operation string) {
+	t.Helper()
+	if err != nil {
+		t.Errorf("%s failed: %v", operation, err)
+	}
+}
+
+// Helper to assert PC value
+func assertPC(t *testing.T, v *VDBE, expected int, context string) {
+	t.Helper()
+	if v.PC != expected {
+		t.Errorf("Expected PC=%d %s, got %d", expected, context, v.PC)
+	}
+}
+
+// Helper to assert register int value
+func assertRegInt(t *testing.T, v *VDBE, reg int, expected int64, context string) {
+	t.Helper()
+	if v.Mem[reg].IntValue() != expected {
+		t.Errorf("Expected r%d=%d %s, got %d", reg, expected, context, v.Mem[reg].IntValue())
+	}
+}
+
+// Helper to assert register is NULL
+func assertRegNull(t *testing.T, v *VDBE, reg int) {
+	t.Helper()
+	if !v.Mem[reg].IsNull() {
+		t.Errorf("Expected r%d to be NULL", reg)
+	}
+}
+
 // TestMissingOpcodesCoverage adds coverage for opcodes that have 0% coverage
 func TestMissingOpcodesCoverage(t *testing.T) {
 	t.Parallel()
-	t.Run("OpNoop", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		instr := &Instruction{Opcode: OpNoop}
-		err := v.execNoop(instr)
-		if err != nil {
-			t.Errorf("execNoop failed: %v", err)
-		}
-	})
+	t.Run("OpNoop", testOpNoop)
+	t.Run("OpGosub_Return", testOpGosubReturn)
+	t.Run("OpIfNot", testOpIfNot)
+	t.Run("OpIfPos", testOpIfPos)
+	t.Run("OpInt64", testOpInt64)
+	t.Run("OpNull", testOpNull)
+	t.Run("OpCopy", testOpCopy)
+	t.Run("OpMove", testOpMove)
+	t.Run("OpSCopy", testOpSCopy)
+	t.Run("OpSubtract", testOpSubtract)
+	t.Run("OpMultiply", testOpMultiply)
+	t.Run("OpDivide", testOpDivide)
+	t.Run("OpRemainder", testOpRemainder)
+	t.Run("OpAddImm", testOpAddImm)
+	t.Run("OpIsNull", testOpIsNull)
+	t.Run("OpNotNull", testOpNotNull)
+	t.Run("OpSeekGE", testOpSeekGE)
+	t.Run("OpSeekLE", testOpSeekLE)
+}
 
-	t.Run("OpGosub_Return", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		v.PC = 1
+func testOpNoop(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	instr := &Instruction{Opcode: OpNoop}
+	assertNoError(t, v.execNoop(instr), "execNoop")
+}
 
-		// Test Gosub - stores current PC (1) and jumps to P2 (3)
-		gosubInstr := &Instruction{Opcode: OpGosub, P1: 0, P2: 3}
-		err := v.execGosub(gosubInstr)
-		if err != nil {
-			t.Errorf("execGosub failed: %v", err)
-		}
+func testOpGosubReturn(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	v.PC = 1
 
-		// PC should be set to 3
-		if v.PC != 3 {
-			t.Errorf("Expected PC=3 after Gosub, got %d", v.PC)
-		}
+	gosubInstr := &Instruction{Opcode: OpGosub, P1: 0, P2: 3}
+	assertNoError(t, v.execGosub(gosubInstr), "execGosub")
+	assertPC(t, v, 3, "after Gosub")
+	assertRegInt(t, v, 0, 1, "return addr")
 
-		// Return address should be in r0 (PC was 1)
-		if v.Mem[0].IntValue() != 1 {
-			t.Errorf("Expected return addr=1, got %d", v.Mem[0].IntValue())
-		}
+	returnInstr := &Instruction{Opcode: OpReturn, P1: 0}
+	assertNoError(t, v.execReturn(returnInstr), "execReturn")
+	assertPC(t, v, 1, "after Return")
+}
 
-		// Test Return
-		returnInstr := &Instruction{Opcode: OpReturn, P1: 0}
-		err = v.execReturn(returnInstr)
-		if err != nil {
-			t.Errorf("execReturn failed: %v", err)
-		}
+func testOpIfNot(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	instr := &Instruction{Opcode: OpIfNot, P1: 0, P2: 10}
 
-		// PC should be restored to 1
-		if v.PC != 1 {
-			t.Errorf("Expected PC=1 after Return, got %d", v.PC)
-		}
-	})
+	v.Mem[0].SetInt(0)
+	assertNoError(t, v.execIfNot(instr), "execIfNot with false")
+	assertPC(t, v, 10, "after IfNot with false")
 
-	t.Run("OpIfNot", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
+	v.PC = 0
+	v.Mem[0].SetInt(1)
+	assertNoError(t, v.execIfNot(instr), "execIfNot with true")
+	assertPC(t, v, 0, "after IfNot with true")
+}
 
-		// Test with false value (should jump)
-		v.Mem[0].SetInt(0)
-		instr := &Instruction{Opcode: OpIfNot, P1: 0, P2: 10}
-		err := v.execIfNot(instr)
-		if err != nil {
-			t.Errorf("execIfNot failed: %v", err)
-		}
-		if v.PC != 10 {
-			t.Errorf("Expected PC=10 after IfNot with false, got %d", v.PC)
-		}
+func testOpIfPos(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	instr := &Instruction{Opcode: OpIfPos, P1: 0, P2: 10, P3: -1}
 
-		// Test with true value (should not jump)
-		v.PC = 0
-		v.Mem[0].SetInt(1)
-		err = v.execIfNot(instr)
-		if err != nil {
-			t.Errorf("execIfNot failed: %v", err)
-		}
-		if v.PC != 0 {
-			t.Errorf("Expected PC=0 after IfNot with true, got %d", v.PC)
-		}
-	})
+	v.Mem[0].SetInt(3)
+	assertNoError(t, v.execIfPos(instr), "execIfPos with positive")
+	assertPC(t, v, 10, "after IfPos with positive")
+	assertRegInt(t, v, 0, 2, "(decremented)")
 
-	t.Run("OpIfPos", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
+	v.PC = 0
+	v.Mem[0].SetInt(0)
+	assertNoError(t, v.execIfPos(instr), "execIfPos with zero")
+	assertPC(t, v, 0, "after IfPos with zero")
+}
 
-		// Test with positive value (should add P3 and jump)
-		// P3 is typically -1, so val + (-1) decrements
-		v.Mem[0].SetInt(3)
-		instr := &Instruction{Opcode: OpIfPos, P1: 0, P2: 10, P3: -1}
-		err := v.execIfPos(instr)
-		if err != nil {
-			t.Errorf("execIfPos failed: %v", err)
-		}
-		if v.PC != 10 {
-			t.Errorf("Expected PC=10 after IfPos with positive, got %d", v.PC)
-		}
-		if v.Mem[0].IntValue() != 2 {
-			t.Errorf("Expected r0=2 (decremented), got %d", v.Mem[0].IntValue())
-		}
+func testOpInt64(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	instr := &Instruction{
+		Opcode: OpInt64,
+		P2:     1,
+		P4:     P4Union{I64: 9223372036854775807},
+		P4Type: P4Int64,
+	}
+	assertNoError(t, v.execInt64(instr), "execInt64")
+	assertRegInt(t, v, 1, 9223372036854775807, "")
+}
 
-		// Test with non-positive value (should not jump)
-		v.PC = 0
-		v.Mem[0].SetInt(0)
-		err = v.execIfPos(instr)
-		if err != nil {
-			t.Errorf("execIfPos failed: %v", err)
-		}
-		if v.PC != 0 {
-			t.Errorf("Expected PC=0 after IfPos with zero, got %d", v.PC)
-		}
-	})
+func testOpNull(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	v.Mem[0].SetInt(42)
+	v.Mem[1].SetInt(43)
+	v.Mem[2].SetInt(44)
 
-	t.Run("OpInt64", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		instr := &Instruction{
-			Opcode: OpInt64,
-			P2:     1,
-			P4:     P4Union{I64: 9223372036854775807},
-			P4Type: P4Int64,
-		}
-		err := v.execInt64(instr)
-		if err != nil {
-			t.Errorf("execInt64 failed: %v", err)
-		}
-		if v.Mem[1].IntValue() != 9223372036854775807 {
-			t.Errorf("Expected max int64, got %d", v.Mem[1].IntValue())
-		}
-	})
+	instr := &Instruction{Opcode: OpNull, P2: 0, P3: 2}
+	assertNoError(t, v.execNull(instr), "execNull")
 
-	t.Run("OpNull", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		v.Mem[0].SetInt(42)
-		v.Mem[1].SetInt(43)
-		v.Mem[2].SetInt(44)
+	for i := 0; i < 3; i++ {
+		assertRegNull(t, v, i)
+	}
+}
 
-		// Set r0-r2 to NULL  (P2 through P2+P3)
-		// P2=0, P3=2 means r0 through r2
-		instr := &Instruction{Opcode: OpNull, P2: 0, P3: 2}
-		err := v.execNull(instr)
-		if err != nil {
-			t.Errorf("execNull failed: %v", err)
-		}
+func testOpCopy(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	v.Mem[0].SetInt(42)
 
-		for i := 0; i < 3; i++ {
-			if !v.Mem[i].IsNull() {
-				t.Errorf("Expected r%d to be NULL", i)
-			}
-		}
-	})
+	instr := &Instruction{Opcode: OpCopy, P1: 0, P2: 1}
+	assertNoError(t, v.execCopy(instr), "execCopy")
+	assertRegInt(t, v, 1, 42, "")
+}
 
-	t.Run("OpCopy", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		v.Mem[0].SetInt(42)
+func testOpMove(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(10)
+	v.Mem[0].SetInt(42)
+	v.Mem[1].SetInt(43)
 
-		instr := &Instruction{Opcode: OpCopy, P1: 0, P2: 1}
-		err := v.execCopy(instr)
-		if err != nil {
-			t.Errorf("execCopy failed: %v", err)
-		}
+	instr := &Instruction{Opcode: OpMove, P1: 0, P2: 5, P3: 2}
+	assertNoError(t, v.execMove(instr), "execMove")
+	assertRegInt(t, v, 5, 42, "")
+	assertRegInt(t, v, 6, 43, "")
+}
 
-		if v.Mem[1].IntValue() != 42 {
-			t.Errorf("Expected r1=42, got %d", v.Mem[1].IntValue())
-		}
-	})
+func testOpSCopy(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	v.Mem[0].SetInt(42)
 
-	t.Run("OpMove", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.Mem[0].SetInt(42)
-		v.Mem[1].SetInt(43)
+	instr := &Instruction{Opcode: OpSCopy, P1: 0, P2: 1}
+	assertNoError(t, v.execSCopy(instr), "execSCopy")
+	assertRegInt(t, v, 1, 42, "")
+}
 
-		// Move r0,r1 to r5,r6
-		instr := &Instruction{Opcode: OpMove, P1: 0, P2: 5, P3: 2}
-		err := v.execMove(instr)
-		if err != nil {
-			t.Errorf("execMove failed: %v", err)
-		}
+func testOpSubtract(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	v.Mem[0].SetInt(50)
+	v.Mem[1].SetInt(8)
 
-		if v.Mem[5].IntValue() != 42 {
-			t.Errorf("Expected r5=42, got %d", v.Mem[5].IntValue())
-		}
-		if v.Mem[6].IntValue() != 43 {
-			t.Errorf("Expected r6=43, got %d", v.Mem[6].IntValue())
-		}
-	})
+	instr := &Instruction{Opcode: OpSubtract, P1: 0, P2: 1, P3: 2}
+	assertNoError(t, v.execSubtract(instr), "execSubtract")
+	assertRegInt(t, v, 2, 42, "")
+}
 
-	t.Run("OpSCopy", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		v.Mem[0].SetInt(42)
+func testOpMultiply(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	v.Mem[0].SetInt(6)
+	v.Mem[1].SetInt(7)
 
-		instr := &Instruction{Opcode: OpSCopy, P1: 0, P2: 1}
-		err := v.execSCopy(instr)
-		if err != nil {
-			t.Errorf("execSCopy failed: %v", err)
-		}
+	instr := &Instruction{Opcode: OpMultiply, P1: 1, P2: 0, P3: 2}
+	assertNoError(t, v.execMultiply(instr), "execMultiply")
+	assertRegInt(t, v, 2, 42, "")
+}
 
-		if v.Mem[1].IntValue() != 42 {
-			t.Errorf("Expected r1=42, got %d", v.Mem[1].IntValue())
-		}
-	})
+func testOpDivide(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	v.Mem[0].SetInt(84)
+	v.Mem[1].SetInt(2)
 
-	t.Run("OpSubtract", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		v.Mem[0].SetInt(50)
-		v.Mem[1].SetInt(8)
+	instr := &Instruction{Opcode: OpDivide, P1: 0, P2: 1, P3: 2}
+	assertNoError(t, v.execDivide(instr), "execDivide")
+	assertRegInt(t, v, 2, 42, "")
 
-		// P3 = P1 - P2, so r2 = r0 - r1 = 50 - 8 = 42
-		instr := &Instruction{Opcode: OpSubtract, P1: 0, P2: 1, P3: 2}
-		err := v.execSubtract(instr)
-		if err != nil {
-			t.Errorf("execSubtract failed: %v", err)
-		}
+	v.Mem[1].SetInt(0)
+	assertNoError(t, v.execDivide(instr), "execDivide by zero")
+	assertRegNull(t, v, 2)
+}
 
-		if v.Mem[2].IntValue() != 42 {
-			t.Errorf("Expected r2=42, got %d", v.Mem[2].IntValue())
-		}
-	})
+func testOpRemainder(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	v.Mem[0].SetInt(47)
+	v.Mem[1].SetInt(5)
 
-	t.Run("OpMultiply", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		v.Mem[0].SetInt(6)
-		v.Mem[1].SetInt(7)
+	instr := &Instruction{Opcode: OpRemainder, P1: 0, P2: 1, P3: 2}
+	assertNoError(t, v.execRemainder(instr), "execRemainder")
+	assertRegInt(t, v, 2, 2, "")
 
-		instr := &Instruction{Opcode: OpMultiply, P1: 1, P2: 0, P3: 2}
-		err := v.execMultiply(instr)
-		if err != nil {
-			t.Errorf("execMultiply failed: %v", err)
-		}
+	v.Mem[1].SetInt(0)
+	assertNoError(t, v.execRemainder(instr), "execRemainder by zero")
+	assertRegNull(t, v, 2)
+}
 
-		if v.Mem[2].IntValue() != 42 {
-			t.Errorf("Expected r2=42, got %d", v.Mem[2].IntValue())
-		}
-	})
+func testOpAddImm(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	v.Mem[0].SetInt(40)
 
-	t.Run("OpDivide", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		v.Mem[0].SetInt(84)
-		v.Mem[1].SetInt(2)
+	instr := &Instruction{Opcode: OpAddImm, P1: 0, P2: 2}
+	assertNoError(t, v.execAddImm(instr), "execAddImm")
+	assertRegInt(t, v, 0, 42, "")
+}
 
-		// P3 = P1 / P2, so r2 = r0 / r1 = 84 / 2 = 42
-		instr := &Instruction{Opcode: OpDivide, P1: 0, P2: 1, P3: 2}
-		err := v.execDivide(instr)
-		if err != nil {
-			t.Errorf("execDivide failed: %v", err)
-		}
+func testOpIsNull(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	instr := &Instruction{Opcode: OpIsNull, P1: 0, P2: 10}
 
-		if v.Mem[2].IntValue() != 42 {
-			t.Errorf("Expected r2=42, got %d", v.Mem[2].IntValue())
-		}
+	v.Mem[0].SetNull()
+	assertNoError(t, v.execIsNull(instr), "execIsNull with NULL")
+	assertPC(t, v, 10, "after IsNull with NULL")
 
-		// Test division by zero
-		v.Mem[1].SetInt(0)
-		err = v.execDivide(instr)
-		if err != nil {
-			t.Errorf("execDivide failed: %v", err)
-		}
-		if !v.Mem[2].IsNull() {
-			t.Errorf("Expected NULL for division by zero")
-		}
-	})
+	v.PC = 0
+	v.Mem[0].SetInt(42)
+	assertNoError(t, v.execIsNull(instr), "execIsNull with non-NULL")
+	assertPC(t, v, 0, "after IsNull with non-NULL")
+}
 
-	t.Run("OpRemainder", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		v.Mem[0].SetInt(47)
-		v.Mem[1].SetInt(5)
+func testOpNotNull(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	instr := &Instruction{Opcode: OpNotNull, P1: 0, P2: 10}
 
-		// P3 = P1 % P2, so r2 = r0 % r1 = 47 % 5 = 2
-		instr := &Instruction{Opcode: OpRemainder, P1: 0, P2: 1, P3: 2}
-		err := v.execRemainder(instr)
-		if err != nil {
-			t.Errorf("execRemainder failed: %v", err)
-		}
+	v.Mem[0].SetInt(42)
+	assertNoError(t, v.execNotNull(instr), "execNotNull with non-NULL")
+	assertPC(t, v, 10, "after NotNull with non-NULL")
 
-		if v.Mem[2].IntValue() != 2 {
-			t.Errorf("Expected r2=2, got %d", v.Mem[2].IntValue())
-		}
+	v.PC = 0
+	v.Mem[0].SetNull()
+	assertNoError(t, v.execNotNull(instr), "execNotNull with NULL")
+	assertPC(t, v, 0, "after NotNull with NULL")
+}
 
-		// Test remainder by zero
-		v.Mem[1].SetInt(0)
-		err = v.execRemainder(instr)
-		if err != nil {
-			t.Errorf("execRemainder failed: %v", err)
-		}
-		if !v.Mem[2].IsNull() {
-			t.Errorf("Expected NULL for remainder by zero")
-		}
-	})
+func testOpSeekGE(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	v.AllocCursors(5)
+	v.Mem[0].SetInt(42)
+	instr := &Instruction{Opcode: OpSeekGE, P1: 0, P2: 10, P3: 0}
+	err := v.execSeekGE(instr)
+	if err == nil {
+		t.Errorf("Expected error for SeekGE without cursor")
+	}
+}
 
-	t.Run("OpAddImm", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		v.Mem[0].SetInt(40)
-
-		// Add P2 to register P1
-		instr := &Instruction{Opcode: OpAddImm, P1: 0, P2: 2}
-		err := v.execAddImm(instr)
-		if err != nil {
-			t.Errorf("execAddImm failed: %v", err)
-		}
-
-		if v.Mem[0].IntValue() != 42 {
-			t.Errorf("Expected r0=42, got %d", v.Mem[0].IntValue())
-		}
-	})
-
-	t.Run("OpIsNull", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-
-		// Test with NULL value (should jump)
-		v.Mem[0].SetNull()
-		instr := &Instruction{Opcode: OpIsNull, P1: 0, P2: 10}
-		err := v.execIsNull(instr)
-		if err != nil {
-			t.Errorf("execIsNull failed: %v", err)
-		}
-		if v.PC != 10 {
-			t.Errorf("Expected PC=10 after IsNull with NULL, got %d", v.PC)
-		}
-
-		// Test with non-NULL value (should not jump)
-		v.PC = 0
-		v.Mem[0].SetInt(42)
-		err = v.execIsNull(instr)
-		if err != nil {
-			t.Errorf("execIsNull failed: %v", err)
-		}
-		if v.PC != 0 {
-			t.Errorf("Expected PC=0 after IsNull with non-NULL, got %d", v.PC)
-		}
-	})
-
-	t.Run("OpNotNull", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-
-		// Test with non-NULL value (should jump)
-		v.Mem[0].SetInt(42)
-		instr := &Instruction{Opcode: OpNotNull, P1: 0, P2: 10}
-		err := v.execNotNull(instr)
-		if err != nil {
-			t.Errorf("execNotNull failed: %v", err)
-		}
-		if v.PC != 10 {
-			t.Errorf("Expected PC=10 after NotNull with non-NULL, got %d", v.PC)
-		}
-
-		// Test with NULL value (should not jump)
-		v.PC = 0
-		v.Mem[0].SetNull()
-		err = v.execNotNull(instr)
-		if err != nil {
-			t.Errorf("execNotNull failed: %v", err)
-		}
-		if v.PC != 0 {
-			t.Errorf("Expected PC=0 after NotNull with NULL, got %d", v.PC)
-		}
-	})
-
-	t.Run("OpSeekGE", func(t *testing.T) {
-		t.Parallel()
-		// This requires a cursor, which is more complex
-		// Just test the basic error path for now
-		v := NewTestVDBE(5)
-		v.AllocCursors(5)
-
-		v.Mem[0].SetInt(42)
-		instr := &Instruction{Opcode: OpSeekGE, P1: 0, P2: 10, P3: 0}
-		err := v.execSeekGE(instr)
-		// Expect error since cursor not set up
-		if err == nil {
-			t.Errorf("Expected error for SeekGE without cursor")
-		}
-	})
-
-	t.Run("OpSeekLE", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		v.AllocCursors(5)
-
-		v.Mem[0].SetInt(42)
-		instr := &Instruction{Opcode: OpSeekLE, P1: 0, P2: 10, P3: 0}
-		err := v.execSeekLE(instr)
-		// Expect error since cursor not set up
-		if err == nil {
-			t.Errorf("Expected error for SeekLE without cursor")
-		}
-	})
+func testOpSeekLE(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	v.AllocCursors(5)
+	v.Mem[0].SetInt(42)
+	instr := &Instruction{Opcode: OpSeekLE, P1: 0, P2: 10, P3: 0}
+	err := v.execSeekLE(instr)
+	if err == nil {
+		t.Errorf("Expected error for SeekLE without cursor")
+	}
 }
 
 // TestVDBEUtilityMethods tests utility methods with 0% coverage

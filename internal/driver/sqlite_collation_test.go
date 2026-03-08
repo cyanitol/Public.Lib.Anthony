@@ -8,6 +8,18 @@ import (
 	"testing"
 )
 
+// collationTestCase defines a single collation test scenario
+type collationTestCase struct {
+	name    string
+	setup   []string // CREATE TABLE statements and other setup
+	inserts []string // INSERT statements to test
+	query   string   // Query to execute
+	verify  func(*testing.T, *sql.Rows)
+	wantErr bool
+	errMsg  string
+	skip    string
+}
+
 // TestSQLiteCollation is a comprehensive test suite converted from SQLite's TCL collation tests
 // (collate1.test, collate2.test, collate3.test, collate4.test, collate5.test, collate6.test,
 //
@@ -27,16 +39,120 @@ import (
 // - GROUP BY with collations
 // - Index usage with collations
 func TestSQLiteCollation(t *testing.T) {
-	tests := []struct {
-		name    string
-		setup   []string // CREATE TABLE statements and other setup
-		inserts []string // INSERT statements to test
-		query   string   // Query to execute
-		verify  func(*testing.T, *sql.Rows)
-		wantErr bool
-		errMsg  string
-		skip    string
-	}{
+	tests := collationTestCases()
+
+	for _, tt := range tests {
+		tt := tt // Capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			runCollationTest(t, tt)
+		})
+	}
+}
+
+// runCollationTest executes a single collation test case
+func runCollationTest(t *testing.T, tt collationTestCase) {
+	if tt.skip != "" {
+		t.Skip(tt.skip)
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sql.Open("sqlite_internal", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	// Setup
+	if !executeSetupStatements(t, db, tt.setup, tt.wantErr, tt.errMsg) {
+		return
+	}
+
+	// Insert test data
+	if !executeInsertStatements(t, db, tt.inserts) {
+		return
+	}
+
+	// Execute query and verify
+	executeAndVerifyQuery(t, db, tt)
+}
+
+// executeSetupStatements runs setup SQL statements
+func executeSetupStatements(t *testing.T, db *sql.DB, setup []string, wantErr bool, errMsg string) bool {
+	for _, stmt := range setup {
+		if _, err := db.Exec(stmt); err != nil {
+			if wantErr {
+				if errMsg == "" || !containsCollation(err.Error(), errMsg) {
+					t.Errorf("Setup error: %v, wanted error containing %q", err, errMsg)
+				}
+				return false
+			}
+			t.Fatalf("Setup failed: %v\nStatement: %s", err, stmt)
+		}
+	}
+	return true
+}
+
+// executeInsertStatements runs insert SQL statements
+func executeInsertStatements(t *testing.T, db *sql.DB, inserts []string) bool {
+	for _, stmt := range inserts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("Insert failed: %v\nStatement: %s", err, stmt)
+			return false
+		}
+	}
+	return true
+}
+
+// executeAndVerifyQuery runs the test query and performs verification
+func executeAndVerifyQuery(t *testing.T, db *sql.DB, tt collationTestCase) {
+	if tt.query == "" {
+		return
+	}
+
+	if tt.verify != nil {
+		executeQueryWithVerification(t, db, tt)
+	} else {
+		executeQueryWithoutVerification(t, db, tt)
+	}
+}
+
+// executeQueryWithVerification runs a query and calls the verify function
+func executeQueryWithVerification(t *testing.T, db *sql.DB, tt collationTestCase) {
+	rows, err := db.Query(tt.query)
+	if err != nil {
+		if tt.wantErr {
+			if tt.errMsg == "" || !containsCollation(err.Error(), tt.errMsg) {
+				t.Errorf("Query error: %v, wanted error containing %q", err, tt.errMsg)
+			}
+			return
+		}
+		t.Fatalf("Query failed: %v\nQuery: %s", err, tt.query)
+	}
+	defer rows.Close()
+	tt.verify(t, rows)
+}
+
+// executeQueryWithoutVerification just executes a query for error checking
+func executeQueryWithoutVerification(t *testing.T, db *sql.DB, tt collationTestCase) {
+	_, err := db.Exec(tt.query)
+	if tt.wantErr {
+		if err == nil {
+			t.Errorf("Expected error containing %q, got nil", tt.errMsg)
+			return
+		}
+		if tt.errMsg == "" || !containsCollation(err.Error(), tt.errMsg) {
+			t.Errorf("Query error: %v, wanted error containing %q", err, tt.errMsg)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("Query failed: %v\nQuery: %s", err, tt.query)
+	}
+}
+
+// collationTestCases returns all collation test cases
+func collationTestCases() []collationTestCase {
+	return []collationTestCase{
 		// ===== BASIC ORDER BY TESTS (from collate1.test) =====
 
 		{
@@ -958,75 +1074,6 @@ func TestSQLiteCollation(t *testing.T) {
 				}
 			},
 		},
-	}
-
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
-			dbPath := filepath.Join(t.TempDir(), "test.db")
-			db, err := sql.Open("sqlite_internal", dbPath)
-			if err != nil {
-				t.Fatalf("Failed to open database: %v", err)
-			}
-			defer db.Close()
-
-			// Setup
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					if tt.wantErr {
-						if tt.errMsg == "" || !containsCollation(err.Error(), tt.errMsg) {
-							t.Errorf("Setup error: %v, wanted error containing %q", err, tt.errMsg)
-						}
-						return
-					}
-					t.Fatalf("Setup failed: %v\nStatement: %s", err, stmt)
-				}
-			}
-
-			// Insert test data
-			for _, stmt := range tt.inserts {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("Insert failed: %v\nStatement: %s", err, stmt)
-				}
-			}
-
-			// Execute query
-			if tt.query != "" {
-				if tt.verify != nil {
-					rows, err := db.Query(tt.query)
-					if err != nil {
-						if tt.wantErr {
-							if tt.errMsg == "" || !containsCollation(err.Error(), tt.errMsg) {
-								t.Errorf("Query error: %v, wanted error containing %q", err, tt.errMsg)
-							}
-							return
-						}
-						t.Fatalf("Query failed: %v\nQuery: %s", err, tt.query)
-					}
-					defer rows.Close()
-					tt.verify(t, rows)
-				} else {
-					// Just execute without verification
-					_, err := db.Exec(tt.query)
-					if tt.wantErr {
-						if err == nil {
-							t.Errorf("Expected error containing %q, got nil", tt.errMsg)
-							return
-						}
-						if tt.errMsg == "" || !containsCollation(err.Error(), tt.errMsg) {
-							t.Errorf("Query error: %v, wanted error containing %q", err, tt.errMsg)
-						}
-						return
-					}
-					if err != nil {
-						t.Fatalf("Query failed: %v\nQuery: %s", err, tt.query)
-					}
-				}
-			}
-		})
 	}
 }
 

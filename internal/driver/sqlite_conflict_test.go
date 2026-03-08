@@ -8,6 +8,17 @@ import (
 	"testing"
 )
 
+// conflictTestCase defines a single conflict test scenario
+type conflictTestCase struct {
+	name    string
+	setup   []string // CREATE TABLE statements and other setup
+	stmts   []string // Statements to execute
+	verify  func(*testing.T, *sql.DB)
+	wantErr bool
+	errMsg  string
+	skip    string
+}
+
 // TestSQLiteConflict is a comprehensive test suite converted from SQLite's TCL conflict tests
 // (conflict.test, conflict2.test, conflict3.test)
 //
@@ -24,15 +35,84 @@ import (
 // - WITHOUT ROWID tables with conflicts
 func TestSQLiteConflict(t *testing.T) {
 	t.Skip("pre-existing failure - ON CONFLICT handling incomplete")
-	tests := []struct {
-		name    string
-		setup   []string // CREATE TABLE statements and other setup
-		stmts   []string // Statements to execute
-		verify  func(*testing.T, *sql.DB)
-		wantErr bool
-		errMsg  string
-		skip    string
-	}{
+	tests := conflictTestCases()
+
+	for _, tt := range tests {
+		tt := tt // Capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			runConflictTest(t, tt)
+		})
+	}
+}
+
+// runConflictTest executes a single conflict test case
+func runConflictTest(t *testing.T, tt conflictTestCase) {
+	if tt.skip != "" {
+		t.Skip(tt.skip)
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sql.Open("sqlite_internal", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	// Setup
+	executeConflictSetup(t, db, tt.setup)
+
+	// Execute statements and check for errors
+	lastErr := executeConflictStatements(t, db, tt.stmts, tt.wantErr)
+
+	// Check error expectation
+	checkConflictError(t, lastErr, tt.wantErr, tt.errMsg)
+
+	// Verify
+	if tt.verify != nil {
+		tt.verify(t, db)
+	}
+}
+
+// executeConflictSetup runs setup SQL statements for conflict tests
+func executeConflictSetup(t *testing.T, db *sql.DB, setup []string) {
+	for _, stmt := range setup {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("Setup failed: %v\nStatement: %s", err, stmt)
+		}
+	}
+}
+
+// executeConflictStatements runs test statements and returns the last error
+func executeConflictStatements(t *testing.T, db *sql.DB, stmts []string, wantErr bool) error {
+	var lastErr error
+	for _, stmt := range stmts {
+		_, err := db.Exec(stmt)
+		if err != nil {
+			lastErr = err
+			if !wantErr {
+				t.Fatalf("Statement failed: %v\nStatement: %s", err, stmt)
+			}
+		}
+	}
+	return lastErr
+}
+
+// checkConflictError verifies error expectations
+func checkConflictError(t *testing.T, lastErr error, wantErr bool, errMsg string) {
+	if wantErr {
+		if lastErr == nil {
+			t.Errorf("Expected error containing %q, got nil", errMsg)
+			return
+		}
+		if errMsg != "" && !containsConflict(lastErr.Error(), errMsg) {
+			t.Errorf("Error: %v, wanted error containing %q", lastErr, errMsg)
+		}
+	}
+}
+
+// conflictTestCases returns all conflict test cases
+func conflictTestCases() []conflictTestCase {
+	return []conflictTestCase{
 		// ===== BASIC CONFLICT TESTS (from conflict.test) =====
 
 		{
@@ -868,56 +948,6 @@ func TestSQLiteConflict(t *testing.T) {
 				}
 			},
 		},
-	}
-
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
-			dbPath := filepath.Join(t.TempDir(), "test.db")
-			db, err := sql.Open("sqlite_internal", dbPath)
-			if err != nil {
-				t.Fatalf("Failed to open database: %v", err)
-			}
-			defer db.Close()
-
-			// Setup
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("Setup failed: %v\nStatement: %s", err, stmt)
-				}
-			}
-
-			// Execute statements
-			var lastErr error
-			for _, stmt := range tt.stmts {
-				_, err := db.Exec(stmt)
-				if err != nil {
-					lastErr = err
-					if !tt.wantErr {
-						t.Fatalf("Statement failed: %v\nStatement: %s", err, stmt)
-					}
-				}
-			}
-
-			// Check error expectation
-			if tt.wantErr {
-				if lastErr == nil {
-					t.Errorf("Expected error containing %q, got nil", tt.errMsg)
-					return
-				}
-				if tt.errMsg != "" && !containsConflict(lastErr.Error(), tt.errMsg) {
-					t.Errorf("Error: %v, wanted error containing %q", lastErr, tt.errMsg)
-				}
-			}
-
-			// Verify
-			if tt.verify != nil {
-				tt.verify(t, db)
-			}
-		})
 	}
 }
 

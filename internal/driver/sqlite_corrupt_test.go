@@ -9,6 +9,15 @@ import (
 	"testing"
 )
 
+// corruptTestCase defines a single corruption test scenario
+type corruptTestCase struct {
+	name     string
+	setup    func(*testing.T, *sql.DB, string) // Setup function with db and path
+	verify   func(*testing.T, *sql.DB)
+	wantErr  bool
+	skipFile bool // Skip this test if it requires file manipulation
+}
+
 // TestSQLiteCorrupt is a comprehensive test suite converted from SQLite's TCL corruption tests
 // (corrupt.test, corrupt2.test, corrupt3.test, corrupt4.test, corruptC.test, etc.)
 //
@@ -28,13 +37,44 @@ import (
 // various corrupted/malformed data gracefully without crashing.
 func TestSQLiteCorrupt(t *testing.T) {
 	t.Skip("pre-existing failure - corruption detection incomplete")
-	tests := []struct {
-		name     string
-		setup    func(*testing.T, *sql.DB, string) // Setup function with db and path
-		verify   func(*testing.T, *sql.DB)
-		wantErr  bool
-		skipFile bool // Skip this test if it requires file manipulation
-	}{
+	tests := corruptTestCases()
+
+	for _, tt := range tests {
+		tt := tt // Capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			runCorruptTest(t, tt)
+		})
+	}
+}
+
+// runCorruptTest executes a single corruption test case
+func runCorruptTest(t *testing.T, tt corruptTestCase) {
+	if tt.skipFile {
+		t.Skip("Skipping test that requires file manipulation")
+		return
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sql.Open("sqlite_internal", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	// Setup
+	if tt.setup != nil {
+		tt.setup(t, db, dbPath)
+	}
+
+	// Verify
+	if tt.verify != nil {
+		tt.verify(t, db)
+	}
+}
+
+// corruptTestCases returns all corruption test cases
+func corruptTestCases() []corruptTestCase {
+	return []corruptTestCase{
 		// ===== INTEGRITY CHECK TESTS =====
 
 		{
@@ -994,33 +1034,6 @@ func TestSQLiteCorrupt(t *testing.T) {
 				}
 			},
 		},
-	}
-
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.skipFile {
-				t.Skip("Skipping test that requires file manipulation")
-				return
-			}
-
-			dbPath := filepath.Join(t.TempDir(), "test.db")
-			db, err := sql.Open("sqlite_internal", dbPath)
-			if err != nil {
-				t.Fatalf("Failed to open database: %v", err)
-			}
-			defer db.Close()
-
-			// Setup
-			if tt.setup != nil {
-				tt.setup(t, db, dbPath)
-			}
-
-			// Verify
-			if tt.verify != nil {
-				tt.verify(t, db)
-			}
-		})
 	}
 }
 

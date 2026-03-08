@@ -21,18 +21,35 @@ func TestSQLiteSchema(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Test 1: Query sqlite_master when empty
+	// Group tests by category
+	testEmptyDatabase(t, db)
+	testBasicSchemaOperations(t, db)
+	testIndexAndViewCreation(t, db)
+	testTriggerCreation(t, db)
+	testSchemaObjectCounts(t, db)
+	testTableOperations(t, db)
+	testComplexSchemas(t, db)
+	testMultipleIndexes(t, db)
+	testViewsAndForeignKeys(t, db)
+	testSchemaMetadata(t, db)
+}
+
+// testEmptyDatabase tests querying an empty database
+func testEmptyDatabase(t *testing.T, db *sql.DB) {
 	var count int64
-	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master").Scan(&count)
+	err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to query sqlite_master: %v", err)
 	}
 	if count != 0 {
 		t.Errorf("expected 0 entries in empty database, got %d", count)
 	}
+}
 
-	// Test 2: Create table and verify in sqlite_master
-	_, err = db.Exec("CREATE TABLE t1(a INTEGER, b TEXT)")
+// testBasicSchemaOperations tests basic table creation and schema queries
+func testBasicSchemaOperations(t *testing.T, db *sql.DB) {
+
+	_, err := db.Exec("CREATE TABLE t1(a INTEGER, b TEXT)")
 	if err != nil {
 		t.Fatalf("failed to create table: %v", err)
 	}
@@ -46,7 +63,11 @@ func TestSQLiteSchema(t *testing.T) {
 		t.Errorf("expected table name 't1', got %q", tblName)
 	}
 
-	// Test 3: Check sqlite_master columns
+	verifySchemaColumns(t, db)
+}
+
+// verifySchemaColumns checks sqlite_master column contents
+func verifySchemaColumns(t *testing.T, db *sql.DB) {
 	rows, err := db.Query("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name='t1'")
 	if err != nil {
 		t.Fatalf("failed to query sqlite_master columns: %v", err)
@@ -68,10 +89,13 @@ func TestSQLiteSchema(t *testing.T) {
 	} else {
 		t.Fatal("no rows returned from sqlite_master")
 	}
-	rows.Close()
+}
 
-	// Test 4: Create index and verify in sqlite_master
-	_, err = db.Exec("CREATE INDEX idx1 ON t1(a)")
+// testIndexAndViewCreation tests creating and verifying indexes and views
+func testIndexAndViewCreation(t *testing.T, db *sql.DB) {
+	var count int64
+
+	_, err := db.Exec("CREATE INDEX idx1 ON t1(a)")
 	if err != nil {
 		t.Fatalf("failed to create index: %v", err)
 	}
@@ -84,7 +108,6 @@ func TestSQLiteSchema(t *testing.T) {
 		t.Errorf("expected 1 index entry, got %d", count)
 	}
 
-	// Test 5: Create view and verify in sqlite_master
 	_, err = db.Exec("CREATE VIEW v1 AS SELECT a, b FROM t1")
 	if err != nil {
 		t.Fatalf("failed to create view: %v", err)
@@ -97,9 +120,13 @@ func TestSQLiteSchema(t *testing.T) {
 	if count != 1 {
 		t.Errorf("expected 1 view entry, got %d", count)
 	}
+}
 
-	// Test 6: Create trigger and verify in sqlite_master
-	_, err = db.Exec(`CREATE TRIGGER trig1 AFTER INSERT ON t1 BEGIN SELECT 1; END`)
+// testTriggerCreation tests creating and verifying triggers
+func testTriggerCreation(t *testing.T, db *sql.DB) {
+	var count int64
+
+	_, err := db.Exec(`CREATE TRIGGER trig1 AFTER INSERT ON t1 BEGIN SELECT 1; END`)
 	if err != nil {
 		t.Fatalf("failed to create trigger: %v", err)
 	}
@@ -111,9 +138,13 @@ func TestSQLiteSchema(t *testing.T) {
 	if count != 1 {
 		t.Errorf("expected 1 trigger entry, got %d", count)
 	}
+}
 
-	// Test 7: Count all objects in sqlite_master
-	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master").Scan(&count)
+// testSchemaObjectCounts tests counting all schema objects
+func testSchemaObjectCounts(t *testing.T, db *sql.DB) {
+	var count int64
+
+	err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to count all objects: %v", err)
 	}
@@ -122,8 +153,12 @@ func TestSQLiteSchema(t *testing.T) {
 		t.Errorf("expected at least 4 objects in sqlite_master, got %d", count)
 	}
 
-	// Test 8: Query all table names
-	rows, err = db.Query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+	queryAllTableNames(t, db)
+}
+
+// queryAllTableNames queries and verifies table names
+func queryAllTableNames(t *testing.T, db *sql.DB) {
+	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
 	if err != nil {
 		t.Fatalf("failed to query table names: %v", err)
 	}
@@ -140,10 +175,14 @@ func TestSQLiteSchema(t *testing.T) {
 	if len(tableNames) < 1 {
 		t.Error("expected at least 1 table name")
 	}
-	rows.Close()
+}
 
-	// Test 9: Drop view and verify removal from sqlite_master
-	_, err = db.Exec("DROP VIEW v1")
+// testTableOperations tests dropping and recreating tables
+func testTableOperations(t *testing.T, db *sql.DB) {
+	var count int64
+
+	// Drop view and verify removal
+	_, err := db.Exec("DROP VIEW v1")
 	if err != nil {
 		t.Fatalf("failed to drop view: %v", err)
 	}
@@ -183,9 +222,14 @@ func TestSQLiteSchema(t *testing.T) {
 	if count != 0 {
 		t.Errorf("expected 0 index entries after drop, got %d", count)
 	}
+}
 
-	// Test 12: Create table with primary key (auto-index)
-	_, err = db.Exec("CREATE TABLE t2(id INTEGER PRIMARY KEY, data TEXT)")
+// testComplexSchemas tests creating tables with primary keys, unique constraints, and complex schemas
+func testComplexSchemas(t *testing.T, db *sql.DB) {
+	var count int64
+	var sql string
+
+	_, err := db.Exec("CREATE TABLE t2(id INTEGER PRIMARY KEY, data TEXT)")
 	if err != nil {
 		t.Fatalf("failed to create table with primary key: %v", err)
 	}
@@ -221,8 +265,16 @@ func TestSQLiteSchema(t *testing.T) {
 		t.Errorf("sql column should contain CREATE TABLE, got %q", sql)
 	}
 
-	// Test 17: Create temporary table
-	_, err = db.Exec("CREATE TEMP TABLE temp1(x INTEGER)")
+	testTemporaryTables(t, db)
+	testAlterTable(t, db)
+	createComplexTable(t, db)
+}
+
+// testTemporaryTables tests temporary table creation and visibility
+func testTemporaryTables(t *testing.T, db *sql.DB) {
+	var count int64
+
+	_, err := db.Exec("CREATE TEMP TABLE temp1(x INTEGER)")
 	if err != nil {
 		t.Fatalf("failed to create temp table: %v", err)
 	}
@@ -244,9 +296,14 @@ func TestSQLiteSchema(t *testing.T) {
 	} else if count != 1 {
 		t.Logf("expected 1 entry in sqlite_temp_master, got %d", count)
 	}
+}
 
-	// Test 20: Alter table and check schema update
-	_, err = db.Exec("ALTER TABLE t1 ADD COLUMN c REAL")
+// testAlterTable tests ALTER TABLE operations
+func testAlterTable(t *testing.T, db *sql.DB) {
+	var count int64
+	var sql string
+
+	_, err := db.Exec("ALTER TABLE t1 ADD COLUMN c REAL")
 	if err != nil {
 		t.Fatalf("failed to alter table: %v", err)
 	}
@@ -282,9 +339,13 @@ func TestSQLiteSchema(t *testing.T) {
 	if count != 0 {
 		t.Errorf("old table name should not exist, got count=%d", count)
 	}
+}
 
-	// Test 24: Create table with complex schema
-	_, err = db.Exec(`CREATE TABLE t4(
+// createComplexTable tests creating a table with a complex schema
+func createComplexTable(t *testing.T, db *sql.DB) {
+	var sql string
+
+	_, err := db.Exec(`CREATE TABLE t4(
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL,
 		value REAL DEFAULT 0.0,
@@ -302,9 +363,13 @@ func TestSQLiteSchema(t *testing.T) {
 	if !strings.Contains(strings.ToUpper(sql), "AUTOINCREMENT") {
 		t.Logf("complex table schema: %q", sql)
 	}
+}
 
-	// Test 26: Create multiple indexes on same table
-	_, err = db.Exec("CREATE INDEX idx_t4_name ON t4(name)")
+// testMultipleIndexes tests creating multiple indexes on same table
+func testMultipleIndexes(t *testing.T, db *sql.DB) {
+	var count int64
+
+	_, err := db.Exec("CREATE INDEX idx_t4_name ON t4(name)")
 	if err != nil {
 		t.Fatalf("failed to create index on name: %v", err)
 	}
@@ -322,8 +387,12 @@ func TestSQLiteSchema(t *testing.T) {
 		t.Errorf("expected at least 2 indexes for t4, got %d", count)
 	}
 
-	// Test 28: Query all object types
-	rows, err = db.Query("SELECT DISTINCT type FROM sqlite_master ORDER BY type")
+	queryObjectTypes(t, db)
+}
+
+// queryObjectTypes queries all distinct object types from sqlite_master
+func queryObjectTypes(t *testing.T, db *sql.DB) {
+	rows, err := db.Query("SELECT DISTINCT type FROM sqlite_master ORDER BY type")
 	if err != nil {
 		t.Fatalf("failed to query object types: %v", err)
 	}
@@ -340,10 +409,14 @@ func TestSQLiteSchema(t *testing.T) {
 	if len(types) < 2 {
 		t.Errorf("expected at least 2 object types, got %v", types)
 	}
-	rows.Close()
+}
 
-	// Test 29: Create view that references multiple tables
-	_, err = db.Exec("CREATE VIEW v2 AS SELECT t2.id, t3.a FROM t2, t3")
+// testViewsAndForeignKeys tests creating views and foreign key relationships
+func testViewsAndForeignKeys(t *testing.T, db *sql.DB) {
+	var count int64
+	var sql string
+
+	_, err := db.Exec("CREATE VIEW v2 AS SELECT t2.id, t3.a FROM t2, t3")
 	if err != nil {
 		t.Fatalf("failed to create multi-table view: %v", err)
 	}
@@ -357,14 +430,18 @@ func TestSQLiteSchema(t *testing.T) {
 		t.Errorf("view sql should reference both tables: %q", sql)
 	}
 
-	// Test 31: Drop table and verify cascade
 	_, err = db.Exec("DROP TABLE IF EXISTS t1_renamed")
 	if err != nil {
 		t.Fatalf("failed to drop table: %v", err)
 	}
 
-	// Test 32: Create table with foreign key
-	_, err = db.Exec("CREATE TABLE parent(id INTEGER PRIMARY KEY)")
+	createForeignKeyTables(t, db)
+	verifyForeignKeyTables(t, db, count)
+}
+
+// createForeignKeyTables creates parent and child tables with foreign keys
+func createForeignKeyTables(t *testing.T, db *sql.DB) {
+	_, err := db.Exec("CREATE TABLE parent(id INTEGER PRIMARY KEY)")
 	if err != nil {
 		t.Fatalf("failed to create parent table: %v", err)
 	}
@@ -372,19 +449,25 @@ func TestSQLiteSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create child table: %v", err)
 	}
+}
 
-	// Test 33: Query both tables in sqlite_master
-	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND (name='parent' OR name='child')").Scan(&count)
+// verifyForeignKeyTables verifies foreign key tables exist
+func verifyForeignKeyTables(t *testing.T, db *sql.DB, count int64) {
+	err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND (name='parent' OR name='child')").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to query FK tables: %v", err)
 	}
 	if count != 2 {
 		t.Errorf("expected 2 FK-related tables, got %d", count)
 	}
+}
 
-	// Test 34: Query rootpage column
+// testSchemaMetadata tests schema metadata like rootpage and LIKE queries
+func testSchemaMetadata(t *testing.T, db *sql.DB) {
 	var rootpage int64
-	err = db.QueryRow("SELECT rootpage FROM sqlite_master WHERE type='table' AND name='parent'").Scan(&rootpage)
+	var count int64
+
+	err := db.QueryRow("SELECT rootpage FROM sqlite_master WHERE type='table' AND name='parent'").Scan(&rootpage)
 	if err != nil {
 		t.Fatalf("failed to query rootpage: %v", err)
 	}
@@ -392,7 +475,6 @@ func TestSQLiteSchema(t *testing.T) {
 		t.Errorf("expected positive rootpage, got %d", rootpage)
 	}
 
-	// Test 35: Test case-insensitive name matching
 	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='PARENT'").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed case-insensitive query: %v", err)
@@ -402,7 +484,6 @@ func TestSQLiteSchema(t *testing.T) {
 		// Exact case match required in sqlite_master
 	}
 
-	// Test 36: Query with LIKE pattern
 	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name LIKE 't%'").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed LIKE query: %v", err)

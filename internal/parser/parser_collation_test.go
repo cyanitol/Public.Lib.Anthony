@@ -5,6 +5,60 @@ import (
 	"testing"
 )
 
+// Helper functions to reduce cyclomatic complexity
+
+func parseCreateTableStmt(t *testing.T, sql string) *CreateTableStmt {
+	t.Helper()
+	parser := NewParser(sql)
+	stmts, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(stmts))
+	}
+	stmt, ok := stmts[0].(*CreateTableStmt)
+	if !ok {
+		t.Fatalf("expected CreateTableStmt, got %T", stmts[0])
+	}
+	return stmt
+}
+
+func parseSelectStmt(t *testing.T, sql string) *SelectStmt {
+	t.Helper()
+	parser := NewParser(sql)
+	stmts, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(stmts))
+	}
+	stmt, ok := stmts[0].(*SelectStmt)
+	if !ok {
+		t.Fatalf("expected SelectStmt, got %T", stmts[0])
+	}
+	return stmt
+}
+
+func runCollateColumnSubtest(t *testing.T, name, sql string, check func(*testing.T, *CreateTableStmt)) {
+	t.Helper()
+	t.Run(name, func(t *testing.T) {
+		t.Parallel()
+		stmt := parseCreateTableStmt(t, sql)
+		check(t, stmt)
+	})
+}
+
+func runCollateOrderBySubtest(t *testing.T, name, sql string, check func(*testing.T, *SelectStmt)) {
+	t.Helper()
+	t.Run(name, func(t *testing.T) {
+		t.Parallel()
+		stmt := parseSelectStmt(t, sql)
+		check(t, stmt)
+	})
+}
+
 func TestParseCollateInColumn(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -88,27 +142,7 @@ func TestParseCollateInColumn(t *testing.T) {
 
 	for _, tt := range tests {
 		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			parser := NewParser(tt.sql)
-			stmts, err := parser.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr {
-				if len(stmts) != 1 {
-					t.Fatalf("expected 1 statement, got %d", len(stmts))
-				}
-				stmt, ok := stmts[0].(*CreateTableStmt)
-				if !ok {
-					t.Fatalf("expected CreateTableStmt, got %T", stmts[0])
-				}
-				if tt.checkTable != nil {
-					tt.checkTable(t, stmt)
-				}
-			}
-		})
+		runCollateColumnSubtest(t, tt.name, tt.sql, tt.checkTable)
 	}
 }
 
@@ -226,27 +260,7 @@ func TestParseCollateInOrderBy(t *testing.T) {
 
 	for _, tt := range tests {
 		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			parser := NewParser(tt.sql)
-			stmts, err := parser.Parse()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr {
-				if len(stmts) != 1 {
-					t.Fatalf("expected 1 statement, got %d", len(stmts))
-				}
-				stmt, ok := stmts[0].(*SelectStmt)
-				if !ok {
-					t.Fatalf("expected SelectStmt, got %T", stmts[0])
-				}
-				if tt.checkStmt != nil {
-					tt.checkStmt(t, stmt)
-				}
-			}
-		})
+		runCollateOrderBySubtest(t, tt.name, tt.sql, tt.checkStmt)
 	}
 }
 
