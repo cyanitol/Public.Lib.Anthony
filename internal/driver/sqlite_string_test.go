@@ -7,6 +7,96 @@ import (
 	"testing"
 )
 
+// ssf_testCase defines a string function test case
+type ssf_testCase struct {
+	name    string
+	query   string
+	want    interface{}
+	wantErr bool
+	skip    string
+}
+
+// ssf_runTest executes a single test case
+func ssf_runTest(t *testing.T, db *sql.DB, tt ssf_testCase) {
+	if tt.skip != "" {
+		t.Skip(tt.skip)
+	}
+
+	var result interface{}
+	err := db.QueryRow(tt.query).Scan(&result)
+
+	if tt.wantErr {
+		if err == nil {
+			t.Errorf("expected error but got none")
+		}
+		return
+	}
+
+	if err != nil {
+		if err == sql.ErrNoRows && tt.want == nil {
+			return
+		}
+		t.Fatalf("query failed: %v", err)
+	}
+
+	// Handle NULL comparison
+	if tt.want == nil {
+		if result != nil {
+			t.Errorf("expected nil, got %v", result)
+		}
+		return
+	}
+
+	// Handle different types
+	ssf_verifyResult(t, tt.want, result)
+}
+
+// ssf_verifyResult verifies query result matches expected value
+func ssf_verifyResult(t *testing.T, expected interface{}, result interface{}) {
+	switch exp := expected.(type) {
+	case int64:
+		ssf_verifyInt64Result(t, exp, result)
+	case string:
+		ssf_verifyStringResult(t, exp, result)
+	default:
+		if result != expected {
+			t.Errorf("expected %v, got %v", expected, result)
+		}
+	}
+}
+
+// ssf_verifyInt64Result verifies int64 or convertible result
+func ssf_verifyInt64Result(t *testing.T, expected int64, result interface{}) {
+	switch got := result.(type) {
+	case int64:
+		if got != expected {
+			t.Errorf("expected %v, got %v", expected, got)
+		}
+	case float64:
+		if int64(got) != expected {
+			t.Errorf("expected %v, got %v (converted from float)", expected, got)
+		}
+	default:
+		t.Errorf("expected int64 %v, got %T %v", expected, result, result)
+	}
+}
+
+// ssf_verifyStringResult verifies string or byte array result
+func ssf_verifyStringResult(t *testing.T, expected string, result interface{}) {
+	got, ok := result.(string)
+	if !ok {
+		if bytes, ok := result.([]byte); ok {
+			got = string(bytes)
+		} else {
+			t.Errorf("expected string %q, got %T %v", expected, result, result)
+			return
+		}
+	}
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
+	}
+}
+
 // TestSQLiteStringFunctions tests SQLite string functions (substr, instr, replace, trim, etc.)
 // Converted from contrib/sqlite/sqlite-src-3510200/test/substr.test and instr.test
 func TestSQLiteStringFunctions(t *testing.T) {
@@ -26,13 +116,7 @@ func TestSQLiteStringFunctions(t *testing.T) {
 		t.Fatalf("failed to create test table: %v", err)
 	}
 
-	tests := []struct {
-		name    string
-		query   string
-		want    interface{}
-		wantErr bool
-		skip    string
-	}{
+	tests := []ssf_testCase{
 		// SUBSTR tests (from substr.test)
 		{
 			name:  "substr_basic_1",
@@ -467,75 +551,13 @@ func TestSQLiteStringFunctions(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
-
-			var result interface{}
-			err := db.QueryRow(tt.query).Scan(&result)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error but got none")
-				}
-				return
-			}
-
-			if err != nil {
-				if err == sql.ErrNoRows && tt.want == nil {
-					return
-				}
-				t.Fatalf("query failed: %v", err)
-			}
-
-			// Handle NULL comparison
-			if tt.want == nil {
-				if result != nil {
-					t.Errorf("expected nil, got %v", result)
-				}
-				return
-			}
-
-			// Handle different types
-			switch expected := tt.want.(type) {
-			case int64:
-				switch got := result.(type) {
-				case int64:
-					if got != expected {
-						t.Errorf("expected %v, got %v", expected, got)
-					}
-				case float64:
-					if int64(got) != expected {
-						t.Errorf("expected %v, got %v (converted from float)", expected, got)
-					}
-				default:
-					t.Errorf("expected int64 %v, got %T %v", expected, result, result)
-				}
-			case string:
-				got, ok := result.(string)
-				if !ok {
-					if bytes, ok := result.([]byte); ok {
-						got = string(bytes)
-					} else {
-						t.Errorf("expected string %q, got %T %v", expected, result, result)
-						return
-					}
-				}
-				if got != expected {
-					t.Errorf("expected %q, got %q", expected, got)
-				}
-			default:
-				if result != tt.want {
-					t.Errorf("expected %v, got %v", tt.want, result)
-				}
-			}
+			ssf_runTest(t, db, tt)
 		})
 	}
 }
 
-// TestStringFunctionsWithTable tests string functions with table data
-func TestStringFunctionsWithTable(t *testing.T) {
-	// Removed function-level skip - test individual operations
+// sfwt_setupDB creates and populates test database
+func sfwt_setupDB(t *testing.T) *sql.DB {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "string_table_test.db")
 
@@ -543,9 +565,7 @@ func TestStringFunctionsWithTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
 
-	// Create and populate test table
 	_, err = db.Exec("CREATE TABLE strings(id INTEGER PRIMARY KEY, text TEXT)")
 	if err != nil {
 		t.Fatalf("failed to create table: %v", err)
@@ -567,99 +587,80 @@ func TestStringFunctionsWithTable(t *testing.T) {
 		}
 	}
 
-	// Test 1: SUBSTR on table column
+	return db
+}
+
+// sfwt_testStringQuery runs a string query and verifies result
+func sfwt_testStringQuery(t *testing.T, db *sql.DB, query, expected, testName string) {
 	var result string
-	err = db.QueryRow("SELECT substr(text, 1, 5) FROM strings WHERE id = 1").Scan(&result)
+	err := db.QueryRow(query).Scan(&result)
 	if err != nil {
-		t.Fatalf("substr query failed: %v", err)
+		t.Fatalf("%s query failed: %v", testName, err)
 	}
-	if result != "hello" {
-		t.Errorf("expected 'hello', got %q", result)
+	if result != expected {
+		t.Errorf("%s: expected %q, got %q", testName, expected, result)
 	}
+}
+
+// sfwt_testInt64Query runs an int64 query and verifies result
+func sfwt_testInt64Query(t *testing.T, db *sql.DB, query string, expected int64, testName string) {
+	var result int64
+	err := db.QueryRow(query).Scan(&result)
+	if err != nil {
+		t.Fatalf("%s query failed: %v", testName, err)
+	}
+	if result != expected {
+		t.Errorf("%s: expected %d, got %d", testName, expected, result)
+	}
+}
+
+// sfwt_testCountAtLeast verifies count is at least the minimum
+func sfwt_testCountAtLeast(t *testing.T, db *sql.DB, query string, minCount int64, testName string) {
+	var count int64
+	err := db.QueryRow(query).Scan(&count)
+	if err != nil {
+		t.Fatalf("%s failed: %v", testName, err)
+	}
+	if count < minCount {
+		t.Errorf("%s: expected at least %d, got %d", testName, minCount, count)
+	}
+}
+
+// TestStringFunctionsWithTable tests string functions with table data
+func TestStringFunctionsWithTable(t *testing.T) {
+	// Removed function-level skip - test individual operations
+	db := sfwt_setupDB(t)
+	defer db.Close()
+
+	// Test 1: SUBSTR on table column
+	sfwt_testStringQuery(t, db, "SELECT substr(text, 1, 5) FROM strings WHERE id = 1", "hello", "substr")
 
 	// Test 2: INSTR on table column
-	var pos int64
-	err = db.QueryRow("SELECT instr(text, 'world') FROM strings WHERE id = 1").Scan(&pos)
-	if err != nil {
-		t.Fatalf("instr query failed: %v", err)
-	}
-	if pos != 7 {
-		t.Errorf("expected position 7, got %d", pos)
-	}
+	sfwt_testInt64Query(t, db, "SELECT instr(text, 'world') FROM strings WHERE id = 1", 7, "instr")
 
 	// Test 3: REPLACE on table column
-	err = db.QueryRow("SELECT replace(text, 'hello', 'goodbye') FROM strings WHERE id = 1").Scan(&result)
-	if err != nil {
-		t.Fatalf("replace query failed: %v", err)
-	}
-	if result != "goodbye world" {
-		t.Errorf("expected 'goodbye world', got %q", result)
-	}
+	sfwt_testStringQuery(t, db, "SELECT replace(text, 'hello', 'goodbye') FROM strings WHERE id = 1", "goodbye world", "replace")
 
 	// Test 4: TRIM on table column
-	err = db.QueryRow("SELECT trim(text) FROM strings WHERE id = 3").Scan(&result)
-	if err != nil {
-		t.Fatalf("trim query failed: %v", err)
-	}
-	if result != "spaces" {
-		t.Errorf("expected 'spaces', got %q", result)
-	}
+	sfwt_testStringQuery(t, db, "SELECT trim(text) FROM strings WHERE id = 3", "spaces", "trim")
 
 	// Test 5: UPPER on table column
-	err = db.QueryRow("SELECT upper(text) FROM strings WHERE id = 5").Scan(&result)
-	if err != nil {
-		t.Fatalf("upper query failed: %v", err)
-	}
-	if result != "LOWERCASE" {
-		t.Errorf("expected 'LOWERCASE', got %q", result)
-	}
+	sfwt_testStringQuery(t, db, "SELECT upper(text) FROM strings WHERE id = 5", "LOWERCASE", "upper")
 
 	// Test 6: LOWER on table column
-	err = db.QueryRow("SELECT lower(text) FROM strings WHERE id = 4").Scan(&result)
-	if err != nil {
-		t.Fatalf("lower query failed: %v", err)
-	}
-	if result != "uppercase" {
-		t.Errorf("expected 'uppercase', got %q", result)
-	}
+	sfwt_testStringQuery(t, db, "SELECT lower(text) FROM strings WHERE id = 4", "uppercase", "lower")
 
 	// Test 7: LENGTH on table column
-	var length int64
-	err = db.QueryRow("SELECT length(text) FROM strings WHERE id = 2").Scan(&length)
-	if err != nil {
-		t.Fatalf("length query failed: %v", err)
-	}
-	if length != 15 {
-		t.Errorf("expected length 15, got %d", length)
-	}
+	sfwt_testInt64Query(t, db, "SELECT length(text) FROM strings WHERE id = 2", 15, "length")
 
 	// Test 8: Combining multiple string functions
-	err = db.QueryRow("SELECT upper(trim(text)) FROM strings WHERE id = 3").Scan(&result)
-	if err != nil {
-		t.Fatalf("combined functions query failed: %v", err)
-	}
-	if result != "SPACES" {
-		t.Errorf("expected 'SPACES', got %q", result)
-	}
+	sfwt_testStringQuery(t, db, "SELECT upper(trim(text)) FROM strings WHERE id = 3", "SPACES", "combined functions")
 
 	// Test 9: Using string functions in WHERE clause
-	var count int64
-	err = db.QueryRow("SELECT COUNT(*) FROM strings WHERE length(text) > 10").Scan(&count)
-	if err != nil {
-		t.Fatalf("WHERE with function failed: %v", err)
-	}
-	if count < 1 {
-		t.Errorf("expected at least 1 row with length > 10, got %d", count)
-	}
+	sfwt_testCountAtLeast(t, db, "SELECT COUNT(*) FROM strings WHERE length(text) > 10", 1, "WHERE with function")
 
 	// Test 10: Using INSTR in WHERE clause
-	err = db.QueryRow("SELECT COUNT(*) FROM strings WHERE instr(text, 'world') > 0").Scan(&count)
-	if err != nil {
-		t.Fatalf("WHERE with instr failed: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("expected 1 row containing 'world', got %d", count)
-	}
+	sfwt_testInt64Query(t, db, "SELECT COUNT(*) FROM strings WHERE instr(text, 'world') > 0", 1, "WHERE with instr")
 
 	// Test 11: UPDATE with string functions - SKIPPED
 	// UPDATE with function in SET clause not supported (parse error)
@@ -670,8 +671,8 @@ func TestStringFunctionsWithTable(t *testing.T) {
 	// rows, err := db.Query("SELECT text FROM strings ORDER BY length(text) DESC LIMIT 3")
 }
 
-// TestStringFunctionsEdgeCases tests edge cases for string functions
-func TestStringFunctionsEdgeCases(t *testing.T) {
+// sfec_setupDB creates test database
+func sfec_setupDB(t *testing.T) *sql.DB {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "string_edge_test.db")
 
@@ -679,59 +680,89 @@ func TestStringFunctionsEdgeCases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	return db
+}
 
-	// Test 1: Very long string
+// sfec_testLongString tests substr on very long strings
+func sfec_testLongString(t *testing.T, db *sql.DB) {
 	longStr := ""
 	for i := 0; i < 1000; i++ {
 		longStr += "a"
 	}
 
 	var result string
-	err = db.QueryRow("SELECT substr(?, 1, 10)", longStr).Scan(&result)
+	err := db.QueryRow("SELECT substr(?, 1, 10)", longStr).Scan(&result)
 	if err != nil {
 		t.Fatalf("substr on long string failed: %v", err)
 	}
 	if result != "aaaaaaaaaa" {
 		t.Errorf("expected 10 'a's, got %q", result)
 	}
+}
 
-	// Test 2: Empty string operations
-	err = db.QueryRow("SELECT replace('', 'x', 'y')").Scan(&result)
+// sfec_testEmptyString tests operations on empty strings
+func sfec_testEmptyString(t *testing.T, db *sql.DB) {
+	var result string
+	err := db.QueryRow("SELECT replace('', 'x', 'y')").Scan(&result)
 	if err != nil {
 		t.Fatalf("replace on empty string failed: %v", err)
 	}
 	if result != "" {
 		t.Errorf("expected empty string, got %q", result)
 	}
+}
 
-	// Test 3: Special characters
-	err = db.QueryRow("SELECT instr('tab\tseparated', '\t')").Scan(&result)
+// sfec_testSpecialChars tests special character handling
+func sfec_testSpecialChars(t *testing.T, db *sql.DB) {
+	var result string
+	err := db.QueryRow("SELECT instr('tab\tseparated', '\t')").Scan(&result)
 	if err != nil {
 		t.Fatalf("instr with tab failed: %v", err)
 	}
+}
 
-	// Test 4: Newline characters
-	err = db.QueryRow("SELECT replace('line1\nline2', '\n', ' ')").Scan(&result)
+// sfec_testNewlines tests newline character handling
+func sfec_testNewlines(t *testing.T, db *sql.DB) {
+	var result string
+	err := db.QueryRow("SELECT replace('line1\nline2', '\n', ' ')").Scan(&result)
 	if err != nil {
 		t.Fatalf("replace newline failed: %v", err)
 	}
 	if result != "line1 line2" {
 		t.Errorf("expected 'line1 line2', got %q", result)
 	}
+}
 
-	// Test 5: Quote characters
-	err = db.QueryRow("SELECT replace('it''s', '''', '\"')").Scan(&result)
+// sfec_testQuotes tests quote character handling
+func sfec_testQuotes(t *testing.T, db *sql.DB) {
+	var result string
+	err := db.QueryRow("SELECT replace('it''s', '''', '\"')").Scan(&result)
 	if err != nil {
 		t.Fatalf("replace quote failed: %v", err)
 	}
+}
 
-	// Test 6: Multiple spaces
-	err = db.QueryRow("SELECT trim('     ')").Scan(&result)
+// sfec_testTrimSpaces tests trimming all spaces
+func sfec_testTrimSpaces(t *testing.T, db *sql.DB) {
+	var result string
+	err := db.QueryRow("SELECT trim('     ')").Scan(&result)
 	if err != nil {
 		t.Fatalf("trim all spaces failed: %v", err)
 	}
 	if result != "" {
 		t.Errorf("expected empty string, got %q", result)
 	}
+}
+
+// TestStringFunctionsEdgeCases tests edge cases for string functions
+func TestStringFunctionsEdgeCases(t *testing.T) {
+	db := sfec_setupDB(t)
+	defer db.Close()
+
+	sfec_testLongString(t, db)
+	sfec_testEmptyString(t, db)
+	sfec_testSpecialChars(t, db)
+	sfec_testNewlines(t, db)
+	sfec_testQuotes(t, db)
+	sfec_testTrimSpaces(t, db)
 }

@@ -169,6 +169,41 @@ func TestSavepointRollback(t *testing.T) {
 	pager.Commit()
 }
 
+// spNestedAction represents a declarative savepoint action
+type spNestedAction struct {
+	actionType string // "write", "savepoint", "rollback", "verify"
+	spName     string
+	value      byte
+}
+
+// spWritePage writes a value to page 1
+func spWritePage(t *testing.T, pager *Pager, value byte) {
+	t.Helper()
+	page, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("failed to write page: %v", err)
+	}
+	page.Data[0] = value
+	pager.Put(page)
+}
+
+// spVerifyPage verifies page 1 has expected value
+func spVerifyPage(t *testing.T, pager *Pager, expected byte) {
+	t.Helper()
+	page, err := pager.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+	defer pager.Put(page)
+
+	if page.Data[0] != expected {
+		t.Errorf("expected 0x%02X, got 0x%02X", expected, page.Data[0])
+	}
+}
+
 func TestNestedSavepoints(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
@@ -180,98 +215,39 @@ func TestNestedSavepoints(t *testing.T) {
 	}
 	defer pager.Close()
 
-	// Begin write transaction
 	if err := pager.BeginWrite(); err != nil {
 		t.Fatalf("failed to begin write: %v", err)
 	}
 
-	// Get page
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
+	actions := []spNestedAction{
+		{actionType: "write", value: 0x11},
+		{actionType: "savepoint", spName: "sp1"},
+		{actionType: "write", value: 0x22},
+		{actionType: "savepoint", spName: "sp2"},
+		{actionType: "write", value: 0x33},
+		{actionType: "savepoint", spName: "sp3"},
+		{actionType: "write", value: 0x44},
+		{actionType: "rollback", spName: "sp2"},
+		{actionType: "verify", value: 0x22},
+		{actionType: "rollback", spName: "sp1"},
+		{actionType: "verify", value: 0x11},
 	}
 
-	// Initial state
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-	page.Data[0] = 0x11
-	pager.Put(page)
-
-	// Savepoint 1
-	if err := pager.Savepoint("sp1"); err != nil {
-		t.Fatalf("failed to create sp1: %v", err)
-	}
-
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-	page.Data[0] = 0x22
-	pager.Put(page)
-
-	// Savepoint 2
-	if err := pager.Savepoint("sp2"); err != nil {
-		t.Fatalf("failed to create sp2: %v", err)
-	}
-
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-	page.Data[0] = 0x33
-	pager.Put(page)
-
-	// Savepoint 3
-	if err := pager.Savepoint("sp3"); err != nil {
-		t.Fatalf("failed to create sp3: %v", err)
-	}
-
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-	page.Data[0] = 0x44
-	pager.Put(page)
-
-	// Rollback to sp2
-	if err := pager.RollbackTo("sp2"); err != nil {
-		t.Fatalf("failed to rollback to sp2: %v", err)
-	}
-
-	// Should be at 0x22 (sp1 state)
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-	if page.Data[0] != 0x22 {
-		t.Errorf("wrong value after rollback to sp2: expected 0x22, got 0x%02X", page.Data[0])
-	}
-	pager.Put(page)
-
-	// Rollback to sp1
-	if err := pager.RollbackTo("sp1"); err != nil {
-		t.Fatalf("failed to rollback to sp1: %v", err)
-	}
-
-	// Should be at 0x11 (initial state)
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-	defer pager.Put(page)
-
-	if page.Data[0] != 0x11 {
-		t.Errorf("wrong value after rollback to sp1: expected 0x11, got 0x%02X", page.Data[0])
+	for _, action := range actions {
+		switch action.actionType {
+		case "write":
+			spWritePage(t, pager, action.value)
+		case "savepoint":
+			if err := pager.Savepoint(action.spName); err != nil {
+				t.Fatalf("failed to create %s: %v", action.spName, err)
+			}
+		case "rollback":
+			if err := pager.RollbackTo(action.spName); err != nil {
+				t.Fatalf("failed to rollback to %s: %v", action.spName, err)
+			}
+		case "verify":
+			spVerifyPage(t, pager, action.value)
+		}
 	}
 
 	pager.Commit()

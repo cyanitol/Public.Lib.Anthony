@@ -483,24 +483,18 @@ func TestWALModeMultipleVersions(t *testing.T) {
 	}
 }
 
-// TestWALModeCheckpointModes tests different checkpoint modes
-func TestWALModeCheckpointModes(t *testing.T) {
-	t.Parallel()
-	tempDir := t.TempDir()
-	dbFile := filepath.Join(tempDir, "test.db")
+// walCheckpointTest represents a declarative WAL checkpoint test
+type walCheckpointTest struct {
+	name         string
+	mode         CheckpointMode
+	writeAfter   bool
+	verifyTrunc  bool
+}
 
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("Failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	if err := pager.SetJournalMode(JournalModeWAL); err != nil {
-		t.Fatalf("Failed to switch to WAL mode: %v", err)
-	}
-
-	// Write some data
-	for i := 0; i < 5; i++ {
+// walWritePages writes test pages to the pager
+func walWritePages(t *testing.T, pager *Pager, count int) {
+	t.Helper()
+	for i := 0; i < count; i++ {
 		if err := pager.BeginWrite(); err != nil {
 			t.Fatalf("Failed to begin write: %v", err)
 		}
@@ -528,63 +522,58 @@ func TestWALModeCheckpointModes(t *testing.T) {
 			t.Fatalf("Failed to commit: %v", err)
 		}
 	}
+}
 
-	// Test passive checkpoint
-	if err := pager.CheckpointMode(CheckpointPassive); err != nil {
-		t.Errorf("Passive checkpoint failed: %v", err)
+// walExecCheckpoint executes a checkpoint and verifies it
+func walExecCheckpoint(t *testing.T, pager *Pager, mode CheckpointMode, dbFile string, verifyTrunc bool) {
+	t.Helper()
+	if err := pager.CheckpointMode(mode); err != nil {
+		t.Errorf("%v checkpoint failed: %v", mode, err)
 	}
 
-	// Test full checkpoint
-	if err := pager.CheckpointMode(CheckpointFull); err != nil {
-		t.Errorf("Full checkpoint failed: %v", err)
+	if verifyTrunc {
+		walFile := dbFile + "-wal"
+		info, err := os.Stat(walFile)
+		if err != nil {
+			t.Fatalf("WAL file should exist: %v", err)
+		}
+		if info.Size() != 0 {
+			t.Errorf("WAL file should be empty, got size %d", info.Size())
+		}
 	}
+}
 
-	// Test restart checkpoint
-	if err := pager.CheckpointMode(CheckpointRestart); err != nil {
-		t.Errorf("Restart checkpoint failed: %v", err)
-	}
+// TestWALModeCheckpointModes tests different checkpoint modes
+func TestWALModeCheckpointModes(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
 
-	// Write more data after restart
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("Failed to begin write after restart: %v", err)
-	}
-
-	pgno, err := pager.AllocatePage()
+	pager, err := Open(dbFile, false)
 	if err != nil {
-		t.Fatalf("Failed to allocate page after restart: %v", err)
+		t.Fatalf("Failed to open pager: %v", err)
+	}
+	defer pager.Close()
+
+	if err := pager.SetJournalMode(JournalModeWAL); err != nil {
+		t.Fatalf("Failed to switch to WAL mode: %v", err)
 	}
 
-	page, err := pager.Get(pgno)
-	if err != nil {
-		t.Fatalf("Failed to get page after restart: %v", err)
+	walWritePages(t, pager, 5)
+
+	tests := []walCheckpointTest{
+		{name: "Passive", mode: CheckpointPassive, writeAfter: false, verifyTrunc: false},
+		{name: "Full", mode: CheckpointFull, writeAfter: false, verifyTrunc: false},
+		{name: "Restart", mode: CheckpointRestart, writeAfter: true, verifyTrunc: false},
+		{name: "Truncate", mode: CheckpointTruncate, writeAfter: false, verifyTrunc: true},
 	}
 
-	testData := []byte("After restart")
-	copy(page.Data, testData)
+	for _, tt := range tests {
+		walExecCheckpoint(t, pager, tt.mode, dbFile, tt.verifyTrunc)
 
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Failed to write page after restart: %v", err)
-	}
-	pager.Put(page)
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Failed to commit after restart: %v", err)
-	}
-
-	// Test truncate checkpoint
-	if err := pager.CheckpointMode(CheckpointTruncate); err != nil {
-		t.Errorf("Truncate checkpoint failed: %v", err)
-	}
-
-	// Verify WAL file was truncated
-	walFile := dbFile + "-wal"
-	info, err := os.Stat(walFile)
-	if err != nil {
-		t.Fatalf("WAL file should still exist: %v", err)
-	}
-
-	if info.Size() != 0 {
-		t.Errorf("WAL file should be empty after truncate checkpoint, got size %d", info.Size())
+		if tt.writeAfter {
+			walWritePages(t, pager, 1)
+		}
 	}
 }
 

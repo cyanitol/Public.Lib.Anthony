@@ -538,143 +538,224 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 				t.Skip(tt.skip)
 			}
 			// Clean up from any previous test - drop tables to reset schema
-			tables := []string{"t1", "t2", "t3", "t4", "t5", "t6", "t7", "test1"}
-			for _, tableName := range tables {
-				_, _ = db.Exec("DROP TABLE IF EXISTS " + tableName)
-			}
+			coalesceCleanupTables(db)
 
 			// Run setup queries
-			for _, setup := range tt.setup {
-				_, err := db.Exec(setup)
-				if err != nil {
-					t.Fatalf("setup failed: %v\nquery: %s", err, setup)
-				}
-			}
+			coalesceRunSetup(t, db, tt.setup)
 
 			// Execute test query
 			rows, err := db.Query(tt.query)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got nil", tt.errMsg)
-				}
-				if tt.errMsg != "" && !containsSubstring(err.Error(), tt.errMsg) {
-					t.Fatalf("expected error containing %q, got %q", tt.errMsg, err.Error())
-				}
+
+			// Handle error cases
+			if coalesceHandleError(t, err, tt.wantErr, tt.errMsg) {
 				return
-			}
-			if err != nil {
-				t.Fatalf("query failed: %v\nquery: %s", err, tt.query)
 			}
 			defer rows.Close()
 
 			// Collect results
-			var results []interface{}
-			for rows.Next() {
-				// Get column count
-				cols, err := rows.Columns()
-				if err != nil {
-					t.Fatalf("failed to get columns: %v", err)
-				}
-
-				// Create slice for scanning
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-
-				// Scan row
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("failed to scan row: %v", err)
-				}
-
-				// Append scanned values
-				results = append(results, values...)
-			}
-
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows iteration error: %v", err)
-			}
+			results := coalesceCollectResults(t, rows)
 
 			// Compare results
-			if len(results) != len(tt.want) {
-				t.Fatalf("result count mismatch: got %d values, want %d\ngot: %v\nwant: %v",
-					len(results), len(tt.want), results, tt.want)
-			}
-
-			for i, got := range results {
-				want := tt.want[i]
-				if !compareValues(got, want) {
-					t.Errorf("value[%d] mismatch: got %v (%T), want %v (%T)",
-						i, got, got, want, want)
-				}
-			}
+			coalesceVerifyResults(t, results, tt.want)
 		})
+	}
+}
+
+// coalesceCleanupTables drops all test tables
+func coalesceCleanupTables(db *sql.DB) {
+	tables := []string{"t1", "t2", "t3", "t4", "t5", "t6", "t7", "test1"}
+	for _, tableName := range tables {
+		_, _ = db.Exec("DROP TABLE IF EXISTS " + tableName)
+	}
+}
+
+// coalesceRunSetup executes setup queries
+func coalesceRunSetup(t *testing.T, db *sql.DB, setup []string) {
+	t.Helper()
+	for _, query := range setup {
+		_, err := db.Exec(query)
+		if err != nil {
+			t.Fatalf("setup failed: %v\nquery: %s", err, query)
+		}
+	}
+}
+
+// coalesceHandleError checks if error handling is correct
+func coalesceHandleError(t *testing.T, err error, wantErr bool, errMsg string) bool {
+	t.Helper()
+	if wantErr {
+		if err == nil {
+			t.Fatalf("expected error containing %q, got nil", errMsg)
+		}
+		if errMsg != "" && !containsSubstring(err.Error(), errMsg) {
+			t.Fatalf("expected error containing %q, got %q", errMsg, err.Error())
+		}
+		return true
+	}
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	return false
+}
+
+// coalesceCollectResults scans all rows and returns results
+func coalesceCollectResults(t *testing.T, rows *sql.Rows) []interface{} {
+	t.Helper()
+	var results []interface{}
+	for rows.Next() {
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatalf("failed to get columns: %v", err)
+		}
+
+		values := make([]interface{}, len(cols))
+		valuePtrs := make([]interface{}, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			t.Fatalf("failed to scan row: %v", err)
+		}
+
+		results = append(results, values...)
+	}
+
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration error: %v", err)
+	}
+	return results
+}
+
+// coalesceVerifyResults compares actual results with expected values
+func coalesceVerifyResults(t *testing.T, results, want []interface{}) {
+	t.Helper()
+	if len(results) != len(want) {
+		t.Fatalf("result count mismatch: got %d values, want %d\ngot: %v\nwant: %v",
+			len(results), len(want), results, want)
+	}
+
+	for i, got := range results {
+		if !compareValues(got, want[i]) {
+			t.Errorf("value[%d] mismatch: got %v (%T), want %v (%T)",
+				i, got, got, want[i], want[i])
+		}
 	}
 }
 
 // compareValues compares two values, handling NULL, integers, floats, strings, and blobs
 func compareValues(got, want interface{}) bool {
 	// Handle NULL cases
-	if want == nil {
-		return got == nil
+	if coalesceCompareNulls(got, want) {
+		return got == nil && want == nil
 	}
-	if got == nil {
-		return want == nil
+	if got == nil || want == nil {
+		return false
 	}
 
 	// Handle byte slices (blobs)
-	if gotBytes, ok := got.([]byte); ok {
-		if wantBytes, ok := want.([]byte); ok {
-			if len(gotBytes) != len(wantBytes) {
-				return false
-			}
-			for i := range gotBytes {
-				if gotBytes[i] != wantBytes[i] {
-					return false
-				}
-			}
-			return true
-		}
-		return false
+	if coalesceIsByteSlice(got) {
+		return coalesceCompareBytes(got, want)
 	}
 
 	// Handle integers (int64)
-	if wantInt, ok := want.(int64); ok {
-		if gotInt, ok := got.(int64); ok {
-			return gotInt == wantInt
-		}
-		return false
+	if coalesceIsInt64(want) {
+		return coalesceCompareInt64(got, want)
 	}
 
 	// Handle floats (float64)
-	if wantFloat, ok := want.(float64); ok {
-		if gotFloat, ok := got.(float64); ok {
-			// Use epsilon comparison for floats
-			if math.IsNaN(wantFloat) && math.IsNaN(gotFloat) {
-				return true
-			}
-			if math.IsInf(wantFloat, 1) && math.IsInf(gotFloat, 1) {
-				return true
-			}
-			if math.IsInf(wantFloat, -1) && math.IsInf(gotFloat, -1) {
-				return true
-			}
-			return math.Abs(gotFloat-wantFloat) < 1e-9
-		}
-		return false
+	if coalesceIsFloat64(want) {
+		return coalesceCompareFloat64(got, want)
 	}
 
 	// Handle strings
-	if wantStr, ok := want.(string); ok {
-		if gotStr, ok := got.(string); ok {
-			return gotStr == wantStr
-		}
-		return false
+	if coalesceIsString(want) {
+		return coalesceCompareString(got, want)
 	}
 
 	// Fallback: direct comparison
 	return got == want
+}
+
+// coalesceCompareNulls checks if both values are nil
+func coalesceCompareNulls(got, want interface{}) bool {
+	return got == nil && want == nil
+}
+
+// coalesceIsByteSlice checks if value is a byte slice
+func coalesceIsByteSlice(v interface{}) bool {
+	_, ok := v.([]byte)
+	return ok
+}
+
+// coalesceIsInt64 checks if value is int64
+func coalesceIsInt64(v interface{}) bool {
+	_, ok := v.(int64)
+	return ok
+}
+
+// coalesceIsFloat64 checks if value is float64
+func coalesceIsFloat64(v interface{}) bool {
+	_, ok := v.(float64)
+	return ok
+}
+
+// coalesceIsString checks if value is string
+func coalesceIsString(v interface{}) bool {
+	_, ok := v.(string)
+	return ok
+}
+
+// coalesceCompareBytes compares byte slices
+func coalesceCompareBytes(got, want interface{}) bool {
+	gotBytes := got.([]byte)
+	wantBytes, ok := want.([]byte)
+	if !ok {
+		return false
+	}
+	if len(gotBytes) != len(wantBytes) {
+		return false
+	}
+	for i := range gotBytes {
+		if gotBytes[i] != wantBytes[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// coalesceCompareInt64 compares int64 values
+func coalesceCompareInt64(got, want interface{}) bool {
+	wantInt := want.(int64)
+	gotInt, ok := got.(int64)
+	return ok && gotInt == wantInt
+}
+
+// coalesceCompareFloat64 compares float64 values with special handling
+func coalesceCompareFloat64(got, want interface{}) bool {
+	wantFloat := want.(float64)
+	gotFloat, ok := got.(float64)
+	if !ok {
+		return false
+	}
+	// Use epsilon comparison for floats
+	if math.IsNaN(wantFloat) && math.IsNaN(gotFloat) {
+		return true
+	}
+	if math.IsInf(wantFloat, 1) && math.IsInf(gotFloat, 1) {
+		return true
+	}
+	if math.IsInf(wantFloat, -1) && math.IsInf(gotFloat, -1) {
+		return true
+	}
+	return math.Abs(gotFloat-wantFloat) < 1e-9
+}
+
+// coalesceCompareString compares string values
+func coalesceCompareString(got, want interface{}) bool {
+	wantStr := want.(string)
+	gotStr, ok := got.(string)
+	return ok && gotStr == wantStr
 }
 
 // containsSubstring checks if a string contains a substring

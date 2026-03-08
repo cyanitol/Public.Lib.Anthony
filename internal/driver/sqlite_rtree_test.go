@@ -29,59 +29,55 @@ func TestSQLiteRTree(t *testing.T) {
 	testRTreeSpatialOperations(t, db)
 }
 
-// test2DRTree tests basic 2D R-Tree operations
-func test2DRTree(t *testing.T, db *sql.DB) {
+// rt2d_rectangle defines a test rectangle
+type rt2d_rectangle struct {
+	id                     int
+	minx, maxx, miny, maxy float64
+}
+
+// rt2d_createTable creates the rtree virtual table
+func rt2d_createTable(t *testing.T, db *sql.DB) {
 	_, err := db.Exec("CREATE VIRTUAL TABLE rt1 USING rtree(id, minx, maxx, miny, maxy)")
 	if err != nil {
 		t.Fatalf("failed to create rtree virtual table: %v", err)
 	}
+}
 
-	// Test 2: Insert basic 2D rectangles
-	_, err = db.Exec("INSERT INTO rt1 VALUES(1, 0, 10, 0, 10)")
+// rt2d_insertRectangle inserts a single rectangle into rt1
+func rt2d_insertRectangle(t *testing.T, db *sql.DB, rect rt2d_rectangle) {
+	_, err := db.Exec("INSERT INTO rt1 VALUES(?, ?, ?, ?, ?)",
+		rect.id, rect.minx, rect.maxx, rect.miny, rect.maxy)
 	if err != nil {
-		t.Fatalf("failed to insert into rtree: %v", err)
+		t.Fatalf("failed to insert rectangle %d: %v", rect.id, err)
 	}
+}
 
-	// Test 3: Query rtree data
+// rt2d_verifyRectangle queries and verifies a rectangle's data
+func rt2d_verifyRectangle(t *testing.T, db *sql.DB, expected rt2d_rectangle) {
 	var id, minx, maxx, miny, maxy float64
-	err = db.QueryRow("SELECT * FROM rt1 WHERE id = 1").Scan(&id, &minx, &maxx, &miny, &maxy)
+	err := db.QueryRow("SELECT * FROM rt1 WHERE id = ?", expected.id).Scan(&id, &minx, &maxx, &miny, &maxy)
 	if err != nil {
 		t.Fatalf("failed to query rtree: %v", err)
 	}
-	if id != 1 || minx != 0 || maxx != 10 || miny != 0 || maxy != 10 {
+	if id != float64(expected.id) || minx != expected.minx || maxx != expected.maxx || miny != expected.miny || maxy != expected.maxy {
 		t.Errorf("rtree data mismatch: got (%v, %v, %v, %v, %v)", id, minx, maxx, miny, maxy)
 	}
+}
 
-	// Test 4: Insert multiple rectangles
-	rectangles := []struct {
-		id                     int
-		minx, maxx, miny, maxy float64
-	}{
-		{2, 5, 15, 5, 15},
-		{3, 10, 20, 10, 20},
-		{4, -5, 5, -5, 5},
-		{5, 20, 30, 20, 30},
-	}
-
-	for _, rect := range rectangles {
-		_, err = db.Exec("INSERT INTO rt1 VALUES(?, ?, ?, ?, ?)",
-			rect.id, rect.minx, rect.maxx, rect.miny, rect.maxy)
-		if err != nil {
-			t.Fatalf("failed to insert rectangle %d: %v", rect.id, err)
-		}
-	}
-
-	// Test 5: Count all entries
+// rt2d_verifyCount checks the total count of entries
+func rt2d_verifyCount(t *testing.T, db *sql.DB, expected int64, testName string) {
 	var count int64
-	err = db.QueryRow("SELECT COUNT(*) FROM rt1").Scan(&count)
+	err := db.QueryRow("SELECT COUNT(*) FROM rt1").Scan(&count)
 	if err != nil {
-		t.Fatalf("failed to count rtree entries: %v", err)
+		t.Fatalf("%s: failed to count: %v", testName, err)
 	}
-	if count != 5 {
-		t.Errorf("expected 5 entries, got %d", count)
+	if count != expected {
+		t.Errorf("%s: expected %d entries, got %d", testName, expected, count)
 	}
+}
 
-	// Test 6: Spatial query - find overlapping rectangles
+// rt2d_testSpatialQuery tests spatial overlap query
+func rt2d_testSpatialQuery(t *testing.T, db *sql.DB) {
 	rows, err := db.Query("SELECT id FROM rt1 WHERE minx <= 10 AND maxx >= 0 AND miny <= 10 AND maxy >= 0")
 	if err != nil {
 		t.Fatalf("failed spatial query: %v", err)
@@ -99,14 +95,16 @@ func test2DRTree(t *testing.T, db *sql.DB) {
 	if len(foundIDs) < 2 {
 		t.Errorf("expected at least 2 overlapping rectangles, got %d", len(foundIDs))
 	}
+}
 
-	// Test 7: Update rtree entry
-	_, err = db.Exec("UPDATE rt1 SET minx = 1, maxx = 11 WHERE id = 1")
+// rt2d_testUpdate tests updating a rectangle
+func rt2d_testUpdate(t *testing.T, db *sql.DB) {
+	_, err := db.Exec("UPDATE rt1 SET minx = 1, maxx = 11 WHERE id = 1")
 	if err != nil {
 		t.Fatalf("failed to update rtree: %v", err)
 	}
 
-	// Test 8: Verify update
+	var minx, maxx float64
 	err = db.QueryRow("SELECT minx, maxx FROM rt1 WHERE id = 1").Scan(&minx, &maxx)
 	if err != nil {
 		t.Fatalf("failed to query updated rtree: %v", err)
@@ -114,21 +112,52 @@ func test2DRTree(t *testing.T, db *sql.DB) {
 	if minx != 1 || maxx != 11 {
 		t.Errorf("update failed: expected (1, 11), got (%v, %v)", minx, maxx)
 	}
+}
 
-	// Test 9: Delete from rtree
-	_, err = db.Exec("DELETE FROM rt1 WHERE id = 5")
+// rt2d_testDelete tests deleting from rtree
+func rt2d_testDelete(t *testing.T, db *sql.DB) {
+	_, err := db.Exec("DELETE FROM rt1 WHERE id = 5")
 	if err != nil {
 		t.Fatalf("failed to delete from rtree: %v", err)
 	}
+}
+
+// test2DRTree tests basic 2D R-Tree operations
+func test2DRTree(t *testing.T, db *sql.DB) {
+	rt2d_createTable(t, db)
+
+	// Test 2: Insert basic 2D rectangle
+	rt2d_insertRectangle(t, db, rt2d_rectangle{1, 0, 10, 0, 10})
+
+	// Test 3: Query rtree data
+	rt2d_verifyRectangle(t, db, rt2d_rectangle{1, 0, 10, 0, 10})
+
+	// Test 4: Insert multiple rectangles
+	rectangles := []rt2d_rectangle{
+		{2, 5, 15, 5, 15},
+		{3, 10, 20, 10, 20},
+		{4, -5, 5, -5, 5},
+		{5, 20, 30, 20, 30},
+	}
+
+	for _, rect := range rectangles {
+		rt2d_insertRectangle(t, db, rect)
+	}
+
+	// Test 5: Count all entries
+	rt2d_verifyCount(t, db, 5, "initial count")
+
+	// Test 6: Spatial query - find overlapping rectangles
+	rt2d_testSpatialQuery(t, db)
+
+	// Test 7-8: Update rtree entry
+	rt2d_testUpdate(t, db)
+
+	// Test 9: Delete from rtree
+	rt2d_testDelete(t, db)
 
 	// Test 10: Verify deletion
-	err = db.QueryRow("SELECT COUNT(*) FROM rt1").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to count after delete: %v", err)
-	}
-	if count != 4 {
-		t.Errorf("expected 4 entries after delete, got %d", count)
-	}
+	rt2d_verifyCount(t, db, 4, "count after delete")
 }
 
 // test3DRTree tests 3D R-Tree operations

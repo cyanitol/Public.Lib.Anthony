@@ -437,6 +437,13 @@ func TestLikeEscape(t *testing.T) {
 	}
 }
 
+// likeCaseSensitivityTest defines a test case for case sensitivity testing
+type likeCaseSensitivityTest struct {
+	name     string
+	query    string
+	expected []string
+}
+
 // TestLikeCaseSensitivity tests case sensitivity with PRAGMA
 // Converted from like.test lines 73-114
 func TestLikeCaseSensitivity(t *testing.T) {
@@ -451,13 +458,49 @@ func TestLikeCaseSensitivity(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create test table
-	_, err = db.Exec("CREATE TABLE t1(x TEXT)")
+	likeCaseSensitivitySetupDB(t, db)
+
+	// Test default case-insensitive behavior
+	t.Run("default_case_insensitive", func(t *testing.T) {
+		test := likeCaseSensitivityTest{
+			name:     "default",
+			query:    "SELECT x FROM t1 WHERE x LIKE 'abc' ORDER BY 1",
+			expected: []string{"ABC", "AbC", "abc"},
+		}
+		likeCaseSensitivityVerifyResults(t, db, test)
+	})
+
+	// Test case-sensitive LIKE (like.test lines 76-102)
+	t.Run("case_sensitive_like", func(t *testing.T) {
+		likeCaseSensitivitySetPragma(t, db, "on")
+		defer likeCaseSensitivitySetPragma(t, db, "off")
+
+		test := likeCaseSensitivityTest{
+			name:     "case_sensitive",
+			query:    "SELECT x FROM t1 WHERE x LIKE 'abc' ORDER BY 1",
+			expected: []string{"abc"},
+		}
+		likeCaseSensitivityVerifyResults(t, db, test)
+	})
+
+	// GLOB is always case-sensitive regardless of pragma (like.test lines 372-392)
+	t.Run("glob_always_case_sensitive", func(t *testing.T) {
+		test := likeCaseSensitivityTest{
+			name:     "glob",
+			query:    "SELECT x FROM t1 WHERE x GLOB 'abc' ORDER BY 1",
+			expected: []string{"abc"},
+		}
+		likeCaseSensitivityVerifyResults(t, db, test)
+	})
+}
+
+// likeCaseSensitivitySetupDB creates the test table and inserts test data
+func likeCaseSensitivitySetupDB(t *testing.T, db *sql.DB) {
+	_, err := db.Exec("CREATE TABLE t1(x TEXT)")
 	if err != nil {
 		t.Fatalf("failed to create test table: %v", err)
 	}
 
-	// Insert test data
 	testData := []string{"abc", "ABC", "AbC"}
 	for _, td := range testData {
 		_, err = db.Exec("INSERT INTO t1 VALUES(?)", td)
@@ -465,95 +508,43 @@ func TestLikeCaseSensitivity(t *testing.T) {
 			t.Fatalf("failed to insert test data: %v", err)
 		}
 	}
+}
 
-	// Test default case-insensitive behavior
-	t.Run("default_case_insensitive", func(t *testing.T) {
-		rows, err := db.Query("SELECT x FROM t1 WHERE x LIKE 'abc' ORDER BY 1")
-		if err != nil {
-			t.Fatalf("query error: %v", err)
-		}
-		defer rows.Close()
+// likeCaseSensitivitySetPragma sets the case_sensitive_like pragma
+func likeCaseSensitivitySetPragma(t *testing.T, db *sql.DB, value string) {
+	_, err := db.Exec("PRAGMA case_sensitive_like=" + value)
+	if err != nil {
+		t.Fatalf("failed to set pragma: %v", err)
+	}
+}
 
-		var results []string
-		for rows.Next() {
-			var val string
-			if err := rows.Scan(&val); err != nil {
-				t.Fatalf("scan error: %v", err)
-			}
-			results = append(results, val)
-		}
+// likeCaseSensitivityVerifyResults executes query and verifies results
+func likeCaseSensitivityVerifyResults(t *testing.T, db *sql.DB, test likeCaseSensitivityTest) {
+	rows, err := db.Query(test.query)
+	if err != nil {
+		t.Fatalf("query error: %v", err)
+	}
+	defer rows.Close()
 
-		expected := []string{"ABC", "AbC", "abc"}
-		if len(results) != len(expected) {
-			t.Errorf("got %d results, want %d", len(results), len(expected))
+	var results []string
+	for rows.Next() {
+		var val string
+		if err := rows.Scan(&val); err != nil {
+			t.Fatalf("scan error: %v", err)
 		}
-	})
+		results = append(results, val)
+	}
 
-	// Test case-sensitive LIKE (like.test lines 76-102)
-	t.Run("case_sensitive_like", func(t *testing.T) {
-		// Enable case-sensitive LIKE
-		_, err = db.Exec("PRAGMA case_sensitive_like=on")
-		if err != nil {
-			t.Fatalf("failed to set pragma: %v", err)
-		}
+	if len(results) != len(test.expected) {
+		t.Errorf("got %d results, want %d", len(results), len(test.expected))
+		return
+	}
 
-		rows, err := db.Query("SELECT x FROM t1 WHERE x LIKE 'abc' ORDER BY 1")
-		if err != nil {
-			t.Fatalf("query error: %v", err)
+	for i, got := range results {
+		if got != test.expected[i] {
+			t.Errorf("result[%d] = %q, want %q", i, got, test.expected[i])
 		}
-		defer rows.Close()
-
-		var results []string
-		for rows.Next() {
-			var val string
-			if err := rows.Scan(&val); err != nil {
-				t.Fatalf("scan error: %v", err)
-			}
-			results = append(results, val)
-		}
-
-		// With case_sensitive_like on, only exact match should be found
-		expected := []string{"abc"}
-		if len(results) != len(expected) {
-			t.Errorf("got %d results, want %d", len(results), len(expected))
-		}
-		if len(results) > 0 && results[0] != expected[0] {
-			t.Errorf("got %q, want %q", results[0], expected[0])
-		}
-
-		// Disable case-sensitive LIKE
-		_, err = db.Exec("PRAGMA case_sensitive_like=off")
-		if err != nil {
-			t.Fatalf("failed to reset pragma: %v", err)
-		}
-	})
-
-	// GLOB is always case-sensitive regardless of pragma (like.test lines 372-392)
-	t.Run("glob_always_case_sensitive", func(t *testing.T) {
-		rows, err := db.Query("SELECT x FROM t1 WHERE x GLOB 'abc' ORDER BY 1")
-		if err != nil {
-			t.Fatalf("query error: %v", err)
-		}
-		defer rows.Close()
-
-		var results []string
-		for rows.Next() {
-			var val string
-			if err := rows.Scan(&val); err != nil {
-				t.Fatalf("scan error: %v", err)
-			}
-			results = append(results, val)
-		}
-
-		// GLOB is case-sensitive, so only exact lowercase match
-		expected := []string{"abc"}
-		if len(results) != len(expected) {
-			t.Errorf("got %d results, want %d", len(results), len(expected))
-		}
-		if len(results) > 0 && results[0] != expected[0] {
-			t.Errorf("got %q, want %q", results[0], expected[0])
-		}
-	})
+	}
 }
 
 // TestLikeUnicode tests LIKE/GLOB with Unicode characters

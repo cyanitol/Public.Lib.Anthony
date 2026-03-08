@@ -8,19 +8,22 @@ import (
 	"testing"
 )
 
+// constraintTestCase defines a declarative test case for constraints
+type constraintTestCase struct {
+	name     string
+	setup    []string
+	inserts  []string
+	verify   string
+	wantErr  bool
+	errMsg   string
+	wantRows int
+}
+
 // TestSQLiteConstraints is a comprehensive test suite converted from SQLite's TCL constraint tests
 // (check.test, unique.test, unique2.test, notnull.test, default.test)
 func TestSQLiteConstraints(t *testing.T) {
 	t.Skip("pre-existing failure - constraint enforcement incomplete")
-	tests := []struct {
-		name     string
-		setup    []string // CREATE TABLE statements and other setup
-		inserts  []string // INSERT/UPDATE statements to test
-		verify   string   // SELECT to verify results (optional)
-		wantErr  bool     // Whether we expect an error
-		errMsg   string   // Expected error message substring
-		wantRows int      // Expected number of rows (when verify is set)
-	}{
+	tests := []constraintTestCase{
 		// ===== CHECK CONSTRAINT TESTS (from check.test) =====
 
 		// Basic CHECK constraints - check-1.*
@@ -873,70 +876,96 @@ func TestSQLiteConstraints(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			// Create temporary database
-			tmpDir := t.TempDir()
-			dbPath := filepath.Join(tmpDir, "test.db")
-
-			db, err := sql.Open("sqlite3", dbPath)
-			if err != nil {
-				t.Fatalf("Failed to open database: %v", err)
-			}
+			db := con_openTestDB(t)
 			defer db.Close()
 
-			// Run setup statements
-			for _, stmt := range tt.setup {
-				_, err := db.Exec(stmt)
-				if err != nil {
-					if tt.wantErr && tt.errMsg != "" && strings.Contains(err.Error(), tt.errMsg) {
-						// Expected error during setup
-						return
-					}
-					t.Fatalf("Setup failed: %v\nStatement: %s", err, stmt)
-				}
-			}
-
-			// Run insert/update statements
-			var lastErr error
-			for _, stmt := range tt.inserts {
-				_, err := db.Exec(stmt)
-				if err != nil {
-					lastErr = err
-					if !tt.wantErr {
-						t.Errorf("Unexpected error: %v\nStatement: %s", err, stmt)
-						return
-					}
-				}
-			}
-
-			// Check for expected error
-			if tt.wantErr {
-				if lastErr == nil {
-					t.Error("Expected an error but got none")
-					return
-				}
-				if tt.errMsg != "" && !strings.Contains(lastErr.Error(), tt.errMsg) {
-					t.Errorf("Error message mismatch.\nExpected substring: %q\nGot: %q", tt.errMsg, lastErr.Error())
-				}
+			if con_runSetup(t, db, tt.setup, tt.wantErr, tt.errMsg) {
 				return
 			}
 
-			// Verify results if specified
-			if tt.verify != "" {
-				rows, err := db.Query(tt.verify)
-				if err != nil {
-					t.Fatalf("Verify query failed: %v\nQuery: %s", err, tt.verify)
-				}
-				defer rows.Close()
+			lastErr := con_runInserts(t, db, tt.inserts, tt.wantErr)
 
-				count := 0
-				for rows.Next() {
-					count++
-				}
-
-				if tt.wantRows > 0 && count != tt.wantRows {
-					t.Errorf("Row count mismatch. Want %d, got %d", tt.wantRows, count)
-				}
+			if tt.wantErr {
+				con_verifyError(t, lastErr, tt.errMsg)
+				return
 			}
+
+			con_verifyResults(t, db, tt.verify, tt.wantRows)
 		})
+	}
+}
+
+// con_openTestDB creates a test database with unique prefix
+func con_openTestDB(t *testing.T) *sql.DB {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	return db
+}
+
+// con_runSetup executes setup statements, returns true if test should stop
+func con_runSetup(t *testing.T, db *sql.DB, setup []string, wantErr bool, errMsg string) bool {
+	for _, stmt := range setup {
+		_, err := db.Exec(stmt)
+		if err != nil {
+			if wantErr && errMsg != "" && strings.Contains(err.Error(), errMsg) {
+				return true
+			}
+			t.Fatalf("Setup failed: %v\nStatement: %s", err, stmt)
+		}
+	}
+	return false
+}
+
+// con_runInserts executes insert/update statements
+func con_runInserts(t *testing.T, db *sql.DB, inserts []string, wantErr bool) error {
+	var lastErr error
+	for _, stmt := range inserts {
+		_, err := db.Exec(stmt)
+		if err != nil {
+			lastErr = err
+			if !wantErr {
+				t.Errorf("Unexpected error: %v\nStatement: %s", err, stmt)
+				return lastErr
+			}
+		}
+	}
+	return lastErr
+}
+
+// con_verifyError checks for expected error
+func con_verifyError(t *testing.T, err error, errMsg string) {
+	if err == nil {
+		t.Error("Expected an error but got none")
+		return
+	}
+	if errMsg != "" && !strings.Contains(err.Error(), errMsg) {
+		t.Errorf("Error message mismatch.\nExpected substring: %q\nGot: %q", errMsg, err.Error())
+	}
+}
+
+// con_verifyResults runs verification query and checks row count
+func con_verifyResults(t *testing.T, db *sql.DB, verify string, wantRows int) {
+	if verify == "" {
+		return
+	}
+
+	rows, err := db.Query(verify)
+	if err != nil {
+		t.Fatalf("Verify query failed: %v\nQuery: %s", err, verify)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		count++
+	}
+
+	if wantRows > 0 && count != wantRows {
+		t.Errorf("Row count mismatch. Want %d, got %d", wantRows, count)
 	}
 }

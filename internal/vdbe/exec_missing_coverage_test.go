@@ -289,132 +289,151 @@ func testOpSeekLE(t *testing.T) {
 	}
 }
 
+// utilSetupFinalize sets up VDBE for Finalize test
+func utilSetupFinalize(v *VDBE) {
+	v.AllocMemory(5)
+	v.AddOp(OpHalt, 0, 0, 0)
+}
+
+// utilVerifyFinalize verifies Finalize behavior
+func utilVerifyFinalize(t *testing.T, v *VDBE) {
+	if err := v.Finalize(); err != nil {
+		t.Fatalf("Finalize failed: %v", err)
+	}
+	if v.State != StateHalt {
+		t.Errorf("Expected StateHalt, got %v", v.State)
+	}
+}
+
+// utilSetupGetError sets up VDBE for GetError test
+func utilSetupGetError(v *VDBE) {
+	v.SetError("test error")
+}
+
+// utilVerifyGetError verifies GetError behavior
+func utilVerifyGetError(t *testing.T, v *VDBE) {
+	if err := v.GetError(); err != "test error" {
+		t.Errorf("Expected 'test error', got '%s'", err)
+	}
+}
+
+// utilVerifyReadOnly verifies IsReadOnly/SetReadOnly behavior
+func utilVerifyReadOnly(t *testing.T, v *VDBE) {
+	if v.IsReadOnly() {
+		t.Error("Expected read-write by default")
+	}
+	v.SetReadOnly(true)
+	if !v.IsReadOnly() {
+		t.Error("Expected read-only after SetReadOnly(true)")
+	}
+	v.SetReadOnly(false)
+	if v.IsReadOnly() {
+		t.Error("Expected read-write after SetReadOnly(false)")
+	}
+}
+
+// utilSetupNumOps sets up VDBE for NumOps test
+func utilSetupNumOps(v *VDBE) {
+	v.AddOp(OpHalt, 0, 0, 0)
+	v.AddOp(OpInteger, 1, 0, 0)
+	v.AddOp(OpInteger, 2, 1, 0)
+}
+
+// utilVerifyNumOps verifies NumOps behavior
+func utilVerifyNumOps(t *testing.T, v *VDBE) {
+	if v.NumOps() != 3 {
+		t.Errorf("Expected 3 operations, got %d", v.NumOps())
+	}
+}
+
+// utilSetupGetInstruction sets up VDBE for GetInstruction test
+func utilSetupGetInstruction(v *VDBE) {
+	v.AddOp(OpInteger, 42, 5, 0)
+}
+
+// utilVerifyGetInstruction verifies GetInstruction behavior
+func utilVerifyGetInstruction(t *testing.T, v *VDBE) {
+	instr, err := v.GetInstruction(0)
+	if err != nil {
+		t.Fatalf("GetInstruction failed: %v", err)
+	}
+	if instr.Opcode != OpInteger || instr.P1 != 42 || instr.P2 != 5 {
+		t.Errorf("Unexpected instruction values")
+	}
+	if _, err := v.GetInstruction(10); err == nil {
+		t.Error("Expected error for out of bounds")
+	}
+}
+
+// utilSetupP4Int sets up VDBE for P4Int test
+func utilSetupP4Int(v *VDBE) {
+	v.AddOpWithP4Int(OpInteger, 0, 0, 0, 42)
+}
+
+// utilVerifyP4Int verifies P4Int behavior
+func utilVerifyP4Int(t *testing.T, v *VDBE) {
+	if v.Program[0].P4.I != 42 || v.Program[0].P4Type != P4Int32 {
+		t.Errorf("P4Int not set correctly")
+	}
+}
+
+// utilSetupP4Real sets up VDBE for P4Real test
+func utilSetupP4Real(v *VDBE) {
+	v.AddOpWithP4Real(OpReal, 0, 0, 0, 3.14)
+}
+
+// utilVerifyP4Real verifies P4Real behavior
+func utilVerifyP4Real(t *testing.T, v *VDBE) {
+	if v.Program[0].P4.R != 3.14 || v.Program[0].P4Type != P4Real {
+		t.Errorf("P4Real not set correctly")
+	}
+}
+
+// utilSetupP4Blob sets up VDBE for P4Blob test
+func utilSetupP4Blob(v *VDBE) {
+	v.AddOpWithP4Blob(OpBlob, 0, 0, 0, []byte{1, 2, 3, 4})
+}
+
+// utilVerifyP4Blob verifies P4Blob behavior
+func utilVerifyP4Blob(t *testing.T, v *VDBE) {
+	p4Blob, ok := v.Program[0].P4.P.([]byte)
+	if !ok || len(p4Blob) != 4 || v.Program[0].P4Type != P4Dynamic {
+		t.Errorf("P4Blob not set correctly")
+	}
+}
+
+// utilTestCase represents a declarative utility method test
+type utilTestCase struct {
+	name   string
+	setup  func(*VDBE)
+	verify func(*testing.T, *VDBE)
+}
+
 // TestVDBEUtilityMethods tests utility methods with 0% coverage
 func TestVDBEUtilityMethods(t *testing.T) {
 	t.Parallel()
-	t.Run("Finalize", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.AllocMemory(5)
-		v.AddOp(OpHalt, 0, 0, 0)
+	tests := []utilTestCase{
+		{name: "Finalize", setup: utilSetupFinalize, verify: utilVerifyFinalize},
+		{name: "GetError", setup: utilSetupGetError, verify: utilVerifyGetError},
+		{name: "IsReadOnly_SetReadOnly", setup: nil, verify: utilVerifyReadOnly},
+		{name: "NumOps", setup: utilSetupNumOps, verify: utilVerifyNumOps},
+		{name: "GetInstruction", setup: utilSetupGetInstruction, verify: utilVerifyGetInstruction},
+		{name: "AddOpWithP4Int", setup: utilSetupP4Int, verify: utilVerifyP4Int},
+		{name: "AddOpWithP4Real", setup: utilSetupP4Real, verify: utilVerifyP4Real},
+		{name: "AddOpWithP4Blob", setup: utilSetupP4Blob, verify: utilVerifyP4Blob},
+	}
 
-		err := v.Finalize()
-		if err != nil {
-			t.Fatalf("Finalize failed: %v", err)
-		}
-
-		if v.State != StateHalt {
-			t.Errorf("Expected state StateHalt, got %v", v.State)
-		}
-	})
-
-	t.Run("GetError", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.SetError("test error")
-
-		err := v.GetError()
-		if err != "test error" {
-			t.Errorf("Expected 'test error', got '%s'", err)
-		}
-	})
-
-	t.Run("IsReadOnly_SetReadOnly", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-
-		if v.IsReadOnly() {
-			t.Error("Expected read-write by default")
-		}
-
-		v.SetReadOnly(true)
-		if !v.IsReadOnly() {
-			t.Error("Expected read-only after SetReadOnly(true)")
-		}
-
-		v.SetReadOnly(false)
-		if v.IsReadOnly() {
-			t.Error("Expected read-write after SetReadOnly(false)")
-		}
-	})
-
-	t.Run("NumOps", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.AddOp(OpHalt, 0, 0, 0)
-		v.AddOp(OpInteger, 1, 0, 0)
-		v.AddOp(OpInteger, 2, 1, 0)
-
-		if v.NumOps() != 3 {
-			t.Errorf("Expected 3 operations, got %d", v.NumOps())
-		}
-	})
-
-	t.Run("GetInstruction", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.AddOp(OpInteger, 42, 5, 0)
-
-		instr, err := v.GetInstruction(0)
-		if err != nil {
-			t.Fatalf("GetInstruction failed: %v", err)
-		}
-		if instr.Opcode != OpInteger {
-			t.Errorf("Expected OpInteger, got %v", instr.Opcode)
-		}
-		if instr.P1 != 42 {
-			t.Errorf("Expected P1=42, got %d", instr.P1)
-		}
-		if instr.P2 != 5 {
-			t.Errorf("Expected P2=5, got %d", instr.P2)
-		}
-
-		// Test out of bounds
-		instr, err = v.GetInstruction(10)
-		if err == nil {
-			t.Error("Expected error for out of bounds instruction")
-		}
-	})
-
-	t.Run("AddOpWithP4Int", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.AddOpWithP4Int(OpInteger, 0, 0, 0, 42)
-
-		if v.Program[0].P4.I != 42 {
-			t.Errorf("Expected P4.I=42, got %d", v.Program[0].P4.I)
-		}
-		if v.Program[0].P4Type != P4Int32 {
-			t.Errorf("Expected P4Type=P4Int32, got %v", v.Program[0].P4Type)
-		}
-	})
-
-	t.Run("AddOpWithP4Real", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.AddOpWithP4Real(OpReal, 0, 0, 0, 3.14)
-
-		if v.Program[0].P4.R != 3.14 {
-			t.Errorf("Expected P4.R=3.14, got %f", v.Program[0].P4.R)
-		}
-		if v.Program[0].P4Type != P4Real {
-			t.Errorf("Expected P4Type=P4Real, got %v", v.Program[0].P4Type)
-		}
-	})
-
-	t.Run("AddOpWithP4Blob", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		blob := []byte{1, 2, 3, 4}
-		v.AddOpWithP4Blob(OpBlob, 0, 0, 0, blob)
-
-		if p4Blob, ok := v.Program[0].P4.P.([]byte); !ok || len(p4Blob) != 4 {
-			t.Errorf("Expected P4.P to be []byte{1,2,3,4}, got %v", v.Program[0].P4.P)
-		}
-		if v.Program[0].P4Type != P4Dynamic {
-			t.Errorf("Expected P4Type=P4Dynamic, got %v", v.Program[0].P4Type)
-		}
-	})
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			v := New()
+			if tt.setup != nil {
+				tt.setup(v)
+			}
+			tt.verify(t, v)
+		})
+	}
 }
 
 // TestNewFunctionContextWithRegistry tests the function context creation

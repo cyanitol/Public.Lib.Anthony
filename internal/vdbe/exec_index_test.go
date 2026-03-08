@@ -359,9 +359,17 @@ func TestIdxDeleteOpcode(t *testing.T) {
 	}
 }
 
-// TestIdxCompareOpcodes tests the OpIdxLT, OpIdxGT, OpIdxLE, OpIdxGE opcodes
-func TestIdxCompareOpcodes(t *testing.T) {
-	t.Parallel()
+// idxCompareTest represents a declarative index comparison test
+type idxCompareTest struct {
+	name       string
+	opcode     Opcode
+	compareKey string
+	shouldJump bool
+}
+
+// idxSetupCursor creates and configures a VDBE with an index cursor
+func idxSetupCursor(t *testing.T) (*VDBE, *btree.Btree, uint32) {
+	t.Helper()
 	bt := btree.NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
@@ -369,8 +377,6 @@ func TestIdxCompareOpcodes(t *testing.T) {
 	}
 
 	idxCursor := btree.NewIndexCursor(bt, rootPage)
-
-	// Insert keys in sorted order
 	keys := []string{"apple", "banana", "cherry", "date"}
 	for i, key := range keys {
 		if err := idxCursor.InsertIndex([]byte(key), int64(i)); err != nil {
@@ -378,21 +384,14 @@ func TestIdxCompareOpcodes(t *testing.T) {
 		}
 	}
 
-	// Seek to "banana"
 	if found, err := idxCursor.SeekIndex([]byte("banana")); err != nil || !found {
 		t.Fatalf("SeekIndex failed: %v, found=%v", err, found)
 	}
 
-	// Create VDBE
 	v := New()
-	v.Ctx = &VDBEContext{
-		Btree: bt,
-	}
-
+	v.Ctx = &VDBEContext{Btree: bt}
 	v.AllocMemory(10)
 	v.AllocCursors(2)
-
-	// Set up index cursor at "banana"
 	v.Cursors[0] = &Cursor{
 		CurType:     CursorBTree,
 		IsTable:     false,
@@ -402,133 +401,66 @@ func TestIdxCompareOpcodes(t *testing.T) {
 		CachedCols:  make([][]byte, 0),
 		CacheStatus: 0,
 	}
+	return v, bt, rootPage
+}
 
-	t.Run("OpIdxLT", func(t *testing.T) {
-		// Compare "banana" < "cherry" (should be true, so jump)
-		v.Mem[1].SetBlob([]byte("cherry"))
-		v.PC = 0
+// idxExecCompare executes an index comparison opcode
+func idxExecCompare(v *VDBE, opcode Opcode, instr *Instruction) error {
+	switch opcode {
+	case OpIdxLT:
+		return v.execIdxLT(instr)
+	case OpIdxGT:
+		return v.execIdxGT(instr)
+	case OpIdxLE:
+		return v.execIdxLE(instr)
+	case OpIdxGE:
+		return v.execIdxGE(instr)
+	default:
+		return nil
+	}
+}
 
-		instr := &Instruction{
-			Opcode: OpIdxLT,
-			P1:     0,  // cursor
-			P2:     10, // jump address
-			P3:     1,  // comparison key register
-		}
+// idxVerifyJump checks if PC jumped as expected
+func idxVerifyJump(t *testing.T, v *VDBE, shouldJump bool, jumpAddr int) {
+	t.Helper()
+	if shouldJump && v.PC != jumpAddr {
+		t.Errorf("Expected jump to %d, PC=%d", jumpAddr, v.PC)
+	}
+	if !shouldJump && v.PC == jumpAddr {
+		t.Error("Should not jump when condition is false")
+	}
+}
 
-		err := v.execIdxLT(instr)
-		if err != nil {
-			t.Fatalf("execIdxLT failed: %v", err)
-		}
+// TestIdxCompareOpcodes tests the OpIdxLT, OpIdxGT, OpIdxLE, OpIdxGE opcodes
+func TestIdxCompareOpcodes(t *testing.T) {
+	t.Parallel()
+	v, _, _ := idxSetupCursor(t)
 
-		if v.PC != 10 {
-			t.Errorf("Expected jump to 10, PC=%d", v.PC)
-		}
+	tests := []idxCompareTest{
+		{name: "LT_True", opcode: OpIdxLT, compareKey: "cherry", shouldJump: true},
+		{name: "LT_False", opcode: OpIdxLT, compareKey: "apple", shouldJump: false},
+		{name: "GT_True", opcode: OpIdxGT, compareKey: "apple", shouldJump: true},
+		{name: "LE_Equal", opcode: OpIdxLE, compareKey: "banana", shouldJump: true},
+		{name: "LE_Less", opcode: OpIdxLE, compareKey: "cherry", shouldJump: true},
+		{name: "GE_Equal", opcode: OpIdxGE, compareKey: "banana", shouldJump: true},
+		{name: "GE_Greater", opcode: OpIdxGE, compareKey: "apple", shouldJump: true},
+	}
 
-		// Compare "banana" < "apple" (should be false, no jump)
-		v.Mem[1].SetBlob([]byte("apple"))
-		v.PC = 0
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			v.Mem[1].SetBlob([]byte(tt.compareKey))
+			v.PC = 0
 
-		err = v.execIdxLT(instr)
-		if err != nil {
-			t.Fatalf("execIdxLT failed: %v", err)
-		}
+			instr := &Instruction{Opcode: tt.opcode, P1: 0, P2: 10, P3: 1}
 
-		if v.PC == 10 {
-			t.Error("Should not jump when condition is false")
-		}
-	})
+			if err := idxExecCompare(v, tt.opcode, instr); err != nil {
+				t.Fatalf("exec failed: %v", err)
+			}
 
-	t.Run("OpIdxGT", func(t *testing.T) {
-		// Compare "banana" > "apple" (should be true, so jump)
-		v.Mem[1].SetBlob([]byte("apple"))
-		v.PC = 0
-
-		instr := &Instruction{
-			Opcode: OpIdxGT,
-			P1:     0,
-			P2:     10,
-			P3:     1,
-		}
-
-		err := v.execIdxGT(instr)
-		if err != nil {
-			t.Fatalf("execIdxGT failed: %v", err)
-		}
-
-		if v.PC != 10 {
-			t.Errorf("Expected jump to 10, PC=%d", v.PC)
-		}
-	})
-
-	t.Run("OpIdxLE", func(t *testing.T) {
-		// Compare "banana" <= "banana" (should be true, so jump)
-		v.Mem[1].SetBlob([]byte("banana"))
-		v.PC = 0
-
-		instr := &Instruction{
-			Opcode: OpIdxLE,
-			P1:     0,
-			P2:     10,
-			P3:     1,
-		}
-
-		err := v.execIdxLE(instr)
-		if err != nil {
-			t.Fatalf("execIdxLE failed: %v", err)
-		}
-
-		if v.PC != 10 {
-			t.Errorf("Expected jump to 10, PC=%d", v.PC)
-		}
-
-		// Compare "banana" <= "cherry" (should be true, so jump)
-		v.Mem[1].SetBlob([]byte("cherry"))
-		v.PC = 0
-
-		err = v.execIdxLE(instr)
-		if err != nil {
-			t.Fatalf("execIdxLE failed: %v", err)
-		}
-
-		if v.PC != 10 {
-			t.Errorf("Expected jump to 10, PC=%d", v.PC)
-		}
-	})
-
-	t.Run("OpIdxGE", func(t *testing.T) {
-		// Compare "banana" >= "banana" (should be true, so jump)
-		v.Mem[1].SetBlob([]byte("banana"))
-		v.PC = 0
-
-		instr := &Instruction{
-			Opcode: OpIdxGE,
-			P1:     0,
-			P2:     10,
-			P3:     1,
-		}
-
-		err := v.execIdxGE(instr)
-		if err != nil {
-			t.Fatalf("execIdxGE failed: %v", err)
-		}
-
-		if v.PC != 10 {
-			t.Errorf("Expected jump to 10, PC=%d", v.PC)
-		}
-
-		// Compare "banana" >= "apple" (should be true, so jump)
-		v.Mem[1].SetBlob([]byte("apple"))
-		v.PC = 0
-
-		err = v.execIdxGE(instr)
-		if err != nil {
-			t.Fatalf("execIdxGE failed: %v", err)
-		}
-
-		if v.PC != 10 {
-			t.Errorf("Expected jump to 10, PC=%d", v.PC)
-		}
-	})
+			idxVerifyJump(t, v, tt.shouldJump, 10)
+		})
+	}
 }
 
 // TestIdxOpcodeErrors tests error conditions for index opcodes

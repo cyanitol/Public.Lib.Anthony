@@ -176,38 +176,69 @@ func TestCollationRTrim(t *testing.T) {
 		t.Fatalf("Expected 5 results, got %d", len(results))
 	}
 
-	// Count entries for each base value
-	appleCount := 0
-	bananaCount := 0
-	cherryCount := 0
+	// Verify grouped ordering with prefix-specific helpers
+	collRtrimVerifyGroupedOrder(t, results)
+}
 
-	for i, value := range results {
+// collRtrimVerifyGroupedOrder verifies that results are properly grouped by base value
+func collRtrimVerifyGroupedOrder(t *testing.T, results []string) {
+	t.Helper()
+
+	counts := collRtrimCountGroups(results)
+
+	collRtrimVerifyCount(t, counts["apple"], 2, "apple")
+	collRtrimVerifyCount(t, counts["banana"], 2, "banana")
+	collRtrimVerifyCount(t, counts["cherry"], 1, "cherry")
+
+	collRtrimVerifyPositions(t, results)
+}
+
+// collRtrimCountGroups counts entries by base value
+func collRtrimCountGroups(results []string) map[string]int {
+	counts := make(map[string]int)
+	for _, value := range results {
 		if value == "apple" || value == "apple  " {
-			appleCount++
-			if i >= 2 {
-				t.Errorf("apple entry at position %d, should be in first 2", i)
-			}
+			counts["apple"]++
 		} else if value == "banana" || value == "banana   " {
-			bananaCount++
-			if i < 2 || i >= 4 {
-				t.Errorf("banana entry at position %d, should be in positions 2-3", i)
-			}
+			counts["banana"]++
 		} else if value == "cherry    " {
-			cherryCount++
-			if i != 4 {
-				t.Errorf("cherry at position %d, should be last (position 4)", i)
-			}
+			counts["cherry"]++
 		}
 	}
+	return counts
+}
 
-	if appleCount != 2 {
-		t.Errorf("Expected 2 apple entries, got %d", appleCount)
+// collRtrimVerifyCount checks if count matches expected value
+func collRtrimVerifyCount(t *testing.T, got, want int, label string) {
+	t.Helper()
+	if got != want {
+		t.Errorf("Expected %d %s entries, got %d", want, label, got)
 	}
-	if bananaCount != 2 {
-		t.Errorf("Expected 2 banana entries, got %d", bananaCount)
+}
+
+// collRtrimVerifyPositions checks that each value is in its expected position range
+func collRtrimVerifyPositions(t *testing.T, results []string) {
+	t.Helper()
+	for i, value := range results {
+		collRtrimCheckPosition(t, value, i)
 	}
-	if cherryCount != 1 {
-		t.Errorf("Expected 1 cherry entry, got %d", cherryCount)
+}
+
+// collRtrimCheckPosition validates that a value is in the correct position
+func collRtrimCheckPosition(t *testing.T, value string, pos int) {
+	t.Helper()
+	if value == "apple" || value == "apple  " {
+		if pos >= 2 {
+			t.Errorf("apple entry at position %d, should be in first 2", pos)
+		}
+	} else if value == "banana" || value == "banana   " {
+		if pos < 2 || pos >= 4 {
+			t.Errorf("banana entry at position %d, should be in positions 2-3", pos)
+		}
+	} else if value == "cherry    " {
+		if pos != 4 {
+			t.Errorf("cherry at position %d, should be last (position 4)", pos)
+		}
 	}
 }
 

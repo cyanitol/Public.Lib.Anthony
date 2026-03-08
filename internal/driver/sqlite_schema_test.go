@@ -505,8 +505,15 @@ func TestSchemaModification(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Test 1: Create and drop multiple objects
-	_, err = db.Exec("CREATE TABLE test1(a, b, c)")
+	sch_testCreateAndVerify(t, db)
+	sch_testDropAndRecreate(t, db)
+	sch_testTransactionCommit(t, db)
+	sch_testTransactionRollback(t, db)
+}
+
+// sch_testCreateAndVerify creates a table and verifies it exists
+func sch_testCreateAndVerify(t *testing.T, db *sql.DB) {
+	_, err := db.Exec("CREATE TABLE test1(a, b, c)")
 	if err != nil {
 		t.Fatalf("failed to create test1: %v", err)
 	}
@@ -519,9 +526,11 @@ func TestSchemaModification(t *testing.T) {
 	if count != 1 {
 		t.Errorf("expected 1 entry for test1, got %d", count)
 	}
+}
 
-	// Test 2: Drop and recreate with different schema
-	_, err = db.Exec("DROP TABLE test1")
+// sch_testDropAndRecreate drops and recreates a table with new schema
+func sch_testDropAndRecreate(t *testing.T, db *sql.DB) {
+	_, err := db.Exec("DROP TABLE test1")
 	if err != nil {
 		t.Fatalf("failed to drop test1: %v", err)
 	}
@@ -539,8 +548,10 @@ func TestSchemaModification(t *testing.T) {
 	if !strings.Contains(sql, "x") || !strings.Contains(sql, "y") {
 		t.Errorf("recreated table should have columns x and y: %q", sql)
 	}
+}
 
-	// Test 3: Transaction with schema changes
+// sch_testTransactionCommit tests committing schema changes in transaction
+func sch_testTransactionCommit(t *testing.T, db *sql.DB) {
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
@@ -556,7 +567,7 @@ func TestSchemaModification(t *testing.T) {
 		t.Fatalf("failed to commit schema transaction: %v", err)
 	}
 
-	// Test 4: Verify transaction committed
+	var count int64
 	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name='tx_test'").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to verify committed table: %v", err)
@@ -564,9 +575,11 @@ func TestSchemaModification(t *testing.T) {
 	if count != 1 {
 		t.Errorf("expected 1 entry for tx_test, got %d", count)
 	}
+}
 
-	// Test 5: Rollback schema changes
-	tx, err = db.Begin()
+// sch_testTransactionRollback tests rolling back schema changes
+func sch_testTransactionRollback(t *testing.T, db *sql.DB) {
+	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
 	}
@@ -581,7 +594,7 @@ func TestSchemaModification(t *testing.T) {
 		t.Fatalf("failed to rollback: %v", err)
 	}
 
-	// Test 6: Verify rollback
+	var count int64
 	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name='rollback_test'").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to check rollback: %v", err)

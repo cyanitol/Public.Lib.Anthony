@@ -346,11 +346,21 @@ func (c *testVTableCursor) Close() error {
 	return nil
 }
 
-// TestVirtualTableWithData tests a complete virtual table with data operations.
-func TestVirtualTableWithData(t *testing.T) {
-	t.Parallel()
+// vtwd_testData holds test case data for TestVirtualTableWithData
+type vtwd_testData struct {
+	module *testVTableModule
+	vtable vtab.VirtualTable
+	schema string
+}
 
-	// Create module and table
+// vtwd_scanResult holds expected results for row scanning
+type vtwd_scanResult struct {
+	expectedID   int64
+	expectedName string
+}
+
+// vtwd_setup creates and initializes the virtual table for testing
+func vtwd_setup(t *testing.T) *vtwd_testData {
 	module := &testVTableModule{}
 	vtable, schema, err := module.Create(nil, "test_vtab", "main", "test_table", nil)
 	if err != nil {
@@ -362,9 +372,17 @@ func TestVirtualTableWithData(t *testing.T) {
 	}
 	t.Logf("Schema: %s", schema)
 
-	// Test BestIndex with no constraints
+	return &vtwd_testData{
+		module: module,
+		vtable: vtable,
+		schema: schema,
+	}
+}
+
+// vtwd_testBestIndexNoConstraints tests BestIndex without constraints
+func vtwd_testBestIndexNoConstraints(t *testing.T, vtable vtab.VirtualTable) {
 	info := vtab.NewIndexInfo(0)
-	err = vtable.BestIndex(info)
+	err := vtable.BestIndex(info)
 	if err != nil {
 		t.Fatalf("BestIndex failed: %v", err)
 	}
@@ -372,15 +390,17 @@ func TestVirtualTableWithData(t *testing.T) {
 		t.Errorf("Expected IdxNum 0 (full scan), got %d", info.IdxNum)
 	}
 	t.Logf("BestIndex (no constraints): cost=%.1f, rows=%d", info.EstimatedCost, info.EstimatedRows)
+}
 
-	// Test BestIndex with ID constraint
-	info = vtab.NewIndexInfo(1)
+// vtwd_testBestIndexWithConstraint tests BestIndex with ID constraint
+func vtwd_testBestIndexWithConstraint(t *testing.T, vtable vtab.VirtualTable) {
+	info := vtab.NewIndexInfo(1)
 	info.Constraints[0] = vtab.IndexConstraint{
 		Column: 0,
 		Op:     vtab.ConstraintEQ,
 		Usable: true,
 	}
-	err = vtable.BestIndex(info)
+	err := vtable.BestIndex(info)
 	if err != nil {
 		t.Fatalf("BestIndex failed: %v", err)
 	}
@@ -388,15 +408,38 @@ func TestVirtualTableWithData(t *testing.T) {
 		t.Errorf("Expected IdxNum 1 (ID constraint), got %d", info.IdxNum)
 	}
 	t.Logf("BestIndex (ID constraint): cost=%.1f, rows=%d", info.EstimatedCost, info.EstimatedRows)
+}
 
-	// Open a cursor
+// vtwd_scanRow retrieves and logs all columns for current cursor position
+func vtwd_scanRow(t *testing.T, cursor vtab.VirtualCursor, rowNum int) {
+	id, err := cursor.Column(0)
+	if err != nil {
+		t.Errorf("Column(0) failed: %v", err)
+	}
+	name, err := cursor.Column(1)
+	if err != nil {
+		t.Errorf("Column(1) failed: %v", err)
+	}
+	age, err := cursor.Column(2)
+	if err != nil {
+		t.Errorf("Column(2) failed: %v", err)
+	}
+	rowid, err := cursor.Rowid()
+	if err != nil {
+		t.Errorf("Rowid failed: %v", err)
+	}
+
+	t.Logf("Row %d: id=%v, name=%v, age=%v, rowid=%v", rowNum, id, name, age, rowid)
+}
+
+// vtwd_testFullTableScan tests scanning all rows without filters
+func vtwd_testFullTableScan(t *testing.T, vtable vtab.VirtualTable) int {
 	cursor, err := vtable.Open()
 	if err != nil {
 		t.Fatalf("Failed to open cursor: %v", err)
 	}
 	defer cursor.Close()
 
-	// Test full table scan
 	err = cursor.Filter(0, "", nil)
 	if err != nil {
 		t.Fatalf("Filter failed: %v", err)
@@ -404,24 +447,7 @@ func TestVirtualTableWithData(t *testing.T) {
 
 	count := 0
 	for !cursor.EOF() {
-		id, err := cursor.Column(0)
-		if err != nil {
-			t.Errorf("Column(0) failed: %v", err)
-		}
-		name, err := cursor.Column(1)
-		if err != nil {
-			t.Errorf("Column(1) failed: %v", err)
-		}
-		age, err := cursor.Column(2)
-		if err != nil {
-			t.Errorf("Column(2) failed: %v", err)
-		}
-		rowid, err := cursor.Rowid()
-		if err != nil {
-			t.Errorf("Rowid failed: %v", err)
-		}
-
-		t.Logf("Row %d: id=%v, name=%v, age=%v, rowid=%v", count, id, name, age, rowid)
+		vtwd_scanRow(t, cursor, count)
 		count++
 
 		err = cursor.Next()
@@ -430,50 +456,71 @@ func TestVirtualTableWithData(t *testing.T) {
 		}
 	}
 
-	if count != 3 {
-		t.Errorf("Expected 3 rows, got %d", count)
+	return count
+}
+
+// vtwd_verifyFilteredRow verifies a filtered row matches expected values
+func vtwd_verifyFilteredRow(t *testing.T, cursor vtab.VirtualCursor, expected vtwd_scanResult) {
+	id, err := cursor.Column(0)
+	if err != nil {
+		t.Errorf("Column(0) failed: %v", err)
+	}
+	name, err := cursor.Column(1)
+	if err != nil {
+		t.Errorf("Column(1) failed: %v", err)
 	}
 
-	// Test filtered query (ID = 2)
-	cursor2, err := vtable.Open()
+	t.Logf("Filtered row: id=%v, name=%v", id, name)
+
+	if id != expected.expectedID {
+		t.Errorf("Expected ID %d, got %v", expected.expectedID, id)
+	}
+	if name != expected.expectedName {
+		t.Errorf("Expected name %q, got %v", expected.expectedName, name)
+	}
+}
+
+// vtwd_testFilteredQuery tests querying with ID constraint
+func vtwd_testFilteredQuery(t *testing.T, vtable vtab.VirtualTable) int {
+	cursor, err := vtable.Open()
 	if err != nil {
 		t.Fatalf("Failed to open second cursor: %v", err)
 	}
-	defer cursor2.Close()
+	defer cursor.Close()
 
-	err = cursor2.Filter(1, "", []interface{}{int64(2)})
+	err = cursor.Filter(1, "", []interface{}{int64(2)})
 	if err != nil {
 		t.Fatalf("Filter with constraint failed: %v", err)
 	}
 
-	count = 0
-	for !cursor2.EOF() {
-		id, err := cursor2.Column(0)
-		if err != nil {
-			t.Errorf("Column(0) failed: %v", err)
-		}
-		name, err := cursor2.Column(1)
-		if err != nil {
-			t.Errorf("Column(1) failed: %v", err)
-		}
-
-		t.Logf("Filtered row: id=%v, name=%v", id, name)
-
-		// Verify it's the correct row
-		if id != int64(2) {
-			t.Errorf("Expected ID 2, got %v", id)
-		}
-		if name != "Bob" {
-			t.Errorf("Expected name 'Bob', got %v", name)
-		}
-
+	count := 0
+	expected := vtwd_scanResult{expectedID: 2, expectedName: "Bob"}
+	for !cursor.EOF() {
+		vtwd_verifyFilteredRow(t, cursor, expected)
 		count++
-		err = cursor2.Next()
+		err = cursor.Next()
 		if err != nil {
 			t.Errorf("Next failed: %v", err)
 		}
 	}
 
+	return count
+}
+
+// TestVirtualTableWithData tests a complete virtual table with data operations.
+func TestVirtualTableWithData(t *testing.T) {
+	t.Parallel()
+
+	data := vtwd_setup(t)
+	vtwd_testBestIndexNoConstraints(t, data.vtable)
+	vtwd_testBestIndexWithConstraint(t, data.vtable)
+
+	count := vtwd_testFullTableScan(t, data.vtable)
+	if count != 3 {
+		t.Errorf("Expected 3 rows, got %d", count)
+	}
+
+	count = vtwd_testFilteredQuery(t, data.vtable)
 	if count != 1 {
 		t.Errorf("Expected 1 filtered row, got %d", count)
 	}

@@ -146,121 +146,87 @@ func TestParseCollateInColumn(t *testing.T) {
 	}
 }
 
+// Prefix: coll_
+type collateOrderByTestCase struct {
+	name         string
+	sql          string
+	wantErr      bool
+	wantNumTerms int
+	term0Collation string
+	term0Asc       bool
+	term1Collation string
+	term1Asc       bool
+	term2Collation string
+}
+
+func coll_checkTerm(t *testing.T, term OrderingTerm, idx int, wantCollation string, wantAsc bool) {
+	t.Helper()
+	if term.Collation != wantCollation {
+		t.Errorf("term %d: expected collation %q, got %q", idx, wantCollation, term.Collation)
+	}
+	if term.Asc != wantAsc {
+		t.Errorf("term %d: expected Asc=%v, got %v", idx, wantAsc, term.Asc)
+	}
+}
+
+func coll_checkOrderBy(t *testing.T, stmt *SelectStmt, tc collateOrderByTestCase) {
+	t.Helper()
+	if len(stmt.OrderBy) != tc.wantNumTerms {
+		t.Fatalf("expected %d ORDER BY terms, got %d", tc.wantNumTerms, len(stmt.OrderBy))
+	}
+	if tc.wantNumTerms >= 1 {
+		coll_checkTerm(t, stmt.OrderBy[0], 0, tc.term0Collation, tc.term0Asc)
+	}
+	if tc.wantNumTerms >= 2 {
+		coll_checkTerm(t, stmt.OrderBy[1], 1, tc.term1Collation, tc.term1Asc)
+	}
+	if tc.wantNumTerms >= 3 {
+		coll_checkTerm(t, stmt.OrderBy[2], 2, tc.term2Collation, true)
+	}
+}
+
 func TestParseCollateInOrderBy(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantErr   bool
-		checkStmt func(*testing.T, *SelectStmt)
-	}{
+	tests := []collateOrderByTestCase{
 		{
-			name:    "ORDER BY with COLLATE NOCASE",
-			sql:     "SELECT name FROM users ORDER BY name COLLATE NOCASE",
-			wantErr: false,
-			checkStmt: func(t *testing.T, stmt *SelectStmt) {
-				if len(stmt.OrderBy) != 1 {
-					t.Fatalf("expected 1 ORDER BY term, got %d", len(stmt.OrderBy))
-				}
-				if stmt.OrderBy[0].Collation != "NOCASE" {
-					t.Errorf("expected COLLATE NOCASE, got %q", stmt.OrderBy[0].Collation)
-				}
-				if !stmt.OrderBy[0].Asc {
-					t.Error("expected ASC by default")
-				}
-			},
+			name: "ORDER BY with COLLATE NOCASE",
+			sql:  "SELECT name FROM users ORDER BY name COLLATE NOCASE",
+			wantNumTerms: 1, term0Collation: "NOCASE", term0Asc: true,
 		},
 		{
-			name:    "ORDER BY with COLLATE BINARY DESC",
-			sql:     "SELECT code FROM items ORDER BY code COLLATE BINARY DESC",
-			wantErr: false,
-			checkStmt: func(t *testing.T, stmt *SelectStmt) {
-				if len(stmt.OrderBy) != 1 {
-					t.Fatalf("expected 1 ORDER BY term, got %d", len(stmt.OrderBy))
-				}
-				if stmt.OrderBy[0].Collation != "BINARY" {
-					t.Errorf("expected COLLATE BINARY, got %q", stmt.OrderBy[0].Collation)
-				}
-				if stmt.OrderBy[0].Asc {
-					t.Error("expected DESC")
-				}
-			},
+			name: "ORDER BY with COLLATE BINARY DESC",
+			sql:  "SELECT code FROM items ORDER BY code COLLATE BINARY DESC",
+			wantNumTerms: 1, term0Collation: "BINARY", term0Asc: false,
 		},
 		{
-			name:    "ORDER BY with COLLATE RTRIM ASC",
-			sql:     "SELECT value FROM data ORDER BY value COLLATE RTRIM ASC",
-			wantErr: false,
-			checkStmt: func(t *testing.T, stmt *SelectStmt) {
-				if len(stmt.OrderBy) != 1 {
-					t.Fatalf("expected 1 ORDER BY term, got %d", len(stmt.OrderBy))
-				}
-				if stmt.OrderBy[0].Collation != "RTRIM" {
-					t.Errorf("expected COLLATE RTRIM, got %q", stmt.OrderBy[0].Collation)
-				}
-				if !stmt.OrderBy[0].Asc {
-					t.Error("expected ASC")
-				}
-			},
+			name: "ORDER BY with COLLATE RTRIM ASC",
+			sql:  "SELECT value FROM data ORDER BY value COLLATE RTRIM ASC",
+			wantNumTerms: 1, term0Collation: "RTRIM", term0Asc: true,
 		},
 		{
-			name:    "ORDER BY multiple columns with different collations",
-			sql:     "SELECT * FROM users ORDER BY lastname COLLATE NOCASE, firstname COLLATE BINARY DESC",
-			wantErr: false,
-			checkStmt: func(t *testing.T, stmt *SelectStmt) {
-				if len(stmt.OrderBy) != 2 {
-					t.Fatalf("expected 2 ORDER BY terms, got %d", len(stmt.OrderBy))
-				}
-				if stmt.OrderBy[0].Collation != "NOCASE" {
-					t.Errorf("term 0: expected COLLATE NOCASE, got %q", stmt.OrderBy[0].Collation)
-				}
-				if !stmt.OrderBy[0].Asc {
-					t.Error("term 0: expected ASC")
-				}
-				if stmt.OrderBy[1].Collation != "BINARY" {
-					t.Errorf("term 1: expected COLLATE BINARY, got %q", stmt.OrderBy[1].Collation)
-				}
-				if stmt.OrderBy[1].Asc {
-					t.Error("term 1: expected DESC")
-				}
-			},
+			name: "ORDER BY multiple columns with different collations",
+			sql:  "SELECT * FROM users ORDER BY lastname COLLATE NOCASE, firstname COLLATE BINARY DESC",
+			wantNumTerms: 2, term0Collation: "NOCASE", term0Asc: true, term1Collation: "BINARY", term1Asc: false,
 		},
 		{
-			name:    "ORDER BY without COLLATE",
-			sql:     "SELECT name FROM users ORDER BY name",
-			wantErr: false,
-			checkStmt: func(t *testing.T, stmt *SelectStmt) {
-				if len(stmt.OrderBy) != 1 {
-					t.Fatalf("expected 1 ORDER BY term, got %d", len(stmt.OrderBy))
-				}
-				if stmt.OrderBy[0].Collation != "" {
-					t.Errorf("expected no collation, got %q", stmt.OrderBy[0].Collation)
-				}
-			},
+			name: "ORDER BY without COLLATE",
+			sql:  "SELECT name FROM users ORDER BY name",
+			wantNumTerms: 1, term0Collation: "", term0Asc: true,
 		},
 		{
-			name:    "ORDER BY mixed - some with COLLATE, some without",
-			sql:     "SELECT * FROM users ORDER BY name COLLATE NOCASE, age, email COLLATE BINARY",
-			wantErr: false,
-			checkStmt: func(t *testing.T, stmt *SelectStmt) {
-				if len(stmt.OrderBy) != 3 {
-					t.Fatalf("expected 3 ORDER BY terms, got %d", len(stmt.OrderBy))
-				}
-				if stmt.OrderBy[0].Collation != "NOCASE" {
-					t.Errorf("term 0: expected NOCASE, got %q", stmt.OrderBy[0].Collation)
-				}
-				if stmt.OrderBy[1].Collation != "" {
-					t.Errorf("term 1: expected no collation, got %q", stmt.OrderBy[1].Collation)
-				}
-				if stmt.OrderBy[2].Collation != "BINARY" {
-					t.Errorf("term 2: expected BINARY, got %q", stmt.OrderBy[2].Collation)
-				}
-			},
+			name: "ORDER BY mixed - some with COLLATE, some without",
+			sql:  "SELECT * FROM users ORDER BY name COLLATE NOCASE, age, email COLLATE BINARY",
+			wantNumTerms: 3, term0Collation: "NOCASE", term0Asc: true, term1Collation: "", term1Asc: true, term2Collation: "BINARY",
 		},
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		runCollateOrderBySubtest(t, tt.name, tt.sql, tt.checkStmt)
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			stmt := parseSelectStmt(t, tc.sql)
+			coll_checkOrderBy(t, stmt, tc)
+		})
 	}
 }
 

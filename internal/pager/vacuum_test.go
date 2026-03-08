@@ -170,61 +170,83 @@ func TestVacuum_AfterManyDeletes(t *testing.T) {
 	pager.Close()
 }
 
+// vacIntoWritePage writes a test page with data
+func vacIntoWritePage(t *testing.T, pager *Pager, pgno Pgno, value byte) {
+	t.Helper()
+	page, err := pager.Get(pgno)
+	if err != nil {
+		t.Fatalf("Get(%d) error = %v", pgno, err)
+	}
+
+	if err := pager.Write(page); err != nil {
+		t.Fatalf("Write(page %d) error = %v", pgno, err)
+	}
+
+	offset := 0
+	if pgno == 1 {
+		offset = DatabaseHeaderSize
+	}
+
+	if err := page.Write(offset, []byte{value}); err != nil {
+		t.Fatalf("page.Write(page %d) error = %v", pgno, err)
+	}
+
+	pager.Put(page)
+}
+
+// vacIntoVerifyPage verifies a page contains expected value
+func vacIntoVerifyPage(t *testing.T, pager *Pager, pgno Pgno, expected byte) {
+	t.Helper()
+	page, err := pager.Get(pgno)
+	if err != nil {
+		t.Fatalf("Get(%d) error = %v", pgno, err)
+	}
+	defer pager.Put(page)
+
+	offset := 0
+	if pgno == 1 {
+		offset = DatabaseHeaderSize
+	}
+
+	readData, err := page.Read(offset, 1)
+	if err != nil {
+		t.Fatalf("page.Read(page %d) error = %v", pgno, err)
+	}
+
+	if readData[0] != expected {
+		t.Errorf("Page %d data = %d, want %d", pgno, readData[0], expected)
+	}
+}
+
 func TestVacuum_Into(t *testing.T) {
 	t.Parallel()
 	sourceFile := filepath.Join(t.TempDir(), "source.db")
 	targetFile := filepath.Join(t.TempDir(), "target.db")
 
-	// Create source database
 	pager, err := Open(sourceFile, false)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
 
-	// Write some data
 	for i := Pgno(1); i <= 5; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("Get(%d) error = %v", i, err)
-		}
-
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("Write(page %d) error = %v", i, err)
-		}
-
-		offset := 0
-		if i == 1 {
-			offset = DatabaseHeaderSize
-		}
-
-		data := []byte{byte(i * 2)}
-		if err := page.Write(offset, data); err != nil {
-			t.Fatalf("page.Write(page %d) error = %v", i, err)
-		}
-
-		pager.Put(page)
+		vacIntoWritePage(t, pager, i, byte(i*2))
 	}
 
 	if err := pager.Commit(); err != nil {
 		t.Fatalf("Commit() error = %v", err)
 	}
 
-	// Perform VACUUM INTO
-	opts := &VacuumOptions{
-		IntoFile: targetFile,
-	}
+	opts := &VacuumOptions{IntoFile: targetFile}
 	if err := pager.Vacuum(opts); err != nil {
 		t.Fatalf("Vacuum() error = %v", err)
 	}
 
 	pager.Close()
 
-	// Verify target file exists
 	if _, err := os.Stat(targetFile); os.IsNotExist(err) {
 		t.Fatal("Target file was not created")
 	}
 
-	// Open target file and verify data
 	targetPager, err := Open(targetFile, false)
 	if err != nil {
 		t.Fatalf("Open(target) error = %v", err)
@@ -232,52 +254,16 @@ func TestVacuum_Into(t *testing.T) {
 	defer targetPager.Close()
 
 	for i := Pgno(1); i <= 5; i++ {
-		page, err := targetPager.Get(i)
-		if err != nil {
-			t.Fatalf("Get(%d) from target error = %v", i, err)
-		}
-
-		offset := 0
-		if i == 1 {
-			offset = DatabaseHeaderSize
-		}
-
-		readData, err := page.Read(offset, 1)
-		if err != nil {
-			t.Fatalf("page.Read(page %d) from target error = %v", i, err)
-		}
-
-		expected := byte(i * 2)
-		if readData[0] != expected {
-			t.Errorf("Target page %d data = %d, want %d", i, readData[0], expected)
-		}
-
-		targetPager.Put(page)
+		vacIntoVerifyPage(t, targetPager, i, byte(i*2))
 	}
 
-	// Verify source file still exists and is unchanged
 	sourcePager, err := Open(sourceFile, false)
 	if err != nil {
 		t.Fatalf("Open(source) after vacuum error = %v", err)
 	}
 	defer sourcePager.Close()
 
-	// Source should still have the original data
-	page, err := sourcePager.Get(1)
-	if err != nil {
-		t.Fatalf("Get(1) from source after vacuum error = %v", err)
-	}
-
-	readData, err := page.Read(DatabaseHeaderSize, 1)
-	if err != nil {
-		t.Fatalf("page.Read() from source after vacuum error = %v", err)
-	}
-
-	if readData[0] != 2 { // First page has value 1*2=2
-		t.Errorf("Source page 1 data after vacuum = %d, want 2", readData[0])
-	}
-
-	sourcePager.Put(page)
+	vacIntoVerifyPage(t, sourcePager, 1, 2)
 }
 
 func TestVacuum_ReadOnlyDatabase(t *testing.T) {
