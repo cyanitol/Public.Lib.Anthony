@@ -7,17 +7,189 @@ import (
 	"testing"
 )
 
+// joinTestCase represents a declarative test case for join operations
+type joinTestCase struct {
+	name     string
+	setup    []string
+	query    string
+	wantRows [][]interface{}
+	wantErr  bool
+	skip     string
+}
+
+// joinRunTest executes a single join test case
+func joinRunTest(t *testing.T, tc joinTestCase) {
+	if tc.skip != "" {
+		t.Skip(tc.skip)
+	}
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db := joinOpenDB(t, dbPath)
+	defer db.Close()
+
+	joinExecSetup(t, db, tc.setup)
+	rows := joinQueryRows(t, db, tc.query, tc.wantErr)
+	if tc.wantErr {
+		return
+	}
+	defer rows.Close()
+
+	joinVerifyResults(t, rows, tc.wantRows)
+}
+
+// joinOpenDB opens a database connection
+func joinOpenDB(t *testing.T, dbPath string) *sql.DB {
+	db, err := sql.Open(DriverName, dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	return db
+}
+
+// joinExecSetup executes setup statements
+func joinExecSetup(t *testing.T, db *sql.DB, stmts []string) {
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup failed on statement %q: %v", stmt, err)
+		}
+	}
+}
+
+// joinQueryRows executes query and returns rows
+func joinQueryRows(t *testing.T, db *sql.DB, query string, expectErr bool) *sql.Rows {
+	rows, err := db.Query(query)
+	if expectErr {
+		if err == nil {
+			t.Fatalf("expected error but got none")
+		}
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	return rows
+}
+
+// joinVerifyResults compares actual rows with expected results
+func joinVerifyResults(t *testing.T, rows *sql.Rows, wantRows [][]interface{}) {
+	cols := joinGetColumns(t, rows)
+	gotRows := joinCollectRows(t, rows, cols)
+	joinCompareRows(t, gotRows, wantRows)
+}
+
+// joinGetColumns retrieves column information
+func joinGetColumns(t *testing.T, rows *sql.Rows) []string {
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("failed to get columns: %v", err)
+	}
+	return cols
+}
+
+// joinCollectRows collects all rows from result set
+func joinCollectRows(t *testing.T, rows *sql.Rows, cols []string) [][]interface{} {
+	var gotRows [][]interface{}
+	for rows.Next() {
+		values := make([]interface{}, len(cols))
+		valuePtrs := make([]interface{}, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			t.Fatalf("failed to scan row: %v", err)
+		}
+		gotRows = append(gotRows, values)
+	}
+
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration error: %v", err)
+	}
+	return gotRows
+}
+
+// joinCompareRows compares actual and expected rows
+func joinCompareRows(t *testing.T, gotRows, wantRows [][]interface{}) {
+	if len(gotRows) != len(wantRows) {
+		t.Fatalf("row count mismatch: got %d rows, want %d rows\nGot: %v\nWant: %v",
+			len(gotRows), len(wantRows), gotRows, wantRows)
+	}
+
+	for i, gotRow := range gotRows {
+		joinCompareRow(t, i, gotRow, wantRows[i])
+	}
+}
+
+// joinCompareRow compares a single row
+func joinCompareRow(t *testing.T, rowNum int, gotRow, wantRow []interface{}) {
+	if len(gotRow) != len(wantRow) {
+		t.Fatalf("row %d column count mismatch: got %d, want %d", rowNum, len(gotRow), len(wantRow))
+	}
+
+	for j, gotVal := range gotRow {
+		joinCompareValue(t, rowNum, j, gotVal, wantRow[j])
+	}
+}
+
+// joinCompareValue compares a single cell value
+func joinCompareValue(t *testing.T, row, col int, gotVal, wantVal interface{}) {
+	if wantVal == nil {
+		if gotVal != nil {
+			t.Errorf("row %d, col %d: got %v (%T), want nil", row, col, gotVal, gotVal)
+		}
+		return
+	}
+
+	if gotVal == nil {
+		t.Errorf("row %d, col %d: got nil, want %v (%T)", row, col, wantVal, wantVal)
+		return
+	}
+
+	switch want := wantVal.(type) {
+	case int64:
+		joinAssertInt64(t, row, col, gotVal, want)
+	case float64:
+		joinAssertFloat64(t, row, col, gotVal, want)
+	case string:
+		joinAssertString(t, row, col, gotVal, want)
+	default:
+		t.Errorf("row %d, col %d: unsupported type %T", row, col, wantVal)
+	}
+}
+
+// joinAssertInt64 verifies int64 value
+func joinAssertInt64(t *testing.T, row, col int, gotVal interface{}, want int64) {
+	if got, ok := gotVal.(int64); !ok {
+		t.Errorf("row %d, col %d: type mismatch: got %T, want int64", row, col, gotVal)
+	} else if got != want {
+		t.Errorf("row %d, col %d: got %v, want %v", row, col, got, want)
+	}
+}
+
+// joinAssertFloat64 verifies float64 value
+func joinAssertFloat64(t *testing.T, row, col int, gotVal interface{}, want float64) {
+	if got, ok := gotVal.(float64); !ok {
+		t.Errorf("row %d, col %d: type mismatch: got %T, want float64", row, col, gotVal)
+	} else if got != want {
+		t.Errorf("row %d, col %d: got %v, want %v", row, col, got, want)
+	}
+}
+
+// joinAssertString verifies string value
+func joinAssertString(t *testing.T, row, col int, gotVal interface{}, want string) {
+	if got, ok := gotVal.(string); !ok {
+		t.Errorf("row %d, col %d: type mismatch: got %T, want string", row, col, gotVal)
+	} else if got != want {
+		t.Errorf("row %d, col %d: got %q, want %q", row, col, got, want)
+	}
+}
+
 // TestSQLiteJoin tests various JOIN operations including INNER, LEFT, CROSS, NATURAL, and USING
 func TestSQLiteJoin(t *testing.T) {
 	t.Skip("pre-existing failure - needs join subquery/aggregate fixes")
-	tests := []struct {
-		name     string
-		setup    []string
-		query    string
-		wantRows [][]interface{}
-		wantErr  bool
-		skip     string
-	}{
+	tests := []joinTestCase{
 		// Basic NATURAL JOIN tests (from join.test)
 		{
 			name: "join-1.1 basic natural join",
@@ -1086,118 +1258,7 @@ func TestSQLiteJoin(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
-			tmpDir := t.TempDir()
-			dbPath := filepath.Join(tmpDir, "test.db")
-
-			db, err := sql.Open(DriverName, dbPath)
-			if err != nil {
-				t.Fatalf("failed to open database: %v", err)
-			}
-			defer db.Close()
-
-			// Execute setup statements
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed on statement %q: %v", stmt, err)
-				}
-			}
-
-			// Execute the query
-			rows, err := db.Query(tt.query)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error but got none")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-
-			// Get column count
-			cols, err := rows.Columns()
-			if err != nil {
-				t.Fatalf("failed to get columns: %v", err)
-			}
-
-			// Collect results
-			var gotRows [][]interface{}
-			for rows.Next() {
-				// Create a slice of interface{} to hold the row values
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("failed to scan row: %v", err)
-				}
-
-				gotRows = append(gotRows, values)
-			}
-
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows iteration error: %v", err)
-			}
-
-			// Compare results
-			if len(gotRows) != len(tt.wantRows) {
-				t.Fatalf("row count mismatch: got %d rows, want %d rows\nGot: %v\nWant: %v",
-					len(gotRows), len(tt.wantRows), gotRows, tt.wantRows)
-			}
-
-			for i, gotRow := range gotRows {
-				wantRow := tt.wantRows[i]
-				if len(gotRow) != len(wantRow) {
-					t.Fatalf("row %d column count mismatch: got %d, want %d", i, len(gotRow), len(wantRow))
-				}
-
-				for j, gotVal := range gotRow {
-					wantVal := wantRow[j]
-
-					// Handle NULL comparison
-					if wantVal == nil {
-						if gotVal != nil {
-							t.Errorf("row %d, col %d: got %v (%T), want nil", i, j, gotVal, gotVal)
-						}
-						continue
-					}
-
-					if gotVal == nil {
-						t.Errorf("row %d, col %d: got nil, want %v (%T)", i, j, wantVal, wantVal)
-						continue
-					}
-
-					// Type-specific comparison
-					switch want := wantVal.(type) {
-					case int64:
-						if got, ok := gotVal.(int64); !ok {
-							t.Errorf("row %d, col %d: type mismatch: got %T, want int64", i, j, gotVal)
-						} else if got != want {
-							t.Errorf("row %d, col %d: got %v, want %v", i, j, got, want)
-						}
-					case float64:
-						if got, ok := gotVal.(float64); !ok {
-							t.Errorf("row %d, col %d: type mismatch: got %T, want float64", i, j, gotVal)
-						} else if got != want {
-							t.Errorf("row %d, col %d: got %v, want %v", i, j, got, want)
-						}
-					case string:
-						if got, ok := gotVal.(string); !ok {
-							t.Errorf("row %d, col %d: type mismatch: got %T, want string", i, j, gotVal)
-						} else if got != want {
-							t.Errorf("row %d, col %d: got %q, want %q", i, j, got, want)
-						}
-					default:
-						t.Errorf("row %d, col %d: unsupported type %T", i, j, wantVal)
-					}
-				}
-			}
+			joinRunTest(t, tt)
 		})
 	}
 }

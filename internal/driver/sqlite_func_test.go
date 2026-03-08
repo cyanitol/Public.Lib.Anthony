@@ -8,26 +8,45 @@ import (
 	"testing"
 )
 
-// TestSQLiteFunctions tests SQLite built-in scalar functions
-// Converted from contrib/sqlite/sqlite-src-3510200/test/func*.test
-func TestSQLiteFunctions(t *testing.T) {
-	// Removed function-level skip - triage individual subtests instead
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "func_test.db")
+// funcTestCase represents a declarative test case for function tests
+type funcTestCase struct {
+	name    string
+	expr    string
+	want    interface{}
+	wantErr bool
+	skip    string
+}
 
+// funcSetupDB creates and populates test database
+func funcSetupDB(t *testing.T, tmpDir string) *sql.DB {
+	dbPath := filepath.Join(tmpDir, "func_test.db")
+	db := funcOpenDB(t, dbPath)
+
+	funcCreateTestTable(t, db)
+	funcInsertTestData(t, db)
+
+	return db
+}
+
+// funcOpenDB opens database connection
+func funcOpenDB(t *testing.T, dbPath string) *sql.DB {
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	return db
+}
 
-	// Create test table
-	_, err = db.Exec("CREATE TABLE test(t TEXT, n INTEGER, r REAL)")
+// funcCreateTestTable creates the test table
+func funcCreateTestTable(t *testing.T, db *sql.DB) {
+	_, err := db.Exec("CREATE TABLE test(t TEXT, n INTEGER, r REAL)")
 	if err != nil {
 		t.Fatalf("failed to create test table: %v", err)
 	}
+}
 
-	// Insert test data
+// funcInsertTestData inserts test data
+func funcInsertTestData(t *testing.T, db *sql.DB) {
 	testData := []struct {
 		t string
 		n interface{}
@@ -41,19 +60,138 @@ func TestSQLiteFunctions(t *testing.T) {
 	}
 
 	for _, td := range testData {
-		_, err = db.Exec("INSERT INTO test(t, n, r) VALUES(?, ?, ?)", td.t, td.n, td.r)
+		_, err := db.Exec("INSERT INTO test(t, n, r) VALUES(?, ?, ?)", td.t, td.n, td.r)
 		if err != nil {
 			t.Fatalf("failed to insert test data: %v", err)
 		}
 	}
+}
 
-	tests := []struct {
-		name    string
-		expr    string      // Function call expression
-		want    interface{} // expected result
-		wantErr bool
-		skip    string
-	}{
+// funcRunTest executes a single function test
+func funcRunTest(t *testing.T, db *sql.DB, tc funcTestCase) {
+	if tc.skip != "" {
+		t.Skip(tc.skip)
+	}
+
+	var result interface{}
+	err := db.QueryRow(tc.expr).Scan(&result)
+
+	if tc.wantErr {
+		funcVerifyError(t, err)
+		return
+	}
+
+	funcVerifyResult(t, err, result, tc.want)
+}
+
+// funcVerifyError checks that error occurred
+func funcVerifyError(t *testing.T, err error) {
+	if err == nil {
+		t.Errorf("expected error but got none")
+	}
+}
+
+// funcVerifyResult verifies query result
+func funcVerifyResult(t *testing.T, err error, result, want interface{}) {
+	if err != nil {
+		if err == sql.ErrNoRows && want == nil {
+			return
+		}
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if want == nil {
+		funcAssertNil(t, result)
+		return
+	}
+
+	funcCompareValue(t, result, want)
+}
+
+// funcAssertNil verifies result is nil
+func funcAssertNil(t *testing.T, result interface{}) {
+	if result != nil {
+		t.Errorf("expected nil, got %v", result)
+	}
+}
+
+// funcCompareValue compares result with expected value
+func funcCompareValue(t *testing.T, result, want interface{}) {
+	switch expected := want.(type) {
+	case int64:
+		funcAssertInt64(t, result, expected)
+	case float64:
+		funcAssertFloat64(t, result, expected)
+	case string:
+		funcAssertString(t, result, expected)
+	default:
+		funcAssertGeneric(t, result, want)
+	}
+}
+
+// funcAssertInt64 verifies int64 result
+func funcAssertInt64(t *testing.T, result interface{}, expected int64) {
+	switch got := result.(type) {
+	case int64:
+		if got != expected {
+			t.Errorf("expected %v, got %v", expected, got)
+		}
+	case float64:
+		if int64(got) != expected {
+			t.Errorf("expected %v, got %v (converted from float)", expected, got)
+		}
+	default:
+		t.Errorf("expected int64 %v, got %T %v", expected, result, result)
+	}
+}
+
+// funcAssertFloat64 verifies float64 result
+func funcAssertFloat64(t *testing.T, result interface{}, expected float64) {
+	switch got := result.(type) {
+	case float64:
+		if math.Abs(got-expected) > 0.001 {
+			t.Errorf("expected %v, got %v", expected, got)
+		}
+	case int64:
+		if math.Abs(float64(got)-expected) > 0.001 {
+			t.Errorf("expected %v, got %v (converted from int)", expected, got)
+		}
+	default:
+		t.Errorf("expected float64 %v, got %T %v", expected, result, result)
+	}
+}
+
+// funcAssertString verifies string result
+func funcAssertString(t *testing.T, result interface{}, expected string) {
+	got, ok := result.(string)
+	if !ok {
+		if bytes, ok := result.([]byte); ok {
+			got = string(bytes)
+		} else {
+			t.Errorf("expected string %v, got %T %v", expected, result, result)
+			return
+		}
+	}
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
+	}
+}
+
+// funcAssertGeneric performs generic comparison
+func funcAssertGeneric(t *testing.T, result, want interface{}) {
+	if result != want {
+		t.Errorf("expected %v, got %v", want, result)
+	}
+}
+
+// TestSQLiteFunctions tests SQLite built-in scalar functions
+// Converted from contrib/sqlite/sqlite-src-3510200/test/func*.test
+func TestSQLiteFunctions(t *testing.T) {
+	tmpDir := t.TempDir()
+	db := funcSetupDB(t, tmpDir)
+	defer db.Close()
+
+	tests := []funcTestCase{
 		// length() function tests (func.test lines 42-64)
 		{
 			name: "length_simple",
@@ -553,83 +691,117 @@ func TestSQLiteFunctions(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
-			var result interface{}
-			err := db.QueryRow(tt.expr).Scan(&result)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error but got none")
-				}
-				return
-			}
-
-			if err != nil {
-				// NULL values might return sql.ErrNoRows in some cases
-				if err == sql.ErrNoRows && tt.want == nil {
-					return
-				}
-				t.Fatalf("query failed: %v", err)
-			}
-
-			// Handle NULL comparison
-			if tt.want == nil {
-				if result != nil {
-					t.Errorf("expected nil, got %v", result)
-				}
-				return
-			}
-
-			// Handle different numeric types
-			switch expected := tt.want.(type) {
-			case int64:
-				switch got := result.(type) {
-				case int64:
-					if got != expected {
-						t.Errorf("expected %v, got %v", expected, got)
-					}
-				case float64:
-					if int64(got) != expected {
-						t.Errorf("expected %v, got %v (converted from float)", expected, got)
-					}
-				default:
-					t.Errorf("expected int64 %v, got %T %v", expected, result, result)
-				}
-			case float64:
-				switch got := result.(type) {
-				case float64:
-					if math.Abs(got-expected) > 0.001 {
-						t.Errorf("expected %v, got %v", expected, got)
-					}
-				case int64:
-					if math.Abs(float64(got)-expected) > 0.001 {
-						t.Errorf("expected %v, got %v (converted from int)", expected, got)
-					}
-				default:
-					t.Errorf("expected float64 %v, got %T %v", expected, result, result)
-				}
-			case string:
-				got, ok := result.(string)
-				if !ok {
-					// Try converting bytes to string
-					if bytes, ok := result.([]byte); ok {
-						got = string(bytes)
-					} else {
-						t.Errorf("expected string %v, got %T %v", expected, result, result)
-						return
-					}
-				}
-				if got != expected {
-					t.Errorf("expected %q, got %q", expected, got)
-				}
-			default:
-				if result != tt.want {
-					t.Errorf("expected %v, got %v", tt.want, result)
-				}
-			}
+			funcRunTest(t, db, tt)
 		})
+	}
+}
+
+// aggSetupDB creates and populates aggregate test database
+func aggSetupDB(t *testing.T, tmpDir string) *sql.DB {
+	dbPath := filepath.Join(tmpDir, "agg_test.db")
+	db := funcOpenDB(t, dbPath)
+
+	aggCreateTable(t, db)
+	aggInsertValues(t, db)
+
+	return db
+}
+
+// aggCreateTable creates numbers table
+func aggCreateTable(t *testing.T, db *sql.DB) {
+	_, err := db.Exec("CREATE TABLE numbers(value INTEGER)")
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+}
+
+// aggInsertValues inserts test values
+func aggInsertValues(t *testing.T, db *sql.DB) {
+	values := []int{1, 2, 3, 4, 5}
+	for _, v := range values {
+		_, err := db.Exec("INSERT INTO numbers(value) VALUES(?)", v)
+		if err != nil {
+			t.Fatalf("failed to insert test data: %v", err)
+		}
+	}
+}
+
+// aggRunTest executes a single aggregate test
+func aggRunTest(t *testing.T, db *sql.DB, tc funcTestCase) {
+	var result interface{}
+	err := db.QueryRow(tc.expr).Scan(&result)
+
+	if tc.wantErr {
+		funcVerifyError(t, err)
+		return
+	}
+
+	aggVerifyResult(t, err, result, tc.want)
+}
+
+// aggVerifyResult verifies aggregate query result
+func aggVerifyResult(t *testing.T, err error, result, want interface{}) {
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	switch expected := want.(type) {
+	case int64:
+		aggAssertInt64(t, result, expected)
+	case float64:
+		aggAssertFloat64(t, result, expected)
+	case string:
+		aggAssertString(t, result, expected)
+	default:
+		funcAssertGeneric(t, result, want)
+	}
+}
+
+// aggAssertInt64 verifies int64 aggregate result
+func aggAssertInt64(t *testing.T, result interface{}, expected int64) {
+	switch got := result.(type) {
+	case int64:
+		if got != expected {
+			t.Errorf("expected %v, got %v", expected, got)
+		}
+	case float64:
+		if int64(got) != expected {
+			t.Errorf("expected %v, got %v (converted from float)", expected, got)
+		}
+	default:
+		t.Errorf("expected int64 %v, got %T %v", expected, result, result)
+	}
+}
+
+// aggAssertFloat64 verifies float64 aggregate result
+func aggAssertFloat64(t *testing.T, result interface{}, expected float64) {
+	got, ok := result.(float64)
+	if !ok {
+		if intVal, ok := result.(int64); ok {
+			got = float64(intVal)
+		} else {
+			t.Errorf("expected float64 %v, got %T %v", expected, result, result)
+			return
+		}
+	}
+	if math.Abs(got-expected) > 0.001 {
+		t.Errorf("expected %v, got %v", expected, got)
+	}
+}
+
+// aggAssertString verifies string aggregate result
+func aggAssertString(t *testing.T, result interface{}, expected string) {
+	got, ok := result.(string)
+	if !ok {
+		if bytes, ok := result.([]byte); ok {
+			got = string(bytes)
+		} else {
+			t.Errorf("expected string %v, got %T %v", expected, result, result)
+			return
+		}
+	}
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
 	}
 }
 
@@ -637,35 +809,10 @@ func TestSQLiteFunctions(t *testing.T) {
 func TestAggregateFunctions(t *testing.T) {
 	t.Skip("pre-existing failure - needs aggregate function fixes")
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "agg_test.db")
-
-	db, err := sql.Open(DriverName, dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := aggSetupDB(t, tmpDir)
 	defer db.Close()
 
-	// Create test table
-	_, err = db.Exec("CREATE TABLE numbers(value INTEGER)")
-	if err != nil {
-		t.Fatalf("failed to create test table: %v", err)
-	}
-
-	// Insert test data
-	values := []int{1, 2, 3, 4, 5}
-	for _, v := range values {
-		_, err = db.Exec("INSERT INTO numbers(value) VALUES(?)", v)
-		if err != nil {
-			t.Fatalf("failed to insert test data: %v", err)
-		}
-	}
-
-	tests := []struct {
-		name    string
-		expr    string
-		want    interface{}
-		wantErr bool
-	}{
+	tests := []funcTestCase{
 		{
 			name: "count_all",
 			expr: "SELECT count(*) FROM numbers",
@@ -716,66 +863,7 @@ func TestAggregateFunctions(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			var result interface{}
-			err := db.QueryRow(tt.expr).Scan(&result)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error but got none")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-
-			// Handle different numeric types
-			switch expected := tt.want.(type) {
-			case int64:
-				switch got := result.(type) {
-				case int64:
-					if got != expected {
-						t.Errorf("expected %v, got %v", expected, got)
-					}
-				case float64:
-					if int64(got) != expected {
-						t.Errorf("expected %v, got %v (converted from float)", expected, got)
-					}
-				default:
-					t.Errorf("expected int64 %v, got %T %v", expected, result, result)
-				}
-			case float64:
-				got, ok := result.(float64)
-				if !ok {
-					if intVal, ok := result.(int64); ok {
-						got = float64(intVal)
-					} else {
-						t.Errorf("expected float64 %v, got %T %v", expected, result, result)
-						return
-					}
-				}
-				if math.Abs(got-expected) > 0.001 {
-					t.Errorf("expected %v, got %v", expected, got)
-				}
-			case string:
-				got, ok := result.(string)
-				if !ok {
-					if bytes, ok := result.([]byte); ok {
-						got = string(bytes)
-					} else {
-						t.Errorf("expected string %v, got %T %v", expected, result, result)
-						return
-					}
-				}
-				if got != expected {
-					t.Errorf("expected %q, got %q", expected, got)
-				}
-			default:
-				if result != tt.want {
-					t.Errorf("expected %v, got %v", tt.want, result)
-				}
-			}
+			aggRunTest(t, db, tt)
 		})
 	}
 }

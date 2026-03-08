@@ -6,20 +6,108 @@ import (
 	"testing"
 )
 
+// updTestCase holds UPDATE test configuration
+type updTestCase struct {
+	name       string
+	setup      []string
+	update     string
+	verify     string
+	wantRows   [][]interface{}
+	wantErr    bool
+	skipVerify bool
+	skip       string
+}
+
+// updRunSetup executes setup SQL statements
+func updRunSetup(t *testing.T, db *sql.DB, setup []string) {
+	for _, stmt := range setup {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("Setup failed for statement %q: %v", stmt, err)
+		}
+	}
+}
+
+// updExecuteUpdate executes the UPDATE statement and checks for errors
+func updExecuteUpdate(t *testing.T, db *sql.DB, updateSQL string, wantErr bool) bool {
+	_, err := db.Exec(updateSQL)
+	if wantErr {
+		if err == nil {
+			t.Errorf("Expected error but got none")
+		}
+		return true
+	}
+	if err != nil {
+		t.Fatalf("UPDATE failed: %v", err)
+	}
+	return false
+}
+
+// updCollectResults fetches all rows and converts bytes to strings
+func updCollectResults(t *testing.T, rows *sql.Rows, colCount int) [][]interface{} {
+	var results [][]interface{}
+	for rows.Next() {
+		values := make([]interface{}, colCount)
+		valuePtrs := make([]interface{}, colCount)
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			t.Fatalf("Failed to scan row: %v", err)
+		}
+
+		for i, v := range values {
+			if b, ok := v.([]byte); ok {
+				values[i] = string(b)
+			}
+		}
+
+		results = append(results, values)
+	}
+
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Row iteration error: %v", err)
+	}
+
+	return results
+}
+
+// updVerifyResults compares actual vs expected results
+func updVerifyResults(t *testing.T, results, wantRows [][]interface{}) {
+	if len(results) != len(wantRows) {
+		t.Errorf("Row count mismatch: got %d, want %d", len(results), len(wantRows))
+		t.Logf("Got: %v", results)
+		t.Logf("Want: %v", wantRows)
+		return
+	}
+
+	for i, row := range results {
+		if len(row) != len(wantRows[i]) {
+			t.Errorf("Row %d column count mismatch: got %d, want %d", i, len(row), len(wantRows[i]))
+			continue
+		}
+		for j, val := range row {
+			if val == nil && wantRows[i][j] == nil {
+				continue
+			}
+			if val == nil || wantRows[i][j] == nil {
+				t.Errorf("Row %d, col %d: got %v, want %v", i, j, val, wantRows[i][j])
+				continue
+			}
+
+			if val != wantRows[i][j] {
+				t.Errorf("Row %d, col %d: got %v (type %T), want %v (type %T)",
+					i, j, val, val, wantRows[i][j], wantRows[i][j])
+			}
+		}
+	}
+}
+
 // TestSQLiteUpdate tests UPDATE statement functionality based on SQLite's TCL test suite
 // Tests are derived from contrib/sqlite/sqlite-src-3510200/test/update.test and update2.test
 func TestSQLiteUpdate(t *testing.T) {
 	t.Skip("pre-existing failure")
-	tests := []struct {
-		name       string
-		setup      []string        // CREATE + INSERT statements
-		update     string          // UPDATE statement to test
-		verify     string          // SELECT to verify results
-		wantRows   [][]interface{} // Expected results
-		wantErr    bool            // Whether an error is expected
-		skipVerify bool            // For updates that just test execution
-		skip       string
-	}{
+	tests := []updTestCase{
 		// update-1.1: Try to update a non-existent table
 		{
 			name:    "update_nonexistent_table",
@@ -746,110 +834,36 @@ func TestSQLiteUpdate(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
-			// Create a new in-memory database for each test
+
 			db, err := sql.Open(DriverName, ":memory:")
 			if err != nil {
 				t.Fatalf("Failed to open database: %v", err)
 			}
 			defer db.Close()
 
-			// Run setup statements
-			for _, stmt := range tt.setup {
-				_, err := db.Exec(stmt)
-				if err != nil {
-					t.Fatalf("Setup failed for statement %q: %v", stmt, err)
-				}
-			}
+			updRunSetup(t, db, tt.setup)
 
-			// Execute the UPDATE statement
-			_, err = db.Exec(tt.update)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Expected error but got none")
-				}
+			if updExecuteUpdate(t, db, tt.update, tt.wantErr) {
 				return
 			}
-			if err != nil {
-				t.Fatalf("UPDATE failed: %v", err)
-			}
 
-			// Skip verification if not needed
 			if tt.skipVerify || tt.verify == "" {
 				return
 			}
 
-			// Verify results
 			rows, err := db.Query(tt.verify)
 			if err != nil {
 				t.Fatalf("Verify query failed: %v", err)
 			}
 			defer rows.Close()
 
-			// Get column count
 			cols, err := rows.Columns()
 			if err != nil {
 				t.Fatalf("Failed to get columns: %v", err)
 			}
-			colCount := len(cols)
 
-			// Collect results
-			var results [][]interface{}
-			for rows.Next() {
-				// Create a slice of interface{} to hold the values
-				values := make([]interface{}, colCount)
-				valuePtrs := make([]interface{}, colCount)
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("Failed to scan row: %v", err)
-				}
-
-				// Convert []byte to string for comparison
-				for i, v := range values {
-					if b, ok := v.([]byte); ok {
-						values[i] = string(b)
-					}
-				}
-
-				results = append(results, values)
-			}
-
-			if err := rows.Err(); err != nil {
-				t.Fatalf("Row iteration error: %v", err)
-			}
-
-			// Compare results
-			if len(results) != len(tt.wantRows) {
-				t.Errorf("Row count mismatch: got %d, want %d", len(results), len(tt.wantRows))
-				t.Logf("Got: %v", results)
-				t.Logf("Want: %v", tt.wantRows)
-				return
-			}
-
-			for i, row := range results {
-				if len(row) != len(tt.wantRows[i]) {
-					t.Errorf("Row %d column count mismatch: got %d, want %d", i, len(row), len(tt.wantRows[i]))
-					continue
-				}
-				for j, val := range row {
-					// Handle nil comparison
-					if val == nil && tt.wantRows[i][j] == nil {
-						continue
-					}
-					if val == nil || tt.wantRows[i][j] == nil {
-						t.Errorf("Row %d, col %d: got %v, want %v", i, j, val, tt.wantRows[i][j])
-						continue
-					}
-
-					// Compare values
-					if val != tt.wantRows[i][j] {
-						t.Errorf("Row %d, col %d: got %v (type %T), want %v (type %T)",
-							i, j, val, val, tt.wantRows[i][j], tt.wantRows[i][j])
-					}
-				}
-			}
+			results := updCollectResults(t, rows, len(cols))
+			updVerifyResults(t, results, tt.wantRows)
 		})
 	}
 }

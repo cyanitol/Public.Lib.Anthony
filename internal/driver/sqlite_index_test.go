@@ -8,22 +8,25 @@ import (
 	"testing"
 )
 
+// idxTestCase represents an index test case with declarative fields
+type idxTestCase struct {
+	name     string
+	setup    []string
+	query    string
+	wantRows [][]interface{}
+	wantErr  bool
+	errMsg   string
+	skip     string
+}
+
 // TestSQLiteIndex tests index creation, usage, and deletion functionality
 // Converted from SQLite TCL test files: index.test, index2.test, index3.test, index4.test, index5.test
 func TestSQLiteIndex(t *testing.T) {
 	t.Skip("pre-existing failure - needs index implementation fixes")
-	tests := []struct {
-		name     string
-		setup    []string        // CREATE TABLE + CREATE INDEX statements
-		query    string          // Query to execute
-		wantRows [][]interface{} // Expected rows
-		wantErr  bool            // Whether an error is expected
-		errMsg   string          // Expected error message substring
-		skip     string
-	}{
+	tests := []idxTestCase{
 		// index.test - Basic index creation
 		{
-			name: "index-1.1 - Basic index creation",
+			name: "idx-1.1 - Basic index creation",
 			setup: []string{
 				"CREATE TABLE test1(f1 int, f2 int, f3 int)",
 				"CREATE INDEX index1 ON test1(f1)",
@@ -32,7 +35,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{"index1"}},
 		},
 		{
-			name: "index-1.2 - Index dies with table",
+			name: "idx-1.2 - Index dies with table",
 			setup: []string{
 				"CREATE TABLE test1(f1 int, f2 int, f3 int)",
 				"CREATE INDEX index1 ON test1(f1)",
@@ -43,14 +46,14 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - Error cases
 		{
-			name:    "index-2.1 - Index on non-existent table",
+			name:    "idx-2.1 - Index on non-existent table",
 			setup:   []string{},
 			query:   "CREATE INDEX index1 ON test1(f1)",
 			wantErr: true,
 			errMsg:  "no such table",
 		},
 		{
-			name: "index-2.1b - Index on non-existent column",
+			name: "idx-2.1b - Index on non-existent column",
 			setup: []string{
 				"CREATE TABLE test1(f1 int, f2 int, f3 int)",
 			},
@@ -59,7 +62,7 @@ func TestSQLiteIndex(t *testing.T) {
 			errMsg:  "no such column",
 		},
 		{
-			name: "index-2.2 - Index with some invalid columns",
+			name: "idx-2.2 - Index with some invalid columns",
 			setup: []string{
 				"CREATE TABLE test1(f1 int, f2 int, f3 int)",
 			},
@@ -69,7 +72,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - Multiple indices
 		{
-			name: "index-3.1 - Create many indices on same table",
+			name: "idx-3.1 - Create many indices on same table",
 			setup: []string{
 				"CREATE TABLE test1(f1 int, f2 int, f3 int, f4 int, f5 int)",
 				"CREATE INDEX index01 ON test1(f1)",
@@ -82,7 +85,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{int64(5)}},
 		},
 		{
-			name: "index-3.3 - All indices removed with table",
+			name: "idx-3.3 - All indices removed with table",
 			setup: []string{
 				"CREATE TABLE test1(f1 int, f2 int)",
 				"CREATE INDEX idx1 ON test1(f1)",
@@ -94,7 +97,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - Index usage
 		{
-			name: "index-4.1-4.3 - Query using index",
+			name: "idx-4.1-4.3 - Query using index",
 			setup: []string{
 				"CREATE TABLE test1(cnt int, power int)",
 				"INSERT INTO test1 VALUES(1, 2)",
@@ -108,7 +111,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{int64(10)}},
 		},
 		{
-			name: "index-4.4-4.5 - Query after dropping one index",
+			name: "idx-4.4-4.5 - Query after dropping one index",
 			setup: []string{
 				"CREATE TABLE test1(cnt int, power int)",
 				"INSERT INTO test1 VALUES(6, 64)",
@@ -121,7 +124,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - No indexing sqlite_master
 		{
-			name:    "index-5.1 - Cannot index sqlite_master",
+			name:    "idx-5.1 - Cannot index sqlite_master",
 			setup:   []string{},
 			query:   "CREATE INDEX index1 ON sqlite_master(name)",
 			wantErr: true,
@@ -129,7 +132,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - Duplicate index names
 		{
-			name: "index-6.1 - Duplicate index name error",
+			name: "idx-6.1 - Duplicate index name error",
 			setup: []string{
 				"CREATE TABLE test1(f1 int, f2 int)",
 				"CREATE TABLE test2(g1 real, g2 real)",
@@ -140,7 +143,7 @@ func TestSQLiteIndex(t *testing.T) {
 			errMsg:  "already exists",
 		},
 		{
-			name: "index-6.1c - CREATE INDEX IF NOT EXISTS on existing",
+			name: "idx-6.1c - CREATE INDEX IF NOT EXISTS on existing",
 			setup: []string{
 				"CREATE TABLE test1(f1 int, f2 int)",
 				"CREATE INDEX index1 ON test1(f1)",
@@ -149,7 +152,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "index-6.2 - Cannot create index with table name",
+			name: "idx-6.2 - Cannot create index with table name",
 			setup: []string{
 				"CREATE TABLE test1(f1 int)",
 				"CREATE TABLE test2(g1 real)",
@@ -159,7 +162,7 @@ func TestSQLiteIndex(t *testing.T) {
 			errMsg:  "already a table named",
 		},
 		{
-			name: "index-6.4 - Multiple indices dropped with table",
+			name: "idx-6.4 - Multiple indices dropped with table",
 			setup: []string{
 				"CREATE TABLE test1(a, b)",
 				"CREATE INDEX index1 ON test1(a)",
@@ -172,7 +175,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - Primary key creates auto-index
 		{
-			name: "index-7.1-7.3 - Primary key auto-index",
+			name: "idx-7.1-7.3 - Primary key auto-index",
 			setup: []string{
 				"CREATE TABLE test1(f1 int, f2 int primary key)",
 				"INSERT INTO test1 VALUES(16, 65536)",
@@ -181,7 +184,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{int64(16)}},
 		},
 		{
-			name: "index-7.3 - Auto-index name check",
+			name: "idx-7.3 - Auto-index name check",
 			setup: []string{
 				"CREATE TABLE test1(f1 int, f2 int primary key)",
 			},
@@ -190,7 +193,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - DROP INDEX errors
 		{
-			name:    "index-8.1 - Drop non-existent index",
+			name:    "idx-8.1 - Drop non-existent index",
 			setup:   []string{},
 			query:   "DROP INDEX index1",
 			wantErr: true,
@@ -198,7 +201,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - Multiple entries with same key
 		{
-			name: "index-10.0 - Non-unique index allows duplicates",
+			name: "idx-10.0 - Non-unique index allows duplicates",
 			setup: []string{
 				"CREATE TABLE t1(a int, b int)",
 				"CREATE INDEX i1 ON t1(a)",
@@ -211,7 +214,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{int64(2)}, {int64(12)}},
 		},
 		{
-			name: "index-10.1 - Query single value",
+			name: "idx-10.1 - Query single value",
 			setup: []string{
 				"CREATE TABLE t1(a int, b int)",
 				"CREATE INDEX i1 ON t1(a)",
@@ -222,7 +225,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - Composite index
 		{
-			name: "index-14.1 - Multi-column index with NULL handling",
+			name: "idx-14.1 - Multi-column index with NULL handling",
 			setup: []string{
 				"CREATE TABLE t6(a, b, c)",
 				"CREATE INDEX t6i1 ON t6(a, b)",
@@ -236,7 +239,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{int64(2)}, {int64(1)}},
 		},
 		{
-			name: "index-14.3 - Query on second column",
+			name: "idx-14.3 - Query on second column",
 			setup: []string{
 				"CREATE TABLE t6(a, b, c)",
 				"CREATE INDEX t6i1 ON t6(a, b)",
@@ -248,7 +251,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - Unique constraint via index
 		{
-			name: "index-16.1 - Single index for UNIQUE PRIMARY KEY",
+			name: "idx-16.1 - Single index for UNIQUE PRIMARY KEY",
 			setup: []string{
 				"CREATE TABLE t7(c UNIQUE PRIMARY KEY)",
 			},
@@ -256,7 +259,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{int64(1)}},
 		},
 		{
-			name: "index-16.4 - Single index for compound constraint",
+			name: "idx-16.4 - Single index for compound constraint",
 			setup: []string{
 				"CREATE TABLE t7(c, d, UNIQUE(c, d), PRIMARY KEY(c, d))",
 			},
@@ -264,7 +267,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{int64(1)}},
 		},
 		{
-			name: "index-16.5 - Multiple indices for different constraints",
+			name: "idx-16.5 - Multiple indices for different constraints",
 			setup: []string{
 				"CREATE TABLE t7(c, d, UNIQUE(c), PRIMARY KEY(c, d))",
 			},
@@ -273,7 +276,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - Auto-index naming
 		{
-			name: "index-17.1 - Auto-index naming convention",
+			name: "idx-17.1 - Auto-index naming convention",
 			setup: []string{
 				"CREATE TABLE t7(c, d UNIQUE, UNIQUE(c), PRIMARY KEY(c, d))",
 			},
@@ -281,7 +284,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{int64(3)}},
 		},
 		{
-			name: "index-17.2 - Cannot drop auto-index",
+			name: "idx-17.2 - Cannot drop auto-index",
 			setup: []string{
 				"CREATE TABLE t7(c PRIMARY KEY)",
 			},
@@ -290,14 +293,14 @@ func TestSQLiteIndex(t *testing.T) {
 			errMsg:  "cannot be dropped",
 		},
 		{
-			name:    "index-17.4 - DROP INDEX IF EXISTS on non-existent",
+			name:    "idx-17.4 - DROP INDEX IF EXISTS on non-existent",
 			setup:   []string{},
 			query:   "DROP INDEX IF EXISTS no_such_index",
 			wantErr: false,
 		},
 		// index.test - Reserved names
 		{
-			name:    "index-18.2 - Cannot create index with sqlite_ prefix",
+			name:    "idx-18.2 - Cannot create index with sqlite_ prefix",
 			setup:   []string{"CREATE TABLE t7(c)"},
 			query:   "CREATE INDEX sqlite_i1 ON t7(c)",
 			wantErr: true,
@@ -305,7 +308,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - Quoted index names
 		{
-			name: "index-20.1 - Drop index with quoted name",
+			name: "idx-20.1 - Drop index with quoted name",
 			setup: []string{
 				"CREATE TABLE t6(c)",
 				"CREATE INDEX \"t6i2\" ON t6(c)",
@@ -315,7 +318,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - TEMP index restrictions
 		{
-			name: "index-21.1 - Cannot create TEMP index on non-TEMP table",
+			name: "idx-21.1 - Cannot create TEMP index on non-TEMP table",
 			setup: []string{
 				"CREATE TABLE t6(c)",
 			},
@@ -325,7 +328,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - Expression index
 		{
-			name: "index-22.0 - Index on expression",
+			name: "idx-22.0 - Index on expression",
 			setup: []string{
 				"CREATE TABLE t1(a, b TEXT)",
 				"CREATE UNIQUE INDEX x1 ON t1(b==0)",
@@ -337,7 +340,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{"a", "0"}, {"a", "1"}},
 		},
 		{
-			name: "index-23.0 - Expression index with GLOB",
+			name: "idx-23.0 - Expression index with GLOB",
 			setup: []string{
 				"CREATE TABLE t1(a TEXT, b REAL)",
 				"CREATE UNIQUE INDEX t1x1 ON t1(a GLOB b)",
@@ -349,7 +352,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index3.test - UNIQUE constraint failures
 		{
-			name: "index3-1.1-1.2 - UNIQUE index fails on duplicate data",
+			name: "idx-unique-1.1-1.2 - UNIQUE index fails on duplicate data",
 			setup: []string{
 				"CREATE TABLE t1(a)",
 				"INSERT INTO t1 VALUES(1)",
@@ -361,7 +364,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index4.test - Large index creation
 		{
-			name: "index4-1.1 - Create index on large table",
+			name: "idx-large-1.1 - Create index on large table",
 			setup: []string{
 				"CREATE TABLE t1(x)",
 				"INSERT INTO t1 VALUES('test1')",
@@ -373,7 +376,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{int64(3)}},
 		},
 		{
-			name: "index4-2.2 - UNIQUE constraint on duplicate values",
+			name: "idx-unique-2.2 - UNIQUE constraint on duplicate values",
 			setup: []string{
 				"CREATE TABLE t2(x)",
 				"INSERT INTO t2 VALUES(14)",
@@ -387,7 +390,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// Additional comprehensive tests
 		{
-			name: "REINDEX - Basic reindex",
+			name: "idx-reindex - Basic reindex",
 			setup: []string{
 				"CREATE TABLE t1(a, b)",
 				"CREATE INDEX i1 ON t1(a)",
@@ -397,7 +400,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "REINDEX - Named index",
+			name: "idx-reindex-named - Named index",
 			setup: []string{
 				"CREATE TABLE t1(a, b)",
 				"CREATE INDEX i1 ON t1(a)",
@@ -407,7 +410,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "Multi-column index - Three columns",
+			name: "idx-multi-column - Three columns",
 			setup: []string{
 				"CREATE TABLE t1(a, b, c)",
 				"CREATE INDEX i1 ON t1(a, b, c)",
@@ -418,7 +421,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{int64(3)}, {int64(4)}},
 		},
 		{
-			name: "Partial index - WHERE clause",
+			name: "idx-partial - WHERE clause",
 			setup: []string{
 				"CREATE TABLE t1(a, b)",
 				"CREATE INDEX i1 ON t1(a) WHERE b > 5",
@@ -429,7 +432,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{int64(1)}},
 		},
 		{
-			name: "Index on INTEGER PRIMARY KEY",
+			name: "idx-ipk - Index on INTEGER PRIMARY KEY",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER PRIMARY KEY, name TEXT)",
 				"INSERT INTO t1 VALUES(1, 'Alice')",
@@ -439,7 +442,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{"Bob"}},
 		},
 		{
-			name: "Compound UNIQUE index",
+			name: "idx-compound-unique - Compound UNIQUE index",
 			setup: []string{
 				"CREATE TABLE t1(a, b, c)",
 				"CREATE UNIQUE INDEX i1 ON t1(a, b)",
@@ -450,7 +453,7 @@ func TestSQLiteIndex(t *testing.T) {
 			errMsg:  "UNIQUE constraint failed",
 		},
 		{
-			name: "Index with ASC",
+			name: "idx-asc - Index with ASC",
 			setup: []string{
 				"CREATE TABLE t1(a, b)",
 				"CREATE INDEX i1 ON t1(a ASC)",
@@ -462,7 +465,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{"a"}, {"b"}, {"c"}},
 		},
 		{
-			name: "Index with DESC",
+			name: "idx-desc - Index with DESC",
 			setup: []string{
 				"CREATE TABLE t1(a, b)",
 				"CREATE INDEX i1 ON t1(a DESC)",
@@ -474,7 +477,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{"c"}, {"b"}, {"a"}},
 		},
 		{
-			name: "Index on NULL values",
+			name: "idx-null - Index on NULL values",
 			skip: "",
 			setup: []string{
 				"CREATE TABLE t1(a, b)",
@@ -487,7 +490,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{int64(1)}, {int64(2)}},
 		},
 		{
-			name: "Drop and recreate index",
+			name: "idx-recreate - Drop and recreate index",
 			setup: []string{
 				"CREATE TABLE t1(a, b)",
 				"CREATE INDEX i1 ON t1(a)",
@@ -498,7 +501,7 @@ func TestSQLiteIndex(t *testing.T) {
 			wantRows: [][]interface{}{{int64(1)}},
 		},
 		{
-			name: "Index with COLLATE",
+			name: "idx-collate - Index with COLLATE",
 			setup: []string{
 				"CREATE TABLE t1(a TEXT, b)",
 				"CREATE INDEX i1 ON t1(a COLLATE NOCASE)",
@@ -511,119 +514,184 @@ func TestSQLiteIndex(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt // Capture range variable
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
-			db, err := sql.Open("sqlite_internal", ":memory:")
-			if err != nil {
-				t.Fatalf("failed to open database: %v", err)
-			}
-			defer db.Close()
-
-			// Execute setup statements
-			for _, stmt := range tt.setup {
-				_, err := db.Exec(stmt)
-				if err != nil {
-					t.Fatalf("setup failed on statement %q: %v", stmt, err)
-				}
-			}
-
-			// Execute the test query
-			if tt.wantErr {
-				_, err := db.Exec(tt.query)
-				if err == nil {
-					t.Fatalf("expected error containing %q, got nil", tt.errMsg)
-				}
-				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
-					t.Fatalf("expected error containing %q, got %q", tt.errMsg, err.Error())
-				}
-			} else {
-				// Check if this is a query or an exec
-				if tt.wantRows != nil {
-					rows, err := db.Query(tt.query)
-					if err != nil {
-						t.Fatalf("query failed: %v", err)
-					}
-					defer rows.Close()
-
-					// Get column count
-					cols, err := rows.Columns()
-					if err != nil {
-						t.Fatalf("failed to get columns: %v", err)
-					}
-
-					var gotRows [][]interface{}
-					for rows.Next() {
-						// Create a slice to hold the values
-						values := make([]interface{}, len(cols))
-						valuePtrs := make([]interface{}, len(cols))
-						for i := range values {
-							valuePtrs[i] = &values[i]
-						}
-
-						if err := rows.Scan(valuePtrs...); err != nil {
-							t.Fatalf("scan failed: %v", err)
-						}
-
-						// Convert []byte to string for comparison
-						row := make([]interface{}, len(cols))
-						for i, v := range values {
-							if b, ok := v.([]byte); ok {
-								row[i] = string(b)
-							} else {
-								row[i] = v
-							}
-						}
-						gotRows = append(gotRows, row)
-					}
-
-					if err := rows.Err(); err != nil {
-						t.Fatalf("rows iteration error: %v", err)
-					}
-
-					// Compare rows
-					if len(gotRows) != len(tt.wantRows) {
-						t.Fatalf("row count mismatch: got %d, want %d\nGot: %v\nWant: %v",
-							len(gotRows), len(tt.wantRows), gotRows, tt.wantRows)
-					}
-
-					for i, gotRow := range gotRows {
-						wantRow := tt.wantRows[i]
-						if len(gotRow) != len(wantRow) {
-							t.Fatalf("row %d column count mismatch: got %d, want %d", i, len(gotRow), len(wantRow))
-						}
-						for j, gotVal := range gotRow {
-							wantVal := wantRow[j]
-							if !valuesEqual(gotVal, wantVal) {
-								t.Errorf("row %d, col %d: got %v (%T), want %v (%T)",
-									i, j, gotVal, gotVal, wantVal, wantVal)
-							}
-						}
-					}
-				} else {
-					// Just execute without checking results
-					_, err := db.Exec(tt.query)
-					if err != nil {
-						t.Fatalf("exec failed: %v", err)
-					}
-				}
-			}
+			runIdxTest(t, tt)
 		})
+	}
+}
+
+// runIdxTest executes a single index test case
+func runIdxTest(t *testing.T, tt idxTestCase) {
+	t.Helper()
+	if tt.skip != "" {
+		t.Skip(tt.skip)
+	}
+
+	db := idxSetupDB(t)
+	defer db.Close()
+
+	idxRunSetup(t, db, tt.setup)
+	idxExecuteQuery(t, db, tt)
+}
+
+// idxSetupDB creates test database
+func idxSetupDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite_internal", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	return db
+}
+
+// idxRunSetup executes setup statements
+func idxRunSetup(t *testing.T, db *sql.DB, setup []string) {
+	t.Helper()
+	for _, stmt := range setup {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup failed on statement %q: %v", stmt, err)
+		}
+	}
+}
+
+// idxExecuteQuery executes the test query and verifies results
+func idxExecuteQuery(t *testing.T, db *sql.DB, tt idxTestCase) {
+	t.Helper()
+	if tt.wantErr {
+		idxVerifyError(t, db, tt.query, tt.errMsg)
+	} else {
+		idxVerifySuccess(t, db, tt)
+	}
+}
+
+// idxVerifyError verifies expected error
+func idxVerifyError(t *testing.T, db *sql.DB, query, errMsg string) {
+	t.Helper()
+	_, err := db.Exec(query)
+	if err == nil {
+		t.Fatalf("expected error containing %q, got nil", errMsg)
+	}
+	if errMsg != "" && !strings.Contains(err.Error(), errMsg) {
+		t.Fatalf("expected error containing %q, got %q", errMsg, err.Error())
+	}
+}
+
+// idxVerifySuccess verifies successful query execution
+func idxVerifySuccess(t *testing.T, db *sql.DB, tt idxTestCase) {
+	t.Helper()
+	if tt.wantRows != nil {
+		idxVerifyRows(t, db, tt.query, tt.wantRows)
+	} else {
+		idxExecuteNoResult(t, db, tt.query)
+	}
+}
+
+// idxVerifyRows verifies query rows match expected
+func idxVerifyRows(t *testing.T, db *sql.DB, query string, wantRows [][]interface{}) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+
+	cols := idxGetColumns(t, rows)
+	gotRows := idxScanRows(t, rows, cols)
+	idxCompareResults(t, gotRows, wantRows)
+}
+
+// idxGetColumns gets column names from rows
+func idxGetColumns(t *testing.T, rows *sql.Rows) []string {
+	t.Helper()
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("failed to get columns: %v", err)
+	}
+	return cols
+}
+
+// idxScanRows scans all rows from query
+func idxScanRows(t *testing.T, rows *sql.Rows, cols []string) [][]interface{} {
+	t.Helper()
+	var gotRows [][]interface{}
+	for rows.Next() {
+		values := make([]interface{}, len(cols))
+		valuePtrs := make([]interface{}, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+
+		row := make([]interface{}, len(cols))
+		for i, v := range values {
+			if b, ok := v.([]byte); ok {
+				row[i] = string(b)
+			} else {
+				row[i] = v
+			}
+		}
+		gotRows = append(gotRows, row)
+	}
+
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration error: %v", err)
+	}
+
+	return gotRows
+}
+
+// idxCompareResults compares actual vs expected rows
+func idxCompareResults(t *testing.T, got, want [][]interface{}) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("row count mismatch: got %d, want %d\nGot: %v\nWant: %v",
+			len(got), len(want), got, want)
+	}
+
+	for i, gotRow := range got {
+		wantRow := want[i]
+		if len(gotRow) != len(wantRow) {
+			t.Fatalf("row %d column count mismatch: got %d, want %d", i, len(gotRow), len(wantRow))
+		}
+		for j, gotVal := range gotRow {
+			wantVal := wantRow[j]
+			if !valuesEqual(gotVal, wantVal) {
+				t.Errorf("row %d, col %d: got %v (%T), want %v (%T)",
+					i, j, gotVal, gotVal, wantVal, wantVal)
+			}
+		}
+	}
+}
+
+// idxExecuteNoResult executes query without verifying results
+func idxExecuteNoResult(t *testing.T, db *sql.DB, query string) {
+	t.Helper()
+	if _, err := db.Exec(query); err != nil {
+		t.Fatalf("exec failed: %v", err)
 	}
 }
 
 // TestIndexUsageInQueries tests that indices are actually used in queries
 func TestIndexUsageInQueries(t *testing.T) {
-	db, err := sql.Open("sqlite_internal", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := idxSetupDB(t)
 	defer db.Close()
 
-	// Setup
-	_, err = db.Exec(`
+	idxCreateUsersTable(t, db)
+	idxPopulateUsers(t, db, 100)
+	idxCreateEmailIndex(t, db)
+
+	id, name := idxQueryUser(t, db, "user50@example.com")
+	idxVerifyUserResult(t, id, name, 50, "User 50")
+}
+
+// idxCreateUsersTable creates the users table
+func idxCreateUsersTable(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`
 		CREATE TABLE users (
 			id INTEGER PRIMARY KEY,
 			email TEXT,
@@ -634,24 +702,33 @@ func TestIndexUsageInQueries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create table: %v", err)
 	}
+}
 
-	// Insert test data
-	for i := 1; i <= 100; i++ {
-		_, err = db.Exec("INSERT INTO users VALUES(?, ?, ?, ?)",
+// idxPopulateUsers inserts test users
+func idxPopulateUsers(t *testing.T, db *sql.DB, count int) {
+	t.Helper()
+	for i := 1; i <= count; i++ {
+		_, err := db.Exec("INSERT INTO users VALUES(?, ?, ?, ?)",
 			i, fmt.Sprintf("user%d@example.com", i), fmt.Sprintf("User %d", i), 20+i%50)
 		if err != nil {
 			t.Fatalf("failed to insert data: %v", err)
 		}
 	}
+}
 
-	// Create index
-	_, err = db.Exec("CREATE INDEX idx_users_email ON users(email)")
+// idxCreateEmailIndex creates index on email column
+func idxCreateEmailIndex(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec("CREATE INDEX idx_users_email ON users(email)")
 	if err != nil {
 		t.Fatalf("failed to create index: %v", err)
 	}
+}
 
-	// Query using index
-	rows, err := db.Query("SELECT id, name FROM users WHERE email = ?", "user50@example.com")
+// idxQueryUser queries user by email
+func idxQueryUser(t *testing.T, db *sql.DB, email string) (int64, string) {
+	t.Helper()
+	rows, err := db.Query("SELECT id, name FROM users WHERE email = ?", email)
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
@@ -666,24 +743,38 @@ func TestIndexUsageInQueries(t *testing.T) {
 	if err := rows.Scan(&id, &name); err != nil {
 		t.Fatalf("failed to scan: %v", err)
 	}
+	return id, name
+}
 
-	if id != 50 {
-		t.Errorf("expected id=50, got %d", id)
+// idxVerifyUserResult verifies user query result
+func idxVerifyUserResult(t *testing.T, gotID int64, gotName string, wantID int64, wantName string) {
+	t.Helper()
+	if gotID != wantID {
+		t.Errorf("expected id=%d, got %d", wantID, gotID)
 	}
-	if name != "User 50" {
-		t.Errorf("expected name='User 50', got %q", name)
+	if gotName != wantName {
+		t.Errorf("expected name=%q, got %q", wantName, gotName)
 	}
 }
 
 // TestMultiColumnIndexUsage tests queries with multi-column indices
 func TestMultiColumnIndexUsage(t *testing.T) {
-	db, err := sql.Open("sqlite_internal", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := idxSetupDB(t)
 	defer db.Close()
 
-	_, err = db.Exec(`
+	idxCreateOrdersTable(t, db)
+	idxCreateMultiColIndex(t, db)
+	idxPopulateOrders(t, db)
+
+	results := idxQueryOrders(t, db, 100, 1)
+	expected := [][]int64{{1, 5}, {3, 2}}
+	idxVerifyOrderResults(t, results, expected)
+}
+
+// idxCreateOrdersTable creates orders table
+func idxCreateOrdersTable(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`
 		CREATE TABLE orders (
 			id INTEGER PRIMARY KEY,
 			customer_id INTEGER,
@@ -694,14 +785,20 @@ func TestMultiColumnIndexUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create table: %v", err)
 	}
+}
 
-	// Create multi-column index
-	_, err = db.Exec("CREATE INDEX idx_orders_customer_product ON orders(customer_id, product_id)")
+// idxCreateMultiColIndex creates multi-column index
+func idxCreateMultiColIndex(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec("CREATE INDEX idx_orders_customer_product ON orders(customer_id, product_id)")
 	if err != nil {
 		t.Fatalf("failed to create index: %v", err)
 	}
+}
 
-	// Insert test data
+// idxPopulateOrders inserts test orders
+func idxPopulateOrders(t *testing.T, db *sql.DB) {
+	t.Helper()
 	testData := [][]int{
 		{1, 100, 1, 5},
 		{2, 100, 2, 3},
@@ -711,51 +808,67 @@ func TestMultiColumnIndexUsage(t *testing.T) {
 	}
 
 	for _, data := range testData {
-		_, err = db.Exec("INSERT INTO orders VALUES(?, ?, ?, ?)", data[0], data[1], data[2], data[3])
+		_, err := db.Exec("INSERT INTO orders VALUES(?, ?, ?, ?)", data[0], data[1], data[2], data[3])
 		if err != nil {
 			t.Fatalf("failed to insert: %v", err)
 		}
 	}
+}
 
-	// Query using multi-column index
+// idxQueryOrders queries orders by customer and product
+func idxQueryOrders(t *testing.T, db *sql.DB, customerID, productID int) [][]int64 {
+	t.Helper()
 	rows, err := db.Query("SELECT id, quantity FROM orders WHERE customer_id = ? AND product_id = ? ORDER BY id",
-		100, 1)
+		customerID, productID)
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
 	defer rows.Close()
 
-	expected := [][]int64{{1, 5}, {3, 2}}
-	idx := 0
+	var results [][]int64
 	for rows.Next() {
 		var id, quantity int64
 		if err := rows.Scan(&id, &quantity); err != nil {
 			t.Fatalf("failed to scan: %v", err)
 		}
-		if idx >= len(expected) {
-			t.Fatalf("too many rows returned")
-		}
-		if id != expected[idx][0] || quantity != expected[idx][1] {
-			t.Errorf("row %d: got (%d, %d), want (%d, %d)",
-				idx, id, quantity, expected[idx][0], expected[idx][1])
-		}
-		idx++
+		results = append(results, []int64{id, quantity})
 	}
+	return results
+}
 
-	if idx != len(expected) {
-		t.Errorf("expected %d rows, got %d", len(expected), idx)
+// idxVerifyOrderResults verifies order query results
+func idxVerifyOrderResults(t *testing.T, got, want [][]int64) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("expected %d rows, got %d", len(want), len(got))
+		return
+	}
+	for idx, gotRow := range got {
+		if gotRow[0] != want[idx][0] || gotRow[1] != want[idx][1] {
+			t.Errorf("row %d: got (%d, %d), want (%d, %d)",
+				idx, gotRow[0], gotRow[1], want[idx][0], want[idx][1])
+		}
 	}
 }
 
 // TestPartialIndexes tests partial indices with WHERE clauses
 func TestPartialIndexes(t *testing.T) {
-	db, err := sql.Open("sqlite_internal", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := idxSetupDB(t)
 	defer db.Close()
 
-	_, err = db.Exec(`
+	idxCreateProductsTable(t, db)
+	idxCreatePartialIndex(t, db)
+	idxPopulateProducts(t, db)
+
+	results := idxQueryInStockProducts(t, db)
+	expected := []string{"Doohickey", "Widget"}
+	idxVerifyProductResults(t, results, expected)
+}
+
+// idxCreateProductsTable creates products table
+func idxCreateProductsTable(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`
 		CREATE TABLE products (
 			id INTEGER PRIMARY KEY,
 			name TEXT,
@@ -766,14 +879,20 @@ func TestPartialIndexes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create table: %v", err)
 	}
+}
 
-	// Create partial index - only index products in stock
-	_, err = db.Exec("CREATE INDEX idx_products_in_stock ON products(name) WHERE in_stock = 1")
+// idxCreatePartialIndex creates partial index
+func idxCreatePartialIndex(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec("CREATE INDEX idx_products_in_stock ON products(name) WHERE in_stock = 1")
 	if err != nil {
 		t.Fatalf("failed to create partial index: %v", err)
 	}
+}
 
-	// Insert test data
+// idxPopulateProducts inserts test products
+func idxPopulateProducts(t *testing.T, db *sql.DB) {
+	t.Helper()
 	testData := []struct {
 		id       int
 		name     string
@@ -787,37 +906,44 @@ func TestPartialIndexes(t *testing.T) {
 	}
 
 	for _, data := range testData {
-		_, err = db.Exec("INSERT INTO products VALUES(?, ?, ?, ?)",
+		_, err := db.Exec("INSERT INTO products VALUES(?, ?, ?, ?)",
 			data.id, data.name, data.price, data.in_stock)
 		if err != nil {
 			t.Fatalf("failed to insert: %v", err)
 		}
 	}
+}
 
-	// Query using partial index
+// idxQueryInStockProducts queries in-stock products
+func idxQueryInStockProducts(t *testing.T, db *sql.DB) []string {
+	t.Helper()
 	rows, err := db.Query("SELECT name FROM products WHERE in_stock = 1 ORDER BY name")
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
 	defer rows.Close()
 
-	expected := []string{"Doohickey", "Widget"}
-	idx := 0
+	var results []string
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
 			t.Fatalf("failed to scan: %v", err)
 		}
-		if idx >= len(expected) {
-			t.Fatalf("too many rows returned")
-		}
-		if name != expected[idx] {
-			t.Errorf("row %d: got %q, want %q", idx, name, expected[idx])
-		}
-		idx++
+		results = append(results, name)
 	}
+	return results
+}
 
-	if idx != len(expected) {
-		t.Errorf("expected %d rows, got %d", len(expected), idx)
+// idxVerifyProductResults verifies product query results
+func idxVerifyProductResults(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("expected %d rows, got %d", len(want), len(got))
+		return
+	}
+	for idx, gotName := range got {
+		if gotName != want[idx] {
+			t.Errorf("row %d: got %q, want %q", idx, gotName, want[idx])
+		}
 	}
 }

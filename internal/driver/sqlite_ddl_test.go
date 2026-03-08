@@ -2,6 +2,7 @@
 package driver
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 )
@@ -10,15 +11,7 @@ import (
 // (table.test, temptable.test, createtab.test)
 func TestSQLiteDDL(t *testing.T) {
 	t.Skip("pre-existing failure - DDL sqlite_master queries not yet supported")
-	tests := []struct {
-		name     string
-		setup    []string // Setup statements (CREATE TABLE, etc.)
-		exec     []string // Main statements to execute
-		verify   string   // SELECT query to verify results
-		wantRows int      // Expected number of rows (if verify is set)
-		wantErr  bool     // Whether we expect an error
-		errMsg   string   // Expected error message substring
-	}{
+	tests := []ddlTestCase{
 		// Basic CREATE/DROP TABLE tests (from table.test)
 		{
 			name: "table-1.1: CREATE TABLE basic",
@@ -724,58 +717,133 @@ func TestSQLiteDDL(t *testing.T) {
 			db, cleanup := setupTestDB(t)
 			defer cleanup()
 
-			// Run setup statements
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed: %v, stmt: %s", err, stmt)
-				}
-			}
+			ddlRunSetup(t, db, tt.setup)
+			execErr := ddlRunExec(db, tt.exec)
 
-			// Run main execution statements
-			var execErr error
-			for _, stmt := range tt.exec {
-				if _, err := db.Exec(stmt); err != nil {
-					execErr = err
-					break
-				}
-			}
-
-			// Check for expected errors
-			if tt.wantErr {
-				if execErr == nil {
-					t.Fatalf("expected error containing %q, got nil", tt.errMsg)
-				}
-				if !strings.Contains(execErr.Error(), tt.errMsg) {
-					t.Fatalf("expected error containing %q, got %q", tt.errMsg, execErr.Error())
-				}
+			if ddlCheckError(t, execErr, tt.wantErr, tt.errMsg) {
 				return
 			}
 
-			if execErr != nil {
-				t.Fatalf("unexpected error: %v", execErr)
-			}
-
-			// Verify results if specified
-			if tt.verify != "" {
-				rows, err := db.Query(tt.verify)
-				if err != nil {
-					t.Fatalf("verify query failed: %v", err)
-				}
-				defer rows.Close()
-
-				count := 0
-				for rows.Next() {
-					count++
-				}
-				if err := rows.Err(); err != nil {
-					t.Fatalf("rows iteration error: %v", err)
-				}
-
-				if count != tt.wantRows {
-					t.Fatalf("expected %d rows, got %d", tt.wantRows, count)
-				}
-			}
+			ddlVerifyResults(t, db, tt.verify, tt.wantRows)
 		})
+	}
+}
+
+// ddlTestCase holds DDL test configuration
+type ddlTestCase struct {
+	name     string
+	setup    []string
+	exec     []string
+	verify   string
+	wantRows int
+	wantErr  bool
+	errMsg   string
+}
+
+// ddlCountRows counts rows returned by a query
+func ddlCountRows(t *testing.T, db *sql.DB, query string) int {
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("failed to query: %v", err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	return count
+}
+
+// ddlRunSetup executes setup statements
+func ddlRunSetup(t *testing.T, db *sql.DB, setup []string) {
+	for _, stmt := range setup {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup failed: %v, stmt: %s", err, stmt)
+		}
+	}
+}
+
+// ddlRunExec executes main execution statements and returns error
+func ddlRunExec(db *sql.DB, exec []string) error {
+	for _, stmt := range exec {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ddlCheckError verifies expected error occurred
+func ddlCheckError(t *testing.T, execErr error, wantErr bool, errMsg string) bool {
+	if wantErr {
+		if execErr == nil {
+			t.Fatalf("expected error containing %q, got nil", errMsg)
+		}
+		if !strings.Contains(execErr.Error(), errMsg) {
+			t.Fatalf("expected error containing %q, got %q", errMsg, execErr.Error())
+		}
+		return true
+	}
+
+	if execErr != nil {
+		t.Fatalf("unexpected error: %v", execErr)
+	}
+	return false
+}
+
+// ddlVerifyResults verifies query results
+func ddlVerifyResults(t *testing.T, db *sql.DB, verify string, wantRows int) {
+	if verify == "" {
+		return
+	}
+
+	rows, err := db.Query(verify)
+	if err != nil {
+		t.Fatalf("verify query failed: %v", err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration error: %v", err)
+	}
+
+	if count != wantRows {
+		t.Fatalf("expected %d rows, got %d", wantRows, count)
+	}
+}
+
+// ddlCreateTables creates n tables with given name pattern
+func ddlCreateTables(t *testing.T, db *sql.DB, namePrefix string, n int) {
+	for i := 1; i <= n; i++ {
+		tableName := namePrefix + string(rune('0'+i))
+		sql := "CREATE TABLE " + tableName + " (id INTEGER, name TEXT)"
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("failed to create table %s: %v", tableName, err)
+		}
+	}
+}
+
+// ddlDropTables drops n tables with given name pattern
+func ddlDropTables(t *testing.T, db *sql.DB, namePrefix string, n int) {
+	for i := 1; i <= n; i++ {
+		tableName := namePrefix + string(rune('0'+i))
+		sql := "DROP TABLE " + tableName
+		if _, err := db.Exec(sql); err != nil {
+			t.Fatalf("failed to drop table %s: %v", tableName, err)
+		}
+	}
+}
+
+// ddlVerifyTableCount verifies expected number of tables
+func ddlVerifyTableCount(t *testing.T, db *sql.DB, expected int) {
+	count := ddlCountRows(t, db, "SELECT name FROM sqlite_master WHERE type='table'")
+	if count != expected {
+		t.Fatalf("expected %d tables, got %d", expected, count)
 	}
 }
 
@@ -787,162 +855,112 @@ func TestDDLComplexScenarios(t *testing.T) {
 
 	// Test creating multiple tables and dropping them
 	t.Run("multiple-tables", func(t *testing.T) {
-		// Create 10 tables
-		for i := 1; i <= 10; i++ {
-			tableName := "test" + string(rune('0'+i))
-			sql := "CREATE TABLE " + tableName + " (id INTEGER, name TEXT)"
-			if _, err := db.Exec(sql); err != nil {
-				t.Fatalf("failed to create table %s: %v", tableName, err)
-			}
-		}
-
-		// Verify all tables exist
-		rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-		if err != nil {
-			t.Fatalf("failed to query tables: %v", err)
-		}
-		defer rows.Close()
-
-		count := 0
-		for rows.Next() {
-			count++
-		}
-
-		if count != 10 {
-			t.Fatalf("expected 10 tables, got %d", count)
-		}
-
-		// Drop all tables
-		for i := 1; i <= 10; i++ {
-			tableName := "test" + string(rune('0'+i))
-			sql := "DROP TABLE " + tableName
-			if _, err := db.Exec(sql); err != nil {
-				t.Fatalf("failed to drop table %s: %v", tableName, err)
-			}
-		}
-
-		// Verify all tables are gone
-		rows, err = db.Query("SELECT name FROM sqlite_master WHERE type='table'")
-		if err != nil {
-			t.Fatalf("failed to query tables: %v", err)
-		}
-		defer rows.Close()
-
-		count = 0
-		for rows.Next() {
-			count++
-		}
-
-		if count != 0 {
-			t.Fatalf("expected 0 tables, got %d", count)
-		}
+		ddlCreateTables(t, db, "test", 10)
+		ddlVerifyTableCount(t, db, 10)
+		ddlDropTables(t, db, "test", 10)
+		ddlVerifyTableCount(t, db, 0)
 	})
 
 	// Test creating table with all constraint types
 	t.Run("all-constraints", func(t *testing.T) {
-		sql := `CREATE TABLE users (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			username TEXT NOT NULL UNIQUE,
-			email TEXT NOT NULL,
-			age INTEGER CHECK(age >= 18),
-			status TEXT DEFAULT 'active',
-			created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(email)
-		)`
-
-		if _, err := db.Exec(sql); err != nil {
-			t.Fatalf("failed to create table with constraints: %v", err)
-		}
-
-		// Insert valid data
-		if _, err := db.Exec("INSERT INTO users (username, email, age) VALUES ('john', 'john@example.com', 25)"); err != nil {
-			t.Fatalf("failed to insert valid data: %v", err)
-		}
-
-		// Try to insert duplicate username
-		if _, err := db.Exec("INSERT INTO users (username, email, age) VALUES ('john', 'other@example.com', 30)"); err == nil {
-			t.Fatal("expected error for duplicate username")
-		}
-
-		// Try to insert with age < 18
-		if _, err := db.Exec("INSERT INTO users (username, email, age) VALUES ('jane', 'jane@example.com', 15)"); err == nil {
-			t.Fatal("expected error for age check constraint")
-		}
+		ddlTestAllConstraints(t, db)
 	})
 
 	// Test CREATE TABLE AS SELECT with joins
 	t.Run("create-as-select-join", func(t *testing.T) {
-		// Setup source tables
-		if _, err := db.Exec("CREATE TABLE orders (id INTEGER, user_id INTEGER, amount REAL)"); err != nil {
-			t.Fatalf("failed to create orders table: %v", err)
-		}
-		if _, err := db.Exec("CREATE TABLE customers (id INTEGER, name TEXT)"); err != nil {
-			t.Fatalf("failed to create customers table: %v", err)
-		}
-
-		// Insert test data
-		if _, err := db.Exec("INSERT INTO customers VALUES (1, 'Alice'), (2, 'Bob')"); err != nil {
-			t.Fatalf("failed to insert customers: %v", err)
-		}
-		if _, err := db.Exec("INSERT INTO orders VALUES (1, 1, 100.0), (2, 1, 200.0), (3, 2, 150.0)"); err != nil {
-			t.Fatalf("failed to insert orders: %v", err)
-		}
-
-		// Create table from join query
-		sql := `CREATE TABLE customer_totals AS
-			SELECT c.name, SUM(o.amount) as total
-			FROM customers c
-			JOIN orders o ON c.id = o.user_id
-			GROUP BY c.id, c.name`
-
-		if _, err := db.Exec(sql); err != nil {
-			t.Fatalf("failed to create table from join: %v", err)
-		}
-
-		// Verify results
-		rows, err := db.Query("SELECT name, total FROM customer_totals ORDER BY name")
-		if err != nil {
-			t.Fatalf("failed to query customer_totals: %v", err)
-		}
-		defer rows.Close()
-
-		count := 0
-		for rows.Next() {
-			count++
-		}
-
-		if count != 2 {
-			t.Fatalf("expected 2 rows in customer_totals, got %d", count)
-		}
+		ddlTestCreateAsSelectJoin(t, db)
 	})
 
 	// Test index creation on existing data
 	t.Run("index-on-existing-data", func(t *testing.T) {
-		// Create table and insert data
-		if _, err := db.Exec("CREATE TABLE products (id INTEGER, name TEXT, price REAL)"); err != nil {
-			t.Fatalf("failed to create products table: %v", err)
-		}
-
-		for i := 1; i <= 100; i++ {
-			if _, err := db.Exec("INSERT INTO products VALUES (?, ?, ?)", i, "Product", float64(i)*10.0); err != nil {
-				t.Fatalf("failed to insert product: %v", err)
-			}
-		}
-
-		// Create index on existing data
-		if _, err := db.Exec("CREATE INDEX idx_products_price ON products(price)"); err != nil {
-			t.Fatalf("failed to create index: %v", err)
-		}
-
-		// Verify index exists
-		rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_products_price'")
-		if err != nil {
-			t.Fatalf("failed to query index: %v", err)
-		}
-		defer rows.Close()
-
-		if !rows.Next() {
-			t.Fatal("expected index to exist")
-		}
+		ddlTestIndexOnExistingData(t, db)
 	})
+}
+
+// ddlTestAllConstraints tests table creation with all constraint types
+func ddlTestAllConstraints(t *testing.T, db *sql.DB) {
+	sql := `CREATE TABLE users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT NOT NULL UNIQUE,
+		email TEXT NOT NULL,
+		age INTEGER CHECK(age >= 18),
+		status TEXT DEFAULT 'active',
+		created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(email)
+	)`
+
+	if _, err := db.Exec(sql); err != nil {
+		t.Fatalf("failed to create table with constraints: %v", err)
+	}
+
+	if _, err := db.Exec("INSERT INTO users (username, email, age) VALUES ('john', 'john@example.com', 25)"); err != nil {
+		t.Fatalf("failed to insert valid data: %v", err)
+	}
+
+	if _, err := db.Exec("INSERT INTO users (username, email, age) VALUES ('john', 'other@example.com', 30)"); err == nil {
+		t.Fatal("expected error for duplicate username")
+	}
+
+	if _, err := db.Exec("INSERT INTO users (username, email, age) VALUES ('jane', 'jane@example.com', 15)"); err == nil {
+		t.Fatal("expected error for age check constraint")
+	}
+}
+
+// ddlTestCreateAsSelectJoin tests CREATE TABLE AS SELECT with joins
+func ddlTestCreateAsSelectJoin(t *testing.T, db *sql.DB) {
+	if _, err := db.Exec("CREATE TABLE orders (id INTEGER, user_id INTEGER, amount REAL)"); err != nil {
+		t.Fatalf("failed to create orders table: %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE customers (id INTEGER, name TEXT)"); err != nil {
+		t.Fatalf("failed to create customers table: %v", err)
+	}
+
+	if _, err := db.Exec("INSERT INTO customers VALUES (1, 'Alice'), (2, 'Bob')"); err != nil {
+		t.Fatalf("failed to insert customers: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO orders VALUES (1, 1, 100.0), (2, 1, 200.0), (3, 2, 150.0)"); err != nil {
+		t.Fatalf("failed to insert orders: %v", err)
+	}
+
+	sql := `CREATE TABLE customer_totals AS
+		SELECT c.name, SUM(o.amount) as total
+		FROM customers c
+		JOIN orders o ON c.id = o.user_id
+		GROUP BY c.id, c.name`
+
+	if _, err := db.Exec(sql); err != nil {
+		t.Fatalf("failed to create table from join: %v", err)
+	}
+
+	count := ddlCountRows(t, db, "SELECT name, total FROM customer_totals ORDER BY name")
+	if count != 2 {
+		t.Fatalf("expected 2 rows in customer_totals, got %d", count)
+	}
+}
+
+// ddlTestIndexOnExistingData tests index creation on existing data
+func ddlTestIndexOnExistingData(t *testing.T, db *sql.DB) {
+	if _, err := db.Exec("CREATE TABLE products (id INTEGER, name TEXT, price REAL)"); err != nil {
+		t.Fatalf("failed to create products table: %v", err)
+	}
+
+	for i := 1; i <= 100; i++ {
+		if _, err := db.Exec("INSERT INTO products VALUES (?, ?, ?)", i, "Product", float64(i)*10.0); err != nil {
+			t.Fatalf("failed to insert product: %v", err)
+		}
+	}
+
+	if _, err := db.Exec("CREATE INDEX idx_products_price ON products(price)"); err != nil {
+		t.Fatalf("failed to create index: %v", err)
+	}
+
+	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_products_price'")
+	if err != nil {
+		t.Fatalf("failed to query index: %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("expected index to exist")
+	}
 }
