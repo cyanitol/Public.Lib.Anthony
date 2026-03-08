@@ -150,6 +150,13 @@ func (m *ForeignKeyManager) ValidateInsert(
 			continue
 		}
 
+		// Check for self-referencing row (row references itself)
+		if strings.EqualFold(fk.Table, fk.RefTable) {
+			if selfReferenceMatches(values, fk.Columns, fk.RefColumns) {
+				continue // Row references itself, constraint satisfied
+			}
+		}
+
 		if err := m.validateReference(fk, fkValues, schemaTyped, reader); err != nil {
 			return err
 		}
@@ -246,6 +253,35 @@ func extractForeignKeyValues(values map[string]interface{}, columns []string) ([
 	}
 
 	return fkValues, hasNull
+}
+
+// selfReferenceMatches checks if a self-referencing row references itself.
+// This happens when the FK column values match the parent key column values.
+func selfReferenceMatches(values map[string]interface{}, fkColumns, parentColumns []string) bool {
+	if len(fkColumns) != len(parentColumns) {
+		return false
+	}
+
+	for i := range fkColumns {
+		fkVal, fkOK := values[strings.ToLower(fkColumns[i])]
+		if !fkOK {
+			fkVal, fkOK = values[fkColumns[i]]
+		}
+		parentVal, parentOK := values[strings.ToLower(parentColumns[i])]
+		if !parentOK {
+			parentVal, parentOK = values[parentColumns[i]]
+		}
+
+		if !fkOK || !parentOK {
+			return false
+		}
+
+		if !valuesEqual(fkVal, parentVal) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // ValidateDelete validates foreign key constraints for a DELETE operation.

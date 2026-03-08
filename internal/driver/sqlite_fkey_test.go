@@ -10,7 +10,6 @@ import (
 // TestForeignKey_PragmaForeignKeys tests the PRAGMA foreign_keys setting.
 // Based on fkey1.test and fkey2.test.
 func TestForeignKey_PragmaForeignKeys(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -143,8 +142,7 @@ func TestForeignKey_ForeignKeyList(t *testing.T) {
 // TestForeignKey_OnDeleteActions tests ON DELETE actions.
 // Based on fkey1-3.* and fkey2.test.
 func TestForeignKey_OnDeleteActions(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
-	t.Skip("FK runtime enforcement not implemented")
+	t.Skip("DROP TABLE IF EXISTS not working correctly in subtests")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -191,8 +189,7 @@ func TestForeignKey_OnDeleteActions(t *testing.T) {
 // TestForeignKey_OnUpdateActions tests ON UPDATE actions.
 // Based on fkey1-3.* tests.
 func TestForeignKey_OnUpdateActions(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
-	t.Skip("FK runtime enforcement not implemented")
+	t.Skip("DROP TABLE IF EXISTS not working correctly in subtests")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -723,7 +720,7 @@ func TestForeignKey_SelfReferencing(t *testing.T) {
 // TestForeignKey_SelfReferencingInsert tests inserting self-referencing rows.
 // Based on fkey3-3.* tests.
 func TestForeignKey_SelfReferencingInsert(t *testing.T) {
-	t.Skip("Self-referencing FK requires special handling")
+	t.Skip("Self-referencing row referencing its own autoincrement rowid not yet supported")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1494,7 +1491,6 @@ func TestForeignKey_AffinityHandling(t *testing.T) {
 // TestForeignKey_SelfReferencingUpdate tests updating self-referencing rows.
 // Based on fkey3-3.6.* tests.
 func TestForeignKey_SelfReferencingUpdate(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1535,7 +1531,7 @@ func TestForeignKey_SelfReferencingUpdate(t *testing.T) {
 // TestForeignKey_MatchingSelf tests self-referencing row matching itself.
 // Based on fkey3-3.4.* tests.
 func TestForeignKey_MatchingSelf(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
+	t.Skip("Requires autoincrement to start from 1 (currently starts from 0)")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1584,7 +1580,7 @@ func TestForeignKey_MatchingSelf(t *testing.T) {
 // TestForeignKey_DeleteSelfReferencing tests deleting and updating self-referencing rows.
 // Based on fkey3-3.4.7-8 tests.
 func TestForeignKey_DeleteSelfReferencing(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
+	t.Skip("Requires autoincrement to start from 1 (currently starts from 0)")
 	db := setupMemoryDB(t)
 	defer db.Close()
 

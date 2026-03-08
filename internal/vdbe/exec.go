@@ -2308,7 +2308,7 @@ func (v *VDBE) validateInsertConstraints(tableName string, payload []byte, btCur
 	if err := v.checkUniqueConstraints(tableName, payload, btCursor, rowid); err != nil {
 		return err
 	}
-	return v.checkForeignKeyConstraints(tableName, payload)
+	return v.checkForeignKeyConstraints(tableName, payload, rowid)
 }
 
 // performInsert executes the actual btree insert and updates counters.
@@ -2570,7 +2570,7 @@ func (v *VDBE) compareNonNullMemValues(a, b *Mem) int {
 }
 
 // checkForeignKeyConstraints validates foreign key constraints for an INSERT operation.
-func (v *VDBE) checkForeignKeyConstraints(tableName string, payload []byte) error {
+func (v *VDBE) checkForeignKeyConstraints(tableName string, payload []byte, rowid int64) error {
 	// Check if foreign keys are enabled
 	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled {
 		return nil
@@ -2596,8 +2596,8 @@ func (v *VDBE) checkForeignKeyConstraints(tableName string, payload []byte) erro
 		return nil
 	}
 
-	// Extract values from payload
-	values, err := v.extractValuesFromPayload(tableName, payload)
+	// Extract values from payload including rowid for INTEGER PRIMARY KEY
+	values, err := v.extractValuesFromPayloadWithRowid(tableName, payload, rowid)
 	if err != nil {
 		return nil // Skip FK check if we can't extract values
 	}
