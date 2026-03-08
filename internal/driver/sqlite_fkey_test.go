@@ -759,7 +759,6 @@ func TestForeignKey_SelfReferencingInsert(t *testing.T) {
 // TestForeignKey_MultiColumn tests multi-column foreign keys.
 // Based on fkey1-3.* and fkey3-3.* tests.
 func TestForeignKey_MultiColumn(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1207,7 +1206,6 @@ func TestForeignKey_ReplaceViolation(t *testing.T) {
 // TestForeignKey_QuotedTableNames tests FK with quoted table names.
 // Based on fkey1-4.* tests.
 func TestForeignKey_QuotedTableNames(t *testing.T) {
-	t.Skip("FK runtime enforcement not implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 

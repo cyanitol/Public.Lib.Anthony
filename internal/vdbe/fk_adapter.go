@@ -295,7 +295,9 @@ func (r *VDBERowReader) collectMatchingRowids(cursorNum int, table *tableInfo, c
 	var rowids []int64
 
 	if err := btCursor.MoveToFirst(); err != nil {
-		if err.Error() == "empty table" {
+		// Handle empty table/leaf errors - both indicate no rows to scan
+		errMsg := err.Error()
+		if errMsg == "empty table" || errMsg == "empty leaf" || strings.Contains(errMsg, "empty leaf page") {
 			return rowids, nil
 		}
 		return nil, err

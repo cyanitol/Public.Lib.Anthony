@@ -59,61 +59,30 @@ func (s *Stmt) compileCreateTable(vm *vdbe.VDBE, stmt *parser.CreateTableStmt, a
 
 // registerForeignKeyConstraints registers foreign key constraints from a CREATE TABLE statement
 // with the connection's ForeignKeyManager.
-func (s *Stmt) registerForeignKeyConstraints(table interface{}, stmt *parser.CreateTableStmt) error {
+func (s *Stmt) registerForeignKeyConstraints(_ interface{}, stmt *parser.CreateTableStmt) error {
 	if s.conn.fkManager == nil {
 		return nil
 	}
-	s.registerTableLevelFKs(table, stmt.Name)
+	s.registerTableLevelFKs(stmt)
 	s.registerColumnLevelFKs(stmt)
 	return nil
 }
 
-// tableWithConstraints provides access to table constraints.
-type tableWithConstraints interface {
-	GetConstraints() []interface{}
-}
-
-// foreignKeyConstraint provides access to FK definition.
-type foreignKeyConstraint interface {
-	GetForeignKey() interface{}
-}
-
-// constraintWithColumns provides access to constraint columns.
-type constraintWithColumns interface {
-	GetColumns() []string
-}
-
 // registerTableLevelFKs registers table-level FOREIGN KEY constraints.
-func (s *Stmt) registerTableLevelFKs(table interface{}, tableName string) {
-	tableObj, ok := table.(tableWithConstraints)
-	if !ok {
-		return
+func (s *Stmt) registerTableLevelFKs(stmt *parser.CreateTableStmt) {
+	for _, tableConstraint := range stmt.Constraints {
+		if tableConstraint.ForeignKey == nil {
+			continue
+		}
+		fkTableConstraint := tableConstraint.ForeignKey
+		fk := constraint.CreateForeignKeyFromParser(
+			stmt.Name,
+			fkTableConstraint.Columns,
+			&fkTableConstraint.ForeignKey,
+			tableConstraint.Name,
+		)
+		s.conn.fkManager.AddConstraint(fk)
 	}
-	for _, constraintIface := range tableObj.GetConstraints() {
-		s.tryRegisterTableFK(constraintIface, tableName)
-	}
-}
-
-// tryRegisterTableFK attempts to register a single table-level FK constraint.
-func (s *Stmt) tryRegisterTableFK(constraintIface interface{}, tableName string) {
-	fkConstraint, ok := constraintIface.(foreignKeyConstraint)
-	if !ok {
-		return
-	}
-	fkDef := fkConstraint.GetForeignKey()
-	if fkDef == nil {
-		return
-	}
-	parserfk, ok := fkDef.(*parser.ForeignKeyConstraint)
-	if !ok {
-		return
-	}
-	var columns []string
-	if colConstraint, ok := constraintIface.(constraintWithColumns); ok {
-		columns = colConstraint.GetColumns()
-	}
-	fk := constraint.CreateForeignKeyFromParser(tableName, columns, parserfk, "")
-	s.conn.fkManager.AddConstraint(fk)
 }
 
 // registerColumnLevelFKs registers column-level FOREIGN KEY constraints.
