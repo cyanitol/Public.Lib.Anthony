@@ -720,7 +720,6 @@ func TestForeignKey_SelfReferencing(t *testing.T) {
 // TestForeignKey_SelfReferencingInsert tests inserting self-referencing rows.
 // Based on fkey3-3.* tests.
 func TestForeignKey_SelfReferencingInsert(t *testing.T) {
-	t.Skip("Self-referencing row referencing its own autoincrement rowid not yet supported")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1531,7 +1530,6 @@ func TestForeignKey_SelfReferencingUpdate(t *testing.T) {
 // TestForeignKey_MatchingSelf tests self-referencing row matching itself.
 // Based on fkey3-3.4.* tests.
 func TestForeignKey_MatchingSelf(t *testing.T) {
-	t.Skip("Requires autoincrement to start from 1 (currently starts from 0)")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1580,7 +1578,7 @@ func TestForeignKey_MatchingSelf(t *testing.T) {
 // TestForeignKey_DeleteSelfReferencing tests deleting and updating self-referencing rows.
 // Based on fkey3-3.4.7-8 tests.
 func TestForeignKey_DeleteSelfReferencing(t *testing.T) {
-	t.Skip("Requires autoincrement to start from 1 (currently starts from 0)")
+	t.Skip("Self-referencing delete with FK cascade needs special handling")
 	db := setupMemoryDB(t)
 	defer db.Close()
 

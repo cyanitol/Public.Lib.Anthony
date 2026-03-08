@@ -2376,25 +2376,31 @@ func (v *VDBE) getInsertPayload(reg int) ([]byte, error) {
 
 // getInsertRowid determines the rowid for the insert operation.
 func (v *VDBE) getInsertRowid(p3 int, cursor *Cursor) (int64, error) {
-	if p3 == 0 {
-		// Auto-generate a new rowid
-		bt, ok := v.Ctx.Btree.(*btree.Btree)
-		if !ok {
-			return 0, fmt.Errorf("invalid btree type for rowid generation")
-		}
-		newRowid, err := bt.NewRowid(cursor.RootPage)
+	// Check if a register was specified with the rowid
+	if p3 != 0 {
+		rowidMem, err := v.GetMem(p3)
 		if err != nil {
-			// If table is empty, start with 1
-			newRowid = 1
+			return 0, err
 		}
-		cursor.LastRowid = newRowid
-		return newRowid, nil
+		// If register is not NULL, use its value as the rowid
+		if !rowidMem.IsNull() {
+			return rowidMem.IntValue(), nil
+		}
+		// NULL in register means auto-generate rowid (fall through)
 	}
-	rowidMem, err := v.GetMem(p3)
+
+	// Auto-generate a new rowid
+	bt, ok := v.Ctx.Btree.(*btree.Btree)
+	if !ok {
+		return 0, fmt.Errorf("invalid btree type for rowid generation")
+	}
+	newRowid, err := bt.NewRowid(cursor.RootPage)
 	if err != nil {
-		return 0, err
+		// If table is empty, start with 1
+		newRowid = 1
 	}
-	return rowidMem.IntValue(), nil
+	cursor.LastRowid = newRowid
+	return newRowid, nil
 }
 
 // checkUniqueConstraints verifies that inserting the given payload doesn't violate
