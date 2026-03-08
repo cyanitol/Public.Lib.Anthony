@@ -9,7 +9,7 @@
 HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
 ================================================================================
 
-[~] Foreign Key Runtime Enforcement (35 tests skipped -> 12 now passing)
+[~] Foreign Key Runtime Enforcement (35 tests -> 16 passing, 20 skipped)
     - [DONE] Wire FK manager through VDBE context
     - [DONE] INSERT FK validation (ValidateInsert) - blocks invalid child inserts
     - [DONE] DELETE FK validation (ValidateDelete) - blocks parent deletes when referenced
@@ -18,7 +18,13 @@ HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
     - [DONE] ON DELETE/UPDATE SET NULL - FK columns set to NULL
     - [DONE] ON DELETE/UPDATE SET DEFAULT - FK columns set to default
     - [DONE] RESTRICT action (same as NO ACTION for immediate constraints)
+    - [DONE] Multi-column FK constraints (table-level FOREIGN KEY clauses)
+    - [DONE] INTEGER PRIMARY KEY handling in FK lookups (rowid alias)
+    - [DONE] Quoted table name handling
+    - Remaining: Recursive CASCADE for self-referencing FKs
+    - Remaining: PRAGMA foreign_key_check
     - Remaining: Deferred constraint checking at transaction boundaries
+    - Remaining: Collation-aware FK matching
 
 [ ] WITHOUT ROWID Tables (23 tests skipped)
     - Implement alt btree layout using PRIMARY KEY as key (no rowid)

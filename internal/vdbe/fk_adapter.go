@@ -81,6 +81,77 @@ func (r *VDBERowReader) FindReferencingRows(tableName string, columns []string, 
 	return r.collectMatchingRowids(cursorNum, table, columns, values)
 }
 
+// ReadRowByRowid reads a row's values by its rowid.
+// Used for recursive CASCADE operations.
+func (r *VDBERowReader) ReadRowByRowid(tableName string, rowid int64) (map[string]interface{}, error) {
+	if r.vdbe == nil || r.vdbe.Ctx == nil {
+		return nil, fmt.Errorf("vdbe context not available")
+	}
+
+	table, err := r.getTable(tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	rootPage := table.RootPage
+	cursorNum := r.allocTempCursor()
+	defer r.closeTempCursor(cursorNum)
+
+	if err := r.openReadCursor(cursorNum, rootPage); err != nil {
+		return nil, err
+	}
+
+	cursor := r.vdbe.Cursors[cursorNum]
+	if cursor == nil {
+		return nil, fmt.Errorf("cursor not found")
+	}
+
+	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
+	if !ok {
+		return nil, fmt.Errorf("invalid cursor type")
+	}
+
+	// Seek to the row with the given rowid
+	found, err := btCursor.SeekRowid(rowid)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("row not found: rowid %d", rowid)
+	}
+
+	// Read the row values using the existing readRowValuesFromCursor method
+	return r.readRowValuesFromCursor(cursor, table)
+}
+
+// readRowValuesFromCursor reads all column values from the current cursor position.
+func (r *VDBERowReader) readRowValuesFromCursor(cursor *Cursor, table *tableInfo) (map[string]interface{}, error) {
+	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
+	if !ok {
+		return nil, fmt.Errorf("invalid cursor type")
+	}
+
+	rowid := btCursor.GetKey()
+	payload, err := btCursor.GetCompletePayload()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get payload: %w", err)
+	}
+
+	result := make(map[string]interface{})
+	for _, col := range table.Columns {
+		if col.IsIntegerPK {
+			result[col.Name] = rowid
+		} else {
+			mem := NewMem()
+			if err := parseRecordColumn(payload, col.PayloadColIndex, mem); err != nil {
+				return nil, fmt.Errorf("read column %s: %w", col.Name, err)
+			}
+			result[col.Name] = memToInterface(mem)
+		}
+	}
+	return result, nil
+}
+
 // tableInfo represents table metadata needed for FK validation
 type tableInfo struct {
 	RootPage uint32

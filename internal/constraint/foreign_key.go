@@ -341,7 +341,7 @@ func (m *ForeignKeyManager) handleDeleteConstraint(
 		return nil
 	}
 
-	return m.applyDeleteAction(fk, referencingRows, schemaObj, rowDeleter, rowUpdater)
+	return m.applyDeleteAction(fk, referencingRows, schemaObj, rowDeleter, rowUpdater, rowReader)
 }
 
 // applyDeleteAction applies the appropriate ON DELETE action.
@@ -351,6 +351,7 @@ func (m *ForeignKeyManager) applyDeleteAction(
 	schemaObj *schema.Schema,
 	rowDeleter RowDeleter,
 	rowUpdater RowUpdater,
+	rowReader RowReader,
 ) error {
 	switch fk.OnDelete {
 	case FKActionNone, FKActionRestrict, FKActionNoAction:
@@ -358,7 +359,7 @@ func (m *ForeignKeyManager) applyDeleteAction(
 		return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", fk.Table)
 
 	case FKActionCascade:
-		return m.cascadeDelete(fk.Table, referencingRows, rowDeleter)
+		return m.cascadeDelete(fk.Table, referencingRows, schemaObj, rowDeleter, rowUpdater, rowReader)
 
 	case FKActionSetNull:
 		return m.setNullOnRows(fk.Table, fk.Columns, referencingRows, rowUpdater)
@@ -370,13 +371,59 @@ func (m *ForeignKeyManager) applyDeleteAction(
 	return nil
 }
 
-// cascadeDelete deletes all referencing rows.
-func (m *ForeignKeyManager) cascadeDelete(table string, rowIDs []int64, rowDeleter RowDeleter) error {
+// cascadeDelete deletes all referencing rows, recursively handling grandchildren.
+func (m *ForeignKeyManager) cascadeDelete(
+	table string,
+	rowIDs []int64,
+	schemaObj *schema.Schema,
+	rowDeleter RowDeleter,
+	rowUpdater RowUpdater,
+	rowReader RowReader,
+) error {
 	for _, rowID := range rowIDs {
+		// Read the row values before deletion (needed for recursive FK checking)
+		rowValues, err := rowReader.ReadRowByRowid(table, rowID)
+		if err != nil {
+			// Row might already be deleted by a previous cascade
+			continue
+		}
+
+		// Recursively handle any grandchildren that reference this row
+		if err := m.validateDeleteRecursive(table, rowValues, schemaObj, rowReader, rowDeleter, rowUpdater); err != nil {
+			return err
+		}
+
+		// Now delete the row
 		if err := rowDeleter.DeleteRow(table, rowID); err != nil {
 			return fmt.Errorf("CASCADE DELETE failed: %w", err)
 		}
 	}
+	return nil
+}
+
+// validateDeleteRecursive handles FK validation for rows being cascade-deleted.
+func (m *ForeignKeyManager) validateDeleteRecursive(
+	tableName string,
+	values map[string]interface{},
+	schemaObj *schema.Schema,
+	rowReader RowReader,
+	rowDeleter RowDeleter,
+	rowUpdater RowUpdater,
+) error {
+	// Find FK constraints where this table is the parent (RefTable)
+	referencingConstraints := m.findReferencingConstraints(tableName)
+
+	table, exists := schemaObj.Tables[tableName]
+	if !exists {
+		return nil
+	}
+
+	for _, fk := range referencingConstraints {
+		if err := m.handleDeleteConstraint(fk, table, values, schemaObj, rowReader, rowDeleter, rowUpdater); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -609,6 +656,9 @@ type RowReader interface {
 
 	// FindReferencingRows finds all rows that reference the given values
 	FindReferencingRows(table string, columns []string, values []interface{}) ([]int64, error)
+
+	// ReadRowByRowid reads a row's values by its rowid (needed for recursive CASCADE)
+	ReadRowByRowid(table string, rowid int64) (map[string]interface{}, error)
 }
 
 // RowDeleter defines the interface for deleting rows.

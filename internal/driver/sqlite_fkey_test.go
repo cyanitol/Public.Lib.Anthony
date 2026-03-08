@@ -667,7 +667,6 @@ func TestForeignKey_OnUpdateSetNull(t *testing.T) {
 // TestForeignKey_SelfReferencing tests self-referencing foreign keys.
 // Based on fkey1-5.* and fkey3-3.* tests.
 func TestForeignKey_SelfReferencing(t *testing.T) {
-	t.Skip("Self-referencing FK requires recursive CASCADE")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
