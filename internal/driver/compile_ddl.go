@@ -114,6 +114,14 @@ func (s *Stmt) compileDropTable(vm *vdbe.VDBE, stmt *parser.DropTableStmt, args 
 		return nil, fmt.Errorf("table not found: %s", stmt.Name)
 	}
 
+	// Check if foreign keys are enabled and any FK constraints reference this table
+	if s.conn.fkManager != nil && s.conn.fkManager.IsEnabled() {
+		referencingConstraints := s.conn.fkManager.FindReferencingConstraints(stmt.Name)
+		if len(referencingConstraints) > 0 {
+			return nil, fmt.Errorf("FOREIGN KEY constraint failed: cannot drop table %s, referenced by foreign key constraint", stmt.Name)
+		}
+	}
+
 	// Drop the table from the schema
 	// This simplified implementation removes the table from memory
 	// A full implementation would also:
@@ -122,6 +130,11 @@ func (s *Stmt) compileDropTable(vm *vdbe.VDBE, stmt *parser.DropTableStmt, args 
 	// 3. Update the schema cookie
 	if err := s.conn.schema.DropTable(stmt.Name); err != nil {
 		return nil, err
+	}
+
+	// Remove FK constraints that belonged to this table
+	if s.conn.fkManager != nil {
+		s.conn.fkManager.RemoveConstraints(stmt.Name)
 	}
 
 	// Free table pages if btree is available

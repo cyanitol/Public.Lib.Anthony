@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/constraint"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/pager"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
@@ -601,7 +602,9 @@ func (s *Stmt) compilePragmaForeignKeyCheck(vm *vdbe.VDBE, stmt *parser.PragmaSt
 		return s.emptyForeignKeyCheckResult(vm)
 	}
 
-	violations, err := s.conn.fkManager.FindViolations(tableName, s.conn.schema, s)
+	// Create a RowReader to scan tables
+	rowReader := newDriverRowReader(s.conn)
+	violations, err := s.conn.fkManager.FindViolations(tableName, s.conn.schema, rowReader)
 	if err != nil {
 		return nil, fmt.Errorf("foreign_key_check failed: %w", err)
 	}
@@ -719,6 +722,228 @@ func fkActionToString(action constraint.ForeignKeyAction) string {
 	default:
 		return "NO ACTION"
 	}
+}
+
+// driverRowReader implements constraint.RowReader for PRAGMA foreign_key_check.
+// It uses the connection's btree and schema directly.
+type driverRowReader struct {
+	conn *Conn
+}
+
+// newDriverRowReader creates a new driverRowReader.
+func newDriverRowReader(conn *Conn) *driverRowReader {
+	return &driverRowReader{conn: conn}
+}
+
+// RowExists checks if a row exists with the given column values.
+func (r *driverRowReader) RowExists(tableName string, columns []string, values []interface{}) (bool, error) {
+	table, ok := r.conn.schema.GetTable(tableName)
+	if !ok {
+		return false, fmt.Errorf("table not found: %s", tableName)
+	}
+
+	if r.conn.btree == nil {
+		return false, fmt.Errorf("btree not available")
+	}
+
+	cursor := btree.NewCursor(r.conn.btree, table.RootPage)
+	if err := cursor.MoveToFirst(); err != nil {
+		// Empty table
+		if strings.Contains(err.Error(), "empty") {
+			return false, nil
+		}
+		return false, err
+	}
+
+	// Scan all rows
+	for {
+		if match, err := r.checkRowMatch(cursor, table, columns, values); err != nil {
+			return false, err
+		} else if match {
+			return true, nil
+		}
+
+		if err := cursor.Next(); err != nil {
+			break
+		}
+	}
+
+	return false, nil
+}
+
+// FindReferencingRows finds all rowids of rows with matching column values.
+func (r *driverRowReader) FindReferencingRows(tableName string, columns []string, values []interface{}) ([]int64, error) {
+	table, ok := r.conn.schema.GetTable(tableName)
+	if !ok {
+		return nil, fmt.Errorf("table not found: %s", tableName)
+	}
+
+	if r.conn.btree == nil {
+		return nil, fmt.Errorf("btree not available")
+	}
+
+	cursor := btree.NewCursor(r.conn.btree, table.RootPage)
+	if err := cursor.MoveToFirst(); err != nil {
+		if strings.Contains(err.Error(), "empty") {
+			return []int64{}, nil
+		}
+		return nil, err
+	}
+
+	var rowids []int64
+	for {
+		if match, err := r.checkRowMatch(cursor, table, columns, values); err != nil {
+			return nil, err
+		} else if match {
+			rowids = append(rowids, cursor.GetKey())
+		}
+
+		if err := cursor.Next(); err != nil {
+			break
+		}
+	}
+
+	return rowids, nil
+}
+
+// ReadRowByRowid reads a row's values by its rowid.
+func (r *driverRowReader) ReadRowByRowid(tableName string, rowid int64) (map[string]interface{}, error) {
+	table, ok := r.conn.schema.GetTable(tableName)
+	if !ok {
+		return nil, fmt.Errorf("table not found: %s", tableName)
+	}
+
+	if r.conn.btree == nil {
+		return nil, fmt.Errorf("btree not available")
+	}
+
+	cursor := btree.NewCursor(r.conn.btree, table.RootPage)
+	found, err := cursor.SeekRowid(rowid)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("row not found: rowid %d", rowid)
+	}
+
+	return r.readRowValues(cursor, table)
+}
+
+// checkRowMatch checks if the current row matches the given column values.
+func (r *driverRowReader) checkRowMatch(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}) (bool, error) {
+	// If no columns specified, return all rows (used for full table scan)
+	if len(columns) == 0 {
+		return true, nil
+	}
+
+	payload, err := cursor.GetPayloadWithOverflow()
+	if err != nil {
+		return false, err
+	}
+
+	rowid := cursor.GetKey()
+
+	for i, colName := range columns {
+		colVal, err := r.getColumnValue(table, colName, payload, rowid)
+		if err != nil {
+			return false, err
+		}
+
+		if !r.valuesEqual(colVal, values[i]) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// getColumnValue extracts a column value from the row.
+func (r *driverRowReader) getColumnValue(table *schema.Table, colName string, payload []byte, rowid int64) (interface{}, error) {
+	// Find the column index
+	payloadIdx := 0
+	for _, col := range table.Columns {
+		if strings.EqualFold(col.Name, colName) {
+			// Check if it's an INTEGER PRIMARY KEY (rowid alias)
+			if col.PrimaryKey && strings.EqualFold(col.Type, "INTEGER") {
+				return rowid, nil
+			}
+			// Extract from payload
+			mem := vdbe.NewMem()
+			if err := vdbe.ParseRecordColumn(payload, payloadIdx, mem); err != nil {
+				return nil, err
+			}
+			return vdbe.MemToInterface(mem), nil
+		}
+		// Count payload columns (skip INTEGER PRIMARY KEY)
+		if !(col.PrimaryKey && strings.EqualFold(col.Type, "INTEGER")) {
+			payloadIdx++
+		}
+	}
+	return nil, fmt.Errorf("column not found: %s", colName)
+}
+
+// readRowValues reads all column values from the current row.
+func (r *driverRowReader) readRowValues(cursor *btree.BtCursor, table *schema.Table) (map[string]interface{}, error) {
+	payload, err := cursor.GetPayloadWithOverflow()
+	if err != nil {
+		return nil, err
+	}
+
+	rowid := cursor.GetKey()
+	result := make(map[string]interface{})
+	payloadIdx := 0
+
+	for _, col := range table.Columns {
+		if col.PrimaryKey && strings.EqualFold(col.Type, "INTEGER") {
+			result[col.Name] = rowid
+		} else {
+			mem := vdbe.NewMem()
+			if err := vdbe.ParseRecordColumn(payload, payloadIdx, mem); err != nil {
+				return nil, err
+			}
+			result[col.Name] = vdbe.MemToInterface(mem)
+			payloadIdx++
+		}
+	}
+
+	return result, nil
+}
+
+// valuesEqual compares two values for FK matching.
+func (r *driverRowReader) valuesEqual(v1, v2 interface{}) bool {
+	if v1 == nil && v2 == nil {
+		return true
+	}
+	if v1 == nil || v2 == nil {
+		return false
+	}
+
+	// Handle numeric comparisons
+	if n1, ok := toInt64Value(v1); ok {
+		if n2, ok := toInt64Value(v2); ok {
+			return n1 == n2
+		}
+	}
+
+	// String comparison
+	s1 := fmt.Sprintf("%v", v1)
+	s2 := fmt.Sprintf("%v", v2)
+	return s1 == s2
+}
+
+// toInt64Value converts a value to int64 if possible.
+func toInt64Value(v interface{}) (int64, bool) {
+	switch n := v.(type) {
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	case float64:
+		if n == float64(int64(n)) {
+			return int64(n), true
+		}
+	}
+	return 0, false
 }
 
 // simpleRowReader is a minimal RowReader implementation for foreign_key_check.

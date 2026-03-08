@@ -1899,6 +1899,18 @@ func memToInterface(m *Mem) interface{} {
 	return nil
 }
 
+// ParseRecordColumn is an exported wrapper for parseRecordColumn.
+// It parses a specific column from a SQLite record.
+func ParseRecordColumn(data []byte, colIndex int, dst *Mem) error {
+	return parseRecordColumn(data, colIndex, dst)
+}
+
+// MemToInterface is an exported wrapper for memToInterface.
+// It converts a Mem value to a Go interface{}.
+func MemToInterface(m *Mem) interface{} {
+	return memToInterface(m)
+}
+
 // encodeSimpleRecord creates a SQLite record encoding
 // SQLite record format:
 // - Header size (varint)

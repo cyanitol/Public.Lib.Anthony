@@ -623,6 +623,25 @@ func columnsMatch(cols1, cols2 []string) bool {
 	return true
 }
 
+// columnsMatchUnordered checks if two column lists contain the same columns (order doesn't matter).
+func columnsMatchUnordered(cols1, cols2 []string) bool {
+	if len(cols1) != len(cols2) {
+		return false
+	}
+	// Create a map of columns in cols2
+	colSet := make(map[string]bool)
+	for _, col := range cols2 {
+		colSet[strings.ToLower(col)] = true
+	}
+	// Check that all columns in cols1 are in the set
+	for _, col := range cols1 {
+		if !colSet[strings.ToLower(col)] {
+			return false
+		}
+	}
+	return true
+}
+
 // hasUniqueConstraint checks if the table has a UNIQUE constraint on the given columns.
 func hasUniqueConstraint(table *schema.Table, columns []string) bool {
 	for _, tc := range table.Constraints {
@@ -634,9 +653,10 @@ func hasUniqueConstraint(table *schema.Table, columns []string) bool {
 }
 
 // hasUniqueIndex checks if there's a UNIQUE index covering the given columns.
+// The index columns can be in any order as long as they cover the same columns.
 func hasUniqueIndex(schemaObj *schema.Schema, tableName string, columns []string) bool {
 	for _, idx := range schemaObj.Indexes {
-		if idx.Unique && strings.EqualFold(idx.Table, tableName) && columnsMatch(columns, idx.Columns) {
+		if idx.Unique && strings.EqualFold(idx.Table, tableName) && columnsMatchUnordered(columns, idx.Columns) {
 			return true
 		}
 	}
