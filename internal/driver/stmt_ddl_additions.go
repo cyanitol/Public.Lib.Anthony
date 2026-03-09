@@ -1019,7 +1019,7 @@ func (r *driverRowReader) checkRowMatchWithParentAffinity(
 			return false, err
 		}
 
-		// Get parent column for affinity
+		// Get parent column for affinity and collation
 		var parentCol *schema.Column
 		if i < len(parentColumns) && parentTable != nil {
 			parentCol, _ = parentTable.GetColumn(parentColumns[i])
@@ -1131,9 +1131,9 @@ func (r *driverRowReader) valuesEqualWithCollation(v1, v2 interface{}, collation
 	return constraint.Compare(s1, s2, collation) == 0
 }
 
-// valuesEqualWithAffinity compares two values using the parent column's affinity.
+// valuesEqualWithAffinity compares two values using the parent column's affinity and collation.
 // According to SQLite FK rules, the parent column's affinity is applied to the
-// child value before comparison.
+// child value before comparison, and the parent column's collation is used for string comparison.
 func (r *driverRowReader) valuesEqualWithAffinity(parentVal, childVal interface{}, parentCol *schema.Column) bool {
 	if parentVal == nil && childVal == nil {
 		return true
@@ -1147,13 +1147,20 @@ func (r *driverRowReader) valuesEqualWithAffinity(parentVal, childVal interface{
 		childVal = expr.ApplyAffinity(childVal, parentCol.Affinity)
 	}
 
-	// Compare after applying affinity
-	return r.compareAfterAffinity(parentVal, childVal)
+	// Get parent column's collation (defaults to BINARY if not specified)
+	collation := "BINARY"
+	if parentCol != nil && parentCol.Collation != "" {
+		collation = strings.ToUpper(parentCol.Collation)
+	}
+
+	// Compare after applying affinity and collation
+	return r.compareAfterAffinityWithCollation(parentVal, childVal, collation)
 }
 
-// compareAfterAffinity compares values after affinity has been applied.
-func (r *driverRowReader) compareAfterAffinity(v1, v2 interface{}) bool {
-	// Handle numeric comparisons
+// compareAfterAffinityWithCollation compares values after affinity has been applied,
+// using the specified collation for string comparisons.
+func (r *driverRowReader) compareAfterAffinityWithCollation(v1, v2 interface{}, collation string) bool {
+	// Handle numeric comparisons (collation doesn't apply to numbers)
 	if n1, ok := toInt64Value(v1); ok {
 		if n2, ok := toInt64Value(v2); ok {
 			return n1 == n2
@@ -1167,10 +1174,10 @@ func (r *driverRowReader) compareAfterAffinity(v1, v2 interface{}) bool {
 		}
 	}
 
-	// String comparison
+	// String comparison with collation
 	s1 := fmt.Sprintf("%v", v1)
 	s2 := fmt.Sprintf("%v", v2)
-	return s1 == s2
+	return constraint.Compare(s1, s2, collation) == 0
 }
 
 // toFloat64Value converts a value to float64 if possible.

@@ -683,6 +683,23 @@ func (r *ConnRowReader) RowExists(table string, columns []string, values []inter
 	return reader.RowExists(table, columns, values)
 }
 
+// RowExistsWithCollation checks if a row exists using specified collations.
+func (r *ConnRowReader) RowExistsWithCollation(table string, columns []string, values []interface{}, collations []string) (bool, error) {
+	v := &vdbe.VDBE{
+		Ctx: &vdbe.VDBEContext{
+			Schema:             r.conn.schema,
+			Btree:              r.conn.btree,
+			Pager:              r.conn.pager,
+			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
+			FKManager:          r.conn.fkManager,
+		},
+		Cursors: make([]*vdbe.Cursor, 10),
+	}
+
+	reader := vdbe.NewVDBERowReader(v)
+	return reader.RowExistsWithCollation(table, columns, values, collations)
+}
+
 // FindReferencingRows finds all rows that reference the given values.
 func (r *ConnRowReader) FindReferencingRows(table string, columns []string, values []interface{}) ([]int64, error) {
 	// Create a minimal VDBE context

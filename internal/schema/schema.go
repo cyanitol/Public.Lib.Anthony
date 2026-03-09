@@ -470,6 +470,11 @@ func (c *Column) GetEffectiveCollation() string {
 	return c.Collation
 }
 
+// GetCollation returns the collation for a column (may be empty if not set).
+func (c *Column) GetCollation() string {
+	return c.Collation
+}
+
 // GetColumns returns the columns as a slice of interfaces (for VDBE access).
 func (t *Table) GetColumns() []interface{} {
 	result := make([]interface{}, len(t.Columns))

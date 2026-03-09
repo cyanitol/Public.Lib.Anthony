@@ -1334,3 +1334,7 @@ func extractCollations(table *schema.Table, columns []string) []string {
 	}
 	return collations
 }
+
+// Note: Affinity conversion functions have been removed as they are currently
+// unused. FK value comparison is handled through collation-aware comparison
+// in the RowReader implementations.

@@ -101,6 +101,39 @@ func (r *VDBERowReader) FindReferencingRows(tableName string, columns []string, 
 	return r.collectMatchingRowids(cursorNum, table, columns, values)
 }
 
+// FindReferencingRowsWithParentAffinity finds all rowids with affinity and collation-aware matching.
+// This applies the parent column's affinity and collation to child values before comparison.
+func (r *VDBERowReader) FindReferencingRowsWithParentAffinity(
+	childTableName string,
+	childColumns []string,
+	parentValues []interface{},
+	parentTableName string,
+	parentColumns []string,
+) ([]int64, error) {
+	if err := r.validateContext(); err != nil {
+		return nil, err
+	}
+
+	childTable, err := r.getTable(childTableName)
+	if err != nil {
+		return nil, err
+	}
+
+	parentTable, err := r.getTable(parentTableName)
+	if err != nil {
+		return nil, err
+	}
+
+	cursorNum := r.allocTempCursor()
+	defer r.closeTempCursor(cursorNum)
+
+	if err := r.openReadCursorForTable(cursorNum, childTable); err != nil {
+		return nil, err
+	}
+
+	return r.collectMatchingRowidsWithAffinityAndCollation(cursorNum, childTable, childColumns, parentValues, parentTable, parentColumns)
+}
+
 // ReadRowByRowid reads a row's values by its rowid.
 // Used for recursive CASCADE operations.
 func (r *VDBERowReader) ReadRowByRowid(tableName string, rowid int64) (map[string]interface{}, error) {
@@ -210,6 +243,7 @@ type tableInfo struct {
 type columnInfo struct {
 	Name            string
 	Type            string // Column type for affinity determination
+	Collation       string // Column collation (e.g., BINARY, NOCASE, RTRIM)
 	IsIntegerPK     bool   // true if INTEGER PRIMARY KEY (rowid alias)
 	PayloadColIndex int    // index in payload (-1 if stored as rowid)
 }
@@ -307,12 +341,23 @@ func (r *VDBERowReader) buildColumnInfo(colIface interface{}, withoutRowID bool,
 		GetType() string
 	}
 
+	type columnWithCollation interface {
+		GetCollation() string
+	}
+
 	col, ok := colIface.(columnWithInfo)
 	if !ok {
 		return r.buildMinimalColumnInfo(colIface, payloadIdx)
 	}
 
 	colType := col.GetType()
+
+	// Try to get collation if available
+	var collation string
+	if colWithColl, ok := colIface.(columnWithCollation); ok {
+		collation = colWithColl.GetCollation()
+	}
+
 	// INTEGER PRIMARY KEY only acts as rowid alias for regular tables (not WITHOUT ROWID)
 	isIPK := !withoutRowID && col.IsPrimaryKeyColumn() && (colType == "INTEGER" || colType == "INT")
 
@@ -320,6 +365,7 @@ func (r *VDBERowReader) buildColumnInfo(colIface interface{}, withoutRowID bool,
 		return columnInfo{
 			Name:            col.GetName(),
 			Type:            colType,
+			Collation:       collation,
 			IsIntegerPK:     true,
 			PayloadColIndex: -1,
 		}, 0
@@ -328,6 +374,7 @@ func (r *VDBERowReader) buildColumnInfo(colIface interface{}, withoutRowID bool,
 	return columnInfo{
 		Name:            col.GetName(),
 		Type:            colType,
+		Collation:       collation,
 		IsIntegerPK:     false,
 		PayloadColIndex: payloadIdx,
 	}, 1
@@ -495,6 +542,62 @@ func (r *VDBERowReader) collectMatchingRowids(cursorNum int, table *tableInfo, c
 	return r.collectAllMatchingRowids(r.vdbe.Cursors[cursorNum], btCursor, table, columns, values)
 }
 
+// collectMatchingRowidsWithAffinityAndCollation collects rowids using parent column affinity and collation.
+func (r *VDBERowReader) collectMatchingRowidsWithAffinityAndCollation(
+	cursorNum int,
+	childTable *tableInfo,
+	childColumns []string,
+	parentValues []interface{},
+	parentTable *tableInfo,
+	parentColumns []string,
+) ([]int64, error) {
+	btCursor, err := r.getBTreeCursor(cursorNum)
+	if err != nil {
+		return nil, err
+	}
+
+	isEmpty, err := r.moveToFirstRow(btCursor)
+	if err != nil {
+		return nil, err
+	}
+	if isEmpty {
+		return []int64{}, nil
+	}
+
+	return r.collectAllMatchingRowidsWithAffinityAndCollation(
+		r.vdbe.Cursors[cursorNum], btCursor, childTable, childColumns, parentValues, parentTable, parentColumns)
+}
+
+// collectAllMatchingRowidsWithAffinityAndCollation scans rows with parent affinity and collation.
+func (r *VDBERowReader) collectAllMatchingRowidsWithAffinityAndCollation(
+	cursor *Cursor,
+	btCursor *btree.BtCursor,
+	childTable *tableInfo,
+	childColumns []string,
+	parentValues []interface{},
+	parentTable *tableInfo,
+	parentColumns []string,
+) ([]int64, error) {
+	var rowids []int64
+
+	for {
+		match, err := r.checkRowMatchWithParentAffinityAndCollation(
+			cursor, childTable, childColumns, parentValues, parentTable, parentColumns)
+		if err != nil {
+			return nil, err
+		}
+		if match {
+			rowids = append(rowids, btCursor.GetKey())
+		}
+
+		if err := btCursor.Next(); err != nil {
+			break
+		}
+	}
+
+	return rowids, nil
+}
+
 // collectAllMatchingRowids scans all rows and collects matching rowids
 func (r *VDBERowReader) collectAllMatchingRowids(cursor *Cursor, btCursor *btree.BtCursor, table *tableInfo, columns []string, values []interface{}) ([]int64, error) {
 	var rowids []int64
@@ -599,15 +702,82 @@ func (r *VDBERowReader) checkRowMatchWithCollation(cursor *Cursor, table *tableI
 			}
 		}
 
-		// Get the collation for this column (use BINARY if not specified)
-		collationName := "BINARY"
+		// Compare with expected value using affinity and collation
+		// For FK checks: apply parent's affinity first, then use parent's collation
+		colCollation := "BINARY"
 		if i < len(collations) && collations[i] != "" {
-			collationName = collations[i]
+			colCollation = collations[i]
+		}
+		if !r.valuesEqualWithAffinityAndCollation(colValue, values[i], colInfo.Type, colCollation) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// checkRowMatchWithParentAffinityAndCollation checks if child row matches parent values.
+// It applies parent column affinity and collation to the comparison.
+func (r *VDBERowReader) checkRowMatchWithParentAffinityAndCollation(
+	cursor *Cursor,
+	childTable *tableInfo,
+	childColumns []string,
+	parentValues []interface{},
+	parentTable *tableInfo,
+	parentColumns []string,
+) (bool, error) {
+	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
+	if !ok {
+		return false, fmt.Errorf("invalid cursor type")
+	}
+
+	payload, err := btCursor.GetPayloadWithOverflow()
+	if err != nil {
+		return false, err
+	}
+
+	rowid := btCursor.GetKey()
+
+	// Compare each column
+	for i, childColName := range childColumns {
+		// Get child column value
+		childColIdx := r.findColumnIndex(childTable, childColName)
+		if childColIdx < 0 {
+			return false, fmt.Errorf("column not found: %s", childColName)
 		}
 
-		// Compare with expected value using collation
-		if !r.valuesEqualWithCollation(colValue, values[i], collationName) {
-			return false, nil
+		childColInfo := childTable.Columns[childColIdx]
+		childValue := NewMem()
+
+		if childColInfo.IsIntegerPK {
+			childValue.SetInt(rowid)
+		} else {
+			if err := parseRecordColumn(payload, childColInfo.PayloadColIndex, childValue); err != nil {
+				return false, err
+			}
+		}
+
+		// Get parent column info for affinity and collation
+		var parentColType string
+		var parentCollation string
+		if i < len(parentColumns) && parentTable != nil {
+			parentColIdx := r.findColumnIndex(parentTable, parentColumns[i])
+			if parentColIdx >= 0 {
+				parentColType = parentTable.Columns[parentColIdx].Type
+				parentCollation = parentTable.Columns[parentColIdx].Collation
+			}
+		}
+
+		// Compare using parent column's collation
+		if parentCollation != "" {
+			if !r.valuesEqualWithCollation(childValue, parentValues[i], parentCollation) {
+				return false, nil
+			}
+		} else {
+			// Fall back to affinity-based comparison
+			if !r.valuesEqualWithAffinity(childValue, parentValues[i], parentColType) {
+				return false, nil
+			}
 		}
 	}
 
@@ -765,6 +935,37 @@ func (r *VDBERowReader) valuesEqualWithCollation(mem *Mem, value interface{}, co
 
 	// For other types, use regular comparison
 	return compareMemToInterface(mem, value)
+}
+
+// valuesEqualWithAffinityAndCollation compares values with affinity conversion and collation.
+// This applies the column's affinity to both values, then uses collation for string comparison.
+func (r *VDBERowReader) valuesEqualWithAffinityAndCollation(mem *Mem, value interface{}, columnType string, collationName string) bool {
+	if mem.IsNull() {
+		return value == nil
+	}
+
+	// Apply affinity to both values
+	memValue := memToInterface(mem)
+	memValue = applyColumnAffinity(memValue, columnType)
+	value = applyColumnAffinity(value, columnType)
+
+	// After affinity, compare based on result types
+	// If both are numeric, use numeric comparison
+	n1, ok1 := toInt64(memValue)
+	n2, ok2 := toInt64(value)
+	if ok1 && ok2 {
+		return n1 == n2
+	}
+
+	// If both are strings, use collation
+	s1, ok1 := memValue.(string)
+	s2, ok2 := value.(string)
+	if ok1 && ok2 {
+		return collation.Compare(s1, s2, collationName) == 0
+	}
+
+	// Fall back to direct equality
+	return valuesEqualDirect(memValue, value)
 }
 
 // toInt64 converts various integer types to int64.
