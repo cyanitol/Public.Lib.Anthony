@@ -32,13 +32,22 @@ func (tx *Tx) Commit() error {
 			return fmt.Errorf("failed to end read transaction: %w", err)
 		}
 	} else {
-		// For write transactions, commit the pager transaction
+		// For write transactions, check deferred FK constraints before committing
+		if err := tx.conn.checkDeferredFKConstraints(); err != nil {
+			return err
+		}
+
+		// Commit the pager transaction
 		if err := tx.conn.pager.Commit(); err != nil {
 			return fmt.Errorf("commit failed: %w", err)
 		}
+
+		// Clear deferred FK violations after successful commit
+		tx.conn.clearDeferredFKViolations()
 	}
 
 	tx.conn.inTx = false
+	tx.conn.setFKTransactionState(false)
 	tx.closed = true
 
 	return nil
@@ -60,6 +69,9 @@ func (tx *Tx) Rollback() error {
 		return nil
 	}
 
+	// Clear deferred FK violations before rollback
+	tx.conn.clearDeferredFKViolations()
+
 	// For read-only transactions, just end the read transaction
 	if tx.readOnly {
 		if err := tx.conn.pager.EndRead(); err != nil {
@@ -75,6 +87,7 @@ func (tx *Tx) Rollback() error {
 	}
 
 	tx.conn.inTx = false
+	tx.conn.setFKTransactionState(false)
 	tx.closed = true
 
 	return nil

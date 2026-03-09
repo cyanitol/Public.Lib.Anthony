@@ -15,6 +15,7 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/security"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab"
 )
 
@@ -215,6 +216,7 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 		}
 
 		c.inTx = true
+		c.setFKTransactionState(true)
 
 		return &Tx{
 			conn:     c,
@@ -228,11 +230,38 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 	}
 
 	c.inTx = true
+	c.setFKTransactionState(true)
 
 	return &Tx{
 		conn:     c,
 		readOnly: false,
 	}, nil
+}
+
+// setFKTransactionState sets the transaction state in the foreign key manager.
+func (c *Conn) setFKTransactionState(inTx bool) {
+	if c.fkManager != nil {
+		c.fkManager.SetInTransaction(inTx)
+	}
+}
+
+// checkDeferredFKConstraints validates all deferred foreign key constraints.
+func (c *Conn) checkDeferredFKConstraints() error {
+	if !c.foreignKeysEnabled || c.fkManager == nil {
+		return nil
+	}
+
+	// We need a minimal row reader to check the deferred violations
+	// Create a simple wrapper that uses the btree directly
+	rowReader := &ConnRowReader{conn: c}
+	return c.fkManager.CheckDeferredViolations(c.schema, rowReader)
+}
+
+// clearDeferredFKViolations clears all deferred foreign key violations.
+func (c *Conn) clearDeferredFKViolations() {
+	if c.fkManager != nil {
+		c.fkManager.ClearDeferredViolations()
+	}
 }
 
 // Ping verifies the connection is still alive.
@@ -628,4 +657,64 @@ func (c *Conn) RemoveCollation(name string) error {
 	}
 
 	return c.collRegistry.Unregister(name)
+}
+
+// ConnRowReader provides a minimal RowReader implementation for deferred FK constraint checking.
+// It creates a temporary VDBE context to access the row reading functionality.
+type ConnRowReader struct {
+	conn *Conn
+}
+
+// RowExists checks if a row exists with the given column values.
+func (r *ConnRowReader) RowExists(table string, columns []string, values []interface{}) (bool, error) {
+	// Create a minimal VDBE context to use the row reader
+	v := &vdbe.VDBE{
+		Ctx: &vdbe.VDBEContext{
+			Schema:             r.conn.schema,
+			Btree:              r.conn.btree,
+			Pager:              r.conn.pager,
+			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
+			FKManager:          r.conn.fkManager,
+		},
+		Cursors: make([]*vdbe.Cursor, 10),
+	}
+
+	reader := vdbe.NewVDBERowReader(v)
+	return reader.RowExists(table, columns, values)
+}
+
+// FindReferencingRows finds all rows that reference the given values.
+func (r *ConnRowReader) FindReferencingRows(table string, columns []string, values []interface{}) ([]int64, error) {
+	// Create a minimal VDBE context
+	v := &vdbe.VDBE{
+		Ctx: &vdbe.VDBEContext{
+			Schema:             r.conn.schema,
+			Btree:              r.conn.btree,
+			Pager:              r.conn.pager,
+			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
+			FKManager:          r.conn.fkManager,
+		},
+		Cursors: make([]*vdbe.Cursor, 10),
+	}
+
+	reader := vdbe.NewVDBERowReader(v)
+	return reader.FindReferencingRows(table, columns, values)
+}
+
+// ReadRowByRowid reads a row's values by its rowid.
+func (r *ConnRowReader) ReadRowByRowid(table string, rowid int64) (map[string]interface{}, error) {
+	// Create a minimal VDBE context
+	v := &vdbe.VDBE{
+		Ctx: &vdbe.VDBEContext{
+			Schema:             r.conn.schema,
+			Btree:              r.conn.btree,
+			Pager:              r.conn.pager,
+			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
+			FKManager:          r.conn.fkManager,
+		},
+		Cursors: make([]*vdbe.Cursor, 10),
+	}
+
+	reader := vdbe.NewVDBERowReader(v)
+	return reader.ReadRowByRowid(table, rowid)
 }

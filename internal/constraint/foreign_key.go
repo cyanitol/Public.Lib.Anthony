@@ -66,6 +66,7 @@ type ForeignKeyManager struct {
 	constraints        map[string][]*ForeignKeyConstraint // table name -> constraints
 	enabled            bool                               // PRAGMA foreign_keys setting
 	deferredViolations []*DeferredViolation               // violations to check at commit time
+	inTransaction      bool                               // true when inside a transaction
 	mu                 sync.RWMutex
 }
 
@@ -89,6 +90,21 @@ func (m *ForeignKeyManager) IsEnabled() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.enabled
+}
+
+// SetInTransaction sets whether we're currently in a transaction.
+// Deferred constraints only defer when inside a transaction.
+func (m *ForeignKeyManager) SetInTransaction(inTx bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.inTransaction = inTx
+}
+
+// IsInTransaction returns whether we're currently in a transaction.
+func (m *ForeignKeyManager) IsInTransaction() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.inTransaction
 }
 
 // AddConstraint adds a foreign key constraint for a table.
@@ -178,7 +194,8 @@ func (m *ForeignKeyManager) validateInsertConstraint(
 	}
 
 	// For deferred constraints, record violation for later checking at COMMIT
-	if fk.Deferrable == DeferrableInitiallyDeferred {
+	// But only defer if we're inside a transaction
+	if fk.Deferrable == DeferrableInitiallyDeferred && m.IsInTransaction() {
 		m.recordDeferredViolation(fk, fkValues, tableName)
 		return nil
 	}
@@ -224,6 +241,10 @@ func (m *ForeignKeyManager) ValidateUpdate(
 		return err
 	}
 
+	// 3. Clear any deferred violations for this table since the row was updated
+	//    and may no longer violate the constraint
+	m.ClearDeferredViolationsForTable(tableName)
+
 	return nil
 }
 
@@ -248,7 +269,8 @@ func (m *ForeignKeyManager) validateOutgoingReferences(
 		}
 
 		// For deferred constraints, record violation for later checking at COMMIT
-		if fk.Deferrable == DeferrableInitiallyDeferred {
+		// But only defer if we're inside a transaction
+		if fk.Deferrable == DeferrableInitiallyDeferred && m.IsInTransaction() {
 			m.recordDeferredViolation(fk, fkValues, tableName)
 			continue
 		}
@@ -367,6 +389,9 @@ func (m *ForeignKeyManager) ValidateDelete(
 		}
 	}
 
+	// Clear any deferred violations for this table since the row was deleted
+	m.ClearDeferredViolationsForTable(tableName)
+
 	return nil
 }
 
@@ -406,7 +431,7 @@ func (m *ForeignKeyManager) handleDeleteConstraint(
 
 	keyValues := extractKeyValues(values, refCols)
 
-	referencingRows, err := rowReader.FindReferencingRows(fk.Table, fk.Columns, keyValues)
+	referencingRows, err := m.findReferencingRowsWithAffinity(rowReader, fk, table.Name, refCols, keyValues)
 	if err != nil {
 		return fmt.Errorf("failed to check foreign key references: %w", err)
 	}
@@ -582,6 +607,40 @@ func extractKeyValues(values map[string]interface{}, columns []string) []interfa
 	return result
 }
 
+// findReferencingRowsWithAffinity finds referencing rows using affinity-aware comparison.
+// It tries to use an extended interface if available, otherwise falls back to standard comparison.
+func (m *ForeignKeyManager) findReferencingRowsWithAffinity(
+	rowReader RowReader,
+	fk *ForeignKeyConstraint,
+	parentTableName string,
+	parentColumns []string,
+	parentValues []interface{},
+) ([]int64, error) {
+	// Try to use affinity-aware interface if available
+	type affinityRowReader interface {
+		FindReferencingRowsWithParentAffinity(
+			childTableName string,
+			childColumns []string,
+			parentValues []interface{},
+			parentTableName string,
+			parentColumns []string,
+		) ([]int64, error)
+	}
+
+	if ar, ok := rowReader.(affinityRowReader); ok {
+		return ar.FindReferencingRowsWithParentAffinity(
+			fk.Table,
+			fk.Columns,
+			parentValues,
+			parentTableName,
+			parentColumns,
+		)
+	}
+
+	// Fall back to standard comparison
+	return rowReader.FindReferencingRows(fk.Table, fk.Columns, parentValues)
+}
+
 // filterSelfReference removes the row being deleted from referencingRows if it matches the PK values.
 func (m *ForeignKeyManager) filterSelfReference(rowIDs []int64, values map[string]interface{}, pkCols []string) []int64 {
 	// Extract the rowid of the row being deleted from the primary key
@@ -719,8 +778,12 @@ func (m *ForeignKeyManager) validateReference(
 		return fmt.Errorf("foreign key mismatch - \"%s\" referencing \"%s\"", fk.Table, fk.RefTable)
 	}
 
+	// Extract collations from parent table columns
+	collations := extractCollations(refTable, refCols)
+
 	// Check if a row with these values exists in the referenced table
-	exists, err := rowReader.RowExists(fk.RefTable, refCols, values)
+	// Use the parent table's collation for comparison (SQLite behavior)
+	exists, err := rowReader.RowExistsWithCollation(fk.RefTable, refCols, values, collations)
 	if err != nil {
 		return fmt.Errorf("failed to check foreign key reference: %w", err)
 	}
@@ -782,7 +845,7 @@ func (m *ForeignKeyManager) handleUpdateConstraint(
 	oldKeyValues := extractKeyValues(oldValues, refCols)
 	newKeyValues := extractKeyValues(newValues, refCols)
 
-	referencingRows, err := rowReader.FindReferencingRows(fk.Table, fk.Columns, oldKeyValues)
+	referencingRows, err := m.findReferencingRowsWithAffinity(rowReader, fk, table.Name, refCols, oldKeyValues)
 	if err != nil {
 		return fmt.Errorf("failed to check foreign key references: %w", err)
 	}
@@ -858,6 +921,9 @@ func (m *ForeignKeyManager) cascadeUpdate(
 type RowReader interface {
 	// RowExists checks if a row exists with the given column values
 	RowExists(table string, columns []string, values []interface{}) (bool, error)
+
+	// RowExistsWithCollation checks if a row exists using specified collations per column
+	RowExistsWithCollation(table string, columns []string, values []interface{}, collations []string) (bool, error)
 
 	// FindReferencingRows finds all rows that reference the given values
 	FindReferencingRows(table string, columns []string, values []interface{}) ([]int64, error)
@@ -988,6 +1054,22 @@ func (m *ForeignKeyManager) ClearDeferredViolations() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deferredViolations = nil
+}
+
+// ClearDeferredViolationsForTable clears deferred violations for a specific table.
+// Called when a row in the table is updated or deleted, since the violation may no longer apply.
+func (m *ForeignKeyManager) ClearDeferredViolationsForTable(tableName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tableLower := strings.ToLower(tableName)
+	filtered := make([]*DeferredViolation, 0, len(m.deferredViolations))
+	for _, v := range m.deferredViolations {
+		if !strings.EqualFold(v.Table, tableLower) {
+			filtered = append(filtered, v)
+		}
+	}
+	m.deferredViolations = filtered
 }
 
 // ForeignKeyViolation represents a single foreign key constraint violation.
@@ -1231,4 +1313,24 @@ func isViolation(
 		return true
 	}
 	return !exists
+}
+
+// extractCollations extracts collation names for the given columns from a table.
+// Returns a slice of collation names, one per column.
+// If a column has no explicit collation, returns "BINARY" (the default).
+func extractCollations(table *schema.Table, columns []string) []string {
+	collations := make([]string, len(columns))
+	for i, colName := range columns {
+		col, ok := table.GetColumn(colName)
+		if !ok {
+			collations[i] = "BINARY"
+			continue
+		}
+		if col.Collation == "" {
+			collations[i] = "BINARY"
+		} else {
+			collations[i] = col.Collation
+		}
+	}
+	return collations
 }

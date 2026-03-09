@@ -6,6 +6,7 @@ package collation
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/utf"
@@ -93,10 +94,13 @@ func (cr *CollationRegistry) Register(name string, fn CollationFunc) error {
 
 // Get retrieves a collation by name.
 // Returns the collation and true if found, nil and false otherwise.
+// Collation names are case-insensitive.
 func (cr *CollationRegistry) Get(name string) (*Collation, bool) {
 	cr.mu.RLock()
 	defer cr.mu.RUnlock()
 
+	// Normalize collation name to uppercase for case-insensitive lookup
+	name = strings.ToUpper(name)
 	coll, ok := cr.collations[name]
 	return coll, ok
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/collation"
 	"strconv"
 )
 
@@ -54,6 +55,28 @@ func (r *VDBERowReader) RowExists(tableName string, columns []string, values []i
 
 	// Search for a matching row
 	return r.findMatchingRow(cursorNum, table, columns, values)
+}
+
+// RowExistsWithCollation checks if a row exists using specified collations per column.
+func (r *VDBERowReader) RowExistsWithCollation(tableName string, columns []string, values []interface{}, collations []string) (bool, error) {
+	if err := r.validateContext(); err != nil {
+		return false, err
+	}
+
+	table, err := r.getTable(tableName)
+	if err != nil {
+		return false, err
+	}
+
+	cursorNum := r.allocTempCursor()
+	defer r.closeTempCursor(cursorNum)
+
+	if err := r.openReadCursorForTable(cursorNum, table); err != nil {
+		return false, err
+	}
+
+	// Search for a matching row with collation-aware comparison
+	return r.findMatchingRowWithCollation(cursorNum, table, columns, values, collations)
 }
 
 // FindReferencingRows finds all rowids of rows that reference the given values.
@@ -386,6 +409,24 @@ func (r *VDBERowReader) findMatchingRow(cursorNum int, table *tableInfo, columns
 	return r.scanForMatch(r.vdbe.Cursors[cursorNum], btCursor, table, columns, values)
 }
 
+// findMatchingRowWithCollation scans the table to find a row matching the given values with collation.
+func (r *VDBERowReader) findMatchingRowWithCollation(cursorNum int, table *tableInfo, columns []string, values []interface{}, collations []string) (bool, error) {
+	btCursor, err := r.getBTreeCursor(cursorNum)
+	if err != nil {
+		return false, err
+	}
+
+	isEmpty, err := r.moveToFirstRow(btCursor)
+	if err != nil {
+		return false, err
+	}
+	if isEmpty {
+		return false, nil // Empty table means no match
+	}
+
+	return r.scanForMatchWithCollation(r.vdbe.Cursors[cursorNum], btCursor, table, columns, values, collations)
+}
+
 // moveToFirstRow moves cursor to the first row, returns (isEmpty, error).
 // isEmpty is true if the table is empty (cursor not valid), false if positioned at first row.
 func (r *VDBERowReader) moveToFirstRow(btCursor *btree.BtCursor) (bool, error) {
@@ -402,6 +443,25 @@ func (r *VDBERowReader) moveToFirstRow(btCursor *btree.BtCursor) (bool, error) {
 func (r *VDBERowReader) scanForMatch(cursor *Cursor, btCursor *btree.BtCursor, table *tableInfo, columns []string, values []interface{}) (bool, error) {
 	for {
 		match, err := r.checkRowMatch(cursor, table, columns, values)
+		if err != nil {
+			return false, err
+		}
+		if match {
+			return true, nil
+		}
+
+		if err := btCursor.Next(); err != nil {
+			break
+		}
+	}
+
+	return false, nil
+}
+
+// scanForMatchWithCollation scans through rows looking for a match with collation
+func (r *VDBERowReader) scanForMatchWithCollation(cursor *Cursor, btCursor *btree.BtCursor, table *tableInfo, columns []string, values []interface{}, collations []string) (bool, error) {
+	for {
+		match, err := r.checkRowMatchWithCollation(cursor, table, columns, values, collations)
 		if err != nil {
 			return false, err
 		}
@@ -498,6 +558,55 @@ func (r *VDBERowReader) checkRowMatch(cursor *Cursor, table *tableInfo, columns 
 
 		// Compare with expected value
 		if !r.valuesEqualWithAffinity(colValue, values[i], colInfo.Type) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// checkRowMatchWithCollation checks if the current row matches the given column values with collation.
+func (r *VDBERowReader) checkRowMatchWithCollation(cursor *Cursor, table *tableInfo, columns []string, values []interface{}, collations []string) (bool, error) {
+	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
+	if !ok {
+		return false, fmt.Errorf("invalid cursor type")
+	}
+
+	payload, err := btCursor.GetPayloadWithOverflow()
+	if err != nil {
+		return false, err
+	}
+
+	rowid := btCursor.GetKey()
+
+	// Parse the record and check column values
+	for i, colName := range columns {
+		colIdx := r.findColumnIndex(table, colName)
+		if colIdx < 0 {
+			return false, fmt.Errorf("column not found: %s", colName)
+		}
+
+		colInfo := table.Columns[colIdx]
+		colValue := NewMem()
+
+		if colInfo.IsIntegerPK {
+			// INTEGER PRIMARY KEY is stored as rowid, not in payload
+			colValue.SetInt(rowid)
+		} else {
+			// Regular column: extract from payload using PayloadColIndex
+			if err := parseRecordColumn(payload, colInfo.PayloadColIndex, colValue); err != nil {
+				return false, err
+			}
+		}
+
+		// Get the collation for this column (use BINARY if not specified)
+		collationName := "BINARY"
+		if i < len(collations) && collations[i] != "" {
+			collationName = collations[i]
+		}
+
+		// Compare with expected value using collation
+		if !r.valuesEqualWithCollation(colValue, values[i], collationName) {
 			return false, nil
 		}
 	}
@@ -634,6 +743,28 @@ func valuesEqualDirect(v1, v2 interface{}) bool {
 	}
 
 	return false
+}
+
+// valuesEqualWithCollation compares mem with value using the specified collation.
+func (r *VDBERowReader) valuesEqualWithCollation(mem *Mem, value interface{}, collationName string) bool {
+	if mem.IsNull() {
+		return value == nil
+	}
+
+	// For numeric types, collation doesn't apply - use regular comparison
+	if mem.IsInt() || mem.IsReal() {
+		return compareMemToInterface(mem, value)
+	}
+
+	// For strings, use collation-aware comparison
+	if mem.IsString() {
+		s1 := mem.StringValue()
+		s2 := fmt.Sprintf("%v", value)
+		return collation.Compare(s1, s2, collationName) == 0
+	}
+
+	// For other types, use regular comparison
+	return compareMemToInterface(mem, value)
 }
 
 // toInt64 converts various integer types to int64.

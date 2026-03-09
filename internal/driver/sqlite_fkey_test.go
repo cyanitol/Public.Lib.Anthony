@@ -353,7 +353,6 @@ func TestForeignKey_SimpleUpdateViolation(t *testing.T) {
 // TestForeignKey_DeferredConstraints tests deferred foreign key constraints.
 // Based on fkey2-2.* tests.
 func TestForeignKey_DeferredConstraints(t *testing.T) {
-	t.Skip("Deferred FK constraints not yet implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -406,7 +405,7 @@ func TestForeignKey_DeferredConstraints(t *testing.T) {
 // TestForeignKey_DeferredConstraintViolation tests deferred constraint fails at commit.
 // Based on fkey2-2.* tests.
 func TestForeignKey_DeferredConstraintViolation(t *testing.T) {
-	t.Skip("Deferred FK constraints not yet implemented")
+	t.Skip("Deferred constraint violation checking needs transaction boundary integration")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1056,7 +1055,7 @@ func TestForeignKey_IntegerPrimaryKey(t *testing.T) {
 // TestForeignKey_CollationHandling tests that FK uses parent key collation.
 // Based on fkey2-1.7.* tests.
 func TestForeignKey_CollationHandling(t *testing.T) {
-	t.Skip("Collation-aware FK comparison not yet implemented")
+	t.Skip("Collation-aware FK matching not fully implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1419,7 +1418,7 @@ func TestForeignKey_Restrict(t *testing.T) {
 // TestForeignKey_AffinityHandling tests that affinity doesn't break FK checks.
 // Based on fkey2-1.5.* tests.
 func TestForeignKey_AffinityHandling(t *testing.T) {
-	t.Skip("Type affinity in FK comparison not yet implemented")
+	t.Skip("Type affinity in FK comparison not fully implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1441,7 +1440,7 @@ func TestForeignKey_AffinityHandling(t *testing.T) {
 		t.Fatalf("Failed to insert parent: %v", err)
 	}
 
-	// Insert with text '35.0' (should not match integer 35 due to affinity)
+	// Insert with text '35.0' (should match integer 35 with affinity)
 	_, err = db.Exec("INSERT INTO j VALUES('35.0')")
 	if err != nil {
 		t.Errorf("Expected insert to succeed, got: %v", err)

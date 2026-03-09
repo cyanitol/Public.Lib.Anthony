@@ -8,6 +8,7 @@ import (
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/constraint"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/pager"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
@@ -746,6 +747,17 @@ func (r *driverRowReader) RowExists(tableName string, columns []string, values [
 	return r.scanForMatch(cursor, table, columns, values)
 }
 
+// RowExistsWithCollation checks if a row exists using specified collations per column.
+func (r *driverRowReader) RowExistsWithCollation(tableName string, columns []string, values []interface{}, collations []string) (bool, error) {
+	cursor, err := r.initializeCursor(tableName)
+	if err != nil {
+		return false, err
+	}
+
+	table, _ := r.conn.schema.GetTable(tableName)
+	return r.scanForMatchWithCollation(cursor, table, columns, values, collations)
+}
+
 // initializeCursor initializes and positions a cursor for table scanning.
 func (r *driverRowReader) initializeCursor(tableName string) (*btree.BtCursor, error) {
 	table, ok := r.conn.schema.GetTable(tableName)
@@ -790,6 +802,27 @@ func (r *driverRowReader) scanForMatch(cursor *btree.BtCursor, table *schema.Tab
 	return false, nil
 }
 
+// scanForMatchWithCollation scans all rows looking for a match using specified collations.
+func (r *driverRowReader) scanForMatchWithCollation(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}, collations []string) (bool, error) {
+	if cursor == nil {
+		return false, nil
+	}
+
+	for {
+		if match, err := r.checkRowMatchWithCollation(cursor, table, columns, values, collations); err != nil {
+			return false, err
+		} else if match {
+			return true, nil
+		}
+
+		if err := cursor.Next(); err != nil {
+			break
+		}
+	}
+
+	return false, nil
+}
+
 // FindReferencingRows finds all rowids of rows with matching column values.
 func (r *driverRowReader) FindReferencingRows(tableName string, columns []string, values []interface{}) ([]int64, error) {
 	cursor, err := r.initializeCursor(tableName)
@@ -805,6 +838,30 @@ func (r *driverRowReader) FindReferencingRows(tableName string, columns []string
 	return r.collectMatchingRowids(cursor, table, columns, values)
 }
 
+// FindReferencingRowsWithParentAffinity finds all rowids with affinity-aware matching.
+// This is used for FK checks where we need to apply parent column affinity to child values.
+func (r *driverRowReader) FindReferencingRowsWithParentAffinity(
+	childTableName string,
+	childColumns []string,
+	parentValues []interface{},
+	parentTableName string,
+	parentColumns []string,
+) ([]int64, error) {
+	cursor, err := r.initializeCursor(childTableName)
+	if err != nil {
+		return nil, err
+	}
+
+	if cursor == nil {
+		return []int64{}, nil
+	}
+
+	childTable, _ := r.conn.schema.GetTable(childTableName)
+	parentTable, _ := r.conn.schema.GetTable(parentTableName)
+
+	return r.collectMatchingRowidsWithAffinity(cursor, childTable, childColumns, parentValues, parentTable, parentColumns)
+}
+
 // collectMatchingRowids scans all rows and collects rowids that match.
 func (r *driverRowReader) collectMatchingRowids(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}) ([]int64, error) {
 	var rowids []int64
@@ -812,6 +869,33 @@ func (r *driverRowReader) collectMatchingRowids(cursor *btree.BtCursor, table *s
 		if match, err := r.checkRowMatch(cursor, table, columns, values); err != nil {
 			return nil, err
 		} else if match {
+			rowids = append(rowids, cursor.GetKey())
+		}
+
+		if err := cursor.Next(); err != nil {
+			break
+		}
+	}
+
+	return rowids, nil
+}
+
+// collectMatchingRowidsWithAffinity scans rows and collects matches using parent column affinity.
+func (r *driverRowReader) collectMatchingRowidsWithAffinity(
+	cursor *btree.BtCursor,
+	childTable *schema.Table,
+	childColumns []string,
+	parentValues []interface{},
+	parentTable *schema.Table,
+	parentColumns []string,
+) ([]int64, error) {
+	var rowids []int64
+	for {
+		match, err := r.checkRowMatchWithParentAffinity(cursor, childTable, childColumns, parentValues, parentTable, parentColumns)
+		if err != nil {
+			return nil, err
+		}
+		if match {
 			rowids = append(rowids, cursor.GetKey())
 		}
 
@@ -866,7 +950,82 @@ func (r *driverRowReader) checkRowMatch(cursor *btree.BtCursor, table *schema.Ta
 			return false, err
 		}
 
-		if !r.valuesEqual(colVal, values[i]) {
+		// Get parent column for affinity-aware comparison
+		col, _ := table.GetColumn(colName)
+		if !r.valuesEqualWithAffinity(colVal, values[i], col) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// checkRowMatchWithCollation checks if the current row matches using specified collations.
+func (r *driverRowReader) checkRowMatchWithCollation(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}, collations []string) (bool, error) {
+	// If no columns specified, return all rows (used for full table scan)
+	if len(columns) == 0 {
+		return true, nil
+	}
+
+	payload, err := cursor.GetPayloadWithOverflow()
+	if err != nil {
+		return false, err
+	}
+
+	rowid := cursor.GetKey()
+
+	for i, colName := range columns {
+		colVal, err := r.getColumnValue(table, colName, payload, rowid)
+		if err != nil {
+			return false, err
+		}
+
+		collation := "BINARY"
+		if i < len(collations) && collations[i] != "" {
+			collation = collations[i]
+		}
+
+		if !r.valuesEqualWithCollation(colVal, values[i], collation) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// checkRowMatchWithParentAffinity checks if child row matches parent values using parent affinity.
+func (r *driverRowReader) checkRowMatchWithParentAffinity(
+	cursor *btree.BtCursor,
+	childTable *schema.Table,
+	childColumns []string,
+	parentValues []interface{},
+	parentTable *schema.Table,
+	parentColumns []string,
+) (bool, error) {
+	if len(childColumns) == 0 {
+		return true, nil
+	}
+
+	payload, err := cursor.GetPayloadWithOverflow()
+	if err != nil {
+		return false, err
+	}
+
+	rowid := cursor.GetKey()
+
+	for i, childColName := range childColumns {
+		childVal, err := r.getColumnValue(childTable, childColName, payload, rowid)
+		if err != nil {
+			return false, err
+		}
+
+		// Get parent column for affinity
+		var parentCol *schema.Column
+		if i < len(parentColumns) && parentTable != nil {
+			parentCol, _ = parentTable.GetColumn(parentColumns[i])
+		}
+
+		if !r.valuesEqualWithAffinity(parentValues[i], childVal, parentCol) {
 			return false, nil
 		}
 	}
@@ -946,6 +1105,85 @@ func (r *driverRowReader) valuesEqual(v1, v2 interface{}) bool {
 	s1 := fmt.Sprintf("%v", v1)
 	s2 := fmt.Sprintf("%v", v2)
 	return s1 == s2
+}
+
+// valuesEqualWithCollation compares two values using the specified collation.
+func (r *driverRowReader) valuesEqualWithCollation(v1, v2 interface{}, collation string) bool {
+	if v1 == nil && v2 == nil {
+		return true
+	}
+	if v1 == nil || v2 == nil {
+		return false
+	}
+
+	// Handle numeric comparisons (collation doesn't apply to numbers)
+	if n1, ok := toInt64Value(v1); ok {
+		if n2, ok := toInt64Value(v2); ok {
+			return n1 == n2
+		}
+	}
+
+	// String comparison with collation
+	s1 := fmt.Sprintf("%v", v1)
+	s2 := fmt.Sprintf("%v", v2)
+
+	// Use collation-aware comparison from the collation package
+	return constraint.Compare(s1, s2, collation) == 0
+}
+
+// valuesEqualWithAffinity compares two values using the parent column's affinity.
+// According to SQLite FK rules, the parent column's affinity is applied to the
+// child value before comparison.
+func (r *driverRowReader) valuesEqualWithAffinity(parentVal, childVal interface{}, parentCol *schema.Column) bool {
+	if parentVal == nil && childVal == nil {
+		return true
+	}
+	if parentVal == nil || childVal == nil {
+		return false
+	}
+
+	// Apply parent column's affinity to child value
+	if parentCol != nil {
+		childVal = expr.ApplyAffinity(childVal, parentCol.Affinity)
+	}
+
+	// Compare after applying affinity
+	return r.compareAfterAffinity(parentVal, childVal)
+}
+
+// compareAfterAffinity compares values after affinity has been applied.
+func (r *driverRowReader) compareAfterAffinity(v1, v2 interface{}) bool {
+	// Handle numeric comparisons
+	if n1, ok := toInt64Value(v1); ok {
+		if n2, ok := toInt64Value(v2); ok {
+			return n1 == n2
+		}
+	}
+
+	// Handle float comparisons
+	if f1, ok := toFloat64Value(v1); ok {
+		if f2, ok := toFloat64Value(v2); ok {
+			return f1 == f2
+		}
+	}
+
+	// String comparison
+	s1 := fmt.Sprintf("%v", v1)
+	s2 := fmt.Sprintf("%v", v2)
+	return s1 == s2
+}
+
+// toFloat64Value converts a value to float64 if possible.
+func toFloat64Value(v interface{}) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int64:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	}
+	return 0, false
 }
 
 // toInt64Value converts a value to int64 if possible.
