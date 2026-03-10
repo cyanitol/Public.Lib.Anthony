@@ -151,8 +151,8 @@ type VDBE struct {
 	// Runtime context
 	Ctx *VDBEContext // Execution context (btree, schema, etc.)
 
-	// Sorters for ORDER BY
-	Sorters []*Sorter // Array of open sorters
+	// Sorters for ORDER BY (supports spill-to-disk via SorterInterface)
+	Sorters []SorterInterface // Array of open sorters
 
 	// Trigger and sub-program support
 	Parent      *VDBE                  // Parent VDBE (for sub-programs/triggers)
@@ -174,6 +174,22 @@ type CoroutineInfo struct {
 	EntryPoint int  // Address to jump to when yielding to this coroutine
 	YieldAddr  int  // Address to return to after yield
 	Active     bool // True if coroutine is currently active
+}
+
+// SorterInterface defines the interface for all sorter types.
+// Both Sorter and SorterWithSpill implement this interface.
+type SorterInterface interface {
+	Insert(row []*Mem) error
+	Sort() error
+	Rewind() bool
+	Next() bool
+	CurrentRow() []*Mem
+	Close()
+	// Additional methods for VDBE internal access
+	NumRows() int
+	SetCurrent(pos int)
+	GetCurrent() int
+	IsSorted() bool
 }
 
 // Sorter is an in-memory sorting structure for ORDER BY.
@@ -216,7 +232,7 @@ func NewSorterWithRegistry(keyCols []int, desc []bool, collations []string, numC
 }
 
 // Insert adds a row to the sorter. The row is copied.
-func (s *Sorter) Insert(row []*Mem) {
+func (s *Sorter) Insert(row []*Mem) error {
 	// Make a deep copy of the row using pooled Mem cells
 	rowCopy := make([]*Mem, len(row))
 	for i, m := range row {
@@ -226,13 +242,14 @@ func (s *Sorter) Insert(row []*Mem) {
 	}
 	s.Rows = append(s.Rows, rowCopy)
 	s.Sorted = false
+	return nil
 }
 
 // Sort sorts the collected rows by the key columns.
-func (s *Sorter) Sort() {
+func (s *Sorter) Sort() error {
 	if s.Sorted || len(s.Rows) <= 1 {
 		s.Sorted = true
-		return
+		return nil
 	}
 
 	// Simple insertion sort (adequate for most ORDER BY cases)
@@ -246,6 +263,7 @@ func (s *Sorter) Sort() {
 		s.Rows[j+1] = key
 	}
 	s.Sorted = true
+	return nil
 }
 
 // isColumnInBounds checks if the column index is valid for both rows.
@@ -315,6 +333,26 @@ func (s *Sorter) Close() {
 		}
 	}
 	s.Rows = nil
+}
+
+// NumRows returns the number of rows in the sorter.
+func (s *Sorter) NumRows() int {
+	return len(s.Rows)
+}
+
+// SetCurrent sets the current position in the sorter.
+func (s *Sorter) SetCurrent(pos int) {
+	s.Current = pos
+}
+
+// GetCurrent returns the current position in the sorter.
+func (s *Sorter) GetCurrent() int {
+	return s.Current
+}
+
+// IsSorted returns whether the sorter has been sorted.
+func (s *Sorter) IsSorted() bool {
+	return s.Sorted
 }
 
 // New creates a new VDBE instance.

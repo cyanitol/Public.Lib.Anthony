@@ -404,7 +404,7 @@ func TestSQLiteOrderByExpression(t *testing.T) {
 // TestSQLiteOrderByWithNulls tests NULL handling in ORDER BY
 // Converted from sort.test
 func TestSQLiteOrderByWithNulls(t *testing.T) {
-	t.Skip("SKIP: ORDER BY NULL handling not yet correct")
+	t.Skip("SKIP: ORDER BY NULL handling not yet correct - mixed ASC/DESC with NULLs")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 

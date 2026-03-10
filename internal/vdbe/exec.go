@@ -4261,7 +4261,7 @@ func (v *VDBE) execSorterOpen(instr *Instruction) error {
 		collRegistry = v.Ctx.CollationRegistry
 	}
 
-	v.Sorters[sorterNum] = NewSorterWithRegistry(keyCols, desc, collations, numCols, collRegistry)
+	v.Sorters[sorterNum] = NewSorterWithSpillAndRegistry(keyCols, desc, collations, numCols, collRegistry, nil)
 	return nil
 }
 
@@ -4295,13 +4295,15 @@ func (v *VDBE) execSorterInsert(instr *Instruction) error {
 		row[i] = mem
 	}
 
-	v.Sorters[sorterNum].Insert(row)
+	if err := v.Sorters[sorterNum].Insert(row); err != nil {
+		return fmt.Errorf("sorter insert failed: %w", err)
+	}
 
 	// Track sorter memory usage (rough estimate)
 	if v.Stats != nil {
 		sorter := v.Sorters[sorterNum]
 		// Estimate: each row is roughly numCols * 64 bytes
-		memBytes := int64(len(sorter.Rows) * numCols * 64)
+		memBytes := int64(sorter.NumRows() * numCols * 64)
 		v.Stats.UpdateSorterMemory(memBytes)
 	}
 
@@ -4319,13 +4321,15 @@ func (v *VDBE) execSorterSort(instr *Instruction) error {
 	}
 
 	sorter := v.Sorters[sorterNum]
-	sorter.Sort()
+	if err := sorter.Sort(); err != nil {
+		return fmt.Errorf("sorter sort failed: %w", err)
+	}
 
 	// Rewind to position before first row (Next will move to first)
-	sorter.Current = -1
+	sorter.SetCurrent(-1)
 
 	// Jump if empty
-	if len(sorter.Rows) == 0 && instr.P2 > 0 {
+	if sorter.NumRows() == 0 && instr.P2 > 0 {
 		v.PC = instr.P2
 	}
 	return nil

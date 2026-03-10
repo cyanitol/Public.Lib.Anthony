@@ -221,6 +221,11 @@ v0.1.x - Current Development
     - [DONE] ROW_NUMBER, RANK, DENSE_RANK, NTILE
     - [DONE] LAG, LEAD, FIRST_VALUE, LAST_VALUE
     - [DONE] ROWS/RANGE frame specification parsing
+[x] Sorter Spill-to-Disk - COMPLETE
+    - [DONE] SorterInterface abstraction for sorter types
+    - [DONE] SorterWithSpill: memory tracking, k-way merge, temp files
+    - [DONE] VDBE integration via NewSorterWithSpillAndRegistry
+    - [DONE] 10MB default memory limit, configurable
 
 ================================================================================
 v0.2.0 - Planned Features
@@ -276,7 +281,6 @@ Known Limitations
 ================================================================================
 
 - Windows file locking not implemented
-- ORDER BY bytecode generation incomplete for complex cases
+- ORDER BY mixed ASC/DESC with NULLs has edge cases (basic ORDER BY works)
 - Trigger execution is compile-time only (should be runtime)
-- No spill-to-disk for large sort operations
 - ATTACH DATABASE partially implemented

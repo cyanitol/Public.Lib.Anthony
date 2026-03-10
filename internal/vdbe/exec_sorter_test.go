@@ -57,11 +57,11 @@ func sortAndVerify(t *testing.T, v *VDBE) {
 	if v.PC == 99 {
 		t.Error("Should not jump when sorter has rows")
 	}
-	if !v.Sorters[0].Sorted {
+	if !v.Sorters[0].IsSorted() {
 		t.Error("Sorter should be marked as sorted")
 	}
-	if v.Sorters[0].Current != -1 {
-		t.Errorf("Sorter current should be -1 after sort, got %d", v.Sorters[0].Current)
+	if v.Sorters[0].GetCurrent() != -1 {
+		t.Errorf("Sorter current should be -1 after sort, got %d", v.Sorters[0].GetCurrent())
 	}
 }
 
@@ -101,8 +101,8 @@ func TestSorterBasicWorkflow(t *testing.T) {
 		insertSorterRow(t, v, []interface{}{int64(1), "first"})
 		insertSorterRow(t, v, []interface{}{int64(2), "second"})
 
-		if len(v.Sorters[0].Rows) != 3 {
-			t.Errorf("Expected 3 rows in sorter, got %d", len(v.Sorters[0].Rows))
+		if v.Sorters[0].NumRows() != 3 {
+			t.Errorf("Expected 3 rows in sorter, got %d", v.Sorters[0].NumRows())
 		}
 
 		sortAndVerify(t, v)
@@ -120,7 +120,7 @@ func TestSorterBasicWorkflow(t *testing.T) {
 			t.Error("Should not jump when no more rows")
 		}
 
-		v.Sorters[0].Current = 0
+		v.Sorters[0].SetCurrent(0)
 		dataInstr := &Instruction{Opcode: OpSorterData, P1: 0, P2: 10, P3: 2}
 		err = v.execSorterData(dataInstr)
 		if err != nil {

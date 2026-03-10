@@ -654,3 +654,23 @@ func (s *SorterWithSpill) GetMemoryUsage() int64 {
 func (s *SorterWithSpill) GetNumSpilledRuns() int {
 	return len(s.spilledRuns)
 }
+
+// NumRows returns the number of rows in the sorter.
+func (s *SorterWithSpill) NumRows() int {
+	return s.Sorter.NumRows()
+}
+
+// SetCurrent sets the current position in the sorter.
+func (s *SorterWithSpill) SetCurrent(pos int) {
+	s.Sorter.SetCurrent(pos)
+}
+
+// GetCurrent returns the current position in the sorter.
+func (s *SorterWithSpill) GetCurrent() int {
+	return s.Sorter.GetCurrent()
+}
+
+// IsSorted returns whether the sorter has been sorted.
+func (s *SorterWithSpill) IsSorted() bool {
+	return s.Sorter.IsSorted()
+}
