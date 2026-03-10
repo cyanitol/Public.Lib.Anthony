@@ -495,13 +495,81 @@ func (c *RTreeCursor) applyIDFilter(argv []interface{}) {
 
 // applySpatialFilter applies a spatial query filter.
 func (c *RTreeCursor) applySpatialFilter() {
-	// Spatial query - build bounding box from constraints
-	// This is a simplified version that assumes range query format
-	// A full implementation would parse the specific constraints used
+	// Build a query bounding box from the constraints
+	// This implementation handles basic range queries
+	queryBox := c.buildQueryBox()
 
-	// For now, perform a full scan (will be optimized with proper constraint parsing)
-	for _, entry := range c.table.entries {
-		c.results = append(c.results, entry)
+	if queryBox != nil && c.table.root != nil {
+		// Use the R-Tree search for efficient spatial queries
+		c.results = c.table.root.SearchOverlap(queryBox)
+	} else {
+		// Fall back to full scan if we can't build a proper query box
+		for _, entry := range c.table.entries {
+			c.results = append(c.results, entry)
+		}
+	}
+}
+
+// buildQueryBox constructs a bounding box from the query constraints.
+func (c *RTreeCursor) buildQueryBox() *BoundingBox {
+	// Initialize with infinite bounds
+	bbox := NewBoundingBox(c.table.dimensions)
+	for i := 0; i < c.table.dimensions; i++ {
+		bbox.Min[i] = -1e308 // Approximate negative infinity
+		bbox.Max[i] = 1e308  // Approximate positive infinity
+	}
+
+	// Parse constraints and refine the bounding box
+	argIdx := 0
+	for col := 1; col <= c.table.dimensions*2; col++ {
+		if c.idxNum&(1<<col) == 0 {
+			continue // This column doesn't have a constraint
+		}
+
+		if argIdx >= len(c.constraint) {
+			break
+		}
+
+		// Extract the constraint value
+		val := c.extractConstraintValue(c.constraint[argIdx])
+
+		// Update the appropriate bound
+		dimIndex := (col - 1) / 2
+		isMaxCol := (col-1)%2 == 1
+
+		if dimIndex < c.table.dimensions {
+			if isMaxCol {
+				// This is a maxX/maxY/etc column
+				// Constraints are typically: maxX >= value
+				if val < bbox.Max[dimIndex] {
+					bbox.Max[dimIndex] = val
+				}
+			} else {
+				// This is a minX/minY/etc column
+				// Constraints are typically: minX <= value
+				if val > bbox.Min[dimIndex] {
+					bbox.Min[dimIndex] = val
+				}
+			}
+		}
+
+		argIdx++
+	}
+
+	return bbox
+}
+
+// extractConstraintValue extracts a float64 value from a constraint.
+func (c *RTreeCursor) extractConstraintValue(val interface{}) float64 {
+	switch v := val.(type) {
+	case int64:
+		return float64(v)
+	case float64:
+		return v
+	case int:
+		return float64(v)
+	default:
+		return 0
 	}
 }
 

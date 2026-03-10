@@ -4,6 +4,7 @@ package driver
 import (
 	"database/sql/driver"
 	"fmt"
+	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
@@ -643,8 +644,22 @@ func (s *Stmt) finalizeAggregate(vm *vdbe.VDBE, rewindAddr int, afterScanAddr in
 
 // findColumnIndex finds the index of a column by name in a table
 func (s *Stmt) findColumnIndex(table *schema.Table, colName string) int {
+	// Try exact match first
 	for i, col := range table.Columns {
 		if col.Name == colName {
+			return i
+		}
+	}
+	// Try case-insensitive match
+	for i, col := range table.Columns {
+		if strings.EqualFold(col.Name, colName) {
+			return i
+		}
+	}
+	// Try with uppercase column name
+	upperColName := strings.ToUpper(colName)
+	for i, col := range table.Columns {
+		if col.Name == upperColName || strings.ToUpper(col.Name) == upperColName {
 			return i
 		}
 	}
@@ -666,6 +681,14 @@ func (s *Stmt) compileSelectWithWindowFunctions(vm *vdbe.VDBE, stmt *parser.Sele
 
 	s.initializeWindowStates(vm, expandedCols, table)
 
+	// Check if we need to sort for window ORDER BY
+	needsSorting, orderByCols, orderByDesc := s.detectWindowOrderBy(expandedCols, table)
+
+	if needsSorting {
+		return s.compileWindowWithSorting(vm, stmt, expandedCols, numCols, table, gen, orderByCols, orderByDesc)
+	}
+
+	// No sorting needed - use simple table scan
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
 
@@ -712,6 +735,10 @@ func (s *Stmt) setupWindowCodeGenerator(vm *vdbe.VDBE, tableName string, table *
 
 // initializeWindowStates initializes window states for each window function.
 func (s *Stmt) initializeWindowStates(vm *vdbe.VDBE, expandedCols []parser.ResultColumn, table *schema.Table) {
+	// Track which OVER clauses we've already seen to avoid duplicates
+	// Multiple window functions with the same OVER clause should share a window state
+	seenOverClauses := make(map[string]int) // overKey -> windowStateIdx
+	windowFunctionCounts := make(map[int]int) // windowStateIdx -> count of functions
 	windowStateIdx := 0
 
 	for _, col := range expandedCols {
@@ -720,12 +747,51 @@ func (s *Stmt) initializeWindowStates(vm *vdbe.VDBE, expandedCols []parser.Resul
 			continue
 		}
 
+		// Create a key for this OVER clause based on its ORDER BY specification
 		orderByCols, orderByDesc := s.extractWindowOrderBy(fnExpr.Over, table)
-		frame := vdbe.DefaultWindowFrame()
-		windowState := vdbe.NewWindowState([]int{}, orderByCols, orderByDesc, frame)
-		vm.WindowStates[windowStateIdx] = windowState
-		windowStateIdx++
+		overKey := s.makeOverClauseKey(orderByCols, orderByDesc)
+
+		// Check if we've seen this OVER clause before
+		if existingIdx, exists := seenOverClauses[overKey]; exists {
+			// Increment count for existing window state
+			windowFunctionCounts[existingIdx]++
+		} else {
+			// Create a new window state
+			frame := vdbe.DefaultWindowFrame()
+			windowState := vdbe.NewWindowState([]int{}, orderByCols, orderByDesc, frame)
+			vm.WindowStates[windowStateIdx] = windowState
+			seenOverClauses[overKey] = windowStateIdx
+			windowFunctionCounts[windowStateIdx] = 1
+			windowStateIdx++
+		}
 	}
+
+	// Set WindowFunctionCount for each window state
+	for idx, count := range windowFunctionCounts {
+		if ws, ok := vm.WindowStates[idx]; ok {
+			ws.WindowFunctionCount = count
+		}
+	}
+}
+
+// makeOverClauseKey creates a unique key for an OVER clause based on its ORDER BY specification.
+func (s *Stmt) makeOverClauseKey(orderByCols []int, orderByDesc []bool) string {
+	if len(orderByCols) == 0 {
+		return "no-order"
+	}
+	key := ""
+	for i, col := range orderByCols {
+		if i > 0 {
+			key += ","
+		}
+		key += fmt.Sprintf("%d", col)
+		if orderByDesc[i] {
+			key += "D"
+		} else {
+			key += "A"
+		}
+	}
+	return key
 }
 
 // extractWindowOrderBy extracts ORDER BY columns from window specification.
@@ -776,4 +842,139 @@ func (s *Stmt) finalizeWindowLoop(vm *vdbe.VDBE, skipAddr, rewindAddr int) {
 
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+}
+
+// detectWindowOrderBy checks if any window function has ORDER BY and extracts the columns
+func (s *Stmt) detectWindowOrderBy(expandedCols []parser.ResultColumn, table *schema.Table) (bool, []int, []bool) {
+	for _, col := range expandedCols {
+		fnExpr, ok := col.Expr.(*parser.FunctionExpr)
+		if !ok || fnExpr.Over == nil || fnExpr.Over.OrderBy == nil {
+			continue
+		}
+
+		// Found a window function with ORDER BY
+		orderByCols, orderByDesc := s.extractWindowOrderBy(fnExpr.Over, table)
+		if len(orderByCols) > 0 {
+			return true, orderByCols, orderByDesc
+		}
+	}
+	return false, nil, nil
+}
+
+// compileWindowWithSorting compiles window functions with sorting
+func (s *Stmt) compileWindowWithSorting(vm *vdbe.VDBE, stmt *parser.SelectStmt,
+	expandedCols []parser.ResultColumn, numCols int, table *schema.Table,
+	gen *expr.CodeGenerator, orderByCols []int, orderByDesc []bool) (*vdbe.VDBE, error) {
+
+	// Calculate total columns needed for sorter (all table columns)
+	numTableCols := len(table.Columns)
+	sorterCols := numTableCols
+
+	// Setup sorter with key info
+	keyInfo := &vdbe.SorterKeyInfo{
+		KeyCols:    orderByCols,
+		Desc:       orderByDesc,
+		Collations: make([]string, len(orderByCols)),
+	}
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
+
+	// Open sorter
+	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, 1, sorterCols, 0)
+	vm.Program[sorterOpenAddr].P4.P = keyInfo
+
+	// First pass: populate sorter
+	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+
+	var skipAddr int
+	if stmt.Where != nil {
+		whereReg, err := gen.GenerateExpr(stmt.Where)
+		if err != nil {
+			return nil, err
+		}
+		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+	}
+
+	// Read all columns from table into registers
+	for i := 0; i < numTableCols; i++ {
+		vm.AddOp(vdbe.OpColumn, 0, i, i)
+	}
+
+	// Insert into sorter
+	vm.AddOp(vdbe.OpSorterInsert, 1, 0, sorterCols)
+
+	// Fix skip address if WHERE exists
+	if stmt.Where != nil {
+		vm.Program[skipAddr].P2 = vm.NumOps()
+	}
+
+	// Complete first pass
+	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
+	vm.Program[rewindAddr].P2 = vm.NumOps()
+
+	// Close the table
+	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+
+	// Sort the data
+	vm.AddOp(vdbe.OpSorterSort, 1, 0, 0)
+
+	// Second pass: read from sorter and compute window functions
+	// OpSorterNext will jump to sorterLoopAddr when there's data, or fall through to halt when done
+	sorterNextAddr := vm.AddOp(vdbe.OpSorterNext, 1, 0, 0)
+	haltJumpAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+	sorterLoopAddr := vm.NumOps()
+
+	// Read all data from sorter into registers 0..numTableCols-1
+	vm.AddOp(vdbe.OpSorterData, 1, 0, numTableCols)
+
+	// Emit columns
+	for i := 0; i < numCols; i++ {
+		s.emitWindowColumnFromSorter(vm, gen, expandedCols[i], table, i)
+	}
+
+	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+
+	// Loop back to get next row from sorter
+	vm.AddOp(vdbe.OpSorterNext, 1, sorterLoopAddr, 0)
+
+	// Fix addresses
+	haltAddr := vm.NumOps()
+	vm.Program[sorterNextAddr].P2 = sorterLoopAddr
+	vm.Program[haltJumpAddr].P2 = haltAddr
+
+	// Close sorter and halt
+	vm.AddOp(vdbe.OpSorterClose, 1, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
+// emitWindowColumnFromSorter emits code for a column when reading from sorter
+func (s *Stmt) emitWindowColumnFromSorter(vm *vdbe.VDBE, gen *expr.CodeGenerator, col parser.ResultColumn,
+	table *schema.Table, colIdx int) {
+
+	if fnExpr, ok := col.Expr.(*parser.FunctionExpr); ok && fnExpr.Over != nil {
+		// Use opcodes with streaming mode (passing numTableCols for register reading)
+		numTableCols := len(table.Columns)
+		s.emitWindowFunctionColumnWithOpcodes(vm, fnExpr, colIdx, numTableCols)
+		return
+	}
+
+	// Regular column - data is already in registers from OpSorterData
+	if identExpr, ok := col.Expr.(*parser.IdentExpr); ok {
+		tableColIdx := s.findColumnIndex(table, identExpr.Name)
+		if tableColIdx >= 0 {
+			// Data is already in register tableColIdx, just copy if needed
+			if tableColIdx != colIdx {
+				vm.AddOp(vdbe.OpCopy, tableColIdx, colIdx, 0)
+			}
+		} else {
+			vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
+		}
+		return
+	}
+
+	// Other expressions - would need special handling
+	vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
 }

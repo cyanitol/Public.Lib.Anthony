@@ -61,6 +61,9 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 
 // compileSelectWithJoinsAndOrderBy compiles a SELECT with JOINs and ORDER BY using a sorter.
 func (s *Stmt) compileSelectWithJoinsAndOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int, gen *expr.CodeGenerator) (*vdbe.VDBE, error) {
+	// Reserve registers for SELECT columns before resolving ORDER BY
+	gen.SetNextReg(numCols)
+
 	// Resolve ORDER BY columns and setup sorter
 	orderInfo := s.resolveOrderByColumnsMultiTable(stmt, tables, numCols, gen)
 	gen.SetNextReg(orderInfo.sorterCols)
@@ -84,13 +87,16 @@ func (s *Stmt) compileSelectWithJoinsAndOrderBy(vm *vdbe.VDBE, stmt *parser.Sele
 		return nil, err
 	}
 
-	// Close all cursors after populating sorter
+	// Loop back for next combinations
 	for i := len(tables) - 1; i > 0; i-- {
 		vm.AddOp(vdbe.OpNext, i, innerLoopStarts[i-1], 0)
-		vm.AddOp(vdbe.OpClose, i, 0, 0)
 	}
 	outerNextAddr := vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
-	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+
+	// Close all cursors after populating sorter
+	for i := len(tables) - 1; i >= 0; i-- {
+		vm.AddOp(vdbe.OpClose, i, 0, 0)
+	}
 
 	// Fix inner loop Rewind addresses to jump to outer Next if empty
 	for _, addr := range innerRewindAddrs {
@@ -172,13 +178,40 @@ func (s *Stmt) findCollationInSchemaMultiTable(colName string, tables []stmtTabl
 	return ""
 }
 
+// buildCombinedWhereExpression combines WHERE clause with JOIN ON conditions.
+func (s *Stmt) buildCombinedWhereExpression(stmt *parser.SelectStmt) parser.Expression {
+	// Start with the WHERE clause (if any)
+	combined := stmt.Where
+
+	// Add all JOIN ON conditions
+	if stmt.From != nil {
+		for _, join := range stmt.From.Joins {
+			if join.Condition.On != nil {
+				if combined == nil {
+					combined = join.Condition.On
+				} else {
+					// Combine with AND
+					combined = &parser.BinaryExpr{
+						Op:    parser.OpAnd,
+						Left:  combined,
+						Right: join.Condition.On,
+					}
+				}
+			}
+		}
+	}
+
+	return combined
+}
+
 // emitJoinSorterPopulation emits WHERE filter and inserts joined rows into sorter.
 func (s *Stmt) emitJoinSorterPopulation(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, orderInfo *orderByColumnInfo, numCols int, gen *expr.CodeGenerator) error {
-	// Emit WHERE clause filter
+	// Emit combined WHERE clause and JOIN ON conditions
 	var skipAddr int
-	hasWhere := stmt.Where != nil
+	combinedWhere := s.buildCombinedWhereExpression(stmt)
+	hasWhere := combinedWhere != nil
 	if hasWhere {
-		whereReg, err := gen.GenerateExpr(stmt.Where)
+		whereReg, err := gen.GenerateExpr(combinedWhere)
 		if err != nil {
 			return fmt.Errorf("failed to compile WHERE clause: %w", err)
 		}
@@ -383,11 +416,12 @@ func (s *Stmt) emitJoinNestedLoopsWithRewinds(vm *vdbe.VDBE, tables []stmtTableI
 
 // emitJoinColumnsWithWhere emits WHERE filter, column read operations, and result row for JOIN.
 func (s *Stmt) emitJoinColumnsWithWhere(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int, gen *expr.CodeGenerator) error {
-	// Emit WHERE clause filter
+	// Emit combined WHERE clause and JOIN ON conditions
 	var skipAddr int
-	hasWhere := stmt.Where != nil
+	combinedWhere := s.buildCombinedWhereExpression(stmt)
+	hasWhere := combinedWhere != nil
 	if hasWhere {
-		whereReg, err := gen.GenerateExpr(stmt.Where)
+		whereReg, err := gen.GenerateExpr(combinedWhere)
 		if err != nil {
 			return fmt.Errorf("failed to compile WHERE clause: %w", err)
 		}
@@ -667,14 +701,15 @@ type statementCompiler func(*vdbe.VDBE, parser.Statement, []driver.NamedValue) (
 // getStatementCompilerMap returns the map of statement types to their compilers.
 func (s *Stmt) getStatementCompilerMap() map[string]statementCompiler {
 	return map[string]statementCompiler{
-		"*parser.SelectStmt":      s.compileSelectWrapper,
-		"*parser.InsertStmt":      s.compileInsertWrapper,
-		"*parser.UpdateStmt":      s.compileUpdateWrapper,
-		"*parser.DeleteStmt":      s.compileDeleteWrapper,
-		"*parser.CreateTableStmt": s.compileCreateTableWrapper,
-		"*parser.DropTableStmt":   s.compileDropTableWrapper,
-		"*parser.CreateViewStmt":  s.compileCreateViewWrapper,
-		"*parser.DropViewStmt":    s.compileDropViewWrapper,
+		"*parser.SelectStmt":             s.compileSelectWrapper,
+		"*parser.InsertStmt":             s.compileInsertWrapper,
+		"*parser.UpdateStmt":             s.compileUpdateWrapper,
+		"*parser.DeleteStmt":             s.compileDeleteWrapper,
+		"*parser.CreateTableStmt":        s.compileCreateTableWrapper,
+		"*parser.CreateVirtualTableStmt": s.compileCreateVirtualTableWrapper,
+		"*parser.DropTableStmt":          s.compileDropTableWrapper,
+		"*parser.CreateViewStmt":         s.compileCreateViewWrapper,
+		"*parser.DropViewStmt":           s.compileDropViewWrapper,
 	}
 }
 
@@ -697,6 +732,10 @@ func (s *Stmt) compileDeleteWrapper(vm *vdbe.VDBE, stmt parser.Statement, args [
 
 func (s *Stmt) compileCreateTableWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	return s.compileCreateTable(vm, stmt.(*parser.CreateTableStmt), args)
+}
+
+func (s *Stmt) compileCreateVirtualTableWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	return s.compileCreateVirtualTable(vm, stmt.(*parser.CreateVirtualTableStmt), args)
 }
 
 func (s *Stmt) compileDropTableWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {

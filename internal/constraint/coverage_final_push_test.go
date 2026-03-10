@@ -476,6 +476,9 @@ func TestForeignKeyManager_ValidateInsert_DeferredCheck(t *testing.T) {
 
 	reader := NewMockRowReader()
 
+	// Must be in a transaction for deferred constraints to work
+	mgr.SetInTransaction(true)
+
 	// Insert with invalid reference but deferred
 	values := map[string]interface{}{
 		"id":          1,
@@ -486,4 +489,7 @@ func TestForeignKeyManager_ValidateInsert_DeferredCheck(t *testing.T) {
 	if err != nil {
 		t.Errorf("Deferred constraint should skip validation: %v", err)
 	}
+
+	// Clean up
+	mgr.SetInTransaction(false)
 }

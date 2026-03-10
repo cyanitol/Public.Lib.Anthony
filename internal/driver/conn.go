@@ -17,6 +17,8 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/security"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab/fts5"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab/rtree"
 )
 
 // Conn implements database/sql/driver.Conn for SQLite.
@@ -347,8 +349,30 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 	c.vtabRegistry = vtab.NewModuleRegistry()
 	c.collRegistry = collation.NewCollationRegistry()
 
+	// Register built-in virtual table modules
+	if err := c.registerBuiltinVirtualTables(); err != nil {
+		return fmt.Errorf("failed to register virtual tables: %w", err)
+	}
+
 	// Initialize foreign key constraint manager
 	c.fkManager = constraint.NewForeignKeyManager()
+
+	return nil
+}
+
+// registerBuiltinVirtualTables registers built-in virtual table modules like FTS5 and RTree.
+func (c *Conn) registerBuiltinVirtualTables() error {
+	// Register FTS5 full-text search module
+	if err := c.vtabRegistry.RegisterModule("fts5", fts5.NewFTS5Module()); err != nil {
+		return fmt.Errorf("failed to register fts5 module: %w", err)
+	}
+
+	// Register RTree spatial index module
+	if err := c.vtabRegistry.RegisterModule("rtree", rtree.NewRTreeModule()); err != nil {
+		return fmt.Errorf("failed to register rtree module: %w", err)
+	}
+
+	// Future: Register additional modules like JSON, etc. when implemented
 
 	return nil
 }
@@ -716,6 +740,31 @@ func (r *ConnRowReader) FindReferencingRows(table string, columns []string, valu
 
 	reader := vdbe.NewVDBERowReader(v)
 	return reader.FindReferencingRows(table, columns, values)
+}
+
+// FindReferencingRowsWithParentAffinity finds all rows that reference the given values,
+// using the parent column's affinity and collation for comparison.
+func (r *ConnRowReader) FindReferencingRowsWithParentAffinity(
+	childTableName string,
+	childColumns []string,
+	parentValues []interface{},
+	parentTableName string,
+	parentColumns []string,
+) ([]int64, error) {
+	// Create a minimal VDBE context
+	v := &vdbe.VDBE{
+		Ctx: &vdbe.VDBEContext{
+			Schema:             r.conn.schema,
+			Btree:              r.conn.btree,
+			Pager:              r.conn.pager,
+			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
+			FKManager:          r.conn.fkManager,
+		},
+		Cursors: make([]*vdbe.Cursor, 10),
+	}
+
+	reader := vdbe.NewVDBERowReader(v)
+	return reader.FindReferencingRowsWithParentAffinity(childTableName, childColumns, parentValues, parentTableName, parentColumns)
 }
 
 // ReadRowByRowid reads a row's values by its rowid.

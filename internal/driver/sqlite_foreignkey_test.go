@@ -18,12 +18,12 @@ type fkTestCase struct {
 	errMsg      string
 	wantRows    int
 	verifyValue interface{}
+	wantNull    bool // true to verify the result is NULL (distinct from verifyValue being nil)
 }
 
 // TestSQLiteForeignKey is a comprehensive table-driven test suite for foreign key constraints
 // Converted from SQLite's TCL foreign key tests (fkey.test, fkey2.test, fkey3.test, fkey4.test, fkey5.test)
 func TestSQLiteForeignKey(t *testing.T) {
-	t.Skip("pre-existing failure - needs foreign key implementation")
 	tests := []fkTestCase{
 		// ===== PRAGMA foreign_keys TESTS =====
 		{
@@ -187,7 +187,7 @@ func TestSQLiteForeignKey(t *testing.T) {
 			},
 			inserts:     []string{"UPDATE child SET pid = NULL WHERE cid = 10"},
 			verify:      "SELECT pid FROM child WHERE cid = 10",
-			verifyValue: nil,
+			wantNull:    true,
 		},
 		{
 			name:     "fk-update-1.3: UPDATE child to another valid parent succeeds",
@@ -330,7 +330,7 @@ func TestSQLiteForeignKey(t *testing.T) {
 			},
 			inserts:     []string{"DELETE FROM parent WHERE id = 1"},
 			verify:      "SELECT pid FROM child WHERE cid = 10",
-			verifyValue: nil,
+			wantNull:    true,
 		},
 		{
 			name:     "fk-setnull-1.2: ON DELETE SET NULL with multiple children",
@@ -490,7 +490,7 @@ func TestSQLiteForeignKey(t *testing.T) {
 			},
 			inserts:     []string{"UPDATE parent SET id = 2 WHERE id = 1"},
 			verify:      "SELECT pid FROM child WHERE cid = 10",
-			verifyValue: nil,
+			wantNull:    true,
 		},
 		{
 			name:     "fk-update-setnull-1.2: ON UPDATE SET NULL with multiple children",
@@ -1198,12 +1198,27 @@ func fkCheckError(t *testing.T, lastErr error, wantErr bool, errMsg string) {
 // fkVerifyResults verifies query results
 func fkVerifyResults(t *testing.T, db *sql.DB, tt fkTestCase) {
 	t.Helper()
-	if tt.verifyValue != nil {
+	if tt.wantNull {
+		fkVerifyNull(t, db, tt.verify)
+	} else if tt.verifyValue != nil {
 		fkVerifySingleValue(t, db, tt.verify, tt.verifyValue)
 	} else if tt.wantRows > 0 {
 		fkVerifyRowCount(t, db, tt.verify, tt.wantRows)
 	} else {
 		fkVerifyRowCount(t, db, tt.verify, 0)
+	}
+}
+
+// fkVerifyNull verifies the query result is NULL
+func fkVerifyNull(t *testing.T, db *sql.DB, query string) {
+	t.Helper()
+	var result sql.NullInt64
+	err := db.QueryRow(query).Scan(&result)
+	if err != nil {
+		t.Fatalf("query failed: %v\nquery: %s", err, query)
+	}
+	if result.Valid {
+		t.Errorf("expected NULL, got %d\nquery: %s", result.Int64, query)
 	}
 }
 
@@ -1241,8 +1256,25 @@ func fkVerifySingleValue(t *testing.T, db *sql.DB, query string, want interface{
 }
 
 // fkVerifyRowCount verifies row count
+// For SELECT COUNT(*) queries, it checks the count value returned
+// For other queries, it checks the number of rows returned
 func fkVerifyRowCount(t *testing.T, db *sql.DB, query string, want int) {
 	t.Helper()
+
+	// Handle COUNT(*) queries specially - check the value, not row count
+	if strings.Contains(strings.ToUpper(query), "COUNT(*)") {
+		var count int
+		if err := db.QueryRow(query).Scan(&count); err != nil {
+			t.Fatalf("count query failed: %v\nquery: %s", err, query)
+		}
+		if count != want {
+			t.Errorf("row count mismatch: got %d, want %d\nquery: %s",
+				count, want, query)
+		}
+		return
+	}
+
+	// For non-COUNT queries, check number of rows returned
 	rows := queryRows(t, db, query)
 	if len(rows) != want {
 		t.Errorf("row count mismatch: got %d, want %d\nquery: %s",
@@ -1252,7 +1284,6 @@ func fkVerifyRowCount(t *testing.T, db *sql.DB, query string, want int) {
 
 // TestForeignKey_ComplexScenarios tests complex foreign key scenarios that don't fit table-driven tests
 func TestForeignKey_ComplexScenarios(t *testing.T) {
-	t.Skip("pre-existing failure - needs foreign key implementation")
 	t.Run("circular-deferred", func(t *testing.T) {
 		db := setupMemoryDB(t)
 		defer db.Close()
@@ -1385,7 +1416,6 @@ func TestForeignKey_ComplexScenarios(t *testing.T) {
 
 // TestForeignKey_MismatchErrors tests foreign key mismatch errors
 func TestForeignKey_MismatchErrors(t *testing.T) {
-	t.Skip("pre-existing failure - needs foreign key implementation")
 	t.Run("no-unique-parent", func(t *testing.T) {
 		db := setupMemoryDB(t)
 		defer db.Close()
@@ -1423,16 +1453,28 @@ func TestForeignKey_MismatchErrors(t *testing.T) {
 		mustExec(t, db, "PRAGMA foreign_keys = OFF")
 		mustExec(t, db, "CREATE TABLE child(cid INTEGER PRIMARY KEY, pid INTEGER REFERENCES nonexistent(id))")
 
-		_, err := db.Query("PRAGMA foreign_key_check")
-		if err == nil {
-			t.Error("expected error for missing parent table, got nil")
+		// Insert a row with non-NULL FK (should be reported as violation since parent doesn't exist)
+		mustExec(t, db, "INSERT INTO child VALUES(1, 999)")
+
+		rows, err := db.Query("PRAGMA foreign_key_check")
+		if err != nil {
+			t.Fatalf("unexpected error from foreign_key_check: %v", err)
+		}
+		defer rows.Close()
+
+		// Should have at least one violation (the row we inserted)
+		violations := 0
+		for rows.Next() {
+			violations++
+		}
+		if violations == 0 {
+			t.Error("expected violations for missing parent table, got 0")
 		}
 	})
 }
 
 // TestForeignKey_EdgeCases tests edge cases and corner scenarios
 func TestForeignKey_EdgeCases(t *testing.T) {
-	t.Skip("pre-existing failure - needs foreign key implementation")
 	t.Run("fk-to-view-fails", func(t *testing.T) {
 		db := setupMemoryDB(t)
 		defer db.Close()

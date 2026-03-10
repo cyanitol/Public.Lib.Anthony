@@ -431,6 +431,14 @@ func (m *ForeignKeyManager) handleDeleteConstraint(
 
 	keyValues := extractKeyValues(values, refCols)
 
+	// Check if child table is WITHOUT ROWID
+	childTable, ok := schemaObj.GetTable(fk.Table)
+	if ok && childTable.WithoutRowID {
+		// Use the extended interface that returns full row data
+		return m.handleDeleteConstraintWithoutRowID(fk, childTable, keyValues, refCols, values, schemaObj, rowReader, rowDeleter, rowUpdater)
+	}
+
+	// Regular table with rowids
 	referencingRows, err := m.findReferencingRowsWithAffinity(rowReader, fk, table.Name, refCols, keyValues)
 	if err != nil {
 		return fmt.Errorf("failed to check foreign key references: %w", err)
@@ -449,6 +457,45 @@ func (m *ForeignKeyManager) handleDeleteConstraint(
 	}
 
 	return m.applyDeleteAction(fk, referencingRows, schemaObj, rowDeleter, rowUpdater, rowReader)
+}
+
+// handleDeleteConstraintWithoutRowID handles FK constraint for WITHOUT ROWID child tables.
+func (m *ForeignKeyManager) handleDeleteConstraintWithoutRowID(
+	fk *ForeignKeyConstraint,
+	childTable *schema.Table,
+	parentValues []interface{},
+	parentCols []string,
+	deletedRowValues map[string]interface{},
+	schemaObj *schema.Schema,
+	rowReader RowReader,
+	rowDeleter RowDeleter,
+	rowUpdater RowUpdater,
+) error {
+	// Try to use extended interface
+	readerExt, ok := rowReader.(RowReaderExtended)
+	if !ok {
+		return fmt.Errorf("RowReaderExtended interface required for WITHOUT ROWID CASCADE")
+	}
+
+	// Find all matching rows and get their complete data
+	rowDataList, err := readerExt.FindReferencingRowsWithData(fk.Table, fk.Columns, parentValues)
+	if err != nil {
+		return fmt.Errorf("failed to find referencing rows: %w", err)
+	}
+
+	if len(rowDataList) == 0 {
+		return nil
+	}
+
+	// For self-referencing FKs, filter out the row being deleted
+	if strings.EqualFold(fk.Table, fk.RefTable) && selfReferenceMatches(deletedRowValues, fk.Columns, parentCols) {
+		rowDataList = m.filterSelfReferenceWithoutRowID(rowDataList, deletedRowValues, childTable.PrimaryKey)
+		if len(rowDataList) == 0 {
+			return nil
+		}
+	}
+
+	return m.applyDeleteActionWithoutRowID(fk, childTable, rowDataList, schemaObj, rowDeleter, rowUpdater, readerExt)
 }
 
 // applyDeleteActionRestrict returns an error for RESTRICT/NO ACTION/default behavior.
@@ -483,6 +530,101 @@ func (m *ForeignKeyManager) applyDeleteAction(
 	return nil
 }
 
+// applyDeleteActionWithoutRowID applies DELETE actions for WITHOUT ROWID tables.
+func (m *ForeignKeyManager) applyDeleteActionWithoutRowID(
+	fk *ForeignKeyConstraint,
+	childTable *schema.Table,
+	rowDataList []map[string]interface{},
+	schemaObj *schema.Schema,
+	rowDeleter RowDeleter,
+	rowUpdater RowUpdater,
+	readerExt RowReaderExtended,
+) error {
+	if len(rowDataList) == 0 {
+		return nil
+	}
+
+	switch fk.OnDelete {
+	case FKActionNone, FKActionRestrict, FKActionNoAction:
+		return m.applyDeleteActionRestrict(fk)
+	case FKActionCascade:
+		return m.cascadeDeleteWithoutRowID(fk.Table, childTable, rowDataList, schemaObj, rowDeleter, rowUpdater, readerExt)
+	case FKActionSetNull:
+		// For SET NULL, we'd need to update rows by their primary keys
+		return fmt.Errorf("SET NULL not yet supported for WITHOUT ROWID tables")
+	case FKActionSetDefault:
+		// For SET DEFAULT, we'd need to update rows by their primary keys
+		return fmt.Errorf("SET DEFAULT not yet supported for WITHOUT ROWID tables")
+	}
+
+	return nil
+}
+
+// cascadeDeleteWithoutRowID deletes referencing rows from WITHOUT ROWID tables.
+func (m *ForeignKeyManager) cascadeDeleteWithoutRowID(
+	tableName string,
+	childTable *schema.Table,
+	rowDataList []map[string]interface{},
+	schemaObj *schema.Schema,
+	rowDeleter RowDeleter,
+	rowUpdater RowUpdater,
+	readerExt RowReaderExtended,
+) error {
+	deleterExt, ok := rowDeleter.(RowDeleterExtended)
+	if !ok {
+		return fmt.Errorf("RowDeleterExtended interface required for WITHOUT ROWID CASCADE DELETE")
+	}
+
+	for _, rowData := range rowDataList {
+		// Recursively handle grandchildren that reference this row
+		if err := m.validateDeleteRecursive(tableName, rowData, schemaObj, readerExt, rowDeleter, rowUpdater); err != nil {
+			return err
+		}
+
+		// Extract primary key values
+		pkValues := extractKeyValues(rowData, childTable.PrimaryKey)
+
+		// Delete the row by its primary key
+		if err := deleterExt.DeleteRowByKey(tableName, pkValues); err != nil {
+			return fmt.Errorf("CASCADE DELETE failed: %w", err)
+		}
+	}
+	return nil
+}
+
+// filterSelfReferenceWithoutRowID removes the deleted row from the list if it matches.
+func (m *ForeignKeyManager) filterSelfReferenceWithoutRowID(
+	rowDataList []map[string]interface{},
+	deletedRowValues map[string]interface{},
+	pkCols []string,
+) []map[string]interface{} {
+	// Extract PK values from the deleted row
+	deletedPK := extractKeyValues(deletedRowValues, pkCols)
+
+	// Filter out rows that match the deleted row's PK
+	filtered := make([]map[string]interface{}, 0, len(rowDataList))
+	for _, rowData := range rowDataList {
+		rowPK := extractKeyValues(rowData, pkCols)
+		if !valuesMatch(rowPK, deletedPK) {
+			filtered = append(filtered, rowData)
+		}
+	}
+	return filtered
+}
+
+// valuesMatch checks if two slices of values are equal.
+func valuesMatch(a, b []interface{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !valuesEqual(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // cascadeDelete deletes all referencing rows, recursively handling grandchildren.
 func (m *ForeignKeyManager) cascadeDelete(
 	table string,
@@ -492,6 +634,15 @@ func (m *ForeignKeyManager) cascadeDelete(
 	rowUpdater RowUpdater,
 	rowReader RowReader,
 ) error {
+	// Check if table is WITHOUT ROWID
+	tableObj, ok := schemaObj.GetTable(table)
+	if !ok {
+		return fmt.Errorf("table not found: %s", table)
+	}
+
+	// Try to use extended interfaces for WITHOUT ROWID support
+	deleterExt, hasDeleterExt := rowDeleter.(RowDeleterExtended)
+
 	for _, rowID := range rowIDs {
 		// Read the row values before deletion (needed for recursive FK checking)
 		rowValues, err := rowReader.ReadRowByRowid(table, rowID)
@@ -506,8 +657,16 @@ func (m *ForeignKeyManager) cascadeDelete(
 		}
 
 		// Now delete the row
-		if err := rowDeleter.DeleteRow(table, rowID); err != nil {
-			return fmt.Errorf("CASCADE DELETE failed: %w", err)
+		if tableObj.WithoutRowID && hasDeleterExt {
+			// Extract PK values for deletion
+			pkValues := extractKeyValues(rowValues, tableObj.PrimaryKey)
+			if err := deleterExt.DeleteRowByKey(table, pkValues); err != nil {
+				return fmt.Errorf("CASCADE DELETE failed: %w", err)
+			}
+		} else {
+			if err := rowDeleter.DeleteRow(table, rowID); err != nil {
+				return fmt.Errorf("CASCADE DELETE failed: %w", err)
+			}
 		}
 	}
 	return nil
@@ -546,6 +705,8 @@ func (m *ForeignKeyManager) setNullOnRows(table string, columns []string, rowIDs
 		nullValues[col] = nil
 	}
 
+	// Note: This function currently only supports regular tables with rowids.
+	// For WITHOUT ROWID tables, rowIDs would need to be replaced with primary key values.
 	for _, rowID := range rowIDs {
 		if err := rowUpdater.UpdateRow(table, rowID, nullValues); err != nil {
 			return fmt.Errorf("SET NULL failed: %w", err)
@@ -909,6 +1070,8 @@ func (m *ForeignKeyManager) cascadeUpdate(
 		updateValues[col] = newKeyValues[i]
 	}
 
+	// Note: This function currently only supports regular tables with rowids.
+	// For WITHOUT ROWID tables, rowIDs would need to be replaced with primary key values.
 	for _, rowID := range rowIDs {
 		if err := rowUpdater.UpdateRow(fk.Table, rowID, updateValues); err != nil {
 			return fmt.Errorf("CASCADE UPDATE failed: %w", err)
@@ -932,16 +1095,41 @@ type RowReader interface {
 	ReadRowByRowid(table string, rowid int64) (map[string]interface{}, error)
 }
 
+// RowReaderExtended extends RowReader with support for WITHOUT ROWID tables.
+type RowReaderExtended interface {
+	RowReader
+	// ReadRowByKey reads a row by primary key values (for WITHOUT ROWID tables)
+	ReadRowByKey(table string, keyValues []interface{}) (map[string]interface{}, error)
+
+	// FindReferencingRowsWithData finds rows and returns their full data (for WITHOUT ROWID support)
+	// Returns a slice of row data maps, where each map contains all column values
+	FindReferencingRowsWithData(table string, columns []string, values []interface{}) ([]map[string]interface{}, error)
+}
+
 // RowDeleter defines the interface for deleting rows.
 type RowDeleter interface {
 	// DeleteRow deletes a row by its rowid
 	DeleteRow(table string, rowid int64) error
 }
 
+// RowDeleterExtended extends RowDeleter with support for WITHOUT ROWID tables.
+type RowDeleterExtended interface {
+	RowDeleter
+	// DeleteRowByKey deletes a row by primary key values (for WITHOUT ROWID tables)
+	DeleteRowByKey(table string, keyValues []interface{}) error
+}
+
 // RowUpdater defines the interface for updating rows.
 type RowUpdater interface {
 	// UpdateRow updates specific columns in a row
 	UpdateRow(table string, rowid int64, values map[string]interface{}) error
+}
+
+// RowUpdaterExtended extends RowUpdater with support for WITHOUT ROWID tables.
+type RowUpdaterExtended interface {
+	RowUpdater
+	// UpdateRowByKey updates specific columns by primary key values (for WITHOUT ROWID tables)
+	UpdateRowByKey(table string, keyValues []interface{}, values map[string]interface{}) error
 }
 
 // CreateForeignKeyFromParser creates a ForeignKeyConstraint from parser AST.
@@ -1056,6 +1244,13 @@ func (m *ForeignKeyManager) ClearDeferredViolations() {
 	m.deferredViolations = nil
 }
 
+// DeferredViolationCount returns the number of pending deferred violations.
+func (m *ForeignKeyManager) DeferredViolationCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.deferredViolations)
+}
+
 // ClearDeferredViolationsForTable clears deferred violations for a specific table.
 // Called when a row in the table is updated or deleted, since the violation may no longer apply.
 func (m *ForeignKeyManager) ClearDeferredViolationsForTable(tableName string) {
@@ -1078,6 +1273,137 @@ type ForeignKeyViolation struct {
 	Rowid  int64  // Rowid of the violating row
 	Parent string // Parent table name
 	FKid   int    // Foreign key constraint index (0-based)
+}
+
+// CheckSchemaMismatch checks if any FK has a schema mismatch.
+// Returns an error if a FK references non-existent table/columns or non-unique columns.
+func (m *ForeignKeyManager) CheckSchemaMismatch(
+	tableName string,
+	schemaObj interface{},
+) error {
+	schemaTyped, ok := schemaObj.(*schema.Schema)
+	if !ok {
+		return fmt.Errorf("invalid schema object")
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if tableName != "" {
+		return m.checkTableSchemaMismatch(tableName, schemaTyped)
+	}
+
+	return m.checkAllTablesSchemaMismatch(schemaTyped)
+}
+
+// checkAllTablesSchemaMismatch checks all tables for schema mismatches.
+func (m *ForeignKeyManager) checkAllTablesSchemaMismatch(schemaObj *schema.Schema) error {
+	for tableName := range m.constraints {
+		if err := m.checkTableSchemaMismatch(tableName, schemaObj); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkTableSchemaMismatch checks a specific table for schema mismatches.
+func (m *ForeignKeyManager) checkTableSchemaMismatch(tableName string, schemaObj *schema.Schema) error {
+	tableLower := strings.ToLower(tableName)
+	constraints := m.constraints[tableLower]
+	if len(constraints) == 0 {
+		return nil
+	}
+
+	for fkid, fk := range constraints {
+		if err := m.validateFKSchema(fk, fkid, schemaObj); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateFKSchema validates that a FK constraint's schema is correct.
+func (m *ForeignKeyManager) validateFKSchema(fk *ForeignKeyConstraint, fkid int, schemaObj *schema.Schema) error {
+	// Check if parent table exists
+	refTable, ok := schemaObj.GetTable(fk.RefTable)
+	if !ok {
+		// Parent table doesn't exist
+		// This is only an error if the child table has data (checked by FindViolations)
+		// Not a schema mismatch error at this level
+		return nil
+	}
+
+	// Determine referenced columns (PRIMARY KEY if not specified)
+	refCols := fk.RefColumns
+	if len(refCols) == 0 {
+		refCols = refTable.PrimaryKey
+	}
+
+	// Check column count mismatch (parent exists but wrong column count)
+	if len(fk.Columns) != len(refCols) {
+		return fmt.Errorf("foreign key mismatch - \"%s\" referencing \"%s\"", fk.Table, fk.RefTable)
+	}
+
+	// Check if referenced columns exist (parent exists but columns don't)
+	for _, colName := range refCols {
+		if _, ok := refTable.GetColumn(colName); !ok {
+			return fmt.Errorf("foreign key mismatch - \"%s\" referencing \"%s\"", fk.Table, fk.RefTable)
+		}
+	}
+
+	// Check if referenced columns have a unique constraint (parent exists but not unique)
+	if !columnsAreUnique(refTable, refCols, schemaObj) {
+		return fmt.Errorf("foreign key mismatch - \"%s\" referencing \"%s\"", fk.Table, fk.RefTable)
+	}
+
+	return nil
+}
+
+// ValidateFKAtCreateTime validates FK constraints at CREATE TABLE time.
+// Only checks errors that should prevent table creation:
+// - Column count mismatch
+// - FK references a view instead of a table
+// Does NOT check for non-unique columns (that's a PRAGMA foreign_key_check error, not a CREATE TABLE error)
+func (m *ForeignKeyManager) ValidateFKAtCreateTime(tableName string, schemaObj interface{}) error {
+	schemaTyped, ok := schemaObj.(*schema.Schema)
+	if !ok {
+		return fmt.Errorf("invalid schema object")
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	tableLower := strings.ToLower(tableName)
+	constraints := m.constraints[tableLower]
+
+	for _, fk := range constraints {
+		// Check if referenced "table" is actually a view
+		if schemaTyped.IsView(fk.RefTable) {
+			return fmt.Errorf("foreign key on %s references view %s", fk.Table, fk.RefTable)
+		}
+
+		// Check if parent table exists
+		refTable, ok := schemaTyped.GetTable(fk.RefTable)
+		if !ok {
+			// Parent table doesn't exist - not an error at CREATE TABLE time
+			// (the FK will be checked later when the parent table is created or data is inserted)
+			continue
+		}
+
+		// Determine referenced columns
+		refCols := fk.RefColumns
+		if len(refCols) == 0 {
+			refCols = refTable.PrimaryKey
+		}
+
+		// Check column count mismatch
+		if len(fk.Columns) != len(refCols) {
+			return fmt.Errorf("number of columns in foreign key does not match")
+		}
+	}
+
+	return nil
 }
 
 // FindViolations finds all foreign key violations in the database.
@@ -1183,14 +1509,10 @@ func (m *ForeignKeyManager) checkConstraintViolations(
 		refCols = refTable.PrimaryKey
 	}
 
-	// Check for schema mismatch (referenced columns must be unique)
+	// Schema mismatches should be caught by CheckSchemaMismatch before calling FindViolations
+	// If we get here with a schema mismatch, just skip scanning (no violations to find)
 	if !columnsAreUnique(refTable, refCols, schemaObj) {
-		return []ForeignKeyViolation{{
-			Table:  fk.Table,
-			Rowid:  0,
-			Parent: fk.RefTable,
-			FKid:   fkid,
-		}}, nil
+		return nil, nil
 	}
 
 	return m.scanTableForViolations(fk, fkid, refCols, reader, schemaObj)

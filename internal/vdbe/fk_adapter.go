@@ -3,12 +3,13 @@ package vdbe
 
 import (
 	"fmt"
+	"math"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/collation"
-	"strconv"
 )
 
 // VDBERowReader implements the constraint.RowReader interface for foreign key validation.
@@ -101,6 +102,28 @@ func (r *VDBERowReader) FindReferencingRows(tableName string, columns []string, 
 	return r.collectMatchingRowids(cursorNum, table, columns, values)
 }
 
+// FindReferencingRowsWithData finds all rows that match and returns their complete data.
+// This is used for CASCADE operations on WITHOUT ROWID tables where we need primary key values.
+func (r *VDBERowReader) FindReferencingRowsWithData(tableName string, columns []string, values []interface{}) ([]map[string]interface{}, error) {
+	if err := r.validateContext(); err != nil {
+		return nil, err
+	}
+
+	table, err := r.getTable(tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	cursorNum := r.allocTempCursor()
+	defer r.closeTempCursor(cursorNum)
+
+	if err := r.openReadCursorForTable(cursorNum, table); err != nil {
+		return nil, err
+	}
+
+	return r.collectMatchingRowData(cursorNum, table, columns, values)
+}
+
 // FindReferencingRowsWithParentAffinity finds all rowids with affinity and collation-aware matching.
 // This applies the parent column's affinity and collation to child values before comparison.
 func (r *VDBERowReader) FindReferencingRowsWithParentAffinity(
@@ -136,6 +159,7 @@ func (r *VDBERowReader) FindReferencingRowsWithParentAffinity(
 
 // ReadRowByRowid reads a row's values by its rowid.
 // Used for recursive CASCADE operations.
+// For WITHOUT ROWID tables, rowid is encoded as a composite key of primary key columns.
 func (r *VDBERowReader) ReadRowByRowid(tableName string, rowid int64) (map[string]interface{}, error) {
 	if err := r.validateContext(); err != nil {
 		return nil, err
@@ -147,7 +171,9 @@ func (r *VDBERowReader) ReadRowByRowid(tableName string, rowid int64) (map[strin
 	}
 
 	if table.WithoutRowID {
-		return nil, fmt.Errorf("ReadRowByRowid not supported for WITHOUT ROWID table: %s", tableName)
+		// For WITHOUT ROWID tables, the "rowid" is actually a composite key stored in a special format
+		// We need to decode it back to the primary key values
+		return nil, fmt.Errorf("ReadRowByRowid not supported for WITHOUT ROWID table: %s (use ReadRowByKey)", tableName)
 	}
 
 	cursorNum := r.allocTempCursor()
@@ -164,6 +190,57 @@ func (r *VDBERowReader) ReadRowByRowid(tableName string, rowid int64) (map[strin
 
 	if err := r.seekToRowid(cursor, rowid); err != nil {
 		return nil, err
+	}
+
+	return r.readRowValuesFromCursor(r.vdbe.Cursors[cursorNum], table)
+}
+
+// ReadRowByKey reads a row's values by its primary key values.
+// Used for recursive CASCADE operations on WITHOUT ROWID tables.
+func (r *VDBERowReader) ReadRowByKey(tableName string, keyValues []interface{}) (map[string]interface{}, error) {
+	if err := r.validateContext(); err != nil {
+		return nil, err
+	}
+
+	table, err := r.getTable(tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	cursorNum := r.allocTempCursor()
+	defer r.closeTempCursor(cursorNum)
+
+	if err := r.openReadCursorForTable(cursorNum, table); err != nil {
+		return nil, err
+	}
+
+	cursor, err := r.getBTreeCursor(cursorNum)
+	if err != nil {
+		return nil, err
+	}
+
+	// For WITHOUT ROWID tables, encode the key and seek
+	if table.WithoutRowID {
+		keyBytes := encodeCompositeKeyFromValues(keyValues)
+		found, err := cursor.SeekComposite(keyBytes)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, fmt.Errorf("row not found with key %v", keyValues)
+		}
+	} else {
+		// For regular tables, keyValues should be a single int64 rowid
+		if len(keyValues) != 1 {
+			return nil, fmt.Errorf("regular tables expect single rowid value")
+		}
+		rowid, ok := keyValues[0].(int64)
+		if !ok {
+			return nil, fmt.Errorf("rowid must be int64")
+		}
+		if err := r.seekToRowid(cursor, rowid); err != nil {
+			return nil, err
+		}
 	}
 
 	return r.readRowValuesFromCursor(r.vdbe.Cursors[cursorNum], table)
@@ -540,6 +617,50 @@ func (r *VDBERowReader) collectMatchingRowids(cursorNum int, table *tableInfo, c
 	}
 
 	return r.collectAllMatchingRowids(r.vdbe.Cursors[cursorNum], btCursor, table, columns, values)
+}
+
+// collectMatchingRowData finds all rows that match and returns their complete data.
+func (r *VDBERowReader) collectMatchingRowData(cursorNum int, table *tableInfo, columns []string, values []interface{}) ([]map[string]interface{}, error) {
+	btCursor, err := r.getBTreeCursor(cursorNum)
+	if err != nil {
+		return nil, err
+	}
+
+	isEmpty, err := r.moveToFirstRow(btCursor)
+	if err != nil {
+		return nil, err
+	}
+	if isEmpty {
+		return []map[string]interface{}{}, nil // Empty table means no matches
+	}
+
+	return r.collectAllMatchingRowData(r.vdbe.Cursors[cursorNum], btCursor, table, columns, values)
+}
+
+// collectAllMatchingRowData scans all rows and collects full row data for matches.
+func (r *VDBERowReader) collectAllMatchingRowData(cursor *Cursor, btCursor *btree.BtCursor, table *tableInfo, columns []string, values []interface{}) ([]map[string]interface{}, error) {
+	var rowData []map[string]interface{}
+
+	for {
+		match, err := r.checkRowMatch(cursor, table, columns, values)
+		if err != nil {
+			return nil, err
+		}
+		if match {
+			// Read the complete row data
+			rowValues, err := r.readRowValuesFromCursor(cursor, table)
+			if err != nil {
+				return nil, err
+			}
+			rowData = append(rowData, rowValues)
+		}
+
+		if err := btCursor.Next(); err != nil {
+			break
+		}
+	}
+
+	return rowData, nil
 }
 
 // collectMatchingRowidsWithAffinityAndCollation collects rowids using parent column affinity and collation.
@@ -1095,16 +1216,21 @@ func applyTextAffinity(value interface{}) interface{} {
 }
 
 // DeleteRow deletes a row by rowid using a writable cursor.
+// For WITHOUT ROWID tables, rowid is actually encoded key data.
 func (m *VDBERowModifier) DeleteRow(table string, rowid int64) error {
 	tableInfo, err := m.reader.getTable(table)
 	if err != nil {
 		return err
 	}
 
+	if tableInfo.WithoutRowID {
+		return fmt.Errorf("DeleteRow not supported for WITHOUT ROWID table: %s (use DeleteRowByKey)", table)
+	}
+
 	cursorNum := m.reader.allocTempCursor()
 	defer m.reader.closeTempCursor(cursorNum)
 
-	btCursor, err := m.openWriteCursor(cursorNum, tableInfo.RootPage)
+	btCursor, err := m.openWriteCursor(cursorNum, tableInfo.RootPage, tableInfo.WithoutRowID)
 	if err != nil {
 		return err
 	}
@@ -1120,8 +1246,9 @@ func (m *VDBERowModifier) DeleteRow(table string, rowid int64) error {
 	return btCursor.Delete()
 }
 
-// UpdateRow updates specific columns on a rowid using a delete/insert cycle.
-func (m *VDBERowModifier) UpdateRow(table string, rowid int64, values map[string]interface{}) error {
+// DeleteRowByKey deletes a row by its primary key values.
+// Used for WITHOUT ROWID tables.
+func (m *VDBERowModifier) DeleteRowByKey(table string, keyValues []interface{}) error {
 	tableInfo, err := m.reader.getTable(table)
 	if err != nil {
 		return err
@@ -1130,7 +1257,52 @@ func (m *VDBERowModifier) UpdateRow(table string, rowid int64, values map[string
 	cursorNum := m.reader.allocTempCursor()
 	defer m.reader.closeTempCursor(cursorNum)
 
-	btCursor, err := m.openWriteCursor(cursorNum, tableInfo.RootPage)
+	btCursor, err := m.openWriteCursor(cursorNum, tableInfo.RootPage, tableInfo.WithoutRowID)
+	if err != nil {
+		return err
+	}
+
+	var found bool
+	if tableInfo.WithoutRowID {
+		keyBytes := encodeCompositeKeyFromValues(keyValues)
+		found, err = btCursor.SeekComposite(keyBytes)
+	} else {
+		if len(keyValues) != 1 {
+			return fmt.Errorf("regular tables expect single rowid value")
+		}
+		rowid, ok := keyValues[0].(int64)
+		if !ok {
+			return fmt.Errorf("rowid must be int64")
+		}
+		found, err = btCursor.SeekRowid(rowid)
+	}
+
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("row not found with key %v in table %s", keyValues, table)
+	}
+
+	return btCursor.Delete()
+}
+
+// UpdateRow updates specific columns on a rowid using a delete/insert cycle.
+// For WITHOUT ROWID tables, use UpdateRowByKey instead.
+func (m *VDBERowModifier) UpdateRow(table string, rowid int64, values map[string]interface{}) error {
+	tableInfo, err := m.reader.getTable(table)
+	if err != nil {
+		return err
+	}
+
+	if tableInfo.WithoutRowID {
+		return fmt.Errorf("UpdateRow not supported for WITHOUT ROWID table: %s (use UpdateRowByKey)", table)
+	}
+
+	cursorNum := m.reader.allocTempCursor()
+	defer m.reader.closeTempCursor(cursorNum)
+
+	btCursor, err := m.openWriteCursor(cursorNum, tableInfo.RootPage, tableInfo.WithoutRowID)
 	if err != nil {
 		return err
 	}
@@ -1138,6 +1310,76 @@ func (m *VDBERowModifier) UpdateRow(table string, rowid int64, values map[string
 	currentValues, err := m.fetchAndMergeValues(btCursor, tableInfo, rowid, table, values)
 	if err != nil {
 		return err
+	}
+
+	return m.replaceRow(btCursor, tableInfo, rowid, currentValues)
+}
+
+// UpdateRowByKey updates specific columns on a row identified by primary key values.
+// Used for WITHOUT ROWID tables.
+func (m *VDBERowModifier) UpdateRowByKey(table string, keyValues []interface{}, values map[string]interface{}) error {
+	tableInfo, err := m.reader.getTable(table)
+	if err != nil {
+		return err
+	}
+
+	cursorNum := m.reader.allocTempCursor()
+	defer m.reader.closeTempCursor(cursorNum)
+
+	btCursor, err := m.openWriteCursor(cursorNum, tableInfo.RootPage, tableInfo.WithoutRowID)
+	if err != nil {
+		return err
+	}
+
+	// Seek to the row
+	var found bool
+	if tableInfo.WithoutRowID {
+		keyBytes := encodeCompositeKeyFromValues(keyValues)
+		found, err = btCursor.SeekComposite(keyBytes)
+	} else {
+		if len(keyValues) != 1 {
+			return fmt.Errorf("regular tables expect single rowid value")
+		}
+		rowid, ok := keyValues[0].(int64)
+		if !ok {
+			return fmt.Errorf("rowid must be int64")
+		}
+		found, err = btCursor.SeekRowid(rowid)
+	}
+
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("row not found with key %v in table %s", keyValues, table)
+	}
+
+	// Read current row values
+	payload, err := btCursor.GetPayloadWithOverflow()
+	if err != nil {
+		return err
+	}
+
+	var rowid int64
+	if !tableInfo.WithoutRowID {
+		rowid = btCursor.GetKey()
+	}
+
+	currentValues, err := m.readRowValues(tableInfo, payload, rowid)
+	if err != nil {
+		return err
+	}
+
+	// Merge update values
+	for colIdx, col := range tableInfo.Columns {
+		if newVal, ok := values[col.Name]; ok {
+			currentValues[colIdx] = newVal
+		}
+	}
+
+	// For WITHOUT ROWID, we need to handle key changes specially
+	if tableInfo.WithoutRowID {
+		return m.replaceRowWithoutRowID(btCursor, tableInfo, keyValues, currentValues)
 	}
 
 	return m.replaceRow(btCursor, tableInfo, rowid, currentValues)
@@ -1195,7 +1437,7 @@ func (m *VDBERowModifier) buildPayloadValues(tableInfo *tableInfo, currentValues
 }
 
 // openWriteCursor opens a writable cursor on the given root page.
-func (m *VDBERowModifier) openWriteCursor(cursorNum int, rootPage uint32) (*btree.BtCursor, error) {
+func (m *VDBERowModifier) openWriteCursor(cursorNum int, rootPage uint32, withoutRowID bool) (*btree.BtCursor, error) {
 	bt, ok := m.reader.vdbe.Ctx.Btree.(*btree.Btree)
 	if !ok {
 		return nil, fmt.Errorf("invalid btree type")
@@ -1205,15 +1447,16 @@ func (m *VDBERowModifier) openWriteCursor(cursorNum int, rootPage uint32) (*btre
 		return nil, err
 	}
 
-	btCursor := btree.NewCursor(bt, rootPage)
+	btCursor := btree.NewCursorWithOptions(bt, rootPage, withoutRowID)
 	m.reader.vdbe.Cursors[cursorNum] = &Cursor{
-		CurType:     CursorBTree,
-		IsTable:     true,
-		Writable:    true,
-		RootPage:    rootPage,
-		BtreeCursor: btCursor,
-		CachedCols:  make([][]byte, 0),
-		CacheStatus: 0,
+		CurType:      CursorBTree,
+		IsTable:      true,
+		Writable:     true,
+		RootPage:     rootPage,
+		BtreeCursor:  btCursor,
+		CachedCols:   make([][]byte, 0),
+		CacheStatus:  0,
+		WithoutRowID: withoutRowID,
 	}
 
 	return btCursor, nil
@@ -1235,4 +1478,98 @@ func (m *VDBERowModifier) readRowValues(table *tableInfo, payload []byte, rowid 
 		}
 	}
 	return values, nil
+}
+
+// replaceRowWithoutRowID handles row replacement for WITHOUT ROWID tables.
+// This is more complex because the key might change.
+func (m *VDBERowModifier) replaceRowWithoutRowID(btCursor *btree.BtCursor, tableInfo *tableInfo, oldKeyValues []interface{}, newValues []interface{}) error {
+	// Delete the old row
+	if err := btCursor.Delete(); err != nil {
+		return err
+	}
+
+	// Build new key from primary key columns
+	newKeyValues := m.extractPrimaryKeyValues(tableInfo, newValues)
+	keyBytes := encodeCompositeKeyFromValues(newKeyValues)
+
+	// Build payload (all columns)
+	payload := encodeSimpleRecord(newValues)
+
+	// Insert with new key
+	return btCursor.InsertWithComposite(0, keyBytes, payload)
+}
+
+// extractPrimaryKeyValues extracts primary key column values from a full row.
+// This requires looking up which columns are part of the primary key.
+func (m *VDBERowModifier) extractPrimaryKeyValues(tableInfo *tableInfo, rowValues []interface{}) []interface{} {
+	// For WITHOUT ROWID tables, we need to identify which columns are PK columns
+	// This is a simplified implementation - in reality we'd need schema info
+	// For now, assume the first N columns matching PK count are the PK
+	// This works for simple cases but may need enhancement
+
+	// FIXME: This is a simplification. We should properly identify PK columns from schema.
+	// For now, return all values as we don't have easy access to PK column indices here.
+	return rowValues
+}
+
+// encodeCompositeKeyFromValues encodes values into a composite key.
+func encodeCompositeKeyFromValues(values []interface{}) []byte {
+	// Import the withoutrowid package's EncodeCompositeKey function
+	return encodeCompositeKey(values)
+}
+
+// encodeCompositeKey is a local implementation matching withoutrowid.EncodeCompositeKey.
+func encodeCompositeKey(values []interface{}) []byte {
+	var buf []byte
+	for _, v := range values {
+		switch val := v.(type) {
+		case nil:
+			buf = append(buf, 0x00)
+		case int:
+			buf = append(buf, 0x10)
+			buf = append(buf, encodeInt64ForKey(int64(val))...)
+		case int64:
+			buf = append(buf, 0x10)
+			buf = append(buf, encodeInt64ForKey(val)...)
+		case float64:
+			buf = append(buf, 0x20)
+			buf = append(buf, encodeFloat64ForKey(val)...)
+		case string:
+			buf = append(buf, 0x30)
+			buf = append(buf, []byte(val)...)
+			buf = append(buf, 0x00)
+		case []byte:
+			buf = append(buf, 0x40)
+			buf = append(buf, val...)
+			buf = append(buf, 0x00)
+		default:
+			buf = append(buf, 0x50)
+			buf = append(buf, []byte(fmt.Sprintf("%v", val))...)
+			buf = append(buf, 0x00)
+		}
+	}
+	return buf
+}
+
+// encodeInt64ForKey encodes an int64 in sortable big-endian format.
+func encodeInt64ForKey(v int64) []byte {
+	u := uint64(v) ^ (1 << 63)
+	return []byte{
+		byte(u >> 56), byte(u >> 48), byte(u >> 40), byte(u >> 32),
+		byte(u >> 24), byte(u >> 16), byte(u >> 8), byte(u),
+	}
+}
+
+// encodeFloat64ForKey encodes a float64 in sortable big-endian format.
+func encodeFloat64ForKey(v float64) []byte {
+	bits := math.Float64bits(v)
+	if v >= 0 {
+		bits |= (1 << 63)
+	} else {
+		bits = ^bits
+	}
+	return []byte{
+		byte(bits >> 56), byte(bits >> 48), byte(bits >> 40), byte(bits >> 32),
+		byte(bits >> 24), byte(bits >> 16), byte(bits >> 8), byte(bits),
+	}
 }

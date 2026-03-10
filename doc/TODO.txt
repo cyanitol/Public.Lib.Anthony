@@ -1,15 +1,15 @@
 # Anthony - Pure Go SQLite Implementation - TODO
 #
-# Test Status: ~680 passing, ~450 skipped (run `go test ./...` for current counts)
+# Test Status: 4951 passing, 466 skipped (91.4% pass rate)
 # Code Quality: Cyclomatic complexity <= 10 for all production code
-# Coverage Snapshot: ~60% feature parity vs reference SQLite; window functions/FTS5/R-Tree incomplete
-# Last Updated: 2026-03-08
+# Coverage Snapshot: ~70% feature parity vs reference SQLite
+# Last Updated: 2026-03-09
 
 ================================================================================
 HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
 ================================================================================
 
-[x] Foreign Key Runtime Enforcement (40 tests -> 31 passing, 9 skipped)
+[x] Foreign Key Runtime Enforcement (83/83 tests passing)
     - [DONE] Wire FK manager through VDBE context
     - [DONE] INSERT FK validation (ValidateInsert) - blocks invalid child inserts
     - [DONE] DELETE FK validation (ValidateDelete) - blocks parent deletes when referenced
@@ -25,32 +25,43 @@ HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
     - [DONE] PRAGMA foreign_key_check (with driverRowReader)
     - [DONE] DROP TABLE reference checking
     - [DONE] Unique index column order flexibility
-    - Remaining: Deferred constraint checking at transaction boundaries
-    - Remaining: Collation-aware FK matching
-    - Remaining: Type affinity in FK comparison
+    - [DONE] Deferred constraint checking at transaction boundaries
+    - [DONE] Collation-aware FK matching
+    - [DONE] Type affinity in FK comparison
 
-[x] WITHOUT ROWID Tables (51 tests -> 38 passing, 13 skipped)
+[x] WITHOUT ROWID Tables (51 tests -> 45 passing, 6 skipped)
     - [DONE] Implement alt btree layout using PRIMARY KEY as key (no rowid)
     - [DONE] Route DML/DDL paths correctly; ensure index selection and VACUUM support
     - [DONE] Split/rewind regression: statement cache invalidation on root page changes
     - [DONE] rowid/oid/_rowid_ column rejection for WITHOUT ROWID tables
     - [DONE] FK validation integration for WITHOUT ROWID inserts
-    - Remaining: JOIN queries with WITHOUT ROWID tables (cursor handling)
-    - Remaining: ROLLBACK for WITHOUT ROWID btrees
-    - Remaining: CASCADE FK actions for WITHOUT ROWID tables
+    - [DONE] JOIN queries with WITHOUT ROWID tables (cursor handling fixed)
+    - [WIP] ROLLBACK for WITHOUT ROWID btrees (infrastructure in place, cache sync needed)
+    - [WIP] CASCADE FK actions for WITHOUT ROWID (infrastructure in place, trigger issue)
 
-[ ] Window Functions
-    - Executor support for ROW_NUMBER/RANK/DENSE_RANK and SUM/AVG/COUNT/MIN/MAX windows
-    - PARTITION BY/ORDER BY, ROWS/RANGE frames, frame edge correctness
-    - Extend to LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTILE
+[~] Window Functions (ROW_NUMBER and RANK working)
+    - [DONE] ROW_NUMBER() with streaming and partition modes
+    - [DONE] RANK() with OpWindowRank opcode integration
+    - [WIP] DENSE_RANK - needs implementation
+    - [ ] PARTITION BY/ORDER BY, ROWS/RANGE frames
+    - [ ] LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTILE
 
-[ ] FTS5 Virtual Table
-    - Tokenizer pipeline, segment storage/merge, MATCH/NEAR/prefix queries
-    - bm25 ranking, highlight/offsets, content/contentless tables
+[~] FTS5 Virtual Table (module implemented, 128 tests pass)
+    - [DONE] Tokenizer pipeline (SimpleTokenizer, StopWordTokenizer)
+    - [DONE] Inverted index with posting lists
+    - [DONE] BM25/TFIDF ranking, snippet/highlight
+    - [DONE] Query parser (AND, OR, NOT, prefix, phrase)
+    - [DONE] Module registration in driver
+    - [DONE] SQL parser support for CREATE VIRTUAL TABLE
+    - [ ] Persistent storage to database file
 
-[ ] R-Tree Virtual Table
-    - R*-tree insertion/split/reinsertion, delete/repack
-    - 2D/3D configs, bounding box queries (overlap/contains/within)
+[~] R-Tree Virtual Table (module implemented, all tests pass)
+    - [DONE] R*-tree insertion/split/reinsertion
+    - [DONE] 2D/3D/4D/5D spatial indexing
+    - [DONE] Bounding box queries (overlap/contains/within)
+    - [DONE] Nearest neighbor search (k-NN)
+    - [DONE] Module registration in driver
+    - [ ] SQL parser support for CREATE VIRTUAL TABLE
 
 [ ] Durability & Conformance Hardening
     - Run sqllogictest subsets vs reference SQLite; diff drift
@@ -180,12 +191,12 @@ v0.1.x - Current Development
 [x] Documentation scaffolding comments
 
 ## In Progress
-[x] Foreign Key Runtime Enforcement (31/40 tests passing, 9 skipped)
+[x] Foreign Key Runtime Enforcement (83/83 tests passing) - COMPLETE
     - [DONE] FK manager wired through VDBE context
     - [DONE] INSERT/DELETE/UPDATE FK validation working
     - [DONE] CASCADE/SET NULL/SET DEFAULT/RESTRICT actions working
     - [DONE] PRAGMA foreign_key_check, DROP TABLE checks
-    - Remaining: Deferred constraints, collation, type affinity
+    - [DONE] Deferred constraints, collation, type affinity
 [ ] CTE Edge Cases (17 tests skipped)
     - Correlated subquery in CTE WHERE causes infinite loop
     - Recursive CTE bytecode generation incomplete

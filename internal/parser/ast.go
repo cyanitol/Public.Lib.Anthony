@@ -349,6 +349,20 @@ type IndexedColumn struct {
 	Order  SortOrder
 }
 
+// CreateVirtualTableStmt represents a CREATE VIRTUAL TABLE statement.
+type CreateVirtualTableStmt struct {
+	Name        string
+	IfNotExists bool
+	Module      string
+	Args        []string
+}
+
+func (c *CreateVirtualTableStmt) node()      {}
+func (c *CreateVirtualTableStmt) statement() {}
+func (c *CreateVirtualTableStmt) String() string {
+	return "CREATE VIRTUAL TABLE"
+}
+
 // DropTableStmt represents a DROP TABLE statement.
 type DropTableStmt struct {
 	Name     string

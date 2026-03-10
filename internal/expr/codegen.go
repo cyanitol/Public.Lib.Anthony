@@ -195,9 +195,10 @@ func init() {
 
 // ColumnInfo contains column metadata for code generation.
 type ColumnInfo struct {
-	Name    string
-	Index   int  // Column index in the record
-	IsRowid bool // True if this is the INTEGER PRIMARY KEY (alias for rowid)
+	Name      string
+	Index     int    // Column index in the record
+	IsRowid   bool   // True if this is the INTEGER PRIMARY KEY (alias for rowid)
+	Collation string // Column collation (e.g., NOCASE, BINARY, RTRIM)
 }
 
 // TableInfo contains table metadata for code generation.
@@ -428,6 +429,11 @@ func (g *CodeGenerator) generateColumn(e *parser.IdentExpr) (int, error) {
 		return 0, err
 	}
 
+	// Look up and store column collation for comparison operations
+	if collation := g.lookupColumnCollation(tableName, e.Name); collation != "" {
+		g.collations[reg] = collation
+	}
+
 	// Emit opcode
 	g.emitColumnOpcode(cursor, colIndex, isRowid, reg)
 	g.addColumnComment(reg, tableName, e.Name)
@@ -514,6 +520,21 @@ func (g *CodeGenerator) lookupColumnInfo(tableName, colName string) (int, bool, 
 	}
 
 	return 0, false, fmt.Errorf("column not found: %s", colName)
+}
+
+// lookupColumnCollation returns the collation for a column in a table.
+// Returns empty string if table not found or column has no explicit collation.
+func (g *CodeGenerator) lookupColumnCollation(tableName, colName string) string {
+	info, ok := g.tableInfo[tableName]
+	if !ok {
+		return ""
+	}
+	for _, col := range info.Columns {
+		if col.Name == colName {
+			return col.Collation
+		}
+	}
+	return ""
 }
 
 // emitColumnOpcode emits the appropriate opcode for reading a column value.

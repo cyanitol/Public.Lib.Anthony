@@ -104,10 +104,16 @@ func (s *Stmt) extractWindowOrderByCols(orderBy []parser.OrderingTerm, table *sc
 // emitWindowRankSetup emits initialization opcodes for window rank tracking
 func emitWindowRankSetup(vm *vdbe.VDBE, regs rankRegisters, info rankFunctionInfo) {
 	vm.AddOp(vdbe.OpInteger, 0, regs.rowCount, 0)
-	vm.AddOp(vdbe.OpInteger, 1, regs.rank, 0)
-	vm.AddOp(vdbe.OpInteger, 1, regs.denseRank, 0)
+	vm.AddOp(vdbe.OpInteger, 0, regs.rank, 0)        // Start at 0, will be set to 1 on first row
+	vm.AddOp(vdbe.OpInteger, 0, regs.denseRank, 0)  // Start at 0, will be set to 1 on first row
 
-	for idx := range info.orderByCols {
+	// Initialize prevOrderBy registers to NULL for comparison
+	// We need at least 10 registers to handle multiple ORDER BY columns
+	maxOrderByCols := 10
+	if len(info.orderByCols) > 0 {
+		maxOrderByCols = len(info.orderByCols)
+	}
+	for idx := 0; idx < maxOrderByCols; idx++ {
 		vm.AddOp(vdbe.OpNull, 0, regs.prevOrderBy+idx, 0)
 	}
 }
@@ -115,29 +121,66 @@ func emitWindowRankSetup(vm *vdbe.VDBE, regs rankRegisters, info rankFunctionInf
 // emitWindowRankTracking emits rank comparison and update logic
 func emitWindowRankTracking(vm *vdbe.VDBE, regs rankRegisters, info rankFunctionInfo, numCols int) {
 	if (info.hasRank || info.hasDenseRank) && len(info.orderByCols) > 0 {
-		emitWindowRankComparison(vm, regs, info, numCols)
+		emitWindowRankComparison(vm, regs, info, numCols, false)
+	} else {
+		vm.AddOp(vdbe.OpAddImm, regs.rowCount, 1, 0)
+	}
+}
+
+// emitWindowRankTrackingFromSorter emits rank comparison and update logic when reading from sorter
+func emitWindowRankTrackingFromSorter(vm *vdbe.VDBE, regs rankRegisters, info rankFunctionInfo, numCols int) {
+	if (info.hasRank || info.hasDenseRank) && len(info.orderByCols) > 0 {
+		emitWindowRankComparison(vm, regs, info, numCols, true)
 	} else {
 		vm.AddOp(vdbe.OpAddImm, regs.rowCount, 1, 0)
 	}
 }
 
 // emitWindowRankComparison emits the comparison logic for rank functions
-func emitWindowRankComparison(vm *vdbe.VDBE, regs rankRegisters, info rankFunctionInfo, numCols int) {
+// If fromSorter is true, data is already in registers 0..N-1 from OpSorterData
+// If fromSorter is false, data is read from cursor 0 using OpColumn
+func emitWindowRankComparison(vm *vdbe.VDBE, regs rankRegisters, info rankFunctionInfo, numCols int, fromSorter bool) {
+	// Determine which columns to compare
+	orderByCols := info.orderByCols
+	if len(orderByCols) == 0 && (info.hasRank || info.hasDenseRank) {
+		// Fallback: if no ORDER BY columns specified but we have ranking,
+		// this might indicate a bug in orderByCols extraction
+		// For now, do nothing - all ranks will be the same
+		vm.AddOp(vdbe.OpAddImm, regs.rowCount, 1, 0)
+		return
+	}
+
 	// Read current ORDER BY values
-	for idx, colIdx := range info.orderByCols {
-		vm.AddOp(vdbe.OpColumn, 0, colIdx, regs.currOrderBy+idx)
+	for idx, colIdx := range orderByCols {
+		if fromSorter {
+			// Data is already in registers from OpSorterData, just copy it
+			vm.AddOp(vdbe.OpCopy, colIdx, regs.currOrderBy+idx, 0)
+		} else {
+			// Read from cursor 0
+			vm.AddOp(vdbe.OpColumn, 0, colIdx, regs.currOrderBy+idx)
+		}
 	}
 
 	valuesChangedReg := numCols + 40
 	vm.AddOp(vdbe.OpInteger, 0, valuesChangedReg, 0)
 
-	emitOrderByValueComparison(vm, regs, info.orderByCols, valuesChangedReg)
+	// Increment rowCount BEFORE checking for changes (rowCount is 1-based)
 	vm.AddOp(vdbe.OpAddImm, regs.rowCount, 1, 0)
+
+	// Check if values changed and update rank accordingly
+	emitOrderByValueComparison(vm, regs, orderByCols, valuesChangedReg)
 	emitWindowRankUpdate(vm, regs, valuesChangedReg, info)
 }
 
 // emitOrderByValueComparison compares current and previous ORDER BY values
 func emitOrderByValueComparison(vm *vdbe.VDBE, regs rankRegisters, orderByCols []int, valuesChangedReg int) {
+	// If no ORDER BY columns (shouldn't happen for RANK/DENSE_RANK, but just in case),
+	// always mark as changed so rank increments like ROW_NUMBER
+	if len(orderByCols) == 0 {
+		vm.AddOp(vdbe.OpInteger, 1, valuesChangedReg, 0)
+		return
+	}
+
 	for idx := range orderByCols {
 		curr := regs.currOrderBy + idx
 		prev := regs.prevOrderBy + idx
@@ -162,14 +205,12 @@ func emitOrderByValueComparison(vm *vdbe.VDBE, regs rankRegisters, orderByCols [
 func emitWindowRankUpdate(vm *vdbe.VDBE, regs rankRegisters, valuesChangedReg int, info rankFunctionInfo) {
 	updateRankAddr := vm.AddOp(vdbe.OpIfNot, valuesChangedReg, 0, 0)
 
+	// When values change: update rank to current rowCount
 	vm.AddOp(vdbe.OpCopy, regs.rowCount, regs.rank, 0)
-
-	firstRowAddr := vm.AddOp(vdbe.OpIsNull, regs.prevOrderBy, 0, 0)
+	// Always increment dense_rank when values change
 	vm.AddOp(vdbe.OpAddImm, regs.denseRank, 1, 0)
-	skipDenseIncAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
-	vm.Program[firstRowAddr].P2 = vm.NumOps()
-	vm.Program[skipDenseIncAddr].P2 = vm.NumOps()
 
+	// Copy current ORDER BY values to prev for next comparison
 	for idx := range info.orderByCols {
 		vm.AddOp(vdbe.OpCopy, regs.currOrderBy+idx, regs.prevOrderBy+idx, 0)
 	}
@@ -218,6 +259,26 @@ func (s *Stmt) emitWindowColumn(vm *vdbe.VDBE, gen *expr.CodeGenerator, col pars
 	if err == nil && reg != colIdx {
 		vm.AddOp(vdbe.OpCopy, reg, colIdx, 0)
 	} else {
+		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
+	}
+}
+
+// emitWindowFunctionColumnWithOpcodes emits code for a window function using proper opcodes
+// numTableCols is used for streaming mode to read from registers
+func (s *Stmt) emitWindowFunctionColumnWithOpcodes(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, colIdx int, numTableCols int) {
+	windowStateIdx := 0 // For now, we use window state 0 for all rank functions
+
+	switch fnExpr.Name {
+	case "RANK":
+		// P3 = number of columns for streaming mode
+		vm.AddOp(vdbe.OpWindowRank, windowStateIdx, colIdx, numTableCols)
+	case "DENSE_RANK":
+		// P3 = number of columns for streaming mode
+		vm.AddOp(vdbe.OpWindowDenseRank, windowStateIdx, colIdx, numTableCols)
+	case "ROW_NUMBER":
+		// P3 = number of columns for streaming mode
+		vm.AddOp(vdbe.OpWindowRowNum, windowStateIdx, colIdx, numTableCols)
+	default:
 		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
 	}
 }

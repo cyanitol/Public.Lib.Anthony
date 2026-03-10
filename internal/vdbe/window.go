@@ -59,10 +59,19 @@ type WindowState struct {
 	TotalRowsSeen  int                // Total rows processed across all partitions
 
 	// Ranking state (for RANK, DENSE_RANK)
-	LastRankRow       []*Mem // Last row used for ranking comparison
-	CurrentRank       int64  // Current rank value
-	CurrentDenseRank  int64  // Current dense rank value
-	RowsAtCurrentRank int64  // Number of rows with current rank
+	LastRankRow             []*Mem // Last row used for ranking comparison
+	CurrentRank             int64  // Current rank value
+	CurrentDenseRank        int64  // Current dense rank value
+	RowsAtCurrentRank       int64  // Number of rows with current rank
+	LastRowCounterUpdate    []*Mem // Track last row that incremented CurrentPartRow
+	RankingUpdateGeneration int    // Increments on each UpdateRankingFromRow call
+	LastRankingGeneration   int    // Generation at which ranking was last updated
+	RowIncrementGeneration  int    // Tracks how many times we've been asked to increment
+	LastIncrementedAt       int    // RowIncrementGeneration value when we last actually incremented
+
+	// Shared state tracking for multiple window functions
+	WindowFunctionCount int // Number of window functions sharing this state
+	CallsThisRow        int // Call count within current row (resets when == WindowFunctionCount)
 
 	// Row buffer for LAG/LEAD
 	RowBuffer [][]*Mem // Buffer of rows for accessing past/future rows
@@ -74,18 +83,20 @@ type WindowState struct {
 // NewWindowState creates a new window state
 func NewWindowState(partitionCols, orderByCols []int, orderByDesc []bool, frame WindowFrame) *WindowState {
 	return &WindowState{
-		PartitionCols:     partitionCols,
-		OrderByCols:       orderByCols,
-		OrderByDesc:       orderByDesc,
-		Frame:             frame,
-		Partitions:        make([]*WindowPartition, 0),
-		CurrentPartIdx:    -1,
-		CurrentPartRow:    -1,
-		TotalRowsSeen:     0,
-		CurrentRank:       0,
-		CurrentDenseRank:  0,
-		RowsAtCurrentRank: 0,
-		RowBuffer:         make([][]*Mem, 0),
+		PartitionCols:           partitionCols,
+		OrderByCols:             orderByCols,
+		OrderByDesc:             orderByDesc,
+		Frame:                   frame,
+		Partitions:              make([]*WindowPartition, 0),
+		CurrentPartIdx:          -1,
+		CurrentPartRow:          -1,
+		TotalRowsSeen:           0,
+		CurrentRank:             0,
+		CurrentDenseRank:        0,
+		RowsAtCurrentRank:       0,
+		RowBuffer:               make([][]*Mem, 0),
+		RankingUpdateGeneration: 0,
+		LastRankingGeneration:   -999, // Marker for uninitialized
 	}
 }
 
@@ -117,7 +128,7 @@ func (ws *WindowState) AddRow(row []*Mem) {
 
 	// Add row to current partition
 	currentPartition := ws.Partitions[len(ws.Partitions)-1]
-	rowCopy := ws.copyRow(row)
+	rowCopy := ws.CopyRow(row)
 	currentPartition.Rows = append(currentPartition.Rows, rowCopy)
 	ws.RowBuffer = append(ws.RowBuffer, rowCopy)
 	ws.TotalRowsSeen++
@@ -143,8 +154,8 @@ func (ws *WindowState) samePartition(row1, row2 []*Mem) bool {
 	return true
 }
 
-// copyRow creates a deep copy of a row
-func (ws *WindowState) copyRow(row []*Mem) []*Mem {
+// CopyRow creates a deep copy of a row
+func (ws *WindowState) CopyRow(row []*Mem) []*Mem {
 	rowCopy := make([]*Mem, len(row))
 	for i, m := range row {
 		newMem := &Mem{}
@@ -294,7 +305,49 @@ func (ws *WindowState) UpdateRanking() {
 		ws.CurrentRank += ws.RowsAtCurrentRank
 		ws.CurrentDenseRank++
 		ws.RowsAtCurrentRank = 1
-		ws.LastRankRow = ws.copyRow(currentRow)
+		ws.LastRankRow = ws.CopyRow(currentRow)
+	}
+}
+
+// UpdateRankingFromRow updates ranking information from a provided row (for streaming mode)
+// This will be called by each window function opcode, but we need to ensure ranking is only
+// updated once per actual database row. We use a generation counter to detect when we've
+// moved to a new row (based on CurrentPartRow changes).
+func (ws *WindowState) UpdateRankingFromRow(currentRow []*Mem) {
+	if currentRow == nil {
+		return
+	}
+
+	// Track the current row number to detect when we've moved to a new row
+	currentRowNum := ws.CurrentPartRow
+
+	// If we've already updated ranking for this row number, skip
+	// Use a marker value of -999 for uninitialized state
+	if ws.LastRankingGeneration == currentRowNum && ws.LastRankingGeneration != -999 {
+		return
+	}
+	ws.LastRankingGeneration = currentRowNum
+
+	// First time setup
+	if ws.LastRankRow == nil {
+		ws.LastRankRow = ws.CopyRow(currentRow)
+		ws.CurrentRank = 0
+		ws.CurrentDenseRank = 1
+		ws.RowsAtCurrentRank = 1
+		return
+	}
+
+	// Update ranking state based on ORDER BY column comparison
+	// Check if order by columns match last rank row
+	if ws.sameOrderByValues(currentRow, ws.LastRankRow) {
+		// Same rank as previous
+		ws.RowsAtCurrentRank++
+	} else {
+		// New rank
+		ws.CurrentRank += ws.RowsAtCurrentRank
+		ws.CurrentDenseRank++
+		ws.RowsAtCurrentRank = 1
+		ws.LastRankRow = ws.CopyRow(currentRow)
 	}
 }
 
@@ -318,6 +371,21 @@ func (ws *WindowState) sameOrderByValues(row1, row2 []*Mem) bool {
 	return true
 }
 
+// SameRowValues checks if two rows have identical values across all columns
+func (ws *WindowState) SameRowValues(row1, row2 []*Mem) bool {
+	if len(row1) != len(row2) {
+		return false
+	}
+
+	for i := range row1 {
+		if row1[i].Compare(row2[i]) != 0 {
+			return false
+		}
+	}
+
+	return true
+}
+
 // GetRank returns the current RANK value
 func (ws *WindowState) GetRank() int64 {
 	return ws.CurrentRank + 1
@@ -326,6 +394,34 @@ func (ws *WindowState) GetRank() int64 {
 // GetDenseRank returns the current DENSE_RANK value
 func (ws *WindowState) GetDenseRank() int64 {
 	return ws.CurrentDenseRank
+}
+
+// IncrementPartRowIfNewRow increments CurrentPartRow only if the given row
+// is different from the last row that caused an increment. This prevents
+// multiple window functions from double-incrementing when they share state.
+func (ws *WindowState) IncrementPartRowIfNewRow(currentRow []*Mem) {
+	if ws.LastRowCounterUpdate == nil || !ws.SameRowValues(currentRow, ws.LastRowCounterUpdate) {
+		ws.CurrentPartRow++
+		ws.LastRowCounterUpdate = ws.CopyRow(currentRow)
+	}
+}
+
+// IncrementPartRowOnFirstCall increments CurrentPartRow only on the first call
+// within a row group when multiple window functions share this state.
+// It tracks call count and resets when all functions have been called.
+func (ws *WindowState) IncrementPartRowOnFirstCall() {
+	ws.CallsThisRow++
+
+	// Only increment on the first call of each row group
+	if ws.CallsThisRow == 1 {
+		ws.CurrentPartRow++
+	}
+
+	// Reset call count when all window functions have been called
+	// (or if WindowFunctionCount is 0/1, meaning single function mode)
+	if ws.WindowFunctionCount > 0 && ws.CallsThisRow >= ws.WindowFunctionCount {
+		ws.CallsThisRow = 0
+	}
 }
 
 // GetLagRow returns the row N positions before the current row

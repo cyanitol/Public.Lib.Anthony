@@ -152,7 +152,7 @@ func TestRecursiveCTE(t *testing.T) {
 
 // TestCTEWithAggregate tests CTE with aggregate functions
 func TestCTEWithAggregate(t *testing.T) {
-	t.Skip("pre-existing failure - CTE with GROUP BY aggregate not yet implemented")
+	// t.Skip("pre-existing failure - CTE with GROUP BY aggregate not yet implemented")
 	dbFile := "test_cte_agg.db"
 	defer os.Remove(dbFile)
 
@@ -513,7 +513,7 @@ func TestRecursiveCTEComplexTermination(t *testing.T) {
 
 // TestCTEInSubquery tests CTE used in subquery
 func TestCTEInSubquery(t *testing.T) {
-	t.Skip("Correlated subqueries in CTE WHERE clause not implemented - causes infinite loop during compilation")
+	t.Skip("CTE with GROUP BY aggregate returns no rows - see TestCTEWithAggregate")
 	dbFile := "test_cte_subquery.db"
 	defer os.Remove(dbFile)
 

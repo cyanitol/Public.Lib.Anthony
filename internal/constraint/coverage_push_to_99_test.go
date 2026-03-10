@@ -79,6 +79,10 @@ func (m *MockRowReaderWithError) ReadRowByRowid(table string, rowid int64) (map[
 	return make(map[string]interface{}), nil
 }
 
+func (m *MockRowReaderWithError) RowExistsWithCollation(table string, columns []string, values []interface{}, collations []string) (bool, error) {
+	return m.RowExists(table, columns, values)
+}
+
 type mockReadError struct{}
 
 func (e *mockReadError) Error() string {

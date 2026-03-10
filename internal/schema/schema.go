@@ -59,6 +59,12 @@ type Table struct {
 	Temp         bool              // True for temporary tables
 	Constraints  []TableConstraint // Table-level constraints
 	Stats        *TableStats       // Table statistics (optional, may be nil)
+
+	// Virtual table fields
+	IsVirtual    bool        // True for virtual tables
+	Module       string      // Virtual table module name (e.g., "fts5", "rtree")
+	ModuleArgs   []string    // Module-specific arguments
+	VirtualTable interface{} // Virtual table instance (vtab.VirtualTable)
 }
 
 // SetRootPage updates the root page for this table.
@@ -417,6 +423,17 @@ func (t *Table) findIntegerPrimaryKeyIndex() int {
 	return -1
 }
 
+// GetIntegerPKColumn returns the name of the INTEGER PRIMARY KEY column.
+// Returns empty string if no INTEGER PRIMARY KEY column exists.
+// This is used by FK validation to include the rowid in extracted values.
+func (t *Table) GetIntegerPKColumn() string {
+	idx := t.findIntegerPrimaryKeyIndex()
+	if idx >= 0 {
+		return t.Columns[idx].Name
+	}
+	return ""
+}
+
 // GetColumnIndexWithRowidAliases returns the index of a column by name,
 // handling both regular column names and special rowid aliases (rowid, _rowid_, oid).
 // Returns -1 if not found. Returns -2 if the name is a rowid alias but no
@@ -717,6 +734,38 @@ func (s *Schema) CreateTable(stmt *parser.CreateTableStmt) (*Table, error) {
 	return table, nil
 }
 
+// CreateVirtualTable creates a virtual table and registers it in the schema.
+func (s *Schema) CreateVirtualTable(name, module string, args []string, vtab interface{}, schemaDDL string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check for reserved names
+	if IsReservedName(name) {
+		return fmt.Errorf("table name is reserved: %s", name)
+	}
+
+	// Check if table already exists
+	if _, exists := s.Tables[name]; exists {
+		return fmt.Errorf("table already exists: %s", name)
+	}
+
+	// Parse the schema DDL to get column information
+	// For now, create a minimal table entry - the virtual table module handles the actual data
+	table := &Table{
+		Name:         name,
+		RootPage:     0, // Virtual tables don't use B-tree pages
+		SQL:          fmt.Sprintf("CREATE VIRTUAL TABLE %s USING %s(%s)", name, module, strings.Join(args, ", ")),
+		Columns:      []*Column{}, // Will be populated from schemaDDL if needed
+		IsVirtual:    true,
+		Module:       module,
+		ModuleArgs:   args,
+		VirtualTable: vtab,
+	}
+
+	s.Tables[name] = table
+	return nil
+}
+
 // CreateIndex creates an index from a CREATE INDEX statement.
 func (s *Schema) CreateIndex(stmt *parser.CreateIndexStmt) (*Index, error) {
 	if stmt == nil {
@@ -908,6 +957,14 @@ func (s *Schema) TriggerCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.Triggers)
+}
+
+// IsView checks if a given name refers to a view (not a table).
+func (s *Schema) IsView(name string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, exists := s.Views[strings.ToLower(name)]
+	return exists
 }
 
 // TableStats represents statistics for a table.

@@ -17,9 +17,10 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 
 | Metric | Count |
 |--------|-------|
-| **Passing Tests** | ~680 |
-| **Skipped Tests** | ~450 |
-| **Coverage Target** | 60% feature parity |
+| **Passing Tests** | 4951 |
+| **Skipped Tests** | 466 |
+| **Pass Rate** | 91.4% |
+| **Coverage Target** | 70% feature parity |
 
 ---
 
@@ -45,7 +46,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | CREATE INDEX | :white_check_mark: | Including UNIQUE indexes |
 | CREATE VIEW | :white_check_mark: | |
 | CREATE TRIGGER | :large_orange_diamond: | Parsed but runtime execution incomplete |
-| CREATE VIRTUAL TABLE | :large_orange_diamond: | Infrastructure exists, limited vtab support |
+| CREATE VIRTUAL TABLE | :white_check_mark: | SQL parsing complete, FTS5/R-Tree modules ready |
 | ALTER TABLE | :large_orange_diamond: | ADD COLUMN only |
 | DROP TABLE | :white_check_mark: | |
 | DROP INDEX | :white_check_mark: | |
@@ -145,7 +146,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | CHECK | :white_check_mark: | |
 | DEFAULT | :white_check_mark: | |
 | FOREIGN KEY (syntax) | :white_check_mark: | Parsed correctly |
-| FOREIGN KEY (runtime) | :large_orange_diamond: | 31 passing, 9 skipped - deferred constraints pending |
+| FOREIGN KEY (runtime) | :white_check_mark: | 83/83 passing - deferred, collation, affinity all working |
 | COLLATE | :white_check_mark: | BINARY, NOCASE, RTRIM |
 | AUTOINCREMENT | :white_check_mark: | |
 
@@ -156,7 +157,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Regular tables | :white_check_mark: | |
-| WITHOUT ROWID tables | :large_orange_diamond: | 38 passing, 13 skipped - JOIN/ROLLBACK issues pending |
+| WITHOUT ROWID tables | :large_orange_diamond: | 45 passing, 6 skipped - JOINs fixed, ROLLBACK/CASCADE in progress |
 | Temporary tables | :large_orange_diamond: | Basic support |
 | Virtual tables | :large_orange_diamond: | Infrastructure only |
 
@@ -258,17 +259,17 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| ROW_NUMBER | :x: | Not implemented |
-| RANK | :x: | Not implemented |
-| DENSE_RANK | :x: | Not implemented |
-| NTILE | :x: | Not implemented |
-| LAG | :x: | Not implemented |
-| LEAD | :x: | Not implemented |
-| FIRST_VALUE | :x: | Not implemented |
-| LAST_VALUE | :x: | Not implemented |
+| ROW_NUMBER | :white_check_mark: | Working with streaming and partition modes |
+| RANK | :white_check_mark: | Working with OpWindowRank opcode |
+| DENSE_RANK | :construction: | Needs implementation |
+| NTILE | :large_orange_diamond: | Opcode exists, needs compiler integration |
+| LAG | :large_orange_diamond: | Opcode exists, needs compiler integration |
+| LEAD | :large_orange_diamond: | Opcode exists, needs compiler integration |
+| FIRST_VALUE | :large_orange_diamond: | Opcode exists, needs compiler integration |
+| LAST_VALUE | :large_orange_diamond: | Opcode exists, needs compiler integration |
 | NTH_VALUE | :x: | Not implemented |
-| OVER clause | :x: | Not implemented |
-| PARTITION BY | :x: | Not implemented |
+| OVER clause | :white_check_mark: | Parser and basic execution |
+| PARTITION BY | :large_orange_diamond: | Infrastructure exists |
 | WINDOW clause | :x: | Not implemented |
 
 ---
@@ -277,8 +278,8 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| FTS5 (Full-Text Search) | :x: | Planned for v0.2.0 |
-| R-Tree (Spatial) | :x: | Scaffolding exists, planned for v0.2.0 |
+| FTS5 (Full-Text Search) | :large_orange_diamond: | Module complete (128 tests), needs SQL parser integration |
+| R-Tree (Spatial) | :large_orange_diamond: | Module complete (all tests pass), needs SQL parser integration |
 | JSON1 | :white_check_mark: | Core functions implemented |
 | Custom functions | :large_orange_diamond: | Infrastructure exists |
 | Custom collations | :x: | Planned |
@@ -343,21 +344,25 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 - Most built-in functions
 - B-tree storage engine
 - Memory and file databases
+- Foreign keys (83/83 tests passing)
+- WITHOUT ROWID tables (JOIN queries fixed)
+- Window functions RANK() with opcodes
+- CREATE VIRTUAL TABLE SQL parsing
+- FTS5 module (API level - 128 tests)
+- R-Tree module (API level - all tests)
 
 ### Known Gaps (v0.1.x blockers)
-- Foreign key deferred constraints (9 tests)
-- WITHOUT ROWID edge cases (13 tests)
+- WITHOUT ROWID ROLLBACK (cache sync - 1 test)
 - Recursive CTEs (17 tests)
 - VACUUM operations (30 tests)
+- Window function DENSE_RANK (not implemented)
 
 ### Major Missing Features (v0.2.0+)
-- Window functions
 - ANALYZE (query statistics)
-- FTS5 (full-text search)
-- R-Tree (spatial indexing)
 - Trigger runtime execution
+- Advanced window functions (LAG, LEAD, etc.)
 
 ---
 
-*Last updated: 2026-03-08*
+*Last updated: 2026-03-09*
 *Reference: [SQLite Documentation](https://sqlite.org/docs.html)*

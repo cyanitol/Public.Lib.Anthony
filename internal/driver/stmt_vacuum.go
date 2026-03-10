@@ -142,6 +142,9 @@ func (s *Stmt) getIntoFilenameFromArgs(args []driver.NamedValue) (string, error)
 
 // executeVacuum performs the actual vacuum operation.
 func (s *Stmt) executeVacuum(opts *pager.VacuumOptions) error {
+	// Store schema before VACUUM
+	schemaBackup := s.cloneSchema(s.conn.schema)
+
 	// Execute the VACUUM operation directly on the pager
 	// We do this at compile time rather than runtime because VACUUM
 	// is a special operation that needs to run immediately
@@ -149,14 +152,20 @@ func (s *Stmt) executeVacuum(opts *pager.VacuumOptions) error {
 		return fmt.Errorf("VACUUM failed: %w", err)
 	}
 
+	// After VACUUM completes and database is reopened, persist schema to sqlite_master
+	// This ensures the schema is correctly written to the rebuilt database
+	if opts.IntoFile == "" && s.conn.btree != nil {
+		if err := schemaBackup.SaveToMaster(s.conn.btree); err != nil {
+			return fmt.Errorf("failed to persist schema after VACUUM: %w", err)
+		}
+		// Reload schema from the persisted data to ensure consistency
+		s.conn.schema = schemaBackup
+	}
+
 	// For VACUUM INTO, we need to set up the schema in the target database
-	// Since schema metadata may not be persisted to sqlite_master yet, we handle it here
 	if opts.IntoFile != "" && opts.SourceSchema != nil {
-		if err := s.setupVacuumIntoSchema(opts.IntoFile, opts.SourceSchema); err != nil {
-			// Log warning but don't fail - the file was created successfully
-			// The schema issue can be resolved by the application
-			// TODO: Properly implement sqlite_master persistence
-			_ = err // For now, ignore the error
+		if err := s.setupVacuumIntoSchema(opts.IntoFile, schemaBackup); err != nil {
+			return fmt.Errorf("failed to setup VACUUM INTO schema: %w", err)
 		}
 	}
 
@@ -169,17 +178,35 @@ func (s *Stmt) finalizeVacuumBytecode(vm *vdbe.VDBE) {
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 }
 
-// setupVacuumIntoSchema is a workaround to copy schema to VACUUM INTO target.
-// This is needed because schema is not yet persisted to sqlite_master in this implementation.
-// In a full implementation, schema would be in sqlite_master and copied automatically.
-func (s *Stmt) setupVacuumIntoSchema(targetFile string, sourceSchemaIface interface{}) error {
-	sourceSchema := s.validateSourceSchema(sourceSchemaIface)
+// setupVacuumIntoSchema copies and persists schema to VACUUM INTO target.
+// This ensures the target database has the complete schema in sqlite_master.
+func (s *Stmt) setupVacuumIntoSchema(targetFile string, sourceSchema *schema.Schema) error {
 	if sourceSchema == nil {
 		return nil // No schema to copy
 	}
 
 	targetSchema := s.cloneSchema(sourceSchema)
-	return s.registerTargetSchema(targetFile, targetSchema)
+
+	// Register the target schema in driver state
+	if err := s.registerTargetSchema(targetFile, targetSchema); err != nil {
+		return err
+	}
+
+	// Get the target btree to persist schema
+	s.conn.driver.mu.Lock()
+	dbState, exists := s.conn.driver.dbs[targetFile]
+	s.conn.driver.mu.Unlock()
+
+	if !exists || dbState.btree == nil {
+		return fmt.Errorf("target database state not found")
+	}
+
+	// Persist schema to sqlite_master in target database
+	if err := targetSchema.SaveToMaster(dbState.btree); err != nil {
+		return fmt.Errorf("failed to save schema to target sqlite_master: %w", err)
+	}
+
+	return nil
 }
 
 // validateSourceSchema validates and type-asserts the source schema.

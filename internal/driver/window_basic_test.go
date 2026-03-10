@@ -81,7 +81,6 @@ func TestBasicRowNumber(t *testing.T) {
 
 // TestBasicRowNumberWithOrderBy tests ROW_NUMBER() OVER (ORDER BY col)
 func TestBasicRowNumberWithOrderBy(t *testing.T) {
-	t.Skip("pre-existing failure")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "window_order.db")
 

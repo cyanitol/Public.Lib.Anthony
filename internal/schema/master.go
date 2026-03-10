@@ -132,8 +132,20 @@ func (s *Schema) SaveToMaster(bt *btree.Btree) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Build master rows from current schema (stubbed for now)
-	_ = bt
+	// Build master rows from current schema
+	rows := s.buildMasterRows()
+
+	// Clear existing sqlite_master content and write new rows
+	if err := s.clearMasterTable(bt); err != nil {
+		return fmt.Errorf("failed to clear sqlite_master: %w", err)
+	}
+
+	// Write all rows to sqlite_master
+	for _, row := range rows {
+		if err := s.writeMasterRow(bt, row); err != nil {
+			return fmt.Errorf("failed to write master row for %s: %w", row.Name, err)
+		}
+	}
 
 	return nil
 }
@@ -171,6 +183,126 @@ func (s *Schema) parseMasterPage(bt *btree.Btree, pageNum uint32) ([]MasterRow, 
 
 // writeMasterPage writes rows to the sqlite_master page.
 func (s *Schema) writeMasterPage(bt *btree.Btree, pageNum uint32, rows []MasterRow) error {
+	return nil
+}
+
+// buildMasterRows builds a list of MasterRow entries from the current schema.
+func (s *Schema) buildMasterRows() []MasterRow {
+	var rows []MasterRow
+
+	// Add tables (except internal tables)
+	for name, table := range s.Tables {
+		if !isInternalTable(name) {
+			rows = append(rows, MasterRow{
+				Type:     "table",
+				Name:     table.Name,
+				TblName:  table.Name,
+				RootPage: table.RootPage,
+				SQL:      table.SQL,
+			})
+		}
+	}
+
+	// Add indexes (except auto-indexes without SQL)
+	for name, index := range s.Indexes {
+		if !isAutoIndex(name) || index.SQL != "" {
+			rows = append(rows, MasterRow{
+				Type:     "index",
+				Name:     index.Name,
+				TblName:  index.Table,
+				RootPage: index.RootPage,
+				SQL:      index.SQL,
+			})
+		}
+	}
+
+	// Add views
+	for _, view := range s.Views {
+		rows = append(rows, MasterRow{
+			Type:     "view",
+			Name:     view.Name,
+			TblName:  view.Name,
+			RootPage: 0, // Views don't have root pages
+			SQL:      view.SQL,
+		})
+	}
+
+	// Add triggers
+	for _, trigger := range s.Triggers {
+		rows = append(rows, MasterRow{
+			Type:     "trigger",
+			Name:     trigger.Name,
+			TblName:  trigger.Table,
+			RootPage: 0, // Triggers don't have root pages
+			SQL:      trigger.SQL,
+		})
+	}
+
+	return rows
+}
+
+// clearMasterTable clears all existing content from sqlite_master table.
+// This is used during VACUUM to rebuild the table from scratch.
+func (s *Schema) clearMasterTable(bt *btree.Btree) error {
+	// Create a cursor on sqlite_master (page 1)
+	cur := btree.NewCursor(bt, 1)
+
+	// Move to first entry
+	if err := cur.MoveToFirst(); err != nil {
+		// If no entries exist, that's fine
+		return nil
+	}
+
+	// Collect all rowids to delete
+	var rowids []int64
+	for cur.IsValid() {
+		if cur.CurrentCell != nil {
+			rowids = append(rowids, cur.CurrentCell.Key)
+		}
+		if err := cur.Next(); err != nil {
+			break
+		}
+	}
+
+	// Delete all entries
+	for _, rowid := range rowids {
+		found, err := cur.SeekRowid(rowid)
+		if err != nil {
+			return fmt.Errorf("failed to seek to rowid %d: %w", rowid, err)
+		}
+		if !found {
+			return fmt.Errorf("rowid %d not found", rowid)
+		}
+		if err := cur.Delete(); err != nil {
+			return fmt.Errorf("failed to delete rowid %d: %w", rowid, err)
+		}
+	}
+
+	return nil
+}
+
+// writeMasterRow writes a single row to the sqlite_master table.
+func (s *Schema) writeMasterRow(bt *btree.Btree, row MasterRow) error {
+	// Encode the row as a payload
+	payload := encodeMasterRow(row)
+
+	// Create a cursor on sqlite_master (page 1)
+	cur := btree.NewCursor(bt, 1)
+
+	// Find the insertion point (we use sequential rowids)
+	// Move to the end and get the last rowid
+	var nextRowid int64 = 1
+	if err := cur.MoveToLast(); err == nil && cur.IsValid() {
+		if cur.CurrentCell != nil {
+			nextRowid = cur.CurrentCell.Key + 1
+		}
+	}
+
+	// Insert the row
+	if err := cur.Insert(nextRowid, payload); err != nil {
+		return fmt.Errorf("failed to insert master row: %w", err)
+	}
+
 	return nil
 }
 
@@ -289,6 +421,46 @@ func buildTableFromStmt(stmt *parser.CreateTableStmt, row MasterRow) *Table {
 		Strict:       stmt.Strict,
 		Temp:         stmt.Temp,
 	}
+}
+
+// parseViewSQL parses a CREATE VIEW statement from a master row.
+func (s *Schema) parseViewSQL(row MasterRow) (*View, error) {
+	if row.SQL == "" {
+		return &View{
+			Name: row.Name,
+			SQL:  row.SQL,
+			Columns: []string{},
+		}, nil
+	}
+
+	// Parse the SQL statement
+	p := parser.NewParser(row.SQL)
+	stmts, err := p.Parse()
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse SQL: %w", err)
+	}
+
+	// Should have exactly one statement
+	if len(stmts) != 1 {
+		return nil, fmt.Errorf("expected 1 statement, got %d", len(stmts))
+	}
+
+	// Ensure it's a CREATE VIEW statement
+	createView, ok := stmts[0].(*parser.CreateViewStmt)
+	if !ok {
+		return nil, fmt.Errorf("expected CREATE VIEW, got %T", stmts[0])
+	}
+
+	// Create the view
+	view := &View{
+		Name:      createView.Name,
+		Columns:   createView.Columns,
+		Select:    createView.Select,
+		SQL:       row.SQL,
+		Temporary: createView.Temporary,
+	}
+
+	return view, nil
 }
 
 // parseIndexSQL parses a CREATE INDEX statement from a master row.

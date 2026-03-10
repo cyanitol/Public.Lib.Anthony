@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/collation"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/constraint"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/pager"
@@ -39,10 +40,12 @@ func (s *Stmt) compileCreateIndex(vm *vdbe.VDBE, stmt *parser.CreateIndexStmt, a
 		index.RootPage = uint32(1000 + s.conn.schema.IndexCount())
 	}
 
-	// In a full implementation, this would also:
-	// 1. Insert entry into sqlite_master table
-	// 2. Populate the index with existing table data
-	// 3. Update the schema cookie
+	// Persist schema to sqlite_master
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			_ = err
+		}
+	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
@@ -75,10 +78,12 @@ func (s *Stmt) compileDropIndex(vm *vdbe.VDBE, stmt *parser.DropIndexStmt, args 
 		return nil, err
 	}
 
-	// In a full implementation, this would:
-	// 1. Delete entry from sqlite_master table
-	// 2. Free all pages used by the index
-	// 3. Update the schema cookie
+	// Persist schema to sqlite_master
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			_ = err
+		}
+	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
@@ -603,6 +608,11 @@ func (s *Stmt) compilePragmaForeignKeyCheck(vm *vdbe.VDBE, stmt *parser.PragmaSt
 		return s.emptyForeignKeyCheckResult(vm)
 	}
 
+	// First check for schema mismatches (returns error if FK definition is invalid)
+	if err := s.conn.fkManager.CheckSchemaMismatch(tableName, s.conn.schema); err != nil {
+		return nil, err
+	}
+
 	// Create a RowReader to scan tables
 	rowReader := newDriverRowReader(s.conn)
 	violations, err := s.conn.fkManager.FindViolations(tableName, s.conn.schema, rowReader)
@@ -1108,7 +1118,7 @@ func (r *driverRowReader) valuesEqual(v1, v2 interface{}) bool {
 }
 
 // valuesEqualWithCollation compares two values using the specified collation.
-func (r *driverRowReader) valuesEqualWithCollation(v1, v2 interface{}, collation string) bool {
+func (r *driverRowReader) valuesEqualWithCollation(v1, v2 interface{}, collationName string) bool {
 	if v1 == nil && v2 == nil {
 		return true
 	}
@@ -1128,7 +1138,7 @@ func (r *driverRowReader) valuesEqualWithCollation(v1, v2 interface{}, collation
 	s2 := fmt.Sprintf("%v", v2)
 
 	// Use collation-aware comparison from the collation package
-	return constraint.Compare(s1, s2, collation) == 0
+	return collation.Compare(s1, s2, collationName) == 0
 }
 
 // valuesEqualWithAffinity compares two values using the parent column's affinity and collation.
@@ -1148,18 +1158,18 @@ func (r *driverRowReader) valuesEqualWithAffinity(parentVal, childVal interface{
 	}
 
 	// Get parent column's collation (defaults to BINARY if not specified)
-	collation := "BINARY"
+	collationName := "BINARY"
 	if parentCol != nil && parentCol.Collation != "" {
-		collation = strings.ToUpper(parentCol.Collation)
+		collationName = strings.ToUpper(parentCol.Collation)
 	}
 
 	// Compare after applying affinity and collation
-	return r.compareAfterAffinityWithCollation(parentVal, childVal, collation)
+	return r.compareAfterAffinityWithCollation(parentVal, childVal, collationName)
 }
 
 // compareAfterAffinityWithCollation compares values after affinity has been applied,
 // using the specified collation for string comparisons.
-func (r *driverRowReader) compareAfterAffinityWithCollation(v1, v2 interface{}, collation string) bool {
+func (r *driverRowReader) compareAfterAffinityWithCollation(v1, v2 interface{}, collationName string) bool {
 	// Handle numeric comparisons (collation doesn't apply to numbers)
 	if n1, ok := toInt64Value(v1); ok {
 		if n2, ok := toInt64Value(v2); ok {
@@ -1177,7 +1187,7 @@ func (r *driverRowReader) compareAfterAffinityWithCollation(v1, v2 interface{}, 
 	// String comparison with collation
 	s1 := fmt.Sprintf("%v", v1)
 	s2 := fmt.Sprintf("%v", v2)
-	return constraint.Compare(s1, s2, collation) == 0
+	return collation.Compare(s1, s2, collationName) == 0
 }
 
 // toFloat64Value converts a value to float64 if possible.

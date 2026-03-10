@@ -36,6 +36,11 @@ func (m *MockRowReader) RowExists(table string, columns []string, values []inter
 	return false, nil
 }
 
+func (m *MockRowReader) RowExistsWithCollation(table string, columns []string, values []interface{}, collations []string) (bool, error) {
+	// For mock, delegate to RowExists - collation not needed in unit tests
+	return m.RowExists(table, columns, values)
+}
+
 func (m *MockRowReader) FindReferencingRows(table string, columns []string, values []interface{}) ([]int64, error) {
 	// First try the full key format
 	key := fmt.Sprintf("%s:%v:%v", table, columns, values)
@@ -689,6 +694,9 @@ func TestForeignKeyManager_DeferredConstraints(t *testing.T) {
 
 	reader := NewMockRowReader()
 
+	// Must be in a transaction for deferred constraints to work
+	mgr.SetInTransaction(true)
+
 	// Insert with invalid FK should succeed (deferred checking)
 	values := map[string]interface{}{
 		"id":          1,
@@ -699,6 +707,9 @@ func TestForeignKeyManager_DeferredConstraints(t *testing.T) {
 	if err != nil {
 		t.Errorf("Deferred constraint should skip immediate validation: %v", err)
 	}
+
+	// Clean up
+	mgr.SetInTransaction(false)
 }
 
 // TestForeignKeyManager_MultiColumnFK tests composite foreign keys

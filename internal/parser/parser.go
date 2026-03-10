@@ -1203,6 +1203,14 @@ func (p *Parser) parseCreate() (Statement, error) {
 	// TEMP/TEMPORARY
 	temp := p.match(TK_TEMP) || p.match(TK_TEMPORARY)
 
+	// Check for VIRTUAL TABLE
+	if p.match(TK_VIRTUAL) {
+		if !p.match(TK_TABLE) {
+			return nil, p.error("expected TABLE after VIRTUAL")
+		}
+		return p.parseCreateVirtualTable()
+	}
+
 	// Check for UNIQUE before INDEX
 	unique := p.match(TK_UNIQUE)
 
@@ -1243,6 +1251,58 @@ func (p *Parser) parseCreateTable(temp bool) (*CreateTableStmt, error) {
 	if err := p.parseTableOptions(stmt); err != nil {
 		return nil, err
 	}
+	return stmt, nil
+}
+
+// parseCreateVirtualTable parses a CREATE VIRTUAL TABLE statement.
+// Syntax: CREATE VIRTUAL TABLE [IF NOT EXISTS] name USING module[(args)]
+func (p *Parser) parseCreateVirtualTable() (*CreateVirtualTableStmt, error) {
+	stmt := &CreateVirtualTableStmt{}
+
+	// Parse IF NOT EXISTS
+	if err := p.parseIfNotExists(&stmt.IfNotExists); err != nil {
+		return nil, err
+	}
+
+	// Parse table name
+	if !p.check(TK_ID) {
+		return nil, p.error("expected table name")
+	}
+	stmt.Name = Unquote(p.advance().Lexeme)
+
+	// Parse USING
+	if !p.match(TK_USING) {
+		return nil, p.error("expected USING after virtual table name")
+	}
+
+	// Parse module name
+	if !p.check(TK_ID) {
+		return nil, p.error("expected module name after USING")
+	}
+	stmt.Module = Unquote(p.advance().Lexeme)
+
+	// Parse optional module arguments: (arg1, arg2, ...)
+	if p.match(TK_LP) {
+		for {
+			if p.check(TK_RP) {
+				break
+			}
+			// Module arguments can be identifiers or strings
+			tok := p.peek()
+			if tok.Type == TK_ID || tok.Type == TK_STRING {
+				stmt.Args = append(stmt.Args, Unquote(p.advance().Lexeme))
+			} else {
+				return nil, p.error("expected module argument")
+			}
+			if !p.match(TK_COMMA) {
+				break
+			}
+		}
+		if !p.match(TK_RP) {
+			return nil, p.error("expected ) after module arguments")
+		}
+	}
+
 	return stmt, nil
 }
 

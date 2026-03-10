@@ -1146,7 +1146,6 @@ func TestForeignKey_RecursiveCascade(t *testing.T) {
 // TestForeignKey_ReplaceViolation tests INSERT OR REPLACE with FK violation.
 // Based on fkey1-5.2.
 func TestForeignKey_ReplaceViolation(t *testing.T) {
-	t.Skip("INSERT OR REPLACE FK cascade not yet implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1170,7 +1169,7 @@ func TestForeignKey_ReplaceViolation(t *testing.T) {
 	// Then tries to insert (2,3) but 3 doesn't exist anymore
 	_, err = db.Exec("INSERT OR REPLACE INTO t11 VALUES(2, 3)")
 	if err == nil {
-		t.Error("Expected FK constraint error from REPLACE cascade, got nil")
+		t.Fatal("Expected FK constraint error from REPLACE cascade, got nil")
 	}
 	if !strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
 		t.Errorf("Expected 'FOREIGN KEY constraint failed', got: %v", err)
@@ -1612,7 +1611,6 @@ func TestForeignKey_DeleteSelfReferencing(t *testing.T) {
 // TestForeignKey_ForeignKeyMismatch tests "foreign key mismatch" error.
 // Based on fkey2-5.2 and fkey5-11.* tests.
 func TestForeignKey_ForeignKeyMismatch(t *testing.T) {
-	t.Skip("FK mismatch detection not yet implemented")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
