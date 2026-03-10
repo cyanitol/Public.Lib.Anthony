@@ -120,6 +120,17 @@ func (s *Stmt) executeAndCommit(args []driver.NamedValue, inTx bool) (driver.Res
 		s.conn.stmtCache.InvalidateAll()
 	}
 
+	// Transaction control statements manage transaction boundaries themselves.
+	txnType := s.txnControlType()
+	switch txnType {
+	case txnBegin:
+		s.conn.inTx = true
+		return s.buildResult(vm), nil
+	case txnCommit, txnRollback:
+		s.conn.inTx = false
+		return s.buildResult(vm), nil
+	}
+
 	if err := s.autoCommitIfNeeded(inTx); err != nil {
 		return nil, err
 	}
@@ -137,6 +148,29 @@ func (s *Stmt) runVMWithRollback(vm *vdbe.VDBE, inTx bool) error {
 	}
 	return nil
 }
+
+// txnControlType classifies the statement as a transaction control statement.
+func (s *Stmt) txnControlType() txnControlKind {
+	switch s.ast.(type) {
+	case *parser.BeginStmt:
+		return txnBegin
+	case *parser.CommitStmt:
+		return txnCommit
+	case *parser.RollbackStmt:
+		return txnRollback
+	default:
+		return txnNone
+	}
+}
+
+type txnControlKind int
+
+const (
+	txnNone txnControlKind = iota
+	txnBegin
+	txnCommit
+	txnRollback
+)
 
 // autoCommitIfNeeded commits if not in a transaction and a write transaction exists
 func (s *Stmt) autoCommitIfNeeded(inTx bool) error {
@@ -253,7 +287,7 @@ func (s *Stmt) isCacheable() bool {
 	switch s.ast.(type) {
 	case *parser.PragmaStmt, *parser.CreateTableStmt, *parser.DropTableStmt,
 		*parser.CreateIndexStmt, *parser.DropIndexStmt, *parser.AlterTableStmt,
-		*parser.CreateViewStmt, *parser.DropViewStmt:
+		*parser.CreateViewStmt, *parser.DropViewStmt, *parser.CreateVirtualTableStmt:
 		return false
 	default:
 		return true
@@ -354,6 +388,9 @@ func (s *Stmt) dispatchTableDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.
 	switch stmt := s.ast.(type) {
 	case *parser.CreateTableStmt:
 		result, err := s.compileCreateTable(vm, stmt, args)
+		return result, err, true
+	case *parser.CreateVirtualTableStmt:
+		result, err := s.compileCreateVirtualTable(vm, stmt, args)
 		return result, err, true
 	case *parser.DropTableStmt:
 		result, err := s.compileDropTable(vm, stmt, args)
@@ -686,9 +723,10 @@ func buildTableInfo(tableName string, table *schema.Table) expr.TableInfo {
 	for _, col := range table.Columns {
 		isRowid := schemaColIsRowidForTable(table, col)
 		colInfo := expr.ColumnInfo{
-			Name:    col.Name,
-			Index:   recordIdx,
-			IsRowid: isRowid,
+			Name:      col.Name,
+			Index:     recordIdx,
+			IsRowid:   isRowid,
+			Collation: col.GetCollation(),
 		}
 		columns = append(columns, colInfo)
 		if !isRowid {

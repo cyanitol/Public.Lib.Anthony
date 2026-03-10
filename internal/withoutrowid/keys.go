@@ -76,3 +76,69 @@ func formatUnknown(v interface{}) string {
 	// Ensure no embedded NULs to avoid prefix ambiguity.
 	return string(bytes.ReplaceAll([]byte(fmt.Sprintf("%v", v)), []byte{0x00}, []byte{0x01}))
 }
+
+// DecodeCompositeKey decodes a composite key produced by EncodeCompositeKey.
+// It returns the slice of values in order or an error if the key bytes are malformed.
+func DecodeCompositeKey(data []byte) ([]interface{}, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	var values []interface{}
+	for i := 0; i < len(data); {
+		prefix := data[i]
+		i++
+
+		switch prefix {
+		case 0x00:
+			values = append(values, nil)
+		case 0x10:
+			if i+8 > len(data) {
+				return nil, fmt.Errorf("truncated integer in composite key")
+			}
+			values = append(values, decodeInt64(data[i:i+8]))
+			i += 8
+		case 0x20:
+			if i+8 > len(data) {
+				return nil, fmt.Errorf("truncated float in composite key")
+			}
+			values = append(values, decodeFloat64(data[i:i+8]))
+			i += 8
+		case 0x30, 0x50: // text encodings (0x50 is fallback string)
+			end := bytes.IndexByte(data[i:], 0x00)
+			if end == -1 {
+				return nil, fmt.Errorf("unterminated text in composite key")
+			}
+			values = append(values, string(data[i:i+end]))
+			i += end + 1
+		case 0x40: // blob
+			end := bytes.IndexByte(data[i:], 0x00)
+			if end == -1 {
+				return nil, fmt.Errorf("unterminated blob in composite key")
+			}
+			values = append(values, append([]byte(nil), data[i:i+end]...))
+			i += end + 1
+		default:
+			return nil, fmt.Errorf("unknown composite key prefix 0x%x", prefix)
+		}
+	}
+
+	return values, nil
+}
+
+// decodeInt64 reverses the EncodeCompositeKey integer encoding.
+func decodeInt64(b []byte) int64 {
+	u := binary.BigEndian.Uint64(b)
+	u ^= 1 << 63
+	return int64(u)
+}
+
+// decodeFloat64 reverses the EncodeCompositeKey float encoding.
+func decodeFloat64(b []byte) float64 {
+	u := binary.BigEndian.Uint64(b)
+	if u&(1<<63) != 0 {
+		u &^= 1 << 63
+		return math.Float64frombits(u)
+	}
+	return math.Float64frombits(^u)
+}

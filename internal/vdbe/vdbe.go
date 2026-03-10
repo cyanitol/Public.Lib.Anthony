@@ -135,6 +135,7 @@ type VDBE struct {
 
 	// Transaction and change tracking
 	InTxn           bool             // True if in a transaction
+	EndsTxn         bool             // True if COMMIT/ROLLBACK statement that ends transaction
 	NumChanges      int64            // Number of database changes
 	LastInsertID    int64            // Last inserted rowid (for database/sql driver)
 	pendingFKUpdate *fkUpdateContext // Captures old row data during UPDATE for FK checks
@@ -526,6 +527,10 @@ func (v *VDBE) resetExecutionState() {
 	v.RC = 0
 	v.ErrorMsg = ""
 	v.NumSteps = 0
+	v.NumChanges = 0
+	v.LastInsertID = 0
+	v.SchemaChanged = false
+	v.pendingFKUpdate = nil
 }
 
 // resetStatistics resets statistics if enabled.

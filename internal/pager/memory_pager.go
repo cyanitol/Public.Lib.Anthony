@@ -455,6 +455,13 @@ func (mp *MemoryPager) BeginWrite() error {
 	return mp.beginWriteTransaction()
 }
 
+// InTransaction returns true if any transaction (read or write) is active.
+func (mp *MemoryPager) InTransaction() bool {
+	mp.mu.RLock()
+	defer mp.mu.RUnlock()
+	return mp.state != PagerStateOpen
+}
+
 // InWriteTransaction returns true if a write transaction is active.
 func (mp *MemoryPager) InWriteTransaction() bool {
 	mp.mu.RLock()

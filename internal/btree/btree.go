@@ -87,10 +87,12 @@ func (bt *Btree) validatePageSize(data []byte) error {
 // validatePageTypeForBtree checks if the page type is valid for btree validation.
 func validatePageTypeForBtree(pageType byte) error {
 	validTypes := map[byte]bool{
-		PageTypeLeafTable:     true,
-		PageTypeInteriorTable: true,
-		PageTypeLeafIndex:     true,
-		PageTypeInteriorIndex: true,
+		PageTypeLeafTable:       true,
+		PageTypeInteriorTable:   true,
+		PageTypeLeafIndex:       true,
+		PageTypeInteriorIndex:   true,
+		PageTypeLeafTableNoInt:  true,
+		PageTypeInteriorTableNo: true,
 	}
 
 	if !validTypes[pageType] {

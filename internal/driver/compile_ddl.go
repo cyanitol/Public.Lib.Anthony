@@ -4,6 +4,7 @@ package driver
 import (
 	"database/sql/driver"
 	"fmt"
+	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/constraint"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
@@ -66,6 +67,15 @@ func (s *Stmt) registerForeignKeyConstraints(_ interface{}, stmt *parser.CreateT
 	}
 	s.registerTableLevelFKs(stmt)
 	s.registerColumnLevelFKs(stmt)
+
+	// Validate FK constraints at CREATE TABLE time
+	// Only checks errors that should prevent table creation (column count mismatch, FK to view)
+	// Does NOT check for non-unique columns (that's reported via PRAGMA foreign_key_check)
+	if err := s.conn.fkManager.ValidateFKAtCreateTime(stmt.Name, s.conn.schema); err != nil {
+		// Remove the constraints we just added since they're invalid
+		s.conn.fkManager.RemoveConstraints(stmt.Name)
+		return err
+	}
 	return nil
 }
 
@@ -120,6 +130,50 @@ func (s *Stmt) compileDropTable(vm *vdbe.VDBE, stmt *parser.DropTableStmt, args 
 	}
 
 	// Emit bytecode
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	s.invalidateStmtCache()
+	return vm, nil
+}
+
+// knownVirtualTableModules lists the supported virtual table modules.
+var knownVirtualTableModules = map[string]bool{
+	"fts5":      true,
+	"fts4":      true,
+	"fts3":      true,
+	"rtree":     true,
+	"rtree_i32": true,
+}
+
+// compileCreateVirtualTable compiles a CREATE VIRTUAL TABLE statement
+func (s *Stmt) compileCreateVirtualTable(vm *vdbe.VDBE, stmt *parser.CreateVirtualTableStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+	vm.AllocMemory(10)
+
+	// Check for known module
+	moduleName := strings.ToLower(stmt.Module)
+	if !knownVirtualTableModules[moduleName] {
+		return nil, fmt.Errorf("no such module: %s", stmt.Module)
+	}
+
+	// Check if table already exists
+	if _, exists := s.conn.schema.GetTable(stmt.Name); exists {
+		if stmt.IfNotExists {
+			// IF NOT EXISTS - silently succeed
+			vm.AddOp(vdbe.OpInit, 0, 0, 0)
+			vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+			return vm, nil
+		}
+		return nil, fmt.Errorf("table %s already exists", stmt.Name)
+	}
+
+	// Register the virtual table in the schema
+	err := s.conn.schema.CreateVirtualTable(stmt.Name, stmt.Module, stmt.Args, nil, stmt.String())
+	if err != nil {
+		return nil, err
+	}
+
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
@@ -308,7 +362,12 @@ func (s *Stmt) compileBegin(vm *vdbe.VDBE, stmt *parser.BeginStmt, args []driver
 	vm.SetReadOnly(false)
 	vm.InTxn = true
 
-	vm.AddOp(vdbe.OpInit, 0, 3, 0)
+	// Set FK manager's transaction state for deferred constraint handling
+	if s.conn.fkManager != nil {
+		s.conn.fkManager.SetInTransaction(true)
+	}
+
+	vm.AddOp(vdbe.OpInit, 0, 1, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
 	return vm, nil
@@ -318,7 +377,18 @@ func (s *Stmt) compileBegin(vm *vdbe.VDBE, stmt *parser.BeginStmt, args []driver
 func (s *Stmt) compileCommit(vm *vdbe.VDBE, stmt *parser.CommitStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
 
-	vm.AddOp(vdbe.OpInit, 0, 3, 0)
+	// Check deferred FK constraints before commit
+	if err := s.conn.checkDeferredFKConstraints(); err != nil {
+		return nil, err
+	}
+
+	// Reset FK manager's transaction state
+	if s.conn.fkManager != nil {
+		s.conn.fkManager.SetInTransaction(false)
+	}
+	s.conn.clearDeferredFKViolations()
+
+	vm.AddOp(vdbe.OpInit, 0, 1, 0)
 	vm.AddOp(vdbe.OpCommit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
@@ -329,7 +399,13 @@ func (s *Stmt) compileCommit(vm *vdbe.VDBE, stmt *parser.CommitStmt, args []driv
 func (s *Stmt) compileRollback(vm *vdbe.VDBE, stmt *parser.RollbackStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
 
-	vm.AddOp(vdbe.OpInit, 0, 3, 0)
+	// Reset FK manager's transaction state (no deferred check on rollback)
+	if s.conn.fkManager != nil {
+		s.conn.fkManager.SetInTransaction(false)
+	}
+	s.conn.clearDeferredFKViolations()
+
+	vm.AddOp(vdbe.OpInit, 0, 1, 0)
 	vm.AddOp(vdbe.OpRollback, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
