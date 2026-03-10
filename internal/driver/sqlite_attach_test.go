@@ -23,13 +23,28 @@ func setupAttachTestDB(t *testing.T, name string) (*sql.DB, string) {
 	return db, dbPath
 }
 
+// setupAttachTestDBInDir creates a test database in a specific directory
+// (for ATTACH tests where both databases must be in the same sandbox)
+func setupAttachTestDBInDir(t *testing.T, tmpDir, name string) (*sql.DB, string) {
+	dbPath := filepath.Join(tmpDir, name)
+
+	db, err := sql.Open(DriverName, dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database %s: %v", name, err)
+	}
+
+	return db, dbPath
+}
+
 // TestAttachBasic tests basic ATTACH DATABASE functionality (attach.test 1.1-1.7)
 func TestAttachBasic(t *testing.T) {
-	t.Skip("ATTACH not implemented")
-	db, _ := setupAttachTestDB(t, "test.db")
+	// Use same temp dir for both databases (security sandbox requirement)
+	tmpDir := t.TempDir()
+
+	db, _ := setupAttachTestDBInDir(t, tmpDir, "test.db")
 	defer db.Close()
 
-	db2, db2Path := setupAttachTestDB(t, "test2.db")
+	db2, db2Path := setupAttachTestDBInDir(t, tmpDir, "test2.db")
 	defer db2.Close()
 
 	// Create table in main database

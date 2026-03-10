@@ -6,6 +6,7 @@ import (
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // sqlite_master table schema:
@@ -129,6 +130,11 @@ func (s *Schema) SaveToMaster(bt *btree.Btree) error {
 		return fmt.Errorf("nil btree")
 	}
 
+	// Ensure sqlite_master root page is initialized before writing rows.
+	if err := ensureMasterPageInitialized(bt); err != nil {
+		return fmt.Errorf("failed to initialize sqlite_master page: %w", err)
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -144,6 +150,38 @@ func (s *Schema) SaveToMaster(bt *btree.Btree) error {
 	for _, row := range rows {
 		if err := s.writeMasterRow(bt, row); err != nil {
 			return fmt.Errorf("failed to write master row for %s: %w", row.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// ensureMasterPageInitialized sets up page 1 as an empty leaf table if it is
+// currently uninitialized. This allows SaveToMaster to write master rows in
+// newly created databases.
+func ensureMasterPageInitialized(bt *btree.Btree) error {
+	page, err := bt.GetPage(1)
+	if err != nil {
+		// Create an empty page if it doesn't exist yet
+		page = make([]byte, bt.PageSize)
+		if err := bt.SetPage(1, page); err != nil {
+			return err
+		}
+	}
+
+	headerOffset := btree.FileHeaderSize
+	page[headerOffset+btree.PageHeaderOffsetType] = btree.PageTypeLeafTable
+	page[headerOffset+btree.PageHeaderOffsetFreeblock] = 0
+	page[headerOffset+btree.PageHeaderOffsetFreeblock+1] = 0
+	page[headerOffset+btree.PageHeaderOffsetNumCells] = 0
+	page[headerOffset+btree.PageHeaderOffsetNumCells+1] = 0
+	page[headerOffset+btree.PageHeaderOffsetCellStart] = 0
+	page[headerOffset+btree.PageHeaderOffsetCellStart+1] = 0
+	page[headerOffset+btree.PageHeaderOffsetFragmented] = 0
+
+	if bt.Provider != nil {
+		if err := bt.Provider.MarkDirty(1); err != nil {
+			return err
 		}
 	}
 
@@ -332,43 +370,31 @@ func tableWithNoSQL(row MasterRow) *Table {
 
 // encodeMasterRow encodes a MasterRow as a simple length-prefixed record.
 func encodeMasterRow(row MasterRow) []byte {
-	fields := [][]byte{
-		[]byte(row.Type),
-		[]byte(row.Name),
-		[]byte(row.TblName),
-		intToVarintBytes(uint64(row.RootPage)),
-		[]byte(row.SQL),
-	}
-	var out []byte
-	for _, f := range fields {
-		out = append(out, intToVarintBytes(uint64(len(f)))...)
-		out = append(out, f...)
-	}
-	return out
+	values := []interface{}{row.Type, row.Name, row.TblName, int64(row.RootPage), row.SQL}
+	return vdbe.EncodeSimpleRecord(values)
 }
 
 // decodeMasterRow decodes the simplified record produced by encodeMasterRow.
 func decodeMasterRow(payload []byte) (MasterRow, error) {
 	var row MasterRow
-	parts := make([][]byte, 0, 5)
-	data := payload
-	for len(parts) < 5 && len(data) > 0 {
-		length, n := btree.GetVarint(data)
-		if n == 0 || len(data) < n+int(length) {
-			return row, fmt.Errorf("invalid master row encoding")
-		}
-		data = data[n:]
-		parts = append(parts, data[:length])
-		data = data[length:]
+	values, err := vdbe.DecodeRecord(payload)
+	if err != nil {
+		return row, fmt.Errorf("invalid master row encoding: %w", err)
 	}
-	if len(parts) != 5 {
+	if len(values) < 5 {
 		return row, fmt.Errorf("invalid master row field count")
 	}
-	row.Type = string(parts[0])
-	row.Name = string(parts[1])
-	row.TblName = string(parts[2])
-	row.RootPage = uint32(varintBytesToUint(parts[3]))
-	row.SQL = string(parts[4])
+
+	row.Type = fmt.Sprint(values[0])
+	row.Name = fmt.Sprint(values[1])
+	row.TblName = fmt.Sprint(values[2])
+	switch v := values[3].(type) {
+	case int64:
+		row.RootPage = uint32(v)
+	default:
+		row.RootPage = uint32(varintBytesToUint([]byte(fmt.Sprint(v))))
+	}
+	row.SQL = fmt.Sprint(values[4])
 	return row, nil
 }
 
@@ -427,8 +453,8 @@ func buildTableFromStmt(stmt *parser.CreateTableStmt, row MasterRow) *Table {
 func (s *Schema) parseViewSQL(row MasterRow) (*View, error) {
 	if row.SQL == "" {
 		return &View{
-			Name: row.Name,
-			SQL:  row.SQL,
+			Name:    row.Name,
+			SQL:     row.SQL,
 			Columns: []string{},
 		}, nil
 	}

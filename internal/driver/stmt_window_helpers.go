@@ -106,8 +106,8 @@ func (s *Stmt) extractWindowOrderByCols(orderBy []parser.OrderingTerm, table *sc
 // emitWindowRankSetup emits initialization opcodes for window rank tracking
 func emitWindowRankSetup(vm *vdbe.VDBE, regs rankRegisters, info rankFunctionInfo) {
 	vm.AddOp(vdbe.OpInteger, 0, regs.rowCount, 0)
-	vm.AddOp(vdbe.OpInteger, 0, regs.rank, 0)        // Start at 0, will be set to 1 on first row
-	vm.AddOp(vdbe.OpInteger, 0, regs.denseRank, 0)  // Start at 0, will be set to 1 on first row
+	vm.AddOp(vdbe.OpInteger, 0, regs.rank, 0)      // Start at 0, will be set to 1 on first row
+	vm.AddOp(vdbe.OpInteger, 0, regs.denseRank, 0) // Start at 0, will be set to 1 on first row
 
 	// Initialize prevOrderBy registers to NULL for comparison
 	// We need at least 10 registers to handle multiple ORDER BY columns

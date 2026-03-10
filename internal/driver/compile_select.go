@@ -22,10 +22,13 @@ func (s *Stmt) compileSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driv
 	}
 
 	// Get table and check for special cases
-	tableName, table, err := s.resolveSelectTable(stmt)
+	tableName, table, db, err := s.resolveSelectTable(stmt)
 	if err != nil {
 		return nil, err
 	}
+
+	// Ensure VDBE context uses the correct database (main or attached)
+	s.setVdbeContextForDatabase(vm, db)
 
 	// Route to specialized compilers
 	if routedVM, err, handled := s.routeSpecializedSelect(vm, stmt, tableName, table, args); handled {
@@ -73,18 +76,21 @@ func (s *Stmt) handleSpecialSelectTypes(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 }
 
 // resolveSelectTable gets the table name and schema for the SELECT.
-func (s *Stmt) resolveSelectTable(stmt *parser.SelectStmt) (string, *schema.Table, error) {
-	tableName, err := selectFromTableName(stmt)
+func (s *Stmt) resolveSelectTable(stmt *parser.SelectStmt) (string, *schema.Table, *schema.Database, error) {
+	tableRef, err := selectFromTableRef(stmt)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 
-	table, ok := s.conn.schema.GetTable(tableName)
+	table, db, _, ok := s.conn.dbRegistry.ResolveTable(tableRef.Schema, tableRef.TableName)
 	if !ok {
-		return "", nil, fmt.Errorf("table not found: %s", tableName)
+		if tableRef.Schema != "" {
+			return "", nil, nil, fmt.Errorf("table not found: %s.%s", tableRef.Schema, tableRef.TableName)
+		}
+		return "", nil, nil, fmt.Errorf("table not found: %s", tableRef.TableName)
 	}
 
-	return tableName, table, nil
+	return tableRef.TableName, table, db, nil
 }
 
 // routeSpecializedSelect routes to JOIN, aggregate, or window function SELECT compilers.

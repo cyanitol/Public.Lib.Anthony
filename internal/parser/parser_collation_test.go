@@ -148,10 +148,10 @@ func TestParseCollateInColumn(t *testing.T) {
 
 // Prefix: coll_
 type collateOrderByTestCase struct {
-	name         string
-	sql          string
-	wantErr      bool
-	wantNumTerms int
+	name           string
+	sql            string
+	wantErr        bool
+	wantNumTerms   int
 	term0Collation string
 	term0Asc       bool
 	term1Collation string
@@ -189,33 +189,33 @@ func TestParseCollateInOrderBy(t *testing.T) {
 	t.Parallel()
 	tests := []collateOrderByTestCase{
 		{
-			name: "ORDER BY with COLLATE NOCASE",
-			sql:  "SELECT name FROM users ORDER BY name COLLATE NOCASE",
+			name:         "ORDER BY with COLLATE NOCASE",
+			sql:          "SELECT name FROM users ORDER BY name COLLATE NOCASE",
 			wantNumTerms: 1, term0Collation: "NOCASE", term0Asc: true,
 		},
 		{
-			name: "ORDER BY with COLLATE BINARY DESC",
-			sql:  "SELECT code FROM items ORDER BY code COLLATE BINARY DESC",
+			name:         "ORDER BY with COLLATE BINARY DESC",
+			sql:          "SELECT code FROM items ORDER BY code COLLATE BINARY DESC",
 			wantNumTerms: 1, term0Collation: "BINARY", term0Asc: false,
 		},
 		{
-			name: "ORDER BY with COLLATE RTRIM ASC",
-			sql:  "SELECT value FROM data ORDER BY value COLLATE RTRIM ASC",
+			name:         "ORDER BY with COLLATE RTRIM ASC",
+			sql:          "SELECT value FROM data ORDER BY value COLLATE RTRIM ASC",
 			wantNumTerms: 1, term0Collation: "RTRIM", term0Asc: true,
 		},
 		{
-			name: "ORDER BY multiple columns with different collations",
-			sql:  "SELECT * FROM users ORDER BY lastname COLLATE NOCASE, firstname COLLATE BINARY DESC",
+			name:         "ORDER BY multiple columns with different collations",
+			sql:          "SELECT * FROM users ORDER BY lastname COLLATE NOCASE, firstname COLLATE BINARY DESC",
 			wantNumTerms: 2, term0Collation: "NOCASE", term0Asc: true, term1Collation: "BINARY", term1Asc: false,
 		},
 		{
-			name: "ORDER BY without COLLATE",
-			sql:  "SELECT name FROM users ORDER BY name",
+			name:         "ORDER BY without COLLATE",
+			sql:          "SELECT name FROM users ORDER BY name",
 			wantNumTerms: 1, term0Collation: "", term0Asc: true,
 		},
 		{
-			name: "ORDER BY mixed - some with COLLATE, some without",
-			sql:  "SELECT * FROM users ORDER BY name COLLATE NOCASE, age, email COLLATE BINARY",
+			name:         "ORDER BY mixed - some with COLLATE, some without",
+			sql:          "SELECT * FROM users ORDER BY name COLLATE NOCASE, age, email COLLATE BINARY",
 			wantNumTerms: 3, term0Collation: "NOCASE", term0Asc: true, term1Collation: "", term1Asc: true, term2Collation: "BINARY",
 		},
 	}

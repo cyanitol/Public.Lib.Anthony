@@ -12,13 +12,13 @@ import (
 // corruptTestCase defines a single corruption test scenario using declarative fields
 type corruptTestCase struct {
 	name          string
-	setupSQL      []string            // SQL statements to execute during setup
-	setupLoop     *corruptSetupLoop   // Optional loop for bulk inserts
-	verifyType    corruptVerifyType   // Type of verification to perform
-	verifyQuery   string              // Query to execute for verification
-	expectedValue interface{}         // Expected value for simple checks
-	expectedCount int                 // Expected row count
-	skipFile      bool                // Skip if requires file manipulation
+	setupSQL      []string          // SQL statements to execute during setup
+	setupLoop     *corruptSetupLoop // Optional loop for bulk inserts
+	verifyType    corruptVerifyType // Type of verification to perform
+	verifyQuery   string            // Query to execute for verification
+	expectedValue interface{}       // Expected value for simple checks
+	expectedCount int               // Expected row count
+	skipFile      bool              // Skip if requires file manipulation
 }
 
 type corruptSetupLoop struct {

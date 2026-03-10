@@ -28,6 +28,8 @@ func (s *Stmt) compileCreateTable(vm *vdbe.VDBE, stmt *parser.CreateTableStmt, a
 	if err != nil {
 		return nil, err
 	}
+	// Preserve original SQL text for persistence/loading.
+	table.SQL = s.query
 
 	// Allocate a root page for the table btree
 	if s.conn.btree != nil {
@@ -51,6 +53,13 @@ func (s *Stmt) compileCreateTable(vm *vdbe.VDBE, stmt *parser.CreateTableStmt, a
 	// Register foreign key constraints with the FK manager
 	if err := s.registerForeignKeyConstraints(table, stmt); err != nil {
 		return nil, err
+	}
+
+	// Persist schema to sqlite_master
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			return nil, fmt.Errorf("failed to persist schema: %w", err)
+		}
 	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
@@ -235,6 +244,13 @@ func (s *Stmt) performDropTable(tableName string, _ *schema.Table) error {
 	// Free table pages if btree is available
 	// In a full implementation, would call btree.FreePage(table.RootPage)
 	// and recursively free all pages in the table's btree
+
+	// Persist schema updates
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			return fmt.Errorf("failed to persist schema: %w", err)
+		}
+	}
 
 	return nil
 }

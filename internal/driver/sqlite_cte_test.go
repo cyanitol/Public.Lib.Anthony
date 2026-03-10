@@ -67,7 +67,7 @@ func cteIsModifyingQuery(query string) bool {
 	}
 	// Check for WITH ... INSERT/UPDATE/DELETE patterns
 	if query[:6] == "WITH d" || query[:6] == "WITH c" || query[:6] == "WITH f" ||
-	   query[:6] == "WITH t" || query[:6] == "WITH u" {
+		query[:6] == "WITH t" || query[:6] == "WITH u" {
 		return cteContainsModifyingKeyword(query)
 	}
 	return false
@@ -75,8 +75,8 @@ func cteIsModifyingQuery(query string) bool {
 
 func cteContainsModifyingKeyword(query string) bool {
 	return cteContains(query, "INSERT INTO") ||
-	       cteContains(query, "UPDATE") ||
-	       cteContains(query, "DELETE FROM")
+		cteContains(query, "UPDATE") ||
+		cteContains(query, "DELETE FROM")
 }
 
 func cteContains(s, substr string) bool {

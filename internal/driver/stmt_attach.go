@@ -29,6 +29,9 @@ func (s *Stmt) compileAttach(vm *vdbe.VDBE, stmt *parser.AttachStmt, args []driv
 		return nil, err
 	}
 
+	// Adding a new database changes name resolution; drop cached statements.
+	s.invalidateStmtCache()
+
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
@@ -95,6 +98,8 @@ func (s *Stmt) openDatabase(validatedPath string) (*pager.Pager, *btree.Btree, e
 	}
 
 	bt := btree.NewBtree(uint32(p.PageSize()))
+	bt.Provider = newPagerProvider(p)
+	p.RollbackCallback = bt.ClearCache
 	return p, bt, nil
 }
 
@@ -112,6 +117,9 @@ func (s *Stmt) compileDetach(vm *vdbe.VDBE, stmt *parser.DetachStmt, args []driv
 	if err := s.conn.dbRegistry.DetachDatabase(schemaName); err != nil {
 		return nil, fmt.Errorf("failed to detach database: %w", err)
 	}
+
+	// Statement cache may hold programs bound to detached databases.
+	s.invalidateStmtCache()
 
 	// Generate simple bytecode that succeeds
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)

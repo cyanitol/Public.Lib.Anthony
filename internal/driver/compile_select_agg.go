@@ -737,7 +737,7 @@ func (s *Stmt) setupWindowCodeGenerator(vm *vdbe.VDBE, tableName string, table *
 func (s *Stmt) initializeWindowStates(vm *vdbe.VDBE, expandedCols []parser.ResultColumn, table *schema.Table) {
 	// Track which OVER clauses we've already seen to avoid duplicates
 	// Multiple window functions with the same OVER clause should share a window state
-	seenOverClauses := make(map[string]int) // overKey -> windowStateIdx
+	seenOverClauses := make(map[string]int)   // overKey -> windowStateIdx
 	windowFunctionCounts := make(map[int]int) // windowStateIdx -> count of functions
 	windowStateIdx := 0
 

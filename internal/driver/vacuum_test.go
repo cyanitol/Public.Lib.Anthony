@@ -9,7 +9,7 @@ import (
 )
 
 func TestVacuum_Integration(t *testing.T) {
-	
+
 	// t.Skip("pre-existing failure")
 	dbFile := filepath.Join(t.TempDir(), "test.db")
 
@@ -75,7 +75,7 @@ func TestVacuum_Integration(t *testing.T) {
 }
 
 func TestVacuum_AfterDeletes(t *testing.T) {
-	
+
 	// t.Skip("pre-existing failure")
 	dbFile := filepath.Join(t.TempDir(), "test.db")
 
@@ -158,7 +158,7 @@ func TestVacuum_AfterDeletes(t *testing.T) {
 }
 
 func TestVacuum_Into(t *testing.T) {
-	
+
 	tempDir := t.TempDir()
 	sourceFile := filepath.Join(tempDir, "source.db")
 	// Use same temp directory for target so security check passes
@@ -243,7 +243,7 @@ func TestVacuum_Into(t *testing.T) {
 }
 
 func TestVacuum_MultipleVacuums(t *testing.T) {
-	
+
 	dbFile := filepath.Join(t.TempDir(), "test.db")
 
 	db, err := sql.Open("sqlite_internal", dbFile)
@@ -313,7 +313,7 @@ func TestVacuum_MultipleVacuums(t *testing.T) {
 }
 
 func TestVacuum_WithIndex(t *testing.T) {
-	
+
 	dbFile := filepath.Join(t.TempDir(), "test.db")
 
 	db, err := sql.Open("sqlite_internal", dbFile)

@@ -26,6 +26,8 @@ func (s *Stmt) compileCreateIndex(vm *vdbe.VDBE, stmt *parser.CreateIndexStmt, a
 	if err != nil {
 		return nil, err
 	}
+	// Preserve original SQL for persistence/loading.
+	index.SQL = s.query
 
 	// Allocate a root page for the index btree
 	if s.conn.btree != nil {

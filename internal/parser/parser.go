@@ -618,7 +618,19 @@ func (p *Parser) parseTableRef(table *TableOrSubquery) error {
 	if !p.isTableIdentifier() {
 		return p.error("expected table name")
 	}
-	table.TableName = p.consumeTableIdentifier()
+	firstIdent := p.consumeTableIdentifier()
+
+	// Check for schema.table syntax
+	if p.match(TK_DOT) {
+		if !p.isTableIdentifier() {
+			return p.error("expected table name after schema")
+		}
+		table.Schema = firstIdent
+		table.TableName = p.consumeTableIdentifier()
+	} else {
+		table.TableName = firstIdent
+	}
+
 	if !p.match(TK_INDEXED) {
 		return nil
 	}

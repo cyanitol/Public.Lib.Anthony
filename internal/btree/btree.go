@@ -63,6 +63,25 @@ func (bt *Btree) validatePage(data []byte, pageNum uint32) error {
 		return err
 	}
 
+	if pageNum == 1 {
+		// Page 1 may have a database file header; treat empty btree payload as uninitialized.
+		if isZeroBuffer(data[FileHeaderSize:]) {
+			return nil
+		}
+	} else if isZeroBuffer(data) {
+		// Freshly allocated page - caller will initialize and mark dirty
+		return nil
+	}
+
+	headerOffset := 0
+	if pageNum == 1 {
+		headerOffset = FileHeaderSize
+	}
+	if data[headerOffset+PageHeaderOffsetType] == 0 {
+		// Uninitialized page - allow caller to set up header
+		return nil
+	}
+
 	header, err := ParsePageHeader(data, pageNum)
 	if err != nil {
 		return fmt.Errorf("%w: failed to parse header: %v", ErrCorruptedPage, err)
@@ -73,6 +92,16 @@ func (bt *Btree) validatePage(data []byte, pageNum uint32) error {
 	}
 
 	return validatePageStructure(header, data)
+}
+
+// isZeroBuffer reports whether the buffer is entirely zeroed.
+func isZeroBuffer(data []byte) bool {
+	for _, b := range data {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // validatePageSize checks if the page data size matches expected size.
@@ -338,6 +367,13 @@ func (bt *Btree) CreateTable() (rootPage uint32, err error) {
 	// FragmentedBytes = 0 (1 byte)
 	pageData[headerOffset+PageHeaderOffsetFragmented] = 0
 
+	// Mark page dirty so pager persists initialization
+	if bt.Provider != nil {
+		if err := bt.Provider.MarkDirty(rootPage); err != nil {
+			return 0, err
+		}
+	}
+
 	return rootPage, nil
 }
 
@@ -366,6 +402,12 @@ func (bt *Btree) CreateWithoutRowidTable() (rootPage uint32, err error) {
 	pageData[headerOffset+PageHeaderOffsetCellStart] = 0
 	pageData[headerOffset+PageHeaderOffsetCellStart+1] = 0
 	pageData[headerOffset+PageHeaderOffsetFragmented] = 0
+
+	if bt.Provider != nil {
+		if err := bt.Provider.MarkDirty(rootPage); err != nil {
+			return 0, err
+		}
+	}
 
 	return rootPage, nil
 }

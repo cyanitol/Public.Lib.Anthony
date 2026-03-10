@@ -150,13 +150,13 @@ func TestAlterTableRenameColumn(t *testing.T) {
 
 // Prefix: alter_
 type alterAddColumnTestCase struct {
-	name            string
-	sql             string
-	wantErr         bool
-	wantTable       string
-	wantColName     string
-	wantColType     string
-	wantConstraints int
+	name               string
+	sql                string
+	wantErr            bool
+	wantTable          string
+	wantColName        string
+	wantColType        string
+	wantConstraints    int
 	wantConstraintType ConstraintType
 }
 
@@ -209,28 +209,28 @@ func TestAlterTableAddColumn(t *testing.T) {
 	t.Parallel()
 	tests := []alterAddColumnTestCase{
 		{
-			name: "add column with type",
-			sql:  "ALTER TABLE users ADD COLUMN email TEXT",
+			name:      "add column with type",
+			sql:       "ALTER TABLE users ADD COLUMN email TEXT",
 			wantTable: "users", wantColName: "email", wantColType: "TEXT",
 		},
 		{
-			name: "add column without COLUMN keyword",
-			sql:  "ALTER TABLE users ADD phone TEXT",
+			name:        "add column without COLUMN keyword",
+			sql:         "ALTER TABLE users ADD phone TEXT",
 			wantColName: "phone",
 		},
 		{
-			name: "add column with constraints",
-			sql:  "ALTER TABLE users ADD COLUMN age INTEGER NOT NULL DEFAULT 0",
+			name:        "add column with constraints",
+			sql:         "ALTER TABLE users ADD COLUMN age INTEGER NOT NULL DEFAULT 0",
 			wantColName: "age", wantColType: "INTEGER", wantConstraints: 2,
 		},
 		{
-			name: "add column with primary key",
-			sql:  "ALTER TABLE users ADD COLUMN id INTEGER PRIMARY KEY AUTOINCREMENT",
+			name:        "add column with primary key",
+			sql:         "ALTER TABLE users ADD COLUMN id INTEGER PRIMARY KEY AUTOINCREMENT",
 			wantColName: "id", wantConstraintType: ConstraintPrimaryKey,
 		},
 		{
-			name: "add column with default value",
-			sql:  "ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'",
+			name:        "add column with default value",
+			sql:         "ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'",
 			wantColName: "status", wantConstraints: 1, wantConstraintType: ConstraintDefault,
 		},
 	}

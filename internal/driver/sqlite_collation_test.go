@@ -12,24 +12,24 @@ import (
 type collationVerifyType int
 
 const (
-	collationVerifyRowCount collationVerifyType = iota // Verify exact row count
-	collationVerifyOrderedStrings                      // Verify exact string order
-	collationVerifyOrderedNullStrings                  // Verify exact order with NULLs
-	collationVerifyMultiColumnOrder                    // Verify multi-column results
-	collationVerifyContainsStrings                     // Verify result contains specific strings
+	collationVerifyRowCount           collationVerifyType = iota // Verify exact row count
+	collationVerifyOrderedStrings                                // Verify exact string order
+	collationVerifyOrderedNullStrings                            // Verify exact order with NULLs
+	collationVerifyMultiColumnOrder                              // Verify multi-column results
+	collationVerifyContainsStrings                               // Verify result contains specific strings
 )
 
 // collationTestCase defines a single collation test scenario
 type collationTestCase struct {
 	name            string
-	setup           []string             // CREATE TABLE statements and other setup
-	inserts         []string             // INSERT statements to test
-	query           string               // Query to execute
-	verifyType      collationVerifyType  // Type of verification
-	expectedRows    [][]interface{}      // Expected rows for multi-column
-	expectedStrings []string             // Expected string values in order
-	expectedNulls   []sql.NullString     // Expected NULL-capable strings
-	expectedCount   int                  // Expected row count
+	setup           []string            // CREATE TABLE statements and other setup
+	inserts         []string            // INSERT statements to test
+	query           string              // Query to execute
+	verifyType      collationVerifyType // Type of verification
+	expectedRows    [][]interface{}     // Expected rows for multi-column
+	expectedStrings []string            // Expected string values in order
+	expectedNulls   []sql.NullString    // Expected NULL-capable strings
+	expectedCount   int                 // Expected row count
 	wantErr         bool
 	errMsg          string
 	skip            string

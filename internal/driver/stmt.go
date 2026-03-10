@@ -233,7 +233,8 @@ func (s *Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driv
 // compile compiles the SQL statement into VDBE bytecode.
 // It checks the statement cache first and returns a cached VDBE if available.
 func (s *Stmt) compile(args []driver.NamedValue) (*vdbe.VDBE, error) {
-	if len(args) == 0 && s.conn.stmtCache != nil {
+	useCache := len(args) == 0 && s.conn.stmtCache != nil && !s.conn.hasAttachedDatabases()
+	if useCache {
 		if cachedVdbe := s.tryGetCachedVdbe(); cachedVdbe != nil {
 			return cachedVdbe, nil
 		}
@@ -245,7 +246,9 @@ func (s *Stmt) compile(args []driver.NamedValue) (*vdbe.VDBE, error) {
 		return nil, err
 	}
 
-	s.cacheVdbeIfAppropriate(compiledVdbe, args)
+	if useCache {
+		s.cacheVdbeIfAppropriate(compiledVdbe, args)
+	}
 	return compiledVdbe, nil
 }
 
@@ -257,16 +260,38 @@ func (s *Stmt) tryGetCachedVdbe() *vdbe.VDBE {
 	}
 	// Reset the VDBE to initial state before re-execution
 	cachedVdbe.Reset()
-	s.setVdbeContext(cachedVdbe)
+	s.setVdbeContextForDatabase(cachedVdbe, nil)
 	return cachedVdbe
 }
 
 // setVdbeContext sets the VDBE context for this connection
 func (s *Stmt) setVdbeContext(vm *vdbe.VDBE) {
+	s.setVdbeContextForDatabase(vm, nil)
+}
+
+// setVdbeContextForDatabase sets the VDBE context for a specific database.
+// When db is nil, the main database for the connection is used.
+func (s *Stmt) setVdbeContextForDatabase(vm *vdbe.VDBE, db *schema.Database) {
+	targetSchema := s.conn.schema
+	targetPager := s.conn.pager
+	targetBtree := s.conn.btree
+
+	if db != nil {
+		if db.Schema != nil {
+			targetSchema = db.Schema
+		}
+		if db.Pager != nil {
+			targetPager = db.Pager
+		}
+		if db.Btree != nil {
+			targetBtree = db.Btree
+		}
+	}
+
 	vm.Ctx = &vdbe.VDBEContext{
-		Btree:              s.conn.btree,
-		Pager:              interface{}(s.conn.pager),
-		Schema:             interface{}(s.conn.schema),
+		Btree:              targetBtree,
+		Pager:              interface{}(targetPager),
+		Schema:             interface{}(targetSchema),
 		CollationRegistry:  interface{}(s.conn.collRegistry),
 		FKManager:          interface{}(s.conn.fkManager),
 		ForeignKeysEnabled: s.conn.foreignKeysEnabled,
@@ -275,7 +300,7 @@ func (s *Stmt) setVdbeContext(vm *vdbe.VDBE) {
 
 // cacheVdbeIfAppropriate caches VDBE if conditions are met
 func (s *Stmt) cacheVdbeIfAppropriate(vm *vdbe.VDBE, args []driver.NamedValue) {
-	if len(args) == 0 && s.conn.stmtCache != nil && vm != nil && s.isCacheable() {
+	if len(args) == 0 && s.conn.stmtCache != nil && vm != nil && s.isCacheable() && !s.conn.hasAttachedDatabases() {
 		s.conn.stmtCache.Put(s.query, vm)
 	}
 }
@@ -305,14 +330,7 @@ func (s *Stmt) invalidateStmtCache() {
 // newVDBE creates a new VDBE with the connection's context.
 func (s *Stmt) newVDBE() *vdbe.VDBE {
 	vm := vdbe.New()
-	vm.Ctx = &vdbe.VDBEContext{
-		Btree:              s.conn.btree,
-		Pager:              interface{}(s.conn.pager),
-		Schema:             interface{}(s.conn.schema),
-		CollationRegistry:  interface{}(s.conn.collRegistry),
-		FKManager:          interface{}(s.conn.fkManager),
-		ForeignKeysEnabled: s.conn.foreignKeysEnabled,
-	}
+	s.setVdbeContextForDatabase(vm, nil)
 	return vm
 }
 
@@ -510,10 +528,20 @@ func schemaColIsRowidForTable(table *schema.Table, col *schema.Column) bool {
 // selectFromTableName returns the first table name from a SELECT FROM clause.
 // It returns an error when no FROM clause or no tables are present.
 func selectFromTableName(stmt *parser.SelectStmt) (string, error) {
-	if stmt.From == nil || len(stmt.From.Tables) == 0 {
-		return "", fmt.Errorf("SELECT requires FROM clause")
+	tableRef, err := selectFromTableRef(stmt)
+	if err != nil {
+		return "", err
 	}
-	return stmt.From.Tables[0].TableName, nil
+	return tableRef.TableName, nil
+}
+
+// selectFromTableRef returns the first table reference from a SELECT FROM clause.
+// It returns an error when no FROM clause or no tables are present.
+func selectFromTableRef(stmt *parser.SelectStmt) (*parser.TableOrSubquery, error) {
+	if stmt.From == nil || len(stmt.From.Tables) == 0 {
+		return nil, fmt.Errorf("SELECT requires FROM clause")
+	}
+	return &stmt.From.Tables[0], nil
 }
 
 // selectColName derives the output column name for a single SELECT column:

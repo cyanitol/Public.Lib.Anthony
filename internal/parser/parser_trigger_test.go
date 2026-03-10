@@ -53,13 +53,13 @@ func TestParseCreateTrigger(t *testing.T) {
 
 // Prefix: trig_
 type triggerTestCase struct {
-	name      string
-	sql       string
-	wantName  string
-	wantTable string
-	wantTiming TriggerTiming
-	wantEvent  TriggerEvent
-	wantTemp   bool
+	name            string
+	sql             string
+	wantName        string
+	wantTable       string
+	wantTiming      TriggerTiming
+	wantEvent       TriggerEvent
+	wantTemp        bool
 	wantIfNotExists bool
 	wantForEachRow  bool
 	wantHasWhen     bool
@@ -132,58 +132,58 @@ func testParseCreateTriggerSuccess(t *testing.T) {
 	t.Helper()
 	tests := []triggerTestCase{
 		{
-			name: "simple trigger - before insert",
-			sql:  "CREATE TRIGGER my_trigger BEFORE INSERT ON users BEGIN SELECT 1; END",
+			name:     "simple trigger - before insert",
+			sql:      "CREATE TRIGGER my_trigger BEFORE INSERT ON users BEGIN SELECT 1; END",
 			wantName: "my_trigger", wantTable: "users", wantTiming: TriggerBefore, wantEvent: TriggerInsert, wantBodyLen: 1,
 		},
 		{
-			name: "trigger - after update",
-			sql:  "CREATE TRIGGER audit_trigger AFTER UPDATE ON employees BEGIN INSERT INTO audit_log VALUES (NEW.id, NEW.name); END",
+			name:       "trigger - after update",
+			sql:        "CREATE TRIGGER audit_trigger AFTER UPDATE ON employees BEGIN INSERT INTO audit_log VALUES (NEW.id, NEW.name); END",
 			wantTiming: TriggerAfter, wantEvent: TriggerUpdate,
 		},
 		{
-			name: "trigger - after delete",
-			sql:  "CREATE TRIGGER delete_trigger AFTER DELETE ON products BEGIN DELETE FROM inventory WHERE product_id = OLD.id; END",
+			name:      "trigger - after delete",
+			sql:       "CREATE TRIGGER delete_trigger AFTER DELETE ON products BEGIN DELETE FROM inventory WHERE product_id = OLD.id; END",
 			wantEvent: TriggerDelete,
 		},
 		{
-			name: "trigger - instead of",
-			sql:  "CREATE TRIGGER view_trigger INSTEAD OF INSERT ON my_view BEGIN SELECT 1; END",
+			name:       "trigger - instead of",
+			sql:        "CREATE TRIGGER view_trigger INSTEAD OF INSERT ON my_view BEGIN SELECT 1; END",
 			wantTiming: TriggerInsteadOf,
 		},
 		{
-			name: "trigger - with if not exists",
-			sql:  "CREATE TRIGGER IF NOT EXISTS my_trigger BEFORE INSERT ON users BEGIN SELECT 1; END",
+			name:            "trigger - with if not exists",
+			sql:             "CREATE TRIGGER IF NOT EXISTS my_trigger BEFORE INSERT ON users BEGIN SELECT 1; END",
 			wantIfNotExists: true,
 		},
 		{
-			name: "temp trigger",
-			sql:  "CREATE TEMP TRIGGER temp_trigger BEFORE INSERT ON users BEGIN SELECT 1; END",
+			name:     "temp trigger",
+			sql:      "CREATE TEMP TRIGGER temp_trigger BEFORE INSERT ON users BEGIN SELECT 1; END",
 			wantTemp: true,
 		},
 		{
-			name: "trigger - for each row",
-			sql:  "CREATE TRIGGER my_trigger BEFORE INSERT ON users FOR EACH ROW BEGIN SELECT 1; END",
+			name:           "trigger - for each row",
+			sql:            "CREATE TRIGGER my_trigger BEFORE INSERT ON users FOR EACH ROW BEGIN SELECT 1; END",
 			wantForEachRow: true,
 		},
 		{
-			name: "trigger - with when clause",
-			sql:  "CREATE TRIGGER my_trigger BEFORE INSERT ON users WHEN NEW.age > 18 BEGIN SELECT 1; END",
+			name:        "trigger - with when clause",
+			sql:         "CREATE TRIGGER my_trigger BEFORE INSERT ON users WHEN NEW.age > 18 BEGIN SELECT 1; END",
 			wantHasWhen: true,
 		},
 		{
-			name: "trigger - update of specific columns",
-			sql:  "CREATE TRIGGER my_trigger BEFORE UPDATE OF name, email ON users BEGIN SELECT 1; END",
+			name:         "trigger - update of specific columns",
+			sql:          "CREATE TRIGGER my_trigger BEFORE UPDATE OF name, email ON users BEGIN SELECT 1; END",
 			wantUpdateOf: []string{"name", "email"},
 		},
 		{
-			name: "trigger - multiple statements in body",
-			sql:  "CREATE TRIGGER my_trigger BEFORE INSERT ON users BEGIN UPDATE counter SET count = count + 1; INSERT INTO log VALUES (1); SELECT 1; END",
+			name:        "trigger - multiple statements in body",
+			sql:         "CREATE TRIGGER my_trigger BEFORE INSERT ON users BEGIN UPDATE counter SET count = count + 1; INSERT INTO log VALUES (1); SELECT 1; END",
 			wantBodyLen: 3,
 		},
 		{
-			name: "trigger - complete example",
-			sql:  "CREATE TEMP TRIGGER IF NOT EXISTS audit_trigger AFTER UPDATE OF salary ON employees FOR EACH ROW WHEN NEW.salary > OLD.salary BEGIN INSERT INTO audit_log (emp_id, old_salary, new_salary, timestamp) VALUES (NEW.id, OLD.salary, NEW.salary, datetime('now')); END",
+			name:     "trigger - complete example",
+			sql:      "CREATE TEMP TRIGGER IF NOT EXISTS audit_trigger AFTER UPDATE OF salary ON employees FOR EACH ROW WHEN NEW.salary > OLD.salary BEGIN INSERT INTO audit_log (emp_id, old_salary, new_salary, timestamp) VALUES (NEW.id, OLD.salary, NEW.salary, datetime('now')); END",
 			wantTemp: true, wantIfNotExists: true, wantTiming: TriggerAfter, wantEvent: TriggerUpdate,
 			wantUpdateOf: []string{"salary"}, wantForEachRow: true, wantHasWhen: true,
 		},
@@ -220,8 +220,8 @@ func TestParseDropTrigger(t *testing.T) {
 		check   func(*testing.T, *DropTriggerStmt)
 	}{
 		{
-			name:    "simple drop trigger",
-			sql:     "DROP TRIGGER my_trigger",
+			name: "simple drop trigger",
+			sql:  "DROP TRIGGER my_trigger",
 			check: func(t *testing.T, stmt *DropTriggerStmt) {
 				if stmt.Name != "my_trigger" {
 					t.Errorf("expected trigger name 'my_trigger', got %s", stmt.Name)
@@ -232,8 +232,8 @@ func TestParseDropTrigger(t *testing.T) {
 			},
 		},
 		{
-			name:    "drop trigger if exists",
-			sql:     "DROP TRIGGER IF EXISTS my_trigger",
+			name: "drop trigger if exists",
+			sql:  "DROP TRIGGER IF EXISTS my_trigger",
 			check: func(t *testing.T, stmt *DropTriggerStmt) {
 				if stmt.Name != "my_trigger" {
 					t.Errorf("expected trigger name 'my_trigger', got %s", stmt.Name)

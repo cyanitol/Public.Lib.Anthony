@@ -55,7 +55,10 @@ func (dr *DatabaseRegistry) AttachDatabase(schemaName, filePath string, p pager.
 	// Load schema from the database file
 	if bt != nil {
 		if err := db.Schema.LoadFromMaster(bt); err != nil {
-			// Ignore errors for empty databases
+			// Allow empty databases (page count <= 1) but surface real errors
+			if p.PageCount() > 1 {
+				return fmt.Errorf("failed to load schema for database %s: %w", schemaName, err)
+			}
 		}
 	}
 
@@ -112,6 +115,42 @@ func (dr *DatabaseRegistry) GetTable(schemaName, tableName string) (*Table, stri
 	}
 
 	return dr.searchUnqualifiedTable(tableName)
+}
+
+// ResolveTable returns the table and owning database for a given schema-qualified
+// or unqualified table reference. The returned schemaName preserves the database
+// name as registered (case-sensitive), while lookups are case-insensitive.
+func (dr *DatabaseRegistry) ResolveTable(schemaName, tableName string) (*Table, *Database, string, bool) {
+	dr.mu.RLock()
+	defer dr.mu.RUnlock()
+
+	// Qualified lookup: only search the specified database
+	if schemaName != "" {
+		lowerSchema := strings.ToLower(schemaName)
+		db, ok := dr.databases[lowerSchema]
+		if !ok {
+			return nil, nil, "", false
+		}
+		table, ok := db.Schema.GetTable(tableName)
+		if !ok {
+			return nil, nil, "", false
+		}
+		return table, db, db.Name, true
+	}
+
+	// Unqualified lookup: search in database priority order
+	searchOrder := dr.buildSearchOrder()
+	for _, name := range searchOrder {
+		db, ok := dr.databases[name]
+		if !ok {
+			continue
+		}
+		if table, ok := db.Schema.GetTable(tableName); ok {
+			return table, db, db.Name, true
+		}
+	}
+
+	return nil, nil, "", false
 }
 
 // getQualifiedTable retrieves a table using a qualified schema.table name

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
@@ -80,14 +81,17 @@ func (c *Conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, e
 
 	// Support multiple statements by creating a MultiStmt
 	if len(stmts) > 1 {
+		parts := splitStatements(query)
 		multiStmt := &MultiStmt{
 			conn:  c,
 			query: query,
 			stmts: make([]*Stmt, len(stmts)),
 		}
 		for i, ast := range stmts {
-			// Use unique query string per sub-statement to avoid cache collisions
 			subQuery := fmt.Sprintf("%s#%d", query, i)
+			if len(parts) == len(stmts) && i < len(parts) {
+				subQuery = parts[i]
+			}
 			multiStmt.stmts[i] = &Stmt{
 				conn:  c,
 				query: subQuery,
@@ -316,6 +320,30 @@ func (c *Conn) removeStmt(stmt *Stmt) {
 	}
 }
 
+// hasAttachedDatabases reports whether any auxiliary databases (beyond "main")
+// are currently registered on this connection.
+func (c *Conn) hasAttachedDatabases() bool {
+	if c.dbRegistry == nil {
+		return false
+	}
+	dbs := c.dbRegistry.ListDatabases()
+	return len(dbs) > 1
+}
+
+// splitStatements splits a raw SQL string into individual statements using ';' delimiters.
+// It trims whitespace and drops empty segments. This is a simplified splitter suitable
+// for test inputs that do not contain semicolons inside literals.
+func splitStatements(query string) []string {
+	raw := strings.Split(query, ";")
+	parts := make([]string, 0, len(raw))
+	for _, part := range raw {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return parts
+}
+
 // openDatabase initializes the database connection by:
 // 1. Loading the schema from sqlite_master (page 1) if first connection
 // 2. Registering built-in functions
@@ -329,6 +357,13 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 			return fmt.Errorf("failed to initialize sqlite_master: %w", err)
 		}
 
+		// Ensure sqlite_master storage exists on disk for brand new databases
+		if c.btree != nil && c.pager != nil && c.pager.PageCount() <= 1 {
+			if _, err := c.btree.CreateTable(); err != nil {
+				return fmt.Errorf("failed to create sqlite_master storage: %w", err)
+			}
+		}
+
 		if err := c.schema.LoadFromMaster(c.btree); err != nil {
 			// Schema loading may fail for new empty databases (no sqlite_master table yet),
 			// which is expected and safe to ignore. The schema will be populated as tables
@@ -340,6 +375,13 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 	// Register the main database in the registry
 	if err := c.dbRegistry.AttachDatabase("main", c.filename, c.pager, c.btree); err != nil {
 		return fmt.Errorf("failed to register main database: %w", err)
+	}
+
+	// Keep registry schema in sync with the connection's main schema
+	if mainDB, ok := c.dbRegistry.GetDatabase("main"); ok {
+		mainDB.Schema = c.schema
+		mainDB.Pager = c.pager
+		mainDB.Btree = c.btree
 	}
 
 	// Register built-in SQL functions

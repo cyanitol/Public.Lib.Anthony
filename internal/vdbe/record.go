@@ -23,6 +23,12 @@ func DecodeRecord(data []byte) ([]interface{}, error) {
 	return decodeRecord(data)
 }
 
+// EncodeSimpleRecord encodes a slice of values using SQLite record format.
+// It mirrors the encoder used by the VDBE when inserting rows.
+func EncodeSimpleRecord(values []interface{}) []byte {
+	return encodeSimpleRecord(values)
+}
+
 // decodeRecord decodes a SQLite record back to a slice of values
 func decodeRecord(data []byte) ([]interface{}, error) {
 	if err := decodeValidateData(data); err != nil {
