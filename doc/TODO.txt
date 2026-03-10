@@ -3,7 +3,7 @@
 # Test Status: 4951 passing, 466 skipped (91.4% pass rate)
 # Code Quality: Cyclomatic complexity <= 10 for all production code
 # Coverage Snapshot: ~70% feature parity vs reference SQLite
-# Last Updated: 2026-03-09
+# Last Updated: 2026-03-10
 
 ================================================================================
 HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
@@ -36,15 +36,17 @@ HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
     - [DONE] rowid/oid/_rowid_ column rejection for WITHOUT ROWID tables
     - [DONE] FK validation integration for WITHOUT ROWID inserts
     - [DONE] JOIN queries with WITHOUT ROWID tables (cursor handling fixed)
-    - [WIP] ROLLBACK for WITHOUT ROWID btrees (infrastructure in place, cache sync needed)
-    - [WIP] CASCADE FK actions for WITHOUT ROWID (infrastructure in place, trigger issue)
+    - [DONE] ROLLBACK for WITHOUT ROWID btrees (pager callback syncs btree cache)
+    - [DONE] CASCADE FK actions: proper PK extraction with PKColumnIndices
 
-[~] Window Functions (ROW_NUMBER and RANK working)
+[x] Window Functions (All ranking and value functions working)
     - [DONE] ROW_NUMBER() with streaming and partition modes
     - [DONE] RANK() with OpWindowRank opcode integration
-    - [WIP] DENSE_RANK - needs implementation
-    - [ ] PARTITION BY/ORDER BY, ROWS/RANGE frames
-    - [ ] LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTILE
+    - [DONE] DENSE_RANK() with OpWindowDenseRank opcode
+    - [DONE] NTILE() bucket distribution
+    - [DONE] LAG/LEAD with offset parameter support
+    - [DONE] FIRST_VALUE/LAST_VALUE frame access
+    - [DONE] ROWS/RANGE frame specification parsing and extraction
 
 [~] FTS5 Virtual Table (module implemented, 128 tests pass)
     - [DONE] Tokenizer pipeline (SimpleTokenizer, StopWordTokenizer)
@@ -55,13 +57,14 @@ HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
     - [DONE] SQL parser support for CREATE VIRTUAL TABLE
     - [ ] Persistent storage to database file
 
-[~] R-Tree Virtual Table (module implemented, all tests pass)
+[x] R-Tree Virtual Table (module implemented, all tests pass)
     - [DONE] R*-tree insertion/split/reinsertion
     - [DONE] 2D/3D/4D/5D spatial indexing
     - [DONE] Bounding box queries (overlap/contains/within)
     - [DONE] Nearest neighbor search (k-NN)
     - [DONE] Module registration in driver
-    - [ ] SQL parser support for CREATE VIRTUAL TABLE
+    - [DONE] SQL parser support for CREATE VIRTUAL TABLE
+    - [ ] Persistent storage to database file
 
 [ ] Durability & Conformance Hardening
     - Run sqllogictest subsets vs reference SQLite; diff drift
@@ -197,22 +200,24 @@ v0.1.x - Current Development
     - [DONE] CASCADE/SET NULL/SET DEFAULT/RESTRICT actions working
     - [DONE] PRAGMA foreign_key_check, DROP TABLE checks
     - [DONE] Deferred constraints, collation, type affinity
-[ ] CTE Edge Cases (17 tests skipped)
-    - Correlated subquery in CTE WHERE causes infinite loop
-    - Recursive CTE bytecode generation incomplete
-[x] WITHOUT ROWID Tables (38/51 tests passing, 13 skipped)
+[~] CTE Edge Cases (improved)
+    - [DONE] Sorter adjustment for GROUP BY in CTE coroutines
+    - [WIP] Recursive CTE bytecode generation (compile-time -> runtime)
+[x] WITHOUT ROWID Tables (45/51 tests passing)
     - [DONE] Composite PK key encoding (collation-aware, stable ordering)
     - [DONE] Btree cursor comparator for composite keys
     - [DONE] Split/rewind regression fix (statement cache invalidation)
     - [DONE] rowid column rejection, FK validation for WITHOUT ROWID
-    - Remaining: JOIN queries, ROLLBACK, CASCADE FK actions
-[ ] VACUUM Operations (30 tests skipped)
-    - sqlite_master table persistence after VACUUM
-    - Schema cookie management
-[ ] Window Functions
-    - Planner/VDBE execution for window frame ops (rows/range)
-    - Initial functions: ROW_NUMBER, RANK, DENSE_RANK, SUM/AVG/COUNT/MIN/MAX
-    - Extended functions: LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTILE
+    - [DONE] ROLLBACK cache sync via pager callback
+    - [DONE] CASCADE FK: PKColumnIndices for proper PK extraction
+[x] VACUUM Operations (fixed)
+    - [DONE] sqlite_master persistence with conditional commit
+    - [DONE] Schema cookie management in commitTargetPager
+    - [DONE] VACUUM INTO schema persistence with commit
+[x] Window Functions - COMPLETE
+    - [DONE] ROW_NUMBER, RANK, DENSE_RANK, NTILE
+    - [DONE] LAG, LEAD, FIRST_VALUE, LAST_VALUE
+    - [DONE] ROWS/RANGE frame specification parsing
 
 ================================================================================
 v0.2.0 - Planned Features

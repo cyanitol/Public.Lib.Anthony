@@ -121,6 +121,11 @@ func (d *Driver) newDBState(filename string, readOnly bool) (*dbState, error) {
 	}
 	bt := btree.NewBtree(uint32(pgr.PageSize()))
 	bt.Provider = newPagerProvider(pgr)
+
+	// Wire up rollback callback so btree cache is cleared when pager rolls back.
+	// This is critical for WITHOUT ROWID tables that maintain separate page caches.
+	pgr.RollbackCallback = bt.ClearCache
+
 	return &dbState{
 		pager:    pgr,
 		btree:    bt,
@@ -140,6 +145,11 @@ func (d *Driver) newMemoryDBState() (*dbState, error) {
 	}
 	bt := btree.NewBtree(uint32(pgr.PageSize()))
 	bt.Provider = newMemoryPagerProvider(pgr)
+
+	// Wire up rollback callback so btree cache is cleared when pager rolls back.
+	// This is critical for WITHOUT ROWID tables that maintain separate page caches.
+	pgr.RollbackCallback = bt.ClearCache
+
 	return &dbState{
 		pager:    pgr,
 		btree:    bt,

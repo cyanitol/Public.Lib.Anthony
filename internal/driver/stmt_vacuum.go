@@ -158,6 +158,13 @@ func (s *Stmt) executeVacuum(opts *pager.VacuumOptions) error {
 		if err := schemaBackup.SaveToMaster(s.conn.btree); err != nil {
 			return fmt.Errorf("failed to persist schema after VACUUM: %w", err)
 		}
+		// Commit the schema changes to ensure they're persisted to disk
+		// Only commit if there's an active write transaction (SaveToMaster may start one)
+		if s.conn.pager.InWriteTransaction() {
+			if err := s.conn.pager.Commit(); err != nil {
+				return fmt.Errorf("failed to commit schema after VACUUM: %w", err)
+			}
+		}
 		// Reload schema from the persisted data to ensure consistency
 		s.conn.schema = schemaBackup
 	}
@@ -204,6 +211,14 @@ func (s *Stmt) setupVacuumIntoSchema(targetFile string, sourceSchema *schema.Sch
 	// Persist schema to sqlite_master in target database
 	if err := targetSchema.SaveToMaster(dbState.btree); err != nil {
 		return fmt.Errorf("failed to save schema to target sqlite_master: %w", err)
+	}
+
+	// Commit the schema changes to disk if there's an active write transaction
+	// SaveToMaster may have started a transaction if it wrote pages
+	if dbState.pager.InWriteTransaction() {
+		if err := dbState.pager.Commit(); err != nil {
+			return fmt.Errorf("failed to commit schema to target database: %w", err)
+		}
 	}
 
 	return nil

@@ -291,10 +291,14 @@ func (p *Pager) persistSchemaToTarget(targetPager *Pager, opts *VacuumOptions) e
 	return nil
 }
 
-// commitTargetPager commits the target pager if needed.
+// commitTargetPager commits the target pager.
+// VACUUM always modifies the target database, so commit unconditionally
+// to ensure schema cookie and all page changes are persisted.
 func (p *Pager) commitTargetPager(targetPager *Pager) error {
-	if targetPager.state == PagerStateWriterCachemod ||
-		targetPager.state == PagerStateWriterDbmod {
+	// Force commit - VACUUM always requires committing the target
+	// The state check was too restrictive and could skip committing
+	// schema cookie updates and other changes
+	if targetPager.state >= PagerStateWriterLocked {
 		if err := targetPager.Commit(); err != nil {
 			return fmt.Errorf("failed to commit target: %w", err)
 		}

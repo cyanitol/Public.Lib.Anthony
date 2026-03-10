@@ -59,6 +59,11 @@ type MemoryPager struct {
 
 	// Mutex for thread-safe operations
 	mu sync.RWMutex
+
+	// RollbackCallback is called during rollback to synchronize external caches.
+	// This is used to clear btree caches when pager rolls back, ensuring
+	// WITHOUT ROWID tables and other btree users have consistent state.
+	RollbackCallback func()
 }
 
 // OpenMemory creates a new in-memory pager.
@@ -315,6 +320,13 @@ func (mp *MemoryPager) rollbackLocked() error {
 
 	// Clear the cache
 	mp.cache.Clear()
+
+	// Notify external caches (e.g., btree) to clear their caches as well.
+	// This is critical for WITHOUT ROWID tables which maintain separate
+	// page caches that must be synchronized with pager rollback.
+	if mp.RollbackCallback != nil {
+		mp.RollbackCallback()
+	}
 
 	// Clear journal
 	mp.journalPages = make(map[Pgno][]byte)

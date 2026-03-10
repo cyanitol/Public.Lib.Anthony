@@ -311,9 +311,10 @@ func (r *VDBERowReader) readRowValuesFromCursor(cursor *Cursor, table *tableInfo
 
 // tableInfo represents table metadata needed for FK validation
 type tableInfo struct {
-	RootPage     uint32
-	Columns      []columnInfo
-	WithoutRowID bool // true for WITHOUT ROWID tables
+	RootPage        uint32
+	Columns         []columnInfo
+	WithoutRowID    bool  // true for WITHOUT ROWID tables
+	PKColumnIndices []int // indices of primary key columns in Columns
 }
 
 // columnInfo represents column metadata
@@ -373,20 +374,38 @@ func (r *VDBERowReader) extractTableInfo(tableIface interface{}) (*tableInfo, er
 	}
 
 	info := &tableInfo{
-		RootPage:     rootPage,
-		Columns:      make([]columnInfo, 0),
-		WithoutRowID: withoutRowID,
+		RootPage:        rootPage,
+		Columns:         make([]columnInfo, 0),
+		WithoutRowID:    withoutRowID,
+		PKColumnIndices: make([]int, 0),
 	}
 
-	// Extract column info
+	// Extract column info and track PK columns
 	payloadIdx := 0
-	for _, colIface := range table.GetColumns() {
+	for colIdx, colIface := range table.GetColumns() {
 		colInfo, payloadIncrement := r.buildColumnInfo(colIface, withoutRowID, payloadIdx)
 		info.Columns = append(info.Columns, colInfo)
+
+		// Track primary key column indices
+		if r.isPKColumn(colIface) {
+			info.PKColumnIndices = append(info.PKColumnIndices, colIdx)
+		}
+
 		payloadIdx += payloadIncrement
 	}
 
 	return info, nil
+}
+
+// isPKColumn checks if a column is part of the primary key
+func (r *VDBERowReader) isPKColumn(colIface interface{}) bool {
+	type columnWithPK interface {
+		IsPrimaryKeyColumn() bool
+	}
+	if col, ok := colIface.(columnWithPK); ok {
+		return col.IsPrimaryKeyColumn()
+	}
+	return false
 }
 
 // extractTableMetadata extracts RootPage and WithoutRowID from table using reflection
@@ -1500,15 +1519,21 @@ func (m *VDBERowModifier) replaceRowWithoutRowID(btCursor *btree.BtCursor, table
 }
 
 // extractPrimaryKeyValues extracts primary key column values from a full row.
-// This requires looking up which columns are part of the primary key.
+// This uses PKColumnIndices from tableInfo to identify which columns are PK columns.
 func (m *VDBERowModifier) extractPrimaryKeyValues(tableInfo *tableInfo, rowValues []interface{}) []interface{} {
-	// For WITHOUT ROWID tables, we need to identify which columns are PK columns
-	// This is a simplified implementation - in reality we'd need schema info
-	// For now, assume the first N columns matching PK count are the PK
-	// This works for simple cases but may need enhancement
+	// Use PKColumnIndices to extract only primary key values
+	if len(tableInfo.PKColumnIndices) > 0 {
+		pkValues := make([]interface{}, 0, len(tableInfo.PKColumnIndices))
+		for _, idx := range tableInfo.PKColumnIndices {
+			if idx < len(rowValues) {
+				pkValues = append(pkValues, rowValues[idx])
+			}
+		}
+		return pkValues
+	}
 
-	// FIXME: This is a simplification. We should properly identify PK columns from schema.
-	// For now, return all values as we don't have easy access to PK column indices here.
+	// Fallback: if no PK columns identified, return all values
+	// This handles edge cases where schema info is incomplete
 	return rowValues
 }
 

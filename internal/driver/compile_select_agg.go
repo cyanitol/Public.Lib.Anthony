@@ -756,8 +756,8 @@ func (s *Stmt) initializeWindowStates(vm *vdbe.VDBE, expandedCols []parser.Resul
 			// Increment count for existing window state
 			windowFunctionCounts[existingIdx]++
 		} else {
-			// Create a new window state
-			frame := vdbe.DefaultWindowFrame()
+			// Create a new window state with proper frame specification
+			frame := s.extractWindowFrame(fnExpr.Over.Frame)
 			windowState := vdbe.NewWindowState([]int{}, orderByCols, orderByDesc, frame)
 			vm.WindowStates[windowStateIdx] = windowState
 			seenOverClauses[overKey] = windowStateIdx

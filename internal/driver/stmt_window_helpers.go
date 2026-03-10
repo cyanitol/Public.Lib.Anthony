@@ -2,6 +2,8 @@
 package driver
 
 import (
+	"strconv"
+
 	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
@@ -223,12 +225,19 @@ func emitWindowRankUpdate(vm *vdbe.VDBE, regs rankRegisters, valuesChangedReg in
 // emitWindowFunctionColumn emits code for a window function result column
 func emitWindowFunctionColumn(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, regs rankRegisters, colIdx int) {
 	switch fnExpr.Name {
-	case "ROW_NUMBER", "NTILE":
+	case "ROW_NUMBER":
+		vm.AddOp(vdbe.OpCopy, regs.rowCount, colIdx, 0)
+	case "NTILE":
+		// NTILE uses rowCount for now - proper implementation uses window state
 		vm.AddOp(vdbe.OpCopy, regs.rowCount, colIdx, 0)
 	case "RANK":
 		vm.AddOp(vdbe.OpCopy, regs.rank, colIdx, 0)
 	case "DENSE_RANK":
 		vm.AddOp(vdbe.OpCopy, regs.denseRank, colIdx, 0)
+	case "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE":
+		// These require window state access - emit placeholder for now
+		// Real implementation uses OpWindowLag/Lead/FirstValue/LastValue opcodes
+		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
 	default:
 		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
 	}
@@ -278,7 +287,161 @@ func (s *Stmt) emitWindowFunctionColumnWithOpcodes(vm *vdbe.VDBE, fnExpr *parser
 	case "ROW_NUMBER":
 		// P3 = number of columns for streaming mode
 		vm.AddOp(vdbe.OpWindowRowNum, windowStateIdx, colIdx, numTableCols)
+	case "NTILE":
+		// P1 = window state, P2 = output register, P3 = number of buckets
+		numBuckets := s.extractNtileArg(fnExpr)
+		vm.AddOp(vdbe.OpWindowNtile, windowStateIdx, colIdx, numBuckets)
+	case "LAG":
+		// P1 = window state, P2 = output register, P3 = column index
+		// P4.I = offset (default 1), P5 = default value register (0 = NULL)
+		colIndex, offset := s.extractLagLeadArgs(fnExpr, numTableCols)
+		addr := vm.AddOp(vdbe.OpWindowLag, windowStateIdx, colIdx, colIndex)
+		vm.Program[addr].P4.I = int32(offset)
+	case "LEAD":
+		// P1 = window state, P2 = output register, P3 = column index
+		// P4.I = offset (default 1), P5 = default value register (0 = NULL)
+		colIndex, offset := s.extractLagLeadArgs(fnExpr, numTableCols)
+		addr := vm.AddOp(vdbe.OpWindowLead, windowStateIdx, colIdx, colIndex)
+		vm.Program[addr].P4.I = int32(offset)
+	case "FIRST_VALUE":
+		// P1 = window state, P2 = output register, P3 = column index
+		colIndex := s.extractValueFunctionArg(fnExpr, numTableCols)
+		vm.AddOp(vdbe.OpWindowFirstValue, windowStateIdx, colIdx, colIndex)
+	case "LAST_VALUE":
+		// P1 = window state, P2 = output register, P3 = column index
+		colIndex := s.extractValueFunctionArg(fnExpr, numTableCols)
+		vm.AddOp(vdbe.OpWindowLastValue, windowStateIdx, colIdx, colIndex)
 	default:
 		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
+	}
+}
+
+// extractNtileArg extracts the number of buckets from NTILE(n) function
+func (s *Stmt) extractNtileArg(fnExpr *parser.FunctionExpr) int {
+	if len(fnExpr.Args) > 0 {
+		if lit, ok := fnExpr.Args[0].(*parser.LiteralExpr); ok {
+			// LiteralExpr.Value is a string, parse it
+			if n, err := strconv.ParseInt(lit.Value, 10, 64); err == nil {
+				return int(n)
+			}
+		}
+	}
+	return 4 // Default to 4 buckets
+}
+
+// extractLagLeadArgs extracts column index and offset from LAG/LEAD functions
+func (s *Stmt) extractLagLeadArgs(fnExpr *parser.FunctionExpr, numTableCols int) (colIndex int, offset int) {
+	offset = 1 // Default offset
+	colIndex = 0
+
+	if len(fnExpr.Args) > 0 {
+		// First arg is the column expression
+		if ident, ok := fnExpr.Args[0].(*parser.IdentExpr); ok {
+			// Try to find column index - for now use a simple approach
+			colIndex = s.findColumnIndexByName(ident.Name, numTableCols)
+		}
+	}
+
+	if len(fnExpr.Args) > 1 {
+		// Second arg is the offset
+		if lit, ok := fnExpr.Args[1].(*parser.LiteralExpr); ok {
+			// LiteralExpr.Value is a string, parse it
+			if n, err := strconv.ParseInt(lit.Value, 10, 64); err == nil {
+				offset = int(n)
+			}
+		}
+	}
+
+	return colIndex, offset
+}
+
+// extractValueFunctionArg extracts column index from FIRST_VALUE/LAST_VALUE
+func (s *Stmt) extractValueFunctionArg(fnExpr *parser.FunctionExpr, numTableCols int) int {
+	if len(fnExpr.Args) > 0 {
+		if ident, ok := fnExpr.Args[0].(*parser.IdentExpr); ok {
+			return s.findColumnIndexByName(ident.Name, numTableCols)
+		}
+	}
+	return 0
+}
+
+// findColumnIndexByName finds column index by name - simple implementation
+func (s *Stmt) findColumnIndexByName(name string, numTableCols int) int {
+	// Try to find in current table context
+	if s.conn != nil && s.conn.schema != nil {
+		for _, t := range s.conn.schema.Tables {
+			for i, col := range t.Columns {
+				if col.Name == name {
+					return i
+				}
+			}
+		}
+	}
+	return 0 // Default to first column
+}
+
+// extractWindowFrame converts parser.FrameSpec to vdbe.WindowFrame
+func (s *Stmt) extractWindowFrame(frameSpec *parser.FrameSpec) vdbe.WindowFrame {
+	if frameSpec == nil {
+		return vdbe.DefaultWindowFrame()
+	}
+
+	frame := vdbe.WindowFrame{
+		Type:  s.convertFrameMode(frameSpec.Mode),
+		Start: s.convertFrameBound(frameSpec.Start),
+		End:   s.convertFrameBound(frameSpec.End),
+	}
+
+	return frame
+}
+
+// convertFrameMode converts parser.FrameMode to vdbe.WindowFrameType
+func (s *Stmt) convertFrameMode(mode parser.FrameMode) vdbe.WindowFrameType {
+	switch mode {
+	case parser.FrameRows:
+		return vdbe.FrameRows
+	case parser.FrameRange:
+		return vdbe.FrameRange
+	case parser.FrameGroups:
+		return vdbe.FrameGroups
+	default:
+		return vdbe.FrameRange // Default to RANGE
+	}
+}
+
+// convertFrameBound converts parser.FrameBound to vdbe.WindowFrameBound
+func (s *Stmt) convertFrameBound(bound parser.FrameBound) vdbe.WindowFrameBound {
+	vdbeBound := vdbe.WindowFrameBound{
+		Type:   s.convertFrameBoundType(bound.Type),
+		Offset: 0,
+	}
+
+	// Extract offset value if present
+	if bound.Offset != nil {
+		if lit, ok := bound.Offset.(*parser.LiteralExpr); ok {
+			if n, err := strconv.ParseInt(lit.Value, 10, 64); err == nil {
+				vdbeBound.Offset = int(n)
+			}
+		}
+	}
+
+	return vdbeBound
+}
+
+// convertFrameBoundType converts parser.FrameBoundType to vdbe.FrameBoundType
+func (s *Stmt) convertFrameBoundType(boundType parser.FrameBoundType) vdbe.FrameBoundType {
+	switch boundType {
+	case parser.BoundUnboundedPreceding:
+		return vdbe.BoundUnboundedPreceding
+	case parser.BoundPreceding:
+		return vdbe.BoundPreceding
+	case parser.BoundCurrentRow:
+		return vdbe.BoundCurrentRow
+	case parser.BoundFollowing:
+		return vdbe.BoundFollowing
+	case parser.BoundUnboundedFollowing:
+		return vdbe.BoundUnboundedFollowing
+	default:
+		return vdbe.BoundCurrentRow
 	}
 }

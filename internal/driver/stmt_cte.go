@@ -147,11 +147,12 @@ func (s *Stmt) compileCTESelect(vm *vdbe.VDBE, cteSelect *parser.SelectStmt, arg
 type cteInlineOffsets struct {
 	baseCursor   int
 	baseRegister int
+	baseSorter   int // Base index for sorter allocation (for GROUP BY)
 	recordReg    int
 	startAddr    int
 }
 
-// allocateCTEResources allocates cursors and registers for CTE inlining.
+// allocateCTEResources allocates cursors, registers, and sorters for CTE inlining.
 func (s *Stmt) allocateCTEResources(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE) cteInlineOffsets {
 	offsets := cteInlineOffsets{}
 
@@ -167,6 +168,16 @@ func (s *Stmt) allocateCTEResources(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE) cteIn
 	cteRegisterCount := len(compiledCTE.Mem)
 	if cteRegisterCount > 0 {
 		vm.AllocMemory(offsets.baseRegister + cteRegisterCount)
+	}
+
+	// Allocate sorters - needed for CTEs with GROUP BY
+	offsets.baseSorter = len(vm.Sorters)
+	cteSorterCount := len(compiledCTE.Sorters)
+	if cteSorterCount > 0 {
+		// Pre-allocate sorter slots in the main VM
+		for i := 0; i < cteSorterCount; i++ {
+			vm.Sorters = append(vm.Sorters, nil)
+		}
 	}
 
 	// Allocate record register
@@ -202,7 +213,7 @@ func (s *Stmt) inlineCTEBytecode(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE, cursorNu
 	}
 }
 
-// adjustInstructionParameters adjusts cursor and register numbers in an instruction.
+// adjustInstructionParameters adjusts cursor, register, and sorter numbers in an instruction.
 func (s *Stmt) adjustInstructionParameters(instr *vdbe.Instruction, offsets cteInlineOffsets) vdbe.Instruction {
 	newInstr := *instr
 	adjustedP1, adjustedP2, adjustedP3 := instr.P1, instr.P2, instr.P3
@@ -218,11 +229,28 @@ func (s *Stmt) adjustInstructionParameters(instr *vdbe.Instruction, offsets cteI
 		adjustedP1 = instr.P1 + offsets.baseCursor
 	}
 
+	// Adjust sorter numbers for sorter operations (GROUP BY/ORDER BY)
+	// Sorter index is in P1 for these opcodes
+	if needsSorterAdjustment(instr.Opcode) {
+		adjustedP1 = instr.P1 + offsets.baseSorter
+	}
+
 	newInstr.P1 = adjustedP1
 	newInstr.P2 = adjustedP2
 	newInstr.P3 = adjustedP3
 
 	return newInstr
+}
+
+// needsSorterAdjustment checks if an opcode requires sorter number adjustment.
+func needsSorterAdjustment(op vdbe.Opcode) bool {
+	switch op {
+	case vdbe.OpSorterOpen, vdbe.OpSorterInsert, vdbe.OpSorterSort,
+		vdbe.OpSorterNext, vdbe.OpSorterData, vdbe.OpSorterClose,
+		vdbe.OpSorterCompare:
+		return true
+	}
+	return false
 }
 
 // handleSpecialOpcode handles ResultRow and Halt opcodes specially. Returns true if handled.
