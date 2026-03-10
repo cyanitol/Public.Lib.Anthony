@@ -54,15 +54,59 @@ func (m *FTS5Module) createTable(db interface{}, moduleName string, dbName strin
 	// Build schema SQL
 	schema := fmt.Sprintf("CREATE TABLE %s(%s)", tableName, strings.Join(columns, ", "))
 
+	// Create shadow table manager if db supports persistence
+	var shadowMgr *ShadowTableManager
+	if dbExec, ok := db.(DatabaseExecutor); ok {
+		shadowMgr = NewShadowTableManager(tableName, dbExec)
+		// Create shadow tables for persistence
+		if err := shadowMgr.CreateShadowTables(columns); err != nil {
+			// Log warning but continue - FTS5 can work in-memory only
+			// In production, this might be an error
+			shadowMgr = nil
+		}
+	}
+
+	// Create or load the index
+	var index *InvertedIndex
+	if shadowMgr != nil {
+		// Try to load existing index from shadow tables
+		loadedIndex, err := shadowMgr.LoadIndex(columns)
+		if err != nil {
+			index = NewInvertedIndex(columns)
+		} else {
+			index = loadedIndex
+		}
+	} else {
+		index = NewInvertedIndex(columns)
+	}
+
+	// Determine next rowid from loaded data
+	nextRowID := DocumentID(1)
+	for docID := range index.docLengths {
+		if docID >= nextRowID {
+			nextRowID = docID + 1
+		}
+	}
+
 	// Create the FTS5 table
 	table := &FTS5Table{
 		tableName: tableName,
 		columns:   columns,
-		index:     NewInvertedIndex(columns),
+		index:     index,
 		tokenizer: NewSimpleTokenizer(),
 		ranker:    NewBM25Ranker(),
-		nextRowID: 1,
+		nextRowID: nextRowID,
 		rows:      make(map[DocumentID][]interface{}),
+		shadowMgr: shadowMgr,
+	}
+
+	// Load content from shadow tables if available
+	if shadowMgr != nil {
+		for docID := range index.docLengths {
+			if content, err := shadowMgr.LoadContent(docID, len(columns)); err == nil {
+				table.rows[docID] = content
+			}
+		}
 	}
 
 	return table, schema, nil
@@ -82,6 +126,9 @@ type FTS5Table struct {
 	// Storage for actual row data
 	nextRowID DocumentID
 	rows      map[DocumentID][]interface{}
+
+	// Persistence layer for shadow tables
+	shadowMgr *ShadowTableManager
 }
 
 // BestIndex analyzes the query and determines the best index strategy.
@@ -159,6 +206,14 @@ func (t *FTS5Table) handleDelete(argv []interface{}) (int64, error) {
 	}
 
 	delete(t.rows, docID)
+
+	// Remove from shadow tables
+	if t.shadowMgr != nil {
+		t.shadowMgr.DeleteContent(docID)
+		// Save updated index state
+		t.shadowMgr.SaveIndex(t.index)
+	}
+
 	return rowid, nil
 }
 
@@ -179,6 +234,10 @@ func (t *FTS5Table) handleInsertOrUpdate(argc int, argv []interface{}) (int64, e
 	// Remove old document if this is an update
 	if isUpdate {
 		t.removeDocument(oldDocID)
+		// Also remove from shadow tables
+		if t.shadowMgr != nil {
+			t.shadowMgr.DeleteContent(oldDocID)
+		}
 	}
 
 	// Extract and index column values
@@ -194,6 +253,16 @@ func (t *FTS5Table) handleInsertOrUpdate(argc int, argv []interface{}) (int64, e
 
 	// Store row data
 	t.rows[docID] = columnValues
+
+	// Persist to shadow tables
+	if t.shadowMgr != nil {
+		if err := t.shadowMgr.SaveContent(docID, columnValues); err != nil {
+			// Log warning but don't fail the operation
+			// In production might want to handle this differently
+		}
+		// Save index state (could be deferred to transaction commit)
+		t.shadowMgr.SaveIndex(t.index)
+	}
 
 	return int64(docID), nil
 }
@@ -280,6 +349,11 @@ func (t *FTS5Table) Destroy() error {
 
 	t.index.Clear()
 	t.rows = make(map[DocumentID][]interface{})
+
+	// Drop shadow tables
+	if t.shadowMgr != nil {
+		return t.shadowMgr.DropShadowTables()
+	}
 	return nil
 }
 

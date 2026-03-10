@@ -55,7 +55,9 @@ HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
     - [DONE] Query parser (AND, OR, NOT, prefix, phrase)
     - [DONE] Module registration in driver
     - [DONE] SQL parser support for CREATE VIRTUAL TABLE
-    - [ ] Persistent storage to database file
+    - [DONE] Virtual table instance creation on CREATE VIRTUAL TABLE
+    - [DONE] Shadow table infrastructure (persistence.go)
+    - [~] Persistent storage to database file (deferred, in-memory only)
 
 [x] R-Tree Virtual Table (module implemented, all tests pass)
     - [DONE] R*-tree insertion/split/reinsertion
@@ -202,7 +204,8 @@ v0.1.x - Current Development
     - [DONE] Deferred constraints, collation, type affinity
 [~] CTE Edge Cases (improved)
     - [DONE] Sorter adjustment for GROUP BY in CTE coroutines
-    - [WIP] Recursive CTE bytecode generation (compile-time -> runtime)
+    - [~] Recursive CTE: works for small datasets (compile-time execution)
+    - [ ] Recursive CTE bytecode generation (runtime loop optimization)
 [x] WITHOUT ROWID Tables (45/51 tests passing)
     - [DONE] Composite PK key encoding (collation-aware, stable ordering)
     - [DONE] Btree cursor comparator for composite keys

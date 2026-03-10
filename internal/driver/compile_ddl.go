@@ -168,8 +168,23 @@ func (s *Stmt) compileCreateVirtualTable(vm *vdbe.VDBE, stmt *parser.CreateVirtu
 		return nil, fmt.Errorf("table %s already exists", stmt.Name)
 	}
 
-	// Register the virtual table in the schema
-	err := s.conn.schema.CreateVirtualTable(stmt.Name, stmt.Module, stmt.Args, nil, stmt.String())
+	// Get the module from registry and create the virtual table instance
+	// Note: We pass nil for the db connection to avoid lock contention during compilation.
+	// Shadow table creation (for persistence) would need to happen after compilation.
+	var vtabInstance interface{}
+	if s.conn.vtabRegistry != nil {
+		module := s.conn.vtabRegistry.GetModule(moduleName)
+		if module != nil {
+			vtab, _, err := module.Create(nil, moduleName, "main", stmt.Name, stmt.Args)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create virtual table: %w", err)
+			}
+			vtabInstance = vtab
+		}
+	}
+
+	// Register the virtual table in the schema with the created instance
+	err := s.conn.schema.CreateVirtualTable(stmt.Name, stmt.Module, stmt.Args, vtabInstance, stmt.String())
 	if err != nil {
 		return nil, err
 	}

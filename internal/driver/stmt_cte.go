@@ -434,6 +434,8 @@ func adjustJumpOps(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int, int) {
 }
 
 // compileRecursiveCTE compiles a recursive CTE using iterative execution.
+// NOTE: This implementation executes at compile-time, not runtime.
+// A future optimization would generate runtime bytecode loops for efficiency.
 func (s *Stmt) compileRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planner.CTEDefinition,
 	cteCtx *planner.CTEContext, cteTempTables map[string]*schema.Table, args []driver.NamedValue) (*schema.Table, error) {
 

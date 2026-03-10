@@ -784,3 +784,77 @@ func (r *ConnRowReader) ReadRowByRowid(table string, rowid int64) (map[string]in
 	reader := vdbe.NewVDBERowReader(v)
 	return reader.ReadRowByRowid(table, rowid)
 }
+
+// DatabaseExecutor implementation for FTS5 shadow table operations.
+// These methods allow FTS5 to create and query its shadow tables.
+
+// ExecDDL executes a DDL statement (CREATE TABLE, DROP TABLE, etc.).
+func (c *Conn) ExecDDL(sql string) error {
+	stmt, err := c.Prepare(sql)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(nil)
+	return err
+}
+
+// ExecDML executes a DML statement (INSERT, UPDATE, DELETE) and returns rows affected.
+func (c *Conn) ExecDML(sql string, args ...interface{}) (int64, error) {
+	stmt, err := c.Prepare(sql)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	// Convert args to driver.Value
+	driverArgs := make([]driver.Value, len(args))
+	for i, arg := range args {
+		driverArgs[i] = arg
+	}
+
+	result, err := stmt.(*Stmt).Exec(driverArgs)
+	if err != nil {
+		return 0, err
+	}
+
+	return result.RowsAffected()
+}
+
+// Query executes a SELECT statement and returns results as rows.
+func (c *Conn) Query(sql string, args ...interface{}) ([][]interface{}, error) {
+	stmt, err := c.Prepare(sql)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	// Convert args to driver.Value
+	driverArgs := make([]driver.Value, len(args))
+	for i, arg := range args {
+		driverArgs[i] = arg
+	}
+
+	rows, err := stmt.(*Stmt).Query(driverArgs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results [][]interface{}
+	dest := make([]driver.Value, len(rows.Columns()))
+
+	for {
+		if err := rows.Next(dest); err != nil {
+			break
+		}
+		row := make([]interface{}, len(dest))
+		for i, v := range dest {
+			row[i] = v
+		}
+		results = append(results, row)
+	}
+
+	return results, nil
+}
