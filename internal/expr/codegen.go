@@ -190,6 +190,9 @@ func init() {
 		reflect.TypeOf((*parser.ParenExpr)(nil)): func(g *CodeGenerator, e parser.Expression) (int, error) {
 			return g.GenerateExpr(e.(*parser.ParenExpr).Expr)
 		},
+		reflect.TypeOf((*parser.RaiseExpr)(nil)): func(g *CodeGenerator, e parser.Expression) (int, error) {
+			return g.generateRaise(e.(*parser.RaiseExpr))
+		},
 	}
 }
 
@@ -1828,4 +1831,22 @@ func (g *CodeGenerator) adjustInstructionRegisters(instr *vdbe.Instruction, regO
 	if rule.adjustP3 {
 		instr.P3 += regOffset
 	}
+}
+
+// generateRaise generates VDBE code for a RAISE expression in a trigger body.
+// RAISE(IGNORE) -> OpRaise P1=0
+// RAISE(ROLLBACK, msg) -> OpRaise P1=1, P4.Z=msg
+// RAISE(ABORT, msg) -> OpRaise P1=2, P4.Z=msg
+// RAISE(FAIL, msg) -> OpRaise P1=3, P4.Z=msg
+func (g *CodeGenerator) generateRaise(e *parser.RaiseExpr) (int, error) {
+	raiseType := int(e.Type)
+	addr := g.vdbe.AddOp(vdbe.OpRaise, raiseType, 0, 0)
+	if e.Message != "" {
+		g.vdbe.Program[addr].P4.Z = e.Message
+		g.vdbe.Program[addr].P4Type = vdbe.P4Static
+	}
+	// RAISE doesn't produce a value, but we need to return a register
+	resultReg := g.AllocReg()
+	g.vdbe.AddOp(vdbe.OpNull, 0, resultReg, 0)
+	return resultReg, nil
 }

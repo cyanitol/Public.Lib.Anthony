@@ -236,6 +236,11 @@ const (
 	OpWindowLastValue  Opcode = 210 // LAST_VALUE() window function
 	OpAggDistinct      Opcode = 211 // Check if value is distinct for aggregate
 	OpDistinctRow      Opcode = 212 // Check if row is distinct for SELECT DISTINCT
+
+	// Trigger opcodes
+	OpTriggerBefore Opcode = 213 // Execute BEFORE triggers: P1=event, P2=skip-addr, P4.Z=table
+	OpTriggerAfter  Opcode = 214 // Execute AFTER triggers: P1=event, P2=0, P4.Z=table
+	OpRaise         Opcode = 215 // RAISE function: P1=type(0=IGNORE,1=ROLLBACK,2=ABORT,3=FAIL), P4.Z=message
 )
 
 // OpcodeNames maps opcodes to their string names for debugging.
@@ -407,6 +412,9 @@ var OpcodeNames = map[Opcode]string{
 	OpWindowLastValue:  "WindowLastValue",
 	OpAggDistinct:      "AggDistinct",
 	OpDistinctRow:      "DistinctRow",
+	OpTriggerBefore:    "TriggerBefore",
+	OpTriggerAfter:     "TriggerAfter",
+	OpRaise:            "Raise",
 }
 
 // String returns the string representation of an opcode.

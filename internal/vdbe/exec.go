@@ -339,6 +339,11 @@ func init() {
 		OpOnce:          (*VDBE).execOnce,
 		OpOpenPseudo:    (*VDBE).execOpenPseudo,
 
+		// Trigger execution
+		OpTriggerBefore: (*VDBE).execTriggerBefore,
+		OpTriggerAfter:  (*VDBE).execTriggerAfter,
+		OpRaise:         (*VDBE).execRaise,
+
 		// Window function operations
 		OpAggStepWindow:    (*VDBE).execAggStepWindow,
 		OpWindowRowNum:     (*VDBE).execWindowRowNum,

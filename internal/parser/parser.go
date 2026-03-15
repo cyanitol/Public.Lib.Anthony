@@ -3280,6 +3280,10 @@ func (p *Parser) parseIdentOrFunction() (Expression, error) {
 
 	// Function call
 	if p.match(TK_LP) {
+		// Check for RAISE function (trigger-specific)
+		if strings.ToUpper(name) == "RAISE" {
+			return p.parseRaiseFunction()
+		}
 		return p.parseFunctionCall(name)
 	}
 
@@ -3316,6 +3320,47 @@ func (p *Parser) isExpressionIdentifier() bool {
 	default:
 		return false
 	}
+}
+
+// parseRaiseFunction parses RAISE(IGNORE) or RAISE(ROLLBACK|ABORT|FAIL, msg).
+// The opening paren has already been consumed.
+func (p *Parser) parseRaiseFunction() (Expression, error) {
+	if !p.check(TK_ID) {
+		return nil, p.error("expected IGNORE, ROLLBACK, ABORT, or FAIL in RAISE")
+	}
+
+	action := strings.ToUpper(p.advance().Lexeme)
+	raise := &RaiseExpr{}
+
+	switch action {
+	case "IGNORE":
+		raise.Type = RaiseIgnore
+	case "ROLLBACK":
+		raise.Type = RaiseRollback
+	case "ABORT":
+		raise.Type = RaiseAbort
+	case "FAIL":
+		raise.Type = RaiseFail
+	default:
+		return nil, p.error("expected IGNORE, ROLLBACK, ABORT, or FAIL in RAISE")
+	}
+
+	// For non-IGNORE types, expect comma and message string
+	if raise.Type != RaiseIgnore {
+		if !p.match(TK_COMMA) {
+			return nil, p.error("expected ',' after RAISE action")
+		}
+		if !p.check(TK_STRING) {
+			return nil, p.error("expected error message string in RAISE")
+		}
+		raise.Message = Unquote(p.advance().Lexeme)
+	}
+
+	if !p.match(TK_RP) {
+		return nil, p.error("expected ')' after RAISE arguments")
+	}
+
+	return raise, nil
 }
 
 // parseFunctionCall parses a function call after the opening paren.
