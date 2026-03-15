@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -371,5 +372,113 @@ func createTableWithData(t *testing.T, db *sql.DB, createStmt string, insertStmt
 	mustExec(t, db, createStmt)
 	for _, stmt := range insertStmts {
 		mustExec(t, db, stmt)
+	}
+}
+
+// ============================================================================
+// Universal SQL Test Case Infrastructure
+// ============================================================================
+
+// sqlTestCase defines a declarative, table-driven SQL test case.
+type sqlTestCase struct {
+	name     string          // t.Run name
+	setup    []string        // DDL/DML to run before the test
+	exec     string          // statement to execute (non-query)
+	query    string          // SELECT to run and compare results
+	args     []interface{}   // bind parameters for query/exec
+	wantRows [][]interface{} // expected rows from query
+	wantErr  bool            // expect an error
+	errLike  string          // error message substring match
+	skip     string          // skip reason (empty = don't skip)
+}
+
+// runSQLTests runs a slice of sqlTestCase against a shared database.
+func runSQLTests(t *testing.T, db *sql.DB, tests []sqlTestCase) {
+	t.Helper()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runSingleSQLTest(t, db, tt)
+		})
+	}
+}
+
+// runSQLTestsFreshDB runs each test case with a fresh in-memory database.
+func runSQLTestsFreshDB(t *testing.T, tests []sqlTestCase) {
+	t.Helper()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupMemoryDB(t)
+			defer db.Close()
+			runSingleSQLTest(t, db, tt)
+		})
+	}
+}
+
+// runSingleSQLTest executes a single sqlTestCase.
+func runSingleSQLTest(t *testing.T, db *sql.DB, tt sqlTestCase) {
+	t.Helper()
+	if tt.skip != "" {
+		t.Skip(tt.skip)
+	}
+	for _, s := range tt.setup {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("setup %q failed: %v", s, err)
+		}
+	}
+	if tt.exec != "" {
+		runSQLTestExec(t, db, tt)
+		return
+	}
+	if tt.query != "" {
+		runSQLTestQuery(t, db, tt)
+	}
+}
+
+// runSQLTestExec handles the exec path of a SQL test case.
+func runSQLTestExec(t *testing.T, db *sql.DB, tt sqlTestCase) {
+	t.Helper()
+	_, err := db.Exec(tt.exec, tt.args...)
+	if tt.wantErr {
+		if err == nil {
+			t.Fatalf("expected error but got none for: %s", tt.exec)
+		}
+		checkErrLike(t, err, tt.errLike)
+		return
+	}
+	if err != nil {
+		t.Fatalf("exec failed: %v\nquery: %s", err, tt.exec)
+	}
+}
+
+// runSQLTestQuery handles the query path of a SQL test case.
+func runSQLTestQuery(t *testing.T, db *sql.DB, tt sqlTestCase) {
+	t.Helper()
+	rows, err := db.Query(tt.query, tt.args...)
+	if tt.wantErr {
+		if err == nil {
+			rows.Close()
+			t.Fatalf("expected error but got none for: %s", tt.query)
+		}
+		checkErrLike(t, err, tt.errLike)
+		return
+	}
+	if err != nil {
+		t.Fatalf("query failed: %v\nquery: %s", err, tt.query)
+	}
+	defer rows.Close()
+	got := scanAllRows(t, rows)
+	compareRows(t, got, tt.wantRows)
+}
+
+// checkErrLike checks that an error message contains the expected substring.
+func checkErrLike(t *testing.T, err error, like string) {
+	t.Helper()
+	if like != "" && err != nil {
+		msg := err.Error()
+		lowerMsg := strings.ToLower(msg)
+		lowerLike := strings.ToLower(like)
+		if !strings.Contains(lowerMsg, lowerLike) {
+			t.Errorf("error %q does not contain %q", msg, like)
+		}
 	}
 }

@@ -3386,10 +3386,22 @@ func (p *Parser) isExpressionIdentifier() bool {
 	}
 }
 
+// isRaiseAction checks if the current token is a valid RAISE action keyword.
+// RAISE actions may be tokenized as keywords (TK_ABORT, TK_FAIL, etc.) or TK_ID.
+func (p *Parser) isRaiseAction() bool {
+	switch p.peek().Type {
+	case TK_ID, TK_ABORT, TK_FAIL, TK_IGNORE:
+		return true
+	default:
+		// ROLLBACK may also be tokenized as a keyword
+		return p.check(TK_ID) || strings.EqualFold(p.peek().Lexeme, "ROLLBACK")
+	}
+}
+
 // parseRaiseFunction parses RAISE(IGNORE) or RAISE(ROLLBACK|ABORT|FAIL, msg).
 // The opening paren has already been consumed.
 func (p *Parser) parseRaiseFunction() (Expression, error) {
-	if !p.check(TK_ID) {
+	if !p.isRaiseAction() {
 		return nil, p.error("expected IGNORE, ROLLBACK, ABORT, or FAIL in RAISE")
 	}
 

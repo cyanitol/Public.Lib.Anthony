@@ -52,16 +52,38 @@ func (v *VDBE) executeTriggerOp(instr *Instruction, timing int) error {
 		return nil // No trigger compiler available, skip
 	}
 
-	triggerRow := v.TriggerRow
-	if triggerRow == nil {
-		triggerRow = &TriggerRowData{}
-	}
+	triggerRow := v.buildTriggerRowForOp(instr)
 
 	err := compiler.ExecuteTriggers(tableName, instr.P1, timing, triggerRow, nil)
 	if err != nil {
 		return v.handleTriggerError(err, instr)
 	}
 	return nil
+}
+
+// buildTriggerRowForOp builds trigger row data from registers.
+// P1=event (0=INSERT,1=UPDATE,2=DELETE), P3=startReg for column values.
+func (v *VDBE) buildTriggerRowForOp(instr *Instruction) *TriggerRowData {
+	startReg := instr.P3
+	tableName := instr.P4.Z
+
+	if startReg <= 0 {
+		if v.TriggerRow != nil {
+			return v.TriggerRow
+		}
+		return &TriggerRowData{}
+	}
+
+	switch instr.P1 {
+	case 0: // INSERT - build NEW from registers
+		return v.buildTriggerRowFromInsert(tableName, startReg, 0)
+	case 1: // UPDATE - build OLD from cursor 0, NEW from registers
+		return v.buildTriggerRowFromUpdate(tableName, 0, startReg)
+	case 2: // DELETE - build OLD from cursor 0
+		return v.buildTriggerRowFromDelete(tableName, 0)
+	default:
+		return &TriggerRowData{}
+	}
 }
 
 // getTriggerCompiler extracts the trigger compiler from the VDBE context.

@@ -92,18 +92,34 @@ func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table
 
 	// Loop over all rows in VALUES clause
 	for _, row := range stmt.Values {
-		// Emit BEFORE INSERT trigger (P1=0 for INSERT event)
+		// Populate registers with row values first (needed for trigger NEW row)
+		if !table.WithoutRowID {
+			s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, &paramIdx)
+		}
+		s.emitInsertRecordValues(vm, table, colNames, row, rowidColIdx, recordStartReg, args, &paramIdx)
+
+		// Emit BEFORE INSERT trigger after values are in registers
+		// P3=recordStartReg so VDBE can build NEW row from registers
 		var beforeAddr int
 		if hasTriggers {
-			beforeAddr = vm.AddOp(vdbe.OpTriggerBefore, 0, 0, 0)
+			beforeAddr = vm.AddOp(vdbe.OpTriggerBefore, 0, 0, recordStartReg)
 			vm.Program[beforeAddr].P4.Z = stmt.Table
 		}
 
-		s.emitInsertRow(vm, table, colNames, row, rowidColIdx, rowidReg, recordStartReg, numRecordCols, conflictMode, args, &paramIdx)
+		// Make record and insert
+		resultReg := recordStartReg + numRecordCols
+		vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
+		rowidRegToUse := rowidReg
+		if table.WithoutRowID {
+			rowidRegToUse = 0
+		}
+		insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidRegToUse)
+		vm.Program[insertOp].P4.I = conflictMode
+		vm.Program[insertOp].P4.Z = table.Name
 
 		// Emit AFTER INSERT trigger
 		if hasTriggers {
-			afterAddr := vm.AddOp(vdbe.OpTriggerAfter, 0, 0, 0)
+			afterAddr := vm.AddOp(vdbe.OpTriggerAfter, 0, 0, recordStartReg)
 			vm.Program[afterAddr].P4.Z = stmt.Table
 			// Fix BEFORE trigger skip address (for RAISE(IGNORE))
 			vm.Program[beforeAddr].P2 = vm.NumOps()
