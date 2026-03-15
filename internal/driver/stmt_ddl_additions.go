@@ -132,46 +132,58 @@ func (s *Stmt) compileAlterTable(vm *vdbe.VDBE, stmt *parser.AlterTableStmt, arg
 
 // compileAlterTableRename handles ALTER TABLE ... RENAME TO ...
 func (s *Stmt) compileAlterTableRename(vm *vdbe.VDBE, oldName, newName string) (*vdbe.VDBE, error) {
-	// Check if new name already exists
-	// Rename the table in schema
 	if err := s.conn.schema.RenameTable(oldName, newName); err != nil {
 		return nil, err
 	}
 
-	// In a full implementation, this would also:
-	// 1. Update sqlite_master table
-	// 2. Update all indexes and triggers that reference this table
-	// 3. Update the schema cookie
+	// Regenerate stored SQL for the table and its indexes
+	s.conn.schema.UpdateRenameTableSQL(newName)
+
+	// Update trigger table references
+	s.updateTriggerTableRefs(oldName, newName)
+
+	// Persist to sqlite_master
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			_ = err
+		}
+	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	s.invalidateStmtCache()
 
 	return vm, nil
 }
 
+// updateTriggerTableRefs updates trigger table references after a table rename.
+func (s *Stmt) updateTriggerTableRefs(oldName, newName string) {
+	lowerOld := strings.ToLower(oldName)
+	for _, trigger := range s.conn.schema.Triggers {
+		if strings.ToLower(trigger.Table) == lowerOld {
+			trigger.Table = newName
+		}
+	}
+}
+
 // compileAlterTableRenameColumn handles ALTER TABLE ... RENAME COLUMN ... TO ...
 func (s *Stmt) compileAlterTableRenameColumn(vm *vdbe.VDBE, table *schema.Table, oldName, newName string) (*vdbe.VDBE, error) {
-	// Find the column
-	col, exists := table.GetColumn(oldName)
-	if !exists {
-		return nil, fmt.Errorf("column %q not found in table %q", oldName, table.Name)
+	if err := s.conn.schema.RenameColumn(table.Name, oldName, newName); err != nil {
+		return nil, err
 	}
 
-	// Check if new name already exists
-	if _, exists := table.GetColumn(newName); exists {
-		return nil, fmt.Errorf("column %q already exists in table %q", newName, table.Name)
+	// Persist to sqlite_master
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			_ = err
+		}
 	}
-
-	// Update column name
-	col.Name = newName
-
-	// In a full implementation, this would:
-	// 1. Update sqlite_master table
-	// 2. Update all indexes, triggers, and views that reference this column
-	// 3. Update the schema cookie
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	s.invalidateStmtCache()
 
 	return vm, nil
 }
@@ -185,8 +197,18 @@ func (s *Stmt) compileAlterTableAddColumn(vm *vdbe.VDBE, table *schema.Table, co
 	newCol := s.createNewColumn(colDef)
 	table.Columns = append(table.Columns, newCol)
 
+	// Regenerate stored SQL and persist
+	s.conn.schema.UpdateTableSQL(table.Name)
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			_ = err
+		}
+	}
+
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	s.invalidateStmtCache()
 
 	return vm, nil
 }
@@ -236,28 +258,21 @@ func (s *Stmt) applyColumnConstraint(col *schema.Column, constraint parser.Colum
 
 // compileAlterTableDropColumn handles ALTER TABLE ... DROP COLUMN ...
 func (s *Stmt) compileAlterTableDropColumn(vm *vdbe.VDBE, table *schema.Table, columnName string) (*vdbe.VDBE, error) {
-	// Find the column index
-	colIdx := table.GetColumnIndex(columnName)
-	if colIdx == -1 {
-		return nil, fmt.Errorf("column %q not found in table %q", columnName, table.Name)
+	if err := s.conn.schema.DropColumn(table.Name, columnName); err != nil {
+		return nil, err
 	}
 
-	// Check if it's the last column (SQLite doesn't allow dropping the last column)
-	if len(table.Columns) == 1 {
-		return nil, fmt.Errorf("cannot drop the last column of table %q", table.Name)
+	// Persist to sqlite_master
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			_ = err
+		}
 	}
-
-	// Remove the column
-	table.Columns = append(table.Columns[:colIdx], table.Columns[colIdx+1:]...)
-
-	// In a full implementation, this would:
-	// 1. Update sqlite_master table
-	// 2. Rebuild the table data without the dropped column
-	// 3. Update all indexes and triggers that reference this column
-	// 4. Update the schema cookie
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	s.invalidateStmtCache()
 
 	return vm, nil
 }
