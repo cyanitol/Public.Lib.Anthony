@@ -49,6 +49,15 @@ func (m *RTreeModule) createTable(db interface{}, moduleName string, dbName stri
 
 	schema := fmt.Sprintf("CREATE TABLE %s(%s)", tableName, strings.Join(columns, ", "))
 
+	// Create shadow table manager if db supports persistence
+	var shadowMgr *ShadowTableManager
+	if dbExec, ok := db.(DatabaseExecutor); ok {
+		shadowMgr = NewShadowTableManager(tableName, dbExec, dimensions)
+		if err := shadowMgr.CreateShadowTables(); err != nil {
+			shadowMgr = nil
+		}
+	}
+
 	table := &RTree{
 		tableName:  tableName,
 		columns:    columns,
@@ -57,6 +66,12 @@ func (m *RTreeModule) createTable(db interface{}, moduleName string, dbName stri
 		root:       nil,
 		entries:    make(map[int64]*Entry),
 		nextID:     1,
+		shadowMgr:  shadowMgr,
+	}
+
+	// Load persisted entries if available
+	if shadowMgr != nil {
+		table.loadFromShadowTables()
 	}
 
 	return table, schema, nil
@@ -113,6 +128,39 @@ type RTree struct {
 	root    *Node
 	entries map[int64]*Entry // Maps ID to entry for quick lookup
 	nextID  int64
+
+	// Persistence layer for shadow tables
+	shadowMgr *ShadowTableManager
+}
+
+// loadFromShadowTables reconstructs the R-Tree from persisted shadow tables.
+func (t *RTree) loadFromShadowTables() {
+	entries, err := t.shadowMgr.LoadEntries()
+	if err != nil || len(entries) == 0 {
+		return
+	}
+
+	t.entries = entries
+
+	// Rebuild the R-Tree from loaded entries
+	for _, entry := range entries {
+		if t.root == nil {
+			t.root = NewLeafNode()
+		}
+		t.root = t.root.Insert(entry)
+	}
+
+	// Load the next ID counter
+	if nextID, err := t.shadowMgr.LoadNextID(); err == nil {
+		t.nextID = nextID
+	}
+
+	// Ensure nextID is greater than any loaded entry ID
+	for id := range entries {
+		if id >= t.nextID {
+			t.nextID = id + 1
+		}
+	}
 }
 
 // BestIndex analyzes the query and determines the best index strategy.
@@ -241,6 +289,13 @@ func (t *RTree) handleDelete(argv []interface{}) (int64, error) {
 	}
 
 	delete(t.entries, id)
+
+	// Persist changes to shadow tables
+	if t.shadowMgr != nil {
+		t.shadowMgr.SaveEntries(t.entries)
+		t.shadowMgr.SaveNextID(t.nextID)
+	}
+
 	return id, nil
 }
 
@@ -283,6 +338,12 @@ func (t *RTree) handleInsertOrUpdate(argc int, argv []interface{}) (int64, error
 
 	// Store entry
 	t.entries[entryID] = entry
+
+	// Persist changes to shadow tables
+	if t.shadowMgr != nil {
+		t.shadowMgr.SaveEntries(t.entries)
+		t.shadowMgr.SaveNextID(t.nextID)
+	}
 
 	return entryID, nil
 }
@@ -417,6 +478,11 @@ func (t *RTree) Destroy() error {
 
 	t.root = nil
 	t.entries = make(map[int64]*Entry)
+
+	// Drop shadow tables
+	if t.shadowMgr != nil {
+		return t.shadowMgr.DropShadowTables()
+	}
 	return nil
 }
 

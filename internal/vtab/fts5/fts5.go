@@ -32,15 +32,42 @@ func (m *FTS5Module) Connect(db interface{}, moduleName string, dbName string, t
 
 // createTable creates or connects to an FTS5 table.
 func (m *FTS5Module) createTable(db interface{}, moduleName string, dbName string, tableName string, args []string) (vtab.VirtualTable, string, error) {
-	if len(args) == 0 {
-		return nil, "", fmt.Errorf("FTS5 table requires at least one column")
+	columns, err := parseFTS5Columns(args)
+	if err != nil {
+		return nil, "", err
 	}
 
-	// Parse column definitions
+	schema := fmt.Sprintf("CREATE TABLE %s(%s)", tableName, strings.Join(columns, ", "))
+	shadowMgr := initShadowManager(db, tableName, columns)
+	index := loadOrCreateIndex(shadowMgr, columns)
+
+	table := &FTS5Table{
+		tableName: tableName,
+		columns:   columns,
+		index:     index,
+		tokenizer: NewSimpleTokenizer(),
+		ranker:    NewBM25Ranker(),
+		nextRowID: computeNextRowID(index),
+		rows:      make(map[DocumentID][]interface{}),
+		shadowMgr: shadowMgr,
+	}
+
+	// Load content from shadow tables if available
+	if shadowMgr != nil {
+		table.loadContentFromShadow()
+	}
+
+	return table, schema, nil
+}
+
+// parseFTS5Columns parses and validates column definitions from args.
+func parseFTS5Columns(args []string) ([]string, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("FTS5 table requires at least one column")
+	}
+
 	columns := make([]string, 0, len(args))
 	for _, arg := range args {
-		// Simple parsing: just extract column names
-		// In a full implementation, we'd parse options like UNINDEXED, tokenize, etc.
 		colName := strings.TrimSpace(arg)
 		if colName != "" {
 			columns = append(columns, colName)
@@ -48,68 +75,56 @@ func (m *FTS5Module) createTable(db interface{}, moduleName string, dbName strin
 	}
 
 	if len(columns) == 0 {
-		return nil, "", fmt.Errorf("FTS5 table requires at least one column")
+		return nil, fmt.Errorf("FTS5 table requires at least one column")
+	}
+	return columns, nil
+}
+
+// initShadowManager creates and initializes a shadow table manager if possible.
+func initShadowManager(db interface{}, tableName string, columns []string) *ShadowTableManager {
+	dbExec, ok := db.(DatabaseExecutor)
+	if !ok {
+		return nil
 	}
 
-	// Build schema SQL
-	schema := fmt.Sprintf("CREATE TABLE %s(%s)", tableName, strings.Join(columns, ", "))
+	mgr := NewShadowTableManager(tableName, dbExec)
+	if err := mgr.CreateShadowTables(columns); err != nil {
+		return nil
+	}
+	return mgr
+}
 
-	// Create shadow table manager if db supports persistence
-	var shadowMgr *ShadowTableManager
-	if dbExec, ok := db.(DatabaseExecutor); ok {
-		shadowMgr = NewShadowTableManager(tableName, dbExec)
-		// Create shadow tables for persistence
-		if err := shadowMgr.CreateShadowTables(columns); err != nil {
-			// Log warning but continue - FTS5 can work in-memory only
-			// In production, this might be an error
-			shadowMgr = nil
-		}
+// loadOrCreateIndex loads an existing index from shadow tables or creates a new one.
+func loadOrCreateIndex(shadowMgr *ShadowTableManager, columns []string) *InvertedIndex {
+	if shadowMgr == nil {
+		return NewInvertedIndex(columns)
 	}
 
-	// Create or load the index
-	var index *InvertedIndex
-	if shadowMgr != nil {
-		// Try to load existing index from shadow tables
-		loadedIndex, err := shadowMgr.LoadIndex(columns)
-		if err != nil {
-			index = NewInvertedIndex(columns)
-		} else {
-			index = loadedIndex
-		}
-	} else {
-		index = NewInvertedIndex(columns)
+	loadedIndex, err := shadowMgr.LoadIndex(columns)
+	if err != nil {
+		return NewInvertedIndex(columns)
 	}
+	return loadedIndex
+}
 
-	// Determine next rowid from loaded data
+// computeNextRowID determines the next row ID from loaded index data.
+func computeNextRowID(index *InvertedIndex) DocumentID {
 	nextRowID := DocumentID(1)
 	for docID := range index.docLengths {
 		if docID >= nextRowID {
 			nextRowID = docID + 1
 		}
 	}
+	return nextRowID
+}
 
-	// Create the FTS5 table
-	table := &FTS5Table{
-		tableName: tableName,
-		columns:   columns,
-		index:     index,
-		tokenizer: NewSimpleTokenizer(),
-		ranker:    NewBM25Ranker(),
-		nextRowID: nextRowID,
-		rows:      make(map[DocumentID][]interface{}),
-		shadowMgr: shadowMgr,
-	}
-
-	// Load content from shadow tables if available
-	if shadowMgr != nil {
-		for docID := range index.docLengths {
-			if content, err := shadowMgr.LoadContent(docID, len(columns)); err == nil {
-				table.rows[docID] = content
-			}
+// loadContentFromShadow loads document content from shadow tables into memory.
+func (t *FTS5Table) loadContentFromShadow() {
+	for docID := range t.index.docLengths {
+		if content, err := t.shadowMgr.LoadContent(docID, len(t.columns)); err == nil {
+			t.rows[docID] = content
 		}
 	}
-
-	return table, schema, nil
 }
 
 // FTS5Table represents an FTS5 virtual table instance.

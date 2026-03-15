@@ -230,6 +230,24 @@ func (s *Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driv
 	return rows, nil
 }
 
+// queryInternal executes a query without acquiring the connection mutex.
+// This must only be called when the caller already holds c.mu.
+func (s *Stmt) queryInternal(args []driver.NamedValue) (driver.Rows, error) {
+	vm, err := s.compile(args)
+	if err != nil {
+		return nil, fmt.Errorf("compile error: %w", err)
+	}
+
+	rows := &Rows{
+		stmt:    s,
+		vdbe:    vm,
+		columns: vm.ResultCols,
+		ctx:     context.Background(),
+	}
+
+	return rows, nil
+}
+
 // compile compiles the SQL statement into VDBE bytecode.
 // It checks the statement cache first and returns a cached VDBE if available.
 func (s *Stmt) compile(args []driver.NamedValue) (*vdbe.VDBE, error) {

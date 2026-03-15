@@ -178,13 +178,12 @@ func (s *Stmt) compileCreateVirtualTable(vm *vdbe.VDBE, stmt *parser.CreateVirtu
 	}
 
 	// Get the module from registry and create the virtual table instance
-	// Note: We pass nil for the db connection to avoid lock contention during compilation.
-	// Shadow table creation (for persistence) would need to happen after compilation.
+	// Pass s.conn as the database executor so modules can create shadow tables.
 	var vtabInstance interface{}
 	if s.conn.vtabRegistry != nil {
 		module := s.conn.vtabRegistry.GetModule(moduleName)
 		if module != nil {
-			vtab, _, err := module.Create(nil, moduleName, "main", stmt.Name, stmt.Args)
+			vtab, _, err := module.Create(s.conn, moduleName, "main", stmt.Name, stmt.Args)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create virtual table: %w", err)
 			}

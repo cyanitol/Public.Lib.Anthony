@@ -827,36 +827,59 @@ func (r *ConnRowReader) ReadRowByRowid(table string, rowid int64) (map[string]in
 	return reader.ReadRowByRowid(table, rowid)
 }
 
-// DatabaseExecutor implementation for FTS5 shadow table operations.
-// These methods allow FTS5 to create and query its shadow tables.
+// DatabaseExecutor implementation for FTS5/R-Tree shadow table operations.
+// These methods allow virtual table modules to create and query their shadow tables.
+// They use prepareInternal to avoid deadlocking on the connection mutex,
+// since they are called during CREATE VIRTUAL TABLE which already holds the lock.
+
+// prepareInternal prepares a SQL statement without acquiring the connection mutex.
+// This must only be called when the caller already holds c.mu.
+func (c *Conn) prepareInternal(sqlStr string) (*Stmt, error) {
+	if c.closed {
+		return nil, driver.ErrBadConn
+	}
+
+	p := parser.NewParser(sqlStr)
+	stmts, err := p.Parse()
+	if err != nil {
+		return nil, fmt.Errorf("parse error: %w", err)
+	}
+
+	if len(stmts) == 0 {
+		return nil, fmt.Errorf("no statements found")
+	}
+
+	stmt := &Stmt{
+		conn:  c,
+		query: sqlStr,
+		ast:   stmts[0],
+	}
+	return stmt, nil
+}
 
 // ExecDDL executes a DDL statement (CREATE TABLE, DROP TABLE, etc.).
-func (c *Conn) ExecDDL(sql string) error {
-	stmt, err := c.Prepare(sql)
+// Must be called with c.mu already held.
+func (c *Conn) ExecDDL(sqlStr string) error {
+	stmt, err := c.prepareInternal(sqlStr)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
 
-	_, err = stmt.Exec(nil)
+	namedArgs := valuesToNamedValues(nil)
+	_, err = stmt.executeAndCommit(namedArgs, c.inTx)
 	return err
 }
 
 // ExecDML executes a DML statement (INSERT, UPDATE, DELETE) and returns rows affected.
-func (c *Conn) ExecDML(sql string, args ...interface{}) (int64, error) {
-	stmt, err := c.Prepare(sql)
+// Must be called with c.mu already held.
+func (c *Conn) ExecDML(sqlStr string, args ...interface{}) (int64, error) {
+	stmt, err := c.prepareInternal(sqlStr)
 	if err != nil {
 		return 0, err
 	}
-	defer stmt.Close()
 
-	// Convert args to driver.Value
-	driverArgs := make([]driver.Value, len(args))
-	for i, arg := range args {
-		driverArgs[i] = arg
-	}
-
-	result, err := stmt.(*Stmt).Exec(driverArgs)
+	namedArgs := valuesToNamedValues(toDriverValues(args))
+	result, err := stmt.executeAndCommit(namedArgs, c.inTx)
 	if err != nil {
 		return 0, err
 	}
@@ -865,25 +888,34 @@ func (c *Conn) ExecDML(sql string, args ...interface{}) (int64, error) {
 }
 
 // Query executes a SELECT statement and returns results as rows.
-func (c *Conn) Query(sql string, args ...interface{}) ([][]interface{}, error) {
-	stmt, err := c.Prepare(sql)
+// Must be called with c.mu already held.
+func (c *Conn) Query(sqlStr string, args ...interface{}) ([][]interface{}, error) {
+	stmt, err := c.prepareInternal(sqlStr)
 	if err != nil {
 		return nil, err
 	}
-	defer stmt.Close()
 
-	// Convert args to driver.Value
-	driverArgs := make([]driver.Value, len(args))
-	for i, arg := range args {
-		driverArgs[i] = arg
-	}
-
-	rows, err := stmt.(*Stmt).Query(driverArgs)
+	namedArgs := valuesToNamedValues(toDriverValues(args))
+	rows, err := stmt.queryInternal(namedArgs)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	return c.collectQueryResults(rows)
+}
+
+// toDriverValues converts interface args to driver.Value slice.
+func toDriverValues(args []interface{}) []driver.Value {
+	driverArgs := make([]driver.Value, len(args))
+	for i, arg := range args {
+		driverArgs[i] = arg
+	}
+	return driverArgs
+}
+
+// collectQueryResults reads all rows from a result set into a slice.
+func (c *Conn) collectQueryResults(rows driver.Rows) ([][]interface{}, error) {
 	var results [][]interface{}
 	dest := make([]driver.Value, len(rows.Columns()))
 
