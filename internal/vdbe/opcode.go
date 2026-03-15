@@ -236,6 +236,7 @@ const (
 	OpWindowLastValue  Opcode = 210 // LAST_VALUE() window function
 	OpAggDistinct      Opcode = 211 // Check if value is distinct for aggregate
 	OpDistinctRow      Opcode = 212 // Check if row is distinct for SELECT DISTINCT
+	OpClearEphemeral   Opcode = 213 // Clear all rows from ephemeral table (P1=cursor)
 )
 
 // OpcodeNames maps opcodes to their string names for debugging.
@@ -407,6 +408,7 @@ var OpcodeNames = map[Opcode]string{
 	OpWindowLastValue:  "WindowLastValue",
 	OpAggDistinct:      "AggDistinct",
 	OpDistinctRow:      "DistinctRow",
+	OpClearEphemeral:   "ClearEphemeral",
 }
 
 // String returns the string representation of an opcode.

@@ -412,6 +412,46 @@ func (bt *Btree) CreateWithoutRowidTable() (rootPage uint32, err error) {
 	return rootPage, nil
 }
 
+// ClearTableData removes all rows from a table by reinitializing its root page as an empty leaf.
+// Any child pages of an interior root are dropped. The root page itself is reused.
+func (bt *Btree) ClearTableData(rootPage uint32) error {
+	if rootPage == 0 {
+		return fmt.Errorf("invalid root page 0")
+	}
+
+	pageData, err := bt.GetPage(rootPage)
+	if err != nil {
+		return err
+	}
+
+	header, err := ParsePageHeader(pageData, rootPage)
+	if err != nil {
+		return err
+	}
+
+	// Drop child pages if root is an interior node
+	if header.IsInterior {
+		bt.dropInteriorChildren(pageData, header)
+	}
+
+	// Reinitialize root page as empty leaf table
+	headerOffset := 0
+	if rootPage == 1 {
+		headerOffset = FileHeaderSize
+	}
+
+	pageData[headerOffset+PageHeaderOffsetType] = PageTypeLeafTable
+	pageData[headerOffset+PageHeaderOffsetFreeblock] = 0
+	pageData[headerOffset+PageHeaderOffsetFreeblock+1] = 0
+	pageData[headerOffset+PageHeaderOffsetNumCells] = 0
+	pageData[headerOffset+PageHeaderOffsetNumCells+1] = 0
+	pageData[headerOffset+PageHeaderOffsetCellStart] = 0
+	pageData[headerOffset+PageHeaderOffsetCellStart+1] = 0
+	pageData[headerOffset+PageHeaderOffsetFragmented] = 0
+
+	return nil
+}
+
 // DropTable drops a table B-tree by freeing all its pages
 func (bt *Btree) DropTable(rootPage uint32) error {
 	if rootPage == 0 {

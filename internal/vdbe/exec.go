@@ -229,8 +229,9 @@ func init() {
 		// Cursor operations
 		OpOpenRead:      (*VDBE).execOpenRead,
 		OpOpenWrite:     (*VDBE).execOpenWrite,
-		OpOpenEphemeral: (*VDBE).execOpenEphemeral,
-		OpClose:         (*VDBE).execClose,
+		OpOpenEphemeral:  (*VDBE).execOpenEphemeral,
+		OpClearEphemeral: (*VDBE).execClearEphemeral,
+		OpClose:          (*VDBE).execClose,
 		OpRewind:        (*VDBE).execRewind,
 		OpNext:          (*VDBE).execNext,
 		OpPrev:          (*VDBE).execPrev,
@@ -1055,6 +1056,33 @@ func (v *VDBE) execOpenEphemeral(instr *Instruction) error {
 	}
 
 	v.Cursors[instr.P1] = cursor
+	return nil
+}
+
+// execClearEphemeral clears all rows from an ephemeral table by reinitializing its root page.
+// P1 = cursor number
+func (v *VDBE) execClearEphemeral(instr *Instruction) error {
+	cursor := v.Cursors[instr.P1]
+	if cursor == nil {
+		return nil
+	}
+
+	bt, ok := v.Ctx.Btree.(*btree.Btree)
+	if !ok {
+		return fmt.Errorf("invalid btree type")
+	}
+
+	// Reinitialize the root page as an empty leaf table page
+	rootPage := cursor.RootPage
+	if err := bt.ClearTableData(rootPage); err != nil {
+		return fmt.Errorf("failed to clear ephemeral table: %w", err)
+	}
+
+	// Reopen cursor on the now-empty table
+	btCursor := btree.NewCursor(bt, rootPage)
+	cursor.BtreeCursor = btCursor
+	cursor.CachedCols = make([][]byte, 0)
+	cursor.CacheStatus = 0
 	return nil
 }
 

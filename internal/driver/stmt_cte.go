@@ -433,47 +433,12 @@ func adjustJumpOps(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int, int) {
 	return p1 + baseReg, p2, p3
 }
 
-// compileRecursiveCTE compiles a recursive CTE using iterative execution.
-// NOTE: This implementation executes at compile-time, not runtime.
-// A future optimization would generate runtime bytecode loops for efficiency.
+// compileRecursiveCTE compiles a recursive CTE using runtime bytecode generation.
+// It inlines both the anchor and recursive member into the main VM with a loop structure.
 func (s *Stmt) compileRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planner.CTEDefinition,
 	cteCtx *planner.CTEContext, cteTempTables map[string]*schema.Table, args []driver.NamedValue) (*schema.Table, error) {
 
-	compound, err := s.validateRecursiveCTE(def, cteName)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create and initialize temp tables
-	tempTable, currentTable, resultCursor, currentCursor, err := s.setupRecursiveTables(vm, cteName, def)
-	if err != nil {
-		return nil, err
-	}
-
-	// Register temp tables in schema
-	s.registerRecursiveTempTables(tempTable, currentTable)
-
-	// Step 1: Execute anchor member
-	numColumns := len(tempTable.Columns)
-	anchorRows, err := s.executeAnchorMember(vm, compound.Left, cteTempTables, numColumns, args)
-	if err != nil {
-		return nil, err
-	}
-
-	// Materialize anchor results
-	baseReg := len(vm.Mem)
-	vm.AllocMemory(baseReg + numColumns + 2)
-	recordReg := baseReg + numColumns
-	s.materializeRows(vm, anchorRows, numColumns, baseReg, recordReg, resultCursor, currentCursor)
-
-	// Step 2: Iterate recursive member
-	err = s.executeRecursiveIterations(vm, compound.Right, cteName, currentTable, cteTempTables,
-		numColumns, baseReg, recordReg, resultCursor, currentCursor, args)
-	if err != nil {
-		return nil, err
-	}
-
-	return tempTable, nil
+	return s.compileRecursiveCTEBytecode(vm, cteName, def, cteCtx, cteTempTables, args)
 }
 
 // validateRecursiveCTE validates that a CTE is properly structured for recursion.
@@ -488,56 +453,6 @@ func (s *Stmt) validateRecursiveCTE(def *planner.CTEDefinition, cteName string) 
 	}
 
 	return compound, nil
-}
-
-// setupRecursiveTables creates and initializes the ephemeral tables for recursive CTE execution.
-func (s *Stmt) setupRecursiveTables(vm *vdbe.VDBE, cteName string, def *planner.CTEDefinition) (
-	*schema.Table, *schema.Table, int, int, error) {
-
-	tempTableName := fmt.Sprintf("_cte_%s", cteName)
-	currentTableName := fmt.Sprintf("_cte_%s_current", cteName)
-
-	tempTable := s.createCTETempTable(tempTableName, def)
-	currentTable := s.createCTETempTable(currentTableName, def)
-
-	// Allocate cursors for both ephemeral tables
-	resultCursor := len(vm.Cursors)
-	vm.AllocCursors(resultCursor + 1)
-	currentCursor := len(vm.Cursors)
-	vm.AllocCursors(currentCursor + 1)
-
-	// Open ephemeral tables
-	numColumns := len(tempTable.Columns)
-	vm.AddOp(vdbe.OpOpenEphemeral, resultCursor, numColumns, 0)
-	vm.AddOp(vdbe.OpOpenEphemeral, currentCursor, numColumns, 0)
-
-	// Store cursor numbers in temp tables
-	tempTable.RootPage = uint32(resultCursor)
-	currentTable.RootPage = uint32(currentCursor)
-
-	return tempTable, currentTable, resultCursor, currentCursor, nil
-}
-
-// registerRecursiveTempTables registers temporary tables in the schema.
-func (s *Stmt) registerRecursiveTempTables(tempTable, currentTable *schema.Table) {
-	s.conn.schema.AddTableDirect(tempTable)
-	s.conn.schema.AddTableDirect(currentTable)
-}
-
-// executeAnchorMember executes the anchor (non-recursive) part of a recursive CTE.
-func (s *Stmt) executeAnchorMember(vm *vdbe.VDBE, anchorSelect *parser.SelectStmt,
-	cteTempTables map[string]*schema.Table, numColumns int, args []driver.NamedValue) ([][]interface{}, error) {
-
-	rewrittenAnchor := s.rewriteSelectWithCTETables(anchorSelect, cteTempTables)
-
-	anchorVM := vdbe.New()
-	anchorVM.Ctx = vm.Ctx
-	compiledAnchor, err := s.compileSelect(anchorVM, rewrittenAnchor, args)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile recursive CTE anchor: %w", err)
-	}
-
-	return s.collectRows(compiledAnchor, numColumns, "anchor")
 }
 
 // collectRows collects all rows from a compiled VDBE execution.
@@ -561,86 +476,6 @@ func (s *Stmt) collectRows(vm *vdbe.VDBE, numColumns int, description string) ([
 	return rows, nil
 }
 
-// materializeRows generates bytecode to materialize rows into ephemeral tables.
-func (s *Stmt) materializeRows(vm *vdbe.VDBE, rows [][]interface{}, numColumns, baseReg, recordReg,
-	resultCursor, currentCursor int) {
-
-	for _, row := range rows {
-		s.emitRowLoadBytecode(vm, row, numColumns, baseReg)
-		vm.AddOp(vdbe.OpMakeRecord, baseReg, numColumns, recordReg)
-		vm.AddOp(vdbe.OpInsert, resultCursor, recordReg, 0)
-		vm.AddOp(vdbe.OpInsert, currentCursor, recordReg, 0)
-	}
-}
-
-// emitRowLoadBytecode generates bytecode to load a row's values into registers.
-func (s *Stmt) emitRowLoadBytecode(vm *vdbe.VDBE, row []interface{}, numColumns, baseReg int) {
-	for i := 0; i < numColumns; i++ {
-		switch v := row[i].(type) {
-		case nil:
-			vm.AddOp(vdbe.OpNull, 0, baseReg+i, 0)
-		case int64:
-			vm.AddOp(vdbe.OpInteger, int(v), baseReg+i, 0)
-		case float64:
-			vm.AddOpWithP4Real(vdbe.OpReal, 0, baseReg+i, 0, v)
-		case string:
-			vm.AddOpWithP4Str(vdbe.OpString8, 0, baseReg+i, 0, v)
-		case []byte:
-			vm.AddOpWithP4Blob(vdbe.OpBlob, len(v), baseReg+i, 0, v)
-		default:
-			vm.AddOp(vdbe.OpNull, 0, baseReg+i, 0)
-		}
-	}
-}
-
-// executeRecursiveIterations executes the recursive member until no new rows are produced.
-func (s *Stmt) executeRecursiveIterations(vm *vdbe.VDBE, recursiveMember *parser.SelectStmt,
-	cteName string, currentTable *schema.Table, cteTempTables map[string]*schema.Table,
-	numColumns, baseReg, recordReg, resultCursor, currentCursor int, args []driver.NamedValue) error {
-
-	maxIterations := 1000
-
-	for iteration := 0; iteration < maxIterations; iteration++ {
-		newRows, err := s.executeRecursiveMember(vm, recursiveMember, cteName, currentTable,
-			cteTempTables, numColumns, args)
-		if err != nil {
-			return err
-		}
-
-		// If no new rows, exit loop
-		if len(newRows) == 0 {
-			break
-		}
-
-		// Materialize new rows
-		s.materializeRows(vm, newRows, numColumns, baseReg, recordReg, resultCursor, currentCursor)
-	}
-
-	return nil
-}
-
-// executeRecursiveMember executes one iteration of the recursive member.
-func (s *Stmt) executeRecursiveMember(vm *vdbe.VDBE, recursiveMember *parser.SelectStmt,
-	cteName string, currentTable *schema.Table, cteTempTables map[string]*schema.Table,
-	numColumns int, args []driver.NamedValue) ([][]interface{}, error) {
-
-	// Build temp tables map with CTE pointing to current table
-	recursiveTempTables := make(map[string]*schema.Table)
-	for k, v := range cteTempTables {
-		recursiveTempTables[k] = v
-	}
-	recursiveTempTables[cteName] = currentTable
-
-	rewrittenRecursive := s.rewriteSelectWithCTETables(recursiveMember, recursiveTempTables)
-	recursiveVM := vdbe.New()
-	recursiveVM.Ctx = vm.Ctx
-	compiledRecursive, err := s.compileSelect(recursiveVM, rewrittenRecursive, args)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile recursive member: %w", err)
-	}
-
-	return s.collectRows(compiledRecursive, numColumns, "recursive member")
-}
 
 func (s *Stmt) createCTETempTable(tableName string, def *planner.CTEDefinition) *schema.Table {
 	var columns []*schema.Column

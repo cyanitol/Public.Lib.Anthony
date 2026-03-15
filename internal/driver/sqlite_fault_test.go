@@ -830,7 +830,6 @@ func TestFault_InsertSelectWithDuplicates(t *testing.T) {
 // =============================================================================
 
 func TestFault_RecursiveCTETermination(t *testing.T) {
-	t.Skip("pre-existing failure - needs recursive CTE implementation")
 	db := setupMemoryDB(t)
 	defer db.Close()
 

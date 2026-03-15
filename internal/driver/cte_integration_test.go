@@ -113,8 +113,6 @@ func TestCTEIntegration_Multiple(t *testing.T) {
 
 // TestCTEIntegration_Recursive tests recursive CTEs.
 func TestCTEIntegration_Recursive(t *testing.T) {
-	t.Skip("CTE integration not fully implemented")
-	t.Skip("Recursive CTE requires bytecode loop generation - not yet implemented")
 
 	db, err := sql.Open(DriverName, ":memory:")
 	if err != nil {
@@ -145,8 +143,7 @@ func TestCTEIntegration_Recursive(t *testing.T) {
 
 // TestCTEIntegration_RecursiveHierarchy tests recursive CTEs with hierarchical data.
 func TestCTEIntegration_RecursiveHierarchy(t *testing.T) {
-	t.Skip("CTE integration not fully implemented")
-	t.Skip("Recursive CTE requires bytecode loop generation - not yet implemented")
+	t.Skip("Recursive CTE with JOIN needs column resolution fixes")
 
 	db, err := sql.Open(DriverName, ":memory:")
 	if err != nil {
