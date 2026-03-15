@@ -171,78 +171,101 @@ func (m *ShadowTableManager) LoadIndex(columns []string) (*InvertedIndex, error)
 
 	index := NewInvertedIndex(columns)
 
-	// Load structure record
+	// Load structure record (total docs, avg doc length)
+	m.loadStructureRecord(index)
+
+	// Load terms and their posting lists
+	m.loadTermPostings(index)
+
+	// Load document sizes
+	m.loadDocumentSizes(index)
+
+	return index, nil
+}
+
+// loadStructureRecord loads the structure metadata from the _data table.
+func (m *ShadowTableManager) loadStructureRecord(index *InvertedIndex) {
 	rows, err := m.db.Query(
 		fmt.Sprintf("SELECT block FROM %s_data WHERE id = ?", m.tableName),
 		int64(10),
 	)
-	if err != nil {
-		return index, nil // Empty index if no data
+	if err != nil || len(rows) == 0 || len(rows[0]) == 0 {
+		return
 	}
 
-	if len(rows) > 0 && len(rows[0]) > 0 {
-		if blob, ok := rows[0][0].([]byte); ok {
-			totalDocs, avgLen := m.decodeStructureRecord(blob)
-			index.totalDocs = totalDocs
-			index.avgDocLength = avgLen
-		}
+	if blob, ok := rows[0][0].([]byte); ok {
+		totalDocs, avgLen := m.decodeStructureRecord(blob)
+		index.totalDocs = totalDocs
+		index.avgDocLength = avgLen
 	}
+}
 
-	// Load terms and posting lists
+// loadTermPostings loads all terms and their posting lists from shadow tables.
+func (m *ShadowTableManager) loadTermPostings(index *InvertedIndex) {
 	termRows, err := m.db.Query(
 		fmt.Sprintf("SELECT term FROM %s_idx WHERE segid = ?", m.tableName),
 		int64(1),
 	)
 	if err != nil {
-		return index, nil
+		return
 	}
 
 	for _, row := range termRows {
-		if len(row) == 0 {
-			continue
-		}
-		term, ok := row[0].(string)
-		if !ok {
-			continue
-		}
+		m.loadSingleTermPosting(index, row)
+	}
+}
 
-		termID := hashTerm(term)
-		dataRows, err := m.db.Query(
-			fmt.Sprintf("SELECT block FROM %s_data WHERE id = ?", m.tableName),
-			termID,
-		)
-		if err != nil || len(dataRows) == 0 {
-			continue
-		}
-
-		if blob, ok := dataRows[0][0].([]byte); ok {
-			postings := m.decodePostingList(blob)
-			index.index[term] = postings
-		}
+// loadSingleTermPosting loads the posting list for one term.
+func (m *ShadowTableManager) loadSingleTermPosting(index *InvertedIndex, row []interface{}) {
+	if len(row) == 0 {
+		return
+	}
+	term, ok := row[0].(string)
+	if !ok {
+		return
 	}
 
-	// Load document sizes
+	termID := hashTerm(term)
+	dataRows, err := m.db.Query(
+		fmt.Sprintf("SELECT block FROM %s_data WHERE id = ?", m.tableName),
+		termID,
+	)
+	if err != nil || len(dataRows) == 0 {
+		return
+	}
+
+	if blob, ok := dataRows[0][0].([]byte); ok {
+		postings := m.decodePostingList(blob)
+		index.index[term] = postings
+	}
+}
+
+// loadDocumentSizes loads document sizes from the _docsize table.
+func (m *ShadowTableManager) loadDocumentSizes(index *InvertedIndex) {
 	sizeRows, err := m.db.Query(
 		fmt.Sprintf("SELECT id, sz FROM %s_docsize", m.tableName),
 	)
 	if err != nil {
-		return index, nil
+		return
 	}
 
 	for _, row := range sizeRows {
-		if len(row) < 2 {
-			continue
-		}
-		docID, ok1 := row[0].(int64)
-		szBlob, ok2 := row[1].([]byte)
-		if !ok1 || !ok2 {
-			continue
-		}
-		length := m.decodeVarint(szBlob)
-		index.docLengths[DocumentID(docID)] = int(length)
+		m.loadSingleDocSize(index, row)
 	}
+}
 
-	return index, nil
+// loadSingleDocSize loads the size for one document.
+func (m *ShadowTableManager) loadSingleDocSize(index *InvertedIndex, row []interface{}) {
+	if len(row) < 2 {
+		return
+	}
+	docID, ok1 := row[0].(int64)
+	szBlob, ok2 := row[1].([]byte)
+	if !ok1 || !ok2 {
+		return
+	}
+	length := m.decodeVarint(szBlob)
+	index.docLengths[DocumentID(docID)] = int(length)
 }
 
 // SaveContent saves document content to the _content shadow table.
