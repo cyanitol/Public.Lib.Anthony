@@ -1100,7 +1100,6 @@ func TestStress_WindowFunctions(t *testing.T) {
 // =============================================================================
 
 func TestStress_RecursiveCTE(t *testing.T) {
-	t.Skip("pre-existing failure - needs recursive CTE fixes")
 	if testing.Short() {
 		t.Skip("skipping stress test in short mode")
 	}

@@ -237,11 +237,12 @@ const (
 	OpWindowNthValue   Opcode = 213 // NTH_VALUE() window function
 	OpAggDistinct      Opcode = 211 // Check if value is distinct for aggregate
 	OpDistinctRow      Opcode = 212 // Check if row is distinct for SELECT DISTINCT
+	OpClearEphemeral Opcode = 214 // Clear all rows from ephemeral table (P1=cursor)
 
 	// Trigger opcodes
-	OpTriggerBefore Opcode = 213 // Execute BEFORE triggers: P1=event, P2=skip-addr, P4.Z=table
-	OpTriggerAfter  Opcode = 214 // Execute AFTER triggers: P1=event, P2=0, P4.Z=table
-	OpRaise         Opcode = 215 // RAISE function: P1=type(0=IGNORE,1=ROLLBACK,2=ABORT,3=FAIL), P4.Z=message
+	OpTriggerBefore Opcode = 215 // Execute BEFORE triggers: P1=event, P2=skip-addr, P4.Z=table
+	OpTriggerAfter  Opcode = 216 // Execute AFTER triggers: P1=event, P2=0, P4.Z=table
+	OpRaise         Opcode = 217 // RAISE function: P1=type(0=IGNORE,1=ROLLBACK,2=ABORT,3=FAIL), P4.Z=message
 )
 
 // OpcodeNames maps opcodes to their string names for debugging.
@@ -414,6 +415,7 @@ var OpcodeNames = map[Opcode]string{
 	OpWindowNthValue:   "WindowNthValue",
 	OpAggDistinct:      "AggDistinct",
 	OpDistinctRow:      "DistinctRow",
+	OpClearEphemeral:   "ClearEphemeral",
 	OpTriggerBefore:    "TriggerBefore",
 	OpTriggerAfter:     "TriggerAfter",
 	OpRaise:            "Raise",
