@@ -29,10 +29,11 @@ func insertFirstRow(stmt *parser.InsertStmt) ([]parser.Expression, error) {
 func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
 
-	table, ok := s.conn.schema.GetTable(stmt.Table)
+	table, db, _, ok := s.conn.dbRegistry.ResolveTable(stmt.Schema, stmt.Table)
 	if !ok {
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
+	s.setVdbeContextForDatabase(vm, db)
 
 	// Phase 3.5 Note: BEFORE INSERT trigger execution framework exists but is not yet
 	// integrated into the VDBE execution path. Triggers are defined and stored in schema,
@@ -177,7 +178,7 @@ type insertSelectContext struct {
 // prepareInsertSelectContext sets up the context for INSERT...SELECT compilation.
 func (s *Stmt) prepareInsertSelectContext(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driver.NamedValue) (*insertSelectContext, error) {
 	// Get target table schema
-	targetTable, ok := s.conn.schema.GetTable(stmt.Table)
+	targetTable, _, _, ok := s.conn.dbRegistry.ResolveTable(stmt.Schema, stmt.Table)
 	if !ok {
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
@@ -200,7 +201,7 @@ func (s *Stmt) prepareInsertSelectContext(vm *vdbe.VDBE, stmt *parser.InsertStmt
 		return nil, fmt.Errorf("INSERT...SELECT requires FROM clause: %w", err)
 	}
 
-	sourceTable, ok := s.conn.schema.GetTable(sourceTableName)
+	sourceTable, _, _, ok := s.conn.dbRegistry.ResolveTable("", sourceTableName)
 	if !ok {
 		return nil, fmt.Errorf("source table not found: %s", sourceTableName)
 	}
@@ -667,11 +668,12 @@ func compileDefaultArg(vm *vdbe.VDBE, val driver.Value, reg int) {
 func (s *Stmt) compileUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
 
-	// Look up table in schema
-	table, ok := s.conn.schema.GetTable(stmt.Table)
+	// Look up table in schema (supports cross-database qualified names)
+	table, db, _, ok := s.conn.dbRegistry.ResolveTable(stmt.Schema, stmt.Table)
 	if !ok {
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
+	s.setVdbeContextForDatabase(vm, db)
 
 	// Build update map and column list
 	updateMap, _ := s.buildUpdateMap(stmt) // updatedColumns used for trigger execution (not yet operational)
@@ -899,11 +901,12 @@ func countExprParams(e parser.Expression) int {
 func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
 
-	// Look up table in schema
-	table, ok := s.conn.schema.GetTable(stmt.Table)
+	// Look up table in schema (supports cross-database qualified names)
+	table, db, _, ok := s.conn.dbRegistry.ResolveTable(stmt.Schema, stmt.Table)
 	if !ok {
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
+	s.setVdbeContextForDatabase(vm, db)
 
 	// TODO Phase 3.5: BEFORE DELETE trigger execution
 	// Requires VDBE runtime integration. Framework exists but not yet operational.

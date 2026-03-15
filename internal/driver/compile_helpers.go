@@ -337,9 +337,13 @@ func (s *Stmt) collectExplicitJoinTables(stmt *parser.SelectStmt, startCursorIdx
 }
 
 // createTableInfoFromRef creates a stmtTableInfo from a table reference.
+// Supports cross-database qualified names (schema.table).
 func (s *Stmt) createTableInfoFromRef(tableRef parser.TableOrSubquery, cursorIdx int) (stmtTableInfo, error) {
-	table, ok := s.conn.schema.GetTable(tableRef.TableName)
+	table, _, _, ok := s.conn.dbRegistry.ResolveTable(tableRef.Schema, tableRef.TableName)
 	if !ok {
+		if tableRef.Schema != "" {
+			return stmtTableInfo{}, fmt.Errorf("table not found: %s.%s", tableRef.Schema, tableRef.TableName)
+		}
 		return stmtTableInfo{}, fmt.Errorf("table not found: %s", tableRef.TableName)
 	}
 

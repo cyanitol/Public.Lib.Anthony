@@ -179,8 +179,16 @@ func (c *Conn) removeFromDriver() {
 	}
 }
 
-// closePager closes the pager, rolling back any active transaction first.
+// closePager closes attached databases and the main pager,
+// rolling back any active transaction first.
 func (c *Conn) closePager(pager pager.PagerInterface, inTx bool) error {
+	// Close all attached databases (excludes main and temp)
+	if c.dbRegistry != nil {
+		if err := c.dbRegistry.CloseAttached(); err != nil {
+			return fmt.Errorf("failed to close attached databases: %w", err)
+		}
+	}
+
 	if pager == nil {
 		return nil
 	}
@@ -192,7 +200,7 @@ func (c *Conn) closePager(pager pager.PagerInterface, inTx bool) error {
 		}
 	}
 
-	// Close pager
+	// Close main pager
 	return pager.Close()
 }
 

@@ -283,6 +283,8 @@ func (s *Stmt) compilePragma(vm *vdbe.VDBE, stmt *parser.PragmaStmt, args []driv
 		return s.compilePragmaJournalMode(vm, stmt)
 	case "page_count":
 		return s.compilePragmaPageCount(vm)
+	case "database_list":
+		return s.compilePragmaDatabaseList(vm)
 	default:
 		// For unsupported PRAGMAs, return empty result
 		vm.AddOp(vdbe.OpInit, 0, 0, 0)
@@ -518,6 +520,24 @@ func (s *Stmt) compilePragmaJournalModeGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
 	mode := s.getCurrentJournalMode()
 	vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, mode)
 	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaDatabaseList handles PRAGMA database_list.
+// Returns rows with columns: seq, name, file.
+func (s *Stmt) compilePragmaDatabaseList(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"seq", "name", "file"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	databases := s.conn.dbRegistry.ListDatabasesOrdered()
+	for i, db := range databases {
+		vm.AddOpWithP4Int(vdbe.OpInteger, i, 1, 0, int32(i))
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 2, 0, db.Name)
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 3, 0, db.Path)
+		vm.AddOp(vdbe.OpResultRow, 1, 3, 0)
+	}
+
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	return vm, nil
 }
