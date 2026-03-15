@@ -349,6 +349,7 @@ func init() {
 		OpWindowLead:       (*VDBE).execWindowLead,
 		OpWindowFirstValue: (*VDBE).execWindowFirstValue,
 		OpWindowLastValue:  (*VDBE).execWindowLastValue,
+		OpWindowNthValue:   (*VDBE).execWindowNthValue,
 		OpAggDistinct:      (*VDBE).execAggDistinct,
 		OpDistinctRow:      (*VDBE).execDistinctRow,
 	}
@@ -6059,6 +6060,32 @@ func (v *VDBE) execWindowLastValue(instr *Instruction) error {
 	}
 
 	return mem.Copy(lastValue)
+}
+
+// execWindowNthValue implements OpWindowNthValue - NTH_VALUE() window function
+// P1 = window state index
+// P2 = output register
+// P3 = column index to retrieve
+// P4 = N (which row in the frame, 1-based)
+func (v *VDBE) execWindowNthValue(instr *Instruction) error {
+	windowState, err := v.getWindowState(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	n := int(instr.P4.I)
+	if n < 1 {
+		n = 1
+	}
+
+	nthValue := windowState.GetNthValue(instr.P3, n)
+
+	mem, mErr := v.GetMem(instr.P2)
+	if mErr != nil {
+		return mErr
+	}
+
+	return mem.Copy(nthValue)
 }
 
 // getWindowState retrieves a window state by index.

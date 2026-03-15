@@ -17,6 +17,7 @@ func RegisterWindowFunctions(r *Registry) {
 	r.Register(&LeadFunc{})
 	r.Register(&FirstValueFunc{})
 	r.Register(&LastValueFunc{})
+	r.Register(&NthValueFunc{})
 }
 
 // RowNumberFunc implements ROW_NUMBER() window function
@@ -90,6 +91,15 @@ func (f *LastValueFunc) Name() string { return "last_value" }
 func (f *LastValueFunc) NumArgs() int { return 1 }
 func (f *LastValueFunc) Call([]Value) (Value, error) {
 	return nil, fmt.Errorf("last_value() is a window function")
+}
+
+// NthValueFunc implements NTH_VALUE() window function
+type NthValueFunc struct{}
+
+func (f *NthValueFunc) Name() string { return "nth_value" }
+func (f *NthValueFunc) NumArgs() int { return 2 }
+func (f *NthValueFunc) Call([]Value) (Value, error) {
+	return nil, fmt.Errorf("nth_value() is a window function")
 }
 
 // WindowAggregateWrapper wraps an aggregate function for use in window context

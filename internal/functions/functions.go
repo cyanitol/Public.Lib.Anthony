@@ -433,5 +433,8 @@ func DefaultRegistry() *Registry {
 	// Register window functions
 	RegisterWindowFunctions(r)
 
+	// Register JSON table-valued functions
+	RegisterJSONTableFunctions(r)
+
 	return r
 }

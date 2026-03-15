@@ -234,6 +234,7 @@ const (
 	OpWindowLead       Opcode = 208 // LEAD() window function
 	OpWindowFirstValue Opcode = 209 // FIRST_VALUE() window function
 	OpWindowLastValue  Opcode = 210 // LAST_VALUE() window function
+	OpWindowNthValue   Opcode = 213 // NTH_VALUE() window function
 	OpAggDistinct      Opcode = 211 // Check if value is distinct for aggregate
 	OpDistinctRow      Opcode = 212 // Check if row is distinct for SELECT DISTINCT
 )
@@ -405,6 +406,7 @@ var OpcodeNames = map[Opcode]string{
 	OpWindowLead:       "WindowLead",
 	OpWindowFirstValue: "WindowFirstValue",
 	OpWindowLastValue:  "WindowLastValue",
+	OpWindowNthValue:   "WindowNthValue",
 	OpAggDistinct:      "AggDistinct",
 	OpDistinctRow:      "DistinctRow",
 }

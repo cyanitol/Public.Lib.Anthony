@@ -1022,6 +1022,16 @@ var strftimeHandlers = map[byte]func(*DateTime) string{
 	'f': func(dt *DateTime) string { return fmt.Sprintf("%06.3f", dt.second) },
 	's': func(dt *DateTime) string { return fmt.Sprintf("%d", int64(dt.getUnixEpoch())) },
 	'J': func(dt *DateTime) string { return fmt.Sprintf("%.16g", dt.getJulianDay()) },
+	'w': func(dt *DateTime) string { return fmt.Sprintf("%d", dt.getWeekday()) },
+	'u': func(dt *DateTime) string {
+		wd := dt.getWeekday()
+		if wd == 0 {
+			wd = 7
+		}
+		return fmt.Sprintf("%d", wd)
+	},
+	'W': func(dt *DateTime) string { return fmt.Sprintf("%02d", dt.getWeekNumber()) },
+	'j': func(dt *DateTime) string { return fmt.Sprintf("%03d", dt.getDayOfYear()) },
 }
 
 // strftimeSpecifier resolves a single format specifier byte and appends its
