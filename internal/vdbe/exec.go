@@ -2115,7 +2115,7 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 
 // execInsertWithRowID handles INSERT for regular rowid-based tables.
 func (v *VDBE) execInsertWithRowID(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, tableName string, isUpdate bool, rowidReg int, conflictMode int32) error {
-	rowid, err := v.getInsertRowid(rowidReg, cursor)
+	rowid, err := v.getInsertRowid(rowidReg, cursor, tableName)
 	if err != nil {
 		return err
 	}
@@ -2668,21 +2668,66 @@ func (v *VDBE) getInsertPayload(reg int) ([]byte, error) {
 }
 
 // getInsertRowid determines the rowid for the insert operation.
-func (v *VDBE) getInsertRowid(p3 int, cursor *Cursor) (int64, error) {
+func (v *VDBE) getInsertRowid(p3 int, cursor *Cursor, tableName string) (int64, error) {
+	hasExplicit := false
+	var explicitRowid int64
+
 	// Check if a register was specified with the rowid
 	if p3 != 0 {
 		rowidMem, err := v.GetMem(p3)
 		if err != nil {
 			return 0, err
 		}
-		// If register is not NULL, use its value as the rowid
+		// If register is not NULL, capture the explicit rowid
 		if !rowidMem.IsNull() {
-			return rowidMem.IntValue(), nil
+			hasExplicit = true
+			explicitRowid = rowidMem.IntValue()
 		}
-		// NULL in register means auto-generate rowid (fall through)
 	}
 
-	// Auto-generate a new rowid
+	// For AUTOINCREMENT tables, use the sequence manager
+	if sm := v.getSequenceManager(); sm != nil && sm.HasSequence(tableName) {
+		return v.getAutoincrementRowid(sm, tableName, hasExplicit, explicitRowid, cursor)
+	}
+
+	// Non-AUTOINCREMENT: use explicit rowid if provided
+	if hasExplicit {
+		return explicitRowid, nil
+	}
+
+	// Auto-generate a new rowid from btree
+	return v.generateNewRowid(cursor)
+}
+
+// getAutoincrementRowid generates a rowid using the sequence manager.
+func (v *VDBE) getAutoincrementRowid(sm sequenceUpdater, tableName string, hasExplicit bool, explicitRowid int64, cursor *Cursor) (int64, error) {
+	if hasExplicit {
+		sm.UpdateSequence(tableName, explicitRowid)
+		return explicitRowid, nil
+	}
+
+	// Get current max rowid from btree
+	var currentMax int64
+	bt, ok := v.Ctx.Btree.(*btree.Btree)
+	if ok {
+		maxRowid, err := bt.NewRowid(cursor.RootPage)
+		if err != nil {
+			currentMax = 0 // empty table
+		} else {
+			currentMax = maxRowid - 1 // NewRowid returns max+1
+		}
+	}
+
+	newRowid, err := sm.NextSequence(tableName, currentMax)
+	if err != nil {
+		return 0, err
+	}
+	cursor.LastRowid = newRowid
+	return newRowid, nil
+}
+
+// generateNewRowid generates a new rowid from the btree.
+func (v *VDBE) generateNewRowid(cursor *Cursor) (int64, error) {
 	bt, ok := v.Ctx.Btree.(*btree.Btree)
 	if !ok {
 		return 0, fmt.Errorf("invalid btree type for rowid generation")

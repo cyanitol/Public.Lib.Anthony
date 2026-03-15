@@ -569,7 +569,13 @@ func (s *SorterWithSpill) mergeRuns(readers []*runReader) [][]*Mem {
 			heap.items[0] = reader
 			heap.down(0)
 		} else {
-			heap.items = heap.items[1:]
+			// Move last element to front and shrink, then restore heap
+			n := len(heap.items)
+			heap.items[0] = heap.items[n-1]
+			heap.items = heap.items[:n-1]
+			if len(heap.items) > 0 {
+				heap.down(0)
+			}
 		}
 	}
 

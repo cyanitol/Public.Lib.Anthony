@@ -55,6 +55,13 @@ func (s *Stmt) compileCreateTable(vm *vdbe.VDBE, stmt *parser.CreateTableStmt, a
 		return nil, err
 	}
 
+	// If table has AUTOINCREMENT, ensure sqlite_sequence table exists
+	if _, hasAutoincrement := table.HasAutoincrementColumn(); hasAutoincrement {
+		if err := s.ensureSqliteSequenceTable(); err != nil {
+			return nil, err
+		}
+	}
+
 	// Persist schema to sqlite_master
 	if s.conn.btree != nil {
 		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
@@ -66,6 +73,29 @@ func (s *Stmt) compileCreateTable(vm *vdbe.VDBE, stmt *parser.CreateTableStmt, a
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
 	return vm, nil
+}
+
+// ensureSqliteSequenceTable creates the sqlite_sequence table if it does not exist.
+// This table is required for AUTOINCREMENT support and is automatically created
+// when the first table with an AUTOINCREMENT column is created.
+func (s *Stmt) ensureSqliteSequenceTable() error {
+	if _, exists := s.conn.schema.GetTable("sqlite_sequence"); exists {
+		return nil
+	}
+
+	var rootPage uint32
+	if s.conn.btree != nil {
+		var err error
+		rootPage, err = s.conn.btree.CreateTable()
+		if err != nil {
+			return fmt.Errorf("failed to create sqlite_sequence table: %w", err)
+		}
+	} else {
+		rootPage = 3 // placeholder for in-memory databases
+	}
+
+	s.conn.schema.EnsureSqliteSequenceTable(rootPage)
+	return nil
 }
 
 // registerForeignKeyConstraints registers foreign key constraints from a CREATE TABLE statement

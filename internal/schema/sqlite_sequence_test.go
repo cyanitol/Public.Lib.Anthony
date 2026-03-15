@@ -64,7 +64,10 @@ func TestNextSequence(t *testing.T) {
 	sm := NewSequenceManager()
 
 	// First call with no existing sequence
-	next := sm.NextSequence("users", 0)
+	next, err := sm.NextSequence("users", 0)
+	if err != nil {
+		t.Fatalf("NextSequence() error = %v", err)
+	}
 	if next != 1 {
 		t.Errorf("NextSequence() = %d, want 1", next)
 	}
@@ -76,13 +79,19 @@ func TestNextSequence(t *testing.T) {
 	}
 
 	// Second call
-	next = sm.NextSequence("users", 1)
+	next, err = sm.NextSequence("users", 1)
+	if err != nil {
+		t.Fatalf("NextSequence() error = %v", err)
+	}
 	if next != 2 {
 		t.Errorf("NextSequence() = %d, want 2", next)
 	}
 
 	// With explicit higher rowid
-	next = sm.NextSequence("users", 10)
+	next, err = sm.NextSequence("users", 10)
+	if err != nil {
+		t.Fatalf("NextSequence() error = %v", err)
+	}
 	if next != 11 {
 		t.Errorf("NextSequence() with higher currentMaxRowid = %d, want 11", next)
 	}
@@ -340,13 +349,19 @@ func TestGenerateAutoincrementRowid(t *testing.T) {
 	sm := NewSequenceManager()
 
 	// No explicit rowid - should generate next sequence
-	rowid := GenerateAutoincrementRowid(sm, "users", 0, false, 0)
+	rowid, err := GenerateAutoincrementRowid(sm, "users", 0, false, 0)
+	if err != nil {
+		t.Fatalf("GenerateAutoincrementRowid() error = %v", err)
+	}
 	if rowid != 1 {
 		t.Errorf("GenerateAutoincrementRowid() = %d, want 1", rowid)
 	}
 
 	// Explicit rowid provided
-	rowid = GenerateAutoincrementRowid(sm, "users", 10, true, 1)
+	rowid, err = GenerateAutoincrementRowid(sm, "users", 10, true, 1)
+	if err != nil {
+		t.Fatalf("GenerateAutoincrementRowid() error = %v", err)
+	}
 	if rowid != 10 {
 		t.Errorf("GenerateAutoincrementRowid() with explicit rowid = %d, want 10", rowid)
 	}
@@ -358,19 +373,28 @@ func TestGenerateAutoincrementRowid(t *testing.T) {
 	}
 
 	// Next auto-generated should be 11
-	rowid = GenerateAutoincrementRowid(sm, "users", 0, false, 10)
+	rowid, err = GenerateAutoincrementRowid(sm, "users", 0, false, 10)
+	if err != nil {
+		t.Fatalf("GenerateAutoincrementRowid() error = %v", err)
+	}
 	if rowid != 11 {
 		t.Errorf("GenerateAutoincrementRowid() = %d, want 11", rowid)
 	}
 
 	// Explicit rowid = 0 should be treated as NULL
-	rowid = GenerateAutoincrementRowid(sm, "users", 0, true, 11)
+	rowid, err = GenerateAutoincrementRowid(sm, "users", 0, true, 11)
+	if err != nil {
+		t.Fatalf("GenerateAutoincrementRowid() error = %v", err)
+	}
 	if rowid != 12 {
 		t.Errorf("GenerateAutoincrementRowid() with explicit 0 = %d, want 12", rowid)
 	}
 
 	// Higher currentMaxRowid
-	rowid = GenerateAutoincrementRowid(sm, "orders", 0, false, 100)
+	rowid, err = GenerateAutoincrementRowid(sm, "orders", 0, false, 100)
+	if err != nil {
+		t.Fatalf("GenerateAutoincrementRowid() error = %v", err)
+	}
 	if rowid != 101 {
 		t.Errorf("GenerateAutoincrementRowid() with high currentMaxRowid = %d, want 101", rowid)
 	}
@@ -386,7 +410,7 @@ func TestConcurrentSequenceAccess(t *testing.T) {
 	// Writer goroutine
 	go func() {
 		for i := 0; i < 100; i++ {
-			sm.NextSequence("users", int64(i))
+			_, _ = sm.NextSequence("users", int64(i))
 		}
 		done <- true
 	}()
