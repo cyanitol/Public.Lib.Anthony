@@ -1100,6 +1100,43 @@ func (v *VariableExpr) String() string {
 }
 
 // =============================================================================
+// RAISE Expression (for trigger bodies)
+// =============================================================================
+
+// RaiseType represents the type of RAISE function in a trigger.
+type RaiseType int
+
+const (
+	RaiseIgnore   RaiseType = iota // RAISE(IGNORE) - skip the rest of the trigger
+	RaiseRollback                  // RAISE(ROLLBACK, msg) - rollback transaction
+	RaiseAbort                     // RAISE(ABORT, msg) - abort current statement
+	RaiseFail                      // RAISE(FAIL, msg) - fail but keep prior changes
+)
+
+// RaiseExpr represents a RAISE function call within a trigger body.
+type RaiseExpr struct {
+	Type    RaiseType // The raise action type
+	Message string    // Error message (empty for IGNORE)
+}
+
+func (r *RaiseExpr) node()       {}
+func (r *RaiseExpr) expression() {}
+func (r *RaiseExpr) String() string {
+	switch r.Type {
+	case RaiseIgnore:
+		return "RAISE(IGNORE)"
+	case RaiseRollback:
+		return "RAISE(ROLLBACK, " + r.Message + ")"
+	case RaiseAbort:
+		return "RAISE(ABORT, " + r.Message + ")"
+	case RaiseFail:
+		return "RAISE(FAIL, " + r.Message + ")"
+	default:
+		return "RAISE(UNKNOWN)"
+	}
+}
+
+// =============================================================================
 // UPSERT (ON CONFLICT) Clause
 // =============================================================================
 

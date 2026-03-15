@@ -295,6 +295,7 @@ func (s *Stmt) setVdbeContextForDatabase(vm *vdbe.VDBE, db *schema.Database) {
 		CollationRegistry:  interface{}(s.conn.collRegistry),
 		FKManager:          interface{}(s.conn.fkManager),
 		ForeignKeysEnabled: s.conn.foreignKeysEnabled,
+		TriggerCompiler:    NewTriggerRuntime(s.conn),
 	}
 }
 

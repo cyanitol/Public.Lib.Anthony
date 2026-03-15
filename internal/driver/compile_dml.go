@@ -34,22 +34,10 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
 
-	// Phase 3.5 Note: BEFORE INSERT trigger execution framework exists but is not yet
-	// integrated into the VDBE execution path. Triggers are defined and stored in schema,
-	// but actual execution requires VDBE-level changes to handle OLD/NEW pseudo-tables.
-	//
-	// The trigger infrastructure is complete:
-	// - schema.CreateTrigger() stores trigger definitions
-	// - schema.GetTableTriggers() retrieves triggers by table/event/timing
-	// - engine.TriggerExecutor provides execution framework
-	// - engine.SubstituteOldNewReferences() handles OLD/NEW substitution
-	//
-	// What's missing for full execution:
-	// - VDBE opcodes need to call trigger executor at runtime
-	// - OLD/NEW values must be extracted from current row data during DML operations
-	// - Trigger bytecode needs to be inlined or executed via callback in VDBE loop
-	//
-	// This will be completed in a future phase focused on VDBE enhancements.
+	// Trigger execution is wired through OpTriggerBefore/OpTriggerAfter opcodes
+	// emitted in compileInsertValues, compileUpdate, and compileDelete.
+	// At VDBE runtime, these opcodes invoke TriggerCompilerInterface to compile
+	// and execute trigger body statements with actual OLD/NEW row data.
 
 	// Handle INSERT...SELECT
 	if stmt.Select != nil {
@@ -99,14 +87,27 @@ func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table
 	// Determine conflict resolution mode for INSERT OR IGNORE/REPLACE
 	conflictMode := getConflictMode(stmt.OnConflict)
 
+	hasTriggers := s.tableHasTriggers(stmt.Table)
+
 	// Loop over all rows in VALUES clause
 	for _, row := range stmt.Values {
-		s.emitInsertRow(vm, table, colNames, row, rowidColIdx, rowidReg, recordStartReg, numRecordCols, conflictMode, args, &paramIdx)
-	}
+		// Emit BEFORE INSERT trigger (P1=0 for INSERT event)
+		var beforeAddr int
+		if hasTriggers {
+			beforeAddr = vm.AddOp(vdbe.OpTriggerBefore, 0, 0, 0)
+			vm.Program[beforeAddr].P4.Z = stmt.Table
+		}
 
-	// TODO Phase 3.5: AFTER INSERT trigger execution
-	// Same limitation as BEFORE triggers - requires VDBE runtime integration.
-	// Keeping framework in place for future implementation.
+		s.emitInsertRow(vm, table, colNames, row, rowidColIdx, rowidReg, recordStartReg, numRecordCols, conflictMode, args, &paramIdx)
+
+		// Emit AFTER INSERT trigger
+		if hasTriggers {
+			afterAddr := vm.AddOp(vdbe.OpTriggerAfter, 0, 0, 0)
+			vm.Program[afterAddr].P4.Z = stmt.Table
+			// Fix BEFORE trigger skip address (for RAISE(IGNORE))
+			vm.Program[beforeAddr].P2 = vm.NumOps()
+		}
+	}
 
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
@@ -674,11 +675,7 @@ func (s *Stmt) compileUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt, args []driv
 	}
 
 	// Build update map and column list
-	updateMap, _ := s.buildUpdateMap(stmt) // updatedColumns used for trigger execution (not yet operational)
-
-	// TODO Phase 3.5: BEFORE/AFTER UPDATE trigger execution
-	// Requires VDBE runtime integration. Framework exists but not yet operational.
-	// When implemented, use updatedColumns parameter to determine which triggers fire.
+	updateMap, _ := s.buildUpdateMap(stmt)
 
 	// Setup VDBE and code generator
 	gen, numRecordCols := s.setupUpdateVDBE(vm, table, stmt)
@@ -755,6 +752,14 @@ func (s *Stmt) emitUpdateLoop(vm *vdbe.VDBE, stmt *parser.UpdateStmt, table *sch
 	// Reset args for SET clause
 	gen.SetArgs(argValues)
 
+	// Emit BEFORE UPDATE trigger (P1=1 for UPDATE event)
+	hasTriggers := s.tableHasTriggers(stmt.Table)
+	var beforeAddr int
+	if hasTriggers {
+		beforeAddr = vm.AddOp(vdbe.OpTriggerBefore, 1, 0, 0)
+		vm.Program[beforeAddr].P4.Z = stmt.Table
+	}
+
 	// Build updated record
 	recordStartReg, newRowidReg := s.emitUpdateRecordBuild(vm, table, updateMap, numRecordCols, gen)
 
@@ -766,6 +771,13 @@ func (s *Stmt) emitUpdateLoop(vm *vdbe.VDBE, stmt *parser.UpdateStmt, table *sch
 
 	// Create record, delete old, insert new
 	s.emitUpdateRowReplacement(vm, recordStartReg, numRecordCols, effectiveRowidReg, table.Name, gen)
+
+	// Emit AFTER UPDATE trigger
+	if hasTriggers {
+		afterAddr := vm.AddOp(vdbe.OpTriggerAfter, 1, 0, 0)
+		vm.Program[afterAddr].P4.Z = stmt.Table
+		vm.Program[beforeAddr].P2 = vm.NumOps()
+	}
 
 	// Fix WHERE skip target
 	if stmt.Where != nil {
@@ -905,9 +917,6 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
 
-	// TODO Phase 3.5: BEFORE DELETE trigger execution
-	// Requires VDBE runtime integration. Framework exists but not yet operational.
-
 	vm.AllocMemory(10)
 	vm.AllocCursors(1)
 
@@ -919,6 +928,8 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 
 	// Start iteration from beginning
 	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+
+	hasTriggers := s.tableHasTriggers(stmt.Table)
 
 	// If WHERE clause exists, compile and evaluate it
 	if stmt.Where != nil {
@@ -947,23 +958,49 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 		// Skip deletion if WHERE condition is false (OpIfNot jumps when register is false/0)
 		skipAddr := vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
 
+		// Emit BEFORE DELETE trigger (P1=2 for DELETE event)
+		var beforeAddr int
+		if hasTriggers {
+			beforeAddr = vm.AddOp(vdbe.OpTriggerBefore, 2, 0, 0)
+			vm.Program[beforeAddr].P4.Z = stmt.Table
+		}
+
 		// Delete the current row (only if WHERE is true)
 		delAddr := vm.AddOp(vdbe.OpDelete, 0, 0, 0)
 		vm.Program[delAddr].P4.Z = table.Name
+
+		// Emit AFTER DELETE trigger
+		if hasTriggers {
+			afterAddr := vm.AddOp(vdbe.OpTriggerAfter, 2, 0, 0)
+			vm.Program[afterAddr].P4.Z = stmt.Table
+			vm.Program[beforeAddr].P2 = vm.NumOps()
+		}
 
 		// Fix up the skip target to point past the Delete to the Next instruction
 		vm.Program[skipAddr].P2 = vm.NumOps()
 	} else {
 		// No WHERE clause: delete current row unconditionally
+
+		// Emit BEFORE DELETE trigger
+		var beforeAddr int
+		if hasTriggers {
+			beforeAddr = vm.AddOp(vdbe.OpTriggerBefore, 2, 0, 0)
+			vm.Program[beforeAddr].P4.Z = stmt.Table
+		}
+
 		delAddr := vm.AddOp(vdbe.OpDelete, 0, 0, 0)
 		vm.Program[delAddr].P4.Z = table.Name
+
+		// Emit AFTER DELETE trigger
+		if hasTriggers {
+			afterAddr := vm.AddOp(vdbe.OpTriggerAfter, 2, 0, 0)
+			vm.Program[afterAddr].P4.Z = stmt.Table
+			vm.Program[beforeAddr].P2 = vm.NumOps()
+		}
 	}
 
 	// Move to next row and loop back (common for both WHERE and non-WHERE cases)
 	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
-
-	// TODO Phase 3.5: AFTER DELETE trigger execution
-	// Requires VDBE runtime integration. Framework exists but not yet operational.
 
 	// Close table cursor
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)

@@ -102,6 +102,36 @@ type VDBEContext struct {
 	// Foreign key constraint support
 	FKManager          interface{} // *constraint.ForeignKeyManager
 	ForeignKeysEnabled bool        // PRAGMA foreign_keys setting
+
+	// Trigger support
+	TriggerCompiler interface{} // Callback for compiling trigger body statements
+}
+
+// TriggerRowData holds OLD and NEW pseudo-table row data for trigger execution.
+type TriggerRowData struct {
+	OldRow map[string]interface{} // OLD pseudo-table (nil for INSERT)
+	NewRow map[string]interface{} // NEW pseudo-table (nil for DELETE)
+}
+
+// RaiseError represents a RAISE function error within a trigger.
+type RaiseError struct {
+	Type    int    // 0=IGNORE, 1=ROLLBACK, 2=ABORT, 3=FAIL
+	Message string // Error message
+}
+
+// Error implements the error interface.
+func (r *RaiseError) Error() string {
+	return r.Message
+}
+
+// IsIgnore returns true if this is a RAISE(IGNORE).
+func (r *RaiseError) IsIgnore() bool {
+	return r.Type == 0
+}
+
+// IsRollback returns true if this is a RAISE(ROLLBACK, msg).
+func (r *RaiseError) IsRollback() bool {
+	return r.Type == 1
 }
 
 // VDBE represents the Virtual Database Engine - a bytecode virtual machine.
@@ -158,6 +188,7 @@ type VDBE struct {
 	Parent      *VDBE                  // Parent VDBE (for sub-programs/triggers)
 	SubPrograms map[int]*VDBE          // Sub-programs (triggers) keyed by ID
 	Coroutines  map[int]*CoroutineInfo // Coroutine state keyed by coroutine ID
+	TriggerRow  *TriggerRowData        // OLD/NEW row data for trigger execution
 
 	// Window function support
 	WindowStates map[int]*WindowState // Window states keyed by cursor/index

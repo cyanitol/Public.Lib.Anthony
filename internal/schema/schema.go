@@ -501,6 +501,15 @@ func (t *Table) GetColumns() []interface{} {
 	return result
 }
 
+// GetColumnNames returns the column names for this table.
+func (t *Table) GetColumnNames() []string {
+	names := make([]string, len(t.Columns))
+	for i, col := range t.Columns {
+		names[i] = col.Name
+	}
+	return names
+}
+
 // HasRowID returns true if the table has an implicit rowid column.
 // Tables have a rowid unless they are declared WITHOUT ROWID.
 func (t *Table) HasRowID() bool {
