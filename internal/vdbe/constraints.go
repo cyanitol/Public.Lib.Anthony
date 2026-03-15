@@ -139,3 +139,56 @@ func evaluateCheckConstraint(checkExpr string, value *Mem) bool {
 	// Full implementation would parse and evaluate the expression tree
 	return true
 }
+
+// autoincrementColumnChecker is used to detect if a table has AUTOINCREMENT.
+type autoincrementColumnChecker interface {
+	GetAutoincrementColumnIndex() int
+}
+
+// sequenceManagerAccessor provides access to the sequence manager.
+type sequenceManagerAccessor interface {
+	GetSequences() interface{}
+}
+
+// sequenceUpdater provides methods for updating sequence values.
+type sequenceUpdater interface {
+	NextSequence(tableName string, currentMaxRowid int64) (int64, error)
+	UpdateSequence(tableName string, rowid int64)
+	HasSequence(tableName string) bool
+}
+
+// isAutoincrementTable checks if the given table has an AUTOINCREMENT column.
+func (v *VDBE) isAutoincrementTable(tableName string) bool {
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return false
+	}
+	sch, ok := v.Ctx.Schema.(schemaWithGetTableByName)
+	if !ok {
+		return false
+	}
+	tableIface, exists := sch.GetTableByName(tableName)
+	if !exists {
+		return false
+	}
+	checker, ok := tableIface.(autoincrementColumnChecker)
+	if !ok {
+		return false
+	}
+	return checker.GetAutoincrementColumnIndex() >= 0
+}
+
+// getSequenceManager retrieves the sequence manager from the schema.
+func (v *VDBE) getSequenceManager() sequenceUpdater {
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return nil
+	}
+	accessor, ok := v.Ctx.Schema.(sequenceManagerAccessor)
+	if !ok {
+		return nil
+	}
+	sm, ok := accessor.GetSequences().(sequenceUpdater)
+	if !ok {
+		return nil
+	}
+	return sm
+}
