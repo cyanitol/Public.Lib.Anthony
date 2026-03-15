@@ -490,6 +490,23 @@ func (ws *WindowState) GetLastValue(colIdx int) *Mem {
 	return result
 }
 
+// GetNthValue returns the Nth value (1-based) in the current frame
+func (ws *WindowState) GetNthValue(colIdx int, n int) *Mem {
+	frameRows := ws.GetFrameRows()
+	if n < 1 || n > len(frameRows) {
+		return NewMemNull()
+	}
+
+	row := frameRows[n-1]
+	if colIdx >= len(row) {
+		return NewMemNull()
+	}
+
+	result := &Mem{}
+	result.Copy(row[colIdx])
+	return result
+}
+
 // Helper functions
 func min(a, b int) int {
 	if a < b {

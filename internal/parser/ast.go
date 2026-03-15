@@ -34,10 +34,17 @@ type SelectStmt struct {
 	Where    Expression
 	GroupBy  []Expression
 	Having   Expression
-	OrderBy  []OrderingTerm
-	Limit    Expression
-	Offset   Expression
-	Compound *CompoundSelect // For UNION, EXCEPT, INTERSECT
+	OrderBy    []OrderingTerm
+	Limit      Expression
+	Offset     Expression
+	WindowDefs []WindowDef        // Named window definitions (WINDOW clause)
+	Compound   *CompoundSelect    // For UNION, EXCEPT, INTERSECT
+}
+
+// WindowDef represents a named window definition in a WINDOW clause.
+type WindowDef struct {
+	Name string
+	Spec *WindowSpec
 }
 
 func (s *SelectStmt) node()      {}
@@ -865,6 +872,7 @@ func (f *FunctionExpr) String() string {
 
 // WindowSpec represents a window specification for window functions.
 type WindowSpec struct {
+	BaseName    string         // Reference to a named window (OVER w)
 	PartitionBy []Expression
 	OrderBy     []OrderingTerm
 	Frame       *FrameSpec

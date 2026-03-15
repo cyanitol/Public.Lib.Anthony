@@ -232,7 +232,7 @@ func (p *Parser) parseSelectBody(stmt *SelectStmt) (*SelectStmt, error) {
 	return stmt, nil
 }
 
-// parseSelectClauses parses FROM, WHERE, GROUP BY, ORDER BY, and LIMIT clauses.
+// parseSelectClauses parses FROM, WHERE, GROUP BY, WINDOW, ORDER BY, and LIMIT clauses.
 func (p *Parser) parseSelectClauses(stmt *SelectStmt) error {
 	if err := p.parseFromClauseInto(stmt); err != nil {
 		return err
@@ -243,10 +243,74 @@ func (p *Parser) parseSelectClauses(stmt *SelectStmt) error {
 	if err := p.parseGroupByClauseInto(stmt); err != nil {
 		return err
 	}
+	if err := p.parseWindowClauseInto(stmt); err != nil {
+		return err
+	}
 	if err := p.parseOrderByClauseInto(stmt); err != nil {
 		return err
 	}
 	return p.parseLimitClauseInto(stmt)
+}
+
+// parseWindowClauseInto parses the optional WINDOW clause for named window definitions.
+// Syntax: WINDOW name AS (window-spec) [, name AS (window-spec)] ...
+func (p *Parser) parseWindowClauseInto(stmt *SelectStmt) error {
+	if !p.match(TK_WINDOW) {
+		return nil
+	}
+	defs, err := p.parseWindowDefList()
+	if err != nil {
+		return err
+	}
+	stmt.WindowDefs = defs
+	return nil
+}
+
+// parseWindowDefList parses a comma-separated list of named window definitions.
+func (p *Parser) parseWindowDefList() ([]WindowDef, error) {
+	var defs []WindowDef
+	for {
+		def, err := p.parseWindowDef()
+		if err != nil {
+			return nil, err
+		}
+		defs = append(defs, def)
+		if !p.match(TK_COMMA) {
+			break
+		}
+	}
+	return defs, nil
+}
+
+// parseWindowDef parses a single named window definition: name AS (window-spec).
+func (p *Parser) parseWindowDef() (WindowDef, error) {
+	if !p.check(TK_ID) {
+		return WindowDef{}, p.error("expected window name")
+	}
+	name := Unquote(p.advance().Lexeme)
+	if !p.match(TK_AS) {
+		return WindowDef{}, p.error("expected AS after window name")
+	}
+	if !p.match(TK_LP) {
+		return WindowDef{}, p.error("expected ( after AS")
+	}
+
+	spec := &WindowSpec{}
+	if err := p.parsePartitionBy(spec); err != nil {
+		return WindowDef{}, err
+	}
+	if err := p.parseWindowOrderBy(spec); err != nil {
+		return WindowDef{}, err
+	}
+	if err := p.parseWindowFrame(spec); err != nil {
+		return WindowDef{}, err
+	}
+
+	if !p.match(TK_RP) {
+		return WindowDef{}, p.error("expected ) after window specification")
+	}
+
+	return WindowDef{Name: name, Spec: spec}, nil
 }
 
 // parseFromClauseInto parses the FROM clause into the statement.
@@ -3384,12 +3448,20 @@ func (p *Parser) parseFunctionFilter(fn *FunctionExpr) error {
 }
 
 // parseFunctionOver parses the optional OVER clause for window functions.
+// Supports both OVER (window-spec) and OVER window-name.
 func (p *Parser) parseFunctionOver(fn *FunctionExpr) error {
 	if !p.match(TK_OVER) {
 		return nil
 	}
+
+	// Check for named window reference: OVER window_name
+	if p.check(TK_ID) && p.peekAhead(1).Type != TK_LP {
+		fn.Over = &WindowSpec{BaseName: Unquote(p.advance().Lexeme)}
+		return nil
+	}
+
 	if !p.match(TK_LP) {
-		return p.error("expected ( after OVER")
+		return p.error("expected ( or window name after OVER")
 	}
 
 	windowSpec := &WindowSpec{}
