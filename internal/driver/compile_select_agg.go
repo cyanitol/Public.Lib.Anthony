@@ -289,6 +289,135 @@ func (s *Stmt) emitGroupConcatUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr,
 	vm.Program[skipToEndAddr].P2 = endAddr
 }
 
+// emitJSONGroupArrayUpdate emits VDBE opcodes to update JSON_GROUP_ARRAY accumulator.
+// Accumulates comma-separated json_quote'd values (including NULLs as "null").
+func (s *Stmt) emitJSONGroupArrayUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, accReg int, gen *expr.CodeGenerator) {
+	if len(fnExpr.Args) == 0 {
+		return
+	}
+
+	tempReg := s.loadJSONArgValue(vm, fnExpr, table, tableName, gen)
+	if tempReg < 0 {
+		return
+	}
+
+	// json_quote the value (handles NULL -> "null")
+	quotedReg := gen.AllocReg()
+	vm.AddOpWithP4Str(vdbe.OpFunction, 0, tempReg, quotedReg, "json_quote")
+	vm.Program[len(vm.Program)-1].P5 = 1
+
+	emitAccumJSONElement(vm, gen, accReg, quotedReg)
+}
+
+// emitJSONGroupObjectUpdate emits VDBE opcodes to update JSON_GROUP_OBJECT accumulator.
+func (s *Stmt) emitJSONGroupObjectUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, accReg int, gen *expr.CodeGenerator) {
+	if len(fnExpr.Args) < 2 {
+		return
+	}
+
+	// Load key value
+	keyReg := s.loadJSONExprValue(vm, fnExpr.Args[0], table, tableName, gen)
+	if keyReg < 0 {
+		return
+	}
+
+	// Skip if key is NULL
+	skipAddr := vm.AddOp(vdbe.OpIsNull, keyReg, 0, 0)
+
+	// Load value
+	valReg := s.loadJSONExprValue(vm, fnExpr.Args[1], table, tableName, gen)
+	if valReg < 0 {
+		vm.Program[skipAddr].P2 = vm.NumOps()
+		return
+	}
+
+	// Build "key":value pair
+	pairReg := emitJSONKeyValuePair(vm, gen, keyReg, valReg)
+	emitAccumJSONElement(vm, gen, accReg, pairReg)
+
+	vm.Program[skipAddr].P2 = vm.NumOps()
+}
+
+// loadJSONArgValue loads the first function argument value into a register (without NULL skip).
+func (s *Stmt) loadJSONArgValue(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, gen *expr.CodeGenerator) int {
+	return s.loadJSONExprValue(vm, fnExpr.Args[0], table, tableName, gen)
+}
+
+// loadJSONExprValue loads an expression value into a register.
+func (s *Stmt) loadJSONExprValue(vm *vdbe.VDBE, e parser.Expression, table *schema.Table, tableName string, gen *expr.CodeGenerator) int {
+	if ident, ok := e.(*parser.IdentExpr); ok {
+		colIdx := table.GetColumnIndex(ident.Name)
+		if colIdx >= 0 {
+			tableCursor, _ := gen.GetCursor(tableName)
+			reg := gen.AllocReg()
+			vm.AddOp(vdbe.OpColumn, tableCursor, schemaRecordIdxForTable(table, colIdx), reg)
+			return reg
+		}
+	}
+	reg, err := gen.GenerateExpr(e)
+	if err != nil {
+		return -1
+	}
+	return reg
+}
+
+// emitJSONKeyValuePair builds a "key":value JSON pair string in a register.
+func emitJSONKeyValuePair(vm *vdbe.VDBE, gen *expr.CodeGenerator, keyReg, valReg int) int {
+	// json_quote the key
+	quotedKeyReg := gen.AllocReg()
+	vm.AddOpWithP4Str(vdbe.OpFunction, 0, keyReg, quotedKeyReg, "json_quote")
+	vm.Program[len(vm.Program)-1].P5 = 1
+
+	// json_quote the value
+	quotedValReg := gen.AllocReg()
+	vm.AddOpWithP4Str(vdbe.OpFunction, 0, valReg, quotedValReg, "json_quote")
+	vm.Program[len(vm.Program)-1].P5 = 1
+
+	// Build "key":value
+	colonReg := gen.AllocReg()
+	vm.AddOpWithP4Str(vdbe.OpString8, 0, colonReg, 0, ":")
+	tmpReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpConcat, quotedKeyReg, colonReg, tmpReg)
+	pairReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpConcat, tmpReg, quotedValReg, pairReg)
+	return pairReg
+}
+
+// emitAccumJSONElement appends an element to a JSON accumulator with comma separation.
+func emitAccumJSONElement(vm *vdbe.VDBE, gen *expr.CodeGenerator, accReg, elemReg int) {
+	sepReg := gen.AllocReg()
+	vm.AddOpWithP4Str(vdbe.OpString8, 0, sepReg, 0, ",")
+
+	copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
+	tmpReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpConcat, accReg, sepReg, tmpReg)
+	vm.AddOp(vdbe.OpConcat, tmpReg, elemReg, accReg)
+	skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+	vm.Program[copyAddr].P2 = vm.NumOps()
+	vm.AddOp(vdbe.OpCopy, elemReg, accReg, 0)
+	vm.Program[skipToEndAddr].P2 = vm.NumOps()
+}
+
+// emitJSONWrap wraps the accumulator value with open/close brackets, handling NULL (empty group).
+func emitJSONWrap(vm *vdbe.VDBE, gen *expr.CodeGenerator, accReg, targetReg int, open, close string) {
+	openReg := gen.AllocReg()
+	closeReg := gen.AllocReg()
+	vm.AddOpWithP4Str(vdbe.OpString8, 0, openReg, 0, open)
+	vm.AddOpWithP4Str(vdbe.OpString8, 0, closeReg, 0, close)
+
+	// If accumulator is NULL, return open+close (empty)
+	nullAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
+	tmpReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpConcat, openReg, accReg, tmpReg)
+	vm.AddOp(vdbe.OpConcat, tmpReg, closeReg, targetReg)
+	skipAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+
+	vm.Program[nullAddr].P2 = vm.NumOps()
+	vm.AddOp(vdbe.OpConcat, openReg, closeReg, targetReg)
+
+	vm.Program[skipAddr].P2 = vm.NumOps()
+}
+
 // initializeAggregateRegister initializes a single aggregate accumulator register.
 func (s *Stmt) initializeAggregateRegister(vm *vdbe.VDBE, funcName string, accReg int, gen *expr.CodeGenerator) (avgCountReg int) {
 	switch funcName {
@@ -300,7 +429,7 @@ func (s *Stmt) initializeAggregateRegister(vm *vdbe.VDBE, funcName string, accRe
 		vm.AddOp(vdbe.OpInteger, 0, avgCountReg, 0)
 	case "TOTAL":
 		vm.AddOpWithP4Real(vdbe.OpReal, 0, accReg, 0, 0.0)
-	case "SUM", "MIN", "MAX", "GROUP_CONCAT":
+	case "SUM", "MIN", "MAX", "GROUP_CONCAT", "JSON_GROUP_ARRAY", "JSON_GROUP_OBJECT":
 		vm.AddOp(vdbe.OpNull, 0, accReg, 0)
 	}
 	return avgCountReg
@@ -555,6 +684,10 @@ func (s *Stmt) emitSingleAggregateUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionE
 		s.emitMaxUpdate(vm, fnExpr, table, tableName, accReg, gen)
 	case "GROUP_CONCAT":
 		s.emitGroupConcatUpdate(vm, fnExpr, table, tableName, accReg, gen)
+	case "JSON_GROUP_ARRAY":
+		s.emitJSONGroupArrayUpdate(vm, fnExpr, table, tableName, accReg, gen)
+	case "JSON_GROUP_OBJECT":
+		s.emitJSONGroupObjectUpdate(vm, fnExpr, table, tableName, accReg, gen)
 	}
 }
 
@@ -644,7 +777,7 @@ func (s *Stmt) emitAggregateExpressionOutput(vm *vdbe.VDBE, gen *expr.CodeGenera
 
 	expr = unwrapParentheses(expr)
 
-	if s.tryEmitDirectAggregate(vm, expr, accReg, avgCountReg, targetReg) {
+	if s.tryEmitDirectAggregate(vm, expr, accReg, avgCountReg, targetReg, gen) {
 		return nil
 	}
 
@@ -670,16 +803,21 @@ func unwrapParentheses(expr parser.Expression) parser.Expression {
 }
 
 // tryEmitDirectAggregate tries to emit a direct aggregate function
-func (s *Stmt) tryEmitDirectAggregate(vm *vdbe.VDBE, expr parser.Expression, accReg, avgCountReg, targetReg int) bool {
-	fnExpr, ok := expr.(*parser.FunctionExpr)
+func (s *Stmt) tryEmitDirectAggregate(vm *vdbe.VDBE, e parser.Expression, accReg, avgCountReg, targetReg int, gen *expr.CodeGenerator) bool {
+	fnExpr, ok := e.(*parser.FunctionExpr)
 	if !ok || !s.isAggregateExpr(fnExpr) {
 		return false
 	}
 
-	if fnExpr.Name == "AVG" {
+	switch fnExpr.Name {
+	case "AVG":
 		vm.AddOp(vdbe.OpDivide, accReg, avgCountReg, targetReg)
 		vm.AddOp(vdbe.OpToReal, targetReg, 0, 0)
-	} else {
+	case "JSON_GROUP_ARRAY":
+		emitJSONWrap(vm, gen, accReg, targetReg, "[", "]")
+	case "JSON_GROUP_OBJECT":
+		emitJSONWrap(vm, gen, accReg, targetReg, "{", "}")
+	default:
 		vm.AddOp(vdbe.OpCopy, accReg, targetReg, 0)
 	}
 	return true

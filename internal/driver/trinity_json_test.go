@@ -45,7 +45,7 @@ func genJSONScalarTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-JSON-004_json_array_mixed",
-			skip:     "pre-existing: JSON function edge case",
+			skip:     "json_array renders 3.0 as 3 (integer), missing real formatting",
 			query:    `SELECT json_array(1, 'two', NULL, 3.0)`,
 			wantRows: [][]interface{}{{"[1,\"two\",null,3.0]"}},
 		},
@@ -76,7 +76,7 @@ func genJSONScalarTests() []sqlTestCase {
 		},
 		{
 			name:    "REQ-JSON-010_json_invalid_input",
-			skip:    "pre-existing: JSON function edge case",
+			skip:    "json() does not return error on malformed input",
 			query:   `SELECT json('not json')`,
 			wantErr: true,
 			errLike: "malformed",
@@ -187,7 +187,7 @@ func genJSONTypeValidTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-JSON-043_type_real",
-			skip:     "pre-existing: JSON function edge case",
+
 			query:    `SELECT json_type('3.14')`,
 			wantRows: [][]interface{}{{"real"}},
 		},
@@ -223,7 +223,7 @@ func genJSONTypeValidTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-JSON-050_valid_null_input",
-			skip:     "pre-existing: JSON function edge case",
+
 			query:    "SELECT json_valid(NULL)",
 			wantRows: [][]interface{}{{nil}},
 		},
@@ -318,42 +318,42 @@ func genJSONTableTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:     "REQ-JSON-080_group_array_all",
-			skip:     "pre-existing: JSON function edge case",
+
 			setup:    setup,
 			query:    "SELECT json_group_array(val) FROM jt1",
 			wantRows: [][]interface{}{{"[10,20,30]"}},
 		},
 		{
 			name:     "REQ-JSON-081_group_array_filtered",
-			skip:     "pre-existing: JSON function edge case",
+
 			setup:    setup,
 			query:    "SELECT json_group_array(val) FROM jt1 WHERE id <= 2",
 			wantRows: [][]interface{}{{"[10,20]"}},
 		},
 		{
 			name:     "REQ-JSON-082_group_object_all",
-			skip:     "pre-existing: JSON function edge case",
+
 			setup:    setup,
 			query:    "SELECT json_group_object(name, val) FROM jt1",
 			wantRows: [][]interface{}{{`{"a":10,"b":20,"c":30}`}},
 		},
 		{
 			name:     "REQ-JSON-083_group_array_single",
-			skip:     "pre-existing: JSON function edge case",
+
 			setup:    setup,
 			query:    "SELECT json_group_array(val) FROM jt1 WHERE id=1",
 			wantRows: [][]interface{}{{"[10]"}},
 		},
 		{
 			name:     "REQ-JSON-084_group_array_strings",
-			skip:     "pre-existing: JSON function edge case",
+
 			setup:    setup,
 			query:    "SELECT json_group_array(name) FROM jt1",
 			wantRows: [][]interface{}{{`["a","b","c"]`}},
 		},
 		{
 			name:     "REQ-JSON-085_group_object_single",
-			skip:     "pre-existing: JSON function edge case",
+
 			setup:    setup,
 			query:    "SELECT json_group_object(name, val) FROM jt1 WHERE id=2",
 			wantRows: [][]interface{}{{`{"b":20}`}},

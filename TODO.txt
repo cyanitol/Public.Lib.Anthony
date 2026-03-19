@@ -1,110 +1,387 @@
-TODO - Public.Lib.Anthony (Go SQLite) v0.2.1
-=============================================
+TODO - Public.Lib.Anthony (Go SQLite) v0.2.2-dev
+=================================================
 
-Status: 14046 tests passing (alltests), 1073 trinity passing, 842 skipped. 2026-03-16.
+Status: 10 test failures (7 regressions from JSON changes, 3 pre-existing).
+        3169 passing, 785 skipped in driver (alltests).
+        1093 trinity passing, 159 skipped, 3 failing.
+        25 other packages all passing.
+        Last updated: 2026-03-16.
 
-==========================================================
-v0.2.0 - Remaining Work
-==========================================================
+Goal: Reach 90% feature parity (currently ~80%). Fix all 12 root causes
+covering the 99 originally-skipped trinity tests. Commit as v0.2.2.
 
-Bugs / Regressions
--------------------
-[x] Planner PlanCache data race (plan_cache.go:81 concurrent Get) - FIXED: promoted RLock to Lock + atomic counters
-[ ] Subquery as JOIN target causes stack overflow (recursive view expansion) (skipped in trinity tests)
-[ ] OpRealAffinity opcode defined but not wired into exec dispatch table
+##########################################################################
+# PHASE 1: Fix Regressions (introduced by v0.2.2-dev JSON changes)
+##########################################################################
 
-v0.1.x Carryover
------------------
-[ ] WITHOUT ROWID ROLLBACK (cache sync - 1 test skipped)
-[ ] Recursive CTEs (cursor architecture being fixed)
-[ ] VACUUM operations (30 tests skipped - schema persistence issues)
-[ ] Window functions: DENSE_RANK (not yet wired to compiler)
-[ ] Window functions: NTILE (not yet wired to compiler)
+1.1 JSON regressions from float-preservation change (3 failures)
+    Files: internal/functions/json.go
+    Tests failing:
+    [R] TestTrinity_JSON/REQ-JSON-008_json_array_nested
+        - json_array with nested arrays: got [1,[2.0,3.0]], want [1,[2,3]]
+        - The wrapFloats() helper incorrectly wraps integer-valued floats
+          inside nested arrays. Fix: only wrap if the float has a fractional
+          part OR if the original SQL literal was explicitly typed as REAL.
+          Integers inside nested arrays should remain as integers.
+    [R] TestTrinity_JSON/REQ-JSON-009_json_object_nested
+        - Same root cause as 008: nested integer values wrapped as floats.
+    [R] TestTrinity_VTab/REQ-VTAB-005_json_each_types
+        - json_each returns "real" for integer values due to json_type change.
+        - The parseJSONArgUseNumber() / getJSONType() change is too aggressive.
+          Only use UseNumber() path for top-level json_type() calls, not
+          internal json_each/json_tree type detection.
 
-Partially Implemented / Known Issues
--------------------------------------
-[ ] UPSERT (ON CONFLICT) - basic support, complex cases untested
-[ ] Correlated subqueries - some edge cases cause issues
-[ ] EXPLAIN QUERY PLAN - partial support
-[ ] Temporary tables - basic support only
-[ ] Virtual tables - infrastructure only
-[ ] Custom functions - infrastructure exists
-[ ] PRAGMA journal_mode - partial
-[ ] PRAGMA synchronous - partial
-[ ] PRAGMA cache_size - partial
-[ ] PRAGMA integrity_check - partial
-[ ] PRAGMA quick_check - partial
-[ ] Journal mode (WAL) - infrastructure exists
+1.2 JSON error-vs-NULL regression (4 failures)
+    Files: internal/functions/json.go
+    Tests failing:
+    [R] TestJSONFunctionsNULL/json_with_invalid_JSON_returns_NULL (driver)
+    [R] TestJSONFuncInvalid (functions package)
+    [R] TestFunctionsGenJsonTree/json_tree_nested_object
+    [R] TestFunctionsGenJsonTree/json_tree_nested_array
+        - json('not json') now returns error instead of NULL.
+        - Existing tests expected NULL return (pre-existing behavior).
+        - DECISION NEEDED: SQLite returns error, but existing tests expect NULL.
+          Options: (a) update existing tests to expect error (matches SQLite),
+          or (b) revert to NULL behavior and update trinity test to expect NULL.
+        - json_tree regressions are from getJSONType returning "real" for
+          integer values inside tree nodes (same as 1.1 above).
 
-Window Functions (in progress)
-------------------------------
-[ ] LAG - being implemented
-[ ] LEAD - being implemented
-[ ] FIRST_VALUE - being implemented
-[ ] LAST_VALUE - being implemented
+    Sub-tasks:
+    [ ] Fix wrapFloats() to only apply to values that were originally float
+        (not integer-valued float64 from Go's JSON parsing)
+    [ ] Fix getJSONType() to use UseNumber only in the json_type() code path
+    [ ] Decide json() invalid-input behavior; update tests accordingly
+    [ ] Verify: nix-shell --run "go test -count=1 -tags alltests ./... -timeout 600s"
 
-Not Implemented
----------------
-[ ] ANALYZE (query statistics)
-[ ] likelihood / likely / unlikely functions
-[ ] Custom collations
-[ ] Loadable extensions - not planned (Go limitation)
-[ ] File locking (Windows)
+##########################################################################
+# PHASE 2: Remaining Root Causes (still skipped, need implementation)
+##########################################################################
 
-Extensions Needing SQL Parser Integration
-------------------------------------------
-[ ] FTS5 - module complete (128 tests), needs SQL parser integration
-[ ] R-Tree - module complete (all tests pass), needs SQL parser integration
+----------------------------------------------------------------------
+2.1 WINDOW FUNCTIONS (42 skipped tests)
+----------------------------------------------------------------------
+Root cause A: SELECT column clobbered by ORDER BY column (~4 tests)
+    File: internal/driver/compile_select_agg.go (compileWindowWithSorting)
+    Line: ~1047-1050
+    Bug: Sorter population reads columns with raw indices OpColumn(0,i,i).
+         For tables with INTEGER PRIMARY KEY (rowid alias), OpColumn(0,0)
+         reads the first B-tree record field (dept), not the rowid (id).
+         This shifts all columns, replacing name with salary.
+    Fix: Use schemaRecordIdxForTable() and OpRowid for rowid columns.
+    Sub-tasks:
+    [ ] Read compile_select_agg.go compileWindowWithSorting
+    [ ] Fix column read loop to handle rowid columns correctly
+    [ ] Fix emitSorterColumnValue register mapping to match
+    [ ] Test: REQ-WIN-001, REQ-WIN-002 should show correct column values
 
-==========================================================
-Completed in v0.2.1
-==========================================================
+Root cause B: Window value functions return nil (~38 tests)
+    File: internal/driver/stmt_window_helpers.go
+    Line: emitWindowFunctionColumnWithOpcodes (~302-319)
+    Bug: No cases for SUM, COUNT, AVG, MIN, MAX, TOTAL, GROUP_CONCAT.
+         All fall to default: OpNull. Also LAG, LEAD, FIRST_VALUE,
+         LAST_VALUE, NTH_VALUE may not properly compute values.
+    Fix: Add OpWindowAggregate opcode + execution logic.
+    Sub-tasks:
+    [ ] Add OpWindowAggregate opcode to internal/vdbe/opcode.go
+    [ ] Add execWindowAggregate handler to internal/vdbe/exec.go
+        - Get frame rows via WindowState.GetFrameRows()
+        - Compute SUM/COUNT/AVG/MIN/MAX/TOTAL over frame
+    [ ] Add SUM/COUNT/AVG/MIN/MAX/TOTAL/GROUP_CONCAT dispatch in
+        emitWindowFunctionColumnWithOpcodes
+    [ ] Test: REQ-WIN-040 through REQ-WIN-068
 
-Code Quality
-------------
-[x] Cyclomatic complexity reduced to ≤9 for ALL functions (was ≤10)
-[x] Race condition in PlanCache.Get() fixed (RLock→Lock + atomics)
-[x] Race condition in TestIdxOpcodeErrors fixed (isolated VDBE instances)
-[x] 181 test DB file paths converted to t.TempDir() for isolation
-[x] alltests build tag added to all 25 trinity test files
-[x] 99 pre-existing trinity failures marked with skip fields
-[x] Stress tests optimized with prepared statement helpers
-[x] Go toolchain upgraded to 1.26.1
+Root cause C: PERCENT_RANK and CUME_DIST not implemented (2 tests)
+    Files: internal/vdbe/opcode.go, exec.go, stmt_window_helpers.go
+    Sub-tasks:
+    [ ] Add OpWindowPercentRank, OpWindowCumeDist opcodes
+    [ ] Implement: percent_rank = (rank-1)/(partition_size-1)
+    [ ] Implement: cume_dist = rows_with_value_lte_current / partition_size
+    [ ] Test: REQ-WIN-071, REQ-WIN-072
 
-==========================================================
-Completed in v0.2.0
-==========================================================
+Root cause D: Outer ORDER BY / LIMIT ignored (affects many tests)
+    File: internal/driver/compile_select_agg.go
+    Bug: compileSelectWithWindowFunctions ignores stmt.OrderBy/stmt.Limit
+    Fix: Add second sorter pass for outer ORDER BY, or recognize when
+         outer ORDER BY matches window ORDER BY.
+    Sub-tasks:
+    [ ] Detect outer ORDER BY in window function path
+    [ ] Emit second sort pass if outer ORDER BY differs from window ORDER BY
+    [ ] Apply LIMIT/OFFSET after final sort
+    [ ] Test: various window tests with ORDER BY ... LIMIT
 
-Bug Fixes
----------
-[x] AVG aggregate returns float (both regular and GROUP BY paths)
-[x] AND/OR short-circuit with correct NULL handling (NULL AND 0 = 0)
-[x] Integer division returns int per SQLite
-[x] ROWID resolution for tables without explicit INTEGER PRIMARY KEY
-[x] Data race in pager.writePage (snapshot page data before WriteAt)
-[x] Data race in busy handler (mutex protection)
-[x] Data race in expr CodeGenerator tests (isolated VDBE instances)
-[x] Compound query precedence (INTERSECT before UNION per SQL standard)
-[x] INSERT OR IGNORE/REPLACE on non-PK UNIQUE columns
-[x] INSERT value count validation (column/value mismatch returns error)
-[x] LENGTH() returns string representation length for integers/floats
-[x] SELECT * with ORDER BY (star column expansion before sorter)
-[x] CTE JOIN cursor index handling (fixed hardcoded cursor 0)
-[x] Multiple CTEs with JOINs
-[x] FK SET DEFAULT action (proper type affinity for default values)
-[x] FK deferred delete-and-reinsert
-[x] Stress test race detector timeouts (scaled iterations)
+Summary: Remove skip from all 42 window tests after fixes.
 
-Security
---------
-[x] Go 1.26.1
-[x] File permissions tightened to 0600
-[x] GitHub Action pinned to SHA
-[x] SQL injection nosec annotations
-[x] unsafe package nosec annotations
+----------------------------------------------------------------------
+2.2 JOIN CURSOR MANAGEMENT (7 skipped tests)
+----------------------------------------------------------------------
+Status: PARTIALLY FIXED. emitJoinLoopCleanup restructured to close
+        cursors after all loops. REQ-JOIN-020 (cross_basic) unskipped
+        and passing.
 
-Documentation
--------------
-[x] 522 broken markdown anchor links fixed across 21 doc files
-[x] AREWETHEREYET.md updated with current status
-[x] TODO.txt comprehensive tracking
+Remaining skipped:
+    [ ] REQ-JOIN-002_inner_excludes_null_fk
+    [ ] REQ-JOIN-005_inner_no_match
+    [ ] REQ-JOIN-006_inner_empty_table
+    [ ] REQ-JOIN-011_left_includes_unmatched
+    [ ] REQ-JOIN-014_left_both_empty
+    [ ] REQ-JOIN-022_cross_one_empty
+    [ ] REQ-JOIN-042_null_eq_null_inner
+
+Sub-tasks:
+    [ ] Unskip each test one at a time and check actual error
+    [ ] Fix remaining cursor issues (may need LEFT JOIN path fix)
+    [ ] Test NULL handling in ON clause (JOIN-042)
+    [ ] Verify: nix-shell --run "go test -run TestTrinity_Join -tags alltests ./internal/driver/ -v"
+
+----------------------------------------------------------------------
+2.3 AGGREGATES IN JOIN+GROUP BY (5 skipped tests)
+----------------------------------------------------------------------
+Status: IMPLEMENTED. compile_join_agg.go created with
+        compileSelectWithJoinsAndAggregates. Route added in
+        compile_helpers.go. Needs testing.
+
+Remaining skipped:
+    [ ] REQ-JOIN-013_left_with_aggregate
+    [ ] REQ-JOIN-032_self_join_count_reports
+    [ ] REQ-JOIN-061_three_table_aggregate
+    [ ] REQ-JOIN-062_three_table_left
+    [ ] REQ-JOIN-064_four_table_join
+
+Sub-tasks:
+    [ ] Unskip each test and verify correct aggregate results
+    [ ] Fix any issues with the new JOIN+aggregate compilation path
+    [ ] Handle LEFT JOIN + aggregate combination
+    [ ] Handle 3-table and 4-table joins with aggregates
+    [ ] Test: nix-shell --run "go test -run 'TestTrinity_Join/REQ-JOIN-061' -tags alltests ./internal/driver/ -v"
+
+----------------------------------------------------------------------
+2.4 IS operator in JOIN ON clause (1 skipped test)
+----------------------------------------------------------------------
+    [ ] REQ-JOIN-043_null_is_null_join
+    File: internal/driver/compile_join.go or expression codegen
+    Bug: ON t1.k IS t2.k not supported. IS treats NULL IS NULL as true.
+    Fix: Detect IS operator in ON clause, use null-safe comparison.
+
+----------------------------------------------------------------------
+2.5 HAVING CLAUSE (2 skipped tests)
+----------------------------------------------------------------------
+Status: PARTIALLY ADDRESSED. Routing fix in compile_helpers.go adds
+        aggregate detection before JOIN routing. HAVING for non-JOIN
+        aggregates may still have issues.
+
+Remaining skipped:
+    [ ] REQ-SELECT-062_having_filter
+    [ ] REQ-SELECT-065_having_sum
+
+Sub-tasks:
+    [ ] Unskip and test HAVING with simple GROUP BY (no JOINs)
+    [ ] If still failing: check generateHavingFunctionExpr aggregate
+        key matching in stmt_groupby.go
+    [ ] Verify HAVING references accumulator register, not re-evaluated scalar
+
+----------------------------------------------------------------------
+2.6 GROUP BY NULL MERGING (2 skipped tests)
+----------------------------------------------------------------------
+Status: FIXED. emitNullSafeGroupCompare added to stmt_groupby.go.
+        Uses explicit NULL checks before OpNe.
+
+Remaining skipped:
+    [ ] REQ-NULL-070_group_by_null_single_group
+    [ ] REQ-NULL-073_group_by_having_null
+
+Sub-tasks:
+    [ ] Unskip both tests and verify they pass
+    [ ] If REQ-NULL-073 still fails, may be a HAVING issue (see 2.5)
+
+----------------------------------------------------------------------
+2.7 json_group_array / json_group_object (6 skipped tests)
+----------------------------------------------------------------------
+Status: IMPLEMENTED. JSONGroupArrayFunc and JSONGroupObjectFunc added
+        to aggregate.go. Wiring added in compile_select.go,
+        compile_select_agg.go, stmt_groupby.go.
+
+Remaining skipped:
+    [ ] REQ-JSON-080_group_array_all
+    [ ] REQ-JSON-081_group_array_filtered
+    [ ] REQ-JSON-082_group_object_all
+    [ ] REQ-JSON-083_group_array_single
+    [ ] REQ-JSON-084_group_array_strings
+    [ ] REQ-JSON-085_group_object_single
+
+Sub-tasks:
+    [ ] Unskip and test each json_group_array test
+    [ ] Unskip and test each json_group_object test
+    [ ] Verify JSON output format matches SQLite (quoting, nulls, order)
+    [ ] Fix float-vs-integer issues in JSON aggregate output (see 1.1)
+
+----------------------------------------------------------------------
+2.8 VIRTUAL TABLE AGGREGATE BYPASS (7 skipped tests)
+----------------------------------------------------------------------
+Status: PARTIALLY IMPLEMENTED. compile_tvf.go modified but the VTab
+        agent was interrupted. Need to verify/complete.
+
+Remaining skipped:
+    [ ] REQ-VTAB-006_json_each_empty_array
+    [ ] REQ-VTAB-009_json_each_count
+    [ ] REQ-VTAB-010_json_each_from_column
+    [ ] REQ-VTAB-020_json_tree_flat_array
+    [ ] REQ-VTAB-021_json_tree_nested_count
+    [ ] REQ-VTAB-022_json_tree_leaf_values
+    [ ] REQ-VTAB-023_json_tree_with_path
+    [ ] REQ-VTAB-024_json_tree_types
+
+Sub-tasks:
+    [ ] Review compile_tvf.go changes (materializeTVFAsEphemeral)
+    [ ] Ensure aggregate detection works for TVF SELECTs
+    [ ] Route TVF+aggregate queries through aggregate compilation
+    [ ] Test COUNT(*) over json_each and json_tree
+    [ ] Test json_tree column values (key, value, type, atom, path)
+
+----------------------------------------------------------------------
+2.9 TVF IN MULTI-TABLE FROM (5 skipped tests)
+----------------------------------------------------------------------
+    [ ] REQ-VTAB-030_join_json_each_expand
+    [ ] REQ-VTAB-031_join_json_each_count
+    [ ] REQ-VTAB-032_join_json_each_filter
+    [ ] REQ-VTAB-033_join_json_each_all_tags
+    [ ] REQ-VTAB-034_join_json_each_no_match
+
+    File: internal/driver/compile_tvf.go (hasTableValuedFunction)
+    Bug: Only checks stmt.From.Tables[0]. TVF in second position not
+         recognized. Also needs correlated evaluation (per-row TVF args).
+    Sub-tasks:
+    [ ] Check all tables in FROM, not just index 0
+    [ ] Implement correlated TVF join: scan outer table, evaluate TVF
+        per-row with outer column references
+    [ ] This is architecturally complex; may need new compilation path
+    [ ] Test: FROM tags t, json_each(t.tag_list) je
+
+----------------------------------------------------------------------
+2.10 TRIGGER NEW.col IN EXPRESSIONS (2 skipped tests)
+----------------------------------------------------------------------
+Status: FIXED. substituteExpr extended with CastExpr, ParenExpr,
+        CollateExpr, BetweenExpr, InExpr, CaseExpr support.
+
+Remaining skipped:
+    [ ] REQ-TRIG-053_new_ref_computed_value
+    [ ] REQ-TRIG-080_cascading_trigger
+
+Sub-tasks:
+    [ ] Unskip both tests and verify they pass
+    [ ] If cascading trigger still fails, may be a separate issue
+
+----------------------------------------------------------------------
+2.11 VIEW EDGE CASES (4 skipped tests)
+----------------------------------------------------------------------
+Status: PARTIALLY ADDRESSED. compile_subquery.go modified.
+
+Remaining skipped:
+    [ ] REQ-VIEW-012_view_with_aggregates
+        - WHERE on outer query not applied after view materialization
+    [ ] REQ-VIEW-021_drop_nonexistent_view_error
+        - DROP VIEW should error, not silently succeed
+        - File: internal/driver/compile_ddl.go
+    [ ] REQ-VIEW-033_view_with_having
+        - View containing HAVING clause
+    [ ] REQ-VIEW-034_view_with_distinct
+        - View containing DISTINCT
+
+Sub-tasks:
+    [ ] Unskip REQ-VIEW-012 and verify outer WHERE filtering
+    [ ] Fix DROP VIEW IF NOT EXISTS vs DROP VIEW error distinction
+    [ ] Unskip and test views with HAVING and DISTINCT
+    [ ] Review compile_subquery.go changes for correctness
+
+----------------------------------------------------------------------
+2.12 DELETE WITH SUBQUERY (1 skipped test)
+----------------------------------------------------------------------
+    [ ] REQ-UPDATE-039d_delete_subquery
+    File: internal/driver/compile_dml.go
+    Bug: DELETE FROM t WHERE id IN (SELECT ...) not supported or failing
+    Sub-tasks:
+    [ ] Unskip and check actual error
+    [ ] Fix subquery evaluation in DELETE WHERE clause
+
+##########################################################################
+# PHASE 3: Unskip and Verify
+##########################################################################
+
+After all fixes, systematically unskip tests and run full suite:
+
+    [ ] Remove skip from all fixed trinity_join_test.go tests
+    [ ] Remove skip from all fixed trinity_window_test.go tests
+    [ ] Remove skip from all fixed trinity_json_test.go tests
+    [ ] Remove skip from all fixed trinity_null_test.go tests
+    [ ] Remove skip from all fixed trinity_select_test.go tests
+    [ ] Remove skip from all fixed trinity_trigger_test.go tests
+    [ ] Remove skip from all fixed trinity_update_test.go tests
+    [ ] Remove skip from all fixed trinity_view_test.go tests
+    [ ] Remove skip from all fixed trinity_vtab_test.go tests
+    [ ] Run: nix-shell --run "go test -count=1 -tags alltests ./... -timeout 600s"
+    [ ] Run: nix-shell --run "go test -race -count=1 ./... -timeout 600s"
+    [ ] Verify 0 failures, update test counts
+    [ ] Check cyclomatic complexity: nix-shell --run "gocyclo -over 9 ."
+
+##########################################################################
+# PHASE 4: Commit and Release
+##########################################################################
+
+    [ ] Commit without attribution, timestamp 6:58AM
+    [ ] Tag as v0.2.2
+    [ ] Push to remote
+    [ ] Update documentation (CHANGELOG, AREWETHEREYET, ROADMAP)
+
+##########################################################################
+# IMPLEMENTATION PRIORITY ORDER
+##########################################################################
+
+Priority 1 (fix regressions first - blocking):
+  1.1 JSON float-preservation regression
+  1.2 JSON error-vs-NULL regression
+
+Priority 2 (easy wins - already implemented, just unskip+verify):
+  2.6  GROUP BY NULL (already fixed)
+  2.10 Trigger expressions (already fixed)
+  2.7  json_group_array/object (already implemented)
+  2.3  Join+aggregate (already implemented)
+
+Priority 3 (moderate effort):
+  2.2  Join cursor (partially fixed)
+  2.5  HAVING clause
+  2.11 View edge cases
+  2.12 DELETE subquery
+  2.4  IS operator in JOIN
+  2.8  VTab aggregates
+
+Priority 4 (high effort - most test impact):
+  2.1  Window functions (42 tests, complex)
+  2.9  TVF multi-table FROM (5 tests, complex architecture)
+
+##########################################################################
+# COMPLETED IN v0.2.2-dev (this session)
+##########################################################################
+
+[x] Trigger NEW.col expression substitution (CastExpr + 5 other types)
+[x] JSON edge cases (json_type real detection, json_valid NULL, json error)
+    NOTE: introduced regressions, needs fix (Phase 1)
+[x] GROUP BY null-safe comparison (emitNullSafeGroupCompare)
+[x] json_group_array / json_group_object aggregate functions
+[x] Join cursor close ordering (emitJoinLoopCleanup restructured)
+[x] Join+aggregate routing (compile_join_agg.go)
+[x] HAVING/view subquery changes (compile_subquery.go)
+
+##########################################################################
+# PREVIOUSLY COMPLETED (v0.2.0 and v0.2.1)
+##########################################################################
+
+[x] Cyclomatic complexity ≤9 for all functions
+[x] PlanCache race condition fixed
+[x] VDBE test race condition fixed
+[x] 181 test DB paths → t.TempDir()
+[x] alltests build tag on 25 trinity files
+[x] Stress tests optimized (prepared statements)
+[x] Go 1.26.1 upgrade
+[x] All security audit items resolved
+[x] Foreign key runtime enforcement (83/83 tests)
+[x] WITHOUT ROWID tables (45/51 tests)
+[x] Window function infrastructure (ROW_NUMBER, RANK work)

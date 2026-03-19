@@ -8,6 +8,7 @@ import (
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
@@ -191,6 +192,81 @@ func findTVFColIndex(name string, tvfCols []string) int {
 		}
 	}
 	return -1
+}
+
+// materializeTVFAsEphemeral executes a TVF, materializes its rows into an
+// ephemeral table, and rewrites stmt.From so the aggregate pipeline can
+// process the results. The caller should fall through to routeSpecializedSelect.
+func (s *Stmt) materializeTVFAsEphemeral(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) error {
+	ref := &stmt.From.Tables[0]
+	tvf := s.lookupTVF(ref.TableName)
+	if tvf == nil {
+		return fmt.Errorf("table-valued function not found: %s", ref.TableName)
+	}
+
+	funcArgs, err := evalTVFArgs(ref.FuncArgs, args)
+	if err != nil {
+		return fmt.Errorf("%s: %w", ref.TableName, err)
+	}
+
+	rows, err := tvf.Open(funcArgs)
+	if err != nil {
+		return fmt.Errorf("%s: %w", ref.TableName, err)
+	}
+
+	tvfCols := tvf.Columns()
+	tempTable, cursorNum := s.createTVFTempTable(ref.TableName, tvfCols, vm)
+	s.conn.schema.AddTableDirect(tempTable)
+	emitTVFMaterialize(vm, rows, tvfCols, cursorNum)
+	rewriteFromForTVF(ref, tempTable.Name)
+	return nil
+}
+
+// createTVFTempTable creates a temporary schema table and allocates a cursor
+// for the ephemeral TVF materialization.
+func (s *Stmt) createTVFTempTable(tvfName string, tvfCols []string, vm *vdbe.VDBE) (*schema.Table, int) {
+	tableName := fmt.Sprintf("_tvf_%s", tvfName)
+	columns := make([]*schema.Column, len(tvfCols))
+	for i, name := range tvfCols {
+		columns[i] = &schema.Column{Name: name, Type: "ANY"}
+	}
+	cursorNum := len(vm.Cursors)
+	vm.AllocCursors(cursorNum + 1)
+	table := &schema.Table{
+		Name:     tableName,
+		Columns:  columns,
+		RootPage: uint32(cursorNum),
+		Temp:     true,
+	}
+	return table, cursorNum
+}
+
+// emitTVFMaterialize emits bytecode to open an ephemeral table and insert all
+// TVF result rows into it.
+func emitTVFMaterialize(vm *vdbe.VDBE, rows [][]functions.Value, tvfCols []string, cursorNum int) {
+	numCols := len(tvfCols)
+	vm.AllocMemory(numCols + 20)
+	vm.AddOp(vdbe.OpOpenEphemeral, cursorNum, numCols, 0)
+
+	recordReg := numCols // register for MakeRecord output
+	for _, row := range rows {
+		for i := 0; i < numCols; i++ {
+			if i < len(row) {
+				emitFuncValue(vm, row[i], i)
+			} else {
+				vm.AddOp(vdbe.OpNull, 0, i, 0)
+			}
+		}
+		vm.AddOp(vdbe.OpMakeRecord, 0, numCols, recordReg)
+		vm.AddOp(vdbe.OpInsert, cursorNum, recordReg, 0)
+	}
+}
+
+// rewriteFromForTVF rewrites a table reference to point at the materialized
+// temp table instead of the TVF call.
+func rewriteFromForTVF(ref *parser.TableOrSubquery, tempName string) {
+	ref.TableName = tempName
+	ref.FuncArgs = nil
 }
 
 // emitTVFBytecode generates VDBE bytecode that outputs pre-computed TVF rows.

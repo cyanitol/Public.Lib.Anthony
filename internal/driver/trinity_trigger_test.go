@@ -390,7 +390,6 @@ func genTriggerRefTests() []sqlTestCase {
 		},
 		{
 			name: "REQ-TRIG-053_new_ref_computed_value",
-			skip: "pre-existing: trigger NEW reference edge case",
 			setup: []string{
 				"CREATE TABLE tref4(a INTEGER, b INTEGER)",
 				"CREATE TABLE log(msg TEXT)",
@@ -517,7 +516,6 @@ func genTriggerCascadingTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name: "REQ-TRIG-080_cascading_trigger",
-			skip: "pre-existing: cascading trigger not yet implemented",
 			setup: []string{
 				"CREATE TABLE tc1(a INTEGER)",
 				"CREATE TABLE tc2(b INTEGER)",

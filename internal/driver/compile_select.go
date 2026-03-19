@@ -75,6 +75,14 @@ func (s *Stmt) handleSpecialSelectTypes(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 
 	// Handle table-valued functions (e.g., json_each, json_tree)
 	if s.hasTableValuedFunction(stmt) {
+		// If the query has aggregates, materialize TVF into an ephemeral table
+		// and let the aggregate pipeline handle it instead of emitting raw rows.
+		if s.detectAggregates(stmt) {
+			if err := s.materializeTVFAsEphemeral(vm, stmt, args); err != nil {
+				return nil, err, true
+			}
+			return nil, nil, false
+		}
 		result, err := s.compileSelectWithTVF(vm, stmt, args)
 		return result, err, true
 	}
@@ -963,6 +971,7 @@ func (s *Stmt) isAggregateExpr(expr parser.Expression) bool {
 		"COUNT": true, "SUM": true, "AVG": true,
 		"MIN": true, "MAX": true, "TOTAL": true,
 		"GROUP_CONCAT": true,
+		"JSON_GROUP_ARRAY": true, "JSON_GROUP_OBJECT": true,
 	}
 
 	return aggFuncs[fnExpr.Name]

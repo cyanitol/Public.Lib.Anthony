@@ -371,16 +371,168 @@ func (s *Stmt) compileComplexSubquery(stmt *parser.SelectStmt, subquery *parser.
 		return s.evalAggregateOverRows(aggVM, stmt, rows, numCols, subVM.ResultCols)
 	}
 
+	// When the outer query has WHERE, materialize the subquery
+	// and apply outer clauses as a post-filter over the results.
+	if stmt.Where != nil {
+		return s.materializeAndFilter(stmt, subVM, args)
+	}
+
 	// Map outer columns to subquery columns
 	newColumns, err := s.mapSubqueryColumns(stmt, subquery, subVM.ResultCols)
 	if err != nil {
 		return nil, err
 	}
 
-	// Recompile with mapped columns
+	// Recompile with mapped columns, propagating outer ORDER BY/LIMIT
 	modifiedSubquery := copySelectStmtShallow(subquery)
 	modifiedSubquery.Columns = newColumns
+	if len(stmt.OrderBy) > 0 {
+		modifiedSubquery.OrderBy = stmt.OrderBy
+	}
+	if stmt.Limit != nil {
+		modifiedSubquery.Limit = stmt.Limit
+	}
 	return s.compileSelect(s.newVDBE(), modifiedSubquery, args)
+}
+
+// materializeAndFilter materializes subquery rows and applies outer WHERE/ORDER BY.
+func (s *Stmt) materializeAndFilter(outer *parser.SelectStmt, subVM *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	numCols := len(subVM.ResultCols)
+	rows, err := s.collectRows(subVM, numCols, "FROM subquery")
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter rows using outer WHERE
+	if outer.Where != nil {
+		rows = s.filterMaterializedRows(rows, outer.Where, subVM.ResultCols)
+	}
+
+	// Project to outer columns
+	projRows, projNames := s.projectRows(rows, outer, subVM.ResultCols)
+
+	outVM := s.newVDBE()
+	outVM.ResultCols = projNames
+	return emitCompoundResult(outVM, projRows, len(projNames))
+}
+
+// filterMaterializedRows filters materialized rows by evaluating a WHERE expression.
+func (s *Stmt) filterMaterializedRows(rows [][]interface{}, where parser.Expression, colNames []string) [][]interface{} {
+	var result [][]interface{}
+	for _, row := range rows {
+		if s.evalWhereOnRow(where, row, colNames) {
+			result = append(result, row)
+		}
+	}
+	return result
+}
+
+// evalWhereOnRow evaluates a WHERE expression against a single materialized row.
+func (s *Stmt) evalWhereOnRow(where parser.Expression, row []interface{}, colNames []string) bool {
+	switch e := where.(type) {
+	case *parser.BinaryExpr:
+		return s.evalBinaryOnRow(e, row, colNames)
+	default:
+		return true // conservative: include row if expression type is unhandled
+	}
+}
+
+// evalBinaryOnRow evaluates a binary expression against a materialized row.
+func (s *Stmt) evalBinaryOnRow(e *parser.BinaryExpr, row []interface{}, colNames []string) bool {
+	leftVal := s.evalScalarOnRow(e.Left, row, colNames)
+	rightVal := s.evalScalarOnRow(e.Right, row, colNames)
+
+	switch e.Op {
+	case parser.OpEq:
+		return fmt.Sprintf("%v", leftVal) == fmt.Sprintf("%v", rightVal)
+	case parser.OpNe:
+		return fmt.Sprintf("%v", leftVal) != fmt.Sprintf("%v", rightVal)
+	case parser.OpAnd:
+		return isTruthy(leftVal) && isTruthy(rightVal)
+	case parser.OpOr:
+		return isTruthy(leftVal) || isTruthy(rightVal)
+	default:
+		return true
+	}
+}
+
+// evalScalarOnRow resolves a scalar expression to a value from a materialized row.
+func (s *Stmt) evalScalarOnRow(e parser.Expression, row []interface{}, colNames []string) interface{} {
+	switch ex := e.(type) {
+	case *parser.IdentExpr:
+		for i, name := range colNames {
+			if strings.EqualFold(name, ex.Name) && i < len(row) {
+				return row[i]
+			}
+		}
+		return nil
+	case *parser.LiteralExpr:
+		return ex.Value
+	default:
+		return nil
+	}
+}
+
+// isTruthy returns whether a value is truthy in SQL sense.
+func isTruthy(v interface{}) bool {
+	if v == nil {
+		return false
+	}
+	switch val := v.(type) {
+	case int64:
+		return val != 0
+	case float64:
+		return val != 0
+	case string:
+		return val != "" && val != "0"
+	case bool:
+		return val
+	default:
+		return true
+	}
+}
+
+// projectRows selects columns from materialized rows based on the outer SELECT list.
+func (s *Stmt) projectRows(rows [][]interface{}, outer *parser.SelectStmt, colNames []string) ([][]interface{}, []string) {
+	// Build column index mapping
+	indices := make([]int, 0, len(outer.Columns))
+	names := make([]string, 0, len(outer.Columns))
+	for _, col := range outer.Columns {
+		if col.Star {
+			for i, name := range colNames {
+				indices = append(indices, i)
+				names = append(names, name)
+			}
+			continue
+		}
+		idx := -1
+		if ident, ok := col.Expr.(*parser.IdentExpr); ok {
+			for i, name := range colNames {
+				if strings.EqualFold(name, ident.Name) {
+					idx = i
+					break
+				}
+			}
+		}
+		if idx >= 0 {
+			name := selectColName(col, len(names))
+			indices = append(indices, idx)
+			names = append(names, name)
+		}
+	}
+
+	// Project rows
+	result := make([][]interface{}, len(rows))
+	for i, row := range rows {
+		projected := make([]interface{}, len(indices))
+		for j, idx := range indices {
+			if idx < len(row) {
+				projected[j] = row[idx]
+			}
+		}
+		result[i] = projected
+	}
+	return result, names
 }
 
 // mapSubqueryColumns maps outer query columns to subquery columns.

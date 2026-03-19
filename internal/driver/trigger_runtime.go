@@ -303,6 +303,26 @@ func (s *triggerSubstitutor) substituteExpr(expr parser.Expression) (parser.Expr
 	case *parser.RaiseExpr:
 		return e, nil // RAISE expressions don't need substitution
 	default:
+		return s.substituteCompoundExpr(expr)
+	}
+}
+
+// substituteCompoundExpr handles substitution for compound expression types.
+func (s *triggerSubstitutor) substituteCompoundExpr(expr parser.Expression) (parser.Expression, error) {
+	switch e := expr.(type) {
+	case *parser.CastExpr:
+		return s.substituteCast(e)
+	case *parser.ParenExpr:
+		return s.substituteParen(e)
+	case *parser.CollateExpr:
+		return s.substituteCollate(e)
+	case *parser.BetweenExpr:
+		return s.substituteBetween(e)
+	case *parser.InExpr:
+		return s.substituteIn(e)
+	case *parser.CaseExpr:
+		return s.substituteCase(e)
+	default:
 		return expr, nil
 	}
 }
@@ -366,6 +386,88 @@ func (s *triggerSubstitutor) substituteFunction(e *parser.FunctionExpr) (parser.
 		Name: e.Name, Args: newArgs, Distinct: e.Distinct, Star: e.Star,
 		Filter: e.Filter, Over: e.Over,
 	}, nil
+}
+
+// substituteCast substitutes in a CAST expression.
+func (s *triggerSubstitutor) substituteCast(e *parser.CastExpr) (parser.Expression, error) {
+	inner, err := s.substituteExpr(e.Expr)
+	if err != nil {
+		return nil, err
+	}
+	return &parser.CastExpr{Expr: inner, Type: e.Type}, nil
+}
+
+// substituteParen substitutes in a parenthesized expression.
+func (s *triggerSubstitutor) substituteParen(e *parser.ParenExpr) (parser.Expression, error) {
+	inner, err := s.substituteExpr(e.Expr)
+	if err != nil {
+		return nil, err
+	}
+	return &parser.ParenExpr{Expr: inner}, nil
+}
+
+// substituteCollate substitutes in a COLLATE expression.
+func (s *triggerSubstitutor) substituteCollate(e *parser.CollateExpr) (parser.Expression, error) {
+	inner, err := s.substituteExpr(e.Expr)
+	if err != nil {
+		return nil, err
+	}
+	return &parser.CollateExpr{Expr: inner, Collation: e.Collation}, nil
+}
+
+// substituteBetween substitutes in a BETWEEN expression.
+func (s *triggerSubstitutor) substituteBetween(e *parser.BetweenExpr) (parser.Expression, error) {
+	expr, err := s.substituteExpr(e.Expr)
+	if err != nil {
+		return nil, err
+	}
+	lower, err := s.substituteExpr(e.Lower)
+	if err != nil {
+		return nil, err
+	}
+	upper, err := s.substituteExpr(e.Upper)
+	if err != nil {
+		return nil, err
+	}
+	return &parser.BetweenExpr{Expr: expr, Lower: lower, Upper: upper, Not: e.Not}, nil
+}
+
+// substituteIn substitutes in an IN expression.
+func (s *triggerSubstitutor) substituteIn(e *parser.InExpr) (parser.Expression, error) {
+	expr, err := s.substituteExpr(e.Expr)
+	if err != nil {
+		return nil, err
+	}
+	values, err := s.substituteExprList(e.Values)
+	if err != nil {
+		return nil, err
+	}
+	return &parser.InExpr{Expr: expr, Values: values, Select: e.Select, Not: e.Not}, nil
+}
+
+// substituteCase substitutes in a CASE expression.
+func (s *triggerSubstitutor) substituteCase(e *parser.CaseExpr) (parser.Expression, error) {
+	operand, err := s.substituteExpr(e.Expr)
+	if err != nil {
+		return nil, err
+	}
+	whens := make([]parser.WhenClause, len(e.WhenClauses))
+	for i, w := range e.WhenClauses {
+		cond, err := s.substituteExpr(w.Condition)
+		if err != nil {
+			return nil, err
+		}
+		result, err := s.substituteExpr(w.Result)
+		if err != nil {
+			return nil, err
+		}
+		whens[i] = parser.WhenClause{Condition: cond, Result: result}
+	}
+	elseExpr, err := s.substituteExpr(e.ElseClause)
+	if err != nil {
+		return nil, err
+	}
+	return &parser.CaseExpr{Expr: operand, WhenClauses: whens, ElseClause: elseExpr}, nil
 }
 
 // caseInsensitiveLookup finds a value in a map with case-insensitive key matching.

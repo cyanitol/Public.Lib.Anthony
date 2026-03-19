@@ -2,6 +2,7 @@
 package functions
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -17,6 +18,8 @@ func RegisterAggregateFunctions(r *Registry) {
 	r.Register(&MinFunc{})
 	r.Register(&MaxFunc{})
 	r.Register(&GroupConcatFunc{})
+	r.Register(&JSONGroupArrayFunc{})
+	r.Register(&JSONGroupObjectFunc{})
 }
 
 // Resettable defines the interface for types that can be reset.
@@ -375,6 +378,105 @@ func (f *GroupConcatFunc) Reset() {
 	f.values = nil
 	f.separator = ","
 	f.hasSep = false
+}
+
+// JSONGroupArrayFunc implements json_group_array(X)
+type JSONGroupArrayFunc struct {
+	values []interface{}
+}
+
+func (f *JSONGroupArrayFunc) Name() string { return "json_group_array" }
+func (f *JSONGroupArrayFunc) NumArgs() int { return 1 }
+func (f *JSONGroupArrayFunc) Call([]Value) (Value, error) {
+	return nil, fmt.Errorf("json_group_array() is an aggregate function")
+}
+
+func (f *JSONGroupArrayFunc) Step(args []Value) error {
+	if len(args) < 1 {
+		return fmt.Errorf("json_group_array() requires 1 argument")
+	}
+	f.values = append(f.values, valueToJSONInterface(args[0]))
+	return nil
+}
+
+func (f *JSONGroupArrayFunc) Final() (Value, error) {
+	if f.values == nil {
+		f.values = []interface{}{}
+	}
+	return finalizeAndReset(f, marshalJSONValue(f.values))
+}
+
+func (f *JSONGroupArrayFunc) Reset() {
+	f.values = nil
+}
+
+// JSONGroupObjectFunc implements json_group_object(key, value)
+type JSONGroupObjectFunc struct {
+	keys   []string
+	values []interface{}
+}
+
+func (f *JSONGroupObjectFunc) Name() string { return "json_group_object" }
+func (f *JSONGroupObjectFunc) NumArgs() int { return 2 }
+func (f *JSONGroupObjectFunc) Call([]Value) (Value, error) {
+	return nil, fmt.Errorf("json_group_object() is an aggregate function")
+}
+
+func (f *JSONGroupObjectFunc) Step(args []Value) error {
+	if len(args) < 2 {
+		return fmt.Errorf("json_group_object() requires 2 arguments")
+	}
+	if args[0].IsNull() {
+		return nil // skip rows with NULL keys
+	}
+	f.keys = append(f.keys, args[0].AsString())
+	f.values = append(f.values, valueToJSONInterface(args[1]))
+	return nil
+}
+
+func (f *JSONGroupObjectFunc) Final() (Value, error) {
+	obj := buildJSONObject(f.keys, f.values)
+	return finalizeAndReset(f, marshalJSONValue(obj))
+}
+
+func (f *JSONGroupObjectFunc) Reset() {
+	f.keys = nil
+	f.values = nil
+}
+
+// valueToJSONInterface converts a Value to a Go interface{} for JSON marshaling.
+func valueToJSONInterface(v Value) interface{} {
+	if v.IsNull() {
+		return nil
+	}
+	switch v.Type() {
+	case TypeInteger:
+		return v.AsInt64()
+	case TypeFloat:
+		return v.AsFloat64()
+	case TypeBlob:
+		return string(v.AsBlob())
+	default:
+		return v.AsString()
+	}
+}
+
+// buildJSONObject constructs a map from parallel key/value slices.
+func buildJSONObject(keys []string, values []interface{}) map[string]interface{} {
+	obj := make(map[string]interface{}, len(keys))
+	for i, k := range keys {
+		obj[k] = values[i]
+	}
+	return obj
+}
+
+// marshalJSONValue marshals a value to JSON text, returning "[]" on error.
+func marshalJSONValue(v interface{}) Value {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return NewTextValue("[]")
+	}
+	return NewTextValue(string(data))
 }
 
 // Scalar versions of min/max for non-aggregate use

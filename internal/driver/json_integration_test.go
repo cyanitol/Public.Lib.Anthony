@@ -173,14 +173,10 @@ func TestJSONFunctionsNULL(t *testing.T) {
 	}
 	defer db.Close()
 
-	tests := []struct {
+	testsNull := []struct {
 		name  string
 		query string
 	}{
-		{
-			name:  "json with invalid JSON returns NULL",
-			query: `SELECT json('{invalid}')`,
-		},
 		{
 			name:  "json_extract with non-existent path returns NULL",
 			query: `SELECT json_extract('{"a":1}', '$.b')`,
@@ -191,7 +187,7 @@ func TestJSONFunctionsNULL(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for _, tt := range testsNull {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			var result interface{}
@@ -199,12 +195,20 @@ func TestJSONFunctionsNULL(t *testing.T) {
 			if err != nil {
 				t.Fatalf("query failed: %v", err)
 			}
-
 			if result != nil {
 				t.Errorf("expected NULL, got %v (type: %T)", result, result)
 			}
 		})
 	}
+
+	// json() with invalid input returns error per SQLite spec
+	t.Run("json with invalid JSON returns error", func(t *testing.T) {
+		var result interface{}
+		err := db.QueryRow(`SELECT json('{invalid}')`).Scan(&result)
+		if err == nil {
+			t.Error("expected error for invalid JSON, got nil")
+		}
+	})
 }
 
 // jsonValidateAllRows queries rows with (id, valid) columns and checks valid=1.

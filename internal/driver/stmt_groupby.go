@@ -70,27 +70,22 @@ func (s *Stmt) emitGroupComparison(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt 
 	// Check if first row - if so, skip comparison and go straight to initialization
 	skipCheckAddr := vm.AddOp(vdbe.OpIf, state.firstRowReg, 0, 0)
 
-	// Compare all GROUP BY columns to detect if group changed
-	// We need to check if ANY column differs
+	// Compare all GROUP BY columns with NULL-aware logic.
+	// OpNe(non_null, NULL) returns NULL under SQL three-valued logic,
+	// so we must handle NULL values explicitly for correct group detection.
 	groupChangedReg := gen.AllocReg()
+	cmpReg := gen.AllocReg() // temp register for per-column comparison results
 	vm.AddOp(vdbe.OpInteger, 0, groupChangedReg, 0) // Initialize to false
 
 	for i := 0; i < numGroupBy; i++ {
-		cmpReg := gen.AllocReg()
-		cmpAddr := vm.AddOp(vdbe.OpNe, state.groupByRegs[i], state.prevGroupByRegs[i], cmpReg)
-		if i < len(collations) && collations[i] != "" {
-			vm.Program[cmpAddr].P4.Z = collations[i]
-			vm.Program[cmpAddr].P4Type = vdbe.P4Static
-		}
-		// If this column differs, set groupChangedReg to true
-		vm.AddOp(vdbe.OpOr, groupChangedReg, cmpReg, groupChangedReg)
+		s.emitNullSafeGroupCompare(vm, state.groupByRegs[i], state.prevGroupByRegs[i], groupChangedReg, cmpReg, collations, i)
 	}
 
 	// If group hasn't changed, skip to accumulator update (don't output or reinitialize)
 	skipToUpdateAddr := vm.AddOp(vdbe.OpIfNot, groupChangedReg, 0, 0)
 
 	// Group changed - output previous group results
-	s.emitGroupOutput(vm, stmt, state.accRegs, state.avgCountRegs, state.prevGroupByRegs, numCols)
+	s.emitGroupOutput(vm, gen, stmt, state.accRegs, state.avgCountRegs, state.prevGroupByRegs, numCols)
 
 	// Fall through to initialization (for first row or after group change)
 	// First row jumps here too
@@ -107,6 +102,53 @@ func (s *Stmt) emitGroupComparison(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt 
 	return updateAddr // Not used anymore but keeping signature compatible
 }
 
+// emitNullSafeGroupCompare emits bytecode to compare a single GROUP BY column
+// with correct NULL handling. Sets changedReg to 1 if values differ.
+//
+// Bytecode pattern:
+//
+//	OpIsNull curReg -> curIsNull
+//	; cur is NOT null
+//	OpIsNull prevReg -> setChanged  ; cur!=NULL, prev=NULL -> different
+//	OpNe curReg, prevReg -> setChanged ; both non-null, check equality
+//	Goto -> nextCol
+//	curIsNull:
+//	OpIsNull prevReg -> nextCol  ; both NULL -> same group
+//	; cur=NULL, prev!=NULL -> fall through to setChanged
+//	setChanged:
+//	OpInteger 1, changedReg
+//	nextCol:
+func (s *Stmt) emitNullSafeGroupCompare(vm *vdbe.VDBE, curReg, prevReg, changedReg, cmpReg int, collations []string, colIdx int) {
+	// OpIsNull curReg -> curIsNull
+	curIsNullAddr := vm.AddOp(vdbe.OpIsNull, curReg, 0, 0)
+
+	// cur is NOT NULL; if prev is NULL -> different
+	setChangedFromPrevNull := vm.AddOp(vdbe.OpIsNull, prevReg, 0, 0)
+
+	// Both non-NULL: compare with OpNe into cmpReg, then OR into changedReg
+	neAddr := vm.AddOp(vdbe.OpNe, curReg, prevReg, cmpReg)
+	if colIdx < len(collations) && collations[colIdx] != "" {
+		vm.Program[neAddr].P4.Z = collations[colIdx]
+		vm.Program[neAddr].P4Type = vdbe.P4Static
+	}
+	vm.AddOp(vdbe.OpOr, changedReg, cmpReg, changedReg)
+	gotoNextCol := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+
+	// curIsNull: cur is NULL; if prev is also NULL -> same group
+	vm.Program[curIsNullAddr].P2 = vm.NumOps()
+	bothNullAddr := vm.AddOp(vdbe.OpIsNull, prevReg, 0, 0)
+
+	// setChanged: exactly one is NULL -> different group
+	setChangedTarget := vm.NumOps()
+	vm.Program[setChangedFromPrevNull].P2 = setChangedTarget
+	vm.AddOp(vdbe.OpInteger, 1, changedReg, 0)
+
+	// nextCol:
+	nextColTarget := vm.NumOps()
+	vm.Program[gotoNextCol].P2 = nextColTarget
+	vm.Program[bothNullAddr].P2 = nextColTarget
+}
+
 // initializeGroupAccumulator initializes a single accumulator register based on function type.
 func (s *Stmt) initializeGroupAccumulator(vm *vdbe.VDBE, funcName string, accReg, avgCountReg int) {
 	switch funcName {
@@ -117,7 +159,7 @@ func (s *Stmt) initializeGroupAccumulator(vm *vdbe.VDBE, funcName string, accReg
 		vm.AddOp(vdbe.OpInteger, 0, avgCountReg, 0)
 	case "TOTAL":
 		vm.AddOpWithP4Real(vdbe.OpReal, 0, accReg, 0, 0.0)
-	case "SUM", "MIN", "MAX", "GROUP_CONCAT":
+	case "SUM", "MIN", "MAX", "GROUP_CONCAT", "JSON_GROUP_ARRAY", "JSON_GROUP_OBJECT":
 		vm.AddOp(vdbe.OpNull, 0, accReg, 0)
 	}
 }
@@ -164,6 +206,16 @@ func (s *Stmt) updateGroupAccumulatorsFromSorter(vm *vdbe.VDBE, gen *expr.CodeGe
 			continue
 		}
 
+		// JSON_GROUP_OBJECT uses two sorter columns
+		if fnExpr.Name == "JSON_GROUP_OBJECT" && len(fnExpr.Args) >= 2 {
+			keyReg := sorterBaseReg + regIdx
+			regIdx++
+			valReg := sorterBaseReg + regIdx
+			regIdx++
+			emitAccumJSONObject(vm, gen, state.accRegs[i], keyReg, valReg)
+			continue
+		}
+
 		// Get column value from sorter data
 		valueReg := sorterBaseReg + regIdx
 		regIdx++
@@ -183,6 +235,12 @@ func (s *Stmt) updateGroupAccumulatorsFromSorter(vm *vdbe.VDBE, gen *expr.CodeGe
 
 // updateSingleAccumulator updates a single accumulator register with a value
 func (s *Stmt) updateSingleAccumulator(vm *vdbe.VDBE, funcName string, accReg int, countReg int, valueReg int, gen *expr.CodeGenerator, collation string, sep string) {
+	// JSON_GROUP_ARRAY includes NULLs (as JSON null), so no NULL skip
+	if funcName == "JSON_GROUP_ARRAY" {
+		emitAccumJSONArray(vm, gen, accReg, valueReg)
+		return
+	}
+
 	skipAddr := vm.AddOp(vdbe.OpIsNull, valueReg, 0, 0)
 
 	switch funcName {
@@ -200,6 +258,27 @@ func (s *Stmt) updateSingleAccumulator(vm *vdbe.VDBE, funcName string, accReg in
 	case "GROUP_CONCAT":
 		emitAccumGroupConcat(vm, gen, accReg, valueReg, sep)
 	}
+
+	vm.Program[skipAddr].P2 = vm.NumOps()
+}
+
+// emitAccumJSONArray emits opcodes for JSON_GROUP_ARRAY accumulation.
+// json_quote's the value (handling NULL -> "null") then appends with comma separation.
+func emitAccumJSONArray(vm *vdbe.VDBE, gen *expr.CodeGenerator, accReg, valueReg int) {
+	quotedReg := gen.AllocReg()
+	vm.AddOpWithP4Str(vdbe.OpFunction, 0, valueReg, quotedReg, "json_quote")
+	vm.Program[len(vm.Program)-1].P5 = 1
+
+	emitAccumJSONElement(vm, gen, accReg, quotedReg)
+}
+
+// emitAccumJSONObject emits opcodes for JSON_GROUP_OBJECT accumulation.
+// Skips NULL keys, builds "key":value pairs with comma separation.
+func emitAccumJSONObject(vm *vdbe.VDBE, gen *expr.CodeGenerator, accReg, keyReg, valReg int) {
+	skipAddr := vm.AddOp(vdbe.OpIsNull, keyReg, 0, 0)
+
+	pairReg := emitJSONKeyValuePair(vm, gen, keyReg, valReg)
+	emitAccumJSONElement(vm, gen, accReg, pairReg)
 
 	vm.Program[skipAddr].P2 = vm.NumOps()
 }
@@ -271,12 +350,19 @@ func (s *Stmt) calculateSorterColumns(stmt *parser.SelectStmt, numGroupBy int) i
 
 	// Add columns needed for aggregate functions
 	for _, col := range stmt.Columns {
-		if s.isAggregateExpr(col.Expr) {
-			fnExpr := col.Expr.(*parser.FunctionExpr)
-			// COUNT(*) doesn't need a column
-			if !fnExpr.Star && len(fnExpr.Args) > 0 {
-				cols++
-			}
+		if !s.isAggregateExpr(col.Expr) {
+			continue
+		}
+		fnExpr := col.Expr.(*parser.FunctionExpr)
+		// COUNT(*) doesn't need a column
+		if fnExpr.Star || len(fnExpr.Args) == 0 {
+			continue
+		}
+		// JSON_GROUP_OBJECT needs 2 columns (key + value)
+		if fnExpr.Name == "JSON_GROUP_OBJECT" && len(fnExpr.Args) >= 2 {
+			cols += 2
+		} else {
+			cols++
 		}
 	}
 
@@ -401,10 +487,27 @@ func (s *Stmt) populateAggregateArgs(vm *vdbe.VDBE, gen *expr.CodeGenerator, col
 		if fnExpr.Star || len(fnExpr.Args) == 0 {
 			continue
 		}
+		// JSON_GROUP_OBJECT stores both key and value args
+		if fnExpr.Name == "JSON_GROUP_OBJECT" && len(fnExpr.Args) >= 2 {
+			s.populateJSONObjectArgs(vm, gen, fnExpr, baseReg, &regIdx)
+			continue
+		}
 		if argReg, err := gen.GenerateExpr(fnExpr.Args[0]); err == nil {
 			vm.AddOp(vdbe.OpCopy, argReg, baseReg+regIdx, 0)
 			regIdx++
 		}
+	}
+}
+
+// populateJSONObjectArgs stores both key and value arguments for JSON_GROUP_OBJECT.
+func (s *Stmt) populateJSONObjectArgs(vm *vdbe.VDBE, gen *expr.CodeGenerator, fnExpr *parser.FunctionExpr, baseReg int, regIdx *int) {
+	if keyReg, err := gen.GenerateExpr(fnExpr.Args[0]); err == nil {
+		vm.AddOp(vdbe.OpCopy, keyReg, baseReg+*regIdx, 0)
+		*regIdx++
+	}
+	if valReg, err := gen.GenerateExpr(fnExpr.Args[1]); err == nil {
+		vm.AddOp(vdbe.OpCopy, valReg, baseReg+*regIdx, 0)
+		*regIdx++
 	}
 }
 
@@ -533,15 +636,15 @@ func (s *Stmt) emitFinalGroupOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt
 	skipFinalOutputAddr := vm.AddOp(vdbe.OpIfNot, checkHasRowsReg, 0, 0)
 
 	// Output final group
-	s.emitGroupOutput(vm, stmt, state.accRegs, state.avgCountRegs, state.prevGroupByRegs, numCols)
+	s.emitGroupOutput(vm, gen, stmt, state.accRegs, state.avgCountRegs, state.prevGroupByRegs, numCols)
 
 	// Patch skip address
 	vm.Program[skipFinalOutputAddr].P2 = vm.NumOps()
 }
 
 // emitGroupOutput outputs a single group's results.
-func (s *Stmt) emitGroupOutput(vm *vdbe.VDBE, stmt *parser.SelectStmt, accRegs []int, avgCountRegs []int, groupByRegs []int, numCols int) {
-	s.copyColumnsToResults(vm, stmt, accRegs, avgCountRegs, groupByRegs)
+func (s *Stmt) emitGroupOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, accRegs []int, avgCountRegs []int, groupByRegs []int, numCols int) {
+	s.copyColumnsToResults(vm, gen, stmt, accRegs, avgCountRegs, groupByRegs)
 	havingSkipAddr := s.emitGroupByHavingClause(vm, stmt, accRegs, avgCountRegs, groupByRegs, numCols)
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
 
@@ -551,10 +654,10 @@ func (s *Stmt) emitGroupOutput(vm *vdbe.VDBE, stmt *parser.SelectStmt, accRegs [
 }
 
 // copyColumnsToResults copies all column values to result registers
-func (s *Stmt) copyColumnsToResults(vm *vdbe.VDBE, stmt *parser.SelectStmt, accRegs, avgCountRegs, groupByRegs []int) {
+func (s *Stmt) copyColumnsToResults(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, accRegs, avgCountRegs, groupByRegs []int) {
 	for i, col := range stmt.Columns {
 		if s.isAggregateExpr(col.Expr) {
-			s.copyAggregateResult(vm, col.Expr.(*parser.FunctionExpr), accRegs[i], avgCountRegs[i], i)
+			s.copyAggregateResult(vm, gen, col.Expr.(*parser.FunctionExpr), accRegs[i], avgCountRegs[i], i)
 		} else {
 			s.copyNonAggregateResult(vm, col, stmt.GroupBy, groupByRegs, i)
 		}
@@ -562,12 +665,17 @@ func (s *Stmt) copyColumnsToResults(vm *vdbe.VDBE, stmt *parser.SelectStmt, accR
 }
 
 // copyAggregateResult copies aggregate value to result register
-func (s *Stmt) copyAggregateResult(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, accReg, countReg, targetReg int) {
-	if fnExpr.Name == "AVG" {
+func (s *Stmt) copyAggregateResult(vm *vdbe.VDBE, gen *expr.CodeGenerator, fnExpr *parser.FunctionExpr, accReg, countReg, targetReg int) {
+	switch fnExpr.Name {
+	case "AVG":
 		vm.AddOp(vdbe.OpToReal, accReg, 0, 0)
 		vm.AddOp(vdbe.OpDivide, accReg, countReg, targetReg)
 		vm.AddOp(vdbe.OpToReal, targetReg, 0, 0)
-	} else {
+	case "JSON_GROUP_ARRAY":
+		emitJSONWrap(vm, gen, accReg, targetReg, "[", "]")
+	case "JSON_GROUP_OBJECT":
+		emitJSONWrap(vm, gen, accReg, targetReg, "{", "}")
+	default:
 		vm.AddOp(vdbe.OpCopy, accReg, targetReg, 0)
 	}
 }
@@ -632,8 +740,10 @@ func (s *Stmt) emitAggregateHavingClause(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 		return 0
 	}
 
-	// Create a code generator
+	// Create a code generator starting after all allocated registers
+	// to avoid overwriting result or accumulator registers.
 	gen := expr.NewCodeGenerator(vm)
+	gen.SetNextReg(vm.NumMem)
 	s.setupSubqueryCompiler(gen)
 
 	// Build a map from aggregate expressions to their result registers
@@ -657,8 +767,10 @@ func (s *Stmt) emitGroupByHavingClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, a
 		return 0
 	}
 
-	// Create a code generator
+	// Create a code generator starting after all allocated registers
+	// to avoid overwriting result or accumulator registers.
 	gen := expr.NewCodeGenerator(vm)
+	gen.SetNextReg(vm.NumMem)
 	s.setupSubqueryCompiler(gen)
 
 	// Build a map from aggregate expressions and GROUP BY columns to their result registers

@@ -11,6 +11,7 @@ func TestJSONFunc_EdgeCases(t *testing.T) {
 		name     string
 		input    Value
 		wantNull bool
+		wantErr  bool
 		validate func(string) bool
 	}{
 		{
@@ -19,9 +20,9 @@ func TestJSONFunc_EdgeCases(t *testing.T) {
 			wantNull: true,
 		},
 		{
-			name:     "invalid json",
-			input:    NewTextValue("{invalid}"),
-			wantNull: true,
+			name:    "invalid json",
+			input:   NewTextValue("{invalid}"),
+			wantErr: true,
 		},
 		{
 			name:  "valid json object",
@@ -42,6 +43,12 @@ func TestJSONFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := jsonFunc([]Value{tt.input})
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("jsonFunc() expected error for invalid JSON, got result: %v", result)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("jsonFunc() error = %v", err)
 			}
@@ -1130,13 +1137,10 @@ func TestDeepCopy_EdgeCases(t *testing.T) {
 
 // TestJsonFuncMarshalError tests json function with values that cause marshal errors
 func TestJsonFuncMarshalError(t *testing.T) {
-	// Test with invalid JSON string
-	result, err := jsonFunc([]Value{NewTextValue("{invalid json}")})
-	if err != nil {
-		t.Errorf("jsonFunc() error = %v", err)
-	}
-	if !result.IsNull() {
-		t.Error("jsonFunc() should return NULL for invalid JSON")
+	// Test with invalid JSON string - should return error per SQLite spec
+	_, err := jsonFunc([]Value{NewTextValue("{invalid json}")})
+	if err == nil {
+		t.Error("jsonFunc() expected error for invalid JSON")
 	}
 }
 

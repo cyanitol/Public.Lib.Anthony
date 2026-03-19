@@ -158,10 +158,12 @@ func (s *Stmt) compileJoinsWithLeftSupport(vm *vdbe.VDBE, stmt *parser.SelectStm
 	// Emit the recursive join body starting at join index 0
 	s.emitJoinLevel(ctx, 0)
 
-	// Outer Next + Close + Halt
+	// Outer Next loops back; close ALL cursors after loop exits
 	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
 	for i := len(tables) - 1; i >= 0; i-- {
-		vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
+		if !tables[i].table.Temp {
+			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
+		}
 	}
 	haltAddr := vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	vm.Program[rewindAddr].P2 = haltAddr

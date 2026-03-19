@@ -397,7 +397,6 @@ func genNullGroupByOrderByTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:  "REQ-NULL-070_group_by_null_single_group",
-			skip:  "pre-existing: NULL GROUP BY edge case",
 			setup: []string{"CREATE TABLE ngb1(k INTEGER, v INTEGER)", "INSERT INTO ngb1 VALUES(NULL,1)", "INSERT INTO ngb1 VALUES(NULL,2)", "INSERT INTO ngb1 VALUES(1,3)"},
 			query: "SELECT k, SUM(v) FROM ngb1 GROUP BY k ORDER BY k",
 			wantRows: [][]interface{}{
@@ -427,7 +426,6 @@ func genNullGroupByOrderByTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-NULL-073_group_by_having_null",
-			skip:  "pre-existing: NULL GROUP BY edge case",
 			setup: []string{"CREATE TABLE ngb2(k INTEGER, v INTEGER)", "INSERT INTO ngb2 VALUES(NULL,1)", "INSERT INTO ngb2 VALUES(NULL,2)", "INSERT INTO ngb2 VALUES(1,3)"},
 			query: "SELECT k, COUNT(*) AS c FROM ngb2 GROUP BY k HAVING c > 1",
 			wantRows: [][]interface{}{

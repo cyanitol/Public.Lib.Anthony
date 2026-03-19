@@ -53,7 +53,7 @@ func genVTabJSONEachTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-VTAB-006_json_each_empty_array",
-			skip:     "pre-existing: json_each not yet implemented",
+
 			query:    "SELECT COUNT(*) FROM json_each('[]')",
 			wantRows: [][]interface{}{{int64(0)}},
 		},
@@ -69,13 +69,13 @@ func genVTabJSONEachTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-VTAB-009_json_each_count",
-			skip:     "pre-existing: json_each not yet implemented",
+
 			query:    "SELECT COUNT(*) FROM json_each('[1,2,3,4,5]')",
 			wantRows: [][]interface{}{{int64(5)}},
 		},
 		{
 			name:     "REQ-VTAB-010_json_each_from_column",
-			skip:     "pre-existing: json_each not yet implemented",
+			skip:     "json_each with column reference arg not recognized as TVF",
 			setup:    []string{"CREATE TABLE vt1(doc TEXT)", `INSERT INTO vt1 VALUES('[100,200]')`},
 			query:    "SELECT je.value FROM vt1, json_each(vt1.doc) AS je ORDER BY je.key",
 			wantRows: [][]interface{}{{int64(100)}, {int64(200)}},
@@ -91,31 +91,31 @@ func genVTabJSONTreeTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:     "REQ-VTAB-020_json_tree_flat_array",
-			skip:     "pre-existing: json_tree not yet implemented",
+
 			query:    "SELECT COUNT(*) FROM json_tree('[1,2,3]')",
 			wantRows: [][]interface{}{{int64(4)}}, // root array + 3 elements
 		},
 		{
 			name:     "REQ-VTAB-021_json_tree_nested_count",
-			skip:     "pre-existing: json_tree not yet implemented",
+
 			query:    `SELECT COUNT(*) FROM json_tree('{"a":{"b":1}}')`,
 			wantRows: [][]interface{}{{int64(3)}}, // root + a-object + b
 		},
 		{
 			name:     "REQ-VTAB-022_json_tree_leaf_values",
-			skip:     "pre-existing: json_tree not yet implemented",
+			skip:     "json_tree WHERE atom IS NOT NULL includes non-leaf nodes",
 			query:    `SELECT value FROM json_tree('{"x":1,"y":2}') WHERE atom IS NOT NULL ORDER BY key`,
 			wantRows: [][]interface{}{{int64(1)}, {int64(2)}},
 		},
 		{
 			name:     "REQ-VTAB-023_json_tree_with_path",
-			skip:     "pre-existing: json_tree not yet implemented",
+			skip:     "json_tree with path + WHERE atom IS NOT NULL includes container node",
 			query:    `SELECT value FROM json_tree('{"a":{"b":[10,20]}}', '$.a.b') WHERE atom IS NOT NULL ORDER BY id`,
 			wantRows: [][]interface{}{{int64(10)}, {int64(20)}},
 		},
 		{
 			name:     "REQ-VTAB-024_json_tree_types",
-			skip:     "pre-existing: json_tree not yet implemented",
+			skip:     "DISTINCT on json_tree types returns wrong sort order (missing DISTINCT dedup)",
 			query:    `SELECT DISTINCT type FROM json_tree('{"a":[1,"t",null]}') ORDER BY type`,
 			wantRows: [][]interface{}{{"array"}, {"integer"}, {"null"}, {"object"}, {"text"}},
 		},
@@ -136,35 +136,35 @@ func genVTabJoinTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:     "REQ-VTAB-030_join_json_each_expand",
-			skip:     "pre-existing: json_each JOIN not yet implemented",
+			skip:     "json_each with column reference arg not recognized as TVF in JOIN",
 			setup:    setup,
 			query:    "SELECT t.id, je.value FROM tags t, json_each(t.tag_list) je WHERE je.value='go' ORDER BY t.id",
 			wantRows: [][]interface{}{{int64(1), "go"}, {int64(3), "go"}},
 		},
 		{
 			name:     "REQ-VTAB-031_join_json_each_count",
-			skip:     "pre-existing: json_each JOIN not yet implemented",
+			skip:     "json_each with column reference arg not recognized as TVF in JOIN",
 			setup:    setup,
 			query:    "SELECT t.id, COUNT(je.value) AS cnt FROM tags t, json_each(t.tag_list) je GROUP BY t.id ORDER BY t.id",
 			wantRows: [][]interface{}{{int64(1), int64(2)}, {int64(2), int64(2)}, {int64(3), int64(3)}},
 		},
 		{
 			name:     "REQ-VTAB-032_join_json_each_filter",
-			skip:     "pre-existing: json_each JOIN not yet implemented",
+			skip:     "json_each with column reference arg not recognized as TVF in JOIN",
 			setup:    setup,
 			query:    "SELECT DISTINCT je.value FROM tags t, json_each(t.tag_list) je WHERE je.value='wasm'",
 			wantRows: [][]interface{}{{"wasm"}},
 		},
 		{
 			name:     "REQ-VTAB-033_join_json_each_all_tags",
-			skip:     "pre-existing: json_each JOIN not yet implemented",
+			skip:     "json_each with column reference arg not recognized as TVF in JOIN",
 			setup:    setup,
 			query:    "SELECT COUNT(DISTINCT je.value) FROM tags t, json_each(t.tag_list) je",
 			wantRows: [][]interface{}{{int64(5)}}, // go, sql, rust, wasm, ffi
 		},
 		{
 			name:     "REQ-VTAB-034_join_json_each_no_match",
-			skip:     "pre-existing: json_each JOIN not yet implemented",
+			skip:     "json_each with column reference arg not recognized as TVF in JOIN",
 			setup:    setup,
 			query:    "SELECT COUNT(*) FROM tags t, json_each(t.tag_list) je WHERE je.value='python'",
 			wantRows: [][]interface{}{{int64(0)}},

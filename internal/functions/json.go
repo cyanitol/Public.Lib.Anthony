@@ -38,7 +38,7 @@ func jsonFunc(args []Value) (Value, error) {
 	// Validate and minify by unmarshaling and marshaling
 	var data interface{}
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-		return NewNullValue(), nil // Invalid JSON returns NULL
+		return nil, fmt.Errorf("malformed JSON")
 	}
 
 	minified, err := json.Marshal(data)
@@ -59,12 +59,7 @@ func jsonArrayFunc(args []Value) (Value, error) {
 		arr[i] = valueToJSONSmart(arg)
 	}
 
-	result, err := json.Marshal(arr)
-	if err != nil {
-		return NewNullValue(), nil
-	}
-
-	return NewTextValue(string(result)), nil
+	return marshalJSONPreserveFloats(arr)
 }
 
 // jsonArrayLengthFunc implements json_array_length(X [, path])
@@ -279,12 +274,7 @@ func jsonObjectFunc(args []Value) (Value, error) {
 		obj[key] = value
 	}
 
-	result, err := json.Marshal(obj)
-	if err != nil {
-		return NewNullValue(), nil
-	}
-
-	return NewTextValue(string(result)), nil
+	return marshalJSONPreserveFloats(obj)
 }
 
 // jsonPatchFunc implements json_patch(X, Y)
@@ -447,12 +437,28 @@ func jsonTypeFunc(args []Value) (Value, error) {
 		return nil, fmt.Errorf("json_type() requires 1 or 2 arguments")
 	}
 
-	data, err := parseJSONArg(args[0])
+	if args[0].IsNull() {
+		return NewNullValue(), nil
+	}
+
+	data, err := parseJSONArgUseNumber(args[0])
 	if err != nil {
 		return NewNullValue(), nil
 	}
 
 	return jsonTypeWithPath(data, args)
+}
+
+// parseJSONArgUseNumber parses a JSON argument using json.Number to preserve number format
+func parseJSONArgUseNumber(arg Value) (interface{}, error) {
+	jsonStr := arg.AsString()
+	dec := json.NewDecoder(strings.NewReader(jsonStr))
+	dec.UseNumber()
+	var data interface{}
+	if err := dec.Decode(&data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 // jsonTypeWithPath applies path if present and returns the JSON type
@@ -472,7 +478,7 @@ func jsonTypeWithPath(data interface{}, args []Value) (Value, error) {
 // Returns 1 if X is valid JSON, 0 otherwise
 func jsonValidFunc(args []Value) (Value, error) {
 	if args[0].IsNull() {
-		return NewIntValue(0), nil
+		return NewNullValue(), nil
 	}
 
 	jsonStr := args[0].AsString()
@@ -678,11 +684,19 @@ func getJSONType(data interface{}) string {
 		return "null"
 	}
 
-	switch data.(type) {
+	switch v := data.(type) {
 	case bool:
 		return "true" // SQLite uses "true" for both true and false
+	case json.Number:
+		if strings.Contains(v.String(), ".") {
+			return "real"
+		}
+		return "integer"
 	case float64:
-		return "integer" // JSON numbers are treated as integers or reals
+		if v == float64(int64(v)) && v <= 1e15 && v >= -1e15 {
+			return "integer"
+		}
+		return "real"
 	case string:
 		return "text"
 	case []interface{}:
@@ -1039,6 +1053,55 @@ func mergeObjectPatch(targetVal interface{}, vMap map[string]interface{}) interf
 		return applyJSONPatch(targetVal, vMap)
 	}
 	return vMap
+}
+
+// jsonFloat wraps float64 to preserve decimal point in JSON output (e.g. 3.0 not 3)
+type jsonFloat float64
+
+// MarshalJSON outputs the float with a decimal point when it has no fractional part.
+func (f jsonFloat) MarshalJSON() ([]byte, error) {
+	v := float64(f)
+	s := strconv.FormatFloat(v, 'f', -1, 64)
+	if !strings.Contains(s, ".") {
+		s += ".0"
+	}
+	return []byte(s), nil
+}
+
+// marshalJSONPreserveFloats marshals a value, preserving float64 decimal points.
+func marshalJSONPreserveFloats(data interface{}) (Value, error) {
+	wrapped := wrapFloats(data)
+	result, err := json.Marshal(wrapped)
+	if err != nil {
+		return NewNullValue(), nil
+	}
+	return NewTextValue(string(result)), nil
+}
+
+// wrapFloats recursively wraps float64 values that have fractional parts as jsonFloat.
+// Integer-valued float64 (e.g., 3.0 from JSON parsing) are left as-is so they marshal as "3".
+func wrapFloats(data interface{}) interface{} {
+	switch v := data.(type) {
+	case float64:
+		if v != float64(int64(v)) || v > 1e15 || v < -1e15 {
+			return jsonFloat(v) // has fractional part or too large for int64
+		}
+		return v // integer-valued float, marshal as integer
+	case []interface{}:
+		out := make([]interface{}, len(v))
+		for i, elem := range v {
+			out[i] = wrapFloats(elem)
+		}
+		return out
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(v))
+		for k, val := range v {
+			out[k] = wrapFloats(val)
+		}
+		return out
+	default:
+		return data
+	}
 }
 
 // deepCopy creates a deep copy of a JSON-compatible data structure

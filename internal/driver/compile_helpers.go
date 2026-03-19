@@ -39,6 +39,11 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 	// Setup VDBE and code generator (with table info and args for WHERE)
 	numCols, gen := s.setupJoinVDBE(vm, stmt, tables, args)
 
+	// Handle JOINs with aggregates (GROUP BY / COUNT / SUM / etc.)
+	if s.detectAggregates(stmt) {
+		return s.compileSelectWithJoinsAndAggregates(vm, stmt, tables, numCols, gen)
+	}
+
 	// Handle ORDER BY - requires sorter
 	if len(stmt.OrderBy) > 0 {
 		return s.compileSelectWithJoinsAndOrderBy(vm, stmt, tables, numCols, gen)
@@ -54,7 +59,7 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 	loopStart := vm.NumOps()
 
 	// Setup nested loops for joined tables
-	innerLoopStarts := s.emitJoinNestedLoops(vm, tables)
+	innerLoopStarts, innerRewindAddrs := s.emitJoinNestedLoops(vm, tables)
 
 	// Emit WHERE filter, column reads, and result
 	if err := s.emitJoinColumnsWithWhere(vm, stmt, tables, numCols, gen); err != nil {
@@ -62,7 +67,7 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 	}
 
 	// Emit loop cleanup
-	s.emitJoinLoopCleanup(vm, tables, innerLoopStarts, loopStart, rewindAddr)
+	s.emitJoinLoopCleanup(vm, tables, innerLoopStarts, innerRewindAddrs, loopStart, rewindAddr)
 
 	return vm, nil
 }
@@ -111,22 +116,27 @@ func (s *Stmt) compileSelectWithJoinsAndOrderBy(vm *vdbe.VDBE, stmt *parser.Sele
 }
 
 // emitInnerJoinSorterBody emits the nested loop + sorter population for INNER JOINs.
+// Cursors are closed after the outermost loop exits so inner cursors can be rewound.
 func (s *Stmt) emitInnerJoinSorterBody(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int, gen *expr.CodeGenerator, orderInfo *orderByColumnInfo, loopStart int) {
-	innerLoopStarts, innerRewindAddrs := s.emitJoinNestedLoopsWithRewinds(vm, tables)
+	innerLoopStarts, innerRewindAddrs := s.emitJoinNestedLoops(vm, tables)
 
 	_ = s.emitJoinSorterPopulation(vm, stmt, tables, orderInfo, numCols, gen)
 
+	// Emit inner Next ops (innermost first)
 	for i := len(tables) - 1; i > 0; i-- {
 		vm.AddOp(vdbe.OpNext, tables[i].cursorIdx, innerLoopStarts[i-1], 0)
 	}
+	// Outer Next jumps back to loopStart (first inner Rewind)
 	outerNextAddr := vm.AddOp(vdbe.OpNext, tables[0].cursorIdx, loopStart, 0)
 
+	// Close ALL cursors after the outermost loop exits
 	for i := len(tables) - 1; i >= 0; i-- {
 		if !tables[i].table.Temp {
 			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
 		}
 	}
 
+	// Fix inner Rewind empty-table jumps
 	for _, addr := range innerRewindAddrs {
 		vm.Program[addr].P2 = outerNextAddr
 	}
@@ -152,7 +162,9 @@ func (s *Stmt) emitLeftJoinSorterBody(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 
 	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
 	for i := len(tables) - 1; i >= 0; i-- {
-		vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
+		if !tables[i].table.Temp {
+			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
+		}
 	}
 }
 
@@ -464,22 +476,13 @@ func (s *Stmt) emitJoinScanSetup(vm *vdbe.VDBE, tables []stmtTableInfo) int {
 }
 
 // emitJoinNestedLoops sets up nested loops for joined tables.
-func (s *Stmt) emitJoinNestedLoops(vm *vdbe.VDBE, tables []stmtTableInfo) []int {
-	var innerLoopStarts []int
-	for i := 1; i < len(tables); i++ {
-		vm.AddOp(vdbe.OpRewind, tables[i].cursorIdx, 0, 0)
-		innerLoopStarts = append(innerLoopStarts, vm.NumOps())
-	}
-	return innerLoopStarts
-}
-
-// emitJoinNestedLoopsWithRewinds sets up nested loops and returns both loop starts and rewind addresses.
-func (s *Stmt) emitJoinNestedLoopsWithRewinds(vm *vdbe.VDBE, tables []stmtTableInfo) ([]int, []int) {
+// Returns loop body starts and rewind addresses so callers can fix jump targets.
+func (s *Stmt) emitJoinNestedLoops(vm *vdbe.VDBE, tables []stmtTableInfo) ([]int, []int) {
 	var innerLoopStarts []int
 	var innerRewindAddrs []int
 	for i := 1; i < len(tables); i++ {
-		rewindAddr := vm.AddOp(vdbe.OpRewind, tables[i].cursorIdx, 0, 0)
-		innerRewindAddrs = append(innerRewindAddrs, rewindAddr)
+		addr := vm.AddOp(vdbe.OpRewind, tables[i].cursorIdx, 0, 0)
+		innerRewindAddrs = append(innerRewindAddrs, addr)
 		innerLoopStarts = append(innerLoopStarts, vm.NumOps())
 	}
 	return innerLoopStarts, innerRewindAddrs
@@ -514,21 +517,31 @@ func (s *Stmt) emitJoinColumnsWithWhere(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	return nil
 }
 
-// emitJoinLoopCleanup emits Next and Close operations for all tables and fixes addresses.
-func (s *Stmt) emitJoinLoopCleanup(vm *vdbe.VDBE, tables []stmtTableInfo, innerLoopStarts []int, loopStart int, rewindAddr int) {
+// emitJoinLoopCleanup emits Next operations for all loops, then Close for all cursors after
+// the outermost loop exits. Inner Rewind jump targets are fixed to skip past the inner loop
+// when the table is empty.
+func (s *Stmt) emitJoinLoopCleanup(vm *vdbe.VDBE, tables []stmtTableInfo, innerLoopStarts []int, innerRewindAddrs []int, loopStart int, rewindAddr int) {
+	// Emit inner Next ops (innermost first)
 	for i := len(tables) - 1; i > 0; i-- {
 		vm.AddOp(vdbe.OpNext, tables[i].cursorIdx, innerLoopStarts[i-1], 0)
+	}
+
+	// Outer Next jumps back to loopStart (which is the first inner Rewind)
+	outerNextAddr := vm.AddOp(vdbe.OpNext, tables[0].cursorIdx, loopStart, 0)
+
+	// Close ALL cursors after the outermost loop exits
+	for i := len(tables) - 1; i >= 0; i-- {
 		if !tables[i].table.Temp {
 			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
 		}
 	}
-
-	vm.AddOp(vdbe.OpNext, tables[0].cursorIdx, loopStart, 0)
-	if !tables[0].table.Temp {
-		vm.AddOp(vdbe.OpClose, tables[0].cursorIdx, 0, 0)
-	}
 	haltAddr := vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	vm.Program[rewindAddr].P2 = haltAddr
+
+	// Fix inner Rewind empty-table jumps to skip past their own Next
+	for _, addr := range innerRewindAddrs {
+		vm.Program[addr].P2 = outerNextAddr
+	}
 }
 
 // emitSelectColumnOpMultiTable emits the VDBE opcode(s) for reading a column across multiple tables.

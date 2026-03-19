@@ -340,14 +340,11 @@ func TestIsValidDateBoundaries(t *testing.T) {
 	}
 }
 
-// TestJSONFuncInvalid tests json() with invalid JSON
+// TestJSONFuncInvalid tests json() with invalid JSON returns error (per SQLite spec)
 func TestJSONFuncInvalid(t *testing.T) {
-	result, err := jsonFunc([]Value{NewTextValue("not json")})
-	if err != nil {
-		t.Errorf("jsonFunc() error = %v", err)
-	}
-	if !result.IsNull() {
-		t.Error("Expected NULL for invalid JSON")
+	_, err := jsonFunc([]Value{NewTextValue("not json")})
+	if err == nil {
+		t.Error("Expected error for invalid JSON")
 	}
 }
 

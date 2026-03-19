@@ -349,7 +349,7 @@ func (s *Stmt) compileDropView(vm *vdbe.VDBE, stmt *parser.DropViewStmt, args []
 			vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 			return vm, nil
 		}
-		return nil, fmt.Errorf("no such view: %s", stmt.Name)
+		return nil, fmt.Errorf("view not found: %s", stmt.Name)
 	}
 
 	// Drop the view from the schema

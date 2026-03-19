@@ -14,6 +14,7 @@ func TestJSONFunc(t *testing.T) {
 		input    Value
 		expected string
 		isNull   bool
+		wantErr  bool
 	}{
 		{
 			name:     "valid object",
@@ -31,9 +32,9 @@ func TestJSONFunc(t *testing.T) {
 			expected: `{"x":1}`,
 		},
 		{
-			name:   "invalid JSON",
-			input:  NewTextValue(`{invalid}`),
-			isNull: true,
+			name:    "invalid JSON",
+			input:   NewTextValue(`{invalid}`),
+			wantErr: true,
 		},
 		{
 			name:   "NULL input",
@@ -50,6 +51,12 @@ func TestJSONFunc(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := jsonFunc([]Value{tt.input})
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error for invalid JSON, got result: %v", result)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

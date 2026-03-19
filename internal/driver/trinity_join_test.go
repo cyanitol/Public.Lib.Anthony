@@ -48,7 +48,7 @@ func genJoinInnerTests() []sqlTestCase {
 			query:    "SELECT emp.name, dept.name FROM emp INNER JOIN dept ON emp.dept_id = dept.id ORDER BY emp.name",
 			wantRows: [][]interface{}{{"Alice", "Engineering"}, {"Bob", "Engineering"}, {"Carol", "Marketing"}}},
 		{name: "REQ-JOIN-002_inner_excludes_null_fk",
-			skip:  "pre-existing: join edge case not yet implemented",
+
 			setup:    joinSetupEmployees,
 			query:    "SELECT COUNT(*) FROM emp INNER JOIN dept ON emp.dept_id = dept.id",
 			wantRows: [][]interface{}{{int64(3)}}},
@@ -61,7 +61,7 @@ func genJoinInnerTests() []sqlTestCase {
 			query:    "SELECT emp.name, dept.name FROM emp, dept WHERE emp.dept_id = dept.id ORDER BY emp.name",
 			wantRows: [][]interface{}{{"Alice", "Engineering"}, {"Bob", "Engineering"}, {"Carol", "Marketing"}}},
 		{name: "REQ-JOIN-005_inner_no_match",
-			skip: "pre-existing: join edge case not yet implemented",
+			skip: "COUNT(*) returns 0 rows instead of 1 row with value 0 when join matches nothing",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER PRIMARY KEY, val TEXT)",
 				"CREATE TABLE t2(id INTEGER PRIMARY KEY, t1_id INTEGER)",
@@ -71,7 +71,7 @@ func genJoinInnerTests() []sqlTestCase {
 			query:    "SELECT COUNT(*) FROM t1 INNER JOIN t2 ON t1.id = t2.t1_id",
 			wantRows: [][]interface{}{{int64(0)}}},
 		{name: "REQ-JOIN-006_inner_empty_table",
-			skip: "pre-existing: join edge case not yet implemented",
+			skip: "COUNT(*) returns 0 rows instead of 1 row with value 0 when join matches nothing",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER PRIMARY KEY)",
 				"CREATE TABLE t2(id INTEGER PRIMARY KEY, ref INTEGER)",
@@ -96,7 +96,7 @@ func genJoinLeftTests() []sqlTestCase {
 				{"Carol", "Marketing"}, {"Dave", nil},
 			}},
 		{name: "REQ-JOIN-011_left_includes_unmatched",
-			skip:  "pre-existing: join edge case not yet implemented",
+			skip: "LEFT JOIN COUNT(*) returns 3 instead of 4, missing NULL-fk unmatched row",
 			setup:    joinSetupEmployees,
 			query:    "SELECT COUNT(*) FROM emp LEFT JOIN dept ON emp.dept_id = dept.id",
 			wantRows: [][]interface{}{{int64(4)}}},
@@ -105,14 +105,14 @@ func genJoinLeftTests() []sqlTestCase {
 			query:    "SELECT emp.name, dept.name FROM emp LEFT JOIN dept ON emp.dept_id = dept.id WHERE dept.name IS NULL",
 			wantRows: [][]interface{}{{"Dave", nil}}},
 		{name: "REQ-JOIN-013_left_with_aggregate",
-			skip:  "pre-existing: join edge case not yet implemented",
+			skip: "LEFT JOIN drops unmatched dept 'Sales' instead of showing COUNT 0",
 			setup: joinSetupEmployees,
 			query: "SELECT dept.name, COUNT(emp.id) AS cnt FROM dept LEFT JOIN emp ON dept.id = emp.dept_id GROUP BY dept.name ORDER BY dept.name",
 			wantRows: [][]interface{}{
 				{"Engineering", int64(2)}, {"Marketing", int64(1)}, {"Sales", int64(0)},
 			}},
 		{name: "REQ-JOIN-014_left_both_empty",
-			skip: "pre-existing: join edge case not yet implemented",
+			skip: "COUNT(*) returns 0 rows instead of 1 row with value 0 on empty join",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER)", "CREATE TABLE t2(id INTEGER, ref INTEGER)",
 			},
@@ -136,7 +136,6 @@ func genJoinLeftTests() []sqlTestCase {
 func genJoinCrossTests() []sqlTestCase {
 	return []sqlTestCase{
 		{name: "REQ-JOIN-020_cross_basic",
-			skip: "pre-existing: join edge case not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(x TEXT)", "INSERT INTO t1 VALUES('a')", "INSERT INTO t1 VALUES('b')",
 				"CREATE TABLE t2(y TEXT)", "INSERT INTO t2 VALUES('1')", "INSERT INTO t2 VALUES('2')",
@@ -153,7 +152,7 @@ func genJoinCrossTests() []sqlTestCase {
 				{"G", "L"}, {"G", "S"}, {"R", "L"}, {"R", "S"},
 			}},
 		{name: "REQ-JOIN-022_cross_one_empty",
-			skip: "pre-existing: join edge case not yet implemented",
+			skip: "COUNT(*) returns 0 rows instead of 1 row with value 0 on empty cross join",
 			setup: []string{
 				"CREATE TABLE t1(x TEXT)", "INSERT INTO t1 VALUES('a')",
 				"CREATE TABLE t2(y TEXT)",
@@ -192,7 +191,7 @@ func genJoinSelfTests() []sqlTestCase {
 				{"CEO", nil}, {"Dev", "VP"}, {"QA", "VP"}, {"VP", "CEO"},
 			}},
 		{name: "REQ-JOIN-032_self_join_count_reports",
-			skip:  "pre-existing: join edge case not yet implemented",
+
 			setup: orgSetup,
 			query: "SELECT m.name, COUNT(e.id) FROM org m JOIN org e ON e.mgr_id = m.id GROUP BY m.name ORDER BY m.name",
 			wantRows: [][]interface{}{
@@ -226,7 +225,7 @@ func genJoinNullKeyTests() []sqlTestCase {
 				{"a", "x"}, {"b", nil},
 			}},
 		{name: "REQ-JOIN-042_null_eq_null_inner",
-			skip: "pre-existing: join edge case not yet implemented",
+			skip: "COUNT(*) returns 0 rows instead of 1 row with value 0 on no-match join",
 			setup: []string{
 				"CREATE TABLE t1(k INTEGER)", "INSERT INTO t1 VALUES(NULL)",
 				"CREATE TABLE t2(k INTEGER)", "INSERT INTO t2 VALUES(NULL)",
@@ -234,7 +233,7 @@ func genJoinNullKeyTests() []sqlTestCase {
 			query:    "SELECT COUNT(*) FROM t1 JOIN t2 ON t1.k = t2.k",
 			wantRows: [][]interface{}{{int64(0)}}},
 		{name: "REQ-JOIN-043_null_is_null_join",
-			skip: "pre-existing: join edge case not yet implemented",
+			skip: "IS-based join ON clause not producing match for NULL IS NULL",
 			setup: []string{
 				"CREATE TABLE t1(k INTEGER)", "INSERT INTO t1 VALUES(NULL)",
 				"CREATE TABLE t2(k INTEGER)", "INSERT INTO t2 VALUES(NULL)",
@@ -305,14 +304,14 @@ func genJoinMultiTableTests() []sqlTestCase {
 			query:    "SELECT c.name, o.total, i.product FROM customers c JOIN orders o ON c.id = o.cust_id JOIN items i ON o.id = i.order_id WHERE c.name = 'Acme' ORDER BY o.total, i.product",
 			wantRows: [][]interface{}{{"Acme", 100.0, "Gadget"}, {"Acme", 100.0, "Widget"}, {"Acme", 200.0, "Widget"}}},
 		{name: "REQ-JOIN-061_three_table_aggregate",
-			skip:  "pre-existing: join edge case not yet implemented",
+
 			setup: multiSetup,
 			query: "SELECT c.name, COUNT(i.id) FROM customers c JOIN orders o ON c.id = o.cust_id JOIN items i ON o.id = i.order_id GROUP BY c.name ORDER BY c.name",
 			wantRows: [][]interface{}{
 				{"Acme", int64(3)}, {"Beta", int64(1)},
 			}},
 		{name: "REQ-JOIN-062_three_table_left",
-			skip:  "pre-existing: join edge case not yet implemented",
+			skip: "multi-table LEFT JOIN drops unmatched 'Gamma' instead of showing COUNT 0",
 			setup: append(append([]string{}, multiSetup...),
 				"INSERT INTO customers VALUES(3, 'Gamma')"),
 			query: "SELECT c.name, COUNT(o.id) FROM customers c LEFT JOIN orders o ON c.id = o.cust_id LEFT JOIN items i ON o.id = i.order_id GROUP BY c.name ORDER BY c.name",
@@ -326,7 +325,7 @@ func genJoinMultiTableTests() []sqlTestCase {
 				{"Acme", 100.0}, {"Acme", 200.0},
 			}},
 		{name: "REQ-JOIN-064_four_table_join",
-			skip:  "pre-existing: join edge case not yet implemented",
+
 			setup: append(append([]string{}, multiSetup...),
 				"CREATE TABLE categories(id INTEGER PRIMARY KEY, product TEXT, category TEXT)",
 				"INSERT INTO categories VALUES(1, 'Widget', 'Hardware')",
