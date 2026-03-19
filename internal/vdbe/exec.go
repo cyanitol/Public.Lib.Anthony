@@ -357,8 +357,11 @@ func init() {
 		OpWindowLead:       (*VDBE).execWindowLead,
 		OpWindowFirstValue: (*VDBE).execWindowFirstValue,
 		OpWindowLastValue:  (*VDBE).execWindowLastValue,
-		OpWindowNthValue:   (*VDBE).execWindowNthValue,
-		OpAggDistinct:      (*VDBE).execAggDistinct,
+		OpWindowNthValue:    (*VDBE).execWindowNthValue,
+		OpWindowAggregate:   (*VDBE).execWindowAggregate,
+		OpWindowPercentRank: (*VDBE).execWindowPercentRank,
+		OpWindowCumeDist:    (*VDBE).execWindowCumeDist,
+		OpAggDistinct:       (*VDBE).execAggDistinct,
 		OpDistinctRow:      (*VDBE).execDistinctRow,
 	}
 }
@@ -6209,32 +6212,22 @@ func (v *VDBE) execAggStepWindow(instr *Instruction) error {
 // P2 = output register
 // P3 = streaming mode flag (if > 0, increment counter before returning)
 func (v *VDBE) execWindowRowNum(instr *Instruction) error {
-	windowIdx := instr.P1
-	outputReg := instr.P2
-	streamingMode := instr.P3 > 0
-
-	// Get window state
-	windowState, ok := v.WindowStates[windowIdx]
-	if !ok {
-		return fmt.Errorf("window state %d not found", windowIdx)
-	}
-
-	// In streaming mode, increment row counter using call-counting
-	// (only first window function call per row actually increments)
-	if streamingMode {
-		windowState.IncrementPartRowOnFirstCall()
-	}
-
-	// Get row number (1-based)
-	rowNum := windowState.GetCurrentRowNumber()
-
-	// Store result
-	mem, err := v.GetMem(outputReg)
+	windowState, err := v.getWindowState(instr.P1)
 	if err != nil {
 		return err
 	}
-	mem.SetInt(rowNum)
 
+	if instr.P3 > 0 {
+		v.initWindowPartition(windowState)
+		windowState.IncrementPartRowOnFirstCall()
+		v.advancePartitionIfNeeded(windowState)
+	}
+
+	mem, mErr := v.GetMem(instr.P2)
+	if mErr != nil {
+		return mErr
+	}
+	mem.SetInt(windowState.GetCurrentRowNumber())
 	return nil
 }
 
@@ -6243,45 +6236,22 @@ func (v *VDBE) execWindowRowNum(instr *Instruction) error {
 // P2 = output register
 // P3 = number of table columns (streaming mode if > 0, data in registers 0..P3-1)
 func (v *VDBE) execWindowRank(instr *Instruction) error {
-	windowIdx := instr.P1
-	outputReg := instr.P2
-	numCols := instr.P3
-
-	// Get window state
-	windowState, ok := v.WindowStates[windowIdx]
-	if !ok {
-		return fmt.Errorf("window state %d not found", windowIdx)
-	}
-
-	// In streaming mode (P3 > 0), read row data from registers and update ranking
-	if numCols > 0 {
-		// Increment row counter using call-counting (only first call per row increments)
-		windowState.IncrementPartRowOnFirstCall()
-
-		// Build current row from registers for ORDER BY comparison
-		currentRow := make([]*Mem, numCols)
-		for i := 0; i < numCols; i++ {
-			mem, err := v.GetMem(i)
-			if err == nil {
-				currentRow[i] = mem
-			}
-		}
-		windowState.UpdateRankingFromRow(currentRow)
-	} else {
-		// Partition mode - use stored partition data
-		windowState.UpdateRanking()
-	}
-
-	// Get rank value
-	rank := windowState.GetRank()
-
-	// Store result
-	mem, err := v.GetMem(outputReg)
+	windowState, err := v.getWindowState(instr.P1)
 	if err != nil {
 		return err
 	}
-	mem.SetInt(rank)
 
+	if instr.P3 > 0 {
+		v.advanceWindowRanking(windowState, instr.P3)
+	} else {
+		windowState.UpdateRanking()
+	}
+
+	mem, mErr := v.GetMem(instr.P2)
+	if mErr != nil {
+		return mErr
+	}
+	mem.SetInt(windowState.GetRank())
 	return nil
 }
 
@@ -6290,45 +6260,22 @@ func (v *VDBE) execWindowRank(instr *Instruction) error {
 // P2 = output register
 // P3 = number of table columns (streaming mode if > 0, data in registers 0..P3-1)
 func (v *VDBE) execWindowDenseRank(instr *Instruction) error {
-	windowIdx := instr.P1
-	outputReg := instr.P2
-	numCols := instr.P3
-
-	// Get window state
-	windowState, ok := v.WindowStates[windowIdx]
-	if !ok {
-		return fmt.Errorf("window state %d not found", windowIdx)
-	}
-
-	// In streaming mode (P3 > 0), read row data from registers and update ranking
-	if numCols > 0 {
-		// Increment row counter using call-counting (only first call per row increments)
-		windowState.IncrementPartRowOnFirstCall()
-
-		// Build current row from registers for ORDER BY comparison
-		currentRow := make([]*Mem, numCols)
-		for i := 0; i < numCols; i++ {
-			mem, err := v.GetMem(i)
-			if err == nil {
-				currentRow[i] = mem
-			}
-		}
-		windowState.UpdateRankingFromRow(currentRow)
-	} else {
-		// Partition mode - use stored partition data
-		windowState.UpdateRanking()
-	}
-
-	// Get dense rank value
-	denseRank := windowState.GetDenseRank()
-
-	// Store result
-	mem, err := v.GetMem(outputReg)
+	windowState, err := v.getWindowState(instr.P1)
 	if err != nil {
 		return err
 	}
-	mem.SetInt(denseRank)
 
+	if instr.P3 > 0 {
+		v.advanceWindowRanking(windowState, instr.P3)
+	} else {
+		windowState.UpdateRanking()
+	}
+
+	mem, mErr := v.GetMem(instr.P2)
+	if mErr != nil {
+		return mErr
+	}
+	mem.SetInt(windowState.GetDenseRank())
 	return nil
 }
 
@@ -6337,40 +6284,30 @@ func (v *VDBE) execWindowDenseRank(instr *Instruction) error {
 // P2 = output register
 // P3 = number of buckets (from register or immediate)
 func (v *VDBE) execWindowNtile(instr *Instruction) error {
-	windowIdx := instr.P1
-	outputReg := instr.P2
-	numBuckets := instr.P3
-
-	// Get window state
-	windowState, ok := v.WindowStates[windowIdx]
-	if !ok {
-		return fmt.Errorf("window state %d not found", windowIdx)
+	windowState, err := v.getWindowState(instr.P1)
+	if err != nil {
+		return err
 	}
 
-	// Get partition size and current row number
-	partitionSize := windowState.GetPartitionSize()
-	currentRowNum := windowState.GetCurrentRowNumber()
+	v.initWindowPartition(windowState)
+	windowState.IncrementPartRowOnFirstCall()
+	v.advancePartitionIfNeeded(windowState)
 
-	// Calculate bucket number
-	// NTILE divides rows into N buckets as evenly as possible
+	numBuckets := int64(instr.P3)
 	if numBuckets <= 0 {
 		numBuckets = 1
 	}
 
-	bucketSize := int64(partitionSize) / int64(numBuckets)
-	remainder := int64(partitionSize) % int64(numBuckets)
-
-	// Rows are distributed: first 'remainder' buckets get (bucketSize+1) rows,
-	// remaining buckets get bucketSize rows
-	var bucket int64
-	if currentRowNum <= remainder*(bucketSize+1) {
-		bucket = (currentRowNum-1)/(bucketSize+1) + 1
-	} else {
-		bucket = (currentRowNum-remainder*(bucketSize+1)-1)/bucketSize + remainder + 1
+	partSize := int64(windowState.GetPartitionSize())
+	if partSize <= 0 {
+		partSize = 1
 	}
+	rowNum := windowState.GetCurrentRowNumber() // 1-based
 
-	// Store result
-	mem, err := v.GetMem(outputReg)
+	// NTILE formula: tile = ((k-1) * n / S) + 1
+	bucket := ((rowNum - 1) * numBuckets / partSize) + 1
+
+	mem, err := v.GetMem(instr.P2)
 	if err != nil {
 		return err
 	}
@@ -6503,6 +6440,29 @@ func (v *VDBE) execWindowNthValue(instr *Instruction) error {
 	}
 
 	return mem.Copy(nthValue)
+}
+
+// advanceWindowRanking handles partition-aware ranking in streaming mode.
+// It tracks partition boundaries and resets ranking state on partition changes.
+func (v *VDBE) advanceWindowRanking(ws *WindowState, numCols int) {
+	prevPartIdx := ws.CurrentPartIdx
+	v.initWindowPartition(ws)
+	ws.IncrementPartRowOnFirstCall()
+	v.advancePartitionIfNeeded(ws)
+
+	// Reset ranking state when partition changes
+	if ws.CurrentPartIdx != prevPartIdx && prevPartIdx >= 0 {
+		ws.ResetRanking()
+	}
+
+	currentRow := make([]*Mem, numCols)
+	for i := 0; i < numCols; i++ {
+		mem, err := v.GetMem(i)
+		if err == nil {
+			currentRow[i] = mem
+		}
+	}
+	ws.UpdateRankingFromRow(currentRow)
 }
 
 // initWindowPartition initializes partition tracking on first call after row population.
@@ -6698,4 +6658,239 @@ func (v *VDBE) getCollationRegistry() interface{} {
 		return nil
 	}
 	return v.Ctx.CollationRegistry
+}
+
+// execWindowAggregate implements OpWindowAggregate - aggregate window functions over frame rows.
+// P1 = result register, P3 = arg column index in partition data, P4.Z = function name
+func (v *VDBE) execWindowAggregate(instr *Instruction) error {
+	ws, err := v.getWindowState(0)
+	if err != nil {
+		return err
+	}
+
+	v.initWindowPartition(ws)
+	ws.IncrementPartRowOnFirstCall()
+	v.advancePartitionIfNeeded(ws)
+	ws.UpdateFrame()
+
+	frameRows := ws.GetFrameRows()
+	colIdx := instr.P3
+	funcName := instr.P4.Z
+
+	mem, mErr := v.GetMem(instr.P1)
+	if mErr != nil {
+		return mErr
+	}
+
+	return windowAggDispatch(funcName, frameRows, colIdx, mem)
+}
+
+// windowAggDispatch routes to the correct aggregate computation by function name.
+func windowAggDispatch(funcName string, rows [][]*Mem, colIdx int, out *Mem) error {
+	switch funcName {
+	case "SUM":
+		windowAggSum(rows, colIdx, out)
+	case "COUNT":
+		windowAggCount(rows, colIdx, out)
+	case "AVG":
+		windowAggAvg(rows, colIdx, out)
+	case "MIN":
+		windowAggMinMax(rows, colIdx, out, true)
+	case "MAX":
+		windowAggMinMax(rows, colIdx, out, false)
+	case "TOTAL":
+		windowAggTotal(rows, colIdx, out)
+	case "GROUP_CONCAT":
+		windowAggGroupConcat(rows, colIdx, out, ",")
+	default:
+		out.SetNull()
+	}
+	return nil
+}
+
+// windowAggSum computes SUM over frame rows. Returns NULL if all values are NULL.
+func windowAggSum(rows [][]*Mem, colIdx int, out *Mem) {
+	var sum float64
+	hasValue := false
+	isAllInt := true
+
+	for _, row := range rows {
+		val := windowGetVal(row, colIdx)
+		if val == nil || val.IsNull() {
+			continue
+		}
+		hasValue = true
+		if !val.IsInt() {
+			isAllInt = false
+		}
+		sum += val.RealValue()
+	}
+
+	if !hasValue {
+		out.SetNull()
+		return
+	}
+	if isAllInt {
+		out.SetInt(int64(sum))
+		return
+	}
+	out.SetReal(sum)
+}
+
+// windowAggCount computes COUNT over frame rows (counts non-NULL values).
+func windowAggCount(rows [][]*Mem, colIdx int, out *Mem) {
+	var count int64
+	for _, row := range rows {
+		val := windowGetVal(row, colIdx)
+		if val != nil && !val.IsNull() {
+			count++
+		}
+	}
+	out.SetInt(count)
+}
+
+// windowAggAvg computes AVG over frame rows. Returns NULL if no non-NULL values.
+func windowAggAvg(rows [][]*Mem, colIdx int, out *Mem) {
+	var sum float64
+	var count int64
+
+	for _, row := range rows {
+		val := windowGetVal(row, colIdx)
+		if val == nil || val.IsNull() {
+			continue
+		}
+		sum += val.RealValue()
+		count++
+	}
+
+	if count == 0 {
+		out.SetNull()
+		return
+	}
+	out.SetReal(sum / float64(count))
+}
+
+// windowAggMinMax computes MIN (isMin=true) or MAX (isMin=false) over frame rows.
+func windowAggMinMax(rows [][]*Mem, colIdx int, out *Mem, isMin bool) {
+	var best *Mem
+
+	for _, row := range rows {
+		val := windowGetVal(row, colIdx)
+		if val == nil || val.IsNull() {
+			continue
+		}
+		if best == nil || windowShouldReplace(val, best, isMin) {
+			best = val
+		}
+	}
+
+	if best == nil {
+		out.SetNull()
+		return
+	}
+	_ = out.Copy(best)
+}
+
+// windowShouldReplace returns true if val should replace current best for MIN/MAX.
+func windowShouldReplace(val, best *Mem, isMin bool) bool {
+	cmp := val.Compare(best)
+	if isMin {
+		return cmp < 0
+	}
+	return cmp > 0
+}
+
+// windowAggTotal computes TOTAL over frame rows. Returns 0.0 (not NULL) if all NULL.
+func windowAggTotal(rows [][]*Mem, colIdx int, out *Mem) {
+	var sum float64
+	for _, row := range rows {
+		val := windowGetVal(row, colIdx)
+		if val != nil && !val.IsNull() {
+			sum += val.RealValue()
+		}
+	}
+	out.SetReal(sum)
+}
+
+// windowAggGroupConcat concatenates non-NULL string values from frame rows.
+func windowAggGroupConcat(rows [][]*Mem, colIdx int, out *Mem, sep string) {
+	var parts []string
+	for _, row := range rows {
+		val := windowGetVal(row, colIdx)
+		if val != nil && !val.IsNull() {
+			parts = append(parts, val.StringValue())
+		}
+	}
+	if len(parts) == 0 {
+		out.SetNull()
+		return
+	}
+	_ = out.SetStr(strings.Join(parts, sep))
+}
+
+// windowGetVal safely retrieves a column value from a row.
+func windowGetVal(row []*Mem, colIdx int) *Mem {
+	if colIdx < len(row) {
+		return row[colIdx]
+	}
+	return nil
+}
+
+// execWindowPercentRank implements OpWindowPercentRank - PERCENT_RANK() window function.
+// P1 = result register
+func (v *VDBE) execWindowPercentRank(instr *Instruction) error {
+	ws, err := v.getWindowState(0)
+	if err != nil {
+		return err
+	}
+
+	v.initWindowPartition(ws)
+	ws.IncrementPartRowOnFirstCall()
+	v.advancePartitionIfNeeded(ws)
+	ws.UpdateRanking()
+
+	mem, mErr := v.GetMem(instr.P1)
+	if mErr != nil {
+		return mErr
+	}
+
+	partSize := ws.GetPartitionSize()
+	if partSize <= 1 {
+		mem.SetReal(0.0)
+		return nil
+	}
+
+	rank := ws.GetRank()
+	mem.SetReal(float64(rank-1) / float64(partSize-1))
+	return nil
+}
+
+// execWindowCumeDist implements OpWindowCumeDist - CUME_DIST() window function.
+// P1 = result register
+func (v *VDBE) execWindowCumeDist(instr *Instruction) error {
+	ws, err := v.getWindowState(0)
+	if err != nil {
+		return err
+	}
+
+	v.initWindowPartition(ws)
+	ws.IncrementPartRowOnFirstCall()
+	v.advancePartitionIfNeeded(ws)
+	ws.UpdateRanking()
+
+	mem, mErr := v.GetMem(instr.P1)
+	if mErr != nil {
+		return mErr
+	}
+
+	partSize := ws.GetPartitionSize()
+	if partSize == 0 {
+		mem.SetReal(0.0)
+		return nil
+	}
+
+	// Count rows with ORDER BY value <= current row's value
+	rowsLte := ws.CurrentRank + ws.RowsAtCurrentRank
+	mem.SetReal(float64(rowsLte) / float64(partSize))
+	return nil
 }

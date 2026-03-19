@@ -247,6 +247,11 @@ const (
 	// Correlated subquery opcodes
 	OpCorrelatedExists Opcode = 218 // Correlated EXISTS: P1=result reg, P2=first binding reg, P3=num bindings, P4.P=callback, P5=not flag
 	OpCorrelatedScalar Opcode = 219 // Correlated scalar subquery: P1=result reg, P2=first binding reg, P3=num bindings, P4.P=callback
+
+	// Aggregate window function opcodes
+	OpWindowAggregate   Opcode = 220 // Aggregate over frame: P1=result reg, P3=arg col index, P4.Z=function name
+	OpWindowPercentRank Opcode = 221 // PERCENT_RANK(): P1=result register
+	OpWindowCumeDist    Opcode = 222 // CUME_DIST(): P1=result register
 )
 
 // OpcodeNames maps opcodes to their string names for debugging.
@@ -423,8 +428,11 @@ var OpcodeNames = map[Opcode]string{
 	OpTriggerBefore:    "TriggerBefore",
 	OpTriggerAfter:     "TriggerAfter",
 	OpRaise:            "Raise",
-	OpCorrelatedExists: "CorrelatedExists",
-	OpCorrelatedScalar: "CorrelatedScalar",
+	OpCorrelatedExists:  "CorrelatedExists",
+	OpCorrelatedScalar:  "CorrelatedScalar",
+	OpWindowAggregate:   "WindowAggregate",
+	OpWindowPercentRank: "WindowPercentRank",
+	OpWindowCumeDist:    "WindowCumeDist",
 }
 
 // String returns the string representation of an opcode.

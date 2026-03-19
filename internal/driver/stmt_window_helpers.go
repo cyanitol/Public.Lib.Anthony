@@ -313,9 +313,27 @@ func (s *Stmt) emitWindowFunctionColumnWithOpcodes(vm *vdbe.VDBE, fnExpr *parser
 		s.emitWindowLagLead(vm, fnExpr, windowStateIdx, colIdx, numTableCols)
 	case "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE":
 		s.emitWindowValueFunc(vm, fnExpr, windowStateIdx, colIdx, numTableCols)
+	case "SUM", "COUNT", "AVG", "MIN", "MAX", "TOTAL", "GROUP_CONCAT":
+		s.emitWindowAggregateFunc(vm, fnExpr, colIdx, numTableCols)
+	case "PERCENT_RANK":
+		vm.AddOp(vdbe.OpWindowPercentRank, colIdx, 0, 0)
+	case "CUME_DIST":
+		vm.AddOp(vdbe.OpWindowCumeDist, colIdx, 0, 0)
 	default:
 		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
 	}
+}
+
+// emitWindowAggregateFunc emits OpWindowAggregate for aggregate window functions.
+func (s *Stmt) emitWindowAggregateFunc(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, colIdx, numTableCols int) {
+	argColIdx := 0
+	if len(fnExpr.Args) > 0 {
+		if ident, ok := fnExpr.Args[0].(*parser.IdentExpr); ok {
+			argColIdx = s.findColumnIndexByName(ident.Name, numTableCols)
+		}
+	}
+	addr := vm.AddOp(vdbe.OpWindowAggregate, colIdx, 0, argColIdx)
+	vm.Program[addr].P4.Z = fnExpr.Name
 }
 
 // emitWindowRankFunc emits opcodes for RANK, DENSE_RANK, or ROW_NUMBER.
@@ -335,8 +353,23 @@ func (s *Stmt) emitWindowLagLead(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, sta
 	if fnExpr.Name == "LEAD" {
 		op = vdbe.OpWindowLead
 	}
+
+	// 3rd argument: default value when row is out of bounds
+	// Must be loaded into register BEFORE the window opcode executes
+	var defReg int
+	if defaultVal := s.extractLagLeadDefault(fnExpr); defaultVal != nil {
+		defReg = vm.NumMem
+		vm.AllocMemory(defReg + 1)
+		intAddr := vm.AddOp(vdbe.OpInt64, 0, defReg, 0)
+		vm.Program[intAddr].P4.I64 = *defaultVal
+		vm.Program[intAddr].P4Type = vdbe.P4Int64
+	}
+
 	addr := vm.AddOp(op, stateIdx, colIdx, colIndex)
 	vm.Program[addr].P4.I = int32(offset)
+	if defReg > 0 {
+		vm.Program[addr].P5 = uint16(defReg)
+	}
 }
 
 // emitWindowValueFunc emits opcodes for FIRST_VALUE, LAST_VALUE, or NTH_VALUE.
@@ -392,6 +425,30 @@ func (s *Stmt) extractLagLeadArgs(fnExpr *parser.FunctionExpr, numTableCols int)
 	return colIndex, offset
 }
 
+// extractLagLeadDefault extracts the 3rd argument (default value) from LAG/LEAD.
+func (s *Stmt) extractLagLeadDefault(fnExpr *parser.FunctionExpr) *int64 {
+	if len(fnExpr.Args) <= 2 {
+		return nil
+	}
+	return parseIntExpr(fnExpr.Args[2])
+}
+
+// parseIntExpr extracts an int64 from a literal or negated literal expression.
+func parseIntExpr(e parser.Expression) *int64 {
+	if lit, ok := e.(*parser.LiteralExpr); ok {
+		if n, err := strconv.ParseInt(lit.Value, 10, 64); err == nil {
+			return &n
+		}
+	}
+	if u, ok := e.(*parser.UnaryExpr); ok && u.Op == parser.OpNeg {
+		if inner := parseIntExpr(u.Expr); inner != nil {
+			neg := -(*inner)
+			return &neg
+		}
+	}
+	return nil
+}
+
 // extractNthValueN extracts the N argument from NTH_VALUE(expr, N)
 func (s *Stmt) extractNthValueN(fnExpr *parser.FunctionExpr) int {
 	if len(fnExpr.Args) > 1 {
@@ -414,19 +471,39 @@ func (s *Stmt) extractValueFunctionArg(fnExpr *parser.FunctionExpr, numTableCols
 	return 0
 }
 
-// findColumnIndexByName finds column index by name - simple implementation
+// findColumnIndexByName finds column index by name in the query's target table.
+// It matches only tables whose column count equals numTableCols to avoid
+// accidentally resolving against system tables like sqlite_master.
 func (s *Stmt) findColumnIndexByName(name string, numTableCols int) int {
-	// Try to find in current table context
-	if s.conn != nil && s.conn.schema != nil {
-		for _, t := range s.conn.schema.Tables {
-			for i, col := range t.Columns {
-				if col.Name == name {
-					return i
-				}
+	if s.conn == nil || s.conn.schema == nil {
+		return 0
+	}
+	for _, t := range s.conn.schema.Tables {
+		if len(t.Columns) != numTableCols {
+			continue
+		}
+		for i, col := range t.Columns {
+			if col.Name == name {
+				return i
 			}
 		}
 	}
 	return 0 // Default to first column
+}
+
+// windowFrameForSpec returns the correct frame for a window specification.
+// Per SQL standard: when there is no ORDER BY and no explicit frame, the
+// default frame covers the entire partition (UNBOUNDED PRECEDING to
+// UNBOUNDED FOLLOWING). With ORDER BY, the default is UNBOUNDED PRECEDING
+// to CURRENT ROW.
+func (s *Stmt) windowFrameForSpec(over *parser.WindowSpec, orderByCols []int) vdbe.WindowFrame {
+	if over.Frame != nil {
+		return s.extractWindowFrame(over.Frame)
+	}
+	if len(orderByCols) == 0 {
+		return vdbe.EntirePartitionFrame()
+	}
+	return vdbe.DefaultWindowFrame()
 }
 
 // extractWindowFrame converts parser.FrameSpec to vdbe.WindowFrame
@@ -475,6 +552,22 @@ func (s *Stmt) convertFrameBound(bound parser.FrameBound) vdbe.WindowFrameBound 
 	}
 
 	return vdbeBound
+}
+
+// emitWindowLimitCheck emits LIMIT check opcodes for window function queries.
+// Returns the address of the conditional jump to halt (0 if no LIMIT).
+func (s *Stmt) emitWindowLimitCheck(vm *vdbe.VDBE, limitExpr parser.Expression, gen *expr.CodeGenerator) int {
+	limitVal := parseLimitExpr(limitExpr)
+	if limitVal < 0 {
+		return 0
+	}
+	counterReg := gen.AllocReg()
+	limitCheckReg := gen.AllocReg()
+	cmpReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpAddImm, counterReg, 1, 0)
+	vm.AddOp(vdbe.OpInteger, limitVal, limitCheckReg, 0)
+	vm.AddOp(vdbe.OpGe, counterReg, limitCheckReg, cmpReg)
+	return vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)
 }
 
 // convertFrameBoundType converts parser.FrameBoundType to vdbe.FrameBoundType

@@ -113,6 +113,21 @@ func DefaultWindowFrame() WindowFrame {
 	}
 }
 
+// EntirePartitionFrame returns the frame for windows without ORDER BY:
+// RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING.
+// Per SQL standard, omitting ORDER BY means the entire partition is the frame.
+func EntirePartitionFrame() WindowFrame {
+	return WindowFrame{
+		Type: FrameRange,
+		Start: WindowFrameBound{
+			Type: BoundUnboundedPreceding,
+		},
+		End: WindowFrameBound{
+			Type: BoundUnboundedFollowing,
+		},
+	}
+}
+
 // AddRow adds a row to the window state, partitioning as needed
 func (ws *WindowState) AddRow(row []*Mem) {
 	// If no partitions yet, or row belongs to a new partition, create new partition
@@ -384,6 +399,15 @@ func (ws *WindowState) SameRowValues(row1, row2 []*Mem) bool {
 	}
 
 	return true
+}
+
+// ResetRanking resets ranking state for a new partition.
+func (ws *WindowState) ResetRanking() {
+	ws.LastRankRow = nil
+	ws.CurrentRank = 0
+	ws.CurrentDenseRank = 0
+	ws.RowsAtCurrentRank = 0
+	ws.LastRankingGeneration = -999
 }
 
 // GetRank returns the current RANK value

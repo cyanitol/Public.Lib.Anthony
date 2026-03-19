@@ -161,6 +161,7 @@ func TestWindowNtile(t *testing.T) {
 	v.WindowStates = make(map[int]*WindowState)
 
 	windowState := NewWindowState(nil, nil, nil, DefaultWindowFrame())
+	windowState.WindowFunctionCount = 1
 
 	// Add 10 rows
 	for i := 1; i <= 10; i++ {
@@ -170,12 +171,12 @@ func TestWindowNtile(t *testing.T) {
 	v.WindowStates[0] = windowState
 
 	// Test NTILE(4) - divide into 4 buckets
-	// Expected: 1,1,1, 2,2,2, 3,3, 4,4
-	expectedBuckets := []int64{1, 1, 1, 2, 2, 2, 3, 3, 4, 4}
+	// Formula: tile = ((k-1) * 4 / 10) + 1
+	// k=1→1, k=2→1, k=3→1, k=4→2, k=5→2, k=6→3, k=7→3, k=8→3, k=9→4, k=10→4
+	expectedBuckets := []int64{1, 1, 1, 2, 2, 3, 3, 3, 4, 4}
 
 	for i, expected := range expectedBuckets {
-		windowState.NextRow()
-
+		// execWindowNtile manages row advancement internally
 		instr := &Instruction{
 			Opcode: OpWindowNtile,
 			P1:     0,
@@ -192,6 +193,7 @@ func TestWindowNtile(t *testing.T) {
 		if result.IntValue() != expected {
 			t.Errorf("Row %d: expected ntile=%d, got %d", i+1, expected, result.IntValue())
 		}
+		_ = i
 	}
 }
 

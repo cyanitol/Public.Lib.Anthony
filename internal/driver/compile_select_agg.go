@@ -939,7 +939,10 @@ func (s *Stmt) compileSelectWithWindowFunctions(vm *vdbe.VDBE, stmt *parser.Sele
 
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
 
-	s.finalizeWindowLoop(vm, skipAddr, rewindAddr)
+	// LIMIT check after each result row
+	limitJumpAddr := s.emitWindowLimitCheck(vm, stmt.Limit, gen)
+
+	s.finalizeWindowLoop(vm, skipAddr, rewindAddr, limitJumpAddr)
 
 	return vm, nil
 }
@@ -998,7 +1001,7 @@ func (s *Stmt) collectWindowFuncs(e parser.Expression, table *schema.Table, vm *
 		if existingIdx, exists := seen[overKey]; exists {
 			counts[existingIdx]++
 		} else {
-			frame := s.extractWindowFrame(fnExpr.Over.Frame)
+			frame := s.windowFrameForSpec(fnExpr.Over, orderByCols)
 			windowState := vdbe.NewWindowState(partCols, orderByCols, orderByDesc, frame)
 			vm.WindowStates[*nextIdx] = windowState
 			seen[overKey] = *nextIdx
@@ -1088,7 +1091,7 @@ func (s *Stmt) compileWindowWhereClause(vm *vdbe.VDBE, gen *expr.CodeGenerator, 
 }
 
 // finalizeWindowLoop finalizes the window function loop.
-func (s *Stmt) finalizeWindowLoop(vm *vdbe.VDBE, skipAddr, rewindAddr int) {
+func (s *Stmt) finalizeWindowLoop(vm *vdbe.VDBE, skipAddr, rewindAddr, limitJumpAddr int) {
 	if skipAddr >= 0 {
 		vm.Program[skipAddr].P2 = vm.NumOps()
 	}
@@ -1096,18 +1099,52 @@ func (s *Stmt) finalizeWindowLoop(vm *vdbe.VDBE, skipAddr, rewindAddr int) {
 	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
 	vm.Program[rewindAddr].P2 = vm.NumOps()
 
+	if limitJumpAddr > 0 {
+		vm.Program[limitJumpAddr].P2 = vm.NumOps()
+	}
+
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 }
 
-// detectWindowOrderBy checks if any window function has ORDER BY and extracts the columns
+// detectWindowOrderBy checks if any window function has ORDER BY/PARTITION BY
+// or requires the two-pass sorting path (e.g., aggregate window functions).
 func (s *Stmt) detectWindowOrderBy(expandedCols []parser.ResultColumn, table *schema.Table) (bool, []int, []bool) {
 	for _, col := range expandedCols {
 		if found, orderByCols, orderByDesc := s.findWindowOrderBy(col.Expr, table); found {
 			return true, orderByCols, orderByDesc
 		}
 	}
+	// Even without ORDER BY/PARTITION BY, aggregate and value window functions
+	// (e.g., SUM(x) OVER ()) need the two-pass sorting path for partition data.
+	if s.hasDataDependentWindowFunc(expandedCols) {
+		return true, nil, nil
+	}
 	return false, nil, nil
+}
+
+// hasDataDependentWindowFunc checks if any column uses an aggregate or value
+// window function that requires pre-populated partition data.
+func (s *Stmt) hasDataDependentWindowFunc(cols []parser.ResultColumn) bool {
+	for _, col := range cols {
+		if fn, ok := col.Expr.(*parser.FunctionExpr); ok && fn.Over != nil {
+			if isDataDependentWindowFunc(fn.Name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isDataDependentWindowFunc returns true for window functions that require
+// the two-pass execution path (partition data must be fully populated).
+func isDataDependentWindowFunc(name string) bool {
+	switch name {
+	case "SUM", "COUNT", "AVG", "MIN", "MAX", "TOTAL", "GROUP_CONCAT",
+		"FIRST_VALUE", "LAST_VALUE", "NTH_VALUE", "LAG", "LEAD":
+		return true
+	}
+	return false
 }
 
 // findWindowOrderBy recursively searches an expression for a window function with ORDER BY.
@@ -1156,11 +1193,18 @@ func (s *Stmt) compileWindowWithSorting(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	numTableCols := len(table.Columns)
 	sorterCols := numTableCols
 
-	// Setup sorter with key info
+	// Ensure register allocator starts past the data registers (0..numTableCols-1)
+	gen.SetNextReg(numTableCols)
+
+	// Build sorter key: PARTITION BY columns (ascending) first, then ORDER BY columns.
+	// This ensures rows are grouped by partition before being ordered within each partition.
+	partCols := s.extractWindowPartitionCols(expandedCols, table)
+	allKeyCols, allKeyDesc := buildSorterKey(partCols, orderByCols, orderByDesc)
+
 	keyInfo := &vdbe.SorterKeyInfo{
-		KeyCols:    orderByCols,
-		Desc:       orderByDesc,
-		Collations: make([]string, len(orderByCols)),
+		KeyCols:    allKeyCols,
+		Desc:       allKeyDesc,
+		Collations: make([]string, len(allKeyCols)),
 	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
@@ -1182,10 +1226,9 @@ func (s *Stmt) compileWindowWithSorting(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
 	}
 
-	// Read all columns from table into registers
-	for i := 0; i < numTableCols; i++ {
-		vm.AddOp(vdbe.OpColumn, 0, i, i)
-	}
+	// Read all columns from table into registers.
+	// Use OpRowid for INTEGER PRIMARY KEY (rowid alias) columns, OpColumn for others.
+	s.emitTableColumnsToRegisters(vm, table, numTableCols)
 
 	// Insert into sorter
 	vm.AddOp(vdbe.OpSorterInsert, 1, 0, sorterCols)
@@ -1241,6 +1284,9 @@ func (s *Stmt) compileWindowWithSorting(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
 
+	// LIMIT check after each result row
+	limitJumpAddr := s.emitWindowLimitCheck(vm, stmt.Limit, gen)
+
 	// Loop back to get next row from sorter
 	vm.AddOp(vdbe.OpSorterNext, 1, sorterLoopAddr, 0)
 
@@ -1248,6 +1294,9 @@ func (s *Stmt) compileWindowWithSorting(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	haltAddr := vm.NumOps()
 	vm.Program[sorterNextAddr].P2 = sorterLoopAddr
 	vm.Program[haltJumpAddr].P2 = haltAddr
+	if limitJumpAddr > 0 {
+		vm.Program[limitJumpAddr].P2 = haltAddr
+	}
 
 	// Close sorter and halt
 	vm.AddOp(vdbe.OpSorterClose, 1, 0, 0)
@@ -1369,4 +1418,55 @@ func (s *Stmt) walkAndPrecomputeCase(vm *vdbe.VDBE, gen *expr.CodeGenerator,
 		s.walkAndPrecompute(vm, gen, w.Result, numTableCols)
 	}
 	s.walkAndPrecompute(vm, gen, ex.ElseClause, numTableCols)
+}
+
+// extractWindowPartitionCols extracts PARTITION BY column indices from the first
+// window function found in the expanded columns.
+func (s *Stmt) extractWindowPartitionCols(expandedCols []parser.ResultColumn, table *schema.Table) []int {
+	for _, col := range expandedCols {
+		fnExpr, ok := col.Expr.(*parser.FunctionExpr)
+		if !ok || fnExpr.Over == nil {
+			continue
+		}
+		return s.extractPartitionByCols(fnExpr.Over, table)
+	}
+	return nil
+}
+
+// buildSorterKey prepends partition columns (ascending) before order-by columns,
+// deduplicating any partition column that already appears in the order-by list.
+func buildSorterKey(partCols, orderByCols []int, orderByDesc []bool) ([]int, []bool) {
+	if len(partCols) == 0 {
+		return orderByCols, orderByDesc
+	}
+	orderSet := make(map[int]bool, len(orderByCols))
+	for _, c := range orderByCols {
+		orderSet[c] = true
+	}
+	keyCols := make([]int, 0, len(partCols)+len(orderByCols))
+	keyDesc := make([]bool, 0, len(partCols)+len(orderByCols))
+	for _, pc := range partCols {
+		if !orderSet[pc] {
+			keyCols = append(keyCols, pc)
+			keyDesc = append(keyDesc, false)
+		}
+	}
+	keyCols = append(keyCols, orderByCols...)
+	keyDesc = append(keyDesc, orderByDesc...)
+	return keyCols, keyDesc
+}
+
+// emitTableColumnsToRegisters reads all table columns into registers 0..n-1.
+// For INTEGER PRIMARY KEY (rowid alias) columns, OpRowid is used instead of OpColumn
+// to correctly read the rowid rather than misinterpreting the B-tree record layout.
+func (s *Stmt) emitTableColumnsToRegisters(vm *vdbe.VDBE, table *schema.Table, numTableCols int) {
+	recordIdx := 0
+	for i := 0; i < numTableCols; i++ {
+		if schemaColIsRowidForTable(table, table.Columns[i]) {
+			vm.AddOp(vdbe.OpRowid, 0, i, 0)
+		} else {
+			vm.AddOp(vdbe.OpColumn, 0, recordIdx, i)
+			recordIdx++
+		}
+	}
 }

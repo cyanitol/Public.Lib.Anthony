@@ -45,7 +45,6 @@ func genWindowRankTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:  "REQ-WIN-001_row_number_global",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT name, ROW_NUMBER() OVER (ORDER BY salary DESC) AS rn FROM w ORDER BY rn LIMIT 3",
 			wantRows: [][]interface{}{
@@ -54,7 +53,6 @@ func genWindowRankTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-002_row_number_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT dept, name, ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC) AS rn FROM w WHERE dept='eng' ORDER BY rn",
 			wantRows: [][]interface{}{
@@ -87,7 +85,6 @@ func genWindowRankTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-005_rank_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT dept, name, RANK() OVER (PARTITION BY dept ORDER BY salary DESC) AS rnk FROM w WHERE dept IN ('eng','hr') ORDER BY dept, rnk",
 			wantRows: [][]interface{}{
@@ -97,7 +94,6 @@ func genWindowRankTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-006_dense_rank_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT dept, name, DENSE_RANK() OVER (PARTITION BY dept ORDER BY salary DESC) AS drnk FROM w WHERE dept='sales' ORDER BY drnk",
 			wantRows: [][]interface{}{
@@ -106,7 +102,6 @@ func genWindowRankTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-007_ntile_2",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT name, NTILE(2) OVER (ORDER BY salary DESC) AS tile FROM w ORDER BY salary DESC",
 			wantRows: [][]interface{}{
@@ -116,7 +111,6 @@ func genWindowRankTests() []sqlTestCase {
 		},
 		{
 			name: "REQ-WIN-008_ntile_3",
-			skip: "pre-existing: window functions not yet implemented",
 			setup: []string{
 				"CREATE TABLE wn3(v INTEGER)",
 				"INSERT INTO wn3 VALUES(1)", "INSERT INTO wn3 VALUES(2)", "INSERT INTO wn3 VALUES(3)",
@@ -131,7 +125,6 @@ func genWindowRankTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-009_ntile_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT dept, name, NTILE(2) OVER (PARTITION BY dept ORDER BY salary) AS tile FROM w WHERE dept='eng' ORDER BY salary",
 			wantRows: [][]interface{}{
@@ -161,7 +154,6 @@ func genWindowValueTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:  "REQ-WIN-020_lag_default",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, val, LAG(val) OVER (ORDER BY id) AS prev FROM wv ORDER BY id",
 			wantRows: [][]interface{}{
@@ -174,7 +166,6 @@ func genWindowValueTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-021_lag_offset_2",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, LAG(val, 2) OVER (ORDER BY id) AS prev2 FROM wv ORDER BY id",
 			wantRows: [][]interface{}{
@@ -184,7 +175,6 @@ func genWindowValueTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-022_lag_offset_default_value",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, LAG(val, 1, -1) OVER (ORDER BY id) AS prev FROM wv ORDER BY id",
 			wantRows: [][]interface{}{
@@ -194,7 +184,6 @@ func genWindowValueTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-023_lead_default",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, val, LEAD(val) OVER (ORDER BY id) AS nxt FROM wv ORDER BY id",
 			wantRows: [][]interface{}{
@@ -207,7 +196,6 @@ func genWindowValueTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-024_lead_offset_2",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, LEAD(val, 2) OVER (ORDER BY id) AS nxt2 FROM wv ORDER BY id",
 			wantRows: [][]interface{}{
@@ -217,7 +205,6 @@ func genWindowValueTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-025_lead_default_value",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, LEAD(val, 1, 0) OVER (ORDER BY id) AS nxt FROM wv ORDER BY id",
 			wantRows: [][]interface{}{
@@ -227,7 +214,6 @@ func genWindowValueTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-026_first_value",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, FIRST_VALUE(val) OVER (ORDER BY id) AS fv FROM wv ORDER BY id",
 			wantRows: [][]interface{}{
@@ -237,7 +223,6 @@ func genWindowValueTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-027_first_value_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: windowSetup(),
 			query: "SELECT dept, name, FIRST_VALUE(name) OVER (PARTITION BY dept ORDER BY salary DESC) AS top FROM w WHERE dept IN ('eng','hr') ORDER BY dept, salary DESC",
 			wantRows: [][]interface{}{
@@ -247,7 +232,6 @@ func genWindowValueTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-028_last_value_full_frame",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, LAST_VALUE(val) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS lv FROM wv ORDER BY id",
 			wantRows: [][]interface{}{
@@ -257,7 +241,6 @@ func genWindowValueTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-029_nth_value_2",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, NTH_VALUE(val, 2) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS nv FROM wv ORDER BY id",
 			wantRows: [][]interface{}{
@@ -267,7 +250,6 @@ func genWindowValueTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-030_nth_value_3",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, NTH_VALUE(val, 3) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS nv FROM wv ORDER BY id",
 			wantRows: [][]interface{}{
@@ -277,7 +259,6 @@ func genWindowValueTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-031_lag_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: windowSetup(),
 			query: "SELECT dept, name, LAG(name) OVER (PARTITION BY dept ORDER BY salary) AS prev FROM w WHERE dept='sales' ORDER BY salary",
 			wantRows: [][]interface{}{
@@ -286,7 +267,6 @@ func genWindowValueTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-032_lead_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: windowSetup(),
 			query: "SELECT dept, name, LEAD(name) OVER (PARTITION BY dept ORDER BY salary) AS nxt FROM w WHERE dept='sales' ORDER BY salary",
 			wantRows: [][]interface{}{
@@ -310,7 +290,6 @@ func genWindowFrameTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:  "REQ-WIN-040_rows_unbounded_preceding_current",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, SUM(val) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running FROM wf ORDER BY id",
 			wantRows: [][]interface{}{
@@ -320,7 +299,6 @@ func genWindowFrameTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-041_rows_1_preceding_1_following",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, SUM(val) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS s FROM wf ORDER BY id",
 			wantRows: [][]interface{}{
@@ -330,7 +308,6 @@ func genWindowFrameTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-042_rows_current_row_only",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, SUM(val) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND CURRENT ROW) AS s FROM wf ORDER BY id",
 			wantRows: [][]interface{}{
@@ -340,7 +317,6 @@ func genWindowFrameTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-043_rows_unbounded_both",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, SUM(val) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS s FROM wf ORDER BY id",
 			wantRows: [][]interface{}{
@@ -350,7 +326,6 @@ func genWindowFrameTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-044_rows_2_preceding_current",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, SUM(val) OVER (ORDER BY id ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS s FROM wf ORDER BY id",
 			wantRows: [][]interface{}{
@@ -360,7 +335,6 @@ func genWindowFrameTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-045_avg_over_frame",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, AVG(val) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS a FROM wf ORDER BY id",
 			wantRows: [][]interface{}{
@@ -370,7 +344,6 @@ func genWindowFrameTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-046_count_over_frame",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, COUNT(*) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS c FROM wf ORDER BY id",
 			wantRows: [][]interface{}{
@@ -380,7 +353,6 @@ func genWindowFrameTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-047_min_over_frame",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, MIN(val) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS mn FROM wf ORDER BY id",
 			wantRows: [][]interface{}{
@@ -390,7 +362,6 @@ func genWindowFrameTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-048_max_over_frame",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: seqSetup,
 			query: "SELECT id, MAX(val) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS mx FROM wf ORDER BY id",
 			wantRows: [][]interface{}{
@@ -410,7 +381,6 @@ func genWindowAggregateTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:  "REQ-WIN-060_sum_over_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT dept, name, SUM(salary) OVER (PARTITION BY dept) AS dept_total FROM w WHERE dept='eng' ORDER BY name",
 			wantRows: [][]interface{}{
@@ -419,7 +389,6 @@ func genWindowAggregateTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-061_count_over_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT dept, COUNT(*) OVER (PARTITION BY dept) AS cnt FROM w ORDER BY dept, name",
 			wantRows: [][]interface{}{
@@ -430,7 +399,6 @@ func genWindowAggregateTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-062_avg_over_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT dept, name, AVG(salary) OVER (PARTITION BY dept) AS avg_sal FROM w WHERE dept='hr' ORDER BY name",
 			wantRows: [][]interface{}{
@@ -439,7 +407,6 @@ func genWindowAggregateTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-063_sum_over_no_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT name, SUM(salary) OVER () AS grand_total FROM w ORDER BY name LIMIT 1",
 			wantRows: [][]interface{}{
@@ -448,7 +415,6 @@ func genWindowAggregateTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-064_running_sum",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT name, salary, SUM(salary) OVER (ORDER BY salary) AS running FROM w WHERE dept='eng' ORDER BY salary",
 			wantRows: [][]interface{}{
@@ -459,7 +425,6 @@ func genWindowAggregateTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-065_running_count",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT name, COUNT(*) OVER (ORDER BY salary) AS rc FROM w WHERE dept='sales' ORDER BY salary",
 			wantRows: [][]interface{}{
@@ -468,7 +433,6 @@ func genWindowAggregateTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-066_running_avg",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT name, salary, AVG(salary) OVER (ORDER BY salary ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_avg FROM w WHERE dept='eng' ORDER BY salary",
 			wantRows: [][]interface{}{
@@ -479,7 +443,6 @@ func genWindowAggregateTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-067_min_over_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT dept, MIN(salary) OVER (PARTITION BY dept) AS mn FROM w ORDER BY dept, name",
 			wantRows: [][]interface{}{
@@ -490,7 +453,6 @@ func genWindowAggregateTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-068_max_over_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT dept, MAX(salary) OVER (PARTITION BY dept) AS mx FROM w ORDER BY dept, name",
 			wantRows: [][]interface{}{
@@ -501,7 +463,7 @@ func genWindowAggregateTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-069_multiple_windows_one_query",
-			skip:  "pre-existing: window functions not yet implemented",
+			skip:  "SUM(salary) OVER () returns running sum instead of grand total when combined with ROW_NUMBER() OVER (ORDER BY ...) — different OVER clauses share accumulator state",
 			setup: ws,
 			query: "SELECT name, ROW_NUMBER() OVER (ORDER BY salary DESC) AS rn, SUM(salary) OVER () AS total FROM w ORDER BY salary DESC LIMIT 3",
 			wantRows: [][]interface{}{
@@ -512,7 +474,6 @@ func genWindowAggregateTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-070_group_concat_over_partition",
-			skip:  "pre-existing: window functions not yet implemented",
 			setup: ws,
 			query: "SELECT dept, GROUP_CONCAT(name, ',') OVER (PARTITION BY dept ORDER BY name ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS names FROM w WHERE dept='hr' ORDER BY name LIMIT 1",
 			wantRows: [][]interface{}{
@@ -521,7 +482,6 @@ func genWindowAggregateTests() []sqlTestCase {
 		},
 		{
 			name: "REQ-WIN-071_percent_rank",
-			skip: "pre-existing: window functions not yet implemented",
 			setup: []string{
 				"CREATE TABLE wpr(v INTEGER)",
 				"INSERT INTO wpr VALUES(10)", "INSERT INTO wpr VALUES(20)",
@@ -537,7 +497,6 @@ func genWindowAggregateTests() []sqlTestCase {
 		},
 		{
 			name: "REQ-WIN-072_cume_dist",
-			skip: "pre-existing: window functions not yet implemented",
 			setup: []string{
 				"CREATE TABLE wcd(v INTEGER)",
 				"INSERT INTO wcd VALUES(10)", "INSERT INTO wcd VALUES(20)",
