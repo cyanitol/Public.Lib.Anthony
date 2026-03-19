@@ -840,8 +840,8 @@ func (s *Stmt) tryEmitDirectAggregate(vm *vdbe.VDBE, e parser.Expression, accReg
 
 	switch fnExpr.Name {
 	case "AVG":
+		vm.AddOp(vdbe.OpToReal, accReg, 0, 0)
 		vm.AddOp(vdbe.OpDivide, accReg, avgCountReg, targetReg)
-		vm.AddOp(vdbe.OpToReal, targetReg, 0, 0)
 	case "JSON_GROUP_ARRAY":
 		emitJSONWrap(vm, gen, accReg, targetReg, "[", "]")
 	case "JSON_GROUP_OBJECT":

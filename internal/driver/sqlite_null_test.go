@@ -259,7 +259,7 @@ func TestSQLiteNull(t *testing.T) {
 			},
 			query: "SELECT count(*), count(b), count(c), sum(b), sum(c), avg(b), avg(c), min(b), max(b) FROM t1",
 			want: [][]interface{}{
-				{int64(7), int64(4), int64(6), int64(2), int64(3), float64(0), float64(0), int64(0), int64(1)},
+				{int64(7), int64(4), int64(6), int64(2), int64(3), float64(0.5), float64(0.5), int64(0), int64(1)},
 			},
 		},
 
