@@ -16,11 +16,11 @@ A pure Go SQLite implementation for the cyanitol project. This library provides 
   - Common Table Expressions (CTEs) with recursive queries
   - Subqueries (scalar, IN, EXISTS)
   - Compound queries (UNION, INTERSECT, EXCEPT)
-  - Joins (INNER, LEFT, CROSS, RIGHT, NATURAL)
+  - Joins (INNER, LEFT, RIGHT, FULL OUTER, CROSS, NATURAL)
   - Aggregate functions (SUM, COUNT, AVG, MIN, MAX, GROUP_CONCAT, TOTAL)
   - Window functions (ROW_NUMBER, RANK, NTH_VALUE, named WINDOW clauses)
   - Triggers (BEFORE/AFTER, WHEN clause, RAISE, cascading, UPDATE OF columns)
-  - Table-valued functions (json_each, json_tree)
+  - Table-valued functions (json_each, json_tree, generate_series)
   - ATTACH/DETACH with cross-database queries
 - **Complete DDL Support** - CREATE, ALTER (RENAME TABLE/COLUMN, DROP COLUMN), DROP for tables and indexes
 - **Constraint Enforcement** - PRIMARY KEY, UNIQUE, CHECK, FOREIGN KEY, NOT NULL
@@ -120,6 +120,8 @@ See [INDEX.md](INDEX.md) for the complete documentation index.
 ## Package Structure
 
 ```
+cmd/
+└── anthony/     - CLI for running SQL scripts and ad-hoc queries
 internal/
 ├── btree/       - B-tree storage engine
 ├── pager/       - Page cache, journal, and transaction management
@@ -211,7 +213,7 @@ make test-cover   # With coverage
 
 ### Project Structure & Module Organization
 - Core library resides in `internal/` with major components such as `btree/`, `pager/`, `parser/`, `vdbe/`, `engine/`, and `driver/`; tests live alongside code in the same packages.
-- CLI helpers for debugging and demonstrations are under `cmd/test_dsn` and `cmd/test_explain`.
+- CLI tool is at `cmd/anthony` (run SQL scripts and ad-hoc queries); helper commands are under `cmd/test_dsn`, `cmd/test_explain`, `cmd/trinitygen`, and `cmd/verify_pragma`.
 - Documentation is in `doc/` (architecture, testing, security); examples are in `example/`; repository entrypoint wiring sits in `anthony.go`.
 
 ### Build, Test, and Development Commands

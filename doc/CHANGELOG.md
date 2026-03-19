@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **CLI Tool** (`cmd/anthony`) — Run SQL scripts and ad-hoc queries from the command line (`-db`, `-query`, `-file` flags, stdin via `-file -`)
 - **FTS5 SQL Integration** — CREATE VIRTUAL TABLE...USING fts5, INSERT, SELECT with MATCH, UPDATE, DELETE via compile_vtab.go
 - **R-Tree SQL Integration** — CREATE VIRTUAL TABLE...USING rtree, INSERT, spatial range queries, DELETE via compile_vtab.go
 - **Virtual Table SQL Compilation Pipeline** — New `compile_vtab.go` with BestIndex/Filter, cursor-based row collection, WHERE post-filtering, DISTINCT/ORDER BY/LIMIT support

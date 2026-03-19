@@ -23,10 +23,15 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.26'
-          cache: false
+          cache: true
+
+      - name: Verify
+        run: go vet ./...
 
       - name: Run tests
-        run: go test ./... -short
+        env:
+          CGO_ENABLED: '0'
+        run: go test ./... -short -p 4 -parallel 4
 
       - name: Create Release
         env:

@@ -1,4 +1,4 @@
-.PHONY: all build test test-fast test-ci test-short test-cover test-race lint clean help commit check-spdx check-complexity check-fmt
+.PHONY: all build test test-fast test-ci test-short test-cover test-cover-report test-cover-func test-race lint check clean help commit check-spdx check-complexity check-fmt bench vet
 
 # Test configuration
 TEST_PARALLEL ?= 4
@@ -10,6 +10,20 @@ all: test build
 # Build the project
 build:
 	go build ./...
+
+
+# Run performance comparison benchmark (Anthony vs sqlite3 if available)
+bench:
+	@export CGO_ENABLED=0; \
+	BENCH_DURATION=$${BENCH_DURATION:-300}; \
+	if command -v sqlite3 >/dev/null 2>&1; then \
+		BENCH_DURATION=$$BENCH_DURATION /bin/bash scripts/bench.sh; \
+	elif [ -x /nix/var/nix/profiles/default/bin/nix-shell ]; then \
+		/nix/var/nix/profiles/default/bin/nix-shell --run "BENCH_DURATION=$$BENCH_DURATION /bin/bash scripts/bench.sh"; \
+	else \
+		echo "sqlite3 not found; running Anthony benchmark only"; \
+		BENCH_DURATION=$$BENCH_DURATION SKIP_SQLITE=1 /bin/bash scripts/bench.sh; \
+	fi
 
 # Run all tests
 test:
@@ -29,22 +43,22 @@ test-short:
 
 # Run tests with coverage
 test-cover:
-	go test -cover ./...
+	CGO_ENABLED=0 go test -p $(TEST_PKG_PARALLEL) -parallel $(TEST_PARALLEL) -cover ./...
 
 # Run tests with coverage report
 test-cover-report:
-	go test -coverprofile=coverage.out ./...
+	CGO_ENABLED=0 go test -p $(TEST_PKG_PARALLEL) -parallel $(TEST_PARALLEL) -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
 # Run tests with coverage and show functions
 test-cover-func:
-	go test -coverprofile=coverage.out ./...
+	CGO_ENABLED=0 go test -p $(TEST_PKG_PARALLEL) -parallel $(TEST_PARALLEL) -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out
 
-# Run tests with race detection
+# Run tests with race detection (CGO required for -race, but set explicitly)
 test-race:
-	go test -race ./...
+	CGO_ENABLED=1 go test -race ./...
 
 # Run cyclomatic complexity check
 complexity:
@@ -76,8 +90,18 @@ clean-all: clean
 	rm -rf .gocache/
 	go clean -cache -testcache
 
+# Static analysis: fmt, spdx, complexity, vet
+lint: check-fmt check-spdx check-complexity vet
+	@echo ""
+	@echo "All lint checks passed."
+
+# Fast checks (lint + build) without running tests
+check: lint build
+	@echo ""
+	@echo "All checks passed."
+
 # Pre-commit validation - run before committing
-commit: check-fmt check-spdx check-complexity vet build test
+commit: check test
 	@echo ""
 	@echo "✓ All pre-commit checks passed!"
 	@echo "Ready to commit."
@@ -130,7 +154,9 @@ help:
 	@echo "  tidy             - Tidy go.mod"
 	@echo "  clean            - Remove generated files"
 	@echo "  clean-all        - Remove all caches and generated files"
-	@echo "  commit           - Pre-commit checks (fmt, spdx, complexity, vet, build, test)"
+	@echo "  lint             - Static analysis (fmt, spdx, complexity, vet)"
+	@echo "  check            - Lint + build (no tests)"
+	@echo "  commit           - Full pre-commit validation (check + test)"
 	@echo "  check-fmt        - Check code is formatted"
 	@echo "  check-spdx       - Check SPDX headers"
 	@echo "  check-complexity - Check cyclomatic complexity ≤ 11"
