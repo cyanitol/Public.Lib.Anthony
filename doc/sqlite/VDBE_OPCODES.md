@@ -31,16 +31,16 @@ Search Changelog
 The SQLite Bytecode Engine
 
 Table Of Contents
-[1. Executive Summary](#executive_summary)
-[2. Introduction](#introduction)
-[2.1. VDBE Source Code](#vdbe_source_code)
-[2.2. Instruction Format](#instruction_format)
-[2.3. Registers](#registers)
-[2.4. B-Tree Cursors](#b_tree_cursors)
-[2.5. Subroutines, Coroutines, and Subprograms](#subroutines_coroutines_and_subprograms)
-[2.6. Self-Altering Code](#self_altering_code)
-[3. Viewing The Bytecode](#viewing_the_bytecode)
-[4. The Opcodes](#the_opcodes)
+[1. Executive Summary](#1-executive-summary)
+[2. Introduction](#2-introduction)
+[2.1. VDBE Source Code](#21-vdbe-source-code)
+[2.2. Instruction Format](#22-instruction-format)
+[2.3. Registers](#23-registers)
+[2.4. B-Tree Cursors](#24-b-tree-cursors)
+[2.5. Subroutines, Coroutines, and Subprograms](#25-subroutines-coroutines-and-subprograms)
+[2.6. Self-Altering Code](#26-self-altering-code)
+[3. Viewing The Bytecode](#3-viewing-the-bytecode)
+[4. The Opcodes](#4-the-opcodes)
 
 # 1. Executive Summary
 

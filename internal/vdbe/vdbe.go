@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package vdbe
 
 import (
@@ -52,11 +52,12 @@ const (
 
 // Cursor represents a database cursor in the VDBE.
 type Cursor struct {
-	CurType    CursorType // Type of cursor
-	IsTable    bool       // True for rowid tables, false for indexes
-	Writable   bool       // True if cursor supports write operations
-	NullRow    bool       // True if pointing to a row with no data
-	SeekResult int        // Result of previous seek operation
+	CurType      CursorType // Type of cursor
+	IsTable      bool       // True for rowid tables, false for indexes
+	Writable     bool       // True if cursor supports write operations
+	NullRow      bool       // True if pointing to a row with no data
+	SeekResult   int        // Result of previous seek operation
+	WithoutRowID bool       // True for WITHOUT ROWID tables (use composite PK keys)
 
 	// B-tree cursor data (for CursorBTree)
 	RootPage    uint32      // Root page of the B-tree
@@ -101,6 +102,36 @@ type VDBEContext struct {
 	// Foreign key constraint support
 	FKManager          interface{} // *constraint.ForeignKeyManager
 	ForeignKeysEnabled bool        // PRAGMA foreign_keys setting
+
+	// Trigger support
+	TriggerCompiler interface{} // Callback for compiling trigger body statements
+}
+
+// TriggerRowData holds OLD and NEW pseudo-table row data for trigger execution.
+type TriggerRowData struct {
+	OldRow map[string]interface{} // OLD pseudo-table (nil for INSERT)
+	NewRow map[string]interface{} // NEW pseudo-table (nil for DELETE)
+}
+
+// RaiseError represents a RAISE function error within a trigger.
+type RaiseError struct {
+	Type    int    // 0=IGNORE, 1=ROLLBACK, 2=ABORT, 3=FAIL
+	Message string // Error message
+}
+
+// Error implements the error interface.
+func (r *RaiseError) Error() string {
+	return r.Message
+}
+
+// IsIgnore returns true if this is a RAISE(IGNORE).
+func (r *RaiseError) IsIgnore() bool {
+	return r.Type == 0
+}
+
+// IsRollback returns true if this is a RAISE(ROLLBACK, msg).
+func (r *RaiseError) IsRollback() bool {
+	return r.Type == 1
 }
 
 // VDBE represents the Virtual Database Engine - a bytecode virtual machine.
@@ -133,27 +164,31 @@ type VDBE struct {
 	Stats    *QueryStatistics // Query execution statistics (Phase 9.2)
 
 	// Transaction and change tracking
-	InTxn        bool  // True if in a transaction
-	NumChanges   int64 // Number of database changes
-	LastInsertID int64 // Last inserted rowid (for database/sql driver)
+	InTxn           bool             // True if in a transaction
+	EndsTxn         bool             // True if COMMIT/ROLLBACK statement that ends transaction
+	NumChanges      int64            // Number of database changes
+	LastInsertID    int64            // Last inserted rowid (for database/sql driver)
+	pendingFKUpdate *fkUpdateContext // Captures old row data during UPDATE for FK checks
 
 	// Function execution context
 	funcCtx *FunctionContext // Function registry and aggregate state
 
 	// Flags
-	Explain  bool // True if EXPLAIN mode
-	ReadOnly bool // True for read-only statements
+	Explain       bool // True if EXPLAIN mode
+	ReadOnly      bool // True for read-only statements
+	SchemaChanged bool // True if schema changed (root page split), requires cache invalidation
 
 	// Runtime context
 	Ctx *VDBEContext // Execution context (btree, schema, etc.)
 
-	// Sorters for ORDER BY
-	Sorters []*Sorter // Array of open sorters
+	// Sorters for ORDER BY (supports spill-to-disk via SorterInterface)
+	Sorters []SorterInterface // Array of open sorters
 
 	// Trigger and sub-program support
 	Parent      *VDBE                  // Parent VDBE (for sub-programs/triggers)
 	SubPrograms map[int]*VDBE          // Sub-programs (triggers) keyed by ID
 	Coroutines  map[int]*CoroutineInfo // Coroutine state keyed by coroutine ID
+	TriggerRow  *TriggerRowData        // OLD/NEW row data for trigger execution
 
 	// Window function support
 	WindowStates map[int]*WindowState // Window states keyed by cursor/index
@@ -170,6 +205,22 @@ type CoroutineInfo struct {
 	EntryPoint int  // Address to jump to when yielding to this coroutine
 	YieldAddr  int  // Address to return to after yield
 	Active     bool // True if coroutine is currently active
+}
+
+// SorterInterface defines the interface for all sorter types.
+// Both Sorter and SorterWithSpill implement this interface.
+type SorterInterface interface {
+	Insert(row []*Mem) error
+	Sort() error
+	Rewind() bool
+	Next() bool
+	CurrentRow() []*Mem
+	Close()
+	// Additional methods for VDBE internal access
+	NumRows() int
+	SetCurrent(pos int)
+	GetCurrent() int
+	IsSorted() bool
 }
 
 // Sorter is an in-memory sorting structure for ORDER BY.
@@ -212,7 +263,7 @@ func NewSorterWithRegistry(keyCols []int, desc []bool, collations []string, numC
 }
 
 // Insert adds a row to the sorter. The row is copied.
-func (s *Sorter) Insert(row []*Mem) {
+func (s *Sorter) Insert(row []*Mem) error {
 	// Make a deep copy of the row using pooled Mem cells
 	rowCopy := make([]*Mem, len(row))
 	for i, m := range row {
@@ -222,13 +273,14 @@ func (s *Sorter) Insert(row []*Mem) {
 	}
 	s.Rows = append(s.Rows, rowCopy)
 	s.Sorted = false
+	return nil
 }
 
 // Sort sorts the collected rows by the key columns.
-func (s *Sorter) Sort() {
+func (s *Sorter) Sort() error {
 	if s.Sorted || len(s.Rows) <= 1 {
 		s.Sorted = true
-		return
+		return nil
 	}
 
 	// Simple insertion sort (adequate for most ORDER BY cases)
@@ -242,6 +294,7 @@ func (s *Sorter) Sort() {
 		s.Rows[j+1] = key
 	}
 	s.Sorted = true
+	return nil
 }
 
 // isColumnInBounds checks if the column index is valid for both rows.
@@ -313,6 +366,26 @@ func (s *Sorter) Close() {
 	s.Rows = nil
 }
 
+// NumRows returns the number of rows in the sorter.
+func (s *Sorter) NumRows() int {
+	return len(s.Rows)
+}
+
+// SetCurrent sets the current position in the sorter.
+func (s *Sorter) SetCurrent(pos int) {
+	s.Current = pos
+}
+
+// GetCurrent returns the current position in the sorter.
+func (s *Sorter) GetCurrent() int {
+	return s.Current
+}
+
+// IsSorted returns whether the sorter has been sorted.
+func (s *Sorter) IsSorted() bool {
+	return s.Sorted
+}
+
 // New creates a new VDBE instance.
 func New() *VDBE {
 	return &VDBE{
@@ -380,6 +453,14 @@ func (v *VDBE) AddOpWithP4Blob(opcode Opcode, p1, p2, p3 int, p4 []byte) int {
 	addr := v.AddOp(opcode, p1, p2, p3)
 	v.Program[addr].P4.P = p4
 	v.Program[addr].P4Type = P4Dynamic
+	return addr
+}
+
+// AddOpWithP4Callback adds an instruction with a callback stored in P4.P.
+func (v *VDBE) AddOpWithP4Callback(opcode Opcode, p1, p2, p3 int, cb interface{}) int {
+	addr := v.AddOp(opcode, p1, p2, p3)
+	v.Program[addr].P4.P = cb
+	v.Program[addr].P4Type = P4Callback
 	return addr
 }
 
@@ -523,6 +604,10 @@ func (v *VDBE) resetExecutionState() {
 	v.RC = 0
 	v.ErrorMsg = ""
 	v.NumSteps = 0
+	v.NumChanges = 0
+	v.LastInsertID = 0
+	v.SchemaChanged = false
+	v.pendingFKUpdate = nil
 }
 
 // resetStatistics resets statistics if enabled.

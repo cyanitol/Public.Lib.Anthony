@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package constraint
 
 import (
@@ -248,88 +248,152 @@ func TestConvertToInt64AllTypes(t *testing.T) {
 
 // TestUniqueConstraintHelpers tests unique constraint helper functions
 func TestUniqueConstraintHelpers(t *testing.T) {
-	// Test bothNil
-	if !bothNil(nil, nil) {
-		t.Error("Expected true for both nil")
-	}
-	if bothNil(nil, 1) {
-		t.Error("Expected false when only one is nil")
-	}
+	testBothNil(t)
+	testEitherNil(t)
+	testCompareInt(t)
+	testCompareInt64(t)
+	testCompareFloat64(t)
+	testCompareString(t)
+	testCompareBytes(t)
+}
 
-	// Test eitherNil
-	if !eitherNil(nil, 1) {
-		t.Error("Expected true when one is nil")
+func testBothNil(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b interface{}
+		want bool
+	}{
+		{"both_nil", nil, nil, true},
+		{"only_first_nil", nil, 1, false},
 	}
-	if !eitherNil(1, nil) {
-		t.Error("Expected true when one is nil")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bothNil(tt.a, tt.b); got != tt.want {
+				t.Errorf("bothNil(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
 	}
-	// Note: eitherNil returns true when EITHER is nil, including when both are nil
-	if !eitherNil(nil, nil) {
-		t.Error("Expected true when both are nil (either is nil)")
-	}
-	if eitherNil(1, 2) {
-		t.Error("Expected false when neither is nil")
-	}
+}
 
-	// Test compareInt
-	if !compareInt(5, 5) {
-		t.Error("Expected true for equal ints")
+func testEitherNil(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b interface{}
+		want bool
+	}{
+		{"first_nil", nil, 1, true},
+		{"second_nil", 1, nil, true},
+		{"both_nil", nil, nil, true},
+		{"neither_nil", 1, 2, false},
 	}
-	if !compareInt(5, int64(5)) {
-		t.Error("Expected true for int == int64")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := eitherNil(tt.a, tt.b); got != tt.want {
+				t.Errorf("eitherNil(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
 	}
-	if compareInt(5, 6) {
-		t.Error("Expected false for unequal ints")
-	}
-	if compareInt(5, "5") {
-		t.Error("Expected false for different types")
-	}
+}
 
-	// Test compareInt64
-	if !compareInt64(int64(5), int64(5)) {
-		t.Error("Expected true for equal int64s")
+func testCompareInt(t *testing.T) {
+	tests := []struct {
+		name string
+		a    int
+		b    interface{}
+		want bool
+	}{
+		{"equal_ints", 5, 5, true},
+		{"int_and_int64", 5, int64(5), true},
+		{"unequal_ints", 5, 6, false},
+		{"different_types", 5, "5", false},
 	}
-	if !compareInt64(int64(5), 5) {
-		t.Error("Expected true for int64 == int")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compareInt(tt.a, tt.b); got != tt.want {
+				t.Errorf("compareInt(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
 	}
-	if compareInt64(int64(5), int64(6)) {
-		t.Error("Expected false for unequal int64s")
-	}
+}
 
-	// Test compareFloat64
-	if !compareFloat64(3.14, 3.14) {
-		t.Error("Expected true for equal floats")
+func testCompareInt64(t *testing.T) {
+	tests := []struct {
+		name string
+		a    int64
+		b    interface{}
+		want bool
+	}{
+		{"equal_int64s", int64(5), int64(5), true},
+		{"int64_and_int", int64(5), 5, true},
+		{"unequal_int64s", int64(5), int64(6), false},
 	}
-	if compareFloat64(3.14, 2.71) {
-		t.Error("Expected false for unequal floats")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compareInt64(tt.a, tt.b); got != tt.want {
+				t.Errorf("compareInt64(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
 	}
-	if compareFloat64(3.14, "3.14") {
-		t.Error("Expected false for different types")
-	}
+}
 
-	// Test compareString
-	if !compareString("test", "test") {
-		t.Error("Expected true for equal strings")
+func testCompareFloat64(t *testing.T) {
+	tests := []struct {
+		name string
+		a    float64
+		b    interface{}
+		want bool
+	}{
+		{"equal_floats", 3.14, 3.14, true},
+		{"unequal_floats", 3.14, 2.71, false},
+		{"different_types", 3.14, "3.14", false},
 	}
-	if compareString("test", "TEST") {
-		t.Error("Expected false for different strings")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compareFloat64(tt.a, tt.b); got != tt.want {
+				t.Errorf("compareFloat64(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
 	}
-	if compareString("test", 123) {
-		t.Error("Expected false for different types")
-	}
+}
 
-	// Test compareBytes
-	if !compareBytes([]byte("test"), []byte("test")) {
-		t.Error("Expected true for equal byte slices")
+func testCompareString(t *testing.T) {
+	tests := []struct {
+		name string
+		a    string
+		b    interface{}
+		want bool
+	}{
+		{"equal_strings", "test", "test", true},
+		{"different_strings", "test", "TEST", false},
+		{"different_types", "test", 123, false},
 	}
-	if compareBytes([]byte("test"), []byte("TEST")) {
-		t.Error("Expected false for different byte slices")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compareString(tt.a, tt.b); got != tt.want {
+				t.Errorf("compareString(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
 	}
-	if compareBytes([]byte("test"), []byte("te")) {
-		t.Error("Expected false for different length byte slices")
+}
+
+func testCompareBytes(t *testing.T) {
+	tests := []struct {
+		name string
+		a    []byte
+		b    interface{}
+		want bool
+	}{
+		{"equal_bytes", []byte("test"), []byte("test"), true},
+		{"different_bytes", []byte("test"), []byte("TEST"), false},
+		{"different_lengths", []byte("test"), []byte("te"), false},
+		{"different_types", []byte("test"), "test", false},
 	}
-	if compareBytes([]byte("test"), "test") {
-		t.Error("Expected false for different types")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compareBytes(tt.a, tt.b); got != tt.want {
+				t.Errorf("compareBytes(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
 	}
 }
 

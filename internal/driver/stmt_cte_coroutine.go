@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -60,8 +60,10 @@ func (s *Stmt) compileCTEPopulationCoroutine(vm *vdbe.VDBE, cteSelect *parser.Se
 }
 
 // inlineCTEBytecodeForCoroutine copies CTE bytecode into main VM with necessary adjustments for coroutine execution.
-// This is similar to inlineCTEBytecode but handles the ResultRow->Insert conversion appropriately for coroutines.
+// Uses a proper address map to handle ResultRow expansion (1 instruction -> 2: MakeRecord + Insert).
 func (s *Stmt) inlineCTEBytecodeForCoroutine(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE, cursorNum int, coroutineID int, offsets cteInlineOffsets) {
+	addrMap := s.buildSingleInsertAddrMap(compiledCTE, offsets.startAddr)
+
 	for _, instr := range compiledCTE.Program {
 		newInstr := s.adjustInstructionParameters(instr, offsets)
 
@@ -73,10 +75,12 @@ func (s *Stmt) inlineCTEBytecodeForCoroutine(vm *vdbe.VDBE, compiledCTE *vdbe.VD
 		// Add the instruction
 		addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
 		vm.Program[addr].P4 = instr.P4
+		vm.Program[addr].P4Type = instr.P4Type
+		vm.Program[addr].P5 = instr.P5
 		vm.Program[addr].Comment = instr.Comment
 
-		// Adjust jump targets
-		s.adjustJumpTarget(vm, instr, addr, offsets)
+		// Adjust jump targets using address map
+		s.fixJumpWithAddrMap(vm, instr, addr, addrMap)
 	}
 }
 
@@ -85,9 +89,7 @@ func (s *Stmt) inlineCTEBytecodeForCoroutine(vm *vdbe.VDBE, compiledCTE *vdbe.VD
 func (s *Stmt) handleSpecialOpcodeForCoroutine(vm *vdbe.VDBE, instr *vdbe.Instruction, newInstr *vdbe.Instruction, cursorNum int, coroutineID int, offsets cteInlineOffsets) bool {
 	switch instr.Opcode {
 	case vdbe.OpResultRow:
-		// Replace ResultRow with MakeRecord + Insert
-		// For a coroutine-based CTE, we don't yield per row (we materialize all rows at once)
-		// but the pattern is set up to allow per-row yielding in the future if needed
+		// Replace ResultRow with MakeRecord + Insert to populate the ephemeral table
 		newInstr.Opcode = vdbe.OpMakeRecord
 		newInstr.P3 = offsets.recordReg
 
@@ -96,12 +98,12 @@ func (s *Stmt) handleSpecialOpcodeForCoroutine(vm *vdbe.VDBE, instr *vdbe.Instru
 		vm.Program[addr].Comment = "CTE: Convert result row to record"
 
 		vm.AddOp(vdbe.OpInsert, cursorNum, offsets.recordReg, 0)
-
-		// Note: We could add OpYield here to yield after each row, but for now
-		// we materialize all rows then return control (simpler and matches SQLite behavior)
-		// vm.AddOp(vdbe.OpYield, coroutineID, 0, 0)
-
 		return true
+
+	case vdbe.OpInit:
+		// Replace Init with Noop - control flow is handled by the coroutine
+		newInstr.Opcode = vdbe.OpNoop
+		return false
 
 	case vdbe.OpHalt:
 		// Replace Halt with Noop - we'll handle termination with OpEndCoroutine

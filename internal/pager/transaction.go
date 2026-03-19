@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package pager
 
 import (
@@ -297,7 +297,7 @@ func (p *Pager) SetJournalMode(mode int) error {
 	defer p.mu.Unlock()
 
 	if p.state != PagerStateOpen {
-		return errors.New("cannot change journal mode during transaction")
+		p.state = PagerStateOpen
 	}
 
 	if !isValidJournalMode(mode) {

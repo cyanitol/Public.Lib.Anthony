@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -66,11 +66,103 @@ func (s *Stmt) compileSingleCTE(vm *vdbe.VDBE, cteName string, cteCtx *planner.C
 	return s.compileNonRecursiveCTE(vm, cteName, def, cteCtx, cteTempTables, args)
 }
 
-// compileMainQueryWithCTEs compiles the main query with CTE references rewritten
+// compileMainQueryWithCTEs compiles the main query with CTE references rewritten.
+// CTE temp tables are already materialized as ephemeral tables with open cursors.
+// The main query is compiled directly, using the existing cursor numbers stored
+// in each CTE temp table's RootPage field.
 func (s *Stmt) compileMainQueryWithCTEs(vm *vdbe.VDBE, stmt *parser.SelectStmt, cteTempTables map[string]*schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	mainStmt := s.rewriteSelectWithCTETables(stmt, cteTempTables)
 	mainStmt.With = nil
 	return s.compileSelect(vm, mainStmt, args)
+}
+
+// cteSavedInfo holds saved CTE table state for restoration after sub-VM compilation.
+type cteSavedInfo struct {
+	table    *schema.Table
+	rootPage uint32
+	temp     bool
+	cursor   int // the real CTE cursor in the main VM
+	marker   int // unique marker used in sub-VM
+}
+
+// prepareCTETablesForSubVM prepares CTE tables for sub-VM compilation
+// by setting marker RootPage values and Temp=false.
+func (s *Stmt) prepareCTETablesForSubVM(cteTempTables map[string]*schema.Table) []cteSavedInfo {
+	var infos []cteSavedInfo
+	marker := 1000000 // Start markers at a value that won't collide with real pages
+
+	for _, table := range cteTempTables {
+		info := cteSavedInfo{
+			table:    table,
+			rootPage: table.RootPage,
+			temp:     table.Temp,
+			cursor:   int(table.RootPage),
+			marker:   marker,
+		}
+		infos = append(infos, info)
+		table.RootPage = uint32(marker)
+		table.Temp = false
+		marker++
+	}
+	return infos
+}
+
+// restoreCTETables restores CTE table state after sub-VM compilation.
+func (s *Stmt) restoreCTETables(infos []cteSavedInfo) {
+	for _, info := range infos {
+		info.table.RootPage = info.rootPage
+		info.table.Temp = info.temp
+	}
+}
+
+// buildMainQueryCursorMap builds a cursor map from sub-VM cursors to real CTE cursors.
+func (s *Stmt) buildMainQueryCursorMap(compiledMain *vdbe.VDBE, infos []cteSavedInfo) map[int]int {
+	cursorMap := make(map[int]int)
+	for _, instr := range compiledMain.Program {
+		if instr.Opcode != vdbe.OpOpenRead {
+			continue
+		}
+		for _, info := range infos {
+			if instr.P2 == info.marker {
+				cursorMap[instr.P1] = info.cursor
+				break
+			}
+		}
+	}
+	return cursorMap
+}
+
+// inlineMainQueryBytecode inlines the main query sub-VM bytecode into the main VM,
+// mapping CTE cursors and preserving ResultRow (unlike CTE inlining which converts to Insert).
+func (s *Stmt) inlineMainQueryBytecode(vm *vdbe.VDBE, compiledMain *vdbe.VDBE,
+	offsets cteInlineOffsets, cursorMap map[int]int) {
+
+	addrMap := s.buildSimpleAddrMap(compiledMain, offsets.startAddr)
+
+	for i, instr := range compiledMain.Program {
+		_ = i
+		newInstr := s.adjustInstrWithMap(instr, offsets, cursorMap)
+
+		// Convert control flow and mapped cursor ops
+		switch {
+		case instr.Opcode == vdbe.OpInit:
+			newInstr.Opcode = vdbe.OpNoop
+		case isMappedCursorOp(instr, cursorMap):
+			newInstr.Opcode = vdbe.OpNoop
+		}
+
+		addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
+		vm.Program[addr].P4 = instr.P4
+		vm.Program[addr].P4Type = instr.P4Type
+		vm.Program[addr].P5 = instr.P5
+		vm.Program[addr].Comment = instr.Comment
+		s.fixJumpWithAddrMap(vm, instr, addr, addrMap)
+	}
+
+	// Copy result column names from sub-VM
+	if len(compiledMain.ResultCols) > 0 {
+		vm.ResultCols = compiledMain.ResultCols
+	}
 }
 
 // compileNonRecursiveCTE compiles a non-recursive CTE into a temporary table using coroutines.
@@ -101,12 +193,106 @@ func (s *Stmt) compileNonRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planne
 	// Rewrite the CTE's SELECT to use already-materialized CTEs
 	cteSelect := s.rewriteSelectWithCTETables(def.Select, cteTempTables)
 
-	// Generate bytecode to populate the ephemeral table using a coroutine
-	if err := s.compileCTEPopulationCoroutine(vm, cteSelect, cursorNum, coroutineID, len(tempTable.Columns), args); err != nil {
-		return nil, fmt.Errorf("failed to compile CTE population: %w", err)
+	// For chained CTEs (referencing other CTEs), use sub-VM with cursor mapping.
+	// For standalone CTEs, use the simpler coroutine approach.
+	if len(cteTempTables) > 0 {
+		if err := s.compileCTEPopulationWithMapping(vm, cteSelect, cursorNum, len(tempTable.Columns), cteTempTables, args); err != nil {
+			return nil, fmt.Errorf("failed to compile CTE population: %w", err)
+		}
+	} else {
+		if err := s.compileCTEPopulationCoroutine(vm, cteSelect, cursorNum, coroutineID, len(tempTable.Columns), args); err != nil {
+			return nil, fmt.Errorf("failed to compile CTE population: %w", err)
+		}
 	}
 
 	return tempTable, nil
+}
+
+// compileCTEPopulationWithMapping compiles a CTE SELECT that references other
+// already-materialized CTEs. It uses the marker/sub-VM/cursor-map approach:
+// temporarily set CTE table RootPages to marker values, compile in a sub-VM,
+// then inline bytecode mapping sub-VM CTE cursors to real main-VM cursors.
+func (s *Stmt) compileCTEPopulationWithMapping(vm *vdbe.VDBE, cteSelect *parser.SelectStmt,
+	cursorNum int, numColumns int, cteTempTables map[string]*schema.Table,
+	args []driver.NamedValue) error {
+
+	vm.AddOp(vdbe.OpOpenEphemeral, cursorNum, numColumns, 0)
+
+	// Set marker RootPages on referenced CTE tables for sub-VM compilation
+	cteInfo := s.prepareCTETablesForSubVM(cteTempTables)
+	defer s.restoreCTETables(cteInfo)
+
+	// Compile CTE SELECT in a sub-VM (will use marker values for CTE table references)
+	compiledCTE, err := s.compileCTESelect(vm, cteSelect, args)
+	if err != nil {
+		return fmt.Errorf("failed to compile chained CTE SELECT: %w", err)
+	}
+
+	// Build cursor map from sub-VM cursors to real CTE cursors
+	cursorMap := s.buildMainQueryCursorMap(compiledCTE, cteInfo)
+
+	// Fix inner Rewind addresses in the sub-VM
+	fixInnerRewindAddresses(compiledCTE)
+
+	// Allocate resources and inline, converting ResultRow to single Insert
+	offsets := s.allocateRecursiveCTEResources(vm, compiledCTE, cursorMap)
+	s.inlineCTESingleInsert(vm, compiledCTE, cursorNum, offsets, cursorMap)
+
+	return nil
+}
+
+// inlineCTESingleInsert inlines CTE bytecode with cursor mapping, inserting ResultRow
+// into a single target cursor. Used for chained CTE materialization.
+func (s *Stmt) inlineCTESingleInsert(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE,
+	targetCursor int, offsets cteInlineOffsets, cursorMap map[int]int) {
+
+	addrMap := s.buildSingleInsertAddrMap(compiledCTE, offsets.startAddr)
+
+	for _, instr := range compiledCTE.Program {
+		newInstr := s.adjustInstrWithMap(instr, offsets, cursorMap)
+
+		if instr.Opcode == vdbe.OpResultRow {
+			// Convert ResultRow to MakeRecord + single Insert
+			newInstr.Opcode = vdbe.OpMakeRecord
+			newInstr.P3 = offsets.recordReg
+			addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
+			vm.Program[addr].P4 = instr.P4
+			vm.Program[addr].Comment = "CTE: make record"
+			vm.AddOp(vdbe.OpInsert, targetCursor, offsets.recordReg, 0)
+			continue
+		}
+
+		switch {
+		case instr.Opcode == vdbe.OpHalt || instr.Opcode == vdbe.OpInit:
+			newInstr.Opcode = vdbe.OpNoop
+		case isMappedCursorOp(instr, cursorMap):
+			newInstr.Opcode = vdbe.OpNoop
+		}
+
+		addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
+		vm.Program[addr].P4 = instr.P4
+		vm.Program[addr].P4Type = instr.P4Type
+		vm.Program[addr].P5 = instr.P5
+		vm.Program[addr].Comment = instr.Comment
+		s.fixJumpWithAddrMap(vm, instr, addr, addrMap)
+	}
+}
+
+// buildSingleInsertAddrMap builds an address map accounting for ResultRow expansion
+// to 2 instructions (MakeRecord + Insert) instead of 3 (MakeRecord + Insert + Insert).
+func (s *Stmt) buildSingleInsertAddrMap(compiledCTE *vdbe.VDBE, startAddr int) []int {
+	addrMap := make([]int, len(compiledCTE.Program)+1)
+	mainAddr := startAddr
+	for i, instr := range compiledCTE.Program {
+		addrMap[i] = mainAddr
+		if instr.Opcode == vdbe.OpResultRow {
+			mainAddr += 2 // MakeRecord + Insert
+		} else {
+			mainAddr++
+		}
+	}
+	addrMap[len(compiledCTE.Program)] = mainAddr
+	return addrMap
 }
 
 // compileCTEPopulation generates bytecode to populate an ephemeral table with CTE results.
@@ -147,11 +333,12 @@ func (s *Stmt) compileCTESelect(vm *vdbe.VDBE, cteSelect *parser.SelectStmt, arg
 type cteInlineOffsets struct {
 	baseCursor   int
 	baseRegister int
+	baseSorter   int // Base index for sorter allocation (for GROUP BY)
 	recordReg    int
 	startAddr    int
 }
 
-// allocateCTEResources allocates cursors and registers for CTE inlining.
+// allocateCTEResources allocates cursors, registers, and sorters for CTE inlining.
 func (s *Stmt) allocateCTEResources(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE) cteInlineOffsets {
 	offsets := cteInlineOffsets{}
 
@@ -167,6 +354,16 @@ func (s *Stmt) allocateCTEResources(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE) cteIn
 	cteRegisterCount := len(compiledCTE.Mem)
 	if cteRegisterCount > 0 {
 		vm.AllocMemory(offsets.baseRegister + cteRegisterCount)
+	}
+
+	// Allocate sorters - needed for CTEs with GROUP BY
+	offsets.baseSorter = len(vm.Sorters)
+	cteSorterCount := len(compiledCTE.Sorters)
+	if cteSorterCount > 0 {
+		// Pre-allocate sorter slots in the main VM
+		for i := 0; i < cteSorterCount; i++ {
+			vm.Sorters = append(vm.Sorters, nil)
+		}
 	}
 
 	// Allocate record register
@@ -195,6 +392,8 @@ func (s *Stmt) inlineCTEBytecode(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE, cursorNu
 		// Add the instruction
 		addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
 		vm.Program[addr].P4 = instr.P4
+		vm.Program[addr].P4Type = instr.P4Type
+		vm.Program[addr].P5 = instr.P5
 		vm.Program[addr].Comment = instr.Comment
 
 		// Adjust jump targets
@@ -202,7 +401,7 @@ func (s *Stmt) inlineCTEBytecode(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE, cursorNu
 	}
 }
 
-// adjustInstructionParameters adjusts cursor and register numbers in an instruction.
+// adjustInstructionParameters adjusts cursor, register, and sorter numbers in an instruction.
 func (s *Stmt) adjustInstructionParameters(instr *vdbe.Instruction, offsets cteInlineOffsets) vdbe.Instruction {
 	newInstr := *instr
 	adjustedP1, adjustedP2, adjustedP3 := instr.P1, instr.P2, instr.P3
@@ -218,11 +417,28 @@ func (s *Stmt) adjustInstructionParameters(instr *vdbe.Instruction, offsets cteI
 		adjustedP1 = instr.P1 + offsets.baseCursor
 	}
 
+	// Adjust sorter numbers for sorter operations (GROUP BY/ORDER BY)
+	// Sorter index is in P1 for these opcodes
+	if needsSorterAdjustment(instr.Opcode) {
+		adjustedP1 = instr.P1 + offsets.baseSorter
+	}
+
 	newInstr.P1 = adjustedP1
 	newInstr.P2 = adjustedP2
 	newInstr.P3 = adjustedP3
 
 	return newInstr
+}
+
+// needsSorterAdjustment checks if an opcode requires sorter number adjustment.
+func needsSorterAdjustment(op vdbe.Opcode) bool {
+	switch op {
+	case vdbe.OpSorterOpen, vdbe.OpSorterInsert, vdbe.OpSorterSort,
+		vdbe.OpSorterNext, vdbe.OpSorterData, vdbe.OpSorterClose,
+		vdbe.OpSorterCompare:
+		return true
+	}
+	return false
 }
 
 // handleSpecialOpcode handles ResultRow and Halt opcodes specially. Returns true if handled.
@@ -243,6 +459,11 @@ func (s *Stmt) handleSpecialOpcode(vm *vdbe.VDBE, instr *vdbe.Instruction, newIn
 		vm.AddOp(vdbe.OpInsert, cursorNum, offsets.recordReg, 0)
 		return true
 
+	case vdbe.OpInit:
+		// Replace Init with Noop - control flow is managed by the outer context
+		newInstr.Opcode = vdbe.OpNoop
+		return false
+
 	case vdbe.OpHalt:
 		// Replace Halt with Noop
 		newInstr.Opcode = vdbe.OpNoop
@@ -254,13 +475,19 @@ func (s *Stmt) handleSpecialOpcode(vm *vdbe.VDBE, instr *vdbe.Instruction, newIn
 // adjustJumpTarget adjusts jump target addresses for jump opcodes.
 func (s *Stmt) adjustJumpTarget(vm *vdbe.VDBE, instr *vdbe.Instruction, addr int, offsets cteInlineOffsets) {
 	switch instr.Opcode {
-	case vdbe.OpGoto, vdbe.OpIf, vdbe.OpIfNot, vdbe.OpIfPos:
+	case vdbe.OpGoto, vdbe.OpIf, vdbe.OpIfNot, vdbe.OpIfPos,
+		vdbe.OpIsNull, vdbe.OpNotNull:
 		// These opcodes use P2 as a jump target
 		if instr.P2 > 0 {
 			vm.Program[addr].P2 = instr.P2 + offsets.startAddr
 		}
 	case vdbe.OpRewind, vdbe.OpNext, vdbe.OpPrev:
 		// These opcodes use P2 as a jump target
+		if instr.P2 > 0 {
+			vm.Program[addr].P2 = instr.P2 + offsets.startAddr
+		}
+	case vdbe.OpSorterSort, vdbe.OpSorterNext:
+		// Sorter opcodes also use P2 as a jump target
 		if instr.P2 > 0 {
 			vm.Program[addr].P2 = instr.P2 + offsets.startAddr
 		}
@@ -275,7 +502,8 @@ func needsCursorAdjustment(op vdbe.Opcode) bool {
 	case vdbe.OpOpenRead, vdbe.OpOpenWrite, vdbe.OpOpenEphemeral,
 		vdbe.OpClose, vdbe.OpRewind, vdbe.OpNext, vdbe.OpPrev,
 		vdbe.OpSeekGE, vdbe.OpSeekGT, vdbe.OpSeekLE, vdbe.OpSeekLT,
-		vdbe.OpColumn, vdbe.OpInsert, vdbe.OpDelete:
+		vdbe.OpColumn, vdbe.OpInsert, vdbe.OpDelete,
+		vdbe.OpRowid:
 		return true
 	}
 	return false
@@ -299,6 +527,9 @@ func adjustCursorOpRegisters(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int,
 	case vdbe.OpColumn:
 		// P1=cursor, P2=column, P3=dest register
 		return p1, p2, p3 + baseReg
+	case vdbe.OpRowid:
+		// P1=cursor, P2=dest register, P3=unused
+		return p1, p2 + baseReg, p3
 	case vdbe.OpInsert, vdbe.OpDelete:
 		// P1=cursor, P2=data register, P3=key register (or 0)
 		newP2 := p2 + baseReg
@@ -373,7 +604,8 @@ func isUnaryOp(op vdbe.Opcode) bool {
 
 // isJumpOp checks if op is a jump operation
 func isJumpOp(op vdbe.Opcode) bool {
-	return op == vdbe.OpGoto || op == vdbe.OpIf || op == vdbe.OpIfNot || op == vdbe.OpIfPos
+	return op == vdbe.OpGoto || op == vdbe.OpIf || op == vdbe.OpIfNot || op == vdbe.OpIfPos ||
+		op == vdbe.OpIsNull || op == vdbe.OpNotNull
 }
 
 // isControlFlowOp checks if op is a control flow operation.
@@ -400,45 +632,12 @@ func adjustJumpOps(op vdbe.Opcode, p1, p2, p3, baseReg int) (int, int, int) {
 	return p1 + baseReg, p2, p3
 }
 
-// compileRecursiveCTE compiles a recursive CTE using iterative execution.
+// compileRecursiveCTE compiles a recursive CTE using runtime bytecode generation.
+// It inlines both the anchor and recursive member into the main VM with a loop structure.
 func (s *Stmt) compileRecursiveCTE(vm *vdbe.VDBE, cteName string, def *planner.CTEDefinition,
 	cteCtx *planner.CTEContext, cteTempTables map[string]*schema.Table, args []driver.NamedValue) (*schema.Table, error) {
 
-	compound, err := s.validateRecursiveCTE(def, cteName)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create and initialize temp tables
-	tempTable, currentTable, resultCursor, currentCursor, err := s.setupRecursiveTables(vm, cteName, def)
-	if err != nil {
-		return nil, err
-	}
-
-	// Register temp tables in schema
-	s.registerRecursiveTempTables(tempTable, currentTable)
-
-	// Step 1: Execute anchor member
-	numColumns := len(tempTable.Columns)
-	anchorRows, err := s.executeAnchorMember(vm, compound.Left, cteTempTables, numColumns, args)
-	if err != nil {
-		return nil, err
-	}
-
-	// Materialize anchor results
-	baseReg := len(vm.Mem)
-	vm.AllocMemory(baseReg + numColumns + 2)
-	recordReg := baseReg + numColumns
-	s.materializeRows(vm, anchorRows, numColumns, baseReg, recordReg, resultCursor, currentCursor)
-
-	// Step 2: Iterate recursive member
-	err = s.executeRecursiveIterations(vm, compound.Right, cteName, currentTable, cteTempTables,
-		numColumns, baseReg, recordReg, resultCursor, currentCursor, args)
-	if err != nil {
-		return nil, err
-	}
-
-	return tempTable, nil
+	return s.compileRecursiveCTEBytecode(vm, cteName, def, cteCtx, cteTempTables, args)
 }
 
 // validateRecursiveCTE validates that a CTE is properly structured for recursion.
@@ -453,56 +652,6 @@ func (s *Stmt) validateRecursiveCTE(def *planner.CTEDefinition, cteName string) 
 	}
 
 	return compound, nil
-}
-
-// setupRecursiveTables creates and initializes the ephemeral tables for recursive CTE execution.
-func (s *Stmt) setupRecursiveTables(vm *vdbe.VDBE, cteName string, def *planner.CTEDefinition) (
-	*schema.Table, *schema.Table, int, int, error) {
-
-	tempTableName := fmt.Sprintf("_cte_%s", cteName)
-	currentTableName := fmt.Sprintf("_cte_%s_current", cteName)
-
-	tempTable := s.createCTETempTable(tempTableName, def)
-	currentTable := s.createCTETempTable(currentTableName, def)
-
-	// Allocate cursors for both ephemeral tables
-	resultCursor := len(vm.Cursors)
-	vm.AllocCursors(resultCursor + 1)
-	currentCursor := len(vm.Cursors)
-	vm.AllocCursors(currentCursor + 1)
-
-	// Open ephemeral tables
-	numColumns := len(tempTable.Columns)
-	vm.AddOp(vdbe.OpOpenEphemeral, resultCursor, numColumns, 0)
-	vm.AddOp(vdbe.OpOpenEphemeral, currentCursor, numColumns, 0)
-
-	// Store cursor numbers in temp tables
-	tempTable.RootPage = uint32(resultCursor)
-	currentTable.RootPage = uint32(currentCursor)
-
-	return tempTable, currentTable, resultCursor, currentCursor, nil
-}
-
-// registerRecursiveTempTables registers temporary tables in the schema.
-func (s *Stmt) registerRecursiveTempTables(tempTable, currentTable *schema.Table) {
-	s.conn.schema.AddTableDirect(tempTable)
-	s.conn.schema.AddTableDirect(currentTable)
-}
-
-// executeAnchorMember executes the anchor (non-recursive) part of a recursive CTE.
-func (s *Stmt) executeAnchorMember(vm *vdbe.VDBE, anchorSelect *parser.SelectStmt,
-	cteTempTables map[string]*schema.Table, numColumns int, args []driver.NamedValue) ([][]interface{}, error) {
-
-	rewrittenAnchor := s.rewriteSelectWithCTETables(anchorSelect, cteTempTables)
-
-	anchorVM := vdbe.New()
-	anchorVM.Ctx = vm.Ctx
-	compiledAnchor, err := s.compileSelect(anchorVM, rewrittenAnchor, args)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile recursive CTE anchor: %w", err)
-	}
-
-	return s.collectRows(compiledAnchor, numColumns, "anchor")
 }
 
 // collectRows collects all rows from a compiled VDBE execution.
@@ -526,86 +675,6 @@ func (s *Stmt) collectRows(vm *vdbe.VDBE, numColumns int, description string) ([
 	return rows, nil
 }
 
-// materializeRows generates bytecode to materialize rows into ephemeral tables.
-func (s *Stmt) materializeRows(vm *vdbe.VDBE, rows [][]interface{}, numColumns, baseReg, recordReg,
-	resultCursor, currentCursor int) {
-
-	for _, row := range rows {
-		s.emitRowLoadBytecode(vm, row, numColumns, baseReg)
-		vm.AddOp(vdbe.OpMakeRecord, baseReg, numColumns, recordReg)
-		vm.AddOp(vdbe.OpInsert, resultCursor, recordReg, 0)
-		vm.AddOp(vdbe.OpInsert, currentCursor, recordReg, 0)
-	}
-}
-
-// emitRowLoadBytecode generates bytecode to load a row's values into registers.
-func (s *Stmt) emitRowLoadBytecode(vm *vdbe.VDBE, row []interface{}, numColumns, baseReg int) {
-	for i := 0; i < numColumns; i++ {
-		switch v := row[i].(type) {
-		case nil:
-			vm.AddOp(vdbe.OpNull, 0, baseReg+i, 0)
-		case int64:
-			vm.AddOp(vdbe.OpInteger, int(v), baseReg+i, 0)
-		case float64:
-			vm.AddOpWithP4Real(vdbe.OpReal, 0, baseReg+i, 0, v)
-		case string:
-			vm.AddOpWithP4Str(vdbe.OpString8, 0, baseReg+i, 0, v)
-		case []byte:
-			vm.AddOpWithP4Blob(vdbe.OpBlob, len(v), baseReg+i, 0, v)
-		default:
-			vm.AddOp(vdbe.OpNull, 0, baseReg+i, 0)
-		}
-	}
-}
-
-// executeRecursiveIterations executes the recursive member until no new rows are produced.
-func (s *Stmt) executeRecursiveIterations(vm *vdbe.VDBE, recursiveMember *parser.SelectStmt,
-	cteName string, currentTable *schema.Table, cteTempTables map[string]*schema.Table,
-	numColumns, baseReg, recordReg, resultCursor, currentCursor int, args []driver.NamedValue) error {
-
-	maxIterations := 1000
-
-	for iteration := 0; iteration < maxIterations; iteration++ {
-		newRows, err := s.executeRecursiveMember(vm, recursiveMember, cteName, currentTable,
-			cteTempTables, numColumns, args)
-		if err != nil {
-			return err
-		}
-
-		// If no new rows, exit loop
-		if len(newRows) == 0 {
-			break
-		}
-
-		// Materialize new rows
-		s.materializeRows(vm, newRows, numColumns, baseReg, recordReg, resultCursor, currentCursor)
-	}
-
-	return nil
-}
-
-// executeRecursiveMember executes one iteration of the recursive member.
-func (s *Stmt) executeRecursiveMember(vm *vdbe.VDBE, recursiveMember *parser.SelectStmt,
-	cteName string, currentTable *schema.Table, cteTempTables map[string]*schema.Table,
-	numColumns int, args []driver.NamedValue) ([][]interface{}, error) {
-
-	// Build temp tables map with CTE pointing to current table
-	recursiveTempTables := make(map[string]*schema.Table)
-	for k, v := range cteTempTables {
-		recursiveTempTables[k] = v
-	}
-	recursiveTempTables[cteName] = currentTable
-
-	rewrittenRecursive := s.rewriteSelectWithCTETables(recursiveMember, recursiveTempTables)
-	recursiveVM := vdbe.New()
-	recursiveVM.Ctx = vm.Ctx
-	compiledRecursive, err := s.compileSelect(recursiveVM, rewrittenRecursive, args)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile recursive member: %w", err)
-	}
-
-	return s.collectRows(compiledRecursive, numColumns, "recursive member")
-}
 
 func (s *Stmt) createCTETempTable(tableName string, def *planner.CTEDefinition) *schema.Table {
 	var columns []*schema.Column
@@ -671,28 +740,45 @@ func (s *Stmt) expandStarColumns(stmt *parser.SelectStmt) []parser.ResultColumn 
 
 	for _, col := range stmt.Columns {
 		if col.Star {
-			// Get the table(s) from FROM clause and expand their columns
-			if stmt.From != nil && len(stmt.From.Tables) > 0 {
-				for _, tableOrSub := range stmt.From.Tables {
-					if tableOrSub.TableName != "" {
-						// Look up the table in schema
-						if table, ok := s.conn.schema.GetTable(tableOrSub.TableName); ok {
-							// Add each column from the table
-							for _, schemaCol := range table.Columns {
-								expandedCols = append(expandedCols, parser.ResultColumn{
-									Expr: &parser.IdentExpr{Name: schemaCol.Name},
-								})
-							}
-						}
-					}
-				}
-			}
+			expandedCols = append(expandedCols, s.expandStarColumn(stmt)...)
 		} else {
-			// Keep non-star columns as-is
 			expandedCols = append(expandedCols, col)
 		}
 	}
 
+	return expandedCols
+}
+
+// expandStarColumn expands a single star column to all table columns.
+func (s *Stmt) expandStarColumn(stmt *parser.SelectStmt) []parser.ResultColumn {
+	if stmt.From == nil || len(stmt.From.Tables) == 0 {
+		return nil
+	}
+
+	var expandedCols []parser.ResultColumn
+	for _, tableOrSub := range stmt.From.Tables {
+		expandedCols = append(expandedCols, s.expandTableColumns(tableOrSub)...)
+	}
+	return expandedCols
+}
+
+// expandTableColumns expands columns from a single table reference.
+func (s *Stmt) expandTableColumns(tableOrSub parser.TableOrSubquery) []parser.ResultColumn {
+	if tableOrSub.TableName == "" {
+		return nil
+	}
+
+	table, ok := s.conn.schema.GetTable(tableOrSub.TableName)
+	if !ok {
+		return nil
+	}
+
+	expandedCols := make([]parser.ResultColumn, 0, len(table.Columns))
+	for _, schemaCol := range table.Columns {
+		expandedCols = append(expandedCols, parser.ResultColumn{
+			Expr: &parser.IdentExpr{Name: schemaCol.Name},
+		})
+	}
 	return expandedCols
 }
 
@@ -772,8 +858,11 @@ func (s *Stmt) rewriteFromClause(from *parser.FromClause, cteTempTables map[stri
 func (s *Stmt) rewriteTableOrSubquery(table parser.TableOrSubquery, cteTempTables map[string]*schema.Table) parser.TableOrSubquery {
 	// Check if this table name references a CTE
 	if tempTable, exists := cteTempTables[table.TableName]; exists {
-		// Replace with temp table name
+		// Replace with temp table name, preserving original name as alias
 		rewritten := table
+		if rewritten.Alias == "" {
+			rewritten.Alias = table.TableName
+		}
 		rewritten.TableName = tempTable.Name
 		return rewritten
 	}
@@ -809,6 +898,8 @@ func (s *Stmt) rewriteSubqueryTypes(expr parser.Expression, cteTempTables map[st
 		return s.rewriteSubqueryExpr(e, cteTempTables)
 	case *parser.InExpr:
 		return s.rewriteInExpr(e, cteTempTables)
+	case *parser.ExistsExpr:
+		return s.rewriteExistsExpr(e, cteTempTables)
 	default:
 		return nil
 	}
@@ -816,6 +907,17 @@ func (s *Stmt) rewriteSubqueryTypes(expr parser.Expression, cteTempTables map[st
 
 // rewriteCompoundTypes handles compound and nested expression types.
 func (s *Stmt) rewriteCompoundTypes(expr parser.Expression, cteTempTables map[string]*schema.Table) parser.Expression {
+	// Group 1: Basic compound expressions
+	if result := s.tryRewriteBasicCompoundExpr(expr, cteTempTables); result != nil {
+		return result
+	}
+
+	// Group 2: Wrapper expressions
+	return s.tryRewriteWrapperExpr(expr, cteTempTables)
+}
+
+// tryRewriteBasicCompoundExpr tries to rewrite basic compound expression types.
+func (s *Stmt) tryRewriteBasicCompoundExpr(expr parser.Expression, cteTempTables map[string]*schema.Table) parser.Expression {
 	switch e := expr.(type) {
 	case *parser.BinaryExpr:
 		return s.rewriteBinaryExpr(e, cteTempTables)
@@ -827,15 +929,29 @@ func (s *Stmt) rewriteCompoundTypes(expr parser.Expression, cteTempTables map[st
 		return s.rewriteBetweenExpr(e, cteTempTables)
 	case *parser.FunctionExpr:
 		return s.rewriteFunctionExpr(e, cteTempTables)
+	}
+	return nil
+}
+
+// tryRewriteWrapperExpr tries to rewrite wrapper expression types.
+func (s *Stmt) tryRewriteWrapperExpr(expr parser.Expression, cteTempTables map[string]*schema.Table) parser.Expression {
+	switch e := expr.(type) {
 	case *parser.ParenExpr:
 		return s.rewriteParenExpr(e, cteTempTables)
 	case *parser.CastExpr:
 		return s.rewriteCastExpr(e, cteTempTables)
 	case *parser.CollateExpr:
 		return s.rewriteCollateExpr(e, cteTempTables)
-	default:
-		return nil
 	}
+	return nil
+}
+
+func (s *Stmt) rewriteExistsExpr(e *parser.ExistsExpr, cteTempTables map[string]*schema.Table) parser.Expression {
+	rewritten := *e
+	if e.Select != nil {
+		rewritten.Select = s.rewriteSelectWithCTETables(e.Select, cteTempTables)
+	}
+	return &rewritten
 }
 
 func (s *Stmt) rewriteSubqueryExpr(e *parser.SubqueryExpr, cteTempTables map[string]*schema.Table) parser.Expression {

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package functions
 
 import (
@@ -546,12 +546,12 @@ func TestLengthFunc_EdgeCases(t *testing.T) {
 		{
 			name:  "integer",
 			input: NewIntValue(12345),
-			want:  8, // Length of the bytes representation
+			want:  5, // String length matching SQLite behavior
 		},
 		{
 			name:  "float",
 			input: NewFloatValue(3.14),
-			want:  8,
+			want:  4, // String length matching SQLite behavior
 		},
 	}
 

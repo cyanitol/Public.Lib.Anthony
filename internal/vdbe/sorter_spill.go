@@ -1,14 +1,14 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package vdbe
 
 import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
-	"unsafe"
 )
 
 // SorterConfig holds configuration for sorter memory limits and spill behavior.
@@ -282,7 +282,7 @@ func (s *SorterWithSpill) serializeMem(mem *Mem) ([]byte, error) {
 		buf = append(buf, lenBuf...)
 
 		realBuf := make([]byte, 8)
-		binary.LittleEndian.PutUint64(realBuf, binary.LittleEndian.Uint64((*[8]byte)(unsafe.Pointer(&mem.r))[:]))
+		binary.LittleEndian.PutUint64(realBuf, math.Float64bits(mem.r))
 		buf = append(buf, realBuf...)
 
 	case mem.flags&(MemStr|MemBlob) != 0:
@@ -383,7 +383,7 @@ func (s *SorterWithSpill) deserializeMemReal(mem *Mem, data []byte, dataLen uint
 		return fmt.Errorf("invalid real data length")
 	}
 	bits := binary.LittleEndian.Uint64(data[offset : offset+8])
-	val := *(*float64)(unsafe.Pointer(&bits))
+	val := math.Float64frombits(bits)
 	mem.SetReal(val)
 	return nil
 }
@@ -569,7 +569,13 @@ func (s *SorterWithSpill) mergeRuns(readers []*runReader) [][]*Mem {
 			heap.items[0] = reader
 			heap.down(0)
 		} else {
-			heap.items = heap.items[1:]
+			// Move last element to front and shrink, then restore heap
+			n := len(heap.items)
+			heap.items[0] = heap.items[n-1]
+			heap.items = heap.items[:n-1]
+			if len(heap.items) > 0 {
+				heap.down(0)
+			}
 		}
 	}
 
@@ -653,4 +659,24 @@ func (s *SorterWithSpill) GetMemoryUsage() int64 {
 // GetNumSpilledRuns returns the number of spilled runs.
 func (s *SorterWithSpill) GetNumSpilledRuns() int {
 	return len(s.spilledRuns)
+}
+
+// NumRows returns the number of rows in the sorter.
+func (s *SorterWithSpill) NumRows() int {
+	return s.Sorter.NumRows()
+}
+
+// SetCurrent sets the current position in the sorter.
+func (s *SorterWithSpill) SetCurrent(pos int) {
+	s.Sorter.SetCurrent(pos)
+}
+
+// GetCurrent returns the current position in the sorter.
+func (s *SorterWithSpill) GetCurrent() int {
+	return s.Sorter.GetCurrent()
+}
+
+// IsSorted returns whether the sorter has been sorted.
+func (s *SorterWithSpill) IsSorted() bool {
+	return s.Sorter.IsSorted()
 }

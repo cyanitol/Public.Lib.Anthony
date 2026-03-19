@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 // Package constraint provides constraint validation for SQLite-compatible databases.
 // This includes UNIQUE, CHECK, FOREIGN KEY, and other constraint types.
 package constraint
@@ -429,7 +429,7 @@ func (uc *UniqueConstraint) CreateBackingIndex(sch *schema.Schema, bt *btree.Btr
 // generateIndexSQL generates the CREATE INDEX SQL for this constraint's backing index.
 func (uc *UniqueConstraint) generateIndexSQL() string {
 	columns := strings.Join(uc.Columns, ", ")
-	sql := fmt.Sprintf("CREATE UNIQUE INDEX %s ON %s(%s)", uc.IndexName, uc.TableName, columns)
+	sql := fmt.Sprintf("CREATE UNIQUE INDEX %s ON %s(%s)", uc.IndexName, uc.TableName, columns) // nosec: index/table names are from internal schema, not user input
 
 	if uc.Partial && uc.Where != "" {
 		sql += fmt.Sprintf(" WHERE %s", uc.Where)

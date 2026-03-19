@@ -1,11 +1,15 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 // Package schema provides AUTOINCREMENT support via the sqlite_sequence table.
 package schema
 
 import (
 	"fmt"
+	"math"
 	"sync"
 )
+
+// MaxRowid is the maximum allowed rowid value (2^63 - 1).
+const MaxRowid = math.MaxInt64
 
 // SequenceManager manages the sqlite_sequence table for AUTOINCREMENT support.
 // The sqlite_sequence table stores the maximum rowid for each table with
@@ -33,7 +37,8 @@ func (sm *SequenceManager) GetSequence(tableName string) int64 {
 // NextSequence generates the next sequence value for a table.
 // This increments the sequence and returns the new value.
 // The sequence is initialized to 0 if it doesn't exist, so the first value is 1.
-func (sm *SequenceManager) NextSequence(tableName string, currentMaxRowid int64) int64 {
+// Returns an error if the maximum rowid (2^63-1) would be exceeded.
+func (sm *SequenceManager) NextSequence(tableName string, currentMaxRowid int64) (int64, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -41,18 +46,20 @@ func (sm *SequenceManager) NextSequence(tableName string, currentMaxRowid int64)
 	current := sm.sequences[tableName]
 
 	// The next value should be max(current, currentMaxRowid) + 1
-	// This handles both:
-	// - Normal increment (current is already the max)
-	// - Explicit INSERT with larger rowid (currentMaxRowid > current)
 	next := current
 	if currentMaxRowid > current {
 		next = currentMaxRowid
+	}
+
+	// Check for overflow before incrementing
+	if next >= MaxRowid {
+		return 0, fmt.Errorf("AUTOINCREMENT maximum rowid exceeded for table %s", tableName)
 	}
 	next++
 
 	// Update sequence
 	sm.sequences[tableName] = next
-	return next
+	return next, nil
 }
 
 // UpdateSequence updates the sequence value for a table if the new value is greater.
@@ -127,6 +134,35 @@ func (sm *SequenceManager) SetSequence(tableName string, value int64) {
 	sm.sequences[tableName] = value
 }
 
+// EnsureSqliteSequenceTable ensures the sqlite_sequence table exists in the schema.
+// It creates the table definition if it does not already exist.
+// The caller must provide a rootPage obtained from btree.CreateTable().
+func (s *Schema) EnsureSqliteSequenceTable(rootPage uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.Tables["sqlite_sequence"]; exists {
+		return
+	}
+
+	s.Tables["sqlite_sequence"] = &Table{
+		Name:     "sqlite_sequence",
+		RootPage: rootPage,
+		SQL:      "CREATE TABLE sqlite_sequence(name,seq)",
+		Columns: []*Column{
+			{Name: "name", Type: "TEXT", Affinity: AffinityText},
+			{Name: "seq", Type: "INTEGER", Affinity: AffinityInteger},
+		},
+		PrimaryKey: []string{},
+	}
+}
+
+// GetSequences returns the SequenceManager for external access.
+// Returns interface{} to avoid import cycles with the vdbe package.
+func (s *Schema) GetSequences() interface{} {
+	return s.Sequences
+}
+
 // HasAutoincrementColumn checks if a table has an AUTOINCREMENT column.
 // Returns the column and true if found, nil and false otherwise.
 func (t *Table) HasAutoincrementColumn() (*Column, bool) {
@@ -190,20 +226,16 @@ func (t *Table) ValidateAutoincrementColumn() error {
 
 // GenerateAutoincrementRowid generates the next rowid for an AUTOINCREMENT column.
 // This differs from regular INTEGER PRIMARY KEY in that it never reuses deleted rowids.
-//
-// Parameters:
-// - sm: The sequence manager
-// - tableName: The table name
-// - explicitRowid: The explicit rowid value (if provided), or 0 if NULL
-// - hasExplicitRowid: Whether an explicit rowid was provided
-// - currentMaxRowid: The current maximum rowid in the table (from btree)
-//
-// Returns the rowid to use for the insert.
-func GenerateAutoincrementRowid(sm *SequenceManager, tableName string, explicitRowid int64, hasExplicitRowid bool, currentMaxRowid int64) int64 {
+// Returns an error if the maximum rowid would be exceeded.
+func GenerateAutoincrementRowid(sm *SequenceManager, tableName string, explicitRowid int64, hasExplicitRowid bool, currentMaxRowid int64) (int64, error) {
 	if hasExplicitRowid && explicitRowid != 0 {
+		// Check explicit rowid against max
+		if explicitRowid > MaxRowid {
+			return 0, fmt.Errorf("AUTOINCREMENT rowid exceeds maximum for table %s", tableName)
+		}
 		// Explicit rowid provided - use it and update sequence
 		sm.UpdateSequence(tableName, explicitRowid)
-		return explicitRowid
+		return explicitRowid, nil
 	}
 
 	// NULL or no rowid provided - generate next sequence value

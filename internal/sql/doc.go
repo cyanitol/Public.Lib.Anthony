@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 // Package sql provides SQL statement compilation for a pure Go SQLite database engine.
 //
 // This package is a pure Go implementation based on SQLite source code.

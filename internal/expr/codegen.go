@@ -1,10 +1,11 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package expr
 
 import (
 	"encoding/hex"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
@@ -190,14 +191,18 @@ func init() {
 		reflect.TypeOf((*parser.ParenExpr)(nil)): func(g *CodeGenerator, e parser.Expression) (int, error) {
 			return g.GenerateExpr(e.(*parser.ParenExpr).Expr)
 		},
+		reflect.TypeOf((*parser.RaiseExpr)(nil)): func(g *CodeGenerator, e parser.Expression) (int, error) {
+			return g.generateRaise(e.(*parser.RaiseExpr))
+		},
 	}
 }
 
 // ColumnInfo contains column metadata for code generation.
 type ColumnInfo struct {
-	Name    string
-	Index   int  // Column index in the record
-	IsRowid bool // True if this is the INTEGER PRIMARY KEY (alias for rowid)
+	Name      string
+	Index     int    // Column index in the record
+	IsRowid   bool   // True if this is the INTEGER PRIMARY KEY (alias for rowid)
+	Collation string // Column collation (e.g., NOCASE, BINARY, RTRIM)
 }
 
 // TableInfo contains table metadata for code generation.
@@ -209,6 +214,10 @@ type TableInfo struct {
 // SubqueryCompiler is a callback function to compile subquery SELECT statements.
 // It takes a SELECT AST node and returns compiled VDBE bytecode.
 type SubqueryCompiler func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error)
+
+// SubqueryExecutor compiles and executes a subquery, returning the result rows.
+// Each row is a slice of interface{} values (one per result column).
+type SubqueryExecutor func(selectStmt *parser.SelectStmt) ([][]interface{}, error)
 
 // CodeGenerator generates VDBE bytecode for expressions.
 // It converts parser AST nodes into executable VDBE instructions.
@@ -222,6 +231,8 @@ type CodeGenerator struct {
 	paramIdx         int                  // next parameter index to use
 	collations       map[int]string       // register -> collation name (for collate expressions)
 	subqueryCompiler SubqueryCompiler     // callback to compile subqueries
+	subqueryExecutor SubqueryExecutor     // callback to materialise subqueries
+	precomputed      map[parser.Expression]int // expressions pre-computed into registers
 }
 
 // NewCodeGenerator creates a new code generator.
@@ -246,15 +257,65 @@ func (g *CodeGenerator) SetSubqueryCompiler(compiler SubqueryCompiler) {
 	g.subqueryCompiler = compiler
 }
 
+// SetSubqueryExecutor sets the callback for materialising subqueries.
+func (g *CodeGenerator) SetSubqueryExecutor(executor SubqueryExecutor) {
+	g.subqueryExecutor = executor
+}
+
+// SetPrecomputed registers an expression as already computed in a given register.
+// When GenerateExpr encounters this expression, it returns the register directly.
+func (g *CodeGenerator) SetPrecomputed(e parser.Expression, reg int) {
+	if g.precomputed == nil {
+		g.precomputed = make(map[parser.Expression]int)
+	}
+	g.precomputed[e] = reg
+}
+
 // GetVDBE returns the underlying VDBE for access to context.
 func (g *CodeGenerator) GetVDBE() *vdbe.VDBE {
 	return g.vdbe
+}
+
+// HasNonZeroCursor returns true if any registered cursor is non-zero.
+// This indicates that column references should be routed through the code
+// generator to use the correct cursor (e.g. INSERT..SELECT source cursor).
+func (g *CodeGenerator) HasNonZeroCursor() bool {
+	for _, cursor := range g.cursorMap {
+		if cursor != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // SetArgs sets the bound parameter values for the code generator.
 func (g *CodeGenerator) SetArgs(args []interface{}) {
 	g.args = args
 	g.paramIdx = 0
+}
+
+// SetParamIndex sets the next parameter index to consume.
+func (g *CodeGenerator) SetParamIndex(idx int) {
+	g.paramIdx = idx
+}
+
+// ParamIndex returns the next parameter index to consume.
+func (g *CodeGenerator) ParamIndex() int {
+	return g.paramIdx
+}
+
+// CollationForReg returns the collation name for a register, if any.
+func (g *CodeGenerator) CollationForReg(reg int) (string, bool) {
+	coll, ok := g.collations[reg]
+	return coll, ok
+}
+
+// SetCollationForReg assigns a collation name to a register.
+func (g *CodeGenerator) SetCollationForReg(reg int, coll string) {
+	if coll == "" {
+		return
+	}
+	g.collations[reg] = coll
 }
 
 // RegisterTable registers table information for column resolution.
@@ -326,6 +387,10 @@ func (g *CodeGenerator) GenerateExpr(expr parser.Expression) (int, error) {
 	if expr == nil {
 		return g.generateNullLiteral()
 	}
+	// Check if this expression was pre-computed into a register
+	if reg, ok := g.precomputed[expr]; ok {
+		return reg, nil
+	}
 	handler, ok := exprDispatch[reflect.TypeOf(expr)]
 	if !ok {
 		return 0, fmt.Errorf("unsupported expression type: %T", expr)
@@ -366,8 +431,24 @@ func (g *CodeGenerator) generateNullLiteralValue(e *parser.LiteralExpr, reg int)
 
 // generateIntegerLiteral generates code for integer literals.
 func (g *CodeGenerator) generateIntegerLiteral(e *parser.LiteralExpr, reg int) error {
-	var val int64
-	fmt.Sscanf(e.Value, "%d", &val)
+	clean := strings.ReplaceAll(e.Value, "_", "")
+	base := 10
+	if strings.HasPrefix(clean, "0x") || strings.HasPrefix(clean, "0X") {
+		base = 16
+		clean = clean[2:]
+	}
+	val, err := strconv.ParseInt(clean, base, 64)
+	if err != nil {
+		floatVal, floatErr := strconv.ParseFloat(strings.ReplaceAll(e.Value, "_", ""), 64)
+		if floatErr != nil {
+			return fmt.Errorf("invalid integer literal %q", e.Value)
+		}
+		addr := g.vdbe.AddOp(vdbe.OpReal, 0, reg, 0)
+		g.vdbe.Program[addr].P4.R = floatVal
+		g.vdbe.Program[addr].P4Type = vdbe.P4Real
+		g.vdbe.SetComment(addr, fmt.Sprintf("REAL %s", e.Value))
+		return nil
+	}
 	if val >= -2147483648 && val <= 2147483647 {
 		g.vdbe.AddOp(vdbe.OpInteger, int(val), reg, 0)
 	} else {
@@ -428,6 +509,11 @@ func (g *CodeGenerator) generateColumn(e *parser.IdentExpr) (int, error) {
 		return 0, err
 	}
 
+	// Look up and store column collation for comparison operations
+	if collation := g.lookupColumnCollation(tableName, e.Name); collation != "" {
+		g.collations[reg] = collation
+	}
+
 	// Emit opcode
 	g.emitColumnOpcode(cursor, colIndex, isRowid, reg)
 	g.addColumnComment(reg, tableName, e.Name)
@@ -474,12 +560,18 @@ func (g *CodeGenerator) findTableWithColumn(colName string) (string, int) {
 
 	// If no exact match and this is a rowid alias, find a table with a rowid column
 	if isRowidAlias(colName) {
+		// First, prefer a table that has an explicit INTEGER PRIMARY KEY
 		for name, info := range g.tableInfo {
 			for _, col := range info.Columns {
 				if col.IsRowid {
 					return name, g.cursorMap[name]
 				}
 			}
+		}
+		// If no explicit INTEGER PRIMARY KEY, return the first available table
+		// since SQLite always has an implicit rowid for regular tables
+		for name := range g.tableInfo {
+			return name, g.cursorMap[name]
 		}
 	}
 
@@ -516,6 +608,21 @@ func (g *CodeGenerator) lookupColumnInfo(tableName, colName string) (int, bool, 
 	return 0, false, fmt.Errorf("column not found: %s", colName)
 }
 
+// lookupColumnCollation returns the collation for a column in a table.
+// Returns empty string if table not found or column has no explicit collation.
+func (g *CodeGenerator) lookupColumnCollation(tableName, colName string) string {
+	info, ok := g.tableInfo[tableName]
+	if !ok {
+		return ""
+	}
+	for _, col := range info.Columns {
+		if col.Name == colName {
+			return col.Collation
+		}
+	}
+	return ""
+}
+
 // emitColumnOpcode emits the appropriate opcode for reading a column value.
 func (g *CodeGenerator) emitColumnOpcode(cursor, colIndex int, isRowid bool, reg int) {
 	if isRowid {
@@ -539,6 +646,11 @@ func (g *CodeGenerator) generateBinary(e *parser.BinaryExpr) (int, error) {
 	// Special handling for AND and OR (short-circuit evaluation)
 	if e.Op == parser.OpAnd || e.Op == parser.OpOr {
 		return g.generateLogical(e)
+	}
+
+	// LIKE with ESCAPE clause needs 3 arguments
+	if e.Op == parser.OpLike && e.Escape != nil {
+		return g.generateLikeEscapeExpr(e)
 	}
 
 	leftReg, rightReg, err := g.generateBinaryOperands(e)
@@ -614,62 +726,46 @@ func (g *CodeGenerator) emitCollatedComparison(entry binaryOpEntry, leftReg, rig
 
 // generateLogical generates code for AND/OR with short-circuit evaluation.
 func (g *CodeGenerator) generateLogical(e *parser.BinaryExpr) (int, error) {
-	resultReg := g.AllocReg()
-
-	if e.Op == parser.OpAnd {
-		// AND: if left is false, result is false (skip right)
-		leftReg, err := g.GenerateExpr(e.Left)
-		if err != nil {
-			return 0, err
-		}
-
-		// Copy left to result
-		g.vdbe.AddOp(vdbe.OpCopy, leftReg, resultReg, 0)
-
-		// If false, jump to end
-		endLabel := g.vdbe.NumOps() + 100 // Placeholder - will be patched
-		g.vdbe.AddOp(vdbe.OpIfNot, resultReg, endLabel, 0)
-		ifNotAddr := g.vdbe.NumOps() - 1
-
-		// Evaluate right side
-		rightReg, err := g.GenerateExpr(e.Right)
-		if err != nil {
-			return 0, err
-		}
-
-		// Copy right to result
-		g.vdbe.AddOp(vdbe.OpCopy, rightReg, resultReg, 0)
-
-		// Patch the jump
-		g.vdbe.Program[ifNotAddr].P2 = g.vdbe.NumOps()
-
-	} else { // OpOr
-		// OR: if left is true, result is true (skip right)
-		leftReg, err := g.GenerateExpr(e.Left)
-		if err != nil {
-			return 0, err
-		}
-
-		// Copy left to result
-		g.vdbe.AddOp(vdbe.OpCopy, leftReg, resultReg, 0)
-
-		// If true, jump to end
-		endLabel := g.vdbe.NumOps() + 100
-		g.vdbe.AddOp(vdbe.OpIf, resultReg, endLabel, 0)
-		ifAddr := g.vdbe.NumOps() - 1
-
-		// Evaluate right side
-		rightReg, err := g.GenerateExpr(e.Right)
-		if err != nil {
-			return 0, err
-		}
-
-		// Copy right to result
-		g.vdbe.AddOp(vdbe.OpCopy, rightReg, resultReg, 0)
-
-		// Patch the jump
-		g.vdbe.Program[ifAddr].P2 = g.vdbe.NumOps()
+	// Generate left operand
+	leftReg, err := g.GenerateExpr(e.Left)
+	if err != nil {
+		return 0, err
 	}
+
+	resultReg := g.AllocReg()
+	// Copy left result to result register
+	g.vdbe.AddOp(vdbe.OpCopy, leftReg, resultReg, 0)
+
+	var shortCircuitAddr int
+	if e.Op == parser.OpAnd {
+		// AND: if left is false, skip right (short-circuit).
+		// P3=1: do not jump when left is NULL (need to evaluate right side).
+		shortCircuitAddr = g.vdbe.AddOp(vdbe.OpIfNot, leftReg, 0, 1)
+		g.vdbe.SetComment(shortCircuitAddr, "AND short-circuit")
+	} else {
+		// OR: if left is true, skip right (short-circuit)
+		shortCircuitAddr = g.vdbe.AddOp(vdbe.OpIf, leftReg, 0, 0)
+		g.vdbe.SetComment(shortCircuitAddr, "OR short-circuit")
+	}
+
+	// Generate right operand
+	rightReg, err := g.GenerateExpr(e.Right)
+	if err != nil {
+		return 0, err
+	}
+
+	// Combine results
+	if e.Op == parser.OpAnd {
+		g.vdbe.AddOp(vdbe.OpAnd, leftReg, rightReg, resultReg)
+		g.vdbe.SetComment(g.vdbe.NumOps()-1, "AND")
+	} else {
+		g.vdbe.AddOp(vdbe.OpOr, leftReg, rightReg, resultReg)
+		g.vdbe.SetComment(g.vdbe.NumOps()-1, "OR")
+	}
+
+	// Fix short-circuit jump target to after the combine
+	endAddr := g.vdbe.NumOps()
+	g.vdbe.Program[shortCircuitAddr].P2 = endAddr
 
 	return resultReg, nil
 }
@@ -927,16 +1023,24 @@ func (g *CodeGenerator) generateIn(e *parser.InExpr) (int, error) {
 func (g *CodeGenerator) generateInValueList(e *parser.InExpr, exprReg int) (int, error) {
 	resultReg := g.AllocReg()
 	g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
+	nullSeenReg := g.AllocReg()
+	g.vdbe.AddOp(vdbe.OpInteger, 0, nullSeenReg, 0)
 
 	var endJumps []int
 
 	for _, val := range e.Values {
-		jumpAddr, err := g.generateInValueComparison(exprReg, val, resultReg)
+		jumpAddr, err := g.generateInValueComparison(exprReg, val, resultReg, nullSeenReg)
 		if err != nil {
 			return 0, err
 		}
 		endJumps = append(endJumps, jumpAddr)
 	}
+
+	// If any comparison was NULL and no match found, result is NULL.
+	setNullAddr := g.vdbe.AddOp(vdbe.OpIfNot, nullSeenReg, 0, 0)
+	g.vdbe.AddOp(vdbe.OpNull, 0, resultReg, 0)
+	endAddr := g.vdbe.NumOps()
+	g.vdbe.Program[setNullAddr].P2 = endAddr
 
 	g.patchJumpsToEnd(endJumps)
 	return resultReg, nil
@@ -944,7 +1048,7 @@ func (g *CodeGenerator) generateInValueList(e *parser.InExpr, exprReg int) (int,
 
 // generateInValueComparison generates code to compare exprReg with a single IN value.
 // Returns the address of the jump to the end on match.
-func (g *CodeGenerator) generateInValueComparison(exprReg int, val parser.Expression, resultReg int) (int, error) {
+func (g *CodeGenerator) generateInValueComparison(exprReg int, val parser.Expression, resultReg int, nullSeenReg int) (int, error) {
 	valReg, err := g.GenerateExpr(val)
 	if err != nil {
 		return 0, err
@@ -952,18 +1056,27 @@ func (g *CodeGenerator) generateInValueComparison(exprReg int, val parser.Expres
 
 	// Compare
 	cmpReg := g.AllocReg()
-	g.vdbe.AddOp(vdbe.OpEq, exprReg, valReg, cmpReg)
+	collation := g.getCollationForOperands(exprReg, valReg)
+	addr := g.vdbe.AddOp(vdbe.OpEq, exprReg, valReg, cmpReg)
+	if collation != "" {
+		g.vdbe.Program[addr].P4.Z = collation
+		g.vdbe.Program[addr].P4Type = vdbe.P4Static
+	}
 
 	// If true, set result to true and jump to end
-	g.vdbe.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
-	ifAddr := g.vdbe.NumOps() - 1
+	isNullAddr := g.vdbe.AddOp(vdbe.OpIsNull, cmpReg, 0, 0)
+	ifAddr := g.vdbe.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
 
 	g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
 	g.vdbe.AddOp(vdbe.OpGoto, 0, 0, 0)
 	gotoAddr := g.vdbe.NumOps() - 1
 
 	// Patch the If jump to next iteration
-	g.vdbe.Program[ifAddr].P2 = g.vdbe.NumOps()
+	setNullAddr := g.vdbe.NumOps()
+	g.vdbe.AddOp(vdbe.OpInteger, 1, nullSeenReg, 0)
+	nextIterAddr := g.vdbe.NumOps()
+	g.vdbe.Program[ifAddr].P2 = nextIterAddr
+	g.vdbe.Program[isNullAddr].P2 = setNullAddr
 
 	return gotoAddr, nil
 }
@@ -984,9 +1097,19 @@ func (g *CodeGenerator) negateResult(reg int) int {
 }
 
 // generateInSubquery generates code for IN (SELECT ...) expressions.
-// Strategy: Similar to SQLite's approach - create an ephemeral table,
-// populate it with subquery results, then use OP_Found to check membership.
+// When a SubqueryExecutor is available, the subquery is materialised at compile
+// time and converted to a value-list comparison. Otherwise falls back to
+// bytecode embedding via ephemeral tables.
 func (g *CodeGenerator) generateInSubquery(e *parser.InExpr, exprReg int, resultReg int) (int, error) {
+	// Prefer materialisation: execute the subquery, then emit value-list checks.
+	if g.subqueryExecutor != nil {
+		res, err := g.generateInSubqueryMaterialised(e, exprReg, resultReg)
+		if err == nil {
+			return res, nil
+		}
+		// Fall through to bytecode embedding
+	}
+
 	if g.subqueryCompiler == nil {
 		return 0, fmt.Errorf("subquery compiler not set")
 	}
@@ -1107,6 +1230,45 @@ func (g *CodeGenerator) generateInSubquery(e *parser.InExpr, exprReg int, result
 	return resultReg, nil
 }
 
+// generateInSubqueryMaterialised executes the subquery at compile time and
+// emits value-list comparisons for the collected results. Falls back to
+// bytecode embedding on failure.
+func (g *CodeGenerator) generateInSubqueryMaterialised(e *parser.InExpr, exprReg int, resultReg int) (int, error) {
+	rows, err := g.subqueryExecutor(e.Select)
+	if err != nil {
+		// Fall back to bytecode embedding for correlated subqueries
+		return g.generateInSubquery(e, exprReg, resultReg)
+	}
+
+	// Convert rows to a value-list InExpr and generate code for it.
+	var values []parser.Expression
+	for _, row := range rows {
+		if len(row) == 0 {
+			continue
+		}
+		values = append(values, valueToLiteral(row[0]))
+	}
+
+	synth := &parser.InExpr{Expr: e.Expr, Values: values, Not: false}
+	return g.generateInValueList(synth, exprReg)
+}
+
+// valueToLiteral converts an interface{} value to a parser literal expression.
+func valueToLiteral(v interface{}) parser.Expression {
+	switch val := v.(type) {
+	case int64:
+		return &parser.LiteralExpr{Type: parser.LiteralInteger, Value: fmt.Sprintf("%d", val)}
+	case float64:
+		return &parser.LiteralExpr{Type: parser.LiteralFloat, Value: fmt.Sprintf("%g", val)}
+	case string:
+		return &parser.LiteralExpr{Type: parser.LiteralString, Value: val}
+	case nil:
+		return &parser.LiteralExpr{Type: parser.LiteralNull, Value: "NULL"}
+	default:
+		return &parser.LiteralExpr{Type: parser.LiteralString, Value: fmt.Sprintf("%v", val)}
+	}
+}
+
 // generateBetween generates code for BETWEEN expressions.
 func (g *CodeGenerator) generateBetween(e *parser.BetweenExpr) (int, error) {
 	// expr BETWEEN lower AND upper
@@ -1170,12 +1332,16 @@ func (g *CodeGenerator) generateCast(e *parser.CastExpr) (int, error) {
 
 // generateSubquery generates code for scalar subquery expressions.
 // A scalar subquery is a SELECT that returns a single value.
-// Strategy: Inline the subquery code directly. The subquery's ResultRow is
-// replaced with a Goto to skip further processing, capturing the result.
-// If the subquery returns zero rows, the result is NULL.
+// When a SubqueryExecutor is available, the subquery is materialised at compile
+// time. Otherwise falls back to bytecode embedding.
 func (g *CodeGenerator) generateSubquery(e *parser.SubqueryExpr) (int, error) {
 	if e.Select == nil {
 		return 0, fmt.Errorf("subquery expression has no SELECT statement")
+	}
+
+	// Prefer materialisation.
+	if g.subqueryExecutor != nil {
+		return g.generateSubqueryMaterialised(e)
 	}
 
 	if g.subqueryCompiler == nil {
@@ -1199,6 +1365,71 @@ func (g *CodeGenerator) generateSubquery(e *parser.SubqueryExpr) (int, error) {
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: end")
 
 	return resultReg, nil
+}
+
+// generateSubqueryMaterialised executes a scalar subquery at compile time and
+// emits a constant value. Falls back to bytecode embedding on failure.
+func (g *CodeGenerator) generateSubqueryMaterialised(e *parser.SubqueryExpr) (int, error) {
+	// Check for correlated subquery FIRST - outer refs mean we must evaluate per-row.
+	refs := g.findOuterRefs(e.Select)
+	if len(refs) > 0 {
+		return g.emitCorrelatedScalar(e, refs)
+	}
+
+	rows, err := g.subqueryExecutor(e.Select)
+	if err != nil {
+		return g.generateSubqueryBytecodeEmbedding(e)
+	}
+
+	resultReg := g.AllocReg()
+	if len(rows) == 0 || len(rows[0]) == 0 {
+		g.vdbe.AddOp(vdbe.OpNull, 0, resultReg, 0)
+		return resultReg, nil
+	}
+
+	g.emitLiteralValue(resultReg, rows[0][0])
+	return resultReg, nil
+}
+
+// generateSubqueryBytecodeEmbedding falls back to bytecode embedding for
+// scalar subqueries (typically correlated ones).
+func (g *CodeGenerator) generateSubqueryBytecodeEmbedding(e *parser.SubqueryExpr) (int, error) {
+	if g.subqueryCompiler == nil {
+		return 0, fmt.Errorf("subquery compiler not set")
+	}
+	resultReg := g.AllocReg()
+	g.initSubqueryResult(resultReg)
+
+	subVM, err := g.subqueryCompiler(e.Select)
+	if err != nil {
+		return 0, fmt.Errorf("failed to compile scalar subquery: %w", err)
+	}
+
+	addrSubqueryStart := g.vdbe.NumOps()
+	addrMap := g.buildSubqueryAddressMap(subVM, addrSubqueryStart)
+	resultRowGotoAddrs := g.copySubqueryInstructions(subVM, addrMap, resultReg)
+	g.patchResultRowGotos(resultRowGotoAddrs)
+
+	g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: end")
+
+	return resultReg, nil
+}
+
+// emitLiteralValue emits an opcode to load a concrete value into a register.
+func (g *CodeGenerator) emitLiteralValue(reg int, v interface{}) {
+	switch val := v.(type) {
+	case int64:
+		g.vdbe.AddOp(vdbe.OpInteger, int(val), reg, 0)
+	case float64:
+		g.vdbe.AddOpWithP4Real(vdbe.OpReal, 0, reg, 0, val)
+	case string:
+		g.vdbe.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, val)
+	case nil:
+		g.vdbe.AddOp(vdbe.OpNull, 0, reg, 0)
+	default:
+		g.vdbe.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, fmt.Sprintf("%v", val))
+	}
 }
 
 // initSubqueryResult initializes the result register to NULL.
@@ -1271,6 +1502,42 @@ func (g *CodeGenerator) patchResultRowGotos(gotoAddrs []int) {
 	for _, addr := range gotoAddrs {
 		g.vdbe.Program[addr].P2 = addrAfterSubquery
 	}
+}
+
+// generateLikeEscapeExpr generates code for LIKE with ESCAPE clause.
+func (g *CodeGenerator) generateLikeEscapeExpr(e *parser.BinaryExpr) (int, error) {
+	leftReg, err := g.GenerateExpr(e.Left)
+	if err != nil {
+		return 0, err
+	}
+	rightReg, err := g.GenerateExpr(e.Right)
+	if err != nil {
+		return 0, err
+	}
+	escapeReg, err := g.GenerateExpr(e.Escape)
+	if err != nil {
+		return 0, err
+	}
+
+	resultReg := g.AllocReg()
+	firstArg := g.AllocRegs(3)
+
+	if leftReg != firstArg {
+		g.vdbe.AddOp(vdbe.OpMove, leftReg, firstArg, 0)
+	}
+	if rightReg != firstArg+1 {
+		g.vdbe.AddOp(vdbe.OpMove, rightReg, firstArg+1, 0)
+	}
+	if escapeReg != firstArg+2 {
+		g.vdbe.AddOp(vdbe.OpMove, escapeReg, firstArg+2, 0)
+	}
+
+	addr := g.vdbe.AddOp(vdbe.OpFunction, 0, firstArg, resultReg)
+	g.vdbe.Program[addr].P4.Z = "like"
+	g.vdbe.Program[addr].P4Type = vdbe.P4Static
+	g.vdbe.Program[addr].P5 = 3
+	g.vdbe.SetComment(addr, "LIKE ESCAPE")
+	return resultReg, nil
 }
 
 // generateLikeExpr generates code for LIKE expressions.
@@ -1366,19 +1633,79 @@ func (g *CodeGenerator) CurrentAddr() int {
 }
 
 // generateExists generates code for EXISTS (SELECT ...) expressions.
-// Strategy: Similar to generateSubquery, but for EXISTS we only need to check
-// if any row is returned. The result is initialized to 0 (false), and if the
-// subquery produces any row, the ResultRow opcode sets it to 1 (true).
-// EXISTS is optimized with LIMIT 1 since we only need to know if at least one row exists.
+// When a SubqueryExecutor is available, the subquery is materialised at compile
+// time to determine existence. Otherwise falls back to bytecode embedding.
 func (g *CodeGenerator) generateExists(e *parser.ExistsExpr) (int, error) {
 	if e.Select == nil {
 		return 0, fmt.Errorf("EXISTS expression has no SELECT statement")
+	}
+
+	// Prefer materialisation.
+	if g.subqueryExecutor != nil {
+		return g.generateExistsMaterialised(e)
 	}
 
 	if g.subqueryCompiler == nil {
 		return 0, fmt.Errorf("subquery compiler not set")
 	}
 
+	resultReg := g.AllocReg()
+	g.initExistsResult(resultReg)
+
+	selectWithLimit := g.applyExistsLimit(e.Select)
+	subVM, err := g.subqueryCompiler(selectWithLimit)
+	if err != nil {
+		return 0, fmt.Errorf("failed to compile EXISTS subquery: %w", err)
+	}
+
+	addrSubqueryStart := g.vdbe.NumOps()
+	g.adjustSubqueryJumpTargets(subVM, addrSubqueryStart)
+	resultRowGotoAddrs := g.embedExistsSubquery(subVM, resultReg)
+	g.finalizeExistsSubquery(resultReg, resultRowGotoAddrs)
+
+	return g.applyExistsNegation(e.Not, resultReg), nil
+}
+
+// generateExistsMaterialised executes the subquery at compile time and emits a
+// constant boolean result. Falls back to bytecode embedding on failure
+// (e.g. correlated subqueries).
+func (g *CodeGenerator) generateExistsMaterialised(e *parser.ExistsExpr) (int, error) {
+	// Check for correlated subquery FIRST - outer refs mean we must evaluate per-row.
+	refs := g.findOuterRefs(e.Select)
+	if len(refs) > 0 {
+		return g.emitCorrelatedExists(e, refs)
+	}
+
+	selectWithLimit := g.applyExistsLimit(e.Select)
+	rows, err := g.subqueryExecutor(selectWithLimit)
+	if err != nil {
+		return g.generateExistsBytecodeEmbedding(e)
+	}
+
+	exists := len(rows) > 0
+	resultReg := g.AllocReg()
+	val := 0
+	if exists {
+		val = 1
+	}
+
+	if e.Not {
+		if val == 1 {
+			val = 0
+		} else {
+			val = 1
+		}
+	}
+
+	g.vdbe.AddOp(vdbe.OpInteger, val, resultReg, 0)
+	return resultReg, nil
+}
+
+// generateExistsBytecodeEmbedding falls back to bytecode embedding for EXISTS.
+func (g *CodeGenerator) generateExistsBytecodeEmbedding(e *parser.ExistsExpr) (int, error) {
+	if g.subqueryCompiler == nil {
+		return 0, fmt.Errorf("subquery compiler not set")
+	}
 	resultReg := g.AllocReg()
 	g.initExistsResult(resultReg)
 
@@ -1807,4 +2134,22 @@ func (g *CodeGenerator) adjustInstructionRegisters(instr *vdbe.Instruction, regO
 	if rule.adjustP3 {
 		instr.P3 += regOffset
 	}
+}
+
+// generateRaise generates VDBE code for a RAISE expression in a trigger body.
+// RAISE(IGNORE) -> OpRaise P1=0
+// RAISE(ROLLBACK, msg) -> OpRaise P1=1, P4.Z=msg
+// RAISE(ABORT, msg) -> OpRaise P1=2, P4.Z=msg
+// RAISE(FAIL, msg) -> OpRaise P1=3, P4.Z=msg
+func (g *CodeGenerator) generateRaise(e *parser.RaiseExpr) (int, error) {
+	raiseType := int(e.Type)
+	addr := g.vdbe.AddOp(vdbe.OpRaise, raiseType, 0, 0)
+	if e.Message != "" {
+		g.vdbe.Program[addr].P4.Z = e.Message
+		g.vdbe.Program[addr].P4Type = vdbe.P4Static
+	}
+	// RAISE doesn't produce a value, but we need to return a register
+	resultReg := g.AllocReg()
+	g.vdbe.AddOp(vdbe.OpNull, 0, resultReg, 0)
+	return resultReg, nil
 }

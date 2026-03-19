@@ -2,7 +2,7 @@
 
 ## Files Modified
 
-### 1. `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/expr/codegen.go`
+### 1. `internal/expr/codegen.go`
 
 **Added Functions:**
 - `generateInSubquery()` (lines 608-687) - Handles IN (SELECT ...)
@@ -13,16 +13,16 @@
 - `generateIn()` (lines 544-607) - Now calls generateInSubquery() for subquery cases
 - `init()` (lines 60-99) - Registered ExistsExpr handler
 
-### 2. `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/parser/ast.go`
+### 2. `internal/parser/ast.go`
 
 **Added:**
 - `ExistsExpr` type (lines 1050-1063) - New AST node for EXISTS expressions
 
-### 3. `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/expr/subquery_test.go`
+### 3. `internal/expr/subquery_test.go`
 
 **New Test File** - Comprehensive test suite with 8 test functions
 
-### 4. `/home/justin/Programming/Workspace/Public.Lib.Anthony/SUBQUERY_IMPLEMENTATION.md`
+### 4. `SUBQUERY_IMPLEMENTATION.md`
 
 **New Documentation** - Complete implementation details and usage guide
 
@@ -93,7 +93,7 @@ SELECT * FROM products WHERE NOT EXISTS (SELECT 1 FROM inventory WHERE inventory
 
 To fully enable subquery support, integrate with SELECT compiler:
 
-1. **Location**: `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/sql/select.go`
+1. **Location**: `internal/sql/select.go`
 
 2. **Replace TODO placeholders** in:
    - `generateInSubquery()` - line 636
@@ -229,10 +229,10 @@ Expected: All tests pass (or fail on TODO placeholders for SELECT compilation)
 
 ## Contact Points
 
-- **Main Implementation**: `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/expr/codegen.go`
-- **Tests**: `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/expr/subquery_test.go`
-- **Documentation**: `/home/justin/Programming/Workspace/Public.Lib.Anthony/SUBQUERY_IMPLEMENTATION.md`
-- **AST Definitions**: `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/parser/ast.go`
+- **Main Implementation**: `internal/expr/codegen.go`
+- **Tests**: `internal/expr/subquery_test.go`
+- **Documentation**: `SUBQUERY_IMPLEMENTATION.md`
+- **AST Definitions**: `internal/parser/ast.go`
 
 ---
 

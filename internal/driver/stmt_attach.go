@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -15,24 +15,67 @@ import (
 func (s *Stmt) compileAttach(vm *vdbe.VDBE, stmt *parser.AttachStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
 
+	// Cannot ATTACH while in a transaction
+	if s.conn.inTx {
+		return nil, fmt.Errorf("cannot ATTACH database within a transaction")
+	}
+
 	filename, schemaName, err := s.extractAttachParameters(stmt)
 	if err != nil {
 		return nil, err
 	}
 
-	validatedPath, err := s.validateDatabasePath(filename)
-	if err != nil {
-		return nil, fmt.Errorf("invalid database path: %w", err)
-	}
-
-	if err := s.performDatabaseAttach(schemaName, validatedPath); err != nil {
+	if err := s.attachDatabase(filename, schemaName); err != nil {
 		return nil, err
 	}
+
+	// Adding a new database changes name resolution; drop cached statements.
+	s.invalidateStmtCache()
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
 	return vm, nil
+}
+
+// attachDatabase opens and attaches either a file or memory database.
+func (s *Stmt) attachDatabase(filename, schemaName string) error {
+	if filename == ":memory:" || filename == "" {
+		return s.attachMemoryDatabase(schemaName)
+	}
+	return s.attachFileDatabase(filename, schemaName)
+}
+
+// attachFileDatabase validates the path, opens the file, and attaches.
+func (s *Stmt) attachFileDatabase(filename, schemaName string) error {
+	validatedPath, err := s.validateDatabasePath(filename)
+	if err != nil {
+		return fmt.Errorf("invalid database path: %w", err)
+	}
+
+	if err := s.performDatabaseAttach(schemaName, validatedPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+// attachMemoryDatabase creates and attaches an in-memory database.
+func (s *Stmt) attachMemoryDatabase(schemaName string) error {
+	const defaultPageSize = 4096
+	mp, err := pager.OpenMemory(defaultPageSize)
+	if err != nil {
+		return fmt.Errorf("failed to create memory database: %w", err)
+	}
+
+	bt := btree.NewBtree(uint32(mp.PageSize()))
+	bt.Provider = newMemoryPagerProvider(mp)
+	mp.RollbackCallback = bt.ClearCache
+
+	if err := s.conn.dbRegistry.AttachDatabase(schemaName, ":memory:", mp, bt); err != nil {
+		mp.Close()
+		return fmt.Errorf("failed to attach memory database: %w", err)
+	}
+	return nil
 }
 
 // extractAttachParameters extracts and validates filename and schema name from ATTACH statement.
@@ -95,12 +138,19 @@ func (s *Stmt) openDatabase(validatedPath string) (*pager.Pager, *btree.Btree, e
 	}
 
 	bt := btree.NewBtree(uint32(p.PageSize()))
+	bt.Provider = newPagerProvider(p)
+	p.RollbackCallback = bt.ClearCache
 	return p, bt, nil
 }
 
 // compileDetach compiles a DETACH DATABASE statement.
 func (s *Stmt) compileDetach(vm *vdbe.VDBE, stmt *parser.DetachStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
+
+	// Cannot DETACH while in a transaction
+	if s.conn.inTx {
+		return nil, fmt.Errorf("cannot DETACH database within a transaction")
+	}
 
 	// Validate schema name
 	schemaName := stmt.SchemaName
@@ -112,6 +162,9 @@ func (s *Stmt) compileDetach(vm *vdbe.VDBE, stmt *parser.DetachStmt, args []driv
 	if err := s.conn.dbRegistry.DetachDatabase(schemaName); err != nil {
 		return nil, fmt.Errorf("failed to detach database: %w", err)
 	}
+
+	// Statement cache may hold programs bound to detached databases.
+	s.invalidateStmtCache()
 
 	// Generate simple bytecode that succeeds
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)

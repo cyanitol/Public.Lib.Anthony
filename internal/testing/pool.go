@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 // Package testing provides test utilities for the Anthony SQLite driver.
 package testing
 
@@ -48,7 +48,8 @@ func GetTestDB(t *testing.T) *sql.DB {
 			}
 			rows.Close()
 			for _, table := range tables {
-				db.Exec("DROP TABLE IF EXISTS " + table)
+				// nosec: table name is a test constant, not user input
+			db.Exec("DROP TABLE IF EXISTS " + table)
 			}
 		}
 

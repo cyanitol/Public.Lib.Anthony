@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 //go:build windows
 
 package pager
@@ -120,12 +120,15 @@ func (lm *LockManager) releaseLockPlatform(level LockLevel) error {
 	return nil
 }
 
-// lockFileEx wraps the Windows LockFileEx API
+// lockFileEx wraps the Windows LockFileEx API.
+// unsafe.Pointer is required to pass the OVERLAPPED struct to the Windows
+// syscall interface; there is no safe alternative for raw Win32 API calls.
 func lockFileEx(handle syscall.Handle, flags uint32, offsetLow uint32, offsetHigh uint32, nBytes uint32) error {
 	var overlapped syscall.Overlapped
 	overlapped.Offset = offsetLow
 	overlapped.OffsetHigh = offsetHigh
 
+	// nosec: unsafe.Pointer required for Windows LockFileEx syscall
 	r1, _, err := procLockFileEx.Call(
 		uintptr(handle),
 		uintptr(flags),
@@ -141,7 +144,8 @@ func lockFileEx(handle syscall.Handle, flags uint32, offsetLow uint32, offsetHig
 	return nil
 }
 
-// unlockFileEx wraps the Windows UnlockFileEx API
+// unlockFileEx wraps the Windows UnlockFileEx API.
+// unsafe.Pointer usage mirrors lockFileEx (see comment above).
 func unlockFileEx(handle syscall.Handle, offsetLow uint32, offsetHigh uint32, nBytes uint32) error {
 	var overlapped syscall.Overlapped
 	overlapped.Offset = offsetLow

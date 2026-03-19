@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -7,6 +7,149 @@ import (
 	"strings"
 	"testing"
 )
+
+// ftsTestCase holds FTS test configuration
+type ftsTestCase struct {
+	name     string
+	setup    []string
+	query    string
+	wantRows [][]interface{}
+	wantErr  bool
+	errMsg   string
+}
+
+// ftsCleanupTables removes temporary tables used in FTS tests
+func ftsCleanupTables(db *sql.DB) {
+	db.Exec("DROP TABLE IF EXISTS t1")
+	db.Exec("DROP TABLE IF EXISTS t0")
+	db.Exec("DROP TABLE IF EXISTS t2")
+	db.Exec("DROP TABLE IF EXISTS docs")
+	db.Exec("DROP TABLE IF EXISTS documents")
+	db.Exec("DROP TABLE IF EXISTS ft")
+	db.Exec("DROP TABLE IF EXISTS meta")
+}
+
+// ftsRunSetup executes setup SQL statements
+func ftsRunSetup(t *testing.T, db *sql.DB, setupSQL []string) {
+	for _, stmt := range setupSQL {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup failed: %v, SQL: %s", err, stmt)
+		}
+	}
+}
+
+// ftsVerifyError checks if an error occurred and contains expected message
+func ftsVerifyError(t *testing.T, err error, wantErr bool, errMsg string) bool {
+	if wantErr {
+		if err == nil {
+			t.Fatalf("expected error containing %q, got nil", errMsg)
+		}
+		if !strings.Contains(err.Error(), errMsg) {
+			t.Fatalf("expected error containing %q, got %v", errMsg, err)
+		}
+		return true
+	}
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	return false
+}
+
+// ftsCollectRows fetches all rows and converts bytes to strings
+func ftsCollectRows(t *testing.T, rows *sql.Rows) [][]interface{} {
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("failed to get columns: %v", err)
+	}
+
+	var gotRows [][]interface{}
+	for rows.Next() {
+		values := make([]interface{}, len(cols))
+		valuePtrs := make([]interface{}, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+
+		row := make([]interface{}, len(values))
+		for i, v := range values {
+			if b, ok := v.([]byte); ok {
+				row[i] = string(b)
+			} else {
+				row[i] = v
+			}
+		}
+		gotRows = append(gotRows, row)
+	}
+
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration failed: %v", err)
+	}
+
+	return gotRows
+}
+
+// ftsCompareValue compares a single cell value
+func ftsCompareValue(t *testing.T, i, j int, got, want interface{}) {
+	if want == nil {
+		if got != nil {
+			t.Errorf("row %d col %d: got %v (%T), want nil", i, j, got, got)
+		}
+		return
+	}
+	if got == nil {
+		t.Errorf("row %d col %d: got nil, want %v (%T)", i, j, want, want)
+		return
+	}
+
+	switch wantVal := want.(type) {
+	case int64:
+		if gotVal, ok := got.(int64); ok {
+			if gotVal != wantVal {
+				t.Errorf("row %d col %d: got %v, want %v", i, j, gotVal, wantVal)
+			}
+		} else {
+			t.Errorf("row %d col %d: got %v (%T), want %v (int64)", i, j, got, got, wantVal)
+		}
+	case string:
+		if gotVal, ok := got.(string); ok {
+			if gotVal != wantVal {
+				t.Errorf("row %d col %d: got %q, want %q", i, j, gotVal, wantVal)
+			}
+		} else {
+			t.Errorf("row %d col %d: got %v (%T), want %v (string)", i, j, got, got, wantVal)
+		}
+	default:
+		t.Errorf("row %d col %d: unsupported type %T", i, j, want)
+	}
+}
+
+// ftsCompareRow compares a single row
+func ftsCompareRow(t *testing.T, i int, gotRow, wantRow []interface{}) {
+	if len(gotRow) != len(wantRow) {
+		t.Errorf("row %d column count mismatch: got %d, want %d", i, len(gotRow), len(wantRow))
+		return
+	}
+
+	for j, got := range gotRow {
+		ftsCompareValue(t, i, j, got, wantRow[j])
+	}
+}
+
+// ftsCompareResults verifies expected vs actual results
+func ftsCompareResults(t *testing.T, gotRows, wantRows [][]interface{}) {
+	if len(gotRows) != len(wantRows) {
+		t.Fatalf("row count mismatch: got %d, want %d\nGot: %v\nWant: %v",
+			len(gotRows), len(wantRows), gotRows, wantRows)
+	}
+
+	for i, gotRow := range gotRows {
+		ftsCompareRow(t, i, gotRow, wantRows[i])
+	}
+}
 
 // TestSQLiteFTS tests Full-Text Search functionality including FTS3/FTS4
 // Converted from contrib/sqlite/sqlite-src-3510200/test/fts3*.test
@@ -21,14 +164,7 @@ func TestSQLiteFTS(t *testing.T) {
 	}
 	defer db.Close()
 
-	tests := []struct {
-		name     string
-		setup    []string
-		query    string
-		wantRows [][]interface{}
-		wantErr  bool
-		errMsg   string
-	}{
+	tests := []ftsTestCase{
 		// Test 1: Basic FTS3 table creation and simple search (fts3aa.test 1.1)
 		{
 			name: "fts3aa-1.1 basic match single word",
@@ -523,122 +659,17 @@ func TestSQLiteFTS(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			// Clean up
-			db.Exec("DROP TABLE IF EXISTS t1")
-			db.Exec("DROP TABLE IF EXISTS t0")
-			db.Exec("DROP TABLE IF EXISTS t2")
-			db.Exec("DROP TABLE IF EXISTS docs")
-			db.Exec("DROP TABLE IF EXISTS documents")
-			db.Exec("DROP TABLE IF EXISTS ft")
-			db.Exec("DROP TABLE IF EXISTS meta")
+			ftsCleanupTables(db)
+			ftsRunSetup(t, db, tt.setup)
 
-			// Run setup
-			for _, setupSQL := range tt.setup {
-				if _, err := db.Exec(setupSQL); err != nil {
-					t.Fatalf("setup failed: %v, SQL: %s", err, setupSQL)
-				}
-			}
-
-			// Execute query
 			rows, err := db.Query(tt.query)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got nil", tt.errMsg)
-				}
-				if !strings.Contains(err.Error(), tt.errMsg) {
-					t.Fatalf("expected error containing %q, got %v", tt.errMsg, err)
-				}
+			if ftsVerifyError(t, err, tt.wantErr, tt.errMsg) {
 				return
-			}
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
 			}
 			defer rows.Close()
 
-			// Collect results
-			var gotRows [][]interface{}
-			cols, err := rows.Columns()
-			if err != nil {
-				t.Fatalf("failed to get columns: %v", err)
-			}
-
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-
-				// Convert []byte to string for comparison
-				row := make([]interface{}, len(values))
-				for i, v := range values {
-					if b, ok := v.([]byte); ok {
-						row[i] = string(b)
-					} else {
-						row[i] = v
-					}
-				}
-				gotRows = append(gotRows, row)
-			}
-
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows iteration failed: %v", err)
-			}
-
-			// Compare results
-			if len(gotRows) != len(tt.wantRows) {
-				t.Fatalf("row count mismatch: got %d, want %d\nGot: %v\nWant: %v",
-					len(gotRows), len(tt.wantRows), gotRows, tt.wantRows)
-			}
-
-			for i, gotRow := range gotRows {
-				wantRow := tt.wantRows[i]
-				if len(gotRow) != len(wantRow) {
-					t.Errorf("row %d column count mismatch: got %d, want %d", i, len(gotRow), len(wantRow))
-					continue
-				}
-
-				for j, got := range gotRow {
-					want := wantRow[j]
-					// Handle nil comparison
-					if want == nil {
-						if got != nil {
-							t.Errorf("row %d col %d: got %v (%T), want nil", i, j, got, got)
-						}
-						continue
-					}
-					if got == nil {
-						t.Errorf("row %d col %d: got nil, want %v (%T)", i, j, want, want)
-						continue
-					}
-
-					// Compare values
-					switch wantVal := want.(type) {
-					case int64:
-						if gotVal, ok := got.(int64); ok {
-							if gotVal != wantVal {
-								t.Errorf("row %d col %d: got %v, want %v", i, j, gotVal, wantVal)
-							}
-						} else {
-							t.Errorf("row %d col %d: got %v (%T), want %v (int64)", i, j, got, got, wantVal)
-						}
-					case string:
-						if gotVal, ok := got.(string); ok {
-							if gotVal != wantVal {
-								t.Errorf("row %d col %d: got %q, want %q", i, j, gotVal, wantVal)
-							}
-						} else {
-							t.Errorf("row %d col %d: got %v (%T), want %v (string)", i, j, got, got, wantVal)
-						}
-					default:
-						t.Errorf("row %d col %d: unsupported type %T", i, j, want)
-					}
-				}
-			}
+			gotRows := ftsCollectRows(t, rows)
+			ftsCompareResults(t, gotRows, tt.wantRows)
 		})
 	}
 }

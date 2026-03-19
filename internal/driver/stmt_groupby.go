@@ -1,9 +1,10 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
 	"database/sql/driver"
 	"fmt"
+	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
@@ -65,7 +66,7 @@ func (s *Stmt) initGroupByState(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *pa
 // the previous group's accumulated results and then initializes accumulators for the new group.
 // For the first row, it skips comparison and just initializes accumulators.
 // Returns the address to jump to for updating accumulators (when group hasn't changed).
-func (s *Stmt) emitGroupComparison(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, numGroupBy, numCols int) int {
+func (s *Stmt) emitGroupComparison(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, numGroupBy, numCols int, collations []string) int {
 	// Check if first row - if so, skip comparison and go straight to initialization
 	skipCheckAddr := vm.AddOp(vdbe.OpIf, state.firstRowReg, 0, 0)
 
@@ -76,7 +77,11 @@ func (s *Stmt) emitGroupComparison(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt 
 
 	for i := 0; i < numGroupBy; i++ {
 		cmpReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpNe, state.groupByRegs[i], state.prevGroupByRegs[i], cmpReg)
+		cmpAddr := vm.AddOp(vdbe.OpNe, state.groupByRegs[i], state.prevGroupByRegs[i], cmpReg)
+		if i < len(collations) && collations[i] != "" {
+			vm.Program[cmpAddr].P4.Z = collations[i]
+			vm.Program[cmpAddr].P4Type = vdbe.P4Static
+		}
 		// If this column differs, set groupChangedReg to true
 		vm.AddOp(vdbe.OpOr, groupChangedReg, cmpReg, groupChangedReg)
 	}
@@ -112,7 +117,7 @@ func (s *Stmt) initializeGroupAccumulator(vm *vdbe.VDBE, funcName string, accReg
 		vm.AddOp(vdbe.OpInteger, 0, avgCountReg, 0)
 	case "TOTAL":
 		vm.AddOpWithP4Real(vdbe.OpReal, 0, accReg, 0, 0.0)
-	case "SUM", "MIN", "MAX":
+	case "SUM", "MIN", "MAX", "GROUP_CONCAT":
 		vm.AddOp(vdbe.OpNull, 0, accReg, 0)
 	}
 }
@@ -142,7 +147,7 @@ func (s *Stmt) initializeGroupAccumulators(vm *vdbe.VDBE, gen *expr.CodeGenerato
 
 // updateGroupAccumulatorsFromSorter updates accumulators from data extracted from sorter.
 // This should be called for every row to accumulate values.
-func (s *Stmt) updateGroupAccumulatorsFromSorter(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, sorterBaseReg int, numGroupBy int) {
+func (s *Stmt) updateGroupAccumulatorsFromSorter(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, table *schema.Table, state groupByState, sorterBaseReg int, numGroupBy int) {
 	// Update accumulators from sorter data
 	regIdx := numGroupBy
 	for i, col := range stmt.Columns {
@@ -164,12 +169,20 @@ func (s *Stmt) updateGroupAccumulatorsFromSorter(vm *vdbe.VDBE, gen *expr.CodeGe
 		regIdx++
 
 		// Update accumulator based on function type
-		s.updateSingleAccumulator(vm, fnExpr.Name, state.accRegs[i], state.avgCountRegs[i], valueReg, gen)
+		coll := ""
+		if len(fnExpr.Args) > 0 {
+			coll = resolveExprCollation(fnExpr.Args[0], table)
+		}
+		sep := ""
+		if fnExpr.Name == "GROUP_CONCAT" {
+			sep = groupConcatSeparator(fnExpr)
+		}
+		s.updateSingleAccumulator(vm, fnExpr.Name, state.accRegs[i], state.avgCountRegs[i], valueReg, gen, coll, sep)
 	}
 }
 
 // updateSingleAccumulator updates a single accumulator register with a value
-func (s *Stmt) updateSingleAccumulator(vm *vdbe.VDBE, funcName string, accReg int, countReg int, valueReg int, gen *expr.CodeGenerator) {
+func (s *Stmt) updateSingleAccumulator(vm *vdbe.VDBE, funcName string, accReg int, countReg int, valueReg int, gen *expr.CodeGenerator, collation string, sep string) {
 	// Skip NULL values
 	skipAddr := vm.AddOp(vdbe.OpIsNull, valueReg, 0, 0)
 
@@ -208,7 +221,11 @@ func (s *Stmt) updateSingleAccumulator(vm *vdbe.VDBE, funcName string, accReg in
 		copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
 		// Accumulator is not NULL - compare
 		cmpReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpLt, valueReg, accReg, cmpReg)
+		cmpAddr := vm.AddOp(vdbe.OpLt, valueReg, accReg, cmpReg)
+		if collation != "" {
+			vm.Program[cmpAddr].P4.Z = collation
+			vm.Program[cmpAddr].P4Type = vdbe.P4Static
+		}
 		notLessAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
 		// Copy value (either first value or new min)
 		vm.Program[copyAddr].P2 = vm.NumOps()
@@ -221,17 +238,57 @@ func (s *Stmt) updateSingleAccumulator(vm *vdbe.VDBE, funcName string, accReg in
 		copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
 		// Accumulator is not NULL - compare
 		cmpReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpGt, valueReg, accReg, cmpReg)
+		cmpAddr := vm.AddOp(vdbe.OpGt, valueReg, accReg, cmpReg)
+		if collation != "" {
+			vm.Program[cmpAddr].P4.Z = collation
+			vm.Program[cmpAddr].P4Type = vdbe.P4Static
+		}
 		notGreaterAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
 		// Copy value (either first value or new max)
 		vm.Program[copyAddr].P2 = vm.NumOps()
 		vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
 		endAddr := vm.NumOps()
 		vm.Program[notGreaterAddr].P2 = endAddr
+
+	case "GROUP_CONCAT":
+		sepReg := gen.AllocReg()
+		separator := sep
+		if separator == "" {
+			separator = ","
+		}
+		vm.AddOpWithP4Str(vdbe.OpString8, 0, sepReg, 0, separator)
+
+		copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
+		tmpReg := gen.AllocReg()
+		vm.AddOp(vdbe.OpConcat, accReg, sepReg, tmpReg)
+		vm.AddOp(vdbe.OpConcat, tmpReg, valueReg, accReg)
+		skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+		vm.Program[copyAddr].P2 = vm.NumOps()
+		vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
+		endAddr := vm.NumOps()
+		vm.Program[skipToEndAddr].P2 = endAddr
 	}
 
 	// Fix skip address for NULL values
 	vm.Program[skipAddr].P2 = vm.NumOps()
+}
+
+func groupConcatSeparator(fnExpr *parser.FunctionExpr) string {
+	if len(fnExpr.Args) < 2 {
+		return ","
+	}
+	if lit, ok := fnExpr.Args[1].(*parser.LiteralExpr); ok && lit.Type == parser.LiteralString {
+		return lit.Value
+	}
+	return ","
+}
+
+func (s *Stmt) groupByCollations(groupBy []parser.Expression, table *schema.Table) []string {
+	collations := make([]string, len(groupBy))
+	for i, expr := range groupBy {
+		collations[i] = resolveExprCollation(expr, table)
+	}
+	return collations
 }
 
 // calculateSorterColumns determines how many columns the sorter needs to store
@@ -253,15 +310,16 @@ func (s *Stmt) calculateSorterColumns(stmt *parser.SelectStmt, numGroupBy int) i
 }
 
 // createGroupBySorterKeyInfo creates sorter key information for GROUP BY
-func (s *Stmt) createGroupBySorterKeyInfo(numGroupBy int) *vdbe.SorterKeyInfo {
+func (s *Stmt) createGroupBySorterKeyInfo(numGroupBy int, collations []string) *vdbe.SorterKeyInfo {
 	keyCols := make([]int, numGroupBy)
 	desc := make([]bool, numGroupBy)
-	collations := make([]string, numGroupBy)
 
 	for i := 0; i < numGroupBy; i++ {
 		keyCols[i] = i
 		desc[i] = false
-		collations[i] = ""
+		if i >= len(collations) || collations[i] == "" {
+			collations[i] = ""
+		}
 	}
 
 	return &vdbe.SorterKeyInfo{
@@ -320,7 +378,7 @@ func (s *Stmt) openTableAndSorter(vm *vdbe.VDBE, table *schema.Table, cursors gr
 
 // populateSorterData evaluates and copies GROUP BY and aggregate expressions to sorter registers
 func (s *Stmt) populateSorterData(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, sorterBaseReg, numGroupBy int) error {
-	if err := s.populateGroupByExprs(vm, gen, stmt.GroupBy, sorterBaseReg); err != nil {
+	if err := s.populateGroupByExprs(vm, gen, stmt, sorterBaseReg); err != nil {
 		return err
 	}
 	s.populateAggregateArgs(vm, gen, stmt.Columns, sorterBaseReg, numGroupBy)
@@ -328,15 +386,34 @@ func (s *Stmt) populateSorterData(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *
 }
 
 // populateGroupByExprs populates GROUP BY expressions into sorter
-func (s *Stmt) populateGroupByExprs(vm *vdbe.VDBE, gen *expr.CodeGenerator, groupBy []parser.Expression, baseReg int) error {
-	for i, groupExpr := range groupBy {
-		reg, err := gen.GenerateExpr(groupExpr)
+func (s *Stmt) populateGroupByExprs(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, baseReg int) error {
+	for i, groupExpr := range stmt.GroupBy {
+		resolvedExpr := s.resolveGroupByExpr(stmt, groupExpr)
+		reg, err := gen.GenerateExpr(resolvedExpr)
 		if err != nil {
 			return fmt.Errorf("error compiling GROUP BY expression: %w", err)
 		}
 		vm.AddOp(vdbe.OpCopy, reg, baseReg+i, 0)
 	}
 	return nil
+}
+
+func (s *Stmt) resolveGroupByExpr(stmt *parser.SelectStmt, groupExpr parser.Expression) parser.Expression {
+	ident, ok := groupExpr.(*parser.IdentExpr)
+	if !ok {
+		return groupExpr
+	}
+	for _, col := range stmt.Columns {
+		if col.Alias != "" && strings.EqualFold(col.Alias, ident.Name) {
+			return col.Expr
+		}
+		if colIdent, ok := col.Expr.(*parser.IdentExpr); ok {
+			if strings.EqualFold(colIdent.Name, ident.Name) {
+				return col.Expr
+			}
+		}
+	}
+	return groupExpr
 }
 
 // populateAggregateArgs populates aggregate function arguments into sorter
@@ -358,8 +435,8 @@ func (s *Stmt) populateAggregateArgs(vm *vdbe.VDBE, gen *expr.CodeGenerator, col
 }
 
 // scanAndPopulateSorter implements Phase 1: scan table and populate sorter
-func (s *Stmt) scanAndPopulateSorter(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, table *schema.Table, cursors groupByCursors, numGroupBy, sorterCols int) (rewindAddr, sorterSortAddr, sorterBaseReg int, err error) {
-	keyInfo := s.createGroupBySorterKeyInfo(numGroupBy)
+func (s *Stmt) scanAndPopulateSorter(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, table *schema.Table, cursors groupByCursors, numGroupBy, sorterCols int, collations []string) (rewindAddr, sorterSortAddr, sorterBaseReg int, err error) {
+	keyInfo := s.createGroupBySorterKeyInfo(numGroupBy, collations)
 	s.openTableAndSorter(vm, table, cursors, sorterCols, keyInfo)
 
 	rewindAddr = vm.AddOp(vdbe.OpRewind, cursors.tableCursor, 0, 0)
@@ -388,7 +465,7 @@ func (s *Stmt) scanAndPopulateSorter(vm *vdbe.VDBE, gen *expr.CodeGenerator, stm
 }
 
 // processSortedDataWithGrouping implements Phase 2: process sorted data
-func (s *Stmt) processSortedDataWithGrouping(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, state groupByState, sorterCursor, sorterBaseReg, numGroupBy, numCols, sorterCols int) (sorterNextAddr, sorterLoopStart int) {
+func (s *Stmt) processSortedDataWithGrouping(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, table *schema.Table, state groupByState, sorterCursor, sorterBaseReg, numGroupBy, numCols, sorterCols int, collations []string) (sorterNextAddr, sorterLoopStart int) {
 	sorterNextAddr = vm.AddOp(vdbe.OpSorterNext, sorterCursor, 0, 0)
 	sorterLoopStart = vm.NumOps()
 
@@ -398,8 +475,8 @@ func (s *Stmt) processSortedDataWithGrouping(vm *vdbe.VDBE, gen *expr.CodeGenera
 		vm.AddOp(vdbe.OpCopy, sorterBaseReg+i, state.groupByRegs[i], 0)
 	}
 
-	s.emitGroupComparison(vm, gen, stmt, state, numGroupBy, numCols)
-	s.updateGroupAccumulatorsFromSorter(vm, gen, stmt, state, sorterBaseReg, numGroupBy)
+	s.emitGroupComparison(vm, gen, stmt, state, numGroupBy, numCols, collations)
+	s.updateGroupAccumulatorsFromSorter(vm, gen, stmt, table, state, sorterBaseReg, numGroupBy)
 	vm.AddOp(vdbe.OpSorterNext, sorterCursor, sorterLoopStart, 0)
 
 	return sorterNextAddr, sorterLoopStart
@@ -417,13 +494,14 @@ func (s *Stmt) compileSelectWithGroupBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	gen, cursors, state := s.setupGroupByCursorsAndState(vm, stmt, tableName, table, args, numCols, numGroupBy)
 	sorterCols := s.calculateSorterColumns(stmt, numGroupBy)
 
-	rewindAddr, sorterSortAddr, sorterBaseReg, err := s.scanAndPopulateSorter(vm, gen, stmt, table, cursors, numGroupBy, sorterCols)
+	groupCollations := s.groupByCollations(stmt.GroupBy, table)
+	rewindAddr, sorterSortAddr, sorterBaseReg, err := s.scanAndPopulateSorter(vm, gen, stmt, table, cursors, numGroupBy, sorterCols, groupCollations)
 	if err != nil {
 		return nil, err
 	}
 
 	afterScanAddr := vm.NumOps()
-	sorterNextAddr, sorterLoopStart := s.processSortedDataWithGrouping(vm, gen, stmt, state, cursors.sorterCursor, sorterBaseReg, numGroupBy, numCols, sorterCols)
+	sorterNextAddr, sorterLoopStart := s.processSortedDataWithGrouping(vm, gen, stmt, table, state, cursors.sorterCursor, sorterBaseReg, numGroupBy, numCols, sorterCols, groupCollations)
 
 	finalOutputAddr := vm.NumOps()
 	s.emitFinalGroupOutput(vm, gen, stmt, state, numCols)
@@ -504,7 +582,7 @@ func (s *Stmt) copyColumnsToResults(vm *vdbe.VDBE, stmt *parser.SelectStmt, accR
 		if s.isAggregateExpr(col.Expr) {
 			s.copyAggregateResult(vm, col.Expr.(*parser.FunctionExpr), accRegs[i], avgCountRegs[i], i)
 		} else {
-			s.copyNonAggregateResult(vm, col.Expr, stmt.GroupBy, groupByRegs, i)
+			s.copyNonAggregateResult(vm, col, stmt.GroupBy, groupByRegs, i)
 		}
 	}
 }
@@ -512,16 +590,27 @@ func (s *Stmt) copyColumnsToResults(vm *vdbe.VDBE, stmt *parser.SelectStmt, accR
 // copyAggregateResult copies aggregate value to result register
 func (s *Stmt) copyAggregateResult(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, accReg, countReg, targetReg int) {
 	if fnExpr.Name == "AVG" {
+		vm.AddOp(vdbe.OpToReal, accReg, 0, 0)
 		vm.AddOp(vdbe.OpDivide, accReg, countReg, targetReg)
+		vm.AddOp(vdbe.OpToReal, targetReg, 0, 0)
 	} else {
 		vm.AddOp(vdbe.OpCopy, accReg, targetReg, 0)
 	}
 }
 
 // copyNonAggregateResult copies non-aggregate value to result register
-func (s *Stmt) copyNonAggregateResult(vm *vdbe.VDBE, expr parser.Expression, groupBy []parser.Expression, groupByRegs []int, targetReg int) {
+func (s *Stmt) copyNonAggregateResult(vm *vdbe.VDBE, col parser.ResultColumn, groupBy []parser.Expression, groupByRegs []int, targetReg int) {
+	if col.Alias != "" {
+		for j, groupExpr := range groupBy {
+			if ident, ok := groupExpr.(*parser.IdentExpr); ok && strings.EqualFold(ident.Name, col.Alias) {
+				vm.AddOp(vdbe.OpCopy, groupByRegs[j], targetReg, 0)
+				return
+			}
+		}
+	}
+
 	for j, groupExpr := range groupBy {
-		if exprsEqual(expr, groupExpr) {
+		if exprsEqual(col.Expr, groupExpr) {
 			vm.AddOp(vdbe.OpCopy, groupByRegs[j], targetReg, 0)
 			return
 		}
@@ -538,7 +627,19 @@ func exprsEqual(e1, e2 parser.Expression) bool {
 	ident1, ok1 := e1.(*parser.IdentExpr)
 	ident2, ok2 := e2.(*parser.IdentExpr)
 	if ok1 && ok2 {
-		return ident1.Name == ident2.Name
+		return strings.EqualFold(ident1.Name, ident2.Name)
+	}
+
+	lit1, ok1 := e1.(*parser.LiteralExpr)
+	lit2, ok2 := e2.(*parser.LiteralExpr)
+	if ok1 && ok2 {
+		return lit1.Type == lit2.Type && lit1.Value == lit2.Value
+	}
+
+	bin1, ok1 := e1.(*parser.BinaryExpr)
+	bin2, ok2 := e2.(*parser.BinaryExpr)
+	if ok1 && ok2 {
+		return bin1.Op == bin2.Op && exprsEqual(bin1.Left, bin2.Left) && exprsEqual(bin1.Right, bin2.Right)
 	}
 
 	return false
@@ -586,7 +687,7 @@ func (s *Stmt) emitGroupByHavingClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, a
 	// Add GROUP BY columns to the map
 	for i, groupExpr := range stmt.GroupBy {
 		if ident, ok := groupExpr.(*parser.IdentExpr); ok {
-			aggregateMap[ident.Name] = groupByRegs[i]
+			aggregateMap[ident.Name] = aggregateRef{accReg: groupByRegs[i]}
 		}
 	}
 
@@ -602,18 +703,29 @@ func (s *Stmt) emitGroupByHavingClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, a
 }
 
 // buildAggregateMap creates a mapping from aggregate function calls to their result registers.
-func (s *Stmt) buildAggregateMap(stmt *parser.SelectStmt, accRegs []int, avgCountRegs []int) map[string]int {
-	aggregateMap := make(map[string]int)
+type aggregateRef struct {
+	accReg   int
+	countReg int
+	isAvg    bool
+}
+
+func (s *Stmt) buildAggregateMap(stmt *parser.SelectStmt, accRegs []int, avgCountRegs []int) map[string]aggregateRef {
+	aggregateMap := make(map[string]aggregateRef)
 
 	for i, col := range stmt.Columns {
 		if fnExpr, ok := col.Expr.(*parser.FunctionExpr); ok && s.isAggregateExpr(col.Expr) {
 			// Create a key for this aggregate (e.g., "COUNT(*)", "SUM(value)")
 			key := s.aggregateKey(fnExpr)
-			aggregateMap[key] = i
+			ref := aggregateRef{accReg: accRegs[i]}
+			if fnExpr.Name == "AVG" {
+				ref.isAvg = true
+				ref.countReg = avgCountRegs[i]
+			}
+			aggregateMap[key] = ref
 
 			// For aliases, also map the alias name
 			if col.Alias != "" {
-				aggregateMap[col.Alias] = i
+				aggregateMap[col.Alias] = ref
 			}
 		}
 	}
@@ -636,15 +748,15 @@ func (s *Stmt) aggregateKey(fnExpr *parser.FunctionExpr) string {
 
 // generateHavingExpression generates code for the HAVING expression, resolving aggregate references.
 func (s *Stmt) generateHavingExpression(vm *vdbe.VDBE, gen *expr.CodeGenerator, havingExpr parser.Expression,
-	aggregateMap map[string]int, baseReg int) (int, error) {
+	aggregateMap map[string]aggregateRef, baseReg int) (int, error) {
 
 	switch expr := havingExpr.(type) {
 	case *parser.BinaryExpr:
 		return s.generateHavingBinaryExpr(vm, gen, expr, aggregateMap, baseReg)
 	case *parser.FunctionExpr:
-		return s.generateHavingFunctionExpr(gen, expr, aggregateMap)
+		return s.generateHavingFunctionExpr(vm, gen, expr, aggregateMap)
 	case *parser.IdentExpr:
-		return s.generateHavingIdentExpr(gen, expr, aggregateMap)
+		return s.generateHavingIdentExpr(vm, gen, expr, aggregateMap)
 	case *parser.LiteralExpr:
 		return gen.GenerateExpr(expr)
 	default:
@@ -653,21 +765,35 @@ func (s *Stmt) generateHavingExpression(vm *vdbe.VDBE, gen *expr.CodeGenerator, 
 }
 
 // generateHavingFunctionExpr handles function expressions in HAVING
-func (s *Stmt) generateHavingFunctionExpr(gen *expr.CodeGenerator, expr *parser.FunctionExpr, aggregateMap map[string]int) (int, error) {
+func (s *Stmt) generateHavingFunctionExpr(vm *vdbe.VDBE, gen *expr.CodeGenerator, expr *parser.FunctionExpr, aggregateMap map[string]aggregateRef) (int, error) {
 	if !s.isAggregateExpr(expr) {
 		return gen.GenerateExpr(expr)
 	}
 	key := s.aggregateKey(expr)
-	if reg, ok := aggregateMap[key]; ok {
-		return reg, nil
+	if ref, ok := aggregateMap[key]; ok {
+		if ref.isAvg {
+			resultReg := gen.AllocReg()
+			vm.AddOp(vdbe.OpToReal, ref.accReg, 0, 0)
+			vm.AddOp(vdbe.OpDivide, ref.accReg, ref.countReg, resultReg)
+			vm.AddOp(vdbe.OpToReal, resultReg, 0, 0)
+			return resultReg, nil
+		}
+		return ref.accReg, nil
 	}
 	return gen.GenerateExpr(expr)
 }
 
 // generateHavingIdentExpr handles identifier expressions in HAVING
-func (s *Stmt) generateHavingIdentExpr(gen *expr.CodeGenerator, expr *parser.IdentExpr, aggregateMap map[string]int) (int, error) {
-	if reg, ok := aggregateMap[expr.Name]; ok {
-		return reg, nil
+func (s *Stmt) generateHavingIdentExpr(vm *vdbe.VDBE, gen *expr.CodeGenerator, expr *parser.IdentExpr, aggregateMap map[string]aggregateRef) (int, error) {
+	if ref, ok := aggregateMap[expr.Name]; ok {
+		if ref.isAvg {
+			resultReg := gen.AllocReg()
+			vm.AddOp(vdbe.OpToReal, ref.accReg, 0, 0)
+			vm.AddOp(vdbe.OpDivide, ref.accReg, ref.countReg, resultReg)
+			vm.AddOp(vdbe.OpToReal, resultReg, 0, 0)
+			return resultReg, nil
+		}
+		return ref.accReg, nil
 	}
 	return gen.GenerateExpr(expr)
 }
@@ -690,7 +816,7 @@ var binaryOpToVdbeOpcode = map[parser.BinaryOp]vdbe.Opcode{
 
 // generateHavingBinaryExpr generates code for a binary expression in HAVING.
 func (s *Stmt) generateHavingBinaryExpr(vm *vdbe.VDBE, gen *expr.CodeGenerator, expr *parser.BinaryExpr,
-	aggregateMap map[string]int, baseReg int) (int, error) {
+	aggregateMap map[string]aggregateRef, baseReg int) (int, error) {
 
 	// Recursively generate left and right operands
 	leftReg, err := s.generateHavingExpression(vm, gen, expr.Left, aggregateMap, baseReg)

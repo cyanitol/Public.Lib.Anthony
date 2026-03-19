@@ -1,7 +1,8 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package btree
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 )
@@ -20,9 +21,10 @@ const MaxBtreeDepth = 20
 
 // BtCursor represents a cursor for traversing a B-tree
 type BtCursor struct {
-	Btree    *Btree // The B-tree this cursor belongs to
-	RootPage uint32 // Root page number of the tree
-	State    int    // Cursor state (valid, invalid, etc.)
+	Btree       *Btree // The B-tree this cursor belongs to
+	RootPage    uint32 // Root page number of the tree
+	State       int    // Cursor state (valid, invalid, etc.)
+	CompositePK bool   // True if keys are composite byte keys (WITHOUT ROWID)
 
 	// Current position in the tree
 	PageStack  [MaxBtreeDepth]uint32 // Stack of page numbers from root to current
@@ -47,6 +49,29 @@ func NewCursor(bt *Btree, rootPage uint32) *BtCursor {
 		RootPage: rootPage,
 		State:    CursorInvalid,
 		Depth:    -1,
+	}
+}
+
+// NewCursorWithOptions creates a new cursor with optional composite key mode.
+func NewCursorWithOptions(bt *Btree, rootPage uint32, compositePK bool) *BtCursor {
+	cur := NewCursor(bt, rootPage)
+	cur.CompositePK = compositePK
+	return cur
+}
+
+// compareKeys compares two keys based on cursor mode.
+// For composite cursors, compares byte keys; otherwise compares int rowids.
+func (c *BtCursor) compareKeys(aKey int64, aBytes []byte, bKey int64, bBytes []byte) int {
+	if c.CompositePK {
+		return bytes.Compare(aBytes, bBytes)
+	}
+	switch {
+	case aKey == bKey:
+		return 0
+	case aKey < bKey:
+		return -1
+	default:
+		return 1
 	}
 }
 
@@ -76,6 +101,13 @@ func (c *BtCursor) MoveToFirst() error {
 		return err
 	}
 	c.resetToRoot()
+	if c.CompositePK {
+		if err := c.descendToFirstComposite(c.RootPage); err != nil {
+			return err
+		}
+		c.AtFirst = true
+		return nil
+	}
 	if err := c.descendToFirst(c.RootPage); err != nil {
 		return err
 	}
@@ -89,6 +121,9 @@ func (c *BtCursor) MoveToLast() error {
 		return err
 	}
 	c.resetForMoveToLast()
+	if c.CompositePK {
+		return c.navigateToRightmostLeafComposite(c.RootPage)
+	}
 	return c.navigateToRightmostLeaf(c.RootPage)
 }
 
@@ -119,6 +154,22 @@ func (c *BtCursor) navigateToRightmostLeaf(pageNum uint32) error {
 	}
 }
 
+func (c *BtCursor) navigateToRightmostLeafComposite(pageNum uint32) error {
+	for {
+		pageData, header, err := c.getPageAndHeader(pageNum)
+		if err != nil {
+			return err
+		}
+
+		if header.IsLeaf {
+			return c.positionAtLastCell(pageNum, pageData, header)
+		}
+
+		// Right child pointer for interior pages
+		pageNum = header.RightChild
+	}
+}
+
 // getPageAndHeader retrieves a page and parses its header.
 func (c *BtCursor) getPageAndHeader(pageNum uint32) ([]byte, *PageHeader, error) {
 	pageData, err := c.Btree.GetPage(pageNum)
@@ -131,6 +182,9 @@ func (c *BtCursor) getPageAndHeader(pageNum uint32) ([]byte, *PageHeader, error)
 	if err != nil {
 		c.State = CursorInvalid
 		return nil, nil, fmt.Errorf("failed to parse page %d: %w", pageNum, err)
+	}
+	if header.PageType == PageTypeLeafTableNoInt || header.PageType == PageTypeInteriorTableNo {
+		c.CompositePK = true
 	}
 	return pageData, header, nil
 }
@@ -256,12 +310,22 @@ func (c *BtCursor) tryAdvanceInParent() (uint32, bool, error) {
 		return 0, false, err
 	}
 
-	if parentIndex >= int(parentHeader.NumCells)-1 {
+	if parentIndex >= int(parentHeader.NumCells) {
 		return 0, false, nil
 	}
 
-	c.IndexStack[c.Depth] = parentIndex + 1
-	return c.getChildPageFromParent(parentData, parentHeader, parentIndex+1)
+	if parentIndex < int(parentHeader.NumCells)-1 {
+		c.IndexStack[c.Depth] = parentIndex + 1
+		return c.getChildPageFromParent(parentData, parentHeader, parentIndex+1)
+	}
+
+	// When at the last cell, advance to the rightmost child.
+	if parentHeader.RightChild != 0 {
+		c.IndexStack[c.Depth] = int(parentHeader.NumCells)
+		return parentHeader.RightChild, true, nil
+	}
+
+	return 0, false, nil
 }
 
 // loadParentPage loads and parses a parent page.
@@ -487,6 +551,14 @@ func (c *BtCursor) GetKey() int64 {
 	return c.CurrentCell.Key
 }
 
+// GetKeyBytes returns the composite key bytes for WITHOUT ROWID cursors.
+func (c *BtCursor) GetKeyBytes() []byte {
+	if c.Btree == nil || c.State != CursorValid || c.CurrentCell == nil {
+		return nil
+	}
+	return c.CurrentCell.KeyBytes
+}
+
 // GetPayload returns the local payload of the current entry
 // Note: This only returns the portion stored locally in the cell.
 // For cells with overflow pages, use GetCompletePayload() to get the full payload.
@@ -524,6 +596,16 @@ func (c *BtCursor) SeekRowid(rowid int64) (found bool, err error) {
 	return c.navigateToRowid(c.RootPage, rowid)
 }
 
+// SeekComposite seeks to the specified composite key in the table.
+// Returns true if the exact key is found, false otherwise.
+func (c *BtCursor) SeekComposite(key []byte) (bool, error) {
+	if err := c.validateCursorState(); err != nil {
+		return false, err
+	}
+	c.initializeSeek()
+	return c.navigateToComposite(c.RootPage, key)
+}
+
 // initializeSeek initializes cursor state for seeking.
 func (c *BtCursor) initializeSeek() {
 	c.Depth = 0
@@ -553,6 +635,28 @@ func (c *BtCursor) navigateToRowid(pageNum uint32, rowid int64) (bool, error) {
 	}
 }
 
+// navigateToComposite navigates down the tree to find the composite key.
+func (c *BtCursor) navigateToComposite(pageNum uint32, key []byte) (bool, error) {
+	for {
+		pageData, header, err := c.loadPageForSeek(pageNum)
+		if err != nil {
+			return false, err
+		}
+
+		idx, exactMatch := c.binarySearchComposite(pageData, header, key)
+
+		if header.IsLeaf {
+			return c.seekLeafPageComposite(pageData, header, pageNum, idx, exactMatch)
+		}
+
+		childPage, err := c.advanceToChildPageComposite(pageData, header, idx)
+		if err != nil {
+			return false, err
+		}
+		pageNum = childPage
+	}
+}
+
 // loadPageForSeek loads and parses a page during seek operation.
 func (c *BtCursor) loadPageForSeek(pageNum uint32) ([]byte, *PageHeader, error) {
 	pageData, err := c.Btree.GetPage(pageNum)
@@ -565,6 +669,10 @@ func (c *BtCursor) loadPageForSeek(pageNum uint32) ([]byte, *PageHeader, error) 
 	if err != nil {
 		c.State = CursorInvalid
 		return nil, nil, fmt.Errorf("failed to parse page %d: %w", pageNum, err)
+	}
+
+	if header.PageType == PageTypeLeafTableNoInt || header.PageType == PageTypeInteriorTableNo {
+		c.CompositePK = true
 	}
 
 	return pageData, header, nil
@@ -588,6 +696,37 @@ func (c *BtCursor) advanceToChildPage(pageData []byte, header *PageHeader, idx i
 	return childPage, nil
 }
 
+// descendToFirstComposite descends to the first entry for composite-key trees.
+func (c *BtCursor) descendToFirstComposite(pageNum uint32) error {
+	for {
+		c.Depth++
+		if c.Depth >= MaxBtreeDepth {
+			return c.markInvalidAndReturn(fmt.Errorf("btree depth exceeded"))
+		}
+		c.PageStack[c.Depth] = pageNum
+		c.IndexStack[c.Depth] = 0
+
+		pageData, header, err := c.getPageAndHeader(pageNum)
+		if err != nil {
+			return c.markInvalidAndReturn(err)
+		}
+
+		if header.IsLeaf {
+			return c.setupLeafFirst(pageNum, pageData, header)
+		}
+
+		pageNum, err = c.getFirstChildPage(header, pageData)
+		if err != nil {
+			return c.markInvalidAndReturn(err)
+		}
+	}
+}
+
+// advanceToChildPageComposite mirrors advanceToChildPage for composite keys.
+func (c *BtCursor) advanceToChildPageComposite(pageData []byte, header *PageHeader, idx int) (uint32, error) {
+	return c.advanceToChildPage(pageData, header, idx)
+}
+
 // seekLeafPage positions the cursor on a leaf page after a binary search and
 // returns whether the rowid was found exactly.
 func (c *BtCursor) seekLeafPage(pageData []byte, header *PageHeader, pageNum uint32, idx int, exactMatch bool) (bool, error) {
@@ -601,6 +740,22 @@ func (c *BtCursor) seekLeafPage(pageData []byte, header *PageHeader, pageNum uin
 	}
 
 	// Rowid not found; position cursor at nearest entry for caller convenience
+	c.State = CursorValid
+	c.tryLoadCell(pageData, header, idx)
+	return false, nil
+}
+
+// seekLeafPageComposite positions the cursor on a leaf page for composite keys.
+func (c *BtCursor) seekLeafPageComposite(pageData []byte, header *PageHeader, pageNum uint32, idx int, exactMatch bool) (bool, error) {
+	c.CurrentPage = pageNum
+	c.CurrentIndex = idx
+	c.CurrentHeader = header
+	c.IndexStack[c.Depth] = idx
+
+	if exactMatch && idx < int(header.NumCells) {
+		return c.seekLeafExactMatch(pageData, header, idx)
+	}
+
 	c.State = CursorValid
 	c.tryLoadCell(pageData, header, idx)
 	return false, nil
@@ -630,14 +785,27 @@ func (c *BtCursor) seekLeafExactMatch(pageData []byte, header *PageHeader, idx i
 // ignored so the cursor remains positioned without a hard failure.
 func (c *BtCursor) tryLoadCell(pageData []byte, header *PageHeader, idx int) {
 	if idx >= int(header.NumCells) {
-		return
+		if header.NumCells == 0 {
+			c.CurrentCell = nil
+			return
+		}
+		idx = int(header.NumCells) - 1
+	}
+	if idx < 0 {
+		if header.NumCells == 0 {
+			c.CurrentCell = nil
+			return
+		}
+		idx = 0
 	}
 	cellOffset, err := header.GetCellPointer(pageData, idx)
 	if err != nil {
+		c.CurrentCell = nil
 		return
 	}
 	cell, err := ParseCell(header.PageType, pageData[cellOffset:], c.Btree.UsableSize)
 	if err != nil {
+		c.CurrentCell = nil
 		return
 	}
 	c.CurrentCell = cell
@@ -685,9 +853,10 @@ func (c *BtCursor) binarySearch(pageData []byte, header *PageHeader, rowid int64
 			return left, false
 		}
 
-		if cell.Key == rowid {
+		comp := c.compareCellKey(cell, rowid, nil)
+		if comp == 0 {
 			return mid, true
-		} else if cell.Key < rowid {
+		} else if comp < 0 {
 			left = mid + 1
 		} else {
 			right = mid
@@ -697,14 +866,65 @@ func (c *BtCursor) binarySearch(pageData []byte, header *PageHeader, rowid int64
 	return left, false
 }
 
+// binarySearchComposite performs binary search for a composite key in a page.
+func (c *BtCursor) binarySearchComposite(pageData []byte, header *PageHeader, key []byte) (int, bool) {
+	left := 0
+	right := int(header.NumCells)
+
+	for left < right {
+		mid := (left + right) / 2
+
+		cellOffset, err := header.GetCellPointer(pageData, mid)
+		if err != nil {
+			return left, false
+		}
+
+		cell, err := ParseCell(header.PageType, pageData[cellOffset:], c.Btree.UsableSize)
+		if err != nil {
+			return left, false
+		}
+
+		comp := c.compareCellKey(cell, 0, key)
+		if comp == 0 {
+			return mid, true
+		} else if comp < 0 {
+			left = mid + 1
+		} else {
+			right = mid
+		}
+	}
+
+	return left, false
+}
+
+// compareCellKey compares a cell key to a target. When CompositePK is true,
+// the compositeKey parameter is used and compared with KeyBytes; otherwise, rowid is used.
+func (c *BtCursor) compareCellKey(cell *CellInfo, rowid int64, compositeKey []byte) int {
+	if c.CompositePK && compositeKey != nil {
+		return bytes.Compare(cell.KeyBytes, compositeKey)
+	}
+	if cell.Key == rowid {
+		return 0
+	}
+	if cell.Key < rowid {
+		return -1
+	}
+	return 1
+}
+
 // Insert inserts a new row with the given key and payload
 // Automatically handles overflow pages if the payload is too large
 func (c *BtCursor) Insert(key int64, payload []byte) error {
-	if err := c.validateInsertPosition(key); err != nil {
+	return c.InsertWithComposite(key, nil, payload)
+}
+
+// InsertWithComposite inserts a row using either int64 keys or composite key bytes.
+func (c *BtCursor) InsertWithComposite(key int64, keyBytes []byte, payload []byte) error {
+	if err := c.validateInsertPosition(key, keyBytes); err != nil {
 		return err
 	}
 
-	cellData, overflowPage, err := c.prepareCellData(key, payload)
+	cellData, overflowPage, err := c.prepareCellData(key, keyBytes, payload)
 	if err != nil {
 		return err
 	}
@@ -716,8 +936,29 @@ func (c *BtCursor) Insert(key int64, payload []byte) error {
 	}
 
 	if len(cellData) > btreePage.FreeSpace() {
-		c.cleanupOverflowOnError(overflowPage)
-		return c.splitPage(key, payload)
+		// If the page is empty, try re-encoding with minimal local payload using overflow
+		// before forcing a split. This prevents pathological splits with empty left/right.
+		if btreePage.Header.NumCells == 0 && len(payload) > 0 {
+			c.cleanupOverflowOnError(overflowPage)
+			overflowPage = 0
+
+			minLocal := calculateMinLocal(c.Btree.UsableSize, true)
+			if minLocal > uint32(len(payload)) {
+				minLocal = uint32(len(payload))
+			}
+			localSize := uint16(minLocal)
+
+			var err error
+			overflowPage, err = c.WriteOverflow(payload, localSize, c.Btree.UsableSize)
+			if err == nil {
+				cellData = c.encodeTableLeafCellWithOverflow(key, keyBytes, payload[:localSize], overflowPage, uint32(len(payload)))
+			}
+		}
+
+		if len(cellData) > btreePage.FreeSpace() {
+			c.cleanupOverflowOnError(overflowPage)
+			return c.splitPage(key, keyBytes, payload)
+		}
 	}
 
 	if err := c.markPageDirty(); err != nil {
@@ -730,12 +971,16 @@ func (c *BtCursor) Insert(key int64, payload []byte) error {
 		return err
 	}
 
-	_, err = c.SeekRowid(key)
+	if c.CompositePK {
+		_, err = c.SeekComposite(keyBytes)
+	} else {
+		_, err = c.SeekRowid(key)
+	}
 	return err
 }
 
 // prepareCellData encodes the cell data with optional overflow handling.
-func (c *BtCursor) prepareCellData(key int64, payload []byte) (cellData []byte, overflowPage uint32, err error) {
+func (c *BtCursor) prepareCellData(key int64, keyBytes []byte, payload []byte) (cellData []byte, overflowPage uint32, err error) {
 	payloadSize := uint32(len(payload))
 	localSize := CalculateLocalPayload(payloadSize, c.Btree.UsableSize, true)
 
@@ -744,9 +989,13 @@ func (c *BtCursor) prepareCellData(key int64, payload []byte) (cellData []byte, 
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to write overflow: %w", err)
 		}
-		cellData = c.encodeTableLeafCellWithOverflow(key, payload[:localSize], overflowPage, payloadSize)
+		cellData = c.encodeTableLeafCellWithOverflow(key, keyBytes, payload[:localSize], overflowPage, payloadSize)
 	} else {
-		cellData = EncodeTableLeafCell(key, payload)
+		if c.CompositePK {
+			cellData = EncodeTableLeafCompositeCell(keyBytes, payload)
+		} else {
+			cellData = EncodeTableLeafCell(key, payload)
+		}
 	}
 	return cellData, overflowPage, nil
 }
@@ -767,30 +1016,49 @@ func (c *BtCursor) markPageDirty() error {
 }
 
 // encodeTableLeafCellWithOverflow encodes a table leaf cell with overflow
-// Format: varint(total_payload_size), varint(rowid), local_payload, overflow_page_number
-func (c *BtCursor) encodeTableLeafCellWithOverflow(rowid int64, localPayload []byte, overflowPage uint32, totalPayloadSize uint32) []byte {
-	// Pre-calculate varint sizes
+// Supports both int rowid keys and composite keys (when keyBytes provided).
+// Formats:
+//
+//	int key:     varint(total_payload_size), varint(rowid), local_payload, overflow_page_number
+//	composite:   varint(total_payload_size), varint(key_len), key_bytes, local_payload, overflow_page_number
+func (c *BtCursor) encodeTableLeafCellWithOverflow(rowid int64, keyBytes []byte, localPayload []byte, overflowPage uint32, totalPayloadSize uint32) []byte {
+	if c != nil && c.CompositePK && len(keyBytes) > 0 {
+		sizeVarintSize := VarintLen(uint64(totalPayloadSize))
+		keyLenVarint := VarintLen(uint64(len(keyBytes)))
+		bufSize := sizeVarintSize + keyLenVarint + len(keyBytes) + len(localPayload) + 4
+		buf := make([]byte, bufSize)
+		offset := 0
+
+		n := PutVarint(buf[offset:], uint64(totalPayloadSize))
+		offset += n
+		n = PutVarint(buf[offset:], uint64(len(keyBytes)))
+		offset += n
+		copy(buf[offset:], keyBytes)
+		offset += len(keyBytes)
+		copy(buf[offset:], localPayload)
+		offset += len(localPayload)
+		binary.BigEndian.PutUint32(buf[offset:], overflowPage)
+		offset += 4
+		return buf[:offset]
+	}
+
+	// rowid path
 	sizeVarintSize := VarintLen(uint64(totalPayloadSize))
 	rowidVarintSize := VarintLen(uint64(rowid))
 
-	// Allocate exact buffer size
 	bufSize := sizeVarintSize + rowidVarintSize + len(localPayload) + 4
 	buf := make([]byte, bufSize)
 	offset := 0
 
-	// Write total payload size
 	n := PutVarint(buf[offset:], uint64(totalPayloadSize))
 	offset += n
 
-	// Write rowid
 	n = PutVarint(buf[offset:], uint64(rowid))
 	offset += n
 
-	// Write local payload
 	copy(buf[offset:], localPayload)
 	offset += len(localPayload)
 
-	// Write overflow page number (4 bytes, big-endian)
 	binary.BigEndian.PutUint32(buf[offset:], overflowPage)
 	offset += 4
 
@@ -798,13 +1066,22 @@ func (c *BtCursor) encodeTableLeafCellWithOverflow(rowid int64, localPayload []b
 }
 
 // validateInsertPosition seeks to position and validates it's a valid leaf.
-func (c *BtCursor) validateInsertPosition(key int64) error {
-	found, err := c.SeekRowid(key)
+func (c *BtCursor) validateInsertPosition(key int64, keyBytes []byte) error {
+	var found bool
+	var err error
+	if c.CompositePK {
+		found, err = c.SeekComposite(keyBytes)
+	} else {
+		found, err = c.SeekRowid(key)
+	}
 	if err != nil {
 		return err
 	}
 	if found {
-		return fmt.Errorf("duplicate key: %d", key)
+		if c.CompositePK {
+			return fmt.Errorf("UNIQUE constraint failed: duplicate composite key")
+		}
+		return fmt.Errorf("UNIQUE constraint failed: duplicate key %d", key)
 	}
 	if c.CurrentHeader == nil || !c.CurrentHeader.IsLeaf {
 		return fmt.Errorf("cursor not positioned at leaf page")
@@ -926,13 +1203,13 @@ func (c *BtCursor) loadCellAtCurrentIndex(pageData []byte) error {
 
 // splitPage splits a full page when inserting a new cell
 // Delegates to splitLeafPage or splitInteriorPage based on page type
-func (c *BtCursor) splitPage(key int64, payload []byte) error {
+func (c *BtCursor) splitPage(key int64, keyBytes []byte, payload []byte) error {
 	if c.CurrentHeader == nil {
 		return fmt.Errorf("cursor not positioned at valid page")
 	}
 
 	if c.CurrentHeader.IsLeaf {
-		return c.splitLeafPage(key, payload)
+		return c.splitLeafPage(key, keyBytes, payload)
 	}
 
 	// For interior pages, we need the child page number

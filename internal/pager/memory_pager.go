@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package pager
 
 import (
@@ -59,6 +59,11 @@ type MemoryPager struct {
 
 	// Mutex for thread-safe operations
 	mu sync.RWMutex
+
+	// RollbackCallback is called during rollback to synchronize external caches.
+	// This is used to clear btree caches when pager rolls back, ensuring
+	// WITHOUT ROWID tables and other btree users have consistent state.
+	RollbackCallback func()
 }
 
 // OpenMemory creates a new in-memory pager.
@@ -316,6 +321,13 @@ func (mp *MemoryPager) rollbackLocked() error {
 	// Clear the cache
 	mp.cache.Clear()
 
+	// Notify external caches (e.g., btree) to clear their caches as well.
+	// This is critical for WITHOUT ROWID tables which maintain separate
+	// page caches that must be synchronized with pager rollback.
+	if mp.RollbackCallback != nil {
+		mp.RollbackCallback()
+	}
+
 	// Clear journal
 	mp.journalPages = make(map[Pgno][]byte)
 
@@ -455,6 +467,13 @@ func (mp *MemoryPager) BeginWrite() error {
 	return mp.beginWriteTransaction()
 }
 
+// InTransaction returns true if any transaction (read or write) is active.
+func (mp *MemoryPager) InTransaction() bool {
+	mp.mu.RLock()
+	defer mp.mu.RUnlock()
+	return mp.state != PagerStateOpen
+}
+
 // InWriteTransaction returns true if a write transaction is active.
 func (mp *MemoryPager) InWriteTransaction() bool {
 	mp.mu.RLock()
@@ -514,7 +533,7 @@ func (mp *MemoryPager) Release(name string) error {
 	return nil
 }
 
-// RollbackTo rolls back to a savepoint.
+// RollbackTo rolls back to a savepoint, keeping the savepoint active.
 func (mp *MemoryPager) RollbackTo(name string) error {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
@@ -536,8 +555,10 @@ func (mp *MemoryPager) RollbackTo(name string) error {
 	// Clear cache to reload pages
 	mp.cache.Clear()
 
-	// Remove newer savepoints
-	mp.savepoints = mp.savepoints[:idx]
+	// Remove newer savepoints but keep the target savepoint active
+	// Re-create it with a fresh page snapshot so it can be reused.
+	mp.savepoints = mp.savepoints[:idx+1]
+	sp.Pages = make(map[Pgno][]byte)
 
 	return nil
 }

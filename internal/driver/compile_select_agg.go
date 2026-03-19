@@ -1,9 +1,10 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
 	"database/sql/driver"
 	"fmt"
+	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
@@ -54,7 +55,7 @@ func (s *Stmt) emitCountUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table
 		return
 	}
 
-	s.emitCountIncrement(vm, fnExpr, accReg, tempReg, skipAddr)
+	s.emitCountIncrement(vm, fnExpr, table, accReg, tempReg, skipAddr)
 }
 
 // loadCountValueReg loads the value register for COUNT expression
@@ -77,10 +78,15 @@ func (s *Stmt) loadCountValueReg(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, tab
 }
 
 // emitCountIncrement emits the increment and distinct check for COUNT
-func (s *Stmt) emitCountIncrement(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, accReg, tempReg, skipAddr int) {
+func (s *Stmt) emitCountIncrement(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, accReg, tempReg, skipAddr int) {
 	var distinctSkipAddr int
 	if fnExpr.Distinct {
 		distinctSkipAddr = vm.AddOp(vdbe.OpAggDistinct, tempReg, 0, accReg)
+		if len(fnExpr.Args) > 0 {
+			if coll := resolveExprCollation(fnExpr.Args[0], table); coll != "" {
+				vm.Program[distinctSkipAddr].P4.Z = coll
+			}
+		}
 	}
 
 	vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
@@ -115,6 +121,11 @@ func (s *Stmt) emitSumUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 	if fnExpr.Distinct {
 		// Check if value is distinct, skip addition if already seen
 		distinctSkipAddr = vm.AddOp(vdbe.OpAggDistinct, tempReg, 0, accReg)
+		if len(fnExpr.Args) > 0 {
+			if coll := resolveExprCollation(fnExpr.Args[0], table); coll != "" {
+				vm.Program[distinctSkipAddr].P4.Z = coll
+			}
+		}
 	}
 
 	// If accumulator is NOT NULL, jump to add instruction
@@ -186,7 +197,13 @@ func (s *Stmt) emitMinUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 
 	// Accumulator is not NULL - compare
 	cmpReg := gen.AllocReg()
-	vm.AddOp(vdbe.OpLt, tempReg, accReg, cmpReg)
+	cmpAddr := vm.AddOp(vdbe.OpLt, tempReg, accReg, cmpReg)
+	if len(fnExpr.Args) > 0 {
+		if coll := resolveExprCollation(fnExpr.Args[0], table); coll != "" {
+			vm.Program[cmpAddr].P4.Z = coll
+			vm.Program[cmpAddr].P4Type = vdbe.P4Static
+		}
+	}
 	notLessAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
 
 	// Copy value (either first value or new min)
@@ -211,7 +228,13 @@ func (s *Stmt) emitMaxUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 
 	// Accumulator is not NULL - compare
 	cmpReg := gen.AllocReg()
-	vm.AddOp(vdbe.OpGt, tempReg, accReg, cmpReg)
+	cmpAddr := vm.AddOp(vdbe.OpGt, tempReg, accReg, cmpReg)
+	if len(fnExpr.Args) > 0 {
+		if coll := resolveExprCollation(fnExpr.Args[0], table); coll != "" {
+			vm.Program[cmpAddr].P4.Z = coll
+			vm.Program[cmpAddr].P4Type = vdbe.P4Static
+		}
+	}
 	notGreaterAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
 
 	// Copy value (either first value or new max)
@@ -222,6 +245,48 @@ func (s *Stmt) emitMaxUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 	endAddr := vm.NumOps()
 	vm.Program[skipAddr].P2 = endAddr
 	vm.Program[notGreaterAddr].P2 = endAddr
+}
+
+// emitGroupConcatUpdate emits VDBE opcodes to update GROUP_CONCAT accumulator.
+func (s *Stmt) emitGroupConcatUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, accReg int, gen *expr.CodeGenerator) {
+	if len(fnExpr.Args) == 0 {
+		return
+	}
+
+	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, tableName, gen)
+	if !ok {
+		exprReg, err := gen.GenerateExpr(fnExpr.Args[0])
+		if err != nil {
+			return
+		}
+		tempReg = exprReg
+		skipAddr = vm.AddOp(vdbe.OpIsNull, tempReg, 0, 0)
+	}
+
+	sepReg := gen.AllocReg()
+	if len(fnExpr.Args) > 1 {
+		if lit, ok := fnExpr.Args[1].(*parser.LiteralExpr); ok && lit.Type == parser.LiteralString {
+			vm.AddOpWithP4Str(vdbe.OpString8, 0, sepReg, 0, lit.Value)
+		} else {
+			vm.AddOpWithP4Str(vdbe.OpString8, 0, sepReg, 0, ",")
+		}
+	} else {
+		vm.AddOpWithP4Str(vdbe.OpString8, 0, sepReg, 0, ",")
+	}
+
+	copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
+
+	tmpReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpConcat, accReg, sepReg, tmpReg)
+	vm.AddOp(vdbe.OpConcat, tmpReg, tempReg, accReg)
+
+	skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+	vm.Program[copyAddr].P2 = vm.NumOps()
+	vm.AddOp(vdbe.OpCopy, tempReg, accReg, 0)
+
+	endAddr := vm.NumOps()
+	vm.Program[skipAddr].P2 = endAddr
+	vm.Program[skipToEndAddr].P2 = endAddr
 }
 
 // initializeAggregateRegister initializes a single aggregate accumulator register.
@@ -235,7 +300,7 @@ func (s *Stmt) initializeAggregateRegister(vm *vdbe.VDBE, funcName string, accRe
 		vm.AddOp(vdbe.OpInteger, 0, avgCountReg, 0)
 	case "TOTAL":
 		vm.AddOpWithP4Real(vdbe.OpReal, 0, accReg, 0, 0.0)
-	case "SUM", "MIN", "MAX":
+	case "SUM", "MIN", "MAX", "GROUP_CONCAT":
 		vm.AddOp(vdbe.OpNull, 0, accReg, 0)
 	}
 	return avgCountReg
@@ -350,6 +415,14 @@ func (s *Stmt) setupAggregateVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	s.setupSubqueryCompiler(gen)
 	gen.RegisterCursor(tableName, tableCursor)
 
+	// Register alias so qualified column refs like b.age resolve correctly
+	if stmt.From != nil && len(stmt.From.Tables) > 0 {
+		alias := stmt.From.Tables[0].Alias
+		if alias != "" && alias != tableName {
+			gen.RegisterCursor(alias, tableCursor)
+		}
+	}
+
 	// Build result column names
 	vm.ResultCols = make([]string, numCols)
 	for i, col := range stmt.Columns {
@@ -359,6 +432,16 @@ func (s *Stmt) setupAggregateVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	// Register table info
 	tableInfo := buildTableInfo(tableName, table)
 	gen.RegisterTable(tableInfo)
+
+	// Register alias table info
+	if stmt.From != nil && len(stmt.From.Tables) > 0 {
+		alias := stmt.From.Tables[0].Alias
+		if alias != "" && alias != tableName {
+			aliasInfo := buildTableInfo(tableName, table)
+			aliasInfo.Name = alias
+			gen.RegisterTable(aliasInfo)
+		}
+	}
 
 	return gen
 }
@@ -466,6 +549,8 @@ func (s *Stmt) emitSingleAggregateUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionE
 		s.emitMinUpdate(vm, fnExpr, table, tableName, accReg, gen)
 	case "MAX":
 		s.emitMaxUpdate(vm, fnExpr, table, tableName, accReg, gen)
+	case "GROUP_CONCAT":
+		s.emitGroupConcatUpdate(vm, fnExpr, table, tableName, accReg, gen)
 	}
 }
 
@@ -523,6 +608,7 @@ func (s *Stmt) emitRightAggregateOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator,
 func (s *Stmt) emitAggregateCopy(vm *vdbe.VDBE, funcName string, accReg int, avgCountReg int, targetReg int) {
 	if funcName == "AVG" {
 		vm.AddOp(vdbe.OpDivide, accReg, avgCountReg, targetReg)
+		vm.AddOp(vdbe.OpToReal, targetReg, 0, 0)
 	} else {
 		vm.AddOp(vdbe.OpCopy, accReg, targetReg, 0)
 	}
@@ -588,6 +674,7 @@ func (s *Stmt) tryEmitDirectAggregate(vm *vdbe.VDBE, expr parser.Expression, acc
 
 	if fnExpr.Name == "AVG" {
 		vm.AddOp(vdbe.OpDivide, accReg, avgCountReg, targetReg)
+		vm.AddOp(vdbe.OpToReal, targetReg, 0, 0)
 	} else {
 		vm.AddOp(vdbe.OpCopy, accReg, targetReg, 0)
 	}
@@ -643,8 +730,22 @@ func (s *Stmt) finalizeAggregate(vm *vdbe.VDBE, rewindAddr int, afterScanAddr in
 
 // findColumnIndex finds the index of a column by name in a table
 func (s *Stmt) findColumnIndex(table *schema.Table, colName string) int {
+	// Try exact match first
 	for i, col := range table.Columns {
 		if col.Name == colName {
+			return i
+		}
+	}
+	// Try case-insensitive match
+	for i, col := range table.Columns {
+		if strings.EqualFold(col.Name, colName) {
+			return i
+		}
+	}
+	// Try with uppercase column name
+	upperColName := strings.ToUpper(colName)
+	for i, col := range table.Columns {
+		if col.Name == upperColName || strings.ToUpper(col.Name) == upperColName {
 			return i
 		}
 	}
@@ -666,6 +767,14 @@ func (s *Stmt) compileSelectWithWindowFunctions(vm *vdbe.VDBE, stmt *parser.Sele
 
 	s.initializeWindowStates(vm, expandedCols, table)
 
+	// Check if we need to sort for window ORDER BY
+	needsSorting, orderByCols, orderByDesc := s.detectWindowOrderBy(expandedCols, table)
+
+	if needsSorting {
+		return s.compileWindowWithSorting(vm, stmt, expandedCols, numCols, table, gen, orderByCols, orderByDesc)
+	}
+
+	// No sorting needed - use simple table scan
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
 
@@ -712,20 +821,91 @@ func (s *Stmt) setupWindowCodeGenerator(vm *vdbe.VDBE, tableName string, table *
 
 // initializeWindowStates initializes window states for each window function.
 func (s *Stmt) initializeWindowStates(vm *vdbe.VDBE, expandedCols []parser.ResultColumn, table *schema.Table) {
+	seenOverClauses := make(map[string]int)
+	windowFunctionCounts := make(map[int]int)
 	windowStateIdx := 0
 
 	for _, col := range expandedCols {
-		fnExpr, ok := col.Expr.(*parser.FunctionExpr)
-		if !ok || fnExpr.Over == nil {
-			continue
-		}
-
-		orderByCols, orderByDesc := s.extractWindowOrderBy(fnExpr.Over, table)
-		frame := vdbe.DefaultWindowFrame()
-		windowState := vdbe.NewWindowState([]int{}, orderByCols, orderByDesc, frame)
-		vm.WindowStates[windowStateIdx] = windowState
-		windowStateIdx++
+		s.collectWindowFuncs(col.Expr, table, vm, seenOverClauses, windowFunctionCounts, &windowStateIdx)
 	}
+
+	for idx, count := range windowFunctionCounts {
+		if ws, ok := vm.WindowStates[idx]; ok {
+			ws.WindowFunctionCount = count
+		}
+	}
+}
+
+// collectWindowFuncs recursively finds window functions in an expression tree
+// and creates window states for them.
+func (s *Stmt) collectWindowFuncs(e parser.Expression, table *schema.Table, vm *vdbe.VDBE,
+	seen map[string]int, counts map[int]int, nextIdx *int) {
+
+	if e == nil {
+		return
+	}
+	fnExpr, ok := e.(*parser.FunctionExpr)
+	if !ok {
+		return
+	}
+	if fnExpr.Over != nil {
+		partCols := s.extractPartitionByCols(fnExpr.Over, table)
+		orderByCols, orderByDesc := s.extractWindowOrderBy(fnExpr.Over, table)
+		overKey := s.makeOverClauseKey(orderByCols, orderByDesc)
+
+		if existingIdx, exists := seen[overKey]; exists {
+			counts[existingIdx]++
+		} else {
+			frame := s.extractWindowFrame(fnExpr.Over.Frame)
+			windowState := vdbe.NewWindowState(partCols, orderByCols, orderByDesc, frame)
+			vm.WindowStates[*nextIdx] = windowState
+			seen[overKey] = *nextIdx
+			counts[*nextIdx] = 1
+			*nextIdx++
+		}
+		return
+	}
+	// Recurse into function args to find nested window functions
+	for _, arg := range fnExpr.Args {
+		s.collectWindowFuncs(arg, table, vm, seen, counts, nextIdx)
+	}
+}
+
+// extractPartitionByCols extracts column indices from PARTITION BY expressions.
+func (s *Stmt) extractPartitionByCols(over *parser.WindowSpec, table *schema.Table) []int {
+	if over == nil || len(over.PartitionBy) == 0 {
+		return nil
+	}
+	var cols []int
+	for _, expr := range over.PartitionBy {
+		if ident, ok := expr.(*parser.IdentExpr); ok {
+			idx := s.findColumnIndex(table, ident.Name)
+			if idx >= 0 {
+				cols = append(cols, idx)
+			}
+		}
+	}
+	return cols
+}
+
+// makeOverClauseKey creates a unique key for an OVER clause based on its ORDER BY specification.
+func (s *Stmt) makeOverClauseKey(orderByCols []int, orderByDesc []bool) string {
+	if len(orderByCols) == 0 {
+		return "no-order"
+	}
+	key := ""
+	for i, col := range orderByCols {
+		if i > 0 {
+			key += ","
+		}
+		key += fmt.Sprintf("%d", col)
+		if orderByDesc[i] {
+			key += "D"
+		} else {
+			key += "A"
+		}
+	}
+	return key
 }
 
 // extractWindowOrderBy extracts ORDER BY columns from window specification.
@@ -776,4 +956,275 @@ func (s *Stmt) finalizeWindowLoop(vm *vdbe.VDBE, skipAddr, rewindAddr int) {
 
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+}
+
+// detectWindowOrderBy checks if any window function has ORDER BY and extracts the columns
+func (s *Stmt) detectWindowOrderBy(expandedCols []parser.ResultColumn, table *schema.Table) (bool, []int, []bool) {
+	for _, col := range expandedCols {
+		if found, orderByCols, orderByDesc := s.findWindowOrderBy(col.Expr, table); found {
+			return true, orderByCols, orderByDesc
+		}
+	}
+	return false, nil, nil
+}
+
+// findWindowOrderBy recursively searches an expression for a window function with ORDER BY.
+// Returns partition+order columns combined (partition cols first, ASC) for sorter use.
+func (s *Stmt) findWindowOrderBy(e parser.Expression, table *schema.Table) (bool, []int, []bool) {
+	if e == nil {
+		return false, nil, nil
+	}
+	fnExpr, ok := e.(*parser.FunctionExpr)
+	if !ok {
+		return false, nil, nil
+	}
+	if fnExpr.Over != nil {
+		partCols := s.extractPartitionByCols(fnExpr.Over, table)
+		orderByCols, orderByDesc := s.extractWindowOrderBy(fnExpr.Over, table)
+
+		// Combine: partition cols (ASC) first, then order by cols
+		allCols := make([]int, 0, len(partCols)+len(orderByCols))
+		allDesc := make([]bool, 0, len(partCols)+len(orderByCols))
+		for _, pc := range partCols {
+			allCols = append(allCols, pc)
+			allDesc = append(allDesc, false)
+		}
+		allCols = append(allCols, orderByCols...)
+		allDesc = append(allDesc, orderByDesc...)
+
+		if len(allCols) > 0 {
+			return true, allCols, allDesc
+		}
+	}
+	// Recurse into function arguments
+	for _, arg := range fnExpr.Args {
+		if found, cols, desc := s.findWindowOrderBy(arg, table); found {
+			return true, cols, desc
+		}
+	}
+	return false, nil, nil
+}
+
+// compileWindowWithSorting compiles window functions with sorting
+func (s *Stmt) compileWindowWithSorting(vm *vdbe.VDBE, stmt *parser.SelectStmt,
+	expandedCols []parser.ResultColumn, numCols int, table *schema.Table,
+	gen *expr.CodeGenerator, orderByCols []int, orderByDesc []bool) (*vdbe.VDBE, error) {
+
+	// Calculate total columns needed for sorter (all table columns)
+	numTableCols := len(table.Columns)
+	sorterCols := numTableCols
+
+	// Setup sorter with key info
+	keyInfo := &vdbe.SorterKeyInfo{
+		KeyCols:    orderByCols,
+		Desc:       orderByDesc,
+		Collations: make([]string, len(orderByCols)),
+	}
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
+
+	// Open sorter
+	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, 1, sorterCols, 0)
+	vm.Program[sorterOpenAddr].P4.P = keyInfo
+
+	// First pass: populate sorter
+	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+
+	var skipAddr int
+	if stmt.Where != nil {
+		whereReg, err := gen.GenerateExpr(stmt.Where)
+		if err != nil {
+			return nil, err
+		}
+		skipAddr = vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+	}
+
+	// Read all columns from table into registers
+	for i := 0; i < numTableCols; i++ {
+		vm.AddOp(vdbe.OpColumn, 0, i, i)
+	}
+
+	// Insert into sorter
+	vm.AddOp(vdbe.OpSorterInsert, 1, 0, sorterCols)
+
+	// Fix skip address if WHERE exists
+	if stmt.Where != nil {
+		vm.Program[skipAddr].P2 = vm.NumOps()
+	}
+
+	// Complete first pass
+	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
+	vm.Program[rewindAddr].P2 = vm.NumOps()
+
+	// Close the table
+	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+
+	// Sort the data
+	vm.AddOp(vdbe.OpSorterSort, 1, 0, 0)
+
+	// Populate window states with all rows from the sorted data
+	// This is needed for frame-dependent functions like NTH_VALUE, FIRST_VALUE, LAST_VALUE
+	collectNextAddr := vm.AddOp(vdbe.OpSorterNext, 1, 0, 0)
+	collectSkipAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+	collectLoopAddr := vm.NumOps()
+
+	vm.AddOp(vdbe.OpSorterData, 1, 0, numTableCols)
+
+	// Add row to window state 0
+	addr := vm.AddOp(vdbe.OpAggStepWindow, 0, 0, 0)
+	vm.Program[addr].P4.Z = "_window_feed"
+	vm.Program[addr].P4Type = vdbe.P4Static
+	vm.Program[addr].P5 = uint16(numTableCols)
+
+	vm.AddOp(vdbe.OpSorterNext, 1, collectLoopAddr, 0)
+	vm.Program[collectNextAddr].P2 = collectLoopAddr
+	vm.Program[collectSkipAddr].P2 = vm.NumOps()
+
+	// Re-sort to rewind the sorter for the output pass
+	vm.AddOp(vdbe.OpSorterSort, 1, 0, 0)
+
+	// Output pass: read from sorter and compute window functions
+	sorterNextAddr := vm.AddOp(vdbe.OpSorterNext, 1, 0, 0)
+	haltJumpAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+	sorterLoopAddr := vm.NumOps()
+
+	// Read all data from sorter into registers 0..numTableCols-1
+	vm.AddOp(vdbe.OpSorterData, 1, 0, numTableCols)
+
+	// Emit columns
+	for i := 0; i < numCols; i++ {
+		s.emitWindowColumnFromSorter(vm, gen, expandedCols[i], table, i)
+	}
+
+	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+
+	// Loop back to get next row from sorter
+	vm.AddOp(vdbe.OpSorterNext, 1, sorterLoopAddr, 0)
+
+	// Fix addresses
+	haltAddr := vm.NumOps()
+	vm.Program[sorterNextAddr].P2 = sorterLoopAddr
+	vm.Program[haltJumpAddr].P2 = haltAddr
+
+	// Close sorter and halt
+	vm.AddOp(vdbe.OpSorterClose, 1, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
+// emitWindowColumnFromSorter emits code for a column when reading from sorter.
+func (s *Stmt) emitWindowColumnFromSorter(vm *vdbe.VDBE, gen *expr.CodeGenerator, col parser.ResultColumn,
+	table *schema.Table, colIdx int) {
+
+	numTableCols := len(table.Columns)
+
+	if fnExpr, ok := col.Expr.(*parser.FunctionExpr); ok && fnExpr.Over != nil {
+		s.emitWindowFunctionColumnWithOpcodes(vm, fnExpr, colIdx, numTableCols)
+		return
+	}
+
+	if s.isWindowFunctionExpr(col.Expr) {
+		s.precomputeNestedWindowFuncs(vm, gen, col.Expr, table)
+		s.emitGeneratedExpr(vm, gen, col.Expr, colIdx)
+		return
+	}
+
+	s.emitSorterColumnValue(vm, gen, col.Expr, table, colIdx)
+}
+
+// emitGeneratedExpr generates code for an expression and copies result to colIdx.
+func (s *Stmt) emitGeneratedExpr(vm *vdbe.VDBE, gen *expr.CodeGenerator,
+	e parser.Expression, colIdx int) {
+
+	reg, err := gen.GenerateExpr(e)
+	if err == nil && reg != colIdx {
+		vm.AddOp(vdbe.OpCopy, reg, colIdx, 0)
+	} else if err != nil {
+		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
+	}
+}
+
+// emitSorterColumnValue emits code for a regular column or expression from sorter data.
+func (s *Stmt) emitSorterColumnValue(vm *vdbe.VDBE, gen *expr.CodeGenerator,
+	e parser.Expression, table *schema.Table, colIdx int) {
+
+	if identExpr, ok := e.(*parser.IdentExpr); ok {
+		tableColIdx := s.findColumnIndex(table, identExpr.Name)
+		if tableColIdx >= 0 && tableColIdx != colIdx {
+			vm.AddOp(vdbe.OpCopy, tableColIdx, colIdx, 0)
+		} else if tableColIdx < 0 {
+			vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
+		}
+		return
+	}
+
+	s.emitGeneratedExpr(vm, gen, e, colIdx)
+}
+
+// precomputeNestedWindowFuncs finds window function calls inside an expression,
+// emits their opcodes into temporary registers, and registers them as precomputed
+// so the code generator skips them.
+func (s *Stmt) precomputeNestedWindowFuncs(vm *vdbe.VDBE, gen *expr.CodeGenerator,
+	e parser.Expression, table *schema.Table) {
+
+	numTableCols := len(table.Columns)
+	s.walkAndPrecompute(vm, gen, e, numTableCols)
+}
+
+// walkAndPrecompute recursively walks an expression tree to precompute window functions.
+func (s *Stmt) walkAndPrecompute(vm *vdbe.VDBE, gen *expr.CodeGenerator,
+	e parser.Expression, numTableCols int) {
+
+	if e == nil {
+		return
+	}
+
+	fnExpr, ok := e.(*parser.FunctionExpr)
+	if ok && fnExpr.Over != nil {
+		reg := gen.AllocReg()
+		s.emitWindowFunctionColumnWithOpcodes(vm, fnExpr, reg, numTableCols)
+		gen.SetPrecomputed(e, reg)
+		return
+	}
+
+	if ok {
+		for _, arg := range fnExpr.Args {
+			s.walkAndPrecompute(vm, gen, arg, numTableCols)
+		}
+		return
+	}
+
+	s.walkAndPrecomputeChildren(vm, gen, e, numTableCols)
+}
+
+// walkAndPrecomputeChildren walks non-function expression children.
+func (s *Stmt) walkAndPrecomputeChildren(vm *vdbe.VDBE, gen *expr.CodeGenerator,
+	e parser.Expression, numTableCols int) {
+
+	switch ex := e.(type) {
+	case *parser.BinaryExpr:
+		s.walkAndPrecompute(vm, gen, ex.Left, numTableCols)
+		s.walkAndPrecompute(vm, gen, ex.Right, numTableCols)
+	case *parser.UnaryExpr:
+		s.walkAndPrecompute(vm, gen, ex.Expr, numTableCols)
+	case *parser.ParenExpr:
+		s.walkAndPrecompute(vm, gen, ex.Expr, numTableCols)
+	case *parser.CastExpr:
+		s.walkAndPrecompute(vm, gen, ex.Expr, numTableCols)
+	case *parser.CaseExpr:
+		s.walkAndPrecomputeCase(vm, gen, ex, numTableCols)
+	}
+}
+
+// walkAndPrecomputeCase walks CASE expression children.
+func (s *Stmt) walkAndPrecomputeCase(vm *vdbe.VDBE, gen *expr.CodeGenerator,
+	ex *parser.CaseExpr, numTableCols int) {
+
+	for _, w := range ex.WhenClauses {
+		s.walkAndPrecompute(vm, gen, w.Condition, numTableCols)
+		s.walkAndPrecompute(vm, gen, w.Result, numTableCols)
+	}
+	s.walkAndPrecompute(vm, gen, ex.ElseClause, numTableCols)
 }

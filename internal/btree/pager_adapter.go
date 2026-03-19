@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package btree
 
 import (
@@ -73,8 +73,20 @@ func (pa *PagerAdapter) AllocatePageData() (uint32, []byte, error) {
 	return pgno, data, nil
 }
 
-// MarkDirty marks a page as dirty
+// MarkDirty marks a page as dirty by calling pager.Write() to journal it
 func (pa *PagerAdapter) MarkDirty(pgno uint32) error {
+	// Get the page from the pager
+	page, err := pa.pager.Get(pgno)
+	if err != nil {
+		return fmt.Errorf("failed to get page %d: %w", pgno, err)
+	}
+
+	// Call Write() to journal the page before modification
+	// This ensures the page state is saved for rollback/savepoint support
+	if err := pa.pager.Write(page); err != nil {
+		return fmt.Errorf("failed to write page %d: %w", pgno, err)
+	}
+
 	pa.dirtyPages[pgno] = true
 	return nil
 }

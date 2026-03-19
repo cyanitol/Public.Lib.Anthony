@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -9,7 +9,6 @@ import (
 
 // TestRankFunction tests basic RANK() window function with ties
 func TestRankFunction(t *testing.T) {
-	t.Skip("pre-existing failure")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "rank_test.db")
 
@@ -91,7 +90,6 @@ func TestRankFunction(t *testing.T) {
 
 // TestDenseRankFunction tests basic DENSE_RANK() window function
 func TestDenseRankFunction(t *testing.T) {
-	t.Skip("pre-existing failure")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "dense_rank_test.db")
 
@@ -173,7 +171,6 @@ func TestDenseRankFunction(t *testing.T) {
 
 // TestRankAndDenseRankTogether tests both RANK() and DENSE_RANK() in the same query
 func TestRankAndDenseRankTogether(t *testing.T) {
-	t.Skip("pre-existing failure")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "both_ranks_test.db")
 

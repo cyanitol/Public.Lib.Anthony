@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -7,23 +7,144 @@ import (
 	"testing"
 )
 
+// indexTestCase defines a CREATE INDEX test case
+type indexTestCase struct {
+	name    string
+	setup   []string
+	exec    []string
+	verify  string
+	wantErr bool
+	errMsg  string
+	check   func(*testing.T, *sql.DB)
+	skip    string
+}
+
 // TestSQLiteCreateIndex is a comprehensive test suite for CREATE INDEX and DROP INDEX
 // Converted from SQLite's TCL test files: index.test, index2.test, index3.test, index4.test, index5.test
 func TestSQLiteCreateIndex(t *testing.T) {
 	t.Skip("pre-existing failure - CREATE INDEX incomplete")
-	tests := []struct {
-		name    string
-		setup   []string                  // CREATE TABLE statements and other setup
-		exec    []string                  // Main statements to execute
-		verify  string                    // SELECT query to verify results (optional)
-		wantErr bool                      // Whether we expect an error
-		errMsg  string                    // Expected error message substring
-		check   func(*testing.T, *sql.DB) // Custom verification function
-		skip    string
-	}{
-		// ========================================================================
+	tests := buildIndexTests()
+
+	for _, tt := range tests {
+		tt := tt // Capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.skip != "" {
+				t.Skip(tt.skip)
+			}
+			db := setupMemoryDB(t)
+			defer db.Close()
+
+			// Run setup statements
+			indexExecuteSetup(t, db, tt.setup)
+
+			// Run main execution statements
+			execErr := indexExecuteStatements(t, db, tt.exec)
+
+			// Check for expected errors
+			if indexCheckError(t, tt, execErr) {
+				return
+			}
+
+			// Run custom check if provided
+			if tt.check != nil {
+				tt.check(t, db)
+			}
+
+			// Verify results if specified
+			indexVerifyResults(t, db, tt)
+		})
+	}
+}
+
+// Helper functions for index tests (index prefix to avoid naming conflicts)
+
+func indexExecuteSetup(t *testing.T, db *sql.DB, setup []string) {
+	t.Helper()
+	for _, stmt := range setup {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup failed on statement %q: %v", stmt, err)
+		}
+	}
+}
+
+func indexExecuteStatements(t *testing.T, db *sql.DB, stmts []string) error {
+	t.Helper()
+	var execErr error
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			execErr = err
+			break
+		}
+	}
+	return execErr
+}
+
+func indexCheckError(t *testing.T, tt indexTestCase, execErr error) bool {
+	t.Helper()
+	if tt.wantErr {
+		if execErr == nil {
+			t.Fatalf("expected error containing %q, got nil", tt.errMsg)
+		}
+		if tt.errMsg != "" && !strings.Contains(execErr.Error(), tt.errMsg) {
+			t.Fatalf("expected error containing %q, got %q", tt.errMsg, execErr.Error())
+		}
+		return true
+	}
+
+	if execErr != nil {
+		t.Fatalf("unexpected error: %v", execErr)
+	}
+	return false
+}
+
+func indexVerifyResults(t *testing.T, db *sql.DB, tt indexTestCase) {
+	t.Helper()
+	if tt.verify != "" && tt.check == nil {
+		rows, err := db.Query(tt.verify)
+		if err != nil {
+			t.Fatalf("verify query failed: %v", err)
+		}
+		defer rows.Close()
+
+		// Just verify the query runs successfully
+		for rows.Next() {
+			// Iterate through rows
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("rows iteration error: %v", err)
+		}
+	}
+}
+
+// Test builder function to reduce main test function complexity
+func buildIndexTests() []indexTestCase {
+	tests := make([]indexTestCase, 0, 100)
+	tests = append(tests, indexBasicTests()...)
+	tests = append(tests, indexUniqueTests()...)
+	tests = append(tests, indexIfNotExistsTests()...)
+	tests = append(tests, indexMultiColumnTests()...)
+	tests = append(tests, indexASCDESCTests()...)
+	tests = append(tests, indexCollateTests()...)
+	tests = append(tests, indexPartialTests()...)
+	tests = append(tests, indexDropTests()...)
+	tests = append(tests, indexExpressionTests()...)
+	tests = append(tests, indexNamingTests()...)
+	tests = append(tests, indexErrorTests()...)
+	tests = append(tests, indexMultipleTests()...)
+	tests = append(tests, indexAutoTests()...)
+	tests = append(tests, indexUsageTests()...)
+	tests = append(tests, indexNullTests()...)
+	tests = append(tests, indexRecreateTests()...)
+	tests = append(tests, indexReindexTests()...)
+	tests = append(tests, indexLargeTableTests()...)
+	tests = append(tests, indexCompoundTests()...)
+	tests = append(tests, indexIntPKTests()...)
+	return tests
+}
+
+func indexBasicTests() []indexTestCase {
+	return []indexTestCase{
 		// Basic CREATE INDEX tests
-		// ========================================================================
 		{
 			name: "createindex-1.1: basic CREATE INDEX",
 			setup: []string{
@@ -72,10 +193,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 				}
 			},
 		},
+	}
+}
 
-		// ========================================================================
-		// CREATE UNIQUE INDEX tests
-		// ========================================================================
+func indexUniqueTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-2.1: CREATE UNIQUE INDEX",
 			setup: []string{
@@ -118,10 +240,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 			wantErr: true,
 			errMsg:  "UNIQUE constraint failed",
 		},
+	}
+}
 
-		// ========================================================================
-		// CREATE INDEX IF NOT EXISTS tests
-		// ========================================================================
+func indexIfNotExistsTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-3.1: CREATE INDEX IF NOT EXISTS - new index",
 			setup: []string{
@@ -160,10 +283,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 			},
 			wantErr: false,
 		},
+	}
+}
 
-		// ========================================================================
-		// Multi-column index tests
-		// ========================================================================
+func indexMultiColumnTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-4.1: CREATE INDEX on two columns",
 			setup: []string{
@@ -214,10 +338,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 				compareRows(t, rows, want)
 			},
 		},
+	}
+}
 
-		// ========================================================================
-		// CREATE INDEX with ASC/DESC tests
-		// ========================================================================
+func indexASCDESCTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-5.1: CREATE INDEX with ASC",
 			setup: []string{
@@ -282,10 +407,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 				compareRows(t, rows, want)
 			},
 		},
+	}
+}
 
-		// ========================================================================
-		// CREATE INDEX with COLLATE tests
-		// ========================================================================
+func indexCollateTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-6.1: CREATE INDEX with COLLATE NOCASE",
 			setup: []string{
@@ -333,10 +459,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 				}
 			},
 		},
+	}
+}
 
-		// ========================================================================
-		// Partial index (CREATE INDEX with WHERE) tests
-		// ========================================================================
+func indexPartialTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-7.1: CREATE INDEX with WHERE clause",
 			setup: []string{
@@ -400,10 +527,12 @@ func TestSQLiteCreateIndex(t *testing.T) {
 				}
 			},
 		},
+	}
+}
 
-		// ========================================================================
+func indexDropTests() []indexTestCase {
+	return []indexTestCase{
 		// DROP INDEX tests
-		// ========================================================================
 		{
 			name: "createindex-8.1: DROP INDEX basic",
 			setup: []string{
@@ -431,9 +560,7 @@ func TestSQLiteCreateIndex(t *testing.T) {
 			errMsg:  "no such index",
 		},
 
-		// ========================================================================
 		// DROP INDEX IF EXISTS tests
-		// ========================================================================
 		{
 			name: "createindex-9.1: DROP INDEX IF EXISTS - existing index",
 			setup: []string{
@@ -467,10 +594,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 			},
 			wantErr: false,
 		},
+	}
+}
 
-		// ========================================================================
-		// Expression index tests
-		// ========================================================================
+func indexExpressionTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-10.1: CREATE INDEX on expression",
 			setup: []string{
@@ -550,10 +678,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 				}
 			},
 		},
+	}
+}
 
-		// ========================================================================
-		// Index naming convention tests
-		// ========================================================================
+func indexNamingTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-11.1: index with quoted name",
 			setup: []string{
@@ -595,10 +724,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 				}
 			},
 		},
+	}
+}
 
-		// ========================================================================
-		// Index error cases
-		// ========================================================================
+func indexErrorTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name:  "createindex-12.1: index on non-existent table",
 			setup: []string{},
@@ -697,10 +827,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 			wantErr: true,
 			errMsg:  "cannot create a TEMP index",
 		},
+	}
+}
 
-		// ========================================================================
-		// Multiple indices on same table
-		// ========================================================================
+func indexMultipleTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-13.1: create many indices on same table",
 			setup: []string{
@@ -757,10 +888,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 				}
 			},
 		},
+	}
+}
 
-		// ========================================================================
-		// Auto-index tests (PRIMARY KEY, UNIQUE)
-		// ========================================================================
+func indexAutoTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-14.1: primary key creates auto-index",
 			setup: []string{
@@ -834,10 +966,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 				compareRows(t, rows, want)
 			},
 		},
+	}
+}
 
-		// ========================================================================
-		// Index usage tests
-		// ========================================================================
+func indexUsageTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-15.1: query using index",
 			setup: []string{
@@ -905,10 +1038,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 				compareRows(t, rows, want)
 			},
 		},
+	}
+}
 
-		// ========================================================================
-		// Index on NULL values
-		// ========================================================================
+func indexNullTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-16.1: index on NULL values",
 			skip: "",
@@ -936,10 +1070,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 			},
 			wantErr: false,
 		},
+	}
+}
 
-		// ========================================================================
-		// Drop and recreate tests
-		// ========================================================================
+func indexRecreateTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-17.1: drop and recreate index",
 			setup: []string{
@@ -974,10 +1109,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 				compareRows(t, rows, want)
 			},
 		},
+	}
+}
 
-		// ========================================================================
-		// REINDEX tests
-		// ========================================================================
+func indexReindexTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-18.1: REINDEX all",
 			setup: []string{
@@ -1014,10 +1150,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 			},
 			wantErr: false,
 		},
+	}
+}
 
-		// ========================================================================
-		// Index on large table
-		// ========================================================================
+func indexLargeTableTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-19.1: create index on large table",
 			setup: []string{
@@ -1051,10 +1188,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 			wantErr: true,
 			errMsg:  "UNIQUE constraint failed",
 		},
+	}
+}
 
-		// ========================================================================
-		// Compound UNIQUE index
-		// ========================================================================
+func indexCompoundTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-20.1: compound UNIQUE index",
 			setup: []string{
@@ -1079,10 +1217,11 @@ func TestSQLiteCreateIndex(t *testing.T) {
 			},
 			wantErr: false,
 		},
+	}
+}
 
-		// ========================================================================
-		// Index on INTEGER PRIMARY KEY
-		// ========================================================================
+func indexIntPKTests() []indexTestCase {
+	return []indexTestCase{
 		{
 			name: "createindex-21.1: index on INTEGER PRIMARY KEY",
 			setup: []string{
@@ -1097,70 +1236,6 @@ func TestSQLiteCreateIndex(t *testing.T) {
 				compareRows(t, rows, want)
 			},
 		},
-	}
-
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
-			db := setupMemoryDB(t)
-			defer db.Close()
-
-			// Run setup statements
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed on statement %q: %v", stmt, err)
-				}
-			}
-
-			// Run main execution statements
-			var execErr error
-			for _, stmt := range tt.exec {
-				if _, err := db.Exec(stmt); err != nil {
-					execErr = err
-					break
-				}
-			}
-
-			// Check for expected errors
-			if tt.wantErr {
-				if execErr == nil {
-					t.Fatalf("expected error containing %q, got nil", tt.errMsg)
-				}
-				if tt.errMsg != "" && !strings.Contains(execErr.Error(), tt.errMsg) {
-					t.Fatalf("expected error containing %q, got %q", tt.errMsg, execErr.Error())
-				}
-				return
-			}
-
-			if execErr != nil {
-				t.Fatalf("unexpected error: %v", execErr)
-			}
-
-			// Run custom check if provided
-			if tt.check != nil {
-				tt.check(t, db)
-			}
-
-			// Verify results if specified
-			if tt.verify != "" && tt.check == nil {
-				rows, err := db.Query(tt.verify)
-				if err != nil {
-					t.Fatalf("verify query failed: %v", err)
-				}
-				defer rows.Close()
-
-				// Just verify the query runs successfully
-				for rows.Next() {
-					// Iterate through rows
-				}
-				if err := rows.Err(); err != nil {
-					t.Fatalf("rows iteration error: %v", err)
-				}
-			}
-		})
 	}
 }
 

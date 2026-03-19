@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package vdbe
 
 import (
@@ -21,6 +21,12 @@ const MaxRecordSize = 1_000_000_000
 // This is exported to allow other packages to parse SQLite record format.
 func DecodeRecord(data []byte) ([]interface{}, error) {
 	return decodeRecord(data)
+}
+
+// EncodeSimpleRecord encodes a slice of values using SQLite record format.
+// It mirrors the encoder used by the VDBE when inserting rows.
+func EncodeSimpleRecord(values []interface{}) []byte {
+	return encodeSimpleRecord(values)
 }
 
 // decodeRecord decodes a SQLite record back to a slice of values

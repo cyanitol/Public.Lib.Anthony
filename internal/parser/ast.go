@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package parser
 
 import "strings"
@@ -34,10 +34,17 @@ type SelectStmt struct {
 	Where    Expression
 	GroupBy  []Expression
 	Having   Expression
-	OrderBy  []OrderingTerm
-	Limit    Expression
-	Offset   Expression
-	Compound *CompoundSelect // For UNION, EXCEPT, INTERSECT
+	OrderBy    []OrderingTerm
+	Limit      Expression
+	Offset     Expression
+	WindowDefs []WindowDef        // Named window definitions (WINDOW clause)
+	Compound   *CompoundSelect    // For UNION, EXCEPT, INTERSECT
+}
+
+// WindowDef represents a named window definition in a WINDOW clause.
+type WindowDef struct {
+	Name string
+	Spec *WindowSpec
 }
 
 func (s *SelectStmt) node()      {}
@@ -111,11 +118,13 @@ type TableOrSubquery struct {
 	Alias     string
 	Subquery  *SelectStmt
 	Indexed   string // index name for INDEXED BY
+	FuncArgs  []Expression // arguments for table-valued functions (e.g., json_each('...'))
 }
 
 // JoinClause represents a JOIN clause.
 type JoinClause struct {
 	Type      JoinType
+	Natural   bool
 	Table     TableOrSubquery
 	Condition JoinCondition
 }
@@ -349,6 +358,20 @@ type IndexedColumn struct {
 	Order  SortOrder
 }
 
+// CreateVirtualTableStmt represents a CREATE VIRTUAL TABLE statement.
+type CreateVirtualTableStmt struct {
+	Name        string
+	IfNotExists bool
+	Module      string
+	Args        []string
+}
+
+func (c *CreateVirtualTableStmt) node()      {}
+func (c *CreateVirtualTableStmt) statement() {}
+func (c *CreateVirtualTableStmt) String() string {
+	return "CREATE VIRTUAL TABLE"
+}
+
 // DropTableStmt represents a DROP TABLE statement.
 type DropTableStmt struct {
 	Name     string
@@ -505,6 +528,28 @@ func (r *RollbackStmt) String() string {
 	return "ROLLBACK"
 }
 
+// SavepointStmt represents a SAVEPOINT statement.
+type SavepointStmt struct {
+	Name string
+}
+
+func (s *SavepointStmt) node()      {}
+func (s *SavepointStmt) statement() {}
+func (s *SavepointStmt) String() string {
+	return "SAVEPOINT"
+}
+
+// ReleaseStmt represents a RELEASE [SAVEPOINT] statement.
+type ReleaseStmt struct {
+	Name string
+}
+
+func (r *ReleaseStmt) node()      {}
+func (r *ReleaseStmt) statement() {}
+func (r *ReleaseStmt) String() string {
+	return "RELEASE"
+}
+
 // ExplainStmt represents an EXPLAIN or EXPLAIN QUERY PLAN statement.
 type ExplainStmt struct {
 	QueryPlan bool      // true for EXPLAIN QUERY PLAN, false for EXPLAIN
@@ -654,9 +699,10 @@ func (d *DropColumnAction) String() string {
 
 // BinaryExpr represents a binary expression.
 type BinaryExpr struct {
-	Left  Expression
-	Op    BinaryOp
-	Right Expression
+	Left   Expression
+	Op     BinaryOp
+	Right  Expression
+	Escape Expression // optional ESCAPE clause for LIKE
 }
 
 func (b *BinaryExpr) node()       {}
@@ -851,6 +897,7 @@ func (f *FunctionExpr) String() string {
 
 // WindowSpec represents a window specification for window functions.
 type WindowSpec struct {
+	BaseName    string         // Reference to a named window (OVER w)
 	PartitionBy []Expression
 	OrderBy     []OrderingTerm
 	Frame       *FrameSpec
@@ -1075,6 +1122,43 @@ func (v *VariableExpr) String() string {
 		return "?"
 	}
 	return ":" + v.Name
+}
+
+// =============================================================================
+// RAISE Expression (for trigger bodies)
+// =============================================================================
+
+// RaiseType represents the type of RAISE function in a trigger.
+type RaiseType int
+
+const (
+	RaiseIgnore   RaiseType = iota // RAISE(IGNORE) - skip the rest of the trigger
+	RaiseRollback                  // RAISE(ROLLBACK, msg) - rollback transaction
+	RaiseAbort                     // RAISE(ABORT, msg) - abort current statement
+	RaiseFail                      // RAISE(FAIL, msg) - fail but keep prior changes
+)
+
+// RaiseExpr represents a RAISE function call within a trigger body.
+type RaiseExpr struct {
+	Type    RaiseType // The raise action type
+	Message string    // Error message (empty for IGNORE)
+}
+
+func (r *RaiseExpr) node()       {}
+func (r *RaiseExpr) expression() {}
+func (r *RaiseExpr) String() string {
+	switch r.Type {
+	case RaiseIgnore:
+		return "RAISE(IGNORE)"
+	case RaiseRollback:
+		return "RAISE(ROLLBACK, " + r.Message + ")"
+	case RaiseAbort:
+		return "RAISE(ABORT, " + r.Message + ")"
+	case RaiseFail:
+		return "RAISE(FAIL, " + r.Message + ")"
+	default:
+		return "RAISE(UNKNOWN)"
+	}
 }
 
 // =============================================================================

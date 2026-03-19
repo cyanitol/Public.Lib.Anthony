@@ -31,22 +31,22 @@ Search Changelog
 WAL-mode File Format
 
 Table Of Contents
-[1. Files On Disk](#files_on_disk)
-[1.1. The Main Database File](#the_main_database_file)
-[1.2. The Write-Ahead-Log or "-wal" File](#the_write_ahead_log_or_wal_file)
-[1.3. The Wal-Index or "-shm" file](#the_wal_index_or_shm_file)
-[1.4. File Lifecycles](#file_lifecycles)
-[1.5. Variations](#variations)
-[2. The WAL-Index File Format](#the_wal_index_file_format)
-[2.1. The WAL-Index Header](#the_wal_index_header)
-[2.1.1. The mxFrame field](#the_mxframe_field)
-[2.1.2. The nBackfill field](#the_nbackfill_field)
-[2.1.3. WAL Locks](#wal_locks)
-[2.2. WAL-Index Hash Tables](#wal_index_hash_tables)
-[2.3. Locking Matrix](#locking_matrix)
-[2.3.1. How the various locks are used](#how_the_various_locks_are_used)
-[2.3.2. Operations that require locks and which locks those operations use](#operations_that_require_locks_and_which_locks_those_operations_use)
-[3. Recovery](#recovery)
+[1. Files On Disk](#1-files-on-disk)
+[1.1. The Main Database File](#11-the-main-database-file)
+[1.2. The Write-Ahead-Log or "-wal" File](#12-the-write-ahead-log-or-wal-file)
+[1.3. The Wal-Index or "-shm" file](#13-the-wal-index-or-shm-file)
+[1.4. File Lifecycles](#14-file-lifecycles)
+[1.5. Variations](#15-variations)
+[2. The WAL-Index File Format](#2-the-wal-index-file-format)
+[2.1. The WAL-Index Header](#21-the-wal-index-header)
+[2.1.1. The mxFrame field](#211-the-mxframe-field)
+[2.1.2. The nBackfill field](#212-the-nbackfill-field)
+[2.1.3. WAL Locks](#213-wal-locks)
+[2.2. WAL-Index Hash Tables](#22-wal-index-hash-tables)
+[2.3. Locking Matrix](#23-locking-matrix)
+[2.3.1. How the various locks are used](#231-how-the-various-locks-are-used)
+[2.3.2. Operations that require locks and which locks those operations use](#232-operations-that-require-locks-and-which-locks-those-operations-use)
+[3. Recovery](#3-recovery)
 
 This document describes low-level details on how [WAL mode](wal.html) is
 implemented on unix and windows.

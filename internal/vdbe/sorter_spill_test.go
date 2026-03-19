@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package vdbe
 
 import (
@@ -342,12 +342,9 @@ func TestSorterWithSpill_MultipleColumns(t *testing.T) {
 		t.Fatalf("Sort failed: %v", err)
 	}
 
-	// Expected order: (1,8,'c'), (1,5,'a'), (1,2,'e'), (2,3,'b'), (2,1,'d')
-	// TODO: There's a known issue with multi-column DESC sorting during merge that causes
-	// the second column to be sorted in ASC order instead of DESC. This needs to be fixed
-	// in the mergeRuns heap implementation.
-	// For now, we accept the actual output: (1,8,'c'), (1,5,'a'), (1,2,'e'), (2,1,'d'), (2,3,'b')
-	expected := []string{"c", "a", "e", "d", "b"}
+	// Expected order: col0 ASC, col1 DESC
+	// (1,8,'c'), (1,5,'a'), (1,2,'e'), (2,3,'b'), (2,1,'d')
+	expected := []string{"c", "a", "e", "b", "d"}
 
 	// Sort() already sets Current to -1, so don't call Rewind()
 	for i, exp := range expected {

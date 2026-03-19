@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package vdbe
 
 import (
@@ -11,7 +11,11 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/observability"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/types"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/withoutrowid"
 )
+
+var compositeInsertDebug int
+var rewindDebugLimit int
 
 // Step executes the VDBE program until a result row is ready or the program halts.
 // Returns true if a row is ready, false if halted.
@@ -225,8 +229,9 @@ func init() {
 		// Cursor operations
 		OpOpenRead:      (*VDBE).execOpenRead,
 		OpOpenWrite:     (*VDBE).execOpenWrite,
-		OpOpenEphemeral: (*VDBE).execOpenEphemeral,
-		OpClose:         (*VDBE).execClose,
+		OpOpenEphemeral:  (*VDBE).execOpenEphemeral,
+		OpClearEphemeral: (*VDBE).execClearEphemeral,
+		OpClose:          (*VDBE).execClose,
 		OpRewind:        (*VDBE).execRewind,
 		OpNext:          (*VDBE).execNext,
 		OpPrev:          (*VDBE).execPrev,
@@ -335,6 +340,13 @@ func init() {
 		OpOnce:          (*VDBE).execOnce,
 		OpOpenPseudo:    (*VDBE).execOpenPseudo,
 
+		// Trigger execution
+		OpTriggerBefore: (*VDBE).execTriggerBefore,
+		OpTriggerAfter:  (*VDBE).execTriggerAfter,
+		OpRaise:            (*VDBE).execRaise,
+		OpCorrelatedExists: (*VDBE).execCorrelatedExists,
+		OpCorrelatedScalar: (*VDBE).execCorrelatedScalar,
+
 		// Window function operations
 		OpAggStepWindow:    (*VDBE).execAggStepWindow,
 		OpWindowRowNum:     (*VDBE).execWindowRowNum,
@@ -345,6 +357,7 @@ func init() {
 		OpWindowLead:       (*VDBE).execWindowLead,
 		OpWindowFirstValue: (*VDBE).execWindowFirstValue,
 		OpWindowLastValue:  (*VDBE).execWindowLastValue,
+		OpWindowNthValue:   (*VDBE).execWindowNthValue,
 		OpAggDistinct:      (*VDBE).execAggDistinct,
 		OpDistinctRow:      (*VDBE).execDistinctRow,
 	}
@@ -438,19 +451,25 @@ func (v *VDBE) execIf(instr *Instruction) error {
 }
 
 func (v *VDBE) execIfNot(instr *Instruction) error {
-	// Jump to P2 if P1 is false
+	// Jump to P2 if P1 is false.
+	// If P3 is non-zero, treat NULL as unknown (do not jump).
 	mem, err := v.GetMem(instr.P1)
 	if err != nil {
 		return err
 	}
 
-	isFalse := mem.IsNull()
-	if !isFalse {
-		if mem.IsInt() {
-			isFalse = mem.IntValue() == 0
-		} else {
-			isFalse = mem.RealValue() == 0.0
+	if mem.IsNull() {
+		if instr.P3 == 0 {
+			v.PC = instr.P2
 		}
+		return nil
+	}
+
+	isFalse := false
+	if mem.IsInt() {
+		isFalse = mem.IntValue() == 0
+	} else {
+		isFalse = mem.RealValue() == 0.0
 	}
 
 	if isFalse {
@@ -670,21 +689,26 @@ func (v *VDBE) execOpenRead(instr *Instruction) error {
 		return err
 	}
 
-	// Create btree cursor
-	btCursor := btree.NewCursor(bt, uint32(instr.P2))
+	// Store table metadata if available (for handling ALTER TABLE ADD COLUMN defaults)
+	table := v.findTableByRootPage(uint32(instr.P2))
+
+	// Check if this is a WITHOUT ROWID table
+	isWithoutRowID := v.isTableWithoutRowID(table)
+
+	// Create btree cursor with composite key mode for WITHOUT ROWID tables
+	btCursor := btree.NewCursorWithOptions(bt, uint32(instr.P2), isWithoutRowID)
 
 	// Create VDBE cursor
 	cursor := &Cursor{
-		CurType:     CursorBTree,
-		IsTable:     true,
-		RootPage:    uint32(instr.P2),
-		BtreeCursor: btCursor,
-		CachedCols:  make([][]byte, 0),
-		CacheStatus: 0,
+		CurType:      CursorBTree,
+		IsTable:      true,
+		WithoutRowID: isWithoutRowID,
+		RootPage:     uint32(instr.P2),
+		BtreeCursor:  btCursor,
+		CachedCols:   make([][]byte, 0),
+		CacheStatus:  0,
+		Table:        table,
 	}
-
-	// Store table metadata if available (for handling ALTER TABLE ADD COLUMN defaults)
-	cursor.Table = v.findTableByRootPage(uint32(instr.P2))
 
 	v.Cursors[instr.P1] = cursor
 	return nil
@@ -707,22 +731,27 @@ func (v *VDBE) execOpenWrite(instr *Instruction) error {
 		return err
 	}
 
-	// Create btree cursor (same as read cursor - btree cursors support both read and write)
-	btCursor := btree.NewCursor(bt, uint32(instr.P2))
+	// Store table metadata if available (for handling ALTER TABLE ADD COLUMN defaults)
+	table := v.findTableByRootPage(uint32(instr.P2))
+
+	// Check if this is a WITHOUT ROWID table
+	isWithoutRowID := v.isTableWithoutRowID(table)
+
+	// Create btree cursor with composite key mode for WITHOUT ROWID tables
+	btCursor := btree.NewCursorWithOptions(bt, uint32(instr.P2), isWithoutRowID)
 
 	// Create VDBE cursor with writable flag set
 	cursor := &Cursor{
-		CurType:     CursorBTree,
-		IsTable:     true,
-		Writable:    true, // Mark as writable for write operations
-		RootPage:    uint32(instr.P2),
-		BtreeCursor: btCursor,
-		CachedCols:  make([][]byte, 0),
-		CacheStatus: 0,
+		CurType:      CursorBTree,
+		IsTable:      true,
+		Writable:     true, // Mark as writable for write operations
+		WithoutRowID: isWithoutRowID,
+		RootPage:     uint32(instr.P2),
+		BtreeCursor:  btCursor,
+		CachedCols:   make([][]byte, 0),
+		CacheStatus:  0,
+		Table:        table,
 	}
-
-	// Store table metadata if available (for handling ALTER TABLE ADD COLUMN defaults)
-	cursor.Table = v.findTableByRootPage(uint32(instr.P2))
 
 	v.Cursors[instr.P1] = cursor
 	return nil
@@ -1041,6 +1070,33 @@ func (v *VDBE) execOpenEphemeral(instr *Instruction) error {
 	}
 
 	v.Cursors[instr.P1] = cursor
+	return nil
+}
+
+// execClearEphemeral clears all rows from an ephemeral table by reinitializing its root page.
+// P1 = cursor number
+func (v *VDBE) execClearEphemeral(instr *Instruction) error {
+	cursor := v.Cursors[instr.P1]
+	if cursor == nil {
+		return nil
+	}
+
+	bt, ok := v.Ctx.Btree.(*btree.Btree)
+	if !ok {
+		return fmt.Errorf("invalid btree type")
+	}
+
+	// Reinitialize the root page as an empty leaf table page
+	rootPage := cursor.RootPage
+	if err := bt.ClearTableData(rootPage); err != nil {
+		return fmt.Errorf("failed to clear ephemeral table: %w", err)
+	}
+
+	// Reopen cursor on the now-empty table
+	btCursor := btree.NewCursor(bt, rootPage)
+	cursor.BtreeCursor = btCursor
+	cursor.CachedCols = make([][]byte, 0)
+	cursor.CacheStatus = 0
 	return nil
 }
 
@@ -1885,6 +1941,18 @@ func memToInterface(m *Mem) interface{} {
 	return nil
 }
 
+// ParseRecordColumn is an exported wrapper for parseRecordColumn.
+// It parses a specific column from a SQLite record.
+func ParseRecordColumn(data []byte, colIndex int, dst *Mem) error {
+	return parseRecordColumn(data, colIndex, dst)
+}
+
+// MemToInterface is an exported wrapper for memToInterface.
+// It converts a Mem value to a Go interface{}.
+func MemToInterface(m *Mem) interface{} {
+	return memToInterface(m)
+}
+
 // encodeSimpleRecord creates a SQLite record encoding
 // SQLite record format:
 // - Header size (varint)
@@ -2049,6 +2117,15 @@ func appendVarint(buf []byte, v uint64) []byte {
 	return append(buf, encodeVarint(v)...)
 }
 
+// Conflict resolution mode constants (must match compile_dml.go getConflictMode)
+const (
+	conflictModeAbort    = 0 // Default (OnConflictAbort): abort on conflict
+	conflictModeRollback = 1 // OnConflictRollback
+	conflictModeFail     = 2 // OnConflictFail
+	conflictModeIgnore   = 3 // INSERT OR IGNORE: skip on conflict
+	conflictModeReplace  = 4 // INSERT OR REPLACE: delete existing, then insert
+)
+
 func (v *VDBE) execInsert(instr *Instruction) error {
 	cursor, btCursor, err := v.getWritableBtreeCursor(instr.P1)
 	if err != nil {
@@ -2058,17 +2135,678 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 	if err != nil {
 		return err
 	}
-	rowid, err := v.getInsertRowid(instr.P3, cursor)
+	conflictMode := instr.P4.I
+	tableName := instr.P4.Z
+
+	// P4.I==1 is used by UPDATE row replacement to mark the insert half so it
+	// doesn't double-count NumChanges. Also honor pendingFKUpdate (set during
+	// the delete half) for FK processing.
+	isUpdate := conflictMode == 1 || (v.pendingFKUpdate != nil && v.pendingFKUpdate.table == tableName)
+	if conflictMode == 1 {
+		// Treat as normal INSERT semantics for conflict handling once we've
+		// captured the update flag.
+		conflictMode = conflictModeAbort
+	}
+
+	if cursor.WithoutRowID {
+		return v.execInsertWithoutRowID(cursor, btCursor, payload, tableName, isUpdate)
+	}
+
+	return v.execInsertWithRowID(cursor, btCursor, payload, tableName, isUpdate, instr.P3, conflictMode)
+}
+
+// execInsertWithRowID handles INSERT for regular rowid-based tables.
+func (v *VDBE) execInsertWithRowID(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, tableName string, isUpdate bool, rowidReg int, conflictMode int32) error {
+	rowid, err := v.getInsertRowid(rowidReg, cursor, tableName)
 	if err != nil {
 		return err
 	}
-	if err := v.validateInsertConstraints(instr.P4.Z, payload, btCursor, rowid); err != nil {
+
+	// Handle conflict resolution for INSERT OR REPLACE / INSERT OR IGNORE
+	if !isUpdate && conflictMode != conflictModeAbort {
+		exists, err := v.rowExists(btCursor, rowid)
+		if err != nil {
+			return err
+		}
+		if exists {
+			switch conflictMode {
+			case conflictModeReplace:
+				// Delete existing row before inserting replacement
+				if err := v.deleteRowForReplace(cursor, btCursor, rowid, tableName); err != nil {
+					return err
+				}
+			case conflictModeIgnore:
+				// Skip this insert, row already exists
+				return nil
+			}
+		}
+	}
+
+	if err := v.validateInsertWithRowID(tableName, payload, btCursor, rowid, isUpdate); err != nil {
+		if !isUpdate && conflictMode != conflictModeAbort && isUniqueConstraintError(err) {
+			switch conflictMode {
+			case conflictModeIgnore:
+				return nil
+			case conflictModeReplace:
+				if err := v.deleteConflictingUniqueRows(cursor, btCursor, payload, rowid, tableName); err != nil {
+					return err
+				}
+				// Re-validate after deleting conflicting rows
+				if err := v.validateInsertWithRowID(tableName, payload, btCursor, rowid, isUpdate); err != nil {
+					return err
+				}
+				goto validated
+			}
+		}
 		return err
 	}
-	if err := v.performInsert(cursor, btCursor, rowid, payload, int64(instr.P4.I)); err != nil {
+validated:
+
+	// For UPDATE operations, use conflictMode=1 to avoid incrementing NumChanges
+	updateFlag := int64(0)
+	if isUpdate {
+		updateFlag = 1
+	}
+
+	if err := v.performInsert(cursor, btCursor, rowid, payload, updateFlag); err != nil {
+		if isUpdate {
+			v.restorePendingUpdate()
+		}
+		return err
+	}
+
+	if isUpdate {
+		v.pendingFKUpdate = nil
+	}
+	return nil
+}
+
+// rowExists checks if a row with the given rowid exists in the btree.
+func (v *VDBE) rowExists(btCursor *btree.BtCursor, rowid int64) (bool, error) {
+	found, err := btCursor.SeekRowid(rowid)
+	if err != nil {
+		return false, err
+	}
+	return found, nil
+}
+
+// deleteRowForReplace deletes an existing row as part of INSERT OR REPLACE.
+func (v *VDBE) deleteRowForReplace(cursor *Cursor, btCursor *btree.BtCursor, rowid int64, tableName string) error {
+	// For FK validation, we need to get the values of the row being replaced
+	if v.Ctx != nil && v.Ctx.ForeignKeysEnabled && v.Ctx.FKManager != nil && tableName != "" {
+		// Use the same approach as validateDeleteConstraints for proper INTEGER PRIMARY KEY handling
+		payload := btCursor.GetPayload()
+		oldValues, err := v.extractValuesFromPayloadWithRowid(tableName, payload, rowid)
+		if err == nil && len(oldValues) > 0 {
+			// Validate FK constraints for the delete
+			type fkValidator interface {
+				ValidateDelete(tableName string, values map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowDeleter interface{}, rowUpdater interface{}) error
+			}
+			if fkMgr, ok := v.Ctx.FKManager.(fkValidator); ok {
+				rowReader := NewVDBERowReader(v)
+				rowDeleter := NewVDBERowModifier(v)
+				rowUpdater := NewVDBERowModifier(v)
+				if err := fkMgr.ValidateDelete(tableName, oldValues, v.Ctx.Schema, rowReader, rowDeleter, rowUpdater); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	// Delete the row from the btree
+	if err := btCursor.Delete(); err != nil {
+		return fmt.Errorf("failed to delete row for REPLACE: %w", err)
+	}
+	return nil
+}
+
+// isUniqueConstraintError returns true if the error is a UNIQUE constraint failure
+// (but not a PRIMARY KEY uniqueness error, which is handled separately).
+func isUniqueConstraintError(err error) bool {
+	msg := err.Error()
+	return strings.HasPrefix(msg, "UNIQUE constraint failed:") &&
+		!strings.Contains(msg, "PRIMARY KEY")
+}
+
+// deleteConflictingUniqueRows finds and deletes rows that conflict with the new
+// payload on non-PK UNIQUE columns, used for INSERT OR REPLACE.
+func (v *VDBE) deleteConflictingUniqueRows(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, newRowid int64, tableName string) error {
+	columns, ok := v.getTableColumns(tableName)
+	if !ok {
+		return nil
+	}
+	recordIdx := 0
+	for _, colIface := range columns {
+		col, ok := colIface.(uniqueColumnInfo)
+		if !ok {
+			recordIdx++
+			continue
+		}
+		isPK := col.IsPrimaryKeyColumn()
+		if !col.IsUniqueColumn() || isPK {
+			if !isPK {
+				recordIdx++
+			}
+			continue
+		}
+		collation := ""
+		if collInfo, ok := colIface.(collationInfo); ok {
+			collation = collInfo.GetEffectiveCollation()
+		}
+		newValueMem := NewMem()
+		if err := parseRecordColumn(payload, recordIdx, newValueMem); err != nil {
+			recordIdx++
+			continue
+		}
+		if newValueMem.IsNull() {
+			recordIdx++
+			continue // NULL never conflicts
+		}
+		if err := v.deleteRowWithDuplicateValue(cursor, btCursor, recordIdx, newValueMem, newRowid, tableName, collation); err != nil {
+			return err
+		}
+		recordIdx++
+	}
+	// Also handle schema-level unique indexes (CREATE UNIQUE INDEX)
+	return v.deleteConflictingIndexRows(cursor, btCursor, payload, newRowid, tableName)
+}
+
+// deleteRowWithDuplicateValue scans for a row that has a duplicate value in the
+// given column and deletes it for INSERT OR REPLACE.
+func (v *VDBE) deleteRowWithDuplicateValue(cursor *Cursor, btCursor *btree.BtCursor, colIdx int, newValue *Mem, newRowid int64, tableName string, collation string) error {
+	scanCursor := btree.NewCursor(btCursor.Btree, btCursor.RootPage)
+	if err := scanCursor.MoveToFirst(); err != nil {
+		return nil
+	}
+	for scanCursor.IsValid() {
+		currentRowid := scanCursor.GetKey()
+		if currentRowid != newRowid {
+			existingValue, err := v.extractColumnValue(scanCursor, colIdx)
+			if err == nil && v.compareMemValuesWithCollation(existingValue, newValue, collation) == 0 {
+				// Found conflicting row — seek write cursor and delete it
+				if _, seekErr := btCursor.SeekRowid(currentRowid); seekErr != nil {
+					return seekErr
+				}
+				return v.deleteRowForReplace(cursor, btCursor, currentRowid, tableName)
+			}
+		}
+		if err := scanCursor.Next(); err != nil {
+			break
+		}
+	}
+	return nil
+}
+
+// deleteConflictingIndexRows handles INSERT OR REPLACE for schema-level unique
+// indexes (created via CREATE UNIQUE INDEX).
+func (v *VDBE) deleteConflictingIndexRows(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, newRowid int64, tableName string) error {
+	provider := v.getSchemaIndexProvider(tableName)
+	if provider == nil {
+		return nil
+	}
+	indexes := provider.GetTableIndexes(tableName)
+	for _, idx := range indexes {
+		if !idx.IsUnique() {
+			continue
+		}
+		cols := idx.GetColumns()
+		conflictRowid, found := v.findMultiColConflictRowid(provider, tableName, cols, payload, btCursor, newRowid)
+		if found {
+			if _, seekErr := btCursor.SeekRowid(conflictRowid); seekErr != nil {
+				return seekErr
+			}
+			if err := v.deleteRowForReplace(cursor, btCursor, conflictRowid, tableName); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// findMultiColConflictRowid finds the rowid of a row that conflicts on a
+// multi-column unique index.
+func (v *VDBE) findMultiColConflictRowid(provider schemaIndexProvider, tableName string, cols []string, payload []byte, btCursor *btree.BtCursor, newRowid int64) (int64, bool) {
+	newValues := make([]*Mem, len(cols))
+	for i, col := range cols {
+		recIdx := provider.GetRecordColumnIndex(tableName, col)
+		if recIdx < 0 {
+			return 0, false
+		}
+		m := NewMem()
+		if err := parseRecordColumn(payload, recIdx, m); err != nil {
+			return 0, false
+		}
+		if m.IsNull() {
+			return 0, false // NULL never conflicts
+		}
+		newValues[i] = m
+	}
+	scanCursor := btree.NewCursor(btCursor.Btree, btCursor.RootPage)
+	if err := scanCursor.MoveToFirst(); err != nil {
+		return 0, false
+	}
+	for scanCursor.IsValid() {
+		rowid := scanCursor.GetKey()
+		if rowid != newRowid {
+			recordData, err := scanCursor.GetPayloadWithOverflow()
+			if err == nil {
+				match := true
+				for i, col := range cols {
+					recIdx := provider.GetRecordColumnIndex(tableName, col)
+					if recIdx < 0 {
+						match = false
+						break
+					}
+					existing := NewMem()
+					if err := parseRecordColumn(recordData, recIdx, existing); err != nil {
+						match = false
+						break
+					}
+					if existing.IsNull() || newValues[i].IsNull() {
+						match = false
+						break
+					}
+					collation := provider.GetColumnCollation(tableName, col)
+					if v.compareMemValuesWithCollation(existing, newValues[i], collation) != 0 {
+						match = false
+						break
+					}
+				}
+				if match {
+					return rowid, true
+				}
+			}
+		}
+		if err := scanCursor.Next(); err != nil {
+			break
+		}
+	}
+	return 0, false
+}
+
+// extractRowValues extracts column values from the current row.
+func (v *VDBE) extractRowValues(cursor *Cursor, btCursor *btree.BtCursor, tableName string) (map[string]interface{}, error) {
+	recordData, err := btCursor.GetPayloadWithOverflow()
+	if err != nil {
+		return nil, err
+	}
+
+	// Get table schema to know column names
+	type schemaGetter interface {
+		GetTableByName(name string) (interface{}, bool)
+	}
+	schemaObj, ok := v.Ctx.Schema.(schemaGetter)
+	if !ok {
+		return nil, nil
+	}
+	tableIface, ok := schemaObj.GetTableByName(tableName)
+	if !ok {
+		return nil, nil
+	}
+	type columnGetter interface {
+		GetColumnNames() []string
+	}
+	table, ok := tableIface.(columnGetter)
+	if !ok {
+		return nil, nil
+	}
+
+	colNames := table.GetColumnNames()
+	values := make(map[string]interface{})
+
+	// For INTEGER PRIMARY KEY columns, get the rowid and add it to values
+	rowid := btCursor.GetKey()
+	type integerPKChecker interface {
+		GetIntegerPKColumn() string
+	}
+	if pkChecker, ok := tableIface.(integerPKChecker); ok {
+		if pkCol := pkChecker.GetIntegerPKColumn(); pkCol != "" {
+			values[pkCol] = rowid
+		}
+	}
+
+	// Parse the record and extract values
+	headerSize, headerBytes := binary.Uvarint(recordData)
+	if headerBytes <= 0 {
+		return nil, nil
+	}
+	header := recordData[headerBytes:headerSize]
+	body := recordData[headerSize:]
+
+	colIdx := 0
+	bodyOffset := 0
+	for len(header) > 0 && colIdx < len(colNames) {
+		serialType, n := binary.Uvarint(header)
+		if n <= 0 {
+			break
+		}
+		header = header[n:]
+
+		val, size := v.decodeSerialValue(serialType, body[bodyOffset:])
+		if colIdx < len(colNames) {
+			values[colNames[colIdx]] = val
+		}
+		bodyOffset += size
+		colIdx++
+	}
+
+	return values, nil
+}
+
+// decodeSerialValue decodes a SQLite serial value and returns the decoded value and byte size.
+func (v *VDBE) decodeSerialValue(serialType uint64, data []byte) (interface{}, int) {
+	switch serialType {
+	case 0: // NULL
+		return nil, 0
+	case 1: // 8-bit signed integer
+		if len(data) < 1 {
+			return nil, 0
+		}
+		return int64(int8(data[0])), 1
+	case 2: // 16-bit big-endian signed integer
+		if len(data) < 2 {
+			return nil, 0
+		}
+		return int64(int16(binary.BigEndian.Uint16(data))), 2
+	case 3: // 24-bit big-endian signed integer
+		if len(data) < 3 {
+			return nil, 0
+		}
+		val := int64(data[0])<<16 | int64(data[1])<<8 | int64(data[2])
+		if val&0x800000 != 0 {
+			val |= ^int64(0xFFFFFF) // Sign extend
+		}
+		return val, 3
+	case 4: // 32-bit big-endian signed integer
+		if len(data) < 4 {
+			return nil, 0
+		}
+		return int64(int32(binary.BigEndian.Uint32(data))), 4
+	case 5: // 48-bit big-endian signed integer
+		if len(data) < 6 {
+			return nil, 0
+		}
+		val := int64(data[0])<<40 | int64(data[1])<<32 | int64(data[2])<<24 |
+			int64(data[3])<<16 | int64(data[4])<<8 | int64(data[5])
+		if val&0x800000000000 != 0 {
+			val |= ^int64(0xFFFFFFFFFFFF) // Sign extend
+		}
+		return val, 6
+	case 6: // 64-bit big-endian signed integer
+		if len(data) < 8 {
+			return nil, 0
+		}
+		return int64(binary.BigEndian.Uint64(data)), 8
+	case 7: // 64-bit IEEE 754 float
+		if len(data) < 8 {
+			return nil, 0
+		}
+		bits := binary.BigEndian.Uint64(data)
+		return math.Float64frombits(bits), 8
+	case 8: // Integer constant 0
+		return int64(0), 0
+	case 9: // Integer constant 1
+		return int64(1), 0
+	case 10, 11: // Reserved
+		return nil, 0
+	default:
+		// For serial types >= 12:
+		// Even = blob, Odd = text
+		length := int((serialType - 12) / 2)
+		if len(data) < length {
+			return nil, 0
+		}
+		if serialType%2 == 0 {
+			// Blob
+			blob := make([]byte, length)
+			copy(blob, data[:length])
+			return blob, length
+		}
+		// Text
+		return string(data[:length]), length
+	}
+}
+
+// validateInsertWithRowID validates constraints for rowid-based inserts.
+func (v *VDBE) validateInsertWithRowID(tableName string, payload []byte, btCursor *btree.BtCursor, rowid int64, isUpdate bool) error {
+	if isUpdate && tableName != "" {
+		if err := v.validateUpdateConstraintsWithRowid(tableName, payload, rowid); err != nil {
+			v.restorePendingUpdate()
+			return err
+		}
+	}
+
+	if err := v.validateInsertConstraints(tableName, payload, btCursor, rowid); err != nil {
+		if isUpdate {
+			v.restorePendingUpdate()
+		}
 		return err
 	}
 	return nil
+}
+
+// execInsertWithoutRowID handles INSERT for WITHOUT ROWID tables using composite keys.
+func (v *VDBE) execInsertWithoutRowID(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, tableName string, isUpdate bool) error {
+	keyBytes, err := v.computeCompositeKeyBytes(tableName, payload)
+	if err != nil {
+		if isUpdate {
+			v.restorePendingUpdate()
+		}
+		return err
+	}
+
+	if err := v.validateWithoutRowIDConstraints(tableName, payload, keyBytes, isUpdate); err != nil {
+		return err
+	}
+
+	if err := v.performInsertWithCompositeKey(cursor, btCursor, keyBytes, payload, isUpdate); err != nil {
+		if isUpdate {
+			v.restorePendingUpdate()
+		}
+		return err
+	}
+
+	if isUpdate {
+		v.pendingFKUpdate = nil
+	}
+	return nil
+}
+
+// validateWithoutRowIDConstraints validates constraints for WITHOUT ROWID inserts.
+func (v *VDBE) validateWithoutRowIDConstraints(tableName string, payload []byte, keyBytes []byte, isUpdate bool) error {
+	if isUpdate && tableName != "" {
+		if err := v.validateUpdateConstraintsWithoutRowID(tableName, payload, keyBytes); err != nil {
+			v.restorePendingUpdate()
+			return err
+		}
+		return nil
+	}
+
+	if !isUpdate && tableName != "" {
+		return v.checkForeignKeyConstraintsWithoutRowID(tableName, payload)
+	}
+
+	return nil
+}
+
+// validateUpdateConstraintsWithoutRowID validates FK constraints for WITHOUT ROWID table updates.
+func (v *VDBE) validateUpdateConstraintsWithoutRowID(tableName string, payload []byte, keyBytes []byte) error {
+	if !v.shouldValidateWithoutRowIDUpdate(tableName) {
+		return nil
+	}
+
+	mgr, err := v.getTypedFKManager()
+	if err != nil {
+		return nil
+	}
+
+	newValues, err := v.extractValuesFromPayload(tableName, payload)
+	if err != nil {
+		return err
+	}
+
+	rowReader := NewVDBERowReader(v)
+	rowUpdater := NewVDBERowModifier(v)
+
+	return mgr.ValidateUpdate(tableName, v.pendingFKUpdate.oldValues, newValues, v.Ctx.Schema, rowReader, rowUpdater)
+}
+
+// shouldValidateWithoutRowIDUpdate checks if WITHOUT ROWID update validation is needed.
+func (v *VDBE) shouldValidateWithoutRowIDUpdate(tableName string) bool {
+	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil {
+		return false
+	}
+	if v.pendingFKUpdate == nil || v.pendingFKUpdate.table != tableName || v.Ctx.Schema == nil {
+		return false
+	}
+	return true
+}
+
+// getTypedFKManager returns a type-asserted FK manager with ValidateUpdate support.
+func (v *VDBE) getTypedFKManager() (interface {
+	ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
+}, error) {
+	type fkManager interface {
+		ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
+	}
+
+	mgr, ok := v.Ctx.FKManager.(fkManager)
+	if !ok {
+		return nil, fmt.Errorf("invalid FK manager type")
+	}
+	return mgr, nil
+}
+
+// performInsertWithCompositeKey inserts a row using composite key for WITHOUT ROWID tables.
+func (v *VDBE) performInsertWithCompositeKey(cursor *Cursor, btCursor *btree.BtCursor, keyBytes []byte, payload []byte, isUpdate bool) error {
+	if err := btCursor.InsertWithComposite(0, keyBytes, payload); err != nil {
+		return v.wrapInsertError(err)
+	}
+
+	// Root page can change after a split; keep cursor and schema in sync.
+	if cursor.RootPage != btCursor.RootPage {
+		cursor.RootPage = btCursor.RootPage
+		if tbl, ok := cursor.Table.(interface{ SetRootPage(uint32) }); ok && tbl != nil {
+			tbl.SetRootPage(btCursor.RootPage)
+		}
+		// Signal that schema changed - statement cache needs invalidation
+		v.SchemaChanged = true
+	}
+
+	// For WITHOUT ROWID tables, we don't have a rowid to track
+	cursor.LastRowid = 0
+	cursor.CurrentKey = keyBytes
+	if !isUpdate {
+		v.NumChanges++
+	}
+	if v.Stats != nil {
+		v.Stats.RowsWritten++
+	}
+	return nil
+}
+
+// validateUpdateConstraintsWithRowid validates FK constraints with the new rowid for INTEGER PRIMARY KEY updates.
+func (v *VDBE) validateUpdateConstraintsWithRowid(tableName string, newPayload []byte, newRowid int64) error {
+	if !v.shouldValidateUpdate(tableName) {
+		return nil
+	}
+
+	mgr, err := v.getFKManager()
+	if err != nil {
+		return nil
+	}
+
+	newValues, err := v.extractValuesFromPayloadWithRowid(tableName, newPayload, newRowid)
+	if err != nil {
+		return err
+	}
+
+	if err := v.checkPKUniquenessIfChanged(tableName, newPayload, newValues); err != nil {
+		return err
+	}
+
+	rowReader := NewVDBERowReader(v)
+	rowUpdater := NewVDBERowModifier(v)
+
+	return mgr.ValidateUpdate(tableName, v.pendingFKUpdate.oldValues, newValues, v.Ctx.Schema, rowReader, rowUpdater)
+}
+
+func (v *VDBE) validateUpdateConstraints(tableName string, newPayload []byte) error {
+	if !v.shouldValidateUpdate(tableName) {
+		return nil
+	}
+
+	mgr, err := v.getFKManager()
+	if err != nil {
+		return nil
+	}
+
+	newValues, err := v.extractValuesFromPayloadWithRowid(tableName, newPayload, v.pendingFKUpdate.rowid)
+	if err != nil {
+		return err
+	}
+
+	if err := v.checkPKUniquenessIfChanged(tableName, newPayload, newValues); err != nil {
+		return err
+	}
+
+	rowReader := NewVDBERowReader(v)
+	rowUpdater := NewVDBERowModifier(v)
+
+	return mgr.ValidateUpdate(tableName, v.pendingFKUpdate.oldValues, newValues, v.Ctx.Schema, rowReader, rowUpdater)
+}
+
+// shouldValidateUpdate checks if update validation is needed.
+func (v *VDBE) shouldValidateUpdate(tableName string) bool {
+	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil {
+		return false
+	}
+	return v.pendingFKUpdate != nil && v.pendingFKUpdate.table == tableName && v.Ctx.Schema != nil
+}
+
+// getFKManager retrieves the foreign key manager interface.
+func (v *VDBE) getFKManager() (interface {
+	ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
+}, error) {
+	type fkManager interface {
+		ValidateUpdate(tableName string, oldValues map[string]interface{}, newValues map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowUpdater interface{}) error
+	}
+
+	mgr, ok := v.Ctx.FKManager.(fkManager)
+	if !ok {
+		return nil, fmt.Errorf("FK manager doesn't support ValidateUpdate")
+	}
+	return mgr, nil
+}
+
+// checkPKUniquenessIfChanged validates PK uniqueness if primary key changed.
+func (v *VDBE) checkPKUniquenessIfChanged(tableName string, newPayload []byte, newValues map[string]interface{}) error {
+	if v.isWithoutRowidTable(tableName) && v.pkChanged(v.pendingFKUpdate.oldValues, newValues) {
+		return v.checkWithoutRowidPKUniqueness(tableName, newPayload, v.pendingFKUpdate.rowid, v.pendingFKUpdate.rowid)
+	}
+	return nil
+}
+
+func (v *VDBE) restorePendingUpdate() {
+	ctx := v.pendingFKUpdate
+	if ctx == nil {
+		return
+	}
+	defer func() {
+		v.pendingFKUpdate = nil
+	}()
+
+	bt, ok := v.Ctx.Btree.(*btree.Btree)
+	if !ok || bt == nil {
+		return
+	}
+
+	cursor := btree.NewCursor(bt, ctx.rootPage)
+	found, err := cursor.SeekRowid(ctx.rowid)
+	if err == nil && found {
+		return
+	}
+	_ = cursor.Insert(ctx.rowid, ctx.payload)
 }
 
 // validateInsertConstraints checks all constraints before insert.
@@ -2085,7 +2823,7 @@ func (v *VDBE) validateInsertConstraints(tableName string, payload []byte, btCur
 	if err := v.checkUniqueConstraints(tableName, payload, btCursor, rowid); err != nil {
 		return err
 	}
-	return v.checkForeignKeyConstraints(tableName, payload)
+	return v.checkForeignKeyConstraints(tableName, payload, rowid)
 }
 
 // performInsert executes the actual btree insert and updates counters.
@@ -2093,6 +2831,17 @@ func (v *VDBE) performInsert(cursor *Cursor, btCursor *btree.BtCursor, rowid int
 	if err := btCursor.Insert(rowid, payload); err != nil {
 		return v.wrapInsertError(err)
 	}
+
+	// Root page can change after a split; keep cursor and schema in sync.
+	if cursor.RootPage != btCursor.RootPage {
+		cursor.RootPage = btCursor.RootPage
+		if tbl, ok := cursor.Table.(interface{ SetRootPage(uint32) }); ok && tbl != nil {
+			tbl.SetRootPage(btCursor.RootPage)
+		}
+		// Signal that schema changed - statement cache needs invalidation
+		v.SchemaChanged = true
+	}
+
 	cursor.LastRowid = rowid
 	v.LastInsertID = rowid
 	if updateFlag != 1 {
@@ -2141,36 +2890,91 @@ func (v *VDBE) getInsertPayload(reg int) ([]byte, error) {
 }
 
 // getInsertRowid determines the rowid for the insert operation.
-func (v *VDBE) getInsertRowid(p3 int, cursor *Cursor) (int64, error) {
-	if p3 == 0 {
-		// Auto-generate a new rowid
-		bt, ok := v.Ctx.Btree.(*btree.Btree)
-		if !ok {
-			return 0, fmt.Errorf("invalid btree type for rowid generation")
-		}
-		newRowid, err := bt.NewRowid(cursor.RootPage)
+func (v *VDBE) getInsertRowid(p3 int, cursor *Cursor, tableName string) (int64, error) {
+	hasExplicit := false
+	var explicitRowid int64
+
+	// Check if a register was specified with the rowid
+	if p3 != 0 {
+		rowidMem, err := v.GetMem(p3)
 		if err != nil {
-			// If table is empty, start with 1
-			newRowid = 1
+			return 0, err
 		}
-		cursor.LastRowid = newRowid
-		return newRowid, nil
+		// If register is not NULL, capture the explicit rowid
+		if !rowidMem.IsNull() {
+			hasExplicit = true
+			explicitRowid = rowidMem.IntValue()
+		}
 	}
-	rowidMem, err := v.GetMem(p3)
+
+	// For AUTOINCREMENT tables, use the sequence manager
+	if sm := v.getSequenceManager(); sm != nil && sm.HasSequence(tableName) {
+		return v.getAutoincrementRowid(sm, tableName, hasExplicit, explicitRowid, cursor)
+	}
+
+	// Non-AUTOINCREMENT: use explicit rowid if provided
+	if hasExplicit {
+		return explicitRowid, nil
+	}
+
+	// Auto-generate a new rowid from btree
+	return v.generateNewRowid(cursor)
+}
+
+// getAutoincrementRowid generates a rowid using the sequence manager.
+func (v *VDBE) getAutoincrementRowid(sm sequenceUpdater, tableName string, hasExplicit bool, explicitRowid int64, cursor *Cursor) (int64, error) {
+	if hasExplicit {
+		sm.UpdateSequence(tableName, explicitRowid)
+		return explicitRowid, nil
+	}
+
+	// Get current max rowid from btree
+	var currentMax int64
+	bt, ok := v.Ctx.Btree.(*btree.Btree)
+	if ok {
+		maxRowid, err := bt.NewRowid(cursor.RootPage)
+		if err != nil {
+			currentMax = 0 // empty table
+		} else {
+			currentMax = maxRowid - 1 // NewRowid returns max+1
+		}
+	}
+
+	newRowid, err := sm.NextSequence(tableName, currentMax)
 	if err != nil {
 		return 0, err
 	}
-	return rowidMem.IntValue(), nil
+	cursor.LastRowid = newRowid
+	return newRowid, nil
+}
+
+// generateNewRowid generates a new rowid from the btree.
+func (v *VDBE) generateNewRowid(cursor *Cursor) (int64, error) {
+	bt, ok := v.Ctx.Btree.(*btree.Btree)
+	if !ok {
+		return 0, fmt.Errorf("invalid btree type for rowid generation")
+	}
+	newRowid, err := bt.NewRowid(cursor.RootPage)
+	if err != nil {
+		// If table is empty, start with 1
+		newRowid = 1
+	}
+	cursor.LastRowid = newRowid
+	return newRowid, nil
 }
 
 // checkUniqueConstraints verifies that inserting the given payload doesn't violate
-// any UNIQUE column constraints in the table.
+// any UNIQUE column constraints in the table, including schema-level unique
+// indexes and composite primary key uniqueness.
 func (v *VDBE) checkUniqueConstraints(tableName string, payload []byte, btCursor *btree.BtCursor, newRowid int64) error {
 	columns, ok := v.getTableColumns(tableName)
 	if !ok {
 		return nil
 	}
-	return v.validateUniqueColumns(columns, payload, btCursor, newRowid)
+	if err := v.validateUniqueColumns(columns, payload, btCursor, newRowid); err != nil {
+		return err
+	}
+	return v.checkSchemaUniqueConstraints(tableName, payload, btCursor, newRowid)
 }
 
 // uniqueColumnInfo is an interface for unique constraint column info.
@@ -2178,6 +2982,10 @@ type uniqueColumnInfo interface {
 	GetName() string
 	IsUniqueColumn() bool
 	IsPrimaryKeyColumn() bool
+}
+
+type collationInfo interface {
+	GetEffectiveCollation() string
 }
 
 // validateUniqueColumns checks UNIQUE constraints on columns.
@@ -2196,7 +3004,11 @@ func (v *VDBE) validateUniqueColumns(columns []interface{}, payload []byte, btCu
 			}
 			continue
 		}
-		if err := v.checkColumnUnique(col, payload, btCursor, recordIdx, newRowid); err != nil {
+		collation := ""
+		if collInfo, ok := colIface.(collationInfo); ok {
+			collation = collInfo.GetEffectiveCollation()
+		}
+		if err := v.checkColumnUnique(col, payload, btCursor, recordIdx, newRowid, collation); err != nil {
 			return err
 		}
 		recordIdx++
@@ -2205,69 +3017,70 @@ func (v *VDBE) validateUniqueColumns(columns []interface{}, payload []byte, btCu
 }
 
 // checkColumnUnique checks a single column's UNIQUE constraint.
-func (v *VDBE) checkColumnUnique(col uniqueColumnInfo, payload []byte, btCursor *btree.BtCursor, recordIdx int, newRowid int64) error {
+func (v *VDBE) checkColumnUnique(col uniqueColumnInfo, payload []byte, btCursor *btree.BtCursor, recordIdx int, newRowid int64, collation string) error {
 	newValueMem := NewMem()
 	if err := parseRecordColumn(payload, recordIdx, newValueMem); err != nil {
 		return nil // Skip if can't parse
 	}
-	return v.scanTableForDuplicate(btCursor, recordIdx, newValueMem, newRowid, col.GetName())
+	return v.scanTableForDuplicate(btCursor, recordIdx, newValueMem, newRowid, col.GetName(), collation)
 }
 
 // scanTableForDuplicate scans the entire table to check if the given column value
 // already exists in any row (excluding the row with newRowid for UPDATE operations).
 // IMPORTANT: Creates a separate read cursor to avoid disturbing the insert cursor position.
-func (v *VDBE) scanTableForDuplicate(insertCursor *btree.BtCursor, colIdx int, newValue *Mem, newRowid int64, colName string) error {
-	// Create a separate read cursor for scanning to avoid disturbing the insert cursor
+func (v *VDBE) scanTableForDuplicate(insertCursor *btree.BtCursor, colIdx int, newValue *Mem, newRowid int64, colName string, collation string) error {
 	scanCursor := btree.NewCursor(insertCursor.Btree, insertCursor.RootPage)
 
-	// Move to the first record
 	if err := scanCursor.MoveToFirst(); err != nil {
-		// Table is empty, no duplicates possible
-		return nil
+		return nil // Table is empty, no duplicates possible
 	}
 
-	// Iterate through all records
 	for scanCursor.IsValid() {
-		// Get current rowid
-		currentRowid := scanCursor.GetKey()
-
-		// Skip if this is the row we're inserting/updating (for UPDATE operations)
-		// For INSERT operations, newRowid won't match any existing row
-		if currentRowid != newRowid {
-			// Get the record data
-			recordData, err := scanCursor.GetPayloadWithOverflow()
-			if err != nil {
-				// Skip if can't get payload
-				if err := scanCursor.Next(); err != nil {
-					break
-				}
-				continue
-			}
-
-			// Extract the column value from this record
-			existingValueMem := NewMem()
-			if err := parseRecordColumn(recordData, colIdx, existingValueMem); err != nil {
-				// Skip records that can't be parsed
-				if err := scanCursor.Next(); err != nil {
-					break
-				}
-				continue
-			}
-
-			// Compare the values
-			if v.compareMemValues(existingValueMem, newValue) == 0 {
-				// Duplicate found!
-				return fmt.Errorf("UNIQUE constraint failed: %s", colName)
-			}
+		if err := v.checkRowForDuplicate(scanCursor, colIdx, newValue, newRowid, colName, collation); err != nil {
+			return err
 		}
-
-		// Move to next record
 		if err := scanCursor.Next(); err != nil {
 			break
 		}
 	}
 
 	return nil
+}
+
+// checkRowForDuplicate checks a single row for duplicate value.
+func (v *VDBE) checkRowForDuplicate(scanCursor *btree.BtCursor, colIdx int, newValue *Mem, newRowid int64, colName string, collation string) error {
+	currentRowid := scanCursor.GetKey()
+
+	// Skip if this is the row we're inserting/updating
+	if currentRowid == newRowid {
+		return nil
+	}
+
+	existingValue, err := v.extractColumnValue(scanCursor, colIdx)
+	if err != nil {
+		return nil // Skip records that can't be parsed
+	}
+
+	if v.compareMemValuesWithCollation(existingValue, newValue, collation) == 0 {
+		return fmt.Errorf("UNIQUE constraint failed: %s", colName)
+	}
+
+	return nil
+}
+
+// extractColumnValue extracts a column value from the cursor's current record.
+func (v *VDBE) extractColumnValue(scanCursor *btree.BtCursor, colIdx int) (*Mem, error) {
+	recordData, err := scanCursor.GetPayloadWithOverflow()
+	if err != nil {
+		return nil, err
+	}
+
+	existingValueMem := NewMem()
+	if err := parseRecordColumn(recordData, colIdx, existingValueMem); err != nil {
+		return nil, err
+	}
+
+	return existingValueMem, nil
 }
 
 // compareInts returns -1 if a < b, 0 if a == b, 1 if a > b
@@ -2317,26 +3130,58 @@ func (v *VDBE) compareMemValues(a, b *Mem) int {
 	return v.compareNonNullMemValues(a, b)
 }
 
+func (v *VDBE) compareMemValuesWithCollation(a, b *Mem, collation string) int {
+	if collation == "" {
+		return v.compareMemValues(a, b)
+	}
+	return a.CompareWithCollationRegistry(b, collation, v.getCollationRegistry())
+}
+
 // compareNonNullMemValues compares two non-null Mem values
 func (v *VDBE) compareNonNullMemValues(a, b *Mem) int {
-	if a.IsInt() && b.IsInt() {
-		return compareInts(a.IntValue(), b.IntValue())
+	// Try each comparison type in order
+	if result, ok := v.tryTypedComparison(a, b); ok {
+		return result
 	}
-	if a.IsReal() && b.IsReal() {
-		return compareReals(a.RealValue(), b.RealValue())
-	}
-	if a.IsString() && b.IsString() {
-		return cmpStrings(a.StringValue(), b.StringValue())
-	}
-	if a.IsBlob() && b.IsBlob() {
-		return compareBytes(a.BlobValue(), b.BlobValue())
-	}
-	// Mixed types - use string comparison
+	// Mixed types - use string comparison as fallback
 	return cmpStrings(fmt.Sprintf("%v", a.Value()), fmt.Sprintf("%v", b.Value()))
 }
 
+// tryTypedComparison attempts to compare values of the same type.
+func (v *VDBE) tryTypedComparison(a, b *Mem) (int, bool) {
+	comparators := []struct {
+		check   func(*Mem, *Mem) bool
+		compare func(*Mem, *Mem) int
+	}{
+		{
+			check:   func(x, y *Mem) bool { return x.IsInt() && y.IsInt() },
+			compare: func(x, y *Mem) int { return compareInts(x.IntValue(), y.IntValue()) },
+		},
+		{
+			check:   func(x, y *Mem) bool { return x.IsReal() && y.IsReal() },
+			compare: func(x, y *Mem) int { return compareReals(x.RealValue(), y.RealValue()) },
+		},
+		{
+			check:   func(x, y *Mem) bool { return x.IsString() && y.IsString() },
+			compare: func(x, y *Mem) int { return cmpStrings(x.StringValue(), y.StringValue()) },
+		},
+		{
+			check:   func(x, y *Mem) bool { return x.IsBlob() && y.IsBlob() },
+			compare: func(x, y *Mem) int { return compareBytes(x.BlobValue(), y.BlobValue()) },
+		},
+	}
+
+	for _, comp := range comparators {
+		if comp.check(a, b) {
+			return comp.compare(a, b), true
+		}
+	}
+
+	return 0, false
+}
+
 // checkForeignKeyConstraints validates foreign key constraints for an INSERT operation.
-func (v *VDBE) checkForeignKeyConstraints(tableName string, payload []byte) error {
+func (v *VDBE) checkForeignKeyConstraints(tableName string, payload []byte, rowid int64) error {
 	// Check if foreign keys are enabled
 	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled {
 		return nil
@@ -2362,8 +3207,8 @@ func (v *VDBE) checkForeignKeyConstraints(tableName string, payload []byte) erro
 		return nil
 	}
 
-	// Extract values from payload
-	values, err := v.extractValuesFromPayload(tableName, payload)
+	// Extract values from payload including rowid for INTEGER PRIMARY KEY
+	values, err := v.extractValuesFromPayloadWithRowid(tableName, payload, rowid)
 	if err != nil {
 		return nil // Skip FK check if we can't extract values
 	}
@@ -2375,13 +3220,101 @@ func (v *VDBE) checkForeignKeyConstraints(tableName string, payload []byte) erro
 	return mgr.ValidateInsert(tableName, values, v.Ctx.Schema, rowReader)
 }
 
+// checkForeignKeyConstraintsWithoutRowID validates FK constraints for WITHOUT ROWID table inserts.
+func (v *VDBE) checkForeignKeyConstraintsWithoutRowID(tableName string, payload []byte) error {
+	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil {
+		return nil
+	}
+
+	type fkManager interface {
+		ValidateInsert(tableName string, values map[string]interface{}, schemaObj interface{}, rowReader interface{}) error
+	}
+
+	mgr, ok := v.Ctx.FKManager.(fkManager)
+	if !ok {
+		return nil
+	}
+
+	if v.Ctx.Schema == nil {
+		return nil
+	}
+
+	// For WITHOUT ROWID tables, extract values directly from payload (no rowid)
+	values, err := v.extractValuesFromPayload(tableName, payload)
+	if err != nil {
+		return nil // Skip FK check if we can't extract values
+	}
+
+	rowReader := NewVDBERowReader(v)
+	return mgr.ValidateInsert(tableName, values, v.Ctx.Schema, rowReader)
+}
+
+// extractValuesFromPayloadWithRowid extracts column values including rowid for INTEGER PRIMARY KEY.
+func (v *VDBE) extractValuesFromPayloadWithRowid(tableName string, payload []byte, rowid int64) (map[string]interface{}, error) {
+	values, err := v.extractValuesFromPayload(tableName, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := v.addRowidToValues(tableName, rowid, values); err != nil {
+		return values, nil // Ignore errors, just return values without rowid
+	}
+
+	return values, nil
+}
+
+// addRowidToValues adds the rowid value for INTEGER PRIMARY KEY columns.
+func (v *VDBE) addRowidToValues(tableName string, rowid int64, values map[string]interface{}) error {
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return fmt.Errorf("no schema available")
+	}
+
+	columns, err := v.getTableColumnsForExtraction(tableName)
+	if err != nil {
+		return err
+	}
+
+	addRowidForIntegerPK(columns, rowid, values)
+	return nil
+}
+
+// addRowidForIntegerPK adds rowid to values for INTEGER PRIMARY KEY columns.
+func addRowidForIntegerPK(columns []interface{}, rowid int64, values map[string]interface{}) {
+	type columnInfo interface {
+		GetName() string
+		IsPrimaryKeyColumn() bool
+		GetType() string
+	}
+
+	for _, colIface := range columns {
+		col, ok := colIface.(columnInfo)
+		if !ok || !col.IsPrimaryKeyColumn() {
+			continue
+		}
+
+		colType := col.GetType()
+		if colType == "INTEGER" || colType == "INT" {
+			values[col.GetName()] = rowid
+		}
+	}
+}
+
 // extractValuesFromPayload extracts column values from a record payload.
 func (v *VDBE) extractValuesFromPayload(tableName string, payload []byte) (map[string]interface{}, error) {
 	if v.Ctx == nil || v.Ctx.Schema == nil {
 		return nil, fmt.Errorf("no schema available")
 	}
 
-	// Type assert to get the schema with GetTableByName method
+	columns, err := v.getTableColumnsForExtraction(tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	return extractValuesFromColumns(columns, payload)
+}
+
+// getTableColumnsForExtraction retrieves table columns for value extraction.
+func (v *VDBE) getTableColumnsForExtraction(tableName string) ([]interface{}, error) {
 	type schemaWithGetTableByName interface {
 		GetTableByName(name string) (interface{}, bool)
 	}
@@ -2391,13 +3324,11 @@ func (v *VDBE) extractValuesFromPayload(tableName string, payload []byte) (map[s
 		return nil, fmt.Errorf("schema doesn't support GetTableByName")
 	}
 
-	// Get the table definition
 	tableIface, exists := schema.GetTableByName(tableName)
 	if !exists {
 		return nil, fmt.Errorf("table not found: %s", tableName)
 	}
 
-	// Type assert to access table columns
 	type tableWithColumns interface {
 		GetColumns() []interface{}
 	}
@@ -2407,43 +3338,60 @@ func (v *VDBE) extractValuesFromPayload(tableName string, payload []byte) (map[s
 		return nil, fmt.Errorf("can't access columns")
 	}
 
-	columns := table.GetColumns()
+	return table.GetColumns(), nil
+}
 
-	// Extract values into a map
+// extractValuesFromColumns extracts values from payload based on column definitions.
+func extractValuesFromColumns(columns []interface{}, payload []byte) (map[string]interface{}, error) {
 	values := make(map[string]interface{})
 	recordIdx := 0
 
-	for _, colIface := range columns {
-		// Type assert to access column info
-		type columnInfo interface {
-			GetName() string
-			IsPrimaryKeyColumn() bool
-		}
+	type columnInfo interface {
+		GetName() string
+		IsPrimaryKeyColumn() bool
+		GetType() string
+	}
 
+	for _, colIface := range columns {
 		col, ok := colIface.(columnInfo)
 		if !ok {
 			recordIdx++
 			continue
 		}
 
-		// INTEGER PRIMARY KEY columns are stored as rowid, not in the record
-		if col.IsPrimaryKeyColumn() {
+		if shouldSkipColumn(col) {
 			continue
 		}
 
-		// Extract the value from the record
-		valueMem := NewMem()
-		if err := parseRecordColumn(payload, recordIdx, valueMem); err != nil {
-			recordIdx++
-			continue
+		if value, err := extractColumnValue(payload, recordIdx); err == nil {
+			values[col.GetName()] = value
 		}
-
-		// Convert Mem to interface{} value
-		values[col.GetName()] = valueMem.Value()
 		recordIdx++
 	}
 
 	return values, nil
+}
+
+// shouldSkipColumn determines if a column should be skipped during extraction.
+func shouldSkipColumn(col interface{}) bool {
+	type columnInfo interface {
+		IsPrimaryKeyColumn() bool
+		GetType() string
+	}
+	if c, ok := col.(columnInfo); ok && c.IsPrimaryKeyColumn() {
+		colType := c.GetType()
+		return colType == "INTEGER" || colType == "INT"
+	}
+	return false
+}
+
+// extractColumnValue extracts a single column value from payload.
+func extractColumnValue(payload []byte, recordIdx int) (interface{}, error) {
+	valueMem := NewMem()
+	if err := parseRecordColumn(payload, recordIdx, valueMem); err != nil {
+		return nil, err
+	}
+	return valueMem.Value(), nil
 }
 
 // checkForeignKeyDeleteConstraints validates foreign key constraints for a DELETE operation.
@@ -2473,8 +3421,366 @@ func (v *VDBE) checkForeignKeyDeleteConstraints(tableName string, values map[str
 		return nil
 	}
 
-	// Validate the delete (pass nil for rowReader, rowDeleter, and rowUpdater for now)
-	return mgr.ValidateDelete(tableName, values, v.Ctx.Schema, nil, nil, nil)
+	rowReader := NewVDBERowReader(v)
+	modifier := NewVDBERowModifier(v)
+
+	return mgr.ValidateDelete(tableName, values, v.Ctx.Schema, rowReader, modifier, modifier)
+}
+
+type fkUpdateContext struct {
+	table     string
+	rowid     int64
+	payload   []byte
+	oldValues map[string]interface{}
+	rootPage  uint32
+}
+
+func (v *VDBE) capturePendingUpdate(tableName string, btCursor *btree.BtCursor) error {
+	payload, err := btCursor.GetPayloadWithOverflow()
+	if err != nil {
+		return err
+	}
+	rowid := btCursor.GetKey()
+	values, err := v.extractValuesFromPayloadWithRowid(tableName, payload, rowid)
+	if err != nil {
+		return err
+	}
+	v.pendingFKUpdate = &fkUpdateContext{
+		table:     tableName,
+		rowid:     rowid,
+		payload:   payload,
+		oldValues: values,
+		rootPage:  btCursor.RootPage,
+	}
+	return nil
+}
+
+func (v *VDBE) isWithoutRowidTable(tableName string) bool {
+	if v.Ctx == nil || v.Ctx.Schema == nil || tableName == "" {
+		return false
+	}
+	type schemaWithGetTable interface {
+		GetTableByName(name string) (interface{}, bool)
+	}
+	schemaObj, ok := v.Ctx.Schema.(schemaWithGetTable)
+	if !ok {
+		return false
+	}
+	tableIface, ok := schemaObj.GetTableByName(tableName)
+	if !ok {
+		return false
+	}
+	return v.isTableWithoutRowID(tableIface)
+}
+
+// isTableWithoutRowID checks if a table interface represents a WITHOUT ROWID table.
+func (v *VDBE) isTableWithoutRowID(table interface{}) bool {
+	if table == nil {
+		return false
+	}
+	type tableWithRowid interface {
+		HasRowID() bool
+	}
+	if t, ok := table.(tableWithRowid); ok {
+		return !t.HasRowID()
+	}
+	return false
+}
+
+// computeCompositeKeyBytes encodes the primary key columns from a record payload
+// into order-preserving composite key bytes for WITHOUT ROWID tables.
+// The key is encoded in the order specified by table.PrimaryKey.
+func (v *VDBE) computeCompositeKeyBytes(tableName string, payload []byte) ([]byte, error) {
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return nil, fmt.Errorf("no schema available for WITHOUT ROWID computation")
+	}
+
+	pkCols, pkValues, err := v.extractPKColumns(tableName, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	pkMap := v.buildPKMap(pkCols, pkValues, tableName)
+	if pkMap == nil {
+		return nil, fmt.Errorf("WITHOUT ROWID table %s missing primary key columns", tableName)
+	}
+
+	pkOrder := v.resolvePKOrder(tableName, pkCols)
+	orderedVals, err := v.orderAndValidatePKValues(pkMap, pkOrder)
+	if err != nil {
+		return nil, err
+	}
+
+	return withoutrowid.EncodeCompositeKey(orderedVals), nil
+}
+
+// buildPKMap creates a map from column name to value.
+func (v *VDBE) buildPKMap(pkCols []string, pkValues []interface{}, tableName string) map[string]interface{} {
+	if len(pkCols) == 0 {
+		return nil
+	}
+	pkMap := make(map[string]interface{})
+	for i, name := range pkCols {
+		pkMap[name] = pkValues[i]
+	}
+	return pkMap
+}
+
+// resolvePKOrder determines the primary key column order.
+func (v *VDBE) resolvePKOrder(tableName string, pkCols []string) []string {
+	pkOrder := v.getTablePrimaryKeyOrder(tableName)
+	if len(pkOrder) == 0 {
+		return pkCols
+	}
+	return pkOrder
+}
+
+// orderAndValidatePKValues reorders values and validates for NULL.
+func (v *VDBE) orderAndValidatePKValues(pkMap map[string]interface{}, pkOrder []string) ([]interface{}, error) {
+	orderedVals := make([]interface{}, 0, len(pkOrder))
+	for _, colName := range pkOrder {
+		val, ok := pkMap[colName]
+		if !ok {
+			return nil, fmt.Errorf("primary key column %s not found in payload", colName)
+		}
+		if val == nil {
+			return nil, fmt.Errorf("NOT NULL constraint failed: %s (PRIMARY KEY columns cannot be NULL in WITHOUT ROWID tables)", colName)
+		}
+		orderedVals = append(orderedVals, val)
+	}
+	return orderedVals, nil
+}
+
+// getTablePrimaryKeyOrder returns the PrimaryKey column names in constraint order.
+func (v *VDBE) getTablePrimaryKeyOrder(tableName string) []string {
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return nil
+	}
+
+	type schemaWithGetTable interface {
+		GetTableByName(name string) (interface{}, bool)
+	}
+	schemaObj, ok := v.Ctx.Schema.(schemaWithGetTable)
+	if !ok {
+		return nil
+	}
+
+	tableIface, ok := schemaObj.GetTableByName(tableName)
+	if !ok {
+		return nil
+	}
+
+	type tableWithPK interface {
+		GetPrimaryKey() []string
+	}
+	if t, ok := tableIface.(tableWithPK); ok {
+		return t.GetPrimaryKey()
+	}
+	return nil
+}
+
+// checkWithoutRowidPKUniqueness verifies that the composite key in payload
+// doesn't already exist in the table (unless it's the current row being updated).
+func (v *VDBE) checkWithoutRowidPKUniqueness(tableName string, payload []byte, _ int64, _ int64) error {
+	// Compute the composite key for the new row
+	keyBytes, err := v.computeCompositeKeyBytes(tableName, payload)
+	if err != nil {
+		return err
+	}
+
+	// Find the table's root page and create a cursor to check for duplicates
+	rootPage, err := v.getTableRootPage(tableName)
+	if err != nil {
+		return err
+	}
+
+	bt, ok := v.Ctx.Btree.(*btree.Btree)
+	if !ok {
+		return fmt.Errorf("invalid btree context")
+	}
+
+	// Create a temporary cursor to check for the key
+	tempCursor := btree.NewCursorWithOptions(bt, rootPage, true)
+	found, err := tempCursor.SeekComposite(keyBytes)
+	if err != nil {
+		return fmt.Errorf("failed to seek for uniqueness check: %w", err)
+	}
+
+	// If found, we have a duplicate PK (note: the current row would have been deleted first in UPDATE)
+	if found {
+		return fmt.Errorf("UNIQUE constraint failed: PRIMARY KEY for WITHOUT ROWID table %s", tableName)
+	}
+	return nil
+}
+
+// getTableRootPage returns the root page number for a table.
+func (v *VDBE) getTableRootPage(tableName string) (uint32, error) {
+	type schemaWithGetTable interface {
+		GetTableByName(name string) (interface{}, bool)
+	}
+	schemaObj, ok := v.Ctx.Schema.(schemaWithGetTable)
+	if !ok {
+		return 0, fmt.Errorf("invalid schema type")
+	}
+	tableIface, ok := schemaObj.GetTableByName(tableName)
+	if !ok {
+		return 0, fmt.Errorf("table not found: %s", tableName)
+	}
+	type tableWithRootPage interface {
+		GetRootPage() uint32
+	}
+	if t, ok := tableIface.(tableWithRootPage); ok {
+		return t.GetRootPage(), nil
+	}
+	return 0, fmt.Errorf("table missing root page info: %s", tableName)
+}
+
+func (v *VDBE) extractPKColumns(tableName string, payload []byte) ([]string, []interface{}, error) {
+	tableIface, pkColNames, err := v.getPKColumnNames(tableName)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	columns, err := getColumnsFromTable(tableIface)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	colNameToIdx := buildColumnIndexMap(columns)
+	return extractPKValues(pkColNames, colNameToIdx, payload)
+}
+
+// getPKColumnNames retrieves the primary key column names for a table.
+func (v *VDBE) getPKColumnNames(tableName string) (interface{}, []string, error) {
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return nil, nil, fmt.Errorf("no schema for PK extraction")
+	}
+
+	type schemaWithGetTable interface {
+		GetTableByName(name string) (interface{}, bool)
+	}
+	schemaObj, ok := v.Ctx.Schema.(schemaWithGetTable)
+	if !ok {
+		return nil, nil, fmt.Errorf("invalid schema type for PK extraction")
+	}
+
+	tableIface, ok := schemaObj.GetTableByName(tableName)
+	if !ok {
+		return nil, nil, fmt.Errorf("table not found: %s", tableName)
+	}
+
+	type tableWithPK interface {
+		GetPrimaryKey() []string
+	}
+	pkProvider, ok := tableIface.(tableWithPK)
+	if !ok {
+		return nil, nil, fmt.Errorf("table missing PK info for extraction")
+	}
+
+	pkColNames := pkProvider.GetPrimaryKey()
+	if len(pkColNames) == 0 {
+		return nil, nil, fmt.Errorf("table %s has no primary key columns", tableName)
+	}
+
+	return tableIface, pkColNames, nil
+}
+
+// getColumnsFromTable retrieves the columns from a table interface.
+func getColumnsFromTable(tableIface interface{}) ([]interface{}, error) {
+	type tableWithColumns interface {
+		GetColumns() []interface{}
+	}
+	colsProvider, ok := tableIface.(tableWithColumns)
+	if !ok {
+		return nil, fmt.Errorf("table missing columns for PK extraction")
+	}
+	return colsProvider.GetColumns(), nil
+}
+
+// buildColumnIndexMap creates a map from column name to index.
+func buildColumnIndexMap(columns []interface{}) map[string]int {
+	type colMeta interface {
+		GetName() string
+	}
+	colNameToIdx := make(map[string]int)
+	for idx, colIface := range columns {
+		if col, ok := colIface.(colMeta); ok {
+			colNameToIdx[strings.ToLower(col.GetName())] = idx
+		}
+	}
+	return colNameToIdx
+}
+
+// extractPKValues extracts primary key values from payload based on column names.
+func extractPKValues(pkColNames []string, colNameToIdx map[string]int, payload []byte) ([]string, []interface{}, error) {
+	var pkCols []string
+	var pkValues []interface{}
+	for _, pkColName := range pkColNames {
+		idx, found := colNameToIdx[strings.ToLower(pkColName)]
+		if !found {
+			return nil, nil, fmt.Errorf("PK column %s not found in table columns", pkColName)
+		}
+		mem := NewMem()
+		if err := parseRecordColumn(payload, idx, mem); err != nil {
+			return nil, nil, err
+		}
+		pkCols = append(pkCols, pkColName)
+		pkValues = append(pkValues, memToInterface(mem))
+	}
+	return pkCols, pkValues, nil
+}
+
+func (v *VDBE) pkChanged(oldValues, newValues map[string]interface{}) bool {
+	for k := range oldValues {
+		if strings.EqualFold(k, "rowid") || strings.EqualFold(k, "_rowid_") {
+			delete(oldValues, k)
+		}
+	}
+	for key, oldVal := range oldValues {
+		newVal, ok := newValues[key]
+		if !ok {
+			continue
+		}
+		if !valuesEqualLoose(oldVal, newVal) {
+			return true
+		}
+	}
+	return false
+}
+
+func valuesEqualLoose(a, b interface{}) bool {
+	// Convert both values to float64 for numeric comparison
+	aNum, aIsNum := toNumeric(a)
+	bNum, bIsNum := toNumeric(b)
+	if aIsNum && bIsNum {
+		return aNum == bNum
+	}
+	// String comparison
+	if aStr, ok := a.(string); ok {
+		if bStr, ok := b.(string); ok {
+			return aStr == bStr
+		}
+	}
+	// Blob comparison
+	if aBytes, ok := a.([]byte); ok {
+		if bBytes, ok := b.([]byte); ok {
+			return string(aBytes) == string(bBytes)
+		}
+	}
+	return false
+}
+
+// toNumeric converts a value to float64 for numeric comparison.
+func toNumeric(v interface{}) (float64, bool) {
+	switch val := v.(type) {
+	case int:
+		return float64(val), true
+	case int64:
+		return float64(val), true
+	case float64:
+		return val, true
+	}
+	return 0, false
 }
 
 func (v *VDBE) execDelete(instr *Instruction) error {
@@ -2482,10 +3788,29 @@ func (v *VDBE) execDelete(instr *Instruction) error {
 	if err != nil {
 		return err
 	}
-	if err := v.validateDeleteConstraints(instr.P4.Z, btCursor); err != nil {
+
+	isUpdateDelete := instr.P5 == 1
+	if err := v.handleDeleteConstraints(instr, btCursor, isUpdateDelete); err != nil {
 		return err
 	}
+
 	return v.performDelete(btCursor)
+}
+
+// handleDeleteConstraints manages FK constraints for delete operations.
+func (v *VDBE) handleDeleteConstraints(instr *Instruction, btCursor *btree.BtCursor, isUpdateDelete bool) error {
+	if isUpdateDelete {
+		return v.handleUpdateDeleteConstraints(instr.P4.Z, btCursor)
+	}
+	return v.validateDeleteConstraints(instr.P4.Z, btCursor)
+}
+
+// handleUpdateDeleteConstraints captures pending update for FK validation.
+func (v *VDBE) handleUpdateDeleteConstraints(tableName string, btCursor *btree.BtCursor) error {
+	if tableName == "" || v.Ctx == nil || !v.Ctx.ForeignKeysEnabled {
+		return nil
+	}
+	return v.capturePendingUpdate(tableName, btCursor)
 }
 
 // getDeleteCursor returns a validated writable btree cursor for delete operations.
@@ -2509,12 +3834,113 @@ func (v *VDBE) validateDeleteConstraints(tableName string, btCursor *btree.BtCur
 	if tableName == "" || v.Ctx == nil || !v.Ctx.ForeignKeysEnabled {
 		return nil
 	}
+
+	// Check if this is a WITHOUT ROWID table
+	table := v.getTableFromSchema(tableName)
+	if table != nil && v.isTableWithoutRowID(table) {
+		return v.validateDeleteConstraintsWithoutRowID(tableName, btCursor, table)
+	}
+
 	payload := btCursor.GetPayload()
-	values, err := v.extractValuesFromPayload(tableName, payload)
+	rowid := btCursor.GetKey()
+	values, err := v.extractValuesFromPayloadWithRowid(tableName, payload, rowid)
 	if err != nil {
 		return nil // Skip if can't extract values
 	}
 	return v.checkForeignKeyDeleteConstraints(tableName, values)
+}
+
+// validateDeleteConstraintsWithoutRowID handles FK validation for WITHOUT ROWID table deletes.
+func (v *VDBE) validateDeleteConstraintsWithoutRowID(tableName string, btCursor *btree.BtCursor, table interface{}) error {
+	// For WITHOUT ROWID tables, primary key columns are in the key, not the payload
+	keyBytes := btCursor.GetKeyBytes()
+	payload, err := btCursor.GetCompletePayload()
+	if err != nil {
+		return fmt.Errorf("failed to read row payload: %w", err)
+	}
+
+	// Extract values from both key and payload
+	values, err := v.extractValuesFromKeyAndPayload(tableName, keyBytes, payload, table)
+	if err != nil {
+		return nil // Skip if can't extract values
+	}
+
+	return v.checkForeignKeyDeleteConstraints(tableName, values)
+}
+
+// extractValuesFromKeyAndPayload extracts all column values for WITHOUT ROWID tables.
+func (v *VDBE) extractValuesFromKeyAndPayload(tableName string, keyBytes, payload []byte, table interface{}) (map[string]interface{}, error) {
+	values := make(map[string]interface{})
+
+	// Get table info
+	type tableWithPKAndColumns interface {
+		GetPrimaryKey() []string
+		GetColumns() []interface{}
+	}
+	tbl, ok := table.(tableWithPKAndColumns)
+	if !ok {
+		return nil, fmt.Errorf("table %s doesn't support required interface", tableName)
+	}
+
+	pkCols := tbl.GetPrimaryKey()
+	columns := tbl.GetColumns()
+
+	// Decode primary key values from key bytes
+	if len(pkCols) > 0 && len(keyBytes) > 0 {
+		keyValues, err := withoutrowid.DecodeCompositeKey(keyBytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode key: %w", err)
+		}
+		// Map key values to primary key column names
+		for i, pkCol := range pkCols {
+			if i < len(keyValues) {
+				values[pkCol] = keyValues[i]
+			}
+		}
+	}
+
+	// Extract remaining values from payload using column order
+	for idx, colIface := range columns {
+		type columnInfo interface {
+			GetName() string
+		}
+		col, ok := colIface.(columnInfo)
+		if !ok {
+			continue
+		}
+
+		// Don't override PK values we already got from the key
+		if _, exists := values[col.GetName()]; exists {
+			continue
+		}
+
+		val, err := extractColumnValue(payload, idx)
+		if err != nil {
+			return nil, err
+		}
+		values[col.GetName()] = val
+	}
+
+	return values, nil
+}
+
+// getTableFromSchema retrieves a table from the schema by name.
+func (v *VDBE) getTableFromSchema(tableName string) interface{} {
+	if v.Ctx == nil || v.Ctx.Schema == nil {
+		return nil
+	}
+	type schemaWithGetTableByName interface {
+		GetTableByName(name string) (interface{}, bool)
+	}
+	schema, ok := v.Ctx.Schema.(schemaWithGetTableByName)
+	if !ok {
+		return nil
+	}
+	table, exists := schema.GetTableByName(tableName)
+	if !exists {
+		return nil
+	}
+	return table
 }
 
 // performDelete executes the btree delete and updates counters.
@@ -2889,7 +4315,11 @@ func (v *VDBE) execRollback(instr *Instruction) error {
 
 	// Check if we're in a write transaction
 	if pager.InWriteTransaction() {
-		return pager.Rollback()
+		if err := pager.Rollback(); err != nil {
+			return err
+		}
+		v.clearBtreeCache()
+		return nil
 	}
 
 	// If we're in a read transaction, end it
@@ -2945,7 +4375,11 @@ func (v *VDBE) execCommitOrRollback(pager types.PagerWriter, rollbackFlag int) e
 	if pager.InWriteTransaction() {
 		if rollbackFlag != 0 {
 			// P2 non-zero: rollback
-			return pager.Rollback()
+			if err := pager.Rollback(); err != nil {
+				return err
+			}
+			v.clearBtreeCache()
+			return nil
 		}
 		// P2 zero: commit
 		return pager.Commit()
@@ -3009,9 +4443,27 @@ func (v *VDBE) executeSavepointOperation(pager types.SavepointPager, operation i
 	case 1:
 		return pager.Release(name)
 	case 2:
-		return pager.RollbackTo(name)
+		if err := pager.RollbackTo(name); err != nil {
+			return err
+		}
+		v.clearBtreeCache()
+		return nil
 	default:
 		return fmt.Errorf("invalid savepoint operation: %d", operation)
+	}
+}
+
+// clearBtreeCache clears the btree cache if the underlying implementation supports it.
+// This is needed after rollback operations to discard stale in-memory pages.
+func (v *VDBE) clearBtreeCache() {
+	if v.Ctx == nil || v.Ctx.Btree == nil {
+		return
+	}
+	type cacheClearer interface {
+		ClearCache()
+	}
+	if bt, ok := v.Ctx.Btree.(cacheClearer); ok {
+		bt.ClearCache()
 	}
 }
 
@@ -3095,7 +4547,7 @@ func (v *VDBE) execSorterOpen(instr *Instruction) error {
 		collRegistry = v.Ctx.CollationRegistry
 	}
 
-	v.Sorters[sorterNum] = NewSorterWithRegistry(keyCols, desc, collations, numCols, collRegistry)
+	v.Sorters[sorterNum] = NewSorterWithSpillAndRegistry(keyCols, desc, collations, numCols, collRegistry, nil)
 	return nil
 }
 
@@ -3129,13 +4581,15 @@ func (v *VDBE) execSorterInsert(instr *Instruction) error {
 		row[i] = mem
 	}
 
-	v.Sorters[sorterNum].Insert(row)
+	if err := v.Sorters[sorterNum].Insert(row); err != nil {
+		return fmt.Errorf("sorter insert failed: %w", err)
+	}
 
 	// Track sorter memory usage (rough estimate)
 	if v.Stats != nil {
 		sorter := v.Sorters[sorterNum]
 		// Estimate: each row is roughly numCols * 64 bytes
-		memBytes := int64(len(sorter.Rows) * numCols * 64)
+		memBytes := int64(sorter.NumRows() * numCols * 64)
 		v.Stats.UpdateSorterMemory(memBytes)
 	}
 
@@ -3153,13 +4607,15 @@ func (v *VDBE) execSorterSort(instr *Instruction) error {
 	}
 
 	sorter := v.Sorters[sorterNum]
-	sorter.Sort()
+	if err := sorter.Sort(); err != nil {
+		return fmt.Errorf("sorter sort failed: %w", err)
+	}
 
 	// Rewind to position before first row (Next will move to first)
-	sorter.Current = -1
+	sorter.SetCurrent(-1)
 
 	// Jump if empty
-	if len(sorter.Rows) == 0 && instr.P2 > 0 {
+	if sorter.NumRows() == 0 && instr.P2 > 0 {
 		v.PC = instr.P2
 	}
 	return nil
@@ -3251,23 +4707,95 @@ var affinityHandlers = map[int]affinityFunc{
 // - 4 (REAL): Convert to real
 // - 5 (NUMERIC): Try int, then float, keep text if neither works
 func (v *VDBE) execCast(instr *Instruction) error {
+	// Explicit CAST expression: P4.Z contains the target type name,
+	// P1 is the source register, P2 is the destination register.
+	if instr.P4.Z != "" {
+		return v.execExplicitCast(instr)
+	}
+	// Implicit affinity application (INSERT path): P1 is the register
+	// to modify in-place, P2 is the affinity code (0-5).
+	return v.execAffinityCast(instr)
+}
+
+// execExplicitCast handles CAST(expr AS type) with P1=src, P2=dst, P4.Z=type.
+func (v *VDBE) execExplicitCast(instr *Instruction) error {
+	src, err := v.GetMem(instr.P1)
+	if err != nil {
+		return err
+	}
+	dst, err := v.GetMem(instr.P2)
+	if err != nil {
+		return err
+	}
+	if src.IsNull() {
+		dst.SetNull()
+		return nil
+	}
+	if err := dst.Copy(src); err != nil {
+		return err
+	}
+	typeName := strings.ToUpper(strings.TrimSpace(instr.P4.Z))
+	return applyCast(dst, typeName)
+}
+
+// execAffinityCast handles implicit affinity with P1=register, P2=affinity code.
+func (v *VDBE) execAffinityCast(instr *Instruction) error {
 	mem, err := v.GetMem(instr.P1)
 	if err != nil {
 		return err
 	}
-
-	// NULL values remain NULL regardless of affinity
 	if mem.IsNull() {
 		return nil
 	}
-
-	// Look up the affinity handler
 	handler, ok := affinityHandlers[instr.P2]
 	if !ok {
 		return fmt.Errorf("unknown affinity code: %d", instr.P2)
 	}
-
 	return handler(mem)
+}
+
+// applyCast applies an explicit CAST conversion to a Mem value.
+// Explicit CAST differs from implicit affinity: non-numeric text
+// becomes 0 for INTEGER, 0.0 for REAL (never kept as text).
+func applyCast(mem *Mem, typeName string) error {
+	switch typeName {
+	case "INTEGER", "INT":
+		return explicitCastToInteger(mem)
+	case "REAL":
+		return mem.Realify()
+	case "TEXT":
+		return mem.Stringify()
+	case "BLOB":
+		return castToBlob(mem)
+	case "NUMERIC":
+		return castToNumeric(mem)
+	default:
+		return explicitCastToInteger(mem)
+	}
+}
+
+// explicitCastToInteger implements CAST(x AS INTEGER).
+// Non-numeric strings yield 0, reals are truncated.
+func explicitCastToInteger(mem *Mem) error {
+	if mem.IsInt() {
+		return nil
+	}
+	if mem.IsReal() {
+		mem.SetInt(int64(mem.RealValue()))
+		return nil
+	}
+	// String or blob: try to parse, default to 0
+	str := string(mem.BlobValue())
+	if val, err := strconv.ParseInt(str, 10, 64); err == nil {
+		mem.SetInt(val)
+		return nil
+	}
+	if val, err := strconv.ParseFloat(str, 64); err == nil {
+		mem.SetInt(int64(val))
+		return nil
+	}
+	mem.SetInt(0)
+	return nil
 }
 
 // castToBlob converts a memory value to blob affinity.
@@ -4629,14 +6157,22 @@ func (v *VDBE) execAggStepWindow(instr *Instruction) error {
 // execWindowRowNum implements OpWindowRowNum - ROW_NUMBER() window function
 // P1 = window state index
 // P2 = output register
+// P3 = streaming mode flag (if > 0, increment counter before returning)
 func (v *VDBE) execWindowRowNum(instr *Instruction) error {
 	windowIdx := instr.P1
 	outputReg := instr.P2
+	streamingMode := instr.P3 > 0
 
 	// Get window state
 	windowState, ok := v.WindowStates[windowIdx]
 	if !ok {
 		return fmt.Errorf("window state %d not found", windowIdx)
+	}
+
+	// In streaming mode, increment row counter using call-counting
+	// (only first window function call per row actually increments)
+	if streamingMode {
+		windowState.IncrementPartRowOnFirstCall()
 	}
 
 	// Get row number (1-based)
@@ -4655,9 +6191,11 @@ func (v *VDBE) execWindowRowNum(instr *Instruction) error {
 // execWindowRank implements OpWindowRank - RANK() window function
 // P1 = window state index
 // P2 = output register
+// P3 = number of table columns (streaming mode if > 0, data in registers 0..P3-1)
 func (v *VDBE) execWindowRank(instr *Instruction) error {
 	windowIdx := instr.P1
 	outputReg := instr.P2
+	numCols := instr.P3
 
 	// Get window state
 	windowState, ok := v.WindowStates[windowIdx]
@@ -4665,8 +6203,24 @@ func (v *VDBE) execWindowRank(instr *Instruction) error {
 		return fmt.Errorf("window state %d not found", windowIdx)
 	}
 
-	// Update ranking based on current row
-	windowState.UpdateRanking()
+	// In streaming mode (P3 > 0), read row data from registers and update ranking
+	if numCols > 0 {
+		// Increment row counter using call-counting (only first call per row increments)
+		windowState.IncrementPartRowOnFirstCall()
+
+		// Build current row from registers for ORDER BY comparison
+		currentRow := make([]*Mem, numCols)
+		for i := 0; i < numCols; i++ {
+			mem, err := v.GetMem(i)
+			if err == nil {
+				currentRow[i] = mem
+			}
+		}
+		windowState.UpdateRankingFromRow(currentRow)
+	} else {
+		// Partition mode - use stored partition data
+		windowState.UpdateRanking()
+	}
 
 	// Get rank value
 	rank := windowState.GetRank()
@@ -4684,9 +6238,11 @@ func (v *VDBE) execWindowRank(instr *Instruction) error {
 // execWindowDenseRank implements OpWindowDenseRank - DENSE_RANK() window function
 // P1 = window state index
 // P2 = output register
+// P3 = number of table columns (streaming mode if > 0, data in registers 0..P3-1)
 func (v *VDBE) execWindowDenseRank(instr *Instruction) error {
 	windowIdx := instr.P1
 	outputReg := instr.P2
+	numCols := instr.P3
 
 	// Get window state
 	windowState, ok := v.WindowStates[windowIdx]
@@ -4694,8 +6250,24 @@ func (v *VDBE) execWindowDenseRank(instr *Instruction) error {
 		return fmt.Errorf("window state %d not found", windowIdx)
 	}
 
-	// Update ranking based on current row
-	windowState.UpdateRanking()
+	// In streaming mode (P3 > 0), read row data from registers and update ranking
+	if numCols > 0 {
+		// Increment row counter using call-counting (only first call per row increments)
+		windowState.IncrementPartRowOnFirstCall()
+
+		// Build current row from registers for ORDER BY comparison
+		currentRow := make([]*Mem, numCols)
+		for i := 0; i < numCols; i++ {
+			mem, err := v.GetMem(i)
+			if err == nil {
+				currentRow[i] = mem
+			}
+		}
+		windowState.UpdateRankingFromRow(currentRow)
+	} else {
+		// Partition mode - use stored partition data
+		windowState.UpdateRanking()
+	}
 
 	// Get dense rank value
 	denseRank := windowState.GetDenseRank()
@@ -4769,6 +6341,10 @@ func (v *VDBE) execWindowLag(instr *Instruction) error {
 		return err
 	}
 
+	v.initWindowPartition(windowState)
+	windowState.IncrementPartRowOnFirstCall()
+	v.advancePartitionIfNeeded(windowState)
+
 	offset := v.getWindowOffset(instr)
 	lagRow := windowState.GetLagRow(offset)
 
@@ -4787,6 +6363,10 @@ func (v *VDBE) execWindowLead(instr *Instruction) error {
 		return err
 	}
 
+	v.initWindowPartition(windowState)
+	windowState.IncrementPartRowOnFirstCall()
+	v.advancePartitionIfNeeded(windowState)
+
 	offset := v.getWindowOffset(instr)
 	leadRow := windowState.GetLeadRow(offset)
 
@@ -4798,23 +6378,21 @@ func (v *VDBE) execWindowLead(instr *Instruction) error {
 // P2 = output register
 // P3 = column index to retrieve
 func (v *VDBE) execWindowFirstValue(instr *Instruction) error {
-	windowIdx := instr.P1
-	outputReg := instr.P2
-	colIdx := instr.P3
-
-	// Get window state
-	windowState, ok := v.WindowStates[windowIdx]
-	if !ok {
-		return fmt.Errorf("window state %d not found", windowIdx)
-	}
-
-	// Get first value in frame
-	firstValue := windowState.GetFirstValue(colIdx)
-
-	// Store result
-	mem, err := v.GetMem(outputReg)
+	windowState, err := v.getWindowState(instr.P1)
 	if err != nil {
 		return err
+	}
+
+	v.initWindowPartition(windowState)
+	windowState.IncrementPartRowOnFirstCall()
+	v.advancePartitionIfNeeded(windowState)
+	windowState.UpdateFrame()
+
+	firstValue := windowState.GetFirstValue(instr.P3)
+
+	mem, mErr := v.GetMem(instr.P2)
+	if mErr != nil {
+		return mErr
 	}
 
 	return mem.Copy(firstValue)
@@ -4825,26 +6403,78 @@ func (v *VDBE) execWindowFirstValue(instr *Instruction) error {
 // P2 = output register
 // P3 = column index to retrieve
 func (v *VDBE) execWindowLastValue(instr *Instruction) error {
-	windowIdx := instr.P1
-	outputReg := instr.P2
-	colIdx := instr.P3
-
-	// Get window state
-	windowState, ok := v.WindowStates[windowIdx]
-	if !ok {
-		return fmt.Errorf("window state %d not found", windowIdx)
-	}
-
-	// Get last value in frame
-	lastValue := windowState.GetLastValue(colIdx)
-
-	// Store result
-	mem, err := v.GetMem(outputReg)
+	windowState, err := v.getWindowState(instr.P1)
 	if err != nil {
 		return err
 	}
 
+	v.initWindowPartition(windowState)
+	windowState.IncrementPartRowOnFirstCall()
+	v.advancePartitionIfNeeded(windowState)
+	windowState.UpdateFrame()
+
+	lastValue := windowState.GetLastValue(instr.P3)
+
+	mem, mErr := v.GetMem(instr.P2)
+	if mErr != nil {
+		return mErr
+	}
+
 	return mem.Copy(lastValue)
+}
+
+// execWindowNthValue implements OpWindowNthValue - NTH_VALUE() window function
+// P1 = window state index
+// P2 = output register
+// P3 = column index to retrieve
+// P4 = N (which row in the frame, 1-based)
+func (v *VDBE) execWindowNthValue(instr *Instruction) error {
+	windowState, err := v.getWindowState(instr.P1)
+	if err != nil {
+		return err
+	}
+
+	v.initWindowPartition(windowState)
+	windowState.IncrementPartRowOnFirstCall()
+	v.advancePartitionIfNeeded(windowState)
+
+	windowState.UpdateFrame()
+
+	n := int(instr.P4.I)
+	if n < 1 {
+		n = 1
+	}
+
+	nthValue := windowState.GetNthValue(instr.P3, n)
+
+	mem, mErr := v.GetMem(instr.P2)
+	if mErr != nil {
+		return mErr
+	}
+
+	return mem.Copy(nthValue)
+}
+
+// initWindowPartition initializes partition tracking on first call after row population.
+func (v *VDBE) initWindowPartition(ws *WindowState) {
+	if ws.CurrentPartIdx < 0 && len(ws.Partitions) > 0 {
+		ws.CurrentPartIdx = 0
+		ws.CurrentPartRow = -1
+	}
+}
+
+// advancePartitionIfNeeded moves to the next partition when the current row
+// exceeds the current partition's row count.
+func (v *VDBE) advancePartitionIfNeeded(ws *WindowState) {
+	if ws.CurrentPartIdx < 0 || ws.CurrentPartIdx >= len(ws.Partitions) {
+		return
+	}
+	part := ws.Partitions[ws.CurrentPartIdx]
+	if ws.CurrentPartRow >= len(part.Rows) {
+		ws.CurrentPartIdx++
+		ws.CurrentPartRow = 0
+		ws.CallsThisRow = 0
+	}
 }
 
 // getWindowState retrieves a window state by index.
@@ -4898,6 +6528,7 @@ func (v *VDBE) execAggDistinct(instr *Instruction) error {
 	inputReg := instr.P1
 	jumpAddr := instr.P2
 	aggReg := instr.P3
+	collName := instr.P4.Z
 
 	// Get the value to check
 	mem, err := v.GetMem(inputReg)
@@ -4916,7 +6547,7 @@ func (v *VDBE) execAggDistinct(instr *Instruction) error {
 	}
 
 	// Convert value to string key for deduplication
-	key := mem.ToDistinctKey()
+	key := mem.ToDistinctKeyWithCollation(collName, v.getCollationRegistry())
 
 	// Check if we've seen this value before
 	if v.DistinctSets[aggReg][key] {
@@ -4942,9 +6573,15 @@ func (v *VDBE) execDistinctRow(instr *Instruction) error {
 	firstReg := instr.P1
 	jumpAddr := instr.P2
 	numCols := instr.P3
+	var collations []string
+	if instr.P4.P != nil {
+		if cols, ok := instr.P4.P.([]string); ok {
+			collations = cols
+		}
+	}
 
 	// Build a composite key from all columns
-	key, err := v.buildDistinctKey(firstReg, numCols)
+	key, err := v.buildDistinctKey(firstReg, numCols, collations)
 	if err != nil {
 		return err
 	}
@@ -4970,7 +6607,7 @@ func (v *VDBE) execDistinctRow(instr *Instruction) error {
 }
 
 // buildDistinctKey creates a composite key from multiple register values
-func (v *VDBE) buildDistinctKey(firstReg, numCols int) (string, error) {
+func (v *VDBE) buildDistinctKey(firstReg, numCols int, collations []string) (string, error) {
 	var key string
 	for i := 0; i < numCols; i++ {
 		mem, err := v.GetMem(firstReg + i)
@@ -4980,7 +6617,11 @@ func (v *VDBE) buildDistinctKey(firstReg, numCols int) (string, error) {
 		if i > 0 {
 			key += "\x00" // Separator
 		}
-		key += mem.ToDistinctKey()
+		collName := ""
+		if i < len(collations) {
+			collName = collations[i]
+		}
+		key += mem.ToDistinctKeyWithCollation(collName, v.getCollationRegistry())
 	}
 	return key, nil
 }
@@ -5000,4 +6641,11 @@ func (v *VDBE) jumpIfValid(jumpAddr int) {
 	if jumpAddr >= 0 && jumpAddr < len(v.Program) {
 		v.PC = jumpAddr
 	}
+}
+
+func (v *VDBE) getCollationRegistry() interface{} {
+	if v.Ctx == nil {
+		return nil
+	}
+	return v.Ctx.CollationRegistry
 }

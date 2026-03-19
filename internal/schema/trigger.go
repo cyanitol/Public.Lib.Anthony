@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 // Package schema provides trigger management for the Anthony SQLite clone.
 package schema
 
@@ -43,9 +43,14 @@ func (s *Schema) CreateTrigger(stmt *parser.CreateTriggerStmt) (*Trigger, error)
 		}
 	}
 
-	// Check if table exists
-	if !s.tableExistsLocked(stmt.Table) {
+	// Check if table exists (tables or views)
+	if !s.tableExistsLocked(stmt.Table) && !s.viewExistsLocked(stmt.Table) {
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
+	}
+
+	// INSTEAD OF triggers are only valid on views, not tables
+	if stmt.Timing == parser.TriggerInsteadOf && !s.viewExistsLocked(stmt.Table) {
+		return nil, fmt.Errorf("cannot create INSTEAD OF trigger on table: %s", stmt.Table)
 	}
 
 	// Create the trigger

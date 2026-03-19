@@ -1,8 +1,9 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package pager
 
 import (
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -98,6 +99,9 @@ type BusyHandler interface {
 // This handler sleeps for progressively longer periods between retry attempts,
 // similar to SQLite's default busy handler.
 type DefaultBusyHandler struct {
+	// mu protects startTime and rng from concurrent access
+	mu sync.Mutex
+
 	// timeout is the total time allowed for retry attempts
 	timeout time.Duration
 
@@ -130,14 +134,18 @@ func NewDefaultBusyHandler(timeout time.Duration) *DefaultBusyHandler {
 // It sleeps for an exponentially increasing duration with jitter,
 // and returns false once the total timeout has been exceeded.
 func (h *DefaultBusyHandler) Busy(count int) bool {
+	h.mu.Lock()
 	h.initializeStartTime(count)
 
 	elapsed := time.Since(h.startTime)
 	if elapsed >= h.timeout {
+		h.mu.Unlock()
 		return false
 	}
 
 	delay := h.calculateDelayWithBackoff(count, elapsed)
+	h.mu.Unlock()
+
 	h.sleepWithDelay(delay)
 
 	return true
@@ -195,7 +203,9 @@ func (h *DefaultBusyHandler) sleepWithDelay(delay time.Duration) {
 // Reset resets the busy handler state, clearing the start time.
 // This is called when a lock is successfully acquired or the operation completes.
 func (h *DefaultBusyHandler) Reset() {
+	h.mu.Lock()
 	h.startTime = time.Time{}
+	h.mu.Unlock()
 }
 
 // CallbackBusyHandler wraps a callback function as a BusyHandler.
@@ -232,6 +242,7 @@ func (h *CallbackBusyHandler) Busy(count int) bool {
 // TimeoutBusyHandler is a simple busy handler that retries for a fixed duration.
 // It sleeps for a fixed interval between retries until the timeout is reached.
 type TimeoutBusyHandler struct {
+	mu           sync.Mutex
 	timeout      time.Duration
 	retryDelay   time.Duration
 	startTime    time.Time
@@ -253,6 +264,8 @@ func BusyTimeout(timeout time.Duration) BusyHandler {
 // Busy implements the BusyHandler interface.
 // It sleeps for a fixed interval and returns false once timeout is exceeded.
 func (h *TimeoutBusyHandler) Busy(count int) bool {
+	h.mu.Lock()
+
 	// Initialize start time on first call or if it's been reset
 	if count == 0 || h.startTime.IsZero() {
 		h.startTime = time.Now()
@@ -262,6 +275,7 @@ func (h *TimeoutBusyHandler) Busy(count int) bool {
 	// Check if we've exceeded the timeout
 	elapsed := time.Since(h.startTime)
 	if elapsed >= h.timeout {
+		h.mu.Unlock()
 		return false
 	}
 
@@ -277,6 +291,8 @@ func (h *TimeoutBusyHandler) Busy(count int) bool {
 		sleepDuration = remaining
 	}
 
+	h.mu.Unlock()
+
 	if sleepDuration > 0 {
 		time.Sleep(sleepDuration)
 	}
@@ -286,6 +302,8 @@ func (h *TimeoutBusyHandler) Busy(count int) bool {
 
 // GetTotalRetries returns the total number of retries attempted.
 func (h *TimeoutBusyHandler) GetTotalRetries() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return h.totalRetries
 }
 
@@ -319,10 +337,13 @@ func (p *Pager) GetBusyHandler() BusyHandler {
 // invokeBusyHandler invokes the busy handler if one is set.
 // Returns true if the operation should be retried, false otherwise.
 func (p *Pager) invokeBusyHandler(count int) bool {
-	if p.busyHandler == nil {
+	p.mu.RLock()
+	handler := p.busyHandler
+	p.mu.RUnlock()
+	if handler == nil {
 		return false
 	}
-	return p.busyHandler.Busy(count)
+	return handler.Busy(count)
 }
 
 // acquireSharedLockWithRetry attempts to acquire a shared lock with busy handler support.

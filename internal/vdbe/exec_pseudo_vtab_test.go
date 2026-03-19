@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package vdbe
 
 import (
@@ -82,19 +82,55 @@ func TestOpenPseudoOpcode(t *testing.T) {
 	})
 }
 
+// Helper to create VTab cursor for testing
+func setupVTabCursor(t *testing.T, initialized bool) (*VDBE, *Cursor) {
+	t.Helper()
+	v := NewTestVDBE(10)
+	v.Cursors = make([]*Cursor, 2)
+	cursor := &Cursor{
+		CurType: CursorVTab,
+		VTable:  "mock_vtable",
+	}
+	if initialized {
+		cursor.VTabCursor = "mock_vtab_cursor"
+	}
+	v.Cursors[0] = cursor
+	return v, cursor
+}
+
+// Helper to verify cursor properties
+func verifyCursor(t *testing.T, cursor *Cursor, expectedType CursorType, shouldHaveVTable bool) {
+	t.Helper()
+	if cursor == nil {
+		t.Fatal("Cursor not created")
+	}
+	if cursor.CurType != expectedType {
+		t.Errorf("Expected %v, got %v", expectedType, cursor.CurType)
+	}
+	if shouldHaveVTable && cursor.VTable == nil {
+		t.Error("VTable should be set")
+	}
+}
+
+// Helper to test error case
+func expectError(t *testing.T, err error, context string) {
+	t.Helper()
+	if err == nil {
+		t.Errorf("Expected error for %s", context)
+	}
+}
+
 // TestVirtualTableOpcodes tests virtual table related opcodes
 func TestVirtualTableOpcodes(t *testing.T) {
 	t.Parallel()
 	t.Run("VOpen_Basic", func(t *testing.T) {
 		t.Parallel()
 		v := NewTestVDBE(10)
-
-		// Create a mock virtual table (just use a string for testing)
 		mockVTable := "mock_vtable"
 
 		instr := &Instruction{
 			Opcode: OpVOpen,
-			P1:     0, // cursor number
+			P1:     0,
 			P2:     0,
 			P3:     0,
 			P4:     P4Union{P: mockVTable},
@@ -106,53 +142,31 @@ func TestVirtualTableOpcodes(t *testing.T) {
 			t.Fatalf("execVOpen failed: %v", err)
 		}
 
-		// Check cursor was created
-		cursor := v.Cursors[0]
-		if cursor == nil {
-			t.Fatal("Cursor not created")
-		}
-
-		if cursor.CurType != CursorVTab {
-			t.Errorf("Expected CursorVTab, got %v", cursor.CurType)
-		}
-
-		if cursor.VTable == nil {
-			t.Error("VTable should be set")
-		}
+		verifyCursor(t, v.Cursors[0], CursorVTab, true)
 	})
 
 	t.Run("VOpen_NilVTable", func(t *testing.T) {
 		t.Parallel()
 		v := NewTestVDBE(10)
-
 		instr := &Instruction{
 			Opcode: OpVOpen,
 			P1:     0,
 			P4:     P4Union{P: nil},
 			P4Type: P4VTab,
 		}
-
-		err := v.execVOpen(instr)
-		if err == nil {
-			t.Error("Expected error for nil virtual table")
-		}
+		expectError(t, v.execVOpen(instr), "nil virtual table")
 	})
 
 	t.Run("VOpen_WrongP4Type", func(t *testing.T) {
 		t.Parallel()
 		v := NewTestVDBE(10)
-
 		instr := &Instruction{
 			Opcode: OpVOpen,
 			P1:     0,
 			P4:     P4Union{Z: "not a vtable"},
-			P4Type: P4Static, // Wrong type
+			P4Type: P4Static,
 		}
-
-		err := v.execVOpen(instr)
-		if err == nil {
-			t.Error("Expected error for wrong P4 type")
-		}
+		expectError(t, v.execVOpen(instr), "wrong P4 type")
 	})
 
 	t.Run("VFilter_Basic", func(t *testing.T) {
@@ -196,51 +210,19 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	t.Run("VFilter_WrongCursorType", func(t *testing.T) {
 		t.Parallel()
 		v := NewTestVDBE(10)
-
-		// Create a non-virtual cursor
 		v.Cursors = make([]*Cursor, 2)
-		v.Cursors[0] = &Cursor{
-			CurType: CursorBTree,
-		}
-
-		instr := &Instruction{
-			Opcode: OpVFilter,
-			P1:     0,
-			P2:     0,
-			P3:     0,
-		}
-
-		err := v.execVFilter(instr)
-		if err == nil {
-			t.Error("Expected error for wrong cursor type")
-		}
+		v.Cursors[0] = &Cursor{CurType: CursorBTree}
+		expectError(t, v.execVFilter(&Instruction{Opcode: OpVFilter, P1: 0, P2: 0, P3: 0}), "wrong cursor type")
 	})
 
 	t.Run("VColumn_Basic", func(t *testing.T) {
 		t.Parallel()
-		v := NewTestVDBE(10)
-
-		// Create a virtual table cursor with initialized VTabCursor
-		v.Cursors = make([]*Cursor, 2)
-		v.Cursors[0] = &Cursor{
-			CurType:    CursorVTab,
-			VTable:     "mock_vtable",
-			VTabCursor: "mock_vtab_cursor",
-		}
-
-		instr := &Instruction{
-			Opcode: OpVColumn,
-			P1:     0, // cursor
-			P2:     1, // column number
-			P3:     5, // destination register
-		}
-
+		v, _ := setupVTabCursor(t, true)
+		instr := &Instruction{Opcode: OpVColumn, P1: 0, P2: 1, P3: 5}
 		err := v.execVColumn(instr)
 		if err != nil {
 			t.Fatalf("execVColumn failed: %v", err)
 		}
-
-		// Result should be in register 5 (currently set to NULL by default)
 		if !v.Mem[5].IsNull() {
 			t.Logf("Note: VColumn currently returns NULL (stub implementation)")
 		}
@@ -249,70 +231,24 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	t.Run("VColumn_NoCursor", func(t *testing.T) {
 		t.Parallel()
 		v := NewTestVDBE(10)
-
-		instr := &Instruction{
-			Opcode: OpVColumn,
-			P1:     0,
-			P2:     1,
-			P3:     5,
-		}
-
-		err := v.execVColumn(instr)
-		if err == nil {
-			t.Error("Expected error for missing cursor")
-		}
+		expectError(t, v.execVColumn(&Instruction{Opcode: OpVColumn, P1: 0, P2: 1, P3: 5}), "missing cursor")
 	})
 
 	t.Run("VColumn_UninitializedCursor", func(t *testing.T) {
 		t.Parallel()
-		v := NewTestVDBE(10)
-
-		v.Cursors = make([]*Cursor, 2)
-		v.Cursors[0] = &Cursor{
-			CurType:    CursorVTab,
-			VTable:     "mock_vtable",
-			VTabCursor: nil, // Not initialized
-		}
-
-		instr := &Instruction{
-			Opcode: OpVColumn,
-			P1:     0,
-			P2:     1,
-			P3:     5,
-		}
-
-		err := v.execVColumn(instr)
-		if err == nil {
-			t.Error("Expected error for uninitialized virtual cursor")
-		}
+		v, _ := setupVTabCursor(t, false)
+		expectError(t, v.execVColumn(&Instruction{Opcode: OpVColumn, P1: 0, P2: 1, P3: 5}), "uninitialized cursor")
 	})
 
 	t.Run("VNext_Basic", func(t *testing.T) {
 		t.Parallel()
-		v := NewTestVDBE(10)
-
-		v.Cursors = make([]*Cursor, 2)
-		v.Cursors[0] = &Cursor{
-			CurType:    CursorVTab,
-			VTable:     "mock_vtable",
-			VTabCursor: "mock_vtab_cursor",
-			EOF:        false,
-		}
-
-		instr := &Instruction{
-			Opcode: OpVNext,
-			P1:     0,  // cursor
-			P2:     10, // jump address
-		}
-
+		v, cursor := setupVTabCursor(t, true)
+		cursor.EOF = false
 		v.PC = 0
-		err := v.execVNext(instr)
+		err := v.execVNext(&Instruction{Opcode: OpVNext, P1: 0, P2: 10})
 		if err != nil {
 			t.Fatalf("execVNext failed: %v", err)
 		}
-
-		// Current stub implementation sets EOF to true
-		// So PC should not jump
 		if v.PC == 10 {
 			t.Error("Should not jump when EOF is true")
 		}
@@ -321,69 +257,24 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	t.Run("VNext_WrongCursorType", func(t *testing.T) {
 		t.Parallel()
 		v := NewTestVDBE(10)
-
 		v.Cursors = make([]*Cursor, 2)
-		v.Cursors[0] = &Cursor{
-			CurType: CursorBTree,
-		}
-
-		instr := &Instruction{
-			Opcode: OpVNext,
-			P1:     0,
-			P2:     10,
-		}
-
-		err := v.execVNext(instr)
-		if err == nil {
-			t.Error("Expected error for wrong cursor type")
-		}
+		v.Cursors[0] = &Cursor{CurType: CursorBTree}
+		expectError(t, v.execVNext(&Instruction{Opcode: OpVNext, P1: 0, P2: 10}), "wrong cursor type")
 	})
 
 	t.Run("VNext_UninitializedCursor", func(t *testing.T) {
 		t.Parallel()
-		v := NewTestVDBE(10)
-
-		v.Cursors = make([]*Cursor, 2)
-		v.Cursors[0] = &Cursor{
-			CurType:    CursorVTab,
-			VTabCursor: nil,
-		}
-
-		instr := &Instruction{
-			Opcode: OpVNext,
-			P1:     0,
-			P2:     10,
-		}
-
-		err := v.execVNext(instr)
-		if err == nil {
-			t.Error("Expected error for uninitialized cursor")
-		}
+		v, _ := setupVTabCursor(t, false)
+		expectError(t, v.execVNext(&Instruction{Opcode: OpVNext, P1: 0, P2: 10}), "uninitialized cursor")
 	})
 
 	t.Run("VRowid_Direct", func(t *testing.T) {
 		t.Parallel()
-		v := NewTestVDBE(10)
-
-		v.Cursors = make([]*Cursor, 2)
-		v.Cursors[0] = &Cursor{
-			CurType:    CursorVTab,
-			VTable:     "mock_vtable",
-			VTabCursor: "mock_vtab_cursor",
-		}
-
-		// Call execVRowid directly since there's no OpVRowid opcode
-		instr := &Instruction{
-			P1: 0, // cursor
-			P2: 3, // destination register
-		}
-
-		err := v.execVRowid(instr)
+		v, _ := setupVTabCursor(t, true)
+		err := v.execVRowid(&Instruction{P1: 0, P2: 3})
 		if err != nil {
 			t.Fatalf("execVRowid failed: %v", err)
 		}
-
-		// Result should be in register 3 (currently set to 0 by default)
 		if !v.Mem[3].IsInt() {
 			t.Error("VRowid should return an integer")
 		}
@@ -392,41 +283,14 @@ func TestVirtualTableOpcodes(t *testing.T) {
 	t.Run("VRowid_WrongCursorType", func(t *testing.T) {
 		t.Parallel()
 		v := NewTestVDBE(10)
-
 		v.Cursors = make([]*Cursor, 2)
-		v.Cursors[0] = &Cursor{
-			CurType: CursorBTree,
-		}
-
-		instr := &Instruction{
-			P1: 0,
-			P2: 3,
-		}
-
-		err := v.execVRowid(instr)
-		if err == nil {
-			t.Error("Expected error for wrong cursor type")
-		}
+		v.Cursors[0] = &Cursor{CurType: CursorBTree}
+		expectError(t, v.execVRowid(&Instruction{P1: 0, P2: 3}), "wrong cursor type")
 	})
 
 	t.Run("VRowid_UninitializedCursor", func(t *testing.T) {
 		t.Parallel()
-		v := NewTestVDBE(10)
-
-		v.Cursors = make([]*Cursor, 2)
-		v.Cursors[0] = &Cursor{
-			CurType:    CursorVTab,
-			VTabCursor: nil,
-		}
-
-		instr := &Instruction{
-			P1: 0,
-			P2: 3,
-		}
-
-		err := v.execVRowid(instr)
-		if err == nil {
-			t.Error("Expected error for uninitialized cursor")
-		}
+		v, _ := setupVTabCursor(t, false)
+		expectError(t, v.execVRowid(&Instruction{P1: 0, P2: 3}), "uninitialized cursor")
 	})
 }

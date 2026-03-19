@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package vdbe
 
 import (
@@ -568,89 +568,66 @@ func TestGetLogicalOperands(t *testing.T) {
 	})
 }
 
+// arithTestCase represents a declarative arithmetic operation test
+type arithTestCase struct {
+	name     string
+	opcode   Opcode
+	leftInt  int64
+	leftReal float64
+	isLeftInt bool
+	rightInt  int64
+	rightReal float64
+	isRightInt bool
+	expectInt  int64
+	expectReal float64
+	isExpectInt bool
+}
+
+// arithExecOp executes the arithmetic operation for the given opcode
+func arithExecOp(v *VDBE, opcode Opcode, instr *Instruction) error {
+	switch opcode {
+	case OpAdd:
+		return v.execAdd(instr)
+	case OpSubtract:
+		return v.execSubtract(instr)
+	case OpMultiply:
+		return v.execMultiply(instr)
+	case OpDivide:
+		return v.execDivide(instr)
+	case OpRemainder:
+		return v.execRemainder(instr)
+	default:
+		return nil
+	}
+}
+
+// arithVerifyResult checks if the result matches expected value
+func arithVerifyResult(t *testing.T, mem *Mem, tc arithTestCase) {
+	t.Helper()
+	if tc.isExpectInt {
+		if !mem.IsInt() || mem.IntValue() != tc.expectInt {
+			t.Errorf("Expected int %d, got type=%v val=%v", tc.expectInt, mem.IsInt(), mem.IntValue())
+		}
+	} else {
+		if !mem.IsReal() || mem.RealValue() != tc.expectReal {
+			t.Errorf("Expected real %f, got type=%v val=%v", tc.expectReal, mem.IsReal(), mem.RealValue())
+		}
+	}
+}
+
 // TestArithmeticOperations tests arithmetic operations comprehensively
 func TestArithmeticOperations(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name     string
-		opcode   Opcode
-		left     interface{}
-		right    interface{}
-		expected interface{}
-		wantType func(*Mem) bool
-	}{
-		{
-			name:     "AddInts",
-			opcode:   OpAdd,
-			left:     int64(10),
-			right:    int64(20),
-			expected: int64(30),
-			wantType: func(m *Mem) bool { return m.IsInt() && m.IntValue() == 30 },
-		},
-		{
-			name:     "AddReals",
-			opcode:   OpAdd,
-			left:     1.5,
-			right:    2.5,
-			expected: 4.0,
-			wantType: func(m *Mem) bool { return m.IsReal() && m.RealValue() == 4.0 },
-		},
-		{
-			name:     "SubtractInts",
-			opcode:   OpSubtract,
-			left:     int64(50),
-			right:    int64(20),
-			expected: int64(30),
-			wantType: func(m *Mem) bool { return m.IsInt() && m.IntValue() == 30 },
-		},
-		{
-			name:     "SubtractReals",
-			opcode:   OpSubtract,
-			left:     5.5,
-			right:    2.5,
-			expected: 3.0,
-			wantType: func(m *Mem) bool { return m.IsReal() && m.RealValue() == 3.0 },
-		},
-		{
-			name:     "MultiplyInts",
-			opcode:   OpMultiply,
-			left:     int64(5),
-			right:    int64(6),
-			expected: int64(30),
-			wantType: func(m *Mem) bool { return m.IsInt() && m.IntValue() == 30 },
-		},
-		{
-			name:     "MultiplyReals",
-			opcode:   OpMultiply,
-			left:     2.5,
-			right:    4.0,
-			expected: 10.0,
-			wantType: func(m *Mem) bool { return m.IsReal() && m.RealValue() == 10.0 },
-		},
-		{
-			name:     "DivideInts",
-			opcode:   OpDivide,
-			left:     int64(20),
-			right:    int64(4),
-			expected: 5.0,
-			wantType: func(m *Mem) bool { return m.IsReal() && m.RealValue() == 5.0 },
-		},
-		{
-			name:     "DivideReals",
-			opcode:   OpDivide,
-			left:     10.0,
-			right:    2.0,
-			expected: 5.0,
-			wantType: func(m *Mem) bool { return m.IsReal() && m.RealValue() == 5.0 },
-		},
-		{
-			name:     "RemainderInts",
-			opcode:   OpRemainder,
-			left:     int64(17),
-			right:    int64(5),
-			expected: int64(2),
-			wantType: func(m *Mem) bool { return m.IsInt() && m.IntValue() == 2 },
-		},
+	tests := []arithTestCase{
+		{name: "AddInts", opcode: OpAdd, leftInt: 10, isLeftInt: true, rightInt: 20, isRightInt: true, expectInt: 30, isExpectInt: true},
+		{name: "AddReals", opcode: OpAdd, leftReal: 1.5, isLeftInt: false, rightReal: 2.5, isRightInt: false, expectReal: 4.0, isExpectInt: false},
+		{name: "SubtractInts", opcode: OpSubtract, leftInt: 50, isLeftInt: true, rightInt: 20, isRightInt: true, expectInt: 30, isExpectInt: true},
+		{name: "SubtractReals", opcode: OpSubtract, leftReal: 5.5, isLeftInt: false, rightReal: 2.5, isRightInt: false, expectReal: 3.0, isExpectInt: false},
+		{name: "MultiplyInts", opcode: OpMultiply, leftInt: 5, isLeftInt: true, rightInt: 6, isRightInt: true, expectInt: 30, isExpectInt: true},
+		{name: "MultiplyReals", opcode: OpMultiply, leftReal: 2.5, isLeftInt: false, rightReal: 4.0, isRightInt: false, expectReal: 10.0, isExpectInt: false},
+		{name: "DivideInts", opcode: OpDivide, leftInt: 20, isLeftInt: true, rightInt: 4, isRightInt: true, expectInt: 5, isExpectInt: true},
+		{name: "DivideReals", opcode: OpDivide, leftReal: 10.0, isLeftInt: false, rightReal: 2.0, isRightInt: false, expectReal: 5.0, isExpectInt: false},
+		{name: "RemainderInts", opcode: OpRemainder, leftInt: 17, isLeftInt: true, rightInt: 5, isRightInt: true, expectInt: 2, isExpectInt: true},
 	}
 
 	for _, tt := range tests {
@@ -659,49 +636,25 @@ func TestArithmeticOperations(t *testing.T) {
 			t.Parallel()
 			v := NewTestVDBE(5)
 
-			// Setup operands
-			switch l := tt.left.(type) {
-			case int64:
-				v.Mem[0].SetInt(l)
-			case float64:
-				v.Mem[0].SetReal(l)
+			if tt.isLeftInt {
+				v.Mem[0].SetInt(tt.leftInt)
+			} else {
+				v.Mem[0].SetReal(tt.leftReal)
 			}
 
-			switch r := tt.right.(type) {
-			case int64:
-				v.Mem[1].SetInt(r)
-			case float64:
-				v.Mem[1].SetReal(r)
+			if tt.isRightInt {
+				v.Mem[1].SetInt(tt.rightInt)
+			} else {
+				v.Mem[1].SetReal(tt.rightReal)
 			}
 
-			instr := &Instruction{
-				Opcode: tt.opcode,
-				P1:     0,
-				P2:     1,
-				P3:     2,
-			}
+			instr := &Instruction{Opcode: tt.opcode, P1: 0, P2: 1, P3: 2}
 
-			var err error
-			switch tt.opcode {
-			case OpAdd:
-				err = v.execAdd(instr)
-			case OpSubtract:
-				err = v.execSubtract(instr)
-			case OpMultiply:
-				err = v.execMultiply(instr)
-			case OpDivide:
-				err = v.execDivide(instr)
-			case OpRemainder:
-				err = v.execRemainder(instr)
-			}
-
-			if err != nil {
+			if err := arithExecOp(v, tt.opcode, instr); err != nil {
 				t.Fatalf("Operation failed: %v", err)
 			}
 
-			if !tt.wantType(v.Mem[2]) {
-				t.Errorf("Result type check failed")
-			}
+			arithVerifyResult(t, v.Mem[2], tt)
 		})
 	}
 }

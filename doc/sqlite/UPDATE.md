@@ -31,12 +31,12 @@ Search Changelog
 UPDATE
 
 Table Of Contents
-[1. Overview](#overview)
-[2. Details](#details)
-[2.1. Restrictions on UPDATE Statements Within CREATE TRIGGER](#restrictions_on_update_statements_within_create_trigger)
-[2.2. UPDATE FROM](#update_from)
-[2.2.1. UPDATE FROM in other SQL database engines](#update_from_in_other_sql_database_engines)
-[2.3. Optional LIMIT and ORDER BY Clauses](#optional_limit_and_order_by_clauses)
+[1. Overview](#1-overview)
+[2. Details](#2-details)
+[2.1. Restrictions on UPDATE Statements Within CREATE TRIGGER](#21-restrictions-on-update-statements-within-create-trigger)
+[2.2. UPDATE FROM](#22-update-from)
+[2.2.1. UPDATE FROM in other SQL database engines](#221-update-from-in-other-sql-database-engines)
+[2.3. Optional LIMIT and ORDER BY Clauses](#23-optional-limit-and-order-by-clauses)
 
 # 1. Overview
 

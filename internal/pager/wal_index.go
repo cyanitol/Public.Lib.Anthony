@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package pager
 
 import (
@@ -742,7 +742,10 @@ func (w *WALIndex) syncMmap() error {
 		return errors.New("mmap not initialized")
 	}
 
-	// Use msync to flush changes to disk
+	// Use msync to flush changes to disk.
+	// unsafe.Pointer is required here to pass the mmap base address to the
+	// syscall.Syscall interface; there is no safe alternative for raw syscalls.
+	// nosec: unsafe.Pointer required for mmap syscall interop
 	_, _, errno := syscall.Syscall(
 		syscall.SYS_MSYNC,
 		uintptr(unsafe.Pointer(&w.mmap[0])),

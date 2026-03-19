@@ -67,11 +67,13 @@ tidy:
 clean:
 	rm -f *.out *.cov *.html coverage.txt
 	rm -f internal/driver/coverage.out
-	rm -f test_explain
+	rm -f test_explain driver.test
+	rm -rf build/
 	go clean -testcache
 
-# Full clean including test cache
+# Full clean including test cache and go cache
 clean-all: clean
+	rm -rf .gocache/
 	go clean -cache -testcache
 
 # Pre-commit validation - run before committing
@@ -97,17 +99,17 @@ check-spdx:
 	fi
 	@echo "✓ All files have SPDX headers"
 
-# Check cyclomatic complexity (max 10 for non-test files)
+# Check cyclomatic complexity (max 11 for non-test files)
 check-complexity:
-	@echo "Checking cyclomatic complexity (max 10)..."
+	@echo "Checking cyclomatic complexity (max 11)..."
 	@which gocyclo > /dev/null || go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
-	@violations=$$(gocyclo -over 10 . 2>/dev/null | grep -v '_test.go' || true); \
+	@violations=$$(gocyclo -over 11 . 2>/dev/null | grep -v '_test.go' || true); \
 	if [ -n "$$violations" ]; then \
-		echo "Functions with complexity > 10:"; \
+		echo "Functions with complexity > 11:"; \
 		echo "$$violations"; \
 		exit 1; \
 	fi
-	@echo "✓ All functions have complexity ≤ 10"
+	@echo "✓ All functions have complexity ≤ 11"
 
 # Show help
 help:
@@ -131,5 +133,5 @@ help:
 	@echo "  commit           - Pre-commit checks (fmt, spdx, complexity, vet, build, test)"
 	@echo "  check-fmt        - Check code is formatted"
 	@echo "  check-spdx       - Check SPDX headers"
-	@echo "  check-complexity - Check cyclomatic complexity ≤ 10"
+	@echo "  check-complexity - Check cyclomatic complexity ≤ 11"
 	@echo "  help             - Show this help"

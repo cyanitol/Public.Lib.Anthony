@@ -1,6 +1,6 @@
 Preamble (Gratitude + Intent)
 
-This project is indebted to the SQLite project: technically, culturally, and
+This project is indebted to the SQLite project: technically, and
 philosophically. SQLite demonstrated that small, careful software can power a
 large fraction of civilization, and it did so while keeping reuse friction as
 close to zero as the law allows.
@@ -12,8 +12,6 @@ freely accessible as possible.
 
 In that spirit, and in honor of SQLite, we include the SQLite Blessing:
 
-In place of a legal notice, here is a blessing:
-
 May you do good and not evil.
 May you find forgiveness for yourself and forgive others.
 May you share freely, never taking more than you give.
@@ -23,7 +21,7 @@ Legal Reality: Jurisdictions and Policies Vary
 Some jurisdictions do not fully recognize public-domain dedications, and some
 users require an OSI-approved license for compliance, redistribution, or
 internal policy. Therefore, in addition to the blessing above, we
-offer this project under a tri-license so you can choose what fits your
+offer this project under a quad-license so you can choose what fits your
 situation.
 
 License (Choose One)
@@ -33,5 +31,6 @@ This project is available under your choice of ONE of the following licenses:
 * Apache License 2.0 (Apache-2.0)            see LICENSE-APACHE
 * GNU GPL v2.0 or later (GPL-2.0-or-later)   see LICENSE-GPL-2.0
 * CC0 1.0 Universal (CC0-1.0)                see LICENSE-CC0-1.0
+* BSD 3-Clause License (BSD-3-Clause)        see LICENSE-BSD
 
-SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)

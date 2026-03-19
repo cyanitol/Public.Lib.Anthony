@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -72,6 +72,12 @@ func (s *Stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (drive
 		return nil, err
 	}
 
+	// Acquire the shared write mutex first to serialize write operations across
+	// all connections sharing the same database, preventing data races on page
+	// buffers between concurrent VM execution and commit/writePage.
+	s.conn.writeMu.Lock()
+	defer s.conn.writeMu.Unlock()
+
 	// Lock connection for entire execution to prevent concurrent access to pager
 	s.conn.mu.Lock()
 	defer s.conn.mu.Unlock()
@@ -114,11 +120,67 @@ func (s *Stmt) executeAndCommit(args []driver.NamedValue, inTx bool) (driver.Res
 		return nil, err
 	}
 
+	// Check if schema changed during execution (e.g., root page split)
+	// If so, invalidate the statement cache
+	if vm.SchemaChanged && s.conn.stmtCache != nil {
+		s.conn.stmtCache.InvalidateAll()
+	}
+
+	// Transaction control statements manage transaction boundaries themselves.
+	if err := s.applyTxnControl(); err != nil {
+		return nil, err
+	}
+	if s.txnControlType() != txnNone {
+		return s.buildResult(vm), nil
+	}
+
 	if err := s.autoCommitIfNeeded(inTx); err != nil {
 		return nil, err
 	}
 
 	return s.buildResult(vm), nil
+}
+
+// applyTxnControl updates connection state after transaction control statements.
+func (s *Stmt) applyTxnControl() error {
+	switch s.txnControlType() {
+	case txnBegin:
+		s.conn.inTx = true
+		s.conn.sqlTx = true
+		s.conn.savepointOnly = false
+	case txnCommit:
+		s.conn.clearTxState()
+	case txnRollback:
+		s.conn.clearTxState()
+		s.conn.reloadSchemaAfterRollback()
+	case txnSavepoint:
+		return s.applySavepointControl()
+	}
+	return nil
+}
+
+// applySavepointControl handles SAVEPOINT, RELEASE, and ROLLBACK TO state.
+func (s *Stmt) applySavepointControl() error {
+	if _, ok := s.ast.(*parser.ReleaseStmt); ok && s.conn.savepointOnly {
+		if err := s.commitSavepointTransaction(); err != nil {
+			return err
+		}
+	}
+	if rb, ok := s.ast.(*parser.RollbackStmt); ok && rb.Savepoint != "" {
+		s.conn.reloadSchemaAfterRollback()
+	}
+	return nil
+}
+
+// commitSavepointTransaction commits a savepoint-only transaction on RELEASE.
+func (s *Stmt) commitSavepointTransaction() error {
+	if s.conn.pager.InWriteTransaction() {
+		if err := s.conn.pager.Commit(); err != nil {
+			return fmt.Errorf("auto-commit after release: %w", err)
+		}
+	}
+	s.conn.clearTxState()
+	return nil
 }
 
 // runVMWithRollback runs the VM and rolls back on error if in autocommit mode
@@ -131,6 +193,35 @@ func (s *Stmt) runVMWithRollback(vm *vdbe.VDBE, inTx bool) error {
 	}
 	return nil
 }
+
+// txnControlType classifies the statement as a transaction control statement.
+func (s *Stmt) txnControlType() txnControlKind {
+	switch stmt := s.ast.(type) {
+	case *parser.BeginStmt:
+		return txnBegin
+	case *parser.CommitStmt:
+		return txnCommit
+	case *parser.RollbackStmt:
+		if stmt.Savepoint != "" {
+			return txnSavepoint // ROLLBACK TO does not end the transaction
+		}
+		return txnRollback
+	case *parser.SavepointStmt, *parser.ReleaseStmt:
+		return txnSavepoint
+	default:
+		return txnNone
+	}
+}
+
+type txnControlKind int
+
+const (
+	txnNone txnControlKind = iota
+	txnBegin
+	txnCommit
+	txnRollback
+	txnSavepoint
+)
 
 // autoCommitIfNeeded commits if not in a transaction and a write transaction exists
 func (s *Stmt) autoCommitIfNeeded(inTx bool) error {
@@ -157,20 +248,21 @@ func (s *Stmt) Query(args []driver.Value) (driver.Rows, error) {
 
 // QueryContext executes a query that returns rows.
 func (s *Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil, driver.ErrBadConn
+	if err := s.checkStmtClosed(); err != nil {
+		return nil, err
 	}
-	s.mu.Unlock()
 
-	// Check connection state under lock to avoid TOCTOU race
+	// Acquire the shared write mutex to serialize with write operations across
+	// all connections sharing the same database, preventing data races on page
+	// buffers between concurrent VM execution and commit/writePage.
+	s.conn.writeMu.Lock()
+	defer s.conn.writeMu.Unlock()
+
 	s.conn.mu.Lock()
-	connClosed := s.conn.closed
-	s.conn.mu.Unlock()
+	defer s.conn.mu.Unlock()
 
-	if connClosed {
-		return nil, driver.ErrBadConn
+	if err := s.checkConnClosed(); err != nil {
+		return nil, err
 	}
 
 	// Compile the statement to VDBE bytecode
@@ -190,10 +282,29 @@ func (s *Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driv
 	return rows, nil
 }
 
+// queryInternal executes a query without acquiring the connection mutex.
+// This must only be called when the caller already holds c.mu.
+func (s *Stmt) queryInternal(args []driver.NamedValue) (driver.Rows, error) {
+	vm, err := s.compile(args)
+	if err != nil {
+		return nil, fmt.Errorf("compile error: %w", err)
+	}
+
+	rows := &Rows{
+		stmt:    s,
+		vdbe:    vm,
+		columns: vm.ResultCols,
+		ctx:     context.Background(),
+	}
+
+	return rows, nil
+}
+
 // compile compiles the SQL statement into VDBE bytecode.
 // It checks the statement cache first and returns a cached VDBE if available.
 func (s *Stmt) compile(args []driver.NamedValue) (*vdbe.VDBE, error) {
-	if len(args) == 0 && s.conn.stmtCache != nil {
+	useCache := len(args) == 0 && s.conn.stmtCache != nil && !s.conn.hasAttachedDatabases()
+	if useCache {
 		if cachedVdbe := s.tryGetCachedVdbe(); cachedVdbe != nil {
 			return cachedVdbe, nil
 		}
@@ -205,7 +316,9 @@ func (s *Stmt) compile(args []driver.NamedValue) (*vdbe.VDBE, error) {
 		return nil, err
 	}
 
-	s.cacheVdbeIfAppropriate(compiledVdbe, args)
+	if useCache {
+		s.cacheVdbeIfAppropriate(compiledVdbe, args)
+	}
 	return compiledVdbe, nil
 }
 
@@ -217,35 +330,66 @@ func (s *Stmt) tryGetCachedVdbe() *vdbe.VDBE {
 	}
 	// Reset the VDBE to initial state before re-execution
 	cachedVdbe.Reset()
-	s.setVdbeContext(cachedVdbe)
+	s.setVdbeContextForDatabase(cachedVdbe, nil)
 	return cachedVdbe
 }
 
 // setVdbeContext sets the VDBE context for this connection
 func (s *Stmt) setVdbeContext(vm *vdbe.VDBE) {
+	s.setVdbeContextForDatabase(vm, nil)
+}
+
+// setVdbeContextForDatabase sets the VDBE context for a specific database.
+// When db is nil, the main database for the connection is used.
+func (s *Stmt) setVdbeContextForDatabase(vm *vdbe.VDBE, db *schema.Database) {
+	targetSchema := s.conn.schema
+	targetPager := s.conn.pager
+	targetBtree := s.conn.btree
+
+	if db != nil {
+		if db.Schema != nil {
+			targetSchema = db.Schema
+		}
+		if db.Pager != nil {
+			targetPager = db.Pager
+		}
+		if db.Btree != nil {
+			targetBtree = db.Btree
+		}
+	}
+
 	vm.Ctx = &vdbe.VDBEContext{
-		Btree:              s.conn.btree,
-		Pager:              interface{}(s.conn.pager),
-		Schema:             interface{}(s.conn.schema),
+		Btree:              targetBtree,
+		Pager:              interface{}(targetPager),
+		Schema:             interface{}(targetSchema),
 		CollationRegistry:  interface{}(s.conn.collRegistry),
 		FKManager:          interface{}(s.conn.fkManager),
 		ForeignKeysEnabled: s.conn.foreignKeysEnabled,
+		TriggerCompiler:    NewTriggerRuntime(s.conn),
 	}
 }
 
 // cacheVdbeIfAppropriate caches VDBE if conditions are met
 func (s *Stmt) cacheVdbeIfAppropriate(vm *vdbe.VDBE, args []driver.NamedValue) {
-	if len(args) == 0 && s.conn.stmtCache != nil && vm != nil && s.isCacheable() {
+	if len(args) == 0 && s.conn.stmtCache != nil && vm != nil && s.isCacheable() && !s.conn.hasAttachedDatabases() {
 		s.conn.stmtCache.Put(s.query, vm)
 	}
 }
 
 // isCacheable returns true if this statement can be safely cached.
-// PRAGMAs that return connection state cannot be cached because they
-// embed the current value at compile time.
+// DDL statements, PRAGMAs, and transaction control statements cannot be cached
+// because they embed schema state or connection state at compile time.
 func (s *Stmt) isCacheable() bool {
-	_, isPragma := s.ast.(*parser.PragmaStmt)
-	return !isPragma
+	switch s.ast.(type) {
+	case *parser.PragmaStmt, *parser.CreateTableStmt, *parser.DropTableStmt,
+		*parser.CreateIndexStmt, *parser.DropIndexStmt, *parser.AlterTableStmt,
+		*parser.CreateViewStmt, *parser.DropViewStmt, *parser.CreateVirtualTableStmt,
+		*parser.BeginStmt, *parser.CommitStmt, *parser.RollbackStmt,
+		*parser.SavepointStmt, *parser.ReleaseStmt:
+		return false
+	default:
+		return true
+	}
 }
 
 // invalidateStmtCache invalidates the statement cache when schema changes.
@@ -259,14 +403,7 @@ func (s *Stmt) invalidateStmtCache() {
 // newVDBE creates a new VDBE with the connection's context.
 func (s *Stmt) newVDBE() *vdbe.VDBE {
 	vm := vdbe.New()
-	vm.Ctx = &vdbe.VDBEContext{
-		Btree:              s.conn.btree,
-		Pager:              interface{}(s.conn.pager),
-		Schema:             interface{}(s.conn.schema),
-		CollationRegistry:  interface{}(s.conn.collRegistry),
-		FKManager:          interface{}(s.conn.fkManager),
-		ForeignKeysEnabled: s.conn.foreignKeysEnabled,
-	}
+	s.setVdbeContextForDatabase(vm, nil)
 	return vm
 }
 
@@ -343,6 +480,9 @@ func (s *Stmt) dispatchTableDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.
 	case *parser.CreateTableStmt:
 		result, err := s.compileCreateTable(vm, stmt, args)
 		return result, err, true
+	case *parser.CreateVirtualTableStmt:
+		result, err := s.compileCreateVirtualTable(vm, stmt, args)
+		return result, err, true
 	case *parser.DropTableStmt:
 		result, err := s.compileDropTable(vm, stmt, args)
 		return result, err, true
@@ -396,7 +536,7 @@ func (s *Stmt) dispatchTriggerDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdb
 	}
 }
 
-// dispatchTransactionControl handles BEGIN/COMMIT/ROLLBACK statements.
+// dispatchTransactionControl handles BEGIN/COMMIT/ROLLBACK/SAVEPOINT/RELEASE statements.
 func (s *Stmt) dispatchTransactionControl(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
 	switch stmt := s.ast.(type) {
 	case *parser.BeginStmt:
@@ -407,6 +547,12 @@ func (s *Stmt) dispatchTransactionControl(vm *vdbe.VDBE, args []driver.NamedValu
 		return result, err, true
 	case *parser.RollbackStmt:
 		result, err := s.compileRollback(vm, stmt, args)
+		return result, err, true
+	case *parser.SavepointStmt:
+		result, err := s.compileSavepoint(vm, stmt, args)
+		return result, err, true
+	case *parser.ReleaseStmt:
+		result, err := s.compileRelease(vm, stmt, args)
 		return result, err, true
 	default:
 		return nil, nil, false
@@ -442,17 +588,39 @@ func (s *Stmt) dispatchOtherStatements(vm *vdbe.VDBE, args []driver.NamedValue) 
 
 // schemaColIsRowid reports whether a *schema.Column is an INTEGER PRIMARY KEY
 // (a rowid alias). Such columns are not stored in the B-tree record itself.
+// For WITHOUT ROWID tables, INTEGER PRIMARY KEY is NOT a rowid alias - it's
+// stored in the record like any other column.
 func schemaColIsRowid(col *schema.Column) bool {
 	return col.PrimaryKey && (col.Type == "INTEGER" || col.Type == "INT")
+}
+
+// schemaColIsRowidForTable checks if a column is a rowid alias, considering
+// the table's WITHOUT ROWID status. For WITHOUT ROWID tables, returns false
+// since all columns are stored in the record.
+func schemaColIsRowidForTable(table *schema.Table, col *schema.Column) bool {
+	if table != nil && table.WithoutRowID {
+		return false // WITHOUT ROWID tables store all columns in the record
+	}
+	return schemaColIsRowid(col)
 }
 
 // selectFromTableName returns the first table name from a SELECT FROM clause.
 // It returns an error when no FROM clause or no tables are present.
 func selectFromTableName(stmt *parser.SelectStmt) (string, error) {
-	if stmt.From == nil || len(stmt.From.Tables) == 0 {
-		return "", fmt.Errorf("SELECT requires FROM clause")
+	tableRef, err := selectFromTableRef(stmt)
+	if err != nil {
+		return "", err
 	}
-	return stmt.From.Tables[0].TableName, nil
+	return tableRef.TableName, nil
+}
+
+// selectFromTableRef returns the first table reference from a SELECT FROM clause.
+// It returns an error when no FROM clause or no tables are present.
+func selectFromTableRef(stmt *parser.SelectStmt) (*parser.TableOrSubquery, error) {
+	if stmt.From == nil || len(stmt.From.Tables) == 0 {
+		return nil, fmt.Errorf("SELECT requires FROM clause")
+	}
+	return &stmt.From.Tables[0], nil
 }
 
 // selectColName derives the output column name for a single SELECT column:
@@ -519,11 +687,30 @@ func schemaRecordIdxForTable(table *schema.Table, colIdx int) int {
 
 // emitSelectColumnOp emits the VDBE opcode(s) required to read the i-th SELECT
 // column into register i. It returns an error when the named column is not
-// found in the table.
+// found in the table. When a CodeGenerator with a non-default cursor mapping
+// is available, all expressions are routed through it so the correct cursor is
+// used (critical for INSERT..SELECT where the source cursor is not cursor 0).
 func emitSelectColumnOp(vm *vdbe.VDBE, table *schema.Table, col parser.ResultColumn, i int, gen *expr.CodeGenerator) error {
+	// When the code generator has a non-zero cursor for this table, route
+	// through it so that the correct cursor is used for column reads.
+	if gen != nil && gen.HasNonZeroCursor() {
+		return emitComplexExpression(vm, col.Expr, i, gen)
+	}
+
 	ident, ok := col.Expr.(*parser.IdentExpr)
 	if ok {
-		return emitSimpleColumnRef(vm, table, ident, i)
+		if gen != nil {
+			colIdx := table.GetColumnIndex(ident.Name)
+			if colIdx >= 0 {
+				gen.SetCollationForReg(i, table.Columns[colIdx].Collation)
+			}
+		}
+		// Use cursor from table metadata: temp/CTE tables store cursor in RootPage
+		cursorNum := 0
+		if table.Temp {
+			cursorNum = int(table.RootPage)
+		}
+		return emitSimpleColumnRef(vm, table, ident, i, cursorNum)
 	}
 
 	fnExpr, isFn := col.Expr.(*parser.FunctionExpr)
@@ -534,25 +721,30 @@ func emitSelectColumnOp(vm *vdbe.VDBE, table *schema.Table, col parser.ResultCol
 	return emitComplexExpression(vm, col.Expr, i, gen)
 }
 
-// emitSimpleColumnRef emits opcodes for simple column reference
-func emitSimpleColumnRef(vm *vdbe.VDBE, table *schema.Table, ident *parser.IdentExpr, targetReg int) error {
+// emitSimpleColumnRef emits opcodes for simple column reference using the given cursor.
+func emitSimpleColumnRef(vm *vdbe.VDBE, table *schema.Table, ident *parser.IdentExpr, targetReg int, cursorNum int) error {
 	colIdx := table.GetColumnIndexWithRowidAliases(ident.Name)
 	if colIdx == -1 {
 		return fmt.Errorf("column not found: %s", ident.Name)
 	}
 
+	// colIdx == -2 means it's a rowid alias (rowid, _rowid_, oid)
 	if colIdx == -2 {
-		// This is a rowid alias but no INTEGER PRIMARY KEY exists
-		vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
+		if table.WithoutRowID {
+			// WITHOUT ROWID tables don't have rowid - return error
+			return fmt.Errorf("no such column: %s", ident.Name)
+		}
+		// Regular tables: emit OpRowid
+		vm.AddOp(vdbe.OpRowid, cursorNum, targetReg, 0)
 		return nil
 	}
 
-	if schemaColIsRowid(table.Columns[colIdx]) {
-		vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
+	if schemaColIsRowidForTable(table, table.Columns[colIdx]) {
+		vm.AddOp(vdbe.OpRowid, cursorNum, targetReg, 0)
 		return nil
 	}
 
-	vm.AddOp(vdbe.OpColumn, 0, schemaRecordIdxForTable(table, colIdx), targetReg)
+	vm.AddOp(vdbe.OpColumn, cursorNum, schemaRecordIdxForTable(table, colIdx), targetReg)
 	return nil
 }
 
@@ -566,6 +758,10 @@ func emitComplexExpression(vm *vdbe.VDBE, expr parser.Expression, targetReg int,
 	reg, err := gen.GenerateExpr(expr)
 	if err != nil {
 		return fmt.Errorf("failed to generate expression: %w", err)
+	}
+
+	if coll, ok := gen.CollationForReg(reg); ok {
+		gen.SetCollationForReg(targetReg, coll)
 	}
 
 	if reg != targetReg {
@@ -607,7 +803,7 @@ func handleCountStar() error {
 // isKnownAggregateFunction checks if the function is a known aggregate function.
 func isKnownAggregateFunction(funcName string) bool {
 	switch funcName {
-	case "COUNT", "SUM", "AVG", "MIN", "MAX", "TOTAL":
+	case "COUNT", "SUM", "AVG", "MIN", "MAX", "TOTAL", "GROUP_CONCAT":
 		return true
 	default:
 		return false
@@ -655,11 +851,12 @@ func buildTableInfo(tableName string, table *schema.Table) expr.TableInfo {
 	var columns []expr.ColumnInfo
 	recordIdx := 0
 	for _, col := range table.Columns {
-		isRowid := schemaColIsRowid(col)
+		isRowid := schemaColIsRowidForTable(table, col)
 		colInfo := expr.ColumnInfo{
-			Name:    col.Name,
-			Index:   recordIdx,
-			IsRowid: isRowid,
+			Name:      col.Name,
+			Index:     recordIdx,
+			IsRowid:   isRowid,
+			Collation: col.GetCollation(),
 		}
 		columns = append(columns, colInfo)
 		if !isRowid {

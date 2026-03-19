@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 //go:build ignore
 // +build ignore
 
@@ -19,7 +19,7 @@ func main() {
 		fmt.Printf("ERROR: Expected TK_PRAGMA, got %v\n", tok.Type)
 		os.Exit(1)
 	}
-	fmt.Println("✓ TK_PRAGMA token recognized by lexer")
+	fmt.Println("TK_PRAGMA token recognized by lexer")
 
 	// Test 2: Simple PRAGMA statement
 	testCases := []struct {
@@ -35,14 +35,12 @@ func main() {
 
 	for _, tc := range testCases {
 		p := parser.NewParser(tc.sql)
-		// Note: We can't actually parse because of the initialization cycle
-		// Just verify the parser structure exists
 		if p == nil {
 			fmt.Printf("ERROR: Parser creation failed for: %s\n", tc.description)
 			os.Exit(1)
 		}
 	}
-	fmt.Println("✓ Parser structure created successfully")
+	fmt.Println("Parser structure created successfully")
 
 	// Test 3: Verify PragmaStmt structure
 	stmt := &parser.PragmaStmt{
@@ -55,18 +53,7 @@ func main() {
 		fmt.Printf("ERROR: Expected String() = 'PRAGMA', got '%s'\n", stmt.String())
 		os.Exit(1)
 	}
-	fmt.Println("✓ PragmaStmt structure is correct")
+	fmt.Println("PragmaStmt structure is correct")
 
 	fmt.Println("\nAll verification checks passed!")
-	fmt.Println("\nImplementation Summary:")
-	fmt.Println("- PragmaStmt AST node created with Schema, Name, and Value fields")
-	fmt.Println("- parsePragma() function implemented supporting:")
-	fmt.Println("  * PRAGMA name")
-	fmt.Println("  * PRAGMA name = value")
-	fmt.Println("  * PRAGMA name(value)")
-	fmt.Println("  * PRAGMA schema.name")
-	fmt.Println("  * PRAGMA schema.name = value")
-	fmt.Println("  * PRAGMA schema.name(value)")
-	fmt.Println("- TK_PRAGMA token already exists in lexer")
-	fmt.Println("- Comprehensive tests written in parser_pragma_test.go")
 }

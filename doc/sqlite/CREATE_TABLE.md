@@ -31,21 +31,21 @@ Search Changelog
 CREATE TABLE
 
 Table Of Contents
-[1. Syntax](#syntax)
-[2. The CREATE TABLE command](#the_create_table_command)
-[2.1. CREATE TABLE ... AS SELECT Statements](#create_table_as_select_statements)
-[3. Column Definitions](#column_definitions)
-[3.1. Column Data Types](#column_data_types)
-[3.2. The DEFAULT clause](#the_default_clause)
-[3.3. The COLLATE clause](#the_collate_clause)
-[3.4. The GENERATED ALWAYS AS clause](#the_generated_always_as_clause)
-[3.5. The PRIMARY KEY](#the_primary_key)
-[3.6. UNIQUE constraints](#unique_constraints)
-[3.7. CHECK constraints](#check_constraints)
-[3.8. NOT NULL constraints](#not_null_constraints)
-[4. Constraint enforcement](#constraint_enforcement)
-[4.1. Response to constraint violations](#response_to_constraint_violations)
-[5. ROWIDs and the INTEGER PRIMARY KEY](#rowids_and_the_integer_primary_key)
+[1. Syntax](#1-syntax)
+[2. The CREATE TABLE command](#2-the-create-table-command)
+[2.1. CREATE TABLE ... AS SELECT Statements](#21-create-table-as-select-statements)
+[3. Column Definitions](#3-column-definitions)
+[3.1. Column Data Types](#31-column-data-types)
+[3.2. The DEFAULT clause](#32-the-default-clause)
+[3.3. The COLLATE clause](#33-the-collate-clause)
+[3.4. The GENERATED ALWAYS AS clause](#34-the-generated-always-as-clause)
+[3.5. The PRIMARY KEY](#35-the-primary-key)
+[3.6. UNIQUE constraints](#36-unique-constraints)
+[3.7. CHECK constraints](#37-check-constraints)
+[3.8. NOT NULL constraints](#38-not-null-constraints)
+[4. Constraint enforcement](#4-constraint-enforcement)
+[4.1. Response to constraint violations](#41-response-to-constraint-violations)
+[5. ROWIDs and the INTEGER PRIMARY KEY](#5-rowids-and-the-integer-primary-key)
 
 # 1. Syntax
 

@@ -1576,7 +1576,7 @@ SELECT fullkey, value FROM json_tree('{"a":{"b":{"c":1}}}');
 -- Returns paths like: $.a, $.a.b, $.a.b.c with values
 ```
 
-**Status:** PLANNED
+**Status:** IMPLEMENTED - Available as table-valued functions in FROM clauses
 
 ## Implementation Status
 
@@ -1618,8 +1618,11 @@ The following standard SQLite functions are planned for future implementation:
 
 **JSON Functions:**
 - json_group_array, json_group_object (aggregate)
-- json_each, json_tree (table-valued)
 - JSONB variants (jsonb, jsonb_array, etc.)
+
+**JSON Table-Valued Functions (Implemented):**
+- json_each - Parse JSON array/object into rows (FROM clause)
+- json_tree - Recursively parse JSON into rows (FROM clause)
 
 **Utility Functions:**
 - changes, total_changes
@@ -1634,7 +1637,7 @@ The following standard SQLite functions are planned for future implementation:
 
 ### Go Implementation Reference
 
-All function implementations can be found in `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/functions/`:
+All function implementations can be found in `internal/functions/`:
 
 - `scalar.go` - Core string and type functions
 - `aggregate.go` - Aggregate functions (count, sum, avg, etc.)

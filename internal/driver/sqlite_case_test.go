@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -576,30 +576,7 @@ func TestSQLiteCaseWithAggregates(t *testing.T) {
 	defer db.Close()
 
 	// Create test table (from select7.test)
-	_, err := db.Exec(`CREATE TABLE t4(a REAL)`)
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t4 VALUES(0)`)
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t4 VALUES(44.0)`)
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t4 VALUES(56.0)`)
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t4 VALUES(69.0)`)
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t4 VALUES(94.0)`)
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
+	caseAggSetupTable(t, db)
 
 	tests := []struct {
 		name  string
@@ -631,60 +608,98 @@ func TestSQLiteCaseWithAggregates(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			// Check if we expect multiple rows
-			if slice, ok := tt.want.([]interface{}); ok {
-				rows, err := db.Query(tt.query)
-				if err != nil {
-					t.Fatalf("query failed: %v", err)
-				}
-				defer rows.Close()
-
-				var results []interface{}
-				for rows.Next() {
-					cols, err := rows.Columns()
-					if err != nil {
-						t.Fatalf("failed to get columns: %v", err)
-					}
-
-					values := make([]interface{}, len(cols))
-					valuePtrs := make([]interface{}, len(cols))
-					for i := range values {
-						valuePtrs[i] = &values[i]
-					}
-
-					if err := rows.Scan(valuePtrs...); err != nil {
-						t.Fatalf("scan failed: %v", err)
-					}
-
-					for _, v := range values {
-						results = append(results, v)
-					}
-				}
-
-				if len(results) != len(slice) {
-					t.Fatalf("got %d values, want %d", len(results), len(slice))
-				}
-
-				for i := range results {
-					if !compareCaseValues(results[i], slice[i]) {
-						t.Errorf("result[%d]: got %v (%T), want %v (%T)",
-							i, results[i], results[i], slice[i], slice[i])
-					}
-				}
-			} else {
-				// Single value expected
-				var result interface{}
-				err := db.QueryRow(tt.query).Scan(&result)
-				if err != nil {
-					t.Fatalf("query failed: %v", err)
-				}
-
-				if !compareCaseValues(result, tt.want) {
-					t.Errorf("got %v (%T), want %v (%T)",
-						result, result, tt.want, tt.want)
-				}
-			}
+			caseAggRunTest(t, db, tt.query, tt.want)
 		})
+	}
+}
+
+// caseAggSetupTable creates and populates the test table
+func caseAggSetupTable(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`CREATE TABLE t4(a REAL)`)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	values := []float64{0, 44.0, 56.0, 69.0, 94.0}
+	for _, v := range values {
+		_, err := db.Exec(`INSERT INTO t4 VALUES(?)`, v)
+		if err != nil {
+			t.Fatalf("failed to insert: %v", err)
+		}
+	}
+}
+
+// caseAggRunTest executes a test and verifies results
+func caseAggRunTest(t *testing.T, db *sql.DB, query string, want interface{}) {
+	t.Helper()
+	// Check if we expect multiple rows
+	if slice, ok := want.([]interface{}); ok {
+		caseAggVerifyMultipleRows(t, db, query, slice)
+	} else {
+		caseAggVerifySingleValue(t, db, query, want)
+	}
+}
+
+// caseAggVerifyMultipleRows handles multi-row result verification
+func caseAggVerifyMultipleRows(t *testing.T, db *sql.DB, query string, want []interface{}) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+
+	results := caseAggCollectResults(t, rows)
+
+	if len(results) != len(want) {
+		t.Fatalf("got %d values, want %d", len(results), len(want))
+	}
+
+	for i := range results {
+		if !compareCaseValues(results[i], want[i]) {
+			t.Errorf("result[%d]: got %v (%T), want %v (%T)",
+				i, results[i], results[i], want[i], want[i])
+		}
+	}
+}
+
+// caseAggCollectResults scans all rows and collects values
+func caseAggCollectResults(t *testing.T, rows *sql.Rows) []interface{} {
+	t.Helper()
+	var results []interface{}
+	for rows.Next() {
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatalf("failed to get columns: %v", err)
+		}
+
+		values := make([]interface{}, len(cols))
+		valuePtrs := make([]interface{}, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+
+		results = append(results, values...)
+	}
+	return results
+}
+
+// caseAggVerifySingleValue handles single-value result verification
+func caseAggVerifySingleValue(t *testing.T, db *sql.DB, query string, want interface{}) {
+	t.Helper()
+	var result interface{}
+	err := db.QueryRow(query).Scan(&result)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if !compareCaseValues(result, want) {
+		t.Errorf("got %v (%T), want %v (%T)", result, result, want, want)
 	}
 }
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 // Package schema provides schema management for SQLite databases.
 // It tracks tables, indexes, and their metadata including type affinities.
 package schema
@@ -59,6 +59,22 @@ type Table struct {
 	Temp         bool              // True for temporary tables
 	Constraints  []TableConstraint // Table-level constraints
 	Stats        *TableStats       // Table statistics (optional, may be nil)
+
+	// Virtual table fields
+	IsVirtual    bool        // True for virtual tables
+	Module       string      // Virtual table module name (e.g., "fts5", "rtree")
+	ModuleArgs   []string    // Module-specific arguments
+	VirtualTable interface{} // Virtual table instance (vtab.VirtualTable)
+}
+
+// SetRootPage updates the root page for this table.
+func (t *Table) SetRootPage(root uint32) {
+	t.RootPage = root
+}
+
+// GetRootPage returns the root page for this table.
+func (t *Table) GetRootPage() uint32 {
+	return t.RootPage
 }
 
 // Column represents a table column definition.
@@ -90,6 +106,11 @@ func (c *Column) GetDefault() interface{} {
 // GetName returns the column name (for interface access from vdbe).
 func (c *Column) GetName() string {
 	return c.Name
+}
+
+// GetType returns the declared type for this column (for interface access from vdbe).
+func (c *Column) GetType() string {
+	return c.Type
 }
 
 // IsUniqueColumn returns true if this column has a UNIQUE constraint (for interface access from vdbe).
@@ -131,6 +152,16 @@ type Index struct {
 	Unique      bool                // True for UNIQUE indexes
 	Partial     bool                // True for partial indexes (WHERE clause)
 	Where       string              // WHERE clause for partial indexes
+}
+
+// IsUnique returns true if this is a UNIQUE index.
+func (idx *Index) IsUnique() bool {
+	return idx.Unique
+}
+
+// GetColumns returns the indexed column names.
+func (idx *Index) GetColumns() []string {
+	return idx.Columns
 }
 
 // GetTable retrieves a table by name.
@@ -235,6 +266,17 @@ func (s *Schema) GetTableIndexes(tableName string) []*Index {
 	})
 
 	return indexes
+}
+
+// ListIndexesForTable returns all indexes for a table as a slice of interface{}.
+// This is used by the VDBE to check unique constraints without importing schema.
+func (s *Schema) ListIndexesForTable(tableName string) []interface{} {
+	indexes := s.GetTableIndexes(tableName)
+	result := make([]interface{}, len(indexes))
+	for i, idx := range indexes {
+		result[i] = idx
+	}
+	return result
 }
 
 // DropTable removes a table and all its indexes from the schema.
@@ -385,6 +427,34 @@ func (t *Table) GetColumnIndex(name string) int {
 	return -1
 }
 
+// isRowidAlias checks if a name is a special rowid alias.
+func isRowidAlias(name string) bool {
+	lowerName := strings.ToLower(name)
+	return lowerName == "rowid" || lowerName == "_rowid_" || lowerName == "oid"
+}
+
+// findIntegerPrimaryKeyIndex searches for an INTEGER PRIMARY KEY column.
+// Returns the column index or -1 if not found.
+func (t *Table) findIntegerPrimaryKeyIndex() int {
+	for i, col := range t.Columns {
+		if col.PrimaryKey && (col.Type == "INTEGER" || col.Type == "INT") {
+			return i
+		}
+	}
+	return -1
+}
+
+// GetIntegerPKColumn returns the name of the INTEGER PRIMARY KEY column.
+// Returns empty string if no INTEGER PRIMARY KEY column exists.
+// This is used by FK validation to include the rowid in extracted values.
+func (t *Table) GetIntegerPKColumn() string {
+	idx := t.findIntegerPrimaryKeyIndex()
+	if idx >= 0 {
+		return t.Columns[idx].Name
+	}
+	return ""
+}
+
 // GetColumnIndexWithRowidAliases returns the index of a column by name,
 // handling both regular column names and special rowid aliases (rowid, _rowid_, oid).
 // Returns -1 if not found. Returns -2 if the name is a rowid alias but no
@@ -397,21 +467,17 @@ func (t *Table) GetColumnIndexWithRowidAliases(name string) int {
 	}
 
 	// Check if this is a rowid alias
-	lowerName := strings.ToLower(name)
-	isRowidAlias := lowerName == "rowid" || lowerName == "_rowid_" || lowerName == "oid"
-
-	if isRowidAlias {
-		// Look for INTEGER PRIMARY KEY column
-		for i, col := range t.Columns {
-			if col.PrimaryKey && (col.Type == "INTEGER" || col.Type == "INT") {
-				return i
-			}
-		}
-		// No INTEGER PRIMARY KEY, but this is a rowid alias - return special marker
-		return -2
+	if !isRowidAlias(name) {
+		return -1
 	}
 
-	return -1
+	// Look for INTEGER PRIMARY KEY column
+	if idx := t.findIntegerPrimaryKeyIndex(); idx >= 0 {
+		return idx
+	}
+
+	// No INTEGER PRIMARY KEY, but this is a rowid alias - return special marker
+	return -2
 }
 
 // GetColumnCollation returns the collation for a column by index.
@@ -442,6 +508,11 @@ func (c *Column) GetEffectiveCollation() string {
 	return c.Collation
 }
 
+// GetCollation returns the collation for a column (may be empty if not set).
+func (c *Column) GetCollation() string {
+	return c.Collation
+}
+
 // GetColumns returns the columns as a slice of interfaces (for VDBE access).
 func (t *Table) GetColumns() []interface{} {
 	result := make([]interface{}, len(t.Columns))
@@ -451,10 +522,58 @@ func (t *Table) GetColumns() []interface{} {
 	return result
 }
 
+// GetColumnNames returns the column names for this table.
+func (t *Table) GetColumnNames() []string {
+	names := make([]string, len(t.Columns))
+	for i, col := range t.Columns {
+		names[i] = col.Name
+	}
+	return names
+}
+
 // HasRowID returns true if the table has an implicit rowid column.
 // Tables have a rowid unless they are declared WITHOUT ROWID.
 func (t *Table) HasRowID() bool {
 	return !t.WithoutRowID
+}
+
+// GetRecordColumnNames returns column names that are stored in the B-tree record.
+// For normal tables, this excludes the INTEGER PRIMARY KEY column (the rowid alias)
+// since it is stored as the B-tree key, not in the record payload.
+// For WITHOUT ROWID tables, all columns are included.
+func (t *Table) GetRecordColumnNames() []string {
+	if t.WithoutRowID {
+		return t.GetColumnNames()
+	}
+	names := make([]string, 0, len(t.Columns))
+	for _, col := range t.Columns {
+		if col.PrimaryKey && (col.Type == "INTEGER" || col.Type == "INT") {
+			continue // rowid alias - stored as B-tree key, not in record
+		}
+		names = append(names, col.Name)
+	}
+	return names
+}
+
+// GetRowidColumnName returns the name of the INTEGER PRIMARY KEY column
+// that serves as the rowid alias, or empty string if none exists.
+// For WITHOUT ROWID tables, always returns empty string.
+func (t *Table) GetRowidColumnName() string {
+	if t.WithoutRowID {
+		return ""
+	}
+	for _, col := range t.Columns {
+		if col.PrimaryKey && (col.Type == "INTEGER" || col.Type == "INT") {
+			return col.Name
+		}
+	}
+	return ""
+}
+
+// GetPrimaryKey returns the primary key column names in constraint order.
+// For WITHOUT ROWID tables, this determines the order of key encoding.
+func (t *Table) GetPrimaryKey() []string {
+	return t.PrimaryKey
 }
 
 // checkTableExists checks if a table already exists in the schema.
@@ -678,6 +797,38 @@ func (s *Schema) CreateTable(stmt *parser.CreateTableStmt) (*Table, error) {
 	return table, nil
 }
 
+// CreateVirtualTable creates a virtual table and registers it in the schema.
+func (s *Schema) CreateVirtualTable(name, module string, args []string, vtab interface{}, schemaDDL string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check for reserved names
+	if IsReservedName(name) {
+		return fmt.Errorf("table name is reserved: %s", name)
+	}
+
+	// Check if table already exists
+	if _, exists := s.Tables[name]; exists {
+		return fmt.Errorf("table already exists: %s", name)
+	}
+
+	// Parse the schema DDL to get column information
+	// For now, create a minimal table entry - the virtual table module handles the actual data
+	table := &Table{
+		Name:         name,
+		RootPage:     0, // Virtual tables don't use B-tree pages
+		SQL:          fmt.Sprintf("CREATE VIRTUAL TABLE %s USING %s(%s)", name, module, strings.Join(args, ", ")), // nosec: name/module/args are from internal schema registration, not user input
+		Columns:      []*Column{}, // Will be populated from schemaDDL if needed
+		IsVirtual:    true,
+		Module:       module,
+		ModuleArgs:   args,
+		VirtualTable: vtab,
+	}
+
+	s.Tables[name] = table
+	return nil
+}
+
 // CreateIndex creates an index from a CREATE INDEX statement.
 func (s *Schema) CreateIndex(stmt *parser.CreateIndexStmt) (*Index, error) {
 	if stmt == nil {
@@ -727,6 +878,17 @@ func (s *Schema) tableExistsLocked(tableName string) bool {
 	lowerTableName := strings.ToLower(tableName)
 	for name := range s.Tables {
 		if strings.ToLower(name) == lowerTableName {
+			return true
+		}
+	}
+	return false
+}
+
+// viewExistsLocked checks if a view exists (caller must hold lock).
+func (s *Schema) viewExistsLocked(viewName string) bool {
+	lowerViewName := strings.ToLower(viewName)
+	for name := range s.Views {
+		if strings.ToLower(name) == lowerViewName {
 			return true
 		}
 	}
@@ -869,6 +1031,14 @@ func (s *Schema) TriggerCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.Triggers)
+}
+
+// IsView checks if a given name refers to a view (not a table).
+func (s *Schema) IsView(name string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, exists := s.Views[strings.ToLower(name)]
+	return exists
 }
 
 // TableStats represents statistics for a table.

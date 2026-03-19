@@ -31,17 +31,17 @@ Search Changelog
 The WITH Clause
 
 Table Of Contents
-[1. Overview](#overview)
-[2. Ordinary Common Table Expressions](#ordinary_common_table_expressions)
-[3. Recursive Common Table Expressions](#recursive_common_table_expressions)
-[3.1. Recursive Query Examples](#recursive_query_examples)
-[3.2. Hierarchical Query Examples](#hierarchical_query_examples)
-[3.3. Queries Against A Graph](#queries_against_a_graph)
+[1. Overview](#1-overview)
+[2. Ordinary Common Table Expressions](#2-ordinary-common-table-expressions)
+[3. Recursive Common Table Expressions](#3-recursive-common-table-expressions)
+[3.1. Recursive Query Examples](#31-recursive-query-examples)
+[3.2. Hierarchical Query Examples](#32-hierarchical-query-examples)
+[3.3. Queries Against A Graph](#33-queries-against-a-graph)
 [3.4. Controlling Depth-First Versus Breadth-First Search Of a Tree
 Using ORDER BY](#controlling_depth_first_versus_breadth_first_search_of_a_tree_using_order_by)
-[3.5. Outlandish Recursive Query Examples](#outlandish_recursive_query_examples)
-[4. Materialization Hints](#materialization_hints)
-[5. Limitations And Caveats](#limitations_and_caveats)
+[3.5. Outlandish Recursive Query Examples](#35-outlandish-recursive-query-examples)
+[4. Materialization Hints](#4-materialization-hints)
+[5. Limitations And Caveats](#5-limitations-and-caveats)
 
 # 1. Overview
 

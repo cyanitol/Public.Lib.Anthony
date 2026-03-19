@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package parser
 
 import (
@@ -383,9 +383,9 @@ func TestParserLowCoverageFunctions(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "NOT LIKE - unsupported, expecting error",
+			name:    "NOT LIKE - supported",
 			sql:     "SELECT * FROM users WHERE name NOT LIKE 'Admin%'",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name:    "GLOB pattern",

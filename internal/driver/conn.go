@@ -1,10 +1,11 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
 	"context"
 	"database/sql/driver"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
@@ -15,7 +16,10 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/security"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab/fts5"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab/rtree"
 )
 
 // Conn implements database/sql/driver.Conn for SQLite.
@@ -30,14 +34,18 @@ type Conn struct {
 	stmts      map[*Stmt]struct{}
 	stmtCache  *StmtCache
 	mu         sync.Mutex
+	writeMu    *sync.Mutex // Shared across all connections to the same database
 	closed     bool
 
 	// Transaction state
-	inTx bool
+	inTx          bool
+	sqlTx         bool // true when transaction was started via SQL (BEGIN/SAVEPOINT)
+	savepointOnly bool // true when transaction was started implicitly by SAVEPOINT
 
 	// PRAGMA settings
 	foreignKeysEnabled bool
 	journalMode        string
+	cacheSize          int64 // PRAGMA cache_size: positive=pages, negative=KiB
 
 	// Security configuration
 	securityConfig *security.SecurityConfig
@@ -77,14 +85,17 @@ func (c *Conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, e
 
 	// Support multiple statements by creating a MultiStmt
 	if len(stmts) > 1 {
+		parts := splitStatements(query)
 		multiStmt := &MultiStmt{
 			conn:  c,
 			query: query,
 			stmts: make([]*Stmt, len(stmts)),
 		}
 		for i, ast := range stmts {
-			// Use unique query string per sub-statement to avoid cache collisions
 			subQuery := fmt.Sprintf("%s#%d", query, i)
+			if len(parts) == len(stmts) && i < len(parts) {
+				subQuery = parts[i]
+			}
 			multiStmt.stmts[i] = &Stmt{
 				conn:  c,
 				query: subQuery,
@@ -172,21 +183,36 @@ func (c *Conn) removeFromDriver() {
 	}
 }
 
-// closePager closes the pager, rolling back any active transaction first.
-func (c *Conn) closePager(pager pager.PagerInterface, inTx bool) error {
-	if pager == nil {
+// closePager closes attached databases and the main pager,
+// rolling back any active transaction first.
+func (c *Conn) closePager(pgr pager.PagerInterface, inTx bool) error {
+	// Close all attached databases (excludes main and temp)
+	if c.dbRegistry != nil {
+		if err := c.dbRegistry.CloseAttached(); err != nil {
+			return fmt.Errorf("failed to close attached databases: %w", err)
+		}
+	}
+
+	if pgr == nil {
 		return nil
+	}
+
+	// Acquire the shared write mutex to serialize with any in-flight
+	// write operations on other connections sharing this database.
+	if c.writeMu != nil {
+		c.writeMu.Lock()
+		defer c.writeMu.Unlock()
 	}
 
 	// Rollback any active transaction
 	if inTx {
-		if err := pager.Rollback(); err != nil {
+		if err := pgr.Rollback(); err != nil {
 			return err
 		}
 	}
 
-	// Close pager
-	return pager.Close()
+	// Close main pager
+	return pgr.Close()
 }
 
 // Begin starts a transaction.
@@ -196,6 +222,9 @@ func (c *Conn) Begin() (driver.Tx, error) {
 
 // BeginTx starts a transaction with options.
 func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -215,6 +244,7 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 		}
 
 		c.inTx = true
+		c.setFKTransactionState(true)
 
 		return &Tx{
 			conn:     c,
@@ -228,11 +258,38 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 	}
 
 	c.inTx = true
+	c.setFKTransactionState(true)
 
 	return &Tx{
 		conn:     c,
 		readOnly: false,
 	}, nil
+}
+
+// setFKTransactionState sets the transaction state in the foreign key manager.
+func (c *Conn) setFKTransactionState(inTx bool) {
+	if c.fkManager != nil {
+		c.fkManager.SetInTransaction(inTx)
+	}
+}
+
+// checkDeferredFKConstraints validates all deferred foreign key constraints.
+func (c *Conn) checkDeferredFKConstraints() error {
+	if !c.foreignKeysEnabled || c.fkManager == nil {
+		return nil
+	}
+
+	// We need a minimal row reader to check the deferred violations
+	// Create a simple wrapper that uses the btree directly
+	rowReader := &ConnRowReader{conn: c}
+	return c.fkManager.CheckDeferredViolations(c.schema, rowReader)
+}
+
+// clearDeferredFKViolations clears all deferred foreign key violations.
+func (c *Conn) clearDeferredFKViolations() {
+	if c.fkManager != nil {
+		c.fkManager.ClearDeferredViolations()
+	}
 }
 
 // Ping verifies the connection is still alive.
@@ -257,8 +314,10 @@ func (c *Conn) ResetSession(ctx context.Context) error {
 		return driver.ErrBadConn
 	}
 
-	// Ensure no transaction is active
-	if c.inTx {
+	// SQL-managed transactions (via BEGIN/SAVEPOINT SQL statements) are allowed
+	// to persist across database/sql pool reuse. Go-API transactions (via db.Begin())
+	// must be completed before the connection can be reused.
+	if c.inTx && !c.sqlTx {
 		return fmt.Errorf("cannot reset session with active transaction")
 	}
 
@@ -285,6 +344,59 @@ func (c *Conn) removeStmt(stmt *Stmt) {
 	}
 }
 
+// hasAttachedDatabases reports whether any auxiliary databases (beyond "main")
+// are currently registered on this connection.
+func (c *Conn) hasAttachedDatabases() bool {
+	if c.dbRegistry == nil {
+		return false
+	}
+	dbs := c.dbRegistry.ListDatabases()
+	return len(dbs) > 1
+}
+
+// clearTxState resets all transaction-related state flags.
+func (c *Conn) clearTxState() {
+	c.inTx = false
+	c.sqlTx = false
+	c.savepointOnly = false
+}
+
+// reloadSchemaAfterRollback reloads the in-memory schema from the btree
+// after a ROLLBACK so that DDL changes (CREATE/DROP TABLE) are undone.
+func (c *Conn) reloadSchemaAfterRollback() {
+	if c.btree == nil || c.schema == nil {
+		return
+	}
+	fresh := schema.NewSchema()
+	if err := fresh.InitializeMaster(); err != nil {
+		return
+	}
+	if err := fresh.LoadFromMaster(c.btree); err != nil {
+		return // empty DB after rollback is fine
+	}
+	c.schema = fresh
+	// Update the registry so callers see the restored schema
+	if c.dbRegistry != nil {
+		if mainDB, ok := c.dbRegistry.GetDatabase("main"); ok {
+			mainDB.Schema = c.schema
+		}
+	}
+}
+
+// splitStatements splits a raw SQL string into individual statements using ';' delimiters.
+// It trims whitespace and drops empty segments. This is a simplified splitter suitable
+// for test inputs that do not contain semicolons inside literals.
+func splitStatements(query string) []string {
+	raw := strings.Split(query, ";")
+	parts := make([]string, 0, len(raw))
+	for _, part := range raw {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return parts
+}
+
 // openDatabase initializes the database connection by:
 // 1. Loading the schema from sqlite_master (page 1) if first connection
 // 2. Registering built-in functions
@@ -296,6 +408,13 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 		// This is required for both new and existing databases
 		if err := c.schema.InitializeMaster(); err != nil {
 			return fmt.Errorf("failed to initialize sqlite_master: %w", err)
+		}
+
+		// Ensure sqlite_master storage exists on disk for brand new databases
+		if c.btree != nil && c.pager != nil && c.pager.PageCount() <= 1 {
+			if _, err := c.btree.CreateTable(); err != nil {
+				return fmt.Errorf("failed to create sqlite_master storage: %w", err)
+			}
 		}
 
 		if err := c.schema.LoadFromMaster(c.btree); err != nil {
@@ -311,6 +430,13 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 		return fmt.Errorf("failed to register main database: %w", err)
 	}
 
+	// Keep registry schema in sync with the connection's main schema
+	if mainDB, ok := c.dbRegistry.GetDatabase("main"); ok {
+		mainDB.Schema = c.schema
+		mainDB.Pager = c.pager
+		mainDB.Btree = c.btree
+	}
+
 	// Register built-in SQL functions
 	c.funcReg = functions.DefaultRegistry()
 
@@ -318,10 +444,53 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 	c.vtabRegistry = vtab.NewModuleRegistry()
 	c.collRegistry = collation.NewCollationRegistry()
 
+	// Register built-in virtual table modules
+	if err := c.registerBuiltinVirtualTables(); err != nil {
+		return fmt.Errorf("failed to register virtual tables: %w", err)
+	}
+
 	// Initialize foreign key constraint manager
 	c.fkManager = constraint.NewForeignKeyManager()
 
+	// Default PRAGMA cache_size (-2000 means 2000 KiB)
+	if c.cacheSize == 0 {
+		c.cacheSize = -2000
+	}
+
 	return nil
+}
+
+// registerBuiltinVirtualTables registers built-in virtual table modules like FTS5 and RTree.
+func (c *Conn) registerBuiltinVirtualTables() error {
+	// Register FTS5 full-text search module
+	if err := c.vtabRegistry.RegisterModule("fts5", fts5.NewFTS5Module()); err != nil {
+		return fmt.Errorf("failed to register fts5 module: %w", err)
+	}
+
+	// Register RTree spatial index module
+	if err := c.vtabRegistry.RegisterModule("rtree", rtree.NewRTreeModule()); err != nil {
+		return fmt.Errorf("failed to register rtree module: %w", err)
+	}
+
+	// Future: Register additional modules like JSON, etc. when implemented
+
+	return nil
+}
+
+// ensureMasterPage makes sure page 1 exists in the btree for sqlite_master.
+func (c *Conn) ensureMasterPage() error {
+	if c.btree == nil {
+		return nil
+	}
+	if _, err := c.btree.GetPage(1); err == nil {
+		return nil
+	}
+
+	page := make([]byte, c.btree.PageSize)
+	headerOffset := btree.FileHeaderSize
+	page[headerOffset+btree.PageHeaderOffsetType] = btree.PageTypeLeafTable
+	// NumCells, CellContentStart, Fragmented already zeroed
+	return c.btree.SetPage(1, page)
 }
 
 // applyConfig applies the DSN configuration settings to the connection.
@@ -334,6 +503,9 @@ func (c *Conn) applyConfig(config *DriverConfig) error {
 
 	// Store configuration settings that affect connection behavior
 	c.foreignKeysEnabled = config.EnableForeignKeys
+	if c.fkManager != nil {
+		c.fkManager.SetEnabled(c.foreignKeysEnabled)
+	}
 
 	// Apply PRAGMA settings by executing them as SQL statements
 	// We need to do this through the statement execution path to ensure
@@ -609,4 +781,212 @@ func (c *Conn) RemoveCollation(name string) error {
 	}
 
 	return c.collRegistry.Unregister(name)
+}
+
+// ConnRowReader provides a minimal RowReader implementation for deferred FK constraint checking.
+// It creates a temporary VDBE context to access the row reading functionality.
+type ConnRowReader struct {
+	conn *Conn
+}
+
+// RowExists checks if a row exists with the given column values.
+func (r *ConnRowReader) RowExists(table string, columns []string, values []interface{}) (bool, error) {
+	// Create a minimal VDBE context to use the row reader
+	v := &vdbe.VDBE{
+		Ctx: &vdbe.VDBEContext{
+			Schema:             r.conn.schema,
+			Btree:              r.conn.btree,
+			Pager:              r.conn.pager,
+			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
+			FKManager:          r.conn.fkManager,
+		},
+		Cursors: make([]*vdbe.Cursor, 10),
+	}
+
+	reader := vdbe.NewVDBERowReader(v)
+	return reader.RowExists(table, columns, values)
+}
+
+// RowExistsWithCollation checks if a row exists using specified collations.
+func (r *ConnRowReader) RowExistsWithCollation(table string, columns []string, values []interface{}, collations []string) (bool, error) {
+	v := &vdbe.VDBE{
+		Ctx: &vdbe.VDBEContext{
+			Schema:             r.conn.schema,
+			Btree:              r.conn.btree,
+			Pager:              r.conn.pager,
+			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
+			FKManager:          r.conn.fkManager,
+		},
+		Cursors: make([]*vdbe.Cursor, 10),
+	}
+
+	reader := vdbe.NewVDBERowReader(v)
+	return reader.RowExistsWithCollation(table, columns, values, collations)
+}
+
+// FindReferencingRows finds all rows that reference the given values.
+func (r *ConnRowReader) FindReferencingRows(table string, columns []string, values []interface{}) ([]int64, error) {
+	// Create a minimal VDBE context
+	v := &vdbe.VDBE{
+		Ctx: &vdbe.VDBEContext{
+			Schema:             r.conn.schema,
+			Btree:              r.conn.btree,
+			Pager:              r.conn.pager,
+			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
+			FKManager:          r.conn.fkManager,
+		},
+		Cursors: make([]*vdbe.Cursor, 10),
+	}
+
+	reader := vdbe.NewVDBERowReader(v)
+	return reader.FindReferencingRows(table, columns, values)
+}
+
+// FindReferencingRowsWithParentAffinity finds all rows that reference the given values,
+// using the parent column's affinity and collation for comparison.
+func (r *ConnRowReader) FindReferencingRowsWithParentAffinity(
+	childTableName string,
+	childColumns []string,
+	parentValues []interface{},
+	parentTableName string,
+	parentColumns []string,
+) ([]int64, error) {
+	// Create a minimal VDBE context
+	v := &vdbe.VDBE{
+		Ctx: &vdbe.VDBEContext{
+			Schema:             r.conn.schema,
+			Btree:              r.conn.btree,
+			Pager:              r.conn.pager,
+			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
+			FKManager:          r.conn.fkManager,
+		},
+		Cursors: make([]*vdbe.Cursor, 10),
+	}
+
+	reader := vdbe.NewVDBERowReader(v)
+	return reader.FindReferencingRowsWithParentAffinity(childTableName, childColumns, parentValues, parentTableName, parentColumns)
+}
+
+// ReadRowByRowid reads a row's values by its rowid.
+func (r *ConnRowReader) ReadRowByRowid(table string, rowid int64) (map[string]interface{}, error) {
+	// Create a minimal VDBE context
+	v := &vdbe.VDBE{
+		Ctx: &vdbe.VDBEContext{
+			Schema:             r.conn.schema,
+			Btree:              r.conn.btree,
+			Pager:              r.conn.pager,
+			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
+			FKManager:          r.conn.fkManager,
+		},
+		Cursors: make([]*vdbe.Cursor, 10),
+	}
+
+	reader := vdbe.NewVDBERowReader(v)
+	return reader.ReadRowByRowid(table, rowid)
+}
+
+// DatabaseExecutor implementation for FTS5/R-Tree shadow table operations.
+// These methods allow virtual table modules to create and query their shadow tables.
+// They use prepareInternal to avoid deadlocking on the connection mutex,
+// since they are called during CREATE VIRTUAL TABLE which already holds the lock.
+
+// prepareInternal prepares a SQL statement without acquiring the connection mutex.
+// This must only be called when the caller already holds c.mu.
+func (c *Conn) prepareInternal(sqlStr string) (*Stmt, error) {
+	if c.closed {
+		return nil, driver.ErrBadConn
+	}
+
+	p := parser.NewParser(sqlStr)
+	stmts, err := p.Parse()
+	if err != nil {
+		return nil, fmt.Errorf("parse error: %w", err)
+	}
+
+	if len(stmts) == 0 {
+		return nil, fmt.Errorf("no statements found")
+	}
+
+	stmt := &Stmt{
+		conn:  c,
+		query: sqlStr,
+		ast:   stmts[0],
+	}
+	return stmt, nil
+}
+
+// ExecDDL executes a DDL statement (CREATE TABLE, DROP TABLE, etc.).
+// Must be called with c.mu already held.
+func (c *Conn) ExecDDL(sqlStr string) error {
+	stmt, err := c.prepareInternal(sqlStr)
+	if err != nil {
+		return err
+	}
+
+	namedArgs := valuesToNamedValues(nil)
+	_, err = stmt.executeAndCommit(namedArgs, c.inTx)
+	return err
+}
+
+// ExecDML executes a DML statement (INSERT, UPDATE, DELETE) and returns rows affected.
+// Must be called with c.mu already held.
+func (c *Conn) ExecDML(sqlStr string, args ...interface{}) (int64, error) {
+	stmt, err := c.prepareInternal(sqlStr)
+	if err != nil {
+		return 0, err
+	}
+
+	namedArgs := valuesToNamedValues(toDriverValues(args))
+	result, err := stmt.executeAndCommit(namedArgs, c.inTx)
+	if err != nil {
+		return 0, err
+	}
+
+	return result.RowsAffected()
+}
+
+// Query executes a SELECT statement and returns results as rows.
+// Must be called with c.mu already held.
+func (c *Conn) Query(sqlStr string, args ...interface{}) ([][]interface{}, error) {
+	stmt, err := c.prepareInternal(sqlStr)
+	if err != nil {
+		return nil, err
+	}
+
+	namedArgs := valuesToNamedValues(toDriverValues(args))
+	rows, err := stmt.queryInternal(namedArgs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return c.collectQueryResults(rows)
+}
+
+// toDriverValues converts interface args to driver.Value slice.
+func toDriverValues(args []interface{}) []driver.Value {
+	driverArgs := make([]driver.Value, len(args))
+	for i, arg := range args {
+		driverArgs[i] = arg
+	}
+	return driverArgs
+}
+
+// collectQueryResults reads all rows from a result set into a slice.
+func (c *Conn) collectQueryResults(rows driver.Rows) ([][]interface{}, error) {
+	var results [][]interface{}
+	dest := make([]driver.Value, len(rows.Columns()))
+
+	for {
+		if err := rows.Next(dest); err != nil {
+			break
+		}
+		row := make([]interface{}, len(dest))
+		for i, v := range dest {
+			row[i] = v
+		}
+		results = append(results, row)
+	}
+
+	return results, nil
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -22,6 +22,13 @@ type dbState struct {
 	schema   *schema.Schema
 	refCnt   int
 	inMemory bool // True for :memory: databases
+
+	// writeMu serializes write operations (VM execution + commit) across all
+	// connections sharing the same underlying database. Without this, two
+	// connections could race: one modifying page data through the btree while
+	// another commits (writes dirty pages to disk), causing a data race on the
+	// shared page buffer.
+	writeMu sync.Mutex
 }
 
 // Driver implements database/sql/driver.Driver for SQLite.
@@ -121,6 +128,11 @@ func (d *Driver) newDBState(filename string, readOnly bool) (*dbState, error) {
 	}
 	bt := btree.NewBtree(uint32(pgr.PageSize()))
 	bt.Provider = newPagerProvider(pgr)
+
+	// Wire up rollback callback so btree cache is cleared when pager rolls back.
+	// This is critical for WITHOUT ROWID tables that maintain separate page caches.
+	pgr.RollbackCallback = bt.ClearCache
+
 	return &dbState{
 		pager:    pgr,
 		btree:    bt,
@@ -140,6 +152,11 @@ func (d *Driver) newMemoryDBState() (*dbState, error) {
 	}
 	bt := btree.NewBtree(uint32(pgr.PageSize()))
 	bt.Provider = newMemoryPagerProvider(pgr)
+
+	// Wire up rollback callback so btree cache is cleared when pager rolls back.
+	// This is critical for WITHOUT ROWID tables that maintain separate page caches.
+	pgr.RollbackCallback = bt.ClearCache
+
 	return &dbState{
 		pager:    pgr,
 		btree:    bt,
@@ -196,6 +213,7 @@ func (d *Driver) buildConnection(filename string, state *dbState, secCfg *securi
 		dbRegistry:     schema.NewDatabaseRegistry(),
 		stmts:          make(map[*Stmt]struct{}),
 		stmtCache:      NewStmtCache(100),
+		writeMu:        &state.writeMu,
 		securityConfig: secCfg,
 	}
 }
@@ -217,6 +235,7 @@ func (d *Driver) createMemoryConnection(memoryID string, state *dbState, config 
 		dbRegistry:     schema.NewDatabaseRegistry(),
 		stmts:          make(map[*Stmt]struct{}),
 		stmtCache:      NewStmtCache(100), // Default cache size of 100
+		writeMu:        &state.writeMu,
 		securityConfig: secCfg,
 	}
 	// Memory databases are always new, so schema never pre-loaded

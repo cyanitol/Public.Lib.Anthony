@@ -270,10 +270,10 @@ for i, op := range vdbe.Ops {
 
 ## Resources
 
-- Implementation: `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/sql/select.go`
-- Documentation: `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/sql/INTERSECT_EXCEPT_IMPLEMENTATION.md`
-- Tests: `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/sql/compound_select_test.go`
-- Bytecode Flow: `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/sql/COMPOUND_SELECT_BYTECODE_FLOW.md`
+- Implementation: `internal/sql/select.go`
+- Documentation: `internal/sql/INTERSECT_EXCEPT_IMPLEMENTATION.md`
+- Tests: `internal/sql/compound_select_test.go`
+- Bytecode Flow: `internal/sql/COMPOUND_SELECT_BYTECODE_FLOW.md`
 
 ## SQL Standard References
 

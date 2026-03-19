@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package pager
 
 import (
@@ -187,6 +187,11 @@ type Pager struct {
 
 	// Mutex for thread-safe operations
 	mu sync.RWMutex
+
+	// RollbackCallback is called during rollback to synchronize external caches.
+	// This is used to clear btree caches when pager rolls back, ensuring
+	// WITHOUT ROWID tables and other btree users have consistent state.
+	RollbackCallback func()
 }
 
 // Open opens a database file and creates a new Pager.
@@ -665,6 +670,13 @@ func (p *Pager) rollbackLocked() error {
 	// Clear the cache
 	p.cache.Clear()
 
+	// Notify external caches (e.g., btree) to clear their caches as well.
+	// This is critical for WITHOUT ROWID tables which maintain separate
+	// page caches that must be synchronized with pager rollback.
+	if p.RollbackCallback != nil {
+		p.RollbackCallback()
+	}
+
 	// Close and delete the journal
 	if p.journalFile != nil {
 		p.journalFile.Close()
@@ -899,7 +911,9 @@ func (p *Pager) writePage(page *DbPage) error {
 	}
 
 	offset := int64(page.Pgno-1) * int64(p.pageSize)
-	if _, err := p.file.WriteAt(page.Data, offset); err != nil {
+	dataCopy := make([]byte, p.pageSize)
+	copy(dataCopy, page.Data[:p.pageSize])
+	if _, err := p.file.WriteAt(dataCopy, offset); err != nil {
 		return fmt.Errorf("failed to write page %d: %w", page.Pgno, err)
 	}
 

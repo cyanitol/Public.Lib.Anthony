@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 // Package utf provides UTF-8 and UTF-16 encoding/decoding utilities for SQLite.
 //
 // This package implements the core UTF functionality needed by the SQLite engine,

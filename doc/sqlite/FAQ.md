@@ -72,6 +72,8 @@ Search Changelog
 - [My query does not return the column name that I expect.  Is this a bug?](#q28)
 - [Where did my database go? (Or: How did my database become empty?)](#q29)
 
+<a name="q1"></a>
+
 **(1) How do I create an AUTOINCREMENT field?**
 
 Short answer: A column declared [INTEGER PRIMARY KEY](lang_createtable.html#rowid) will
@@ -132,10 +134,14 @@ Note that the integer key is one greater than the largest
   possible key has previously existed in that table, then the [INSERT](lang_insert.html)
   will fail with an [SQLITE_FULL](rescode.html#full) error code.
 
+<a name="q2"></a>
+
 **(2) What datatypes does SQLite support?**
 
 SQLite uses [dynamic typing](datatype3.html).  Content can be stored as INTEGER,
   REAL, TEXT, BLOB, or as NULL.
+
+<a name="q3"></a>
 
 **(3) SQLite lets me insert a string into a database column of type integer!**
 
@@ -161,6 +167,8 @@ But SQLite does use the declared type of a column as a hint
   it inserts the string.  This feature is called [type affinity](datatype3.html#affinity).
   
 
+<a name="q4"></a>
+
 **(4) Why doesn't SQLite allow me to use '0' and '0.0' as the primary
   key on two different rows of the same table?**
 
@@ -172,6 +180,8 @@ Every row must have a unique primary key.  For a column with a
   numeric type, SQLite thinks that **'0'** and **'0.0'** are the
   same value because they compare equal to one another numerically.
   (See the previous question.)  Hence the values are not unique.
+
+<a name="q5"></a>
 
 **(5) Can multiple applications or multiple instances of the same
   application access a single database file at the same time?**
@@ -226,6 +236,8 @@ When SQLite tries to access a file that is locked by another
   [sqlite3_busy_handler()](c3ref/busy_handler.html) or [sqlite3_busy_timeout()](c3ref/busy_timeout.html)
   API functions.
 
+<a name="q6"></a>
+
 **(6) Is SQLite threadsafe?**
 
 [Threads are evil](https://www2.eecs.berkeley.edu/Pubs/TechRpts/2006/EECS-2006-1.html).
@@ -253,6 +265,8 @@ SQLite is threadsafe because it uses mutexes to serialize
   
 Under Unix, you should not carry an open SQLite database across
   a fork() system call into the child process.
+
+<a name="q7"></a>
 
 **(7) How do I list all tables/indices contained in an SQLite database**
 
@@ -328,10 +342,14 @@ ORDER BY name
 
 ```
 
+<a name="q8"></a>
+
 **(8) Are there any known size limits to SQLite databases?**
 
 See [limits.html](limits.html) for a full discussion of
   the limits of SQLite.
+
+<a name="q9"></a>
 
 **(9) What is the maximum size of a VARCHAR in SQLite?**
 
@@ -343,11 +361,15 @@ SQLite does not enforce the length of a VARCHAR.  You can declare
   of *N*.
   
 
+<a name="q10"></a>
+
 **(10) Does SQLite support a BLOB type?**
 
 SQLite allows you to store BLOB data in any 
   column, even columns that are declared to hold some other type.
   BLOBs can even be used as PRIMARY KEYs.
+
+<a name="q11"></a>
 
 **(11) How do I add, delete or rename columns from an existing table in SQLite?**
 
@@ -362,6 +384,8 @@ If you want to make more complex changes in the structure or
   old table, create the new table, then copy the data back in from
   the temporary table. See [
   Making Other Kinds Of Table Schema Changes](lang_altertable.html#otheralter) for procedure.
+
+<a name="q12"></a>
 
 **(12) I deleted a lot of data but the database file did not get any
   smaller.  Is this a bug?**
@@ -386,11 +410,15 @@ An alternative to using the VACUUM command
   is auto-vacuum mode, enabled using the 
   [auto_vacuum pragma](pragma.html#pragma_auto_vacuum).
 
+<a name="q13"></a>
+
 **(13) Can I use SQLite in my commercial product without paying royalties?**
 
 Yes.  SQLite is in the 
   [public domain](copyright.html).  No claim of ownership is made
   to any part of the code.  You can do anything you want with it.
+
+<a name="q14"></a>
 
 **(14) How do I use a string literal that contains an embedded single-quote (')
   character?**
@@ -406,6 +434,8 @@ The SQL standard specifies that single-quotes in strings are escaped
     INSERT INTO xyz VALUES('5 O''clock');
   
 ```
+
+<a name="q15"></a>
 
 **(15) What is an SQLITE_SCHEMA error, and why am I getting one?**
 
@@ -426,6 +456,8 @@ The [sqlite3_prepare_v2()](c3ref/prepare.html) interface creates a
   the schema changes.  The easiest way to deal with
   [SQLITE_SCHEMA](rescode.html#schema) errors is to always use [sqlite3_prepare_v2()](c3ref/prepare.html)
   instead of [sqlite3_prepare()](c3ref/prepare.html).
+
+<a name="q17"></a>
 
 **(17) I get some compiler warnings when I compile SQLite.
   Isn't this a problem?  Doesn't it indicate poor code quality?**
@@ -471,6 +503,8 @@ Some people say that we should eliminate all warnings because
   Compiler warnings usually only arise from compilers or compile-time 
   options that the SQLite developers do not use themselves.
 
+<a name="q18"></a>
+
 **(18) Case-insensitive matching of Unicode characters does not work.**
 
 The default configuration of SQLite only supports case-insensitive
@@ -495,6 +529,8 @@ Instead of providing full Unicode case support by default,
   these overloads.  Or, developers can write their own overloads
   based on their own Unicode-aware comparison routines already
   contained within their project.
+
+<a name="q19"></a>
 
 **(19) INSERT is really slow - I can only do few dozen INSERTs per second**
 
@@ -533,6 +569,8 @@ Another option is to run [PRAGMA synchronous=OFF](pragma.html#pragma_synchronous
   transaction can improve performance dramatically by avoiding the overhead
   of transaction control after each individual operation.*
 
+<a name="q20"></a>
+
 **(20) I accidentally deleted some important information from my SQLite database.
   How can I recover it?**
 
@@ -551,6 +589,8 @@ If you do not have a backup, recovery is very difficult.  You might
   then some of the deleted content might still be in the database file, in
   areas marked for reuse.  But, again, there exist no procedures or tools
   that we know of to help you recover that data.
+
+<a name="q21"></a>
 
 **(21) What is an SQLITE_CORRUPT error?  What does it mean for the database
   to be "malformed"? Why am I getting this error?**
@@ -587,6 +627,8 @@ Depending how badly your database is corrupted, you may be able to
   to a file and then recreate.  Unfortunately, once humpty-dumpty falls off 
   the wall, it is generally not possible to put him back together again.
 
+<a name="q22"></a>
+
 **(22) Does SQLite support foreign keys?**
 
   As of [version 3.6.19](releaselog/3_6_19.html) (2009-10-14), 
@@ -595,6 +637,8 @@ Depending how badly your database is corrupted, you may be able to
   To enable foreign key constraint enforcement, run 
   [PRAGMA foreign_keys=ON](pragma.html#pragma_foreign_keys) or compile with
   [-DSQLITE_DEFAULT_FOREIGN_KEYS=1](compile.html#default_foreign_keys).
+
+<a name="q23"></a>
 
 **(23) I get a compiler error if I use the SQLITE_OMIT_... 
   compile-time options when building SQLite.**
@@ -608,6 +652,8 @@ The [SQLITE_OMIT_...](compile.html#omitfeatures) compile-time options only work
 It is possible to build a special [amalgamation](amalgamation.html) that will work with
   a predetermined set of SQLITE_OMIT_... options.  Instructions for doing
   so can be found with the [SQLITE_OMIT_... documentation](compile.html#omitfeatures).
+
+<a name="q24"></a>
 
 **(24) My WHERE clause expression column1="column1" does not work.
   It causes every row of the table to be returned, not just the rows
@@ -624,6 +670,8 @@ SQL uses double-quotes around identifiers (column or table names) that
   column1="column1" that is equivalent to 
   column1=column1 which is obviously always true.
 
+<a name="q25"></a>
+
 **(25) How are the syntax diagrams (a.k.a. "railroad" diagrams) for
   SQLite generated?**
 
@@ -636,6 +684,8 @@ Each diagram is hand-written using the [Pikchr](https://pikchr.org/)
   generating the syntax diagrams.  The historical process was based on Tcl/Tk and is
   described  at [http://wiki.tcl-lang.org/21708](http://wiki.tcl-lang.org/21708).  The newer Pikchr-based syntax diagrams
   first landed on trunk on 2020-09-26.
+
+<a name="q26"></a>
 
 **(26) The SQL standard requires that a UNIQUE constraint be enforced even if
   one or more of the columns in the constraint are NULL, but SQLite does
@@ -666,6 +716,8 @@ Perhaps you are referring to the following statement from SQL92:
   SQL database engines, and most other database engines also go with (1),
   so that is what SQLite does.
 
+<a name="q27"></a>
+
 **(27) What is the Export Control Classification Number (ECCN) for SQLite?**
 
 After careful review of the Commerce Control List (CCL), we are convinced
@@ -677,6 +729,8 @@ The above is true for the core public-domain SQLite.  If you extend
   SQLite by adding new code, or if you statically link SQLite with your
   application, that might change the ECCN in your particular case.
 
+<a name="q28"></a>
+
 **(28) My query does not return the column name that I expect.  Is this a bug?**
 
 If the columns of your result set are named by AS clauses, then SQLite
@@ -684,6 +738,8 @@ If the columns of your result set are named by AS clauses, then SQLite
   column name.  If the result set does not use an AS clause, then SQLite
   is free to name the column anything it wants.
   See the [sqlite3_column_name()](c3ref/column_name.html) documentation for further information.
+
+<a name="q29"></a>
 
 **(29) Where did my database go? (Or: How did my database become empty?)**
 

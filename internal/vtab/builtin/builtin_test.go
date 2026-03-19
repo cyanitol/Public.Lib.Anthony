@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package builtin
 
 import (
@@ -89,96 +89,97 @@ func TestSQLiteMasterTable(t *testing.T) {
 	}
 }
 
-// TestSQLiteMasterCursor tests the sqlite_master cursor.
-func TestSQLiteMasterCursor(t *testing.T) {
-	t.Parallel()
+// Prefix: smCur_
+func smCur_openCursor(t *testing.T) *SQLiteMasterCursor {
+	t.Helper()
 	table := &SQLiteMasterTable{db: nil}
 	cursor, err := table.Open()
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	defer cursor.Close()
-
 	masterCursor, ok := cursor.(*SQLiteMasterCursor)
 	if !ok {
 		t.Fatal("Expected cursor to be *SQLiteMasterCursor")
 	}
+	return masterCursor
+}
 
-	// Test Filter with no constraints
-	err = masterCursor.Filter(0, "", nil)
+func smCur_testFilter(t *testing.T, cursor *SQLiteMasterCursor) {
+	t.Helper()
+	err := cursor.Filter(0, "", nil)
 	if err != nil {
 		t.Fatalf("Filter failed: %v", err)
 	}
-
-	// Should have at least the sqlite_master table itself
-	if masterCursor.EOF() {
+	if cursor.EOF() {
 		t.Error("Expected at least one row (sqlite_master)")
 	}
+}
 
-	// Test Column access
-	if !masterCursor.EOF() {
-		typeVal, err := masterCursor.Column(0)
-		if err != nil {
-			t.Errorf("Column(0) failed: %v", err)
-		}
-		if typeVal != "table" {
-			t.Errorf("Expected type='table', got %v", typeVal)
-		}
-
-		nameVal, err := masterCursor.Column(1)
-		if err != nil {
-			t.Errorf("Column(1) failed: %v", err)
-		}
-		if nameVal != "sqlite_master" {
-			t.Errorf("Expected name='sqlite_master', got %v", nameVal)
-		}
-
-		tblNameVal, err := masterCursor.Column(2)
-		if err != nil {
-			t.Errorf("Column(2) failed: %v", err)
-		}
-		if tblNameVal != "sqlite_master" {
-			t.Errorf("Expected tbl_name='sqlite_master', got %v", tblNameVal)
-		}
-
-		rootPageVal, err := masterCursor.Column(3)
-		if err != nil {
-			t.Errorf("Column(3) failed: %v", err)
-		}
-		if rootPageVal != int64(1) {
-			t.Errorf("Expected rootpage=1, got %v", rootPageVal)
-		}
-
-		sqlVal, err := masterCursor.Column(4)
-		if err != nil {
-			t.Errorf("Column(4) failed: %v", err)
-		}
-		if sqlVal == "" {
-			t.Error("Expected non-empty SQL")
-		}
+func smCur_checkColumn(t *testing.T, cursor *SQLiteMasterCursor, colNum int, wantVal interface{}) {
+	t.Helper()
+	val, err := cursor.Column(colNum)
+	if err != nil {
+		t.Errorf("Column(%d) failed: %v", colNum, err)
 	}
-
-	// Test Rowid
-	if !masterCursor.EOF() {
-		rowid, err := masterCursor.Rowid()
-		if err != nil {
-			t.Errorf("Rowid failed: %v", err)
-		}
-		if rowid != 0 {
-			t.Errorf("Expected rowid=0, got %d", rowid)
-		}
+	if val != wantVal {
+		t.Errorf("Column(%d): expected %v, got %v", colNum, wantVal, val)
 	}
+}
 
-	// Test Next
-	err = masterCursor.Next()
+func smCur_testColumns(t *testing.T, cursor *SQLiteMasterCursor) {
+	t.Helper()
+	if cursor.EOF() {
+		return
+	}
+	smCur_checkColumn(t, cursor, 0, "table")
+	smCur_checkColumn(t, cursor, 1, "sqlite_master")
+	smCur_checkColumn(t, cursor, 2, "sqlite_master")
+	smCur_checkColumn(t, cursor, 3, int64(1))
+
+	sqlVal, err := cursor.Column(4)
+	if err != nil {
+		t.Errorf("Column(4) failed: %v", err)
+	}
+	if sqlVal == "" {
+		t.Error("Expected non-empty SQL")
+	}
+}
+
+func smCur_testRowid(t *testing.T, cursor *SQLiteMasterCursor) {
+	t.Helper()
+	if cursor.EOF() {
+		return
+	}
+	rowid, err := cursor.Rowid()
+	if err != nil {
+		t.Errorf("Rowid failed: %v", err)
+	}
+	if rowid != 0 {
+		t.Errorf("Expected rowid=0, got %d", rowid)
+	}
+}
+
+func smCur_testNext(t *testing.T, cursor *SQLiteMasterCursor) {
+	t.Helper()
+	err := cursor.Next()
 	if err != nil {
 		t.Errorf("Next failed: %v", err)
 	}
-
-	// Should be EOF after one row
-	if !masterCursor.EOF() {
+	if !cursor.EOF() {
 		t.Error("Expected EOF after one row")
 	}
+}
+
+// TestSQLiteMasterCursor tests the sqlite_master cursor.
+func TestSQLiteMasterCursor(t *testing.T) {
+	t.Parallel()
+	cursor := smCur_openCursor(t)
+	defer cursor.Close()
+
+	smCur_testFilter(t, cursor)
+	smCur_testColumns(t, cursor)
+	smCur_testRowid(t, cursor)
+	smCur_testNext(t, cursor)
 }
 
 // TestSQLiteMasterCursorWithFilters tests filtering in sqlite_master.

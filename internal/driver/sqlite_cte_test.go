@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -7,17 +7,172 @@ import (
 	"testing"
 )
 
+// cteTestCase defines a CTE test case
+type cteTestCase struct {
+	name     string
+	setup    []string
+	query    string
+	wantRows [][]interface{}
+	wantErr  bool
+	skip     string
+}
+
 // TestSQLiteCTE tests Common Table Expressions (CTEs) including basic WITH, recursive, and complex queries
 func TestSQLiteCTE(t *testing.T) {
 	t.Skip("pre-existing failure - CTE compilation incomplete")
-	tests := []struct {
-		name     string
-		setup    []string
-		query    string
-		wantRows [][]interface{}
-		wantErr  bool
-		skip     string
-	}{
+	tests := buildCTETests()
+
+	for _, tt := range tests {
+		tt := tt // Capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.skip != "" {
+				t.Skip(tt.skip)
+			}
+			tmpDir := t.TempDir()
+			dbPath := filepath.Join(tmpDir, "test.db")
+
+			db, err := sql.Open(DriverName, dbPath)
+			if err != nil {
+				t.Fatalf("failed to open database: %v", err)
+			}
+			defer db.Close()
+
+			// Execute setup statements
+			cteExecuteSetup(t, db, tt.setup)
+
+			// Determine query type and execute appropriately
+			if cteIsModifyingQuery(tt.query) {
+				cteExecuteModifyingQuery(t, db, tt)
+			} else {
+				cteExecuteSelectQuery(t, db, tt)
+			}
+		})
+	}
+}
+
+// Helper functions for CTE tests (cte prefix to avoid naming conflicts)
+
+func cteExecuteSetup(t *testing.T, db *sql.DB, setup []string) {
+	t.Helper()
+	for _, stmt := range setup {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup failed on statement %q: %v", stmt, err)
+		}
+	}
+}
+
+func cteIsModifyingQuery(query string) bool {
+	if len(query) < 6 {
+		return false
+	}
+	// Check for WITH ... INSERT/UPDATE/DELETE patterns
+	if query[:6] == "WITH d" || query[:6] == "WITH c" || query[:6] == "WITH f" ||
+		query[:6] == "WITH t" || query[:6] == "WITH u" {
+		return cteContainsModifyingKeyword(query)
+	}
+	return false
+}
+
+func cteContainsModifyingKeyword(query string) bool {
+	return cteContains(query, "INSERT INTO") ||
+		cteContains(query, "UPDATE") ||
+		cteContains(query, "DELETE FROM")
+}
+
+func cteContains(s, substr string) bool {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func cteExecuteModifyingQuery(t *testing.T, db *sql.DB, tt cteTestCase) {
+	t.Helper()
+	_, err := db.Exec(tt.query)
+	if tt.wantErr {
+		if err == nil {
+			t.Fatalf("expected error but got none")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("exec failed: %v", err)
+	}
+
+	// Verify results
+	verifyQuery := cteExtractVerifyQuery(tt.query)
+	if verifyQuery != "" && len(tt.wantRows) > 0 {
+		rows, err := db.Query(verifyQuery)
+		if err != nil {
+			t.Fatalf("verify query failed: %v", err)
+		}
+		defer rows.Close()
+		gotRows := scanAllRows(t, rows)
+		compareRows(t, gotRows, tt.wantRows)
+	}
+}
+
+func cteExtractVerifyQuery(query string) string {
+	tableName := cteExtractTableName(query)
+	if tableName != "" {
+		return "SELECT * FROM " + tableName + " ORDER BY 1"
+	}
+	return ""
+}
+
+func cteExtractTableName(query string) string {
+	if cteContains(query, "INSERT INTO") {
+		return cteExtractTableAfter(query, "INSERT INTO")
+	}
+	if cteContains(query, "UPDATE") {
+		return cteExtractTableAfter(query, "UPDATE")
+	}
+	if cteContains(query, "DELETE FROM") {
+		return cteExtractTableAfter(query, "DELETE FROM")
+	}
+	return ""
+}
+
+func cteExtractTableAfter(query, keyword string) string {
+	start := 0
+	for i := 0; i < len(query); i++ {
+		if i+len(keyword) <= len(query) && query[i:i+len(keyword)] == keyword {
+			start = i + len(keyword) + 1
+			break
+		}
+	}
+	if start > 0 {
+		end := start
+		for end < len(query) && query[end] != ' ' && query[end] != '(' {
+			end++
+		}
+		return query[start:end]
+	}
+	return ""
+}
+
+func cteExecuteSelectQuery(t *testing.T, db *sql.DB, tt cteTestCase) {
+	t.Helper()
+	rows, err := db.Query(tt.query)
+	if tt.wantErr {
+		if err == nil {
+			t.Fatalf("expected error but got none")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+
+	gotRows := scanAllRows(t, rows)
+	compareRows(t, gotRows, tt.wantRows)
+}
+
+func buildCTETests() []cteTestCase {
+	return []cteTestCase{
 		// Basic WITH clause tests
 		{
 			name: "basic_with_single_select",
@@ -855,148 +1010,5 @@ func TestSQLiteCTE(t *testing.T) {
 			query:   "WITH cte AS (SELECT 1), cte AS (SELECT 2) SELECT * FROM cte",
 			wantErr: true,
 		},
-	}
-
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
-			tmpDir := t.TempDir()
-			dbPath := filepath.Join(tmpDir, "test.db")
-
-			db, err := sql.Open(DriverName, dbPath)
-			if err != nil {
-				t.Fatalf("failed to open database: %v", err)
-			}
-			defer db.Close()
-
-			// Execute setup statements
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed on statement %q: %v", stmt, err)
-				}
-			}
-
-			// For INSERT/UPDATE/DELETE queries, execute first and then query results
-			isModifyingQuery := false
-			var verifyQuery string
-
-			if len(tt.wantRows) > 0 {
-				// Check if this is a modifying query (INSERT, UPDATE, DELETE)
-				if stmt := tt.query; len(stmt) >= 6 {
-					prefix := stmt[:6]
-					if prefix == "WITH d" || prefix == "WITH c" || prefix == "WITH f" || prefix == "WITH t" || prefix == "WITH u" {
-						// Could be DELETE, INSERT, UPDATE with CTE
-						if contains := func(s, substr string) bool {
-							for i := 0; i+len(substr) <= len(s); i++ {
-								if s[i:i+len(substr)] == substr {
-									return true
-								}
-							}
-							return false
-						}; contains(stmt, "INSERT INTO") {
-							isModifyingQuery = true
-							// Extract table name from INSERT INTO
-							start := 0
-							for i := 0; i < len(stmt); i++ {
-								if i+11 <= len(stmt) && stmt[i:i+11] == "INSERT INTO" {
-									start = i + 12
-									break
-								}
-							}
-							if start > 0 {
-								end := start
-								for end < len(stmt) && stmt[end] != ' ' && stmt[end] != '(' {
-									end++
-								}
-								tableName := stmt[start:end]
-								verifyQuery = "SELECT * FROM " + tableName + " ORDER BY 1"
-							}
-						} else if contains(stmt, "UPDATE") {
-							isModifyingQuery = true
-							// Extract table name from UPDATE
-							start := 0
-							for i := 0; i < len(stmt); i++ {
-								if i+6 <= len(stmt) && stmt[i:i+6] == "UPDATE" {
-									start = i + 7
-									break
-								}
-							}
-							if start > 0 {
-								end := start
-								for end < len(stmt) && stmt[end] != ' ' {
-									end++
-								}
-								tableName := stmt[start:end]
-								verifyQuery = "SELECT * FROM " + tableName + " ORDER BY 1"
-							}
-						} else if contains(stmt, "DELETE FROM") {
-							isModifyingQuery = true
-							// Extract table name from DELETE FROM
-							start := 0
-							for i := 0; i < len(stmt); i++ {
-								if i+11 <= len(stmt) && stmt[i:i+11] == "DELETE FROM" {
-									start = i + 12
-									break
-								}
-							}
-							if start > 0 {
-								end := start
-								for end < len(stmt) && stmt[end] != ' ' {
-									end++
-								}
-								tableName := stmt[start:end]
-								verifyQuery = "SELECT * FROM " + tableName + " ORDER BY 1"
-							}
-						}
-					}
-				}
-			}
-
-			// Execute the main query
-			if isModifyingQuery {
-				_, err := db.Exec(tt.query)
-				if tt.wantErr {
-					if err == nil {
-						t.Fatalf("expected error but got none")
-					}
-					return
-				}
-				if err != nil {
-					t.Fatalf("exec failed: %v", err)
-				}
-
-				// Now query to verify results
-				if verifyQuery != "" {
-					rows, err := db.Query(verifyQuery)
-					if err != nil {
-						t.Fatalf("verify query failed: %v", err)
-					}
-					defer rows.Close()
-
-					gotRows := scanAllRows(t, rows)
-					compareRows(t, gotRows, tt.wantRows)
-				}
-				return
-			}
-
-			// Regular SELECT query
-			rows, err := db.Query(tt.query)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error but got none")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-
-			gotRows := scanAllRows(t, rows)
-			compareRows(t, gotRows, tt.wantRows)
-		})
 	}
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/collation"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/constraint"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/pager"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
@@ -22,6 +26,8 @@ func (s *Stmt) compileCreateIndex(vm *vdbe.VDBE, stmt *parser.CreateIndexStmt, a
 	if err != nil {
 		return nil, err
 	}
+	// Preserve original SQL for persistence/loading.
+	index.SQL = s.query
 
 	// Allocate a root page for the index btree
 	if s.conn.btree != nil {
@@ -36,10 +42,12 @@ func (s *Stmt) compileCreateIndex(vm *vdbe.VDBE, stmt *parser.CreateIndexStmt, a
 		index.RootPage = uint32(1000 + s.conn.schema.IndexCount())
 	}
 
-	// In a full implementation, this would also:
-	// 1. Insert entry into sqlite_master table
-	// 2. Populate the index with existing table data
-	// 3. Update the schema cookie
+	// Persist schema to sqlite_master
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			_ = err
+		}
+	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
@@ -72,10 +80,12 @@ func (s *Stmt) compileDropIndex(vm *vdbe.VDBE, stmt *parser.DropIndexStmt, args 
 		return nil, err
 	}
 
-	// In a full implementation, this would:
-	// 1. Delete entry from sqlite_master table
-	// 2. Free all pages used by the index
-	// 3. Update the schema cookie
+	// Persist schema to sqlite_master
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			_ = err
+		}
+	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
@@ -122,46 +132,58 @@ func (s *Stmt) compileAlterTable(vm *vdbe.VDBE, stmt *parser.AlterTableStmt, arg
 
 // compileAlterTableRename handles ALTER TABLE ... RENAME TO ...
 func (s *Stmt) compileAlterTableRename(vm *vdbe.VDBE, oldName, newName string) (*vdbe.VDBE, error) {
-	// Check if new name already exists
-	// Rename the table in schema
 	if err := s.conn.schema.RenameTable(oldName, newName); err != nil {
 		return nil, err
 	}
 
-	// In a full implementation, this would also:
-	// 1. Update sqlite_master table
-	// 2. Update all indexes and triggers that reference this table
-	// 3. Update the schema cookie
+	// Regenerate stored SQL for the table and its indexes
+	s.conn.schema.UpdateRenameTableSQL(newName)
+
+	// Update trigger table references
+	s.updateTriggerTableRefs(oldName, newName)
+
+	// Persist to sqlite_master
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			_ = err
+		}
+	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	s.invalidateStmtCache()
 
 	return vm, nil
 }
 
+// updateTriggerTableRefs updates trigger table references after a table rename.
+func (s *Stmt) updateTriggerTableRefs(oldName, newName string) {
+	lowerOld := strings.ToLower(oldName)
+	for _, trigger := range s.conn.schema.Triggers {
+		if strings.ToLower(trigger.Table) == lowerOld {
+			trigger.Table = newName
+		}
+	}
+}
+
 // compileAlterTableRenameColumn handles ALTER TABLE ... RENAME COLUMN ... TO ...
 func (s *Stmt) compileAlterTableRenameColumn(vm *vdbe.VDBE, table *schema.Table, oldName, newName string) (*vdbe.VDBE, error) {
-	// Find the column
-	col, exists := table.GetColumn(oldName)
-	if !exists {
-		return nil, fmt.Errorf("column %q not found in table %q", oldName, table.Name)
+	if err := s.conn.schema.RenameColumn(table.Name, oldName, newName); err != nil {
+		return nil, err
 	}
 
-	// Check if new name already exists
-	if _, exists := table.GetColumn(newName); exists {
-		return nil, fmt.Errorf("column %q already exists in table %q", newName, table.Name)
+	// Persist to sqlite_master
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			_ = err
+		}
 	}
-
-	// Update column name
-	col.Name = newName
-
-	// In a full implementation, this would:
-	// 1. Update sqlite_master table
-	// 2. Update all indexes, triggers, and views that reference this column
-	// 3. Update the schema cookie
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	s.invalidateStmtCache()
 
 	return vm, nil
 }
@@ -175,8 +197,18 @@ func (s *Stmt) compileAlterTableAddColumn(vm *vdbe.VDBE, table *schema.Table, co
 	newCol := s.createNewColumn(colDef)
 	table.Columns = append(table.Columns, newCol)
 
+	// Regenerate stored SQL and persist
+	s.conn.schema.UpdateTableSQL(table.Name)
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			_ = err
+		}
+	}
+
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	s.invalidateStmtCache()
 
 	return vm, nil
 }
@@ -226,28 +258,21 @@ func (s *Stmt) applyColumnConstraint(col *schema.Column, constraint parser.Colum
 
 // compileAlterTableDropColumn handles ALTER TABLE ... DROP COLUMN ...
 func (s *Stmt) compileAlterTableDropColumn(vm *vdbe.VDBE, table *schema.Table, columnName string) (*vdbe.VDBE, error) {
-	// Find the column index
-	colIdx := table.GetColumnIndex(columnName)
-	if colIdx == -1 {
-		return nil, fmt.Errorf("column %q not found in table %q", columnName, table.Name)
+	if err := s.conn.schema.DropColumn(table.Name, columnName); err != nil {
+		return nil, err
 	}
 
-	// Check if it's the last column (SQLite doesn't allow dropping the last column)
-	if len(table.Columns) == 1 {
-		return nil, fmt.Errorf("cannot drop the last column of table %q", table.Name)
+	// Persist to sqlite_master
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			_ = err
+		}
 	}
-
-	// Remove the column
-	table.Columns = append(table.Columns[:colIdx], table.Columns[colIdx+1:]...)
-
-	// In a full implementation, this would:
-	// 1. Update sqlite_master table
-	// 2. Rebuild the table data without the dropped column
-	// 3. Update all indexes and triggers that reference this column
-	// 4. Update the schema cookie
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	s.invalidateStmtCache()
 
 	return vm, nil
 }
@@ -265,8 +290,20 @@ func (s *Stmt) compilePragma(vm *vdbe.VDBE, stmt *parser.PragmaStmt, args []driv
 		return s.compilePragmaTableInfo(vm, stmt)
 	case "foreign_keys":
 		return s.compilePragmaForeignKeys(vm, stmt)
+	case "foreign_key_check":
+		return s.compilePragmaForeignKeyCheck(vm, stmt)
+	case "foreign_key_list":
+		return s.compilePragmaForeignKeyList(vm, stmt)
 	case "journal_mode":
 		return s.compilePragmaJournalMode(vm, stmt)
+	case "page_count":
+		return s.compilePragmaPageCount(vm)
+	case "database_list":
+		return s.compilePragmaDatabaseList(vm)
+	case "index_list":
+		return s.compilePragmaIndexList(vm, stmt)
+	case "cache_size":
+		return s.compilePragmaCacheSize(vm, stmt)
 	default:
 		// For unsupported PRAGMAs, return empty result
 		vm.AddOp(vdbe.OpInit, 0, 0, 0)
@@ -371,20 +408,22 @@ func emitDefaultValue(vm *vdbe.VDBE, reg int, defaultVal interface{}) {
 
 // calculatePrimaryKeyIndex returns the primary key index for a column.
 // Returns 0 if the column is not a primary key, or the position (1-based) if it is.
+// For table-level PRIMARY KEY(a, b), columns may not have col.PrimaryKey set,
+// so we also check membership in table.PrimaryKey.
 func calculatePrimaryKeyIndex(col *schema.Column, table *schema.Table) int {
-	if !col.PrimaryKey {
-		return 0
-	}
-
-	// Find position in composite primary key
+	// Check table.PrimaryKey list (covers both inline and table-level PKs)
 	for j, pkCol := range table.PrimaryKey {
-		if pkCol == col.Name {
+		if strings.EqualFold(pkCol, col.Name) {
 			return j + 1
 		}
 	}
 
-	// Single column primary key
-	return 1
+	// Fallback for inline PRIMARY KEY when table.PrimaryKey is empty
+	if col.PrimaryKey {
+		return 1
+	}
+
+	return 0
 }
 
 // compilePragmaForeignKeys compiles PRAGMA foreign_keys or PRAGMA foreign_keys = value
@@ -405,6 +444,9 @@ func (s *Stmt) compilePragmaForeignKeysSet(vm *vdbe.VDBE, stmt *parser.PragmaStm
 	}
 
 	s.conn.foreignKeysEnabled = enabled
+	if s.conn.fkManager != nil {
+		s.conn.fkManager.SetEnabled(enabled)
+	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
@@ -453,13 +495,22 @@ func parseForeignKeysValue(value parser.Expression) (bool, error) {
 	return enabled, nil
 }
 
-// extractPragmaValueString extracts a string value from a pragma expression
+// extractPragmaValueString extracts a string value from a pragma expression.
+// Handles literals, identifiers, and unary negation (e.g., -4000).
 func extractPragmaValueString(value parser.Expression) string {
 	if lit, ok := value.(*parser.LiteralExpr); ok {
 		return lit.Value
 	}
 	if ident, ok := value.(*parser.IdentExpr); ok {
 		return ident.Name
+	}
+	if unary, ok := value.(*parser.UnaryExpr); ok {
+		if unary.Op == parser.OpNeg {
+			inner := extractPragmaValueString(unary.Expr)
+			if inner != "" {
+				return "-" + inner
+			}
+		}
 	}
 	return ""
 }
@@ -498,6 +549,37 @@ func (s *Stmt) compilePragmaJournalModeGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
 
 	mode := s.getCurrentJournalMode()
 	vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, mode)
+	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaDatabaseList handles PRAGMA database_list.
+// Returns rows with columns: seq, name, file.
+func (s *Stmt) compilePragmaDatabaseList(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"seq", "name", "file"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	databases := s.conn.dbRegistry.ListDatabasesOrdered()
+	for i, db := range databases {
+		vm.AddOpWithP4Int(vdbe.OpInteger, i, 1, 0, int32(i))
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 2, 0, db.Name)
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 3, 0, db.Path)
+		vm.AddOp(vdbe.OpResultRow, 1, 3, 0)
+	}
+
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaPageCount handles PRAGMA page_count
+func (s *Stmt) compilePragmaPageCount(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"page_count"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	// Get page count from pager
+	pageCount := int64(s.conn.pager.PageCount())
+	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 1, 0, pageCount)
 	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	return vm, nil
@@ -569,3 +651,687 @@ func emitJournalModeResult(vm *vdbe.VDBE, mode string) {
 	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 }
+
+// compilePragmaForeignKeyCheck compiles PRAGMA foreign_key_check or PRAGMA foreign_key_check(table)
+func (s *Stmt) compilePragmaForeignKeyCheck(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	tableName := extractOptionalTableName(stmt)
+
+	if s.conn.fkManager == nil {
+		return s.emptyForeignKeyCheckResult(vm)
+	}
+
+	// First check for schema mismatches (returns error if FK definition is invalid)
+	if err := s.conn.fkManager.CheckSchemaMismatch(tableName, s.conn.schema); err != nil {
+		return nil, err
+	}
+
+	// Create a RowReader to scan tables
+	rowReader := newDriverRowReader(s.conn)
+	violations, err := s.conn.fkManager.FindViolations(tableName, s.conn.schema, rowReader)
+	if err != nil {
+		return nil, fmt.Errorf("foreign_key_check failed: %w", err)
+	}
+
+	return s.emitForeignKeyCheckResults(vm, violations)
+}
+
+// extractOptionalTableName extracts the optional table name from PRAGMA foreign_key_check.
+func extractOptionalTableName(stmt *parser.PragmaStmt) string {
+	if stmt.Value == nil {
+		return ""
+	}
+
+	if lit, ok := stmt.Value.(*parser.LiteralExpr); ok {
+		return lit.Value
+	}
+
+	if ident, ok := stmt.Value.(*parser.IdentExpr); ok {
+		return ident.Name
+	}
+
+	return ""
+}
+
+// emptyForeignKeyCheckResult returns an empty result set.
+func (s *Stmt) emptyForeignKeyCheckResult(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"table", "rowid", "parent", "fkid"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// emitForeignKeyCheckResults emits violations as VDBE result rows.
+func (s *Stmt) emitForeignKeyCheckResults(vm *vdbe.VDBE, violations []constraint.ForeignKeyViolation) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"table", "rowid", "parent", "fkid"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	for _, v := range violations {
+		s.emitViolationRow(vm, v)
+	}
+
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// emitViolationRow emits a single violation row.
+func (s *Stmt) emitViolationRow(vm *vdbe.VDBE, v constraint.ForeignKeyViolation) {
+	vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, v.Table)
+	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 2, 0, v.Rowid)
+	vm.AddOpWithP4Str(vdbe.OpString, 0, 3, 0, v.Parent)
+	vm.AddOpWithP4Int(vdbe.OpInteger, v.FKid, 4, 0, int32(v.FKid))
+	vm.AddOp(vdbe.OpResultRow, 1, 4, 0)
+}
+
+// compilePragmaForeignKeyList compiles PRAGMA foreign_key_list(tablename)
+func (s *Stmt) compilePragmaForeignKeyList(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	tableName := extractOptionalTableName(stmt)
+	if tableName == "" {
+		return nil, fmt.Errorf("PRAGMA foreign_key_list requires a table name")
+	}
+
+	vm.ResultCols = []string{"id", "seq", "table", "from", "to", "on_update", "on_delete", "match"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	if s.conn.fkManager == nil {
+		vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+		return vm, nil
+	}
+
+	constraints := s.conn.fkManager.GetConstraints(tableName)
+	for id, fk := range constraints {
+		s.emitForeignKeyListRows(vm, id, fk)
+	}
+
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// emitForeignKeyListRows emits rows for a single FK constraint (one per column).
+func (s *Stmt) emitForeignKeyListRows(vm *vdbe.VDBE, id int, fk *constraint.ForeignKeyConstraint) {
+	onUpdate := fkActionToString(fk.OnUpdate)
+	onDelete := fkActionToString(fk.OnDelete)
+
+	for seq, col := range fk.Columns {
+		toCol := ""
+		if seq < len(fk.RefColumns) {
+			toCol = fk.RefColumns[seq]
+		}
+
+		vm.AddOpWithP4Int(vdbe.OpInteger, id, 1, 0, int32(id))
+		vm.AddOpWithP4Int(vdbe.OpInteger, seq, 2, 0, int32(seq))
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 3, 0, fk.RefTable)
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 4, 0, col)
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 5, 0, toCol)
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 6, 0, onUpdate)
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 7, 0, onDelete)
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 8, 0, "NONE")
+		vm.AddOp(vdbe.OpResultRow, 1, 8, 0)
+	}
+}
+
+// fkActionToString converts a foreign key action to its string representation.
+func fkActionToString(action constraint.ForeignKeyAction) string {
+	switch action {
+	case constraint.FKActionCascade:
+		return "CASCADE"
+	case constraint.FKActionSetNull:
+		return "SET NULL"
+	case constraint.FKActionSetDefault:
+		return "SET DEFAULT"
+	case constraint.FKActionRestrict:
+		return "RESTRICT"
+	case constraint.FKActionNoAction:
+		return "NO ACTION"
+	default:
+		return "NO ACTION"
+	}
+}
+
+// driverRowReader implements constraint.RowReader for PRAGMA foreign_key_check.
+// It uses the connection's btree and schema directly.
+type driverRowReader struct {
+	conn *Conn
+}
+
+// newDriverRowReader creates a new driverRowReader.
+func newDriverRowReader(conn *Conn) *driverRowReader {
+	return &driverRowReader{conn: conn}
+}
+
+// RowExists checks if a row exists with the given column values.
+func (r *driverRowReader) RowExists(tableName string, columns []string, values []interface{}) (bool, error) {
+	cursor, err := r.initializeCursor(tableName)
+	if err != nil {
+		return false, err
+	}
+
+	table, _ := r.conn.schema.GetTable(tableName)
+	return r.scanForMatch(cursor, table, columns, values)
+}
+
+// RowExistsWithCollation checks if a row exists using specified collations per column.
+func (r *driverRowReader) RowExistsWithCollation(tableName string, columns []string, values []interface{}, collations []string) (bool, error) {
+	cursor, err := r.initializeCursor(tableName)
+	if err != nil {
+		return false, err
+	}
+
+	table, _ := r.conn.schema.GetTable(tableName)
+	return r.scanForMatchWithCollation(cursor, table, columns, values, collations)
+}
+
+// initializeCursor initializes and positions a cursor for table scanning.
+func (r *driverRowReader) initializeCursor(tableName string) (*btree.BtCursor, error) {
+	table, ok := r.conn.schema.GetTable(tableName)
+	if !ok {
+		return nil, fmt.Errorf("table not found: %s", tableName)
+	}
+
+	if r.conn.btree == nil {
+		return nil, fmt.Errorf("btree not available")
+	}
+
+	cursor := btree.NewCursor(r.conn.btree, table.RootPage)
+	if err := cursor.MoveToFirst(); err != nil {
+		// Empty table
+		if strings.Contains(err.Error(), "empty") {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return cursor, nil
+}
+
+// scanForMatch scans all rows looking for a match.
+func (r *driverRowReader) scanForMatch(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}) (bool, error) {
+	if cursor == nil {
+		return false, nil
+	}
+
+	for {
+		if match, err := r.checkRowMatch(cursor, table, columns, values); err != nil {
+			return false, err
+		} else if match {
+			return true, nil
+		}
+
+		if err := cursor.Next(); err != nil {
+			break
+		}
+	}
+
+	return false, nil
+}
+
+// scanForMatchWithCollation scans all rows looking for a match using specified collations.
+func (r *driverRowReader) scanForMatchWithCollation(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}, collations []string) (bool, error) {
+	if cursor == nil {
+		return false, nil
+	}
+
+	for {
+		if match, err := r.checkRowMatchWithCollation(cursor, table, columns, values, collations); err != nil {
+			return false, err
+		} else if match {
+			return true, nil
+		}
+
+		if err := cursor.Next(); err != nil {
+			break
+		}
+	}
+
+	return false, nil
+}
+
+// FindReferencingRows finds all rowids of rows with matching column values.
+func (r *driverRowReader) FindReferencingRows(tableName string, columns []string, values []interface{}) ([]int64, error) {
+	cursor, err := r.initializeCursor(tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	if cursor == nil {
+		return []int64{}, nil
+	}
+
+	table, _ := r.conn.schema.GetTable(tableName)
+	return r.collectMatchingRowids(cursor, table, columns, values)
+}
+
+// FindReferencingRowsWithParentAffinity finds all rowids with affinity-aware matching.
+// This is used for FK checks where we need to apply parent column affinity to child values.
+func (r *driverRowReader) FindReferencingRowsWithParentAffinity(
+	childTableName string,
+	childColumns []string,
+	parentValues []interface{},
+	parentTableName string,
+	parentColumns []string,
+) ([]int64, error) {
+	cursor, err := r.initializeCursor(childTableName)
+	if err != nil {
+		return nil, err
+	}
+
+	if cursor == nil {
+		return []int64{}, nil
+	}
+
+	childTable, _ := r.conn.schema.GetTable(childTableName)
+	parentTable, _ := r.conn.schema.GetTable(parentTableName)
+
+	return r.collectMatchingRowidsWithAffinity(cursor, childTable, childColumns, parentValues, parentTable, parentColumns)
+}
+
+// collectMatchingRowids scans all rows and collects rowids that match.
+func (r *driverRowReader) collectMatchingRowids(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}) ([]int64, error) {
+	var rowids []int64
+	for {
+		if match, err := r.checkRowMatch(cursor, table, columns, values); err != nil {
+			return nil, err
+		} else if match {
+			rowids = append(rowids, cursor.GetKey())
+		}
+
+		if err := cursor.Next(); err != nil {
+			break
+		}
+	}
+
+	return rowids, nil
+}
+
+// collectMatchingRowidsWithAffinity scans rows and collects matches using parent column affinity.
+func (r *driverRowReader) collectMatchingRowidsWithAffinity(
+	cursor *btree.BtCursor,
+	childTable *schema.Table,
+	childColumns []string,
+	parentValues []interface{},
+	parentTable *schema.Table,
+	parentColumns []string,
+) ([]int64, error) {
+	var rowids []int64
+	for {
+		match, err := r.checkRowMatchWithParentAffinity(cursor, childTable, childColumns, parentValues, parentTable, parentColumns)
+		if err != nil {
+			return nil, err
+		}
+		if match {
+			rowids = append(rowids, cursor.GetKey())
+		}
+
+		if err := cursor.Next(); err != nil {
+			break
+		}
+	}
+
+	return rowids, nil
+}
+
+// ReadRowByRowid reads a row's values by its rowid.
+func (r *driverRowReader) ReadRowByRowid(tableName string, rowid int64) (map[string]interface{}, error) {
+	table, ok := r.conn.schema.GetTable(tableName)
+	if !ok {
+		return nil, fmt.Errorf("table not found: %s", tableName)
+	}
+
+	if r.conn.btree == nil {
+		return nil, fmt.Errorf("btree not available")
+	}
+
+	cursor := btree.NewCursor(r.conn.btree, table.RootPage)
+	found, err := cursor.SeekRowid(rowid)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("row not found: rowid %d", rowid)
+	}
+
+	return r.readRowValues(cursor, table)
+}
+
+// checkRowMatch checks if the current row matches the given column values.
+func (r *driverRowReader) checkRowMatch(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}) (bool, error) {
+	// If no columns specified, return all rows (used for full table scan)
+	if len(columns) == 0 {
+		return true, nil
+	}
+
+	payload, err := cursor.GetPayloadWithOverflow()
+	if err != nil {
+		return false, err
+	}
+
+	rowid := cursor.GetKey()
+
+	for i, colName := range columns {
+		colVal, err := r.getColumnValue(table, colName, payload, rowid)
+		if err != nil {
+			return false, err
+		}
+
+		// Get parent column for affinity-aware comparison
+		col, _ := table.GetColumn(colName)
+		if !r.valuesEqualWithAffinity(colVal, values[i], col) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// checkRowMatchWithCollation checks if the current row matches using specified collations.
+func (r *driverRowReader) checkRowMatchWithCollation(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}, collations []string) (bool, error) {
+	// If no columns specified, return all rows (used for full table scan)
+	if len(columns) == 0 {
+		return true, nil
+	}
+
+	payload, err := cursor.GetPayloadWithOverflow()
+	if err != nil {
+		return false, err
+	}
+
+	rowid := cursor.GetKey()
+
+	for i, colName := range columns {
+		colVal, err := r.getColumnValue(table, colName, payload, rowid)
+		if err != nil {
+			return false, err
+		}
+
+		collation := "BINARY"
+		if i < len(collations) && collations[i] != "" {
+			collation = collations[i]
+		}
+
+		if !r.valuesEqualWithCollation(colVal, values[i], collation) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// checkRowMatchWithParentAffinity checks if child row matches parent values using parent affinity.
+func (r *driverRowReader) checkRowMatchWithParentAffinity(
+	cursor *btree.BtCursor,
+	childTable *schema.Table,
+	childColumns []string,
+	parentValues []interface{},
+	parentTable *schema.Table,
+	parentColumns []string,
+) (bool, error) {
+	if len(childColumns) == 0 {
+		return true, nil
+	}
+
+	payload, err := cursor.GetPayloadWithOverflow()
+	if err != nil {
+		return false, err
+	}
+
+	rowid := cursor.GetKey()
+
+	for i, childColName := range childColumns {
+		childVal, err := r.getColumnValue(childTable, childColName, payload, rowid)
+		if err != nil {
+			return false, err
+		}
+
+		// Get parent column for affinity and collation
+		var parentCol *schema.Column
+		if i < len(parentColumns) && parentTable != nil {
+			parentCol, _ = parentTable.GetColumn(parentColumns[i])
+		}
+
+		if !r.valuesEqualWithAffinity(parentValues[i], childVal, parentCol) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// getColumnValue extracts a column value from the row.
+func (r *driverRowReader) getColumnValue(table *schema.Table, colName string, payload []byte, rowid int64) (interface{}, error) {
+	// Find the column index
+	payloadIdx := 0
+	for _, col := range table.Columns {
+		if strings.EqualFold(col.Name, colName) {
+			// Check if it's an INTEGER PRIMARY KEY (rowid alias)
+			if col.PrimaryKey && strings.EqualFold(col.Type, "INTEGER") {
+				return rowid, nil
+			}
+			// Extract from payload
+			mem := vdbe.NewMem()
+			if err := vdbe.ParseRecordColumn(payload, payloadIdx, mem); err != nil {
+				return nil, err
+			}
+			return vdbe.MemToInterface(mem), nil
+		}
+		// Count payload columns (skip INTEGER PRIMARY KEY)
+		if !(col.PrimaryKey && strings.EqualFold(col.Type, "INTEGER")) {
+			payloadIdx++
+		}
+	}
+	return nil, fmt.Errorf("column not found: %s", colName)
+}
+
+// readRowValues reads all column values from the current row.
+func (r *driverRowReader) readRowValues(cursor *btree.BtCursor, table *schema.Table) (map[string]interface{}, error) {
+	payload, err := cursor.GetPayloadWithOverflow()
+	if err != nil {
+		return nil, err
+	}
+
+	rowid := cursor.GetKey()
+	result := make(map[string]interface{})
+	payloadIdx := 0
+
+	for _, col := range table.Columns {
+		if col.PrimaryKey && strings.EqualFold(col.Type, "INTEGER") {
+			result[col.Name] = rowid
+		} else {
+			mem := vdbe.NewMem()
+			if err := vdbe.ParseRecordColumn(payload, payloadIdx, mem); err != nil {
+				return nil, err
+			}
+			result[col.Name] = vdbe.MemToInterface(mem)
+			payloadIdx++
+		}
+	}
+
+	return result, nil
+}
+
+// valuesEqual compares two values for FK matching.
+func (r *driverRowReader) valuesEqual(v1, v2 interface{}) bool {
+	if v1 == nil && v2 == nil {
+		return true
+	}
+	if v1 == nil || v2 == nil {
+		return false
+	}
+
+	// Handle numeric comparisons
+	if n1, ok := toInt64Value(v1); ok {
+		if n2, ok := toInt64Value(v2); ok {
+			return n1 == n2
+		}
+	}
+
+	// String comparison
+	s1 := fmt.Sprintf("%v", v1)
+	s2 := fmt.Sprintf("%v", v2)
+	return s1 == s2
+}
+
+// valuesEqualWithCollation compares two values using the specified collation.
+func (r *driverRowReader) valuesEqualWithCollation(v1, v2 interface{}, collationName string) bool {
+	if v1 == nil && v2 == nil {
+		return true
+	}
+	if v1 == nil || v2 == nil {
+		return false
+	}
+
+	// Handle numeric comparisons (collation doesn't apply to numbers)
+	if n1, ok := toInt64Value(v1); ok {
+		if n2, ok := toInt64Value(v2); ok {
+			return n1 == n2
+		}
+	}
+
+	// String comparison with collation
+	s1 := fmt.Sprintf("%v", v1)
+	s2 := fmt.Sprintf("%v", v2)
+
+	// Use collation-aware comparison from the collation package
+	return collation.Compare(s1, s2, collationName) == 0
+}
+
+// valuesEqualWithAffinity compares two values using the parent column's affinity and collation.
+// According to SQLite FK rules, the parent column's affinity is applied to the
+// child value before comparison, and the parent column's collation is used for string comparison.
+func (r *driverRowReader) valuesEqualWithAffinity(parentVal, childVal interface{}, parentCol *schema.Column) bool {
+	if parentVal == nil && childVal == nil {
+		return true
+	}
+	if parentVal == nil || childVal == nil {
+		return false
+	}
+
+	// Apply parent column's affinity to child value
+	if parentCol != nil {
+		childVal = expr.ApplyAffinity(childVal, parentCol.Affinity)
+	}
+
+	// Get parent column's collation (defaults to BINARY if not specified)
+	collationName := "BINARY"
+	if parentCol != nil && parentCol.Collation != "" {
+		collationName = strings.ToUpper(parentCol.Collation)
+	}
+
+	// Compare after applying affinity and collation
+	return r.compareAfterAffinityWithCollation(parentVal, childVal, collationName)
+}
+
+// compareAfterAffinityWithCollation compares values after affinity has been applied,
+// using the specified collation for string comparisons.
+func (r *driverRowReader) compareAfterAffinityWithCollation(v1, v2 interface{}, collationName string) bool {
+	// Handle numeric comparisons (collation doesn't apply to numbers)
+	if n1, ok := toInt64Value(v1); ok {
+		if n2, ok := toInt64Value(v2); ok {
+			return n1 == n2
+		}
+	}
+
+	// Handle float comparisons
+	if f1, ok := toFloat64Value(v1); ok {
+		if f2, ok := toFloat64Value(v2); ok {
+			return f1 == f2
+		}
+	}
+
+	// String comparison with collation
+	s1 := fmt.Sprintf("%v", v1)
+	s2 := fmt.Sprintf("%v", v2)
+	return collation.Compare(s1, s2, collationName) == 0
+}
+
+// toFloat64Value converts a value to float64 if possible.
+func toFloat64Value(v interface{}) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int64:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	}
+	return 0, false
+}
+
+// toInt64Value converts a value to int64 if possible.
+func toInt64Value(v interface{}) (int64, bool) {
+	switch n := v.(type) {
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	case float64:
+		if n == float64(int64(n)) {
+			return int64(n), true
+		}
+	}
+	return 0, false
+}
+
+// compilePragmaCacheSize compiles PRAGMA cache_size or PRAGMA cache_size = value.
+func (s *Stmt) compilePragmaCacheSize(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	if stmt.Value != nil {
+		return s.compilePragmaCacheSizeSet(vm, stmt)
+	}
+	return s.compilePragmaCacheSizeGet(vm)
+}
+
+// compilePragmaCacheSizeGet returns the current cache_size value.
+func (s *Stmt) compilePragmaCacheSizeGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"cache_size"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 1, 0, s.conn.cacheSize)
+	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaCacheSizeSet sets the cache_size value.
+func (s *Stmt) compilePragmaCacheSizeSet(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+	valueStr := extractPragmaValueString(stmt.Value)
+	var val int64
+	if _, err := fmt.Sscanf(valueStr, "%d", &val); err != nil {
+		return nil, fmt.Errorf("invalid value for PRAGMA cache_size: %s", valueStr)
+	}
+	s.conn.cacheSize = val
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaIndexList compiles PRAGMA index_list(tablename).
+func (s *Stmt) compilePragmaIndexList(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	tableName := extractOptionalTableName(stmt)
+	if tableName == "" {
+		return nil, fmt.Errorf("PRAGMA index_list requires a table name")
+	}
+
+	vm.ResultCols = []string{"seq", "name", "unique", "origin", "partial"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	indexes := s.conn.schema.GetTableIndexes(tableName)
+	for i, idx := range indexes {
+		isUnique := 0
+		if idx.Unique {
+			isUnique = 1
+		}
+		isPartial := 0
+		if idx.Partial {
+			isPartial = 1
+		}
+		vm.AddOpWithP4Int(vdbe.OpInteger, i, 1, 0, int32(i))
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 2, 0, idx.Name)
+		vm.AddOpWithP4Int(vdbe.OpInteger, isUnique, 3, 0, int32(isUnique))
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 4, 0, "c")
+		vm.AddOpWithP4Int(vdbe.OpInteger, isPartial, 5, 0, int32(isPartial))
+		vm.AddOp(vdbe.OpResultRow, 1, 5, 0)
+	}
+
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// simpleRowReader is a minimal RowReader implementation for foreign_key_check.

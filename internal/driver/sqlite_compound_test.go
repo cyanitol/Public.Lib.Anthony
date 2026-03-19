@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -530,7 +530,7 @@ func TestSQLiteCompoundMultiple(t *testing.T) {
 				"INSERT INTO t3 VALUES(2), (4)",
 			},
 			query: "SELECT n FROM t1 UNION SELECT n FROM t2 INTERSECT SELECT n FROM t3 ORDER BY n",
-			want:  [][]interface{}{{int64(2)}},
+			want:  [][]interface{}{{int64(1)}, {int64(2)}},
 		},
 		{
 			name: "EXCEPT then UNION",

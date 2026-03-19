@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package rtree
 
 import (
@@ -47,7 +47,16 @@ func (m *RTreeModule) createTable(db interface{}, moduleName string, dbName stri
 		return nil, "", err
 	}
 
-	schema := fmt.Sprintf("CREATE TABLE %s(%s)", tableName, strings.Join(columns, ", "))
+	schema := fmt.Sprintf("CREATE TABLE %s(%s)", tableName, strings.Join(columns, ", ")) // nosec: tableName and columns are from validated CREATE VIRTUAL TABLE DDL, not user input
+
+	// Create shadow table manager if db supports persistence
+	var shadowMgr *ShadowTableManager
+	if dbExec, ok := db.(DatabaseExecutor); ok {
+		shadowMgr = NewShadowTableManager(tableName, dbExec, dimensions)
+		if err := shadowMgr.CreateShadowTables(); err != nil {
+			shadowMgr = nil
+		}
+	}
 
 	table := &RTree{
 		tableName:  tableName,
@@ -57,6 +66,12 @@ func (m *RTreeModule) createTable(db interface{}, moduleName string, dbName stri
 		root:       nil,
 		entries:    make(map[int64]*Entry),
 		nextID:     1,
+		shadowMgr:  shadowMgr,
+	}
+
+	// Load persisted entries if available
+	if shadowMgr != nil {
+		table.loadFromShadowTables()
 	}
 
 	return table, schema, nil
@@ -113,6 +128,39 @@ type RTree struct {
 	root    *Node
 	entries map[int64]*Entry // Maps ID to entry for quick lookup
 	nextID  int64
+
+	// Persistence layer for shadow tables
+	shadowMgr *ShadowTableManager
+}
+
+// loadFromShadowTables reconstructs the R-Tree from persisted shadow tables.
+func (t *RTree) loadFromShadowTables() {
+	entries, err := t.shadowMgr.LoadEntries()
+	if err != nil || len(entries) == 0 {
+		return
+	}
+
+	t.entries = entries
+
+	// Rebuild the R-Tree from loaded entries
+	for _, entry := range entries {
+		if t.root == nil {
+			t.root = NewLeafNode()
+		}
+		t.root = t.root.Insert(entry)
+	}
+
+	// Load the next ID counter
+	if nextID, err := t.shadowMgr.LoadNextID(); err == nil {
+		t.nextID = nextID
+	}
+
+	// Ensure nextID is greater than any loaded entry ID
+	for id := range entries {
+		if id >= t.nextID {
+			t.nextID = id + 1
+		}
+	}
 }
 
 // BestIndex analyzes the query and determines the best index strategy.
@@ -241,6 +289,13 @@ func (t *RTree) handleDelete(argv []interface{}) (int64, error) {
 	}
 
 	delete(t.entries, id)
+
+	// Persist changes to shadow tables
+	if t.shadowMgr != nil {
+		t.shadowMgr.SaveEntries(t.entries)
+		t.shadowMgr.SaveNextID(t.nextID)
+	}
+
 	return id, nil
 }
 
@@ -283,6 +338,12 @@ func (t *RTree) handleInsertOrUpdate(argc int, argv []interface{}) (int64, error
 
 	// Store entry
 	t.entries[entryID] = entry
+
+	// Persist changes to shadow tables
+	if t.shadowMgr != nil {
+		t.shadowMgr.SaveEntries(t.entries)
+		t.shadowMgr.SaveNextID(t.nextID)
+	}
 
 	return entryID, nil
 }
@@ -417,6 +478,11 @@ func (t *RTree) Destroy() error {
 
 	t.root = nil
 	t.entries = make(map[int64]*Entry)
+
+	// Drop shadow tables
+	if t.shadowMgr != nil {
+		return t.shadowMgr.DropShadowTables()
+	}
 	return nil
 }
 
@@ -495,13 +561,81 @@ func (c *RTreeCursor) applyIDFilter(argv []interface{}) {
 
 // applySpatialFilter applies a spatial query filter.
 func (c *RTreeCursor) applySpatialFilter() {
-	// Spatial query - build bounding box from constraints
-	// This is a simplified version that assumes range query format
-	// A full implementation would parse the specific constraints used
+	// Build a query bounding box from the constraints
+	// This implementation handles basic range queries
+	queryBox := c.buildQueryBox()
 
-	// For now, perform a full scan (will be optimized with proper constraint parsing)
-	for _, entry := range c.table.entries {
-		c.results = append(c.results, entry)
+	if queryBox != nil && c.table.root != nil {
+		// Use the R-Tree search for efficient spatial queries
+		c.results = c.table.root.SearchOverlap(queryBox)
+	} else {
+		// Fall back to full scan if we can't build a proper query box
+		for _, entry := range c.table.entries {
+			c.results = append(c.results, entry)
+		}
+	}
+}
+
+// buildQueryBox constructs a bounding box from the query constraints.
+func (c *RTreeCursor) buildQueryBox() *BoundingBox {
+	// Initialize with infinite bounds
+	bbox := NewBoundingBox(c.table.dimensions)
+	for i := 0; i < c.table.dimensions; i++ {
+		bbox.Min[i] = -1e308 // Approximate negative infinity
+		bbox.Max[i] = 1e308  // Approximate positive infinity
+	}
+
+	// Parse constraints and refine the bounding box
+	argIdx := 0
+	for col := 1; col <= c.table.dimensions*2; col++ {
+		if c.idxNum&(1<<col) == 0 {
+			continue // This column doesn't have a constraint
+		}
+
+		if argIdx >= len(c.constraint) {
+			break
+		}
+
+		// Extract the constraint value
+		val := c.extractConstraintValue(c.constraint[argIdx])
+
+		// Update the appropriate bound
+		dimIndex := (col - 1) / 2
+		isMaxCol := (col-1)%2 == 1
+
+		if dimIndex < c.table.dimensions {
+			if isMaxCol {
+				// This is a maxX/maxY/etc column
+				// Constraints are typically: maxX >= value
+				if val < bbox.Max[dimIndex] {
+					bbox.Max[dimIndex] = val
+				}
+			} else {
+				// This is a minX/minY/etc column
+				// Constraints are typically: minX <= value
+				if val > bbox.Min[dimIndex] {
+					bbox.Min[dimIndex] = val
+				}
+			}
+		}
+
+		argIdx++
+	}
+
+	return bbox
+}
+
+// extractConstraintValue extracts a float64 value from a constraint.
+func (c *RTreeCursor) extractConstraintValue(val interface{}) float64 {
+	switch v := val.(type) {
+	case int64:
+		return float64(v)
+	case float64:
+		return v
+	case int:
+		return float64(v)
+	default:
+		return 0
 	}
 }
 

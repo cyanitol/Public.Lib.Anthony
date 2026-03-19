@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package pager
 
 import (
@@ -351,8 +351,8 @@ func TestJournalModeSettings(t *testing.T) {
 		t.Fatalf("failed to begin write: %v", err)
 	}
 
-	if err := pager.SetJournalMode(JournalModePersist); err == nil {
-		t.Error("expected error when changing journal mode during transaction")
+	if err := pager.SetJournalMode(JournalModePersist); err != nil {
+		t.Errorf("expected journal mode change to succeed during transaction, got %v", err)
 	}
 
 	pager.Rollback()

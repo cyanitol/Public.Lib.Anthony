@@ -1,12 +1,15 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
 	"database/sql/driver"
 	"fmt"
+	"strings"
 
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/constraint"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
@@ -19,23 +22,26 @@ func (s *Stmt) compileCreateTable(vm *vdbe.VDBE, stmt *parser.CreateTableStmt, a
 	vm.SetReadOnly(false)
 	vm.AllocMemory(10)
 
-	// Create the table in the schema
-	// This simplified implementation registers the table in memory
-	// A full implementation would also persist to sqlite_master
-	table, err := s.conn.schema.CreateTable(stmt)
+	// Resolve target database (schema-qualified or main)
+	targetSchema, targetBtree, err := s.resolveTargetDatabase(stmt.Schema)
 	if err != nil {
 		return nil, err
 	}
 
+	table, err := targetSchema.CreateTable(stmt)
+	if err != nil {
+		return nil, err
+	}
+	table.SQL = s.query
+
 	// Allocate a root page for the table btree
-	if s.conn.btree != nil {
-		rootPage, err := s.conn.btree.CreateTable()
+	if targetBtree != nil {
+		rootPage, err := s.allocateTablePage(targetBtree, stmt.WithoutRowID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to allocate table root page: %w", err)
+			return nil, err
 		}
 		table.RootPage = rootPage
 	} else {
-		// For in-memory databases without btree, use a placeholder
 		table.RootPage = 2
 	}
 
@@ -44,69 +50,105 @@ func (s *Stmt) compileCreateTable(vm *vdbe.VDBE, stmt *parser.CreateTableStmt, a
 		return nil, err
 	}
 
+	// If table has AUTOINCREMENT, ensure sqlite_sequence table exists
+	if _, hasAutoincrement := table.HasAutoincrementColumn(); hasAutoincrement {
+		if err := s.ensureSqliteSequenceTable(); err != nil {
+			return nil, err
+		}
+	}
+
+	// Persist schema to sqlite_master
+	if targetBtree != nil {
+		if err := targetSchema.SaveToMaster(targetBtree); err != nil {
+			return nil, fmt.Errorf("failed to persist schema: %w", err)
+		}
+	}
+
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
 	return vm, nil
 }
 
-// registerForeignKeyConstraints registers foreign key constraints from a CREATE TABLE statement
-// with the connection's ForeignKeyManager.
-func (s *Stmt) registerForeignKeyConstraints(table interface{}, stmt *parser.CreateTableStmt) error {
-	if s.conn.fkManager == nil {
+// resolveTargetDatabase resolves the target schema and btree for a DDL statement.
+// If schemaName is empty, uses the main database.
+func (s *Stmt) resolveTargetDatabase(schemaName string) (*schema.Schema, *btree.Btree, error) {
+	if schemaName == "" {
+		return s.conn.schema, s.conn.btree, nil
+	}
+	db, ok := s.conn.dbRegistry.GetDatabase(schemaName)
+	if !ok {
+		return nil, nil, fmt.Errorf("unknown database %s", schemaName)
+	}
+	return db.Schema, db.Btree, nil
+}
+
+// allocateTablePage allocates a root page for a new table.
+func (s *Stmt) allocateTablePage(bt *btree.Btree, withoutRowID bool) (uint32, error) {
+	if withoutRowID {
+		return bt.CreateWithoutRowidTable()
+	}
+	return bt.CreateTable()
+}
+
+// ensureSqliteSequenceTable creates the sqlite_sequence table if it does not exist.
+// This table is required for AUTOINCREMENT support and is automatically created
+// when the first table with an AUTOINCREMENT column is created.
+func (s *Stmt) ensureSqliteSequenceTable() error {
+	if _, exists := s.conn.schema.GetTable("sqlite_sequence"); exists {
 		return nil
 	}
-	s.registerTableLevelFKs(table, stmt.Name)
-	s.registerColumnLevelFKs(stmt)
+
+	var rootPage uint32
+	if s.conn.btree != nil {
+		var err error
+		rootPage, err = s.conn.btree.CreateTable()
+		if err != nil {
+			return fmt.Errorf("failed to create sqlite_sequence table: %w", err)
+		}
+	} else {
+		rootPage = 3 // placeholder for in-memory databases
+	}
+
+	s.conn.schema.EnsureSqliteSequenceTable(rootPage)
 	return nil
 }
 
-// tableWithConstraints provides access to table constraints.
-type tableWithConstraints interface {
-	GetConstraints() []interface{}
-}
+// registerForeignKeyConstraints registers foreign key constraints from a CREATE TABLE statement
+// with the connection's ForeignKeyManager.
+func (s *Stmt) registerForeignKeyConstraints(_ interface{}, stmt *parser.CreateTableStmt) error {
+	if s.conn.fkManager == nil {
+		return nil
+	}
+	s.registerTableLevelFKs(stmt)
+	s.registerColumnLevelFKs(stmt)
 
-// foreignKeyConstraint provides access to FK definition.
-type foreignKeyConstraint interface {
-	GetForeignKey() interface{}
-}
-
-// constraintWithColumns provides access to constraint columns.
-type constraintWithColumns interface {
-	GetColumns() []string
+	// Validate FK constraints at CREATE TABLE time
+	// Only checks errors that should prevent table creation (column count mismatch, FK to view)
+	// Does NOT check for non-unique columns (that's reported via PRAGMA foreign_key_check)
+	if err := s.conn.fkManager.ValidateFKAtCreateTime(stmt.Name, s.conn.schema); err != nil {
+		// Remove the constraints we just added since they're invalid
+		s.conn.fkManager.RemoveConstraints(stmt.Name)
+		return err
+	}
+	return nil
 }
 
 // registerTableLevelFKs registers table-level FOREIGN KEY constraints.
-func (s *Stmt) registerTableLevelFKs(table interface{}, tableName string) {
-	tableObj, ok := table.(tableWithConstraints)
-	if !ok {
-		return
+func (s *Stmt) registerTableLevelFKs(stmt *parser.CreateTableStmt) {
+	for _, tableConstraint := range stmt.Constraints {
+		if tableConstraint.ForeignKey == nil {
+			continue
+		}
+		fkTableConstraint := tableConstraint.ForeignKey
+		fk := constraint.CreateForeignKeyFromParser(
+			stmt.Name,
+			fkTableConstraint.Columns,
+			&fkTableConstraint.ForeignKey,
+			tableConstraint.Name,
+		)
+		s.conn.fkManager.AddConstraint(fk)
 	}
-	for _, constraintIface := range tableObj.GetConstraints() {
-		s.tryRegisterTableFK(constraintIface, tableName)
-	}
-}
-
-// tryRegisterTableFK attempts to register a single table-level FK constraint.
-func (s *Stmt) tryRegisterTableFK(constraintIface interface{}, tableName string) {
-	fkConstraint, ok := constraintIface.(foreignKeyConstraint)
-	if !ok {
-		return
-	}
-	fkDef := fkConstraint.GetForeignKey()
-	if fkDef == nil {
-		return
-	}
-	parserfk, ok := fkDef.(*parser.ForeignKeyConstraint)
-	if !ok {
-		return
-	}
-	var columns []string
-	if colConstraint, ok := constraintIface.(constraintWithColumns); ok {
-		columns = colConstraint.GetColumns()
-	}
-	fk := constraint.CreateForeignKeyFromParser(tableName, columns, parserfk, "")
-	s.conn.fkManager.AddConstraint(fk)
 }
 
 // registerColumnLevelFKs registers column-level FOREIGN KEY constraints.
@@ -129,44 +171,133 @@ func (s *Stmt) compileDropTable(vm *vdbe.VDBE, stmt *parser.DropTableStmt, args 
 	// Check if table exists
 	table, exists := s.conn.schema.GetTable(stmt.Name)
 	if !exists {
-		if stmt.IfExists {
-			// IF EXISTS was specified, silently succeed
+		return s.handleMissingTable(vm, stmt)
+	}
+
+	// Check foreign key constraints
+	if err := s.checkDropTableForeignKeys(stmt.Name); err != nil {
+		return nil, err
+	}
+
+	// Drop table and cleanup
+	if err := s.performDropTable(stmt.Name, table); err != nil {
+		return nil, err
+	}
+
+	// Emit bytecode
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	s.invalidateStmtCache()
+	return vm, nil
+}
+
+// knownVirtualTableModules lists the supported virtual table modules.
+var knownVirtualTableModules = map[string]bool{
+	"fts5":      true,
+	"fts4":      true,
+	"fts3":      true,
+	"rtree":     true,
+	"rtree_i32": true,
+}
+
+// compileCreateVirtualTable compiles a CREATE VIRTUAL TABLE statement
+func (s *Stmt) compileCreateVirtualTable(vm *vdbe.VDBE, stmt *parser.CreateVirtualTableStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+	vm.AllocMemory(10)
+
+	// Check for known module
+	moduleName := strings.ToLower(stmt.Module)
+	if !knownVirtualTableModules[moduleName] {
+		return nil, fmt.Errorf("no such module: %s", stmt.Module)
+	}
+
+	// Check if table already exists
+	if _, exists := s.conn.schema.GetTable(stmt.Name); exists {
+		if stmt.IfNotExists {
+			// IF NOT EXISTS - silently succeed
 			vm.AddOp(vdbe.OpInit, 0, 0, 0)
 			vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 			return vm, nil
 		}
-		return nil, fmt.Errorf("table not found: %s", stmt.Name)
+		return nil, fmt.Errorf("table %s already exists", stmt.Name)
 	}
 
-	// Drop the table from the schema
-	// This simplified implementation removes the table from memory
-	// A full implementation would also:
-	// 1. Delete entry from sqlite_master table
-	// 2. Free all pages used by the table
-	// 3. Update the schema cookie
-	if err := s.conn.schema.DropTable(stmt.Name); err != nil {
+	// Get the module from registry and create the virtual table instance
+	// Pass s.conn as the database executor so modules can create shadow tables.
+	var vtabInstance interface{}
+	if s.conn.vtabRegistry != nil {
+		module := s.conn.vtabRegistry.GetModule(moduleName)
+		if module != nil {
+			vtab, _, err := module.Create(s.conn, moduleName, "main", stmt.Name, stmt.Args)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create virtual table: %w", err)
+			}
+			vtabInstance = vtab
+		}
+	}
+
+	// Register the virtual table in the schema with the created instance
+	err := s.conn.schema.CreateVirtualTable(stmt.Name, stmt.Module, stmt.Args, vtabInstance, stmt.String())
+	if err != nil {
 		return nil, err
 	}
 
-	// Free table pages if btree is available
-	if s.conn.btree != nil && table.RootPage > 0 {
-		// In a full implementation, would call btree.FreePage(table.RootPage)
-		// and recursively free all pages in the table's btree
-		// For now, we just note that the page should be freed
-	}
-
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	// In a full implementation with sqlite_master:
-	// - OpOpenWrite on sqlite_master cursor
-	// - OpSeek to find the table entry
-	// - OpDelete to remove it
-	// - OpSetCookie to update schema version
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
-	// Invalidate statement cache since schema has changed
 	s.invalidateStmtCache()
-
 	return vm, nil
+}
+
+// handleMissingTable handles the case when a table doesn't exist.
+func (s *Stmt) handleMissingTable(vm *vdbe.VDBE, stmt *parser.DropTableStmt) (*vdbe.VDBE, error) {
+	if stmt.IfExists {
+		// IF EXISTS was specified, silently succeed
+		vm.AddOp(vdbe.OpInit, 0, 0, 0)
+		vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+		return vm, nil
+	}
+	return nil, fmt.Errorf("table not found: %s", stmt.Name)
+}
+
+// checkDropTableForeignKeys checks if foreign key constraints prevent dropping the table.
+func (s *Stmt) checkDropTableForeignKeys(tableName string) error {
+	if s.conn.fkManager == nil || !s.conn.fkManager.IsEnabled() {
+		return nil
+	}
+
+	referencingConstraints := s.conn.fkManager.FindReferencingConstraints(tableName)
+	if len(referencingConstraints) > 0 {
+		return fmt.Errorf("FOREIGN KEY constraint failed: cannot drop table %s, referenced by foreign key constraint", tableName)
+	}
+	return nil
+}
+
+// performDropTable removes the table from schema and performs cleanup.
+func (s *Stmt) performDropTable(tableName string, _ *schema.Table) error {
+	// Drop the table from the schema
+	if err := s.conn.schema.DropTable(tableName); err != nil {
+		return err
+	}
+
+	// Remove FK constraints that belonged to this table
+	if s.conn.fkManager != nil {
+		s.conn.fkManager.RemoveConstraints(tableName)
+	}
+
+	// Free table pages if btree is available
+	// In a full implementation, would call btree.FreePage(table.RootPage)
+	// and recursively free all pages in the table's btree
+
+	// Persist schema updates
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			return fmt.Errorf("failed to persist schema: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // ============================================================================
@@ -184,9 +315,12 @@ func (s *Stmt) compileCreateView(vm *vdbe.VDBE, stmt *parser.CreateViewStmt, arg
 		return nil, err
 	}
 
-	// In a full implementation, this would also:
-	// 1. Insert entry into sqlite_master table
-	// 2. Update the schema cookie
+	// Persist schema to sqlite_master
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			return nil, fmt.Errorf("failed to persist schema: %w", err)
+		}
+	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
@@ -211,7 +345,7 @@ func (s *Stmt) compileDropView(vm *vdbe.VDBE, stmt *parser.DropViewStmt, args []
 			vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 			return vm, nil
 		}
-		return nil, fmt.Errorf("view not found: %s", stmt.Name)
+		return nil, fmt.Errorf("no such view: %s", stmt.Name)
 	}
 
 	// Drop the view from the schema
@@ -219,9 +353,12 @@ func (s *Stmt) compileDropView(vm *vdbe.VDBE, stmt *parser.DropViewStmt, args []
 		return nil, err
 	}
 
-	// In a full implementation, this would:
-	// 1. Delete entry from sqlite_master table
-	// 2. Update the schema cookie
+	// Persist schema to sqlite_master
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			return nil, fmt.Errorf("failed to persist schema: %w", err)
+		}
+	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
@@ -304,10 +441,19 @@ func (s *Stmt) compileDropTrigger(vm *vdbe.VDBE, stmt *parser.DropTriggerStmt, a
 
 // compileBegin compiles a BEGIN statement.
 func (s *Stmt) compileBegin(vm *vdbe.VDBE, stmt *parser.BeginStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	if s.conn.inTx {
+		return nil, fmt.Errorf("cannot start a transaction within a transaction")
+	}
+
 	vm.SetReadOnly(false)
 	vm.InTxn = true
 
-	vm.AddOp(vdbe.OpInit, 0, 3, 0)
+	// Set FK manager's transaction state for deferred constraint handling
+	if s.conn.fkManager != nil {
+		s.conn.fkManager.SetInTransaction(true)
+	}
+
+	vm.AddOp(vdbe.OpInit, 0, 1, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
 	return vm, nil
@@ -315,9 +461,24 @@ func (s *Stmt) compileBegin(vm *vdbe.VDBE, stmt *parser.BeginStmt, args []driver
 
 // compileCommit compiles a COMMIT statement.
 func (s *Stmt) compileCommit(vm *vdbe.VDBE, stmt *parser.CommitStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	if !s.conn.inTx {
+		return nil, fmt.Errorf("cannot commit - no transaction is active")
+	}
+
 	vm.SetReadOnly(false)
 
-	vm.AddOp(vdbe.OpInit, 0, 3, 0)
+	// Check deferred FK constraints before commit
+	if err := s.conn.checkDeferredFKConstraints(); err != nil {
+		return nil, err
+	}
+
+	// Reset FK manager's transaction state
+	if s.conn.fkManager != nil {
+		s.conn.fkManager.SetInTransaction(false)
+	}
+	s.conn.clearDeferredFKViolations()
+
+	vm.AddOp(vdbe.OpInit, 0, 1, 0)
 	vm.AddOp(vdbe.OpCommit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
@@ -326,10 +487,75 @@ func (s *Stmt) compileCommit(vm *vdbe.VDBE, stmt *parser.CommitStmt, args []driv
 
 // compileRollback compiles a ROLLBACK statement.
 func (s *Stmt) compileRollback(vm *vdbe.VDBE, stmt *parser.RollbackStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	// ROLLBACK TO savepoint does not require an explicit transaction
+	if stmt.Savepoint != "" {
+		return s.compileRollbackTo(vm, stmt.Savepoint)
+	}
+
+	if !s.conn.inTx {
+		return nil, fmt.Errorf("cannot rollback - no transaction is active")
+	}
+
 	vm.SetReadOnly(false)
 
-	vm.AddOp(vdbe.OpInit, 0, 3, 0)
+	// Reset FK manager's transaction state (no deferred check on rollback)
+	if s.conn.fkManager != nil {
+		s.conn.fkManager.SetInTransaction(false)
+	}
+	s.conn.clearDeferredFKViolations()
+
+	vm.AddOp(vdbe.OpInit, 0, 1, 0)
 	vm.AddOp(vdbe.OpRollback, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
+// compileRollbackTo compiles a ROLLBACK TO savepoint statement.
+func (s *Stmt) compileRollbackTo(vm *vdbe.VDBE, name string) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+
+	vm.AddOp(vdbe.OpInit, 0, 1, 0)
+	vm.AddOpWithP4Str(vdbe.OpSavepoint, 2, 0, 0, name)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
+// compileSavepoint compiles a SAVEPOINT statement.
+func (s *Stmt) compileSavepoint(vm *vdbe.VDBE, stmt *parser.SavepointStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+
+	// Ensure a write transaction is active (needed for pager savepoint support)
+	if !s.conn.pager.InWriteTransaction() {
+		if err := s.conn.pager.BeginWrite(); err != nil {
+			return nil, fmt.Errorf("failed to begin write transaction: %w", err)
+		}
+	}
+
+	if !s.conn.inTx {
+		s.conn.inTx = true
+		s.conn.sqlTx = true
+		s.conn.savepointOnly = true
+		vm.InTxn = true
+		if s.conn.fkManager != nil {
+			s.conn.fkManager.SetInTransaction(true)
+		}
+	}
+
+	vm.AddOp(vdbe.OpInit, 0, 1, 0)
+	vm.AddOpWithP4Str(vdbe.OpSavepoint, 0, 0, 0, stmt.Name)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
+// compileRelease compiles a RELEASE [SAVEPOINT] statement.
+func (s *Stmt) compileRelease(vm *vdbe.VDBE, stmt *parser.ReleaseStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+
+	vm.AddOp(vdbe.OpInit, 0, 1, 0)
+	vm.AddOpWithP4Str(vdbe.OpSavepoint, 1, 0, 0, stmt.Name)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
 	return vm, nil

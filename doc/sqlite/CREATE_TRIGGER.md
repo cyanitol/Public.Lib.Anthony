@@ -31,15 +31,15 @@ Search Changelog
 CREATE TRIGGER
 
 Table Of Contents
-[1. Syntax](#syntax)
-[2. Description](#description)
+[1. Syntax](#1-syntax)
+[2. Description](#2-description)
 [2.1. Syntax Restrictions On UPDATE, DELETE, and INSERT Statements Within
 Triggers](#syntax_restrictions_on_update_delete_and_insert_statements_within_triggers)
-[3. INSTEAD OF triggers](#instead_of_triggers)
-[4. Some Example Triggers](#some_example_triggers)
-[5. Cautions On The Use Of BEFORE triggers](#cautions_on_the_use_of_before_triggers)
-[6. The RAISE() function](#the_raise_function)
-[7. TEMP Triggers on Non-TEMP Tables](#temp_triggers_on_non_temp_tables)
+[3. INSTEAD OF triggers](#3-instead-of-triggers)
+[4. Some Example Triggers](#4-some-example-triggers)
+[5. Cautions On The Use Of BEFORE triggers](#5-cautions-on-the-use-of-before-triggers)
+[6. The RAISE() function](#6-the-raise-function)
+[7. TEMP Triggers on Non-TEMP Tables](#7-temp-triggers-on-non-temp-tables)
 
 # 1. Syntax
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package functions
 
 import (
@@ -649,22 +649,22 @@ func TestAtanhFuncOutOfRange(t *testing.T) {
 
 // TestLengthFuncNonText tests length() with non-text types
 func TestLengthFuncNonText(t *testing.T) {
-	// Test with integer (should return bytes)
+	// Test with integer (should return string length, matching SQLite)
 	result, err := lengthFunc([]Value{NewIntValue(12345)})
 	if err != nil {
 		t.Errorf("lengthFunc() error = %v", err)
 	}
-	if result.AsInt64() != 8 {
-		t.Errorf("Expected 8 bytes for int64, got %d", result.AsInt64())
+	if result.AsInt64() != 5 {
+		t.Errorf("Expected 5 (string length of 12345), got %d", result.AsInt64())
 	}
 
-	// Test with float (should return bytes)
+	// Test with float (should return string length, matching SQLite)
 	result, err = lengthFunc([]Value{NewFloatValue(1.234)})
 	if err != nil {
 		t.Errorf("lengthFunc() error = %v", err)
 	}
-	if result.AsInt64() != 8 {
-		t.Errorf("Expected 8 bytes for float64, got %d", result.AsInt64())
+	if result.AsInt64() != 5 {
+		t.Errorf("Expected 5 (string length of 1.234), got %d", result.AsInt64())
 	}
 }
 

@@ -35,7 +35,7 @@ Choose one of the following methods:
 # On macOS: brew install fossil
 
 # Clone the SQLite fossil repository
-cd /home/justin/Programming/Workspace/Public.Lib.Anthony/contrib/sqlite/
+cd contrib/sqlite/
 fossil clone https://sqlite.org/src/sqlite.fossil sqlite.fossil
 
 # Open the repository
@@ -47,7 +47,7 @@ fossil open sqlite.fossil
 #### Method B: GitHub Mirror
 
 ```bash
-cd /home/justin/Programming/Workspace/Public.Lib.Anthony/contrib/sqlite/
+cd contrib/sqlite/
 git clone https://github.com/sqlite/sqlite.git official-source
 cd official-source
 ```
@@ -55,7 +55,7 @@ cd official-source
 #### Method C: Tarball Download
 
 ```bash
-cd /home/justin/Programming/Workspace/Public.Lib.Anthony/contrib/sqlite/
+cd contrib/sqlite/
 # Download the amalgamation (for quick reference)
 wget https://sqlite.org/2025/sqlite-amalgamation-3470000.zip
 unzip sqlite-amalgamation-3470000.zip

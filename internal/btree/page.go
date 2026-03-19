@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package btree
 
 import (
@@ -8,10 +8,12 @@ import (
 
 // Page type constants (first byte of page header)
 const (
-	PageTypeInteriorIndex = 0x02 // Interior index b-tree page
-	PageTypeInteriorTable = 0x05 // Interior table b-tree page
-	PageTypeLeafIndex     = 0x0a // Leaf index b-tree page
-	PageTypeLeafTable     = 0x0d // Leaf table b-tree page
+	PageTypeInteriorIndex   = 0x02 // Interior index b-tree page
+	PageTypeInteriorTable   = 0x05 // Interior table b-tree page
+	PageTypeLeafIndex       = 0x0a // Leaf index b-tree page
+	PageTypeLeafTable       = 0x0d // Leaf table b-tree page
+	PageTypeLeafTableNoInt  = 0x0e // Custom: WITHOUT ROWID table leaf (composite key)
+	PageTypeInteriorTableNo = 0x0f // Custom: WITHOUT ROWID table interior (composite key)
 )
 
 // Page type flags (bit flags in page type byte)
@@ -51,7 +53,7 @@ type PageHeader struct {
 	// Derived properties
 	IsLeaf        bool // True if this is a leaf page
 	IsInterior    bool // True if this is an interior page
-	IsTable       bool // True if this is a table b-tree (intkey)
+	IsTable       bool // True if this is a table b-tree (intkey or composite key)
 	IsIndex       bool // True if this is an index b-tree (blob key)
 	HeaderSize    int  // Size of page header (8 or 12 bytes)
 	CellPtrOffset int  // Offset where cell pointer array starts
@@ -92,10 +94,22 @@ func parseHeaderFields(data []byte, offset int) *PageHeader {
 		CellContentStart: binary.BigEndian.Uint16(data[offset+PageHeaderOffsetCellStart:]),
 		FragmentedBytes:  data[offset+PageHeaderOffsetFragmented],
 	}
-	h.IsLeaf = (h.PageType & PTF_LEAF) != 0
-	h.IsInterior = !h.IsLeaf
-	h.IsTable = (h.PageType & PTF_INTKEY) != 0
-	h.IsIndex = !h.IsTable
+	if h.PageType == PageTypeLeafTableNoInt {
+		h.IsLeaf = true
+		h.IsInterior = false
+		h.IsTable = true
+		h.IsIndex = false
+	} else if h.PageType == PageTypeInteriorTableNo {
+		h.IsLeaf = false
+		h.IsInterior = true
+		h.IsTable = true
+		h.IsIndex = false
+	} else {
+		h.IsLeaf = (h.PageType & PTF_LEAF) != 0
+		h.IsInterior = !h.IsLeaf
+		h.IsTable = (h.PageType & PTF_INTKEY) != 0
+		h.IsIndex = !h.IsTable
+	}
 	return h
 }
 
@@ -115,10 +129,12 @@ func finalizeHeader(h *PageHeader, data []byte, offset int) error {
 }
 
 var validPageTypes = map[byte]bool{
-	PageTypeInteriorIndex: true,
-	PageTypeInteriorTable: true,
-	PageTypeLeafIndex:     true,
-	PageTypeLeafTable:     true,
+	PageTypeInteriorIndex:   true,
+	PageTypeInteriorTable:   true,
+	PageTypeLeafIndex:       true,
+	PageTypeLeafTable:       true,
+	PageTypeLeafTableNoInt:  true,
+	PageTypeInteriorTableNo: true,
 }
 
 func validatePageType(pt byte) error {

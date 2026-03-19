@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package vdbe
 
 // Opcode represents a VDBE instruction opcode.
@@ -234,8 +234,19 @@ const (
 	OpWindowLead       Opcode = 208 // LEAD() window function
 	OpWindowFirstValue Opcode = 209 // FIRST_VALUE() window function
 	OpWindowLastValue  Opcode = 210 // LAST_VALUE() window function
+	OpWindowNthValue   Opcode = 213 // NTH_VALUE() window function
 	OpAggDistinct      Opcode = 211 // Check if value is distinct for aggregate
 	OpDistinctRow      Opcode = 212 // Check if row is distinct for SELECT DISTINCT
+	OpClearEphemeral Opcode = 214 // Clear all rows from ephemeral table (P1=cursor)
+
+	// Trigger opcodes
+	OpTriggerBefore Opcode = 215 // Execute BEFORE triggers: P1=event, P2=skip-addr, P4.Z=table
+	OpTriggerAfter  Opcode = 216 // Execute AFTER triggers: P1=event, P2=0, P4.Z=table
+	OpRaise         Opcode = 217 // RAISE function: P1=type(0=IGNORE,1=ROLLBACK,2=ABORT,3=FAIL), P4.Z=message
+
+	// Correlated subquery opcodes
+	OpCorrelatedExists Opcode = 218 // Correlated EXISTS: P1=result reg, P2=first binding reg, P3=num bindings, P4.P=callback, P5=not flag
+	OpCorrelatedScalar Opcode = 219 // Correlated scalar subquery: P1=result reg, P2=first binding reg, P3=num bindings, P4.P=callback
 )
 
 // OpcodeNames maps opcodes to their string names for debugging.
@@ -405,8 +416,15 @@ var OpcodeNames = map[Opcode]string{
 	OpWindowLead:       "WindowLead",
 	OpWindowFirstValue: "WindowFirstValue",
 	OpWindowLastValue:  "WindowLastValue",
+	OpWindowNthValue:   "WindowNthValue",
 	OpAggDistinct:      "AggDistinct",
 	OpDistinctRow:      "DistinctRow",
+	OpClearEphemeral:   "ClearEphemeral",
+	OpTriggerBefore:    "TriggerBefore",
+	OpTriggerAfter:     "TriggerAfter",
+	OpRaise:            "Raise",
+	OpCorrelatedExists: "CorrelatedExists",
+	OpCorrelatedScalar: "CorrelatedScalar",
 }
 
 // String returns the string representation of an opcode.
@@ -439,4 +457,5 @@ const (
 	P4IntArray   P4Type = -14 // P4 is an array of integers
 	P4FuncCtx    P4Type = -15 // P4 is a function context
 	P4TableRef   P4Type = -16 // P4 is a reference-counted table
+	P4Callback   P4Type = -17 // P4.P is a Go callback (interface{})
 )

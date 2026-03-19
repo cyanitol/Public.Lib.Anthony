@@ -1,9 +1,10 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
 	"database/sql/driver"
 	"fmt"
+	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
@@ -22,10 +23,13 @@ func (s *Stmt) compileSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driv
 	}
 
 	// Get table and check for special cases
-	tableName, table, err := s.resolveSelectTable(stmt)
+	tableName, table, db, err := s.resolveSelectTable(stmt)
 	if err != nil {
 		return nil, err
 	}
+
+	// Ensure VDBE context uses the correct database (main or attached)
+	s.setVdbeContextForDatabase(vm, db)
 
 	// Route to specialized compilers
 	if routedVM, err, handled := s.routeSpecializedSelect(vm, stmt, tableName, table, args); handled {
@@ -63,6 +67,18 @@ func (s *Stmt) handleSpecialSelectTypes(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 		return result, err, true
 	}
 
+	// Handle pragma table-valued functions (e.g., pragma_table_info)
+	if s.isPragmaTVF(stmt) {
+		result, err := s.compileSelectWithPragmaTVF(vm, stmt, args)
+		return result, err, true
+	}
+
+	// Handle table-valued functions (e.g., json_each, json_tree)
+	if s.hasTableValuedFunction(stmt) {
+		result, err := s.compileSelectWithTVF(vm, stmt, args)
+		return result, err, true
+	}
+
 	// Handle SELECT without FROM
 	if stmt.From == nil || len(stmt.From.Tables) == 0 {
 		result, err := s.compileSelectWithoutFrom(vm, stmt, args)
@@ -73,23 +89,29 @@ func (s *Stmt) handleSpecialSelectTypes(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 }
 
 // resolveSelectTable gets the table name and schema for the SELECT.
-func (s *Stmt) resolveSelectTable(stmt *parser.SelectStmt) (string, *schema.Table, error) {
-	tableName, err := selectFromTableName(stmt)
+func (s *Stmt) resolveSelectTable(stmt *parser.SelectStmt) (string, *schema.Table, *schema.Database, error) {
+	tableRef, err := selectFromTableRef(stmt)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 
-	table, ok := s.conn.schema.GetTable(tableName)
+	table, db, _, ok := s.conn.dbRegistry.ResolveTable(tableRef.Schema, tableRef.TableName)
 	if !ok {
-		return "", nil, fmt.Errorf("table not found: %s", tableName)
+		if tableRef.Schema != "" {
+			return "", nil, nil, fmt.Errorf("table not found: %s.%s", tableRef.Schema, tableRef.TableName)
+		}
+		return "", nil, nil, fmt.Errorf("table not found: %s", tableRef.TableName)
 	}
 
-	return tableName, table, nil
+	return tableRef.TableName, table, db, nil
 }
 
 // routeSpecializedSelect routes to JOIN, aggregate, or window function SELECT compilers.
 func (s *Stmt) routeSpecializedSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+
+	// Resolve named WINDOW clause references before routing
+	resolveNamedWindows(stmt)
 
 	// Handle JOINs (explicit JOIN or implicit cross join via comma-separated tables)
 	if stmt.From != nil && (len(stmt.From.Joins) > 0 || len(stmt.From.Tables) > 1) {
@@ -120,12 +142,16 @@ func (s *Stmt) compileSimpleSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	expandedCols, colNames := expandStarColumns(stmt.Columns, table)
 	numCols := len(expandedCols)
 
+	// Replace stmt.Columns with expanded columns so that ORDER BY and other
+	// downstream consumers see individual column references instead of *.
+	stmt.Columns = expandedCols
+
 	// Setup VDBE and code generator
 	gen, cursorNum := s.setupSimpleSelectVDBE(vm, stmt, tableName, table, numCols, colNames, args)
 
 	// Handle ORDER BY
 	if len(stmt.OrderBy) > 0 {
-		return s.compileSelectWithOrderBy(vm, stmt, table, gen, numCols)
+		return s.compileSelectWithOrderBy(vm, stmt, table, gen, numCols, cursorNum)
 	}
 
 	// Compile simple scan
@@ -148,6 +174,17 @@ func (s *Stmt) setupSimpleSelectVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	gen.RegisterCursor(tableName, cursorNum)
 	tableInfo := buildTableInfo(tableName, table)
 	gen.RegisterTable(tableInfo)
+
+	// Register alias so correlated subqueries can reference outer columns
+	if stmt.From != nil && len(stmt.From.Tables) > 0 {
+		alias := stmt.From.Tables[0].Alias
+		if alias != "" && alias != tableName {
+			gen.RegisterCursor(alias, cursorNum)
+			aliasInfo := buildTableInfo(tableName, table)
+			aliasInfo.Name = alias
+			gen.RegisterTable(aliasInfo)
+		}
+	}
 
 	// Setup args
 	argValues := make([]interface{}, len(args))
@@ -181,11 +218,17 @@ func (s *Stmt) emitSimpleSelectScan(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 
+	// Setup LIMIT/OFFSET counters before the scan loop
+	limitInfo := s.setupLimitOffset(vm, stmt, gen)
+
 	// Open cursor and start scan loop
 	rewindAddr := s.emitScanLoopSetup(vm, table, cursorNum)
 
 	// WHERE clause
 	skipAddr := s.emitSimpleSelectWhere(vm, stmt, gen)
+
+	// OFFSET check before output (skip early rows)
+	offsetSkipAddr := s.emitOffsetCheck(vm, limitInfo, gen)
 
 	// SELECT columns
 	if err := s.emitScanColumns(vm, table, expandedCols, gen); err != nil {
@@ -193,12 +236,60 @@ func (s *Stmt) emitSimpleSelectScan(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	}
 
 	// Handle DISTINCT and output row
-	distinctSkipAddr := s.emitDistinctAndOutput(vm, stmt, numCols)
+	distinctSkipAddr := s.emitDistinctAndOutput(vm, stmt, numCols, gen)
+
+	// LIMIT check after output (stop after N rows)
+	limitJumpAddr := s.emitLimitCheck(vm, limitInfo, gen)
 
 	// Fix addresses and close loop
-	s.fixScanAddresses(vm, stmt, rewindAddr, skipAddr, distinctSkipAddr, cursorNum, table)
+	s.fixScanAddressesWithLimit(vm, stmt, rewindAddr, skipAddr, distinctSkipAddr,
+		offsetSkipAddr, limitJumpAddr, limitInfo, cursorNum, table)
 
 	return vm, nil
+}
+
+// fixScanAddressesWithLimit fixes jump addresses for scan with LIMIT/OFFSET support.
+func (s *Stmt) fixScanAddressesWithLimit(vm *vdbe.VDBE, stmt *parser.SelectStmt,
+	rewindAddr, skipAddr, distinctSkipAddr, offsetSkipAddr, limitJumpAddr int,
+	limitInfo *limitOffsetInfo, cursorNum int, table *schema.Table) {
+
+	// Fix DISTINCT skip
+	if stmt.Distinct {
+		vm.Program[distinctSkipAddr].P2 = vm.NumOps()
+	}
+
+	// Fix WHERE skip
+	if stmt.Where != nil {
+		vm.Program[skipAddr].P2 = vm.NumOps()
+	}
+
+	// Fix OFFSET skip to jump to Next
+	nextAddr := vm.NumOps()
+	if limitInfo.hasOffset {
+		vm.Program[offsetSkipAddr].P2 = nextAddr
+	}
+
+	// Loop
+	vm.AddOp(vdbe.OpNext, cursorNum, rewindAddr+1, 0)
+
+	// Close regular tables
+	if !table.Temp {
+		vm.AddOp(vdbe.OpClose, cursorNum, 0, 0)
+	}
+
+	// Halt
+	haltAddr := vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	vm.Program[rewindAddr].P2 = haltAddr
+
+	// Fix LIMIT jump to halt
+	if limitInfo.hasLimit {
+		vm.Program[limitJumpAddr].P2 = haltAddr
+	}
+
+	// Fix early halt jump for LIMIT 0
+	if limitInfo.earlyHaltAddr > 0 {
+		vm.Program[limitInfo.earlyHaltAddr].P2 = haltAddr
+	}
 }
 
 // emitScanLoopSetup opens cursor and starts the scan loop.
@@ -220,38 +311,22 @@ func (s *Stmt) emitScanColumns(vm *vdbe.VDBE, table *schema.Table, expandedCols 
 }
 
 // emitDistinctAndOutput handles DISTINCT check and result row emission.
-func (s *Stmt) emitDistinctAndOutput(vm *vdbe.VDBE, stmt *parser.SelectStmt, numCols int) int {
+func (s *Stmt) emitDistinctAndOutput(vm *vdbe.VDBE, stmt *parser.SelectStmt, numCols int, gen *expr.CodeGenerator) int {
 	var distinctSkipAddr int
 	if stmt.Distinct {
 		distinctSkipAddr = vm.AddOp(vdbe.OpDistinctRow, 0, 0, numCols)
+		if gen != nil {
+			collations := make([]string, numCols)
+			for i := 0; i < numCols; i++ {
+				if coll, ok := gen.CollationForReg(i); ok {
+					collations[i] = coll
+				}
+			}
+			vm.Program[distinctSkipAddr].P4.P = collations
+		}
 	}
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
 	return distinctSkipAddr
-}
-
-// fixScanAddresses fixes all jump addresses and closes the scan loop.
-func (s *Stmt) fixScanAddresses(vm *vdbe.VDBE, stmt *parser.SelectStmt, rewindAddr, skipAddr, distinctSkipAddr, cursorNum int, table *schema.Table) {
-	// Fix DISTINCT skip
-	if stmt.Distinct {
-		vm.Program[distinctSkipAddr].P2 = vm.NumOps()
-	}
-
-	// Fix WHERE skip
-	if stmt.Where != nil {
-		vm.Program[skipAddr].P2 = vm.NumOps()
-	}
-
-	// Loop
-	vm.AddOp(vdbe.OpNext, cursorNum, rewindAddr+1, 0)
-
-	// Close regular tables
-	if !table.Temp {
-		vm.AddOp(vdbe.OpClose, cursorNum, 0, 0)
-	}
-
-	// Halt
-	haltAddr := vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	vm.Program[rewindAddr].P2 = haltAddr
 }
 
 // emitSimpleSelectWhere emits WHERE clause for simple SELECT.
@@ -356,22 +431,25 @@ type orderByColumnInfo struct {
 	keyCols      []int
 	desc         []bool
 	collations   []string
-	extraCols    []string
+	extraExprs   []parser.Expression
 	extraColRegs []int
 	sorterCols   int
 }
 
 // limitOffsetInfo holds LIMIT/OFFSET state
 type limitOffsetInfo struct {
-	hasLimit  bool
-	hasOffset bool
-	limitVal  int
-	offsetVal int
-	limitReg  int
-	offsetReg int
+	hasLimit      bool
+	hasOffset     bool
+	limitVal      int
+	offsetVal     int
+	limitReg      int
+	offsetReg     int
+	earlyHaltAddr int // address of early Goto for LIMIT 0 (needs patching to halt)
 }
 
-// setupLimitOffset parses LIMIT/OFFSET and initializes counter registers
+// setupLimitOffset parses LIMIT/OFFSET and initializes counter registers.
+// If LIMIT is 0, emits a Goto to a placeholder address (stored in earlyHaltAddr)
+// that the caller must patch to point to Halt.
 func (s *Stmt) setupLimitOffset(vm *vdbe.VDBE, stmt *parser.SelectStmt, gen *expr.CodeGenerator) *limitOffsetInfo {
 	info := &limitOffsetInfo{}
 
@@ -383,6 +461,10 @@ func (s *Stmt) setupLimitOffset(vm *vdbe.VDBE, stmt *parser.SelectStmt, gen *exp
 				info.limitVal = int(parsedVal)
 				info.limitReg = gen.AllocReg()
 				vm.AddOp(vdbe.OpInteger, 0, info.limitReg, 0)
+				// LIMIT 0 or negative: emit early jump to halt (patched later)
+				if parsedVal <= 0 {
+					info.earlyHaltAddr = vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+				}
 			}
 		}
 	}
@@ -402,31 +484,36 @@ func (s *Stmt) setupLimitOffset(vm *vdbe.VDBE, stmt *parser.SelectStmt, gen *exp
 	return info
 }
 
-// emitLimitOffsetChecks emits VDBE opcodes to check LIMIT/OFFSET conditions
-func (s *Stmt) emitLimitOffsetChecks(vm *vdbe.VDBE, info *limitOffsetInfo, gen *expr.CodeGenerator) (offsetSkipAddr int, limitJumpAddr int) {
-	if info.hasOffset {
-		// Increment offset counter
-		vm.AddOp(vdbe.OpAddImm, info.offsetReg, 1, 0)
-		// Compare counter to offset value
-		offsetCheckReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpInteger, info.offsetVal, offsetCheckReg, 0)
-		cmpReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpLe, info.offsetReg, offsetCheckReg, cmpReg)
-		offsetSkipAddr = vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)
+// emitOffsetCheck emits VDBE opcodes to check OFFSET condition (skip early rows).
+// Returns the address of the conditional jump that needs patching to the Next opcode.
+func (s *Stmt) emitOffsetCheck(vm *vdbe.VDBE, info *limitOffsetInfo, gen *expr.CodeGenerator) int {
+	if !info.hasOffset {
+		return 0
 	}
+	// Increment offset counter
+	vm.AddOp(vdbe.OpAddImm, info.offsetReg, 1, 0)
+	// Compare counter to offset value: skip this row if counter <= offset
+	offsetCheckReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpInteger, info.offsetVal, offsetCheckReg, 0)
+	cmpReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpLe, info.offsetReg, offsetCheckReg, cmpReg)
+	return vm.AddOp(vdbe.OpIf, cmpReg, 0, 0) // jump to Next (patched later)
+}
 
-	if info.hasLimit {
-		// Increment counter
-		vm.AddOp(vdbe.OpAddImm, info.limitReg, 1, 0)
-		// Compare counter to limit
-		limitCheckReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpInteger, info.limitVal, limitCheckReg, 0)
-		cmpReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpGt, info.limitReg, limitCheckReg, cmpReg)
-		limitJumpAddr = vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)
+// emitLimitCheck emits VDBE opcodes to check LIMIT condition (stop after N rows).
+// Returns the address of the conditional jump that needs patching to the Halt opcode.
+func (s *Stmt) emitLimitCheck(vm *vdbe.VDBE, info *limitOffsetInfo, gen *expr.CodeGenerator) int {
+	if !info.hasLimit {
+		return 0
 	}
-
-	return offsetSkipAddr, limitJumpAddr
+	// Increment counter
+	vm.AddOp(vdbe.OpAddImm, info.limitReg, 1, 0)
+	// Compare counter to limit: stop if counter >= limit
+	limitCheckReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpInteger, info.limitVal, limitCheckReg, 0)
+	cmpReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpGe, info.limitReg, limitCheckReg, cmpReg)
+	return vm.AddOp(vdbe.OpIf, cmpReg, 0, 0) // jump to Halt (patched later)
 }
 
 // resolveOrderByColumns determines which columns to sort by and identifies extra columns needed
@@ -435,7 +522,7 @@ func (s *Stmt) resolveOrderByColumns(stmt *parser.SelectStmt, table *schema.Tabl
 		keyCols:      make([]int, len(stmt.OrderBy)),
 		desc:         make([]bool, len(stmt.OrderBy)),
 		collations:   make([]string, len(stmt.OrderBy)),
-		extraCols:    make([]string, 0),
+		extraExprs:   make([]parser.Expression, 0),
 		extraColRegs: make([]int, 0),
 	}
 
@@ -443,7 +530,7 @@ func (s *Stmt) resolveOrderByColumns(stmt *parser.SelectStmt, table *schema.Tabl
 		s.resolveOrderByTerm(orderTerm, i, stmt, table, numCols, gen, info)
 	}
 
-	info.sorterCols = numCols + len(info.extraCols)
+	info.sorterCols = numCols + len(info.extraExprs)
 	return info
 }
 
@@ -458,15 +545,19 @@ func (s *Stmt) resolveOrderByTerm(orderTerm parser.OrderingTerm, termIdx int,
 	// Try to find column in SELECT list
 	orderColName, colIdx := s.findOrderByColumnInSelect(baseExpr, stmt)
 
-	// Look up collation from schema if not explicitly specified
-	if collation == "" && orderColName != "" {
-		collation = s.findCollationInSchema(orderColName, table)
+	// Look up collation from schema or expression if not explicitly specified
+	if collation == "" {
+		if orderColName != "" {
+			collation = s.findCollationInSchema(orderColName, table)
+		} else {
+			collation = resolveExprCollation(baseExpr, table)
+		}
 	}
 	info.collations[termIdx] = collation
 
 	// Handle column not in SELECT list
-	if colIdx < 0 && orderColName != "" {
-		colIdx = s.addExtraOrderByColumn(orderColName, numCols, gen, info)
+	if colIdx < 0 {
+		colIdx = s.addExtraOrderByExpr(baseExpr, numCols, gen, info)
 	}
 
 	// Default to first column if not found
@@ -494,15 +585,8 @@ func (s *Stmt) extractOrderByExpression(orderTerm parser.OrderingTerm, termIdx i
 // findOrderByColumnInSelect searches for ORDER BY column in SELECT columns.
 func (s *Stmt) findOrderByColumnInSelect(baseExpr parser.Expression, stmt *parser.SelectStmt) (string, int) {
 	// Check if it's a column number (literal integer)
-	if litExpr, ok := baseExpr.(*parser.LiteralExpr); ok {
-		var colNum int
-		if _, err := fmt.Sscanf(litExpr.Value, "%d", &colNum); err == nil {
-			// Column numbers are 1-indexed in SQL
-			if colNum >= 1 && colNum <= len(stmt.Columns) {
-				return "", colNum - 1
-			}
-		}
-		return "", -1
+	if colIdx := s.tryParseColumnNumber(baseExpr, stmt); colIdx >= 0 {
+		return "", colIdx
 	}
 
 	// Check if it's a column name
@@ -511,21 +595,44 @@ func (s *Stmt) findOrderByColumnInSelect(baseExpr parser.Expression, stmt *parse
 		return "", -1
 	}
 
-	orderColName := ident.Name
-
 	// Search by alias or column name
-	for j, selCol := range stmt.Columns {
+	orderColName := ident.Name
+	colIdx := s.searchColumnByName(orderColName, stmt.Columns)
+	return orderColName, colIdx
+}
+
+// tryParseColumnNumber attempts to parse a column number from a literal expression.
+func (s *Stmt) tryParseColumnNumber(baseExpr parser.Expression, stmt *parser.SelectStmt) int {
+	litExpr, ok := baseExpr.(*parser.LiteralExpr)
+	if !ok {
+		return -1
+	}
+
+	var colNum int
+	if _, err := fmt.Sscanf(litExpr.Value, "%d", &colNum); err != nil {
+		return -1
+	}
+
+	// Column numbers are 1-indexed in SQL
+	if colNum >= 1 && colNum <= len(stmt.Columns) {
+		return colNum - 1
+	}
+	return -1
+}
+
+// searchColumnByName searches for a column by alias or name in SELECT columns.
+func (s *Stmt) searchColumnByName(orderColName string, columns []parser.ResultColumn) int {
+	for j, selCol := range columns {
 		if selCol.Alias == orderColName {
-			return orderColName, j
+			return j
 		}
 		if selColIdent, ok := selCol.Expr.(*parser.IdentExpr); ok {
 			if selColIdent.Name == orderColName {
-				return orderColName, j
+				return j
 			}
 		}
 	}
-
-	return orderColName, -1
+	return -1
 }
 
 // findCollationInSchema looks up collation from table schema.
@@ -539,34 +646,36 @@ func (s *Stmt) findCollationInSchema(colName string, table *schema.Table) string
 }
 
 // addExtraOrderByColumn adds an extra column for ORDER BY that's not in SELECT.
-func (s *Stmt) addExtraOrderByColumn(orderColName string, numCols int, gen *expr.CodeGenerator, info *orderByColumnInfo) int {
-	// Check if already added
-	for j, extraCol := range info.extraCols {
-		if extraCol == orderColName {
-			return numCols + j
+func (s *Stmt) addExtraOrderByExpr(orderExpr parser.Expression, numCols int, gen *expr.CodeGenerator, info *orderByColumnInfo) int {
+	if ident, ok := orderExpr.(*parser.IdentExpr); ok {
+		for j, extraExpr := range info.extraExprs {
+			if extraIdent, ok := extraExpr.(*parser.IdentExpr); ok {
+				if strings.EqualFold(extraIdent.Name, ident.Name) {
+					return numCols + j
+				}
+			}
 		}
 	}
 
-	// Add new extra column
-	colIdx := numCols + len(info.extraCols)
-	info.extraCols = append(info.extraCols, orderColName)
-	info.extraColRegs = append(info.extraColRegs, gen.AllocReg())
+	colIdx := numCols + len(info.extraExprs)
+	info.extraExprs = append(info.extraExprs, orderExpr)
+	info.extraColRegs = append(info.extraColRegs, 0)
 	return colIdx
 }
 
 // compileSelectWithOrderBy handles SELECT with ORDER BY clause using a sorter.
-func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, table *schema.Table, gen *expr.CodeGenerator, numCols int) (*vdbe.VDBE, error) {
+func (s *Stmt) compileSelectWithOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, table *schema.Table, gen *expr.CodeGenerator, numCols int, cursorNum int) (*vdbe.VDBE, error) {
 	// Resolve ORDER BY columns and setup sorter
 	orderInfo := s.resolveOrderByColumns(stmt, table, numCols, gen)
 	gen.SetNextReg(orderInfo.sorterCols)
 	keyInfo := s.createSorterKeyInfo(orderInfo)
 
 	// Emit table scan and sorter population
-	rewindAddr, skipAddr := s.emitOrderByScanSetup(vm, stmt, table, keyInfo, orderInfo.sorterCols, gen)
-	if err := s.emitOrderBySorterPopulation(vm, stmt, table, orderInfo, numCols, gen); err != nil {
+	rewindAddr, skipAddr := s.emitOrderByScanSetup(vm, stmt, table, keyInfo, orderInfo.sorterCols, gen, cursorNum)
+	if err := s.emitOrderBySorterPopulation(vm, stmt, table, orderInfo, numCols, gen, cursorNum); err != nil {
 		return nil, err
 	}
-	s.fixOrderByScanAddresses(vm, stmt, rewindAddr, skipAddr)
+	s.fixOrderByScanAddresses(vm, stmt, table, rewindAddr, skipAddr, cursorNum)
 
 	// Emit sorter output loop
 	sorterSortAddr, limitInfo := s.emitOrderBySorterSort(vm, stmt, gen)
@@ -591,14 +700,16 @@ func (s *Stmt) createSorterKeyInfo(orderInfo *orderByColumnInfo) *vdbe.SorterKey
 }
 
 // emitOrderByScanSetup emits initialization, table open, and sorter open operations.
-func (s *Stmt) emitOrderByScanSetup(vm *vdbe.VDBE, stmt *parser.SelectStmt, table *schema.Table, keyInfo *vdbe.SorterKeyInfo, sorterCols int, gen *expr.CodeGenerator) (int, int) {
+func (s *Stmt) emitOrderByScanSetup(vm *vdbe.VDBE, stmt *parser.SelectStmt, table *schema.Table, keyInfo *vdbe.SorterKeyInfo, sorterCols int, gen *expr.CodeGenerator, cursorNum int) (int, int) {
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), len(table.Columns))
+	if !table.Temp {
+		vm.AddOp(vdbe.OpOpenRead, cursorNum, int(table.RootPage), len(table.Columns))
+	}
 
 	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, 0, sorterCols, 0)
 	vm.Program[sorterOpenAddr].P4.P = keyInfo
 
-	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+	rewindAddr := vm.AddOp(vdbe.OpRewind, cursorNum, 0, 0)
 
 	var skipAddr int
 	if stmt.Where != nil {
@@ -610,7 +721,7 @@ func (s *Stmt) emitOrderByScanSetup(vm *vdbe.VDBE, stmt *parser.SelectStmt, tabl
 }
 
 // emitOrderBySorterPopulation reads columns and populates the sorter.
-func (s *Stmt) emitOrderBySorterPopulation(vm *vdbe.VDBE, stmt *parser.SelectStmt, table *schema.Table, orderInfo *orderByColumnInfo, numCols int, gen *expr.CodeGenerator) error {
+func (s *Stmt) emitOrderBySorterPopulation(vm *vdbe.VDBE, stmt *parser.SelectStmt, table *schema.Table, orderInfo *orderByColumnInfo, numCols int, gen *expr.CodeGenerator, cursorNum int) error {
 	// Read SELECT columns
 	for i, col := range stmt.Columns {
 		if err := emitSelectColumnOp(vm, table, col, i, gen); err != nil {
@@ -619,12 +730,16 @@ func (s *Stmt) emitOrderBySorterPopulation(vm *vdbe.VDBE, stmt *parser.SelectStm
 	}
 
 	// Read extra ORDER BY columns
-	for i, colName := range orderInfo.extraCols {
-		s.emitExtraOrderByColumn(vm, table, colName, orderInfo.extraColRegs[i])
+	for i, orderExpr := range orderInfo.extraExprs {
+		reg, err := gen.GenerateExpr(orderExpr)
+		if err != nil {
+			return err
+		}
+		orderInfo.extraColRegs[i] = reg
 	}
 
 	// Copy extra columns to contiguous registers and insert
-	for i := range orderInfo.extraCols {
+	for i := range orderInfo.extraExprs {
 		vm.AddOp(vdbe.OpCopy, orderInfo.extraColRegs[i], numCols+i, 0)
 	}
 	vm.AddOp(vdbe.OpSorterInsert, 0, 0, orderInfo.sorterCols)
@@ -633,31 +748,34 @@ func (s *Stmt) emitOrderBySorterPopulation(vm *vdbe.VDBE, stmt *parser.SelectStm
 }
 
 // emitExtraOrderByColumn emits code to read an extra ORDER BY column.
-func (s *Stmt) emitExtraOrderByColumn(vm *vdbe.VDBE, table *schema.Table, colName string, targetReg int) {
+func (s *Stmt) emitExtraOrderByColumn(vm *vdbe.VDBE, table *schema.Table, colName string, targetReg int, cursorNum int) {
 	tableColIdx := table.GetColumnIndexWithRowidAliases(colName)
 	if tableColIdx >= 0 {
 		// Check if this is a rowid column (INTEGER PRIMARY KEY)
-		if schemaColIsRowid(table.Columns[tableColIdx]) {
-			vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
+		if schemaColIsRowidForTable(table, table.Columns[tableColIdx]) {
+			vm.AddOp(vdbe.OpRowid, cursorNum, targetReg, 0)
 		} else {
 			recordIdx := schemaRecordIdxForTable(table, tableColIdx)
-			vm.AddOp(vdbe.OpColumn, 0, recordIdx, targetReg)
+			vm.AddOp(vdbe.OpColumn, cursorNum, recordIdx, targetReg)
 		}
-	} else if tableColIdx == -2 {
+	} else if tableColIdx == -2 && !table.WithoutRowID {
 		// This is a rowid alias but no INTEGER PRIMARY KEY exists
-		vm.AddOp(vdbe.OpRowid, 0, targetReg, 0)
+		// (not applicable for WITHOUT ROWID tables)
+		vm.AddOp(vdbe.OpRowid, cursorNum, targetReg, 0)
 	} else {
 		vm.AddOp(vdbe.OpNull, 0, targetReg, 0)
 	}
 }
 
 // fixOrderByScanAddresses fixes addresses for the table scan loop.
-func (s *Stmt) fixOrderByScanAddresses(vm *vdbe.VDBE, stmt *parser.SelectStmt, rewindAddr int, skipAddr int) {
+func (s *Stmt) fixOrderByScanAddresses(vm *vdbe.VDBE, stmt *parser.SelectStmt, table *schema.Table, rewindAddr int, skipAddr int, cursorNum int) {
 	if stmt.Where != nil {
 		vm.Program[skipAddr].P2 = vm.NumOps()
 	}
-	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
-	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+	vm.AddOp(vdbe.OpNext, cursorNum, rewindAddr+1, 0)
+	if !table.Temp {
+		vm.AddOp(vdbe.OpClose, cursorNum, 0, 0)
+	}
 }
 
 // emitOrderBySorterSort emits sorter sort operation and sets up LIMIT/OFFSET.
@@ -676,17 +794,48 @@ func (s *Stmt) emitOrderByOutputSetup(vm *vdbe.VDBE) (int, int, int) {
 }
 
 // emitOrderByOutputLoop emits the sorter output loop with LIMIT/OFFSET checks.
+// OFFSET is checked before ResultRow (to skip rows), LIMIT after (to stop after N rows).
 func (s *Stmt) emitOrderByOutputLoop(vm *vdbe.VDBE, stmt *parser.SelectStmt, numCols int, limitInfo *limitOffsetInfo, gen *expr.CodeGenerator, sorterLoopAddr int) (int, int, int) {
 	vm.AddOp(vdbe.OpSorterData, 0, 0, numCols)
-	offsetSkipAddr, limitJumpAddr := s.emitLimitOffsetChecks(vm, limitInfo, gen)
+
+	// OFFSET check before ResultRow (skip early rows)
+	var offsetSkipAddr int
+	if limitInfo.hasOffset {
+		vm.AddOp(vdbe.OpAddImm, limitInfo.offsetReg, 1, 0)
+		offsetCheckReg := gen.AllocReg()
+		vm.AddOp(vdbe.OpInteger, limitInfo.offsetVal, offsetCheckReg, 0)
+		cmpReg := gen.AllocReg()
+		vm.AddOp(vdbe.OpLe, limitInfo.offsetReg, offsetCheckReg, cmpReg)
+		offsetSkipAddr = vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)
+	}
 
 	// Handle DISTINCT - check if row is unique before outputting
 	var distinctSkipAddr int
 	if stmt.Distinct {
 		distinctSkipAddr = vm.AddOp(vdbe.OpDistinctRow, 0, 0, numCols)
+		if gen != nil {
+			collations := make([]string, numCols)
+			for i := 0; i < numCols; i++ {
+				if coll, ok := gen.CollationForReg(i); ok {
+					collations[i] = coll
+				}
+			}
+			vm.Program[distinctSkipAddr].P4.P = collations
+		}
 	}
 
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+
+	// LIMIT check after ResultRow (stop after N rows emitted)
+	var limitJumpAddr int
+	if limitInfo.hasLimit {
+		vm.AddOp(vdbe.OpAddImm, limitInfo.limitReg, 1, 0)
+		limitCheckReg := gen.AllocReg()
+		vm.AddOp(vdbe.OpInteger, limitInfo.limitVal, limitCheckReg, 0)
+		cmpReg := gen.AllocReg()
+		vm.AddOp(vdbe.OpGe, limitInfo.limitReg, limitCheckReg, cmpReg)
+		limitJumpAddr = vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)
+	}
 
 	// Fix DISTINCT skip - jump to SorterNext
 	nextRowAddr := vm.AddOp(vdbe.OpSorterNext, 0, sorterLoopAddr, 0)
@@ -718,6 +867,9 @@ func (s *Stmt) fixOrderByAddresses(vm *vdbe.VDBE, rewindAddr, sorterSortAddr, so
 	if limitInfo.hasLimit {
 		vm.Program[limitJumpAddr].P2 = haltAddr
 	}
+	if limitInfo.earlyHaltAddr > 0 {
+		vm.Program[limitInfo.earlyHaltAddr].P2 = haltAddr
+	}
 }
 
 // detectWindowFunctions checks if a SELECT statement contains window functions
@@ -730,19 +882,49 @@ func (s *Stmt) detectWindowFunctions(stmt *parser.SelectStmt) bool {
 	return false
 }
 
-// isWindowFunctionExpr checks if an expression is a window function (has OVER clause)
-func (s *Stmt) isWindowFunctionExpr(expr parser.Expression) bool {
-	if expr == nil {
+// isWindowFunctionExpr checks if an expression contains a window function (has OVER clause)
+func (s *Stmt) isWindowFunctionExpr(e parser.Expression) bool {
+	if e == nil {
 		return false
 	}
 
-	fnExpr, ok := expr.(*parser.FunctionExpr)
+	fnExpr, ok := e.(*parser.FunctionExpr)
 	if !ok {
-		return false
+		return s.exprContainsWindowFunc(e)
 	}
 
-	// A window function is identified by the presence of an OVER clause
-	return fnExpr.Over != nil
+	if fnExpr.Over != nil {
+		return true
+	}
+	// Check arguments for nested window functions (e.g., COALESCE(NTH_VALUE(...) OVER ...))
+	for _, arg := range fnExpr.Args {
+		if s.isWindowFunctionExpr(arg) {
+			return true
+		}
+	}
+	return false
+}
+
+// exprContainsWindowFunc checks non-function expressions for nested window functions.
+func (s *Stmt) exprContainsWindowFunc(e parser.Expression) bool {
+	switch ex := e.(type) {
+	case *parser.BinaryExpr:
+		return s.isWindowFunctionExpr(ex.Left) || s.isWindowFunctionExpr(ex.Right)
+	case *parser.UnaryExpr:
+		return s.isWindowFunctionExpr(ex.Expr)
+	case *parser.ParenExpr:
+		return s.isWindowFunctionExpr(ex.Expr)
+	case *parser.CastExpr:
+		return s.isWindowFunctionExpr(ex.Expr)
+	case *parser.CaseExpr:
+		for _, w := range ex.WhenClauses {
+			if s.isWindowFunctionExpr(w.Condition) || s.isWindowFunctionExpr(w.Result) {
+				return true
+			}
+		}
+		return s.isWindowFunctionExpr(ex.ElseClause)
+	}
+	return false
 }
 
 // detectAggregates checks if a SELECT statement contains aggregate functions

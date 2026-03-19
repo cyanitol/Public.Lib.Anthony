@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package parser
 
 import (
@@ -148,118 +148,108 @@ func TestAlterTableRenameColumn(t *testing.T) {
 	}
 }
 
+// Prefix: alter_
+type alterAddColumnTestCase struct {
+	name               string
+	sql                string
+	wantErr            bool
+	wantTable          string
+	wantColName        string
+	wantColType        string
+	wantConstraints    int
+	wantConstraintType ConstraintType
+}
+
+func alter_getAddAction(t *testing.T, stmt Statement) *AddColumnAction {
+	t.Helper()
+	alter, ok := stmt.(*AlterTableStmt)
+	if !ok {
+		t.Fatalf("expected *AlterTableStmt, got %T", stmt)
+	}
+	add, ok := alter.Action.(*AddColumnAction)
+	if !ok {
+		t.Fatalf("expected *AddColumnAction, got %T", alter.Action)
+	}
+	return add
+}
+
+func alter_checkTableAndColumn(t *testing.T, stmt Statement, tc alterAddColumnTestCase) *AddColumnAction {
+	t.Helper()
+	alter := stmt.(*AlterTableStmt)
+	if tc.wantTable != "" && alter.Table != tc.wantTable {
+		t.Errorf("expected table %q, got %q", tc.wantTable, alter.Table)
+	}
+	add := alter_getAddAction(t, stmt)
+	if tc.wantColName != "" && add.Column.Name != tc.wantColName {
+		t.Errorf("expected column name %q, got %q", tc.wantColName, add.Column.Name)
+	}
+	if tc.wantColType != "" && add.Column.Type != tc.wantColType {
+		t.Errorf("expected column type %q, got %q", tc.wantColType, add.Column.Type)
+	}
+	return add
+}
+
+func alter_checkConstraints(t *testing.T, add *AddColumnAction, tc alterAddColumnTestCase) {
+	t.Helper()
+	if tc.wantConstraints > 0 && len(add.Column.Constraints) != tc.wantConstraints {
+		t.Errorf("expected %d constraints, got %d", tc.wantConstraints, len(add.Column.Constraints))
+	}
+	if tc.wantConstraintType != 0 && len(add.Column.Constraints) > 0 && add.Column.Constraints[0].Type != tc.wantConstraintType {
+		t.Errorf("expected constraint type %v, got %v", tc.wantConstraintType, add.Column.Constraints[0].Type)
+	}
+}
+
+func alter_checkAddColumn(t *testing.T, stmt Statement, tc alterAddColumnTestCase) {
+	t.Helper()
+	add := alter_checkTableAndColumn(t, stmt, tc)
+	alter_checkConstraints(t, add, tc)
+}
+
 func TestAlterTableAddColumn(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-		check   func(*testing.T, Statement)
-	}{
+	tests := []alterAddColumnTestCase{
 		{
-			name: "add column with type",
-			sql:  "ALTER TABLE users ADD COLUMN email TEXT",
-			check: func(t *testing.T, stmt Statement) {
-				alter, ok := stmt.(*AlterTableStmt)
-				if !ok {
-					t.Fatalf("expected *AlterTableStmt, got %T", stmt)
-				}
-				if alter.Table != "users" {
-					t.Errorf("expected table 'users', got %q", alter.Table)
-				}
-				add, ok := alter.Action.(*AddColumnAction)
-				if !ok {
-					t.Fatalf("expected *AddColumnAction, got %T", alter.Action)
-				}
-				if add.Column.Name != "email" {
-					t.Errorf("expected column name 'email', got %q", add.Column.Name)
-				}
-				if add.Column.Type != "TEXT" {
-					t.Errorf("expected column type 'TEXT', got %q", add.Column.Type)
-				}
-			},
+			name:      "add column with type",
+			sql:       "ALTER TABLE users ADD COLUMN email TEXT",
+			wantTable: "users", wantColName: "email", wantColType: "TEXT",
 		},
 		{
-			name: "add column without COLUMN keyword",
-			sql:  "ALTER TABLE users ADD phone TEXT",
-			check: func(t *testing.T, stmt Statement) {
-				alter := stmt.(*AlterTableStmt)
-				add := alter.Action.(*AddColumnAction)
-				if add.Column.Name != "phone" {
-					t.Errorf("expected column name 'phone', got %q", add.Column.Name)
-				}
-			},
+			name:        "add column without COLUMN keyword",
+			sql:         "ALTER TABLE users ADD phone TEXT",
+			wantColName: "phone",
 		},
 		{
-			name: "add column with constraints",
-			sql:  "ALTER TABLE users ADD COLUMN age INTEGER NOT NULL DEFAULT 0",
-			check: func(t *testing.T, stmt Statement) {
-				alter := stmt.(*AlterTableStmt)
-				add := alter.Action.(*AddColumnAction)
-				if add.Column.Name != "age" {
-					t.Errorf("expected column name 'age', got %q", add.Column.Name)
-				}
-				if add.Column.Type != "INTEGER" {
-					t.Errorf("expected column type 'INTEGER', got %q", add.Column.Type)
-				}
-				if len(add.Column.Constraints) != 2 {
-					t.Errorf("expected 2 constraints, got %d", len(add.Column.Constraints))
-				}
-			},
+			name:        "add column with constraints",
+			sql:         "ALTER TABLE users ADD COLUMN age INTEGER NOT NULL DEFAULT 0",
+			wantColName: "age", wantColType: "INTEGER", wantConstraints: 2,
 		},
 		{
-			name: "add column with primary key",
-			sql:  "ALTER TABLE users ADD COLUMN id INTEGER PRIMARY KEY AUTOINCREMENT",
-			check: func(t *testing.T, stmt Statement) {
-				alter := stmt.(*AlterTableStmt)
-				add := alter.Action.(*AddColumnAction)
-				if add.Column.Name != "id" {
-					t.Errorf("expected column name 'id', got %q", add.Column.Name)
-				}
-				if len(add.Column.Constraints) < 1 {
-					t.Fatalf("expected at least 1 constraint")
-				}
-				if add.Column.Constraints[0].Type != ConstraintPrimaryKey {
-					t.Errorf("expected PRIMARY KEY constraint")
-				}
-			},
+			name:        "add column with primary key",
+			sql:         "ALTER TABLE users ADD COLUMN id INTEGER PRIMARY KEY AUTOINCREMENT",
+			wantColName: "id", wantConstraintType: ConstraintPrimaryKey,
 		},
 		{
-			name: "add column with default value",
-			sql:  "ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'",
-			check: func(t *testing.T, stmt Statement) {
-				alter := stmt.(*AlterTableStmt)
-				add := alter.Action.(*AddColumnAction)
-				if add.Column.Name != "status" {
-					t.Errorf("expected column name 'status', got %q", add.Column.Name)
-				}
-				if len(add.Column.Constraints) != 1 {
-					t.Fatalf("expected 1 constraint, got %d", len(add.Column.Constraints))
-				}
-				if add.Column.Constraints[0].Type != ConstraintDefault {
-					t.Errorf("expected DEFAULT constraint")
-				}
-			},
+			name:        "add column with default value",
+			sql:         "ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'",
+			wantColName: "status", wantConstraints: 1, wantConstraintType: ConstraintDefault,
 		},
 	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			stmts, err := ParseString(tt.sql)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("ParseString() error = %v, wantErr %v", err, tt.wantErr)
+			stmts, err := ParseString(tc.sql)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ParseString() error = %v, wantErr %v", err, tc.wantErr)
 			}
-			if tt.wantErr {
+			if tc.wantErr {
 				return
 			}
 			if len(stmts) != 1 {
 				t.Fatalf("expected 1 statement, got %d", len(stmts))
 			}
-			if tt.check != nil {
-				tt.check(t, stmts[0])
-			}
+			alter_checkAddColumn(t, stmts[0], tc)
 		})
 	}
 }

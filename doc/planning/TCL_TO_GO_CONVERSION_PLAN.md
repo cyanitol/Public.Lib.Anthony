@@ -1910,9 +1910,9 @@ Before marking a test conversion complete:
 ### Example Converted Tests
 
 See the following files for examples of converted tests:
-- `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/driver/insert_select_test.go`
-- `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/driver/orderby_test.go`
-- `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/driver/integration_test.go`
+- `internal/driver/insert_select_test.go`
+- `internal/driver/orderby_test.go`
+- `internal/driver/integration_test.go`
 
 ---
 

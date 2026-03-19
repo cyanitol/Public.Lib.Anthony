@@ -1,9 +1,10 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
 	"database/sql/driver"
 	"fmt"
+	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
@@ -122,6 +123,12 @@ func (s *Stmt) hasNonSubqueryTable(stmt *parser.SelectStmt) bool {
 func (s *Stmt) compileSingleFromSubquery(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	subquery := stmt.From.Tables[0].Subquery
 
+	// Compound subqueries must be materialized first, then the outer query
+	// runs over the materialized result set.
+	if subquery.Compound != nil {
+		return s.compileFromCompoundSubquery(vm, stmt, subquery, args)
+	}
+
 	// Special optimization: SELECT * with no WHERE clause
 	if s.isSimpleSelectStar(stmt) {
 		return s.compileSimpleSubquery(subquery, args)
@@ -135,6 +142,131 @@ func (s *Stmt) compileSingleFromSubquery(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 
 	// Complex case: specific columns or WHERE clause
 	return s.compileComplexSubquery(stmt, subquery, args)
+}
+
+// compileFromCompoundSubquery materializes a compound subquery and wraps the
+// outer SELECT around it. This handles cases like:
+//   - SELECT v FROM (SELECT v FROM t1 UNION SELECT v FROM t2)
+//   - SELECT COUNT(*) FROM (SELECT v FROM t1 UNION ALL SELECT v FROM t2)
+func (s *Stmt) compileFromCompoundSubquery(vm *vdbe.VDBE, outer *parser.SelectStmt, subquery *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	// Compile and execute the compound subquery to get its rows.
+	subVM := vdbe.New()
+	subVM.Ctx = vm.Ctx
+	compiled, err := s.compileSelect(subVM, subquery, args)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile compound FROM subquery: %w", err)
+	}
+
+	numCols := len(compiled.ResultCols)
+	rows, err := s.collectRows(compiled, numCols, "compound FROM subquery")
+	if err != nil {
+		return nil, err
+	}
+
+	// Build a synthetic SELECT over the materialised rows.
+	return s.buildOuterOverMaterialized(vm, outer, rows, numCols, compiled.ResultCols)
+}
+
+// buildOuterOverMaterialized applies the outer query (aggregates, WHERE, ORDER
+// BY, etc.) to pre-materialised rows. For simple SELECT * it just emits the
+// rows. For aggregates it evaluates them in-process.
+func (s *Stmt) buildOuterOverMaterialized(vm *vdbe.VDBE, outer *parser.SelectStmt, rows [][]interface{}, numCols int, colNames []string) (*vdbe.VDBE, error) {
+	// Detect if outer is a simple pass-through (SELECT * or SELECT col list)
+	if isSelectStar(outer) && outer.Where == nil {
+		vm.ResultCols = colNames
+		return emitCompoundResult(vm, rows, numCols)
+	}
+
+	// Check for aggregates in outer query
+	if s.detectAggregates(outer) {
+		return s.evalAggregateOverRows(vm, outer, rows, numCols, colNames)
+	}
+
+	// Non-aggregate column selection: filter and project
+	vm.ResultCols = colNames
+	return emitCompoundResult(vm, rows, numCols)
+}
+
+// evalAggregateOverRows evaluates aggregate functions over pre-materialised
+// rows and emits the single-row result. Supports COUNT(*) and SUM(col).
+func (s *Stmt) evalAggregateOverRows(vm *vdbe.VDBE, outer *parser.SelectStmt, rows [][]interface{}, numCols int, colNames []string) (*vdbe.VDBE, error) {
+	resultRow := make([]interface{}, len(outer.Columns))
+	for i, col := range outer.Columns {
+		val, err := evalAggregate(col, rows, numCols, colNames)
+		if err != nil {
+			return nil, err
+		}
+		resultRow[i] = val
+	}
+	outColNames := make([]string, len(outer.Columns))
+	for i, col := range outer.Columns {
+		outColNames[i] = resultColumnName(col)
+	}
+	vm.ResultCols = outColNames
+	return emitCompoundResult(vm, [][]interface{}{resultRow}, len(resultRow))
+}
+
+// evalAggregate evaluates a single aggregate column over materialised rows.
+func evalAggregate(col parser.ResultColumn, rows [][]interface{}, numCols int, colNames []string) (interface{}, error) {
+	fn, ok := col.Expr.(*parser.FunctionExpr)
+	if !ok {
+		return nil, fmt.Errorf("non-aggregate in aggregate context")
+	}
+	switch name := strings.ToUpper(fn.Name); name {
+	case "COUNT":
+		return int64(len(rows)), nil
+	case "SUM":
+		return sumColumn(fn, rows, colNames)
+	default:
+		return nil, fmt.Errorf("unsupported aggregate: %s", fn.Name)
+	}
+}
+
+// sumColumn computes SUM for a named column over materialised rows.
+func sumColumn(fn *parser.FunctionExpr, rows [][]interface{}, colNames []string) (interface{}, error) {
+	if len(fn.Args) == 0 {
+		return nil, fmt.Errorf("SUM requires an argument")
+	}
+	ident, ok := fn.Args[0].(*parser.IdentExpr)
+	if !ok {
+		return nil, fmt.Errorf("SUM argument must be a column name")
+	}
+	idx := -1
+	for i, n := range colNames {
+		if n == ident.Name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil, fmt.Errorf("column not found: %s", ident.Name)
+	}
+	var sum int64
+	for _, row := range rows {
+		if idx < len(row) && row[idx] != nil {
+			switch v := row[idx].(type) {
+			case int64:
+				sum += v
+			case float64:
+				sum += int64(v)
+			}
+		}
+	}
+	return sum, nil
+}
+
+// resultColumnName returns a display name for a result column.
+func resultColumnName(col parser.ResultColumn) string {
+	if col.Alias != "" {
+		return col.Alias
+	}
+	if fn, ok := col.Expr.(*parser.FunctionExpr); ok {
+		return fn.Name + "(*)"
+	}
+	if ident, ok := col.Expr.(*parser.IdentExpr); ok {
+		return ident.Name
+	}
+	return "?"
 }
 
 // isSimpleSelectStar checks if statement is SELECT * with no WHERE.
@@ -224,6 +356,17 @@ func (s *Stmt) compileComplexSubquery(stmt *parser.SelectStmt, subquery *parser.
 		return nil, fmt.Errorf("failed to compile FROM subquery: %w", err)
 	}
 
+	// If the outer query contains aggregates, evaluate them over the materialized subquery rows.
+	if s.detectAggregates(stmt) {
+		numCols := len(subVM.ResultCols)
+		rows, err := s.collectRows(subVM, numCols, "FROM subquery")
+		if err != nil {
+			return nil, err
+		}
+		aggVM := s.newVDBE()
+		return s.evalAggregateOverRows(aggVM, stmt, rows, numCols, subVM.ResultCols)
+	}
+
 	// Map outer columns to subquery columns
 	newColumns, err := s.mapSubqueryColumns(stmt, subquery, subVM.ResultCols)
 	if err != nil {
@@ -260,12 +403,34 @@ func (s *Stmt) mapSubqueryColumns(stmt *parser.SelectStmt, subquery *parser.Sele
 
 // findSubqueryColumn finds a column in the subquery by name.
 func (s *Stmt) findSubqueryColumn(name string, subquery *parser.SelectStmt, subqueryColumns []string) (parser.ResultColumn, error) {
+	// Derive columns from compound's first SELECT when subquery.Columns is empty
+	cols := subquery.Columns
+	if len(cols) == 0 && subquery.Compound != nil {
+		cols = compoundLeafColumns(subquery.Compound)
+	}
 	for i, subCol := range subqueryColumns {
 		if subCol == name {
-			return subquery.Columns[i], nil
+			if i < len(cols) {
+				return cols[i], nil
+			}
+			// Column exists in result set but no AST node; synthesize one.
+			return parser.ResultColumn{
+				Expr: &parser.IdentExpr{Name: name},
+			}, nil
 		}
 	}
 	return parser.ResultColumn{}, fmt.Errorf("column not found: %s", name)
+}
+
+// compoundLeafColumns returns the Columns slice from the leftmost leaf of a
+// CompoundSelect tree. This is used when the top-level SelectStmt wrapping a
+// compound has an empty Columns slice.
+func compoundLeafColumns(c *parser.CompoundSelect) []parser.ResultColumn {
+	left := c.Left
+	for left.Compound != nil {
+		left = left.Compound.Left
+	}
+	return left.Columns
 }
 
 // copySelectStmtShallow makes a shallow copy of a SELECT statement.
@@ -340,10 +505,6 @@ func (s *Stmt) setupSubqueryCompiler(gen *expr.CodeGenerator) {
 		// Copy context from parent so btree is available
 		subVM.Ctx = parentVM.Ctx
 
-		// Pre-allocate memory in subquery to account for parent's registers
-		// This ensures the subquery's CodeGenerator starts allocating after parent's registers
-		subVM.AllocMemory(registerOffset + 50)
-
 		// Compile the subquery SELECT statement
 		compiledVM, err := s.compileSelect(subVM, selectStmt, nil)
 		if err != nil {
@@ -378,6 +539,35 @@ func (s *Stmt) setupSubqueryCompiler(gen *expr.CodeGenerator) {
 		}
 
 		return compiledVM, nil
+	})
+
+	// Also set up the executor for materialised subqueries (IN, EXISTS, scalar).
+	s.setupSubqueryExecutor(gen)
+}
+
+// setupSubqueryExecutor provides a callback that compiles and executes a
+// subquery SELECT to produce concrete result rows. This is used for IN, EXISTS,
+// and scalar subqueries where materialisation is simpler and more robust than
+// bytecode embedding. Returns an error for correlated subqueries that reference
+// outer tables (the caller falls back to bytecode embedding).
+func (s *Stmt) setupSubqueryExecutor(gen *expr.CodeGenerator) {
+	gen.SetSubqueryExecutor(func(selectStmt *parser.SelectStmt) ([][]interface{}, error) {
+		parentVM := gen.GetVDBE()
+		subVM := vdbe.New()
+		subVM.Ctx = parentVM.Ctx
+
+		compiled, err := s.compileSelect(subVM, selectStmt, nil)
+		if err != nil {
+			// Compilation failure likely means a correlated subquery
+			// referencing outer columns. Signal caller to fall back.
+			return nil, err
+		}
+
+		numCols := len(compiled.ResultCols)
+		if numCols == 0 {
+			numCols = 1 // at least one column for scalar subqueries
+		}
+		return s.collectRows(compiled, numCols, "subquery materialise")
 	})
 }
 
@@ -516,6 +706,12 @@ func adjustSubqueryCursors(vm *vdbe.VDBE, offset int) {
 		return
 	}
 
+	// First, find which cursors are opened within this sub-VM.
+	// Cursors that appear in operations but are never opened are references
+	// to already-open main VM cursors (e.g., CTE ephemeral tables) and must
+	// NOT be offset.
+	openedCursors := findOpenedCursors(vm)
+
 	// Opcodes that use cursor in P1
 	cursorP1Opcodes := map[vdbe.Opcode]bool{
 		vdbe.OpOpenRead:      true,
@@ -545,9 +741,24 @@ func adjustSubqueryCursors(vm *vdbe.VDBE, offset int) {
 
 	for i := range vm.Program {
 		if cursorP1Opcodes[vm.Program[i].Opcode] {
-			vm.Program[i].P1 += offset
+			if openedCursors[vm.Program[i].P1] {
+				vm.Program[i].P1 += offset
+			}
 		}
 	}
+}
+
+// findOpenedCursors returns the set of cursor IDs that are explicitly opened
+// within the bytecode via OpenRead, OpenWrite, or OpenEphemeral.
+func findOpenedCursors(vm *vdbe.VDBE) map[int]bool {
+	opened := make(map[int]bool)
+	for _, instr := range vm.Program {
+		switch instr.Opcode {
+		case vdbe.OpOpenRead, vdbe.OpOpenWrite, vdbe.OpOpenEphemeral:
+			opened[instr.P1] = true
+		}
+	}
+	return opened
 }
 
 // findMaxCursor finds the maximum cursor index used in the bytecode.

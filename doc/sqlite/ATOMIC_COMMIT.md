@@ -31,54 +31,54 @@ Search Changelog
 Atomic Commit In SQLite
 
 Table Of Contents
-[1.  Introduction](#_introduction)
-[2.  Hardware Assumptions](#_hardware_assumptions)
-[3.  Single File Commit](#_single_file_commit)
-[3.1.  Initial State](#_initial_state)
-[3.2.  Acquiring A Read Lock](#_acquiring_a_read_lock)
-[3.3.  Reading Information Out Of The Database](#_reading_information_out_of_the_database)
-[3.4.  Obtaining A Reserved Lock](#_obtaining_a_reserved_lock)
-[3.5.  Creating A Rollback Journal File](#_creating_a_rollback_journal_file)
-[3.6.  Changing Database Pages In User Space](#_changing_database_pages_in_user_space)
-[3.7.  Flushing The Rollback Journal File To Mass Storage](#_flushing_the_rollback_journal_file_to_mass_storage)
-[3.8.  Obtaining An Exclusive Lock](#_obtaining_an_exclusive_lock)
-[3.9.  Writing Changes To The Database File](#_writing_changes_to_the_database_file)
-[3.10. 0 Flushing Changes To Mass Storage](#0_flushing_changes_to_mass_storage)
-[3.11. 1 Deleting The Rollback Journal](#1_deleting_the_rollback_journal)
-[3.12. 2 Releasing The Lock](#2_releasing_the_lock)
-[4.  Rollback](#_rollback)
-[4.1.  When Something Goes Wrong...](#_when_something_goes_wrong_)
-[4.2.  Hot Rollback Journals](#_hot_rollback_journals)
-[4.3.  Obtaining An Exclusive Lock On The Database](#_obtaining_an_exclusive_lock_on_the_database)
-[4.4.  Rolling Back Incomplete Changes](#_rolling_back_incomplete_changes)
-[4.5.  Deleting The Hot Journal](#_deleting_the_hot_journal)
-[4.6.  Continue As If The Uncompleted Writes Had Never Happened](#_continue_as_if_the_uncompleted_writes_had_never_happened)
-[5.  Multi-file Commit](#_multi_file_commit)
-[5.1.  Separate Rollback Journals For Each Database](#_separate_rollback_journals_for_each_database)
-[5.2.  The Super-Journal File](#_the_super_journal_file)
-[5.3.  Updating Rollback Journal Headers](#_updating_rollback_journal_headers)
-[5.4.  Updating The Database Files](#_updating_the_database_files)
-[5.5.  Delete The Super-Journal File](#_delete_the_super_journal_file)
-[5.6.  Clean Up The Rollback Journals](#_clean_up_the_rollback_journals)
-[6.  Additional Details Of The Commit Process](#_additional_details_of_the_commit_process)
-[6.1.  Always Journal Complete Sectors](#_always_journal_complete_sectors)
-[6.2.  Dealing With Garbage Written Into Journal Files](#_dealing_with_garbage_written_into_journal_files)
-[6.3.  Cache Spill Prior To Commit](#_cache_spill_prior_to_commit)
-[7.  Optimizations](#_optimizations)
-[7.1.  Cache Retained Between Transactions](#_cache_retained_between_transactions)
-[7.2.  Exclusive Access Mode](#_exclusive_access_mode)
-[7.3.  Do Not Journal Freelist Pages](#_do_not_journal_freelist_pages)
-[7.4.  Single Page Updates And Atomic Sector Writes](#_single_page_updates_and_atomic_sector_writes)
-[7.5.  Filesystems With Safe Append Semantics](#_filesystems_with_safe_append_semantics)
-[7.6.  Persistent Rollback Journals](#_persistent_rollback_journals)
-[8.  Testing Atomic Commit Behavior](#_testing_atomic_commit_behavior)
-[9.  Things That Can Go Wrong](#_things_that_can_go_wrong)
-[9.1.  Broken Locking Implementations](#_broken_locking_implementations)
-[9.2.  Incomplete Disk Flushes](#_incomplete_disk_flushes)
-[9.3.  Partial File Deletions](#_partial_file_deletions)
-[9.4.  Garbage Written Into Files](#_garbage_written_into_files)
-[9.5.  Deleting Or Renaming A Hot Journal](#_deleting_or_renaming_a_hot_journal)
-[10.  Future Directions And Conclusion](#_future_directions_and_conclusion)
+[1.  Introduction](#1-introduction)
+[2.  Hardware Assumptions](#2-hardware-assumptions)
+[3.  Single File Commit](#3-single-file-commit)
+[3.1.  Initial State](#31-initial-state)
+[3.2.  Acquiring A Read Lock](#32-acquiring-a-read-lock)
+[3.3.  Reading Information Out Of The Database](#33-reading-information-out-of-the-database)
+[3.4.  Obtaining A Reserved Lock](#34-obtaining-a-reserved-lock)
+[3.5.  Creating A Rollback Journal File](#35-creating-a-rollback-journal-file)
+[3.6.  Changing Database Pages In User Space](#36-changing-database-pages-in-user-space)
+[3.7.  Flushing The Rollback Journal File To Mass Storage](#37-flushing-the-rollback-journal-file-to-mass-storage)
+[3.8.  Obtaining An Exclusive Lock](#38-obtaining-an-exclusive-lock)
+[3.9.  Writing Changes To The Database File](#39-writing-changes-to-the-database-file)
+[3.10. 0 Flushing Changes To Mass Storage](#310-0-flushing-changes-to-mass-storage)
+[3.11. 1 Deleting The Rollback Journal](#311-1-deleting-the-rollback-journal)
+[3.12. 2 Releasing The Lock](#312-2-releasing-the-lock)
+[4.  Rollback](#4-rollback)
+[4.1.  When Something Goes Wrong...](#41-when-something-goes-wrong)
+[4.2.  Hot Rollback Journals](#42-hot-rollback-journals)
+[4.3.  Obtaining An Exclusive Lock On The Database](#43-obtaining-an-exclusive-lock-on-the-database)
+[4.4.  Rolling Back Incomplete Changes](#44-rolling-back-incomplete-changes)
+[4.5.  Deleting The Hot Journal](#45-deleting-the-hot-journal)
+[4.6.  Continue As If The Uncompleted Writes Had Never Happened](#46-continue-as-if-the-uncompleted-writes-had-never-happened)
+[5.  Multi-file Commit](#5-multi-file-commit)
+[5.1.  Separate Rollback Journals For Each Database](#51-separate-rollback-journals-for-each-database)
+[5.2.  The Super-Journal File](#52-the-super-journal-file)
+[5.3.  Updating Rollback Journal Headers](#53-updating-rollback-journal-headers)
+[5.4.  Updating The Database Files](#54-updating-the-database-files)
+[5.5.  Delete The Super-Journal File](#55-delete-the-super-journal-file)
+[5.6.  Clean Up The Rollback Journals](#56-clean-up-the-rollback-journals)
+[6.  Additional Details Of The Commit Process](#6-additional-details-of-the-commit-process)
+[6.1.  Always Journal Complete Sectors](#61-always-journal-complete-sectors)
+[6.2.  Dealing With Garbage Written Into Journal Files](#62-dealing-with-garbage-written-into-journal-files)
+[6.3.  Cache Spill Prior To Commit](#63-cache-spill-prior-to-commit)
+[7.  Optimizations](#7-optimizations)
+[7.1.  Cache Retained Between Transactions](#71-cache-retained-between-transactions)
+[7.2.  Exclusive Access Mode](#72-exclusive-access-mode)
+[7.3.  Do Not Journal Freelist Pages](#73-do-not-journal-freelist-pages)
+[7.4.  Single Page Updates And Atomic Sector Writes](#74-single-page-updates-and-atomic-sector-writes)
+[7.5.  Filesystems With Safe Append Semantics](#75-filesystems-with-safe-append-semantics)
+[7.6.  Persistent Rollback Journals](#76-persistent-rollback-journals)
+[8.  Testing Atomic Commit Behavior](#8-testing-atomic-commit-behavior)
+[9.  Things That Can Go Wrong](#9-things-that-can-go-wrong)
+[9.1.  Broken Locking Implementations](#91-broken-locking-implementations)
+[9.2.  Incomplete Disk Flushes](#92-incomplete-disk-flushes)
+[9.3.  Partial File Deletions](#93-partial-file-deletions)
+[9.4.  Garbage Written Into Files](#94-garbage-written-into-files)
+[9.5.  Deleting Or Renaming A Hot Journal](#95-deleting-or-renaming-a-hot-journal)
+[10.  Future Directions And Conclusion](#10-future-directions-and-conclusion)
 
 # 1.  Introduction
 
@@ -246,6 +246,8 @@ default in recent versions of SQLite.  The assumption of powersafe
 overwrite property can be disabled at compile-time or a run-time if
 desired.  See the [powersafe overwrite documentation](psow.html) for further
 details.
+
+<a name="section_3_0"></a>
 
 # 3.  Single File Commit
 
@@ -529,7 +531,7 @@ the state it was in prior to the beginning of the transaction.
 ## 4.1.  When Something Goes Wrong...
 
 Suppose the power loss occurred
-during [step 3.10](#section_3_10) above,
+during [step 3.10](#310-0-flushing-changes-to-mass-storage) above,
 while the database changes were being written to disk.
 After power is restored, the situation might be something
 like what is shown to the right.  We were trying to change
@@ -539,7 +541,7 @@ and a third page was not written at all.
 
 The rollback journal is complete and intact on disk when
 the power is restored.  This is a key point.  The reason for
-the flush operation in [step 3.7](#section_3_7)
+the flush operation in [step 3.7](#37-flushing-the-rollback-journal-file-to-mass-storage)
 is to make absolutely sure that
 all of the rollback journal is safely on nonvolatile storage
 prior to making any changes to the database file itself.
@@ -548,7 +550,7 @@ prior to making any changes to the database file itself.
 
 The first time that any SQLite process attempts to access
 the database file, it obtains a shared lock as described in
-[section 3.2](#section_3_2) above.
+[section 3.2](#32-acquiring-a-read-lock) above.
 But then it notices that there is a
 rollback journal file present.  SQLite then checks to see if
 the rollback journal is a "hot journal".   A hot journal is
@@ -571,7 +573,7 @@ are true:
 
 - The rollback journal does not
 contain the name of a super-journal file (see
-[section 5.5](#section_5_5) below) or if does
+[section 5.5](#55-delete-the-super-journal-file) below) or if does
 contain the name of a super-journal, then that super-journal
 file exists.
 
@@ -611,7 +613,7 @@ played back into the database file (and flushed to disk in case
 we encounter yet another power failure), the hot rollback journal
 can be deleted.
 
-As in [section 3.11](#section_3_11), the journal
+As in [section 3.11](#311-1-deleting-the-rollback-journal), the journal
 file might be truncated to zero length or its header might
 be overwritten with zeros as an optimization on systems where
 deleting a file is expensive.  Either way, the journal is no
@@ -648,7 +650,7 @@ is locked separately.  The diagram at the right shows a scenario
 where three different database files have been modified within
 one transaction.  The situation at this step is analogous to
 the single-file transaction scenario at
-[step 3.6](#section_3_6).  Each database file has
+[step 3.6](#36-changing-database-pages-in-user-space).  Each database file has
 a reserved lock.  For each database, the original content of pages
 that are being changed have been written into the rollback journal
 for that database, but the content of the journals have not yet
@@ -714,7 +716,7 @@ the second flush is usually inexpensive since typically only a single
 page of the journal file (the first page) has changed.
 
 This step is analogous to
-[step 3.7](#section_3_7) in the single-file commit
+[step 3.7](#37-flushing-the-rollback-journal-file-to-mass-storage) in the single-file commit
 scenario described above.
 
 ## 5.4.  Updating The Database Files
@@ -727,9 +729,9 @@ changes to disk so that they will be preserved in the event of
 a power failure or operating system crash.
 
 This step corresponds to steps
-[3.8](#section_3_8),
-[3.9](#section_3_9), and
-[3.10](#section_3_10) in the single-file commit
+[3.8](#38-obtaining-an-exclusive-lock),
+[3.9](#39-writing-changes-to-the-database-file), and
+[3.10](#310-0-flushing-changes-to-mass-storage) in the single-file commit
 scenario described previously.
 
 ## 5.5.  Delete The Super-Journal File
@@ -737,7 +739,7 @@ scenario described previously.
 The next step is to delete the super-journal file.
 This is the point where the multi-file transaction commits.
 This step corresponds to
-[step 3.11](#section_3_11) in the single-file
+[step 3.11](#311-1-deleting-the-rollback-journal) in the single-file
 commit scenario where the rollback journal is deleted.
 
 If a power failure or operating system crash occurs at this
@@ -756,7 +758,7 @@ The final step in a multi-file commit is to delete the
 individual rollback journals and drop the exclusive locks on
 the database files so that other processes can see the changes.
 This corresponds to
-[step 3.12](#section_3_12) in the single-file
+[step 3.12](#312-2-releasing-the-lock) in the single-file
 commit sequence.
 
 The transaction has already committed at this point so timing
@@ -780,7 +782,7 @@ in the gaps.
 ## 6.1.  Always Journal Complete Sectors
 
 When the original content of a database page is written into
-the rollback journal (as shown in [section 3.5](#section_3_5)),
+the rollback journal (as shown in [section 3.5](#35-creating-a-rollback-journal-file)),
 SQLite always writes a complete sector of data, even if the
 page size of the database is smaller than the sector size.
 Historically, the sector size in SQLite has been hard coded to 512
@@ -851,7 +853,7 @@ write request occurred last.  So as a second line of defense, SQLite
 also uses a 32-bit checksum on every page of data in the rollback
 journal.  This checksum is evaluated for each page during rollback
 while rolling back a journal as described in
-[section 4.4](#section_4_4).  If an incorrect checksum
+[section 4.4](#44-rolling-back-incomplete-changes).  If an incorrect checksum
 is seen, the rollback is abandoned.  Note that the checksum does
 not guarantee that the page data is correct since there is a small
 but finite probability that the checksum might be right even if the data is
@@ -873,20 +875,20 @@ cases, the cache must spill to the database before the transaction
 is complete.
 
 At the beginning of a cache spill, the status of the database
-connection is as shown in [step 3.6](#section_3_6).
+connection is as shown in [step 3.6](#36-changing-database-pages-in-user-space).
 Original page content has been saved in the rollback journal and
 modifications of the pages exist in user memory.  To spill the cache,
-SQLite executes steps [3.7](#section_3_7) through
-[3.9](#section_3_9).  In other words, the rollback journal
+SQLite executes steps [3.7](#37-flushing-the-rollback-journal-file-to-mass-storage) through
+[3.9](#39-writing-changes-to-the-database-file).  In other words, the rollback journal
 is flushed to disk, an exclusive lock is acquired, and changes are
 written into the database.  But the remaining steps are deferred
 until the transaction really commits.  A new journal header is
 appended to the end of the rollback journal (in its own sector)
 and the exclusive database lock is retained, but otherwise processing
-returns to [step 3.6](#section_3_6).  When the transaction
+returns to [step 3.6](#36-changing-database-pages-in-user-space).  When the transaction
 commits, or if another cache spill occurs, steps
-[3.7](#section_3_7) and [3.9](#section_3_9) are
-repeated.  (Step [3.8](#section_3_8) is omitted on second
+[3.7](#37-flushing-the-rollback-journal-file-to-mass-storage) and [3.9](#39-writing-changes-to-the-database-file) are
+repeated.  (Step [3.8](#38-obtaining-an-exclusive-lock) is omitted on second
 and subsequent passes since an exclusive database lock is already held
 due to the first pass.)
 
@@ -908,7 +910,7 @@ amount of disk I/O to a minimum while still preserving atomic commit.
 
 ## 7.1.  Cache Retained Between Transactions
 
-[Step 3.12](#section_3_12) of the commit process shows
+[Step 3.12](#312-2-releasing-the-lock) of the commit process shows
 that once the shared lock has been released, all user-space cache
 images of database content must be discarded.  This is done because
 without a shared lock, other processes are free to modify the database
@@ -973,7 +975,7 @@ deleting the rollback journal file,
 does not depend on holding an exclusive lock at all times.
 This optimization can be set independently of exclusive lock mode
 using the [journal_mode pragma](pragma.html#pragma_journal_mode)
-as described in [section 7.6](#section_7_6) below.
+as described in [section 7.6](#76-persistent-rollback-journals) below.
 
 ## 7.3.  Do Not Journal Freelist Pages
 
@@ -990,12 +992,12 @@ changing the meaning of the database in any way.
 
 Because the content of leaf freelist pages is unimportant, SQLite
 avoids storing leaf freelist page content in the rollback journal
-in [step 3.5](#section_3_5) of the commit process.
+in [step 3.5](#35-creating-a-rollback-journal-file) of the commit process.
 If a leaf freelist page is changed and that change does not get rolled back
 during a transaction recovery, the database is not harmed by the omission.
 Similarly, the content of a new freelist page is never written back
-into the database at [step 3.9](#section_3_9) nor
-read from the database at [step 3.3](#section_3_3).
+into the database at [step 3.9](#39-writing-changes-to-the-database-file) nor
+read from the database at [step 3.3](#33-reading-information-out-of-the-database).
 These optimizations can greatly reduce the amount of I/O that occurs
 when making changes to a database file that contains free space.
 
@@ -1067,7 +1069,7 @@ new pages to the end of the existing journal.
 
 Deleting a file is an expensive operation on many systems.
 So as an optimization, SQLite can be configured to avoid the
-delete operation of [section 3.11](#section_3_11).
+delete operation of [section 3.11](#311-1-deleting-the-rollback-journal).
 Instead of deleting the journal file in order to commit a transaction,
 the file is either truncated to zero bytes in length or its
 header is overwritten with zeros.  Truncating the file to zero
@@ -1222,8 +1224,8 @@ dot-file locks or vice versa.
 
 SQLite uses the fsync() system call on Unix and the FlushFileBuffers()
 system call on w32 in order to sync the file system buffers onto disk
-oxide as shown in [step 3.7](#section_3_7) and
-[step 3.10](#section_3_10).  Unfortunately, we have received
+oxide as shown in [step 3.7](#37-flushing-the-rollback-journal-file-to-mass-storage) and
+[step 3.10](#310-0-flushing-changes-to-mass-storage).  Unfortunately, we have received
 reports that neither of these interfaces works as advertised on many
 systems.  We hear that FlushFileBuffers() can be completely disabled
 using registry settings on some Windows versions.  Some historical
@@ -1268,7 +1270,7 @@ If a crash or power loss does occur and a hot journal is left on
 the disk, it is essential that the original database file and the hot
 journal remain on disk with their original names until the database
 file is opened by another SQLite process and rolled back.
-During recovery at [step 4.2](#section_4_2) SQLite locates
+During recovery at [step 4.2](#42-hot-rollback-journals) SQLite locates
 the hot journal by looking for a file in the same directory as the
 database being opened and whose name is derived from the name of the
 file being opened.  If either the original database file or the

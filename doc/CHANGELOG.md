@@ -8,6 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Trigger Runtime** - Complete BEFORE/AFTER trigger execution for INSERT/UPDATE/DELETE
+  - WHEN clause evaluation (both true and false paths)
+  - UPDATE OF column filtering
+  - RAISE(IGNORE/ABORT/ROLLBACK/FAIL) in trigger bodies via SELECT RAISE
+  - Cascading triggers (trigger A fires trigger B)
+  - Multiple triggers on same table
+  - NEW pseudo-row substitution in INSERT triggers
+  - INSTEAD OF trigger validation (only valid on views)
+  - Recursion depth limiting (max 32)
+- **ALTER TABLE** - RENAME TABLE, RENAME COLUMN, DROP COLUMN with index/trigger fixup
+- **ATTACH/DETACH** - Full database attachment with cross-database queries
+  - Schema-qualified CREATE TABLE and INSERT (e.g., `CREATE TABLE aux.t1`)
+  - PRAGMA database_list returns attached databases
+  - Cross-database SELECT/INSERT
+- **Table-Valued Functions** - json_each and json_tree wired to SQL FROM clauses
+  - Full TVF compilation pipeline with argument evaluation
+  - Parser support for `FROM func_name(args...)` syntax
+- **Window Functions** - NTH_VALUE compiler integration with OpWindowNthValue
+  - Named WINDOW clause resolution (`OVER w ... WINDOW w AS (...)`)
+  - PARTITION BY fully working
+- **Date/Time** - strftime %w (day of week 0-6), %u (day of week 1-7), %W (week number), %j (day of year)
+- **AUTOINCREMENT** - sqlite_sequence table tracking and rowid gap preservation
+- **Sorter spill-to-disk** - ORDER BY with multi-column DESC support
+- **FTS5/R-Tree persistence** - Shadow table creation and management
+- **Recursive CTE** - Bytecode generation infrastructure (cursor fix in progress)
+- **Schema persistence** - Attached database schema support
+- **Quad-license** - Added BSD-3-Clause as fourth license option
+- Comprehensive auto-generated test infrastructure (sqlTestCase + generators)
 - NOT NULL constraint checking at runtime with proper error messages
 - CHECK constraint framework (ready for expression evaluation)
 - UNIQUE constraint violation detection with table scanning
@@ -319,7 +347,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Notes:**
 - This project was developed in an intensive sprint during February 2026
 - Development progressed through 3 major phases in less than 4 days
-- All code achieves cyclomatic complexity ≤10 for maintainability
+- All code achieves cyclomatic complexity ≤11 for maintainability
 - Comprehensive security audit completed with all issues resolved
 - Test coverage consistently improved throughout development
 - Future releases will focus on:

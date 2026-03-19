@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -87,19 +87,67 @@ func (s *Stmt) validateColumnCount(index, cols, numCols int, ops []parser.Compou
 	return nil
 }
 
-// applyCompoundOperations applies set operations and post-processing.
+// applyCompoundOperations applies set operations left-to-right (SQLite
+// semantics), then applies ORDER BY, LIMIT, and OFFSET.
 func (s *Stmt) applyCompoundOperations(allResults [][][]interface{}, ops []parser.CompoundOp, numCols int, orderBy []parser.OrderingTerm, limit, offset parser.Expression, colNames []string) [][]interface{} {
-	result := allResults[0]
-	for i, op := range ops {
-		right := allResults[i+1]
-		result = applySetOperation(op, result, right, numCols)
-	}
+	result := applyWithPrecedence(allResults, ops, numCols)
 
 	if len(orderBy) > 0 {
 		sortCompoundRows(result, orderBy, numCols, colNames)
 	}
 
 	return applyLimitOffset(result, limit, offset)
+}
+
+// applyWithPrecedence evaluates compound operations respecting INTERSECT >
+// UNION/EXCEPT precedence. It first reduces consecutive INTERSECT runs, then
+// evaluates the remaining UNION/EXCEPT left-to-right.
+func applyWithPrecedence(allResults [][][]interface{}, ops []parser.CompoundOp, numCols int) [][]interface{} {
+	if len(ops) == 0 {
+		return allResults[0]
+	}
+	// Copy for safe in-place modification.
+	work := make([][][]interface{}, len(allResults))
+	copy(work, allResults)
+	workOps := make([]parser.CompoundOp, len(ops))
+	copy(workOps, ops)
+
+	// Pass 1: collapse INTERSECT (higher precedence)
+	work, workOps = collapseOp(work, workOps, parser.CompoundIntersect, numCols)
+
+	// Pass 2: left-to-right for remaining ops
+	result := work[0]
+	for i, op := range workOps {
+		result = applySetOperation(op, result, work[i+1], numCols)
+	}
+	return result
+}
+
+// collapseOp merges adjacent entries connected by the given operator.
+func collapseOp(work [][][]interface{}, ops []parser.CompoundOp, target parser.CompoundOp, numCols int) ([][][]interface{}, []parser.CompoundOp) {
+	for {
+		idx := -1
+		for i, op := range ops {
+			if op == target {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			break
+		}
+		merged := applySetOperation(target, work[idx], work[idx+1], numCols)
+		newWork := make([][][]interface{}, 0, len(work)-1)
+		newWork = append(newWork, work[:idx]...)
+		newWork = append(newWork, merged)
+		newWork = append(newWork, work[idx+2:]...)
+		newOps := make([]parser.CompoundOp, 0, len(ops)-1)
+		newOps = append(newOps, ops[:idx]...)
+		newOps = append(newOps, ops[idx+1:]...)
+		work = newWork
+		ops = newOps
+	}
+	return work, ops
 }
 
 // flattenCompound walks the compound tree and returns operators and leaf SELECTs

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package engine
 
 import (
@@ -135,13 +135,20 @@ func TestTriggerExecuteInsteadOfTriggersWithMatching(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create table
-	_, err = db.Execute("CREATE TABLE test (id INTEGER)")
+	// Create base table and view (INSTEAD OF triggers require a view)
+	_, err = db.Execute("CREATE TABLE test_base (id INTEGER)")
 	if err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
+	viewStmt := &parser.CreateViewStmt{
+		Name:   "test",
+		Select: &parser.SelectStmt{},
+	}
+	if _, viewErr := db.schema.CreateView(viewStmt); viewErr != nil {
+		t.Fatalf("Failed to create view: %v", viewErr)
+	}
 
-	// Create INSTEAD OF trigger
+	// Create INSTEAD OF trigger on the view
 	triggerStmt := &parser.CreateTriggerStmt{
 		Name:       "instead_of_trigger",
 		Table:      "test",
@@ -237,13 +244,21 @@ func TestTriggerExecuteInsteadOfWithUpdatedColumns(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create table
-	_, err = db.Execute("CREATE TABLE test (id INTEGER, value INTEGER)")
+	// Create base table and view (INSTEAD OF triggers require a view)
+	_, err = db.Execute("CREATE TABLE test_base (id INTEGER, value INTEGER)")
 	if err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
+	// Register view directly through schema (engine doesn't compile CREATE VIEW yet)
+	viewStmt := &parser.CreateViewStmt{
+		Name:   "test",
+		Select: &parser.SelectStmt{},
+	}
+	if _, viewErr := db.schema.CreateView(viewStmt); viewErr != nil {
+		t.Fatalf("Failed to create view: %v", viewErr)
+	}
 
-	// Create INSTEAD OF UPDATE trigger
+	// Create INSTEAD OF UPDATE trigger on the view
 	triggerStmt := &parser.CreateTriggerStmt{
 		Name:       "instead_update_trigger",
 		Table:      "test",

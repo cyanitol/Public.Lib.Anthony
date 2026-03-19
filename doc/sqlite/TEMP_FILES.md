@@ -31,20 +31,20 @@ Search Changelog
 Temporary Files Used By SQLite
 
 Table Of Contents
-[1. Introduction](#introduction)
-[2. Nine Kinds Of Temporary Files](#nine_kinds_of_temporary_files)
-[2.1. Rollback Journals](#rollback_journals)
-[2.2. Write-Ahead Log (WAL) Files](#write_ahead_log_wal_files)
-[2.3. Shared-Memory Files](#shared_memory_files)
-[2.4. Super-Journal Files](#super_journal_files)
-[2.5. Statement Journal Files](#statement_journal_files)
-[2.6. TEMP Databases](#temp_databases)
-[2.7. Materializations Of Views And Subqueries](#materializations_of_views_and_subqueries)
-[2.8. Transient Indices](#transient_indices)
-[2.9. Transient Database Used By VACUUM](#transient_database_used_by_vacuum_)
-[3. The SQLITE_TEMP_STORE Compile-Time Parameter and Pragma](#the_sqlite_temp_store_compile_time_parameter_and_pragma)
-[4. Other Temporary File Optimizations](#other_temporary_file_optimizations)
-[5. Temporary File Storage Locations](#temporary_file_storage_locations)
+[1. Introduction](#1-introduction)
+[2. Nine Kinds Of Temporary Files](#2-nine-kinds-of-temporary-files)
+[2.1. Rollback Journals](#21-rollback-journals)
+[2.2. Write-Ahead Log (WAL) Files](#22-write-ahead-log-wal-files)
+[2.3. Shared-Memory Files](#23-shared-memory-files)
+[2.4. Super-Journal Files](#24-super-journal-files)
+[2.5. Statement Journal Files](#25-statement-journal-files)
+[2.6. TEMP Databases](#26-temp-databases)
+[2.7. Materializations Of Views And Subqueries](#27-materializations-of-views-and-subqueries)
+[2.8. Transient Indices](#28-transient-indices)
+[2.9. Transient Database Used By VACUUM](#29-transient-database-used-by-vacuum)
+[3. The SQLITE_TEMP_STORE Compile-Time Parameter and Pragma](#3-the-sqlite_temp_store-compile-time-parameter-and-pragma)
+[4. Other Temporary File Optimizations](#4-other-temporary-file-optimizations)
+[5. Temporary File Storage Locations](#5-temporary-file-storage-locations)
 
 # 1. Introduction
 

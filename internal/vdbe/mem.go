@@ -1,10 +1,11 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package vdbe
 
 import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/collation"
 )
@@ -785,6 +786,19 @@ func (m *Mem) Divide(other *Mem) error {
 		return nil
 	}
 
+	if m.IsInt() && other.IsInt() {
+		if other.i == 0 {
+			m.SetNull()
+			return nil
+		}
+		if m.i == math.MinInt64 && other.i == -1 {
+			m.SetReal(float64(m.i) / float64(other.i))
+			return nil
+		}
+		m.i = m.i / other.i
+		return nil
+	}
+
 	v2 := other.RealValue()
 	if v2 == 0.0 {
 		m.SetNull()
@@ -841,4 +855,39 @@ func (m *Mem) ToDistinctKey() string {
 		return fmt.Sprintf("B:%x", m.z)
 	}
 	return "UNDEFINED"
+}
+
+// ToDistinctKeyWithCollation converts a Mem value to a distinct key using collation rules.
+func (m *Mem) ToDistinctKeyWithCollation(collName string, registry interface{}) string {
+	if collName == "" {
+		return m.ToDistinctKey()
+	}
+	if m.IsNull() {
+		return "NULL"
+	}
+	if m.IsInt() {
+		return fmt.Sprintf("I:%d", m.i)
+	}
+	if m.IsReal() {
+		return fmt.Sprintf("R:%g", m.r)
+	}
+	if m.IsStr() {
+		return fmt.Sprintf("S:%s", normalizeDistinctText(string(m.z), collName, registry))
+	}
+	if m.IsBlob() {
+		return fmt.Sprintf("B:%x", m.z)
+	}
+	return "UNDEFINED"
+}
+
+func normalizeDistinctText(s, collName string, registry interface{}) string {
+	coll := strings.ToUpper(collName)
+	switch coll {
+	case "NOCASE":
+		return strings.ToLower(s)
+	case "RTRIM":
+		return strings.TrimRight(s, " ")
+	default:
+		return s
+	}
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -77,14 +77,19 @@ func (c *StmtCache) Get(sql string) *vdbe.VDBE {
 
 // Put adds a compiled VDBE program to the cache.
 // If the cache is full, it evicts the least recently used entry.
+// The VDBE is cloned before being stored so the original can be safely finalized.
 func (c *StmtCache) Put(sql string, vdbe *vdbe.VDBE) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Clone the VDBE so the cache has its own copy that won't be affected
+	// when the original is finalized by Rows.Close()
+	cloned := c.cloneVdbe(vdbe)
+
 	// Check if entry already exists
 	if entry, ok := c.entries[sql]; ok {
 		// Update existing entry
-		entry.vdbe = vdbe
+		entry.vdbe = cloned
 		entry.schemaVersion = c.schemaVersion
 		c.lruList.MoveToFront(entry.element)
 		return
@@ -99,7 +104,7 @@ func (c *StmtCache) Put(sql string, vdbe *vdbe.VDBE) {
 	element := c.lruList.PushFront(sql)
 	c.entries[sql] = &StmtCacheEntry{
 		sql:           sql,
-		vdbe:          vdbe,
+		vdbe:          cloned,
 		schemaVersion: c.schemaVersion,
 		element:       element,
 	}
@@ -260,6 +265,16 @@ func (c *StmtCache) cloneVdbe(original *vdbe.VDBE) *vdbe.VDBE {
 	clone.InTxn = original.InTxn
 	clone.NumMem = original.NumMem
 	clone.NumCursor = original.NumCursor
+
+	// Allocate memory cells to match the original's NumMem
+	if original.NumMem > 0 {
+		_ = clone.AllocMemory(original.NumMem)
+	}
+
+	// Allocate cursors if needed
+	if original.NumCursor > 0 {
+		_ = clone.AllocCursors(original.NumCursor)
+	}
 
 	return clone
 }

@@ -31,11 +31,11 @@ Search Changelog
 Partial Indexes
 
 Table Of Contents
-[1. Introduction](#introduction)
-[2. Creating Partial Indexes](#creating_partial_indexes)
-[2.1. Unique Partial Indexes](#unique_partial_indexes)
-[3. Queries Using Partial Indexes](#queries_using_partial_indexes)
-[4. Supported Versions](#supported_versions)
+[1. Introduction](#1-introduction)
+[2. Creating Partial Indexes](#2-creating-partial-indexes)
+[2.1. Unique Partial Indexes](#21-unique-partial-indexes)
+[3. Queries Using Partial Indexes](#3-queries-using-partial-indexes)
+[4. Supported Versions](#4-supported-versions)
 
 # 1. Introduction
 

@@ -1,12 +1,38 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
+	"strconv"
+
 	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
+
+// resolveNamedWindows resolves OVER w references to their WINDOW clause definitions.
+// For each function expression that references a named window (BaseName),
+// the corresponding WindowDef spec is copied into the function's Over clause.
+func resolveNamedWindows(stmt *parser.SelectStmt) {
+	if len(stmt.WindowDefs) == 0 {
+		return
+	}
+
+	defs := make(map[string]*parser.WindowSpec, len(stmt.WindowDefs))
+	for i := range stmt.WindowDefs {
+		defs[stmt.WindowDefs[i].Name] = stmt.WindowDefs[i].Spec
+	}
+
+	for i := range stmt.Columns {
+		fnExpr, ok := stmt.Columns[i].Expr.(*parser.FunctionExpr)
+		if !ok || fnExpr.Over == nil || fnExpr.Over.BaseName == "" {
+			continue
+		}
+		if spec, found := defs[fnExpr.Over.BaseName]; found {
+			fnExpr.Over = spec
+		}
+	}
+}
 
 // rankRegisters holds register indices for rank tracking in window functions
 type rankRegisters struct {
@@ -104,10 +130,16 @@ func (s *Stmt) extractWindowOrderByCols(orderBy []parser.OrderingTerm, table *sc
 // emitWindowRankSetup emits initialization opcodes for window rank tracking
 func emitWindowRankSetup(vm *vdbe.VDBE, regs rankRegisters, info rankFunctionInfo) {
 	vm.AddOp(vdbe.OpInteger, 0, regs.rowCount, 0)
-	vm.AddOp(vdbe.OpInteger, 1, regs.rank, 0)
-	vm.AddOp(vdbe.OpInteger, 1, regs.denseRank, 0)
+	vm.AddOp(vdbe.OpInteger, 0, regs.rank, 0)      // Start at 0, will be set to 1 on first row
+	vm.AddOp(vdbe.OpInteger, 0, regs.denseRank, 0) // Start at 0, will be set to 1 on first row
 
-	for idx := range info.orderByCols {
+	// Initialize prevOrderBy registers to NULL for comparison
+	// We need at least 10 registers to handle multiple ORDER BY columns
+	maxOrderByCols := 10
+	if len(info.orderByCols) > 0 {
+		maxOrderByCols = len(info.orderByCols)
+	}
+	for idx := 0; idx < maxOrderByCols; idx++ {
 		vm.AddOp(vdbe.OpNull, 0, regs.prevOrderBy+idx, 0)
 	}
 }
@@ -115,29 +147,66 @@ func emitWindowRankSetup(vm *vdbe.VDBE, regs rankRegisters, info rankFunctionInf
 // emitWindowRankTracking emits rank comparison and update logic
 func emitWindowRankTracking(vm *vdbe.VDBE, regs rankRegisters, info rankFunctionInfo, numCols int) {
 	if (info.hasRank || info.hasDenseRank) && len(info.orderByCols) > 0 {
-		emitWindowRankComparison(vm, regs, info, numCols)
+		emitWindowRankComparison(vm, regs, info, numCols, false)
+	} else {
+		vm.AddOp(vdbe.OpAddImm, regs.rowCount, 1, 0)
+	}
+}
+
+// emitWindowRankTrackingFromSorter emits rank comparison and update logic when reading from sorter
+func emitWindowRankTrackingFromSorter(vm *vdbe.VDBE, regs rankRegisters, info rankFunctionInfo, numCols int) {
+	if (info.hasRank || info.hasDenseRank) && len(info.orderByCols) > 0 {
+		emitWindowRankComparison(vm, regs, info, numCols, true)
 	} else {
 		vm.AddOp(vdbe.OpAddImm, regs.rowCount, 1, 0)
 	}
 }
 
 // emitWindowRankComparison emits the comparison logic for rank functions
-func emitWindowRankComparison(vm *vdbe.VDBE, regs rankRegisters, info rankFunctionInfo, numCols int) {
+// If fromSorter is true, data is already in registers 0..N-1 from OpSorterData
+// If fromSorter is false, data is read from cursor 0 using OpColumn
+func emitWindowRankComparison(vm *vdbe.VDBE, regs rankRegisters, info rankFunctionInfo, numCols int, fromSorter bool) {
+	// Determine which columns to compare
+	orderByCols := info.orderByCols
+	if len(orderByCols) == 0 && (info.hasRank || info.hasDenseRank) {
+		// Fallback: if no ORDER BY columns specified but we have ranking,
+		// this might indicate a bug in orderByCols extraction
+		// For now, do nothing - all ranks will be the same
+		vm.AddOp(vdbe.OpAddImm, regs.rowCount, 1, 0)
+		return
+	}
+
 	// Read current ORDER BY values
-	for idx, colIdx := range info.orderByCols {
-		vm.AddOp(vdbe.OpColumn, 0, colIdx, regs.currOrderBy+idx)
+	for idx, colIdx := range orderByCols {
+		if fromSorter {
+			// Data is already in registers from OpSorterData, just copy it
+			vm.AddOp(vdbe.OpCopy, colIdx, regs.currOrderBy+idx, 0)
+		} else {
+			// Read from cursor 0
+			vm.AddOp(vdbe.OpColumn, 0, colIdx, regs.currOrderBy+idx)
+		}
 	}
 
 	valuesChangedReg := numCols + 40
 	vm.AddOp(vdbe.OpInteger, 0, valuesChangedReg, 0)
 
-	emitOrderByValueComparison(vm, regs, info.orderByCols, valuesChangedReg)
+	// Increment rowCount BEFORE checking for changes (rowCount is 1-based)
 	vm.AddOp(vdbe.OpAddImm, regs.rowCount, 1, 0)
+
+	// Check if values changed and update rank accordingly
+	emitOrderByValueComparison(vm, regs, orderByCols, valuesChangedReg)
 	emitWindowRankUpdate(vm, regs, valuesChangedReg, info)
 }
 
 // emitOrderByValueComparison compares current and previous ORDER BY values
 func emitOrderByValueComparison(vm *vdbe.VDBE, regs rankRegisters, orderByCols []int, valuesChangedReg int) {
+	// If no ORDER BY columns (shouldn't happen for RANK/DENSE_RANK, but just in case),
+	// always mark as changed so rank increments like ROW_NUMBER
+	if len(orderByCols) == 0 {
+		vm.AddOp(vdbe.OpInteger, 1, valuesChangedReg, 0)
+		return
+	}
+
 	for idx := range orderByCols {
 		curr := regs.currOrderBy + idx
 		prev := regs.prevOrderBy + idx
@@ -162,14 +231,12 @@ func emitOrderByValueComparison(vm *vdbe.VDBE, regs rankRegisters, orderByCols [
 func emitWindowRankUpdate(vm *vdbe.VDBE, regs rankRegisters, valuesChangedReg int, info rankFunctionInfo) {
 	updateRankAddr := vm.AddOp(vdbe.OpIfNot, valuesChangedReg, 0, 0)
 
+	// When values change: update rank to current rowCount
 	vm.AddOp(vdbe.OpCopy, regs.rowCount, regs.rank, 0)
-
-	firstRowAddr := vm.AddOp(vdbe.OpIsNull, regs.prevOrderBy, 0, 0)
+	// Always increment dense_rank when values change
 	vm.AddOp(vdbe.OpAddImm, regs.denseRank, 1, 0)
-	skipDenseIncAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
-	vm.Program[firstRowAddr].P2 = vm.NumOps()
-	vm.Program[skipDenseIncAddr].P2 = vm.NumOps()
 
+	// Copy current ORDER BY values to prev for next comparison
 	for idx := range info.orderByCols {
 		vm.AddOp(vdbe.OpCopy, regs.currOrderBy+idx, regs.prevOrderBy+idx, 0)
 	}
@@ -182,12 +249,22 @@ func emitWindowRankUpdate(vm *vdbe.VDBE, regs rankRegisters, valuesChangedReg in
 // emitWindowFunctionColumn emits code for a window function result column
 func emitWindowFunctionColumn(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, regs rankRegisters, colIdx int) {
 	switch fnExpr.Name {
-	case "ROW_NUMBER", "NTILE":
+	case "ROW_NUMBER":
+		vm.AddOp(vdbe.OpCopy, regs.rowCount, colIdx, 0)
+	case "NTILE":
+		// NTILE uses rowCount for now - proper implementation uses window state
 		vm.AddOp(vdbe.OpCopy, regs.rowCount, colIdx, 0)
 	case "RANK":
 		vm.AddOp(vdbe.OpCopy, regs.rank, colIdx, 0)
 	case "DENSE_RANK":
 		vm.AddOp(vdbe.OpCopy, regs.denseRank, colIdx, 0)
+	case "NTH_VALUE":
+		// NTH_VALUE requires window state access - emit placeholder for non-opcode path
+		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
+	case "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE":
+		// These require window state access - emit placeholder for now
+		// Real implementation uses OpWindowLag/Lead/FirstValue/LastValue opcodes
+		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
 	default:
 		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
 	}
@@ -219,5 +296,198 @@ func (s *Stmt) emitWindowColumn(vm *vdbe.VDBE, gen *expr.CodeGenerator, col pars
 		vm.AddOp(vdbe.OpCopy, reg, colIdx, 0)
 	} else {
 		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
+	}
+}
+
+// emitWindowFunctionColumnWithOpcodes emits code for a window function using proper opcodes
+// numTableCols is used for streaming mode to read from registers
+func (s *Stmt) emitWindowFunctionColumnWithOpcodes(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, colIdx int, numTableCols int) {
+	windowStateIdx := 0 // For now, we use window state 0 for all rank functions
+
+	switch fnExpr.Name {
+	case "RANK":
+		// P3 = number of columns for streaming mode
+		vm.AddOp(vdbe.OpWindowRank, windowStateIdx, colIdx, numTableCols)
+	case "DENSE_RANK":
+		// P3 = number of columns for streaming mode
+		vm.AddOp(vdbe.OpWindowDenseRank, windowStateIdx, colIdx, numTableCols)
+	case "ROW_NUMBER":
+		// P3 = number of columns for streaming mode
+		vm.AddOp(vdbe.OpWindowRowNum, windowStateIdx, colIdx, numTableCols)
+	case "NTILE":
+		// P1 = window state, P2 = output register, P3 = number of buckets
+		numBuckets := s.extractNtileArg(fnExpr)
+		vm.AddOp(vdbe.OpWindowNtile, windowStateIdx, colIdx, numBuckets)
+	case "LAG":
+		// P1 = window state, P2 = output register, P3 = column index
+		// P4.I = offset (default 1), P5 = default value register (0 = NULL)
+		colIndex, offset := s.extractLagLeadArgs(fnExpr, numTableCols)
+		addr := vm.AddOp(vdbe.OpWindowLag, windowStateIdx, colIdx, colIndex)
+		vm.Program[addr].P4.I = int32(offset)
+	case "LEAD":
+		// P1 = window state, P2 = output register, P3 = column index
+		// P4.I = offset (default 1), P5 = default value register (0 = NULL)
+		colIndex, offset := s.extractLagLeadArgs(fnExpr, numTableCols)
+		addr := vm.AddOp(vdbe.OpWindowLead, windowStateIdx, colIdx, colIndex)
+		vm.Program[addr].P4.I = int32(offset)
+	case "FIRST_VALUE":
+		// P1 = window state, P2 = output register, P3 = column index
+		colIndex := s.extractValueFunctionArg(fnExpr, numTableCols)
+		vm.AddOp(vdbe.OpWindowFirstValue, windowStateIdx, colIdx, colIndex)
+	case "LAST_VALUE":
+		// P1 = window state, P2 = output register, P3 = column index
+		colIndex := s.extractValueFunctionArg(fnExpr, numTableCols)
+		vm.AddOp(vdbe.OpWindowLastValue, windowStateIdx, colIdx, colIndex)
+	case "NTH_VALUE":
+		// P1 = window state, P2 = output register, P3 = column index
+		// P4.I = N (1-based row within frame)
+		colIndex := s.extractValueFunctionArg(fnExpr, numTableCols)
+		n := s.extractNthValueN(fnExpr)
+		addr := vm.AddOp(vdbe.OpWindowNthValue, windowStateIdx, colIdx, colIndex)
+		vm.Program[addr].P4.I = int32(n)
+	default:
+		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
+	}
+}
+
+// extractNtileArg extracts the number of buckets from NTILE(n) function
+func (s *Stmt) extractNtileArg(fnExpr *parser.FunctionExpr) int {
+	if len(fnExpr.Args) > 0 {
+		if lit, ok := fnExpr.Args[0].(*parser.LiteralExpr); ok {
+			// LiteralExpr.Value is a string, parse it
+			if n, err := strconv.ParseInt(lit.Value, 10, 64); err == nil {
+				return int(n)
+			}
+		}
+	}
+	return 4 // Default to 4 buckets
+}
+
+// extractLagLeadArgs extracts column index and offset from LAG/LEAD functions
+func (s *Stmt) extractLagLeadArgs(fnExpr *parser.FunctionExpr, numTableCols int) (colIndex int, offset int) {
+	offset = 1 // Default offset
+	colIndex = 0
+
+	if len(fnExpr.Args) > 0 {
+		// First arg is the column expression
+		if ident, ok := fnExpr.Args[0].(*parser.IdentExpr); ok {
+			// Try to find column index - for now use a simple approach
+			colIndex = s.findColumnIndexByName(ident.Name, numTableCols)
+		}
+	}
+
+	if len(fnExpr.Args) > 1 {
+		// Second arg is the offset
+		if lit, ok := fnExpr.Args[1].(*parser.LiteralExpr); ok {
+			// LiteralExpr.Value is a string, parse it
+			if n, err := strconv.ParseInt(lit.Value, 10, 64); err == nil {
+				offset = int(n)
+			}
+		}
+	}
+
+	return colIndex, offset
+}
+
+// extractNthValueN extracts the N argument from NTH_VALUE(expr, N)
+func (s *Stmt) extractNthValueN(fnExpr *parser.FunctionExpr) int {
+	if len(fnExpr.Args) > 1 {
+		if lit, ok := fnExpr.Args[1].(*parser.LiteralExpr); ok {
+			if n, err := strconv.ParseInt(lit.Value, 10, 64); err == nil && n >= 1 {
+				return int(n)
+			}
+		}
+	}
+	return 1 // Default to first value
+}
+
+// extractValueFunctionArg extracts column index from FIRST_VALUE/LAST_VALUE
+func (s *Stmt) extractValueFunctionArg(fnExpr *parser.FunctionExpr, numTableCols int) int {
+	if len(fnExpr.Args) > 0 {
+		if ident, ok := fnExpr.Args[0].(*parser.IdentExpr); ok {
+			return s.findColumnIndexByName(ident.Name, numTableCols)
+		}
+	}
+	return 0
+}
+
+// findColumnIndexByName finds column index by name - simple implementation
+func (s *Stmt) findColumnIndexByName(name string, numTableCols int) int {
+	// Try to find in current table context
+	if s.conn != nil && s.conn.schema != nil {
+		for _, t := range s.conn.schema.Tables {
+			for i, col := range t.Columns {
+				if col.Name == name {
+					return i
+				}
+			}
+		}
+	}
+	return 0 // Default to first column
+}
+
+// extractWindowFrame converts parser.FrameSpec to vdbe.WindowFrame
+func (s *Stmt) extractWindowFrame(frameSpec *parser.FrameSpec) vdbe.WindowFrame {
+	if frameSpec == nil {
+		return vdbe.DefaultWindowFrame()
+	}
+
+	frame := vdbe.WindowFrame{
+		Type:  s.convertFrameMode(frameSpec.Mode),
+		Start: s.convertFrameBound(frameSpec.Start),
+		End:   s.convertFrameBound(frameSpec.End),
+	}
+
+	return frame
+}
+
+// convertFrameMode converts parser.FrameMode to vdbe.WindowFrameType
+func (s *Stmt) convertFrameMode(mode parser.FrameMode) vdbe.WindowFrameType {
+	switch mode {
+	case parser.FrameRows:
+		return vdbe.FrameRows
+	case parser.FrameRange:
+		return vdbe.FrameRange
+	case parser.FrameGroups:
+		return vdbe.FrameGroups
+	default:
+		return vdbe.FrameRange // Default to RANGE
+	}
+}
+
+// convertFrameBound converts parser.FrameBound to vdbe.WindowFrameBound
+func (s *Stmt) convertFrameBound(bound parser.FrameBound) vdbe.WindowFrameBound {
+	vdbeBound := vdbe.WindowFrameBound{
+		Type:   s.convertFrameBoundType(bound.Type),
+		Offset: 0,
+	}
+
+	// Extract offset value if present
+	if bound.Offset != nil {
+		if lit, ok := bound.Offset.(*parser.LiteralExpr); ok {
+			if n, err := strconv.ParseInt(lit.Value, 10, 64); err == nil {
+				vdbeBound.Offset = int(n)
+			}
+		}
+	}
+
+	return vdbeBound
+}
+
+// convertFrameBoundType converts parser.FrameBoundType to vdbe.FrameBoundType
+func (s *Stmt) convertFrameBoundType(boundType parser.FrameBoundType) vdbe.FrameBoundType {
+	switch boundType {
+	case parser.BoundUnboundedPreceding:
+		return vdbe.BoundUnboundedPreceding
+	case parser.BoundPreceding:
+		return vdbe.BoundPreceding
+	case parser.BoundCurrentRow:
+		return vdbe.BoundCurrentRow
+	case parser.BoundFollowing:
+		return vdbe.BoundFollowing
+	case parser.BoundUnboundedFollowing:
+		return vdbe.BoundUnboundedFollowing
+	default:
+		return vdbe.BoundCurrentRow
 	}
 }

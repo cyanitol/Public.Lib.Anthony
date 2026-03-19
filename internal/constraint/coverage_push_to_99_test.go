@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package constraint
 
 import (
@@ -70,6 +70,17 @@ func (m *MockRowReaderWithError) FindReferencingRows(table string, columns []str
 		return nil, &mockReadError{}
 	}
 	return []int64{}, nil
+}
+
+func (m *MockRowReaderWithError) ReadRowByRowid(table string, rowid int64) (map[string]interface{}, error) {
+	if m.shouldFail {
+		return nil, &mockReadError{}
+	}
+	return make(map[string]interface{}), nil
+}
+
+func (m *MockRowReaderWithError) RowExistsWithCollation(table string, columns []string, values []interface{}, collations []string) (bool, error) {
+	return m.RowExists(table, columns, values)
 }
 
 type mockReadError struct{}

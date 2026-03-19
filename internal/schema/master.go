@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package schema
 
 import (
@@ -6,6 +6,7 @@ import (
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // sqlite_master table schema:
@@ -129,53 +130,59 @@ func (s *Schema) SaveToMaster(bt *btree.Btree) error {
 		return fmt.Errorf("nil btree")
 	}
 
+	// Ensure sqlite_master root page is initialized before writing rows.
+	if err := ensureMasterPageInitialized(bt); err != nil {
+		return fmt.Errorf("failed to initialize sqlite_master page: %w", err)
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	// Build master rows from current schema
-	var rows []MasterRow
+	rows := s.buildMasterRows()
 
-	// Add tables
-	for _, table := range s.Tables {
-		// Skip sqlite_master itself
-		if table.Name == "sqlite_master" {
-			continue
+	// Clear existing sqlite_master content and write new rows
+	if err := s.clearMasterTable(bt); err != nil {
+		return fmt.Errorf("failed to clear sqlite_master: %w", err)
+	}
+
+	// Write all rows to sqlite_master
+	for _, row := range rows {
+		if err := s.writeMasterRow(bt, row); err != nil {
+			return fmt.Errorf("failed to write master row for %s: %w", row.Name, err)
 		}
-
-		rows = append(rows, MasterRow{
-			Type:     "table",
-			Name:     table.Name,
-			TblName:  table.Name,
-			RootPage: table.RootPage,
-			SQL:      table.SQL,
-		})
 	}
 
-	// Add indexes
-	for _, index := range s.Indexes {
-		rows = append(rows, MasterRow{
-			Type:     "index",
-			Name:     index.Name,
-			TblName:  index.Table,
-			RootPage: index.RootPage,
-			SQL:      index.SQL,
-		})
+	return nil
+}
+
+// ensureMasterPageInitialized sets up page 1 as an empty leaf table if it is
+// currently uninitialized. This allows SaveToMaster to write master rows in
+// newly created databases.
+func ensureMasterPageInitialized(bt *btree.Btree) error {
+	page, err := bt.GetPage(1)
+	if err != nil {
+		// Create an empty page if it doesn't exist yet
+		page = make([]byte, bt.PageSize)
+		if err := bt.SetPage(1, page); err != nil {
+			return err
+		}
 	}
 
-	// Add views
-	for _, view := range s.Views {
-		rows = append(rows, MasterRow{
-			Type:     "view",
-			Name:     view.Name,
-			TblName:  view.Name,
-			RootPage: 0, // Views don't have a root page
-			SQL:      view.SQL,
-		})
-	}
+	headerOffset := btree.FileHeaderSize
+	page[headerOffset+btree.PageHeaderOffsetType] = btree.PageTypeLeafTable
+	page[headerOffset+btree.PageHeaderOffsetFreeblock] = 0
+	page[headerOffset+btree.PageHeaderOffsetFreeblock+1] = 0
+	page[headerOffset+btree.PageHeaderOffsetNumCells] = 0
+	page[headerOffset+btree.PageHeaderOffsetNumCells+1] = 0
+	page[headerOffset+btree.PageHeaderOffsetCellStart] = 0
+	page[headerOffset+btree.PageHeaderOffsetCellStart+1] = 0
+	page[headerOffset+btree.PageHeaderOffsetFragmented] = 0
 
-	// Write rows to sqlite_master (page 1)
-	if err := s.writeMasterPage(bt, 1, rows); err != nil {
-		return fmt.Errorf("failed to write sqlite_master: %w", err)
+	if bt.Provider != nil {
+		if err := bt.Provider.MarkDirty(1); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -191,20 +198,149 @@ func (s *Schema) parseMasterPage(bt *btree.Btree, pageNum uint32) ([]MasterRow, 
 	// 3. Parse each record as a MasterRow
 	// 4. Return the list of rows
 
-	// For now, return empty list - this is a placeholder
-	// The actual implementation would require a full record parser
-	return []MasterRow{}, nil
+	cur := btree.NewCursor(bt, pageNum)
+	if err := cur.MoveToFirst(); err != nil {
+		return []MasterRow{}, nil
+	}
+
+	var rows []MasterRow
+	for cur.IsValid() {
+		payload, err := cur.GetCompletePayload()
+		if err != nil {
+			break
+		}
+		if row, err := decodeMasterRow(payload); err == nil {
+			rows = append(rows, row)
+		}
+		if err := cur.Next(); err != nil {
+			break
+		}
+	}
+	return rows, nil
 }
 
 // writeMasterPage writes rows to the sqlite_master page.
 func (s *Schema) writeMasterPage(bt *btree.Btree, pageNum uint32, rows []MasterRow) error {
-	// In a real implementation, this would:
-	// 1. Clear the existing page 1 contents
-	// 2. For each row, encode it as a SQLite record
-	// 3. Insert the record into the B-tree page
-	// 4. Update the page header
+	return nil
+}
 
-	// For now, this is a placeholder
+// buildMasterRows builds a list of MasterRow entries from the current schema.
+func (s *Schema) buildMasterRows() []MasterRow {
+	var rows []MasterRow
+
+	// Add tables (except internal tables)
+	for name, table := range s.Tables {
+		if !isInternalTable(name) {
+			rows = append(rows, MasterRow{
+				Type:     "table",
+				Name:     table.Name,
+				TblName:  table.Name,
+				RootPage: table.RootPage,
+				SQL:      table.SQL,
+			})
+		}
+	}
+
+	// Add indexes (except auto-indexes without SQL)
+	for name, index := range s.Indexes {
+		if !isAutoIndex(name) || index.SQL != "" {
+			rows = append(rows, MasterRow{
+				Type:     "index",
+				Name:     index.Name,
+				TblName:  index.Table,
+				RootPage: index.RootPage,
+				SQL:      index.SQL,
+			})
+		}
+	}
+
+	// Add views
+	for _, view := range s.Views {
+		rows = append(rows, MasterRow{
+			Type:     "view",
+			Name:     view.Name,
+			TblName:  view.Name,
+			RootPage: 0, // Views don't have root pages
+			SQL:      view.SQL,
+		})
+	}
+
+	// Add triggers
+	for _, trigger := range s.Triggers {
+		rows = append(rows, MasterRow{
+			Type:     "trigger",
+			Name:     trigger.Name,
+			TblName:  trigger.Table,
+			RootPage: 0, // Triggers don't have root pages
+			SQL:      trigger.SQL,
+		})
+	}
+
+	return rows
+}
+
+// clearMasterTable clears all existing content from sqlite_master table.
+// This is used during VACUUM to rebuild the table from scratch.
+func (s *Schema) clearMasterTable(bt *btree.Btree) error {
+	// Create a cursor on sqlite_master (page 1)
+	cur := btree.NewCursor(bt, 1)
+
+	// Move to first entry
+	if err := cur.MoveToFirst(); err != nil {
+		// If no entries exist, that's fine
+		return nil
+	}
+
+	// Collect all rowids to delete
+	var rowids []int64
+	for cur.IsValid() {
+		if cur.CurrentCell != nil {
+			rowids = append(rowids, cur.CurrentCell.Key)
+		}
+		if err := cur.Next(); err != nil {
+			break
+		}
+	}
+
+	// Delete all entries
+	for _, rowid := range rowids {
+		found, err := cur.SeekRowid(rowid)
+		if err != nil {
+			return fmt.Errorf("failed to seek to rowid %d: %w", rowid, err)
+		}
+		if !found {
+			return fmt.Errorf("rowid %d not found", rowid)
+		}
+		if err := cur.Delete(); err != nil {
+			return fmt.Errorf("failed to delete rowid %d: %w", rowid, err)
+		}
+	}
+
+	return nil
+}
+
+// writeMasterRow writes a single row to the sqlite_master table.
+func (s *Schema) writeMasterRow(bt *btree.Btree, row MasterRow) error {
+	// Encode the row as a payload
+	payload := encodeMasterRow(row)
+
+	// Create a cursor on sqlite_master (page 1)
+	cur := btree.NewCursor(bt, 1)
+
+	// Find the insertion point (we use sequential rowids)
+	// Move to the end and get the last rowid
+	var nextRowid int64 = 1
+	if err := cur.MoveToLast(); err == nil && cur.IsValid() {
+		if cur.CurrentCell != nil {
+			nextRowid = cur.CurrentCell.Key + 1
+		}
+	}
+
+	// Insert the row
+	if err := cur.Insert(nextRowid, payload); err != nil {
+		return fmt.Errorf("failed to insert master row: %w", err)
+	}
+
 	return nil
 }
 
@@ -230,6 +366,47 @@ func tableWithNoSQL(row MasterRow) *Table {
 		SQL:      row.SQL,
 		Columns:  []*Column{},
 	}
+}
+
+// encodeMasterRow encodes a MasterRow as a simple length-prefixed record.
+func encodeMasterRow(row MasterRow) []byte {
+	values := []interface{}{row.Type, row.Name, row.TblName, int64(row.RootPage), row.SQL}
+	return vdbe.EncodeSimpleRecord(values)
+}
+
+// decodeMasterRow decodes the simplified record produced by encodeMasterRow.
+func decodeMasterRow(payload []byte) (MasterRow, error) {
+	var row MasterRow
+	values, err := vdbe.DecodeRecord(payload)
+	if err != nil {
+		return row, fmt.Errorf("invalid master row encoding: %w", err)
+	}
+	if len(values) < 5 {
+		return row, fmt.Errorf("invalid master row field count")
+	}
+
+	row.Type = fmt.Sprint(values[0])
+	row.Name = fmt.Sprint(values[1])
+	row.TblName = fmt.Sprint(values[2])
+	switch v := values[3].(type) {
+	case int64:
+		row.RootPage = uint32(v)
+	default:
+		row.RootPage = uint32(varintBytesToUint([]byte(fmt.Sprint(v))))
+	}
+	row.SQL = fmt.Sprint(values[4])
+	return row, nil
+}
+
+func intToVarintBytes(v uint64) []byte {
+	buf := make([]byte, btree.VarintLen(v))
+	n := btree.PutVarint(buf, v)
+	return buf[:n]
+}
+
+func varintBytesToUint(b []byte) uint64 {
+	v, _ := btree.GetVarint(b)
+	return v
 }
 
 // parseSingleCreateTable parses sql, validates it contains exactly one
@@ -270,6 +447,46 @@ func buildTableFromStmt(stmt *parser.CreateTableStmt, row MasterRow) *Table {
 		Strict:       stmt.Strict,
 		Temp:         stmt.Temp,
 	}
+}
+
+// parseViewSQL parses a CREATE VIEW statement from a master row.
+func (s *Schema) parseViewSQL(row MasterRow) (*View, error) {
+	if row.SQL == "" {
+		return &View{
+			Name:    row.Name,
+			SQL:     row.SQL,
+			Columns: []string{},
+		}, nil
+	}
+
+	// Parse the SQL statement
+	p := parser.NewParser(row.SQL)
+	stmts, err := p.Parse()
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse SQL: %w", err)
+	}
+
+	// Should have exactly one statement
+	if len(stmts) != 1 {
+		return nil, fmt.Errorf("expected 1 statement, got %d", len(stmts))
+	}
+
+	// Ensure it's a CREATE VIEW statement
+	createView, ok := stmts[0].(*parser.CreateViewStmt)
+	if !ok {
+		return nil, fmt.Errorf("expected CREATE VIEW, got %T", stmts[0])
+	}
+
+	// Create the view
+	view := &View{
+		Name:      createView.Name,
+		Columns:   createView.Columns,
+		Select:    createView.Select,
+		SQL:       row.SQL,
+		Temporary: createView.Temporary,
+	}
+
+	return view, nil
 }
 
 // parseIndexSQL parses a CREATE INDEX statement from a master row.

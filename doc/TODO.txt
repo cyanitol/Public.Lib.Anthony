@@ -1,242 +1,285 @@
-# Anthony SQLite Driver - TODO List
-# Format: https://github.com/todotxt/todo.txt
-# Generated: 2026-02-27 | Updated: 2026-03-06 (v0.1.0)
-# Stats: 655 passing | 690 skipped | 0 failing | 48% pass rate (driver tests)
+# Anthony - Pure Go SQLite Implementation - TODO
+#
+# Code Quality: Cyclomatic complexity <= 11 for all production code
+# Coverage Snapshot: ~75% feature parity vs reference SQLite
+# Last Updated: 2026-03-10
 
-# ============================================================================
-# PRIORITY 1: MAJOR SKIP CATEGORIES (~145 skips) - COMPLETE ALL - IN PROGRESS
-# ============================================================================
+================================================================================
+HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
+================================================================================
 
-# --- Foreign Key Runtime Enforcement (38 skips) ---
-(A) Add FKManager field to VDBEContext +FK @vdbe file:internal/vdbe/vdbe.go:95
-(A) Add ForeignKeysEnabled flag to VDBEContext +FK @vdbe file:internal/vdbe/vdbe.go:95
-(A) Wire FKManager from Conn to VDBE +FK @driver file:internal/driver/stmt.go
-(A) Add checkForeignKeyConstraints in execInsert +FK @vdbe file:internal/vdbe/exec.go:2070
-(A) Add FK validation in execDelete +FK @vdbe file:internal/vdbe/exec.go:2353
-(A) Implement RowReader adapter for VDBE cursors +FK @vdbe file:internal/vdbe/fk_adapter.go
-(A) Implement RowDeleter adapter for CASCADE +FK @vdbe file:internal/vdbe/fk_adapter.go
-(A) Enable sqlite_fkey_test.go tests (38) +FK @driver file:internal/driver/sqlite_fkey_test.go
+[x] Foreign Key Runtime Enforcement (83/83 tests passing)
+    - [DONE] Wire FK manager through VDBE context
+    - [DONE] INSERT FK validation (ValidateInsert) - blocks invalid child inserts
+    - [DONE] DELETE FK validation (ValidateDelete) - blocks parent deletes when referenced
+    - [DONE] UPDATE FK validation (ValidateUpdate) - blocks parent updates when referenced
+    - [DONE] ON DELETE/UPDATE CASCADE - child rows auto-deleted/updated
+    - [DONE] ON DELETE/UPDATE SET NULL - FK columns set to NULL
+    - [DONE] ON DELETE/UPDATE SET DEFAULT - FK columns set to default
+    - [DONE] RESTRICT action (same as NO ACTION for immediate constraints)
+    - [DONE] Multi-column FK constraints (table-level FOREIGN KEY clauses)
+    - [DONE] INTEGER PRIMARY KEY handling in FK lookups (rowid alias)
+    - [DONE] Quoted table name handling
+    - [DONE] Recursive CASCADE for self-referencing FKs
+    - [DONE] PRAGMA foreign_key_check (with driverRowReader)
+    - [DONE] DROP TABLE reference checking
+    - [DONE] Unique index column order flexibility
+    - [DONE] Deferred constraint checking at transaction boundaries
+    - [DONE] Collation-aware FK matching
+    - [DONE] Type affinity in FK comparison
 
-# --- Fault/Constraint Edge Cases (19 skips) ---
-(A) Audit constraint error paths +Constraints @vdbe file:internal/vdbe/constraints.go
-(A) Fix error message formatting +Constraints @vdbe file:internal/vdbe/exec.go
-(A) Ensure proper transaction rollback on failure +Constraints @driver file:internal/driver/stmt.go
-(A) Enable sqlite_fault_test.go tests (19) +Constraints @driver file:internal/driver/sqlite_fault_test.go
+[x] WITHOUT ROWID Tables (51 tests -> 45 passing, 6 skipped)
+    - [DONE] Implement alt btree layout using PRIMARY KEY as key (no rowid)
+    - [DONE] Route DML/DDL paths correctly; ensure index selection and VACUUM support
+    - [DONE] Split/rewind regression: statement cache invalidation on root page changes
+    - [DONE] rowid/oid/_rowid_ column rejection for WITHOUT ROWID tables
+    - [DONE] FK validation integration for WITHOUT ROWID inserts
+    - [DONE] JOIN queries with WITHOUT ROWID tables (cursor handling fixed)
+    - [DONE] ROLLBACK for WITHOUT ROWID btrees (pager callback syncs btree cache)
+    - [DONE] CASCADE FK actions: proper PK extraction with PKColumnIndices
 
-# --- VACUUM Operations (30 skips) ---
-(A) Fix sqlite_master persistence after VACUUM +VACUUM @driver file:internal/driver/stmt_vacuum.go
-(A) Add schema cookie update in vacuum +VACUUM @pager file:internal/pager/vacuum.go
-(A) Test VACUUM on empty database +VACUUM @driver file:internal/driver/vacuum_test.go
-(A) Test VACUUM after DELETE operations +VACUUM @driver file:internal/driver/vacuum_test.go
-(A) Test VACUUM with indexes +VACUUM @driver file:internal/driver/vacuum_test.go
-(A) Enable vacuum_test.go tests (30) +VACUUM @driver file:internal/driver/vacuum_test.go
+[x] Window Functions (All ranking and value functions working)
+    - [DONE] ROW_NUMBER() with streaming and partition modes
+    - [DONE] RANK() with OpWindowRank opcode integration
+    - [DONE] DENSE_RANK() with OpWindowDenseRank opcode
+    - [DONE] NTILE() bucket distribution
+    - [DONE] LAG/LEAD with offset parameter support
+    - [DONE] FIRST_VALUE/LAST_VALUE frame access
+    - [DONE] ROWS/RANGE frame specification parsing and extraction
 
-# --- WITHOUT ROWID Tables (23 skips) ---
-(A) Check table.WithoutRowID in DML compilation +ROWID @driver file:internal/driver/compile_dml.go
-(A) Skip OpNewRowid for WITHOUT ROWID tables +ROWID @driver file:internal/driver/compile_insert.go
-(A) Use PRIMARY KEY columns as key instead +ROWID @driver file:internal/driver/compile_dml.go
-(A) Add PRIMARY KEY requirement validation +ROWID @driver file:internal/driver/stmt_ddl.go
-(A) Reject AUTOINCREMENT on WITHOUT ROWID +ROWID @driver file:internal/driver/stmt_ddl.go
-(A) Remove rowid/_rowid_/oid aliases for WITHOUT ROWID +ROWID @schema file:internal/schema/schema.go
-(A) Enable sqlite_without_rowid_test.go tests (23) +ROWID @driver file:internal/driver/sqlite_without_rowid_test.go
+[~] FTS5 Virtual Table (module implemented, 128 tests pass)
+    - [DONE] Tokenizer pipeline (SimpleTokenizer, StopWordTokenizer)
+    - [DONE] Inverted index with posting lists
+    - [DONE] BM25/TFIDF ranking, snippet/highlight
+    - [DONE] Query parser (AND, OR, NOT, prefix, phrase)
+    - [DONE] Module registration in driver
+    - [DONE] SQL parser support for CREATE VIRTUAL TABLE
+    - [DONE] Virtual table instance creation on CREATE VIRTUAL TABLE
+    - [DONE] Shadow table infrastructure (persistence.go)
+    - [~] Persistent storage to database file (deferred, in-memory only)
 
-# --- Stress/Concurrent Tests (18 skips) ---
-(A) Verify PRAGMA journal_mode=WAL works +Concurrent @pager file:internal/pager/wal.go
-(A) Enable TestConcurrentExec (WAL needed) +Concurrent @driver file:internal/driver/concurrent_security_test.go:90
-(A) Enable TestConcurrentReadWrite (WAL needed) +Concurrent @driver file:internal/driver/concurrent_security_test.go:180
-(A) Enable TestSecurityConcurrentTransactions (WAL needed) +Concurrent @driver file:internal/driver/concurrent_security_test.go:324
-(A) Enable TestConcurrentConnections (WAL needed) +Concurrent @driver file:internal/driver/concurrent_security_test.go:459
-(A) Fix bulk insert performance +Concurrent @driver file:internal/driver/sqlite_stress_test.go:35
+[x] R-Tree Virtual Table (module implemented, all tests pass)
+    - [DONE] R*-tree insertion/split/reinsertion
+    - [DONE] 2D/3D/4D/5D spatial indexing
+    - [DONE] Bounding box queries (overlap/contains/within)
+    - [DONE] Nearest neighbor search (k-NN)
+    - [DONE] Module registration in driver
+    - [DONE] SQL parser support for CREATE VIRTUAL TABLE
+    - [ ] Persistent storage to database file
 
-# --- CTE Integration Edge Cases (17 skips) ---
-(A) Fix OpMakeRecord/OpInsert register mismatch +CTE @driver file:internal/driver/stmt_cte.go:221
-(A) Fix SELECT * duplicate rows bug +CTE @driver file:internal/driver/stmt_cte.go:658
-(A) Fix multiple CTE dependencies +CTE @planner file:internal/planner/cte.go
-(A) Implement recursive CTE bytecode generation +CTE @driver file:internal/driver/stmt_cte.go:392
-(A) Fix UNION ALL with CTEs record serialization +CTE @driver file:internal/driver/stmt_cte.go
-(A) Enable cte_integration_test.go tests (17) +CTE @driver file:internal/driver/cte_integration_test.go
+[ ] Durability & Conformance Hardening
+    - Run sqllogictest subsets vs reference SQLite; diff drift
+    - Fuzz parser and record decoder; add crash-replay tests for WAL/journal
+    - Target ≥80% coverage in pager/vdbe/btree/parser/engine
 
-# ============================================================================
-# PRIORITY 2: SCATTERED SKIPS (~350 individual tests)
-# ============================================================================
+================================================================================
+SCAFFOLDING CODE - Prepared but waiting for activation
+================================================================================
 
-(B) ATTACH database (24 skips) +PartialFeatures @driver skips:24
-(B) Transaction edge cases (15 skips) +PartialFeatures @driver skips:15
-(B) SQLite* compatibility tests (100+ skips) +PartialFeatures @driver
-(B) BLOB edge cases (15 skips) +PartialFeatures @driver skips:15
-(B) BETWEEN/LIKE edge cases (15 skips) +PartialFeatures @driver skips:15
-(B) Savepoint operations (10 skips) +PartialFeatures @driver skips:10
-(B) ROWID edge cases (10 skips) +PartialFeatures @driver skips:10
-(B) REINDEX edge cases (9 skips) +PartialFeatures @driver skips:9
-(B) ORDER BY edge cases (12 skips) +PartialFeatures @driver skips:12
-(B) LIMIT edge cases (15 skips) +PartialFeatures @driver skips:15
-(B) EXPLAIN edge cases (7 skips) +PartialFeatures @driver skips:7
-(B) UDF integration (4 skips) +PartialFeatures @vdbe skips:4
-(B) Window functions (3 skips) +PartialFeatures @driver skips:3
-(B) Trigger operations (7 skips) +PartialFeatures @driver skips:7
-(B) Cast operations (10 skips) +PartialFeatures @driver skips:10
+The following code is intentionally unused, prepared for future features.
+Each section documents what the code is waiting for.
 
-# ============================================================================
-# PRIORITY 3: v2.0 FEATURES - IMPLEMENT IN PHASE 3
-# ============================================================================
+## Phase 3.5: Trigger Execution
+Location: internal/driver/compile_helpers.go
+Functions:
+  - executeBeforeInsertTriggers()
+  - executeAfterInsertTriggers()
+  - executeBeforeUpdateTriggers()
+  - executeAfterUpdateTriggers()
+  - executeBeforeDeleteTriggers()
+  - executeAfterDeleteTriggers()
+  - prepareNewRowForInsert()
+Waiting for:
+  - VDBE runtime integration (triggers execute during row ops, not compilation)
+  - NEW/OLD row pseudo-tables populated from actual row data
+  - Recursive statement execution within trigger body
+See: compile_dml.go TODO Phase 3.5 comments
 
-# --- ANALYZE Query Optimizer Stats ---
-(C) Parse ANALYZE statement +ANALYZE @parser file:internal/parser/parser_analyze.go
-(C) Create sqlite_stat1 table for statistics +ANALYZE @schema file:internal/schema/sqlite_stat.go
-(C) Implement index usage statistics collection +ANALYZE @planner file:internal/planner/stats.go
-(C) Integrate statistics into query cost estimation +ANALYZE @planner file:internal/planner/cost.go
+## Subquery Optimization
+Location: internal/driver/compile_subquery.go
+Functions:
+  - adjustSubqueryJumpTargets()
+  - buildJumpOpcodeMap()
+  - buildDualJumpOpcodeMap()
+  - adjustJumpTargetsInProgram()
+  - compileInSubquery()
+Location: internal/expr/codegen.go
+  - registerAdjustmentRule (type)
+  - registerAdjustmentRules (var)
+  - adjustSubqueryCursors()
+  - adjustSubqueryRegisters()
+  - adjustInstructionRegisters()
+Waiting for:
+  - Subquery flattening optimization
+  - Inline scalar subquery evaluation
+  - Materialized IN subquery optimization
 
-# --- BACKUP Online Backup API ---
-(C) Parse BACKUP/RESTORE statements +BACKUP @parser file:internal/parser/parser_backup.go
-(C) Implement online backup mechanism +BACKUP @pager file:internal/pager/backup.go
-(C) Add progress callback support +BACKUP @driver file:internal/driver/backup.go
-(C) Handle concurrent access during backup +BACKUP @pager file:internal/pager/backup.go
+## CTE Bytecode Inlining
+Location: internal/driver/stmt_cte.go
+Functions:
+  - compileCTEPopulation()
+  - inlineCTEBytecode()
+  - handleSpecialOpcode()
+  - isControlFlowOp()
+Waiting for:
+  - CTE materialization optimization for multiple references
+  - Recursive CTE support (iterative bytecode generation)
+Currently using coroutine-based implementation (compileCTEPopulationCoroutine)
 
-# --- FTS5 Full-Text Search ---
-(C) Implement FTS5 virtual table module +FTS5 @vtab file:internal/vtab/fts5/module.go
-(C) Add tokenizer interface +FTS5 @vtab file:internal/vtab/fts5/tokenizer.go
-(C) Implement inverted index storage +FTS5 @vtab file:internal/vtab/fts5/index.go
-(C) Add MATCH expression evaluation +FTS5 @vtab file:internal/vtab/fts5/match.go
+## GROUP BY Evaluation
+Location: internal/driver/stmt_groupby.go
+Functions:
+  - evaluateGroupByExprs()
+Waiting for:
+  - Complex GROUP BY expressions requiring separate evaluation pass
+Currently using inline bytecode generation in compileGroupBy
 
-# --- R-Tree Spatial Index ---
-(C) Implement R-Tree virtual table module +RTree @vtab file:internal/vtab/rtree/module.go
-(C) Add spatial index node structure +RTree @vtab file:internal/vtab/rtree/node.go
-(C) Implement spatial query operators +RTree @vtab file:internal/vtab/rtree/query.go
-(C) Add insert/delete with node splitting +RTree @vtab file:internal/vtab/rtree/modify.go
+## Transaction Management
+Location: internal/pager/transaction.go
+Fields:
+  - journal: For direct journal integration
+  - readRefs: For multi-reader tracking
+  - writeOwner: For deadlock detection
+  - mu: For concurrent access protection
+Waiting for:
+  - WAL mode concurrent readers
+  - Deadlock detection
+  - Connection-level transaction isolation
 
-# ============================================================================
-# PHASE 2: STORAGE LAYER HARDENING - AFTER PRIORITY 1
-# ============================================================================
+## Pager Infrastructure
+Location: internal/pager/pager.go
+  - tempFile: For temp database support (ATTACH ':memory:')
+  - changeCountDone: For file header change counter updates
+Location: internal/pager/journal.go
+  - headerSynced: For atomic commit tracking
+Location: internal/pager/memory_pager.go
+  - changeCountDone: For consistency with file-based pager
+Location: internal/pager/savepoint.go
+  - mu: For concurrent savepoint access
+Location: internal/pager/wal_index.go
+  - pageSize: For page size validation during WAL ops
+Location: internal/pager/vacuum.go
+  - allocateLocked(): For incremental/auto-vacuum modes
 
-x 2026-03-04 2026-02-27 Implement Windows file locking +Phase2 @pager
-x 2026-03-04 2026-02-27 Add journal crash recovery +Phase2 @pager
+## Date/Time Functions
+Location: internal/functions/date.go
+  - isError: For error propagation in date parsing chains
+  - getWeekday(): For strftime %w and %u format specifiers
+  - getWeekNumber(): For strftime %W format specifier
+  - getDayOfYear(): For strftime %j format specifier
 
-# --- Journal Improvements ---
-x 2026-03-06 2026-02-27 Replace XOR checksum with CRC32 +Phase2 @pager file:internal/pager/journal.go
-x 2026-03-06 2026-02-27 Add journal file header validation +Phase2 @pager file:internal/pager/journal.go
-x 2026-03-06 2026-02-27 Add journal page count validation +Phase2 @pager file:internal/pager/journal.go
+## EXPLAIN Infrastructure
+Location: internal/planner/explain.go
+  - addOrderByNode(): Simplified version without cost estimates
+  - formatIndexScan(): For detailed EXPLAIN with index info
+Location: internal/planner/planner.go
+  - explainLoop(): For EXPLAIN QUERY PLAN output
 
-# --- WAL Improvements ---
-x 2026-03-06 2026-02-27 Complete WAL frame validation +Phase2 @pager file:internal/pager/wal.go
-(B) Add WAL recovery from incomplete transactions +Phase2 @pager file:internal/pager/wal.go
-(B) Add WAL checkpoint implementation +Phase2 @pager file:internal/pager/wal.go
-(B) Add WAL-index (shm) file support +Phase2 @pager file:internal/pager/wal_index.go
+## R-Tree Virtual Table
+Location: internal/vtab/rtree/rtree.go
+  - queryBBox: For spatial range queries (overlap, contains, within)
+  - queryType: For distinguishing spatial query operations
 
-# ============================================================================
-# PHASE 3: FEATURE COMPLETION
-# ============================================================================
+================================================================================
+v0.1.x - Current Development
+================================================================================
 
-x 2026-03-05 2026-03-05 CTE bytecode register adjustment +Phase3 @driver
-x 2026-03-05 2026-03-05 UNIQUE constraint enforcement +Phase3 @vdbe
-x 2026-03-05 2026-03-05 NOT NULL constraint enforcement +Phase3 @vdbe
-x 2026-03-05 2026-03-05 PRIMARY KEY constraint error messages +Phase3 @vdbe
-(B) Complete recursive CTE support +Phase3 @driver file:internal/driver/stmt_cte.go
-(B) Complete subquery compilation for scalar/IN/EXISTS +Phase3 @expr file:internal/expr/codegen.go
-(B) Hook trigger execution to INSERT/UPDATE/DELETE +Phase3 @engine file:internal/engine/trigger.go
+## Completed
+[x] Core Infrastructure (B-tree, Pager, VDBE, Parser)
+[x] SQL Features (Constraints, CTEs, Subqueries, DDL)
+[x] Built-in Functions (String, Math, Date/Time, Aggregate)
+[x] Query Optimization (Index selection, cost estimation)
+[x] Code Quality (Cyclomatic complexity <= 11)
+[x] Pre-commit validation (make commit)
+[x] SPDX license headers on all files
+[x] Documentation scaffolding comments
 
-# ============================================================================
-# PHASE 4: PERFORMANCE OPTIMIZATION
-# ============================================================================
+## In Progress
+[x] Foreign Key Runtime Enforcement (83/83 tests passing) - COMPLETE
+    - [DONE] FK manager wired through VDBE context
+    - [DONE] INSERT/DELETE/UPDATE FK validation working
+    - [DONE] CASCADE/SET NULL/SET DEFAULT/RESTRICT actions working
+    - [DONE] PRAGMA foreign_key_check, DROP TABLE checks
+    - [DONE] Deferred constraints, collation, type affinity
+[~] CTE Edge Cases (improved)
+    - [DONE] Sorter adjustment for GROUP BY in CTE coroutines
+    - [~] Recursive CTE: works for small datasets (compile-time execution)
+    - [ ] Recursive CTE bytecode generation (runtime loop optimization)
+[x] WITHOUT ROWID Tables (45/51 tests passing)
+    - [DONE] Composite PK key encoding (collation-aware, stable ordering)
+    - [DONE] Btree cursor comparator for composite keys
+    - [DONE] Split/rewind regression fix (statement cache invalidation)
+    - [DONE] rowid column rejection, FK validation for WITHOUT ROWID
+    - [DONE] ROLLBACK cache sync via pager callback
+    - [DONE] CASCADE FK: PKColumnIndices for proper PK extraction
+[x] VACUUM Operations (fixed)
+    - [DONE] sqlite_master persistence with conditional commit
+    - [DONE] Schema cookie management in commitTargetPager
+    - [DONE] VACUUM INTO schema persistence with commit
+[x] Window Functions - COMPLETE
+    - [DONE] ROW_NUMBER, RANK, DENSE_RANK, NTILE
+    - [DONE] LAG, LEAD, FIRST_VALUE, LAST_VALUE
+    - [DONE] ROWS/RANGE frame specification parsing
+[x] Sorter Spill-to-Disk - COMPLETE
+    - [DONE] SorterInterface abstraction for sorter types
+    - [DONE] SorterWithSpill: memory tracking, k-way merge, temp files
+    - [DONE] VDBE integration via NewSorterWithSpillAndRegistry
+    - [DONE] 10MB default memory limit, configurable
 
-(C) Add prepared statement LRU cache +Phase4 @driver file:internal/driver/stmt_cache.go
-(C) Add query plan cache by SQL hash +Phase4 @planner file:internal/planner/plan_cache.go
-(C) Add memory pooling with sync.Pool +Phase4 @vdbe file:internal/vdbe/pool.go
-(C) Add spill-to-disk for large sorter operations +Phase4 @vdbe file:internal/vdbe/sorter_spill.go
+================================================================================
+v0.2.0 - Planned Features
+================================================================================
 
-# ============================================================================
-# PHASE 5: CODE ARCHITECTURE
-# ============================================================================
+[ ] ANALYZE - Query optimizer statistics
+    - Collect histogram data for table columns
+    - Store in sqlite_stat1/sqlite_stat4 tables
+    - Integrate with cost estimator
 
-(C) Split stmt.go into compile_*.go files +Phase5 @driver file:internal/driver/stmt.go
-x 2026-02-28 2026-02-27 Segregate PagerInterface into Reader/Writer/Transaction +Phase5 @pager
-x 2026-02-28 2026-02-27 Create typed error hierarchy with SQLite codes +Phase5 @errors
-(C) Eliminate interface{} in VDBEContext +Phase5 @types file:internal/types/
+[ ] BACKUP - Online backup API
+    - Incremental backup support
+    - Progress callback
+    - Concurrent read access during backup
 
-# ============================================================================
-# PHASE 7: TESTING AND QUALITY
-# ============================================================================
+[ ] FTS5 - Full-text search
+    - Tokenizer infrastructure (internal/vtab/fts5/)
+    - Segment storage/merge, search operators (MATCH, NEAR, prefix)
+    - Ranking functions (bm25, etc.), highlight/offsets support
 
-(B) Enable skipped tests as features are fixed +Phase7 @testing skips:497
-x 2026-02-28 2026-02-27 Add concurrency tests with race detector +Phase7 @testing
-x 2026-02-28 2026-02-27 Add fuzzing tests for parser and btree +Phase7 @testing
-(C) Add performance benchmarks for CRUD operations +Phase7 @testing file:internal/driver/benchmark_test.go
+[ ] R-Tree - Spatial indexing
+    - Bounding box queries (internal/vtab/rtree/)
+    - Insert/Update/Delete operations and reinsertion/pack
+    - Index maintenance and 2D/3D configurations
 
-# ============================================================================
-# PHASE 8: CONFIGURATION AND EXTENSIBILITY
-# ============================================================================
+================================================================================
+Future Phases
+================================================================================
 
-(C) Add PagerConfig and DriverConfig structures +Phase8 @driver
-x 2026-03-05 2026-03-05 DSN parameter parsing for connection strings +Phase8 @driver file:internal/driver/dsn.go
-x 2026-02-28 2026-02-27 Expose virtual table registration API +Phase8 @driver
-(C) Expose custom collation registration +Phase8 @driver
+## Phase 4: Performance
+[ ] Prepared statement caching
+[ ] Connection pooling improvements
+[ ] Memory limits and spill-to-disk for large sorts
+[ ] Query plan caching
 
-# ============================================================================
-# PHASE 9: OBSERVABILITY
-# ============================================================================
+## Phase 5: Security
+[ ] Input validation hardening
+[ ] Resource limits enforcement
+[ ] SQL injection prevention audit
 
-(D) Add structured leveled logging +Phase9 @observability
-(D) Add query execution statistics +Phase9 @vdbe
-(D) Complete EXPLAIN QUERY PLAN with cost estimates +Phase9 @planner
-(D) Add VDBE instruction tracing debug mode +Phase9 @vdbe
+## Phase 6: Testing
+[ ] Fuzzing infrastructure
+[ ] Benchmarks vs reference SQLite
+[ ] Stress testing
 
-# ============================================================================
-# COMPLETED - PHASE 1: CRITICAL STABILITY
-# ============================================================================
+## Phase 7: Configuration
+[ ] DSN parsing improvements
+[ ] Custom collation support
+[ ] Extension loading
 
-x 2026-02-28 2026-02-27 Fix race condition in Conn.Close() +Phase1 @driver
-x 2026-02-28 2026-02-27 Add atomic operations for memoryCount +Phase1 @driver
-x 2026-02-28 2026-02-27 Fix Btree Pages map race condition +Phase1 @btree
-x 2026-02-28 2026-02-27 Document lock ordering hierarchy +Phase1 @docs
+================================================================================
+Known Limitations
+================================================================================
 
-# ============================================================================
-# COMPLETED - SECURITY AUDIT (11 Agents)
-# ============================================================================
-
-x 2026-02-28 2026-02-28 Security Agent 1: Path traversal prevention +Security @security
-x 2026-02-28 2026-02-28 Security Agent 2: Statement concurrency fixes +Security @driver
-x 2026-02-28 2026-02-28 Security Agent 3: Connection concurrency fixes +Security @driver
-x 2026-02-28 2026-02-28 Security Agent 4: Integer safety with checked arithmetic +Security @security
-x 2026-02-28 2026-02-28 Security Agent 5: Buffer safety with bounds checking +Security @vdbe
-x 2026-02-28 2026-02-28 Security Agent 6: Resource limits for SQL/memory/ops +Security @security
-x 2026-02-28 2026-02-28 Security Agent 7: Schema safety with RWMutex +Security @schema
-x 2026-02-28 2026-02-28 Security Agent 8: Btree safety with page ref counting +Security @btree
-x 2026-02-28 2026-02-28 Security Agent 9: Pager safety with state sync +Security @pager
-x 2026-02-28 2026-02-28 Security Agent 10: Security test suite (100+ tests) +Security @testing
-x 2026-02-28 2026-02-28 Security Agent 11: Security documentation +Security @docs
-
-# ============================================================================
-# COMPLETED - PHASE 6: SECURITY AND ROBUSTNESS
-# ============================================================================
-
-x 2026-02-28 2026-02-27 Path traversal prevention for database paths +Phase6 @security
-x 2026-02-28 2026-02-27 Integer overflow protection for page offsets +Phase6 @security
-x 2026-02-28 2026-02-27 Input size limits for SQL parsing +Phase6 @security
-x 2026-02-28 2026-02-27 Memory limits for cache and records +Phase6 @security
-
-# ============================================================================
-# COMPLETED - COMPLEXITY REDUCTION
-# ============================================================================
-
-x 2026-03-04 2026-02-27 Reduce cyclomatic complexity to <=10 for all functions +Complexity @refactor waves:3 before:107 after:0
-
-# ============================================================================
-# COMPLETED - v0.1.0 RELEASE
-# ============================================================================
-
-x 2026-03-04 2026-03-04 Tag and release v0.1.0 +Release @git tests:12306 skipped:759 failing:0
-
-# ============================================================================
-# COMPLETED - 2026-03-05 CONSTRAINT & CTE IMPROVEMENTS
-# ============================================================================
-
-x 2026-03-05 2026-03-05 Fix foreign key parser (ON DELETE/UPDATE/etc) +Constraints @parser
-x 2026-03-05 2026-03-05 Fix printf/format function implementation +Functions @vdbe
-x 2026-03-05 2026-03-05 Implement REINDEX parser and compiler +Parser @parser
-x 2026-03-05 2026-03-05 Add ROWID alias recognition (_rowid_, oid) +Parser @driver
-x 2026-03-05 2026-03-05 Add PRIMARY KEY constraint error messages +Constraints @vdbe
-x 2026-03-05 2026-03-05 Implement UNIQUE constraint violation detection +Constraints @vdbe
-x 2026-03-05 2026-03-05 Fix UNIQUE constraint cursor bug (separate read cursor) +Constraints @vdbe
-x 2026-03-05 2026-03-05 Implement NOT NULL constraint checking +Constraints @vdbe
-x 2026-03-05 2026-03-05 Fix CTE register adjustment for comparison opcodes +CTE @driver
-x 2026-03-05 2026-03-05 Fix CTE jump target vs comparison opcode handling +CTE @driver
-x 2026-03-05 2026-03-05 Add FK infrastructure (schema getters, PRAGMA support) +FK @schema
+- Windows file locking not implemented
+- ORDER BY mixed ASC/DESC with NULLs has edge cases (basic ORDER BY works)
+- Trigger execution is compile-time only (should be runtime)
+- ATTACH DATABASE partially implemented

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package constraint
 
 import (
@@ -36,6 +36,11 @@ func (m *MockRowReader) RowExists(table string, columns []string, values []inter
 	return false, nil
 }
 
+func (m *MockRowReader) RowExistsWithCollation(table string, columns []string, values []interface{}, collations []string) (bool, error) {
+	// For mock, delegate to RowExists - collation not needed in unit tests
+	return m.RowExists(table, columns, values)
+}
+
 func (m *MockRowReader) FindReferencingRows(table string, columns []string, values []interface{}) ([]int64, error) {
 	// First try the full key format
 	key := fmt.Sprintf("%s:%v:%v", table, columns, values)
@@ -69,6 +74,12 @@ func (m *MockRowReader) AddReferencingRows(table string, rowids []int64) {
 	// Store under a simple table key for CASCADE operations
 	key := table
 	m.referencingRows[key] = rowids
+}
+
+// ReadRowByRowid reads a row's column values by rowid (needed for recursive CASCADE)
+func (m *MockRowReader) ReadRowByRowid(table string, rowid int64) (map[string]interface{}, error) {
+	// Return empty row for mock - CASCADE tests don't need actual row values
+	return make(map[string]interface{}), nil
 }
 
 // MockRowDeleter implements RowDeleter for testing
@@ -683,6 +694,9 @@ func TestForeignKeyManager_DeferredConstraints(t *testing.T) {
 
 	reader := NewMockRowReader()
 
+	// Must be in a transaction for deferred constraints to work
+	mgr.SetInTransaction(true)
+
 	// Insert with invalid FK should succeed (deferred checking)
 	values := map[string]interface{}{
 		"id":          1,
@@ -693,6 +707,9 @@ func TestForeignKeyManager_DeferredConstraints(t *testing.T) {
 	if err != nil {
 		t.Errorf("Deferred constraint should skip immediate validation: %v", err)
 	}
+
+	// Clean up
+	mgr.SetInTransaction(false)
 }
 
 // TestForeignKeyManager_MultiColumnFK tests composite foreign keys

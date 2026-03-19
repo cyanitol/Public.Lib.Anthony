@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package functions
 
 import (
@@ -39,7 +39,7 @@ func TestLength(t *testing.T) {
 		{testText("世界"), 2}, // UTF-8 characters
 		{testText(""), 0},
 		{testBlob([]byte{1, 2, 3}), 3},
-		{testInt(12345), 8}, // int64 size
+		{testInt(12345), 5}, // string length matching SQLite behavior
 	}
 
 	for _, test := range tests {

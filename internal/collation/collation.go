@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 // Package collation provides collation sequences for string comparison operations.
 // This is a low-level package with no dependencies on other internal packages
 // except for utf, which provides the actual comparison implementations.
@@ -6,6 +6,7 @@ package collation
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/utf"
@@ -93,10 +94,13 @@ func (cr *CollationRegistry) Register(name string, fn CollationFunc) error {
 
 // Get retrieves a collation by name.
 // Returns the collation and true if found, nil and false otherwise.
+// Collation names are case-insensitive.
 func (cr *CollationRegistry) Get(name string) (*Collation, bool) {
 	cr.mu.RLock()
 	defer cr.mu.RUnlock()
 
+	// Normalize collation name to uppercase for case-insensitive lookup
+	name = strings.ToUpper(name)
 	coll, ok := cr.collations[name]
 	return coll, ok
 }

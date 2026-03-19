@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -404,7 +404,7 @@ func TestSQLiteOrderByExpression(t *testing.T) {
 // TestSQLiteOrderByWithNulls tests NULL handling in ORDER BY
 // Converted from sort.test
 func TestSQLiteOrderByWithNulls(t *testing.T) {
-	t.Skip("SKIP: ORDER BY NULL handling not yet correct")
+	t.Skip("SKIP: ORDER BY NULL handling not yet correct - mixed ASC/DESC with NULLs")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 

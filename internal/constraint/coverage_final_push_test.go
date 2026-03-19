@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package constraint
 
 import (
@@ -476,6 +476,9 @@ func TestForeignKeyManager_ValidateInsert_DeferredCheck(t *testing.T) {
 
 	reader := NewMockRowReader()
 
+	// Must be in a transaction for deferred constraints to work
+	mgr.SetInTransaction(true)
+
 	// Insert with invalid reference but deferred
 	values := map[string]interface{}{
 		"id":          1,
@@ -486,4 +489,7 @@ func TestForeignKeyManager_ValidateInsert_DeferredCheck(t *testing.T) {
 	if err != nil {
 		t.Errorf("Deferred constraint should skip validation: %v", err)
 	}
+
+	// Clean up
+	mgr.SetInTransaction(false)
 }

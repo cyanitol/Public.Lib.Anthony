@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -9,7 +9,7 @@ import (
 )
 
 func TestVacuum_Integration(t *testing.T) {
-	t.Skip("VACUUM not fully implemented")
+
 	// t.Skip("pre-existing failure")
 	dbFile := filepath.Join(t.TempDir(), "test.db")
 
@@ -75,7 +75,7 @@ func TestVacuum_Integration(t *testing.T) {
 }
 
 func TestVacuum_AfterDeletes(t *testing.T) {
-	t.Skip("VACUUM not fully implemented")
+
 	// t.Skip("pre-existing failure")
 	dbFile := filepath.Join(t.TempDir(), "test.db")
 
@@ -158,7 +158,7 @@ func TestVacuum_AfterDeletes(t *testing.T) {
 }
 
 func TestVacuum_Into(t *testing.T) {
-	t.Skip("VACUUM not fully implemented")
+
 	tempDir := t.TempDir()
 	sourceFile := filepath.Join(tempDir, "source.db")
 	// Use same temp directory for target so security check passes
@@ -243,7 +243,7 @@ func TestVacuum_Into(t *testing.T) {
 }
 
 func TestVacuum_MultipleVacuums(t *testing.T) {
-	t.Skip("VACUUM not fully implemented")
+
 	dbFile := filepath.Join(t.TempDir(), "test.db")
 
 	db, err := sql.Open("sqlite_internal", dbFile)
@@ -313,7 +313,7 @@ func TestVacuum_MultipleVacuums(t *testing.T) {
 }
 
 func TestVacuum_WithIndex(t *testing.T) {
-	t.Skip("VACUUM not fully implemented")
+
 	dbFile := filepath.Join(t.TempDir(), "test.db")
 
 	db, err := sql.Open("sqlite_internal", dbFile)

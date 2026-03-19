@@ -31,35 +31,35 @@ Search Changelog
 The SQLite Query Optimizer Overview
 
 Table Of Contents
-[1. Introduction](#introduction)
-[2. WHERE Clause Analysis](#where_clause_analysis)
-[2.1. Index Term Usage Examples](#index_term_usage_examples)
-[3. The BETWEEN Optimization](#the_between_optimization)
-[4. OR Optimizations](#or_optimizations)
-[4.1. Converting OR-connected constraint into an IN operator](#converting_or_connected_constraint_into_an_in_operator)
-[4.2. Evaluating OR constraints separately and taking the UNION of the result](#evaluating_or_constraints_separately_and_taking_the_union_of_the_result)
-[5. The LIKE Optimization](#the_like_optimization)
-[6. The Skip-Scan Optimization](#the_skip_scan_optimization)
-[7. Joins](#joins)
-[7.1. Manual Control Of Join Order](#manual_control_of_join_order)
-[7.1.1. Manual Control Of Query Plans Using SQLITE_STAT Tables](#manual_control_of_query_plans_using_sqlite_stat_tables)
-[7.1.2. Manual Control of Query Plans using CROSS JOIN](#manual_control_of_query_plans_using_cross_join)
-[8. Choosing Between Multiple Indexes](#choosing_between_multiple_indexes)
-[8.1. Disqualifying WHERE Clause Terms using Unary-"+"](#disqualifying_where_clause_terms_using_unary_)
-[8.2. Range Queries](#range_queries)
-[9. Covering Indexes](#covering_indexes)
-[10. ORDER BY Optimizations](#order_by_optimizations)
-[10.1. Partial ORDER BY via Index](#partial_order_by_via_index)
-[11. Subquery Flattening](#subquery_flattening)
-[12. Subquery Co-routines](#subquery_co_routines)
-[12.1. Using Co-routines to Defer Work until after the Sorting](#using_co_routines_to_defer_work_until_after_the_sorting)
-[13. The MIN/MAX Optimization](#the_min_max_optimization)
-[14. Automatic Query-Time Indexes](#automatic_query_time_indexes)
-[14.1. Hash Joins](#hash_joins)
-[15. The Predicate Push-Down Optimization](#the_predicate_push_down_optimization)
-[16. The OUTER JOIN Strength Reduction Optimization](#the_outer_join_strength_reduction_optimization)
-[17. The Omit OUTER JOIN Optimization](#the_omit_outer_join_optimization)
-[18. The Constant Propagation Optimization](#the_constant_propagation_optimization)
+[1. Introduction](#1-introduction)
+[2. WHERE Clause Analysis](#2-where-clause-analysis)
+[2.1. Index Term Usage Examples](#21-index-term-usage-examples)
+[3. The BETWEEN Optimization](#3-the-between-optimization)
+[4. OR Optimizations](#4-or-optimizations)
+[4.1. Converting OR-connected constraint into an IN operator](#41-converting-or-connected-constraint-into-an-in-operator)
+[4.2. Evaluating OR constraints separately and taking the UNION of the result](#42-evaluating-or-constraints-separately-and-taking-the-union-of-the-result)
+[5. The LIKE Optimization](#5-the-like-optimization)
+[6. The Skip-Scan Optimization](#6-the-skip-scan-optimization)
+[7. Joins](#7-joins)
+[7.1. Manual Control Of Join Order](#71-manual-control-of-join-order)
+[7.1.1. Manual Control Of Query Plans Using SQLITE_STAT Tables](#711-manual-control-of-query-plans-using-sqlite_stat-tables)
+[7.1.2. Manual Control of Query Plans using CROSS JOIN](#712-manual-control-of-query-plans-using-cross-join)
+[8. Choosing Between Multiple Indexes](#8-choosing-between-multiple-indexes)
+[8.1. Disqualifying WHERE Clause Terms using Unary-"+"](#81-disqualifying-where-clause-terms-using-unary)
+[8.2. Range Queries](#82-range-queries)
+[9. Covering Indexes](#9-covering-indexes)
+[10. ORDER BY Optimizations](#10-order-by-optimizations)
+[10.1. Partial ORDER BY via Index](#101-partial-order-by-via-index)
+[11. Subquery Flattening](#11-subquery-flattening)
+[12. Subquery Co-routines](#12-subquery-co-routines)
+[12.1. Using Co-routines to Defer Work until after the Sorting](#121-using-co-routines-to-defer-work-until-after-the-sorting)
+[13. The MIN/MAX Optimization](#13-the-minmax-optimization)
+[14. Automatic Query-Time Indexes](#14-automatic-query-time-indexes)
+[14.1. Hash Joins](#141-hash-joins)
+[15. The Predicate Push-Down Optimization](#15-the-predicate-push-down-optimization)
+[16. The OUTER JOIN Strength Reduction Optimization](#16-the-outer-join-strength-reduction-optimization)
+[17. The Omit OUTER JOIN Optimization](#17-the-omit-outer-join-optimization)
+[18. The Constant Propagation Optimization](#18-the-constant-propagation-optimization)
 
 # 1. Introduction
 
@@ -260,6 +260,8 @@ CREATE INDEX idx_ex1 ON ex1(a,b,c,d,e,...,y,z);
   Thus if the BETWEEN term is not used as an index constraint and
   instead must be used to test input rows, the *expr1* expression is
   only evaluated once.
+
+<a name="or_opt"></a>
 
 # 4. OR Optimizations
 
@@ -682,6 +684,8 @@ foreach n1 where n1.name='alice' do:
 end
 
 ```
+
+<a name="option2"></a>
 
 Option 2:
 

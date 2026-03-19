@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package sql
 
 import (
@@ -195,155 +195,167 @@ func TestRecordRoundTrip(t *testing.T) {
 	}
 }
 
-func TestEdgeCases(t *testing.T) {
-	t.Run("empty_string", func(t *testing.T) {
-		val := TextValue("")
+// testSingleValueRoundTrip is a helper that tests encoding and decoding a single value
+func testSingleValueRoundTrip(t *testing.T, val Value, checkFn func(*testing.T, Value)) {
+	t.Helper()
+	record, err := MakeRecord([]Value{val})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parsed, err := ParseRecord(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(parsed.Values) != 1 {
+		t.Fatalf("expected 1 value, got %d", len(parsed.Values))
+	}
+
+	checkFn(t, parsed.Values[0])
+}
+
+// testIntBoundaryRoundTrip is a helper that tests a set of int64 boundary values
+func testIntBoundaryRoundTrip(t *testing.T, values []int64) {
+	t.Helper()
+	for _, n := range values {
+		val := IntValue(n)
 		record, err := MakeRecord([]Value{val})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("failed to make record for %d: %v", n, err)
 		}
 
 		parsed, err := ParseRecord(record)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("failed to parse record for %d: %v", n, err)
 		}
 
-		if len(parsed.Values) != 1 {
-			t.Fatalf("expected 1 value, got %d", len(parsed.Values))
+		if parsed.Values[0].Int != n {
+			t.Errorf("boundary %d: got %d", n, parsed.Values[0].Int)
+		}
+	}
+}
+
+// testTextRoundTrip is a helper that tests text encoding/decoding
+func testTextRoundTrip(t *testing.T, texts []string) {
+	t.Helper()
+	for _, text := range texts {
+		val := TextValue(text)
+		record, err := MakeRecord([]Value{val})
+		if err != nil {
+			t.Fatalf("failed for text %q: %v", text, err)
 		}
 
-		if parsed.Values[0].Text != "" {
-			t.Errorf("expected empty string, got %q", parsed.Values[0].Text)
+		parsed, err := ParseRecord(record)
+		if err != nil {
+			t.Fatalf("failed to parse %q: %v", text, err)
 		}
+
+		if parsed.Values[0].Text != text {
+			t.Errorf("text mismatch: got %q, want %q", parsed.Values[0].Text, text)
+		}
+	}
+}
+
+// testMultiValueRoundTrip is a helper that tests encoding/decoding multiple values
+func testMultiValueRoundTrip(t *testing.T, values []Value) {
+	t.Helper()
+	record, err := MakeRecord(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parsed, err := ParseRecord(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(parsed.Values) != len(values) {
+		t.Fatalf("value count mismatch: got %d, want %d", len(parsed.Values), len(values))
+	}
+
+	for i, want := range values {
+		got := parsed.Values[i]
+		if !valuesEqual(got, want) {
+			t.Errorf("value %d mismatch: got %+v, want %+v", i, got, want)
+		}
+	}
+}
+
+func TestEdgeCases(t *testing.T) {
+	testEdgeCasesEmptyValues(t)
+	testEdgeCasesIntBoundaries(t)
+	testEdgeCasesSpecialFloats(t)
+	testEdgeCasesUnicode(t)
+	testEdgeCasesLargeRecords(t)
+}
+
+func testEdgeCasesEmptyValues(t *testing.T) {
+	t.Run("empty_string", func(t *testing.T) {
+		testSingleValueRoundTrip(t, TextValue(""), func(t *testing.T, v Value) {
+			if v.Text != "" {
+				t.Errorf("expected empty string, got %q", v.Text)
+			}
+		})
 	})
 
 	t.Run("empty_blob", func(t *testing.T) {
-		val := BlobValue([]byte{})
-		record, err := MakeRecord([]Value{val})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		parsed, err := ParseRecord(record)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if len(parsed.Values) != 1 {
-			t.Fatalf("expected 1 value, got %d", len(parsed.Values))
-		}
-
-		if len(parsed.Values[0].Blob) != 0 {
-			t.Errorf("expected empty blob, got %d bytes", len(parsed.Values[0].Blob))
-		}
+		testSingleValueRoundTrip(t, BlobValue([]byte{}), func(t *testing.T, v Value) {
+			if len(v.Blob) != 0 {
+				t.Errorf("expected empty blob, got %d bytes", len(v.Blob))
+			}
+		})
 	})
 
 	t.Run("large_text", func(t *testing.T) {
 		text := string(make([]byte, 10000))
-		val := TextValue(text)
-		record, err := MakeRecord([]Value{val})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		parsed, err := ParseRecord(record)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if parsed.Values[0].Text != text {
-			t.Error("large text mismatch")
-		}
+		testSingleValueRoundTrip(t, TextValue(text), func(t *testing.T, v Value) {
+			if v.Text != text {
+				t.Error("large text mismatch")
+			}
+		})
 	})
+}
 
+func testEdgeCasesIntBoundaries(t *testing.T) {
 	t.Run("max_int64", func(t *testing.T) {
-		val := IntValue(9223372036854775807) // math.MaxInt64
-		record, err := MakeRecord([]Value{val})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		parsed, err := ParseRecord(record)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if parsed.Values[0].Int != 9223372036854775807 {
-			t.Errorf("expected max int64, got %d", parsed.Values[0].Int)
-		}
+		testSingleValueRoundTrip(t, IntValue(9223372036854775807), func(t *testing.T, v Value) {
+			if v.Int != 9223372036854775807 {
+				t.Errorf("expected max int64, got %d", v.Int)
+			}
+		})
 	})
 
 	t.Run("min_int64", func(t *testing.T) {
-		val := IntValue(-9223372036854775808) // math.MinInt64
-		record, err := MakeRecord([]Value{val})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		parsed, err := ParseRecord(record)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if parsed.Values[0].Int != -9223372036854775808 {
-			t.Errorf("expected min int64, got %d", parsed.Values[0].Int)
-		}
+		testSingleValueRoundTrip(t, IntValue(-9223372036854775808), func(t *testing.T, v Value) {
+			if v.Int != -9223372036854775808 {
+				t.Errorf("expected min int64, got %d", v.Int)
+			}
+		})
 	})
 
 	t.Run("int24_boundaries", func(t *testing.T) {
-		tests := []int64{
+		testIntBoundaryRoundTrip(t, []int64{
 			-8388608, // min int24
 			-8388607,
 			-1,
 			0,
 			1,
 			8388607, // max int24
-		}
-
-		for _, n := range tests {
-			val := IntValue(n)
-			record, err := MakeRecord([]Value{val})
-			if err != nil {
-				t.Fatalf("failed to make record for %d: %v", n, err)
-			}
-
-			parsed, err := ParseRecord(record)
-			if err != nil {
-				t.Fatalf("failed to parse record for %d: %v", n, err)
-			}
-
-			if parsed.Values[0].Int != n {
-				t.Errorf("int24 boundary %d: got %d", n, parsed.Values[0].Int)
-			}
-		}
+		})
 	})
 
 	t.Run("int48_boundaries", func(t *testing.T) {
-		tests := []int64{
+		testIntBoundaryRoundTrip(t, []int64{
 			-140737488355328, // min int48
 			-140737488355327,
 			140737488355326,
 			140737488355327, // max int48
-		}
-
-		for _, n := range tests {
-			val := IntValue(n)
-			record, err := MakeRecord([]Value{val})
-			if err != nil {
-				t.Fatalf("failed to make record for %d: %v", n, err)
-			}
-
-			parsed, err := ParseRecord(record)
-			if err != nil {
-				t.Fatalf("failed to parse record for %d: %v", n, err)
-			}
-
-			if parsed.Values[0].Int != n {
-				t.Errorf("int48 boundary %d: got %d", n, parsed.Values[0].Int)
-			}
-		}
+		})
 	})
+}
 
+func testEdgeCasesSpecialFloats(t *testing.T) {
 	t.Run("special_floats", func(t *testing.T) {
 		// Note: NaN != NaN, so we handle it specially
 		tests := []struct {
@@ -360,100 +372,48 @@ func TestEdgeCases(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				val := FloatValue(tt.value)
-				record, err := MakeRecord([]Value{val})
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				parsed, err := ParseRecord(record)
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				if !tt.check(parsed.Values[0].Float) {
-					t.Errorf("special float %s: got %v, want %v", tt.name, parsed.Values[0].Float, tt.value)
-				}
+				testSingleValueRoundTrip(t, FloatValue(tt.value), func(t *testing.T, v Value) {
+					if !tt.check(v.Float) {
+						t.Errorf("special float %s: got %v, want %v", tt.name, v.Float, tt.value)
+					}
+				})
 			})
 		}
 	})
+}
 
+func testEdgeCasesUnicode(t *testing.T) {
 	t.Run("unicode_text", func(t *testing.T) {
-		texts := []string{
+		testTextRoundTrip(t, []string{
 			"Hello, 世界",
 			"🎉🎊🎈",
 			"Привет мир",
 			"مرحبا بالعالم",
 			"こんにちは世界",
-		}
-
-		for _, text := range texts {
-			val := TextValue(text)
-			record, err := MakeRecord([]Value{val})
-			if err != nil {
-				t.Fatalf("failed for text %q: %v", text, err)
-			}
-
-			parsed, err := ParseRecord(record)
-			if err != nil {
-				t.Fatalf("failed to parse %q: %v", text, err)
-			}
-
-			if parsed.Values[0].Text != text {
-				t.Errorf("unicode text mismatch: got %q, want %q", parsed.Values[0].Text, text)
-			}
-		}
+		})
 	})
 
 	t.Run("binary_blob", func(t *testing.T) {
-		// Test blob with all byte values
 		blob := make([]byte, 256)
 		for i := range blob {
 			blob[i] = byte(i)
 		}
 
-		val := BlobValue(blob)
-		record, err := MakeRecord([]Value{val})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		parsed, err := ParseRecord(record)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if !bytes.Equal(parsed.Values[0].Blob, blob) {
-			t.Error("binary blob mismatch")
-		}
+		testSingleValueRoundTrip(t, BlobValue(blob), func(t *testing.T, v Value) {
+			if !bytes.Equal(v.Blob, blob) {
+				t.Error("binary blob mismatch")
+			}
+		})
 	})
+}
 
+func testEdgeCasesLargeRecords(t *testing.T) {
 	t.Run("large_record_many_columns", func(t *testing.T) {
-		// Create a record with 1000 columns
 		values := make([]Value, 1000)
 		for i := range values {
 			values[i] = IntValue(int64(i))
 		}
-
-		record, err := MakeRecord(values)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		parsed, err := ParseRecord(record)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if len(parsed.Values) != 1000 {
-			t.Fatalf("expected 1000 values, got %d", len(parsed.Values))
-		}
-
-		for i := range values {
-			if parsed.Values[i].Int != int64(i) {
-				t.Errorf("column %d: got %d, want %d", i, parsed.Values[i].Int, i)
-			}
-		}
+		testMultiValueRoundTrip(t, values)
 	})
 
 	t.Run("mixed_types_comprehensive", func(t *testing.T) {
@@ -485,27 +445,7 @@ func TestEdgeCases(t *testing.T) {
 			BlobValue([]byte{0}),
 			BlobValue([]byte{0xFF, 0xFE, 0xFD}),
 		}
-
-		record, err := MakeRecord(values)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		parsed, err := ParseRecord(record)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if len(parsed.Values) != len(values) {
-			t.Fatalf("value count mismatch: got %d, want %d", len(parsed.Values), len(values))
-		}
-
-		for i, want := range values {
-			got := parsed.Values[i]
-			if !valuesEqual(got, want) {
-				t.Errorf("value %d mismatch: got %+v, want %+v", i, got, want)
-			}
-		}
+		testMultiValueRoundTrip(t, values)
 	})
 }
 

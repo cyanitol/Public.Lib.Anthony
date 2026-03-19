@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package btree
 
 import (
@@ -12,6 +12,7 @@ import (
 // CellInfo contains parsed information about a B-tree cell
 type CellInfo struct {
 	Key          int64  // The integer key for table b-trees, or payload size for index b-trees
+	KeyBytes     []byte // Composite key bytes for WITHOUT ROWID tables (when not using intkey)
 	Payload      []byte // Pointer to start of payload data
 	PayloadSize  uint32 // Total bytes of payload
 	LocalPayload uint16 // Amount of payload stored locally (not in overflow pages)
@@ -25,8 +26,12 @@ func ParseCell(pageType byte, cellData []byte, usableSize uint32) (*CellInfo, er
 	switch pageType {
 	case PageTypeLeafTable:
 		return parseTableLeafCell(cellData, usableSize)
+	case PageTypeLeafTableNoInt:
+		return parseTableLeafCompositeCell(cellData, usableSize)
 	case PageTypeInteriorTable:
 		return parseTableInteriorCell(cellData)
+	case PageTypeInteriorTableNo:
+		return parseTableInteriorCompositeCell(cellData)
 	case PageTypeLeafIndex:
 		return parseIndexLeafCell(cellData, usableSize)
 	case PageTypeInteriorIndex:
@@ -46,6 +51,40 @@ func parseTableLeafCell(cellData []byte, usableSize uint32) (*CellInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	return completeLeafCellParse(info, cellData, offset, usableSize)
+}
+
+// parseTableLeafCompositeCell parses WITHOUT ROWID table leaf cell
+// Format: varint(payload_size), varint(key_bytes_len), key_bytes, payload
+func parseTableLeafCompositeCell(cellData []byte, usableSize uint32) (*CellInfo, error) {
+	if len(cellData) == 0 {
+		return nil, fmt.Errorf("empty cell data")
+	}
+	offset := 0
+	info := &CellInfo{}
+
+	payloadSize64, n := GetVarint(cellData[offset:])
+	if n == 0 {
+		return nil, fmt.Errorf("failed to read payload size")
+	}
+	if payloadSize64 > math.MaxUint32 {
+		return nil, security.ErrIntegerOverflow
+	}
+	info.PayloadSize = uint32(payloadSize64)
+	offset += n
+
+	keyLen64, n := GetVarint(cellData[offset:])
+	if n == 0 {
+		return nil, fmt.Errorf("failed to read composite key length")
+	}
+	offset += n
+	if keyLen64 > uint64(len(cellData)-offset) {
+		return nil, fmt.Errorf("composite key length exceeds cell size")
+	}
+	keyLen := int(keyLen64)
+	info.KeyBytes = append([]byte(nil), cellData[offset:offset+keyLen]...)
+	offset += keyLen
+
 	return completeLeafCellParse(info, cellData, offset, usableSize)
 }
 
@@ -84,11 +123,19 @@ func completeLeafCellParse(info *CellInfo, cellData []byte, offset int, usableSi
 	calculateCellSizeAndLocal(info, offset, maxLocal, minLocal, usableSize)
 
 	if offset+int(info.LocalPayload) > len(cellData) {
-		return nil, fmt.Errorf("cell data truncated")
+		// If the encoded payload is larger than available, but there is room for an
+		// overflow pointer, treat the extra bytes as overflow rather than corrupt data.
+		available := len(cellData) - offset
+		if available <= 4 {
+			return nil, fmt.Errorf("cell data truncated")
+		}
+		local := available - 4
+		info.LocalPayload = uint16(local)
+		info.CellSize = uint16(offset + local + 4)
 	}
 	info.Payload = cellData[offset : offset+int(info.LocalPayload)]
 
-	return extractOverflowPage(info, cellData, offset, maxLocal)
+	return extractOverflowPage(info, cellData, offset)
 }
 
 // calculateCellSizeAndLocal sets LocalPayload and CellSize.
@@ -122,8 +169,8 @@ func calculateCellSizeAndLocal(info *CellInfo, offset int, maxLocal, minLocal, u
 }
 
 // extractOverflowPage reads the overflow page number if present.
-func extractOverflowPage(info *CellInfo, cellData []byte, offset int, maxLocal uint32) (*CellInfo, error) {
-	if info.PayloadSize <= maxLocal {
+func extractOverflowPage(info *CellInfo, cellData []byte, offset int) (*CellInfo, error) {
+	if info.PayloadSize <= uint32(info.LocalPayload) {
 		return info, nil
 	}
 	overflowOffset := offset + int(info.LocalPayload)
@@ -157,6 +204,31 @@ func parseTableInteriorCell(cellData []byte) (*CellInfo, error) {
 	info.Key = int64(rowid)
 	info.CellSize = uint16(4 + n)
 
+	return info, nil
+}
+
+// parseTableInteriorCompositeCell parses a WITHOUT ROWID interior cell:
+// child page number (4 bytes) followed by varint key length and key bytes.
+func parseTableInteriorCompositeCell(cellData []byte) (*CellInfo, error) {
+	if len(cellData) < 4 {
+		return nil, fmt.Errorf("cell data too small for interior composite cell")
+	}
+	info := &CellInfo{}
+	offset := 0
+	info.ChildPage = binary.BigEndian.Uint32(cellData[offset:])
+	offset += 4
+
+	keyLen64, n := GetVarint(cellData[offset:])
+	if n == 0 {
+		return nil, fmt.Errorf("failed to read composite key length")
+	}
+	offset += n
+	if keyLen64 > uint64(len(cellData)-offset) {
+		return nil, fmt.Errorf("composite key length exceeds cell size")
+	}
+	keyLen := int(keyLen64)
+	info.KeyBytes = append([]byte(nil), cellData[offset:offset+keyLen]...)
+	info.CellSize = uint16(4 + n + keyLen)
 	return info, nil
 }
 
@@ -358,7 +430,7 @@ func (c *CellInfo) String() string {
 }
 
 // EncodeTableLeafCell encodes a table leaf cell with the given rowid and payload
-// Format: varint(payload_size), varint(rowid), payload, [overflow_page_number]
+// Format: varint(payload_size), varint(rowid), payload
 func EncodeTableLeafCell(rowid int64, payload []byte) []byte {
 	payloadSize := uint64(len(payload))
 
@@ -384,6 +456,31 @@ func EncodeTableLeafCell(rowid int64, payload []byte) []byte {
 	return buf[:offset]
 }
 
+// EncodeTableLeafCompositeCell encodes a WITHOUT ROWID leaf cell (composite key).
+// Format: varint(payload_size), varint(key_len), key_bytes, payload
+func EncodeTableLeafCompositeCell(keyBytes []byte, payload []byte) []byte {
+	payloadSize := uint64(len(payload))
+	keyLen := uint64(len(keyBytes))
+
+	bufSize := 9 + 9 + len(keyBytes) + len(payload)
+	buf := make([]byte, bufSize)
+	offset := 0
+
+	n := PutVarint(buf[offset:], payloadSize)
+	offset += n
+
+	n = PutVarint(buf[offset:], keyLen)
+	offset += n
+
+	copy(buf[offset:], keyBytes)
+	offset += len(keyBytes)
+
+	copy(buf[offset:], payload)
+	offset += len(payload)
+
+	return buf[:offset]
+}
+
 // EncodeTableInteriorCell encodes a table interior cell with the given child page and rowid
 // Format: 4-byte child page number, varint(rowid)
 func EncodeTableInteriorCell(childPage uint32, rowid int64) []byte {
@@ -400,6 +497,24 @@ func EncodeTableInteriorCell(childPage uint32, rowid int64) []byte {
 	offset += n
 
 	// Return the actual used portion
+	return buf[:offset]
+}
+
+// EncodeTableInteriorCompositeCell encodes an interior cell for composite keys.
+// Format: 4-byte child page number, varint(key_len), key_bytes
+func EncodeTableInteriorCompositeCell(childPage uint32, keyBytes []byte) []byte {
+	buf := make([]byte, 4+9+len(keyBytes))
+	offset := 0
+
+	binary.BigEndian.PutUint32(buf[offset:], childPage)
+	offset += 4
+
+	n := PutVarint(buf[offset:], uint64(len(keyBytes)))
+	offset += n
+
+	copy(buf[offset:], keyBytes)
+	offset += len(keyBytes)
+
 	return buf[:offset]
 }
 

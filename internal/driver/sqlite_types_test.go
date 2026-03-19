@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -1152,6 +1152,14 @@ func TestCastSpecialNumeric(t *testing.T) {
 	}
 }
 
+// typesAffinityColumnTest defines a column type verification test
+type typesAffinityColumnTest struct {
+	name     string
+	column   string
+	query    string
+	expected []string
+}
+
 // TestAffinityWithIndexes tests type affinity with different column types and indexes
 // From affinity2.test lines 19-60
 func TestAffinityWithIndexes(t *testing.T) {
@@ -1165,7 +1173,46 @@ func TestAffinityWithIndexes(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec(`CREATE TABLE t1(
+	typesAffinitySetupDB(t, db)
+
+	tests := []typesAffinityColumnTest{
+		{
+			name:     "integer_column_types",
+			column:   "xi",
+			query:    "SELECT xi, typeof(xi) FROM t1 ORDER BY rowid",
+			expected: []string{"integer", "integer", "integer"},
+		},
+		{
+			name:     "real_column_types",
+			column:   "xr",
+			query:    "SELECT xr, typeof(xr) FROM t1 ORDER BY rowid",
+			expected: []string{"real", "real", "real"},
+		},
+		{
+			name:     "blob_column_types",
+			column:   "xb",
+			query:    "SELECT xb, typeof(xb) FROM t1 ORDER BY rowid",
+			expected: []string{"integer", "text", "text"},
+		},
+		{
+			name:     "text_column_types",
+			column:   "xt",
+			query:    "SELECT xt, typeof(xt) FROM t1 ORDER BY rowid",
+			expected: []string{"text", "text", "text"},
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			typesAffinityVerifyColumnTypes(t, db, test)
+		})
+	}
+}
+
+// typesAffinitySetupDB creates table and inserts test data
+func typesAffinitySetupDB(t *testing.T, db *sql.DB) {
+	_, err := db.Exec(`CREATE TABLE t1(
 		xi INTEGER,
 		xr REAL,
 		xb BLOB,
@@ -1176,113 +1223,39 @@ func TestAffinityWithIndexes(t *testing.T) {
 		t.Fatalf("failed to create table: %v", err)
 	}
 
-	// Insert test data
-	_, err = db.Exec("INSERT INTO t1(rowid,xi,xr,xb,xn,xt) VALUES(1,1,1,1,1,1)")
-	if err != nil {
-		t.Fatalf("failed to insert row 1: %v", err)
+	inserts := []string{
+		"INSERT INTO t1(rowid,xi,xr,xb,xn,xt) VALUES(1,1,1,1,1,1)",
+		"INSERT INTO t1(rowid,xi,xr,xb,xn,xt) VALUES(2,'2','2','2','2','2')",
+		"INSERT INTO t1(rowid,xi,xr,xb,xn,xt) VALUES(3,'03','03','03','03','03')",
 	}
 
-	_, err = db.Exec("INSERT INTO t1(rowid,xi,xr,xb,xn,xt) VALUES(2,'2','2','2','2','2')")
-	if err != nil {
-		t.Fatalf("failed to insert row 2: %v", err)
+	for i, insert := range inserts {
+		if _, err := db.Exec(insert); err != nil {
+			t.Fatalf("failed to insert row %d: %v", i+1, err)
+		}
 	}
+}
 
-	_, err = db.Exec("INSERT INTO t1(rowid,xi,xr,xb,xn,xt) VALUES(3,'03','03','03','03','03')")
+// typesAffinityVerifyColumnTypes verifies column types match expected values
+func typesAffinityVerifyColumnTypes(t *testing.T, db *sql.DB, test typesAffinityColumnTest) {
+	rows, err := db.Query(test.query)
 	if err != nil {
-		t.Fatalf("failed to insert row 3: %v", err)
+		t.Fatalf("failed to query: %v", err)
 	}
+	defer rows.Close()
 
-	// Check INTEGER column
-	t.Run("integer_column_types", func(t *testing.T) {
-		rows, err := db.Query("SELECT xi, typeof(xi) FROM t1 ORDER BY rowid")
-		if err != nil {
-			t.Fatalf("failed to query: %v", err)
+	i := 0
+	for rows.Next() {
+		var val interface{}
+		var typ string
+		if err := rows.Scan(&val, &typ); err != nil {
+			t.Fatalf("failed to scan: %v", err)
 		}
-		defer rows.Close()
-
-		expected := []string{"integer", "integer", "integer"}
-		i := 0
-		for rows.Next() {
-			var val int64
-			var typ string
-			if err := rows.Scan(&val, &typ); err != nil {
-				t.Fatalf("failed to scan: %v", err)
-			}
-			if typ != expected[i] {
-				t.Errorf("row %d: got type %s, want %s", i+1, typ, expected[i])
-			}
-			i++
+		if typ != test.expected[i] {
+			t.Errorf("row %d: got type %s, want %s", i+1, typ, test.expected[i])
 		}
-	})
-
-	// Check REAL column
-	t.Run("real_column_types", func(t *testing.T) {
-		rows, err := db.Query("SELECT xr, typeof(xr) FROM t1 ORDER BY rowid")
-		if err != nil {
-			t.Fatalf("failed to query: %v", err)
-		}
-		defer rows.Close()
-
-		expected := []string{"real", "real", "real"}
-		i := 0
-		for rows.Next() {
-			var val float64
-			var typ string
-			if err := rows.Scan(&val, &typ); err != nil {
-				t.Fatalf("failed to scan: %v", err)
-			}
-			if typ != expected[i] {
-				t.Errorf("row %d: got type %s, want %s", i+1, typ, expected[i])
-			}
-			i++
-		}
-	})
-
-	// Check BLOB column - no affinity, stores as-is
-	t.Run("blob_column_types", func(t *testing.T) {
-		rows, err := db.Query("SELECT xb, typeof(xb) FROM t1 ORDER BY rowid")
-		if err != nil {
-			t.Fatalf("failed to query: %v", err)
-		}
-		defer rows.Close()
-
-		expected := []string{"integer", "text", "text"}
-		i := 0
-		for rows.Next() {
-			var val interface{}
-			var typ string
-			if err := rows.Scan(&val, &typ); err != nil {
-				t.Fatalf("failed to scan: %v", err)
-			}
-			if typ != expected[i] {
-				t.Errorf("row %d: got type %s, want %s", i+1, typ, expected[i])
-			}
-			i++
-		}
-	})
-
-	// Check TEXT column
-	t.Run("text_column_types", func(t *testing.T) {
-		rows, err := db.Query("SELECT xt, typeof(xt) FROM t1 ORDER BY rowid")
-		if err != nil {
-			t.Fatalf("failed to query: %v", err)
-		}
-		defer rows.Close()
-
-		expected := []string{"text", "text", "text"}
-		i := 0
-		for rows.Next() {
-			var val string
-			var typ string
-			if err := rows.Scan(&val, &typ); err != nil {
-				t.Fatalf("failed to scan: %v", err)
-			}
-			if typ != expected[i] {
-				t.Errorf("row %d: got type %s, want %s", i+1, typ, expected[i])
-			}
-			i++
-		}
-	})
+		i++
+	}
 }
 
 // TestAffinityEquality tests equality comparisons across different affinities

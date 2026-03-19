@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package planner
 
 import (
@@ -293,10 +293,43 @@ func flattenSimpleView(outer *parser.SelectStmt, tableIdx int, view *schema.View
 		}
 	}
 
+	// Apply alias-based column mapping from view's SELECT columns.
+	// E.g., CREATE VIEW v AS SELECT a AS id FROM t => map "id" -> "a".
+	applySelectAliasMapping(outer, viewSelect)
+
 	handleSelectStar(outer, viewSelect)
 	mergeWhereClauses(outer, viewSelect)
 
 	return outer, nil
+}
+
+// applySelectAliasMapping rewrites column references in the outer query
+// based on aliases in the view's SELECT columns. For example, if the view
+// has SELECT a AS id, then references to "id" in the outer query are
+// rewritten to reference "a".
+func applySelectAliasMapping(outer *parser.SelectStmt, viewSelect *parser.SelectStmt) {
+	aliasMap := buildSelectAliasMap(viewSelect)
+	if len(aliasMap) == 0 {
+		return
+	}
+	rewriteSelectColumns(outer, aliasMap)
+	rewriteWhereClause(outer, aliasMap)
+	rewriteOrderByClause(outer, aliasMap)
+	rewriteGroupByClause(outer, aliasMap)
+	rewriteHavingClause(outer, aliasMap)
+}
+
+// buildSelectAliasMap builds a mapping from alias names to underlying expressions
+// for columns that have aliases in the view's SELECT.
+func buildSelectAliasMap(viewSelect *parser.SelectStmt) map[string]parser.Expression {
+	aliasMap := make(map[string]parser.Expression)
+	for _, col := range viewSelect.Columns {
+		if col.Alias == "" {
+			continue
+		}
+		aliasMap[col.Alias] = col.Expr
+	}
+	return aliasMap
 }
 
 // resolveViewSelect resolves a view's SELECT, recursively flattening nested views

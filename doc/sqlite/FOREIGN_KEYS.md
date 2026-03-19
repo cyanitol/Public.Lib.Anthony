@@ -31,19 +31,19 @@ Search Changelog
 SQLite Foreign Key Support
 
 Table Of Contents
-[1. Introduction to Foreign Key Constraints](#fk_basics)
+[1. Introduction to Foreign Key Constraints](#1-introduction-to-foreign-key-constraints)
 [2.
 Enabling Foreign Key Support
 ](#fk_enable)
-[3. Required and Suggested Database Indexes](#fk_indexes)
-[4. Advanced Foreign Key Constraint Features](#fk_advanced)
-[4.1. Composite Foreign Key Constraints](#fk_composite)
-[4.2. Deferred Foreign Key Constraints](#fk_deferred)
+[3. Required and Suggested Database Indexes](#3-required-and-suggested-database-indexes)
+[4. Advanced Foreign Key Constraint Features](#4-advanced-foreign-key-constraint-features)
+[4.1. Composite Foreign Key Constraints](#41-composite-foreign-key-constraints)
+[4.2. Deferred Foreign Key Constraints](#42-deferred-foreign-key-constraints)
 [4.3.
 ON DELETE and ON UPDATE Actions
 ](#fk_actions)
-[5. CREATE, ALTER and DROP TABLE commands](#fk_schemacommands)
-[6. Limits and Unsupported Features](#fk_unsupported)
+[5. CREATE, ALTER and DROP TABLE commands](#5-create-alter-and-drop-table-commands)
+[6. Limits and Unsupported Features](#6-limits-and-unsupported-features)
 
 ##  Overview
 
@@ -66,6 +66,8 @@ The first section introduces the
 This document does not contain a full description of the syntax used
    to create foreign key constraints in SQLite. This may be found as 
    part of the documentation for the [CREATE TABLE](lang_createtable.html) statement.
+
+<a name="fk_basics"></a>
 
 # 1. Introduction to Foreign Key Constraints
 
@@ -1057,7 +1059,7 @@ null
 
       **No support for switching constraints between deferred and immediate 
          mode.** Many systems allow the user to toggle individual foreign key
-         constraints between [deferred](#fk_deferred) and immediate 
+         constraints between [deferred](#42-deferred-foreign-key-constraints) and immediate 
          mode at runtime (for example using the Oracle "SET CONSTRAINT" command).
          SQLite does not support this. In SQLite, a foreign key constraint is
          permanently marked as deferred or immediate when it is created.

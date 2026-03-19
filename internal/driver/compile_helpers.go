@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -33,12 +33,20 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 		return nil, err
 	}
 
+	// Resolve NATURAL/USING joins into ON conditions
+	s.resolveJoinConditions(stmt, tables)
+
 	// Setup VDBE and code generator (with table info and args for WHERE)
 	numCols, gen := s.setupJoinVDBE(vm, stmt, tables, args)
 
 	// Handle ORDER BY - requires sorter
 	if len(stmt.OrderBy) > 0 {
 		return s.compileSelectWithJoinsAndOrderBy(vm, stmt, tables, numCols, gen)
+	}
+
+	// Use LEFT JOIN aware path when any join is a LEFT JOIN
+	if hasLeftJoin(stmt) {
+		return s.compileJoinsWithLeftSupport(vm, stmt, tables, numCols, gen)
 	}
 
 	// Emit scan preamble and open cursors
@@ -61,40 +69,31 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 
 // compileSelectWithJoinsAndOrderBy compiles a SELECT with JOINs and ORDER BY using a sorter.
 func (s *Stmt) compileSelectWithJoinsAndOrderBy(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int, gen *expr.CodeGenerator) (*vdbe.VDBE, error) {
+	// Reserve registers for SELECT columns before resolving ORDER BY
+	gen.SetNextReg(numCols)
+
 	// Resolve ORDER BY columns and setup sorter
 	orderInfo := s.resolveOrderByColumnsMultiTable(stmt, tables, numCols, gen)
 	gen.SetNextReg(orderInfo.sorterCols)
 	keyInfo := s.createSorterKeyInfo(orderInfo)
 
-	// Emit initialization, open all cursors, and sorter
+	// Emit initialization, open non-temp cursors, and sorter
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	for _, tbl := range tables {
-		vm.AddOp(vdbe.OpOpenRead, tbl.cursorIdx, int(tbl.table.RootPage), len(tbl.table.Columns))
+		if !tbl.table.Temp {
+			vm.AddOp(vdbe.OpOpenRead, tbl.cursorIdx, int(tbl.table.RootPage), len(tbl.table.Columns))
+		}
 	}
 	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, 0, orderInfo.sorterCols, 0)
 	vm.Program[sorterOpenAddr].P4.P = keyInfo
 
-	// Setup nested loops for joined tables
-	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+	rewindAddr := vm.AddOp(vdbe.OpRewind, tables[0].cursorIdx, 0, 0)
 	loopStart := vm.NumOps()
-	innerLoopStarts, innerRewindAddrs := s.emitJoinNestedLoopsWithRewinds(vm, tables)
 
-	// Emit WHERE filter and populate sorter
-	if err := s.emitJoinSorterPopulation(vm, stmt, tables, orderInfo, numCols, gen); err != nil {
-		return nil, err
-	}
-
-	// Close all cursors after populating sorter
-	for i := len(tables) - 1; i > 0; i-- {
-		vm.AddOp(vdbe.OpNext, i, innerLoopStarts[i-1], 0)
-		vm.AddOp(vdbe.OpClose, i, 0, 0)
-	}
-	outerNextAddr := vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
-	vm.AddOp(vdbe.OpClose, 0, 0, 0)
-
-	// Fix inner loop Rewind addresses to jump to outer Next if empty
-	for _, addr := range innerRewindAddrs {
-		vm.Program[addr].P2 = outerNextAddr
+	if hasLeftJoin(stmt) {
+		s.emitLeftJoinSorterBody(vm, stmt, tables, numCols, gen, orderInfo, loopStart)
+	} else {
+		s.emitInnerJoinSorterBody(vm, stmt, tables, numCols, gen, orderInfo, loopStart)
 	}
 
 	// Emit sorter output loop
@@ -111,13 +110,59 @@ func (s *Stmt) compileSelectWithJoinsAndOrderBy(vm *vdbe.VDBE, stmt *parser.Sele
 	return vm, nil
 }
 
+// emitInnerJoinSorterBody emits the nested loop + sorter population for INNER JOINs.
+func (s *Stmt) emitInnerJoinSorterBody(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int, gen *expr.CodeGenerator, orderInfo *orderByColumnInfo, loopStart int) {
+	innerLoopStarts, innerRewindAddrs := s.emitJoinNestedLoopsWithRewinds(vm, tables)
+
+	_ = s.emitJoinSorterPopulation(vm, stmt, tables, orderInfo, numCols, gen)
+
+	for i := len(tables) - 1; i > 0; i-- {
+		vm.AddOp(vdbe.OpNext, tables[i].cursorIdx, innerLoopStarts[i-1], 0)
+	}
+	outerNextAddr := vm.AddOp(vdbe.OpNext, tables[0].cursorIdx, loopStart, 0)
+
+	for i := len(tables) - 1; i >= 0; i-- {
+		if !tables[i].table.Temp {
+			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
+		}
+	}
+
+	for _, addr := range innerRewindAddrs {
+		vm.Program[addr].P2 = outerNextAddr
+	}
+}
+
+// emitLeftJoinSorterBody emits the nested loop + sorter population with LEFT JOIN support.
+func (s *Stmt) emitLeftJoinSorterBody(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int, gen *expr.CodeGenerator, orderInfo *orderByColumnInfo, loopStart int) {
+	joinCount := len(stmt.From.Joins)
+	flagRegs := make([]int, joinCount)
+	for i := range flagRegs {
+		flagRegs[i] = gen.AllocReg()
+	}
+
+	ctx := &leftSorterCtx{
+		leftJoinCtx: leftJoinCtx{
+			vm: vm, stmt: stmt, tables: tables,
+			numCols: numCols, gen: gen, flagRegs: flagRegs,
+		},
+		orderInfo: orderInfo,
+	}
+
+	s.emitJoinLevelSorter(ctx, 0)
+
+	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
+	for i := len(tables) - 1; i >= 0; i-- {
+		vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
+	}
+}
+
 // resolveOrderByColumnsMultiTable resolves ORDER BY columns for multi-table queries.
 func (s *Stmt) resolveOrderByColumnsMultiTable(stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int, gen *expr.CodeGenerator) *orderByColumnInfo {
 	info := &orderByColumnInfo{
 		keyCols:      make([]int, len(stmt.OrderBy)),
 		desc:         make([]bool, len(stmt.OrderBy)),
 		collations:   make([]string, len(stmt.OrderBy)),
-		extraCols:    make([]string, 0),
+		extraExprs:   make([]parser.Expression, 0),
 		extraColRegs: make([]int, 0),
 	}
 
@@ -125,7 +170,7 @@ func (s *Stmt) resolveOrderByColumnsMultiTable(stmt *parser.SelectStmt, tables [
 		s.resolveOrderByTermMultiTable(orderTerm, i, stmt, tables, numCols, gen, info)
 	}
 
-	info.sorterCols = numCols + len(info.extraCols)
+	info.sorterCols = numCols + len(info.extraExprs)
 	return info
 }
 
@@ -140,15 +185,19 @@ func (s *Stmt) resolveOrderByTermMultiTable(orderTerm parser.OrderingTerm, termI
 	// Try to find column in SELECT list
 	orderColName, colIdx := s.findOrderByColumnInSelect(baseExpr, stmt)
 
-	// Look up collation from schema if not explicitly specified
-	if collation == "" && orderColName != "" {
-		collation = s.findCollationInSchemaMultiTable(orderColName, tables)
+	// Look up collation from schema or expression if not explicitly specified
+	if collation == "" {
+		if orderColName != "" {
+			collation = s.findCollationInSchemaMultiTable(orderColName, tables)
+		} else if len(tables) > 0 {
+			collation = resolveExprCollation(baseExpr, tables[0].table)
+		}
 	}
 	info.collations[termIdx] = collation
 
 	// Handle column not in SELECT list
-	if colIdx < 0 && orderColName != "" {
-		colIdx = s.addExtraOrderByColumn(orderColName, numCols, gen, info)
+	if colIdx < 0 {
+		colIdx = s.addExtraOrderByExpr(baseExpr, numCols, gen, info)
 	}
 
 	// Default to first column if not found
@@ -172,13 +221,40 @@ func (s *Stmt) findCollationInSchemaMultiTable(colName string, tables []stmtTabl
 	return ""
 }
 
+// buildCombinedWhereExpression combines WHERE clause with JOIN ON conditions.
+func (s *Stmt) buildCombinedWhereExpression(stmt *parser.SelectStmt) parser.Expression {
+	// Start with the WHERE clause (if any)
+	combined := stmt.Where
+
+	// Add all JOIN ON conditions
+	if stmt.From != nil {
+		for _, join := range stmt.From.Joins {
+			if join.Condition.On != nil {
+				if combined == nil {
+					combined = join.Condition.On
+				} else {
+					// Combine with AND
+					combined = &parser.BinaryExpr{
+						Op:    parser.OpAnd,
+						Left:  combined,
+						Right: join.Condition.On,
+					}
+				}
+			}
+		}
+	}
+
+	return combined
+}
+
 // emitJoinSorterPopulation emits WHERE filter and inserts joined rows into sorter.
 func (s *Stmt) emitJoinSorterPopulation(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, orderInfo *orderByColumnInfo, numCols int, gen *expr.CodeGenerator) error {
-	// Emit WHERE clause filter
+	// Emit combined WHERE clause and JOIN ON conditions
 	var skipAddr int
-	hasWhere := stmt.Where != nil
+	combinedWhere := s.buildCombinedWhereExpression(stmt)
+	hasWhere := combinedWhere != nil
 	if hasWhere {
-		whereReg, err := gen.GenerateExpr(stmt.Where)
+		whereReg, err := gen.GenerateExpr(combinedWhere)
 		if err != nil {
 			return fmt.Errorf("failed to compile WHERE clause: %w", err)
 		}
@@ -192,13 +268,17 @@ func (s *Stmt) emitJoinSorterPopulation(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 		}
 	}
 
-	// Read extra ORDER BY columns
-	for i, colName := range orderInfo.extraCols {
-		s.emitExtraOrderByColumnMultiTable(vm, tables, colName, orderInfo.extraColRegs[i])
+	// Read extra ORDER BY expressions
+	for i, orderExpr := range orderInfo.extraExprs {
+		reg, err := gen.GenerateExpr(orderExpr)
+		if err != nil {
+			return err
+		}
+		orderInfo.extraColRegs[i] = reg
 	}
 
 	// Copy extra columns to contiguous registers and insert
-	for i := range orderInfo.extraCols {
+	for i := range orderInfo.extraExprs {
 		vm.AddOp(vdbe.OpCopy, orderInfo.extraColRegs[i], numCols+i, 0)
 	}
 	vm.AddOp(vdbe.OpSorterInsert, 0, 0, orderInfo.sorterCols)
@@ -218,15 +298,16 @@ func (s *Stmt) emitExtraOrderByColumnMultiTable(vm *vdbe.VDBE, tables []stmtTabl
 		tableColIdx := tbl.table.GetColumnIndexWithRowidAliases(colName)
 		if tableColIdx >= 0 && tableColIdx < len(tbl.table.Columns) {
 			// Check if this is a rowid column (INTEGER PRIMARY KEY)
-			if schemaColIsRowid(tbl.table.Columns[tableColIdx]) {
+			if schemaColIsRowidForTable(tbl.table, tbl.table.Columns[tableColIdx]) {
 				vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, targetReg, 0)
 			} else {
 				recordIdx := schemaRecordIdxForTable(tbl.table, tableColIdx)
 				vm.AddOp(vdbe.OpColumn, tbl.cursorIdx, recordIdx, targetReg)
 			}
 			return
-		} else if tableColIdx == -2 {
+		} else if tableColIdx == -2 && !tbl.table.WithoutRowID {
 			// This is a rowid alias but no INTEGER PRIMARY KEY exists
+			// (not applicable for WITHOUT ROWID tables)
 			vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, targetReg, 0)
 			return
 		}
@@ -265,7 +346,11 @@ func (s *Stmt) createBaseTableInfo(stmt *parser.SelectStmt, tableName string, ta
 	if len(stmt.From.Tables) > 0 && stmt.From.Tables[0].Alias != "" {
 		baseTableAlias = stmt.From.Tables[0].Alias
 	}
-	return stmtTableInfo{name: baseTableAlias, table: table, cursorIdx: 0}
+	cursorIdx := 0
+	if table.Temp {
+		cursorIdx = int(table.RootPage)
+	}
+	return stmtTableInfo{name: baseTableAlias, table: table, cursorIdx: cursorIdx}
 }
 
 // collectCrossJoinTables collects comma-separated tables (implicit cross joins).
@@ -303,9 +388,14 @@ func (s *Stmt) collectExplicitJoinTables(stmt *parser.SelectStmt, startCursorIdx
 }
 
 // createTableInfoFromRef creates a stmtTableInfo from a table reference.
+// Supports cross-database qualified names (schema.table).
+// For temp/CTE tables, the cursor stored in RootPage is used instead of the sequential cursorIdx.
 func (s *Stmt) createTableInfoFromRef(tableRef parser.TableOrSubquery, cursorIdx int) (stmtTableInfo, error) {
-	table, ok := s.conn.schema.GetTable(tableRef.TableName)
+	table, _, _, ok := s.conn.dbRegistry.ResolveTable(tableRef.Schema, tableRef.TableName)
 	if !ok {
+		if tableRef.Schema != "" {
+			return stmtTableInfo{}, fmt.Errorf("table not found: %s.%s", tableRef.Schema, tableRef.TableName)
+		}
 		return stmtTableInfo{}, fmt.Errorf("table not found: %s", tableRef.TableName)
 	}
 
@@ -314,10 +404,15 @@ func (s *Stmt) createTableInfoFromRef(tableRef parser.TableOrSubquery, cursorIdx
 		tableAlias = tableRef.Alias
 	}
 
+	effectiveCursor := cursorIdx
+	if table.Temp {
+		effectiveCursor = int(table.RootPage)
+	}
+
 	return stmtTableInfo{
 		name:      tableAlias,
 		table:     table,
-		cursorIdx: cursorIdx,
+		cursorIdx: effectiveCursor,
 	}, nil
 }
 
@@ -325,7 +420,14 @@ func (s *Stmt) createTableInfoFromRef(tableRef parser.TableOrSubquery, cursorIdx
 func (s *Stmt) setupJoinVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, args []driver.NamedValue) (int, *expr.CodeGenerator) {
 	numCols := len(stmt.Columns)
 	vm.AllocMemory(numCols + 30)
-	vm.AllocCursors(len(tables))
+	// Allocate enough cursors to cover all tables, including CTE cursors with higher indices
+	maxCursor := len(tables)
+	for _, tbl := range tables {
+		if tbl.cursorIdx+1 > maxCursor {
+			maxCursor = tbl.cursorIdx + 1
+		}
+	}
+	vm.AllocCursors(maxCursor)
 
 	gen := expr.NewCodeGenerator(vm)
 	s.setupSubqueryCompiler(gen)
@@ -348,21 +450,24 @@ func (s *Stmt) setupJoinVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []st
 }
 
 // emitJoinScanSetup emits initialization and cursor open operations for JOIN.
+// Temp/CTE tables already have open cursors, so OpenRead is skipped for them.
 func (s *Stmt) emitJoinScanSetup(vm *vdbe.VDBE, tables []stmtTableInfo) int {
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 
 	for _, tbl := range tables {
-		vm.AddOp(vdbe.OpOpenRead, tbl.cursorIdx, int(tbl.table.RootPage), len(tbl.table.Columns))
+		if !tbl.table.Temp {
+			vm.AddOp(vdbe.OpOpenRead, tbl.cursorIdx, int(tbl.table.RootPage), len(tbl.table.Columns))
+		}
 	}
 
-	return vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+	return vm.AddOp(vdbe.OpRewind, tables[0].cursorIdx, 0, 0)
 }
 
 // emitJoinNestedLoops sets up nested loops for joined tables.
 func (s *Stmt) emitJoinNestedLoops(vm *vdbe.VDBE, tables []stmtTableInfo) []int {
 	var innerLoopStarts []int
 	for i := 1; i < len(tables); i++ {
-		vm.AddOp(vdbe.OpRewind, i, 0, 0)
+		vm.AddOp(vdbe.OpRewind, tables[i].cursorIdx, 0, 0)
 		innerLoopStarts = append(innerLoopStarts, vm.NumOps())
 	}
 	return innerLoopStarts
@@ -373,7 +478,7 @@ func (s *Stmt) emitJoinNestedLoopsWithRewinds(vm *vdbe.VDBE, tables []stmtTableI
 	var innerLoopStarts []int
 	var innerRewindAddrs []int
 	for i := 1; i < len(tables); i++ {
-		rewindAddr := vm.AddOp(vdbe.OpRewind, i, 0, 0)
+		rewindAddr := vm.AddOp(vdbe.OpRewind, tables[i].cursorIdx, 0, 0)
 		innerRewindAddrs = append(innerRewindAddrs, rewindAddr)
 		innerLoopStarts = append(innerLoopStarts, vm.NumOps())
 	}
@@ -382,11 +487,12 @@ func (s *Stmt) emitJoinNestedLoopsWithRewinds(vm *vdbe.VDBE, tables []stmtTableI
 
 // emitJoinColumnsWithWhere emits WHERE filter, column read operations, and result row for JOIN.
 func (s *Stmt) emitJoinColumnsWithWhere(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []stmtTableInfo, numCols int, gen *expr.CodeGenerator) error {
-	// Emit WHERE clause filter
+	// Emit combined WHERE clause and JOIN ON conditions
 	var skipAddr int
-	hasWhere := stmt.Where != nil
+	combinedWhere := s.buildCombinedWhereExpression(stmt)
+	hasWhere := combinedWhere != nil
 	if hasWhere {
-		whereReg, err := gen.GenerateExpr(stmt.Where)
+		whereReg, err := gen.GenerateExpr(combinedWhere)
 		if err != nil {
 			return fmt.Errorf("failed to compile WHERE clause: %w", err)
 		}
@@ -411,12 +517,16 @@ func (s *Stmt) emitJoinColumnsWithWhere(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 // emitJoinLoopCleanup emits Next and Close operations for all tables and fixes addresses.
 func (s *Stmt) emitJoinLoopCleanup(vm *vdbe.VDBE, tables []stmtTableInfo, innerLoopStarts []int, loopStart int, rewindAddr int) {
 	for i := len(tables) - 1; i > 0; i-- {
-		vm.AddOp(vdbe.OpNext, i, innerLoopStarts[i-1], 0)
-		vm.AddOp(vdbe.OpClose, i, 0, 0)
+		vm.AddOp(vdbe.OpNext, tables[i].cursorIdx, innerLoopStarts[i-1], 0)
+		if !tables[i].table.Temp {
+			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
+		}
 	}
 
-	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
-	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+	vm.AddOp(vdbe.OpNext, tables[0].cursorIdx, loopStart, 0)
+	if !tables[0].table.Temp {
+		vm.AddOp(vdbe.OpClose, tables[0].cursorIdx, 0, 0)
+	}
 	haltAddr := vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	vm.Program[rewindAddr].P2 = haltAddr
 }
@@ -426,6 +536,28 @@ func (s *Stmt) emitSelectColumnOpMultiTable(vm *vdbe.VDBE, tables []stmtTableInf
 	ident, ok := col.Expr.(*parser.IdentExpr)
 	if !ok {
 		return s.emitNonIdentifierColumn(vm, col, i, gen)
+	}
+
+	if gen != nil {
+		var coll string
+		if ident.Table != "" {
+			for _, tbl := range tables {
+				if tbl.name == ident.Table || tbl.table.Name == ident.Table {
+					if colIdx := tbl.table.GetColumnIndex(ident.Name); colIdx >= 0 {
+						coll = tbl.table.Columns[colIdx].Collation
+					}
+					break
+				}
+			}
+		} else {
+			for _, tbl := range tables {
+				if colIdx := tbl.table.GetColumnIndex(ident.Name); colIdx >= 0 {
+					coll = tbl.table.Columns[colIdx].Collation
+					break
+				}
+			}
+		}
+		gen.SetCollationForReg(i, coll)
 	}
 
 	if ident.Table != "" {
@@ -446,6 +578,10 @@ func (s *Stmt) emitNonIdentifierColumn(vm *vdbe.VDBE, col parser.ResultColumn, t
 	if err != nil {
 		vm.AddOp(vdbe.OpNull, 0, targetReg, 0)
 		return nil
+	}
+
+	if coll, ok := gen.CollationForReg(reg); ok {
+		gen.SetCollationForReg(targetReg, coll)
 	}
 
 	if reg != targetReg {
@@ -482,13 +618,14 @@ func (s *Stmt) emitColumnFromTable(vm *vdbe.VDBE, tbl stmtTableInfo, colName str
 		return fmt.Errorf("column not found: %s.%s", tbl.name, colName)
 	}
 
-	if colIdx == -2 {
+	if colIdx == -2 && !tbl.table.WithoutRowID {
 		// This is a rowid alias but no INTEGER PRIMARY KEY exists
+		// (not applicable for WITHOUT ROWID tables)
 		vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, targetReg, 0)
 		return nil
 	}
 
-	if schemaColIsRowid(tbl.table.Columns[colIdx]) {
+	if schemaColIsRowidForTable(tbl.table, tbl.table.Columns[colIdx]) {
 		vm.AddOp(vdbe.OpRowid, tbl.cursorIdx, targetReg, 0)
 		return nil
 	}
@@ -665,14 +802,15 @@ type statementCompiler func(*vdbe.VDBE, parser.Statement, []driver.NamedValue) (
 // getStatementCompilerMap returns the map of statement types to their compilers.
 func (s *Stmt) getStatementCompilerMap() map[string]statementCompiler {
 	return map[string]statementCompiler{
-		"*parser.SelectStmt":      s.compileSelectWrapper,
-		"*parser.InsertStmt":      s.compileInsertWrapper,
-		"*parser.UpdateStmt":      s.compileUpdateWrapper,
-		"*parser.DeleteStmt":      s.compileDeleteWrapper,
-		"*parser.CreateTableStmt": s.compileCreateTableWrapper,
-		"*parser.DropTableStmt":   s.compileDropTableWrapper,
-		"*parser.CreateViewStmt":  s.compileCreateViewWrapper,
-		"*parser.DropViewStmt":    s.compileDropViewWrapper,
+		"*parser.SelectStmt":             s.compileSelectWrapper,
+		"*parser.InsertStmt":             s.compileInsertWrapper,
+		"*parser.UpdateStmt":             s.compileUpdateWrapper,
+		"*parser.DeleteStmt":             s.compileDeleteWrapper,
+		"*parser.CreateTableStmt":        s.compileCreateTableWrapper,
+		"*parser.CreateVirtualTableStmt": s.compileCreateVirtualTableWrapper,
+		"*parser.DropTableStmt":          s.compileDropTableWrapper,
+		"*parser.CreateViewStmt":         s.compileCreateViewWrapper,
+		"*parser.DropViewStmt":           s.compileDropViewWrapper,
 	}
 }
 
@@ -695,6 +833,10 @@ func (s *Stmt) compileDeleteWrapper(vm *vdbe.VDBE, stmt parser.Statement, args [
 
 func (s *Stmt) compileCreateTableWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	return s.compileCreateTable(vm, stmt.(*parser.CreateTableStmt), args)
+}
+
+func (s *Stmt) compileCreateVirtualTableWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	return s.compileCreateVirtualTable(vm, stmt.(*parser.CreateVirtualTableStmt), args)
 }
 
 func (s *Stmt) compileDropTableWrapper(vm *vdbe.VDBE, stmt parser.Statement, args []driver.NamedValue) (*vdbe.VDBE, error) {
@@ -722,16 +864,16 @@ func (s *Stmt) compileInnerStatement(vm *vdbe.VDBE, stmt parser.Statement, args 
 }
 
 // ============================================================================
-// Trigger Execution Helper Functions
+// Trigger Execution Helper Functions (Compile-time scaffolding)
 // ============================================================================
 //
-// SCAFFOLDING: These functions are prepared for Phase 3.5 trigger execution.
-// Currently unused because trigger execution requires:
-// 1. VDBE runtime integration (triggers execute during row operations, not compilation)
-// 2. NEW/OLD row pseudo-tables populated from actual row data
-// 3. Recursive statement execution within trigger body
+// These functions provide compile-time trigger execution support.
+// The primary runtime trigger execution path is through:
+// - OpTriggerBefore/OpTriggerAfter VDBE opcodes (emitted in compile_dml.go)
+// - TriggerRuntime (in trigger_runtime.go) implements VDBE runtime callbacks
+// - OLD/NEW pseudo-tables are populated from actual row data at runtime
 //
-// See compile_dml.go for TODO comments marking where these will be called.
+// The functions below are retained for backward compatibility and as utilities.
 // ============================================================================
 
 // executeBeforeInsertTriggers executes all BEFORE INSERT triggers for the given table.

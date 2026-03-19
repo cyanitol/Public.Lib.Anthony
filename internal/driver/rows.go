@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -35,6 +35,11 @@ func (r *Rows) Close() error {
 	r.closed = true
 
 	if r.vdbe != nil {
+		// Check if schema changed during execution (e.g., root page split)
+		// If so, invalidate the statement cache
+		if r.vdbe.SchemaChanged && r.stmt != nil && r.stmt.conn != nil && r.stmt.conn.stmtCache != nil {
+			r.stmt.conn.stmtCache.InvalidateAll()
+		}
 		r.vdbe.Finalize()
 		r.vdbe = nil
 	}

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package expr
 
 import (
@@ -300,8 +300,6 @@ func TestGenerateCastUncoveredType(t *testing.T) {
 // Test generateBinary uncovered cases
 func TestGenerateBinaryUncoveredOps(t *testing.T) {
 	t.Parallel()
-	v := vdbe.New()
-	gen := NewCodeGenerator(v)
 
 	tests := []struct {
 		name string
@@ -317,6 +315,8 @@ func TestGenerateBinaryUncoveredOps(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			v := vdbe.New()
+			gen := NewCodeGenerator(v)
 			expr := &parser.BinaryExpr{
 				Left:  &parser.IdentExpr{Name: "a"},
 				Op:    tt.op,

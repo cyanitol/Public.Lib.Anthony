@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package parser
 
 import (
@@ -44,6 +44,13 @@ var keywordsAsIdentifiers = map[TokenType]bool{
 	TK_COLLATE:      true,
 	TK_WITHOUT:      true,
 	TK_ROWID:        true,
+	TK_SAVEPOINT:    true,
+	TK_RELEASE:      true,
+	TK_OUTER:        true,
+	TK_INNER:        true,
+	TK_LEFT:         true,
+	TK_RIGHT:        true,
+	TK_CROSS:        true,
 }
 
 // columnConstraintKeywords lists keywords that indicate the start of a column constraint.
@@ -150,14 +157,18 @@ var statementParsers = map[TokenType]statementParser{
 	TK_DETACH:   func(p *Parser) (Statement, error) { return p.parseDetach() },
 	TK_PRAGMA:   func(p *Parser) (Statement, error) { return p.parsePragma() },
 	TK_VACUUM:   func(p *Parser) (Statement, error) { return p.parseVacuum() },
-	TK_REINDEX:  func(p *Parser) (Statement, error) { return p.parseReindex() },
-	TK_WITH:     func(p *Parser) (Statement, error) { return p.parseSelect() }, // WITH starts a CTE, parsed as part of SELECT
+	TK_REINDEX:   func(p *Parser) (Statement, error) { return p.parseReindex() },
+	TK_SAVEPOINT: func(p *Parser) (Statement, error) { return p.parseSavepoint() },
+	TK_RELEASE:   func(p *Parser) (Statement, error) { return p.parseRelease() },
+	TK_END:       func(p *Parser) (Statement, error) { return &CommitStmt{}, nil },
+	TK_WITH:      func(p *Parser) (Statement, error) { return p.parseSelect() }, // WITH starts a CTE, parsed as part of SELECT
 }
 
 var statementParserOrder = []TokenType{
 	TK_WITH, TK_SELECT, TK_INSERT, TK_UPDATE, TK_DELETE,
 	TK_CREATE, TK_DROP, TK_ALTER, TK_BEGIN, TK_COMMIT, TK_ROLLBACK,
 	TK_ATTACH, TK_DETACH, TK_PRAGMA, TK_VACUUM, TK_REINDEX,
+	TK_SAVEPOINT, TK_RELEASE, TK_END,
 }
 
 func (p *Parser) parseStatement() (Statement, error) {
@@ -232,7 +243,7 @@ func (p *Parser) parseSelectBody(stmt *SelectStmt) (*SelectStmt, error) {
 	return stmt, nil
 }
 
-// parseSelectClauses parses FROM, WHERE, GROUP BY, ORDER BY, and LIMIT clauses.
+// parseSelectClauses parses FROM, WHERE, GROUP BY, WINDOW, ORDER BY, and LIMIT clauses.
 func (p *Parser) parseSelectClauses(stmt *SelectStmt) error {
 	if err := p.parseFromClauseInto(stmt); err != nil {
 		return err
@@ -243,10 +254,74 @@ func (p *Parser) parseSelectClauses(stmt *SelectStmt) error {
 	if err := p.parseGroupByClauseInto(stmt); err != nil {
 		return err
 	}
+	if err := p.parseWindowClauseInto(stmt); err != nil {
+		return err
+	}
 	if err := p.parseOrderByClauseInto(stmt); err != nil {
 		return err
 	}
 	return p.parseLimitClauseInto(stmt)
+}
+
+// parseWindowClauseInto parses the optional WINDOW clause for named window definitions.
+// Syntax: WINDOW name AS (window-spec) [, name AS (window-spec)] ...
+func (p *Parser) parseWindowClauseInto(stmt *SelectStmt) error {
+	if !p.match(TK_WINDOW) {
+		return nil
+	}
+	defs, err := p.parseWindowDefList()
+	if err != nil {
+		return err
+	}
+	stmt.WindowDefs = defs
+	return nil
+}
+
+// parseWindowDefList parses a comma-separated list of named window definitions.
+func (p *Parser) parseWindowDefList() ([]WindowDef, error) {
+	var defs []WindowDef
+	for {
+		def, err := p.parseWindowDef()
+		if err != nil {
+			return nil, err
+		}
+		defs = append(defs, def)
+		if !p.match(TK_COMMA) {
+			break
+		}
+	}
+	return defs, nil
+}
+
+// parseWindowDef parses a single named window definition: name AS (window-spec).
+func (p *Parser) parseWindowDef() (WindowDef, error) {
+	if !p.check(TK_ID) {
+		return WindowDef{}, p.error("expected window name")
+	}
+	name := Unquote(p.advance().Lexeme)
+	if !p.match(TK_AS) {
+		return WindowDef{}, p.error("expected AS after window name")
+	}
+	if !p.match(TK_LP) {
+		return WindowDef{}, p.error("expected ( after AS")
+	}
+
+	spec := &WindowSpec{}
+	if err := p.parsePartitionBy(spec); err != nil {
+		return WindowDef{}, err
+	}
+	if err := p.parseWindowOrderBy(spec); err != nil {
+		return WindowDef{}, err
+	}
+	if err := p.parseWindowFrame(spec); err != nil {
+		return WindowDef{}, err
+	}
+
+	if !p.match(TK_RP) {
+		return WindowDef{}, p.error("expected ) after window specification")
+	}
+
+	return WindowDef{Name: name, Spec: spec}, nil
 }
 
 // parseFromClauseInto parses the FROM clause into the statement.
@@ -618,7 +693,32 @@ func (p *Parser) parseTableRef(table *TableOrSubquery) error {
 	if !p.isTableIdentifier() {
 		return p.error("expected table name")
 	}
-	table.TableName = p.consumeTableIdentifier()
+	firstIdent := p.consumeTableIdentifier()
+
+	// Check for schema.table syntax
+	if p.match(TK_DOT) {
+		if !p.isTableIdentifier() {
+			return p.error("expected table name after schema")
+		}
+		table.Schema = firstIdent
+		table.TableName = p.consumeTableIdentifier()
+	} else {
+		table.TableName = firstIdent
+	}
+
+	// Check for table-valued function syntax: name(args...)
+	if p.match(TK_LP) {
+		args, err := p.parseExpressionList()
+		if err != nil {
+			return err
+		}
+		if !p.match(TK_RP) {
+			return p.error("expected ) after function arguments")
+		}
+		table.FuncArgs = args
+		return nil
+	}
+
 	if !p.match(TK_INDEXED) {
 		return nil
 	}
@@ -681,7 +781,7 @@ var joinOuterTokens = map[TokenType]bool{
 func (p *Parser) parseJoinClause() (*JoinClause, error) {
 	join := &JoinClause{}
 
-	p.match(TK_NATURAL) // optional NATURAL prefix; type stays JoinInner (zero value)
+	join.Natural = p.match(TK_NATURAL) // optional NATURAL prefix
 
 	p.parseJoinType(join)
 
@@ -783,6 +883,15 @@ func (p *Parser) parseInsert() (*InsertStmt, error) {
 		return nil, p.error("expected table name")
 	}
 	stmt.Table = Unquote(p.advance().Lexeme)
+
+	// Handle schema-qualified table name: schema.table
+	if p.match(TK_DOT) {
+		if !p.check(TK_ID) {
+			return nil, p.error("expected table name after '.'")
+		}
+		stmt.Schema = stmt.Table
+		stmt.Table = Unquote(p.advance().Lexeme)
+	}
 
 	if err := p.parseInsertColumnList(stmt); err != nil {
 		return nil, err
@@ -1203,6 +1312,14 @@ func (p *Parser) parseCreate() (Statement, error) {
 	// TEMP/TEMPORARY
 	temp := p.match(TK_TEMP) || p.match(TK_TEMPORARY)
 
+	// Check for VIRTUAL TABLE
+	if p.match(TK_VIRTUAL) {
+		if !p.match(TK_TABLE) {
+			return nil, p.error("expected TABLE after VIRTUAL")
+		}
+		return p.parseCreateVirtualTable()
+	}
+
 	// Check for UNIQUE before INDEX
 	unique := p.match(TK_UNIQUE)
 
@@ -1233,6 +1350,15 @@ func (p *Parser) parseCreateTable(temp bool) (*CreateTableStmt, error) {
 	}
 	stmt.Name = Unquote(p.advance().Lexeme)
 
+	// Handle schema-qualified table name: schema.table
+	if p.match(TK_DOT) {
+		if !p.check(TK_ID) {
+			return nil, p.error("expected table name after '.'")
+		}
+		stmt.Schema = stmt.Name
+		stmt.Name = Unquote(p.advance().Lexeme)
+	}
+
 	if p.match(TK_AS) {
 		return p.parseCreateTableAsSelect(stmt)
 	}
@@ -1243,6 +1369,58 @@ func (p *Parser) parseCreateTable(temp bool) (*CreateTableStmt, error) {
 	if err := p.parseTableOptions(stmt); err != nil {
 		return nil, err
 	}
+	return stmt, nil
+}
+
+// parseCreateVirtualTable parses a CREATE VIRTUAL TABLE statement.
+// Syntax: CREATE VIRTUAL TABLE [IF NOT EXISTS] name USING module[(args)]
+func (p *Parser) parseCreateVirtualTable() (*CreateVirtualTableStmt, error) {
+	stmt := &CreateVirtualTableStmt{}
+
+	// Parse IF NOT EXISTS
+	if err := p.parseIfNotExists(&stmt.IfNotExists); err != nil {
+		return nil, err
+	}
+
+	// Parse table name
+	if !p.check(TK_ID) {
+		return nil, p.error("expected table name")
+	}
+	stmt.Name = Unquote(p.advance().Lexeme)
+
+	// Parse USING
+	if !p.match(TK_USING) {
+		return nil, p.error("expected USING after virtual table name")
+	}
+
+	// Parse module name
+	if !p.check(TK_ID) {
+		return nil, p.error("expected module name after USING")
+	}
+	stmt.Module = Unquote(p.advance().Lexeme)
+
+	// Parse optional module arguments: (arg1, arg2, ...)
+	if p.match(TK_LP) {
+		for {
+			if p.check(TK_RP) {
+				break
+			}
+			// Module arguments can be identifiers or strings
+			tok := p.peek()
+			if tok.Type == TK_ID || tok.Type == TK_STRING {
+				stmt.Args = append(stmt.Args, Unquote(p.advance().Lexeme))
+			} else {
+				return nil, p.error("expected module argument")
+			}
+			if !p.match(TK_COMMA) {
+				break
+			}
+		}
+		if !p.match(TK_RP) {
+			return nil, p.error("expected ) after module arguments")
+		}
+	}
+
 	return stmt, nil
 }
 
@@ -1604,6 +1782,24 @@ func (p *Parser) parseFKDeferrable(fk *ForeignKeyConstraint) error {
 	return p.error("expected DEFERRED or IMMEDIATE after INITIALLY")
 }
 
+// parseFKMatchClause parses the MATCH clause of a foreign key.
+func (p *Parser) parseFKMatchClause(fk *ForeignKeyConstraint) error {
+	if !p.check(TK_ID) {
+		return p.error("expected match name")
+	}
+	fk.Match = Unquote(p.advance().Lexeme)
+	return nil
+}
+
+// parseFKNotDeferrable parses the NOT DEFERRABLE clause.
+func (p *Parser) parseFKNotDeferrable(fk *ForeignKeyConstraint) error {
+	if !p.match(TK_DEFERRABLE) {
+		return p.error("expected DEFERRABLE after NOT")
+	}
+	fk.Deferrable = DeferrableNone
+	return nil
+}
+
 // parseForeignKeyActions parses ON DELETE/UPDATE, MATCH, and DEFERRABLE clauses.
 func (p *Parser) parseForeignKeyActions(fk *ForeignKeyConstraint) error {
 	for {
@@ -1612,15 +1808,13 @@ func (p *Parser) parseForeignKeyActions(fk *ForeignKeyConstraint) error {
 				return err
 			}
 		} else if p.match(TK_MATCH) {
-			if !p.check(TK_ID) {
-				return p.error("expected match name")
+			if err := p.parseFKMatchClause(fk); err != nil {
+				return err
 			}
-			fk.Match = Unquote(p.advance().Lexeme)
 		} else if p.match(TK_NOT) {
-			if !p.match(TK_DEFERRABLE) {
-				return p.error("expected DEFERRABLE after NOT")
+			if err := p.parseFKNotDeferrable(fk); err != nil {
+				return err
 			}
-			fk.Deferrable = DeferrableNone
 		} else if p.match(TK_DEFERRABLE) {
 			if err := p.parseFKDeferrable(fk); err != nil {
 				return err
@@ -2457,9 +2651,36 @@ func (p *Parser) parseBegin() (*BeginStmt, error) {
 func (p *Parser) parseRollback() (*RollbackStmt, error) {
 	stmt := &RollbackStmt{}
 
+	// ROLLBACK [TRANSACTION] [TO [SAVEPOINT] name]
 	p.match(TK_TRANSACTION)
 
+	if p.match(TK_TO) {
+		p.match(TK_SAVEPOINT) // optional SAVEPOINT keyword
+		if !p.checkIdentifier() {
+			return nil, p.error("expected savepoint name after ROLLBACK TO")
+		}
+		tok := p.advance()
+		stmt.Savepoint = Unquote(tok.Lexeme)
+	}
+
 	return stmt, nil
+}
+
+func (p *Parser) parseSavepoint() (*SavepointStmt, error) {
+	if !p.checkIdentifier() {
+		return nil, p.error("expected savepoint name after SAVEPOINT")
+	}
+	tok := p.advance()
+	return &SavepointStmt{Name: Unquote(tok.Lexeme)}, nil
+}
+
+func (p *Parser) parseRelease() (*ReleaseStmt, error) {
+	p.match(TK_SAVEPOINT) // optional SAVEPOINT keyword
+	if !p.checkIdentifier() {
+		return nil, p.error("expected savepoint name after RELEASE")
+	}
+	tok := p.advance()
+	return &ReleaseStmt{Name: Unquote(tok.Lexeme)}, nil
 }
 
 // =============================================================================
@@ -2827,6 +3048,11 @@ func (p *Parser) parseComparisonExpression() (Expression, error) {
 		return p.parseBetweenExpression(left)
 	}
 
+	// NOT LIKE / NOT GLOB
+	if p.checkNotWithAhead(TK_LIKE) || p.checkNotWithAhead(TK_GLOB) {
+		return p.parseNotPatternOp(left)
+	}
+
 	// Pattern operators and comparison operators
 	return p.tryParseOperators(left)
 }
@@ -2852,7 +3078,11 @@ func (p *Parser) parseIsExpression(left Expression) (Expression, error) {
 		if p.match(TK_NULL) {
 			return &UnaryExpr{Op: OpNotNull, Expr: left}, nil
 		}
-		return nil, p.error("expected NULL after IS NOT")
+		right, err := p.parseBitwiseExpression()
+		if err != nil {
+			return nil, err
+		}
+		return &BinaryExpr{Left: left, Op: OpNe, Right: right}, nil
 	}
 	if p.match(TK_NULL) {
 		return &UnaryExpr{Op: OpIsNull, Expr: left}, nil
@@ -2919,6 +3149,19 @@ func (p *Parser) parseBetweenExpression(left Expression) (Expression, error) {
 	return &BetweenExpr{Expr: left, Lower: lower, Upper: upper, Not: not}, nil
 }
 
+// parseNotPatternOp parses NOT LIKE or NOT GLOB expressions.
+func (p *Parser) parseNotPatternOp(left Expression) (Expression, error) {
+	p.match(TK_NOT) // consume NOT
+	expr, err := p.tryParsePatternOp(left)
+	if err != nil {
+		return nil, err
+	}
+	if expr == nil {
+		return nil, p.error("expected LIKE or GLOB after NOT")
+	}
+	return &UnaryExpr{Op: OpNot, Expr: expr}, nil
+}
+
 // tryParsePatternOp tries to parse LIKE, GLOB, REGEXP, or MATCH.
 func (p *Parser) tryParsePatternOp(left Expression) (Expression, error) {
 	for tokType, op := range patternOpMap {
@@ -2927,7 +3170,16 @@ func (p *Parser) tryParsePatternOp(left Expression) (Expression, error) {
 			if err != nil {
 				return nil, err
 			}
-			return &BinaryExpr{Left: left, Op: op, Right: right}, nil
+			result := &BinaryExpr{Left: left, Op: op, Right: right}
+			// Handle optional ESCAPE clause for LIKE
+			if op == OpLike && p.match(TK_ESCAPE) {
+				escExpr, escErr := p.parseBitwiseExpression()
+				if escErr != nil {
+					return nil, escErr
+				}
+				result.Escape = escExpr
+			}
+			return result, nil
 		}
 	}
 	return nil, nil
@@ -3103,6 +3355,15 @@ func (p *Parser) parseUnaryExprWithOp(op UnaryOp) (Expression, error) {
 	if err != nil {
 		return nil, err
 	}
+	if op == OpNeg {
+		if lit, ok := expr.(*LiteralExpr); ok && lit.Type == LiteralInteger {
+			clean := strings.ReplaceAll(lit.Value, "_", "")
+			if clean == "9223372036854775808" {
+				lit.Value = "-9223372036854775808"
+				return lit, nil
+			}
+		}
+	}
 	return &UnaryExpr{Op: op, Expr: expr}, nil
 }
 
@@ -3181,6 +3442,12 @@ func (p *Parser) tryParseLiteral() Expression {
 		return &LiteralExpr{Type: LiteralBlob, Value: tok.Lexeme}
 	case p.match(TK_NULL):
 		return &LiteralExpr{Type: LiteralNull, Value: "NULL"}
+	case p.check(TK_ID) && strings.EqualFold(p.peek().Lexeme, "TRUE"):
+		p.advance()
+		return &LiteralExpr{Type: LiteralInteger, Value: "1"}
+	case p.check(TK_ID) && strings.EqualFold(p.peek().Lexeme, "FALSE"):
+		p.advance()
+		return &LiteralExpr{Type: LiteralInteger, Value: "0"}
 	default:
 		return nil
 	}
@@ -3192,6 +3459,10 @@ func (p *Parser) parseIdentOrFunction() (Expression, error) {
 
 	// Function call
 	if p.match(TK_LP) {
+		// Check for RAISE function (trigger-specific)
+		if strings.ToUpper(name) == "RAISE" {
+			return p.parseRaiseFunction()
+		}
 		return p.parseFunctionCall(name)
 	}
 
@@ -3228,6 +3499,59 @@ func (p *Parser) isExpressionIdentifier() bool {
 	default:
 		return false
 	}
+}
+
+// isRaiseAction checks if the current token is a valid RAISE action keyword.
+// RAISE actions may be tokenized as keywords (TK_ABORT, TK_FAIL, etc.) or TK_ID.
+func (p *Parser) isRaiseAction() bool {
+	switch p.peek().Type {
+	case TK_ID, TK_ABORT, TK_FAIL, TK_IGNORE:
+		return true
+	default:
+		// ROLLBACK may also be tokenized as a keyword
+		return p.check(TK_ID) || strings.EqualFold(p.peek().Lexeme, "ROLLBACK")
+	}
+}
+
+// parseRaiseFunction parses RAISE(IGNORE) or RAISE(ROLLBACK|ABORT|FAIL, msg).
+// The opening paren has already been consumed.
+func (p *Parser) parseRaiseFunction() (Expression, error) {
+	if !p.isRaiseAction() {
+		return nil, p.error("expected IGNORE, ROLLBACK, ABORT, or FAIL in RAISE")
+	}
+
+	action := strings.ToUpper(p.advance().Lexeme)
+	raise := &RaiseExpr{}
+
+	switch action {
+	case "IGNORE":
+		raise.Type = RaiseIgnore
+	case "ROLLBACK":
+		raise.Type = RaiseRollback
+	case "ABORT":
+		raise.Type = RaiseAbort
+	case "FAIL":
+		raise.Type = RaiseFail
+	default:
+		return nil, p.error("expected IGNORE, ROLLBACK, ABORT, or FAIL in RAISE")
+	}
+
+	// For non-IGNORE types, expect comma and message string
+	if raise.Type != RaiseIgnore {
+		if !p.match(TK_COMMA) {
+			return nil, p.error("expected ',' after RAISE action")
+		}
+		if !p.check(TK_STRING) {
+			return nil, p.error("expected error message string in RAISE")
+		}
+		raise.Message = Unquote(p.advance().Lexeme)
+	}
+
+	if !p.match(TK_RP) {
+		return nil, p.error("expected ')' after RAISE arguments")
+	}
+
+	return raise, nil
 }
 
 // parseFunctionCall parses a function call after the opening paren.
@@ -3296,12 +3620,20 @@ func (p *Parser) parseFunctionFilter(fn *FunctionExpr) error {
 }
 
 // parseFunctionOver parses the optional OVER clause for window functions.
+// Supports both OVER (window-spec) and OVER window-name.
 func (p *Parser) parseFunctionOver(fn *FunctionExpr) error {
 	if !p.match(TK_OVER) {
 		return nil
 	}
+
+	// Check for named window reference: OVER window_name
+	if p.check(TK_ID) && p.peekAhead(1).Type != TK_LP {
+		fn.Over = &WindowSpec{BaseName: Unquote(p.advance().Lexeme)}
+		return nil
+	}
+
 	if !p.match(TK_LP) {
-		return p.error("expected ( after OVER")
+		return p.error("expected ( or window name after OVER")
 	}
 
 	windowSpec := &WindowSpec{}
@@ -3484,6 +3816,18 @@ func (p *Parser) parseExistsExpr(not bool) (Expression, error) {
 // parseParenOrSubquery parses a parenthesized expression or subquery.
 func (p *Parser) parseParenOrSubquery() (Expression, error) {
 	if p.match(TK_SELECT) {
+		sel, err := p.parseSelect()
+		if err != nil {
+			return nil, err
+		}
+		if !p.match(TK_RP) {
+			return nil, p.error("expected ) after subquery")
+		}
+		return &SubqueryExpr{Select: sel}, nil
+	}
+
+	// Handle WITH ... SELECT subquery (CTE in subquery)
+	if p.check(TK_WITH) {
 		sel, err := p.parseSelect()
 		if err != nil {
 			return nil, err

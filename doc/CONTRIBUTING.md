@@ -5,7 +5,7 @@ Thank you for your interest.
 ## Contributions are closed (for now)
 
 At this time we are **not accepting external code contributions** (pull requests,
-patches, or direct commits). The repository is open source and tri-licensed for
+patches, or direct commits). The repository is open source and quad-licensed for
 use, but development is currently maintained internally.
 
 ## What you *can* do

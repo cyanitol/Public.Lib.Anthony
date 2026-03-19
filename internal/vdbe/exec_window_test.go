@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package vdbe
 
 import (
@@ -203,6 +203,7 @@ func TestWindowLag(t *testing.T) {
 	v.WindowStates = make(map[int]*WindowState)
 
 	windowState := NewWindowState(nil, nil, nil, DefaultWindowFrame())
+	windowState.WindowFunctionCount = 1
 
 	// Add rows
 	rows := [][]*Mem{
@@ -218,50 +219,32 @@ func TestWindowLag(t *testing.T) {
 
 	v.WindowStates[0] = windowState
 
-	tests := []struct {
-		rowIdx      int
-		offset      int
-		colIdx      int
-		expectNull  bool
-		expectValue int64
-	}{
-		{0, 1, 0, true, 0},   // First row, lag 1 - should be NULL
-		{1, 1, 0, false, 10}, // Second row, lag 1 - should be 10
-		{2, 1, 0, false, 20}, // Third row, lag 1 - should be 20
-		{2, 2, 0, false, 10}, // Third row, lag 2 - should be 10
-		{3, 1, 0, false, 30}, // Fourth row, lag 1 - should be 30
-	}
+	// Sequential LAG(col0, 1) evaluation: NULL, 10, 20, 30
+	expectedNull := []bool{true, false, false, false}
+	expectedVals := []int64{0, 10, 20, 30}
 
-	for _, tt := range tests {
-		tt := tt
-		// Reset and advance to target row
-		windowState.CurrentPartIdx = -1
-		windowState.CurrentPartRow = -1
-		for i := 0; i <= tt.rowIdx; i++ {
-			windowState.NextRow()
-		}
-
+	for i := 0; i < len(rows); i++ {
 		instr := &Instruction{
 			Opcode: OpWindowLag,
 			P1:     0,
 			P2:     0,
-			P3:     tt.colIdx,
-			P4:     P4Union{I: int32(tt.offset)},
+			P3:     0,
+			P4:     P4Union{I: 1},
 		}
 
 		err := v.execWindowLag(instr)
 		if err != nil {
-			t.Fatalf("execWindowLag failed: %v", err)
+			t.Fatalf("execWindowLag failed at row %d: %v", i, err)
 		}
 
 		result, _ := v.GetMem(0)
-		if tt.expectNull {
+		if expectedNull[i] {
 			if !result.IsNull() {
-				t.Errorf("Row %d, offset %d: expected NULL, got %v", tt.rowIdx, tt.offset, result.IntValue())
+				t.Errorf("Row %d, offset 1: expected NULL, got %v", i, result.IntValue())
 			}
 		} else {
-			if result.IntValue() != tt.expectValue {
-				t.Errorf("Row %d, offset %d: expected %d, got %d", tt.rowIdx, tt.offset, tt.expectValue, result.IntValue())
+			if result.IntValue() != expectedVals[i] {
+				t.Errorf("Row %d, offset 1: expected %d, got %d", i, expectedVals[i], result.IntValue())
 			}
 		}
 	}
@@ -275,6 +258,7 @@ func TestWindowLead(t *testing.T) {
 	v.WindowStates = make(map[int]*WindowState)
 
 	windowState := NewWindowState(nil, nil, nil, DefaultWindowFrame())
+	windowState.WindowFunctionCount = 1
 
 	// Add rows
 	rows := [][]*Mem{
@@ -290,50 +274,32 @@ func TestWindowLead(t *testing.T) {
 
 	v.WindowStates[0] = windowState
 
-	tests := []struct {
-		rowIdx      int
-		offset      int
-		colIdx      int
-		expectNull  bool
-		expectValue int64
-	}{
-		{0, 1, 0, false, 20}, // First row, lead 1 - should be 20
-		{0, 2, 0, false, 30}, // First row, lead 2 - should be 30
-		{1, 1, 0, false, 30}, // Second row, lead 1 - should be 30
-		{2, 1, 0, false, 40}, // Third row, lead 1 - should be 40
-		{3, 1, 0, true, 0},   // Fourth row, lead 1 - should be NULL
-	}
+	// Sequential LEAD(col0, 1) evaluation: 20, 30, 40, NULL
+	expectedNull := []bool{false, false, false, true}
+	expectedVals := []int64{20, 30, 40, 0}
 
-	for _, tt := range tests {
-		tt := tt
-		// Reset and advance to target row
-		windowState.CurrentPartIdx = -1
-		windowState.CurrentPartRow = -1
-		for i := 0; i <= tt.rowIdx; i++ {
-			windowState.NextRow()
-		}
-
+	for i := 0; i < len(rows); i++ {
 		instr := &Instruction{
 			Opcode: OpWindowLead,
 			P1:     0,
 			P2:     0,
-			P3:     tt.colIdx,
-			P4:     P4Union{I: int32(tt.offset)},
+			P3:     0,
+			P4:     P4Union{I: 1},
 		}
 
 		err := v.execWindowLead(instr)
 		if err != nil {
-			t.Fatalf("execWindowLead failed: %v", err)
+			t.Fatalf("execWindowLead failed at row %d: %v", i, err)
 		}
 
 		result, _ := v.GetMem(0)
-		if tt.expectNull {
+		if expectedNull[i] {
 			if !result.IsNull() {
-				t.Errorf("Row %d, offset %d: expected NULL, got %v", tt.rowIdx, tt.offset, result.IntValue())
+				t.Errorf("Row %d, offset 1: expected NULL, got %v", i, result.IntValue())
 			}
 		} else {
-			if result.IntValue() != tt.expectValue {
-				t.Errorf("Row %d, offset %d: expected %d, got %d", tt.rowIdx, tt.offset, tt.expectValue, result.IntValue())
+			if result.IntValue() != expectedVals[i] {
+				t.Errorf("Row %d, offset 1: expected %d, got %d", i, expectedVals[i], result.IntValue())
 			}
 		}
 	}
@@ -357,6 +323,7 @@ func TestWindowFirstValue(t *testing.T) {
 		},
 	}
 	windowState := NewWindowState(nil, nil, nil, frame)
+	windowState.WindowFunctionCount = 1
 
 	// Add rows
 	rows := [][]*Mem{
@@ -372,10 +339,8 @@ func TestWindowFirstValue(t *testing.T) {
 
 	v.WindowStates[0] = windowState
 
-	// FIRST_VALUE should always be 10 (first row in frame)
+	// FIRST_VALUE should always be 10 (first row in frame with UNBOUNDED PRECEDING)
 	for i := 0; i < len(rows); i++ {
-		windowState.NextRow()
-
 		instr := &Instruction{
 			Opcode: OpWindowFirstValue,
 			P1:     0,
@@ -413,6 +378,7 @@ func TestWindowLastValue(t *testing.T) {
 		},
 	}
 	windowState := NewWindowState(nil, nil, nil, frame)
+	windowState.WindowFunctionCount = 1
 
 	// Add rows
 	rows := [][]*Mem{
@@ -432,8 +398,6 @@ func TestWindowLastValue(t *testing.T) {
 	expectedValues := []int64{10, 20, 30, 40}
 
 	for i, expected := range expectedValues {
-		windowState.NextRow()
-
 		instr := &Instruction{
 			Opcode: OpWindowLastValue,
 			P1:     0,

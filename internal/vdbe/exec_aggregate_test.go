@@ -1,448 +1,211 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package vdbe
 
 import (
 	"testing"
 )
 
-// TestAggregateOpcodes tests the OpAggStep and OpAggFinal opcodes
-func TestAggregateOpcodes(t *testing.T) {
+// Helper to setup aggregate test
+func setupAggTest(t *testing.T, funcName string) *VDBE {
+	t.Helper()
+	v := NewTestVDBE(10)
+	v.funcCtx = NewFunctionContext()
+	v.Program = []*Instruction{
+		{
+			Opcode: OpAggStep,
+			P1:     0,
+			P2:     1,
+			P3:     0,
+			P4:     P4Union{Z: funcName},
+			P4Type: P4Static,
+			P5:     1,
+		},
+	}
+	return v
+}
+
+// Helper to run aggregate step
+func runAggStep(t *testing.T, v *VDBE) {
+	t.Helper()
+	v.PC = 1
+	err := v.execAggStep(v.Program[0])
+	if err != nil {
+		t.Fatalf("execAggStep failed: %v", err)
+	}
+}
+
+// Helper to finalize aggregate and check result
+func finalizeAndCheckInt(t *testing.T, v *VDBE, expected int64) {
+	t.Helper()
+	finalInstr := &Instruction{Opcode: OpAggFinal, P1: 0, P2: 5, P3: 0}
+	err := v.execAggFinal(finalInstr)
+	if err != nil {
+		t.Fatalf("execAggFinal failed: %v", err)
+	}
+	if !v.Mem[5].IsInt() || v.Mem[5].IntValue() != expected {
+		t.Errorf("Expected result=%d, got %v", expected, v.Mem[5].IntValue())
+	}
+}
+
+// Helper to finalize aggregate and check real result
+func finalizeAndCheckReal(t *testing.T, v *VDBE, expected float64) {
+	t.Helper()
+	finalInstr := &Instruction{Opcode: OpAggFinal, P1: 0, P2: 5, P3: 0}
+	err := v.execAggFinal(finalInstr)
+	if err != nil {
+		t.Fatalf("execAggFinal failed: %v", err)
+	}
+	result := v.Mem[5].RealValue()
+	if result != expected {
+		t.Errorf("Expected result=%.1f, got %.1f", expected, result)
+	}
+}
+
+// Helper to finalize aggregate and check string result
+func finalizeAndCheckString(t *testing.T, v *VDBE, expected string) {
+	t.Helper()
+	finalInstr := &Instruction{Opcode: OpAggFinal, P1: 0, P2: 5, P3: 0}
+	err := v.execAggFinal(finalInstr)
+	if err != nil {
+		t.Fatalf("execAggFinal failed: %v", err)
+	}
+	result := v.Mem[5].StringValue()
+	if result != expected {
+		t.Errorf("Expected result='%s', got '%s'", expected, result)
+	}
+}
+
+func TestAggregateOpcodesCount(t *testing.T) {
 	t.Parallel()
-	t.Run("execAggStep_execAggFinal_COUNT", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.funcCtx = NewFunctionContext()
+	v := setupAggTest(t, "count")
+	for i := 0; i < 3; i++ {
+		v.Mem[1].SetInt(int64(i))
+		runAggStep(t, v)
+	}
+	finalizeAndCheckInt(t, v, 3)
+}
 
-		// Set up aggregate function name in Program
-		v.Program = []*Instruction{
-			{
-				Opcode: OpAggStep,
-				P1:     0, // cursor
-				P2:     1, // first arg register
-				P3:     0, // function index
-				P4:     P4Union{Z: "count"},
-				P4Type: P4Static,
-				P5:     1, // 1 argument
-			},
-		}
+func TestAggregateOpcodesSum(t *testing.T) {
+	t.Parallel()
+	v := setupAggTest(t, "sum")
+	for i := 1; i <= 4; i++ {
+		v.Mem[1].SetInt(int64(i))
+		runAggStep(t, v)
+	}
+	finalizeAndCheckInt(t, v, 10)
+}
 
-		// Insert 3 rows
-		for i := 0; i < 3; i++ {
-			v.Mem[1].SetInt(int64(i))
-			v.PC = 1 // Set PC to 1 so validateAggStepP4 can access Program[v.PC-1]
+func TestAggregateOpcodesAvg(t *testing.T) {
+	t.Parallel()
+	v := setupAggTest(t, "avg")
+	for _, val := range []int64{2, 4, 6} {
+		v.Mem[1].SetInt(val)
+		runAggStep(t, v)
+	}
+	finalizeAndCheckReal(t, v, 4.0)
+}
 
-			err := v.execAggStep(v.Program[0])
-			if err != nil {
-				t.Fatalf("execAggStep failed on iteration %d: %v", i, err)
-			}
-		}
+func TestAggregateOpcodesMax(t *testing.T) {
+	t.Parallel()
+	v := setupAggTest(t, "max")
+	for _, val := range []int64{3, 7, 2, 9, 1} {
+		v.Mem[1].SetInt(val)
+		runAggStep(t, v)
+	}
+	finalizeAndCheckInt(t, v, 9)
+}
 
-		// Finalize
-		finalInstr := &Instruction{
-			Opcode: OpAggFinal,
-			P1:     0, // cursor
-			P2:     5, // output register
-			P3:     0, // function index
-		}
+func TestAggregateOpcodesMin(t *testing.T) {
+	t.Parallel()
+	v := setupAggTest(t, "min")
+	for _, val := range []int64{3, 7, 2, 9, 1} {
+		v.Mem[1].SetInt(val)
+		runAggStep(t, v)
+	}
+	finalizeAndCheckInt(t, v, 1)
+}
 
-		err := v.execAggFinal(finalInstr)
-		if err != nil {
-			t.Fatalf("execAggFinal failed: %v", err)
-		}
+func TestAggregateOpcodesMultipleGroups(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(10)
+	v.funcCtx = NewFunctionContext()
 
-		// Check result
-		if !v.Mem[5].IsInt() || v.Mem[5].IntValue() != 3 {
-			t.Errorf("Expected COUNT=3, got %v", v.Mem[5].IntValue())
-		}
-	})
+	v.Program = []*Instruction{
+		{Opcode: OpAggStep, P1: 0, P2: 1, P3: 0, P4: P4Union{Z: "sum"}, P4Type: P4Static, P5: 1},
+		{Opcode: OpAggStep, P1: 1, P2: 1, P3: 0, P4: P4Union{Z: "sum"}, P4Type: P4Static, P5: 1},
+	}
 
-	t.Run("execAggStep_execAggFinal_SUM", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.funcCtx = NewFunctionContext()
-
-		v.Program = []*Instruction{
-			{
-				Opcode: OpAggStep,
-				P1:     0,
-				P2:     1,
-				P3:     0,
-				P4:     P4Union{Z: "sum"},
-				P4Type: P4Static,
-				P5:     1,
-			},
-		}
-
-		// Sum 1 + 2 + 3 + 4 = 10
-		for i := 1; i <= 4; i++ {
-			v.Mem[1].SetInt(int64(i))
-			v.PC = 1
-			err := v.execAggStep(v.Program[0])
-			if err != nil {
-				t.Fatalf("execAggStep failed: %v", err)
-			}
-		}
-
-		err := v.execAggFinal(&Instruction{
-			Opcode: OpAggFinal,
-			P1:     0,
-			P2:     5,
-			P3:     0,
-		})
-
-		if err != nil {
-			t.Fatalf("execAggFinal failed: %v", err)
-		}
-
-		if v.Mem[5].IntValue() != 10 {
-			t.Errorf("Expected SUM=10, got %d", v.Mem[5].IntValue())
-		}
-	})
-
-	t.Run("execAggStep_execAggFinal_AVG", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.funcCtx = NewFunctionContext()
-
-		v.Program = []*Instruction{
-			{
-				Opcode: OpAggStep,
-				P1:     0,
-				P2:     1,
-				P3:     0,
-				P4:     P4Union{Z: "avg"},
-				P4Type: P4Static,
-				P5:     1,
-			},
-		}
-
-		// Average of 2, 4, 6 = 4.0
-		for _, val := range []int64{2, 4, 6} {
-			v.Mem[1].SetInt(val)
-			v.PC = 1
-			err := v.execAggStep(v.Program[0])
-			if err != nil {
-				t.Fatalf("execAggStep failed: %v", err)
-			}
-		}
-
-		err := v.execAggFinal(&Instruction{
-			Opcode: OpAggFinal,
-			P1:     0,
-			P2:     5,
-			P3:     0,
-		})
-
-		if err != nil {
-			t.Fatalf("execAggFinal failed: %v", err)
-		}
-
-		// Result should be 4.0
-		avgVal := v.Mem[5].RealValue()
-		if avgVal != 4.0 {
-			t.Errorf("Expected AVG=4.0, got %f", avgVal)
-		}
-	})
-
-	t.Run("execAggStep_execAggFinal_MAX", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.funcCtx = NewFunctionContext()
-
-		v.Program = []*Instruction{
-			{
-				Opcode: OpAggStep,
-				P1:     0,
-				P2:     1,
-				P3:     0,
-				P4:     P4Union{Z: "max"},
-				P4Type: P4Static,
-				P5:     1,
-			},
-		}
-
-		// Max of 3, 7, 2, 9, 1 = 9
-		for _, val := range []int64{3, 7, 2, 9, 1} {
-			v.Mem[1].SetInt(val)
-			v.PC = 1
-			err := v.execAggStep(v.Program[0])
-			if err != nil {
-				t.Fatalf("execAggStep failed: %v", err)
-			}
-		}
-
-		err := v.execAggFinal(&Instruction{
-			Opcode: OpAggFinal,
-			P1:     0,
-			P2:     5,
-			P3:     0,
-		})
-
-		if err != nil {
-			t.Fatalf("execAggFinal failed: %v", err)
-		}
-
-		if v.Mem[5].IntValue() != 9 {
-			t.Errorf("Expected MAX=9, got %d", v.Mem[5].IntValue())
-		}
-	})
-
-	t.Run("execAggStep_execAggFinal_MIN", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.funcCtx = NewFunctionContext()
-
-		v.Program = []*Instruction{
-			{
-				Opcode: OpAggStep,
-				P1:     0,
-				P2:     1,
-				P3:     0,
-				P4:     P4Union{Z: "min"},
-				P4Type: P4Static,
-				P5:     1,
-			},
-		}
-
-		// Min of 3, 7, 2, 9, 1 = 1
-		for _, val := range []int64{3, 7, 2, 9, 1} {
-			v.Mem[1].SetInt(val)
-			v.PC = 1
-			err := v.execAggStep(v.Program[0])
-			if err != nil {
-				t.Fatalf("execAggStep failed: %v", err)
-			}
-		}
-
-		err := v.execAggFinal(&Instruction{
-			Opcode: OpAggFinal,
-			P1:     0,
-			P2:     5,
-			P3:     0,
-		})
-
-		if err != nil {
-			t.Fatalf("execAggFinal failed: %v", err)
-		}
-
-		if v.Mem[5].IntValue() != 1 {
-			t.Errorf("Expected MIN=1, got %d", v.Mem[5].IntValue())
-		}
-	})
-
-	t.Run("execAggStep_MultipleGroups", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.funcCtx = NewFunctionContext()
-
-		v.Program = []*Instruction{
-			{
-				Opcode: OpAggStep,
-				P1:     0, // Group 0
-				P2:     1,
-				P3:     0,
-				P4:     P4Union{Z: "sum"},
-				P4Type: P4Static,
-				P5:     1,
-			},
-			{
-				Opcode: OpAggStep,
-				P1:     1, // Group 1
-				P2:     1,
-				P3:     0,
-				P4:     P4Union{Z: "sum"},
-				P4Type: P4Static,
-				P5:     1,
-			},
-		}
-
-		// Sum for group 0
-		for _, val := range []int64{1, 2, 3} {
-			v.Mem[1].SetInt(val)
-			v.PC = 1
-			v.execAggStep(v.Program[0])
-		}
-
-		// Sum for group 1
-		for _, val := range []int64{10, 20, 30} {
-			v.Mem[1].SetInt(val)
-			v.PC = 2
-			v.execAggStep(v.Program[1])
-		}
-
-		// Finalize group 0
-		v.execAggFinal(&Instruction{
-			Opcode: OpAggFinal,
-			P1:     0,
-			P2:     5,
-			P3:     0,
-		})
-
-		if v.Mem[5].IntValue() != 6 {
-			t.Errorf("Expected group 0 SUM=6, got %d", v.Mem[5].IntValue())
-		}
-
-		// Finalize group 1
-		v.execAggFinal(&Instruction{
-			Opcode: OpAggFinal,
-			P1:     1,
-			P2:     6,
-			P3:     0,
-		})
-
-		if v.Mem[6].IntValue() != 60 {
-			t.Errorf("Expected group 1 SUM=60, got %d", v.Mem[6].IntValue())
-		}
-	})
-
-	t.Run("execAggStep_WithNullValues", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.funcCtx = NewFunctionContext()
-
-		v.Program = []*Instruction{
-			{
-				Opcode: OpAggStep,
-				P1:     0,
-				P2:     1,
-				P3:     0,
-				P4:     P4Union{Z: "count"},
-				P4Type: P4Static,
-				P5:     1,
-			},
-		}
-
-		// Count with some NULL values
-		v.Mem[1].SetInt(1)
+	for _, val := range []int64{1, 2, 3} {
+		v.Mem[1].SetInt(val)
 		v.PC = 1
 		v.execAggStep(v.Program[0])
+	}
 
-		v.Mem[1].SetNull()
-		v.PC = 1
-		v.execAggStep(v.Program[0])
+	for _, val := range []int64{10, 20, 30} {
+		v.Mem[1].SetInt(val)
+		v.PC = 2
+		v.execAggStep(v.Program[1])
+	}
 
-		v.Mem[1].SetInt(2)
-		v.PC = 1
-		v.execAggStep(v.Program[0])
+	v.execAggFinal(&Instruction{Opcode: OpAggFinal, P1: 0, P2: 5, P3: 0})
+	if v.Mem[5].IntValue() != 6 {
+		t.Errorf("Expected group 0 SUM=6, got %d", v.Mem[5].IntValue())
+	}
 
-		v.execAggFinal(&Instruction{
-			Opcode: OpAggFinal,
-			P1:     0,
-			P2:     5,
-			P3:     0,
-		})
+	v.execAggFinal(&Instruction{Opcode: OpAggFinal, P1: 1, P2: 6, P3: 0})
+	if v.Mem[6].IntValue() != 60 {
+		t.Errorf("Expected group 1 SUM=60, got %d", v.Mem[6].IntValue())
+	}
+}
 
-		// COUNT should count all non-NULL values (2 in this case)
-		// But depending on implementation, it might count all rows (3)
-		result := v.Mem[5].IntValue()
-		if result != 2 && result != 3 {
-			t.Errorf("Expected COUNT=2 or 3, got %d", result)
-		}
-	})
+func TestAggregateOpcodesWithNullValues(t *testing.T) {
+	t.Parallel()
+	v := setupAggTest(t, "count")
 
-	t.Run("execAggFinal_WithoutContext", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		// Don't set funcCtx
+	v.Mem[1].SetInt(1)
+	runAggStep(t, v)
 
-		err := v.execAggFinal(&Instruction{
-			Opcode: OpAggFinal,
-			P1:     0,
-			P2:     5,
-			P3:     0,
-		})
+	v.Mem[1].SetNull()
+	runAggStep(t, v)
 
-		if err == nil {
-			t.Error("Expected error when funcCtx is nil")
-		}
-	})
+	v.Mem[1].SetInt(2)
+	runAggStep(t, v)
 
-	t.Run("execAggStep_RealValues", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.funcCtx = NewFunctionContext()
+	finalInstr := &Instruction{Opcode: OpAggFinal, P1: 0, P2: 5, P3: 0}
+	v.execAggFinal(finalInstr)
 
-		v.Program = []*Instruction{
-			{
-				Opcode: OpAggStep,
-				P1:     0,
-				P2:     1,
-				P3:     0,
-				P4:     P4Union{Z: "sum"},
-				P4Type: P4Static,
-				P5:     1,
-			},
-		}
+	result := v.Mem[5].IntValue()
+	if result != 2 && result != 3 {
+		t.Errorf("Expected COUNT=2 or 3, got %d", result)
+	}
+}
 
-		// Sum of real numbers
-		for _, val := range []float64{1.5, 2.5, 3.5} {
-			v.Mem[1].SetReal(val)
-			v.PC = 1
-			err := v.execAggStep(v.Program[0])
-			if err != nil {
-				t.Fatalf("execAggStep failed: %v", err)
-			}
-		}
+func TestAggregateOpcodesFinalWithoutContext(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(10)
 
-		err := v.execAggFinal(&Instruction{
-			Opcode: OpAggFinal,
-			P1:     0,
-			P2:     5,
-			P3:     0,
-		})
+	err := v.execAggFinal(&Instruction{Opcode: OpAggFinal, P1: 0, P2: 5, P3: 0})
+	if err == nil {
+		t.Error("Expected error when funcCtx is nil")
+	}
+}
 
-		if err != nil {
-			t.Fatalf("execAggFinal failed: %v", err)
-		}
+func TestAggregateOpcodesRealValues(t *testing.T) {
+	t.Parallel()
+	v := setupAggTest(t, "sum")
+	for _, val := range []float64{1.5, 2.5, 3.5} {
+		v.Mem[1].SetReal(val)
+		runAggStep(t, v)
+	}
+	finalizeAndCheckReal(t, v, 7.5)
+}
 
-		result := v.Mem[5].RealValue()
-		expected := 7.5
-		if result != expected {
-			t.Errorf("Expected SUM=%.1f, got %.1f", expected, result)
-		}
-	})
-
-	t.Run("execAggStep_StringAggregate", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.funcCtx = NewFunctionContext()
-
-		v.Program = []*Instruction{
-			{
-				Opcode: OpAggStep,
-				P1:     0,
-				P2:     1,
-				P3:     0,
-				P4:     P4Union{Z: "max"},
-				P4Type: P4Static,
-				P5:     1,
-			},
-		}
-
-		// Max of strings (lexicographic order)
-		for _, val := range []string{"apple", "zebra", "banana"} {
-			v.Mem[1].SetStr(val)
-			v.PC = 1
-			err := v.execAggStep(v.Program[0])
-			if err != nil {
-				t.Fatalf("execAggStep failed: %v", err)
-			}
-		}
-
-		err := v.execAggFinal(&Instruction{
-			Opcode: OpAggFinal,
-			P1:     0,
-			P2:     5,
-			P3:     0,
-		})
-
-		if err != nil {
-			t.Fatalf("execAggFinal failed: %v", err)
-		}
-
-		result := v.Mem[5].StringValue()
-		if result != "zebra" {
-			t.Errorf("Expected MAX='zebra', got '%s'", result)
-		}
-	})
+func TestAggregateOpcodesStringAggregate(t *testing.T) {
+	t.Parallel()
+	v := setupAggTest(t, "max")
+	for _, val := range []string{"apple", "zebra", "banana"} {
+		v.Mem[1].SetStr(val)
+		runAggStep(t, v)
+	}
+	finalizeAndCheckString(t, v, "zebra")
 }

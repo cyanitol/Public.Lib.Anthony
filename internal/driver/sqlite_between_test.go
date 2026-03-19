@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -224,6 +224,12 @@ func TestBetweenCollation(t *testing.T) {
 	}
 }
 
+// betweenLeftJoinTest defines a LEFT JOIN BETWEEN test case
+type betweenLeftJoinTest struct {
+	name  string
+	query string
+}
+
 // TestBetweenLeftJoin tests BETWEEN in LEFT JOIN ON clause
 // From between.test lines 143-159
 func TestBetweenLeftJoin(t *testing.T) {
@@ -237,7 +243,30 @@ func TestBetweenLeftJoin(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec(`
+	betweenLeftJoinSetupDB(t, db)
+
+	tests := []betweenLeftJoinTest{
+		{
+			name:  "between_1_and_3",
+			query: "SELECT * FROM t1 LEFT JOIN t2 ON (x BETWEEN 1 AND 3)",
+		},
+		{
+			name:  "between_5_and_7",
+			query: "SELECT * FROM t1 LEFT JOIN t2 ON (x BETWEEN 5 AND 7)",
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			betweenLeftJoinVerifyResults(t, db, test.query)
+		})
+	}
+}
+
+// betweenLeftJoinSetupDB creates tables and inserts test data
+func betweenLeftJoinSetupDB(t *testing.T, db *sql.DB) {
+	_, err := db.Exec(`
 		CREATE TABLE t1(x, y);
 		CREATE INDEX i1 ON t1(x);
 		INSERT INTO t1 VALUES(4, 4);
@@ -246,42 +275,25 @@ func TestBetweenLeftJoin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to setup: %v", err)
 	}
+}
 
-	// Test BETWEEN that should NOT match in LEFT JOIN
-	rows, err := db.Query("SELECT * FROM t1 LEFT JOIN t2 ON (x BETWEEN 1 AND 3)")
+// betweenLeftJoinVerifyResults verifies LEFT JOIN results with NULL expectations
+func betweenLeftJoinVerifyResults(t *testing.T, db *sql.DB, query string) {
+	rows, err := db.Query(query)
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
 	defer rows.Close()
 
-	var x, y sql.NullInt64
-	var a, b sql.NullInt64
 	if !rows.Next() {
 		t.Fatal("expected one row")
 	}
+
+	var x, y, a, b sql.NullInt64
 	if err := rows.Scan(&x, &y, &a, &b); err != nil {
 		t.Fatalf("failed to scan: %v", err)
 	}
-	if !x.Valid || x.Int64 != 4 || !y.Valid || y.Int64 != 4 {
-		t.Errorf("got x=%v y=%v, want 4, 4", x, y)
-	}
-	if a.Valid || b.Valid {
-		t.Errorf("expected NULL for a and b, got a=%v b=%v", a, b)
-	}
 
-	// Test BETWEEN that should NOT match (different range)
-	rows2, err := db.Query("SELECT * FROM t1 LEFT JOIN t2 ON (x BETWEEN 5 AND 7)")
-	if err != nil {
-		t.Fatalf("failed to query: %v", err)
-	}
-	defer rows2.Close()
-
-	if !rows2.Next() {
-		t.Fatal("expected one row")
-	}
-	if err := rows2.Scan(&x, &y, &a, &b); err != nil {
-		t.Fatalf("failed to scan: %v", err)
-	}
 	if !x.Valid || x.Int64 != 4 || !y.Valid || y.Int64 != 4 {
 		t.Errorf("got x=%v y=%v, want 4, 4", x, y)
 	}

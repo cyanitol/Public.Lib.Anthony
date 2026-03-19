@@ -8,6 +8,7 @@ pkgs.mkShell {
     gotools
     go-tools
     delve
+    codex
 
     # Build tools
     gnumake

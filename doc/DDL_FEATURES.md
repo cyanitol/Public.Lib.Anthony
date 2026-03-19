@@ -8,21 +8,21 @@ Successfully implemented and wired up the remaining DDL statements to the driver
 
 ### 1. Files Modified
 
-#### /home/justin/Programming/Workspace/Public.Lib.Anthony/internal/driver/stmt.go
+#### internal/driver/stmt.go
 - **Added dispatch cases** in `dispatchDDLOrTxn()` function for:
   - `*parser.CreateIndexStmt` -> `compileCreateIndex()`
   - `*parser.DropIndexStmt` -> `compileDropIndex()`
   - `*parser.AlterTableStmt` -> `compileAlterTable()`
   - `*parser.PragmaStmt` -> `compilePragma()`
 
-#### /home/justin/Programming/Workspace/Public.Lib.Anthony/internal/driver/conn.go
+#### internal/driver/conn.go
 - **Added PRAGMA settings fields** to `Conn` struct:
   - `foreignKeysEnabled bool` - tracks PRAGMA foreign_keys setting
   - `journalMode string` - tracks PRAGMA journal_mode setting
 
 ### 2. Files Created
 
-#### /home/justin/Programming/Workspace/Public.Lib.Anthony/internal/driver/stmt_ddl_additions.go
+#### internal/driver/stmt_ddl_additions.go
 New file containing all DDL compilation functions (456 lines):
 
 **CREATE INDEX / DROP INDEX:**
@@ -42,7 +42,7 @@ New file containing all DDL compilation functions (456 lines):
 - `compilePragmaForeignKeys()` - Implements `PRAGMA foreign_keys` (GET/SET)
 - `compilePragmaJournalMode()` - Implements `PRAGMA journal_mode` (GET/SET)
 
-#### /home/justin/Programming/Workspace/Public.Lib.Anthony/internal/driver/ddl_test.go
+#### internal/driver/ddl_test.go
 Comprehensive test suite covering:
 - CREATE INDEX / DROP INDEX with IF NOT EXISTS / IF EXISTS
 - ALTER TABLE RENAME TO

@@ -31,13 +31,13 @@ Search Changelog
 RETURNING
 
 Table Of Contents
-[1. Overview](#overview)
-[1.1. Typical Use](#typical_use)
-[2. Details](#details)
-[2.1. Processing Order](#processing_order)
-[2.2. Self-Referential Subqueries Are Indeterminate](#self_referential_subqueries_are_indeterminate)
-[2.3. ACID Changes](#acid_changes)
-[3. Limitations And Caveats](#limitations_and_caveats)
+[1. Overview](#1-overview)
+[1.1. Typical Use](#11-typical-use)
+[2. Details](#2-details)
+[2.1. Processing Order](#21-processing-order)
+[2.2. Self-Referential Subqueries Are Indeterminate](#22-self-referential-subqueries-are-indeterminate)
+[2.3. ACID Changes](#23-acid-changes)
+[3. Limitations And Caveats](#3-limitations-and-caveats)
 
 # 1. Overview
 

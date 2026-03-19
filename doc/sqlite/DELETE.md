@@ -31,10 +31,10 @@ Search Changelog
 DELETE
 
 Table Of Contents
-[1. Overview](#overview)
-[2. Restrictions on DELETE Statements Within CREATE TRIGGER](#restrictions_on_delete_statements_within_create_trigger)
-[3. Optional LIMIT and ORDER BY clauses](#optional_limit_and_order_by_clauses)
-[4. The Truncate Optimization](#the_truncate_optimization)
+[1. Overview](#1-overview)
+[2. Restrictions on DELETE Statements Within CREATE TRIGGER](#2-restrictions-on-delete-statements-within-create-trigger)
+[3. Optional LIMIT and ORDER BY clauses](#3-optional-limit-and-order-by-clauses)
+[4. The Truncate Optimization](#4-the-truncate-optimization)
 
 # 1. Overview
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package functions
 
 import (
@@ -959,7 +959,6 @@ func strftimeFunc(args []Value) (Value, error) {
 }
 
 // getWeekday returns the day of week (0=Sunday, 1=Monday, ..., 6=Saturday).
-// SCAFFOLDING: For strftime %w and %u format specifiers.
 func (dt *DateTime) getWeekday() int {
 	dt.computeJD()
 	// Julian day 0 is a Monday, so adjust accordingly
@@ -968,35 +967,23 @@ func (dt *DateTime) getWeekday() int {
 }
 
 // getWeekNumber returns the week number of the year (00-53).
-// Week 01 is the first week containing a Monday.
-// SCAFFOLDING: For strftime %W format specifier.
+// Week 01 starts on the first Monday of the year.
+// Days before the first Monday belong to week 00.
+// This matches C strftime %W and SQLite's %W behaviour.
 func (dt *DateTime) getWeekNumber() int {
 	dt.computeYMD()
 
-	// Get day of year
-	dayOfYear := dt.getDayOfYear()
+	dayOfYear := dt.getDayOfYear() // 1-based
+	wd := dt.getWeekday()          // 0=Sun, 1=Mon, ..., 6=Sat
 
-	// Get weekday of January 1
-	jan1 := &DateTime{year: dt.year, month: 1, day: 1, validYMD: true}
-	jan1.computeJD()
-	jan1Weekday := jan1.getWeekday()
+	// Convert Sunday=0 weekday to Monday-based offset (Mon=0 .. Sun=6).
+	mondayBased := (wd + 6) % 7
 
-	// Calculate week number
-	// Days until first Monday
-	daysUntilMonday := (8 - jan1Weekday) % 7
-	if daysUntilMonday == 0 {
-		daysUntilMonday = 7
-	}
-
-	if dayOfYear < daysUntilMonday {
-		return 0
-	}
-
-	return (dayOfYear-daysUntilMonday)/7 + 1
+	// Week number = number of Mondays on or before this day-of-year.
+	return (dayOfYear + 6 - mondayBased) / 7
 }
 
 // getDayOfYear returns the day of year (1-366).
-// SCAFFOLDING: For strftime %j format specifier.
 func (dt *DateTime) getDayOfYear() int {
 	dt.computeYMD()
 
@@ -1022,6 +1009,16 @@ var strftimeHandlers = map[byte]func(*DateTime) string{
 	'f': func(dt *DateTime) string { return fmt.Sprintf("%06.3f", dt.second) },
 	's': func(dt *DateTime) string { return fmt.Sprintf("%d", int64(dt.getUnixEpoch())) },
 	'J': func(dt *DateTime) string { return fmt.Sprintf("%.16g", dt.getJulianDay()) },
+	'w': func(dt *DateTime) string { return fmt.Sprintf("%d", dt.getWeekday()) },
+	'u': func(dt *DateTime) string {
+		wd := dt.getWeekday()
+		if wd == 0 {
+			wd = 7
+		}
+		return fmt.Sprintf("%d", wd)
+	},
+	'W': func(dt *DateTime) string { return fmt.Sprintf("%02d", dt.getWeekNumber()) },
+	'j': func(dt *DateTime) string { return fmt.Sprintf("%03d", dt.getDayOfYear()) },
 }
 
 // strftimeSpecifier resolves a single format specifier byte and appends its

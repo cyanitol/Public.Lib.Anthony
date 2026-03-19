@@ -4,7 +4,7 @@ This document describes the JSON functions implemented in the Anthony SQLite lib
 
 ## Overview
 
-The JSON functions provide support for storing, querying, and manipulating JSON data within SQLite. All functions are implemented in `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/functions/json.go` and registered in `RegisterJSONFunctions()`.
+The JSON functions provide support for storing, querying, and manipulating JSON data within SQLite. All functions are implemented in `internal/functions/json.go` and registered in `RegisterJSONFunctions()`.
 
 ## Core JSON Functions
 
@@ -212,12 +212,12 @@ SELECT COUNT(*) FROM users WHERE json_valid(profile) = 1;
 
 ## Implementation Details
 
-- **Location:** `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/functions/json.go`
-- **Registration:** `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/functions/functions.go` in `RegisterJSONFunctions()`
+- **Location:** `internal/functions/json.go`
+- **Registration:** `internal/functions/functions.go` in `RegisterJSONFunctions()`
 - **Parser:** Uses Go's standard library `encoding/json` package
 - **Path Support:** Simplified JSONPath syntax supporting `$`, `.key`, and `[index]` notation
 - **NULL Handling:** Invalid JSON operations return NULL
-- **Testing:** Comprehensive unit tests in `json_test.go` and integration tests in `/home/justin/Programming/Workspace/Public.Lib.Anthony/internal/driver/json_integration_test.go`
+- **Testing:** Comprehensive unit tests in `json_test.go` and integration tests in `internal/driver/json_integration_test.go`
 
 ## Running Tests
 
@@ -243,6 +243,38 @@ nix-shell --run "go run ./examples/json_demo.go"
 - JSON numbers are automatically converted to SQLite INTEGER or REAL types
 - Complex JSON structures (arrays, objects) are returned as JSON strings when extracted
 - The implementation follows SQLite's JSON1 extension behavior
+
+## Table-Valued Functions
+
+### json_each(X, [path])
+
+Parses a JSON array or object and returns one row per element. Available as a table-valued function in FROM clauses.
+
+```sql
+SELECT value FROM json_each('[1,2,3]');
+-- Returns: 1, 2, 3
+
+SELECT key, value FROM json_each('{"a":1,"b":2}');
+-- Returns: a/1, b/2
+
+SELECT value FROM json_each('{"x":[10,20]}', '$.x');
+-- Returns: 10, 20
+```
+
+**Output columns:** key, value, type, atom, id, parent, fullkey, path
+
+### json_tree(X, [path])
+
+Recursively walks a JSON structure and returns one row per node.
+
+```sql
+SELECT key, value, type FROM json_tree('{"a":{"b":1}}');
+-- Returns all nodes including nested objects
+```
+
+**Output columns:** key, value, type, atom, id, parent, fullkey, path
+
+**Implementation:** `internal/functions/json_table.go`
 
 ## See Also
 

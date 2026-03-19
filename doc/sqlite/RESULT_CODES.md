@@ -31,12 +31,12 @@ Search Changelog
 Result and Error Codes
 
 Table Of Contents
-[1. Result Codes versus Error Codes](#result_codes_versus_error_codes)
-[2. Primary Result Codes versus Extended Result Codes](#primary_result_codes_versus_extended_result_codes)
-[3. Definitions](#definitions)
-[4. Primary Result Code List](#primary_result_code_list)
-[5. Extended Result Code List](#extended_result_code_list)
-[6. Result Code Meanings](#result_code_meanings)
+[1. Result Codes versus Error Codes](#1-result-codes-versus-error-codes)
+[2. Primary Result Codes versus Extended Result Codes](#2-primary-result-codes-versus-extended-result-codes)
+[3. Definitions](#3-definitions)
+[4. Primary Result Code List](#4-primary-result-code-list)
+[5. Extended Result Code List](#5-extended-result-code-list)
+[6. Result Code Meanings](#6-result-code-meanings)
 
 ##  Overview
  

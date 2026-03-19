@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package constraint
 
 import (
@@ -185,124 +185,83 @@ func TestNewDefaultConstraint(t *testing.T) {
 	}
 }
 
+// Prefix: defEval_
+type defEvalTestCase struct {
+	name         string
+	dcType       DefaultType
+	litValue     interface{}
+	wantValue    interface{}
+	checkFormat  func(*testing.T, interface{})
+}
+
+func defEval_checkTimeFormat(t *testing.T, val interface{}) {
+	t.Helper()
+	timeStr, ok := val.(string)
+	if !ok {
+		t.Fatalf("expected string, got %T", val)
+	}
+	if len(timeStr) != 8 || timeStr[2] != ':' || timeStr[5] != ':' {
+		t.Errorf("invalid time format: %s", timeStr)
+	}
+}
+
+func defEval_checkDateFormat(t *testing.T, val interface{}) {
+	t.Helper()
+	dateStr, ok := val.(string)
+	if !ok {
+		t.Fatalf("expected string, got %T", val)
+	}
+	if len(dateStr) != 10 || dateStr[4] != '-' || dateStr[7] != '-' {
+		t.Errorf("invalid date format: %s", dateStr)
+	}
+	today := time.Now().Format("2006-01-02")
+	if dateStr != today {
+		t.Errorf("expected today's date %s, got %s", today, dateStr)
+	}
+}
+
+func defEval_checkTimestampFormat(t *testing.T, val interface{}) {
+	t.Helper()
+	tsStr, ok := val.(string)
+	if !ok {
+		t.Fatalf("expected string, got %T", val)
+	}
+	if len(tsStr) != 19 {
+		t.Errorf("invalid timestamp length: %s", tsStr)
+	}
+}
+
+func defEval_runTest(t *testing.T, tc defEvalTestCase) {
+	t.Helper()
+	dc := &DefaultConstraint{Type: tc.dcType, LiteralValue: tc.litValue}
+	val, err := dc.Evaluate()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tc.checkFormat != nil {
+		tc.checkFormat(t, val)
+	} else if val != tc.wantValue {
+		t.Errorf("expected %v, got %v", tc.wantValue, val)
+	}
+}
+
 // TestEvaluate tests evaluating default constraints.
 func TestEvaluate(t *testing.T) {
-	t.Run("literal integer", func(t *testing.T) {
-		dc := &DefaultConstraint{
-			Type:         DefaultLiteral,
-			LiteralValue: int64(42),
-		}
+	tests := []defEvalTestCase{
+		{name: "literal integer", dcType: DefaultLiteral, litValue: int64(42), wantValue: int64(42)},
+		{name: "literal string", dcType: DefaultLiteral, litValue: "hello", wantValue: "hello"},
+		{name: "literal null", dcType: DefaultLiteral, litValue: nil, wantValue: nil},
+		{name: "CURRENT_TIME", dcType: DefaultCurrentTime, checkFormat: defEval_checkTimeFormat},
+		{name: "CURRENT_DATE", dcType: DefaultCurrentDate, checkFormat: defEval_checkDateFormat},
+		{name: "CURRENT_TIMESTAMP", dcType: DefaultCurrentTimestamp, checkFormat: defEval_checkTimestampFormat},
+	}
 
-		val, err := dc.Evaluate()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if val != int64(42) {
-			t.Errorf("expected 42, got %v", val)
-		}
-	})
-
-	t.Run("literal string", func(t *testing.T) {
-		dc := &DefaultConstraint{
-			Type:         DefaultLiteral,
-			LiteralValue: "hello",
-		}
-
-		val, err := dc.Evaluate()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if val != "hello" {
-			t.Errorf("expected 'hello', got %v", val)
-		}
-	})
-
-	t.Run("literal null", func(t *testing.T) {
-		dc := &DefaultConstraint{
-			Type:         DefaultLiteral,
-			LiteralValue: nil,
-		}
-
-		val, err := dc.Evaluate()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if val != nil {
-			t.Errorf("expected nil, got %v", val)
-		}
-	})
-
-	t.Run("CURRENT_TIME", func(t *testing.T) {
-		dc := &DefaultConstraint{
-			Type: DefaultCurrentTime,
-		}
-
-		val, err := dc.Evaluate()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		// Check format: HH:MM:SS
-		timeStr, ok := val.(string)
-		if !ok {
-			t.Fatalf("expected string, got %T", val)
-		}
-
-		if len(timeStr) != 8 || timeStr[2] != ':' || timeStr[5] != ':' {
-			t.Errorf("invalid time format: %s", timeStr)
-		}
-	})
-
-	t.Run("CURRENT_DATE", func(t *testing.T) {
-		dc := &DefaultConstraint{
-			Type: DefaultCurrentDate,
-		}
-
-		val, err := dc.Evaluate()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		// Check format: YYYY-MM-DD
-		dateStr, ok := val.(string)
-		if !ok {
-			t.Fatalf("expected string, got %T", val)
-		}
-
-		if len(dateStr) != 10 || dateStr[4] != '-' || dateStr[7] != '-' {
-			t.Errorf("invalid date format: %s", dateStr)
-		}
-
-		// Verify it's today's date
-		today := time.Now().Format("2006-01-02")
-		if dateStr != today {
-			t.Errorf("expected today's date %s, got %s", today, dateStr)
-		}
-	})
-
-	t.Run("CURRENT_TIMESTAMP", func(t *testing.T) {
-		dc := &DefaultConstraint{
-			Type: DefaultCurrentTimestamp,
-		}
-
-		val, err := dc.Evaluate()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		// Check format: YYYY-MM-DD HH:MM:SS
-		tsStr, ok := val.(string)
-		if !ok {
-			t.Fatalf("expected string, got %T", val)
-		}
-
-		if len(tsStr) != 19 {
-			t.Errorf("invalid timestamp length: %s", tsStr)
-		}
-	})
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			defEval_runTest(t, tc)
+		})
+	}
 }
 
 // TestShouldApplyDefault tests the decision logic for applying defaults.

@@ -1,10 +1,12 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
 	"database/sql/driver"
+	"encoding/hex"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
@@ -29,27 +31,16 @@ func insertFirstRow(stmt *parser.InsertStmt) ([]parser.Expression, error) {
 func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
 
-	table, ok := s.conn.schema.GetTable(stmt.Table)
+	table, db, _, ok := s.conn.dbRegistry.ResolveTable(stmt.Schema, stmt.Table)
 	if !ok {
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
+	s.setVdbeContextForDatabase(vm, db)
 
-	// Phase 3.5 Note: BEFORE INSERT trigger execution framework exists but is not yet
-	// integrated into the VDBE execution path. Triggers are defined and stored in schema,
-	// but actual execution requires VDBE-level changes to handle OLD/NEW pseudo-tables.
-	//
-	// The trigger infrastructure is complete:
-	// - schema.CreateTrigger() stores trigger definitions
-	// - schema.GetTableTriggers() retrieves triggers by table/event/timing
-	// - engine.TriggerExecutor provides execution framework
-	// - engine.SubstituteOldNewReferences() handles OLD/NEW substitution
-	//
-	// What's missing for full execution:
-	// - VDBE opcodes need to call trigger executor at runtime
-	// - OLD/NEW values must be extracted from current row data during DML operations
-	// - Trigger bytecode needs to be inlined or executed via callback in VDBE loop
-	//
-	// This will be completed in a future phase focused on VDBE enhancements.
+	// Trigger execution is wired through OpTriggerBefore/OpTriggerAfter opcodes
+	// emitted in compileInsertValues, compileUpdate, and compileDelete.
+	// At VDBE runtime, these opcodes invoke TriggerCompilerInterface to compile
+	// and execute trigger body statements with actual OLD/NEW row data.
 
 	// Handle INSERT...SELECT
 	if stmt.Select != nil {
@@ -70,10 +61,30 @@ func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table
 		return nil, fmt.Errorf("INSERT requires VALUES clause")
 	}
 
+	// Validate explicit column list count matches each VALUES row.
+	if len(stmt.Columns) > 0 {
+		for _, row := range stmt.Values {
+			if len(row) != len(stmt.Columns) {
+				return nil, fmt.Errorf("%d values for %d columns", len(row), len(stmt.Columns))
+			}
+		}
+	}
+
+	// Expand partial column lists to include all columns with defaults.
+	expandedValues := expandInsertDefaults(stmt, table)
+
+	// Validate that each row has the correct number of values.
+	numCols := len(table.Columns)
+	for _, row := range expandedValues {
+		if len(row) != numCols {
+			return nil, fmt.Errorf("table %s has %d columns but %d values were supplied", table.Name, numCols, len(row))
+		}
+	}
+
 	// Use first row to determine structure
-	firstRow := stmt.Values[0]
-	colNames := resolveInsertColumns(stmt, table)
-	rowidColIdx := findInsertRowidCol(colNames, table)
+	firstRow := expandedValues[0]
+	allColNames := allTableColumnNames(table)
+	rowidColIdx := findInsertRowidCol(allColNames, table)
 
 	// For WITHOUT ROWID tables, all columns go in the record
 	// For normal tables, only non-rowid columns go in the record
@@ -91,6 +102,16 @@ func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table
 	vm.AllocMemory(numRecordCols + 10)
 	vm.AllocCursors(1)
 
+	gen := expr.NewCodeGenerator(vm)
+	gen.SetNextReg(recordStartReg + numRecordCols + 1)
+	if len(args) > 0 {
+		argValues := make([]interface{}, len(args))
+		for i, a := range args {
+			argValues[i] = a.Value
+		}
+		gen.SetArgs(argValues)
+	}
+
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpOpenWrite, 0, int(table.RootPage), len(table.Columns))
 
@@ -99,14 +120,43 @@ func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table
 	// Determine conflict resolution mode for INSERT OR IGNORE/REPLACE
 	conflictMode := getConflictMode(stmt.OnConflict)
 
-	// Loop over all rows in VALUES clause
-	for _, row := range stmt.Values {
-		s.emitInsertRow(vm, table, colNames, row, rowidColIdx, rowidReg, recordStartReg, numRecordCols, conflictMode, args, &paramIdx)
-	}
+	hasTriggers := s.tableHasTriggers(stmt.Table)
 
-	// TODO Phase 3.5: AFTER INSERT trigger execution
-	// Same limitation as BEFORE triggers - requires VDBE runtime integration.
-	// Keeping framework in place for future implementation.
+	// Loop over all rows in VALUES clause
+	for _, row := range expandedValues {
+		// Populate registers with row values first (needed for trigger NEW row)
+		if !table.WithoutRowID {
+			s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, &paramIdx, gen)
+		}
+		s.emitInsertRecordValues(vm, table, allColNames, row, rowidColIdx, recordStartReg, args, &paramIdx, gen)
+
+		// Emit BEFORE INSERT trigger after values are in registers
+		// P3=recordStartReg so VDBE can build NEW row from registers
+		var beforeAddr int
+		if hasTriggers {
+			beforeAddr = vm.AddOp(vdbe.OpTriggerBefore, 0, 0, recordStartReg)
+			vm.Program[beforeAddr].P4.Z = stmt.Table
+		}
+
+		// Make record and insert
+		resultReg := recordStartReg + numRecordCols
+		vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
+		rowidRegToUse := rowidReg
+		if table.WithoutRowID {
+			rowidRegToUse = 0
+		}
+		insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidRegToUse)
+		vm.Program[insertOp].P4.I = conflictMode
+		vm.Program[insertOp].P4.Z = table.Name
+
+		// Emit AFTER INSERT trigger
+		if hasTriggers {
+			afterAddr := vm.AddOp(vdbe.OpTriggerAfter, 0, 0, recordStartReg)
+			vm.Program[afterAddr].P4.Z = stmt.Table
+			// Fix BEFORE trigger skip address (for RAISE(IGNORE))
+			vm.Program[beforeAddr].P2 = vm.NumOps()
+		}
+	}
 
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
@@ -117,13 +167,13 @@ func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table
 // emitInsertRow emits bytecode for inserting a single row.
 func (s *Stmt) emitInsertRow(vm *vdbe.VDBE, table *schema.Table, colNames []string, row []parser.Expression,
 	rowidColIdx, rowidReg, recordStartReg, numRecordCols int, conflictMode int32,
-	args []driver.NamedValue, paramIdx *int) {
+	args []driver.NamedValue, paramIdx *int, gen *expr.CodeGenerator) {
 
 	// For WITHOUT ROWID tables, we don't generate a rowid
 	if !table.WithoutRowID {
-		s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, paramIdx)
+		s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, paramIdx, gen)
 	}
-	s.emitInsertRecordValues(vm, table, colNames, row, rowidColIdx, recordStartReg, args, paramIdx)
+	s.emitInsertRecordValues(vm, table, colNames, row, rowidColIdx, recordStartReg, args, paramIdx, gen)
 
 	resultReg := recordStartReg + numRecordCols
 	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
@@ -143,6 +193,13 @@ func (s *Stmt) emitInsertRow(vm *vdbe.VDBE, table *schema.Table, colNames []stri
 
 // compileInsertSelect compiles an INSERT...SELECT statement.
 func (s *Stmt) compileInsertSelect(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	// When the SELECT contains aggregates, ORDER BY, LIMIT, or other
+	// features that require full materialisation, execute the SELECT first
+	// and then insert the result rows.
+	if s.insertSelectNeedsMaterialise(stmt.Select) {
+		return s.compileInsertSelectMaterialised(vm, stmt, args)
+	}
+
 	// Prepare tables and columns
 	ctx, err := s.prepareInsertSelectContext(vm, stmt, args)
 	if err != nil {
@@ -161,6 +218,98 @@ func (s *Stmt) compileInsertSelect(vm *vdbe.VDBE, stmt *parser.InsertStmt, args 
 	return vm, nil
 }
 
+// insertSelectNeedsMaterialise returns true when the SELECT part contains
+// features that cannot be compiled as a simple row-by-row scan loop, such as
+// aggregates, ORDER BY, LIMIT, or DISTINCT.
+func (s *Stmt) insertSelectNeedsMaterialise(sel *parser.SelectStmt) bool {
+	if sel == nil {
+		return false
+	}
+	return s.detectAggregates(sel) || len(sel.OrderBy) > 0 || sel.Limit != nil || sel.Distinct
+}
+
+// compileInsertSelectMaterialised executes the SELECT to completion, then
+// inserts each result row into the target table.
+func (s *Stmt) compileInsertSelectMaterialised(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	// Execute the SELECT
+	selVM := vdbe.New()
+	selVM.Ctx = vm.Ctx
+	compiled, err := s.compileSelect(selVM, stmt.Select, args)
+	if err != nil {
+		return nil, fmt.Errorf("INSERT..SELECT compile: %w", err)
+	}
+	numCols := len(compiled.ResultCols)
+	rows, err := s.collectRows(compiled, numCols, "INSERT..SELECT")
+	if err != nil {
+		return nil, err
+	}
+
+	// Resolve target table
+	targetTable, db, _, ok := s.conn.dbRegistry.ResolveTable(stmt.Schema, stmt.Table)
+	if !ok {
+		return nil, fmt.Errorf("table not found: %s", stmt.Table)
+	}
+	s.setVdbeContextForDatabase(vm, db)
+
+	return s.emitInsertMaterialisedRows(vm, targetTable, stmt, rows, numCols)
+}
+
+// emitInsertMaterialisedRows emits bytecode to insert pre-materialised rows.
+func (s *Stmt) emitInsertMaterialisedRows(vm *vdbe.VDBE, table *schema.Table, stmt *parser.InsertStmt, rows [][]interface{}, numCols int) (*vdbe.VDBE, error) {
+	colNames := resolveInsertColumns(stmt, table)
+	rowidColIdx := findInsertRowidCol(colNames, table)
+	numRecordCols := numCols
+	if !table.WithoutRowID && rowidColIdx >= 0 {
+		numRecordCols--
+	}
+
+	const rowidReg = 1
+	const recordStartReg = 2
+	vm.AllocMemory(numRecordCols + 10)
+	vm.AllocCursors(1)
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpOpenWrite, 0, int(table.RootPage), len(table.Columns))
+
+	for _, row := range rows {
+		s.emitMaterialisedRow(vm, table, row, rowidColIdx, rowidReg, recordStartReg, numRecordCols)
+	}
+
+	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// emitMaterialisedRow emits bytecode for a single pre-materialised row.
+func (s *Stmt) emitMaterialisedRow(vm *vdbe.VDBE, table *schema.Table, row []interface{}, rowidColIdx, rowidReg, recordStartReg, numRecordCols int) {
+	// Handle rowid
+	if !table.WithoutRowID {
+		if rowidColIdx >= 0 && rowidColIdx < len(row) {
+			emitLoadValue(vm, row[rowidColIdx], rowidReg)
+		} else {
+			vm.AddOp(vdbe.OpNewRowid, 0, 0, rowidReg)
+		}
+	}
+
+	// Load non-rowid columns
+	reg := recordStartReg
+	for i, val := range row {
+		if !table.WithoutRowID && i == rowidColIdx {
+			continue
+		}
+		emitLoadValue(vm, val, reg)
+		reg++
+	}
+
+	resultReg := recordStartReg + numRecordCols
+	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
+	rowidRegToUse := rowidReg
+	if table.WithoutRowID {
+		rowidRegToUse = 0
+	}
+	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidRegToUse)
+	vm.Program[insertOp].P4.Z = table.Name
+}
+
 // insertSelectContext holds the context for INSERT...SELECT compilation.
 type insertSelectContext struct {
 	targetTable    *schema.Table
@@ -177,7 +326,7 @@ type insertSelectContext struct {
 // prepareInsertSelectContext sets up the context for INSERT...SELECT compilation.
 func (s *Stmt) prepareInsertSelectContext(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driver.NamedValue) (*insertSelectContext, error) {
 	// Get target table schema
-	targetTable, ok := s.conn.schema.GetTable(stmt.Table)
+	targetTable, _, _, ok := s.conn.dbRegistry.ResolveTable(stmt.Schema, stmt.Table)
 	if !ok {
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
@@ -200,7 +349,7 @@ func (s *Stmt) prepareInsertSelectContext(vm *vdbe.VDBE, stmt *parser.InsertStmt
 		return nil, fmt.Errorf("INSERT...SELECT requires FROM clause: %w", err)
 	}
 
-	sourceTable, ok := s.conn.schema.GetTable(sourceTableName)
+	sourceTable, _, _, ok := s.conn.dbRegistry.ResolveTable("", sourceTableName)
 	if !ok {
 		return nil, fmt.Errorf("source table not found: %s", sourceTableName)
 	}
@@ -400,8 +549,12 @@ func resolveInsertColumns(stmt *parser.InsertStmt, table *schema.Table) []string
 }
 
 // findInsertRowidCol returns the index within names of the INTEGER PRIMARY KEY
-// column, or -1 when none exists.
+// column, or -1 when none exists. For WITHOUT ROWID tables, always returns -1
+// since they don't have a rowid column.
 func findInsertRowidCol(names []string, table *schema.Table) int {
+	if table.WithoutRowID {
+		return -1 // WITHOUT ROWID tables don't have a rowid column
+	}
 	for i, name := range names {
 		idx := table.GetColumnIndex(name)
 		if idx < 0 {
@@ -419,9 +572,9 @@ func findInsertRowidCol(names []string, table *schema.Table) int {
 // VALUES clause; otherwise OpNewRowid generates a fresh rowid.
 // For AUTOINCREMENT columns, special handling ensures rowids are never reused.
 // For WITHOUT ROWID tables, this function should not be called as they don't use rowids.
-func (s *Stmt) emitInsertRowid(vm *vdbe.VDBE, table *schema.Table, row []parser.Expression, rowidColIdx int, rowidReg int, args []driver.NamedValue, paramIdx *int) {
+func (s *Stmt) emitInsertRowid(vm *vdbe.VDBE, table *schema.Table, row []parser.Expression, rowidColIdx int, rowidReg int, args []driver.NamedValue, paramIdx *int, gen *expr.CodeGenerator) {
 	if rowidColIdx >= 0 {
-		s.compileValue(vm, row[rowidColIdx], rowidReg, args, paramIdx)
+		s.compileValue(vm, row[rowidColIdx], rowidReg, args, paramIdx, gen)
 
 		// If this is an AUTOINCREMENT column, we need to update the sequence
 		// even when an explicit value is provided (unless it's NULL)
@@ -454,7 +607,7 @@ func (s *Stmt) emitInsertRowid(vm *vdbe.VDBE, table *schema.Table, row []parser.
 // from row into consecutive registers beginning at startReg, applying column
 // affinity as needed.
 // For WITHOUT ROWID tables, includes PRIMARY KEY columns in the record.
-func (s *Stmt) emitInsertRecordValues(vm *vdbe.VDBE, table *schema.Table, colNames []string, row []parser.Expression, rowidColIdx int, startReg int, args []driver.NamedValue, paramIdx *int) {
+func (s *Stmt) emitInsertRecordValues(vm *vdbe.VDBE, table *schema.Table, colNames []string, row []parser.Expression, rowidColIdx int, startReg int, args []driver.NamedValue, paramIdx *int, gen *expr.CodeGenerator) {
 	reg := startReg
 	for i, val := range row {
 		// For normal tables, skip the rowid column (it's stored separately)
@@ -462,20 +615,29 @@ func (s *Stmt) emitInsertRecordValues(vm *vdbe.VDBE, table *schema.Table, colNam
 		if !table.WithoutRowID && i == rowidColIdx {
 			continue // rowid already loaded separately
 		}
-		s.compileValue(vm, val, reg, args, paramIdx)
+		s.compileValue(vm, val, reg, args, paramIdx, gen)
 
-		// Apply column affinity if column exists in schema
+		// Apply column affinity if column exists in schema.
+		// Per SQLite rules, BLOB values are never coerced by column affinity.
 		colName := colNames[i]
-		if colIdx := table.GetColumnIndex(colName); colIdx >= 0 {
-			col := table.Columns[colIdx]
-			if col.Affinity != schema.AffinityNone && col.Affinity != schema.AffinityBlob {
-				// Convert affinity to OpCast P2 encoding
-				affinityCode := affinityToOpCastCode(col.Affinity)
-				vm.AddOp(vdbe.OpCast, reg, affinityCode, 0)
+		if !isBlobLiteral(val) {
+			if colIdx := table.GetColumnIndex(colName); colIdx >= 0 {
+				col := table.Columns[colIdx]
+				if col.Affinity != schema.AffinityNone && col.Affinity != schema.AffinityBlob {
+					affinityCode := affinityToOpCastCode(col.Affinity)
+					vm.AddOp(vdbe.OpCast, reg, affinityCode, 0)
+				}
 			}
 		}
 		reg++
 	}
+}
+
+// isBlobLiteral returns true if the expression is a BLOB literal (X'...').
+// SQLite never applies column affinity to BLOB values.
+func isBlobLiteral(e parser.Expression) bool {
+	lit, ok := e.(*parser.LiteralExpr)
+	return ok && lit.Type == parser.LiteralBlob
 }
 
 // affinityToOpCastCode converts a schema.Affinity to the OpCast P2 encoding.
@@ -499,7 +661,7 @@ func affinityToOpCastCode(aff schema.Affinity) int {
 
 // compileValue compiles a value expression into bytecode that stores the result in reg.
 // CC=4
-func (s *Stmt) compileValue(vm *vdbe.VDBE, val parser.Expression, reg int, args []driver.NamedValue, paramIdx *int) {
+func (s *Stmt) compileValue(vm *vdbe.VDBE, val parser.Expression, reg int, args []driver.NamedValue, paramIdx *int, gen *expr.CodeGenerator) {
 	switch v := val.(type) {
 	case *parser.LiteralExpr:
 		compileLiteralExpr(vm, v, reg)
@@ -508,7 +670,20 @@ func (s *Stmt) compileValue(vm *vdbe.VDBE, val parser.Expression, reg int, args 
 	case *parser.UnaryExpr:
 		compileUnaryExpr(vm, v, reg)
 	default:
-		vm.AddOp(vdbe.OpNull, 0, reg, 0)
+		if gen == nil {
+			vm.AddOp(vdbe.OpNull, 0, reg, 0)
+			return
+		}
+		gen.SetParamIndex(*paramIdx)
+		exprReg, err := gen.GenerateExpr(val)
+		*paramIdx = gen.ParamIndex()
+		if err != nil {
+			vm.AddOp(vdbe.OpNull, 0, reg, 0)
+			return
+		}
+		if exprReg != reg {
+			vm.AddOp(vdbe.OpCopy, exprReg, reg, 0)
+		}
 	}
 }
 
@@ -573,11 +748,29 @@ func compileLiteralExpr(vm *vdbe.VDBE, expr *parser.LiteralExpr, reg int) {
 	case parser.LiteralFloat:
 		floatVal, _ := strconv.ParseFloat(expr.Value, 64)
 		vm.AddOpWithP4Real(vdbe.OpReal, 0, reg, 0, floatVal)
-	case parser.LiteralString, parser.LiteralBlob:
+	case parser.LiteralString:
 		vm.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, expr.Value)
+	case parser.LiteralBlob:
+		compileBlobLiteral(vm, expr.Value, reg)
 	default:
 		vm.AddOp(vdbe.OpNull, 0, reg, 0)
 	}
+}
+
+// compileBlobLiteral decodes a hex blob literal (e.g. X'CAFE') and emits
+// an OpBlob instruction so the value is stored as []byte, not string. CC=2
+func compileBlobLiteral(vm *vdbe.VDBE, raw string, reg int) {
+	hexStr := raw
+	if len(hexStr) >= 3 && (hexStr[0] == 'X' || hexStr[0] == 'x') &&
+		hexStr[1] == '\'' && hexStr[len(hexStr)-1] == '\'' {
+		hexStr = hexStr[2 : len(hexStr)-1]
+	}
+	blobData, err := hex.DecodeString(strings.ToUpper(hexStr))
+	if err != nil {
+		vm.AddOp(vdbe.OpNull, 0, reg, 0)
+		return
+	}
+	vm.AddOpWithP4Blob(vdbe.OpBlob, len(blobData), reg, 0, blobData)
 }
 
 // compileArgValue emits the VDBE opcode for a concrete bound-parameter value
@@ -663,24 +856,28 @@ func compileDefaultArg(vm *vdbe.VDBE, val driver.Value, reg int) {
 func (s *Stmt) compileUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
 
-	// Look up table in schema
-	table, ok := s.conn.schema.GetTable(stmt.Table)
+	// Look up table in schema (supports cross-database qualified names)
+	table, db, _, ok := s.conn.dbRegistry.ResolveTable(stmt.Schema, stmt.Table)
 	if !ok {
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
+	s.setVdbeContextForDatabase(vm, db)
+
+	for _, assign := range stmt.Sets {
+		colIdx := table.GetColumnIndexWithRowidAliases(assign.Column)
+		if colIdx == -1 {
+			return nil, fmt.Errorf("no such column: %s", assign.Column)
+		}
+	}
 
 	// Build update map and column list
-	updateMap, _ := s.buildUpdateMap(stmt) // updatedColumns used for trigger execution (not yet operational)
-
-	// TODO Phase 3.5: BEFORE/AFTER UPDATE trigger execution
-	// Requires VDBE runtime integration. Framework exists but not yet operational.
-	// When implemented, use updatedColumns parameter to determine which triggers fire.
+	updateMap, updatedColumns := s.buildUpdateMap(stmt)
 
 	// Setup VDBE and code generator
 	gen, numRecordCols := s.setupUpdateVDBE(vm, table, stmt)
 
 	// Emit update loop
-	rewindAddr := s.emitUpdateLoop(vm, stmt, table, updateMap, numRecordCols, gen, args)
+	rewindAddr := s.emitUpdateLoop(vm, stmt, table, updateMap, updatedColumns, numRecordCols, gen, args)
 
 	// Close and finalize
 	s.finalizeUpdate(vm, rewindAddr)
@@ -701,16 +898,16 @@ func (s *Stmt) buildUpdateMap(stmt *parser.UpdateStmt) (map[string]parser.Expres
 
 // setupUpdateVDBE initializes VDBE and code generator for UPDATE.
 func (s *Stmt) setupUpdateVDBE(vm *vdbe.VDBE, table *schema.Table, stmt *parser.UpdateStmt) (*expr.CodeGenerator, int) {
-	// Count non-rowid columns
+	// Count non-rowid columns (for WITHOUT ROWID tables, all columns are in the record)
 	numRecordCols := 0
 	for _, col := range table.Columns {
-		if !schemaColIsRowid(col) {
+		if !schemaColIsRowidForTable(table, col) {
 			numRecordCols++
 		}
 	}
 
-	// Allocate resources
-	vm.AllocMemory(numRecordCols + 20)
+	// Allocate resources (extra space for OLD row snapshot when triggers exist)
+	vm.AllocMemory(numRecordCols*2 + 30)
 	vm.AllocCursors(1)
 
 	// Initialize program
@@ -729,8 +926,8 @@ func (s *Stmt) setupUpdateVDBE(vm *vdbe.VDBE, table *schema.Table, stmt *parser.
 
 // emitUpdateLoop generates the main UPDATE loop bytecode.
 func (s *Stmt) emitUpdateLoop(vm *vdbe.VDBE, stmt *parser.UpdateStmt, table *schema.Table,
-	updateMap map[string]parser.Expression, numRecordCols int, gen *expr.CodeGenerator,
-	args []driver.NamedValue) int {
+	updateMap map[string]parser.Expression, updatedCols []string, numRecordCols int,
+	gen *expr.CodeGenerator, args []driver.NamedValue) int {
 
 	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
 
@@ -751,11 +948,47 @@ func (s *Stmt) emitUpdateLoop(vm *vdbe.VDBE, stmt *parser.UpdateStmt, table *sch
 	// Reset args for SET clause
 	gen.SetArgs(argValues)
 
+	// Snapshot OLD row into registers for triggers (before record build)
+	hasTriggers := s.tableHasTriggers(stmt.Table)
+	oldRowStartReg := 0
+	oldRowidReg := 0
+	if hasTriggers {
+		oldRowidReg = gen.AllocReg()
+		oldRowStartReg = gen.AllocRegs(numRecordCols)
+		emitOldRowSnapshot(vm, table, 0, oldRowidReg, oldRowStartReg, numRecordCols)
+	}
+
+	// Emit BEFORE UPDATE trigger (P1=1 for UPDATE event)
+	var beforeAddr int
+	if hasTriggers {
+		beforeAddr = vm.AddOp(vdbe.OpTriggerBefore, 1, 0, oldRowStartReg)
+		vm.Program[beforeAddr].P4.Z = stmt.Table
+		vm.Program[beforeAddr].P4.P = updatedCols
+	}
+
 	// Build updated record
-	recordStartReg := s.emitUpdateRecordBuild(vm, table, updateMap, numRecordCols, gen)
+	recordStartReg, newRowidReg := s.emitUpdateRecordBuild(vm, table, updateMap, numRecordCols, gen)
+
+	// Use new rowid if IPK is being updated, otherwise use old rowid
+	effectiveRowidReg := rowidReg
+	if newRowidReg != 0 {
+		effectiveRowidReg = newRowidReg
+	}
 
 	// Create record, delete old, insert new
-	s.emitUpdateRowReplacement(vm, recordStartReg, numRecordCols, rowidReg, gen)
+	s.emitUpdateRowReplacement(vm, recordStartReg, numRecordCols, effectiveRowidReg, table.Name, gen)
+
+	// Emit AFTER UPDATE trigger with OLD in P3, NEW in P5
+	if hasTriggers {
+		afterAddr := vm.AddOp(vdbe.OpTriggerAfter, 1, 0, oldRowStartReg)
+		vm.Program[afterAddr].P4.Z = stmt.Table
+		vm.Program[afterAddr].P4.P = updatedCols
+		vm.Program[afterAddr].P5 = uint16(recordStartReg)
+		// Also set P5 on BEFORE trigger to point to NEW record
+		// (NEW may not be fully populated yet for BEFORE, but set for consistency)
+		vm.Program[beforeAddr].P5 = uint16(recordStartReg)
+		vm.Program[beforeAddr].P2 = vm.NumOps()
+	}
 
 	// Fix WHERE skip target
 	if stmt.Where != nil {
@@ -791,15 +1024,24 @@ func (s *Stmt) emitUpdateWhereClause(vm *vdbe.VDBE, stmt *parser.UpdateStmt,
 }
 
 // emitUpdateRecordBuild builds the updated record in registers.
+// Returns (recordStartReg, newRowidReg) where newRowidReg is non-zero
+// if INTEGER PRIMARY KEY is being updated.
 func (s *Stmt) emitUpdateRecordBuild(vm *vdbe.VDBE, table *schema.Table,
 	updateMap map[string]parser.Expression, numRecordCols int,
-	gen *expr.CodeGenerator) int {
+	gen *expr.CodeGenerator) (int, int) {
 
 	recordStartReg := gen.AllocRegs(numRecordCols)
 	reg := recordStartReg
+	newRowidReg := 0
 
 	for colIdx, col := range table.Columns {
-		if schemaColIsRowid(col) {
+		if schemaColIsRowidForTable(table, col) {
+			// Check if IPK is being updated
+			if updateExpr, isUpdated := updateMap[col.Name]; isUpdated {
+				valReg, _ := gen.GenerateExpr(updateExpr)
+				newRowidReg = gen.AllocReg()
+				vm.AddOp(vdbe.OpCopy, valReg, newRowidReg, 0)
+			}
 			continue
 		}
 
@@ -815,19 +1057,22 @@ func (s *Stmt) emitUpdateRecordBuild(vm *vdbe.VDBE, table *schema.Table,
 		reg++
 	}
 
-	return recordStartReg
+	return recordStartReg, newRowidReg
 }
 
 // emitUpdateRowReplacement emits bytecode to replace the row.
 func (s *Stmt) emitUpdateRowReplacement(vm *vdbe.VDBE, recordStartReg int,
-	numRecordCols int, rowidReg int, gen *expr.CodeGenerator) {
+	numRecordCols int, rowidReg int, tableName string, gen *expr.CodeGenerator) {
 
 	resultReg := gen.AllocReg()
 	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
-	vm.AddOp(vdbe.OpDelete, 0, 0, 0)
+	delAddr := vm.AddOp(vdbe.OpDelete, 0, 0, 0)
+	vm.Program[delAddr].P4.Z = tableName
+	vm.Program[delAddr].P5 = 1 // mark as update delete for FK handling
 
 	insertAddr := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidReg)
 	vm.Program[insertAddr].P4.I = 1 // Don't double-count in NumChanges
+	vm.Program[insertAddr].P4.Z = tableName
 }
 
 // finalizeUpdate closes cursor and adds halt instruction.
@@ -877,16 +1122,25 @@ func countExprParams(e parser.Expression) int {
 func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
 
-	// Look up table in schema
-	table, ok := s.conn.schema.GetTable(stmt.Table)
+	// Look up table in schema (supports cross-database qualified names)
+	table, db, _, ok := s.conn.dbRegistry.ResolveTable(stmt.Schema, stmt.Table)
 	if !ok {
 		return nil, fmt.Errorf("table not found: %s", stmt.Table)
 	}
+	s.setVdbeContextForDatabase(vm, db)
 
-	// TODO Phase 3.5: BEFORE DELETE trigger execution
-	// Requires VDBE runtime integration. Framework exists but not yet operational.
+	hasTriggers := s.tableHasTriggers(stmt.Table)
 
-	vm.AllocMemory(10)
+	// Allocate extra registers for OLD row snapshot when triggers exist
+	numRecordCols := countNonRowidCols(table)
+	memSize := 10
+	oldRowStartReg := 0
+	if hasTriggers {
+		// Layout: reg 1 = rowid, regs 2..N+1 = record columns
+		oldRowStartReg = 2
+		memSize = numRecordCols + 20
+	}
+	vm.AllocMemory(memSize)
 	vm.AllocCursors(1)
 
 	// Initialize program
@@ -898,48 +1152,38 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 	// Start iteration from beginning
 	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
 
-	// If WHERE clause exists, compile and evaluate it
-	if stmt.Where != nil {
-		// Create code generator for expression compilation
-		gen := expr.NewCodeGenerator(vm)
-		s.setupSubqueryCompiler(gen)
-		gen.RegisterCursor(stmt.Table, 0)
+	skipAddr := s.emitDeleteWhereClause(vm, stmt, table, args)
 
-		// Register table info for column resolution
-		tableInfo := buildTableInfo(stmt.Table, table)
-		gen.RegisterTable(tableInfo)
-
-		// Set up args for parameter binding
-		argValues := make([]interface{}, len(args))
-		for i, a := range args {
-			argValues[i] = a.Value
-		}
-		gen.SetArgs(argValues)
-
-		// Generate code for WHERE expression
-		whereReg, err := gen.GenerateExpr(stmt.Where)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile WHERE clause: %w", err)
-		}
-
-		// Skip deletion if WHERE condition is false (OpIfNot jumps when register is false/0)
-		skipAddr := vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
-
-		// Delete the current row (only if WHERE is true)
-		vm.AddOp(vdbe.OpDelete, 0, 0, 0)
-
-		// Fix up the skip target to point past the Delete to the Next instruction
-		vm.Program[skipAddr].P2 = vm.NumOps()
-	} else {
-		// No WHERE clause: delete current row unconditionally
-		vm.AddOp(vdbe.OpDelete, 0, 0, 0)
+	// Snapshot OLD row into registers before deletion (for trigger access)
+	if hasTriggers {
+		emitOldRowSnapshot(vm, table, 0, 1, oldRowStartReg, numRecordCols)
 	}
 
-	// Move to next row and loop back (common for both WHERE and non-WHERE cases)
-	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
+	// Emit BEFORE DELETE trigger (P1=2 for DELETE event)
+	var beforeAddr int
+	if hasTriggers {
+		beforeAddr = vm.AddOp(vdbe.OpTriggerBefore, 2, 0, oldRowStartReg)
+		vm.Program[beforeAddr].P4.Z = stmt.Table
+	}
 
-	// TODO Phase 3.5: AFTER DELETE trigger execution
-	// Requires VDBE runtime integration. Framework exists but not yet operational.
+	// Delete the current row
+	delAddr := vm.AddOp(vdbe.OpDelete, 0, 0, 0)
+	vm.Program[delAddr].P4.Z = table.Name
+
+	// Emit AFTER DELETE trigger
+	if hasTriggers {
+		afterAddr := vm.AddOp(vdbe.OpTriggerAfter, 2, 0, oldRowStartReg)
+		vm.Program[afterAddr].P4.Z = stmt.Table
+		vm.Program[beforeAddr].P2 = vm.NumOps()
+	}
+
+	// Fix up the skip target to point past the Delete to the Next instruction
+	if stmt.Where != nil {
+		vm.Program[skipAddr].P2 = vm.NumOps()
+	}
+
+	// Move to next row and loop back
+	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
 
 	// Close table cursor
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
@@ -951,6 +1195,64 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 	vm.Program[rewindAddr].P2 = haltAddr
 
 	return vm, nil
+}
+
+// emitDeleteWhereClause compiles and emits the WHERE clause for DELETE.
+// Returns the skip address (to be fixed up later), or 0 if no WHERE clause.
+func (s *Stmt) emitDeleteWhereClause(vm *vdbe.VDBE, stmt *parser.DeleteStmt,
+	table *schema.Table, args []driver.NamedValue) int {
+
+	if stmt.Where == nil {
+		return 0
+	}
+
+	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
+	gen.RegisterCursor(stmt.Table, 0)
+
+	tableInfo := buildTableInfo(stmt.Table, table)
+	gen.RegisterTable(tableInfo)
+
+	argValues := make([]interface{}, len(args))
+	for i, a := range args {
+		argValues[i] = a.Value
+	}
+	gen.SetArgs(argValues)
+
+	whereReg, err := gen.GenerateExpr(stmt.Where)
+	if err != nil {
+		return 0
+	}
+
+	return vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+}
+
+// emitOldRowSnapshot emits opcodes to save the current cursor row into
+// registers so trigger bodies can access OLD column values even after
+// the row has been deleted or replaced. rowidReg receives the rowid,
+// and record columns are stored starting at recordStartReg.
+func emitOldRowSnapshot(vm *vdbe.VDBE, table *schema.Table,
+	cursorIdx int, rowidReg int, recordStartReg int, numRecordCols int) {
+
+	vm.AddOp(vdbe.OpRowid, cursorIdx, rowidReg, 0)
+	for i := 0; i < numRecordCols; i++ {
+		vm.AddOp(vdbe.OpColumn, cursorIdx, i, recordStartReg+i)
+	}
+}
+
+// countNonRowidCols returns the number of non-rowid columns (record columns)
+// in the table.
+func countNonRowidCols(table *schema.Table) int {
+	if table.WithoutRowID {
+		return len(table.Columns)
+	}
+	count := 0
+	for _, col := range table.Columns {
+		if !schemaColIsRowid(col) {
+			count++
+		}
+	}
+	return count
 }
 
 // ============================================================================
@@ -985,4 +1287,69 @@ func (s *Stmt) compileInsertUpsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args 
 	result, err := s.compileInsert(vm, stmt, args)
 	stmt.Upsert = savedUpsert
 	return result, err
+}
+
+// allTableColumnNames returns all column names from the table schema.
+func allTableColumnNames(table *schema.Table) []string {
+	names := make([]string, len(table.Columns))
+	for i, col := range table.Columns {
+		names[i] = col.Name
+	}
+	return names
+}
+
+// expandInsertDefaults expands a partial-column INSERT into a full-column
+// INSERT by filling in DEFAULT values for omitted columns. When the INSERT
+// already specifies all columns, the original values are returned unchanged.
+func expandInsertDefaults(stmt *parser.InsertStmt, table *schema.Table) [][]parser.Expression {
+	if len(stmt.Columns) == 0 {
+		return stmt.Values // All columns specified implicitly
+	}
+	specifiedSet := buildColumnSet(stmt.Columns)
+	expanded := make([][]parser.Expression, len(stmt.Values))
+	for i, row := range stmt.Values {
+		expanded[i] = expandSingleRow(row, stmt.Columns, specifiedSet, table)
+	}
+	return expanded
+}
+
+// buildColumnSet creates a set of lower-cased column names for fast lookup.
+func buildColumnSet(cols []string) map[string]int {
+	m := make(map[string]int, len(cols))
+	for i, c := range cols {
+		m[strings.ToLower(c)] = i
+	}
+	return m
+}
+
+// expandSingleRow expands one VALUES row to cover all table columns.
+func expandSingleRow(row []parser.Expression, insertCols []string, specifiedSet map[string]int, table *schema.Table) []parser.Expression {
+	full := make([]parser.Expression, len(table.Columns))
+	for i, col := range table.Columns {
+		idx, ok := specifiedSet[strings.ToLower(col.Name)]
+		if ok && idx < len(row) {
+			full[i] = row[idx]
+		} else {
+			full[i] = defaultExprForColumn(col)
+		}
+	}
+	return full
+}
+
+// defaultExprForColumn returns a parser.Expression representing the column's
+// DEFAULT value, or a NULL literal when no default is defined.
+func defaultExprForColumn(col *schema.Column) parser.Expression {
+	if col.Default == nil {
+		return &parser.LiteralExpr{Type: parser.LiteralNull}
+	}
+	defaultStr, ok := col.Default.(string)
+	if !ok {
+		return &parser.LiteralExpr{Type: parser.LiteralNull}
+	}
+	p := parser.NewParser(defaultStr)
+	expr, err := p.ParseExpression()
+	if err != nil {
+		return &parser.LiteralExpr{Type: parser.LiteralNull}
+	}
+	return expr
 }

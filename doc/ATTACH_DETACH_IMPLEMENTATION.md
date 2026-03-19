@@ -167,8 +167,19 @@ The implementation follows SQLite's ATTACH and DETACH syntax:
 - Schema names are unquoted after parsing (following SQLite behavior)
 - Expressions are fully supported for filename (not just string literals)
 
+## Runtime Integration (Completed)
+
+The execution layer is now fully integrated:
+
+- **ATTACH DATABASE** creates a new in-memory or file-based database and registers it in the database registry
+- **DETACH DATABASE** removes the database from the registry (cannot detach `main` or `temp`)
+- **Cross-database queries** work: `CREATE TABLE aux.t1(...)`, `INSERT INTO aux.t1 VALUES(...)`, `SELECT * FROM aux.t1`
+- **PRAGMA database_list** returns all attached databases with (seq, name, file) tuples
+- **Schema-qualified DDL/DML**: Parser supports `schema.table` syntax in CREATE TABLE and INSERT statements
+- Maximum 10 attached databases enforced
+- Cannot ATTACH while in a transaction
+
 ## Future Considerations
-- The implementation is ready for execution layer integration
-- AttachStmt.Filename being an Expression allows for runtime evaluation
-- Schema name conflicts should be checked at execution time, not parse time
 - The AST can be extended with additional metadata if needed (e.g., KEY for encryption)
+- Cross-database JOIN support
+- Cross-database trigger execution

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package btree
 
 import (
@@ -63,6 +63,25 @@ func (bt *Btree) validatePage(data []byte, pageNum uint32) error {
 		return err
 	}
 
+	if pageNum == 1 {
+		// Page 1 may have a database file header; treat empty btree payload as uninitialized.
+		if isZeroBuffer(data[FileHeaderSize:]) {
+			return nil
+		}
+	} else if isZeroBuffer(data) {
+		// Freshly allocated page - caller will initialize and mark dirty
+		return nil
+	}
+
+	headerOffset := 0
+	if pageNum == 1 {
+		headerOffset = FileHeaderSize
+	}
+	if data[headerOffset+PageHeaderOffsetType] == 0 {
+		// Uninitialized page - allow caller to set up header
+		return nil
+	}
+
 	header, err := ParsePageHeader(data, pageNum)
 	if err != nil {
 		return fmt.Errorf("%w: failed to parse header: %v", ErrCorruptedPage, err)
@@ -73,6 +92,16 @@ func (bt *Btree) validatePage(data []byte, pageNum uint32) error {
 	}
 
 	return validatePageStructure(header, data)
+}
+
+// isZeroBuffer reports whether the buffer is entirely zeroed.
+func isZeroBuffer(data []byte) bool {
+	for _, b := range data {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // validatePageSize checks if the page data size matches expected size.
@@ -87,10 +116,12 @@ func (bt *Btree) validatePageSize(data []byte) error {
 // validatePageTypeForBtree checks if the page type is valid for btree validation.
 func validatePageTypeForBtree(pageType byte) error {
 	validTypes := map[byte]bool{
-		PageTypeLeafTable:     true,
-		PageTypeInteriorTable: true,
-		PageTypeLeafIndex:     true,
-		PageTypeInteriorIndex: true,
+		PageTypeLeafTable:       true,
+		PageTypeInteriorTable:   true,
+		PageTypeLeafIndex:       true,
+		PageTypeInteriorIndex:   true,
+		PageTypeLeafTableNoInt:  true,
+		PageTypeInteriorTableNo: true,
 	}
 
 	if !validTypes[pageType] {
@@ -336,7 +367,89 @@ func (bt *Btree) CreateTable() (rootPage uint32, err error) {
 	// FragmentedBytes = 0 (1 byte)
 	pageData[headerOffset+PageHeaderOffsetFragmented] = 0
 
+	// Mark page dirty so pager persists initialization
+	if bt.Provider != nil {
+		if err := bt.Provider.MarkDirty(rootPage); err != nil {
+			return 0, err
+		}
+	}
+
 	return rootPage, nil
+}
+
+// CreateWithoutRowidTable creates a new WITHOUT ROWID table B-tree root.
+func (bt *Btree) CreateWithoutRowidTable() (rootPage uint32, err error) {
+	rootPage, err = bt.AllocatePage()
+	if err != nil {
+		return 0, err
+	}
+
+	pageData, err := bt.GetPage(rootPage)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get allocated page: %w", err)
+	}
+
+	headerOffset := 0
+	if rootPage == 1 {
+		headerOffset = FileHeaderSize
+	}
+
+	pageData[headerOffset+PageHeaderOffsetType] = PageTypeLeafTableNoInt
+	pageData[headerOffset+PageHeaderOffsetFreeblock] = 0
+	pageData[headerOffset+PageHeaderOffsetFreeblock+1] = 0
+	pageData[headerOffset+PageHeaderOffsetNumCells] = 0
+	pageData[headerOffset+PageHeaderOffsetNumCells+1] = 0
+	pageData[headerOffset+PageHeaderOffsetCellStart] = 0
+	pageData[headerOffset+PageHeaderOffsetCellStart+1] = 0
+	pageData[headerOffset+PageHeaderOffsetFragmented] = 0
+
+	if bt.Provider != nil {
+		if err := bt.Provider.MarkDirty(rootPage); err != nil {
+			return 0, err
+		}
+	}
+
+	return rootPage, nil
+}
+
+// ClearTableData removes all rows from a table by reinitializing its root page as an empty leaf.
+// Any child pages of an interior root are dropped. The root page itself is reused.
+func (bt *Btree) ClearTableData(rootPage uint32) error {
+	if rootPage == 0 {
+		return fmt.Errorf("invalid root page 0")
+	}
+
+	pageData, err := bt.GetPage(rootPage)
+	if err != nil {
+		return err
+	}
+
+	header, err := ParsePageHeader(pageData, rootPage)
+	if err != nil {
+		return err
+	}
+
+	// Drop child pages if root is an interior node
+	if header.IsInterior {
+		bt.dropInteriorChildren(pageData, header)
+	}
+
+	// Reinitialize root page as empty leaf table
+	headerOffset := 0
+	if rootPage == 1 {
+		headerOffset = FileHeaderSize
+	}
+
+	pageData[headerOffset+PageHeaderOffsetType] = PageTypeLeafTable
+	pageData[headerOffset+PageHeaderOffsetFreeblock] = 0
+	pageData[headerOffset+PageHeaderOffsetFreeblock+1] = 0
+	pageData[headerOffset+PageHeaderOffsetNumCells] = 0
+	pageData[headerOffset+PageHeaderOffsetNumCells+1] = 0
+	pageData[headerOffset+PageHeaderOffsetCellStart] = 0
+	pageData[headerOffset+PageHeaderOffsetCellStart+1] = 0
+	pageData[headerOffset+PageHeaderOffsetFragmented] = 0
+
+	return nil
 }
 
 // DropTable drops a table B-tree by freeing all its pages

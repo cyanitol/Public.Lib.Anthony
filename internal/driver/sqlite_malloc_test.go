@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -535,7 +535,7 @@ func TestMemoryGC(t *testing.T) {
 	`)
 	if err != nil {
 		// If generate_series doesn't exist, use loop
-		_, err = db.Exec("CREATE TABLE t1(id INTEGER, data TEXT)")
+		_, err = db.Exec("CREATE TABLE IF NOT EXISTS t1(id INTEGER, data TEXT)")
 		if err != nil {
 			t.Fatalf("failed to create table: %v", err)
 		}

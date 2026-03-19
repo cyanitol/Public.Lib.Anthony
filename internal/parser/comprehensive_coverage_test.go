@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package parser
 
 import (
@@ -250,9 +250,9 @@ func TestComprehensiveParserCoverage(t *testing.T) {
 
 		// parseCreateTable - 76.9%
 		{
-			name:    "CREATE TABLE with schema - unsupported",
+			name:    "CREATE TABLE with schema prefix",
 			sql:     "CREATE TABLE main.users (id INTEGER)",
-			wantErr: true,
+			wantErr: false,
 		},
 
 		// parseUpdateAssignments - 76.9%

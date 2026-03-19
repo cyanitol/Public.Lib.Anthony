@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver_test
 
 import (
@@ -196,16 +196,15 @@ func ExampleDSN_memory() {
 
 	fmt.Println("Valid insert succeeded")
 
-	// Try to insert a book with invalid author
-	// NOTE: Foreign key constraints are not yet implemented, so this succeeds
+	// Try to insert a book with invalid author - this should fail
 	_, err = db.Exec("INSERT INTO books (title, author_id) VALUES ('Unknown Book', 999)")
 	if err != nil {
 		fmt.Println("Foreign key constraint enforced")
 	} else {
-		fmt.Println("Insert succeeded (foreign keys not yet enforced)")
+		fmt.Println("Insert succeeded (foreign keys not enforced)")
 	}
 
 	// Output:
 	// Valid insert succeeded
-	// Insert succeeded (foreign keys not yet enforced)
+	// Foreign key constraint enforced
 }

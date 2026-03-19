@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package schema
 
 import (
@@ -32,6 +32,9 @@ func NewDatabaseRegistry() *DatabaseRegistry {
 	}
 }
 
+// MaxAttachedDatabases is the maximum number of attached databases allowed (SQLite default).
+const MaxAttachedDatabases = 10
+
 // AttachDatabase attaches a database with the given schema name and file path.
 func (dr *DatabaseRegistry) AttachDatabase(schemaName, filePath string, p pager.PagerInterface, bt *btree.Btree) error {
 	dr.mu.Lock()
@@ -43,7 +46,54 @@ func (dr *DatabaseRegistry) AttachDatabase(schemaName, filePath string, p pager.
 		return fmt.Errorf("database %s is already attached", schemaName)
 	}
 
-	// Create new database entry
+	// Enforce max attached databases limit (exclude main and temp from count)
+	if err := dr.checkAttachLimit(lowerName); err != nil {
+		return err
+	}
+
+	// Check for duplicate file paths (cannot attach same file twice)
+	if err := dr.checkDuplicatePath(filePath, lowerName); err != nil {
+		return err
+	}
+
+	return dr.insertDatabase(schemaName, lowerName, filePath, p, bt)
+}
+
+// checkAttachLimit verifies the attached database limit is not exceeded.
+func (dr *DatabaseRegistry) checkAttachLimit(lowerName string) error {
+	if lowerName == "main" || lowerName == "temp" {
+		return nil
+	}
+	userDBCount := 0
+	for name := range dr.databases {
+		if name != "main" && name != "temp" {
+			userDBCount++
+		}
+	}
+	if userDBCount >= MaxAttachedDatabases {
+		return fmt.Errorf("too many attached databases - max %d", MaxAttachedDatabases)
+	}
+	return nil
+}
+
+// checkDuplicatePath checks if a file path is already in use by another database.
+func (dr *DatabaseRegistry) checkDuplicatePath(filePath, lowerName string) error {
+	if filePath == "" || filePath == ":memory:" {
+		return nil
+	}
+	for name, db := range dr.databases {
+		if name == lowerName {
+			continue
+		}
+		if db.Path != "" && db.Path != ":memory:" && db.Path == filePath {
+			return fmt.Errorf("database %s is already attached as %s", filePath, db.Name)
+		}
+	}
+	return nil
+}
+
+// insertDatabase creates and inserts a new database entry.
+func (dr *DatabaseRegistry) insertDatabase(schemaName, lowerName, filePath string, p pager.PagerInterface, bt *btree.Btree) error {
 	db := &Database{
 		Name:   schemaName,
 		Path:   filePath,
@@ -55,7 +105,10 @@ func (dr *DatabaseRegistry) AttachDatabase(schemaName, filePath string, p pager.
 	// Load schema from the database file
 	if bt != nil {
 		if err := db.Schema.LoadFromMaster(bt); err != nil {
-			// Ignore errors for empty databases
+			// Allow empty databases (page count <= 1) but surface real errors
+			if p.PageCount() > 1 {
+				return fmt.Errorf("failed to load schema for database %s: %w", schemaName, err)
+			}
 		}
 	}
 
@@ -112,6 +165,42 @@ func (dr *DatabaseRegistry) GetTable(schemaName, tableName string) (*Table, stri
 	}
 
 	return dr.searchUnqualifiedTable(tableName)
+}
+
+// ResolveTable returns the table and owning database for a given schema-qualified
+// or unqualified table reference. The returned schemaName preserves the database
+// name as registered (case-sensitive), while lookups are case-insensitive.
+func (dr *DatabaseRegistry) ResolveTable(schemaName, tableName string) (*Table, *Database, string, bool) {
+	dr.mu.RLock()
+	defer dr.mu.RUnlock()
+
+	// Qualified lookup: only search the specified database
+	if schemaName != "" {
+		lowerSchema := strings.ToLower(schemaName)
+		db, ok := dr.databases[lowerSchema]
+		if !ok {
+			return nil, nil, "", false
+		}
+		table, ok := db.Schema.GetTable(tableName)
+		if !ok {
+			return nil, nil, "", false
+		}
+		return table, db, db.Name, true
+	}
+
+	// Unqualified lookup: search in database priority order
+	searchOrder := dr.buildSearchOrder()
+	for _, name := range searchOrder {
+		db, ok := dr.databases[name]
+		if !ok {
+			continue
+		}
+		if table, ok := db.Schema.GetTable(tableName); ok {
+			return table, db, db.Name, true
+		}
+	}
+
+	return nil, nil, "", false
 }
 
 // getQualifiedTable retrieves a table using a qualified schema.table name
@@ -173,4 +262,57 @@ func (dr *DatabaseRegistry) ListDatabases() []string {
 // GetMainDatabase returns the main database.
 func (dr *DatabaseRegistry) GetMainDatabase() (*Database, bool) {
 	return dr.GetDatabase("main")
+}
+
+// DatabaseCount returns the number of attached databases (including main).
+func (dr *DatabaseRegistry) DatabaseCount() int {
+	dr.mu.RLock()
+	defer dr.mu.RUnlock()
+	return len(dr.databases)
+}
+
+// ListDatabasesOrdered returns databases in order: main first, temp second, then others.
+func (dr *DatabaseRegistry) ListDatabasesOrdered() []*Database {
+	dr.mu.RLock()
+	defer dr.mu.RUnlock()
+
+	result := make([]*Database, 0, len(dr.databases))
+
+	// Add main first
+	if db, ok := dr.databases["main"]; ok {
+		result = append(result, db)
+	}
+
+	// Add temp second
+	if db, ok := dr.databases["temp"]; ok {
+		result = append(result, db)
+	}
+
+	// Add others
+	for name, db := range dr.databases {
+		if name != "main" && name != "temp" {
+			result = append(result, db)
+		}
+	}
+
+	return result
+}
+
+// CloseAttached closes and removes all attached databases except main and temp.
+func (dr *DatabaseRegistry) CloseAttached() error {
+	dr.mu.Lock()
+	defer dr.mu.Unlock()
+
+	for name, db := range dr.databases {
+		if name == "main" || name == "temp" {
+			continue
+		}
+		if db.Pager != nil {
+			if err := db.Pager.Close(); err != nil {
+				return fmt.Errorf("failed to close attached database %s: %w", db.Name, err)
+			}
+		}
+		delete(dr.databases, name)
+	}
+	return nil
 }

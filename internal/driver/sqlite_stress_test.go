@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -96,6 +96,13 @@ func TestStress_FullTableScanInteger(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 5000
+	numQueries := 10
+	if raceEnabled {
+		numRows = 500
+		numQueries = 3
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -103,7 +110,7 @@ func TestStress_FullTableScanInteger(t *testing.T) {
 
 	// Populate with test data
 	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= 5000; i++ {
+	for i := 1; i <= numRows; i++ {
 		r := rand.Intn(500000)
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, i, r, fmt.Sprintf("text_%d", r))
 	}
@@ -111,7 +118,7 @@ func TestStress_FullTableScanInteger(t *testing.T) {
 
 	// Perform multiple range queries
 	start := time.Now()
-	for i := 0; i < 10; i++ {
+	for i := 0; i < numQueries; i++ {
 		lwr := i * 1000
 		upr := (i + 10) * 1000
 		rows := queryRows(t, db, `SELECT count(*), avg(b) FROM t1 WHERE b >= ? AND b < ?`, lwr, upr)
@@ -119,7 +126,7 @@ func TestStress_FullTableScanInteger(t *testing.T) {
 	}
 	elapsed := time.Since(start)
 
-	t.Logf("Completed 10 range scans in %v", elapsed)
+	t.Logf("Completed %d range scans in %v", numQueries, elapsed)
 }
 
 func TestStress_FullTableScanLike(t *testing.T) {
@@ -163,6 +170,11 @@ func TestStress_CreateIndexOnLargeTable(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 10000
+	if raceEnabled {
+		numRows = 500
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -170,7 +182,7 @@ func TestStress_CreateIndexOnLargeTable(t *testing.T) {
 
 	// Populate with test data
 	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= 10000; i++ {
+	for i := 1; i <= numRows; i++ {
 		r := rand.Intn(500000)
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, i, r, fmt.Sprintf("text_%d", r))
 	}
@@ -203,6 +215,13 @@ func TestStress_IndexedRangeQuery(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 10000
+	numQueries := 1000
+	if raceEnabled {
+		numRows = 500
+		numQueries = 50
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -211,7 +230,7 @@ func TestStress_IndexedRangeQuery(t *testing.T) {
 
 	// Populate
 	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= 10000; i++ {
+	for i := 1; i <= numRows; i++ {
 		r := rand.Intn(10000)
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, i, r, fmt.Sprintf("text_%d", r))
 	}
@@ -219,7 +238,7 @@ func TestStress_IndexedRangeQuery(t *testing.T) {
 
 	// Perform indexed range queries
 	start := time.Now()
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < numQueries; i++ {
 		lwr := i * 10
 		upr := (i + 10) * 10
 		rows := queryRows(t, db, `SELECT count(*), avg(b) FROM t1 WHERE b >= ? AND b < ?`, lwr, upr)
@@ -227,7 +246,7 @@ func TestStress_IndexedRangeQuery(t *testing.T) {
 	}
 	elapsed := time.Since(start)
 
-	t.Logf("Completed 1000 indexed range queries in %v (%.0f queries/sec)", elapsed, 1000.0/elapsed.Seconds())
+	t.Logf("Completed %d indexed range queries in %v (%.0f queries/sec)", numQueries, elapsed, float64(numQueries)/elapsed.Seconds())
 }
 
 // =============================================================================
@@ -240,6 +259,13 @@ func TestStress_RandomRowidLookup(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 10000
+	numLookups := 5000
+	if raceEnabled {
+		numRows = 500
+		numLookups = 200
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -247,7 +273,7 @@ func TestStress_RandomRowidLookup(t *testing.T) {
 
 	// Populate
 	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= 10000; i++ {
+	for i := 1; i <= numRows; i++ {
 		r := rand.Intn(500000)
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, i, r, fmt.Sprintf("text_%d", r))
 	}
@@ -255,14 +281,14 @@ func TestStress_RandomRowidLookup(t *testing.T) {
 
 	// Random lookups
 	start := time.Now()
-	for i := 0; i < 5000; i++ {
-		id := rand.Intn(10000) + 1
+	for i := 0; i < numLookups; i++ {
+		id := rand.Intn(numRows) + 1
 		rows := queryRows(t, db, `SELECT c FROM t1 WHERE a = ?`, id)
 		_ = rows
 	}
 	elapsed := time.Since(start)
 
-	t.Logf("Completed 5000 random rowid lookups in %v (%.0f lookups/sec)", elapsed, 5000.0/elapsed.Seconds())
+	t.Logf("Completed %d random rowid lookups in %v (%.0f lookups/sec)", numLookups, elapsed, float64(numLookups)/elapsed.Seconds())
 }
 
 // =============================================================================
@@ -275,6 +301,13 @@ func TestStress_RandomIndexedLookup(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 10000
+	numLookups := 5000
+	if raceEnabled {
+		numRows = 500
+		numLookups = 200
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -283,21 +316,21 @@ func TestStress_RandomIndexedLookup(t *testing.T) {
 
 	// Populate
 	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= 10000; i++ {
+	for i := 1; i <= numRows; i++ {
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, i, i, fmt.Sprintf("text_%d", i))
 	}
 	mustExec(t, db, `COMMIT`)
 
 	// Random indexed lookups
 	start := time.Now()
-	for i := 0; i < 5000; i++ {
-		b := rand.Intn(10000) + 1
+	for i := 0; i < numLookups; i++ {
+		b := rand.Intn(numRows) + 1
 		rows := queryRows(t, db, `SELECT c FROM t1 WHERE b = ?`, b)
 		_ = rows
 	}
 	elapsed := time.Since(start)
 
-	t.Logf("Completed 5000 random indexed lookups in %v (%.0f lookups/sec)", elapsed, 5000.0/elapsed.Seconds())
+	t.Logf("Completed %d random indexed lookups in %v (%.0f lookups/sec)", numLookups, elapsed, float64(numLookups)/elapsed.Seconds())
 }
 
 // =============================================================================
@@ -310,6 +343,13 @@ func TestStress_TextIndexLookup(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 5000
+	numLookups := 2000
+	if raceEnabled {
+		numRows = 500
+		numLookups = 100
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -317,9 +357,9 @@ func TestStress_TextIndexLookup(t *testing.T) {
 	mustExec(t, db, `CREATE INDEX i1c ON t1(c)`)
 
 	// Populate with unique text values
-	values := make([]string, 5000)
+	values := make([]string, numRows)
 	mustExec(t, db, `BEGIN`)
-	for i := 0; i < 5000; i++ {
+	for i := 0; i < numRows; i++ {
 		values[i] = fmt.Sprintf("value_%05d", rand.Intn(100000))
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?)`, i+1, values[i])
 	}
@@ -327,14 +367,14 @@ func TestStress_TextIndexLookup(t *testing.T) {
 
 	// Random text lookups
 	start := time.Now()
-	for i := 0; i < 2000; i++ {
+	for i := 0; i < numLookups; i++ {
 		val := values[rand.Intn(len(values))]
 		rows := queryRows(t, db, `SELECT a FROM t1 WHERE c = ?`, val)
 		_ = rows
 	}
 	elapsed := time.Since(start)
 
-	t.Logf("Completed 2000 text index lookups in %v (%.0f lookups/sec)", elapsed, 2000.0/elapsed.Seconds())
+	t.Logf("Completed %d text index lookups in %v (%.0f lookups/sec)", numLookups, elapsed, float64(numLookups)/elapsed.Seconds())
 }
 
 // =============================================================================
@@ -387,6 +427,13 @@ func TestStress_UpdateIndexedColumn(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 5000
+	numUpdates := 1000
+	if raceEnabled {
+		numRows = 500
+		numUpdates = 50
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -395,7 +442,7 @@ func TestStress_UpdateIndexedColumn(t *testing.T) {
 
 	// Populate
 	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= 5000; i++ {
+	for i := 1; i <= numRows; i++ {
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, i, i*2, fmt.Sprintf("text_%d", i))
 	}
 	mustExec(t, db, `COMMIT`)
@@ -403,7 +450,7 @@ func TestStress_UpdateIndexedColumn(t *testing.T) {
 	// Update indexed column
 	start := time.Now()
 	mustExec(t, db, `BEGIN`)
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < numUpdates; i++ {
 		lwr := i * 2
 		upr := (i + 1) * 2
 		mustExec(t, db, `UPDATE t1 SET b = b + 1 WHERE b >= ? AND b < ?`, lwr, upr)
@@ -411,7 +458,7 @@ func TestStress_UpdateIndexedColumn(t *testing.T) {
 	mustExec(t, db, `COMMIT`)
 	elapsed := time.Since(start)
 
-	t.Logf("Completed 1000 indexed updates in %v", elapsed)
+	t.Logf("Completed %d indexed updates in %v", numUpdates, elapsed)
 }
 
 // =============================================================================
@@ -424,6 +471,11 @@ func TestStress_DeleteWithIndex(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 10000
+	if raceEnabled {
+		numRows = 500
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -432,7 +484,7 @@ func TestStress_DeleteWithIndex(t *testing.T) {
 
 	// Populate
 	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= 10000; i++ {
+	for i := 1; i <= numRows; i++ {
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, i, i%100, fmt.Sprintf("text_%d", i))
 	}
 	mustExec(t, db, `COMMIT`)
@@ -442,11 +494,11 @@ func TestStress_DeleteWithIndex(t *testing.T) {
 	mustExec(t, db, `DELETE FROM t1 WHERE b < 50`)
 	elapsed := time.Since(start)
 
-	t.Logf("Deleted ~5000 rows using index in %v", elapsed)
+	t.Logf("Deleted ~%d rows using index in %v", numRows/2, elapsed)
 
 	count := querySingle(t, db, `SELECT COUNT(*) FROM t1`)
-	if count.(int64) > 5500 {
-		t.Errorf("expected ~5000 rows remaining, got %v", count)
+	if count.(int64) > int64(numRows/2+numRows/10) {
+		t.Errorf("expected ~%d rows remaining, got %v", numRows/2, count)
 	}
 }
 
@@ -790,8 +842,17 @@ func TestStress_MixedReadWrite(t *testing.T) {
 		t.Fatalf("failed to open db: %v", err)
 	}
 	mustExec(t, setupDB, `CREATE TABLE t1(id INTEGER PRIMARY KEY, value INTEGER, updated_at INTEGER)`)
+	numRows := 1000
+	numReads := 50
+	numWrites := 30
+	if raceEnabled {
+		numRows = 100
+		numReads = 5
+		numWrites = 3
+	}
+
 	mustExec(t, setupDB, `BEGIN`)
-	for i := 1; i <= 1000; i++ {
+	for i := 1; i <= numRows; i++ {
 		mustExec(t, setupDB, `INSERT INTO t1 VALUES(?, ?, ?)`, i, i*10, 0)
 	}
 	mustExec(t, setupDB, `COMMIT`)
@@ -808,8 +869,8 @@ func TestStress_MixedReadWrite(t *testing.T) {
 			db, _ := sql.Open(DriverName, dbPath)
 			defer db.Close()
 
-			for i := 0; i < 50; i++ {
-				id := rand.Intn(1000) + 1
+			for i := 0; i < numReads; i++ {
+				id := rand.Intn(numRows) + 1
 				var value int
 				db.QueryRow(`SELECT value FROM t1 WHERE id = ?`, id).Scan(&value)
 				time.Sleep(10 * time.Millisecond)
@@ -825,8 +886,8 @@ func TestStress_MixedReadWrite(t *testing.T) {
 			db, _ := sql.Open(DriverName, dbPath)
 			defer db.Close()
 
-			for i := 0; i < 30; i++ {
-				id := rand.Intn(1000) + 1
+			for i := 0; i < numWrites; i++ {
+				id := rand.Intn(numRows) + 1
 				db.Exec(`UPDATE t1 SET updated_at = ? WHERE id = ?`, time.Now().Unix(), id)
 				time.Sleep(20 * time.Millisecond)
 			}
@@ -854,8 +915,12 @@ func TestStress_TransactionThroughput(t *testing.T) {
 
 	mustExec(t, db, `CREATE TABLE t1(id INTEGER PRIMARY KEY, value INTEGER)`)
 
-	const numTransactions = 100
-	const rowsPerTransaction = 50
+	numTransactions := 100
+	rowsPerTransaction := 50
+	if raceEnabled {
+		numTransactions = 10
+		rowsPerTransaction = 10
+	}
 
 	start := time.Now()
 	for txn := 0; txn < numTransactions; txn++ {
@@ -992,6 +1057,11 @@ func TestStress_OrderByLargeResult(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 5000
+	if raceEnabled {
+		numRows = 500
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -999,7 +1069,7 @@ func TestStress_OrderByLargeResult(t *testing.T) {
 
 	// Populate
 	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= 5000; i++ {
+	for i := 1; i <= numRows; i++ {
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, i, rand.Intn(10000), fmt.Sprintf("text_%d", i))
 	}
 	mustExec(t, db, `COMMIT`)
@@ -1026,6 +1096,11 @@ func TestStress_UnionOperations(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 2000
+	if raceEnabled {
+		numRows = 200
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1034,10 +1109,10 @@ func TestStress_UnionOperations(t *testing.T) {
 
 	// Populate
 	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= 2000; i++ {
+	for i := 1; i <= numRows; i++ {
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?)`, i, i*2)
 	}
-	for i := 1500; i <= 3500; i++ {
+	for i := numRows*3/4; i <= numRows*7/4; i++ {
 		mustExec(t, db, `INSERT INTO t2 VALUES(?, ?)`, i, i*2)
 	}
 	mustExec(t, db, `COMMIT`)
@@ -1100,7 +1175,6 @@ func TestStress_WindowFunctions(t *testing.T) {
 // =============================================================================
 
 func TestStress_RecursiveCTE(t *testing.T) {
-	t.Skip("pre-existing failure - needs recursive CTE fixes")
 	if testing.Short() {
 		t.Skip("skipping stress test in short mode")
 	}
@@ -1137,6 +1211,11 @@ func TestStress_PreparedStatementReuse(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 10000
+	if raceEnabled {
+		numRows = 500
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1152,7 +1231,7 @@ func TestStress_PreparedStatementReuse(t *testing.T) {
 	// Reuse prepared statement
 	start := time.Now()
 	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= 10000; i++ {
+	for i := 1; i <= numRows; i++ {
 		_, err := stmt.Exec(i, i*2)
 		if err != nil {
 			t.Fatalf("exec failed: %v", err)
@@ -1161,8 +1240,8 @@ func TestStress_PreparedStatementReuse(t *testing.T) {
 	mustExec(t, db, `COMMIT`)
 	elapsed := time.Since(start)
 
-	t.Logf("Inserted 10k rows using prepared statement in %v (%.0f rows/sec)",
-		elapsed, 10000.0/elapsed.Seconds())
+	t.Logf("Inserted %d rows using prepared statement in %v (%.0f rows/sec)",
+		numRows, elapsed, float64(numRows)/elapsed.Seconds())
 }
 
 // =============================================================================
@@ -1175,6 +1254,11 @@ func TestStress_MultipleIndexes(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 5000
+	if raceEnabled {
+		numRows = 500
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1185,7 +1269,7 @@ func TestStress_MultipleIndexes(t *testing.T) {
 
 	// Populate
 	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= 5000; i++ {
+	for i := 1; i <= numRows; i++ {
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?, ?)`,
 			rand.Intn(100), rand.Intn(100), rand.Intn(100), fmt.Sprintf("text_%d", i))
 	}
@@ -1247,6 +1331,11 @@ func TestStress_BatchDelete(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 10000
+	if raceEnabled {
+		numRows = 500
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1254,7 +1343,7 @@ func TestStress_BatchDelete(t *testing.T) {
 
 	// Populate
 	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= 10000; i++ {
+	for i := 1; i <= numRows; i++ {
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?)`, i, rand.Intn(100))
 	}
 	mustExec(t, db, `COMMIT`)
@@ -1278,6 +1367,11 @@ func TestStress_ComplexWhereClause(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
+	numRows := 5000
+	if raceEnabled {
+		numRows = 500
+	}
+
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -1286,7 +1380,7 @@ func TestStress_ComplexWhereClause(t *testing.T) {
 
 	// Populate
 	mustExec(t, db, `BEGIN`)
-	for i := 0; i < 5000; i++ {
+	for i := 0; i < numRows; i++ {
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?, ?)`,
 			rand.Intn(100), rand.Intn(100), rand.Intn(100), rand.Intn(100))
 	}

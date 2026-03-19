@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0)
+// SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
@@ -8,17 +8,20 @@ import (
 	"testing"
 )
 
+// upsertTestCase defines a declarative test case for UPSERT operations
+type upsertTestCase struct {
+	name     string
+	setup    []string
+	query    string
+	wantRows [][]interface{}
+	wantErr  bool
+	errMsg   string
+}
+
 // TestSQLiteUpsert tests UPSERT operations including INSERT ON CONFLICT, DO UPDATE, and DO NOTHING
 func TestSQLiteUpsert(t *testing.T) {
 	t.Skip("pre-existing failure")
-	tests := []struct {
-		name     string
-		setup    []string
-		query    string
-		wantRows [][]interface{}
-		wantErr  bool
-		errMsg   string
-	}{
+	tests := []upsertTestCase{
 		// Basic UPSERT tests (from upsert1.test)
 		{
 			name: "upsert1-100 DO NOTHING on primary key conflict",
@@ -470,88 +473,109 @@ func TestSQLiteUpsert(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			dbPath := filepath.Join(t.TempDir(), "test.db")
-			db, err := sql.Open("sqlite_internal", dbPath)
-			if err != nil {
-				t.Fatalf("Failed to open database: %v", err)
-			}
+			db := ups_openTestDB(t)
 			defer db.Close()
 
-			// Execute setup statements
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("Setup failed for %q: %v", stmt, err)
-				}
-			}
+			ups_runSetup(t, db, tt.setup)
 
-			// Execute query
 			if tt.wantErr {
-				_, err := db.Exec(tt.query)
-				if err == nil {
-					t.Errorf("Expected error containing %q but got none", tt.errMsg)
-					return
-				}
-				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
-					t.Errorf("Error %q does not contain expected substring %q", err.Error(), tt.errMsg)
-				}
+				ups_verifyError(t, db, tt.query, tt.errMsg)
 				return
 			}
 
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("Query failed: %v", err)
-			}
-			defer rows.Close()
-
-			// Get column count
-			cols, err := rows.Columns()
-			if err != nil {
-				t.Fatalf("Failed to get columns: %v", err)
-			}
-
-			// Collect results
-			var gotRows [][]interface{}
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("Scan failed: %v", err)
-				}
-
-				gotRows = append(gotRows, values)
-			}
-
-			if err := rows.Err(); err != nil {
-				t.Fatalf("Rows iteration error: %v", err)
-			}
-
-			// Compare results
-			if len(gotRows) != len(tt.wantRows) {
-				t.Errorf("Row count mismatch: got %d, want %d", len(gotRows), len(tt.wantRows))
-				t.Logf("Got rows: %v", gotRows)
-				t.Logf("Want rows: %v", tt.wantRows)
-				return
-			}
-
-			for i, gotRow := range gotRows {
-				wantRow := tt.wantRows[i]
-				if len(gotRow) != len(wantRow) {
-					t.Errorf("Row %d column count mismatch: got %d, want %d", i, len(gotRow), len(wantRow))
-					continue
-				}
-
-				for j, gotVal := range gotRow {
-					wantVal := wantRow[j]
-					if !compareUpsertValues(gotVal, wantVal) {
-						t.Errorf("Row %d, Col %d: got %v (%T), want %v (%T)", i, j, gotVal, gotVal, wantVal, wantVal)
-					}
-				}
-			}
+			gotRows := ups_executeQuery(t, db, tt.query)
+			ups_compareResults(t, gotRows, tt.wantRows)
 		})
+	}
+}
+
+// ups_openTestDB opens a test database with unique prefix
+func ups_openTestDB(t *testing.T) *sql.DB {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sql.Open("sqlite_internal", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	return db
+}
+
+// ups_runSetup executes setup statements
+func ups_runSetup(t *testing.T, db *sql.DB, setup []string) {
+	for _, stmt := range setup {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("Setup failed for %q: %v", stmt, err)
+		}
+	}
+}
+
+// ups_verifyError checks for expected error
+func ups_verifyError(t *testing.T, db *sql.DB, query, errMsg string) {
+	_, err := db.Exec(query)
+	if err == nil {
+		t.Errorf("Expected error containing %q but got none", errMsg)
+		return
+	}
+	if errMsg != "" && !strings.Contains(err.Error(), errMsg) {
+		t.Errorf("Error %q does not contain expected substring %q", err.Error(), errMsg)
+	}
+}
+
+// ups_executeQuery runs query and returns all rows
+func ups_executeQuery(t *testing.T, db *sql.DB, query string) [][]interface{} {
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("Failed to get columns: %v", err)
+	}
+
+	var gotRows [][]interface{}
+	for rows.Next() {
+		values := make([]interface{}, len(cols))
+		valuePtrs := make([]interface{}, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		gotRows = append(gotRows, values)
+	}
+
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Rows iteration error: %v", err)
+	}
+
+	return gotRows
+}
+
+// ups_compareResults compares actual and expected rows
+func ups_compareResults(t *testing.T, gotRows, wantRows [][]interface{}) {
+	if len(gotRows) != len(wantRows) {
+		t.Errorf("Row count mismatch: got %d, want %d", len(gotRows), len(wantRows))
+		t.Logf("Got rows: %v", gotRows)
+		t.Logf("Want rows: %v", wantRows)
+		return
+	}
+
+	for i, gotRow := range gotRows {
+		wantRow := wantRows[i]
+		if len(gotRow) != len(wantRow) {
+			t.Errorf("Row %d column count mismatch: got %d, want %d", i, len(gotRow), len(wantRow))
+			continue
+		}
+
+		for j, gotVal := range gotRow {
+			wantVal := wantRow[j]
+			if !compareUpsertValues(gotVal, wantVal) {
+				t.Errorf("Row %d, Col %d: got %v (%T), want %v (%T)", i, j, gotVal, gotVal, wantVal, wantVal)
+			}
+		}
 	}
 }
 
@@ -566,28 +590,52 @@ func compareUpsertValues(got, want interface{}) bool {
 
 	switch wv := want.(type) {
 	case int64:
-		if gv, ok := got.(int64); ok {
-			return gv == wv
-		}
+		return ups_compareInt64(got, wv)
 	case float64:
-		if gv, ok := got.(float64); ok {
-			return gv == wv
-		}
+		return ups_compareFloat64(got, wv)
 	case string:
-		if gv, ok := got.(string); ok {
-			return gv == wv
-		}
-		if gv, ok := got.([]byte); ok {
-			return string(gv) == wv
-		}
+		return ups_compareString(got, wv)
 	case []byte:
-		if gv, ok := got.([]byte); ok {
-			return string(gv) == string(wv)
-		}
-		if gv, ok := got.(string); ok {
-			return gv == string(wv)
-		}
+		return ups_compareBytes(got, wv)
 	}
 
+	return false
+}
+
+// ups_compareInt64 compares int64 values
+func ups_compareInt64(got interface{}, want int64) bool {
+	if gv, ok := got.(int64); ok {
+		return gv == want
+	}
+	return false
+}
+
+// ups_compareFloat64 compares float64 values
+func ups_compareFloat64(got interface{}, want float64) bool {
+	if gv, ok := got.(float64); ok {
+		return gv == want
+	}
+	return false
+}
+
+// ups_compareString compares string values
+func ups_compareString(got interface{}, want string) bool {
+	if gv, ok := got.(string); ok {
+		return gv == want
+	}
+	if gv, ok := got.([]byte); ok {
+		return string(gv) == want
+	}
+	return false
+}
+
+// ups_compareBytes compares byte slice values
+func ups_compareBytes(got interface{}, want []byte) bool {
+	if gv, ok := got.([]byte); ok {
+		return string(gv) == string(want)
+	}
+	if gv, ok := got.(string); ok {
+		return gv == string(want)
+	}
 	return false
 }
