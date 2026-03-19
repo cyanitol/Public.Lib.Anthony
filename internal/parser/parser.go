@@ -3476,6 +3476,12 @@ func (p *Parser) parsePostfixExpression() (Expression, error) {
 		return nil, err
 	}
 
+	// JSON -> and ->> operators (desugar to json_extract / json_extract_text)
+	expr, err = p.parseJSONArrowOps(expr)
+	if err != nil {
+		return nil, err
+	}
+
 	// COLLATE
 	if p.match(TK_COLLATE) {
 		if !p.check(TK_ID) {
@@ -3487,6 +3493,27 @@ func (p *Parser) parsePostfixExpression() (Expression, error) {
 		}, nil
 	}
 
+	return expr, nil
+}
+
+// parseJSONArrowOps handles chained -> and ->> operators by desugaring them
+// into json_extract (for ->) and json_extract_text (for ->>) function calls.
+func (p *Parser) parseJSONArrowOps(expr Expression) (Expression, error) {
+	for p.check(TK_PTR) {
+		tok := p.advance()
+		right, err := p.parsePrimaryExpression()
+		if err != nil {
+			return nil, err
+		}
+		funcName := "JSON_EXTRACT"
+		if tok.Lexeme == "->>" {
+			funcName = "JSON_EXTRACT_TEXT"
+		}
+		expr = &FunctionExpr{
+			Name: funcName,
+			Args: []Expression{expr, right},
+		}
+	}
 	return expr, nil
 }
 
@@ -4018,6 +4045,22 @@ func (p *Parser) parseOrderByList() ([]OrderingTerm, error) {
 			p.match(TK_ASC)
 		}
 
+		// Parse optional NULLS FIRST / NULLS LAST
+		if p.peekIsKeyword("NULLS") {
+			p.advance() // consume NULLS
+			if p.peekIsKeyword("FIRST") {
+				p.advance() // consume FIRST
+				t := true
+				term.NullsFirst = &t
+			} else if p.peekIsKeyword("LAST") {
+				p.advance() // consume LAST
+				f := false
+				term.NullsFirst = &f
+			} else {
+				return nil, fmt.Errorf("expected FIRST or LAST after NULLS")
+			}
+		}
+
 		terms = append(terms, term)
 
 		if !p.match(TK_COMMA) {
@@ -4105,6 +4148,15 @@ func (p *Parser) match(types ...TokenType) bool {
 	return false
 }
 
+// peekIsKeyword checks if the current token is an identifier matching a keyword (case-insensitive).
+func (p *Parser) peekIsKeyword(kw string) bool {
+	if p.isAtEnd() {
+		return false
+	}
+	tok := p.peek()
+	return tok.Type == TK_ID && strings.EqualFold(tok.Lexeme, kw)
+}
+
 func (p *Parser) isAtEnd() bool {
 	return p.current >= len(p.tokens) || p.peek().Type == TK_EOF
 }
@@ -4164,10 +4216,61 @@ func (p *Parser) parseFrameSpec() (*FrameSpec, error) {
 	}
 
 	// Parse BETWEEN clause or simple frame bound
+	var err error
 	if p.match(TK_BETWEEN) {
-		return p.parseFrameBetween(frameSpec)
+		frameSpec, err = p.parseFrameBetween(frameSpec)
+	} else {
+		frameSpec, err = p.parseFrameSingleBound(frameSpec)
 	}
-	return p.parseFrameSingleBound(frameSpec)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse optional EXCLUDE clause
+	if p.match(TK_EXCLUDE) {
+		if err := p.parseFrameExclude(frameSpec); err != nil {
+			return nil, err
+		}
+	}
+
+	return frameSpec, nil
+}
+
+// frameExcludeMap maps tokens to frame exclude modes for single-token variants.
+var frameExcludeMap = map[TokenType]FrameExclude{
+	TK_GROUP: ExcludeGroup,
+	TK_TIES:  ExcludeTies,
+}
+
+// parseFrameExclude parses the EXCLUDE clause after the EXCLUDE keyword.
+func (p *Parser) parseFrameExclude(frameSpec *FrameSpec) error {
+	// EXCLUDE NO OTHERS
+	if p.match(TK_NO) {
+		if !p.match(TK_OTHERS) {
+			return p.error("expected OTHERS after NO in EXCLUDE clause")
+		}
+		frameSpec.Exclude = ExcludeNoOthers
+		return nil
+	}
+
+	// EXCLUDE CURRENT ROW
+	if p.match(TK_CURRENT) {
+		if !p.match(TK_ROW) {
+			return p.error("expected ROW after CURRENT in EXCLUDE clause")
+		}
+		frameSpec.Exclude = ExcludeCurrentRow
+		return nil
+	}
+
+	// EXCLUDE GROUP or EXCLUDE TIES
+	for tok, exclude := range frameExcludeMap {
+		if p.match(tok) {
+			frameSpec.Exclude = exclude
+			return nil
+		}
+	}
+
+	return p.error("expected NO OTHERS, CURRENT ROW, GROUP, or TIES after EXCLUDE")
 }
 
 // parseFrameMode parses the frame mode (ROWS, RANGE, or GROUPS).

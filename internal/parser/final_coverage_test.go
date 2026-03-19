@@ -392,14 +392,14 @@ func TestParserEdgeCasesForHighCoverage(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "ORDER BY with NULLS FIRST - unsupported",
+			name:    "ORDER BY with NULLS FIRST",
 			sql:     "SELECT * FROM users ORDER BY name NULLS FIRST",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
-			name:    "ORDER BY with NULLS LAST - unsupported",
+			name:    "ORDER BY with NULLS LAST",
 			sql:     "SELECT * FROM users ORDER BY name NULLS LAST",
-			wantErr: true,
+			wantErr: false,
 		},
 
 		// tryParsePatternOp edge cases

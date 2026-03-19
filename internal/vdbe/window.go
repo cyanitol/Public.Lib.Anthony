@@ -27,11 +27,22 @@ type WindowFrameBound struct {
 	Offset int            // Offset value for PRECEDING/FOLLOWING (ignored for other types)
 }
 
+// WindowFrameExclude represents the EXCLUDE clause of a window frame
+type WindowFrameExclude uint8
+
+const (
+	ExcludeNoOthers   WindowFrameExclude = 0 // EXCLUDE NO OTHERS (default)
+	ExcludeCurrentRow WindowFrameExclude = 1 // EXCLUDE CURRENT ROW
+	ExcludeGroup      WindowFrameExclude = 2 // EXCLUDE GROUP
+	ExcludeTies       WindowFrameExclude = 3 // EXCLUDE TIES
+)
+
 // WindowFrame defines the frame specification for a window function
 type WindowFrame struct {
-	Type  WindowFrameType  // ROWS, RANGE, or GROUPS
-	Start WindowFrameBound // Starting boundary
-	End   WindowFrameBound // Ending boundary
+	Type    WindowFrameType    // ROWS, RANGE, or GROUPS
+	Start   WindowFrameBound   // Starting boundary
+	End     WindowFrameBound   // Ending boundary
+	Exclude WindowFrameExclude // EXCLUDE clause
 }
 
 // WindowPartition represents a partition of rows for window functions
@@ -273,7 +284,7 @@ func (ws *WindowState) calculateFrameEnd(currentRow, partitionSize int) int {
 	}
 }
 
-// GetFrameRows returns all rows in the current frame
+// GetFrameRows returns all rows in the current frame, applying EXCLUDE filtering.
 func (ws *WindowState) GetFrameRows() [][]*Mem {
 	if ws.CurrentPartIdx < 0 || ws.CurrentPartIdx >= len(ws.Partitions) {
 		return nil
@@ -288,7 +299,42 @@ func (ws *WindowState) GetFrameRows() [][]*Mem {
 	}
 
 	end = min(end, len(partition.Rows)-1)
-	return partition.Rows[start : end+1]
+	rawRows := partition.Rows[start : end+1]
+
+	if ws.Frame.Exclude == ExcludeNoOthers {
+		return rawRows
+	}
+
+	return ws.applyFrameExclude(rawRows, partition.Rows[ws.CurrentPartRow], start)
+}
+
+// applyFrameExclude filters frame rows based on the EXCLUDE clause.
+func (ws *WindowState) applyFrameExclude(rows [][]*Mem, currentRow []*Mem, startIdx int) [][]*Mem {
+	result := make([][]*Mem, 0, len(rows))
+	for i, row := range rows {
+		if ws.shouldExcludeRow(row, currentRow, startIdx+i) {
+			continue
+		}
+		result = append(result, row)
+	}
+	return result
+}
+
+// shouldExcludeRow determines if a row should be excluded from the frame.
+func (ws *WindowState) shouldExcludeRow(row, currentRow []*Mem, absIdx int) bool {
+	isCurrentRow := absIdx == ws.CurrentPartRow
+	isPeer := ws.sameOrderByValues(row, currentRow)
+
+	switch ws.Frame.Exclude {
+	case ExcludeCurrentRow:
+		return isCurrentRow
+	case ExcludeGroup:
+		return isPeer
+	case ExcludeTies:
+		return isPeer && !isCurrentRow
+	default:
+		return false
+	}
 }
 
 // GetPartitionSize returns the size of the current partition

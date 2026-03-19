@@ -89,7 +89,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | Feature | Status | Notes |
 |---------|--------|-------|
 | WHERE | :white_check_mark: | |
-| ORDER BY | :white_check_mark: | SELECT * with ORDER BY fixed |
+| ORDER BY | :white_check_mark: | SELECT * with ORDER BY fixed, NULLS FIRST/LAST |
 | GROUP BY | :white_check_mark: | AVG returns float correctly, NULL-safe group comparison |
 | HAVING | :white_check_mark: | Including aggregate expressions |
 | LIMIT | :white_check_mark: | |
@@ -287,6 +287,8 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | json_array_length | :white_check_mark: |
 | json_group_array | :white_check_mark: |
 | json_group_object | :white_check_mark: |
+| -> (arrow operator) | :white_check_mark: |
+| ->> (arrow operator) | :white_check_mark: |
 
 ### Table-Valued Functions
 
@@ -335,6 +337,8 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | OVER clause | :white_check_mark: | Parser and basic execution |
 | PARTITION BY | :white_check_mark: | Working |
 | WINDOW clause | :white_check_mark: | Named windows working |
+| Frame EXCLUDE | :white_check_mark: | EXCLUDE NO OTHERS, CURRENT ROW, GROUP, TIES |
+| FILTER clause | :white_check_mark: | Aggregate FILTER(WHERE ...) in both GROUP BY and non-GROUP BY paths |
 
 ---
 
@@ -431,7 +435,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 - Common Table Expressions (non-recursive and recursive with cycle detection)
 - Transactions and savepoints (SAVEPOINT/RELEASE/ROLLBACK TO)
 - All built-in functions (string, math, date/time, JSON, pattern matching)
-- All 11 window functions with PARTITION BY and named WINDOW clauses
+- All 11 window functions with PARTITION BY, named WINDOW clauses, frame EXCLUDE, and FILTER clause
 - Table-valued functions (json_each, json_tree, generate_series)
 - JSON aggregate functions (json_group_array, json_group_object)
 - FTS5 module (MATCH queries, INSERT/DELETE via SQL)
@@ -451,6 +455,8 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 - Incremental vacuum (PRAGMA auto_vacuum=INCREMENTAL, PRAGMA incremental_vacuum(N))
 - All 19 PRAGMAs fully implemented (GET/SET)
 - Connection state functions (last_insert_rowid, changes, total_changes, sqlite_version)
+- NULLS FIRST/LAST ordering across all sort paths (regular, compound, TVF, vtab)
+- JSON -> / ->> arrow operators (desugared to json_extract/json_extract_text)
 - Custom collations (global + per-connection registration)
 - WAL mode (write path, all checkpoint modes, recovery)
 - Online backup API with progress callbacks

@@ -296,8 +296,9 @@ func exceptRows(left, right [][]interface{}) [][]interface{} {
 
 // orderSpec defines a column to sort by and its direction.
 type orderSpec struct {
-	colIdx int
-	desc   bool
+	colIdx     int
+	desc       bool
+	nullsFirst *bool // nil = default, true = NULLS FIRST, false = NULLS LAST
 }
 
 // sortCompoundRows sorts the in-memory result set according to ORDER BY terms.
@@ -317,7 +318,7 @@ func buildOrderSpecs(orderBy []parser.OrderingTerm, numCols int, colNames []stri
 	specs := make([]orderSpec, 0, len(orderBy))
 	for _, term := range orderBy {
 		colIdx := resolveOrderByColumn(term, numCols, colNames)
-		specs = append(specs, orderSpec{colIdx: colIdx, desc: !term.Asc})
+		specs = append(specs, orderSpec{colIdx: colIdx, desc: !term.Asc, nullsFirst: term.NullsFirst})
 	}
 	return specs
 }
@@ -370,11 +371,50 @@ func resolveLiteralExpr(expr parser.Expression, numCols int) int {
 	return -1
 }
 
+// shouldNullsFirst returns whether NULLs should sort first for a given spec.
+func shouldNullsFirst(spec orderSpec) bool {
+	if spec.nullsFirst != nil {
+		return *spec.nullsFirst
+	}
+	// Default SQLite: NULLs are smallest, so first in ASC, last in DESC
+	return !spec.desc
+}
+
+// compareCompoundNull handles NULL comparison for a single column.
+// Returns (result, true) if a NULL was involved, (0, false) otherwise.
+func compareCompoundNull(a, b interface{}, spec orderSpec) (int, bool) {
+	if a != nil && b != nil {
+		return 0, false
+	}
+	if a == nil && b == nil {
+		return 0, true
+	}
+	nf := shouldNullsFirst(spec)
+	if a == nil {
+		if nf {
+			return -1, true
+		}
+		return 1, true
+	}
+	// b == nil
+	if nf {
+		return 1, true
+	}
+	return -1, true
+}
+
 // compareCompoundRows compares two rows according to orderSpecs.
 func compareCompoundRows(row1, row2 []interface{}, specs []orderSpec) bool {
 	for _, spec := range specs {
 		ci := spec.colIdx
 		if ci >= len(row1) || ci >= len(row2) {
+			continue
+		}
+		// Handle NULLs with NULLS FIRST/LAST awareness
+		if cmp, isNull := compareCompoundNull(row1[ci], row2[ci], spec); isNull {
+			if cmp != 0 {
+				return cmp < 0
+			}
 			continue
 		}
 		cmp := cmpCompoundValues(row1[ci], row2[ci])

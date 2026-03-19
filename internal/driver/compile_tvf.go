@@ -336,8 +336,9 @@ func tvfRowKey(row []functions.Value) string {
 
 // tvfSortKey describes one ORDER BY column for TVF row sorting.
 type tvfSortKey struct {
-	colIdx int
-	desc   bool
+	colIdx     int
+	desc       bool
+	nullsFirst *bool
 }
 
 // sortTVFRows sorts projected rows according to ORDER BY terms.
@@ -348,16 +349,55 @@ func sortTVFRows(rows [][]functions.Value, orderBy []parser.OrderingTerm, outCol
 		if idx < 0 {
 			continue
 		}
-		keys = append(keys, tvfSortKey{colIdx: idx, desc: !term.Asc})
+		keys = append(keys, tvfSortKey{colIdx: idx, desc: !term.Asc, nullsFirst: term.NullsFirst})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		return tvfRowLess(rows[i], rows[j], keys)
 	})
 }
 
+// tvfNullsFirst returns whether NULLs should sort first for a given key.
+func tvfNullsFirst(k tvfSortKey) bool {
+	if k.nullsFirst != nil {
+		return *k.nullsFirst
+	}
+	return !k.desc
+}
+
+// tvfCompareNull handles NULL comparison for TVF values.
+// Returns (result, true) if a NULL was involved, (0, false) otherwise.
+func tvfCompareNull(a, b functions.Value, k tvfSortKey) (int, bool) {
+	aNil := a == nil || a.IsNull()
+	bNil := b == nil || b.IsNull()
+	if !aNil && !bNil {
+		return 0, false
+	}
+	if aNil && bNil {
+		return 0, true
+	}
+	nf := tvfNullsFirst(k)
+	if aNil {
+		if nf {
+			return -1, true
+		}
+		return 1, true
+	}
+	if nf {
+		return 1, true
+	}
+	return -1, true
+}
+
 // tvfRowLess returns true if row a should sort before row b.
 func tvfRowLess(a, b []functions.Value, keys []tvfSortKey) bool {
 	for _, k := range keys {
+		// Handle NULLs with NULLS FIRST/LAST awareness
+		if cmp, isNull := tvfCompareNull(a[k.colIdx], b[k.colIdx], k); isNull {
+			if cmp != 0 {
+				return cmp < 0
+			}
+			continue
+		}
 		cmp := compareFuncValues(a[k.colIdx], b[k.colIdx])
 		if cmp == 0 {
 			continue

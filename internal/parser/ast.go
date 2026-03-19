@@ -147,9 +147,10 @@ type JoinCondition struct {
 
 // OrderingTerm represents an ORDER BY term.
 type OrderingTerm struct {
-	Expr      Expression
-	Asc       bool
-	Collation string // COLLATE clause
+	Expr       Expression
+	Asc        bool
+	Collation  string // COLLATE clause
+	NullsFirst *bool  // nil = default, true = NULLS FIRST, false = NULLS LAST
 }
 
 // InsertStmt represents an INSERT statement.
@@ -927,11 +928,22 @@ type WindowSpec struct {
 	Frame       *FrameSpec
 }
 
+// FrameExclude represents the EXCLUDE clause in a frame specification.
+type FrameExclude int
+
+const (
+	ExcludeNoOthers   FrameExclude = iota // EXCLUDE NO OTHERS (default)
+	ExcludeCurrentRow                     // EXCLUDE CURRENT ROW
+	ExcludeGroup                          // EXCLUDE GROUP
+	ExcludeTies                           // EXCLUDE TIES
+)
+
 // FrameSpec represents a frame specification in a window.
 type FrameSpec struct {
-	Mode  FrameMode
-	Start FrameBound
-	End   FrameBound
+	Mode    FrameMode
+	Start   FrameBound
+	End     FrameBound
+	Exclude FrameExclude
 }
 
 type FrameMode int

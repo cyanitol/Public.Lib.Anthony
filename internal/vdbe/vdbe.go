@@ -239,6 +239,7 @@ type Sorter struct {
 	Rows              [][]*Mem    // Collected rows
 	KeyCols           []int       // Indices of columns to sort by (relative to row start)
 	Desc              []bool      // True for descending sort for each key column
+	NullsFirst        []*bool     // NULLS FIRST/LAST override per key column (nil = default)
 	Collations        []string    // Collation name for each key column (empty string for default)
 	Current           int         // Current position during iteration
 	Sorted            bool        // True after Sort() has been called
@@ -265,6 +266,21 @@ func NewSorterWithRegistry(keyCols []int, desc []bool, collations []string, numC
 		Rows:              make([][]*Mem, 0),
 		KeyCols:           keyCols,
 		Desc:              desc,
+		Collations:        collations,
+		Current:           -1,
+		Sorted:            false,
+		NumCols:           numCols,
+		CollationRegistry: registry,
+	}
+}
+
+// NewSorterWithNulls creates a new Sorter with NULLS FIRST/LAST overrides and collation registry.
+func NewSorterWithNulls(keyCols []int, desc []bool, nullsFirst []*bool, collations []string, numCols int, registry interface{}) *Sorter {
+	return &Sorter{
+		Rows:              make([][]*Mem, 0),
+		KeyCols:           keyCols,
+		Desc:              desc,
+		NullsFirst:        nullsFirst,
 		Collations:        collations,
 		Current:           -1,
 		Sorted:            false,
@@ -329,11 +345,54 @@ func (s *Sorter) applySortDirection(cmp int, keyIdx int) int {
 	return cmp
 }
 
+// nullsFirstForKey returns whether NULLs should sort first for the given key index.
+// Default: ASC => nulls first, DESC => nulls last (matching SQLite behavior).
+func (s *Sorter) nullsFirstForKey(keyIdx int) bool {
+	if len(s.NullsFirst) > keyIdx && s.NullsFirst[keyIdx] != nil {
+		return *s.NullsFirst[keyIdx]
+	}
+	// Default SQLite behavior: NULLs are smallest, so first in ASC, last in DESC
+	return !(len(s.Desc) > keyIdx && s.Desc[keyIdx])
+}
+
+// compareRowNull handles the case where at least one value is NULL.
+// Returns (result, true) if a NULL was involved, (0, false) otherwise.
+func (s *Sorter) compareRowNull(aVal, bVal *Mem, keyIdx int) (int, bool) {
+	aNull := aVal.IsNull()
+	bNull := bVal.IsNull()
+	if !aNull && !bNull {
+		return 0, false
+	}
+	if aNull && bNull {
+		return 0, true
+	}
+	nf := s.nullsFirstForKey(keyIdx)
+	if aNull {
+		if nf {
+			return -1, true
+		}
+		return 1, true
+	}
+	// bNull
+	if nf {
+		return 1, true
+	}
+	return -1, true
+}
+
 // compareRows compares two rows based on key columns.
 // Returns negative if a < b, positive if a > b, 0 if equal.
 func (s *Sorter) compareRows(a, b []*Mem) int {
 	for i, colIdx := range s.KeyCols {
 		if !s.isColumnInBounds(colIdx, a, b) {
+			continue
+		}
+
+		// Handle NULLs with NULLS FIRST/LAST awareness
+		if cmp, isNull := s.compareRowNull(a[colIdx], b[colIdx], i); isNull {
+			if cmp != 0 {
+				return cmp
+			}
 			continue
 		}
 

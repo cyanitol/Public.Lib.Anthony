@@ -4590,14 +4590,16 @@ func (v *VDBE) execSorterOpen(instr *Instruction) error {
 		v.Sorters = append(v.Sorters, nil)
 	}
 
-	// Get key columns, desc, and collations info from P4.P
+	// Get key columns, desc, nulls, and collations info from P4.P
 	var keyCols []int
 	var desc []bool
+	var nullsFirst []*bool
 	var collations []string
 	if instr.P4.P != nil {
 		if keyInfo, ok := instr.P4.P.(*SorterKeyInfo); ok {
 			keyCols = keyInfo.KeyCols
 			desc = keyInfo.Desc
+			nullsFirst = keyInfo.NullsFirst
 			collations = keyInfo.Collations
 		}
 	}
@@ -4608,7 +4610,9 @@ func (v *VDBE) execSorterOpen(instr *Instruction) error {
 		collRegistry = v.Ctx.CollationRegistry
 	}
 
-	v.Sorters[sorterNum] = NewSorterWithSpillAndRegistry(keyCols, desc, collations, numCols, collRegistry, nil)
+	sorter := NewSorterWithSpillAndRegistry(keyCols, desc, collations, numCols, collRegistry, nil)
+	sorter.NullsFirst = nullsFirst
+	v.Sorters[sorterNum] = sorter
 	return nil
 }
 
@@ -4616,6 +4620,7 @@ func (v *VDBE) execSorterOpen(instr *Instruction) error {
 type SorterKeyInfo struct {
 	KeyCols    []int    // Column indices for sorting
 	Desc       []bool   // True for descending order
+	NullsFirst []*bool  // NULLS FIRST/LAST override per key column (nil = default)
 	Collations []string // Collation name for each key column (empty string for default)
 }
 

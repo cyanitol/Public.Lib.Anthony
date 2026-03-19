@@ -671,6 +671,35 @@ func (s *Stmt) emitAggregateUpdates(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 func (s *Stmt) emitSingleAggregateUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr,
 	table *schema.Table, tableName string, accReg int, avgCountReg int, gen *expr.CodeGenerator) {
 
+	filterSkipAddr := s.emitAggregateFilterCheck(vm, fnExpr, gen)
+	s.emitAggregateByName(vm, fnExpr, table, tableName, accReg, avgCountReg, gen)
+	s.patchFilterSkip(vm, filterSkipAddr)
+}
+
+// emitAggregateFilterCheck emits a FILTER clause check, returning the skip address to patch.
+// Returns -1 if no filter is present.
+func (s *Stmt) emitAggregateFilterCheck(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, gen *expr.CodeGenerator) int {
+	if fnExpr.Filter == nil {
+		return -1
+	}
+	filterReg, err := gen.GenerateExpr(fnExpr.Filter)
+	if err != nil {
+		return -1
+	}
+	return vm.AddOp(vdbe.OpIfNot, filterReg, 0, 0)
+}
+
+// patchFilterSkip patches the FILTER skip address to jump past the aggregate update.
+func (s *Stmt) patchFilterSkip(vm *vdbe.VDBE, filterSkipAddr int) {
+	if filterSkipAddr >= 0 {
+		vm.Program[filterSkipAddr].P2 = vm.NumOps()
+	}
+}
+
+// emitAggregateByName dispatches the aggregate update by function name.
+func (s *Stmt) emitAggregateByName(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr,
+	table *schema.Table, tableName string, accReg int, avgCountReg int, gen *expr.CodeGenerator) {
+
 	switch fnExpr.Name {
 	case "COUNT":
 		s.emitCountUpdate(vm, fnExpr, table, tableName, accReg, gen)

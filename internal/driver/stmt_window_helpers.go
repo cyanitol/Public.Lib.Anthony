@@ -527,12 +527,27 @@ func (s *Stmt) extractWindowFrame(frameSpec *parser.FrameSpec) vdbe.WindowFrame 
 	}
 
 	frame := vdbe.WindowFrame{
-		Type:  s.convertFrameMode(frameSpec.Mode),
-		Start: s.convertFrameBound(frameSpec.Start),
-		End:   s.convertFrameBound(frameSpec.End),
+		Type:    s.convertFrameMode(frameSpec.Mode),
+		Start:   s.convertFrameBound(frameSpec.Start),
+		End:     s.convertFrameBound(frameSpec.End),
+		Exclude: s.convertFrameExclude(frameSpec.Exclude),
 	}
 
 	return frame
+}
+
+// convertFrameExclude converts parser.FrameExclude to vdbe.WindowFrameExclude
+func (s *Stmt) convertFrameExclude(exclude parser.FrameExclude) vdbe.WindowFrameExclude {
+	switch exclude {
+	case parser.ExcludeCurrentRow:
+		return vdbe.ExcludeCurrentRow
+	case parser.ExcludeGroup:
+		return vdbe.ExcludeGroup
+	case parser.ExcludeTies:
+		return vdbe.ExcludeTies
+	default:
+		return vdbe.ExcludeNoOthers
+	}
 }
 
 // convertFrameMode converts parser.FrameMode to vdbe.WindowFrameType

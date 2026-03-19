@@ -453,6 +453,7 @@ func (s *Stmt) finalizeNoFromSelect(vm *vdbe.VDBE, numCols int, addrHalt int) {
 type orderByColumnInfo struct {
 	keyCols      []int
 	desc         []bool
+	nullsFirst   []*bool
 	collations   []string
 	extraExprs   []parser.Expression
 	extraColRegs []int
@@ -544,6 +545,7 @@ func (s *Stmt) resolveOrderByColumns(stmt *parser.SelectStmt, table *schema.Tabl
 	info := &orderByColumnInfo{
 		keyCols:      make([]int, len(stmt.OrderBy)),
 		desc:         make([]bool, len(stmt.OrderBy)),
+		nullsFirst:   make([]*bool, len(stmt.OrderBy)),
 		collations:   make([]string, len(stmt.OrderBy)),
 		extraExprs:   make([]parser.Expression, 0),
 		extraColRegs: make([]int, 0),
@@ -590,6 +592,7 @@ func (s *Stmt) resolveOrderByTerm(orderTerm parser.OrderingTerm, termIdx int,
 
 	info.keyCols[termIdx] = colIdx
 	info.desc[termIdx] = !orderTerm.Asc
+	info.nullsFirst[termIdx] = orderTerm.NullsFirst
 }
 
 // extractOrderByExpression extracts base expression and collation from ORDER BY term.
@@ -718,6 +721,7 @@ func (s *Stmt) createSorterKeyInfo(orderInfo *orderByColumnInfo) *vdbe.SorterKey
 	return &vdbe.SorterKeyInfo{
 		KeyCols:    orderInfo.keyCols,
 		Desc:       orderInfo.desc,
+		NullsFirst: orderInfo.nullsFirst,
 		Collations: orderInfo.collations,
 	}
 }

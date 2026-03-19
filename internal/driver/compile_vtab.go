@@ -408,15 +408,16 @@ func sortVTabRows(rows [][]interface{}, orderBy []parser.OrderingTerm, colNames 
 	}
 
 	type sortKey struct {
-		idx  int
-		desc bool
+		idx        int
+		desc       bool
+		nullsFirst *bool
 	}
 	var keys []sortKey
 	for _, ob := range orderBy {
 		name := extractVTabOrderByName(ob)
 		for i, cn := range colNames {
 			if strings.EqualFold(cn, name) {
-				keys = append(keys, sortKey{idx: i, desc: !ob.Asc})
+				keys = append(keys, sortKey{idx: i, desc: !ob.Asc, nullsFirst: ob.NullsFirst})
 				break
 			}
 		}
@@ -427,7 +428,7 @@ func sortVTabRows(rows [][]interface{}, orderBy []parser.OrderingTerm, colNames 
 
 	for i := len(keys) - 1; i >= 0; i-- {
 		k := keys[i]
-		stableSortVTabRows(rows, k.idx, k.desc)
+		stableSortVTabRows(rows, k.idx, k.desc, k.nullsFirst)
 	}
 }
 
@@ -440,17 +441,38 @@ func extractVTabOrderByName(ob parser.OrderingTerm) string {
 }
 
 // stableSortVTabRows performs a stable insertion sort on one column.
-func stableSortVTabRows(rows [][]interface{}, colIdx int, desc bool) {
+func stableSortVTabRows(rows [][]interface{}, colIdx int, desc bool, nullsFirst *bool) {
 	n := len(rows)
 	for i := 1; i < n; i++ {
-		for j := i; j > 0 && compareVTabValues(rows[j-1][colIdx], rows[j][colIdx], desc); j-- {
+		for j := i; j > 0 && compareVTabValues(rows[j-1][colIdx], rows[j][colIdx], desc, nullsFirst); j-- {
 			rows[j-1], rows[j] = rows[j], rows[j-1]
 		}
 	}
 }
 
+// vtabShouldNullsFirst returns whether NULLs should sort first for a vtab column.
+func vtabShouldNullsFirst(desc bool, nullsFirst *bool) bool {
+	if nullsFirst != nil {
+		return *nullsFirst
+	}
+	return !desc
+}
+
 // compareVTabValues returns true if a should come after b in sort order.
-func compareVTabValues(a, b interface{}, desc bool) bool {
+func compareVTabValues(a, b interface{}, desc bool, nullsFirst *bool) bool {
+	// Handle NULLs with NULLS FIRST/LAST awareness
+	aNull := a == nil
+	bNull := b == nil
+	if aNull || bNull {
+		if aNull && bNull {
+			return false
+		}
+		nf := vtabShouldNullsFirst(desc, nullsFirst)
+		if aNull {
+			return !nf // a is NULL; if nulls first, a should NOT come after b
+		}
+		return nf // b is NULL; if nulls first, a should come after b
+	}
 	cmp := compareInterfaces(a, b)
 	if desc {
 		return cmp < 0

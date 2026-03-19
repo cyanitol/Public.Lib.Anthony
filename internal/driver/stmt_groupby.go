@@ -190,47 +190,65 @@ func (s *Stmt) initializeGroupAccumulators(vm *vdbe.VDBE, gen *expr.CodeGenerato
 // updateGroupAccumulatorsFromSorter updates accumulators from data extracted from sorter.
 // This should be called for every row to accumulate values.
 func (s *Stmt) updateGroupAccumulatorsFromSorter(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt *parser.SelectStmt, table *schema.Table, state groupByState, sorterBaseReg int, numGroupBy int) {
-	// Update accumulators from sorter data
 	regIdx := numGroupBy
 	for i, col := range stmt.Columns {
 		if !s.isAggregateExpr(col.Expr) {
 			continue
 		}
 		fnExpr := col.Expr.(*parser.FunctionExpr)
-
-		// COUNT(*) doesn't need column data
-		if fnExpr.Star || len(fnExpr.Args) == 0 {
-			if fnExpr.Name == "COUNT" {
-				vm.AddOp(vdbe.OpAddImm, state.accRegs[i], 1, 0)
-			}
-			continue
-		}
-
-		// JSON_GROUP_OBJECT uses two sorter columns
-		if fnExpr.Name == "JSON_GROUP_OBJECT" && len(fnExpr.Args) >= 2 {
-			keyReg := sorterBaseReg + regIdx
-			regIdx++
-			valReg := sorterBaseReg + regIdx
-			regIdx++
-			emitAccumJSONObject(vm, gen, state.accRegs[i], keyReg, valReg)
-			continue
-		}
-
-		// Get column value from sorter data
-		valueReg := sorterBaseReg + regIdx
-		regIdx++
-
-		// Update accumulator based on function type
-		coll := ""
-		if len(fnExpr.Args) > 0 {
-			coll = resolveExprCollation(fnExpr.Args[0], table)
-		}
-		sep := ""
-		if fnExpr.Name == "GROUP_CONCAT" {
-			sep = groupConcatSeparator(fnExpr)
-		}
-		s.updateSingleAccumulator(vm, fnExpr.Name, state.accRegs[i], state.avgCountRegs[i], valueReg, gen, coll, sep)
+		s.updateGroupAccForColumn(vm, gen, fnExpr, table, state, i, sorterBaseReg, &regIdx)
 	}
+}
+
+// updateGroupAccForColumn updates a single aggregate accumulator from sorter data.
+func (s *Stmt) updateGroupAccForColumn(vm *vdbe.VDBE, gen *expr.CodeGenerator, fnExpr *parser.FunctionExpr, table *schema.Table, state groupByState, colIdx int, sorterBaseReg int, regIdx *int) {
+	// COUNT(*) or no-arg aggregates
+	if fnExpr.Star || len(fnExpr.Args) == 0 {
+		filterSkipAddr := s.readSorterFilterCheck(vm, fnExpr, sorterBaseReg, regIdx)
+		if fnExpr.Name == "COUNT" {
+			vm.AddOp(vdbe.OpAddImm, state.accRegs[colIdx], 1, 0)
+		}
+		s.patchFilterSkip(vm, filterSkipAddr)
+		return
+	}
+
+	// JSON_GROUP_OBJECT uses two sorter columns
+	if fnExpr.Name == "JSON_GROUP_OBJECT" && len(fnExpr.Args) >= 2 {
+		keyReg := sorterBaseReg + *regIdx
+		*regIdx++
+		valReg := sorterBaseReg + *regIdx
+		*regIdx++
+		filterSkipAddr := s.readSorterFilterCheck(vm, fnExpr, sorterBaseReg, regIdx)
+		emitAccumJSONObject(vm, gen, state.accRegs[colIdx], keyReg, valReg)
+		s.patchFilterSkip(vm, filterSkipAddr)
+		return
+	}
+
+	valueReg := sorterBaseReg + *regIdx
+	*regIdx++
+	filterSkipAddr := s.readSorterFilterCheck(vm, fnExpr, sorterBaseReg, regIdx)
+
+	coll := ""
+	if len(fnExpr.Args) > 0 {
+		coll = resolveExprCollation(fnExpr.Args[0], table)
+	}
+	sep := ""
+	if fnExpr.Name == "GROUP_CONCAT" {
+		sep = groupConcatSeparator(fnExpr)
+	}
+	s.updateSingleAccumulator(vm, fnExpr.Name, state.accRegs[colIdx], state.avgCountRegs[colIdx], valueReg, gen, coll, sep)
+	s.patchFilterSkip(vm, filterSkipAddr)
+}
+
+// readSorterFilterCheck reads the FILTER result from the sorter and emits a conditional skip.
+// Returns the skip address to patch, or -1 if no filter is present.
+func (s *Stmt) readSorterFilterCheck(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, sorterBaseReg int, regIdx *int) int {
+	if fnExpr.Filter == nil {
+		return -1
+	}
+	filterReg := sorterBaseReg + *regIdx
+	*regIdx++
+	return vm.AddOp(vdbe.OpIfNot, filterReg, 0, 0)
 }
 
 // updateSingleAccumulator updates a single accumulator register with a value
@@ -354,8 +372,11 @@ func (s *Stmt) calculateSorterColumns(stmt *parser.SelectStmt, numGroupBy int) i
 			continue
 		}
 		fnExpr := col.Expr.(*parser.FunctionExpr)
-		// COUNT(*) doesn't need a column
+		// COUNT(*) doesn't need a column for args (but may need one for filter)
 		if fnExpr.Star || len(fnExpr.Args) == 0 {
+			if fnExpr.Filter != nil {
+				cols++ // extra column for FILTER result
+			}
 			continue
 		}
 		// JSON_GROUP_OBJECT needs 2 columns (key + value)
@@ -363,6 +384,9 @@ func (s *Stmt) calculateSorterColumns(stmt *parser.SelectStmt, numGroupBy int) i
 			cols += 2
 		} else {
 			cols++
+		}
+		if fnExpr.Filter != nil {
+			cols++ // extra column for FILTER result
 		}
 	}
 
@@ -485,17 +509,31 @@ func (s *Stmt) populateAggregateArgs(vm *vdbe.VDBE, gen *expr.CodeGenerator, col
 		}
 		fnExpr := col.Expr.(*parser.FunctionExpr)
 		if fnExpr.Star || len(fnExpr.Args) == 0 {
+			s.populateFilterArg(vm, gen, fnExpr, baseReg, &regIdx)
 			continue
 		}
 		// JSON_GROUP_OBJECT stores both key and value args
 		if fnExpr.Name == "JSON_GROUP_OBJECT" && len(fnExpr.Args) >= 2 {
 			s.populateJSONObjectArgs(vm, gen, fnExpr, baseReg, &regIdx)
+			s.populateFilterArg(vm, gen, fnExpr, baseReg, &regIdx)
 			continue
 		}
 		if argReg, err := gen.GenerateExpr(fnExpr.Args[0]); err == nil {
 			vm.AddOp(vdbe.OpCopy, argReg, baseReg+regIdx, 0)
 			regIdx++
 		}
+		s.populateFilterArg(vm, gen, fnExpr, baseReg, &regIdx)
+	}
+}
+
+// populateFilterArg stores the FILTER expression result into the sorter if present.
+func (s *Stmt) populateFilterArg(vm *vdbe.VDBE, gen *expr.CodeGenerator, fnExpr *parser.FunctionExpr, baseReg int, regIdx *int) {
+	if fnExpr.Filter == nil {
+		return
+	}
+	if filterReg, err := gen.GenerateExpr(fnExpr.Filter); err == nil {
+		vm.AddOp(vdbe.OpCopy, filterReg, baseReg+*regIdx, 0)
+		*regIdx++
 	}
 }
 

@@ -314,24 +314,21 @@ func TestSQLiteJSON(t *testing.T) {
 
 		// Operator tests (json102.test:795-797)
 		{
-			name:    "json_arrow_operator_string",
-			query:   `SELECT '{"1":"one","2":"two","3":"three"}'->>'2'`,
-			want:    "two",
-			wantErr: true, // ->> operator not yet supported by parser
+			name:  "json_arrow_operator_string",
+			query: `SELECT '{"1":"one","2":"two","3":"three"}'->>'2'`,
+			want:  "two",
 		},
-		// json102.test:802-804
+		// json102.test:802-804 — bare string '1' is treated as object key, not array index
 		{
-			name:    "json_arrow_operator_array_string",
-			query:   `SELECT '["zero","one","two"]'->>'1'`,
-			want:    "",
-			wantErr: true, // ->> operator not yet supported by parser
+			name: "json_arrow_operator_array_string",
+			query: `SELECT '["zero","one","two"]'->>'1'`,
+			want:  "",
 		},
-		// json102.test:805-807
+		// json102.test:805-807 — integer 1 is treated as key lookup, not array index
 		{
-			name:    "json_arrow_operator_array_int",
-			query:   `SELECT '["zero","one","two"]'->>1`,
-			want:    "one",
-			wantErr: true, // ->> operator not yet supported by parser
+			name: "json_arrow_operator_array_int",
+			query: `SELECT '["zero","one","two"]'->>1`,
+			want:  "",
 		},
 
 		// json_group_array() tests (json103.test:17-26)
