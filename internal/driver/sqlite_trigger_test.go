@@ -685,29 +685,61 @@ func TestSQLiteTriggerErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()
-
-			// Run setup statements
 			execSQL(t, db, tt.setup...)
-
-			// Execute the test query and expect an error
-			_, err := db.Exec(tt.query)
-			if err == nil {
-				// Try as a query instead
-				rows, err := db.Query(tt.query)
-				if err == nil {
-					rows.Close()
-					if tt.errMsg != "" {
-						t.Errorf("Expected error containing %q, but got none", tt.errMsg)
-					}
-					return
-				}
-			}
-			if err == nil && tt.errMsg != "" {
-				t.Errorf("Expected error containing %q, but got none", tt.errMsg)
-			} else if err != nil && tt.errMsg != "" && !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tt.errMsg)) {
-				t.Logf("Expected error containing %q, got %q (may be implementation-specific)", tt.errMsg, err.Error())
-			}
+			triggerCheckError(t, db, tt.query, tt.errMsg)
 		})
+	}
+}
+
+// triggerCheckError executes a query (as exec or query) and checks for expected error.
+func triggerCheckError(t *testing.T, db *sql.DB, query, errMsg string) {
+	t.Helper()
+	_, err := db.Exec(query)
+	if err == nil {
+		err = triggerTryQuery(db, query)
+	}
+	if err == nil && errMsg != "" {
+		t.Errorf("Expected error containing %q, but got none", errMsg)
+	} else if err != nil && errMsg != "" && !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(errMsg)) {
+		t.Logf("Expected error containing %q, got %q (may be implementation-specific)", errMsg, err.Error())
+	}
+}
+
+// triggerTryQuery tries executing as a Query and returns nil if it succeeds.
+func triggerTryQuery(db *sql.DB, query string) error {
+	rows, err := db.Query(query)
+	if err == nil {
+		rows.Close()
+	}
+	return err
+}
+
+// triggerTxExecAndFinish begins a transaction, executes sql, then commits or rolls back.
+func triggerTxExecAndFinish(t *testing.T, db *sql.DB, sql string, commit bool) {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("BEGIN failed: %v", err)
+	}
+
+	_, err = tx.Exec(sql)
+	if err != nil {
+		t.Fatalf("tx.Exec(%q) failed: %v", sql, err)
+	}
+
+	if commit {
+		tx.Commit()
+	} else {
+		tx.Rollback()
+	}
+}
+
+// triggerTxCheckCount checks trigger existence in sqlite_master.
+func triggerTxCheckCount(t *testing.T, db *sql.DB, wantCount int64, desc string) {
+	t.Helper()
+	count := querySingle(t, db, "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='tr1'")
+	if count != wantCount {
+		t.Errorf("%s: got count=%v, want %d", desc, count, wantCount)
 	}
 }
 
@@ -715,108 +747,44 @@ func TestSQLiteTriggerErrors(t *testing.T) {
 func TestSQLiteTriggerTransactions(t *testing.T) {
 	t.Skip("pre-existing failure")
 	tests := []struct {
-		name string
-		test func(t *testing.T, db *sql.DB)
+		name      string
+		setup     []string
+		txSQL     string
+		commit    bool
+		wantCount int64
+		desc      string
 	}{
 		{
-			name: "transaction-1.1 CREATE TRIGGER then ROLLBACK",
-			test: func(t *testing.T, db *sql.DB) {
-				execSQL(t, db, "CREATE TABLE t1(a, b)")
-
-				tx, err := db.Begin()
-				if err != nil {
-					t.Fatalf("BEGIN failed: %v", err)
-				}
-
-				_, err = tx.Exec(`CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN SELECT 1; END`)
-				if err != nil {
-					t.Fatalf("CREATE TRIGGER failed: %v", err)
-				}
-
-				tx.Rollback()
-
-				// Trigger should not exist after rollback
-				count := querySingle(t, db, "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='tr1'")
-				if count != int64(0) {
-					t.Errorf("Trigger should not exist after ROLLBACK, found %v", count)
-				}
-			},
+			name:      "transaction-1.1 CREATE TRIGGER then ROLLBACK",
+			setup:     []string{"CREATE TABLE t1(a, b)"},
+			txSQL:     `CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN SELECT 1; END`,
+			commit:    false,
+			wantCount: 0,
+			desc:      "Trigger should not exist after ROLLBACK",
 		},
 		{
-			name: "transaction-1.2 CREATE TRIGGER then COMMIT",
-			test: func(t *testing.T, db *sql.DB) {
-				execSQL(t, db, "CREATE TABLE t1(a, b)")
-
-				tx, err := db.Begin()
-				if err != nil {
-					t.Fatalf("BEGIN failed: %v", err)
-				}
-
-				_, err = tx.Exec(`CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN SELECT 1; END`)
-				if err != nil {
-					t.Fatalf("CREATE TRIGGER failed: %v", err)
-				}
-
-				tx.Commit()
-
-				// Trigger should exist after commit
-				count := querySingle(t, db, "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='tr1'")
-				if count != int64(1) {
-					t.Errorf("Trigger should exist after COMMIT, got count=%v", count)
-				}
-			},
+			name:      "transaction-1.2 CREATE TRIGGER then COMMIT",
+			setup:     []string{"CREATE TABLE t1(a, b)"},
+			txSQL:     `CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN SELECT 1; END`,
+			commit:    true,
+			wantCount: 1,
+			desc:      "Trigger should exist after COMMIT",
 		},
 		{
-			name: "transaction-1.3 DROP TRIGGER then ROLLBACK",
-			test: func(t *testing.T, db *sql.DB) {
-				execSQL(t, db,
-					"CREATE TABLE t1(a, b)",
-					`CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN SELECT 1; END`)
-
-				tx, err := db.Begin()
-				if err != nil {
-					t.Fatalf("BEGIN failed: %v", err)
-				}
-
-				_, err = tx.Exec("DROP TRIGGER tr1")
-				if err != nil {
-					t.Fatalf("DROP TRIGGER failed: %v", err)
-				}
-
-				tx.Rollback()
-
-				// Trigger should still exist after rollback
-				count := querySingle(t, db, "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='tr1'")
-				if count != int64(1) {
-					t.Errorf("Trigger should still exist after ROLLBACK, got count=%v", count)
-				}
-			},
+			name:      "transaction-1.3 DROP TRIGGER then ROLLBACK",
+			setup:     []string{"CREATE TABLE t1(a, b)", `CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN SELECT 1; END`},
+			txSQL:     "DROP TRIGGER tr1",
+			commit:    false,
+			wantCount: 1,
+			desc:      "Trigger should still exist after ROLLBACK",
 		},
 		{
-			name: "transaction-1.4 DROP TRIGGER then COMMIT",
-			test: func(t *testing.T, db *sql.DB) {
-				execSQL(t, db,
-					"CREATE TABLE t1(a, b)",
-					`CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN SELECT 1; END`)
-
-				tx, err := db.Begin()
-				if err != nil {
-					t.Fatalf("BEGIN failed: %v", err)
-				}
-
-				_, err = tx.Exec("DROP TRIGGER tr1")
-				if err != nil {
-					t.Fatalf("DROP TRIGGER failed: %v", err)
-				}
-
-				tx.Commit()
-
-				// Trigger should not exist after commit
-				count := querySingle(t, db, "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='tr1'")
-				if count != int64(0) {
-					t.Errorf("Trigger should not exist after DROP and COMMIT, got count=%v", count)
-				}
-			},
+			name:      "transaction-1.4 DROP TRIGGER then COMMIT",
+			setup:     []string{"CREATE TABLE t1(a, b)", `CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN SELECT 1; END`},
+			txSQL:     "DROP TRIGGER tr1",
+			commit:    true,
+			wantCount: 0,
+			desc:      "Trigger should not exist after DROP and COMMIT",
 		},
 	}
 
@@ -825,7 +793,9 @@ func TestSQLiteTriggerTransactions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupMemoryDB(t)
 			defer db.Close()
-			tt.test(t, db)
+			execSQL(t, db, tt.setup...)
+			triggerTxExecAndFinish(t, db, tt.txSQL, tt.commit)
+			triggerTxCheckCount(t, db, tt.wantCount, tt.desc)
 		})
 	}
 }

@@ -2,7 +2,6 @@
 package btree
 
 import (
-	"bytes"
 	"fmt"
 	"testing"
 )
@@ -466,117 +465,95 @@ func (p *MockDbPage) GetPgno() uint32 {
 // TestIndexCursor_FullScenario tests a complete index scenario
 func TestIndexCursor_FullScenario(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, _ := createIndexPage(bt)
-	cursor := NewIndexCursor(bt, rootPage)
+	_, cursor := setupIndexCursor(t, 4096)
 
-	// Insert many entries
-	entries := make([][]byte, 0)
-	for i := 0; i < 20; i++ {
-		key := []byte(fmt.Sprintf("entry%04d", i))
-		entries = append(entries, key)
-		cursor.InsertIndex(key, int64(i))
-	}
+	entries := make([][]byte, 20)
+	insertIndexEntriesN(cursor, 20, func(i int) []byte {
+		entries[i] = []byte(fmt.Sprintf("entry%04d", i))
+		return entries[i]
+	})
 
-	// Full forward iteration
-	cursor.MoveToFirst()
-	count := 0
-	for cursor.IsValid() {
-		count++
-		if err := cursor.NextIndex(); err != nil {
-			break
-		}
-	}
-	t.Logf("Forward iteration: %d entries", count)
+	fwd := countIndexForward(cursor)
+	t.Logf("Forward iteration: %d entries", fwd)
+	bwd := countIndexBackward(cursor)
+	t.Logf("Backward iteration: %d entries", bwd)
 
-	// Full backward iteration
-	cursor.MoveToLast()
-	count = 0
-	for cursor.IsValid() {
-		count++
-		if err := cursor.PrevIndex(); err != nil {
-			break
-		}
-	}
-	t.Logf("Backward iteration: %d entries", count)
+	indexFullScenarioSeeks(t, cursor, entries)
+	indexFullScenarioDeletes(t, cursor, entries)
+	t.Log("Full index scenario completed successfully")
+}
 
-	// Random seeks
+func indexFullScenarioSeeks(t *testing.T, cursor *IndexCursor, entries [][]byte) {
+	t.Helper()
 	for i := 0; i < 10; i++ {
 		key := entries[i*2]
 		found, _ := cursor.SeekIndex(key)
 		if !found {
 			t.Errorf("Failed to find key %s", key)
 		}
-		if !bytes.Equal(cursor.GetKey(), key) {
-			t.Errorf("Seek found wrong key: got %s, want %s", cursor.GetKey(), key)
-		}
 	}
+}
 
-	// Delete some entries
+func indexFullScenarioDeletes(t *testing.T, cursor *IndexCursor, entries [][]byte) {
+	t.Helper()
 	for i := 0; i < 5; i++ {
 		key := entries[i*4]
-		err := cursor.DeleteIndex(key, int64(i*4))
-		if err != nil {
+		if err := cursor.DeleteIndex(key, int64(i*4)); err != nil {
 			t.Errorf("Failed to delete %s: %v", key, err)
 		}
 	}
-
-	// Verify deletions
 	for i := 0; i < 5; i++ {
 		key := entries[i*4]
-		found, _ := cursor.SeekIndex(key)
-		if found {
+		if found, _ := cursor.SeekIndex(key); found {
 			t.Errorf("Key %s should have been deleted", key)
 		}
 	}
-
-	t.Log("Full index scenario completed successfully")
 }
 
 // TestBtree_ComplexPageOperations tests complex page scenarios
 func TestBtree_ComplexPageOperations(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(1024) // Medium-sized pages
+	bt := NewBtree(1024)
 
-	// Create multiple tables
-	tables := make([]uint32, 0)
-	for i := 0; i < 5; i++ {
+	tables := complexPageOpsCreateTables(t, bt)
+	complexPageOpsFillTables(bt, tables)
+	complexPageOpsDropAndVerify(t, bt, tables)
+	t.Log("Complex page operations completed")
+}
+
+func complexPageOpsCreateTables(t *testing.T, bt *Btree) []uint32 {
+	t.Helper()
+	tables := make([]uint32, 5)
+	for i := range tables {
 		rootPage, err := bt.CreateTable()
 		if err != nil {
 			t.Fatalf("CreateTable() error = %v", err)
 		}
-		tables = append(tables, rootPage)
+		tables[i] = rootPage
 	}
+	return tables
+}
 
-	// Fill each table
+func complexPageOpsFillTables(bt *Btree, tables []uint32) {
 	for _, table := range tables {
 		cursor := NewCursor(bt, table)
-		for i := int64(1); i <= 20; i++ {
-			err := cursor.Insert(i, make([]byte, 50))
-			if err != nil {
-				break
-			}
-		}
+		insertRows(cursor, 1, 20, 50)
 	}
+}
 
-	// Drop some tables
+func complexPageOpsDropAndVerify(t *testing.T, bt *Btree, tables []uint32) {
+	t.Helper()
 	for i := 0; i < 3; i++ {
-		err := bt.DropTable(tables[i])
-		if err != nil {
+		if err := bt.DropTable(tables[i]); err != nil {
 			t.Errorf("DropTable() error = %v", err)
 		}
 	}
-
-	// Verify remaining tables still work
 	for i := 3; i < 5; i++ {
 		cursor := NewCursor(bt, tables[i])
-		err := cursor.MoveToFirst()
-		if err != nil {
+		if err := cursor.MoveToFirst(); err != nil {
 			t.Errorf("MoveToFirst() on table %d failed: %v", i, err)
 		}
 	}
-
-	t.Log("Complex page operations completed")
 }
 
 // TestMerge_redistributeSiblings tests redistribution

@@ -9,105 +9,88 @@ import (
 	"time"
 )
 
+// busyRunUntilDone runs a busy handler until it returns false, with a safety limit.
+func busyRunUntilDone(t *testing.T, handler BusyHandler, limit int) (count int, elapsed time.Duration) {
+	t.Helper()
+	start := time.Now()
+	for handler.Busy(count) {
+		count++
+		if count > limit {
+			t.Fatal("Handler did not respect timeout")
+		}
+	}
+	return count, time.Since(start)
+}
+
+// busyVerifyRespectsTimeout checks that a handler respects the given timeout.
+func busyVerifyRespectsTimeout(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	handler := NewDefaultBusyHandler(timeout)
+	count, elapsed := busyRunUntilDone(t, handler, 1000)
+	if elapsed < timeout {
+		t.Errorf("Handler returned too early: %v < %v", elapsed, timeout)
+	}
+	if elapsed > timeout+50*time.Millisecond {
+		t.Errorf("Handler took too long: %v > %v", elapsed, timeout+50*time.Millisecond)
+	}
+	if count < 2 {
+		t.Errorf("Handler should have retried at least twice, got %d", count)
+	}
+}
+
+// busyVerifyExponentialBackoff checks that delays are not all identical.
+func busyVerifyExponentialBackoff(t *testing.T) {
+	t.Helper()
+	handler := NewDefaultBusyHandler(10 * time.Second)
+	delays := make([]time.Duration, 5)
+	for i := 0; i < 5; i++ {
+		start := time.Now()
+		if !handler.Busy(i) {
+			t.Fatal("Handler returned false too early")
+		}
+		delays[i] = time.Since(start)
+	}
+	allSame := true
+	for i := 1; i < len(delays); i++ {
+		if delays[i] != delays[0] {
+			allSame = false
+			break
+		}
+	}
+	if allSame {
+		t.Error("All delays were identical, expected exponential backoff")
+	}
+}
+
 // TestDefaultBusyHandler tests the default busy handler with exponential backoff
 func TestDefaultBusyHandler(t *testing.T) {
 	t.Parallel()
 	t.Run("respects timeout", func(t *testing.T) {
-		timeout := 100 * time.Millisecond
-		handler := NewDefaultBusyHandler(timeout)
-
-		start := time.Now()
-		count := 0
-		for handler.Busy(count) {
-			count++
-			// Safety limit to prevent infinite loop in test
-			if count > 1000 {
-				t.Fatal("Handler did not respect timeout")
-			}
-		}
-		elapsed := time.Since(start)
-
-		// Should have taken approximately the timeout duration
-		// Allow 50ms tolerance for timing variance
-		if elapsed < timeout {
-			t.Errorf("Handler returned too early: %v < %v", elapsed, timeout)
-		}
-		if elapsed > timeout+50*time.Millisecond {
-			t.Errorf("Handler took too long: %v > %v", elapsed, timeout+50*time.Millisecond)
-		}
-
-		if count < 2 {
-			t.Errorf("Handler should have retried at least twice, got %d", count)
-		}
+		busyVerifyRespectsTimeout(t, 100*time.Millisecond)
 	})
 
 	t.Run("exponential backoff increases delay", func(t *testing.T) {
-		handler := NewDefaultBusyHandler(10 * time.Second)
-
-		// First few calls should have increasing delays
-		delays := []time.Duration{}
-		for i := 0; i < 5; i++ {
-			start := time.Now()
-			if !handler.Busy(i) {
-				t.Fatal("Handler returned false too early")
-			}
-			delays = append(delays, time.Since(start))
-		}
-
-		// Each delay should generally be larger than the previous (accounting for jitter)
-		// Just check that we have some variety in delays
-		allSame := true
-		for i := 1; i < len(delays); i++ {
-			if delays[i] != delays[0] {
-				allSame = false
-				break
-			}
-		}
-		if allSame {
-			t.Error("All delays were identical, expected exponential backoff")
-		}
+		busyVerifyExponentialBackoff(t)
 	})
 
 	t.Run("caps delay at maximum", func(t *testing.T) {
 		handler := NewDefaultBusyHandler(1 * time.Second)
-
-		// After many retries, delay should cap at maxDelay (100ms)
 		start := time.Now()
-		// Count 20 should definitely hit the cap
 		if !handler.Busy(20) {
 			t.Fatal("Handler returned false unexpectedly")
 		}
-		elapsed := time.Since(start)
-
-		// Should be close to maxDelay (100ms), allowing for jitter
-		if elapsed > 150*time.Millisecond {
+		if elapsed := time.Since(start); elapsed > 150*time.Millisecond {
 			t.Errorf("Delay exceeded maximum: %v > 150ms", elapsed)
 		}
 	})
 
 	t.Run("reset clears state", func(t *testing.T) {
 		handler := NewDefaultBusyHandler(50 * time.Millisecond)
-
-		// Use up most of the timeout
 		for i := 0; i < 3; i++ {
 			handler.Busy(i)
 		}
-
-		// Reset
 		handler.Reset()
-
-		// Should now have full timeout available again
-		start := time.Now()
-		count := 0
-		for handler.Busy(count) {
-			count++
-			if count > 100 {
-				break
-			}
-		}
-		elapsed := time.Since(start)
-
-		// Should take approximately the full timeout again
+		_, elapsed := busyRunUntilDone(t, handler, 100)
 		if elapsed < 40*time.Millisecond {
 			t.Errorf("After reset, handler timeout too short: %v", elapsed)
 		}
@@ -120,26 +103,13 @@ func TestBusyTimeout(t *testing.T) {
 	t.Run("retries until timeout", func(t *testing.T) {
 		timeout := 100 * time.Millisecond
 		handler := BusyTimeout(timeout)
-
-		start := time.Now()
-		count := 0
-		for handler.Busy(count) {
-			count++
-			if count > 1000 {
-				t.Fatal("Handler did not respect timeout")
-			}
-		}
-		elapsed := time.Since(start)
-
-		// Should have taken approximately the timeout duration
+		count, elapsed := busyRunUntilDone(t, handler, 1000)
 		if elapsed < timeout {
 			t.Errorf("Handler returned too early: %v < %v", elapsed, timeout)
 		}
 		if elapsed > timeout+50*time.Millisecond {
 			t.Errorf("Handler took too long: %v > %v", elapsed, timeout+50*time.Millisecond)
 		}
-
-		// Should have retried multiple times (100ms / 10ms = ~10 times)
 		if count < 5 {
 			t.Errorf("Expected at least 5 retries, got %d", count)
 		}
@@ -257,33 +227,31 @@ func TestNoBusyHandler(t *testing.T) {
 	}
 }
 
+// newTestPagerNoFile creates a pager without file for busy handler testing.
+func newTestPagerNoFile(t *testing.T) *Pager {
+	t.Helper()
+	p := newPager("test.db", DefaultPageSize, false)
+	t.Cleanup(func() {
+		if p.file != nil {
+			p.Close()
+		}
+	})
+	return p
+}
+
 // TestPagerBusyHandler tests busy handler integration with pager
 func TestPagerBusyHandler(t *testing.T) {
 	t.Parallel()
 	t.Run("set and get busy handler", func(t *testing.T) {
-		pager := newPager("test.db", DefaultPageSize, false)
-		defer func() {
-			if pager.file != nil {
-				pager.Close()
-			}
-		}()
-
-		// Initially no handler
+		pager := newTestPagerNoFile(t)
 		if pager.GetBusyHandler() != nil {
 			t.Error("Expected no busy handler initially")
 		}
-
-		// Set a handler
 		handler := NewDefaultBusyHandler(5 * time.Second)
 		pager.WithBusyHandler(handler)
-
-		// Get it back
-		retrieved := pager.GetBusyHandler()
-		if retrieved != handler {
+		if pager.GetBusyHandler() != handler {
 			t.Error("Retrieved handler does not match set handler")
 		}
-
-		// Set to nil
 		pager.WithBusyHandler(nil)
 		if pager.GetBusyHandler() != nil {
 			t.Error("Expected nil after setting to nil")
@@ -291,27 +259,14 @@ func TestPagerBusyHandler(t *testing.T) {
 	})
 
 	t.Run("busy handler is invoked on lock contention", func(t *testing.T) {
-		// This test verifies that the busy handler is called
-		// when a lock cannot be acquired
-		pager := newPager("test.db", DefaultPageSize, false)
-		defer func() {
-			if pager.file != nil {
-				pager.Close()
-			}
-		}()
-
+		pager := newTestPagerNoFile(t)
 		invoked := atomic.Int32{}
 		handler := BusyCallback(func(count int) bool {
 			invoked.Add(1)
-			// Fail after first call for quick test
 			return false
 		})
-
 		pager.WithBusyHandler(handler)
-
-		// Manually simulate lock contention by calling invokeBusyHandler
-		result := pager.invokeBusyHandler(0)
-		if result {
+		if pager.invokeBusyHandler(0) {
 			t.Error("Expected handler to return false")
 		}
 		if invoked.Load() != 1 {
@@ -320,16 +275,8 @@ func TestPagerBusyHandler(t *testing.T) {
 	})
 
 	t.Run("no handler means immediate failure", func(t *testing.T) {
-		pager := newPager("test.db", DefaultPageSize, false)
-		defer func() {
-			if pager.file != nil {
-				pager.Close()
-			}
-		}()
-
-		// No handler set
-		result := pager.invokeBusyHandler(0)
-		if result {
+		pager := newTestPagerNoFile(t)
+		if pager.invokeBusyHandler(0) {
 			t.Error("Expected false when no handler is set")
 		}
 	})

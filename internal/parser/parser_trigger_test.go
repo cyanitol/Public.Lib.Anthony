@@ -211,79 +211,63 @@ func testParseCreateTriggerErrors(t *testing.T) {
 	runCreateTriggerErrorSubtest(t, "error - instead without OF", "CREATE TRIGGER my_trigger INSTEAD INSERT ON users BEGIN SELECT 1; END")
 }
 
+func parseDropTriggerStmt(t *testing.T, sql string) *DropTriggerStmt {
+	t.Helper()
+	parser := NewParser(sql)
+	stmts, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(stmts))
+	}
+	stmt, ok := stmts[0].(*DropTriggerStmt)
+	if !ok {
+		t.Fatalf("expected DropTriggerStmt, got %T", stmts[0])
+	}
+	return stmt
+}
+
 func TestParseDropTrigger(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-		check   func(*testing.T, *DropTriggerStmt)
-	}{
-		{
-			name: "simple drop trigger",
-			sql:  "DROP TRIGGER my_trigger",
-			check: func(t *testing.T, stmt *DropTriggerStmt) {
-				if stmt.Name != "my_trigger" {
-					t.Errorf("expected trigger name 'my_trigger', got %s", stmt.Name)
-				}
-				if stmt.IfExists {
-					t.Errorf("expected IfExists to be false")
-				}
-			},
-		},
-		{
-			name: "drop trigger if exists",
-			sql:  "DROP TRIGGER IF EXISTS my_trigger",
-			check: func(t *testing.T, stmt *DropTriggerStmt) {
-				if stmt.Name != "my_trigger" {
-					t.Errorf("expected trigger name 'my_trigger', got %s", stmt.Name)
-				}
-				if !stmt.IfExists {
-					t.Errorf("expected IfExists to be true")
-				}
-			},
-		},
-		{
-			name:    "error - missing trigger name",
-			sql:     "DROP TRIGGER",
-			wantErr: true,
-		},
-		{
-			name:    "error - if without exists",
-			sql:     "DROP TRIGGER IF my_trigger",
-			wantErr: true,
-		},
-	}
 
-	for _, tt := range tests {
+	t.Run("simple drop trigger", func(t *testing.T) {
+		t.Parallel()
+		stmt := parseDropTriggerStmt(t, "DROP TRIGGER my_trigger")
+		if stmt.Name != "my_trigger" {
+			t.Errorf("expected trigger name 'my_trigger', got %s", stmt.Name)
+		}
+		if stmt.IfExists {
+			t.Error("expected IfExists to be false")
+		}
+	})
+
+	t.Run("drop trigger if exists", func(t *testing.T) {
+		t.Parallel()
+		stmt := parseDropTriggerStmt(t, "DROP TRIGGER IF EXISTS my_trigger")
+		if stmt.Name != "my_trigger" {
+			t.Errorf("expected trigger name 'my_trigger', got %s", stmt.Name)
+		}
+		if !stmt.IfExists {
+			t.Error("expected IfExists to be true")
+		}
+	})
+
+	errorTests := []struct {
+		name string
+		sql  string
+	}{
+		{"error - missing trigger name", "DROP TRIGGER"},
+		{"error - if without exists", "DROP TRIGGER IF my_trigger"},
+	}
+	for _, tt := range errorTests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			parser := NewParser(tt.sql)
-			stmts, err := parser.Parse()
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.wantErr {
-				return
-			}
-
-			if len(stmts) != 1 {
-				t.Errorf("expected 1 statement, got %d", len(stmts))
-				return
-			}
-
-			stmt, ok := stmts[0].(*DropTriggerStmt)
-			if !ok {
-				t.Errorf("expected DropTriggerStmt, got %T", stmts[0])
-				return
-			}
-
-			if tt.check != nil {
-				tt.check(t, stmt)
+			_, err := parser.Parse()
+			if err == nil {
+				t.Error("expected error but got none")
 			}
 		})
 	}

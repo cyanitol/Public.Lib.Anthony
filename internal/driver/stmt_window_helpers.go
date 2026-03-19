@@ -302,51 +302,54 @@ func (s *Stmt) emitWindowColumn(vm *vdbe.VDBE, gen *expr.CodeGenerator, col pars
 // emitWindowFunctionColumnWithOpcodes emits code for a window function using proper opcodes
 // numTableCols is used for streaming mode to read from registers
 func (s *Stmt) emitWindowFunctionColumnWithOpcodes(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, colIdx int, numTableCols int) {
-	windowStateIdx := 0 // For now, we use window state 0 for all rank functions
+	windowStateIdx := 0
 
 	switch fnExpr.Name {
-	case "RANK":
-		// P3 = number of columns for streaming mode
-		vm.AddOp(vdbe.OpWindowRank, windowStateIdx, colIdx, numTableCols)
-	case "DENSE_RANK":
-		// P3 = number of columns for streaming mode
-		vm.AddOp(vdbe.OpWindowDenseRank, windowStateIdx, colIdx, numTableCols)
-	case "ROW_NUMBER":
-		// P3 = number of columns for streaming mode
-		vm.AddOp(vdbe.OpWindowRowNum, windowStateIdx, colIdx, numTableCols)
+	case "RANK", "DENSE_RANK", "ROW_NUMBER":
+		s.emitWindowRankFunc(vm, fnExpr.Name, windowStateIdx, colIdx, numTableCols)
 	case "NTILE":
-		// P1 = window state, P2 = output register, P3 = number of buckets
-		numBuckets := s.extractNtileArg(fnExpr)
-		vm.AddOp(vdbe.OpWindowNtile, windowStateIdx, colIdx, numBuckets)
-	case "LAG":
-		// P1 = window state, P2 = output register, P3 = column index
-		// P4.I = offset (default 1), P5 = default value register (0 = NULL)
-		colIndex, offset := s.extractLagLeadArgs(fnExpr, numTableCols)
-		addr := vm.AddOp(vdbe.OpWindowLag, windowStateIdx, colIdx, colIndex)
-		vm.Program[addr].P4.I = int32(offset)
-	case "LEAD":
-		// P1 = window state, P2 = output register, P3 = column index
-		// P4.I = offset (default 1), P5 = default value register (0 = NULL)
-		colIndex, offset := s.extractLagLeadArgs(fnExpr, numTableCols)
-		addr := vm.AddOp(vdbe.OpWindowLead, windowStateIdx, colIdx, colIndex)
-		vm.Program[addr].P4.I = int32(offset)
-	case "FIRST_VALUE":
-		// P1 = window state, P2 = output register, P3 = column index
-		colIndex := s.extractValueFunctionArg(fnExpr, numTableCols)
-		vm.AddOp(vdbe.OpWindowFirstValue, windowStateIdx, colIdx, colIndex)
-	case "LAST_VALUE":
-		// P1 = window state, P2 = output register, P3 = column index
-		colIndex := s.extractValueFunctionArg(fnExpr, numTableCols)
-		vm.AddOp(vdbe.OpWindowLastValue, windowStateIdx, colIdx, colIndex)
-	case "NTH_VALUE":
-		// P1 = window state, P2 = output register, P3 = column index
-		// P4.I = N (1-based row within frame)
-		colIndex := s.extractValueFunctionArg(fnExpr, numTableCols)
-		n := s.extractNthValueN(fnExpr)
-		addr := vm.AddOp(vdbe.OpWindowNthValue, windowStateIdx, colIdx, colIndex)
-		vm.Program[addr].P4.I = int32(n)
+		vm.AddOp(vdbe.OpWindowNtile, windowStateIdx, colIdx, s.extractNtileArg(fnExpr))
+	case "LAG", "LEAD":
+		s.emitWindowLagLead(vm, fnExpr, windowStateIdx, colIdx, numTableCols)
+	case "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE":
+		s.emitWindowValueFunc(vm, fnExpr, windowStateIdx, colIdx, numTableCols)
 	default:
 		vm.AddOp(vdbe.OpNull, 0, colIdx, 0)
+	}
+}
+
+// emitWindowRankFunc emits opcodes for RANK, DENSE_RANK, or ROW_NUMBER.
+func (s *Stmt) emitWindowRankFunc(vm *vdbe.VDBE, name string, stateIdx, colIdx, numTableCols int) {
+	opcodes := map[string]vdbe.Opcode{
+		"RANK":       vdbe.OpWindowRank,
+		"DENSE_RANK": vdbe.OpWindowDenseRank,
+		"ROW_NUMBER": vdbe.OpWindowRowNum,
+	}
+	vm.AddOp(opcodes[name], stateIdx, colIdx, numTableCols)
+}
+
+// emitWindowLagLead emits opcodes for LAG or LEAD window functions.
+func (s *Stmt) emitWindowLagLead(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, stateIdx, colIdx, numTableCols int) {
+	colIndex, offset := s.extractLagLeadArgs(fnExpr, numTableCols)
+	op := vdbe.OpWindowLag
+	if fnExpr.Name == "LEAD" {
+		op = vdbe.OpWindowLead
+	}
+	addr := vm.AddOp(op, stateIdx, colIdx, colIndex)
+	vm.Program[addr].P4.I = int32(offset)
+}
+
+// emitWindowValueFunc emits opcodes for FIRST_VALUE, LAST_VALUE, or NTH_VALUE.
+func (s *Stmt) emitWindowValueFunc(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, stateIdx, colIdx, numTableCols int) {
+	colIndex := s.extractValueFunctionArg(fnExpr, numTableCols)
+	opcodes := map[string]vdbe.Opcode{
+		"FIRST_VALUE": vdbe.OpWindowFirstValue,
+		"LAST_VALUE":  vdbe.OpWindowLastValue,
+		"NTH_VALUE":   vdbe.OpWindowNthValue,
+	}
+	addr := vm.AddOp(opcodes[fnExpr.Name], stateIdx, colIdx, colIndex)
+	if fnExpr.Name == "NTH_VALUE" {
+		vm.Program[addr].P4.I = int32(s.extractNthValueN(fnExpr))
 	}
 }
 

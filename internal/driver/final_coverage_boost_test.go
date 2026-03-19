@@ -3,14 +3,12 @@ package driver
 
 import (
 	"database/sql"
-	"os"
 	"testing"
 )
 
 // TestVacuumEdgeCases tests VACUUM statement variations
 func TestVacuumEdgeCases(t *testing.T) {
-	dbFile := "test_vacuum_edge.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_vacuum_edge.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -46,8 +44,7 @@ func TestVacuumEdgeCases(t *testing.T) {
 
 // TestCTEWithMultipleReferences tests CTE referenced multiple times
 func TestCTEWithMultipleReferences(t *testing.T) {
-	dbFile := "test_cte_multi_ref.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_cte_multi_ref.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -89,36 +86,16 @@ func TestCTEWithMultipleReferences(t *testing.T) {
 
 // TestJoinWithWhereClause tests JOIN with WHERE conditions
 func TestJoinWithWhereClause(t *testing.T) {
-	dbFile := "test_join_where.db"
-	defer os.Remove(dbFile)
+	db, cleanup := fcbOpenDB(t, t.TempDir()+"/test_join_where.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
-	defer db.Close()
+	fcbExecMany(t, db, []string{
+		"CREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER)",
+		"CREATE TABLE customers (id INTEGER, name TEXT)",
+		"INSERT INTO customers VALUES (1, 'Alice')",
+		"INSERT INTO orders VALUES (1, 1, 100)",
+	})
 
-	_, err = db.Exec("CREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE orders failed: %v", err)
-	}
-
-	_, err = db.Exec("CREATE TABLE customers (id INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE customers failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO customers VALUES (1, 'Alice')")
-	if err != nil {
-		t.Fatalf("INSERT customer failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO orders VALUES (1, 1, 100)")
-	if err != nil {
-		t.Fatalf("INSERT order failed: %v", err)
-	}
-
-	// Test JOIN with WHERE
 	query := "SELECT customers.name, orders.amount FROM customers JOIN orders ON customers.id = orders.customer_id WHERE orders.amount > 50"
 	rows, err := db.Query(query)
 	if err != nil {
@@ -139,37 +116,17 @@ func TestJoinWithWhereClause(t *testing.T) {
 
 // TestAggregateWithGroupBy tests aggregate functions with GROUP BY
 func TestAggregateWithGroupBy(t *testing.T) {
-	// GROUP BY with aggregates fixed - remove skip
-	dbFile := "test_agg_groupby.db"
-	defer os.Remove(dbFile)
+	db, cleanup := fcbOpenDB(t, t.TempDir()+"/test_agg_groupby.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
-	defer db.Close()
+	fcbExecMany(t, db, []string{
+		"CREATE TABLE sales_data (category TEXT, amount INTEGER)",
+		"INSERT INTO sales_data VALUES ('A', 100)",
+		"INSERT INTO sales_data VALUES ('A', 200)",
+		"INSERT INTO sales_data VALUES ('B', 150)",
+	})
 
-	_, err = db.Exec("CREATE TABLE sales_data (category TEXT, amount INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO sales_data VALUES ('A', 100)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-	_, err = db.Exec("INSERT INTO sales_data VALUES ('A', 200)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-	_, err = db.Exec("INSERT INTO sales_data VALUES ('B', 150)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	// Test SUM with GROUP BY
-	query := "SELECT category, SUM(amount) FROM sales_data GROUP BY category"
-	rows, err := db.Query(query)
+	rows, err := db.Query("SELECT category, SUM(amount) FROM sales_data GROUP BY category")
 	if err != nil {
 		t.Logf("GROUP BY query failed (may not be fully implemented): %v", err)
 		return
@@ -194,35 +151,17 @@ func TestAggregateWithGroupBy(t *testing.T) {
 
 // TestOrderByWithMultipleColumns tests ORDER BY with multiple columns
 func TestOrderByWithMultipleColumns(t *testing.T) {
-	dbFile := "test_orderby_multi.db"
-	defer os.Remove(dbFile)
+	db, cleanup := fcbOpenDB(t, t.TempDir()+"/test_orderby_multi.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
-	defer db.Close()
+	fcbExecMany(t, db, []string{
+		"CREATE TABLE multi_order (a INTEGER, b INTEGER)",
+		"INSERT INTO multi_order VALUES (1, 3)",
+		"INSERT INTO multi_order VALUES (2, 1)",
+		"INSERT INTO multi_order VALUES (1, 2)",
+		"INSERT INTO multi_order VALUES (2, 2)",
+	})
 
-	_, err = db.Exec("CREATE TABLE multi_order (a INTEGER, b INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	testData := []struct{ a, b int }{
-		{1, 3},
-		{2, 1},
-		{1, 2},
-		{2, 2},
-	}
-
-	for _, td := range testData {
-		_, err = db.Exec("INSERT INTO multi_order VALUES (?, ?)", td.a, td.b)
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-	}
-
-	// Test ORDER BY multiple columns
 	rows, err := db.Query("SELECT a, b FROM multi_order ORDER BY a, b")
 	if err != nil {
 		t.Logf("ORDER BY failed (may not be fully implemented): %v", err)
@@ -231,10 +170,7 @@ func TestOrderByWithMultipleColumns(t *testing.T) {
 	defer rows.Close()
 
 	expected := []struct{ a, b int }{
-		{1, 2},
-		{1, 3},
-		{2, 1},
-		{2, 2},
+		{1, 2}, {1, 3}, {2, 1}, {2, 2},
 	}
 
 	i := 0
@@ -250,8 +186,7 @@ func TestOrderByWithMultipleColumns(t *testing.T) {
 
 // TestInsertWithDefaultValues tests INSERT with column defaults
 func TestInsertWithDefaultValues(t *testing.T) {
-	dbFile := "test_insert_default.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_insert_default.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -280,8 +215,7 @@ func TestInsertWithDefaultValues(t *testing.T) {
 
 // TestUpdateWithComplexExpression tests UPDATE with expressions
 func TestUpdateWithComplexExpression(t *testing.T) {
-	dbFile := "test_update_complex.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_update_complex.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -318,8 +252,7 @@ func TestUpdateWithComplexExpression(t *testing.T) {
 
 // TestDeleteWithOrderByLimit tests DELETE with ORDER BY and LIMIT
 func TestDeleteWithOrderByLimit(t *testing.T) {
-	dbFile := "test_delete_orderby.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_delete_orderby.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -353,38 +286,38 @@ func TestDeleteWithOrderByLimit(t *testing.T) {
 	}
 }
 
+// fcbExecMany executes multiple SQL statements, fataling on error.
+func fcbExecMany(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("exec %q failed: %v", s, err)
+		}
+	}
+}
+
+// fcbOpenDB opens a temporary database file and returns db + cleanup.
+func fcbOpenDB(t *testing.T, name string) (*sql.DB, func()) {
+	t.Helper()
+	db, err := sql.Open(DriverName, name)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	return db, func() { db.Close() }
+}
+
 // TestSelectStarFromMultipleTables tests SELECT * from cross product
 func TestSelectStarFromMultipleTables(t *testing.T) {
-	dbFile := "test_star_multi.db"
-	defer os.Remove(dbFile)
+	db, cleanup := fcbOpenDB(t, t.TempDir()+"/test_star_multi.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
-	defer db.Close()
+	fcbExecMany(t, db, []string{
+		"CREATE TABLE star1 (a INTEGER)",
+		"CREATE TABLE star2 (b INTEGER)",
+		"INSERT INTO star1 VALUES (1)",
+		"INSERT INTO star2 VALUES (2)",
+	})
 
-	_, err = db.Exec("CREATE TABLE star1 (a INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE star1 failed: %v", err)
-	}
-
-	_, err = db.Exec("CREATE TABLE star2 (b INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE star2 failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO star1 VALUES (1)")
-	if err != nil {
-		t.Fatalf("INSERT star1 failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO star2 VALUES (2)")
-	if err != nil {
-		t.Fatalf("INSERT star2 failed: %v", err)
-	}
-
-	// SELECT * from multiple tables
 	rows, err := db.Query("SELECT * FROM star1, star2")
 	if err != nil {
 		t.Fatalf("SELECT * from multi-table failed: %v", err)
@@ -396,7 +329,6 @@ func TestSelectStarFromMultipleTables(t *testing.T) {
 		if err != nil {
 			t.Errorf("Columns() failed: %v", err)
 		}
-		// Should have at least 2 columns
 		if len(cols) < 2 {
 			t.Logf("Expected at least 2 columns, got %d", len(cols))
 		}
@@ -405,8 +337,7 @@ func TestSelectStarFromMultipleTables(t *testing.T) {
 
 // TestParameterizedQueries tests various parameter binding scenarios
 func TestParameterizedQueries(t *testing.T) {
-	dbFile := "test_params_varied.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_params_varied.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -452,8 +383,7 @@ func TestParameterizedQueries(t *testing.T) {
 
 // TestExpressionEvaluation tests expression compilation paths
 func TestExpressionEvaluation(t *testing.T) {
-	dbFile := "test_expr_eval.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_expr_eval.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -496,11 +426,25 @@ func TestExpressionEvaluation(t *testing.T) {
 	}
 }
 
+// countQueryRows returns the number of rows from a query.
+func countQueryRows(t *testing.T, db *sql.DB, query string) int {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query %q failed: %v", query, err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	return count
+}
+
 // TestLimitAndOffsetVariations tests LIMIT with and without OFFSET
 func TestLimitAndOffsetVariations(t *testing.T) {
 	t.Skip("LIMIT implementation incomplete")
-	dbFile := "test_limit_variations.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_limit_variations.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -514,38 +458,16 @@ func TestLimitAndOffsetVariations(t *testing.T) {
 	}
 
 	for i := 1; i <= 10; i++ {
-		_, err = db.Exec("INSERT INTO limit_test VALUES (?)", i)
-		if err != nil {
+		if _, err := db.Exec("INSERT INTO limit_test VALUES (?)", i); err != nil {
 			t.Fatalf("INSERT %d failed: %v", i, err)
 		}
 	}
 
-	// Test LIMIT only
-	rows, err := db.Query("SELECT id FROM limit_test LIMIT 3")
-	if err != nil {
-		t.Fatalf("LIMIT query failed: %v", err)
-	}
-	count := 0
-	for rows.Next() {
-		count++
-	}
-	rows.Close()
-	if count != 3 {
-		t.Errorf("LIMIT 3: expected 3 rows, got %d", count)
+	if c := countQueryRows(t, db, "SELECT id FROM limit_test LIMIT 3"); c != 3 {
+		t.Errorf("LIMIT 3: expected 3 rows, got %d", c)
 	}
 
-	// Test LIMIT with OFFSET
-	rows, err = db.Query("SELECT id FROM limit_test LIMIT 3 OFFSET 5")
-	if err != nil {
-		t.Logf("LIMIT OFFSET query failed (may not be fully implemented): %v", err)
-		return
-	}
-	count = 0
-	for rows.Next() {
-		count++
-	}
-	rows.Close()
-	if count != 3 {
-		t.Errorf("LIMIT 3 OFFSET 5: expected 3 rows, got %d", count)
+	if c := countQueryRows(t, db, "SELECT id FROM limit_test LIMIT 3 OFFSET 5"); c != 3 {
+		t.Errorf("LIMIT 3 OFFSET 5: expected 3 rows, got %d", c)
 	}
 }

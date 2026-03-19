@@ -645,6 +645,19 @@ func TestParseMultipleStatements(t *testing.T) {
 	}
 }
 
+func assertSelectClauses(t *testing.T, stmt *SelectStmt, wantCols, wantGroupBy, wantOrderBy int) {
+	t.Helper()
+	if len(stmt.Columns) != wantCols {
+		t.Errorf("expected %d columns, got %d", wantCols, len(stmt.Columns))
+	}
+	if len(stmt.GroupBy) != wantGroupBy {
+		t.Errorf("expected %d GROUP BY expressions, got %d", wantGroupBy, len(stmt.GroupBy))
+	}
+	if len(stmt.OrderBy) != wantOrderBy {
+		t.Errorf("expected %d ORDER BY term(s), got %d", wantOrderBy, len(stmt.OrderBy))
+	}
+}
+
 func TestParseComplexQuery(t *testing.T) {
 	t.Parallel()
 	sql := `
@@ -663,46 +676,18 @@ func TestParseComplexQuery(t *testing.T) {
 		LIMIT 10
 	`
 
-	parser := NewParser(sql)
-	stmts, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parse() error = %v", err)
-	}
-
-	if len(stmts) != 1 {
-		t.Errorf("expected 1 statement, got %d", len(stmts))
-	}
-
-	stmt, ok := stmts[0].(*SelectStmt)
-	if !ok {
-		t.Fatalf("expected SelectStmt, got %T", stmts[0])
-	}
-
-	// Verify statement structure
-	if len(stmt.Columns) != 4 {
-		t.Errorf("expected 4 columns, got %d", len(stmt.Columns))
-	}
+	stmt := parseSelectStmt(t, sql)
+	assertSelectClauses(t, stmt, 4, 2, 1)
 
 	if stmt.From == nil {
 		t.Error("expected FROM clause")
 	}
-
 	if stmt.Where == nil {
 		t.Error("expected WHERE clause")
 	}
-
-	if len(stmt.GroupBy) != 2 {
-		t.Errorf("expected 2 GROUP BY expressions, got %d", len(stmt.GroupBy))
-	}
-
 	if stmt.Having == nil {
 		t.Error("expected HAVING clause")
 	}
-
-	if len(stmt.OrderBy) != 1 {
-		t.Errorf("expected 1 ORDER BY term, got %d", len(stmt.OrderBy))
-	}
-
 	if stmt.Limit == nil {
 		t.Error("expected LIMIT clause")
 	}

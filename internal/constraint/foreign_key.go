@@ -435,41 +435,53 @@ func (m *ForeignKeyManager) handleDeleteConstraint(
 	// Check if child table is WITHOUT ROWID
 	childTable, ok := schemaObj.GetTable(fk.Table)
 	if ok && childTable.WithoutRowID {
-		// Use the extended interface that returns full row data
 		return m.handleDeleteConstraintWithoutRowID(fk, childTable, keyValues, refCols, values, schemaObj, rowReader, rowDeleter, rowUpdater)
 	}
 
-	// Regular table with rowids
 	referencingRows, err := m.findReferencingRowsWithAffinity(rowReader, fk, table.Name, refCols, keyValues)
 	if err != nil {
 		return fmt.Errorf("failed to check foreign key references: %w", err)
 	}
 
+	referencingRows = m.filterDeleteSelfRef(fk, referencingRows, values, refCols)
 	if len(referencingRows) == 0 {
 		return nil
 	}
 
-	// For self-referencing FKs, filter out the row being deleted if it references itself
-	if strings.EqualFold(fk.Table, fk.RefTable) && selfReferenceMatches(values, fk.Columns, refCols) {
-		referencingRows = m.filterSelfReference(referencingRows, values, refCols)
-		if len(referencingRows) == 0 {
-			return nil
-		}
-	}
-
-	// For deferred constraints with NO ACTION inside a transaction, record the
-	// violation for checking at COMMIT instead of failing immediately.
-	if fk.Deferrable == DeferrableInitiallyDeferred && m.IsInTransaction() {
-		action := fk.OnDelete
-		if action == FKActionNone || action == FKActionNoAction {
-			// Record the parent key values so validateReference can check at
-			// COMMIT whether the parent row has been reinserted.
-			m.recordDeferredViolation(fk, keyValues, fk.Table)
-			return nil
-		}
+	if m.shouldDeferDeleteViolation(fk, keyValues) {
+		return nil
 	}
 
 	return m.applyDeleteAction(fk, referencingRows, schemaObj, rowDeleter, rowUpdater, rowReader)
+}
+
+// filterDeleteSelfRef filters out self-referencing rows from referencingRows when applicable.
+func (m *ForeignKeyManager) filterDeleteSelfRef(
+	fk *ForeignKeyConstraint,
+	referencingRows []int64,
+	values map[string]interface{},
+	refCols []string,
+) []int64 {
+	if len(referencingRows) == 0 {
+		return referencingRows
+	}
+	if strings.EqualFold(fk.Table, fk.RefTable) && selfReferenceMatches(values, fk.Columns, refCols) {
+		return m.filterSelfReference(referencingRows, values, refCols)
+	}
+	return referencingRows
+}
+
+// shouldDeferDeleteViolation checks if the violation should be deferred and records it if so.
+func (m *ForeignKeyManager) shouldDeferDeleteViolation(fk *ForeignKeyConstraint, keyValues []interface{}) bool {
+	if fk.Deferrable != DeferrableInitiallyDeferred || !m.IsInTransaction() {
+		return false
+	}
+	action := fk.OnDelete
+	if action != FKActionNone && action != FKActionNoAction {
+		return false
+	}
+	m.recordDeferredViolation(fk, keyValues, fk.Table)
+	return true
 }
 
 // handleDeleteConstraintWithoutRowID handles FK constraint for WITHOUT ROWID child tables.
@@ -781,25 +793,52 @@ func applyAffinityToDefault(val interface{}, colType string) interface{} {
 	}
 	upper := strings.ToUpper(colType)
 	if strings.Contains(upper, "INT") {
-		if i, err := strconv.ParseInt(s, 10, 64); err == nil {
-			return i
-		}
+		return tryParseInt(s, val)
 	}
-	if strings.Contains(upper, "REAL") || strings.Contains(upper, "FLOA") || strings.Contains(upper, "DOUB") {
-		if f, err := strconv.ParseFloat(s, 64); err == nil {
-			return f
-		}
+	if hasRealAffinity(upper) {
+		return tryParseFloat(s, val)
 	}
-	// For NUMERIC affinity, try int first, then float
-	if strings.Contains(upper, "NUM") || strings.Contains(upper, "DEC") {
-		if i, err := strconv.ParseInt(s, 10, 64); err == nil {
-			return i
-		}
-		if f, err := strconv.ParseFloat(s, 64); err == nil {
-			return f
-		}
+	if hasNumericAffinity(upper) {
+		return tryParseNumeric(s, val)
 	}
 	return val
+}
+
+// hasRealAffinity checks if the type string indicates REAL affinity.
+func hasRealAffinity(upper string) bool {
+	return strings.Contains(upper, "REAL") || strings.Contains(upper, "FLOA") || strings.Contains(upper, "DOUB")
+}
+
+// hasNumericAffinity checks if the type string indicates NUMERIC affinity.
+func hasNumericAffinity(upper string) bool {
+	return strings.Contains(upper, "NUM") || strings.Contains(upper, "DEC")
+}
+
+// tryParseInt tries to parse a string as int64, returning fallback on failure.
+func tryParseInt(s string, fallback interface{}) interface{} {
+	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return i
+	}
+	return fallback
+}
+
+// tryParseFloat tries to parse a string as float64, returning fallback on failure.
+func tryParseFloat(s string, fallback interface{}) interface{} {
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f
+	}
+	return fallback
+}
+
+// tryParseNumeric tries to parse as int first, then float, returning fallback on failure.
+func tryParseNumeric(s string, fallback interface{}) interface{} {
+	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return i
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f
+	}
+	return fallback
 }
 
 // extractKeyValues extracts values from the given map based on column names.

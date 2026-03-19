@@ -82,10 +82,8 @@ func runExpressionIndexSubtest(t *testing.T, name, sql string, validate func(*te
 	})
 }
 
-// TestParseExpressionIndex tests parsing of expression-based indexes
-func TestParseExpressionIndex(t *testing.T) {
-	t.Parallel()
-
+func testExprIndexBasicFunctions(t *testing.T) {
+	t.Helper()
 	runExpressionIndexSubtest(t, "simple function expression - LOWER",
 		"CREATE INDEX idx ON users(LOWER(name))",
 		func(t *testing.T, stmt *CreateIndexStmt) {
@@ -109,7 +107,10 @@ func TestParseExpressionIndex(t *testing.T) {
 			validateHasExpression(t, &stmt.Columns[0])
 			validateBinaryExpr(t, stmt.Columns[0].Expr, OpPlus)
 		})
+}
 
+func testExprIndexMultiColumn(t *testing.T) {
+	t.Helper()
 	runExpressionIndexSubtest(t, "multiple expressions",
 		"CREATE INDEX idx ON people(LOWER(last_name), LOWER(first_name))",
 		func(t *testing.T, stmt *CreateIndexStmt) {
@@ -128,7 +129,10 @@ func TestParseExpressionIndex(t *testing.T) {
 				t.Errorf("Second column should be 'age', got '%s'", stmt.Columns[1].Column)
 			}
 		})
+}
 
+func testExprIndexAdvanced(t *testing.T) {
+	t.Helper()
 	runExpressionIndexSubtest(t, "expression with DESC",
 		"CREATE INDEX idx ON users(LOWER(name) DESC)",
 		func(t *testing.T, stmt *CreateIndexStmt) {
@@ -144,31 +148,23 @@ func TestParseExpressionIndex(t *testing.T) {
 		func(t *testing.T, stmt *CreateIndexStmt) {
 			validateColumnCount(t, stmt, 1)
 			validateHasExpression(t, &stmt.Columns[0])
-			call, ok := stmt.Columns[0].Expr.(*FunctionExpr)
-			if !ok {
-				return
-			}
-			if call.Name != "LOWER" {
-				t.Errorf("Expected LOWER function, got %s", call.Name)
-			}
-			if len(call.Args) != 1 {
-				t.Errorf("Expected 1 argument, got %d", len(call.Args))
-			}
+			validateFunctionExpr(t, stmt.Columns[0].Expr, "LOWER")
 		})
 
-	runExpressionIndexSubtest(t, "string concatenation",
-		"CREATE INDEX idx ON names(last || ', ' || first)",
-		func(t *testing.T, stmt *CreateIndexStmt) {
+	// Simple expression-only tests
+	simpleExprTests := []struct {
+		name string
+		sql  string
+	}{
+		{"string concatenation", "CREATE INDEX idx ON names(last || ', ' || first)"},
+		{"CAST expression", "CREATE INDEX idx ON data(CAST(text_num AS INTEGER))"},
+	}
+	for _, tt := range simpleExprTests {
+		runExpressionIndexSubtest(t, tt.name, tt.sql, func(t *testing.T, stmt *CreateIndexStmt) {
 			validateColumnCount(t, stmt, 1)
 			validateHasExpression(t, &stmt.Columns[0])
 		})
-
-	runExpressionIndexSubtest(t, "CAST expression",
-		"CREATE INDEX idx ON data(CAST(text_num AS INTEGER))",
-		func(t *testing.T, stmt *CreateIndexStmt) {
-			validateColumnCount(t, stmt, 1)
-			validateHasExpression(t, &stmt.Columns[0])
-		})
+	}
 
 	runExpressionIndexSubtest(t, "SUBSTR function",
 		"CREATE INDEX idx ON codes(SUBSTR(code, 1, 3))",
@@ -205,6 +201,14 @@ func TestParseExpressionIndex(t *testing.T) {
 			}
 			validateHasExpression(t, &stmt.Columns[0])
 		})
+}
+
+// TestParseExpressionIndex tests parsing of expression-based indexes
+func TestParseExpressionIndex(t *testing.T) {
+	t.Parallel()
+	testExprIndexBasicFunctions(t)
+	testExprIndexMultiColumn(t)
+	testExprIndexAdvanced(t)
 }
 
 // TestExpressionIndexNameExtraction tests the extractExpressionName helper

@@ -4,7 +4,6 @@ package driver
 import (
 	"context"
 	"database/sql/driver"
-	"os"
 	"testing"
 )
 
@@ -34,8 +33,7 @@ func TestPrepareContextErrors(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			dbFile := "test_prepare_" + tt.name + ".db"
-			defer os.Remove(dbFile)
+			dbFile := t.TempDir() + "/test_prepare_" + tt.name + ".db"
 
 			d := &Driver{}
 			conn, err := d.Open(dbFile)
@@ -55,8 +53,7 @@ func TestPrepareContextErrors(t *testing.T) {
 }
 
 func TestPrepareContextOnClosedConn(t *testing.T) {
-	dbFile := "test_prepare_closed.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_prepare_closed.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -79,8 +76,7 @@ func TestPrepareContextOnClosedConn(t *testing.T) {
 }
 
 func TestCloseWithStatements(t *testing.T) {
-	dbFile := "test_close_with_stmts.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_close_with_stmts.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -119,8 +115,7 @@ func TestCloseWithStatements(t *testing.T) {
 }
 
 func TestCloseWithActiveTransaction(t *testing.T) {
-	dbFile := "test_close_with_tx.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_close_with_tx.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -152,8 +147,7 @@ func TestCloseWithActiveTransaction(t *testing.T) {
 }
 
 func TestCloseIdempotent(t *testing.T) {
-	dbFile := "test_close_idempotent.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_close_idempotent.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -175,8 +169,7 @@ func TestCloseIdempotent(t *testing.T) {
 }
 
 func TestPingOnClosedConnection(t *testing.T) {
-	dbFile := "test_ping_closed.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_ping_closed.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -198,8 +191,7 @@ func TestPingOnClosedConnection(t *testing.T) {
 }
 
 func TestResetSession(t *testing.T) {
-	dbFile := "test_reset_session.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_reset_session.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -217,8 +209,7 @@ func TestResetSession(t *testing.T) {
 }
 
 func TestResetSessionWithActiveTransaction(t *testing.T) {
-	dbFile := "test_reset_session_tx.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_reset_session_tx.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -243,8 +234,7 @@ func TestResetSessionWithActiveTransaction(t *testing.T) {
 }
 
 func TestResetSessionOnClosedConnection(t *testing.T) {
-	dbFile := "test_reset_session_closed.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_reset_session_closed.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -266,8 +256,7 @@ func TestResetSessionOnClosedConnection(t *testing.T) {
 }
 
 func TestCheckNamedValue(t *testing.T) {
-	dbFile := "test_check_named_value.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_check_named_value.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -290,8 +279,7 @@ func TestCheckNamedValue(t *testing.T) {
 }
 
 func TestCreateScalarFunctionOnClosedConn(t *testing.T) {
-	dbFile := "test_scalar_func_closed.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_scalar_func_closed.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -314,8 +302,7 @@ func TestCreateScalarFunctionOnClosedConn(t *testing.T) {
 }
 
 func TestCreateAggregateFunctionOnClosedConn(t *testing.T) {
-	dbFile := "test_agg_func_closed.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_agg_func_closed.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -338,8 +325,7 @@ func TestCreateAggregateFunctionOnClosedConn(t *testing.T) {
 }
 
 func TestUnregisterFunctionOnClosedConn(t *testing.T) {
-	dbFile := "test_unreg_func_closed.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_unreg_func_closed.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -361,8 +347,7 @@ func TestUnregisterFunctionOnClosedConn(t *testing.T) {
 }
 
 func TestBeginTxOnClosedConnection(t *testing.T) {
-	dbFile := "test_begintx_closed.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_begintx_closed.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)

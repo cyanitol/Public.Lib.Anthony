@@ -50,54 +50,37 @@ func TestPagerReadPageCoverage(t *testing.T) {
 	}
 }
 
-// TestPagerWritePageCoverage tests writePage function coverage
-func TestPagerWritePageCoverage(t *testing.T) {
-	t.Parallel()
-	dbFile := filepath.Join(t.TempDir(), "test_write_page.db")
-
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Create multiple pages
-	for i := Pgno(1); i <= 5; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
+// writeMultiplePagesWithData writes pages 1..n with byte(i) data.
+func writeMultiplePagesWithData(t *testing.T, p *Pager, n Pgno) {
+	t.Helper()
+	for i := Pgno(1); i <= n; i++ {
+		page := mustGetWritePage(t, p, i)
 		data := []byte{byte(i)}
 		if i == 1 {
 			copy(page.Data[DatabaseHeaderSize:], data)
 		} else {
 			copy(page.Data[:], data)
 		}
-		pager.Put(page)
+		p.Put(page)
 	}
+}
 
-	// Commit and verify all pages were written
-	if err := pager.Commit(); err != nil {
-		t.Errorf("Commit() error = %v", err)
-	}
+// TestPagerWritePageCoverage tests writePage function coverage
+func TestPagerWritePageCoverage(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_write_page.db")
 
-	// Reopen and verify
-	pager.Close()
-	pager2, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to reopen: %v", err)
-	}
-	defer pager2.Close()
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	writeMultiplePagesWithData(t, p, 5)
+	mustCommit(t, p)
+	p.Close()
+
+	p2 := mustOpenPagerSized(t, dbFile, 4096)
+	defer p2.Close()
 
 	for i := Pgno(1); i <= 5; i++ {
-		page, err := pager2.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d after reopen: %v", i, err)
-		}
-		pager2.Put(page)
+		page := mustGetPage(t, p2, i)
+		p2.Put(page)
 	}
 }
 
@@ -236,55 +219,10 @@ func TestRollbackJournalCoverage(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_rollback_journal.db")
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-	defer pager.Close()
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	defer p.Close()
 
-	// Write initial data
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	originalData := []byte("original data")
-	copy(page.Data[DatabaseHeaderSize:], originalData)
-	pager.Put(page)
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit() error = %v", err)
-	}
-
-	// Start new transaction and modify
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	modifiedData := []byte("modified data")
-	copy(page.Data[DatabaseHeaderSize:], modifiedData)
-	pager.Put(page)
-
-	// Rollback
-	if err := pager.Rollback(); err != nil {
-		t.Errorf("Rollback() error = %v", err)
-	}
-
-	// Verify data was restored
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page after rollback: %v", err)
-	}
-	defer pager.Put(page)
-
-	if !bytes.Equal(page.Data[DatabaseHeaderSize:DatabaseHeaderSize+len(originalData)], originalData) {
-		t.Error("data not restored correctly after rollback")
-	}
+	mustPagerWriteCommitRollbackVerify(t, p, []byte("original data"), []byte("modified data"))
 }
 
 // TestFinalizeJournalCoverage tests finalizeJournal coverage

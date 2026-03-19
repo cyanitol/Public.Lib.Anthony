@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"os"
 	"testing"
 )
 
@@ -151,8 +150,7 @@ func TestTxRollbackError(t *testing.T) {
 
 // TestOpenDatabaseNewDB tests openDatabase with 75.0% coverage
 func TestOpenDatabaseNewDB(t *testing.T) {
-	dbFile := "test_open_new.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_open_new.db"
 
 	// Open a new database file
 	db, err := sql.Open(DriverName, dbFile)

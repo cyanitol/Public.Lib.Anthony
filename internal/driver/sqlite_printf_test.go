@@ -412,39 +412,59 @@ func TestSQLitePrintf(t *testing.T) {
 			if err != nil {
 				t.Fatalf("query failed: %v", err)
 			}
-
-			// Convert result to appropriate type for comparison
-			switch expected := tt.want.(type) {
-			case string:
-				var got string
-				if b, ok := result.([]byte); ok {
-					got = string(b)
-				} else if s, ok := result.(string); ok {
-					got = s
-				} else {
-					t.Fatalf("expected string, got %T: %v", result, result)
-				}
-				if got != expected {
-					t.Errorf("expected %q, got %q", expected, got)
-				}
-			case int64:
-				var got int64
-				if i, ok := result.(int64); ok {
-					got = i
-				} else if f, ok := result.(float64); ok {
-					got = int64(f)
-				} else {
-					t.Fatalf("expected int64, got %T: %v", result, result)
-				}
-				if got != expected {
-					t.Errorf("expected %d, got %d", expected, got)
-				}
-			default:
-				if result != tt.want {
-					t.Errorf("expected %v, got %v", tt.want, result)
-				}
-			}
+			printfCompareResult(t, result, tt.want)
 		})
+	}
+}
+
+// printfCompareResult compares a query result against an expected value with type conversion.
+func printfCompareResult(t *testing.T, result, want interface{}) {
+	t.Helper()
+	switch expected := want.(type) {
+	case string:
+		printfCompareString(t, result, expected)
+	case int64:
+		printfCompareInt64(t, result, expected)
+	default:
+		if result != want {
+			t.Errorf("expected %v, got %v", want, result)
+		}
+	}
+}
+
+// printfCompareString compares result to expected string.
+func printfCompareString(t *testing.T, result interface{}, expected string) {
+	t.Helper()
+	var got string
+	switch v := result.(type) {
+	case []byte:
+		got = string(v)
+	case string:
+		got = v
+	default:
+		t.Fatalf("expected string, got %T: %v", result, result)
+		return
+	}
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
+	}
+}
+
+// printfCompareInt64 compares result to expected int64.
+func printfCompareInt64(t *testing.T, result interface{}, expected int64) {
+	t.Helper()
+	var got int64
+	switch v := result.(type) {
+	case int64:
+		got = v
+	case float64:
+		got = int64(v)
+	default:
+		t.Fatalf("expected int64, got %T: %v", result, result)
+		return
+	}
+	if got != expected {
+		t.Errorf("expected %d, got %d", expected, got)
 	}
 }
 
@@ -488,34 +508,35 @@ func TestPrintfWithTable(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			rows, err := db.Query(tt.expr)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-
-			var results []string
-			for rows.Next() {
-				var result string
-				if err := rows.Scan(&result); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				results = append(results, result)
-			}
-
-			if len(results) != len(tt.want) {
-				t.Errorf("expected %d rows, got %d", len(tt.want), len(results))
-			}
-
-			for i, want := range tt.want {
-				if i >= len(results) {
-					break
-				}
-				if results[i] != want {
-					t.Errorf("row %d: expected %q, got %q", i, want, results[i])
-				}
-			}
+			printfTableCheck(t, db, tt.expr, tt.want)
 		})
+	}
+}
+
+// printfTableCheck queries multiple rows and compares string results.
+func printfTableCheck(t *testing.T, db *sql.DB, expr string, want []string) {
+	t.Helper()
+	rows, err := db.Query(expr)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+
+	var results []string
+	for rows.Next() {
+		var result string
+		if err := rows.Scan(&result); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		results = append(results, result)
+	}
+	if len(results) != len(want) {
+		t.Errorf("expected %d rows, got %d", len(want), len(results))
+	}
+	for i := range want {
+		if i < len(results) && results[i] != want[i] {
+			t.Errorf("row %d: expected %q, got %q", i, want[i], results[i])
+		}
 	}
 }
 
@@ -562,29 +583,26 @@ func TestPrintfNullHandling(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			var result interface{}
-			err := db.QueryRow(tt.expr).Scan(&result)
-			if err != nil && err != sql.ErrNoRows {
-				t.Fatalf("query failed: %v", err)
-			}
-
-			if tt.wantNil {
-				if result != nil && err != sql.ErrNoRows {
-					t.Errorf("expected nil, got %v", result)
-				}
-			} else if tt.want != nil {
-				var got string
-				if b, ok := result.([]byte); ok {
-					got = string(b)
-				} else if s, ok := result.(string); ok {
-					got = s
-				} else {
-					t.Fatalf("expected string, got %T: %v", result, result)
-				}
-				if got != tt.want.(string) {
-					t.Errorf("expected %q, got %q", tt.want, got)
-				}
-			}
+			printfNullCheck(t, db, tt.expr, tt.want, tt.wantNil)
 		})
+	}
+}
+
+// printfNullCheck evaluates an expression and checks for NULL or string result.
+func printfNullCheck(t *testing.T, db *sql.DB, expr string, want interface{}, wantNil bool) {
+	t.Helper()
+	var result interface{}
+	err := db.QueryRow(expr).Scan(&result)
+	if err != nil && err != sql.ErrNoRows {
+		t.Fatalf("query failed: %v", err)
+	}
+	if wantNil {
+		if result != nil && err != sql.ErrNoRows {
+			t.Errorf("expected nil, got %v", result)
+		}
+		return
+	}
+	if want != nil {
+		printfCompareString(t, result, want.(string))
 	}
 }

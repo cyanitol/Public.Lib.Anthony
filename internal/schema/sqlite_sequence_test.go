@@ -344,60 +344,44 @@ func TestValidateAutoincrementColumn(t *testing.T) {
 	}
 }
 
+// assertAutoincRowid calls GenerateAutoincrementRowid and checks the result.
+func assertAutoincRowid(t *testing.T, sm *SequenceManager, table string, explicit int64, hasExplicit bool, currentMax int64, want int64) {
+	t.Helper()
+	rowid, err := GenerateAutoincrementRowid(sm, table, explicit, hasExplicit, currentMax)
+	if err != nil {
+		t.Fatalf("GenerateAutoincrementRowid() error = %v", err)
+	}
+	if rowid != want {
+		t.Errorf("GenerateAutoincrementRowid() = %d, want %d", rowid, want)
+	}
+}
+
 func TestGenerateAutoincrementRowid(t *testing.T) {
 	t.Parallel()
 	sm := NewSequenceManager()
 
-	// No explicit rowid - should generate next sequence
-	rowid, err := GenerateAutoincrementRowid(sm, "users", 0, false, 0)
-	if err != nil {
-		t.Fatalf("GenerateAutoincrementRowid() error = %v", err)
-	}
-	if rowid != 1 {
-		t.Errorf("GenerateAutoincrementRowid() = %d, want 1", rowid)
-	}
+	t.Run("auto_generate_first", func(t *testing.T) {
+		assertAutoincRowid(t, sm, "users", 0, false, 0, 1)
+	})
 
-	// Explicit rowid provided
-	rowid, err = GenerateAutoincrementRowid(sm, "users", 10, true, 1)
-	if err != nil {
-		t.Fatalf("GenerateAutoincrementRowid() error = %v", err)
-	}
-	if rowid != 10 {
-		t.Errorf("GenerateAutoincrementRowid() with explicit rowid = %d, want 10", rowid)
-	}
+	t.Run("explicit_rowid", func(t *testing.T) {
+		assertAutoincRowid(t, sm, "users", 10, true, 1, 10)
+		if val := sm.GetSequence("users"); val != 10 {
+			t.Errorf("Sequence value = %d, want 10", val)
+		}
+	})
 
-	// Sequence should be updated to 10
-	val := sm.GetSequence("users")
-	if val != 10 {
-		t.Errorf("Sequence value = %d, want 10", val)
-	}
+	t.Run("next_after_explicit", func(t *testing.T) {
+		assertAutoincRowid(t, sm, "users", 0, false, 10, 11)
+	})
 
-	// Next auto-generated should be 11
-	rowid, err = GenerateAutoincrementRowid(sm, "users", 0, false, 10)
-	if err != nil {
-		t.Fatalf("GenerateAutoincrementRowid() error = %v", err)
-	}
-	if rowid != 11 {
-		t.Errorf("GenerateAutoincrementRowid() = %d, want 11", rowid)
-	}
+	t.Run("explicit_zero_as_null", func(t *testing.T) {
+		assertAutoincRowid(t, sm, "users", 0, true, 11, 12)
+	})
 
-	// Explicit rowid = 0 should be treated as NULL
-	rowid, err = GenerateAutoincrementRowid(sm, "users", 0, true, 11)
-	if err != nil {
-		t.Fatalf("GenerateAutoincrementRowid() error = %v", err)
-	}
-	if rowid != 12 {
-		t.Errorf("GenerateAutoincrementRowid() with explicit 0 = %d, want 12", rowid)
-	}
-
-	// Higher currentMaxRowid
-	rowid, err = GenerateAutoincrementRowid(sm, "orders", 0, false, 100)
-	if err != nil {
-		t.Fatalf("GenerateAutoincrementRowid() error = %v", err)
-	}
-	if rowid != 101 {
-		t.Errorf("GenerateAutoincrementRowid() with high currentMaxRowid = %d, want 101", rowid)
-	}
+	t.Run("high_current_max", func(t *testing.T) {
+		assertAutoincRowid(t, sm, "orders", 0, false, 100, 101)
+	})
 }
 
 func TestConcurrentSequenceAccess(t *testing.T) {

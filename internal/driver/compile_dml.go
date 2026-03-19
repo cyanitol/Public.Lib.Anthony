@@ -57,11 +57,43 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 
 // compileInsertValues compiles a regular INSERT...VALUES statement.
 func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	expandedValues, err := s.validateAndExpandInsertValues(stmt, table)
+	if err != nil {
+		return nil, err
+	}
+
+	allColNames := allTableColumnNames(table)
+	rowidColIdx := findInsertRowidCol(allColNames, table)
+	numRecordCols := insertRecordColCount(expandedValues[0], table, rowidColIdx)
+
+	const rowidReg = 1
+	const recordStartReg = 2
+	gen := s.initInsertVDBE(vm, numRecordCols, recordStartReg, args)
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpOpenWrite, 0, int(table.RootPage), len(table.Columns))
+
+	paramIdx := 0
+	conflictMode := getConflictMode(stmt.OnConflict)
+	hasTriggers := s.tableHasTriggers(stmt.Table)
+
+	for _, row := range expandedValues {
+		s.emitInsertValueRow(vm, stmt, table, row, allColNames, rowidColIdx,
+			rowidReg, recordStartReg, numRecordCols, conflictMode, hasTriggers, args, &paramIdx, gen)
+	}
+
+	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
+// validateAndExpandInsertValues validates the INSERT statement and expands defaults.
+func (s *Stmt) validateAndExpandInsertValues(stmt *parser.InsertStmt, table *schema.Table) ([][]parser.Expression, error) {
 	if len(stmt.Values) == 0 {
 		return nil, fmt.Errorf("INSERT requires VALUES clause")
 	}
 
-	// Validate explicit column list count matches each VALUES row.
 	if len(stmt.Columns) > 0 {
 		for _, row := range stmt.Values {
 			if len(row) != len(stmt.Columns) {
@@ -70,35 +102,27 @@ func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table
 		}
 	}
 
-	// Expand partial column lists to include all columns with defaults.
 	expandedValues := expandInsertDefaults(stmt, table)
-
-	// Validate that each row has the correct number of values.
 	numCols := len(table.Columns)
 	for _, row := range expandedValues {
 		if len(row) != numCols {
 			return nil, fmt.Errorf("table %s has %d columns but %d values were supplied", table.Name, numCols, len(row))
 		}
 	}
+	return expandedValues, nil
+}
 
-	// Use first row to determine structure
-	firstRow := expandedValues[0]
-	allColNames := allTableColumnNames(table)
-	rowidColIdx := findInsertRowidCol(allColNames, table)
-
-	// For WITHOUT ROWID tables, all columns go in the record
-	// For normal tables, only non-rowid columns go in the record
+// insertRecordColCount returns the number of columns in the record portion of an INSERT.
+func insertRecordColCount(firstRow []parser.Expression, table *schema.Table, rowidColIdx int) int {
 	numRecordCols := len(firstRow)
 	if !table.WithoutRowID && rowidColIdx >= 0 {
 		numRecordCols--
 	}
+	return numRecordCols
+}
 
-	// Register layout:
-	//   reg 1         - rowid  (P3=0 is special in OpInsert, so start at 1)
-	//   reg 2..N+1    - record column values (non-rowid only for normal tables, all for WITHOUT ROWID)
-	//   reg N+2       - assembled record
-	const rowidReg = 1
-	const recordStartReg = 2
+// initInsertVDBE initializes the VDBE and code generator for INSERT compilation.
+func (s *Stmt) initInsertVDBE(vm *vdbe.VDBE, numRecordCols, recordStartReg int, args []driver.NamedValue) *expr.CodeGenerator {
 	vm.AllocMemory(numRecordCols + 10)
 	vm.AllocCursors(1)
 
@@ -111,57 +135,40 @@ func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table
 		}
 		gen.SetArgs(argValues)
 	}
+	return gen
+}
 
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpOpenWrite, 0, int(table.RootPage), len(table.Columns))
+// emitInsertValueRow emits bytecode for a single INSERT VALUES row.
+func (s *Stmt) emitInsertValueRow(vm *vdbe.VDBE, stmt *parser.InsertStmt, table *schema.Table,
+	row []parser.Expression, allColNames []string, rowidColIdx, rowidReg, recordStartReg, numRecordCols int,
+	conflictMode int32, hasTriggers bool, args []driver.NamedValue, paramIdx *int, gen *expr.CodeGenerator) {
 
-	paramIdx := 0
+	if !table.WithoutRowID {
+		s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, paramIdx, gen)
+	}
+	s.emitInsertRecordValues(vm, table, allColNames, row, rowidColIdx, recordStartReg, args, paramIdx, gen)
 
-	// Determine conflict resolution mode for INSERT OR IGNORE/REPLACE
-	conflictMode := getConflictMode(stmt.OnConflict)
-
-	hasTriggers := s.tableHasTriggers(stmt.Table)
-
-	// Loop over all rows in VALUES clause
-	for _, row := range expandedValues {
-		// Populate registers with row values first (needed for trigger NEW row)
-		if !table.WithoutRowID {
-			s.emitInsertRowid(vm, table, row, rowidColIdx, rowidReg, args, &paramIdx, gen)
-		}
-		s.emitInsertRecordValues(vm, table, allColNames, row, rowidColIdx, recordStartReg, args, &paramIdx, gen)
-
-		// Emit BEFORE INSERT trigger after values are in registers
-		// P3=recordStartReg so VDBE can build NEW row from registers
-		var beforeAddr int
-		if hasTriggers {
-			beforeAddr = vm.AddOp(vdbe.OpTriggerBefore, 0, 0, recordStartReg)
-			vm.Program[beforeAddr].P4.Z = stmt.Table
-		}
-
-		// Make record and insert
-		resultReg := recordStartReg + numRecordCols
-		vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
-		rowidRegToUse := rowidReg
-		if table.WithoutRowID {
-			rowidRegToUse = 0
-		}
-		insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidRegToUse)
-		vm.Program[insertOp].P4.I = conflictMode
-		vm.Program[insertOp].P4.Z = table.Name
-
-		// Emit AFTER INSERT trigger
-		if hasTriggers {
-			afterAddr := vm.AddOp(vdbe.OpTriggerAfter, 0, 0, recordStartReg)
-			vm.Program[afterAddr].P4.Z = stmt.Table
-			// Fix BEFORE trigger skip address (for RAISE(IGNORE))
-			vm.Program[beforeAddr].P2 = vm.NumOps()
-		}
+	var beforeAddr int
+	if hasTriggers {
+		beforeAddr = vm.AddOp(vdbe.OpTriggerBefore, 0, 0, recordStartReg)
+		vm.Program[beforeAddr].P4.Z = stmt.Table
 	}
 
-	vm.AddOp(vdbe.OpClose, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	resultReg := recordStartReg + numRecordCols
+	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
+	rowidRegToUse := rowidReg
+	if table.WithoutRowID {
+		rowidRegToUse = 0
+	}
+	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidRegToUse)
+	vm.Program[insertOp].P4.I = conflictMode
+	vm.Program[insertOp].P4.Z = table.Name
 
-	return vm, nil
+	if hasTriggers {
+		afterAddr := vm.AddOp(vdbe.OpTriggerAfter, 0, 0, recordStartReg)
+		vm.Program[afterAddr].P4.Z = stmt.Table
+		vm.Program[beforeAddr].P2 = vm.NumOps()
+	}
 }
 
 // emitInsertRow emits bytecode for inserting a single row.

@@ -406,53 +406,72 @@ func TestSQLitePragma(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			// Cleanup
-			_, _ = db.Exec("DROP TABLE IF EXISTS t1")
-			_, _ = db.Exec("DROP TABLE IF EXISTS parent")
-			_, _ = db.Exec("DROP TABLE IF EXISTS child")
-			_, _ = db.Exec("DROP INDEX IF EXISTS i1")
-			_, _ = db.Exec("DROP INDEX IF EXISTS i2")
-
-			// Run setup
-			for _, stmt := range tt.setup {
-				_, err := db.Exec(stmt)
-				if err != nil {
-					t.Logf("setup failed (may be ok): %v", err)
-				}
-			}
-
-			// Execute query
-			rows, err := db.Query(tt.query)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got nil")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			defer rows.Close()
-
-			// Count rows
-			count := 0
-			for rows.Next() {
-				count++
-			}
-
-			if err := rows.Err(); err != nil {
-				t.Errorf("row iteration error: %v", err)
-			}
-
-			// Validate row count
-			if !tt.skipValidate {
-				if tt.wantRows >= 0 && count != tt.wantRows {
-					t.Errorf("got %d rows, want %d", count, tt.wantRows)
-				}
-			}
+			pragmaCleanup(db)
+			pragmaRunSetup(t, db, tt.setup)
+			pragmaRunAndCheck(t, db, tt.query, tt.wantErr, tt.wantRows, tt.skipValidate)
 		})
 	}
+}
+
+// pragmaCleanup drops common test objects.
+func pragmaCleanup(db *sql.DB) {
+	_, _ = db.Exec("DROP TABLE IF EXISTS t1")
+	_, _ = db.Exec("DROP TABLE IF EXISTS parent")
+	_, _ = db.Exec("DROP TABLE IF EXISTS child")
+	_, _ = db.Exec("DROP INDEX IF EXISTS i1")
+	_, _ = db.Exec("DROP INDEX IF EXISTS i2")
+}
+
+// pragmaRunSetup executes setup statements.
+func pragmaRunSetup(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Logf("setup failed (may be ok): %v", err)
+		}
+	}
+}
+
+// pragmaRunAndCheck executes a pragma query and validates row count.
+func pragmaRunAndCheck(t *testing.T, db *sql.DB, query string, wantErr bool, wantRows int, skipValidate bool) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if wantErr {
+		if err == nil {
+			t.Errorf("expected error, got nil")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Errorf("row iteration error: %v", err)
+	}
+	if !skipValidate && wantRows >= 0 && count != wantRows {
+		t.Errorf("got %d rows, want %d", count, wantRows)
+	}
+}
+
+// pragmaCountRows counts rows returned by a query.
+func pragmaCountRows(t *testing.T, db *sql.DB, query string) int {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	return count
 }
 
 // TestPragmaSchemaQueries tests schema introspection pragmas
@@ -467,7 +486,6 @@ func TestPragmaSchemaQueries(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create test schema
 	_, err = db.Exec(`
 		CREATE TABLE users(
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -484,64 +502,20 @@ func TestPragmaSchemaQueries(t *testing.T) {
 	}
 
 	t.Run("table_info", func(t *testing.T) {
-		rows, err := db.Query("PRAGMA table_info(users)")
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		defer rows.Close()
-
-		count := 0
-		for rows.Next() {
-			var cid int
-			var name, ctype string
-			var notnull, pk int
-			var dfltValue sql.NullString
-
-			err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk)
-			if err != nil {
-				t.Fatalf("scan failed: %v", err)
-			}
-			count++
-		}
-
-		if count != 5 {
-			t.Errorf("expected 5 columns, got %d", count)
+		if c := pragmaCountRows(t, db, "PRAGMA table_info(users)"); c != 5 {
+			t.Errorf("expected 5 columns, got %d", c)
 		}
 	})
 
 	t.Run("index_list", func(t *testing.T) {
-		rows, err := db.Query("PRAGMA index_list(users)")
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		defer rows.Close()
-
-		count := 0
-		for rows.Next() {
-			count++
-		}
-
-		// At least 2 indexes (idx_users_name, idx_users_email)
-		// May have more due to UNIQUE constraint
-		if count < 2 {
-			t.Errorf("expected at least 2 indexes, got %d", count)
+		if c := pragmaCountRows(t, db, "PRAGMA index_list(users)"); c < 2 {
+			t.Errorf("expected at least 2 indexes, got %d", c)
 		}
 	})
 
 	t.Run("index_info", func(t *testing.T) {
-		rows, err := db.Query("PRAGMA index_info(idx_users_name)")
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		defer rows.Close()
-
-		count := 0
-		for rows.Next() {
-			count++
-		}
-
-		if count != 1 {
-			t.Errorf("expected 1 column in index, got %d", count)
+		if c := pragmaCountRows(t, db, "PRAGMA index_info(idx_users_name)"); c != 1 {
+			t.Errorf("expected 1 column in index, got %d", c)
 		}
 	})
 }

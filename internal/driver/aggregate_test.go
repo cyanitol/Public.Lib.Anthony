@@ -3,66 +3,56 @@ package driver
 
 import (
 	"database/sql"
-	"os"
 	"testing"
 )
 
-// TestAggregateCountStar tests COUNT(*) functionality
-func TestAggregateCountStar(t *testing.T) {
-	t.Parallel()
-	dbFile := "test_count_star.db"
-	defer os.Remove(dbFile)
-
+// aggOpenAndPopulate opens a DB, creates table, inserts rows, and returns DB.
+func aggOpenAndPopulate(t *testing.T, dbFile, table string, cols string, rows []string) *sql.DB {
+	t.Helper()
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
-
-	// Create and populate table
-	_, err = db.Exec("CREATE TABLE items (id INTEGER, value INTEGER)")
-	if err != nil {
+	if _, err = db.Exec("CREATE TABLE " + table + " (" + cols + ")"); err != nil {
 		t.Fatalf("CREATE TABLE failed: %v", err)
 	}
+	for _, r := range rows {
+		if _, err = db.Exec("INSERT INTO " + table + " VALUES " + r); err != nil {
+			t.Fatalf("INSERT failed: %v", err)
+		}
+	}
+	return db
+}
 
-	_, err = db.Exec("INSERT INTO items VALUES (1, 100)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
+// aggAssertCount queries a count and checks it.
+func aggAssertCount(t *testing.T, db *sql.DB, query string, want int, label string) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow(query).Scan(&got); err != nil {
+		t.Fatalf("%s failed: %v", label, err)
 	}
-	_, err = db.Exec("INSERT INTO items VALUES (2, 200)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
+	if got != want {
+		t.Errorf("%s = %d, want %d", label, got, want)
 	}
-	_, err = db.Exec("INSERT INTO items VALUES (3, 300)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
+}
 
-	// Test COUNT(*)
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM items").Scan(&count)
-	if err != nil {
-		t.Fatalf("COUNT(*) query failed: %v", err)
-	}
-	if count != 3 {
-		t.Errorf("COUNT(*) = %d, want 3", count)
-	}
+// TestAggregateCountStar tests COUNT(*) functionality
+func TestAggregateCountStar(t *testing.T) {
+	t.Parallel()
+	dbFile := t.TempDir() + "/test_count_star.db"
 
-	// Test COUNT(*) with WHERE
-	err = db.QueryRow("SELECT COUNT(*) FROM items WHERE value > 100").Scan(&count)
-	if err != nil {
-		t.Fatalf("COUNT(*) with WHERE failed: %v", err)
-	}
-	if count != 2 {
-		t.Errorf("COUNT(*) with WHERE = %d, want 2", count)
-	}
+	db := aggOpenAndPopulate(t, dbFile, "items", "id INTEGER, value INTEGER",
+		[]string{"(1, 100)", "(2, 200)", "(3, 300)"})
+	defer db.Close()
+
+	aggAssertCount(t, db, "SELECT COUNT(*) FROM items", 3, "COUNT(*)")
+	aggAssertCount(t, db, "SELECT COUNT(*) FROM items WHERE value > 100", 2, "COUNT(*) with WHERE")
 }
 
 // TestAggregateSum tests SUM function
 func TestAggregateSum(t *testing.T) {
 	t.Parallel()
-	dbFile := "test_sum.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_sum.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -101,8 +91,7 @@ func TestAggregateSum(t *testing.T) {
 // TestAggregateAvg tests AVG function
 func TestAggregateAvg(t *testing.T) {
 	t.Parallel()
-	dbFile := "test_avg.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_avg.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -141,8 +130,7 @@ func TestAggregateAvg(t *testing.T) {
 // TestAggregateMin tests MIN function
 func TestAggregateMin(t *testing.T) {
 	t.Parallel()
-	dbFile := "test_min.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_min.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -181,8 +169,7 @@ func TestAggregateMin(t *testing.T) {
 // TestAggregateMax tests MAX function
 func TestAggregateMax(t *testing.T) {
 	t.Parallel()
-	dbFile := "test_max.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_max.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -221,8 +208,7 @@ func TestAggregateMax(t *testing.T) {
 // TestAggregateTotal tests TOTAL function
 func TestAggregateTotal(t *testing.T) {
 	t.Parallel()
-	dbFile := "test_total.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_total.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -257,8 +243,7 @@ func TestAggregateTotal(t *testing.T) {
 // TestAggregateCount tests COUNT(column) function
 func TestAggregateCount(t *testing.T) {
 	t.Parallel()
-	dbFile := "test_count_col.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_count_col.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -293,39 +278,21 @@ func TestAggregateCount(t *testing.T) {
 // TestMultipleAggregatesExtended tests multiple aggregate functions in one query
 func TestMultipleAggregatesExtended(t *testing.T) {
 	t.Parallel()
-	dbFile := "test_multi_agg.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_multi_agg.db"
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := aggOpenAndPopulate(t, dbFile, "metrics", "id INTEGER, value INTEGER",
+		[]string{"(5, 10)", "(5, 20)", "(5, 30)", "(5, 40)", "(5, 50)"})
 	defer db.Close()
-
-	_, err = db.Exec("CREATE TABLE metrics (id INTEGER, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	vals := []int{10, 20, 30, 40, 50}
-	for _, v := range vals {
-		_, err = db.Exec("INSERT INTO metrics VALUES (?, ?)", len(vals), v)
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-	}
 
 	var count, sum, min, max int
 	var avg float64
-	err = db.QueryRow("SELECT COUNT(*), SUM(value), AVG(value), MIN(value), MAX(value) FROM metrics").
+	err := db.QueryRow("SELECT COUNT(*), SUM(value), AVG(value), MIN(value), MAX(value) FROM metrics").
 		Scan(&count, &sum, &avg, &min, &max)
 	if err != nil {
 		t.Fatalf("Multiple aggregates query failed: %v", err)
 	}
 
-	if count != 5 {
-		t.Errorf("COUNT(*) = %d, want 5", count)
-	}
+	aggAssertCount(t, db, "SELECT COUNT(*) FROM metrics", 5, "COUNT(*)")
 	if sum != 150 {
 		t.Errorf("SUM(value) = %d, want 150", sum)
 	}

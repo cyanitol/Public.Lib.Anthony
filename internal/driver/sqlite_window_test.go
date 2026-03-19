@@ -216,57 +216,16 @@ func TestSQLiteWindow(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			rows, err := db.Query(tt.query)
 			if tt.wantErr {
+				_, err := db.Query(tt.query)
 				if err == nil {
 					t.Errorf("expected error, got none")
 				}
 				return
 			}
-
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-
-			var results []string
-			for rows.Next() {
-				var result1, result2 interface{}
-				// Try to scan two columns first
-				err := rows.Scan(&result1, &result2)
-				if err != nil {
-					// If that fails, try one column
-					rows, _ = db.Query(tt.query)
-					defer rows.Close()
-					var results []string
-					for rows.Next() {
-						var result interface{}
-						if err := rows.Scan(&result); err != nil {
-							t.Fatalf("scan failed: %v", err)
-						}
-						if b, ok := result.([]byte); ok {
-							results = append(results, string(b))
-						} else {
-							results = append(results, formatValue(result))
-						}
-					}
-					got := strings.Join(results, " ")
-					if got != tt.want {
-						t.Errorf("got %q, want %q", got, tt.want)
-					}
-					return
-				}
-				// Two column result
-				v1 := formatValue(result1)
-				v2 := formatValue(result2)
-				results = append(results, v1+"|"+v2)
-			}
-
-			if len(results) > 0 {
-				got := strings.Join(results, " ")
-				if got != tt.want {
-					t.Errorf("got %q, want %q", got, tt.want)
-				}
+			got := windowQueryResult(t, db, tt.query)
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -340,45 +299,9 @@ func TestSQLiteWindowPartitioned(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-
-			var results []string
-			for rows.Next() {
-				var result1, result2 interface{}
-				err := rows.Scan(&result1, &result2)
-				if err != nil {
-					// Single column
-					rows, _ = db.Query(tt.query)
-					defer rows.Close()
-					var results []string
-					for rows.Next() {
-						var result interface{}
-						if err := rows.Scan(&result); err != nil {
-							t.Fatalf("scan failed: %v", err)
-						}
-						results = append(results, formatValue(result))
-					}
-					got := strings.Join(results, " ")
-					if got != tt.want {
-						t.Errorf("got %q, want %q", got, tt.want)
-					}
-					return
-				}
-				// Two columns
-				v1 := formatValue(result1)
-				v2 := formatValue(result2)
-				results = append(results, v1+"|"+v2)
-			}
-
-			if len(results) > 0 {
-				got := strings.Join(results, " ")
-				if got != tt.want {
-					t.Errorf("got %q, want %q", got, tt.want)
-				}
+			got := windowQueryResult(t, db, tt.query)
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -465,51 +388,55 @@ func TestSQLiteWindowFrames(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-
-			var results []string
-			for rows.Next() {
-				var result1, result2, result3 interface{}
-				err := rows.Scan(&result1, &result2, &result3)
-				if err != nil {
-					// Try two columns
-					rows, _ = db.Query(tt.query)
-					defer rows.Close()
-					var results []string
-					for rows.Next() {
-						var r1, r2 interface{}
-						if err := rows.Scan(&r1, &r2); err != nil {
-							t.Fatalf("scan failed: %v", err)
-						}
-						v1 := formatValue(r1)
-						v2 := formatValue(r2)
-						results = append(results, v1+"|"+v2)
-					}
-					got := strings.Join(results, " ")
-					if got != tt.want {
-						t.Errorf("got %q, want %q", got, tt.want)
-					}
-					return
-				}
-				// Three columns
-				v1 := formatValue(result1)
-				v2 := formatValue(result2)
-				v3 := formatValue(result3)
-				results = append(results, v1+"|"+v2+"|"+v3)
-			}
-
-			if len(results) > 0 {
-				got := strings.Join(results, " ")
-				if got != tt.want {
-					t.Errorf("got %q, want %q", got, tt.want)
-				}
+			got := windowQueryResult(t, db, tt.query)
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
 	}
+}
+
+// windowQueryResult executes a query and returns all rows as a space-separated
+// string. Each row's columns are joined with "|".
+func windowQueryResult(t *testing.T, db *sql.DB, query string) string {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("failed to get columns: %v", err)
+	}
+
+	var results []string
+	for rows.Next() {
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		row := windowFormatRow(vals)
+		results = append(results, row)
+	}
+	return strings.Join(results, " ")
+}
+
+func windowFormatRow(vals []interface{}) string {
+	parts := make([]string, len(vals))
+	for i, v := range vals {
+		if b, ok := v.([]byte); ok {
+			parts[i] = string(b)
+		} else {
+			parts[i] = formatValue(v)
+		}
+	}
+	return strings.Join(parts, "|")
 }
 
 // formatValue formats a value for comparison in tests

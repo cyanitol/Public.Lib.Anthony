@@ -98,200 +98,142 @@ func runUpsertSubtest(t *testing.T, name, sql string, check func(*testing.T, *In
 	})
 }
 
-func TestParseUpsert(t *testing.T) {
-	t.Parallel()
+func testParseUpsertSuccess(t *testing.T) {
+	t.Helper()
 	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-		check   func(*testing.T, *InsertStmt)
+		name  string
+		sql   string
+		check func(*testing.T, *InsertStmt)
 	}{
-		{
-			name:    "ON CONFLICT DO NOTHING",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT DO NOTHING",
-			wantErr: false,
-			check: func(t *testing.T, stmt *InsertStmt) {
+		{"ON CONFLICT DO NOTHING", "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT DO NOTHING",
+			func(t *testing.T, stmt *InsertStmt) {
 				validateUpsertExists(t, stmt)
 				validateUpsertAction(t, stmt.Upsert, ConflictDoNothing)
 				validateNoConflictTarget(t, stmt.Upsert)
-			},
-		},
-		{
-			name:    "ON CONFLICT (column) DO NOTHING",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) DO NOTHING",
-			wantErr: false,
-			check: func(t *testing.T, stmt *InsertStmt) {
+			}},
+		{"ON CONFLICT (column) DO NOTHING", "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) DO NOTHING",
+			func(t *testing.T, stmt *InsertStmt) {
 				validateUpsertExists(t, stmt)
 				validateUpsertAction(t, stmt.Upsert, ConflictDoNothing)
 				target := validateConflictTarget(t, stmt.Upsert)
 				validateTargetColumnCount(t, target, 1)
 				validateTargetColumn(t, target, 0, "id")
-			},
-		},
-		{
-			name:    "ON CONFLICT (col1, col2) DO NOTHING",
-			sql:     "INSERT INTO users (id, email, name) VALUES (1, 'john@example.com', 'John') ON CONFLICT (id, email) DO NOTHING",
-			wantErr: false,
-			check: func(t *testing.T, stmt *InsertStmt) {
+			}},
+		{"ON CONFLICT (col1, col2) DO NOTHING", "INSERT INTO users (id, email, name) VALUES (1, 'john@example.com', 'John') ON CONFLICT (id, email) DO NOTHING",
+			func(t *testing.T, stmt *InsertStmt) {
 				validateUpsertExists(t, stmt)
 				target := validateConflictTarget(t, stmt.Upsert)
 				validateTargetColumnCount(t, target, 2)
-			},
-		},
-		{
-			name:    "ON CONFLICT (col) WHERE condition DO NOTHING",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) WHERE id > 0 DO NOTHING",
-			wantErr: false,
-			check: func(t *testing.T, stmt *InsertStmt) {
+			}},
+		{"ON CONFLICT (col) WHERE condition DO NOTHING", "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) WHERE id > 0 DO NOTHING",
+			func(t *testing.T, stmt *InsertStmt) {
 				validateUpsertExists(t, stmt)
 				target := validateConflictTarget(t, stmt.Upsert)
 				if target.Where == nil {
 					t.Fatal("expected WHERE clause in conflict target")
 				}
-			},
-		},
-		{
-			name:    "ON CONFLICT DO UPDATE SET single column",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT DO UPDATE SET name = 'Jane'",
-			wantErr: false,
-			check: func(t *testing.T, stmt *InsertStmt) {
+			}},
+		{"ON CONFLICT DO UPDATE SET single column", "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT DO UPDATE SET name = 'Jane'",
+			func(t *testing.T, stmt *InsertStmt) {
 				validateUpsertExists(t, stmt)
 				validateUpsertAction(t, stmt.Upsert, ConflictDoUpdate)
 				update := validateDoUpdateClause(t, stmt.Upsert)
 				validateSetCount(t, update, 1)
 				validateSetColumn(t, update, 0, "name")
-			},
-		},
-		{
-			name:    "ON CONFLICT DO UPDATE SET multiple columns",
-			sql:     "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com') ON CONFLICT DO UPDATE SET name = 'Jane', email = 'jane@example.com'",
-			wantErr: false,
-			check: func(t *testing.T, stmt *InsertStmt) {
+			}},
+		{"ON CONFLICT DO UPDATE SET multiple columns", "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com') ON CONFLICT DO UPDATE SET name = 'Jane', email = 'jane@example.com'",
+			func(t *testing.T, stmt *InsertStmt) {
 				validateUpsertExists(t, stmt)
 				update := validateDoUpdateClause(t, stmt.Upsert)
 				validateSetCount(t, update, 2)
-			},
-		},
-		{
-			name:    "ON CONFLICT (id) DO UPDATE SET with excluded",
-			sql:     "INSERT INTO users (id, name, count) VALUES (1, 'John', 5) ON CONFLICT (id) DO UPDATE SET count = count + 1",
-			wantErr: false,
-			check: func(t *testing.T, stmt *InsertStmt) {
+			}},
+		{"ON CONFLICT (id) DO UPDATE SET with excluded", "INSERT INTO users (id, name, count) VALUES (1, 'John', 5) ON CONFLICT (id) DO UPDATE SET count = count + 1",
+			func(t *testing.T, stmt *InsertStmt) {
 				validateUpsertExists(t, stmt)
 				validateConflictTarget(t, stmt.Upsert)
 				validateDoUpdateClause(t, stmt.Upsert)
-			},
-		},
-		{
-			name:    "ON CONFLICT (id) DO UPDATE SET ... WHERE",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) DO UPDATE SET name = 'Jane' WHERE id > 0",
-			wantErr: false,
-			check: func(t *testing.T, stmt *InsertStmt) {
+			}},
+		{"ON CONFLICT (id) DO UPDATE SET ... WHERE", "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) DO UPDATE SET name = 'Jane' WHERE id > 0",
+			func(t *testing.T, stmt *InsertStmt) {
 				validateUpsertExists(t, stmt)
 				update := validateDoUpdateClause(t, stmt.Upsert)
 				if update.Where == nil {
 					t.Fatal("expected WHERE clause in DO UPDATE")
 				}
-			},
-		},
-		{
-			name:    "ON CONFLICT ON CONSTRAINT name DO NOTHING",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT ON CONSTRAINT users_pkey DO NOTHING",
-			wantErr: false,
-			check: func(t *testing.T, stmt *InsertStmt) {
+			}},
+		{"ON CONFLICT ON CONSTRAINT name DO NOTHING", "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT ON CONSTRAINT users_pkey DO NOTHING",
+			func(t *testing.T, stmt *InsertStmt) {
 				validateUpsertExists(t, stmt)
 				target := validateConflictTarget(t, stmt.Upsert)
 				if target.ConstraintName != "users_pkey" {
 					t.Errorf("expected constraint 'users_pkey', got %s", target.ConstraintName)
 				}
-			},
-		},
-		{
-			name:    "ON CONFLICT ON CONSTRAINT name DO UPDATE",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT ON CONSTRAINT users_pkey DO UPDATE SET name = 'Jane'",
-			wantErr: false,
-			check: func(t *testing.T, stmt *InsertStmt) {
+			}},
+		{"ON CONFLICT ON CONSTRAINT name DO UPDATE", "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT ON CONSTRAINT users_pkey DO UPDATE SET name = 'Jane'",
+			func(t *testing.T, stmt *InsertStmt) {
 				validateUpsertExists(t, stmt)
 				target := validateConflictTarget(t, stmt.Upsert)
 				if target.ConstraintName != "users_pkey" {
 					t.Errorf("expected constraint 'users_pkey', got %s", target.ConstraintName)
 				}
 				validateDoUpdateClause(t, stmt.Upsert)
-			},
-		},
-		{
-			name:    "Complex UPSERT with expressions",
-			sql:     "INSERT INTO stats (id, count, updated) VALUES (1, 1, NOW()) ON CONFLICT (id) DO UPDATE SET count = count + 1, updated = NOW()",
-			wantErr: false,
-			check: func(t *testing.T, stmt *InsertStmt) {
+			}},
+		{"Complex UPSERT with expressions", "INSERT INTO stats (id, count, updated) VALUES (1, 1, NOW()) ON CONFLICT (id) DO UPDATE SET count = count + 1, updated = NOW()",
+			func(t *testing.T, stmt *InsertStmt) {
 				validateUpsertExists(t, stmt)
 				update := validateDoUpdateClause(t, stmt.Upsert)
 				validateSetCount(t, update, 2)
-			},
-		},
-		{
-			name:    "INSERT with SELECT and UPSERT",
-			sql:     "INSERT INTO users (id, name) SELECT id, name FROM temp ON CONFLICT (id) DO UPDATE SET name = temp.name",
-			wantErr: false,
-			check: func(t *testing.T, stmt *InsertStmt) {
+			}},
+		{"INSERT with SELECT and UPSERT", "INSERT INTO users (id, name) SELECT id, name FROM temp ON CONFLICT (id) DO UPDATE SET name = temp.name",
+			func(t *testing.T, stmt *InsertStmt) {
 				if stmt.Select == nil {
 					t.Fatal("expected SELECT source")
 				}
 				validateUpsertExists(t, stmt)
-			},
-		},
-		{
-			name:    "Multiple rows with UPSERT",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John'), (2, 'Jane') ON CONFLICT (id) DO NOTHING",
-			wantErr: false,
-			check: func(t *testing.T, stmt *InsertStmt) {
+			}},
+		{"Multiple rows with UPSERT", "INSERT INTO users (id, name) VALUES (1, 'John'), (2, 'Jane') ON CONFLICT (id) DO NOTHING",
+			func(t *testing.T, stmt *InsertStmt) {
 				if len(stmt.Values) != 2 {
 					t.Errorf("expected 2 value rows, got %d", len(stmt.Values))
 				}
 				validateUpsertExists(t, stmt)
-			},
-		},
-		{
-			name:    "Error: missing DO",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT NOTHING",
-			wantErr: true,
-		},
-		{
-			name:    "Error: missing action after DO",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT DO",
-			wantErr: true,
-		},
-		{
-			name:    "Error: missing SET after DO UPDATE",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT DO UPDATE",
-			wantErr: true,
-		},
-		{
-			name:    "Error: ON without CONFLICT",
-			sql:     "INSERT INTO users (id, name) VALUES (1, 'John') ON DO NOTHING",
-			wantErr: true,
-		},
+			}},
 	}
 
 	for _, tt := range tests {
+		runUpsertSubtest(t, tt.name, tt.sql, tt.check)
+	}
+}
+
+func testParseUpsertErrors(t *testing.T) {
+	t.Helper()
+	errorTests := []struct {
+		name string
+		sql  string
+	}{
+		{"Error: missing DO", "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT NOTHING"},
+		{"Error: missing action after DO", "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT DO"},
+		{"Error: missing SET after DO UPDATE", "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT DO UPDATE"},
+		{"Error: ON without CONFLICT", "INSERT INTO users (id, name) VALUES (1, 'John') ON DO NOTHING"},
+	}
+
+	for _, tt := range errorTests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if tt.wantErr {
-				parser := NewParser(tt.sql)
-				_, err := parser.Parse()
-				if err == nil {
-					t.Errorf("Expected error but got none")
-				}
-				return
-			}
-
-			stmt := parseInsertStmt(t, tt.sql)
-			if tt.check != nil {
-				tt.check(t, stmt)
+			parser := NewParser(tt.sql)
+			_, err := parser.Parse()
+			if err == nil {
+				t.Error("Expected error but got none")
 			}
 		})
 	}
+}
+
+func TestParseUpsert(t *testing.T) {
+	t.Parallel()
+	testParseUpsertSuccess(t)
+	testParseUpsertErrors(t)
 }
 
 func TestParseUpsertColumnOrder(t *testing.T) {

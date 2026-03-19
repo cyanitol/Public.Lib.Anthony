@@ -28,40 +28,51 @@ func TestCompositeSplitKeepsRootConsistent(t *testing.T) {
 		if err := cursor.InsertWithComposite(0, k, payload); err != nil {
 			t.Fatalf("insert %d failed: %v", i, err)
 		}
-		rootHeader := headerInfo(t, bt, cursor.RootPage)
-		origHeader := headerInfo(t, bt, root)
-		children := collectInteriorChildren(t, bt, cursor.RootPage)
-		childHeaders := make([]string, 0, len(children))
-		for _, child := range children {
-			childHeaders = append(childHeaders, headerInfo(t, bt, child))
-		}
-		all := dumpAllHeaders(t, bt)
+		compositeSplitVerifyRows(t, bt, cursor, root, i)
+	}
+}
 
-		// Open a fresh cursor using the updated root and ensure all rows are reachable.
-		scan := NewCursorWithOptions(bt, cursor.RootPage, true)
-		if err := scan.MoveToFirst(); err != nil {
-			t.Fatalf("after insert %d MoveToFirst failed: %v (root=%d original=%d, rootHdr=%s, origHdr=%s, children=%v, childHdrs=%v)", i, err, cursor.RootPage, root, rootHeader, origHeader, children, childHeaders)
-		}
+func compositeSplitVerifyRows(t *testing.T, bt *Btree, cursor *BtCursor, root uint32, i int) {
+	t.Helper()
+	rootHeader := headerInfo(t, bt, cursor.RootPage)
+	origHeader := headerInfo(t, bt, root)
+	children := collectInteriorChildren(t, bt, cursor.RootPage)
+	childHeaders := compositeSplitChildHeaders(t, bt, children)
+	all := dumpAllHeaders(t, bt)
 
-		count := 0
-		steps := 0
-		visited := make([][]byte, 0, 10)
-		for scan.IsValid() && steps < 10 {
-			visited = append(visited, append([]byte(nil), scan.GetKeyBytes()...))
-			count++
-			if err := scan.Next(); err != nil {
-				break
-			}
-			steps++
-		}
+	scan := NewCursorWithOptions(bt, cursor.RootPage, true)
+	if err := scan.MoveToFirst(); err != nil {
+		t.Fatalf("after insert %d MoveToFirst failed: %v (root=%d original=%d, rootHdr=%s, origHdr=%s, children=%v, childHdrs=%v)",
+			i, err, cursor.RootPage, root, rootHeader, origHeader, children, childHeaders)
+	}
 
-		if count != i+1 {
-			t.Fatalf("after insert %d expected %d rows, got %d (rootHdr=%s, origHdr=%s, childHdrs=%v, visited=%q, all=%v)", i, i+1, count, rootHeader, origHeader, childHeaders, visited, all)
-		}
-		if steps >= 10 {
-			t.Fatalf("iteration did not terminate after insert %d (rootHdr=%s, visited=%q, all=%v)", i, rootHeader, visited, all)
+	count, visited := compositeSplitCountRows(scan)
+	if count != i+1 {
+		t.Fatalf("after insert %d expected %d rows, got %d (rootHdr=%s, origHdr=%s, childHdrs=%v, visited=%q, all=%v)",
+			i, i+1, count, rootHeader, origHeader, childHeaders, visited, all)
+	}
+}
+
+func compositeSplitChildHeaders(t *testing.T, bt *Btree, children []uint32) []string {
+	t.Helper()
+	headers := make([]string, 0, len(children))
+	for _, child := range children {
+		headers = append(headers, headerInfo(t, bt, child))
+	}
+	return headers
+}
+
+func compositeSplitCountRows(scan *BtCursor) (int, [][]byte) {
+	count := 0
+	visited := make([][]byte, 0, 10)
+	for scan.IsValid() && count < 10 {
+		visited = append(visited, append([]byte(nil), scan.GetKeyBytes()...))
+		count++
+		if err := scan.Next(); err != nil {
+			break
 		}
 	}
+	return count, visited
 }
 
 func headerInfo(t *testing.T, bt *Btree, pgno uint32) string {

@@ -76,47 +76,25 @@ func TestZeroJournalHeaderNonExistent(t *testing.T) {
 // TestCommitPhase0FlushFreeList tests commitPhase0FlushFreeList (50% coverage)
 func TestCommitPhase0FlushFreeList(t *testing.T) {
 	t.Parallel()
-	dbFile := filepath.Join(t.TempDir(), "test_phase0.db")
+	p := openTestPagerSized(t, 4096)
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Allocate some pages to create freelist
-	for i := 0; i < 10; i++ {
-		_, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("failed to allocate page: %v", err)
-		}
-	}
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
+	// Allocate pages and commit
+	mustBeginWrite(t, p)
+	mustAllocatePages(t, p, 10)
+	mustCommit(t, p)
 
 	// Free some pages
-	if err := pager.FreePage(5); err != nil {
-		t.Fatalf("failed to free page: %v", err)
-	}
-	if err := pager.FreePage(6); err != nil {
-		t.Fatalf("failed to free page: %v", err)
-	}
+	mustBeginWrite(t, p)
+	mustFreePage(t, p, 5)
+	mustFreePage(t, p, 6)
 
 	// Start a write transaction
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-	pager.Put(page)
+	mustGetWritePageData(t, p, 1, 0)
 
 	// Test phase 0
-	pager.mu.Lock()
-	err = pager.commitPhase0FlushFreeList()
-	pager.mu.Unlock()
+	p.mu.Lock()
+	err := p.commitPhase0FlushFreeList()
+	p.mu.Unlock()
 
 	if err != nil {
 		t.Errorf("commitPhase0FlushFreeList() error = %v", err)
@@ -313,63 +291,28 @@ func TestProcessTrunkPageFullTrunk(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_trunk_full.db")
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
+	pager := mustOpenPagerSized(t, dbFile, 4096)
 	defer pager.Close()
 
 	fl := NewFreeList(pager)
 
-	// Create enough pages
 	maxLeaves := FreeListMaxLeafPages(4096)
 	numPages := maxLeaves + 20
 
-	for i := Pgno(2); i <= Pgno(numPages); i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
-		pager.Put(page)
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
+	mustCreateWritePages(t, pager, 2, Pgno(numPages))
 
 	// Free enough pages to fill a trunk
-	for i := Pgno(10); i <= Pgno(numPages-5); i++ {
-		if err := fl.Free(i); err != nil {
-			t.Fatalf("failed to free page %d: %v", i, err)
-		}
-	}
+	mustFreePages(t, fl, 10, Pgno(numPages-5))
+	mustFlush(t, fl)
 
-	// Flush to create trunk structure
-	if err := fl.Flush(); err != nil {
-		t.Fatalf("failed to flush: %v", err)
-	}
-
-	// Verify trunk was created
 	if fl.GetFirstTrunk() == 0 {
 		t.Error("expected trunk page to be created")
 	}
 
 	// Free more pages to trigger processing of a full trunk
-	for i := Pgno(numPages - 4); i <= Pgno(numPages); i++ {
-		if err := fl.Free(i); err != nil {
-			t.Fatalf("failed to free page %d: %v", i, err)
-		}
-	}
+	mustFreePages(t, fl, Pgno(numPages-4), Pgno(numPages))
+	mustFlush(t, fl)
 
-	// This flush should process a full trunk
-	if err := fl.Flush(); err != nil {
-		t.Fatalf("failed to flush with full trunk: %v", err)
-	}
-
-	// Verify freelist integrity
 	if err := fl.Verify(); err != nil {
 		t.Errorf("freelist verification failed: %v", err)
 	}
@@ -380,53 +323,21 @@ func TestProcessTrunkPageAddToExisting(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_trunk_add.db")
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
+	pager := mustOpenPagerSized(t, dbFile, 4096)
 	defer pager.Close()
 
 	fl := NewFreeList(pager)
 
-	// Create some pages
-	for i := Pgno(2); i <= 30; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
-		pager.Put(page)
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
+	mustCreateWritePages(t, pager, 2, 30)
 
 	// Free a small number of pages (should create partially-filled trunk)
-	for i := Pgno(10); i <= 15; i++ {
-		if err := fl.Free(i); err != nil {
-			t.Fatalf("failed to free page %d: %v", i, err)
-		}
-	}
-
-	if err := fl.Flush(); err != nil {
-		t.Fatalf("failed to flush: %v", err)
-	}
+	mustFreePages(t, fl, 10, 15)
+	mustFlush(t, fl)
 
 	// Free a few more pages (should add to existing trunk)
-	for i := Pgno(20); i <= 22; i++ {
-		if err := fl.Free(i); err != nil {
-			t.Fatalf("failed to free page %d: %v", i, err)
-		}
-	}
+	mustFreePages(t, fl, 20, 22)
+	mustFlush(t, fl)
 
-	if err := fl.Flush(); err != nil {
-		t.Fatalf("failed to flush when adding to trunk: %v", err)
-	}
-
-	// Verify freelist
 	if fl.GetTotalFree() == 0 {
 		t.Error("expected non-zero free page count")
 	}

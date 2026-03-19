@@ -41,47 +41,37 @@ func TestTypeAffinityBasic(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			// Use unique database per subtest for isolation
-			tmpDir := t.TempDir()
-			dbPath := filepath.Join(tmpDir, "types_test.db")
-
-			db, err := sql.Open(DriverName, dbPath)
-			if err != nil {
-				t.Fatalf("failed to open database: %v", err)
-			}
-			defer db.Close()
-
-			// Create table with different affinity columns
-			_, err = db.Exec("CREATE TABLE t1(i INTEGER, n NUMERIC, t TEXT, o BLOB)")
-			if err != nil {
-				t.Fatalf("failed to create table: %v", err)
-			}
-
-			query := "INSERT INTO t1 VALUES(" + tt.value + ", " + tt.value + ", " + tt.value + ", " + tt.value + ")"
-			_, err = db.Exec(query)
-			if err != nil {
-				t.Fatalf("failed to insert: %v", err)
-			}
-
-			var iType, nType, tType, oType string
-			err = db.QueryRow("SELECT typeof(i), typeof(n), typeof(t), typeof(o) FROM t1").Scan(&iType, &nType, &tType, &oType)
-			if err != nil {
-				t.Fatalf("failed to query types: %v", err)
-			}
-
-			if iType != tt.intType {
-				t.Errorf("INTEGER column: got type %s, want %s", iType, tt.intType)
-			}
-			if nType != tt.numType {
-				t.Errorf("NUMERIC column: got type %s, want %s", nType, tt.numType)
-			}
-			if tType != tt.textType {
-				t.Errorf("TEXT column: got type %s, want %s", tType, tt.textType)
-			}
-			if oType != tt.blobType {
-				t.Errorf("BLOB column: got type %s, want %s", oType, tt.blobType)
-			}
+			typeAffinityCheckOne(t, tt.value, [4]string{tt.intType, tt.numType, tt.textType, tt.blobType})
 		})
+	}
+}
+
+// typeAffinityCheckOne creates a fresh DB, inserts a value, and checks types.
+func typeAffinityCheckOne(t *testing.T, value string, want [4]string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	db, err := sql.Open(DriverName, filepath.Join(tmpDir, "types_test.db"))
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE t1(i INTEGER, n NUMERIC, t TEXT, o BLOB)"); err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO t1 VALUES(" + value + ", " + value + ", " + value + ", " + value + ")"); err != nil {
+		t.Fatalf("failed to insert: %v", err)
+	}
+
+	var types [4]string
+	if err := db.QueryRow("SELECT typeof(i), typeof(n), typeof(t), typeof(o) FROM t1").Scan(&types[0], &types[1], &types[2], &types[3]); err != nil {
+		t.Fatalf("failed to query types: %v", err)
+	}
+	labels := [4]string{"INTEGER", "NUMERIC", "TEXT", "BLOB"}
+	for i := range want {
+		if types[i] != want[i] {
+			t.Errorf("%s column: got type %s, want %s", labels[i], types[i], want[i])
+		}
 	}
 }
 
@@ -791,38 +781,48 @@ func TestCastToNumeric(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			var typeStr string
-			err := db.QueryRow("SELECT typeof(" + tt.expr + ")").Scan(&typeStr)
-			if err != nil {
-				t.Fatalf("failed to query type: %v", err)
-			}
-
-			if typeStr != tt.typeExp {
-				t.Errorf("got type %s, want %s", typeStr, tt.typeExp)
-			}
-
-			if tt.checkInt {
-				var result int64
-				err := db.QueryRow("SELECT " + tt.expr).Scan(&result)
-				if err != nil {
-					t.Fatalf("failed to query value: %v", err)
-				}
-				if result != tt.intVal {
-					t.Errorf("got %d, want %d", result, tt.intVal)
-				}
-			}
-
-			if tt.checkFlt {
-				var result float64
-				err := db.QueryRow("SELECT " + tt.expr).Scan(&result)
-				if err != nil {
-					t.Fatalf("failed to query value: %v", err)
-				}
-				if result != tt.fltVal {
-					t.Errorf("got %f, want %f", result, tt.fltVal)
-				}
-			}
+			castNumericCheck(t, db, tt.expr, tt.typeExp, tt.checkInt, tt.intVal, tt.checkFlt, tt.fltVal)
 		})
+	}
+}
+
+// castNumericCheck verifies the type and value of a CAST expression.
+func castNumericCheck(t *testing.T, db *sql.DB, expr, typeExp string, checkInt bool, intVal int64, checkFlt bool, fltVal float64) {
+	t.Helper()
+	var typeStr string
+	if err := db.QueryRow("SELECT typeof(" + expr + ")").Scan(&typeStr); err != nil {
+		t.Fatalf("failed to query type: %v", err)
+	}
+	if typeStr != typeExp {
+		t.Errorf("got type %s, want %s", typeStr, typeExp)
+	}
+	if checkInt {
+		castNumericCheckInt(t, db, expr, intVal)
+	}
+	if checkFlt {
+		castNumericCheckFloat(t, db, expr, fltVal)
+	}
+}
+
+func castNumericCheckInt(t *testing.T, db *sql.DB, expr string, want int64) {
+	t.Helper()
+	var result int64
+	if err := db.QueryRow("SELECT " + expr).Scan(&result); err != nil {
+		t.Fatalf("failed to query value: %v", err)
+	}
+	if result != want {
+		t.Errorf("got %d, want %d", result, want)
+	}
+}
+
+func castNumericCheckFloat(t *testing.T, db *sql.DB, expr string, want float64) {
+	t.Helper()
+	var result float64
+	if err := db.QueryRow("SELECT " + expr).Scan(&result); err != nil {
+		t.Fatalf("failed to query value: %v", err)
+	}
+	if result != want {
+		t.Errorf("got %f, want %f", result, want)
 	}
 }
 
@@ -1428,6 +1428,14 @@ func TestNumericStringComparisons(t *testing.T) {
 
 // TestMixedTypesTable tests table with mixed types in same column
 // From types.test lines 301-324
+// mixedTypesExec executes a statement or fails.
+func mixedTypesExec(t *testing.T, db *sql.DB, stmt string) {
+	t.Helper()
+	if _, err := db.Exec(stmt); err != nil {
+		t.Fatalf("exec failed (%s): %v", stmt, err)
+	}
+}
+
 func TestMixedTypesTable(t *testing.T) {
 	t.Skip("pre-existing failure")
 	tmpDir := t.TempDir()
@@ -1439,28 +1447,11 @@ func TestMixedTypesTable(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec("CREATE TABLE t1(a, b, c)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
+	mixedTypesExec(t, db, "CREATE TABLE t1(a, b, c)")
+	mixedTypesExec(t, db, "INSERT INTO t1 VALUES(NULL, 'text', 4000)")
+	mixedTypesExec(t, db, "INSERT INTO t1 VALUES('text2', 5000, NULL)")
+	mixedTypesExec(t, db, "INSERT INTO t1 VALUES(6000, NULL, 'text3')")
 
-	// Insert rows with different types in each position
-	_, err = db.Exec("INSERT INTO t1 VALUES(NULL, 'text', 4000)")
-	if err != nil {
-		t.Fatalf("failed to insert row 1: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t1 VALUES('text2', 5000, NULL)")
-	if err != nil {
-		t.Fatalf("failed to insert row 2: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t1 VALUES(6000, NULL, 'text3')")
-	if err != nil {
-		t.Fatalf("failed to insert row 3: %v", err)
-	}
-
-	// Verify types are preserved
 	rows, err := db.Query("SELECT typeof(a), typeof(b), typeof(c) FROM t1 ORDER BY rowid")
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
@@ -1472,14 +1463,12 @@ func TestMixedTypesTable(t *testing.T) {
 		{"text", "integer", "null"},
 		{"integer", "null", "text"},
 	}
-
 	i := 0
 	for rows.Next() {
 		var t1, t2, t3 string
 		if err := rows.Scan(&t1, &t2, &t3); err != nil {
 			t.Fatalf("failed to scan: %v", err)
 		}
-
 		if t1 != expected[i][0] || t2 != expected[i][1] || t3 != expected[i][2] {
 			t.Errorf("row %d: got [%s, %s, %s], want %v", i, t1, t2, t3, expected[i])
 		}
@@ -1524,35 +1513,29 @@ func TestStorageClassDetermination(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := db.Exec("DELETE FROM t1")
-			if err != nil {
-				t.Fatalf("failed to delete: %v", err)
-			}
-
-			_, err = db.Exec("INSERT INTO t1 VALUES(?, ?, ?, ?)", tt.insertVal, tt.insertVal, tt.insertVal, tt.insertVal)
-			if err != nil {
-				t.Fatalf("failed to insert: %v", err)
-			}
-
-			var types [4]string
-			err = db.QueryRow("SELECT typeof(i), typeof(n), typeof(t), typeof(b) FROM t1").Scan(&types[0], &types[1], &types[2], &types[3])
-			if err != nil {
-				t.Fatalf("failed to query: %v", err)
-			}
-
-			if types[0] != tt.intType {
-				t.Errorf("INTEGER column: got %s, want %s", types[0], tt.intType)
-			}
-			if types[1] != tt.numType {
-				t.Errorf("NUMERIC column: got %s, want %s", types[1], tt.numType)
-			}
-			if types[2] != tt.textType {
-				t.Errorf("TEXT column: got %s, want %s", types[2], tt.textType)
-			}
-			if types[3] != tt.blobType {
-				t.Errorf("BLOB column: got %s, want %s", types[3], tt.blobType)
-			}
+			storageClassRunOne(t, db, tt.insertVal, [4]string{tt.intType, tt.numType, tt.textType, tt.blobType})
 		})
+	}
+}
+
+// storageClassRunOne inserts a value into all columns and checks typeof.
+func storageClassRunOne(t *testing.T, db *sql.DB, val interface{}, want [4]string) {
+	t.Helper()
+	if _, err := db.Exec("DELETE FROM t1"); err != nil {
+		t.Fatalf("failed to delete: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?, ?)", val, val, val, val); err != nil {
+		t.Fatalf("failed to insert: %v", err)
+	}
+	var types [4]string
+	if err := db.QueryRow("SELECT typeof(i), typeof(n), typeof(t), typeof(b) FROM t1").Scan(&types[0], &types[1], &types[2], &types[3]); err != nil {
+		t.Fatalf("failed to query: %v", err)
+	}
+	labels := [4]string{"INTEGER", "NUMERIC", "TEXT", "BLOB"}
+	for i := range want {
+		if types[i] != want[i] {
+			t.Errorf("%s column: got %s, want %s", labels[i], types[i], want[i])
+		}
 	}
 }
 

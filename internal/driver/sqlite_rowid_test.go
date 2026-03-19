@@ -174,50 +174,33 @@ func TestRowidWithIntegerPrimaryKey(t *testing.T) {
 			t.Fatalf("failed to create table: %v", err)
 		}
 
-		// First auto-generated rowid should be 1
-		var a int64
-		err = db.QueryRow("SELECT a FROM t5 WHERE b = 55").Scan(&a)
-		if err != nil {
-			t.Fatalf("failed to query: %v", err)
-		}
-		if a != 1 {
-			t.Errorf("expected auto-generated a=1, got a=%d", a)
-		}
+		rowidAssertAutoKey(t, db, "SELECT a FROM t5 WHERE b = 55", 1)
 
-		// Insert another row
-		_, err = db.Exec("INSERT INTO t5(b) VALUES(66)")
-		if err != nil {
-			t.Fatalf("failed to insert: %v", err)
-		}
+		rowidExecOrFatal(t, db, "INSERT INTO t5(b) VALUES(66)")
+		rowidAssertAutoKey(t, db, "SELECT a FROM t5 WHERE b = 66", 2)
 
-		err = db.QueryRow("SELECT a FROM t5 WHERE b = 66").Scan(&a)
-		if err != nil {
-			t.Fatalf("failed to query: %v", err)
-		}
-		if a != 2 {
-			t.Errorf("expected auto-generated a=2, got a=%d", a)
-		}
-
-		// Insert with explicit large value
-		_, err = db.Exec("INSERT INTO t5(a, b) VALUES(1000000, 77)")
-		if err != nil {
-			t.Fatalf("failed to insert with explicit a: %v", err)
-		}
-
-		// Next auto-generated should be 1000001
-		_, err = db.Exec("INSERT INTO t5(b) VALUES(88)")
-		if err != nil {
-			t.Fatalf("failed to insert: %v", err)
-		}
-
-		err = db.QueryRow("SELECT a FROM t5 WHERE b = 88").Scan(&a)
-		if err != nil {
-			t.Fatalf("failed to query: %v", err)
-		}
-		if a != 1000001 {
-			t.Errorf("expected auto-generated a=1000001, got a=%d", a)
-		}
+		rowidExecOrFatal(t, db, "INSERT INTO t5(a, b) VALUES(1000000, 77)")
+		rowidExecOrFatal(t, db, "INSERT INTO t5(b) VALUES(88)")
+		rowidAssertAutoKey(t, db, "SELECT a FROM t5 WHERE b = 88", 1000001)
 	})
+}
+
+func rowidExecOrFatal(t *testing.T, db *sql.DB, stmt string) {
+	t.Helper()
+	if _, err := db.Exec(stmt); err != nil {
+		t.Fatalf("exec failed for %q: %v", stmt, err)
+	}
+}
+
+func rowidAssertAutoKey(t *testing.T, db *sql.DB, query string, want int64) {
+	t.Helper()
+	var a int64
+	if err := db.QueryRow(query).Scan(&a); err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if a != want {
+		t.Errorf("expected a=%d, got a=%d", want, a)
+	}
 }
 
 // TestRowidComparisons tests rowid comparisons with different types
@@ -232,96 +215,60 @@ func TestRowidComparisons(t *testing.T) {
 	}
 	defer db.Close()
 
+	_, err = db.Exec(`
+		CREATE TABLE t6(a INTEGER PRIMARY KEY, b);
+		INSERT INTO t6 VALUES(123, 'x');
+		INSERT INTO t6 VALUES(124, 'y');
+	`)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
 	t.Run("rowid_float_comparison", func(t *testing.T) {
-		_, err := db.Exec(`
-			CREATE TABLE t6(a INTEGER PRIMARY KEY, b);
-			INSERT INTO t6 VALUES(123, 'x');
-			INSERT INTO t6 VALUES(124, 'y');
-		`)
-		if err != nil {
-			t.Fatalf("failed to create table: %v", err)
+		tests := []struct {
+			where string
+			want  int64
+		}{
+			{"a < 123.5", 1},
+			{"a < 124.5", 2},
+			{"a > 123.5", 1},
+			{"a == 123.5", 0},
+			{"a == 123.0", 1},
+			{"a > 100.5 AND a < 200.5", 2},
 		}
-
-		// Test comparisons with float values
-		var count int64
-
-		// a < 123.5 should include only 123
-		err = db.QueryRow("SELECT COUNT(*) FROM t6 WHERE a < 123.5").Scan(&count)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		if count != 1 {
-			t.Errorf("expected 1 row where a < 123.5, got %d", count)
-		}
-
-		// a < 124.5 should include both
-		err = db.QueryRow("SELECT COUNT(*) FROM t6 WHERE a < 124.5").Scan(&count)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		if count != 2 {
-			t.Errorf("expected 2 rows where a < 124.5, got %d", count)
-		}
-
-		// a > 123.5 should include only 124
-		err = db.QueryRow("SELECT COUNT(*) FROM t6 WHERE a > 123.5").Scan(&count)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		if count != 1 {
-			t.Errorf("expected 1 row where a > 123.5, got %d", count)
-		}
-
-		// a == 123.5 should match nothing
-		err = db.QueryRow("SELECT COUNT(*) FROM t6 WHERE a == 123.5").Scan(&count)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		if count != 0 {
-			t.Errorf("expected 0 rows where a == 123.5, got %d", count)
-		}
-
-		// a == 123.0 should match 123
-		err = db.QueryRow("SELECT COUNT(*) FROM t6 WHERE a == 123.0").Scan(&count)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		if count != 1 {
-			t.Errorf("expected 1 row where a == 123.0, got %d", count)
-		}
-
-		// Range query
-		err = db.QueryRow("SELECT COUNT(*) FROM t6 WHERE a > 100.5 AND a < 200.5").Scan(&count)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		if count != 2 {
-			t.Errorf("expected 2 rows in range, got %d", count)
+		for _, tt := range tests {
+			t.Run(tt.where, func(t *testing.T) {
+				rowidAssertCount(t, db, "t6", tt.where, tt.want)
+			})
 		}
 	})
 
 	t.Run("rowid_string_comparison", func(t *testing.T) {
-		// rowid compared to string should handle type mismatch
-		var count int64
-
-		// rowid > 'abc' should return no rows (string is greater in SQLite's type ordering)
-		err := db.QueryRow("SELECT COUNT(*) FROM t6 WHERE rowid > 'abc'").Scan(&count)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
+		tests := []struct {
+			where string
+			want  int64
+		}{
+			{"rowid > 'abc'", 0},
+			{"rowid < 'abc'", 2},
 		}
-		if count != 0 {
-			t.Errorf("expected 0 rows where rowid > 'abc', got %d", count)
-		}
-
-		// rowid < 'abc' should return all rows
-		err = db.QueryRow("SELECT COUNT(*) FROM t6 WHERE rowid < 'abc'").Scan(&count)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		if count != 2 {
-			t.Errorf("expected 2 rows where rowid < 'abc', got %d", count)
+		for _, tt := range tests {
+			t.Run(tt.where, func(t *testing.T) {
+				rowidAssertCount(t, db, "t6", tt.where, tt.want)
+			})
 		}
 	})
+}
+
+func rowidAssertCount(t *testing.T, db *sql.DB, table, where string, want int64) {
+	t.Helper()
+	var count int64
+	query := "SELECT COUNT(*) FROM " + table + " WHERE " + where
+	if err := db.QueryRow(query).Scan(&count); err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if count != want {
+		t.Errorf("expected %d rows for %s, got %d", want, where, count)
+	}
 }
 
 // TestRowidRangeQueries tests rowid with range queries
@@ -468,55 +415,37 @@ func TestRowidOrdering(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create table: %v", err)
 		}
-
-		rows, err := db.Query("SELECT rowid, value FROM t9 ORDER BY rowid ASC")
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		defer rows.Close()
-
-		expected := []string{"third", "first", "second"}
-		i := 0
-		for rows.Next() {
-			var rowid int64
-			var value string
-			if err := rows.Scan(&rowid, &value); err != nil {
-				t.Fatalf("scan failed: %v", err)
-			}
-			if i >= len(expected) {
-				t.Fatalf("too many rows")
-			}
-			if value != expected[i] {
-				t.Errorf("row %d: expected %q, got %q", i, expected[i], value)
-			}
-			i++
-		}
+		rowidAssertRowOrder(t, db, "SELECT rowid, value FROM t9 ORDER BY rowid ASC", []string{"third", "first", "second"})
 	})
 
 	t.Run("order_by_rowid_desc", func(t *testing.T) {
-		rows, err := db.Query("SELECT rowid, value FROM t9 ORDER BY rowid DESC")
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		defer rows.Close()
-
-		expected := []string{"second", "first", "third"}
-		i := 0
-		for rows.Next() {
-			var rowid int64
-			var value string
-			if err := rows.Scan(&rowid, &value); err != nil {
-				t.Fatalf("scan failed: %v", err)
-			}
-			if i >= len(expected) {
-				t.Fatalf("too many rows")
-			}
-			if value != expected[i] {
-				t.Errorf("row %d: expected %q, got %q", i, expected[i], value)
-			}
-			i++
-		}
+		rowidAssertRowOrder(t, db, "SELECT rowid, value FROM t9 ORDER BY rowid DESC", []string{"second", "first", "third"})
 	})
+}
+
+func rowidAssertRowOrder(t *testing.T, db *sql.DB, query string, expected []string) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+
+	i := 0
+	for rows.Next() {
+		var rowid int64
+		var value string
+		if err := rows.Scan(&rowid, &value); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		if i >= len(expected) {
+			t.Fatalf("too many rows")
+		}
+		if value != expected[i] {
+			t.Errorf("row %d: expected %q, got %q", i, expected[i], value)
+		}
+		i++
+	}
 }
 
 // TestRowidWithoutRowid tests tables without rowid

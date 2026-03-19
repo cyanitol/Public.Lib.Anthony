@@ -7,89 +7,51 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
+func checkCircDepHelper(t *testing.T, sql, cteName string) *CTEContext {
+	t.Helper()
+	p := parser.NewParser(sql)
+	stmts, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	selectStmt := stmts[0].(*parser.SelectStmt)
+	ctx, err := NewCTEContext(selectStmt.With)
+	if err != nil {
+		t.Fatalf("NewCTEContext failed: %v", err)
+	}
+	return ctx
+}
+
 // TestCheckCircularDependencyAllPaths tests all code paths in checkCircularDependency.
 func TestCheckCircularDependencyAllPaths(t *testing.T) {
-	// Test case 1: Visiting a CTE that's already being visited (recursive case)
 	t.Run("Recursive CTE visiting itself", func(t *testing.T) {
-		sql := "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 10) SELECT * FROM cte"
-		p := parser.NewParser(sql)
-		stmts, err := p.Parse()
-		if err != nil {
-			t.Fatalf("Parse failed: %v", err)
-		}
-
-		selectStmt := stmts[0].(*parser.SelectStmt)
-		ctx, err := NewCTEContext(selectStmt.With)
-		if err != nil {
-			t.Fatalf("NewCTEContext failed: %v", err)
-		}
-
-		// Manually call checkCircularDependency to test recursive path
+		ctx := checkCircDepHelper(t, "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 10) SELECT * FROM cte", "cte")
 		visiting := make(map[string]bool)
-		err = ctx.checkCircularDependency("cte", visiting)
-		if err != nil {
-			t.Errorf("checkCircularDependency should succeed for recursive CTE, got: %v", err)
+		if err := ctx.checkCircularDependency("cte", visiting); err != nil {
+			t.Errorf("should succeed for recursive CTE, got: %v", err)
 		}
 	})
 
-	// Test case 2: CTE that doesn't exist in the map
 	t.Run("Non-existent CTE", func(t *testing.T) {
-		ctx := &CTEContext{
-			CTEs:        make(map[string]*CTEDefinition),
-			IsRecursive: false,
-		}
-
-		visiting := make(map[string]bool)
-		err := ctx.checkCircularDependency("non_existent", visiting)
-		if err != nil {
-			t.Errorf("checkCircularDependency should succeed for non-existent CTE, got: %v", err)
+		ctx := &CTEContext{CTEs: make(map[string]*CTEDefinition), IsRecursive: false}
+		if err := ctx.checkCircularDependency("non_existent", make(map[string]bool)); err != nil {
+			t.Errorf("should succeed for non-existent CTE, got: %v", err)
 		}
 	})
 
-	// Test case 3: CTE with dependencies that form valid chain
 	t.Run("Valid dependency chain", func(t *testing.T) {
-		sql := "WITH a AS (SELECT 1), b AS (SELECT * FROM a), c AS (SELECT * FROM b) SELECT * FROM c"
-		p := parser.NewParser(sql)
-		stmts, err := p.Parse()
-		if err != nil {
-			t.Fatalf("Parse failed: %v", err)
-		}
-
-		selectStmt := stmts[0].(*parser.SelectStmt)
-		ctx, err := NewCTEContext(selectStmt.With)
-		if err != nil {
-			t.Fatalf("NewCTEContext failed: %v", err)
-		}
-
-		visiting := make(map[string]bool)
-		err = ctx.checkCircularDependency("c", visiting)
-		if err != nil {
-			t.Errorf("checkCircularDependency should succeed for valid chain, got: %v", err)
+		ctx := checkCircDepHelper(t, "WITH a AS (SELECT 1), b AS (SELECT * FROM a), c AS (SELECT * FROM b) SELECT * FROM c", "c")
+		if err := ctx.checkCircularDependency("c", make(map[string]bool)); err != nil {
+			t.Errorf("should succeed for valid chain, got: %v", err)
 		}
 	})
 
-	// Test case 4: Test the path where we delete from visiting map
 	t.Run("Cleanup visiting map", func(t *testing.T) {
-		sql := "WITH a AS (SELECT 1), b AS (SELECT * FROM a) SELECT * FROM b"
-		p := parser.NewParser(sql)
-		stmts, err := p.Parse()
-		if err != nil {
-			t.Fatalf("Parse failed: %v", err)
-		}
-
-		selectStmt := stmts[0].(*parser.SelectStmt)
-		ctx, err := NewCTEContext(selectStmt.With)
-		if err != nil {
-			t.Fatalf("NewCTEContext failed: %v", err)
-		}
-
+		ctx := checkCircDepHelper(t, "WITH a AS (SELECT 1), b AS (SELECT * FROM a) SELECT * FROM b", "b")
 		visiting := make(map[string]bool)
-		err = ctx.checkCircularDependency("b", visiting)
-		if err != nil {
-			t.Errorf("checkCircularDependency failed: %v", err)
+		if err := ctx.checkCircularDependency("b", visiting); err != nil {
+			t.Errorf("failed: %v", err)
 		}
-
-		// Verify visiting map was cleaned up
 		if visiting["b"] {
 			t.Error("Expected 'b' to be removed from visiting map")
 		}
@@ -98,67 +60,35 @@ func TestCheckCircularDependencyAllPaths(t *testing.T) {
 
 // TestCalculateMaxDependencyLevelAllPaths tests all paths in calculateMaxDependencyLevel.
 func TestCalculateMaxDependencyLevelAllPaths(t *testing.T) {
-	// Test case 1: Dependency that's the CTE itself (recursive)
 	t.Run("Self-reference in recursive CTE", func(t *testing.T) {
-		sql := "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 10) SELECT * FROM cte"
-		p := parser.NewParser(sql)
-		stmts, err := p.Parse()
-		if err != nil {
-			t.Fatalf("Parse failed: %v", err)
-		}
-
-		selectStmt := stmts[0].(*parser.SelectStmt)
-		ctx, err := NewCTEContext(selectStmt.With)
-		if err != nil {
-			t.Fatalf("NewCTEContext failed: %v", err)
-		}
-
-		// The CTE should be created successfully
+		ctx := checkCircDepHelper(t, "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 10) SELECT * FROM cte", "cte")
 		def, exists := ctx.GetCTE("cte")
 		if !exists {
 			t.Fatal("CTE 'cte' not found")
 		}
-
 		if def.Level <= 0 {
 			t.Errorf("Expected positive level for recursive CTE, got %d", def.Level)
 		}
 	})
 
-	// Test case 2: CTE with multiple dependencies
 	t.Run("Multiple dependencies with max level calculation", func(t *testing.T) {
-		sql := "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT * FROM a), d AS (SELECT * FROM c UNION SELECT * FROM b) SELECT * FROM d"
-		p := parser.NewParser(sql)
-		stmts, err := p.Parse()
-		if err != nil {
-			t.Fatalf("Parse failed: %v", err)
-		}
-
-		selectStmt := stmts[0].(*parser.SelectStmt)
-		ctx, err := NewCTEContext(selectStmt.With)
-		if err != nil {
-			t.Fatalf("NewCTEContext failed: %v", err)
-		}
-
-		// CTE 'd' depends on both 'c' and 'b'
-		// 'c' depends on 'a'
-		// So level of 'd' should be highest
+		ctx := checkCircDepHelper(t, "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT * FROM a), d AS (SELECT * FROM c UNION SELECT * FROM b) SELECT * FROM d", "d")
 		defA, _ := ctx.GetCTE("a")
 		defB, _ := ctx.GetCTE("b")
 		defC, _ := ctx.GetCTE("c")
 		defD, _ := ctx.GetCTE("d")
 
-		if defD.Level <= defC.Level {
-			t.Errorf("Expected level of 'd' (%d) > level of 'c' (%d)", defD.Level, defC.Level)
-		}
-
-		if defC.Level <= defA.Level {
-			t.Errorf("Expected level of 'c' (%d) > level of 'a' (%d)", defC.Level, defA.Level)
-		}
-
-		if defD.Level <= defB.Level {
-			t.Errorf("Expected level of 'd' (%d) > level of 'b' (%d)", defD.Level, defB.Level)
-		}
+		assertLevelGreater(t, "d", defD.Level, "c", defC.Level)
+		assertLevelGreater(t, "c", defC.Level, "a", defA.Level)
+		assertLevelGreater(t, "d", defD.Level, "b", defB.Level)
 	})
+}
+
+func assertLevelGreater(t *testing.T, name1 string, level1 int, name2 string, level2 int) {
+	t.Helper()
+	if level1 <= level2 {
+		t.Errorf("Expected level of '%s' (%d) > level of '%s' (%d)", name1, level1, name2, level2)
+	}
 }
 
 // TestSelectBestIndexWithOptionsAllPaths tests all paths in SelectBestIndexWithOptions.

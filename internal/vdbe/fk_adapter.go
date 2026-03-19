@@ -195,6 +195,29 @@ func (r *VDBERowReader) ReadRowByRowid(tableName string, rowid int64) (map[strin
 	return r.readRowValuesFromCursor(r.vdbe.Cursors[cursorNum], table)
 }
 
+// seekByKeyValues seeks a cursor to the row identified by keyValues.
+func (r *VDBERowReader) seekByKeyValues(cursor *btree.BtCursor, table *tableInfo, keyValues []interface{}) error {
+	if table.WithoutRowID {
+		keyBytes := encodeCompositeKeyFromValues(keyValues)
+		found, err := cursor.SeekComposite(keyBytes)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("row not found with key %v", keyValues)
+		}
+		return nil
+	}
+	if len(keyValues) != 1 {
+		return fmt.Errorf("regular tables expect single rowid value")
+	}
+	rowid, ok := keyValues[0].(int64)
+	if !ok {
+		return fmt.Errorf("rowid must be int64")
+	}
+	return r.seekToRowid(cursor, rowid)
+}
+
 // ReadRowByKey reads a row's values by its primary key values.
 // Used for recursive CASCADE operations on WITHOUT ROWID tables.
 func (r *VDBERowReader) ReadRowByKey(tableName string, keyValues []interface{}) (map[string]interface{}, error) {
@@ -219,28 +242,8 @@ func (r *VDBERowReader) ReadRowByKey(tableName string, keyValues []interface{}) 
 		return nil, err
 	}
 
-	// For WITHOUT ROWID tables, encode the key and seek
-	if table.WithoutRowID {
-		keyBytes := encodeCompositeKeyFromValues(keyValues)
-		found, err := cursor.SeekComposite(keyBytes)
-		if err != nil {
-			return nil, err
-		}
-		if !found {
-			return nil, fmt.Errorf("row not found with key %v", keyValues)
-		}
-	} else {
-		// For regular tables, keyValues should be a single int64 rowid
-		if len(keyValues) != 1 {
-			return nil, fmt.Errorf("regular tables expect single rowid value")
-		}
-		rowid, ok := keyValues[0].(int64)
-		if !ok {
-			return nil, fmt.Errorf("rowid must be int64")
-		}
-		if err := r.seekToRowid(cursor, rowid); err != nil {
-			return nil, err
-		}
+	if err := r.seekByKeyValues(cursor, table, keyValues); err != nil {
+		return nil, err
 	}
 
 	return r.readRowValuesFromCursor(r.vdbe.Cursors[cursorNum], table)
@@ -808,6 +811,14 @@ func (r *VDBERowReader) checkRowMatch(cursor *Cursor, table *tableInfo, columns 
 	return true, nil
 }
 
+// getCollationForColumn returns the collation for a column at the given index.
+func getCollationForColumn(collations []string, idx int) string {
+	if idx < len(collations) && collations[idx] != "" {
+		return collations[idx]
+	}
+	return "BINARY"
+}
+
 // checkRowMatchWithCollation checks if the current row matches the given column values with collation.
 func (r *VDBERowReader) checkRowMatchWithCollation(cursor *Cursor, table *tableInfo, columns []string, values []interface{}, collations []string) (bool, error) {
 	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
@@ -822,38 +833,50 @@ func (r *VDBERowReader) checkRowMatchWithCollation(cursor *Cursor, table *tableI
 
 	rowid := btCursor.GetKey()
 
-	// Parse the record and check column values
 	for i, colName := range columns {
+		colValue, err := r.extractColumnValueFromRow(table, colName, payload, rowid)
+		if err != nil {
+			return false, err
+		}
+
 		colIdx := r.findColumnIndex(table, colName)
-		if colIdx < 0 {
-			return false, fmt.Errorf("column not found: %s", colName)
-		}
-
-		colInfo := table.Columns[colIdx]
-		colValue := NewMem()
-
-		if colInfo.IsIntegerPK {
-			// INTEGER PRIMARY KEY is stored as rowid, not in payload
-			colValue.SetInt(rowid)
-		} else {
-			// Regular column: extract from payload using PayloadColIndex
-			if err := parseRecordColumn(payload, colInfo.PayloadColIndex, colValue); err != nil {
-				return false, err
-			}
-		}
-
-		// Compare with expected value using affinity and collation
-		// For FK checks: apply parent's affinity first, then use parent's collation
-		colCollation := "BINARY"
-		if i < len(collations) && collations[i] != "" {
-			colCollation = collations[i]
-		}
-		if !r.valuesEqualWithAffinityAndCollation(colValue, values[i], colInfo.Type, colCollation) {
+		colCollation := getCollationForColumn(collations, i)
+		if !r.valuesEqualWithAffinityAndCollation(colValue, values[i], table.Columns[colIdx].Type, colCollation) {
 			return false, nil
 		}
 	}
 
 	return true, nil
+}
+
+// extractColumnValueFromRow extracts a column value from the current row, handling INTEGER PK.
+func (r *VDBERowReader) extractColumnValueFromRow(table *tableInfo, colName string, payload []byte, rowid int64) (*Mem, error) {
+	colIdx := r.findColumnIndex(table, colName)
+	if colIdx < 0 {
+		return nil, fmt.Errorf("column not found: %s", colName)
+	}
+	colInfo := table.Columns[colIdx]
+	value := NewMem()
+	if colInfo.IsIntegerPK {
+		value.SetInt(rowid)
+	} else {
+		if err := parseRecordColumn(payload, colInfo.PayloadColIndex, value); err != nil {
+			return nil, err
+		}
+	}
+	return value, nil
+}
+
+// getParentColumnTypeAndCollation retrieves the type and collation for a parent column.
+func (r *VDBERowReader) getParentColumnTypeAndCollation(parentTable *tableInfo, parentColumns []string, idx int) (string, string) {
+	if idx >= len(parentColumns) || parentTable == nil {
+		return "", ""
+	}
+	parentColIdx := r.findColumnIndex(parentTable, parentColumns[idx])
+	if parentColIdx < 0 {
+		return "", ""
+	}
+	return parentTable.Columns[parentColIdx].Type, parentTable.Columns[parentColIdx].Collation
 }
 
 // checkRowMatchWithParentAffinityAndCollation checks if child row matches parent values.
@@ -878,43 +901,19 @@ func (r *VDBERowReader) checkRowMatchWithParentAffinityAndCollation(
 
 	rowid := btCursor.GetKey()
 
-	// Compare each column
 	for i, childColName := range childColumns {
-		// Get child column value
-		childColIdx := r.findColumnIndex(childTable, childColName)
-		if childColIdx < 0 {
-			return false, fmt.Errorf("column not found: %s", childColName)
+		childValue, err := r.extractColumnValueFromRow(childTable, childColName, payload, rowid)
+		if err != nil {
+			return false, err
 		}
 
-		childColInfo := childTable.Columns[childColIdx]
-		childValue := NewMem()
+		parentColType, parentCollation := r.getParentColumnTypeAndCollation(parentTable, parentColumns, i)
 
-		if childColInfo.IsIntegerPK {
-			childValue.SetInt(rowid)
-		} else {
-			if err := parseRecordColumn(payload, childColInfo.PayloadColIndex, childValue); err != nil {
-				return false, err
-			}
-		}
-
-		// Get parent column info for affinity and collation
-		var parentColType string
-		var parentCollation string
-		if i < len(parentColumns) && parentTable != nil {
-			parentColIdx := r.findColumnIndex(parentTable, parentColumns[i])
-			if parentColIdx >= 0 {
-				parentColType = parentTable.Columns[parentColIdx].Type
-				parentCollation = parentTable.Columns[parentColIdx].Collation
-			}
-		}
-
-		// Compare using parent column's collation
 		if parentCollation != "" {
 			if !r.valuesEqualWithCollation(childValue, parentValues[i], parentCollation) {
 				return false, nil
 			}
 		} else {
-			// Fall back to affinity-based comparison
 			if !r.valuesEqualWithAffinity(childValue, parentValues[i], parentColType) {
 				return false, nil
 			}
@@ -1334,6 +1333,44 @@ func (m *VDBERowModifier) UpdateRow(table string, rowid int64, values map[string
 	return m.replaceRow(btCursor, tableInfo, rowid, currentValues)
 }
 
+// seekByKey seeks to a row using either composite key or rowid.
+func (m *VDBERowModifier) seekByKey(btCursor *btree.BtCursor, tableInfo *tableInfo, keyValues []interface{}) (bool, error) {
+	if tableInfo.WithoutRowID {
+		keyBytes := encodeCompositeKeyFromValues(keyValues)
+		return btCursor.SeekComposite(keyBytes)
+	}
+	if len(keyValues) != 1 {
+		return false, fmt.Errorf("regular tables expect single rowid value")
+	}
+	rowid, ok := keyValues[0].(int64)
+	if !ok {
+		return false, fmt.Errorf("rowid must be int64")
+	}
+	return btCursor.SeekRowid(rowid)
+}
+
+// readAndMergeRowByKey reads the current row and merges in update values.
+func (m *VDBERowModifier) readAndMergeRowByKey(btCursor *btree.BtCursor, tableInfo *tableInfo, values map[string]interface{}) ([]interface{}, int64, error) {
+	payload, err := btCursor.GetPayloadWithOverflow()
+	if err != nil {
+		return nil, 0, err
+	}
+	var rowid int64
+	if !tableInfo.WithoutRowID {
+		rowid = btCursor.GetKey()
+	}
+	currentValues, err := m.readRowValues(tableInfo, payload, rowid)
+	if err != nil {
+		return nil, 0, err
+	}
+	for colIdx, col := range tableInfo.Columns {
+		if newVal, ok := values[col.Name]; ok {
+			currentValues[colIdx] = newVal
+		}
+	}
+	return currentValues, rowid, nil
+}
+
 // UpdateRowByKey updates specific columns on a row identified by primary key values.
 // Used for WITHOUT ROWID tables.
 func (m *VDBERowModifier) UpdateRowByKey(table string, keyValues []interface{}, values map[string]interface{}) error {
@@ -1350,22 +1387,7 @@ func (m *VDBERowModifier) UpdateRowByKey(table string, keyValues []interface{}, 
 		return err
 	}
 
-	// Seek to the row
-	var found bool
-	if tableInfo.WithoutRowID {
-		keyBytes := encodeCompositeKeyFromValues(keyValues)
-		found, err = btCursor.SeekComposite(keyBytes)
-	} else {
-		if len(keyValues) != 1 {
-			return fmt.Errorf("regular tables expect single rowid value")
-		}
-		rowid, ok := keyValues[0].(int64)
-		if !ok {
-			return fmt.Errorf("rowid must be int64")
-		}
-		found, err = btCursor.SeekRowid(rowid)
-	}
-
+	found, err := m.seekByKey(btCursor, tableInfo, keyValues)
 	if err != nil {
 		return err
 	}
@@ -1373,34 +1395,14 @@ func (m *VDBERowModifier) UpdateRowByKey(table string, keyValues []interface{}, 
 		return fmt.Errorf("row not found with key %v in table %s", keyValues, table)
 	}
 
-	// Read current row values
-	payload, err := btCursor.GetPayloadWithOverflow()
+	currentValues, rowid, err := m.readAndMergeRowByKey(btCursor, tableInfo, values)
 	if err != nil {
 		return err
 	}
 
-	var rowid int64
-	if !tableInfo.WithoutRowID {
-		rowid = btCursor.GetKey()
-	}
-
-	currentValues, err := m.readRowValues(tableInfo, payload, rowid)
-	if err != nil {
-		return err
-	}
-
-	// Merge update values
-	for colIdx, col := range tableInfo.Columns {
-		if newVal, ok := values[col.Name]; ok {
-			currentValues[colIdx] = newVal
-		}
-	}
-
-	// For WITHOUT ROWID, we need to handle key changes specially
 	if tableInfo.WithoutRowID {
 		return m.replaceRowWithoutRowID(btCursor, tableInfo, keyValues, currentValues)
 	}
-
 	return m.replaceRow(btCursor, tableInfo, rowid, currentValues)
 }
 

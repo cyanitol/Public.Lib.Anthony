@@ -3,15 +3,30 @@ package driver
 
 import (
 	"database/sql"
-	"os"
 	"testing"
 )
+
+// countPreparedScanCount prepares a statement, queries a count, and checks it.
+func countPreparedScanCount(t *testing.T, db *sql.DB, query string, want int, label string) {
+	t.Helper()
+	stmt, err := db.Prepare(query)
+	if err != nil {
+		t.Fatalf("failed to prepare %s: %v", label, err)
+	}
+	defer stmt.Close()
+	var count int
+	if err = stmt.QueryRow().Scan(&count); err != nil {
+		t.Fatalf("failed to query %s: %v", label, err)
+	}
+	if count != want {
+		t.Errorf("%s = %d, want %d", label, count, want)
+	}
+}
 
 // TestCountWithPreparedStatement tests that COUNT(*) works with prepared statements
 func TestCountWithPreparedStatement(t *testing.T) {
 	t.Skip("pre-existing failure - COUNT with prepared statements incomplete")
-	dbFile := "test_count_prepared.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_count_prepared.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -19,108 +34,44 @@ func TestCountWithPreparedStatement(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create a test table
-	_, err = db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
-	if err != nil {
+	if _, err = db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"); err != nil {
 		t.Fatalf("failed to create table: %v", err)
 	}
-
-	// Insert some test data
-	_, err = db.Exec("INSERT INTO users (id, name) VALUES (1, 'Alice')")
-	if err != nil {
-		t.Fatalf("failed to insert row 1: %v", err)
+	for i, name := range []string{"Alice", "Bob", "Charlie"} {
+		if _, err = db.Exec("INSERT INTO users (id, name) VALUES (?, ?)", i+1, name); err != nil {
+			t.Fatalf("failed to insert row %d: %v", i+1, err)
+		}
 	}
 
-	_, err = db.Exec("INSERT INTO users (id, name) VALUES (2, 'Bob')")
-	if err != nil {
-		t.Fatalf("failed to insert row 2: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO users (id, name) VALUES (3, 'Charlie')")
-	if err != nil {
-		t.Fatalf("failed to insert row 3: %v", err)
-	}
-
-	// Test COUNT(*) with prepared statement
 	t.Run("COUNT(*) with prepared statement", func(t *testing.T) {
-		stmt, err := db.Prepare("SELECT COUNT(*) FROM users")
-		if err != nil {
-			t.Fatalf("failed to prepare statement: %v", err)
-		}
-		defer stmt.Close()
-
-		var count int
-		err = stmt.QueryRow().Scan(&count)
-		if err != nil {
-			t.Fatalf("failed to query: %v", err)
-		}
-
-		if count != 3 {
-			t.Errorf("COUNT(*) = %d, want 3", count)
-		}
+		countPreparedScanCount(t, db, "SELECT COUNT(*) FROM users", 3, "COUNT(*)")
 	})
 
-	// Test COUNT(*) with direct query (for comparison)
 	t.Run("COUNT(*) with direct query", func(t *testing.T) {
 		var count int
-		err = db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
-		if err != nil {
+		if err = db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
 			t.Fatalf("failed to query: %v", err)
 		}
-
 		if count != 3 {
 			t.Errorf("COUNT(*) = %d, want 3", count)
 		}
 	})
 
-	// Test COUNT(column) with prepared statement
 	t.Run("COUNT(column) with prepared statement", func(t *testing.T) {
-		stmt, err := db.Prepare("SELECT COUNT(name) FROM users")
-		if err != nil {
-			t.Fatalf("failed to prepare statement: %v", err)
-		}
-		defer stmt.Close()
-
-		var count int
-		err = stmt.QueryRow().Scan(&count)
-		if err != nil {
-			t.Fatalf("failed to query: %v", err)
-		}
-
-		if count != 3 {
-			t.Errorf("COUNT(name) = %d, want 3", count)
-		}
+		countPreparedScanCount(t, db, "SELECT COUNT(name) FROM users", 3, "COUNT(name)")
 	})
 
-	// Test empty table COUNT
 	t.Run("COUNT(*) on empty table", func(t *testing.T) {
-		_, err = db.Exec("CREATE TABLE empty_table (id INTEGER PRIMARY KEY)")
-		if err != nil {
+		if _, err = db.Exec("CREATE TABLE empty_table (id INTEGER PRIMARY KEY)"); err != nil {
 			t.Fatalf("failed to create empty table: %v", err)
 		}
-
-		stmt, err := db.Prepare("SELECT COUNT(*) FROM empty_table")
-		if err != nil {
-			t.Fatalf("failed to prepare statement: %v", err)
-		}
-		defer stmt.Close()
-
-		var count int
-		err = stmt.QueryRow().Scan(&count)
-		if err != nil {
-			t.Fatalf("failed to query: %v", err)
-		}
-
-		if count != 0 {
-			t.Errorf("COUNT(*) on empty table = %d, want 0", count)
-		}
+		countPreparedScanCount(t, db, "SELECT COUNT(*) FROM empty_table", 0, "COUNT(*) empty")
 	})
 }
 
 // TestCountWithParameters tests COUNT with WHERE clause using parameters
 func TestCountWithParameters(t *testing.T) {
-	dbFile := "test_count_params.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_count_params.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -172,8 +123,7 @@ func TestCountWithParameters(t *testing.T) {
 
 // TestMultipleAggregates tests multiple aggregate functions in one query
 func TestMultipleAggregates(t *testing.T) {
-	dbFile := "test_count_multi_agg.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_count_multi_agg.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {

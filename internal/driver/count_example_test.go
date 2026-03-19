@@ -5,17 +5,13 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
 )
 
 // Example_preparedStatementCount demonstrates that COUNT(*) works correctly
 // with prepared statements, returning the actual count instead of NULL.
 func Example_preparedStatementCount() {
 	// Create a temporary database
-	dbFile := "example_count.db"
-	defer os.Remove(dbFile)
-
-	db, err := sql.Open(DriverName, dbFile)
+	db, err := sql.Open(DriverName, ":memory:")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -57,10 +53,7 @@ func Example_preparedStatementCount() {
 // for empty tables instead of NULL.
 func Example_preparedStatementCountEmpty() {
 	// Create a temporary database
-	dbFile := "example_count_empty.db"
-	defer os.Remove(dbFile)
-
-	db, err := sql.Open(DriverName, dbFile)
+	db, err := sql.Open(DriverName, ":memory:")
 	if err != nil {
 		log.Fatal(err)
 	}

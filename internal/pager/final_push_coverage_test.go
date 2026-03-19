@@ -51,79 +51,52 @@ func TestEnableWALModeFull(t *testing.T) {
 	}
 }
 
+// journalRestoreWriteAndCapture writes initial data, commits, and captures original page data.
+func journalRestoreWriteAndCapture(t *testing.T, p *Pager, testData []byte) []byte {
+	t.Helper()
+	mustWriteDataToPage(t, p, 1, DatabaseHeaderSize, testData)
+	mustCommit(t, p)
+	page := mustGetPage(t, p, 1)
+	originalData := make([]byte, len(page.Data))
+	copy(originalData, page.Data)
+	p.Put(page)
+	return originalData
+}
+
+// journalRestoreModifyAndFlush modifies page, writes dirty to disk, and closes.
+func journalRestoreModifyAndFlush(t *testing.T, p *Pager, modifiedData []byte) {
+	t.Helper()
+	mustModifyPage(t, p, 1, DatabaseHeaderSize, modifiedData)
+	p.writeDirtyPages()
+	p.Close()
+}
+
 // TestJournalRestoreEntryWithValidChecksum tests restore with valid checksum
 func TestJournalRestoreEntryWithValidChecksum(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_restore_valid.db")
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-	defer pager.Close()
+	p := mustOpenPagerSized(t, dbFile, 4096)
 
-	// Write initial data
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
 	testData := []byte("initial data for restore test")
-	copy(page.Data[DatabaseHeaderSize:], testData)
-	pager.Put(page)
+	originalData := journalRestoreWriteAndCapture(t, p, testData)
 
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit() error = %v", err)
-	}
-
-	// Create a journal manually
-	journal := NewJournal(dbFile+"-journal", 4096, 1)
-	if err := journal.Open(); err != nil {
-		t.Fatalf("failed to open journal: %v", err)
-	}
-
-	// Get the current page data
-	page, _ = pager.Get(1)
-	originalData := make([]byte, len(page.Data))
-	copy(originalData, page.Data)
-	pager.Put(page)
-
-	// Write original data to journal
-	if err := journal.WriteOriginal(1, originalData); err != nil {
-		t.Fatalf("WriteOriginal() error = %v", err)
-	}
+	journal := mustOpenJournalWrite(t, dbFile+"-journal", 4096, 1, 1, originalData)
 	journal.Close()
 
-	// Modify the page in memory
-	page, _ = pager.Get(1)
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	modifiedData := []byte("modified data that should be rolled back")
-	copy(page.Data[DatabaseHeaderSize:], modifiedData)
-	pager.Put(page)
-
-	// Write to disk without committing
-	pager.writeDirtyPages()
-	pager.Close()
+	journalRestoreModifyAndFlush(t, p, []byte("modified data that should be rolled back"))
 
 	// Reopen and rollback
-	pager, err = OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to reopen: %v", err)
-	}
-	defer pager.Close()
+	p = mustOpenPagerSized(t, dbFile, 4096)
+	defer p.Close()
 
 	journal = NewJournal(dbFile+"-journal", 4096, 1)
-	if err := journal.Rollback(pager); err != nil {
+	if err := journal.Rollback(p); err != nil {
 		t.Errorf("Rollback() error = %v", err)
 	}
 
-	// Verify data was restored
-	page, _ = pager.Get(1)
-	defer pager.Put(page)
+	page := mustGetPage(t, p, 1)
+	defer p.Put(page)
 
 	if !bytes.Equal(page.Data[DatabaseHeaderSize:DatabaseHeaderSize+len(testData)], testData) {
 		t.Error("data not properly restored from journal")
@@ -187,60 +160,24 @@ func TestProcessTrunkPageEdgeCases(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_trunk_edge.db")
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-	defer pager.Close()
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	defer p.Close()
 
-	fl := NewFreeList(pager)
+	fl := NewFreeList(p)
+	mustCreateWritePages(t, p, 2, 100)
+	mustFreePages(t, fl, 10, 39)
+	mustFlush(t, fl)
 
-	// Create pages
-	totalPages := 100 // Reduced to avoid cache full error
-
-	for i := Pgno(2); i <= Pgno(totalPages); i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("Write() error = %v", err)
-		}
-		pager.Put(page)
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit() error = %v", err)
-	}
-
-	// Free pages to fill part of a trunk
-	pagesToFree := 30 // Less than a full trunk
-	for i := Pgno(10); i < Pgno(10+pagesToFree); i++ {
-		if err := fl.Free(i); err != nil {
-			t.Fatalf("Free() error = %v", err)
-		}
-	}
-
-	// Flush
-	if err := fl.Flush(); err != nil {
-		t.Fatalf("Flush() error = %v", err)
-	}
-
-	// Now free one more to trigger adding to existing trunk
+	// Free one more to trigger adding to existing trunk
 	if err := fl.Free(Pgno(50)); err != nil {
 		t.Fatalf("Free() error = %v", err)
 	}
+	mustFlush(t, fl)
 
-	if err := fl.Flush(); err != nil {
-		t.Fatalf("second Flush() error = %v", err)
-	}
-
-	// Verify freelist
 	totalFree := fl.GetTotalFree()
 	if totalFree == 0 {
 		t.Error("expected non-zero total free pages")
 	}
-
 	t.Logf("Total free pages: %d", totalFree)
 }
 
@@ -249,60 +186,38 @@ func TestFreeListCreateNewTrunkMultiple(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_multi_trunk.db")
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-	defer pager.Close()
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	defer p.Close()
 
-	fl := NewFreeList(pager)
+	fl := NewFreeList(p)
+	mustCreateWritePages(t, p, 2, 150)
+	mustFreePages(t, fl, 20, 140)
+	mustFlush(t, fl)
 
-	// Create enough pages
-	totalPages := 150 // Reduced to avoid cache full
-
-	for i := Pgno(2); i <= Pgno(totalPages); i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("Write() error = %v", err)
-		}
-		pager.Put(page)
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit() error = %v", err)
-	}
-
-	// Free many pages to create multiple trunks
-	for i := Pgno(20); i <= Pgno(totalPages-10); i++ {
-		if err := fl.Free(i); err != nil {
-			t.Fatalf("Free() error = %v", err)
-		}
-	}
-
-	// Flush to create trunk structure
-	if err := fl.Flush(); err != nil {
-		t.Fatalf("Flush() error = %v", err)
-	}
-
-	// Verify trunk was created
 	if fl.GetFirstTrunk() == 0 {
 		t.Error("expected trunk to be created")
 	}
 
-	// Read trunk
 	nextTrunk, leaves, err := fl.ReadTrunk(fl.GetFirstTrunk())
 	if err != nil {
 		t.Fatalf("ReadTrunk() error = %v", err)
 	}
-
 	t.Logf("First trunk: next=%d, leaves=%d", nextTrunk, len(leaves))
 
-	// Verify the structure
 	if err := fl.Verify(); err != nil {
 		t.Errorf("Verify() error = %v", err)
+	}
+}
+
+// walCleanup closes and nils WAL resources on a pager.
+func walCleanup(p *Pager) {
+	if p.wal != nil {
+		p.wal.Close()
+		p.wal = nil
+	}
+	if p.walIndex != nil {
+		p.walIndex.Close()
+		p.walIndex = nil
 	}
 }
 
@@ -311,53 +226,24 @@ func TestWALModeCheckpointTransition(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_wal_checkpoint.db")
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-	defer pager.Close()
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	defer p.Close()
 
-	// Enable WAL mode
-	if err := pager.SetJournalMode(JournalModeWAL); err != nil {
+	if err := p.SetJournalMode(JournalModeWAL); err != nil {
 		t.Logf("SetJournalMode(WAL) error = %v", err)
-		// May not be supported in all environments
 		return
 	}
 
-	// Write some data in WAL mode
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	copy(page.Data[DatabaseHeaderSize:], []byte("WAL mode data"))
-	pager.Put(page)
+	mustWriteDataToPage(t, p, 1, DatabaseHeaderSize, []byte("WAL mode data"))
+	mustCommit(t, p)
 
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit() error = %v", err)
-	}
-
-	// Disable WAL mode (should checkpoint)
-	if err := pager.SetJournalMode(JournalModeDelete); err != nil {
+	if err := p.SetJournalMode(JournalModeDelete); err != nil {
 		t.Errorf("SetJournalMode(DELETE) error = %v", err)
 	}
-
-	// Verify mode changed
-	if pager.GetJournalMode() != JournalModeDelete {
+	if p.GetJournalMode() != JournalModeDelete {
 		t.Error("expected DELETE mode after disabling WAL")
 	}
-
-	// Cleanup
-	if pager.wal != nil {
-		pager.wal.Close()
-		pager.wal = nil
-	}
-	if pager.walIndex != nil {
-		pager.walIndex.Close()
-		pager.walIndex = nil
-	}
+	walCleanup(p)
 }
 
 // TestCommitPhasesWithErrors tests error handling in commit phases

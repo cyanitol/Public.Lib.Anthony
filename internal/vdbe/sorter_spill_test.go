@@ -114,72 +114,67 @@ func TestSorterWithSpill_NoSpill(t *testing.T) {
 	}
 }
 
-func TestSorterWithSpill_SingleSpill(t *testing.T) {
-	t.Parallel()
-
-	// Create temp directory for spill files
-	tempDir := t.TempDir()
-
-	// Create sorter with small memory limit to force spilling
+func createSpillSorter(tempDir string) *SorterWithSpill {
 	config := &SorterConfig{
-		MaxMemoryBytes: 500, // Very small to force spill
+		MaxMemoryBytes: 500,
 		TempDir:        tempDir,
 		EnableSpill:    true,
 	}
+	return NewSorterWithSpill([]int{0}, []bool{false}, []string{""}, 2, config)
+}
 
-	sorter := NewSorterWithSpill(
-		[]int{0},
-		[]bool{false},
-		[]string{""},
-		2,
-		config,
-	)
-	defer sorter.Close()
-
-	// Insert rows that exceed memory limit
+func insertSpillRows(t *testing.T, sorter *SorterWithSpill) {
+	t.Helper()
 	for i := int64(10); i > 0; i-- {
-		mem1 := NewMemInt(i)
-		mem2 := NewMemStr(fmt.Sprintf("row_%d", i))
-		err := sorter.Insert([]*Mem{mem1, mem2})
+		err := sorter.Insert([]*Mem{NewMemInt(i), NewMemStr(fmt.Sprintf("row_%d", i))})
 		if err != nil {
 			t.Fatalf("Insert failed: %v", err)
 		}
 	}
+}
 
-	// Should have spilled at least once
-	if sorter.GetNumSpilledRuns() == 0 {
-		t.Error("Expected at least one spilled run")
-	}
-
-	// Sort (triggers merge)
-	err := sorter.Sort()
-	if err != nil {
-		t.Fatalf("Sort failed: %v", err)
-	}
-
-	// Check sorted order
-	// Sort() already sets Current to -1, so don't call Rewind()
+func verifySpillSortedOrder(t *testing.T, sorter *SorterWithSpill) {
+	t.Helper()
 	for i := int64(1); i <= 10; i++ {
 		if !sorter.Next() {
 			t.Fatalf("Expected row %d to exist", i)
 		}
-
-		row := sorter.CurrentRow()
-		if row[0].IntValue() != i {
+		if row := sorter.CurrentRow(); row[0].IntValue() != i {
 			t.Errorf("Row %d: expected %d, got %d", i, i, row[0].IntValue())
 		}
 	}
+}
 
-	// Verify spill files are cleaned up
+func countSpillFiles(tempDir string) int {
 	files, _ := os.ReadDir(tempDir)
-	spillFiles := 0
+	count := 0
 	for _, file := range files {
 		if filepath.Ext(file.Name()) == ".tmp" {
-			spillFiles++
+			count++
 		}
 	}
-	if spillFiles > 0 {
-		t.Errorf("Expected spill files to be cleaned up, found %d", spillFiles)
+	return count
+}
+
+func TestSorterWithSpill_SingleSpill(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	sorter := createSpillSorter(tempDir)
+	defer sorter.Close()
+
+	insertSpillRows(t, sorter)
+	if sorter.GetNumSpilledRuns() == 0 {
+		t.Error("Expected at least one spilled run")
+	}
+
+	if err := sorter.Sort(); err != nil {
+		t.Fatalf("Sort failed: %v", err)
+	}
+
+	verifySpillSortedOrder(t, sorter)
+
+	if n := countSpillFiles(tempDir); n > 0 {
+		t.Errorf("Expected spill files to be cleaned up, found %d", n)
 	}
 }
 

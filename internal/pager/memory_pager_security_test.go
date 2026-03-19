@@ -80,44 +80,16 @@ func TestMemoryPagerPageLimitExceeded(t *testing.T) {
 
 func TestMemoryPagerPageLimitWithFreeList(t *testing.T) {
 	t.Parallel()
-	mp, err := OpenMemory(4096)
-	if err != nil {
-		t.Fatalf("Failed to open memory pager: %v", err)
-	}
-	defer mp.Close()
+	mp := mustOpenMemoryPager(t, 4096)
 
-	// Start a write transaction
-	if err := mp.BeginWrite(); err != nil {
-		t.Fatalf("Failed to begin write transaction: %v", err)
-	}
+	mustMemoryBeginWrite(t, mp)
+	pgno1 := mustMemoryAllocate(t, mp)
+	pgno2 := mustMemoryAllocate(t, mp)
+	mustMemoryFreePage(t, mp, pgno1)
+	mustMemoryCommit(t, mp)
 
-	// Allocate a few pages
-	pgno1, err := mp.AllocatePage()
-	if err != nil {
-		t.Fatalf("Failed to allocate page 1: %v", err)
-	}
+	mustMemoryBeginWrite(t, mp)
 
-	pgno2, err := mp.AllocatePage()
-	if err != nil {
-		t.Fatalf("Failed to allocate page 2: %v", err)
-	}
-
-	// Free one page
-	if err := mp.FreePage(pgno1); err != nil {
-		t.Fatalf("Failed to free page: %v", err)
-	}
-
-	// Commit to finalize the free list
-	if err := mp.Commit(); err != nil {
-		t.Fatalf("Failed to commit: %v", err)
-	}
-
-	// Start a new transaction
-	if err := mp.BeginWrite(); err != nil {
-		t.Fatalf("Failed to begin write transaction: %v", err)
-	}
-
-	// Manually set dbSize to the limit
 	mp.mu.Lock()
 	mp.dbSize = Pgno(security.MaxMemoryDBPages)
 	mp.mu.Unlock()
@@ -128,12 +100,9 @@ func TestMemoryPagerPageLimitWithFreeList(t *testing.T) {
 		t.Errorf("Should be able to allocate from free list at limit: %v", err)
 	}
 
-	// The allocated page should be the freed page (reused from free list)
 	if pgno3 != pgno1 {
-		t.Logf("Note: Page %d was allocated, expected reuse of freed page %d (may be normal depending on free list implementation)", pgno3, pgno1)
+		t.Logf("Note: Page %d was allocated, expected reuse of freed page %d", pgno3, pgno1)
 	}
-
-	// Verify pgno2 wasn't affected
 	_ = pgno2
 }
 

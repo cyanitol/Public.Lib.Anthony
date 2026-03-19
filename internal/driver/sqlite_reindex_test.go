@@ -7,6 +7,52 @@ import (
 	"testing"
 )
 
+func reindexExecAll(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Errorf("exec %q failed: %v", stmt, err)
+		}
+	}
+}
+
+func reindexAssertInts(t *testing.T, db *sql.DB, query string, want []int) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	var got []int
+	for rows.Next() {
+		var v int
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		got = append(got, v)
+	}
+	if len(got) != len(want) {
+		t.Errorf("expected %d rows, got %d", len(want), len(got))
+		return
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d: expected %d, got %d", i, want[i], got[i])
+		}
+	}
+}
+
+func reindexAssertCount(t *testing.T, db *sql.DB, query string, want int64) {
+	t.Helper()
+	var count int64
+	if err := db.QueryRow(query).Scan(&count); err != nil {
+		t.Fatalf("count query failed: %v", err)
+	}
+	if count != want {
+		t.Errorf("expected count %d, got %d", want, count)
+	}
+}
+
 // TestSQLiteReindex tests the REINDEX command
 // Converted from contrib/sqlite/sqlite-src-3510200/test/reindex.test
 func TestSQLiteReindex(t *testing.T) {
@@ -31,44 +77,15 @@ func TestSQLiteReindex(t *testing.T) {
 			t.Fatalf("failed to create table: %v", err)
 		}
 
-		// REINDEX without arguments
-		_, err = db.Exec("REINDEX")
-		if err != nil {
-			t.Errorf("REINDEX failed: %v", err)
-		}
+		reindexExecAll(t, db, []string{
+			"REINDEX",
+			"REINDEX t1",
+			"REINDEX i1",
+			"REINDEX main.t1",
+			"REINDEX main.i1",
+		})
 
-		// REINDEX on table
-		_, err = db.Exec("REINDEX t1")
-		if err != nil {
-			t.Errorf("REINDEX t1 failed: %v", err)
-		}
-
-		// REINDEX on index
-		_, err = db.Exec("REINDEX i1")
-		if err != nil {
-			t.Errorf("REINDEX i1 failed: %v", err)
-		}
-
-		// REINDEX with database qualifier
-		_, err = db.Exec("REINDEX main.t1")
-		if err != nil {
-			t.Errorf("REINDEX main.t1 failed: %v", err)
-		}
-
-		_, err = db.Exec("REINDEX main.i1")
-		if err != nil {
-			t.Errorf("REINDEX main.i1 failed: %v", err)
-		}
-
-		// Verify data integrity
-		var count int64
-		err = db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-		if err != nil {
-			t.Fatalf("failed to count rows: %v", err)
-		}
-		if count != 2 {
-			t.Errorf("expected 2 rows, got %d", count)
-		}
+		reindexAssertCount(t, db, "SELECT COUNT(*) FROM t1", 2)
 	})
 
 	// Test 2: REINDEX on non-existent object
@@ -81,33 +98,7 @@ func TestSQLiteReindex(t *testing.T) {
 
 	// Test 3: Verify data after reindex
 	t.Run("verify_data_after_reindex", func(t *testing.T) {
-		var results []int
-		rows, err := db.Query("SELECT a FROM t1 ORDER BY a")
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var a int
-			if err := rows.Scan(&a); err != nil {
-				t.Fatalf("scan failed: %v", err)
-			}
-			results = append(results, a)
-		}
-
-		expected := []int{1, 3}
-		if len(results) != len(expected) {
-			t.Errorf("expected %d rows, got %d", len(expected), len(results))
-		}
-		for i, want := range expected {
-			if i >= len(results) {
-				break
-			}
-			if results[i] != want {
-				t.Errorf("row %d: expected %d, got %d", i, want, results[i])
-			}
-		}
+		reindexAssertInts(t, db, "SELECT a FROM t1 ORDER BY a", []int{1, 3})
 	})
 }
 
@@ -238,7 +229,6 @@ func TestReindexAfterInsert(t *testing.T) {
 	defer db.Close()
 
 	t.Run("reindex_after_bulk_insert", func(t *testing.T) {
-		// Create table and index
 		_, err := db.Exec(`
 			CREATE TABLE t4(value INTEGER);
 			CREATE INDEX idx_value ON t4(value);
@@ -247,40 +237,16 @@ func TestReindexAfterInsert(t *testing.T) {
 			t.Fatalf("failed to create table: %v", err)
 		}
 
-		// Insert many rows
 		for i := 0; i < 100; i++ {
-			_, err = db.Exec("INSERT INTO t4(value) VALUES(?)", i)
-			if err != nil {
+			if _, err = db.Exec("INSERT INTO t4(value) VALUES(?)", i); err != nil {
 				t.Fatalf("failed to insert: %v", err)
 			}
 		}
 
-		// REINDEX
-		_, err = db.Exec("REINDEX t4")
-		if err != nil {
-			t.Errorf("REINDEX failed: %v", err)
-		}
-
-		// Verify count
-		var count int64
-		err = db.QueryRow("SELECT COUNT(*) FROM t4").Scan(&count)
-		if err != nil {
-			t.Fatalf("count failed: %v", err)
-		}
-		if count != 100 {
-			t.Errorf("expected 100 rows, got %d", count)
-		}
-
-		// Verify index is used (check range query)
-		var sum int64
-		err = db.QueryRow("SELECT SUM(value) FROM t4 WHERE value >= 50 AND value < 60").Scan(&sum)
-		if err != nil {
-			t.Fatalf("sum query failed: %v", err)
-		}
-		expectedSum := int64(50 + 51 + 52 + 53 + 54 + 55 + 56 + 57 + 58 + 59)
-		if sum != expectedSum {
-			t.Errorf("expected sum %d, got %d", expectedSum, sum)
-		}
+		reindexExecAll(t, db, []string{"REINDEX t4"})
+		reindexAssertCount(t, db, "SELECT COUNT(*) FROM t4", 100)
+		reindexAssertCount(t, db, "SELECT SUM(value) FROM t4 WHERE value >= 50 AND value < 60",
+			int64(50+51+52+53+54+55+56+57+58+59))
 	})
 }
 
@@ -298,7 +264,6 @@ func TestReindexWithoutRowid(t *testing.T) {
 
 	t.Run("without_rowid_desc", func(t *testing.T) {
 		t.Skip("UNIQUE constraint on NULL needs SQLite-compatible behavior (multiple NULLs allowed)")
-		// Create WITHOUT ROWID table with DESC primary key
 		_, err := db.Exec(`
 			CREATE TABLE t5(
 				c0 INTEGER PRIMARY KEY DESC,
@@ -310,62 +275,16 @@ func TestReindexWithoutRowid(t *testing.T) {
 			t.Fatalf("failed to create table: %v", err)
 		}
 
-		// Query before reindex
-		var results1 []int
-		rows, err := db.Query("SELECT c0 FROM t5 WHERE c1 IS NULL ORDER BY c0")
-		if err != nil {
-			t.Fatalf("query before reindex failed: %v", err)
-		}
-		for rows.Next() {
-			var c0 int
-			if err := rows.Scan(&c0); err != nil {
-				rows.Close()
-				t.Fatalf("scan failed: %v", err)
-			}
-			results1 = append(results1, c0)
-		}
-		rows.Close()
+		query := "SELECT c0 FROM t5 WHERE c1 IS NULL ORDER BY c0"
+		expected := []int{1, 2, 3, 4, 5}
 
-		// REINDEX
-		_, err = db.Exec("REINDEX")
-		if err != nil {
+		reindexAssertInts(t, db, query, expected)
+
+		if _, err = db.Exec("REINDEX"); err != nil {
 			t.Fatalf("REINDEX failed: %v", err)
 		}
 
-		// Query after reindex
-		var results2 []int
-		rows, err = db.Query("SELECT c0 FROM t5 WHERE c1 IS NULL ORDER BY c0")
-		if err != nil {
-			t.Fatalf("query after reindex failed: %v", err)
-		}
-		for rows.Next() {
-			var c0 int
-			if err := rows.Scan(&c0); err != nil {
-				rows.Close()
-				t.Fatalf("scan failed: %v", err)
-			}
-			results2 = append(results2, c0)
-		}
-		rows.Close()
-
-		// Results should be the same
-		expected := []int{1, 2, 3, 4, 5}
-		if len(results1) != len(expected) || len(results2) != len(expected) {
-			t.Errorf("expected %d rows, got %d before and %d after",
-				len(expected), len(results1), len(results2))
-		}
-
-		for i := range expected {
-			if i >= len(results1) || i >= len(results2) {
-				break
-			}
-			if results1[i] != expected[i] {
-				t.Errorf("before reindex row %d: expected %d, got %d", i, expected[i], results1[i])
-			}
-			if results2[i] != expected[i] {
-				t.Errorf("after reindex row %d: expected %d, got %d", i, expected[i], results2[i])
-			}
-		}
+		reindexAssertInts(t, db, query, expected)
 	})
 }
 

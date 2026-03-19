@@ -502,49 +502,32 @@ func TestSQLiteAlter(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			db := setupMemoryDB(t)
-			defer db.Close()
-
-			// Run setup
-			for _, stmt := range tt.setup {
-				mustExec(t, db, stmt)
-			}
-
-			// Execute ALTER statement
-			_, err := db.Exec(tt.alter)
-
-			// Check error expectations
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got none", tt.errMsg)
-				}
-				if !strings.Contains(err.Error(), tt.errMsg) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errMsg)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			// Run custom check if provided
-			if tt.check != nil {
-				tt.check(t, db)
-			}
-
-			// Run verify query if provided
-			if tt.verify != "" {
-				rows := queryRows(t, db, tt.verify)
-				if len(rows) == 0 {
-					t.Error("verify query returned no rows")
-				}
-			}
+			alterRunTestCase(t, tt.setup, tt.alter, tt.verify, tt.wantErr, tt.errMsg, tt.check)
 		})
 	}
 }
 
 // TestSQLiteAlterDropColumn tests DROP COLUMN functionality (SQLite 3.35.0+)
+// alterDropColumnBasicCheck verifies column was removed after DROP COLUMN.
+func alterDropColumnBasicCheck(t *testing.T, db *sql.DB) {
+	t.Helper()
+	rows := queryRows(t, db, "SELECT * FROM t1")
+	if len(rows) > 0 && len(rows[0]) == 3 {
+		want := [][]interface{}{{int64(1), int64(2), int64(3)}}
+		compareRows(t, rows, want)
+	}
+}
+
+// alterDefaultFloatCheck verifies a float default value is approximately pi.
+func alterDefaultFloatCheck(t *testing.T, db *sql.DB) {
+	t.Helper()
+	val := querySingle(t, db, "SELECT b FROM t1")
+	fval, ok := val.(float64)
+	if !ok || fval < 3.14 || fval > 3.15 {
+		t.Errorf("expected ~3.14159, got %v", val)
+	}
+}
+
 func TestSQLiteAlterDropColumn(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -565,16 +548,7 @@ func TestSQLiteAlterDropColumn(t *testing.T) {
 				"INSERT INTO t1 VALUES(1, 2, 3, 4)",
 			},
 			alter: "ALTER TABLE t1 DROP COLUMN d",
-			check: func(t *testing.T, db *sql.DB) {
-				// If DROP COLUMN is supported, verify column is removed
-				rows := queryRows(t, db, "SELECT * FROM t1")
-				if len(rows) > 0 && len(rows[0]) == 3 {
-					// Column successfully dropped
-					want := [][]interface{}{{int64(1), int64(2), int64(3)}}
-					compareRows(t, rows, want)
-				}
-				// If not supported, the ALTER will fail - that's ok
-			},
+			check: alterDropColumnBasicCheck,
 		},
 		{
 			name: "alter-drop-2: DROP COLUMN non-existent",
@@ -651,13 +625,7 @@ func TestSQLiteAlterDropColumn(t *testing.T) {
 				"INSERT INTO t1 VALUES(1)",
 			},
 			alter: "ALTER TABLE t1 ADD b REAL DEFAULT 3.14159",
-			check: func(t *testing.T, db *sql.DB) {
-				val := querySingle(t, db, "SELECT b FROM t1")
-				// Check it's close to pi
-				if fval, ok := val.(float64); !ok || fval < 3.14 || fval > 3.15 {
-					t.Errorf("expected ~3.14159, got %v", val)
-				}
-			},
+			check: alterDefaultFloatCheck,
 		},
 
 		// ========================================================================
@@ -906,45 +874,26 @@ func TestSQLiteAlterDropColumn(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			db := setupMemoryDB(t)
-			defer db.Close()
-
-			// Run setup
-			for _, stmt := range tt.setup {
-				mustExec(t, db, stmt)
-			}
-
-			// Execute ALTER statement
-			_, err := db.Exec(tt.alter)
-
-			// Check error expectations
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got none", tt.errMsg)
-				}
-				if !strings.Contains(err.Error(), tt.errMsg) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errMsg)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			// Run custom check if provided
-			if tt.check != nil {
-				tt.check(t, db)
-			}
-
-			// Run verify query if provided
-			if tt.verify != "" {
-				rows := queryRows(t, db, tt.verify)
-				if len(rows) == 0 {
-					t.Error("verify query returned no rows")
-				}
-			}
+			alterRunTestCase(t, tt.setup, tt.alter, tt.verify, tt.wantErr, tt.errMsg, tt.check)
 		})
+	}
+}
+
+// alterCheckIndexExists verifies an index exists for a table.
+func alterCheckIndexExists(t *testing.T, db *sql.DB, tbl, errMsg string) {
+	t.Helper()
+	rows := queryRows(t, db, "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='"+tbl+"'")
+	if len(rows) == 0 {
+		t.Error(errMsg)
+	}
+}
+
+// alterCheckIndexByName verifies a specific index exists by name.
+func alterCheckIndexByName(t *testing.T, db *sql.DB, name, errMsg string) {
+	t.Helper()
+	rows := queryRows(t, db, "SELECT name FROM sqlite_master WHERE type='index' AND name='"+name+"'")
+	if len(rows) == 0 {
+		t.Error(errMsg)
 	}
 }
 
@@ -967,9 +916,7 @@ func TestAlterTableWithIndexes(t *testing.T) {
 			},
 			alter: "ALTER TABLE t1 RENAME TO t2",
 			check: func(t *testing.T, db *sql.DB) {
-				// Verify both indexes still exist and work
-				rows := queryRows(t, db, "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='t2' ORDER BY name")
-				if len(rows) != 2 {
+				if rows := queryRows(t, db, "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='t2' ORDER BY name"); len(rows) != 2 {
 					t.Errorf("expected 2 indexes, got %d", len(rows))
 				}
 			},
@@ -982,9 +929,7 @@ func TestAlterTableWithIndexes(t *testing.T) {
 			},
 			alter: "ALTER TABLE t1 RENAME TO t2",
 			check: func(t *testing.T, db *sql.DB) {
-				// Verify unique constraint still works
-				_, err := db.Exec("INSERT INTO t2 VALUES(4, 2, 6)")
-				if err == nil {
+				if _, err := db.Exec("INSERT INTO t2 VALUES(4, 2, 6)"); err == nil {
 					t.Error("expected unique constraint violation")
 				}
 			},
@@ -998,11 +943,7 @@ func TestAlterTableWithIndexes(t *testing.T) {
 			},
 			alter: "ALTER TABLE t1 RENAME TO t2",
 			check: func(t *testing.T, db *sql.DB) {
-				// Verify expression index still exists
-				rows := queryRows(t, db, "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='t2'")
-				if len(rows) == 0 {
-					t.Error("expression index lost after rename")
-				}
+				alterCheckIndexExists(t, db, "t2", "expression index lost after rename")
 			},
 		},
 		{
@@ -1013,13 +954,7 @@ func TestAlterTableWithIndexes(t *testing.T) {
 				"INSERT INTO t1 VALUES(1, 2, 3)",
 			},
 			alter: "ALTER TABLE t1 RENAME TO t2",
-			check: func(t *testing.T, db *sql.DB) {
-				// Verify partial/covering index still works
-				rows := queryRows(t, db, "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='t2'")
-				if len(rows) == 0 {
-					t.Error("index lost after rename")
-				}
-			},
+			check: func(t *testing.T, db *sql.DB) { alterCheckIndexExists(t, db, "t2", "index lost after rename") },
 		},
 		{
 			name: "rename with collated index",
@@ -1029,13 +964,7 @@ func TestAlterTableWithIndexes(t *testing.T) {
 				"INSERT INTO t1 VALUES('Hello')",
 			},
 			alter: "ALTER TABLE t1 RENAME TO t2",
-			check: func(t *testing.T, db *sql.DB) {
-				// Verify collated index preserved
-				rows := queryRows(t, db, "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='t2'")
-				if len(rows) == 0 {
-					t.Error("collated index lost after rename")
-				}
-			},
+			check: func(t *testing.T, db *sql.DB) { alterCheckIndexExists(t, db, "t2", "collated index lost after rename") },
 		},
 		{
 			name: "add column then create index",
@@ -1045,12 +974,8 @@ func TestAlterTableWithIndexes(t *testing.T) {
 			},
 			alter: "ALTER TABLE t1 ADD c INTEGER DEFAULT 3",
 			check: func(t *testing.T, db *sql.DB) {
-				// Create index on new column
 				mustExec(t, db, "CREATE INDEX idx_c ON t1(c)")
-				rows := queryRows(t, db, "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_c'")
-				if len(rows) == 0 {
-					t.Error("index on new column not created")
-				}
+				alterCheckIndexByName(t, db, "idx_c", "index on new column not created")
 			},
 		},
 		{
@@ -1061,13 +986,7 @@ func TestAlterTableWithIndexes(t *testing.T) {
 				"INSERT INTO t1 VALUES(1, 2)",
 			},
 			alter: "ALTER TABLE t1 RENAME TO t2",
-			check: func(t *testing.T, db *sql.DB) {
-				// Verify expression index still exists
-				rows := queryRows(t, db, "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='t2'")
-				if len(rows) == 0 {
-					t.Error("computed index lost after rename")
-				}
-			},
+			check: func(t *testing.T, db *sql.DB) { alterCheckIndexExists(t, db, "t2", "computed index lost after rename") },
 		},
 	}
 
@@ -1087,6 +1006,27 @@ func TestAlterTableWithIndexes(t *testing.T) {
 				tt.check(t, db)
 			}
 		})
+	}
+}
+
+// alterTriggerConditionalCheck tests conditional trigger fires only for matching rows.
+func alterTriggerConditionalCheck(t *testing.T, db *sql.DB) {
+	t.Helper()
+	mustExec(t, db, "INSERT INTO t2 VALUES(5, 6)")
+	mustExec(t, db, "INSERT INTO t2 VALUES(15, 20)")
+	count := querySingle(t, db, "SELECT COUNT(*) FROM log")
+	if count.(int64) != 1 {
+		t.Errorf("expected 1 log entry, got %v", count)
+	}
+}
+
+func alterTriggerMultipleCheck(t *testing.T, db *sql.DB) {
+	mustExec(t, db, "INSERT INTO t2 VALUES(1, 2)")
+	mustExec(t, db, "UPDATE t2 SET b=3")
+	count1 := querySingle(t, db, "SELECT COUNT(*) FROM log1")
+	count2 := querySingle(t, db, "SELECT COUNT(*) FROM log2")
+	if count1.(int64) != 1 || count2.(int64) != 1 {
+		t.Error("both triggers did not fire correctly")
 	}
 }
 
@@ -1156,15 +1096,7 @@ func TestAlterTableWithTriggers(t *testing.T) {
 				"CREATE TRIGGER tr1 AFTER INSERT ON t1 WHEN new.a > 10 BEGIN INSERT INTO log VALUES(new.a); END",
 			},
 			alter: "ALTER TABLE t1 RENAME TO t2",
-			check: func(t *testing.T, db *sql.DB) {
-				mustExec(t, db, "INSERT INTO t2 VALUES(5, 6)")
-				mustExec(t, db, "INSERT INTO t2 VALUES(15, 20)")
-				// Only the second insert should trigger
-				count := querySingle(t, db, "SELECT COUNT(*) FROM log")
-				if count.(int64) != 1 {
-					t.Errorf("expected 1 log entry, got %v", count)
-				}
-			},
+			check: alterTriggerConditionalCheck,
 		},
 		{
 			name: "rename with INSTEAD OF trigger on view",
@@ -1230,15 +1162,7 @@ func TestAlterTableWithTriggers(t *testing.T) {
 				"CREATE TRIGGER tr2 AFTER UPDATE ON t1 BEGIN INSERT INTO log2 VALUES('update'); END",
 			},
 			alter: "ALTER TABLE t1 RENAME TO t2",
-			check: func(t *testing.T, db *sql.DB) {
-				mustExec(t, db, "INSERT INTO t2 VALUES(1, 2)")
-				mustExec(t, db, "UPDATE t2 SET b=3")
-				count1 := querySingle(t, db, "SELECT COUNT(*) FROM log1")
-				count2 := querySingle(t, db, "SELECT COUNT(*) FROM log2")
-				if count1.(int64) != 1 || count2.(int64) != 1 {
-					t.Error("both triggers did not fire correctly")
-				}
-			},
+			check: alterTriggerMultipleCheck,
 		},
 	}
 
@@ -1505,6 +1429,26 @@ func TestAlterTableWithForeignKeys(t *testing.T) {
 	}
 }
 
+func alterEdgeCaseRenameMany(t *testing.T, db *sql.DB) {
+	for i := 0; i < 500; i++ {
+		mustExec(t, db, "INSERT INTO t2 VALUES(?, ?)", i, "value")
+	}
+	count := querySingle(t, db, "SELECT COUNT(*) FROM t2")
+	if count.(int64) != 500 {
+		t.Errorf("expected 500 rows, got %v", count)
+	}
+}
+
+func alterEdgeCaseMixedDefaults(t *testing.T, db *sql.DB) {
+	mustExec(t, db, "ALTER TABLE t1 ADD c TEXT DEFAULT 'text'")
+	mustExec(t, db, "ALTER TABLE t1 ADD d REAL DEFAULT 3.14")
+	mustExec(t, db, "ALTER TABLE t1 ADD e BLOB DEFAULT x'FF'")
+	rows := queryRows(t, db, "SELECT a, b, c, d FROM t1")
+	if len(rows) != 1 || len(rows[0]) != 4 {
+		t.Error("mixed type columns not added correctly")
+	}
+}
+
 // TestAlterTableEdgeCases tests various edge cases and corner scenarios
 func TestAlterTableEdgeCases(t *testing.T) {
 	t.Skip("ALTER feature not fully implemented")
@@ -1602,16 +1546,7 @@ func TestAlterTableEdgeCases(t *testing.T) {
 				"CREATE TABLE t1(id INTEGER, value TEXT)",
 			},
 			alter: "ALTER TABLE t1 RENAME TO t2",
-			check: func(t *testing.T, db *sql.DB) {
-				// Insert many rows after rename
-				for i := 0; i < 500; i++ {
-					mustExec(t, db, "INSERT INTO t2 VALUES(?, ?)", i, "value")
-				}
-				count := querySingle(t, db, "SELECT COUNT(*) FROM t2")
-				if count.(int64) != 500 {
-					t.Errorf("expected 500 rows, got %v", count)
-				}
-			},
+			check: alterEdgeCaseRenameMany,
 		},
 		{
 			name: "add column with mixed type defaults",
@@ -1620,15 +1555,7 @@ func TestAlterTableEdgeCases(t *testing.T) {
 				"INSERT INTO t1 VALUES(1)",
 			},
 			alter: "ALTER TABLE t1 ADD b",
-			check: func(t *testing.T, db *sql.DB) {
-				mustExec(t, db, "ALTER TABLE t1 ADD c TEXT DEFAULT 'text'")
-				mustExec(t, db, "ALTER TABLE t1 ADD d REAL DEFAULT 3.14")
-				mustExec(t, db, "ALTER TABLE t1 ADD e BLOB DEFAULT x'FF'")
-				rows := queryRows(t, db, "SELECT a, b, c, d FROM t1")
-				if len(rows) != 1 || len(rows[0]) != 4 {
-					t.Error("mixed type columns not added correctly")
-				}
-			},
+			check: alterEdgeCaseMixedDefaults,
 		},
 		{
 			name: "rename table case sensitivity",
@@ -1648,32 +1575,43 @@ func TestAlterTableEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			db := setupMemoryDB(t)
-			defer db.Close()
-
-			for _, stmt := range tt.setup {
-				mustExec(t, db, stmt)
-			}
-
-			_, err := db.Exec(tt.alter)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got none", tt.errMsg)
-				}
-				if !strings.Contains(err.Error(), tt.errMsg) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errMsg)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if tt.check != nil {
-				tt.check(t, db)
-			}
+			alterRunTestCase(t, tt.setup, tt.alter, "", tt.wantErr, tt.errMsg, tt.check)
 		})
+	}
+}
+
+func alterRunTestCase(t *testing.T, setup []string, alter, verify string, wantErr bool, errMsg string, check func(*testing.T, *sql.DB)) {
+	t.Helper()
+	db := setupMemoryDB(t)
+	defer db.Close()
+	for _, stmt := range setup {
+		mustExec(t, db, stmt)
+	}
+	_, err := db.Exec(alter)
+	if wantErr {
+		alterCheckError(t, err, errMsg)
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if check != nil {
+		check(t, db)
+	}
+	if verify != "" {
+		rows := queryRows(t, db, verify)
+		if len(rows) == 0 {
+			t.Error("verify query returned no rows")
+		}
+	}
+}
+
+func alterCheckError(t *testing.T, err error, errMsg string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error containing %q, got none", errMsg)
+	}
+	if !strings.Contains(err.Error(), errMsg) {
+		t.Errorf("error %q does not contain %q", err.Error(), errMsg)
 	}
 }

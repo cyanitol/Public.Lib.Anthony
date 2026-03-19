@@ -3,15 +3,13 @@ package driver
 
 import (
 	"database/sql"
-	"os"
 	"testing"
 )
 
 // TestReleaseStateMultiConnection tests releaseState with multiple connections
 func TestReleaseStateMultiConnection(t *testing.T) {
 	t.Skip("sqlite_master not implemented")
-	dbFile := "test_release_state_multi.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_release_state_multi.db"
 
 	db1, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -63,8 +61,7 @@ func TestReleaseStateMultiConnection(t *testing.T) {
 
 // TestEmitNonIdentifierColumnCoverage tests emitNonIdentifierColumn
 func TestEmitNonIdentifierColumnCoverage(t *testing.T) {
-	dbFile := "test_non_ident_col.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_non_ident_col.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -113,8 +110,7 @@ func TestEmitNonIdentifierColumnCoverage(t *testing.T) {
 
 // TestEmitUnqualifiedColumnCoverage tests emitUnqualifiedColumn
 func TestEmitUnqualifiedColumnCoverage(t *testing.T) {
-	dbFile := "test_unqual_col.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_unqual_col.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -159,8 +155,7 @@ func TestEmitUnqualifiedColumnCoverage(t *testing.T) {
 
 // TestHandleNonAggregateFunctionCoverage tests handleNonAggregateFunction
 func TestHandleNonAggregateFunctionCoverage(t *testing.T) {
-	dbFile := "test_non_agg_func.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_non_agg_func.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -209,8 +204,7 @@ func TestHandleNonAggregateFunctionCoverage(t *testing.T) {
 
 // TestCompileInnerStatementCoverage tests compileInnerStatement
 func TestCompileInnerStatementCoverage(t *testing.T) {
-	dbFile := "test_inner_stmt_cov.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_inner_stmt_cov.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -259,8 +253,7 @@ func TestCompileInnerStatementCoverage(t *testing.T) {
 
 // TestFromSubqueryIntegration tests FROM subquery handling via integration tests
 func TestFromSubqueryIntegration(t *testing.T) {
-	dbFile := "test_from_subquery_int.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_from_subquery_int.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {

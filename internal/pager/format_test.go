@@ -220,6 +220,39 @@ func TestDatabaseHeader_GetPageSize(t *testing.T) {
 	}
 }
 
+func verifyHeaderDefaults(t *testing.T, header *DatabaseHeader, pageSize int) {
+	t.Helper()
+	if header == nil {
+		t.Fatal("NewDatabaseHeader() returned nil")
+	}
+	if string(header.Magic[:]) != MagicHeaderString {
+		t.Errorf("Magic = %q, want %q", header.Magic, MagicHeaderString)
+	}
+	if header.GetPageSize() != pageSize {
+		t.Errorf("PageSize = %d, want %d", header.GetPageSize(), pageSize)
+	}
+	checks := []struct {
+		name string
+		got  interface{}
+		want interface{}
+	}{
+		{"FileFormatWrite", header.FileFormatWrite, uint8(1)},
+		{"FileFormatRead", header.FileFormatRead, uint8(1)},
+		{"MaxPayloadFrac", header.MaxPayloadFrac, uint8(64)},
+		{"MinPayloadFrac", header.MinPayloadFrac, uint8(32)},
+		{"LeafPayloadFrac", header.LeafPayloadFrac, uint8(32)},
+		{"TextEncoding", header.TextEncoding, uint32(EncodingUTF8)},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s = %v, want %v", c.name, c.got, c.want)
+		}
+	}
+	if err := header.Validate(); err != nil {
+		t.Errorf("Validate() error = %v", err)
+	}
+}
+
 func TestNewDatabaseHeader(t *testing.T) {
 	t.Parallel()
 	pageSizes := []int{512, 1024, 2048, 4096, 8192, 16384, 32768, 65536}
@@ -228,51 +261,7 @@ func TestNewDatabaseHeader(t *testing.T) {
 		pageSize := pageSize
 		t.Run("page_size_"+string(rune(pageSize)), func(t *testing.T) {
 			header := NewDatabaseHeader(pageSize)
-
-			if header == nil {
-				t.Fatal("NewDatabaseHeader() returned nil")
-			}
-
-			// Check magic header
-			if string(header.Magic[:]) != MagicHeaderString {
-				t.Errorf("Magic = %q, want %q", header.Magic, MagicHeaderString)
-			}
-
-			// Check page size
-			actualPageSize := header.GetPageSize()
-			if actualPageSize != pageSize {
-				t.Errorf("PageSize = %d, want %d", actualPageSize, pageSize)
-			}
-
-			// Check default values
-			if header.FileFormatWrite != 1 {
-				t.Errorf("FileFormatWrite = %d, want 1", header.FileFormatWrite)
-			}
-
-			if header.FileFormatRead != 1 {
-				t.Errorf("FileFormatRead = %d, want 1", header.FileFormatRead)
-			}
-
-			if header.MaxPayloadFrac != 64 {
-				t.Errorf("MaxPayloadFrac = %d, want 64", header.MaxPayloadFrac)
-			}
-
-			if header.MinPayloadFrac != 32 {
-				t.Errorf("MinPayloadFrac = %d, want 32", header.MinPayloadFrac)
-			}
-
-			if header.LeafPayloadFrac != 32 {
-				t.Errorf("LeafPayloadFrac = %d, want 32", header.LeafPayloadFrac)
-			}
-
-			if header.TextEncoding != EncodingUTF8 {
-				t.Errorf("TextEncoding = %d, want %d", header.TextEncoding, EncodingUTF8)
-			}
-
-			// Validate the header
-			if err := header.Validate(); err != nil {
-				t.Errorf("Validate() error = %v", err)
-			}
+			verifyHeaderDefaults(t, header, pageSize)
 		})
 	}
 }

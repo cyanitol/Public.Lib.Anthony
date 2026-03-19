@@ -402,19 +402,9 @@ func TestPersistenceNilDB(t *testing.T) {
 	}
 }
 
-// TestPersistenceRTreeSaveLoadRoundTrip tests saving RTree entries to binary
-// format and reloading them to reconstruct equivalent state.
-func TestPersistenceRTreeSaveLoadRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	// Build an RTree with several entries.
-	module := NewRTreeModule()
-	table, _, err := module.Create(nil, "rtree", "main", "geo", []string{"id", "minX", "maxX", "minY", "maxY"})
-	if err != nil {
-		t.Fatalf("Create() error: %v", err)
-	}
-	rt := table.(*RTree)
-
+// insertPersistenceTestEntries inserts entries and returns inserted IDs.
+func insertPersistenceTestEntries(t *testing.T, rt *RTree) []int64 {
+	t.Helper()
 	type testEntry struct {
 		minX, maxX, minY, maxY float64
 	}
@@ -433,21 +423,40 @@ func TestPersistenceRTreeSaveLoadRoundTrip(t *testing.T) {
 		}
 		ids = append(ids, id)
 	}
+	return ids
+}
 
-	// Serialize entries and nextID.
-	origEntries := make([]*Entry, 0, len(ids))
+// collectEntries retrieves entries by ID from the RTree.
+func collectEntries(t *testing.T, rt *RTree, ids []int64) []*Entry {
+	t.Helper()
+	entries := make([]*Entry, 0, len(ids))
 	for _, id := range ids {
 		e, ok := rt.GetEntry(id)
 		if !ok {
 			t.Fatalf("entry %d not found", id)
 		}
-		origEntries = append(origEntries, e)
+		entries = append(entries, e)
 	}
+	return entries
+}
+
+// TestPersistenceRTreeSaveLoadRoundTrip tests saving RTree entries to binary
+// format and reloading them to reconstruct equivalent state.
+func TestPersistenceRTreeSaveLoadRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	module := NewRTreeModule()
+	table, _, err := module.Create(nil, "rtree", "main", "geo", []string{"id", "minX", "maxX", "minY", "maxY"})
+	if err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+	rt := table.(*RTree)
+
+	ids := insertPersistenceTestEntries(t, rt)
+	origEntries := collectEntries(t, rt, ids)
 
 	blob := encodeEntries(origEntries)
 	nextIDBlob := encodeNextID(rt.nextID)
-
-	// Decode and verify.
 	restored := decodeEntries(blob)
 	restoredNextID := decodeNextID(nextIDBlob)
 
@@ -461,8 +470,7 @@ func TestPersistenceRTreeSaveLoadRoundTrip(t *testing.T) {
 			t.Errorf("entry[%d] ID: want %d, got %d", i, orig.ID, got.ID)
 		}
 		if !orig.BBox.Equal(got.BBox) {
-			t.Errorf("entry[%d] BBox mismatch: want min=%v max=%v, got min=%v max=%v",
-				i, orig.BBox.Min, orig.BBox.Max, got.BBox.Min, got.BBox.Max)
+			t.Errorf("entry[%d] BBox mismatch", i)
 		}
 	}
 

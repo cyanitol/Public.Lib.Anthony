@@ -116,26 +116,48 @@ func TestVDBEInsert(t *testing.T) {
 	}
 }
 
-func TestVDBESelect(t *testing.T) {
-	t.Parallel()
+func setupSelectTestVM(t *testing.T) *VDBE {
+	t.Helper()
 	bt := btree.NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable failed: %v", err)
 	}
-
 	ctx := &VDBEContext{Btree: bt}
-	insertVM := createInsertVM(ctx, rootPage)
-	err = insertVM.Run()
-	if err != nil {
+	if err := createInsertVM(ctx, rootPage).Run(); err != nil {
 		t.Fatalf("INSERT failed: %v", err)
 	}
-
 	vm := createSelectVM(ctx, rootPage)
 	t.Logf("SELECT bytecode:\n%s", vm.ExplainProgram())
-
 	stepUntilRowOrHalt(t, vm, 100)
+	return vm
+}
 
+func logResultRow(t *testing.T, vm *VDBE) {
+	t.Helper()
+	t.Logf("Got result row with %d columns", len(vm.ResultRow))
+	for i, mem := range vm.ResultRow {
+		logColumnValue(t, i, mem)
+	}
+}
+
+func logColumnValue(t *testing.T, i int, mem *Mem) {
+	t.Helper()
+	switch {
+	case mem.IsInt():
+		t.Logf("  Column %d: %d (int)", i, mem.IntValue())
+	case mem.IsStr():
+		t.Logf("  Column %d: %q (string)", i, mem.StrValue())
+	case mem.IsNull():
+		t.Logf("  Column %d: NULL", i)
+	default:
+		t.Logf("  Column %d: unknown type", i)
+	}
+}
+
+func TestVDBESelect(t *testing.T) {
+	t.Parallel()
+	vm := setupSelectTestVM(t)
 	if vm.State == StateHalt {
 		t.Fatalf("SELECT halted without returning rows, PC=%d", vm.PC)
 	}
@@ -145,19 +167,6 @@ func TestVDBESelect(t *testing.T) {
 	if vm.ResultRow == nil {
 		t.Fatal("ResultRow is nil")
 	}
-
-	t.Logf("Got result row with %d columns", len(vm.ResultRow))
-	for i, mem := range vm.ResultRow {
-		if mem.IsInt() {
-			t.Logf("  Column %d: %d (int)", i, mem.IntValue())
-		} else if mem.IsStr() {
-			t.Logf("  Column %d: %q (string)", i, mem.StrValue())
-		} else if mem.IsNull() {
-			t.Logf("  Column %d: NULL", i)
-		} else {
-			t.Logf("  Column %d: unknown type", i)
-		}
-	}
-
+	logResultRow(t, vm)
 	verifyResultColumns(t, vm, 42, "test")
 }

@@ -429,89 +429,83 @@ func TestSQLiteExplain(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			// Clean up and run setup
-			_, err := db.Exec("DROP TABLE IF EXISTS t1")
-			db.Exec("DROP TABLE IF EXISTS t2")
-			db.Exec("DROP TABLE IF EXISTS t3")
-			db.Exec("DROP TABLE IF EXISTS sales")
-			db.Exec("DROP TABLE IF EXISTS items")
-			db.Exec("DROP TABLE IF EXISTS orders")
-			db.Exec("DROP TABLE IF EXISTS customers")
-			db.Exec("DROP TABLE IF EXISTS a")
-			db.Exec("DROP TABLE IF EXISTS b")
-			db.Exec("DROP TABLE IF EXISTS c")
-
+			explainCleanupTables(db)
 			for _, setupSQL := range tt.setup {
 				if _, err := db.Exec(setupSQL); err != nil {
 					t.Fatalf("setup failed: %v, SQL: %s", err, setupSQL)
 				}
 			}
-
-			// Execute query
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-
-			// Collect all output
-			var output []string
-			cols, err := rows.Columns()
-			if err != nil {
-				t.Fatalf("failed to get columns: %v", err)
-			}
-
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-
-				// Convert row to string
-				var rowStr []string
-				for _, v := range values {
-					if v == nil {
-						rowStr = append(rowStr, "NULL")
-					} else {
-						switch val := v.(type) {
-						case []byte:
-							rowStr = append(rowStr, string(val))
-						case int64:
-							rowStr = append(rowStr, fmt.Sprintf("%d", val))
-						case string:
-							rowStr = append(rowStr, strings.TrimSpace(val))
-						default:
-							rowStr = append(rowStr, fmt.Sprintf("%v", val))
-						}
-					}
-				}
-				output = append(output, strings.Join(rowStr, " "))
-			}
-
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows iteration failed: %v", err)
-			}
-
-			// Join all output
+			output := explainCollectOutput(t, db, tt.query)
 			fullOutput := strings.Join(output, "\n")
-
-			// Check for expected patterns
 			for _, pattern := range tt.wantMatch {
 				if !strings.Contains(fullOutput, pattern) {
 					t.Errorf("expected pattern %q not found in output:\n%s", pattern, fullOutput)
 				}
 			}
-
-			// Verify output is not empty
 			if len(output) == 0 {
 				t.Error("EXPLAIN output is empty")
 			}
 		})
+	}
+}
+
+func explainCleanupTables(db *sql.DB) {
+	tables := []string{"t1", "t2", "t3", "sales", "items", "orders", "customers", "a", "b", "c"}
+	for _, tbl := range tables {
+		db.Exec("DROP TABLE IF EXISTS " + tbl)
+	}
+}
+
+func explainCollectOutput(t *testing.T, db *sql.DB, query string) []string {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("failed to get columns: %v", err)
+	}
+	var output []string
+	for rows.Next() {
+		values := make([]interface{}, len(cols))
+		valuePtrs := make([]interface{}, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		output = append(output, explainRowToString(values))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration failed: %v", err)
+	}
+	return output
+}
+
+func explainRowToString(values []interface{}) string {
+	var rowStr []string
+	for _, v := range values {
+		rowStr = append(rowStr, explainValueToString(v))
+	}
+	return strings.Join(rowStr, " ")
+}
+
+func explainValueToString(v interface{}) string {
+	if v == nil {
+		return "NULL"
+	}
+	switch val := v.(type) {
+	case []byte:
+		return string(val)
+	case int64:
+		return fmt.Sprintf("%d", val)
+	case string:
+		return strings.TrimSpace(val)
+	default:
+		return fmt.Sprintf("%v", val)
 	}
 }
 
@@ -619,40 +613,16 @@ func TestExplainQueryPlanMultipleStatements(t *testing.T) {
 	for _, q := range queries {
 		q := q // Capture range variable
 		t.Run(q.name, func(t *testing.T) {
-			rows, err := db.Query(q.sql)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-
-			var found bool
-			for rows.Next() {
-				var detail string
-				cols, _ := rows.Columns()
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-				rows.Scan(valuePtrs...)
-
-				// Get the detail column (usually last)
-				if len(values) > 0 {
-					if s, ok := values[len(values)-1].(string); ok {
-						detail = s
-					} else if b, ok := values[len(values)-1].([]byte); ok {
-						detail = string(b)
-					}
-				}
-
-				if strings.Contains(detail, q.want) {
-					found = true
-				}
-			}
-
-			if !found {
+			if !explainOutputContains(t, db, q.sql, q.want) {
 				t.Errorf("expected to find %q in query plan output", q.want)
 			}
 		})
 	}
+}
+
+func explainOutputContains(t *testing.T, db *sql.DB, query, want string) bool {
+	t.Helper()
+	output := explainCollectOutput(t, db, query)
+	fullOutput := strings.Join(output, "\n")
+	return strings.Contains(fullOutput, want)
 }

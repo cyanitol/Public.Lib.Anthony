@@ -90,6 +90,23 @@ func TestSchemaRemoveTable(t *testing.T) {
 	}
 }
 
+// assertVDBEHasOpcodes checks that the VDBE program contains all required opcodes.
+func assertVDBEHasOpcodes(t *testing.T, v *vdbe.VDBE, opcodes []vdbe.Opcode) {
+	t.Helper()
+	found := make(map[vdbe.Opcode]bool)
+	for i := 0; i < v.NumOps(); i++ {
+		instr, _ := v.GetInstruction(i)
+		if instr != nil {
+			found[instr.Opcode] = true
+		}
+	}
+	for _, op := range opcodes {
+		if !found[op] {
+			t.Errorf("VDBE program missing %v", op)
+		}
+	}
+}
+
 func TestCompileCreateTableBasic(t *testing.T) {
 	schema := NewSchema()
 	bt := btree.NewBtree(4096)
@@ -106,12 +123,10 @@ func TestCompileCreateTableBasic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompileCreateTable failed: %v", err)
 	}
-
 	if v == nil {
 		t.Fatal("VDBE is nil")
 	}
 
-	// Check that table was added to schema
 	table := schema.GetTable("users")
 	if table == nil {
 		t.Fatal("Table not added to schema")
@@ -122,46 +137,11 @@ func TestCompileCreateTableBasic(t *testing.T) {
 	if table.NumColumns != 2 {
 		t.Errorf("Expected 2 columns, got %d", table.NumColumns)
 	}
-
-	// Check VDBE program
 	if v.NumOps() == 0 {
 		t.Error("VDBE program is empty")
 	}
 
-	// Verify the program has key operations
-	hasInit := false
-	hasOpenWrite := false
-	hasInsert := false
-	hasHalt := false
-
-	for i := 0; i < v.NumOps(); i++ {
-		instr, _ := v.GetInstruction(i)
-		if instr != nil {
-			switch instr.Opcode {
-			case vdbe.OpInit:
-				hasInit = true
-			case vdbe.OpOpenWrite:
-				hasOpenWrite = true
-			case vdbe.OpInsert:
-				hasInsert = true
-			case vdbe.OpHalt:
-				hasHalt = true
-			}
-		}
-	}
-
-	if !hasInit {
-		t.Error("VDBE program missing OpInit")
-	}
-	if !hasOpenWrite {
-		t.Error("VDBE program missing OpOpenWrite")
-	}
-	if !hasInsert {
-		t.Error("VDBE program missing OpInsert")
-	}
-	if !hasHalt {
-		t.Error("VDBE program missing OpHalt")
-	}
+	assertVDBEHasOpcodes(t, v, []vdbe.Opcode{vdbe.OpInit, vdbe.OpOpenWrite, vdbe.OpInsert, vdbe.OpHalt})
 }
 
 func TestCompileCreateTableWithConstraints(t *testing.T) {

@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"os"
 	"testing"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
@@ -94,8 +93,7 @@ func TestAggregateFunctionCoverage(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			dbFile := "test_agg_cov_" + tt.name + ".db"
-			defer os.Remove(dbFile)
+			dbFile := t.TempDir() + "/test_agg_cov_" + tt.name + ".db"
 
 			db, err := sql.Open(DriverName, dbFile)
 			if err != nil {
@@ -201,8 +199,7 @@ func TestHelperFunctionCoverage(t *testing.T) {
 
 // TestMultiTableColumnCoverage tests multi-table column handling
 func TestMultiTableColumnCoverage(t *testing.T) {
-	dbFile := "test_multitable_cov.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_multitable_cov.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -311,8 +308,7 @@ func TestInsertFirstRowCoverage(t *testing.T) {
 
 // TestSubqueryCompilationCoverage tests subquery compilation functions
 func TestSubqueryCompilationCoverage(t *testing.T) {
-	dbFile := "test_subquery_comp.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_subquery_comp.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -395,8 +391,7 @@ func TestDriverReleaseStateCoverage(t *testing.T) {
 	d := &Driver{}
 	d.initMaps()
 
-	dbFile := "test_release_state_cov.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_release_state_cov.db"
 
 	// Create first connection
 	conn1, err := d.Open(dbFile)
@@ -628,8 +623,7 @@ func TestLiteralCompilationCoverage(t *testing.T) {
 
 // TestTransactionCompilationCoverage tests transaction statement compilation
 func TestTransactionCompilationCoverage(t *testing.T) {
-	dbFile := "test_txn_comp.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_txn_comp.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {

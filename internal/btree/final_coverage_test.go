@@ -357,7 +357,34 @@ func TestIndexCursorComplexNavigation(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(4096)
 
-	// Create 4 index leaf pages
+	indexComplexNavSetupPages(bt)
+
+	cursor := NewIndexCursor(bt, 1)
+
+	err := cursor.MoveToLast()
+	if err != nil {
+		t.Fatalf("MoveToLast error: %v", err)
+	}
+	if cursor.IsValid() {
+		t.Logf("Index MoveToLast positioned at: %s", cursor.GetKey())
+	}
+
+	navigateIndexBackward(cursor, 10)
+
+	err = cursor.MoveToFirst()
+	if err != nil {
+		t.Fatalf("MoveToFirst error: %v", err)
+	}
+	if cursor.IsValid() {
+		t.Logf("Index MoveToFirst positioned at: %s", cursor.GetKey())
+	}
+
+	navigateIndexForward(cursor, 10)
+
+	indexComplexNavSeeks(t, cursor)
+}
+
+func indexComplexNavSetupPages(bt *Btree) {
 	prefixes := []string{"aaa", "lll", "rrr", "zzz"}
 	for idx, prefix := range prefixes {
 		pgno := uint32(50 + idx)
@@ -373,7 +400,6 @@ func TestIndexCursorComplexNavigation(t *testing.T) {
 		bt.SetPage(pgno, pageData)
 	}
 
-	// Create index interior page
 	interior := createIndexInteriorPage(1, 4096, []struct {
 		childPage uint32
 		key       []byte
@@ -384,52 +410,11 @@ func TestIndexCursorComplexNavigation(t *testing.T) {
 		{52, []byte("rrr3"), 23},
 	}, 53)
 	bt.SetPage(1, interior)
+}
 
-	cursor := NewIndexCursor(bt, 1)
-
-	// Test MoveToLast (should trigger descendToLast for index)
-	err := cursor.MoveToLast()
-	if err != nil {
-		t.Fatalf("MoveToLast error: %v", err)
-	}
-
-	if cursor.IsValid() {
-		t.Logf("Index MoveToLast positioned at: %s", cursor.GetKey())
-	}
-
-	// Test Previous navigation (should trigger prevViaParent)
-	for i := 0; i < 10 && cursor.IsValid(); i++ {
-		err := cursor.PrevIndex()
-		if err != nil {
-			break
-		}
-		if cursor.IsValid() {
-			t.Logf("PrevIndex step %d: %s", i, cursor.GetKey())
-		}
-	}
-
-	// Test MoveToFirst (should trigger getFirstChildPage)
-	err = cursor.MoveToFirst()
-	if err != nil {
-		t.Fatalf("MoveToFirst error: %v", err)
-	}
-
-	if cursor.IsValid() {
-		t.Logf("Index MoveToFirst positioned at: %s", cursor.GetKey())
-	}
-
-	// Test forward navigation
-	for i := 0; i < 10 && cursor.IsValid(); i++ {
-		cursor.NextIndex()
-	}
-
-	// Test seeks (should trigger resolveChildPage)
-	testKeys := [][]byte{
-		[]byte("lll2"),
-		[]byte("rrr1"),
-		[]byte("zzz2"),
-	}
-
+func indexComplexNavSeeks(t *testing.T, cursor *IndexCursor) {
+	t.Helper()
+	testKeys := [][]byte{[]byte("lll2"), []byte("rrr1"), []byte("zzz2")}
 	for _, key := range testKeys {
 		found, err := cursor.SeekIndex(key)
 		if err != nil {
@@ -444,66 +429,31 @@ func TestIndexCursorComplexNavigation(t *testing.T) {
 // TestVeryDeepTree creates a very deep tree to ensure all navigation paths are tested
 func TestVeryDeepTree(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(512) // Very small pages for depth
+	bt := NewBtree(512)
 	rootPage, _ := bt.CreateTable()
 	cursor := NewCursor(bt, rootPage)
 
-	// Insert enough to create 4+ levels
-	maxRows := 2000
-	insertCount := 0
-	for i := int64(1); i <= int64(maxRows); i++ {
-		err := cursor.Insert(i, make([]byte, 18))
-		if err != nil {
-			break
-		}
-		insertCount++
-	}
-
+	insertCount := insertRows(cursor, 1, 2000, 18)
 	t.Logf("Created very deep tree with %d rows", insertCount)
 
-	// Test navigation at various depths
-	testPositions := []int64{1, 100, 500, 1000, 1500, int64(insertCount) - 1}
+	veryDeepTreeNavPositions(cursor, insertCount)
 
+	fwdCount := countForward(cursor)
+	backCount := countBackward(cursor)
+	t.Logf("Full traversal: forward=%d, backward=%d", fwdCount, backCount)
+}
+
+func veryDeepTreeNavPositions(cursor *BtCursor, insertCount int) {
+	testPositions := []int64{1, 100, 500, 1000, 1500, int64(insertCount) - 1}
 	for _, pos := range testPositions {
 		cursor.SeekRowid(pos)
 		if !cursor.IsValid() {
 			continue
 		}
-
-		// Navigate backward
-		for j := 0; j < 20 && cursor.IsValid(); j++ {
-			cursor.Previous()
-		}
-
-		// Navigate forward
+		navigateBackward(cursor, 20)
 		cursor.SeekRowid(pos)
-		for j := 0; j < 20 && cursor.IsValid(); j++ {
-			cursor.Next()
-		}
+		navigateForward(cursor, 20)
 	}
-
-	// Full tree traversal
-	cursor.MoveToFirst()
-	fwdCount := 0
-	for cursor.IsValid() && fwdCount < insertCount+10 {
-		fwdCount++
-		err := cursor.Next()
-		if err != nil {
-			break
-		}
-	}
-
-	cursor.MoveToLast()
-	backCount := 0
-	for cursor.IsValid() && backCount < insertCount+10 {
-		backCount++
-		err := cursor.Previous()
-		if err != nil {
-			break
-		}
-	}
-
-	t.Logf("Full traversal: forward=%d, backward=%d", fwdCount, backCount)
 }
 
 // TestVeryDeepIndexTree creates a very deep index tree
@@ -513,42 +463,20 @@ func TestVeryDeepIndexTree(t *testing.T) {
 	rootPage, _ := createIndexPage(bt)
 	cursor := NewIndexCursor(bt, rootPage)
 
-	// Insert many entries
-	maxEntries := 2000
-	insertCount := 0
-	for i := 0; i < maxEntries; i++ {
-		key := []byte(fmt.Sprintf("indexentry%08d", i))
-		err := cursor.InsertIndex(key, int64(i))
-		if err != nil {
-			break
-		}
-		insertCount++
-	}
-
+	insertCount := insertIndexEntriesN(cursor, 2000, func(i int) []byte {
+		return []byte(fmt.Sprintf("indexentry%08d", i))
+	})
 	t.Logf("Created deep index tree with %d entries", insertCount)
 
-	// Full traversals
-	cursor.MoveToFirst()
-	fwdCount := 0
-	for cursor.IsValid() && fwdCount < insertCount+10 {
-		fwdCount++
-		if err := cursor.NextIndex(); err != nil {
-			break
-		}
-	}
-
-	cursor.MoveToLast()
-	backCount := 0
-	for cursor.IsValid() && backCount < insertCount+10 {
-		backCount++
-		if err := cursor.PrevIndex(); err != nil {
-			break
-		}
-	}
-
+	fwdCount := countIndexForward(cursor)
+	backCount := countIndexBackward(cursor)
 	t.Logf("Index traversal: forward=%d, backward=%d", fwdCount, backCount)
 
-	// Test seeks throughout the tree
+	deepIndexTreeSeeksBy200(t, cursor, insertCount)
+}
+
+func deepIndexTreeSeeksBy200(t *testing.T, cursor *IndexCursor, insertCount int) {
+	t.Helper()
 	for i := 0; i < insertCount; i += 200 {
 		searchKey := []byte(fmt.Sprintf("indexentry%08d", i))
 		found, err := cursor.SeekIndex(searchKey)

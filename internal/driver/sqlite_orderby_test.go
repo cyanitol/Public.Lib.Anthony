@@ -1210,6 +1210,54 @@ func TestSQLiteOrderByJoinUnique(t *testing.T) {
 	}
 }
 
+// orderByBenchmarkSetup creates and populates a table with 100 rows for benchmark testing.
+func orderByBenchmarkSetup(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec("CREATE TABLE t1(a INTEGER, b INTEGER)")
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+	_, err = db.Exec("CREATE INDEX i1 ON t1(a)")
+	if err != nil {
+		t.Fatalf("failed to create index: %v", err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+	stmt, err := tx.Prepare("INSERT INTO t1 VALUES(?, ?)")
+	if err != nil {
+		t.Fatalf("failed to prepare: %v", err)
+	}
+	defer stmt.Close()
+
+	for i := 0; i < 100; i++ {
+		if _, err := stmt.Exec(i%2, i); err != nil {
+			t.Fatalf("failed to insert: %v", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+}
+
+// orderByBenchmarkVerify checks that rows are sorted by (a, b).
+func orderByBenchmarkVerify(t *testing.T, rows [][]interface{}) {
+	t.Helper()
+	if len(rows) != 100 {
+		t.Errorf("expected 100 rows, got %d", len(rows))
+	}
+	lastA, lastB := int64(-1), int64(-1)
+	for _, row := range rows {
+		a, b := row[0].(int64), row[1].(int64)
+		if a < lastA || (a == lastA && b < lastB) {
+			t.Errorf("rows not properly ordered: got (%d, %d) after (%d, %d)", a, b, lastA, lastB)
+		}
+		lastA, lastB = a, b
+	}
+}
+
 // TestSQLiteOrderByBenchmark provides a simple benchmark-style test
 func TestSQLiteOrderByBenchmark(t *testing.T) {
 	t.Skip("SKIP: ORDER BY benchmark has panic issues")
@@ -1220,62 +1268,9 @@ func TestSQLiteOrderByBenchmark(t *testing.T) {
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
-	// Create table with index
-	_, err := db.Exec("CREATE TABLE t1(a INTEGER, b INTEGER)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	_, err = db.Exec("CREATE INDEX i1 ON t1(a)")
-	if err != nil {
-		t.Fatalf("failed to create index: %v", err)
-	}
-
-	// Insert test data
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("failed to begin transaction: %v", err)
-	}
-
-	stmt, err := tx.Prepare("INSERT INTO t1 VALUES(?, ?)")
-	if err != nil {
-		t.Fatalf("failed to prepare: %v", err)
-	}
-	defer stmt.Close()
-
-	for i := 0; i < 100; i++ {
-		_, err := stmt.Exec(i%2, i)
-		if err != nil {
-			t.Fatalf("failed to insert: %v", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Run ORDER BY query
+	orderByBenchmarkSetup(t, db)
 	rows := queryOrderBy(t, db, "SELECT * FROM t1 ORDER BY a, b")
-
-	// Verify we got all rows
-	if len(rows) != 100 {
-		t.Errorf("expected 100 rows, got %d", len(rows))
-	}
-
-	// Verify ordering: first all a=0, then all a=1
-	lastA := int64(-1)
-	lastB := int64(-1)
-	for _, row := range rows {
-		a := row[0].(int64)
-		b := row[1].(int64)
-
-		if a < lastA || (a == lastA && b < lastB) {
-			t.Errorf("rows not properly ordered: got (%d, %d) after (%d, %d)", a, b, lastA, lastB)
-		}
-
-		lastA = a
-		lastB = b
-	}
+	orderByBenchmarkVerify(t, rows)
 }
 
 // TestSQLiteOrderByPrimaryKey tests ORDER BY with multi-column primary keys

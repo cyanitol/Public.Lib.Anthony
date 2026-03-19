@@ -32,28 +32,17 @@ func (s *Schema) CreateTrigger(stmt *parser.CreateTriggerStmt) (*Trigger, error)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Check if trigger already exists
-	lowerName := strings.ToLower(stmt.Name)
-	for triggerName := range s.Triggers {
-		if strings.ToLower(triggerName) == lowerName {
-			if stmt.IfNotExists {
-				return s.Triggers[triggerName], nil
-			}
-			return nil, fmt.Errorf("trigger already exists: %s", stmt.Name)
+	if existing, exists := s.findTriggerLocked(stmt.Name); exists {
+		if stmt.IfNotExists {
+			return existing, nil
 		}
+		return nil, fmt.Errorf("trigger already exists: %s", stmt.Name)
 	}
 
-	// Check if table exists (tables or views)
-	if !s.tableExistsLocked(stmt.Table) && !s.viewExistsLocked(stmt.Table) {
-		return nil, fmt.Errorf("table not found: %s", stmt.Table)
+	if err := s.validateTriggerTarget(stmt); err != nil {
+		return nil, err
 	}
 
-	// INSTEAD OF triggers are only valid on views, not tables
-	if stmt.Timing == parser.TriggerInsteadOf && !s.viewExistsLocked(stmt.Table) {
-		return nil, fmt.Errorf("cannot create INSTEAD OF trigger on table: %s", stmt.Table)
-	}
-
-	// Create the trigger
 	trigger := &Trigger{
 		Name:       stmt.Name,
 		Table:      stmt.Table,
@@ -67,13 +56,34 @@ func (s *Schema) CreateTrigger(stmt *parser.CreateTriggerStmt) (*Trigger, error)
 		Temp:       stmt.Temp,
 	}
 
-	// Initialize Triggers map if not already done
 	if s.Triggers == nil {
 		s.Triggers = make(map[string]*Trigger)
 	}
 
 	s.Triggers[stmt.Name] = trigger
 	return trigger, nil
+}
+
+// findTriggerLocked finds a trigger by name (case-insensitive). Must be called with mu held.
+func (s *Schema) findTriggerLocked(name string) (*Trigger, bool) {
+	lowerName := strings.ToLower(name)
+	for triggerName, trigger := range s.Triggers {
+		if strings.ToLower(triggerName) == lowerName {
+			return trigger, true
+		}
+	}
+	return nil, false
+}
+
+// validateTriggerTarget validates the table/view target for a trigger. Must be called with mu held.
+func (s *Schema) validateTriggerTarget(stmt *parser.CreateTriggerStmt) error {
+	if !s.tableExistsLocked(stmt.Table) && !s.viewExistsLocked(stmt.Table) {
+		return fmt.Errorf("table not found: %s", stmt.Table)
+	}
+	if stmt.Timing == parser.TriggerInsteadOf && !s.viewExistsLocked(stmt.Table) {
+		return fmt.Errorf("cannot create INSTEAD OF trigger on table: %s", stmt.Table)
+	}
+	return nil
 }
 
 // DropTrigger removes a trigger from the schema.

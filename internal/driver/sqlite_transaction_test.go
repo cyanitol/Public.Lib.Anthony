@@ -671,12 +671,22 @@ func TestSavepointRollbackData(t *testing.T) {
 
 // TestSavepointMultipleLevels tests multiple nested savepoint levels
 // Converted from savepoint.test lines 137-162
+func savepointCheckRowCount(t *testing.T, db *sql.DB, query string, want int, label string) {
+	t.Helper()
+	rows, err := queryRowsWithError(db, query)
+	if err != nil {
+		t.Fatalf("Query failed (%s): %v", label, err)
+	}
+	if len(rows) != want {
+		t.Errorf("%s: expected %d rows, got %d", label, want, len(rows))
+	}
+}
+
 func TestSavepointMultipleLevels(t *testing.T) {
 	t.Skip("DML not yet fully implemented")
 	db := setupTransactionTestDB(t)
 	defer db.Close()
 
-	// Setup
 	if err := execSQLStmts(db,
 		"CREATE TABLE t1(a, b, c)",
 		"BEGIN",
@@ -689,47 +699,18 @@ func TestSavepointMultipleLevels(t *testing.T) {
 		t.Fatalf("Setup failed: %v", err)
 	}
 
-	// Should have 3 rows
-	rows, err := queryRowsWithError(db, "SELECT * FROM t1")
-	if err != nil {
-		t.Fatalf("Query failed: %v", err)
-	}
+	savepointCheckRowCount(t, db, "SELECT * FROM t1", 3, "initial")
 
-	if len(rows) != 3 {
-		t.Errorf("Expected 3 rows, got %d", len(rows))
-	}
-
-	// Rollback to level two
 	if _, err := db.Exec("ROLLBACK TO two"); err != nil {
 		t.Fatalf("ROLLBACK TO two failed: %v", err)
 	}
+	savepointCheckRowCount(t, db, "SELECT * FROM t1", 2, "after ROLLBACK TO two")
 
-	// Should have 2 rows
-	rows, err = queryRowsWithError(db, "SELECT * FROM t1")
-	if err != nil {
-		t.Fatalf("Query failed: %v", err)
-	}
-
-	if len(rows) != 2 {
-		t.Errorf("Expected 2 rows after ROLLBACK TO two, got %d", len(rows))
-	}
-
-	// Rollback to level one
 	if _, err := db.Exec("ROLLBACK TO one"); err != nil {
 		t.Fatalf("ROLLBACK TO one failed: %v", err)
 	}
+	savepointCheckRowCount(t, db, "SELECT * FROM t1", 1, "after ROLLBACK TO one")
 
-	// Should have 1 row
-	rows, err = queryRowsWithError(db, "SELECT * FROM t1")
-	if err != nil {
-		t.Fatalf("Query failed: %v", err)
-	}
-
-	if len(rows) != 1 {
-		t.Errorf("Expected 1 row after ROLLBACK TO one, got %d", len(rows))
-	}
-
-	// Clean up
 	db.Exec("ROLLBACK")
 }
 

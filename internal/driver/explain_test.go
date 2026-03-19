@@ -32,72 +32,72 @@ func createTestDB(t *testing.T) (*sql.DB, func()) {
 	return db, cleanup
 }
 
+// explainCheckColumns verifies column names from an explain result set.
+func explainCheckColumns(t *testing.T, rows *sql.Rows, expectedCols []string) {
+	t.Helper()
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("Failed to get columns: %v", err)
+	}
+	if len(cols) != len(expectedCols) {
+		t.Errorf("Expected %d columns, got %d", len(expectedCols), len(cols))
+	}
+	for i, col := range cols {
+		if i < len(expectedCols) && col != expectedCols[i] {
+			t.Errorf("Column %d: expected '%s', got '%s'", i, expectedCols[i], col)
+		}
+	}
+}
+
+// explainScanPlanRows scans all EXPLAIN QUERY PLAN rows and returns the detail strings.
+func explainScanPlanRows(t *testing.T, rows *sql.Rows) []string {
+	t.Helper()
+	var details []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatalf("Failed to scan row: %v", err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Error iterating rows: %v", err)
+	}
+	return details
+}
+
 // TestExplainQueryPlan tests EXPLAIN QUERY PLAN functionality end-to-end.
 func TestExplainQueryPlan(t *testing.T) {
 	t.Skip("EXPLAIN QUERY PLAN requires full query planning integration")
 	db, cleanup := createTestDB(t)
 	defer cleanup()
 
-	// Create a test table
 	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
 	if err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
 
-	// Test EXPLAIN QUERY PLAN for a simple SELECT
 	rows, err := db.Query("EXPLAIN QUERY PLAN SELECT * FROM users")
 	if err != nil {
 		t.Fatalf("EXPLAIN QUERY PLAN failed: %v", err)
 	}
 	defer rows.Close()
 
-	// Check column names
-	cols, err := rows.Columns()
-	if err != nil {
-		t.Fatalf("Failed to get columns: %v", err)
-	}
+	explainCheckColumns(t, rows, []string{"id", "parent", "notused", "detail"})
 
-	expectedCols := []string{"id", "parent", "notused", "detail"}
-	if len(cols) != len(expectedCols) {
-		t.Errorf("Expected %d columns, got %d", len(expectedCols), len(cols))
-	}
-
-	for i, col := range cols {
-		if i < len(expectedCols) && col != expectedCols[i] {
-			t.Errorf("Column %d: expected '%s', got '%s'", i, expectedCols[i], col)
-		}
-	}
-
-	// Read and validate rows
-	rowCount := 0
-	foundUsers := false
-	for rows.Next() {
-		var id, parent, notused int
-		var detail string
-
-		err = rows.Scan(&id, &parent, &notused, &detail)
-		if err != nil {
-			t.Fatalf("Failed to scan row: %v", err)
-		}
-
-		rowCount++
-
-		// Check that the plan mentions the users table
-		if strings.Contains(detail, "users") {
-			foundUsers = true
-		}
-
-		t.Logf("Plan row %d: id=%d, parent=%d, detail=%s", rowCount, id, parent, detail)
-	}
-
-	if err = rows.Err(); err != nil {
-		t.Fatalf("Error iterating rows: %v", err)
-	}
-
-	if rowCount == 0 {
+	details := explainScanPlanRows(t, rows)
+	if len(details) == 0 {
 		t.Error("Expected at least one row in explain output")
 	}
 
+	foundUsers := false
+	for _, d := range details {
+		if strings.Contains(d, "users") {
+			foundUsers = true
+			break
+		}
+	}
 	if !foundUsers {
 		t.Error("Expected plan to mention 'users' table")
 	}
@@ -165,33 +165,38 @@ func TestExplainQueryPlanWithJoin(t *testing.T) {
 	}
 	defer rows.Close()
 
-	foundUsers := false
-	foundOrders := false
-	for rows.Next() {
-		var id, parent, notused int
-		var detail string
+	details := explainScanPlanRows(t, rows)
+	for _, table := range []string{"users", "orders"} {
+		found := false
+		for _, d := range details {
+			if strings.Contains(d, table) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected plan to mention '%s' table", table)
+		}
+	}
+}
 
-		err = rows.Scan(&id, &parent, &notused, &detail)
-		if err != nil {
+// scanExplainOpcodes scans EXPLAIN rows and returns a set of found opcodes.
+func scanExplainOpcodes(t *testing.T, rows *sql.Rows) map[string]bool {
+	t.Helper()
+	found := make(map[string]bool)
+	for rows.Next() {
+		var addr, p1, p2, p3, p5 int
+		var opcode, p4, comment string
+		if err := rows.Scan(&addr, &opcode, &p1, &p2, &p3, &p4, &p5, &comment); err != nil {
 			t.Fatalf("Failed to scan row: %v", err)
 		}
-
-		if strings.Contains(detail, "users") {
-			foundUsers = true
-		}
-		if strings.Contains(detail, "orders") {
-			foundOrders = true
-		}
-
-		t.Logf("Plan: %s", detail)
+		found[opcode] = true
+		t.Logf("Opcode %d: %s p1=%d p2=%d p3=%d p4=%s p5=%d", addr, opcode, p1, p2, p3, p4, p5)
 	}
-
-	if !foundUsers {
-		t.Error("Expected plan to mention 'users' table")
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Error iterating rows: %v", err)
 	}
-	if !foundOrders {
-		t.Error("Expected plan to mention 'orders' table")
-	}
+	return found
 }
 
 // TestExplainOpcodes tests basic EXPLAIN (shows VDBE opcodes).
@@ -211,78 +216,17 @@ func TestExplainOpcodes(t *testing.T) {
 	}
 	defer rows.Close()
 
-	// Check column names
-	cols, err := rows.Columns()
-	if err != nil {
-		t.Fatalf("Failed to get columns: %v", err)
-	}
+	explainCheckColumns(t, rows, []string{"addr", "opcode", "p1", "p2", "p3", "p4", "p5", "comment"})
 
-	expectedCols := []string{"addr", "opcode", "p1", "p2", "p3", "p4", "p5", "comment"}
-	if len(cols) != len(expectedCols) {
-		t.Errorf("Expected %d columns, got %d", len(expectedCols), len(cols))
-	}
-
-	// Read and validate rows
-	rowCount := 0
-	foundInit := false
-	foundOpenRead := false
-	foundRewind := false
-	foundResultRow := false
-	foundHalt := false
-
-	for rows.Next() {
-		var addr, p1, p2, p3, p5 int
-		var opcode, p4, comment string
-
-		err = rows.Scan(&addr, &opcode, &p1, &p2, &p3, &p4, &p5, &comment)
-		if err != nil {
-			t.Fatalf("Failed to scan row: %v", err)
-		}
-
-		rowCount++
-
-		// Check for expected opcodes
-		if opcode == "Init" {
-			foundInit = true
-		}
-		if opcode == "OpenRead" {
-			foundOpenRead = true
-		}
-		if opcode == "Rewind" {
-			foundRewind = true
-		}
-		if opcode == "ResultRow" {
-			foundResultRow = true
-		}
-		if opcode == "Halt" {
-			foundHalt = true
-		}
-
-		t.Logf("Opcode %d: %s p1=%d p2=%d p3=%d p4=%s p5=%d", addr, opcode, p1, p2, p3, p4, p5)
-	}
-
-	if err = rows.Err(); err != nil {
-		t.Fatalf("Error iterating rows: %v", err)
-	}
-
-	if rowCount == 0 {
+	found := scanExplainOpcodes(t, rows)
+	if len(found) == 0 {
 		t.Error("Expected at least one row in explain output")
 	}
 
-	if !foundInit {
-		t.Error("Expected to find Init opcode")
-	}
-	if !foundOpenRead {
-		t.Error("Expected to find OpenRead opcode")
-	}
-	if !foundRewind {
-		t.Error("Expected to find Rewind opcode")
-	}
-	if !foundResultRow {
-		t.Error("Expected to find ResultRow opcode")
-	}
-	if !foundHalt {
-		t.Error("Expected to find Halt opcode")
+	for _, name := range []string{"Init", "OpenRead", "Rewind", "ResultRow", "Halt"} {
+		if !found[name] {
+			t.Errorf("Expected to find %s opcode", name)
+		}
 	}
 }
 

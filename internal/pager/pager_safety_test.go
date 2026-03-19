@@ -231,6 +231,42 @@ func TestJournalChecksumValidation(t *testing.T) {
 	}
 }
 
+// corruptJournalChecksum opens a journal file, corrupts a checksum, and returns whether corruption was applied.
+func corruptJournalChecksum(t *testing.T, journalPath string) bool {
+	t.Helper()
+	journalFile, err := os.OpenFile(journalPath, os.O_RDWR, 0600)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Skip("Journal file doesn't exist (deleted after commit)")
+		}
+		t.Fatalf("failed to open journal: %v", err)
+	}
+	defer journalFile.Close()
+
+	header := make([]byte, 4)
+	if _, err = journalFile.Read(header); err != nil {
+		t.Fatalf("failed to read journal header: %v", err)
+	}
+
+	pageSize := int(binary.BigEndian.Uint32(header))
+	entry := make([]byte, 4+pageSize+4)
+	n, err := journalFile.Read(entry)
+	if err != nil && err != io.EOF {
+		t.Fatalf("failed to read journal entry: %v", err)
+	}
+	if n != len(entry) {
+		return false
+	}
+
+	entry[len(entry)-1] ^= 0xFF
+	entry[len(entry)-2] ^= 0xFF
+	if _, err = journalFile.WriteAt(entry, 4); err != nil {
+		t.Fatalf("failed to write corrupted entry: %v", err)
+	}
+	journalFile.Sync()
+	return true
+}
+
 // TestJournalChecksumCorruption tests that corrupted checksums are detected.
 func TestJournalChecksumCorruption(t *testing.T) {
 	t.Parallel()
@@ -238,103 +274,28 @@ func TestJournalChecksumCorruption(t *testing.T) {
 	defer os.Remove(tmpFile)
 	defer os.Remove(tmpFile + "-journal")
 
-	p, err := Open(tmpFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-
-	// Set journal mode to persist so we can manipulate it
+	p := openTestPagerAt(t, tmpFile, false)
 	p.journalMode = JournalModePersist
 
-	// Get a page and modify it
-	page, err := p.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	err = p.Write(page)
-	if err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-
+	page := mustGetWritePage(t, p, 1)
 	copy(page.Data[DatabaseHeaderSize:DatabaseHeaderSize+10], []byte("testdata12"))
 	p.Put(page)
-
-	// Commit to write the journal
-	err = p.Commit()
-	if err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
+	mustCommit(t, p)
 	p.Close()
 
-	// Now check if journal file exists and corrupt it if it does
-	journalFile, err := os.OpenFile(tmpFile+"-journal", os.O_RDWR, 0600)
-	if err != nil {
-		if os.IsNotExist(err) {
-			t.Skip("Journal file doesn't exist (deleted after commit)")
-		}
-		t.Fatalf("failed to open journal: %v", err)
-	}
-
-	// Read the journal header (4 bytes)
-	header := make([]byte, 4)
-	_, err = journalFile.Read(header)
-	if err != nil {
-		journalFile.Close()
-		t.Fatalf("failed to read journal header: %v", err)
-	}
-
-	// Read a journal entry (if exists)
-	pageSize := int(binary.BigEndian.Uint32(header))
-	entry := make([]byte, 4+pageSize+4)
-	n, err := journalFile.Read(entry)
-	if err != nil && err != io.EOF {
-		journalFile.Close()
-		t.Fatalf("failed to read journal entry: %v", err)
-	}
-
-	if n == len(entry) {
-		// Corrupt the checksum (last 4 bytes)
-		entry[len(entry)-1] ^= 0xFF
-		entry[len(entry)-2] ^= 0xFF
-
-		// Write back the corrupted entry
-		_, err = journalFile.WriteAt(entry, 4)
-		if err != nil {
-			journalFile.Close()
-			t.Fatalf("failed to write corrupted entry: %v", err)
-		}
-		journalFile.Sync()
-	}
-
-	journalFile.Close()
-
-	if n != len(entry) {
+	if !corruptJournalChecksum(t, tmpFile+"-journal") {
 		t.Skip("No complete journal entry found to corrupt")
 	}
 
-	// Manually create a transaction and rollback to test journal corruption detection
-	// First, open a new journal file to trigger rollback
-	p2, err := Open(tmpFile, false)
-	if err != nil {
-		t.Fatalf("failed to reopen pager: %v", err)
-	}
+	p2 := openTestPagerAt(t, tmpFile, false)
 	defer p2.Close()
-
-	// Create a new transaction that will need to use journal
 	p2.journalMode = JournalModePersist
 	page2, _ := p2.Get(1)
-	err = p2.Write(page2)
-	if err != nil {
+	if err := p2.Write(page2); err != nil {
 		t.Logf("Write failed (expected after corruption): %v", err)
 	}
 	p2.Put(page2)
-
-	// This should attempt to use the corrupted journal
-	err = p2.Rollback()
-	if err != nil {
-		// We expect a checksum error if we successfully corrupted the journal
+	if err := p2.Rollback(); err != nil {
 		t.Logf("Rollback detected corruption (expected): %v", err)
 	}
 }

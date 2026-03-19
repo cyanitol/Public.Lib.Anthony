@@ -4,7 +4,6 @@ package driver
 import (
 	"context"
 	"database/sql"
-	"os"
 	"testing"
 )
 
@@ -174,6 +173,47 @@ func TestEmitAggregateFunctionAllTypes(t *testing.T) {
 	}
 }
 
+// compileValueCompare checks a single query result against expected value.
+func compileValueCompare(t *testing.T, db *sql.DB, query string, expected interface{}) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("failed %s: %v", query, err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatalf("no rows for %s", query)
+		return
+	}
+
+	var result interface{}
+	if err := rows.Scan(&result); err != nil {
+		t.Fatalf("failed to scan %s: %v", query, err)
+	}
+
+	compileValueCheck(t, query, result, expected)
+}
+
+// compileValueCheck does type-specific comparison of result vs expected.
+func compileValueCheck(t *testing.T, query string, result, expected interface{}) {
+	t.Helper()
+	switch exp := expected.(type) {
+	case int64:
+		if v, ok := result.(int64); !ok || v != exp {
+			t.Errorf("%s: got %v (%T), want %d", query, result, result, exp)
+		}
+	case string:
+		if v, ok := result.(string); !ok || v != exp {
+			t.Errorf("%s: got %v (%T), want %s", query, result, result, exp)
+		}
+	case nil:
+		if result != nil {
+			t.Errorf("%s: got %v, want nil", query, result)
+		}
+	}
+}
+
 // TestCompileValueDifferentTypes tests compileValue with 66.7% coverage
 func TestCompileValueDifferentTypes(t *testing.T) {
 	db, err := sql.Open(DriverName, ":memory:")
@@ -182,7 +222,6 @@ func TestCompileValueDifferentTypes(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Test with literal values of different types
 	tests := []struct {
 		query    string
 		expected interface{}
@@ -194,35 +233,7 @@ func TestCompileValueDifferentTypes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		rows, err := db.Query(tt.query)
-		if err != nil {
-			t.Fatalf("failed %s: %v", tt.query, err)
-		}
-
-		if rows.Next() {
-			var result interface{}
-			err = rows.Scan(&result)
-			if err != nil {
-				t.Fatalf("failed to scan %s: %v", tt.query, err)
-			}
-
-			// Type-specific comparison
-			switch expected := tt.expected.(type) {
-			case int64:
-				if v, ok := result.(int64); !ok || v != expected {
-					t.Errorf("%s: got %v (%T), want %d", tt.query, result, result, expected)
-				}
-			case string:
-				if v, ok := result.(string); !ok || v != expected {
-					t.Errorf("%s: got %v (%T), want %s", tt.query, result, result, expected)
-				}
-			case nil:
-				if result != nil {
-					t.Errorf("%s: got %v, want nil", tt.query, result)
-				}
-			}
-		}
-		rows.Close()
+		compileValueCompare(t, db, tt.query, tt.expected)
 	}
 }
 
@@ -317,8 +328,7 @@ func TestMarkDirtyOperations(t *testing.T) {
 
 // TestCreateConnectionSharedState tests createConnection with shared state
 func TestCreateConnectionSharedState(t *testing.T) {
-	dbFile := "test_shared_conn_ultimate.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_shared_conn_ultimate.db"
 
 	// Create first connection
 	db1, err := sql.Open(DriverName, dbFile)

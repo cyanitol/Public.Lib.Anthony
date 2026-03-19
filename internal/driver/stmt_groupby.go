@@ -183,94 +183,68 @@ func (s *Stmt) updateGroupAccumulatorsFromSorter(vm *vdbe.VDBE, gen *expr.CodeGe
 
 // updateSingleAccumulator updates a single accumulator register with a value
 func (s *Stmt) updateSingleAccumulator(vm *vdbe.VDBE, funcName string, accReg int, countReg int, valueReg int, gen *expr.CodeGenerator, collation string, sep string) {
-	// Skip NULL values
 	skipAddr := vm.AddOp(vdbe.OpIsNull, valueReg, 0, 0)
 
 	switch funcName {
 	case "COUNT":
 		vm.AddOp(vdbe.OpAddImm, accReg, 1, 0)
-
 	case "SUM", "TOTAL":
-		// If accumulator is NOT NULL, jump to add instruction
-		addAddr := vm.AddOp(vdbe.OpNotNull, accReg, 0, 0)
-		// Accumulator is NULL - copy the first value
-		vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
-		skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
-		// Accumulator is not NULL - add to it
-		vm.Program[addAddr].P2 = vm.NumOps()
-		vm.AddOp(vdbe.OpAdd, accReg, valueReg, accReg)
-		endAddr := vm.NumOps()
-		vm.Program[skipToEndAddr].P2 = endAddr
-
+		emitAccumAdd(vm, accReg, valueReg)
 	case "AVG":
-		// Increment count
 		vm.AddOp(vdbe.OpAddImm, countReg, 1, 0)
-		// If sum accumulator is NOT NULL, jump to add instruction
-		addAddr := vm.AddOp(vdbe.OpNotNull, accReg, 0, 0)
-		// Sum is NULL - copy the first value
-		vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
-		skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
-		// Sum is not NULL - add to it
-		vm.Program[addAddr].P2 = vm.NumOps()
-		vm.AddOp(vdbe.OpAdd, accReg, valueReg, accReg)
-		endAddr := vm.NumOps()
-		vm.Program[skipToEndAddr].P2 = endAddr
-
+		emitAccumAdd(vm, accReg, valueReg)
 	case "MIN":
-		// If accumulator is NULL, just copy the value (first value)
-		copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
-		// Accumulator is not NULL - compare
-		cmpReg := gen.AllocReg()
-		cmpAddr := vm.AddOp(vdbe.OpLt, valueReg, accReg, cmpReg)
-		if collation != "" {
-			vm.Program[cmpAddr].P4.Z = collation
-			vm.Program[cmpAddr].P4Type = vdbe.P4Static
-		}
-		notLessAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
-		// Copy value (either first value or new min)
-		vm.Program[copyAddr].P2 = vm.NumOps()
-		vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
-		endAddr := vm.NumOps()
-		vm.Program[notLessAddr].P2 = endAddr
-
+		emitAccumMinMax(vm, gen, vdbe.OpLt, accReg, valueReg, collation)
 	case "MAX":
-		// If accumulator is NULL, just copy the value (first value)
-		copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
-		// Accumulator is not NULL - compare
-		cmpReg := gen.AllocReg()
-		cmpAddr := vm.AddOp(vdbe.OpGt, valueReg, accReg, cmpReg)
-		if collation != "" {
-			vm.Program[cmpAddr].P4.Z = collation
-			vm.Program[cmpAddr].P4Type = vdbe.P4Static
-		}
-		notGreaterAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
-		// Copy value (either first value or new max)
-		vm.Program[copyAddr].P2 = vm.NumOps()
-		vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
-		endAddr := vm.NumOps()
-		vm.Program[notGreaterAddr].P2 = endAddr
-
+		emitAccumMinMax(vm, gen, vdbe.OpGt, accReg, valueReg, collation)
 	case "GROUP_CONCAT":
-		sepReg := gen.AllocReg()
-		separator := sep
-		if separator == "" {
-			separator = ","
-		}
-		vm.AddOpWithP4Str(vdbe.OpString8, 0, sepReg, 0, separator)
-
-		copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
-		tmpReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpConcat, accReg, sepReg, tmpReg)
-		vm.AddOp(vdbe.OpConcat, tmpReg, valueReg, accReg)
-		skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
-		vm.Program[copyAddr].P2 = vm.NumOps()
-		vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
-		endAddr := vm.NumOps()
-		vm.Program[skipToEndAddr].P2 = endAddr
+		emitAccumGroupConcat(vm, gen, accReg, valueReg, sep)
 	}
 
-	// Fix skip address for NULL values
 	vm.Program[skipAddr].P2 = vm.NumOps()
+}
+
+// emitAccumAdd emits opcodes for SUM/TOTAL/AVG accumulation (copy first, add subsequent).
+func emitAccumAdd(vm *vdbe.VDBE, accReg, valueReg int) {
+	addAddr := vm.AddOp(vdbe.OpNotNull, accReg, 0, 0)
+	vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
+	skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+	vm.Program[addAddr].P2 = vm.NumOps()
+	vm.AddOp(vdbe.OpAdd, accReg, valueReg, accReg)
+	vm.Program[skipToEndAddr].P2 = vm.NumOps()
+}
+
+// emitAccumMinMax emits opcodes for MIN or MAX accumulation.
+func emitAccumMinMax(vm *vdbe.VDBE, gen *expr.CodeGenerator, cmpOp vdbe.Opcode, accReg, valueReg int, collation string) {
+	copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
+	cmpReg := gen.AllocReg()
+	cmpAddr := vm.AddOp(cmpOp, valueReg, accReg, cmpReg)
+	if collation != "" {
+		vm.Program[cmpAddr].P4.Z = collation
+		vm.Program[cmpAddr].P4Type = vdbe.P4Static
+	}
+	notBetterAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
+	vm.Program[copyAddr].P2 = vm.NumOps()
+	vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
+	vm.Program[notBetterAddr].P2 = vm.NumOps()
+}
+
+// emitAccumGroupConcat emits opcodes for GROUP_CONCAT accumulation.
+func emitAccumGroupConcat(vm *vdbe.VDBE, gen *expr.CodeGenerator, accReg, valueReg int, sep string) {
+	sepReg := gen.AllocReg()
+	if sep == "" {
+		sep = ","
+	}
+	vm.AddOpWithP4Str(vdbe.OpString8, 0, sepReg, 0, sep)
+
+	copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
+	tmpReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpConcat, accReg, sepReg, tmpReg)
+	vm.AddOp(vdbe.OpConcat, tmpReg, valueReg, accReg)
+	skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
+	vm.Program[copyAddr].P2 = vm.NumOps()
+	vm.AddOp(vdbe.OpCopy, valueReg, accReg, 0)
+	vm.Program[skipToEndAddr].P2 = vm.NumOps()
 }
 
 func groupConcatSeparator(fnExpr *parser.FunctionExpr) string {
@@ -624,25 +598,31 @@ func exprsEqual(e1, e2 parser.Expression) bool {
 		return e1 == e2
 	}
 
-	ident1, ok1 := e1.(*parser.IdentExpr)
-	ident2, ok2 := e2.(*parser.IdentExpr)
-	if ok1 && ok2 {
-		return strings.EqualFold(ident1.Name, ident2.Name)
+	switch v1 := e1.(type) {
+	case *parser.IdentExpr:
+		return identsEqual(v1, e2)
+	case *parser.LiteralExpr:
+		return literalsEqual(v1, e2)
+	case *parser.BinaryExpr:
+		return binaryExprsEqual(v1, e2)
+	default:
+		return false
 	}
+}
 
-	lit1, ok1 := e1.(*parser.LiteralExpr)
-	lit2, ok2 := e2.(*parser.LiteralExpr)
-	if ok1 && ok2 {
-		return lit1.Type == lit2.Type && lit1.Value == lit2.Value
-	}
+func identsEqual(v1 *parser.IdentExpr, e2 parser.Expression) bool {
+	v2, ok := e2.(*parser.IdentExpr)
+	return ok && strings.EqualFold(v1.Name, v2.Name)
+}
 
-	bin1, ok1 := e1.(*parser.BinaryExpr)
-	bin2, ok2 := e2.(*parser.BinaryExpr)
-	if ok1 && ok2 {
-		return bin1.Op == bin2.Op && exprsEqual(bin1.Left, bin2.Left) && exprsEqual(bin1.Right, bin2.Right)
-	}
+func literalsEqual(v1 *parser.LiteralExpr, e2 parser.Expression) bool {
+	v2, ok := e2.(*parser.LiteralExpr)
+	return ok && v1.Type == v2.Type && v1.Value == v2.Value
+}
 
-	return false
+func binaryExprsEqual(v1 *parser.BinaryExpr, e2 parser.Expression) bool {
+	v2, ok := e2.(*parser.BinaryExpr)
+	return ok && v1.Op == v2.Op && exprsEqual(v1.Left, v2.Left) && exprsEqual(v1.Right, v2.Right)
 }
 
 // emitAggregateHavingClause emits HAVING clause check for aggregate output (without GROUP BY).

@@ -86,44 +86,63 @@ func DecodeCompositeKey(data []byte) ([]interface{}, error) {
 
 	var values []interface{}
 	for i := 0; i < len(data); {
-		prefix := data[i]
-		i++
-
-		switch prefix {
-		case 0x00:
-			values = append(values, nil)
-		case 0x10:
-			if i+8 > len(data) {
-				return nil, fmt.Errorf("truncated integer in composite key")
-			}
-			values = append(values, decodeInt64(data[i:i+8]))
-			i += 8
-		case 0x20:
-			if i+8 > len(data) {
-				return nil, fmt.Errorf("truncated float in composite key")
-			}
-			values = append(values, decodeFloat64(data[i:i+8]))
-			i += 8
-		case 0x30, 0x50: // text encodings (0x50 is fallback string)
-			end := bytes.IndexByte(data[i:], 0x00)
-			if end == -1 {
-				return nil, fmt.Errorf("unterminated text in composite key")
-			}
-			values = append(values, string(data[i:i+end]))
-			i += end + 1
-		case 0x40: // blob
-			end := bytes.IndexByte(data[i:], 0x00)
-			if end == -1 {
-				return nil, fmt.Errorf("unterminated blob in composite key")
-			}
-			values = append(values, append([]byte(nil), data[i:i+end]...))
-			i += end + 1
-		default:
-			return nil, fmt.Errorf("unknown composite key prefix 0x%x", prefix)
+		val, consumed, err := decodeOneValue(data[i:])
+		if err != nil {
+			return nil, err
 		}
+		values = append(values, val)
+		i += consumed
 	}
 
 	return values, nil
+}
+
+// decodeOneValue decodes a single value from the start of data, returning the value,
+// bytes consumed, and any error.
+func decodeOneValue(data []byte) (interface{}, int, error) {
+	prefix := data[0]
+	rest := data[1:]
+
+	switch prefix {
+	case 0x00:
+		return nil, 1, nil
+	case 0x10:
+		return decodeFixed8(rest, "integer", decodeInt64)
+	case 0x20:
+		return decodeFixed8(rest, "float", decodeFloat64)
+	case 0x30, 0x50:
+		return decodeNullTermString(rest, "text")
+	case 0x40:
+		return decodeNullTermBlob(rest)
+	default:
+		return nil, 0, fmt.Errorf("unknown composite key prefix 0x%x", prefix)
+	}
+}
+
+// decodeFixed8 decodes an 8-byte fixed-size value using the provided decoder function.
+func decodeFixed8[T any](data []byte, typeName string, decode func([]byte) T) (interface{}, int, error) {
+	if len(data) < 8 {
+		return nil, 0, fmt.Errorf("truncated %s in composite key", typeName)
+	}
+	return decode(data[:8]), 9, nil
+}
+
+// decodeNullTermString decodes a null-terminated string from data.
+func decodeNullTermString(data []byte, typeName string) (interface{}, int, error) {
+	end := bytes.IndexByte(data, 0x00)
+	if end == -1 {
+		return nil, 0, fmt.Errorf("unterminated %s in composite key", typeName)
+	}
+	return string(data[:end]), 1 + end + 1, nil
+}
+
+// decodeNullTermBlob decodes a null-terminated blob from data.
+func decodeNullTermBlob(data []byte) (interface{}, int, error) {
+	end := bytes.IndexByte(data, 0x00)
+	if end == -1 {
+		return nil, 0, fmt.Errorf("unterminated blob in composite key")
+	}
+	return append([]byte(nil), data[:end]...), 1 + end + 1, nil
 }
 
 // decodeInt64 reverses the EncodeCompositeKey integer encoding.

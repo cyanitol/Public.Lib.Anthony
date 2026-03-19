@@ -917,14 +917,19 @@ func (s *Stmt) exprContainsWindowFunc(e parser.Expression) bool {
 	case *parser.CastExpr:
 		return s.isWindowFunctionExpr(ex.Expr)
 	case *parser.CaseExpr:
-		for _, w := range ex.WhenClauses {
-			if s.isWindowFunctionExpr(w.Condition) || s.isWindowFunctionExpr(w.Result) {
-				return true
-			}
-		}
-		return s.isWindowFunctionExpr(ex.ElseClause)
+		return s.caseExprContainsWindowFunc(ex)
 	}
 	return false
+}
+
+// caseExprContainsWindowFunc checks CASE expression clauses for window functions.
+func (s *Stmt) caseExprContainsWindowFunc(ex *parser.CaseExpr) bool {
+	for _, w := range ex.WhenClauses {
+		if s.isWindowFunctionExpr(w.Condition) || s.isWindowFunctionExpr(w.Result) {
+			return true
+		}
+	}
+	return s.isWindowFunctionExpr(ex.ElseClause)
 }
 
 // detectAggregates checks if a SELECT statement contains aggregate functions

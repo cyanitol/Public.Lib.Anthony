@@ -122,59 +122,19 @@ func TestMemoryPagerWriteAndRead(t *testing.T) {
 
 func TestMemoryPagerTransaction(t *testing.T) {
 	t.Parallel()
-	mp, err := OpenMemory(DefaultPageSize)
-	if err != nil {
-		t.Fatalf("failed to open memory pager: %v", err)
-	}
-	defer mp.Close()
+	mp := mustOpenMemoryPager(t, DefaultPageSize)
 
-	// Allocate and write to a page
-	pgno, err := mp.AllocatePage()
-	if err != nil {
-		t.Fatalf("failed to allocate page: %v", err)
-	}
+	pgno := mustMemoryAllocate(t, mp)
+	memoryWritePageData(t, mp, pgno, []byte("Original Data"))
+	mustMemoryCommit(t, mp)
 
-	page, err := mp.Get(pgno)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	if err := mp.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-
-	testData := []byte("Original Data")
-	copy(page.Data, testData)
-	mp.Put(page)
-
-	if err := mp.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Start a new transaction and modify the page
-	page, err = mp.Get(pgno)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	if err := mp.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-
-	modifiedData := []byte("Modified Data")
-	copy(page.Data, modifiedData)
-	mp.Put(page)
-
-	// Rollback the transaction
-	if err := mp.Rollback(); err != nil {
-		t.Fatalf("failed to rollback: %v", err)
-	}
+	// Modify and rollback
+	memoryWritePageData(t, mp, pgno, []byte("Modified Data"))
+	mustMemoryRollback(t, mp)
 
 	// Read the page again - should have original data
-	page, err = mp.Get(pgno)
-	if err != nil {
-		t.Fatalf("failed to get page after rollback: %v", err)
-	}
+	testData := []byte("Original Data")
+	page := mustMemoryGet(t, mp, pgno)
 	defer mp.Put(page)
 
 	if string(page.Data[:len(testData)]) != string(testData) {
@@ -184,65 +144,20 @@ func TestMemoryPagerTransaction(t *testing.T) {
 
 func TestMemoryPagerSavepoint(t *testing.T) {
 	t.Parallel()
-	mp, err := OpenMemory(DefaultPageSize)
-	if err != nil {
-		t.Fatalf("failed to open memory pager: %v", err)
-	}
-	defer mp.Close()
+	mp := mustOpenMemoryPager(t, DefaultPageSize)
 
-	// Allocate and write to a page
-	pgno, err := mp.AllocatePage()
-	if err != nil {
-		t.Fatalf("failed to allocate page: %v", err)
-	}
+	pgno := mustMemoryAllocate(t, mp)
+	mustMemoryBeginWrite(t, mp)
 
-	// Begin write transaction
-	if err := mp.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
+	memoryWritePageData(t, mp, pgno, []byte("Original"))
+	mustMemorySavepoint(t, mp, "sp1")
 
-	page, err := mp.Get(pgno)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	if err := mp.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-
-	originalData := []byte("Original")
-	copy(page.Data, originalData)
-	mp.Put(page)
-
-	// Create a savepoint
-	if err := mp.Savepoint("sp1"); err != nil {
-		t.Fatalf("failed to create savepoint: %v", err)
-	}
-
-	// Modify the page
-	page, err = mp.Get(pgno)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	if err := mp.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-
-	modifiedData := []byte("Modified")
-	copy(page.Data, modifiedData)
-	mp.Put(page)
-
-	// Rollback to savepoint
-	if err := mp.RollbackTo("sp1"); err != nil {
-		t.Fatalf("failed to rollback to savepoint: %v", err)
-	}
+	memoryWritePageData(t, mp, pgno, []byte("Modified"))
+	mustMemoryRollbackTo(t, mp, "sp1")
 
 	// Read the page - should have original data
-	page, err = mp.Get(pgno)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
+	originalData := []byte("Original")
+	page := mustMemoryGet(t, mp, pgno)
 	defer mp.Put(page)
 
 	if string(page.Data[:len(originalData)]) != string(originalData) {

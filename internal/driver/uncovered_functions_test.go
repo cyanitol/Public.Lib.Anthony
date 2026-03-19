@@ -3,7 +3,6 @@ package driver
 
 import (
 	"database/sql"
-	"os"
 	"testing"
 )
 
@@ -13,8 +12,7 @@ func TestReleaseStateRefCounting(t *testing.T) {
 	// Test releaseState by triggering the error path in createConnection
 	// We'll use an invalid schema operation to cause openDatabase to fail
 
-	dbFile := "test_release_state_error.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_release_state_error.db"
 
 	d := &Driver{}
 
@@ -58,29 +56,27 @@ func TestReleaseStateRefCounting(t *testing.T) {
 }
 
 // TestEmitNonIdentifierColumn tests the emitNonIdentifierColumn function with 0% coverage
-func TestEmitNonIdentifierColumn(t *testing.T) {
-	dbFile := "test_emit_non_identifier.db"
-	defer os.Remove(dbFile)
-
-	db, err := sql.Open(DriverName, dbFile)
+func uncoveredSetupDB(t *testing.T, name string, stmts []string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open(DriverName, name)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+	}
+	return db
+}
+
+func TestEmitNonIdentifierColumn(t *testing.T) {
+	db := uncoveredSetupDB(t, t.TempDir()+"/test_emit_non_identifier.db", []string{
+		"CREATE TABLE multi (a INTEGER, b INTEGER, c TEXT)",
+		"INSERT INTO multi VALUES (1, 2, 'test'), (3, 4, 'data')",
+	})
 	defer db.Close()
 
-	// Create a table with multiple columns
-	_, err = db.Exec("CREATE TABLE multi (a INTEGER, b INTEGER, c TEXT)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	// Insert test data
-	_, err = db.Exec("INSERT INTO multi VALUES (1, 2, 'test'), (3, 4, 'data')")
-	if err != nil {
-		t.Fatalf("failed to insert data: %v", err)
-	}
-
-	// Test SELECT with expression (non-identifier column)
 	rows, err := db.Query("SELECT a + b, c FROM multi")
 	if err != nil {
 		t.Fatalf("failed to query with expression: %v", err)
@@ -95,17 +91,10 @@ func TestEmitNonIdentifierColumn(t *testing.T) {
 			t.Fatalf("failed to scan row: %v", err)
 		}
 		count++
-
-		if count == 1 {
-			if sum != 3 {
-				t.Errorf("first row sum = %d, want 3", sum)
-			}
-			if text != "test" {
-				t.Errorf("first row text = %s, want 'test'", text)
-			}
+		if count == 1 && (sum != 3 || text != "test") {
+			t.Errorf("first row: sum=%d, text=%s, want 3, test", sum, text)
 		}
 	}
-
 	if count != 2 {
 		t.Errorf("got %d rows, want 2", count)
 	}
@@ -113,38 +102,14 @@ func TestEmitNonIdentifierColumn(t *testing.T) {
 
 // TestEmitUnqualifiedColumn tests the emitUnqualifiedColumn function with 0% coverage
 func TestEmitUnqualifiedColumnWithJoin(t *testing.T) {
-	dbFile := "test_emit_unqualified.db"
-	defer os.Remove(dbFile)
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := uncoveredSetupDB(t, t.TempDir()+"/test_emit_unqualified.db", []string{
+		"CREATE TABLE t1 (id INTEGER, name TEXT)",
+		"CREATE TABLE t2 (tid INTEGER, val INTEGER)",
+		"INSERT INTO t1 VALUES (1, 'alice'), (2, 'bob')",
+		"INSERT INTO t2 VALUES (1, 100), (2, 200)",
+	})
 	defer db.Close()
 
-	// Create two tables for join
-	_, err = db.Exec("CREATE TABLE t1 (id INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("failed to create t1: %v", err)
-	}
-
-	_, err = db.Exec("CREATE TABLE t2 (tid INTEGER, val INTEGER)")
-	if err != nil {
-		t.Fatalf("failed to create t2: %v", err)
-	}
-
-	// Insert test data
-	_, err = db.Exec("INSERT INTO t1 VALUES (1, 'alice'), (2, 'bob')")
-	if err != nil {
-		t.Fatalf("failed to insert into t1: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t2 VALUES (1, 100), (2, 200)")
-	if err != nil {
-		t.Fatalf("failed to insert into t2: %v", err)
-	}
-
-	// Test simple cross-product select (JOIN testing is limited)
 	rows, err := db.Query("SELECT t1.name FROM t1")
 	if err != nil {
 		t.Fatalf("failed to query with join: %v", err)
@@ -158,14 +123,10 @@ func TestEmitUnqualifiedColumnWithJoin(t *testing.T) {
 			t.Fatalf("failed to scan row: %v", err)
 		}
 		count++
-
-		if count == 1 {
-			if name != "alice" {
-				t.Errorf("first row name = %s, want 'alice'", name)
-			}
+		if count == 1 && name != "alice" {
+			t.Errorf("first row name = %s, want 'alice'", name)
 		}
 	}
-
 	if count != 2 {
 		t.Errorf("got %d rows, want 2", count)
 	}
@@ -173,8 +134,7 @@ func TestEmitUnqualifiedColumnWithJoin(t *testing.T) {
 
 // TestCompileInSubquery tests the compileInSubquery function with 0% coverage
 func TestCompileInSubquery(t *testing.T) {
-	dbFile := "test_compile_in_subquery.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_compile_in_subquery.db"
 
 	// Clean up any leftover state from the singleton driver
 	// This is necessary because the driver caches dbState across test runs
@@ -237,8 +197,7 @@ func TestCompileInSubquery(t *testing.T) {
 
 // TestCompileInnerStatement tests the compileInnerStatement function with 20% coverage
 func TestCompileInnerStatementWithExplain(t *testing.T) {
-	dbFile := "test_inner_statement.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_inner_statement.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -272,8 +231,7 @@ func TestCompileInnerStatementWithExplain(t *testing.T) {
 
 // TestBuildMultiTableColumnNames tests the buildMultiTableColumnNames function with 58.3% coverage
 func TestBuildMultiTableColumnNames(t *testing.T) {
-	dbFile := "test_multi_table_columns.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_multi_table_columns.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -324,8 +282,7 @@ func TestBuildMultiTableColumnNames(t *testing.T) {
 
 // TestEmitColumnFromTable tests the emitColumnFromTable function with 62.5% coverage
 func TestEmitColumnFromTableWithRowid(t *testing.T) {
-	dbFile := "test_emit_column_rowid.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_emit_column_rowid.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -370,8 +327,7 @@ func TestEmitColumnFromTableWithRowid(t *testing.T) {
 
 // TestEmitInsertRowid tests the emitInsertRowid function with 62.5% coverage
 func TestEmitInsertRowidExplicit(t *testing.T) {
-	dbFile := "test_insert_rowid.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_insert_rowid.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -462,8 +418,7 @@ func TestCompileArgValueWithParameters(t *testing.T) {
 
 // TestCreateScalarFunction tests CreateScalarFunction with 66.7% coverage
 func TestCreateScalarFunctionSuccess(t *testing.T) {
-	dbFile := "test_scalar_func.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_scalar_func.db"
 
 	d := GetDriver()
 	conn, err := d.Open(dbFile)
@@ -490,8 +445,7 @@ func TestCreateScalarFunctionSuccess(t *testing.T) {
 
 // TestCreateAggregateFunction tests CreateAggregateFunction with 66.7% coverage
 func TestCreateAggregateFunctionSuccess(t *testing.T) {
-	dbFile := "test_agg_func.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_agg_func.db"
 
 	d := GetDriver()
 	conn, err := d.Open(dbFile)
@@ -544,8 +498,7 @@ func TestCreateMemoryConnectionErrorHandling(t *testing.T) {
 
 // TestMarkDirtyPagerProvider tests MarkDirty with 66.7% coverage
 func TestMarkDirtyPagerProviderSuccess(t *testing.T) {
-	dbFile := "test_mark_dirty_pager.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_mark_dirty_pager.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -651,16 +604,9 @@ func TestEmitSelectColumnOpMultiTableComplex(t *testing.T) {
 
 // TestCompileValue tests compileValue function with 66.7% coverage
 func TestCompileValueLiteralHandling(t *testing.T) {
-	dbFile := "test_compile_value.db"
-	defer os.Remove(dbFile)
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open: %v", err)
-	}
+	db := uncoveredSetupDB(t, t.TempDir()+"/test_compile_value.db", nil)
 	defer db.Close()
 
-	// Test various literal types
 	tests := []struct {
 		query    string
 		expected interface{}
@@ -672,41 +618,49 @@ func TestCompileValueLiteralHandling(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		rows, err := db.Query(tt.query)
-		if err != nil {
-			t.Fatalf("failed to query %s: %v", tt.query, err)
-		}
+		uncoveredCheckScalar(t, db, tt.query, tt.expected)
+	}
+}
 
-		if rows.Next() {
-			var result interface{}
-			if err := rows.Scan(&result); err != nil {
-				t.Fatalf("failed to scan for %s: %v", tt.query, err)
-			}
+func uncoveredCheckScalar(t *testing.T, db *sql.DB, query string, expected interface{}) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("failed to query %s: %v", query, err)
+	}
+	defer rows.Close()
 
-			// Type-specific comparison
-			switch expected := tt.expected.(type) {
-			case int64:
-				if v, ok := result.(int64); !ok || v != expected {
-					t.Errorf("%s: got %v, want %d", tt.query, result, expected)
-				}
-			case string:
-				if v, ok := result.(string); !ok || v != expected {
-					t.Errorf("%s: got %v, want %s", tt.query, result, expected)
-				}
-			case nil:
-				if result != nil {
-					t.Errorf("%s: got %v, want nil", tt.query, result)
-				}
-			}
+	if !rows.Next() {
+		return
+	}
+	var result interface{}
+	if err := rows.Scan(&result); err != nil {
+		t.Fatalf("failed to scan for %s: %v", query, err)
+	}
+	uncoveredCompareValue(t, query, result, expected)
+}
+
+func uncoveredCompareValue(t *testing.T, query string, result, expected interface{}) {
+	t.Helper()
+	switch exp := expected.(type) {
+	case int64:
+		if v, ok := result.(int64); !ok || v != exp {
+			t.Errorf("%s: got %v, want %d", query, result, exp)
 		}
-		rows.Close()
+	case string:
+		if v, ok := result.(string); !ok || v != exp {
+			t.Errorf("%s: got %v, want %s", query, result, exp)
+		}
+	case nil:
+		if result != nil {
+			t.Errorf("%s: got %v, want nil", query, result)
+		}
 	}
 }
 
 // TestSelectFromTableName tests selectFromTableName with 66.7% coverage
 func TestSelectFromTableNameBasic(t *testing.T) {
-	dbFile := "test_select_from_table.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_select_from_table.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -749,8 +703,7 @@ func TestSelectFromTableNameBasic(t *testing.T) {
 
 // TestEmitAggregateFunction tests emitAggregateFunction with 66.7% coverage
 func TestEmitAggregateFunctionVariety(t *testing.T) {
-	dbFile := "test_aggregate_emit.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_aggregate_emit.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -796,54 +749,30 @@ func TestEmitAggregateFunctionVariety(t *testing.T) {
 
 // TestExtractOrderByExpression tests extractOrderByExpression with 66.7% coverage
 func TestExtractOrderByExpressionComplex(t *testing.T) {
-	dbFile := "test_order_by_expr.db"
-	defer os.Remove(dbFile)
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open: %v", err)
-	}
+	db := uncoveredSetupDB(t, t.TempDir()+"/test_order_by_expr.db", []string{
+		"CREATE TABLE coords (x INTEGER, y INTEGER)",
+		"INSERT INTO coords VALUES (3, 4), (1, 2), (5, 6)",
+	})
 	defer db.Close()
 
-	// Create table
-	_, err = db.Exec("CREATE TABLE coords (x INTEGER, y INTEGER)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO coords VALUES (3, 4), (1, 2), (5, 6)")
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-
-	// Order by expression
 	rows, err := db.Query("SELECT x, y FROM coords ORDER BY x + y")
 	if err != nil {
 		t.Fatalf("failed to query with ORDER BY expression: %v", err)
 	}
 	defer rows.Close()
 
-	expected := []struct{ x, y int }{
-		{1, 2}, // sum = 3
-		{3, 4}, // sum = 7
-		{5, 6}, // sum = 11
-	}
-
+	expected := [][2]int{{1, 2}, {3, 4}, {5, 6}}
 	i := 0
 	for rows.Next() {
 		var x, y int
 		if err := rows.Scan(&x, &y); err != nil {
 			t.Fatalf("failed to scan: %v", err)
 		}
-
-		if i < len(expected) {
-			if x != expected[i].x || y != expected[i].y {
-				t.Errorf("row %d: got (%d, %d), want (%d, %d)", i, x, y, expected[i].x, expected[i].y)
-			}
+		if i < len(expected) && (x != expected[i][0] || y != expected[i][1]) {
+			t.Errorf("row %d: got (%d, %d), want (%d, %d)", i, x, y, expected[i][0], expected[i][1])
 		}
 		i++
 	}
-
 	if i != len(expected) {
 		t.Errorf("got %d rows, want %d", i, len(expected))
 	}

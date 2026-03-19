@@ -5,208 +5,126 @@ import (
 	"testing"
 )
 
-// TestCoroutineOpcodes tests coroutine-related opcodes
+// newCoroutineTestVDBE creates a test VDBE with coroutine support.
+func newCoroutineTestVDBE() *VDBE {
+	v := NewTestVDBE(10)
+	v.Coroutines = make(map[int]*CoroutineInfo)
+	return v
+}
+
+func TestCoroutineInitCoroutine(t *testing.T) {
+	t.Parallel()
+	v := newCoroutineTestVDBE()
+	v.PC = 0
+	err := v.execInitCoroutine(&Instruction{Opcode: OpInitCoroutine, P1: 1, P2: 10, P3: 5})
+	if err != nil {
+		t.Fatalf("execInitCoroutine failed: %v", err)
+	}
+	coInfo, ok := v.Coroutines[1]
+	if !ok {
+		t.Fatal("Coroutine not created")
+	}
+	if coInfo.EntryPoint != 5 {
+		t.Errorf("Expected entry point 5, got %d", coInfo.EntryPoint)
+	}
+	if coInfo.Active {
+		t.Error("Coroutine should not be active after init")
+	}
+	if v.PC != 10 {
+		t.Errorf("Expected PC=10 after init, got %d", v.PC)
+	}
+}
+
+func TestCoroutineYield(t *testing.T) {
+	t.Parallel()
+	v := newCoroutineTestVDBE()
+	v.Coroutines[1] = &CoroutineInfo{EntryPoint: 5, YieldAddr: 0, Active: false}
+	v.PC = 3
+	err := v.execYield(&Instruction{Opcode: OpYield, P1: 1, P2: 0})
+	if err != nil {
+		t.Fatalf("execYield failed: %v", err)
+	}
+	if !v.Coroutines[1].Active {
+		t.Error("Coroutine should be active after yield")
+	}
+	if v.Coroutines[1].YieldAddr != 3 {
+		t.Errorf("Expected yield addr 3, got %d", v.Coroutines[1].YieldAddr)
+	}
+	if v.PC != 5 {
+		t.Errorf("Expected PC=5 (entry point), got %d", v.PC)
+	}
+}
+
+func TestCoroutineYieldWithRegister(t *testing.T) {
+	t.Parallel()
+	v := newCoroutineTestVDBE()
+	v.Coroutines[1] = &CoroutineInfo{EntryPoint: 5, YieldAddr: 0, Active: false}
+	v.Mem[2].SetInt(7)
+	v.PC = 3
+	err := v.execYield(&Instruction{Opcode: OpYield, P1: 1, P2: 2})
+	if err != nil {
+		t.Fatalf("execYield failed: %v", err)
+	}
+	if v.Coroutines[1].YieldAddr != 7 {
+		t.Errorf("Expected yield addr 7 (from register), got %d", v.Coroutines[1].YieldAddr)
+	}
+}
+
+func TestCoroutineEndCoroutine(t *testing.T) {
+	t.Parallel()
+	v := newCoroutineTestVDBE()
+	v.Coroutines[1] = &CoroutineInfo{EntryPoint: 5, YieldAddr: 8, Active: true}
+	v.PC = 6
+	err := v.execEndCoroutine(&Instruction{Opcode: OpEndCoroutine, P1: 1})
+	if err != nil {
+		t.Fatalf("execEndCoroutine failed: %v", err)
+	}
+	if v.Coroutines[1].Active {
+		t.Error("Coroutine should not be active after end")
+	}
+	if v.PC != 8 {
+		t.Errorf("Expected PC=8 (yield addr), got %d", v.PC)
+	}
+}
+
+func TestCoroutineEndNotActive(t *testing.T) {
+	t.Parallel()
+	v := newCoroutineTestVDBE()
+	v.Coroutines[1] = &CoroutineInfo{EntryPoint: 5, YieldAddr: 8, Active: false}
+	err := v.execEndCoroutine(&Instruction{Opcode: OpEndCoroutine, P1: 1})
+	if err == nil {
+		t.Error("Expected error for ending inactive coroutine")
+	}
+}
+
+func TestCoroutineEndNotInitialized(t *testing.T) {
+	t.Parallel()
+	v := newCoroutineTestVDBE()
+	err := v.execEndCoroutine(&Instruction{Opcode: OpEndCoroutine, P1: 99})
+	if err == nil {
+		t.Error("Expected error for non-existent coroutine")
+	}
+}
+
+func TestCoroutineYieldNotInitialized(t *testing.T) {
+	t.Parallel()
+	v := newCoroutineTestVDBE()
+	err := v.execYield(&Instruction{Opcode: OpYield, P1: 99, P2: 0})
+	if err == nil {
+		t.Error("Expected error for non-existent coroutine")
+	}
+}
+
+// TestCoroutineOpcodes is kept as a thin wrapper for backward compatibility.
 func TestCoroutineOpcodes(t *testing.T) {
 	t.Parallel()
-	t.Run("InitCoroutine", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.Coroutines = make(map[int]*CoroutineInfo)
-
-		instr := &Instruction{
-			Opcode: OpInitCoroutine,
-			P1:     1,  // coroutine ID
-			P2:     10, // jump address (skip coroutine body)
-			P3:     5,  // entry point
-		}
-
-		v.PC = 0
-		err := v.execInitCoroutine(instr)
-		if err != nil {
-			t.Fatalf("execInitCoroutine failed: %v", err)
-		}
-
-		// Check coroutine was created
-		coInfo, ok := v.Coroutines[1]
-		if !ok {
-			t.Fatal("Coroutine not created")
-		}
-
-		if coInfo.EntryPoint != 5 {
-			t.Errorf("Expected entry point 5, got %d", coInfo.EntryPoint)
-		}
-
-		if coInfo.Active {
-			t.Error("Coroutine should not be active after init")
-		}
-
-		// Check PC was jumped
-		if v.PC != 10 {
-			t.Errorf("Expected PC=10 after init, got %d", v.PC)
-		}
-	})
-
-	t.Run("Yield", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.Coroutines = make(map[int]*CoroutineInfo)
-
-		// Initialize coroutine first
-		v.Coroutines[1] = &CoroutineInfo{
-			EntryPoint: 5,
-			YieldAddr:  0,
-			Active:     false,
-		}
-
-		// Yield from current position (PC=3) to entry point (5)
-		v.PC = 3
-		instr := &Instruction{
-			Opcode: OpYield,
-			P1:     1, // coroutine ID
-			P2:     0, // use current PC as return address
-		}
-
-		err := v.execYield(instr)
-		if err != nil {
-			t.Fatalf("execYield failed: %v", err)
-		}
-
-		// Check coroutine state
-		coInfo := v.Coroutines[1]
-		if !coInfo.Active {
-			t.Error("Coroutine should be active after yield")
-		}
-
-		if coInfo.YieldAddr != 3 {
-			t.Errorf("Expected yield addr 3, got %d", coInfo.YieldAddr)
-		}
-
-		if v.PC != 5 {
-			t.Errorf("Expected PC=5 (entry point), got %d", v.PC)
-		}
-	})
-
-	t.Run("YieldWithRegister", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.Coroutines = make(map[int]*CoroutineInfo)
-
-		v.Coroutines[1] = &CoroutineInfo{
-			EntryPoint: 5,
-			YieldAddr:  0,
-			Active:     false,
-		}
-
-		// Store return address in register
-		v.Mem[2].SetInt(7)
-
-		v.PC = 3
-		instr := &Instruction{
-			Opcode: OpYield,
-			P1:     1, // coroutine ID
-			P2:     2, // get return address from register 2
-		}
-
-		err := v.execYield(instr)
-		if err != nil {
-			t.Fatalf("execYield failed: %v", err)
-		}
-
-		if v.Coroutines[1].YieldAddr != 7 {
-			t.Errorf("Expected yield addr 7 (from register), got %d", v.Coroutines[1].YieldAddr)
-		}
-	})
-
-	t.Run("EndCoroutine", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.Coroutines = make(map[int]*CoroutineInfo)
-
-		// Set up active coroutine
-		v.Coroutines[1] = &CoroutineInfo{
-			EntryPoint: 5,
-			YieldAddr:  8,
-			Active:     true,
-		}
-
-		v.PC = 6
-		instr := &Instruction{
-			Opcode: OpEndCoroutine,
-			P1:     1, // coroutine ID
-		}
-
-		err := v.execEndCoroutine(instr)
-		if err != nil {
-			t.Fatalf("execEndCoroutine failed: %v", err)
-		}
-
-		// Check coroutine state
-		coInfo := v.Coroutines[1]
-		if coInfo.Active {
-			t.Error("Coroutine should not be active after end")
-		}
-
-		// Check PC returned to yield address
-		if v.PC != 8 {
-			t.Errorf("Expected PC=8 (yield addr), got %d", v.PC)
-		}
-	})
-
-	t.Run("EndCoroutine_NotActive", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.Coroutines = make(map[int]*CoroutineInfo)
-
-		// Set up inactive coroutine
-		v.Coroutines[1] = &CoroutineInfo{
-			EntryPoint: 5,
-			YieldAddr:  8,
-			Active:     false,
-		}
-
-		instr := &Instruction{
-			Opcode: OpEndCoroutine,
-			P1:     1,
-		}
-
-		err := v.execEndCoroutine(instr)
-		if err == nil {
-			t.Error("Expected error for ending inactive coroutine")
-		}
-	})
-
-	t.Run("EndCoroutine_NotInitialized", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.Coroutines = make(map[int]*CoroutineInfo)
-
-		instr := &Instruction{
-			Opcode: OpEndCoroutine,
-			P1:     99, // Non-existent coroutine
-		}
-
-		err := v.execEndCoroutine(instr)
-		if err == nil {
-			t.Error("Expected error for non-existent coroutine")
-		}
-	})
-
-	t.Run("Yield_NotInitialized", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.Coroutines = make(map[int]*CoroutineInfo)
-
-		instr := &Instruction{
-			Opcode: OpYield,
-			P1:     99, // Non-existent coroutine
-			P2:     0,
-		}
-
-		err := v.execYield(instr)
-		if err == nil {
-			t.Error("Expected error for non-existent coroutine")
-		}
-	})
+	t.Run("InitCoroutine", TestCoroutineInitCoroutine)
+	t.Run("Yield", TestCoroutineYield)
+	t.Run("YieldWithRegister", TestCoroutineYieldWithRegister)
+	t.Run("EndCoroutine", TestCoroutineEndCoroutine)
+	t.Run("EndCoroutine_NotActive", TestCoroutineEndNotActive)
+	t.Run("EndCoroutine_NotInitialized", TestCoroutineEndNotInitialized)
+	t.Run("Yield_NotInitialized", TestCoroutineYieldNotInitialized)
 }
 
 // TestProgramOpcode tests the OpProgram opcode for sub-programs

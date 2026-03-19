@@ -283,44 +283,48 @@ func TestSQLiteUTF(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.setup != "" {
-				_, err := db.Exec(tt.setup)
-				if err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			var result interface{}
-			err := db.QueryRow(tt.query).Scan(&result)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got none")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-
-			// Handle NULL values
-			if tt.want == nil {
-				if result != nil {
-					t.Errorf("expected NULL, got %v", result)
-				}
-				return
-			}
-
-			// Convert byte arrays to strings for comparison
-			if b, ok := result.([]byte); ok {
-				result = string(b)
-			}
-
-			if result != tt.want {
-				t.Errorf("got %v (%T), want %v (%T)", result, result, tt.want, tt.want)
-			}
+			utfRunSetup(t, db, tt.setup)
+			utfCheckResult(t, db, tt.query, tt.want, tt.wantErr)
 		})
+	}
+}
+
+// utfRunSetup executes a single setup statement if non-empty.
+func utfRunSetup(t *testing.T, db *sql.DB, setup string) {
+	t.Helper()
+	if setup == "" {
+		return
+	}
+	if _, err := db.Exec(setup); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+}
+
+// utfCheckResult queries a single value and compares to expected.
+func utfCheckResult(t *testing.T, db *sql.DB, query string, want interface{}, wantErr bool) {
+	t.Helper()
+	var result interface{}
+	err := db.QueryRow(query).Scan(&result)
+	if wantErr {
+		if err == nil {
+			t.Errorf("expected error, got none")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if want == nil {
+		if result != nil {
+			t.Errorf("expected NULL, got %v", result)
+		}
+		return
+	}
+	if b, ok := result.([]byte); ok {
+		result = string(b)
+	}
+	if result != want {
+		t.Errorf("got %v (%T), want %v (%T)", result, result, want, want)
 	}
 }
 

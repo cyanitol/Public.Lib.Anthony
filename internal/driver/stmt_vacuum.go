@@ -142,40 +142,38 @@ func (s *Stmt) getIntoFilenameFromArgs(args []driver.NamedValue) (string, error)
 
 // executeVacuum performs the actual vacuum operation.
 func (s *Stmt) executeVacuum(opts *pager.VacuumOptions) error {
-	// Store schema before VACUUM
 	schemaBackup := s.cloneSchema(s.conn.schema)
 
-	// Execute the VACUUM operation directly on the pager
-	// We do this at compile time rather than runtime because VACUUM
-	// is a special operation that needs to run immediately
 	if err := s.conn.pager.Vacuum(opts); err != nil {
 		return fmt.Errorf("VACUUM failed: %w", err)
 	}
 
-	// After VACUUM completes and database is reopened, persist schema to sqlite_master
-	// This ensures the schema is correctly written to the rebuilt database
 	if opts.IntoFile == "" && s.conn.btree != nil {
-		if err := schemaBackup.SaveToMaster(s.conn.btree); err != nil {
-			return fmt.Errorf("failed to persist schema after VACUUM: %w", err)
+		if err := s.persistSchemaAfterVacuum(schemaBackup); err != nil {
+			return err
 		}
-		// Commit the schema changes to ensure they're persisted to disk
-		// Only commit if there's an active write transaction (SaveToMaster may start one)
-		if s.conn.pager.InWriteTransaction() {
-			if err := s.conn.pager.Commit(); err != nil {
-				return fmt.Errorf("failed to commit schema after VACUUM: %w", err)
-			}
-		}
-		// Reload schema from the persisted data to ensure consistency
-		s.conn.schema = schemaBackup
 	}
 
-	// For VACUUM INTO, we need to set up the schema in the target database
 	if opts.IntoFile != "" && opts.SourceSchema != nil {
 		if err := s.setupVacuumIntoSchema(opts.IntoFile, schemaBackup); err != nil {
 			return fmt.Errorf("failed to setup VACUUM INTO schema: %w", err)
 		}
 	}
 
+	return nil
+}
+
+// persistSchemaAfterVacuum saves and commits the schema after a regular VACUUM.
+func (s *Stmt) persistSchemaAfterVacuum(schemaBackup *schema.Schema) error {
+	if err := schemaBackup.SaveToMaster(s.conn.btree); err != nil {
+		return fmt.Errorf("failed to persist schema after VACUUM: %w", err)
+	}
+	if s.conn.pager.InWriteTransaction() {
+		if err := s.conn.pager.Commit(); err != nil {
+			return fmt.Errorf("failed to commit schema after VACUUM: %w", err)
+		}
+	}
+	s.conn.schema = schemaBackup
 	return nil
 }
 

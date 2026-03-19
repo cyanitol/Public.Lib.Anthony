@@ -5,6 +5,39 @@ import (
 	"testing"
 )
 
+func parseSinglePragma(t *testing.T, sql string) *PragmaStmt {
+	t.Helper()
+	parser := NewParser(sql)
+	stmts, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(stmts))
+	}
+	stmt, ok := stmts[0].(*PragmaStmt)
+	if !ok {
+		t.Fatalf("expected PragmaStmt, got %T", stmts[0])
+	}
+	return stmt
+}
+
+func assertPragmaFields(t *testing.T, stmt *PragmaStmt, wantSchema, wantName string, wantValue bool) {
+	t.Helper()
+	if stmt.Schema != wantSchema {
+		t.Errorf("expected schema %q, got %q", wantSchema, stmt.Schema)
+	}
+	if stmt.Name != wantName {
+		t.Errorf("expected name %q, got %q", wantName, stmt.Name)
+	}
+	if wantValue && stmt.Value == nil {
+		t.Errorf("expected value to be present, got nil")
+	}
+	if !wantValue && stmt.Value != nil {
+		t.Errorf("expected no value, got %v", stmt.Value)
+	}
+}
+
 func TestParsePragma(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -13,114 +46,22 @@ func TestParsePragma(t *testing.T) {
 		wantErr    bool
 		wantSchema string
 		wantName   string
-		wantValue  bool // whether a value should be present
+		wantValue  bool
 	}{
-		{
-			name:       "simple pragma",
-			sql:        "PRAGMA cache_size",
-			wantErr:    false,
-			wantSchema: "",
-			wantName:   "cache_size",
-			wantValue:  false,
-		},
-		{
-			name:       "pragma with equals value",
-			sql:        "PRAGMA cache_size = 10000",
-			wantErr:    false,
-			wantSchema: "",
-			wantName:   "cache_size",
-			wantValue:  true,
-		},
-		{
-			name:       "pragma with function syntax",
-			sql:        "PRAGMA cache_size(10000)",
-			wantErr:    false,
-			wantSchema: "",
-			wantName:   "cache_size",
-			wantValue:  true,
-		},
-		{
-			name:       "pragma with schema",
-			sql:        "PRAGMA main.cache_size",
-			wantErr:    false,
-			wantSchema: "main",
-			wantName:   "cache_size",
-			wantValue:  false,
-		},
-		{
-			name:       "pragma with schema and equals value",
-			sql:        "PRAGMA main.cache_size = 10000",
-			wantErr:    false,
-			wantSchema: "main",
-			wantName:   "cache_size",
-			wantValue:  true,
-		},
-		{
-			name:       "pragma with schema and function syntax",
-			sql:        "PRAGMA main.cache_size(10000)",
-			wantErr:    false,
-			wantSchema: "main",
-			wantName:   "cache_size",
-			wantValue:  true,
-		},
-		{
-			name:       "pragma with string value",
-			sql:        "PRAGMA journal_mode = 'WAL'",
-			wantErr:    false,
-			wantSchema: "",
-			wantName:   "journal_mode",
-			wantValue:  true,
-		},
-		{
-			name:       "pragma with negative value",
-			sql:        "PRAGMA cache_size = -2000",
-			wantErr:    false,
-			wantSchema: "",
-			wantName:   "cache_size",
-			wantValue:  true,
-		},
-		{
-			name:       "pragma user_version",
-			sql:        "PRAGMA user_version",
-			wantErr:    false,
-			wantSchema: "",
-			wantName:   "user_version",
-			wantValue:  false,
-		},
-		{
-			name:       "pragma user_version with value",
-			sql:        "PRAGMA user_version = 123",
-			wantErr:    false,
-			wantSchema: "",
-			wantName:   "user_version",
-			wantValue:  true,
-		},
-		{
-			name:       "pragma table_info",
-			sql:        "PRAGMA table_info(users)",
-			wantErr:    false,
-			wantSchema: "",
-			wantName:   "table_info",
-			wantValue:  true,
-		},
-		{
-			name:       "pragma with temp schema",
-			sql:        "PRAGMA temp.cache_size = 5000",
-			wantErr:    false,
-			wantSchema: "temp",
-			wantName:   "cache_size",
-			wantValue:  true,
-		},
-		{
-			name:    "pragma without name - error",
-			sql:     "PRAGMA",
-			wantErr: true,
-		},
-		{
-			name:    "pragma with incomplete schema - error",
-			sql:     "PRAGMA main.",
-			wantErr: true,
-		},
+		{"simple pragma", "PRAGMA cache_size", false, "", "cache_size", false},
+		{"pragma with equals value", "PRAGMA cache_size = 10000", false, "", "cache_size", true},
+		{"pragma with function syntax", "PRAGMA cache_size(10000)", false, "", "cache_size", true},
+		{"pragma with schema", "PRAGMA main.cache_size", false, "main", "cache_size", false},
+		{"pragma with schema and equals value", "PRAGMA main.cache_size = 10000", false, "main", "cache_size", true},
+		{"pragma with schema and function syntax", "PRAGMA main.cache_size(10000)", false, "main", "cache_size", true},
+		{"pragma with string value", "PRAGMA journal_mode = 'WAL'", false, "", "journal_mode", true},
+		{"pragma with negative value", "PRAGMA cache_size = -2000", false, "", "cache_size", true},
+		{"pragma user_version", "PRAGMA user_version", false, "", "user_version", false},
+		{"pragma user_version with value", "PRAGMA user_version = 123", false, "", "user_version", true},
+		{"pragma table_info", "PRAGMA table_info(users)", false, "", "table_info", true},
+		{"pragma with temp schema", "PRAGMA temp.cache_size = 5000", false, "temp", "cache_size", true},
+		{"pragma without name - error", "PRAGMA", true, "", "", false},
+		{"pragma with incomplete schema - error", "PRAGMA main.", true, "", "", false},
 	}
 
 	for _, tt := range tests {
@@ -128,45 +69,18 @@ func TestParsePragma(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			parser := NewParser(tt.sql)
-			stmts, err := parser.Parse()
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
+			_, err := parser.Parse()
 			if tt.wantErr {
-				return
-			}
-
-			if len(stmts) != 1 {
-				t.Errorf("expected 1 statement, got %d", len(stmts))
-				return
-			}
-
-			stmt, ok := stmts[0].(*PragmaStmt)
-			if !ok {
-				t.Errorf("expected PragmaStmt, got %T", stmts[0])
-				return
-			}
-
-			if stmt.Schema != tt.wantSchema {
-				t.Errorf("expected schema %q, got %q", tt.wantSchema, stmt.Schema)
-			}
-
-			if stmt.Name != tt.wantName {
-				t.Errorf("expected name %q, got %q", tt.wantName, stmt.Name)
-			}
-
-			if tt.wantValue {
-				if stmt.Value == nil {
-					t.Errorf("expected value to be present, got nil")
+				if err == nil {
+					t.Error("expected error but got none")
 				}
-			} else {
-				if stmt.Value != nil {
-					t.Errorf("expected no value, got %v", stmt.Value)
-				}
+				return
 			}
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			stmt := parseSinglePragma(t, tt.sql)
+			assertPragmaFields(t, stmt, tt.wantSchema, tt.wantName, tt.wantValue)
 		})
 	}
 }
@@ -232,102 +146,64 @@ func TestParsePragmaMultiple(t *testing.T) {
 	}
 }
 
+func parsePragmaValue(t *testing.T, sql string) Expression {
+	t.Helper()
+	parser := NewParser(sql)
+	stmts, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(stmts))
+	}
+	stmt, ok := stmts[0].(*PragmaStmt)
+	if !ok {
+		t.Fatalf("expected PragmaStmt, got %T", stmts[0])
+	}
+	if stmt.Value == nil {
+		t.Fatal("expected value to be present, got nil")
+	}
+	return stmt.Value
+}
+
+func assertLiteralValue(t *testing.T, expr Expression, wantType LiteralType, wantVal string) {
+	t.Helper()
+	lit, ok := expr.(*LiteralExpr)
+	if !ok {
+		t.Fatalf("expected LiteralExpr, got %T", expr)
+	}
+	if lit.Type != wantType {
+		t.Errorf("expected literal type %v, got %v", wantType, lit.Type)
+	}
+	if lit.Value != wantVal {
+		t.Errorf("expected value %q, got %q", wantVal, lit.Value)
+	}
+}
+
 func TestParsePragmaValueTypes(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantErr   bool
-		checkFunc func(*testing.T, Expression)
-	}{
-		{
-			name:    "pragma with integer value",
-			sql:     "PRAGMA cache_size = 10000",
-			wantErr: false,
-			checkFunc: func(t *testing.T, expr Expression) {
-				lit, ok := expr.(*LiteralExpr)
-				if !ok {
-					t.Errorf("expected LiteralExpr, got %T", expr)
-					return
-				}
-				if lit.Type != LiteralInteger {
-					t.Errorf("expected LiteralInteger, got %v", lit.Type)
-				}
-				if lit.Value != "10000" {
-					t.Errorf("expected value '10000', got '%s'", lit.Value)
-				}
-			},
-		},
-		{
-			name:    "pragma with string value",
-			sql:     "PRAGMA journal_mode = 'WAL'",
-			wantErr: false,
-			checkFunc: func(t *testing.T, expr Expression) {
-				lit, ok := expr.(*LiteralExpr)
-				if !ok {
-					t.Errorf("expected LiteralExpr, got %T", expr)
-					return
-				}
-				if lit.Type != LiteralString {
-					t.Errorf("expected LiteralString, got %v", lit.Type)
-				}
-				if lit.Value != "WAL" {
-					t.Errorf("expected value 'WAL', got '%s'", lit.Value)
-				}
-			},
-		},
-		{
-			name:    "pragma with identifier value",
-			sql:     "PRAGMA synchronous = FULL",
-			wantErr: false,
-			checkFunc: func(t *testing.T, expr Expression) {
-				ident, ok := expr.(*IdentExpr)
-				if !ok {
-					t.Errorf("expected IdentExpr, got %T", expr)
-					return
-				}
-				if ident.Name != "FULL" {
-					t.Errorf("expected name 'FULL', got '%s'", ident.Name)
-				}
-			},
-		},
-	}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			parser := NewParser(tt.sql)
-			stmts, err := parser.Parse()
+	t.Run("pragma with integer value", func(t *testing.T) {
+		t.Parallel()
+		expr := parsePragmaValue(t, "PRAGMA cache_size = 10000")
+		assertLiteralValue(t, expr, LiteralInteger, "10000")
+	})
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
+	t.Run("pragma with string value", func(t *testing.T) {
+		t.Parallel()
+		expr := parsePragmaValue(t, "PRAGMA journal_mode = 'WAL'")
+		assertLiteralValue(t, expr, LiteralString, "WAL")
+	})
 
-			if tt.wantErr {
-				return
-			}
-
-			if len(stmts) != 1 {
-				t.Errorf("expected 1 statement, got %d", len(stmts))
-				return
-			}
-
-			stmt, ok := stmts[0].(*PragmaStmt)
-			if !ok {
-				t.Errorf("expected PragmaStmt, got %T", stmts[0])
-				return
-			}
-
-			if stmt.Value == nil {
-				t.Errorf("expected value to be present, got nil")
-				return
-			}
-
-			if tt.checkFunc != nil {
-				tt.checkFunc(t, stmt.Value)
-			}
-		})
-	}
+	t.Run("pragma with identifier value", func(t *testing.T) {
+		t.Parallel()
+		expr := parsePragmaValue(t, "PRAGMA synchronous = FULL")
+		ident, ok := expr.(*IdentExpr)
+		if !ok {
+			t.Fatalf("expected IdentExpr, got %T", expr)
+		}
+		if ident.Name != "FULL" {
+			t.Errorf("expected name 'FULL', got %q", ident.Name)
+		}
+	})
 }

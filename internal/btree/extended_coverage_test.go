@@ -9,43 +9,41 @@ import (
 // TestCursor_PrevInPageDetailed tests backward navigation within a page (62.5% coverage)
 func TestCursor_PrevInPageDetailed(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096) // Large page to keep entries on one page
+	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable() error = %v", err)
 	}
 
 	cursor := NewCursor(bt, rootPage)
-
-	// Insert a small number of rows to stay on one page
 	for i := int64(1); i <= 10; i++ {
-		err := cursor.Insert(i, []byte{byte(i)})
-		if err != nil {
+		if err := cursor.Insert(i, []byte{byte(i)}); err != nil {
 			t.Fatalf("Insert() error = %v", err)
 		}
 	}
 
-	// Move to last and navigate backward within page
-	err = cursor.MoveToLast()
-	if err != nil {
+	if err = cursor.MoveToLast(); err != nil {
 		t.Fatalf("MoveToLast() error = %v", err)
 	}
 
-	prevCount := 0
-	initialPage := cursor.CurrentPage
-	for i := 0; i < 9; i++ {
-		err := cursor.Previous()
-		if err != nil || !cursor.IsValid() {
-			break
-		}
-		if cursor.CurrentPage == initialPage {
-			prevCount++
-		}
-	}
-
+	prevCount := countSamePagePrev(cursor, 9)
 	if prevCount > 0 {
 		t.Logf("Navigated backward %d times on same page (prevInPage)", prevCount)
 	}
+}
+
+func countSamePagePrev(cursor *BtCursor, steps int) int {
+	count := 0
+	initialPage := cursor.CurrentPage
+	for i := 0; i < steps; i++ {
+		if err := cursor.Previous(); err != nil || !cursor.IsValid() {
+			break
+		}
+		if cursor.CurrentPage == initialPage {
+			count++
+		}
+	}
+	return count
 }
 
 // TestCursor_AdvanceWithinPage tests forward navigation within page (66.7% coverage)
@@ -58,36 +56,34 @@ func TestCursor_AdvanceWithinPage(t *testing.T) {
 	}
 
 	cursor := NewCursor(bt, rootPage)
-
-	// Insert entries
 	for i := int64(1); i <= 15; i++ {
-		err := cursor.Insert(i, []byte{byte(i)})
-		if err != nil {
+		if err := cursor.Insert(i, []byte{byte(i)}); err != nil {
 			t.Fatalf("Insert() error = %v", err)
 		}
 	}
 
-	// Navigate forward within page
-	err = cursor.MoveToFirst()
-	if err != nil {
+	if err = cursor.MoveToFirst(); err != nil {
 		t.Fatalf("MoveToFirst() error = %v", err)
 	}
 
-	nextCount := 0
-	initialPage := cursor.CurrentPage
-	for i := 0; i < 10; i++ {
-		err := cursor.Next()
-		if err != nil || !cursor.IsValid() {
-			break
-		}
-		if cursor.CurrentPage == initialPage {
-			nextCount++
-		}
-	}
-
+	nextCount := countSamePageNext(cursor, 10)
 	if nextCount > 0 {
 		t.Logf("Navigated forward %d times on same page (advanceWithinPage)", nextCount)
 	}
+}
+
+func countSamePageNext(cursor *BtCursor, steps int) int {
+	count := 0
+	initialPage := cursor.CurrentPage
+	for i := 0; i < steps; i++ {
+		if err := cursor.Next(); err != nil || !cursor.IsValid() {
+			break
+		}
+		if cursor.CurrentPage == initialPage {
+			count++
+		}
+	}
+	return count
 }
 
 // TestCursor_ResolveChildPage tests child page resolution (63.6% coverage)
@@ -239,34 +235,36 @@ func TestCursor_PerformCellDeletion(t *testing.T) {
 	}
 
 	cursor := NewCursor(bt, rootPage)
-
-	// Insert entries
 	for i := int64(1); i <= 30; i++ {
-		err := cursor.Insert(i, []byte("test"))
-		if err != nil {
+		if err := cursor.Insert(i, []byte("test")); err != nil {
 			t.Fatalf("Insert() error = %v", err)
 		}
 	}
 
-	// Delete several entries
-	for _, rowid := range []int64{5, 15, 25} {
+	rowids := []int64{5, 15, 25}
+	performCellDeletionDelete(t, cursor, rowids)
+	performCellDeletionVerify(t, cursor, rowids)
+}
+
+func performCellDeletionDelete(t *testing.T, cursor *BtCursor, rowids []int64) {
+	t.Helper()
+	for _, rowid := range rowids {
 		found, err := cursor.SeekRowid(rowid)
 		if err != nil {
 			t.Errorf("SeekRowid(%d) error = %v", rowid, err)
 			continue
 		}
 		if found {
-			err = cursor.Delete()
-			if err != nil {
+			if err = cursor.Delete(); err != nil {
 				t.Errorf("Delete() error = %v", err)
-			} else {
-				t.Logf("Deleted rowid %d (performCellDeletion)", rowid)
 			}
 		}
 	}
+}
 
-	// Verify deletions
-	for _, rowid := range []int64{5, 15, 25} {
+func performCellDeletionVerify(t *testing.T, cursor *BtCursor, rowids []int64) {
+	t.Helper()
+	for _, rowid := range rowids {
 		found, _ := cursor.SeekRowid(rowid)
 		if found {
 			t.Errorf("Rowid %d still found after deletion", rowid)
@@ -461,35 +459,29 @@ func TestMerge_MergePages(t *testing.T) {
 	}
 
 	cursor := NewCursor(bt, rootPage)
-
-	// Insert rows to create multiple pages
 	for i := int64(1); i <= 80; i++ {
-		err := cursor.Insert(i, make([]byte, 20))
-		if err != nil {
+		if err := cursor.Insert(i, make([]byte, 20)); err != nil {
 			break
 		}
 	}
 
-	// Delete many rows to trigger merge
-	for i := int64(20); i <= 60; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
-	}
+	deleteRowRange(cursor, 20, 60)
+	mergePagesAttempt(t, cursor, 30)
+}
 
-	// Try to merge
-	cursor.SeekRowid(30)
-	if cursor.IsValid() && cursor.Depth > 0 {
-		merged, err := cursor.MergePage()
-		if err != nil {
-			t.Logf("MergePage() error = %v", err)
-		}
-		if merged {
-			t.Log("Successfully merged pages")
-		} else {
-			t.Log("Merge not performed (page may not be underfull enough)")
-		}
+func mergePagesAttempt(t *testing.T, cursor *BtCursor, seekRowid int64) {
+	t.Helper()
+	cursor.SeekRowid(seekRowid)
+	if !cursor.IsValid() || cursor.Depth <= 0 {
+		return
+	}
+	merged, err := cursor.MergePage()
+	if err != nil {
+		t.Logf("MergePage() error = %v", err)
+	} else if merged {
+		t.Log("Successfully merged pages")
+	} else {
+		t.Log("Merge not performed (page may not be underfull enough)")
 	}
 }
 

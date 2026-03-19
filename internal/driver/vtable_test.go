@@ -12,6 +12,39 @@ import (
 
 var ctx = context.Background()
 
+func vtableRegisterModule(name string, module vtab.Module) func(interface{}) error {
+	return func(driverConn interface{}) error {
+		c, ok := driverConn.(*Conn)
+		if !ok {
+			return fmt.Errorf("unexpected driver connection type")
+		}
+		return c.RegisterVirtualTableModule(name, module)
+	}
+}
+
+func vtableUnregisterModule(name string) func(interface{}) error {
+	return func(driverConn interface{}) error {
+		c, ok := driverConn.(*Conn)
+		if !ok {
+			return fmt.Errorf("unexpected driver connection type")
+		}
+		return c.UnregisterVirtualTableModule(name)
+	}
+}
+
+func vtableCheckNotRegistered(name string) func(interface{}) error {
+	return func(driverConn interface{}) error {
+		c, ok := driverConn.(*Conn)
+		if !ok {
+			return fmt.Errorf("unexpected driver connection type")
+		}
+		if c.vtabRegistry.HasModule(name) {
+			return fmt.Errorf("module still registered after unregister")
+		}
+		return nil
+	}
+}
+
 // TestRegisterVirtualTableModule tests the registration and use of virtual table modules.
 func TestRegisterVirtualTableModule(t *testing.T) {
 	t.Parallel()
@@ -81,40 +114,19 @@ func TestVirtualTableModuleOperations(t *testing.T) {
 
 	// Register a test virtual table module
 	module := &testVTableModule{}
-	err = conn.Raw(func(driverConn interface{}) error {
-		c, ok := driverConn.(*Conn)
-		if !ok {
-			return fmt.Errorf("unexpected driver connection type")
-		}
-		return c.RegisterVirtualTableModule("test_ops", module)
-	})
+	err = conn.Raw(vtableRegisterModule("test_ops", module))
 	if err != nil {
 		t.Fatalf("Failed to register virtual table module: %v", err)
 	}
 
 	// Test unregistering the module
-	err = conn.Raw(func(driverConn interface{}) error {
-		c, ok := driverConn.(*Conn)
-		if !ok {
-			return fmt.Errorf("unexpected driver connection type")
-		}
-		return c.UnregisterVirtualTableModule("test_ops")
-	})
+	err = conn.Raw(vtableUnregisterModule("test_ops"))
 	if err != nil {
 		t.Fatalf("Failed to unregister virtual table module: %v", err)
 	}
 
 	// Verify module was unregistered
-	err = conn.Raw(func(driverConn interface{}) error {
-		c, ok := driverConn.(*Conn)
-		if !ok {
-			return fmt.Errorf("unexpected driver connection type")
-		}
-		if c.vtabRegistry.HasModule("test_ops") {
-			return fmt.Errorf("module still registered after unregister")
-		}
-		return nil
-	})
+	err = conn.Raw(vtableCheckNotRegistered("test_ops"))
 	if err != nil {
 		t.Fatalf("Module unregistration check failed: %v", err)
 	}

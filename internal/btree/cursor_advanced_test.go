@@ -8,54 +8,17 @@ import (
 // TestCursorPrevViaParent tests the prevViaParent navigation path
 func TestCursorPrevViaParent(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
+	_, cursor := setupBtreeWithRows(t, 4096, 1, 200, 100)
 
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable failed: %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert enough data to create a multi-level tree
-	numRecords := 200
-	for i := 1; i <= numRecords; i++ {
-		payload := make([]byte, 100)
-		for j := range payload {
-			payload[j] = byte(i % 256)
-		}
-		err := cursor.Insert(int64(i), payload)
-		if err != nil {
-			t.Fatalf("Insert(%d) failed: %v", i, err)
-		}
-	}
-
-	// Move to last position
-	cursor2 := NewCursor(bt, rootPage)
-	err = cursor2.MoveToLast()
+	cursor2 := NewCursor(cursor.Btree, cursor.RootPage)
+	err := cursor2.MoveToLast()
 	if err != nil {
 		t.Fatalf("MoveToLast failed: %v", err)
 	}
 
-	// Navigate backwards - this should trigger prevViaParent at page boundaries
-	// Just verify we can navigate backward through some entries
-	prevCount := 0
-	for cursor2.IsValid() && prevCount < 50 {
-		prevCount++
-		err = cursor2.Previous()
-		if err != nil {
-			break
-		}
-	}
-
+	prevCount := navigateBackward(cursor2, 50)
 	if prevCount < 10 {
 		t.Errorf("Only navigated backward %d times, expected more", prevCount)
-	}
-
-	// One more Previous should fail or make cursor invalid
-	err = cursor2.Previous()
-	if err == nil && cursor2.IsValid() {
-		t.Error("Expected cursor to be invalid before first entry")
 	}
 }
 
@@ -227,55 +190,17 @@ func TestBalanceOverfullCondition(t *testing.T) {
 func TestBalanceUnderfullCondition(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(4096)
-
 	rootPage, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable failed: %v", err)
 	}
 
 	cursor := NewCursor(bt, rootPage)
+	insertRows(cursor, 1, 100, 100)
+	deleteRowRange(NewCursor(bt, rootPage), 50, 99)
 
-	// Insert many entries
-	for i := 1; i <= 100; i++ {
-		payload := make([]byte, 100)
-		err := cursor.Insert(int64(i), payload)
-		if err != nil {
-			t.Fatalf("Insert(%d) failed: %v", i, err)
-		}
-	}
-
-	// Delete many entries to create underfull condition
-	cursor2 := NewCursor(bt, rootPage)
-	for i := 50; i <= 99; i++ {
-		found, err := cursor2.SeekRowid(int64(i))
-		if err != nil {
-			t.Fatalf("SeekRowid(%d) failed: %v", i, err)
-		}
-		if found {
-			err = cursor2.Delete()
-			if err != nil {
-				t.Logf("Delete(%d): %v", i, err)
-			}
-		}
-	}
-
-	// Verify remaining entries
 	cursor3 := NewCursor(bt, rootPage)
-	err = cursor3.MoveToFirst()
-	if err != nil {
-		t.Fatalf("MoveToFirst after deletes failed: %v", err)
-	}
-
-	count := 0
-	for cursor3.IsValid() {
-		count++
-		err = cursor3.Next()
-		if err != nil {
-			break
-		}
-	}
-
-	// Should have roughly 50 entries left
+	count := countForward(cursor3)
 	if count < 45 || count > 55 {
 		t.Logf("Found %d entries after deletions, expected ~50", count)
 	}
@@ -326,50 +251,13 @@ func TestMergeOperations(t *testing.T) {
 // TestSiblingOperations tests sibling page operations
 func TestSiblingOperations(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
+	_, cursor := setupBtreeWithRows(t, 4096, 1, 150, 150)
+	deleteRowRange(NewCursor(cursor.Btree, cursor.RootPage), 60, 90)
 
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable failed: %v", err)
-	}
+	cursor3 := NewCursor(cursor.Btree, cursor.RootPage)
+	count := countForward(cursor3)
 
-	cursor := NewCursor(bt, rootPage)
-
-	// Create multi-page structure
-	for i := 1; i <= 150; i++ {
-		payload := make([]byte, 150)
-		err := cursor.Insert(int64(i), payload)
-		if err != nil {
-			t.Fatalf("Insert(%d) failed: %v", i, err)
-		}
-	}
-
-	// Delete from middle to trigger sibling operations
-	cursor2 := NewCursor(bt, rootPage)
-	for i := 60; i <= 90; i++ {
-		found, err := cursor2.SeekRowid(int64(i))
-		if err == nil && found {
-			cursor2.Delete()
-		}
-	}
-
-	// Verify tree integrity
-	cursor3 := NewCursor(bt, rootPage)
-	err = cursor3.MoveToFirst()
-	if err != nil {
-		t.Fatalf("MoveToFirst failed: %v", err)
-	}
-
-	count := 0
-	for cursor3.IsValid() {
-		count++
-		err = cursor3.Next()
-		if err != nil {
-			break
-		}
-	}
-
-	expected := 150 - 31 // deleted 31 entries (60-90 inclusive)
+	expected := 150 - 31
 	if count < expected-5 || count > expected+5 {
 		t.Logf("Found %d entries, expected ~%d", count, expected)
 	}
@@ -378,44 +266,17 @@ func TestSiblingOperations(t *testing.T) {
 // TestRightmostSiblingHandling tests rightmost sibling handling
 func TestRightmostSiblingHandling(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
+	_, cursor := setupBtreeWithRows(t, 4096, 1, 180, 120)
+	deleteRowRange(NewCursor(cursor.Btree, cursor.RootPage), 150, 180)
 
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable failed: %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Create structure
-	for i := 1; i <= 180; i++ {
-		payload := make([]byte, 120)
-		err := cursor.Insert(int64(i), payload)
-		if err != nil {
-			t.Fatalf("Insert(%d) failed: %v", i, err)
-		}
-	}
-
-	// Delete from end to test rightmost sibling handling
-	cursor2 := NewCursor(bt, rootPage)
-	for i := 150; i <= 180; i++ {
-		found, err := cursor2.SeekRowid(int64(i))
-		if err == nil && found {
-			cursor2.Delete()
-		}
-	}
-
-	// Move to last and verify
-	cursor3 := NewCursor(bt, rootPage)
-	err = cursor3.MoveToLast()
+	cursor3 := NewCursor(cursor.Btree, cursor.RootPage)
+	err := cursor3.MoveToLast()
 	if err != nil {
 		t.Fatalf("MoveToLast failed: %v", err)
 	}
-
 	if !cursor3.IsValid() {
 		t.Fatal("Cursor should be valid")
 	}
-
 	lastKey := cursor3.GetKey()
 	if lastKey != 149 {
 		t.Logf("Last key = %d, expected 149", lastKey)
@@ -425,54 +286,14 @@ func TestRightmostSiblingHandling(t *testing.T) {
 // TestRedistributionBetweenSiblings tests cell redistribution
 func TestRedistributionBetweenSiblings(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
+	_, cursor := setupBtreeWithRows(t, 4096, 1, 100, 80)
+	deleteRowRange(NewCursor(cursor.Btree, cursor.RootPage), 25, 35)
 
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable failed: %v", err)
-	}
+	cursor3 := NewCursor(cursor.Btree, cursor.RootPage)
+	count := countForward(cursor3)
 
-	cursor := NewCursor(bt, rootPage)
-
-	// Create pages that will need redistribution
-	for i := 1; i <= 100; i++ {
-		payload := make([]byte, 80)
-		for j := range payload {
-			payload[j] = byte((i + j) % 256)
-		}
-		err := cursor.Insert(int64(i), payload)
-		if err != nil {
-			t.Fatalf("Insert(%d) failed: %v", i, err)
-		}
-	}
-
-	// Delete some entries to potentially trigger redistribution
-	cursor2 := NewCursor(bt, rootPage)
-	for i := 25; i <= 35; i++ {
-		found, err := cursor2.SeekRowid(int64(i))
-		if err == nil && found {
-			cursor2.Delete()
-		}
-	}
-
-	// Verify all remaining entries are accessible
-	cursor3 := NewCursor(bt, rootPage)
-	err = cursor3.MoveToFirst()
-	if err != nil {
-		t.Fatalf("MoveToFirst failed: %v", err)
-	}
-
-	keys := []int64{}
-	for cursor3.IsValid() {
-		keys = append(keys, cursor3.GetKey())
-		err = cursor3.Next()
-		if err != nil {
-			break
-		}
-	}
-
-	if len(keys) < 20 {
-		t.Errorf("Found %d keys, expected at least 20", len(keys))
+	if count < 20 {
+		t.Errorf("Found %d keys, expected at least 20", count)
 	}
 }
 

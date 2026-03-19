@@ -8,141 +8,82 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
+func parseCTEAndCheckLevel(t *testing.T, sql, cteName string) {
+	t.Helper()
+	p := parser.NewParser(sql)
+	stmts, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	selectStmt := stmts[0].(*parser.SelectStmt)
+	ctx, err := NewCTEContext(selectStmt.With)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if ctx != nil {
+		def, exists := ctx.GetCTE(cteName)
+		if exists && def.Level < 0 {
+			t.Errorf("Expected non-negative level, got %d", def.Level)
+		}
+	}
+}
+
 // TestCalculateMaxDependencyLevelComprehensive tests the calculateMaxDependencyLevel function comprehensively.
 func TestCalculateMaxDependencyLevelComprehensive(t *testing.T) {
 	tests := []struct {
-		name        string
-		sql         string
-		cteName     string
-		wantErr     bool
-		errContains string
+		name    string
+		sql     string
+		cteName string
 	}{
-		{
-			name:    "CTE with no dependencies",
-			sql:     "WITH a AS (SELECT 1) SELECT * FROM a",
-			cteName: "a",
-			wantErr: false,
-		},
-		{
-			name:    "CTE with single dependency",
-			sql:     "WITH a AS (SELECT 1), b AS (SELECT * FROM a) SELECT * FROM b",
-			cteName: "b",
-			wantErr: false,
-		},
-		{
-			name:    "CTE with multiple dependencies",
-			sql:     "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT * FROM a UNION SELECT * FROM b) SELECT * FROM c",
-			cteName: "c",
-			wantErr: false,
-		},
-		{
-			name:    "Recursive CTE self-reference",
-			sql:     "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 5) SELECT * FROM cte",
-			cteName: "cte",
-			wantErr: false,
-		},
-		{
-			name:    "CTE with dependency chain",
-			sql:     "WITH a AS (SELECT 1), b AS (SELECT * FROM a), c AS (SELECT * FROM b) SELECT * FROM c",
-			cteName: "c",
-			wantErr: false,
-		},
+		{"CTE with no dependencies", "WITH a AS (SELECT 1) SELECT * FROM a", "a"},
+		{"CTE with single dependency", "WITH a AS (SELECT 1), b AS (SELECT * FROM a) SELECT * FROM b", "b"},
+		{"CTE with multiple dependencies", "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT * FROM a UNION SELECT * FROM b) SELECT * FROM c", "c"},
+		{"Recursive CTE self-reference", "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 5) SELECT * FROM cte", "cte"},
+		{"CTE with dependency chain", "WITH a AS (SELECT 1), b AS (SELECT * FROM a), c AS (SELECT * FROM b) SELECT * FROM c", "c"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := parser.NewParser(tt.sql)
-			stmts, err := p.Parse()
-			if err != nil {
-				t.Fatalf("Parse failed: %v", err)
-			}
-
-			selectStmt := stmts[0].(*parser.SelectStmt)
-			ctx, err := NewCTEContext(selectStmt.With)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Expected error containing '%s', got nil", tt.errContains)
-				} else if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("Expected error containing '%s', got '%s'", tt.errContains, err.Error())
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				}
-				if ctx != nil {
-					def, exists := ctx.GetCTE(tt.cteName)
-					if exists && def.Level < 0 {
-						t.Errorf("Expected non-negative level, got %d", def.Level)
-					}
-				}
-			}
+			parseCTEAndCheckLevel(t, tt.sql, tt.cteName)
 		})
 	}
+}
+
+func parseCTEAndValidate(t *testing.T, sql string) error {
+	t.Helper()
+	p := parser.NewParser(sql)
+	stmts, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	selectStmt := stmts[0].(*parser.SelectStmt)
+	ctx, err := NewCTEContext(selectStmt.With)
+	if err != nil {
+		return err
+	}
+	if ctx != nil {
+		return ctx.ValidateCTEs()
+	}
+	return nil
 }
 
 // TestCheckCircularDependencyComprehensive tests circular dependency detection thoroughly.
 func TestCheckCircularDependencyComprehensive(t *testing.T) {
 	tests := []struct {
-		name        string
-		sql         string
-		wantErr     bool
-		errContains string
+		name string
+		sql  string
 	}{
-		{
-			name:    "No circular dependency - linear chain",
-			sql:     "WITH a AS (SELECT 1), b AS (SELECT * FROM a), c AS (SELECT * FROM b) SELECT * FROM c",
-			wantErr: false,
-		},
-		{
-			name:    "No circular dependency - independent CTEs",
-			sql:     "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT 3) SELECT * FROM a, b, c",
-			wantErr: false,
-		},
-		{
-			name:    "Recursive CTE allowed to reference itself",
-			sql:     "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 10) SELECT * FROM cte",
-			wantErr: false,
-		},
-		{
-			name:    "Complex dependency graph without cycles",
-			sql:     "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT * FROM a), d AS (SELECT * FROM b), e AS (SELECT * FROM c UNION SELECT * FROM d) SELECT * FROM e",
-			wantErr: false,
-		},
-		{
-			name:    "Multiple independent CTEs",
-			sql:     "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT 3) SELECT * FROM a UNION SELECT * FROM b UNION SELECT * FROM c",
-			wantErr: false,
-		},
+		{"No circular dependency - linear chain", "WITH a AS (SELECT 1), b AS (SELECT * FROM a), c AS (SELECT * FROM b) SELECT * FROM c"},
+		{"No circular dependency - independent CTEs", "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT 3) SELECT * FROM a, b, c"},
+		{"Recursive CTE allowed to reference itself", "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 10) SELECT * FROM cte"},
+		{"Complex dependency graph without cycles", "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT * FROM a), d AS (SELECT * FROM b), e AS (SELECT * FROM c UNION SELECT * FROM d) SELECT * FROM e"},
+		{"Multiple independent CTEs", "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT 3) SELECT * FROM a UNION SELECT * FROM b UNION SELECT * FROM c"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := parser.NewParser(tt.sql)
-			stmts, err := p.Parse()
-			if err != nil {
-				t.Fatalf("Parse failed: %v", err)
-			}
-
-			selectStmt := stmts[0].(*parser.SelectStmt)
-			ctx, err := NewCTEContext(selectStmt.With)
-			if err != nil && !tt.wantErr {
-				t.Fatalf("NewCTEContext failed: %v", err)
-			}
-
-			if ctx != nil {
-				err = ctx.ValidateCTEs()
-				if tt.wantErr {
-					if err == nil {
-						t.Errorf("Expected error containing '%s', got nil", tt.errContains)
-					} else if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-						t.Errorf("Expected error containing '%s', got '%s'", tt.errContains, err.Error())
-					}
-				} else {
-					if err != nil {
-						t.Errorf("Unexpected error: %v", err)
-					}
-				}
+			if err := parseCTEAndValidate(t, tt.sql); err != nil {
+				t.Errorf("Unexpected error: %v", err)
 			}
 		})
 	}
@@ -328,25 +269,26 @@ func TestFormatTableScanComprehensive(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := formatTableScan(tt.tableName, tt.where, tt.isWrite)
-
-			if result == "" {
-				t.Error("formatTableScan returned empty string")
-			}
-
-			if !strings.Contains(result, tt.tableName) {
-				t.Errorf("Expected result to contain table name '%s', got '%s'", tt.tableName, result)
-			}
-
-			if tt.expectScan && !strings.Contains(result, "SCAN") {
-				t.Errorf("Expected result to contain 'SCAN', got '%s'", result)
-			}
-
-			if tt.expectIndex && tt.where != nil {
-				if !strings.Contains(result, "SEARCH") && !strings.Contains(result, "SCAN") {
-					t.Errorf("Expected result to contain 'SEARCH' or 'SCAN', got '%s'", result)
-				}
-			}
+			assertTableScanResult(t, result, tt.tableName, tt.expectScan, tt.expectIndex, tt.where)
 		})
+	}
+}
+
+func assertTableScanResult(t *testing.T, result, tableName string, expectScan, expectIndex bool, where parser.Expression) {
+	t.Helper()
+	if result == "" {
+		t.Error("formatTableScan returned empty string")
+	}
+	if !strings.Contains(result, tableName) {
+		t.Errorf("Expected result to contain table name '%s', got '%s'", tableName, result)
+	}
+	if expectScan && !strings.Contains(result, "SCAN") {
+		t.Errorf("Expected result to contain 'SCAN', got '%s'", result)
+	}
+	if expectIndex && where != nil {
+		if !strings.Contains(result, "SEARCH") && !strings.Contains(result, "SCAN") {
+			t.Errorf("Expected result to contain 'SEARCH' or 'SCAN', got '%s'", result)
+		}
 	}
 }
 
@@ -809,6 +751,38 @@ func TestExplainWithDeepNesting(t *testing.T) {
 	}
 }
 
+func parseCTEContextForValidation(t *testing.T, sql string) (*CTEContext, error) {
+	t.Helper()
+	p := parser.NewParser(sql)
+	stmts, err := p.Parse()
+	if err != nil {
+		return nil, err
+	}
+	selectStmt := stmts[0].(*parser.SelectStmt)
+	return NewCTEContext(selectStmt.With)
+}
+
+func parseCTEAndValidateFull(t *testing.T, sql string, wantErr bool) {
+	t.Helper()
+	ctx, err := parseCTEContextForValidation(t, sql)
+	if err != nil {
+		if !wantErr {
+			t.Fatalf("Parse/CTE creation failed: %v", err)
+		}
+		return
+	}
+	if ctx == nil {
+		return
+	}
+	err = ctx.ValidateCTEs()
+	if wantErr && err == nil {
+		t.Error("Expected validation error, got nil")
+	}
+	if !wantErr && err != nil {
+		t.Errorf("Unexpected validation error: %v", err)
+	}
+}
+
 // TestCTEEdgeCasesForCoverage tests edge cases in CTE handling.
 func TestCTEEdgeCasesForCoverage(t *testing.T) {
 	tests := []struct {
@@ -816,54 +790,15 @@ func TestCTEEdgeCasesForCoverage(t *testing.T) {
 		sql     string
 		wantErr bool
 	}{
-		{
-			name:    "CTE with subquery in FROM that references another CTE",
-			sql:     "WITH a AS (SELECT 1), b AS (SELECT * FROM (SELECT * FROM a)) SELECT * FROM b",
-			wantErr: false,
-		},
-		{
-			name:    "CTE with subquery in JOIN that references another CTE",
-			sql:     "WITH a AS (SELECT 1 AS x), b AS (SELECT * FROM users JOIN (SELECT * FROM a) ON users.id = a.x) SELECT * FROM b",
-			wantErr: false,
-		},
-		{
-			name:    "Recursive CTE with EXCEPT",
-			sql:     "WITH RECURSIVE cte AS (SELECT 1 EXCEPT SELECT 2) SELECT * FROM cte",
-			wantErr: true, // Should fail validation - needs UNION
-		},
-		{
-			name:    "Recursive CTE with INTERSECT",
-			sql:     "WITH RECURSIVE cte AS (SELECT 1 INTERSECT SELECT 2) SELECT * FROM cte",
-			wantErr: true, // Should fail validation - needs UNION
-		},
+		{"CTE with subquery in FROM that references another CTE", "WITH a AS (SELECT 1), b AS (SELECT * FROM (SELECT * FROM a)) SELECT * FROM b", false},
+		{"CTE with subquery in JOIN that references another CTE", "WITH a AS (SELECT 1 AS x), b AS (SELECT * FROM users JOIN (SELECT * FROM a) ON users.id = a.x) SELECT * FROM b", false},
+		{"Recursive CTE with EXCEPT", "WITH RECURSIVE cte AS (SELECT 1 EXCEPT SELECT 2) SELECT * FROM cte", true},
+		{"Recursive CTE with INTERSECT", "WITH RECURSIVE cte AS (SELECT 1 INTERSECT SELECT 2) SELECT * FROM cte", true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := parser.NewParser(tt.sql)
-			stmts, err := p.Parse()
-			if err != nil {
-				if !tt.wantErr {
-					t.Fatalf("Parse failed: %v", err)
-				}
-				return
-			}
-
-			selectStmt := stmts[0].(*parser.SelectStmt)
-			ctx, err := NewCTEContext(selectStmt.With)
-			if err != nil && !tt.wantErr {
-				t.Fatalf("NewCTEContext failed: %v", err)
-			}
-
-			if ctx != nil {
-				err = ctx.ValidateCTEs()
-				if tt.wantErr && err == nil {
-					t.Error("Expected validation error, got nil")
-				}
-				if !tt.wantErr && err != nil {
-					t.Errorf("Unexpected validation error: %v", err)
-				}
-			}
+			parseCTEAndValidateFull(t, tt.sql, tt.wantErr)
 		})
 	}
 }

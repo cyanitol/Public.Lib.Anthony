@@ -492,72 +492,79 @@ func TestSQLiteInsert(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			// Create temporary database
 			tmpDir := t.TempDir()
 			dbPath := filepath.Join(tmpDir, "test.db")
-
 			db, err := sql.Open(DriverName, dbPath)
 			if err != nil {
 				t.Fatalf("failed to open database: %v", err)
 			}
 			defer db.Close()
-
-			// Run setup statements
-			for _, setupSQL := range tt.setup {
-				if _, err := db.Exec(setupSQL); err != nil {
-					t.Fatalf("setup failed on %q: %v", setupSQL, err)
-				}
-			}
-
-			// Run INSERT statements
-			var lastErr error
-			for _, insertSQL := range tt.inserts {
-				_, err := db.Exec(insertSQL)
-				if err != nil {
-					lastErr = err
-					if !tt.wantErr {
-						t.Fatalf("INSERT failed: %v\nSQL: %s", err, insertSQL)
-					}
-				}
-			}
-
-			// Check error expectations
+			insertExecSetup(t, db, tt.setup)
+			lastErr := insertExecStatements(t, db, tt.inserts, tt.wantErr)
 			if tt.wantErr {
-				if lastErr == nil {
-					t.Fatal("expected error but got none")
-				}
-				if tt.errMsg != "" && !strings.Contains(lastErr.Error(), tt.errMsg) {
-					t.Fatalf("error message mismatch:\ngot:  %v\nwant: %v", lastErr.Error(), tt.errMsg)
-				}
+				insertCheckError(t, lastErr, tt.errMsg)
 				return
 			}
-
 			if lastErr != nil {
 				t.Fatalf("unexpected error: %v", lastErr)
 			}
-
-			// Verify results if we have a verify query
-			if tt.verify != "" {
-				rows, err := db.Query(tt.verify)
-				if err != nil {
-					t.Fatalf("verify query failed: %v\nSQL: %s", err, tt.verify)
-				}
-				defer rows.Close()
-
-				rowCount := 0
-				for rows.Next() {
-					rowCount++
-				}
-
-				if err := rows.Err(); err != nil {
-					t.Fatalf("error iterating rows: %v", err)
-				}
-
-				if rowCount != tt.wantRows {
-					t.Errorf("row count mismatch: got %d, want %d", rowCount, tt.wantRows)
-				}
-			}
+			insertVerifyRowCount(t, db, tt.verify, tt.wantRows)
 		})
+	}
+}
+
+func insertExecSetup(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup failed on %q: %v", stmt, err)
+		}
+	}
+}
+
+func insertExecStatements(t *testing.T, db *sql.DB, stmts []string, expectErr bool) error {
+	t.Helper()
+	var lastErr error
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			lastErr = err
+			if !expectErr {
+				t.Fatalf("INSERT failed: %v\nSQL: %s", err, stmt)
+			}
+		}
+	}
+	return lastErr
+}
+
+func insertCheckError(t *testing.T, err error, errMsg string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected error but got none")
+	}
+	if errMsg != "" && !strings.Contains(err.Error(), errMsg) {
+		t.Fatalf("error message mismatch:\ngot:  %v\nwant: %v", err.Error(), errMsg)
+	}
+}
+
+func insertVerifyRowCount(t *testing.T, db *sql.DB, verify string, wantRows int) {
+	t.Helper()
+	if verify == "" {
+		return
+	}
+	rows, err := db.Query(verify)
+	if err != nil {
+		t.Fatalf("verify query failed: %v\nSQL: %s", err, verify)
+	}
+	defer rows.Close()
+	rowCount := 0
+	for rows.Next() {
+		rowCount++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("error iterating rows: %v", err)
+	}
+	if rowCount != wantRows {
+		t.Errorf("row count mismatch: got %d, want %d", rowCount, wantRows)
 	}
 }
 
@@ -612,42 +619,14 @@ func TestInsertConflictResolution(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
 			dbPath := filepath.Join(tmpDir, "test.db")
-
 			db, err := sql.Open(DriverName, dbPath)
 			if err != nil {
 				t.Fatalf("failed to open database: %v", err)
 			}
 			defer db.Close()
-
-			for _, setupSQL := range tt.setup {
-				if _, err := db.Exec(setupSQL); err != nil {
-					t.Fatalf("setup failed: %v\nSQL: %s", err, setupSQL)
-				}
-			}
-
-			for _, insertSQL := range tt.inserts {
-				_, err := db.Exec(insertSQL)
-				if err != nil && !tt.wantErr {
-					t.Fatalf("INSERT failed: %v\nSQL: %s", err, insertSQL)
-				}
-			}
-
-			if tt.verify != "" {
-				rows, err := db.Query(tt.verify)
-				if err != nil {
-					t.Fatalf("verify failed: %v", err)
-				}
-				defer rows.Close()
-
-				rowCount := 0
-				for rows.Next() {
-					rowCount++
-				}
-
-				if rowCount != tt.wantRows {
-					t.Errorf("row count mismatch: got %d, want %d", rowCount, tt.wantRows)
-				}
-			}
+			insertExecSetup(t, db, tt.setup)
+			insertExecStatements(t, db, tt.inserts, tt.wantErr)
+			insertVerifyRowCount(t, db, tt.verify, tt.wantRows)
 		})
 	}
 }
@@ -665,76 +644,24 @@ func TestInsertRowidCaching(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Test from insert-9.1
 	t.Run("explicit rowid with SELECT", func(t *testing.T) {
-		_, err := db.Exec("CREATE TABLE t5(x)")
-		if err != nil {
-			t.Fatalf("CREATE TABLE failed: %v", err)
-		}
-
-		_, err = db.Exec("INSERT INTO t5 VALUES(1)")
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-		_, err = db.Exec("INSERT INTO t5 VALUES(2)")
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-		_, err = db.Exec("INSERT INTO t5 VALUES(3)")
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-
-		rows, err := db.Query("SELECT rowid, x FROM t5 ORDER BY rowid")
-		if err != nil {
-			t.Fatalf("SELECT failed: %v", err)
-		}
-		defer rows.Close()
-
-		count := 0
-		for rows.Next() {
-			count++
-		}
-
-		if count != 3 {
-			t.Errorf("expected 3 rows, got %d", count)
-		}
+		insertExecSetup(t, db, []string{
+			"CREATE TABLE t5(x)",
+			"INSERT INTO t5 VALUES(1)",
+			"INSERT INTO t5 VALUES(2)",
+			"INSERT INTO t5 VALUES(3)",
+		})
+		insertVerifyRowCount(t, db, "SELECT rowid, x FROM t5 ORDER BY rowid", 3)
 	})
 
-	// Test from insert-9.2
 	t.Run("INTEGER PRIMARY KEY", func(t *testing.T) {
-		_, err := db.Exec("CREATE TABLE t6(x INTEGER PRIMARY KEY, y)")
-		if err != nil {
-			t.Fatalf("CREATE TABLE failed: %v", err)
-		}
-
-		_, err = db.Exec("INSERT INTO t6 VALUES(1,1)")
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-		_, err = db.Exec("INSERT INTO t6 VALUES(2,2)")
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-		_, err = db.Exec("INSERT INTO t6 VALUES(3,3)")
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-
-		rows, err := db.Query("SELECT x, y FROM t6 ORDER BY x")
-		if err != nil {
-			t.Fatalf("SELECT failed: %v", err)
-		}
-		defer rows.Close()
-
-		count := 0
-		for rows.Next() {
-			count++
-		}
-
-		if count != 3 {
-			t.Errorf("expected 3 rows, got %d", count)
-		}
+		insertExecSetup(t, db, []string{
+			"CREATE TABLE t6(x INTEGER PRIMARY KEY, y)",
+			"INSERT INTO t6 VALUES(1,1)",
+			"INSERT INTO t6 VALUES(2,2)",
+			"INSERT INTO t6 VALUES(3,3)",
+		})
+		insertVerifyRowCount(t, db, "SELECT x, y FROM t6 ORDER BY x", 3)
 	})
 }
 
@@ -808,33 +735,12 @@ func TestInsertWithTransactions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BEGIN failed: %v", err)
 		}
-
-		_, err = tx.Exec("INSERT INTO t1 VALUES(1, 'one')")
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-			tx.Rollback()
-		}
-
-		_, err = tx.Exec("INSERT INTO t1 VALUES(2, 'two')")
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-			tx.Rollback()
-		}
-
-		err = tx.Commit()
-		if err != nil {
+		insertTxExec(t, tx, "INSERT INTO t1 VALUES(1, 'one')")
+		insertTxExec(t, tx, "INSERT INTO t1 VALUES(2, 'two')")
+		if err := tx.Commit(); err != nil {
 			t.Fatalf("COMMIT failed: %v", err)
 		}
-
-		var count int
-		err = db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-		if err != nil {
-			t.Fatalf("SELECT failed: %v", err)
-		}
-
-		if count != 2 {
-			t.Errorf("expected 2 rows after commit, got %d", count)
-		}
+		insertAssertCount(t, db, "t1", 2)
 	})
 
 	t.Run("rollback transaction", func(t *testing.T) {
@@ -842,28 +748,30 @@ func TestInsertWithTransactions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BEGIN failed: %v", err)
 		}
-
-		_, err = tx.Exec("INSERT INTO t1 VALUES(3, 'three')")
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-
-		err = tx.Rollback()
-		if err != nil {
+		insertTxExec(t, tx, "INSERT INTO t1 VALUES(3, 'three')")
+		if err := tx.Rollback(); err != nil {
 			t.Fatalf("ROLLBACK failed: %v", err)
 		}
-
-		var count int
-		err = db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-		if err != nil {
-			t.Fatalf("SELECT failed: %v", err)
-		}
-
-		// Should still be 2 from the previous test
-		if count != 2 {
-			t.Errorf("expected 2 rows after rollback, got %d", count)
-		}
+		insertAssertCount(t, db, "t1", 2)
 	})
+}
+
+func insertTxExec(t *testing.T, tx *sql.Tx, stmt string) {
+	t.Helper()
+	if _, err := tx.Exec(stmt); err != nil {
+		t.Fatalf("tx exec failed: %v", err)
+	}
+}
+
+func insertAssertCount(t *testing.T, db *sql.DB, table string, want int) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
+		t.Fatalf("SELECT COUNT failed: %v", err)
+	}
+	if count != want {
+		t.Errorf("expected %d rows, got %d", want, count)
+	}
 }
 
 // TestInsertEdgeCases tests various edge cases
@@ -937,42 +845,14 @@ func TestInsertEdgeCases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
 			dbPath := filepath.Join(tmpDir, "test.db")
-
 			db, err := sql.Open(DriverName, dbPath)
 			if err != nil {
 				t.Fatalf("failed to open database: %v", err)
 			}
 			defer db.Close()
-
-			for _, setupSQL := range tt.setup {
-				if _, err := db.Exec(setupSQL); err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			for _, insertSQL := range tt.inserts {
-				_, err := db.Exec(insertSQL)
-				if err != nil && !tt.wantErr {
-					t.Fatalf("INSERT failed: %v", err)
-				}
-			}
-
-			if tt.verify != "" {
-				rows, err := db.Query(tt.verify)
-				if err != nil {
-					t.Fatalf("verify failed: %v", err)
-				}
-				defer rows.Close()
-
-				count := 0
-				for rows.Next() {
-					count++
-				}
-
-				if count != tt.wantRows {
-					t.Errorf("row count mismatch: got %d, want %d", count, tt.wantRows)
-				}
-			}
+			insertExecSetup(t, db, tt.setup)
+			insertExecStatements(t, db, tt.inserts, tt.wantErr)
+			insertVerifyRowCount(t, db, tt.verify, tt.wantRows)
 		})
 	}
 }

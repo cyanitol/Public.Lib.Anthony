@@ -539,25 +539,7 @@ func (s *Stmt) emitSelectColumnOpMultiTable(vm *vdbe.VDBE, tables []stmtTableInf
 	}
 
 	if gen != nil {
-		var coll string
-		if ident.Table != "" {
-			for _, tbl := range tables {
-				if tbl.name == ident.Table || tbl.table.Name == ident.Table {
-					if colIdx := tbl.table.GetColumnIndex(ident.Name); colIdx >= 0 {
-						coll = tbl.table.Columns[colIdx].Collation
-					}
-					break
-				}
-			}
-		} else {
-			for _, tbl := range tables {
-				if colIdx := tbl.table.GetColumnIndex(ident.Name); colIdx >= 0 {
-					coll = tbl.table.Columns[colIdx].Collation
-					break
-				}
-			}
-		}
-		gen.SetCollationForReg(i, coll)
+		gen.SetCollationForReg(i, resolveIdentCollation(tables, ident))
 	}
 
 	if ident.Table != "" {
@@ -565,6 +547,27 @@ func (s *Stmt) emitSelectColumnOpMultiTable(vm *vdbe.VDBE, tables []stmtTableInf
 	}
 
 	return s.emitUnqualifiedColumn(vm, tables, ident, i)
+}
+
+// resolveIdentCollation finds the collation for a column identifier across tables.
+func resolveIdentCollation(tables []stmtTableInfo, ident *parser.IdentExpr) string {
+	if ident.Table != "" {
+		for _, tbl := range tables {
+			if tbl.name == ident.Table || tbl.table.Name == ident.Table {
+				if colIdx := tbl.table.GetColumnIndex(ident.Name); colIdx >= 0 {
+					return tbl.table.Columns[colIdx].Collation
+				}
+				return ""
+			}
+		}
+		return ""
+	}
+	for _, tbl := range tables {
+		if colIdx := tbl.table.GetColumnIndex(ident.Name); colIdx >= 0 {
+			return tbl.table.Columns[colIdx].Collation
+		}
+	}
+	return ""
 }
 
 // emitNonIdentifierColumn handles non-identifier expressions in multi-table SELECT.

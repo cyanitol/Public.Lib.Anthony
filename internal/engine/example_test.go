@@ -233,59 +233,35 @@ func Example_multipleSelects() {
 	}
 	defer db.Close()
 
-	// Create tables
-	_, err = db.Execute(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)`)
+	exampleMustExec(db, `CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)`)
+	exampleMustExec(db, `CREATE TABLE posts (id INTEGER PRIMARY KEY, title TEXT)`)
+	exampleMustExec(db, `INSERT INTO users (name) VALUES ('Alice')`)
+	exampleMustExec(db, `INSERT INTO posts (title) VALUES ('First Post')`)
+
+	examplePrintRows(db, `SELECT id, name FROM users`, "User")
+	examplePrintRows(db, `SELECT id, title FROM posts`, "Post")
+}
+
+func exampleMustExec(db *engine.Engine, sql string) {
+	if _, err := db.Execute(sql); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func examplePrintRows(db *engine.Engine, query, label string) {
+	rows, err := db.Query(query)
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	_, err = db.Execute(`CREATE TABLE posts (id INTEGER PRIMARY KEY, title TEXT)`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Insert data
-	_, err = db.Execute(`INSERT INTO users (name) VALUES ('Alice')`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	_, err = db.Execute(`INSERT INTO posts (title) VALUES ('First Post')`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Query users
-	rows, err := db.Query(`SELECT id, name FROM users`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
+	defer rows.Close()
 	for rows.Next() {
 		var id int64
-		var name string
-		if err := rows.Scan(&id, &name); err != nil {
+		var val string
+		if err := rows.Scan(&id, &val); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("User: %d - %s\n", id, name)
+		fmt.Printf("%s: %d - %s\n", label, id, val)
 	}
-	rows.Close()
-
-	// Query posts
-	rows, err = db.Query(`SELECT id, title FROM posts`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for rows.Next() {
-		var id int64
-		var title string
-		if err := rows.Scan(&id, &title); err != nil {
-			log.Fatal(err)
-		}
-		fmt.Printf("Post: %d - %s\n", id, title)
-	}
-	rows.Close()
 }
 
 // Example_createIndex demonstrates creating and dropping an index.

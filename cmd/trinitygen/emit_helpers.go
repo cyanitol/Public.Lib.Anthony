@@ -30,20 +30,27 @@ func formatGoValue(v interface{}) string {
 func sanitizeName(s string) string {
 	var b strings.Builder
 	for i, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(r)
-		} else if r == '_' || r == '-' || r == ' ' {
-			if i > 0 {
-				b.WriteRune('_')
-			}
-		}
+		writeRuneForIdent(&b, r, i)
 	}
-	result := b.String()
+	return finalizeSanitizedName(b.String())
+}
+
+// writeRuneForIdent writes a rune to the builder if it's a valid identifier character.
+func writeRuneForIdent(b *strings.Builder, r rune, pos int) {
+	if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		b.WriteRune(r)
+	} else if (r == '_' || r == '-' || r == ' ') && pos > 0 {
+		b.WriteRune('_')
+	}
+}
+
+// finalizeSanitizedName handles edge cases for empty or digit-starting names.
+func finalizeSanitizedName(result string) string {
 	if len(result) == 0 {
 		return "unnamed"
 	}
 	if unicode.IsDigit(rune(result[0])) {
-		result = "t_" + result
+		return "t_" + result
 	}
 	return result
 }

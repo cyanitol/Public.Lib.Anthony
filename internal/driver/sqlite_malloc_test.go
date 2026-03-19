@@ -456,70 +456,95 @@ func TestMemoryLimit(t *testing.T) {
 	}
 }
 
+func mallocBulkInsert(t *testing.T, db *sql.DB, table string, n int) {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare("INSERT INTO " + table + "(data) VALUES(?)")
+	if err != nil {
+		t.Fatalf("failed to prepare statement: %v", err)
+	}
+	defer stmt.Close()
+	for i := 0; i < n; i++ {
+		if _, err := stmt.Exec(fmt.Sprintf("row data %d", i)); err != nil {
+			t.Fatalf("failed to insert row %d: %v", i, err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatalf("failed to commit transaction: %v", err)
+	}
+}
+
 // TestMemoryPressure tests behavior under memory pressure
 func TestMemoryPressure(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "pressure_test.db")
-
+	dbPath := filepath.Join(t.TempDir(), "pressure_test.db")
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
 	defer db.Close()
 
-	// Create a table
-	_, err = db.Exec("CREATE TABLE t1(id INTEGER PRIMARY KEY, data TEXT)")
-	if err != nil {
+	if _, err = db.Exec("CREATE TABLE t1(id INTEGER PRIMARY KEY, data TEXT)"); err != nil {
 		t.Fatalf("failed to create table: %v", err)
 	}
 
-	// Test inserting many rows
 	t.Run("many_inserts", func(t *testing.T) {
-		tx, err := db.Begin()
-		if err != nil {
-			t.Fatalf("failed to begin transaction: %v", err)
-		}
-		defer tx.Rollback()
-
-		stmt, err := tx.Prepare("INSERT INTO t1(data) VALUES(?)")
-		if err != nil {
-			t.Fatalf("failed to prepare statement: %v", err)
-		}
-		defer stmt.Close()
-
-		for i := 0; i < 100; i++ {
-			_, err := stmt.Exec(fmt.Sprintf("row data %d", i))
-			if err != nil {
-				t.Fatalf("failed to insert row %d: %v", i, err)
-			}
-		}
-
-		err = tx.Commit()
-		if err != nil {
-			t.Fatalf("failed to commit transaction: %v", err)
-		}
+		mallocBulkInsert(t, db, "t1", 100)
 	})
 
-	// Verify data
 	t.Run("verify_inserts", func(t *testing.T) {
 		var count int
-		err := db.QueryRow("SELECT count(*) FROM t1").Scan(&count)
-		if err != nil {
+		if err := db.QueryRow("SELECT count(*) FROM t1").Scan(&count); err != nil {
 			t.Fatalf("failed to count rows: %v", err)
 		}
-
 		if count != 100 {
 			t.Errorf("expected 100 rows, got %d", count)
 		}
 	})
 }
 
+func mallocPopulateTable(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`
+		CREATE TABLE t1(id INTEGER, data TEXT);
+		INSERT INTO t1 SELECT value, 'data' || value FROM generate_series(1, 100);
+	`)
+	if err == nil {
+		return
+	}
+	if _, err = db.Exec("CREATE TABLE IF NOT EXISTS t1(id INTEGER, data TEXT)"); err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+	for i := 1; i <= 100; i++ {
+		if _, err = db.Exec("INSERT INTO t1 VALUES(?, ?)", i, fmt.Sprintf("data%d", i)); err != nil {
+			t.Fatalf("failed to insert: %v", err)
+		}
+	}
+}
+
+func mallocDrainQuery(t *testing.T, db *sql.DB, query string) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	for rows.Next() {
+		var id int
+		var data string
+		if err := rows.Scan(&id, &data); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+	}
+	rows.Close()
+}
+
 // TestMemoryGC tests garbage collection behavior
 func TestMemoryGC(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "gc_test.db")
+	dbPath := filepath.Join(t.TempDir(), "gc_test.db")
 
-	// Get initial memory stats
 	var m1 runtime.MemStats
 	runtime.ReadMemStats(&m1)
 
@@ -528,52 +553,17 @@ func TestMemoryGC(t *testing.T) {
 		t.Fatalf("failed to open database: %v", err)
 	}
 
-	// Create and populate table
-	_, err = db.Exec(`
-		CREATE TABLE t1(id INTEGER, data TEXT);
-		INSERT INTO t1 SELECT value, 'data' || value FROM generate_series(1, 100);
-	`)
-	if err != nil {
-		// If generate_series doesn't exist, use loop
-		_, err = db.Exec("CREATE TABLE IF NOT EXISTS t1(id INTEGER, data TEXT)")
-		if err != nil {
-			t.Fatalf("failed to create table: %v", err)
-		}
+	mallocPopulateTable(t, db)
 
-		for i := 1; i <= 100; i++ {
-			_, err = db.Exec("INSERT INTO t1 VALUES(?, ?)", i, fmt.Sprintf("data%d", i))
-			if err != nil {
-				t.Fatalf("failed to insert: %v", err)
-			}
-		}
-	}
-
-	// Perform queries
 	for i := 0; i < 10; i++ {
-		rows, err := db.Query("SELECT * FROM t1")
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-
-		for rows.Next() {
-			var id int
-			var data string
-			if err := rows.Scan(&id, &data); err != nil {
-				t.Fatalf("scan failed: %v", err)
-			}
-		}
-		rows.Close()
+		mallocDrainQuery(t, db, "SELECT * FROM t1")
 	}
 
 	db.Close()
-
-	// Force GC
 	runtime.GC()
 
 	var m2 runtime.MemStats
 	runtime.ReadMemStats(&m2)
-
-	// Memory should have been released (not strictly guaranteed but expected)
 	t.Logf("Memory before: %d bytes, after: %d bytes", m1.Alloc, m2.Alloc)
 }
 

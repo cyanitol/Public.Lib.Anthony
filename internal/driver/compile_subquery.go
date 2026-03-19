@@ -224,22 +224,9 @@ func evalAggregate(col parser.ResultColumn, rows [][]interface{}, numCols int, c
 
 // sumColumn computes SUM for a named column over materialised rows.
 func sumColumn(fn *parser.FunctionExpr, rows [][]interface{}, colNames []string) (interface{}, error) {
-	if len(fn.Args) == 0 {
-		return nil, fmt.Errorf("SUM requires an argument")
-	}
-	ident, ok := fn.Args[0].(*parser.IdentExpr)
-	if !ok {
-		return nil, fmt.Errorf("SUM argument must be a column name")
-	}
-	idx := -1
-	for i, n := range colNames {
-		if n == ident.Name {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return nil, fmt.Errorf("column not found: %s", ident.Name)
+	idx, err := resolveAggColumnIndex(fn, colNames)
+	if err != nil {
+		return nil, err
 	}
 	var sum int64
 	for _, row := range rows {
@@ -253,6 +240,23 @@ func sumColumn(fn *parser.FunctionExpr, rows [][]interface{}, colNames []string)
 		}
 	}
 	return sum, nil
+}
+
+// resolveAggColumnIndex resolves the column index for a single-argument aggregate function.
+func resolveAggColumnIndex(fn *parser.FunctionExpr, colNames []string) (int, error) {
+	if len(fn.Args) == 0 {
+		return -1, fmt.Errorf("%s requires an argument", fn.Name)
+	}
+	ident, ok := fn.Args[0].(*parser.IdentExpr)
+	if !ok {
+		return -1, fmt.Errorf("%s argument must be a column name", fn.Name)
+	}
+	for i, n := range colNames {
+		if n == ident.Name {
+			return i, nil
+		}
+	}
+	return -1, fmt.Errorf("column not found: %s", ident.Name)
 }
 
 // resultColumnName returns a display name for a result column.

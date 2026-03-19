@@ -250,46 +250,36 @@ func TestReadWriteOverflowRoundtrip(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			// Fill payload with pattern
 			for i := range tt.payload {
 				tt.payload[i] = byte(i % 256)
 			}
-
-			// Write overflow
 			firstPage, err := cursor.WriteOverflow(tt.payload, tt.localSize, bt.UsableSize)
 			if err != nil {
 				t.Fatalf("WriteOverflow() error = %v", err)
 			}
-
-			if tt.wantOverflow && firstPage == 0 {
-				t.Error("WriteOverflow() returned 0 page number when overflow expected")
-			}
-			if !tt.wantOverflow && firstPage != 0 {
-				t.Errorf("WriteOverflow() returned page %d when no overflow expected", firstPage)
-			}
-
-			if !tt.wantOverflow {
-				return // No overflow to read
-			}
-
-			// Read back using cursor
-			localPayload := tt.payload[:tt.localSize]
-			completePayload, err := cursor.ReadOverflow(
-				localPayload,
-				firstPage,
-				uint32(len(tt.payload)),
-				bt.UsableSize,
-			)
-			if err != nil {
-				t.Fatalf("ReadOverflow() error = %v", err)
-			}
-
-			// Verify data
-			if !bytes.Equal(completePayload, tt.payload) {
-				t.Errorf("ReadOverflow() returned different data")
-				t.Logf("Expected %d bytes, got %d bytes", len(tt.payload), len(completePayload))
-			}
+			overflowRoundtripVerify(t, cursor, bt, tt.payload, tt.localSize, firstPage, tt.wantOverflow)
 		})
+	}
+}
+
+func overflowRoundtripVerify(t *testing.T, cursor *BtCursor, bt *Btree, payload []byte, localSize uint16, firstPage uint32, wantOverflow bool) {
+	t.Helper()
+	if wantOverflow && firstPage == 0 {
+		t.Error("WriteOverflow() returned 0 page number when overflow expected")
+	}
+	if !wantOverflow && firstPage != 0 {
+		t.Errorf("WriteOverflow() returned page %d when no overflow expected", firstPage)
+	}
+	if !wantOverflow {
+		return
+	}
+	localPayload := payload[:localSize]
+	completePayload, err := cursor.ReadOverflow(localPayload, firstPage, uint32(len(payload)), bt.UsableSize)
+	if err != nil {
+		t.Fatalf("ReadOverflow() error = %v", err)
+	}
+	if !bytes.Equal(completePayload, payload) {
+		t.Errorf("ReadOverflow() returned different data (%d bytes vs %d bytes)", len(completePayload), len(payload))
 	}
 }
 
@@ -614,43 +604,14 @@ func TestInsertWithOverflow(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			// Create test payload
-			payload := make([]byte, tt.payloadSize)
-			for i := range payload {
-				payload[i] = byte(i % 256)
-			}
-
-			// Insert the row
-			err := cursor.Insert(tt.rowid, payload)
-			if err != nil {
-				t.Fatalf("Insert() error = %v", err)
-			}
-
-			// Seek to the inserted row
-			found, err := cursor.SeekRowid(tt.rowid)
-			if err != nil {
-				t.Fatalf("SeekRowid() error = %v", err)
-			}
-			if !found {
-				t.Fatal("SeekRowid() did not find inserted row")
-			}
-
-			// Check if overflow was used as expected
-			hasOverflow := cursor.CurrentCell.OverflowPage != 0
-			if hasOverflow != tt.wantOverflow {
-				t.Errorf("Overflow usage mismatch: got overflow=%v, want overflow=%v", hasOverflow, tt.wantOverflow)
-			}
-
-			// Retrieve the complete payload
-			retrievedPayload, err := cursor.GetCompletePayload()
+			payload := makePatternPayload(tt.payloadSize)
+			insertAndVerifyOverflow(t, cursor, tt.rowid, payload, tt.wantOverflow)
+			retrieved, err := cursor.GetCompletePayload()
 			if err != nil {
 				t.Fatalf("GetCompletePayload() error = %v", err)
 			}
-
-			// Verify the payload matches
-			if !bytes.Equal(retrievedPayload, payload) {
-				t.Errorf("Retrieved payload does not match original")
-				t.Logf("Expected %d bytes, got %d bytes", len(payload), len(retrievedPayload))
+			if !bytes.Equal(retrieved, payload) {
+				t.Errorf("Retrieved payload does not match (%d vs %d bytes)", len(retrieved), len(payload))
 			}
 		})
 	}
@@ -666,21 +627,25 @@ func TestDeleteWithOverflow(t *testing.T) {
 	}
 
 	cursor := NewCursor(bt, rootPage)
-
-	// Insert a row with large payload requiring overflow
 	rowid := int64(1)
-	payloadSize := 15000
-	payload := make([]byte, payloadSize)
-	for i := range payload {
-		payload[i] = byte(i % 256)
-	}
+	payload := makePatternPayload(15000)
 
-	err = cursor.Insert(rowid, payload)
-	if err != nil {
+	if err := cursor.Insert(rowid, payload); err != nil {
 		t.Fatalf("Insert() error = %v", err)
 	}
 
-	// Verify overflow pages were created
+	firstOverflowPage, overflowPagesBefore := deleteOverflowVerifySetup(t, bt, cursor, rowid)
+	totalPagesBefore := len(bt.Pages)
+
+	if err := cursor.Delete(); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	deleteOverflowVerifyCleanup(t, bt, cursor, rowid, firstOverflowPage, totalPagesBefore, overflowPagesBefore)
+}
+
+func deleteOverflowVerifySetup(t *testing.T, bt *Btree, cursor *BtCursor, rowid int64) (uint32, int) {
+	t.Helper()
 	found, err := cursor.SeekRowid(rowid)
 	if err != nil {
 		t.Fatalf("SeekRowid() error = %v", err)
@@ -688,45 +653,30 @@ func TestDeleteWithOverflow(t *testing.T) {
 	if !found {
 		t.Fatal("SeekRowid() did not find inserted row")
 	}
-
 	if cursor.CurrentCell.OverflowPage == 0 {
 		t.Fatal("Expected overflow pages, but none were created")
 	}
-
 	firstOverflowPage := cursor.CurrentCell.OverflowPage
-
-	// Count overflow pages before deletion
-	overflowPagesBefore := countOverflowPages(bt, firstOverflowPage)
-	if overflowPagesBefore == 0 {
+	count := countOverflowPages(bt, firstOverflowPage)
+	if count == 0 {
 		t.Fatal("No overflow pages found")
 	}
+	return firstOverflowPage, count
+}
 
-	totalPagesBefore := len(bt.Pages)
-
-	// Delete the row
-	err = cursor.Delete()
-	if err != nil {
-		t.Fatalf("Delete() error = %v", err)
-	}
-
-	// Verify overflow pages were freed
+func deleteOverflowVerifyCleanup(t *testing.T, bt *Btree, cursor *BtCursor, rowid int64, firstOverflowPage uint32, totalPagesBefore, overflowPagesBefore int) {
+	t.Helper()
 	totalPagesAfter := len(bt.Pages)
 	expectedPages := totalPagesBefore - overflowPagesBefore
 	if totalPagesAfter != expectedPages {
-		t.Errorf("Expected %d pages after delete, got %d (freed %d overflow pages)",
-			expectedPages, totalPagesAfter, overflowPagesBefore)
+		t.Errorf("Expected %d pages after delete, got %d", expectedPages, totalPagesAfter)
 	}
-
-	// Verify the overflow pages are no longer accessible
-	_, err = bt.GetPage(firstOverflowPage)
-	if err == nil {
-		t.Error("Overflow page should have been freed but is still accessible")
+	if _, err := bt.GetPage(firstOverflowPage); err == nil {
+		t.Error("Overflow page should have been freed")
 	}
-
-	// Verify the row was deleted
-	found, err = cursor.SeekRowid(rowid)
+	found, err := cursor.SeekRowid(rowid)
 	if err == nil && found {
-		t.Error("Row should have been deleted but is still found")
+		t.Error("Row should have been deleted")
 	}
 }
 
@@ -742,7 +692,6 @@ func TestMultipleRowsWithOverflow(t *testing.T) {
 
 	cursor := NewCursor(bt, rootPage)
 
-	// Insert rows with payload sizes that require overflow but avoid triggering page splits
 	testData := []struct {
 		rowid       int64
 		payloadSize int
@@ -752,20 +701,32 @@ func TestMultipleRowsWithOverflow(t *testing.T) {
 		{3, 500},  // Small - no overflow
 	}
 
-	// Insert all rows
+	overflowInsertAllRows(t, cursor, testData)
+	overflowVerifyAllRows(t, cursor, testData)
+	overflowDeleteAndVerify(t, cursor, 2, []int64{1, 3})
+}
+
+func overflowInsertAllRows(t *testing.T, cursor *BtCursor, testData []struct {
+	rowid       int64
+	payloadSize int
+}) {
+	t.Helper()
 	for _, td := range testData {
 		payload := make([]byte, td.payloadSize)
 		for i := range payload {
 			payload[i] = byte((i + int(td.rowid)) % 256)
 		}
-
-		err := cursor.Insert(td.rowid, payload)
-		if err != nil {
+		if err := cursor.Insert(td.rowid, payload); err != nil {
 			t.Fatalf("Insert(rowid=%d) error = %v", td.rowid, err)
 		}
 	}
+}
 
-	// Verify all rows can be retrieved
+func overflowVerifyAllRows(t *testing.T, cursor *BtCursor, testData []struct {
+	rowid       int64
+	payloadSize int
+}) {
+	t.Helper()
 	for _, td := range testData {
 		found, err := cursor.SeekRowid(td.rowid)
 		if err != nil {
@@ -774,56 +735,51 @@ func TestMultipleRowsWithOverflow(t *testing.T) {
 		if !found {
 			t.Fatalf("Row %d not found after insert", td.rowid)
 		}
+		overflowVerifyPayloadContent(t, cursor, td.rowid, td.payloadSize)
+	}
+}
 
-		payload, err := cursor.GetCompletePayload()
-		if err != nil {
-			t.Fatalf("GetCompletePayload(rowid=%d) error = %v", td.rowid, err)
-		}
-
-		if len(payload) != td.payloadSize {
-			t.Errorf("Row %d: expected payload size %d, got %d", td.rowid, td.payloadSize, len(payload))
-		}
-
-		// Verify payload content
-		for i := range payload {
-			expected := byte((i + int(td.rowid)) % 256)
-			if payload[i] != expected {
-				t.Errorf("Row %d: payload byte %d mismatch: got %d, want %d", td.rowid, i, payload[i], expected)
-				break
-			}
+func overflowVerifyPayloadContent(t *testing.T, cursor *BtCursor, rowid int64, expectedSize int) {
+	t.Helper()
+	payload, err := cursor.GetCompletePayload()
+	if err != nil {
+		t.Fatalf("GetCompletePayload(rowid=%d) error = %v", rowid, err)
+	}
+	if len(payload) != expectedSize {
+		t.Errorf("Row %d: expected payload size %d, got %d", rowid, expectedSize, len(payload))
+	}
+	for i := range payload {
+		expected := byte((i + int(rowid)) % 256)
+		if payload[i] != expected {
+			t.Errorf("Row %d: payload byte %d mismatch: got %d, want %d", rowid, i, payload[i], expected)
+			break
 		}
 	}
+}
 
-	// Delete row with overflow
-	rowToDelete := int64(2)
-	found, err := cursor.SeekRowid(rowToDelete)
+func overflowDeleteAndVerify(t *testing.T, cursor *BtCursor, deleteRowid int64, remainingRows []int64) {
+	t.Helper()
+	found, err := cursor.SeekRowid(deleteRowid)
 	if err != nil {
-		t.Fatalf("SeekRowid(%d) error = %v", rowToDelete, err)
+		t.Fatalf("SeekRowid(%d) error = %v", deleteRowid, err)
 	}
 	if !found {
-		t.Fatalf("Row %d not found before delete", rowToDelete)
+		t.Fatalf("Row %d not found before delete", deleteRowid)
 	}
-
-	err = cursor.Delete()
-	if err != nil {
-		t.Fatalf("Delete(rowid=%d) error = %v", rowToDelete, err)
+	if err = cursor.Delete(); err != nil {
+		t.Fatalf("Delete(rowid=%d) error = %v", deleteRowid, err)
 	}
-
-	// Verify deleted row is gone
-	found, _ = cursor.SeekRowid(rowToDelete)
+	found, _ = cursor.SeekRowid(deleteRowid)
 	if found {
-		t.Errorf("Row %d should have been deleted but is still found", rowToDelete)
+		t.Errorf("Row %d should have been deleted", deleteRowid)
 	}
-
-	// Verify remaining rows are intact
-	remainingRows := []int64{1, 3}
 	for _, rowid := range remainingRows {
 		found, err := cursor.SeekRowid(rowid)
 		if err != nil {
 			t.Fatalf("SeekRowid(%d) error = %v", rowid, err)
 		}
 		if !found {
-			t.Errorf("Row %d should still exist but was not found", rowid)
+			t.Errorf("Row %d should still exist", rowid)
 		}
 	}
 }
@@ -832,94 +788,60 @@ func TestMultipleRowsWithOverflow(t *testing.T) {
 func TestOverflowEdgeCases(t *testing.T) {
 	t.Parallel()
 	t.Run("payload just below threshold", func(t *testing.T) {
-		// Create fresh btree for this test
 		bt := NewBtree(4096)
 		rootPage, err := bt.CreateTable()
 		if err != nil {
 			t.Fatalf("CreateTable() error = %v", err)
 		}
 		cursor := NewCursor(bt, rootPage)
-
-		// Use a payload size well below threshold to avoid page split issues
-		// This tests that overflow is NOT used for medium-sized payloads
-		payload := make([]byte, 3000)
-		for i := range payload {
-			payload[i] = byte(i % 256)
-		}
-
-		err = cursor.Insert(100, payload)
-		if err != nil {
-			t.Fatalf("Insert() error = %v", err)
-		}
-
-		found, err := cursor.SeekRowid(100)
-		if err != nil {
-			t.Fatalf("SeekRowid() error = %v", err)
-		}
-		if !found {
-			t.Fatal("Row not found after Insert()")
-		}
-
-		// Should not have overflow for payload well under threshold
-		if cursor.CurrentCell.OverflowPage != 0 {
-			t.Error("Payload below threshold should not require overflow")
-		}
-
-		retrieved, err := cursor.GetCompletePayload()
-		if err != nil {
-			t.Fatalf("GetCompletePayload() error = %v", err)
-		}
-
-		if !bytes.Equal(retrieved, payload) {
-			t.Error("Retrieved payload does not match")
-		}
+		payload := makePatternPayload(3000)
+		overflowEdgeCaseInsertAndVerify(t, cursor, 100, payload, false)
 	})
 
 	t.Run("payload one byte over threshold", func(t *testing.T) {
-		// Create fresh btree for this test
 		bt := NewBtree(4096)
 		rootPage, err := bt.CreateTable()
 		if err != nil {
 			t.Fatalf("CreateTable() error = %v", err)
 		}
 		cursor := NewCursor(bt, rootPage)
-
-		// Get the overflow threshold
 		threshold := GetOverflowThreshold(bt.PageSize, true)
-
-		// Create payload one byte over threshold (should overflow)
-		payload := make([]byte, threshold+1)
-		for i := range payload {
-			payload[i] = byte(i % 256)
-		}
-
-		err = cursor.Insert(101, payload)
-		if err != nil {
-			t.Fatalf("Insert() error = %v", err)
-		}
-
-		found, err := cursor.SeekRowid(101)
-		if err != nil {
-			t.Fatalf("SeekRowid() error = %v", err)
-		}
-		if !found {
-			t.Fatal("Row not found")
-		}
-
-		// Should have overflow
-		if cursor.CurrentCell.OverflowPage == 0 {
-			t.Error("Payload over threshold should require overflow")
-		}
-
-		retrieved, err := cursor.GetCompletePayload()
-		if err != nil {
-			t.Fatalf("GetCompletePayload() error = %v", err)
-		}
-
-		if !bytes.Equal(retrieved, payload) {
-			t.Error("Retrieved payload does not match")
-		}
+		payload := makePatternPayload(int(threshold + 1))
+		overflowEdgeCaseInsertAndVerify(t, cursor, 101, payload, true)
 	})
+}
+
+func makePatternPayload(size int) []byte {
+	payload := make([]byte, size)
+	for i := range payload {
+		payload[i] = byte(i % 256)
+	}
+	return payload
+}
+
+func overflowEdgeCaseInsertAndVerify(t *testing.T, cursor *BtCursor, rowid int64, payload []byte, wantOverflow bool) {
+	t.Helper()
+	if err := cursor.Insert(rowid, payload); err != nil {
+		t.Fatalf("Insert() error = %v", err)
+	}
+	found, err := cursor.SeekRowid(rowid)
+	if err != nil {
+		t.Fatalf("SeekRowid() error = %v", err)
+	}
+	if !found {
+		t.Fatal("Row not found after Insert()")
+	}
+	hasOverflow := cursor.CurrentCell.OverflowPage != 0
+	if hasOverflow != wantOverflow {
+		t.Errorf("Overflow mismatch: got %v, want %v", hasOverflow, wantOverflow)
+	}
+	retrieved, err := cursor.GetCompletePayload()
+	if err != nil {
+		t.Fatalf("GetCompletePayload() error = %v", err)
+	}
+	if !bytes.Equal(retrieved, payload) {
+		t.Error("Retrieved payload does not match")
+	}
 }
 
 // TestGetOverflowThreshold tests the GetOverflowThreshold function

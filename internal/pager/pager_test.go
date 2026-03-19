@@ -57,51 +57,15 @@ func TestOpen_ExistingDatabase(t *testing.T) {
 	t.Skip("Opening existing database not yet fully implemented")
 	filename := tempFile(t)
 
-	// Create database
-	pager1, err := Open(filename, false)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-
-	// Modify database
-	page, err := pager1.Get(1)
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-
+	pager1 := openTestPagerAt(t, filename, false)
 	testData := []byte("Test data")
-	if err := pager1.Write(page); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-
-	if err := page.Write(DatabaseHeaderSize, testData); err != nil {
-		t.Fatalf("page.Write() error = %v", err)
-	}
-
-	if err := pager1.Commit(); err != nil {
-		t.Fatalf("Commit() error = %v", err)
-	}
-
+	mustWritePageAtOffset(t, pager1, 1, DatabaseHeaderSize, testData)
+	mustCommit(t, pager1)
 	pager1.Close()
 
-	// Reopen database
-	pager2, err := Open(filename, false)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	pager2 := openTestPagerAt(t, filename, false)
 	defer pager2.Close()
-
-	// Verify data
-	page2, err := pager2.Get(1)
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-
-	readData, err := page2.Read(DatabaseHeaderSize, len(testData))
-	if err != nil {
-		t.Fatalf("page.Read() error = %v", err)
-	}
-
+	readData := mustReadPageAtOffset(t, pager2, 1, DatabaseHeaderSize, len(testData))
 	if !bytes.Equal(readData, testData) {
 		t.Errorf("Read data = %v, want %v", readData, testData)
 	}
@@ -274,66 +238,48 @@ func TestPager_WriteAndRollback(t *testing.T) {
 	t.Skip("Pager write and rollback not yet fully implemented")
 	filename := tempFile(t)
 
-	pager, err := Open(filename, false)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	pager := openTestPagerAt(t, filename, false)
 	defer pager.Close()
 
-	// Get page and write original data
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-
 	originalData := []byte("Original data")
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-
-	if err := page.Write(DatabaseHeaderSize, originalData); err != nil {
-		t.Fatalf("page.Write() error = %v", err)
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit() error = %v", err)
-	}
-
-	pager.Put(page)
+	mustWritePageAtOffset(t, pager, 1, DatabaseHeaderSize, originalData)
+	mustCommit(t, pager)
 
 	// Start new transaction and modify
-	page2, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-
 	modifiedData := []byte("Modified data")
-	if err := pager.Write(page2); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
+	mustWritePageAtOffset(t, pager, 1, DatabaseHeaderSize, modifiedData)
+	mustRollback(t, pager)
 
-	if err := page2.Write(DatabaseHeaderSize, modifiedData); err != nil {
-		t.Fatalf("page.Write() error = %v", err)
-	}
-
-	// Rollback
-	if err := pager.Rollback(); err != nil {
-		t.Fatalf("Rollback() error = %v", err)
-	}
-
-	// Verify original data is restored
-	page3, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("Get() after rollback error = %v", err)
-	}
-
-	readData, err := page3.Read(DatabaseHeaderSize, len(originalData))
-	if err != nil {
-		t.Fatalf("page.Read() error = %v", err)
-	}
-
+	readData := mustReadPageAtOffset(t, pager, 1, DatabaseHeaderSize, len(originalData))
 	if !bytes.Equal(readData, originalData) {
 		t.Errorf("Data after rollback = %v, want %v", readData, originalData)
+	}
+}
+
+// pagerWritePageNumPages writes byte(i) to each page at appropriate offset (header-aware).
+func pagerWritePageNumPages(t *testing.T, pager *Pager, count int) {
+	t.Helper()
+	for i := 1; i <= count; i++ {
+		offset := DatabaseHeaderSize
+		if i > 1 {
+			offset = 0
+		}
+		mustWritePageAtOffset(t, pager, Pgno(i), offset, []byte{byte(i)})
+	}
+}
+
+// pagerVerifyPageNumPages verifies byte(i) on each page at appropriate offset.
+func pagerVerifyPageNumPages(t *testing.T, pager *Pager, count int) {
+	t.Helper()
+	for i := 1; i <= count; i++ {
+		offset := DatabaseHeaderSize
+		if i > 1 {
+			offset = 0
+		}
+		data := mustReadPageAtOffset(t, pager, Pgno(i), offset, 1)
+		if data[0] != byte(i) {
+			t.Errorf("Page %d data = %d, want %d", i, data[0], i)
+		}
 	}
 }
 
@@ -341,68 +287,14 @@ func TestPager_MultiplePages(t *testing.T) {
 	t.Parallel()
 	filename := tempFile(t)
 
-	pager, err := Open(filename, false)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	pager := openTestPagerAt(t, filename, false)
 	defer pager.Close()
 
 	numPages := 10
+	pagerWritePageNumPages(t, pager, numPages)
+	mustCommit(t, pager)
+	pagerVerifyPageNumPages(t, pager, numPages)
 
-	// Write to multiple pages
-	for i := 1; i <= numPages; i++ {
-		page, err := pager.Get(Pgno(i))
-		if err != nil {
-			t.Fatalf("Get(%d) error = %v", i, err)
-		}
-
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("Write(page %d) error = %v", i, err)
-		}
-
-		data := []byte{byte(i)}
-		offset := DatabaseHeaderSize
-		if i > 1 {
-			offset = 0
-		}
-
-		if err := page.Write(offset, data); err != nil {
-			t.Fatalf("page.Write(page %d) error = %v", i, err)
-		}
-
-		pager.Put(page)
-	}
-
-	// Commit
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit() error = %v", err)
-	}
-
-	// Verify all pages
-	for i := 1; i <= numPages; i++ {
-		page, err := pager.Get(Pgno(i))
-		if err != nil {
-			t.Fatalf("Get(%d) error = %v", i, err)
-		}
-
-		offset := DatabaseHeaderSize
-		if i > 1 {
-			offset = 0
-		}
-
-		readData, err := page.Read(offset, 1)
-		if err != nil {
-			t.Fatalf("page.Read(page %d) error = %v", i, err)
-		}
-
-		if readData[0] != byte(i) {
-			t.Errorf("Page %d data = %d, want %d", i, readData[0], i)
-		}
-
-		pager.Put(page)
-	}
-
-	// Check page count
 	if pager.PageCount() != Pgno(numPages) {
 		t.Errorf("PageCount() = %d, want %d", pager.PageCount(), numPages)
 	}

@@ -99,6 +99,56 @@ func TestMemStringValue(t *testing.T) {
 	}
 }
 
+// assertValueEquals checks that got matches expected for any supported type.
+func assertValueEquals(t *testing.T, got, expected interface{}) {
+	t.Helper()
+	if expected == nil {
+		if got != nil {
+			t.Errorf("Value() = %v, want nil", got)
+		}
+		return
+	}
+	assertNonNilValueEquals(t, got, expected)
+}
+
+func assertNonNilValueEquals(t *testing.T, got, expected interface{}) {
+	t.Helper()
+	if !valuesMatchComprehensive(got, expected) {
+		t.Errorf("Value() = %v (%T), want %v (%T)", got, got, expected, expected)
+	}
+}
+
+func valuesMatchComprehensive(got, expected interface{}) bool {
+	switch v := expected.(type) {
+	case int64:
+		gotInt, ok := got.(int64)
+		return ok && gotInt == v
+	case float64:
+		gotFloat, ok := got.(float64)
+		return ok && gotFloat == v
+	case string:
+		gotStr, ok := got.(string)
+		return ok && gotStr == v
+	case []byte:
+		gotBytes, ok := got.([]byte)
+		return ok && bytesMatchComprehensive(gotBytes, v)
+	}
+	return false
+}
+
+func bytesMatchComprehensive(got, expected []byte) bool {
+	if len(got) != len(expected) {
+		return false
+	}
+	for i, b := range got {
+		if b != expected[i] {
+			return false
+		}
+	}
+	return true
+}
+
+
 // TestMemValue tests the Value method
 func TestMemValue(t *testing.T) {
 	t.Parallel()
@@ -107,66 +157,18 @@ func TestMemValue(t *testing.T) {
 		mem      *Mem
 		expected interface{}
 	}{
-		{
-			name:     "null",
-			mem:      NewMemNull(),
-			expected: nil,
-		},
-		{
-			name:     "int",
-			mem:      NewMemInt(42),
-			expected: int64(42),
-		},
-		{
-			name:     "real",
-			mem:      NewMemReal(3.14),
-			expected: float64(3.14),
-		},
-		{
-			name:     "string",
-			mem:      NewMemStr("test"),
-			expected: "test",
-		},
-		{
-			name:     "blob",
-			mem:      NewMemBlob([]byte{1, 2, 3}),
-			expected: []byte{1, 2, 3},
-		},
+		{"null", NewMemNull(), nil},
+		{"int", NewMemInt(42), int64(42)},
+		{"real", NewMemReal(3.14), float64(3.14)},
+		{"string", NewMemStr("test"), "test"},
+		{"blob", NewMemBlob([]byte{1, 2, 3}), []byte{1, 2, 3}},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := tt.mem.Value()
-			switch v := tt.expected.(type) {
-			case nil:
-				if got != nil {
-					t.Errorf("Value() = %v, want nil", got)
-				}
-			case int64:
-				if gotInt, ok := got.(int64); !ok || gotInt != v {
-					t.Errorf("Value() = %v, want %v", got, v)
-				}
-			case float64:
-				if gotFloat, ok := got.(float64); !ok || gotFloat != v {
-					t.Errorf("Value() = %v, want %v", got, v)
-				}
-			case string:
-				if gotStr, ok := got.(string); !ok || gotStr != v {
-					t.Errorf("Value() = %v, want %v", got, v)
-				}
-			case []byte:
-				if gotBytes, ok := got.([]byte); !ok {
-					t.Errorf("Value() type = %T, want []byte", got)
-				} else {
-					for i, b := range gotBytes {
-						if b != v[i] {
-							t.Errorf("Value()[%d] = %v, want %v", i, b, v[i])
-						}
-					}
-				}
-			}
+			assertValueEquals(t, tt.mem.Value(), tt.expected)
 		})
 	}
 }
@@ -232,25 +234,28 @@ func TestMemNumerify(t *testing.T) {
 			if tt.wantErr {
 				return
 			}
-
-			if tt.wantInt && !m.IsInt() {
-				t.Errorf("Expected int flag after Numerify()")
-			}
-			if tt.wantReal && !m.IsReal() {
-				t.Errorf("Expected real flag after Numerify()")
-			}
-
-			if tt.wantInt {
-				if got := m.IntValue(); got != tt.wantValue.(int64) {
-					t.Errorf("IntValue() = %v, want %v", got, tt.wantValue)
-				}
-			}
-			if tt.wantReal {
-				if got := m.RealValue(); got != tt.wantValue.(float64) {
-					t.Errorf("RealValue() = %v, want %v", got, tt.wantValue)
-				}
-			}
+			checkNumerifyResult(t, m, tt.wantInt, tt.wantReal, tt.wantValue)
 		})
+	}
+}
+
+func checkNumerifyResult(t *testing.T, m *Mem, wantInt, wantReal bool, wantValue interface{}) {
+	t.Helper()
+	if wantInt && !m.IsInt() {
+		t.Errorf("Expected int flag after Numerify()")
+	}
+	if wantReal && !m.IsReal() {
+		t.Errorf("Expected real flag after Numerify()")
+	}
+	if wantInt {
+		if got := m.IntValue(); got != wantValue.(int64) {
+			t.Errorf("IntValue() = %v, want %v", got, wantValue)
+		}
+	}
+	if wantReal {
+		if got := m.RealValue(); got != wantValue.(float64) {
+			t.Errorf("RealValue() = %v, want %v", got, wantValue)
+		}
 	}
 }
 
@@ -606,104 +611,56 @@ func TestCompareMixedNumericText(t *testing.T) {
 	}
 }
 
+// arithEdgeCaseTest describes an arithmetic edge case test.
+type arithEdgeCaseTest struct {
+	name    string
+	setup   func() *Mem
+	op      func(*Mem) error
+	checkFn func(*testing.T, *Mem)
+}
+
+func arithEdgeCases() []arithEdgeCaseTest {
+	return []arithEdgeCaseTest{
+		{"Subtract with null", func() *Mem { return NewMemInt(10) }, func(m *Mem) error { return m.Subtract(NewMemNull()) }, func(t *testing.T, m *Mem) {
+			if !m.IsNull() { t.Errorf("Expected null result") }
+		}},
+		{"Subtract with overflow", func() *Mem { return NewMemInt(-9223372036854775808) }, func(m *Mem) error { return m.Subtract(NewMemInt(1)) }, func(t *testing.T, m *Mem) {
+			if !m.IsReal() { t.Errorf("Expected real after overflow") }
+		}},
+		{"Multiply with null", func() *Mem { return NewMemInt(10) }, func(m *Mem) error { return m.Multiply(NewMemNull()) }, func(t *testing.T, m *Mem) {
+			if !m.IsNull() { t.Errorf("Expected null result") }
+		}},
+		{"Multiply with overflow", func() *Mem { return NewMemInt(9223372036854775807) }, func(m *Mem) error { return m.Multiply(NewMemInt(2)) }, func(t *testing.T, m *Mem) {
+			if !m.IsReal() { t.Errorf("Expected real after overflow") }
+		}},
+		{"Remainder with null", func() *Mem { return NewMemInt(10) }, func(m *Mem) error { return m.Remainder(NewMemNull()) }, func(t *testing.T, m *Mem) {
+			if !m.IsNull() { t.Errorf("Expected null result") }
+		}},
+		{"Remainder with zero divisor (int)", func() *Mem { return NewMemInt(10) }, func(m *Mem) error { return m.Remainder(NewMemInt(0)) }, func(t *testing.T, m *Mem) {
+			if !m.IsNull() { t.Errorf("Expected null result for division by zero") }
+		}},
+		{"Remainder with zero divisor (real)", func() *Mem { return NewMemInt(10) }, func(m *Mem) error { return m.Remainder(NewMemReal(0.0)) }, func(t *testing.T, m *Mem) {
+			if !m.IsNull() { t.Errorf("Expected null result for division by zero") }
+		}},
+		{"Remainder with real values", func() *Mem { return NewMemReal(10.5) }, func(m *Mem) error { return m.Remainder(NewMemReal(3.0)) }, func(t *testing.T, m *Mem) {
+			if !m.IsReal() { t.Errorf("Expected real result") }
+		}},
+	}
+}
+
 // TestMemArithmeticEdgeCases tests edge cases for arithmetic operations
 func TestMemArithmeticEdgeCases(t *testing.T) {
 	t.Parallel()
-	t.Run("Subtract with null", func(t *testing.T) {
-		t.Parallel()
-		m := NewMemInt(10)
-		err := m.Subtract(NewMemNull())
-		if err != nil {
-			t.Errorf("Subtract() error = %v", err)
-		}
-		if !m.IsNull() {
-			t.Errorf("Expected null result")
-		}
-	})
-
-	t.Run("Subtract with overflow", func(t *testing.T) {
-		t.Parallel()
-		m := NewMemInt(-9223372036854775808) // min int64
-		err := m.Subtract(NewMemInt(1))
-		if err != nil {
-			t.Errorf("Subtract() error = %v", err)
-		}
-		// Should convert to real on overflow
-		if !m.IsReal() {
-			t.Errorf("Expected real after overflow")
-		}
-	})
-
-	t.Run("Multiply with null", func(t *testing.T) {
-		t.Parallel()
-		m := NewMemInt(10)
-		err := m.Multiply(NewMemNull())
-		if err != nil {
-			t.Errorf("Multiply() error = %v", err)
-		}
-		if !m.IsNull() {
-			t.Errorf("Expected null result")
-		}
-	})
-
-	t.Run("Multiply with overflow", func(t *testing.T) {
-		t.Parallel()
-		m := NewMemInt(9223372036854775807) // max int64
-		err := m.Multiply(NewMemInt(2))
-		if err != nil {
-			t.Errorf("Multiply() error = %v", err)
-		}
-		// Should convert to real on overflow
-		if !m.IsReal() {
-			t.Errorf("Expected real after overflow")
-		}
-	})
-
-	t.Run("Remainder with null", func(t *testing.T) {
-		t.Parallel()
-		m := NewMemInt(10)
-		err := m.Remainder(NewMemNull())
-		if err != nil {
-			t.Errorf("Remainder() error = %v", err)
-		}
-		if !m.IsNull() {
-			t.Errorf("Expected null result")
-		}
-	})
-
-	t.Run("Remainder with zero divisor (int)", func(t *testing.T) {
-		t.Parallel()
-		m := NewMemInt(10)
-		err := m.Remainder(NewMemInt(0))
-		if err != nil {
-			t.Errorf("Remainder() error = %v", err)
-		}
-		if !m.IsNull() {
-			t.Errorf("Expected null result for division by zero")
-		}
-	})
-
-	t.Run("Remainder with zero divisor (real)", func(t *testing.T) {
-		t.Parallel()
-		m := NewMemInt(10)
-		err := m.Remainder(NewMemReal(0.0))
-		if err != nil {
-			t.Errorf("Remainder() error = %v", err)
-		}
-		if !m.IsNull() {
-			t.Errorf("Expected null result for division by zero")
-		}
-	})
-
-	t.Run("Remainder with real values", func(t *testing.T) {
-		t.Parallel()
-		m := NewMemReal(10.5)
-		err := m.Remainder(NewMemReal(3.0))
-		if err != nil {
-			t.Errorf("Remainder() error = %v", err)
-		}
-		if !m.IsReal() {
-			t.Errorf("Expected real result")
-		}
-	})
+	for _, tt := range arithEdgeCases() {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			m := tt.setup()
+			err := tt.op(m)
+			if err != nil {
+				t.Errorf("operation error = %v", err)
+			}
+			tt.checkFn(t, m)
+		})
+	}
 }

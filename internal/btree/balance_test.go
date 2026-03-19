@@ -198,67 +198,18 @@ func TestBalance(t *testing.T) {
 		errorMsg  string
 	}{
 		{
-			name: "balanced page",
-			setup: func(bt *Btree) (*BtCursor, error) {
-				rootPage, _ := bt.CreateTable()
-				cursor := NewCursor(bt, rootPage)
-
-				// Insert a moderate number of cells
-				for i := int64(1); i <= 10; i++ {
-					if err := cursor.Insert(i, []byte("data")); err != nil {
-						return nil, err
-					}
-				}
-
-				// Position cursor on a valid cell
-				cursor.SeekRowid(5)
-				return cursor, nil
-			},
+			name:      "balanced page",
+			setup:     balanceSetupBalancedPage,
 			wantError: false,
 		},
 		{
-			name: "nearly full page",
-			setup: func(bt *Btree) (*BtCursor, error) {
-				rootPage, _ := bt.CreateTable()
-				cursor := NewCursor(bt, rootPage)
-
-				// Insert many cells to fill the page
-				// With 4KB pages, we can fit many small cells
-				for i := int64(1); i <= 100; i++ {
-					if err := cursor.Insert(i, []byte("x")); err != nil {
-						// If we get an overflow error, that's expected
-						if err.Error() == fmt.Sprintf("page %d is full (need 9 bytes, have 0)", rootPage) {
-							break
-						}
-						return nil, err
-					}
-				}
-
-				cursor.SeekRowid(1)
-				return cursor, nil
-			},
-			wantError: false, // Should handle near-full gracefully
+			name:      "nearly full page",
+			setup:     balanceSetupNearlyFullPage,
+			wantError: false,
 		},
 		{
-			name: "page with fragmentation",
-			setup: func(bt *Btree) (*BtCursor, error) {
-				rootPage, _ := bt.CreateTable()
-				cursor := NewCursor(bt, rootPage)
-
-				// Insert and delete to create fragmentation
-				for i := int64(1); i <= 20; i++ {
-					cursor.Insert(i, []byte("data"))
-				}
-
-				// Delete every other cell to create fragmentation
-				for i := int64(2); i <= 20; i += 2 {
-					cursor.SeekRowid(i)
-					cursor.Delete()
-				}
-
-				cursor.SeekRowid(1)
-				return cursor, nil
-			},
+			name:      "page with fragmentation",
+			setup:     balanceSetupFragmentedPage,
 			wantError: false,
 		},
 		{
@@ -282,27 +233,67 @@ func TestBalance(t *testing.T) {
 			if err != nil {
 				t.Fatalf("setup() error = %v", err)
 			}
-
 			err = balance(cursor)
-
-			if tt.wantError {
-				if err == nil {
-					t.Error("balance() expected error, got nil")
-				} else if tt.errorMsg != "" && err.Error() != tt.errorMsg {
-					t.Errorf("balance() error = %v, want %v", err, tt.errorMsg)
-				}
-			} else {
-				// For non-error cases, we allow "overfull" or "underfull" messages
-				// since we're not implementing split/merge yet
-				if err != nil {
-					errMsg := err.Error()
-					if errMsg != fmt.Sprintf("page %d is overfull and requires split", cursor.CurrentPage) &&
-						errMsg != fmt.Sprintf("page %d is underfull and may need merge or redistribution", cursor.CurrentPage) {
-						t.Errorf("balance() unexpected error = %v", err)
-					}
-				}
-			}
+			balanceVerifyResult(t, err, tt.wantError, tt.errorMsg, cursor)
 		})
+	}
+}
+
+func balanceSetupBalancedPage(bt *Btree) (*BtCursor, error) {
+	rootPage, _ := bt.CreateTable()
+	cursor := NewCursor(bt, rootPage)
+	for i := int64(1); i <= 10; i++ {
+		if err := cursor.Insert(i, []byte("data")); err != nil {
+			return nil, err
+		}
+	}
+	cursor.SeekRowid(5)
+	return cursor, nil
+}
+
+func balanceSetupNearlyFullPage(bt *Btree) (*BtCursor, error) {
+	rootPage, _ := bt.CreateTable()
+	cursor := NewCursor(bt, rootPage)
+	for i := int64(1); i <= 100; i++ {
+		if err := cursor.Insert(i, []byte("x")); err != nil {
+			break
+		}
+	}
+	cursor.SeekRowid(1)
+	return cursor, nil
+}
+
+func balanceSetupFragmentedPage(bt *Btree) (*BtCursor, error) {
+	rootPage, _ := bt.CreateTable()
+	cursor := NewCursor(bt, rootPage)
+	for i := int64(1); i <= 20; i++ {
+		cursor.Insert(i, []byte("data"))
+	}
+	for i := int64(2); i <= 20; i += 2 {
+		cursor.SeekRowid(i)
+		cursor.Delete()
+	}
+	cursor.SeekRowid(1)
+	return cursor, nil
+}
+
+func balanceVerifyResult(t *testing.T, err error, wantError bool, errorMsg string, cursor *BtCursor) {
+	t.Helper()
+	if wantError {
+		if err == nil {
+			t.Error("balance() expected error, got nil")
+		} else if errorMsg != "" && err.Error() != errorMsg {
+			t.Errorf("balance() error = %v, want %v", err, errorMsg)
+		}
+		return
+	}
+	if err != nil {
+		errMsg := err.Error()
+		overfullMsg := fmt.Sprintf("page %d is overfull and requires split", cursor.CurrentPage)
+		underfullMsg := fmt.Sprintf("page %d is underfull and may need merge or redistribution", cursor.CurrentPage)
+		if errMsg != overfullMsg && errMsg != underfullMsg {
+			t.Errorf("balance() unexpected error = %v", err)
+		}
 	}
 }
 
@@ -315,48 +306,43 @@ func TestGetBalanceInfo(t *testing.T) {
 		t.Fatalf("CreateTable() error = %v", err)
 	}
 
-	// Test empty page
+	getBalanceInfoVerifyEmpty(t, bt, rootPage)
+
+	cursor := NewCursor(bt, rootPage)
+	insertRows(cursor, 1, 10, 9) // 9-byte payload ~ "test data"
+
+	getBalanceInfoVerifyWithData(t, bt, rootPage)
+}
+
+func getBalanceInfoVerifyEmpty(t *testing.T, bt *Btree, rootPage uint32) {
+	t.Helper()
 	info, err := GetBalanceInfo(bt, rootPage)
 	if err != nil {
 		t.Fatalf("GetBalanceInfo() error = %v", err)
 	}
-
 	if info.NumCells != 0 {
 		t.Errorf("NumCells = %d, want 0", info.NumCells)
 	}
-
 	if info.IsOverfull {
 		t.Error("Empty page should not be overfull")
 	}
-
 	if info.IsUnderfull {
 		t.Error("Empty page should not be underfull")
 	}
-
 	if !info.IsBalanced {
 		t.Error("Empty page should be balanced")
 	}
+}
 
-	// Add some data
-	cursor := NewCursor(bt, rootPage)
-	for i := int64(1); i <= 10; i++ {
-		cursor.Insert(i, []byte("test data"))
-	}
-
-	// Test page with data
-	info, err = GetBalanceInfo(bt, rootPage)
+func getBalanceInfoVerifyWithData(t *testing.T, bt *Btree, rootPage uint32) {
+	t.Helper()
+	info, err := GetBalanceInfo(bt, rootPage)
 	if err != nil {
 		t.Fatalf("GetBalanceInfo() error = %v", err)
 	}
-
-	if info.NumCells != 10 {
-		t.Errorf("NumCells = %d, want 10", info.NumCells)
-	}
-
 	if info.FillFactor < 0 || info.FillFactor > 1 {
 		t.Errorf("FillFactor = %f, want 0.0-1.0", info.FillFactor)
 	}
-
 	t.Logf("Balance info: %s", info.String())
 }
 

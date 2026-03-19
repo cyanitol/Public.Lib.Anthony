@@ -439,37 +439,44 @@ func TestMemToInterface(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := memToInterface(tt.mem)
-			if tt.expected == nil {
-				if result != nil {
-					t.Errorf("Expected nil, got %v", result)
-				}
-				return
-			}
-
-			// For byte slices, compare differently
-			if expectedBytes, ok := tt.expected.([]byte); ok {
-				resultBytes, ok := result.([]byte)
-				if !ok {
-					t.Errorf("Expected byte slice, got %T", result)
-					return
-				}
-				if len(expectedBytes) != len(resultBytes) {
-					t.Errorf("Expected %v, got %v", expectedBytes, resultBytes)
-					return
-				}
-				for i := range expectedBytes {
-					if expectedBytes[i] != resultBytes[i] {
-						t.Errorf("Expected %v, got %v", expectedBytes, resultBytes)
-						return
-					}
-				}
-				return
-			}
-
-			if result != tt.expected {
-				t.Errorf("Expected %v, got %v", tt.expected, result)
-			}
+			assertMemResult(t, tt.expected, result)
 		})
+	}
+}
+
+func assertMemResult(t *testing.T, expected, result interface{}) {
+	t.Helper()
+	if expected == nil {
+		if result != nil {
+			t.Errorf("Expected nil, got %v", result)
+		}
+		return
+	}
+	if expectedBytes, ok := expected.([]byte); ok {
+		assertBytesEqual(t, expectedBytes, result)
+		return
+	}
+	if result != expected {
+		t.Errorf("Expected %v, got %v", expected, result)
+	}
+}
+
+func assertBytesEqual(t *testing.T, expected []byte, result interface{}) {
+	t.Helper()
+	resultBytes, ok := result.([]byte)
+	if !ok {
+		t.Errorf("Expected byte slice, got %T", result)
+		return
+	}
+	if len(expected) != len(resultBytes) {
+		t.Errorf("Expected %v, got %v", expected, resultBytes)
+		return
+	}
+	for i := range expected {
+		if expected[i] != resultBytes[i] {
+			t.Errorf("Expected %v, got %v", expected, resultBytes)
+			return
+		}
 	}
 }
 

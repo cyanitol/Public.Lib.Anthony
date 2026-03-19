@@ -102,65 +102,87 @@ func TestAlterTable(t *testing.T) {
 	}
 }
 
-// TestPragmaTableInfo tests PRAGMA table_info.
-func TestPragmaTableInfo(t *testing.T) {
-	db, err := sql.Open("sqlite_internal", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+// ddlColumnInfo holds PRAGMA table_info results.
+type ddlColumnInfo struct {
+	cid        int
+	name       string
+	typ        string
+	notnull    int
+	dflt_value sql.NullString
+	pk         int
+}
 
-	// Create a table with various column types
-	_, err = db.Exec(`
-		CREATE TABLE users (
-			id INTEGER PRIMARY KEY,
-			name TEXT NOT NULL,
-			email TEXT,
-			age INTEGER DEFAULT 0
-		)
-	`)
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	// Query table_info
-	rows, err := db.Query("PRAGMA table_info(users)")
+// ddlScanTableInfo scans all rows from PRAGMA table_info.
+func ddlScanTableInfo(t *testing.T, db *sql.DB, table string) []ddlColumnInfo {
+	t.Helper()
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
 	if err != nil {
 		t.Fatalf("failed to query table_info: %v", err)
 	}
 	defer rows.Close()
-
-	type ColumnInfo struct {
-		cid        int
-		name       string
-		typ        string
-		notnull    int
-		dflt_value sql.NullString
-		pk         int
-	}
-
-	var columns []ColumnInfo
+	var columns []ddlColumnInfo
 	for rows.Next() {
-		var col ColumnInfo
-		err := rows.Scan(&col.cid, &col.name, &col.typ, &col.notnull, &col.dflt_value, &col.pk)
-		if err != nil {
+		var col ddlColumnInfo
+		if err := rows.Scan(&col.cid, &col.name, &col.typ, &col.notnull, &col.dflt_value, &col.pk); err != nil {
 			t.Fatalf("failed to scan row: %v", err)
 		}
 		columns = append(columns, col)
 	}
+	return columns
+}
 
+// ddlOpenMemDB opens an in-memory database.
+func ddlOpenMemDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite_internal", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	return db
+}
+
+// ddlAssertColumn checks a column's basic properties.
+func ddlAssertColumn(t *testing.T, col ddlColumnInfo, wantName, wantTyp string, idx int) {
+	t.Helper()
+	if col.name != wantName || col.typ != wantTyp {
+		t.Errorf("unexpected column %d: %+v", idx, col)
+	}
+}
+
+// TestPragmaTableInfo tests PRAGMA table_info.
+func TestPragmaTableInfo(t *testing.T) {
+	db := ddlOpenMemDB(t)
+	defer db.Close()
+
+	if _, err := db.Exec(`CREATE TABLE users (
+		id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT, age INTEGER DEFAULT 0
+	)`); err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	columns := ddlScanTableInfo(t, db, "users")
 	if len(columns) != 4 {
 		t.Fatalf("expected 4 columns, got %d", len(columns))
 	}
-
-	// Verify first column
-	if columns[0].name != "id" || columns[0].typ != "INTEGER" || columns[0].pk != 1 {
-		t.Errorf("unexpected column 0: %+v", columns[0])
+	ddlAssertColumn(t, columns[0], "id", "INTEGER", 0)
+	if columns[0].pk != 1 {
+		t.Errorf("column 0 pk = %d, want 1", columns[0].pk)
 	}
+	ddlAssertColumn(t, columns[1], "name", "TEXT", 1)
+	if columns[1].notnull != 1 {
+		t.Errorf("column 1 notnull = %d, want 1", columns[1].notnull)
+	}
+}
 
-	// Verify second column
-	if columns[1].name != "name" || columns[1].typ != "TEXT" || columns[1].notnull != 1 {
-		t.Errorf("unexpected column 1: %+v", columns[1])
+// ddlAssertPragmaInt queries a PRAGMA and checks the integer result.
+func ddlAssertPragmaInt(t *testing.T, db *sql.DB, pragma string, want int) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow(pragma).Scan(&got); err != nil {
+		t.Fatalf("failed to query %s: %v", pragma, err)
+	}
+	if got != want {
+		t.Errorf("%s = %d, want %d", pragma, got, want)
 	}
 }
 
@@ -173,47 +195,26 @@ func TestPragmaForeignKeys(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Get initial value
-	var value int
-	err = db.QueryRow("PRAGMA foreign_keys").Scan(&value)
-	if err != nil {
-		t.Fatalf("failed to query foreign_keys: %v", err)
-	}
-
-	if value != 0 {
-		t.Errorf("expected initial foreign_keys to be 0, got %d", value)
-	}
-
-	// Set to ON
-	_, err = db.Exec("PRAGMA foreign_keys = ON")
-	if err != nil {
+	ddlAssertPragmaInt(t, db, "PRAGMA foreign_keys", 0)
+	if _, err = db.Exec("PRAGMA foreign_keys = ON"); err != nil {
 		t.Fatalf("failed to set foreign_keys: %v", err)
 	}
-
-	// Verify it was set
-	err = db.QueryRow("PRAGMA foreign_keys").Scan(&value)
-	if err != nil {
-		t.Fatalf("failed to query foreign_keys after SET: %v", err)
-	}
-
-	if value != 1 {
-		t.Errorf("expected foreign_keys to be 1, got %d", value)
-	}
-
-	// Set to OFF
-	_, err = db.Exec("PRAGMA foreign_keys = OFF")
-	if err != nil {
+	ddlAssertPragmaInt(t, db, "PRAGMA foreign_keys", 1)
+	if _, err = db.Exec("PRAGMA foreign_keys = OFF"); err != nil {
 		t.Fatalf("failed to set foreign_keys to OFF: %v", err)
 	}
+	ddlAssertPragmaInt(t, db, "PRAGMA foreign_keys", 0)
+}
 
-	// Verify it was set
-	err = db.QueryRow("PRAGMA foreign_keys").Scan(&value)
-	if err != nil {
-		t.Fatalf("failed to query foreign_keys after SET OFF: %v", err)
+// ddlAssertPragmaStr queries a PRAGMA and checks the string result.
+func ddlAssertPragmaStr(t *testing.T, db *sql.DB, pragma, want string) {
+	t.Helper()
+	var got string
+	if err := db.QueryRow(pragma).Scan(&got); err != nil {
+		t.Fatalf("failed to query %s: %v", pragma, err)
 	}
-
-	if value != 0 {
-		t.Errorf("expected foreign_keys to be 0, got %d", value)
+	if got != want {
+		t.Errorf("%s = %q, want %q", pragma, got, want)
 	}
 }
 
@@ -226,44 +227,8 @@ func TestPragmaJournalMode(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Get initial value
-	var mode string
-	err = db.QueryRow("PRAGMA journal_mode").Scan(&mode)
-	if err != nil {
-		t.Fatalf("failed to query journal_mode: %v", err)
-	}
-
-	if mode != "delete" {
-		t.Errorf("expected initial journal_mode to be 'delete', got %q", mode)
-	}
-
-	// Set to WAL
-	err = db.QueryRow("PRAGMA journal_mode = WAL").Scan(&mode)
-	if err != nil {
-		t.Fatalf("failed to set journal_mode: %v", err)
-	}
-
-	if mode != "wal" {
-		t.Errorf("expected journal_mode to be 'wal', got %q", mode)
-	}
-
-	// Verify it persists
-	err = db.QueryRow("PRAGMA journal_mode").Scan(&mode)
-	if err != nil {
-		t.Fatalf("failed to query journal_mode after SET: %v", err)
-	}
-
-	if mode != "wal" {
-		t.Errorf("expected journal_mode to be 'wal', got %q", mode)
-	}
-
-	// Set to MEMORY
-	err = db.QueryRow("PRAGMA journal_mode = MEMORY").Scan(&mode)
-	if err != nil {
-		t.Fatalf("failed to set journal_mode to MEMORY: %v", err)
-	}
-
-	if mode != "memory" {
-		t.Errorf("expected journal_mode to be 'memory', got %q", mode)
-	}
+	ddlAssertPragmaStr(t, db, "PRAGMA journal_mode", "delete")
+	ddlAssertPragmaStr(t, db, "PRAGMA journal_mode = WAL", "wal")
+	ddlAssertPragmaStr(t, db, "PRAGMA journal_mode", "wal")
+	ddlAssertPragmaStr(t, db, "PRAGMA journal_mode = MEMORY", "memory")
 }

@@ -10,6 +10,54 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
 )
 
+func udfOpenDBConn(t *testing.T, prefix string) (*sql.DB, *sql.Conn) {
+	t.Helper()
+	tmpfile, err := os.CreateTemp("", prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(tmpfile.Name()) })
+	tmpfile.Close()
+	db, err := sql.Open(DriverName, tmpfile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return db, conn
+}
+
+func udfRegisterScalar(t *testing.T, conn *sql.Conn, name string, nArgs int, f functions.UserFunction) {
+	t.Helper()
+	err := conn.Raw(func(driverConn interface{}) error {
+		return driverConn.(*Conn).CreateScalarFunction(name, nArgs, true, f)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func udfRegisterAggregate(t *testing.T, conn *sql.Conn, name string, nArgs int, f functions.UserAggregateFunction) {
+	t.Helper()
+	err := conn.Raw(func(driverConn interface{}) error {
+		return driverConn.(*Conn).CreateAggregateFunction(name, nArgs, true, f)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func udfInsertValues(t *testing.T, db *sql.DB, table string, values []int) {
+	t.Helper()
+	for _, v := range values {
+		if _, err := db.Exec("INSERT INTO "+table+" VALUES (?)", v); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // Example user-defined scalar function: double
 type doubleFunc struct{}
 
@@ -104,57 +152,21 @@ func TestScalarFunctionBasic(t *testing.T) {
 // TestAggregateFunctionBasic tests creating and using an aggregate UDF
 func TestAggregateFunctionBasic(t *testing.T) {
 	t.Skip("UDF integration requires full VDBE function execution support")
-	// Create temporary database
-	tmpfile, err := os.CreateTemp("", "anthony_agg_test_*.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(tmpfile.Name())
-	tmpfile.Close()
-
-	// Open database
-	db, err := sql.Open(DriverName, tmpfile.Name())
-	if err != nil {
-		t.Fatalf("Error: %v", err)
-	}
+	db, conn := udfOpenDBConn(t, "anthony_agg_test_*.db")
 	defer db.Close()
-
-	// Get the underlying connection
-	conn, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatalf("Error: %v", err)
-	}
 	defer conn.Close()
 
-	// Register custom aggregate function
-	err = conn.Raw(func(driverConn interface{}) error {
-		driverConn2 := driverConn.(*Conn)
-		return driverConn2.CreateAggregateFunction("product", 1, true, &productFunc{})
-	})
-	if err != nil {
-		t.Fatalf("Error: %v", err)
-	}
+	udfRegisterAggregate(t, conn, "product", 1, &productFunc{})
 
-	// Create table and insert data
-	_, err = db.Exec("CREATE TABLE numbers (value INTEGER)")
-	if err != nil {
-		t.Fatalf("Error: %v", err)
+	if _, err := db.Exec("CREATE TABLE numbers (value INTEGER)"); err != nil {
+		t.Fatal(err)
 	}
+	udfInsertValues(t, db, "numbers", []int{2, 3, 4})
 
-	for _, v := range []int{2, 3, 4} {
-		_, err = db.Exec("INSERT INTO numbers (value) VALUES (?)", v)
-		if err != nil {
-			t.Fatalf("Error: %v", err)
-		}
-	}
-
-	// Use the custom aggregate function
 	var result int64
-	err = db.QueryRow("SELECT product(value) FROM numbers").Scan(&result)
-	if err != nil {
-		t.Fatalf("Error: %v", err)
+	if err := db.QueryRow("SELECT product(value) FROM numbers").Scan(&result); err != nil {
+		t.Fatal(err)
 	}
-
 	if result != 24 {
 		t.Errorf("Expected 24, got %d", result)
 	}
@@ -219,59 +231,21 @@ func TestUDFIntegration(t *testing.T) {
 
 func TestUDFAggregateIntegration(t *testing.T) {
 	t.Skip("UDF integration requires full VDBE function execution support")
-	// Create temporary database
-	tmpfile, err := os.CreateTemp("", "anthony_udf_agg_test_*.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(tmpfile.Name())
-	tmpfile.Close()
-
-	// Open database
-	db, err := sql.Open(DriverName, tmpfile.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
+	db, conn := udfOpenDBConn(t, "anthony_udf_agg_test_*.db")
 	defer db.Close()
-
-	// Get connection
-	conn, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer conn.Close()
 
-	// Register aggregate function
-	err = conn.Raw(func(driverConn interface{}) error {
-		driverConn2 := driverConn.(*Conn)
-		return driverConn2.CreateAggregateFunction("product", 1, true, &productFunc{})
-	})
-	if err != nil {
+	udfRegisterAggregate(t, conn, "product", 1, &productFunc{})
+
+	if _, err := db.Exec("CREATE TABLE test_values (num INTEGER)"); err != nil {
 		t.Fatal(err)
 	}
+	udfInsertValues(t, db, "test_values", []int{2, 3, 4, 5})
 
-	// Create table
-	_, err = db.Exec("CREATE TABLE test_values (num INTEGER)")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Insert test data
-	values := []int{2, 3, 4, 5}
-	for _, v := range values {
-		_, err = db.Exec("INSERT INTO test_values (num) VALUES (?)", v)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Test aggregate function
 	var result int64
-	err = db.QueryRow("SELECT product(num) FROM test_values").Scan(&result)
-	if err != nil {
+	if err := db.QueryRow("SELECT product(num) FROM test_values").Scan(&result); err != nil {
 		t.Fatal(err)
 	}
-
 	expected := int64(2 * 3 * 4 * 5)
 	if result != expected {
 		t.Errorf("Expected %d, got %d", expected, result)
@@ -281,68 +255,25 @@ func TestUDFAggregateIntegration(t *testing.T) {
 // Test function overloading
 func TestUDFOverloading(t *testing.T) {
 	t.Skip("UDF integration requires full VDBE function execution support")
-	// Create temporary database
-	tmpfile, err := os.CreateTemp("", "anthony_udf_overload_test_*.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(tmpfile.Name())
-	tmpfile.Close()
-
-	// Open database
-	db, err := sql.Open(DriverName, tmpfile.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
+	db, conn := udfOpenDBConn(t, "anthony_udf_overload_test_*.db")
 	defer db.Close()
-
-	// Get connection
-	conn, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer conn.Close()
 
-	// Register "add1" function with 1 arg
-	add1 := &add1Func{}
+	udfRegisterScalar(t, conn, "add", 1, &add1Func{})
+	udfRegisterScalar(t, conn, "add", 2, &add2Func{})
 
-	err = conn.Raw(func(driverConn interface{}) error {
-		driverConn2 := driverConn.(*Conn)
-		return driverConn2.CreateScalarFunction("add", 1, true, add1)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Register "add2" function with 2 args
-	add2 := &add2Func{}
-
-	err = conn.Raw(func(driverConn interface{}) error {
-		driverConn2 := driverConn.(*Conn)
-		return driverConn2.CreateScalarFunction("add", 2, true, add2)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Test 1-arg version
 	var result1 int64
-	err = db.QueryRow("SELECT add(5)").Scan(&result1)
-	if err != nil {
+	if err := db.QueryRow("SELECT add(5)").Scan(&result1); err != nil {
 		t.Fatal(err)
 	}
-
 	if result1 != 6 {
 		t.Errorf("Expected 6, got %d", result1)
 	}
 
-	// Test 2-arg version
 	var result2 int64
-	err = db.QueryRow("SELECT add(3, 4)").Scan(&result2)
-	if err != nil {
+	if err := db.QueryRow("SELECT add(3, 4)").Scan(&result2); err != nil {
 		t.Fatal(err)
 	}
-
 	if result2 != 7 {
 		t.Errorf("Expected 7, got %d", result2)
 	}
@@ -365,67 +296,40 @@ func (f *add2Func) Invoke(args []functions.Value) (functions.Value, error) {
 // Test unregistering functions
 func TestUDFUnregister(t *testing.T) {
 	t.Skip("UDF integration requires full VDBE function execution support")
-	// Create temporary database
-	tmpfile, err := os.CreateTemp("", "anthony_udf_unreg_test_*.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(tmpfile.Name())
-	tmpfile.Close()
-
-	// Open database
-	db, err := sql.Open(DriverName, tmpfile.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
+	db, conn := udfOpenDBConn(t, "anthony_udf_unreg_test_*.db")
 	defer db.Close()
-
-	// Get connection
-	conn, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer conn.Close()
 
-	// Register function
-	err = conn.Raw(func(driverConn interface{}) error {
-		driverConn2 := driverConn.(*Conn)
-		return driverConn2.CreateScalarFunction("double", 1, true, &doubleFunc{})
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	udfRegisterScalar(t, conn, "double", 1, &doubleFunc{})
 
-	// Verify it works
 	var result int64
-	err = db.QueryRow("SELECT double(10)").Scan(&result)
-	if err != nil {
+	if err := db.QueryRow("SELECT double(10)").Scan(&result); err != nil {
 		t.Fatal(err)
 	}
-
 	if result != 20 {
 		t.Errorf("Expected 20, got %d", result)
 	}
 
-	// Unregister it
+	removed := udfUnregister(t, conn, "double", 1)
+	if !removed {
+		t.Error("Expected function to be removed")
+	}
+
+	err := db.QueryRow("SELECT double(10)").Scan(&result)
+	if err == nil {
+		t.Error("Expected error after unregistering function")
+	}
+}
+
+func udfUnregister(t *testing.T, conn *sql.Conn, name string, nArgs int) bool {
+	t.Helper()
 	var removed bool
-	err = conn.Raw(func(driverConn interface{}) error {
-		driverConn2 := driverConn.(*Conn)
-		removed = driverConn2.UnregisterFunction("double", 1)
+	err := conn.Raw(func(driverConn interface{}) error {
+		removed = driverConn.(*Conn).UnregisterFunction(name, nArgs)
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if !removed {
-		t.Error("Expected function to be removed")
-	}
-
-	// Verify it no longer works (should fail during execution)
-	// The function won't be found, so this should error
-	err = db.QueryRow("SELECT double(10)").Scan(&result)
-	if err == nil {
-		t.Error("Expected error after unregistering function")
-	}
+	return removed
 }

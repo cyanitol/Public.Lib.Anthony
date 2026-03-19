@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,8 +27,18 @@ type CachedPlan struct {
 	Plan          *WhereInfo
 	SchemaVersion uint32
 	CreatedAt     time.Time
-	LastUsed      time.Time
-	HitCount      int64
+	lastUsed      atomic.Int64 // unix nano
+	hitCount      atomic.Int64
+}
+
+// LastUsed returns the last time this plan was used.
+func (p *CachedPlan) LastUsed() time.Time {
+	return time.Unix(0, p.lastUsed.Load())
+}
+
+// HitCount returns the number of cache hits for this plan.
+func (p *CachedPlan) HitCount() int64 {
+	return p.hitCount.Load()
 }
 
 // CacheStats tracks cache performance metrics.
@@ -60,8 +71,8 @@ func hashSQL(sql string) string {
 // Get retrieves a cached plan for the given SQL query.
 // Returns the cached plan and true if found and valid, nil and false otherwise.
 func (c *PlanCache) Get(sql string) (*WhereInfo, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	hash := hashSQL(sql)
 	cached, exists := c.plans[hash]
@@ -79,8 +90,8 @@ func (c *PlanCache) Get(sql string) (*WhereInfo, bool) {
 
 	// Update statistics
 	c.stats.Hits++
-	cached.LastUsed = time.Now()
-	cached.HitCount++
+	cached.lastUsed.Store(time.Now().UnixNano())
+	cached.hitCount.Add(1)
 
 	return cached.Plan, true
 }
@@ -99,15 +110,15 @@ func (c *PlanCache) Put(sql string, plan *WhereInfo) {
 	}
 
 	now := time.Now()
-	c.plans[hash] = &CachedPlan{
+	entry := &CachedPlan{
 		SQL:           sql,
 		Hash:          hash,
 		Plan:          plan,
 		SchemaVersion: c.schemaVersion,
 		CreatedAt:     now,
-		LastUsed:      now,
-		HitCount:      0,
 	}
+	entry.lastUsed.Store(now.UnixNano())
+	c.plans[hash] = entry
 
 	c.stats.Size = len(c.plans)
 }
@@ -120,9 +131,10 @@ func (c *PlanCache) evictLRU() {
 	first := true
 
 	for hash, cached := range c.plans {
-		if first || cached.LastUsed.Before(oldestTime) {
+		lu := cached.LastUsed()
+		if first || lu.Before(oldestTime) {
 			oldestHash = hash
-			oldestTime = cached.LastUsed
+			oldestTime = lu
 			first = false
 		}
 	}

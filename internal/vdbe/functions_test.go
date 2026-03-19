@@ -2,6 +2,7 @@
 package vdbe
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
@@ -250,62 +251,60 @@ func TestAggregateFunctions(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			fc := NewFunctionContext()
-
-			// Look up the aggregate function
-			// Use LookupBuiltin for min/max since scalar versions have priority in Lookup
-			var fn functions.Function
-			var ok bool
-			if tt.funcName == "min" || tt.funcName == "max" {
-				fn, ok = fc.registry.LookupBuiltin(tt.funcName)
-			} else {
-				fn, ok = fc.registry.Lookup(tt.funcName)
+			aggFn := lookupAggregateFunc(t, tt.funcName)
+			if runAggregateSteps(t, aggFn, tt.rows, tt.wantErr) {
+				return
 			}
-			if !ok {
-				t.Fatalf("Function %s not found", tt.funcName)
-			}
-
-			aggFn, ok := fn.(functions.AggregateFunction)
-			if !ok {
-				t.Fatalf("Function %s is not an aggregate function", tt.funcName)
-			}
-
-			// Create a fresh instance
-			aggFn = createAggregateInstance(aggFn)
-
-			// Execute step for each row
-			for _, row := range tt.rows {
-				values := make([]functions.Value, len(row))
-				for i, mem := range row {
-					values[i] = memToValue(mem)
-				}
-
-				err := aggFn.Step(values)
-				if err != nil {
-					if !tt.wantErr {
-						t.Fatalf("Step() error = %v", err)
-					}
-					return
-				}
-			}
-
-			// Finalize
 			result, err := aggFn.Final()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Final() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-
 			if err != nil {
 				return
 			}
-
-			got := valueToMem(result)
-			if !memEqual(got, tt.want) {
+			if got := valueToMem(result); !memEqual(got, tt.want) {
 				t.Errorf("Final() = %v, want %v", got, tt.want)
 			}
 		})
 	}
+}
+
+func lookupAggregateFunc(t *testing.T, funcName string) functions.AggregateFunction {
+	t.Helper()
+	fc := NewFunctionContext()
+	var fn functions.Function
+	var ok bool
+	if funcName == "min" || funcName == "max" {
+		fn, ok = fc.registry.LookupBuiltin(funcName)
+	} else {
+		fn, ok = fc.registry.Lookup(funcName)
+	}
+	if !ok {
+		t.Fatalf("Function %s not found", funcName)
+	}
+	aggFn, ok := fn.(functions.AggregateFunction)
+	if !ok {
+		t.Fatalf("Function %s is not an aggregate function", funcName)
+	}
+	return createAggregateInstance(aggFn)
+}
+
+func runAggregateSteps(t *testing.T, aggFn functions.AggregateFunction, rows [][]*Mem, wantErr bool) bool {
+	t.Helper()
+	for _, row := range rows {
+		values := make([]functions.Value, len(row))
+		for i, mem := range row {
+			values[i] = memToValue(mem)
+		}
+		if err := aggFn.Step(values); err != nil {
+			if !wantErr {
+				t.Fatalf("Step() error = %v", err)
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // TestOPFunction tests the OP_Function opcode
@@ -494,7 +493,10 @@ func memEqual(a, b *Mem) bool {
 	if a.IsNull() || b.IsNull() {
 		return false
 	}
+	return memEqualNonNull(a, b)
+}
 
+func memEqualNonNull(a, b *Mem) bool {
 	if a.IsInt() && b.IsInt() {
 		return a.IntValue() == b.IntValue()
 	}
@@ -505,18 +507,7 @@ func memEqual(a, b *Mem) bool {
 		return a.StrValue() == b.StrValue()
 	}
 	if a.IsBlob() && b.IsBlob() {
-		aBlob := a.BlobValue()
-		bBlob := b.BlobValue()
-		if len(aBlob) != len(bBlob) {
-			return false
-		}
-		for i := range aBlob {
-			if aBlob[i] != bBlob[i] {
-				return false
-			}
-		}
-		return true
+		return bytes.Equal(a.BlobValue(), b.BlobValue())
 	}
-
 	return false
 }

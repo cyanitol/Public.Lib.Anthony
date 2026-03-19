@@ -176,62 +176,17 @@ func TestPagerRollbackJournal(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_rollback_journal.db")
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-
-	// Write and commit initial data
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write: %v", err)
-	}
-
-	originalData := []byte("ORIGINAL")
-	copy(page.Data[DatabaseHeaderSize:DatabaseHeaderSize+len(originalData)], originalData)
-	pager.Put(page)
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Start new transaction and modify
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write: %v", err)
-	}
-
-	modifiedData := []byte("MODIFIED")
-	copy(page.Data[DatabaseHeaderSize:DatabaseHeaderSize+len(modifiedData)], modifiedData)
-	pager.Put(page)
-
-	// Rollback
-	if err := pager.Rollback(); err != nil {
-		t.Fatalf("failed to rollback: %v", err)
-	}
-
-	pager.Close()
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	mustPagerWriteCommitRollbackVerify(t, p, []byte("ORIGINAL"), []byte("MODIFIED"))
+	p.Close()
 
 	// Reopen and verify data was restored
-	pager, err = Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to reopen: %v", err)
-	}
-	defer pager.Close()
+	p = openTestPagerAt(t, dbFile, false)
+	defer p.Close()
 
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-	defer pager.Put(page)
+	originalData := []byte("ORIGINAL")
+	page := mustGetPage(t, p, 1)
+	defer p.Put(page)
 
 	readData := string(page.Data[DatabaseHeaderSize : DatabaseHeaderSize+len(originalData)])
 	if readData != string(originalData) {
@@ -277,58 +232,15 @@ func TestPagerUpdateDatabaseHeader(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_update_header.db")
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-
-	// Make a change and commit
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write: %v", err)
-	}
-
-	// Modify the data so the page is actually dirty
-	page.Data[DatabaseHeaderSize] = 0xAB
-	pager.Put(page)
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	initialCounter := pager.GetHeader().FileChangeCounter
-
-	// Make another change
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write: %v", err)
-	}
-
-	page.Data[DatabaseHeaderSize] = 0xCD
-	pager.Put(page)
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	pager.Close()
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	initialCounter := mustPagerWriteAndCommitTwoRounds(t, p)
+	p.Close()
 
 	// Reopen and check counter was incremented
-	pager, err = Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to reopen: %v", err)
-	}
-	defer pager.Close()
+	p = openTestPagerAt(t, dbFile, false)
+	defer p.Close()
 
-	newCounter := pager.GetHeader().FileChangeCounter
+	newCounter := p.GetHeader().FileChangeCounter
 	if newCounter <= initialCounter {
 		t.Logf("Change counter: was %d, now %d (may not increment in all cases)", initialCounter, newCounter)
 	}
@@ -337,37 +249,13 @@ func TestPagerUpdateDatabaseHeader(t *testing.T) {
 // TestFreeListAllocateFromDisk tests allocation from disk-based freelist
 func TestFreeListAllocateFromDisk(t *testing.T) {
 	t.Parallel()
-	pager, cleanup := createTestPagerForFreeList(t)
+	p, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
-	fl := NewFreeList(pager)
-
-	// Create many pages
-	for i := Pgno(2); i <= 100; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
-		pager.Put(page)
-	}
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Free many pages
-	for i := Pgno(50); i <= 90; i++ {
-		if err := fl.Free(i); err != nil {
-			t.Fatalf("failed to free page %d: %v", i, err)
-		}
-	}
-
-	// Flush to create disk-based structure
-	if err := fl.Flush(); err != nil {
-		t.Fatalf("failed to flush: %v", err)
-	}
+	fl := NewFreeList(p)
+	mustCreateWritePages(t, p, 2, 100)
+	mustFreePages(t, fl, 50, 90)
+	mustFlush(t, fl)
 
 	// Now allocate - should come from disk
 	for i := 0; i < 10; i++ {
@@ -384,42 +272,18 @@ func TestFreeListAllocateFromDisk(t *testing.T) {
 // TestFreeListCreateNewTrunk tests creating new trunk pages
 func TestFreeListCreateNewTrunk(t *testing.T) {
 	t.Parallel()
-	pager, cleanup := createTestPagerForFreeList(t)
+	p, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
-	fl := NewFreeList(pager)
-	fl.maxPending = 5 // Small threshold to trigger trunk creation
+	fl := NewFreeList(p)
+	fl.maxPending = 5
 
-	// Create pages
-	for i := Pgno(2); i <= 50; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
-		pager.Put(page)
-	}
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
+	mustCreateWritePages(t, p, 2, 50)
+	mustFreePages(t, fl, 10, 40)
 
-	// Free many pages to trigger trunk creation
-	for i := Pgno(10); i <= 40; i++ {
-		if err := fl.Free(i); err != nil {
-			t.Fatalf("failed to free page %d: %v", i, err)
-		}
-	}
-
-	// Should have created trunk pages
 	if fl.GetFirstTrunk() == 0 {
-		// Flush to ensure trunk is created
-		if err := fl.Flush(); err != nil {
-			t.Fatalf("failed to flush: %v", err)
-		}
+		mustFlush(t, fl)
 	}
-
 	if fl.GetFirstTrunk() == 0 {
 		t.Error("expected non-zero first trunk after freeing many pages")
 	}

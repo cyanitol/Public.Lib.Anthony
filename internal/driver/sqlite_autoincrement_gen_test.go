@@ -235,42 +235,25 @@ func TestAutoincrementGenOrderByThreeColMixed(t *testing.T) {
 
 // TestAutoincrementGenOrderByLargeDataset tests ORDER BY DESC merge correctness
 // with enough rows to potentially trigger sorter spill.
-func TestAutoincrementGenOrderByLargeDataset(t *testing.T) {
-	db := setupMemoryDB(t)
-	defer db.Close()
-
-	execSQL(t, db, "CREATE TABLE t1(a INTEGER, b INTEGER)")
-
-	// Insert 200 rows with varying values
-	for i := 0; i < 200; i++ {
-		mustExec(t, db, "INSERT INTO t1 VALUES(?, ?)", i%10, i)
-	}
-
-	got := queryRows(t, db, "SELECT a, b FROM t1 ORDER BY a ASC, b DESC")
-
-	if len(got) != 200 {
-		t.Fatalf("expected 200 rows, got %d", len(got))
-	}
-
-	// Verify ordering: a should be non-decreasing; within same a, b should be
-	// strictly decreasing.
+// autoincGenVerifyOrdering checks that rows are sorted by a ASC, b DESC.
+func autoincGenVerifyOrdering(t *testing.T, got [][]interface{}) {
+	t.Helper()
 	for i := 1; i < len(got); i++ {
-		prevA := got[i-1][0].(int64)
-		currA := got[i][0].(int64)
-		prevB := got[i-1][1].(int64)
-		currB := got[i][1].(int64)
-
+		prevA, currA := got[i-1][0].(int64), got[i][0].(int64)
+		prevB, currB := got[i-1][1].(int64), got[i][1].(int64)
 		if currA < prevA {
 			t.Fatalf("row %d: a decreased from %d to %d", i, prevA, currA)
 		}
 		if currA == prevA && currB >= prevB {
-			t.Fatalf("row %d: within a=%d, b did not decrease: %d >= %d",
-				i, currA, currB, prevB)
+			t.Fatalf("row %d: within a=%d, b did not decrease: %d >= %d", i, currA, currB, prevB)
 		}
 	}
+}
 
-	// Spot-check: first group (a=0) should have b values 190, 180, ..., 0
-	firstGroup := []int64{}
+// autoincGenSpotCheck checks the first group (a=0) b values.
+func autoincGenSpotCheck(t *testing.T, got [][]interface{}) {
+	t.Helper()
+	var firstGroup []int64
 	for _, row := range got {
 		if row[0].(int64) == 0 {
 			firstGroup = append(firstGroup, row[1].(int64))
@@ -285,6 +268,24 @@ func TestAutoincrementGenOrderByLargeDataset(t *testing.T) {
 			t.Fatalf("a=0, position %d: got b=%d, want %d", i, b, expected)
 		}
 	}
+}
+
+func TestAutoincrementGenOrderByLargeDataset(t *testing.T) {
+	db := setupMemoryDB(t)
+	defer db.Close()
+
+	execSQL(t, db, "CREATE TABLE t1(a INTEGER, b INTEGER)")
+	for i := 0; i < 200; i++ {
+		mustExec(t, db, "INSERT INTO t1 VALUES(?, ?)", i%10, i)
+	}
+
+	got := queryRows(t, db, "SELECT a, b FROM t1 ORDER BY a ASC, b DESC")
+	if len(got) != 200 {
+		t.Fatalf("expected 200 rows, got %d", len(got))
+	}
+
+	autoincGenVerifyOrdering(t, got)
+	autoincGenSpotCheck(t, got)
 }
 
 // TestAutoincrementGenOrderByDescLargeSpill tests ORDER BY DESC with a large
@@ -314,4 +315,3 @@ func TestAutoincrementGenOrderByDescLargeSpill(t *testing.T) {
 		}
 	}
 }
-

@@ -31,7 +31,6 @@ func TestCreateTable(t *testing.T) {
 	t.Parallel()
 	s := NewSchema()
 
-	// Create a simple table
 	stmt := &parser.CreateTableStmt{
 		Name: "users",
 		Columns: []parser.ColumnDef{
@@ -49,10 +48,7 @@ func TestCreateTable(t *testing.T) {
 					{Type: parser.ConstraintNotNull},
 				},
 			},
-			{
-				Name: "age",
-				Type: "INTEGER",
-			},
+			{Name: "age", Type: "INTEGER"},
 		},
 	}
 
@@ -64,45 +60,54 @@ func TestCreateTable(t *testing.T) {
 	if table.Name != "users" {
 		t.Errorf("table.Name = %q, want %q", table.Name, "users")
 	}
-
 	if len(table.Columns) != 3 {
 		t.Fatalf("table has %d columns, want 3", len(table.Columns))
 	}
 
-	// Check id column
-	if table.Columns[0].Name != "id" {
-		t.Errorf("column 0 name = %q, want %q", table.Columns[0].Name, "id")
-	}
-	if table.Columns[0].Type != "INTEGER" {
-		t.Errorf("column 0 type = %q, want %q", table.Columns[0].Type, "INTEGER")
-	}
-	if table.Columns[0].Affinity != AffinityInteger {
-		t.Errorf("column 0 affinity = %v, want INTEGER", table.Columns[0].Affinity)
-	}
-	if !table.Columns[0].PrimaryKey {
-		t.Error("column 0 should be primary key")
-	}
+	t.Run("id_column", func(t *testing.T) { testCreateTableIDColumn(t, table) })
+	t.Run("name_column", func(t *testing.T) { testCreateTableNameColumn(t, table) })
+	t.Run("primary_key_and_schema", func(t *testing.T) { testCreateTablePKAndSchema(t, table, s) })
+}
 
-	// Check name column
-	if table.Columns[1].Name != "name" {
-		t.Errorf("column 1 name = %q, want %q", table.Columns[1].Name, "name")
+func testCreateTableIDColumn(t *testing.T, table *Table) {
+	t.Helper()
+	col := table.Columns[0]
+	if col.Name != "id" {
+		t.Errorf("name = %q, want %q", col.Name, "id")
 	}
-	if !table.Columns[1].NotNull {
-		t.Error("column 1 should be NOT NULL")
+	if col.Type != "INTEGER" {
+		t.Errorf("type = %q, want %q", col.Type, "INTEGER")
 	}
-	if table.Columns[1].Affinity != AffinityText {
-		t.Errorf("column 1 affinity = %v, want TEXT", table.Columns[1].Affinity)
+	if col.Affinity != AffinityInteger {
+		t.Errorf("affinity = %v, want INTEGER", col.Affinity)
 	}
+	if !col.PrimaryKey {
+		t.Error("should be primary key")
+	}
+}
 
-	// Check primary key
+func testCreateTableNameColumn(t *testing.T, table *Table) {
+	t.Helper()
+	col := table.Columns[1]
+	if col.Name != "name" {
+		t.Errorf("name = %q, want %q", col.Name, "name")
+	}
+	if !col.NotNull {
+		t.Error("should be NOT NULL")
+	}
+	if col.Affinity != AffinityText {
+		t.Errorf("affinity = %v, want TEXT", col.Affinity)
+	}
+}
+
+func testCreateTablePKAndSchema(t *testing.T, table *Table, s *Schema) {
+	t.Helper()
 	if len(table.PrimaryKey) != 1 {
 		t.Fatalf("table has %d primary key columns, want 1", len(table.PrimaryKey))
 	}
 	if table.PrimaryKey[0] != "id" {
 		t.Errorf("primary key = %q, want %q", table.PrimaryKey[0], "id")
 	}
-
-	// Verify table is in schema
 	if _, ok := s.GetTable("users"); !ok {
 		t.Error("table not found in schema")
 	}

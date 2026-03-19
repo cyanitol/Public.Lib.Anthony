@@ -2,6 +2,7 @@
 package driver
 
 import (
+	"database/sql"
 	"testing"
 )
 
@@ -751,68 +752,67 @@ func TestSQLiteViewCreateIfNotExists(t *testing.T) {
 	}
 }
 
-// TestSQLiteViewTableDrop tests that dropping a table affects dependent views
-func TestSQLiteViewTableDrop(t *testing.T) {
-	t.Skip("pre-existing failure")
-	db := setupMemoryDB(t)
-	defer db.Close()
+// viewTableDropSetup creates initial table, data, and view then drops the table.
+func viewTableDropSetup(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, stmt := range []string{
+		"CREATE TABLE t1(a,b,c)",
+		"INSERT INTO t1 VALUES(1,2,3)",
+		"CREATE VIEW v1 AS SELECT a,b FROM t1",
+		"DROP TABLE t1",
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec %q failed: %v", stmt, err)
+		}
+	}
+}
 
-	// view-1.6, view-1.7: Drop table, recreate with different schema
-	_, err := db.Exec("CREATE TABLE t1(a,b,c)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
+// viewTableDropVerify recreates the table with different schema and checks the view.
+func viewTableDropVerify(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, stmt := range []string{
+		"CREATE TABLE t1(x,a,b,c)",
+		"INSERT INTO t1 VALUES(1,2,3,4)",
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec %q failed: %v", stmt, err)
+		}
 	}
 
-	_, err = db.Exec("INSERT INTO t1 VALUES(1,2,3)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	_, err = db.Exec("CREATE VIEW v1 AS SELECT a,b FROM t1")
-	if err != nil {
-		t.Fatalf("CREATE VIEW failed: %v", err)
-	}
-
-	_, err = db.Exec("DROP TABLE t1")
-	if err != nil {
-		t.Fatalf("DROP TABLE failed: %v", err)
-	}
-
-	// View still exists but querying should fail
-	_, err = db.Query("SELECT * FROM v1")
-	if err == nil {
-		t.Error("Expected error querying view after table drop")
-	}
-
-	// Recreate table with different schema
-	_, err = db.Exec("CREATE TABLE t1(x,a,b,c)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE (2nd) failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t1 VALUES(1,2,3,4)")
-	if err != nil {
-		t.Fatalf("INSERT (2nd) failed: %v", err)
-	}
-
-	// Now the view should work with new schema
 	rows, err := db.Query("SELECT * FROM v1 ORDER BY a")
 	if err != nil {
 		t.Fatalf("SELECT from view failed: %v", err)
 	}
 	defer rows.Close()
 
-	if rows.Next() {
-		var a, b int64
-		if err := rows.Scan(&a, &b); err != nil {
-			t.Fatalf("Scan failed: %v", err)
-		}
-		if a != 2 || b != 3 {
-			t.Errorf("Expected a=2, b=3, got a=%d, b=%d", a, b)
-		}
-	} else {
+	if !rows.Next() {
 		t.Error("Expected at least one row")
+		return
 	}
+	var a, b int64
+	if err := rows.Scan(&a, &b); err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+	if a != 2 || b != 3 {
+		t.Errorf("Expected a=2, b=3, got a=%d, b=%d", a, b)
+	}
+}
+
+// TestSQLiteViewTableDrop tests that dropping a table affects dependent views
+func TestSQLiteViewTableDrop(t *testing.T) {
+	t.Skip("pre-existing failure")
+	db := setupMemoryDB(t)
+	defer db.Close()
+
+	viewTableDropSetup(t, db)
+
+	// View still exists but querying should fail
+	_, err := db.Query("SELECT * FROM v1")
+	if err == nil {
+		t.Error("Expected error querying view after table drop")
+	}
+
+	viewTableDropVerify(t, db)
 }
 
 // Helper function to check if a string contains a substring

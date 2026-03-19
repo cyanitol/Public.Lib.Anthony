@@ -7,44 +7,40 @@ import (
 	"testing"
 )
 
-// TestCTEBasic tests basic Common Table Expressions
-func TestCTEBasic(t *testing.T) {
-	dbFile := "test_cte_basic.db"
-	defer os.Remove(dbFile)
-
+// cteOpenDB opens a DB and returns it with the given file.
+func cteOpenDB(t *testing.T, dbFile string) *sql.DB {
+	t.Helper()
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	return db
+}
 
-	_, err = db.Exec("CREATE TABLE numbers (value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	for i := 1; i <= 5; i++ {
-		_, err = db.Exec("INSERT INTO numbers VALUES (?)", i)
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
+// cteExecMulti executes multiple statements on a db.
+func cteExecMulti(t *testing.T, db *sql.DB, stmts ...string) {
+	t.Helper()
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("%s failed: %v", s, err)
 		}
 	}
+}
 
-	// Test simple CTE
-	rows, err := db.Query("WITH doubled AS (SELECT value * 2 AS val FROM numbers) SELECT val FROM doubled")
+// cteAssertIntRows queries and checks that integer results match expected.
+func cteAssertIntRows(t *testing.T, db *sql.DB, query string, expected []int) {
+	t.Helper()
+	rows, err := db.Query(query)
 	if err != nil {
-		t.Logf("Simple CTE: %v", err)
-		// CTEs may not be fully implemented
+		t.Logf("Query: %v", err)
 		return
 	}
 	defer rows.Close()
 
-	expected := []int{2, 4, 6, 8, 10}
 	i := 0
 	for rows.Next() {
 		var val int
-		err = rows.Scan(&val)
-		if err != nil {
+		if err = rows.Scan(&val); err != nil {
 			t.Errorf("Scan failed: %v", err)
 		}
 		if i < len(expected) && val != expected[i] {
@@ -52,16 +48,31 @@ func TestCTEBasic(t *testing.T) {
 		}
 		i++
 	}
-
 	if i != len(expected) {
 		t.Errorf("Got %d rows, want %d", i, len(expected))
 	}
 }
 
+// TestCTEBasic tests basic Common Table Expressions
+func TestCTEBasic(t *testing.T) {
+	dbFile := t.TempDir() + "/test_cte_basic.db"
+
+	db := cteOpenDB(t, dbFile)
+	defer db.Close()
+
+	cteExecMulti(t, db, "CREATE TABLE numbers (value INTEGER)")
+	for i := 1; i <= 5; i++ {
+		if _, err := db.Exec("INSERT INTO numbers VALUES (?)", i); err != nil {
+			t.Fatalf("INSERT failed: %v", err)
+		}
+	}
+
+	cteAssertIntRows(t, db, "WITH doubled AS (SELECT value * 2 AS val FROM numbers) SELECT val FROM doubled", []int{2, 4, 6, 8, 10})
+}
+
 // TestCTEMultiple tests multiple CTEs
 func TestCTEMultiple(t *testing.T) {
-	dbFile := "test_cte_multiple.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_cte_multiple.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -104,8 +115,7 @@ func TestCTEMultiple(t *testing.T) {
 
 // TestRecursiveCTE tests recursive Common Table Expressions
 func TestRecursiveCTE(t *testing.T) {
-	dbFile := "test_recursive_cte.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_recursive_cte.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -153,8 +163,7 @@ func TestRecursiveCTE(t *testing.T) {
 // TestCTEWithAggregate tests CTE with aggregate functions
 func TestCTEWithAggregate(t *testing.T) {
 	// t.Skip("pre-existing failure - CTE with GROUP BY aggregate not yet implemented")
-	dbFile := "test_cte_agg.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_cte_agg.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -202,8 +211,7 @@ func TestCTEWithAggregate(t *testing.T) {
 
 // TestCTERewrite tests CTE table rewriting
 func TestCTERewrite(t *testing.T) {
-	dbFile := "test_cte_rewrite.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_cte_rewrite.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -235,6 +243,17 @@ func TestCTERewrite(t *testing.T) {
 	}
 }
 
+// cteSetupAttachDB creates and populates the database to be attached.
+func cteSetupAttachDB(t *testing.T, attachDBPath string) {
+	t.Helper()
+	otherDB := cteOpenDB(t, attachDBPath)
+	cteExecMulti(t, otherDB,
+		"CREATE TABLE other_table (id INTEGER, value TEXT)",
+		"INSERT INTO other_table VALUES (1, 'attached')",
+	)
+	otherDB.Close()
+}
+
 // TestAttachDatabase tests ATTACH DATABASE statement
 func TestAttachDatabase(t *testing.T) {
 	t.Skip("ATTACH not implemented")
@@ -243,73 +262,36 @@ func TestAttachDatabase(t *testing.T) {
 	defer os.Remove(mainDB)
 	defer os.Remove(attachDB)
 
-	// Create and populate the database to attach
-	otherDB, err := sql.Open(DriverName, attachDB)
-	if err != nil {
-		t.Fatalf("failed to create other database: %v", err)
-	}
+	cteSetupAttachDB(t, attachDB)
 
-	_, err = otherDB.Exec("CREATE TABLE other_table (id INTEGER, value TEXT)")
-	if err != nil {
-		otherDB.Close()
-		t.Fatalf("CREATE TABLE in other db failed: %v", err)
-	}
-
-	_, err = otherDB.Exec("INSERT INTO other_table VALUES (1, 'attached')")
-	if err != nil {
-		otherDB.Close()
-		t.Fatalf("INSERT in other db failed: %v", err)
-	}
-	otherDB.Close()
-
-	// Open main database
-	db, err := sql.Open(DriverName, mainDB)
-	if err != nil {
-		t.Fatalf("failed to open main database: %v", err)
-	}
+	db := cteOpenDB(t, mainDB)
 	defer db.Close()
+	cteExecMulti(t, db, "CREATE TABLE main_table (id INTEGER)")
 
-	_, err = db.Exec("CREATE TABLE main_table (id INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE in main db failed: %v", err)
-	}
-
-	// Test ATTACH DATABASE
-	_, err = db.Exec("ATTACH DATABASE '" + attachDB + "' AS other")
-	if err != nil {
+	if _, err := db.Exec("ATTACH DATABASE '" + attachDB + "' AS other"); err != nil {
 		t.Logf("ATTACH DATABASE: %v", err)
-		// ATTACH may not be fully implemented
 		return
 	}
 
-	// Query attached database
 	var value string
-	err = db.QueryRow("SELECT value FROM other.other_table WHERE id = 1").Scan(&value)
-	if err != nil {
+	if err := db.QueryRow("SELECT value FROM other.other_table WHERE id = 1").Scan(&value); err != nil {
 		t.Fatalf("SELECT from attached db failed: %v", err)
 	}
-
 	if value != "attached" {
 		t.Errorf("value = %s, want 'attached'", value)
 	}
 
-	// Test DETACH DATABASE
-	_, err = db.Exec("DETACH DATABASE other")
-	if err != nil {
+	if _, err := db.Exec("DETACH DATABASE other"); err != nil {
 		t.Errorf("DETACH DATABASE failed: %v", err)
 	}
-
-	// Verify detached
-	err = db.QueryRow("SELECT value FROM other.other_table WHERE id = 1").Scan(&value)
-	if err == nil {
+	if err := db.QueryRow("SELECT value FROM other.other_table WHERE id = 1").Scan(&value); err == nil {
 		t.Error("Expected error querying detached database, got nil")
 	}
 }
 
 // TestDetachDatabase tests DETACH without prior ATTACH
 func TestDetachDatabase(t *testing.T) {
-	dbFile := "test_detach.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_detach.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -387,8 +369,7 @@ func TestAttachWithAlias(t *testing.T) {
 
 // TestCTEColumnAliases tests CTE with column aliases
 func TestCTEColumnAliases(t *testing.T) {
-	dbFile := "test_cte_aliases.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_cte_aliases.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -428,60 +409,25 @@ func TestCTEColumnAliases(t *testing.T) {
 
 // TestNestedCTE tests nested CTE references
 func TestNestedCTE(t *testing.T) {
-	dbFile := "test_nested_cte.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_nested_cte.db"
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := cteOpenDB(t, dbFile)
 	defer db.Close()
 
-	_, err = db.Exec("CREATE TABLE nums (n INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
+	cteExecMulti(t, db, "CREATE TABLE nums (n INTEGER)")
 	for i := 1; i <= 3; i++ {
-		_, err = db.Exec("INSERT INTO nums VALUES (?)", i)
-		if err != nil {
+		if _, err := db.Exec("INSERT INTO nums VALUES (?)", i); err != nil {
 			t.Fatalf("INSERT failed: %v", err)
 		}
 	}
 
-	// Nested CTEs (one CTE referencing another)
-	query := `
-		WITH cte1 AS (SELECT n FROM nums),
-		     cte2 AS (SELECT n * 2 AS doubled FROM cte1)
-		SELECT doubled FROM cte2
-	`
-
-	rows, err := db.Query(query)
-	if err != nil {
-		t.Logf("Nested CTE: %v", err)
-		return
-	}
-	defer rows.Close()
-
-	expected := []int{2, 4, 6}
-	i := 0
-	for rows.Next() {
-		var doubled int
-		err = rows.Scan(&doubled)
-		if err != nil {
-			t.Errorf("Scan failed: %v", err)
-		}
-		if i < len(expected) && doubled != expected[i] {
-			t.Errorf("Row %d: doubled = %d, want %d", i, doubled, expected[i])
-		}
-		i++
-	}
+	query := `WITH cte1 AS (SELECT n FROM nums), cte2 AS (SELECT n * 2 AS doubled FROM cte1) SELECT doubled FROM cte2`
+	cteAssertIntRows(t, db, query, []int{2, 4, 6})
 }
 
 // TestRecursiveCTEComplexTermination tests recursive CTE termination
 func TestRecursiveCTEComplexTermination(t *testing.T) {
-	dbFile := "test_recursive_term.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_recursive_term.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -514,8 +460,7 @@ func TestRecursiveCTEComplexTermination(t *testing.T) {
 // TestCTEInSubquery tests CTE used in subquery
 func TestCTEInSubquery(t *testing.T) {
 	t.Skip("CTE with GROUP BY aggregate returns no rows - see TestCTEWithAggregate")
-	dbFile := "test_cte_subquery.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_cte_subquery.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -574,8 +519,7 @@ func TestCTEInSubquery(t *testing.T) {
 
 // TestCTEMaterialization tests CTE materialization
 func TestCTEMaterialization(t *testing.T) {
-	dbFile := "test_cte_materialize.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_cte_materialize.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -615,8 +559,7 @@ func TestCTEMaterialization(t *testing.T) {
 
 // TestCTEWithJoin tests CTE combined with joins
 func TestCTEWithJoin(t *testing.T) {
-	dbFile := "test_cte_join.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_cte_join.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -671,8 +614,7 @@ func TestCTEWithJoin(t *testing.T) {
 
 // TestRecursiveCTEValidation tests recursive CTE validation
 func TestRecursiveCTEValidation(t *testing.T) {
-	dbFile := "test_recursive_validation.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_recursive_validation.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -698,8 +640,7 @@ func TestRecursiveCTEValidation(t *testing.T) {
 
 // TestCTETempTableCreation tests CTE temporary table creation
 func TestCTETempTableCreation(t *testing.T) {
-	dbFile := "test_cte_temp.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_cte_temp.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -735,8 +676,7 @@ func TestCTETempTableCreation(t *testing.T) {
 // TestCTEBytecodeInlining tests CTE bytecode inlining
 func TestCTEBytecodeInlining(t *testing.T) {
 	t.Skip("CTE bytecode inlining not fully implemented")
-	dbFile := "test_cte_inline.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_cte_inline.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -774,8 +714,7 @@ func TestCTEBytecodeInlining(t *testing.T) {
 // TestCTERegisterAdjustment tests CTE register number adjustment
 func TestCTERegisterAdjustment(t *testing.T) {
 	t.Skip("CTE register adjustment has bugs")
-	dbFile := "test_cte_registers.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_cte_registers.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -871,8 +810,7 @@ func TestMultipleAttachDetach(t *testing.T) {
 
 // TestCTEEmptyResult tests CTE with empty result set
 func TestCTEEmptyResult(t *testing.T) {
-	dbFile := "test_cte_empty.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_cte_empty.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {

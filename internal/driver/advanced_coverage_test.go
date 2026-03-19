@@ -3,45 +3,60 @@ package driver
 
 import (
 	"database/sql"
-	"os"
 	"testing"
 )
 
-// Additional integration tests to improve coverage
-
-func TestJoinQuery(t *testing.T) {
-	dbFile := "test_join.db"
-	defer os.Remove(dbFile)
-
+// advOpenDB opens a database file for testing.
+func advOpenDB(t *testing.T, dbFile string) *sql.DB {
+	t.Helper()
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
+	return db
+}
+
+// advExecAll executes a list of SQL statements.
+func advExecAll(t *testing.T, db *sql.DB, stmts ...string) {
+	t.Helper()
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("%s failed: %v", s, err)
+		}
+	}
+}
+
+// advQueryInts queries a single int column and returns all results.
+func advQueryInts(t *testing.T, db *sql.DB, query string) []int {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	var vals []int
+	for rows.Next() {
+		var v int
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		vals = append(vals, v)
+	}
+	return vals
+}
+
+func TestJoinQuery(t *testing.T) {
+	dbFile := t.TempDir() + "/test_join.db"
+	db := advOpenDB(t, dbFile)
 	defer db.Close()
 
-	// Create tables
-	_, err = db.Exec("CREATE TABLE users (id INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE users failed: %v", err)
-	}
+	advExecAll(t, db,
+		"CREATE TABLE users (id INTEGER, name TEXT)",
+		"CREATE TABLE orders (id INTEGER, user_id INTEGER, amount INTEGER)",
+		"INSERT INTO users VALUES (1, 'Alice')",
+		"INSERT INTO orders VALUES (1, 1, 100)",
+	)
 
-	_, err = db.Exec("CREATE TABLE orders (id INTEGER, user_id INTEGER, amount INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE orders failed: %v", err)
-	}
-
-	// Insert test data
-	_, err = db.Exec("INSERT INTO users VALUES (1, 'Alice')")
-	if err != nil {
-		t.Fatalf("INSERT INTO users failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO orders VALUES (1, 1, 100)")
-	if err != nil {
-		t.Fatalf("INSERT INTO orders failed: %v", err)
-	}
-
-	// Test simple query from multiple tables (cartesian product)
 	rows, err := db.Query("SELECT users.id, users.name FROM users, orders")
 	if err != nil {
 		t.Errorf("multi-table query failed: %v", err)
@@ -49,7 +64,6 @@ func TestJoinQuery(t *testing.T) {
 	}
 	defer rows.Close()
 
-	// Just verify it returns rows
 	hasRows := false
 	for rows.Next() {
 		hasRows = true
@@ -65,8 +79,7 @@ func TestJoinQuery(t *testing.T) {
 }
 
 func TestInsertWithSelectColumns(t *testing.T) {
-	dbFile := "test_insert_select_cols.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_insert_select_cols.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -98,8 +111,7 @@ func TestInsertWithSelectColumns(t *testing.T) {
 }
 
 func TestUpdateWithExpression(t *testing.T) {
-	dbFile := "test_update_expr.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_update_expr.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -136,41 +148,19 @@ func TestUpdateWithExpression(t *testing.T) {
 }
 
 func TestDeleteWithWhere(t *testing.T) {
-	dbFile := "test_delete_where.db"
-	defer os.Remove(dbFile)
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	dbFile := t.TempDir() + "/test_delete_where.db"
+	db := advOpenDB(t, dbFile)
 	defer db.Close()
 
-	// Create and populate table
-	_, err = db.Exec("CREATE TABLE test (id INTEGER, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
+	advExecAll(t, db,
+		"CREATE TABLE test (id INTEGER, value INTEGER)",
+		"INSERT INTO test VALUES (1, 10)",
+		"INSERT INTO test VALUES (2, 20)",
+		"DELETE FROM test WHERE id = 1",
+	)
 
-	_, err = db.Exec("INSERT INTO test VALUES (1, 10)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO test VALUES (2, 20)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	// Delete with WHERE clause
-	_, err = db.Exec("DELETE FROM test WHERE id = 1")
-	if err != nil {
-		t.Errorf("DELETE with WHERE failed: %v", err)
-	}
-
-	// Verify only second row remains
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM test").Scan(&count)
-	if err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM test").Scan(&count); err != nil {
 		t.Errorf("SELECT COUNT failed: %v", err)
 	}
 	if count != 1 {
@@ -178,8 +168,7 @@ func TestDeleteWithWhere(t *testing.T) {
 	}
 
 	var value int
-	err = db.QueryRow("SELECT value FROM test").Scan(&value)
-	if err != nil {
+	if err := db.QueryRow("SELECT value FROM test").Scan(&value); err != nil {
 		t.Errorf("SELECT failed: %v", err)
 	}
 	if value != 20 {
@@ -188,8 +177,7 @@ func TestDeleteWithWhere(t *testing.T) {
 }
 
 func TestSelectWithQualifiedColumn(t *testing.T) {
-	dbFile := "test_qualified_col.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_qualified_col.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -220,8 +208,7 @@ func TestSelectWithQualifiedColumn(t *testing.T) {
 }
 
 func TestSelectAllColumns(t *testing.T) {
-	dbFile := "test_select_all.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_select_all.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -261,55 +248,24 @@ func TestSelectAllColumns(t *testing.T) {
 }
 
 func TestExpressionInOrderBy(t *testing.T) {
-	dbFile := "test_order_expr.db"
-	defer os.Remove(dbFile)
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	dbFile := t.TempDir() + "/test_order_expr.db"
+	db := advOpenDB(t, dbFile)
 	defer db.Close()
 
-	// Create and populate table
-	_, err = db.Exec("CREATE TABLE test (id INTEGER, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
+	advExecAll(t, db,
+		"CREATE TABLE test (id INTEGER, value INTEGER)",
+		"INSERT INTO test VALUES (1, 10)",
+		"INSERT INTO test VALUES (2, 5)",
+	)
 
-	_, err = db.Exec("INSERT INTO test VALUES (1, 10)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO test VALUES (2, 5)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	// ORDER BY with expression
-	rows, err := db.Query("SELECT id FROM test ORDER BY value")
-	if err != nil {
-		t.Errorf("ORDER BY failed: %v", err)
-	}
-	defer rows.Close()
-
-	var ids []int
-	for rows.Next() {
-		var id int
-		if err := rows.Scan(&id); err != nil {
-			t.Errorf("Scan failed: %v", err)
-		}
-		ids = append(ids, id)
-	}
-
+	ids := advQueryInts(t, db, "SELECT id FROM test ORDER BY value")
 	if len(ids) != 2 || ids[0] != 2 || ids[1] != 1 {
 		t.Errorf("ids = %v, want [2 1]", ids)
 	}
 }
 
 func TestCreateTableIfNotExists(t *testing.T) {
-	dbFile := "test_create_if_not_exists.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_create_if_not_exists.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -331,8 +287,7 @@ func TestCreateTableIfNotExists(t *testing.T) {
 }
 
 func TestTransactionRollbackOnError(t *testing.T) {
-	dbFile := "test_tx_rollback_error.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_tx_rollback_error.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -376,8 +331,7 @@ func TestTransactionRollbackOnError(t *testing.T) {
 }
 
 func TestMultipleInserts(t *testing.T) {
-	dbFile := "test_multi_insert.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_multi_insert.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -411,35 +365,19 @@ func TestMultipleInserts(t *testing.T) {
 }
 
 func TestOrderByColumnNumber(t *testing.T) {
-	dbFile := "test_order_colnum.db"
-	defer os.Remove(dbFile)
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	dbFile := t.TempDir() + "/test_order_colnum.db"
+	db := advOpenDB(t, dbFile)
 	defer db.Close()
 
-	// Create and populate table
-	_, err = db.Exec("CREATE TABLE test (id INTEGER, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
+	advExecAll(t, db,
+		"CREATE TABLE test (id INTEGER, value INTEGER)",
+		"INSERT INTO test VALUES (1, 10)",
+		"INSERT INTO test VALUES (2, 5)",
+	)
 
-	_, err = db.Exec("INSERT INTO test VALUES (1, 10)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO test VALUES (2, 5)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	// ORDER BY column number (1 = first column = id)
 	rows, err := db.Query("SELECT id, value FROM test ORDER BY 1")
 	if err != nil {
-		t.Errorf("ORDER BY column number failed: %v", err)
+		t.Fatalf("ORDER BY column number failed: %v", err)
 	}
 	defer rows.Close()
 
@@ -447,11 +385,10 @@ func TestOrderByColumnNumber(t *testing.T) {
 	for rows.Next() {
 		var id, value int
 		if err := rows.Scan(&id, &value); err != nil {
-			t.Errorf("Scan failed: %v", err)
+			t.Fatalf("Scan failed: %v", err)
 		}
 		ids = append(ids, id)
 	}
-
 	if len(ids) != 2 || ids[0] != 1 || ids[1] != 2 {
 		t.Errorf("ids = %v, want [1 2]", ids)
 	}

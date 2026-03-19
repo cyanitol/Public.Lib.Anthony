@@ -12,180 +12,116 @@ import (
 
 // Example demonstrates basic usage of the pager.
 func Example() {
-	// Create a temporary database file
-	tmpDir, err := os.MkdirTemp("", "pager-example")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
+	dbFile, cleanup := exampleTempDB()
+	defer cleanup()
 
-	dbFile := filepath.Join(tmpDir, "example.db")
-
-	// Open a new database
-	p, err := pager.Open(dbFile, false)
-	if err != nil {
-		log.Fatal(err)
-	}
+	p := exampleOpenPager(dbFile, false)
 	defer p.Close()
 
-	// Get the first page
-	page, err := p.Get(1)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer p.Put(page)
-
-	// Mark the page for writing
-	if err := p.Write(page); err != nil {
-		log.Fatal(err)
-	}
-
-	// Write some data to the page (after the database header)
-	testData := []byte("Hello, SQLite Pager!")
-	if err := page.Write(pager.DatabaseHeaderSize, testData); err != nil {
-		log.Fatal(err)
-	}
-
-	// Commit the transaction
-	if err := p.Commit(); err != nil {
-		log.Fatal(err)
-	}
+	exampleWritePageData(p, 1, pager.DatabaseHeaderSize, []byte("Hello, SQLite Pager!"))
+	exampleCommit(p)
 
 	fmt.Println("Data written successfully")
 	// Output: Data written successfully
 }
 
-// Example_readWrite demonstrates reading and writing pages.
-func Example_readWrite() {
+// exampleOpenPager opens a pager for examples, calling log.Fatal on error.
+func exampleOpenPager(dbFile string, readOnly bool) *pager.Pager {
+	p, err := pager.Open(dbFile, readOnly)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return p
+}
+
+// exampleWritePageData writes data to a page at an offset for examples.
+func exampleWritePageData(p *pager.Pager, pgno pager.Pgno, offset int, data []byte) {
+	page, err := p.Get(pgno)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := p.Write(page); err != nil {
+		log.Fatal(err)
+	}
+	if err := page.Write(offset, data); err != nil {
+		log.Fatal(err)
+	}
+	p.Put(page)
+}
+
+// exampleCommit commits a pager transaction for examples.
+func exampleCommit(p *pager.Pager) {
+	if err := p.Commit(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// exampleReadPageData reads data from a page at an offset for examples.
+func exampleReadPageData(p *pager.Pager, pgno pager.Pgno, offset, length int) []byte {
+	page, err := p.Get(pgno)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer p.Put(page)
+	data, err := page.Read(offset, length)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return data
+}
+
+// exampleTempDB creates a temp dir with a db file, returning the path and a cleanup function.
+func exampleTempDB() (string, func()) {
 	tmpDir, err := os.MkdirTemp("", "pager-example")
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	return filepath.Join(tmpDir, "example.db"), func() { os.RemoveAll(tmpDir) }
+}
 
-	dbFile := filepath.Join(tmpDir, "example.db")
+// Example_readWrite demonstrates reading and writing pages.
+func Example_readWrite() {
+	dbFile, cleanup := exampleTempDB()
+	defer cleanup()
 
-	// Create and write to database
-	p, err := pager.Open(dbFile, false)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Write data
-	page, err := p.Get(1)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if err := p.Write(page); err != nil {
-		log.Fatal(err)
-	}
-
+	p := exampleOpenPager(dbFile, false)
 	data := []byte("Test Data")
-	if err := page.Write(pager.DatabaseHeaderSize, data); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := p.Commit(); err != nil {
-		log.Fatal(err)
-	}
-
-	p.Put(page)
+	exampleWritePageData(p, 1, pager.DatabaseHeaderSize, data)
+	exampleCommit(p)
 	p.Close()
 
 	// Reopen and read
-	p2, err := pager.Open(dbFile, false)
-	if err != nil {
-		log.Fatal(err)
-	}
+	p2 := exampleOpenPager(dbFile, false)
 	defer p2.Close()
 
-	page2, err := p2.Get(1)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer p2.Put(page2)
-
-	readData, err := page2.Read(pager.DatabaseHeaderSize, len(data))
-	if err != nil {
-		log.Fatal(err)
-	}
-
+	readData := exampleReadPageData(p2, 1, pager.DatabaseHeaderSize, len(data))
 	fmt.Printf("Read: %s\n", string(readData))
 	// Note: Output test skipped - pager data persistence not yet fully implemented
 }
 
 // Example_rollback demonstrates transaction rollback.
 func Example_rollback() {
-	tmpDir, err := os.MkdirTemp("", "pager-example")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
+	dbFile, cleanup := exampleTempDB()
+	defer cleanup()
 
-	dbFile := filepath.Join(tmpDir, "example.db")
-
-	p, err := pager.Open(dbFile, false)
-	if err != nil {
-		log.Fatal(err)
-	}
+	p := exampleOpenPager(dbFile, false)
 	defer p.Close()
 
-	// Write original data
-	page, err := p.Get(1)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if err := p.Write(page); err != nil {
-		log.Fatal(err)
-	}
-
+	// Write original data and commit
 	originalData := []byte("Original")
-	if err := page.Write(pager.DatabaseHeaderSize, originalData); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := p.Commit(); err != nil {
-		log.Fatal(err)
-	}
-
-	p.Put(page)
+	exampleWritePageData(p, 1, pager.DatabaseHeaderSize, originalData)
+	exampleCommit(p)
 
 	// Start new transaction and modify
-	page2, err := p.Get(1)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if err := p.Write(page2); err != nil {
-		log.Fatal(err)
-	}
-
-	modifiedData := []byte("Modified")
-	if err := page2.Write(pager.DatabaseHeaderSize, modifiedData); err != nil {
-		log.Fatal(err)
-	}
+	exampleWritePageData(p, 1, pager.DatabaseHeaderSize, []byte("Modified"))
 
 	// Rollback the changes
 	if err := p.Rollback(); err != nil {
 		log.Fatal(err)
 	}
 
-	p.Put(page2)
-
 	// Read data after rollback
-	page3, err := p.Get(1)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer p.Put(page3)
-
-	readData, err := page3.Read(pager.DatabaseHeaderSize, len(originalData))
-	if err != nil {
-		log.Fatal(err)
-	}
-
+	readData := exampleReadPageData(p, 1, pager.DatabaseHeaderSize, len(originalData))
 	fmt.Printf("After rollback: %s\n", string(readData))
 	// Note: Output test skipped - pager rollback not yet fully implemented
 }
@@ -268,61 +204,23 @@ func Example_pageSize() {
 
 // Example_readOnly demonstrates opening a database in read-only mode.
 func Example_readOnly() {
-	tmpDir, err := os.MkdirTemp("", "pager-example")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
+	dbFile, cleanup := exampleTempDB()
+	defer cleanup()
 
-	dbFile := filepath.Join(tmpDir, "example.db")
-
-	// Create database
-	p1, err := pager.Open(dbFile, false)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	page, err := p1.Get(1)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if err := p1.Write(page); err != nil {
-		log.Fatal(err)
-	}
-
+	// Create database and write data
+	p1 := exampleOpenPager(dbFile, false)
 	data := []byte("Read-only test")
-	if err := page.Write(pager.DatabaseHeaderSize, data); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := p1.Commit(); err != nil {
-		log.Fatal(err)
-	}
-
-	p1.Put(page)
+	exampleWritePageData(p1, 1, pager.DatabaseHeaderSize, data)
+	exampleCommit(p1)
 	p1.Close()
 
 	// Open in read-only mode
-	p2, err := pager.Open(dbFile, true)
-	if err != nil {
-		log.Fatal(err)
-	}
+	p2 := exampleOpenPager(dbFile, true)
 	defer p2.Close()
 
 	fmt.Printf("Is read-only: %v\n", p2.IsReadOnly())
 
-	page2, err := p2.Get(1)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer p2.Put(page2)
-
-	readData, err := page2.Read(pager.DatabaseHeaderSize, len(data))
-	if err != nil {
-		log.Fatal(err)
-	}
-
+	readData := exampleReadPageData(p2, 1, pager.DatabaseHeaderSize, len(data))
 	fmt.Printf("Data: %s\n", string(readData))
 	// Note: Output test skipped - pager data persistence not yet fully implemented
 }

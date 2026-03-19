@@ -7,17 +7,14 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab"
 )
 
-// TestBasicRTreeInsertAndQuery tests basic R-Tree insert and query operations
-func TestBasicRTreeInsertAndQuery(t *testing.T) {
-	t.Parallel()
-
-	// Create R-Tree module
+// createTestRTree creates a 2D R-Tree table for testing, returning the RTree and asserting setup.
+func createTestRTree(t *testing.T) *RTree {
+	t.Helper()
 	module := NewRTreeModule()
 	if module == nil {
 		t.Fatal("NewRTreeModule returned nil")
 	}
 
-	// Create a 2D R-Tree table
 	table, schema, err := module.Create(
 		nil, "rtree", "main", "t1",
 		[]string{"id", "minX", "maxX", "minY", "maxY"},
@@ -32,54 +29,57 @@ func TestBasicRTreeInsertAndQuery(t *testing.T) {
 		t.Error("Create returned empty schema")
 	}
 
-	rtree, ok := table.(*RTree)
+	rt, ok := table.(*RTree)
 	if !ok {
 		t.Fatal("table is not *RTree")
 	}
+	return rt
+}
 
-	// Test INSERT: INSERT INTO t1 VALUES(1, 0, 10, 0, 10)
-	rowid, err := rtree.Update(7, []interface{}{
-		nil,       // argv[0] - old rowid (nil for INSERT)
-		int64(1),  // argv[1] - new rowid
-		int64(0),  // argv[2] - minX
-		int64(10), // argv[3] - maxX
-		int64(0),  // argv[4] - minY
-		int64(10), // argv[5] - maxY
-	})
+// insertRTreeEntry inserts a row into the RTree and validates the result.
+func insertRTreeEntry(t *testing.T, rt *RTree, id int64, minX, maxX, minY, maxY interface{}) {
+	t.Helper()
+	rowid, err := rt.Update(7, []interface{}{nil, id, minX, maxX, minY, maxY})
 	if err != nil {
-		t.Fatalf("Insert failed: %v", err)
+		t.Fatalf("Insert id=%d failed: %v", id, err)
 	}
-	if rowid != 1 {
-		t.Errorf("Expected rowid 1, got %d", rowid)
+	if rowid != id {
+		t.Errorf("Expected rowid %d, got %d", id, rowid)
 	}
+}
 
-	// Verify the entry was inserted
-	if rtree.Count() != 1 {
-		t.Errorf("Expected 1 entry, got %d", rtree.Count())
-	}
+// TestBasicRTreeInsertAndQuery tests basic R-Tree insert and query operations
+func TestBasicRTreeInsertAndQuery(t *testing.T) {
+	t.Parallel()
 
-	// Test another INSERT
-	rowid, err = rtree.Update(7, []interface{}{
-		nil,       // argv[0] - old rowid (nil for INSERT)
-		int64(2),  // argv[1] - new rowid
-		int64(5),  // argv[2] - minX
-		int64(15), // argv[3] - maxX
-		int64(5),  // argv[4] - minY
-		int64(15), // argv[5] - maxY
+	rt := createTestRTree(t)
+
+	t.Run("insert_first", func(t *testing.T) {
+		insertRTreeEntry(t, rt, 1, int64(0), int64(10), int64(0), int64(10))
+		if rt.Count() != 1 {
+			t.Errorf("Expected 1 entry, got %d", rt.Count())
+		}
 	})
-	if err != nil {
-		t.Fatalf("Second insert failed: %v", err)
-	}
-	if rowid != 2 {
-		t.Errorf("Expected rowid 2, got %d", rowid)
-	}
 
-	if rtree.Count() != 2 {
-		t.Errorf("Expected 2 entries, got %d", rtree.Count())
-	}
+	t.Run("insert_second", func(t *testing.T) {
+		insertRTreeEntry(t, rt, 2, int64(5), int64(15), int64(5), int64(15))
+		if rt.Count() != 2 {
+			t.Errorf("Expected 2 entries, got %d", rt.Count())
+		}
+	})
 
-	// Test SELECT * FROM t1
-	cursor, err := rtree.Open()
+	t.Run("query_full_scan", func(t *testing.T) {
+		count := countRTreeFullScan(t, rt)
+		if count != 2 {
+			t.Errorf("Expected 2 results, got %d", count)
+		}
+	})
+}
+
+// countRTreeFullScan opens a cursor, filters with no constraints, and counts results.
+func countRTreeFullScan(t *testing.T, rt *RTree) int {
+	t.Helper()
+	cursor, err := rt.Open()
 	if err != nil {
 		t.Fatalf("Open cursor failed: %v", err)
 	}
@@ -90,21 +90,17 @@ func TestBasicRTreeInsertAndQuery(t *testing.T) {
 		t.Fatal("cursor is not *RTreeCursor")
 	}
 
-	// Filter with no constraints (full scan)
 	err = rtreeCursor.Filter(0, "", []interface{}{})
 	if err != nil {
 		t.Fatalf("Filter failed: %v", err)
 	}
 
-	// Count results
 	count := 0
 	for !rtreeCursor.EOF() {
 		rowid, err := rtreeCursor.Rowid()
 		if err != nil {
 			t.Fatalf("Rowid failed: %v", err)
 		}
-
-		// Check column values
 		id, err := rtreeCursor.Column(0)
 		if err != nil {
 			t.Fatalf("Column(0) failed: %v", err)
@@ -112,14 +108,10 @@ func TestBasicRTreeInsertAndQuery(t *testing.T) {
 		if id != rowid {
 			t.Errorf("ID mismatch: expected %d, got %v", rowid, id)
 		}
-
 		count++
 		rtreeCursor.Next()
 	}
-
-	if count != 2 {
-		t.Errorf("Expected 2 results, got %d", count)
-	}
+	return count
 }
 
 // TestRTreeOverlapQuery tests spatial overlap queries
@@ -164,8 +156,6 @@ func TestRTreeOverlapQuery(t *testing.T) {
 	}
 
 	// Test SearchOverlap
-	// Query box (0, 19, 0, 19) should overlap with IDs 1, 2, and 4 only
-	// ID 3 at (20, 30, 20, 30) should not overlap since 19 < 20
 	queryBox := NewBoundingBox(2)
 	queryBox.Min[0] = 0
 	queryBox.Max[0] = 19
@@ -173,37 +163,38 @@ func TestRTreeOverlapQuery(t *testing.T) {
 	queryBox.Max[1] = 19
 
 	results := rtree.SearchOverlap(queryBox)
-	if len(results) != 3 {
-		t.Errorf("SearchOverlap expected 3 results, got %d", len(results))
-		for _, r := range results {
-			t.Logf("  Found ID: %d, bbox: [%.0f,%.0f] x [%.0f,%.0f]",
-				r.ID, r.BBox.Min[0], r.BBox.Max[0], r.BBox.Min[1], r.BBox.Max[1])
-		}
-	}
-
-	// Verify the results contain IDs 1, 2, and 4
-	foundIDs := make(map[int64]bool)
-	for _, r := range results {
-		foundIDs[r.ID] = true
-	}
-
-	expectedIDs := []int64{1, 2, 4}
-	for _, id := range expectedIDs {
-		if !foundIDs[id] {
-			t.Errorf("Expected to find ID %d in results", id)
-		}
-	}
-
-	// ID 3 should not be in the results
-	if foundIDs[3] {
-		t.Error("ID 3 should not be in the results")
-	}
+	verifyOverlapResults(t, results, []int64{1, 2, 4}, []int64{3})
 
 	// Test point containment
 	point := []float64{7, 7}
 	pointResults := rtree.SearchContains(point)
 	if len(pointResults) != 2 {
 		t.Errorf("SearchContains expected 2 results, got %d", len(pointResults))
+	}
+}
+
+func verifyOverlapResults(t *testing.T, results []*Entry, expectedIDs []int64, excludedIDs []int64) {
+	t.Helper()
+	if len(results) != len(expectedIDs) {
+		t.Errorf("SearchOverlap expected %d results, got %d", len(expectedIDs), len(results))
+		for _, r := range results {
+			t.Logf("  Found ID: %d, bbox: [%.0f,%.0f] x [%.0f,%.0f]",
+				r.ID, r.BBox.Min[0], r.BBox.Max[0], r.BBox.Min[1], r.BBox.Max[1])
+		}
+	}
+	foundIDs := make(map[int64]bool)
+	for _, r := range results {
+		foundIDs[r.ID] = true
+	}
+	for _, id := range expectedIDs {
+		if !foundIDs[id] {
+			t.Errorf("Expected to find ID %d in results", id)
+		}
+	}
+	for _, id := range excludedIDs {
+		if foundIDs[id] {
+			t.Errorf("ID %d should not be in the results", id)
+		}
 	}
 }
 
@@ -251,14 +242,16 @@ func TestRTreeBasicDelete(t *testing.T) {
 		t.Errorf("Expected 4 entries after delete, got %d", rtree.Count())
 	}
 
-	// Verify entry 3 is gone
-	_, exists := rtree.GetEntry(3)
-	if exists {
-		t.Error("Entry 3 should not exist after deletion")
-	}
+	verifyDeletedEntry(t, rtree, 3, []int64{1, 2, 4, 5})
+}
 
-	// Verify other entries still exist
-	for _, id := range []int64{1, 2, 4, 5} {
+func verifyDeletedEntry(t *testing.T, rtree *RTree, deletedID int64, remainingIDs []int64) {
+	t.Helper()
+	_, exists := rtree.GetEntry(deletedID)
+	if exists {
+		t.Errorf("Entry %d should not exist after deletion", deletedID)
+	}
+	for _, id := range remainingIDs {
 		_, exists := rtree.GetEntry(id)
 		if !exists {
 			t.Errorf("Entry %d should exist", id)

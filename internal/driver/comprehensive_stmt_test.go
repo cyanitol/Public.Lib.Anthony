@@ -3,15 +3,13 @@ package driver
 
 import (
 	"database/sql"
-	"os"
 	"testing"
 )
 
 // Comprehensive statement testing to improve coverage
 
 func TestComplexSelectQuery(t *testing.T) {
-	dbFile := "test_complex_select.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_complex_select.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -74,8 +72,7 @@ func TestComplexSelectQuery(t *testing.T) {
 }
 
 func TestSelectWithExpressions(t *testing.T) {
-	dbFile := "test_select_expr.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_select_expr.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -95,8 +92,7 @@ func TestSelectWithExpressions(t *testing.T) {
 }
 
 func TestSelectWithMultipleWhereClauses(t *testing.T) {
-	dbFile := "test_where_multiple.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_where_multiple.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -137,8 +133,7 @@ func TestSelectWithMultipleWhereClauses(t *testing.T) {
 }
 
 func TestUpdateMultipleColumns(t *testing.T) {
-	dbFile := "test_update_multi.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_update_multi.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -176,8 +171,7 @@ func TestUpdateMultipleColumns(t *testing.T) {
 }
 
 func TestDeleteAll(t *testing.T) {
-	dbFile := "test_delete_all.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_delete_all.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -216,8 +210,7 @@ func TestDeleteAll(t *testing.T) {
 }
 
 func TestSelectWithComparison(t *testing.T) {
-	dbFile := "test_comparison.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_comparison.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -265,8 +258,7 @@ func TestSelectWithComparison(t *testing.T) {
 }
 
 func TestInsertMultipleRows(t *testing.T) {
-	dbFile := "test_insert_multi.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_insert_multi.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -307,8 +299,7 @@ func TestInsertMultipleRows(t *testing.T) {
 }
 
 func TestSelectDistinct(t *testing.T) {
-	dbFile := "test_distinct.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_distinct.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -353,8 +344,7 @@ func TestSelectDistinct(t *testing.T) {
 }
 
 func TestTransactionCommitWithData(t *testing.T) {
-	dbFile := "test_tx_commit_data.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_tx_commit_data.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -404,51 +394,52 @@ func TestTransactionCommitWithData(t *testing.T) {
 	}
 }
 
-func TestOrderByDescending(t *testing.T) {
-	dbFile := "test_order_desc.db"
-	defer os.Remove(dbFile)
-
+// compStmtSetupTable5 creates a table with 5 rows and returns the DB.
+func compStmtSetupTable5(t *testing.T, dbFile string) *sql.DB {
+	t.Helper()
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
-
-	// Create and populate table
-	_, err = db.Exec("CREATE TABLE test (id INTEGER, value INTEGER)")
-	if err != nil {
+	if _, err = db.Exec("CREATE TABLE test (id INTEGER, value INTEGER)"); err != nil {
 		t.Fatalf("CREATE TABLE failed: %v", err)
 	}
-
 	for i := 1; i <= 5; i++ {
-		_, err = db.Exec("INSERT INTO test VALUES (?, ?)", i, i*10)
-		if err != nil {
+		if _, err = db.Exec("INSERT INTO test VALUES (?, ?)", i, i*10); err != nil {
 			t.Fatalf("INSERT failed: %v", err)
 		}
 	}
+	return db
+}
 
-	// ORDER BY DESC
-	rows, err := db.Query("SELECT value FROM test ORDER BY value DESC")
+// compStmtQueryInts queries a single int column.
+func compStmtQueryInts(t *testing.T, db *sql.DB, query string) []int {
+	t.Helper()
+	rows, err := db.Query(query)
 	if err != nil {
-		t.Errorf("ORDER BY DESC failed: %v", err)
-		return
+		t.Fatalf("query failed: %v", err)
 	}
 	defer rows.Close()
-
-	var values []int
+	var vals []int
 	for rows.Next() {
 		var v int
 		if err := rows.Scan(&v); err != nil {
-			t.Errorf("Scan failed: %v", err)
+			t.Fatalf("Scan failed: %v", err)
 		}
-		values = append(values, v)
+		vals = append(vals, v)
 	}
+	return vals
+}
 
+func TestOrderByDescending(t *testing.T) {
+	dbFile := t.TempDir() + "/test_order_desc.db"
+	db := compStmtSetupTable5(t, dbFile)
+	defer db.Close()
+
+	values := compStmtQueryInts(t, db, "SELECT value FROM test ORDER BY value DESC")
 	if len(values) != 5 {
 		t.Errorf("got %d values, want 5", len(values))
 	}
-
-	// Verify descending order
 	for i := 0; i < len(values)-1; i++ {
 		if values[i] < values[i+1] {
 			t.Errorf("values not in descending order: %v", values)

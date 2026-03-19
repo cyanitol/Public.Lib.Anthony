@@ -104,23 +104,21 @@ func ftsCompareValue(t *testing.T, i, j int, got, want interface{}) {
 		t.Errorf("row %d col %d: got nil, want %v (%T)", i, j, want, want)
 		return
 	}
+	ftsCompareTypedValue(t, i, j, got, want)
+}
 
+func ftsCompareTypedValue(t *testing.T, i, j int, got, want interface{}) {
+	t.Helper()
 	switch wantVal := want.(type) {
 	case int64:
-		if gotVal, ok := got.(int64); ok {
-			if gotVal != wantVal {
-				t.Errorf("row %d col %d: got %v, want %v", i, j, gotVal, wantVal)
-			}
-		} else {
+		gotVal, ok := got.(int64)
+		if !ok || gotVal != wantVal {
 			t.Errorf("row %d col %d: got %v (%T), want %v (int64)", i, j, got, got, wantVal)
 		}
 	case string:
-		if gotVal, ok := got.(string); ok {
-			if gotVal != wantVal {
-				t.Errorf("row %d col %d: got %q, want %q", i, j, gotVal, wantVal)
-			}
-		} else {
-			t.Errorf("row %d col %d: got %v (%T), want %v (string)", i, j, got, got, wantVal)
+		gotVal, ok := got.(string)
+		if !ok || gotVal != wantVal {
+			t.Errorf("row %d col %d: got %v (%T), want %q (string)", i, j, got, got, wantVal)
 		}
 	default:
 		t.Errorf("row %d col %d: unsupported type %T", i, j, want)
@@ -674,35 +672,31 @@ func TestSQLiteFTS(t *testing.T) {
 	}
 }
 
-// TestFTSSpecialFunctions tests FTS-specific functions like snippet, offsets, matchinfo
-func TestFTSSpecialFunctions(t *testing.T) {
-	t.Skip("pre-existing failure - needs FTS implementation")
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "fts_funcs_test.db")
-
+func ftsSetupArticlesDB(t *testing.T) *sql.DB {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "fts_funcs_test.db")
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
-
-	// Create FTS table
-	_, err = db.Exec("CREATE VIRTUAL TABLE articles USING fts3(title, content)")
-	if err != nil {
+	if _, err = db.Exec("CREATE VIRTUAL TABLE articles USING fts3(title, content)"); err != nil {
 		t.Fatalf("failed to create FTS table: %v", err)
 	}
-
-	// Insert test data
-	_, err = db.Exec("INSERT INTO articles(title, content) VALUES('Go Programming', 'Go is a statically typed compiled programming language')")
-	if err != nil {
+	if _, err = db.Exec("INSERT INTO articles(title, content) VALUES('Go Programming', 'Go is a statically typed compiled programming language')"); err != nil {
 		t.Fatalf("failed to insert data: %v", err)
 	}
+	return db
+}
 
-	// Test offsets function
+// TestFTSSpecialFunctions tests FTS-specific functions like snippet, offsets, matchinfo
+func TestFTSSpecialFunctions(t *testing.T) {
+	t.Skip("pre-existing failure - needs FTS implementation")
+	db := ftsSetupArticlesDB(t)
+	defer db.Close()
+
 	t.Run("offsets function", func(t *testing.T) {
 		var offsets string
-		err := db.QueryRow("SELECT offsets(articles) FROM articles WHERE articles MATCH 'programming'").Scan(&offsets)
-		if err != nil {
+		if err := db.QueryRow("SELECT offsets(articles) FROM articles WHERE articles MATCH 'programming'").Scan(&offsets); err != nil {
 			t.Fatalf("offsets query failed: %v", err)
 		}
 		if offsets == "" {
@@ -710,11 +704,9 @@ func TestFTSSpecialFunctions(t *testing.T) {
 		}
 	})
 
-	// Test snippet function
 	t.Run("snippet function", func(t *testing.T) {
 		var snippet string
-		err := db.QueryRow("SELECT snippet(articles) FROM articles WHERE articles MATCH 'language'").Scan(&snippet)
-		if err != nil {
+		if err := db.QueryRow("SELECT snippet(articles) FROM articles WHERE articles MATCH 'language'").Scan(&snippet); err != nil {
 			t.Fatalf("snippet query failed: %v", err)
 		}
 		if !strings.Contains(snippet, "language") {
@@ -722,11 +714,9 @@ func TestFTSSpecialFunctions(t *testing.T) {
 		}
 	})
 
-	// Test matchinfo function
 	t.Run("matchinfo function", func(t *testing.T) {
 		var matchinfo []byte
-		err := db.QueryRow("SELECT matchinfo(articles) FROM articles WHERE articles MATCH 'Go'").Scan(&matchinfo)
-		if err != nil {
+		if err := db.QueryRow("SELECT matchinfo(articles) FROM articles WHERE articles MATCH 'Go'").Scan(&matchinfo); err != nil {
 			t.Fatalf("matchinfo query failed: %v", err)
 		}
 		if len(matchinfo) == 0 {

@@ -11,90 +11,57 @@ import (
 	"testing"
 )
 
-// TestJournalRestoreEntry tests the journal restoreEntry function
-func TestJournalRestoreEntry(t *testing.T) {
-	t.Parallel()
-	dbFile := filepath.Join(t.TempDir(), "test_restore.db")
+// journalRestoreSetup writes initial data, creates journal, modifies page, and closes pager.
+func journalRestoreSetup(t *testing.T, dbFile string) []byte {
+	t.Helper()
+	p := mustOpenPagerSized(t, dbFile, 4096)
 
-	// Create a pager
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-
-	// Write some initial data
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-
-	// Set unique data
 	testData := []byte("ORIGINAL DATA")
-	copy(page.Data[DatabaseHeaderSize:], testData)
-	pager.Put(page)
+	mustWriteDataToPage(t, p, 1, DatabaseHeaderSize, testData)
+	mustCommit(t, p)
 
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Now create a journal entry manually
-	journal := NewJournal(dbFile+"-journal", 4096, 1)
-	if err := journal.Open(); err != nil {
-		t.Fatalf("failed to open journal: %v", err)
-	}
-
-	// Save original page data
-	page, _ = pager.Get(1)
+	// Create journal with original page data
+	page := mustGetPage(t, p, 1)
 	originalData := make([]byte, len(page.Data))
 	copy(originalData, page.Data)
-	pager.Put(page)
+	p.Put(page)
 
-	// Write to journal
+	journal := mustOpenJournal(t, dbFile+"-journal", 4096, 1)
 	if err := journal.WriteOriginal(1, originalData); err != nil {
 		t.Fatalf("failed to write to journal: %v", err)
 	}
 	journal.Close()
 
-	// Modify the database page
-	page, _ = pager.Get(1)
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-	modifiedData := []byte("MODIFIED DATA")
-	copy(page.Data[DatabaseHeaderSize:], modifiedData)
-	pager.Put(page)
-
-	// Flush to disk without committing
-	if err := pager.writePage(page); err != nil {
+	// Modify the database page and flush to disk
+	page = mustGetWritePage(t, p, 1)
+	copy(page.Data[DatabaseHeaderSize:], []byte("MODIFIED DATA"))
+	p.Put(page)
+	if err := p.writePage(page); err != nil {
 		t.Fatalf("failed to write page to disk: %v", err)
 	}
+	p.Close()
+	return testData
+}
 
-	pager.Close()
+// TestJournalRestoreEntry tests the journal restoreEntry function
+func TestJournalRestoreEntry(t *testing.T) {
+	t.Parallel()
+	dbFile := filepath.Join(t.TempDir(), "test_restore.db")
 
-	// Reopen pager and journal
-	pager, err = OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to reopen pager: %v", err)
-	}
-	defer pager.Close()
+	testData := journalRestoreSetup(t, dbFile)
 
-	journal = NewJournal(dbFile+"-journal", 4096, 1)
+	// Reopen pager and rollback
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	defer p.Close()
 
-	// Rollback should restore original data
-	if err := journal.Rollback(pager); err != nil {
+	journal := NewJournal(dbFile+"-journal", 4096, 1)
+	if err := journal.Rollback(p); err != nil {
 		t.Fatalf("failed to rollback: %v", err)
 	}
 
 	// Verify data was restored
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page after rollback: %v", err)
-	}
-	defer pager.Put(page)
+	page := mustGetPage(t, p, 1)
+	defer p.Put(page)
 
 	restoredData := string(page.Data[DatabaseHeaderSize : DatabaseHeaderSize+len(testData)])
 	if restoredData != string(testData) {
@@ -219,10 +186,7 @@ func TestLockUnixCheckReservedLock(t *testing.T) {
 	f1, cleanup1 := createCoverageTestFile(t)
 	defer cleanup1()
 
-	lm1, err := NewLockManager(f1)
-	if err != nil {
-		t.Fatalf("NewLockManager(1) error = %v", err)
-	}
+	lm1 := mustNewLockManager(t, f1)
 	defer lm1.Close()
 
 	// Check reserved lock when no lock is held
@@ -234,26 +198,11 @@ func TestLockUnixCheckReservedLock(t *testing.T) {
 		t.Error("expected no reserved lock initially")
 	}
 
-	// Acquire shared lock then reserved
-	if err := lm1.AcquireLock(lockShared); err != nil {
-		t.Fatalf("AcquireLock(SHARED) error = %v", err)
-	}
-	if err := lm1.AcquireLock(lockReserved); err != nil {
-		t.Fatalf("AcquireLock(RESERVED) error = %v", err)
-	}
+	mustAcquireLock(t, lm1, lockShared)
+	mustAcquireLock(t, lm1, lockReserved)
 
-	// Now check from another lock manager
-	f2, err := os.OpenFile(f1.Name(), os.O_RDWR, 0600)
-	if err != nil {
-		t.Fatalf("failed to open file: %v", err)
-	}
-	defer f2.Close()
-
-	lm2, err := NewLockManager(f2)
-	if err != nil {
-		t.Fatalf("NewLockManager(2) error = %v", err)
-	}
-	defer lm2.Close()
+	// Check from another lock manager
+	_, lm2 := mustOpenSecondLockManager(t, f1.Name())
 
 	reserved, err = lm2.CheckReservedLock()
 	if err != nil {
@@ -531,55 +480,22 @@ func TestPagerFullCommitCycle(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_commit_cycle.db")
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-	defer pager.Close()
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	defer p.Close()
 
-	// Allocate some pages first
-	for i := 0; i < 5; i++ {
-		pgno, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("failed to allocate page: %v", err)
-		}
-		t.Logf("Allocated page %d", pgno)
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit allocation: %v", err)
-	}
-
-	// Free some pages to test freelist flush
-	if err := pager.FreePage(3); err != nil {
-		t.Fatalf("failed to free page: %v", err)
-	}
-
-	// Start new transaction
-	page, err := pager.Get(2)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
+	mustAllocateAndCommit(t, p, 5)
+	mustFreePage(t, p, 3)
 
 	testData := []byte("COMMIT CYCLE TEST")
+	page := mustGetWritePage(t, p, 2)
 	copy(page.Data[:len(testData)], testData)
-	pager.Put(page)
+	p.Put(page)
 
-	// Full commit should go through all phases
-	if err := pager.Commit(); err != nil {
-		t.Errorf("Commit() error = %v", err)
-	}
+	mustCommit(t, p)
 
 	// Verify data persisted
-	page2, err := pager.Get(2)
-	if err != nil {
-		t.Fatalf("failed to get page after commit: %v", err)
-	}
-	defer pager.Put(page2)
+	page2 := mustGetPage(t, p, 2)
+	defer p.Put(page2)
 
 	if string(page2.Data[:len(testData)]) != string(testData) {
 		t.Error("data not persisted correctly after commit")
@@ -622,48 +538,20 @@ func TestFreeListProcessTrunkPage(t *testing.T) {
 
 	fl := NewFreeList(pager)
 
-	// Create pages to work with
-	for i := Pgno(2); i <= 50; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
-		pager.Put(page)
-	}
+	mustCreateWritePages(t, pager, 2, 50)
+	mustFreePages(t, fl, 10, 40)
+	mustFlush(t, fl)
 
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Free many pages to create trunk structure
-	for i := Pgno(10); i <= 40; i++ {
-		if err := fl.Free(i); err != nil {
-			t.Fatalf("failed to free page %d: %v", i, err)
-		}
-	}
-
-	// Flush to create trunk pages
-	if err := fl.Flush(); err != nil {
-		t.Fatalf("failed to flush: %v", err)
-	}
-
-	// Verify trunk exists
 	if fl.GetFirstTrunk() == 0 {
 		t.Fatal("expected non-zero first trunk")
 	}
 
-	// Read and verify trunk page
 	nextTrunk, leaves, err := fl.ReadTrunk(fl.GetFirstTrunk())
 	if err != nil {
 		t.Fatalf("failed to read trunk: %v", err)
 	}
 
 	t.Logf("Trunk page: next=%d, leaves=%d", nextTrunk, len(leaves))
-
-	// Verify leaves
 	if len(leaves) == 0 {
 		t.Error("expected at least one leaf page")
 	}

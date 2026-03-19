@@ -5,81 +5,61 @@ import (
 	"testing"
 )
 
+func testOpenPseudoBasic(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(10)
+	v.AllocCursors(3)
+	v.Mem[2].SetBlob([]byte{1, 2, 3, 4})
+	err := v.execOpenPseudo(&Instruction{Opcode: OpOpenPseudo, P1: 1, P2: 2, P3: 3})
+	if err != nil {
+		t.Fatalf("execOpenPseudo failed: %v", err)
+	}
+	cursor := v.Cursors[1]
+	if cursor == nil {
+		t.Fatal("Cursor not created")
+	}
+	verifyPseudoCursorProps(t, cursor)
+}
+
+func verifyPseudoCursorProps(t *testing.T, cursor *Cursor) {
+	t.Helper()
+	if cursor.CurType != CursorPseudo {
+		t.Errorf("Expected CursorPseudo, got %v", cursor.CurType)
+	}
+	if !cursor.IsTable {
+		t.Error("Pseudo cursor should be marked as table")
+	}
+	if cursor.PseudoReg != 2 {
+		t.Errorf("Expected PseudoReg=2, got %d", cursor.PseudoReg)
+	}
+	if cursor.NullRow {
+		t.Error("Cursor should not be null row initially")
+	}
+	if cursor.EOF {
+		t.Error("Cursor should not be EOF initially")
+	}
+}
+
+func testOpenPseudoAllocates(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(10)
+	err := v.execOpenPseudo(&Instruction{Opcode: OpOpenPseudo, P1: 5, P2: 1, P3: 1})
+	if err != nil {
+		t.Fatalf("execOpenPseudo failed: %v", err)
+	}
+	if len(v.Cursors) <= 5 {
+		t.Errorf("Expected cursors to be allocated, got length %d", len(v.Cursors))
+	}
+	if v.Cursors[5] == nil {
+		t.Error("Cursor 5 should be created")
+	}
+}
+
 // TestOpenPseudoOpcode tests the OpOpenPseudo opcode
 func TestOpenPseudoOpcode(t *testing.T) {
 	t.Parallel()
-	t.Run("BasicOpenPseudo", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.AllocCursors(3)
-
-		// Set up pseudo-table data in register 2
-		v.Mem[2].SetBlob([]byte{1, 2, 3, 4})
-
-		instr := &Instruction{
-			Opcode: OpOpenPseudo,
-			P1:     1, // cursor number
-			P2:     2, // register containing data
-			P3:     3, // number of columns
-		}
-
-		err := v.execOpenPseudo(instr)
-		if err != nil {
-			t.Fatalf("execOpenPseudo failed: %v", err)
-		}
-
-		// Check cursor was created
-		cursor := v.Cursors[1]
-		if cursor == nil {
-			t.Fatal("Cursor not created")
-		}
-
-		if cursor.CurType != CursorPseudo {
-			t.Errorf("Expected CursorPseudo, got %v", cursor.CurType)
-		}
-
-		if !cursor.IsTable {
-			t.Error("Pseudo cursor should be marked as table")
-		}
-
-		if cursor.PseudoReg != 2 {
-			t.Errorf("Expected PseudoReg=2, got %d", cursor.PseudoReg)
-		}
-
-		if cursor.NullRow {
-			t.Error("Cursor should not be null row initially")
-		}
-
-		if cursor.EOF {
-			t.Error("Cursor should not be EOF initially")
-		}
-	})
-
-	t.Run("OpenPseudo_AllocatesCursors", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		// Don't pre-allocate cursors
-
-		instr := &Instruction{
-			Opcode: OpOpenPseudo,
-			P1:     5, // cursor number beyond current size
-			P2:     1,
-			P3:     1,
-		}
-
-		err := v.execOpenPseudo(instr)
-		if err != nil {
-			t.Fatalf("execOpenPseudo failed: %v", err)
-		}
-
-		if len(v.Cursors) <= 5 {
-			t.Errorf("Expected cursors to be allocated, got length %d", len(v.Cursors))
-		}
-
-		if v.Cursors[5] == nil {
-			t.Error("Cursor 5 should be created")
-		}
-	})
+	t.Run("BasicOpenPseudo", testOpenPseudoBasic)
+	t.Run("OpenPseudo_AllocatesCursors", testOpenPseudoAllocates)
 }
 
 // Helper to create VTab cursor for testing
@@ -120,100 +100,60 @@ func expectError(t *testing.T, err error, context string) {
 	}
 }
 
+func testVOpenBasic(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(10)
+	err := v.execVOpen(&Instruction{Opcode: OpVOpen, P4: P4Union{P: "mock_vtable"}, P4Type: P4VTab})
+	if err != nil {
+		t.Fatalf("execVOpen failed: %v", err)
+	}
+	verifyCursor(t, v.Cursors[0], CursorVTab, true)
+}
+
+func testVOpenNilVTable(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(10)
+	expectError(t, v.execVOpen(&Instruction{Opcode: OpVOpen, P4: P4Union{P: nil}, P4Type: P4VTab}), "nil virtual table")
+}
+
+func testVOpenWrongP4Type(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(10)
+	expectError(t, v.execVOpen(&Instruction{Opcode: OpVOpen, P4: P4Union{Z: "not a vtable"}, P4Type: P4Static}), "wrong P4 type")
+}
+
+func testVFilterBasic(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(10)
+	v.Cursors = make([]*Cursor, 2)
+	v.Cursors[0] = &Cursor{CurType: CursorVTab, VTable: "mock_vtable", EOF: true}
+	v.Mem[1].SetInt(100)
+	v.Mem[2].SetStr("test")
+	err := v.execVFilter(&Instruction{Opcode: OpVFilter, P1: 0, P2: 2, P3: 1, P4: P4Union{Z: "idxStr"}, P4Type: P4Static, P5: 1})
+	if err != nil {
+		t.Fatalf("execVFilter failed: %v", err)
+	}
+	if v.Cursors[0].EOF {
+		t.Error("EOF should be false after VFilter")
+	}
+}
+
+func testVFilterWrongCursorType(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(10)
+	v.Cursors = make([]*Cursor, 2)
+	v.Cursors[0] = &Cursor{CurType: CursorBTree}
+	expectError(t, v.execVFilter(&Instruction{Opcode: OpVFilter, P1: 0, P2: 0, P3: 0}), "wrong cursor type")
+}
+
 // TestVirtualTableOpcodes tests virtual table related opcodes
 func TestVirtualTableOpcodes(t *testing.T) {
 	t.Parallel()
-	t.Run("VOpen_Basic", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		mockVTable := "mock_vtable"
-
-		instr := &Instruction{
-			Opcode: OpVOpen,
-			P1:     0,
-			P2:     0,
-			P3:     0,
-			P4:     P4Union{P: mockVTable},
-			P4Type: P4VTab,
-		}
-
-		err := v.execVOpen(instr)
-		if err != nil {
-			t.Fatalf("execVOpen failed: %v", err)
-		}
-
-		verifyCursor(t, v.Cursors[0], CursorVTab, true)
-	})
-
-	t.Run("VOpen_NilVTable", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		instr := &Instruction{
-			Opcode: OpVOpen,
-			P1:     0,
-			P4:     P4Union{P: nil},
-			P4Type: P4VTab,
-		}
-		expectError(t, v.execVOpen(instr), "nil virtual table")
-	})
-
-	t.Run("VOpen_WrongP4Type", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		instr := &Instruction{
-			Opcode: OpVOpen,
-			P1:     0,
-			P4:     P4Union{Z: "not a vtable"},
-			P4Type: P4Static,
-		}
-		expectError(t, v.execVOpen(instr), "wrong P4 type")
-	})
-
-	t.Run("VFilter_Basic", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-
-		// Create a virtual table cursor
-		v.Cursors = make([]*Cursor, 2)
-		v.Cursors[0] = &Cursor{
-			CurType:    CursorVTab,
-			VTable:     "mock_vtable",
-			VTabCursor: nil,
-			EOF:        true,
-		}
-
-		// Set up constraint values
-		v.Mem[1].SetInt(100)
-		v.Mem[2].SetStr("test")
-
-		instr := &Instruction{
-			Opcode: OpVFilter,
-			P1:     0, // cursor
-			P2:     2, // argc
-			P3:     1, // idxNum
-			P4:     P4Union{Z: "idxStr"},
-			P4Type: P4Static,
-			P5:     1, // start register for args
-		}
-
-		err := v.execVFilter(instr)
-		if err != nil {
-			t.Fatalf("execVFilter failed: %v", err)
-		}
-
-		// Check EOF was reset
-		if v.Cursors[0].EOF {
-			t.Error("EOF should be false after VFilter")
-		}
-	})
-
-	t.Run("VFilter_WrongCursorType", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.Cursors = make([]*Cursor, 2)
-		v.Cursors[0] = &Cursor{CurType: CursorBTree}
-		expectError(t, v.execVFilter(&Instruction{Opcode: OpVFilter, P1: 0, P2: 0, P3: 0}), "wrong cursor type")
-	})
+	t.Run("VOpen_Basic", testVOpenBasic)
+	t.Run("VOpen_NilVTable", testVOpenNilVTable)
+	t.Run("VOpen_WrongP4Type", testVOpenWrongP4Type)
+	t.Run("VFilter_Basic", testVFilterBasic)
+	t.Run("VFilter_WrongCursorType", testVFilterWrongCursorType)
 
 	t.Run("VColumn_Basic", func(t *testing.T) {
 		t.Parallel()

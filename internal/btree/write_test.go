@@ -339,7 +339,6 @@ func TestCursorInsert(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(4096)
 
-	// Create a table
 	rootPage, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable() error = %v", err)
@@ -347,56 +346,34 @@ func TestCursorInsert(t *testing.T) {
 
 	cursor := NewCursor(bt, rootPage)
 
-	// Insert first row
-	err = cursor.Insert(1, []byte("first"))
-	if err != nil {
-		t.Fatalf("Insert(1) error = %v", err)
+	for _, row := range []struct {
+		key     int64
+		payload string
+	}{{1, "first"}, {2, "second"}, {3, "third"}} {
+		if err := cursor.Insert(row.key, []byte(row.payload)); err != nil {
+			t.Fatalf("Insert(%d) error = %v", row.key, err)
+		}
 	}
 
-	// Insert second row
-	err = cursor.Insert(2, []byte("second"))
-	if err != nil {
-		t.Fatalf("Insert(2) error = %v", err)
-	}
+	cursorInsertVerifySeeks(t, cursor)
+}
 
-	// Insert third row
-	err = cursor.Insert(3, []byte("third"))
-	if err != nil {
-		t.Fatalf("Insert(3) error = %v", err)
-	}
-
-	// Verify we can seek to each row
-	found, err := cursor.SeekRowid(1)
-	if err != nil {
-		t.Fatalf("SeekRowid(1) error = %v", err)
-	}
-	if !found {
-		t.Error("SeekRowid(1) not found")
-	}
-	if string(cursor.GetPayload()) != "first" {
-		t.Errorf("Payload = %q, want %q", cursor.GetPayload(), "first")
-	}
-
-	found, err = cursor.SeekRowid(2)
-	if err != nil {
-		t.Fatalf("SeekRowid(2) error = %v", err)
-	}
-	if !found {
-		t.Error("SeekRowid(2) not found")
-	}
-	if string(cursor.GetPayload()) != "second" {
-		t.Errorf("Payload = %q, want %q", cursor.GetPayload(), "second")
-	}
-
-	found, err = cursor.SeekRowid(3)
-	if err != nil {
-		t.Fatalf("SeekRowid(3) error = %v", err)
-	}
-	if !found {
-		t.Error("SeekRowid(3) not found")
-	}
-	if string(cursor.GetPayload()) != "third" {
-		t.Errorf("Payload = %q, want %q", cursor.GetPayload(), "third")
+func cursorInsertVerifySeeks(t *testing.T, cursor *BtCursor) {
+	t.Helper()
+	for _, tc := range []struct {
+		key     int64
+		payload string
+	}{{1, "first"}, {2, "second"}, {3, "third"}} {
+		found, err := cursor.SeekRowid(tc.key)
+		if err != nil {
+			t.Fatalf("SeekRowid(%d) error = %v", tc.key, err)
+		}
+		if !found {
+			t.Errorf("SeekRowid(%d) not found", tc.key)
+		}
+		if string(cursor.GetPayload()) != tc.payload {
+			t.Errorf("Payload = %q, want %q", cursor.GetPayload(), tc.payload)
+		}
 	}
 }
 
@@ -404,57 +381,38 @@ func TestCursorDelete(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(4096)
 
-	// Create a table with some data
 	rootPage, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable() error = %v", err)
 	}
 
 	cursor := NewCursor(bt, rootPage)
-
-	// Insert rows
 	cursor.Insert(1, []byte("first"))
 	cursor.Insert(2, []byte("second"))
 	cursor.Insert(3, []byte("third"))
 
-	// Delete the second row
+	seekAndDelete(cursor, 2)
+
+	cursorDeleteVerify(t, cursor)
+}
+
+func cursorDeleteVerify(t *testing.T, cursor *BtCursor) {
+	t.Helper()
 	found, err := cursor.SeekRowid(2)
-	if err != nil {
-		t.Fatalf("SeekRowid(2) error = %v", err)
-	}
-	if !found {
-		t.Fatal("SeekRowid(2) not found")
-	}
-
-	err = cursor.Delete()
-	if err != nil {
-		t.Fatalf("Delete() error = %v", err)
-	}
-
-	// Verify row 2 is gone
-	found, err = cursor.SeekRowid(2)
 	if err != nil {
 		t.Fatalf("SeekRowid(2) after delete error = %v", err)
 	}
 	if found {
 		t.Error("SeekRowid(2) found after delete")
 	}
-
-	// Verify rows 1 and 3 still exist
-	found, err = cursor.SeekRowid(1)
-	if err != nil {
-		t.Fatalf("SeekRowid(1) error = %v", err)
-	}
-	if !found {
-		t.Error("SeekRowid(1) not found")
-	}
-
-	found, err = cursor.SeekRowid(3)
-	if err != nil {
-		t.Fatalf("SeekRowid(3) error = %v", err)
-	}
-	if !found {
-		t.Error("SeekRowid(3) not found")
+	for _, key := range []int64{1, 3} {
+		found, err = cursor.SeekRowid(key)
+		if err != nil {
+			t.Fatalf("SeekRowid(%d) error = %v", key, err)
+		}
+		if !found {
+			t.Errorf("SeekRowid(%d) not found", key)
+		}
 	}
 }
 

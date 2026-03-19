@@ -3,6 +3,7 @@ package functions
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -840,27 +841,42 @@ func TestValueToJSON(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := valueToJSON(tt.input)
-
-			// Compare based on type
-			switch exp := tt.expected.(type) {
-			case nil:
-				if result != nil {
-					t.Errorf("expected nil, got %v", result)
-				}
-			case int64:
-				if r, ok := result.(int64); !ok || r != exp {
-					t.Errorf("expected %d, got %v", exp, result)
-				}
-			case float64:
-				if r, ok := result.(float64); !ok || r != exp {
-					t.Errorf("expected %f, got %v", exp, result)
-				}
-			case string:
-				if r, ok := result.(string); !ok || r != exp {
-					t.Errorf("expected %s, got %v", exp, result)
-				}
-			}
+			assertJSONEqual(t, tt.expected, result)
 		})
+	}
+}
+
+// assertJSONEqual compares JSON conversion results.
+func assertJSONEqual(t *testing.T, expected, result interface{}) {
+	t.Helper()
+	if expected == nil && result == nil {
+		return
+	}
+	if expected == nil || result == nil {
+		t.Errorf("expected %v, got %v", expected, result)
+		return
+	}
+	// For map types, compare via JSON serialization since valueToJSON may return raw text
+	if _, isMap := expected.(map[string]interface{}); isMap {
+		assertJSONMapEqual(t, expected, result)
+		return
+	}
+	if !reflect.DeepEqual(expected, result) {
+		t.Errorf("expected %v (%T), got %v (%T)", expected, expected, result, result)
+	}
+}
+
+func assertJSONMapEqual(t *testing.T, expected, result interface{}) {
+	t.Helper()
+	// If result is a string, try to parse it as JSON for comparison
+	if s, ok := result.(string); ok {
+		var parsed interface{}
+		if err := json.Unmarshal([]byte(s), &parsed); err == nil {
+			result = parsed
+		}
+	}
+	if !reflect.DeepEqual(expected, result) {
+		t.Errorf("expected %v (%T), got %v (%T)", expected, expected, result, result)
 	}
 }
 
@@ -894,70 +910,64 @@ func TestJSONFunctionsRegistration(t *testing.T) {
 
 // Test edge cases
 func TestJSONEdgeCases(t *testing.T) {
-	t.Run("deep nesting", func(t *testing.T) {
-		deep := `{"a":{"b":{"c":{"d":{"e":{"f":1}}}}}}`
-		result, err := jsonExtractFunc([]Value{
-			NewTextValue(deep),
-			NewTextValue("$.a.b.c.d.e.f"),
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if result.AsString() != "1" {
-			t.Errorf("expected 1, got %s", result.AsString())
-		}
-	})
+	t.Run("deep nesting", testJSONDeepNesting)
+	t.Run("large array", testJSONLargeArray)
+	t.Run("unicode handling", testJSONUnicodeHandling)
+	t.Run("empty object operations", testJSONEmptyObjectOps)
+}
 
-	t.Run("large array", func(t *testing.T) {
-		arr := make([]Value, 100)
-		for i := range arr {
-			arr[i] = NewIntValue(int64(i))
-		}
-		result, err := jsonArrayFunc(arr)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+func testJSONDeepNesting(t *testing.T) {
+	deep := `{"a":{"b":{"c":{"d":{"e":{"f":1}}}}}}`
+	result, err := jsonExtractFunc([]Value{NewTextValue(deep), NewTextValue("$.a.b.c.d.e.f")})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.AsString() != "1" {
+		t.Errorf("expected 1, got %s", result.AsString())
+	}
+}
 
-		// Verify it's a valid JSON array
-		var parsed []interface{}
-		if err := json.Unmarshal([]byte(result.AsString()), &parsed); err != nil {
-			t.Errorf("result is not valid JSON: %v", err)
-		}
-		if len(parsed) != 100 {
-			t.Errorf("expected 100 elements, got %d", len(parsed))
-		}
-	})
+func testJSONLargeArray(t *testing.T) {
+	arr := make([]Value, 100)
+	for i := range arr {
+		arr[i] = NewIntValue(int64(i))
+	}
+	result, err := jsonArrayFunc(arr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var parsed []interface{}
+	if err := json.Unmarshal([]byte(result.AsString()), &parsed); err != nil {
+		t.Errorf("result is not valid JSON: %v", err)
+	}
+	if len(parsed) != 100 {
+		t.Errorf("expected 100 elements, got %d", len(parsed))
+	}
+}
 
-	t.Run("unicode handling", func(t *testing.T) {
-		input := NewTextValue("你好世界")
-		result, err := jsonQuoteFunc([]Value{input})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+func testJSONUnicodeHandling(t *testing.T) {
+	input := NewTextValue("你好世界")
+	result, err := jsonQuoteFunc([]Value{input})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var parsed string
+	if err := json.Unmarshal([]byte(result.AsString()), &parsed); err != nil {
+		t.Errorf("result is not valid JSON: %v", err)
+	}
+	if parsed != "你好世界" {
+		t.Errorf("unicode not preserved: got %s", parsed)
+	}
+}
 
-		// Verify it's valid JSON
-		var parsed string
-		if err := json.Unmarshal([]byte(result.AsString()), &parsed); err != nil {
-			t.Errorf("result is not valid JSON: %v", err)
-		}
-		if parsed != "你好世界" {
-			t.Errorf("unicode not preserved: got %s", parsed)
-		}
-	})
-
-	t.Run("empty object operations", func(t *testing.T) {
-		result, err := jsonSetFunc([]Value{
-			NewTextValue(`{}`),
-			NewTextValue("$.a"),
-			NewIntValue(1),
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if result.AsString() != `{"a":1}` {
-			t.Errorf("expected {\"a\":1}, got %s", result.AsString())
-		}
-	})
+func testJSONEmptyObjectOps(t *testing.T) {
+	result, err := jsonSetFunc([]Value{NewTextValue(`{}`), NewTextValue("$.a"), NewIntValue(1)})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.AsString() != `{"a":1}` {
+		t.Errorf("expected {\"a\":1}, got %s", result.AsString())
+	}
 }
 
 // Benchmark tests

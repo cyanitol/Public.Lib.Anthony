@@ -9,14 +9,9 @@ import (
 	"testing"
 )
 
-// TestDatabaseRegistryResolveAttachedTable ensures that attaching a database
-// populates the registry and allows qualified table resolution.
-func TestDatabaseRegistryResolveAttachedTable(t *testing.T) {
-	tmpDir := t.TempDir()
-	mainPath := filepath.Join(tmpDir, "main.db")
-	attachPath := filepath.Join(tmpDir, "attach.db")
-
-	// Create attached database with a table.
+// attachRegistryCreateAttachedDB creates and populates the database to be attached.
+func attachRegistryCreateAttachedDB(t *testing.T, attachPath string) {
+	t.Helper()
 	attachDB, err := sql.Open(DriverName, attachPath)
 	if err != nil {
 		t.Fatalf("failed to open attach database: %v", err)
@@ -24,6 +19,13 @@ func TestDatabaseRegistryResolveAttachedTable(t *testing.T) {
 	if _, err := attachDB.Exec("CREATE TABLE t2(x, y)"); err != nil {
 		t.Fatalf("failed to create table in attach database: %v", err)
 	}
+	attachRegistryVerifyMaster(t, attachDB)
+	attachDB.Close()
+}
+
+// attachRegistryVerifyMaster verifies the sqlite_master entry for t2.
+func attachRegistryVerifyMaster(t *testing.T, attachDB *sql.DB) {
+	t.Helper()
 	var masterCount int
 	if err := attachDB.QueryRow("SELECT count(*) FROM sqlite_master WHERE name = 't2'").Scan(&masterCount); err != nil {
 		t.Fatalf("failed to verify table in attach database: %v", err)
@@ -37,15 +39,17 @@ func TestDatabaseRegistryResolveAttachedTable(t *testing.T) {
 		t.Fatalf("failed to read sqlite_master row: %v", err)
 	}
 	t.Logf("master row: type=%s name=%s tbl=%s root=%d sql=%s", typ, name, tbl, root, sqlText)
-	attachDB.Close()
+}
 
+// attachRegistryOpenAndAttach opens main DB and attaches the other database.
+func attachRegistryOpenAndAttach(t *testing.T, mainPath, attachPath string) *Conn {
+	t.Helper()
 	driver := GetDriver()
 	conn, err := driver.Open(mainPath)
 	if err != nil {
 		t.Fatalf("failed to open main connection: %v", err)
 	}
 	c := conn.(*Conn)
-	defer c.Close()
 
 	stmt, err := c.PrepareContext(context.Background(), fmt.Sprintf("ATTACH DATABASE '%s' AS two", attachPath))
 	if err != nil {
@@ -54,9 +58,13 @@ func TestDatabaseRegistryResolveAttachedTable(t *testing.T) {
 	if _, err := stmt.(*Stmt).ExecContext(context.Background(), nil); err != nil {
 		t.Fatalf("failed to execute attach: %v", err)
 	}
-	defer stmt.Close()
+	stmt.Close()
+	return c
+}
 
-	// Inspect registry entry for attached database.
+// attachRegistryEnsureSchemaLoaded loads the schema from master if possible.
+func attachRegistryEnsureSchemaLoaded(t *testing.T, c *Conn) (int, int) {
+	t.Helper()
 	attachedDB, _ := c.dbRegistry.GetDatabase("two")
 	attachedTables := 0
 	pageCount := 0
@@ -72,6 +80,21 @@ func TestDatabaseRegistryResolveAttachedTable(t *testing.T) {
 		}
 		attachedTables = len(attachedDB.Schema.Tables)
 	}
+	return attachedTables, pageCount
+}
+
+// TestDatabaseRegistryResolveAttachedTable ensures that attaching a database
+// populates the registry and allows qualified table resolution.
+func TestDatabaseRegistryResolveAttachedTable(t *testing.T) {
+	tmpDir := t.TempDir()
+	mainPath := filepath.Join(tmpDir, "main.db")
+	attachPath := filepath.Join(tmpDir, "attach.db")
+
+	attachRegistryCreateAttachedDB(t, attachPath)
+	c := attachRegistryOpenAndAttach(t, mainPath, attachPath)
+	defer c.Close()
+
+	attachedTables, pageCount := attachRegistryEnsureSchemaLoaded(t, c)
 
 	// Resolve qualified table from attached database.
 	table, dbEntry, _, ok := c.dbRegistry.ResolveTable("two", "t2")

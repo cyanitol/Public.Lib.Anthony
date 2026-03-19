@@ -402,62 +402,67 @@ func splitStatements(query string) []string {
 // 2. Registering built-in functions
 // The schemaLoaded parameter indicates if schema was already loaded by another connection.
 func (c *Conn) openDatabase(schemaLoaded bool) error {
-	// Load schema from the database only if this is the first connection
 	if !schemaLoaded {
-		// First, ensure sqlite_master table exists in the schema
-		// This is required for both new and existing databases
-		if err := c.schema.InitializeMaster(); err != nil {
-			return fmt.Errorf("failed to initialize sqlite_master: %w", err)
-		}
-
-		// Ensure sqlite_master storage exists on disk for brand new databases
-		if c.btree != nil && c.pager != nil && c.pager.PageCount() <= 1 {
-			if _, err := c.btree.CreateTable(); err != nil {
-				return fmt.Errorf("failed to create sqlite_master storage: %w", err)
-			}
-		}
-
-		if err := c.schema.LoadFromMaster(c.btree); err != nil {
-			// Schema loading may fail for new empty databases (no sqlite_master table yet),
-			// which is expected and safe to ignore. The schema will be populated as tables
-			// are created through DDL statements.
-			// We explicitly ignore this error as it indicates a new database, not a failure.
+		if err := c.loadInitialSchema(); err != nil {
+			return err
 		}
 	}
 
-	// Register the main database in the registry
-	if err := c.dbRegistry.AttachDatabase("main", c.filename, c.pager, c.btree); err != nil {
-		return fmt.Errorf("failed to register main database: %w", err)
+	if err := c.registerMainDatabase(); err != nil {
+		return err
 	}
 
-	// Keep registry schema in sync with the connection's main schema
-	if mainDB, ok := c.dbRegistry.GetDatabase("main"); ok {
-		mainDB.Schema = c.schema
-		mainDB.Pager = c.pager
-		mainDB.Btree = c.btree
-	}
+	c.initRegistries()
 
-	// Register built-in SQL functions
-	c.funcReg = functions.DefaultRegistry()
-
-	// Initialize virtual table and collation registries
-	c.vtabRegistry = vtab.NewModuleRegistry()
-	c.collRegistry = collation.NewCollationRegistry()
-
-	// Register built-in virtual table modules
 	if err := c.registerBuiltinVirtualTables(); err != nil {
 		return fmt.Errorf("failed to register virtual tables: %w", err)
 	}
 
-	// Initialize foreign key constraint manager
 	c.fkManager = constraint.NewForeignKeyManager()
 
-	// Default PRAGMA cache_size (-2000 means 2000 KiB)
 	if c.cacheSize == 0 {
 		c.cacheSize = -2000
 	}
 
 	return nil
+}
+
+// loadInitialSchema initializes and loads the schema for the first connection.
+func (c *Conn) loadInitialSchema() error {
+	if err := c.schema.InitializeMaster(); err != nil {
+		return fmt.Errorf("failed to initialize sqlite_master: %w", err)
+	}
+
+	if c.btree != nil && c.pager != nil && c.pager.PageCount() <= 1 {
+		if _, err := c.btree.CreateTable(); err != nil {
+			return fmt.Errorf("failed to create sqlite_master storage: %w", err)
+		}
+	}
+
+	// Schema loading may fail for new empty databases, which is expected and safe to ignore.
+	_ = c.schema.LoadFromMaster(c.btree)
+	return nil
+}
+
+// registerMainDatabase registers the main database in the registry and syncs schema.
+func (c *Conn) registerMainDatabase() error {
+	if err := c.dbRegistry.AttachDatabase("main", c.filename, c.pager, c.btree); err != nil {
+		return fmt.Errorf("failed to register main database: %w", err)
+	}
+
+	if mainDB, ok := c.dbRegistry.GetDatabase("main"); ok {
+		mainDB.Schema = c.schema
+		mainDB.Pager = c.pager
+		mainDB.Btree = c.btree
+	}
+	return nil
+}
+
+// initRegistries initializes function, virtual table, and collation registries.
+func (c *Conn) initRegistries() {
+	c.funcReg = functions.DefaultRegistry()
+	c.vtabRegistry = vtab.NewModuleRegistry()
+	c.collRegistry = collation.NewCollationRegistry()
 }
 
 // registerBuiltinVirtualTables registers built-in virtual table modules like FTS5 and RTree.

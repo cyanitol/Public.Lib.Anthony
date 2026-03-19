@@ -1,10 +1,15 @@
 # Anthony Roadmap (Production Readiness)
 
 ## Scope and Current Snapshot
-- Feature parity: ~75% vs reference SQLite; 25 packages all passing, comprehensive test coverage.
-- Targets: no CGO, maintain cyclomatic complexity ≤ 11, push critical package coverage to ≥80%.
+- Feature parity: ~80% vs reference SQLite; 27 packages all passing, 14,046 tests passing (alltests tag), 0 failures.
+- Targets: no CGO, maintain cyclomatic complexity ≤ 9, push critical package coverage to ≥80%.
 
 ## Recently Completed
+- **Cyclomatic Complexity ≤9** - All functions across entire codebase
+- **Race Condition Fixes** - PlanCache.Get() (RLock→Lock+atomics), VDBE test isolation
+- **Test Isolation** - 181 hardcoded DB paths converted to t.TempDir()
+- **alltests Build Tag** - Unified main + trinity test execution
+- **Go 1.26.1** - Toolchain upgrade
 - **Trigger Runtime** - Full BEFORE/AFTER execution, WHEN clause, RAISE, UPDATE OF, cascading
 - **ALTER TABLE** - RENAME TABLE, RENAME COLUMN, DROP COLUMN
 - **ATTACH/DETACH** - Cross-database queries, PRAGMA database_list
@@ -18,9 +23,9 @@
 
 ## Active Workstreams
 
-1) Window Functions (In Progress)
-- LAG, LEAD, FIRST_VALUE, LAST_VALUE being implemented now.
-- DENSE_RANK, NTILE still need compiler wiring.
+1) Window Functions (Mostly Complete)
+- Compiler wired for all window functions; core functionality working.
+- 42 trinity window tests skipped as pre-existing edge cases.
 - Frame specification (ROWS/RANGE) needs edge case testing.
 
 2) Recursive CTE (In Progress)
@@ -56,4 +61,4 @@
 - Keep README and CHANGELOG aligned with current priorities and unsupported features.
 - Publish tagged releases once active workstreams are completed and conformance/coverage thresholds are met.
 
-*Last updated: 2026-03-15*
+*Last updated: 2026-03-16*

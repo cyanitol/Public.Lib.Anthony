@@ -113,41 +113,37 @@ func TestMakeRecord(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			record, err := MakeRecord(tt.values)
-			if tt.err {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if len(record) == 0 {
-				t.Error("record is empty")
-			}
-
-			// Parse it back
-			parsed, err := ParseRecord(record)
-			if err != nil {
-				t.Fatalf("failed to parse record: %v", err)
-			}
-
-			if len(parsed.Values) != len(tt.values) {
-				t.Fatalf("value count mismatch: got %d, want %d",
-					len(parsed.Values), len(tt.values))
-			}
-
-			// Verify each value
-			for i, want := range tt.values {
-				got := parsed.Values[i]
-				if !valuesEqual(got, want) {
-					t.Errorf("value %d mismatch: got %+v, want %+v", i, got, want)
-				}
-			}
+			verifyMakeRecordCase(t, tt.values, tt.err)
 		})
+	}
+}
+
+func verifyMakeRecordCase(t *testing.T, values []Value, expectErr bool) {
+	t.Helper()
+	record, err := MakeRecord(values)
+	if expectErr {
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(record) == 0 {
+		t.Error("record is empty")
+	}
+	parsed, err := ParseRecord(record)
+	if err != nil {
+		t.Fatalf("failed to parse record: %v", err)
+	}
+	if len(parsed.Values) != len(values) {
+		t.Fatalf("value count mismatch: got %d, want %d", len(parsed.Values), len(values))
+	}
+	for i, want := range values {
+		if !valuesEqual(parsed.Values[i], want) {
+			t.Errorf("value %d mismatch: got %+v, want %+v", i, parsed.Values[i], want)
+		}
 	}
 }
 
@@ -513,163 +509,115 @@ func TestSerialTypeLen(t *testing.T) {
 	}
 }
 
+func assertValueType(t *testing.T, v Value, wantType ValueType, wantNull bool) {
+	t.Helper()
+	if v.Type != wantType {
+		t.Errorf("Type = %v, want %v", v.Type, wantType)
+	}
+	if v.IsNull != wantNull {
+		t.Errorf("IsNull = %v, want %v", v.IsNull, wantNull)
+	}
+}
+
 func TestValueConstructors(t *testing.T) {
 	t.Run("IntValue", func(t *testing.T) {
 		v := IntValue(42)
-		if v.Type != TypeInteger {
-			t.Errorf("Type = %v, want %v", v.Type, TypeInteger)
-		}
+		assertValueType(t, v, TypeInteger, false)
 		if v.Int != 42 {
 			t.Errorf("Int = %d, want 42", v.Int)
 		}
-		if v.IsNull {
-			t.Error("IsNull should be false")
-		}
 	})
-
 	t.Run("FloatValue", func(t *testing.T) {
 		v := FloatValue(3.14)
-		if v.Type != TypeFloat {
-			t.Errorf("Type = %v, want %v", v.Type, TypeFloat)
-		}
+		assertValueType(t, v, TypeFloat, false)
 		if v.Float != 3.14 {
 			t.Errorf("Float = %f, want 3.14", v.Float)
 		}
-		if v.IsNull {
-			t.Error("IsNull should be false")
-		}
 	})
-
 	t.Run("TextValue", func(t *testing.T) {
 		v := TextValue("hello")
-		if v.Type != TypeText {
-			t.Errorf("Type = %v, want %v", v.Type, TypeText)
-		}
+		assertValueType(t, v, TypeText, false)
 		if v.Text != "hello" {
 			t.Errorf("Text = %q, want \"hello\"", v.Text)
 		}
-		if v.IsNull {
-			t.Error("IsNull should be false")
-		}
 	})
-
 	t.Run("BlobValue", func(t *testing.T) {
-		blob := []byte{1, 2, 3}
-		v := BlobValue(blob)
-		if v.Type != TypeBlob {
-			t.Errorf("Type = %v, want %v", v.Type, TypeBlob)
-		}
-		if !bytes.Equal(v.Blob, blob) {
-			t.Errorf("Blob = %v, want %v", v.Blob, blob)
-		}
-		if v.IsNull {
-			t.Error("IsNull should be false")
+		v := BlobValue([]byte{1, 2, 3})
+		assertValueType(t, v, TypeBlob, false)
+		if !bytes.Equal(v.Blob, []byte{1, 2, 3}) {
+			t.Errorf("Blob = %v, want [1 2 3]", v.Blob)
 		}
 	})
-
 	t.Run("NullValue", func(t *testing.T) {
-		v := NullValue()
-		if v.Type != TypeNull {
-			t.Errorf("Type = %v, want %v", v.Type, TypeNull)
-		}
-		if !v.IsNull {
-			t.Error("IsNull should be true")
-		}
+		assertValueType(t, NullValue(), TypeNull, true)
 	})
 }
 
+// makeAndParse creates a record from values and parses it back, fataling on error.
+func makeAndParse(t *testing.T, values []Value) *Record {
+	t.Helper()
+	record, err := MakeRecord(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseRecord(record)
+	if err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+	return parsed
+}
+
+func testRecordHeaderSize(t *testing.T) {
+	t.Helper()
+	values := []Value{IntValue(1), IntValue(2), IntValue(3)}
+	record, err := MakeRecord(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	headerSize, n := GetVarint(record, 0)
+	if n == 0 {
+		t.Fatal("failed to read header size")
+	}
+	if int(headerSize) > len(record) {
+		t.Errorf("header size %d exceeds record length %d", headerSize, len(record))
+	}
+	parsed := makeAndParse(t, values)
+	if len(parsed.Values) != 3 {
+		t.Errorf("expected 3 values, got %d", len(parsed.Values))
+	}
+}
+
+func testRecordSerialTypeOrdering(t *testing.T) {
+	t.Helper()
+	values := []Value{NullValue(), IntValue(100), FloatValue(2.5), TextValue("test")}
+	parsed := makeAndParse(t, values)
+	expectedTypes := []ValueType{TypeNull, TypeInteger, TypeFloat, TypeText}
+	for i, wantType := range expectedTypes {
+		if parsed.Values[i].Type != wantType {
+			t.Errorf("value[%d] type = %v, want %v", i, parsed.Values[i].Type, wantType)
+		}
+	}
+}
+
+func testRecordBodyValues(t *testing.T) {
+	t.Helper()
+	values := []Value{IntValue(255), TextValue("ab"), BlobValue([]byte{1, 2})}
+	parsed := makeAndParse(t, values)
+	if parsed.Values[0].Int != 255 {
+		t.Errorf("first value: got %d, want 255", parsed.Values[0].Int)
+	}
+	if parsed.Values[1].Text != "ab" {
+		t.Errorf("second value: got %q, want \"ab\"", parsed.Values[1].Text)
+	}
+	if !bytes.Equal(parsed.Values[2].Blob, []byte{1, 2}) {
+		t.Errorf("third value: got %v, want [1 2]", parsed.Values[2].Blob)
+	}
+}
+
 func TestRecordFormat(t *testing.T) {
-	t.Run("header_size_calculation", func(t *testing.T) {
-		// Test that header size is correctly calculated for various records
-		values := []Value{IntValue(1), IntValue(2), IntValue(3)}
-		record, err := MakeRecord(values)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		// Read header size
-		headerSize, n := GetVarint(record, 0)
-		if n == 0 {
-			t.Fatal("failed to read header size")
-		}
-
-		// Verify header size points to start of body
-		if int(headerSize) > len(record) {
-			t.Errorf("header size %d exceeds record length %d", headerSize, len(record))
-		}
-
-		// Parse and verify
-		parsed, err := ParseRecord(record)
-		if err != nil {
-			t.Fatalf("failed to parse: %v", err)
-		}
-		if len(parsed.Values) != 3 {
-			t.Errorf("expected 3 values, got %d", len(parsed.Values))
-		}
-	})
-
-	t.Run("serial_type_ordering", func(t *testing.T) {
-		// Test that serial types appear in header in correct order
-		values := []Value{
-			NullValue(),
-			IntValue(100),
-			FloatValue(2.5),
-			TextValue("test"),
-		}
-		record, err := MakeRecord(values)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		parsed, err := ParseRecord(record)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		// Verify types are in correct order
-		if parsed.Values[0].Type != TypeNull {
-			t.Error("first value should be null")
-		}
-		if parsed.Values[1].Type != TypeInteger {
-			t.Error("second value should be integer")
-		}
-		if parsed.Values[2].Type != TypeFloat {
-			t.Error("third value should be float")
-		}
-		if parsed.Values[3].Type != TypeText {
-			t.Error("fourth value should be text")
-		}
-	})
-
-	t.Run("body_values_contiguous", func(t *testing.T) {
-		// Verify that body values are stored contiguously without gaps
-		values := []Value{
-			IntValue(255),           // 1 byte (int8)
-			TextValue("ab"),         // 2 bytes
-			BlobValue([]byte{1, 2}), // 2 bytes
-		}
-		record, err := MakeRecord(values)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		// Parse successfully
-		parsed, err := ParseRecord(record)
-		if err != nil {
-			t.Fatalf("failed to parse: %v", err)
-		}
-
-		// Verify values
-		if parsed.Values[0].Int != 255 {
-			t.Errorf("first value: got %d, want 255", parsed.Values[0].Int)
-		}
-		if parsed.Values[1].Text != "ab" {
-			t.Errorf("second value: got %q, want \"ab\"", parsed.Values[1].Text)
-		}
-		if !bytes.Equal(parsed.Values[2].Blob, []byte{1, 2}) {
-			t.Errorf("third value: got %v, want [1 2]", parsed.Values[2].Blob)
-		}
-	})
+	t.Run("header_size_calculation", func(t *testing.T) { testRecordHeaderSize(t) })
+	t.Run("serial_type_ordering", func(t *testing.T) { testRecordSerialTypeOrdering(t) })
+	t.Run("body_values_contiguous", func(t *testing.T) { testRecordBodyValues(t) })
 }
 
 // Helper function to compare values

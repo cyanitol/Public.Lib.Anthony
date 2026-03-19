@@ -136,14 +136,26 @@ func (m *MockPager) SetCookie(dbIndex int, cookieType int, value uint32) error {
 	return nil
 }
 
+// verifyTransactionState checks transaction state after execTransaction.
+func verifyTransactionState(t *testing.T, pager *MockPager, p2 int, setupTxn bool, expectError bool) {
+	t.Helper()
+	if expectError || setupTxn {
+		return
+	}
+	if !pager.InTransaction() {
+		t.Error("transaction should be active")
+	}
+	if p2 != 0 && !pager.InWriteTransaction() {
+		t.Error("write transaction should be active")
+	}
+}
+
 // Test OpTransaction
 func TestOpTransaction(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name        string
-		p1          int // db index
-		p2          int // write flag
-		p3          int // schema version
+		p1, p2, p3  int
 		setupTxn    bool
 		expectError bool
 	}{
@@ -159,35 +171,27 @@ func TestOpTransaction(t *testing.T) {
 			v := New()
 			pager := NewMockPager()
 			v.Ctx = &VDBEContext{Pager: pager}
-
 			if tt.setupTxn {
 				pager.BeginRead()
 			}
-
-			instr := &Instruction{
-				Opcode: OpTransaction,
-				P1:     tt.p1,
-				P2:     tt.p2,
-				P3:     tt.p3,
-			}
-
-			err := v.execTransaction(instr)
-			if tt.expectError && err == nil {
-				t.Error("expected error but got none")
-			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-
-			if !tt.expectError && !tt.setupTxn {
-				if !pager.InTransaction() {
-					t.Error("transaction should be active")
-				}
-				if tt.p2 != 0 && !pager.InWriteTransaction() {
-					t.Error("write transaction should be active")
-				}
-			}
+			err := v.execTransaction(&Instruction{Opcode: OpTransaction, P1: tt.p1, P2: tt.p2, P3: tt.p3})
+			checkExpectedError(t, err, tt.expectError)
+			verifyTransactionState(t, pager, tt.p2, tt.setupTxn, tt.expectError)
 		})
+	}
+}
+
+// verifyAutoCommitState checks the transaction state after autocommit.
+func verifyAutoCommitState(t *testing.T, pager *MockPager, p1 int, setupTxn bool, expectError bool) {
+	t.Helper()
+	if p1 == 0 && !expectError {
+		if !pager.InTransaction() {
+			t.Error("transaction should be active after begin")
+		}
+	} else if p1 == 1 && setupTxn && !expectError {
+		if pager.InTransaction() {
+			t.Error("transaction should not be active after commit/rollback")
+		}
 	}
 }
 
@@ -196,9 +200,9 @@ func TestOpAutoCommit(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name        string
-		p1          int  // 1=commit, 0=begin
-		p2          int  // rollback flag
-		setupTxn    bool // setup a transaction first
+		p1          int
+		p2          int
+		setupTxn    bool
 		expectError bool
 	}{
 		{"begin transaction", 0, 0, false, false},
@@ -214,37 +218,12 @@ func TestOpAutoCommit(t *testing.T) {
 			v := New()
 			pager := NewMockPager()
 			v.Ctx = &VDBEContext{Pager: pager}
-
 			if tt.setupTxn {
 				pager.BeginWrite()
 			}
-
-			instr := &Instruction{
-				Opcode: OpAutocommit,
-				P1:     tt.p1,
-				P2:     tt.p2,
-			}
-
-			err := v.execAutoCommit(instr)
-			if tt.expectError && err == nil {
-				t.Error("expected error but got none")
-			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-
-			// Verify transaction state
-			if tt.p1 == 0 && !tt.expectError {
-				// Begin transaction
-				if !pager.InTransaction() {
-					t.Error("transaction should be active after begin")
-				}
-			} else if tt.p1 == 1 && tt.setupTxn && !tt.expectError {
-				// Commit or rollback transaction
-				if pager.InTransaction() {
-					t.Error("transaction should not be active after commit/rollback")
-				}
-			}
+			err := v.execAutoCommit(&Instruction{Opcode: OpAutocommit, P1: tt.p1, P2: tt.p2})
+			checkExpectedError(t, err, tt.expectError)
+			verifyAutoCommitState(t, pager, tt.p1, tt.setupTxn, tt.expectError)
 		})
 	}
 }
@@ -278,46 +257,52 @@ func TestOpSavepoint(t *testing.T) {
 			v := New()
 			pager := NewMockPager()
 			v.Ctx = &VDBEContext{Pager: pager}
-
 			if tt.setupTxn {
 				pager.BeginWrite()
 			}
-
-			// Setup savepoints
 			for _, sp := range tt.setupSp {
 				pager.Savepoint(sp)
 			}
-
-			instr := &Instruction{
-				Opcode: OpSavepoint,
-				P1:     tt.operation,
-				P4:     P4Union{Z: tt.spName},
-				P4Type: P4Static,
-			}
-
-			err := v.execSavepoint(instr)
-			if tt.expectError && err == nil {
-				t.Error("expected error but got none")
-			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-
-			// Check savepoints
-			if tt.checkSp != nil && !tt.expectError {
-				if len(pager.savepoints) != len(tt.checkSp) {
-					t.Errorf("expected %d savepoints, got %d", len(tt.checkSp), len(pager.savepoints))
-				}
-				for i, sp := range tt.checkSp {
-					if i >= len(pager.savepoints) {
-						break
-					}
-					if pager.savepoints[i] != sp {
-						t.Errorf("savepoint[%d]: expected %s, got %s", i, sp, pager.savepoints[i])
-					}
-				}
-			}
+			err := v.execSavepoint(&Instruction{Opcode: OpSavepoint, P1: tt.operation, P4: P4Union{Z: tt.spName}, P4Type: P4Static})
+			checkExpectedError(t, err, tt.expectError)
+			verifySavepoints(t, pager, tt.checkSp, tt.expectError)
 		})
+	}
+}
+
+func checkExpectedError(t *testing.T, err error, expectError bool) {
+	t.Helper()
+	if expectError && err == nil {
+		t.Error("expected error but got none")
+	}
+	if !expectError && err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func verifySavepoints(t *testing.T, pager *MockPager, expected []string, hadError bool) {
+	t.Helper()
+	if expected == nil || hadError {
+		return
+	}
+	if len(pager.savepoints) != len(expected) {
+		t.Errorf("expected %d savepoints, got %d", len(expected), len(pager.savepoints))
+	}
+	for i, sp := range expected {
+		if i >= len(pager.savepoints) {
+			break
+		}
+		if pager.savepoints[i] != sp {
+			t.Errorf("savepoint[%d]: expected %s, got %s", i, sp, pager.savepoints[i])
+		}
+	}
+}
+
+// checkErrorMessage checks if an error message contains expected string.
+func checkErrorMessage(t *testing.T, err error, expected string) {
+	t.Helper()
+	if expected != "" && err != nil && !contains(err.Error(), expected) {
+		t.Errorf("expected error containing %q, got %q", expected, err.Error())
 	}
 }
 
@@ -326,9 +311,7 @@ func TestOpVerifyCookie(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name         string
-		dbIndex      int
-		cookieType   int
-		expectedVal  int
+		dbIndex, cookieType, expectedVal int
 		actualVal    uint32
 		expectError  bool
 		errorMessage string
@@ -346,29 +329,10 @@ func TestOpVerifyCookie(t *testing.T) {
 			v := New()
 			pager := NewMockPager()
 			v.Ctx = &VDBEContext{Pager: pager}
-
-			// Set actual cookie value
 			pager.SetCookie(tt.dbIndex, tt.cookieType, tt.actualVal)
-
-			instr := &Instruction{
-				Opcode: OpVerifyCookie,
-				P1:     tt.dbIndex,
-				P2:     tt.cookieType,
-				P3:     tt.expectedVal,
-			}
-
-			err := v.execVerifyCookie(instr)
-			if tt.expectError && err == nil {
-				t.Error("expected error but got none")
-			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if tt.expectError && err != nil && tt.errorMessage != "" {
-				if !contains(err.Error(), tt.errorMessage) {
-					t.Errorf("expected error containing %q, got %q", tt.errorMessage, err.Error())
-				}
-			}
+			err := v.execVerifyCookie(&Instruction{Opcode: OpVerifyCookie, P1: tt.dbIndex, P2: tt.cookieType, P3: tt.expectedVal})
+			checkExpectedError(t, err, tt.expectError)
+			checkErrorMessage(t, err, tt.errorMessage)
 		})
 	}
 }
@@ -420,6 +384,15 @@ func TestOpSetCookie(t *testing.T) {
 	}
 }
 
+// txnFlowExecSavepoint is a helper that creates a savepoint instruction and executes it.
+func txnFlowExecSavepoint(t *testing.T, v *VDBE, op int, name string) {
+	t.Helper()
+	instr := &Instruction{Opcode: OpSavepoint, P1: op, P4: P4Union{Z: name}, P4Type: P4Static}
+	if err := v.execSavepoint(instr); err != nil {
+		t.Fatalf("execSavepoint(%d, %s) failed: %v", op, name, err)
+	}
+}
+
 // Test transaction flow with multiple opcodes
 func TestTransactionFlow(t *testing.T) {
 	t.Parallel()
@@ -427,55 +400,29 @@ func TestTransactionFlow(t *testing.T) {
 	pager := NewMockPager()
 	v.Ctx = &VDBEContext{Pager: pager}
 
-	// Begin write transaction
-	instr := &Instruction{Opcode: OpTransaction, P1: 0, P2: 1, P3: 0}
-	if err := v.execTransaction(instr); err != nil {
+	if err := v.execTransaction(&Instruction{Opcode: OpTransaction, P1: 0, P2: 1, P3: 0}); err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
 	}
 	if !pager.InWriteTransaction() {
 		t.Error("write transaction should be active")
 	}
 
-	// Create savepoint
-	instr = &Instruction{
-		Opcode: OpSavepoint,
-		P1:     0,
-		P4:     P4Union{Z: "sp1"},
-		P4Type: P4Static,
-	}
-	if err := v.execSavepoint(instr); err != nil {
-		t.Fatalf("failed to create savepoint: %v", err)
-	}
+	txnFlowExecSavepoint(t, v, 0, "sp1")
 	if len(pager.savepoints) != 1 {
 		t.Errorf("expected 1 savepoint, got %d", len(pager.savepoints))
 	}
 
-	// Create another savepoint
-	instr.P4.Z = "sp2"
-	if err := v.execSavepoint(instr); err != nil {
-		t.Fatalf("failed to create second savepoint: %v", err)
-	}
+	txnFlowExecSavepoint(t, v, 0, "sp2")
 	if len(pager.savepoints) != 2 {
 		t.Errorf("expected 2 savepoints, got %d", len(pager.savepoints))
 	}
 
-	// Rollback to first savepoint
-	instr = &Instruction{
-		Opcode: OpSavepoint,
-		P1:     2, // rollback operation
-		P4:     P4Union{Z: "sp1"},
-		P4Type: P4Static,
-	}
-	if err := v.execSavepoint(instr); err != nil {
-		t.Fatalf("failed to rollback to savepoint: %v", err)
-	}
+	txnFlowExecSavepoint(t, v, 2, "sp1")
 	if len(pager.savepoints) != 1 {
 		t.Errorf("expected 1 savepoint after rollback, got %d", len(pager.savepoints))
 	}
 
-	// Commit transaction
-	instr = &Instruction{Opcode: OpCommit}
-	if err := v.execCommit(instr); err != nil {
+	if err := v.execCommit(&Instruction{Opcode: OpCommit}); err != nil {
 		t.Fatalf("failed to commit: %v", err)
 	}
 	if pager.InTransaction() {

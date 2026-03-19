@@ -586,27 +586,16 @@ func TestIndexCursor_ClimbToNextParent(t *testing.T) {
 // TestMultipleLevelTree creates a deep tree to trigger interior page operations
 func TestMultipleLevelTree(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(512) // Small page size
+	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable() error = %v", err)
 	}
 
 	cursor := NewCursor(bt, rootPage)
-
-	// Insert many rows to create a deep tree
-	insertCount := 0
-	for i := int64(1); i <= 1000; i++ {
-		err := cursor.Insert(i, make([]byte, 10))
-		if err != nil {
-			break
-		}
-		insertCount++
-	}
-
+	insertCount := insertRows(cursor, 1, 1000, 10)
 	t.Logf("Inserted %d rows", insertCount)
 
-	// Verify we can navigate through the tree
 	cursor.MoveToFirst()
 	if !cursor.IsValid() {
 		t.Error("MoveToFirst() resulted in invalid cursor")
@@ -617,27 +606,11 @@ func TestMultipleLevelTree(t *testing.T) {
 		t.Error("MoveToLast() resulted in invalid cursor")
 	}
 
-	// Navigate backward from end
-	backCount := 0
-	for i := 0; i < 50; i++ {
-		err := cursor.Previous()
-		if err != nil || !cursor.IsValid() {
-			break
-		}
-		backCount++
-	}
+	backCount := navigateBackward(cursor, 50)
 	t.Logf("Backward navigation: %d steps", backCount)
 
-	// Navigate forward from beginning
 	cursor.MoveToFirst()
-	fwdCount := 0
-	for i := 0; i < 50; i++ {
-		err := cursor.Next()
-		if err != nil || !cursor.IsValid() {
-			break
-		}
-		fwdCount++
-	}
+	fwdCount := navigateForward(cursor, 50)
 	t.Logf("Forward navigation: %d steps", fwdCount)
 }
 
@@ -652,44 +625,22 @@ func TestDeepIndexTree(t *testing.T) {
 
 	cursor := NewIndexCursor(bt, rootPage)
 
-	// Insert many entries
-	insertCount := 0
-	for i := 0; i < 500; i++ {
-		key := []byte(fmt.Sprintf("deepkey%06d", i))
-		err := cursor.InsertIndex(key, int64(i))
-		if err != nil {
-			break
-		}
-		insertCount++
-	}
-
+	insertCount := insertIndexEntriesN(cursor, 500, func(i int) []byte {
+		return []byte(fmt.Sprintf("deepkey%06d", i))
+	})
 	t.Logf("Inserted %d index entries", insertCount)
 
-	// Full forward scan
-	cursor.MoveToFirst()
-	scanCount := 0
-	for cursor.IsValid() && scanCount < 600 {
-		scanCount++
-		err := cursor.NextIndex()
-		if err != nil {
-			break
-		}
-	}
+	scanCount := countIndexForward(cursor)
 	t.Logf("Forward scan: %d entries", scanCount)
 
-	// Full backward scan
-	cursor.MoveToLast()
-	backScan := 0
-	for cursor.IsValid() && backScan < 600 {
-		backScan++
-		err := cursor.PrevIndex()
-		if err != nil {
-			break
-		}
-	}
+	backScan := countIndexBackward(cursor)
 	t.Logf("Backward scan: %d entries", backScan)
 
-	// Random seeks
+	deepIndexTreeSeeks(t, cursor, insertCount)
+}
+
+func deepIndexTreeSeeks(t *testing.T, cursor *IndexCursor, insertCount int) {
+	t.Helper()
 	for i := 0; i < 20; i++ {
 		idx := i * 25
 		if idx >= insertCount {
@@ -704,8 +655,7 @@ func TestDeepIndexTree(t *testing.T) {
 			t.Errorf("Failed to find key: %s", searchKey)
 		}
 		if found && !bytes.Equal(cursor.GetKey(), searchKey) {
-			t.Errorf("Seek returned wrong key: got %s, want %s",
-				cursor.GetKey(), searchKey)
+			t.Errorf("Seek returned wrong key: got %s, want %s", cursor.GetKey(), searchKey)
 		}
 	}
 }

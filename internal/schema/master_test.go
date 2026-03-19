@@ -30,7 +30,11 @@ func TestInitializeMaster(t *testing.T) {
 		t.Errorf("table.RootPage = %d, want 1", table.RootPage)
 	}
 
-	// Verify columns
+	verifyMasterColumns(t, table)
+}
+
+func verifyMasterColumns(t *testing.T, table *Table) {
+	t.Helper()
 	expectedColumns := []struct {
 		name     string
 		typeName string
@@ -48,7 +52,6 @@ func TestInitializeMaster(t *testing.T) {
 	}
 
 	for i, expected := range expectedColumns {
-		expected := expected
 		col := table.Columns[i]
 		if col.Name != expected.name {
 			t.Errorf("column %d name = %q, want %q", i, col.Name, expected.name)

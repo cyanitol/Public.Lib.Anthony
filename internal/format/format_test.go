@@ -116,6 +116,41 @@ func TestIsValidPageSize(t *testing.T) {
 	}
 }
 
+// assertNewHeaderDefaults validates the default values of a newly created header.
+func assertNewHeaderDefaults(t *testing.T, h *Header, pageSize int) {
+	t.Helper()
+	if h == nil {
+		t.Fatal("NewHeader() returned nil")
+	}
+	if string(h.Magic[:]) != MagicString {
+		t.Errorf("Magic = %q, want %q", h.Magic, MagicString)
+	}
+	if h.GetPageSize() != pageSize {
+		t.Errorf("PageSize = %d, want %d", h.GetPageSize(), pageSize)
+	}
+	checks := []struct {
+		name string
+		got  uint32
+		want uint32
+	}{
+		{"WriteVersion", uint32(h.WriteVersion), 1},
+		{"ReadVersion", uint32(h.ReadVersion), 1},
+		{"MaxPayloadFrac", uint32(h.MaxPayloadFrac), 64},
+		{"MinPayloadFrac", uint32(h.MinPayloadFrac), 32},
+		{"LeafPayloadFrac", uint32(h.LeafPayloadFrac), 32},
+		{"SchemaFormat", h.SchemaFormat, 4},
+		{"TextEncoding", h.TextEncoding, EncodingUTF8},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s = %d, want %d", c.name, c.got, c.want)
+		}
+	}
+	if err := h.Validate(); err != nil {
+		t.Errorf("Validate() error = %v", err)
+	}
+}
+
 func TestNewHeader(t *testing.T) {
 	t.Parallel()
 	pageSizes := []int{512, 1024, 2048, 4096, 8192, 16384, 32768, 65536}
@@ -124,56 +159,7 @@ func TestNewHeader(t *testing.T) {
 		pageSize := pageSize
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
-			h := NewHeader(pageSize)
-
-			if h == nil {
-				t.Fatal("NewHeader() returned nil")
-			}
-
-			// Check magic header
-			if string(h.Magic[:]) != MagicString {
-				t.Errorf("Magic = %q, want %q", h.Magic, MagicString)
-			}
-
-			// Check page size
-			actualPageSize := h.GetPageSize()
-			if actualPageSize != pageSize {
-				t.Errorf("PageSize = %d, want %d", actualPageSize, pageSize)
-			}
-
-			// Check default values
-			if h.WriteVersion != 1 {
-				t.Errorf("WriteVersion = %d, want 1", h.WriteVersion)
-			}
-
-			if h.ReadVersion != 1 {
-				t.Errorf("ReadVersion = %d, want 1", h.ReadVersion)
-			}
-
-			if h.MaxPayloadFrac != 64 {
-				t.Errorf("MaxPayloadFrac = %d, want 64", h.MaxPayloadFrac)
-			}
-
-			if h.MinPayloadFrac != 32 {
-				t.Errorf("MinPayloadFrac = %d, want 32", h.MinPayloadFrac)
-			}
-
-			if h.LeafPayloadFrac != 32 {
-				t.Errorf("LeafPayloadFrac = %d, want 32", h.LeafPayloadFrac)
-			}
-
-			if h.SchemaFormat != 4 {
-				t.Errorf("SchemaFormat = %d, want 4", h.SchemaFormat)
-			}
-
-			if h.TextEncoding != EncodingUTF8 {
-				t.Errorf("TextEncoding = %d, want %d", h.TextEncoding, EncodingUTF8)
-			}
-
-			// Validate the header
-			if err := h.Validate(); err != nil {
-				t.Errorf("Validate() error = %v", err)
-			}
+			assertNewHeaderDefaults(t, NewHeader(pageSize), pageSize)
 		})
 	}
 }
@@ -558,9 +544,40 @@ func TestHeader_Validate(t *testing.T) {
 	}
 }
 
+// assertHeaderFieldsMatch compares two headers field by field.
+func assertHeaderFieldsMatch(t *testing.T, h, h2 *Header) {
+	t.Helper()
+	checks := []struct {
+		name string
+		got  uint32
+		want uint32
+	}{
+		{"WriteVersion", uint32(h2.WriteVersion), uint32(h.WriteVersion)},
+		{"ReadVersion", uint32(h2.ReadVersion), uint32(h.ReadVersion)},
+		{"DatabaseSize", h2.DatabaseSize, h.DatabaseSize},
+		{"FileChangeCounter", h2.FileChangeCounter, h.FileChangeCounter},
+		{"FirstFreelist", h2.FirstFreelist, h.FirstFreelist},
+		{"FreelistCount", h2.FreelistCount, h.FreelistCount},
+		{"SchemaCookie", h2.SchemaCookie, h.SchemaCookie},
+		{"SchemaFormat", h2.SchemaFormat, h.SchemaFormat},
+		{"DefaultCacheSize", h2.DefaultCacheSize, h.DefaultCacheSize},
+		{"TextEncoding", h2.TextEncoding, h.TextEncoding},
+		{"UserVersion", uint32(h2.UserVersion), uint32(h.UserVersion)},
+		{"AppID", h2.AppID, h.AppID},
+		{"SQLiteVersion", h2.SQLiteVersion, h.SQLiteVersion},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s = %d, want %d", c.name, c.got, c.want)
+		}
+	}
+	if h2.GetPageSize() != h.GetPageSize() {
+		t.Errorf("PageSize = %d, want %d", h2.GetPageSize(), h.GetPageSize())
+	}
+}
+
 func TestHeader_RoundTrip(t *testing.T) {
 	t.Parallel()
-	// Test round-trip serialization with various field values
 	h := NewHeader(8192)
 	h.DatabaseSize = 1000
 	h.FileChangeCounter = 12345
@@ -577,58 +594,14 @@ func TestHeader_RoundTrip(t *testing.T) {
 	h.VersionValidFor = 54321
 	h.SQLiteVersion = 3051020
 
-	// Serialize
 	data := h.Serialize()
 
-	// Parse
 	h2 := &Header{}
 	if err := h2.Parse(data); err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	// Compare all fields
-	if h2.GetPageSize() != h.GetPageSize() {
-		t.Errorf("PageSize = %d, want %d", h2.GetPageSize(), h.GetPageSize())
-	}
-	if h2.WriteVersion != h.WriteVersion {
-		t.Errorf("WriteVersion = %d, want %d", h2.WriteVersion, h.WriteVersion)
-	}
-	if h2.ReadVersion != h.ReadVersion {
-		t.Errorf("ReadVersion = %d, want %d", h2.ReadVersion, h.ReadVersion)
-	}
-	if h2.DatabaseSize != h.DatabaseSize {
-		t.Errorf("DatabaseSize = %d, want %d", h2.DatabaseSize, h.DatabaseSize)
-	}
-	if h2.FileChangeCounter != h.FileChangeCounter {
-		t.Errorf("FileChangeCounter = %d, want %d", h2.FileChangeCounter, h.FileChangeCounter)
-	}
-	if h2.FirstFreelist != h.FirstFreelist {
-		t.Errorf("FirstFreelist = %d, want %d", h2.FirstFreelist, h.FirstFreelist)
-	}
-	if h2.FreelistCount != h.FreelistCount {
-		t.Errorf("FreelistCount = %d, want %d", h2.FreelistCount, h.FreelistCount)
-	}
-	if h2.SchemaCookie != h.SchemaCookie {
-		t.Errorf("SchemaCookie = %d, want %d", h2.SchemaCookie, h.SchemaCookie)
-	}
-	if h2.SchemaFormat != h.SchemaFormat {
-		t.Errorf("SchemaFormat = %d, want %d", h2.SchemaFormat, h.SchemaFormat)
-	}
-	if h2.DefaultCacheSize != h.DefaultCacheSize {
-		t.Errorf("DefaultCacheSize = %d, want %d", h2.DefaultCacheSize, h.DefaultCacheSize)
-	}
-	if h2.TextEncoding != h.TextEncoding {
-		t.Errorf("TextEncoding = %d, want %d", h2.TextEncoding, h.TextEncoding)
-	}
-	if h2.UserVersion != h.UserVersion {
-		t.Errorf("UserVersion = %d, want %d", h2.UserVersion, h.UserVersion)
-	}
-	if h2.AppID != h.AppID {
-		t.Errorf("AppID = 0x%08x, want 0x%08x", h2.AppID, h.AppID)
-	}
-	if h2.SQLiteVersion != h.SQLiteVersion {
-		t.Errorf("SQLiteVersion = %d, want %d", h2.SQLiteVersion, h.SQLiteVersion)
-	}
+	assertHeaderFieldsMatch(t, h, h2)
 }
 
 func TestHeader_MaxPageSizeEncoding(t *testing.T) {

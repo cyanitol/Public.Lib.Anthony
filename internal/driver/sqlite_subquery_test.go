@@ -560,76 +560,85 @@ func TestSQLiteSubquery(t *testing.T) {
 			}
 			defer db.Close()
 
-			// Execute setup statements
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("Setup failed for %q: %v", stmt, err)
-				}
-			}
-
-			// Execute query
-			rows, err := db.Query(tt.query)
+			subqueryExecSetup(t, db, tt.setup)
+			gotRows, queryErr := subqueryCollectRows(t, db, tt.query)
 			if tt.wantErr {
-				if err == nil {
+				if queryErr == nil {
 					t.Errorf("Expected error but got none")
 				}
 				return
 			}
-			if err != nil {
-				t.Fatalf("Query failed: %v", err)
+			if queryErr != nil {
+				t.Fatalf("Query failed: %v", queryErr)
 			}
-			defer rows.Close()
-
-			// Get column count
-			cols, err := rows.Columns()
-			if err != nil {
-				t.Fatalf("Failed to get columns: %v", err)
-			}
-
-			// Collect results
-			var gotRows [][]interface{}
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("Scan failed: %v", err)
-				}
-
-				gotRows = append(gotRows, values)
-			}
-
-			if err := rows.Err(); err != nil {
-				t.Fatalf("Rows iteration error: %v", err)
-			}
-
-			// Compare results
-			if len(gotRows) != len(tt.wantRows) {
-				t.Errorf("Row count mismatch: got %d, want %d", len(gotRows), len(tt.wantRows))
-				t.Logf("Got rows: %v", gotRows)
-				t.Logf("Want rows: %v", tt.wantRows)
-				return
-			}
-
-			for i, gotRow := range gotRows {
-				wantRow := tt.wantRows[i]
-				if len(gotRow) != len(wantRow) {
-					t.Errorf("Row %d column count mismatch: got %d, want %d", i, len(gotRow), len(wantRow))
-					continue
-				}
-
-				for j, gotVal := range gotRow {
-					wantVal := wantRow[j]
-					// Handle type conversions
-					if !compareValuesSubquery(gotVal, wantVal) {
-						t.Errorf("Row %d, Col %d: got %v (%T), want %v (%T)", i, j, gotVal, gotVal, wantVal, wantVal)
-					}
-				}
-			}
+			subqueryCompareRows(t, gotRows, tt.wantRows)
 		})
+	}
+}
+
+func subqueryExecSetup(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("Setup failed for %q: %v", stmt, err)
+		}
+	}
+}
+
+func subqueryCollectRows(t *testing.T, db *sql.DB, query string) ([][]interface{}, error) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("Failed to get columns: %v", err)
+	}
+
+	var gotRows [][]interface{}
+	for rows.Next() {
+		values := make([]interface{}, len(cols))
+		valuePtrs := make([]interface{}, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		gotRows = append(gotRows, values)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Rows iteration error: %v", err)
+	}
+	return gotRows, nil
+}
+
+func subqueryCompareRows(t *testing.T, gotRows, wantRows [][]interface{}) {
+	t.Helper()
+	if len(gotRows) != len(wantRows) {
+		t.Errorf("Row count mismatch: got %d, want %d", len(gotRows), len(wantRows))
+		t.Logf("Got rows: %v", gotRows)
+		t.Logf("Want rows: %v", wantRows)
+		return
+	}
+	for i, gotRow := range gotRows {
+		subqueryCompareRow(t, i, gotRow, wantRows[i])
+	}
+}
+
+func subqueryCompareRow(t *testing.T, i int, gotRow, wantRow []interface{}) {
+	t.Helper()
+	if len(gotRow) != len(wantRow) {
+		t.Errorf("Row %d column count mismatch: got %d, want %d", i, len(gotRow), len(wantRow))
+		return
+	}
+	for j, gotVal := range gotRow {
+		if !compareValuesSubquery(gotVal, wantRow[j]) {
+			t.Errorf("Row %d, Col %d: got %v (%T), want %v (%T)", i, j, gotVal, gotVal, wantRow[j], wantRow[j])
+		}
 	}
 }
 
@@ -641,31 +650,41 @@ func compareValuesSubquery(got, want interface{}) bool {
 	if got == nil || want == nil {
 		return false
 	}
+	return subqueryCompareTyped(got, want)
+}
 
+func subqueryCompareTyped(got, want interface{}) bool {
 	switch wv := want.(type) {
 	case int64:
-		if gv, ok := got.(int64); ok {
-			return gv == wv
-		}
+		gv, ok := got.(int64)
+		return ok && gv == wv
 	case float64:
-		if gv, ok := got.(float64); ok {
-			return gv == wv
-		}
+		gv, ok := got.(float64)
+		return ok && gv == wv
 	case string:
-		if gv, ok := got.(string); ok {
-			return gv == wv
-		}
-		if gv, ok := got.([]byte); ok {
-			return string(gv) == wv
-		}
+		return subqueryCompareString(got, wv)
 	case []byte:
-		if gv, ok := got.([]byte); ok {
-			return string(gv) == string(wv)
-		}
-		if gv, ok := got.(string); ok {
-			return gv == string(wv)
-		}
+		return subqueryCompareBytes(got, wv)
 	}
+	return false
+}
 
+func subqueryCompareString(got interface{}, wv string) bool {
+	switch gv := got.(type) {
+	case string:
+		return gv == wv
+	case []byte:
+		return string(gv) == wv
+	}
+	return false
+}
+
+func subqueryCompareBytes(got interface{}, wv []byte) bool {
+	switch gv := got.(type) {
+	case []byte:
+		return string(gv) == string(wv)
+	case string:
+		return gv == string(wv)
+	}
 	return false
 }

@@ -4,15 +4,13 @@ package driver
 import (
 	"context"
 	"database/sql"
-	"os"
 	"testing"
 )
 
 // This file contains tests specifically to improve coverage of uncovered code paths
 
 func TestTransactionControlStatements(t *testing.T) {
-	dbFile := "test_tx_control.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_tx_control.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -46,8 +44,7 @@ func TestTransactionControlStatements(t *testing.T) {
 }
 
 func TestDropTable(t *testing.T) {
-	dbFile := "test_drop_table.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_drop_table.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -75,8 +72,7 @@ func TestDropTable(t *testing.T) {
 }
 
 func TestCountStar(t *testing.T) {
-	dbFile := "test_coverage_count_star.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_coverage_count_star.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -111,9 +107,21 @@ func TestCountStar(t *testing.T) {
 	}
 }
 
+// covScanInt queries a single int value and checks it.
+func covScanInt(t *testing.T, db *sql.DB, query string, want int, label string) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow(query).Scan(&got); err != nil {
+		t.Errorf("%s failed: %v", label, err)
+		return
+	}
+	if got != want {
+		t.Errorf("%s = %d, want %d", label, got, want)
+	}
+}
+
 func TestAggregateFunction(t *testing.T) {
-	dbFile := "test_aggregate.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_aggregate.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -121,71 +129,32 @@ func TestAggregateFunction(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create and populate table
 	_, err = db.Exec("CREATE TABLE test (id INTEGER, value INTEGER)")
 	if err != nil {
 		t.Fatalf("CREATE TABLE failed: %v", err)
 	}
 
-	_, err = db.Exec("INSERT INTO test VALUES (1, 10)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
+	for i := 1; i <= 3; i++ {
+		if _, err = db.Exec("INSERT INTO test VALUES (?, ?)", i, i*10); err != nil {
+			t.Fatalf("INSERT failed: %v", err)
+		}
 	}
 
-	_, err = db.Exec("INSERT INTO test VALUES (2, 20)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
+	covScanInt(t, db, "SELECT SUM(value) FROM test", 60, "SUM")
+	covScanInt(t, db, "SELECT MIN(value) FROM test", 10, "MIN")
+	covScanInt(t, db, "SELECT MAX(value) FROM test", 30, "MAX")
 
-	_, err = db.Exec("INSERT INTO test VALUES (3, 30)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	// Test SUM
-	var sum int
-	err = db.QueryRow("SELECT SUM(value) FROM test").Scan(&sum)
-	if err != nil {
-		t.Errorf("SUM failed: %v", err)
-	}
-	if sum != 60 {
-		t.Errorf("SUM = %d, want 60", sum)
-	}
-
-	// Test AVG
 	var avg float64
-	err = db.QueryRow("SELECT AVG(value) FROM test").Scan(&avg)
-	if err != nil {
+	if err = db.QueryRow("SELECT AVG(value) FROM test").Scan(&avg); err != nil {
 		t.Errorf("AVG failed: %v", err)
 	}
 	if avg != 20.0 {
 		t.Errorf("AVG = %f, want 20.0", avg)
 	}
-
-	// Test MIN
-	var min int
-	err = db.QueryRow("SELECT MIN(value) FROM test").Scan(&min)
-	if err != nil {
-		t.Errorf("MIN failed: %v", err)
-	}
-	if min != 10 {
-		t.Errorf("MIN = %d, want 10", min)
-	}
-
-	// Test MAX
-	var max int
-	err = db.QueryRow("SELECT MAX(value) FROM test").Scan(&max)
-	if err != nil {
-		t.Errorf("MAX failed: %v", err)
-	}
-	if max != 30 {
-		t.Errorf("MAX = %d, want 30", max)
-	}
 }
 
 func TestReleaseState(t *testing.T) {
-	dbFile := "test_release_state.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_release_state.db"
 
 	d := &Driver{}
 
@@ -215,8 +184,7 @@ func TestReleaseState(t *testing.T) {
 }
 
 func TestComplexAggregateQuery(t *testing.T) {
-	dbFile := "test_complex_agg.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_complex_agg.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -253,45 +221,49 @@ func TestComplexAggregateQuery(t *testing.T) {
 
 // Note: Non-aggregate function tests are covered by function_test.go and integration tests
 
-func TestOrderByWithLimit(t *testing.T) {
-	dbFile := "test_order_limit.db"
-	defer os.Remove(dbFile)
-
+// covSetupTableWith5Rows creates a test table with 5 rows of (id, value=id*10).
+func covSetupTableWith5Rows(t *testing.T, dbFile string) *sql.DB {
+	t.Helper()
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
-
-	// Create and populate table
-	_, err = db.Exec("CREATE TABLE test (id INTEGER, value INTEGER)")
-	if err != nil {
+	if _, err = db.Exec("CREATE TABLE test (id INTEGER, value INTEGER)"); err != nil {
 		t.Fatalf("CREATE TABLE failed: %v", err)
 	}
-
 	for i := 1; i <= 5; i++ {
-		_, err = db.Exec("INSERT INTO test VALUES (?, ?)", i, i*10)
-		if err != nil {
+		if _, err = db.Exec("INSERT INTO test VALUES (?, ?)", i, i*10); err != nil {
 			t.Fatalf("INSERT failed: %v", err)
 		}
 	}
+	return db
+}
 
-	// Test ORDER BY with LIMIT
-	rows, err := db.Query("SELECT value FROM test ORDER BY value DESC LIMIT 2")
+// covQueryInts queries a single int column and returns all results.
+func covQueryInts(t *testing.T, db *sql.DB, query string) []int {
+	t.Helper()
+	rows, err := db.Query(query)
 	if err != nil {
-		t.Errorf("ORDER BY LIMIT failed: %v", err)
+		t.Fatalf("query failed: %v", err)
 	}
 	defer rows.Close()
-
 	var values []int
 	for rows.Next() {
 		var v int
 		if err := rows.Scan(&v); err != nil {
-			t.Errorf("Scan failed: %v", err)
+			t.Fatalf("Scan failed: %v", err)
 		}
 		values = append(values, v)
 	}
+	return values
+}
 
+func TestOrderByWithLimit(t *testing.T) {
+	dbFile := t.TempDir() + "/test_order_limit.db"
+	db := covSetupTableWith5Rows(t, dbFile)
+	defer db.Close()
+
+	values := covQueryInts(t, db, "SELECT value FROM test ORDER BY value DESC LIMIT 2")
 	if len(values) != 2 {
 		t.Errorf("got %d values, want 2", len(values))
 	}
@@ -301,44 +273,11 @@ func TestOrderByWithLimit(t *testing.T) {
 }
 
 func TestOrderByWithOffset(t *testing.T) {
-	dbFile := "test_order_offset.db"
-	defer os.Remove(dbFile)
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	dbFile := t.TempDir() + "/test_order_offset.db"
+	db := covSetupTableWith5Rows(t, dbFile)
 	defer db.Close()
 
-	// Create and populate table
-	_, err = db.Exec("CREATE TABLE test (id INTEGER, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	for i := 1; i <= 5; i++ {
-		_, err = db.Exec("INSERT INTO test VALUES (?, ?)", i, i*10)
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-	}
-
-	// Test ORDER BY with OFFSET
-	rows, err := db.Query("SELECT value FROM test ORDER BY value ASC LIMIT 2 OFFSET 2")
-	if err != nil {
-		t.Errorf("ORDER BY OFFSET failed: %v", err)
-	}
-	defer rows.Close()
-
-	var values []int
-	for rows.Next() {
-		var v int
-		if err := rows.Scan(&v); err != nil {
-			t.Errorf("Scan failed: %v", err)
-		}
-		values = append(values, v)
-	}
-
+	values := covQueryInts(t, db, "SELECT value FROM test ORDER BY value ASC LIMIT 2 OFFSET 2")
 	if len(values) != 2 {
 		t.Errorf("got %d values, want 2", len(values))
 	}
@@ -348,8 +287,7 @@ func TestOrderByWithOffset(t *testing.T) {
 }
 
 func TestExecContextAutoCommit(t *testing.T) {
-	dbFile := "test_autocommit.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_autocommit.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -382,8 +320,7 @@ func TestExecContextAutoCommit(t *testing.T) {
 }
 
 func TestParameterizedQuery(t *testing.T) {
-	dbFile := "test_params.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_params.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {

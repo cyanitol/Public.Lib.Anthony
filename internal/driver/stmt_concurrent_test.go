@@ -4,78 +4,43 @@ package driver
 import (
 	"context"
 	"database/sql/driver"
-	"os"
 	"sync"
 	"testing"
 	"time"
 )
 
-// TestConcurrentExecContext tests concurrent ExecContext calls on the same statement.
-// This verifies that the transaction state checks are properly protected by locks.
-func TestConcurrentExecContext(t *testing.T) {
-	dbFile := "test_concurrent_exec.db"
-	defer os.Remove(dbFile)
-
+// concurrentOpenAndCreate opens a DB file, creates a test table, and returns the conn.
+func concurrentOpenAndCreate(t *testing.T, dbFile, createSQL string) *Conn {
+	t.Helper()
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
 	if err != nil {
 		t.Fatalf("failed to open connection: %v", err)
 	}
-	defer conn.Close()
-
 	c := conn.(*Conn)
+	concurrentExecSQL(t, c, createSQL)
+	return c
+}
 
-	// Create a test table
-	createStmt, err := c.PrepareContext(context.Background(), "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
+// concurrentExecSQL prepares and executes a SQL statement on the connection.
+func concurrentExecSQL(t *testing.T, c *Conn, sql string) {
+	t.Helper()
+	stmt, err := c.PrepareContext(context.Background(), sql)
 	if err != nil {
-		t.Fatalf("failed to prepare create: %v", err)
+		t.Fatalf("failed to prepare %q: %v", sql, err)
 	}
-	if _, err := createStmt.(*Stmt).ExecContext(context.Background(), nil); err != nil {
-		t.Fatalf("failed to create table: %v", err)
+	if _, err := stmt.(*Stmt).ExecContext(context.Background(), nil); err != nil {
+		t.Fatalf("failed to exec %q: %v", sql, err)
 	}
-	createStmt.Close()
+	stmt.Close()
+}
 
-	// Prepare an insert statement
-	stmt, err := c.PrepareContext(context.Background(), "INSERT INTO test (value) VALUES (?)")
+// concurrentCountRows queries COUNT(*) and returns the count.
+func concurrentCountRows(t *testing.T, c *Conn, table string) int64 {
+	t.Helper()
+	queryStmt, err := c.PrepareContext(context.Background(), "SELECT COUNT(*) FROM "+table)
 	if err != nil {
-		t.Fatalf("failed to prepare statement: %v", err)
-	}
-	defer stmt.Close()
-
-	s := stmt.(*Stmt)
-
-	// Run concurrent ExecContext calls
-	const numGoroutines = 10
-	var wg sync.WaitGroup
-	wg.Add(numGoroutines)
-
-	errors := make(chan error, numGoroutines)
-
-	for i := 0; i < numGoroutines; i++ {
-		go func(id int) {
-			defer wg.Done()
-			args := []driver.NamedValue{
-				{Ordinal: 1, Value: "test"},
-			}
-			_, err := s.ExecContext(context.Background(), args)
-			if err != nil {
-				errors <- err
-			}
-		}(i)
-	}
-
-	wg.Wait()
-	close(errors)
-
-	// Check for errors
-	for err := range errors {
-		t.Errorf("ExecContext error: %v", err)
-	}
-
-	// Verify all rows were inserted
-	queryStmt, err := c.PrepareContext(context.Background(), "SELECT COUNT(*) FROM test")
-	if err != nil {
-		t.Fatalf("failed to prepare query: %v", err)
+		t.Fatalf("failed to prepare count query: %v", err)
 	}
 	defer queryStmt.Close()
 
@@ -89,51 +54,73 @@ func TestConcurrentExecContext(t *testing.T) {
 	if err := rows.Next(values); err != nil {
 		t.Fatalf("failed to get count: %v", err)
 	}
+	return values[0].(int64)
+}
 
-	count := values[0].(int64)
-	if count != numGoroutines {
+// TestConcurrentExecContext tests concurrent ExecContext calls on the same statement.
+func TestConcurrentExecContext(t *testing.T) {
+	dbFile := t.TempDir() + "/test_concurrent_exec.db"
+
+	c := concurrentOpenAndCreate(t, dbFile, "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
+	defer c.Close()
+
+	stmt, err := c.PrepareContext(context.Background(), "INSERT INTO test (value) VALUES (?)")
+	if err != nil {
+		t.Fatalf("failed to prepare statement: %v", err)
+	}
+	defer stmt.Close()
+
+	s := stmt.(*Stmt)
+	const numGoroutines = 10
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+	errors := make(chan error, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			defer wg.Done()
+			args := []driver.NamedValue{{Ordinal: 1, Value: "test"}}
+			if _, err := s.ExecContext(context.Background(), args); err != nil {
+				errors <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errors)
+
+	for err := range errors {
+		t.Errorf("ExecContext error: %v", err)
+	}
+
+	if count := concurrentCountRows(t, c, "test"); count != numGoroutines {
 		t.Errorf("expected %d rows, got %d", numGoroutines, count)
 	}
 }
 
-// TestConcurrentQueryContext tests concurrent QueryContext calls on the same statement.
-// This verifies that the connection state checks are properly protected by locks.
-func TestConcurrentQueryContext(t *testing.T) {
-	dbFile := "test_concurrent_query.db"
-	defer os.Remove(dbFile)
-
-	d := &Driver{}
-	conn, err := d.Open(dbFile)
-	if err != nil {
-		t.Fatalf("failed to open connection: %v", err)
-	}
-	defer conn.Close()
-
-	c := conn.(*Conn)
-
-	// Create and populate a test table
-	createStmt, err := c.PrepareContext(context.Background(), "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
-	if err != nil {
-		t.Fatalf("failed to prepare create: %v", err)
-	}
-	if _, err := createStmt.(*Stmt).ExecContext(context.Background(), nil); err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-	createStmt.Close()
-
-	// Insert test data
-	insertStmt, err := c.PrepareContext(context.Background(), "INSERT INTO test (value) VALUES ('test')")
+// concurrentInsertN inserts N rows using a prepared statement.
+func concurrentInsertN(t *testing.T, c *Conn, sql string, n int) {
+	t.Helper()
+	stmt, err := c.PrepareContext(context.Background(), sql)
 	if err != nil {
 		t.Fatalf("failed to prepare insert: %v", err)
 	}
-	for i := 0; i < 5; i++ {
-		if _, err := insertStmt.(*Stmt).ExecContext(context.Background(), nil); err != nil {
+	for i := 0; i < n; i++ {
+		if _, err := stmt.(*Stmt).ExecContext(context.Background(), nil); err != nil {
 			t.Fatalf("failed to insert: %v", err)
 		}
 	}
-	insertStmt.Close()
+	stmt.Close()
+}
 
-	// Prepare a query statement
+// TestConcurrentQueryContext tests concurrent QueryContext calls on the same statement.
+func TestConcurrentQueryContext(t *testing.T) {
+	dbFile := t.TempDir() + "/test_concurrent_query.db"
+
+	c := concurrentOpenAndCreate(t, dbFile, "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
+	defer c.Close()
+
+	concurrentInsertN(t, c, "INSERT INTO test (value) VALUES ('test')", 5)
+
 	stmt, err := c.PrepareContext(context.Background(), "SELECT * FROM test")
 	if err != nil {
 		t.Fatalf("failed to prepare statement: %v", err)
@@ -141,12 +128,9 @@ func TestConcurrentQueryContext(t *testing.T) {
 	defer stmt.Close()
 
 	s := stmt.(*Stmt)
-
-	// Run concurrent QueryContext calls
 	const numGoroutines = 10
 	var wg sync.WaitGroup
 	wg.Add(numGoroutines)
-
 	errors := make(chan error, numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
@@ -158,14 +142,8 @@ func TestConcurrentQueryContext(t *testing.T) {
 				return
 			}
 			defer rows.Close()
-
-			// Read all rows
 			values := make([]driver.Value, 2)
-			for {
-				err := rows.Next(values)
-				if err != nil {
-					break
-				}
+			for rows.Next(values) == nil {
 			}
 		}(i)
 	}
@@ -173,46 +151,38 @@ func TestConcurrentQueryContext(t *testing.T) {
 	wg.Wait()
 	close(errors)
 
-	// Check for errors
 	for err := range errors {
 		t.Errorf("QueryContext error: %v", err)
 	}
 }
 
+// concurrentCloseVerify checks that a statement is properly closed and unregistered.
+func concurrentCloseVerify(t *testing.T, c *Conn, s *Stmt) {
+	t.Helper()
+	if !s.closed {
+		t.Error("statement should be closed")
+	}
+	c.mu.Lock()
+	_, exists := c.stmts[s]
+	c.mu.Unlock()
+	if exists {
+		t.Error("statement should be removed from connection's map")
+	}
+}
+
 // TestConcurrentCloseWhileExecuting tests closing a statement while it's being executed.
-// This verifies that the Close method properly handles the lock ordering to avoid deadlocks.
 func TestConcurrentCloseWhileExecuting(t *testing.T) {
-	dbFile := "test_concurrent_close.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_concurrent_close.db"
 
-	d := &Driver{}
-	conn, err := d.Open(dbFile)
-	if err != nil {
-		t.Fatalf("failed to open connection: %v", err)
-	}
-	defer conn.Close()
+	c := concurrentOpenAndCreate(t, dbFile, "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
+	defer c.Close()
 
-	c := conn.(*Conn)
-
-	// Create a test table
-	createStmt, err := c.PrepareContext(context.Background(), "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
-	if err != nil {
-		t.Fatalf("failed to prepare create: %v", err)
-	}
-	if _, err := createStmt.(*Stmt).ExecContext(context.Background(), nil); err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-	createStmt.Close()
-
-	// Prepare an insert statement
 	stmt, err := c.PrepareContext(context.Background(), "INSERT INTO test (value) VALUES (?)")
 	if err != nil {
 		t.Fatalf("failed to prepare statement: %v", err)
 	}
-
 	s := stmt.(*Stmt)
 
-	// Start multiple goroutines executing the statement
 	const numGoroutines = 5
 	var wg sync.WaitGroup
 	wg.Add(numGoroutines)
@@ -221,45 +191,25 @@ func TestConcurrentCloseWhileExecuting(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				args := []driver.NamedValue{
-					{Ordinal: 1, Value: "test"},
-				}
+				args := []driver.NamedValue{{Ordinal: 1, Value: "test"}}
 				s.ExecContext(context.Background(), args)
 				time.Sleep(time.Millisecond)
 			}
 		}(i)
 	}
 
-	// Wait a bit then close the statement
 	time.Sleep(5 * time.Millisecond)
-	closeErr := s.Close()
-
-	wg.Wait()
-
-	if closeErr != nil {
+	if closeErr := s.Close(); closeErr != nil {
 		t.Errorf("Close() error = %v", closeErr)
 	}
-
-	// Verify statement is closed
-	if !s.closed {
-		t.Error("statement should be closed")
-	}
-
-	// Verify removed from connection
-	c.mu.Lock()
-	_, exists := c.stmts[s]
-	c.mu.Unlock()
-
-	if exists {
-		t.Error("statement should be removed from connection's map")
-	}
+	wg.Wait()
+	concurrentCloseVerify(t, c, s)
 }
 
 // TestExecContextWithClosedConnection tests ExecContext with a closed connection.
 // This verifies the TOCTOU fix where connection state is checked under lock.
 func TestExecContextWithClosedConnection(t *testing.T) {
-	dbFile := "test_exec_closed_conn.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_exec_closed_conn.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -300,8 +250,7 @@ func TestExecContextWithClosedConnection(t *testing.T) {
 // TestQueryContextWithClosedConnection tests QueryContext with a closed connection.
 // This verifies the TOCTOU fix where connection state is checked under lock.
 func TestQueryContextWithClosedConnection(t *testing.T) {
-	dbFile := "test_query_closed_conn.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_query_closed_conn.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -332,29 +281,11 @@ func TestQueryContextWithClosedConnection(t *testing.T) {
 // TestConcurrentTransactionStateCheck tests that transaction state checks
 // don't race with transaction begin/commit/rollback operations.
 func TestConcurrentTransactionStateCheck(t *testing.T) {
-	dbFile := "test_concurrent_tx_state.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_concurrent_tx_state.db"
 
-	d := &Driver{}
-	conn, err := d.Open(dbFile)
-	if err != nil {
-		t.Fatalf("failed to open connection: %v", err)
-	}
-	defer conn.Close()
+	c := concurrentOpenAndCreate(t, dbFile, "CREATE TABLE test (id INTEGER PRIMARY KEY)")
+	defer c.Close()
 
-	c := conn.(*Conn)
-
-	// Create a test table
-	createStmt, err := c.PrepareContext(context.Background(), "CREATE TABLE test (id INTEGER PRIMARY KEY)")
-	if err != nil {
-		t.Fatalf("failed to prepare create: %v", err)
-	}
-	if _, err := createStmt.(*Stmt).ExecContext(context.Background(), nil); err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-	createStmt.Close()
-
-	// Prepare an insert statement
 	stmt, err := c.PrepareContext(context.Background(), "INSERT INTO test DEFAULT VALUES")
 	if err != nil {
 		t.Fatalf("failed to prepare statement: %v", err)
@@ -362,12 +293,9 @@ func TestConcurrentTransactionStateCheck(t *testing.T) {
 	defer stmt.Close()
 
 	s := stmt.(*Stmt)
-
-	// Run concurrent operations: some executing statements, some starting/ending transactions
 	var wg sync.WaitGroup
 	wg.Add(20)
 
-	// Goroutines executing statements
 	for i := 0; i < 10; i++ {
 		go func() {
 			defer wg.Done()
@@ -378,29 +306,32 @@ func TestConcurrentTransactionStateCheck(t *testing.T) {
 		}()
 	}
 
-	// Goroutines starting and committing transactions
 	for i := 0; i < 10; i++ {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 3; j++ {
-				tx, err := c.BeginTx(context.Background(), driver.TxOptions{})
-				if err != nil {
-					continue
-				}
-				time.Sleep(2 * time.Millisecond)
-				tx.Commit()
-				time.Sleep(time.Millisecond)
-			}
+			concurrentTxCycle(c)
 		}()
 	}
 
 	wg.Wait()
 }
 
+// concurrentTxCycle runs begin/commit cycles.
+func concurrentTxCycle(c *Conn) {
+	for j := 0; j < 3; j++ {
+		tx, err := c.BeginTx(context.Background(), driver.TxOptions{})
+		if err != nil {
+			continue
+		}
+		time.Sleep(2 * time.Millisecond)
+		tx.Commit()
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // TestMultipleStmtClose tests that multiple simultaneous Close calls are safe.
 func TestMultipleStmtClose(t *testing.T) {
-	dbFile := "test_multi_close.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_multi_close.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)

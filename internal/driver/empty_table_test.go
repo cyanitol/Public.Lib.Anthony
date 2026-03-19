@@ -61,19 +61,34 @@ func TestEmptyTableQuery(t *testing.T) {
 	t.Log("Successfully queried empty table with no errors")
 }
 
+// verifyColumnNames checks that the column names from rows match expected.
+func verifyColumnNames(t *testing.T, rows *sql.Rows, expected []string) {
+	t.Helper()
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("Columns() failed: %v", err)
+	}
+	if len(cols) != len(expected) {
+		t.Fatalf("expected %d columns, got %d", len(expected), len(cols))
+	}
+	for i, exp := range expected {
+		if cols[i] != exp {
+			t.Errorf("column %d: expected %q, got %q", i, exp, cols[i])
+		}
+	}
+}
+
 // TestEmptyTableWithColumns tests that an empty table returns correct column info
 func TestEmptyTableWithColumns(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	// Open database - driver will create a new database file
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
 	defer db.Close()
 
-	// Create an empty table with multiple columns
 	_, err = db.Exec(`CREATE TABLE test_cols (
 		id INTEGER PRIMARY KEY,
 		name TEXT,
@@ -84,35 +99,17 @@ func TestEmptyTableWithColumns(t *testing.T) {
 		t.Fatalf("failed to create table: %v", err)
 	}
 
-	// Query specific columns from empty table
 	rows, err := db.Query("SELECT name, age FROM test_cols")
 	if err != nil {
 		t.Fatalf("Query() failed: %v", err)
 	}
 	defer rows.Close()
 
-	// Verify column names
-	cols, err := rows.Columns()
-	if err != nil {
-		t.Fatalf("Columns() failed: %v", err)
-	}
+	verifyColumnNames(t, rows, []string{"name", "age"})
 
-	expectedCols := []string{"name", "age"}
-	if len(cols) != len(expectedCols) {
-		t.Fatalf("expected %d columns, got %d", len(expectedCols), len(cols))
-	}
-
-	for i, expected := range expectedCols {
-		if cols[i] != expected {
-			t.Errorf("column %d: expected %q, got %q", i, expected, cols[i])
-		}
-	}
-
-	// Verify no rows without error
 	if rows.Next() {
 		t.Error("Next() should return false for empty table")
 	}
-
 	if err := rows.Err(); err != nil {
 		t.Errorf("rows.Err() should be nil, got: %v", err)
 	}

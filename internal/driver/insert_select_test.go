@@ -10,6 +10,48 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
+// stepToRow steps the VM until it reaches StateRowReady or fails.
+func stepToRow(t *testing.T, vm *vdbe.VDBE) {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		hasMore, err := vm.Step()
+		if err != nil {
+			t.Fatalf("Step failed: %v", err)
+		}
+		if vm.State == vdbe.StateRowReady {
+			return
+		}
+		if !hasMore {
+			t.Fatalf("No more rows but never got StateRowReady")
+		}
+	}
+	t.Fatalf("Too many steps without getting a row")
+}
+
+// verifySelectRow verifies the result row from a SELECT VM has expected values.
+func verifySelectRow(t *testing.T, vm *vdbe.VDBE) {
+	t.Helper()
+	t.Logf("Got row with %d columns", len(vm.ResultRow))
+	for j, mem := range vm.ResultRow {
+		if mem.IsInt() {
+			t.Logf("  Column %d: %d (int)", j, mem.IntValue())
+		} else if mem.IsStr() {
+			t.Logf("  Column %d: %q (string)", j, mem.StrValue())
+		} else {
+			t.Logf("  Column %d: type=%v", j, mem)
+		}
+	}
+	if len(vm.ResultRow) < 2 {
+		return
+	}
+	if vm.ResultRow[0].IntValue() != 1 {
+		t.Errorf("Expected id=1, got %d", vm.ResultRow[0].IntValue())
+	}
+	if vm.ResultRow[1].StrValue() != "hello" {
+		t.Errorf("Expected value='hello', got %q", vm.ResultRow[1].StrValue())
+	}
+}
+
 func TestDriverInsertSelect(t *testing.T) {
 	// Create an in-memory btree (no pager)
 	bt := btree.NewBtree(4096)
@@ -105,38 +147,7 @@ func TestDriverInsertSelect(t *testing.T) {
 
 		t.Logf("SELECT bytecode:\n%s", vm.ExplainProgram())
 
-		// Step until we get a row
-		for i := 0; i < 20; i++ {
-			hasMore, err := vm.Step()
-			if err != nil {
-				t.Fatalf("Step failed: %v", err)
-			}
-			if vm.State == vdbe.StateRowReady {
-				t.Logf("Got row with %d columns", len(vm.ResultRow))
-				for j, mem := range vm.ResultRow {
-					if mem.IsInt() {
-						t.Logf("  Column %d: %d (int)", j, mem.IntValue())
-					} else if mem.IsStr() {
-						t.Logf("  Column %d: %q (string)", j, mem.StrValue())
-					} else {
-						t.Logf("  Column %d: type=%v", j, mem)
-					}
-				}
-				// Verify values
-				if len(vm.ResultRow) >= 2 {
-					if vm.ResultRow[0].IntValue() != 1 {
-						t.Errorf("Expected id=1, got %d", vm.ResultRow[0].IntValue())
-					}
-					if vm.ResultRow[1].StrValue() != "hello" {
-						t.Errorf("Expected value='hello', got %q", vm.ResultRow[1].StrValue())
-					}
-				}
-				return
-			}
-			if !hasMore {
-				t.Fatalf("No more rows but never got StateRowReady")
-			}
-		}
-		t.Fatalf("Too many steps without getting a row")
+		stepToRow(t, vm)
+		verifySelectRow(t, vm)
 	})
 }

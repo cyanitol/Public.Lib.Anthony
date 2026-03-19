@@ -74,32 +74,36 @@ func updCollectResults(t *testing.T, rows *sql.Rows, colCount int) [][]interface
 
 // updVerifyResults compares actual vs expected results
 func updVerifyResults(t *testing.T, results, wantRows [][]interface{}) {
+	t.Helper()
 	if len(results) != len(wantRows) {
 		t.Errorf("Row count mismatch: got %d, want %d", len(results), len(wantRows))
 		t.Logf("Got: %v", results)
 		t.Logf("Want: %v", wantRows)
 		return
 	}
-
 	for i, row := range results {
-		if len(row) != len(wantRows[i]) {
-			t.Errorf("Row %d column count mismatch: got %d, want %d", i, len(row), len(wantRows[i]))
-			continue
-		}
-		for j, val := range row {
-			if val == nil && wantRows[i][j] == nil {
-				continue
-			}
-			if val == nil || wantRows[i][j] == nil {
-				t.Errorf("Row %d, col %d: got %v, want %v", i, j, val, wantRows[i][j])
-				continue
-			}
+		updVerifyRow(t, i, row, wantRows[i])
+	}
+}
 
-			if val != wantRows[i][j] {
-				t.Errorf("Row %d, col %d: got %v (type %T), want %v (type %T)",
-					i, j, val, val, wantRows[i][j], wantRows[i][j])
-			}
-		}
+func updVerifyRow(t *testing.T, i int, row, wantRow []interface{}) {
+	t.Helper()
+	if len(row) != len(wantRow) {
+		t.Errorf("Row %d column count mismatch: got %d, want %d", i, len(row), len(wantRow))
+		return
+	}
+	for j, val := range row {
+		updVerifyCell(t, i, j, val, wantRow[j])
+	}
+}
+
+func updVerifyCell(t *testing.T, i, j int, val, want interface{}) {
+	t.Helper()
+	if val == nil && want == nil {
+		return
+	}
+	if val == nil || want == nil || val != want {
+		t.Errorf("Row %d, col %d: got %v (type %T), want %v (type %T)", i, j, val, val, want, want)
 	}
 }
 

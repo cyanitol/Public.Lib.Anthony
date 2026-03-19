@@ -29,7 +29,7 @@ func TestRTreeIntegrationBasic(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// Verify rtree module is registered
+	// Verify rtree module is registered and create a table
 	err = conn.Raw(func(driverConn interface{}) error {
 		c, ok := driverConn.(*Conn)
 		if !ok {
@@ -38,26 +38,10 @@ func TestRTreeIntegrationBasic(t *testing.T) {
 		if !c.vtabRegistry.HasModule("rtree") {
 			return fmt.Errorf("rtree module not registered")
 		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("RTree module check failed: %v", err)
-	}
-
-	// Test 1: Create virtual table directly through vtab API
-	err = conn.Raw(func(driverConn interface{}) error {
-		c, ok := driverConn.(*Conn)
-		if !ok {
-			return fmt.Errorf("unexpected driver connection type")
-		}
-
-		// Get the rtree module
 		module := c.vtabRegistry.GetModule("rtree")
 		if module == nil {
 			return fmt.Errorf("rtree module not found")
 		}
-
-		// Create the virtual table
 		_, _, err := module.Create(
 			nil, "rtree", "main", "t1",
 			[]string{"id", "minX", "maxX", "minY", "maxY"},
@@ -65,7 +49,6 @@ func TestRTreeIntegrationBasic(t *testing.T) {
 		if err != nil {
 			return fmt.Errorf("failed to create rtree table: %v", err)
 		}
-
 		return nil
 	})
 	if err != nil {
@@ -121,6 +104,65 @@ func TestRTreeModuleRegistration(t *testing.T) {
 	t.Log("RTree module successfully registered")
 }
 
+// rtreeCreateAndInsert creates an RTree table, inserts one entry, and returns the RTree.
+func rtreeCreateAndInsert(c *Conn) (*rtree.RTree, error) {
+	module := c.vtabRegistry.GetModule("rtree")
+	if module == nil {
+		return nil, fmt.Errorf("rtree module not found")
+	}
+
+	table, schema, err := module.Create(
+		nil, "rtree", "main", "spatial_index",
+		[]string{"id", "minX", "maxX", "minY", "maxY"},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rtree: %v", err)
+	}
+	if table == nil {
+		return nil, fmt.Errorf("created table is nil")
+	}
+	if schema == "" {
+		return nil, fmt.Errorf("schema is empty")
+	}
+
+	rt, ok := table.(*rtree.RTree)
+	if !ok {
+		return nil, fmt.Errorf("table is not *rtree.RTree")
+	}
+
+	_, err = rt.Update(7, []interface{}{
+		nil, int64(1), int64(0), int64(10), int64(0), int64(10),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert: %v", err)
+	}
+	return rt, nil
+}
+
+// rtreeVerifyCursorCount opens a cursor, filters, and verifies the result count.
+func rtreeVerifyCursorCount(rt *rtree.RTree, want int) error {
+	cursor, err := rt.Open()
+	if err != nil {
+		return fmt.Errorf("failed to open cursor: %v", err)
+	}
+	defer cursor.Close()
+
+	err = cursor.Filter(0, "", []interface{}{})
+	if err != nil {
+		return fmt.Errorf("failed to filter: %v", err)
+	}
+
+	count := 0
+	for !cursor.EOF() {
+		count++
+		cursor.Next()
+	}
+	if count != want {
+		return fmt.Errorf("expected %d result, got %d", want, count)
+	}
+	return nil
+}
+
 // TestRTreeModuleOperations tests basic operations on RTree module
 func TestRTreeModuleOperations(t *testing.T) {
 	t.Parallel()
@@ -137,89 +179,56 @@ func TestRTreeModuleOperations(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// Test creating an RTree table through the module
 	err = conn.Raw(func(driverConn interface{}) error {
 		c, ok := driverConn.(*Conn)
 		if !ok {
 			return fmt.Errorf("unexpected driver connection type")
 		}
 
-		module := c.vtabRegistry.GetModule("rtree")
-		if module == nil {
-			return fmt.Errorf("rtree module not found")
-		}
-
-		// Create a 2D R-Tree
-		table, schema, err := module.Create(
-			nil, "rtree", "main", "spatial_index",
-			[]string{"id", "minX", "maxX", "minY", "maxY"},
-		)
+		rt, err := rtreeCreateAndInsert(c)
 		if err != nil {
-			return fmt.Errorf("failed to create rtree: %v", err)
+			return err
 		}
 
-		if table == nil {
-			return fmt.Errorf("created table is nil")
-		}
-
-		if schema == "" {
-			return fmt.Errorf("schema is empty")
-		}
-
-		// Verify it's an RTree
-		rt, ok := table.(*rtree.RTree)
-		if !ok {
-			return fmt.Errorf("table is not *rtree.RTree")
-		}
-
-		// Test inserting data
-		_, err = rt.Update(7, []interface{}{
-			nil,       // old rowid
-			int64(1),  // new rowid
-			int64(0),  // minX
-			int64(10), // maxX
-			int64(0),  // minY
-			int64(10), // maxY
-		})
-		if err != nil {
-			return fmt.Errorf("failed to insert: %v", err)
-		}
-
-		// Verify count
 		if rt.Count() != 1 {
 			return fmt.Errorf("expected 1 entry, got %d", rt.Count())
 		}
 
-		// Test querying
-		cursor, err := rt.Open()
-		if err != nil {
-			return fmt.Errorf("failed to open cursor: %v", err)
-		}
-		defer cursor.Close()
-
-		err = cursor.Filter(0, "", []interface{}{})
-		if err != nil {
-			return fmt.Errorf("failed to filter: %v", err)
-		}
-
-		// Count results
-		count := 0
-		for !cursor.EOF() {
-			count++
-			cursor.Next()
-		}
-
-		if count != 1 {
-			return fmt.Errorf("expected 1 result, got %d", count)
-		}
-
-		return nil
+		return rtreeVerifyCursorCount(rt, 1)
 	})
 	if err != nil {
 		t.Fatalf("Module operations test failed: %v", err)
 	}
 
 	t.Log("RTree module operations completed successfully")
+}
+
+// rtreeTestCreateDimension tests creating an RTree with the given columns.
+func rtreeTestCreateDimension(c *Conn, columns []string, wantErr bool) error {
+	module := c.vtabRegistry.GetModule("rtree")
+	if module == nil {
+		return fmt.Errorf("rtree module not found")
+	}
+
+	table, _, err := module.Create(nil, "rtree", "main", "test_table", columns)
+	if wantErr {
+		if err == nil {
+			return fmt.Errorf("expected error but got none")
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("unexpected error: %v", err)
+	}
+
+	rt, ok := table.(*rtree.RTree)
+	if !ok {
+		return fmt.Errorf("table is not *rtree.RTree")
+	}
+	if rt.Count() != 0 {
+		return fmt.Errorf("expected empty tree, got %d entries", rt.Count())
+	}
+	return nil
 }
 
 // TestRTreeModuleMultipleDimensions tests creating R-Trees with different dimensions
@@ -283,40 +292,8 @@ func TestRTreeModuleMultipleDimensions(t *testing.T) {
 				if !ok {
 					return fmt.Errorf("unexpected driver connection type")
 				}
-
-				module := c.vtabRegistry.GetModule("rtree")
-				if module == nil {
-					return fmt.Errorf("rtree module not found")
-				}
-
-				table, _, err := module.Create(
-					nil, "rtree", "main", "test_table",
-					tc.columns,
-				)
-
-				if tc.wantErr {
-					if err == nil {
-						return fmt.Errorf("expected error but got none")
-					}
-					return nil // Expected error, test passed
-				}
-
-				if err != nil {
-					return fmt.Errorf("unexpected error: %v", err)
-				}
-
-				rt, ok := table.(*rtree.RTree)
-				if !ok {
-					return fmt.Errorf("table is not *rtree.RTree")
-				}
-
-				if rt.Count() != 0 {
-					return fmt.Errorf("expected empty tree, got %d entries", rt.Count())
-				}
-
-				return nil
+				return rtreeTestCreateDimension(c, tc.columns, tc.wantErr)
 			})
-
 			if err != nil {
 				t.Fatalf("Test case failed: %v", err)
 			}

@@ -19,7 +19,6 @@ func TestIndexCursor_PrevIndex(t *testing.T) {
 
 	cursor := NewIndexCursor(bt, rootPage)
 
-	// Insert entries
 	entries := []struct {
 		key   []byte
 		rowid int64
@@ -35,15 +34,24 @@ func TestIndexCursor_PrevIndex(t *testing.T) {
 		cursor.InsertIndex(entry.key, entry.rowid)
 	}
 
-	// Start at last
 	cursor.MoveToLast()
+	prevIndexVerifyBackward(t, cursor, entries)
 
-	// Iterate backwards
+	err = cursor.PrevIndex()
+	if err == nil {
+		t.Error("PrevIndex() should fail at beginning of index")
+	}
+}
+
+func prevIndexVerifyBackward(t *testing.T, cursor *IndexCursor, entries []struct {
+	key   []byte
+	rowid int64
+}) {
+	t.Helper()
 	for i := len(entries) - 1; i >= 0; i-- {
 		if !cursor.IsValid() {
 			t.Fatalf("cursor invalid at iteration %d", i)
 		}
-
 		expected := entries[i]
 		if !bytes.Equal(cursor.GetKey(), expected.key) {
 			t.Errorf("iteration %d: GetKey() = %q, want %q", i, cursor.GetKey(), expected.key)
@@ -51,19 +59,11 @@ func TestIndexCursor_PrevIndex(t *testing.T) {
 		if cursor.GetRowid() != expected.rowid {
 			t.Errorf("iteration %d: GetRowid() = %d, want %d", i, cursor.GetRowid(), expected.rowid)
 		}
-
-		// Move to previous (except on last iteration)
 		if i > 0 {
 			if err := cursor.PrevIndex(); err != nil {
 				t.Fatalf("PrevIndex() error at iteration %d: %v", i, err)
 			}
 		}
-	}
-
-	// Prev should fail at beginning
-	err = cursor.PrevIndex()
-	if err == nil {
-		t.Error("PrevIndex() should fail at beginning of index")
 	}
 }
 

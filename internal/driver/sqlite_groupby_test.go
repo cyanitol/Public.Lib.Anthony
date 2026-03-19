@@ -4,7 +4,8 @@ package driver
 import (
 	"database/sql"
 	"fmt"
-	"os"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -792,80 +793,87 @@ func TestSQLiteGroupBy(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
-
-			// Create a temporary database
-			dbFile := fmt.Sprintf("test_groupby_%s.db", sanitizeFilenameGroupBy(tt.name))
-			defer os.Remove(dbFile)
-
+			dbFile := fmt.Sprintf(t.TempDir()+"/test_groupby_%s.db", sanitizeFilenameGroupBy(tt.name))
 			db, err := sql.Open(DriverName, dbFile)
 			if err != nil {
 				t.Fatalf("failed to open database: %v", err)
 			}
 			defer db.Close()
-
-			// Run setup statements
-			for _, stmt := range tt.setup {
-				_, err := db.Exec(stmt)
-				if err != nil {
-					t.Fatalf("setup failed for statement %q: %v", stmt, err)
-				}
-			}
-
-			// Execute query
-			rows, err := db.Query(tt.query)
+			groupByExecSetup(t, db, tt.setup)
+			got, queryErr := groupByCollectRows(t, db, tt.query)
 			if tt.wantErr {
-				if err == nil {
+				if queryErr == nil {
 					t.Errorf("expected error but got none")
 				}
 				return
 			}
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
+			if queryErr != nil {
+				t.Fatalf("query failed: %v", queryErr)
 			}
-			defer rows.Close()
-
-			// Get column count
-			cols, err := rows.Columns()
-			if err != nil {
-				t.Fatalf("failed to get columns: %v", err)
-			}
-
-			// Collect results
-			var got [][]interface{}
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				got = append(got, values)
-			}
-
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows error: %v", err)
-			}
-
-			// Compare results
-			if len(got) != len(tt.want) {
-				t.Errorf("row count mismatch: got %d, want %d\nGot: %v\nWant: %v", len(got), len(tt.want), got, tt.want)
-				return
-			}
-
-			for i, wantRow := range tt.want {
-				if len(got[i]) != len(wantRow) {
-					t.Errorf("row %d column count mismatch: got %d, want %d", i, len(got[i]), len(wantRow))
-					continue
-				}
-				for j, wantVal := range wantRow {
-					if !compareGroupByValues(got[i][j], wantVal) {
-						t.Errorf("row %d, col %d: got %v (%T), want %v (%T)", i, j, got[i][j], got[i][j], wantVal, wantVal)
-					}
-				}
-			}
+			groupByCompareResults(t, got, tt.want)
 		})
+	}
+}
+
+func groupByExecSetup(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup failed for statement %q: %v", stmt, err)
+		}
+	}
+}
+
+func groupByCollectRows(t *testing.T, db *sql.DB, query string) ([][]interface{}, error) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("failed to get columns: %v", err)
+	}
+	var got [][]interface{}
+	for rows.Next() {
+		values := make([]interface{}, len(cols))
+		valuePtrs := make([]interface{}, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		got = append(got, values)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
+	return got, nil
+}
+
+func groupByCompareResults(t *testing.T, got, want [][]interface{}) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("row count mismatch: got %d, want %d\nGot: %v\nWant: %v", len(got), len(want), got, want)
+		return
+	}
+	for i, wantRow := range want {
+		groupByCompareRow(t, i, got[i], wantRow)
+	}
+}
+
+func groupByCompareRow(t *testing.T, i int, gotRow, wantRow []interface{}) {
+	t.Helper()
+	if len(gotRow) != len(wantRow) {
+		t.Errorf("row %d column count mismatch: got %d, want %d", i, len(gotRow), len(wantRow))
+		return
+	}
+	for j, wantVal := range wantRow {
+		if !compareGroupByValues(gotRow[j], wantVal) {
+			t.Errorf("row %d, col %d: got %v (%T), want %v (%T)", i, j, gotRow[j], gotRow[j], wantVal, wantVal)
+		}
 	}
 }
 
@@ -899,31 +907,14 @@ func compareGroupByValues(got, want interface{}) bool {
 
 // toFloat64GroupBy converts various numeric types to float64
 func toFloat64GroupBy(v interface{}) (float64, bool) {
-	switch val := v.(type) {
-	case int:
-		return float64(val), true
-	case int8:
-		return float64(val), true
-	case int16:
-		return float64(val), true
-	case int32:
-		return float64(val), true
-	case int64:
-		return float64(val), true
-	case uint:
-		return float64(val), true
-	case uint8:
-		return float64(val), true
-	case uint16:
-		return float64(val), true
-	case uint32:
-		return float64(val), true
-	case uint64:
-		return float64(val), true
-	case float32:
-		return float64(val), true
-	case float64:
-		return val, true
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Float32, reflect.Float64:
+		return rv.Float(), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(rv.Int()), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return float64(rv.Uint()), true
 	default:
 		return 0, false
 	}
@@ -931,16 +922,19 @@ func toFloat64GroupBy(v interface{}) (float64, bool) {
 
 // sanitizeFilenameGroupBy removes characters that can't be used in filenames
 func sanitizeFilenameGroupBy(name string) string {
-	result := ""
-	for _, c := range name {
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
-			result += string(c)
-		} else if c == ' ' || c == '-' {
-			result += "_"
-		}
-	}
+	result := strings.Map(sanitizeGroupByRune, name)
 	if len(result) > 50 {
 		result = result[:50]
 	}
 	return result
+}
+
+func sanitizeGroupByRune(c rune) rune {
+	if isAlnumOrUnderscore(c) {
+		return c
+	}
+	if c == ' ' || c == '-' {
+		return '_'
+	}
+	return -1
 }

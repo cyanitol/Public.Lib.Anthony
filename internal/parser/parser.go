@@ -708,17 +708,27 @@ func (p *Parser) parseTableRef(table *TableOrSubquery) error {
 
 	// Check for table-valued function syntax: name(args...)
 	if p.match(TK_LP) {
-		args, err := p.parseExpressionList()
-		if err != nil {
-			return err
-		}
-		if !p.match(TK_RP) {
-			return p.error("expected ) after function arguments")
-		}
-		table.FuncArgs = args
-		return nil
+		return p.parseTableFuncArgs(table)
 	}
 
+	return p.parseIndexedBy(table)
+}
+
+// parseTableFuncArgs parses table-valued function arguments after '(' has been consumed.
+func (p *Parser) parseTableFuncArgs(table *TableOrSubquery) error {
+	args, err := p.parseExpressionList()
+	if err != nil {
+		return err
+	}
+	if !p.match(TK_RP) {
+		return p.error("expected ) after function arguments")
+	}
+	table.FuncArgs = args
+	return nil
+}
+
+// parseIndexedBy parses an optional INDEXED BY clause.
+func (p *Parser) parseIndexedBy(table *TableOrSubquery) error {
 	if !p.match(TK_INDEXED) {
 		return nil
 	}
@@ -1377,51 +1387,57 @@ func (p *Parser) parseCreateTable(temp bool) (*CreateTableStmt, error) {
 func (p *Parser) parseCreateVirtualTable() (*CreateVirtualTableStmt, error) {
 	stmt := &CreateVirtualTableStmt{}
 
-	// Parse IF NOT EXISTS
 	if err := p.parseIfNotExists(&stmt.IfNotExists); err != nil {
 		return nil, err
 	}
 
-	// Parse table name
 	if !p.check(TK_ID) {
 		return nil, p.error("expected table name")
 	}
 	stmt.Name = Unquote(p.advance().Lexeme)
 
-	// Parse USING
 	if !p.match(TK_USING) {
 		return nil, p.error("expected USING after virtual table name")
 	}
 
-	// Parse module name
 	if !p.check(TK_ID) {
 		return nil, p.error("expected module name after USING")
 	}
 	stmt.Module = Unquote(p.advance().Lexeme)
 
-	// Parse optional module arguments: (arg1, arg2, ...)
 	if p.match(TK_LP) {
-		for {
-			if p.check(TK_RP) {
-				break
-			}
-			// Module arguments can be identifiers or strings
-			tok := p.peek()
-			if tok.Type == TK_ID || tok.Type == TK_STRING {
-				stmt.Args = append(stmt.Args, Unquote(p.advance().Lexeme))
-			} else {
-				return nil, p.error("expected module argument")
-			}
-			if !p.match(TK_COMMA) {
-				break
-			}
+		args, err := p.parseModuleArgs()
+		if err != nil {
+			return nil, err
 		}
-		if !p.match(TK_RP) {
-			return nil, p.error("expected ) after module arguments")
-		}
+		stmt.Args = args
 	}
 
 	return stmt, nil
+}
+
+// parseModuleArgs parses comma-separated module arguments within parentheses.
+// The opening paren has already been consumed.
+func (p *Parser) parseModuleArgs() ([]string, error) {
+	var args []string
+	for {
+		if p.check(TK_RP) {
+			break
+		}
+		tok := p.peek()
+		if tok.Type == TK_ID || tok.Type == TK_STRING {
+			args = append(args, Unquote(p.advance().Lexeme))
+		} else {
+			return nil, p.error("expected module argument")
+		}
+		if !p.match(TK_COMMA) {
+			break
+		}
+	}
+	if !p.match(TK_RP) {
+		return nil, p.error("expected ) after module arguments")
+	}
+	return args, nil
 }
 
 // parseIfNotExists parses the optional IF NOT EXISTS clause and sets the flag.
@@ -1800,30 +1816,33 @@ func (p *Parser) parseFKNotDeferrable(fk *ForeignKeyConstraint) error {
 	return nil
 }
 
+// parseFKActionStep tries to match and parse one FK action clause. Returns false if no match.
+func (p *Parser) parseFKActionStep(fk *ForeignKeyConstraint) (bool, error) {
+	switch {
+	case p.match(TK_ON):
+		return true, p.parseFKOnClause(fk)
+	case p.match(TK_MATCH):
+		return true, p.parseFKMatchClause(fk)
+	case p.match(TK_NOT):
+		return true, p.parseFKNotDeferrable(fk)
+	case p.match(TK_DEFERRABLE):
+		return true, p.parseFKDeferrable(fk)
+	default:
+		return false, nil
+	}
+}
+
 // parseForeignKeyActions parses ON DELETE/UPDATE, MATCH, and DEFERRABLE clauses.
 func (p *Parser) parseForeignKeyActions(fk *ForeignKeyConstraint) error {
 	for {
-		if p.match(TK_ON) {
-			if err := p.parseFKOnClause(fk); err != nil {
-				return err
-			}
-		} else if p.match(TK_MATCH) {
-			if err := p.parseFKMatchClause(fk); err != nil {
-				return err
-			}
-		} else if p.match(TK_NOT) {
-			if err := p.parseFKNotDeferrable(fk); err != nil {
-				return err
-			}
-		} else if p.match(TK_DEFERRABLE) {
-			if err := p.parseFKDeferrable(fk); err != nil {
-				return err
-			}
-		} else {
-			break
+		matched, err := p.parseFKActionStep(fk)
+		if err != nil {
+			return err
+		}
+		if !matched {
+			return nil
 		}
 	}
-	return nil
 }
 
 // parseForeignKeyAction parses an FK action (CASCADE, RESTRICT, SET NULL, SET DEFAULT, NO ACTION).
@@ -3425,27 +3444,40 @@ func (p *Parser) parseSpecialExpression() (Expression, error) {
 	return nil, p.error("expected expression, got %s", p.peek().Type)
 }
 
+// literalTokenTypes maps token types to their literal expression type.
+var literalTokenTypes = map[TokenType]LiteralType{
+	TK_INTEGER: LiteralInteger,
+	TK_FLOAT:   LiteralFloat,
+	TK_STRING:  LiteralString,
+	TK_BLOB:    LiteralBlob,
+}
+
 // tryParseLiteral attempts to parse a literal expression, returns nil if not a literal.
 func (p *Parser) tryParseLiteral() Expression {
-	switch {
-	case p.check(TK_INTEGER):
+	if litType, ok := literalTokenTypes[p.peek().Type]; ok {
 		tok := p.advance()
-		return &LiteralExpr{Type: LiteralInteger, Value: tok.Lexeme}
-	case p.check(TK_FLOAT):
-		tok := p.advance()
-		return &LiteralExpr{Type: LiteralFloat, Value: tok.Lexeme}
-	case p.check(TK_STRING):
-		tok := p.advance()
-		return &LiteralExpr{Type: LiteralString, Value: Unquote(tok.Lexeme)}
-	case p.check(TK_BLOB):
-		tok := p.advance()
-		return &LiteralExpr{Type: LiteralBlob, Value: tok.Lexeme}
-	case p.match(TK_NULL):
+		val := tok.Lexeme
+		if litType == LiteralString {
+			val = Unquote(val)
+		}
+		return &LiteralExpr{Type: litType, Value: val}
+	}
+	if p.match(TK_NULL) {
 		return &LiteralExpr{Type: LiteralNull, Value: "NULL"}
-	case p.check(TK_ID) && strings.EqualFold(p.peek().Lexeme, "TRUE"):
+	}
+	return p.tryParseBoolLiteral()
+}
+
+// tryParseBoolLiteral parses TRUE/FALSE as integer literals, returns nil if not a boolean.
+func (p *Parser) tryParseBoolLiteral() Expression {
+	if !p.check(TK_ID) {
+		return nil
+	}
+	switch {
+	case strings.EqualFold(p.peek().Lexeme, "TRUE"):
 		p.advance()
 		return &LiteralExpr{Type: LiteralInteger, Value: "1"}
-	case p.check(TK_ID) && strings.EqualFold(p.peek().Lexeme, "FALSE"):
+	case strings.EqualFold(p.peek().Lexeme, "FALSE"):
 		p.advance()
 		return &LiteralExpr{Type: LiteralInteger, Value: "0"}
 	default:
@@ -3513,6 +3545,29 @@ func (p *Parser) isRaiseAction() bool {
 	}
 }
 
+// raiseActionMap maps RAISE action strings to their RaiseType.
+var raiseActionMap = map[string]RaiseType{
+	"IGNORE":   RaiseIgnore,
+	"ROLLBACK": RaiseRollback,
+	"ABORT":    RaiseAbort,
+	"FAIL":     RaiseFail,
+}
+
+// parseRaiseMessage parses the optional comma and message for non-IGNORE RAISE types.
+func (p *Parser) parseRaiseMessage(raise *RaiseExpr) error {
+	if raise.Type == RaiseIgnore {
+		return nil
+	}
+	if !p.match(TK_COMMA) {
+		return p.error("expected ',' after RAISE action")
+	}
+	if !p.check(TK_STRING) {
+		return p.error("expected error message string in RAISE")
+	}
+	raise.Message = Unquote(p.advance().Lexeme)
+	return nil
+}
+
 // parseRaiseFunction parses RAISE(IGNORE) or RAISE(ROLLBACK|ABORT|FAIL, msg).
 // The opening paren has already been consumed.
 func (p *Parser) parseRaiseFunction() (Expression, error) {
@@ -3521,30 +3576,14 @@ func (p *Parser) parseRaiseFunction() (Expression, error) {
 	}
 
 	action := strings.ToUpper(p.advance().Lexeme)
-	raise := &RaiseExpr{}
-
-	switch action {
-	case "IGNORE":
-		raise.Type = RaiseIgnore
-	case "ROLLBACK":
-		raise.Type = RaiseRollback
-	case "ABORT":
-		raise.Type = RaiseAbort
-	case "FAIL":
-		raise.Type = RaiseFail
-	default:
+	raiseType, ok := raiseActionMap[action]
+	if !ok {
 		return nil, p.error("expected IGNORE, ROLLBACK, ABORT, or FAIL in RAISE")
 	}
+	raise := &RaiseExpr{Type: raiseType}
 
-	// For non-IGNORE types, expect comma and message string
-	if raise.Type != RaiseIgnore {
-		if !p.match(TK_COMMA) {
-			return nil, p.error("expected ',' after RAISE action")
-		}
-		if !p.check(TK_STRING) {
-			return nil, p.error("expected error message string in RAISE")
-		}
-		raise.Message = Unquote(p.advance().Lexeme)
+	if err := p.parseRaiseMessage(raise); err != nil {
+		return nil, err
 	}
 
 	if !p.match(TK_RP) {

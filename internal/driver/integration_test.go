@@ -191,6 +191,23 @@ func TestVDBECompilation(t *testing.T) {
 	t.Logf("Statement successfully parsed: %T", sqlStmt.ast)
 }
 
+// integrationCheckColumns verifies column names match expected.
+func integrationCheckColumns(t *testing.T, rows *sql.Rows, expected []string) {
+	t.Helper()
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("failed to get columns: %v", err)
+	}
+	if len(cols) != len(expected) {
+		t.Fatalf("expected %d columns, got %d", len(expected), len(cols))
+	}
+	for i, col := range cols {
+		if col != expected[i] {
+			t.Errorf("column %d: expected %q, got %q", i, expected[i], col)
+		}
+	}
+}
+
 // TestSelectQueryExecution tests executing a simple SELECT query
 func TestSelectQueryExecution(t *testing.T) {
 	t.Skip("SELECT execution requires properly initialized database file")
@@ -207,43 +224,23 @@ func TestSelectQueryExecution(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Query sqlite_master - should work even if empty
 	rows, err := db.Query("SELECT * FROM sqlite_master")
 	if err != nil {
 		t.Fatalf("failed to query sqlite_master: %v", err)
 	}
 	defer rows.Close()
 
-	// Get column names
-	cols, err := rows.Columns()
-	if err != nil {
-		t.Fatalf("failed to get columns: %v", err)
-	}
-
-	if len(cols) != 5 {
-		t.Fatalf("expected 5 columns, got %d", len(cols))
-	}
-
-	expectedCols := []string{"type", "name", "tbl_name", "rootpage", "sql"}
-	for i, col := range cols {
-		if col != expectedCols[i] {
-			t.Errorf("column %d: expected %q, got %q", i, expectedCols[i], col)
-		}
-	}
+	integrationCheckColumns(t, rows, []string{"type", "name", "tbl_name", "rootpage", "sql"})
 
 	t.Log("Successfully executed SELECT query and retrieved column metadata")
 
-	// Note: The database is empty, so we don't expect any rows
-	// In a full implementation, there would be at least the sqlite_master entry
 	rowCount := 0
 	for rows.Next() {
 		rowCount++
 	}
-
 	if err := rows.Err(); err != nil {
 		t.Fatalf("error iterating rows: %v", err)
 	}
-
 	t.Logf("Query returned %d rows", rowCount)
 }
 

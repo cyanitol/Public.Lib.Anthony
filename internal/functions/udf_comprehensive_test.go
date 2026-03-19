@@ -164,57 +164,36 @@ func TestUserAggregateFunc_Complete(t *testing.T) {
 	}
 	fn := NewUserAggregateFunc(config, &simpleUserAggregateFunc{})
 
-	// Test name
 	if fn.Name() != "my_sum" {
 		t.Errorf("Name() = %q, want \"my_sum\"", fn.Name())
 	}
 
-	// Step through values
-	err := fn.Step([]Value{NewIntValue(10)})
-	if err != nil {
-		t.Fatalf("Step() error = %v", err)
-	}
+	stepValues := []Value{NewIntValue(10), NewIntValue(20), NewNullValue(), NewIntValue(30)}
+	stepAll(t, fn, stepValues)
 
-	err = fn.Step([]Value{NewIntValue(20)})
-	if err != nil {
-		t.Fatalf("Step() error = %v", err)
-	}
+	assertFinalValue(t, fn, 60)
 
-	err = fn.Step([]Value{NewNullValue()})
-	if err != nil {
-		t.Fatalf("Step() error = %v", err)
-	}
+	fn.Reset()
+	stepAll(t, fn, []Value{NewIntValue(5)})
+	assertFinalValue(t, fn, 5)
+}
 
-	err = fn.Step([]Value{NewIntValue(30)})
-	if err != nil {
-		t.Fatalf("Step() error = %v", err)
+func stepAll(t *testing.T, fn interface{ Step([]Value) error }, values []Value) {
+	t.Helper()
+	for _, v := range values {
+		if err := fn.Step([]Value{v}); err != nil {
+			t.Fatalf("Step() error = %v", err)
+		}
 	}
+}
 
-	// Get final result
+func assertFinalValue(t *testing.T, fn interface{ Final() (Value, error) }, want int64) {
+	t.Helper()
 	result, err := fn.Final()
 	if err != nil {
 		t.Fatalf("Final() error = %v", err)
 	}
-
-	if result.AsInt64() != 60 {
-		t.Errorf("Final() = %d, want 60", result.AsInt64())
-	}
-
-	// Test reset
-	fn.Reset()
-
-	// After reset, should start fresh
-	err = fn.Step([]Value{NewIntValue(5)})
-	if err != nil {
-		t.Fatalf("Step() after reset error = %v", err)
-	}
-
-	result, err = fn.Final()
-	if err != nil {
-		t.Fatalf("Final() after reset error = %v", err)
-	}
-
-	if result.AsInt64() != 5 {
-		t.Errorf("Final() after reset = %d, want 5", result.AsInt64())
+	if result.AsInt64() != want {
+		t.Errorf("Final() = %d, want %d", result.AsInt64(), want)
 	}
 }

@@ -177,51 +177,26 @@ func queryAllTableNames(t *testing.T, db *sql.DB) {
 	}
 }
 
+func schemaDropAndVerify(t *testing.T, db *sql.DB, dropSQL, objType, objName string) {
+	t.Helper()
+	if _, err := db.Exec(dropSQL); err != nil {
+		t.Fatalf("failed to execute %s: %v", dropSQL, err)
+	}
+	var count int64
+	err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type=? AND name=?", objType, objName).Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to query after %s: %v", dropSQL, err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 %s entries for %s after drop, got %d", objType, objName, count)
+	}
+}
+
 // testTableOperations tests dropping and recreating tables
 func testTableOperations(t *testing.T, db *sql.DB) {
-	var count int64
-
-	// Drop view and verify removal
-	_, err := db.Exec("DROP VIEW v1")
-	if err != nil {
-		t.Fatalf("failed to drop view: %v", err)
-	}
-
-	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='view' AND name='v1'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query after drop view: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("expected 0 view entries after drop, got %d", count)
-	}
-
-	// Test 10: Drop trigger and verify removal
-	_, err = db.Exec("DROP TRIGGER trig1")
-	if err != nil {
-		t.Fatalf("failed to drop trigger: %v", err)
-	}
-
-	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='trig1'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query after drop trigger: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("expected 0 trigger entries after drop, got %d", count)
-	}
-
-	// Test 11: Drop index and verify removal
-	_, err = db.Exec("DROP INDEX idx1")
-	if err != nil {
-		t.Fatalf("failed to drop index: %v", err)
-	}
-
-	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx1'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query after drop index: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("expected 0 index entries after drop, got %d", count)
-	}
+	schemaDropAndVerify(t, db, "DROP VIEW v1", "view", "v1")
+	schemaDropAndVerify(t, db, "DROP TRIGGER trig1", "trigger", "trig1")
+	schemaDropAndVerify(t, db, "DROP INDEX idx1", "index", "idx1")
 }
 
 // testComplexSchemas tests creating tables with primary keys, unique constraints, and complex schemas

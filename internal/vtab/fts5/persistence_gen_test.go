@@ -260,21 +260,8 @@ func TestPersistenceLoadIndexNilDB(t *testing.T) {
 	}
 }
 
-// TestPersistenceRoundTrip verifies that saving and then loading an index
-// preserves the structure record, terms, posting lists, and document sizes.
-func TestPersistenceRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	// Use a round-trip-capable mock that stores data properly.
-	db := newRoundTripDB()
-	mgr := NewShadowTableManager("rt", db)
-
-	columns := []string{"content"}
-	if err := mgr.CreateShadowTables(columns); err != nil {
-		t.Fatalf("CreateShadowTables() error: %v", err)
-	}
-
-	// Build an index with known data.
+// buildTestIndex creates a test InvertedIndex with known data.
+func buildTestIndex(columns []string) *InvertedIndex {
 	original := NewInvertedIndex(columns)
 	original.totalDocs = 3
 	original.avgDocLength = 2.5
@@ -288,7 +275,52 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	original.docLengths[DocumentID(1)] = 4
 	original.docLengths[DocumentID(2)] = 3
 	original.docLengths[DocumentID(3)] = 1
+	return original
+}
 
+// verifyIndexMatch asserts that the loaded index matches the original.
+func verifyIndexMatch(t *testing.T, original, loaded *InvertedIndex) {
+	t.Helper()
+	if loaded.totalDocs != original.totalDocs {
+		t.Errorf("totalDocs: want %d, got %d", original.totalDocs, loaded.totalDocs)
+	}
+	if loaded.avgDocLength != original.avgDocLength {
+		t.Errorf("avgDocLength: want %f, got %f", original.avgDocLength, loaded.avgDocLength)
+	}
+	for term, wantPostings := range original.index {
+		gotPostings, ok := loaded.index[term]
+		if !ok {
+			t.Errorf("term %q not found in loaded index", term)
+			continue
+		}
+		if !reflect.DeepEqual(gotPostings, wantPostings) {
+			t.Errorf("postings for %q mismatch", term)
+		}
+	}
+	for docID, wantLen := range original.docLengths {
+		gotLen, ok := loaded.docLengths[docID]
+		if !ok {
+			t.Errorf("docLength for %d not found", docID)
+		} else if gotLen != wantLen {
+			t.Errorf("docLength[%d]: want %d, got %d", docID, wantLen, gotLen)
+		}
+	}
+}
+
+// TestPersistenceRoundTrip verifies that saving and then loading an index
+// preserves the structure record, terms, posting lists, and document sizes.
+func TestPersistenceRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	db := newRoundTripDB()
+	mgr := NewShadowTableManager("rt", db)
+
+	columns := []string{"content"}
+	if err := mgr.CreateShadowTables(columns); err != nil {
+		t.Fatalf("CreateShadowTables() error: %v", err)
+	}
+
+	original := buildTestIndex(columns)
 	if err := mgr.SaveIndex(original); err != nil {
 		t.Fatalf("SaveIndex() error: %v", err)
 	}
@@ -298,37 +330,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 		t.Fatalf("LoadIndex() error: %v", err)
 	}
 
-	// Verify structure record.
-	if loaded.totalDocs != original.totalDocs {
-		t.Errorf("totalDocs: want %d, got %d", original.totalDocs, loaded.totalDocs)
-	}
-	if loaded.avgDocLength != original.avgDocLength {
-		t.Errorf("avgDocLength: want %f, got %f", original.avgDocLength, loaded.avgDocLength)
-	}
-
-	// Verify terms are present.
-	for term, wantPostings := range original.index {
-		gotPostings, ok := loaded.index[term]
-		if !ok {
-			t.Errorf("term %q not found in loaded index", term)
-			continue
-		}
-		if !reflect.DeepEqual(gotPostings, wantPostings) {
-			t.Errorf("postings for %q: want %v, got %v", term, wantPostings, gotPostings)
-		}
-	}
-
-	// Verify document sizes.
-	for docID, wantLen := range original.docLengths {
-		gotLen, ok := loaded.docLengths[docID]
-		if !ok {
-			t.Errorf("docLength for %d not found", docID)
-			continue
-		}
-		if gotLen != wantLen {
-			t.Errorf("docLength[%d]: want %d, got %d", docID, wantLen, gotLen)
-		}
-	}
+	verifyIndexMatch(t, original, loaded)
 }
 
 // TestPersistenceBinarySerialization tests the encoding/decoding helpers directly.
@@ -339,65 +341,90 @@ func TestPersistenceBinarySerialization(t *testing.T) {
 
 	t.Run("structure record round-trip", func(t *testing.T) {
 		t.Parallel()
-		blob := mgr.encodeStructureRecord(42, 3.14)
-		docs, avg := mgr.decodeStructureRecord(blob)
-		if docs != 42 {
-			t.Errorf("totalDocs: want 42, got %d", docs)
-		}
-		if avg != 3.14 {
-			t.Errorf("avgDocLength: want 3.14, got %f", avg)
-		}
+		testBinSerStructureRoundTrip(t, mgr)
 	})
-
 	t.Run("structure record short blob", func(t *testing.T) {
 		t.Parallel()
-		docs, avg := mgr.decodeStructureRecord([]byte{1, 2, 3})
-		if docs != 0 || avg != 0 {
-			t.Errorf("short blob: want (0, 0), got (%d, %f)", docs, avg)
-		}
+		testBinSerStructureShortBlob(t, mgr)
 	})
-
 	t.Run("posting list round-trip", func(t *testing.T) {
 		t.Parallel()
-		postings := []PostingList{
-			{DocID: 10, Frequency: 3, Positions: []int{0, 5, 12}},
-			{DocID: 20, Frequency: 1, Positions: []int{7}},
-		}
-		blob := mgr.encodePostingList(postings)
-		decoded := mgr.decodePostingList(blob)
-		if !reflect.DeepEqual(decoded, postings) {
-			t.Errorf("posting list round-trip failed: want %v, got %v", postings, decoded)
-		}
+		testBinSerPostingRoundTrip(t, mgr)
 	})
-
 	t.Run("posting list empty", func(t *testing.T) {
 		t.Parallel()
-		blob := mgr.encodePostingList(nil)
-		decoded := mgr.decodePostingList(blob)
-		if len(decoded) != 0 {
-			t.Errorf("expected empty posting list, got %v", decoded)
-		}
+		testBinSerPostingEmpty(t, mgr)
 	})
-
 	t.Run("posting list short blob", func(t *testing.T) {
 		t.Parallel()
-		decoded := mgr.decodePostingList([]byte{1})
-		if decoded != nil {
-			t.Errorf("expected nil for short blob, got %v", decoded)
-		}
+		testBinSerPostingShortBlob(t, mgr)
 	})
-
 	t.Run("varint round-trip", func(t *testing.T) {
 		t.Parallel()
-		values := []int64{0, 1, -1, 127, 128, 1000000, -999999}
-		for _, v := range values {
-			blob := mgr.encodeVarint(v)
-			decoded := mgr.decodeVarint(blob)
-			if decoded != v {
-				t.Errorf("varint %d: got %d", v, decoded)
-			}
-		}
+		testBinSerVarintRoundTrip(t, mgr)
 	})
+}
+
+func testBinSerStructureRoundTrip(t *testing.T, mgr *ShadowTableManager) {
+	t.Helper()
+	blob := mgr.encodeStructureRecord(42, 3.14)
+	docs, avg := mgr.decodeStructureRecord(blob)
+	if docs != 42 {
+		t.Errorf("totalDocs: want 42, got %d", docs)
+	}
+	if avg != 3.14 {
+		t.Errorf("avgDocLength: want 3.14, got %f", avg)
+	}
+}
+
+func testBinSerStructureShortBlob(t *testing.T, mgr *ShadowTableManager) {
+	t.Helper()
+	docs, avg := mgr.decodeStructureRecord([]byte{1, 2, 3})
+	if docs != 0 || avg != 0 {
+		t.Errorf("short blob: want (0, 0), got (%d, %f)", docs, avg)
+	}
+}
+
+func testBinSerPostingRoundTrip(t *testing.T, mgr *ShadowTableManager) {
+	t.Helper()
+	postings := []PostingList{
+		{DocID: 10, Frequency: 3, Positions: []int{0, 5, 12}},
+		{DocID: 20, Frequency: 1, Positions: []int{7}},
+	}
+	blob := mgr.encodePostingList(postings)
+	decoded := mgr.decodePostingList(blob)
+	if !reflect.DeepEqual(decoded, postings) {
+		t.Errorf("posting list round-trip failed: want %v, got %v", postings, decoded)
+	}
+}
+
+func testBinSerPostingEmpty(t *testing.T, mgr *ShadowTableManager) {
+	t.Helper()
+	blob := mgr.encodePostingList(nil)
+	decoded := mgr.decodePostingList(blob)
+	if len(decoded) != 0 {
+		t.Errorf("expected empty posting list, got %v", decoded)
+	}
+}
+
+func testBinSerPostingShortBlob(t *testing.T, mgr *ShadowTableManager) {
+	t.Helper()
+	decoded := mgr.decodePostingList([]byte{1})
+	if decoded != nil {
+		t.Errorf("expected nil for short blob, got %v", decoded)
+	}
+}
+
+func testBinSerVarintRoundTrip(t *testing.T, mgr *ShadowTableManager) {
+	t.Helper()
+	values := []int64{0, 1, -1, 127, 128, 1000000, -999999}
+	for _, v := range values {
+		blob := mgr.encodeVarint(v)
+		decoded := mgr.decodeVarint(blob)
+		if decoded != v {
+			t.Errorf("varint %d: got %d", v, decoded)
+		}
+	}
 }
 
 // TestPersistenceHashTerm verifies hashTerm returns stable, non-conflicting IDs.

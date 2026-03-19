@@ -7,8 +7,41 @@ import (
 	"testing"
 )
 
+// viewExecOrFatal executes a statement or fails.
+func viewExecOrFatal(t *testing.T, db *sql.DB, stmt string) {
+	t.Helper()
+	if _, err := db.Exec(stmt); err != nil {
+		t.Fatalf("exec failed (%s): %v", stmt, err)
+	}
+}
+
+// viewVerifyNames queries and verifies name column values match expected.
+func viewVerifyNames(t *testing.T, db *sql.DB, query string, expectedNames []string) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("Failed to query view: %v", err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var id int
+		var name, email string
+		if err := rows.Scan(&id, &name, &email); err != nil {
+			t.Fatalf("Failed to scan row: %v", err)
+		}
+		if count < len(expectedNames) && name != expectedNames[count] {
+			t.Errorf("Row %d: expected name %q, got %q", count, expectedNames[count], name)
+		}
+		count++
+	}
+	if count != len(expectedNames) {
+		t.Errorf("Expected %d rows, got %d", len(expectedNames), count)
+	}
+}
+
 func TestViewBasicOperations(t *testing.T) {
-	// Create temporary database
 	tmpfile := tempFilename()
 	defer os.Remove(tmpfile)
 
@@ -18,69 +51,16 @@ func TestViewBasicOperations(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create a table
-	_, err = db.Exec(`CREATE TABLE users (
-		id INTEGER PRIMARY KEY,
-		name TEXT,
-		email TEXT,
-		active INTEGER
-	)`)
-	if err != nil {
-		t.Fatalf("Failed to create table: %v", err)
-	}
-
-	// Insert test data
-	_, err = db.Exec(`INSERT INTO users (id, name, email, active) VALUES
+	viewExecOrFatal(t, db, `CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, active INTEGER)`)
+	viewExecOrFatal(t, db, `INSERT INTO users (id, name, email, active) VALUES
 		(1, 'Alice', 'alice@example.com', 1),
 		(2, 'Bob', 'bob@example.com', 1),
 		(3, 'Charlie', 'charlie@example.com', 0)`)
-	if err != nil {
-		t.Fatalf("Failed to insert data: %v", err)
-	}
+	viewExecOrFatal(t, db, `CREATE VIEW active_users AS SELECT id, name, email FROM users WHERE active = 1`)
 
-	// Create a view
-	_, err = db.Exec(`CREATE VIEW active_users AS
-		SELECT id, name, email FROM users WHERE active = 1`)
-	if err != nil {
-		t.Fatalf("Failed to create view: %v", err)
-	}
+	viewVerifyNames(t, db, `SELECT * FROM active_users ORDER BY id`, []string{"Alice", "Bob"})
 
-	// Query the view
-	rows, err := db.Query(`SELECT * FROM active_users ORDER BY id`)
-	if err != nil {
-		t.Fatalf("Failed to query view: %v", err)
-	}
-	defer rows.Close()
-
-	// Verify results
-	count := 0
-	expectedNames := []string{"Alice", "Bob"}
-	for rows.Next() {
-		var id int
-		var name, email string
-		if err := rows.Scan(&id, &name, &email); err != nil {
-			t.Fatalf("Failed to scan row: %v", err)
-		}
-		if count >= len(expectedNames) {
-			t.Fatalf("Too many rows returned")
-		}
-		if name != expectedNames[count] {
-			t.Errorf("Row %d: expected name %q, got %q", count, expectedNames[count], name)
-		}
-		count++
-	}
-
-	if count != 2 {
-		t.Errorf("Expected 2 rows, got %d", count)
-	}
-
-	// Drop the view
-	_, err = db.Exec(`DROP VIEW active_users`)
-	if err != nil {
-		t.Fatalf("Failed to drop view: %v", err)
-	}
-
-	// Verify view is gone (query should fail)
+	viewExecOrFatal(t, db, `DROP VIEW active_users`)
 	_, err = db.Query(`SELECT * FROM active_users`)
 	if err == nil {
 		t.Error("Expected error querying dropped view")
@@ -202,6 +182,21 @@ func TestDropViewIfExists(t *testing.T) {
 	}
 }
 
+// viewCountRows counts the number of rows returned by a query.
+func viewCountRows(t *testing.T, db *sql.DB, query string) int {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("Failed to query: %v", err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	return count
+}
+
 func TestViewWithJoin(t *testing.T) {
 	t.Skip("JOIN returns wrong row count after recent changes")
 	tmpfile := tempFilename()
@@ -213,57 +208,40 @@ func TestViewWithJoin(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create tables
-	_, err = db.Exec(`CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT)`)
-	if err != nil {
-		t.Fatalf("Failed to create customers table: %v", err)
-	}
+	viewExecOrFatal(t, db, `CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT)`)
+	viewExecOrFatal(t, db, `CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER, total REAL)`)
+	viewExecOrFatal(t, db, `INSERT INTO customers VALUES (1, 'Alice'), (2, 'Bob')`)
+	viewExecOrFatal(t, db, `INSERT INTO orders VALUES (1, 1, 100.0), (2, 1, 200.0), (3, 2, 150.0)`)
+	viewExecOrFatal(t, db, `CREATE VIEW customer_orders AS
+		SELECT c.name, o.total FROM customers c JOIN orders o ON c.id = o.customer_id`)
 
-	_, err = db.Exec(`CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER, total REAL)`)
-	if err != nil {
-		t.Fatalf("Failed to create orders table: %v", err)
+	if count := viewCountRows(t, db, `SELECT * FROM customer_orders ORDER BY total`); count != 3 {
+		t.Errorf("Expected 3 rows, got %d", count)
 	}
+}
 
-	// Insert data
-	_, err = db.Exec(`INSERT INTO customers VALUES (1, 'Alice'), (2, 'Bob')`)
+// viewVerifyInts queries and verifies integer column values match expected.
+func viewVerifyInts(t *testing.T, db *sql.DB, query string, expected []int) {
+	t.Helper()
+	rows, err := db.Query(query)
 	if err != nil {
-		t.Fatalf("Failed to insert customers: %v", err)
-	}
-
-	_, err = db.Exec(`INSERT INTO orders VALUES (1, 1, 100.0), (2, 1, 200.0), (3, 2, 150.0)`)
-	if err != nil {
-		t.Fatalf("Failed to insert orders: %v", err)
-	}
-
-	// Create view with JOIN
-	_, err = db.Exec(`CREATE VIEW customer_orders AS
-		SELECT c.name, o.total
-		FROM customers c
-		JOIN orders o ON c.id = o.customer_id`)
-	if err != nil {
-		t.Fatalf("Failed to create view: %v", err)
-	}
-
-	// Query the view
-	rows, err := db.Query(`SELECT * FROM customer_orders ORDER BY total`)
-	if err != nil {
-		t.Fatalf("Failed to query view: %v", err)
+		t.Fatalf("Failed to query: %v", err)
 	}
 	defer rows.Close()
 
-	// Verify results
 	count := 0
 	for rows.Next() {
-		var name string
-		var total float64
-		if err := rows.Scan(&name, &total); err != nil {
+		var value int
+		if err := rows.Scan(&value); err != nil {
 			t.Fatalf("Failed to scan row: %v", err)
+		}
+		if count < len(expected) && value != expected[count] {
+			t.Errorf("Row %d: expected %d, got %d", count, expected[count], value)
 		}
 		count++
 	}
-
-	if count != 3 {
-		t.Errorf("Expected 3 rows, got %d", count)
+	if count != len(expected) {
+		t.Errorf("Expected %d rows, got %d", len(expected), count)
 	}
 }
 
@@ -277,56 +255,12 @@ func TestViewReferencingView(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create table
-	_, err = db.Exec(`CREATE TABLE numbers (value INTEGER)`)
-	if err != nil {
-		t.Fatalf("Failed to create table: %v", err)
-	}
+	viewExecOrFatal(t, db, `CREATE TABLE numbers (value INTEGER)`)
+	viewExecOrFatal(t, db, `INSERT INTO numbers VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10)`)
+	viewExecOrFatal(t, db, `CREATE VIEW even_numbers AS SELECT value FROM numbers WHERE value % 2 = 0`)
+	viewExecOrFatal(t, db, `CREATE VIEW large_even_numbers AS SELECT value FROM even_numbers WHERE value > 5`)
 
-	_, err = db.Exec(`INSERT INTO numbers VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10)`)
-	if err != nil {
-		t.Fatalf("Failed to insert data: %v", err)
-	}
-
-	// Create first view
-	_, err = db.Exec(`CREATE VIEW even_numbers AS SELECT value FROM numbers WHERE value % 2 = 0`)
-	if err != nil {
-		t.Fatalf("Failed to create first view: %v", err)
-	}
-
-	// Create second view that references first view
-	_, err = db.Exec(`CREATE VIEW large_even_numbers AS SELECT value FROM even_numbers WHERE value > 5`)
-	if err != nil {
-		t.Fatalf("Failed to create second view: %v", err)
-	}
-
-	// Query the nested view
-	rows, err := db.Query(`SELECT * FROM large_even_numbers ORDER BY value`)
-	if err != nil {
-		t.Fatalf("Failed to query nested view: %v", err)
-	}
-	defer rows.Close()
-
-	// Verify results (should be 6, 8, 10)
-	expected := []int{6, 8, 10}
-	count := 0
-	for rows.Next() {
-		var value int
-		if err := rows.Scan(&value); err != nil {
-			t.Fatalf("Failed to scan row: %v", err)
-		}
-		if count >= len(expected) {
-			t.Fatalf("Too many rows returned")
-		}
-		if value != expected[count] {
-			t.Errorf("Row %d: expected %d, got %d", count, expected[count], value)
-		}
-		count++
-	}
-
-	if count != 3 {
-		t.Errorf("Expected 3 rows, got %d", count)
-	}
+	viewVerifyInts(t, db, `SELECT * FROM large_even_numbers ORDER BY value`, []int{6, 8, 10})
 }
 
 func TestTemporaryView(t *testing.T) {

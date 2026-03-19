@@ -509,43 +509,38 @@ func TestSQLiteDelete(t *testing.T) {
 			}
 			db := setupMemoryDB(t)
 			defer db.Close()
-
-			// Execute setup statements
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("Setup failed for statement %q: %v", stmt, err)
-				}
-			}
-
-			// Execute DELETE statement
-			_, err := db.Exec(tt.delete)
-
-			// Check error expectation
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("Expected error containing %q, got nil", tt.wantErrMsg)
-				}
-				if !strings.Contains(err.Error(), tt.wantErrMsg) {
-					t.Fatalf("Expected error containing %q, got %q", tt.wantErrMsg, err.Error())
-				}
-				return // Test passed
-			}
-
-			if err != nil {
-				t.Fatalf("DELETE failed: %v", err)
-			}
-
-			// Verify results if verify query is specified
-			if tt.verify != "" {
-				var count int
-				if err := db.QueryRow(tt.verify).Scan(&count); err != nil {
-					t.Fatalf("Verify query failed: %v", err)
-				}
-				if count != tt.wantCount {
-					t.Errorf("Expected count %d, got %d", tt.wantCount, count)
-				}
-			}
+			deleteExecSetup(t, db, tt.setup)
+			deleteExecAndVerify(t, db, tt.delete, tt.verify, tt.wantCount, tt.wantErr, tt.wantErrMsg)
 		})
+	}
+}
+
+func deleteExecSetup(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("Setup failed for statement %q: %v", stmt, err)
+		}
+	}
+}
+
+func deleteExecAndVerify(t *testing.T, db *sql.DB, del, verify string, wantCount int, wantErr bool, wantErrMsg string) {
+	t.Helper()
+	_, err := db.Exec(del)
+	if wantErr {
+		if err == nil {
+			t.Fatalf("Expected error containing %q, got nil", wantErrMsg)
+		}
+		if !strings.Contains(err.Error(), wantErrMsg) {
+			t.Fatalf("Expected error containing %q, got %q", wantErrMsg, err.Error())
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("DELETE failed: %v", err)
+	}
+	if verify != "" {
+		deleteAssertCount(t, db, verify, wantCount)
 	}
 }
 
@@ -555,86 +550,53 @@ func TestSQLiteDeleteTriggers(t *testing.T) {
 	db := setupMemoryDB(t)
 	defer db.Close()
 
-	// Create table and trigger counter
-	_, err := db.Exec(`
-		CREATE TABLE t3(a INTEGER);
+	deleteTriggerSetup(t, db)
+	deleteTriggerVerify(t, db)
+}
+
+func deleteTriggerSetup(t *testing.T, db *sql.DB) {
+	t.Helper()
+	stmts := []string{
+		`CREATE TABLE t3(a INTEGER);
 		INSERT INTO t3 VALUES(1);
 		INSERT INTO t3 SELECT a+1 FROM t3;
-		INSERT INTO t3 SELECT a+2 FROM t3;
-	`)
-	if err != nil {
-		t.Fatalf("Setup failed: %v", err)
-	}
-
-	// Verify initial data
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM t3").Scan(&count)
-	if err != nil {
-		t.Fatalf("Count query failed: %v", err)
-	}
-	if count != 4 {
-		t.Errorf("Expected 4 rows initially, got %d", count)
-	}
-
-	// Create trigger to count deletions
-	_, err = db.Exec(`
-		CREATE TABLE cnt(del INTEGER);
+		INSERT INTO t3 SELECT a+2 FROM t3`,
+		`CREATE TABLE cnt(del INTEGER);
 		INSERT INTO cnt VALUES(0);
 		CREATE TRIGGER r1 AFTER DELETE ON t3 FOR EACH ROW BEGIN
 			UPDATE cnt SET del=del+1;
-		END;
-	`)
-	if err != nil {
-		t.Fatalf("Trigger creation failed: %v", err)
+		END`,
 	}
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+	}
+}
 
-	// Delete one row
-	_, err = db.Exec("DELETE FROM t3 WHERE a<2")
-	if err != nil {
+func deleteTriggerVerify(t *testing.T, db *sql.DB) {
+	t.Helper()
+	deleteAssertCount(t, db, "SELECT COUNT(*) FROM t3", 4)
+	if _, err := db.Exec("DELETE FROM t3 WHERE a<2"); err != nil {
 		t.Fatalf("DELETE failed: %v", err)
 	}
-
-	// Check remaining rows
-	err = db.QueryRow("SELECT COUNT(*) FROM t3").Scan(&count)
-	if err != nil {
-		t.Fatalf("Count query failed: %v", err)
-	}
-	if count != 3 {
-		t.Errorf("Expected 3 rows after delete, got %d", count)
-	}
-
-	// Check trigger counter
-	var delCount int
-	err = db.QueryRow("SELECT del FROM cnt").Scan(&delCount)
-	if err != nil {
-		t.Fatalf("Counter query failed: %v", err)
-	}
-	if delCount != 1 {
-		t.Errorf("Expected trigger to fire 1 time, got %d", delCount)
-	}
-
-	// Delete all remaining rows
-	_, err = db.Exec("DELETE FROM t3")
-	if err != nil {
+	deleteAssertCount(t, db, "SELECT COUNT(*) FROM t3", 3)
+	deleteAssertCount(t, db, "SELECT del FROM cnt", 1)
+	if _, err := db.Exec("DELETE FROM t3"); err != nil {
 		t.Fatalf("DELETE all failed: %v", err)
 	}
+	deleteAssertCount(t, db, "SELECT COUNT(*) FROM t3", 0)
+	deleteAssertCount(t, db, "SELECT del FROM cnt", 4)
+}
 
-	// Check all rows deleted
-	err = db.QueryRow("SELECT COUNT(*) FROM t3").Scan(&count)
-	if err != nil {
-		t.Fatalf("Count query failed: %v", err)
+func deleteAssertCount(t *testing.T, db *sql.DB, query string, want int) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow(query).Scan(&got); err != nil {
+		t.Fatalf("query failed (%s): %v", query, err)
 	}
-	if count != 0 {
-		t.Errorf("Expected 0 rows after delete all, got %d", count)
-	}
-
-	// Check trigger counter for all deletions
-	err = db.QueryRow("SELECT del FROM cnt").Scan(&delCount)
-	if err != nil {
-		t.Fatalf("Counter query failed: %v", err)
-	}
-	if delCount != 4 {
-		t.Errorf("Expected trigger to fire 4 times total, got %d", delCount)
+	if got != want {
+		t.Errorf("%s: got %d, want %d", query, got, want)
 	}
 }
 
@@ -732,58 +694,29 @@ func TestSQLiteDeleteLargeDataset(t *testing.T) {
 	db := setupMemoryDB(t)
 	defer db.Close()
 
-	// Create table with many rows (scaled down from 524288 in original test)
-	_, err := db.Exec("CREATE TABLE t1(x integer primary key)")
-	if err != nil {
+	deleteLargeDatasetSetup(t, db)
+	deleteAssertCount(t, db, "SELECT COUNT(*) FROM t1", 2048)
+	if _, err := db.Exec("DELETE FROM t1 WHERE x%2==0"); err != nil {
+		t.Fatalf("DELETE failed: %v", err)
+	}
+	deleteAssertCount(t, db, "SELECT COUNT(*) FROM t1", 1024)
+}
+
+func deleteLargeDatasetSetup(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec("CREATE TABLE t1(x integer primary key)"); err != nil {
 		t.Fatalf("Table creation failed: %v", err)
 	}
-
-	// Insert rows using doubling strategy
-	_, err = db.Exec(`
-		BEGIN;
-		INSERT INTO t1 VALUES(1);
-		INSERT INTO t1 VALUES(2);
-	`)
-	if err != nil {
+	if _, err := db.Exec("BEGIN; INSERT INTO t1 VALUES(1); INSERT INTO t1 VALUES(2)"); err != nil {
 		t.Fatalf("Initial insert failed: %v", err)
 	}
-
-	// Double the data several times
-	for i := 0; i < 10; i++ { // Creates 2048 rows
-		_, err = db.Exec(fmt.Sprintf("INSERT INTO t1 SELECT x+%d FROM t1", 1<<uint(i+1)))
-		if err != nil {
+	for i := 0; i < 10; i++ {
+		if _, err := db.Exec(fmt.Sprintf("INSERT INTO t1 SELECT x+%d FROM t1", 1<<uint(i+1))); err != nil {
 			t.Fatalf("Insert iteration %d failed: %v", i, err)
 		}
 	}
-
-	_, err = db.Exec("COMMIT")
-	if err != nil {
+	if _, err := db.Exec("COMMIT"); err != nil {
 		t.Fatalf("Commit failed: %v", err)
-	}
-
-	// Verify row count
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-	if err != nil {
-		t.Fatalf("Count query failed: %v", err)
-	}
-	if count != 2048 {
-		t.Errorf("Expected 2048 rows, got %d", count)
-	}
-
-	// Delete even numbers
-	_, err = db.Exec("DELETE FROM t1 WHERE x%2==0")
-	if err != nil {
-		t.Fatalf("DELETE failed: %v", err)
-	}
-
-	// Verify half deleted
-	err = db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-	if err != nil {
-		t.Fatalf("Count query after delete failed: %v", err)
-	}
-	if count != 1024 {
-		t.Errorf("Expected 1024 rows after delete, got %d", count)
 	}
 }
 
@@ -793,7 +726,7 @@ func TestSQLiteDeleteWithAliases(t *testing.T) {
 	db := setupMemoryDB(t)
 	defer db.Close()
 
-	_, err := db.Exec(`
+	if _, err := db.Exec(`
 		CREATE TABLE t11(a INTEGER PRIMARY KEY, b INT);
 		INSERT INTO t11(a,b) VALUES(1, 17);
 		INSERT INTO t11(a,b) VALUES(2, 34);
@@ -801,55 +734,38 @@ func TestSQLiteDeleteWithAliases(t *testing.T) {
 		INSERT INTO t11(a,b) VALUES(6, 2);
 		INSERT INTO t11(a,b) VALUES(12, 4);
 		INSERT INTO t11(a,b) VALUES(18, 6);
-	`)
-	if err != nil {
+	`); err != nil {
 		t.Fatalf("Setup failed: %v", err)
 	}
 
-	// DELETE with alias and correlated subquery
-	_, err = db.Exec(`
+	if _, err := db.Exec(`
 		DELETE FROM t11 AS xyz
 		WHERE EXISTS(SELECT 1 FROM t11 WHERE t11.a>xyz.a AND t11.b<=xyz.b)
-	`)
-	if err != nil {
+	`); err != nil {
 		t.Fatalf("DELETE with alias failed: %v", err)
 	}
 
-	// Verify correct rows remain
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM t11").Scan(&count)
-	if err != nil {
-		t.Fatalf("Count query failed: %v", err)
-	}
-	if count != 3 {
-		t.Errorf("Expected 3 rows remaining, got %d", count)
-	}
+	deleteAssertCount(t, db, "SELECT COUNT(*) FROM t11", 3)
+	deleteVerifyAliasRows(t, db)
+}
 
-	// Verify the specific rows that should remain
+func deleteVerifyAliasRows(t *testing.T, db *sql.DB) {
+	t.Helper()
 	rows, err := db.Query("SELECT a, b FROM t11 ORDER BY a")
 	if err != nil {
 		t.Fatalf("Query failed: %v", err)
 	}
 	defer rows.Close()
 
-	expected := []struct{ a, b int }{
-		{6, 2},
-		{12, 4},
-		{18, 6},
-	}
-
+	expected := [][2]int{{6, 2}, {12, 4}, {18, 6}}
 	i := 0
 	for rows.Next() {
 		var a, b int
 		if err := rows.Scan(&a, &b); err != nil {
 			t.Fatalf("Scan failed: %v", err)
 		}
-		if i >= len(expected) {
-			t.Errorf("Got more rows than expected")
-			break
-		}
-		if a != expected[i].a || b != expected[i].b {
-			t.Errorf("Row %d: expected (%d,%d), got (%d,%d)", i, expected[i].a, expected[i].b, a, b)
+		if i < len(expected) && (a != expected[i][0] || b != expected[i][1]) {
+			t.Errorf("Row %d: expected (%d,%d), got (%d,%d)", i, expected[i][0], expected[i][1], a, b)
 		}
 		i++
 	}

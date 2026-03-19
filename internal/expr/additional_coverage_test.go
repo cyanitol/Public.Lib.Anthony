@@ -232,40 +232,27 @@ func TestStepResultFunctions(t *testing.T) {
 	pattern := []rune("a\\bc")
 	str := []rune("abc")
 
-	// Test stepEscape with escape at end
-	step := stepEscape([]rune("a\\"), str, false, 1, 0)
-	if !step.done || step.result {
-		t.Error("Expected done=true, result=false for escape at end")
+	tests := []struct {
+		name       string
+		step       stepResult
+		wantDone   bool
+		wantResult bool
+	}{
+		{"escape at end", stepEscape([]rune("a\\"), str, false, 1, 0), true, false},
+		{"escape str at end", stepEscape(pattern, []rune(""), false, 1, 0), true, false},
+		{"multi wildcard at end", stepMultiWildcard([]rune("a%"), str, 0, false, 1, 0), true, true},
+		{"single wildcard str end", stepSingleWildcard([]rune(""), 0, 0), true, false},
+		{"literal str at end", stepLiteral(pattern, []rune(""), false, 0, 0), true, false},
+		{"literal mismatch", stepLiteral([]rune("x"), str, false, 0, 0), true, false},
 	}
 
-	// Test stepEscape with str at end
-	step = stepEscape(pattern, []rune(""), false, 1, 0)
-	if !step.done || step.result {
-		t.Error("Expected done=true, result=false for str at end")
-	}
-
-	// Test stepMultiWildcard at pattern end
-	step = stepMultiWildcard([]rune("a%"), str, 0, false, 1, 0)
-	if !step.done || !step.result {
-		t.Error("Expected done=true, result=true for % at pattern end")
-	}
-
-	// Test stepSingleWildcard with str at end
-	step = stepSingleWildcard([]rune(""), 0, 0)
-	if !step.done || step.result {
-		t.Error("Expected done=true, result=false for str at end")
-	}
-
-	// Test stepLiteral with str at end
-	step = stepLiteral(pattern, []rune(""), false, 0, 0)
-	if !step.done || step.result {
-		t.Error("Expected done=true, result=false for str at end")
-	}
-
-	// Test stepLiteral with mismatch
-	step = stepLiteral([]rune("x"), str, false, 0, 0)
-	if !step.done || step.result {
-		t.Error("Expected done=true, result=false for char mismatch")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.step.done != tt.wantDone || tt.step.result != tt.wantResult {
+				t.Errorf("got done=%v result=%v, want done=%v result=%v",
+					tt.step.done, tt.step.result, tt.wantDone, tt.wantResult)
+			}
+		})
 	}
 }
 

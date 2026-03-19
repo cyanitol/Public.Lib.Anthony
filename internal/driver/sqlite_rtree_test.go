@@ -345,26 +345,8 @@ func testZeroWidthRectangle(t *testing.T, db *sql.DB) {
 	}
 }
 
-// testRTreeSpatialOperations tests spatial queries and operations
-func testRTreeSpatialOperations(t *testing.T, db *sql.DB) {
-	var count int64
-
-	err := db.QueryRow("SELECT COUNT(*) FROM rt1 WHERE id = 101").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query by id: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("expected 1 entry with id=101, got %d", count)
-	}
-
-	err = db.QueryRow("SELECT COUNT(*) FROM rt1 WHERE id >= 1 AND id <= 4").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed range query on id: %v", err)
-	}
-	if count > 0 {
-		// Should find some entries
-	}
-
+func rtreeVerifyOrdering(t *testing.T, db *sql.DB) {
+	t.Helper()
 	rows, err := db.Query("SELECT id FROM rt1 ORDER BY id LIMIT 3")
 	if err != nil {
 		t.Fatalf("failed ORDER BY query: %v", err)
@@ -382,7 +364,24 @@ func testRTreeSpatialOperations(t *testing.T, db *sql.DB) {
 		}
 		prevID = currentID
 	}
+}
 
+// testRTreeSpatialOperations tests spatial queries and operations
+func testRTreeSpatialOperations(t *testing.T, db *sql.DB) {
+	var count int64
+
+	if err := db.QueryRow("SELECT COUNT(*) FROM rt1 WHERE id = 101").Scan(&count); err != nil {
+		t.Fatalf("failed to query by id: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 entry with id=101, got %d", count)
+	}
+
+	if err := db.QueryRow("SELECT COUNT(*) FROM rt1 WHERE id >= 1 AND id <= 4").Scan(&count); err != nil {
+		t.Fatalf("failed range query on id: %v", err)
+	}
+
+	rtreeVerifyOrdering(t, db)
 	testDropAndSpatialJoin(t, db)
 	testLargeCoordinates(t, db)
 }
@@ -467,63 +466,53 @@ func testLargeCoordinates(t *testing.T, db *sql.DB) {
 	}
 }
 
+func rtreeBulkInsert(t *testing.T, db *sql.DB, n int) {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+	stmt, err := tx.Prepare("INSERT INTO rt VALUES(?, ?, ?, ?, ?)")
+	if err != nil {
+		t.Fatalf("failed to prepare statement: %v", err)
+	}
+	defer stmt.Close()
+	for i := 1; i <= n; i++ {
+		if _, err = stmt.Exec(i, float64(i), float64(i+10), float64(i), float64(i+10)); err != nil {
+			tx.Rollback()
+			t.Fatalf("failed to insert entry %d: %v", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("failed to commit transaction: %v", err)
+	}
+}
+
 // TestRTreeIntegrity tests R-Tree integrity and edge cases
 func TestRTreeIntegrity(t *testing.T) {
 	t.Skip("pre-existing failure - needs R-Tree implementation")
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "rtree_integrity_test.db")
-
+	dbPath := filepath.Join(t.TempDir(), "rtree_integrity_test.db")
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
 	defer db.Close()
 
-	// Test 1: Create rtree and insert many entries
-	_, err = db.Exec("CREATE VIRTUAL TABLE rt USING rtree(id, x1, x2, y1, y2)")
-	if err != nil {
+	if _, err = db.Exec("CREATE VIRTUAL TABLE rt USING rtree(id, x1, x2, y1, y2)"); err != nil {
 		t.Fatalf("failed to create rtree: %v", err)
 	}
 
-	// Test 2: Bulk insert
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("failed to begin transaction: %v", err)
-	}
+	rtreeBulkInsert(t, db, 100)
 
-	stmt, err := tx.Prepare("INSERT INTO rt VALUES(?, ?, ?, ?, ?)")
-	if err != nil {
-		t.Fatalf("failed to prepare statement: %v", err)
-	}
-	defer stmt.Close()
-
-	for i := 1; i <= 100; i++ {
-		_, err = stmt.Exec(i, float64(i), float64(i+10), float64(i), float64(i+10))
-		if err != nil {
-			tx.Rollback()
-			t.Fatalf("failed to insert entry %d: %v", i, err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("failed to commit transaction: %v", err)
-	}
-
-	// Test 3: Verify count
 	var count int64
-	err = db.QueryRow("SELECT COUNT(*) FROM rt").Scan(&count)
-	if err != nil {
+	if err = db.QueryRow("SELECT COUNT(*) FROM rt").Scan(&count); err != nil {
 		t.Fatalf("failed to count entries: %v", err)
 	}
 	if count != 100 {
 		t.Errorf("expected 100 entries, got %d", count)
 	}
 
-	// Test 4: Test duplicate IDs (should replace or fail)
-	_, err = db.Exec("INSERT INTO rt VALUES(1, 0, 1, 0, 1)")
-	// SQLite rtree may allow duplicates or fail - we just check it doesn't crash
-
-	// Test 5: Test invalid coordinates (min > max)
-	_, err = db.Exec("INSERT INTO rt VALUES(1000, 10, 5, 10, 5)")
-	// This should either fail or accept it - we test that it doesn't crash
+	// Test duplicate IDs and invalid coordinates - just verify no crash
+	db.Exec("INSERT INTO rt VALUES(1, 0, 1, 0, 1)")
+	db.Exec("INSERT INTO rt VALUES(1000, 10, 5, 10, 5)")
 }

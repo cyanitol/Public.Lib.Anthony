@@ -717,15 +717,20 @@ func TestCollectQueryTables(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tables, err := compiler.collectQueryTables(tt.stmt, "users", usersTable)
-			if tt.wantError && err == nil {
-				t.Error("Expected error but got none")
-			}
-			if !tt.wantError && err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-			if !tt.wantError && len(tables) != tt.wantCount {
+			checkErrorExpectation(t, err, tt.wantError)
+			if !tt.wantError && err == nil && len(tables) != tt.wantCount {
 				t.Errorf("Expected %d tables, got %d", tt.wantCount, len(tables))
 			}
 		})
+	}
+}
+
+func checkErrorExpectation(t *testing.T, err error, wantError bool) {
+	t.Helper()
+	if wantError && err == nil {
+		t.Error("Expected error but got none")
+	}
+	if !wantError && err != nil {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }

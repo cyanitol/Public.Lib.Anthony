@@ -225,70 +225,58 @@ func TestWindowFrameErrorCases(t *testing.T) {
 	}
 }
 
-// TestWindowFunctionAST tests that window functions create correct AST structures
-func TestWindowFunctionAST(t *testing.T) {
-	t.Parallel()
-
-	sql := "SELECT SUM(amount) OVER (PARTITION BY user_id ORDER BY date ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM transactions"
-	parser := NewParser(sql)
-	stmts, err := parser.Parse()
-
+func parseWindowFunc(t *testing.T, sql string) *FunctionExpr {
+	t.Helper()
+	p := NewParser(sql)
+	stmts, err := p.Parse()
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-
 	if len(stmts) != 1 {
 		t.Fatalf("Expected 1 statement, got %d", len(stmts))
 	}
-
 	selectStmt, ok := stmts[0].(*SelectStmt)
 	if !ok {
 		t.Fatalf("Expected SelectStmt, got %T", stmts[0])
 	}
-
 	if len(selectStmt.Columns) != 1 {
 		t.Fatalf("Expected 1 column, got %d", len(selectStmt.Columns))
 	}
-
-	// Verify the column is a function expression
 	funcExpr, ok := selectStmt.Columns[0].Expr.(*FunctionExpr)
 	if !ok {
 		t.Fatalf("Expected FunctionExpr, got %T", selectStmt.Columns[0].Expr)
 	}
+	return funcExpr
+}
+
+// TestWindowFunctionAST tests that window functions create correct AST structures
+func TestWindowFunctionAST(t *testing.T) {
+	t.Parallel()
+
+	funcExpr := parseWindowFunc(t,
+		"SELECT SUM(amount) OVER (PARTITION BY user_id ORDER BY date ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM transactions")
 
 	if funcExpr.Name != "SUM" {
 		t.Errorf("Expected function name SUM, got %s", funcExpr.Name)
 	}
-
-	// Verify window spec exists
 	if funcExpr.Over == nil {
 		t.Fatal("Expected Over clause to be non-nil")
 	}
-
-	// Verify PARTITION BY
 	if len(funcExpr.Over.PartitionBy) != 1 {
 		t.Errorf("Expected 1 partition by expression, got %d", len(funcExpr.Over.PartitionBy))
 	}
-
-	// Verify ORDER BY
 	if len(funcExpr.Over.OrderBy) != 1 {
 		t.Errorf("Expected 1 order by term, got %d", len(funcExpr.Over.OrderBy))
 	}
-
-	// Verify frame spec
 	if funcExpr.Over.Frame == nil {
 		t.Fatal("Expected Frame to be non-nil")
 	}
-
 	if funcExpr.Over.Frame.Mode != FrameRows {
 		t.Errorf("Expected FrameRows mode, got %v", funcExpr.Over.Frame.Mode)
 	}
-
-	// Verify frame bounds
 	if funcExpr.Over.Frame.Start.Type != BoundPreceding {
 		t.Errorf("Expected BoundPreceding for start, got %v", funcExpr.Over.Frame.Start.Type)
 	}
-
 	if funcExpr.Over.Frame.End.Type != BoundFollowing {
 		t.Errorf("Expected BoundFollowing for end, got %v", funcExpr.Over.Frame.End.Type)
 	}

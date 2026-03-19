@@ -4,6 +4,7 @@ package driver
 import (
 	"database/sql"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -281,49 +282,46 @@ func TestSQLiteCaseExpressions(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
-			// Create a fresh database for each test to avoid state leakage
 			db := setupCaseTestDB(t)
 			defer db.Close()
-
-			// Setup: update the table with test values
-			if tt.setup != "" {
-				_, err := db.Exec("UPDATE test1 SET " + tt.setup)
-				if err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			// Execute the expression
-			var result interface{}
-			query := "SELECT " + tt.expr + " FROM test1"
-			err := db.QueryRow(query).Scan(&result)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got none")
-				}
-				return
-			}
-
-			if err != nil {
-				if tt.want == nil && err == sql.ErrNoRows {
-					// NULL result is expected
-					return
-				}
-				t.Fatalf("query failed: %v (query: %s)", err, query)
-			}
-
-			// Handle NULL results
-			if result == nil && tt.want == nil {
-				return
-			}
-
-			// Compare results
-			if !compareCaseValues(result, tt.want) {
-				t.Errorf("expr = %q\ngot  = %v (type %T)\nwant = %v (type %T)",
-					tt.expr, result, result, tt.want, tt.want)
-			}
+			caseExprRunOne(t, db, tt.setup, tt.expr, tt.want, tt.wantErr)
 		})
+	}
+}
+
+func caseExprRunOne(t *testing.T, db *sql.DB, setup, expr string, want interface{}, wantErr bool) {
+	t.Helper()
+	if setup != "" {
+		if _, err := db.Exec("UPDATE test1 SET " + setup); err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+	}
+	query := "SELECT " + expr + " FROM test1"
+	caseExprCheck(t, db, query, want, wantErr)
+}
+
+func caseExprCheck(t *testing.T, db *sql.DB, query string, want interface{}, wantErr bool) {
+	t.Helper()
+	var result interface{}
+	err := db.QueryRow(query).Scan(&result)
+	if wantErr {
+		if err == nil {
+			t.Errorf("expected error, got none")
+		}
+		return
+	}
+	if err != nil {
+		if want == nil && err == sql.ErrNoRows {
+			return
+		}
+		t.Fatalf("query failed: %v (query: %s)", err, query)
+	}
+	if result == nil && want == nil {
+		return
+	}
+	if !compareCaseValues(result, want) {
+		t.Errorf("query = %q\ngot  = %v (type %T)\nwant = %v (type %T)",
+			query, result, result, want, want)
 	}
 }
 
@@ -332,28 +330,13 @@ func TestSQLiteCaseInSelectList(t *testing.T) {
 	db := setupCaseTestDB(t)
 	defer db.Close()
 
-	// Create a table with multiple rows
-	_, err := db.Exec(`CREATE TABLE t2(id INTEGER, value INTEGER)`)
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	_, err = db.Exec(`INSERT INTO t2 VALUES(1, 10)`)
-	if err != nil {
-		t.Fatalf("failed to insert row 1: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t2 VALUES(2, 20)`)
-	if err != nil {
-		t.Fatalf("failed to insert row 2: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t2 VALUES(3, 30)`)
-	if err != nil {
-		t.Fatalf("failed to insert row 3: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t2 VALUES(4, 40)`)
-	if err != nil {
-		t.Fatalf("failed to insert row 4: %v", err)
-	}
+	caseExecAll(t, db, []string{
+		`CREATE TABLE t2(id INTEGER, value INTEGER)`,
+		`INSERT INTO t2 VALUES(1, 10)`,
+		`INSERT INTO t2 VALUES(2, 20)`,
+		`INSERT INTO t2 VALUES(3, 30)`,
+		`INSERT INTO t2 VALUES(4, 40)`,
+	})
 
 	tests := []struct {
 		name  string
@@ -380,32 +363,34 @@ func TestSQLiteCaseInSelectList(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-
-			var results []interface{}
-			for rows.Next() {
-				var id, val interface{}
-				if err := rows.Scan(&id, &val); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				results = append(results, id, val)
-			}
-
-			if len(results) != len(tt.want) {
-				t.Fatalf("got %d results, want %d", len(results), len(tt.want))
-			}
-
-			for i := range results {
-				if !compareCaseValues(results[i], tt.want[i]) {
-					t.Errorf("result[%d]: got %v (%T), want %v (%T)",
-						i, results[i], results[i], tt.want[i], tt.want[i])
-				}
-			}
+			caseSelectListCheck(t, db, tt.query, tt.want)
 		})
+	}
+}
+
+func caseSelectListCheck(t *testing.T, db *sql.DB, query string, want []interface{}) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	var results []interface{}
+	for rows.Next() {
+		var id, val interface{}
+		if err := rows.Scan(&id, &val); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		results = append(results, id, val)
+	}
+	if len(results) != len(want) {
+		t.Fatalf("got %d results, want %d", len(results), len(want))
+	}
+	for i := range results {
+		if !compareCaseValues(results[i], want[i]) {
+			t.Errorf("result[%d]: got %v (%T), want %v (%T)",
+				i, results[i], results[i], want[i], want[i])
+		}
 	}
 }
 
@@ -415,35 +400,15 @@ func TestSQLiteCaseInWhereClause(t *testing.T) {
 	db := setupCaseTestDB(t)
 	defer db.Close()
 
-	// Create test data (from select2.test)
-	_, err := db.Exec(`CREATE TABLE aa(a INTEGER)`)
-	if err != nil {
-		t.Fatalf("failed to create table aa: %v", err)
-	}
-	_, err = db.Exec(`CREATE TABLE bb(b INTEGER)`)
-	if err != nil {
-		t.Fatalf("failed to create table bb: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO aa VALUES(1)`)
-	if err != nil {
-		t.Fatalf("failed to insert into aa: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO aa VALUES(3)`)
-	if err != nil {
-		t.Fatalf("failed to insert into aa: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO bb VALUES(2)`)
-	if err != nil {
-		t.Fatalf("failed to insert into bb: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO bb VALUES(4)`)
-	if err != nil {
-		t.Fatalf("failed to insert into bb: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO bb VALUES(0)`)
-	if err != nil {
-		t.Fatalf("failed to insert into bb: %v", err)
-	}
+	caseExecAll(t, db, []string{
+		`CREATE TABLE aa(a INTEGER)`,
+		`CREATE TABLE bb(b INTEGER)`,
+		`INSERT INTO aa VALUES(1)`,
+		`INSERT INTO aa VALUES(3)`,
+		`INSERT INTO bb VALUES(2)`,
+		`INSERT INTO bb VALUES(4)`,
+		`INSERT INTO bb VALUES(0)`,
+	})
 
 	tests := []struct {
 		name  string
@@ -465,32 +430,43 @@ func TestSQLiteCaseInWhereClause(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-
-			var results [][]int64
-			for rows.Next() {
-				var a, b int64
-				if err := rows.Scan(&a, &b); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				results = append(results, []int64{a, b})
-			}
-
-			if len(results) != len(tt.want) {
-				t.Fatalf("got %d rows, want %d", len(results), len(tt.want))
-			}
-
-			for i := range results {
-				if results[i][0] != tt.want[i][0] || results[i][1] != tt.want[i][1] {
-					t.Errorf("row[%d]: got [%d, %d], want [%d, %d]",
-						i, results[i][0], results[i][1], tt.want[i][0], tt.want[i][1])
-				}
-			}
+			caseAssertInt64Pairs(t, db, tt.query, tt.want)
 		})
+	}
+}
+
+func caseExecAll(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec failed: %v\nSQL: %s", err, stmt)
+		}
+	}
+}
+
+func caseAssertInt64Pairs(t *testing.T, db *sql.DB, query string, want [][]int64) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	var results [][]int64
+	for rows.Next() {
+		var a, b int64
+		if err := rows.Scan(&a, &b); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		results = append(results, []int64{a, b})
+	}
+	if len(results) != len(want) {
+		t.Fatalf("got %d rows, want %d", len(results), len(want))
+	}
+	for i := range results {
+		if results[i][0] != want[i][0] || results[i][1] != want[i][1] {
+			t.Errorf("row[%d]: got [%d, %d], want [%d, %d]",
+				i, results[i][0], results[i][1], want[i][0], want[i][1])
+		}
 	}
 }
 
@@ -500,26 +476,13 @@ func TestSQLiteCaseInOrderBy(t *testing.T) {
 	db := setupCaseTestDB(t)
 	defer db.Close()
 
-	_, err := db.Exec(`CREATE TABLE t3(id INTEGER, category TEXT)`)
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t3 VALUES(1, 'zebra')`)
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t3 VALUES(2, 'apple')`)
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t3 VALUES(3, 'banana')`)
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t3 VALUES(4, 'cherry')`)
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
+	caseExecAll(t, db, []string{
+		`CREATE TABLE t3(id INTEGER, category TEXT)`,
+		`INSERT INTO t3 VALUES(1, 'zebra')`,
+		`INSERT INTO t3 VALUES(2, 'apple')`,
+		`INSERT INTO t3 VALUES(3, 'banana')`,
+		`INSERT INTO t3 VALUES(4, 'cherry')`,
+	})
 
 	tests := []struct {
 		name  string
@@ -541,31 +504,33 @@ func TestSQLiteCaseInOrderBy(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-
-			var results []int64
-			for rows.Next() {
-				var id int64
-				if err := rows.Scan(&id); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				results = append(results, id)
-			}
-
-			if len(results) != len(tt.want) {
-				t.Fatalf("got %d rows, want %d", len(results), len(tt.want))
-			}
-
-			for i := range results {
-				if results[i] != tt.want[i] {
-					t.Errorf("row[%d]: got %d, want %d", i, results[i], tt.want[i])
-				}
-			}
+			caseAssertInt64List(t, db, tt.query, tt.want)
 		})
+	}
+}
+
+func caseAssertInt64List(t *testing.T, db *sql.DB, query string, want []int64) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	var results []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		results = append(results, id)
+	}
+	if len(results) != len(want) {
+		t.Fatalf("got %d rows, want %d", len(results), len(want))
+	}
+	for i := range results {
+		if results[i] != want[i] {
+			t.Errorf("row[%d]: got %d, want %d", i, results[i], want[i])
+		}
 	}
 }
 
@@ -818,84 +783,59 @@ func TestSQLiteCaseSyntaxErrors(t *testing.T) {
 
 // compareCaseValues compares two values considering SQLite type conversions
 func compareCaseValues(got, want interface{}) bool {
-	// Handle nil cases
 	if got == nil && want == nil {
 		return true
 	}
 	if got == nil || want == nil {
 		return false
 	}
-
-	// Handle integer comparisons
-	gotInt, gotIsInt := toInt64(got)
-	wantInt, wantIsInt := toInt64(want)
-	if gotIsInt && wantIsInt {
-		return gotInt == wantInt
+	if caseCompareNumeric(got, want) {
+		return true
 	}
+	return caseCompareStringOrBytes(got, want)
+}
 
-	// Handle float comparisons
-	gotFloat, gotIsFloat := toFloat64(got)
-	wantFloat, wantIsFloat := toFloat64(want)
-	if gotIsFloat && wantIsFloat {
-		// Allow small floating point differences
-		diff := gotFloat - wantFloat
-		if diff < 0 {
-			diff = -diff
-		}
-		return diff < 0.0001
+func caseCompareNumeric(got, want interface{}) bool {
+	gotFloat, gotOk := toFloat64(got)
+	wantFloat, wantOk := toFloat64(want)
+	if !gotOk || !wantOk {
+		return false
 	}
+	diff := gotFloat - wantFloat
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff < 0.0001
+}
 
-	// Handle mixed int/float comparisons
-	if gotIsInt && wantIsFloat {
-		return compareCaseValues(float64(gotInt), want)
+func caseCompareStringOrBytes(got, want interface{}) bool {
+	gotStr := valueToString(got)
+	wantStr := valueToString(want)
+	if gotStr == nil || wantStr == nil {
+		return false
 	}
-	if gotIsFloat && wantIsInt {
-		return compareCaseValues(got, float64(wantInt))
-	}
+	return *gotStr == *wantStr
+}
 
-	// Handle string comparisons
-	gotStr, gotIsStr := got.(string)
-	wantStr, wantIsStr := want.(string)
-	if gotIsStr && wantIsStr {
-		return gotStr == wantStr
+func valueToString(v interface{}) *string {
+	switch val := v.(type) {
+	case string:
+		return &val
+	case []byte:
+		s := string(val)
+		return &s
 	}
-
-	// Handle byte slice (string) comparisons
-	if gotBytes, ok := got.([]byte); ok {
-		if wantIsStr {
-			return string(gotBytes) == wantStr
-		}
-		if wantBytes, ok := want.([]byte); ok {
-			return string(gotBytes) == string(wantBytes)
-		}
-	}
-
-	return false
+	return nil
 }
 
 // toInt64 converts various integer types to int64
 func toInt64(v interface{}) (int64, bool) {
-	switch val := v.(type) {
-	case int:
-		return int64(val), true
-	case int8:
-		return int64(val), true
-	case int16:
-		return int64(val), true
-	case int32:
-		return int64(val), true
-	case int64:
-		return val, true
-	case uint:
-		return int64(val), true
-	case uint8:
-		return int64(val), true
-	case uint16:
-		return int64(val), true
-	case uint32:
-		return int64(val), true
-	case uint64:
-		return int64(val), true
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int(), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return int64(rv.Uint()), true
 	default:
 		return 0, false
 	}
@@ -903,31 +843,14 @@ func toInt64(v interface{}) (int64, bool) {
 
 // toFloat64 converts various numeric types to float64
 func toFloat64(v interface{}) (float64, bool) {
-	switch val := v.(type) {
-	case float32:
-		return float64(val), true
-	case float64:
-		return val, true
-	case int:
-		return float64(val), true
-	case int8:
-		return float64(val), true
-	case int16:
-		return float64(val), true
-	case int32:
-		return float64(val), true
-	case int64:
-		return float64(val), true
-	case uint:
-		return float64(val), true
-	case uint8:
-		return float64(val), true
-	case uint16:
-		return float64(val), true
-	case uint32:
-		return float64(val), true
-	case uint64:
-		return float64(val), true
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Float32, reflect.Float64:
+		return rv.Float(), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(rv.Int()), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return float64(rv.Uint()), true
 	default:
 		return 0, false
 	}

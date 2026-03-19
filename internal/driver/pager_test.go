@@ -10,6 +10,66 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 )
 
+// pagerExecSQL prepares and executes a SQL statement on the given connection.
+func pagerExecSQL(t *testing.T, c *Conn, sql string) {
+	t.Helper()
+	stmt, err := c.Prepare(sql)
+	if err != nil {
+		t.Fatalf("failed to prepare %q: %v", sql, err)
+	}
+	defer stmt.Close()
+	_, err = stmt.Exec(nil)
+	if err != nil {
+		t.Fatalf("failed to exec %q: %v", sql, err)
+	}
+}
+
+// pagerLogInitialState logs the initial state of a pager connection.
+func pagerLogInitialState(t *testing.T, c *Conn) {
+	t.Helper()
+	t.Logf("Initial state:")
+	t.Logf("  btree.Pages count: %d", len(c.btree.Pages))
+	t.Logf("  Provider: %v", c.btree.Provider != nil)
+	if c.btree.Provider != nil {
+		pp := c.btree.Provider.(*pagerProvider)
+		t.Logf("  Provider nextPage: %d", pp.nextPage)
+	}
+}
+
+// pagerVerifyInsertAndParse verifies page data after insert and parses page cells.
+func pagerVerifyInsertAndParse(t *testing.T, c *Conn, rootPage uint32) {
+	t.Helper()
+	_, err := c.btree.GetPage(rootPage)
+	if err != nil {
+		t.Fatalf("failed to get root page after INSERT: %v", err)
+	}
+	header, cells, err := c.btree.ParsePage(rootPage)
+	if err != nil {
+		t.Logf("  Failed to parse page: %v", err)
+		return
+	}
+	t.Logf("  Page %d: numCells=%d, pageType=0x%02x, isLeaf=%v", rootPage, header.NumCells, header.PageType, header.IsLeaf)
+	for i, cell := range cells {
+		t.Logf("    Cell %d: key=%d, payload len=%d", i, cell.Key, len(cell.Payload))
+	}
+}
+
+// pagerTestCursor tests cursor operations directly on the btree.
+func pagerTestCursor(t *testing.T, c *Conn, rootPage uint32) {
+	t.Helper()
+	t.Logf("Testing cursor directly:")
+	cursor := btree.NewCursor(c.btree, rootPage)
+	err := cursor.MoveToFirst()
+	if err != nil {
+		t.Logf("  MoveToFirst error: %v", err)
+		return
+	}
+	t.Logf("  Cursor state: %d, valid=%v", cursor.State, cursor.IsValid())
+	if cursor.IsValid() {
+		t.Logf("  Current key: %d, payload len: %d", cursor.GetKey(), len(cursor.GetPayload()))
+	}
+}
+
 func TestPagerIntegration(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "sqlite-pager-test-*")
 	if err != nil {
@@ -19,7 +79,6 @@ func TestPagerIntegration(t *testing.T) {
 
 	dbPath := filepath.Join(tempDir, "test.db")
 
-	// Open a connection directly through the driver
 	conn, err := sqliteDriver.OpenConnector(dbPath)
 	if err != nil {
 		t.Fatalf("failed to open connection: %v", err)
@@ -27,28 +86,10 @@ func TestPagerIntegration(t *testing.T) {
 	defer conn.Close()
 
 	c := conn.(*Conn)
+	pagerLogInitialState(t, c)
 
-	// Check initial state
-	t.Logf("Initial state:")
-	t.Logf("  btree.Pages count: %d", len(c.btree.Pages))
-	t.Logf("  Provider: %v", c.btree.Provider != nil)
-	if c.btree.Provider != nil {
-		pp := c.btree.Provider.(*pagerProvider)
-		t.Logf("  Provider nextPage: %d", pp.nextPage)
-	}
+	pagerExecSQL(t, c, "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
 
-	// Create table
-	stmt, err := c.Prepare("CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
-	if err != nil {
-		t.Fatalf("failed to prepare CREATE TABLE: %v", err)
-	}
-	_, err = stmt.Exec(nil)
-	if err != nil {
-		t.Fatalf("failed to exec CREATE TABLE: %v", err)
-	}
-	stmt.Close()
-
-	// Check state after CREATE TABLE
 	t.Logf("After CREATE TABLE:")
 	t.Logf("  btree.Pages count: %d", len(c.btree.Pages))
 	table, ok := c.schema.GetTable("test")
@@ -57,57 +98,18 @@ func TestPagerIntegration(t *testing.T) {
 	}
 	t.Logf("  table.RootPage: %d", table.RootPage)
 
-	// Verify page data exists
 	pageData, err := c.btree.GetPage(table.RootPage)
 	if err != nil {
 		t.Fatalf("failed to get root page: %v", err)
 	}
 	t.Logf("  Page %d exists, len=%d, type=0x%02x", table.RootPage, len(pageData), pageData[0])
 
-	// Insert data
-	stmt, err = c.Prepare("INSERT INTO test (id, value) VALUES (1, 'hello')")
-	if err != nil {
-		t.Fatalf("failed to prepare INSERT: %v", err)
-	}
-	result, err := stmt.Exec(nil)
-	if err != nil {
-		t.Fatalf("failed to exec INSERT: %v", err)
-	}
-	stmt.Close()
-	affected, _ := result.RowsAffected()
-	t.Logf("After INSERT: rows affected = %d", affected)
+	pagerExecSQL(t, c, "INSERT INTO test (id, value) VALUES (1, 'hello')")
 
-	// Check page data after INSERT
-	pageData, err = c.btree.GetPage(table.RootPage)
-	if err != nil {
-		t.Fatalf("failed to get root page after INSERT: %v", err)
-	}
-	// Parse page header to see if cells were added
-	header, cells, err := c.btree.ParsePage(table.RootPage)
-	if err != nil {
-		t.Logf("  Failed to parse page: %v", err)
-	} else {
-		t.Logf("  Page %d: numCells=%d, pageType=0x%02x, isLeaf=%v", table.RootPage, header.NumCells, header.PageType, header.IsLeaf)
-		for i, cell := range cells {
-			t.Logf("    Cell %d: key=%d, payload len=%d", i, cell.Key, len(cell.Payload))
-		}
-	}
+	pagerVerifyInsertAndParse(t, c, table.RootPage)
+	pagerTestCursor(t, c, table.RootPage)
 
-	// Test cursor directly
-	t.Logf("Testing cursor directly:")
-	cursor := btree.NewCursor(c.btree, table.RootPage)
-	err = cursor.MoveToFirst()
-	if err != nil {
-		t.Logf("  MoveToFirst error: %v", err)
-	} else {
-		t.Logf("  Cursor state: %d, valid=%v", cursor.State, cursor.IsValid())
-		if cursor.IsValid() {
-			t.Logf("  Current key: %d, payload len: %d", cursor.GetKey(), len(cursor.GetPayload()))
-		}
-	}
-
-	// Query data
-	stmt, err = c.Prepare("SELECT value FROM test WHERE id = 1")
+	stmt, err := c.Prepare("SELECT value FROM test WHERE id = 1")
 	if err != nil {
 		t.Fatalf("failed to prepare SELECT: %v", err)
 	}
@@ -116,7 +118,6 @@ func TestPagerIntegration(t *testing.T) {
 		t.Fatalf("failed to query: %v", err)
 	}
 
-	// Try to read rows
 	cols := rows.Columns()
 	t.Logf("SELECT columns: %v", cols)
 

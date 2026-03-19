@@ -242,59 +242,62 @@ func TestCheckpointFull_MultipleFrames(t *testing.T) {
 	}
 }
 
+// writeTestFrames writes numFrames frames to WAL with byteMul pattern.
+func writeTestFrames(t *testing.T, wal *WAL, numFrames int, byteMul int) {
+	t.Helper()
+	for i := 1; i <= numFrames; i++ {
+		writeTestFrameToWAL(t, wal, Pgno(i), byte(i*byteMul), uint32(i))
+	}
+}
+
+// verifyCheckpointResult checks checkpointed and remaining counts.
+func verifyCheckpointResult(t *testing.T, checkpointed, remaining, expectCheckpointed int) {
+	t.Helper()
+	if checkpointed != expectCheckpointed {
+		t.Errorf("Expected %d frames checkpointed, got %d", expectCheckpointed, checkpointed)
+	}
+	if remaining != 0 {
+		t.Errorf("Expected 0 frames remaining, got %d", remaining)
+	}
+}
+
+// verifyFramesInDatabase verifies numFrames pages were written to the database file.
+func verifyFramesInDatabase(t *testing.T, dbFile string, numFrames, byteMul int) {
+	t.Helper()
+	for i := 1; i <= numFrames; i++ {
+		verifyPageInDatabase(t, dbFile, Pgno(i), byte(i*byteMul), DefaultPageSize)
+	}
+}
+
 func TestCheckpointRestart_ResetsWAL(t *testing.T) {
 	t.Parallel()
 	wal, dbFile := createTestWALForCheckpoint(t)
 	defer wal.Close()
 
-	// Write frames
 	numFrames := 3
-	for i := 1; i <= numFrames; i++ {
-		writeTestFrameToWAL(t, wal, Pgno(i), byte(i*30), uint32(i))
-	}
+	writeTestFrames(t, wal, numFrames, 30)
 
-	// Get checkpoint sequence before
 	initialSeq := wal.checkpointSeq
-
-	// Restart checkpoint
 	checkpointed, remaining, err := wal.CheckpointWithMode(CheckpointRestart)
 	if err != nil {
 		t.Fatalf("Checkpoint failed: %v", err)
 	}
+	verifyCheckpointResult(t, checkpointed, remaining, numFrames)
+	verifyFramesInDatabase(t, dbFile, numFrames, 30)
 
-	if checkpointed != numFrames {
-		t.Errorf("Expected %d frames checkpointed, got %d", numFrames, checkpointed)
-	}
-
-	if remaining != 0 {
-		t.Errorf("Expected 0 frames remaining after restart, got %d", remaining)
-	}
-
-	// Verify data was written to database
-	for i := 1; i <= numFrames; i++ {
-		verifyPageInDatabase(t, dbFile, Pgno(i), byte(i*30), DefaultPageSize)
-	}
-
-	// Verify WAL was reset
 	if wal.FrameCount() != 0 {
 		t.Errorf("WAL should be empty after restart, got %d frames", wal.FrameCount())
 	}
-
-	// Verify checkpoint sequence was incremented
 	if wal.checkpointSeq != initialSeq+1 {
-		t.Errorf("Checkpoint sequence should be incremented: got %d, expected %d",
-			wal.checkpointSeq, initialSeq+1)
+		t.Errorf("Checkpoint sequence: got %d, expected %d", wal.checkpointSeq, initialSeq+1)
 	}
 
-	// Verify WAL file still exists and has just the header
 	info, err := os.Stat(wal.filename)
 	if err != nil {
 		t.Fatalf("WAL file should still exist: %v", err)
 	}
-
 	if info.Size() != WALHeaderSize {
-		t.Errorf("WAL file size should be %d (header only), got %d",
-			WALHeaderSize, info.Size())
+		t.Errorf("WAL file size should be %d, got %d", WALHeaderSize, info.Size())
 	}
 }
 
@@ -303,47 +306,27 @@ func TestCheckpointTruncate_RemovesWAL(t *testing.T) {
 	wal, dbFile := createTestWALForCheckpoint(t)
 	walFilename := wal.filename
 
-	// Write frames
 	numFrames := 3
-	for i := 1; i <= numFrames; i++ {
-		writeTestFrameToWAL(t, wal, Pgno(i), byte(i*40), uint32(i))
-	}
+	writeTestFrames(t, wal, numFrames, 40)
 
-	// Truncate checkpoint
 	checkpointed, remaining, err := wal.CheckpointWithMode(CheckpointTruncate)
 	if err != nil {
 		t.Fatalf("Checkpoint failed: %v", err)
 	}
+	verifyCheckpointResult(t, checkpointed, remaining, numFrames)
+	verifyFramesInDatabase(t, dbFile, numFrames, 40)
 
-	if checkpointed != numFrames {
-		t.Errorf("Expected %d frames checkpointed, got %d", numFrames, checkpointed)
-	}
-
-	if remaining != 0 {
-		t.Errorf("Expected 0 frames remaining after truncate, got %d", remaining)
-	}
-
-	// Verify data was written to database
-	for i := 1; i <= numFrames; i++ {
-		verifyPageInDatabase(t, dbFile, Pgno(i), byte(i*40), DefaultPageSize)
-	}
-
-	// Verify WAL was truncated
 	if wal.FrameCount() != 0 {
 		t.Errorf("WAL should be empty after truncate, got %d frames", wal.FrameCount())
 	}
 
-	// Verify WAL file was truncated to zero
 	info, err := os.Stat(walFilename)
 	if err != nil {
 		t.Fatalf("Failed to stat WAL file: %v", err)
 	}
-
 	if info.Size() != 0 {
 		t.Errorf("WAL file should be truncated to 0 bytes, got %d", info.Size())
 	}
-
-	// File handle should be closed
 	if wal.file != nil {
 		t.Error("WAL file should be closed after truncate")
 	}

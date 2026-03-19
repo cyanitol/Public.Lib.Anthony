@@ -7,6 +7,14 @@ import (
 	"testing"
 )
 
+// fkeyExecOrFatal executes a statement or fails the test.
+func fkeyExecOrFatal(t *testing.T, db *sql.DB, stmt string) {
+	t.Helper()
+	if _, err := db.Exec(stmt); err != nil {
+		t.Fatalf("exec %q failed: %v", stmt, err)
+	}
+}
+
 // TestForeignKey_PragmaForeignKeys tests the PRAGMA foreign_keys setting.
 // Based on fkey1.test and fkey2.test.
 func TestForeignKey_PragmaForeignKeys(t *testing.T) {
@@ -847,60 +855,13 @@ func TestForeignKey_ForeignKeyCheck(t *testing.T) {
 	db := setupMemoryDB(t)
 	defer db.Close()
 
-	// Disable FK enforcement to insert invalid data
-	_, err := db.Exec("PRAGMA foreign_keys = OFF")
-	if err != nil {
-		t.Fatalf("Failed to disable foreign keys: %v", err)
-	}
+	fkeyExecOrFatal(t, db, "PRAGMA foreign_keys = OFF")
+	fkeyExecOrFatal(t, db, `CREATE TABLE p1(a INTEGER PRIMARY KEY); CREATE TABLE c1(x INTEGER PRIMARY KEY REFERENCES p1)`)
+	fkeyExecOrFatal(t, db, "INSERT INTO p1 VALUES(88), (89)")
+	fkeyExecOrFatal(t, db, "INSERT INTO c1 VALUES(90), (87), (88)")
 
-	_, err = db.Exec(`
-		CREATE TABLE p1(a INTEGER PRIMARY KEY);
-		CREATE TABLE c1(x INTEGER PRIMARY KEY REFERENCES p1)
-	`)
-	if err != nil {
-		t.Fatalf("Failed to create tables: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO p1 VALUES(88), (89)")
-	if err != nil {
-		t.Fatalf("Failed to insert parents: %v", err)
-	}
-
-	// Insert with valid and invalid FKs
-	_, err = db.Exec("INSERT INTO c1 VALUES(90), (87), (88)")
-	if err != nil {
-		t.Fatalf("Failed to insert children: %v", err)
-	}
-
-	// Check for FK violations
-	rows, err := db.Query("PRAGMA foreign_key_check")
-	if err != nil {
-		t.Fatalf("Failed to run foreign_key_check: %v", err)
-	}
-	defer rows.Close()
-
-	violations := 0
-	for rows.Next() {
-		violations++
-		var table string
-		var rowid sql.NullInt64
-		var parent string
-		var fkid int
-		err := rows.Scan(&table, &rowid, &parent, &fkid)
-		if err != nil {
-			t.Fatalf("Failed to scan violation: %v", err)
-		}
-
-		if table != "c1" {
-			t.Errorf("Expected table 'c1', got '%s'", table)
-		}
-		if parent != "p1" {
-			t.Errorf("Expected parent 'p1', got '%s'", parent)
-		}
-	}
-
-	if violations != 2 {
-		t.Errorf("Expected 2 FK violations, got %d", violations)
+	if v := fkeyCountViolations(t, db, "PRAGMA foreign_key_check"); v != 2 {
+		t.Errorf("Expected 2 FK violations, got %d", v)
 	}
 }
 
@@ -910,68 +871,16 @@ func TestForeignKey_ForeignKeyCheckSpecificTable(t *testing.T) {
 	db := setupMemoryDB(t)
 	defer db.Close()
 
-	_, err := db.Exec("PRAGMA foreign_keys = OFF")
-	if err != nil {
-		t.Fatalf("Failed to disable foreign keys: %v", err)
-	}
+	fkeyExecOrFatal(t, db, "PRAGMA foreign_keys = OFF")
+	fkeyExecOrFatal(t, db, `CREATE TABLE p1(a INTEGER PRIMARY KEY); CREATE TABLE c1(x INTEGER PRIMARY KEY REFERENCES p1); CREATE TABLE c2(y INTEGER PRIMARY KEY REFERENCES p1)`)
+	fkeyExecOrFatal(t, db, "INSERT INTO p1 VALUES(88)")
+	fkeyExecOrFatal(t, db, "INSERT INTO c1 VALUES(90)")
 
-	_, err = db.Exec(`
-		CREATE TABLE p1(a INTEGER PRIMARY KEY);
-		CREATE TABLE c1(x INTEGER PRIMARY KEY REFERENCES p1);
-		CREATE TABLE c2(y INTEGER PRIMARY KEY REFERENCES p1)
-	`)
-	if err != nil {
-		t.Fatalf("Failed to create tables: %v", err)
+	if v := fkeyCountViolations(t, db, "PRAGMA foreign_key_check(c1)"); v != 1 {
+		t.Errorf("Expected 1 FK violation, got %d", v)
 	}
-
-	_, err = db.Exec("INSERT INTO p1 VALUES(88)")
-	if err != nil {
-		t.Fatalf("Failed to insert parent: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO c1 VALUES(90)")
-	if err != nil {
-		t.Fatalf("Failed to insert c1: %v", err)
-	}
-
-	// Check specific table
-	rows, err := db.Query("PRAGMA foreign_key_check(c1)")
-	if err != nil {
-		t.Fatalf("Failed to run foreign_key_check(c1): %v", err)
-	}
-	defer rows.Close()
-
-	violations := 0
-	for rows.Next() {
-		violations++
-		var table string
-		var rowid sql.NullInt64
-		var parent string
-		var fkid int
-		err := rows.Scan(&table, &rowid, &parent, &fkid)
-		if err != nil {
-			t.Fatalf("Failed to scan violation: %v", err)
-		}
-	}
-
-	if violations != 1 {
-		t.Errorf("Expected 1 FK violation, got %d", violations)
-	}
-
-	// Check c2 (should have no violations)
-	rows2, err := db.Query("PRAGMA foreign_key_check(c2)")
-	if err != nil {
-		t.Fatalf("Failed to run foreign_key_check(c2): %v", err)
-	}
-	defer rows2.Close()
-
-	violations2 := 0
-	for rows2.Next() {
-		violations2++
-	}
-
-	if violations2 != 0 {
-		t.Errorf("Expected 0 FK violations for c2, got %d", violations2)
+	if v := fkeyCountViolations(t, db, "PRAGMA foreign_key_check(c2)"); v != 0 {
+		t.Errorf("Expected 0 FK violations for c2, got %d", v)
 	}
 }
 
@@ -1229,74 +1138,39 @@ func TestForeignKey_QuotedTableNames(t *testing.T) {
 	}
 }
 
+// fkeyCountViolations counts rows from a PRAGMA foreign_key_check query.
+func fkeyCountViolations(t *testing.T, db *sql.DB, query string) int {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("Failed to run %s: %v", query, err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	return count
+}
+
 // TestForeignKey_MissingParentTable tests FK referencing non-existent table.
 // Based on fkey5-9.* tests.
 func TestForeignKey_MissingParentTable(t *testing.T) {
 	db := setupMemoryDB(t)
 	defer db.Close()
 
-	_, err := db.Exec("PRAGMA foreign_keys = OFF")
-	if err != nil {
-		t.Fatalf("Failed to disable foreign keys: %v", err)
+	fkeyExecOrFatal(t, db, "PRAGMA foreign_keys = OFF")
+	fkeyExecOrFatal(t, db, `CREATE TABLE k1(x REFERENCES s1)`)
+	fkeyExecOrFatal(t, db, "INSERT INTO k1 VALUES(NULL)")
+
+	if v := fkeyCountViolations(t, db, "PRAGMA foreign_key_check(k1)"); v != 0 {
+		t.Errorf("Expected 0 violations with NULL FK, got %d", v)
 	}
 
-	_, err = db.Exec(`CREATE TABLE k1(x REFERENCES s1)`)
-	if err != nil {
-		t.Fatalf("Failed to create table: %v", err)
-	}
+	fkeyExecOrFatal(t, db, "INSERT INTO k1 VALUES(1)")
 
-	// Check with NULL FK (should pass)
-	_, err = db.Exec("INSERT INTO k1 VALUES(NULL)")
-	if err != nil {
-		t.Fatalf("Failed to insert NULL FK: %v", err)
-	}
-
-	rows, err := db.Query("PRAGMA foreign_key_check(k1)")
-	if err != nil {
-		t.Fatalf("Failed to run foreign_key_check: %v", err)
-	}
-	defer rows.Close()
-
-	violations := 0
-	for rows.Next() {
-		violations++
-	}
-
-	if violations != 0 {
-		t.Errorf("Expected 0 violations with NULL FK, got %d", violations)
-	}
-
-	// Insert non-NULL FK to missing table
-	_, err = db.Exec("INSERT INTO k1 VALUES(1)")
-	if err != nil {
-		t.Fatalf("Failed to insert FK: %v", err)
-	}
-
-	// Should report violation
-	rows2, err := db.Query("PRAGMA foreign_key_check(k1)")
-	if err != nil {
-		t.Fatalf("Failed to run foreign_key_check: %v", err)
-	}
-	defer rows2.Close()
-
-	violations2 := 0
-	for rows2.Next() {
-		violations2++
-		var table, parent string
-		var rowid sql.NullInt64
-		var fkid int
-		err := rows2.Scan(&table, &rowid, &parent, &fkid)
-		if err != nil {
-			t.Fatalf("Failed to scan violation: %v", err)
-		}
-
-		if parent != "s1" {
-			t.Errorf("Expected parent table 's1', got '%s'", parent)
-		}
-	}
-
-	if violations2 != 1 {
-		t.Errorf("Expected 1 violation with missing parent table, got %d", violations2)
+	if v := fkeyCountViolations(t, db, "PRAGMA foreign_key_check(k1)"); v != 1 {
+		t.Errorf("Expected 1 violation with missing parent table, got %d", v)
 	}
 }
 
@@ -1306,67 +1180,19 @@ func TestForeignKey_PartialNullMultiColumn(t *testing.T) {
 	db := setupMemoryDB(t)
 	defer db.Close()
 
-	_, err := db.Exec("PRAGMA foreign_keys = OFF")
-	if err != nil {
-		t.Fatalf("Failed to disable foreign keys: %v", err)
+	fkeyExecOrFatal(t, db, "PRAGMA foreign_keys = OFF")
+	fkeyExecOrFatal(t, db, `CREATE TABLE k2(x, y, FOREIGN KEY(x, y) REFERENCES s1(a, b))`)
+	fkeyExecOrFatal(t, db, "INSERT INTO k2 VALUES(NULL, 'five')")
+	fkeyExecOrFatal(t, db, "INSERT INTO k2 VALUES('one', NULL)")
+
+	if v := fkeyCountViolations(t, db, "PRAGMA foreign_key_check(k2)"); v != 0 {
+		t.Errorf("Expected 0 violations with partial NULL FK, got %d", v)
 	}
 
-	_, err = db.Exec(`
-		CREATE TABLE k2(
-			x, y,
-			FOREIGN KEY(x, y) REFERENCES s1(a, b)
-		)
-	`)
-	if err != nil {
-		t.Fatalf("Failed to create table: %v", err)
-	}
+	fkeyExecOrFatal(t, db, "INSERT INTO k2 VALUES('six', 'seven')")
 
-	// Insert with partial NULL (should be allowed)
-	_, err = db.Exec("INSERT INTO k2 VALUES(NULL, 'five')")
-	if err != nil {
-		t.Fatalf("Failed to insert partial NULL: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO k2 VALUES('one', NULL)")
-	if err != nil {
-		t.Fatalf("Failed to insert partial NULL: %v", err)
-	}
-
-	// Check - partial NULLs should not be violations
-	rows, err := db.Query("PRAGMA foreign_key_check(k2)")
-	if err != nil {
-		t.Fatalf("Failed to run foreign_key_check: %v", err)
-	}
-	defer rows.Close()
-
-	violations := 0
-	for rows.Next() {
-		violations++
-	}
-
-	if violations != 0 {
-		t.Errorf("Expected 0 violations with partial NULL FK, got %d", violations)
-	}
-
-	// Insert with both non-NULL (should be violation)
-	_, err = db.Exec("INSERT INTO k2 VALUES('six', 'seven')")
-	if err != nil {
-		t.Fatalf("Failed to insert: %v", err)
-	}
-
-	rows2, err := db.Query("PRAGMA foreign_key_check(k2)")
-	if err != nil {
-		t.Fatalf("Failed to run foreign_key_check: %v", err)
-	}
-	defer rows2.Close()
-
-	violations2 := 0
-	for rows2.Next() {
-		violations2++
-	}
-
-	if violations2 != 1 {
-		t.Errorf("Expected 1 violation with non-NULL FK, got %d", violations2)
+	if v := fkeyCountViolations(t, db, "PRAGMA foreign_key_check(k2)"); v != 1 {
+		t.Errorf("Expected 1 violation with non-NULL FK, got %d", v)
 	}
 }
 

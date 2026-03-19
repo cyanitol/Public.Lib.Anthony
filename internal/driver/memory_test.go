@@ -19,31 +19,44 @@ func TestMemoryDatabaseBasic(t *testing.T) {
 	}
 }
 
-func TestMemoryDatabaseCreateTable(t *testing.T) {
+// memOpenDB opens an in-memory database and fatals on error.
+func memOpenDB(t *testing.T) *sql.DB {
+	t.Helper()
 	db, err := sql.Open(DriverName, ":memory:")
 	if err != nil {
 		t.Fatalf("failed to open memory database: %v", err)
 	}
+	return db
+}
+
+// memExec executes a SQL statement and fatals on error.
+func memExec(t *testing.T, db *sql.DB, query string, args ...interface{}) sql.Result {
+	t.Helper()
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		t.Fatalf("failed to exec %q: %v", query, err)
+	}
+	return result
+}
+
+// memScanCount scans a COUNT(*) query and returns the result.
+func memScanCount(t *testing.T, db *sql.DB, query string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(query).Scan(&count); err != nil {
+		t.Fatalf("failed to query count: %v", err)
+	}
+	return count
+}
+
+func TestMemoryDatabaseCreateTable(t *testing.T) {
+	db := memOpenDB(t)
 	defer db.Close()
 
-	// Create a table
-	_, err = db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
+	memExec(t, db, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
+	memExec(t, db, "INSERT INTO users (name, age) VALUES ('Alice', 30)")
+	memExec(t, db, "INSERT INTO users (name, age) VALUES ('Bob', 25)")
 
-	// Insert some data
-	_, err = db.Exec("INSERT INTO users (name, age) VALUES ('Alice', 30)")
-	if err != nil {
-		t.Fatalf("failed to insert data: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO users (name, age) VALUES ('Bob', 25)")
-	if err != nil {
-		t.Fatalf("failed to insert data: %v", err)
-	}
-
-	// Query the data
 	rows, err := db.Query("SELECT name, age FROM users ORDER BY name")
 	if err != nil {
 		t.Fatalf("failed to query data: %v", err)
@@ -65,88 +78,57 @@ func TestMemoryDatabaseCreateTable(t *testing.T) {
 		if err := rows.Scan(&name, &age); err != nil {
 			t.Fatalf("failed to scan row: %v", err)
 		}
-
 		if i >= len(expected) {
 			t.Fatalf("too many rows returned")
 		}
-
 		if name != expected[i].name || age != expected[i].age {
 			t.Errorf("row %d: got (%s, %d), want (%s, %d)", i, name, age, expected[i].name, expected[i].age)
 		}
 		i++
 	}
-
 	if i != len(expected) {
 		t.Errorf("got %d rows, want %d", i, len(expected))
 	}
 }
 
-func TestMemoryDatabaseTransaction(t *testing.T) {
-	t.Skip("pre-existing failure - memory database transactions incomplete")
-	db, err := sql.Open(DriverName, ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open memory database: %v", err)
-	}
-	defer db.Close()
-
-	// Create a table
-	_, err = db.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	// Begin transaction
+// memTxExecAndFinish begins a transaction, executes a statement, and either commits or rolls back.
+func memTxExecAndFinish(t *testing.T, db *sql.DB, query string, commit bool) {
+	t.Helper()
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
 	}
+	if _, err := tx.Exec(query); err != nil {
+		t.Fatalf("failed to exec in tx: %v", err)
+	}
+	if commit {
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("failed to commit: %v", err)
+		}
+	} else {
+		if err := tx.Rollback(); err != nil {
+			t.Fatalf("failed to rollback: %v", err)
+		}
+	}
+}
 
-	// Insert data in transaction
-	_, err = tx.Exec("INSERT INTO test (value) VALUES ('test1')")
-	if err != nil {
-		t.Fatalf("failed to insert data: %v", err)
+func TestMemoryDatabaseTransaction(t *testing.T) {
+	t.Skip("pre-existing failure - memory database transactions incomplete")
+	db := memOpenDB(t)
+	defer db.Close()
+
+	memExec(t, db, "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
+
+	// Commit path
+	memTxExecAndFinish(t, db, "INSERT INTO test (value) VALUES ('test1')", true)
+	if c := memScanCount(t, db, "SELECT COUNT(*) FROM test"); c != 1 {
+		t.Errorf("got count %d, want 1", c)
 	}
 
-	// Commit
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Verify data was committed
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM test").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query count: %v", err)
-	}
-
-	if count != 1 {
-		t.Errorf("got count %d, want 1", count)
-	}
-
-	// Test rollback
-	tx, err = db.Begin()
-	if err != nil {
-		t.Fatalf("failed to begin transaction: %v", err)
-	}
-
-	_, err = tx.Exec("INSERT INTO test (value) VALUES ('test2')")
-	if err != nil {
-		t.Fatalf("failed to insert data: %v", err)
-	}
-
-	// Rollback
-	if err := tx.Rollback(); err != nil {
-		t.Fatalf("failed to rollback: %v", err)
-	}
-
-	// Verify data was not committed
-	err = db.QueryRow("SELECT COUNT(*) FROM test").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query count: %v", err)
-	}
-
-	if count != 1 {
-		t.Errorf("got count %d, want 1 (rollback should not have committed)", count)
+	// Rollback path
+	memTxExecAndFinish(t, db, "INSERT INTO test (value) VALUES ('test2')", false)
+	if c := memScanCount(t, db, "SELECT COUNT(*) FROM test"); c != 1 {
+		t.Errorf("got count %d, want 1 (rollback should not have committed)", c)
 	}
 }
 
@@ -196,52 +178,24 @@ func TestMemoryDatabaseUpdate(t *testing.T) {
 }
 
 func TestMemoryDatabaseDelete(t *testing.T) {
-	db, err := sql.Open(DriverName, ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open memory database: %v", err)
-	}
+	db := memOpenDB(t)
 	defer db.Close()
 
-	// Create and populate table
-	_, err = db.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
+	memExec(t, db, "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
+	memExec(t, db, "INSERT INTO test (value) VALUES ('test1')")
+	memExec(t, db, "INSERT INTO test (value) VALUES ('test2')")
 
-	_, err = db.Exec("INSERT INTO test (value) VALUES ('test1')")
-	if err != nil {
-		t.Fatalf("failed to insert data: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO test (value) VALUES ('test2')")
-	if err != nil {
-		t.Fatalf("failed to insert data: %v", err)
-	}
-
-	// Delete one row
-	result, err := db.Exec("DELETE FROM test WHERE id = 1")
-	if err != nil {
-		t.Fatalf("failed to delete: %v", err)
-	}
-
+	result := memExec(t, db, "DELETE FROM test WHERE id = 1")
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		t.Fatalf("failed to get rows affected: %v", err)
 	}
-
 	if rowsAffected != 1 {
 		t.Errorf("got %d rows affected, want 1", rowsAffected)
 	}
 
-	// Verify deletion
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM test").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query count: %v", err)
-	}
-
-	if count != 1 {
-		t.Errorf("got count %d, want 1", count)
+	if c := memScanCount(t, db, "SELECT COUNT(*) FROM test"); c != 1 {
+		t.Errorf("got count %d, want 1", c)
 	}
 }
 
@@ -323,61 +277,29 @@ func TestMemoryDatabasePersistenceIsolation(t *testing.T) {
 	}
 }
 
+// memSetupMultiOpSchema creates users and posts tables for multi-operation tests.
+func memSetupMultiOpSchema(t *testing.T, db *sql.DB) {
+	t.Helper()
+	memExec(t, db, `CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE)`)
+	memExec(t, db, `CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT, content TEXT, FOREIGN KEY(user_id) REFERENCES users(id))`)
+}
+
 func TestMemoryDatabaseMultipleOperations(t *testing.T) {
-	db, err := sql.Open(DriverName, ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open memory database: %v", err)
-	}
+	db := memOpenDB(t)
 	defer db.Close()
 
-	// Create a more complex schema
-	_, err = db.Exec(`
-		CREATE TABLE users (
-			id INTEGER PRIMARY KEY,
-			name TEXT NOT NULL,
-			email TEXT UNIQUE
-		)
-	`)
-	if err != nil {
-		t.Fatalf("failed to create users table: %v", err)
-	}
+	memSetupMultiOpSchema(t, db)
 
-	_, err = db.Exec(`
-		CREATE TABLE posts (
-			id INTEGER PRIMARY KEY,
-			user_id INTEGER,
-			title TEXT,
-			content TEXT,
-			FOREIGN KEY(user_id) REFERENCES users(id)
-		)
-	`)
-	if err != nil {
-		t.Fatalf("failed to create posts table: %v", err)
-	}
-
-	// Insert test data
-	_, err = db.Exec("INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com')")
-	if err != nil {
-		t.Fatalf("failed to insert user: %v", err)
-	}
+	memExec(t, db, "INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com')")
 
 	var userID int64
-	err = db.QueryRow("SELECT id FROM users WHERE name = 'Alice'").Scan(&userID)
-	if err != nil {
+	if err := db.QueryRow("SELECT id FROM users WHERE name = 'Alice'").Scan(&userID); err != nil {
 		t.Fatalf("failed to get user ID: %v", err)
 	}
 
-	_, err = db.Exec("INSERT INTO posts (user_id, title, content) VALUES (?, 'First Post', 'Hello World')", userID)
-	if err != nil {
-		t.Fatalf("failed to insert post: %v", err)
-	}
+	memExec(t, db, "INSERT INTO posts (user_id, title, content) VALUES (?, 'First Post', 'Hello World')", userID)
 
-	// Query with join
-	rows, err := db.Query(`
-		SELECT users.name, posts.title, posts.content
-		FROM posts
-		JOIN users ON posts.user_id = users.id
-	`)
+	rows, err := db.Query(`SELECT users.name, posts.title, posts.content FROM posts JOIN users ON posts.user_id = users.id`)
 	if err != nil {
 		t.Fatalf("failed to query with join: %v", err)
 	}

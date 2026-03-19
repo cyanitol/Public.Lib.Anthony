@@ -147,6 +147,26 @@ func TestCreateVirtualTableUnknownModule(t *testing.T) {
 }
 
 // TestCreateVirtualTableWithArgs tests module arguments.
+// vtableSQLCheckArgs verifies a virtual table's module arguments.
+func vtableSQLCheckArgs(t *testing.T, c *Conn, name string, expectedArgs []string) {
+	t.Helper()
+	table, exists := c.schema.GetTable(name)
+	if !exists {
+		t.Fatalf("Table %q not found in schema", name)
+	}
+	if !table.IsVirtual {
+		t.Errorf("Table %q is not marked as virtual", name)
+	}
+	if len(table.ModuleArgs) != len(expectedArgs) {
+		t.Errorf("Expected %d module args, got %d", len(expectedArgs), len(table.ModuleArgs))
+	}
+	for i, expected := range expectedArgs {
+		if i < len(table.ModuleArgs) && table.ModuleArgs[i] != expected {
+			t.Errorf("Arg %d: expected %q, got %q", i, expected, table.ModuleArgs[i])
+		}
+	}
+}
+
 func TestCreateVirtualTableWithArgs(t *testing.T) {
 	db, err := sql.Open(DriverName, ":memory:")
 	if err != nil {
@@ -154,13 +174,11 @@ func TestCreateVirtualTableWithArgs(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create FTS5 table with multiple columns
 	_, err = db.Exec("CREATE VIRTUAL TABLE docs USING fts5(title, body, author)")
 	if err != nil {
 		t.Fatalf("Failed to create FTS5 table with multiple columns: %v", err)
 	}
 
-	// Verify table was created with correct arguments
 	conn, err := db.Conn(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to get connection: %v", err)
@@ -172,27 +190,7 @@ func TestCreateVirtualTableWithArgs(t *testing.T) {
 		if !ok {
 			return nil
 		}
-
-		table, exists := c.schema.GetTable("docs")
-		if !exists {
-			t.Fatal("Table 'docs' not found in schema")
-		}
-
-		if !table.IsVirtual {
-			t.Error("Table 'docs' is not marked as virtual")
-		}
-
-		if len(table.ModuleArgs) != 3 {
-			t.Errorf("Expected 3 module args, got %d", len(table.ModuleArgs))
-		}
-
-		expectedArgs := []string{"title", "body", "author"}
-		for i, expected := range expectedArgs {
-			if i >= len(table.ModuleArgs) || table.ModuleArgs[i] != expected {
-				t.Errorf("Arg %d: expected %q, got %q", i, expected, table.ModuleArgs[i])
-			}
-		}
-
+		vtableSQLCheckArgs(t, c, "docs", []string{"title", "body", "author"})
 		return nil
 	})
 	if err != nil {

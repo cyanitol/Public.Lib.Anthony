@@ -4,13 +4,11 @@ package driver
 import (
 	"context"
 	"database/sql/driver"
-	"os"
 	"testing"
 )
 
 func TestStmtClose(t *testing.T) {
-	dbFile := "test_stmt_close.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_stmt_close.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -54,8 +52,7 @@ func TestStmtClose(t *testing.T) {
 }
 
 func TestStmtNumInput(t *testing.T) {
-	dbFile := "test_stmt_numinput.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_stmt_numinput.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -81,8 +78,7 @@ func TestStmtNumInput(t *testing.T) {
 }
 
 func TestStmtExec(t *testing.T) {
-	dbFile := "test_stmt_exec.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_stmt_exec.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -115,8 +111,7 @@ func TestStmtExec(t *testing.T) {
 }
 
 func TestStmtExecContextOnClosed(t *testing.T) {
-	dbFile := "test_stmt_exec_closed.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_stmt_exec_closed.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -145,8 +140,7 @@ func TestStmtExecContextOnClosed(t *testing.T) {
 }
 
 func TestStmtQuery(t *testing.T) {
-	dbFile := "test_stmt_query.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_stmt_query.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -180,8 +174,7 @@ func TestStmtQuery(t *testing.T) {
 }
 
 func TestStmtQueryContextOnClosed(t *testing.T) {
-	dbFile := "test_stmt_query_closed.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_stmt_query_closed.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -236,8 +229,7 @@ func TestValueToNamedValues(t *testing.T) {
 }
 
 func TestStmtNewVDBE(t *testing.T) {
-	dbFile := "test_stmt_new_vdbe.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_stmt_new_vdbe.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -277,8 +269,7 @@ func TestStmtNewVDBE(t *testing.T) {
 }
 
 func TestStmtCloseWithVDBE(t *testing.T) {
-	dbFile := "test_stmt_close_vdbe.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_stmt_close_vdbe.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -310,8 +301,7 @@ func TestStmtCloseWithVDBE(t *testing.T) {
 }
 
 func TestStmtConcurrentClose(t *testing.T) {
-	dbFile := "test_stmt_concurrent_close.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_stmt_concurrent_close.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)

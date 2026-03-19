@@ -5,192 +5,203 @@ import (
 	"testing"
 )
 
+func testMemNull(t *testing.T) {
+	t.Parallel()
+	mem := NewMemNull()
+	if !mem.IsNull() {
+		t.Error("Expected NULL flag to be set")
+	}
+	if mem.IntValue() != 0 {
+		t.Error("NULL should convert to 0 integer")
+	}
+}
+
+func testMemInteger(t *testing.T) {
+	t.Parallel()
+	mem := NewMemInt(42)
+	if !mem.IsInt() {
+		t.Error("Expected INT flag to be set")
+	}
+	if mem.IntValue() != 42 {
+		t.Errorf("Expected 42, got %d", mem.IntValue())
+	}
+	if mem.StrValue() != "42" {
+		t.Errorf("Expected '42', got '%s'", mem.StrValue())
+	}
+}
+
+func testMemReal(t *testing.T) {
+	t.Parallel()
+	mem := NewMemReal(3.14159)
+	if !mem.IsReal() {
+		t.Error("Expected REAL flag to be set")
+	}
+	if mem.RealValue() != 3.14159 {
+		t.Errorf("Expected 3.14159, got %f", mem.RealValue())
+	}
+}
+
+func testMemString(t *testing.T) {
+	t.Parallel()
+	mem := NewMemStr("hello")
+	if !mem.IsStr() {
+		t.Error("Expected STR flag to be set")
+	}
+	if mem.StrValue() != "hello" {
+		t.Errorf("Expected 'hello', got '%s'", mem.StrValue())
+	}
+}
+
+func testMemBlob(t *testing.T) {
+	t.Parallel()
+	data := []byte{1, 2, 3, 4, 5}
+	mem := NewMemBlob(data)
+	if !mem.IsBlob() {
+		t.Error("Expected BLOB flag to be set")
+	}
+	if len(mem.BlobValue()) != 5 {
+		t.Errorf("Expected blob length 5, got %d", len(mem.BlobValue()))
+	}
+}
+
 func TestMemBasicTypes(t *testing.T) {
 	t.Parallel()
-	t.Run("Null", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemNull()
-		if !mem.IsNull() {
-			t.Error("Expected NULL flag to be set")
-		}
-		if mem.IntValue() != 0 {
-			t.Error("NULL should convert to 0 integer")
-		}
-	})
+	t.Run("Null", testMemNull)
+	t.Run("Integer", testMemInteger)
+	t.Run("Real", testMemReal)
+	t.Run("String", testMemString)
+	t.Run("Blob", testMemBlob)
+}
 
-	t.Run("Integer", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemInt(42)
-		if !mem.IsInt() {
-			t.Error("Expected INT flag to be set")
-		}
-		if mem.IntValue() != 42 {
-			t.Errorf("Expected 42, got %d", mem.IntValue())
-		}
-		if mem.StrValue() != "42" {
-			t.Errorf("Expected '42', got '%s'", mem.StrValue())
-		}
-	})
+func testIntToReal(t *testing.T) {
+	t.Parallel()
+	mem := NewMemInt(42)
+	if err := mem.Realify(); err != nil {
+		t.Fatalf("Realify failed: %v", err)
+	}
+	if !mem.IsReal() {
+		t.Error("Expected REAL flag after conversion")
+	}
+	if mem.RealValue() != 42.0 {
+		t.Errorf("Expected 42.0, got %f", mem.RealValue())
+	}
+}
 
-	t.Run("Real", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemReal(3.14159)
-		if !mem.IsReal() {
-			t.Error("Expected REAL flag to be set")
-		}
-		if mem.RealValue() != 3.14159 {
-			t.Errorf("Expected 3.14159, got %f", mem.RealValue())
-		}
-	})
+func testStringToInt(t *testing.T) {
+	t.Parallel()
+	mem := NewMemStr("123")
+	if err := mem.Integerify(); err != nil {
+		t.Fatalf("Integerify failed: %v", err)
+	}
+	if mem.IntValue() != 123 {
+		t.Errorf("Expected 123, got %d", mem.IntValue())
+	}
+}
 
-	t.Run("String", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemStr("hello")
-		if !mem.IsStr() {
-			t.Error("Expected STR flag to be set")
-		}
-		if mem.StrValue() != "hello" {
-			t.Errorf("Expected 'hello', got '%s'", mem.StrValue())
-		}
-	})
+func testStringToReal(t *testing.T) {
+	t.Parallel()
+	mem := NewMemStr("3.14")
+	if err := mem.Realify(); err != nil {
+		t.Fatalf("Realify failed: %v", err)
+	}
+	if mem.RealValue() != 3.14 {
+		t.Errorf("Expected 3.14, got %f", mem.RealValue())
+	}
+}
 
-	t.Run("Blob", func(t *testing.T) {
-		t.Parallel()
-		data := []byte{1, 2, 3, 4, 5}
-		mem := NewMemBlob(data)
-		if !mem.IsBlob() {
-			t.Error("Expected BLOB flag to be set")
-		}
-		blob := mem.BlobValue()
-		if len(blob) != 5 {
-			t.Errorf("Expected blob length 5, got %d", len(blob))
-		}
-	})
+func testIntToString(t *testing.T) {
+	t.Parallel()
+	mem := NewMemInt(42)
+	if err := mem.Stringify(); err != nil {
+		t.Fatalf("Stringify failed: %v", err)
+	}
+	if mem.StrValue() != "42" {
+		t.Errorf("Expected '42', got '%s'", mem.StrValue())
+	}
 }
 
 func TestMemConversions(t *testing.T) {
 	t.Parallel()
-	t.Run("IntToReal", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemInt(42)
-		if err := mem.Realify(); err != nil {
-			t.Fatalf("Realify failed: %v", err)
-		}
-		if !mem.IsReal() {
-			t.Error("Expected REAL flag after conversion")
-		}
-		if mem.RealValue() != 42.0 {
-			t.Errorf("Expected 42.0, got %f", mem.RealValue())
-		}
-	})
+	t.Run("IntToReal", testIntToReal)
+	t.Run("StringToInt", testStringToInt)
+	t.Run("StringToReal", testStringToReal)
+	t.Run("IntToString", testIntToString)
+}
 
-	t.Run("StringToInt", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemStr("123")
-		if err := mem.Integerify(); err != nil {
-			t.Fatalf("Integerify failed: %v", err)
-		}
-		if mem.IntValue() != 123 {
-			t.Errorf("Expected 123, got %d", mem.IntValue())
-		}
-	})
+func testAddIntegers(t *testing.T) {
+	t.Parallel()
+	a := NewMemInt(10)
+	if err := a.Add(NewMemInt(20)); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	if a.IntValue() != 30 {
+		t.Errorf("Expected 30, got %d", a.IntValue())
+	}
+}
 
-	t.Run("StringToReal", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemStr("3.14")
-		if err := mem.Realify(); err != nil {
-			t.Fatalf("Realify failed: %v", err)
-		}
-		if mem.RealValue() != 3.14 {
-			t.Errorf("Expected 3.14, got %f", mem.RealValue())
-		}
-	})
+func testSubtractIntegers(t *testing.T) {
+	t.Parallel()
+	a := NewMemInt(50)
+	if err := a.Subtract(NewMemInt(20)); err != nil {
+		t.Fatalf("Subtract failed: %v", err)
+	}
+	if a.IntValue() != 30 {
+		t.Errorf("Expected 30, got %d", a.IntValue())
+	}
+}
 
-	t.Run("IntToString", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemInt(42)
-		if err := mem.Stringify(); err != nil {
-			t.Fatalf("Stringify failed: %v", err)
-		}
-		if mem.StrValue() != "42" {
-			t.Errorf("Expected '42', got '%s'", mem.StrValue())
-		}
-	})
+func testMultiplyIntegers(t *testing.T) {
+	t.Parallel()
+	a := NewMemInt(6)
+	if err := a.Multiply(NewMemInt(7)); err != nil {
+		t.Fatalf("Multiply failed: %v", err)
+	}
+	if a.IntValue() != 42 {
+		t.Errorf("Expected 42, got %d", a.IntValue())
+	}
+}
+
+func testDivideReals(t *testing.T) {
+	t.Parallel()
+	a := NewMemReal(10.0)
+	if err := a.Divide(NewMemReal(4.0)); err != nil {
+		t.Fatalf("Divide failed: %v", err)
+	}
+	if a.RealValue() != 2.5 {
+		t.Errorf("Expected 2.5, got %f", a.RealValue())
+	}
+}
+
+func testDivideByZero(t *testing.T) {
+	t.Parallel()
+	a := NewMemInt(10)
+	if err := a.Divide(NewMemInt(0)); err != nil {
+		t.Fatalf("Divide failed: %v", err)
+	}
+	if !a.IsNull() {
+		t.Error("Expected NULL after division by zero")
+	}
+}
+
+func testRemainder(t *testing.T) {
+	t.Parallel()
+	a := NewMemInt(17)
+	if err := a.Remainder(NewMemInt(5)); err != nil {
+		t.Fatalf("Remainder failed: %v", err)
+	}
+	if a.IntValue() != 2 {
+		t.Errorf("Expected 2, got %d", a.IntValue())
+	}
 }
 
 func TestMemArithmetic(t *testing.T) {
 	t.Parallel()
-	t.Run("AddIntegers", func(t *testing.T) {
-		t.Parallel()
-		a := NewMemInt(10)
-		b := NewMemInt(20)
-		if err := a.Add(b); err != nil {
-			t.Fatalf("Add failed: %v", err)
-		}
-		if a.IntValue() != 30 {
-			t.Errorf("Expected 30, got %d", a.IntValue())
-		}
-	})
-
-	t.Run("SubtractIntegers", func(t *testing.T) {
-		t.Parallel()
-		a := NewMemInt(50)
-		b := NewMemInt(20)
-		if err := a.Subtract(b); err != nil {
-			t.Fatalf("Subtract failed: %v", err)
-		}
-		if a.IntValue() != 30 {
-			t.Errorf("Expected 30, got %d", a.IntValue())
-		}
-	})
-
-	t.Run("MultiplyIntegers", func(t *testing.T) {
-		t.Parallel()
-		a := NewMemInt(6)
-		b := NewMemInt(7)
-		if err := a.Multiply(b); err != nil {
-			t.Fatalf("Multiply failed: %v", err)
-		}
-		if a.IntValue() != 42 {
-			t.Errorf("Expected 42, got %d", a.IntValue())
-		}
-	})
-
-	t.Run("DivideReals", func(t *testing.T) {
-		t.Parallel()
-		a := NewMemReal(10.0)
-		b := NewMemReal(4.0)
-		if err := a.Divide(b); err != nil {
-			t.Fatalf("Divide failed: %v", err)
-		}
-		if a.RealValue() != 2.5 {
-			t.Errorf("Expected 2.5, got %f", a.RealValue())
-		}
-	})
-
-	t.Run("DivideByZero", func(t *testing.T) {
-		t.Parallel()
-		a := NewMemInt(10)
-		b := NewMemInt(0)
-		if err := a.Divide(b); err != nil {
-			t.Fatalf("Divide failed: %v", err)
-		}
-		if !a.IsNull() {
-			t.Error("Expected NULL after division by zero")
-		}
-	})
-
-	t.Run("Remainder", func(t *testing.T) {
-		t.Parallel()
-		a := NewMemInt(17)
-		b := NewMemInt(5)
-		if err := a.Remainder(b); err != nil {
-			t.Fatalf("Remainder failed: %v", err)
-		}
-		if a.IntValue() != 2 {
-			t.Errorf("Expected 2, got %d", a.IntValue())
-		}
-	})
+	t.Run("AddIntegers", testAddIntegers)
+	t.Run("SubtractIntegers", testSubtractIntegers)
+	t.Run("MultiplyIntegers", testMultiplyIntegers)
+	t.Run("DivideReals", testDivideReals)
+	t.Run("DivideByZero", testDivideByZero)
+	t.Run("Remainder", testRemainder)
 }
 
 func TestMemComparison(t *testing.T) {

@@ -147,59 +147,35 @@ func TestReadTransactionReadOnly(t *testing.T) {
 
 func TestTransactionStateTransitions(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_state_transitions.db"
+	pager := openTestPager(t)
 
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Initial state
 	if pager.InTransaction() {
 		t.Error("should not be in transaction initially")
 	}
 
-	// Open -> Read
-	if err := pager.BeginRead(); err != nil {
-		t.Fatalf("failed to begin read: %v", err)
-	}
+	// Open -> Read -> Open
+	mustBeginRead(t, pager)
 	if !pager.InTransaction() || pager.GetTransactionState() != TxRead {
 		t.Error("should be in read transaction")
 	}
-
-	// Read -> Open
-	if err := pager.EndRead(); err != nil {
-		t.Fatalf("failed to end read: %v", err)
-	}
+	mustEndRead(t, pager)
 	if pager.InTransaction() {
 		t.Error("should not be in transaction")
 	}
 
-	// Open -> Write
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
+	// Open -> Write -> Open (commit)
+	mustBeginWrite(t, pager)
 	if !pager.InWriteTransaction() || pager.GetTransactionState() != TxWrite {
 		t.Error("should be in write transaction")
 	}
-
-	// Write -> Open (commit)
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
+	mustCommit(t, pager)
 	if pager.InTransaction() {
 		t.Error("should not be in transaction after commit")
 	}
 
 	// Open -> Write -> Open (rollback)
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-	if err := pager.Rollback(); err != nil {
-		t.Fatalf("failed to rollback: %v", err)
-	}
+	mustBeginWrite(t, pager)
+	mustRollback(t, pager)
 	if pager.InTransaction() {
 		t.Error("should not be in transaction after rollback")
 	}
@@ -257,51 +233,23 @@ func TestTransactionIsolation(t *testing.T) {
 
 func TestLockStateManagement(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_lock_state.db"
+	pager := openTestPager(t)
 
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Initial lock state
 	if pager.GetLockState() != LockNone {
 		t.Error("initial lock state should be LockNone")
 	}
 
-	// Begin read transaction
-	if err := pager.BeginRead(); err != nil {
-		t.Fatalf("failed to begin read: %v", err)
-	}
-
-	// Should have shared lock
+	mustBeginRead(t, pager)
 	if pager.GetLockState() < LockShared {
 		t.Error("should have at least shared lock in read transaction")
 	}
+	mustEndRead(t, pager)
 
-	// End read transaction
-	if err := pager.EndRead(); err != nil {
-		t.Fatalf("failed to end read: %v", err)
-	}
-
-	// Begin write transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	// Should have reserved lock
+	mustBeginWrite(t, pager)
 	if pager.GetLockState() < LockReserved {
 		t.Error("should have at least reserved lock in write transaction")
 	}
-
-	// Commit
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Lock should be released
+	mustCommit(t, pager)
 	if pager.GetLockState() != LockNone {
 		t.Error("lock should be released after commit")
 	}

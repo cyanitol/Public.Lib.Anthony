@@ -94,6 +94,30 @@ func TestPagerWithLRUCache_WriteThroughMode(t *testing.T) {
 	}
 }
 
+// lruAccessAndWritePages accesses pages 1..n, writing to every 5th page.
+func lruAccessAndWritePages(t *testing.T, p *Pager, n Pgno) {
+	t.Helper()
+	for i := Pgno(1); i <= n; i++ {
+		page := mustGetPage(t, p, i)
+		if i%5 == 0 {
+			mustWritePage(t, p, page)
+			page.Data[0] = byte(i)
+		}
+		p.Put(page)
+	}
+}
+
+// lruVerifyStats checks cache stats and logs them.
+func lruVerifyStats(t *testing.T, cache *LRUCache, maxPages int) {
+	t.Helper()
+	hits, misses := cache.Stats()
+	t.Logf("Cache stats: hits=%d, misses=%d, hit rate=%.2f%%", hits, misses, cache.HitRate())
+	if cache.Size() > maxPages {
+		t.Errorf("cache size %d exceeds max %d", cache.Size(), maxPages)
+	}
+	t.Logf("Dirty pages: %d", len(cache.GetDirtyPages()))
+}
+
 // TestPagerWithLRUCache_LargeWorkload tests LRU cache with many pages
 func TestPagerWithLRUCache_LargeWorkload(t *testing.T) {
 	t.Parallel()
@@ -105,59 +129,21 @@ func TestPagerWithLRUCache_LargeWorkload(t *testing.T) {
 	defer os.Remove(tmpFile)
 	defer os.Remove(tmpFile + "-journal")
 
-	// Create pager with small LRU cache
-	cacheConfig := LRUCacheConfig{
-		PageSize: 4096,
-		MaxPages: 10,
-		Mode:     WriteBackMode,
-	}
-
+	cacheConfig := LRUCacheConfig{PageSize: 4096, MaxPages: 10, Mode: WriteBackMode}
 	pager, err := OpenWithLRUCache(tmpFile, false, 4096, cacheConfig)
 	if err != nil {
 		t.Fatalf("failed to open pager: %v", err)
 	}
 	defer pager.Close()
 
-	// Access many pages (more than cache size)
-	for i := Pgno(1); i <= 50; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
+	lruAccessAndWritePages(t, pager, 50)
 
-		// Write to every 5th page
-		if i%5 == 0 {
-			if err := pager.Write(page); err != nil {
-				t.Fatalf("failed to write page %d: %v", i, err)
-			}
-			page.Data[0] = byte(i)
-		}
-
-		pager.Put(page)
-	}
-
-	// Check statistics
 	if lruCache, ok := pager.cache.(*LRUCache); ok {
-		hits, misses := lruCache.Stats()
-		t.Logf("Cache stats after 50 accesses: hits=%d, misses=%d, hit rate=%.2f%%",
-			hits, misses, lruCache.HitRate())
-
-		// We expect some evictions to have occurred
-		if lruCache.Size() > cacheConfig.MaxPages {
-			t.Errorf("cache size %d exceeds max %d", lruCache.Size(), cacheConfig.MaxPages)
-		}
-
-		// Should have dirty pages
-		dirty := lruCache.GetDirtyPages()
-		t.Logf("Dirty pages: %d", len(dirty))
+		lruVerifyStats(t, lruCache, cacheConfig.MaxPages)
 	}
 
-	// Commit should flush all dirty pages
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
+	mustCommit(t, pager)
 
-	// After commit, no dirty pages should remain
 	if lruCache, ok := pager.cache.(*LRUCache); ok {
 		dirty := lruCache.GetDirtyPages()
 		if len(dirty) != 0 {

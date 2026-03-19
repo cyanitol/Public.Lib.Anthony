@@ -66,31 +66,9 @@ func TestGenerateInSubquery(t *testing.T) {
 	}
 
 	// Check that essential opcodes are present
-	foundOpenEphemeral := false
-	foundRewind := false
-	foundClose := false
-
-	for i := 0; i < v.NumOps(); i++ {
-		op := v.Program[i]
-		switch op.Opcode {
-		case vdbe.OpOpenEphemeral:
-			foundOpenEphemeral = true
-		case vdbe.OpRewind:
-			foundRewind = true
-		case vdbe.OpClose:
-			foundClose = true
-		}
-	}
-
-	if !foundOpenEphemeral {
-		t.Error("expected OpOpenEphemeral to open ephemeral table for subquery results")
-	}
-	if !foundRewind {
-		t.Error("expected OpRewind to iterate through subquery results")
-	}
-	if !foundClose {
-		t.Error("expected OpClose to close ephemeral table")
-	}
+	assertOpcodePresent(t, v, vdbe.OpOpenEphemeral, "open ephemeral table for subquery results")
+	assertOpcodePresent(t, v, vdbe.OpRewind, "iterate through subquery results")
+	assertOpcodePresent(t, v, vdbe.OpClose, "close ephemeral table")
 }
 
 // TestGenerateNotInSubquery tests NOT IN (SELECT ...) expression.
@@ -160,18 +138,9 @@ func TestGenerateScalarSubquery(t *testing.T) {
 	v := vdbe.New()
 	v.AllocMemory(100)
 
-	g := NewCodeGenerator(v)
-
-	// Set up a mock subquery compiler
-	g.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
-		subVM := vdbe.New()
-		subVM.AllocMemory(10)
-		subVM.AddOp(vdbe.OpResultRow, 1, 1, 0)
-		return subVM, nil
-	})
+	g := newSubqueryCodeGen(v)
 
 	// Create a scalar subquery expression
-	// SELECT name, (SELECT MAX(salary) FROM employees) FROM users
 	subqueryExpr := &parser.SubqueryExpr{
 		Select: &parser.SelectStmt{
 			Columns: []parser.ResultColumn{
@@ -197,38 +166,10 @@ func TestGenerateScalarSubquery(t *testing.T) {
 	}
 
 	// Verify bytecode structure
-	// The scalar subquery implementation embeds subquery bytecode directly
-	foundNull := false // Should initialize to NULL
-	foundCopy := false // Should use OpCopy to capture result
-	foundGoto := false // Should use OpGoto to skip to end
-	foundNoop := false // Should replace OpHalt with OpNoop
-
-	for i := 0; i < v.NumOps(); i++ {
-		op := v.Program[i]
-		switch op.Opcode {
-		case vdbe.OpNull:
-			foundNull = true
-		case vdbe.OpCopy:
-			foundCopy = true
-		case vdbe.OpGoto:
-			foundGoto = true
-		case vdbe.OpNoop:
-			foundNoop = true
-		}
-	}
-
-	if !foundNull {
-		t.Error("expected OpNull to initialize result to NULL")
-	}
-	if !foundCopy {
-		t.Error("expected OpCopy to capture subquery result")
-	}
-	if !foundGoto {
-		t.Error("expected OpGoto to skip to end after capturing result")
-	}
-	if !foundNoop {
-		t.Error("expected OpNoop (replaced OpHalt from subquery)")
-	}
+	assertOpcodePresent(t, v, vdbe.OpNull, "initialize result to NULL")
+	assertOpcodePresent(t, v, vdbe.OpCopy, "capture subquery result")
+	assertOpcodePresent(t, v, vdbe.OpGoto, "skip to end after capturing result")
+	assertOpcodePresent(t, v, vdbe.OpNoop, "replace OpHalt from subquery")
 }
 
 // TestGenerateExists tests EXISTS (SELECT ...) expression code generation.
@@ -237,18 +178,8 @@ func TestGenerateExists(t *testing.T) {
 	v := vdbe.New()
 	v.AllocMemory(100)
 
-	g := NewCodeGenerator(v)
+	g := newSubqueryCodeGen(v)
 
-	// Set up a mock subquery compiler
-	g.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
-		subVM := vdbe.New()
-		subVM.AllocMemory(10)
-		subVM.AddOp(vdbe.OpResultRow, 1, 1, 0)
-		return subVM, nil
-	})
-
-	// Create an EXISTS expression
-	// SELECT * FROM users WHERE EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)
 	existsExpr := &parser.ExistsExpr{
 		Select: &parser.SelectStmt{
 			Columns: []parser.ResultColumn{
@@ -268,40 +199,21 @@ func TestGenerateExists(t *testing.T) {
 	}
 
 	// Verify bytecode structure
-	// The EXISTS implementation embeds subquery bytecode directly
-	foundInitFalse := false // Should initialize to false
-	foundSetTrue := false   // Should set to true if row found
-	foundGoto := false      // Should use Goto to skip to end when found
+	assertIntegerOpPresent(t, v, 0, "initialize result to false")
+	assertIntegerOpPresent(t, v, 1, "set result to true when row found")
+	assertOpcodePresent(t, v, vdbe.OpGoto, "skip to end when row found")
+}
 
-	initToFalseFound := false
-	setToTrueFound := false
-
+// assertIntegerOpPresent checks that an OpInteger with the given P1 value exists.
+func assertIntegerOpPresent(t *testing.T, v *vdbe.VDBE, p1 int, desc string) {
+	t.Helper()
 	for i := 0; i < v.NumOps(); i++ {
 		op := v.Program[i]
-		switch op.Opcode {
-		case vdbe.OpInteger:
-			// Check if initializing to 0 (false) or 1 (true)
-			if op.P1 == 0 && !initToFalseFound {
-				foundInitFalse = true
-				initToFalseFound = true
-			} else if op.P1 == 1 && !setToTrueFound {
-				foundSetTrue = true
-				setToTrueFound = true
-			}
-		case vdbe.OpGoto:
-			foundGoto = true
+		if op.Opcode == vdbe.OpInteger && op.P1 == p1 {
+			return
 		}
 	}
-
-	if !foundInitFalse {
-		t.Error("expected OpInteger(0) to initialize result to false")
-	}
-	if !foundSetTrue {
-		t.Error("expected OpInteger(1) to set result to true when row found")
-	}
-	if !foundGoto {
-		t.Error("expected OpGoto to skip to end when row found")
-	}
+	t.Errorf("expected OpInteger(%d) to %s", p1, desc)
 }
 
 // TestGenerateNotExists tests NOT EXISTS (SELECT ...) expression.
@@ -425,107 +337,86 @@ func TestSubqueryNilCheck(t *testing.T) {
 // TestSubqueryBytecodeComments tests that generated bytecode has proper comments.
 func TestSubqueryBytecodeComments(t *testing.T) {
 	t.Parallel()
-	v := vdbe.New()
-	v.AllocMemory(100)
+	t.Run("IN subquery comments", func(t *testing.T) {
+		v := vdbe.New()
+		v.AllocMemory(100)
+		g := newSubqueryCodeGen(v)
 
+		inExpr := &parser.InExpr{
+			Expr:   &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
+			Select: &parser.SelectStmt{},
+		}
+		_, _ = g.generateIn(inExpr)
+
+		assertCommentPresent(t, v, []string{
+			"IN subquery: init result to false",
+			"IN subquery: open ephemeral table",
+		}, "IN subquery")
+	})
+
+	t.Run("EXISTS comments", func(t *testing.T) {
+		v2 := vdbe.New()
+		v2.AllocMemory(100)
+		g2 := newSubqueryCodeGen(v2)
+
+		existsExpr := &parser.ExistsExpr{Select: &parser.SelectStmt{}}
+		_, _ = g2.generateExists(existsExpr)
+
+		assertCommentPresent(t, v2, []string{
+			"EXISTS: init result to false",
+			"EXISTS subquery: start",
+		}, "EXISTS")
+	})
+
+	t.Run("scalar subquery comments", func(t *testing.T) {
+		v3 := vdbe.New()
+		v3.AllocMemory(100)
+		g3 := newSubqueryCodeGen(v3)
+
+		scalarExpr := &parser.SubqueryExpr{Select: &parser.SelectStmt{}}
+		_, _ = g3.generateSubquery(scalarExpr)
+
+		assertCommentPresent(t, v3, []string{
+			"Scalar subquery: init result to NULL",
+			"Scalar subquery: start",
+		}, "scalar subquery")
+	})
+}
+
+// assertOpcodePresent checks that an opcode exists in the VDBE program.
+func assertOpcodePresent(t *testing.T, v *vdbe.VDBE, opcode vdbe.Opcode, desc string) {
+	t.Helper()
+	for i := 0; i < v.NumOps(); i++ {
+		if v.Program[i].Opcode == opcode {
+			return
+		}
+	}
+	t.Errorf("expected %v to %s", opcode, desc)
+}
+
+// assertCommentPresent checks that one of the given comments exists in the VDBE program.
+func assertCommentPresent(t *testing.T, v *vdbe.VDBE, comments []string, desc string) {
+	t.Helper()
+	commentSet := make(map[string]bool, len(comments))
+	for _, c := range comments {
+		commentSet[c] = true
+	}
+	for i := 0; i < v.NumOps(); i++ {
+		if commentSet[v.Program[i].Comment] {
+			return
+		}
+	}
+	t.Errorf("expected meaningful comments in %s bytecode", desc)
+}
+
+// newSubqueryCodeGen creates a CodeGenerator with a mock subquery compiler.
+func newSubqueryCodeGen(v *vdbe.VDBE) *CodeGenerator {
 	g := NewCodeGenerator(v)
-
-	// Set up a mock subquery compiler
 	g.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
 		subVM := vdbe.New()
 		subVM.AllocMemory(10)
 		subVM.AddOp(vdbe.OpResultRow, 1, 1, 0)
 		return subVM, nil
 	})
-
-	// Generate IN subquery
-	inExpr := &parser.InExpr{
-		Expr:   &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
-		Select: &parser.SelectStmt{},
-	}
-
-	_, _ = g.generateIn(inExpr)
-
-	// Check for meaningful comments
-	hasInComment := false
-	for i := 0; i < v.NumOps(); i++ {
-		comment := v.Program[i].Comment
-		if comment != "" && (comment == "IN subquery: init result to false" ||
-			comment == "IN subquery: open ephemeral table") {
-			hasInComment = true
-			break
-		}
-	}
-
-	if !hasInComment {
-		t.Error("expected meaningful comments in IN subquery bytecode")
-	}
-
-	// Generate EXISTS expression
-	v2 := vdbe.New()
-	v2.AllocMemory(100)
-	g2 := NewCodeGenerator(v2)
-
-	// Set up a mock subquery compiler for EXISTS
-	g2.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
-		subVM := vdbe.New()
-		subVM.AllocMemory(10)
-		subVM.AddOp(vdbe.OpResultRow, 1, 1, 0)
-		return subVM, nil
-	})
-
-	existsExpr := &parser.ExistsExpr{
-		Select: &parser.SelectStmt{},
-	}
-
-	_, _ = g2.generateExists(existsExpr)
-
-	// Check for EXISTS comments
-	hasExistsComment := false
-	for i := 0; i < v2.NumOps(); i++ {
-		comment := v2.Program[i].Comment
-		if comment != "" && (comment == "EXISTS: init result to false" ||
-			comment == "EXISTS subquery: start") {
-			hasExistsComment = true
-			break
-		}
-	}
-
-	if !hasExistsComment {
-		t.Error("expected meaningful comments in EXISTS bytecode")
-	}
-
-	// Generate scalar subquery
-	v3 := vdbe.New()
-	v3.AllocMemory(100)
-	g3 := NewCodeGenerator(v3)
-
-	// Set up a mock subquery compiler for scalar subquery
-	g3.SetSubqueryCompiler(func(selectStmt *parser.SelectStmt) (*vdbe.VDBE, error) {
-		subVM := vdbe.New()
-		subVM.AllocMemory(10)
-		subVM.AddOp(vdbe.OpResultRow, 1, 1, 0)
-		return subVM, nil
-	})
-
-	scalarExpr := &parser.SubqueryExpr{
-		Select: &parser.SelectStmt{},
-	}
-
-	_, _ = g3.generateSubquery(scalarExpr)
-
-	// Check for scalar subquery comments
-	hasScalarComment := false
-	for i := 0; i < v3.NumOps(); i++ {
-		comment := v3.Program[i].Comment
-		if comment != "" && (comment == "Scalar subquery: init result to NULL" ||
-			comment == "Scalar subquery: start") {
-			hasScalarComment = true
-			break
-		}
-	}
-
-	if !hasScalarComment {
-		t.Error("expected meaningful comments in scalar subquery bytecode")
-	}
+	return g
 }

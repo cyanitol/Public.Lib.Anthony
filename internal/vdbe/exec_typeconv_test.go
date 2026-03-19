@@ -424,36 +424,22 @@ func TestOpToRealNull(t *testing.T) {
 	}
 }
 
-// TestTypeConversionIntegration tests type conversions in a VDBE program.
-func TestTypeConversionIntegration(t *testing.T) {
-	t.Parallel()
-	v := New()
-	v.AllocMemory(10)
-
-	// Test program that performs various type conversions
-	v.Program = []*Instruction{
-		// Load test values
-		{Opcode: OpInteger, P1: 42, P2: 1},                                   // r1 = 42
-		{Opcode: OpReal, P2: 2, P4Type: P4Real, P4: P4Union{R: 3.14}},        // r2 = 3.14
-		{Opcode: OpString, P2: 3, P4Type: P4Static, P4: P4Union{Z: "123"}},   // r3 = "123"
-		{Opcode: OpString, P2: 4, P4Type: P4Static, P4: P4Union{Z: "hello"}}, // r4 = "hello"
-
-		// Test conversions
-		{Opcode: OpToText, P1: 1},    // r1 = "42"
-		{Opcode: OpToInt, P1: 2},     // r2 = 3 (truncated)
-		{Opcode: OpToNumeric, P1: 3}, // r3 = 123 (int)
-		{Opcode: OpToNumeric, P1: 4}, // r4 = "hello" (stays text)
-
+func buildTypeConversionProgram() []*Instruction {
+	return []*Instruction{
+		{Opcode: OpInteger, P1: 42, P2: 1},
+		{Opcode: OpReal, P2: 2, P4Type: P4Real, P4: P4Union{R: 3.14}},
+		{Opcode: OpString, P2: 3, P4Type: P4Static, P4: P4Union{Z: "123"}},
+		{Opcode: OpString, P2: 4, P4Type: P4Static, P4: P4Union{Z: "hello"}},
+		{Opcode: OpToText, P1: 1},
+		{Opcode: OpToInt, P1: 2},
+		{Opcode: OpToNumeric, P1: 3},
+		{Opcode: OpToNumeric, P1: 4},
 		{Opcode: OpHalt, P1: 0},
 	}
+}
 
-	// Run the program
-	err := v.Run()
-	if err != nil {
-		t.Fatalf("VDBE execution failed: %v", err)
-	}
-
-	// Verify results
+func verifyTypeConversionResults(t *testing.T, v *VDBE) {
+	t.Helper()
 	if !v.Mem[1].IsString() || v.Mem[1].StrValue() != "42" {
 		t.Errorf("r1: expected string '42', got %v", v.Mem[1])
 	}
@@ -466,6 +452,19 @@ func TestTypeConversionIntegration(t *testing.T) {
 	if !v.Mem[4].IsString() || v.Mem[4].StrValue() != "hello" {
 		t.Errorf("r4: expected string 'hello', got %v", v.Mem[4])
 	}
+}
+
+// TestTypeConversionIntegration tests type conversions in a VDBE program.
+func TestTypeConversionIntegration(t *testing.T) {
+	t.Parallel()
+	v := New()
+	v.AllocMemory(10)
+	v.Program = buildTypeConversionProgram()
+
+	if err := v.Run(); err != nil {
+		t.Fatalf("VDBE execution failed: %v", err)
+	}
+	verifyTypeConversionResults(t, v)
 }
 
 // TestCastAffinityTypes tests all affinity types with Cast opcode.
@@ -531,37 +530,61 @@ func setMemValue(mem *Mem, value interface{}) {
 }
 
 func verifyMemValue(t *testing.T, mem *Mem, expectedType string, expectedValue interface{}) {
-	switch expectedType {
-	case "null":
-		if !mem.IsNull() {
-			t.Errorf("expected NULL, got %s: %v", getMemType(mem), mem.Value())
-		}
-	case "int":
-		if !mem.IsInt() {
-			t.Errorf("expected int type, got %s", getMemType(mem))
-		} else if mem.IntValue() != expectedValue.(int64) {
-			t.Errorf("expected %d, got %d", expectedValue.(int64), mem.IntValue())
-		}
-	case "real":
-		if !mem.IsReal() {
-			t.Errorf("expected real type, got %s", getMemType(mem))
-		} else if mem.RealValue() != expectedValue.(float64) {
-			t.Errorf("expected %f, got %f", expectedValue.(float64), mem.RealValue())
-		}
-	case "string":
-		if !mem.IsString() {
-			t.Errorf("expected string type, got %s", getMemType(mem))
-		} else if mem.StrValue() != expectedValue.(string) {
-			t.Errorf("expected %q, got %q", expectedValue.(string), mem.StrValue())
-		}
-	case "blob":
-		if !mem.IsBlob() {
-			t.Errorf("expected blob type, got %s", getMemType(mem))
-		} else if string(mem.BlobValue()) != string(expectedValue.([]byte)) {
-			t.Errorf("expected %v, got %v", expectedValue.([]byte), mem.BlobValue())
-		}
-	default:
+	t.Helper()
+	verifiers := map[string]func(){
+		"null":   func() { verifyMemNull(t, mem) },
+		"int":    func() { verifyMemInt(t, mem, expectedValue) },
+		"real":   func() { verifyMemReal(t, mem, expectedValue) },
+		"string": func() { verifyMemString(t, mem, expectedValue) },
+		"blob":   func() { verifyMemBlob(t, mem, expectedValue) },
+	}
+	if fn, ok := verifiers[expectedType]; ok {
+		fn()
+	} else {
 		t.Errorf("unknown expected type: %s", expectedType)
+	}
+}
+
+func verifyMemNull(t *testing.T, mem *Mem) {
+	t.Helper()
+	if !mem.IsNull() {
+		t.Errorf("expected NULL, got %s: %v", getMemType(mem), mem.Value())
+	}
+}
+
+func verifyMemInt(t *testing.T, mem *Mem, expectedValue interface{}) {
+	t.Helper()
+	if !mem.IsInt() {
+		t.Errorf("expected int type, got %s", getMemType(mem))
+	} else if mem.IntValue() != expectedValue.(int64) {
+		t.Errorf("expected %d, got %d", expectedValue.(int64), mem.IntValue())
+	}
+}
+
+func verifyMemReal(t *testing.T, mem *Mem, expectedValue interface{}) {
+	t.Helper()
+	if !mem.IsReal() {
+		t.Errorf("expected real type, got %s", getMemType(mem))
+	} else if mem.RealValue() != expectedValue.(float64) {
+		t.Errorf("expected %f, got %f", expectedValue.(float64), mem.RealValue())
+	}
+}
+
+func verifyMemString(t *testing.T, mem *Mem, expectedValue interface{}) {
+	t.Helper()
+	if !mem.IsString() {
+		t.Errorf("expected string type, got %s", getMemType(mem))
+	} else if mem.StrValue() != expectedValue.(string) {
+		t.Errorf("expected %q, got %q", expectedValue.(string), mem.StrValue())
+	}
+}
+
+func verifyMemBlob(t *testing.T, mem *Mem, expectedValue interface{}) {
+	t.Helper()
+	if !mem.IsBlob() {
+		t.Errorf("expected blob type, got %s", getMemType(mem))
+	} else if string(mem.BlobValue()) != string(expectedValue.([]byte)) {
+		t.Errorf("expected %v, got %v", expectedValue.([]byte), mem.BlobValue())
 	}
 }
 

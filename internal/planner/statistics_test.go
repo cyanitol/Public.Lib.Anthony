@@ -25,6 +25,39 @@ func TestNewStatistics(t *testing.T) {
 	}
 }
 
+func assertTableStat(t *testing.T, stats *Statistics, tableName string, wantRowCount int64) {
+	t.Helper()
+	tableStat := stats.GetTableStats(tableName)
+	if tableStat == nil {
+		t.Fatalf("Table stats not loaded for %s", tableName)
+	}
+	if tableStat.RowCount != wantRowCount {
+		t.Errorf("Expected row count %d, got %d", wantRowCount, tableStat.RowCount)
+	}
+	if tableStat.TableName != tableName {
+		t.Errorf("Expected table name %q, got %q", tableName, tableStat.TableName)
+	}
+}
+
+func assertIndexStat(t *testing.T, stats *Statistics, idxName string, wantRowCount int64, wantAvgEq []int64) {
+	t.Helper()
+	idxStat := stats.GetIndexStats(idxName)
+	if idxStat == nil {
+		t.Fatalf("Index stats not loaded for %s", idxName)
+	}
+	if idxStat.RowCount != wantRowCount {
+		t.Errorf("Expected row count %d, got %d", wantRowCount, idxStat.RowCount)
+	}
+	if len(idxStat.AvgEq) != len(wantAvgEq) {
+		t.Fatalf("Expected %d avgEq values, got %d", len(wantAvgEq), len(idxStat.AvgEq))
+	}
+	for i, want := range wantAvgEq {
+		if idxStat.AvgEq[i] != want {
+			t.Errorf("Expected avgEq[%d] = %d, got %d", i, want, idxStat.AvgEq[i])
+		}
+	}
+}
+
 // TestLoadStatistics tests loading statistics from sqlite_stat1 format.
 func TestLoadStatistics(t *testing.T) {
 	rows := []StatRow{
@@ -38,61 +71,28 @@ func TestLoadStatistics(t *testing.T) {
 		t.Fatalf("LoadStatistics failed: %v", err)
 	}
 
-	// Check table statistics
-	tableStat := stats.GetTableStats("users")
-	if tableStat == nil {
-		t.Fatal("Table stats not loaded")
-	}
-	if tableStat.RowCount != 1000 {
-		t.Errorf("Expected row count 1000, got %d", tableStat.RowCount)
-	}
-	if tableStat.TableName != "users" {
-		t.Errorf("Expected table name 'users', got %s", tableStat.TableName)
-	}
+	assertTableStat(t, stats, "users", 1000)
+	assertIndexStat(t, stats, "idx_name", 1000, []int64{10})
+	assertIndexStat(t, stats, "idx_age_city", 1000, []int64{50, 5})
+}
 
-	// Check index statistics
-	idxStat := stats.GetIndexStats("idx_name")
-	if idxStat == nil {
-		t.Fatal("Index stats not loaded for idx_name")
+func findStatRow(rows []StatRow, tbl, idx string) *StatRow {
+	for i := range rows {
+		if rows[i].Tbl == tbl && rows[i].Idx == idx {
+			return &rows[i]
+		}
 	}
-	if idxStat.RowCount != 1000 {
-		t.Errorf("Expected row count 1000, got %d", idxStat.RowCount)
-	}
-	if len(idxStat.AvgEq) != 1 {
-		t.Errorf("Expected 1 avgEq value, got %d", len(idxStat.AvgEq))
-	}
-	if idxStat.AvgEq[0] != 10 {
-		t.Errorf("Expected avgEq[0] = 10, got %d", idxStat.AvgEq[0])
-	}
-
-	// Check multi-column index
-	idxStat2 := stats.GetIndexStats("idx_age_city")
-	if idxStat2 == nil {
-		t.Fatal("Index stats not loaded for idx_age_city")
-	}
-	if len(idxStat2.AvgEq) != 2 {
-		t.Errorf("Expected 2 avgEq values, got %d", len(idxStat2.AvgEq))
-	}
-	if idxStat2.AvgEq[0] != 50 {
-		t.Errorf("Expected avgEq[0] = 50, got %d", idxStat2.AvgEq[0])
-	}
-	if idxStat2.AvgEq[1] != 5 {
-		t.Errorf("Expected avgEq[1] = 5, got %d", idxStat2.AvgEq[1])
-	}
+	return nil
 }
 
 // TestSaveStatistics tests saving statistics to sqlite_stat1 format.
 func TestSaveStatistics(t *testing.T) {
 	stats := NewStatistics()
-
-	// Add table statistics
 	stats.TableStats["users"] = &TableStatistics{
 		TableName: "users",
 		RowCount:  1000,
 		RowLogEst: NewLogEst(1000),
 	}
-
-	// Add index statistics
 	stats.IndexStats["idx_name"] = &IndexStatistics{
 		IndexName: "idx_name",
 		TableName: "users",
@@ -102,34 +102,24 @@ func TestSaveStatistics(t *testing.T) {
 	}
 
 	rows := SaveStatistics(stats)
-
 	if len(rows) != 2 {
 		t.Fatalf("Expected 2 rows, got %d", len(rows))
 	}
 
-	// Check table row
-	foundTable := false
-	foundIndex := false
-	for _, row := range rows {
-		if row.Tbl == "users" && row.Idx == "" {
-			foundTable = true
-			if row.Stat != "1000" {
-				t.Errorf("Expected stat '1000', got '%s'", row.Stat)
-			}
-		}
-		if row.Tbl == "users" && row.Idx == "idx_name" {
-			foundIndex = true
-			if row.Stat != "1000 10" {
-				t.Errorf("Expected stat '1000 10', got '%s'", row.Stat)
-			}
-		}
+	tableRow := findStatRow(rows, "users", "")
+	if tableRow == nil {
+		t.Fatal("Table statistics not saved")
+	}
+	if tableRow.Stat != "1000" {
+		t.Errorf("Expected stat '1000', got '%s'", tableRow.Stat)
 	}
 
-	if !foundTable {
-		t.Error("Table statistics not saved")
+	indexRow := findStatRow(rows, "users", "idx_name")
+	if indexRow == nil {
+		t.Fatal("Index statistics not saved")
 	}
-	if !foundIndex {
-		t.Error("Index statistics not saved")
+	if indexRow.Stat != "1000 10" {
+		t.Errorf("Expected stat '1000 10', got '%s'", indexRow.Stat)
 	}
 }
 

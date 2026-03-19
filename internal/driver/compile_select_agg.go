@@ -408,42 +408,46 @@ func (s *Stmt) setupAggregateVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 
 	vm.AllocMemory(numCols + 20)
 
-	// Determine cursor number for source table (handles both regular and ephemeral tables)
 	tableCursor := s.determineCursorNum(table, vm)
 
 	gen := expr.NewCodeGenerator(vm)
 	s.setupSubqueryCompiler(gen)
 	gen.RegisterCursor(tableName, tableCursor)
 
-	// Register alias so qualified column refs like b.age resolve correctly
-	if stmt.From != nil && len(stmt.From.Tables) > 0 {
-		alias := stmt.From.Tables[0].Alias
-		if alias != "" && alias != tableName {
-			gen.RegisterCursor(alias, tableCursor)
-		}
+	alias := s.fromTableAlias(stmt)
+	if alias != "" && alias != tableName {
+		gen.RegisterCursor(alias, tableCursor)
 	}
 
-	// Build result column names
 	vm.ResultCols = make([]string, numCols)
 	for i, col := range stmt.Columns {
 		vm.ResultCols[i] = selectColName(col, i)
 	}
 
-	// Register table info
+	s.registerAggTableInfo(gen, stmt, tableName, table)
+
+	return gen
+}
+
+// fromTableAlias returns the alias of the first FROM table, or empty string.
+func (s *Stmt) fromTableAlias(stmt *parser.SelectStmt) string {
+	if stmt.From != nil && len(stmt.From.Tables) > 0 {
+		return stmt.From.Tables[0].Alias
+	}
+	return ""
+}
+
+// registerAggTableInfo registers primary and alias table info in the code generator.
+func (s *Stmt) registerAggTableInfo(gen *expr.CodeGenerator, stmt *parser.SelectStmt, tableName string, table *schema.Table) {
 	tableInfo := buildTableInfo(tableName, table)
 	gen.RegisterTable(tableInfo)
 
-	// Register alias table info
-	if stmt.From != nil && len(stmt.From.Tables) > 0 {
-		alias := stmt.From.Tables[0].Alias
-		if alias != "" && alias != tableName {
-			aliasInfo := buildTableInfo(tableName, table)
-			aliasInfo.Name = alias
-			gen.RegisterTable(aliasInfo)
-		}
+	alias := s.fromTableAlias(stmt)
+	if alias != "" && alias != tableName {
+		aliasInfo := buildTableInfo(tableName, table)
+		aliasInfo.Name = alias
+		gen.RegisterTable(aliasInfo)
 	}
-
-	return gen
 }
 
 // setupAggregateArgs sets up args for parameter binding.

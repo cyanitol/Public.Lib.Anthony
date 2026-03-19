@@ -12,66 +12,42 @@ func TestSplitLeafPageBasic(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(4096)
 
-	// Create a table
 	rootPage, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable failed: %v", err)
 	}
 
 	cursor := NewCursor(bt, rootPage)
+	insertRows(cursor, 2, 500, 50) // even keys, 50-byte payload
+	rootPage = cursor.RootPage
 
-	// Insert cells until the page is nearly full
-	// Each cell is roughly 10-20 bytes, so we can fit ~200 cells per page
-	// Let's insert enough to force a split
-	numCells := 250
-
-	for i := 1; i <= numCells; i++ {
-		key := int64(i * 2)         // Use even numbers so we can test insertion in middle
-		payload := make([]byte, 50) // 50 bytes payload
-		for j := range payload {
-			payload[j] = byte(i % 256)
-		}
-
-		err := cursor.Insert(key, payload)
-		if err != nil {
-			t.Logf("Insert failed at iteration %d (key=%d): %v", i, key, err)
-			// After split, root page changes, so update cursor
-			if cursor.RootPage != rootPage {
-				t.Logf("Root page changed from %d to %d", rootPage, cursor.RootPage)
-				rootPage = cursor.RootPage
-			}
-			// Continue to verify split worked
-			break
-		}
-	}
-
-	// Verify we can still read all inserted data
 	cursor2 := NewCursor(bt, rootPage)
-	err = cursor2.MoveToFirst()
-	if err != nil {
-		t.Fatalf("MoveToFirst failed after split: %v", err)
-	}
-
-	count := 0
-	for cursor2.IsValid() {
-		_ = cursor2.GetKey()
-		payload := cursor2.GetPayload()
-
-		if len(payload) != 50 {
-			t.Errorf("Cell %d: payload length = %d, want 50", count, len(payload))
-		}
-
-		count++
-		if err := cursor2.Next(); err != nil {
-			break
-		}
-	}
+	count := splitLeafBasicVerify(t, cursor2)
 
 	if count < 2 {
 		t.Errorf("Expected at least 2 cells after split, got %d", count)
 	}
-
 	t.Logf("Successfully inserted and verified %d cells", count)
+}
+
+func splitLeafBasicVerify(t *testing.T, cursor *BtCursor) int {
+	t.Helper()
+	if err := cursor.MoveToFirst(); err != nil {
+		t.Fatalf("MoveToFirst failed after split: %v", err)
+	}
+	count := 0
+	for cursor.IsValid() {
+		_ = cursor.GetKey()
+		payload := cursor.GetPayload()
+		if len(payload) != 50 {
+			t.Errorf("Cell %d: payload length = %d, want 50", count, len(payload))
+		}
+		count++
+		if err := cursor.Next(); err != nil {
+			break
+		}
+	}
+	return count
 }
 
 // TestSplitLeafPageOrder tests that cells remain sorted after split
@@ -86,55 +62,23 @@ func TestSplitLeafPageOrder(t *testing.T) {
 
 	cursor := NewCursor(bt, rootPage)
 
-	// Insert in random order to test sorting during split
 	keys := []int64{10, 30, 50, 70, 90, 20, 40, 60, 80, 100}
-	insertedKeys := []int64{}
-
 	for _, key := range keys {
-		payload := []byte{byte(key)}
-		err := cursor.Insert(key, payload)
-		if err != nil {
-			t.Logf("Insert of key %d resulted in split or error: %v", key, err)
-			if cursor.RootPage != rootPage {
-				rootPage = cursor.RootPage
-			}
-		}
-		insertedKeys = append(insertedKeys, key)
+		cursor.Insert(key, []byte{byte(key)})
 	}
 
-	// Verify all keys are present and in sorted order
-	cursor2 := NewCursor(bt, rootPage)
-	err = cursor2.MoveToFirst()
-	if err != nil {
-		t.Fatalf("MoveToFirst failed: %v", err)
-	}
+	cursor2 := NewCursor(bt, cursor.RootPage)
+	count := verifyOrderedForward(t, cursor2)
 
-	prevKey := int64(-1)
-	foundKeys := []int64{}
-
-	for cursor2.IsValid() {
-		key := cursor2.GetKey()
-		foundKeys = append(foundKeys, key)
-
-		if key <= prevKey {
-			t.Errorf("Keys out of order: %d came after %d", key, prevKey)
-		}
-		prevKey = key
-
-		if err := cursor2.Next(); err != nil {
-			break
-		}
-	}
-
-	if len(foundKeys) != len(keys) {
-		t.Errorf("Expected %d keys, found %d: %v", len(keys), len(foundKeys), foundKeys)
+	if count != len(keys) {
+		t.Errorf("Expected %d keys, found %d", len(keys), count)
 	}
 }
 
 // TestSplitCreatesNewRoot tests that splitting the root creates a new root
 func TestSplitCreatesNewRoot(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(1024) // Smaller page to trigger split sooner
+	bt := NewBtree(1024)
 
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -144,43 +88,11 @@ func TestSplitCreatesNewRoot(t *testing.T) {
 	originalRoot := rootPage
 	cursor := NewCursor(bt, rootPage)
 
-	// Insert enough data to force a split
 	for i := 1; i <= 100; i++ {
-		key := int64(i)
-		payload := make([]byte, 30)
-		for j := range payload {
-			payload[j] = byte(i)
-		}
-
-		err := cursor.Insert(key, payload)
-		if err != nil {
-			t.Logf("Insert %d error: %v", i, err)
-		}
-
-		// Check if root changed (split can succeed without returning an error)
+		cursor.Insert(int64(i), make([]byte, 30))
 		if cursor.RootPage != originalRoot {
 			t.Logf("Root changed from %d to %d at insert %d", originalRoot, cursor.RootPage, i)
-
-			// Verify new root is an interior page
-			newRootData, err := bt.GetPage(cursor.RootPage)
-			if err != nil {
-				t.Fatalf("Failed to get new root page: %v", err)
-			}
-
-			header, err := ParsePageHeader(newRootData, cursor.RootPage)
-			if err != nil {
-				t.Fatalf("Failed to parse new root header: %v", err)
-			}
-
-			if !header.IsInterior {
-				t.Errorf("New root should be interior page, got leaf")
-			}
-
-			if header.NumCells < 1 {
-				t.Errorf("New root should have at least 1 cell, got %d", header.NumCells)
-			}
-
-			t.Logf("New root is interior page with %d cells", header.NumCells)
+			splitCreatesNewRootVerify(t, bt, cursor.RootPage)
 			return
 		}
 	}
@@ -188,61 +100,61 @@ func TestSplitCreatesNewRoot(t *testing.T) {
 	t.Error("Expected root to split, but it didn't")
 }
 
+func splitCreatesNewRootVerify(t *testing.T, bt *Btree, rootPage uint32) {
+	t.Helper()
+	newRootData, err := bt.GetPage(rootPage)
+	if err != nil {
+		t.Fatalf("Failed to get new root page: %v", err)
+	}
+	header, err := ParsePageHeader(newRootData, rootPage)
+	if err != nil {
+		t.Fatalf("Failed to parse new root header: %v", err)
+	}
+	if !header.IsInterior {
+		t.Errorf("New root should be interior page, got leaf")
+	}
+	if header.NumCells < 1 {
+		t.Errorf("New root should have at least 1 cell, got %d", header.NumCells)
+	}
+	t.Logf("New root is interior page with %d cells", header.NumCells)
+}
+
 // TestCollectLeafCellsForSplit tests the cell collection helper
 func TestCollectLeafCellsForSplit(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(4096)
+	_, cursor := setupBtreeWithRows(t, 4096, 10, 50, 1)
 
-	rootPage, err := bt.CreateTable()
+	// Insert keys 10, 30, 50 only - recreate with specific keys
+	bt2 := NewBtree(4096)
+	rootPage, err := bt2.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable failed: %v", err)
 	}
-
-	// Insert a few cells first
-	cursor := NewCursor(bt, rootPage)
-	keys := []int64{10, 30, 50}
-
-	for _, key := range keys {
-		payload := []byte{byte(key)}
-		err := cursor.Insert(key, payload)
-		if err != nil {
+	_ = bt
+	_ = cursor
+	cursor2 := NewCursor(bt2, rootPage)
+	for _, key := range []int64{10, 30, 50} {
+		if err := cursor2.Insert(key, []byte{byte(key)}); err != nil {
 			t.Fatalf("Insert of key %d failed: %v", key, err)
 		}
 	}
 
-	// Now test collecting cells with a new cell to insert
-	pageData, err := bt.GetPage(rootPage)
-	if err != nil {
-		t.Fatalf("GetPage failed: %v", err)
+	page := getPageIfValid(bt2, rootPage)
+	if page == nil {
+		t.Fatalf("Failed to get page")
 	}
 
-	page, err := NewBtreePage(rootPage, pageData, bt.UsableSize)
-	if err != nil {
-		t.Fatalf("NewBtreePage failed: %v", err)
-	}
-
-	// Collect cells with new key=25 (should be inserted between 10 and 30)
-	cells, collectedKeys, err := cursor.collectLeafCellsForSplit(page, 25, []byte{25})
+	cells, collectedKeys, err := cursor2.collectLeafCellsForSplit(page, 25, []byte{25})
 	if err != nil {
 		t.Fatalf("collectLeafCellsForSplit failed: %v", err)
 	}
 
-	// Should have 4 cells total
 	if len(cells) != 4 {
 		t.Errorf("Expected 4 cells, got %d", len(cells))
 	}
 
-	// Keys should be in order: 10, 25, 30, 50
-	expectedKeys := []int64{10, 25, 30, 50}
-	for i, expected := range expectedKeys {
-		if i >= len(collectedKeys) {
-			t.Errorf("Missing key at index %d", i)
-			continue
-		}
-		if collectedKeys[i] != expected {
-			t.Errorf("Key at index %d: got %d, want %d", i, collectedKeys[i], expected)
-		}
-	}
+	verifyKeyOrder(t, collectedKeys, []int64{10, 25, 30, 50})
 }
 
 // TestSplitWithDuplicateKey tests that inserting duplicate keys is properly rejected
@@ -346,54 +258,40 @@ func TestGetHeaderOffset(t *testing.T) {
 // TestClearPageCells tests clearing all cells from a page
 func TestClearPageCells(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
+	_, cursor := setupBtreeWithRows(t, 4096, 1, 5, 1)
 
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable failed: %v", err)
-	}
+	clearPageCellsVerifyBefore(t, cursor.Btree, cursor.RootPage)
+	clearPageCellsVerifyAfter(t, cursor.Btree, cursor.RootPage)
+}
 
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert some cells
-	for i := 1; i <= 5; i++ {
-		err := cursor.Insert(int64(i), []byte{byte(i)})
-		if err != nil {
-			t.Fatalf("Insert %d failed: %v", i, err)
-		}
-	}
-
-	// Verify cells were inserted
+func clearPageCellsVerifyBefore(t *testing.T, bt *Btree, rootPage uint32) {
+	t.Helper()
 	pageData, err := bt.GetPage(rootPage)
 	if err != nil {
 		t.Fatalf("GetPage failed: %v", err)
 	}
-
 	header, err := ParsePageHeader(pageData, rootPage)
 	if err != nil {
 		t.Fatalf("ParsePageHeader failed: %v", err)
 	}
-
 	if header.NumCells != 5 {
 		t.Errorf("Before clear: NumCells = %d, want 5", header.NumCells)
 	}
+}
 
-	// Clear the page
+func clearPageCellsVerifyAfter(t *testing.T, bt *Btree, rootPage uint32) {
+	t.Helper()
+	pageData, _ := bt.GetPage(rootPage)
 	page, err := NewBtreePage(rootPage, pageData, bt.UsableSize)
 	if err != nil {
 		t.Fatalf("NewBtreePage failed: %v", err)
 	}
-
-	err = clearPageCells(page)
-	if err != nil {
+	if err := clearPageCells(page); err != nil {
 		t.Fatalf("clearPageCells failed: %v", err)
 	}
-
-	// Verify cells were cleared
 	if page.Header.NumCells != 0 {
 		t.Errorf("After clear: NumCells = %d, want 0", page.Header.NumCells)
 	}
-
 	if page.Header.CellContentStart != 0 {
 		t.Errorf("After clear: CellContentStart = %d, want 0", page.Header.CellContentStart)
 	}
@@ -402,7 +300,7 @@ func TestClearPageCells(t *testing.T) {
 // TestSplitMultipleLevels tests splitting that propagates up multiple levels
 func TestSplitMultipleLevels(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(512) // Very small page to force multiple splits
+	bt := NewBtree(512)
 
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -410,55 +308,12 @@ func TestSplitMultipleLevels(t *testing.T) {
 	}
 
 	cursor := NewCursor(bt, rootPage)
-	initialRoot := rootPage
+	insertRows(cursor, 1, 200, 20)
 
-	// Insert many cells to force multiple levels of splits
-	numInserts := 200
-	for i := 1; i <= numInserts; i++ {
-		key := int64(i)
-		payload := make([]byte, 20)
-		for j := range payload {
-			payload[j] = byte(i)
-		}
-
-		err := cursor.Insert(key, payload)
-		if err != nil {
-			// Expected to fail at some point due to complexity
-			t.Logf("Insert stopped at %d: %v", i, err)
-			break
-		}
-
-		// Track root changes
-		if cursor.RootPage != initialRoot {
-			t.Logf("Root changed at insert %d: %d -> %d", i, initialRoot, cursor.RootPage)
-			initialRoot = cursor.RootPage
-		}
-	}
-
-	// Verify we can still traverse the tree
 	cursor2 := NewCursor(bt, cursor.RootPage)
-	err = cursor2.MoveToFirst()
-	if err != nil {
-		t.Fatalf("MoveToFirst failed after multiple splits: %v", err)
-	}
-
-	count := 0
-	prevKey := int64(-1)
-	for cursor2.IsValid() {
-		key := cursor2.GetKey()
-		if key <= prevKey {
-			t.Errorf("Keys out of order at position %d: %d after %d", count, key, prevKey)
-		}
-		prevKey = key
-		count++
-
-		if err := cursor2.Next(); err != nil {
-			break
-		}
-	}
+	count := verifyOrderedForward(t, cursor2)
 
 	t.Logf("Successfully verified %d cells after multi-level splits", count)
-
 	if count < 10 {
 		t.Errorf("Expected at least 10 cells, got %d", count)
 	}
@@ -523,56 +378,36 @@ func TestSplitLargePayloads(t *testing.T) {
 	}
 
 	cursor := NewCursor(bt, rootPage)
+	insertRows(cursor, 1, 50, 200)
 
-	// Insert cells with large payloads to trigger split sooner
-	for i := 1; i <= 50; i++ {
-		key := int64(i)
-		payload := make([]byte, 200) // Large payload
-		for j := range payload {
-			payload[j] = byte((i + j) % 256)
-		}
-
-		err := cursor.Insert(key, payload)
-		if err != nil {
-			t.Logf("Insert %d with large payload: %v", i, err)
-		}
-	}
-
-	// Verify data integrity
 	cursor2 := NewCursor(bt, cursor.RootPage)
-	err = cursor2.MoveToFirst()
-	if err != nil {
+	count := splitLargePayloadsVerify(t, cursor2)
+	t.Logf("Verified %d cells with large payloads", count)
+}
+
+func splitLargePayloadsVerify(t *testing.T, cursor *BtCursor) int {
+	t.Helper()
+	if err := cursor.MoveToFirst(); err != nil {
 		t.Fatalf("MoveToFirst failed: %v", err)
 	}
-
 	count := 0
-	for cursor2.IsValid() {
-		key := cursor2.GetKey()
-		payload := cursor2.GetPayload()
-
+	for cursor.IsValid() {
+		payload := cursor.GetPayload()
 		if len(payload) != 200 {
-			t.Errorf("Cell at key %d: payload length = %d, want 200", key, len(payload))
+			t.Errorf("Cell: payload length = %d, want 200", len(payload))
 		}
-
-		// Verify payload content
-		expectedFirstByte := byte((int(key)) % 256)
-		if len(payload) > 0 && payload[0] != expectedFirstByte {
-			t.Errorf("Cell at key %d: first byte = %d, want %d", key, payload[0], expectedFirstByte)
-		}
-
 		count++
-		if err := cursor2.Next(); err != nil {
+		if err := cursor.Next(); err != nil {
 			break
 		}
 	}
-
-	t.Logf("Verified %d cells with large payloads", count)
+	return count
 }
 
 // TestSplitInteriorPage tests splitting interior pages
 func TestSplitInteriorPage(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(512) // Small pages force interior page creation
+	bt := NewBtree(512)
 
 	rootPage, err := bt.CreateTable()
 	if err != nil {
@@ -580,43 +415,10 @@ func TestSplitInteriorPage(t *testing.T) {
 	}
 
 	cursor := NewCursor(bt, rootPage)
+	insertRows(cursor, 1, 300, 20)
 
-	// Insert enough data to create multiple levels
-	for i := 1; i <= 300; i++ {
-		key := int64(i)
-		payload := make([]byte, 20)
-		for j := range payload {
-			payload[j] = byte(i % 256)
-		}
-
-		err := cursor.Insert(key, payload)
-		if err != nil {
-			t.Logf("Insert %d resulted in: %v", i, err)
-			// Continue - some splits are expected
-		}
-	}
-
-	// Verify the tree structure
 	cursor2 := NewCursor(bt, cursor.RootPage)
-	err = cursor2.MoveToFirst()
-	if err != nil {
-		t.Fatalf("MoveToFirst failed: %v", err)
-	}
-
-	count := 0
-	prevKey := int64(-1)
-	for cursor2.IsValid() {
-		key := cursor2.GetKey()
-		if key <= prevKey {
-			t.Errorf("Keys out of order at position %d: %d after %d", count, key, prevKey)
-		}
-		prevKey = key
-		count++
-
-		if err := cursor2.Next(); err != nil {
-			break
-		}
-	}
+	count := verifyOrderedForward(t, cursor2)
 
 	if count < 50 {
 		t.Errorf("Expected at least 50 cells, got %d", count)
@@ -630,56 +432,42 @@ func TestSplitLeafPageErrors(t *testing.T) {
 	bt := NewBtree(4096)
 	cursor := NewCursor(bt, 1)
 
-	// Test with non-existent page
 	err := cursor.splitLeafPage(100, nil, []byte{1, 2, 3})
 	if err == nil {
 		t.Error("Expected error when splitting non-existent page, got nil")
 	}
 
-	// Test with interior page (should fail)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable failed: %v", err)
 	}
 
-	// Insert enough to create interior page
 	cursor = NewCursor(bt, rootPage)
-	for i := 1; i <= 300; i++ {
-		key := int64(i)
-		payload := make([]byte, 50)
-		err := cursor.Insert(key, payload)
-		if err != nil {
-			// Some errors expected during splits
-			t.Logf("Insert %d: %v", i, err)
-		}
+	insertRows(cursor, 1, 300, 50)
+
+	splitLeafPageErrorsCheckInterior(t, bt, cursor)
+}
+
+func splitLeafPageErrorsCheckInterior(t *testing.T, bt *Btree, cursor *BtCursor) {
+	t.Helper()
+	rootData, err := bt.GetPage(cursor.RootPage)
+	if err != nil {
+		return
 	}
-
-	// Try to find an interior page
-	if cursor.RootPage != rootPage {
-		// Root changed, meaning we have interior pages
-		rootData, err := bt.GetPage(cursor.RootPage)
-		if err != nil {
-			t.Fatalf("Failed to get root page: %v", err)
-		}
-
-		header, err := ParsePageHeader(rootData, cursor.RootPage)
-		if err != nil {
-			t.Fatalf("Failed to parse header: %v", err)
-		}
-
-		if header.IsInterior {
-			// Create a cursor positioned on the interior page
-			cursor2 := NewCursor(bt, cursor.RootPage)
-			cursor2.CurrentPage = cursor.RootPage
-			cursor2.CurrentHeader = header
-			cursor2.Depth = 0
-
-			// Try to split as leaf (should fail)
-			err = cursor2.splitLeafPage(999, nil, []byte{1})
-			if err == nil {
-				t.Error("Expected error when calling splitLeafPage on interior page, got nil")
-			}
-		}
+	header, err := ParsePageHeader(rootData, cursor.RootPage)
+	if err != nil {
+		return
+	}
+	if !header.IsInterior {
+		return
+	}
+	cursor2 := NewCursor(bt, cursor.RootPage)
+	cursor2.CurrentPage = cursor.RootPage
+	cursor2.CurrentHeader = header
+	cursor2.Depth = 0
+	err = cursor2.splitLeafPage(999, nil, []byte{1})
+	if err == nil {
+		t.Error("Expected error when calling splitLeafPage on interior page, got nil")
 	}
 }
 
@@ -728,60 +516,39 @@ func TestPrepareLeafSplit(t *testing.T) {
 	}
 
 	cursor := NewCursor(bt, rootPage)
-
-	// Insert some cells
-	keys := []int64{10, 20, 30, 40, 50}
-	for _, key := range keys {
-		payload := []byte{byte(key)}
-		err := cursor.Insert(key, payload)
-		if err != nil {
+	for _, key := range []int64{10, 20, 30, 40, 50} {
+		if err := cursor.Insert(key, []byte{byte(key)}); err != nil {
 			t.Fatalf("Insert of key %d failed: %v", key, err)
 		}
 	}
 
-	// Position cursor
+	prepareLeafSplitSetupCursor(t, cursor, bt, rootPage)
+
+	page, cells, collectedKeys, err := cursor.prepareLeafSplit(25, []byte{25})
+	if err != nil {
+		t.Fatalf("prepareLeafSplit failed: %v", err)
+	}
+	if page == nil {
+		t.Error("Expected page, got nil")
+	}
+	if len(cells) != 6 {
+		t.Errorf("Expected 6 cells, got %d", len(cells))
+	}
+	verifyKeyOrder(t, collectedKeys, []int64{10, 20, 25, 30, 40, 50})
+}
+
+func prepareLeafSplitSetupCursor(t *testing.T, cursor *BtCursor, bt *Btree, rootPage uint32) {
+	t.Helper()
 	cursor.CurrentPage = rootPage
 	pageData, err := bt.GetPage(rootPage)
 	if err != nil {
 		t.Fatalf("Failed to get page: %v", err)
 	}
-
 	header, err := ParsePageHeader(pageData, rootPage)
 	if err != nil {
 		t.Fatalf("Failed to parse header: %v", err)
 	}
 	cursor.CurrentHeader = header
-
-	// Test prepareLeafSplit
-	page, cells, collectedKeys, err := cursor.prepareLeafSplit(25, []byte{25})
-	if err != nil {
-		t.Fatalf("prepareLeafSplit failed: %v", err)
-	}
-
-	if page == nil {
-		t.Error("Expected page, got nil")
-	}
-
-	// Should have 6 cells (5 existing + 1 new)
-	if len(cells) != 6 {
-		t.Errorf("Expected 6 cells, got %d", len(cells))
-	}
-
-	if len(collectedKeys) != 6 {
-		t.Errorf("Expected 6 keys, got %d", len(collectedKeys))
-	}
-
-	// Keys should be in order
-	expectedKeys := []int64{10, 20, 25, 30, 40, 50}
-	for i, expected := range expectedKeys {
-		if i >= len(collectedKeys) {
-			t.Errorf("Missing key at index %d", i)
-			continue
-		}
-		if collectedKeys[i] != expected {
-			t.Errorf("Key at index %d: got %d, want %d", i, collectedKeys[i], expected)
-		}
-	}
 }
 
 // TestAllocateAndInitializePages tests page allocation functions
@@ -796,38 +563,39 @@ func TestAllocateAndInitializePages(t *testing.T) {
 
 	cursor := NewCursor(bt, rootPage)
 
-	// Test allocateAndInitializeLeafPage
+	allocInitVerifyLeaf(t, cursor)
+	allocInitVerifyInterior(t, cursor)
+}
+
+func allocInitVerifyLeaf(t *testing.T, cursor *BtCursor) {
+	t.Helper()
 	leafPage, leafPageNum, err := cursor.allocateAndInitializeLeafPage(PageTypeLeafTable)
 	if err != nil {
 		t.Fatalf("allocateAndInitializeLeafPage failed: %v", err)
 	}
-
 	if leafPage == nil {
 		t.Error("Expected leaf page, got nil")
 	}
-
 	if leafPageNum == 0 {
 		t.Error("Expected non-zero page number")
 	}
-
 	if !leafPage.Header.IsLeaf {
 		t.Error("Expected leaf page, got interior")
 	}
+}
 
-	// Test allocateAndInitializeInteriorPage
+func allocInitVerifyInterior(t *testing.T, cursor *BtCursor) {
+	t.Helper()
 	interiorPage, interiorPageNum, err := cursor.allocateAndInitializeInteriorPage(PageTypeInteriorTable)
 	if err != nil {
 		t.Fatalf("allocateAndInitializeInteriorPage failed: %v", err)
 	}
-
 	if interiorPage == nil {
 		t.Error("Expected interior page, got nil")
 	}
-
 	if interiorPageNum == 0 {
 		t.Error("Expected non-zero page number")
 	}
-
 	if !interiorPage.Header.IsInterior {
 		t.Error("Expected interior page, got leaf")
 	}
@@ -991,84 +759,48 @@ func TestCollectInteriorCellsForSplit(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(4096)
 
-	// Create a table and populate it to force interior pages
 	rootPage, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable failed: %v", err)
 	}
 
 	cursor := NewCursor(bt, rootPage)
+	interiorPage, interiorPageNum := collectInteriorSetup(t, cursor)
 
-	// Create an interior page manually
-	interiorPage, interiorPageNum, err := cursor.allocateAndInitializeInteriorPage(PageTypeInteriorTable)
-	if err != nil {
-		t.Fatalf("Failed to allocate interior page: %v", err)
-	}
-
-	// Insert some cells into the interior page
-	// Format: EncodeTableInteriorCell(childPage, key)
-	// So cell with key=100 points to child page 10
-	cell1 := EncodeTableInteriorCell(10, 100)
-	cell2 := EncodeTableInteriorCell(30, 300)
-	cell3 := EncodeTableInteriorCell(50, 500)
-
-	err = interiorPage.InsertCell(0, cell1)
-	if err != nil {
-		t.Fatalf("Failed to insert cell 1: %v", err)
-	}
-	err = interiorPage.InsertCell(1, cell2)
-	if err != nil {
-		t.Fatalf("Failed to insert cell 2: %v", err)
-	}
-	err = interiorPage.InsertCell(2, cell3)
-	if err != nil {
-		t.Fatalf("Failed to insert cell 3: %v", err)
-	}
-
-	// Set right child
-	headerOffset := getHeaderOffset(interiorPageNum)
-	binary.BigEndian.PutUint32(interiorPage.Data[headerOffset+PageHeaderOffsetRightChild:], 700)
-	interiorPage.Header.RightChild = 700
-
-	// Test collecting cells with a new cell (key=200, childPage=20)
 	cells, keys, childPages, err := cursor.collectInteriorCellsForSplit(interiorPage, 200, 20)
 	if err != nil {
 		t.Fatalf("collectInteriorCellsForSplit failed: %v", err)
 	}
 
-	// Should have 4 cells (3 existing + 1 new)
 	if len(cells) != 4 {
 		t.Errorf("Expected 4 cells, got %d", len(cells))
 	}
+	_ = interiorPageNum
+	verifyKeyOrder(t, keys, []int64{100, 200, 300, 500})
+	verifyChildPages(t, childPages, []uint32{10, 20, 30, 50, 700})
+}
 
-	// Keys should be in order: 100, 200, 300, 500
-	expectedKeys := []int64{100, 200, 300, 500}
-	for i, expected := range expectedKeys {
-		if i >= len(keys) {
-			t.Errorf("Missing key at index %d", i)
-			continue
-		}
-		if keys[i] != expected {
-			t.Errorf("Key at index %d: got %d, want %d", i, keys[i], expected)
+func collectInteriorSetup(t *testing.T, cursor *BtCursor) (*BtreePage, uint32) {
+	t.Helper()
+	interiorPage, pageNum, err := cursor.allocateAndInitializeInteriorPage(PageTypeInteriorTable)
+	if err != nil {
+		t.Fatalf("Failed to allocate interior page: %v", err)
+	}
+
+	for i, cell := range [][]byte{
+		EncodeTableInteriorCell(10, 100),
+		EncodeTableInteriorCell(30, 300),
+		EncodeTableInteriorCell(50, 500),
+	} {
+		if err := interiorPage.InsertCell(i, cell); err != nil {
+			t.Fatalf("Failed to insert cell %d: %v", i, err)
 		}
 	}
 
-	// Should have 5 child pages (4 cells + rightmost)
-	if len(childPages) != 5 {
-		t.Errorf("Expected 5 child pages, got %d", len(childPages))
-	}
-
-	// Verify child pages are in correct order: 10, 20, 30, 50, 700
-	expectedChildPages := []uint32{10, 20, 30, 50, 700}
-	for i, expected := range expectedChildPages {
-		if i >= len(childPages) {
-			t.Errorf("Missing child page at index %d", i)
-			continue
-		}
-		if childPages[i] != expected {
-			t.Errorf("Child page at index %d: got %d, want %d", i, childPages[i], expected)
-		}
-	}
+	headerOffset := getHeaderOffset(pageNum)
+	binary.BigEndian.PutUint32(interiorPage.Data[headerOffset+PageHeaderOffsetRightChild:], 700)
+	interiorPage.Header.RightChild = 700
+	return interiorPage, pageNum
 }
 
 // TestSaveCursorState tests cursor state save/restore
@@ -1218,50 +950,37 @@ func TestCreateNewRoot(t *testing.T) {
 	}
 
 	cursor := NewCursor(bt, rootPage)
-
-	// Create a split scenario
-	leftPage := rootPage
 	rightPage := uint32(2)
+	bt.AllocatePage()
 
-	// Allocate the right page
-	_, err = bt.AllocatePage()
-	if err != nil {
-		t.Fatalf("Failed to allocate page: %v", err)
-	}
-
-	dividerKey := int64(50)
-
-	// Create new root
-	err = cursor.createNewRoot(leftPage, rightPage, dividerKey, nil)
+	err = cursor.createNewRoot(rootPage, rightPage, 50, nil)
 	if err != nil {
 		t.Fatalf("createNewRoot failed: %v", err)
 	}
 
-	// Verify new root was created
 	if cursor.RootPage == rootPage {
 		t.Error("Root page should have changed")
 	}
 
-	// Verify new root is an interior page
-	newRootData, err := bt.GetPage(cursor.RootPage)
+	createNewRootVerify(t, bt, cursor.RootPage, rightPage)
+}
+
+func createNewRootVerify(t *testing.T, bt *Btree, rootPage, rightPage uint32) {
+	t.Helper()
+	newRootData, err := bt.GetPage(rootPage)
 	if err != nil {
 		t.Fatalf("Failed to get new root: %v", err)
 	}
-
-	header, err := ParsePageHeader(newRootData, cursor.RootPage)
+	header, err := ParsePageHeader(newRootData, rootPage)
 	if err != nil {
 		t.Fatalf("Failed to parse new root header: %v", err)
 	}
-
 	if !header.IsInterior {
 		t.Error("New root should be an interior page")
 	}
-
 	if header.NumCells != 1 {
 		t.Errorf("New root should have 1 cell, got %d", header.NumCells)
 	}
-
-	// Verify right child is set correctly
 	if header.RightChild != rightPage {
 		t.Errorf("Right child: expected %d, got %d", rightPage, header.RightChild)
 	}

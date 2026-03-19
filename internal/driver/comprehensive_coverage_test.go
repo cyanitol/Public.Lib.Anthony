@@ -3,7 +3,6 @@ package driver
 
 import (
 	"database/sql"
-	"os"
 	"testing"
 )
 
@@ -24,10 +23,45 @@ func TestReleaseStateComprehensive(t *testing.T) {
 	}
 }
 
+// compCovSetupTwoTables creates two tables t1(a) and t2(b) with one row each.
+func compCovSetupTwoTables(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, stmt := range []string{
+		"CREATE TABLE t1 (a INTEGER)",
+		"CREATE TABLE t2 (b INTEGER)",
+		"INSERT INTO t1 VALUES (1)",
+		"INSERT INTO t2 VALUES (2)",
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("%s failed: %v", stmt, err)
+		}
+	}
+}
+
+// compCovQueryOneInt queries a single-column int result and checks the first row.
+func compCovQueryOneInt(t *testing.T, db *sql.DB, query string, want int) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Error("Expected at least one row")
+		return
+	}
+	var val int
+	if err = rows.Scan(&val); err != nil {
+		t.Errorf("Scan failed: %v", err)
+	}
+	if val != want {
+		t.Errorf("Expected %d, got %d", want, val)
+	}
+}
+
 // TestEmitNonIdentifierColumnComprehensive tests emitNonIdentifierColumn (0% coverage)
 func TestEmitNonIdentifierColumnComprehensive(t *testing.T) {
-	dbFile := "test_comprehensive_non_ident.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_comprehensive_non_ident.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -35,69 +69,14 @@ func TestEmitNonIdentifierColumnComprehensive(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create tables for cross product
-	_, err = db.Exec("CREATE TABLE t1 (a INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE t1 failed: %v", err)
-	}
-
-	_, err = db.Exec("CREATE TABLE t2 (b INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE t2 failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t1 VALUES (1)")
-	if err != nil {
-		t.Fatalf("INSERT INTO t1 failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t2 VALUES (2)")
-	if err != nil {
-		t.Fatalf("INSERT INTO t2 failed: %v", err)
-	}
-
-	// Test SELECT with literal in multi-table context (should trigger emitNonIdentifierColumn)
-	rows, err := db.Query("SELECT 42 FROM t1, t2")
-	if err != nil {
-		t.Fatalf("SELECT literal from multi-table failed: %v", err)
-	}
-	defer rows.Close()
-
-	var val int
-	if rows.Next() {
-		err = rows.Scan(&val)
-		if err != nil {
-			t.Errorf("Scan failed: %v", err)
-		}
-		if val != 42 {
-			t.Errorf("Expected 42, got %d", val)
-		}
-	} else {
-		t.Error("Expected at least one row")
-	}
-
-	// Test with expression
-	rows2, err := db.Query("SELECT 10 + 20 FROM t1, t2")
-	if err != nil {
-		t.Fatalf("SELECT expression from multi-table failed: %v", err)
-	}
-	defer rows2.Close()
-
-	if rows2.Next() {
-		err = rows2.Scan(&val)
-		if err != nil {
-			t.Errorf("Scan failed: %v", err)
-		}
-		if val != 30 {
-			t.Errorf("Expected 30, got %d", val)
-		}
-	}
+	compCovSetupTwoTables(t, db)
+	compCovQueryOneInt(t, db, "SELECT 42 FROM t1, t2", 42)
+	compCovQueryOneInt(t, db, "SELECT 10 + 20 FROM t1, t2", 30)
 }
 
 // TestEmitUnqualifiedColumn tests emitUnqualifiedColumn (0% coverage)
 func TestEmitUnqualifiedColumn(t *testing.T) {
-	dbFile := "test_unqual.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_unqual.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -138,8 +117,7 @@ func TestEmitUnqualifiedColumn(t *testing.T) {
 
 // TestConnectionClose tests Conn.Close edge cases for better coverage
 func TestConnectionClose(t *testing.T) {
-	dbFile := "test_conn_close.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_conn_close.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -175,8 +153,7 @@ func TestConnectionClose(t *testing.T) {
 
 // TestFunctionRegistrationCoverage tests function registration paths
 func TestFunctionRegistrationCoverage(t *testing.T) {
-	dbFile := "test_func_reg.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_func_reg.db"
 
 	driver := &Driver{}
 	driver.initMaps()
@@ -217,8 +194,7 @@ func TestOpenDatabaseErrors(t *testing.T) {
 
 // TestBeginTxCoverage tests BeginTx for additional coverage
 func TestBeginTxCoverage(t *testing.T) {
-	dbFile := "test_begintx.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_begintx.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -256,8 +232,7 @@ func TestBeginTxCoverage(t *testing.T) {
 
 // TestTransactionRollback tests transaction rollback paths
 func TestTransactionRollback(t *testing.T) {
-	dbFile := "test_rollback.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_rollback.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -312,8 +287,7 @@ func TestTransactionRollback(t *testing.T) {
 
 // TestExecContextWithParameters tests ExecContext code paths
 func TestExecContextWithParameters(t *testing.T) {
-	dbFile := "test_exec_ctx.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_exec_ctx.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -357,8 +331,7 @@ func TestExecContextWithParameters(t *testing.T) {
 // TestAggregateEdgeCases tests aggregate function compilation edge cases
 func TestAggregateEdgeCases(t *testing.T) {
 	t.Skip("pre-existing failure - aggregate edge cases not yet handled")
-	dbFile := "test_agg_edge.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_agg_edge.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -366,53 +339,38 @@ func TestAggregateEdgeCases(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec("CREATE TABLE agg_test (value INTEGER)")
-	if err != nil {
+	if _, err = db.Exec("CREATE TABLE agg_test (value INTEGER)"); err != nil {
 		t.Fatalf("CREATE TABLE failed: %v", err)
 	}
 
-	// Test aggregate on empty table
-	var countEmpty int
-	err = db.QueryRow("SELECT COUNT(*) FROM agg_test").Scan(&countEmpty)
-	if err != nil {
-		t.Fatalf("COUNT on empty table failed: %v", err)
-	}
-	if countEmpty != 0 {
-		t.Errorf("Expected COUNT(*) = 0 on empty table, got %d", countEmpty)
-	}
+	compCovScanCount(t, db, "SELECT COUNT(*) FROM agg_test", 0, "COUNT on empty table")
 
-	// Insert some data
 	for i := 1; i <= 5; i++ {
-		_, err = db.Exec("INSERT INTO agg_test VALUES (?)", i*10)
-		if err != nil {
+		if _, err = db.Exec("INSERT INTO agg_test VALUES (?)", i*10); err != nil {
 			t.Fatalf("INSERT %d failed: %v", i, err)
 		}
 	}
 
-	// Test COUNT
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM agg_test").Scan(&count)
-	if err != nil {
-		t.Errorf("COUNT failed: %v", err)
-	}
-	if count != 5 {
-		t.Errorf("Expected COUNT = 5, got %d", count)
-	}
+	compCovScanCount(t, db, "SELECT COUNT(*) FROM agg_test", 5, "COUNT(*)")
+	compCovScanCount(t, db, "SELECT COUNT(value) FROM agg_test", 5, "COUNT(value)")
+}
 
-	// Test COUNT(column)
-	err = db.QueryRow("SELECT COUNT(value) FROM agg_test").Scan(&count)
-	if err != nil {
-		t.Errorf("COUNT(column) failed: %v", err)
+// compCovScanCount queries a single count value and verifies it.
+func compCovScanCount(t *testing.T, db *sql.DB, query string, want int, label string) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow(query).Scan(&got); err != nil {
+		t.Errorf("%s failed: %v", label, err)
+		return
 	}
-	if count != 5 {
-		t.Errorf("Expected COUNT(value) = 5, got %d", count)
+	if got != want {
+		t.Errorf("Expected %s = %d, got %d", label, want, got)
 	}
 }
 
 // TestSelectFromTableNameCoverage tests selectFromTableName function
 func TestSelectFromTableNameCoverage(t *testing.T) {
-	dbFile := "test_from_table.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_from_table.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -457,8 +415,7 @@ func TestSelectFromTableNameCoverage(t *testing.T) {
 
 // TestSelectWithoutFromCoverage tests SELECT without FROM clause
 func TestSelectWithoutFromCoverage(t *testing.T) {
-	dbFile := "test_no_from.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_no_from.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -528,8 +485,7 @@ func TestMemoryDatabase(t *testing.T) {
 
 // TestPageDataOperations tests AllocatePageData, GetPageData, MarkDirty
 func TestPageDataOperations(t *testing.T) {
-	dbFile := "test_page_ops.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_page_ops.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {

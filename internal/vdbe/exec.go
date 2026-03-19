@@ -2155,6 +2155,69 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 	return v.execInsertWithRowID(cursor, btCursor, payload, tableName, isUpdate, instr.P3, conflictMode)
 }
 
+// handleExistingRowConflict resolves conflicts when a row with the same rowid already exists.
+func (v *VDBE) handleExistingRowConflict(cursor *Cursor, btCursor *btree.BtCursor, rowid int64, tableName string, conflictMode int32) (skip bool, err error) {
+	exists, err := v.rowExists(btCursor, rowid)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, nil
+	}
+	switch conflictMode {
+	case conflictModeReplace:
+		return false, v.deleteRowForReplace(cursor, btCursor, rowid, tableName)
+	case conflictModeIgnore:
+		return true, nil
+	}
+	return false, nil
+}
+
+// handleUniqueConflict handles UNIQUE constraint errors during INSERT with conflict resolution.
+func (v *VDBE) handleUniqueConflict(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, rowid int64, tableName string, isUpdate bool, conflictMode int32) (bool, error) {
+	switch conflictMode {
+	case conflictModeIgnore:
+		return true, nil
+	case conflictModeReplace:
+		if err := v.deleteConflictingUniqueRows(cursor, btCursor, payload, rowid, tableName); err != nil {
+			return false, err
+		}
+		return false, v.validateInsertWithRowID(tableName, payload, btCursor, rowid, isUpdate)
+	}
+	return false, nil
+}
+
+// validateAndResolveConflicts validates constraints and resolves any unique conflicts.
+func (v *VDBE) validateAndResolveConflicts(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, tableName string, isUpdate bool, rowid int64, conflictMode int32) (skip bool, err error) {
+	err = v.validateInsertWithRowID(tableName, payload, btCursor, rowid, isUpdate)
+	if err == nil {
+		return false, nil
+	}
+	canResolve := !isUpdate && conflictMode != conflictModeAbort && isUniqueConstraintError(err)
+	if !canResolve {
+		return false, err
+	}
+	return v.handleUniqueConflict(cursor, btCursor, payload, rowid, tableName, isUpdate, conflictMode)
+}
+
+// finalizeInsert performs the insert and cleans up pending FK state.
+func (v *VDBE) finalizeInsert(cursor *Cursor, btCursor *btree.BtCursor, rowid int64, payload []byte, isUpdate bool) error {
+	updateFlag := int64(0)
+	if isUpdate {
+		updateFlag = 1
+	}
+	if err := v.performInsert(cursor, btCursor, rowid, payload, updateFlag); err != nil {
+		if isUpdate {
+			v.restorePendingUpdate()
+		}
+		return err
+	}
+	if isUpdate {
+		v.pendingFKUpdate = nil
+	}
+	return nil
+}
+
 // execInsertWithRowID handles INSERT for regular rowid-based tables.
 func (v *VDBE) execInsertWithRowID(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, tableName string, isUpdate bool, rowidReg int, conflictMode int32) error {
 	rowid, err := v.getInsertRowid(rowidReg, cursor, tableName)
@@ -2162,63 +2225,25 @@ func (v *VDBE) execInsertWithRowID(cursor *Cursor, btCursor *btree.BtCursor, pay
 		return err
 	}
 
-	// Handle conflict resolution for INSERT OR REPLACE / INSERT OR IGNORE
 	if !isUpdate && conflictMode != conflictModeAbort {
-		exists, err := v.rowExists(btCursor, rowid)
+		skip, err := v.handleExistingRowConflict(cursor, btCursor, rowid, tableName, conflictMode)
 		if err != nil {
 			return err
 		}
-		if exists {
-			switch conflictMode {
-			case conflictModeReplace:
-				// Delete existing row before inserting replacement
-				if err := v.deleteRowForReplace(cursor, btCursor, rowid, tableName); err != nil {
-					return err
-				}
-			case conflictModeIgnore:
-				// Skip this insert, row already exists
-				return nil
-			}
+		if skip {
+			return nil
 		}
 	}
 
-	if err := v.validateInsertWithRowID(tableName, payload, btCursor, rowid, isUpdate); err != nil {
-		if !isUpdate && conflictMode != conflictModeAbort && isUniqueConstraintError(err) {
-			switch conflictMode {
-			case conflictModeIgnore:
-				return nil
-			case conflictModeReplace:
-				if err := v.deleteConflictingUniqueRows(cursor, btCursor, payload, rowid, tableName); err != nil {
-					return err
-				}
-				// Re-validate after deleting conflicting rows
-				if err := v.validateInsertWithRowID(tableName, payload, btCursor, rowid, isUpdate); err != nil {
-					return err
-				}
-				goto validated
-			}
-		}
+	skip, err := v.validateAndResolveConflicts(cursor, btCursor, payload, tableName, isUpdate, rowid, conflictMode)
+	if err != nil {
 		return err
 	}
-validated:
-
-	// For UPDATE operations, use conflictMode=1 to avoid incrementing NumChanges
-	updateFlag := int64(0)
-	if isUpdate {
-		updateFlag = 1
+	if skip {
+		return nil
 	}
 
-	if err := v.performInsert(cursor, btCursor, rowid, payload, updateFlag); err != nil {
-		if isUpdate {
-			v.restorePendingUpdate()
-		}
-		return err
-	}
-
-	if isUpdate {
-		v.pendingFKUpdate = nil
-	}
-	return nil
+	return v.finalizeInsert(cursor, btCursor, rowid, payload, isUpdate)
 }
 
 // rowExists checks if a row with the given rowid exists in the btree.
@@ -2230,30 +2255,31 @@ func (v *VDBE) rowExists(btCursor *btree.BtCursor, rowid int64) (bool, error) {
 	return found, nil
 }
 
+// validateFKForDelete validates foreign key constraints before deleting a row for REPLACE.
+func (v *VDBE) validateFKForDelete(btCursor *btree.BtCursor, rowid int64, tableName string) error {
+	if v.Ctx == nil || !v.Ctx.ForeignKeysEnabled || v.Ctx.FKManager == nil || tableName == "" {
+		return nil
+	}
+	payload := btCursor.GetPayload()
+	oldValues, err := v.extractValuesFromPayloadWithRowid(tableName, payload, rowid)
+	if err != nil || len(oldValues) == 0 {
+		return nil
+	}
+	type fkValidator interface {
+		ValidateDelete(tableName string, values map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowDeleter interface{}, rowUpdater interface{}) error
+	}
+	fkMgr, ok := v.Ctx.FKManager.(fkValidator)
+	if !ok {
+		return nil
+	}
+	return fkMgr.ValidateDelete(tableName, oldValues, v.Ctx.Schema, NewVDBERowReader(v), NewVDBERowModifier(v), NewVDBERowModifier(v))
+}
+
 // deleteRowForReplace deletes an existing row as part of INSERT OR REPLACE.
 func (v *VDBE) deleteRowForReplace(cursor *Cursor, btCursor *btree.BtCursor, rowid int64, tableName string) error {
-	// For FK validation, we need to get the values of the row being replaced
-	if v.Ctx != nil && v.Ctx.ForeignKeysEnabled && v.Ctx.FKManager != nil && tableName != "" {
-		// Use the same approach as validateDeleteConstraints for proper INTEGER PRIMARY KEY handling
-		payload := btCursor.GetPayload()
-		oldValues, err := v.extractValuesFromPayloadWithRowid(tableName, payload, rowid)
-		if err == nil && len(oldValues) > 0 {
-			// Validate FK constraints for the delete
-			type fkValidator interface {
-				ValidateDelete(tableName string, values map[string]interface{}, schemaObj interface{}, rowReader interface{}, rowDeleter interface{}, rowUpdater interface{}) error
-			}
-			if fkMgr, ok := v.Ctx.FKManager.(fkValidator); ok {
-				rowReader := NewVDBERowReader(v)
-				rowDeleter := NewVDBERowModifier(v)
-				rowUpdater := NewVDBERowModifier(v)
-				if err := fkMgr.ValidateDelete(tableName, oldValues, v.Ctx.Schema, rowReader, rowDeleter, rowUpdater); err != nil {
-					return err
-				}
-			}
-		}
+	if err := v.validateFKForDelete(btCursor, rowid, tableName); err != nil {
+		return err
 	}
-
-	// Delete the row from the btree
 	if err := btCursor.Delete(); err != nil {
 		return fmt.Errorf("failed to delete row for REPLACE: %w", err)
 	}
@@ -2268,6 +2294,23 @@ func isUniqueConstraintError(err error) bool {
 		!strings.Contains(msg, "PRIMARY KEY")
 }
 
+// processUniqueColumn checks one column for conflicts and deletes conflicting rows.
+func (v *VDBE) processUniqueColumn(cursor *Cursor, btCursor *btree.BtCursor, colIface interface{}, recordIdx int, payload []byte, newRowid int64, tableName string) error {
+	col, ok := colIface.(uniqueColumnInfo)
+	if !ok || !col.IsUniqueColumn() || col.IsPrimaryKeyColumn() {
+		return nil
+	}
+	collation := ""
+	if collInfo, ok := colIface.(collationInfo); ok {
+		collation = collInfo.GetEffectiveCollation()
+	}
+	newValueMem := NewMem()
+	if err := parseRecordColumn(payload, recordIdx, newValueMem); err != nil || newValueMem.IsNull() {
+		return nil
+	}
+	return v.deleteRowWithDuplicateValue(cursor, btCursor, recordIdx, newValueMem, newRowid, tableName, collation)
+}
+
 // deleteConflictingUniqueRows finds and deletes rows that conflict with the new
 // payload on non-PK UNIQUE columns, used for INSERT OR REPLACE.
 func (v *VDBE) deleteConflictingUniqueRows(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, newRowid int64, tableName string) error {
@@ -2277,37 +2320,15 @@ func (v *VDBE) deleteConflictingUniqueRows(cursor *Cursor, btCursor *btree.BtCur
 	}
 	recordIdx := 0
 	for _, colIface := range columns {
-		col, ok := colIface.(uniqueColumnInfo)
-		if !ok {
-			recordIdx++
-			continue
-		}
-		isPK := col.IsPrimaryKeyColumn()
-		if !col.IsUniqueColumn() || isPK {
-			if !isPK {
-				recordIdx++
-			}
-			continue
-		}
-		collation := ""
-		if collInfo, ok := colIface.(collationInfo); ok {
-			collation = collInfo.GetEffectiveCollation()
-		}
-		newValueMem := NewMem()
-		if err := parseRecordColumn(payload, recordIdx, newValueMem); err != nil {
-			recordIdx++
-			continue
-		}
-		if newValueMem.IsNull() {
-			recordIdx++
-			continue // NULL never conflicts
-		}
-		if err := v.deleteRowWithDuplicateValue(cursor, btCursor, recordIdx, newValueMem, newRowid, tableName, collation); err != nil {
+		if err := v.processUniqueColumn(cursor, btCursor, colIface, recordIdx, payload, newRowid, tableName); err != nil {
 			return err
+		}
+		col, ok := colIface.(uniqueColumnInfo)
+		if ok && col.IsPrimaryKeyColumn() {
+			continue
 		}
 		recordIdx++
 	}
-	// Also handle schema-level unique indexes (CREATE UNIQUE INDEX)
 	return v.deleteConflictingIndexRows(cursor, btCursor, payload, newRowid, tableName)
 }
 
@@ -2363,23 +2384,51 @@ func (v *VDBE) deleteConflictingIndexRows(cursor *Cursor, btCursor *btree.BtCurs
 	return nil
 }
 
-// findMultiColConflictRowid finds the rowid of a row that conflicts on a
-// multi-column unique index.
-func (v *VDBE) findMultiColConflictRowid(provider schemaIndexProvider, tableName string, cols []string, payload []byte, btCursor *btree.BtCursor, newRowid int64) (int64, bool) {
-	newValues := make([]*Mem, len(cols))
+// parseNewIndexValues parses values for columns from a payload, returning nil if any are NULL.
+func parseNewIndexValues(provider schemaIndexProvider, tableName string, cols []string, payload []byte) []*Mem {
+	values := make([]*Mem, len(cols))
 	for i, col := range cols {
 		recIdx := provider.GetRecordColumnIndex(tableName, col)
 		if recIdx < 0 {
-			return 0, false
+			return nil
 		}
 		m := NewMem()
 		if err := parseRecordColumn(payload, recIdx, m); err != nil {
-			return 0, false
+			return nil
 		}
 		if m.IsNull() {
-			return 0, false // NULL never conflicts
+			return nil
 		}
-		newValues[i] = m
+		values[i] = m
+	}
+	return values
+}
+
+// rowMatchesIndexValues checks if a row's record data matches the given index column values.
+func (v *VDBE) rowMatchesIndexValues(provider schemaIndexProvider, tableName string, cols []string, recordData []byte, newValues []*Mem) bool {
+	for i, col := range cols {
+		recIdx := provider.GetRecordColumnIndex(tableName, col)
+		if recIdx < 0 {
+			return false
+		}
+		existing := NewMem()
+		if err := parseRecordColumn(recordData, recIdx, existing); err != nil || existing.IsNull() || newValues[i].IsNull() {
+			return false
+		}
+		collation := provider.GetColumnCollation(tableName, col)
+		if v.compareMemValuesWithCollation(existing, newValues[i], collation) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// findMultiColConflictRowid finds the rowid of a row that conflicts on a
+// multi-column unique index.
+func (v *VDBE) findMultiColConflictRowid(provider schemaIndexProvider, tableName string, cols []string, payload []byte, btCursor *btree.BtCursor, newRowid int64) (int64, bool) {
+	newValues := parseNewIndexValues(provider, tableName, cols, payload)
+	if newValues == nil {
+		return 0, false
 	}
 	scanCursor := btree.NewCursor(btCursor.Btree, btCursor.RootPage)
 	if err := scanCursor.MoveToFirst(); err != nil {
@@ -2388,31 +2437,8 @@ func (v *VDBE) findMultiColConflictRowid(provider schemaIndexProvider, tableName
 	for scanCursor.IsValid() {
 		rowid := scanCursor.GetKey()
 		if rowid != newRowid {
-			recordData, err := scanCursor.GetPayloadWithOverflow()
-			if err == nil {
-				match := true
-				for i, col := range cols {
-					recIdx := provider.GetRecordColumnIndex(tableName, col)
-					if recIdx < 0 {
-						match = false
-						break
-					}
-					existing := NewMem()
-					if err := parseRecordColumn(recordData, recIdx, existing); err != nil {
-						match = false
-						break
-					}
-					if existing.IsNull() || newValues[i].IsNull() {
-						match = false
-						break
-					}
-					collation := provider.GetColumnCollation(tableName, col)
-					if v.compareMemValuesWithCollation(existing, newValues[i], collation) != 0 {
-						match = false
-						break
-					}
-				}
-				if match {
+			if recordData, err := scanCursor.GetPayloadWithOverflow(); err == nil {
+				if v.rowMatchesIndexValues(provider, tableName, cols, recordData, newValues) {
 					return rowid, true
 				}
 			}
@@ -2424,38 +2450,31 @@ func (v *VDBE) findMultiColConflictRowid(provider schemaIndexProvider, tableName
 	return 0, false
 }
 
-// extractRowValues extracts column values from the current row.
-func (v *VDBE) extractRowValues(cursor *Cursor, btCursor *btree.BtCursor, tableName string) (map[string]interface{}, error) {
-	recordData, err := btCursor.GetPayloadWithOverflow()
-	if err != nil {
-		return nil, err
-	}
-
-	// Get table schema to know column names
+// getTableColumnNamesWithIface retrieves the table interface and column names for a table.
+func (v *VDBE) getTableColumnNamesWithIface(tableName string) (tableIface interface{}, colNames []string, ok bool) {
 	type schemaGetter interface {
 		GetTableByName(name string) (interface{}, bool)
 	}
-	schemaObj, ok := v.Ctx.Schema.(schemaGetter)
-	if !ok {
-		return nil, nil
+	schemaObj, schemaOk := v.Ctx.Schema.(schemaGetter)
+	if !schemaOk {
+		return nil, nil, false
 	}
-	tableIface, ok := schemaObj.GetTableByName(tableName)
-	if !ok {
-		return nil, nil
+	tableIface, found := schemaObj.GetTableByName(tableName)
+	if !found {
+		return nil, nil, false
 	}
 	type columnGetter interface {
 		GetColumnNames() []string
 	}
-	table, ok := tableIface.(columnGetter)
-	if !ok {
-		return nil, nil
+	table, tableOk := tableIface.(columnGetter)
+	if !tableOk {
+		return nil, nil, false
 	}
+	return tableIface, table.GetColumnNames(), true
+}
 
-	colNames := table.GetColumnNames()
-	values := make(map[string]interface{})
-
-	// For INTEGER PRIMARY KEY columns, get the rowid and add it to values
-	rowid := btCursor.GetKey()
+// addIntegerPKValue adds the rowid for an INTEGER PRIMARY KEY column if applicable.
+func addIntegerPKValue(tableIface interface{}, values map[string]interface{}, rowid int64) {
 	type integerPKChecker interface {
 		GetIntegerPKColumn() string
 	}
@@ -2464,8 +2483,23 @@ func (v *VDBE) extractRowValues(cursor *Cursor, btCursor *btree.BtCursor, tableN
 			values[pkCol] = rowid
 		}
 	}
+}
 
-	// Parse the record and extract values
+// extractRowValues extracts column values from the current row.
+func (v *VDBE) extractRowValues(cursor *Cursor, btCursor *btree.BtCursor, tableName string) (map[string]interface{}, error) {
+	recordData, err := btCursor.GetPayloadWithOverflow()
+	if err != nil {
+		return nil, err
+	}
+
+	tableIface, colNames, ok := v.getTableColumnNamesWithIface(tableName)
+	if !ok {
+		return nil, nil
+	}
+
+	values := make(map[string]interface{})
+	addIntegerPKValue(tableIface, values, btCursor.GetKey())
+
 	headerSize, headerBytes := binary.Uvarint(recordData)
 	if headerBytes <= 0 {
 		return nil, nil
@@ -2481,11 +2515,8 @@ func (v *VDBE) extractRowValues(cursor *Cursor, btCursor *btree.BtCursor, tableN
 			break
 		}
 		header = header[n:]
-
 		val, size := v.decodeSerialValue(serialType, body[bodyOffset:])
-		if colIdx < len(colNames) {
-			values[colNames[colIdx]] = val
-		}
+		values[colNames[colIdx]] = val
 		bodyOffset += size
 		colIdx++
 	}
@@ -2493,78 +2524,99 @@ func (v *VDBE) extractRowValues(cursor *Cursor, btCursor *btree.BtCursor, tableN
 	return values, nil
 }
 
+// serialDecoder maps serial types 0-11 to their decode functions.
+var serialDecoders = [12]func([]byte) (interface{}, int){
+	0:  func(_ []byte) (interface{}, int) { return nil, 0 },                          // NULL
+	1:  decodeInt8,                                                                    // 8-bit signed
+	2:  decodeInt16,                                                                   // 16-bit signed
+	3:  decodeInt24,                                                                   // 24-bit signed
+	4:  decodeInt32,                                                                   // 32-bit signed
+	5:  decodeInt48,                                                                   // 48-bit signed
+	6:  decodeInt64,                                                                   // 64-bit signed
+	7:  serialDecodeFloat64,                                                             // IEEE 754 float
+	8:  func(_ []byte) (interface{}, int) { return int64(0), 0 },                     // constant 0
+	9:  func(_ []byte) (interface{}, int) { return int64(1), 0 },                     // constant 1
+	10: func(_ []byte) (interface{}, int) { return nil, 0 },                          // reserved
+	11: func(_ []byte) (interface{}, int) { return nil, 0 },                          // reserved
+}
+
+func decodeInt8(data []byte) (interface{}, int) {
+	if len(data) < 1 {
+		return nil, 0
+	}
+	return int64(int8(data[0])), 1
+}
+
+func decodeInt16(data []byte) (interface{}, int) {
+	if len(data) < 2 {
+		return nil, 0
+	}
+	return int64(int16(binary.BigEndian.Uint16(data))), 2
+}
+
+func decodeInt24(data []byte) (interface{}, int) {
+	if len(data) < 3 {
+		return nil, 0
+	}
+	val := int64(data[0])<<16 | int64(data[1])<<8 | int64(data[2])
+	if val&0x800000 != 0 {
+		val |= ^int64(0xFFFFFF)
+	}
+	return val, 3
+}
+
+func decodeInt32(data []byte) (interface{}, int) {
+	if len(data) < 4 {
+		return nil, 0
+	}
+	return int64(int32(binary.BigEndian.Uint32(data))), 4
+}
+
+func decodeInt48(data []byte) (interface{}, int) {
+	if len(data) < 6 {
+		return nil, 0
+	}
+	val := int64(data[0])<<40 | int64(data[1])<<32 | int64(data[2])<<24 |
+		int64(data[3])<<16 | int64(data[4])<<8 | int64(data[5])
+	if val&0x800000000000 != 0 {
+		val |= ^int64(0xFFFFFFFFFFFF)
+	}
+	return val, 6
+}
+
+func decodeInt64(data []byte) (interface{}, int) {
+	if len(data) < 8 {
+		return nil, 0
+	}
+	return int64(binary.BigEndian.Uint64(data)), 8
+}
+
+func serialDecodeFloat64(data []byte) (interface{}, int) {
+	if len(data) < 8 {
+		return nil, 0
+	}
+	return math.Float64frombits(binary.BigEndian.Uint64(data)), 8
+}
+
+func serialDecodeBlobOrText(serialType uint64, data []byte) (interface{}, int) {
+	length := int((serialType - 12) / 2)
+	if len(data) < length {
+		return nil, 0
+	}
+	if serialType%2 == 0 {
+		blob := make([]byte, length)
+		copy(blob, data[:length])
+		return blob, length
+	}
+	return string(data[:length]), length
+}
+
 // decodeSerialValue decodes a SQLite serial value and returns the decoded value and byte size.
 func (v *VDBE) decodeSerialValue(serialType uint64, data []byte) (interface{}, int) {
-	switch serialType {
-	case 0: // NULL
-		return nil, 0
-	case 1: // 8-bit signed integer
-		if len(data) < 1 {
-			return nil, 0
-		}
-		return int64(int8(data[0])), 1
-	case 2: // 16-bit big-endian signed integer
-		if len(data) < 2 {
-			return nil, 0
-		}
-		return int64(int16(binary.BigEndian.Uint16(data))), 2
-	case 3: // 24-bit big-endian signed integer
-		if len(data) < 3 {
-			return nil, 0
-		}
-		val := int64(data[0])<<16 | int64(data[1])<<8 | int64(data[2])
-		if val&0x800000 != 0 {
-			val |= ^int64(0xFFFFFF) // Sign extend
-		}
-		return val, 3
-	case 4: // 32-bit big-endian signed integer
-		if len(data) < 4 {
-			return nil, 0
-		}
-		return int64(int32(binary.BigEndian.Uint32(data))), 4
-	case 5: // 48-bit big-endian signed integer
-		if len(data) < 6 {
-			return nil, 0
-		}
-		val := int64(data[0])<<40 | int64(data[1])<<32 | int64(data[2])<<24 |
-			int64(data[3])<<16 | int64(data[4])<<8 | int64(data[5])
-		if val&0x800000000000 != 0 {
-			val |= ^int64(0xFFFFFFFFFFFF) // Sign extend
-		}
-		return val, 6
-	case 6: // 64-bit big-endian signed integer
-		if len(data) < 8 {
-			return nil, 0
-		}
-		return int64(binary.BigEndian.Uint64(data)), 8
-	case 7: // 64-bit IEEE 754 float
-		if len(data) < 8 {
-			return nil, 0
-		}
-		bits := binary.BigEndian.Uint64(data)
-		return math.Float64frombits(bits), 8
-	case 8: // Integer constant 0
-		return int64(0), 0
-	case 9: // Integer constant 1
-		return int64(1), 0
-	case 10, 11: // Reserved
-		return nil, 0
-	default:
-		// For serial types >= 12:
-		// Even = blob, Odd = text
-		length := int((serialType - 12) / 2)
-		if len(data) < length {
-			return nil, 0
-		}
-		if serialType%2 == 0 {
-			// Blob
-			blob := make([]byte, length)
-			copy(blob, data[:length])
-			return blob, length
-		}
-		// Text
-		return string(data[:length]), length
+	if serialType < 12 {
+		return serialDecoders[serialType](data)
 	}
+	return serialDecodeBlobOrText(serialType, data)
 }
 
 // validateInsertWithRowID validates constraints for rowid-based inserts.
@@ -3868,11 +3920,26 @@ func (v *VDBE) validateDeleteConstraintsWithoutRowID(tableName string, btCursor 
 	return v.checkForeignKeyDeleteConstraints(tableName, values)
 }
 
+// decodePrimaryKeyValues decodes key bytes and maps them to primary key column names.
+func decodePrimaryKeyValues(pkCols []string, keyBytes []byte) (map[string]interface{}, error) {
+	values := make(map[string]interface{})
+	if len(pkCols) == 0 || len(keyBytes) == 0 {
+		return values, nil
+	}
+	keyValues, err := withoutrowid.DecodeCompositeKey(keyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode key: %w", err)
+	}
+	for i, pkCol := range pkCols {
+		if i < len(keyValues) {
+			values[pkCol] = keyValues[i]
+		}
+	}
+	return values, nil
+}
+
 // extractValuesFromKeyAndPayload extracts all column values for WITHOUT ROWID tables.
 func (v *VDBE) extractValuesFromKeyAndPayload(tableName string, keyBytes, payload []byte, table interface{}) (map[string]interface{}, error) {
-	values := make(map[string]interface{})
-
-	// Get table info
 	type tableWithPKAndColumns interface {
 		GetPrimaryKey() []string
 		GetColumns() []interface{}
@@ -3882,45 +3949,28 @@ func (v *VDBE) extractValuesFromKeyAndPayload(tableName string, keyBytes, payloa
 		return nil, fmt.Errorf("table %s doesn't support required interface", tableName)
 	}
 
-	pkCols := tbl.GetPrimaryKey()
-	columns := tbl.GetColumns()
-
-	// Decode primary key values from key bytes
-	if len(pkCols) > 0 && len(keyBytes) > 0 {
-		keyValues, err := withoutrowid.DecodeCompositeKey(keyBytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode key: %w", err)
-		}
-		// Map key values to primary key column names
-		for i, pkCol := range pkCols {
-			if i < len(keyValues) {
-				values[pkCol] = keyValues[i]
-			}
-		}
+	values, err := decodePrimaryKeyValues(tbl.GetPrimaryKey(), keyBytes)
+	if err != nil {
+		return nil, err
 	}
 
-	// Extract remaining values from payload using column order
-	for idx, colIface := range columns {
-		type columnInfo interface {
-			GetName() string
-		}
+	type columnInfo interface {
+		GetName() string
+	}
+	for idx, colIface := range tbl.GetColumns() {
 		col, ok := colIface.(columnInfo)
 		if !ok {
 			continue
 		}
-
-		// Don't override PK values we already got from the key
 		if _, exists := values[col.GetName()]; exists {
 			continue
 		}
-
 		val, err := extractColumnValue(payload, idx)
 		if err != nil {
 			return nil, err
 		}
 		values[col.GetName()] = val
 	}
-
 	return values, nil
 }
 

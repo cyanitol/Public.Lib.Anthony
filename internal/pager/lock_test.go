@@ -136,10 +136,27 @@ func TestIsValidTransition(t *testing.T) {
 	}
 }
 
+// lockAcquireAndVerify acquires a lock and verifies the state.
+func lockAcquireAndVerify(t *testing.T, lm *LockManager, level LockLevel) {
+	t.Helper()
+	mustAcquireLock(t, lm, level)
+	if got := lm.GetLockState(); got != level {
+		t.Errorf("lock state = %v, want %v", got, level)
+	}
+}
+
+// lockReleaseAndVerify releases to a level and verifies the state.
+func lockReleaseAndVerify(t *testing.T, lm *LockManager, level LockLevel) {
+	t.Helper()
+	mustReleaseLock(t, lm, level)
+	if got := lm.GetLockState(); got != level {
+		t.Errorf("lock state = %v, want %v", got, level)
+	}
+}
+
 // TestAcquireReleaseLock tests basic lock acquisition and release.
 func TestAcquireReleaseLock(t *testing.T) {
 	t.Parallel()
-	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
 	}
@@ -147,66 +164,14 @@ func TestAcquireReleaseLock(t *testing.T) {
 	f, cleanup := createTestFile(t)
 	defer cleanup()
 
-	lm, err := NewLockManager(f)
-	if err != nil {
-		t.Fatalf("NewLockManager() error = %v", err)
-	}
+	lm := mustNewLockManager(t, f)
 	defer lm.Close()
 
-	// Test acquiring SHARED lock
-	t.Run("acquire shared", func(t *testing.T) {
-		if err := lm.AcquireLock(lockShared); err != nil {
-			t.Fatalf("AcquireLock(SHARED) error = %v", err)
-		}
-
-		if got := lm.GetLockState(); got != lockShared {
-			t.Errorf("lock state = %v, want %v", got, lockShared)
-		}
-	})
-
-	// Test upgrading to RESERVED
-	t.Run("upgrade to reserved", func(t *testing.T) {
-		if err := lm.AcquireLock(lockReserved); err != nil {
-			t.Fatalf("AcquireLock(RESERVED) error = %v", err)
-		}
-
-		if got := lm.GetLockState(); got != lockReserved {
-			t.Errorf("lock state = %v, want %v", got, lockReserved)
-		}
-	})
-
-	// Test upgrading to EXCLUSIVE
-	t.Run("upgrade to exclusive", func(t *testing.T) {
-		if err := lm.AcquireLock(lockExclusive); err != nil {
-			t.Fatalf("AcquireLock(EXCLUSIVE) error = %v", err)
-		}
-
-		if got := lm.GetLockState(); got != lockExclusive {
-			t.Errorf("lock state = %v, want %v", got, lockExclusive)
-		}
-	})
-
-	// Test downgrading to SHARED
-	t.Run("downgrade to shared", func(t *testing.T) {
-		if err := lm.ReleaseLock(lockShared); err != nil {
-			t.Fatalf("ReleaseLock(SHARED) error = %v", err)
-		}
-
-		if got := lm.GetLockState(); got != lockShared {
-			t.Errorf("lock state = %v, want %v", got, lockShared)
-		}
-	})
-
-	// Test releasing all locks
-	t.Run("release all", func(t *testing.T) {
-		if err := lm.ReleaseLock(lockNone); err != nil {
-			t.Fatalf("ReleaseLock(NONE) error = %v", err)
-		}
-
-		if got := lm.GetLockState(); got != lockNone {
-			t.Errorf("lock state = %v, want %v", got, lockNone)
-		}
-	})
+	t.Run("acquire shared", func(t *testing.T) { lockAcquireAndVerify(t, lm, lockShared) })
+	t.Run("upgrade to reserved", func(t *testing.T) { lockAcquireAndVerify(t, lm, lockReserved) })
+	t.Run("upgrade to exclusive", func(t *testing.T) { lockAcquireAndVerify(t, lm, lockExclusive) })
+	t.Run("downgrade to shared", func(t *testing.T) { lockReleaseAndVerify(t, lm, lockShared) })
+	t.Run("release all", func(t *testing.T) { lockReleaseAndVerify(t, lm, lockNone) })
 }
 
 // TestInvalidTransitions tests that invalid lock transitions are rejected.
@@ -290,7 +255,6 @@ func TestConcurrentReaders(t *testing.T) {
 // TestReaderWriterConflict tests that a writer blocks when readers exist.
 func TestReaderWriterConflict(t *testing.T) {
 	t.Parallel()
-	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
 	}
@@ -298,39 +262,17 @@ func TestReaderWriterConflict(t *testing.T) {
 	f1, cleanup1 := createTestFile(t)
 	defer cleanup1()
 
-	f2, err := os.OpenFile(f1.Name(), os.O_RDWR, 0600)
-	if err != nil {
-		t.Fatalf("failed to open file: %v", err)
-	}
-	defer f2.Close()
-
-	lm1, err := NewLockManager(f1)
-	if err != nil {
-		t.Fatalf("NewLockManager(1) error = %v", err)
-	}
+	lm1 := mustNewLockManager(t, f1)
 	defer lm1.Close()
 
-	lm2, err := NewLockManager(f2)
-	if err != nil {
-		t.Fatalf("NewLockManager(2) error = %v", err)
-	}
-	defer lm2.Close()
+	_, lm2 := mustOpenSecondLockManager(t, f1.Name())
 
-	// lm1 acquires a SHARED lock (reader)
-	if err := lm1.AcquireLock(lockShared); err != nil {
-		t.Fatalf("lm1.AcquireLock(SHARED) error = %v", err)
-	}
-
-	// lm2 should be able to get RESERVED (planning to write)
-	if err := lm2.AcquireLock(lockShared); err != nil {
-		t.Fatalf("lm2.AcquireLock(SHARED) error = %v", err)
-	}
-	if err := lm2.AcquireLock(lockReserved); err != nil {
-		t.Fatalf("lm2.AcquireLock(RESERVED) error = %v", err)
-	}
+	mustAcquireLock(t, lm1, lockShared)
+	mustAcquireLock(t, lm2, lockShared)
+	mustAcquireLock(t, lm2, lockReserved)
 
 	// lm2 should NOT be able to get EXCLUSIVE while lm1 holds SHARED
-	err = lm2.AcquireLock(lockExclusive)
+	err := lm2.AcquireLock(lockExclusive)
 	if err == nil {
 		t.Error("lm2.AcquireLock(EXCLUSIVE) should fail while reader exists")
 	}
@@ -338,20 +280,13 @@ func TestReaderWriterConflict(t *testing.T) {
 		t.Errorf("error = %v, want %v", err, ErrLockBusy)
 	}
 
-	// After lm1 releases, lm2 should be able to get EXCLUSIVE
-	if err := lm1.ReleaseLock(lockNone); err != nil {
-		t.Fatalf("lm1.ReleaseLock(NONE) error = %v", err)
-	}
-
-	if err := lm2.AcquireLock(lockExclusive); err != nil {
-		t.Fatalf("lm2.AcquireLock(EXCLUSIVE) error = %v", err)
-	}
+	mustReleaseLock(t, lm1, lockNone)
+	mustAcquireLock(t, lm2, lockExclusive)
 }
 
 // TestReservedlockExclusive tests that only one RESERVED lock can be held.
 func TestReservedlockExclusive(t *testing.T) {
 	t.Parallel()
-	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
 	}
@@ -359,39 +294,16 @@ func TestReservedlockExclusive(t *testing.T) {
 	f1, cleanup1 := createTestFile(t)
 	defer cleanup1()
 
-	f2, err := os.OpenFile(f1.Name(), os.O_RDWR, 0600)
-	if err != nil {
-		t.Fatalf("failed to open file: %v", err)
-	}
-	defer f2.Close()
-
-	lm1, err := NewLockManager(f1)
-	if err != nil {
-		t.Fatalf("NewLockManager(1) error = %v", err)
-	}
+	lm1 := mustNewLockManager(t, f1)
 	defer lm1.Close()
 
-	lm2, err := NewLockManager(f2)
-	if err != nil {
-		t.Fatalf("NewLockManager(2) error = %v", err)
-	}
-	defer lm2.Close()
+	_, lm2 := mustOpenSecondLockManager(t, f1.Name())
 
-	// Both acquire SHARED locks
-	if err := lm1.AcquireLock(lockShared); err != nil {
-		t.Fatalf("lm1.AcquireLock(SHARED) error = %v", err)
-	}
-	if err := lm2.AcquireLock(lockShared); err != nil {
-		t.Fatalf("lm2.AcquireLock(SHARED) error = %v", err)
-	}
+	mustAcquireLock(t, lm1, lockShared)
+	mustAcquireLock(t, lm2, lockShared)
+	mustAcquireLock(t, lm1, lockReserved)
 
-	// lm1 acquires RESERVED
-	if err := lm1.AcquireLock(lockReserved); err != nil {
-		t.Fatalf("lm1.AcquireLock(RESERVED) error = %v", err)
-	}
-
-	// lm2 should NOT be able to acquire RESERVED
-	err = lm2.AcquireLock(lockReserved)
+	err := lm2.AcquireLock(lockReserved)
 	if err == nil {
 		t.Error("lm2.AcquireLock(RESERVED) should fail when lm1 holds it")
 	}
@@ -484,7 +396,6 @@ func TestConcurrentLockOperations(t *testing.T) {
 // TestIsLockHeld tests the IsLockHeld method.
 func TestIsLockHeld(t *testing.T) {
 	t.Parallel()
-	// Skip on Windows until implemented
 	if isWindows() {
 		t.Skip("Skipping test on Windows (not yet implemented)")
 	}
@@ -492,43 +403,22 @@ func TestIsLockHeld(t *testing.T) {
 	f, cleanup := createTestFile(t)
 	defer cleanup()
 
-	lm, err := NewLockManager(f)
-	if err != nil {
-		t.Fatalf("NewLockManager() error = %v", err)
-	}
+	lm := mustNewLockManager(t, f)
 	defer lm.Close()
 
 	// Initially no locks held
-	if lm.IsLockHeld(lockShared) {
-		t.Error("IsLockHeld(SHARED) = true, want false")
-	}
+	verifyLockHeld(t, lm, lockShared, false)
 
 	// Acquire SHARED
-	if err := lm.AcquireLock(lockShared); err != nil {
-		t.Fatalf("AcquireLock(SHARED) error = %v", err)
-	}
-
-	if !lm.IsLockHeld(lockShared) {
-		t.Error("IsLockHeld(SHARED) = false, want true")
-	}
-	if lm.IsLockHeld(lockReserved) {
-		t.Error("IsLockHeld(RESERVED) = true, want false")
-	}
+	mustAcquireLock(t, lm, lockShared)
+	verifyLockHeld(t, lm, lockShared, true)
+	verifyLockHeld(t, lm, lockReserved, false)
 
 	// Acquire RESERVED
-	if err := lm.AcquireLock(lockReserved); err != nil {
-		t.Fatalf("AcquireLock(RESERVED) error = %v", err)
-	}
-
-	if !lm.IsLockHeld(lockShared) {
-		t.Error("IsLockHeld(SHARED) = false, want true")
-	}
-	if !lm.IsLockHeld(lockReserved) {
-		t.Error("IsLockHeld(RESERVED) = false, want true")
-	}
-	if lm.IsLockHeld(lockExclusive) {
-		t.Error("IsLockHeld(EXCLUSIVE) = true, want false")
-	}
+	mustAcquireLock(t, lm, lockReserved)
+	verifyLockHeld(t, lm, lockShared, true)
+	verifyLockHeld(t, lm, lockReserved, true)
+	verifyLockHeld(t, lm, lockExclusive, false)
 }
 
 // TestCanAcquire tests the CanAcquire method.

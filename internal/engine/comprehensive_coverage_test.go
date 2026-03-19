@@ -143,18 +143,7 @@ func TestResolveColumnIndexMultiTableErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, err := resolveColumnIndexMultiTable(tt.col, tables)
-			if tt.wantError && err == nil {
-				t.Error("Expected error but got none")
-			}
-			if !tt.wantError && err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-			if tt.wantError && err != nil && tt.errMsg != "" {
-				if matched := fmt.Sprintf("%v", err); matched != "" {
-					// Error message should contain expected substring
-					// We just check err is not nil which is already done
-				}
-			}
+			assertErrorExpectation(t, err, tt.wantError)
 		})
 	}
 }
@@ -634,50 +623,48 @@ func TestTriggerExecutorStatementExecution(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			triggerStmt := &parser.CreateTriggerStmt{
-				Name:       "test_trigger",
-				Table:      "test",
-				Timing:     tt.timing,
-				Event:      tt.event,
-				ForEachRow: true,
-				Body:       []parser.Statement{tt.stmt},
-			}
-
-			_, err := db.schema.CreateTrigger(triggerStmt)
-			if err != nil {
-				t.Fatalf("Failed to create trigger: %v", err)
-			}
-
-			ctx := &TriggerContext{
-				Schema:    db.schema,
-				TableName: "test",
-				OldRow:    map[string]interface{}{"id": 1},
-				NewRow:    map[string]interface{}{"id": 2},
-			}
-
-			executor := NewTriggerExecutor(ctx)
-
-			var execErr error
-			switch tt.timing {
-			case parser.TriggerBefore:
-				execErr = executor.ExecuteBeforeTriggers(tt.event, nil)
-			case parser.TriggerAfter:
-				execErr = executor.ExecuteAfterTriggers(tt.event, nil)
-			case parser.TriggerInsteadOf:
-				execErr = executor.ExecuteInsteadOfTriggers(tt.event, nil)
-			}
-
-			if tt.wantError && execErr == nil {
-				t.Error("Expected error but got none")
-			}
-			if !tt.wantError && execErr != nil {
-				t.Errorf("Unexpected error: %v", execErr)
-			}
-
-			// Clean up trigger
-			db.schema.DropTrigger("test_trigger")
+			runTriggerExecTest(t, db, tt.stmt, tt.timing, tt.event, tt.wantError)
 		})
 	}
+}
+
+func runTriggerExecTest(t *testing.T, db *Engine, stmt parser.Statement, timing parser.TriggerTiming, event parser.TriggerEvent, wantError bool) {
+	t.Helper()
+	triggerStmt := &parser.CreateTriggerStmt{
+		Name: "test_trigger", Table: "test",
+		Timing: timing, Event: event, ForEachRow: true,
+		Body: []parser.Statement{stmt},
+	}
+
+	if _, err := db.schema.CreateTrigger(triggerStmt); err != nil {
+		t.Fatalf("Failed to create trigger: %v", err)
+	}
+	defer db.schema.DropTrigger("test_trigger")
+
+	ctx := &TriggerContext{
+		Schema: db.schema, TableName: "test",
+		OldRow: map[string]interface{}{"id": 1},
+		NewRow: map[string]interface{}{"id": 2},
+	}
+	execErr := executeTriggerByTiming(NewTriggerExecutor(ctx), timing, event)
+	if wantError && execErr == nil {
+		t.Error("Expected error but got none")
+	}
+	if !wantError && execErr != nil {
+		t.Errorf("Unexpected error: %v", execErr)
+	}
+}
+
+func executeTriggerByTiming(executor *TriggerExecutor, timing parser.TriggerTiming, event parser.TriggerEvent) error {
+	switch timing {
+	case parser.TriggerBefore:
+		return executor.ExecuteBeforeTriggers(event, nil)
+	case parser.TriggerAfter:
+		return executor.ExecuteAfterTriggers(event, nil)
+	case parser.TriggerInsteadOf:
+		return executor.ExecuteInsteadOfTriggers(event, nil)
+	}
+	return nil
 }
 
 // TestCompileSelectScanErrors tests error cases in compileSelectScan
@@ -1052,5 +1039,15 @@ func TestExecuteVDBEWithRows(t *testing.T) {
 	// Just verify we got some result
 	if result == nil {
 		t.Error("Expected non-nil result")
+	}
+}
+
+func assertErrorExpectation(t *testing.T, err error, wantError bool) {
+	t.Helper()
+	if wantError && err == nil {
+		t.Error("Expected error but got none")
+	}
+	if !wantError && err != nil {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }

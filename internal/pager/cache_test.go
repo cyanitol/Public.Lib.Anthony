@@ -71,57 +71,49 @@ func TestLRUCacheCreate(t *testing.T) {
 	}
 }
 
+func verifyCacheSize(t *testing.T, cache *LRUCache, expected int) {
+	t.Helper()
+	if cache.Size() != expected {
+		t.Errorf("expected size %d, got %d", expected, cache.Size())
+	}
+}
+
+func verifyCacheContains(t *testing.T, cache *LRUCache, pgno Pgno, expected bool) {
+	t.Helper()
+	if cache.Contains(pgno) != expected {
+		t.Errorf("Contains(%d) = %v, want %v", pgno, !expected, expected)
+	}
+}
+
 func TestLRUCacheBasicOperations(t *testing.T) {
 	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
-	// Test empty cache
-	if cache.Size() != 0 {
-		t.Errorf("expected size 0, got %d", cache.Size())
-	}
+	verifyCacheSize(t, cache, 0)
 
-	// Test Get on empty cache
-	page := cache.Get(1)
-	if page != nil {
+	if page := cache.Get(1); page != nil {
 		t.Error("expected nil from empty cache")
 	}
 
-	// Test Put
 	page1 := NewDbPage(1, 4096)
-	err := cache.Put(page1)
-	if err != nil {
+	if err := cache.Put(page1); err != nil {
 		t.Errorf("unexpected error on Put: %v", err)
 	}
+	verifyCacheSize(t, cache, 1)
 
-	if cache.Size() != 1 {
-		t.Errorf("expected size 1, got %d", cache.Size())
-	}
-
-	// Test Get
 	retrieved := cache.Get(1)
 	if retrieved == nil {
 		t.Error("expected non-nil page")
-	}
-	if retrieved.Pgno != 1 {
+	} else if retrieved.Pgno != 1 {
 		t.Errorf("expected page number 1, got %d", retrieved.Pgno)
 	}
 
-	// Test Contains
-	if !cache.Contains(1) {
-		t.Error("expected cache to contain page 1")
-	}
-	if cache.Contains(2) {
-		t.Error("expected cache to not contain page 2")
-	}
+	verifyCacheContains(t, cache, 1, true)
+	verifyCacheContains(t, cache, 2, false)
 
-	// Test Remove
 	cache.Remove(1)
-	if cache.Size() != 0 {
-		t.Errorf("expected size 0 after remove, got %d", cache.Size())
-	}
-	if cache.Contains(1) {
-		t.Error("expected cache to not contain page 1 after remove")
-	}
+	verifyCacheSize(t, cache, 0)
+	verifyCacheContains(t, cache, 1, false)
 }
 
 func TestLRUCacheLRUOrder(t *testing.T) {
@@ -306,47 +298,35 @@ func TestLRUCacheDirtyList(t *testing.T) {
 	}
 }
 
+func verifyCacheStats(t *testing.T, cache *LRUCache, wantHits, wantMisses int64) {
+	t.Helper()
+	hits, misses := cache.Stats()
+	if hits != wantHits || misses != wantMisses {
+		t.Errorf("expected %d hits and %d misses, got %d hits and %d misses", wantHits, wantMisses, hits, misses)
+	}
+}
+
 func TestLRUCacheStats(t *testing.T) {
 	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
-	// Add a page
 	page := NewDbPage(1, 4096)
 	cache.Put(page)
 
-	// Initial stats should be 0
-	hits, misses := cache.Stats()
-	if hits != 0 || misses != 0 {
-		t.Errorf("expected 0 hits and misses, got %d hits and %d misses", hits, misses)
+	verifyCacheStats(t, cache, 0, 0)
+
+	cache.Get(2) // miss
+	verifyCacheStats(t, cache, 0, 1)
+
+	cache.Get(1) // hit
+	verifyCacheStats(t, cache, 1, 1)
+
+	if rate := cache.HitRate(); rate != 50.0 {
+		t.Errorf("expected hit rate 50.0%%, got %.1f%%", rate)
 	}
 
-	// Miss
-	cache.Get(2)
-	hits, misses = cache.Stats()
-	if hits != 0 || misses != 1 {
-		t.Errorf("expected 0 hits and 1 miss, got %d hits and %d misses", hits, misses)
-	}
-
-	// Hit
-	cache.Get(1)
-	hits, misses = cache.Stats()
-	if hits != 1 || misses != 1 {
-		t.Errorf("expected 1 hit and 1 miss, got %d hits and %d misses", hits, misses)
-	}
-
-	// Hit rate
-	rate := cache.HitRate()
-	expectedRate := 50.0
-	if rate != expectedRate {
-		t.Errorf("expected hit rate %.1f%%, got %.1f%%", expectedRate, rate)
-	}
-
-	// Reset stats
 	cache.ResetStats()
-	hits, misses = cache.Stats()
-	if hits != 0 || misses != 0 {
-		t.Errorf("expected 0 hits and misses after reset, got %d hits and %d misses", hits, misses)
-	}
+	verifyCacheStats(t, cache, 0, 0)
 }
 
 func TestLRUCacheMemoryUsage(t *testing.T) {

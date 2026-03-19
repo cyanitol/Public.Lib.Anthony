@@ -458,74 +458,70 @@ func TestSQLiteIntegrityCheck(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			// Clean up
-			db.Exec("DROP TABLE IF EXISTS t1")
-			db.Exec("DROP TABLE IF EXISTS t2")
-			db.Exec("DROP TABLE IF EXISTS t3")
-			db.Exec("DROP TABLE IF EXISTS users")
-			db.Exec("DROP TABLE IF EXISTS products")
-			db.Exec("DROP TABLE IF EXISTS orders")
-			db.Exec("DROP TABLE IF EXISTS accounts")
-			db.Exec("DROP TABLE IF EXISTS items")
-			db.Exec("DROP TABLE IF EXISTS empty_table")
-			db.Exec("DROP TABLE IF EXISTS nullable")
-			db.Exec("DROP TABLE IF EXISTS parent")
-			db.Exec("DROP TABLE IF EXISTS child")
-
-			// Run setup
+			integrityCleanupAllTables(db)
 			for _, setupSQL := range tt.setup {
 				if _, err := db.Exec(setupSQL); err != nil {
 					t.Fatalf("setup failed: %v, SQL: %s", err, setupSQL)
 				}
 			}
-
-			// Execute query
-			rows, err := db.Query(tt.query)
+			results, queryErr := integrityCollectStringResults(t, db, tt.query)
 			if tt.wantErr {
-				if err == nil {
+				if queryErr == nil {
 					t.Fatalf("expected error, got nil")
 				}
 				return
 			}
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
+			if queryErr != nil {
+				t.Fatalf("query failed: %v", queryErr)
 			}
-			defer rows.Close()
-
-			// Collect results
-			var results []string
-			for rows.Next() {
-				var result string
-				if err := rows.Scan(&result); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				results = append(results, result)
-			}
-
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows iteration failed: %v", err)
-			}
-
-			// Check results
-			if tt.wantOK {
-				// Expect "ok" result
-				if len(results) == 0 {
-					t.Error("expected 'ok' result, got empty result set")
-				} else if len(results) == 1 && results[0] == "ok" {
-					// Success
-				} else {
-					t.Errorf("expected 'ok', got: %v", results)
-				}
-			} else if len(tt.contains) > 0 {
-				// Check for specific patterns
-				fullResult := strings.Join(results, "\n")
-				for _, pattern := range tt.contains {
-					if !strings.Contains(fullResult, pattern) {
-						t.Errorf("expected pattern %q not found in results: %v", pattern, results)
-					}
-				}
-			}
+			integrityVerifyResults(t, results, tt.wantOK, tt.contains)
 		})
+	}
+}
+
+func integrityCleanupAllTables(db *sql.DB) {
+	tables := []string{"t1", "t2", "t3", "users", "products", "orders", "accounts", "items", "empty_table", "nullable", "parent", "child"}
+	for _, tbl := range tables {
+		db.Exec("DROP TABLE IF EXISTS " + tbl)
+	}
+}
+
+func integrityCollectStringResults(t *testing.T, db *sql.DB, query string) ([]string, error) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []string
+	for rows.Next() {
+		var result string
+		if err := rows.Scan(&result); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		results = append(results, result)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration failed: %v", err)
+	}
+	return results, nil
+}
+
+func integrityVerifyResults(t *testing.T, results []string, wantOK bool, contains []string) {
+	t.Helper()
+	if wantOK {
+		if len(results) != 1 || results[0] != "ok" {
+			t.Errorf("expected 'ok', got: %v", results)
+		}
+		return
+	}
+	if len(contains) > 0 {
+		fullResult := strings.Join(results, "\n")
+		for _, pattern := range contains {
+			if !strings.Contains(fullResult, pattern) {
+				t.Errorf("expected pattern %q not found in results: %v", pattern, results)
+			}
+		}
 	}
 }
 
@@ -541,98 +537,55 @@ func TestIntegrityCheckEdgeCases(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Test 1: Integrity check on fresh database
 	t.Run("fresh database", func(t *testing.T) {
-		var result string
-		err := db.QueryRow("PRAGMA integrity_check").Scan(&result)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		if result != "ok" {
-			t.Errorf("expected 'ok', got %q", result)
-		}
+		integrityAssertOK(t, db, "PRAGMA integrity_check")
 	})
 
-	// Test 2: Integrity check with limit 0 (unlimited)
 	t.Run("unlimited check", func(t *testing.T) {
-		_, err := db.Exec("CREATE TABLE t1(a INT); INSERT INTO t1 VALUES(1)")
-		if err != nil {
-			t.Fatalf("setup failed: %v", err)
-		}
-
-		var result string
-		err = db.QueryRow("PRAGMA integrity_check(0)").Scan(&result)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		if result != "ok" {
-			t.Errorf("expected 'ok', got %q", result)
-		}
+		integritySetupTable(t, db, "t1", "CREATE TABLE t1(a INT); INSERT INTO t1 VALUES(1)")
+		integrityAssertOK(t, db, "PRAGMA integrity_check(0)")
 		db.Exec("DROP TABLE t1")
 	})
 
-	// Test 3: Quick check vs integrity check comparison
 	t.Run("quick vs integrity", func(t *testing.T) {
-		_, err := db.Exec("CREATE TABLE t2(x INT); INSERT INTO t2 VALUES(42)")
-		if err != nil {
-			t.Fatalf("setup failed: %v", err)
-		}
-
-		var integrityResult, quickResult string
-		err = db.QueryRow("PRAGMA integrity_check").Scan(&integrityResult)
-		if err != nil {
-			t.Fatalf("integrity_check failed: %v", err)
-		}
-
-		err = db.QueryRow("PRAGMA quick_check").Scan(&quickResult)
-		if err != nil {
-			t.Fatalf("quick_check failed: %v", err)
-		}
-
-		if integrityResult != "ok" || quickResult != "ok" {
-			t.Errorf("expected both to return 'ok', got integrity=%q quick=%q", integrityResult, quickResult)
-		}
+		integritySetupTable(t, db, "t2", "CREATE TABLE t2(x INT); INSERT INTO t2 VALUES(42)")
+		integrityAssertOK(t, db, "PRAGMA integrity_check")
+		integrityAssertOK(t, db, "PRAGMA quick_check")
 		db.Exec("DROP TABLE t2")
 	})
 
-	// Test 4: Check with very long table name
 	t.Run("long table name", func(t *testing.T) {
 		longName := "table_" + strings.Repeat("x", 100)
-		_, err := db.Exec("CREATE TABLE " + longName + "(a INT)")
-		if err != nil {
-			t.Fatalf("create table failed: %v", err)
-		}
-
-		var result string
-		err = db.QueryRow("PRAGMA integrity_check").Scan(&result)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		if result != "ok" {
-			t.Errorf("expected 'ok', got %q", result)
-		}
+		integritySetupTable(t, db, longName, "CREATE TABLE "+longName+"(a INT)")
+		integrityAssertOK(t, db, "PRAGMA integrity_check")
 		db.Exec("DROP TABLE " + longName)
 	})
 
-	// Test 5: Multiple sequential checks
 	t.Run("sequential checks", func(t *testing.T) {
-		_, err := db.Exec("CREATE TABLE t3(a INT); INSERT INTO t3 VALUES(1)")
-		if err != nil {
-			t.Fatalf("setup failed: %v", err)
-		}
-
+		integritySetupTable(t, db, "t3", "CREATE TABLE t3(a INT); INSERT INTO t3 VALUES(1)")
 		for i := 0; i < 5; i++ {
-			var result string
-			err = db.QueryRow("PRAGMA integrity_check").Scan(&result)
-			if err != nil {
-				t.Fatalf("check %d failed: %v", i, err)
-			}
-			if result != "ok" {
-				t.Errorf("check %d: expected 'ok', got %q", i, result)
-			}
+			integrityAssertOK(t, db, "PRAGMA integrity_check")
 		}
 		db.Exec("DROP TABLE t3")
 	})
+}
+
+func integritySetupTable(t *testing.T, db *sql.DB, _ string, stmt string) {
+	t.Helper()
+	if _, err := db.Exec(stmt); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+}
+
+func integrityAssertOK(t *testing.T, db *sql.DB, pragma string) {
+	t.Helper()
+	var result string
+	if err := db.QueryRow(pragma).Scan(&result); err != nil {
+		t.Fatalf("query failed for %q: %v", pragma, err)
+	}
+	if result != "ok" {
+		t.Errorf("expected 'ok' for %q, got %q", pragma, result)
+	}
 }
 
 // TestPragmaIntegrityCheckOptions tests various PRAGMA integrity_check options

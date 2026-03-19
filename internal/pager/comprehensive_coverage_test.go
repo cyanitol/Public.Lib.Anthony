@@ -588,70 +588,55 @@ func TestCacheEvictDirtyPage(t *testing.T) {
 	}
 }
 
-// TestFreeListProcessTrunkPageFull tests processTrunkPage when trunk is full
-func TestFreeListProcessTrunkPageFull(t *testing.T) {
-	t.Parallel()
+// setupTrunkPageFull creates a pager with allocated pages, a full trunk page, and returns the freelist.
+func setupTrunkPageFull(t *testing.T) (*Pager, *FreeList, int) {
+	t.Helper()
 	tmpFile, err := os.CreateTemp("", "freelist_trunk_*.db")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	t.Cleanup(func() { os.Remove(tmpFile.Name()) })
 	tmpFile.Close()
 
-	pager, err := Open(tmpFile.Name(), false)
+	p, err := Open(tmpFile.Name(), false)
 	if err != nil {
 		t.Fatalf("failed to open pager: %v", err)
 	}
-	defer pager.Close()
+	mustBeginWrite(t, p)
+	mustAllocatePages(t, p, 10)
 
-	fl := pager.freeList
-
-	// Begin write transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	// Allocate initial pages to work with
-	for i := 0; i < 10; i++ {
-		_, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("failed to allocate page: %v", err)
-		}
-	}
-
-	// Free some pages to create pending free list
+	fl := p.freeList
 	for i := Pgno(3); i <= 7; i++ {
 		fl.Free(i)
 	}
 
-	// Create a trunk page
-	maxLeaves := (int(pager.PageSize()) - FreeListTrunkHeaderSize) / 4
-
-	// Fill trunk to capacity
+	maxLeaves := (int(p.PageSize()) - FreeListTrunkHeaderSize) / 4
 	fl.pendingFree = make([]Pgno, maxLeaves+5)
 	for i := 0; i < maxLeaves+5; i++ {
 		fl.pendingFree[i] = Pgno(100 + i)
 	}
 	fl.firstTrunk = 2
 
-	// Initialize trunk page
-	trunkPage, err := pager.Get(2)
-	if err != nil {
-		t.Fatalf("failed to get trunk page: %v", err)
-	}
-	pager.Write(trunkPage)
+	trunkPage := mustGetWritePage(t, p, 2)
 	binary.BigEndian.PutUint32(trunkPage.Data[0:4], 0)
 	binary.BigEndian.PutUint32(trunkPage.Data[4:8], uint32(maxLeaves))
-	pager.Put(trunkPage)
+	p.Put(trunkPage)
 
-	// Process trunk page - should create new trunk
-	err = fl.processTrunkPage(maxLeaves)
+	return p, fl, maxLeaves
+}
+
+// TestFreeListProcessTrunkPageFull tests processTrunkPage when trunk is full
+func TestFreeListProcessTrunkPageFull(t *testing.T) {
+	t.Parallel()
+	p, fl, maxLeaves := setupTrunkPageFull(t)
+	defer p.Close()
+
+	err := fl.processTrunkPage(maxLeaves)
 	if err == nil {
-		// This might succeed by creating a new trunk
 		t.Log("processTrunkPage succeeded (created new trunk)")
 	}
 
-	pager.Rollback()
+	p.Rollback()
 }
 
 // TestFreeListAddPendingToTrunkPartial tests addPendingToTrunk with partial fill
@@ -896,41 +881,9 @@ func TestFreeListAllocateFromDiskEdgeCases(t *testing.T) {
 	pager.Rollback()
 }
 
-// TestFreeListFreeMultiplePages tests FreeMultiple function
-func TestFreeListFreeMultiplePages(t *testing.T) {
-	t.Parallel()
-	tmpFile, err := os.CreateTemp("", "freelist_multi_*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
-
-	pager, err := Open(tmpFile.Name(), false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	fl := pager.freeList
-
-	// Allocate pages
-	for i := 0; i < 10; i++ {
-		_, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("failed to allocate: %v", err)
-		}
-	}
-
-	// Free multiple pages
-	pages := []Pgno{3, 4, 5, 6}
-	fl.FreeMultiple(pages)
-
-	// Verify all pages are in pending free list
+// verifyPagesInPendingFreeList checks that all pages are in the pending free list.
+func verifyPagesInPendingFreeList(t *testing.T, fl *FreeList, pages []Pgno) {
+	t.Helper()
 	for _, pgno := range pages {
 		found := false
 		for _, p := range fl.pendingFree {
@@ -943,8 +896,33 @@ func TestFreeListFreeMultiplePages(t *testing.T) {
 			t.Errorf("page %d not found in pending free list", pgno)
 		}
 	}
+}
 
-	pager.Rollback()
+// TestFreeListFreeMultiplePages tests FreeMultiple function
+func TestFreeListFreeMultiplePages(t *testing.T) {
+	t.Parallel()
+	tmpFile, err := os.CreateTemp("", "freelist_multi_*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	p, err := Open(tmpFile.Name(), false)
+	if err != nil {
+		t.Fatalf("failed to open pager: %v", err)
+	}
+	defer p.Close()
+
+	mustBeginWrite(t, p)
+	mustAllocatePages(t, p, 10)
+
+	fl := p.freeList
+	pages := []Pgno{3, 4, 5, 6}
+	fl.FreeMultiple(pages)
+
+	verifyPagesInPendingFreeList(t, fl, pages)
+	p.Rollback()
 }
 
 // TestFreeListFlushPendingEmpty tests flushPending with empty pending list

@@ -261,22 +261,23 @@ func TestFunctionCalls(t *testing.T) {
 				t.Fatalf("GenerateExpr failed: %v", err)
 			}
 
-			// Verify function call instruction exists
-			found := false
-			for _, instr := range v.Program {
-				if instr.Opcode == vdbe.OpFunction || instr.Opcode == vdbe.OpInteger {
-					if instr.P4.Z == tt.funcName || tt.expr.(*parser.FunctionExpr).Star {
-						found = true
-						break
-					}
-				}
-			}
-
-			if !found && !tt.expr.(*parser.FunctionExpr).Star {
-				t.Errorf("Expected to find function call for %s", tt.funcName)
-			}
+			verifyFunctionCall(t, v, tt.expr.(*parser.FunctionExpr), tt.funcName)
 		})
 	}
+}
+
+// verifyFunctionCall checks that a function call instruction exists in the VDBE program.
+func verifyFunctionCall(t *testing.T, v *vdbe.VDBE, fe *parser.FunctionExpr, funcName string) {
+	t.Helper()
+	if fe.Star {
+		return // COUNT(*) uses OpInteger, no further check needed
+	}
+	for _, instr := range v.Program {
+		if (instr.Opcode == vdbe.OpFunction || instr.Opcode == vdbe.OpInteger) && instr.P4.Z == funcName {
+			return
+		}
+	}
+	t.Errorf("Expected to find function call for %s", funcName)
 }
 
 // TestInExpression tests IN expression code generation.

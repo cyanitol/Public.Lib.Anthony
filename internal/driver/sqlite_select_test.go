@@ -3,12 +3,74 @@ package driver
 
 import (
 	"database/sql"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 )
+
+type selectTestCase struct {
+	name    string
+	setup   []string
+	query   string
+	want    [][]interface{}
+	wantErr bool
+}
+
+func selectRunTests(t *testing.T, db *sql.DB, tests []selectTestCase) {
+	t.Helper()
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			selectRunSetup(t, db, tt.setup)
+			selectRunQuery(t, db, tt.query, tt.want, tt.wantErr)
+		})
+	}
+}
+
+func selectRunSetup(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+	}
+}
+
+func selectRunQuery(t *testing.T, db *sql.DB, query string, want [][]interface{}, wantErr bool) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if (err != nil) != wantErr {
+		t.Fatalf("query error = %v, wantErr %v", err, wantErr)
+	}
+	if wantErr {
+		return
+	}
+	defer rows.Close()
+
+	got := selectScanRows(t, rows)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("query results = %v, want %v", got, want)
+	}
+}
+
+func selectScanRows(t *testing.T, rows *sql.Rows) [][]interface{} {
+	t.Helper()
+	cols, _ := rows.Columns()
+	var got [][]interface{}
+	for rows.Next() {
+		values := make([]interface{}, len(cols))
+		valuePtrs := make([]interface{}, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		got = append(got, values)
+	}
+	return got
+}
 
 // setupSelectTestDB creates a temporary test database for SELECT tests
 func setupSelectTestDB(t *testing.T) *sql.DB {
@@ -34,13 +96,7 @@ func TestSQLiteSelectBasic(t *testing.T) {
 	db := setupSelectTestDB(t)
 	defer db.Close()
 
-	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		wantErr bool
-	}{
+	tests := []selectTestCase{
 		{
 			name:    "select from non-existent table",
 			setup:   []string{},
@@ -145,48 +201,7 @@ func TestSQLiteSelectBasic(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			// Run setup statements
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			// Execute query
-			rows, err := db.Query(tt.query)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("query error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			defer rows.Close()
-
-			// Verify results
-			got := [][]interface{}{}
-			cols, _ := rows.Columns()
-			for rows.Next() {
-				// Create a slice of interface{} to hold the values
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				got = append(got, values)
-			}
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("query results = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	selectRunTests(t, db, tests)
 }
 
 // TestSQLiteSelectWhere tests WHERE clause functionality from select1.test
@@ -195,13 +210,7 @@ func TestSQLiteSelectWhere(t *testing.T) {
 	db := setupSelectTestDB(t)
 	defer db.Close()
 
-	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		wantErr bool
-	}{
+	tests := []selectTestCase{
 		{
 			name: "where less than",
 			setup: []string{
@@ -284,43 +293,7 @@ func TestSQLiteSelectWhere(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			rows, err := db.Query(tt.query)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("query error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			defer rows.Close()
-
-			got := [][]interface{}{}
-			cols, _ := rows.Columns()
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				got = append(got, values)
-			}
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("query results = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	selectRunTests(t, db, tests)
 }
 
 // TestSQLiteSelectOrderBy tests ORDER BY functionality from select1.test
@@ -329,13 +302,7 @@ func TestSQLiteSelectOrderBy(t *testing.T) {
 	db := setupSelectTestDB(t)
 	defer db.Close()
 
-	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		wantErr bool
-	}{
+	tests := []selectTestCase{
 		{
 			name: "order by ascending",
 			setup: []string{
@@ -411,43 +378,7 @@ func TestSQLiteSelectOrderBy(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			rows, err := db.Query(tt.query)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("query error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			defer rows.Close()
-
-			got := [][]interface{}{}
-			cols, _ := rows.Columns()
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				got = append(got, values)
-			}
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("query results = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	selectRunTests(t, db, tests)
 }
 
 // TestSQLiteSelectAliases tests column aliases from select1.test
@@ -456,13 +387,7 @@ func TestSQLiteSelectAliases(t *testing.T) {
 	db := setupSelectTestDB(t)
 	defer db.Close()
 
-	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		wantErr bool
-	}{
+	tests := []selectTestCase{
 		{
 			name: "select with alias",
 			setup: []string{
@@ -505,43 +430,7 @@ func TestSQLiteSelectAliases(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			rows, err := db.Query(tt.query)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("query error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			defer rows.Close()
-
-			got := [][]interface{}{}
-			cols, _ := rows.Columns()
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				got = append(got, values)
-			}
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("query results = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	selectRunTests(t, db, tests)
 }
 
 // TestSQLiteSelectDistinct tests DISTINCT functionality from select4.test
@@ -550,13 +439,7 @@ func TestSQLiteSelectDistinct(t *testing.T) {
 	db := setupSelectTestDB(t)
 	defer db.Close()
 
-	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		wantErr bool
-	}{
+	tests := []selectTestCase{
 		{
 			name: "distinct simple",
 			setup: []string{
@@ -597,43 +480,7 @@ func TestSQLiteSelectDistinct(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			rows, err := db.Query(tt.query)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("query error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			defer rows.Close()
-
-			got := [][]interface{}{}
-			cols, _ := rows.Columns()
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				got = append(got, values)
-			}
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("query results = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	selectRunTests(t, db, tests)
 }
 
 // TestSQLiteSelectLimitOffset tests LIMIT and OFFSET from select4.test
@@ -642,13 +489,7 @@ func TestSQLiteSelectLimitOffset(t *testing.T) {
 	db := setupSelectTestDB(t)
 	defer db.Close()
 
-	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		wantErr bool
-	}{
+	tests := []selectTestCase{
 		{
 			name: "distinct with limit",
 			setup: []string{
@@ -712,43 +553,7 @@ func TestSQLiteSelectLimitOffset(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			rows, err := db.Query(tt.query)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("query error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			defer rows.Close()
-
-			got := [][]interface{}{}
-			cols, _ := rows.Columns()
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				got = append(got, values)
-			}
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("query results = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	selectRunTests(t, db, tests)
 }
 
 // TestSQLiteSelectJoins tests JOIN functionality from select2.test
@@ -757,13 +562,7 @@ func TestSQLiteSelectJoins(t *testing.T) {
 	db := setupSelectTestDB(t)
 	defer db.Close()
 
-	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		wantErr bool
-	}{
+	tests := []selectTestCase{
 		{
 			name: "cross join simple",
 			setup: []string{
@@ -820,43 +619,7 @@ func TestSQLiteSelectJoins(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			rows, err := db.Query(tt.query)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("query error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			defer rows.Close()
-
-			got := [][]interface{}{}
-			cols, _ := rows.Columns()
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				got = append(got, values)
-			}
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("query results = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	selectRunTests(t, db, tests)
 }
 
 // TestSQLiteSelectWithoutFrom tests SELECT without FROM clause from select1.test
@@ -865,13 +628,7 @@ func TestSQLiteSelectWithoutFrom(t *testing.T) {
 	db := setupSelectTestDB(t)
 	defer db.Close()
 
-	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		wantErr bool
-	}{
+	tests := []selectTestCase{
 		{
 			name:  "select expression",
 			setup: []string{},
@@ -892,43 +649,7 @@ func TestSQLiteSelectWithoutFrom(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			rows, err := db.Query(tt.query)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("query error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			defer rows.Close()
-
-			got := [][]interface{}{}
-			cols, _ := rows.Columns()
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				got = append(got, values)
-			}
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("query results = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	selectRunTests(t, db, tests)
 }
 
 // TestSQLiteSelectGroupBy tests GROUP BY functionality from select3.test
@@ -937,13 +658,7 @@ func TestSQLiteSelectGroupBy(t *testing.T) {
 	db := setupSelectTestDB(t)
 	defer db.Close()
 
-	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		wantErr bool
-	}{
+	tests := []selectTestCase{
 		{
 			name: "group by with count",
 			setup: []string{
@@ -1011,43 +726,7 @@ func TestSQLiteSelectGroupBy(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			rows, err := db.Query(tt.query)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("query error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			defer rows.Close()
-
-			got := [][]interface{}{}
-			cols, _ := rows.Columns()
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				got = append(got, values)
-			}
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("query results = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	selectRunTests(t, db, tests)
 }
 
 // TestSQLiteSelectHaving tests HAVING clause from select3.test
@@ -1056,13 +735,7 @@ func TestSQLiteSelectHaving(t *testing.T) {
 	db := setupSelectTestDB(t)
 	defer db.Close()
 
-	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		wantErr bool
-	}{
+	tests := []selectTestCase{
 		{
 			name: "having with comparison",
 			setup: []string{
@@ -1112,43 +785,7 @@ func TestSQLiteSelectHaving(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			rows, err := db.Query(tt.query)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("query error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			defer rows.Close()
-
-			got := [][]interface{}{}
-			cols, _ := rows.Columns()
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				got = append(got, values)
-			}
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("query results = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	selectRunTests(t, db, tests)
 }
 
 // TestSQLiteSelectTableStar tests table.* syntax from select1.test
@@ -1157,13 +794,7 @@ func TestSQLiteSelectTableStar(t *testing.T) {
 	db := setupSelectTestDB(t)
 	defer db.Close()
 
-	tests := []struct {
-		name    string
-		setup   []string
-		query   string
-		want    [][]interface{}
-		wantErr bool
-	}{
+	tests := []selectTestCase{
 		{
 			name: "select table.* single",
 			setup: []string{
@@ -1199,43 +830,7 @@ func TestSQLiteSelectTableStar(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			rows, err := db.Query(tt.query)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("query error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			defer rows.Close()
-
-			got := [][]interface{}{}
-			cols, _ := rows.Columns()
-			for rows.Next() {
-				values := make([]interface{}, len(cols))
-				valuePtrs := make([]interface{}, len(cols))
-				for i := range values {
-					valuePtrs[i] = &values[i]
-				}
-				if err := rows.Scan(valuePtrs...); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				got = append(got, values)
-			}
-
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("query results = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	selectRunTests(t, db, tests)
 }
 
 // TestSQLiteSelectErrors tests error cases from select tests
@@ -1311,24 +906,26 @@ func TestSQLiteSelectErrors(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			for _, stmt := range tt.setup {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			_, err := db.Query(tt.query)
-			if !tt.wantErr && err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if tt.wantErr && err == nil {
-				t.Fatalf("expected error containing '%s', got nil", tt.errorMsg)
-			}
-			if tt.wantErr && err != nil {
-				errStr := fmt.Sprintf("%v", err)
-				// Just verify we got an error - detailed message checking can come later
-				t.Logf("Got expected error: %v", errStr)
-			}
+			selectRunErrorCase(t, db, tt.setup, tt.query, tt.wantErr, tt.errorMsg)
 		})
+	}
+}
+
+func selectRunErrorCase(t *testing.T, db *sql.DB, setup []string, query string, wantErr bool, errorMsg string) {
+	t.Helper()
+	for _, stmt := range setup {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+	}
+	_, err := db.Query(query)
+	if !wantErr && err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if wantErr && err == nil {
+		t.Fatalf("expected error containing '%s', got nil", errorMsg)
+	}
+	if wantErr && err != nil {
+		t.Logf("Got expected error: %v", err)
 	}
 }

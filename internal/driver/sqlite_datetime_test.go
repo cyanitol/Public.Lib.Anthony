@@ -587,45 +587,59 @@ func TestSQLiteDateTimeFunctions(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			var result interface{}
-			err := db.QueryRow(tt.expr).Scan(&result)
-
-			if tt.wantErr || tt.want == nil {
-				// Expecting NULL
-				if err != sql.ErrNoRows && result != nil {
-					t.Errorf("expected NULL, got %v (err=%v)", result, err)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-
-			// Compare results based on type
-			switch want := tt.want.(type) {
-			case string:
-				if got, ok := result.(string); !ok {
-					t.Errorf("expected string, got %T: %v", result, result)
-				} else if got != want {
-					t.Errorf("got %q, want %q", got, want)
-				}
-			case int64:
-				if got, ok := result.(int64); !ok {
-					t.Errorf("expected int64, got %T: %v", result, result)
-				} else if got != want {
-					t.Errorf("got %d, want %d", got, want)
-				}
-			case float64:
-				if got, ok := result.(float64); !ok {
-					t.Errorf("expected float64, got %T: %v", result, result)
-				} else if got != want {
-					t.Errorf("got %f, want %f", got, want)
-				}
-			default:
-				t.Errorf("unexpected want type: %T", want)
-			}
+			dtAssertExpr(t, db, tt.expr, tt.want, tt.wantErr)
 		})
+	}
+}
+
+func dtAssertExpr(t *testing.T, db *sql.DB, expr string, want interface{}, wantErr bool) {
+	t.Helper()
+	var result interface{}
+	err := db.QueryRow(expr).Scan(&result)
+	if wantErr || want == nil {
+		if err != sql.ErrNoRows && result != nil {
+			t.Errorf("expected NULL, got %v (err=%v)", result, err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	dtCompareResult(t, result, want)
+}
+
+func dtCompareResult(t *testing.T, result, want interface{}) {
+	t.Helper()
+	switch w := want.(type) {
+	case string:
+		dtCompareString(t, result, w)
+	case int64:
+		dtCompareInt64(t, result, w)
+	case float64:
+		dtCompareFloat64(t, result, w)
+	default:
+		t.Errorf("unexpected want type: %T", want)
+	}
+}
+
+func dtCompareString(t *testing.T, result interface{}, w string) {
+	t.Helper()
+	if got, ok := result.(string); !ok || got != w {
+		t.Errorf("got %v (%T), want %q", result, result, w)
+	}
+}
+
+func dtCompareInt64(t *testing.T, result interface{}, w int64) {
+	t.Helper()
+	if got, ok := result.(int64); !ok || got != w {
+		t.Errorf("got %v (%T), want %d", result, result, w)
+	}
+}
+
+func dtCompareFloat64(t *testing.T, result interface{}, w float64) {
+	t.Helper()
+	if got, ok := result.(float64); !ok || got != w {
+		t.Errorf("got %v (%T), want %f", result, result, w)
 	}
 }
 

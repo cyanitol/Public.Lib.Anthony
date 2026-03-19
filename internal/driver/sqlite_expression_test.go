@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"math"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -1054,53 +1055,52 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
-			// Setup: update the table with test values if needed
 			if tt.setup != "" {
-				_, err := db.Exec("UPDATE expr_test SET " + tt.setup + " WHERE id = 1")
-				if err != nil {
+				if _, err := db.Exec("UPDATE expr_test SET " + tt.setup + " WHERE id = 1"); err != nil {
 					t.Fatalf("setup failed: %v", err)
 				}
 			}
-
-			// Execute the query
-			var result interface{}
-			err := db.QueryRow(tt.query).Scan(&result)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got result: %v", result)
-				}
-				return
-			}
-
-			if err != nil {
-				if err == sql.ErrNoRows && tt.want == nil {
-					return
-				}
-				t.Fatalf("query failed: %v (query: %s)", err, tt.query)
-			}
-
-			// Handle NULL results
-			if result == nil && tt.want == nil {
-				return
-			}
-
-			if result == nil && tt.want != nil {
-				t.Errorf("got nil, want %v (%T)", tt.want, tt.want)
-				return
-			}
-
-			if result != nil && tt.want == nil {
-				t.Errorf("got %v (%T), want nil", result, result)
-				return
-			}
-
-			// Compare results based on type
-			if !compareExpressionValues(result, tt.want) {
-				t.Errorf("query = %s\ngot  = %v (type %T)\nwant = %v (type %T)",
-					tt.query, result, result, tt.want, tt.want)
-			}
+			exprEvalRunOne(t, db, tt.query, tt.want, tt.wantErr)
 		})
+	}
+}
+
+func exprEvalRunOne(t *testing.T, db *sql.DB, query string, want interface{}, wantErr bool) {
+	t.Helper()
+	var result interface{}
+	err := db.QueryRow(query).Scan(&result)
+	if wantErr {
+		if err == nil {
+			t.Errorf("expected error, got result: %v", result)
+		}
+		return
+	}
+	if err != nil {
+		if err == sql.ErrNoRows && want == nil {
+			return
+		}
+		t.Fatalf("query failed: %v (query: %s)", err, query)
+	}
+	exprEvalCompare(t, query, result, want)
+}
+
+// exprEvalCompare compares result and want, handling nil cases.
+func exprEvalCompare(t *testing.T, query string, result, want interface{}) {
+	t.Helper()
+	if result == nil && want == nil {
+		return
+	}
+	if result == nil {
+		t.Errorf("got nil, want %v (%T)", want, want)
+		return
+	}
+	if want == nil {
+		t.Errorf("got %v (%T), want nil", result, result)
+		return
+	}
+	if !compareExpressionValues(result, want) {
+		t.Errorf("query = %s\ngot  = %v (type %T)\nwant = %v (type %T)",
+			query, result, result, want, want)
 	}
 }
 
@@ -1276,103 +1276,75 @@ func TestExpressionComplexCombinations(t *testing.T) {
 
 // compareExpressionValues compares two values considering SQLite type conversions
 func compareExpressionValues(got, want interface{}) bool {
-	// Handle nil cases
 	if got == nil && want == nil {
 		return true
 	}
 	if got == nil || want == nil {
 		return false
 	}
-
-	// Handle integer comparisons
-	gotInt, gotIsInt := expressionToInt64(got)
-	wantInt, wantIsInt := expressionToInt64(want)
-	if gotIsInt && wantIsInt {
-		return gotInt == wantInt
+	if exprCompareNumeric(got, want) {
+		return true
 	}
+	return exprCompareStringOrBytes(got, want)
+}
 
-	// Handle float comparisons (including infinity)
-	gotFloat, gotIsFloat := expressionToFloat64(got)
-	wantFloat, wantIsFloat := expressionToFloat64(want)
-	if gotIsFloat && wantIsFloat {
-		// Handle infinity
-		if math.IsInf(gotFloat, 1) && math.IsInf(wantFloat, 1) {
-			return true
-		}
-		if math.IsInf(gotFloat, -1) && math.IsInf(wantFloat, -1) {
-			return true
-		}
-		// Use epsilon comparison for normal floating point
-		const epsilon = 0.0001
-		return math.Abs(gotFloat-wantFloat) < epsilon
+func exprCompareNumeric(got, want interface{}) bool {
+	gotFloat, gotOk := expressionToFloat64(got)
+	wantFloat, wantOk := expressionToFloat64(want)
+	if !gotOk || !wantOk {
+		return false
 	}
+	if math.IsInf(gotFloat, 1) && math.IsInf(wantFloat, 1) {
+		return true
+	}
+	if math.IsInf(gotFloat, -1) && math.IsInf(wantFloat, -1) {
+		return true
+	}
+	return math.Abs(gotFloat-wantFloat) < 0.0001
+}
 
-	// Handle string comparisons
-	gotStr, gotIsStr := got.(string)
-	wantStr, wantIsStr := want.(string)
-	if gotIsStr && wantIsStr {
-		return gotStr == wantStr
+func exprCompareStringOrBytes(got, want interface{}) bool {
+	gotStr := exprValueToString(got)
+	wantStr := exprValueToString(want)
+	if gotStr == nil || wantStr == nil {
+		return false
 	}
+	return *gotStr == *wantStr
+}
 
-	// Handle byte slice comparisons (SQLite sometimes returns []byte for strings)
-	gotBytes, gotIsBytes := got.([]byte)
-	if gotIsBytes && wantIsStr {
-		return string(gotBytes) == wantStr
+func exprValueToString(v interface{}) *string {
+	switch val := v.(type) {
+	case string:
+		return &val
+	case []byte:
+		s := string(val)
+		return &s
 	}
-	if gotIsStr {
-		wantBytes, wantIsBytes := want.([]byte)
-		if wantIsBytes {
-			return gotStr == string(wantBytes)
-		}
-	}
-
-	return false
+	return nil
 }
 
 // expressionToInt64 attempts to convert a value to int64
 func expressionToInt64(v interface{}) (int64, bool) {
-	switch val := v.(type) {
-	case int:
-		return int64(val), true
-	case int8:
-		return int64(val), true
-	case int16:
-		return int64(val), true
-	case int32:
-		return int64(val), true
-	case int64:
-		return val, true
-	case uint:
-		return int64(val), true
-	case uint8:
-		return int64(val), true
-	case uint16:
-		return int64(val), true
-	case uint32:
-		return int64(val), true
-	case uint64:
-		return int64(val), true
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int(), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return int64(rv.Uint()), true
 	}
 	return 0, false
 }
 
 // expressionToFloat64 attempts to convert a value to float64
 func expressionToFloat64(v interface{}) (float64, bool) {
-	switch val := v.(type) {
-	case float32:
-		return float64(val), true
-	case float64:
-		return val, true
-	case int:
-		return float64(val), true
-	case int8:
-		return float64(val), true
-	case int16:
-		return float64(val), true
-	case int32:
-		return float64(val), true
-	case int64:
-		return float64(val), true
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Float32, reflect.Float64:
+		return rv.Float(), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(rv.Int()), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return float64(rv.Uint()), true
 	}
 	return 0, false
 }

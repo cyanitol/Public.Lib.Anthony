@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql/driver"
 	"io"
-	"os"
 	"testing"
 	"time"
 
@@ -305,8 +304,7 @@ func TestMemToValue(t *testing.T) {
 }
 
 func TestRowsIntegrationWithRealQuery(t *testing.T) {
-	dbFile := "test_rows_integration.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_rows_integration.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)

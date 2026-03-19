@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"math"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -248,134 +249,109 @@ func TestSQLiteExpressions(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
-			// Setup: update the table with test values
-			if tt.setup != "" {
-				_, err := db.Exec("UPDATE test1 SET " + tt.setup)
-				if err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
-			}
-
-			// Execute the expression
-			var result interface{}
-			query := "SELECT " + tt.expr + " FROM test1"
-			err := db.QueryRow(query).Scan(&result)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got none")
-				}
-				return
-			}
-
-			if err != nil {
-				if tt.want == nil && err == sql.ErrNoRows {
-					// NULL result is expected
-					return
-				}
-				t.Fatalf("query failed: %v (query: %s)", err, query)
-			}
-
-			// Handle NULL results
-			if result == nil && tt.want == nil {
-				return
-			}
-
-			// Compare results
-			if !compareExprValues(result, tt.want) {
-				t.Errorf("expr = %q\ngot  = %v (type %T)\nwant = %v (type %T)",
-					tt.expr, result, result, tt.want, tt.want)
-			}
+			exprTestSetup(t, db, tt.setup)
+			exprTestEval(t, db, tt.expr, tt.want, tt.wantErr)
 		})
+	}
+}
+
+// exprTestSetup runs the UPDATE setup for an expression test.
+func exprTestSetup(t *testing.T, db *sql.DB, setup string) {
+	t.Helper()
+	if setup == "" {
+		return
+	}
+	if _, err := db.Exec("UPDATE test1 SET " + setup); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+}
+
+// exprTestEval evaluates an expression and compares the result.
+func exprTestEval(t *testing.T, db *sql.DB, expr string, want interface{}, wantErr bool) {
+	t.Helper()
+	query := "SELECT " + expr + " FROM test1"
+	var result interface{}
+	err := db.QueryRow(query).Scan(&result)
+
+	if wantErr {
+		if err == nil {
+			t.Errorf("expected error, got none")
+		}
+		return
+	}
+	if err != nil {
+		if want == nil && err == sql.ErrNoRows {
+			return
+		}
+		t.Fatalf("query failed: %v (query: %s)", err, query)
+	}
+	if result == nil && want == nil {
+		return
+	}
+	if !compareExprValues(result, want) {
+		t.Errorf("expr = %q\ngot  = %v (type %T)\nwant = %v (type %T)", expr, result, result, want, want)
 	}
 }
 
 // compareExprValues compares two values considering SQLite type conversions
 func compareExprValues(got, want interface{}) bool {
-	// Handle nil cases
 	if got == nil && want == nil {
 		return true
 	}
 	if got == nil || want == nil {
 		return false
 	}
-
-	// Handle integer comparisons
-	gotInt, gotIsInt := exprToInt64(got)
-	wantInt, wantIsInt := exprToInt64(want)
-	if gotIsInt && wantIsInt {
-		return gotInt == wantInt
+	if exprValCompareNumeric(got, want) {
+		return true
 	}
+	return exprValCompareStrings(got, want)
+}
 
-	// Handle float comparisons
-	gotFloat, gotIsFloat := exprToFloat64(got)
-	wantFloat, wantIsFloat := exprToFloat64(want)
-	if gotIsFloat && wantIsFloat {
-		// Use epsilon comparison for floating point
-		const epsilon = 0.0001
-		return math.Abs(gotFloat-wantFloat) < epsilon
+func exprValCompareNumeric(got, want interface{}) bool {
+	gotFloat, gotOk := exprToFloat64(got)
+	wantFloat, wantOk := exprToFloat64(want)
+	if !gotOk || !wantOk {
+		return false
 	}
+	return math.Abs(gotFloat-wantFloat) < 0.0001
+}
 
-	// Handle string comparisons
-	gotStr, gotIsStr := got.(string)
+func exprValCompareStrings(got, want interface{}) bool {
 	wantStr, wantIsStr := want.(string)
-	if gotIsStr && wantIsStr {
-		return gotStr == wantStr
+	if !wantIsStr {
+		return false
 	}
-
-	// Handle byte slice comparisons (SQLite sometimes returns []byte for strings)
-	gotBytes, gotIsBytes := got.([]byte)
-	if gotIsBytes && wantIsStr {
-		return string(gotBytes) == wantStr
+	switch gv := got.(type) {
+	case string:
+		return gv == wantStr
+	case []byte:
+		return string(gv) == wantStr
 	}
-
 	return false
 }
 
 // exprToInt64 attempts to convert a value to int64
 func exprToInt64(v interface{}) (int64, bool) {
-	switch val := v.(type) {
-	case int:
-		return int64(val), true
-	case int8:
-		return int64(val), true
-	case int16:
-		return int64(val), true
-	case int32:
-		return int64(val), true
-	case int64:
-		return val, true
-	case uint:
-		return int64(val), true
-	case uint8:
-		return int64(val), true
-	case uint16:
-		return int64(val), true
-	case uint32:
-		return int64(val), true
-	case uint64:
-		return int64(val), true
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int(), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return int64(rv.Uint()), true
 	}
 	return 0, false
 }
 
 // exprToFloat64 attempts to convert a value to float64
 func exprToFloat64(v interface{}) (float64, bool) {
-	switch val := v.(type) {
-	case float32:
-		return float64(val), true
-	case float64:
-		return val, true
-	case int:
-		return float64(val), true
-	case int8:
-		return float64(val), true
-	case int16:
-		return float64(val), true
-	case int32:
-		return float64(val), true
-	case int64:
-		return float64(val), true
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Float32, reflect.Float64:
+		return rv.Float(), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(rv.Int()), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return float64(rv.Uint()), true
 	}
 	return 0, false
 }

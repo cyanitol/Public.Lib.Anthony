@@ -230,64 +230,56 @@ func TestVacuum_SchemaCookieUpdate(t *testing.T) {
 	db1, dbPath := setupVacuumTestDB(t)
 	defer db1.Close()
 
-	// Create tables
-	_, err := db1.Exec(`
+	vacuumExecOrFatal(t, db1, `
 		CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
 		INSERT INTO t1 VALUES(1, 'test');
 		CREATE TABLE t2(c INTEGER, d TEXT);
 		INSERT INTO t2 VALUES(10, 'value');
 	`)
-	if err != nil {
-		t.Fatalf("failed to setup: %v", err)
-	}
 
-	// Open second connection
 	db2, err := sql.Open(DriverName, dbPath)
 	if err != nil {
 		t.Fatalf("failed to open second connection: %v", err)
 	}
 	defer db2.Close()
 
-	// Query from both connections
-	var val1 string
-	err = db1.QueryRow("SELECT b FROM t1 WHERE a = 1").Scan(&val1)
-	if err != nil {
-		t.Fatalf("query on db1 failed: %v", err)
-	}
+	vacuumSchemaCookieVerify(t, db1, db2)
+}
 
-	var val2 int
-	err = db2.QueryRow("SELECT c FROM t2 WHERE d = 'value'").Scan(&val2)
-	if err != nil {
-		t.Fatalf("query on db2 failed: %v", err)
-	}
+func vacuumSchemaCookieVerify(t *testing.T, db1, db2 *sql.DB) {
+	t.Helper()
+	vacuumScanString(t, db1, "SELECT b FROM t1 WHERE a = 1")
+	vacuumScanInt(t, db2, "SELECT c FROM t2 WHERE d = 'value'")
+	vacuumExecOrFatal(t, db1, "VACUUM")
+	vacuumScanString(t, db1, "SELECT b FROM t1 WHERE a = 1")
+	vacuumScanInt(t, db2, "SELECT c FROM t2 WHERE d = 'value'")
+	vacuumExecOrFatal(t, db1, "INSERT INTO t1 VALUES(2, 'new')")
+	vacuumExecOrFatal(t, db2, "INSERT INTO t2 VALUES(20, 'new2')")
+}
 
-	// VACUUM should increment schema cookie
-	_, err = db1.Exec("VACUUM")
-	if err != nil {
-		t.Fatalf("VACUUM failed: %v", err)
+func vacuumExecOrFatal(t *testing.T, db *sql.DB, query string) {
+	t.Helper()
+	if _, err := db.Exec(query); err != nil {
+		t.Fatalf("exec failed (%s): %v", query, err)
 	}
+}
 
-	// Both connections should still work
-	err = db1.QueryRow("SELECT b FROM t1 WHERE a = 1").Scan(&val1)
-	if err != nil {
-		t.Fatalf("query on db1 after VACUUM failed: %v", err)
+func vacuumScanString(t *testing.T, db *sql.DB, query string) string {
+	t.Helper()
+	var val string
+	if err := db.QueryRow(query).Scan(&val); err != nil {
+		t.Fatalf("query failed (%s): %v", query, err)
 	}
+	return val
+}
 
-	err = db2.QueryRow("SELECT c FROM t2 WHERE d = 'value'").Scan(&val2)
-	if err != nil {
-		t.Fatalf("query on db2 after VACUUM failed: %v", err)
+func vacuumScanInt(t *testing.T, db *sql.DB, query string) int {
+	t.Helper()
+	var val int
+	if err := db.QueryRow(query).Scan(&val); err != nil {
+		t.Fatalf("query failed (%s): %v", query, err)
 	}
-
-	// Can insert from both connections
-	_, err = db1.Exec("INSERT INTO t1 VALUES(2, 'new')")
-	if err != nil {
-		t.Fatalf("insert on db1 failed: %v", err)
-	}
-
-	_, err = db2.Exec("INSERT INTO t2 VALUES(20, 'new2')")
-	if err != nil {
-		t.Fatalf("insert on db2 failed: %v", err)
-	}
+	return val
 }
 
 // TestVacuum_AfterViewDrop tests VACUUM after view recreation (vacuum.test 5.1-5.2)
@@ -505,49 +497,25 @@ func TestVacuum_PageSize(t *testing.T) {
 	db, dbPath := setupVacuumTestDB(t)
 	defer db.Close()
 
-	// Set initial page size and create table
-	_, err := db.Exec(`
+	vacuumExecOrFatal(t, db, `
 		PRAGMA auto_vacuum=OFF;
 		PRAGMA page_size = 1024;
 		CREATE TABLE t1(a INTEGER, b TEXT, c TEXT);
 		INSERT INTO t1 VALUES(1, 'test', 'data');
 	`)
-	if err != nil {
-		t.Fatalf("failed to setup: %v", err)
-	}
 
-	// Verify initial page size
-	var pageSize int
-	err = db.QueryRow("PRAGMA page_size").Scan(&pageSize)
-	if err != nil {
-		t.Fatalf("failed to get page size: %v", err)
-	}
+	pageSize := vacuumScanInt(t, db, "PRAGMA page_size")
 	if pageSize != 1024 {
 		t.Logf("initial page size: %d (expected 1024)", pageSize)
 	}
+	t.Logf("initial file size: %d bytes with page_size=%d", getFileSize(t, dbPath), pageSize)
 
-	initialSize := getFileSize(t, dbPath)
-	t.Logf("initial file size: %d bytes with page_size=%d", initialSize, pageSize)
+	vacuumExecOrFatal(t, db, "PRAGMA page_size = 2048; VACUUM;")
+	t.Logf("page size after VACUUM: %d", vacuumScanInt(t, db, "PRAGMA page_size"))
 
-	// Change page size and VACUUM
-	_, err = db.Exec("PRAGMA page_size = 2048; VACUUM;")
-	if err != nil {
-		t.Fatalf("failed to change page size and VACUUM: %v", err)
-	}
-
-	// Verify new page size
-	err = db.QueryRow("PRAGMA page_size").Scan(&pageSize)
-	if err != nil {
-		t.Fatalf("failed to get new page size: %v", err)
-	}
-
-	t.Logf("page size after VACUUM: %d", pageSize)
-
-	// Verify data preserved
 	var a int
 	var b, c string
-	err = db.QueryRow("SELECT a, b, c FROM t1").Scan(&a, &b, &c)
-	if err != nil {
+	if err := db.QueryRow("SELECT a, b, c FROM t1").Scan(&a, &b, &c); err != nil {
 		t.Fatalf("query after page size change failed: %v", err)
 	}
 	if a != 1 || b != "test" || c != "data" {
@@ -644,29 +612,30 @@ func TestVacuum_ActiveStatements(t *testing.T) {
 	db, _ := setupVacuumTestDB(t)
 	defer db.Close()
 
-	_, err := db.Exec(`
-		CREATE TABLE t1(a INTEGER PRIMARY KEY, b BLOB);
-	`)
-	if err != nil {
+	vacuumActiveSetup(t, db)
+	vacuumActiveVerify(t, db)
+}
+
+func vacuumActiveSetup(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec(`CREATE TABLE t1(a INTEGER PRIMARY KEY, b BLOB)`); err != nil {
 		t.Fatalf("failed to create table: %v", err)
 	}
-
-	// Insert multiple rows
 	for i := 1; i <= 16; i++ {
-		_, err = db.Exec("INSERT INTO t1 VALUES(?, ?)", i, make([]byte, 500))
-		if err != nil {
+		if _, err := db.Exec("INSERT INTO t1 VALUES(?, ?)", i, make([]byte, 500)); err != nil {
 			t.Fatalf("failed to insert row %d: %v", i, err)
 		}
 	}
+}
 
-	// Open query
+func vacuumActiveVerify(t *testing.T, db *sql.DB) {
+	t.Helper()
 	rows, err := db.Query("SELECT a, b FROM t1")
 	if err != nil {
 		t.Fatalf("failed to open query: %v", err)
 	}
 	defer rows.Close()
 
-	// Read a few rows
 	count := 0
 	for rows.Next() && count < 5 {
 		var a int
@@ -677,22 +646,14 @@ func TestVacuum_ActiveStatements(t *testing.T) {
 		count++
 	}
 
-	// Try to VACUUM while statement is active
-	_, err = db.Exec("VACUUM")
-	if err == nil {
-		t.Logf("note: VACUUM succeeded with active statement (implementation-specific)")
-	} else {
-		if !strings.Contains(err.Error(), "progress") && !strings.Contains(err.Error(), "statement") {
-			t.Logf("VACUUM error with active statement: %v", err)
-		}
-	}
-
-	// Close the query
-	rows.Close()
-
-	// VACUUM should work now
 	_, err = db.Exec("VACUUM")
 	if err != nil {
+		t.Logf("VACUUM error with active statement: %v", err)
+	}
+
+	rows.Close()
+
+	if _, err := db.Exec("VACUUM"); err != nil {
 		t.Fatalf("VACUUM after closing statement failed: %v", err)
 	}
 }
@@ -745,82 +706,51 @@ func TestVacuum_AttachedDatabases(t *testing.T) {
 	tmpDir := filepath.Dir(mainPath)
 	attachPath := filepath.Join(tmpDir, "attached.db")
 
-	// Setup main database
-	_, err := db.Exec(`
-		PRAGMA auto_vacuum=OFF;
-		CREATE TABLE main.t1(a INTEGER, b BLOB);
-	`)
-	if err != nil {
-		t.Fatalf("failed to setup main database: %v", err)
-	}
+	vacuumAttachedSetup(t, db, attachPath)
+	vacuumAttachedVerify(t, db, mainPath, attachPath)
+}
 
-	// Insert data into main
-	for i := 1; i <= 100; i++ {
-		_, err = db.Exec("INSERT INTO t1 VALUES(?, ?)", i, make([]byte, 100))
-		if err != nil {
-			t.Fatalf("failed to insert into main: %v", err)
+// vacuumAttachedInsertBlobs inserts n rows with blob data into a table.
+func vacuumAttachedInsertBlobs(t *testing.T, db *sql.DB, stmt string, n int) {
+	t.Helper()
+	for i := 1; i <= n; i++ {
+		if _, err := db.Exec(stmt, i, make([]byte, 100)); err != nil {
+			t.Fatalf("insert failed: %v", err)
 		}
 	}
+}
 
-	// Attach second database
-	_, err = db.Exec(fmt.Sprintf("ATTACH DATABASE '%s' AS attached", attachPath))
-	if err != nil {
-		t.Fatalf("failed to attach database: %v", err)
+func vacuumAttachedSetup(t *testing.T, db *sql.DB, attachPath string) {
+	t.Helper()
+	for _, s := range []string{"PRAGMA auto_vacuum=OFF", "CREATE TABLE main.t1(a INTEGER, b BLOB)"} {
+		vacuumExecOrFatal(t, db, s)
 	}
+	vacuumAttachedInsertBlobs(t, db, "INSERT INTO t1 VALUES(?, ?)", 100)
+	vacuumExecOrFatal(t, db, fmt.Sprintf("ATTACH DATABASE '%s' AS attached", attachPath))
+	vacuumExecOrFatal(t, db, `CREATE TABLE attached.t2(c INTEGER, d BLOB)`)
+	vacuumAttachedInsertBlobs(t, db, "INSERT INTO attached.t2 VALUES(?, ?)", 100)
+	vacuumExecOrFatal(t, db, "DELETE FROM t1 WHERE (a % 3) != 0")
+	vacuumExecOrFatal(t, db, "DELETE FROM attached.t2 WHERE (c % 4) != 0")
+}
 
-	// Create table in attached database
-	_, err = db.Exec(`CREATE TABLE attached.t2(c INTEGER, d BLOB)`)
-	if err != nil {
-		t.Fatalf("failed to create table in attached db: %v", err)
-	}
-
-	// Insert data into attached
-	for i := 1; i <= 100; i++ {
-		_, err = db.Exec("INSERT INTO attached.t2 VALUES(?, ?)", i, make([]byte, 100))
-		if err != nil {
-			t.Fatalf("failed to insert into attached: %v", err)
-		}
-	}
-
-	// Delete some data
-	_, err = db.Exec("DELETE FROM t1 WHERE (a % 3) != 0")
-	if err != nil {
-		t.Fatalf("failed to delete from main: %v", err)
-	}
-
-	_, err = db.Exec("DELETE FROM attached.t2 WHERE (c % 4) != 0")
-	if err != nil {
-		t.Fatalf("failed to delete from attached: %v", err)
-	}
-
+func vacuumAttachedVerify(t *testing.T, db *sql.DB, mainPath, attachPath string) {
+	t.Helper()
 	mainSizeBefore := getFileSize(t, mainPath)
 	attachedSizeBefore := getFileSize(t, attachPath)
 
-	// VACUUM main database
-	_, err = db.Exec("VACUUM main")
-	if err != nil {
+	if _, err := db.Exec("VACUUM main"); err != nil {
 		t.Fatalf("VACUUM main failed: %v", err)
 	}
-
-	mainSizeAfter := getFileSize(t, mainPath)
-	attachedSizeAfter := getFileSize(t, attachPath)
-
-	// Main should be smaller or same, attached unchanged
-	if mainSizeAfter > mainSizeBefore {
+	if getFileSize(t, mainPath) > mainSizeBefore {
 		t.Errorf("main database grew after VACUUM")
 	}
-	if attachedSizeAfter != attachedSizeBefore {
+	if getFileSize(t, attachPath) != attachedSizeBefore {
 		t.Errorf("attached database size changed when vacuuming main")
 	}
-
-	// VACUUM attached database
-	_, err = db.Exec("VACUUM attached")
-	if err != nil {
+	if _, err := db.Exec("VACUUM attached"); err != nil {
 		t.Fatalf("VACUUM attached failed: %v", err)
 	}
-
-	attachedSizeFinal := getFileSize(t, attachPath)
-	if attachedSizeFinal > attachedSizeBefore {
+	if getFileSize(t, attachPath) > attachedSizeBefore {
 		t.Errorf("attached database grew after VACUUM")
 	}
 }
@@ -847,64 +777,36 @@ func TestVacuum_AfterManyDeletes(t *testing.T) {
 	db, dbPath := setupVacuumTestDB(t)
 	defer db.Close()
 
-	// Create table and insert many rows
-	_, err := db.Exec(`
-		CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT, c TEXT, d TEXT);
-	`)
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
+	vacuumManyDeletesSetup(t, db)
+	vacuumManyDeletesVerify(t, db, dbPath)
+}
 
-	// Insert 1000 rows
+func vacuumManyDeletesSetup(t *testing.T, db *sql.DB) {
+	t.Helper()
+	vacuumExecOrFatal(t, db, `CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT, c TEXT, d TEXT)`)
 	for i := 1; i <= 1000; i++ {
-		_, err = db.Exec("INSERT INTO t1 VALUES(?, ?, ?, ?)",
-			i, strings.Repeat("b", 50), strings.Repeat("c", 50), strings.Repeat("d", 50))
-		if err != nil {
+		if _, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?, ?)",
+			i, strings.Repeat("b", 50), strings.Repeat("c", 50), strings.Repeat("d", 50)); err != nil {
 			t.Fatalf("failed to insert row %d: %v", i, err)
 		}
 	}
-
-	// Add indexes
-	_, err = db.Exec(`
-		CREATE INDEX idx_b ON t1(b);
-		CREATE INDEX idx_c ON t1(c);
-	`)
-	if err != nil {
+	if _, err := db.Exec(`CREATE INDEX idx_b ON t1(b); CREATE INDEX idx_c ON t1(c)`); err != nil {
 		t.Logf("failed to create indexes (may not be supported): %v", err)
 	}
+}
 
+func vacuumManyDeletesVerify(t *testing.T, db *sql.DB, dbPath string) {
+	t.Helper()
 	sizeBefore := getFileSize(t, dbPath)
-
-	// Delete most rows
-	_, err = db.Exec("DELETE FROM t1 WHERE a > 100")
-	if err != nil {
-		t.Fatalf("failed to delete: %v", err)
-	}
-
-	// File should still be large
-	sizeAfterDelete := getFileSize(t, dbPath)
-	t.Logf("size before: %d, after delete: %d", sizeBefore, sizeAfterDelete)
-
-	// VACUUM to reclaim space
-	_, err = db.Exec("VACUUM")
-	if err != nil {
-		t.Fatalf("VACUUM failed: %v", err)
-	}
-
+	vacuumExecOrFatal(t, db, "DELETE FROM t1 WHERE a > 100")
+	t.Logf("size before: %d, after delete: %d", sizeBefore, getFileSize(t, dbPath))
+	vacuumExecOrFatal(t, db, "VACUUM")
 	sizeAfterVacuum := getFileSize(t, dbPath)
 	t.Logf("size after VACUUM: %d", sizeAfterVacuum)
-
-	// Should be smaller
 	if sizeAfterVacuum > sizeBefore {
 		t.Errorf("file grew after VACUUM: before=%d, after=%d", sizeBefore, sizeAfterVacuum)
 	}
-
-	// Verify remaining data
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to count after VACUUM: %v", err)
-	}
+	count := vacuumScanInt(t, db, "SELECT COUNT(*) FROM t1")
 	if count != 100 {
 		t.Errorf("wrong count after VACUUM: got %d, want 100", count)
 	}
@@ -1455,46 +1357,32 @@ func TestVacuum_FileSizeReduction(t *testing.T) {
 	db, dbPath := setupVacuumTestDB(t)
 	defer db.Close()
 
-	// Create large table
-	_, err := db.Exec(`
-		CREATE TABLE big(a INTEGER PRIMARY KEY, b BLOB);
-	`)
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
+	vacuumFileSizeSetup(t, db)
+	vacuumFileSizeVerify(t, db, dbPath)
+}
 
-	// Insert large data
+func vacuumFileSizeSetup(t *testing.T, db *sql.DB) {
+	t.Helper()
+	vacuumExecOrFatal(t, db, `CREATE TABLE big(a INTEGER PRIMARY KEY, b BLOB)`)
 	for i := 1; i <= 500; i++ {
-		_, err = db.Exec("INSERT INTO big VALUES(?, ?)", i, make([]byte, 500))
-		if err != nil {
+		if _, err := db.Exec("INSERT INTO big VALUES(?, ?)", i, make([]byte, 500)); err != nil {
 			t.Fatalf("failed to insert row %d: %v", i, err)
 		}
 	}
+}
 
+func vacuumFileSizeVerify(t *testing.T, db *sql.DB, dbPath string) {
+	t.Helper()
 	sizeBeforeDelete := getFileSize(t, dbPath)
-
-	// Delete most data
-	_, err = db.Exec("DELETE FROM big WHERE a > 50")
-	if err != nil {
-		t.Fatalf("failed to delete: %v", err)
-	}
+	vacuumExecOrFatal(t, db, "DELETE FROM big WHERE a > 50")
 
 	sizeAfterDelete := getFileSize(t, dbPath)
-
-	// Size should not decrease yet (deleted space not reclaimed)
 	if sizeAfterDelete < sizeBeforeDelete-1000 {
 		t.Logf("size decreased after delete (unexpected): %d -> %d", sizeBeforeDelete, sizeAfterDelete)
 	}
 
-	// VACUUM to reclaim space
-	_, err = db.Exec("VACUUM")
-	if err != nil {
-		t.Fatalf("VACUUM failed: %v", err)
-	}
-
+	vacuumExecOrFatal(t, db, "VACUUM")
 	sizeAfterVacuum := getFileSize(t, dbPath)
-
-	// Size should be smaller after VACUUM
 	if sizeAfterVacuum >= sizeBeforeDelete {
 		t.Logf("file size not reduced: before=%d, after=%d (may be due to overhead)",
 			sizeBeforeDelete, sizeAfterVacuum)
@@ -1503,13 +1391,7 @@ func TestVacuum_FileSizeReduction(t *testing.T) {
 		t.Logf("file size reduced by %d bytes (%.1f%%)",
 			reduction, float64(reduction)/float64(sizeBeforeDelete)*100)
 	}
-
-	// Verify remaining data
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM big").Scan(&count)
-	if err != nil {
-		t.Fatalf("count after VACUUM failed: %v", err)
-	}
+	count := vacuumScanInt(t, db, "SELECT COUNT(*) FROM big")
 	if count != 50 {
 		t.Errorf("wrong count: got %d, want 50", count)
 	}
@@ -1521,8 +1403,7 @@ func TestVacuum_ComplexSchema(t *testing.T) {
 	db, _ := setupVacuumTestDB(t)
 	defer db.Close()
 
-	// Create complex schema
-	_, err := db.Exec(`
+	vacuumExecOrFatal(t, db, `
 		CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT, c TEXT);
 		INSERT INTO t1 VALUES(1, 'b1', 'c1');
 		INSERT INTO t1 VALUES(2, 'b2', 'c2');
@@ -1533,48 +1414,26 @@ func TestVacuum_ComplexSchema(t *testing.T) {
 		CREATE VIEW v1 AS SELECT b, c FROM t1;
 		CREATE TRIGGER trig1 AFTER INSERT ON t1 BEGIN INSERT INTO t2 VALUES(NEW.a * 10, NEW.b); END;
 	`)
-	if err != nil {
-		t.Fatalf("failed to create complex schema: %v", err)
-	}
 
+	vacuumComplexSchemaVerify(t, db)
+}
+
+func vacuumComplexSchemaVerify(t *testing.T, db *sql.DB) {
+	t.Helper()
 	checksumT1 := computeTableChecksum(t, db, "t1")
 	checksumT2 := computeTableChecksum(t, db, "t2")
-
-	// VACUUM
-	_, err = db.Exec("VACUUM")
-	if err != nil {
-		t.Fatalf("VACUUM failed: %v", err)
-	}
-
-	// Verify all checksums
+	vacuumExecOrFatal(t, db, "VACUUM")
 	if checksumT1 != computeTableChecksum(t, db, "t1") {
 		t.Errorf("t1 checksum changed")
 	}
 	if checksumT2 != computeTableChecksum(t, db, "t2") {
 		t.Errorf("t2 checksum changed")
 	}
-
-	// Verify view works
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM v1").Scan(&count)
-	if err != nil {
-		t.Fatalf("view query failed: %v", err)
-	}
-	if count != 2 {
+	if count := vacuumScanInt(t, db, "SELECT COUNT(*) FROM v1"); count != 2 {
 		t.Errorf("view count wrong: got %d, want 2", count)
 	}
-
-	// Verify trigger works
-	_, err = db.Exec("INSERT INTO t1 VALUES(3, 'b3', 'c3')")
-	if err != nil {
-		t.Fatalf("insert after VACUUM failed: %v", err)
-	}
-
-	err = db.QueryRow("SELECT COUNT(*) FROM t2 WHERE d = 30").Scan(&count)
-	if err != nil {
-		t.Fatalf("trigger verification failed: %v", err)
-	}
-	if count != 1 {
+	vacuumExecOrFatal(t, db, "INSERT INTO t1 VALUES(3, 'b3', 'c3')")
+	if count := vacuumScanInt(t, db, "SELECT COUNT(*) FROM t2 WHERE d = 30"); count != 1 {
 		t.Errorf("trigger didn't fire: count=%d", count)
 	}
 }

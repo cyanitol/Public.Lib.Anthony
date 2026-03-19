@@ -291,55 +291,46 @@ func TestRedistributeSiblings_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			// Create left page
-			leftCells := make([]struct {
-				rowid   int64
-				payload []byte
-			}, tt.leftCells)
-			for i := 0; i < tt.leftCells; i++ {
-				leftCells[i].rowid = int64(i + 1)
-				leftCells[i].payload = []byte("data")
-			}
-			leftPageData := createTestPage(2, pageSize, PageTypeLeafTable, leftCells)
-			leftPage, err := NewBtreePage(2, leftPageData, pageSize)
-			if err != nil {
-				t.Fatalf("Failed to create left page: %v", err)
-			}
+			leftPage := redistributeEdgeCaseCreatePage(t, 2, pageSize, tt.leftCells, 0)
+			rightPage := redistributeEdgeCaseCreatePage(t, 3, pageSize, tt.rightCells, tt.leftCells)
 
-			// Create right page
-			rightCells := make([]struct {
-				rowid   int64
-				payload []byte
-			}, tt.rightCells)
-			for i := 0; i < tt.rightCells; i++ {
-				rightCells[i].rowid = int64(tt.leftCells + i + 1)
-				rightCells[i].payload = []byte("data")
-			}
-			rightPageData := createTestPage(3, pageSize, PageTypeLeafTable, rightCells)
-			rightPage, err := NewBtreePage(3, rightPageData, pageSize)
-			if err != nil {
-				t.Fatalf("Failed to create right page: %v", err)
-			}
-
-			// Redistribute
-			err = RedistributeCells(leftPage, rightPage)
-
-			if tt.shouldError && err == nil {
-				t.Error("Expected error but got none")
-			}
-			if !tt.shouldError && err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-
-			if err == nil {
-				// Verify total cells preserved
-				totalCells := tt.leftCells + tt.rightCells
-				actualTotal := int(leftPage.Header.NumCells) + int(rightPage.Header.NumCells)
-				if actualTotal != totalCells {
-					t.Errorf("Total cells = %d, want %d", actualTotal, totalCells)
-				}
-			}
+			err := RedistributeCells(leftPage, rightPage)
+			redistributeEdgeCaseVerify(t, err, tt.shouldError, leftPage, rightPage, tt.leftCells+tt.rightCells)
 		})
+	}
+}
+
+func redistributeEdgeCaseCreatePage(t *testing.T, pgno, pageSize uint32, numCells, rowidOffset int) *BtreePage {
+	t.Helper()
+	cells := make([]struct {
+		rowid   int64
+		payload []byte
+	}, numCells)
+	for i := 0; i < numCells; i++ {
+		cells[i].rowid = int64(rowidOffset + i + 1)
+		cells[i].payload = []byte("data")
+	}
+	pageData := createTestPage(pgno, pageSize, PageTypeLeafTable, cells)
+	page, err := NewBtreePage(pgno, pageData, pageSize)
+	if err != nil {
+		t.Fatalf("Failed to create page %d: %v", pgno, err)
+	}
+	return page
+}
+
+func redistributeEdgeCaseVerify(t *testing.T, err error, shouldError bool, left, right *BtreePage, totalCells int) {
+	t.Helper()
+	if shouldError && err == nil {
+		t.Error("Expected error but got none")
+	}
+	if !shouldError && err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if err == nil {
+		actualTotal := int(left.Header.NumCells) + int(right.Header.NumCells)
+		if actualTotal != totalCells {
+			t.Errorf("Total cells = %d, want %d", actualTotal, totalCells)
+		}
 	}
 }
 

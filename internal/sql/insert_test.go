@@ -6,6 +6,49 @@ import (
 	"testing"
 )
 
+// checkSingleRowProgram validates a single-row insert program.
+func checkSingleRowProgram(t *testing.T, p *Program) {
+	t.Helper()
+	if len(p.Instructions) == 0 {
+		t.Error("no instructions generated")
+	}
+	if p.Instructions[0].OpCode != OpInit {
+		t.Error("first instruction should be Init")
+	}
+	if p.Instructions[len(p.Instructions)-1].OpCode != OpHalt {
+		t.Error("last instruction should be Halt")
+	}
+	assertHasOpWithP2(t, p, OpOpenWrite, 100)
+}
+
+// assertHasOpWithP2 checks that the program contains an instruction with the given opcode and P2 value.
+func assertHasOpWithP2(t *testing.T, p *Program, op OpCode, p2 int) {
+	t.Helper()
+	for _, inst := range p.Instructions {
+		if inst.OpCode == op {
+			if inst.P2 != p2 {
+				t.Errorf("%v P2 = %d, want %d", op, inst.P2, p2)
+			}
+			return
+		}
+	}
+	t.Errorf("missing %v instruction", op)
+}
+
+// checkMultipleRowsProgram validates a multi-row insert program.
+func checkMultipleRowsProgram(t *testing.T, p *Program) {
+	t.Helper()
+	insertCount := 0
+	for _, inst := range p.Instructions {
+		if inst.OpCode == OpInsert {
+			insertCount++
+		}
+	}
+	if insertCount != 3 {
+		t.Errorf("expected 3 Insert ops, got %d", insertCount)
+	}
+}
+
 func TestCompileInsert(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -15,147 +58,47 @@ func TestCompileInsert(t *testing.T) {
 		checkFunc func(*testing.T, *Program)
 	}{
 		{
-			name: "single_row",
-			stmt: &InsertStmt{
-				Table:   "users",
-				Columns: []string{"id", "name"},
-				Values: [][]Value{
-					{IntValue(1), TextValue("Alice")},
-				},
-			},
+			name:      "single_row",
+			stmt:      &InsertStmt{Table: "users", Columns: []string{"id", "name"}, Values: [][]Value{{IntValue(1), TextValue("Alice")}}},
 			tableRoot: 100,
-			checkFunc: func(t *testing.T, p *Program) {
-				if len(p.Instructions) == 0 {
-					t.Error("no instructions generated")
-				}
-
-				// Check first and last instructions
-				if p.Instructions[0].OpCode != OpInit {
-					t.Error("first instruction should be Init")
-				}
-
-				lastIdx := len(p.Instructions) - 1
-				if p.Instructions[lastIdx].OpCode != OpHalt {
-					t.Error("last instruction should be Halt")
-				}
-
-				// Verify OpenWrite is present
-				hasOpenWrite := false
-				for _, inst := range p.Instructions {
-					if inst.OpCode == OpOpenWrite {
-						hasOpenWrite = true
-						if inst.P2 != 100 {
-							t.Errorf("OpenWrite P2 = %d, want 100", inst.P2)
-						}
-						break
-					}
-				}
-				if !hasOpenWrite {
-					t.Error("missing OpenWrite instruction")
-				}
-			},
+			checkFunc: checkSingleRowProgram,
 		},
 		{
-			name: "multiple_rows",
-			stmt: &InsertStmt{
-				Table:   "data",
-				Columns: []string{"x", "y"},
-				Values: [][]Value{
-					{IntValue(1), IntValue(2)},
-					{IntValue(3), IntValue(4)},
-					{IntValue(5), IntValue(6)},
-				},
-			},
+			name:      "multiple_rows",
+			stmt:      &InsertStmt{Table: "data", Columns: []string{"x", "y"}, Values: [][]Value{{IntValue(1), IntValue(2)}, {IntValue(3), IntValue(4)}, {IntValue(5), IntValue(6)}}},
 			tableRoot: 200,
-			checkFunc: func(t *testing.T, p *Program) {
-				// Count Insert operations
-				insertCount := 0
-				for _, inst := range p.Instructions {
-					if inst.OpCode == OpInsert {
-						insertCount++
-					}
-				}
-				if insertCount != 3 {
-					t.Errorf("expected 3 Insert ops, got %d", insertCount)
-				}
-			},
+			checkFunc: checkMultipleRowsProgram,
 		},
 		{
-			name: "mixed_types",
-			stmt: &InsertStmt{
-				Table:   "mixed",
-				Columns: []string{"id", "name", "score", "data"},
-				Values: [][]Value{
-					{
-						IntValue(1),
-						TextValue("test"),
-						FloatValue(98.5),
-						BlobValue([]byte{1, 2, 3}),
-					},
-				},
-			},
+			name:      "mixed_types",
+			stmt:      &InsertStmt{Table: "mixed", Columns: []string{"id", "name", "score", "data"}, Values: [][]Value{{IntValue(1), TextValue("test"), FloatValue(98.5), BlobValue([]byte{1, 2, 3})}}},
 			tableRoot: 300,
 		},
 		{
-			name: "with_nulls",
-			stmt: &InsertStmt{
-				Table:   "nulls",
-				Columns: []string{"a", "b", "c"},
-				Values: [][]Value{
-					{IntValue(1), NullValue(), TextValue("x")},
-				},
-			},
+			name:      "with_nulls",
+			stmt:      &InsertStmt{Table: "nulls", Columns: []string{"a", "b", "c"}, Values: [][]Value{{IntValue(1), NullValue(), TextValue("x")}}},
 			tableRoot: 400,
 		},
-		{
-			name:      "nil_statement",
-			stmt:      nil,
-			tableRoot: 100,
-			wantErr:   true,
-		},
-		{
-			name: "no_values",
-			stmt: &InsertStmt{
-				Table:   "empty",
-				Columns: []string{"a"},
-				Values:  [][]Value{},
-			},
-			tableRoot: 100,
-			wantErr:   true,
-		},
-		{
-			name: "mismatched_columns",
-			stmt: &InsertStmt{
-				Table:   "mismatch",
-				Columns: []string{"a", "b"},
-				Values: [][]Value{
-					{IntValue(1)}, // Only 1 value, need 2
-				},
-			},
-			tableRoot: 100,
-			wantErr:   true,
-		},
+		{name: "nil_statement", stmt: nil, tableRoot: 100, wantErr: true},
+		{name: "no_values", stmt: &InsertStmt{Table: "empty", Columns: []string{"a"}, Values: [][]Value{}}, tableRoot: 100, wantErr: true},
+		{name: "mismatched_columns", stmt: &InsertStmt{Table: "mismatch", Columns: []string{"a", "b"}, Values: [][]Value{{IntValue(1)}}}, tableRoot: 100, wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			prog, err := CompileInsert(tt.stmt, tt.tableRoot)
-
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error, got nil")
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-
 			if prog == nil {
 				t.Fatal("program is nil")
 			}
-
 			if tt.checkFunc != nil {
 				tt.checkFunc(t, prog)
 			}

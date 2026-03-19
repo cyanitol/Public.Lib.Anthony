@@ -1,8 +1,8 @@
 # Anthony - Pure Go SQLite Implementation - TODO
 #
-# Code Quality: Cyclomatic complexity <= 11 for all production code
+# Code Quality: Cyclomatic complexity <= 9 for all production code
 # Coverage Snapshot: ~75% feature parity vs reference SQLite
-# Last Updated: 2026-03-10
+# Last Updated: 2026-03-16
 
 ================================================================================
 HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
@@ -189,7 +189,7 @@ v0.1.x - Current Development
 [x] SQL Features (Constraints, CTEs, Subqueries, DDL)
 [x] Built-in Functions (String, Math, Date/Time, Aggregate)
 [x] Query Optimization (Index selection, cost estimation)
-[x] Code Quality (Cyclomatic complexity <= 11)
+[x] Code Quality (Cyclomatic complexity <= 9)
 [x] Pre-commit validation (make commit)
 [x] SPDX license headers on all files
 [x] Documentation scaffolding comments
@@ -281,5 +281,6 @@ Known Limitations
 
 - Windows file locking not implemented
 - ORDER BY mixed ASC/DESC with NULLs has edge cases (basic ORDER BY works)
-- Trigger execution is compile-time only (should be runtime)
 - ATTACH DATABASE partially implemented
+- Window function edge cases (42 trinity tests skipped as pre-existing)
+- Join edge cases (14 trinity tests skipped as pre-existing)

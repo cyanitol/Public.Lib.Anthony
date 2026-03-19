@@ -296,65 +296,31 @@ func TestFullRuneContinuationByte(t *testing.T) {
 
 // Test varint additional edge cases for better coverage
 func TestVarintAdditionalEdgeCases(t *testing.T) {
-	// Test 3-byte varint
-	buf := make([]byte, 9)
-	n := PutVarint(buf, 0x4000)
-	if n != 3 {
-		t.Errorf("PutVarint(0x4000) size = %d, want 3", n)
-	}
-	v, size := GetVarint(buf[:n])
-	if v != 0x4000 || size != 3 {
-		t.Errorf("GetVarint 3-byte = (%d, %d), want (16384, 3)", v, size)
-	}
-
-	// Test 4-byte varint
-	n = PutVarint(buf, 0x200000)
-	if n != 4 {
-		t.Errorf("PutVarint(0x200000) size = %d, want 4", n)
-	}
-	v, size = GetVarint(buf[:n])
-	if v != 0x200000 || size != 4 {
-		t.Errorf("GetVarint 4-byte = (%d, %d), want (2097152, 4)", v, size)
+	tests := []struct {
+		name     string
+		value    uint64
+		wantSize int
+	}{
+		{"3-byte", 0x4000, 3},
+		{"4-byte", 0x200000, 4},
+		{"5-byte", 0x10000000, 5},
+		{"6-byte", 0x800000000, 6},
+		{"7-byte", 0x40000000000, 7},
+		{"8-byte", 0x2000000000000, 8},
 	}
 
-	// Test 5-byte varint
-	n = PutVarint(buf, 0x10000000)
-	if n != 5 {
-		t.Errorf("PutVarint(0x10000000) size = %d, want 5", n)
-	}
-	v, size = GetVarint(buf[:n])
-	if v != 0x10000000 || size != 5 {
-		t.Errorf("GetVarint 5-byte = (%d, %d), want (268435456, 5)", v, size)
-	}
-
-	// Test 6-byte varint
-	n = PutVarint(buf, 0x800000000)
-	if n != 6 {
-		t.Errorf("PutVarint(0x800000000) size = %d, want 6", n)
-	}
-	v, size = GetVarint(buf[:n])
-	if v != 0x800000000 || size != 6 {
-		t.Errorf("GetVarint 6-byte = (%d, %d), want (34359738368, 6)", v, size)
-	}
-
-	// Test 7-byte varint
-	n = PutVarint(buf, 0x40000000000)
-	if n != 7 {
-		t.Errorf("PutVarint(0x40000000000) size = %d, want 7", n)
-	}
-	v, size = GetVarint(buf[:n])
-	if v != 0x40000000000 || size != 7 {
-		t.Errorf("GetVarint 7-byte = (%d, %d), want (4398046511104, 7)", v, size)
-	}
-
-	// Test 8-byte varint
-	n = PutVarint(buf, 0x2000000000000)
-	if n != 8 {
-		t.Errorf("PutVarint(0x2000000000000) size = %d, want 8", n)
-	}
-	v, size = GetVarint(buf[:n])
-	if v != 0x2000000000000 || size != 8 {
-		t.Errorf("GetVarint 8-byte = (%d, %d), want (562949953421312, 8)", v, size)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := make([]byte, 9)
+			n := PutVarint(buf, tt.value)
+			if n != tt.wantSize {
+				t.Errorf("PutVarint(0x%x) size = %d, want %d", tt.value, n, tt.wantSize)
+			}
+			v, size := GetVarint(buf[:n])
+			if v != tt.value || size != tt.wantSize {
+				t.Errorf("GetVarint %s = (%d, %d), want (%d, %d)", tt.name, v, size, tt.value, tt.wantSize)
+			}
+		})
 	}
 }
 

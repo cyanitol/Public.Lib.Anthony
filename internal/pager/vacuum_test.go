@@ -7,167 +7,95 @@ import (
 	"testing"
 )
 
+// vacWriteTestPages writes value byte(i) to each page at appropriate offset.
+func vacWriteTestPages(t *testing.T, pager *Pager, start, end Pgno) {
+	t.Helper()
+	for i := start; i <= end; i++ {
+		offset := 0
+		if i == 1 {
+			offset = DatabaseHeaderSize
+		}
+		mustWritePageAtOffset(t, pager, i, offset, []byte{byte(i)})
+	}
+}
+
+// vacVerifyTestPages verifies value byte(i) on each page at appropriate offset.
+func vacVerifyTestPages(t *testing.T, pager *Pager, start, end Pgno) {
+	t.Helper()
+	for i := start; i <= end; i++ {
+		offset := 0
+		if i == 1 {
+			offset = DatabaseHeaderSize
+		}
+		data := mustReadPageAtOffset(t, pager, i, offset, 1)
+		if data[0] != byte(i) {
+			t.Errorf("Page %d data after vacuum = %d, want %d", i, data[0], i)
+		}
+	}
+}
+
 func TestVacuum_BasicOperation(t *testing.T) {
 	t.Skip("pager vacuum page 1 header not preserved")
 	t.Parallel()
 	filename := filepath.Join(t.TempDir(), "test.db")
 
-	// Create database and add some data
-	pager, err := Open(filename, false)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-
-	// Write to multiple pages
-	for i := Pgno(1); i <= 10; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("Get(%d) error = %v", i, err)
-		}
-
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("Write(page %d) error = %v", i, err)
-		}
-
-		offset := 0
-		if i == 1 {
-			offset = DatabaseHeaderSize
-		}
-
-		data := []byte{byte(i)}
-		if err := page.Write(offset, data); err != nil {
-			t.Fatalf("page.Write(page %d) error = %v", i, err)
-		}
-
-		pager.Put(page)
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit() error = %v", err)
-	}
+	pager := openTestPagerAt(t, filename, false)
+	vacWriteTestPages(t, pager, 1, 10)
+	mustCommit(t, pager)
 
 	initialSize := pager.dbSize
-
-	// Perform VACUUM
-	opts := &VacuumOptions{}
-	if err := pager.Vacuum(opts); err != nil {
+	if err := pager.Vacuum(&VacuumOptions{}); err != nil {
 		t.Fatalf("Vacuum() error = %v", err)
 	}
 
-	// Verify database still works and data is intact
-	for i := Pgno(1); i <= 10; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("Get(%d) after vacuum error = %v", i, err)
-		}
+	vacVerifyTestPages(t, pager, 1, 10)
 
-		offset := 0
-		if i == 1 {
-			offset = DatabaseHeaderSize
-		}
-
-		readData, err := page.Read(offset, 1)
-		if err != nil {
-			t.Fatalf("page.Read(page %d) after vacuum error = %v", i, err)
-		}
-
-		if readData[0] != byte(i) {
-			t.Errorf("Page %d data after vacuum = %d, want %d", i, readData[0], i)
-		}
-
-		pager.Put(page)
-	}
-
-	// Database size should be the same or smaller
 	if pager.dbSize > initialSize {
 		t.Errorf("Database size after vacuum = %d, want <= %d", pager.dbSize, initialSize)
 	}
-
 	pager.Close()
+}
+
+// vacFreeHalfPages frees pages from start to end via the freelist.
+func vacFreeHalfPages(t *testing.T, pager *Pager, start, end int) {
+	t.Helper()
+	if pager.freeList == nil {
+		return
+	}
+	for i := start; i <= end; i++ {
+		if err := pager.freeList.Free(Pgno(i)); err != nil {
+			t.Logf("Free(%d) warning: %v", i, err)
+		}
+	}
+	mustFlush(t, pager.freeList)
+	mustCommit(t, pager)
 }
 
 func TestVacuum_AfterManyDeletes(t *testing.T) {
 	t.Parallel()
 	filename := filepath.Join(t.TempDir(), "test.db")
 
-	// Create database
-	pager, err := Open(filename, false)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-
-	// Allocate many pages
-	numPages := 100
-	for i := 1; i <= numPages; i++ {
-		page, err := pager.Get(Pgno(i))
-		if err != nil {
-			t.Fatalf("Get(%d) error = %v", i, err)
-		}
-
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("Write(page %d) error = %v", i, err)
-		}
-
-		pager.Put(page)
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit() error = %v", err)
-	}
+	pager := openTestPagerAt(t, filename, false)
+	allocateTestPagesRange(t, pager, 1, 100)
+	mustCommit(t, pager)
 
 	sizeBeforeDelete := pager.dbSize
-	t.Logf("Database size before delete: %d pages", sizeBeforeDelete)
+	vacFreeHalfPages(t, pager, 50, 100)
 
-	// Simulate deletes by adding pages to free list
-	// In a real scenario, this would happen through DELETE statements
-	if pager.freeList != nil {
-		// Free half the pages
-		for i := 50; i <= numPages; i++ {
-			if err := pager.freeList.Free(Pgno(i)); err != nil {
-				t.Logf("Free(%d) warning: %v", i, err)
-			}
-		}
-
-		if err := pager.freeList.Flush(); err != nil {
-			t.Fatalf("Flush() error = %v", err)
-		}
-
-		if err := pager.Commit(); err != nil {
-			t.Fatalf("Commit() error = %v", err)
-		}
-	}
-
-	freeCountBefore := uint32(0)
-	if pager.freeList != nil {
-		freeCountBefore = pager.freeList.Count()
-	}
-	t.Logf("Free pages before vacuum: %d", freeCountBefore)
-
-	// Perform VACUUM
-	opts := &VacuumOptions{}
-	if err := pager.Vacuum(opts); err != nil {
+	if err := pager.Vacuum(&VacuumOptions{}); err != nil {
 		t.Fatalf("Vacuum() error = %v", err)
 	}
 
-	// Free list should be empty after VACUUM
 	freeCountAfter := uint32(0)
 	if pager.freeList != nil {
 		freeCountAfter = pager.freeList.Count()
 	}
-
 	if freeCountAfter != 0 {
 		t.Errorf("Free pages after vacuum = %d, want 0", freeCountAfter)
 	}
-
-	// Database should be smaller
 	if pager.dbSize >= sizeBeforeDelete {
-		t.Logf("Warning: Database size not reduced after vacuum: before=%d, after=%d",
-			sizeBeforeDelete, pager.dbSize)
+		t.Logf("Warning: Database size not reduced: before=%d, after=%d", sizeBeforeDelete, pager.dbSize)
 	}
-
-	t.Logf("Database size after vacuum: %d pages (reduced by %d)",
-		pager.dbSize, sizeBeforeDelete-pager.dbSize)
-
 	pager.Close()
 }
 
@@ -324,80 +252,51 @@ func TestVacuum_DuringTransaction(t *testing.T) {
 	pager.Put(page)
 }
 
+// vacWritePatternPages writes pattern + page digit to each page.
+func vacWritePatternPages(t *testing.T, pager *Pager, pattern []byte, start, end Pgno) {
+	t.Helper()
+	for i := start; i <= end; i++ {
+		offset := 0
+		if i == 1 {
+			offset = DatabaseHeaderSize
+		}
+		data := append(pattern, byte('0'+i%10))
+		mustWritePageAtOffset(t, pager, i, offset, data)
+	}
+}
+
+// vacVerifyPatternPages verifies pattern + page digit on each page.
+func vacVerifyPatternPages(t *testing.T, pager *Pager, pattern []byte, start, end Pgno) {
+	t.Helper()
+	for i := start; i <= end; i++ {
+		offset := 0
+		if i == 1 {
+			offset = DatabaseHeaderSize
+		}
+		readData := mustReadPageAtOffset(t, pager, i, offset, len(pattern)+1)
+		expectedData := append(pattern, byte('0'+i%10))
+		for j := range expectedData {
+			if readData[j] != expectedData[j] {
+				t.Errorf("Page %d byte %d after vacuum = %d, want %d", i, j, readData[j], expectedData[j])
+			}
+		}
+	}
+}
+
 func TestVacuum_DataIntegrity(t *testing.T) {
 	t.Skip("pager vacuum page 1 header not preserved")
 	t.Parallel()
 	filename := filepath.Join(t.TempDir(), "test.db")
 
-	pager, err := Open(filename, false)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-
-	// Write a specific pattern to each page
+	pager := openTestPagerAt(t, filename, false)
 	pattern := []byte("INTEGRITY_TEST_PATTERN_")
-	for i := Pgno(1); i <= 20; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("Get(%d) error = %v", i, err)
-		}
+	vacWritePatternPages(t, pager, pattern, 1, 20)
+	mustCommit(t, pager)
 
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("Write(page %d) error = %v", i, err)
-		}
-
-		offset := 0
-		if i == 1 {
-			offset = DatabaseHeaderSize
-		}
-
-		// Write pattern + page number
-		data := append(pattern, byte('0'+i%10))
-		if err := page.Write(offset, data); err != nil {
-			t.Fatalf("page.Write(page %d) error = %v", i, err)
-		}
-
-		pager.Put(page)
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit() error = %v", err)
-	}
-
-	// Perform VACUUM
-	opts := &VacuumOptions{}
-	if err := pager.Vacuum(opts); err != nil {
+	if err := pager.Vacuum(&VacuumOptions{}); err != nil {
 		t.Fatalf("Vacuum() error = %v", err)
 	}
-
-	// Verify all data is intact
-	for i := Pgno(1); i <= 20; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("Get(%d) after vacuum error = %v", i, err)
-		}
-
-		offset := 0
-		if i == 1 {
-			offset = DatabaseHeaderSize
-		}
-
-		readData, err := page.Read(offset, len(pattern)+1)
-		if err != nil {
-			t.Fatalf("page.Read(page %d) after vacuum error = %v", i, err)
-		}
-
-		expectedData := append(pattern, byte('0'+i%10))
-		for j := range expectedData {
-			if readData[j] != expectedData[j] {
-				t.Errorf("Page %d byte %d after vacuum = %d, want %d",
-					i, j, readData[j], expectedData[j])
-			}
-		}
-
-		pager.Put(page)
-	}
-
+	vacVerifyPatternPages(t, pager, pattern, 1, 20)
 	pager.Close()
 }
 

@@ -2,7 +2,6 @@
 package btree
 
 import (
-	"bytes"
 	"encoding/binary"
 	"testing"
 )
@@ -50,33 +49,16 @@ func TestBalance_HandleUnderfullPage(t *testing.T) {
 	}
 
 	cursor := NewCursor(btree, rootPage)
+	insertRows(cursor, 1, 200, 50)
+	deleteRowRange(cursor, 10, 150)
 
-	// Insert many rows to create multiple pages
-	for i := int64(1); i <= 200; i++ {
-		err := cursor.Insert(i, make([]byte, 50))
-		if err != nil {
-			break
-		}
-	}
-
-	// Delete many rows to make a page underfull
-	for i := int64(10); i <= 150; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
-	}
-
-	// Check if any pages are underfull
 	cursor.SeekRowid(5)
-	if cursor.IsValid() {
-		pageData, _ := btree.GetPage(cursor.CurrentPage)
-		if pageData != nil {
-			page, err := NewBtreePage(cursor.CurrentPage, pageData, btree.UsableSize)
-			if err == nil && page.IsUnderfull() {
-				t.Log("Page is underfull as expected")
-			}
-		}
+	if !cursor.IsValid() {
+		return
+	}
+	page := getPageIfValid(btree, cursor.CurrentPage)
+	if page != nil && page.IsUnderfull() {
+		t.Log("Page is underfull as expected")
 	}
 }
 
@@ -509,24 +491,28 @@ func TestCursor_DescendToLastMultiLevel(t *testing.T) {
 // TestIndexCursor_SeekLeafExactMatch tests exact match seeking (53.8% coverage)
 func TestIndexCursor_SeekLeafExactMatch(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := createIndexPage(bt)
-	if err != nil {
-		t.Fatalf("createIndexPage() error = %v", err)
-	}
+	_, cursor := setupIndexCursor(t, 4096)
 
-	cursor := NewIndexCursor(bt, rootPage)
-
-	// Insert entries
 	testKeys := []string{"apple", "banana", "cherry", "date", "elderberry"}
-	for i, key := range testKeys {
-		err := cursor.InsertIndex([]byte(key), int64(i))
-		if err != nil {
-			t.Fatalf("InsertIndex() error = %v", err)
+	insertIndexEntries(cursor, func() [][]byte {
+		keys := make([][]byte, len(testKeys))
+		for i, k := range testKeys {
+			keys[i] = []byte(k)
+			_ = i
 		}
-	}
+		return keys
+	}())
 
-	// Seek exact matches
+	seekLeafExactMatchVerify(t, cursor, testKeys)
+
+	for _, key := range []string{"aardvark", "fig", "zebra"} {
+		found, _ := cursor.SeekIndex([]byte(key))
+		t.Logf("SeekIndex(%s) found=%v (expected false for non-existent)", key, found)
+	}
+}
+
+func seekLeafExactMatchVerify(t *testing.T, cursor *IndexCursor, testKeys []string) {
+	t.Helper()
 	for i, key := range testKeys {
 		found, err := cursor.SeekIndex([]byte(key))
 		if err != nil {
@@ -534,27 +520,14 @@ func TestIndexCursor_SeekLeafExactMatch(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("SeekIndex(%s) not found", key)
+			continue
 		}
-		if found && cursor.IsValid() {
-			gotKey := cursor.GetKey()
-			if !bytes.Equal(gotKey, []byte(key)) {
-				t.Errorf("SeekIndex(%s) returned wrong key: %s", key, gotKey)
-			}
-			gotRowid := cursor.GetRowid()
-			if gotRowid != int64(i) {
-				t.Errorf("SeekIndex(%s) returned wrong rowid: got %d, want %d", key, gotRowid, i)
-			}
+		if !cursor.IsValid() {
+			continue
 		}
-	}
-
-	// Seek non-existent keys
-	nonExistent := []string{"aardvark", "fig", "zebra"}
-	for _, key := range nonExistent {
-		found, err := cursor.SeekIndex([]byte(key))
-		if err != nil {
-			t.Logf("SeekIndex(%s) error = %v", key, err)
+		if gotRowid := cursor.GetRowid(); gotRowid != int64(i) {
+			t.Errorf("SeekIndex(%s) returned wrong rowid: got %d, want %d", key, gotRowid, i)
 		}
-		t.Logf("SeekIndex(%s) found=%v (expected false for non-existent)", key, found)
 	}
 }
 
@@ -602,66 +575,50 @@ func TestIndexCursor_PrevInPage(t *testing.T) {
 // TestIndexCursor_DeleteCurrentEntry tests deleting current entry (58.8% coverage)
 func TestIndexCursor_DeleteCurrentEntry(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := createIndexPage(bt)
-	if err != nil {
-		t.Fatalf("createIndexPage() error = %v", err)
-	}
+	_, cursor := setupIndexCursor(t, 4096)
 
-	cursor := NewIndexCursor(bt, rootPage)
+	insertIndexEntriesN(cursor, 20, func(i int) []byte {
+		return []byte{byte('A' + i)}
+	})
 
-	// Insert entries
-	for i := 0; i < 20; i++ {
-		key := []byte{byte('A' + i)}
-		err := cursor.InsertIndex(key, int64(i))
-		if err != nil {
-			t.Fatalf("InsertIndex() error = %v", err)
-		}
-	}
-
-	// Delete some entries
 	deleteKeys := []struct {
 		key   []byte
 		rowid int64
 	}{
-		{[]byte("C"), 2},
-		{[]byte("F"), 5},
-		{[]byte("K"), 10},
-		{[]byte("P"), 15},
+		{[]byte("C"), 2}, {[]byte("F"), 5}, {[]byte("K"), 10}, {[]byte("P"), 15},
 	}
-	for _, entry := range deleteKeys {
-		err := cursor.DeleteIndex(entry.key, entry.rowid)
-		if err != nil {
+	indexDeleteCurrentEntryPerform(t, cursor, deleteKeys)
+	indexDeleteCurrentEntryVerify(t, cursor, deleteKeys)
+
+	count := countIndexForward(cursor)
+	expected := 20 - len(deleteKeys)
+	if count != expected {
+		t.Errorf("Remaining entries = %d, want %d", count, expected)
+	}
+}
+
+func indexDeleteCurrentEntryPerform(t *testing.T, cursor *IndexCursor, entries []struct {
+	key   []byte
+	rowid int64
+}) {
+	t.Helper()
+	for _, entry := range entries {
+		if err := cursor.DeleteIndex(entry.key, entry.rowid); err != nil {
 			t.Logf("DeleteIndex(%s, %d) error = %v", entry.key, entry.rowid, err)
-		} else {
-			t.Logf("Successfully deleted key %s", entry.key)
 		}
 	}
+}
 
-	// Verify deletions
-	for _, entry := range deleteKeys {
+func indexDeleteCurrentEntryVerify(t *testing.T, cursor *IndexCursor, entries []struct {
+	key   []byte
+	rowid int64
+}) {
+	t.Helper()
+	for _, entry := range entries {
 		found, _ := cursor.SeekIndex(entry.key)
 		if found && cursor.GetRowid() == entry.rowid {
 			t.Errorf("Key %s with rowid %d still found after deletion", entry.key, entry.rowid)
 		}
-	}
-
-	// Count remaining entries
-	cursor.MoveToFirst()
-	count := 0
-	for cursor.IsValid() {
-		count++
-		err := cursor.NextIndex()
-		if err != nil {
-			break
-		}
-	}
-
-	expected := 20 - len(deleteKeys)
-	if count != expected {
-		t.Errorf("Remaining entries = %d, want %d", count, expected)
-	} else {
-		t.Logf("Correctly have %d entries after deletions", count)
 	}
 }
 

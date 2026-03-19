@@ -3,14 +3,12 @@ package driver
 
 import (
 	"database/sql"
-	"os"
 	"testing"
 )
 
 // TestExplain tests EXPLAIN statement
 func TestExplain(t *testing.T) {
-	dbFile := "test_explain.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_explain.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -49,8 +47,7 @@ func TestExplain(t *testing.T) {
 
 // TestExplainQueryPlanExtended tests EXPLAIN QUERY PLAN
 func TestExplainQueryPlanExtended(t *testing.T) {
-	dbFile := "test_explain_qp.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_explain_qp.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -89,8 +86,7 @@ func TestExplainQueryPlanExtended(t *testing.T) {
 
 // TestScalarSubquery tests scalar subqueries
 func TestScalarSubquery(t *testing.T) {
-	dbFile := "test_scalar_subquery.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_scalar_subquery.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -123,104 +119,71 @@ func TestScalarSubquery(t *testing.T) {
 	}
 }
 
-// TestExistsSubquery tests EXISTS subqueries
-func TestExistsSubquery(t *testing.T) {
-	dbFile := "test_exists.db"
-	defer os.Remove(dbFile)
-
-	db, err := sql.Open(DriverName, dbFile)
+// queryHasRows returns true if the query produces at least one row.
+func queryHasRows(t *testing.T, db *sql.DB, query string) bool {
+	t.Helper()
+	rows, err := db.Query(query)
 	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
-
-	_, err = db.Exec("CREATE TABLE items (id INTEGER, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO items VALUES (1, 100)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	// Test EXISTS - should return a row when subquery has results
-	rows, err := db.Query("SELECT 1 WHERE EXISTS (SELECT 1 FROM items WHERE value > 50)")
-	if err != nil {
-		t.Fatalf("EXISTS query failed: %v", err)
+		t.Fatalf("query %q failed: %v", query, err)
 	}
 	defer rows.Close()
+	return rows.Next()
+}
 
-	hasRows := false
-	for rows.Next() {
-		hasRows = true
-	}
+// TestExistsSubquery tests EXISTS subqueries
+func TestExistsSubquery(t *testing.T) {
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_exists.db")
+	defer cleanup()
 
-	if !hasRows {
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE items (id INTEGER, value INTEGER)",
+		"INSERT INTO items VALUES (1, 100)",
+	})
+
+	if !queryHasRows(t, db, "SELECT 1 WHERE EXISTS (SELECT 1 FROM items WHERE value > 50)") {
 		t.Error("EXISTS should return true when subquery has results")
 	}
 
-	// Test EXISTS - should return no rows when subquery is empty
-	rows2, err := db.Query("SELECT 1 WHERE EXISTS (SELECT 1 FROM items WHERE value > 1000)")
-	if err != nil {
-		t.Fatalf("EXISTS query failed: %v", err)
-	}
-	defer rows2.Close()
-
-	hasRows2 := false
-	for rows2.Next() {
-		hasRows2 = true
-	}
-
-	if hasRows2 {
+	if queryHasRows(t, db, "SELECT 1 WHERE EXISTS (SELECT 1 FROM items WHERE value > 1000)") {
 		t.Error("EXISTS should return false when subquery is empty")
 	}
 }
 
-// TestInSubquery tests IN with subqueries
-func TestInSubquery(t *testing.T) {
-	dbFile := "test_in_subquery.db"
-	defer os.Remove(dbFile)
+// subqueryExecMany executes multiple SQL statements, fataling on error.
+func subqueryExecMany(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("exec %q failed: %v", s, err)
+		}
+	}
+}
 
-	db, err := sql.Open(DriverName, dbFile)
+// subqueryOpenDB opens a temporary database file and returns db + cleanup.
+func subqueryOpenDB(t *testing.T, name string) (*sql.DB, func()) {
+	t.Helper()
+	db, err := sql.Open(DriverName, name)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	return db, func() { db.Close() }
+}
 
-	_, err = db.Exec("CREATE TABLE products (id INTEGER, category_id INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE products failed: %v", err)
-	}
+// TestInSubquery tests IN with subqueries
+func TestInSubquery(t *testing.T) {
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_in_subquery.db")
+	defer cleanup()
 
-	_, err = db.Exec("CREATE TABLE categories (id INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE categories failed: %v", err)
-	}
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE products (id INTEGER, category_id INTEGER)",
+		"CREATE TABLE categories (id INTEGER, name TEXT)",
+		"INSERT INTO categories VALUES (1, 'Electronics')",
+		"INSERT INTO categories VALUES (2, 'Books')",
+		"INSERT INTO products VALUES (1, 1)",
+		"INSERT INTO products VALUES (2, 1)",
+		"INSERT INTO products VALUES (3, 2)",
+	})
 
-	_, err = db.Exec("INSERT INTO categories VALUES (1, 'Electronics')")
-	if err != nil {
-		t.Fatalf("INSERT category failed: %v", err)
-	}
-	_, err = db.Exec("INSERT INTO categories VALUES (2, 'Books')")
-	if err != nil {
-		t.Fatalf("INSERT category failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO products VALUES (1, 1)")
-	if err != nil {
-		t.Fatalf("INSERT product failed: %v", err)
-	}
-	_, err = db.Exec("INSERT INTO products VALUES (2, 1)")
-	if err != nil {
-		t.Fatalf("INSERT product failed: %v", err)
-	}
-	_, err = db.Exec("INSERT INTO products VALUES (3, 2)")
-	if err != nil {
-		t.Fatalf("INSERT product failed: %v", err)
-	}
-
-	// Test IN subquery
 	rows, err := db.Query("SELECT id FROM products WHERE category_id IN (SELECT id FROM categories WHERE name = 'Electronics')")
 	if err != nil {
 		t.Fatalf("IN subquery failed: %v", err)
@@ -241,8 +204,7 @@ func TestInSubquery(t *testing.T) {
 
 // TestFromSubquery tests subqueries in FROM clause
 func TestFromSubquery(t *testing.T) {
-	dbFile := "test_from_subquery.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_from_subquery.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -278,8 +240,7 @@ func TestFromSubquery(t *testing.T) {
 
 // TestComplexSubquery tests nested and complex subqueries
 func TestComplexSubquery(t *testing.T) {
-	dbFile := "test_complex_subquery.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_complex_subquery.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -314,8 +275,7 @@ func TestComplexSubquery(t *testing.T) {
 
 // TestSubqueryWithJoin tests subqueries combined with joins
 func TestSubqueryWithJoin(t *testing.T) {
-	dbFile := "test_subquery_join.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_subquery_join.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -363,8 +323,7 @@ func TestSubqueryWithJoin(t *testing.T) {
 
 // TestUnqualifiedColumnInMultiTable tests error handling for unqualified columns
 func TestUnqualifiedColumnInMultiTable(t *testing.T) {
-	dbFile := "test_unqualified.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_unqualified.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -414,8 +373,7 @@ func TestUnqualifiedColumnInMultiTable(t *testing.T) {
 
 // TestNonIdentifierColumn tests non-identifier columns in multi-table context
 func TestNonIdentifierColumn(t *testing.T) {
-	dbFile := "test_non_ident.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_non_ident.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -457,8 +415,7 @@ func TestNonIdentifierColumn(t *testing.T) {
 
 // TestCountFromSubqueries tests the countFromSubqueries function
 func TestCountFromSubqueries(t *testing.T) {
-	dbFile := "test_count_subq.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_count_subq.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -497,8 +454,7 @@ func TestCountFromSubqueries(t *testing.T) {
 
 // TestInsertFirstRow tests insertFirstRow path
 func TestInsertFirstRow(t *testing.T) {
-	dbFile := "test_insert_first.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_insert_first.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -538,8 +494,7 @@ func TestInsertFirstRow(t *testing.T) {
 
 // TestExplainOpcodesExtended tests that EXPLAIN produces valid opcode output
 func TestExplainOpcodesExtended(t *testing.T) {
-	dbFile := "test_explain_opcodes.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_explain_opcodes.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -586,8 +541,7 @@ func TestExplainOpcodesExtended(t *testing.T) {
 
 // TestInnerStatementCompilation tests inner statement compilation
 func TestInnerStatementCompilation(t *testing.T) {
-	dbFile := "test_inner_stmt.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_inner_stmt.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -619,8 +573,7 @@ func TestInnerStatementCompilation(t *testing.T) {
 
 // TestSelectWithoutFromSpecialCases tests special SELECT without FROM cases
 func TestSelectWithoutFromSpecialCases(t *testing.T) {
-	dbFile := "test_select_no_from.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_select_no_from.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -669,8 +622,7 @@ func TestSelectWithoutFromSpecialCases(t *testing.T) {
 
 // TestQualifiedColumnInSelect tests qualified column references
 func TestQualifiedColumnInSelect(t *testing.T) {
-	dbFile := "test_qualified.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_qualified.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -702,37 +654,16 @@ func TestQualifiedColumnInSelect(t *testing.T) {
 
 // TestDetermineCursorNum tests cursor number determination
 func TestDetermineCursorNum(t *testing.T) {
-	dbFile := "test_cursor_num.db"
-	defer os.Remove(dbFile)
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_cursor_num.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE t1 (id INTEGER)",
+		"CREATE TABLE t2 (id INTEGER)",
+		"INSERT INTO t1 VALUES (1)",
+		"INSERT INTO t2 VALUES (2)",
+	})
 
-	// Create multiple tables to test cursor allocation
-	_, err = db.Exec("CREATE TABLE t1 (id INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE t1 failed: %v", err)
-	}
-
-	_, err = db.Exec("CREATE TABLE t2 (id INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE t2 failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t1 VALUES (1)")
-	if err != nil {
-		t.Fatalf("INSERT t1 failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t2 VALUES (2)")
-	if err != nil {
-		t.Fatalf("INSERT t2 failed: %v", err)
-	}
-
-	// Query from multiple tables
 	rows, err := db.Query("SELECT t1.id, t2.id FROM t1, t2")
 	if err != nil {
 		t.Fatalf("Multi-table query failed: %v", err)
@@ -743,12 +674,10 @@ func TestDetermineCursorNum(t *testing.T) {
 	for rows.Next() {
 		hasRows = true
 		var id1, id2 int
-		err = rows.Scan(&id1, &id2)
-		if err != nil {
+		if err := rows.Scan(&id1, &id2); err != nil {
 			t.Errorf("Scan failed: %v", err)
 		}
 	}
-
 	if !hasRows {
 		t.Error("Expected rows from multi-table query")
 	}
@@ -756,8 +685,7 @@ func TestDetermineCursorNum(t *testing.T) {
 
 // TestSelectFromTableNameResolution tests table name resolution
 func TestSelectFromTableNameResolution(t *testing.T) {
-	dbFile := "test_table_resolution.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_table_resolution.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -803,8 +731,7 @@ func TestSelectFromTableNameResolution(t *testing.T) {
 
 // TestDispatchOtherStatements tests the dispatchOtherStatements path
 func TestDispatchOtherStatements(t *testing.T) {
-	dbFile := "test_dispatch.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_dispatch.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -849,8 +776,7 @@ func TestDispatchOtherStatements(t *testing.T) {
 
 // TestCountExprParams tests parameter counting in expressions
 func TestCountExprParams(t *testing.T) {
-	dbFile := "test_expr_params.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_expr_params.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -888,8 +814,7 @@ func TestCountExprParams(t *testing.T) {
 
 // TestCompileLiteralExpr tests literal expression compilation
 func TestCompileLiteralExpr(t *testing.T) {
-	dbFile := "test_literal.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_literal.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -922,8 +847,7 @@ func TestCompileLiteralExpr(t *testing.T) {
 // TestExtractValueFromExpression tests value extraction from expressions
 func TestExtractValueFromExpression(t *testing.T) {
 	t.Skip("Expression evaluation in INSERT not fully implemented")
-	dbFile := "test_extract_value.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_extract_value.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -958,8 +882,7 @@ func TestExtractValueFromExpression(t *testing.T) {
 // TestPrepareNewRowForInsert tests row preparation for insert
 func TestPrepareNewRowForInsert(t *testing.T) {
 	t.Skip("Partial column INSERT has type conversion issues")
-	dbFile := "test_prepare_row.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_prepare_row.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -999,8 +922,7 @@ func TestPrepareNewRowForInsert(t *testing.T) {
 
 // TestHasFromSubqueriesDetection tests detection of FROM subqueries
 func TestHasFromSubqueriesDetection(t *testing.T) {
-	dbFile := "test_has_from_subq.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_has_from_subq.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -1040,8 +962,7 @@ func TestHasFromSubqueriesDetection(t *testing.T) {
 
 // TestCompileValueTypes tests different value type compilation
 func TestCompileValueTypes(t *testing.T) {
-	dbFile := "test_value_types.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_value_types.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -1080,8 +1001,7 @@ func TestCompileValueTypes(t *testing.T) {
 
 // TestCompileArgValue tests argument value compilation
 func TestCompileArgValue(t *testing.T) {
-	dbFile := "test_arg_value.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_arg_value.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -1122,62 +1042,43 @@ func TestCompileArgValue(t *testing.T) {
 // TestMultiTableColumnNames tests buildMultiTableColumnNames
 func TestMultiTableColumnNames(t *testing.T) {
 	t.Skip("Multi-table SELECT * column name expansion not implemented")
-	dbFile := "test_multi_cols.db"
-	defer os.Remove(dbFile)
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_multi_cols.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE mc1 (id INTEGER, name TEXT)",
+		"CREATE TABLE mc2 (id INTEGER, value INTEGER)",
+		"INSERT INTO mc1 VALUES (1, 'test')",
+		"INSERT INTO mc2 VALUES (1, 100)",
+	})
 
-	_, err = db.Exec("CREATE TABLE mc1 (id INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE mc1 failed: %v", err)
-	}
-
-	_, err = db.Exec("CREATE TABLE mc2 (id INTEGER, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE mc2 failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO mc1 VALUES (1, 'test')")
-	if err != nil {
-		t.Fatalf("INSERT mc1 failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO mc2 VALUES (1, 100)")
-	if err != nil {
-		t.Fatalf("INSERT mc2 failed: %v", err)
-	}
-
-	// SELECT * from multiple tables
 	rows, err := db.Query("SELECT * FROM mc1, mc2")
 	if err != nil {
 		t.Fatalf("Multi-table SELECT * failed: %v", err)
 	}
 	defer rows.Close()
 
-	// Check column names
 	cols, err := rows.Columns()
 	if err != nil {
 		t.Fatalf("Columns() failed: %v", err)
 	}
-
-	// Should have columns from both tables
 	if len(cols) < 3 {
 		t.Errorf("Expected at least 3 columns, got %d: %v", len(cols), cols)
 	}
 
-	// Verify data can be read
+	scanDynamicRows(t, rows, len(cols))
+}
+
+// scanDynamicRows scans all rows with a dynamic number of columns.
+func scanDynamicRows(t *testing.T, rows *sql.Rows, numCols int) {
+	t.Helper()
 	for rows.Next() {
-		values := make([]interface{}, len(cols))
-		valuePtrs := make([]interface{}, len(cols))
+		values := make([]interface{}, numCols)
+		valuePtrs := make([]interface{}, numCols)
 		for i := range values {
 			valuePtrs[i] = &values[i]
 		}
-		err = rows.Scan(valuePtrs...)
-		if err != nil {
+		if err := rows.Scan(valuePtrs...); err != nil {
 			t.Errorf("Scan failed: %v", err)
 		}
 	}
@@ -1186,36 +1087,16 @@ func TestMultiTableColumnNames(t *testing.T) {
 // TestEmitColumnFromTable tests column emission from specific table
 func TestEmitColumnFromTable(t *testing.T) {
 	t.Skip("Qualified column names not fully supported")
-	dbFile := "test_emit_col.db"
-	defer os.Remove(dbFile)
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_emit_col.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE emit1 (id INTEGER, data TEXT)",
+		"CREATE TABLE emit2 (id INTEGER, info TEXT)",
+		"INSERT INTO emit1 VALUES (1, 'data1')",
+		"INSERT INTO emit2 VALUES (1, 'info1')",
+	})
 
-	_, err = db.Exec("CREATE TABLE emit1 (id INTEGER, data TEXT)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	_, err = db.Exec("CREATE TABLE emit2 (id INTEGER, info TEXT)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO emit1 VALUES (1, 'data1')")
-	if err != nil {
-		t.Fatalf("INSERT emit1 failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO emit2 VALUES (1, 'info1')")
-	if err != nil {
-		t.Fatalf("INSERT emit2 failed: %v", err)
-	}
-
-	// Select specific columns from each table
 	rows, err := db.Query("SELECT emit1.data, emit2.info FROM emit1, emit2")
 	if err != nil {
 		t.Fatalf("Qualified column SELECT failed: %v", err)
@@ -1224,8 +1105,7 @@ func TestEmitColumnFromTable(t *testing.T) {
 
 	for rows.Next() {
 		var data, info string
-		err = rows.Scan(&data, &info)
-		if err != nil {
+		if err := rows.Scan(&data, &info); err != nil {
 			t.Errorf("Scan failed: %v", err)
 		}
 		if data != "data1" {
@@ -1239,39 +1119,16 @@ func TestEmitColumnFromTable(t *testing.T) {
 
 // TestFindOrderByColumnInSelect tests ORDER BY column resolution
 func TestFindOrderByColumnInSelect(t *testing.T) {
-	dbFile := "test_orderby_find.db"
-	defer os.Remove(dbFile)
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_orderby_find.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE orderby_test (id INTEGER, name TEXT, value INTEGER)",
+		"INSERT INTO orderby_test VALUES (1, 'zebra', 100)",
+		"INSERT INTO orderby_test VALUES (2, 'alpha', 200)",
+		"INSERT INTO orderby_test VALUES (3, 'beta', 150)",
+	})
 
-	_, err = db.Exec("CREATE TABLE orderby_test (id INTEGER, name TEXT, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	// Insert test data
-	data := []struct {
-		id    int
-		name  string
-		value int
-	}{
-		{1, "zebra", 100},
-		{2, "alpha", 200},
-		{3, "beta", 150},
-	}
-
-	for _, d := range data {
-		_, err = db.Exec("INSERT INTO orderby_test VALUES (?, ?, ?)", d.id, d.name, d.value)
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-	}
-
-	// Test ORDER BY different columns
 	rows, err := db.Query("SELECT name, value FROM orderby_test ORDER BY name")
 	if err != nil {
 		t.Fatalf("ORDER BY name failed: %v", err)
@@ -1283,8 +1140,7 @@ func TestFindOrderByColumnInSelect(t *testing.T) {
 	for rows.Next() {
 		var name string
 		var value int
-		err = rows.Scan(&name, &value)
-		if err != nil {
+		if err := rows.Scan(&name, &value); err != nil {
 			t.Errorf("Scan failed: %v", err)
 		}
 		if i < len(expectedOrder) && name != expectedOrder[i] {
@@ -1292,7 +1148,6 @@ func TestFindOrderByColumnInSelect(t *testing.T) {
 		}
 		i++
 	}
-
 	if i != len(expectedOrder) {
 		t.Errorf("Got %d rows, want %d", i, len(expectedOrder))
 	}
@@ -1300,29 +1155,18 @@ func TestFindOrderByColumnInSelect(t *testing.T) {
 
 // TestExtractOrderByExpression tests ORDER BY expression extraction
 func TestExtractOrderByExpression(t *testing.T) {
-	dbFile := "test_orderby_expr.db"
-	defer os.Remove(dbFile)
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_orderby_expr.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
-
-	_, err = db.Exec("CREATE TABLE expr_order (id INTEGER, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	vals := []int{5, 2, 8, 1, 9}
-	for i, v := range vals {
-		_, err = db.Exec("INSERT INTO expr_order VALUES (?, ?)", i+1, v)
-		if err != nil {
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE expr_order (id INTEGER, value INTEGER)",
+	})
+	for i, v := range []int{5, 2, 8, 1, 9} {
+		if _, err := db.Exec("INSERT INTO expr_order VALUES (?, ?)", i+1, v); err != nil {
 			t.Fatalf("INSERT failed: %v", err)
 		}
 	}
 
-	// Test ORDER BY with expression/column reference
 	rows, err := db.Query("SELECT id, value FROM expr_order ORDER BY value")
 	if err != nil {
 		t.Fatalf("ORDER BY expression failed: %v", err)
@@ -1333,8 +1177,7 @@ func TestExtractOrderByExpression(t *testing.T) {
 	i := 0
 	for rows.Next() {
 		var id, value int
-		err = rows.Scan(&id, &value)
-		if err != nil {
+		if err := rows.Scan(&id, &value); err != nil {
 			t.Errorf("Scan failed: %v", err)
 		}
 		if i < len(expectedValues) && value != expectedValues[i] {
@@ -1346,47 +1189,26 @@ func TestExtractOrderByExpression(t *testing.T) {
 
 // TestFindCollationInSchema tests collation finding in schema
 func TestFindCollationInSchema(t *testing.T) {
-	dbFile := "test_collation.db"
-	defer os.Remove(dbFile)
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_collation.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE coll_test (id INTEGER, name TEXT)",
+		"INSERT INTO coll_test VALUES (1, 'Zebra')",
+		"INSERT INTO coll_test VALUES (2, 'alpha')",
+		"INSERT INTO coll_test VALUES (3, 'Beta')",
+	})
 
-	// Create table with TEXT column
-	_, err = db.Exec("CREATE TABLE coll_test (id INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	// Insert data
-	_, err = db.Exec("INSERT INTO coll_test VALUES (1, 'Zebra')")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-	_, err = db.Exec("INSERT INTO coll_test VALUES (2, 'alpha')")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-	_, err = db.Exec("INSERT INTO coll_test VALUES (3, 'Beta')")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	// Test ORDER BY on text column (uses collation)
 	rows, err := db.Query("SELECT name FROM coll_test ORDER BY name")
 	if err != nil {
 		t.Fatalf("ORDER BY text column failed: %v", err)
 	}
 	defer rows.Close()
 
-	names := []string{}
+	var names []string
 	for rows.Next() {
 		var name string
-		err = rows.Scan(&name)
-		if err != nil {
+		if err := rows.Scan(&name); err != nil {
 			t.Errorf("Scan failed: %v", err)
 		}
 		names = append(names, name)
@@ -1395,42 +1217,22 @@ func TestFindCollationInSchema(t *testing.T) {
 	if len(names) != 3 {
 		t.Errorf("Got %d names, want 3", len(names))
 	}
-	// Order depends on collation implementation
 	t.Logf("Ordered names: %v", names)
 }
 
 // TestAddExtraOrderByColumn tests adding extra ORDER BY columns
 func TestAddExtraOrderByColumn(t *testing.T) {
-	dbFile := "test_extra_orderby.db"
-	defer os.Remove(dbFile)
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_extra_orderby.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE extra_order (id INTEGER, a INTEGER, b INTEGER)",
+		"INSERT INTO extra_order VALUES (1, 10, 1)",
+		"INSERT INTO extra_order VALUES (2, 10, 2)",
+		"INSERT INTO extra_order VALUES (3, 20, 1)",
+		"INSERT INTO extra_order VALUES (4, 20, 2)",
+	})
 
-	_, err = db.Exec("CREATE TABLE extra_order (id INTEGER, a INTEGER, b INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	// Insert data
-	testData := [][]int{
-		{1, 10, 1},
-		{2, 10, 2},
-		{3, 20, 1},
-		{4, 20, 2},
-	}
-
-	for _, row := range testData {
-		_, err = db.Exec("INSERT INTO extra_order VALUES (?, ?, ?)", row[0], row[1], row[2])
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-	}
-
-	// Test ORDER BY multiple columns
 	rows, err := db.Query("SELECT id, a, b FROM extra_order ORDER BY a, b")
 	if err != nil {
 		t.Fatalf("ORDER BY multiple columns failed: %v", err)
@@ -1441,8 +1243,7 @@ func TestAddExtraOrderByColumn(t *testing.T) {
 	i := 0
 	for rows.Next() {
 		var id, a, b int
-		err = rows.Scan(&id, &a, &b)
-		if err != nil {
+		if err := rows.Scan(&id, &a, &b); err != nil {
 			t.Errorf("Scan failed: %v", err)
 		}
 		if i < len(expected) && id != expected[i] {
@@ -1454,29 +1255,18 @@ func TestAddExtraOrderByColumn(t *testing.T) {
 
 // TestUpdateWhereClause tests UPDATE with WHERE clause
 func TestUpdateWhereClause(t *testing.T) {
-	dbFile := "test_update_where.db"
-	defer os.Remove(dbFile)
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_update_where.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
-
-	_, err = db.Exec("CREATE TABLE upd_test (id INTEGER, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	// Insert data
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE upd_test (id INTEGER, value INTEGER)",
+	})
 	for i := 1; i <= 5; i++ {
-		_, err = db.Exec("INSERT INTO upd_test VALUES (?, ?)", i, i*10)
-		if err != nil {
+		if _, err := db.Exec("INSERT INTO upd_test VALUES (?, ?)", i, i*10); err != nil {
 			t.Fatalf("INSERT failed: %v", err)
 		}
 	}
 
-	// Update with WHERE clause
 	result, err := db.Exec("UPDATE upd_test SET value = 999 WHERE id > 3")
 	if err != nil {
 		t.Fatalf("UPDATE with WHERE failed: %v", err)
@@ -1487,10 +1277,8 @@ func TestUpdateWhereClause(t *testing.T) {
 		t.Logf("Expected 2 rows affected, got %d", affected)
 	}
 
-	// Verify
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM upd_test WHERE value = 999").Scan(&count)
-	if err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM upd_test WHERE value = 999").Scan(&count); err != nil {
 		t.Fatalf("COUNT query failed: %v", err)
 	}
 	if count != 2 {
@@ -1501,8 +1289,7 @@ func TestUpdateWhereClause(t *testing.T) {
 // TestReleaseStateExtended tests state release (cleanup path)
 func TestReleaseStateExtended(t *testing.T) {
 	// Create a database and close it to trigger cleanup
-	dbFile := "test_release.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_release.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {

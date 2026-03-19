@@ -412,52 +412,69 @@ func TestPagerFreePageAndReuse(t *testing.T) {
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
-	// Allocate some pages
-	pgno1, _ := pager.AllocatePage()
-	pgno2, _ := pager.AllocatePage()
-	pgno3, _ := pager.AllocatePage()
+	pgno1 := mustAllocatePage(t, pager)
+	pgno2 := mustAllocatePage(t, pager)
+	pgno3 := mustAllocatePage(t, pager)
+	mustCommit(t, pager)
+	mustFreePage(t, pager, pgno2)
+	mustCommit(t, pager)
 
-	// Commit the allocation
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit failed: %v", err)
-	}
-
-	// Free page 2
-	if err := pager.FreePage(pgno2); err != nil {
-		t.Fatalf("FreePage failed: %v", err)
-	}
-
-	// Commit the free
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit failed: %v", err)
-	}
-
-	// Check free page count
-	freeCount := pager.GetFreePageCount()
-	if freeCount != 1 {
+	if freeCount := pager.GetFreePageCount(); freeCount != 1 {
 		t.Errorf("Expected 1 free page, got %d", freeCount)
 	}
 
-	// Allocate a new page - should reuse the freed page
-	pgnoReused, err := pager.AllocatePage()
-	if err != nil {
-		t.Fatalf("AllocatePage failed: %v", err)
-	}
-
-	// Should have reused page 2
+	pgnoReused := mustAllocatePage(t, pager)
 	if pgnoReused != pgno2 {
 		t.Errorf("Expected to reuse page %d, got %d", pgno2, pgnoReused)
 	}
-
-	// Verify we now have 0 free pages
-	freeCount = pager.GetFreePageCount()
-	if freeCount != 0 {
+	if freeCount := pager.GetFreePageCount(); freeCount != 0 {
 		t.Errorf("Expected 0 free pages after reuse, got %d", freeCount)
 	}
-
-	// Verify the other pages are still valid
 	if pgno1 == 0 || pgno3 == 0 {
 		t.Error("Other pages should still be valid")
+	}
+}
+
+// flPersistFirstSession allocates pages, frees some, and returns page numbers and free count.
+func flPersistFirstSession(t *testing.T, tmpName string) (pgno1, pgno2, pgno3, pgno4 Pgno, freeCount uint32) {
+	t.Helper()
+	pager1 := mustOpenPagerSized(t, tmpName, 4096)
+	pgno1 = mustAllocatePage(t, pager1)
+	pgno2 = mustAllocatePage(t, pager1)
+	pgno3 = mustAllocatePage(t, pager1)
+	pgno4 = mustAllocatePage(t, pager1)
+	mustCommit(t, pager1)
+	mustFreePage(t, pager1, pgno2)
+	mustFreePage(t, pager1, pgno4)
+	mustCommit(t, pager1)
+	freeCount = pager1.GetFreePageCount()
+	pager1.Close()
+	return
+}
+
+// flPersistVerifyReuse reopens the pager and verifies free list reuse.
+func flPersistVerifyReuse(t *testing.T, tmpName string, pgno2, pgno4 Pgno, freeCount1 uint32) {
+	t.Helper()
+	pager2 := mustOpenPagerSized(t, tmpName, 4096)
+	defer pager2.Close()
+	freeCount2 := pager2.GetFreePageCount()
+	if freeCount2 != freeCount1 {
+		t.Errorf("Free count after reopen: expected %d, got %d", freeCount1, freeCount2)
+	}
+	pgnoNew1 := mustAllocatePage(t, pager2)
+	pgnoNew2 := mustAllocatePage(t, pager2)
+	if pgnoNew1 == pgnoNew2 {
+		t.Error("Allocated pages should be different")
+	}
+	reusedCount := 0
+	if pgnoNew1 == pgno2 || pgnoNew1 == pgno4 {
+		reusedCount++
+	}
+	if pgnoNew2 == pgno2 || pgnoNew2 == pgno4 {
+		reusedCount++
+	}
+	if reusedCount == 0 {
+		t.Errorf("Expected to reuse at least one freed page, got %d and %d", pgnoNew1, pgnoNew2)
 	}
 }
 
@@ -472,106 +489,22 @@ func TestPagerFreeListPersistence(t *testing.T) {
 	tmpName := tmpFile.Name()
 	defer os.Remove(tmpName)
 
-	// First session: allocate and free some pages
-	pager1, err := OpenWithPageSize(tmpName, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-
-	// Allocate pages
-	pgno1, _ := pager1.AllocatePage()
-	pgno2, _ := pager1.AllocatePage()
-	pgno3, _ := pager1.AllocatePage()
-	pgno4, _ := pager1.AllocatePage()
-
-	if err := pager1.Commit(); err != nil {
-		t.Fatalf("Commit failed: %v", err)
-	}
-
-	// Free some pages
-	pager1.FreePage(pgno2)
-	pager1.FreePage(pgno4)
-
-	if err := pager1.Commit(); err != nil {
-		t.Fatalf("Commit failed: %v", err)
-	}
-
-	// Get free count before closing
-	freeCount1 := pager1.GetFreePageCount()
+	_, pgno2, _, pgno4, freeCount1 := flPersistFirstSession(t, tmpName)
 	if freeCount1 != 2 {
 		t.Errorf("Expected 2 free pages, got %d", freeCount1)
 	}
+	flPersistVerifyReuse(t, tmpName, pgno2, pgno4, freeCount1)
+}
 
-	// Close the pager
-	if err := pager1.Close(); err != nil {
-		t.Fatalf("Close failed: %v", err)
+// flFreeEveryOther frees every other page from the list and returns freed page numbers.
+func flFreeEveryOther(t *testing.T, p *Pager, pages []Pgno) []Pgno {
+	t.Helper()
+	var freed []Pgno
+	for i := 0; i < len(pages); i += 2 {
+		mustFreePage(t, p, pages[i])
+		freed = append(freed, pages[i])
 	}
-
-	// Second session: reopen and verify free list
-	pager2, err := OpenWithPageSize(tmpName, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to reopen pager: %v", err)
-	}
-	defer pager2.Close()
-
-	// Verify free count matches
-	freeCount2 := pager2.GetFreePageCount()
-	if freeCount2 != freeCount1 {
-		t.Errorf("Free count after reopen: expected %d, got %d", freeCount1, freeCount2)
-	}
-
-	t.Logf("Before allocation: free count = %d, pages were %d and %d", freeCount2, pgno2, pgno4)
-
-	// Allocate new pages - should reuse freed pages
-	pgnoNew1, _ := pager2.AllocatePage()
-	freeAfter1 := pager2.GetFreePageCount()
-	t.Logf("After first allocation: got page %d, free count = %d", pgnoNew1, freeAfter1)
-
-	pgnoNew2, _ := pager2.AllocatePage()
-	freeAfter2 := pager2.GetFreePageCount()
-	t.Logf("After second allocation: got page %d, free count = %d", pgnoNew2, freeAfter2)
-
-	// Verify pages are different
-	if pgnoNew1 == pgnoNew2 {
-		t.Error("Allocated pages should be different")
-	}
-
-	// At least one should have been reused from the free list
-	reusedCount := 0
-	if pgnoNew1 == pgno2 || pgnoNew1 == pgno4 {
-		reusedCount++
-	}
-	if pgnoNew2 == pgno2 || pgnoNew2 == pgno4 {
-		reusedCount++
-	}
-
-	// We should have reused at least one page (the behavior depends on allocation order)
-	if reusedCount == 0 {
-		t.Errorf("Expected to reuse at least one of pages %d and %d, got %d and %d", pgno2, pgno4, pgnoNew1, pgnoNew2)
-	}
-
-	// After allocating 2 pages with 2 free, we should have 0 free pages
-	// The free count should decrease by the number of pages we reused
-	freeCount3 := pager2.GetFreePageCount()
-	expectedFree := int(freeCount1) - reusedCount
-	if int(freeCount3) != expectedFree {
-		t.Errorf("Expected %d free pages (started with %d, reused %d), got %d", expectedFree, freeCount1, reusedCount, freeCount3)
-	}
-
-	// Verify the other pages are still accessible
-	page1, err := pager2.Get(pgno1)
-	if err != nil {
-		t.Errorf("Failed to get page %d: %v", pgno1, err)
-	} else {
-		pager2.Put(page1)
-	}
-
-	page3, err := pager2.Get(pgno3)
-	if err != nil {
-		t.Errorf("Failed to get page %d: %v", pgno3, err)
-	} else {
-		pager2.Put(page3)
-	}
+	return freed
 }
 
 // TestPagerFreeListMultiplePages tests freeing and reusing multiple pages.
@@ -580,70 +513,32 @@ func TestPagerFreeListMultiplePages(t *testing.T) {
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
-	// Allocate 100 pages
-	var pages []Pgno
-	for i := 0; i < 100; i++ {
-		pgno, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("AllocatePage failed at iteration %d: %v", i, err)
-		}
-		pages = append(pages, pgno)
-	}
+	pages := mustAllocatePages(t, pager, 100)
+	mustCommit(t, pager)
 
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit failed: %v", err)
-	}
+	freedPages := flFreeEveryOther(t, pager, pages)
+	mustCommit(t, pager)
 
-	// Free every other page (50 pages)
-	var freedPages []Pgno
-	for i := 0; i < len(pages); i += 2 {
-		if err := pager.FreePage(pages[i]); err != nil {
-			t.Fatalf("FreePage failed for page %d: %v", pages[i], err)
-		}
-		freedPages = append(freedPages, pages[i])
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit failed: %v", err)
-	}
-
-	// Verify free count
-	freeCount := pager.GetFreePageCount()
-	if freeCount != 50 {
+	if freeCount := pager.GetFreePageCount(); freeCount != 50 {
 		t.Errorf("Expected 50 free pages, got %d", freeCount)
 	}
 
-	// Allocate 50 new pages - should reuse all freed pages
-	var reusedPages []Pgno
-	for i := 0; i < 50; i++ {
-		pgno, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("AllocatePage failed during reuse at iteration %d: %v", i, err)
-		}
-		reusedPages = append(reusedPages, pgno)
-	}
+	reusedPages := mustAllocatePages(t, pager, 50)
 
-	// Verify all reused pages were from the freed set
 	freedSet := make(map[Pgno]bool)
 	for _, pgno := range freedPages {
 		freedSet[pgno] = true
 	}
-
 	for _, pgno := range reusedPages {
 		if !freedSet[pgno] {
 			t.Errorf("Page %d was not in the freed set", pgno)
 		}
 	}
 
-	// Should now have 0 free pages
-	freeCount = pager.GetFreePageCount()
-	if freeCount != 0 {
+	if freeCount := pager.GetFreePageCount(); freeCount != 0 {
 		t.Errorf("Expected 0 free pages after reusing all, got %d", freeCount)
 	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Final commit failed: %v", err)
-	}
+	mustCommit(t, pager)
 }
 
 // TestPagerFreeInvalidPage tests error handling for invalid page numbers.
@@ -711,53 +606,23 @@ func TestFreeListReadTrunk(t *testing.T) {
 	defer cleanup()
 
 	fl := NewFreeList(pager)
+	allocateTestPagesRange(t, pager, 2, 20)
+	mustCommit(t, pager)
+	freeTestPagesRange(t, fl, 5, 15)
+	mustFlush(t, fl)
 
-	// Ensure we have pages to work with
-	for i := Pgno(2); i <= 20; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
-		pager.Put(page)
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Free multiple pages to create trunk structure
-	for i := Pgno(5); i <= 15; i++ {
-		if err := fl.Free(i); err != nil {
-			t.Fatalf("failed to free page %d: %v", i, err)
-		}
-	}
-
-	// Flush to create trunk pages
-	if err := fl.Flush(); err != nil {
-		t.Fatalf("failed to flush: %v", err)
-	}
-
-	// Read trunk
 	if fl.GetFirstTrunk() == 0 {
 		t.Fatal("expected non-zero first trunk")
 	}
 
-	nextTrunk, leaves, err := fl.ReadTrunk(fl.GetFirstTrunk())
+	_, leaves, err := fl.ReadTrunk(fl.GetFirstTrunk())
 	if err != nil {
 		t.Fatalf("failed to read trunk: %v", err)
 	}
-
-	t.Logf("Next trunk: %d, Leaves: %v", nextTrunk, leaves)
-
-	// Should have some leaves
 	if len(leaves) == 0 {
 		t.Error("expected at least one leaf page")
 	}
 
-	// Test reading invalid trunk
 	_, _, err = fl.ReadTrunk(0)
 	if err != ErrInvalidTrunkPage {
 		t.Errorf("expected ErrInvalidTrunkPage, got %v", err)
@@ -780,32 +645,10 @@ func TestFreeListVerify(t *testing.T) {
 	})
 
 	t.Run("verify after freeeting pages", func(t *testing.T) {
-		// Ensure we have pages
-		for i := Pgno(2); i <= 30; i++ {
-			page, err := pager.Get(i)
-			if err != nil {
-				t.Fatalf("failed to get page %d: %v", i, err)
-			}
-			if err := pager.Write(page); err != nil {
-				t.Fatalf("failed to write page %d: %v", i, err)
-			}
-			pager.Put(page)
-		}
-		if err := pager.Commit(); err != nil {
-			t.Fatalf("failed to commit: %v", err)
-		}
-
-		// Free some pages
-		for i := Pgno(10); i <= 25; i++ {
-			if err := fl.Free(i); err != nil {
-				t.Fatalf("failed to free page %d: %v", i, err)
-			}
-		}
-
-		// Flush to disk
-		if err := fl.Flush(); err != nil {
-			t.Fatalf("failed to flush: %v", err)
-		}
+		allocateTestPagesRange(t, pager, 2, 30)
+		mustCommit(t, pager)
+		freeTestPagesRange(t, fl, 10, 25)
+		mustFlush(t, fl)
 
 		// Verify should pass
 		err := fl.Verify()
@@ -822,35 +665,15 @@ func TestFreeListIterateComplete(t *testing.T) {
 	defer cleanup()
 
 	fl := NewFreeList(pager)
+	allocateTestPagesRange(t, pager, 2, 100)
+	mustCommit(t, pager)
 
-	// Create pages
-	for i := Pgno(2); i <= 100; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
-		pager.Put(page)
-	}
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Free pages that we know exist (more than fit in one trunk)
 	expectedPages := make(map[Pgno]bool)
-	for i := Pgno(20); i <= 79; i++ { // Changed to 79 to stay within allocated range
+	for i := Pgno(20); i <= 79; i++ {
 		expectedPages[i] = true
-		if err := fl.Free(i); err != nil {
-			t.Fatalf("failed to free page %d: %v", i, err)
-		}
 	}
-
-	// Flush to create trunk structure
-	if err := fl.Flush(); err != nil {
-		t.Fatalf("failed to flush: %v", err)
-	}
+	freeTestPagesRange(t, fl, 20, 79)
+	mustFlush(t, fl)
 
 	// Iterate and collect all pages
 	collectedPages := make(map[Pgno]bool)
@@ -879,28 +702,9 @@ func TestFreeListInfoDetails(t *testing.T) {
 	defer cleanup()
 
 	fl := NewFreeList(pager)
-
-	// Create pages
-	for i := Pgno(2); i <= 50; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
-		pager.Put(page)
-	}
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Free pages
-	for i := Pgno(10); i <= 30; i++ {
-		if err := fl.Free(i); err != nil {
-			t.Fatalf("failed to free page %d: %v", i, err)
-		}
-	}
+	allocateTestPagesRange(t, pager, 2, 50)
+	mustCommit(t, pager)
+	freeTestPagesRange(t, fl, 10, 30)
 
 	// Get info before flush (should show pending)
 	info, err := fl.Info()

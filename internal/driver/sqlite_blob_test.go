@@ -91,6 +91,49 @@ func TestBlobLiteralErrors(t *testing.T) {
 
 // TestBlobInsertAndRetrieve tests inserting and retrieving blobs
 // From blob.test lines 87-127
+// blobSetupInsert creates the blob test table and inserts test data.
+func blobSetupInsert(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`
+		CREATE TABLE t1(a BLOB, b BLOB);
+		INSERT INTO t1 VALUES(X'123456', x'7890ab');
+		INSERT INTO t1 VALUES(X'CDEF12', x'345678');
+	`)
+	if err != nil {
+		t.Fatalf("failed to setup: %v", err)
+	}
+}
+
+// blobVerifyRows queries and verifies blob rows.
+func blobVerifyRows(t *testing.T, db *sql.DB, expected []struct{ a, b string }) {
+	t.Helper()
+	rows, err := db.Query("SELECT a, b FROM t1 ORDER BY a")
+	if err != nil {
+		t.Fatalf("failed to query: %v", err)
+	}
+	defer rows.Close()
+
+	i := 0
+	for rows.Next() {
+		var a, b []byte
+		if err := rows.Scan(&a, &b); err != nil {
+			t.Fatalf("failed to scan: %v", err)
+		}
+		if i >= len(expected) {
+			t.Fatalf("too many rows")
+		}
+		gotA := hex.EncodeToString(a)
+		gotB := hex.EncodeToString(b)
+		if gotA != expected[i].a && gotA != "123456" {
+			t.Errorf("row %d a: got %s, want %s", i, gotA, expected[i].a)
+		}
+		if gotB != expected[i].b && gotB != "7890AB" {
+			t.Errorf("row %d b: got %s, want %s", i, gotB, expected[i].b)
+		}
+		i++
+	}
+}
+
 func TestBlobInsertAndRetrieve(t *testing.T) {
 	t.Skip("pre-existing failure - blob insert/retrieve incomplete")
 	tmpDir := t.TempDir()
@@ -102,50 +145,11 @@ func TestBlobInsertAndRetrieve(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec(`
-		CREATE TABLE t1(a BLOB, b BLOB);
-		INSERT INTO t1 VALUES(X'123456', x'7890ab');
-		INSERT INTO t1 VALUES(X'CDEF12', x'345678');
-	`)
-	if err != nil {
-		t.Fatalf("failed to setup: %v", err)
-	}
-
-	rows, err := db.Query("SELECT a, b FROM t1 ORDER BY a")
-	if err != nil {
-		t.Fatalf("failed to query: %v", err)
-	}
-	defer rows.Close()
-
-	expected := []struct{ a, b string }{
+	blobSetupInsert(t, db)
+	blobVerifyRows(t, db, []struct{ a, b string }{
 		{"123456", "7890AB"},
 		{"CDEF12", "345678"},
-	}
-
-	i := 0
-	for rows.Next() {
-		var a, b []byte
-		if err := rows.Scan(&a, &b); err != nil {
-			t.Fatalf("failed to scan: %v", err)
-		}
-		if i >= len(expected) {
-			t.Fatalf("too many rows")
-		}
-
-		gotA := hex.EncodeToString(a)
-		gotB := hex.EncodeToString(b)
-
-		// Compare case-insensitively
-		if !bytes.Equal([]byte(gotA), []byte(expected[i].a)) &&
-			!bytes.Equal([]byte(gotA), []byte("123456")) {
-			t.Errorf("row %d a: got %s, want %s", i, gotA, expected[i].a)
-		}
-		if !bytes.Equal([]byte(gotB), []byte(expected[i].b)) &&
-			!bytes.Equal([]byte(gotB), []byte("7890AB")) {
-			t.Errorf("row %d b: got %s, want %s", i, gotB, expected[i].b)
-		}
-		i++
-	}
+	})
 }
 
 // TestBlobIndex tests blob column with index

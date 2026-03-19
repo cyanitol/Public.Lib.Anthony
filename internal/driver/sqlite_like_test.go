@@ -276,49 +276,60 @@ func TestSQLiteLikeGlob(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			rows, err := db.Query(tt.query)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("query error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			defer rows.Close()
-
-			var results []string
-			for rows.Next() {
-				var val interface{}
-				if err := rows.Scan(&val); err != nil {
-					t.Fatalf("scan error: %v", err)
-				}
-				if val != nil {
-					if s, ok := val.(string); ok {
-						results = append(results, s)
-					}
-				}
-			}
-
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows error: %v", err)
-			}
-
-			// For NULL tests, we expect empty results
-			if len(tt.expected) == 0 && len(results) == 0 {
-				return
-			}
-
-			if len(results) != len(tt.expected) {
-				t.Errorf("got %d results, want %d\nGot: %v\nWant: %v",
-					len(results), len(tt.expected), results, tt.expected)
-				return
-			}
-
-			for i, got := range results {
-				if got != tt.expected[i] {
-					t.Errorf("result[%d] = %q, want %q", i, got, tt.expected[i])
-				}
-			}
+			likeGlobCheckStrings(t, db, tt.query, tt.expected, tt.wantErr)
 		})
+	}
+}
+
+func likeGlobCheckStrings(t *testing.T, db *sql.DB, query string, expected []string, wantErr bool) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if (err != nil) != wantErr {
+		t.Fatalf("query error = %v, wantErr %v", err, wantErr)
+	}
+	if wantErr {
+		return
+	}
+	defer rows.Close()
+
+	results := likeGlobCollectStrings(t, rows)
+	if len(expected) == 0 && len(results) == 0 {
+		return
+	}
+	likeGlobAssertStrings(t, results, expected)
+}
+
+func likeGlobCollectStrings(t *testing.T, rows *sql.Rows) []string {
+	t.Helper()
+	var results []string
+	for rows.Next() {
+		var val interface{}
+		if err := rows.Scan(&val); err != nil {
+			t.Fatalf("scan error: %v", err)
+		}
+		if val != nil {
+			if s, ok := val.(string); ok {
+				results = append(results, s)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
+	return results
+}
+
+func likeGlobAssertStrings(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("got %d results, want %d\nGot: %v\nWant: %v",
+			len(got), len(want), got, want)
+		return
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("result[%d] = %q, want %q", i, got[i], want[i])
+		}
 	}
 }
 
@@ -403,37 +414,37 @@ func TestLikeEscape(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query error: %v", err)
-			}
-			defer rows.Close()
-
-			var results []int64
-			for rows.Next() {
-				var val int64
-				if err := rows.Scan(&val); err != nil {
-					t.Fatalf("scan error: %v", err)
-				}
-				results = append(results, val)
-			}
-
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows error: %v", err)
-			}
-
-			if len(results) != len(tt.expected) {
-				t.Errorf("got %d results, want %d\nGot: %v\nWant: %v",
-					len(results), len(tt.expected), results, tt.expected)
-				return
-			}
-
-			for i, got := range results {
-				if got != tt.expected[i] {
-					t.Errorf("result[%d] = %d, want %d", i, got, tt.expected[i])
-				}
-			}
+			likeAssertInt64s(t, db, tt.query, tt.expected)
 		})
+	}
+}
+
+func likeAssertInt64s(t *testing.T, db *sql.DB, query string, want []int64) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query error: %v", err)
+	}
+	defer rows.Close()
+	var got []int64
+	for rows.Next() {
+		var val int64
+		if err := rows.Scan(&val); err != nil {
+			t.Fatalf("scan error: %v", err)
+		}
+		got = append(got, val)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Errorf("got %d results, want %d\nGot: %v\nWant: %v", len(got), len(want), got, want)
+		return
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("result[%d] = %d, want %d", i, got[i], want[i])
+		}
 	}
 }
 
@@ -666,43 +677,32 @@ func TestLikeSpecialCharacters(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		_, err = db.Exec("INSERT INTO t1(x, y) VALUES(?, ?)", tc.expected, tc.char)
-		if err != nil {
+		if _, err = db.Exec("INSERT INTO t1(x, y) VALUES(?, ?)", tc.expected, tc.char); err != nil {
 			t.Fatalf("failed to insert %q: %v", tc.char, err)
 		}
 	}
 
-	// Test LIKE with special characters
 	for _, tc := range tests {
 		tc := tc // Capture range variable
 		t.Run("like_special_"+tc.char, func(t *testing.T) {
-			// Need to escape % and _ when they are literal characters
-			pattern := tc.char + "%"
-
-			var result int
-			err := db.QueryRow("SELECT x FROM t1 WHERE y LIKE ?", pattern).Scan(&result)
-			if err != nil {
-				t.Fatalf("query error for %q: %v", tc.char, err)
-			}
-
-			if result != tc.expected {
-				t.Errorf("char %q: got %d, want %d", tc.char, result, tc.expected)
-			}
+			likeAssertIntResult(t, db, "SELECT x FROM t1 WHERE y LIKE ?", tc.expected, tc.char+"%")
 		})
 	}
 
-	// Test that backslash is treated as a regular character in LIKE (like2.test lines 702-709)
 	t.Run("backslash_not_escape", func(t *testing.T) {
-		var result int
-		err := db.QueryRow("SELECT x FROM t1 WHERE y LIKE '\\%'").Scan(&result)
-		if err != nil {
-			t.Fatalf("query error: %v", err)
-		}
-
-		if result != 92 {
-			t.Errorf("got %d, want 92", result)
-		}
+		likeAssertIntResult(t, db, "SELECT x FROM t1 WHERE y LIKE '\\%'", 92)
 	})
+}
+
+func likeAssertIntResult(t *testing.T, db *sql.DB, query string, want int, args ...interface{}) {
+	t.Helper()
+	var result int
+	if err := db.QueryRow(query, args...).Scan(&result); err != nil {
+		t.Fatalf("query error: %v", err)
+	}
+	if result != want {
+		t.Errorf("got %d, want %d", result, want)
+	}
 }
 
 // TestLikeWithBlobs tests LIKE/GLOB with BLOB data
@@ -765,32 +765,7 @@ func TestLikeWithBlobs(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query error: %v", err)
-			}
-			defer rows.Close()
-
-			var results []int64
-			for rows.Next() {
-				var val int64
-				if err := rows.Scan(&val); err != nil {
-					t.Fatalf("scan error: %v", err)
-				}
-				results = append(results, val)
-			}
-
-			if len(results) != len(tt.expected) {
-				t.Errorf("got %d results, want %d\nGot: %v\nWant: %v",
-					len(results), len(tt.expected), results, tt.expected)
-				return
-			}
-
-			for i, got := range results {
-				if got != tt.expected[i] {
-					t.Errorf("result[%d] = %d, want %d", i, got, tt.expected[i])
-				}
-			}
+			likeAssertInt64s(t, db, tt.query, tt.expected)
 		})
 	}
 }

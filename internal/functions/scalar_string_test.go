@@ -84,37 +84,47 @@ func TestSubstrFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := substrFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("substrFunc() expected error, got nil")
-				}
+			if checkErrAndNull(t, err, result, tt.wantErr, tt.wantNull) {
 				return
 			}
-			if err != nil {
-				t.Fatalf("substrFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("substrFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("substrFunc() returned NULL")
-			}
-
-			var got string
-			if result.Type() == TypeBlob {
-				got = string(result.AsBlob())
-			} else {
-				got = result.AsString()
-			}
-
+			got := resultAsString(result)
 			if got != tt.want {
 				t.Errorf("substrFunc() = %q, want %q", got, tt.want)
 			}
 		})
 	}
+}
+
+// checkErrAndNull handles error and null checks for test cases. Returns true if test should return early.
+func checkErrAndNull(t *testing.T, err error, result Value, wantErr, wantNull bool) bool {
+	t.Helper()
+	if wantErr {
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		return true
+	}
+	if err != nil {
+		t.Fatalf("unexpected error = %v", err)
+	}
+	if wantNull {
+		if !result.IsNull() {
+			t.Errorf("got %v, want NULL", result)
+		}
+		return true
+	}
+	if result.IsNull() {
+		t.Fatal("unexpected NULL result")
+	}
+	return false
+}
+
+// resultAsString converts a Value to string, handling blobs.
+func resultAsString(result Value) string {
+	if result.Type() == TypeBlob {
+		return string(result.AsBlob())
+	}
+	return result.AsString()
 }
 
 // TestInstrFunc_EdgeCases tests edge cases for instr function
@@ -1045,15 +1055,16 @@ func TestCompareValues_EdgeCases(t *testing.T) {
 
 // Helper function to compare values
 func valuesEqual(a, b Value) bool {
-	if a.IsNull() && b.IsNull() {
-		return true
-	}
 	if a.IsNull() || b.IsNull() {
-		return false
+		return a.IsNull() && b.IsNull()
 	}
 	if a.Type() != b.Type() {
 		return false
 	}
+	return valuesEqualByType(a, b)
+}
+
+func valuesEqualByType(a, b Value) bool {
 	switch a.Type() {
 	case TypeInteger:
 		return a.AsInt64() == b.AsInt64()

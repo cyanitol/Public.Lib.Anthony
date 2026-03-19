@@ -313,191 +313,102 @@ func TestShouldApplyDefault(t *testing.T) {
 	}
 }
 
+// applyDefaultsHelper calls ApplyDefaults and asserts no error and expected length.
+func applyDefaultsHelper(t *testing.T, tableCols []*ColumnInfo, insertCols []string, insertVals []interface{}, wantLen int) []interface{} {
+	t.Helper()
+	result, err := ApplyDefaults(tableCols, insertCols, insertVals)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != wantLen {
+		t.Fatalf("expected %d values, got %d", wantLen, len(result))
+	}
+	return result
+}
+
+func testApplyDefaultsAllCols(t *testing.T) {
+	t.Helper()
+	tableCols := []*ColumnInfo{
+		{Name: "id", AllowsNull: false, DefaultConstraint: &DefaultConstraint{Type: DefaultLiteral, LiteralValue: int64(0)}},
+		{Name: "name", AllowsNull: true, DefaultConstraint: &DefaultConstraint{Type: DefaultLiteral, LiteralValue: "unknown"}},
+	}
+	result := applyDefaultsHelper(t, tableCols, []string{"id", "name"}, []interface{}{int64(1), "Alice"}, 2)
+	if result[0] != int64(1) {
+		t.Errorf("expected id=1, got %v", result[0])
+	}
+	if result[1] != "Alice" {
+		t.Errorf("expected name='Alice', got %v", result[1])
+	}
+}
+
+func testApplyDefaultsMissingWithDefault(t *testing.T) {
+	t.Helper()
+	tableCols := []*ColumnInfo{
+		{Name: "id", AllowsNull: false, DefaultConstraint: nil},
+		{Name: "created_at", AllowsNull: false, DefaultConstraint: &DefaultConstraint{Type: DefaultCurrentTimestamp}},
+	}
+	result := applyDefaultsHelper(t, tableCols, []string{"id"}, []interface{}{int64(1)}, 2)
+	if result[0] != int64(1) {
+		t.Errorf("expected id=1, got %v", result[0])
+	}
+	if ts, ok := result[1].(string); !ok || len(ts) != 19 {
+		t.Errorf("expected timestamp string, got %v (%T)", result[1], result[1])
+	}
+}
+
+func testApplyDefaultsNullNotNull(t *testing.T) {
+	t.Helper()
+	tableCols := []*ColumnInfo{
+		{Name: "status", AllowsNull: false, DefaultConstraint: &DefaultConstraint{Type: DefaultLiteral, LiteralValue: "active"}},
+	}
+	result := applyDefaultsHelper(t, tableCols, []string{"status"}, []interface{}{nil}, 1)
+	if result[0] != "active" {
+		t.Errorf("expected 'active', got %v", result[0])
+	}
+}
+
+func testApplyDefaultsNullNullable(t *testing.T) {
+	t.Helper()
+	tableCols := []*ColumnInfo{
+		{Name: "description", AllowsNull: true, DefaultConstraint: &DefaultConstraint{Type: DefaultLiteral, LiteralValue: "no description"}},
+	}
+	result := applyDefaultsHelper(t, tableCols, []string{"description"}, []interface{}{nil}, 1)
+	if result[0] != nil {
+		t.Errorf("expected nil, got %v", result[0])
+	}
+}
+
+func testApplyDefaultsMissingNoDefault(t *testing.T) {
+	t.Helper()
+	tableCols := []*ColumnInfo{
+		{Name: "id", AllowsNull: true, DefaultConstraint: nil},
+		{Name: "name", AllowsNull: true, DefaultConstraint: nil},
+	}
+	result := applyDefaultsHelper(t, tableCols, []string{"id"}, []interface{}{int64(1)}, 2)
+	if result[1] != nil {
+		t.Errorf("expected nil for missing column without default, got %v", result[1])
+	}
+}
+
+func testApplyDefaultsCaseInsensitive(t *testing.T) {
+	t.Helper()
+	tableCols := []*ColumnInfo{
+		{Name: "ID", AllowsNull: false, DefaultConstraint: &DefaultConstraint{Type: DefaultLiteral, LiteralValue: int64(0)}},
+	}
+	result := applyDefaultsHelper(t, tableCols, []string{"id"}, []interface{}{int64(42)}, 1)
+	if result[0] != int64(42) {
+		t.Errorf("expected 42, got %v", result[0])
+	}
+}
+
 // TestApplyDefaults tests applying defaults to INSERT operations.
 func TestApplyDefaults(t *testing.T) {
-	t.Run("all columns specified", func(t *testing.T) {
-		tableCols := []*ColumnInfo{
-			{
-				Name:       "id",
-				AllowsNull: false,
-				DefaultConstraint: &DefaultConstraint{
-					Type:         DefaultLiteral,
-					LiteralValue: int64(0),
-				},
-			},
-			{
-				Name:       "name",
-				AllowsNull: true,
-				DefaultConstraint: &DefaultConstraint{
-					Type:         DefaultLiteral,
-					LiteralValue: "unknown",
-				},
-			},
-		}
-
-		insertCols := []string{"id", "name"}
-		insertVals := []interface{}{int64(1), "Alice"}
-
-		result, err := ApplyDefaults(tableCols, insertCols, insertVals)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if len(result) != 2 {
-			t.Fatalf("expected 2 values, got %d", len(result))
-		}
-
-		if result[0] != int64(1) {
-			t.Errorf("expected id=1, got %v", result[0])
-		}
-
-		if result[1] != "Alice" {
-			t.Errorf("expected name='Alice', got %v", result[1])
-		}
-	})
-
-	t.Run("missing column with default", func(t *testing.T) {
-		tableCols := []*ColumnInfo{
-			{
-				Name:              "id",
-				AllowsNull:        false,
-				DefaultConstraint: nil,
-			},
-			{
-				Name:       "created_at",
-				AllowsNull: false,
-				DefaultConstraint: &DefaultConstraint{
-					Type: DefaultCurrentTimestamp,
-				},
-			},
-		}
-
-		insertCols := []string{"id"}
-		insertVals := []interface{}{int64(1)}
-
-		result, err := ApplyDefaults(tableCols, insertCols, insertVals)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if len(result) != 2 {
-			t.Fatalf("expected 2 values, got %d", len(result))
-		}
-
-		if result[0] != int64(1) {
-			t.Errorf("expected id=1, got %v", result[0])
-		}
-
-		// Check that created_at is a timestamp string
-		if ts, ok := result[1].(string); !ok || len(ts) != 19 {
-			t.Errorf("expected timestamp string, got %v (%T)", result[1], result[1])
-		}
-	})
-
-	t.Run("null provided for NOT NULL column with default", func(t *testing.T) {
-		tableCols := []*ColumnInfo{
-			{
-				Name:       "status",
-				AllowsNull: false,
-				DefaultConstraint: &DefaultConstraint{
-					Type:         DefaultLiteral,
-					LiteralValue: "active",
-				},
-			},
-		}
-
-		insertCols := []string{"status"}
-		insertVals := []interface{}{nil}
-
-		result, err := ApplyDefaults(tableCols, insertCols, insertVals)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		// Should use default instead of NULL
-		if result[0] != "active" {
-			t.Errorf("expected 'active', got %v", result[0])
-		}
-	})
-
-	t.Run("null provided for nullable column with default", func(t *testing.T) {
-		tableCols := []*ColumnInfo{
-			{
-				Name:       "description",
-				AllowsNull: true,
-				DefaultConstraint: &DefaultConstraint{
-					Type:         DefaultLiteral,
-					LiteralValue: "no description",
-				},
-			},
-		}
-
-		insertCols := []string{"description"}
-		insertVals := []interface{}{nil}
-
-		result, err := ApplyDefaults(tableCols, insertCols, insertVals)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		// Should keep NULL since column allows it
-		if result[0] != nil {
-			t.Errorf("expected nil, got %v", result[0])
-		}
-	})
-
-	t.Run("missing column without default", func(t *testing.T) {
-		tableCols := []*ColumnInfo{
-			{
-				Name:              "id",
-				AllowsNull:        true,
-				DefaultConstraint: nil,
-			},
-			{
-				Name:              "name",
-				AllowsNull:        true,
-				DefaultConstraint: nil,
-			},
-		}
-
-		insertCols := []string{"id"}
-		insertVals := []interface{}{int64(1)}
-
-		result, err := ApplyDefaults(tableCols, insertCols, insertVals)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		// Missing column without default should be NULL
-		if result[1] != nil {
-			t.Errorf("expected nil for missing column without default, got %v", result[1])
-		}
-	})
-
-	t.Run("case insensitive column names", func(t *testing.T) {
-		tableCols := []*ColumnInfo{
-			{
-				Name:       "ID",
-				AllowsNull: false,
-				DefaultConstraint: &DefaultConstraint{
-					Type:         DefaultLiteral,
-					LiteralValue: int64(0),
-				},
-			},
-		}
-
-		insertCols := []string{"id"} // lowercase
-		insertVals := []interface{}{int64(42)}
-
-		result, err := ApplyDefaults(tableCols, insertCols, insertVals)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if result[0] != int64(42) {
-			t.Errorf("expected 42, got %v", result[0])
-		}
-	})
+	t.Run("all columns specified", func(t *testing.T) { testApplyDefaultsAllCols(t) })
+	t.Run("missing column with default", func(t *testing.T) { testApplyDefaultsMissingWithDefault(t) })
+	t.Run("null for NOT NULL column with default", func(t *testing.T) { testApplyDefaultsNullNotNull(t) })
+	t.Run("null for nullable column with default", func(t *testing.T) { testApplyDefaultsNullNullable(t) })
+	t.Run("missing column without default", func(t *testing.T) { testApplyDefaultsMissingNoDefault(t) })
+	t.Run("case insensitive column names", func(t *testing.T) { testApplyDefaultsCaseInsensitive(t) })
 }
 
 // TestIntegrationDefaultConstraint tests a more realistic scenario.

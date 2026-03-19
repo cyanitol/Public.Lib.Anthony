@@ -22,7 +22,6 @@ func (s *Stmt) compileCreateTable(vm *vdbe.VDBE, stmt *parser.CreateTableStmt, a
 	vm.SetReadOnly(false)
 	vm.AllocMemory(10)
 
-	// Resolve target database (schema-qualified or main)
 	targetSchema, targetBtree, err := s.resolveTargetDatabase(stmt.Schema)
 	if err != nil {
 		return nil, err
@@ -34,40 +33,45 @@ func (s *Stmt) compileCreateTable(vm *vdbe.VDBE, stmt *parser.CreateTableStmt, a
 	}
 	table.SQL = s.query
 
-	// Allocate a root page for the table btree
-	if targetBtree != nil {
-		rootPage, err := s.allocateTablePage(targetBtree, stmt.WithoutRowID)
-		if err != nil {
-			return nil, err
-		}
-		table.RootPage = rootPage
-	} else {
-		table.RootPage = 2
-	}
-
-	// Register foreign key constraints with the FK manager
-	if err := s.registerForeignKeyConstraints(table, stmt); err != nil {
+	if err := s.initializeNewTable(table, stmt, targetSchema, targetBtree); err != nil {
 		return nil, err
-	}
-
-	// If table has AUTOINCREMENT, ensure sqlite_sequence table exists
-	if _, hasAutoincrement := table.HasAutoincrementColumn(); hasAutoincrement {
-		if err := s.ensureSqliteSequenceTable(); err != nil {
-			return nil, err
-		}
-	}
-
-	// Persist schema to sqlite_master
-	if targetBtree != nil {
-		if err := targetSchema.SaveToMaster(targetBtree); err != nil {
-			return nil, fmt.Errorf("failed to persist schema: %w", err)
-		}
 	}
 
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 
 	return vm, nil
+}
+
+// initializeNewTable allocates storage, registers constraints, and persists the schema for a new table.
+func (s *Stmt) initializeNewTable(table *schema.Table, stmt *parser.CreateTableStmt, targetSchema *schema.Schema, targetBtree *btree.Btree) error {
+	if targetBtree != nil {
+		rootPage, err := s.allocateTablePage(targetBtree, stmt.WithoutRowID)
+		if err != nil {
+			return err
+		}
+		table.RootPage = rootPage
+	} else {
+		table.RootPage = 2
+	}
+
+	if err := s.registerForeignKeyConstraints(table, stmt); err != nil {
+		return err
+	}
+
+	if _, hasAutoincrement := table.HasAutoincrementColumn(); hasAutoincrement {
+		if err := s.ensureSqliteSequenceTable(); err != nil {
+			return err
+		}
+	}
+
+	if targetBtree != nil {
+		if err := targetSchema.SaveToMaster(targetBtree); err != nil {
+			return fmt.Errorf("failed to persist schema: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // resolveTargetDatabase resolves the target schema and btree for a DDL statement.

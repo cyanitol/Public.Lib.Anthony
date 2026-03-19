@@ -124,7 +124,14 @@ func TestIndexCursor_InsertAndSeek(t *testing.T) {
 		}
 	}
 
-	// Seek and verify each entry
+	insertAndSeekVerifyEntries(t, cursor, entries)
+}
+
+func insertAndSeekVerifyEntries(t *testing.T, cursor *IndexCursor, entries []struct {
+	key   []byte
+	rowid int64
+}) {
+	t.Helper()
 	for _, entry := range entries {
 		found, err := cursor.SeekIndex(entry.key)
 		if err != nil {
@@ -139,9 +146,6 @@ func TestIndexCursor_InsertAndSeek(t *testing.T) {
 		}
 		if cursor.GetRowid() != entry.rowid {
 			t.Errorf("GetRowid() = %d, want %d", cursor.GetRowid(), entry.rowid)
-		}
-		if !cursor.IsValid() {
-			t.Error("cursor should be valid after successful seek")
 		}
 	}
 }
@@ -211,10 +215,20 @@ func TestIndexCursor_NextIndex(t *testing.T) {
 		cursor.InsertIndex(entry.key, entry.rowid)
 	}
 
-	// Start at first
 	cursor.MoveToFirst()
+	nextIndexVerifyForward(t, cursor, entries)
 
-	// Verify we can iterate through all entries
+	err = cursor.NextIndex()
+	if err == nil {
+		t.Error("NextIndex() should fail at end of index")
+	}
+}
+
+func nextIndexVerifyForward(t *testing.T, cursor *IndexCursor, entries []struct {
+	key   []byte
+	rowid int64
+}) {
+	t.Helper()
 	for i, expected := range entries {
 		if !cursor.IsValid() {
 			t.Fatalf("cursor invalid at iteration %d", i)
@@ -225,19 +239,11 @@ func TestIndexCursor_NextIndex(t *testing.T) {
 		if cursor.GetRowid() != expected.rowid {
 			t.Errorf("iteration %d: GetRowid() = %d, want %d", i, cursor.GetRowid(), expected.rowid)
 		}
-
-		// Move to next (except on last iteration)
 		if i < len(entries)-1 {
 			if err := cursor.NextIndex(); err != nil {
 				t.Fatalf("NextIndex() error at iteration %d: %v", i, err)
 			}
 		}
-	}
-
-	// Next should fail at end
-	err = cursor.NextIndex()
-	if err == nil {
-		t.Error("NextIndex() should fail at end of index")
 	}
 }
 

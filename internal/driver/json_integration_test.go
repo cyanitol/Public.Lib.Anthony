@@ -4,20 +4,35 @@ package driver_test
 import (
 	"database/sql"
 	"fmt"
-	"os"
 	"testing"
 
 	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
+// jsonCompareResult compares a query result against an expected value of type int64 or string.
+func jsonCompareResult(t *testing.T, result, expected interface{}) {
+	t.Helper()
+	switch exp := expected.(type) {
+	case int64:
+		if r, ok := result.(int64); !ok || r != exp {
+			t.Errorf("expected %d, got %v (type: %T)", exp, result, result)
+		}
+	case string:
+		if r, ok := result.(string); !ok || r != exp {
+			t.Errorf("expected %s, got %v (type: %T)", exp, result, result)
+		}
+	default:
+		t.Errorf("unexpected expected type: %T", exp)
+	}
+}
+
 // TestJSONFunctionsIntegration tests JSON functions via SQL queries
 func TestJSONFunctionsIntegration(t *testing.T) {
-	db, err := sql.Open("sqlite_internal", "test_json.db")
+	db, err := sql.Open("sqlite_internal", t.TempDir()+"/test_json.db")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	defer os.Remove("test_json.db")
 
 	tests := []struct {
 		name     string
@@ -145,32 +160,18 @@ func TestJSONFunctionsIntegration(t *testing.T) {
 			if err != nil {
 				t.Fatalf("query failed: %v", err)
 			}
-
-			// Compare based on expected type
-			switch exp := tt.expected.(type) {
-			case int64:
-				if r, ok := result.(int64); !ok || r != exp {
-					t.Errorf("expected %d, got %v (type: %T)", exp, result, result)
-				}
-			case string:
-				if r, ok := result.(string); !ok || r != exp {
-					t.Errorf("expected %s, got %v (type: %T)", exp, result, result)
-				}
-			default:
-				t.Errorf("unexpected expected type: %T", exp)
-			}
+			jsonCompareResult(t, result, tt.expected)
 		})
 	}
 }
 
 // TestJSONFunctionsNULL tests NULL handling in JSON functions
 func TestJSONFunctionsNULL(t *testing.T) {
-	db, err := sql.Open("sqlite_internal", "test_json_null.db")
+	db, err := sql.Open("sqlite_internal", t.TempDir()+"/test_json_null.db")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	defer os.Remove("test_json_null.db")
 
 	tests := []struct {
 		name  string
@@ -206,40 +207,55 @@ func TestJSONFunctionsNULL(t *testing.T) {
 	}
 }
 
+// jsonValidateAllRows queries rows with (id, valid) columns and checks valid=1.
+func jsonValidateAllRows(t *testing.T, db *sql.DB, query string) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, valid int64
+		if err := rows.Scan(&id, &valid); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		if valid != 1 {
+			t.Errorf("row %d: expected valid=1, got %d", id, valid)
+		}
+	}
+}
+
+// jsonSetupUsersTable creates and populates a users table with JSON data.
+func jsonSetupUsersTable(t *testing.T, db *sql.DB) {
+	t.Helper()
+	stmts := []string{
+		`CREATE TABLE users (id INTEGER, data TEXT)`,
+		`INSERT INTO users VALUES (1, '{"name":"Alice","age":30}')`,
+		`INSERT INTO users VALUES (2, '{"name":"Bob","age":25}')`,
+	}
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("failed to exec %q: %v", s, err)
+		}
+	}
+}
+
 // TestJSONFunctionsInTable tests JSON functions with table data
 func TestJSONFunctionsInTable(t *testing.T) {
-	db, err := sql.Open("sqlite_internal", "test_json_table.db")
+	db, err := sql.Open("sqlite_internal", t.TempDir()+"/test_json_table.db")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	defer os.Remove("test_json_table.db")
 
-	// Create table with JSON data
-	_, err = db.Exec(`CREATE TABLE users (id INTEGER, data TEXT)`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	jsonSetupUsersTable(t, db)
 
-	// Insert test data
-	_, err = db.Exec(`INSERT INTO users VALUES (1, '{"name":"Alice","age":30}')`)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = db.Exec(`INSERT INTO users VALUES (2, '{"name":"Bob","age":25}')`)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Test extracting JSON values from table
 	t.Run("extract name from JSON", func(t *testing.T) {
 		var name string
-		err := db.QueryRow(`SELECT json_extract(data, '$.name') FROM users WHERE id = 1`).Scan(&name)
-		if err != nil {
+		if err := db.QueryRow(`SELECT json_extract(data, '$.name') FROM users WHERE id = 1`).Scan(&name); err != nil {
 			t.Fatalf("query failed: %v", err)
 		}
-
 		if name != "Alice" {
 			t.Errorf("expected Alice, got %s", name)
 		}
@@ -247,44 +263,26 @@ func TestJSONFunctionsInTable(t *testing.T) {
 
 	t.Run("extract age from JSON", func(t *testing.T) {
 		var age int64
-		err := db.QueryRow(`SELECT json_extract(data, '$.age') FROM users WHERE id = 2`).Scan(&age)
-		if err != nil {
+		if err := db.QueryRow(`SELECT json_extract(data, '$.age') FROM users WHERE id = 2`).Scan(&age); err != nil {
 			t.Fatalf("query failed: %v", err)
 		}
-
 		if age != 25 {
 			t.Errorf("expected 25, got %d", age)
 		}
 	})
 
 	t.Run("validate all JSON data", func(t *testing.T) {
-		rows, err := db.Query(`SELECT id, json_valid(data) FROM users ORDER BY id`)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var id, valid int64
-			if err := rows.Scan(&id, &valid); err != nil {
-				t.Fatalf("scan failed: %v", err)
-			}
-
-			if valid != 1 {
-				t.Errorf("row %d: expected valid=1, got %d", id, valid)
-			}
-		}
+		jsonValidateAllRows(t, db, `SELECT id, json_valid(data) FROM users ORDER BY id`)
 	})
 }
 
 // TestJSONFunctionsComplex tests more complex JSON operations
 func TestJSONFunctionsComplex(t *testing.T) {
-	db, err := sql.Open("sqlite_internal", "test_json_complex.db")
+	db, err := sql.Open("sqlite_internal", t.TempDir()+"/test_json_complex.db")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	defer os.Remove("test_json_complex.db")
 
 	t.Run("nested object extraction", func(t *testing.T) {
 		query := `SELECT json_extract('{"user":{"profile":{"email":"test@example.com"}}}', '$.user.profile.email')`

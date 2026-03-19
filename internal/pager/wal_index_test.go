@@ -14,6 +14,68 @@ func tempWALIndexFile(t *testing.T) string {
 	return filepath.Join(tmpDir, "test.db")
 }
 
+// openTestWALIndex opens a WAL index for testing and registers cleanup.
+func openTestWALIndex(t *testing.T) (*WALIndex, string) {
+	t.Helper()
+	filename := tempWALIndexFile(t)
+	idx := mustOpenWALIndex(t, filename)
+	t.Cleanup(func() { idx.Close() })
+	return idx, filename
+}
+
+// insertFrameRange inserts frames for pages 1..n with frameNo = pgno * mult.
+func insertFrameRange(t *testing.T, idx *WALIndex, n uint32, mult uint32) {
+	t.Helper()
+	for i := uint32(1); i <= n; i++ {
+		mustInsertFrame(t, idx, i, i*mult)
+	}
+}
+
+// verifyFrameRange verifies frames for pages 1..n with expected frameNo = pgno * mult.
+func verifyFrameRange(t *testing.T, idx *WALIndex, n uint32, mult uint32) {
+	t.Helper()
+	for i := uint32(1); i <= n; i++ {
+		frameNo, err := idx.FindFrame(i)
+		if err != nil {
+			t.Fatalf("FindFrame(%d) error = %v", i, err)
+		}
+		if expected := i * mult; frameNo != expected {
+			t.Errorf("FindFrame(%d) = %d, want %d", i, frameNo, expected)
+		}
+	}
+}
+
+// verifyReadMarksZero verifies all read marks are zero.
+func verifyReadMarksZero(t *testing.T, idx *WALIndex, count int) {
+	t.Helper()
+	for i := 0; i < count; i++ {
+		mark, err := idx.GetReadMark(i)
+		if err != nil {
+			t.Fatalf("GetReadMark(%d) error = %v", i, err)
+		}
+		if mark != 0 {
+			t.Errorf("GetReadMark(%d) = %d, want 0", i, mark)
+		}
+	}
+}
+
+// verifyInvalidReaderErrors checks that invalid reader IDs return ErrInvalidReader.
+func verifyInvalidReaderErrors(t *testing.T, idx *WALIndex) {
+	t.Helper()
+	if err := idx.SetReadMark(-1, 100); err != ErrInvalidReader {
+		t.Errorf("SetReadMark(-1, 100) error = %v, want ErrInvalidReader", err)
+	}
+	if err := idx.SetReadMark(WALIndexMaxReaders, 100); err != ErrInvalidReader {
+		t.Errorf("SetReadMark(%d, 100) error = %v, want ErrInvalidReader", WALIndexMaxReaders, err)
+	}
+	if _, err := idx.GetReadMark(-1); err != ErrInvalidReader {
+		t.Errorf("GetReadMark(-1) error = %v, want ErrInvalidReader", err)
+	}
+	if _, err := idx.GetReadMark(WALIndexMaxReaders); err != ErrInvalidReader {
+		t.Errorf("GetReadMark(%d) error = %v, want ErrInvalidReader", WALIndexMaxReaders, err)
+	}
+}
+
 // TestNewWALIndex tests creating a new WAL index
 func TestNewWALIndex(t *testing.T) {
 	t.Parallel()
@@ -179,26 +241,12 @@ func TestWALIndex_MaxFrame(t *testing.T) {
 // TestWALIndex_ReadMarks tests setting and getting read marks
 func TestWALIndex_ReadMarks(t *testing.T) {
 	t.Parallel()
-	filename := tempWALIndexFile(t)
-
-	idx, err := NewWALIndex(filename)
-	if err != nil {
-		t.Fatalf("NewWALIndex() error = %v", err)
-	}
-	defer idx.Close()
+	idx, _ := openTestWALIndex(t)
 
 	// Initially, all read marks should be 0
-	for i := 0; i < WALIndexMaxReaders; i++ {
-		mark, err := idx.GetReadMark(i)
-		if err != nil {
-			t.Fatalf("GetReadMark(%d) error = %v", i, err)
-		}
-		if mark != 0 {
-			t.Errorf("GetReadMark(%d) = %d, want 0", i, mark)
-		}
-	}
+	verifyReadMarksZero(t, idx, WALIndexMaxReaders)
 
-	// Set read marks for different readers
+	// Set and verify read marks for different readers
 	testCases := []struct {
 		reader int
 		frame  uint32
@@ -211,15 +259,10 @@ func TestWALIndex_ReadMarks(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
-		if err := idx.SetReadMark(tc.reader, tc.frame); err != nil {
-			t.Fatalf("SetReadMark(%d, %d) error = %v", tc.reader, tc.frame, err)
-		}
+		mustSetReadMark(t, idx, tc.reader, tc.frame)
 	}
 
-	// Verify the read marks
 	for _, tc := range testCases {
-		tc := tc
 		mark, err := idx.GetReadMark(tc.reader)
 		if err != nil {
 			t.Fatalf("GetReadMark(%d) error = %v", tc.reader, err)
@@ -229,22 +272,7 @@ func TestWALIndex_ReadMarks(t *testing.T) {
 		}
 	}
 
-	// Test invalid reader IDs
-	if err := idx.SetReadMark(-1, 100); err != ErrInvalidReader {
-		t.Errorf("SetReadMark(-1, 100) error = %v, want ErrInvalidReader", err)
-	}
-
-	if err := idx.SetReadMark(WALIndexMaxReaders, 100); err != ErrInvalidReader {
-		t.Errorf("SetReadMark(%d, 100) error = %v, want ErrInvalidReader", WALIndexMaxReaders, err)
-	}
-
-	if _, err := idx.GetReadMark(-1); err != ErrInvalidReader {
-		t.Errorf("GetReadMark(-1) error = %v, want ErrInvalidReader", err)
-	}
-
-	if _, err := idx.GetReadMark(WALIndexMaxReaders); err != ErrInvalidReader {
-		t.Errorf("GetReadMark(%d) error = %v, want ErrInvalidReader", WALIndexMaxReaders, err)
-	}
+	verifyInvalidReaderErrors(t, idx)
 }
 
 // TestWALIndex_PageCount tests setting and getting the page count
@@ -287,49 +315,30 @@ func TestWALIndex_PageCount(t *testing.T) {
 // TestWALIndex_Clear tests clearing the WAL index
 func TestWALIndex_Clear(t *testing.T) {
 	t.Parallel()
-	filename := tempWALIndexFile(t)
+	idx, _ := openTestWALIndex(t)
 
-	idx, err := NewWALIndex(filename)
-	if err != nil {
-		t.Fatalf("NewWALIndex() error = %v", err)
-	}
-	defer idx.Close()
-
-	// Insert some frames
-	for i := uint32(1); i <= 10; i++ {
-		if err := idx.InsertFrame(i, i*10); err != nil {
-			t.Fatalf("InsertFrame(%d, %d) error = %v", i, i*10, err)
-		}
-	}
-
-	// Set some read marks
-	if err := idx.SetReadMark(1, 100); err != nil {
-		t.Fatalf("SetReadMark(1, 100) error = %v", err)
-	}
+	// Insert frames and set read marks
+	insertFrameRange(t, idx, 10, 10)
+	mustSetReadMark(t, idx, 1, 100)
 
 	// Verify data exists
 	if _, err := idx.FindFrame(5); err != nil {
 		t.Fatalf("FindFrame(5) error = %v (should exist)", err)
 	}
-
 	if maxFrame := idx.GetMaxFrame(); maxFrame != 100 {
 		t.Errorf("GetMaxFrame() = %d, want 100", maxFrame)
 	}
 
-	// Clear the index
+	// Clear and verify
 	if err := idx.Clear(); err != nil {
 		t.Fatalf("Clear() error = %v", err)
 	}
-
-	// Verify everything is cleared
 	if _, err := idx.FindFrame(5); err != ErrFrameNotFound {
 		t.Errorf("FindFrame(5) after Clear() error = %v, want ErrFrameNotFound", err)
 	}
-
 	if maxFrame := idx.GetMaxFrame(); maxFrame != 0 {
 		t.Errorf("GetMaxFrame() after Clear() = %d, want 0", maxFrame)
 	}
-
 	mark, err := idx.GetReadMark(1)
 	if err != nil {
 		t.Fatalf("GetReadMark(1) after Clear() error = %v", err)
@@ -389,49 +398,18 @@ func TestWALIndex_CloseAndReopen(t *testing.T) {
 	t.Parallel()
 	filename := tempWALIndexFile(t)
 
-	// Create and populate the index
-	idx, err := NewWALIndex(filename)
-	if err != nil {
-		t.Fatalf("NewWALIndex() error = %v", err)
-	}
+	// Create, populate, and close
+	idx := mustOpenWALIndex(t, filename)
+	insertFrameRange(t, idx, 5, 10)
+	mustSetReadMark(t, idx, 1, 50)
+	mustCloseWALIndex(t, idx)
 
-	// Insert some frames
-	for i := uint32(1); i <= 5; i++ {
-		if err := idx.InsertFrame(i, i*10); err != nil {
-			t.Fatalf("InsertFrame(%d, %d) error = %v", i, i*10, err)
-		}
-	}
-
-	// Set a read mark
-	if err := idx.SetReadMark(1, 50); err != nil {
-		t.Fatalf("SetReadMark(1, 50) error = %v", err)
-	}
-
-	// Close the index
-	if err := idx.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-
-	// Reopen the index
-	idx2, err := NewWALIndex(filename)
-	if err != nil {
-		t.Fatalf("NewWALIndex() (reopen) error = %v", err)
-	}
+	// Reopen and verify
+	idx2 := mustOpenWALIndex(t, filename)
 	defer idx2.Close()
 
-	// Verify data persisted
-	for i := uint32(1); i <= 5; i++ {
-		frameNo, err := idx2.FindFrame(i)
-		if err != nil {
-			t.Fatalf("FindFrame(%d) after reopen error = %v", i, err)
-		}
-		expectedFrame := i * 10
-		if frameNo != expectedFrame {
-			t.Errorf("FindFrame(%d) after reopen = %d, want %d", i, frameNo, expectedFrame)
-		}
-	}
+	verifyFrameRange(t, idx2, 5, 10)
 
-	// Verify read mark persisted
 	mark, err := idx2.GetReadMark(1)
 	if err != nil {
 		t.Fatalf("GetReadMark(1) after reopen error = %v", err)
@@ -539,22 +517,14 @@ func TestWALIndex_Delete(t *testing.T) {
 // TestWALIndex_Concurrent tests concurrent access to the WAL index
 func TestWALIndex_Concurrent(t *testing.T) {
 	t.Parallel()
-	filename := tempWALIndexFile(t)
+	idx, _ := openTestWALIndex(t)
 
-	idx, err := NewWALIndex(filename)
-	if err != nil {
-		t.Fatalf("NewWALIndex() error = %v", err)
-	}
-	defer idx.Close()
-
-	// Use goroutines to simulate concurrent access
 	const numGoroutines = 10
 	const numOpsPerGoroutine = 100
 
 	errCh := make(chan error, numGoroutines*numOpsPerGoroutine)
 	doneCh := make(chan bool, numGoroutines)
 
-	// Writer goroutines
 	for g := 0; g < numGoroutines; g++ {
 		go func(id int) {
 			for i := 0; i < numOpsPerGoroutine; i++ {
@@ -569,22 +539,24 @@ func TestWALIndex_Concurrent(t *testing.T) {
 		}(g)
 	}
 
-	// Wait for all goroutines to complete
 	for g := 0; g < numGoroutines; g++ {
 		<-doneCh
 	}
 	close(errCh)
-
-	// Check for errors
 	for err := range errCh {
 		t.Errorf("Concurrent operation error: %v", err)
 	}
 
-	// Verify all frames were inserted correctly
+	verifyConcurrentFrames(t, idx, numGoroutines, numOpsPerGoroutine)
+}
+
+// verifyConcurrentFrames verifies all frames inserted by concurrent goroutines.
+func verifyConcurrentFrames(t *testing.T, idx *WALIndex, numGoroutines, numOps int) {
+	t.Helper()
 	for g := 0; g < numGoroutines; g++ {
-		for i := 0; i < numOpsPerGoroutine; i++ {
-			pgno := uint32(g*numOpsPerGoroutine + i + 1)
-			expectedFrame := uint32((g*numOpsPerGoroutine + i + 1) * 10)
+		for i := 0; i < numOps; i++ {
+			pgno := uint32(g*numOps + i + 1)
+			expectedFrame := uint32((g*numOps + i + 1) * 10)
 			frameNo, err := idx.FindFrame(pgno)
 			if err != nil {
 				t.Errorf("FindFrame(%d) error = %v", pgno, err)

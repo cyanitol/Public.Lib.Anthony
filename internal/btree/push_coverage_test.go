@@ -186,32 +186,30 @@ func TestCursor_LoadCellAtCurrentIndexErrors(t *testing.T) {
 	for i := int64(1); i <= 20; i++ {
 		payload := make([]byte, 15)
 		binary.BigEndian.PutUint64(payload, uint64(i*100))
-		err := cursor.Insert(i, payload)
-		if err != nil {
+		if err := cursor.Insert(i, payload); err != nil {
 			t.Fatalf("Insert() error = %v", err)
 		}
 	}
 
 	// Navigate and verify cell loading
 	cursor.MoveToFirst()
-	for i := 0; i < 15; i++ {
+	loadCellVerifyNavigation(t, cursor, 15)
+}
+
+func loadCellVerifyNavigation(t *testing.T, cursor *BtCursor, steps int) {
+	t.Helper()
+	for i := 0; i < steps; i++ {
 		if !cursor.IsValid() {
 			break
 		}
-
 		key := cursor.GetKey()
-		payload := cursor.GetPayload()
-
 		if key < 1 || key > 20 {
 			t.Errorf("Unexpected key: %d", key)
 		}
-		if len(payload) == 0 {
+		if len(cursor.GetPayload()) == 0 {
 			t.Error("Empty payload loaded")
 		}
-
-		err := cursor.Next()
-		if err != nil {
-			t.Logf("Next() error = %v", err)
+		if err := cursor.Next(); err != nil {
 			break
 		}
 	}
@@ -350,14 +348,17 @@ func TestMerge_FindSiblingPages(t *testing.T) {
 
 	// Create multi-page tree
 	for i := int64(1); i <= 110; i++ {
-		err := cursor.Insert(i, make([]byte, 19))
-		if err != nil {
+		if err := cursor.Insert(i, make([]byte, 19)); err != nil {
 			break
 		}
 	}
 
-	// Delete from various positions
 	positions := []int64{15, 45, 75, 105}
+	findSiblingDeletePositions(cursor, positions)
+	findSiblingTryMerge(t, cursor, positions)
+}
+
+func findSiblingDeletePositions(cursor *BtCursor, positions []int64) {
 	for _, pos := range positions {
 		for j := pos; j < pos+5; j++ {
 			cursor.SeekRowid(j)
@@ -366,8 +367,10 @@ func TestMerge_FindSiblingPages(t *testing.T) {
 			}
 		}
 	}
+}
 
-	// Try merge at different positions
+func findSiblingTryMerge(t *testing.T, cursor *BtCursor, positions []int64) {
+	t.Helper()
 	for _, pos := range positions {
 		cursor.SeekRowid(pos + 2)
 		if cursor.IsValid() && cursor.Depth > 0 {
@@ -507,34 +510,28 @@ func TestMerge_GetChildPageAt(t *testing.T) {
 	}
 
 	cursor := NewCursor(bt, rootPage)
-
-	// Create interior pages
 	for i := int64(1); i <= 115; i++ {
-		err := cursor.Insert(i, make([]byte, 24))
-		if err != nil {
+		if err := cursor.Insert(i, make([]byte, 24)); err != nil {
 			break
 		}
 	}
 
-	// Seek to various positions to navigate tree
-	for _, rowid := range []int64{1, 30, 60, 90, 115} {
-		cursor.SeekRowid(rowid)
-		if cursor.IsValid() {
-			t.Logf("Seeked to rowid %d at depth %d", rowid, cursor.Depth)
-		}
-	}
-
-	// Delete and attempt merge
-	for i := int64(40); i <= 70; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
-	}
+	getChildPageAtSeekPositions(t, cursor)
+	deleteRowRange(cursor, 40, 70)
 
 	cursor.SeekRowid(55)
 	if cursor.IsValid() && cursor.Depth > 0 {
 		cursor.MergePage()
 		t.Log("Merge completed (getChildPageAt)")
+	}
+}
+
+func getChildPageAtSeekPositions(t *testing.T, cursor *BtCursor) {
+	t.Helper()
+	for _, rowid := range []int64{1, 30, 60, 90, 115} {
+		cursor.SeekRowid(rowid)
+		if cursor.IsValid() {
+			t.Logf("Seeked to rowid %d at depth %d", rowid, cursor.Depth)
+		}
 	}
 }

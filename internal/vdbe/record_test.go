@@ -6,132 +6,78 @@ import (
 	"testing"
 )
 
+// compareDecodedValue checks if a decoded value matches the original.
+func compareDecodedValue(t *testing.T, i int, original, result interface{}) {
+	t.Helper()
+	if original == nil {
+		if result != nil {
+			t.Errorf("value[%d]: expected nil, got %v", i, result)
+		}
+		return
+	}
+	compareDecodedNonNil(t, i, original, result)
+}
+
+func compareDecodedNonNil(t *testing.T, i int, original, result interface{}) {
+	t.Helper()
+	if !decodedValuesMatch(original, result) {
+		t.Errorf("value[%d]: expected %v (%T), got %v (%T)", i, original, original, result, result)
+	}
+}
+
+func decodedValuesMatch(original, result interface{}) bool {
+	switch orig := original.(type) {
+	case int64:
+		res, ok := result.(int64)
+		return ok && res == orig
+	case float64:
+		res, ok := result.(float64)
+		return ok && res == orig
+	case string:
+		res, ok := result.(string)
+		return ok && res == orig
+	case []byte:
+		res, ok := result.([]byte)
+		return ok && bytes.Equal(res, orig)
+	}
+	return false
+}
+
 func TestEncodeDecodeRecord(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
 		values []interface{}
 	}{
-		{
-			name:   "empty record",
-			values: []interface{}{},
-		},
-		{
-			name:   "single NULL",
-			values: []interface{}{nil},
-		},
-		{
-			name:   "integer 0",
-			values: []interface{}{int64(0)},
-		},
-		{
-			name:   "integer 1",
-			values: []interface{}{int64(1)},
-		},
-		{
-			name:   "int8",
-			values: []interface{}{int64(42)},
-		},
-		{
-			name:   "int8 negative",
-			values: []interface{}{int64(-100)},
-		},
-		{
-			name:   "int16",
-			values: []interface{}{int64(1000)},
-		},
-		{
-			name:   "int32",
-			values: []interface{}{int64(100000)},
-		},
-		{
-			name:   "int64",
-			values: []interface{}{int64(9223372036854775807)},
-		},
-		{
-			name:   "float64",
-			values: []interface{}{3.14159},
-		},
-		{
-			name:   "text",
-			values: []interface{}{"Hello, World!"},
-		},
-		{
-			name:   "blob",
-			values: []interface{}{[]byte{0x01, 0x02, 0x03, 0x04}},
-		},
-		{
-			name: "mixed types",
-			values: []interface{}{
-				int64(42),
-				"test string",
-				nil,
-				3.14159,
-				[]byte{0xDE, 0xAD, 0xBE, 0xEF},
-			},
-		},
+		{"empty record", []interface{}{}},
+		{"single NULL", []interface{}{nil}},
+		{"integer 0", []interface{}{int64(0)}},
+		{"integer 1", []interface{}{int64(1)}},
+		{"int8", []interface{}{int64(42)}},
+		{"int8 negative", []interface{}{int64(-100)}},
+		{"int16", []interface{}{int64(1000)}},
+		{"int32", []interface{}{int64(100000)}},
+		{"int64", []interface{}{int64(9223372036854775807)}},
+		{"float64", []interface{}{3.14159}},
+		{"text", []interface{}{"Hello, World!"}},
+		{"blob", []interface{}{[]byte{0x01, 0x02, 0x03, 0x04}}},
+		{"mixed types", []interface{}{int64(42), "test string", nil, 3.14159, []byte{0xDE, 0xAD, 0xBE, 0xEF}}},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			// Encode
 			encoded := encodeSimpleRecord(tt.values)
-
-			// Decode
 			decoded, err := decodeRecord(encoded)
 			if err != nil {
 				t.Fatalf("decodeRecord failed: %v", err)
 			}
-
-			// Verify length matches
 			if len(decoded) != len(tt.values) {
 				t.Fatalf("decoded length %d != original length %d", len(decoded), len(tt.values))
 			}
-
-			// Verify each value
 			for i, original := range tt.values {
-				result := decoded[i]
-
-				// Handle type comparisons
-				switch orig := original.(type) {
-				case nil:
-					if result != nil {
-						t.Errorf("value[%d]: expected nil, got %v", i, result)
-					}
-
-				case int64:
-					if res, ok := result.(int64); !ok {
-						t.Errorf("value[%d]: expected int64, got %T", i, result)
-					} else if res != orig {
-						t.Errorf("value[%d]: expected %d, got %d", i, orig, res)
-					}
-
-				case float64:
-					if res, ok := result.(float64); !ok {
-						t.Errorf("value[%d]: expected float64, got %T", i, result)
-					} else if res != orig {
-						t.Errorf("value[%d]: expected %f, got %f", i, orig, res)
-					}
-
-				case string:
-					if res, ok := result.(string); !ok {
-						t.Errorf("value[%d]: expected string, got %T", i, result)
-					} else if res != orig {
-						t.Errorf("value[%d]: expected %q, got %q", i, orig, res)
-					}
-
-				case []byte:
-					if res, ok := result.([]byte); !ok {
-						t.Errorf("value[%d]: expected []byte, got %T", i, result)
-					} else if !bytes.Equal(res, orig) {
-						t.Errorf("value[%d]: expected %v, got %v", i, orig, res)
-					}
-
-				default:
-					t.Errorf("value[%d]: unsupported type %T", i, original)
-				}
+				compareDecodedValue(t, i, original, decoded[i])
 			}
 		})
 	}

@@ -272,39 +272,46 @@ func TestMinMaxFunc_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var f interface {
-				Step([]Value) error
-				Final() (Value, error)
-			}
-
-			if tt.fn == "min" {
-				f = &MinFunc{}
-			} else {
-				f = &MaxFunc{}
-			}
-
-			for _, v := range tt.values {
-				if err := f.Step([]Value{v}); err != nil {
-					t.Fatalf("Step() error = %v", err)
-				}
-			}
-
-			result, err := f.Final()
-			if err != nil {
-				t.Fatalf("Final() error = %v", err)
-			}
-
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("Final() = %v, want NULL", result)
-				}
-				return
-			}
-
-			if tt.validate != nil && !tt.validate(result) {
-				t.Errorf("Final() validation failed for %v", result)
-			}
+			f := newMinMaxFunc(tt.fn)
+			stepMinMax(t, f, tt.values)
+			checkMinMaxResult(t, f, tt.wantNull, tt.validate)
 		})
+	}
+}
+
+func newMinMaxFunc(name string) interface {
+	Step([]Value) error
+	Final() (Value, error)
+} {
+	if name == "min" {
+		return &MinFunc{}
+	}
+	return &MaxFunc{}
+}
+
+func stepMinMax(t *testing.T, f interface{ Step([]Value) error }, values []Value) {
+	t.Helper()
+	for _, v := range values {
+		if err := f.Step([]Value{v}); err != nil {
+			t.Fatalf("Step() error = %v", err)
+		}
+	}
+}
+
+func checkMinMaxResult(t *testing.T, f interface{ Final() (Value, error) }, wantNull bool, validate func(Value) bool) {
+	t.Helper()
+	result, err := f.Final()
+	if err != nil {
+		t.Fatalf("Final() error = %v", err)
+	}
+	if wantNull {
+		if !result.IsNull() {
+			t.Errorf("Final() = %v, want NULL", result)
+		}
+		return
+	}
+	if validate != nil && !validate(result) {
+		t.Errorf("Final() validation failed for %v", result)
 	}
 }
 
@@ -357,37 +364,46 @@ func TestGroupConcatFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &GroupConcatFunc{}
-
-			for _, args := range tt.values {
-				err := f.Step(args)
-				if tt.wantErr {
-					if err == nil {
-						t.Error("Step() expected error, got nil")
-					}
-					return
-				}
-				if err != nil {
-					t.Fatalf("Step() error = %v", err)
-				}
-			}
-
-			result, err := f.Final()
-			if err != nil {
-				t.Fatalf("Final() error = %v", err)
-			}
-
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("Final() = %v, want NULL", result)
-				}
+			if stepGroupConcat(t, f, tt.values, tt.wantErr) {
 				return
 			}
-
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("Final() = %q, want %q", got, tt.want)
-			}
+			checkGroupConcatResult(t, f, tt.wantNull, tt.want)
 		})
+	}
+}
+
+// stepGroupConcat steps through values, returning true if test should return early due to expected error.
+func stepGroupConcat(t *testing.T, f *GroupConcatFunc, values [][]Value, wantErr bool) bool {
+	t.Helper()
+	for _, args := range values {
+		err := f.Step(args)
+		if wantErr {
+			if err == nil {
+				t.Error("Step() expected error, got nil")
+			}
+			return true
+		}
+		if err != nil {
+			t.Fatalf("Step() error = %v", err)
+		}
+	}
+	return false
+}
+
+func checkGroupConcatResult(t *testing.T, f *GroupConcatFunc, wantNull bool, want string) {
+	t.Helper()
+	result, err := f.Final()
+	if err != nil {
+		t.Fatalf("Final() error = %v", err)
+	}
+	if wantNull {
+		if !result.IsNull() {
+			t.Errorf("Final() = %v, want NULL", result)
+		}
+		return
+	}
+	if got := result.AsString(); got != want {
+		t.Errorf("Final() = %q, want %q", got, want)
 	}
 }
 

@@ -59,15 +59,27 @@ func testParseCreateViewSuccess(t *testing.T) {
 	testParseCreateViewQuoted(t)
 }
 
+func assertViewName(t *testing.T, stmt *CreateViewStmt, want string) {
+	t.Helper()
+	if stmt.Name != want {
+		t.Errorf("expected view name %q, got %q", want, stmt.Name)
+	}
+}
+
+func assertViewHasSelect(t *testing.T, stmt *CreateViewStmt) {
+	t.Helper()
+	if stmt.Select == nil {
+		t.Error("expected SELECT statement")
+	}
+}
+
 func testParseCreateViewBasic(t *testing.T) {
 	t.Helper()
 
 	runCreateViewSubtest(t, "simple view",
 		"CREATE VIEW v AS SELECT * FROM users",
 		func(t *testing.T, stmt *CreateViewStmt) {
-			if stmt.Name != "v" {
-				t.Errorf("expected view name 'v', got %q", stmt.Name)
-			}
+			assertViewName(t, stmt, "v")
 			if stmt.IfNotExists {
 				t.Error("expected IfNotExists to be false")
 			}
@@ -77,21 +89,17 @@ func testParseCreateViewBasic(t *testing.T) {
 			if len(stmt.Columns) != 0 {
 				t.Errorf("expected no columns, got %d", len(stmt.Columns))
 			}
-			if stmt.Select == nil {
-				t.Error("expected SELECT statement")
-			}
+			assertViewHasSelect(t, stmt)
 		})
 
 	runCreateViewSubtest(t, "view with column list",
 		"CREATE VIEW v(id, name, email) AS SELECT id, name, email FROM users",
 		func(t *testing.T, stmt *CreateViewStmt) {
-			if stmt.Name != "v" {
-				t.Errorf("expected view name 'v', got %q", stmt.Name)
-			}
-			if len(stmt.Columns) != 3 {
-				t.Errorf("expected 3 columns, got %d", len(stmt.Columns))
-			}
+			assertViewName(t, stmt, "v")
 			expectedCols := []string{"id", "name", "email"}
+			if len(stmt.Columns) != len(expectedCols) {
+				t.Fatalf("expected %d columns, got %d", len(expectedCols), len(stmt.Columns))
+			}
 			for i, col := range stmt.Columns {
 				if col != expectedCols[i] {
 					t.Errorf("column %d: expected %q, got %q", i, expectedCols[i], col)
@@ -99,94 +107,49 @@ func testParseCreateViewBasic(t *testing.T) {
 			}
 		})
 
-	runCreateViewSubtest(t, "view with complex SELECT",
-		"CREATE VIEW user_orders AS SELECT u.id, u.name, COUNT(o.id) AS order_count FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id, u.name",
-		func(t *testing.T, stmt *CreateViewStmt) {
-			if stmt.Name != "user_orders" {
-				t.Errorf("expected view name 'user_orders', got %q", stmt.Name)
-			}
-			if stmt.Select == nil {
-				t.Error("expected SELECT statement")
-			}
+	basicViewTests := []struct {
+		name     string
+		sql      string
+		wantName string
+	}{
+		{"view with complex SELECT", "CREATE VIEW user_orders AS SELECT u.id, u.name, COUNT(o.id) AS order_count FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id, u.name", "user_orders"},
+		{"view with WHERE clause", "CREATE VIEW active_users AS SELECT * FROM users WHERE active = 1", "active_users"},
+		{"view with ORDER BY", "CREATE VIEW sorted_users AS SELECT * FROM users ORDER BY name", "sorted_users"},
+		{"view with LIMIT", "CREATE VIEW top_users AS SELECT * FROM users LIMIT 10", "top_users"},
+	}
+	for _, tt := range basicViewTests {
+		runCreateViewSubtest(t, tt.name, tt.sql, func(t *testing.T, stmt *CreateViewStmt) {
+			assertViewName(t, stmt, tt.wantName)
+			assertViewHasSelect(t, stmt)
 		})
-
-	runCreateViewSubtest(t, "view with WHERE clause",
-		"CREATE VIEW active_users AS SELECT * FROM users WHERE active = 1",
-		func(t *testing.T, stmt *CreateViewStmt) {
-			if stmt.Name != "active_users" {
-				t.Errorf("expected view name 'active_users', got %q", stmt.Name)
-			}
-			if stmt.Select == nil {
-				t.Error("expected SELECT statement")
-			}
-		})
-
-	runCreateViewSubtest(t, "view with ORDER BY",
-		"CREATE VIEW sorted_users AS SELECT * FROM users ORDER BY name",
-		func(t *testing.T, stmt *CreateViewStmt) {
-			if stmt.Name != "sorted_users" {
-				t.Errorf("expected view name 'sorted_users', got %q", stmt.Name)
-			}
-		})
-
-	runCreateViewSubtest(t, "view with LIMIT",
-		"CREATE VIEW top_users AS SELECT * FROM users LIMIT 10",
-		func(t *testing.T, stmt *CreateViewStmt) {
-			if stmt.Name != "top_users" {
-				t.Errorf("expected view name 'top_users', got %q", stmt.Name)
-			}
-		})
+	}
 }
 
 func testParseCreateViewOptions(t *testing.T) {
 	t.Helper()
-
-	runCreateViewSubtest(t, "view with IF NOT EXISTS",
-		"CREATE VIEW IF NOT EXISTS v AS SELECT * FROM users",
-		func(t *testing.T, stmt *CreateViewStmt) {
-			if stmt.Name != "v" {
-				t.Errorf("expected view name 'v', got %q", stmt.Name)
+	tests := []struct {
+		name          string
+		sql           string
+		wantName      string
+		wantTemp      bool
+		wantIfNotExist bool
+	}{
+		{"view with IF NOT EXISTS", "CREATE VIEW IF NOT EXISTS v AS SELECT * FROM users", "v", false, true},
+		{"temporary view", "CREATE TEMP VIEW v AS SELECT * FROM users", "v", true, false},
+		{"temporary view with TEMPORARY keyword", "CREATE TEMPORARY VIEW v AS SELECT * FROM users", "v", true, false},
+		{"temporary view with IF NOT EXISTS", "CREATE TEMP VIEW IF NOT EXISTS v AS SELECT * FROM users", "v", true, true},
+	}
+	for _, tt := range tests {
+		runCreateViewSubtest(t, tt.name, tt.sql, func(t *testing.T, stmt *CreateViewStmt) {
+			assertViewName(t, stmt, tt.wantName)
+			if stmt.Temporary != tt.wantTemp {
+				t.Errorf("expected Temporary=%v, got %v", tt.wantTemp, stmt.Temporary)
 			}
-			if !stmt.IfNotExists {
-				t.Error("expected IfNotExists to be true")
-			}
-		})
-
-	runCreateViewSubtest(t, "temporary view",
-		"CREATE TEMP VIEW v AS SELECT * FROM users",
-		func(t *testing.T, stmt *CreateViewStmt) {
-			if stmt.Name != "v" {
-				t.Errorf("expected view name 'v', got %q", stmt.Name)
-			}
-			if !stmt.Temporary {
-				t.Error("expected Temporary to be true")
-			}
-		})
-
-	runCreateViewSubtest(t, "temporary view with TEMPORARY keyword",
-		"CREATE TEMPORARY VIEW v AS SELECT * FROM users",
-		func(t *testing.T, stmt *CreateViewStmt) {
-			if stmt.Name != "v" {
-				t.Errorf("expected view name 'v', got %q", stmt.Name)
-			}
-			if !stmt.Temporary {
-				t.Error("expected Temporary to be true")
+			if stmt.IfNotExists != tt.wantIfNotExist {
+				t.Errorf("expected IfNotExists=%v, got %v", tt.wantIfNotExist, stmt.IfNotExists)
 			}
 		})
-
-	runCreateViewSubtest(t, "temporary view with IF NOT EXISTS",
-		"CREATE TEMP VIEW IF NOT EXISTS v AS SELECT * FROM users",
-		func(t *testing.T, stmt *CreateViewStmt) {
-			if stmt.Name != "v" {
-				t.Errorf("expected view name 'v', got %q", stmt.Name)
-			}
-			if !stmt.Temporary {
-				t.Error("expected Temporary to be true")
-			}
-			if !stmt.IfNotExists {
-				t.Error("expected IfNotExists to be true")
-			}
-		})
+	}
 }
 
 func testParseCreateViewQuoted(t *testing.T) {
@@ -383,6 +346,33 @@ func TestParseViewWithSubquery(t *testing.T) {
 	}
 }
 
+func assertCreateViewAt(t *testing.T, stmts []Statement, idx int, wantName string) {
+	t.Helper()
+	stmt, ok := stmts[idx].(*CreateViewStmt)
+	if !ok {
+		t.Errorf("statement %d: expected CreateViewStmt, got %T", idx, stmts[idx])
+		return
+	}
+	if stmt.Name != wantName {
+		t.Errorf("statement %d: expected view name %q, got %q", idx, wantName, stmt.Name)
+	}
+}
+
+func assertDropViewAt(t *testing.T, stmts []Statement, idx int, wantName string, wantIfExists bool) {
+	t.Helper()
+	stmt, ok := stmts[idx].(*DropViewStmt)
+	if !ok {
+		t.Errorf("statement %d: expected DropViewStmt, got %T", idx, stmts[idx])
+		return
+	}
+	if stmt.Name != wantName {
+		t.Errorf("statement %d: expected view name %q, got %q", idx, wantName, stmt.Name)
+	}
+	if stmt.IfExists != wantIfExists {
+		t.Errorf("statement %d: expected IfExists=%v, got %v", idx, wantIfExists, stmt.IfExists)
+	}
+}
+
 // TestMultipleViewStatements tests parsing multiple VIEW statements.
 func TestMultipleViewStatements(t *testing.T) {
 	t.Parallel()
@@ -400,29 +390,7 @@ func TestMultipleViewStatements(t *testing.T) {
 		t.Fatalf("expected 3 statements, got %d", len(stmts))
 	}
 
-	// Check first CREATE VIEW
-	if stmt1, ok := stmts[0].(*CreateViewStmt); !ok {
-		t.Errorf("statement 0: expected CreateViewStmt, got %T", stmts[0])
-	} else if stmt1.Name != "v1" {
-		t.Errorf("statement 0: expected view name 'v1', got %q", stmt1.Name)
-	}
-
-	// Check second CREATE VIEW
-	if stmt2, ok := stmts[1].(*CreateViewStmt); !ok {
-		t.Errorf("statement 1: expected CreateViewStmt, got %T", stmts[1])
-	} else if stmt2.Name != "v2" {
-		t.Errorf("statement 1: expected view name 'v2', got %q", stmt2.Name)
-	}
-
-	// Check DROP VIEW
-	if stmt3, ok := stmts[2].(*DropViewStmt); !ok {
-		t.Errorf("statement 2: expected DropViewStmt, got %T", stmts[2])
-	} else {
-		if stmt3.Name != "v1" {
-			t.Errorf("statement 2: expected view name 'v1', got %q", stmt3.Name)
-		}
-		if !stmt3.IfExists {
-			t.Error("statement 2: expected IfExists to be true")
-		}
-	}
+	assertCreateViewAt(t, stmts, 0, "v1")
+	assertCreateViewAt(t, stmts, 1, "v2")
+	assertDropViewAt(t, stmts, 2, "v1", true)
 }

@@ -26,50 +26,21 @@ func TestCommitWithFreelistFlush(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_freelist_flush.db")
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-	defer pager.Close()
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	defer p.Close()
 
-	// Allocate many pages
-	var allocated []Pgno
-	for i := 0; i < 20; i++ {
-		pgno, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("AllocatePage() error = %v", err)
-		}
-		allocated = append(allocated, pgno)
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("first commit error = %v", err)
-	}
+	allocated := mustAllocateAndCommit(t, p, 20)
 
 	// Free half of them
 	for i := 0; i < len(allocated)/2; i++ {
-		if err := pager.FreePage(allocated[i]); err != nil {
-			t.Errorf("FreePage() error = %v", err)
-		}
+		mustFreePage(t, p, allocated[i])
 	}
 
 	// Modify a page
-	page, err := pager.Get(allocated[len(allocated)-1])
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-
-	page.Data[0] = 0xAB
-	pager.Put(page)
+	mustGetWritePageData(t, p, allocated[len(allocated)-1], 0xAB)
 
 	// Commit should flush freelist (phase 0)
-	if err := pager.Commit(); err != nil {
-		t.Errorf("commit with freelist error = %v", err)
-	}
+	mustCommit(t, p)
 }
 
 // TestCommitWithMultipleDirtyPages tests commit phase 1 with many dirty pages
@@ -77,58 +48,25 @@ func TestCommitWithMultipleDirtyPages(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_dirty_pages.db")
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-	defer pager.Close()
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	defer p.Close()
 
-	// Allocate pages first
-	var pages []Pgno
-	for i := 0; i < 10; i++ {
-		pgno, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("AllocatePage() error = %v", err)
-		}
-		pages = append(pages, pgno)
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("first commit error = %v", err)
-	}
+	pages := mustAllocateAndCommit(t, p, 10)
 
 	// Modify all pages
 	for _, pgno := range pages {
-		page, err := pager.Get(pgno)
-		if err != nil {
-			t.Fatalf("Get(%d) error = %v", pgno, err)
-		}
-
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("Write() error = %v", err)
-		}
-
-		page.Data[0] = byte(pgno)
-		pager.Put(page)
+		mustGetWritePageData(t, p, pgno, byte(pgno))
 	}
 
-	// Commit should write all dirty pages (phase 1)
-	if err := pager.Commit(); err != nil {
-		t.Errorf("commit with dirty pages error = %v", err)
-	}
+	mustCommit(t, p)
 
 	// Verify all pages persisted
 	for _, pgno := range pages {
-		page, err := pager.Get(pgno)
-		if err != nil {
-			t.Fatalf("Get(%d) after commit error = %v", pgno, err)
-		}
-
+		page := mustGetPage(t, p, pgno)
 		if page.Data[0] != byte(pgno) {
 			t.Errorf("page %d: data = %d, want %d", pgno, page.Data[0], byte(pgno))
 		}
-
-		pager.Put(page)
+		p.Put(page)
 	}
 }
 
@@ -307,62 +245,20 @@ func TestProcessTrunkPageWithMultipleTrunks(t *testing.T) {
 	fl := NewFreeList(pager)
 	fl.maxPending = 10 // Lower threshold
 
-	// Create many pages
-	for i := Pgno(2); i <= 250; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
-		pager.Put(page)
-	}
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
+	mustCreateWritePages(t, pager, 2, 250)
 
-	// Free many pages to create multiple trunk pages
-	for i := Pgno(50); i <= 200; i++ {
-		if err := fl.Free(i); err != nil {
-			t.Fatalf("failed to free page %d: %v", i, err)
-		}
-	}
+	mustFreePages(t, fl, 50, 200)
+	mustFlush(t, fl)
 
-	// Flush to create trunk structure
-	if err := fl.Flush(); err != nil {
-		t.Fatalf("failed to flush: %v", err)
-	}
-
-	// Verify trunk chain
 	firstTrunk := fl.GetFirstTrunk()
 	if firstTrunk == 0 {
 		t.Fatal("expected non-zero first trunk")
 	}
 
-	// Count trunks
-	trunkCount := 0
-	currentTrunk := firstTrunk
-	for currentTrunk != 0 && trunkCount < 50 {
-		nextTrunk, leaves, err := fl.ReadTrunk(currentTrunk)
-		if err != nil {
-			t.Fatalf("failed to read trunk %d: %v", currentTrunk, err)
-		}
-
-		trunkCount++
-		t.Logf("Trunk %d: next=%d, leaves=%d", currentTrunk, nextTrunk, len(leaves))
-
-		if nextTrunk == currentTrunk {
-			t.Fatal("trunk points to itself (infinite loop)")
-		}
-
-		currentTrunk = nextTrunk
-	}
-
+	trunkCount := walkTrunkChain(t, fl, firstTrunk, 50)
 	if trunkCount == 0 {
 		t.Error("expected at least one trunk page")
 	}
-
 	t.Logf("Total trunk pages: %d", trunkCount)
 }
 
@@ -495,66 +391,34 @@ func TestMultipleCommitCycles(t *testing.T) {
 	}
 }
 
+// rollbackCycleOnce modifies page 1 and rolls back, verifying original data.
+func rollbackCycleOnce(t *testing.T, p *Pager, cycle int, originalData []byte) {
+	t.Helper()
+	modifiedData := []byte(fmt.Sprintf("MODIFIED%d", cycle))
+	mustModifyPage(t, p, 1, DatabaseHeaderSize, modifiedData)
+	mustRollback(t, p)
+
+	page := mustGetPage(t, p, 1)
+	readData := string(page.Data[DatabaseHeaderSize : DatabaseHeaderSize+len(originalData)])
+	if readData != string(originalData) {
+		t.Errorf("cycle %d: data after rollback = %q, want %q", cycle, readData, originalData)
+	}
+	p.Put(page)
+}
+
 // TestRollbackCycles tests multiple rollback cycles
 func TestRollbackCycles(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_rollback_cycles.db")
 
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Write and commit initial state
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	defer p.Close()
 
 	originalData := []byte("ORIGINAL")
-	copy(page.Data[DatabaseHeaderSize:DatabaseHeaderSize+len(originalData)], originalData)
-	pager.Put(page)
+	mustWriteDataToPage(t, p, 1, DatabaseHeaderSize, originalData)
+	mustCommit(t, p)
 
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("initial commit error = %v", err)
-	}
-
-	// Run multiple modify/rollback cycles
 	for cycle := 0; cycle < 5; cycle++ {
-		page, err := pager.Get(1)
-		if err != nil {
-			t.Fatalf("cycle %d: Get() error = %v", cycle, err)
-		}
-
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("cycle %d: Write() error = %v", cycle, err)
-		}
-
-		modifiedData := []byte(fmt.Sprintf("MODIFIED%d", cycle))
-		copy(page.Data[DatabaseHeaderSize:DatabaseHeaderSize+len(modifiedData)], modifiedData)
-		pager.Put(page)
-
-		// Rollback
-		if err := pager.Rollback(); err != nil {
-			t.Errorf("cycle %d: Rollback() error = %v", cycle, err)
-		}
-
-		// Verify data was restored
-		page, err = pager.Get(1)
-		if err != nil {
-			t.Fatalf("cycle %d: Get() after rollback error = %v", cycle, err)
-		}
-
-		readData := string(page.Data[DatabaseHeaderSize : DatabaseHeaderSize+len(originalData)])
-		if readData != string(originalData) {
-			t.Errorf("cycle %d: data after rollback = %q, want %q", cycle, readData, originalData)
-		}
-
-		pager.Put(page)
+		rollbackCycleOnce(t, p, cycle, originalData)
 	}
 }

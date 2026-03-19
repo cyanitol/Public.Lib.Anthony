@@ -439,56 +439,59 @@ func TestSQLiteAnalyze(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			// Run setup statements
-			for _, stmt := range tt.setup {
-				_, err := db.Exec(stmt)
-				if err != nil {
-					t.Logf("setup statement failed (may be expected): %v", err)
-				}
-			}
-
-			// Execute the test query
-			if tt.wantErr {
-				_, err := db.Exec(tt.query)
-				if err == nil {
-					t.Errorf("expected error but got none")
-				}
-				return
-			}
-
-			// For SELECT queries, check the result
-			if tt.want != nil {
-				row := db.QueryRow(tt.query)
-				switch want := tt.want.(type) {
-				case int64:
-					var got int64
-					err := row.Scan(&got)
-					if err != nil {
-						t.Fatalf("failed to scan result: %v", err)
-					}
-					if got != want {
-						t.Errorf("got %d, want %d", got, want)
-					}
-				case string:
-					// For empty result checks
-					var got string
-					err := row.Scan(&got)
-					if err != nil && err != sql.ErrNoRows {
-						// Empty result is acceptable
-						if want == "" && err == sql.ErrNoRows {
-							return
-						}
-						t.Fatalf("failed to scan result: %v", err)
-					}
-				}
-			} else {
-				// Just execute without checking result
-				_, err := db.Exec(tt.query)
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-			}
+			analyzeRunSetup(t, db, tt.setup)
+			analyzeRunCheck(t, db, tt.query, tt.want, tt.wantErr)
 		})
+	}
+}
+
+func analyzeRunSetup(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, stmt := range stmts {
+		_, err := db.Exec(stmt)
+		if err != nil {
+			t.Logf("setup statement failed (may be expected): %v", err)
+		}
+	}
+}
+
+func analyzeRunCheck(t *testing.T, db *sql.DB, query string, want interface{}, wantErr bool) {
+	t.Helper()
+	if wantErr {
+		_, err := db.Exec(query)
+		if err == nil {
+			t.Errorf("expected error but got none")
+		}
+		return
+	}
+	if want == nil {
+		_, err := db.Exec(query)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		return
+	}
+	analyzeCheckResult(t, db, query, want)
+}
+
+func analyzeCheckResult(t *testing.T, db *sql.DB, query string, want interface{}) {
+	t.Helper()
+	row := db.QueryRow(query)
+	switch w := want.(type) {
+	case int64:
+		var got int64
+		if err := row.Scan(&got); err != nil {
+			t.Fatalf("failed to scan result: %v", err)
+		}
+		if got != w {
+			t.Errorf("got %d, want %d", got, w)
+		}
+	case string:
+		var got string
+		err := row.Scan(&got)
+		if err != nil && (w != "" || err != sql.ErrNoRows) {
+			t.Fatalf("failed to scan result: %v", err)
+		}
 	}
 }
 
@@ -504,54 +507,43 @@ func TestAnalyzeStatisticsUsage(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create a table with selective and non-selective columns
-	_, err = db.Exec(`
-		CREATE TABLE query_test(
-			selective INTEGER,
-			nonselective INTEGER
-		)
-	`)
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
+	analyzeStatsSetup(t, db)
+	analyzeStatsVerify(t, db)
+}
 
-	// Create indices
-	_, err = db.Exec("CREATE INDEX idx_selective ON query_test(selective)")
-	if err != nil {
-		t.Fatalf("failed to create selective index: %v", err)
+func analyzeStatsSetup(t *testing.T, db *sql.DB) {
+	t.Helper()
+	stmts := []string{
+		`CREATE TABLE query_test(selective INTEGER, nonselective INTEGER)`,
+		"CREATE INDEX idx_selective ON query_test(selective)",
+		"CREATE INDEX idx_nonselective ON query_test(nonselective)",
 	}
-
-	_, err = db.Exec("CREATE INDEX idx_nonselective ON query_test(nonselective)")
-	if err != nil {
-		t.Fatalf("failed to create nonselective index: %v", err)
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
 	}
-
-	// Insert data: selective has unique values, nonselective has repeated values
 	for i := 0; i < 100; i++ {
-		_, err = db.Exec("INSERT INTO query_test VALUES(?, ?)", i, 1)
-		if err != nil {
+		if _, err := db.Exec("INSERT INTO query_test VALUES(?, ?)", i, 1); err != nil {
 			t.Fatalf("failed to insert data: %v", err)
 		}
 	}
-
-	// Run ANALYZE
-	_, err = db.Exec("ANALYZE")
-	if err != nil {
+	if _, err := db.Exec("ANALYZE"); err != nil {
 		t.Fatalf("failed to analyze: %v", err)
 	}
+}
 
-	// Verify statistics exist
+func analyzeStatsVerify(t *testing.T, db *sql.DB) {
+	t.Helper()
 	var count int64
-	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl='query_test'").Scan(&count)
+	err := db.QueryRow("SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl='query_test'").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to query statistics: %v", err)
 	}
-
 	if count != 2 {
 		t.Errorf("expected 2 index statistics, got %d", count)
 	}
 
-	// Query using the selective index
 	rows, err := db.Query("SELECT * FROM query_test WHERE selective = 50")
 	if err != nil {
 		t.Fatalf("failed to query with selective index: %v", err)
@@ -562,7 +554,6 @@ func TestAnalyzeStatisticsUsage(t *testing.T) {
 	for rows.Next() {
 		rowCount++
 	}
-
 	if rowCount != 1 {
 		t.Errorf("expected 1 row, got %d", rowCount)
 	}

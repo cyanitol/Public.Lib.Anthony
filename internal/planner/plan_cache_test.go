@@ -424,7 +424,7 @@ func TestPlanCacheLastUsedUpdate(t *testing.T) {
 	hash := hashSQL(sql)
 	cache.mu.RLock()
 	cached1 := cache.plans[hash]
-	lastUsed1 := cached1.LastUsed
+	lastUsed1 := cached1.LastUsed()
 	cache.mu.RUnlock()
 
 	time.Sleep(10 * time.Millisecond)
@@ -435,7 +435,7 @@ func TestPlanCacheLastUsedUpdate(t *testing.T) {
 	// Check that LastUsed was updated
 	cache.mu.RLock()
 	cached2 := cache.plans[hash]
-	lastUsed2 := cached2.LastUsed
+	lastUsed2 := cached2.LastUsed()
 	cache.mu.RUnlock()
 
 	if !lastUsed2.After(lastUsed1) {
@@ -460,7 +460,7 @@ func TestPlanCacheHitCount(t *testing.T) {
 	hash := hashSQL(sql)
 	cache.mu.RLock()
 	cached := cache.plans[hash]
-	hitCount := cached.HitCount
+	hitCount := cached.HitCount()
 	cache.mu.RUnlock()
 
 	if hitCount != 5 {

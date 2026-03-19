@@ -443,15 +443,12 @@ func TestSQLiteAutoincrement(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			// Run setup statements
 			for _, stmt := range tt.setup {
 				_, err := db.Exec(stmt)
 				if err != nil {
 					t.Logf("setup statement failed (may be expected): %v", err)
 				}
 			}
-
-			// Execute the test query
 			if tt.wantErr {
 				_, err := db.Exec(tt.query)
 				if err == nil {
@@ -459,40 +456,46 @@ func TestSQLiteAutoincrement(t *testing.T) {
 				}
 				return
 			}
-
-			// For SELECT queries, check the result
 			if tt.want != nil {
-				row := db.QueryRow(tt.query)
-				switch want := tt.want.(type) {
-				case int64:
-					var got int64
-					err := row.Scan(&got)
-					if err != nil {
-						t.Fatalf("failed to scan result: %v", err)
-					}
-					if got != want {
-						t.Errorf("got %d, want %d", got, want)
-					}
-				case string:
-					var got string
-					err := row.Scan(&got)
-					if err != nil && err != sql.ErrNoRows {
-						if want == "" && err == sql.ErrNoRows {
-							return
-						}
-						t.Fatalf("failed to scan result: %v", err)
-					}
-					if want != "" && got != want {
-						t.Errorf("got %s, want %s", got, want)
-					}
-				}
+				autoincCheckResult(t, db, tt.query, tt.want)
 			} else {
-				_, err := db.Exec(tt.query)
-				if err != nil {
+				if _, err := db.Exec(tt.query); err != nil {
 					t.Errorf("unexpected error: %v", err)
 				}
 			}
 		})
+	}
+}
+
+func autoincCheckResult(t *testing.T, db *sql.DB, query string, want interface{}) {
+	t.Helper()
+	row := db.QueryRow(query)
+	switch w := want.(type) {
+	case int64:
+		var got int64
+		if err := row.Scan(&got); err != nil {
+			t.Fatalf("failed to scan result: %v", err)
+		}
+		if got != w {
+			t.Errorf("got %d, want %d", got, w)
+		}
+	case string:
+		autoincCheckStringResult(t, row, w)
+	}
+}
+
+func autoincCheckStringResult(t *testing.T, row *sql.Row, want string) {
+	t.Helper()
+	var got string
+	err := row.Scan(&got)
+	if err != nil && err != sql.ErrNoRows {
+		if want == "" && err == sql.ErrNoRows {
+			return
+		}
+		t.Fatalf("failed to scan result: %v", err)
+	}
+	if want != "" && got != want {
+		t.Errorf("got %s, want %s", got, want)
 	}
 }
 
@@ -508,51 +511,30 @@ func TestAutoincrementBehavior(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create table with AUTOINCREMENT
-	_, err = db.Exec("CREATE TABLE test_seq(id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	// Test sequential inserts
+	autoincExecFatal(t, db, "CREATE TABLE test_seq(id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT)")
 	for i := 1; i <= 5; i++ {
-		_, err = db.Exec("INSERT INTO test_seq(data) VALUES(?)", "data"+string(rune('0'+i)))
-		if err != nil {
-			t.Fatalf("failed to insert data: %v", err)
-		}
+		autoincExecFatal(t, db, "INSERT INTO test_seq(data) VALUES(?)", "data"+string(rune('0'+i)))
 	}
+	autoincAssertInt64(t, db, "SELECT seq FROM sqlite_sequence WHERE name='test_seq'", 5)
+	autoincExecFatal(t, db, "DELETE FROM test_seq WHERE id <= 3")
+	autoincExecFatal(t, db, "INSERT INTO test_seq(data) VALUES('new')")
+	autoincAssertInt64(t, db, "SELECT id FROM test_seq WHERE data='new'", 6)
+}
 
-	// Verify sequence value
-	var seq int64
-	err = db.QueryRow("SELECT seq FROM sqlite_sequence WHERE name='test_seq'").Scan(&seq)
-	if err != nil {
-		t.Fatalf("failed to query sequence: %v", err)
+func autoincExecFatal(t *testing.T, db *sql.DB, query string, args ...interface{}) {
+	t.Helper()
+	if _, err := db.Exec(query, args...); err != nil {
+		t.Fatalf("exec failed: %v", err)
 	}
+}
 
-	if seq != 5 {
-		t.Errorf("expected sequence 5, got %d", seq)
+func autoincAssertInt64(t *testing.T, db *sql.DB, query string, want int64) {
+	t.Helper()
+	var got int64
+	if err := db.QueryRow(query).Scan(&got); err != nil {
+		t.Fatalf("query failed: %v", err)
 	}
-
-	// Test that deleting rows doesn't reset sequence
-	_, err = db.Exec("DELETE FROM test_seq WHERE id <= 3")
-	if err != nil {
-		t.Fatalf("failed to delete rows: %v", err)
-	}
-
-	// Insert new row
-	_, err = db.Exec("INSERT INTO test_seq(data) VALUES('new')")
-	if err != nil {
-		t.Fatalf("failed to insert after delete: %v", err)
-	}
-
-	// Verify new row has id > 5
-	var newID int64
-	err = db.QueryRow("SELECT id FROM test_seq WHERE data='new'").Scan(&newID)
-	if err != nil {
-		t.Fatalf("failed to query new row: %v", err)
-	}
-
-	if newID != 6 {
-		t.Errorf("expected new id 6, got %d", newID)
+	if got != want {
+		t.Errorf("got %d, want %d", got, want)
 	}
 }

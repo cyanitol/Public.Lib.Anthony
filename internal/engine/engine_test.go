@@ -83,70 +83,58 @@ func TestInsertAndSelect(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create table
-	_, err = db.Execute(`CREATE TABLE users (
-		id INTEGER PRIMARY KEY,
-		name TEXT,
-		age INTEGER
-	)`)
-	if err != nil {
-		t.Fatalf("Failed to create table: %v", err)
-	}
+	mustExec(t, db, `CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)`)
+	mustExec(t, db, `INSERT INTO users (name, age) VALUES ('Alice', 30)`)
+	mustExec(t, db, `INSERT INTO users (name, age) VALUES ('Bob', 25)`)
 
-	// Insert data
-	_, err = db.Execute(`INSERT INTO users (name, age) VALUES ('Alice', 30)`)
-	if err != nil {
-		t.Fatalf("Failed to insert data: %v", err)
-	}
-
-	_, err = db.Execute(`INSERT INTO users (name, age) VALUES ('Bob', 25)`)
-	if err != nil {
-		t.Fatalf("Failed to insert data: %v", err)
-	}
-
-	// Select data
 	rows, err := db.Query(`SELECT id, name, age FROM users`)
 	if err != nil {
 		t.Fatalf("Failed to query data: %v", err)
 	}
 	defer rows.Close()
 
-	// Verify columns
-	columns := rows.Columns()
-	if len(columns) != 3 {
+	if columns := rows.Columns(); len(columns) != 3 {
 		t.Errorf("Expected 3 columns, got %d", len(columns))
 	}
 
-	// Read rows
+	expected := []struct {
+		name string
+		age  int64
+	}{{"Alice", 30}, {"Bob", 25}}
+
 	count := 0
 	for rows.Next() {
 		var id int64
 		var name string
 		var age int64
-
 		if err := rows.Scan(&id, &name, &age); err != nil {
 			t.Fatalf("Failed to scan row: %v", err)
 		}
-
-		count++
-
-		if count == 1 {
-			if name != "Alice" || age != 30 {
-				t.Errorf("Expected Alice, 30, got %s, %d", name, age)
-			}
-		} else if count == 2 {
-			if name != "Bob" || age != 25 {
-				t.Errorf("Expected Bob, 25, got %s, %d", name, age)
-			}
+		if count < len(expected) {
+			verifyRow(t, name, age, expected[count].name, expected[count].age)
 		}
+		count++
 	}
 
 	if err := rows.Err(); err != nil {
 		t.Fatalf("Error during iteration: %v", err)
 	}
-
 	if count != 2 {
 		t.Errorf("Expected 2 rows, got %d", count)
+	}
+}
+
+func mustExec(t *testing.T, db *Engine, sql string) {
+	t.Helper()
+	if _, err := db.Execute(sql); err != nil {
+		t.Fatalf("Failed to execute %q: %v", sql, err)
+	}
+}
+
+func verifyRow(t *testing.T, gotName string, gotAge int64, wantName string, wantAge int64) {
+	t.Helper()
+	if gotName != wantName || gotAge != wantAge {
+		t.Errorf("Expected %s, %d, got %s, %d", wantName, wantAge, gotName, gotAge)
 	}
 }
 

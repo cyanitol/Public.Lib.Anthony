@@ -59,90 +59,45 @@ func runCollateOrderBySubtest(t *testing.T, name, sql string, check func(*testin
 	})
 }
 
+func assertCollateConstraint(t *testing.T, stmt *CreateTableStmt, colIdx int, wantCollate string) {
+	t.Helper()
+	if colIdx >= len(stmt.Columns) {
+		t.Fatalf("column index %d out of range (have %d columns)", colIdx, len(stmt.Columns))
+	}
+	for _, c := range stmt.Columns[colIdx].Constraints {
+		if c.Type == ConstraintCollate && c.Collate == wantCollate {
+			return
+		}
+	}
+	t.Errorf("COLLATE %s constraint not found in column %d", wantCollate, colIdx)
+}
+
 func TestParseCollateInColumn(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		sql        string
-		wantErr    bool
-		checkTable func(*testing.T, *CreateTableStmt)
+		name        string
+		sql         string
+		wantCols    int
+		wantCollate string // collation to check on column 0, empty to skip
 	}{
-		{
-			name:    "column with COLLATE NOCASE",
-			sql:     "CREATE TABLE users (name TEXT COLLATE NOCASE)",
-			wantErr: false,
-			checkTable: func(t *testing.T, stmt *CreateTableStmt) {
-				if len(stmt.Columns) != 1 {
-					t.Fatalf("expected 1 column, got %d", len(stmt.Columns))
-				}
-				// Check that the COLLATE constraint was parsed
-				found := false
-				for _, c := range stmt.Columns[0].Constraints {
-					if c.Type == ConstraintCollate && c.Collate == "NOCASE" {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Error("COLLATE NOCASE constraint not found in column")
-				}
-			},
-		},
-		{
-			name:    "column with COLLATE BINARY",
-			sql:     "CREATE TABLE items (code TEXT COLLATE BINARY)",
-			wantErr: false,
-			checkTable: func(t *testing.T, stmt *CreateTableStmt) {
-				if len(stmt.Columns) != 1 {
-					t.Fatalf("expected 1 column, got %d", len(stmt.Columns))
-				}
-				found := false
-				for _, c := range stmt.Columns[0].Constraints {
-					if c.Type == ConstraintCollate && c.Collate == "BINARY" {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Error("COLLATE BINARY constraint not found in column")
-				}
-			},
-		},
-		{
-			name:    "column with COLLATE RTRIM",
-			sql:     "CREATE TABLE data (value TEXT COLLATE RTRIM)",
-			wantErr: false,
-			checkTable: func(t *testing.T, stmt *CreateTableStmt) {
-				if len(stmt.Columns) != 1 {
-					t.Fatalf("expected 1 column, got %d", len(stmt.Columns))
-				}
-				found := false
-				for _, c := range stmt.Columns[0].Constraints {
-					if c.Type == ConstraintCollate && c.Collate == "RTRIM" {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Error("COLLATE RTRIM constraint not found in column")
-				}
-			},
-		},
-		{
-			name:    "multiple columns with different collations",
-			sql:     "CREATE TABLE mixed (name TEXT COLLATE NOCASE, code TEXT COLLATE BINARY, value TEXT)",
-			wantErr: false,
-			checkTable: func(t *testing.T, stmt *CreateTableStmt) {
-				if len(stmt.Columns) != 3 {
-					t.Fatalf("expected 3 columns, got %d", len(stmt.Columns))
-				}
-			},
-		},
+		{"column with COLLATE NOCASE", "CREATE TABLE users (name TEXT COLLATE NOCASE)", 1, "NOCASE"},
+		{"column with COLLATE BINARY", "CREATE TABLE items (code TEXT COLLATE BINARY)", 1, "BINARY"},
+		{"column with COLLATE RTRIM", "CREATE TABLE data (value TEXT COLLATE RTRIM)", 1, "RTRIM"},
+		{"multiple columns with different collations", "CREATE TABLE mixed (name TEXT COLLATE NOCASE, code TEXT COLLATE BINARY, value TEXT)", 3, ""},
 	}
 
 	for _, tt := range tests {
 		tt := tt
-		runCollateColumnSubtest(t, tt.name, tt.sql, tt.checkTable)
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			stmt := parseCreateTableStmt(t, tt.sql)
+			if len(stmt.Columns) != tt.wantCols {
+				t.Fatalf("expected %d columns, got %d", tt.wantCols, len(stmt.Columns))
+			}
+			if tt.wantCollate != "" {
+				assertCollateConstraint(t, stmt, 0, tt.wantCollate)
+			}
+		})
 	}
 }
 
@@ -285,26 +240,33 @@ func TestParseCollateInExpression(t *testing.T) {
 	}
 }
 
-// Helper function to recursively check if an expression tree contains a CollateExpr
+// collateChildren returns the child expressions to check for a CollateExpr.
+func collateChildren(expr Expression) []Expression {
+	switch e := expr.(type) {
+	case *BinaryExpr:
+		return []Expression{e.Left, e.Right}
+	case *UnaryExpr:
+		return []Expression{e.Expr}
+	case *ParenExpr:
+		return []Expression{e.Expr}
+	case *FunctionExpr:
+		return e.Args
+	default:
+		return nil
+	}
+}
+
+// checkExprForCollate recursively checks if an expression tree contains a CollateExpr.
 func checkExprForCollate(expr Expression) bool {
 	if expr == nil {
 		return false
 	}
-
-	switch e := expr.(type) {
-	case *CollateExpr:
+	if _, ok := expr.(*CollateExpr); ok {
 		return true
-	case *BinaryExpr:
-		return checkExprForCollate(e.Left) || checkExprForCollate(e.Right)
-	case *UnaryExpr:
-		return checkExprForCollate(e.Expr)
-	case *ParenExpr:
-		return checkExprForCollate(e.Expr)
-	case *FunctionExpr:
-		for _, arg := range e.Args {
-			if checkExprForCollate(arg) {
-				return true
-			}
+	}
+	for _, child := range collateChildren(expr) {
+		if checkExprForCollate(child) {
+			return true
 		}
 	}
 	return false

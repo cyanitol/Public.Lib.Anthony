@@ -36,114 +36,78 @@ func setupAttachTestDBInDir(t *testing.T, tmpDir, name string) (*sql.DB, string)
 	return db, dbPath
 }
 
+func attachExecAll(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("exec failed: %v\nSQL: %s", err, s)
+		}
+	}
+}
+
+func attachAssertCount(t *testing.T, db *sql.DB, query string, want int) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	if count != want {
+		t.Errorf("got %d rows, want %d", count, want)
+	}
+}
+
+func attachAssertQueryFails(t *testing.T, db *sql.DB, query string) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err == nil {
+		rows.Close()
+		t.Errorf("expected error for query %q, got nil", query)
+	}
+}
+
+func attachAssertQuerySucceeds(t *testing.T, db *sql.DB, query string) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v\nSQL: %s", err, query)
+	}
+	rows.Close()
+}
+
 // TestAttachBasic tests basic ATTACH DATABASE functionality (attach.test 1.1-1.7)
 func TestAttachBasic(t *testing.T) {
-	// Use same temp dir for both databases (security sandbox requirement)
 	tmpDir := t.TempDir()
 
 	db, _ := setupAttachTestDBInDir(t, tmpDir, "test.db")
 	defer db.Close()
 
 	db2, db2Path := setupAttachTestDBInDir(t, tmpDir, "test2.db")
-	defer db2.Close()
 
-	// Create table in main database
-	_, err := db.Exec("CREATE TABLE t1(a,b)")
-	if err != nil {
-		t.Fatalf("failed to create t1: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t1 VALUES(1,2)")
-	if err != nil {
-		t.Fatalf("failed to insert into t1: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t1 VALUES(3,4)")
-	if err != nil {
-		t.Fatalf("failed to insert into t1: %v", err)
-	}
-
-	// Create table in second database
-	_, err = db2.Exec("CREATE TABLE t2(x,y)")
-	if err != nil {
-		t.Fatalf("failed to create t2: %v", err)
-	}
-
-	_, err = db2.Exec("INSERT INTO t2 VALUES(1,'x')")
-	if err != nil {
-		t.Fatalf("failed to insert into t2: %v", err)
-	}
-
-	_, err = db2.Exec("INSERT INTO t2 VALUES(2,'y')")
-	if err != nil {
-		t.Fatalf("failed to insert into t2: %v", err)
-	}
-
+	attachExecAll(t, db, []string{
+		"CREATE TABLE t1(a,b)",
+		"INSERT INTO t1 VALUES(1,2)",
+		"INSERT INTO t1 VALUES(3,4)",
+	})
+	attachExecAll(t, db2, []string{
+		"CREATE TABLE t2(x,y)",
+		"INSERT INTO t2 VALUES(1,'x')",
+		"INSERT INTO t2 VALUES(2,'y')",
+	})
 	db2.Close()
 
-	// Attach test2.db to main database
-	_, err = db.Exec(fmt.Sprintf("ATTACH DATABASE '%s' AS two", db2Path))
-	if err != nil {
-		t.Fatalf("failed to attach database: %v", err)
-	}
+	attachExecAll(t, db, []string{fmt.Sprintf("ATTACH DATABASE '%s' AS two", db2Path)})
+	attachAssertCount(t, db, "SELECT * FROM two.t2", 2)
+	attachAssertQuerySucceeds(t, db, "SELECT * FROM t2")
 
-	// Query attached database with qualified name
-	rows, err := db.Query("SELECT * FROM two.t2")
-	if err != nil {
-		t.Fatalf("failed to query attached database: %v", err)
-	}
-	defer rows.Close()
-
-	var results []struct {
-		x int
-		y string
-	}
-	for rows.Next() {
-		var r struct {
-			x int
-			y string
-		}
-		if err := rows.Scan(&r.x, &r.y); err != nil {
-			t.Fatalf("failed to scan row: %v", err)
-		}
-		results = append(results, r)
-	}
-
-	if len(results) != 2 {
-		t.Errorf("expected 2 rows, got %d", len(results))
-	}
-
-	// Query attached database without qualifier (should work)
-	rows2, err := db.Query("SELECT * FROM t2")
-	if err != nil {
-		t.Fatalf("failed to query t2 without qualifier: %v", err)
-	}
-	rows2.Close()
-
-	// DETACH database
-	_, err = db.Exec("DETACH DATABASE two")
-	if err != nil {
-		t.Fatalf("failed to detach database: %v", err)
-	}
-
-	// Query main database after detach (should work)
-	rows3, err := db.Query("SELECT * FROM t1")
-	if err != nil {
-		t.Fatalf("failed to query t1 after detach: %v", err)
-	}
-	rows3.Close()
-
-	// Query t2 after detach (should fail)
-	_, err = db.Query("SELECT * FROM t2")
-	if err == nil {
-		t.Error("expected error querying t2 after detach, got nil")
-	}
-
-	// Query two.t2 after detach (should fail)
-	_, err = db.Query("SELECT * FROM two.t2")
-	if err == nil {
-		t.Error("expected error querying two.t2 after detach, got nil")
-	}
+	attachExecAll(t, db, []string{"DETACH DATABASE two"})
+	attachAssertQuerySucceeds(t, db, "SELECT * FROM t1")
+	attachAssertQueryFails(t, db, "SELECT * FROM t2")
+	attachAssertQueryFails(t, db, "SELECT * FROM two.t2")
 }
 
 // TestAttachNonExistent tests attaching a non-existent database (attach.test 1.8-1.10)
@@ -271,6 +235,17 @@ func TestAttachSameSchema(t *testing.T) {
 	}
 }
 
+func attachAssertRow2Int(t *testing.T, db *sql.DB, query string, wantA, wantB int) {
+	t.Helper()
+	var a, b int
+	if err := db.QueryRow(query).Scan(&a, &b); err != nil {
+		t.Fatalf("query failed: %v\nSQL: %s", err, query)
+	}
+	if a != wantA || b != wantB {
+		t.Errorf("got (%d,%d), want (%d,%d)", a, b, wantA, wantB)
+	}
+}
+
 // TestAttachCrossDatabase tests cross-database queries (attach.test 4.1-4.5)
 func TestAttachCrossDatabase(t *testing.T) {
 	t.Skip("ATTACH not implemented")
@@ -279,70 +254,32 @@ func TestAttachCrossDatabase(t *testing.T) {
 
 	db2, db2Path := setupAttachTestDB(t, "test2.db")
 
-	// Create table in main database
-	_, err := db.Exec("CREATE TABLE t3(a,b)")
-	if err != nil {
-		t.Fatalf("failed to create t3 in main: %v", err)
-	}
-
-	_, err = db.Exec("CREATE UNIQUE INDEX t3i1b ON t3(a)")
-	if err != nil {
-		t.Fatalf("failed to create index on main.t3: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t3 VALUES(9,10)")
-	if err != nil {
-		t.Fatalf("failed to insert into main.t3: %v", err)
-	}
-
-	// Create table in second database
-	_, err = db2.Exec("CREATE TABLE t3(x,y)")
-	if err != nil {
-		t.Fatalf("failed to create t3 in db2: %v", err)
-	}
-
-	_, err = db2.Exec("CREATE UNIQUE INDEX t3i1 ON t3(x)")
-	if err != nil {
-		t.Fatalf("failed to create index on db2.t3: %v", err)
-	}
-
-	_, err = db2.Exec("INSERT INTO t3 VALUES(1,2)")
-	if err != nil {
-		t.Fatalf("failed to insert into db2.t3: %v", err)
-	}
-
+	attachExecAll(t, db, []string{
+		"CREATE TABLE t3(a,b)",
+		"CREATE UNIQUE INDEX t3i1b ON t3(a)",
+		"INSERT INTO t3 VALUES(9,10)",
+	})
+	attachExecAll(t, db2, []string{
+		"CREATE TABLE t3(x,y)",
+		"CREATE UNIQUE INDEX t3i1 ON t3(x)",
+		"INSERT INTO t3 VALUES(1,2)",
+	})
 	db2.Close()
 
-	// Attach db2
-	_, err = db.Exec(fmt.Sprintf("ATTACH DATABASE '%s' AS db2", db2Path))
-	if err != nil {
-		t.Fatalf("failed to attach database: %v", err)
-	}
+	attachExecAll(t, db, []string{fmt.Sprintf("ATTACH DATABASE '%s' AS db2", db2Path)})
+	attachAssertRow2Int(t, db, "SELECT * FROM db2.t3", 1, 2)
+	attachAssertRow2Int(t, db, "SELECT * FROM main.t3", 9, 10)
+	attachExecAll(t, db, []string{"INSERT INTO db2.t3 VALUES(9,10)"})
+}
 
-	// Query attached database
-	var x, y int
-	err = db.QueryRow("SELECT * FROM db2.t3").Scan(&x, &y)
-	if err != nil {
-		t.Fatalf("failed to query db2.t3: %v", err)
+func attachAssertIntCount(t *testing.T, db *sql.DB, query string, want int) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(query).Scan(&count); err != nil {
+		t.Fatalf("count query failed: %v\nSQL: %s", err, query)
 	}
-	if x != 1 || y != 2 {
-		t.Errorf("expected (1,2), got (%d,%d)", x, y)
-	}
-
-	// Query main database
-	var a, b int
-	err = db.QueryRow("SELECT * FROM main.t3").Scan(&a, &b)
-	if err != nil {
-		t.Fatalf("failed to query main.t3: %v", err)
-	}
-	if a != 9 || b != 10 {
-		t.Errorf("expected (9,10), got (%d,%d)", a, b)
-	}
-
-	// Insert into attached database
-	_, err = db.Exec("INSERT INTO db2.t3 VALUES(9,10)")
-	if err != nil {
-		t.Fatalf("failed to insert into db2.t3: %v", err)
+	if count != want {
+		t.Errorf("got count %d, want %d\nSQL: %s", count, want, query)
 	}
 }
 
@@ -353,65 +290,20 @@ func TestAttachCreateSchema(t *testing.T) {
 	defer db.Close()
 
 	db2, db2Path := setupAttachTestDB(t, "test2.db")
-
-	// Create tables in both databases
-	_, err := db.Exec("CREATE TABLE t1(a, b); CREATE TABLE t2(c, d)")
-	if err != nil {
-		t.Fatalf("failed to create tables in main: %v", err)
-	}
-
-	_, err = db2.Exec("CREATE TABLE t1(a, b); CREATE TABLE t2(c, d)")
-	if err != nil {
-		t.Fatalf("failed to create tables in db2: %v", err)
-	}
-
+	attachExecAll(t, db, []string{"CREATE TABLE t1(a, b)", "CREATE TABLE t2(c, d)"})
+	attachExecAll(t, db2, []string{"CREATE TABLE t1(a, b)", "CREATE TABLE t2(c, d)"})
 	db2.Close()
 
-	// Attach db2
-	_, err = db.Exec(fmt.Sprintf("ATTACH '%s' AS aux", db2Path))
-	if err != nil {
-		t.Fatalf("failed to attach database: %v", err)
-	}
+	attachExecAll(t, db, []string{
+		fmt.Sprintf("ATTACH '%s' AS aux", db2Path),
+		"CREATE TABLE aux.t3(e, f)",
+	})
 
-	// Create table in attached database
-	_, err = db.Exec("CREATE TABLE aux.t3(e, f)")
-	if err != nil {
-		t.Fatalf("failed to create table in attached database: %v", err)
-	}
+	attachAssertIntCount(t, db, "SELECT COUNT(*) FROM sqlite_master WHERE name = 't3'", 0)
+	attachAssertIntCount(t, db, "SELECT COUNT(*) FROM aux.sqlite_master WHERE name = 't3'", 1)
 
-	// Verify table exists in aux, not in main
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name = 't3'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query main sqlite_master: %v", err)
-	}
-	if count != 0 {
-		t.Error("table t3 should not exist in main database")
-	}
-
-	err = db.QueryRow("SELECT COUNT(*) FROM aux.sqlite_master WHERE name = 't3'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query aux sqlite_master: %v", err)
-	}
-	if count != 1 {
-		t.Error("table t3 should exist in aux database")
-	}
-
-	// Insert into attached table
-	_, err = db.Exec("INSERT INTO t3 VALUES(1, 2)")
-	if err != nil {
-		t.Fatalf("failed to insert into t3: %v", err)
-	}
-
-	// Query attached table
-	var e, f int
-	err = db.QueryRow("SELECT * FROM t3").Scan(&e, &f)
-	if err != nil {
-		t.Fatalf("failed to query t3: %v", err)
-	}
-	if e != 1 || f != 2 {
-		t.Errorf("expected (1,2), got (%d,%d)", e, f)
-	}
+	attachExecAll(t, db, []string{"INSERT INTO t3 VALUES(1, 2)"})
+	attachAssertRow2Int(t, db, "SELECT * FROM t3", 1, 2)
 }
 
 // TestAttachCreateIndex tests creating indexes in attached databases (attach3.test 2.1-3.3)
@@ -421,69 +313,24 @@ func TestAttachCreateIndex(t *testing.T) {
 	defer db.Close()
 
 	db2, db2Path := setupAttachTestDB(t, "test2.db")
-
-	_, err := db2.Exec("CREATE TABLE t3(e, f)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
+	attachExecAll(t, db2, []string{"CREATE TABLE t3(e, f)"})
 	db2.Close()
 
-	// Attach db2
-	_, err = db.Exec(fmt.Sprintf("ATTACH '%s' AS aux", db2Path))
-	if err != nil {
-		t.Fatalf("failed to attach database: %v", err)
-	}
+	attachExecAll(t, db, []string{
+		fmt.Sprintf("ATTACH '%s' AS aux", db2Path),
+		"CREATE INDEX aux.i1 ON t3(e)",
+	})
 
-	// Create index in attached database
-	_, err = db.Exec("CREATE INDEX aux.i1 ON t3(e)")
-	if err != nil {
-		t.Fatalf("failed to create index in attached database: %v", err)
-	}
+	attachAssertIntCount(t, db, "SELECT COUNT(*) FROM sqlite_master WHERE name = 'i1'", 0)
+	attachAssertIntCount(t, db, "SELECT COUNT(*) FROM aux.sqlite_master WHERE name = 'i1'", 1)
 
-	// Verify index exists in aux, not in main
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name = 'i1'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query main sqlite_master: %v", err)
-	}
-	if count != 0 {
-		t.Error("index i1 should not exist in main database")
-	}
+	attachExecAll(t, db, []string{"DROP INDEX aux.i1"})
+	attachAssertIntCount(t, db, "SELECT COUNT(*) FROM aux.sqlite_master WHERE name = 'i1'", 0)
 
-	err = db.QueryRow("SELECT COUNT(*) FROM aux.sqlite_master WHERE name = 'i1'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query aux sqlite_master: %v", err)
-	}
-	if count != 1 {
-		t.Error("index i1 should exist in aux database")
-	}
-
-	// Drop index from attached database
-	_, err = db.Exec("DROP INDEX aux.i1")
-	if err != nil {
-		t.Fatalf("failed to drop index: %v", err)
-	}
-
-	err = db.QueryRow("SELECT COUNT(*) FROM aux.sqlite_master WHERE name = 'i1'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query aux sqlite_master: %v", err)
-	}
-	if count != 0 {
-		t.Error("index i1 should not exist after drop")
-	}
-
-	// Create index again without qualifier
-	_, err = db.Exec("CREATE INDEX aux.i1 ON t3(e)")
-	if err != nil {
-		t.Fatalf("failed to recreate index: %v", err)
-	}
-
-	// Drop index without database qualifier
-	_, err = db.Exec("DROP INDEX i1")
-	if err != nil {
-		t.Fatalf("failed to drop index without qualifier: %v", err)
-	}
+	attachExecAll(t, db, []string{
+		"CREATE INDEX aux.i1 ON t3(e)",
+		"DROP INDEX i1",
+	})
 }
 
 // TestAttachDropTable tests dropping tables in attached databases (attach3.test 4.1-4.3)
@@ -493,67 +340,39 @@ func TestAttachDropTable(t *testing.T) {
 	defer db.Close()
 
 	db2, db2Path := setupAttachTestDB(t, "test2.db")
-
-	// Create tables
-	_, err := db.Exec("CREATE TABLE t2(c, d)")
-	if err != nil {
-		t.Fatalf("failed to create main.t2: %v", err)
-	}
-
-	_, err = db2.Exec("CREATE TABLE t1(a, b); CREATE TABLE t2(c, d); CREATE TABLE t3(e, f)")
-	if err != nil {
-		t.Fatalf("failed to create tables in db2: %v", err)
-	}
-
+	attachExecAll(t, db, []string{"CREATE TABLE t2(c, d)"})
+	attachExecAll(t, db2, []string{"CREATE TABLE t1(a, b)", "CREATE TABLE t2(c, d)", "CREATE TABLE t3(e, f)"})
 	db2.Close()
 
-	// Attach db2
-	_, err = db.Exec(fmt.Sprintf("ATTACH '%s' AS aux", db2Path))
-	if err != nil {
-		t.Fatalf("failed to attach database: %v", err)
-	}
+	attachExecAll(t, db, []string{
+		fmt.Sprintf("ATTACH '%s' AS aux", db2Path),
+		"DROP TABLE aux.t1",
+	})
 
-	// Drop table from attached database
-	_, err = db.Exec("DROP TABLE aux.t1")
-	if err != nil {
-		t.Fatalf("failed to drop aux.t1: %v", err)
-	}
+	attachAssertStringList(t, db, "SELECT name FROM aux.sqlite_master WHERE type='table' ORDER BY name",
+		[]string{"t2", "t3"})
 
-	// Verify remaining tables in aux
-	rows, err := db.Query("SELECT name FROM aux.sqlite_master WHERE type='table' ORDER BY name")
+	attachExecAll(t, db, []string{"DROP TABLE t2"})
+	attachAssertIntCount(t, db, "SELECT COUNT(*) FROM aux.sqlite_master WHERE name = 't2'", 1)
+}
+
+func attachAssertStringList(t *testing.T, db *sql.DB, query string, want []string) {
+	t.Helper()
+	rows, err := db.Query(query)
 	if err != nil {
-		t.Fatalf("failed to query aux tables: %v", err)
+		t.Fatalf("query failed: %v", err)
 	}
 	defer rows.Close()
-
-	var tables []string
+	var got []string
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			t.Fatalf("failed to scan table name: %v", err)
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatalf("scan failed: %v", err)
 		}
-		tables = append(tables, name)
+		got = append(got, s)
 	}
-
-	expected := []string{"t2", "t3"}
-	if len(tables) != len(expected) {
-		t.Errorf("expected %v tables, got %v", expected, tables)
-	}
-
-	// Drop t2 without qualifier (should drop main.t2, not aux.t2)
-	_, err = db.Exec("DROP TABLE t2")
-	if err != nil {
-		t.Fatalf("failed to drop t2: %v", err)
-	}
-
-	// Verify aux.t2 still exists
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM aux.sqlite_master WHERE name = 't2'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query aux sqlite_master: %v", err)
-	}
-	if count != 1 {
-		t.Error("aux.t2 should still exist")
+	if len(got) != len(want) {
+		t.Errorf("got %v, want %v", got, want)
 	}
 }
 
@@ -615,53 +434,29 @@ func TestAttachSameFileTwice(t *testing.T) {
 	tmpDir := t.TempDir()
 	test4Path := filepath.Join(tmpDir, "test4.db")
 
-	// Attach same file twice with different aliases
-	_, err := db.Exec(fmt.Sprintf("ATTACH '%s' AS aux1", test4Path))
-	if err != nil {
-		t.Fatalf("failed to attach as aux1: %v", err)
-	}
+	attachExecAll(t, db, []string{
+		fmt.Sprintf("ATTACH '%s' AS aux1", test4Path),
+		"CREATE TABLE aux1.t1(a, b)",
+		"INSERT INTO aux1.t1 VALUES(1, 2)",
+		fmt.Sprintf("ATTACH '%s' AS aux2", test4Path),
+	})
 
-	_, err = db.Exec("CREATE TABLE aux1.t1(a, b)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
+	attachAssertRow2Int(t, db, "SELECT * FROM aux2.t1", 1, 2)
+	attachSameFileTwiceWriteTest(t, db)
+}
 
-	_, err = db.Exec("INSERT INTO aux1.t1 VALUES(1, 2)")
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-
-	_, err = db.Exec(fmt.Sprintf("ATTACH '%s' AS aux2", test4Path))
-	if err != nil {
-		t.Fatalf("failed to attach as aux2: %v", err)
-	}
-
-	// Query via second alias
-	var a, b int
-	err = db.QueryRow("SELECT * FROM aux2.t1").Scan(&a, &b)
-	if err != nil {
-		t.Fatalf("failed to query aux2.t1: %v", err)
-	}
-	if a != 1 || b != 2 {
-		t.Errorf("expected (1,2), got (%d,%d)", a, b)
-	}
-
-	// Concurrent writes to same file via different aliases should fail
+func attachSameFileTwiceWriteTest(t *testing.T, db *sql.DB) {
+	t.Helper()
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
 	}
-
-	_, err = tx.Exec("INSERT INTO aux1.t1 VALUES(3, 4)")
-	if err != nil {
+	if _, err = tx.Exec("INSERT INTO aux1.t1 VALUES(3, 4)"); err != nil {
 		t.Fatalf("failed to insert into aux1: %v", err)
 	}
-
 	_, err = tx.Exec("INSERT INTO aux2.t1 VALUES(5, 6)")
 	if err != nil {
 		tx.Rollback()
-		// This is expected - writing to the same database via different aliases
-		// in a transaction should cause a lock error
 		if !strings.Contains(err.Error(), "locked") {
 			t.Errorf("expected 'locked' error, got: %v", err)
 		}
@@ -676,63 +471,54 @@ func TestAttachMemoryDatabases(t *testing.T) {
 	db := openAttachTestDB(t)
 	defer db.Close()
 
-	// Attach empty string as memory database
-	_, err := db.Exec("ATTACH '' AS noname")
-	if err != nil {
-		t.Fatalf("failed to attach empty string: %v", err)
-	}
+	attachExecAll(t, db, []string{
+		"ATTACH '' AS noname",
+		"ATTACH ':memory:' AS inmem",
+	})
 
-	// Attach :memory: as memory database
-	_, err = db.Exec("ATTACH ':memory:' AS inmem")
-	if err != nil {
-		t.Fatalf("failed to attach :memory:: %v", err)
-	}
+	attachMemoryCreateTables(t, db)
 
-	// Create tables in attached memory databases
+	attachAssertIntCount(t, db, "SELECT COUNT(*) FROM noname.sqlite_master WHERE name='noname'", 1)
+	attachAssertIntCount(t, db, "SELECT COUNT(*) FROM inmem.sqlite_master WHERE name='inmem'", 1)
+}
+
+func attachMemoryCreateTables(t *testing.T, db *sql.DB) {
+	t.Helper()
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
 	}
-
-	_, err = tx.Exec("CREATE TABLE noname.noname(x)")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("failed to create table in noname: %v", err)
+	for _, stmt := range []string{
+		"CREATE TABLE noname.noname(x)",
+		"CREATE TABLE inmem.inmem(y)",
+		"CREATE TABLE main.main(z)",
+	} {
+		if _, err = tx.Exec(stmt); err != nil {
+			tx.Rollback()
+			t.Fatalf("exec failed: %v\nSQL: %s", err, stmt)
+		}
 	}
-
-	_, err = tx.Exec("CREATE TABLE inmem.inmem(y)")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("failed to create table in inmem: %v", err)
-	}
-
-	_, err = tx.Exec("CREATE TABLE main.main(z)")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("failed to create table in main: %v", err)
-	}
-
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("failed to commit: %v", err)
 	}
+}
 
-	// Verify tables exist
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM noname.sqlite_master WHERE name='noname'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query noname tables: %v", err)
+func attachMany(t *testing.T, db *sql.DB, tmpDir string, count int) []string {
+	t.Helper()
+	var attached []string
+	for i := 0; i < count; i++ {
+		alias := fmt.Sprintf("aux%d", i)
+		attachPath := filepath.Join(tmpDir, fmt.Sprintf("test%d.db", i))
+		_, err := db.Exec(fmt.Sprintf("ATTACH '%s' AS %s", attachPath, alias))
+		if err != nil {
+			if !strings.Contains(err.Error(), "too many attached") {
+				t.Errorf("expected 'too many attached' error at %d attachments, got: %v", i, err)
+			}
+			break
+		}
+		attached = append(attached, alias)
 	}
-	if count != 1 {
-		t.Error("table noname should exist in noname database")
-	}
-
-	err = db.QueryRow("SELECT COUNT(*) FROM inmem.sqlite_master WHERE name='inmem'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query inmem tables: %v", err)
-	}
-	if count != 1 {
-		t.Error("table inmem should exist in inmem database")
-	}
+	return attached
 }
 
 // TestAttachMaxDatabases tests the maximum number of attached databases (attach4.test 1.1-1.2)
@@ -742,47 +528,22 @@ func TestAttachMaxDatabases(t *testing.T) {
 	defer db.Close()
 
 	tmpDir := t.TempDir()
+	attached := attachMany(t, db, tmpDir, 10)
 
-	// Attach many databases
-	var attached []string
-	for i := 0; i < 10; i++ {
-		alias := fmt.Sprintf("aux%d", i)
-		attachPath := filepath.Join(tmpDir, fmt.Sprintf("test%d.db", i))
-
-		_, err := db.Exec(fmt.Sprintf("ATTACH '%s' AS %s", attachPath, alias))
-		if err != nil {
-			// Hit the limit
-			if !strings.Contains(err.Error(), "too many attached") {
-				t.Errorf("expected 'too many attached' error at %d attachments, got: %v", i, err)
-			}
-			break
-		}
-		attached = append(attached, alias)
-	}
-
-	// Verify we could attach at least a few databases
 	if len(attached) < 3 {
 		t.Errorf("expected to attach at least 3 databases, got %d", len(attached))
 	}
 
-	// Try to attach one more (should fail if at limit)
 	oneMore := filepath.Join(tmpDir, "testone_more.db")
-	_, err := db.Exec(fmt.Sprintf("ATTACH '%s' AS one_more", oneMore))
-	if err != nil {
-		if !strings.Contains(err.Error(), "too many attached") {
-			t.Logf("attachment limit reached at %d databases", len(attached))
-		}
+	if _, err := db.Exec(fmt.Sprintf("ATTACH '%s' AS one_more", oneMore)); err != nil {
+		t.Logf("attachment limit reached at %d databases", len(attached))
 	}
 
-	// Detach one and verify we can attach again
 	if len(attached) > 0 {
-		_, err = db.Exec(fmt.Sprintf("DETACH %s", attached[0]))
-		if err != nil {
+		if _, err := db.Exec(fmt.Sprintf("DETACH %s", attached[0])); err != nil {
 			t.Fatalf("failed to detach: %v", err)
 		}
-
-		_, err = db.Exec(fmt.Sprintf("ATTACH '%s' AS reattached", dbPath))
-		if err != nil {
+		if _, err := db.Exec(fmt.Sprintf("ATTACH '%s' AS reattached", dbPath)); err != nil {
 			t.Fatalf("failed to reattach after detach: %v", err)
 		}
 	}
@@ -835,54 +596,13 @@ func TestAttachQualifiedTableNames(t *testing.T) {
 	defer db.Close()
 
 	db2, db2Path := setupAttachTestDB(t, "test2.db")
-
-	// Create tables in both databases
-	_, err := db.Exec("CREATE TABLE t3(a,b)")
-	if err != nil {
-		t.Fatalf("failed to create main.t3: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t3 VALUES(9,10)")
-	if err != nil {
-		t.Fatalf("failed to insert into main.t3: %v", err)
-	}
-
-	_, err = db2.Exec("CREATE TABLE t3(x,y)")
-	if err != nil {
-		t.Fatalf("failed to create db2.t3: %v", err)
-	}
-
-	_, err = db2.Exec("INSERT INTO t3 VALUES(1,2)")
-	if err != nil {
-		t.Fatalf("failed to insert into db2.t3: %v", err)
-	}
-
+	attachExecAll(t, db, []string{"CREATE TABLE t3(a,b)", "INSERT INTO t3 VALUES(9,10)"})
+	attachExecAll(t, db2, []string{"CREATE TABLE t3(x,y)", "INSERT INTO t3 VALUES(1,2)"})
 	db2.Close()
 
-	// Attach db2
-	_, err = db.Exec(fmt.Sprintf("ATTACH DATABASE '%s' AS db2", db2Path))
-	if err != nil {
-		t.Fatalf("failed to attach database: %v", err)
-	}
-
-	// Query with qualified names
-	var x, y int
-	err = db.QueryRow("SELECT * FROM db2.t3").Scan(&x, &y)
-	if err != nil {
-		t.Fatalf("failed to query db2.t3: %v", err)
-	}
-	if x != 1 || y != 2 {
-		t.Errorf("expected (1,2) from db2.t3, got (%d,%d)", x, y)
-	}
-
-	var a, b int
-	err = db.QueryRow("SELECT * FROM main.t3").Scan(&a, &b)
-	if err != nil {
-		t.Fatalf("failed to query main.t3: %v", err)
-	}
-	if a != 9 || b != 10 {
-		t.Errorf("expected (9,10) from main.t3, got (%d,%d)", a, b)
-	}
+	attachExecAll(t, db, []string{fmt.Sprintf("ATTACH DATABASE '%s' AS db2", db2Path)})
+	attachAssertRow2Int(t, db, "SELECT * FROM db2.t3", 1, 2)
+	attachAssertRow2Int(t, db, "SELECT * FROM main.t3", 9, 10)
 }
 
 // TestAttachSchemaNamespace tests that schemas in different databases are independent (attach.test 2.7-2.16)
@@ -892,56 +612,19 @@ func TestAttachSchemaNamespace(t *testing.T) {
 	defer db.Close()
 
 	db2, db2Path := setupAttachTestDB(t, "test2.db")
-
-	// Create table in main
-	_, err := db.Exec("CREATE TABLE tx(x1,x2,y1,y2)")
-	if err != nil {
-		t.Fatalf("failed to create main.tx: %v", err)
-	}
-
-	// Create table and index in db2
-	_, err = db2.Exec("CREATE TABLE t2(x,y)")
-	if err != nil {
-		t.Fatalf("failed to create db2.t2: %v", err)
-	}
-
-	_, err = db2.Exec("INSERT INTO t2 VALUES(1,'x')")
-	if err != nil {
-		t.Fatalf("failed to insert into db2.t2: %v", err)
-	}
-
-	_, err = db2.Exec("CREATE TABLE tx(x1,x2,y1,y2)")
-	if err != nil {
-		t.Fatalf("failed to create db2.tx: %v", err)
-	}
-
+	attachExecAll(t, db, []string{"CREATE TABLE tx(x1,x2,y1,y2)"})
+	attachExecAll(t, db2, []string{
+		"CREATE TABLE t2(x,y)",
+		"INSERT INTO t2 VALUES(1,'x')",
+		"CREATE TABLE tx(x1,x2,y1,y2)",
+	})
 	db2.Close()
 
-	// Attach db2
-	_, err = db.Exec(fmt.Sprintf("ATTACH '%s' AS db2", db2Path))
-	if err != nil {
-		t.Fatalf("failed to attach database: %v", err)
-	}
+	attachExecAll(t, db, []string{fmt.Sprintf("ATTACH '%s' AS db2", db2Path)})
+	attachAssertCount(t, db, "SELECT * FROM main.tx", 0)
 
-	// Query main.tx (should be empty)
-	rows, err := db.Query("SELECT * FROM main.tx")
-	if err != nil {
-		t.Fatalf("failed to query main.tx: %v", err)
-	}
-	defer rows.Close()
-
-	count := 0
-	for rows.Next() {
-		count++
-	}
-	if count != 0 {
-		t.Errorf("expected 0 rows in main.tx, got %d", count)
-	}
-
-	// Verify schema objects exist in db2
 	var schemaCount int
-	err = db.QueryRow("SELECT COUNT(*) FROM db2.sqlite_master WHERE type IN ('table','index')").Scan(&schemaCount)
-	if err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM db2.sqlite_master WHERE type IN ('table','index')").Scan(&schemaCount); err != nil {
 		t.Fatalf("failed to query db2 schema: %v", err)
 	}
 	if schemaCount < 2 {

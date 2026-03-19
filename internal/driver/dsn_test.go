@@ -9,247 +9,208 @@ import (
 	"time"
 )
 
-// TestParseDSN tests the DSN parsing functionality
-func TestParseDSN(t *testing.T) {
-	tests := []struct {
-		name         string
-		dsn          string
-		wantErr      bool
-		wantMemory   bool
-		wantReadOnly bool
-		checkConfig  func(*testing.T, *DriverConfig)
-	}{
-		{
-			name:       "simple filename",
-			dsn:        "test.db",
-			wantErr:    false,
-			wantMemory: false,
-			checkConfig: func(t *testing.T, cfg *DriverConfig) {
-				// Default is false to match SQLite behavior
-				if cfg.EnableForeignKeys != false {
-					t.Errorf("expected EnableForeignKeys=false (SQLite default), got %v", cfg.EnableForeignKeys)
-				}
-			},
-		},
-		{
-			name:         "read-only mode",
-			dsn:          "test.db?mode=ro",
-			wantErr:      false,
-			wantReadOnly: true,
-			checkConfig: func(t *testing.T, cfg *DriverConfig) {
-				if !cfg.Pager.ReadOnly {
-					t.Errorf("expected ReadOnly=true, got false")
-				}
-			},
-		},
-		{
-			name:       "memory mode",
-			dsn:        ":memory:",
-			wantErr:    false,
-			wantMemory: true,
-			checkConfig: func(t *testing.T, cfg *DriverConfig) {
-				if !cfg.Pager.MemoryDB {
-					t.Errorf("expected MemoryDB=true, got false")
-				}
-			},
-		},
-		{
-			name:    "journal_mode WAL",
-			dsn:     "test.db?journal_mode=wal",
-			wantErr: false,
-			checkConfig: func(t *testing.T, cfg *DriverConfig) {
-				if cfg.Pager.JournalMode != "wal" {
-					t.Errorf("expected JournalMode=wal, got %s", cfg.Pager.JournalMode)
-				}
-			},
-		},
-		{
-			name:    "cache_size",
-			dsn:     "test.db?cache_size=10000",
-			wantErr: false,
-			checkConfig: func(t *testing.T, cfg *DriverConfig) {
-				if cfg.Pager.CacheSize != 10000 {
-					t.Errorf("expected CacheSize=10000, got %d", cfg.Pager.CacheSize)
-				}
-			},
-		},
-		{
-			name:    "synchronous mode",
-			dsn:     "test.db?synchronous=normal",
-			wantErr: false,
-			checkConfig: func(t *testing.T, cfg *DriverConfig) {
-				if cfg.Pager.SyncMode != "normal" {
-					t.Errorf("expected SyncMode=normal, got %s", cfg.Pager.SyncMode)
-				}
-			},
-		},
-		{
-			name:    "foreign_keys off",
-			dsn:     "test.db?foreign_keys=off",
-			wantErr: false,
-			checkConfig: func(t *testing.T, cfg *DriverConfig) {
-				if cfg.EnableForeignKeys != false {
-					t.Errorf("expected EnableForeignKeys=false, got true")
-				}
-			},
-		},
-		{
-			name:    "busy_timeout",
-			dsn:     "test.db?busy_timeout=5000",
-			wantErr: false,
-			checkConfig: func(t *testing.T, cfg *DriverConfig) {
-				expected := 5000 * time.Millisecond
-				if cfg.Pager.BusyTimeout != expected {
-					t.Errorf("expected BusyTimeout=%v, got %v", expected, cfg.Pager.BusyTimeout)
-				}
-			},
-		},
-		{
-			name:    "multiple parameters",
-			dsn:     "test.db?mode=rw&journal_mode=wal&cache_size=5000&foreign_keys=on",
-			wantErr: false,
-			checkConfig: func(t *testing.T, cfg *DriverConfig) {
-				if cfg.Pager.ReadOnly {
-					t.Errorf("expected ReadOnly=false, got true")
-				}
-				if cfg.Pager.JournalMode != "wal" {
-					t.Errorf("expected JournalMode=wal, got %s", cfg.Pager.JournalMode)
-				}
-				if cfg.Pager.CacheSize != 5000 {
-					t.Errorf("expected CacheSize=5000, got %d", cfg.Pager.CacheSize)
-				}
-				if !cfg.EnableForeignKeys {
-					t.Errorf("expected EnableForeignKeys=true, got false")
-				}
-			},
-		},
-		{
-			name:    "shared cache",
-			dsn:     "test.db?cache=shared",
-			wantErr: false,
-			checkConfig: func(t *testing.T, cfg *DriverConfig) {
-				if !cfg.SharedCache {
-					t.Errorf("expected SharedCache=true, got false")
-				}
-			},
-		},
+// dsnParsedVerify checks the parsed DSN fields common to all test cases.
+func dsnParsedVerify(t *testing.T, dsn *DSN, wantMemory, wantReadOnly bool) {
+	t.Helper()
+	if dsn.Config.Pager.MemoryDB != wantMemory {
+		t.Errorf("expected MemoryDB=%v, got %v", wantMemory, dsn.Config.Pager.MemoryDB)
 	}
+	if dsn.Config.Pager.ReadOnly != wantReadOnly {
+		t.Errorf("expected ReadOnly=%v, got %v", wantReadOnly, dsn.Config.Pager.ReadOnly)
+	}
+}
 
-	for _, tt := range tests {
+// TestParseDSN tests the DSN parsing functionality
+type dsnTestCase struct {
+	name         string
+	dsn          string
+	wantErr      bool
+	wantMemory   bool
+	wantReadOnly bool
+	checkConfig  func(*testing.T, *DriverConfig)
+}
+
+func dsnCheckSimpleFilename(t *testing.T, cfg *DriverConfig) {
+	if cfg.EnableForeignKeys != false {
+		t.Errorf("expected EnableForeignKeys=false (SQLite default), got %v", cfg.EnableForeignKeys)
+	}
+}
+
+func dsnCheckReadOnly(t *testing.T, cfg *DriverConfig) {
+	if !cfg.Pager.ReadOnly {
+		t.Errorf("expected ReadOnly=true, got false")
+	}
+}
+
+func dsnCheckMemory(t *testing.T, cfg *DriverConfig) {
+	if !cfg.Pager.MemoryDB {
+		t.Errorf("expected MemoryDB=true, got false")
+	}
+}
+
+func dsnCheckMultipleParams(t *testing.T, cfg *DriverConfig) {
+	if cfg.Pager.ReadOnly {
+		t.Errorf("expected ReadOnly=false, got true")
+	}
+	if cfg.Pager.JournalMode != "wal" {
+		t.Errorf("expected JournalMode=wal, got %s", cfg.Pager.JournalMode)
+	}
+	if cfg.Pager.CacheSize != 5000 {
+		t.Errorf("expected CacheSize=5000, got %d", cfg.Pager.CacheSize)
+	}
+	if !cfg.EnableForeignKeys {
+		t.Errorf("expected EnableForeignKeys=true, got false")
+	}
+}
+
+func dsnParseCases() []dsnTestCase {
+	return []dsnTestCase{
+		{"simple filename", "test.db", false, false, false, dsnCheckSimpleFilename},
+		{"read-only mode", "test.db?mode=ro", false, false, true, dsnCheckReadOnly},
+		{"memory mode", ":memory:", false, true, false, dsnCheckMemory},
+		{"journal_mode WAL", "test.db?journal_mode=wal", false, false, false, func(t *testing.T, cfg *DriverConfig) {
+			if cfg.Pager.JournalMode != "wal" {
+				t.Errorf("expected JournalMode=wal, got %s", cfg.Pager.JournalMode)
+			}
+		}},
+		{"cache_size", "test.db?cache_size=10000", false, false, false, func(t *testing.T, cfg *DriverConfig) {
+			if cfg.Pager.CacheSize != 10000 {
+				t.Errorf("expected CacheSize=10000, got %d", cfg.Pager.CacheSize)
+			}
+		}},
+		{"synchronous mode", "test.db?synchronous=normal", false, false, false, func(t *testing.T, cfg *DriverConfig) {
+			if cfg.Pager.SyncMode != "normal" {
+				t.Errorf("expected SyncMode=normal, got %s", cfg.Pager.SyncMode)
+			}
+		}},
+		{"foreign_keys off", "test.db?foreign_keys=off", false, false, false, func(t *testing.T, cfg *DriverConfig) {
+			if cfg.EnableForeignKeys != false {
+				t.Errorf("expected EnableForeignKeys=false, got true")
+			}
+		}},
+		{"busy_timeout", "test.db?busy_timeout=5000", false, false, false, func(t *testing.T, cfg *DriverConfig) {
+			if cfg.Pager.BusyTimeout != 5000*time.Millisecond {
+				t.Errorf("expected BusyTimeout=%v, got %v", 5000*time.Millisecond, cfg.Pager.BusyTimeout)
+			}
+		}},
+		{"multiple parameters", "test.db?mode=rw&journal_mode=wal&cache_size=5000&foreign_keys=on", false, false, false, dsnCheckMultipleParams},
+		{"shared cache", "test.db?cache=shared", false, false, false, func(t *testing.T, cfg *DriverConfig) {
+			if !cfg.SharedCache {
+				t.Errorf("expected SharedCache=true, got false")
+			}
+		}},
+	}
+}
+
+func TestParseDSN(t *testing.T) {
+	for _, tt := range dsnParseCases() {
 		t.Run(tt.name, func(t *testing.T) {
-			dsn, err := ParseDSN(tt.dsn)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseDSN() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if err != nil {
-				return
-			}
-
-			if dsn.Config.Pager.MemoryDB != tt.wantMemory {
-				t.Errorf("expected MemoryDB=%v, got %v", tt.wantMemory, dsn.Config.Pager.MemoryDB)
-			}
-
-			if dsn.Config.Pager.ReadOnly != tt.wantReadOnly {
-				t.Errorf("expected ReadOnly=%v, got %v", tt.wantReadOnly, dsn.Config.Pager.ReadOnly)
-			}
-
-			if tt.checkConfig != nil {
-				tt.checkConfig(t, dsn.Config)
-			}
+			dsnRunParseCase(t, tt.dsn, tt.wantErr, tt.wantMemory, tt.wantReadOnly, tt.checkConfig)
 		})
+	}
+}
+
+// dsnRunParseCase runs a single ParseDSN test case.
+func dsnRunParseCase(t *testing.T, dsnStr string, wantErr, wantMemory, wantReadOnly bool, checkConfig func(*testing.T, *DriverConfig)) {
+	t.Helper()
+	dsn, err := ParseDSN(dsnStr)
+	if (err != nil) != wantErr {
+		t.Errorf("ParseDSN() error = %v, wantErr %v", err, wantErr)
+		return
+	}
+	if err != nil {
+		return
+	}
+	dsnParsedVerify(t, dsn, wantMemory, wantReadOnly)
+	if checkConfig != nil {
+		checkConfig(t, dsn.Config)
+	}
+}
+
+// dsnOpenTemp opens a temp database with the given DSN suffix.
+func dsnOpenTemp(t *testing.T, dsnSuffix string) *sql.DB {
+	t.Helper()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	db, err := sql.Open(DriverName, dbPath+dsnSuffix)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	return db
+}
+
+// dsnIntegrationCase holds a DSN integration test case.
+type dsnIntegrationCase struct {
+	name      string
+	dsn       string
+	setupTest func(*testing.T, *sql.DB)
+}
+
+func dsnIntCheckJournalWAL(t *testing.T, db *sql.DB) {
+	t.Helper()
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatalf("failed to query journal_mode: %v", err)
+	}
+	if mode != "wal" {
+		t.Errorf("expected journal_mode=wal, got %s", mode)
+	}
+}
+
+func dsnIntCheckForeignKeysOn(t *testing.T, db *sql.DB) {
+	t.Helper()
+	var fk int
+	if err := db.QueryRow("PRAGMA foreign_keys").Scan(&fk); err != nil {
+		t.Fatalf("failed to query foreign_keys: %v", err)
+	}
+	if fk != 1 {
+		t.Errorf("expected foreign_keys=1, got %d", fk)
+	}
+}
+
+func dsnIntCheckCacheSize(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec("CREATE TABLE test (id INTEGER)"); err != nil {
+		t.Fatalf("failed to create table with cache_size setting: %v", err)
+	}
+}
+
+func dsnIntCheckMultipleSettings(t *testing.T, db *sql.DB) {
+	t.Helper()
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatalf("failed to query journal_mode: %v", err)
+	}
+	if mode != "memory" {
+		t.Errorf("expected journal_mode=memory, got %s", mode)
+	}
+	var fk int
+	if err := db.QueryRow("PRAGMA foreign_keys").Scan(&fk); err != nil {
+		t.Fatalf("failed to query foreign_keys: %v", err)
+	}
+	if fk != 0 {
+		t.Errorf("expected foreign_keys=0, got %d", fk)
+	}
+}
+
+func dsnIntegrationCases() []dsnIntegrationCase {
+	return []dsnIntegrationCase{
+		{"journal_mode WAL", "?journal_mode=wal", dsnIntCheckJournalWAL},
+		{"foreign_keys on", "?foreign_keys=on", dsnIntCheckForeignKeysOn},
+		{"cache_size", "?cache_size=5000", dsnIntCheckCacheSize},
+		{"multiple settings", "?journal_mode=memory&foreign_keys=off", dsnIntCheckMultipleSettings},
 	}
 }
 
 // TestDSNIntegration tests DSN parameters with actual database connections
 func TestDSNIntegration(t *testing.T) {
-	tests := []struct {
-		name      string
-		dsn       string
-		setupTest func(*testing.T, *sql.DB)
-	}{
-		{
-			name: "journal_mode WAL",
-			dsn:  "?journal_mode=wal",
-			setupTest: func(t *testing.T, db *sql.DB) {
-				var mode string
-				err := db.QueryRow("PRAGMA journal_mode").Scan(&mode)
-				if err != nil {
-					t.Fatalf("failed to query journal_mode: %v", err)
-				}
-				if mode != "wal" {
-					t.Errorf("expected journal_mode=wal, got %s", mode)
-				}
-			},
-		},
-		{
-			name: "foreign_keys on",
-			dsn:  "?foreign_keys=on",
-			setupTest: func(t *testing.T, db *sql.DB) {
-				var fk int
-				err := db.QueryRow("PRAGMA foreign_keys").Scan(&fk)
-				if err != nil {
-					t.Fatalf("failed to query foreign_keys: %v", err)
-				}
-				if fk != 1 {
-					t.Errorf("expected foreign_keys=1, got %d", fk)
-				}
-			},
-		},
-		{
-			name: "cache_size",
-			dsn:  "?cache_size=5000",
-			setupTest: func(t *testing.T, db *sql.DB) {
-				// Create a simple table to verify the connection works
-				// The cache_size is applied but may not be queryable yet
-				_, err := db.Exec("CREATE TABLE test (id INTEGER)")
-				if err != nil {
-					t.Fatalf("failed to create table with cache_size setting: %v", err)
-				}
-			},
-		},
-		{
-			name: "multiple settings",
-			dsn:  "?journal_mode=memory&foreign_keys=off",
-			setupTest: func(t *testing.T, db *sql.DB) {
-				var mode string
-				err := db.QueryRow("PRAGMA journal_mode").Scan(&mode)
-				if err != nil {
-					t.Fatalf("failed to query journal_mode: %v", err)
-				}
-				if mode != "memory" {
-					t.Errorf("expected journal_mode=memory, got %s", mode)
-				}
-
-				var fk int
-				err = db.QueryRow("PRAGMA foreign_keys").Scan(&fk)
-				if err != nil {
-					t.Fatalf("failed to query foreign_keys: %v", err)
-				}
-				if fk != 0 {
-					t.Errorf("expected foreign_keys=0, got %d", fk)
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
+	for _, tt := range dsnIntegrationCases() {
+		dsn := tt.dsn
+		setup := tt.setupTest
 		t.Run(tt.name, func(t *testing.T) {
-			// Create temporary database file
-			tmpDir := t.TempDir()
-			dbPath := filepath.Join(tmpDir, "test.db")
-
-			// Open database with DSN
-			dsn := dbPath + tt.dsn
-			db, err := sql.Open(DriverName, dsn)
-			if err != nil {
-				t.Fatalf("failed to open database: %v", err)
-			}
+			db := dsnOpenTemp(t, dsn)
 			defer db.Close()
-
-			// Run the test
-			tt.setupTest(t, db)
+			setup(t, db)
 		})
 	}
 }

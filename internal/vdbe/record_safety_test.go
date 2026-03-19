@@ -430,6 +430,29 @@ func TestDecodeRecordOffsetEdgeCases(t *testing.T) {
 	}
 }
 
+// verifyDecodedBlobOrText checks a decoded value matches the original.
+func verifyDecodedBlobOrText(t *testing.T, decoded interface{}, expected interface{}) {
+	t.Helper()
+	switch exp := expected.(type) {
+	case string:
+		result, ok := decoded.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", decoded)
+		}
+		if result != exp {
+			t.Errorf("text mismatch: expected length %d, got %d", len(exp), len(result))
+		}
+	case []byte:
+		result, ok := decoded.([]byte)
+		if !ok {
+			t.Fatalf("expected []byte, got %T", decoded)
+		}
+		if !bytes.Equal(result, exp) {
+			t.Errorf("blob mismatch: expected length %d, got %d", len(exp), len(result))
+		}
+	}
+}
+
 // TestDecodeRecordBlobAndText tests blob and text handling with various sizes
 func TestDecodeRecordBlobAndText(t *testing.T) {
 	t.Parallel()
@@ -456,29 +479,10 @@ func TestDecodeRecordBlobAndText(t *testing.T) {
 			if err != nil {
 				t.Fatalf("decoding failed: %v", err)
 			}
-
 			if len(decoded) != 1 {
 				t.Fatalf("expected 1 value, got %d", len(decoded))
 			}
-
-			switch expected := tt.value.(type) {
-			case string:
-				result, ok := decoded[0].(string)
-				if !ok {
-					t.Fatalf("expected string, got %T", decoded[0])
-				}
-				if result != expected {
-					t.Errorf("text mismatch: expected length %d, got %d", len(expected), len(result))
-				}
-			case []byte:
-				result, ok := decoded[0].([]byte)
-				if !ok {
-					t.Fatalf("expected []byte, got %T", decoded[0])
-				}
-				if !bytes.Equal(result, expected) {
-					t.Errorf("blob mismatch: expected length %d, got %d", len(expected), len(result))
-				}
-			}
+			verifyDecodedBlobOrText(t, decoded[0], tt.value)
 		})
 	}
 }

@@ -107,53 +107,42 @@ func TestDateTimeFunctions_Basic(t *testing.T) {
 
 // TestStrftimeFunc_Basic tests basic strftime functionality
 func TestStrftimeFunc_Basic(t *testing.T) {
-	// Test that strftime works without panicking
-	result, err := strftimeFunc([]Value{NewTextValue("%Y-%m-%d"), NewTextValue("now")})
-	if err != nil {
-		t.Fatalf("strftimeFunc() error = %v", err)
-	}
-	if result.IsNull() {
-		t.Fatal("strftimeFunc() returned NULL")
-	}
-
-	// Test with just format (should use current time)
-	result, err = strftimeFunc([]Value{NewTextValue("%Y")})
-	if err != nil {
-		t.Fatalf("strftimeFunc() with just format error = %v", err)
-	}
-	if result.IsNull() {
-		t.Fatal("strftimeFunc() with just format returned NULL")
-	}
-
-	// Test with no args
-	result, err = strftimeFunc([]Value{})
-	if err != nil {
-		t.Fatalf("strftimeFunc() with no args error = %v", err)
-	}
-	if !result.IsNull() {
-		t.Errorf("strftimeFunc() with no args should return NULL, got %v", result)
-	}
-
-	// Test with invalid date
-	result, err = strftimeFunc([]Value{NewTextValue("%Y"), NewTextValue("invalid")})
-	if err != nil {
-		t.Fatalf("strftimeFunc() with invalid date error = %v", err)
-	}
-	if !result.IsNull() {
-		t.Errorf("strftimeFunc() with invalid date should return NULL, got %v", result)
-	}
-
-	// Test all format specifiers
-	specs := []string{"%d", "%m", "%Y", "%H", "%M", "%S", "%J", "%s", "%%", "%X"}
-	for _, spec := range specs {
-		result, err := strftimeFunc([]Value{NewTextValue(spec), NewTextValue("now")})
-		if err != nil {
-			t.Errorf("strftimeFunc(%s) error = %v", spec, err)
+	t.Run("basic calls", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			args     []Value
+			wantNull bool
+		}{
+			{"format and now", []Value{NewTextValue("%Y-%m-%d"), NewTextValue("now")}, false},
+			{"just format", []Value{NewTextValue("%Y")}, false},
+			{"no args", []Value{}, true},
+			{"invalid date", []Value{NewTextValue("%Y"), NewTextValue("invalid")}, true},
 		}
-		if result.IsNull() {
-			t.Errorf("strftimeFunc(%s) returned NULL", spec)
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				result, err := strftimeFunc(tt.args)
+				if err != nil {
+					t.Fatalf("strftimeFunc() error = %v", err)
+				}
+				if result.IsNull() != tt.wantNull {
+					t.Errorf("strftimeFunc() IsNull = %v, want %v", result.IsNull(), tt.wantNull)
+				}
+			})
 		}
-	}
+	})
+
+	t.Run("format specifiers", func(t *testing.T) {
+		specs := []string{"%d", "%m", "%Y", "%H", "%M", "%S", "%J", "%s", "%%", "%X"}
+		for _, spec := range specs {
+			result, err := strftimeFunc([]Value{NewTextValue(spec), NewTextValue("now")})
+			if err != nil {
+				t.Errorf("strftimeFunc(%s) error = %v", spec, err)
+			}
+			if result.IsNull() {
+				t.Errorf("strftimeFunc(%s) returned NULL", spec)
+			}
+		}
+	})
 }
 
 // TestDateTimeModifiers_Basic tests that modifiers work
@@ -200,52 +189,55 @@ func TestDateTimeModifiers_Basic(t *testing.T) {
 
 // TestDateTimeHelpers tests helper functions
 func TestDateTimeHelpers(t *testing.T) {
-	// Test isLeapYear
-	if !isLeapYear(2020) {
-		t.Error("isLeapYear(2020) should be true")
-	}
-	if isLeapYear(2021) {
-		t.Error("isLeapYear(2021) should be false")
-	}
-	if !isLeapYear(2000) {
-		t.Error("isLeapYear(2000) should be true")
-	}
-	if isLeapYear(1900) {
-		t.Error("isLeapYear(1900) should be false")
-	}
+	t.Run("isLeapYear", testIsLeapYear)
+	t.Run("daysInMonth", testDaysInMonth)
+	t.Run("isValidDate", testIsValidDate)
+	t.Run("safeFloatToInt", testSafeFloatToInt)
+}
 
-	// Test daysInMonth
-	if daysInMonth(2020, 2) != 29 {
-		t.Errorf("daysInMonth(2020, 2) = %d, want 29", daysInMonth(2020, 2))
+func testIsLeapYear(t *testing.T) {
+	tests := []struct {
+		year int
+		want bool
+	}{
+		{2020, true}, {2021, false}, {2000, true}, {1900, false},
 	}
-	if daysInMonth(2021, 2) != 28 {
-		t.Errorf("daysInMonth(2021, 2) = %d, want 28", daysInMonth(2021, 2))
+	for _, tt := range tests {
+		if isLeapYear(tt.year) != tt.want {
+			t.Errorf("isLeapYear(%d) = %v, want %v", tt.year, !tt.want, tt.want)
+		}
 	}
-	if daysInMonth(2021, 1) != 31 {
-		t.Errorf("daysInMonth(2021, 1) = %d, want 31", daysInMonth(2021, 1))
-	}
-	if daysInMonth(2021, 4) != 30 {
-		t.Errorf("daysInMonth(2021, 4) = %d, want 30", daysInMonth(2021, 4))
-	}
+}
 
-	// Test isValidDate
-	if !isValidDate(2021, 1, 15) {
-		t.Error("isValidDate(2021, 1, 15) should be true")
+func testDaysInMonth(t *testing.T) {
+	tests := []struct {
+		year, month, want int
+	}{
+		{2020, 2, 29}, {2021, 2, 28}, {2021, 1, 31}, {2021, 4, 30},
 	}
-	if isValidDate(2021, 2, 29) {
-		t.Error("isValidDate(2021, 2, 29) should be false")
+	for _, tt := range tests {
+		if got := daysInMonth(tt.year, tt.month); got != tt.want {
+			t.Errorf("daysInMonth(%d, %d) = %d, want %d", tt.year, tt.month, got, tt.want)
+		}
 	}
-	if !isValidDate(2020, 2, 29) {
-		t.Error("isValidDate(2020, 2, 29) should be true")
-	}
-	if isValidDate(2021, 13, 1) {
-		t.Error("isValidDate(2021, 13, 1) should be false")
-	}
-	if isValidDate(2021, 1, 32) {
-		t.Error("isValidDate(2021, 1, 32) should be false")
-	}
+}
 
-	// Test safeFloatToInt
+func testIsValidDate(t *testing.T) {
+	tests := []struct {
+		y, m, d int
+		want    bool
+	}{
+		{2021, 1, 15, true}, {2021, 2, 29, false}, {2020, 2, 29, true},
+		{2021, 13, 1, false}, {2021, 1, 32, false},
+	}
+	for _, tt := range tests {
+		if isValidDate(tt.y, tt.m, tt.d) != tt.want {
+			t.Errorf("isValidDate(%d, %d, %d) = %v, want %v", tt.y, tt.m, tt.d, !tt.want, tt.want)
+		}
+	}
+}
+
+func testSafeFloatToInt(t *testing.T) {
 	if safeFloatToInt(42.5) != 42 {
 		t.Errorf("safeFloatToInt(42.5) = %d, want 42", safeFloatToInt(42.5))
 	}

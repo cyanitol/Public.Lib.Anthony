@@ -85,61 +85,61 @@ func verifyNextRow(t *testing.T, v *VDBE, expected int64, iteration int) {
 	}
 }
 
+func verifySorterDataExtracted(t *testing.T, v *VDBE) {
+	t.Helper()
+	v.Sorters[0].SetCurrent(0)
+	err := v.execSorterData(&Instruction{Opcode: OpSorterData, P1: 0, P2: 10, P3: 2})
+	if err != nil {
+		t.Fatalf("SorterData failed: %v", err)
+	}
+	if v.Mem[10].IntValue() != 1 {
+		t.Errorf("Expected r10=1, got %d", v.Mem[10].IntValue())
+	}
+	if v.Mem[11].StringValue() != "first" {
+		t.Errorf("Expected r11='first', got '%s'", v.Mem[11].StringValue())
+	}
+}
+
+func verifySorterClose(t *testing.T, v *VDBE) {
+	t.Helper()
+	if err := v.execSorterClose(&Instruction{Opcode: OpSorterClose, P1: 0}); err != nil {
+		t.Fatalf("SorterClose failed: %v", err)
+	}
+	if v.Sorters[0] != nil {
+		t.Error("Sorter should be nil after close")
+	}
+}
+
 // TestSorterBasicWorkflow tests the basic sorter workflow
 func TestSorterBasicWorkflow(t *testing.T) {
 	t.Parallel()
 	v := NewTestVDBE(20)
+	keyInfo := &SorterKeyInfo{KeyCols: []int{0}, Desc: []bool{false}, Collations: []string{""}}
+	setupSorter(t, v, keyInfo, 2)
 
-		keyInfo := &SorterKeyInfo{
-			KeyCols:    []int{0},
-			Desc:       []bool{false},
-			Collations: []string{""},
-		}
-		setupSorter(t, v, keyInfo, 2)
+	insertSorterRow(t, v, []interface{}{int64(3), "third"})
+	insertSorterRow(t, v, []interface{}{int64(1), "first"})
+	insertSorterRow(t, v, []interface{}{int64(2), "second"})
 
-		insertSorterRow(t, v, []interface{}{int64(3), "third"})
-		insertSorterRow(t, v, []interface{}{int64(1), "first"})
-		insertSorterRow(t, v, []interface{}{int64(2), "second"})
+	if v.Sorters[0].NumRows() != 3 {
+		t.Errorf("Expected 3 rows in sorter, got %d", v.Sorters[0].NumRows())
+	}
 
-		if v.Sorters[0].NumRows() != 3 {
-			t.Errorf("Expected 3 rows in sorter, got %d", v.Sorters[0].NumRows())
-		}
+	sortAndVerify(t, v)
+	for i, expected := range []int64{1, 2, 3} {
+		verifyNextRow(t, v, expected, i)
+	}
 
-		sortAndVerify(t, v)
+	v.PC = 10
+	if err := v.execSorterNext(&Instruction{Opcode: OpSorterNext, P1: 0, P2: 15}); err != nil {
+		t.Fatalf("Final SorterNext failed: %v", err)
+	}
+	if v.PC == 15 {
+		t.Error("Should not jump when no more rows")
+	}
 
-		for i, expected := range []int64{1, 2, 3} {
-			verifyNextRow(t, v, expected, i)
-		}
-
-		v.PC = 10
-		err := v.execSorterNext(&Instruction{Opcode: OpSorterNext, P1: 0, P2: 15})
-		if err != nil {
-			t.Fatalf("Final SorterNext failed: %v", err)
-		}
-		if v.PC == 15 {
-			t.Error("Should not jump when no more rows")
-		}
-
-		v.Sorters[0].SetCurrent(0)
-		dataInstr := &Instruction{Opcode: OpSorterData, P1: 0, P2: 10, P3: 2}
-		err = v.execSorterData(dataInstr)
-		if err != nil {
-			t.Fatalf("SorterData failed: %v", err)
-		}
-		if v.Mem[10].IntValue() != 1 {
-			t.Errorf("Expected r10=1, got %d", v.Mem[10].IntValue())
-		}
-		if v.Mem[11].StringValue() != "first" {
-			t.Errorf("Expected r11='first', got '%s'", v.Mem[11].StringValue())
-		}
-
-		err = v.execSorterClose(&Instruction{Opcode: OpSorterClose, P1: 0})
-		if err != nil {
-			t.Fatalf("SorterClose failed: %v", err)
-		}
-		if v.Sorters[0] != nil {
-			t.Error("Sorter should be nil after close")
-		}
+	verifySorterDataExtracted(t, v)
+	verifySorterClose(t, v)
 }
 
 func TestSorterDescending(t *testing.T) {

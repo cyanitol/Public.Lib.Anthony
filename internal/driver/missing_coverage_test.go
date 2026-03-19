@@ -10,6 +10,39 @@ import (
 	"testing"
 )
 
+// missingCovExecNoArgs prepares and executes a SQL statement with no args.
+func missingCovExecNoArgs(t *testing.T, c *Conn, sql string) {
+	t.Helper()
+	stmt, err := c.Prepare(sql)
+	if err != nil {
+		t.Fatalf("Failed to prepare %q: %v", sql, err)
+	}
+	defer stmt.Close()
+	if _, err := stmt.Exec(nil); err != nil {
+		t.Fatalf("Failed to exec %q: %v", sql, err)
+	}
+}
+
+// missingCovQueryOneValue runs a query with args and returns a single value.
+func missingCovQueryOneValue(t *testing.T, c *Conn, sql string, args []driver.Value) driver.Value {
+	t.Helper()
+	stmt, err := c.Prepare(sql)
+	if err != nil {
+		t.Fatalf("Failed to prepare %q: %v", sql, err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(args)
+	if err != nil {
+		t.Fatalf("Failed to query %q: %v", sql, err)
+	}
+	defer rows.Close()
+	values := make([]driver.Value, 1)
+	if err := rows.Next(values); err != nil {
+		t.Fatalf("Failed to get row from %q: %v", sql, err)
+	}
+	return values[0]
+}
+
 // TestReleaseStateSharedConnection tests the releaseState function through connection lifecycle
 func TestReleaseStateSharedConnection(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -17,33 +50,19 @@ func TestReleaseStateSharedConnection(t *testing.T) {
 
 	drv := &Driver{}
 
-	// Open first connection
 	conn1, err := drv.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open first connection: %v", err)
 	}
-
 	c1 := conn1.(*Conn)
+	missingCovExecNoArgs(t, c1, "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
 
-	// Create a table to ensure file is initialized
-	stmt, err := c1.Prepare("CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
-	if err != nil {
-		t.Fatalf("Failed to prepare: %v", err)
-	}
-	_, err = stmt.Exec(nil)
-	if err != nil {
-		t.Fatalf("Failed to create table: %v", err)
-	}
-	stmt.Close()
-
-	// Open second connection to same database - this should share state
 	conn2, err := drv.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open second connection: %v", err)
 	}
 	c2 := conn2.(*Conn)
 
-	// Insert via c2 to verify shared state
 	stmt2, _ := c2.Prepare("INSERT INTO test (id, value) VALUES (?, ?)")
 	_, err = stmt2.Exec([]driver.Value{1, "shared"})
 	if err != nil {
@@ -51,38 +70,18 @@ func TestReleaseStateSharedConnection(t *testing.T) {
 	}
 	stmt2.Close()
 
-	// Close first connection - state should remain due to refcnt
 	if err := conn1.Close(); err != nil {
 		t.Fatalf("Failed to close c1: %v", err)
 	}
 
-	// c2 should still work
-	stmt3, _ := c2.Prepare("SELECT value FROM test WHERE id = ?")
-	rows, err := stmt3.Query([]driver.Value{1})
-	if err != nil {
-		t.Fatalf("Failed to query after closing c1: %v", err)
+	val := missingCovQueryOneValue(t, c2, "SELECT value FROM test WHERE id = ?", []driver.Value{1})
+	if val != "shared" {
+		t.Errorf("Expected 'shared', got %v", val)
 	}
 
-	values := make([]driver.Value, 1)
-	err = rows.Next(values)
-	if err != nil {
-		t.Fatalf("Failed to get row: %v", err)
-	}
-
-	if values[0] != "shared" {
-		t.Errorf("Expected 'shared', got %v", values[0])
-	}
-	rows.Close()
-	stmt3.Close()
-
-	// Close second connection - this should trigger releaseState and cleanup
 	if err := conn2.Close(); err != nil {
 		t.Fatalf("Failed to close c2: %v", err)
 	}
-
-	// Note: With current implementation, state remains in driver map after close
-	// This is a known limitation - releaseState is only called on error paths
-	// Future enhancement: properly call releaseState in Close() to cleanup shared state
 }
 
 // TestCreateConnectionPermissionError tests error paths in createConnection
@@ -247,6 +246,54 @@ func TestOrderByWithCollation(t *testing.T) {
 	}
 }
 
+// missingCovSetupOrderByTable creates and populates a test table for ORDER BY tests.
+func missingCovSetupOrderByTable(t *testing.T, c *Conn) {
+	t.Helper()
+	execStmts := []string{
+		`CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, city TEXT)`,
+	}
+	for _, sql := range execStmts {
+		stmt, _ := c.Prepare(sql)
+		if _, err := stmt.Exec(nil); err != nil {
+			t.Fatalf("Failed to exec %q: %v", sql, err)
+		}
+		stmt.Close()
+	}
+	data := [][]driver.Value{
+		{1, "Alice", 30, "NYC"},
+		{2, "Bob", 25, "LA"},
+		{3, "Charlie", 35, "Chicago"},
+		{4, "David", 28, "Boston"},
+	}
+	for _, d := range data {
+		stmt, _ := c.Prepare("INSERT INTO test (id, name, age, city) VALUES (?, ?, ?, ?)")
+		if _, err := stmt.Exec(d); err != nil {
+			t.Fatalf("Failed to insert: %v", err)
+		}
+		stmt.Close()
+	}
+}
+
+// missingCovQueryStringColumn runs a query and collects the first column as strings.
+func missingCovQueryStringColumn(c *Conn, query string, numCols int) ([]string, error) {
+	stmt, err := c.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []string
+	values := make([]driver.Value, numCols)
+	for rows.Next(values) == nil {
+		results = append(results, values[0].(string))
+	}
+	return results, nil
+}
+
 // TestOrderByWithExtraColumns tests ORDER BY with columns not in SELECT
 func TestOrderByWithExtraColumns(t *testing.T) {
 	drv := &Driver{}
@@ -257,60 +304,17 @@ func TestOrderByWithExtraColumns(t *testing.T) {
 	defer conn.Close()
 
 	c := conn.(*Conn)
+	missingCovSetupOrderByTable(t, c)
 
-	stmt, _ := c.Prepare(`CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, city TEXT)`)
-	_, err = stmt.Exec(nil)
-	if err != nil {
-		t.Fatalf("Failed to create table: %v", err)
-	}
-	stmt.Close()
-
-	// Insert test data
-	data := []struct {
-		id   int
-		name string
-		age  int
-		city string
-	}{
-		{1, "Alice", 30, "NYC"},
-		{2, "Bob", 25, "LA"},
-		{3, "Charlie", 35, "Chicago"},
-		{4, "David", 28, "Boston"},
-	}
-
-	for _, d := range data {
-		stmt, _ := c.Prepare("INSERT INTO test (id, name, age, city) VALUES (?, ?, ?, ?)")
-		_, err = stmt.Exec([]driver.Value{d.id, d.name, d.age, d.city})
-		if err != nil {
-			t.Fatalf("Failed to insert: %v", err)
-		}
-		stmt.Close()
-	}
-
-	// Test ORDER BY with column not in SELECT list
-	stmt2, _ := c.Prepare("SELECT name, city FROM test ORDER BY age")
-	rows, err := stmt2.Query(nil)
+	results, err := missingCovQueryStringColumn(c, "SELECT name, city FROM test ORDER BY age", 2)
 	if err != nil {
 		t.Fatalf("Failed to query with ORDER BY extra column: %v", err)
 	}
 
 	expected := []string{"Bob", "David", "Alice", "Charlie"}
-	var results []string
-	values := make([]driver.Value, 2)
-	for {
-		err := rows.Next(values)
-		if err != nil {
-			break
-		}
-		results = append(results, values[0].(string))
-	}
-	rows.Close()
-	stmt2.Close()
-
 	if len(results) != len(expected) {
 		t.Fatalf("Expected %d results, got %d", len(expected), len(results))
 	}
-
 	for i, exp := range expected {
 		if results[i] != exp {
 			t.Errorf("Position %d: expected %s, got %s", i, exp, results[i])
@@ -364,6 +368,54 @@ func TestOrderByWithDuplicateColumn(t *testing.T) {
 	stmt2.Close()
 }
 
+// aggQueryOne runs a single-value query and returns the result.
+func aggQueryOne(c *Conn, query string) (driver.Value, error) {
+	stmt, err := c.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]driver.Value, 1)
+	if err := rows.Next(values); err != nil {
+		return nil, err
+	}
+	return values[0], nil
+}
+
+// aggSetupTestTable creates a test table with 5 rows of aggregate test data.
+func aggSetupTestTable(t *testing.T, c *Conn) {
+	t.Helper()
+	missingCovExecNoArgs(t, c, `CREATE TABLE test (id INTEGER, value INTEGER, category TEXT)`)
+	categories := []string{"A", "A", "A", "B", "B"}
+	for i := 1; i <= 5; i++ {
+		s, _ := c.Prepare("INSERT INTO test VALUES (?, ?, ?)")
+		s.Exec([]driver.Value{i, i * 10, categories[i-1]})
+		s.Close()
+	}
+}
+
+// aggCheckTotal verifies the TOTAL result which may be int64 or float64.
+func aggCheckTotal(t *testing.T, v driver.Value, want float64) {
+	t.Helper()
+	switch tv := v.(type) {
+	case int64:
+		if float64(tv) != want {
+			t.Errorf("Expected total=%v, got %d", want, tv)
+		}
+	case float64:
+		if tv != want {
+			t.Errorf("Expected total=%v, got %f", want, tv)
+		}
+	default:
+		t.Errorf("Unexpected type for TOTAL: %T", v)
+	}
+}
+
 // TestAggregateFunctionEdgeCases tests emitAggregateFunction paths
 func TestAggregateFunctionEdgeCases(t *testing.T) {
 	drv := &Driver{}
@@ -374,100 +426,41 @@ func TestAggregateFunctionEdgeCases(t *testing.T) {
 	defer conn.Close()
 
 	c := conn.(*Conn)
+	aggSetupTestTable(t, c)
 
-	stmt, _ := c.Prepare(`CREATE TABLE test (id INTEGER, value INTEGER, category TEXT)`)
-	stmt.Exec(nil)
-	stmt.Close()
-
-	// Insert data
-	for i := 1; i <= 5; i++ {
-		cat := "A"
-		if i > 3 {
-			cat = "B"
+	intTests := []struct {
+		name  string
+		query string
+		want  int64
+	}{
+		{"COUNT(*)", "SELECT COUNT(*) FROM test", 5},
+		{"SUM", "SELECT SUM(value) FROM test", 150},
+		{"MIN", "SELECT MIN(value) FROM test", 10},
+		{"MAX", "SELECT MAX(value) FROM test", 50},
+	}
+	for _, tc := range intTests {
+		v, err := aggQueryOne(c, tc.query)
+		if err != nil {
+			t.Fatalf("%s failed: %v", tc.name, err)
 		}
-		stmt, _ := c.Prepare("INSERT INTO test VALUES (?, ?, ?)")
-		stmt.Exec([]driver.Value{i, i * 10, cat})
-		stmt.Close()
+		if v.(int64) != tc.want {
+			t.Errorf("%s: expected %d, got %v", tc.name, tc.want, v)
+		}
 	}
 
-	// Test COUNT(*)
-	stmt2, _ := c.Prepare("SELECT COUNT(*) FROM test")
-	rows, err := stmt2.Query(nil)
+	v, err := aggQueryOne(c, "SELECT AVG(value) FROM test")
 	if err != nil {
-		t.Fatalf("COUNT(*) failed: %v", err)
+		t.Fatalf("AVG failed: %v", err)
 	}
-	values := make([]driver.Value, 1)
-	rows.Next(values)
-	count := values[0].(int64)
-	if count != 5 {
-		t.Errorf("Expected count=5, got %d", count)
+	if v.(float64) != 30.0 {
+		t.Errorf("Expected avg=30.0, got %v", v)
 	}
-	rows.Close()
-	stmt2.Close()
 
-	// Test SUM
-	stmt3, _ := c.Prepare("SELECT SUM(value) FROM test")
-	rows, _ = stmt3.Query(nil)
-	rows.Next(values)
-	sum := values[0].(int64)
-	if sum != 150 {
-		t.Errorf("Expected sum=150, got %d", sum)
+	v, err = aggQueryOne(c, "SELECT TOTAL(value) FROM test")
+	if err != nil {
+		t.Fatalf("TOTAL failed: %v", err)
 	}
-	rows.Close()
-	stmt3.Close()
-
-	// Test AVG
-	stmt4, _ := c.Prepare("SELECT AVG(value) FROM test")
-	rows, _ = stmt4.Query(nil)
-	rows.Next(values)
-	avg := values[0].(float64)
-	if avg != 30.0 {
-		t.Errorf("Expected avg=30.0, got %f", avg)
-	}
-	rows.Close()
-	stmt4.Close()
-
-	// Test MIN
-	stmt5, _ := c.Prepare("SELECT MIN(value) FROM test")
-	rows, _ = stmt5.Query(nil)
-	rows.Next(values)
-	min := values[0].(int64)
-	if min != 10 {
-		t.Errorf("Expected min=10, got %d", min)
-	}
-	rows.Close()
-	stmt5.Close()
-
-	// Test MAX
-	stmt6, _ := c.Prepare("SELECT MAX(value) FROM test")
-	rows, _ = stmt6.Query(nil)
-	rows.Next(values)
-	max := values[0].(int64)
-	if max != 50 {
-		t.Errorf("Expected max=50, got %d", max)
-	}
-	rows.Close()
-	stmt6.Close()
-
-	// Test TOTAL (like SUM but returns float)
-	stmt7, _ := c.Prepare("SELECT TOTAL(value) FROM test")
-	rows, _ = stmt7.Query(nil)
-	rows.Next(values)
-	// TOTAL may return int64 or float64 depending on implementation
-	switch v := values[0].(type) {
-	case int64:
-		if v != 150 {
-			t.Errorf("Expected total=150, got %d", v)
-		}
-	case float64:
-		if v != 150.0 {
-			t.Errorf("Expected total=150.0, got %f", v)
-		}
-	default:
-		t.Errorf("Unexpected type for TOTAL: %T", v)
-	}
-	rows.Close()
-	stmt7.Close()
+	aggCheckTotal(t, v, 150.0)
 }
 
 // TestOpenDatabaseNewFile tests openDatabase with a new database file

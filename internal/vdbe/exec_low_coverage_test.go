@@ -6,147 +6,43 @@ import (
 	"testing"
 )
 
-// TestParseSerialValue tests parseSerialValue function (30% coverage)
-func TestParseSerialValue(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name       string
-		serialType uint64
-		data       []byte
-		offset     int
-		wantErr    bool
-		checkMem   func(*Mem) bool
-	}{
-		{
-			name:       "SerialType0_Null",
-			serialType: 0,
-			data:       []byte{},
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IsNull() },
-		},
-		{
-			name:       "SerialType8_IntZero",
-			serialType: 8,
-			data:       []byte{},
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IntValue() == 0 },
-		},
-		{
-			name:       "SerialType9_IntOne",
-			serialType: 9,
-			data:       []byte{},
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IntValue() == 1 },
-		},
-		{
-			name:       "SerialType1_Int8",
-			serialType: 1,
-			data:       []byte{0x7F}, // 127
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IntValue() == 127 },
-		},
-		{
-			name:       "SerialType2_Int16",
-			serialType: 2,
-			data:       []byte{0x01, 0x00}, // 256
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IntValue() == 256 },
-		},
-		{
-			name:       "SerialType3_Int24",
-			serialType: 3,
-			data:       []byte{0x00, 0x01, 0x00}, // 256
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IntValue() == 256 },
-		},
-		{
-			name:       "SerialType4_Int32",
-			serialType: 4,
-			data:       []byte{0x00, 0x00, 0x01, 0x00}, // 256
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IntValue() == 256 },
-		},
-		{
-			name:       "SerialType5_Int48",
-			serialType: 5,
-			data:       []byte{0x00, 0x00, 0x00, 0x00, 0x01, 0x00}, // 256
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IntValue() == 256 },
-		},
-		{
-			name:       "SerialType6_Int64",
-			serialType: 6,
-			data:       []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00}, // 256
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IntValue() == 256 },
-		},
-		{
-			name:       "SerialType7_Float64",
-			serialType: 7,
-			data:       []byte{0x40, 0x09, 0x21, 0xfb, 0x54, 0x44, 0x2d, 0x18}, // 3.14159...
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IsReal() },
-		},
-		{
-			name:       "SerialType12_Blob0",
-			serialType: 12,
-			data:       []byte{},
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IsBlob() && len(m.BlobValue()) == 0 },
-		},
-		{
-			name:       "SerialType13_Text0",
-			serialType: 13,
-			data:       []byte{},
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IsString() && m.StrValue() == "" },
-		},
-		{
-			name:       "SerialType14_Blob1",
-			serialType: 14,
-			data:       []byte{0x42},
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IsBlob() && len(m.BlobValue()) == 1 && m.BlobValue()[0] == 0x42 },
-		},
-		{
-			name:       "SerialType15_Text1",
-			serialType: 15,
-			data:       []byte{0x41}, // 'A'
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IsString() && m.StrValue() == "A" },
-		},
-		{
-			name:       "SerialType20_Blob4",
-			serialType: 20,
-			data:       []byte{0x01, 0x02, 0x03, 0x04},
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IsBlob() && len(m.BlobValue()) == 4 },
-		},
-		{
-			name:       "SerialType21_Text4",
-			serialType: 21,
-			data:       []byte{'t', 'e', 's', 't'},
-			offset:     0,
-			wantErr:    false,
-			checkMem:   func(m *Mem) bool { return m.IsString() && m.StrValue() == "test" },
-		},
-	}
+type serialValueTest struct {
+	name       string
+	serialType uint64
+	data       []byte
+	offset     int
+	wantErr    bool
+	checkMem   func(*Mem) bool
+}
 
+func serialValueIntTests() []serialValueTest {
+	return []serialValueTest{
+		{"SerialType0_Null", 0, []byte{}, 0, false, func(m *Mem) bool { return m.IsNull() }},
+		{"SerialType8_IntZero", 8, []byte{}, 0, false, func(m *Mem) bool { return m.IntValue() == 0 }},
+		{"SerialType9_IntOne", 9, []byte{}, 0, false, func(m *Mem) bool { return m.IntValue() == 1 }},
+		{"SerialType1_Int8", 1, []byte{0x7F}, 0, false, func(m *Mem) bool { return m.IntValue() == 127 }},
+		{"SerialType2_Int16", 2, []byte{0x01, 0x00}, 0, false, func(m *Mem) bool { return m.IntValue() == 256 }},
+		{"SerialType3_Int24", 3, []byte{0x00, 0x01, 0x00}, 0, false, func(m *Mem) bool { return m.IntValue() == 256 }},
+		{"SerialType4_Int32", 4, []byte{0x00, 0x00, 0x01, 0x00}, 0, false, func(m *Mem) bool { return m.IntValue() == 256 }},
+		{"SerialType5_Int48", 5, []byte{0x00, 0x00, 0x00, 0x00, 0x01, 0x00}, 0, false, func(m *Mem) bool { return m.IntValue() == 256 }},
+		{"SerialType6_Int64", 6, []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00}, 0, false, func(m *Mem) bool { return m.IntValue() == 256 }},
+		{"SerialType7_Float64", 7, []byte{0x40, 0x09, 0x21, 0xfb, 0x54, 0x44, 0x2d, 0x18}, 0, false, func(m *Mem) bool { return m.IsReal() }},
+	}
+}
+
+func serialValueBlobTextTests() []serialValueTest {
+	return []serialValueTest{
+		{"SerialType12_Blob0", 12, []byte{}, 0, false, func(m *Mem) bool { return m.IsBlob() && len(m.BlobValue()) == 0 }},
+		{"SerialType13_Text0", 13, []byte{}, 0, false, func(m *Mem) bool { return m.IsString() && m.StrValue() == "" }},
+		{"SerialType14_Blob1", 14, []byte{0x42}, 0, false, func(m *Mem) bool { return m.IsBlob() && len(m.BlobValue()) == 1 && m.BlobValue()[0] == 0x42 }},
+		{"SerialType15_Text1", 15, []byte{0x41}, 0, false, func(m *Mem) bool { return m.IsString() && m.StrValue() == "A" }},
+		{"SerialType20_Blob4", 20, []byte{0x01, 0x02, 0x03, 0x04}, 0, false, func(m *Mem) bool { return m.IsBlob() && len(m.BlobValue()) == 4 }},
+		{"SerialType21_Text4", 21, []byte{'t', 'e', 's', 't'}, 0, false, func(m *Mem) bool { return m.IsString() && m.StrValue() == "test" }},
+	}
+}
+
+func runSerialValueTests(t *testing.T, tests []serialValueTest) {
+	t.Helper()
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
@@ -162,6 +58,13 @@ func TestParseSerialValue(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestParseSerialValue tests parseSerialValue function (30% coverage)
+func TestParseSerialValue(t *testing.T) {
+	t.Parallel()
+	runSerialValueTests(t, serialValueIntTests())
+	runSerialValueTests(t, serialValueBlobTextTests())
 }
 
 // TestParseSerialInt tests parseSerialInt function (50% coverage)
@@ -264,58 +167,52 @@ func TestParseSerialInt(t *testing.T) {
 	}
 }
 
+func testGetColumnPayloadNullRow(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	dst := NewMem()
+	payload := v.getColumnPayload(&Cursor{NullRow: true}, dst)
+	if payload != nil {
+		t.Error("Expected nil payload for null row")
+	}
+	if !dst.IsNull() {
+		t.Error("Expected dst to be NULL for null row")
+	}
+}
+
+func testGetColumnPayloadEOF(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(5)
+	dst := NewMem()
+	payload := v.getColumnPayload(&Cursor{EOF: true}, dst)
+	if payload != nil {
+		t.Error("Expected nil payload for EOF")
+	}
+	if !dst.IsNull() {
+		t.Error("Expected dst to be NULL for EOF")
+	}
+}
+
+func testGetColumnPayloadPseudo(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(10)
+	v.Mem[5].SetBlob([]byte{1, 2, 3, 4})
+	dst := NewMem()
+	payload := v.getColumnPayload(&Cursor{CurType: CursorPseudo, PseudoReg: 5}, dst)
+	if payload == nil {
+		t.Error("Expected non-nil payload for pseudo cursor with blob")
+	}
+	if len(payload) != 4 {
+		t.Errorf("Expected payload length 4, got %d", len(payload))
+	}
+}
+
 // TestGetColumnPayload tests getColumnPayload function (50% coverage)
 func TestGetColumnPayload(t *testing.T) {
 	t.Parallel()
-	t.Run("NullRow", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		cursor := &Cursor{NullRow: true}
-		dst := NewMem()
-
-		payload := v.getColumnPayload(cursor, dst)
-		if payload != nil {
-			t.Error("Expected nil payload for null row")
-		}
-		if !dst.IsNull() {
-			t.Error("Expected dst to be NULL for null row")
-		}
-	})
-
-	t.Run("EOF", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(5)
-		cursor := &Cursor{EOF: true}
-		dst := NewMem()
-
-		payload := v.getColumnPayload(cursor, dst)
-		if payload != nil {
-			t.Error("Expected nil payload for EOF")
-		}
-		if !dst.IsNull() {
-			t.Error("Expected dst to be NULL for EOF")
-		}
-	})
-
-	t.Run("PseudoCursor_WithBlob", func(t *testing.T) {
-		t.Parallel()
-		v := NewTestVDBE(10)
-		v.Mem[5].SetBlob([]byte{1, 2, 3, 4})
-
-		cursor := &Cursor{
-			CurType:   CursorPseudo,
-			PseudoReg: 5,
-		}
-		dst := NewMem()
-
-		payload := v.getColumnPayload(cursor, dst)
-		if payload == nil {
-			t.Error("Expected non-nil payload for pseudo cursor with blob")
-		}
-		if len(payload) != 4 {
-			t.Errorf("Expected payload length 4, got %d", len(payload))
-		}
-	})
+	t.Run("NullRow", testGetColumnPayloadNullRow)
+	t.Run("EOF", testGetColumnPayloadEOF)
+	t.Run("PseudoCursor_WithBlob", testGetColumnPayloadPseudo)
 
 	t.Run("PseudoCursor_WithNull", func(t *testing.T) {
 		t.Parallel()
@@ -398,98 +295,42 @@ func TestGetBtreeCursorPayload(t *testing.T) {
 	})
 }
 
+// execRowidExpectNull runs execRowid and checks the result is NULL.
+func execRowidExpectNull(t *testing.T, cursor *Cursor, msg string) {
+	t.Helper()
+	v := NewTestVDBE(5)
+	v.AllocCursors(2)
+	v.Cursors[0] = cursor
+	if err := v.execRowid(&Instruction{Opcode: OpRowid, P1: 0, P2: 0}); err != nil {
+		t.Fatalf("execRowid failed: %v", err)
+	}
+	if !v.Mem[0].IsNull() {
+		t.Errorf("Expected NULL for %s", msg)
+	}
+}
+
 // TestExecRowid tests execRowid function (57.9% coverage)
 func TestExecRowid(t *testing.T) {
 	t.Parallel()
 	t.Run("NullRow", func(t *testing.T) {
 		t.Parallel()
-		v := NewTestVDBE(5)
-		v.AllocCursors(2)
-		v.Cursors[0] = &Cursor{NullRow: true}
-
-		instr := &Instruction{Opcode: OpRowid, P1: 0, P2: 0}
-		err := v.execRowid(instr)
-		if err != nil {
-			t.Fatalf("execRowid failed: %v", err)
-		}
-
-		if !v.Mem[0].IsNull() {
-			t.Error("Expected NULL for null row")
-		}
+		execRowidExpectNull(t, &Cursor{NullRow: true}, "null row")
 	})
-
 	t.Run("EOF", func(t *testing.T) {
 		t.Parallel()
-		v := NewTestVDBE(5)
-		v.AllocCursors(2)
-		v.Cursors[0] = &Cursor{EOF: true}
-
-		instr := &Instruction{Opcode: OpRowid, P1: 0, P2: 0}
-		err := v.execRowid(instr)
-		if err != nil {
-			t.Fatalf("execRowid failed: %v", err)
-		}
-
-		if !v.Mem[0].IsNull() {
-			t.Error("Expected NULL for EOF")
-		}
+		execRowidExpectNull(t, &Cursor{EOF: true}, "EOF")
 	})
-
 	t.Run("PseudoCursor", func(t *testing.T) {
 		t.Parallel()
-		v := NewTestVDBE(5)
-		v.AllocCursors(2)
-		v.Cursors[0] = &Cursor{CurType: CursorPseudo}
-
-		instr := &Instruction{Opcode: OpRowid, P1: 0, P2: 0}
-		err := v.execRowid(instr)
-		if err != nil {
-			t.Fatalf("execRowid failed: %v", err)
-		}
-
-		if !v.Mem[0].IsNull() {
-			t.Error("Expected NULL for pseudo cursor")
-		}
+		execRowidExpectNull(t, &Cursor{CurType: CursorPseudo}, "pseudo cursor")
 	})
-
 	t.Run("NilBtreeCursor", func(t *testing.T) {
 		t.Parallel()
-		v := NewTestVDBE(5)
-		v.AllocCursors(2)
-		v.Cursors[0] = &Cursor{
-			CurType:     CursorBTree,
-			BtreeCursor: nil,
-		}
-
-		instr := &Instruction{Opcode: OpRowid, P1: 0, P2: 0}
-		err := v.execRowid(instr)
-		if err != nil {
-			t.Fatalf("execRowid failed: %v", err)
-		}
-
-		if !v.Mem[0].IsNull() {
-			t.Error("Expected NULL for nil btree cursor")
-		}
+		execRowidExpectNull(t, &Cursor{CurType: CursorBTree, BtreeCursor: nil}, "nil btree cursor")
 	})
-
 	t.Run("InvalidBtreeCursor", func(t *testing.T) {
 		t.Parallel()
-		v := NewTestVDBE(5)
-		v.AllocCursors(2)
-		v.Cursors[0] = &Cursor{
-			CurType:     CursorBTree,
-			BtreeCursor: "invalid",
-		}
-
-		instr := &Instruction{Opcode: OpRowid, P1: 0, P2: 0}
-		err := v.execRowid(instr)
-		if err != nil {
-			t.Fatalf("execRowid failed: %v", err)
-		}
-
-		if !v.Mem[0].IsNull() {
-			t.Error("Expected NULL for invalid btree cursor")
-		}
+		execRowidExpectNull(t, &Cursor{CurType: CursorBTree, BtreeCursor: "invalid"}, "invalid btree cursor")
 	})
 }
 

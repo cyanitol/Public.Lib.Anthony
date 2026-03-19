@@ -14,47 +14,62 @@ import (
 // - contrib/sqlite/sqlite-src-3510200/test/bind2.test
 // Tests cover: Parameter binding with ?, ?NNN, :name, @name, $name
 
-// TestBindBasicPositional tests basic positional parameter binding with ?
-// From bind.test lines 37-93
-func TestBindBasicPositional(t *testing.T) {
+func bindSetupDB(t *testing.T, name string) *sql.DB {
+	t.Helper()
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "bind_basic.db")
-
+	dbPath := filepath.Join(tmpDir, name)
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
-
-	_, err = db.Exec("CREATE TABLE t1(a, b, c)")
-	if err != nil {
+	if _, err := db.Exec("CREATE TABLE t1(a, b, c)"); err != nil {
 		t.Fatalf("failed to create table: %v", err)
 	}
+	return db
+}
 
-	// Test inserting with NULL (unbound) parameters
-	_, err = db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", nil, nil, nil)
-	if err != nil {
+func bindCheckTypes(t *testing.T, db *sql.DB, query string, args []interface{}, wantType string) {
+	t.Helper()
+	var typeA, typeB, typeC string
+	if err := db.QueryRow(query, args...).Scan(&typeA, &typeB, &typeC); err != nil {
+		t.Fatalf("failed to query types: %v", err)
+	}
+	if typeA != wantType || typeB != wantType || typeC != wantType {
+		t.Errorf("expected all %s types, got %s, %s, %s", wantType, typeA, typeB, typeC)
+	}
+}
+
+// TestBindBasicPositional tests basic positional parameter binding with ?
+// From bind.test lines 37-93
+func TestBindBasicPositional(t *testing.T) {
+	db := bindSetupDB(t, "bind_basic.db")
+	defer db.Close()
+
+	bindTestNullInsert(t, db)
+	bindTestValueInsert(t, db)
+}
+
+func bindTestNullInsert(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", nil, nil, nil); err != nil {
 		t.Fatalf("failed to insert nulls: %v", err)
 	}
-
 	var a, b, c sql.NullString
-	err = db.QueryRow("SELECT a, b, c FROM t1").Scan(&a, &b, &c)
-	if err != nil {
+	if err := db.QueryRow("SELECT a, b, c FROM t1").Scan(&a, &b, &c); err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
 	if a.Valid || b.Valid || c.Valid {
 		t.Errorf("expected all NULL, got a=%v b=%v c=%v", a, b, c)
 	}
+}
 
-	// Test with actual values
-	_, err = db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", "test value 1", "test value 2", "test value 3")
-	if err != nil {
+func bindTestValueInsert(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", "test value 1", "test value 2", "test value 3"); err != nil {
 		t.Fatalf("failed to insert values: %v", err)
 	}
-
 	var aStr, bStr, cStr string
-	err = db.QueryRow("SELECT a, b, c FROM t1 WHERE a = ?", "test value 1").Scan(&aStr, &bStr, &cStr)
-	if err != nil {
+	if err := db.QueryRow("SELECT a, b, c FROM t1 WHERE a = ?", "test value 1").Scan(&aStr, &bStr, &cStr); err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
 	if aStr != "test value 1" || bStr != "test value 2" || cStr != "test value 3" {
@@ -65,19 +80,8 @@ func TestBindBasicPositional(t *testing.T) {
 // TestBindInteger32 tests 32-bit integer binding
 // From bind.test lines 166-189
 func TestBindInteger32(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "bind_int32.db")
-
-	db, err := sql.Open(DriverName, dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := bindSetupDB(t, "bind_int32.db")
 	defer db.Close()
-
-	_, err = db.Exec("CREATE TABLE t1(a, b, c)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
 
 	tests := []struct {
 		name    string
@@ -88,99 +92,56 @@ func TestBindInteger32(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt // Capture range variable
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", tt.a, tt.b, tt.c)
-			if err != nil {
-				t.Fatalf("failed to insert: %v", err)
-			}
-
-			var a, b, c int
-			err = db.QueryRow("SELECT a, b, c FROM t1 WHERE a = ?", tt.a).Scan(&a, &b, &c)
-			if err != nil {
-				t.Fatalf("failed to query: %v", err)
-			}
-
-			if a != tt.a || b != tt.b || c != tt.c {
-				t.Errorf("got (%d,%d,%d), want (%d,%d,%d)", a, b, c, tt.a, tt.b, tt.c)
-			}
-
-			// Verify types
-			var typeA, typeB, typeC string
-			err = db.QueryRow("SELECT typeof(a), typeof(b), typeof(c) FROM t1 WHERE a = ?", tt.a).Scan(&typeA, &typeB, &typeC)
-			if err != nil {
-				t.Fatalf("failed to query types: %v", err)
-			}
-			if typeA != "integer" || typeB != "integer" || typeC != "integer" {
-				t.Errorf("expected all integer types, got %s, %s, %s", typeA, typeB, typeC)
-			}
-
-			_, err = db.Exec("DELETE FROM t1 WHERE a = ?", tt.a)
-			if err != nil {
-				t.Fatalf("failed to delete: %v", err)
-			}
+			bindInt32Check(t, db, tt.a, tt.b, tt.c)
 		})
+	}
+}
+
+func bindInt32Check(t *testing.T, db *sql.DB, a, b, c int) {
+	t.Helper()
+	if _, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", a, b, c); err != nil {
+		t.Fatalf("failed to insert: %v", err)
+	}
+	var ga, gb, gc int
+	if err := db.QueryRow("SELECT a, b, c FROM t1 WHERE a = ?", a).Scan(&ga, &gb, &gc); err != nil {
+		t.Fatalf("failed to query: %v", err)
+	}
+	if ga != a || gb != b || gc != c {
+		t.Errorf("got (%d,%d,%d), want (%d,%d,%d)", ga, gb, gc, a, b, c)
+	}
+	bindCheckTypes(t, db, "SELECT typeof(a), typeof(b), typeof(c) FROM t1 WHERE a = ?", []interface{}{a}, "integer")
+	if _, err := db.Exec("DELETE FROM t1 WHERE a = ?", a); err != nil {
+		t.Fatalf("failed to delete: %v", err)
 	}
 }
 
 // TestBindInteger64 tests 64-bit integer binding
 // From bind.test lines 191-206
 func TestBindInteger64(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "bind_int64.db")
-
-	db, err := sql.Open(DriverName, dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := bindSetupDB(t, "bind_int64.db")
 	defer db.Close()
 
-	_, err = db.Exec("CREATE TABLE t1(a, b, c)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", int64(32), int64(-2000000000000), int64(2000000000000))
-	if err != nil {
+	if _, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", int64(32), int64(-2000000000000), int64(2000000000000)); err != nil {
 		t.Fatalf("failed to insert: %v", err)
 	}
 
 	var a, b, c int64
-	err = db.QueryRow("SELECT a, b, c FROM t1").Scan(&a, &b, &c)
-	if err != nil {
+	if err := db.QueryRow("SELECT a, b, c FROM t1").Scan(&a, &b, &c); err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
-
 	if a != 32 || b != -2000000000000 || c != 2000000000000 {
 		t.Errorf("got (%d,%d,%d), want (32,-2000000000000,2000000000000)", a, b, c)
 	}
-
-	var typeA, typeB, typeC string
-	err = db.QueryRow("SELECT typeof(a), typeof(b), typeof(c) FROM t1").Scan(&typeA, &typeB, &typeC)
-	if err != nil {
-		t.Fatalf("failed to query types: %v", err)
-	}
-	if typeA != "integer" || typeB != "integer" || typeC != "integer" {
-		t.Errorf("expected all integer types, got %s, %s, %s", typeA, typeB, typeC)
-	}
+	bindCheckTypes(t, db, "SELECT typeof(a), typeof(b), typeof(c) FROM t1", nil, "integer")
 }
 
 // TestBindDouble tests double precision floating point binding
 // From bind.test lines 209-245
 func TestBindDouble(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "bind_double.db")
-
-	db, err := sql.Open(DriverName, dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := bindSetupDB(t, "bind_double.db")
 	defer db.Close()
-
-	_, err = db.Exec("CREATE TABLE t1(a, b, c)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
 
 	tests := []struct {
 		name    string
@@ -191,115 +152,67 @@ func TestBindDouble(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt // Capture range variable
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", tt.a, tt.b, tt.c)
-			if err != nil {
-				t.Fatalf("failed to insert: %v", err)
-			}
-
-			var a, b, c sql.NullFloat64
-			err = db.QueryRow("SELECT a, b, c FROM t1 WHERE b = ?", tt.b).Scan(&a, &b, &c)
-			if err != nil {
-				t.Fatalf("failed to query: %v", err)
-			}
-
-			if tt.name == "normal_values" {
-				if !a.Valid || !b.Valid || !c.Valid {
-					t.Errorf("expected valid floats")
-				}
-			}
-
-			_, err = db.Exec("DELETE FROM t1")
-			if err != nil {
-				t.Fatalf("failed to delete: %v", err)
-			}
+			bindDoubleCheck(t, db, tt.name, tt.a, tt.b, tt.c)
 		})
+	}
+}
+
+func bindDoubleCheck(t *testing.T, db *sql.DB, name string, a, b, c float64) {
+	t.Helper()
+	if _, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", a, b, c); err != nil {
+		t.Fatalf("failed to insert: %v", err)
+	}
+	var ga, gb, gc sql.NullFloat64
+	if err := db.QueryRow("SELECT a, b, c FROM t1 WHERE b = ?", b).Scan(&ga, &gb, &gc); err != nil {
+		t.Fatalf("failed to query: %v", err)
+	}
+	if name == "normal_values" && (!ga.Valid || !gb.Valid || !gc.Valid) {
+		t.Errorf("expected valid floats")
+	}
+	if _, err := db.Exec("DELETE FROM t1"); err != nil {
+		t.Fatalf("failed to delete: %v", err)
 	}
 }
 
 // TestBindNull tests NULL value binding
 // From bind.test lines 247-262
 func TestBindNull(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "bind_null.db")
-
-	db, err := sql.Open(DriverName, dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := bindSetupDB(t, "bind_null.db")
 	defer db.Close()
 
-	_, err = db.Exec("CREATE TABLE t1(a, b, c)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", nil, nil, nil)
-	if err != nil {
+	if _, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", nil, nil, nil); err != nil {
 		t.Fatalf("failed to insert: %v", err)
 	}
 
 	var a, b, c sql.NullString
-	err = db.QueryRow("SELECT a, b, c FROM t1").Scan(&a, &b, &c)
-	if err != nil {
+	if err := db.QueryRow("SELECT a, b, c FROM t1").Scan(&a, &b, &c); err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
-
 	if a.Valid || b.Valid || c.Valid {
 		t.Errorf("expected all NULL, got a=%v b=%v c=%v", a, b, c)
 	}
-
-	var typeA, typeB, typeC string
-	err = db.QueryRow("SELECT typeof(a), typeof(b), typeof(c) FROM t1").Scan(&typeA, &typeB, &typeC)
-	if err != nil {
-		t.Fatalf("failed to query types: %v", err)
-	}
-	if typeA != "null" || typeB != "null" || typeC != "null" {
-		t.Errorf("expected all null types, got %s, %s, %s", typeA, typeB, typeC)
-	}
+	bindCheckTypes(t, db, "SELECT typeof(a), typeof(b), typeof(c) FROM t1", nil, "null")
 }
 
 // TestBindText tests UTF-8 text binding
 // From bind.test lines 265-280
 func TestBindText(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "bind_text.db")
-
-	db, err := sql.Open(DriverName, dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := bindSetupDB(t, "bind_text.db")
 	defer db.Close()
 
-	_, err = db.Exec("CREATE TABLE t1(a, b, c)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", "hello", ".", "world")
-	if err != nil {
+	if _, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?)", "hello", ".", "world"); err != nil {
 		t.Fatalf("failed to insert: %v", err)
 	}
-
 	var a, b, c string
-	err = db.QueryRow("SELECT a, b, c FROM t1").Scan(&a, &b, &c)
-	if err != nil {
+	if err := db.QueryRow("SELECT a, b, c FROM t1").Scan(&a, &b, &c); err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
-
 	if a != "hello" || b != "." || c != "world" {
 		t.Errorf("got (%s,%s,%s), want (hello,.,world)", a, b, c)
 	}
-
-	var typeA, typeB, typeC string
-	err = db.QueryRow("SELECT typeof(a), typeof(b), typeof(c) FROM t1").Scan(&typeA, &typeB, &typeC)
-	if err != nil {
-		t.Fatalf("failed to query types: %v", err)
-	}
-	if typeA != "text" || typeB != "text" || typeC != "text" {
-		t.Errorf("expected all text types, got %s, %s, %s", typeA, typeB, typeC)
-	}
+	bindCheckTypes(t, db, "SELECT typeof(a), typeof(b), typeof(c) FROM t1", nil, "text")
 }
 
 // TestBindMultipleRows tests binding across multiple inserts
@@ -515,47 +428,39 @@ func TestBindBooleanAsInteger(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec("CREATE TABLE t1(flag INTEGER)")
-	if err != nil {
+	if _, err := db.Exec("CREATE TABLE t1(flag INTEGER)"); err != nil {
 		t.Fatalf("failed to create table: %v", err)
 	}
-
-	_, err = db.Exec("INSERT INTO t1 VALUES(?)", true)
-	if err != nil {
-		t.Fatalf("failed to insert true: %v", err)
+	for _, v := range []bool{true, false} {
+		if _, err := db.Exec("INSERT INTO t1 VALUES(?)", v); err != nil {
+			t.Fatalf("failed to insert %v: %v", v, err)
+		}
 	}
+	bindBoolVerify(t, db)
+}
 
-	_, err = db.Exec("INSERT INTO t1 VALUES(?)", false)
-	if err != nil {
-		t.Fatalf("failed to insert false: %v", err)
-	}
-
-	// Query all rows to verify boolean binding worked
+func bindBoolVerify(t *testing.T, db *sql.DB) {
+	t.Helper()
 	rows, err := db.Query("SELECT flag FROM t1 ORDER BY rowid")
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
 	defer rows.Close()
 
-	var vals []int
+	expected := []int{1, 0}
+	i := 0
 	for rows.Next() {
 		var v int
 		if err := rows.Scan(&v); err != nil {
 			t.Fatalf("failed to scan: %v", err)
 		}
-		vals = append(vals, v)
+		if i < len(expected) && v != expected[i] {
+			t.Errorf("row %d: got %d, want %d", i, v, expected[i])
+		}
+		i++
 	}
-
-	if len(vals) != 2 {
-		t.Fatalf("expected 2 rows, got %d", len(vals))
-	}
-
-	if vals[0] != 1 {
-		t.Errorf("first row (true): got %d, want 1", vals[0])
-	}
-
-	if vals[1] != 0 {
-		t.Errorf("second row (false): got %d, want 0", vals[1])
+	if i != len(expected) {
+		t.Fatalf("expected %d rows, got %d", len(expected), i)
 	}
 }
 

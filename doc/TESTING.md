@@ -42,7 +42,9 @@
 The Anthony SQLite driver has comprehensive test coverage across all components. The test suite includes unit tests, integration tests, security tests, fuzz tests, and benchmarks. Tests are organized by component and follow Go testing conventions.
 
 **Test Statistics:**
-- 300+ test files across all packages
+- 300+ test files across 27 packages
+- 14,046 tests passing with 0 failures (alltests tag)
+- 1,073 trinity (DO-178C trace) tests passing
 - Comprehensive coverage of parser, VDBE, pager, btree, and driver layers
 - Security-focused tests for attack vectors and edge cases
 - Fuzz tests for parser and record decoder
@@ -734,22 +736,26 @@ go test -run Window ./internal/vdbe
 
 ### By Build Tag
 
-While this project doesn't currently use build tags extensively, you can add them:
+The project uses build tags for test suite separation:
 
 ```bash
+# Run main test suite only (default)
+go test ./...
+
+# Run trinity (DO-178C trace) tests only
+go test -tags trinity ./internal/driver/
+
+# Run all tests (main + trinity combined)
+go test -tags alltests ./internal/driver/
+
 # Skip slow tests
 go test -short ./...
-
-# Run only with specific tag
-go test -tags=integration ./...
 ```
 
-**Testing Short Mode:**
-Some tests check `testing.Short()` and skip if true:
-```bash
-# Skip slow/concurrent tests
-go test -short ./...
-```
+**Available Build Tags:**
+- `trinity` - Runs only the trinity test suite (DO-178C traceability tests)
+- `alltests` - Runs both main and trinity test suites together
+- No tag - Runs the main test suite only
 
 ## Continuous Integration
 

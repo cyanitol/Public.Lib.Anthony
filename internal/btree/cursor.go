@@ -936,46 +936,58 @@ func (c *BtCursor) InsertWithComposite(key int64, keyBytes []byte, payload []byt
 	}
 
 	if len(cellData) > btreePage.FreeSpace() {
-		// If the page is empty, try re-encoding with minimal local payload using overflow
-		// before forcing a split. This prevents pathological splits with empty left/right.
-		if btreePage.Header.NumCells == 0 && len(payload) > 0 {
-			c.cleanupOverflowOnError(overflowPage)
-			overflowPage = 0
-
-			minLocal := calculateMinLocal(c.Btree.UsableSize, true)
-			if minLocal > uint32(len(payload)) {
-				minLocal = uint32(len(payload))
-			}
-			localSize := uint16(minLocal)
-
-			var err error
-			overflowPage, err = c.WriteOverflow(payload, localSize, c.Btree.UsableSize)
-			if err == nil {
-				cellData = c.encodeTableLeafCellWithOverflow(key, keyBytes, payload[:localSize], overflowPage, uint32(len(payload)))
-			}
-		}
-
+		cellData, overflowPage = c.retryWithMinimalOverflow(key, keyBytes, payload, cellData, overflowPage, btreePage)
 		if len(cellData) > btreePage.FreeSpace() {
 			c.cleanupOverflowOnError(overflowPage)
 			return c.splitPage(key, keyBytes, payload)
 		}
 	}
 
+	return c.finishInsert(key, keyBytes, cellData, overflowPage, btreePage)
+}
+
+// retryWithMinimalOverflow attempts to re-encode with minimal local payload
+// when the page is empty and the cell doesn't fit.
+func (c *BtCursor) retryWithMinimalOverflow(key int64, keyBytes, payload, cellData []byte, overflowPage uint32, btreePage *BtreePage) ([]byte, uint32) {
+	if btreePage.Header.NumCells != 0 || len(payload) == 0 {
+		return cellData, overflowPage
+	}
+	c.cleanupOverflowOnError(overflowPage)
+	overflowPage = 0
+
+	minLocal := calculateMinLocal(c.Btree.UsableSize, true)
+	if minLocal > uint32(len(payload)) {
+		minLocal = uint32(len(payload))
+	}
+	localSize := uint16(minLocal)
+
+	newOverflow, err := c.WriteOverflow(payload, localSize, c.Btree.UsableSize)
+	if err != nil {
+		return cellData, overflowPage
+	}
+	return c.encodeTableLeafCellWithOverflow(key, keyBytes, payload[:localSize], newOverflow, uint32(len(payload))), newOverflow
+}
+
+// finishInsert marks the page dirty, inserts the cell, and repositions the cursor.
+func (c *BtCursor) finishInsert(key int64, keyBytes, cellData []byte, overflowPage uint32, btreePage *BtreePage) error {
 	if err := c.markPageDirty(); err != nil {
 		c.cleanupOverflowOnError(overflowPage)
 		return err
 	}
-
 	if err := btreePage.InsertCell(c.CurrentIndex, cellData); err != nil {
 		c.cleanupOverflowOnError(overflowPage)
 		return err
 	}
+	return c.seekAfterInsert(key, keyBytes)
+}
 
+// seekAfterInsert repositions the cursor after a successful insert.
+func (c *BtCursor) seekAfterInsert(key int64, keyBytes []byte) error {
 	if c.CompositePK {
-		_, err = c.SeekComposite(keyBytes)
-	} else {
-		_, err = c.SeekRowid(key)
+		_, err := c.SeekComposite(keyBytes)
+		return err
 	}
+	_, err := c.SeekRowid(key)
 	return err
 }
 

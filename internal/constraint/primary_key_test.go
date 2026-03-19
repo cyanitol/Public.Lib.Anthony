@@ -66,65 +66,14 @@ func TestPrimaryKeyConstraint_IntegerPrimaryKey(t *testing.T) {
 	pk := NewPrimaryKeyConstraint(table, bt, nil)
 
 	t.Run("auto-generate rowid when not provided", func(t *testing.T) {
-		values := map[string]interface{}{
-			"name": "Alice",
-		}
-
-		rowid, err := pk.ValidateInsert(values, false, 0)
-		if err != nil {
-			t.Fatalf("Expected no error, got: %v", err)
-		}
-
-		if rowid != 1 {
-			t.Errorf("Expected auto-generated rowid 1, got: %d", rowid)
-		}
+		testPKAutoGenerateRowid(t, pk)
 	})
-
 	t.Run("use explicit INTEGER PRIMARY KEY value", func(t *testing.T) {
-		values := map[string]interface{}{
-			"id":   int64(42),
-			"name": "Bob",
-		}
-
-		rowid, err := pk.ValidateInsert(values, false, 0)
-		if err != nil {
-			t.Fatalf("Expected no error, got: %v", err)
-		}
-
-		if rowid != 42 {
-			t.Errorf("Expected rowid 42, got: %d", rowid)
-		}
+		testPKExplicitValue(t, pk)
 	})
-
 	t.Run("reject duplicate INTEGER PRIMARY KEY", func(t *testing.T) {
-		// First insert
-		values1 := map[string]interface{}{
-			"id":   int64(100),
-			"name": "Charlie",
-		}
-		rowid1, err := pk.ValidateInsert(values1, false, 0)
-		if err != nil {
-			t.Fatalf("First insert failed: %v", err)
-		}
-
-		// Insert the row into btree
-		cursor := btree.NewCursor(bt, table.RootPage)
-		payload := []byte("test_payload")
-		if err := cursor.Insert(rowid1, payload); err != nil {
-			t.Fatalf("BTree insert failed: %v", err)
-		}
-
-		// Try to insert duplicate
-		values2 := map[string]interface{}{
-			"id":   int64(100),
-			"name": "David",
-		}
-		_, err = pk.ValidateInsert(values2, false, 0)
-		if err == nil {
-			t.Error("Expected error for duplicate PRIMARY KEY, got nil")
-		}
+		testPKRejectDuplicate(t, pk, table, bt)
 	})
-
 	t.Run("handle different integer types", func(t *testing.T) {
 		testCases := []struct {
 			name  string
@@ -156,6 +105,49 @@ func TestPrimaryKeyConstraint_IntegerPrimaryKey(t *testing.T) {
 			})
 		}
 	})
+}
+
+func testPKAutoGenerateRowid(t *testing.T, pk *PrimaryKeyConstraint) {
+	t.Helper()
+	values := map[string]interface{}{"name": "Alice"}
+	rowid, err := pk.ValidateInsert(values, false, 0)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if rowid != 1 {
+		t.Errorf("Expected auto-generated rowid 1, got: %d", rowid)
+	}
+}
+
+func testPKExplicitValue(t *testing.T, pk *PrimaryKeyConstraint) {
+	t.Helper()
+	values := map[string]interface{}{"id": int64(42), "name": "Bob"}
+	rowid, err := pk.ValidateInsert(values, false, 0)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if rowid != 42 {
+		t.Errorf("Expected rowid 42, got: %d", rowid)
+	}
+}
+
+func testPKRejectDuplicate(t *testing.T, pk *PrimaryKeyConstraint, table *schema.Table, bt *btree.Btree) {
+	t.Helper()
+	values1 := map[string]interface{}{"id": int64(100), "name": "Charlie"}
+	rowid1, err := pk.ValidateInsert(values1, false, 0)
+	if err != nil {
+		t.Fatalf("First insert failed: %v", err)
+	}
+	cursor := btree.NewCursor(bt, table.RootPage)
+	payload := []byte("test_payload")
+	if err := cursor.Insert(rowid1, payload); err != nil {
+		t.Fatalf("BTree insert failed: %v", err)
+	}
+	values2 := map[string]interface{}{"id": int64(100), "name": "David"}
+	_, err = pk.ValidateInsert(values2, false, 0)
+	if err == nil {
+		t.Error("Expected error for duplicate PRIMARY KEY, got nil")
+	}
 }
 
 // TestPrimaryKeyConstraint_CompositePrimaryKey tests composite PRIMARY KEY validation.

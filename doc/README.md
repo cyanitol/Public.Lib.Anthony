@@ -1,6 +1,6 @@
 # Anthony - Pure Go SQLite Implementation
 
-[![Go Version](https://img.shields.io/badge/go-1.26+-blue.svg)](https://golang.org/dl/)
+[![Go Version](https://img.shields.io/badge/go-1.26.1+-blue.svg)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-Quad--License-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](#testing)
 
@@ -34,7 +34,7 @@ A pure Go SQLite implementation for the cyanitol project. This library provides 
 go get github.com/cyanitol/Public.Lib.Anthony
 ```
 
-**Requirements**: Go 1.26 or later
+**Requirements**: Go 1.26.1 or later
 
 ## Quick Start
 
@@ -168,7 +168,7 @@ make commit
 This runs:
 1. **Format check** - Ensures code is `gofmt` formatted
 2. **SPDX check** - All `.go` files must have SPDX license headers
-3. **Complexity check** - No function may have cyclomatic complexity > 11
+3. **Complexity check** - No function may have cyclomatic complexity > 9
 4. **go vet** - Static analysis for bugs
 5. **Build** - Ensures project compiles
 6. **Tests** - All tests must pass
@@ -197,6 +197,9 @@ go test -race ./...
 go test ./internal/driver/...
 go test ./internal/btree/...
 
+# Run all tests including trinity
+go test -tags alltests ./internal/driver/...
+
 # Using Make
 make test         # All tests
 make test-fast    # Parallel tests
@@ -221,7 +224,7 @@ make test-cover   # With coverage
 ### Coding Style & Naming Conventions
 - Go code must be formatted with `gofmt`; no diffs should appear from `gofmt -w .`.
 - Every `.go` file requires an `SPDX-License-Identifier` header; `make check-spdx` enforces this.
-- Maintain cyclomatic complexity ≤ 11 for non-test functions (`make check-complexity`); refactor or split functions if they drift higher.
+- Maintain cyclomatic complexity ≤ 9 for non-test functions (`make check-complexity`); refactor or split functions if they drift higher.
 - Follow idiomatic Go naming; keep exported APIs minimal. Use clear package prefixes for helpers instead of stuttered names (e.g., `pager.Cache`, not `pager.PagerCache`).
 - Tests favor table-driven layouts with underscore-separated scenario names (e.g., `TestPlanBuilder_NestedCTE`).
 
@@ -244,8 +247,7 @@ make test-cover   # With coverage
 
 - **Windows File Locking** - File locking on Windows is not yet implemented
 - **Recursive CTEs** - Cursor architecture being reworked for correct recursive member execution
-- **Advanced Window Functions** - LAG, LEAD, FIRST_VALUE, LAST_VALUE, DENSE_RANK, NTILE in progress
-- **VACUUM** - Schema persistence issues in some edge cases
+- **Window Function Edge Cases** - 42 trinity tests skipped for advanced window function scenarios
 - **Performance** - No prepared statement caching yet
 
 ## Roadmap
@@ -263,9 +265,8 @@ make test-cover   # With coverage
 
 ### Current Focus
 - Recursive CTE cursor architecture fix
-- Window functions: LAG, LEAD, FIRST_VALUE, LAST_VALUE, DENSE_RANK, NTILE
+- Window function edge cases (42 trinity tests skipped)
 - OLD row extraction from cursors for DELETE/UPDATE triggers
-- VACUUM robustness improvements
 
 ### Planned
 - Performance optimization (caching, pooling)
@@ -281,7 +282,7 @@ Contributions are welcome! When contributing:
 
 1. **Read the documentation** - Understand the architecture before making changes
 2. **Follow coding standards**:
-   - Keep cyclomatic complexity ≤ 11
+   - Keep cyclomatic complexity ≤ 9
    - Add comprehensive tests for new features
    - Document all public APIs
    - Use the standard Go formatting (`gofmt`)

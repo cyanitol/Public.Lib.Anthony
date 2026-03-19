@@ -201,52 +201,51 @@ func TestParseCTE_Multiple(t *testing.T) {
 	}
 }
 
-func TestParseCTE_WithColumnList(t *testing.T) {
-	t.Parallel()
-	sql := "WITH users_info(user_id, user_name, user_email) AS (SELECT id, name, email FROM users) SELECT * FROM users_info"
-
-	parser := NewParser(sql)
-	stmts, err := parser.Parse()
+func parseCTESelect(t *testing.T, sql string) *SelectStmt {
+	t.Helper()
+	p := NewParser(sql)
+	stmts, err := p.Parse()
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-
 	if len(stmts) != 1 {
 		t.Fatalf("expected 1 statement, got %d", len(stmts))
 	}
-
 	stmt, ok := stmts[0].(*SelectStmt)
 	if !ok {
 		t.Fatalf("expected SelectStmt, got %T", stmts[0])
 	}
+	return stmt
+}
+
+func assertCTEColumns(t *testing.T, cte CTE, expectedColumns []string) {
+	t.Helper()
+	if len(cte.Columns) != len(expectedColumns) {
+		t.Fatalf("expected %d columns, got %d", len(expectedColumns), len(cte.Columns))
+	}
+	for i, col := range expectedColumns {
+		if cte.Columns[i] != col {
+			t.Errorf("expected column[%d] = %q, got %q", i, col, cte.Columns[i])
+		}
+	}
+}
+
+func TestParseCTE_WithColumnList(t *testing.T) {
+	t.Parallel()
+	stmt := parseCTESelect(t, "WITH users_info(user_id, user_name, user_email) AS (SELECT id, name, email FROM users) SELECT * FROM users_info")
 
 	if stmt.With == nil {
 		t.Fatal("expected WITH clause, got nil")
 	}
-
 	if len(stmt.With.CTEs) != 1 {
 		t.Fatalf("expected 1 CTE, got %d", len(stmt.With.CTEs))
 	}
 
 	cte := stmt.With.CTEs[0]
-
 	if cte.Name != "users_info" {
-		t.Errorf("expected CTE name 'users_info', got '%s'", cte.Name)
+		t.Errorf("expected CTE name 'users_info', got %q", cte.Name)
 	}
-
-	expectedColumns := []string{"user_id", "user_name", "user_email"}
-	if len(cte.Columns) != len(expectedColumns) {
-		t.Errorf("expected %d columns, got %d", len(expectedColumns), len(cte.Columns))
-	}
-
-	for i, col := range expectedColumns {
-		if i >= len(cte.Columns) {
-			break
-		}
-		if cte.Columns[i] != col {
-			t.Errorf("expected column[%d] = '%s', got '%s'", i, col, cte.Columns[i])
-		}
-	}
+	assertCTEColumns(t, cte, []string{"user_id", "user_name", "user_email"})
 }
 
 func TestParseCTE_Complex(t *testing.T) {

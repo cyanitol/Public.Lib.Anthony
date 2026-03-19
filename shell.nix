@@ -2,8 +2,8 @@
 
 pkgs.mkShell {
   buildInputs = with pkgs; [
-    # Go toolchain (using latest available, go.mod requires 1.26.0)
-    go_1_25
+    # Go toolchain (using latest available, go.mod requires 1.26.1)
+    go_1_26
     gopls
     gotools
     go-tools

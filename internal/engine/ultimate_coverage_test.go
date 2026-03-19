@@ -245,82 +245,84 @@ func TestTransactionOperationsEdgeCases(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create table
 	_, err = db.Execute("CREATE TABLE test (id INTEGER)")
 	if err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
 
 	t.Run("Tx.Commit success path", func(t *testing.T) {
-		tx, err := db.Begin()
-		if err != nil {
-			t.Fatalf("Begin failed: %v", err)
-		}
-
-		// Manually ensure transaction is active
-		db.mu.Lock()
-		db.inTransaction = true
-		db.mu.Unlock()
-
-		err = tx.Commit()
-		// May fail if pager doesn't support, but we test the path
-		if err != nil {
-			t.Logf("Commit: %v", err)
-		}
+		testTxCommitPath(t, db)
 	})
-
 	t.Run("Tx.Rollback success path", func(t *testing.T) {
-		// First ensure any previous transaction is cleared
-		db.mu.Lock()
-		db.inTransaction = false
-		db.mu.Unlock()
-
-		tx, err := db.Begin()
-		if err != nil {
-			t.Fatalf("Begin failed: %v", err)
-		}
-
-		db.mu.Lock()
-		db.inTransaction = true
-		db.mu.Unlock()
-
-		err = tx.Rollback()
-		if err != nil {
-			t.Logf("Rollback: %v", err)
-		}
+		testTxRollbackPath(t, db)
 	})
-
 	t.Run("PreparedStmt.Execute with bind", func(t *testing.T) {
-		stmt, err := db.Prepare("SELECT 1")
-		if err != nil {
-			t.Fatalf("Prepare failed: %v", err)
-		}
-		defer stmt.Close()
-
-		// Execute with parameters (tests bindParams path)
-		result, err := stmt.Execute(1, "test", 3.14)
-		if err != nil {
-			t.Logf("Execute with params: %v", err)
-		} else if result == nil {
-			t.Error("Result should not be nil")
-		}
+		testPreparedExec(t, db)
 	})
-
 	t.Run("PreparedStmt.Query with bind", func(t *testing.T) {
-		stmt, err := db.Prepare("SELECT 1")
-		if err != nil {
-			t.Fatalf("Prepare failed: %v", err)
-		}
-		defer stmt.Close()
-
-		// Query with parameters
-		rows, err := stmt.Query(1, 2, 3)
-		if err != nil {
-			t.Logf("Query with params: %v", err)
-		} else {
-			defer rows.Close()
-		}
+		testPreparedQuery(t, db)
 	})
+}
+
+func testTxCommitPath(t *testing.T, db *Engine) {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin failed: %v", err)
+	}
+	db.mu.Lock()
+	db.inTransaction = true
+	db.mu.Unlock()
+	if err = tx.Commit(); err != nil {
+		t.Logf("Commit: %v", err)
+	}
+}
+
+func testTxRollbackPath(t *testing.T, db *Engine) {
+	t.Helper()
+	db.mu.Lock()
+	db.inTransaction = false
+	db.mu.Unlock()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin failed: %v", err)
+	}
+	db.mu.Lock()
+	db.inTransaction = true
+	db.mu.Unlock()
+	if err = tx.Rollback(); err != nil {
+		t.Logf("Rollback: %v", err)
+	}
+}
+
+func testPreparedExec(t *testing.T, db *Engine) {
+	t.Helper()
+	stmt, err := db.Prepare("SELECT 1")
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer stmt.Close()
+	result, err := stmt.Execute(1, "test", 3.14)
+	if err != nil {
+		t.Logf("Execute with params: %v", err)
+	} else if result == nil {
+		t.Error("Result should not be nil")
+	}
+}
+
+func testPreparedQuery(t *testing.T, db *Engine) {
+	t.Helper()
+	stmt, err := db.Prepare("SELECT 1")
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(1, 2, 3)
+	if err != nil {
+		t.Logf("Query with params: %v", err)
+	} else {
+		defer rows.Close()
+	}
 }
 
 // TestRowsNextAndScanEdgeCases tests Rows.Next and Rows.Scan edge cases
@@ -332,66 +334,55 @@ func TestRowsNextAndScanEdgeCases(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create table with various types
 	_, err = db.Execute("CREATE TABLE test (id INTEGER, name TEXT, value REAL)")
 	if err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
-
-	// Insert test data
-	_, err = db.Execute("INSERT INTO test VALUES (1, 'test', 3.14)")
-	if err != nil {
+	if _, err = db.Execute("INSERT INTO test VALUES (1, 'test', 3.14)"); err != nil {
 		t.Logf("Insert: %v", err)
 	}
 
 	t.Run("Rows.Next with data", func(t *testing.T) {
-		rows, err := db.Query("SELECT * FROM test")
-		if err != nil {
-			t.Fatalf("Query failed: %v", err)
-		}
-		defer rows.Close()
-
-		// Test Next returns true when there's data
-		if !rows.Next() {
-			t.Error("Next should return true for first row")
-		}
-
-		// Test scan with various types
-		var id int
-		var name string
-		var value float64
-		err = rows.Scan(&id, &name, &value)
-		if err != nil {
-			t.Logf("Scan: %v", err)
-		}
-
-		// Test Next returns false when no more rows
-		if rows.Next() {
-			t.Log("Next returned true for second row (may have more data)")
-		}
+		testRowsNextWithData(t, db)
 	})
-
 	t.Run("Rows error propagation", func(t *testing.T) {
-		// Create VDBE that will error
-		vm := vdbe.New()
-		vm.AddOp(vdbe.OpColumn, 999, 999, 0)
-		vm.Ctx = &vdbe.VDBEContext{Btree: db.btree, Schema: db.schema}
-
-		rows := &Rows{
-			vdbe:    vm,
-			columns: []string{"col"},
-			done:    false,
-		}
-
-		// Next should fail and set error
-		if rows.Next() {
-			t.Error("Next should return false on error")
-		}
-
-		if rows.Err() == nil {
-			t.Log("Expected error to be set")
-		}
+		testRowsErrorPropagation(t, db)
 	})
+}
+
+func testRowsNextWithData(t *testing.T, db *Engine) {
+	t.Helper()
+	rows, err := db.Query("SELECT * FROM test")
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Error("Next should return true for first row")
+	}
+	var id int
+	var name string
+	var value float64
+	if err = rows.Scan(&id, &name, &value); err != nil {
+		t.Logf("Scan: %v", err)
+	}
+	if rows.Next() {
+		t.Log("Next returned true for second row (may have more data)")
+	}
+}
+
+func testRowsErrorPropagation(t *testing.T, db *Engine) {
+	t.Helper()
+	vm := vdbe.New()
+	vm.AddOp(vdbe.OpColumn, 999, 999, 0)
+	vm.Ctx = &vdbe.VDBEContext{Btree: db.btree, Schema: db.schema}
+	rows := &Rows{vdbe: vm, columns: []string{"col"}, done: false}
+	if rows.Next() {
+		t.Error("Next should return false on error")
+	}
+	if rows.Err() == nil {
+		t.Log("Expected error to be set")
+	}
 }
 
 // TestQueryRowScanEdgeCases tests QueryRow.Scan edge cases
@@ -530,78 +521,52 @@ func TestAllConvenienceFunctions(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create table
 	_, err = db.Execute("CREATE TABLE test (id INTEGER, name TEXT)")
 	if err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
 
-	// Create triggers for all events
-	idx := 0
-	for _, timing := range []parser.TriggerTiming{parser.TriggerBefore, parser.TriggerAfter} {
-		for _, event := range []parser.TriggerEvent{parser.TriggerInsert, parser.TriggerUpdate, parser.TriggerDelete} {
-			triggerName := "trigger_" + string(rune('0'+idx))
-			idx++
-			trigger := &schema.Trigger{
-				Name:   triggerName,
-				Table:  "test",
-				Timing: timing,
-				Event:  event,
-				Body:   []parser.Statement{},
-			}
-			db.schema.Triggers[triggerName] = trigger
-		}
-	}
+	registerTestTriggers(db)
 
 	ctx := &TriggerContext{
-		Schema:    db.schema,
-		Pager:     db.pager,
-		Btree:     db.btree,
+		Schema: db.schema, Pager: db.pager, Btree: db.btree,
 		TableName: "test",
 		OldRow:    map[string]interface{}{"id": 1, "name": "old"},
 		NewRow:    map[string]interface{}{"id": 2, "name": "new"},
 	}
 
-	// Test all convenience functions
-	t.Run("ExecuteTriggersForInsert", func(t *testing.T) {
-		err = ExecuteTriggersForInsert(ctx)
-		if err != nil {
-			t.Logf("ExecuteTriggersForInsert: %v", err)
-		}
-	})
+	cols := []string{"name"}
+	fns := []struct {
+		name string
+		fn   func() error
+	}{
+		{"ExecuteTriggersForInsert", func() error { return ExecuteTriggersForInsert(ctx) }},
+		{"ExecuteAfterInsertTriggers", func() error { return ExecuteAfterInsertTriggers(ctx) }},
+		{"ExecuteTriggersForUpdate", func() error { return ExecuteTriggersForUpdate(ctx, cols) }},
+		{"ExecuteAfterUpdateTriggers", func() error { return ExecuteAfterUpdateTriggers(ctx, cols) }},
+		{"ExecuteTriggersForDelete", func() error { return ExecuteTriggersForDelete(ctx) }},
+		{"ExecuteAfterDeleteTriggers", func() error { return ExecuteAfterDeleteTriggers(ctx) }},
+	}
 
-	t.Run("ExecuteAfterInsertTriggers", func(t *testing.T) {
-		err = ExecuteAfterInsertTriggers(ctx)
-		if err != nil {
-			t.Logf("ExecuteAfterInsertTriggers: %v", err)
-		}
-	})
+	for _, tt := range fns {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.fn(); err != nil {
+				t.Logf("%s: %v", tt.name, err)
+			}
+		})
+	}
+}
 
-	t.Run("ExecuteTriggersForUpdate", func(t *testing.T) {
-		err = ExecuteTriggersForUpdate(ctx, []string{"name"})
-		if err != nil {
-			t.Logf("ExecuteTriggersForUpdate: %v", err)
+func registerTestTriggers(db *Engine) {
+	idx := 0
+	for _, timing := range []parser.TriggerTiming{parser.TriggerBefore, parser.TriggerAfter} {
+		for _, event := range []parser.TriggerEvent{parser.TriggerInsert, parser.TriggerUpdate, parser.TriggerDelete} {
+			triggerName := "trigger_" + string(rune('0'+idx))
+			idx++
+			db.schema.Triggers[triggerName] = &schema.Trigger{
+				Name: triggerName, Table: "test", Timing: timing, Event: event,
+				Body: []parser.Statement{},
+			}
 		}
-	})
-
-	t.Run("ExecuteAfterUpdateTriggers", func(t *testing.T) {
-		err = ExecuteAfterUpdateTriggers(ctx, []string{"name"})
-		if err != nil {
-			t.Logf("ExecuteAfterUpdateTriggers: %v", err)
-		}
-	})
-
-	t.Run("ExecuteTriggersForDelete", func(t *testing.T) {
-		err = ExecuteTriggersForDelete(ctx)
-		if err != nil {
-			t.Logf("ExecuteTriggersForDelete: %v", err)
-		}
-	})
-
-	t.Run("ExecuteAfterDeleteTriggers", func(t *testing.T) {
-		err = ExecuteAfterDeleteTriggers(ctx)
-		if err != nil {
-			t.Logf("ExecuteAfterDeleteTriggers: %v", err)
-		}
-	})
+	}
 }

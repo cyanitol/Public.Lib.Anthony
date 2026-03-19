@@ -189,70 +189,51 @@ func TestSplitAnd(t *testing.T) {
 	}
 }
 
+func assertAnalyzeExprError(t *testing.T, err error, wantErr bool) {
+	t.Helper()
+	if wantErr && err == nil {
+		t.Error("Expected error but got none")
+	}
+	if !wantErr && err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+func assertAnalyzeExprResult(t *testing.T, term *WhereTerm, err error, wantErr, wantNil bool) {
+	t.Helper()
+	assertAnalyzeExprError(t, err, wantErr)
+	if wantNil && term != nil {
+		t.Error("Expected nil term but got non-nil")
+	}
+	if !wantNil && !wantErr && term == nil {
+		t.Error("Expected non-nil term but got nil")
+	}
+}
+
 func TestAnalyzeExpr(t *testing.T) {
 	p := NewPlanner()
 	table := createTestTable()
 	tables := []*TableInfo{table}
 
 	tests := []struct {
-		name     string
-		expr     Expr
-		hasError bool
-		isNil    bool
+		name    string
+		expr    Expr
+		wantErr bool
+		wantNil bool
 	}{
-		{
-			name: "equality expression",
-			expr: &BinaryExpr{
-				Op:    "=",
-				Left:  &ColumnExpr{Cursor: 0, Column: "id"},
-				Right: &ValueExpr{Value: 5},
-			},
-			hasError: false,
-			isNil:    false,
-		},
-		{
-			name: "range expression",
-			expr: &BinaryExpr{
-				Op:    ">",
-				Left:  &ColumnExpr{Cursor: 0, Column: "age"},
-				Right: &ValueExpr{Value: 18},
-			},
-			hasError: false,
-			isNil:    false,
-		},
-		{
-			name: "OR expression",
-			expr: &OrExpr{Terms: []Expr{
-				&BinaryExpr{Op: "=", Left: &ColumnExpr{}, Right: &ValueExpr{}},
-				&BinaryExpr{Op: "=", Left: &ColumnExpr{}, Right: &ValueExpr{}},
-			}},
-			hasError: false,
-			isNil:    false,
-		},
-		{
-			name:     "non-binary expression",
-			expr:     &ValueExpr{Value: 42},
-			hasError: false,
-			isNil:    true,
-		},
+		{"equality expression", &BinaryExpr{Op: "=", Left: &ColumnExpr{Cursor: 0, Column: "id"}, Right: &ValueExpr{Value: 5}}, false, false},
+		{"range expression", &BinaryExpr{Op: ">", Left: &ColumnExpr{Cursor: 0, Column: "age"}, Right: &ValueExpr{Value: 18}}, false, false},
+		{"OR expression", &OrExpr{Terms: []Expr{
+			&BinaryExpr{Op: "=", Left: &ColumnExpr{}, Right: &ValueExpr{}},
+			&BinaryExpr{Op: "=", Left: &ColumnExpr{}, Right: &ValueExpr{}},
+		}}, false, false},
+		{"non-binary expression", &ValueExpr{Value: 42}, false, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			term, err := p.analyzeExpr(tt.expr, tables)
-
-			if tt.hasError && err == nil {
-				t.Error("Expected error but got none")
-			}
-			if !tt.hasError && err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-			if tt.isNil && term != nil {
-				t.Error("Expected nil term but got non-nil")
-			}
-			if !tt.isNil && !tt.hasError && term == nil {
-				t.Error("Expected non-nil term but got nil")
-			}
+			assertAnalyzeExprResult(t, term, err, tt.wantErr, tt.wantNil)
 		})
 	}
 }

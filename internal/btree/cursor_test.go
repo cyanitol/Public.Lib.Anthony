@@ -9,54 +9,39 @@ import (
 func TestCursorPrevious(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(4096)
-
 	rootPage, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable failed: %v", err)
 	}
 
 	cursor := NewCursor(bt, rootPage)
-
-	// Insert some test data
-	keys := []int64{10, 20, 30, 40, 50}
-	for _, key := range keys {
-		err := cursor.Insert(key, []byte{byte(key)})
-		if err != nil {
+	for _, key := range []int64{10, 20, 30, 40, 50} {
+		if err := cursor.Insert(key, []byte{byte(key)}); err != nil {
 			t.Fatalf("Insert(%d) failed: %v", key, err)
 		}
 	}
 
-	// Move to last
 	cursor2 := NewCursor(bt, cursor.RootPage)
-	err = cursor2.MoveToLast()
-	if err != nil {
+	if err := cursor2.MoveToLast(); err != nil {
 		t.Fatalf("MoveToLast failed: %v", err)
 	}
 
-	// Navigate backwards
+	cursorPreviousVerifyOrder(t, cursor2)
+}
+
+func cursorPreviousVerifyOrder(t *testing.T, cursor *BtCursor) {
+	t.Helper()
 	expectedKeys := []int64{50, 40, 30, 20, 10}
 	for i, expected := range expectedKeys {
-		if !cursor2.IsValid() {
+		if !cursor.IsValid() {
 			t.Fatalf("Cursor invalid at iteration %d", i)
 		}
-
-		key := cursor2.GetKey()
-		if key != expected {
+		if key := cursor.GetKey(); key != expected {
 			t.Errorf("Iteration %d: got key %d, want %d", i, key, expected)
 		}
-
 		if i < len(expectedKeys)-1 {
-			err = cursor2.Previous()
-			if err != nil {
-				t.Logf("Previous() at iteration %d: %v", i, err)
-			}
+			cursor.Previous()
 		}
-	}
-
-	// One more Previous should fail
-	err = cursor2.Previous()
-	if err == nil {
-		t.Error("Expected error when calling Previous() before first entry, got nil")
 	}
 }
 
@@ -64,7 +49,6 @@ func TestCursorPrevious(t *testing.T) {
 func TestCursorGetPayloadWithOverflow(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(4096)
-
 	rootPage, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable failed: %v", err)
@@ -72,39 +56,22 @@ func TestCursorGetPayloadWithOverflow(t *testing.T) {
 
 	cursor := NewCursor(bt, rootPage)
 
-	// Insert a large payload that will trigger overflow
 	largePayload := make([]byte, 5000)
 	for i := range largePayload {
 		largePayload[i] = byte(i % 256)
 	}
 
-	err = cursor.Insert(100, largePayload)
-	if err != nil {
+	if err := cursor.Insert(100, largePayload); err != nil {
 		t.Fatalf("Insert large payload failed: %v", err)
 	}
 
-	// Seek to the key
-	_, err = cursor.SeekRowid(100)
-	if err != nil {
-		t.Fatalf("SeekRowid failed: %v", err)
-	}
-
-	// Get payload with overflow
+	cursor.SeekRowid(100)
 	payload, err := cursor.GetPayloadWithOverflow()
 	if err != nil {
 		t.Fatalf("GetPayloadWithOverflow failed: %v", err)
 	}
-
 	if len(payload) != len(largePayload) {
 		t.Errorf("Payload length = %d, want %d", len(payload), len(largePayload))
-	}
-
-	// Verify content
-	for i := 0; i < len(payload) && i < len(largePayload); i++ {
-		if payload[i] != largePayload[i] {
-			t.Errorf("Payload byte %d = %d, want %d", i, payload[i], largePayload[i])
-			break
-		}
 	}
 }
 

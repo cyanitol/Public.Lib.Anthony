@@ -466,12 +466,12 @@ func TestIdxCompareOpcodes(t *testing.T) {
 // TestIdxOpcodeErrors tests error conditions for index opcodes
 func TestIdxOpcodeErrors(t *testing.T) {
 	t.Parallel()
-	v := New()
-	v.AllocMemory(10)
-	v.AllocCursors(2)
 
 	t.Run("IdxInsert_NoCursor", func(t *testing.T) {
 		t.Parallel()
+		v := New()
+		v.AllocMemory(10)
+		v.AllocCursors(2)
 		err := v.execIdxInsert(&Instruction{
 			Opcode: OpIdxInsert,
 			P1:     0,
@@ -486,6 +486,9 @@ func TestIdxOpcodeErrors(t *testing.T) {
 
 	t.Run("IdxInsert_NotWritable", func(t *testing.T) {
 		t.Parallel()
+		v := New()
+		v.AllocMemory(10)
+		v.AllocCursors(2)
 		bt := btree.NewBtree(4096)
 		rootPage, _ := createIndexPage(bt)
 		idxCursor := btree.NewIndexCursor(bt, rootPage)

@@ -10,6 +10,27 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab"
 )
 
+// assertColumnValue asserts that a cursor column value matches the expected value by type.
+func assertColumnValue(t *testing.T, col int, val, want interface{}) {
+	t.Helper()
+	switch expected := want.(type) {
+	case int64:
+		ival, ok := val.(int64)
+		if !ok {
+			t.Errorf("Column(%d) expected int64, got %T", col, val)
+		} else if ival != expected {
+			t.Errorf("Column(%d) = %d, want %d", col, ival, expected)
+		}
+	case float64:
+		fval, ok := val.(float64)
+		if !ok {
+			t.Errorf("Column(%d) expected float64, got %T", col, val)
+		} else if fval != expected {
+			t.Errorf("Column(%d) = %f, want %f", col, fval, expected)
+		}
+	}
+}
+
 // TestRTreeModule tests the R-Tree module creation.
 func TestRTreeModule(t *testing.T) {
 	t.Parallel()
@@ -104,47 +125,39 @@ func TestRTreeInsert(t *testing.T) {
 		t.Fatalf("Create() error: %v", err)
 	}
 
-	rtree := table.(*RTree)
-
-	// Insert a rectangle
-	args := []interface{}{
-		nil,  // old rowid (nil for INSERT)
-		nil,  // new rowid (nil for auto-generate)
-		0.0,  // minX
-		10.0, // maxX
-		0.0,  // minY
-		10.0, // maxY
-	}
-	id, err := rtree.Update(len(args), args)
+	rt := table.(*RTree)
+	args := []interface{}{nil, nil, 0.0, 10.0, 0.0, 10.0}
+	id, err := rt.Update(len(args), args)
 
 	if err != nil {
 		t.Errorf("Update() error: %v", err)
 	}
-
 	if id != 1 {
 		t.Errorf("Update() returned id = %d, want 1", id)
 	}
-
-	// Verify the entry was inserted
-	if rtree.Count() != 1 {
-		t.Errorf("Count() = %d, want 1", rtree.Count())
+	if rt.Count() != 1 {
+		t.Errorf("Count() = %d, want 1", rt.Count())
 	}
 
-	entry, exists := rtree.GetEntry(id)
+	verifyRTreeEntry(t, rt, id, [2]float64{0.0, 0.0}, [2]float64{10.0, 10.0})
+}
+
+// verifyRTreeEntry checks that the entry exists with the expected bounding box.
+func verifyRTreeEntry(t *testing.T, rt *RTree, id int64, wantMin, wantMax [2]float64) {
+	t.Helper()
+	entry, exists := rt.GetEntry(id)
 	if !exists {
-		t.Error("GetEntry() entry not found")
+		t.Errorf("GetEntry(%d) entry not found", id)
+		return
 	}
-
 	if entry.ID != id {
 		t.Errorf("Entry ID = %d, want %d", entry.ID, id)
 	}
-
-	// Verify bounding box
-	if entry.BBox.Min[0] != 0.0 || entry.BBox.Max[0] != 10.0 {
-		t.Errorf("Entry X bounds = [%f, %f], want [0, 10]", entry.BBox.Min[0], entry.BBox.Max[0])
+	if entry.BBox.Min[0] != wantMin[0] || entry.BBox.Max[0] != wantMax[0] {
+		t.Errorf("Entry X bounds = [%f, %f], want [%f, %f]", entry.BBox.Min[0], entry.BBox.Max[0], wantMin[0], wantMax[0])
 	}
-	if entry.BBox.Min[1] != 0.0 || entry.BBox.Max[1] != 10.0 {
-		t.Errorf("Entry Y bounds = [%f, %f], want [0, 10]", entry.BBox.Min[1], entry.BBox.Max[1])
+	if entry.BBox.Min[1] != wantMin[1] || entry.BBox.Max[1] != wantMax[1] {
+		t.Errorf("Entry Y bounds = [%f, %f], want [%f, %f]", entry.BBox.Min[1], entry.BBox.Max[1], wantMin[1], wantMax[1])
 	}
 }
 
@@ -244,6 +257,22 @@ func TestRTreeUpdate(t *testing.T) {
 	}
 }
 
+// insertRTreeEntries inserts sequential entries into an RTree for testing.
+func insertRTreeEntries(t *testing.T, rt *RTree, count int) {
+	t.Helper()
+	for i := 1; i <= count; i++ {
+		args := []interface{}{
+			nil, int64(i),
+			float64(i * 10), float64(i*10 + 10),
+			float64(i * 10), float64(i*10 + 10),
+		}
+		_, err := rt.Update(len(args), args)
+		if err != nil {
+			t.Fatalf("Update() error: %v", err)
+		}
+	}
+}
+
 // TestRTreeCursor tests cursor operations.
 func TestRTreeCursor(t *testing.T) {
 	t.Parallel()
@@ -254,60 +283,46 @@ func TestRTreeCursor(t *testing.T) {
 		t.Fatalf("Create() error: %v", err)
 	}
 
-	rtree := table.(*RTree)
+	rt := table.(*RTree)
+	insertRTreeEntries(t, rt, 3)
 
-	// Insert entries
-	for i := 1; i <= 3; i++ {
-		args := []interface{}{
-			nil, int64(i),
-			float64(i * 10), float64(i*10 + 10),
-			float64(i * 10), float64(i*10 + 10),
-		}
-		_, err := rtree.Update(len(args), args)
-		if err != nil {
-			t.Fatalf("Update() error: %v", err)
-		}
-	}
-
-	// Open cursor
-	cursor, err := rtree.Open()
+	cursor, err := rt.Open()
 	if err != nil {
 		t.Fatalf("Open() error: %v", err)
 	}
 	defer cursor.Close()
 
-	// Filter (no constraints - return all)
 	err = cursor.Filter(0, "", nil)
 	if err != nil {
 		t.Fatalf("Filter() error: %v", err)
 	}
 
-	// Iterate through results
+	count := countCursorRowsMatchingID(t, cursor)
+	if count != 3 {
+		t.Errorf("Cursor iterated %d rows, want 3", count)
+	}
+}
+
+// countCursorRowsMatchingID iterates a cursor and verifies Column(0) matches Rowid.
+func countCursorRowsMatchingID(t *testing.T, cursor vtab.VirtualCursor) int {
+	t.Helper()
 	count := 0
 	for !cursor.EOF() {
-		// Get rowid
 		rowid, err := cursor.Rowid()
 		if err != nil {
 			t.Errorf("Rowid() error: %v", err)
 		}
-
-		// Get columns
 		id, err := cursor.Column(0)
 		if err != nil {
 			t.Errorf("Column(0) error: %v", err)
 		}
-
 		if id != rowid {
 			t.Errorf("Column(0) = %v, Rowid() = %v, should match", id, rowid)
 		}
-
 		count++
 		cursor.Next()
 	}
-
-	if count != 3 {
-		t.Errorf("Cursor iterated %d rows, want 3", count)
-	}
+	return count
 }
 
 // TestRTreeSearchOverlap tests spatial overlap queries.
@@ -1036,27 +1051,7 @@ func TestRTreeCursorColumn(t *testing.T) {
 			t.Errorf("Column(%d) error: %v", tt.col, err)
 			continue
 		}
-
-		switch expected := tt.want.(type) {
-		case int64:
-			ival, ok := val.(int64)
-			if !ok {
-				t.Errorf("Column(%d) expected int64, got %T", tt.col, val)
-				continue
-			}
-			if ival != expected {
-				t.Errorf("Column(%d) = %d, want %d", tt.col, ival, expected)
-			}
-		case float64:
-			fval, ok := val.(float64)
-			if !ok {
-				t.Errorf("Column(%d) expected float64, got %T", tt.col, val)
-				continue
-			}
-			if fval != expected {
-				t.Errorf("Column(%d) = %f, want %f", tt.col, fval, expected)
-			}
-		}
+		assertColumnValue(t, tt.col, val, tt.want)
 	}
 
 	// Test invalid column
@@ -4112,22 +4107,36 @@ func TestPickNextEdgeCases(t *testing.T) {
 // TestHandleRootAfterRemovalCases tests root handling after removal.
 func TestHandleRootAfterRemovalCases(t *testing.T) {
 	t.Parallel()
-	// Case 1: Empty root after deletion
+
+	t.Run("empty_root_after_deletion", func(t *testing.T) {
+		root := NewLeafNode()
+		bbox := NewBoundingBox(2)
+		bbox.Min[0], bbox.Max[0] = 0, 10
+		bbox.Min[1], bbox.Max[1] = 0, 10
+		entry := NewEntry(1, bbox)
+		root.AddEntry(entry)
+		root = root.Remove(entry)
+		if root != nil {
+			t.Error("Expected nil root for empty tree")
+		}
+	})
+
+	t.Run("single_child_after_deletion", func(t *testing.T) {
+		root := buildInternalRoot(t)
+		root = removeUntilSingleChild(root)
+		if root != nil && !root.IsLeaf && len(root.Entries) == 1 {
+			root = root.handleRootAfterRemoval()
+			if root != nil && !root.IsLeaf {
+				t.Error("Expected root to collapse to leaf with single child")
+			}
+		}
+	})
+}
+
+// buildInternalRoot creates a tree with enough entries to have an internal root.
+func buildInternalRoot(t *testing.T) *Node {
+	t.Helper()
 	root := NewLeafNode()
-	bbox := NewBoundingBox(2)
-	bbox.Min[0], bbox.Max[0] = 0, 10
-	bbox.Min[1], bbox.Max[1] = 0, 10
-	entry := NewEntry(1, bbox)
-
-	root.AddEntry(entry)
-	root = root.Remove(entry)
-
-	if root != nil {
-		t.Error("Expected nil root for empty tree")
-	}
-
-	// Case 2: Root with single child after deletion
-	root = NewLeafNode()
 	for i := 0; i < MaxEntries+1; i++ {
 		bbox := NewBoundingBox(2)
 		bbox.Min[0], bbox.Max[0] = float64(i*10), float64(i*10+5)
@@ -4135,40 +4144,46 @@ func TestHandleRootAfterRemovalCases(t *testing.T) {
 		entry := NewEntry(int64(i+1), bbox)
 		root = root.Insert(entry)
 	}
-
-	// Root should now be internal with 2 children
 	if root.IsLeaf {
 		t.Fatal("Expected internal root after split")
 	}
+	return root
+}
 
-	// Remove entries to get down to single child
+// removeUntilSingleChild removes entries until the root has at most one child.
+func removeUntilSingleChild(root *Node) *Node {
 	for i := 0; i < MaxEntries; i++ {
 		if len(root.Entries) <= 1 {
 			break
 		}
-		// Find a leaf entry to remove
 		leaf, _ := root.FindEntry(root.Entries[0].Child.Entries[0])
 		if leaf != nil && len(leaf.Entries) > 0 {
 			root = root.Remove(leaf.Entries[0])
 		}
 	}
-
-	// After removing enough entries, root might collapse
-	if root != nil && !root.IsLeaf && len(root.Entries) == 1 {
-		root = root.handleRootAfterRemoval()
-		if root != nil && !root.IsLeaf {
-			t.Error("Expected root to collapse to leaf with single child")
-		}
-	}
+	return root
 }
 
 // TestHandleUnderflowRecursive tests recursive underflow handling.
+// findFirstLeafEntry returns the first leaf entry in the tree, or nil if none exists.
+func findFirstLeafEntry(root *Node) *Entry {
+	if root == nil || root.Count() == 0 {
+		return nil
+	}
+	current := root
+	for !current.IsLeaf && len(current.Entries) > 0 {
+		current = current.Entries[0].Child
+	}
+	if len(current.Entries) > 0 {
+		return current.Entries[0]
+	}
+	return nil
+}
+
 func TestHandleUnderflowRecursive(t *testing.T) {
 	t.Parallel()
-	// Build a tree that will trigger recursive underflow
 	root := NewLeafNode()
 
-	// Insert enough entries to create a multi-level tree
 	for i := 0; i < 30; i++ {
 		bbox := NewBoundingBox(2)
 		bbox.Min[0], bbox.Max[0] = float64(i*10), float64(i*10+5)
@@ -4177,36 +4192,17 @@ func TestHandleUnderflowRecursive(t *testing.T) {
 		root = root.Insert(entry)
 	}
 
-	// Now remove entries to trigger underflow
 	for i := 0; i < 25; i++ {
-		if root != nil && root.Count() > 0 {
-			// Find any leaf entry
-			var leafEntry *Entry
-			if root.IsLeaf && len(root.Entries) > 0 {
-				leafEntry = root.Entries[0]
-			} else if !root.IsLeaf && len(root.Entries) > 0 {
-				current := root
-				for !current.IsLeaf && len(current.Entries) > 0 {
-					current = current.Entries[0].Child
-				}
-				if len(current.Entries) > 0 {
-					leafEntry = current.Entries[0]
-				}
-			}
-			if leafEntry != nil {
-				root = root.Remove(leafEntry)
-			}
+		leafEntry := findFirstLeafEntry(root)
+		if leafEntry != nil {
+			root = root.Remove(leafEntry)
 		}
 	}
 
-	// Tree should still be valid
-	if root != nil && root.Count() > 0 {
-		// Verify tree structure
-		if !root.IsLeaf {
-			for _, e := range root.Entries {
-				if e.Child.Parent != root {
-					t.Error("Parent pointer not updated correctly after underflow")
-				}
+	if root != nil && root.Count() > 0 && !root.IsLeaf {
+		for _, e := range root.Entries {
+			if e.Child.Parent != root {
+				t.Error("Parent pointer not updated correctly after underflow")
 			}
 		}
 	}
@@ -4444,7 +4440,25 @@ func TestCreateTableEdgeCases(t *testing.T) {
 	t.Parallel()
 	module := NewRTreeModule()
 
-	// Test with exactly 5 columns (minimum valid)
+	t.Run("minimum_valid_columns", func(t *testing.T) {
+		testCreateTableMinCols(t, module)
+	})
+	t.Run("whitespace_in_args", func(t *testing.T) {
+		testCreateTableWhitespace(t, module)
+	})
+	t.Run("empty_strings_in_args", func(t *testing.T) {
+		testCreateTableEmptyStrings(t, module)
+	})
+	t.Run("too_many_dimensions", func(t *testing.T) {
+		testCreateTableTooManyDims(t, module)
+	})
+	t.Run("connect_method", func(t *testing.T) {
+		testCreateTableConnect(t, module)
+	})
+}
+
+func testCreateTableMinCols(t *testing.T, module *RTreeModule) {
+	t.Helper()
 	table, schema, err := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
 	if err != nil {
@@ -4456,33 +4470,41 @@ func TestCreateTableEdgeCases(t *testing.T) {
 	if schema == "" {
 		t.Error("Expected non-empty schema")
 	}
+}
 
-	// Test with whitespace in args
-	table, _, err = module.Create(nil, "rtree", "main", "test",
+func testCreateTableWhitespace(t *testing.T, module *RTreeModule) {
+	t.Helper()
+	_, _, err := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", " minX ", "maxX", "minY", "maxY"})
 	if err != nil {
 		t.Errorf("Should handle whitespace: %v", err)
 	}
+}
 
-	// Test with empty strings in args (they get filtered out, reducing column count)
-	table, _, err = module.Create(nil, "rtree", "main", "test",
+func testCreateTableEmptyStrings(t *testing.T, module *RTreeModule) {
+	t.Helper()
+	_, _, err := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "", "minX", "maxX", ""})
 	if err == nil {
 		t.Error("Expected error for insufficient columns after empty string filtering")
 	}
+}
 
-	// Test with too many dimensions (>5)
+func testCreateTableTooManyDims(t *testing.T, module *RTreeModule) {
+	t.Helper()
 	args := []string{"id"}
 	for i := 0; i < 6; i++ {
 		args = append(args, fmt.Sprintf("min%d", i), fmt.Sprintf("max%d", i))
 	}
-	table, _, err = module.Create(nil, "rtree", "main", "test", args)
+	_, _, err := module.Create(nil, "rtree", "main", "test", args)
 	if err == nil {
 		t.Error("Expected error for >5 dimensions")
 	}
+}
 
-	// Test Connect method (should behave same as Create)
-	table, schema, err = module.Connect(nil, "rtree", "main", "test",
+func testCreateTableConnect(t *testing.T, module *RTreeModule) {
+	t.Helper()
+	table, _, err := module.Connect(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
 	if err != nil {
 		t.Errorf("Connect failed: %v", err)
@@ -4564,43 +4586,59 @@ func TestBestIndexEdgeCases(t *testing.T) {
 	}
 }
 
-// TestUpdateEdgeCases tests Update function edge cases.
-func TestUpdateEdgeCases(t *testing.T) {
-	t.Parallel()
+// newTestRTree creates an RTree for testing.
+func newTestRTree(t *testing.T) *RTree {
+	t.Helper()
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
-	rtree := table.(*RTree)
+	return table.(*RTree)
+}
 
-	// Test invalid argc
-	_, err := rtree.Update(0, []interface{}{})
-	if err == nil {
-		t.Error("Expected error for argc=0")
-	}
+// TestUpdateEdgeCases tests Update function edge cases.
+func TestUpdateEdgeCases(t *testing.T) {
+	t.Parallel()
+	rt := newTestRTree(t)
 
-	// Test DELETE with invalid ID type
-	_, err = rtree.Update(1, []interface{}{"invalid"})
-	if err == nil {
-		t.Error("Expected error for invalid ID type in DELETE")
-	}
+	t.Run("invalid_argc", func(t *testing.T) {
+		_, err := rt.Update(0, []interface{}{})
+		if err == nil {
+			t.Error("Expected error for argc=0")
+		}
+	})
 
-	// Test DELETE of non-existent entry
-	_, err = rtree.Update(1, []interface{}{int64(999)})
-	if err == nil {
-		t.Error("Expected error for DELETE of non-existent entry")
-	}
+	t.Run("delete_invalid_id_type", func(t *testing.T) {
+		_, err := rt.Update(1, []interface{}{"invalid"})
+		if err == nil {
+			t.Error("Expected error for invalid ID type in DELETE")
+		}
+	})
 
-	// Test INSERT with auto-generated ID
-	id, err := rtree.Update(6, []interface{}{nil, nil, 0.0, 10.0, 0.0, 10.0})
-	if err != nil {
-		t.Errorf("INSERT with auto ID failed: %v", err)
-	}
-	if id != 1 {
-		t.Errorf("Expected auto-generated ID 1, got %d", id)
-	}
+	t.Run("delete_nonexistent", func(t *testing.T) {
+		_, err := rt.Update(1, []interface{}{int64(999)})
+		if err == nil {
+			t.Error("Expected error for DELETE of non-existent entry")
+		}
+	})
 
-	// Test INSERT with explicit ID
-	id, err = rtree.Update(6, []interface{}{nil, int64(42), 20.0, 30.0, 0.0, 10.0})
+	t.Run("insert_auto_id", func(t *testing.T) {
+		id, err := rt.Update(6, []interface{}{nil, nil, 0.0, 10.0, 0.0, 10.0})
+		if err != nil {
+			t.Errorf("INSERT with auto ID failed: %v", err)
+		}
+		if id != 1 {
+			t.Errorf("Expected auto-generated ID 1, got %d", id)
+		}
+	})
+
+	t.Run("insert_explicit_and_update", func(t *testing.T) {
+		testUpdateEdgeCasesInsertExplicitAndUpdate(t, rt)
+	})
+}
+
+func testUpdateEdgeCasesInsertExplicitAndUpdate(t *testing.T, rt *RTree) {
+	t.Helper()
+	id, err := rt.Update(6, []interface{}{nil, int64(42), 20.0, 30.0, 0.0, 10.0})
 	if err != nil {
 		t.Errorf("INSERT with explicit ID failed: %v", err)
 	}
@@ -4608,8 +4646,7 @@ func TestUpdateEdgeCases(t *testing.T) {
 		t.Errorf("Expected ID 42, got %d", id)
 	}
 
-	// Test UPDATE (oldID != nil)
-	id, err = rtree.Update(6, []interface{}{int64(42), int64(43), 25.0, 35.0, 5.0, 15.0})
+	id, err = rt.Update(6, []interface{}{int64(42), int64(43), 25.0, 35.0, 5.0, 15.0})
 	if err != nil {
 		t.Errorf("UPDATE failed: %v", err)
 	}
@@ -4617,14 +4654,12 @@ func TestUpdateEdgeCases(t *testing.T) {
 		t.Errorf("Expected new ID 43, got %d", id)
 	}
 
-	// Old entry should be gone
-	_, exists := rtree.GetEntry(42)
+	_, exists := rt.GetEntry(42)
 	if exists {
 		t.Error("Old entry should be removed after UPDATE")
 	}
 
-	// Test DELETE of existing entry
-	id, err = rtree.Update(1, []interface{}{int64(43)})
+	_, err = rt.Update(1, []interface{}{int64(43)})
 	if err != nil {
 		t.Errorf("DELETE failed: %v", err)
 	}
@@ -5078,46 +5113,45 @@ func TestQuadraticSplitWithTies(t *testing.T) {
 	}
 }
 
-// TestHandleUnderflowNonRootCase tests handleUnderflow when parent is not root.
-func TestHandleUnderflowNonRootCase(t *testing.T) {
-	t.Parallel()
-	// Build a 3-level tree to test non-root underflow
+// buildDeepTree creates a tree with the specified number of entries.
+func buildDeepTree(n int) *Node {
 	root := NewLeafNode()
-
-	// Insert many entries to create a deep tree
-	for i := 0; i < 50; i++ {
+	for i := 0; i < n; i++ {
 		bbox := NewBoundingBox(2)
 		bbox.Min[0], bbox.Max[0] = float64(i*5), float64(i*5+3)
 		bbox.Min[1], bbox.Max[1] = float64(i%10), float64(i%10+3)
 		entry := NewEntry(int64(i+1), bbox)
 		root = root.Insert(entry)
 	}
+	return root
+}
 
-	// Verify we have a multi-level tree
+// removeFirstLeafEntries removes up to n leaf entries from the tree.
+func removeFirstLeafEntries(root *Node, n int) *Node {
+	for i := 0; i < n; i++ {
+		leafEntry := findFirstLeafEntry(root)
+		if leafEntry == nil {
+			break
+		}
+		root = root.Remove(leafEntry)
+	}
+	return root
+}
+
+// TestHandleUnderflowNonRootCase tests handleUnderflow when parent is not root.
+func TestHandleUnderflowNonRootCase(t *testing.T) {
+	t.Parallel()
+	root := buildDeepTree(50)
+
 	if root.IsLeaf {
 		t.Skip("Need multi-level tree for this test")
 	}
-
-	height := root.Height()
-	if height < 3 {
+	if root.Height() < 3 {
 		t.Skip("Need at least 3-level tree for this test")
 	}
 
-	// Now remove enough entries to trigger underflow at a non-root level
-	for i := 0; i < 40; i++ {
-		if root != nil && root.Count() > 0 {
-			// Find a leaf entry to remove
-			current := root
-			for !current.IsLeaf && len(current.Entries) > 0 {
-				current = current.Entries[0].Child
-			}
-			if len(current.Entries) > 0 {
-				root = root.Remove(current.Entries[0])
-			}
-		}
-	}
+	root = removeFirstLeafEntries(root, 40)
 
-	// Tree should still be valid
 	if root != nil && !root.IsLeaf {
 		for _, e := range root.Entries {
 			if e.Child != nil && e.Child.Parent != root {
@@ -5287,41 +5321,34 @@ func TestAssignEntryOnTieGroup2FewerEntries(t *testing.T) {
 	}
 }
 
+// findAvailableLeaf finds a leaf node with room for insertion.
+func findAvailableLeaf(root *Node) *Node {
+	if len(root.Entries) == 0 || root.Entries[0].Child == nil {
+		return nil
+	}
+	current := root.Entries[0].Child
+	for !current.IsLeaf && len(current.Entries) > 0 {
+		current = current.Entries[0].Child
+	}
+	if current.IsLeaf && len(current.Entries) < MaxEntries {
+		return current
+	}
+	return nil
+}
+
 // TestInsertWithParentTraversal tests Insert traversing up to root.
 func TestInsertWithParentTraversal(t *testing.T) {
 	t.Parallel()
-	// Build a multi-level tree
-	root := NewLeafNode()
-	for i := 0; i < MaxEntries*2; i++ {
-		bbox := NewBoundingBox(2)
-		bbox.Min[0], bbox.Max[0] = float64(i*10), float64(i*10+5)
-		bbox.Min[1], bbox.Max[1] = 0, 5
-		entry := NewEntry(int64(i+1), bbox)
-		root = root.Insert(entry)
-	}
+	root := buildDeepTree(MaxEntries * 2)
 
-	// Verify we have a multi-level tree
 	if root.IsLeaf {
 		t.Skip("Need multi-level tree for this test")
 	}
 
-	// Find a leaf node to insert into (without causing overflow)
-	var leafNode *Node
-	if len(root.Entries) > 0 && root.Entries[0].Child != nil {
-		current := root.Entries[0].Child
-		for !current.IsLeaf && len(current.Entries) > 0 {
-			current = current.Entries[0].Child
-		}
-		if current.IsLeaf && len(current.Entries) < MaxEntries {
-			leafNode = current
-		}
-	}
-
-	if leafNode == nil {
+	if findAvailableLeaf(root) == nil {
 		t.Skip("Could not find suitable leaf for test")
 	}
 
-	// Insert an entry that won't cause overflow
 	bbox := NewBoundingBox(2)
 	bbox.Min[0], bbox.Max[0] = 9999, 10004
 	bbox.Min[1], bbox.Max[1] = 0, 5
@@ -5330,11 +5357,9 @@ func TestInsertWithParentTraversal(t *testing.T) {
 	initialCount := root.Count()
 	newRoot := root.Insert(entry)
 
-	// Should traverse up to root
 	if newRoot == nil {
 		t.Fatal("Insert returned nil")
 	}
-
 	if newRoot.Count() != initialCount+1 {
 		t.Errorf("Expected count %d, got %d", initialCount+1, newRoot.Count())
 	}

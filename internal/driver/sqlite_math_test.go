@@ -480,48 +480,51 @@ func TestSQLiteMathFunctions(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
-
-			var result interface{}
-			err := db.QueryRow(tt.query).Scan(&result)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error but got result: %v", result)
-				}
-				return
-			}
-
-			if err != nil {
-				if err == sql.ErrNoRows && tt.want == nil {
-					return
-				}
-				t.Fatalf("query failed: %v", err)
-			}
-
-			// Handle NULL comparison
-			if tt.want == nil {
-				if result != nil {
-					t.Errorf("expected nil, got %v (%T)", result, result)
-				}
-				return
-			}
-
-			// Type-specific comparisons
-			switch expected := tt.want.(type) {
-			case int64:
-				compareInt64(t, result, expected)
-			case float64:
-				compareFloat64(t, result, expected)
-			case string:
-				compareString(t, result, expected)
-			case []byte:
-				compareBytes(t, result, expected)
-			default:
-				if result != tt.want {
-					t.Errorf("expected %v (%T), got %v (%T)", tt.want, tt.want, result, result)
-				}
-			}
+			mathCheckScalar(t, db, tt.query, tt.want, tt.wantErr)
 		})
+	}
+}
+
+func mathCheckScalar(t *testing.T, db *sql.DB, query string, want interface{}, wantErr bool) {
+	t.Helper()
+	var result interface{}
+	err := db.QueryRow(query).Scan(&result)
+	if wantErr {
+		if err == nil {
+			t.Errorf("expected error but got result: %v", result)
+		}
+		return
+	}
+	if err != nil {
+		if err == sql.ErrNoRows && want == nil {
+			return
+		}
+		t.Fatalf("query failed: %v", err)
+	}
+	if want == nil {
+		if result != nil {
+			t.Errorf("expected nil, got %v (%T)", result, result)
+		}
+		return
+	}
+	mathCompareResult(t, result, want)
+}
+
+func mathCompareResult(t *testing.T, result, want interface{}) {
+	t.Helper()
+	switch expected := want.(type) {
+	case int64:
+		compareInt64(t, result, expected)
+	case float64:
+		compareFloat64(t, result, expected)
+	case string:
+		compareString(t, result, expected)
+	case []byte:
+		compareBytes(t, result, expected)
+	default:
+		if result != want {
+			t.Errorf("expected %v (%T), got %v (%T)", want, want, result, result)
+		}
 	}
 }
 
@@ -607,19 +610,7 @@ func TestMathFunctionsWithTable(t *testing.T) {
 			if err != nil {
 				t.Fatalf("query failed: %v", err)
 			}
-
-			switch expected := tt.want.(type) {
-			case int64:
-				compareInt64(t, result, expected)
-			case float64:
-				compareFloat64(t, result, expected)
-			case string:
-				compareString(t, result, expected)
-			default:
-				if result != tt.want {
-					t.Errorf("expected %v, got %v", tt.want, result)
-				}
-			}
+			mathCompareResult(t, result, tt.want)
 		})
 	}
 }
@@ -844,40 +835,7 @@ func TestArithmeticEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			var result interface{}
-			err := db.QueryRow(tt.query).Scan(&result)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error but got result: %v", result)
-				}
-				return
-			}
-
-			if err != nil {
-				if err == sql.ErrNoRows && tt.want == nil {
-					return
-				}
-				t.Fatalf("query failed: %v", err)
-			}
-
-			if tt.want == nil {
-				if result != nil {
-					t.Errorf("expected nil, got %v", result)
-				}
-				return
-			}
-
-			switch expected := tt.want.(type) {
-			case int64:
-				compareInt64(t, result, expected)
-			case float64:
-				compareFloat64(t, result, expected)
-			default:
-				if result != tt.want {
-					t.Errorf("expected %v, got %v", tt.want, result)
-				}
-			}
+			mathCheckScalar(t, db, tt.query, tt.want, tt.wantErr)
 		})
 	}
 }
@@ -943,39 +901,45 @@ func TestPrintfFormatSpecifiers(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			var result interface{}
-			err := db.QueryRow(tt.query).Scan(&result)
-			if err != nil {
-				// Some format specifiers might not be supported
-				if strings.Contains(tt.name, "pointer") {
-					t.Skipf("Format specifier might not be supported: %v", err)
-					return
-				}
-				t.Fatalf("query failed: %v", err)
-			}
-
-			got, ok := result.(string)
-			if !ok {
-				if bytes, ok := result.([]byte); ok {
-					got = string(bytes)
-				} else {
-					t.Fatalf("expected string, got %T %v", result, result)
-				}
-			}
-
-			// For some format specifiers, we just check that we got a result
-			if strings.Contains(tt.name, "pointer") || strings.Contains(tt.name, "scientific") {
-				if len(got) == 0 {
-					t.Errorf("expected non-empty result")
-				}
-				return
-			}
-
-			if got != tt.want {
-				t.Errorf("expected %q, got %q", tt.want, got)
-			}
+			printfCheckFormat(t, db, tt.name, tt.query, tt.want)
 		})
 	}
+}
+
+func printfCheckFormat(t *testing.T, db *sql.DB, name, query, want string) {
+	t.Helper()
+	var result interface{}
+	err := db.QueryRow(query).Scan(&result)
+	if err != nil {
+		if strings.Contains(name, "pointer") {
+			t.Skipf("Format specifier might not be supported: %v", err)
+			return
+		}
+		t.Fatalf("query failed: %v", err)
+	}
+	got := mathResultToString(result)
+	if got == "" {
+		t.Fatalf("expected string, got %T %v", result, result)
+	}
+	if strings.Contains(name, "pointer") || strings.Contains(name, "scientific") {
+		if len(got) == 0 {
+			t.Errorf("expected non-empty result")
+		}
+		return
+	}
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+func mathResultToString(result interface{}) string {
+	if s, ok := result.(string); ok {
+		return s
+	}
+	if b, ok := result.([]byte); ok {
+		return string(b)
+	}
+	return ""
 }
 
 // TestRandomFunctions tests random number and blob generation
@@ -991,67 +955,65 @@ func TestRandomFunctions(t *testing.T) {
 	defer db.Close()
 
 	t.Run("random_different_values", func(t *testing.T) {
-		var r1, r2 int64
-		err := db.QueryRow("SELECT random()").Scan(&r1)
-		if err != nil {
-			t.Fatalf("first random() failed: %v", err)
-		}
-
-		err = db.QueryRow("SELECT random()").Scan(&r2)
-		if err != nil {
-			t.Fatalf("second random() failed: %v", err)
-		}
-
-		// It's theoretically possible for two random values to be equal,
-		// but extremely unlikely
-		if r1 == r2 {
-			t.Logf("Warning: Two consecutive random() calls returned the same value: %d", r1)
-		}
+		randomCheckDifferentValues(t, db)
 	})
-
 	t.Run("randomblob_different_values", func(t *testing.T) {
-		var b1, b2 []byte
-		err := db.QueryRow("SELECT randomblob(16)").Scan(&b1)
-		if err != nil {
-			t.Fatalf("first randomblob() failed: %v", err)
-		}
-
-		err = db.QueryRow("SELECT randomblob(16)").Scan(&b2)
-		if err != nil {
-			t.Fatalf("second randomblob() failed: %v", err)
-		}
-
-		if len(b1) != 16 || len(b2) != 16 {
-			t.Fatalf("expected 16-byte blobs, got %d and %d", len(b1), len(b2))
-		}
-
-		// Check if blobs are different
-		equal := true
-		for i := range b1 {
-			if b1[i] != b2[i] {
-				equal = false
-				break
-			}
-		}
-
-		if equal {
-			t.Logf("Warning: Two consecutive randomblob(16) calls returned identical values")
-		}
+		randomCheckDifferentBlobs(t, db)
 	})
-
 	t.Run("randomblob_various_sizes", func(t *testing.T) {
-		sizes := []int{1, 10, 100, 1000}
-		for _, size := range sizes {
-			var blob []byte
-			query := fmt.Sprintf("SELECT randomblob(%d)", size)
-			err := db.QueryRow(query).Scan(&blob)
-			if err != nil {
-				t.Fatalf("randomblob(%d) failed: %v", size, err)
-			}
-
-			if len(blob) != size {
-				t.Errorf("expected %d bytes, got %d", size, len(blob))
-			}
-		}
+		randomCheckBlobSizes(t, db)
 	})
+}
+
+func randomCheckDifferentValues(t *testing.T, db *sql.DB) {
+	t.Helper()
+	var r1, r2 int64
+	if err := db.QueryRow("SELECT random()").Scan(&r1); err != nil {
+		t.Fatalf("first random() failed: %v", err)
+	}
+	if err := db.QueryRow("SELECT random()").Scan(&r2); err != nil {
+		t.Fatalf("second random() failed: %v", err)
+	}
+	if r1 == r2 {
+		t.Logf("Warning: Two consecutive random() calls returned the same value: %d", r1)
+	}
+}
+
+func randomCheckDifferentBlobs(t *testing.T, db *sql.DB) {
+	t.Helper()
+	var b1, b2 []byte
+	if err := db.QueryRow("SELECT randomblob(16)").Scan(&b1); err != nil {
+		t.Fatalf("first randomblob() failed: %v", err)
+	}
+	if err := db.QueryRow("SELECT randomblob(16)").Scan(&b2); err != nil {
+		t.Fatalf("second randomblob() failed: %v", err)
+	}
+	if len(b1) != 16 || len(b2) != 16 {
+		t.Fatalf("expected 16-byte blobs, got %d and %d", len(b1), len(b2))
+	}
+	equal := true
+	for i := range b1 {
+		if b1[i] != b2[i] {
+			equal = false
+			break
+		}
+	}
+	if equal {
+		t.Logf("Warning: Two consecutive randomblob(16) calls returned identical values")
+	}
+}
+
+func randomCheckBlobSizes(t *testing.T, db *sql.DB) {
+	t.Helper()
+	sizes := []int{1, 10, 100, 1000}
+	for _, size := range sizes {
+		var blob []byte
+		query := fmt.Sprintf("SELECT randomblob(%d)", size)
+		if err := db.QueryRow(query).Scan(&blob); err != nil {
+			t.Fatalf("randomblob(%d) failed: %v", size, err)
+		}
+		if len(blob) != size {
+			t.Errorf("expected %d bytes, got %d", size, len(blob))
+		}
+	}
 }

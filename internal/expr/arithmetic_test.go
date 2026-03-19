@@ -2,6 +2,7 @@
 package expr
 
 import (
+	"bytes"
 	"math"
 	"testing"
 )
@@ -836,28 +837,26 @@ func compareResults(a, b interface{}) bool {
 	if a == nil || b == nil {
 		return false
 	}
-
-	// Handle float comparison with tolerance
-	aFloat, aIsFloat := a.(float64)
-	bFloat, bIsFloat := b.(float64)
-	if aIsFloat && bIsFloat {
-		return math.Abs(aFloat-bFloat) < 1e-9
-	}
-
-	// Handle byte array comparison
-	aBytes, aIsBytes := a.([]byte)
-	bBytes, bIsBytes := b.([]byte)
-	if aIsBytes && bIsBytes {
-		if len(aBytes) != len(bBytes) {
-			return false
-		}
-		for i := range aBytes {
-			if aBytes[i] != bBytes[i] {
-				return false
-			}
-		}
+	if ok := compareFloats(a, b); ok {
 		return true
 	}
-
+	if ok := compareBytes(a, b); ok {
+		return true
+	}
 	return a == b
+}
+
+func compareFloats(a, b interface{}) bool {
+	aFloat, aIsFloat := a.(float64)
+	bFloat, bIsFloat := b.(float64)
+	return aIsFloat && bIsFloat && math.Abs(aFloat-bFloat) < 1e-9
+}
+
+func compareBytes(a, b interface{}) bool {
+	aBytes, aIsBytes := a.([]byte)
+	bBytes, bIsBytes := b.([]byte)
+	if !aIsBytes || !bIsBytes {
+		return false
+	}
+	return bytes.Equal(aBytes, bBytes)
 }

@@ -75,73 +75,35 @@ func TestJournalRollback(t *testing.T) {
 	defer os.Remove(dbFile)
 	defer os.Remove(journalFile)
 
-	// Create pager and write initial data
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
+	pager := openTestPagerAt(t, dbFile, false)
 
-	// Get page 1 and set some data
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	// Save original data
+	// Write initial data
+	page := mustGetWritePage(t, pager, 1)
 	originalData := make([]byte, len(page.Data))
 	copy(originalData, page.Data)
 	originalData[0] = 0xAA
 	originalData[100] = 0xBB
 	copy(page.Data, originalData)
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
 	pager.Put(page)
+	mustCommit(t, pager)
 
-	// Commit to save original data
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Start new transaction and modify data
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-
-	// Modify the page
+	// Start new transaction and modify
+	mustBeginWrite(t, pager)
+	page = mustGetWritePage(t, pager, 1)
 	page.Data[0] = 0xFF
 	page.Data[100] = 0xFF
 	pager.Put(page)
-
-	// Rollback
-	if err := pager.Rollback(); err != nil {
-		t.Fatalf("failed to rollback: %v", err)
-	}
+	mustRollback(t, pager)
 
 	// Verify data was restored
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page after rollback: %v", err)
-	}
+	page = mustGetPage(t, pager, 1)
 	defer pager.Put(page)
-
 	if page.Data[0] != 0xAA {
 		t.Errorf("data not restored: expected 0xAA, got 0x%02X", page.Data[0])
 	}
 	if page.Data[100] != 0xBB {
 		t.Errorf("data not restored: expected 0xBB, got 0x%02X", page.Data[100])
 	}
-
 	pager.Close()
 }
 
@@ -312,6 +274,26 @@ func TestJournalZeroHeader(t *testing.T) {
 	}
 }
 
+// journalWriteMarkerPages writes byte(i) to page i for range [1, count].
+func journalWriteMarkerPages(t *testing.T, pager *Pager, count int) {
+	t.Helper()
+	for i := 1; i <= count; i++ {
+		mustGetWritePageData(t, pager, Pgno(i), byte(i))
+	}
+}
+
+// journalVerifyMarkerPages verifies byte(i) on page i for range [1, count].
+func journalVerifyMarkerPages(t *testing.T, pager *Pager, count int, expected func(int) byte) {
+	t.Helper()
+	for i := 1; i <= count; i++ {
+		page := mustGetPage(t, pager, Pgno(i))
+		if page.Data[0] != expected(i) {
+			t.Errorf("page %d: expected %d, got %d", i, expected(i), page.Data[0])
+		}
+		pager.Put(page)
+	}
+}
+
 func TestJournalMultiplePages(t *testing.T) {
 	t.Parallel()
 	t.Skip("Journal multiple pages not yet fully implemented")
@@ -320,78 +302,22 @@ func TestJournalMultiplePages(t *testing.T) {
 	defer os.Remove(dbFile)
 	defer os.Remove(journalFile)
 
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
+	pager := openTestPagerAt(t, dbFile, false)
 	defer pager.Close()
 
-	// Begin write transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
+	mustBeginWrite(t, pager)
+	journalWriteMarkerPages(t, pager, 3)
+	mustCommit(t, pager)
 
-	// Modify multiple pages
+	// Verify and modify again
+	mustBeginWrite(t, pager)
+	journalVerifyMarkerPages(t, pager, 3, func(i int) byte { return byte(i) })
 	for i := 1; i <= 3; i++ {
-		page, err := pager.Get(Pgno(i))
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
-
-		// Set unique marker
-		page.Data[0] = byte(i)
-		pager.Put(page)
+		mustGetWritePageData(t, pager, Pgno(i), 0xFF)
 	}
+	mustRollback(t, pager)
 
-	// Commit
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Start new transaction and verify data
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	for i := 1; i <= 3; i++ {
-		page, err := pager.Get(Pgno(i))
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-
-		if page.Data[0] != byte(i) {
-			t.Errorf("page %d data not persisted: expected %d, got %d", i, i, page.Data[0])
-		}
-
-		// Modify again
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
-		page.Data[0] = 0xFF
-		pager.Put(page)
-	}
-
-	// Rollback
-	if err := pager.Rollback(); err != nil {
-		t.Fatalf("failed to rollback: %v", err)
-	}
-
-	// Verify rollback restored data
-	for i := 1; i <= 3; i++ {
-		page, err := pager.Get(Pgno(i))
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		defer pager.Put(page)
-
-		if page.Data[0] != byte(i) {
-			t.Errorf("page %d not restored after rollback: expected %d, got %d", i, i, page.Data[0])
-		}
-	}
+	journalVerifyMarkerPages(t, pager, 3, func(i int) byte { return byte(i) })
 }
 
 func TestJournalInvalidPageSize(t *testing.T) {
@@ -462,79 +388,36 @@ func TestJournalRollbackReal(t *testing.T) {
 	defer os.Remove(dbFile)
 	defer os.Remove(journalFile)
 
-	// Create initial database
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
+	pager := openTestPagerAt(t, dbFile, false)
+	mustBeginWrite(t, pager)
+	page := mustGetPage(t, pager, 1)
 
-	// Write initial data
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	// Save the original header data to restore later
-	originalHeader := make([]byte, 100)
-	copy(originalHeader, page.Data[:100])
-
-	// Set test data
 	testData := make([]byte, len(page.Data))
 	copy(testData, page.Data)
-	testData[120] = 0xAA // Use offset after header
+	testData[120] = 0xAA
 	testData[200] = 0xBB
 	copy(page.Data, testData)
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
+	mustWritePage(t, pager, page)
 	pager.Put(page)
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
+	mustCommit(t, pager)
 
 	pageSize := pager.PageSize()
 	pageCount := pager.PageCount()
-
 	pager.Close()
 
-	// Now test rollback by manually creating journal
-	journal := NewJournal(journalFile, pageSize, pageCount)
-	if err := journal.Open(); err != nil {
-		t.Fatalf("failed to open journal: %v", err)
-	}
-
-	// Write test data to journal (before modification)
+	// Create journal with test data
+	journal := mustOpenJournal(t, journalFile, pageSize, pageCount)
 	journal.WriteOriginal(1, testData)
 	journal.Close()
 
-	// Reopen pager and apply rollback
-	pager, err = Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to reopen pager: %v", err)
-	}
+	// Reopen and rollback
+	pager = openTestPagerAt(t, dbFile, false)
 	defer pager.Close()
-
-	journal = NewJournal(journalFile, pageSize, pageCount)
-	// Don't open journal (simulate existing journal)
-	// Actually need to create a valid journal file first
-	if err := journal.Open(); err != nil {
-		t.Fatalf("failed to open journal for rollback: %v", err)
-	}
-
-	// Test Rollback
+	journal = mustOpenJournal(t, journalFile, pageSize, pageCount)
 	if err := journal.Rollback(pager); err != nil {
 		t.Fatalf("failed to rollback: %v", err)
 	}
 	journal.Close()
-
-	// Verify rollback completed (no error check needed)
-	t.Log("Journal rollback completed successfully")
 }
 
 // TestJournalUpdatePageCount tests the updatePageCount method

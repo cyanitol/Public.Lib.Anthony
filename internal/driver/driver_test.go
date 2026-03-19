@@ -3,7 +3,6 @@ package driver
 
 import (
 	"database/sql"
-	"os"
 	"testing"
 )
 
@@ -24,8 +23,7 @@ func TestDriverRegistration(t *testing.T) {
 
 func TestOpenConnection(t *testing.T) {
 	// Create a temporary database file
-	dbFile := "test_open.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_open.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -40,8 +38,7 @@ func TestOpenConnection(t *testing.T) {
 }
 
 func TestPrepareStatement(t *testing.T) {
-	dbFile := "test_prepare.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_prepare.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -58,8 +55,7 @@ func TestPrepareStatement(t *testing.T) {
 }
 
 func TestTransaction(t *testing.T) {
-	dbFile := "test_tx.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_tx.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -90,8 +86,7 @@ func TestTransaction(t *testing.T) {
 }
 
 func TestMultipleConnections(t *testing.T) {
-	dbFile := "test_multi.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_multi.db"
 
 	// Open first connection
 	db1, err := sql.Open(DriverName, dbFile)
@@ -117,8 +112,7 @@ func TestMultipleConnections(t *testing.T) {
 }
 
 func TestCloseConnection(t *testing.T) {
-	dbFile := "test_close.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_close.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -291,8 +285,7 @@ func TestMultipleMemoryDatabases(t *testing.T) {
 }
 
 func TestDriverOpenConnector(t *testing.T) {
-	dbFile := "test_open_connector.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_open_connector.db"
 
 	d := &Driver{}
 
@@ -310,8 +303,7 @@ func TestDriverOpenConnector(t *testing.T) {
 }
 
 func TestSharedDatabaseState(t *testing.T) {
-	dbFile := "test_shared_state.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_shared_state.db"
 
 	d := &Driver{}
 
@@ -355,8 +347,7 @@ func TestSharedDatabaseState(t *testing.T) {
 }
 
 func TestReleaseStateDecreasesRefCount(t *testing.T) {
-	dbFile := "test_driver_release_state.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_driver_release_state.db"
 
 	d := &Driver{}
 
@@ -390,8 +381,7 @@ func TestReleaseStateDecreasesRefCount(t *testing.T) {
 }
 
 func TestPagerProvider(t *testing.T) {
-	dbFile := "test_pager_provider.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_pager_provider.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)

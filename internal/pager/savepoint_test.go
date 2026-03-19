@@ -52,35 +52,13 @@ func TestSavepointCreation(t *testing.T) {
 
 func TestSavepointRelease(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_savepoint_release.db"
+	pager := openTestPager(t)
 
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Begin write transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	// Create savepoints
-	if err := pager.Savepoint("sp1"); err != nil {
-		t.Fatalf("failed to create sp1: %v", err)
-	}
-	if err := pager.Savepoint("sp2"); err != nil {
-		t.Fatalf("failed to create sp2: %v", err)
-	}
-	if err := pager.Savepoint("sp3"); err != nil {
-		t.Fatalf("failed to create sp3: %v", err)
-	}
-
-	// Release sp2 should also release sp3
-	if err := pager.Release("sp2"); err != nil {
-		t.Fatalf("failed to release sp2: %v", err)
-	}
+	mustBeginWrite(t, pager)
+	mustSavepoint(t, pager, "sp1")
+	mustSavepoint(t, pager, "sp2")
+	mustSavepoint(t, pager, "sp3")
+	mustRelease(t, pager, "sp2")
 
 	// sp1 should still exist
 	if !pager.HasSavepoint("sp1") {
@@ -105,67 +83,19 @@ func TestSavepointRelease(t *testing.T) {
 
 func TestSavepointRollback(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_savepoint_rollback.db"
+	pager := openTestPager(t)
 
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
+	mustBeginWrite(t, pager)
+	mustGetWritePageData(t, pager, 1, 0xAA)
+	mustSavepoint(t, pager, "sp1")
+	mustGetWritePageData(t, pager, 1, 0xBB)
+	mustRollbackTo(t, pager, "sp1")
 
-	// Begin write transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	// Get page and set initial value
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-
-	page.Data[0] = 0xAA
-	pager.Put(page)
-
-	// Create savepoint
-	if err := pager.Savepoint("sp1"); err != nil {
-		t.Fatalf("failed to create savepoint: %v", err)
-	}
-
-	// Modify page again
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
-
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-
-	page.Data[0] = 0xBB
-	pager.Put(page)
-
-	// Rollback to savepoint
-	if err := pager.RollbackTo("sp1"); err != nil {
-		t.Fatalf("failed to rollback to sp1: %v", err)
-	}
-
-	// Verify data was restored to savepoint state
-	page, err = pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
+	page := mustGetPage(t, pager, 1)
 	defer pager.Put(page)
-
 	if page.Data[0] != 0xAA {
 		t.Errorf("data not restored to savepoint: expected 0xAA, got 0x%02X", page.Data[0])
 	}
-
 	pager.Commit()
 }
 
@@ -206,18 +136,8 @@ func spVerifyPage(t *testing.T, pager *Pager, expected byte) {
 
 func TestNestedSavepoints(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_nested_savepoints.db"
-
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
+	pager := openTestPager(t)
+	mustBeginWrite(t, pager)
 
 	actions := []spNestedAction{
 		{actionType: "write", value: 0x11},
@@ -255,74 +175,25 @@ func TestNestedSavepoints(t *testing.T) {
 
 func TestSavepointMultiplePages(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_savepoint_multi.db"
+	pager := openTestPager(t)
 
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Begin write transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	// Set initial values for multiple pages
+	mustBeginWrite(t, pager)
 	for i := 1; i <= 3; i++ {
-		page, err := pager.Get(Pgno(i))
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
-
-		page.Data[0] = byte(i)
-		pager.Put(page)
+		mustGetWritePageData(t, pager, Pgno(i), byte(i))
 	}
-
-	// Create savepoint
-	if err := pager.Savepoint("sp1"); err != nil {
-		t.Fatalf("failed to create savepoint: %v", err)
-	}
-
-	// Modify all pages
+	mustSavepoint(t, pager, "sp1")
 	for i := 1; i <= 3; i++ {
-		page, err := pager.Get(Pgno(i))
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("failed to write page %d: %v", i, err)
-		}
-
-		page.Data[0] = 0xFF
-		pager.Put(page)
+		mustGetWritePageData(t, pager, Pgno(i), 0xFF)
 	}
+	mustRollbackTo(t, pager, "sp1")
 
-	// Rollback to savepoint
-	if err := pager.RollbackTo("sp1"); err != nil {
-		t.Fatalf("failed to rollback: %v", err)
-	}
-
-	// Verify all pages restored
 	for i := 1; i <= 3; i++ {
-		page, err := pager.Get(Pgno(i))
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-
+		page := mustGetPage(t, pager, Pgno(i))
 		if page.Data[0] != byte(i) {
 			t.Errorf("page %d not restored: expected %d, got 0x%02X", i, i, page.Data[0])
 		}
-
 		pager.Put(page)
 	}
-
 	pager.Commit()
 }
 

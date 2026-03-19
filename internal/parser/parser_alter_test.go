@@ -5,144 +5,104 @@ import (
 	"testing"
 )
 
+func parseAlterStmt(t *testing.T, sql string) *AlterTableStmt {
+	t.Helper()
+	stmts, err := ParseString(sql)
+	if err != nil {
+		t.Fatalf("ParseString() error = %v", err)
+	}
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(stmts))
+	}
+	alter, ok := stmts[0].(*AlterTableStmt)
+	if !ok {
+		t.Fatalf("expected *AlterTableStmt, got %T", stmts[0])
+	}
+	return alter
+}
+
+func assertRenameTable(t *testing.T, alter *AlterTableStmt, wantTable, wantNewName string) {
+	t.Helper()
+	if alter.Table != wantTable {
+		t.Errorf("expected table %q, got %q", wantTable, alter.Table)
+	}
+	rename, ok := alter.Action.(*RenameTableAction)
+	if !ok {
+		t.Fatalf("expected *RenameTableAction, got %T", alter.Action)
+	}
+	if rename.NewName != wantNewName {
+		t.Errorf("expected new name %q, got %q", wantNewName, rename.NewName)
+	}
+}
+
 func TestAlterTableRenameTable(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-		check   func(*testing.T, Statement)
+		name        string
+		sql         string
+		wantTable   string
+		wantNewName string
 	}{
-		{
-			name: "basic rename table",
-			sql:  "ALTER TABLE users RENAME TO customers",
-			check: func(t *testing.T, stmt Statement) {
-				alter, ok := stmt.(*AlterTableStmt)
-				if !ok {
-					t.Fatalf("expected *AlterTableStmt, got %T", stmt)
-				}
-				if alter.Table != "users" {
-					t.Errorf("expected table 'users', got %q", alter.Table)
-				}
-				rename, ok := alter.Action.(*RenameTableAction)
-				if !ok {
-					t.Fatalf("expected *RenameTableAction, got %T", alter.Action)
-				}
-				if rename.NewName != "customers" {
-					t.Errorf("expected new name 'customers', got %q", rename.NewName)
-				}
-			},
-		},
-		{
-			name: "rename table with quoted names",
-			sql:  `ALTER TABLE "old_table" RENAME TO "new_table"`,
-			check: func(t *testing.T, stmt Statement) {
-				alter := stmt.(*AlterTableStmt)
-				if alter.Table != "old_table" {
-					t.Errorf("expected table 'old_table', got %q", alter.Table)
-				}
-				rename := alter.Action.(*RenameTableAction)
-				if rename.NewName != "new_table" {
-					t.Errorf("expected new name 'new_table', got %q", rename.NewName)
-				}
-			},
-		},
+		{"basic rename table", "ALTER TABLE users RENAME TO customers", "users", "customers"},
+		{"rename table with quoted names", `ALTER TABLE "old_table" RENAME TO "new_table"`, "old_table", "new_table"},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			stmts, err := ParseString(tt.sql)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("ParseString() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			if len(stmts) != 1 {
-				t.Fatalf("expected 1 statement, got %d", len(stmts))
-			}
-			if tt.check != nil {
-				tt.check(t, stmts[0])
-			}
+			alter := parseAlterStmt(t, tt.sql)
+			assertRenameTable(t, alter, tt.wantTable, tt.wantNewName)
 		})
+	}
+}
+
+func assertRenameColumn(t *testing.T, alter *AlterTableStmt, wantTable, wantOld, wantNew string) {
+	t.Helper()
+	if alter.Table != wantTable {
+		t.Errorf("expected table %q, got %q", wantTable, alter.Table)
+	}
+	rename, ok := alter.Action.(*RenameColumnAction)
+	if !ok {
+		t.Fatalf("expected *RenameColumnAction, got %T", alter.Action)
+	}
+	if rename.OldName != wantOld {
+		t.Errorf("expected old name %q, got %q", wantOld, rename.OldName)
+	}
+	if rename.NewName != wantNew {
+		t.Errorf("expected new name %q, got %q", wantNew, rename.NewName)
 	}
 }
 
 func TestAlterTableRenameColumn(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-		check   func(*testing.T, Statement)
-	}{
-		{
-			name: "basic rename column",
-			sql:  "ALTER TABLE users RENAME COLUMN name TO full_name",
-			check: func(t *testing.T, stmt Statement) {
-				alter, ok := stmt.(*AlterTableStmt)
-				if !ok {
-					t.Fatalf("expected *AlterTableStmt, got %T", stmt)
-				}
-				if alter.Table != "users" {
-					t.Errorf("expected table 'users', got %q", alter.Table)
-				}
-				rename, ok := alter.Action.(*RenameColumnAction)
-				if !ok {
-					t.Fatalf("expected *RenameColumnAction, got %T", alter.Action)
-				}
-				if rename.OldName != "name" {
-					t.Errorf("expected old name 'name', got %q", rename.OldName)
-				}
-				if rename.NewName != "full_name" {
-					t.Errorf("expected new name 'full_name', got %q", rename.NewName)
-				}
-			},
-		},
-		{
-			name: "rename column with quoted identifiers",
-			sql:  `ALTER TABLE users RENAME COLUMN "old-name" TO "new-name"`,
-			check: func(t *testing.T, stmt Statement) {
-				alter := stmt.(*AlterTableStmt)
-				rename := alter.Action.(*RenameColumnAction)
-				if rename.OldName != "old-name" {
-					t.Errorf("expected old name 'old-name', got %q", rename.OldName)
-				}
-				if rename.NewName != "new-name" {
-					t.Errorf("expected new name 'new-name', got %q", rename.NewName)
-				}
-			},
-		},
-		{
-			name:    "rename column without TO",
-			sql:     "ALTER TABLE users RENAME COLUMN name full_name",
-			wantErr: true,
-		},
-		{
-			name:    "rename column without new name",
-			sql:     "ALTER TABLE users RENAME COLUMN name TO",
-			wantErr: true,
-		},
-	}
 
-	for _, tt := range tests {
+	t.Run("basic rename column", func(t *testing.T) {
+		t.Parallel()
+		alter := parseAlterStmt(t, "ALTER TABLE users RENAME COLUMN name TO full_name")
+		assertRenameColumn(t, alter, "users", "name", "full_name")
+	})
+
+	t.Run("rename column with quoted identifiers", func(t *testing.T) {
+		t.Parallel()
+		alter := parseAlterStmt(t, `ALTER TABLE users RENAME COLUMN "old-name" TO "new-name"`)
+		assertRenameColumn(t, alter, "users", "old-name", "new-name")
+	})
+
+	errorTests := []struct {
+		name string
+		sql  string
+	}{
+		{"rename column without TO", "ALTER TABLE users RENAME COLUMN name full_name"},
+		{"rename column without new name", "ALTER TABLE users RENAME COLUMN name TO"},
+	}
+	for _, tt := range errorTests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			stmts, err := ParseString(tt.sql)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("ParseString() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			if len(stmts) != 1 {
-				t.Fatalf("expected 1 statement, got %d", len(stmts))
-			}
-			if tt.check != nil {
-				tt.check(t, stmts[0])
+			_, err := ParseString(tt.sql)
+			if err == nil {
+				t.Fatal("expected error but got none")
 			}
 		})
 	}
@@ -254,73 +214,49 @@ func TestAlterTableAddColumn(t *testing.T) {
 	}
 }
 
+func assertDropColumn(t *testing.T, alter *AlterTableStmt, wantTable, wantCol string) {
+	t.Helper()
+	if alter.Table != wantTable {
+		t.Errorf("expected table %q, got %q", wantTable, alter.Table)
+	}
+	drop, ok := alter.Action.(*DropColumnAction)
+	if !ok {
+		t.Fatalf("expected *DropColumnAction, got %T", alter.Action)
+	}
+	if drop.ColumnName != wantCol {
+		t.Errorf("expected column name %q, got %q", wantCol, drop.ColumnName)
+	}
+}
+
 func TestAlterTableDropColumn(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-		check   func(*testing.T, Statement)
-	}{
-		{
-			name: "drop column",
-			sql:  "ALTER TABLE users DROP COLUMN email",
-			check: func(t *testing.T, stmt Statement) {
-				alter, ok := stmt.(*AlterTableStmt)
-				if !ok {
-					t.Fatalf("expected *AlterTableStmt, got %T", stmt)
-				}
-				if alter.Table != "users" {
-					t.Errorf("expected table 'users', got %q", alter.Table)
-				}
-				drop, ok := alter.Action.(*DropColumnAction)
-				if !ok {
-					t.Fatalf("expected *DropColumnAction, got %T", alter.Action)
-				}
-				if drop.ColumnName != "email" {
-					t.Errorf("expected column name 'email', got %q", drop.ColumnName)
-				}
-			},
-		},
-		{
-			name: "drop column with quoted identifier",
-			sql:  `ALTER TABLE users DROP COLUMN "old-column"`,
-			check: func(t *testing.T, stmt Statement) {
-				alter := stmt.(*AlterTableStmt)
-				drop := alter.Action.(*DropColumnAction)
-				if drop.ColumnName != "old-column" {
-					t.Errorf("expected column name 'old-column', got %q", drop.ColumnName)
-				}
-			},
-		},
-		{
-			name:    "drop without COLUMN keyword",
-			sql:     "ALTER TABLE users DROP email",
-			wantErr: true,
-		},
-		{
-			name:    "drop column without name",
-			sql:     "ALTER TABLE users DROP COLUMN",
-			wantErr: true,
-		},
-	}
 
-	for _, tt := range tests {
+	t.Run("drop column", func(t *testing.T) {
+		t.Parallel()
+		alter := parseAlterStmt(t, "ALTER TABLE users DROP COLUMN email")
+		assertDropColumn(t, alter, "users", "email")
+	})
+
+	t.Run("drop column with quoted identifier", func(t *testing.T) {
+		t.Parallel()
+		alter := parseAlterStmt(t, `ALTER TABLE users DROP COLUMN "old-column"`)
+		assertDropColumn(t, alter, "users", "old-column")
+	})
+
+	errorTests := []struct {
+		name string
+		sql  string
+	}{
+		{"drop without COLUMN keyword", "ALTER TABLE users DROP email"},
+		{"drop column without name", "ALTER TABLE users DROP COLUMN"},
+	}
+	for _, tt := range errorTests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			stmts, err := ParseString(tt.sql)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("ParseString() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			if len(stmts) != 1 {
-				t.Fatalf("expected 1 statement, got %d", len(stmts))
-			}
-			if tt.check != nil {
-				tt.check(t, stmts[0])
+			_, err := ParseString(tt.sql)
+			if err == nil {
+				t.Fatal("expected error but got none")
 			}
 		})
 	}
@@ -366,6 +302,56 @@ func TestAlterTableErrors(t *testing.T) {
 	}
 }
 
+func assertAlterActionType(t *testing.T, stmts []Statement, idx int, wantTable string, wantAction interface{}) {
+	t.Helper()
+	alter, ok := stmts[idx].(*AlterTableStmt)
+	if !ok {
+		t.Fatalf("statement %d: expected *AlterTableStmt, got %T", idx, stmts[idx])
+	}
+	if wantTable != "" && alter.Table != wantTable {
+		t.Errorf("statement %d: expected table %q, got %q", idx, wantTable, alter.Table)
+	}
+	assertAlterAction(t, idx, alter.Action, wantAction)
+}
+
+func assertAlterAction(t *testing.T, idx int, got AlterTableAction, want interface{}) {
+	t.Helper()
+	// Use reflect-free comparison by getting the type name strings
+	wantType := ""
+	switch want.(type) {
+	case *RenameTableAction:
+		wantType = "RenameTableAction"
+	case *AddColumnAction:
+		wantType = "AddColumnAction"
+	case *RenameColumnAction:
+		wantType = "RenameColumnAction"
+	case *DropColumnAction:
+		wantType = "DropColumnAction"
+	}
+	gotMatch := checkAlterActionMatch(got, want)
+	if !gotMatch {
+		t.Errorf("statement %d: expected %s, got %T", idx, wantType, got)
+	}
+}
+
+func checkAlterActionMatch(got AlterTableAction, want interface{}) bool {
+	switch want.(type) {
+	case *RenameTableAction:
+		_, ok := got.(*RenameTableAction)
+		return ok
+	case *AddColumnAction:
+		_, ok := got.(*AddColumnAction)
+		return ok
+	case *RenameColumnAction:
+		_, ok := got.(*RenameColumnAction)
+		return ok
+	case *DropColumnAction:
+		_, ok := got.(*DropColumnAction)
+		return ok
+	}
+	return false
+}
+
 func TestAlterTableMultipleStatements(t *testing.T) {
 	t.Parallel()
 	sql := `
@@ -379,52 +365,14 @@ func TestAlterTableMultipleStatements(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseString() error = %v", err)
 	}
-
 	if len(stmts) != 4 {
 		t.Fatalf("expected 4 statements, got %d", len(stmts))
 	}
 
-	// Check first statement
-	alter1, ok := stmts[0].(*AlterTableStmt)
-	if !ok {
-		t.Fatalf("statement 0: expected *AlterTableStmt, got %T", stmts[0])
-	}
-	if alter1.Table != "users" {
-		t.Errorf("statement 0: expected table 'users', got %q", alter1.Table)
-	}
-	if _, ok := alter1.Action.(*RenameTableAction); !ok {
-		t.Errorf("statement 0: expected RenameTableAction")
-	}
-
-	// Check second statement
-	alter2, ok := stmts[1].(*AlterTableStmt)
-	if !ok {
-		t.Fatalf("statement 1: expected *AlterTableStmt, got %T", stmts[1])
-	}
-	if alter2.Table != "customers" {
-		t.Errorf("statement 1: expected table 'customers', got %q", alter2.Table)
-	}
-	if _, ok := alter2.Action.(*AddColumnAction); !ok {
-		t.Errorf("statement 1: expected AddColumnAction")
-	}
-
-	// Check third statement
-	alter3, ok := stmts[2].(*AlterTableStmt)
-	if !ok {
-		t.Fatalf("statement 2: expected *AlterTableStmt, got %T", stmts[2])
-	}
-	if _, ok := alter3.Action.(*RenameColumnAction); !ok {
-		t.Errorf("statement 2: expected RenameColumnAction")
-	}
-
-	// Check fourth statement
-	alter4, ok := stmts[3].(*AlterTableStmt)
-	if !ok {
-		t.Fatalf("statement 3: expected *AlterTableStmt, got %T", stmts[3])
-	}
-	if _, ok := alter4.Action.(*DropColumnAction); !ok {
-		t.Errorf("statement 3: expected DropColumnAction")
-	}
+	assertAlterActionType(t, stmts, 0, "users", (*RenameTableAction)(nil))
+	assertAlterActionType(t, stmts, 1, "customers", (*AddColumnAction)(nil))
+	assertAlterActionType(t, stmts, 2, "", (*RenameColumnAction)(nil))
+	assertAlterActionType(t, stmts, 3, "", (*DropColumnAction)(nil))
 }
 
 func TestAlterTableComplexColumnDefinitions(t *testing.T) {

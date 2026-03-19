@@ -483,47 +483,58 @@ func TestSQLiteWAL(t *testing.T) {
 			if tt.skip != "" {
 				t.Skip(tt.skip)
 			}
-			// Use a new database for each test
 			testDBPath := filepath.Join(tmpDir, tt.name+".db")
-			testDB, err := sql.Open(DriverName, testDBPath)
-			if err != nil {
-				t.Fatalf("failed to open test database: %v", err)
-			}
+			testDB := walOpenTestDB(t, testDBPath)
 			defer testDB.Close()
 			defer os.RemoveAll(testDBPath)
 			defer os.RemoveAll(testDBPath + "-wal")
 			defer os.RemoveAll(testDBPath + "-shm")
 
-			for _, setup := range tt.setup {
-				_, err := testDB.Exec(setup)
-				if err != nil {
-					t.Fatalf("setup failed for %q: %v", setup, err)
-				}
-			}
-
-			var result interface{}
-			err = testDB.QueryRow(tt.query).Scan(&result)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got none")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-
-			// Convert byte arrays to strings for comparison
-			if b, ok := result.([]byte); ok {
-				result = string(b)
-			}
-
-			if result != tt.want {
-				t.Errorf("got %v (%T), want %v (%T)", result, result, tt.want, tt.want)
-			}
+			walRunSetup(t, testDB, tt.setup)
+			walCheckResult(t, testDB, tt.query, tt.want, tt.wantErr)
 		})
+	}
+}
+
+// walOpenTestDB opens a test database file.
+func walOpenTestDB(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open(DriverName, path)
+	if err != nil {
+		t.Fatalf("failed to open test database: %v", err)
+	}
+	return db
+}
+
+// walRunSetup executes setup statements.
+func walRunSetup(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("setup failed for %q: %v", s, err)
+		}
+	}
+}
+
+// walCheckResult queries a single value and compares to expected.
+func walCheckResult(t *testing.T, db *sql.DB, query string, want interface{}, wantErr bool) {
+	t.Helper()
+	var result interface{}
+	err := db.QueryRow(query).Scan(&result)
+	if wantErr {
+		if err == nil {
+			t.Errorf("expected error, got none")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if b, ok := result.([]byte); ok {
+		result = string(b)
+	}
+	if result != want {
+		t.Errorf("got %v (%T), want %v (%T)", result, result, want, want)
 	}
 }
 

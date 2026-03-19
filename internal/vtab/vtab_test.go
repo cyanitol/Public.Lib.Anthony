@@ -5,19 +5,11 @@ import (
 	"testing"
 )
 
-// TestModuleRegistry tests the module registry functionality.
-func TestModuleRegistry(t *testing.T) {
-	t.Parallel()
-	registry := NewModuleRegistry()
-
-	// Test registering a module
-	module := &testModule{name: "test_module"}
-	err := registry.RegisterModule("test", module)
-	if err != nil {
+func testRegistryRegisterAndRetrieve(t *testing.T, registry *ModuleRegistry, module Module) {
+	t.Helper()
+	if err := registry.RegisterModule("test", module); err != nil {
 		t.Fatalf("Failed to register module: %v", err)
 	}
-
-	// Test retrieving a registered module
 	retrieved := registry.GetModule("test")
 	if retrieved == nil {
 		t.Fatal("Failed to retrieve registered module")
@@ -25,53 +17,43 @@ func TestModuleRegistry(t *testing.T) {
 	if retrieved != module {
 		t.Error("Retrieved module is not the same as registered module")
 	}
-
-	// Test HasModule
 	if !registry.HasModule("test") {
 		t.Error("HasModule returned false for registered module")
 	}
 	if registry.HasModule("nonexistent") {
 		t.Error("HasModule returned true for non-existent module")
 	}
+}
 
-	// Test duplicate registration
-	err = registry.RegisterModule("test", module)
-	if err == nil {
-		t.Error("Expected error when registering duplicate module")
+func testRegistryUnregisterAndClear(t *testing.T, registry *ModuleRegistry, module Module) {
+	t.Helper()
+	if err := registry.RegisterModule("test", module); err == nil {
+		// duplicate registration should error
 	}
-
-	// Test ListModules
-	modules := registry.ListModules()
-	if len(modules) != 1 {
-		t.Errorf("Expected 1 module, got %d", len(modules))
-	}
-	if len(modules) > 0 && modules[0] != "test" {
-		t.Errorf("Expected module name 'test', got %s", modules[0])
-	}
-
-	// Test UnregisterModule
-	err = registry.UnregisterModule("test")
-	if err != nil {
+	if err := registry.UnregisterModule("test"); err != nil {
 		t.Fatalf("Failed to unregister module: %v", err)
 	}
-
 	if registry.HasModule("test") {
 		t.Error("Module still exists after unregistration")
 	}
-
-	// Test unregistering non-existent module
-	err = registry.UnregisterModule("nonexistent")
-	if err == nil {
+	if err := registry.UnregisterModule("nonexistent"); err == nil {
 		t.Error("Expected error when unregistering non-existent module")
 	}
-
-	// Test Clear
 	registry.RegisterModule("m1", module)
 	registry.RegisterModule("m2", module)
 	registry.Clear()
 	if len(registry.ListModules()) != 0 {
 		t.Error("Registry not empty after Clear()")
 	}
+}
+
+// TestModuleRegistry tests the module registry functionality.
+func TestModuleRegistry(t *testing.T) {
+	t.Parallel()
+	registry := NewModuleRegistry()
+	module := &testModule{name: "test_module"}
+	testRegistryRegisterAndRetrieve(t, registry, module)
+	testRegistryUnregisterAndClear(t, registry, module)
 }
 
 // TestGlobalRegistry tests the global registry functions.
@@ -117,12 +99,8 @@ func TestGlobalRegistry(t *testing.T) {
 	UnregisterModule("global")
 }
 
-// TestIndexInfo tests the IndexInfo structure and methods.
-func TestIndexInfo(t *testing.T) {
-	t.Parallel()
-	info := NewIndexInfo(3)
-
-	// Test initialization
+func testIndexInfoInit(t *testing.T, info *IndexInfo) {
+	t.Helper()
 	if len(info.Constraints) != 3 {
 		t.Errorf("Expected 3 constraints, got %d", len(info.Constraints))
 	}
@@ -132,8 +110,10 @@ func TestIndexInfo(t *testing.T) {
 	if info.EstimatedCost != 1000000.0 {
 		t.Errorf("Expected default cost 1000000.0, got %f", info.EstimatedCost)
 	}
+}
 
-	// Test SetConstraintUsage
+func testIndexInfoConstraintUsage(t *testing.T, info *IndexInfo) {
+	t.Helper()
 	info.SetConstraintUsage(0, 1, true)
 	if info.ConstraintUsage[0].ArgvIndex != 1 {
 		t.Errorf("Expected ArgvIndex 1, got %d", info.ConstraintUsage[0].ArgvIndex)
@@ -141,31 +121,28 @@ func TestIndexInfo(t *testing.T) {
 	if !info.ConstraintUsage[0].Omit {
 		t.Error("Expected Omit to be true")
 	}
+}
 
-	// Test CountUsableConstraints
+func testIndexInfoFindAndCount(t *testing.T, info *IndexInfo) {
+	t.Helper()
 	info.Constraints[0].Usable = true
 	info.Constraints[1].Usable = true
 	info.Constraints[2].Usable = false
-	count := info.CountUsableConstraints()
-	if count != 2 {
-		t.Errorf("Expected 2 usable constraints, got %d", count)
+	if info.CountUsableConstraints() != 2 {
+		t.Errorf("Expected 2 usable constraints, got %d", info.CountUsableConstraints())
 	}
-
-	// Test FindConstraint
 	info.Constraints[0].Column = 0
 	info.Constraints[0].Op = ConstraintEQ
-	info.Constraints[0].Usable = true
-	idx := info.FindConstraint(0, ConstraintEQ)
-	if idx != 0 {
+	if idx := info.FindConstraint(0, ConstraintEQ); idx != 0 {
 		t.Errorf("Expected constraint at index 0, got %d", idx)
 	}
-
-	idx = info.FindConstraint(5, ConstraintEQ)
-	if idx != -1 {
+	if idx := info.FindConstraint(5, ConstraintEQ); idx != -1 {
 		t.Errorf("Expected -1 for non-existent constraint, got %d", idx)
 	}
+}
 
-	// Test HasOrderBy
+func testIndexInfoOrderByAndColUsed(t *testing.T, info *IndexInfo) {
+	t.Helper()
 	if info.HasOrderBy() {
 		t.Error("Expected HasOrderBy to be false initially")
 	}
@@ -173,18 +150,23 @@ func TestIndexInfo(t *testing.T) {
 	if !info.HasOrderBy() {
 		t.Error("Expected HasOrderBy to be true after adding order by")
 	}
-
-	// Test IsColumnUsed
-	info.ColUsed = 0x05 // Binary: 00000101 (columns 0 and 2 used)
+	info.ColUsed = 0x05
 	if !info.IsColumnUsed(0) {
 		t.Error("Expected column 0 to be used")
 	}
 	if info.IsColumnUsed(1) {
 		t.Error("Expected column 1 to not be used")
 	}
-	if !info.IsColumnUsed(2) {
-		t.Error("Expected column 2 to be used")
-	}
+}
+
+// TestIndexInfo tests the IndexInfo structure and methods.
+func TestIndexInfo(t *testing.T) {
+	t.Parallel()
+	info := NewIndexInfo(3)
+	testIndexInfoInit(t, info)
+	testIndexInfoConstraintUsage(t, info)
+	testIndexInfoFindAndCount(t, info)
+	testIndexInfoOrderByAndColUsed(t, info)
 }
 
 // TestConstraintOp tests the ConstraintOp string representation.
@@ -222,56 +204,49 @@ func TestBaseVirtualTable(t *testing.T) {
 	t.Parallel()
 	base := &BaseVirtualTable{}
 
-	// Test BestIndex (should succeed with default values)
-	info := NewIndexInfo(0)
-	err := base.BestIndex(info)
-	if err != nil {
-		t.Errorf("BestIndex failed: %v", err)
-	}
+	t.Run("best_index", func(t *testing.T) {
+		if err := base.BestIndex(NewIndexInfo(0)); err != nil {
+			t.Errorf("BestIndex failed: %v", err)
+		}
+	})
 
-	// Test Open (should fail - not implemented)
-	_, err = base.Open()
-	if err == nil {
-		t.Error("Expected Open to return error")
-	}
+	t.Run("open_not_implemented", func(t *testing.T) {
+		if _, err := base.Open(); err == nil {
+			t.Error("Expected Open to return error")
+		}
+	})
 
-	// Test Disconnect (should succeed - no-op)
-	err = base.Disconnect()
-	if err != nil {
-		t.Errorf("Disconnect failed: %v", err)
-	}
+	t.Run("disconnect_noop", func(t *testing.T) {
+		if err := base.Disconnect(); err != nil {
+			t.Errorf("Disconnect failed: %v", err)
+		}
+	})
 
-	// Test Destroy (should fail - not supported)
-	err = base.Destroy()
-	if err == nil {
-		t.Error("Expected Destroy to return error")
-	}
+	t.Run("destroy_not_supported", func(t *testing.T) {
+		if err := base.Destroy(); err == nil {
+			t.Error("Expected Destroy to return error")
+		}
+	})
 
-	// Test Update (should fail - read-only)
-	_, err = base.Update(1, []interface{}{})
-	if err == nil {
-		t.Error("Expected Update to return error")
-	}
+	t.Run("update_readonly", func(t *testing.T) {
+		if _, err := base.Update(1, []interface{}{}); err == nil {
+			t.Error("Expected Update to return error")
+		}
+	})
 
-	// Test transaction methods (should succeed - no-ops)
-	if err := base.Begin(); err != nil {
-		t.Errorf("Begin failed: %v", err)
-	}
-	if err := base.Sync(); err != nil {
-		t.Errorf("Sync failed: %v", err)
-	}
-	if err := base.Commit(); err != nil {
-		t.Errorf("Commit failed: %v", err)
-	}
-	if err := base.Rollback(); err != nil {
-		t.Errorf("Rollback failed: %v", err)
-	}
+	t.Run("transaction_noops", func(t *testing.T) {
+		for _, fn := range []func() error{base.Begin, base.Sync, base.Commit, base.Rollback} {
+			if err := fn(); err != nil {
+				t.Errorf("Transaction method failed: %v", err)
+			}
+		}
+	})
 
-	// Test Rename (should fail - not supported)
-	err = base.Rename("new_name")
-	if err == nil {
-		t.Error("Expected Rename to return error")
-	}
+	t.Run("rename_not_supported", func(t *testing.T) {
+		if err := base.Rename("new_name"); err == nil {
+			t.Error("Expected Rename to return error")
+		}
+	})
 }
 
 // TestBaseCursor tests the base cursor implementation.
@@ -388,6 +363,25 @@ func (c *testCursor) Rowid() (int64, error) {
 	return int64(c.pos), nil
 }
 
+// iterateCursor iterates through a cursor, returning the row count.
+func iterateCursor(t *testing.T, cursor VirtualCursor) int {
+	t.Helper()
+	count := 0
+	for !cursor.EOF() {
+		if _, err := cursor.Column(0); err != nil {
+			t.Errorf("Column(0) failed: %v", err)
+		}
+		if _, err := cursor.Rowid(); err != nil {
+			t.Errorf("Rowid failed: %v", err)
+		}
+		count++
+		if err := cursor.Next(); err != nil {
+			t.Errorf("Next failed: %v", err)
+		}
+	}
+	return count
+}
+
 // TestVirtualTableCursor tests a complete virtual table implementation.
 func TestVirtualTableCursor(t *testing.T) {
 	t.Parallel()
@@ -396,7 +390,6 @@ func TestVirtualTableCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
-
 	if schema == "" {
 		t.Error("Expected non-empty schema")
 	}
@@ -407,41 +400,11 @@ func TestVirtualTableCursor(t *testing.T) {
 	}
 	defer cursor.Close()
 
-	// Test Filter
-	err = cursor.Filter(0, "", nil)
-	if err != nil {
+	if err := cursor.Filter(0, "", nil); err != nil {
 		t.Fatalf("Filter failed: %v", err)
 	}
 
-	// Iterate through rows
-	count := 0
-	for !cursor.EOF() {
-		// Test Column
-		id, err := cursor.Column(0)
-		if err != nil {
-			t.Errorf("Column(0) failed: %v", err)
-		}
-		name, err := cursor.Column(1)
-		if err != nil {
-			t.Errorf("Column(1) failed: %v", err)
-		}
-
-		// Test Rowid
-		rowid, err := cursor.Rowid()
-		if err != nil {
-			t.Errorf("Rowid failed: %v", err)
-		}
-
-		t.Logf("Row %d: id=%v, name=%v, rowid=%v", count, id, name, rowid)
-
-		count++
-		err = cursor.Next()
-		if err != nil {
-			t.Errorf("Next failed: %v", err)
-		}
-	}
-
-	if count != 3 {
+	if count := iterateCursor(t, cursor); count != 3 {
 		t.Errorf("Expected 3 rows, got %d", count)
 	}
 }

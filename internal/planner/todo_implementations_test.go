@@ -114,53 +114,28 @@ func TestCoveringIndexDetection(t *testing.T) {
 	}
 }
 
-// TestSortOrderTracking tests the sort order tracking for merge join.
-func TestSortOrderTracking(t *testing.T) {
-	// Create test tables
-	table1 := &TableInfo{
-		Name:      "users",
-		RowCount:  1000,
-		RowLogEst: NewLogEst(1000),
-	}
-	table2 := &TableInfo{
-		Name:      "orders",
-		RowCount:  5000,
-		RowLogEst: NewLogEst(5000),
-	}
+func createSortOrderTestOptimizer() *JoinOptimizer {
+	table1 := &TableInfo{Name: "users", RowCount: 1000, RowLogEst: NewLogEst(1000)}
+	table2 := &TableInfo{Name: "orders", RowCount: 5000, RowLogEst: NewLogEst(5000)}
 
-	tables := []*TableInfo{table1, table2}
-	costModel := NewCostModel()
-
-	// Create a join optimizer with WhereInfo that has index information
 	whereInfo := &WhereInfo{
 		AllLoops: []*WhereLoop{
-			{
-				TabIndex: 0,
-				Index: &IndexInfo{
-					Name:  "idx_user_id",
-					Table: "users",
-					Columns: []IndexColumn{
-						{Name: "id", Ascending: true},
-					},
-					Unique: true,
-				},
-			},
-			{
-				TabIndex: 1,
-				Index: &IndexInfo{
-					Name:  "idx_order_user",
-					Table: "orders",
-					Columns: []IndexColumn{
-						{Name: "user_id", Ascending: true},
-					},
-					Unique: false,
-				},
-			},
+			{TabIndex: 0, Index: &IndexInfo{Name: "idx_user_id", Table: "users", Columns: []IndexColumn{{Name: "id", Ascending: true}}, Unique: true}},
+			{TabIndex: 1, Index: &IndexInfo{Name: "idx_order_user", Table: "orders", Columns: []IndexColumn{{Name: "user_id", Ascending: true}}, Unique: false}},
 		},
 	}
+	return NewJoinOptimizer([]*TableInfo{table1, table2}, whereInfo, NewCostModel())
+}
 
-	optimizer := NewJoinOptimizer(tables, whereInfo, costModel)
+// TestSortOrderTracking tests the sort order tracking for merge join.
+func makeJoinOrders(outerCol string, outerAsc bool, innerCol string, innerAsc bool) (*JoinOrder, *JoinOrder) {
+	outer := &JoinOrder{Tables: []int{0}, SortOrder: []SortColumn{{TableIdx: 0, Column: outerCol, Ascending: outerAsc}}}
+	inner := &JoinOrder{Tables: []int{1}, SortOrder: []SortColumn{{TableIdx: 1, Column: innerCol, Ascending: innerAsc}}}
+	return outer, inner
+}
 
+func testSortOrderSingleTable(t *testing.T, optimizer *JoinOptimizer) {
+	t.Helper()
 	t.Run("Single table sort order from index", func(t *testing.T) {
 		sortOrder := optimizer.getSingleTableSortOrder(0)
 		if len(sortOrder) != 1 {
@@ -173,94 +148,38 @@ func TestSortOrderTracking(t *testing.T) {
 			t.Error("Expected ascending sort order")
 		}
 	})
+}
 
+func testSortOrderMergeJoin(t *testing.T) {
+	t.Helper()
 	t.Run("Merge join detection", func(t *testing.T) {
-		// Create two join orders with compatible sort orders
-		outer := &JoinOrder{
-			Tables: []int{0},
-			SortOrder: []SortColumn{
-				{TableIdx: 0, Column: "id", Ascending: true},
-			},
-		}
-		inner := &JoinOrder{
-			Tables: []int{1},
-			SortOrder: []SortColumn{
-				{TableIdx: 1, Column: "user_id", Ascending: true},
-			},
-		}
-
-		// Create a dummy equi-join term
-		joinTerms := []*WhereTerm{
-			{Operator: WO_EQ},
-		}
-
-		canUseMerge := canUseMergeJoin(outer, inner, joinTerms)
-		if !canUseMerge {
+		outer, inner := makeJoinOrders("id", true, "user_id", true)
+		if !canUseMergeJoin(outer, inner, []*WhereTerm{{Operator: WO_EQ}}) {
 			t.Error("Expected to be able to use merge join with compatible sort orders")
 		}
 	})
 
 	t.Run("Merge join not possible - different directions", func(t *testing.T) {
-		outer := &JoinOrder{
-			Tables: []int{0},
-			SortOrder: []SortColumn{
-				{TableIdx: 0, Column: "id", Ascending: true},
-			},
-		}
-		inner := &JoinOrder{
-			Tables: []int{1},
-			SortOrder: []SortColumn{
-				{TableIdx: 1, Column: "user_id", Ascending: false},
-			},
-		}
-
-		joinTerms := []*WhereTerm{
-			{Operator: WO_EQ},
-		}
-
-		canUseMerge := canUseMergeJoin(outer, inner, joinTerms)
-		if canUseMerge {
+		outer, inner := makeJoinOrders("id", true, "user_id", false)
+		if canUseMergeJoin(outer, inner, []*WhereTerm{{Operator: WO_EQ}}) {
 			t.Error("Expected NOT to be able to use merge join with incompatible sort directions")
 		}
 	})
 
 	t.Run("Merge join not possible - no equi-join", func(t *testing.T) {
-		outer := &JoinOrder{
-			Tables: []int{0},
-			SortOrder: []SortColumn{
-				{TableIdx: 0, Column: "id", Ascending: true},
-			},
-		}
-		inner := &JoinOrder{
-			Tables: []int{1},
-			SortOrder: []SortColumn{
-				{TableIdx: 1, Column: "user_id", Ascending: true},
-			},
-		}
-
-		// No equi-join terms
-		joinTerms := []*WhereTerm{
-			{Operator: WO_GT},
-		}
-
-		canUseMerge := canUseMergeJoin(outer, inner, joinTerms)
-		if canUseMerge {
+		outer, inner := makeJoinOrders("id", true, "user_id", true)
+		if canUseMergeJoin(outer, inner, []*WhereTerm{{Operator: WO_GT}}) {
 			t.Error("Expected NOT to be able to use merge join without equi-join condition")
 		}
 	})
+}
+
+func testSortOrderPreservation(t *testing.T, optimizer *JoinOptimizer) {
+	t.Helper()
+	outer := &JoinOrder{Tables: []int{0}, SortOrder: []SortColumn{{TableIdx: 0, Column: "id", Ascending: true}}}
+	inner := &JoinOrder{Tables: []int{1}, SortOrder: []SortColumn{}}
 
 	t.Run("Sort order preservation - nested loop", func(t *testing.T) {
-		outer := &JoinOrder{
-			Tables: []int{0},
-			SortOrder: []SortColumn{
-				{TableIdx: 0, Column: "id", Ascending: true},
-			},
-		}
-		inner := &JoinOrder{
-			Tables:    []int{1},
-			SortOrder: []SortColumn{},
-		}
-
 		sortOrder := optimizer.determineCombinedSortOrder(outer, inner, JoinNestedLoop)
 		if len(sortOrder) != 1 || sortOrder[0].Column != "id" {
 			t.Error("Nested loop join should preserve outer sort order")
@@ -268,22 +187,18 @@ func TestSortOrderTracking(t *testing.T) {
 	})
 
 	t.Run("Sort order preservation - hash join", func(t *testing.T) {
-		outer := &JoinOrder{
-			Tables: []int{0},
-			SortOrder: []SortColumn{
-				{TableIdx: 0, Column: "id", Ascending: true},
-			},
-		}
-		inner := &JoinOrder{
-			Tables:    []int{1},
-			SortOrder: []SortColumn{},
-		}
-
 		sortOrder := optimizer.determineCombinedSortOrder(outer, inner, JoinHash)
 		if len(sortOrder) != 0 {
 			t.Error("Hash join should not preserve sort order")
 		}
 	})
+}
+
+func TestSortOrderTracking(t *testing.T) {
+	optimizer := createSortOrderTestOptimizer()
+	testSortOrderSingleTable(t, optimizer)
+	testSortOrderMergeJoin(t)
+	testSortOrderPreservation(t, optimizer)
 }
 
 // TestFindBestIndexWithColumns tests the covering index detection in context.

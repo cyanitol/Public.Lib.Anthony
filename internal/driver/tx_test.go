@@ -5,13 +5,11 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"os"
 	"testing"
 )
 
 func TestBeginCommit(t *testing.T) {
-	dbFile := "test_begin_commit.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_begin_commit.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -32,8 +30,7 @@ func TestBeginCommit(t *testing.T) {
 }
 
 func TestBeginRollback(t *testing.T) {
-	dbFile := "test_begin_rollback.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_begin_rollback.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -54,8 +51,7 @@ func TestBeginRollback(t *testing.T) {
 }
 
 func TestReadOnlyTransaction(t *testing.T) {
-	dbFile := "test_readonly_tx.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_readonly_tx.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -79,8 +75,7 @@ func TestReadOnlyTransaction(t *testing.T) {
 }
 
 func TestWriteTransaction(t *testing.T) {
-	dbFile := "test_write_tx.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_write_tx.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -104,8 +99,7 @@ func TestWriteTransaction(t *testing.T) {
 }
 
 func TestMultipleTransactions(t *testing.T) {
-	dbFile := "test_multi_tx.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_multi_tx.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -136,8 +130,7 @@ func TestMultipleTransactions(t *testing.T) {
 
 func TestNestedTransactionError(t *testing.T) {
 	t.Skip("pre-existing failure")
-	dbFile := "test_nested_tx.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_nested_tx.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -162,8 +155,7 @@ func TestNestedTransactionError(t *testing.T) {
 }
 
 func TestTransactionDoubleCommit(t *testing.T) {
-	dbFile := "test_double_commit.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_double_commit.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -189,8 +181,7 @@ func TestTransactionDoubleCommit(t *testing.T) {
 }
 
 func TestTransactionDoubleRollback(t *testing.T) {
-	dbFile := "test_double_rollback.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_double_rollback.db"
 
 	// Test at driver level to verify double rollback is safe
 	d := &Driver{}
@@ -222,8 +213,7 @@ func TestTransactionDoubleRollback(t *testing.T) {
 }
 
 func TestTransactionCommitAfterRollback(t *testing.T) {
-	dbFile := "test_commit_after_rollback.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_commit_after_rollback.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -249,8 +239,7 @@ func TestTransactionCommitAfterRollback(t *testing.T) {
 }
 
 func TestTransactionRollbackAfterCommit(t *testing.T) {
-	dbFile := "test_rollback_after_commit.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_rollback_after_commit.db"
 
 	// Test at driver level to verify rollback after commit is safe
 	d := &Driver{}
@@ -282,8 +271,7 @@ func TestTransactionRollbackAfterCommit(t *testing.T) {
 }
 
 func TestTransactionIsolation(t *testing.T) {
-	dbFile := "test_tx_isolation.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_tx_isolation.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -311,8 +299,7 @@ func TestTransactionIsolation(t *testing.T) {
 
 func TestContextCancellation(t *testing.T) {
 	t.Skip("Context cancellation handling not yet implemented in internal driver")
-	dbFile := "test_context_cancel.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_context_cancel.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -341,8 +328,7 @@ func TestContextCancellation(t *testing.T) {
 
 func TestTransactionWithClosedConnection(t *testing.T) {
 	t.Skip("Closed connection handling not yet implemented in internal driver")
-	dbFile := "test_closed_conn.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_closed_conn.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -364,64 +350,58 @@ func TestTransactionWithClosedConnection(t *testing.T) {
 	}
 }
 
-func TestDriverTxInterface(t *testing.T) {
-	dbFile := "test_driver_interface.db"
-	defer os.Remove(dbFile)
-
+func txOpenConn(t *testing.T, name string) *Conn {
+	t.Helper()
+	dbFile := t.TempDir() + "/" + name
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
 	if err != nil {
 		t.Fatalf("failed to open connection: %v", err)
 	}
-	defer conn.Close()
-
-	// Cast to our Conn type
+	t.Cleanup(func() { conn.Close() })
 	c, ok := conn.(*Conn)
 	if !ok {
 		t.Fatal("connection is not *Conn type")
 	}
+	return c
+}
 
-	// Begin transaction
+func txBeginAndCast(t *testing.T, c *Conn) *Tx {
+	t.Helper()
 	tx, err := c.Begin()
 	if err != nil {
 		t.Fatalf("failed to begin: %v", err)
 	}
-
-	// Verify it implements driver.Tx
-	_, ok = tx.(driver.Tx)
-	if !ok {
+	if _, ok := tx.(driver.Tx); !ok {
 		t.Error("transaction does not implement driver.Tx")
 	}
-
-	// Cast to our Tx type
 	ourTx, ok := tx.(*Tx)
 	if !ok {
 		t.Fatal("transaction is not *Tx type")
 	}
+	return ourTx
+}
 
-	// Test custom methods
+func TestDriverTxInterface(t *testing.T) {
+	c := txOpenConn(t, "test_driver_interface.db")
+	ourTx := txBeginAndCast(t, c)
+
 	if ourTx.IsReadOnly() {
 		t.Error("default transaction should not be read-only")
 	}
-
 	if ourTx.IsClosed() {
 		t.Error("transaction should not be closed yet")
 	}
-
-	// Commit
-	if err := tx.Commit(); err != nil {
+	if err := ourTx.Commit(); err != nil {
 		t.Errorf("commit failed: %v", err)
 	}
-
-	// Now should be closed
 	if !ourTx.IsClosed() {
 		t.Error("transaction should be closed after commit")
 	}
 }
 
 func TestReadOnlyTransactionProperties(t *testing.T) {
-	dbFile := "test_readonly_props.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_readonly_props.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -454,8 +434,7 @@ func TestReadOnlyTransactionProperties(t *testing.T) {
 }
 
 func TestWriteTransactionProperties(t *testing.T) {
-	dbFile := "test_write_props.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_write_props.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -488,8 +467,7 @@ func TestWriteTransactionProperties(t *testing.T) {
 }
 
 func TestTransactionStateAfterError(t *testing.T) {
-	dbFile := "test_error_state.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_error_state.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
@@ -511,8 +489,7 @@ func TestTransactionStateAfterError(t *testing.T) {
 
 func TestConcurrentTransactions(t *testing.T) {
 	t.Skip("Concurrent transactions not yet supported in internal driver")
-	dbFile := "test_concurrent_tx.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_concurrent_tx.db"
 
 	// Open multiple connections
 	db1, err := sql.Open(DriverName, dbFile)
@@ -550,8 +527,7 @@ func TestConcurrentTransactions(t *testing.T) {
 }
 
 func TestSavepoint(t *testing.T) {
-	dbFile := "test_savepoint.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_savepoint.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -583,8 +559,7 @@ func TestSavepoint(t *testing.T) {
 }
 
 func TestSavepointRollback(t *testing.T) {
-	dbFile := "test_savepoint_rollback.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_savepoint_rollback.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -616,8 +591,7 @@ func TestSavepointRollback(t *testing.T) {
 }
 
 func TestSavepointOnClosedTx(t *testing.T) {
-	dbFile := "test_savepoint_closed.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_savepoint_closed.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -655,8 +629,7 @@ func TestSavepointOnClosedTx(t *testing.T) {
 }
 
 func TestSavepointOnReadOnlyTx(t *testing.T) {
-	dbFile := "test_savepoint_readonly.db"
-	defer os.Remove(dbFile)
+	dbFile := t.TempDir() + "/test_savepoint_readonly.db"
 
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
@@ -693,48 +666,30 @@ func TestSavepointOnReadOnlyTx(t *testing.T) {
 	}
 }
 
-func TestSavepointWithoutActiveTx(t *testing.T) {
-	dbFile := "test_savepoint_no_tx.db"
-	defer os.Remove(dbFile)
-
-	d := &Driver{}
-	conn, err := d.Open(dbFile)
-	if err != nil {
-		t.Fatalf("failed to open connection: %v", err)
+func txExpectError(t *testing.T, err error, wantMsg string) {
+	t.Helper()
+	if err == nil || err.Error() != wantMsg {
+		t.Errorf("expected %q error, got: %v", wantMsg, err)
 	}
-	defer conn.Close()
+}
 
-	c := conn.(*Conn)
+func TestSavepointWithoutActiveTx(t *testing.T) {
+	c := txOpenConn(t, "test_savepoint_no_tx.db")
 
-	// Begin and rollback transaction
 	dtx, err := c.BeginTx(context.Background(), driver.TxOptions{ReadOnly: false})
 	if err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
 	}
 
 	tx := dtx.(*Tx)
-
 	if err := tx.Rollback(); err != nil {
 		t.Fatalf("failed to rollback: %v", err)
 	}
 
 	// Manually clear closed flag to test transaction state check
-	// This simulates a race condition or edge case
 	tx.closed = false
 
-	// Try savepoint operations without active transaction
-	err = tx.Savepoint("sp1")
-	if err == nil || err.Error() != "no transaction in progress" {
-		t.Errorf("expected 'no transaction in progress' error, got: %v", err)
-	}
-
-	err = tx.ReleaseSavepoint("sp1")
-	if err == nil || err.Error() != "no transaction in progress" {
-		t.Errorf("expected 'no transaction in progress' error, got: %v", err)
-	}
-
-	err = tx.RollbackToSavepoint("sp1")
-	if err == nil || err.Error() != "no transaction in progress" {
-		t.Errorf("expected 'no transaction in progress' error, got: %v", err)
-	}
+	txExpectError(t, tx.Savepoint("sp1"), "no transaction in progress")
+	txExpectError(t, tx.ReleaseSavepoint("sp1"), "no transaction in progress")
+	txExpectError(t, tx.RollbackToSavepoint("sp1"), "no transaction in progress")
 }

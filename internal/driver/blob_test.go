@@ -11,6 +11,63 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
+// blobStepToRow steps the VM until it reaches a row-ready state.
+func blobStepToRow(t *testing.T, vm *vdbe.VDBE) {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		hasMore, err := vm.Step()
+		if err != nil {
+			t.Fatalf("Step failed: %v", err)
+		}
+		if vm.State == vdbe.StateRowReady {
+			return
+		}
+		if !hasMore {
+			t.Fatalf("No more rows but never got StateRowReady")
+		}
+	}
+	t.Fatalf("Too many steps without getting a row")
+}
+
+// blobLogResultRow logs the types and values of the result row.
+func blobLogResultRow(t *testing.T, vm *vdbe.VDBE) {
+	t.Helper()
+	t.Logf("Got row with %d columns", len(vm.ResultRow))
+	for j, mem := range vm.ResultRow {
+		switch {
+		case mem.IsInt():
+			t.Logf("  Column %d: %d (int)", j, mem.IntValue())
+		case mem.IsBlob():
+			t.Logf("  Column %d: %v (blob, %d bytes)", j, mem.BlobValue(), len(mem.BlobValue()))
+		case mem.IsStr():
+			t.Logf("  Column %d: %q (string)", j, mem.StrValue())
+		default:
+			t.Logf("  Column %d: type=%v", j, mem)
+		}
+	}
+}
+
+// blobVerifyResultRow checks that the result row contains the expected id and blob.
+func blobVerifyResultRow(t *testing.T, vm *vdbe.VDBE, expectedBlob []byte) {
+	t.Helper()
+	if len(vm.ResultRow) < 2 {
+		t.Fatalf("Expected at least 2 columns, got %d", len(vm.ResultRow))
+	}
+	if vm.ResultRow[0].IntValue() != 42 {
+		t.Errorf("Expected id=42, got %d", vm.ResultRow[0].IntValue())
+	}
+	if !vm.ResultRow[1].IsBlob() {
+		t.Errorf("Expected column 1 to be BLOB, got %v", vm.ResultRow[1])
+		return
+	}
+	retrievedBlob := vm.ResultRow[1].BlobValue()
+	if !bytes.Equal(retrievedBlob, expectedBlob) {
+		t.Errorf("BLOB mismatch:\n  Expected: %v\n  Got:      %v", expectedBlob, retrievedBlob)
+	} else {
+		t.Logf("BLOB retrieved correctly!")
+	}
+}
+
 // TestBlobHandling tests BLOB data type handling:
 // 1. Ensure []byte values bind correctly as BLOBs
 // 2. BLOB serial types in records are handled properly
@@ -113,57 +170,85 @@ func TestBlobHandling(t *testing.T) {
 
 		t.Logf("SELECT BLOB bytecode:\n%s", vm.ExplainProgram())
 
-		// Step until we get a row
-		for i := 0; i < 20; i++ {
-			hasMore, err := vm.Step()
-			if err != nil {
-				t.Fatalf("Step failed: %v", err)
-			}
-			if vm.State == vdbe.StateRowReady {
-				t.Logf("Got row with %d columns", len(vm.ResultRow))
-				for j, mem := range vm.ResultRow {
-					if mem.IsInt() {
-						t.Logf("  Column %d: %d (int)", j, mem.IntValue())
-					} else if mem.IsBlob() {
-						blob := mem.BlobValue()
-						t.Logf("  Column %d: %v (blob, %d bytes)", j, blob, len(blob))
-					} else if mem.IsStr() {
-						t.Logf("  Column %d: %q (string)", j, mem.StrValue())
-					} else {
-						t.Logf("  Column %d: type=%v", j, mem)
-					}
-				}
-
-				// Verify values
-				if len(vm.ResultRow) >= 2 {
-					if vm.ResultRow[0].IntValue() != 42 {
-						t.Errorf("Expected id=42, got %d", vm.ResultRow[0].IntValue())
-					}
-					if !vm.ResultRow[1].IsBlob() {
-						t.Errorf("Expected column 1 to be BLOB, got %v", vm.ResultRow[1])
-					} else {
-						retrievedBlob := vm.ResultRow[1].BlobValue()
-						if !bytes.Equal(retrievedBlob, testBlob) {
-							t.Errorf("BLOB mismatch:\n  Expected: %v\n  Got:      %v",
-								testBlob, retrievedBlob)
-						} else {
-							t.Logf("BLOB retrieved correctly!")
-						}
-					}
-				}
-				return
-			}
-			if !hasMore {
-				t.Fatalf("No more rows but never got StateRowReady")
-			}
-		}
-		t.Fatalf("Too many steps without getting a row")
+		blobStepToRow(t, vm)
+		blobLogResultRow(t, vm)
+		blobVerifyResultRow(t, vm, testBlob)
 	})
+}
+
+// blobBindingSetup creates a btree, schema, table, and returns (context, rootPage).
+func blobBindingSetup(t *testing.T) (*vdbe.VDBEContext, uint32) {
+	t.Helper()
+	bt := btree.NewBtree(4096)
+	sch := schema.NewSchema()
+	createStmt := &parser.CreateTableStmt{
+		Name: "blob_params",
+		Columns: []parser.ColumnDef{
+			{Name: "id", Type: "INTEGER", Constraints: []parser.ColumnConstraint{{Type: parser.ConstraintPrimaryKey}}},
+			{Name: "content", Type: "BLOB"},
+		},
+	}
+	table, err := sch.CreateTable(createStmt)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("failed to create btree table: %v", err)
+	}
+	table.RootPage = rootPage
+	return &vdbe.VDBEContext{Btree: bt, Schema: sch}, rootPage
+}
+
+// blobBindingInsertAndVerify inserts a blob and verifies it can be read back.
+func blobBindingInsertAndVerify(t *testing.T, ctx *vdbe.VDBEContext, rootPage uint32, rowid int, data []byte) {
+	t.Helper()
+	vm := vdbe.New()
+	vm.Ctx = ctx
+	vm.AllocMemory(10)
+	vm.AllocCursors(1)
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpOpenWrite, 0, int(rootPage), 2)
+	vm.AddOp(vdbe.OpInteger, rowid, 0, 0)
+	vm.AddOp(vdbe.OpInteger, rowid, 1, 0)
+	vm.AddOpWithP4Blob(vdbe.OpBlob, len(data), 2, 0, data)
+	vm.AddOp(vdbe.OpMakeRecord, 1, 2, 3)
+	vm.AddOp(vdbe.OpInsert, 0, 3, 0)
+	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	if err := vm.Run(); err != nil {
+		t.Fatalf("INSERT failed: %v", err)
+	}
+
+	vm2 := vdbe.New()
+	vm2.Ctx = ctx
+	vm2.AllocMemory(10)
+	vm2.AllocCursors(1)
+	vm2.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm2.AddOp(vdbe.OpOpenRead, 0, int(rootPage), 2)
+	vm2.AddOp(vdbe.OpInteger, rowid, 3, 0)
+	seekAddr := vm2.AddOp(vdbe.OpSeekRowid, 0, 0, 3)
+	vm2.AddOp(vdbe.OpColumn, 0, 1, 1)
+	vm2.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	notFoundAddr := vm2.AddOp(vdbe.OpHalt, 0, 0, 0)
+	vm2.AddOp(vdbe.OpClose, 0, 0, 0)
+	vm2.AddOp(vdbe.OpHalt, 0, 0, 0)
+	vm2.Program[seekAddr].P2 = notFoundAddr
+
+	hasMore, err := vm2.Step()
+	if err != nil {
+		t.Fatalf("SELECT step failed: %v", err)
+	}
+	if vm2.State == vdbe.StateRowReady && hasMore && len(vm2.ResultRow) > 0 {
+		retrieved := vm2.ResultRow[0].BlobValue()
+		if !bytes.Equal(retrieved, data) {
+			t.Errorf("BLOB mismatch:\n  Expected: %v\n  Got:      %v", data, retrieved)
+		}
+	}
 }
 
 // TestBlobBinding tests parameter binding with BLOB values
 func TestBlobBinding(t *testing.T) {
-	// Test with different BLOB sizes
 	testCases := []struct {
 		name string
 		data []byte
@@ -178,85 +263,8 @@ func TestBlobBinding(t *testing.T) {
 
 	for i, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create a fresh btree for each test case
-			bt := btree.NewBtree(4096)
-			sch := schema.NewSchema()
-
-			createStmt := &parser.CreateTableStmt{
-				Name: "blob_params",
-				Columns: []parser.ColumnDef{
-					{Name: "id", Type: "INTEGER", Constraints: []parser.ColumnConstraint{{Type: parser.ConstraintPrimaryKey}}},
-					{Name: "content", Type: "BLOB"},
-				},
-			}
-
-			table, err := sch.CreateTable(createStmt)
-			if err != nil {
-				t.Fatalf("failed to create table: %v", err)
-			}
-
-			rootPage, err := bt.CreateTable()
-			if err != nil {
-				t.Fatalf("failed to create btree table: %v", err)
-			}
-			table.RootPage = rootPage
-
-			ctx := &vdbe.VDBEContext{
-				Btree:  bt,
-				Schema: sch,
-			}
-
-			// INSERT
-			vm := vdbe.New()
-			vm.Ctx = ctx
-			vm.AllocMemory(10)
-			vm.AllocCursors(1)
-
-			vm.AddOp(vdbe.OpInit, 0, 0, 0)
-			vm.AddOp(vdbe.OpOpenWrite, 0, int(rootPage), 2)
-			vm.AddOp(vdbe.OpInteger, i+1, 0, 0)                          // rowid
-			vm.AddOp(vdbe.OpInteger, i+1, 1, 0)                          // id
-			vm.AddOpWithP4Blob(vdbe.OpBlob, len(tc.data), 2, 0, tc.data) // content
-			vm.AddOp(vdbe.OpMakeRecord, 1, 2, 3)
-			vm.AddOp(vdbe.OpInsert, 0, 3, 0)
-			vm.AddOp(vdbe.OpClose, 0, 0, 0)
-			vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-			if err := vm.Run(); err != nil {
-				t.Fatalf("INSERT failed: %v", err)
-			}
-
-			// SELECT and verify
-			vm2 := vdbe.New()
-			vm2.Ctx = ctx
-			vm2.AllocMemory(10)
-			vm2.AllocCursors(1)
-
-			vm2.AddOp(vdbe.OpInit, 0, 0, 0)
-			vm2.AddOp(vdbe.OpOpenRead, 0, int(rootPage), 2)
-			vm2.AddOp(vdbe.OpInteger, i+1, 3, 0)             // rowid to seek
-			seekAddr := vm2.AddOp(vdbe.OpSeekRowid, 0, 0, 3) // seek to rowid in register 3
-			vm2.AddOp(vdbe.OpColumn, 0, 1, 1)                // content into reg 1
-			vm2.AddOp(vdbe.OpResultRow, 1, 1, 0)
-			notFoundAddr := vm2.AddOp(vdbe.OpHalt, 0, 0, 0)
-			vm2.AddOp(vdbe.OpClose, 0, 0, 0)
-			vm2.AddOp(vdbe.OpHalt, 0, 0, 0)
-			vm2.Program[seekAddr].P2 = notFoundAddr
-
-			hasMore, err := vm2.Step()
-			if err != nil {
-				t.Fatalf("SELECT step failed: %v", err)
-			}
-
-			if vm2.State == vdbe.StateRowReady && hasMore {
-				if len(vm2.ResultRow) > 0 {
-					retrieved := vm2.ResultRow[0].BlobValue()
-					if !bytes.Equal(retrieved, tc.data) {
-						t.Errorf("BLOB mismatch for %s:\n  Expected: %v\n  Got:      %v",
-							tc.name, tc.data, retrieved)
-					}
-				}
-			}
+			ctx, rootPage := blobBindingSetup(t)
+			blobBindingInsertAndVerify(t, ctx, rootPage, i+1, tc.data)
 		})
 	}
 }

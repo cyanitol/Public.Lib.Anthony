@@ -83,11 +83,24 @@ func exprChildren(e parser.Expression) []parser.Expression {
 	case *parser.FunctionExpr:
 		return v.Args
 	case *parser.InExpr:
-		return append([]parser.Expression{v.Expr}, v.Values...)
+		return inExprChildren(v)
 	case *parser.BetweenExpr:
 		return []parser.Expression{v.Expr, v.Lower, v.Upper}
 	case *parser.CaseExpr:
 		return caseExprChildren(v)
+	default:
+		return exprChildrenSingle(e)
+	}
+}
+
+// inExprChildren returns children of an IN expression.
+func inExprChildren(v *parser.InExpr) []parser.Expression {
+	return append([]parser.Expression{v.Expr}, v.Values...)
+}
+
+// exprChildrenSingle handles single-child expression types.
+func exprChildrenSingle(e parser.Expression) []parser.Expression {
+	switch v := e.(type) {
 	case *parser.CastExpr:
 		return []parser.Expression{v.Expr}
 	case *parser.CollateExpr:

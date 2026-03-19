@@ -280,57 +280,48 @@ func TestRedistributeCells(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			// Create left page
-			leftCells := make([]struct {
-				rowid   int64
-				payload []byte
-			}, tt.leftCells)
-			for i := 0; i < tt.leftCells; i++ {
-				leftCells[i].rowid = int64(i + 1)
-				leftCells[i].payload = make([]byte, tt.payloadSize)
-			}
-			leftPageData := createTestPage(2, pageSize, PageTypeLeafTable, leftCells)
-			leftPage, err := NewBtreePage(2, leftPageData, pageSize)
-			if err != nil {
-				t.Fatalf("Failed to create left page: %v", err)
-			}
+			leftPage := redistributeCreateTestPage(t, 2, pageSize, tt.leftCells, 0, tt.payloadSize)
+			rightPage := redistributeCreateTestPage(t, 3, pageSize, tt.rightCells, tt.leftCells, tt.payloadSize)
 
-			// Create right page
-			rightCells := make([]struct {
-				rowid   int64
-				payload []byte
-			}, tt.rightCells)
-			for i := 0; i < tt.rightCells; i++ {
-				rightCells[i].rowid = int64(tt.leftCells + i + 1)
-				rightCells[i].payload = make([]byte, tt.payloadSize)
-			}
-			rightPageData := createTestPage(3, pageSize, PageTypeLeafTable, rightCells)
-			rightPage, err := NewBtreePage(3, rightPageData, pageSize)
-			if err != nil {
-				t.Fatalf("Failed to create right page: %v", err)
-			}
-
-			// Redistribute
-			err = RedistributeCells(leftPage, rightPage)
+			err := RedistributeCells(leftPage, rightPage)
 			if err != nil {
 				t.Fatalf("RedistributeCells() error = %v", err)
 			}
 
-			// Verify cell counts
-			if int(leftPage.Header.NumCells) != tt.expectedLeft {
-				t.Errorf("Left page cells = %d, want %d", leftPage.Header.NumCells, tt.expectedLeft)
-			}
-			if int(rightPage.Header.NumCells) != tt.expectedRight {
-				t.Errorf("Right page cells = %d, want %d", rightPage.Header.NumCells, tt.expectedRight)
-			}
-
-			// Verify total cells preserved
-			totalCells := tt.leftCells + tt.rightCells
-			actualTotal := int(leftPage.Header.NumCells) + int(rightPage.Header.NumCells)
-			if actualTotal != totalCells {
-				t.Errorf("Total cells = %d, want %d", actualTotal, totalCells)
-			}
+			redistributeVerifyCounts(t, leftPage, rightPage, tt.expectedLeft, tt.expectedRight, tt.leftCells+tt.rightCells)
 		})
+	}
+}
+
+func redistributeCreateTestPage(t *testing.T, pgno, pageSize uint32, numCells, rowidOffset, payloadSize int) *BtreePage {
+	t.Helper()
+	cells := make([]struct {
+		rowid   int64
+		payload []byte
+	}, numCells)
+	for i := 0; i < numCells; i++ {
+		cells[i].rowid = int64(rowidOffset + i + 1)
+		cells[i].payload = make([]byte, payloadSize)
+	}
+	pageData := createTestPage(pgno, pageSize, PageTypeLeafTable, cells)
+	page, err := NewBtreePage(pgno, pageData, pageSize)
+	if err != nil {
+		t.Fatalf("Failed to create page %d: %v", pgno, err)
+	}
+	return page
+}
+
+func redistributeVerifyCounts(t *testing.T, left, right *BtreePage, expectedLeft, expectedRight, totalCells int) {
+	t.Helper()
+	if int(left.Header.NumCells) != expectedLeft {
+		t.Errorf("Left page cells = %d, want %d", left.Header.NumCells, expectedLeft)
+	}
+	if int(right.Header.NumCells) != expectedRight {
+		t.Errorf("Right page cells = %d, want %d", right.Header.NumCells, expectedRight)
+	}
+	actualTotal := int(left.Header.NumCells) + int(right.Header.NumCells)
+	if actualTotal != totalCells {
+		t.Errorf("Total cells = %d, want %d", actualTotal, totalCells)
 	}
 }
 
@@ -455,40 +446,37 @@ func TestMergePage_Simple(t *testing.T) {
 	if !found {
 		t.Fatal("SeekRowid() did not find rowid 1")
 	}
-
-	// Verify cursor is on page 2
 	if cursor.CurrentPage != 2 {
 		t.Fatalf("Cursor on page %d, want page 2", cursor.CurrentPage)
 	}
 
-	// Attempt merge
 	merged, err := cursor.MergePage()
 	if err != nil {
 		t.Fatalf("MergePage() error = %v", err)
 	}
 
-	// Should be able to merge since both pages are small
+	mergePageSimpleVerify(t, bt, merged)
+}
+
+func mergePageSimpleVerify(t *testing.T, bt *Btree, merged bool) {
+	t.Helper()
 	if !merged {
 		t.Log("MergePage() did not merge (this is OK if pages don't need merging)")
-	} else {
-		// Verify one page was freed
-		if _, ok := bt.Pages[3]; ok {
-			t.Error("Page 3 should have been freed after merge")
-		}
-
-		// Verify all cells are in page 2
-		page2DataAfter, err := bt.GetPage(2)
-		if err != nil {
-			t.Fatalf("Failed to get page 2 after merge: %v", err)
-		}
-		header2After, err := ParsePageHeader(page2DataAfter, 2)
-		if err != nil {
-			t.Fatalf("Failed to parse page 2 header after merge: %v", err)
-		}
-
-		if header2After.NumCells != 4 {
-			t.Errorf("Page 2 has %d cells after merge, want 4", header2After.NumCells)
-		}
+		return
+	}
+	if _, ok := bt.Pages[3]; ok {
+		t.Error("Page 3 should have been freed after merge")
+	}
+	page2DataAfter, err := bt.GetPage(2)
+	if err != nil {
+		t.Fatalf("Failed to get page 2 after merge: %v", err)
+	}
+	header2After, err := ParsePageHeader(page2DataAfter, 2)
+	if err != nil {
+		t.Fatalf("Failed to parse page 2 header after merge: %v", err)
+	}
+	if header2After.NumCells != 4 {
+		t.Errorf("Page 2 has %d cells after merge, want 4", header2After.NumCells)
 	}
 }
 

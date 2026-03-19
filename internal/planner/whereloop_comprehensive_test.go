@@ -363,6 +363,29 @@ func TestWhereLoopStringWithIndex(t *testing.T) {
 	}
 }
 
+func assertWhereLoopFieldsMatch(t *testing.T, clone, original *WhereLoop) {
+	t.Helper()
+	checks := []struct {
+		name string
+		ok   bool
+	}{
+		{"Prereq", clone.Prereq == original.Prereq},
+		{"MaskSelf", clone.MaskSelf == original.MaskSelf},
+		{"TabIndex", clone.TabIndex == original.TabIndex},
+		{"Setup", clone.Setup == original.Setup},
+		{"Run", clone.Run == original.Run},
+		{"NOut", clone.NOut == original.NOut},
+		{"Flags", clone.Flags == original.Flags},
+		{"Index", clone.Index == original.Index},
+		{"Terms length", len(clone.Terms) == len(original.Terms)},
+	}
+	for _, c := range checks {
+		if !c.ok {
+			t.Errorf("%s not cloned correctly", c.name)
+		}
+	}
+}
+
 func TestWhereLoopClone(t *testing.T) {
 	original := &WhereLoop{
 		Prereq:   Bitmask(3),
@@ -373,47 +396,15 @@ func TestWhereLoopClone(t *testing.T) {
 		NOut:     LogEst(50),
 		Flags:    WHERE_INDEXED,
 		Index:    &IndexInfo{Name: "test"},
-		Terms: []*WhereTerm{
-			{Operator: WO_EQ},
-		},
+		Terms:    []*WhereTerm{{Operator: WO_EQ}},
 	}
 
 	clone := original.Clone()
-
 	if clone == nil {
 		t.Fatal("Clone returned nil")
 	}
 
-	// Check all fields are copied
-	if clone.Prereq != original.Prereq {
-		t.Error("Prereq not cloned correctly")
-	}
-	if clone.MaskSelf != original.MaskSelf {
-		t.Error("MaskSelf not cloned correctly")
-	}
-	if clone.TabIndex != original.TabIndex {
-		t.Error("TabIndex not cloned correctly")
-	}
-	if clone.Setup != original.Setup {
-		t.Error("Setup not cloned correctly")
-	}
-	if clone.Run != original.Run {
-		t.Error("Run not cloned correctly")
-	}
-	if clone.NOut != original.NOut {
-		t.Error("NOut not cloned correctly")
-	}
-	if clone.Flags != original.Flags {
-		t.Error("Flags not cloned correctly")
-	}
-	if clone.Index != original.Index {
-		t.Error("Index not cloned correctly")
-	}
-
-	// Terms should be a copy
-	if len(clone.Terms) != len(original.Terms) {
-		t.Error("Terms not cloned correctly")
-	}
+	assertWhereLoopFieldsMatch(t, clone, original)
 
 	// Modify clone shouldn't affect original
 	clone.TabIndex = 99

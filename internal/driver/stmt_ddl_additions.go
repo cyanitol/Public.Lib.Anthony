@@ -277,35 +277,37 @@ func (s *Stmt) compileAlterTableDropColumn(vm *vdbe.VDBE, table *schema.Table, c
 	return vm, nil
 }
 
+// pragmaCompiler is a function that compiles a specific PRAGMA statement.
+type pragmaCompiler func(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error)
+
 // compilePragma compiles a PRAGMA statement.
 func (s *Stmt) compilePragma(vm *vdbe.VDBE, stmt *parser.PragmaStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
-	// Most PRAGMAs can be read-only queries
 	vm.SetReadOnly(true)
 	vm.AllocMemory(10)
 
+	dispatch := map[string]pragmaCompiler{
+		"table_info":        s.compilePragmaTableInfo,
+		"foreign_keys":      s.compilePragmaForeignKeys,
+		"foreign_key_check": s.compilePragmaForeignKeyCheck,
+		"foreign_key_list":  s.compilePragmaForeignKeyList,
+		"journal_mode":      s.compilePragmaJournalMode,
+		"index_list":        s.compilePragmaIndexList,
+		"cache_size":        s.compilePragmaCacheSize,
+	}
+
 	pragmaName := strings.ToLower(stmt.Name)
 
+	if compiler, ok := dispatch[pragmaName]; ok {
+		return compiler(vm, stmt)
+	}
+
+	// Handle pragmas with different signatures
 	switch pragmaName {
-	case "table_info":
-		return s.compilePragmaTableInfo(vm, stmt)
-	case "foreign_keys":
-		return s.compilePragmaForeignKeys(vm, stmt)
-	case "foreign_key_check":
-		return s.compilePragmaForeignKeyCheck(vm, stmt)
-	case "foreign_key_list":
-		return s.compilePragmaForeignKeyList(vm, stmt)
-	case "journal_mode":
-		return s.compilePragmaJournalMode(vm, stmt)
 	case "page_count":
 		return s.compilePragmaPageCount(vm)
 	case "database_list":
 		return s.compilePragmaDatabaseList(vm)
-	case "index_list":
-		return s.compilePragmaIndexList(vm, stmt)
-	case "cache_size":
-		return s.compilePragmaCacheSize(vm, stmt)
 	default:
-		// For unsupported PRAGMAs, return empty result
 		vm.AddOp(vdbe.OpInit, 0, 0, 0)
 		vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 		return vm, nil

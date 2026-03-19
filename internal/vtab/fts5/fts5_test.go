@@ -95,71 +95,62 @@ func TestStopWordTokenizer(t *testing.T) {
 }
 
 // TestInvertedIndex tests the inverted index functionality.
+// addTestDocs adds documents to the index, fataling on error.
+func addTestDocs(t *testing.T, index *InvertedIndex, tokenizer Tokenizer, docs map[DocumentID]string) {
+	t.Helper()
+	for id, content := range docs {
+		if err := index.AddDocument(id, map[int]string{0: content}, tokenizer); err != nil {
+			t.Fatalf("Failed to add document %d: %v", id, err)
+		}
+	}
+}
+
 func TestInvertedIndex(t *testing.T) {
 	t.Parallel()
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 
-	// Add documents
-	doc1 := map[int]string{0: "the quick brown fox"}
-	doc2 := map[int]string{0: "the lazy dog"}
-	doc3 := map[int]string{0: "quick brown animals"}
+	addTestDocs(t, index, tokenizer, map[DocumentID]string{
+		1: "the quick brown fox",
+		2: "the lazy dog",
+		3: "quick brown animals",
+	})
 
-	err := index.AddDocument(1, doc1, tokenizer)
-	if err != nil {
-		t.Fatalf("Failed to add document 1: %v", err)
-	}
+	t.Run("document_count", func(t *testing.T) {
+		if index.GetTotalDocuments() != 3 {
+			t.Errorf("Expected 3 documents, got %d", index.GetTotalDocuments())
+		}
+	})
 
-	err = index.AddDocument(2, doc2, tokenizer)
-	if err != nil {
-		t.Fatalf("Failed to add document 2: %v", err)
-	}
+	t.Run("posting_list_and_frequency", func(t *testing.T) {
+		postings := index.GetPostingList("quick")
+		if len(postings) != 2 {
+			t.Errorf("Expected 2 documents with 'quick', got %d", len(postings))
+		}
+		df := index.GetDocumentFrequency("the")
+		if df != 2 {
+			t.Errorf("Expected document frequency 2 for 'the', got %d", df)
+		}
+	})
 
-	err = index.AddDocument(3, doc3, tokenizer)
-	if err != nil {
-		t.Fatalf("Failed to add document 3: %v", err)
-	}
+	t.Run("remove_document", func(t *testing.T) {
+		if err := index.RemoveDocument(1); err != nil {
+			t.Fatalf("Failed to remove document: %v", err)
+		}
+		if index.GetTotalDocuments() != 2 {
+			t.Errorf("Expected 2 documents after removal, got %d", index.GetTotalDocuments())
+		}
+	})
 
-	// Test document count
-	if index.GetTotalDocuments() != 3 {
-		t.Errorf("Expected 3 documents, got %d", index.GetTotalDocuments())
-	}
-
-	// Test posting list
-	postings := index.GetPostingList("quick")
-	if len(postings) != 2 {
-		t.Errorf("Expected 2 documents with 'quick', got %d", len(postings))
-	}
-
-	// Test document frequency
-	df := index.GetDocumentFrequency("the")
-	if df != 2 {
-		t.Errorf("Expected document frequency 2 for 'the', got %d", df)
-	}
-
-	// Test remove document
-	err = index.RemoveDocument(1)
-	if err != nil {
-		t.Fatalf("Failed to remove document: %v", err)
-	}
-
-	if index.GetTotalDocuments() != 2 {
-		t.Errorf("Expected 2 documents after removal, got %d", index.GetTotalDocuments())
-	}
-
-	// Test phrase match
-	doc4 := map[int]string{0: "the quick brown fox jumps"}
-	index.AddDocument(4, doc4, tokenizer)
-
-	match := index.PhraseMatch([]string{"quick", "brown", "fox"}, 4)
-	if !match {
-		t.Error("Expected phrase match for 'quick brown fox' in doc 4")
-	}
-
-	noMatch := index.PhraseMatch([]string{"quick", "lazy"}, 4)
-	if noMatch {
-		t.Error("Did not expect phrase match for 'quick lazy' in doc 4")
-	}
+	t.Run("phrase_match", func(t *testing.T) {
+		index.AddDocument(4, map[int]string{0: "the quick brown fox jumps"}, tokenizer)
+		if !index.PhraseMatch([]string{"quick", "brown", "fox"}, 4) {
+			t.Error("Expected phrase match for 'quick brown fox' in doc 4")
+		}
+		if index.PhraseMatch([]string{"quick", "lazy"}, 4) {
+			t.Error("Did not expect phrase match for 'quick lazy' in doc 4")
+		}
+	})
 }
 
 // TestBM25Ranker tests the BM25 ranking algorithm.
@@ -273,15 +264,13 @@ func TestQueryParser(t *testing.T) {
 	}
 }
 
-// TestQueryExecution tests query execution and search.
-func TestQueryExecution(t *testing.T) {
-	t.Parallel()
+// setupQueryTestIndex creates a test index with 4 test documents.
+func setupQueryTestIndex() (*InvertedIndex, *QueryParser, *QueryExecutor) {
 	index := NewInvertedIndex([]string{"content"})
 	tokenizer := NewSimpleTokenizer()
 	parser := NewQueryParser(tokenizer)
 	executor := NewQueryExecutor(index, NewBM25Ranker())
 
-	// Add test documents
 	docs := []map[int]string{
 		{0: "the quick brown fox jumps over the lazy dog"},
 		{0: "a quick brown animal runs fast"},
@@ -290,24 +279,33 @@ func TestQueryExecution(t *testing.T) {
 	}
 
 	for i, doc := range docs {
-		doc := doc
 		index.AddDocument(DocumentID(i+1), doc, tokenizer)
 	}
+	return index, parser, executor
+}
 
-	// Test simple query
+// executeQuery parses and executes a query, fataling on error.
+func executeQuery(t *testing.T, parser *QueryParser, executor *QueryExecutor, queryStr string) []SearchResult {
+	t.Helper()
+	query, _ := parser.Parse(queryStr)
+	results, err := executor.Execute(query)
+	if err != nil {
+		t.Fatalf("Query execution failed: %v", err)
+	}
+	return results
+}
+
+// TestQueryExecution tests query execution and search.
+func TestQueryExecution(t *testing.T) {
+	t.Parallel()
+	index, parser, executor := setupQueryTestIndex()
+
 	t.Run("simple query", func(t *testing.T) {
 		t.Parallel()
-		query, _ := parser.Parse("quick brown")
-		results, err := executor.Execute(query)
-		if err != nil {
-			t.Fatalf("Query execution failed: %v", err)
-		}
-
+		results := executeQuery(t, parser, executor, "quick brown")
 		if len(results) < 2 {
 			t.Errorf("Expected at least 2 results, got %d", len(results))
 		}
-
-		// Results should be ranked by score
 		for i := 1; i < len(results); i++ {
 			if results[i].Score > results[i-1].Score {
 				t.Error("Results not properly ranked by score")
@@ -315,106 +313,80 @@ func TestQueryExecution(t *testing.T) {
 		}
 	})
 
-	// Test phrase query
 	t.Run("phrase query", func(t *testing.T) {
 		t.Parallel()
-		query, _ := parser.Parse(`"quick brown"`)
-		results, err := executor.Execute(query)
-		if err != nil {
-			t.Fatalf("Query execution failed: %v", err)
-		}
-
-		// Should match docs with "quick brown" as consecutive terms
-		expectedMatches := []DocumentID{1, 2}
-		if len(results) != len(expectedMatches) {
-			t.Errorf("Expected %d results, got %d", len(expectedMatches), len(results))
+		results := executeQuery(t, parser, executor, `"quick brown"`)
+		if len(results) != 2 {
+			t.Errorf("Expected 2 results, got %d", len(results))
 		}
 	})
 
-	// Test AND query
 	t.Run("AND query", func(t *testing.T) {
 		t.Parallel()
-		query, _ := parser.Parse("quick AND fox")
-		results, err := executor.Execute(query)
-		if err != nil {
-			t.Fatalf("Query execution failed: %v", err)
-		}
-
-		// Should only match docs containing both "quick" and "fox"
+		results := executeQuery(t, parser, executor, "quick AND fox")
 		if len(results) < 1 {
 			t.Error("Expected at least 1 result for AND query")
 		}
 	})
 
-	// Test OR query
 	t.Run("OR query", func(t *testing.T) {
 		t.Parallel()
-		query, _ := parser.Parse("cat OR dog")
-		results, err := executor.Execute(query)
-		if err != nil {
-			t.Fatalf("Query execution failed: %v", err)
-		}
-
-		// Should match docs containing either "cat" or "dog"
+		results := executeQuery(t, parser, executor, "cat OR dog")
 		if len(results) < 2 {
 			t.Errorf("Expected at least 2 results for OR query, got %d", len(results))
 		}
 	})
 
-	// Test NOT query
 	t.Run("NOT query", func(t *testing.T) {
 		t.Parallel()
-		query, _ := parser.Parse("quick NOT fox")
-		results, err := executor.Execute(query)
-		if err != nil {
-			t.Fatalf("Query execution failed: %v", err)
-		}
-
-		// Should match docs with "quick" but not "fox"
-		for _, result := range results {
-			// Check that result doesn't contain "fox"
-			postings := index.GetPostingList("fox")
-			for _, posting := range postings {
-				if posting.DocID == result.DocID {
-					t.Error("NOT query returned document containing excluded term")
-				}
-			}
-		}
+		testQueryNotExclusion(t, parser, executor, index)
 	})
 }
 
-// TestFTS5Module tests the FTS5 virtual table module.
-func TestFTS5Module(t *testing.T) {
-	t.Parallel()
-	module := NewFTS5Module()
+func testQueryNotExclusion(t *testing.T, parser *QueryParser, executor *QueryExecutor, index *InvertedIndex) {
+	t.Helper()
+	results := executeQuery(t, parser, executor, "quick NOT fox")
+	foxPostings := index.GetPostingList("fox")
+	for _, result := range results {
+		for _, posting := range foxPostings {
+			if posting.DocID == result.DocID {
+				t.Error("NOT query returned document containing excluded term")
+			}
+		}
+	}
+}
 
-	// Test Create
-	table, schema, err := module.Create(nil, "fts5", "main", "test_fts", []string{"title", "body"})
+// TestFTS5Module tests the FTS5 virtual table module.
+// createFTS5Table creates a test FTS5 table and validates setup.
+func createFTS5Table(t *testing.T, columns []string) *FTS5Table {
+	t.Helper()
+	module := NewFTS5Module()
+	table, schema, err := module.Create(nil, "fts5", "main", "test_fts", columns)
 	if err != nil {
 		t.Fatalf("Failed to create FTS5 table: %v", err)
 	}
-
 	if table == nil {
 		t.Fatal("Expected non-nil table")
 	}
-
 	if schema == "" {
 		t.Error("Expected non-empty schema")
 	}
-
 	ftsTable, ok := table.(*FTS5Table)
 	if !ok {
 		t.Fatal("Expected FTS5Table type")
 	}
+	return ftsTable
+}
 
-	// Test column count
+func TestFTS5Module(t *testing.T) {
+	t.Parallel()
+	ftsTable := createFTS5Table(t, []string{"title", "body"})
+
 	if len(ftsTable.columns) != 2 {
 		t.Errorf("Expected 2 columns, got %d", len(ftsTable.columns))
 	}
 
-	// Test Insert
 	t.Run("insert documents", func(t *testing.T) {
-		// INSERT: argv[0]=NULL, argv[1]=NULL/rowid, argv[2+]=column values
 		rowid, err := ftsTable.Update(4, []interface{}{nil, nil, "First Document", "This is the body of the first document"})
 		if err != nil {
 			t.Fatalf("INSERT failed: %v", err)
@@ -422,7 +394,6 @@ func TestFTS5Module(t *testing.T) {
 		if rowid <= 0 {
 			t.Error("Expected positive rowid")
 		}
-
 		rowid2, err := ftsTable.Update(4, []interface{}{nil, nil, "Second Document", "Another body with different content"})
 		if err != nil {
 			t.Fatalf("INSERT failed: %v", err)
@@ -432,63 +403,54 @@ func TestFTS5Module(t *testing.T) {
 		}
 	})
 
-	// Test Open and Filter
 	t.Run("query documents", func(t *testing.T) {
-		cursor, err := ftsTable.Open()
-		if err != nil {
-			t.Fatalf("Failed to open cursor: %v", err)
-		}
-		defer cursor.Close()
-
-		// Create BestIndex info with MATCH constraint
-		info := vtab.NewIndexInfo(1)
-		info.Constraints[0].Column = 0
-		info.Constraints[0].Op = vtab.ConstraintMatch
-		info.Constraints[0].Usable = true
-
-		err = ftsTable.BestIndex(info)
-		if err != nil {
-			t.Fatalf("BestIndex failed: %v", err)
-		}
-
-		// Query with MATCH
-		err = cursor.Filter(1, "", []interface{}{"document"})
-		if err != nil {
-			t.Fatalf("Filter failed: %v", err)
-		}
-
-		// Count results
-		count := 0
-		for !cursor.EOF() {
-			// Get column value
-			val, err := cursor.Column(0)
-			if err != nil {
-				t.Errorf("Column failed: %v", err)
-			}
-			t.Logf("Result %d: %v", count, val)
-
-			count++
-			cursor.Next()
-		}
-
+		count := queryFTS5Match(t, ftsTable, "document")
 		if count < 1 {
 			t.Error("Expected at least 1 search result")
 		}
 	})
 
-	// Test Delete
 	t.Run("delete document", func(t *testing.T) {
-		// DELETE: argc=1, argv[0]=rowid
 		_, err := ftsTable.Update(1, []interface{}{int64(1)})
 		if err != nil {
 			t.Fatalf("DELETE failed: %v", err)
 		}
-
-		// Verify document was removed
 		if ftsTable.index.GetTotalDocuments() != 1 {
 			t.Errorf("Expected 1 document after delete, got %d", ftsTable.index.GetTotalDocuments())
 		}
 	})
+}
+
+// queryFTS5Match performs a MATCH query and returns the result count.
+func queryFTS5Match(t *testing.T, ftsTable *FTS5Table, query string) int {
+	t.Helper()
+	cursor, err := ftsTable.Open()
+	if err != nil {
+		t.Fatalf("Failed to open cursor: %v", err)
+	}
+	defer cursor.Close()
+
+	info := vtab.NewIndexInfo(1)
+	info.Constraints[0].Column = 0
+	info.Constraints[0].Op = vtab.ConstraintMatch
+	info.Constraints[0].Usable = true
+
+	if err := ftsTable.BestIndex(info); err != nil {
+		t.Fatalf("BestIndex failed: %v", err)
+	}
+	if err := cursor.Filter(1, "", []interface{}{query}); err != nil {
+		t.Fatalf("Filter failed: %v", err)
+	}
+
+	count := 0
+	for !cursor.EOF() {
+		if _, err := cursor.Column(0); err != nil {
+			t.Errorf("Column failed: %v", err)
+		}
+		count++
+		cursor.Next()
+	}
+	return count
 }
 
 // TestHighlightAndSnippet tests highlighting and snippet generation.

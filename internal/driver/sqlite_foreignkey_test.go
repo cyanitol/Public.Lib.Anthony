@@ -1283,40 +1283,36 @@ func fkVerifyRowCount(t *testing.T, db *sql.DB, query string, want int) {
 }
 
 // TestForeignKey_ComplexScenarios tests complex foreign key scenarios that don't fit table-driven tests
+func fkeyCircularDeferred(t *testing.T) {
+	t.Helper()
+	db := setupMemoryDB(t)
+	defer db.Close()
+
+	mustExec(t, db, "PRAGMA foreign_keys = ON")
+	mustExec(t, db, `
+		CREATE TABLE a(id INTEGER PRIMARY KEY, b_id INTEGER REFERENCES b(id) DEFERRABLE INITIALLY DEFERRED);
+		CREATE TABLE b(id INTEGER PRIMARY KEY, a_id INTEGER REFERENCES a(id) DEFERRABLE INITIALLY DEFERRED)
+	`)
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+	if _, err = tx.Exec("INSERT INTO a VALUES(1, 2)"); err != nil {
+		t.Fatalf("failed to insert into a: %v", err)
+	}
+	if _, err = tx.Exec("INSERT INTO b VALUES(2, 1)"); err != nil {
+		t.Fatalf("failed to insert into b: %v", err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Errorf("expected commit to succeed: %v", err)
+	}
+	assertRowCount(t, db, "a", 1)
+	assertRowCount(t, db, "b", 1)
+}
+
 func TestForeignKey_ComplexScenarios(t *testing.T) {
-	t.Run("circular-deferred", func(t *testing.T) {
-		db := setupMemoryDB(t)
-		defer db.Close()
-
-		mustExec(t, db, "PRAGMA foreign_keys = ON")
-		mustExec(t, db, `
-			CREATE TABLE a(id INTEGER PRIMARY KEY, b_id INTEGER REFERENCES b(id) DEFERRABLE INITIALLY DEFERRED);
-			CREATE TABLE b(id INTEGER PRIMARY KEY, a_id INTEGER REFERENCES a(id) DEFERRABLE INITIALLY DEFERRED)
-		`)
-
-		tx, err := db.Begin()
-		if err != nil {
-			t.Fatalf("failed to begin transaction: %v", err)
-		}
-
-		_, err = tx.Exec("INSERT INTO a VALUES(1, 2)")
-		if err != nil {
-			t.Fatalf("failed to insert into a: %v", err)
-		}
-
-		_, err = tx.Exec("INSERT INTO b VALUES(2, 1)")
-		if err != nil {
-			t.Fatalf("failed to insert into b: %v", err)
-		}
-
-		err = tx.Commit()
-		if err != nil {
-			t.Errorf("expected commit to succeed: %v", err)
-		}
-
-		assertRowCount(t, db, "a", 1)
-		assertRowCount(t, db, "b", 1)
-	})
+	t.Run("circular-deferred", fkeyCircularDeferred)
 
 	t.Run("cascade-cycle", func(t *testing.T) {
 		db := setupMemoryDB(t)

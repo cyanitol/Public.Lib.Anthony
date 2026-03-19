@@ -27,6 +27,42 @@ import (
 // - Join performance
 // - Vacuum and reorganization
 
+// stressPreparedLookup runs numLookups random lookups using a prepared statement.
+func stressPreparedLookup(t *testing.T, db *sql.DB, query string, numLookups, maxVal int) time.Duration {
+	t.Helper()
+	stmt, err := db.Prepare(query)
+	if err != nil {
+		t.Fatalf("prepare failed: %v", err)
+	}
+	defer stmt.Close()
+
+	start := time.Now()
+	var dummy interface{}
+	for i := 0; i < numLookups; i++ {
+		_ = stmt.QueryRow(rand.Intn(maxVal) + 1).Scan(&dummy)
+	}
+	return time.Since(start)
+}
+
+// stressBulkInsert inserts numRows using a prepared statement in a transaction.
+func stressBulkInsert(t *testing.T, db *sql.DB, insertSQL string, numRows int, argsFn func(i int) []interface{}) time.Duration {
+	t.Helper()
+	mustExec(t, db, `BEGIN`)
+	stmt, err := db.Prepare(insertSQL)
+	if err != nil {
+		t.Fatalf("prepare failed: %v", err)
+	}
+	start := time.Now()
+	for i := 1; i <= numRows; i++ {
+		if _, err := stmt.Exec(argsFn(i)...); err != nil {
+			t.Fatalf("insert %d failed: %v", i, err)
+		}
+	}
+	stmt.Close()
+	mustExec(t, db, `COMMIT`)
+	return time.Since(start)
+}
+
 // =============================================================================
 // Test 1: Bulk Insert Performance
 // From speed1.test - Large insert operations
@@ -272,21 +308,13 @@ func TestStress_RandomRowidLookup(t *testing.T) {
 	mustExec(t, db, `CREATE TABLE t1(a INTEGER PRIMARY KEY, b INTEGER, c TEXT)`)
 
 	// Populate
-	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= numRows; i++ {
+	stressBulkInsert(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, numRows, func(i int) []interface{} {
 		r := rand.Intn(500000)
-		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, i, r, fmt.Sprintf("text_%d", r))
-	}
-	mustExec(t, db, `COMMIT`)
+		return []interface{}{i, r, fmt.Sprintf("text_%d", r)}
+	})
 
-	// Random lookups
-	start := time.Now()
-	for i := 0; i < numLookups; i++ {
-		id := rand.Intn(numRows) + 1
-		rows := queryRows(t, db, `SELECT c FROM t1 WHERE a = ?`, id)
-		_ = rows
-	}
-	elapsed := time.Since(start)
+	// Random lookups using prepared statement
+	elapsed := stressPreparedLookup(t, db, `SELECT c FROM t1 WHERE a = ?`, numLookups, numRows)
 
 	t.Logf("Completed %d random rowid lookups in %v (%.0f lookups/sec)", numLookups, elapsed, float64(numLookups)/elapsed.Seconds())
 }
@@ -315,20 +343,12 @@ func TestStress_RandomIndexedLookup(t *testing.T) {
 	mustExec(t, db, `CREATE INDEX i1b ON t1(b)`)
 
 	// Populate
-	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= numRows; i++ {
-		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, i, i, fmt.Sprintf("text_%d", i))
-	}
-	mustExec(t, db, `COMMIT`)
+	stressBulkInsert(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, numRows, func(i int) []interface{} {
+		return []interface{}{i, i, fmt.Sprintf("text_%d", i)}
+	})
 
-	// Random indexed lookups
-	start := time.Now()
-	for i := 0; i < numLookups; i++ {
-		b := rand.Intn(numRows) + 1
-		rows := queryRows(t, db, `SELECT c FROM t1 WHERE b = ?`, b)
-		_ = rows
-	}
-	elapsed := time.Since(start)
+	// Random indexed lookups using prepared statement
+	elapsed := stressPreparedLookup(t, db, `SELECT c FROM t1 WHERE b = ?`, numLookups, numRows)
 
 	t.Logf("Completed %d random indexed lookups in %v (%.0f lookups/sec)", numLookups, elapsed, float64(numLookups)/elapsed.Seconds())
 }
@@ -358,19 +378,22 @@ func TestStress_TextIndexLookup(t *testing.T) {
 
 	// Populate with unique text values
 	values := make([]string, numRows)
-	mustExec(t, db, `BEGIN`)
-	for i := 0; i < numRows; i++ {
-		values[i] = fmt.Sprintf("value_%05d", rand.Intn(100000))
-		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?)`, i+1, values[i])
-	}
-	mustExec(t, db, `COMMIT`)
+	stressBulkInsert(t, db, `INSERT INTO t1 VALUES(?, ?)`, numRows, func(i int) []interface{} {
+		values[i-1] = fmt.Sprintf("value_%05d", rand.Intn(100000))
+		return []interface{}{i, values[i-1]}
+	})
 
-	// Random text lookups
+	// Random text lookups using prepared statement
+	stmt, err := db.Prepare(`SELECT a FROM t1 WHERE c = ?`)
+	if err != nil {
+		t.Fatalf("prepare failed: %v", err)
+	}
+	defer stmt.Close()
+
 	start := time.Now()
+	var dummy interface{}
 	for i := 0; i < numLookups; i++ {
-		val := values[rand.Intn(len(values))]
-		rows := queryRows(t, db, `SELECT a FROM t1 WHERE c = ?`, val)
-		_ = rows
+		_ = stmt.QueryRow(values[rand.Intn(len(values))]).Scan(&dummy)
 	}
 	elapsed := time.Since(start)
 
@@ -441,20 +464,18 @@ func TestStress_UpdateIndexedColumn(t *testing.T) {
 	mustExec(t, db, `CREATE INDEX i1b ON t1(b)`)
 
 	// Populate
-	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= numRows; i++ {
-		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, i, i*2, fmt.Sprintf("text_%d", i))
-	}
-	mustExec(t, db, `COMMIT`)
+	stressBulkInsert(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, numRows, func(i int) []interface{} {
+		return []interface{}{i, i * 2, fmt.Sprintf("text_%d", i)}
+	})
 
-	// Update indexed column
+	// Update indexed column using prepared statement
 	start := time.Now()
 	mustExec(t, db, `BEGIN`)
+	updStmt, _ := db.Prepare(`UPDATE t1 SET b = b + 1 WHERE b >= ? AND b < ?`)
 	for i := 0; i < numUpdates; i++ {
-		lwr := i * 2
-		upr := (i + 1) * 2
-		mustExec(t, db, `UPDATE t1 SET b = b + 1 WHERE b >= ? AND b < ?`, lwr, upr)
+		updStmt.Exec(i*2, (i+1)*2)
 	}
+	updStmt.Close()
 	mustExec(t, db, `COMMIT`)
 	elapsed := time.Since(start)
 
@@ -483,11 +504,9 @@ func TestStress_DeleteWithIndex(t *testing.T) {
 	mustExec(t, db, `CREATE INDEX i1b ON t1(b)`)
 
 	// Populate
-	mustExec(t, db, `BEGIN`)
-	for i := 1; i <= numRows; i++ {
-		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, i, i%100, fmt.Sprintf("text_%d", i))
-	}
-	mustExec(t, db, `COMMIT`)
+	stressBulkInsert(t, db, `INSERT INTO t1 VALUES(?, ?, ?)`, numRows, func(i int) []interface{} {
+		return []interface{}{i, i % 100, fmt.Sprintf("text_%d", i)}
+	})
 
 	// Delete with indexed condition
 	start := time.Now()
@@ -752,16 +771,29 @@ func TestStress_ConcurrentReads(t *testing.T) {
 // From threadtest - Concurrent inserts
 // =============================================================================
 
+func stressConcurrentWriter(t *testing.T, dbPath string, writerID, insertsPerWriter int, wg *sync.WaitGroup) {
+	defer wg.Done()
+	writerDB, err := sql.Open(DriverName, dbPath)
+	if err != nil {
+		t.Errorf("writer %d failed to open db: %v", writerID, err)
+		return
+	}
+	defer writerDB.Close()
+	for i := 0; i < insertsPerWriter; i++ {
+		if _, err := writerDB.Exec(`INSERT INTO t1(writer_id, value) VALUES(?, ?)`, writerID, i); err != nil {
+			t.Errorf("writer %d insert failed: %v", writerID, err)
+			return
+		}
+	}
+}
+
 func TestStress_ConcurrentInserts(t *testing.T) {
 	t.Skip("pre-existing failure - needs concurrent insert fixes")
 	if testing.Short() {
 		t.Skip("skipping stress test in short mode")
 	}
 
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "concurrent_write.db")
-
-	// Setup database
+	dbPath := filepath.Join(t.TempDir(), "concurrent_write.db")
 	setupDB, err := sql.Open(DriverName, dbPath)
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)
@@ -769,39 +801,18 @@ func TestStress_ConcurrentInserts(t *testing.T) {
 	mustExec(t, setupDB, `CREATE TABLE t1(id INTEGER PRIMARY KEY AUTOINCREMENT, writer_id INTEGER, value INTEGER)`)
 	setupDB.Close()
 
-	// Concurrent inserts
 	const numWriters = 3
 	const insertsPerWriter = 100
 
 	var wg sync.WaitGroup
 	start := time.Now()
-
 	for w := 0; w < numWriters; w++ {
 		wg.Add(1)
-		go func(writerID int) {
-			defer wg.Done()
-
-			writerDB, err := sql.Open(DriverName, dbPath)
-			if err != nil {
-				t.Errorf("writer %d failed to open db: %v", writerID, err)
-				return
-			}
-			defer writerDB.Close()
-
-			for i := 0; i < insertsPerWriter; i++ {
-				_, err := writerDB.Exec(`INSERT INTO t1(writer_id, value) VALUES(?, ?)`, writerID, i)
-				if err != nil {
-					t.Errorf("writer %d insert failed: %v", writerID, err)
-					return
-				}
-			}
-		}(w)
+		go stressConcurrentWriter(t, dbPath, w, insertsPerWriter, &wg)
 	}
-
 	wg.Wait()
 	elapsed := time.Since(start)
 
-	// Verify
 	verifyDB, err := sql.Open(DriverName, dbPath)
 	if err != nil {
 		t.Fatalf("failed to open verify db: %v", err)
@@ -809,16 +820,13 @@ func TestStress_ConcurrentInserts(t *testing.T) {
 	defer verifyDB.Close()
 
 	var count int64
-	err = verifyDB.QueryRow(`SELECT COUNT(*) FROM t1`).Scan(&count)
-	if err != nil {
+	if err := verifyDB.QueryRow(`SELECT COUNT(*) FROM t1`).Scan(&count); err != nil {
 		t.Fatalf("count query failed: %v", err)
 	}
-
 	expected := int64(numWriters * insertsPerWriter)
 	if count != expected {
 		t.Errorf("expected %d rows, got %d", expected, count)
 	}
-
 	t.Logf("Completed %d concurrent inserts with %d writers in %v (%.0f inserts/sec)",
 		expected, numWriters, elapsed, float64(expected)/elapsed.Seconds())
 }
@@ -1112,7 +1120,7 @@ func TestStress_UnionOperations(t *testing.T) {
 	for i := 1; i <= numRows; i++ {
 		mustExec(t, db, `INSERT INTO t1 VALUES(?, ?)`, i, i*2)
 	}
-	for i := numRows*3/4; i <= numRows*7/4; i++ {
+	for i := numRows * 3 / 4; i <= numRows*7/4; i++ {
 		mustExec(t, db, `INSERT INTO t2 VALUES(?, ?)`, i, i*2)
 	}
 	mustExec(t, db, `COMMIT`)

@@ -13,6 +13,57 @@ import (
 
 // TestBetweenBasicIndexUsage tests basic BETWEEN with index
 // From between.test lines 22-105
+func betweenInsertComputedRows(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for i := 1; i <= 100; i++ {
+		x := 0
+		for temp := i; temp > 1; temp /= 2 {
+			x++
+		}
+		y := i*i + 2*i + 1
+		if _, err := db.Exec("INSERT INTO t1 VALUES(?, ?, ?, ?)", i, x, y, x+y); err != nil {
+			t.Fatalf("failed to insert row %d: %v", i, err)
+		}
+	}
+}
+
+func betweenExecFatal(t *testing.T, db *sql.DB, stmts ...string) {
+	t.Helper()
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("exec failed: %v\nSQL: %s", err, s)
+		}
+	}
+}
+
+type betweenRow4 struct{ w, x, y, z int }
+
+func betweenAssertRows4(t *testing.T, db *sql.DB, query string, want []betweenRow4) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	var got []betweenRow4
+	for rows.Next() {
+		var r betweenRow4
+		if err := rows.Scan(&r.w, &r.x, &r.y, &r.z); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		got = append(got, r)
+	}
+	if len(got) != len(want) {
+		t.Errorf("got %d rows, want %d", len(got), len(want))
+		return
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d: got %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
 func TestBetweenBasicIndexUsage(t *testing.T) {
 	t.Skip("pre-existing failure - index scan returns NULL values - requires fixes to SeekGE/Column/DeferredSeek interaction")
 	tmpDir := t.TempDir()
@@ -24,73 +75,18 @@ func TestBetweenBasicIndexUsage(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Build test data with indices
-	_, err = db.Exec(`
-		CREATE TABLE t1(w int, x int, y int, z int);
-	`)
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
+	betweenExecFatal(t, db, "CREATE TABLE t1(w int, x int, y int, z int)")
+	betweenInsertComputedRows(t, db)
+	betweenExecFatal(t, db,
+		"CREATE UNIQUE INDEX i1w ON t1(w)",
+		"CREATE INDEX i1xy ON t1(x,y)",
+		"CREATE INDEX i1zyx ON t1(z,y,x)",
+	)
 
-	// Insert 100 rows with computed values
-	for i := 1; i <= 100; i++ {
-		w := i
-		x := 0
-		for temp := i; temp > 1; temp /= 2 {
-			x++
-		}
-		y := i*i + 2*i + 1
-		z := x + y
-		_, err = db.Exec("INSERT INTO t1 VALUES(?, ?, ?, ?)", w, x, y, z)
-		if err != nil {
-			t.Fatalf("failed to insert row %d: %v", i, err)
-		}
-	}
-
-	// Create indices
-	_, err = db.Exec("CREATE UNIQUE INDEX i1w ON t1(w)")
-	if err != nil {
-		t.Fatalf("failed to create index i1w: %v", err)
-	}
-	_, err = db.Exec("CREATE INDEX i1xy ON t1(x,y)")
-	if err != nil {
-		t.Fatalf("failed to create index i1xy: %v", err)
-	}
-	_, err = db.Exec("CREATE INDEX i1zyx ON t1(z,y,x)")
-	if err != nil {
-		t.Fatalf("failed to create index i1zyx: %v", err)
-	}
-
-	// Test BETWEEN on indexed column w
-	rows, err := db.Query("SELECT * FROM t1 WHERE w BETWEEN 5 AND 6 ORDER BY w")
-	if err != nil {
-		t.Fatalf("failed to query: %v", err)
-	}
-	defer rows.Close()
-
-	expected := []struct{ w, x, y, z int }{
+	betweenAssertRows4(t, db, "SELECT * FROM t1 WHERE w BETWEEN 5 AND 6 ORDER BY w", []betweenRow4{
 		{5, 2, 36, 38},
 		{6, 2, 49, 51},
-	}
-
-	i := 0
-	for rows.Next() {
-		var w, x, y, z int
-		if err := rows.Scan(&w, &x, &y, &z); err != nil {
-			t.Fatalf("failed to scan row: %v", err)
-		}
-		if i >= len(expected) {
-			t.Fatalf("unexpected extra row: w=%d", w)
-		}
-		if w != expected[i].w || x != expected[i].x || y != expected[i].y || z != expected[i].z {
-			t.Errorf("row %d: got (%d,%d,%d,%d), want (%d,%d,%d,%d)",
-				i, w, x, y, z, expected[i].w, expected[i].x, expected[i].y, expected[i].z)
-		}
-		i++
-	}
-	if i != len(expected) {
-		t.Errorf("got %d rows, want %d", i, len(expected))
-	}
+	})
 }
 
 // TestBetweenWithExpression tests BETWEEN with expressions
@@ -279,6 +275,18 @@ func betweenLeftJoinSetupDB(t *testing.T, db *sql.DB) {
 
 // betweenLeftJoinVerifyResults verifies LEFT JOIN results with NULL expectations
 func betweenLeftJoinVerifyResults(t *testing.T, db *sql.DB, query string) {
+	t.Helper()
+	x, y, a, b := betweenLeftJoinScanRow(t, db, query)
+	if !x.Valid || x.Int64 != 4 || !y.Valid || y.Int64 != 4 {
+		t.Errorf("got x=%v y=%v, want 4, 4", x, y)
+	}
+	if a.Valid || b.Valid {
+		t.Errorf("expected NULL for a and b, got a=%v b=%v", a, b)
+	}
+}
+
+func betweenLeftJoinScanRow(t *testing.T, db *sql.DB, query string) (x, y, a, b sql.NullInt64) {
+	t.Helper()
 	rows, err := db.Query(query)
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
@@ -288,18 +296,10 @@ func betweenLeftJoinVerifyResults(t *testing.T, db *sql.DB, query string) {
 	if !rows.Next() {
 		t.Fatal("expected one row")
 	}
-
-	var x, y, a, b sql.NullInt64
 	if err := rows.Scan(&x, &y, &a, &b); err != nil {
 		t.Fatalf("failed to scan: %v", err)
 	}
-
-	if !x.Valid || x.Int64 != 4 || !y.Valid || y.Int64 != 4 {
-		t.Errorf("got x=%v y=%v, want 4, 4", x, y)
-	}
-	if a.Valid || b.Valid {
-		t.Errorf("expected NULL for a and b, got a=%v b=%v", a, b)
-	}
+	return
 }
 
 // TestBetweenIntegerRange tests integer range BETWEEN

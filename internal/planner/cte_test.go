@@ -7,6 +7,36 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
+func parseCTEContextFromSQL(t *testing.T, sql string) (*CTEContext, error) {
+	t.Helper()
+	p := parser.NewParser(sql)
+	stmts, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(stmts) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(stmts))
+	}
+	selectStmt, ok := stmts[0].(*parser.SelectStmt)
+	if !ok {
+		t.Fatalf("expected SelectStmt, got %T", stmts[0])
+	}
+	return NewCTEContext(selectStmt.With)
+}
+
+func assertCTEContext(t *testing.T, ctx *CTEContext, wantCTEs int, wantRecur bool) {
+	t.Helper()
+	if ctx == nil {
+		t.Fatal("expected CTEContext, got nil")
+	}
+	if len(ctx.CTEs) != wantCTEs {
+		t.Errorf("expected %d CTEs, got %d", wantCTEs, len(ctx.CTEs))
+	}
+	if ctx.IsRecursive != wantRecur {
+		t.Errorf("expected IsRecursive = %v, got %v", wantRecur, ctx.IsRecursive)
+	}
+}
+
 // TestNewCTEContext tests creating a CTE context from a WITH clause.
 func TestNewCTEContext(t *testing.T) {
 	tests := []struct {
@@ -14,67 +44,19 @@ func TestNewCTEContext(t *testing.T) {
 		sql       string
 		wantCTEs  int
 		wantRecur bool
-		wantErr   bool
 	}{
-		{
-			name:      "simple CTE",
-			sql:       "WITH cte AS (SELECT * FROM users) SELECT * FROM cte",
-			wantCTEs:  1,
-			wantRecur: false,
-			wantErr:   false,
-		},
-		{
-			name:      "multiple CTEs",
-			sql:       "WITH a AS (SELECT 1), b AS (SELECT 2) SELECT * FROM a, b",
-			wantCTEs:  2,
-			wantRecur: false,
-			wantErr:   false,
-		},
-		{
-			name:      "recursive CTE",
-			sql:       "WITH RECURSIVE cte AS (SELECT 1 UNION ALL SELECT 2) SELECT * FROM cte",
-			wantCTEs:  1,
-			wantRecur: true,
-			wantErr:   false,
-		},
+		{"simple CTE", "WITH cte AS (SELECT * FROM users) SELECT * FROM cte", 1, false},
+		{"multiple CTEs", "WITH a AS (SELECT 1), b AS (SELECT 2) SELECT * FROM a, b", 2, false},
+		{"recursive CTE", "WITH RECURSIVE cte AS (SELECT 1 UNION ALL SELECT 2) SELECT * FROM cte", 1, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := parser.NewParser(tt.sql)
-			stmts, err := p.Parse()
+			ctx, err := parseCTEContextFromSQL(t, tt.sql)
 			if err != nil {
-				t.Fatalf("Parse failed: %v", err)
+				t.Fatalf("NewCTEContext() error = %v", err)
 			}
-
-			if len(stmts) != 1 {
-				t.Fatalf("expected 1 statement, got %d", len(stmts))
-			}
-
-			selectStmt, ok := stmts[0].(*parser.SelectStmt)
-			if !ok {
-				t.Fatalf("expected SelectStmt, got %T", stmts[0])
-			}
-
-			ctx, err := NewCTEContext(selectStmt.With)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewCTEContext() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if !tt.wantErr {
-				if ctx == nil {
-					t.Fatal("expected CTEContext, got nil")
-				}
-
-				if len(ctx.CTEs) != tt.wantCTEs {
-					t.Errorf("expected %d CTEs, got %d", tt.wantCTEs, len(ctx.CTEs))
-				}
-
-				if ctx.IsRecursive != tt.wantRecur {
-					t.Errorf("expected IsRecursive = %v, got %v", tt.wantRecur, ctx.IsRecursive)
-				}
-			}
+			assertCTEContext(t, ctx, tt.wantCTEs, tt.wantRecur)
 		})
 	}
 }
@@ -135,44 +117,46 @@ func TestCTEDependencies(t *testing.T) {
 	}
 }
 
-// TestCTEDependencyOrder tests topological sorting of CTEs.
-func TestCTEDependencyOrder(t *testing.T) {
-	sql := "WITH a AS (SELECT 1), b AS (SELECT * FROM a), c AS (SELECT * FROM b) SELECT * FROM c"
-
+func parseCTEContext(t *testing.T, sql string) *CTEContext {
+	t.Helper()
 	p := parser.NewParser(sql)
 	stmts, err := p.Parse()
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
-
 	selectStmt := stmts[0].(*parser.SelectStmt)
 	ctx, err := NewCTEContext(selectStmt.With)
 	if err != nil {
 		t.Fatalf("NewCTEContext failed: %v", err)
 	}
+	return ctx
+}
 
-	// Check that order is correct (a before b, b before c)
+func findCTEIndex(order []string, name string) int {
+	for i, n := range order {
+		if n == name {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestCTEDependencyOrder tests topological sorting of CTEs.
+func TestCTEDependencyOrder(t *testing.T) {
+	ctx := parseCTEContext(t, "WITH a AS (SELECT 1), b AS (SELECT * FROM a), c AS (SELECT * FROM b) SELECT * FROM c")
+
 	order := ctx.CTEOrder
 	if len(order) != 3 {
 		t.Fatalf("expected 3 CTEs in order, got %d", len(order))
 	}
 
-	aIdx, bIdx, cIdx := -1, -1, -1
-	for i, name := range order {
-		switch name {
-		case "a":
-			aIdx = i
-		case "b":
-			bIdx = i
-		case "c":
-			cIdx = i
-		}
-	}
+	aIdx := findCTEIndex(order, "a")
+	bIdx := findCTEIndex(order, "b")
+	cIdx := findCTEIndex(order, "c")
 
 	if aIdx == -1 || bIdx == -1 || cIdx == -1 {
 		t.Fatal("not all CTEs found in order")
 	}
-
 	if aIdx >= bIdx || bIdx >= cIdx {
 		t.Errorf("CTE order incorrect: a=%d, b=%d, c=%d", aIdx, bIdx, cIdx)
 	}
@@ -448,41 +432,21 @@ func TestPlannerWithCTEs(t *testing.T) {
 
 // TestMultipleCTEs tests planning with multiple CTEs.
 func TestMultipleCTEs(t *testing.T) {
-	sql := "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT * FROM a JOIN b) SELECT * FROM c"
-
-	p := parser.NewParser(sql)
-	stmts, err := p.Parse()
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
-	}
-
-	selectStmt := stmts[0].(*parser.SelectStmt)
-	ctx, err := NewCTEContext(selectStmt.With)
-	if err != nil {
-		t.Fatalf("NewCTEContext failed: %v", err)
-	}
+	ctx := parseCTEContext(t, "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT * FROM a JOIN b) SELECT * FROM c")
 
 	if len(ctx.CTEs) != 3 {
 		t.Errorf("expected 3 CTEs, got %d", len(ctx.CTEs))
 	}
 
-	// Check order: a and b should come before c
-	order := ctx.CTEOrder
-	cIdx := -1
-	for i, name := range order {
-		if name == "c" {
-			cIdx = i
-		}
-	}
-
+	cIdx := findCTEIndex(ctx.CTEOrder, "c")
 	if cIdx == -1 {
 		t.Fatal("CTE 'c' not found in order")
 	}
 
 	// Both a and b should appear before c
-	for i := cIdx; i < len(order); i++ {
-		if order[i] == "a" || order[i] == "b" {
-			t.Errorf("CTE '%s' appears after 'c' in order", order[i])
+	for i := cIdx; i < len(ctx.CTEOrder); i++ {
+		if ctx.CTEOrder[i] == "a" || ctx.CTEOrder[i] == "b" {
+			t.Errorf("CTE '%s' appears after 'c' in order", ctx.CTEOrder[i])
 		}
 	}
 }

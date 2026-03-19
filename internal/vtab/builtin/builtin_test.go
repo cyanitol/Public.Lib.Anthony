@@ -310,37 +310,38 @@ func TestPragmaTableInfoCursor(t *testing.T) {
 		t.Fatalf("Filter failed: %v", err)
 	}
 
-	// Should have some rows for the example table
 	if pragmaCursor.EOF() {
 		t.Error("Expected some rows for table_info")
 	}
 
-	// Test iterating through rows
+	count := iteratePragmaCursor(t, pragmaCursor)
+	if count == 0 {
+		t.Error("Expected at least one column")
+	}
+}
+
+func iteratePragmaCursor(t *testing.T, cursor *PragmaCursor) int {
+	t.Helper()
 	count := 0
-	for !pragmaCursor.EOF() {
-		// Test Column access
-		cid, err := pragmaCursor.Column(0)
+	for !cursor.EOF() {
+		cid, err := cursor.Column(0)
 		if err != nil {
 			t.Errorf("Column(0) failed: %v", err)
 		}
 		t.Logf("Column %d: cid=%v", count, cid)
 
-		name, err := pragmaCursor.Column(1)
+		name, err := cursor.Column(1)
 		if err != nil {
 			t.Errorf("Column(1) failed: %v", err)
 		}
 		t.Logf("Column %d: name=%v", count, name)
 
 		count++
-		err = pragmaCursor.Next()
-		if err != nil {
+		if err := cursor.Next(); err != nil {
 			t.Errorf("Next failed: %v", err)
 		}
 	}
-
-	if count == 0 {
-		t.Error("Expected at least one column")
-	}
+	return count
 }
 
 // TestPragmaIndexListCursor tests the pragma_index_list cursor.
@@ -366,28 +367,25 @@ func TestPragmaIndexListCursor(t *testing.T) {
 		t.Fatalf("Filter failed: %v", err)
 	}
 
-	// Test that we get at least one index
 	if pragmaCursor.EOF() {
 		t.Error("Expected at least one index for example_table")
 	}
 
-	// Test Column access
-	if !pragmaCursor.EOF() {
-		seq, err := pragmaCursor.Column(0)
-		if err != nil {
-			t.Errorf("Column(0) failed: %v", err)
-		}
-		if seq == nil {
-			t.Error("Expected non-nil seq")
-		}
+	assertPragmaColumnNotNil(t, pragmaCursor, 0, "seq")
+	assertPragmaColumnNotNil(t, pragmaCursor, 1, "name")
+}
 
-		name, err := pragmaCursor.Column(1)
-		if err != nil {
-			t.Errorf("Column(1) failed: %v", err)
-		}
-		if name == nil {
-			t.Error("Expected non-nil name")
-		}
+func assertPragmaColumnNotNil(t *testing.T, cursor *PragmaCursor, col int, label string) {
+	t.Helper()
+	if cursor.EOF() {
+		return
+	}
+	val, err := cursor.Column(col)
+	if err != nil {
+		t.Errorf("Column(%d) failed: %v", col, err)
+	}
+	if val == nil {
+		t.Errorf("Expected non-nil %s", label)
 	}
 }
 
