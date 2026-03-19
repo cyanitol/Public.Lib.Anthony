@@ -15,6 +15,18 @@ db.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)`)
 db.Exec(`INSERT INTO users (name) VALUES (?)`, "Alice")
 ```
 
+## CLI
+
+Run SQL from the command line or a file using the bundled CLI:
+
+```bash
+# Run a single query
+go run ./cmd/anthony -db mydb.sqlite -query "SELECT 1;"
+
+# Run a SQL script
+go run ./cmd/anthony -db mydb.sqlite -file schema.sql
+```
+
 ## Documentation
 
 Full documentation is in the [doc/](doc/) directory:
