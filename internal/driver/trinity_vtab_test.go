@@ -103,20 +103,18 @@ func genVTabJSONTreeTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-VTAB-022_json_tree_leaf_values",
-			skip:     "json_tree WHERE atom IS NOT NULL includes non-leaf nodes",
 			query:    `SELECT value FROM json_tree('{"x":1,"y":2}') WHERE atom IS NOT NULL ORDER BY key`,
 			wantRows: [][]interface{}{{int64(1)}, {int64(2)}},
 		},
 		{
-			name:     "REQ-VTAB-023_json_tree_with_path",
-			skip:     "json_tree with path + WHERE atom IS NOT NULL includes container node",
+			name: "REQ-VTAB-023_json_tree_with_path",
+
 			query:    `SELECT value FROM json_tree('{"a":{"b":[10,20]}}', '$.a.b') WHERE atom IS NOT NULL ORDER BY id`,
 			wantRows: [][]interface{}{{int64(10)}, {int64(20)}},
 		},
 		{
-			name:     "REQ-VTAB-024_json_tree_types",
-			skip:     "DISTINCT on json_tree types returns wrong sort order (missing DISTINCT dedup)",
-			query:    `SELECT DISTINCT type FROM json_tree('{"a":[1,"t",null]}') ORDER BY type`,
+			name:  "REQ-VTAB-024_json_tree_types",
+			query: `SELECT DISTINCT type FROM json_tree('{"a":[1,"t",null]}') ORDER BY type`,
 			wantRows: [][]interface{}{{"array"}, {"integer"}, {"null"}, {"object"}, {"text"}},
 		},
 	}

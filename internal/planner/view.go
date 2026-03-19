@@ -258,6 +258,11 @@ func hasNoComplexFeatures(sel *parser.SelectStmt) bool {
 		return false
 	}
 
+	// No DISTINCT
+	if sel.Distinct {
+		return false
+	}
+
 	// No LIMIT/OFFSET
 	if sel.Limit != nil || sel.Offset != nil {
 		return false

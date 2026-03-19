@@ -1,10 +1,19 @@
 # Anthony Roadmap (Production Readiness)
 
 ## Scope and Current Snapshot
-- Feature parity: ~80% vs reference SQLite; 27 packages all passing, 14,046 tests passing (alltests tag), 0 failures.
-- Targets: no CGO, maintain cyclomatic complexity ≤ 9, push critical package coverage to ≥80%.
+- Feature parity: ~89% trinity (1,122/1,257); 24 packages all passing, 14,072 tests passing (alltests tag), 0 failures.
+- Targets: no CGO, maintain cyclomatic complexity ≤ 9, push trinity parity to ≥95%.
 
-## Recently Completed
+## Recently Completed (v0.2.2)
+- **JSON Aggregates** - json_group_array, json_group_object as Step/Final aggregates
+- **JOIN+Aggregate Pipeline** - compile_join_agg.go for SELECT with JOINs and GROUP BY
+- **NULL-Safe GROUP BY** - OpIsNull checks for correct NULL grouping
+- **Trigger Expression Substitution** - CAST, BETWEEN, IN, CASE in trigger bodies
+- **View WHERE Filtering** - Outer WHERE applied after view materialization
+- **VTab Aggregate Routing** - TVF selects with aggregates
+- **22 Trinity Tests Unskipped** - 1,122 passing (was 1,073)
+
+## Previously Completed (v0.2.0–v0.2.1)
 - **Cyclomatic Complexity ≤9** - All functions across entire codebase
 - **Race Condition Fixes** - PlanCache.Get() (RLock→Lock+atomics), VDBE test isolation
 - **Test Isolation** - 181 hardcoded DB paths converted to t.TempDir()
@@ -23,18 +32,31 @@
 
 ## Active Workstreams
 
-1) Window Functions (Mostly Complete)
-- Compiler wired for all window functions; core functionality working.
-- 42 trinity window tests skipped as pre-existing edge cases.
-- Frame specification (ROWS/RANGE) needs edge case testing.
+1) Unskip Already-Implemented Tests
+- GROUP BY NULL (2 tests), triggers (2 tests), json_group_array/object (6 tests), JOIN+aggregate (5 tests).
+- These features are implemented; need verification and skip removal.
 
-2) Recursive CTE (In Progress)
+2) Join Edge Cases (7 tests)
+- LEFT JOIN unmatched rows, NULL handling in ON clause, empty table joins.
+- IS operator in JOIN ON clause (NULL IS NULL = true).
+
+3) HAVING, Views, DELETE Subquery (7 tests)
+- HAVING with complex aggregates.
+- Views with DISTINCT, HAVING.
+- DELETE FROM WHERE IN (SELECT ...).
+
+4) Window Functions (42 tests - largest gap)
+- Need OpWindowAggregate opcode for SUM/COUNT/AVG/MIN/MAX over frame.
+- Column mapping fix in sorter population (rowid alias).
+- PERCENT_RANK, CUME_DIST not implemented.
+- Outer ORDER BY/LIMIT after window computation.
+
+5) TVF Multi-Table FROM (5 tests)
+- Correlated TVF evaluation (per-row args from outer table).
+- New compilation path needed.
+
+6) Recursive CTE (In Progress)
 - Cursor architecture being reworked for correct anchor/recursive member interaction.
-- Three-ephemeral-table approach (result, queue, next) implemented but cursor scope broken.
-
-3) Trigger Completion
-- OLD row extraction from cursors for DELETE/UPDATE triggers.
-- INSTEAD OF trigger execution on views.
 
 ## Future Workstreams
 

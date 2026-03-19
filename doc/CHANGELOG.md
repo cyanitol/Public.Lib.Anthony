@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-03-16
+
+### Added
+- **JSON Aggregate Functions** - json_group_array and json_group_object as Step/Final aggregates
+- **JOIN+Aggregate Compilation** - New compile_join_agg.go pipeline for SELECT with JOINs and GROUP BY
+- **NULL-Safe GROUP BY** - Explicit OpIsNull checks before OpNe for correct NULL grouping
+- **Trigger Expression Substitution** - NEW.col resolution in CAST, BETWEEN, IN, CASE, parenthesized, COLLATE expressions
+- **View WHERE Filtering** - Outer WHERE clause applied after view materialization
+- **VTab Aggregate Detection** - Aggregate queries over TVF selects routed through aggregate pipeline
+
+### Fixed
+- JSON float formatting regression: integer-valued floats in nested structures no longer wrapped as "2.0"
+- JSON type detection: json_type correctly distinguishes integer vs real using UseNumber decoder
+- JSON error handling: json() with invalid input returns error per SQLite spec (was returning NULL)
+- Join cursor close ordering: all OpClose emitted after outermost loop to prevent use-after-close
+- LEFT JOIN cursor guards: skip OpClose for temp tables to prevent double-close
+
+### Test Status
+- **14,072** tests passing across all packages (with `alltests` tag)
+- **816** tests skipped (135 trinity, 681 main suite)
+- **0** failures
+- **24** packages all passing
+- **1,122** trinity tests passing (was 1,073), **135** skipped (was 161)
+- 22 previously-skipped trinity tests now passing
+
+---
+
+## [Unreleased]
+
 ### Added
 - **Trigger Runtime** - Complete BEFORE/AFTER trigger execution for INSERT/UPDATE/DELETE
   - WHEN clause evaluation (both true and false paths)

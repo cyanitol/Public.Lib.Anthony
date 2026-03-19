@@ -1156,6 +1156,12 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 	// Open table for writing (cursor 0)
 	vm.AddOp(vdbe.OpOpenWrite, 0, int(table.RootPage), len(table.Columns))
 
+	// Pre-materialise subqueries in the WHERE clause so they are evaluated
+	// once before the delete loop rather than re-evaluated per row.
+	if stmt.Where != nil {
+		stmt.Where = s.materializeSubqueries(vm, stmt.Where)
+	}
+
 	// Start iteration from beginning
 	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
 
@@ -1260,6 +1266,101 @@ func countNonRowidCols(table *schema.Table) int {
 		}
 	}
 	return count
+}
+
+// ============================================================================
+// Subquery Pre-materialisation for DML
+// ============================================================================
+
+// materializeSubqueries walks an expression tree and replaces SubqueryExpr
+// nodes with LiteralExpr nodes by executing the subquery once.  This prevents
+// scalar subqueries from being re-evaluated inside a DML loop.
+func (s *Stmt) materializeSubqueries(vm *vdbe.VDBE, e parser.Expression) parser.Expression {
+	switch v := e.(type) {
+	case *parser.SubqueryExpr:
+		return s.evalSubqueryToLiteral(vm, v)
+	case *parser.BinaryExpr:
+		return s.materializeBinaryExpr(vm, v)
+	case *parser.UnaryExpr:
+		return s.materializeUnaryExpr(vm, v)
+	case *parser.ParenExpr:
+		return s.materializeParenExpr(vm, v)
+	default:
+		return e
+	}
+}
+
+// evalSubqueryToLiteral executes a scalar subquery and returns a LiteralExpr.
+func (s *Stmt) evalSubqueryToLiteral(vm *vdbe.VDBE, sq *parser.SubqueryExpr) parser.Expression {
+	if sq.Select == nil {
+		return sq
+	}
+	subVM := vdbe.New()
+	subVM.Ctx = vm.Ctx
+	compiled, err := s.compileSelect(subVM, sq.Select, nil)
+	if err != nil {
+		return sq // fallback: keep original
+	}
+	numCols := len(compiled.ResultCols)
+	if numCols == 0 {
+		numCols = 1
+	}
+	rows, err := s.collectRows(compiled, numCols, "DML subquery materialise")
+	if err != nil || len(rows) == 0 || len(rows[0]) == 0 {
+		return &parser.LiteralExpr{Type: parser.LiteralNull, Value: "NULL"}
+	}
+	return goValueToLiteral(rows[0][0])
+}
+
+// goValueToLiteral converts a Go value to a parser.LiteralExpr.
+func goValueToLiteral(val interface{}) *parser.LiteralExpr {
+	switch v := val.(type) {
+	case nil:
+		return &parser.LiteralExpr{Type: parser.LiteralNull, Value: "NULL"}
+	case int64:
+		return &parser.LiteralExpr{Type: parser.LiteralInteger, Value: strconv.FormatInt(v, 10)}
+	case float64:
+		return &parser.LiteralExpr{Type: parser.LiteralFloat, Value: strconv.FormatFloat(v, 'g', -1, 64)}
+	case string:
+		return &parser.LiteralExpr{Type: parser.LiteralString, Value: v}
+	default:
+		return &parser.LiteralExpr{Type: parser.LiteralNull, Value: "NULL"}
+	}
+}
+
+// materializeBinaryExpr recursively materialises subqueries in a BinaryExpr.
+func (s *Stmt) materializeBinaryExpr(vm *vdbe.VDBE, v *parser.BinaryExpr) parser.Expression {
+	newL := s.materializeSubqueries(vm, v.Left)
+	newR := s.materializeSubqueries(vm, v.Right)
+	if newL == v.Left && newR == v.Right {
+		return v
+	}
+	cp := *v
+	cp.Left = newL
+	cp.Right = newR
+	return &cp
+}
+
+// materializeUnaryExpr recursively materialises subqueries in a UnaryExpr.
+func (s *Stmt) materializeUnaryExpr(vm *vdbe.VDBE, v *parser.UnaryExpr) parser.Expression {
+	newE := s.materializeSubqueries(vm, v.Expr)
+	if newE == v.Expr {
+		return v
+	}
+	cp := *v
+	cp.Expr = newE
+	return &cp
+}
+
+// materializeParenExpr recursively materialises subqueries in a ParenExpr.
+func (s *Stmt) materializeParenExpr(vm *vdbe.VDBE, v *parser.ParenExpr) parser.Expression {
+	newE := s.materializeSubqueries(vm, v.Expr)
+	if newE == v.Expr {
+		return v
+	}
+	cp := *v
+	cp.Expr = newE
+	return &cp
 }
 
 // ============================================================================

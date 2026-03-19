@@ -1,14 +1,14 @@
-TODO - Public.Lib.Anthony (Go SQLite) v0.2.2-dev
+TODO - Public.Lib.Anthony (Go SQLite) v0.2.3-dev
 =================================================
 
-Status: 10 test failures (7 regressions from JSON changes, 3 pre-existing).
-        3169 passing, 785 skipped in driver (alltests).
-        1093 trinity passing, 159 skipped, 3 failing.
-        25 other packages all passing.
+Status: 0 test failures.
+        3203 passing, 761 skipped in driver (alltests).
+        1122 trinity passing, 135 skipped, 0 failing.
+        24 other packages all passing.
         Last updated: 2026-03-16.
 
-Goal: Reach 90% feature parity (currently ~80%). Fix all 12 root causes
-covering the 99 originally-skipped trinity tests. Commit as v0.2.2.
+Goal: Reach 95% trinity parity (currently ~89%). Fix remaining 135 skipped
+trinity tests. Next release: v0.2.3.
 
 ##########################################################################
 # PHASE 1: Fix Regressions (introduced by v0.2.2-dev JSON changes)

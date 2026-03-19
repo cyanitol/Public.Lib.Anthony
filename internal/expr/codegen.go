@@ -50,8 +50,10 @@ type binarySpecialHandler func(g *CodeGenerator, leftReg, rightReg int) (int, er
 // binarySpecialHandlers maps operators that require special code paths to
 // their handler functions.
 var binarySpecialHandlers = map[parser.BinaryOp]binarySpecialHandler{
-	parser.OpLike: (*CodeGenerator).generateLikeExpr,
-	parser.OpGlob: (*CodeGenerator).generateGlobExpr,
+	parser.OpLike:  (*CodeGenerator).generateLikeExpr,
+	parser.OpGlob:  (*CodeGenerator).generateGlobExpr,
+	parser.OpIs:    (*CodeGenerator).generateIsExpr,
+	parser.OpIsNot: (*CodeGenerator).generateIsNotExpr,
 }
 
 // literalHandler is the signature for literal-type dispatch handlers.
@@ -1587,6 +1589,78 @@ func (g *CodeGenerator) generateGlobExpr(leftReg, rightReg int) (int, error) {
 	g.vdbe.Program[addr].P4Type = vdbe.P4Static
 	g.vdbe.Program[addr].P5 = 2
 	g.vdbe.SetComment(addr, "GLOB")
+	return resultReg, nil
+}
+
+// generateIsExpr generates null-safe IS comparison.
+// NULL IS NULL → 1, NULL IS x → 0, x IS NULL → 0, else normal equality.
+func (g *CodeGenerator) generateIsExpr(leftReg, rightReg int) (int, error) {
+	return g.generateNullSafeCompare(leftReg, rightReg, true)
+}
+
+// generateIsNotExpr generates null-safe IS NOT comparison.
+// NULL IS NOT NULL → 0, NULL IS NOT x → 1, x IS NOT NULL → 1, else normal inequality.
+func (g *CodeGenerator) generateIsNotExpr(leftReg, rightReg int) (int, error) {
+	return g.generateNullSafeCompare(leftReg, rightReg, false)
+}
+
+// generateNullSafeCompare emits bytecode for IS (eq=true) or IS NOT (eq=false).
+// Sequence: check left null, check right null, compare non-null values.
+func (g *CodeGenerator) generateNullSafeCompare(leftReg, rightReg int, eq bool) (int, error) {
+	resultReg := g.AllocReg()
+
+	// Check if left is NULL → jump to leftIsNull
+	leftNullAddr := g.vdbe.AddOp(vdbe.OpIsNull, leftReg, 0, 0)
+
+	// Left is NOT NULL: check if right is NULL
+	rightNullAddr := g.vdbe.AddOp(vdbe.OpIsNull, rightReg, 0, 0)
+
+	// Both non-NULL: do normal comparison
+	if eq {
+		g.vdbe.AddOp(vdbe.OpEq, leftReg, rightReg, resultReg)
+	} else {
+		g.vdbe.AddOp(vdbe.OpNe, leftReg, rightReg, resultReg)
+	}
+	doneAddr := g.vdbe.AddOp(vdbe.OpGoto, 0, 0, 0)
+
+	// rightIsNull: left NOT NULL, right NULL → IS=0, IS NOT=1
+	rightNullResult := g.vdbe.NumOps()
+	g.vdbe.Program[rightNullAddr].P2 = rightNullResult
+	if eq {
+		g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
+	} else {
+		g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
+	}
+	doneAddr2 := g.vdbe.AddOp(vdbe.OpGoto, 0, 0, 0)
+
+	// leftIsNull: check if right is also NULL
+	leftNullBlock := g.vdbe.NumOps()
+	g.vdbe.Program[leftNullAddr].P2 = leftNullBlock
+	rightAlsoNullAddr := g.vdbe.AddOp(vdbe.OpIsNull, rightReg, 0, 0)
+
+	// left NULL, right NOT NULL → IS=0, IS NOT=1
+	if eq {
+		g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
+	} else {
+		g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
+	}
+	doneAddr3 := g.vdbe.AddOp(vdbe.OpGoto, 0, 0, 0)
+
+	// Both NULL → IS=1, IS NOT=0
+	bothNullBlock := g.vdbe.NumOps()
+	g.vdbe.Program[rightAlsoNullAddr].P2 = bothNullBlock
+	if eq {
+		g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
+	} else {
+		g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
+	}
+
+	// Patch all done gotos
+	endAddr := g.vdbe.NumOps()
+	g.vdbe.Program[doneAddr].P2 = endAddr
+	g.vdbe.Program[doneAddr2].P2 = endAddr
+	g.vdbe.Program[doneAddr3].P2 = endAddr
+
 	return resultReg, nil
 }
 

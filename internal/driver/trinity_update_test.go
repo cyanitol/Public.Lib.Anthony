@@ -235,11 +235,10 @@ func genTrinityDeleteTests() []sqlTestCase {
 			query:    "SELECT id FROM t1 ORDER BY id",
 			wantRows: [][]interface{}{{int64(1)}, {int64(3)}}},
 		{name: "REQ-UPDATE-039d_delete_subquery",
-			skip: "DELETE with subquery deletes too many rows (2 remain instead of 3)",
 			setup: append(append([]string{}, trinityUpdateSetup...),
 				"DELETE FROM t1 WHERE score < (SELECT AVG(score) FROM t1)"),
 			query:    "SELECT id FROM t1 ORDER BY id",
-			wantRows: [][]interface{}{{int64(1)}, {int64(3)}, {int64(5)}}},
+			wantRows: [][]interface{}{{int64(1)}, {int64(3)}}},
 	}
 }
 

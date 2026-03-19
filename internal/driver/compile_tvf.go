@@ -4,6 +4,7 @@ package driver
 import (
 	"database/sql/driver"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
@@ -61,9 +62,28 @@ func (s *Stmt) compileSelectWithTVF(vm *vdbe.VDBE, stmt *parser.SelectStmt, args
 
 	// Resolve output columns
 	tvfCols := tvf.Columns()
+
+	// Apply WHERE filter before projection
+	if stmt.Where != nil {
+		rows = filterTVFRows(rows, stmt.Where, tvfCols)
+	}
+
 	outCols, colIndices := resolveTVFColumns(stmt.Columns, tvfCols)
 
-	return emitTVFBytecode(vm, rows, outCols, colIndices)
+	// Project rows to output columns
+	projected := projectTVFRows(rows, colIndices)
+
+	// Apply DISTINCT before ORDER BY
+	if stmt.Distinct {
+		projected = deduplicateTVFRows(projected)
+	}
+
+	// Apply ORDER BY
+	if len(stmt.OrderBy) > 0 {
+		sortTVFRows(projected, stmt.OrderBy, outCols)
+	}
+
+	return emitTVFProjectedBytecode(vm, projected, outCols)
 }
 
 // evalTVFArgs converts parser expressions to functions.Value arguments.
@@ -269,6 +289,177 @@ func rewriteFromForTVF(ref *parser.TableOrSubquery, tempName string) {
 	ref.FuncArgs = nil
 }
 
+// projectTVFRows projects full TVF rows down to selected output columns.
+func projectTVFRows(rows [][]functions.Value, colIndices []int) [][]functions.Value {
+	projected := make([][]functions.Value, len(rows))
+	for i, row := range rows {
+		out := make([]functions.Value, len(colIndices))
+		for j, srcIdx := range colIndices {
+			if srcIdx >= 0 && srcIdx < len(row) {
+				out[j] = row[srcIdx]
+			} else {
+				out[j] = functions.NewNullValue()
+			}
+		}
+		projected[i] = out
+	}
+	return projected
+}
+
+// deduplicateTVFRows removes duplicate rows using string-key dedup.
+func deduplicateTVFRows(rows [][]functions.Value) [][]functions.Value {
+	seen := make(map[string]struct{}, len(rows))
+	result := make([][]functions.Value, 0, len(rows))
+	for _, row := range rows {
+		key := tvfRowKey(row)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, row)
+	}
+	return result
+}
+
+// tvfRowKey builds a string key for a row for deduplication.
+func tvfRowKey(row []functions.Value) string {
+	parts := make([]string, len(row))
+	for i, v := range row {
+		if v == nil || v.IsNull() {
+			parts[i] = "\x00null"
+		} else {
+			parts[i] = fmt.Sprintf("%d:%s", v.Type(), v.AsString())
+		}
+	}
+	return strings.Join(parts, "\x01")
+}
+
+// tvfSortKey describes one ORDER BY column for TVF row sorting.
+type tvfSortKey struct {
+	colIdx int
+	desc   bool
+}
+
+// sortTVFRows sorts projected rows according to ORDER BY terms.
+func sortTVFRows(rows [][]functions.Value, orderBy []parser.OrderingTerm, outCols []string) {
+	keys := make([]tvfSortKey, 0, len(orderBy))
+	for _, term := range orderBy {
+		idx := resolveTVFOrderByCol(term.Expr, outCols)
+		if idx < 0 {
+			continue
+		}
+		keys = append(keys, tvfSortKey{colIdx: idx, desc: !term.Asc})
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		return tvfRowLess(rows[i], rows[j], keys)
+	})
+}
+
+// tvfRowLess returns true if row a should sort before row b.
+func tvfRowLess(a, b []functions.Value, keys []tvfSortKey) bool {
+	for _, k := range keys {
+		cmp := compareFuncValues(a[k.colIdx], b[k.colIdx])
+		if cmp == 0 {
+			continue
+		}
+		if k.desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	}
+	return false
+}
+
+// resolveTVFOrderByCol maps an ORDER BY expression to an output column index.
+func resolveTVFOrderByCol(e parser.Expression, outCols []string) int {
+	if lit, ok := e.(*parser.LiteralExpr); ok {
+		var n int
+		if _, err := fmt.Sscanf(lit.Value, "%d", &n); err == nil && n >= 1 && n <= len(outCols) {
+			return n - 1
+		}
+	}
+	if ident, ok := e.(*parser.IdentExpr); ok {
+		lower := strings.ToLower(ident.Name)
+		for i, c := range outCols {
+			if strings.ToLower(c) == lower {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// compareFuncValues compares two functions.Value using SQLite ordering:
+// NULL < integers/floats < text < blob.
+func compareFuncValues(a, b functions.Value) int {
+	aNil := a == nil || a.IsNull()
+	bNil := b == nil || b.IsNull()
+	if aNil && bNil {
+		return 0
+	}
+	if aNil {
+		return -1
+	}
+	if bNil {
+		return 1
+	}
+	// Compare by type affinity, then by value
+	aType, bType := a.Type(), b.Type()
+	if aType != bType {
+		return int(aType) - int(bType)
+	}
+	return compareByType(a, b, aType)
+}
+
+// compareByType compares two non-null values of the same type.
+func compareByType(a, b functions.Value, typ functions.ValueType) int {
+	switch typ {
+	case functions.TypeInteger:
+		ai, bi := a.AsInt64(), b.AsInt64()
+		if ai < bi {
+			return -1
+		}
+		if ai > bi {
+			return 1
+		}
+		return 0
+	case functions.TypeFloat:
+		af, bf := a.AsFloat64(), b.AsFloat64()
+		if af < bf {
+			return -1
+		}
+		if af > bf {
+			return 1
+		}
+		return 0
+	default:
+		return strings.Compare(a.AsString(), b.AsString())
+	}
+}
+
+// emitTVFProjectedBytecode generates VDBE bytecode for pre-projected TVF rows.
+func emitTVFProjectedBytecode(vm *vdbe.VDBE, rows [][]functions.Value, colNames []string) (*vdbe.VDBE, error) {
+	numCols := len(colNames)
+	vm.AllocMemory(numCols + 10)
+	vm.ResultCols = colNames
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	for _, row := range rows {
+		for i := 0; i < numCols; i++ {
+			if i < len(row) {
+				emitFuncValue(vm, row[i], i)
+			} else {
+				vm.AddOp(vdbe.OpNull, 0, i, 0)
+			}
+		}
+		vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+	}
+
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
 // emitTVFBytecode generates VDBE bytecode that outputs pre-computed TVF rows.
 func emitTVFBytecode(vm *vdbe.VDBE, rows [][]functions.Value, colNames []string, colIndices []int) (*vdbe.VDBE, error) {
 	numCols := len(colNames)
@@ -329,5 +520,93 @@ func emitIntValue(vm *vdbe.VDBE, n int64, reg int) {
 		vm.AddOp(vdbe.OpInteger, int(n), reg, 0)
 	} else {
 		vm.AddOpWithP4Int64(vdbe.OpInt64, 0, reg, 0, n)
+	}
+}
+
+// filterTVFRows filters TVF rows by evaluating a WHERE expression.
+func filterTVFRows(rows [][]functions.Value, where parser.Expression, tvfCols []string) [][]functions.Value {
+	var result [][]functions.Value
+	for _, row := range rows {
+		if evalTVFWhere(where, row, tvfCols) {
+			result = append(result, row)
+		}
+	}
+	return result
+}
+
+// evalTVFWhere evaluates a WHERE expression against a single TVF row.
+func evalTVFWhere(expr parser.Expression, row []functions.Value, cols []string) bool {
+	switch e := expr.(type) {
+	case *parser.UnaryExpr:
+		return evalTVFUnary(e, row, cols)
+	case *parser.BinaryExpr:
+		return evalTVFBinary(e, row, cols)
+	default:
+		return true // conservative: include row for unhandled expressions
+	}
+}
+
+// evalTVFUnary evaluates a unary expression (IS NULL, IS NOT NULL) against a TVF row.
+func evalTVFUnary(e *parser.UnaryExpr, row []functions.Value, cols []string) bool {
+	val := resolveTVFValue(e.Expr, row, cols)
+	isNull := val == nil || val.IsNull()
+	switch e.Op {
+	case parser.OpIsNull:
+		return isNull
+	case parser.OpNotNull:
+		return !isNull
+	default:
+		return true
+	}
+}
+
+// evalTVFBinary evaluates a binary expression against a TVF row.
+func evalTVFBinary(e *parser.BinaryExpr, row []functions.Value, cols []string) bool {
+	switch e.Op {
+	case parser.OpAnd:
+		return evalTVFWhere(e.Left, row, cols) && evalTVFWhere(e.Right, row, cols)
+	case parser.OpOr:
+		return evalTVFWhere(e.Left, row, cols) || evalTVFWhere(e.Right, row, cols)
+	default:
+		left := resolveTVFValue(e.Left, row, cols)
+		right := resolveTVFValue(e.Right, row, cols)
+		return evalTVFComparison(e.Op, left, right)
+	}
+}
+
+// evalTVFComparison evaluates a comparison between two TVF values.
+func evalTVFComparison(op parser.BinaryOp, left, right functions.Value) bool {
+	cmp := compareFuncValues(left, right)
+	switch op {
+	case parser.OpEq:
+		return cmp == 0
+	case parser.OpNe:
+		return cmp != 0
+	case parser.OpLt:
+		return cmp < 0
+	case parser.OpGt:
+		return cmp > 0
+	case parser.OpLe:
+		return cmp <= 0
+	case parser.OpGe:
+		return cmp >= 0
+	default:
+		return true
+	}
+}
+
+// resolveTVFValue resolves an expression to a functions.Value from a TVF row.
+func resolveTVFValue(expr parser.Expression, row []functions.Value, cols []string) functions.Value {
+	switch e := expr.(type) {
+	case *parser.IdentExpr:
+		idx := findTVFColIndex(e.Name, cols)
+		if idx >= 0 && idx < len(row) {
+			return row[idx]
+		}
+		return functions.NewNullValue()
+	case *parser.LiteralExpr:
+		return literalToFuncValue(e)
+	default:
+		return functions.NewNullValue()
 	}
 }

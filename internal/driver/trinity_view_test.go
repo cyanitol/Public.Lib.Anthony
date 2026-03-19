@@ -186,7 +186,6 @@ func genViewAdvancedTests() []sqlTestCase {
 		},
 		{
 			name: "REQ-VIEW-034_view_with_distinct",
-			skip: "DISTINCT in view definition not applied, returns duplicates",
 			setup: []string{
 				"CREATE TABLE vd1(a INTEGER)",
 				"INSERT INTO vd1 VALUES(1)", "INSERT INTO vd1 VALUES(1)", "INSERT INTO vd1 VALUES(2)",

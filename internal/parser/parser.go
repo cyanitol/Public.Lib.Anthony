@@ -3101,17 +3101,17 @@ func (p *Parser) parseIsExpression(left Expression) (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &BinaryExpr{Left: left, Op: OpNe, Right: right}, nil
+		return &BinaryExpr{Left: left, Op: OpIsNot, Right: right}, nil
 	}
 	if p.match(TK_NULL) {
 		return &UnaryExpr{Op: OpIsNull, Expr: left}, nil
 	}
-	// IS comparison
+	// IS comparison (null-safe equality)
 	right, err := p.parseBitwiseExpression()
 	if err != nil {
 		return nil, err
 	}
-	return &BinaryExpr{Left: left, Op: OpEq, Right: right}, nil
+	return &BinaryExpr{Left: left, Op: OpIs, Right: right}, nil
 }
 
 // parseInExpression parses IN or NOT IN expressions.

@@ -744,6 +744,8 @@ const (
 	OpGlob
 	OpRegexp
 	OpMatch
+	OpIs    // a IS b  (null-safe equality)
+	OpIsNot // a IS NOT b (null-safe inequality)
 )
 
 var binaryOpStrings = map[BinaryOp]string{
@@ -769,6 +771,8 @@ var binaryOpStrings = map[BinaryOp]string{
 	OpGlob:   "GLOB",
 	OpRegexp: "REGEXP",
 	OpMatch:  "MATCH",
+	OpIs:     "IS",
+	OpIsNot:  "IS NOT",
 }
 
 func (o BinaryOp) String() string {
