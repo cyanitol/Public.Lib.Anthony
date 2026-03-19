@@ -57,6 +57,56 @@ func SafeCastIntToUint32(v int) (uint32, error) {
 	return uint32(v), nil
 }
 
+// SafeMultiplyUint32 safely multiplies two uint32 values with overflow detection.
+func SafeMultiplyUint32(a, b uint32) (uint32, error) {
+	if a == 0 || b == 0 {
+		return 0, nil
+	}
+	result := a * b
+	if result/a != b {
+		return 0, ErrIntegerOverflow
+	}
+	return result, nil
+}
+
+// ValidateBufferAccess validates that an access at offset with given length is
+// within the bounds of the buffer, preventing buffer overflow.
+func ValidateBufferAccess(buf []byte, offset, length int) error {
+	if offset < 0 || length < 0 {
+		return ErrBufferOverflow
+	}
+	if offset > len(buf) || length > len(buf)-offset {
+		return ErrBufferOverflow
+	}
+	return nil
+}
+
+// ValidateExpressionDepth checks that an expression depth is within limits.
+func ValidateExpressionDepth(config *SecurityConfig, depth int) error {
+	if config == nil {
+		config = DefaultSecurityConfig()
+	}
+	if depth > config.MaxExpressionDepth {
+		return ErrExprDepthExceeds
+	}
+	return nil
+}
+
+// SanitizeIdentifier validates an identifier for dangerous characters.
+// Returns the identifier unchanged if valid, or an error if it contains
+// null bytes or control characters.
+func SanitizeIdentifier(ident string) (string, error) {
+	if len(ident) == 0 {
+		return "", ErrEmptyIdentifier
+	}
+	for _, char := range ident {
+		if isControlChar(char) {
+			return "", ErrNullByte
+		}
+	}
+	return ident, nil
+}
+
 // ValidateUsableSize checks that usableSize is large enough for B-tree operations
 // Minimum usable size is 35 bytes (based on SQLite's calculation requirements)
 const MinUsableSize = 35

@@ -140,7 +140,7 @@ func (p *Pager) replaceForVacuumInPlace(tempFilename string) error {
 		return fmt.Errorf("failed to rename vacuumed database: %w", err)
 	}
 
-	file, err := os.OpenFile(p.filename, os.O_RDWR|os.O_CREATE, 0644)
+	file, err := os.OpenFile(p.filename, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to reopen database: %w", err)
 	}

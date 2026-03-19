@@ -14,6 +14,8 @@ type SecurityConfig struct {
 	CreateMode         os.FileMode
 	DirMode            os.FileMode
 	MaxAttachedDBs     int
+	MaxPathLength      int
+	MaxExpressionDepth int
 }
 
 func DefaultSecurityConfig() *SecurityConfig {
@@ -26,6 +28,8 @@ func DefaultSecurityConfig() *SecurityConfig {
 		CreateMode:         0600,
 		DirMode:            0700,
 		MaxAttachedDBs:     10,
+		MaxPathLength:      4096,
+		MaxExpressionDepth: MaxExprDepth,
 	}
 }
 
@@ -44,6 +48,8 @@ func (c *SecurityConfig) Clone() *SecurityConfig {
 		CreateMode:         c.CreateMode,
 		DirMode:            c.DirMode,
 		MaxAttachedDBs:     c.MaxAttachedDBs,
+		MaxPathLength:      c.MaxPathLength,
+		MaxExpressionDepth: c.MaxExpressionDepth,
 	}
 	if len(c.AllowedSubdirs) > 0 {
 		clone.AllowedSubdirs = make([]string, len(c.AllowedSubdirs))

@@ -13,4 +13,7 @@ var (
 	ErrIntegerOverflow  = errors.New("security: integer overflow detected")
 	ErrIntegerUnderflow = errors.New("security: integer underflow detected")
 	ErrBufferOverflow   = errors.New("security: buffer overflow")
+	ErrPathTooLong      = errors.New("security: path exceeds maximum length")
+	ErrExprDepthExceeds = errors.New("security: expression depth exceeds limit")
+	ErrEmptyIdentifier  = errors.New("security: empty identifier")
 )

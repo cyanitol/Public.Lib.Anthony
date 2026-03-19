@@ -275,7 +275,9 @@ func freeOverflowChain(bt *Btree, firstPage uint32, usableSize uint32) error {
 		// Free the current page
 		// In a full implementation, this would add the page to a freelist
 		// For now, we just remove it from the page cache
+		bt.mu.Lock()
 		delete(bt.Pages, currentPage)
+		bt.mu.Unlock()
 
 		// Move to next page
 		currentPage = nextPage

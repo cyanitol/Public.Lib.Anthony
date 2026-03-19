@@ -51,6 +51,12 @@ func (m *MultiStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (
 		return nil, err
 	}
 
+	// Acquire the shared write mutex first to serialize write operations across
+	// all connections sharing the same database, preventing data races on page
+	// buffers between concurrent VM execution and commit/writePage.
+	m.conn.writeMu.Lock()
+	defer m.conn.writeMu.Unlock()
+
 	m.conn.mu.Lock()
 	defer m.conn.mu.Unlock()
 

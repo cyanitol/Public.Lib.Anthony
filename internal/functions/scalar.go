@@ -557,6 +557,10 @@ func iifFunc(args []Value) (Value, error) {
 	return args[2], nil
 }
 
+// maxBlobSize is the maximum allowed blob size (1 GiB), matching SQLite's
+// default SQLITE_MAX_LENGTH.
+const maxBlobSize = 1_000_000_000
+
 // zeroblobFunc implements zeroblob(N)
 // Returns a blob of N zero bytes
 func zeroblobFunc(args []Value) (Value, error) {
@@ -567,6 +571,9 @@ func zeroblobFunc(args []Value) (Value, error) {
 	n := args[0].AsInt64()
 	if n < 0 {
 		n = 0
+	}
+	if n > maxBlobSize {
+		return nil, fmt.Errorf("zeroblob(%d) exceeds maximum blob size of %d bytes", n, maxBlobSize)
 	}
 
 	blob := make([]byte, n)
@@ -615,7 +622,6 @@ func compareValues(a, b Value) int {
 	}
 	return 0
 }
-
 
 // likelyFunc implements likely(X)
 // Returns the argument X unchanged. It's a hint to the query planner that X is probably TRUE.

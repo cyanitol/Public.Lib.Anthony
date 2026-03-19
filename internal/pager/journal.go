@@ -2,6 +2,7 @@
 package pager
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -447,11 +448,14 @@ func (j *Journal) IsOpen() bool {
 	return j.file != nil
 }
 
-// generateNonce generates a random nonce for the journal.
+// generateNonce generates a cryptographically random nonce for the journal.
 func generateNonce() uint32 {
-	// In a real implementation, this would use crypto/rand
-	// For now, use a simple deterministic value
-	return 0x12345678
+	var buf [4]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		// Fallback: use a non-zero value if crypto/rand fails (extremely unlikely)
+		return 0x12345678
+	}
+	return binary.BigEndian.Uint32(buf[:])
 }
 
 // Truncate truncates the journal file to zero length.

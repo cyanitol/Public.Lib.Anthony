@@ -186,6 +186,9 @@ func randomblobFunc(args []Value) (Value, error) {
 	if n < 1 {
 		n = 1
 	}
+	if n > maxBlobSize {
+		return nil, fmt.Errorf("randomblob(%d) exceeds maximum blob size of %d bytes", n, maxBlobSize)
+	}
 
 	blob := make([]byte, n)
 	if _, err := rand.Read(blob); err != nil {

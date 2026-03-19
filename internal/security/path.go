@@ -17,6 +17,11 @@ func ValidateDatabasePath(path string, config *SecurityConfig) (string, error) {
 		config = DefaultSecurityConfig()
 	}
 
+	// Layer 0: Check path length
+	if config.MaxPathLength > 0 && len(path) > config.MaxPathLength {
+		return "", ErrPathTooLong
+	}
+
 	// Layer 1: Block malicious characters and patterns
 	if err := validatePathCharacters(path, config); err != nil {
 		return "", err
