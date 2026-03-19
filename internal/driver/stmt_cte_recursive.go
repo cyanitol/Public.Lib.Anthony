@@ -20,6 +20,8 @@ type recursiveCTEState struct {
 	resultTable  *schema.Table
 	queueTable   *schema.Table
 	nextTable    *schema.Table
+	dedupSetID   int  // DistinctSets key for UNION dedup (-2 = none)
+	isUnion      bool // true for UNION (dedup), false for UNION ALL
 }
 
 // compileRecursiveCTEBytecode generates runtime bytecode for a recursive CTE.
@@ -32,6 +34,11 @@ func (s *Stmt) compileRecursiveCTEBytecode(vm *vdbe.VDBE, cteName string, def *p
 	}
 
 	state := s.setupRecursiveCTEState(vm, cteName, def)
+	state.isUnion = compound.Op == parser.CompoundUnion
+	state.dedupSetID = -2 // sentinel: no dedup
+	if state.isUnion {
+		state.dedupSetID = -3 - len(cteTempTables) // unique per CTE
+	}
 	s.registerRecursiveCTETables(state)
 
 	if err := s.emitAnchorBytecode(vm, compound.Left, cteTempTables, state, args); err != nil {
@@ -91,7 +98,7 @@ func (s *Stmt) emitAnchorBytecode(vm *vdbe.VDBE, anchorSelect *parser.SelectStmt
 
 	offsets := s.allocateCTEResources(vm, compiledAnchor)
 	cursors := [2]int{state.resultCursor, state.queueCursor}
-	s.inlineCTEWithAddrMap(vm, compiledAnchor, cursors, offsets, nil)
+	s.inlineCTEWithDedup(vm, compiledAnchor, cursors, offsets, nil, state)
 	return nil
 }
 
@@ -172,7 +179,7 @@ func (s *Stmt) emitRecursiveMemberInlined(vm *vdbe.VDBE, recursiveMember *parser
 	fixInnerRewindAddresses(compiledRec)
 	offsets := s.allocateRecursiveCTEResources(vm, compiledRec, cursorMap)
 	cursors := [2]int{state.resultCursor, state.nextCursor}
-	s.inlineCTEWithAddrMap(vm, compiledRec, cursors, offsets, cursorMap)
+	s.inlineCTEWithDedup(vm, compiledRec, cursors, offsets, cursorMap, state)
 	return nil
 }
 
@@ -291,6 +298,87 @@ func (s *Stmt) emitMultiInsert(vm *vdbe.VDBE, newInstr *vdbe.Instruction,
 	addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
 	vm.Program[addr].P4 = instr.P4
 	vm.Program[addr].Comment = "CTE: make record"
+	vm.AddOp(vdbe.OpInsert, cursors[0], offsets.recordReg, 0)
+	vm.AddOp(vdbe.OpInsert, cursors[1], offsets.recordReg, 0)
+}
+
+// inlineCTEWithDedup inlines CTE bytecode, optionally adding UNION dedup checks.
+// For UNION ALL (state.isUnion=false) delegates to inlineCTEWithAddrMap.
+func (s *Stmt) inlineCTEWithDedup(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE,
+	cursors [2]int, offsets cteInlineOffsets, cursorMap map[int]int, state *recursiveCTEState) {
+
+	if !state.isUnion {
+		s.inlineCTEWithAddrMap(vm, compiledCTE, cursors, offsets, cursorMap)
+		return
+	}
+	s.inlineCTEWithDedupInner(vm, compiledCTE, cursors, offsets, cursorMap, state)
+}
+
+// inlineCTEWithDedupInner inlines CTE bytecode with UNION dedup via OpDistinctRow.
+func (s *Stmt) inlineCTEWithDedupInner(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE,
+	cursors [2]int, offsets cteInlineOffsets, cursorMap map[int]int, state *recursiveCTEState) {
+
+	addrMap := s.buildDedupAddrMap(compiledCTE, offsets.startAddr)
+
+	for _, instr := range compiledCTE.Program {
+		newInstr := s.adjustInstrWithMap(instr, offsets, cursorMap)
+
+		if instr.Opcode == vdbe.OpResultRow {
+			s.emitDedupMultiInsert(vm, &newInstr, instr, cursors, offsets, state)
+			continue
+		}
+
+		switch {
+		case instr.Opcode == vdbe.OpHalt || instr.Opcode == vdbe.OpInit:
+			newInstr.Opcode = vdbe.OpNoop
+		case isMappedCursorOp(instr, cursorMap):
+			newInstr.Opcode = vdbe.OpNoop
+		}
+
+		addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
+		vm.Program[addr].P4 = instr.P4
+		vm.Program[addr].P4Type = instr.P4Type
+		vm.Program[addr].P5 = instr.P5
+		vm.Program[addr].Comment = instr.Comment
+		s.fixJumpWithAddrMap(vm, instr, addr, addrMap)
+	}
+}
+
+// buildDedupAddrMap builds an address map where ResultRow expands to 4 instructions
+// (MakeRecord + DistinctRow + Insert + Insert) instead of 3.
+func (s *Stmt) buildDedupAddrMap(compiledCTE *vdbe.VDBE, startAddr int) []int {
+	addrMap := make([]int, len(compiledCTE.Program)+1)
+	mainAddr := startAddr
+	for i, instr := range compiledCTE.Program {
+		addrMap[i] = mainAddr
+		if instr.Opcode == vdbe.OpResultRow {
+			mainAddr += 4 // MakeRecord + DistinctRow + Insert + Insert
+		} else {
+			mainAddr++
+		}
+	}
+	addrMap[len(compiledCTE.Program)] = mainAddr
+	return addrMap
+}
+
+// emitDedupMultiInsert emits MakeRecord + DistinctRow + Insert(x2) for UNION dedup.
+func (s *Stmt) emitDedupMultiInsert(vm *vdbe.VDBE, newInstr *vdbe.Instruction,
+	instr *vdbe.Instruction, cursors [2]int, offsets cteInlineOffsets, state *recursiveCTEState) {
+
+	// 1. MakeRecord
+	newInstr.Opcode = vdbe.OpMakeRecord
+	newInstr.P3 = offsets.recordReg
+	addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
+	vm.Program[addr].P4 = instr.P4
+	vm.Program[addr].Comment = "CTE: make record"
+
+	// 2. DistinctRow - skip inserts if duplicate
+	skipTarget := vm.NumOps() + 3 // past DistinctRow + 2 Inserts
+	dedupAddr := vm.AddOp(vdbe.OpDistinctRow, newInstr.P1, skipTarget, newInstr.P2)
+	vm.Program[dedupAddr].P5 = uint16(int16(state.dedupSetID))
+	vm.Program[dedupAddr].Comment = "CTE UNION: dedup check"
+
+	// 3. Insert into both cursors
 	vm.AddOp(vdbe.OpInsert, cursors[0], offsets.recordReg, 0)
 	vm.AddOp(vdbe.OpInsert, cursors[1], offsets.recordReg, 0)
 }

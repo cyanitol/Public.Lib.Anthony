@@ -13,6 +13,8 @@ func RegisterWindowFunctions(r *Registry) {
 	r.Register(&RankFunc{})
 	r.Register(&DenseRankFunc{})
 	r.Register(&NtileFunc{})
+	r.Register(&PercentRankFunc{})
+	r.Register(&CumeDistFunc{})
 	r.Register(&LagFunc{})
 	r.Register(&LeadFunc{})
 	r.Register(&FirstValueFunc{})
@@ -55,6 +57,24 @@ func (f *NtileFunc) Name() string { return "ntile" }
 func (f *NtileFunc) NumArgs() int { return 1 }
 func (f *NtileFunc) Call([]Value) (Value, error) {
 	return nil, fmt.Errorf("ntile() is a window function")
+}
+
+// PercentRankFunc implements PERCENT_RANK() window function
+type PercentRankFunc struct{}
+
+func (f *PercentRankFunc) Name() string { return "percent_rank" }
+func (f *PercentRankFunc) NumArgs() int { return 0 }
+func (f *PercentRankFunc) Call([]Value) (Value, error) {
+	return nil, fmt.Errorf("percent_rank() is a window function")
+}
+
+// CumeDistFunc implements CUME_DIST() window function
+type CumeDistFunc struct{}
+
+func (f *CumeDistFunc) Name() string { return "cume_dist" }
+func (f *CumeDistFunc) NumArgs() int { return 0 }
+func (f *CumeDistFunc) Call([]Value) (Value, error) {
+	return nil, fmt.Errorf("cume_dist() is a window function")
 }
 
 // LagFunc implements LAG() window function

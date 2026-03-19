@@ -436,6 +436,9 @@ func DefaultRegistry() *Registry {
 	// Register JSON table-valued functions
 	RegisterJSONTableFunctions(r)
 
+	// Register generate_series table-valued function
+	RegisterGenerateSeriesFunctions(r)
+
 	// Register pattern matching functions (LIKE, GLOB)
 	RegisterPatternFunctions(r)
 

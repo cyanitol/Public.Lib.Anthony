@@ -207,7 +207,7 @@ Note: These tests verify index creation; full query optimization and index usage
 1. `/internal/parser/expression_index_test.go` - Parser tests
 2. `/internal/schema/expression_index_test.go` - Schema tests
 3. `/internal/driver/sqlite_expressionindex_test.go` - Integration tests
-4. `/docs/EXPRESSION_INDEXES.md` - This documentation
+4. `EXPRESSION_INDEXES.md` - This documentation
 
 ## Example Usage
 

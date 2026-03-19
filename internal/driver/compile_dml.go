@@ -74,6 +74,12 @@ func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table
 	const recordStartReg = 2
 	gen := s.initInsertVDBE(vm, numRecordCols, recordStartReg, args)
 
+	// Register table info when RETURNING is present so column refs resolve
+	if len(stmt.Returning) > 0 {
+		gen.RegisterCursor(stmt.Table, 0)
+		gen.RegisterTable(buildTableInfo(stmt.Table, table))
+	}
+
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpOpenWrite, 0, int(table.RootPage), len(table.Columns))
 
@@ -81,9 +87,27 @@ func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table
 	conflictMode := getConflictMode(stmt.OnConflict)
 	hasTriggers := s.tableHasTriggers(stmt.Table)
 
+	// Expand and set up RETURNING before the loop
+	var retCols []parser.ResultColumn
+	var retNumCols int
+	if len(stmt.Returning) > 0 {
+		var retNames []string
+		retCols, retNames = expandReturningColumns(stmt.Returning, table)
+		retNumCols = len(retCols)
+		vm.ResultCols = retNames
+	}
+
 	for _, row := range expandedValues {
 		s.emitInsertValueRow(vm, stmt, table, row, allColNames, rowidColIdx,
 			rowidReg, recordStartReg, numRecordCols, conflictMode, hasTriggers, args, &paramIdx, gen)
+
+		// Emit RETURNING row: seek to inserted rowid and evaluate expressions
+		if retNumCols > 0 {
+			vm.AddOp(vdbe.OpSeekRowid, 0, 0, rowidReg)
+			if err := emitReturningRow(vm, retCols, retNumCols, gen); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
@@ -96,6 +120,11 @@ func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table
 func (s *Stmt) validateAndExpandInsertValues(stmt *parser.InsertStmt, table *schema.Table) ([][]parser.Expression, error) {
 	if len(stmt.Values) == 0 {
 		return nil, fmt.Errorf("INSERT requires VALUES clause")
+	}
+
+	// Reject explicit writes to generated columns
+	if err := validateNoGeneratedColumns(stmt.Columns, table); err != nil {
+		return nil, err
 	}
 
 	if len(stmt.Columns) > 0 {
@@ -119,6 +148,18 @@ func (s *Stmt) validateAndExpandInsertValues(stmt *parser.InsertStmt, table *sch
 		}
 	}
 	return expandedValues, nil
+}
+
+// validateNoGeneratedColumns returns an error if any explicitly named column
+// in the INSERT column list is a generated column.
+func validateNoGeneratedColumns(columns []string, table *schema.Table) error {
+	for _, name := range columns {
+		col, ok := table.GetColumn(name)
+		if ok && col.Generated {
+			return fmt.Errorf("cannot INSERT into generated column \"%s\"", name)
+		}
+	}
+	return nil
 }
 
 // insertRecordColCount returns the number of columns in the record portion of an INSERT.
@@ -885,11 +926,13 @@ func (s *Stmt) compileUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt, args []driv
 	}
 	s.setVdbeContextForDatabase(vm, db)
 
-	for _, assign := range stmt.Sets {
-		colIdx := table.GetColumnIndexWithRowidAliases(assign.Column)
-		if colIdx == -1 {
-			return nil, fmt.Errorf("no such column: %s", assign.Column)
-		}
+	if err := s.validateUpdateColumns(table, stmt); err != nil {
+		return nil, err
+	}
+
+	// Dispatch to UPDATE...FROM when a FROM clause is present
+	if stmt.From != nil {
+		return s.compileUpdateFrom(vm, stmt, table, args)
 	}
 
 	// Build update map and column list
@@ -898,6 +941,13 @@ func (s *Stmt) compileUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt, args []driv
 	// Setup VDBE and code generator
 	gen, numRecordCols := s.setupUpdateVDBE(vm, table, stmt)
 
+	// Set up RETURNING columns before the loop
+	if len(stmt.Returning) > 0 {
+		retCols, retNames := expandReturningColumns(stmt.Returning, table)
+		stmt.Returning = retCols
+		vm.ResultCols = retNames
+	}
+
 	// Emit update loop
 	rewindAddr := s.emitUpdateLoop(vm, stmt, table, updateMap, updatedColumns, numRecordCols, gen, args)
 
@@ -905,6 +955,192 @@ func (s *Stmt) compileUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt, args []driv
 	s.finalizeUpdate(vm, rewindAddr)
 
 	return vm, nil
+}
+
+// validateUpdateColumns checks that all SET target columns exist and are not generated.
+func (s *Stmt) validateUpdateColumns(table *schema.Table, stmt *parser.UpdateStmt) error {
+	for _, assign := range stmt.Sets {
+		colIdx := table.GetColumnIndexWithRowidAliases(assign.Column)
+		if colIdx == -1 {
+			return fmt.Errorf("no such column: %s", assign.Column)
+		}
+		if colIdx >= 0 && colIdx < len(table.Columns) && table.Columns[colIdx].Generated {
+			return fmt.Errorf("cannot UPDATE generated column \"%s\"", assign.Column)
+		}
+	}
+	return nil
+}
+
+// compileUpdateFrom compiles an UPDATE...FROM statement by materialising the
+// FROM query and applying updates to matching rows. CC=8
+func (s *Stmt) compileUpdateFrom(vm *vdbe.VDBE, stmt *parser.UpdateStmt,
+	table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
+
+	// Build a SELECT that retrieves the values needed from the FROM tables.
+	// We construct: SELECT <set-exprs>, <target>.rowid FROM <from-tables> WHERE <where>
+	selStmt := s.buildUpdateFromSelect(stmt)
+
+	subVM := vdbe.New()
+	subVM.Ctx = vm.Ctx
+	compiled, err := s.compileSelect(subVM, selStmt, args)
+	if err != nil {
+		return nil, fmt.Errorf("UPDATE...FROM select: %w", err)
+	}
+
+	numResultCols := len(stmt.Sets) + 1 // +1 for rowid
+	rows, err := s.collectRows(compiled, numResultCols, "UPDATE...FROM")
+	if err != nil {
+		return nil, fmt.Errorf("UPDATE...FROM materialise: %w", err)
+	}
+
+	return s.applyUpdateFromRows(vm, table, stmt, rows)
+}
+
+// buildUpdateFromSelect builds a SELECT statement from the UPDATE...FROM clause.
+// The SELECT returns the SET expressions plus the target table's rowid.
+func (s *Stmt) buildUpdateFromSelect(stmt *parser.UpdateStmt) *parser.SelectStmt {
+	var cols []parser.ResultColumn
+	for _, assign := range stmt.Sets {
+		cols = append(cols, parser.ResultColumn{Expr: assign.Value, Alias: assign.Column})
+	}
+	// Add rowid of the target table
+	cols = append(cols, parser.ResultColumn{
+		Expr: &parser.IdentExpr{Table: stmt.Table, Name: "rowid"},
+	})
+
+	// Merge the target table into the FROM clause
+	from := s.mergeTargetIntoFrom(stmt)
+
+	return &parser.SelectStmt{
+		Columns: cols,
+		From:    from,
+		Where:   stmt.Where,
+	}
+}
+
+// mergeTargetIntoFrom ensures the UPDATE target table is present in the FROM clause.
+func (s *Stmt) mergeTargetIntoFrom(stmt *parser.UpdateStmt) *parser.FromClause {
+	from := stmt.From
+	// Check if the target table is already listed in FROM
+	for _, t := range from.Tables {
+		if strings.EqualFold(t.TableName, stmt.Table) {
+			return from
+		}
+	}
+	// Prepend the target table
+	targetRef := parser.TableOrSubquery{Schema: stmt.Schema, TableName: stmt.Table}
+	merged := &parser.FromClause{
+		Tables: append([]parser.TableOrSubquery{targetRef}, from.Tables...),
+		Joins:  from.Joins,
+	}
+	return merged
+}
+
+// applyUpdateFromRows applies materialised rows to the target table. CC=7
+func (s *Stmt) applyUpdateFromRows(vm *vdbe.VDBE, table *schema.Table,
+	stmt *parser.UpdateStmt, rows [][]interface{}) (*vdbe.VDBE, error) {
+
+	numRecordCols := countNonRowidCols(table)
+
+	vm.AllocMemory(numRecordCols*2 + 30)
+	vm.AllocCursors(1)
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpOpenWrite, 0, int(table.RootPage), len(table.Columns))
+
+	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
+	gen.RegisterCursor(stmt.Table, 0)
+	tableInfo := buildTableInfo(stmt.Table, table)
+	gen.RegisterTable(tableInfo)
+
+	for _, row := range rows {
+		s.emitUpdateFromSingleRow(vm, table, stmt, row, numRecordCols, gen)
+	}
+
+	vm.AddOp(vdbe.OpClose, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+
+	return vm, nil
+}
+
+// emitUpdateFromSingleRow emits bytecode to update one row from materialised data. CC=9
+func (s *Stmt) emitUpdateFromSingleRow(vm *vdbe.VDBE, table *schema.Table,
+	stmt *parser.UpdateStmt, row []interface{}, numRecordCols int, gen *expr.CodeGenerator) {
+
+	numSets := len(stmt.Sets)
+	rowid, ok := dmlToInt64(row[numSets])
+	if !ok {
+		return
+	}
+
+	// Seek to the target row by rowid
+	rowidReg := gen.AllocReg()
+	vm.AddOp(vdbe.OpInteger, int(rowid), rowidReg, 0)
+	seekAddr := vm.AddOp(vdbe.OpSeekRowid, 0, 0, rowidReg)
+
+	// Build updated column set
+	updateSet := make(map[string]interface{}, numSets)
+	for i, assign := range stmt.Sets {
+		updateSet[assign.Column] = row[i]
+	}
+
+	// Build the new record
+	recordStartReg := gen.AllocRegs(numRecordCols)
+	reg := recordStartReg
+	for colIdx, col := range table.Columns {
+		if schemaColIsRowidForTable(table, col) {
+			continue
+		}
+		if val, updated := updateSet[col.Name]; updated {
+			loadValueIntoReg(vm, val, reg)
+		} else {
+			recordIdx := schemaRecordIdxForTable(table, colIdx)
+			vm.AddOp(vdbe.OpColumn, 0, recordIdx, reg)
+		}
+		reg++
+	}
+
+	// Replace row
+	s.emitUpdateRowReplacement(vm, recordStartReg, numRecordCols, rowidReg, table.Name, gen)
+
+	// Fix seek miss target
+	vm.Program[seekAddr].P2 = vm.NumOps()
+}
+
+// loadValueIntoReg emits an opcode to load a Go value into a VDBE register.
+func loadValueIntoReg(vm *vdbe.VDBE, val interface{}, reg int) {
+	switch v := val.(type) {
+	case nil:
+		vm.AddOp(vdbe.OpNull, 0, reg, 0)
+	case int64:
+		vm.AddOp(vdbe.OpInteger, int(v), reg, 0)
+	case float64:
+		addr := vm.AddOp(vdbe.OpReal, 0, reg, 0)
+		vm.Program[addr].P4.R = v
+	case string:
+		addr := vm.AddOp(vdbe.OpString8, 0, reg, 0)
+		vm.Program[addr].P4.Z = v
+	case []byte:
+		addr := vm.AddOp(vdbe.OpBlob, len(v), reg, 0)
+		vm.Program[addr].P4.Z = string(v)
+	default:
+		vm.AddOp(vdbe.OpNull, 0, reg, 0)
+	}
+}
+
+// dmlToInt64 converts an interface value to int64 for rowid usage.
+func dmlToInt64(v interface{}) (int64, bool) {
+	switch val := v.(type) {
+	case int64:
+		return val, true
+	case float64:
+		return int64(val), true
+	case int:
+		return int64(val), true
+	default:
+		return 0, false
+	}
 }
 
 // buildUpdateMap builds the update map and column list from UPDATE statement.
@@ -1012,6 +1248,12 @@ func (s *Stmt) emitUpdateLoop(vm *vdbe.VDBE, stmt *parser.UpdateStmt, table *sch
 		vm.Program[beforeAddr].P2 = vm.NumOps()
 	}
 
+	// Emit RETURNING row after the update
+	if len(stmt.Returning) > 0 {
+		vm.AddOp(vdbe.OpSeekRowid, 0, 0, effectiveRowidReg)
+		emitReturningRow(vm, stmt.Returning, len(stmt.Returning), gen) //nolint:errcheck
+	}
+
 	// Fix WHERE skip target
 	if stmt.Where != nil {
 		vm.Program[skipAddr].P2 = vm.NumOps()
@@ -1067,19 +1309,37 @@ func (s *Stmt) emitUpdateRecordBuild(vm *vdbe.VDBE, table *schema.Table,
 			continue
 		}
 
-		if updateExpr, isUpdated := updateMap[col.Name]; isUpdated {
-			// Column is being updated
-			valReg, _ := gen.GenerateExpr(updateExpr)
-			vm.AddOp(vdbe.OpCopy, valReg, reg, 0)
-		} else {
-			// Column is not updated - load existing value
-			recordIdx := schemaRecordIdxForTable(table, colIdx)
-			vm.AddOp(vdbe.OpColumn, 0, recordIdx, reg)
-		}
+		s.emitUpdateColumnValue(vm, col, colIdx, table, updateMap, reg, gen)
 		reg++
 	}
 
 	return recordStartReg, newRowidReg
+}
+
+// emitUpdateColumnValue emits bytecode for a single column during UPDATE record build.
+// Generated columns re-evaluate their expression; normal columns use SET or existing value.
+func (s *Stmt) emitUpdateColumnValue(vm *vdbe.VDBE, col *schema.Column, colIdx int,
+	table *schema.Table, updateMap map[string]parser.Expression, reg int,
+	gen *expr.CodeGenerator) {
+
+	if col.Generated {
+		genExpr := generatedExprForColumn(col)
+		valReg, err := gen.GenerateExpr(genExpr)
+		if err != nil {
+			vm.AddOp(vdbe.OpNull, 0, reg, 0)
+			return
+		}
+		vm.AddOp(vdbe.OpCopy, valReg, reg, 0)
+		return
+	}
+
+	if updateExpr, isUpdated := updateMap[col.Name]; isUpdated {
+		valReg, _ := gen.GenerateExpr(updateExpr)
+		vm.AddOp(vdbe.OpCopy, valReg, reg, 0)
+	} else {
+		recordIdx := schemaRecordIdxForTable(table, colIdx)
+		vm.AddOp(vdbe.OpColumn, 0, recordIdx, reg)
+	}
 }
 
 // emitUpdateRowReplacement emits bytecode to replace the row.
@@ -1157,7 +1417,7 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 	numRecordCols := countNonRowidCols(table)
 	memSize := 10
 	oldRowStartReg := 0
-	if hasTriggers {
+	if hasTriggers || len(stmt.Returning) > 0 {
 		// Layout: reg 1 = rowid, regs 2..N+1 = record columns
 		oldRowStartReg = 2
 		memSize = numRecordCols + 20
@@ -1165,61 +1425,67 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 	vm.AllocMemory(memSize)
 	vm.AllocCursors(1)
 
-	// Initialize program
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	// Expand and set up RETURNING columns
+	var retGen *expr.CodeGenerator
+	if len(stmt.Returning) > 0 {
+		retCols, retNames := expandReturningColumns(stmt.Returning, table)
+		stmt.Returning = retCols
+		vm.ResultCols = retNames
+		retGen = expr.NewCodeGenerator(vm)
+		retGen.RegisterCursor(stmt.Table, 0)
+		retGen.RegisterTable(buildTableInfo(stmt.Table, table))
+	}
 
-	// Open table for writing (cursor 0)
+	return s.emitDeleteBody(vm, stmt, table, hasTriggers, numRecordCols, oldRowStartReg, retGen, args)
+}
+
+// emitDeleteBody emits the DELETE loop and finalization opcodes.
+func (s *Stmt) emitDeleteBody(vm *vdbe.VDBE, stmt *parser.DeleteStmt, table *schema.Table,
+	hasTriggers bool, numRecordCols, oldRowStartReg int, retGen *expr.CodeGenerator,
+	args []driver.NamedValue) (*vdbe.VDBE, error) {
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpOpenWrite, 0, int(table.RootPage), len(table.Columns))
 
-	// Pre-materialise subqueries in the WHERE clause so they are evaluated
-	// once before the delete loop rather than re-evaluated per row.
 	if stmt.Where != nil {
 		stmt.Where = s.materializeSubqueries(vm, stmt.Where)
 	}
 
-	// Start iteration from beginning
 	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
-
 	skipAddr := s.emitDeleteWhereClause(vm, stmt, table, args)
 
-	// Snapshot OLD row into registers before deletion (for trigger access)
 	if hasTriggers {
 		emitOldRowSnapshot(vm, table, 0, 1, oldRowStartReg, numRecordCols)
 	}
 
-	// Emit BEFORE DELETE trigger (P1=2 for DELETE event)
+	// Emit RETURNING before delete (cursor still points at the row)
+	if retGen != nil {
+		emitReturningRow(vm, stmt.Returning, len(stmt.Returning), retGen) //nolint:errcheck
+	}
+
 	var beforeAddr int
 	if hasTriggers {
 		beforeAddr = vm.AddOp(vdbe.OpTriggerBefore, 2, 0, oldRowStartReg)
 		vm.Program[beforeAddr].P4.Z = stmt.Table
 	}
 
-	// Delete the current row
 	delAddr := vm.AddOp(vdbe.OpDelete, 0, 0, 0)
 	vm.Program[delAddr].P4.Z = table.Name
 
-	// Emit AFTER DELETE trigger
 	if hasTriggers {
 		afterAddr := vm.AddOp(vdbe.OpTriggerAfter, 2, 0, oldRowStartReg)
 		vm.Program[afterAddr].P4.Z = stmt.Table
 		vm.Program[beforeAddr].P2 = vm.NumOps()
 	}
 
-	// Fix up the skip target to point past the Delete to the Next instruction
 	if stmt.Where != nil {
 		vm.Program[skipAddr].P2 = vm.NumOps()
 	}
 
-	// Move to next row and loop back
 	vm.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
-
-	// Close table cursor
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
 
-	// Halt execution
 	haltAddr := vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	// Fix up the rewind instruction to jump to halt when done
 	vm.Program[rewindAddr].P2 = haltAddr
 
 	return vm, nil
@@ -1428,7 +1694,7 @@ func allTableColumnNames(table *schema.Table) []string {
 // table column, it is appended as an extra trailing element in each row.
 func expandInsertDefaults(stmt *parser.InsertStmt, table *schema.Table) [][]parser.Expression {
 	if len(stmt.Columns) == 0 {
-		return stmt.Values
+		return replaceGeneratedValues(stmt.Values, table)
 	}
 	specifiedSet := buildColumnSet(stmt.Columns)
 	rowidStmtIdx := findRowidAliasInColumns(stmt.Columns, table)
@@ -1467,9 +1733,14 @@ func buildColumnSet(cols []string) map[string]int {
 }
 
 // expandSingleRow expands one VALUES row to cover all table columns.
+// Generated columns use their generation expression regardless of user input.
 func expandSingleRow(row []parser.Expression, insertCols []string, specifiedSet map[string]int, table *schema.Table) []parser.Expression {
 	full := make([]parser.Expression, len(table.Columns))
 	for i, col := range table.Columns {
+		if col.Generated {
+			full[i] = generatedExprForColumn(col)
+			continue
+		}
 		idx, ok := specifiedSet[strings.ToLower(col.Name)]
 		if ok && idx < len(row) {
 			full[i] = row[idx]
@@ -1478,6 +1749,77 @@ func expandSingleRow(row []parser.Expression, insertCols []string, specifiedSet 
 		}
 	}
 	return full
+}
+
+// generatedExprForColumn parses and returns the generation expression for a
+// generated column, or NULL if the expression cannot be parsed.
+func generatedExprForColumn(col *schema.Column) parser.Expression {
+	if col.GeneratedExpr == "" {
+		return &parser.LiteralExpr{Type: parser.LiteralNull}
+	}
+	p := parser.NewParser(col.GeneratedExpr)
+	e, err := p.ParseExpression()
+	if err != nil {
+		return &parser.LiteralExpr{Type: parser.LiteralNull}
+	}
+	return e
+}
+
+// replaceGeneratedValues replaces user-supplied values with generation expressions
+// for any generated columns, preserving the original values for normal columns.
+func replaceGeneratedValues(rows [][]parser.Expression, table *schema.Table) [][]parser.Expression {
+	if !tableHasGeneratedColumns(table) {
+		return rows
+	}
+	result := make([][]parser.Expression, len(rows))
+	for i, row := range rows {
+		newRow := make([]parser.Expression, len(row))
+		copy(newRow, row)
+		for j, col := range table.Columns {
+			if col.Generated && j < len(newRow) {
+				newRow[j] = generatedExprForColumn(col)
+			}
+		}
+		result[i] = newRow
+	}
+	return result
+}
+
+// tableHasGeneratedColumns returns true if the table has any generated columns.
+func tableHasGeneratedColumns(table *schema.Table) bool {
+	for _, col := range table.Columns {
+		if col.Generated {
+			return true
+		}
+	}
+	return false
+}
+
+// ============================================================================
+// RETURNING Clause Compilation
+// ============================================================================
+
+// expandReturningColumns expands RETURNING * into individual column references
+// and returns the expanded columns along with their names.
+func expandReturningColumns(returning []parser.ResultColumn, table *schema.Table) ([]parser.ResultColumn, []string) {
+	return expandStarColumns(returning, table)
+}
+
+// emitReturningRow evaluates RETURNING expressions and emits an OpResultRow.
+// The gen must already have the cursor registered for column lookups.
+func emitReturningRow(vm *vdbe.VDBE, cols []parser.ResultColumn, numCols int, gen *expr.CodeGenerator) error {
+	retBaseReg := gen.AllocRegs(numCols)
+	for i, col := range cols {
+		reg, err := gen.GenerateExpr(col.Expr)
+		if err != nil {
+			return fmt.Errorf("RETURNING expression: %w", err)
+		}
+		if reg != retBaseReg+i {
+			vm.AddOp(vdbe.OpCopy, reg, retBaseReg+i, 0)
+		}
+	}
+	vm.AddOp(vdbe.OpResultRow, retBaseReg, numCols, 0)
+	return nil
 }
 
 // defaultExprForColumn returns a parser.Expression representing the column's

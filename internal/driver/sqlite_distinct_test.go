@@ -11,7 +11,7 @@ import (
 //
 // NOTE: Many tests are currently skipped as DISTINCT is not yet fully implemented.
 // These tests serve as a comprehensive test suite for when DISTINCT support is added.
-// See TODO.txt Phase 3 for feature completion roadmap.
+// See doc/TODO.txt Phase 3 for feature completion roadmap.
 //
 // Test Coverage:
 // - SELECT DISTINCT (basic and multi-column)
@@ -27,7 +27,7 @@ import (
 // - DISTINCT with GROUP BY interaction
 // - Edge cases and error conditions
 func TestSQLiteDistinct(t *testing.T) {
-	const skipMsg = "DISTINCT not yet fully implemented - see TODO.txt Phase 3"
+	const skipMsg = "DISTINCT not yet fully implemented - see doc/TODO.txt Phase 3"
 
 	tests := []struct {
 		name    string

@@ -14,6 +14,7 @@ func RegisterMathFunctions(r *Registry) {
 	// Note: min/max are registered as aggregate functions in RegisterAggregateFunctions
 	// SQLite uses aggregate min/max by default; scalar versions would need different names
 	r.Register(NewScalarFunc("round", -1, roundFunc)) // 1 or 2 args
+	r.Register(NewScalarFunc("trunc", -1, truncFunc)) // 1 or 2 args
 	r.Register(NewScalarFunc("random", 0, randomFunc))
 	r.Register(NewScalarFunc("randomblob", 1, randomblobFunc))
 
@@ -132,6 +133,27 @@ func roundFunc(args []Value) (Value, error) {
 	}
 	multiplier := math.Pow(10, float64(precision))
 	return NewFloatValue(math.Round(value*multiplier) / multiplier), nil
+}
+
+// truncFunc implements trunc(X) and trunc(X,Y)
+// Truncates X toward zero, optionally to Y decimal places.
+func truncFunc(args []Value) (Value, error) {
+	precision, ok, err := roundParsePrecision(args)
+	if err != nil {
+		return nil, fmt.Errorf("trunc() requires 1 or 2 arguments")
+	}
+	if !ok || args[0].IsNull() {
+		return NewNullValue(), nil
+	}
+	value := args[0].AsFloat64()
+	if roundIsPassthrough(value) {
+		return NewFloatValue(value), nil
+	}
+	if precision == 0 {
+		return roundToIntValue(math.Trunc(value)), nil
+	}
+	multiplier := math.Pow(10, float64(precision))
+	return NewFloatValue(math.Trunc(value*multiplier) / multiplier), nil
 }
 
 // randomFunc implements random()

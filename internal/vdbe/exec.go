@@ -6624,8 +6624,11 @@ func (v *VDBE) execDistinctRow(instr *Instruction) error {
 		return err
 	}
 
-	// Use a special set ID (-1) for SELECT DISTINCT rows
-	const distinctRowSetID = -1
+	// P5 overrides the set ID; default is -1 for SELECT DISTINCT rows
+	distinctRowSetID := -1
+	if instr.P5 != 0 {
+		distinctRowSetID = int(int16(instr.P5)) // sign-extend uint16 to int
+	}
 
 	// Ensure the distinct set is initialized
 	v.ensureDistinctSet(distinctRowSetID)

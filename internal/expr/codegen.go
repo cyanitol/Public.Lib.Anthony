@@ -52,8 +52,10 @@ type binarySpecialHandler func(g *CodeGenerator, leftReg, rightReg int) (int, er
 var binarySpecialHandlers = map[parser.BinaryOp]binarySpecialHandler{
 	parser.OpLike:  (*CodeGenerator).generateLikeExpr,
 	parser.OpGlob:  (*CodeGenerator).generateGlobExpr,
-	parser.OpIs:    (*CodeGenerator).generateIsExpr,
-	parser.OpIsNot: (*CodeGenerator).generateIsNotExpr,
+	parser.OpIs:                (*CodeGenerator).generateIsExpr,
+	parser.OpIsNot:             (*CodeGenerator).generateIsNotExpr,
+	parser.OpIsDistinctFrom:    (*CodeGenerator).generateIsNotExpr,
+	parser.OpIsNotDistinctFrom: (*CodeGenerator).generateIsExpr,
 }
 
 // literalHandler is the signature for literal-type dispatch handlers.

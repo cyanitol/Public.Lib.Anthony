@@ -318,6 +318,5 @@ id | parent | detail
 
 ## See Also
 
-- [EXPLAIN_QUERY_PLAN_COSTS.md](EXPLAIN_QUERY_PLAN_COSTS.md) - Detailed cost model
-- [PHASE_9_3_IMPLEMENTATION.md](PHASE_9_3_IMPLEMENTATION.md) - Implementation details
-- [examples/explain_query_plan_cost_example.go](../examples/explain_query_plan_cost_example.go) - Working examples
+- [EXPLAIN_QUERY_PLAN_COSTS.md](EXPLAIN_QUERY_PLAN_COSTS.md) - Cost model notes
+- [SQLite EXPLAIN QUERY PLAN](sqlite/EXPLAIN_QUERY_PLAN.md) - Reference output format

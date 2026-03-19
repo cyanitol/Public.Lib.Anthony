@@ -881,7 +881,7 @@ make clean-all
    go test -race -v ./internal/driver -run TestProblemTest
    ```
 2. Review the race report for involved goroutines
-3. Check lock ordering (see doc/LOCK_ORDERING.md)
+3. Check lock ordering (see [LOCK_ORDERING.md](LOCK_ORDERING.md))
 4. Ensure proper synchronization
 
 #### Coverage Issues
@@ -1277,5 +1277,5 @@ go test -timeout=5m ./...
 ## See Also
 
 - [TESTING_INFRASTRUCTURE.md](TESTING_INFRASTRUCTURE.md) - Testing infrastructure and helper utilities
-- [../CONTRIBUTING.md](../CONTRIBUTING.md) - Contributing guidelines and development workflow
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Contributing guidelines and development workflow
 - [SECURITY.md](SECURITY.md) - Security testing and best practices

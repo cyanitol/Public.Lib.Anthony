@@ -1532,8 +1532,8 @@ PRAGMA integrity_check;
 
 - [User API Documentation](USER_API.md) - Public API for applications
 - [SQL Reference](SQL_REFERENCE.md) - Supported SQL syntax
-- [ARCHITECTURE.md](../ARCHITECTURE.md) - High-level architecture overview
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - Contribution guidelines
+- [ARCHITECTURE.md](ARCHITECTURE.md) - High-level architecture overview
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution guidelines
 
 ---
 

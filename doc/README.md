@@ -86,36 +86,36 @@ func main() {
 
 The driver registers as `sqlite_internal` to avoid conflicts with other SQLite drivers.
 
-For more examples, see [doc/QUICKSTART.md](doc/QUICKSTART.md).
+For more examples, see [QUICKSTART.md](QUICKSTART.md).
 
 ## Documentation
 
 ### Core Documentation
-- **[Quick Start Guide](doc/QUICKSTART.md)** - Get started with code examples
-- **[Architecture Overview](doc/ARCHITECTURE.md)** - System design and internals
-- **[Documentation Index](doc/INDEX.md)** - Complete documentation index
-- **[Security Guide](doc/SECURITY.md)** - Security model and best practices
+- **[Quick Start Guide](QUICKSTART.md)** - Get started with code examples
+- **[Architecture Overview](ARCHITECTURE.md)** - System design and internals
+- **[Documentation Index](INDEX.md)** - Complete documentation index
+- **[Security Guide](SECURITY.md)** - Security model and best practices
 - **Development Environment** - Nix-based for reproducibility; run `nix-shell` for a fully configured toolchain
 
 ### Feature Documentation
-- **[Common Table Expressions (CTEs)](doc/CTE_USAGE_GUIDE.md)** - Recursive and non-recursive CTEs
-- **[Subqueries](doc/SUBQUERY_ARCHITECTURE.md)** - Scalar, IN, and EXISTS subqueries
-- **[PRAGMA Statements](doc/PRAGMA_QUICK_REFERENCE.md)** - Database configuration
-- **[ALTER TABLE](doc/ALTER_TABLE_QUICK_REFERENCE.md)** - Schema modifications
-- **[VACUUM](doc/VACUUM_USAGE.md)** - Database compaction
-- **[Triggers](doc/TRIGGER_INTEGRATION_REPORT.md)** - Trigger support
-- **[Roadmap](doc/ROADMAP.md)** - Current priorities and completion plan
-- **[WITHOUT ROWID Plan](doc/WITHOUT_ROWID_PLAN.md)** - Composite key design and remaining work
+- **[Common Table Expressions (CTEs)](CTE_USAGE_GUIDE.md)** - Recursive and non-recursive CTEs
+- **[Subqueries](SUBQUERY_ARCHITECTURE.md)** - Scalar, IN, and EXISTS subqueries
+- **[PRAGMA Statements](PRAGMA_QUICK_REFERENCE.md)** - Database configuration
+- **[ALTER TABLE](ALTER_TABLE_QUICK_REFERENCE.md)** - Schema modifications
+- **[VACUUM](VACUUM_USAGE.md)** - Database compaction
+- **[Triggers](TRIGGER_INTEGRATION_REPORT.md)** - Trigger support
+- **[Roadmap](ROADMAP.md)** - Current priorities and completion plan
+- **[WITHOUT ROWID Plan](WITHOUT_ROWID_PLAN.md)** - Composite key design and remaining work
 
 ### Package Documentation
-- **[btree](internal/btree)** - B-tree storage engine
-- **[pager](internal/pager)** - Page cache and transaction management
-- **[parser](internal/parser)** - SQL lexer and parser
-- **[vdbe](internal/vdbe)** - Virtual Database Engine (bytecode VM)
-- **[functions](internal/functions)** - Built-in SQL functions
-- **[driver](internal/driver)** - database/sql driver interface
+- **[btree](../internal/btree)** - B-tree storage engine
+- **[pager](../internal/pager)** - Page cache and transaction management
+- **[parser](../internal/parser)** - SQL lexer and parser
+- **[vdbe](../internal/vdbe)** - Virtual Database Engine (bytecode VM)
+- **[functions](../internal/functions)** - Built-in SQL functions
+- **[driver](../internal/driver)** - database/sql driver interface
 
-See [doc/INDEX.md](doc/INDEX.md) for the complete documentation index.
+See [INDEX.md](INDEX.md) for the complete documentation index.
 
 ## Package Structure
 
@@ -241,7 +241,7 @@ make test-cover   # With coverage
 
 ### Security & Configuration Tips
 - Default builds and tests run with `CGO_ENABLED=0`; avoid adding CGO dependencies without approval.
-- Review `doc/SECURITY.md` before modifying pager, btree, or WAL paths; highlight any changes that affect file formats, locking, or crash safety in your PR description.
+- Review `SECURITY.md` before modifying pager, btree, or WAL paths; highlight any changes that affect file formats, locking, or crash safety in your PR description.
 
 ## Known Limitations
 
@@ -287,7 +287,7 @@ Contributions are welcome! When contributing:
    - Document all public APIs
    - Use the standard Go formatting (`gofmt`)
 3. **Write tests first** - Use Test-Driven Development (TDD)
-4. **Follow the lock hierarchy** - See [doc/LOCK_ORDERING.md](doc/LOCK_ORDERING.md)
+4. **Follow the lock hierarchy** - See [LOCK_ORDERING.md](LOCK_ORDERING.md)
 5. **Run tests with race detector** - `go test -race ./...`
 6. **Update documentation** - Keep docs synchronized with code changes
 
@@ -299,7 +299,7 @@ Contributions are welcome! When contributing:
 - [ ] Tests cover the new functionality
 - [ ] Documentation updated
 
-For security vulnerabilities, please see [doc/SECURITY.md](doc/SECURITY.md) for responsible disclosure.
+For security vulnerabilities, please see [SECURITY.md](SECURITY.md) for responsible disclosure.
 
 ## Performance Tips
 

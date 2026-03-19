@@ -50,6 +50,7 @@ var keywordsAsIdentifiers = map[TokenType]bool{
 	TK_INNER:        true,
 	TK_LEFT:         true,
 	TK_RIGHT:        true,
+	TK_FULL:         true,
 	TK_CROSS:        true,
 }
 
@@ -158,6 +159,7 @@ var statementParsers = map[TokenType]statementParser{
 	TK_PRAGMA:   func(p *Parser) (Statement, error) { return p.parsePragma() },
 	TK_VACUUM:   func(p *Parser) (Statement, error) { return p.parseVacuum() },
 	TK_REINDEX:   func(p *Parser) (Statement, error) { return p.parseReindex() },
+	TK_ANALYZE:   func(p *Parser) (Statement, error) { return p.parseAnalyze() },
 	TK_SAVEPOINT: func(p *Parser) (Statement, error) { return p.parseSavepoint() },
 	TK_RELEASE:   func(p *Parser) (Statement, error) { return p.parseRelease() },
 	TK_END:       func(p *Parser) (Statement, error) { return &CommitStmt{}, nil },
@@ -167,7 +169,7 @@ var statementParsers = map[TokenType]statementParser{
 var statementParserOrder = []TokenType{
 	TK_WITH, TK_SELECT, TK_INSERT, TK_UPDATE, TK_DELETE,
 	TK_CREATE, TK_DROP, TK_ALTER, TK_BEGIN, TK_COMMIT, TK_ROLLBACK,
-	TK_ATTACH, TK_DETACH, TK_PRAGMA, TK_VACUUM, TK_REINDEX,
+	TK_ATTACH, TK_DETACH, TK_PRAGMA, TK_VACUUM, TK_REINDEX, TK_ANALYZE,
 	TK_SAVEPOINT, TK_RELEASE, TK_END,
 }
 
@@ -778,6 +780,7 @@ func (p *Parser) parseTableAlias(table *TableOrSubquery) error {
 var joinTypeMap = map[TokenType]JoinType{
 	TK_LEFT:  JoinLeft,
 	TK_RIGHT: JoinRight,
+	TK_FULL:  JoinFull,
 	TK_INNER: JoinInner,
 	TK_CROSS: JoinCross,
 }
@@ -786,6 +789,7 @@ var joinTypeMap = map[TokenType]JoinType{
 var joinOuterTokens = map[TokenType]bool{
 	TK_LEFT:  true,
 	TK_RIGHT: true,
+	TK_FULL:  true,
 }
 
 func (p *Parser) parseJoinClause() (*JoinClause, error) {
@@ -910,6 +914,9 @@ func (p *Parser) parseInsert() (*InsertStmt, error) {
 		return nil, err
 	}
 	if err := p.parseInsertUpsertClause(stmt); err != nil {
+		return nil, err
+	}
+	if err := p.parseReturningClause(&stmt.Returning); err != nil {
 		return nil, err
 	}
 	return stmt, nil
@@ -1164,10 +1171,13 @@ func (p *Parser) parseUpdate() (*UpdateStmt, error) {
 	return stmt, nil
 }
 
-// parseUpdateClauses parses all post-SET clauses: assignments, WHERE, ORDER BY,
-// and LIMIT. Grouping them here keeps parseUpdate at CC <= 6.
+// parseUpdateClauses parses all post-SET clauses: assignments, FROM, WHERE,
+// ORDER BY, and LIMIT. Grouping them here keeps parseUpdate at CC <= 6.
 func (p *Parser) parseUpdateClauses(stmt *UpdateStmt) error {
 	if err := p.parseUpdateAssignments(stmt); err != nil {
+		return err
+	}
+	if err := p.parseUpdateFromClause(stmt); err != nil {
 		return err
 	}
 	if err := p.parseUpdateWhereClause(stmt); err != nil {
@@ -1176,7 +1186,23 @@ func (p *Parser) parseUpdateClauses(stmt *UpdateStmt) error {
 	if err := p.parseUpdateOrderByClause(stmt); err != nil {
 		return err
 	}
-	return p.parseUpdateLimitClause(stmt)
+	if err := p.parseUpdateLimitClause(stmt); err != nil {
+		return err
+	}
+	return p.parseReturningClause(&stmt.Returning)
+}
+
+// parseUpdateFromClause parses the optional FROM clause for UPDATE...FROM syntax.
+func (p *Parser) parseUpdateFromClause(stmt *UpdateStmt) error {
+	if !p.match(TK_FROM) {
+		return nil
+	}
+	from, err := p.parseFromClause()
+	if err != nil {
+		return err
+	}
+	stmt.From = from
+	return nil
 }
 
 // parseUpdateAssignments parses the comma-separated col = expr assignment list.
@@ -1272,7 +1298,10 @@ func (p *Parser) parseDeleteClauses(stmt *DeleteStmt) error {
 	if err := p.parseDeleteOrderBy(stmt); err != nil {
 		return err
 	}
-	return p.parseDeleteLimit(stmt)
+	if err := p.parseDeleteLimit(stmt); err != nil {
+		return err
+	}
+	return p.parseReturningClause(&stmt.Returning)
 }
 
 func (p *Parser) parseDeleteWhere(stmt *DeleteStmt) error {
@@ -1311,6 +1340,23 @@ func (p *Parser) parseDeleteLimit(stmt *DeleteStmt) error {
 		return err
 	}
 	stmt.Limit = limit
+	return nil
+}
+
+// =============================================================================
+// RETURNING
+// =============================================================================
+
+// parseReturningClause parses an optional RETURNING clause for DML statements.
+func (p *Parser) parseReturningClause(returning *[]ResultColumn) error {
+	if !p.match(TK_RETURNING) {
+		return nil
+	}
+	cols, err := p.parseResultColumns()
+	if err != nil {
+		return err
+	}
+	*returning = cols
 	return nil
 }
 
@@ -2911,7 +2957,7 @@ func (p *Parser) isPragmaValueIdentifier() bool {
 	case TK_ID:
 		return true
 	// Common keywords that can be PRAGMA values
-	case TK_ON, TK_DELETE, TK_TEMP, TK_TEMPORARY, TK_DEFAULT:
+	case TK_ON, TK_DELETE, TK_TEMP, TK_TEMPORARY, TK_DEFAULT, TK_FULL:
 		return true
 	default:
 		return false
@@ -3091,17 +3137,14 @@ func (p *Parser) tryParseOperators(left Expression) (Expression, error) {
 	return left, nil
 }
 
-// parseIsExpression parses IS NULL, IS NOT NULL, or IS comparison.
+// parseIsExpression parses IS NULL, IS NOT NULL, IS DISTINCT FROM,
+// IS NOT DISTINCT FROM, or IS comparison.
 func (p *Parser) parseIsExpression(left Expression) (Expression, error) {
 	if p.match(TK_NOT) {
-		if p.match(TK_NULL) {
-			return &UnaryExpr{Op: OpNotNull, Expr: left}, nil
-		}
-		right, err := p.parseBitwiseExpression()
-		if err != nil {
-			return nil, err
-		}
-		return &BinaryExpr{Left: left, Op: OpIsNot, Right: right}, nil
+		return p.parseIsNotBranch(left)
+	}
+	if p.match(TK_DISTINCT) {
+		return p.parseIsDistinctFrom(left)
 	}
 	if p.match(TK_NULL) {
 		return &UnaryExpr{Op: OpIsNull, Expr: left}, nil
@@ -3112,6 +3155,45 @@ func (p *Parser) parseIsExpression(left Expression) (Expression, error) {
 		return nil, err
 	}
 	return &BinaryExpr{Left: left, Op: OpIs, Right: right}, nil
+}
+
+// parseIsNotBranch parses IS NOT NULL, IS NOT DISTINCT FROM, or IS NOT expr.
+func (p *Parser) parseIsNotBranch(left Expression) (Expression, error) {
+	if p.match(TK_NULL) {
+		return &UnaryExpr{Op: OpNotNull, Expr: left}, nil
+	}
+	if p.match(TK_DISTINCT) {
+		return p.parseIsNotDistinctFrom(left)
+	}
+	right, err := p.parseBitwiseExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &BinaryExpr{Left: left, Op: OpIsNot, Right: right}, nil
+}
+
+// parseIsDistinctFrom parses the FROM <expr> part of IS DISTINCT FROM.
+func (p *Parser) parseIsDistinctFrom(left Expression) (Expression, error) {
+	if !p.match(TK_FROM) {
+		return nil, p.error("expected FROM after IS DISTINCT")
+	}
+	right, err := p.parseBitwiseExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &BinaryExpr{Left: left, Op: OpIsDistinctFrom, Right: right}, nil
+}
+
+// parseIsNotDistinctFrom parses the FROM <expr> part of IS NOT DISTINCT FROM.
+func (p *Parser) parseIsNotDistinctFrom(left Expression) (Expression, error) {
+	if !p.match(TK_FROM) {
+		return nil, p.error("expected FROM after IS NOT DISTINCT")
+	}
+	right, err := p.parseBitwiseExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &BinaryExpr{Left: left, Op: OpIsNotDistinctFrom, Right: right}, nil
 }
 
 // parseInExpression parses IN or NOT IN expressions.
@@ -3962,8 +4044,8 @@ func (p *Parser) parseOnConflict() OnConflictClause {
 
 func (p *Parser) isJoinKeyword() bool {
 	return p.check(TK_JOIN) || p.check(TK_LEFT) || p.check(TK_RIGHT) ||
-		p.check(TK_INNER) || p.check(TK_OUTER) || p.check(TK_CROSS) ||
-		p.check(TK_NATURAL)
+		p.check(TK_FULL) || p.check(TK_INNER) || p.check(TK_OUTER) ||
+		p.check(TK_CROSS) || p.check(TK_NATURAL)
 }
 
 func (p *Parser) isColumnConstraint() bool {

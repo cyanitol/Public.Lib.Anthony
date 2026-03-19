@@ -133,7 +133,7 @@ func cteRecursiveUnionTests() []sqlTestCase {
 		},
 		{
 			name: "union_deduplicates",
-			skip: "UNION deduplication not yet implemented for recursive CTEs",
+			// UNION dedup now implemented
 			query: `WITH RECURSIVE r(x) AS (
 				SELECT 1
 				UNION

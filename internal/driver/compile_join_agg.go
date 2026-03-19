@@ -137,7 +137,7 @@ func (s *Stmt) joinAggPhase1(vm *vdbe.VDBE, gen *expr.CodeGenerator,
 	rewindAddr = vm.AddOp(vdbe.OpRewind, tables[0].cursorIdx, 0, 0)
 	loopStart := vm.NumOps()
 
-	if hasLeftJoin(stmt) {
+	if hasOuterJoin(stmt) {
 		s.emitLeftJoinAggBody(vm, gen, stmt, tables, sorterCursor, sorterBaseReg, numGroupBy, sorterCols, loopStart)
 	} else {
 		s.emitInnerJoinAggBody(vm, gen, stmt, tables, sorterCursor, sorterBaseReg, numGroupBy, sorterCols, loopStart)

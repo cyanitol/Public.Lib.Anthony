@@ -32,14 +32,22 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 		return nil, err
 	}
 
-	// Collect all tables involved in the query
+	// Collect all tables to expand stars in original column order
 	tables, err := s.collectJoinTables(stmt, tableName, table)
 	if err != nil {
 		return nil, err
 	}
 
+	// Expand SELECT * before any RIGHT JOIN rewrite so column order is preserved
+	expandStarForJoinTables(stmt, tables)
+
 	// Resolve NATURAL/USING joins into ON conditions
 	s.resolveJoinConditions(stmt, tables)
+
+	// Rewrite RIGHT JOINs as LEFT JOINs by swapping table operands and tables array
+	if hasRightJoin(stmt) {
+		tables = rewriteRightJoinsWithTables(stmt, tables)
+	}
 
 	// Setup VDBE and code generator (with table info and args for WHERE)
 	numCols, gen := s.setupJoinVDBE(vm, stmt, tables, args)
@@ -55,7 +63,7 @@ func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 	}
 
 	// Use LEFT JOIN aware path when any join is a LEFT JOIN
-	if hasLeftJoin(stmt) {
+	if hasOuterJoin(stmt) {
 		return s.compileJoinsWithLeftSupport(vm, stmt, tables, numCols, gen)
 	}
 
@@ -100,7 +108,7 @@ func (s *Stmt) compileSelectWithJoinsAndOrderBy(vm *vdbe.VDBE, stmt *parser.Sele
 	rewindAddr := vm.AddOp(vdbe.OpRewind, tables[0].cursorIdx, 0, 0)
 	loopStart := vm.NumOps()
 
-	if hasLeftJoin(stmt) {
+	if hasOuterJoin(stmt) {
 		s.emitLeftJoinSorterBody(vm, stmt, tables, numCols, gen, orderInfo, loopStart)
 	} else {
 		s.emitInnerJoinSorterBody(vm, stmt, tables, numCols, gen, orderInfo, loopStart)
@@ -165,7 +173,7 @@ func (s *Stmt) emitLeftJoinSorterBody(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 
 	s.emitJoinLevelSorter(ctx, 0)
 
-	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
+	vm.AddOp(vdbe.OpNext, tables[0].cursorIdx, loopStart, 0)
 	for i := len(tables) - 1; i >= 0; i-- {
 		if !tables[i].table.Temp {
 			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
@@ -696,8 +704,8 @@ func (s *Stmt) compileExplain(vm *vdbe.VDBE, stmt *parser.ExplainStmt, args []dr
 
 // compileExplainQueryPlan compiles EXPLAIN QUERY PLAN.
 func (s *Stmt) compileExplainQueryPlan(vm *vdbe.VDBE, stmt *parser.ExplainStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
-	// Generate the explain plan for the inner statement
-	plan, err := planner.GenerateExplain(stmt.Statement)
+	// Generate the explain plan for the inner statement with schema info
+	plan, err := planner.GenerateExplainWithSchema(stmt.Statement, s.conn.schema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate explain plan: %w", err)
 	}
@@ -705,8 +713,8 @@ func (s *Stmt) compileExplainQueryPlan(vm *vdbe.VDBE, stmt *parser.ExplainStmt, 
 	// Format the plan as table rows
 	rows := plan.FormatAsTable()
 
-	// Set up result columns: selectid, order, from, detail (SQLite format)
-	vm.ResultCols = []string{"selectid", "order", "from", "detail"}
+	// Set up result columns: id, parent, notused, detail (SQLite format)
+	vm.ResultCols = []string{"id", "parent", "notused", "detail"}
 
 	// Allocate memory for result columns (4 columns)
 	vm.AllocMemory(10)

@@ -711,9 +711,9 @@ This section tracks the implementation status of security features identified du
 - Added race detector tests
 
 #### Documentation
-- Created comprehensive `docs/SECURITY.md`
-- Updated `docs/LOCK_ORDERING.md` with security context
-- Updated `docs/SECURITY_AUDIT_PLAN.md` with status
+- Created comprehensive `SECURITY.md`
+- Updated `LOCK_ORDERING.md` with security context
+- Updated `SECURITY_AUDIT_PLAN.md` with status
 - Documented all security controls and best practices
 - Created security vulnerability reporting process
 

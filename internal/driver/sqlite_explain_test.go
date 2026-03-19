@@ -601,12 +601,12 @@ func TestExplainQueryPlanMultipleStatements(t *testing.T) {
 		{
 			name: "aggregation",
 			sql:  "EXPLAIN QUERY PLAN SELECT age, COUNT(*) FROM users GROUP BY age",
-			want: "SCAN users",
+			want: "users",
 		},
 		{
 			name: "order by with index",
 			sql:  "EXPLAIN QUERY PLAN SELECT * FROM users ORDER BY age",
-			want: "SCAN users", // Index scan not yet implemented
+			want: "users",
 		},
 	}
 

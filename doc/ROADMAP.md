@@ -57,6 +57,12 @@
 - Expand pragma coverage (journal_mode, synchronous, locking) and ensure unsupported pragmas error cleanly.
 - Benchmark hot paths (btree cursor, pager I/O, VDBE ops) and set regression budgets.
 
+## Reference & Testing Integration (Merged Planning Notes)
+- Maintain contrib/sqlite as a read-only reference source with version tracking.
+- Keep trinity generator + traceability matrix; target decision + MC/DC coverage in critical paths.
+- Expand fault injection (I/O, OOM, corruption), fuzzing, and regression suites.
+- Continue TCL -> Go test conversion in phased batches for high-value SQLite suites.
+
 ## Documentation and Release
 - Keep README and CHANGELOG aligned with current priorities and unsupported features.
 - Publish tagged releases once active workstreams are completed and conformance/coverage thresholds are met.

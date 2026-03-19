@@ -1699,7 +1699,7 @@ See `internal/functions/udf.go` for the complete UDF framework documentation.
 - [PRAGMA Reference](PRAGMAS.md) - Database configuration and query options
 - [Core Functions (local)](sqlite/CORE_FUNCTIONS.md) ([sqlite.org](https://sqlite.org/lang_corefunc.html))
 - [Aggregate Functions (local)](sqlite/AGGREGATE_FUNCTIONS.md) ([sqlite.org](https://sqlite.org/lang_aggfunc.html))
-- [Math Functions (local)](sqlite/MATH_FUNCTIONS.md)
+- [Math Functions (local)](sqlite/LANG_MATHFUNC.md)
 - [JSON Functions (local)](sqlite/JSON1.md) ([sqlite.org](https://sqlite.org/json1.html))
 - [SQLite Date/Time Functions Documentation](https://sqlite.org/lang_datefunc.html)
 - [Anthony SQL Reference](SQL_REFERENCE.md)

@@ -62,6 +62,7 @@ const (
 	TK_JOIN
 	TK_LEFT
 	TK_RIGHT
+	TK_FULL
 	TK_INNER
 	TK_OUTER
 	TK_CROSS
@@ -225,6 +226,7 @@ const (
 	TK_OF
 	TK_DO
 	TK_NOTHING
+	TK_RETURNING
 
 	// Special operator types
 	TK_PTR     // ->
@@ -286,6 +288,7 @@ var tokenTypeNames = [...]string{
 	TK_JOIN:          "JOIN",
 	TK_LEFT:          "LEFT",
 	TK_RIGHT:         "RIGHT",
+	TK_FULL:          "FULL",
 	TK_INNER:         "INNER",
 	TK_OUTER:         "OUTER",
 	TK_CROSS:         "CROSS",
@@ -419,6 +422,7 @@ var tokenTypeNames = [...]string{
 	TK_OF:            "OF",
 	TK_DO:            "DO",
 	TK_NOTHING:       "NOTHING",
+	TK_RETURNING:     "RETURNING",
 	TK_PTR:           "PTR",
 	TK_QNUMBER:       "QNUMBER",
 }
@@ -433,7 +437,7 @@ func (t TokenType) String() string {
 
 // IsKeyword returns true if the token is a SQL keyword.
 func (t TokenType) IsKeyword() bool {
-	return t >= TK_CREATE && t <= TK_STORED
+	return t >= TK_CREATE && t <= TK_RETURNING
 }
 
 // IsOperator returns true if the token is an operator.

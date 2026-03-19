@@ -34,11 +34,12 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 |---------|--------|-------|
 | SELECT | :white_check_mark: | Full support including joins, subqueries |
 | INSERT | :white_check_mark: | Including INSERT OR REPLACE, INSERT OR IGNORE on UNIQUE columns |
-| UPDATE | :white_check_mark: | Basic UPDATE with WHERE |
+| UPDATE | :white_check_mark: | Including UPDATE...FROM syntax |
 | DELETE | :white_check_mark: | Basic DELETE with WHERE |
 | REPLACE | :white_check_mark: | Via INSERT OR REPLACE |
 | UPSERT (ON CONFLICT) | :large_orange_diamond: | Basic support, complex cases untested |
 | INSERT value count validation | :white_check_mark: | Proper error for column/value count mismatch |
+| RETURNING clause | :white_check_mark: | INSERT/UPDATE/DELETE RETURNING with * expansion and expressions |
 
 ### Data Definition Language (DDL)
 
@@ -73,11 +74,11 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 |---------|--------|-------|
 | ATTACH DATABASE | :white_check_mark: | Fully implemented with cross-database CREATE TABLE, INSERT, SELECT |
 | DETACH DATABASE | :white_check_mark: | Fully implemented |
-| ANALYZE | :x: | Planned for v0.2.0 |
+| ANALYZE | :white_check_mark: | sqlite_stat1 table creation, row counts, index selectivity stats |
 | REINDEX | :white_check_mark: | Parser complete, basic execution |
 | VACUUM | :large_orange_diamond: | 30 tests skipped - schema persistence issues |
 | EXPLAIN | :white_check_mark: | Basic output format |
-| EXPLAIN QUERY PLAN | :large_orange_diamond: | Partial support |
+| EXPLAIN QUERY PLAN | :large_orange_diamond: | Improved — SCAN/SEARCH/JOIN nodes, subquery reporting |
 
 ---
 
@@ -102,7 +103,8 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 |---------|--------|-------|
 | INNER JOIN | :white_check_mark: | Including with aggregates via sorter pipeline |
 | LEFT JOIN | :white_check_mark: | Including unmatched row NULL padding |
-| RIGHT JOIN | :white_check_mark: | |
+| RIGHT JOIN | :white_check_mark: | Table-swap compilation to LEFT JOIN with column reordering |
+| FULL OUTER JOIN | :large_orange_diamond: | Basic support via combined LEFT JOIN + anti-join |
 | CROSS JOIN | :white_check_mark: | |
 | NATURAL JOIN | :white_check_mark: | |
 | USING clause | :white_check_mark: | |
@@ -134,7 +136,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Non-recursive CTE | :white_check_mark: | |
-| Recursive CTE | :large_orange_diamond: | Cursor architecture being fixed |
+| Recursive CTE | :large_orange_diamond: | Base case + iterative step with depth limiting; edge cases remain |
 | Multiple CTEs | :white_check_mark: | Including CTEs with JOINs |
 | CTE with column list | :white_check_mark: | |
 
@@ -151,6 +153,8 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | IN (list) | :white_check_mark: | |
 | CASE / WHEN | :white_check_mark: | |
 | CAST | :white_check_mark: | |
+| IS DISTINCT FROM | :white_check_mark: | NULL-safe inequality comparison |
+| IS NOT DISTINCT FROM | :white_check_mark: | NULL-safe equality comparison |
 
 ---
 
@@ -165,8 +169,9 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | DEFAULT | :white_check_mark: | Proper type affinity for default values |
 | FOREIGN KEY (syntax) | :white_check_mark: | Parsed correctly |
 | FOREIGN KEY (runtime) | :white_check_mark: | 83/83 passing - deferred, collation, affinity, SET DEFAULT all working |
-| COLLATE | :white_check_mark: | BINARY, NOCASE, RTRIM |
+| COLLATE | :white_check_mark: | BINARY, NOCASE, RTRIM + custom collations |
 | AUTOINCREMENT | :white_check_mark: | |
+| GENERATED columns | :white_check_mark: | STORED/VIRTUAL semantics, direct write prevention |
 
 ---
 
@@ -177,7 +182,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | Regular tables | :white_check_mark: | |
 | WITHOUT ROWID tables | :large_orange_diamond: | 45 passing, 6 skipped - JOINs fixed, ROLLBACK/CASCADE in progress |
 | Temporary tables | :large_orange_diamond: | Basic support |
-| Virtual tables | :white_check_mark: | json_each/json_tree TVFs with correlated cross-joins |
+| Virtual tables | :white_check_mark: | json_each/json_tree/generate_series TVFs with correlated cross-joins |
 
 ---
 
@@ -223,10 +228,27 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 |----------|--------|
 | abs | :white_check_mark: |
 | round | :white_check_mark: |
+| trunc | :white_check_mark: |
 | random | :white_check_mark: |
 | max | :white_check_mark: |
 | min | :white_check_mark: |
 | sign | :white_check_mark: |
+| ceil/ceiling | :white_check_mark: |
+| floor | :white_check_mark: |
+| sqrt | :white_check_mark: |
+| power/pow | :white_check_mark: |
+| exp | :white_check_mark: |
+| ln/log | :white_check_mark: |
+| log10 | :white_check_mark: |
+| log2 | :white_check_mark: |
+| mod | :white_check_mark: |
+| pi | :white_check_mark: |
+| radians | :white_check_mark: |
+| degrees | :white_check_mark: |
+| sin/cos/tan | :white_check_mark: |
+| asin/acos/atan/atan2 | :white_check_mark: |
+| sinh/cosh/tanh | :white_check_mark: |
+| asinh/acosh/atanh | :white_check_mark: |
 
 ### Date/Time Functions
 
@@ -259,6 +281,14 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | json_group_array | :white_check_mark: |
 | json_group_object | :white_check_mark: |
 
+### Table-Valued Functions
+
+| Function | Status | Notes |
+|----------|--------|-------|
+| json_each | :white_check_mark: | Correlated cross-joins supported |
+| json_tree | :white_check_mark: | Correlated cross-joins supported |
+| generate_series | :white_check_mark: | 1-3 args (start, stop, step), ascending/descending |
+
 ### Other Functions
 
 | Function | Status |
@@ -266,12 +296,13 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | coalesce | :white_check_mark: |
 | ifnull | :white_check_mark: |
 | nullif | :white_check_mark: |
+| iif | :white_check_mark: |
 | typeof | :white_check_mark: |
 | cast | :white_check_mark: |
 | zeroblob | :white_check_mark: |
-| likelihood | :x: |
-| likely | :x: |
-| unlikely | :x: |
+| likelihood | :white_check_mark: |
+| likely | :white_check_mark: |
+| unlikely | :white_check_mark: |
 
 ---
 
@@ -288,8 +319,8 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | FIRST_VALUE | :white_check_mark: | |
 | LAST_VALUE | :white_check_mark: | |
 | NTH_VALUE | :white_check_mark: | |
-| PERCENT_RANK | :x: | Not implemented |
-| CUME_DIST | :x: | Not implemented |
+| PERCENT_RANK | :white_check_mark: | (rank-1)/(partition_size-1), 0.0 for single-row |
+| CUME_DIST | :white_check_mark: | rows_with_value_lte/partition_size |
 | OVER clause | :white_check_mark: | Parser and basic execution |
 | PARTITION BY | :white_check_mark: | Working |
 | WINDOW clause | :white_check_mark: | Named windows working |
@@ -304,7 +335,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | R-Tree (Spatial) | :large_orange_diamond: | Module complete (all tests pass), needs SQL parser integration |
 | JSON1 | :white_check_mark: | Core + aggregate functions (json_group_array/object) |
 | Custom functions | :large_orange_diamond: | Infrastructure exists |
-| Custom collations | :x: | Planned |
+| Custom collations | :white_check_mark: | Global and per-connection registration via RegisterCollation / Conn.CreateCollation |
 | Loadable extensions | :x: | Not planned (Go limitation) |
 
 ---
@@ -319,7 +350,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | foreign_key_list | :white_check_mark: |
 | database_list | :white_check_mark: |
 | compile_options | :white_check_mark: |
-| journal_mode | :large_orange_diamond: |
+| journal_mode | :white_check_mark: |
 | synchronous | :large_orange_diamond: |
 | cache_size | :large_orange_diamond: |
 | page_size | :white_check_mark: |
@@ -339,10 +370,11 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | Overflow pages | :white_check_mark: | |
 | Free page management | :white_check_mark: | |
 | Journal mode (DELETE) | :white_check_mark: | |
-| Journal mode (WAL) | :large_orange_diamond: | Infrastructure exists |
+| Journal mode (WAL) | :white_check_mark: | Write path, checkpoint modes (PASSIVE/FULL/RESTART/TRUNCATE), recovery |
 | Memory databases | :white_check_mark: | |
 | File locking (Unix) | :white_check_mark: | |
-| File locking (Windows) | :x: | Not implemented |
+| File locking (Windows) | :large_orange_diamond: | Implemented via LockFileEx/UnlockFileEx, not yet tested on Windows |
+| Online backup | :white_check_mark: | Page-by-page copy with progress callbacks |
 
 ---
 
@@ -365,7 +397,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 |----------|--------|
 | Linux | :white_check_mark: |
 | macOS | :white_check_mark: |
-| Windows | :large_orange_diamond: | No file locking |
+| Windows | :large_orange_diamond: | File locking implemented, not yet tested on Windows |
 | WebAssembly | :white_check_mark: | Pure Go, no CGO |
 
 ---
@@ -374,23 +406,29 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 
 ### What Works Well
 - Core SQL (SELECT, INSERT, UPDATE, DELETE) with proper validation
+- INSERT/UPDATE/DELETE RETURNING clause
+- UPDATE...FROM for join-based updates
 - INSERT OR IGNORE/REPLACE on UNIQUE columns (not just PK)
 - Compound query precedence (INTERSECT before UNION per SQL standard)
 - AND/OR short-circuit with correct NULL semantics
+- IS DISTINCT FROM / IS NOT DISTINCT FROM operators
 - AVG always returns float (regular and GROUP BY)
 - LENGTH() returns string representation length for numbers
 - Transactions and savepoints
 - Indexes and query optimization
-- Most built-in functions (including strftime with all format specifiers)
+- All built-in functions (string, math, date/time, JSON, pattern matching)
+- trunc(), likelihood/likely/unlikely, generate_series TVF
 - B-tree storage engine with race-free page writes
 - Memory and file databases
 - Foreign keys (83/83 tests passing, including SET DEFAULT and deferred)
 - WITHOUT ROWID tables (JOIN queries fixed)
 - Triggers - full runtime execution
+- Generated column enforcement (STORED/VIRTUAL)
 - ALTER TABLE (RENAME TABLE, RENAME COLUMN, DROP COLUMN)
 - ATTACH/DETACH DATABASE with cross-database queries
-- Window functions (ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE, PARTITION BY, named WINDOW clause)
+- Window functions (all 11: ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE, PERCENT_RANK, CUME_DIST)
 - JSON table-valued functions (json_each, json_tree)
+- generate_series table-valued function
 - CTE with JOINs (fixed cursor index handling)
 - FTS5 module (API level - 128 tests)
 - R-Tree module (API level - all tests)
@@ -400,15 +438,17 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 - Trigger expression substitution (CAST, BETWEEN, IN, CASE)
 - JOIN+aggregate compilation pipeline
 - View WHERE filtering after materialization
+- ANALYZE with sqlite_stat1 statistics
+- Custom collations (global + per-connection)
+- WAL mode (write path, all checkpoint modes, recovery)
+- Online backup API with progress callbacks
+- Windows file locking (LockFileEx/UnlockFileEx)
 
 ### Known Gaps
-- Recursive CTEs (cursor architecture being fixed)
-- VACUUM operations (schema persistence issues)
-- PERCENT_RANK / CUME_DIST window functions
-- ANALYZE (query statistics)
-- likelihood / likely / unlikely functions
-- Custom collations
-- FTS5/R-Tree SQL parser integration
+- Recursive CTEs (iterative step works, complex edge cases remain)
+- VACUUM operations (schema persistence issues, 30 tests skipped)
+- FTS5/R-Tree SQL parser integration (modules work at API level)
+- R-Tree persistent storage to database file
 
 ---
 

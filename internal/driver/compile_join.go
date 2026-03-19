@@ -104,17 +104,100 @@ func findOwnerAlias(colName string, tables []stmtTableInfo) string {
 	return ""
 }
 
-// hasLeftJoin returns true if any explicit join is a LEFT join.
-func hasLeftJoin(stmt *parser.SelectStmt) bool {
+// hasOuterJoin returns true if any explicit join is a LEFT, RIGHT, or FULL join.
+func hasOuterJoin(stmt *parser.SelectStmt) bool {
 	if stmt.From == nil {
 		return false
 	}
 	for _, j := range stmt.From.Joins {
-		if j.Type == parser.JoinLeft {
+		switch j.Type {
+		case parser.JoinLeft, parser.JoinRight, parser.JoinFull:
 			return true
 		}
 	}
 	return false
+}
+
+// hasRightJoin returns true if any explicit join is a RIGHT join.
+func hasRightJoin(stmt *parser.SelectStmt) bool {
+	if stmt.From == nil {
+		return false
+	}
+	for _, j := range stmt.From.Joins {
+		if j.Type == parser.JoinRight {
+			return true
+		}
+	}
+	return false
+}
+
+// rewriteRightJoinsWithTables converts RIGHT JOINs into LEFT JOINs by swapping
+// the table operands in both the AST and the tables slice. Returns the updated
+// tables slice.  Must be called after star expansion so column ordering is preserved.
+func rewriteRightJoinsWithTables(stmt *parser.SelectStmt, tables []stmtTableInfo) []stmtTableInfo {
+	if stmt.From == nil || len(stmt.From.Joins) == 0 {
+		return tables
+	}
+	crossCount := len(stmt.From.Tables)
+	for i := range stmt.From.Joins {
+		if stmt.From.Joins[i].Type != parser.JoinRight {
+			continue
+		}
+		// Swap: FROM A RIGHT JOIN B -> FROM B LEFT JOIN A
+		// Handle the common single-cross-table case (index 0 of Tables).
+		if i == 0 && crossCount == 1 {
+			stmt.From.Tables[0], stmt.From.Joins[0].Table = stmt.From.Joins[0].Table, stmt.From.Tables[0]
+			stmt.From.Joins[0].Type = parser.JoinLeft
+			// Swap corresponding entries in the tables slice
+			tables[0], tables[crossCount] = tables[crossCount], tables[0]
+		}
+	}
+	return tables
+}
+
+// expandStarForJoinTables expands SELECT * into explicit column references
+// using the provided table metadata, preserving original table order.
+func expandStarForJoinTables(stmt *parser.SelectStmt, tables []stmtTableInfo) {
+	var expanded []parser.ResultColumn
+	needExpansion := false
+	for _, col := range stmt.Columns {
+		if col.Star {
+			needExpansion = true
+			break
+		}
+	}
+	if !needExpansion {
+		return
+	}
+	for _, col := range stmt.Columns {
+		if !col.Star {
+			expanded = append(expanded, col)
+			continue
+		}
+		if col.Table != "" {
+			// table.* — expand only that table's columns
+			for _, tbl := range tables {
+				if tbl.name == col.Table || tbl.table.Name == col.Table {
+					for _, sc := range tbl.table.Columns {
+						expanded = append(expanded, parser.ResultColumn{
+							Expr: &parser.IdentExpr{Table: tbl.name, Name: sc.Name},
+						})
+					}
+					break
+				}
+			}
+		} else {
+			// bare * — expand all tables in order
+			for _, tbl := range tables {
+				for _, sc := range tbl.table.Columns {
+					expanded = append(expanded, parser.ResultColumn{
+						Expr: &parser.IdentExpr{Table: tbl.name, Name: sc.Name},
+					})
+				}
+			}
+		}
+	}
+	stmt.Columns = expanded
 }
 
 // ---------------------------------------------------------------------------
@@ -152,14 +235,15 @@ func (s *Stmt) compileJoinsWithLeftSupport(vm *vdbe.VDBE, stmt *parser.SelectStm
 		vm.AddOp(vdbe.OpOpenRead, tbl.cursorIdx, int(tbl.table.RootPage), len(tbl.table.Columns))
 	}
 
-	rewindAddr := vm.AddOp(vdbe.OpRewind, 0, 0, 0)
+	outerCursor := tables[0].cursorIdx
+	rewindAddr := vm.AddOp(vdbe.OpRewind, outerCursor, 0, 0)
 	loopStart := vm.NumOps()
 
 	// Emit the recursive join body starting at join index 0
 	s.emitJoinLevel(ctx, 0)
 
 	// Outer Next loops back; close ALL cursors after loop exits
-	vm.AddOp(vdbe.OpNext, 0, loopStart, 0)
+	vm.AddOp(vdbe.OpNext, outerCursor, loopStart, 0)
 	for i := len(tables) - 1; i >= 0; i-- {
 		if !tables[i].table.Temp {
 			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)

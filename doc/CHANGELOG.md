@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Verification Note
+- Code-derived trinity test cases defined: 1,085
+- Trinity skip markers in code: 0
+- Test pass/fail counts are not verified in this document; run the test suite to confirm
+
+## [0.3.2] - 2026-03-16
+
+### Added
+- **RETURNING Clause** — INSERT/UPDATE/DELETE RETURNING with column lists, expressions, and `RETURNING *` expansion
+- **UPDATE...FROM** — PostgreSQL-style UPDATE with FROM clause, compiled as join between target and source tables
+- **ANALYZE** — sqlite_stat1 table creation with row count and index selectivity statistics collection
+- **IS DISTINCT FROM / IS NOT DISTINCT FROM** — NULL-safe equality/inequality operators with bytecode generation
+- **generate_series TVF** — Table-valued function with 1–3 argument forms (start, stop, step)
+- **PERCENT_RANK / CUME_DIST** — Window function registry entries, VDBE opcodes (221/222), and execution
+- **trunc() Math Function** — trunc(X) and trunc(X,Y) truncation toward zero
+- **Custom Collations API** — `RegisterCollation()` / `UnregisterCollation()` public API on anthony.go
+- **BACKUP API** — Online page-by-page backup with `NewBackup()`, `Step()`, `Finish()`, progress callbacks
+- **RIGHT / FULL OUTER JOIN** — RIGHT JOIN via table swap, FULL OUTER JOIN via LEFT JOIN + anti-join
+- **Generated Column Enforcement** — GENERATED ALWAYS AS evaluation during INSERT/UPDATE, STORED/VIRTUAL semantics, write prevention
+- **EXPLAIN QUERY PLAN Improvements** — SCAN/SEARCH/USE TEMP B-TREE output format, index usage reporting, subquery plan nodes
+- **Recursive CTE Improvements** — Iterative VDBE loop with dedup, cycle detection, UNION vs UNION ALL handling
+- **ANALYZE Statement Parser** — New `internal/parser/parser_analyze.go` for ANALYZE parsing
+
+### Changed
+- likelihood/likely/unlikely confirmed already implemented as pass-through scalar functions
+- WAL mode confirmed fully implemented (frame writing, checkpoints, concurrent readers)
+- Windows file locking confirmed already implemented via syscall
+
+### Test Status (Code-Derived)
+- **1,085** trinity test cases defined
+- **0** trinity skip markers in code
+- Execute the test suite to validate pass/fail counts
+
 ## [0.3.1] - 2026-03-16
 
 ### Added
@@ -25,10 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Correlated TVF aggregates: COUNT/COUNT(DISTINCT) returned 0 because aggregate used projected column names instead of full joined column names
 - Cyclomatic complexity: extractLeadingNumeric (13→8), getJSONType (12→11), handleSpecialSelectTypes (12→9)
 
-### Test Status
-- **1,257** trinity tests passing, **0** skipped (was 1,177 passing, 80 skipped)
-- **0** failures across all packages
-- All cyclomatic complexity ≤ 11
+### Test Status (Code-Derived)
+- **1,085** trinity test cases defined
+- **0** trinity skip markers in code
+- Execute the test suite to validate pass/fail counts
 
 ## [0.2.2] - 2026-03-16
 
@@ -139,10 +172,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - File permission enforcement (default: 0600 for files, 0700 for dirs)
   - Toggleable security layers for flexibility
 - Comprehensive security documentation
-  - `docs/SECURITY.md` with security model, configuration, and best practices
-  - `docs/SECURITY_AUDIT_IMPLEMENTATION.md` with implementation details
+  - `SECURITY.md` with security model, configuration, and best practices
+  - `SECURITY_AUDIT_IMPLEMENTATION.md` with implementation details
   - Security checklist for code review
-  - `docs/LOCK_ORDERING.md` for concurrency safety
+  - `LOCK_ORDERING.md` for concurrency safety
 - Extensive security test suite
   - Path traversal attack tests (50+ vectors)
   - Integer overflow/underflow boundary tests
@@ -159,7 +192,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Development infrastructure
   - `.gitignore` for coverage files, build artifacts, IDE files
   - `Makefile` with common development targets
-- Comprehensive TODO.txt with 36 improvement tasks across 9 phases
+- Comprehensive TODO list in TODO.txt with prioritized phases
 - Best practices improvement plan based on 11-agent architectural review
 - SQLite testing plans and documentation
 
@@ -433,6 +466,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Platform-specific enhancements (Windows file locking)
   - Additional SQL features (complete ORDER BY, enhanced triggers)
   - Query optimization improvements
-- See [TODO.txt](TODO.txt) for detailed roadmap and planned features (36 tasks across 9 phases)
+- See [TODO.txt](TODO.txt) for detailed roadmap and planned features
 - See [README.md](README.md) for complete feature list and usage examples
-- See [docs/SECURITY.md](docs/SECURITY.md) for security model and best practices
+- See [SECURITY.md](SECURITY.md) for security model and best practices

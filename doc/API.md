@@ -1398,8 +1398,6 @@ db.Exec("PRAGMA synchronous = NORMAL") // Balanced
 - [CTE Usage Guide](CTE_USAGE_GUIDE.md) - Common Table Expressions
 - [Subquery Reference](SUBQUERY_QUICK_REFERENCE.md) - Subquery support
 - [SQLite Documentation](https://www.sqlite.org/docs.html) - Official SQLite docs
-- [C API Introduction (local)](sqlite/C_API_INTRO.md) - SQLite C API background
-- [C API Reference Index (local)](sqlite/c-api/API_INDEX.md) - Full C API listing
 
 ## License
 

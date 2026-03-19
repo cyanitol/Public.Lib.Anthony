@@ -698,6 +698,7 @@ var keywordMap = map[string]TokenType{
 	"JOIN":          TK_JOIN,
 	"LEFT":          TK_LEFT,
 	"RIGHT":         TK_RIGHT,
+	"FULL":          TK_FULL,
 	"INNER":         TK_INNER,
 	"OUTER":         TK_OUTER,
 	"CROSS":         TK_CROSS,
@@ -810,6 +811,7 @@ var keywordMap = map[string]TokenType{
 	"OF":            TK_OF,
 	"DO":            TK_DO,
 	"NOTHING":       TK_NOTHING,
+	"RETURNING":     TK_RETURNING,
 }
 
 // lookupKeyword returns the token type for a keyword, or TK_ID if not a keyword.

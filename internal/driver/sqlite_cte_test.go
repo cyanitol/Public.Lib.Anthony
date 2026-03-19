@@ -19,7 +19,7 @@ type cteTestCase struct {
 
 // TestSQLiteCTE tests Common Table Expressions (CTEs) including basic WITH, recursive, and complex queries
 func TestSQLiteCTE(t *testing.T) {
-	t.Skip("pre-existing failure - CTE compilation incomplete")
+	t.Skip("pre-existing failures: VALUES in CTE, nested CTE, CTE in DML not yet supported")
 	tests := buildCTETests()
 
 	for _, tt := range tests {

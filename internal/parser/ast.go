@@ -162,6 +162,7 @@ type InsertStmt struct {
 	OnConflict  OnConflictClause
 	DefaultVals bool
 	Upsert      *UpsertClause
+	Returning   []ResultColumn
 }
 
 func (i *InsertStmt) node()      {}
@@ -186,10 +187,12 @@ type UpdateStmt struct {
 	Schema     string // optional schema name for qualified table references
 	Table      string
 	Sets       []Assignment
+	From       *FromClause // optional FROM clause (UPDATE...FROM syntax)
 	Where      Expression
 	OrderBy    []OrderingTerm
 	Limit      Expression
 	OnConflict OnConflictClause
+	Returning  []ResultColumn
 }
 
 func (u *UpdateStmt) node()      {}
@@ -206,11 +209,12 @@ type Assignment struct {
 
 // DeleteStmt represents a DELETE statement.
 type DeleteStmt struct {
-	Schema  string // optional schema name for qualified table references
-	Table   string
-	Where   Expression
-	OrderBy []OrderingTerm
-	Limit   Expression
+	Schema    string // optional schema name for qualified table references
+	Table     string
+	Where     Expression
+	OrderBy   []OrderingTerm
+	Limit     Expression
+	Returning []ResultColumn
 }
 
 func (d *DeleteStmt) node()      {}
@@ -641,6 +645,18 @@ func (r *ReindexStmt) String() string {
 	return "REINDEX"
 }
 
+// AnalyzeStmt represents an ANALYZE statement that collects index statistics.
+type AnalyzeStmt struct {
+	Schema string // optional schema name
+	Name   string // optional table or index name
+}
+
+func (a *AnalyzeStmt) node()      {}
+func (a *AnalyzeStmt) statement() {}
+func (a *AnalyzeStmt) String() string {
+	return "ANALYZE"
+}
+
 // AlterTableAction represents the action to perform in ALTER TABLE.
 type AlterTableAction interface {
 	Node
@@ -744,8 +760,10 @@ const (
 	OpGlob
 	OpRegexp
 	OpMatch
-	OpIs    // a IS b  (null-safe equality)
-	OpIsNot // a IS NOT b (null-safe inequality)
+	OpIs              // a IS b  (null-safe equality)
+	OpIsNot           // a IS NOT b (null-safe inequality)
+	OpIsDistinctFrom  // a IS DISTINCT FROM b (NULL-safe inequality)
+	OpIsNotDistinctFrom // a IS NOT DISTINCT FROM b (NULL-safe equality)
 )
 
 var binaryOpStrings = map[BinaryOp]string{
@@ -771,8 +789,10 @@ var binaryOpStrings = map[BinaryOp]string{
 	OpGlob:   "GLOB",
 	OpRegexp: "REGEXP",
 	OpMatch:  "MATCH",
-	OpIs:     "IS",
-	OpIsNot:  "IS NOT",
+	OpIs:                "IS",
+	OpIsNot:             "IS NOT",
+	OpIsDistinctFrom:    "IS DISTINCT FROM",
+	OpIsNotDistinctFrom: "IS NOT DISTINCT FROM",
 }
 
 func (o BinaryOp) String() string {

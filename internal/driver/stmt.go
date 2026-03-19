@@ -578,6 +578,9 @@ func (s *Stmt) dispatchOtherStatements(vm *vdbe.VDBE, args []driver.NamedValue) 
 	case *parser.ReindexStmt:
 		result, err := s.compileReindex(vm, stmt, args)
 		return result, err, true
+	case *parser.AnalyzeStmt:
+		result, err := s.compileAnalyze(vm, stmt, args)
+		return result, err, true
 	default:
 		return nil, nil, false
 	}

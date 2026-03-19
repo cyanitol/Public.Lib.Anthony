@@ -860,7 +860,7 @@ Anthony is designed to be compatible with SQLite 3.x.
 **Differences:**
 - Pure Go implementation (no C dependencies)
 - May have different performance characteristics
-- Some advanced features still in development (see TODO.txt)
+- Some advanced features still in development (see [TODO.txt](TODO.txt))
 
 ### Testing Compatibility
 
