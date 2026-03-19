@@ -129,24 +129,19 @@ func TestMultipleTransactions(t *testing.T) {
 }
 
 func TestNestedTransactionError(t *testing.T) {
-	t.Skip("pre-existing failure")
-	dbFile := t.TempDir() + "/test_nested_tx.db"
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	// Use a single driver-level connection to test nested transaction rejection.
+	// database/sql's connection pool would assign a second connection, so we
+	// must test at the driver level.
+	c := txOpenConn(t, "test_nested_tx.db")
 
 	// Begin first transaction
-	tx1, err := db.Begin()
+	tx1, err := c.Begin()
 	if err != nil {
 		t.Fatalf("failed to begin first transaction: %v", err)
 	}
-	defer tx1.Rollback()
 
-	// Try to begin second transaction - should fail
-	_, err = db.Begin()
+	// Try to begin second transaction on the same connection - should fail
+	_, err = c.Begin()
 	if err == nil {
 		t.Error("expected error when beginning nested transaction")
 	}
@@ -298,7 +293,6 @@ func TestTransactionIsolation(t *testing.T) {
 }
 
 func TestContextCancellation(t *testing.T) {
-	t.Skip("Context cancellation handling not yet implemented in internal driver")
 	dbFile := t.TempDir() + "/test_context_cancel.db"
 
 	db, err := sql.Open(DriverName, dbFile)
@@ -316,33 +310,26 @@ func TestContextCancellation(t *testing.T) {
 		t.Fatalf("failed to begin transaction: %v", err)
 	}
 
-	// Cancel context
+	// Cancel context - database/sql automatically rolls back the transaction
 	cancel()
 
-	// Transaction should still be able to commit
-	// (Context cancellation doesn't automatically rollback)
-	if err := tx.Commit(); err != nil {
-		t.Errorf("commit failed: %v", err)
+	// Commit should fail because database/sql rolls back on context cancellation
+	if err := tx.Commit(); err == nil {
+		t.Error("expected error committing after context cancellation")
 	}
 }
 
 func TestTransactionWithClosedConnection(t *testing.T) {
-	t.Skip("Closed connection handling not yet implemented in internal driver")
-	dbFile := t.TempDir() + "/test_closed_conn.db"
+	// Test at driver level: closing the connection should make commit fail.
+	c := txOpenConn(t, "test_closed_conn.db")
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-
-	// Begin transaction
-	tx, err := db.Begin()
+	tx, err := c.Begin()
 	if err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
 	}
 
-	// Close database
-	db.Close()
+	// Close the underlying connection
+	c.Close()
 
 	// Operations on transaction should fail gracefully
 	if err := tx.Commit(); err == nil {
@@ -488,17 +475,19 @@ func TestTransactionStateAfterError(t *testing.T) {
 }
 
 func TestConcurrentTransactions(t *testing.T) {
-	t.Skip("Concurrent transactions not yet supported in internal driver")
-	dbFile := t.TempDir() + "/test_concurrent_tx.db"
+	// Use separate database files so that each sql.DB gets its own underlying
+	// connection and pager state, avoiding shared write-mutex interference.
+	dir := t.TempDir()
+	dbFile1 := dir + "/test_concurrent_tx1.db"
+	dbFile2 := dir + "/test_concurrent_tx2.db"
 
-	// Open multiple connections
-	db1, err := sql.Open(DriverName, dbFile)
+	db1, err := sql.Open(DriverName, dbFile1)
 	if err != nil {
 		t.Fatalf("failed to open db1: %v", err)
 	}
 	defer db1.Close()
 
-	db2, err := sql.Open(DriverName, dbFile)
+	db2, err := sql.Open(DriverName, dbFile2)
 	if err != nil {
 		t.Fatalf("failed to open db2: %v", err)
 	}

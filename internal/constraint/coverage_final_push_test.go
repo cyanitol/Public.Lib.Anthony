@@ -108,7 +108,10 @@ func TestCheckConstraint_ExtractCheckConstraints_ColumnCheck(t *testing.T) {
 		},
 	}
 
-	constraints := extractCheckConstraints(table)
+	constraints, err := extractCheckConstraints(table)
+	if err != nil {
+		t.Fatalf("extractCheckConstraints failed: %v", err)
+	}
 	if len(constraints) == 0 {
 		t.Error("Expected at least one CHECK constraint from column")
 	}
@@ -389,7 +392,10 @@ func TestCheckConstraint_ExtractCheckConstraints_EmptyColumnCheck(t *testing.T) 
 		},
 	}
 
-	constraints := extractCheckConstraints(table)
+	constraints, err := extractCheckConstraints(table)
+	if err != nil {
+		t.Fatalf("extractCheckConstraints failed: %v", err)
+	}
 	// Empty check should be skipped
 	if len(constraints) != 0 {
 		t.Errorf("Expected 0 constraints for empty check, got %d", len(constraints))

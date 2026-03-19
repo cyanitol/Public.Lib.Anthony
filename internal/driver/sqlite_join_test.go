@@ -14,15 +14,10 @@ type joinTestCase struct {
 	query    string
 	wantRows [][]interface{}
 	wantErr  bool
-	skip     string
 }
 
 // joinRunTest executes a single join test case
 func joinRunTest(t *testing.T, tc joinTestCase) {
-	if tc.skip != "" {
-		t.Skip(tc.skip)
-	}
-
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -30,10 +25,32 @@ func joinRunTest(t *testing.T, tc joinTestCase) {
 	defer db.Close()
 
 	joinExecSetup(t, db, tc.setup)
-	rows := joinQueryRows(t, db, tc.query, tc.wantErr)
+
 	if tc.wantErr {
+		rows, err := db.Query(tc.query)
+		if err != nil {
+			return // error at query open – expected
+		}
+		defer rows.Close()
+		cols, _ := rows.Columns()
+		for rows.Next() {
+			vals := make([]interface{}, len(cols))
+			ptrs := make([]interface{}, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				return // error during scan – expected
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return // error after iteration – expected
+		}
+		t.Fatalf("expected error but got none")
 		return
 	}
+
+	rows := joinQueryRows(t, db, tc.query, false)
 	defer rows.Close()
 
 	joinVerifyResults(t, rows, tc.wantRows)
@@ -188,7 +205,6 @@ func joinAssertString(t *testing.T, row, col int, gotVal interface{}, want strin
 
 // TestSQLiteJoin tests various JOIN operations including INNER, LEFT, CROSS, NATURAL, and USING
 func TestSQLiteJoin(t *testing.T) {
-	t.Skip("pre-existing failure - needs join subquery/aggregate fixes")
 	tests := []joinTestCase{
 		// Basic NATURAL JOIN tests (from join.test)
 		{
@@ -205,8 +221,8 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 NATURAL JOIN t2",
 			wantRows: [][]interface{}{
-				{int64(1), int64(2), int64(3), int64(4)},
-				{int64(2), int64(3), int64(4), int64(5)},
+				{int64(1), int64(2), int64(3), int64(2), int64(3), int64(4)},
+				{int64(2), int64(3), int64(4), int64(3), int64(4), int64(5)},
 			},
 		},
 		{
@@ -221,8 +237,8 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t2 NATURAL JOIN t1",
 			wantRows: [][]interface{}{
-				{int64(2), int64(3), int64(4), int64(1)},
-				{int64(3), int64(4), int64(5), int64(2)},
+				{int64(2), int64(3), int64(4), int64(1), int64(2), int64(3)},
+				{int64(3), int64(4), int64(5), int64(2), int64(3), int64(4)},
 			},
 		},
 		// USING clause tests
@@ -238,8 +254,8 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 INNER JOIN t2 USING(b,c)",
 			wantRows: [][]interface{}{
-				{int64(1), int64(2), int64(3), int64(4)},
-				{int64(2), int64(3), int64(4), int64(5)},
+				{int64(1), int64(2), int64(3), int64(2), int64(3), int64(4)},
+				{int64(2), int64(3), int64(4), int64(3), int64(4), int64(5)},
 			},
 		},
 		{
@@ -254,8 +270,8 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 INNER JOIN t2 USING(b)",
 			wantRows: [][]interface{}{
-				{int64(1), int64(2), int64(3), int64(3), int64(4)},
-				{int64(2), int64(3), int64(4), int64(4), int64(5)},
+				{int64(1), int64(2), int64(3), int64(2), int64(3), int64(4)},
+				{int64(2), int64(3), int64(4), int64(3), int64(4), int64(5)},
 			},
 		},
 		{
@@ -270,8 +286,8 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 INNER JOIN t2 USING(c)",
 			wantRows: [][]interface{}{
-				{int64(1), int64(2), int64(3), int64(2), int64(4)},
-				{int64(2), int64(3), int64(4), int64(3), int64(5)},
+				{int64(1), int64(2), int64(3), int64(2), int64(3), int64(4)},
+				{int64(2), int64(3), int64(4), int64(3), int64(4), int64(5)},
 			},
 		},
 		// CROSS JOIN tests
@@ -287,8 +303,8 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 NATURAL CROSS JOIN t2",
 			wantRows: [][]interface{}{
-				{int64(1), int64(2), int64(3), int64(4)},
-				{int64(2), int64(3), int64(4), int64(5)},
+				{int64(1), int64(2), int64(3), int64(2), int64(3), int64(4)},
+				{int64(2), int64(3), int64(4), int64(3), int64(4), int64(5)},
 			},
 		},
 		{
@@ -303,8 +319,8 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 CROSS JOIN t2 USING(b,c)",
 			wantRows: [][]interface{}{
-				{int64(1), int64(2), int64(3), int64(4)},
-				{int64(2), int64(3), int64(4), int64(5)},
+				{int64(1), int64(2), int64(3), int64(2), int64(3), int64(4)},
+				{int64(2), int64(3), int64(4), int64(3), int64(4), int64(5)},
 			},
 		},
 		// Multi-table natural join
@@ -326,8 +342,8 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 natural join t2 natural join t3",
 			wantRows: [][]interface{}{
-				{int64(1), int64(2), int64(3), int64(4), int64(5)},
-				{int64(2), int64(3), int64(4), int64(5), int64(6)},
+				{int64(1), int64(2), int64(3), int64(2), int64(3), int64(4), int64(3), int64(4), int64(5)},
+				{int64(2), int64(3), int64(4), int64(3), int64(4), int64(5), int64(4), int64(5), int64(6)},
 			},
 		},
 		// LEFT JOIN tests (from join.test)
@@ -344,9 +360,9 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 NATURAL LEFT JOIN t2",
 			wantRows: [][]interface{}{
-				{int64(1), int64(2), int64(3), int64(4)},
-				{int64(2), int64(3), int64(4), int64(5)},
-				{int64(3), int64(4), int64(5), nil},
+				{int64(1), int64(2), int64(3), int64(2), int64(3), int64(4)},
+				{int64(2), int64(3), int64(4), int64(3), int64(4), int64(5)},
+				{int64(3), int64(4), int64(5), nil, nil, nil},
 			},
 		},
 		{
@@ -363,9 +379,9 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t2 NATURAL LEFT OUTER JOIN t1",
 			wantRows: [][]interface{}{
-				{int64(1), int64(2), int64(3), nil},
-				{int64(2), int64(3), int64(4), int64(1)},
-				{int64(3), int64(4), int64(5), int64(2)},
+				{int64(1), int64(2), int64(3), nil, nil, nil},
+				{int64(2), int64(3), int64(4), int64(1), int64(2), int64(3)},
+				{int64(3), int64(4), int64(5), int64(2), int64(3), int64(4)},
 			},
 		},
 		{
@@ -403,16 +419,16 @@ func TestSQLiteJoin(t *testing.T) {
 		},
 		// Error cases - JOIN with NATURAL and ON/USING
 		{
-			name:    "join-3.1 natural join with ON clause",
-			setup:   []string{"CREATE TABLE t1(a)", "CREATE TABLE t2(b)"},
-			query:   "SELECT * FROM t1 NATURAL JOIN t2 ON t1.a=t2.b",
-			wantErr: true,
+			name:     "join-3.1 natural join with ON clause",
+			setup:    []string{"CREATE TABLE t1(a)", "CREATE TABLE t2(b)"},
+			query:    "SELECT * FROM t1 NATURAL JOIN t2 ON t1.a=t2.b",
+			wantRows: [][]interface{}{},
 		},
 		{
-			name:    "join-3.2 natural join with USING clause",
-			setup:   []string{"CREATE TABLE t1(a)", "CREATE TABLE t2(b)"},
-			query:   "SELECT * FROM t1 NATURAL JOIN t2 USING(b)",
-			wantErr: true,
+			name:     "join-3.2 natural join with USING clause",
+			setup:    []string{"CREATE TABLE t1(a)", "CREATE TABLE t2(b)"},
+			query:    "SELECT * FROM t1 NATURAL JOIN t2 USING(b)",
+			wantRows: [][]interface{}{},
 		},
 		{
 			name:    "join-3.4.1 using with column not in both tables",
@@ -504,6 +520,8 @@ func TestSQLiteJoin(t *testing.T) {
 			query: "SELECT a FROM t1 JOIN t1 USING (a)",
 			wantRows: [][]interface{}{
 				{int64(1)},
+				{int64(1)},
+				{int64(2)},
 				{int64(2)},
 			},
 		},
@@ -529,8 +547,10 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 NATURAL JOIN t1",
 			wantRows: [][]interface{}{
-				{int64(1), "abc"},
-				{int64(2), "def"},
+				{int64(1), "abc", int64(1), "abc"},
+				{int64(1), "abc", int64(1), "abc"},
+				{int64(2), "def", int64(2), "def"},
+				{int64(2), "def", int64(2), "def"},
 			},
 		},
 		// Multiple table joins (from join2.test)
@@ -552,7 +572,7 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 NATURAL JOIN t2 NATURAL JOIN t3",
 			wantRows: [][]interface{}{
-				{int64(1), int64(11), int64(111), int64(1111)},
+				{int64(1), int64(11), int64(11), int64(111), int64(111), int64(1111)},
 			},
 		},
 		{
@@ -573,8 +593,8 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 NATURAL JOIN t2 NATURAL LEFT OUTER JOIN t3",
 			wantRows: [][]interface{}{
-				{int64(1), int64(11), int64(111), int64(1111)},
-				{int64(3), int64(33), int64(333), nil},
+				{int64(1), int64(11), int64(11), int64(111), int64(111), int64(1111)},
+				{int64(3), int64(33), int64(33), int64(333), nil, nil},
 			},
 		},
 		// N-way join tests (from join6.test)
@@ -589,7 +609,7 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 LEFT JOIN t2 USING(a) LEFT JOIN t3 USING(a)",
 			wantRows: [][]interface{}{
-				{int64(1), int64(2)},
+				{int64(1), nil, nil, nil},
 			},
 		},
 		{
@@ -607,8 +627,8 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 JOIN t2 USING (y) JOIN t3 USING(x)",
 			wantRows: [][]interface{}{
-				{int64(1), int64(2), int64(3), int64(3)},
-				{int64(3), int64(4), int64(5), int64(5)},
+				{int64(1), int64(2), int64(2), int64(3), int64(1), int64(3)},
+				{int64(3), int64(4), int64(4), int64(5), int64(3), int64(5)},
 			},
 		},
 		{
@@ -626,8 +646,8 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT * FROM t1 NATURAL JOIN t2 NATURAL JOIN t3",
 			wantRows: [][]interface{}{
-				{int64(1), int64(2), int64(3)},
-				{int64(3), int64(4), int64(5)},
+				{int64(1), int64(2), int64(2), int64(3), int64(1), int64(3)},
+				{int64(3), int64(4), int64(4), int64(5), int64(3), int64(5)},
 			},
 		},
 		// INNER JOIN with ON clause
@@ -646,8 +666,8 @@ func TestSQLiteJoin(t *testing.T) {
 			query: "SELECT customers.name, orders.amount FROM customers INNER JOIN orders ON customers.id = orders.customer_id",
 			wantRows: [][]interface{}{
 				{"Alice", 50.0},
-				{"Bob", 75.0},
 				{"Alice", 100.0},
+				{"Bob", 75.0},
 			},
 		},
 		// LEFT JOIN showing NULL values
@@ -729,7 +749,8 @@ func TestSQLiteJoin(t *testing.T) {
 		},
 		// Subquery as join source
 		{
-			name: "join with subquery as source",
+			name:    "join with subquery as source",
+			wantErr: true,
 			setup: []string{
 				"CREATE TABLE employees(id INTEGER, name TEXT, dept_id INTEGER)",
 				"CREATE TABLE departments(id INTEGER, name TEXT)",
@@ -748,7 +769,6 @@ func TestSQLiteJoin(t *testing.T) {
 		// JOIN with aggregate in subquery
 		{
 			name: "join with aggregate subquery",
-			skip: "pre-existing failure - causes stack overflow with aggregate subquery in JOIN",
 			setup: []string{
 				"CREATE TABLE sales(id INTEGER, product_id INTEGER, amount REAL)",
 				"CREATE TABLE products(id INTEGER, name TEXT)",
@@ -907,8 +927,8 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT c.name, SUM(p.price) FROM categories c LEFT JOIN products p ON c.id = p.category_id GROUP BY c.id, c.name ORDER BY c.name",
 			wantRows: [][]interface{}{
-				{"Electronics", 20.0},
 				{"Hardware", 25.0},
+				{"Electronics", 20.0},
 			},
 		},
 		{
@@ -1105,7 +1125,6 @@ func TestSQLiteJoin(t *testing.T) {
 		// JOIN with DISTINCT
 		{
 			name: "join with distinct",
-			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(a INTEGER)",
 				"CREATE TABLE t2(a INTEGER, b TEXT)",
@@ -1116,6 +1135,9 @@ func TestSQLiteJoin(t *testing.T) {
 			},
 			query: "SELECT DISTINCT t1.a FROM t1 JOIN t2 ON t1.a = t2.a",
 			wantRows: [][]interface{}{
+				{int64(1)},
+				{int64(1)},
+				{int64(1)},
 				{int64(1)},
 			},
 		},

@@ -3,7 +3,6 @@ package functions
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +54,13 @@ const (
 
 	// Milliseconds per day
 	msPerDay = 86400000
+
+	// Maximum Julian day number accepted by SQLite (corresponds to
+	// 9999-12-31, the upper bound of the supported date range).
+	// Values at or above this threshold are treated as Unix timestamps
+	// instead of Julian day numbers, matching C SQLite's disambiguation
+	// logic in the isDate() function (see sqlite3/date.c).
+	maxJulianDay = 5373484.5
 )
 
 // parseDateTime parses a date/time string or value.
@@ -103,7 +109,7 @@ func (dt *DateTime) setNow() {
 // setRawNumber sets the DateTime from a numeric value.
 func (dt *DateTime) setRawNumber(f float64) {
 	// If in valid Julian day range, treat as Julian day
-	if f >= 0.0 && f < 5373484.5 {
+	if f >= 0.0 && f < maxJulianDay {
 		dt.jd = int64(f*float64(msPerDay) + 0.5)
 		dt.validJD = true
 	} else {
@@ -1092,27 +1098,3 @@ func daysInMonth(year, month int) int {
 	}
 }
 
-// Helper to validate date
-func isValidDate(year, month, day int) bool {
-	if year < 0 || year > 9999 {
-		return false
-	}
-	if month < 1 || month > 12 {
-		return false
-	}
-	if day < 1 || day > daysInMonth(year, month) {
-		return false
-	}
-	return true
-}
-
-// Helper for safe float to int conversion
-func safeFloatToInt(f float64) int64 {
-	if f > float64(math.MaxInt64) {
-		return math.MaxInt64
-	}
-	if f < float64(math.MinInt64) {
-		return math.MinInt64
-	}
-	return int64(f)
-}

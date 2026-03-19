@@ -45,7 +45,7 @@ func (s *Stmt) compileCreateIndex(vm *vdbe.VDBE, stmt *parser.CreateIndexStmt, a
 	// Persist schema to sqlite_master
 	if s.conn.btree != nil {
 		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
-			_ = err
+			return nil, fmt.Errorf("failed to persist schema: %w", err)
 		}
 	}
 
@@ -83,7 +83,7 @@ func (s *Stmt) compileDropIndex(vm *vdbe.VDBE, stmt *parser.DropIndexStmt, args 
 	// Persist schema to sqlite_master
 	if s.conn.btree != nil {
 		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
-			_ = err
+			return nil, fmt.Errorf("failed to persist schema: %w", err)
 		}
 	}
 
@@ -145,7 +145,7 @@ func (s *Stmt) compileAlterTableRename(vm *vdbe.VDBE, oldName, newName string) (
 	// Persist to sqlite_master
 	if s.conn.btree != nil {
 		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
-			_ = err
+			return nil, fmt.Errorf("failed to persist schema: %w", err)
 		}
 	}
 
@@ -176,7 +176,7 @@ func (s *Stmt) compileAlterTableRenameColumn(vm *vdbe.VDBE, table *schema.Table,
 	// Persist to sqlite_master
 	if s.conn.btree != nil {
 		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
-			_ = err
+			return nil, fmt.Errorf("failed to persist schema: %w", err)
 		}
 	}
 
@@ -201,7 +201,7 @@ func (s *Stmt) compileAlterTableAddColumn(vm *vdbe.VDBE, table *schema.Table, co
 	s.conn.schema.UpdateTableSQL(table.Name)
 	if s.conn.btree != nil {
 		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
-			_ = err
+			return nil, fmt.Errorf("failed to persist schema: %w", err)
 		}
 	}
 
@@ -265,7 +265,7 @@ func (s *Stmt) compileAlterTableDropColumn(vm *vdbe.VDBE, table *schema.Table, c
 	// Persist to sqlite_master
 	if s.conn.btree != nil {
 		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
-			_ = err
+			return nil, fmt.Errorf("failed to persist schema: %w", err)
 		}
 	}
 

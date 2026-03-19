@@ -107,6 +107,10 @@ func writeSingleOverflowPage(bt *Btree, pageNum uint32, data []byte, offset, toW
 		return fmt.Errorf("failed to get overflow page %d: %w", pageNum, err)
 	}
 
+	if OverflowHeaderSize+toWrite > len(pageData) {
+		return fmt.Errorf("overflow write exceeds page %d bounds: need %d, have %d", pageNum, OverflowHeaderSize+toWrite, len(pageData))
+	}
+
 	binary.BigEndian.PutUint32(pageData[0:4], nextPageNum)
 	copy(pageData[OverflowHeaderSize:], data[offset:offset+toWrite])
 
@@ -208,6 +212,10 @@ func readSingleOverflowPage(bt *Btree, pageNum uint32, result []byte, offset, da
 		return 0, 0, fmt.Errorf("failed to get overflow page %d: %w", pageNum, err)
 	}
 
+	if len(pageData) < OverflowHeaderSize {
+		return 0, 0, fmt.Errorf("overflow page %d too small: %d bytes", pageNum, len(pageData))
+	}
+
 	nextPage := binary.BigEndian.Uint32(pageData[0:4])
 	toRead := calculateReadAmount(offset, dataSize, pageCapacity)
 
@@ -288,7 +296,7 @@ func CalculateLocalPayload(totalSize uint32, pageSize uint32, isTable bool) uint
 		return safePayloadSize(totalSize, maxLocal)
 	}
 
-	if usableSize < 4 {
+	if usableSize < 4 || totalSize < minLocal {
 		return safePayloadSize(minLocal, 0)
 	}
 

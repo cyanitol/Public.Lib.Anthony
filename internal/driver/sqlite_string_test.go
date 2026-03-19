@@ -13,15 +13,10 @@ type ssf_testCase struct {
 	query   string
 	want    interface{}
 	wantErr bool
-	skip    string
 }
 
 // ssf_runTest executes a single test case
 func ssf_runTest(t *testing.T, db *sql.DB, tt ssf_testCase) {
-	if tt.skip != "" {
-		t.Skip(tt.skip)
-	}
-
 	var result interface{}
 	err := db.QueryRow(tt.query).Scan(&result)
 

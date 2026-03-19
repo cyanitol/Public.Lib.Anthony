@@ -1,3 +1,5 @@
+//go:build !windows
+
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package pager
 
@@ -157,9 +159,6 @@ func lockReleaseAndVerify(t *testing.T, lm *LockManager, level LockLevel) {
 // TestAcquireReleaseLock tests basic lock acquisition and release.
 func TestAcquireReleaseLock(t *testing.T) {
 	t.Parallel()
-	if isWindows() {
-		t.Skip("Skipping test on Windows (not yet implemented)")
-	}
 
 	f, cleanup := createTestFile(t)
 	defer cleanup()
@@ -177,10 +176,6 @@ func TestAcquireReleaseLock(t *testing.T) {
 // TestInvalidTransitions tests that invalid lock transitions are rejected.
 func TestInvalidTransitions(t *testing.T) {
 	t.Parallel()
-	// Skip on Windows until implemented
-	if isWindows() {
-		t.Skip("Skipping test on Windows (not yet implemented)")
-	}
 
 	f, cleanup := createTestFile(t)
 	defer cleanup()
@@ -207,10 +202,6 @@ func TestInvalidTransitions(t *testing.T) {
 // TestConcurrentReaders tests that multiple readers can hold SHARED locks.
 func TestConcurrentReaders(t *testing.T) {
 	t.Parallel()
-	// Skip on Windows until implemented
-	if isWindows() {
-		t.Skip("Skipping test on Windows (not yet implemented)")
-	}
 
 	f1, cleanup1 := createTestFile(t)
 	defer cleanup1()
@@ -255,9 +246,6 @@ func TestConcurrentReaders(t *testing.T) {
 // TestReaderWriterConflict tests that a writer blocks when readers exist.
 func TestReaderWriterConflict(t *testing.T) {
 	t.Parallel()
-	if isWindows() {
-		t.Skip("Skipping test on Windows (not yet implemented)")
-	}
 
 	f1, cleanup1 := createTestFile(t)
 	defer cleanup1()
@@ -287,9 +275,6 @@ func TestReaderWriterConflict(t *testing.T) {
 // TestReservedlockExclusive tests that only one RESERVED lock can be held.
 func TestReservedlockExclusive(t *testing.T) {
 	t.Parallel()
-	if isWindows() {
-		t.Skip("Skipping test on Windows (not yet implemented)")
-	}
 
 	f1, cleanup1 := createTestFile(t)
 	defer cleanup1()
@@ -315,10 +300,6 @@ func TestReservedlockExclusive(t *testing.T) {
 // TestExclusivelockExclusive tests that EXCLUSIVE locks are truly exclusive.
 func TestExclusivelockExclusive(t *testing.T) {
 	t.Parallel()
-	// Skip on Windows until implemented
-	if isWindows() {
-		t.Skip("Skipping test on Windows (not yet implemented)")
-	}
 
 	f1, cleanup1 := createTestFile(t)
 	defer cleanup1()
@@ -362,10 +343,6 @@ func TestExclusivelockExclusive(t *testing.T) {
 // TestConcurrentLockOperations tests thread safety of lock operations.
 func TestConcurrentLockOperations(t *testing.T) {
 	t.Parallel()
-	// Skip on Windows until implemented
-	if isWindows() {
-		t.Skip("Skipping test on Windows (not yet implemented)")
-	}
 
 	f, cleanup := createTestFile(t)
 	defer cleanup()
@@ -396,9 +373,6 @@ func TestConcurrentLockOperations(t *testing.T) {
 // TestIsLockHeld tests the IsLockHeld method.
 func TestIsLockHeld(t *testing.T) {
 	t.Parallel()
-	if isWindows() {
-		t.Skip("Skipping test on Windows (not yet implemented)")
-	}
 
 	f, cleanup := createTestFile(t)
 	defer cleanup()
@@ -466,10 +440,6 @@ func TestCanAcquire(t *testing.T) {
 // TestLockManagerClose tests that Close releases all locks.
 func TestLockManagerClose(t *testing.T) {
 	t.Parallel()
-	// Skip on Windows until implemented
-	if isWindows() {
-		t.Skip("Skipping test on Windows (not yet implemented)")
-	}
 
 	f, cleanup := createTestFile(t)
 	defer cleanup()
@@ -500,10 +470,6 @@ func TestLockManagerClose(t *testing.T) {
 // TestTryAcquireLock tests the non-blocking lock acquisition.
 func TestTryAcquireLock(t *testing.T) {
 	t.Parallel()
-	// Skip on Windows until implemented
-	if isWindows() {
-		t.Skip("Skipping test on Windows (not yet implemented)")
-	}
 
 	f, cleanup := createTestFile(t)
 	defer cleanup()
@@ -527,10 +493,6 @@ func TestTryAcquireLock(t *testing.T) {
 // TestLockSequence tests a typical lock sequence for a write transaction.
 func TestLockSequence(t *testing.T) {
 	t.Parallel()
-	// Skip on Windows until implemented
-	if isWindows() {
-		t.Skip("Skipping test on Windows (not yet implemented)")
-	}
 
 	f, cleanup := createTestFile(t)
 	defer cleanup()
@@ -576,10 +538,6 @@ func TestLockSequence(t *testing.T) {
 // TestPendingBlocksNewReaders tests that PENDING blocks new SHARED locks.
 func TestPendingBlocksNewReaders(t *testing.T) {
 	t.Parallel()
-	// Skip on Windows until implemented
-	if isWindows() {
-		t.Skip("Skipping test on Windows (not yet implemented)")
-	}
 
 	f1, cleanup1 := createTestFile(t)
 	defer cleanup1()
@@ -659,9 +617,3 @@ func createTestFile(t *testing.T) (*os.File, func()) {
 	return f, cleanup
 }
 
-// isWindows returns true if running on Windows.
-func isWindows() bool {
-	// Check if we're on Windows by trying to detect the OS
-	// This is a simple check that works for build tags
-	return false // Will be overridden by lock_windows.go if on Windows
-}

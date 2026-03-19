@@ -611,20 +611,19 @@ func TestRowsCloseTwice(t *testing.T) {
 
 // TestCloseWithTransaction tests closing database with active transaction.
 func TestCloseWithTransaction(t *testing.T) {
-	t.Skip("Transaction management needs pager-level transaction support")
 	tmpDir := t.TempDir()
 	db, err := Open(tmpDir + "/test.db")
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
 
-	// Start transaction flag (doesn't actually start pager transaction)
+	// Start transaction
 	_, err = db.Begin()
 	if err != nil {
 		t.Fatalf("Failed to begin transaction: %v", err)
 	}
 
-	// Close should succeed (no actual pager transaction to rollback)
+	// Close should succeed - it will rollback the active transaction
 	err = db.Close()
 	if err != nil {
 		t.Fatalf("Failed to close database: %v", err)

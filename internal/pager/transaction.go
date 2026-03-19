@@ -198,36 +198,6 @@ func (p *Pager) GetLockState() int {
 	return p.lockState
 }
 
-// upgradeToWriteLock upgrades a read lock to a write lock.
-func (p *Pager) upgradeToWriteLock() error {
-	if p.readOnly {
-		return ErrReadOnly
-	}
-
-	// Can't upgrade if we already have a write lock
-	if p.lockState >= LockReserved {
-		return nil
-	}
-
-	// Acquire reserved lock
-	p.lockState = LockReserved
-
-	return nil
-}
-
-// downgradeLock downgrades from write lock to read lock.
-func (p *Pager) downgradeLock() error {
-	// Can't downgrade if not in a write state
-	if p.lockState < LockReserved {
-		return nil
-	}
-
-	// Downgrade to shared lock
-	p.lockState = LockShared
-
-	return nil
-}
-
 // TryUpgradeToExclusive attempts to acquire an exclusive lock.
 // Returns true if successful, false if the lock is held by another process.
 // If a busy handler is set, it will retry on lock contention.

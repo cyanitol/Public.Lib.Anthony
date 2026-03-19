@@ -25,7 +25,6 @@ func countPreparedScanCount(t *testing.T, db *sql.DB, query string, want int, la
 
 // TestCountWithPreparedStatement tests that COUNT(*) works with prepared statements
 func TestCountWithPreparedStatement(t *testing.T) {
-	t.Skip("pre-existing failure - COUNT with prepared statements incomplete")
 	dbFile := t.TempDir() + "/test_count_prepared.db"
 
 	db, err := sql.Open(DriverName, dbFile)

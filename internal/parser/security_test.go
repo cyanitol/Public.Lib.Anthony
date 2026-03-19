@@ -78,11 +78,24 @@ func TestExpressionDepthLimit(t *testing.T) {
 
 func TestExpressionDepthLimitBinary(t *testing.T) {
 	t.Parallel()
-	// Binary operators like AND/OR create a left-recursive structure
-	// The depth is determined by how many recursive parse calls are made
-	// Since each binary operator increments depth once, we need a very long chain
-	// Skip this test as binary operators don't create deep nesting in our parser
-	t.Skip("Binary operators don't create deep nesting in our left-recursive parser")
+	// Binary operators like AND/OR create a left-recursive structure.
+	// The depth is determined by how many recursive parse calls are made.
+	// In our left-recursive parser, a long AND/OR chain does NOT create
+	// deep nesting, so this should parse without a depth error.
+	parts := make([]string, security.MaxExprDepth+10)
+	for i := range parts {
+		parts[i] = "1"
+	}
+	longChain := strings.Join(parts, " AND ")
+	sql := "SELECT " + longChain
+
+	p := NewParser(sql)
+	_, err := p.Parse()
+
+	// Should NOT trigger depth error because binary ops are left-recursive
+	if err != nil && strings.Contains(err.Error(), "expression depth exceeds maximum") {
+		t.Errorf("Binary AND chain should not trigger depth limit, got: %v", err)
+	}
 }
 
 func TestExpressionDepthLimitNested(t *testing.T) {

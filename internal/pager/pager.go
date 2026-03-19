@@ -620,11 +620,9 @@ func (p *Pager) commitPhase3FinalizeJournal() error {
 	return nil
 }
 
-// commitPhase4UpdateHeader updates the database header if needed.
+// commitPhase4UpdateHeader updates the database header.
+// The header is always updated on commit to increment the file change counter.
 func (p *Pager) commitPhase4UpdateHeader() error {
-	if !p.needsHeaderUpdate() {
-		return nil
-	}
 	return p.updateDatabaseHeader()
 }
 

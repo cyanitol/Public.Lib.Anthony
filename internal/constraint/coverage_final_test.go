@@ -73,7 +73,6 @@ func TestUniqueConstraint_CheckCurrentRow_InvalidData(t *testing.T) {
 
 // TestForeignKeyManager_HandleDeleteConstraint_NoReferencedColumns tests default PK reference
 func TestForeignKeyManager_HandleDeleteConstraint_NoReferencedColumns(t *testing.T) {
-	t.Skip("handleDeleteConstraint interface changes need schema lookup")
 	mgr := NewForeignKeyManager()
 	mgr.SetEnabled(true)
 
@@ -84,6 +83,16 @@ func TestForeignKeyManager_HandleDeleteConstraint_NoReferencedColumns(t *testing
 		PrimaryKey: []string{"id"},
 	}
 	sch.Tables["customers"] = customerTable
+
+	ordersTable := &schema.Table{
+		Name: "orders",
+		Columns: []*schema.Column{
+			{Name: "id", Type: "INTEGER", PrimaryKey: true},
+			{Name: "customer_id", Type: "INTEGER"},
+		},
+		PrimaryKey: []string{"id"},
+	}
+	sch.Tables["orders"] = ordersTable
 
 	fk := &ForeignKeyConstraint{
 		Table:      "orders",
@@ -632,7 +641,10 @@ func TestCheckConstraint_ExtractCheckConstraints_EmptyExpression(t *testing.T) {
 		},
 	}
 
-	constraints := extractCheckConstraints(table)
+	constraints, err := extractCheckConstraints(table)
+	if err != nil {
+		t.Fatalf("extractCheckConstraints failed: %v", err)
+	}
 	// Empty expression should be skipped
 	if len(constraints) != 0 {
 		t.Errorf("Expected 0 constraints for empty expression, got %d", len(constraints))
@@ -659,12 +671,15 @@ func TestCheckConstraint_ValidateInsertWithGenerator_ErrorFromGenerator(t *testi
 
 	s := schema.NewSchema()
 	table, _ := s.CreateTable(stmt)
-	validator := NewCheckValidator(table)
+	validator, err := NewCheckValidator(table)
+	if err != nil {
+		t.Fatalf("NewCheckValidator failed: %v", err)
+	}
 
 	// Mock generator that returns error
 	mockGen := &mockCodeGeneratorWithError{shouldFail: true}
 
-	err := validator.ValidateInsertWithGenerator(mockGen)
+	err = validator.ValidateInsertWithGenerator(mockGen)
 	if err == nil {
 		t.Error("Expected error from generator")
 	}

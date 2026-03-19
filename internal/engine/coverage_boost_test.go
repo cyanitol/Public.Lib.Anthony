@@ -892,8 +892,8 @@ func TestResolveColumnIndexNonIdentExpr(t *testing.T) {
 	}
 
 	idx, err := resolveColumnIndex(col, table)
-	if err != nil {
-		t.Errorf("resolveColumnIndex should not error for non-ident expr: %v", err)
+	if err == nil {
+		t.Errorf("resolveColumnIndex should error for non-ident expr, got idx=%d", idx)
 	}
 	if idx != 0 {
 		t.Logf("resolveColumnIndex returned %d for non-ident expr", idx)
@@ -918,8 +918,8 @@ func TestResolveColumnIndexMultiTableNonIdentExpr(t *testing.T) {
 	}
 
 	cursorIdx, colIdx, err := resolveColumnIndexMultiTable(col, tables)
-	if err != nil {
-		t.Errorf("resolveColumnIndexMultiTable should not error for non-ident expr: %v", err)
+	if err == nil {
+		t.Errorf("resolveColumnIndexMultiTable should error for non-ident expr, got cursor=%d, col=%d", cursorIdx, colIdx)
 	}
 	if cursorIdx != 0 || colIdx != 0 {
 		t.Logf("resolveColumnIndexMultiTable returned cursor=%d, col=%d for non-ident expr", cursorIdx, colIdx)

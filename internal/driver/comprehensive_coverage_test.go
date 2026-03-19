@@ -330,7 +330,6 @@ func TestExecContextWithParameters(t *testing.T) {
 
 // TestAggregateEdgeCases tests aggregate function compilation edge cases
 func TestAggregateEdgeCases(t *testing.T) {
-	t.Skip("pre-existing failure - aggregate edge cases not yet handled")
 	dbFile := t.TempDir() + "/test_agg_edge.db"
 
 	db, err := sql.Open(DriverName, dbFile)

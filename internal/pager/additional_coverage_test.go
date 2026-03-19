@@ -1,10 +1,11 @@
+//go:build !windows
+
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package pager
 
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -89,9 +90,6 @@ func TestPagerReadHeader(t *testing.T) {
 // TestPagerAcquireSharedLock tests shared lock acquisition path
 func TestPagerAcquireSharedLock(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	dbFile := filepath.Join(t.TempDir(), "test_shared_lock.db")
 

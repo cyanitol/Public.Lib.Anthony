@@ -841,7 +841,8 @@ func TestNotNullConstraint_ValidateRow_Error(t *testing.T) {
 
 // TestCheckConstraint_ValidateInsert_ParseError tests handling of parse errors
 func TestCheckConstraint_ValidateInsert_ParseError(t *testing.T) {
-	// Create table with invalid CHECK expression that will fail to parse
+	// The parser may accept partial expressions (e.g., "invalid" as an identifier).
+	// Verify that NewCheckValidator returns an error or succeeds gracefully.
 	table := &schema.Table{
 		Name: "test",
 		Columns: []*schema.Column{
@@ -849,13 +850,7 @@ func TestCheckConstraint_ValidateInsert_ParseError(t *testing.T) {
 		},
 	}
 
-	validator := NewCheckValidator(table)
-
-	// The parser may or may not successfully parse invalid syntax
-	// Just verify that the validator was created successfully
-	if validator == nil {
-		t.Error("Expected non-nil validator")
-	}
+	_, _ = NewCheckValidator(table)
 }
 
 // TestCheckConstraint_ExtractFromTableConstraint_ParseError tests table-level parse error
@@ -872,12 +867,9 @@ func TestCheckConstraint_ExtractFromTableConstraint_ParseError(t *testing.T) {
 		},
 	}
 
-	validator := NewCheckValidator(table)
-
-	// The parser may or may not successfully parse invalid syntax
-	// Just verify that the validator was created successfully
-	if validator == nil {
-		t.Error("Expected non-nil validator")
+	_, err := NewCheckValidator(table)
+	if err == nil {
+		t.Error("Expected error for invalid CHECK expression")
 	}
 }
 
@@ -898,7 +890,10 @@ func TestExtractCheckConstraints_SkipNonCheck(t *testing.T) {
 		},
 	}
 
-	constraints := extractCheckConstraints(table)
+	constraints, err := extractCheckConstraints(table)
+	if err != nil {
+		t.Fatalf("extractCheckConstraints failed: %v", err)
+	}
 	if len(constraints) != 0 {
 		t.Errorf("Expected 0 CHECK constraints, got %d", len(constraints))
 	}

@@ -631,7 +631,10 @@ func TestBuildEquivalenceClasses(t *testing.T) {
 		},
 	}
 
-	equiv := p.buildEquivalenceClasses(clause)
+	tables := []*TableInfo{
+		{Name: "t", Columns: []ColumnInfo{{Name: "a"}, {Name: "b"}}},
+	}
+	equiv := p.buildEquivalenceClasses(clause, tables)
 	if len(equiv) == 0 {
 		t.Error("Expected equivalence classes to be built")
 	}

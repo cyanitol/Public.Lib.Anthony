@@ -1,10 +1,11 @@
+//go:build stress
+
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
 import (
 	"context"
 	"database/sql"
-	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -52,10 +53,6 @@ func concRunQueryLoop(db *sql.DB, done <-chan struct{}, id int) {
 
 // TestConcurrentClose tests closing a connection while queries are running
 func TestConcurrentClose(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping concurrent test in short mode")
-	}
-
 	db := concOpenAndPopulate(t, DriverName, filepath.Join(t.TempDir(), "test.db"), 100)
 
 	var wg sync.WaitGroup
@@ -109,11 +106,6 @@ func concExecLogErrors(t *testing.T, errors <-chan error) {
 
 // TestConcurrentExec tests concurrent statement execution
 func TestConcurrentExec(t *testing.T) {
-	t.Skip("Concurrent write operations not fully supported without WAL mode")
-	if testing.Short() {
-		t.Skip("Skipping concurrent test in short mode")
-	}
-
 	db, err := sql.Open(DriverName, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
@@ -194,11 +186,6 @@ func concWriterLoop(t *testing.T, db *sql.DB, done <-chan struct{}, id, maxWrite
 
 // TestConcurrentReadWrite tests concurrent reads and writes
 func TestConcurrentReadWrite(t *testing.T) {
-	t.Skip("Concurrent write operations not fully supported without WAL mode")
-	if testing.Short() {
-		t.Skip("Skipping concurrent test in short mode")
-	}
-
 	db := concOpenAndPopulate(t, DriverName, filepath.Join(t.TempDir(), "test.db"), 100)
 	defer db.Close()
 	db.SetMaxOpenConns(1)
@@ -222,10 +209,6 @@ func TestConcurrentReadWrite(t *testing.T) {
 
 // TestConcurrentPrepare tests concurrent statement preparation
 func TestConcurrentPrepare(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping concurrent test in short mode")
-	}
-
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
 
@@ -308,11 +291,6 @@ func concTxIncrement(t *testing.T, db *sql.DB) error {
 
 // TestSecurityConcurrentTransactions tests concurrent transaction handling
 func TestSecurityConcurrentTransactions(t *testing.T) {
-	t.Skip("Concurrent transactions not fully supported without WAL mode")
-	if testing.Short() {
-		t.Skip("Skipping concurrent test in short mode")
-	}
-
 	db, err := sql.Open(DriverName, filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
@@ -346,10 +324,6 @@ func TestSecurityConcurrentTransactions(t *testing.T) {
 
 // TestConcurrentStmtClose tests closing statements while they're being used
 func TestConcurrentStmtClose(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping concurrent test in short mode")
-	}
-
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
 
@@ -417,11 +391,6 @@ func concConnWorker(t *testing.T, dbPath string, id, numOps int) {
 
 // TestConcurrentConnections tests multiple concurrent connections
 func TestConcurrentConnections(t *testing.T) {
-	t.Skip("Concurrent connections with write operations not fully supported without WAL mode")
-	if testing.Short() {
-		t.Skip("Skipping concurrent test in short mode")
-	}
-
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	db1, err := sql.Open("sqlite_internal", dbPath)
 	if err != nil {
@@ -459,10 +428,6 @@ func TestConcurrentConnections(t *testing.T) {
 
 // TestRaceConditionOnClose tests for race conditions during connection close
 func TestRaceConditionOnClose(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping concurrent test in short mode")
-	}
-
 	// This test is specifically designed to catch race conditions with -race flag
 
 	for iteration := 0; iteration < 10; iteration++ {
@@ -503,10 +468,6 @@ func TestRaceConditionOnClose(t *testing.T) {
 
 // TestSecurityContextCancellation tests query cancellation via context
 func TestSecurityContextCancellation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping concurrent test in short mode")
-	}
-
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
 
@@ -539,10 +500,6 @@ func TestSecurityContextCancellation(t *testing.T) {
 
 // TestDatabaseFileLocking tests file locking behavior
 func TestDatabaseFileLocking(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping concurrent test in short mode")
-	}
-
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
 
@@ -577,8 +534,4 @@ func TestDatabaseFileLocking(t *testing.T) {
 	}
 }
 
-// Clean up test files
-func TestMain(m *testing.M) {
-	code := m.Run()
-	os.Exit(code)
-}
+

@@ -263,7 +263,6 @@ func TestReindexWithoutRowid(t *testing.T) {
 	defer db.Close()
 
 	t.Run("without_rowid_desc", func(t *testing.T) {
-		t.Skip("UNIQUE constraint on NULL needs SQLite-compatible behavior (multiple NULLs allowed)")
 		_, err := db.Exec(`
 			CREATE TABLE t5(
 				c0 INTEGER PRIMARY KEY DESC,

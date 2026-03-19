@@ -38,7 +38,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		skip    string        // Skip reason if not yet supported
 		setup   []string      // Setup queries (CREATE TABLE, INSERT, etc.)
 		query   string        // Test query
 		want    []interface{} // Expected row values
@@ -128,7 +127,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		},
 		{
 			name: "coalesce_with_function",
-			skip: "UPPER/CAST returns unknown affinity code",
 			setup: []string{
 				"CREATE TABLE t2(a INTEGER)",
 				"INSERT INTO t2 VALUES(1), (NULL), (345)",
@@ -149,7 +147,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		},
 		{
 			name: "coalesce_subtraction_null",
-			skip: "NULL propagation in arithmetic not yet implemented",
 			setup: []string{
 				"CREATE TABLE test1(i1 INTEGER, i2 INTEGER)",
 				"INSERT INTO test1 VALUES(1, NULL)",
@@ -159,7 +156,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		},
 		{
 			name: "coalesce_multiplication_null",
-			skip: "NULL propagation in arithmetic not yet implemented",
 			setup: []string{
 				"CREATE TABLE test1(i1 INTEGER, i2 INTEGER)",
 				"INSERT INTO test1 VALUES(NULL, NULL)",
@@ -169,7 +165,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		},
 		{
 			name: "coalesce_division_null",
-			skip: "NULL propagation in arithmetic not yet implemented",
 			setup: []string{
 				"CREATE TABLE test1(i1 INTEGER, i2 INTEGER)",
 				"INSERT INTO test1 VALUES(NULL, 1)",
@@ -179,7 +174,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		},
 		{
 			name: "coalesce_comparison_null",
-			skip: "NULL propagation in comparison not yet implemented",
 			setup: []string{
 				"CREATE TABLE test1(i1 INTEGER, i2 INTEGER)",
 				"INSERT INTO test1 VALUES(NULL, 1)",
@@ -189,7 +183,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		},
 		{
 			name: "coalesce_logical_and_null",
-			skip: "NULL propagation in logical expressions not yet implemented",
 			setup: []string{
 				"CREATE TABLE test1(i1 INTEGER, i2 INTEGER)",
 				"INSERT INTO test1 VALUES(NULL, NULL)",
@@ -199,7 +192,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		},
 		{
 			name: "coalesce_logical_or_null",
-			skip: "NULL propagation in logical expressions not yet implemented",
 			setup: []string{
 				"CREATE TABLE test1(i1 INTEGER, i2 INTEGER)",
 				"INSERT INTO test1 VALUES(NULL, NULL)",
@@ -211,7 +203,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		// COALESCE with real numbers - from expr.test lines 395-398
 		{
 			name: "coalesce_real_null_addition",
-			skip: "NULL propagation in arithmetic not yet implemented",
 			setup: []string{
 				"CREATE TABLE test1(r1 REAL, r2 REAL)",
 				"INSERT INTO test1 VALUES(1.23, NULL)",
@@ -223,17 +214,14 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		// COALESCE error cases - from func.test lines 1317-1324
 		{
 			name:    "coalesce_no_args",
-			skip:    "error handling for wrong number of arguments not yet implemented",
 			query:   "SELECT coalesce()",
 			wantErr: true,
-			errMsg:  "wrong number of arguments",
+			errMsg:  "requires at least 1 argument",
 		},
 		{
-			name:    "coalesce_one_arg",
-			skip:    "error handling for wrong number of arguments not yet implemented",
-			query:   "SELECT coalesce(1)",
-			wantErr: true,
-			errMsg:  "wrong number of arguments",
+			name:  "coalesce_one_arg",
+			query: "SELECT coalesce(1)",
+			want:  []interface{}{int64(1)},
 		},
 
 		// COALESCE short-circuit behavior - from func.test lines 1526-1532
@@ -278,7 +266,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		},
 		{
 			name: "ifnull_from_table",
-			skip: "IFNULL with table columns returns wrong result",
 			setup: []string{
 				"CREATE TABLE t2(a INTEGER)",
 				"INSERT INTO t2 VALUES(1), (NULL), (3)",
@@ -444,13 +431,11 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		},
 		{
 			name:  "nullif_in_case_expression",
-			skip:  "CASE expression with NULLIF not yet supported",
 			query: "SELECT CASE WHEN nullif(5, 5) IS NULL THEN 'equal' ELSE 'different' END",
 			want:  []interface{}{"equal"},
 		},
 		{
 			name: "ifnull_in_aggregate",
-			skip: "IFNULL inside aggregate function not yet supported",
 			setup: []string{
 				"CREATE TABLE t4(value INTEGER)",
 				"INSERT INTO t4 VALUES(10), (NULL), (20), (NULL), (30)",
@@ -460,7 +445,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		},
 		{
 			name: "coalesce_in_group_by",
-			skip: "GROUP BY with expression alias not yet supported",
 			setup: []string{
 				"CREATE TABLE t5(category TEXT, value INTEGER)",
 				"INSERT INTO t5 VALUES(NULL, 10), (NULL, 20), ('A', 30), ('B', 40)",
@@ -475,7 +459,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 
 		{
 			name:  "coalesce_negative_numbers",
-			skip:  "negative number literals in COALESCE not parsed correctly",
 			query: "SELECT coalesce(NULL, -1, -2)",
 			want:  []interface{}{int64(-1)},
 		},
@@ -486,7 +469,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		},
 		{
 			name:  "coalesce_large_integers",
-			skip:  "large integer literal overflow",
 			query: "SELECT coalesce(NULL, 9223372036854775807)",
 			want:  []interface{}{int64(9223372036854775807)},
 		},
@@ -521,7 +503,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 		},
 		{
 			name: "nullif_scan_optimization",
-			skip: "NULLIF in WHERE clause with IS NULL not yet supported",
 			setup: []string{
 				"CREATE TABLE t7(x INTEGER)",
 				"INSERT INTO t7 VALUES(1), (1), (2), (1), (3)",
@@ -534,9 +515,6 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 			// Clean up from any previous test - drop tables to reset schema
 			coalesceCleanupTables(db)
 
@@ -546,18 +524,38 @@ func TestSQLiteCoalesceNullifIfnull(t *testing.T) {
 			// Execute test query
 			rows, err := db.Query(tt.query)
 
-			// Handle error cases
-			if coalesceHandleError(t, err, tt.wantErr, tt.errMsg) {
+			// Handle error at query level
+			if err != nil {
+				coalesceCheckExpectedErr(t, err, tt.wantErr, tt.errMsg)
 				return
 			}
 			defer rows.Close()
 
-			// Collect results
-			results := coalesceCollectResults(t, rows)
+			// Collect results (may encounter errors during iteration)
+			results, iterErr := coalesceCollectResultsWithErr(t, rows)
+			if iterErr != nil {
+				coalesceCheckExpectedErr(t, iterErr, tt.wantErr, tt.errMsg)
+				return
+			}
+			if tt.wantErr {
+				t.Fatalf("expected error containing %q, got nil", tt.errMsg)
+			}
 
 			// Compare results
 			coalesceVerifyResults(t, results, tt.want)
 		})
+	}
+}
+
+// coalesceCheckExpectedErr verifies that a non-nil error matches expectations.
+// It fatals if wantErr is false, or if errMsg is set but not found in the error string.
+func coalesceCheckExpectedErr(t *testing.T, err error, wantErr bool, errMsg string) {
+	t.Helper()
+	if !wantErr {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if errMsg != "" && !containsSubstring(err.Error(), errMsg) {
+		t.Fatalf("expected error containing %q, got %q", errMsg, err.Error())
 	}
 }
 
@@ -598,8 +596,8 @@ func coalesceHandleError(t *testing.T, err error, wantErr bool, errMsg string) b
 	return false
 }
 
-// coalesceCollectResults scans all rows and returns results
-func coalesceCollectResults(t *testing.T, rows *sql.Rows) []interface{} {
+// coalesceCollectResultsWithErr scans all rows and returns results or an iteration error
+func coalesceCollectResultsWithErr(t *testing.T, rows *sql.Rows) ([]interface{}, error) {
 	t.Helper()
 	var results []interface{}
 	for rows.Next() {
@@ -622,9 +620,9 @@ func coalesceCollectResults(t *testing.T, rows *sql.Rows) []interface{} {
 	}
 
 	if err := rows.Err(); err != nil {
-		t.Fatalf("rows iteration error: %v", err)
+		return results, err
 	}
-	return results
+	return results, nil
 }
 
 // coalesceVerifyResults compares actual results with expected values

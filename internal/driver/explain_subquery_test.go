@@ -846,7 +846,6 @@ func TestCompileLiteralExpr(t *testing.T) {
 
 // TestExtractValueFromExpression tests value extraction from expressions
 func TestExtractValueFromExpression(t *testing.T) {
-	t.Skip("Expression evaluation in INSERT not fully implemented")
 	dbFile := t.TempDir() + "/test_extract_value.db"
 
 	db, err := sql.Open(DriverName, dbFile)
@@ -881,7 +880,6 @@ func TestExtractValueFromExpression(t *testing.T) {
 
 // TestPrepareNewRowForInsert tests row preparation for insert
 func TestPrepareNewRowForInsert(t *testing.T) {
-	t.Skip("Partial column INSERT has type conversion issues")
 	dbFile := t.TempDir() + "/test_prepare_row.db"
 
 	db, err := sql.Open(DriverName, dbFile)
@@ -1041,7 +1039,6 @@ func TestCompileArgValue(t *testing.T) {
 
 // TestMultiTableColumnNames tests buildMultiTableColumnNames
 func TestMultiTableColumnNames(t *testing.T) {
-	t.Skip("Multi-table SELECT * column name expansion not implemented")
 	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_multi_cols.db")
 	defer cleanup()
 
@@ -1086,7 +1083,6 @@ func scanDynamicRows(t *testing.T, rows *sql.Rows, numCols int) {
 
 // TestEmitColumnFromTable tests column emission from specific table
 func TestEmitColumnFromTable(t *testing.T) {
-	t.Skip("Qualified column names not fully supported")
 	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_emit_col.db")
 	defer cleanup()
 

@@ -548,7 +548,6 @@ func TestParseExpressions(t *testing.T) {
 
 func TestParseTransactions(t *testing.T) {
 	t.Parallel()
-	t.Skip("Transaction parsing not yet fully implemented")
 	tests := []struct {
 		name     string
 		sql      string

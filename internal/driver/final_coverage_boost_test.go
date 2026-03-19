@@ -443,7 +443,6 @@ func countQueryRows(t *testing.T, db *sql.DB, query string) int {
 
 // TestLimitAndOffsetVariations tests LIMIT with and without OFFSET
 func TestLimitAndOffsetVariations(t *testing.T) {
-	t.Skip("LIMIT implementation incomplete")
 	dbFile := t.TempDir() + "/test_limit_variations.db"
 
 	db, err := sql.Open(DriverName, dbFile)

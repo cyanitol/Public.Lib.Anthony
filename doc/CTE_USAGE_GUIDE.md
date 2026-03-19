@@ -442,8 +442,4 @@ Start simple and build up complexity as needed. Your future self (and teammates)
 
 ## See Also
 
-- [CTE Quick Reference](CTE_QUICK_REFERENCE.md) - Concise syntax and examples for Common Table Expressions
-- [CTE Implementation Summary](CTE_IMPLEMENTATION_SUMMARY.md) - Technical details of CTE implementation
-- [Subquery Quick Reference](SUBQUERY_QUICK_REFERENCE.md) - Alternative to CTEs for nested queries
-- [SQL Language Reference](SQL_LANGUAGE.md) - Complete SQL syntax and language features
-- [SQLite WITH Reference (local)](sqlite/WITH_CTE.md) -- official SQLite CTE syntax reference
+- [SQLite CTE Documentation](https://sqlite.org/lang_with.html) - Official SQLite WITH clause reference

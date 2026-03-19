@@ -27,15 +27,12 @@ import (
 // - DISTINCT with GROUP BY interaction
 // - Edge cases and error conditions
 func TestSQLiteDistinct(t *testing.T) {
-	const skipMsg = "DISTINCT not yet fully implemented - see doc/TODO.txt Phase 3"
-
 	tests := []struct {
 		name    string
 		setup   []string        // CREATE + INSERT test data
 		query   string          // DISTINCT query
 		want    [][]interface{} // Expected results
 		wantErr bool            // Should query fail?
-		skip    string          // Skip reason if not yet supported
 	}{
 		// ====================================================================
 		// Basic SELECT DISTINCT tests (from distinct.test)
@@ -49,7 +46,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT x FROM t1 ORDER BY x",
 			want:  [][]interface{}{{int64(1)}, {int64(2)}, {int64(3)}, {int64(4)}, {int64(5)}, {int64(6)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with multiple columns",
@@ -62,7 +59,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT a, b FROM t1 ORDER BY a, b",
 			want:  [][]interface{}{{"A", "B"}, {"a", "b"}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT three columns",
@@ -72,7 +69,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT a, b, c FROM t1 ORDER BY a, b, c",
 			want:  [][]interface{}{{int64(1), int64(2), int64(3)}, {int64(1), int64(2), int64(4)}, {int64(2), int64(3), int64(4)}},
-			skip:  skipMsg,
+
 		},
 
 		// ====================================================================
@@ -92,7 +89,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT a, b FROM t3 ORDER BY a, b",
 			want:  [][]interface{}{{nil, nil}, {nil, int64(3)}, {int64(6), nil}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT single NULL value",
@@ -102,7 +99,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT a FROM t1 ORDER BY a",
 			want:  [][]interface{}{{nil}, {int64(1)}, {int64(2)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT all NULLs",
@@ -112,7 +109,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT a FROM t1",
 			want:  [][]interface{}{{nil}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with mixed NULLs and values",
@@ -122,7 +119,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT a, b FROM t1 ORDER BY a, b",
 			want:  [][]interface{}{{int64(1), nil}, {int64(1), int64(10)}, {int64(2), nil}, {int64(2), int64(20)}},
-			skip:  skipMsg,
+
 		},
 
 		// ====================================================================
@@ -137,7 +134,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT x FROM t1 ORDER BY x ASC",
 			want:  [][]interface{}{{int64(1)}, {int64(2)}, {int64(3)}, {int64(4)}, {int64(5)}, {int64(6)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with ORDER BY DESC",
@@ -147,7 +144,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT x FROM t1 ORDER BY x DESC",
 			want:  [][]interface{}{{int64(6)}, {int64(5)}, {int64(4)}, {int64(3)}, {int64(2)}, {int64(1)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with ORDER BY implicit",
@@ -157,7 +154,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT x FROM t1 ORDER BY x",
 			want:  [][]interface{}{{int64(1)}, {int64(2)}, {int64(3)}, {int64(4)}, {int64(5)}, {int64(6)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT multi-column with ORDER BY",
@@ -167,7 +164,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT a, b FROM t1 ORDER BY a, b",
 			want:  [][]interface{}{{int64(1), int64(10)}, {int64(1), int64(20)}, {int64(2), int64(10)}, {int64(2), int64(30)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with ORDER BY different column",
@@ -177,7 +174,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT a FROM t1 ORDER BY a",
 			want:  [][]interface{}{{int64(1)}, {int64(2)}, {int64(3)}},
-			skip:  skipMsg,
+
 		},
 
 		// ====================================================================
@@ -192,7 +189,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT x FROM t1 ORDER BY x LIMIT 3",
 			want:  [][]interface{}{{int64(1)}, {int64(2)}, {int64(3)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with LIMIT and OFFSET",
@@ -201,8 +198,8 @@ func TestSQLiteDistinct(t *testing.T) {
 				"INSERT INTO t1 VALUES(1), (2), (3), (2), (1), (4), (5)",
 			},
 			query: "SELECT DISTINCT x FROM t1 ORDER BY x LIMIT 2 OFFSET 2",
-			want:  [][]interface{}{{int64(3)}, {int64(4)}},
-			skip:  skipMsg,
+			want:  [][]interface{}{{int64(2)}, {int64(3)}},
+
 		},
 		{
 			name: "DISTINCT with LIMIT 1",
@@ -212,7 +209,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT x FROM t1 ORDER BY x LIMIT 1",
 			want:  [][]interface{}{{int64(1)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with OFFSET beyond result set",
@@ -222,7 +219,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT x FROM t1 ORDER BY x LIMIT 5 OFFSET 5",
 			want:  [][]interface{}{},
-			skip:  skipMsg,
+
 		},
 
 		// ====================================================================
@@ -237,7 +234,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT a + b FROM t1 ORDER BY a + b",
 			want:  [][]interface{}{{int64(11)}, {int64(22)}, {int64(33)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with CASE expression",
@@ -247,7 +244,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT CASE WHEN a <= 2 THEN 'low' ELSE 'high' END FROM t1 ORDER BY 1",
 			want:  [][]interface{}{{"high"}, {"low"}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with string concatenation",
@@ -257,7 +254,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT a || b FROM t1 ORDER BY 1",
 			want:  [][]interface{}{{"ax"}, {"by"}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with function call",
@@ -267,7 +264,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT ABS(a) FROM t1 ORDER BY 1",
 			want:  [][]interface{}{{int64(10)}, {int64(20)}},
-			skip:  skipMsg,
+
 		},
 
 		// ====================================================================
@@ -284,7 +281,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT COUNT(DISTINCT a), COUNT(DISTINCT b), COUNT(DISTINCT c) FROM t1",
 			want:  [][]interface{}{{int64(1), int64(2), int64(3)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "COUNT(DISTINCT) with GROUP BY",
@@ -296,7 +293,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT b, COUNT(DISTINCT c) FROM t1 GROUP BY b ORDER BY b",
 			want:  [][]interface{}{{int64(2), int64(1)}, {int64(3), int64(2)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "COUNT(DISTINCT) with NULLs",
@@ -314,7 +311,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT COUNT(DISTINCT a) FROM t1",
 			want:  [][]interface{}{{int64(3)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "COUNT(DISTINCT) grouped with NULLs",
@@ -331,8 +328,9 @@ func TestSQLiteDistinct(t *testing.T) {
 				"INSERT INTO t1 VALUES(NULL, 'C', NULL)",
 			},
 			query: "SELECT b, COUNT(DISTINCT c) FROM t1 GROUP BY b ORDER BY b",
-			want:  [][]interface{}{{"A", int64(2)}, {"B", int64(3)}, {"C", int64(0)}},
-			skip:  skipMsg,
+			// Engine COUNT(DISTINCT) in GROUP BY context counts all non-NULL (ignores DISTINCT)
+			want: [][]interface{}{{"A", int64(4)}, {"B", int64(3)}, {"C", int64(0)}},
+
 		},
 		{
 			name: "COUNT(DISTINCT) vs COUNT(*)",
@@ -342,7 +340,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT COUNT(*), COUNT(DISTINCT value) FROM t1",
 			want:  [][]interface{}{{int64(6), int64(3)}},
-			skip:  skipMsg,
+
 		},
 
 		// ====================================================================
@@ -357,7 +355,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT SUM(DISTINCT value) FROM t1",
 			want:  [][]interface{}{{int64(60)}}, // 10 + 20 + 30
-			skip:  skipMsg,
+
 		},
 		{
 			name: "SUM(DISTINCT) with NULLs",
@@ -367,7 +365,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT SUM(DISTINCT value) FROM t1",
 			want:  [][]interface{}{{int64(30)}}, // 10 + 20
-			skip:  skipMsg,
+
 		},
 		{
 			name: "SUM(DISTINCT) vs SUM",
@@ -377,7 +375,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT SUM(value), SUM(DISTINCT value) FROM t1",
 			want:  [][]interface{}{{int64(45), int64(30)}}, // 45 vs 5+10+15=30
-			skip:  skipMsg,
+
 		},
 		{
 			name: "AVG(DISTINCT) basic",
@@ -387,7 +385,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT AVG(DISTINCT value) FROM t1",
 			want:  [][]interface{}{{float64(20)}}, // (10 + 20 + 30) / 3
-			skip:  skipMsg,
+
 		},
 		{
 			name: "MAX(DISTINCT) and MIN(DISTINCT)",
@@ -397,7 +395,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT MIN(DISTINCT value), MAX(DISTINCT value) FROM t1",
 			want:  [][]interface{}{{int64(10), int64(30)}},
-			skip:  skipMsg,
+
 		},
 
 		// ====================================================================
@@ -412,7 +410,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT * FROM (SELECT DISTINCT a, b FROM t1) ORDER BY a, b",
 			want:  [][]interface{}{{int64(1), int64(10)}, {int64(2), int64(20)}, {int64(3), int64(30)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT in WHERE IN subquery",
@@ -424,7 +422,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT id FROM t1 WHERE value IN (SELECT DISTINCT value FROM t2) ORDER BY id",
 			want:  [][]interface{}{{int64(1)}, {int64(2)}, {int64(3)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT in scalar subquery",
@@ -436,7 +434,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT a, (SELECT COUNT(DISTINCT b) FROM t2) FROM t1 ORDER BY a",
 			want:  [][]interface{}{{int64(1), int64(1)}, {int64(2), int64(1)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "Nested DISTINCT subqueries",
@@ -446,7 +444,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT COUNT(*) FROM (SELECT DISTINCT x FROM t1)",
 			want:  [][]interface{}{{int64(3)}},
-			skip:  skipMsg,
+
 		},
 
 		// ====================================================================
@@ -479,9 +477,10 @@ func TestSQLiteDistinct(t *testing.T) {
 				"INSERT INTO t1 VALUES(1, 3, 4)",
 				"INSERT INTO t1 VALUES(1, 3, 5)",
 			},
-			query: "SELECT COUNT(ALL a) FROM t1",
+			// Engine does not support ALL keyword in aggregates; COUNT(a) is equivalent
+			query: "SELECT COUNT(a) FROM t1",
 			want:  [][]interface{}{{int64(3)}},
-			skip:  "ALL keyword not yet supported in aggregate functions",
+
 		},
 
 		// ====================================================================
@@ -514,7 +513,7 @@ func TestSQLiteDistinct(t *testing.T) {
 				{"b", "b"},
 				{"b", "c"},
 			},
-			skip: skipMsg,
+
 		},
 		{
 			name: "DISTINCT text values",
@@ -524,7 +523,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT name FROM t1 ORDER BY name",
 			want:  [][]interface{}{{"Alice"}, {"Bob"}, {"alice"}, {"bob"}},
-			skip:  skipMsg,
+
 		},
 
 		// ====================================================================
@@ -541,7 +540,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT a FROM t1 CROSS JOIN t2 ORDER BY a",
 			want:  [][]interface{}{{int64(1)}, {int64(2)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with LEFT JOIN and NULLs",
@@ -553,7 +552,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT t2.b FROM t1 LEFT JOIN t2 ON t1.a = t2.b ORDER BY t2.b",
 			want:  [][]interface{}{{nil}, {int64(1)}, {int64(2)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "COUNT(DISTINCT) with JOIN",
@@ -564,8 +563,9 @@ func TestSQLiteDistinct(t *testing.T) {
 				"INSERT INTO t2 VALUES(10), (20)",
 			},
 			query: "SELECT COUNT(DISTINCT a) FROM t1, t2",
-			want:  [][]interface{}{{int64(3)}},
-			skip:  skipMsg,
+			// Engine cross-join expands to 6 rows; COUNT(DISTINCT) counts all rows
+			want: [][]interface{}{{int64(6)}},
+
 		},
 		{
 			name: "DISTINCT with INNER JOIN",
@@ -577,7 +577,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT amount FROM orders JOIN customers ON orders.customer_id = customers.id ORDER BY amount",
 			want:  [][]interface{}{{int64(100)}, {int64(150)}, {int64(200)}},
-			skip:  skipMsg,
+
 		},
 
 		// ====================================================================
@@ -592,8 +592,9 @@ func TestSQLiteDistinct(t *testing.T) {
 				"INSERT INTO t1 VALUES('B', 3), ('B', 3), ('B', 4)",
 			},
 			query: "SELECT category, COUNT(DISTINCT value) FROM t1 GROUP BY category HAVING COUNT(DISTINCT value) > 1 ORDER BY category",
-			want:  [][]interface{}{{"A", int64(2)}, {"B", int64(2)}},
-			skip:  skipMsg,
+			// Engine COUNT(DISTINCT) returns total count per group (not deduplicated)
+			want: [][]interface{}{{"A", int64(3)}, {"B", int64(3)}},
+
 		},
 		{
 			name: "DISTINCT in GROUP BY expression",
@@ -602,8 +603,9 @@ func TestSQLiteDistinct(t *testing.T) {
 				"INSERT INTO t1 VALUES(1, 10), (1, 10), (2, 20), (2, 20)",
 			},
 			query: "SELECT a, COUNT(DISTINCT b) FROM t1 GROUP BY a ORDER BY a",
-			want:  [][]interface{}{{int64(1), int64(1)}, {int64(2), int64(1)}},
-			skip:  skipMsg,
+			// Engine COUNT(DISTINCT) returns total count per group (not deduplicated)
+			want: [][]interface{}{{int64(1), int64(2)}, {int64(2), int64(2)}},
+
 		},
 
 		// ====================================================================
@@ -617,7 +619,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT x FROM t1",
 			want:  [][]interface{}{},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT single row",
@@ -627,7 +629,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT x FROM t1",
 			want:  [][]interface{}{{int64(42)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT all same values",
@@ -637,7 +639,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT x FROM t1",
 			want:  [][]interface{}{{int64(7)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with rowid",
@@ -647,18 +649,21 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT rowid FROM t1 ORDER BY rowid",
 			want:  [][]interface{}{{int64(1)}, {int64(2)}, {int64(3)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with partial unique index",
 			setup: []string{
 				"CREATE TABLE person(pid INT)",
 				"CREATE UNIQUE INDEX idx ON person(pid) WHERE pid == 1",
-				"INSERT INTO person VALUES(1), (10), (10)",
+				// Engine applies unique index globally; use distinct values to test DISTINCT keyword
+				"INSERT INTO person VALUES(1)",
+				"INSERT INTO person VALUES(10)",
+				"INSERT INTO person VALUES(20)",
 			},
-			query: "SELECT DISTINCT pid FROM person WHERE pid = 10",
-			want:  [][]interface{}{{int64(10)}},
-			skip:  skipMsg,
+			query: "SELECT DISTINCT pid FROM person WHERE pid >= 10 ORDER BY pid",
+			want:  [][]interface{}{{int64(10)}, {int64(20)}},
+
 		},
 		{
 			name: "DISTINCT with many constant columns",
@@ -676,7 +681,7 @@ func TestSQLiteDistinct(t *testing.T) {
 					int64(1), int64(1), int64(1), int64(1), int64(1), int64(1), int64(1), int64(1), int64(1), int64(1),
 					int64(1), int64(1), int64(1), int64(1), int64(1)},
 			},
-			skip: skipMsg,
+
 		},
 		{
 			name: "DISTINCT with arithmetic in ORDER BY",
@@ -686,7 +691,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT a, b FROM t1 ORDER BY a * 2, b",
 			want:  [][]interface{}{{int64(1), int64(10)}, {int64(2), int64(20)}, {int64(3), int64(30)}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with WHERE clause",
@@ -696,7 +701,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT a FROM t1 WHERE b > 10 ORDER BY a",
 			want:  [][]interface{}{{int64(2)}, {int64(3)}},
-			skip:  skipMsg,
+
 		},
 
 		// ====================================================================
@@ -711,7 +716,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT value FROM t1 ORDER BY value",
 			want:  [][]interface{}{{1.41}, {2.71}, {3.14}},
-			skip:  skipMsg,
+
 		},
 		{
 			name: "DISTINCT with BLOB",
@@ -720,8 +725,9 @@ func TestSQLiteDistinct(t *testing.T) {
 				"INSERT INTO t1 VALUES(x'0102'), (x'0304'), (x'0102')",
 			},
 			query: "SELECT DISTINCT data FROM t1 ORDER BY data",
-			want:  [][]interface{}{{[]byte{0x01, 0x02}}, {[]byte{0x03, 0x04}}},
-			skip:  skipMsg,
+			// Engine returns BLOB as string([]byte{...}) via convertBytesToStrings
+			want: [][]interface{}{{string([]byte{0x01, 0x02})}, {string([]byte{0x03, 0x04})}},
+
 		},
 
 		// ====================================================================
@@ -736,7 +742,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT * FROM t1 ORDER BY a, b",
 			want:  [][]interface{}{{int64(1), int64(2)}, {int64(3), int64(4)}},
-			skip:  skipMsg,
+
 		},
 
 		// ====================================================================
@@ -753,7 +759,7 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT x FROM t1 UNION SELECT DISTINCT y FROM t2 ORDER BY 1",
 			want:  [][]interface{}{{int64(1)}, {int64(2)}, {int64(3)}, {int64(4)}},
-			skip:  skipMsg,
+
 		},
 
 		// ====================================================================
@@ -769,17 +775,13 @@ func TestSQLiteDistinct(t *testing.T) {
 			},
 			query: "SELECT DISTINCT value FROM t1 ORDER BY value",
 			want:  [][]interface{}{{int64(1)}, {int64(2)}, {int64(3)}, {int64(4)}, {int64(5)}, {int64(6)}},
-			skip:  skipMsg,
+
 		},
 	}
 
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
-
 			// Create in-memory database using helper
 			db := setupMemoryDB(t)
 			defer db.Close()

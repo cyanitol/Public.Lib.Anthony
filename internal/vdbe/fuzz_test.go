@@ -86,7 +86,7 @@ func FuzzDecodeRecordExtended(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// Skip extremely large inputs to prevent timeout
 		if len(data) > 1000000 {
-			t.Skip("input too large")
+			return
 		}
 
 		defer func() {
@@ -219,7 +219,7 @@ func FuzzEncodeDecodeRoundTrip(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, str string, i int64, fl float64) {
 		if len(str) > 10000 {
-			t.Skip("string too long")
+			return
 		}
 
 		defer func() {

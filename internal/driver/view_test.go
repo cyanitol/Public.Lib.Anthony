@@ -124,7 +124,6 @@ func TestViewWithColumnList(t *testing.T) {
 }
 
 func TestViewIfNotExists(t *testing.T) {
-	t.Skip("pre-existing failure")
 	tmpfile := tempFilename()
 	defer os.Remove(tmpfile)
 
@@ -198,7 +197,6 @@ func viewCountRows(t *testing.T, db *sql.DB, query string) int {
 }
 
 func TestViewWithJoin(t *testing.T) {
-	t.Skip("JOIN returns wrong row count after recent changes")
 	tmpfile := tempFilename()
 	defer os.Remove(tmpfile)
 

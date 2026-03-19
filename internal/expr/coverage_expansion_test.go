@@ -467,9 +467,9 @@ func TestApplyNumericAffinity(t *testing.T) {
 			expected: 3.14,
 		},
 		{
-			name:     "Int64 to float64",
+			name:     "Int64 preserved",
 			value:    int64(42),
-			expected: 42.0,
+			expected: int64(42),
 		},
 		{
 			name:     "String float to float64",
@@ -477,9 +477,9 @@ func TestApplyNumericAffinity(t *testing.T) {
 			expected: 3.14,
 		},
 		{
-			name:     "String int to float64",
+			name:     "String int to int64",
 			value:    "42",
-			expected: 42.0,
+			expected: int64(42),
 		},
 		{
 			name:     "Non-numeric string unchanged",

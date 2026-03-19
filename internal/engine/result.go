@@ -2,9 +2,11 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
+	"github.com/cyanitol/Public.Lib.Anthony/internal/pager"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
@@ -170,9 +172,12 @@ func (tx *Tx) Commit() error {
 		return fmt.Errorf("no transaction in progress")
 	}
 
-	// Commit via pager
+	// Commit via pager - tolerate no active pager transaction
+	// (Begin only sets a flag; pager transaction starts on first write)
 	if err := tx.engine.pager.Commit(); err != nil {
-		return fmt.Errorf("commit failed: %w", err)
+		if !isNoTransaction(err) {
+			return fmt.Errorf("commit failed: %w", err)
+		}
 	}
 
 	tx.engine.inTransaction = false
@@ -193,14 +198,21 @@ func (tx *Tx) Rollback() error {
 		return fmt.Errorf("no transaction in progress")
 	}
 
-	// Rollback via pager
+	// Rollback via pager - tolerate no active pager transaction
 	if err := tx.engine.pager.Rollback(); err != nil {
-		return fmt.Errorf("rollback failed: %w", err)
+		if !isNoTransaction(err) {
+			return fmt.Errorf("rollback failed: %w", err)
+		}
 	}
 
 	tx.engine.inTransaction = false
 	tx.done = true
 	return nil
+}
+
+// isNoTransaction checks if the error is a "no transaction active" error.
+func isNoTransaction(err error) bool {
+	return err != nil && errors.Is(err, pager.ErrNoTransaction)
 }
 
 // Execute executes a SQL statement within the transaction.

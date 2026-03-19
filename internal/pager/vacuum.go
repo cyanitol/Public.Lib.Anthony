@@ -209,10 +209,12 @@ func (p *Pager) copyDatabaseToTarget(targetPager *Pager) error {
 		return fmt.Errorf("failed to copy header: %w", err)
 	}
 
-	// Initialize page 1 as an empty btree table page for sqlite_master
-	// This must be done AFTER copying the header but BEFORE copying other pages
-	if err := p.initializeMasterTablePage(targetPager); err != nil {
-		return fmt.Errorf("failed to initialize sqlite_master page: %w", err)
+	// Copy page 1 btree content (after the database header) from source.
+	// This preserves the sqlite_master btree data. The driver layer may
+	// later overwrite this via SaveToMaster, but copying it here ensures
+	// the page is valid even without higher-level schema persistence.
+	if err := p.copyPage1Content(targetPager); err != nil {
+		return fmt.Errorf("failed to copy page 1 content: %w", err)
 	}
 
 	if err := p.copyLivePages(targetPager); err != nil {
@@ -222,33 +224,27 @@ func (p *Pager) copyDatabaseToTarget(targetPager *Pager) error {
 	return nil
 }
 
-// initializeMasterTablePage initializes page 1 as an empty btree table page for sqlite_master.
-// This creates a proper sqlite_master table structure that can hold schema entries.
-func (p *Pager) initializeMasterTablePage(targetPager *Pager) error {
-	page1, err := targetPager.Get(1)
+// copyPage1Content copies the btree content of page 1 (after the database header)
+// from the source pager to the target pager.
+func (p *Pager) copyPage1Content(targetPager *Pager) error {
+	sourcePage, err := p.getLocked(1)
 	if err != nil {
-		return fmt.Errorf("failed to get page 1: %w", err)
+		return fmt.Errorf("failed to get source page 1: %w", err)
 	}
-	defer targetPager.Put(page1)
+	defer p.Put(sourcePage)
 
-	if err = targetPager.Write(page1); err != nil {
-		return fmt.Errorf("failed to mark page 1 dirty: %w", err)
+	targetPage, err := targetPager.Get(1)
+	if err != nil {
+		return fmt.Errorf("failed to get target page 1: %w", err)
+	}
+	defer targetPager.Put(targetPage)
+
+	if err = targetPager.Write(targetPage); err != nil {
+		return fmt.Errorf("failed to mark target page 1 dirty: %w", err)
 	}
 
-	// Initialize page 1 as a table leaf page (type 0x0d)
-	// Page format after database header (at offset 100):
-	// - 1 byte: page type (0x0d = table leaf)
-	// - 2 bytes: first freeblock offset (0 = no freeblocks)
-	// - 2 bytes: number of cells (0 = empty)
-	// - 2 bytes: cell content offset (page size = no content yet)
-	// - 1 byte: fragmented free bytes (0)
-	offset := DatabaseHeaderSize
-	page1.Data[offset] = 0x0d                                                     // Table leaf page
-	binary.BigEndian.PutUint16(page1.Data[offset+1:], 0)                          // No freeblock
-	binary.BigEndian.PutUint16(page1.Data[offset+3:], 0)                          // No cells
-	binary.BigEndian.PutUint16(page1.Data[offset+5:], uint16(targetPager.pageSize)) // Cell content at end
-	page1.Data[offset+7] = 0                                                      // No fragmented bytes
-
+	// Copy everything after the database header (btree content)
+	copy(targetPage.Data[DatabaseHeaderSize:], sourcePage.Data[DatabaseHeaderSize:])
 	return nil
 }
 

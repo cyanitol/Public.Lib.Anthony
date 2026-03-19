@@ -72,9 +72,6 @@ func TestFunctionsGenStrftime(t *testing.T) {
 // runStrftimeCase executes a single strftime test case.
 func runStrftimeCase(t *testing.T, db *sql.DB, tc strftimeTestCase) {
 	t.Helper()
-	if tc.skip != "" {
-		t.Skip(tc.skip)
-	}
 
 	var result interface{}
 	err := db.QueryRow(tc.expr).Scan(&result)
@@ -130,21 +127,18 @@ func generateNthValueTests() []nthValueTestCase {
 			setup: setup,
 			query: "SELECT COALESCE(NTH_VALUE(val, 1) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), 'NULL') FROM nv",
 			want:  "a a a",
-			skip:  "",
 		},
 		{
 			name:  "nth_value_2_is_second",
 			setup: setup,
 			query: "SELECT COALESCE(NTH_VALUE(val, 2) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), 'NULL') FROM nv",
 			want:  "b b b",
-			skip:  "",
 		},
 		{
 			name:  "nth_value_beyond_frame",
 			setup: setup,
 			query: "SELECT COALESCE(NTH_VALUE(val, 10) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), 'NULL') FROM nv",
 			want:  "NULL NULL NULL",
-			skip:  "",
 		},
 		{
 			name: "nth_value_partition_by",
@@ -157,7 +151,6 @@ func generateNthValueTests() []nthValueTestCase {
 			},
 			query: "SELECT COALESCE(NTH_VALUE(val, 2) OVER (PARTITION BY grp ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), 'NULL') FROM nvp ORDER BY grp, id",
 			want:  "b b d d",
-			skip:  "",
 		},
 	}
 }
@@ -174,9 +167,6 @@ func TestFunctionsGenNthValue(t *testing.T) {
 // runNthValueCase executes one NTH_VALUE test.
 func runNthValueCase(t *testing.T, tc nthValueTestCase) {
 	t.Helper()
-	if tc.skip != "" {
-		t.Skip(tc.skip)
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -341,9 +331,6 @@ func TestWindowFunctionsLastValue(t *testing.T) {
 // runWindowValueCase executes one window value function test.
 func runWindowValueCase(t *testing.T, tc windowValueTestCase) {
 	t.Helper()
-	if tc.skip != "" {
-		t.Skip(tc.skip)
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -382,14 +369,12 @@ func generateWindowClauseTests() []windowClauseTestCase {
 			setup: setup,
 			query: "SELECT val, ROW_NUMBER() OVER w FROM wc WINDOW w AS (ORDER BY val)",
 			want:  "10|1 20|2 30|3",
-			skip:  "",
 		},
 		{
 			name:  "multiple_named_windows",
 			setup: setup,
 			query: "SELECT val, ROW_NUMBER() OVER w1, SUM(val) OVER w2 FROM wc WINDOW w1 AS (ORDER BY val), w2 AS (ORDER BY val ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)",
 			want:  "10|1|10 20|2|30 30|3|60",
-			skip:  "window aggregate SUM() OVER requires additional compilation support",
 		},
 	}
 }
@@ -406,9 +391,6 @@ func TestFunctionsGenWindowClause(t *testing.T) {
 // runWindowClauseCase executes one named-window test.
 func runWindowClauseCase(t *testing.T, tc windowClauseTestCase) {
 	t.Helper()
-	if tc.skip != "" {
-		t.Skip(tc.skip)
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -438,19 +420,16 @@ func generateJsonEachTests() []jsonTVFTestCase {
 			name:  "json_each_array",
 			query: "SELECT value FROM json_each('[1,2,3]')",
 			want:  "1 2 3",
-			skip:  "",
 		},
 		{
 			name:  "json_each_object",
 			query: "SELECT key, value FROM json_each('{\"a\":1,\"b\":2}')",
 			want:  "a|1 b|2",
-			skip:  "",
 		},
 		{
 			name:  "json_each_with_path",
 			query: "SELECT value FROM json_each('{\"x\":[10,20]}', '$.x')",
 			want:  "10 20",
-			skip:  "",
 		},
 	}
 }
@@ -462,13 +441,11 @@ func generateJsonTreeTests() []jsonTVFTestCase {
 			name:  "json_tree_nested_object",
 			query: "SELECT key, value, type FROM json_tree('{\"a\":{\"b\":1}}')",
 			want:  "NULL|{\"a\":{\"b\":1}}|object a|{\"b\":1}|object b|1|integer",
-			skip:  "",
 		},
 		{
 			name:  "json_tree_nested_array",
 			query: "SELECT key, value, type FROM json_tree('{\"arr\":[1,2]}')",
 			want:  "NULL|{\"arr\":[1,2]}|object arr|[1,2]|array 0|1|integer 1|2|integer",
-			skip:  "",
 		},
 	}
 }
@@ -500,9 +477,6 @@ func TestFunctionsGenJsonTree(t *testing.T) {
 // runJsonTVFCase executes one json_each or json_tree test.
 func runJsonTVFCase(t *testing.T, db *sql.DB, tc jsonTVFTestCase) {
 	t.Helper()
-	if tc.skip != "" {
-		t.Skip(tc.skip)
-	}
 
 	got := collectPipeSep(t, db, tc.query)
 	if got != tc.want {

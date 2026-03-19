@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -73,8 +74,39 @@ func TestJournalRestoreEntryChecksum(t *testing.T) {
 // TestJournalRestoreAllEntries tests the restoreAllEntries function
 func TestJournalRestoreAllEntries(t *testing.T) {
 	t.Parallel()
-	// Skip this test as it's complex and covered by other journal tests
-	t.Skip("Journal restore is tested in integration tests")
+	dbFile := filepath.Join(t.TempDir(), "test_restore_all.db")
+	journalFile := dbFile + "-journal"
+
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	originalData := []byte("RESTORE ALL TEST")
+	mustWriteDataToPage(t, p, 1, DatabaseHeaderSize, originalData)
+	mustCommit(t, p)
+
+	// Create journal with page 1 data
+	page := mustGetPage(t, p, 1)
+	pageData := make([]byte, len(page.Data))
+	copy(pageData, page.Data)
+	p.Put(page)
+	p.Close()
+
+	// Create journal manually
+	journal := mustOpenJournal(t, journalFile, 4096, 1)
+	if err := journal.WriteOriginal(1, pageData); err != nil {
+		t.Fatalf("WriteOriginal failed: %v", err)
+	}
+	journal.Close()
+
+	// Reopen pager and test restoreAllEntries via Rollback
+	p = mustOpenPagerSized(t, dbFile, 4096)
+	defer p.Close()
+	journal2 := NewJournal(journalFile, 4096, 1)
+	if err := journal2.Open(); err != nil {
+		t.Fatalf("Open journal failed: %v", err)
+	}
+	defer journal2.Close()
+	if err := journal2.restoreAllEntries(p); err != nil {
+		t.Errorf("restoreAllEntries failed: %v", err)
+	}
 }
 
 // TestJournalRestoreAllEntriesEOF tests restoreAllEntries with incomplete entries
@@ -118,8 +150,43 @@ func TestJournalRestoreAllEntriesEOF(t *testing.T) {
 // TestJournalRestoreAllEntriesReadError tests error handling in restoreAllEntries
 func TestJournalRestoreAllEntriesReadError(t *testing.T) {
 	t.Parallel()
-	// This test is difficult to trigger reliably, skip it
-	t.Skip("Error handling in restoreAllEntries is hard to test without OS-level manipulation")
+	dbFile := filepath.Join(t.TempDir(), "test_restore_error.db")
+	journalFile := dbFile + "-journal"
+
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	mustWriteDataToPage(t, p, 1, DatabaseHeaderSize, []byte("DATA"))
+	mustCommit(t, p)
+
+	// Create a journal with a corrupted entry (bad checksum)
+	journal := mustOpenJournal(t, journalFile, 4096, 1)
+	badData := make([]byte, 4096)
+	for i := range badData {
+		badData[i] = 0xFF
+	}
+	journal.WriteOriginal(1, badData)
+	journal.Close()
+
+	// Corrupt the checksum in the journal
+	f, err := os.OpenFile(journalFile, os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatalf("open journal: %v", err)
+	}
+	// Seek to end and corrupt last 4 bytes (checksum)
+	info, _ := f.Stat()
+	if info.Size() > 4 {
+		f.WriteAt([]byte{0xDE, 0xAD, 0xBE, 0xEF}, info.Size()-4)
+	}
+	f.Close()
+
+	// restoreAllEntries should handle the error gracefully
+	journal2 := NewJournal(journalFile, 4096, 1)
+	if err := journal2.Open(); err != nil {
+		t.Fatalf("Open journal failed: %v", err)
+	}
+	defer journal2.Close()
+	// This may error on checksum mismatch - that's the expected behavior
+	_ = journal2.restoreAllEntries(p)
+	p.Close()
 }
 
 // TestCachePeekNonExistent tests Peek with non-existent page

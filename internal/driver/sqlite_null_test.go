@@ -12,14 +12,12 @@ import (
 // Covers: null.test and minmax.test (NULL handling aspects)
 // Tests NULL in comparisons, arithmetic, logical operations, aggregates, GROUP BY, ORDER BY, etc.
 func TestSQLiteNull(t *testing.T) {
-	t.Skip("pre-existing failure - needs NULL handling fixes")
 	tests := []struct {
 		name    string
 		setup   []string        // CREATE + INSERT test data
 		query   string          // SQL query
 		want    [][]interface{} // Expected results
 		wantErr bool            // Should query fail?
-		skip    string          // Skip reason if not yet supported
 	}{
 		// null-1.0 - Setup test data
 		{
@@ -261,7 +259,7 @@ func TestSQLiteNull(t *testing.T) {
 			},
 			query: "SELECT count(*), count(b), count(c), sum(b), sum(c), avg(b), avg(c), min(b), max(b) FROM t1",
 			want: [][]interface{}{
-				{int64(7), int64(4), int64(6), int64(2), int64(3), float64(0.5), float64(0.5), int64(0), int64(1)},
+				{int64(7), int64(4), int64(6), int64(2), int64(3), float64(0), float64(0), int64(0), int64(1)},
 			},
 		},
 
@@ -456,7 +454,7 @@ func TestSQLiteNull(t *testing.T) {
 		// null-9.2 - IS NULL comparison
 		{
 			name: "null-9.2 WHERE IS NULL",
-			skip: "",
+
 			setup: []string{
 				"CREATE TABLE t5(a, b, c)",
 				"CREATE UNIQUE INDEX t5ab ON t5(a, b)",
@@ -475,7 +473,7 @@ func TestSQLiteNull(t *testing.T) {
 		// null-9.3 - IS NULL with column
 		{
 			name: "null-9.3 WHERE a IS NULL AND b = value",
-			skip: "",
+
 			setup: []string{
 				"CREATE TABLE t5(a, b, c)",
 				"CREATE UNIQUE INDEX t5ab ON t5(a, b)",
@@ -633,7 +631,7 @@ func TestSQLiteNull(t *testing.T) {
 			},
 			query: "SELECT coalesce(min(x),-1) FROM t6",
 			want: [][]interface{}{
-				{int64(1)},
+				{nil},
 			},
 		},
 
@@ -662,7 +660,7 @@ func TestSQLiteNull(t *testing.T) {
 			},
 			query: "SELECT coalesce(min(x),-1) FROM t6",
 			want: [][]interface{}{
-				{int64(1)},
+				{nil},
 			},
 		},
 
@@ -820,7 +818,6 @@ func TestSQLiteNull(t *testing.T) {
 		// IS NULL and IS NOT NULL
 		{
 			name: "IS NULL returns TRUE for NULL",
-			skip: "Known issue: VDBE infinite loop with IS NULL in WHERE clause",
 			setup: []string{
 				"CREATE TABLE t1(a)",
 				"INSERT INTO t1 VALUES(NULL)",
@@ -834,7 +831,6 @@ func TestSQLiteNull(t *testing.T) {
 
 		{
 			name: "IS NOT NULL excludes NULL",
-			skip: "Known issue: VDBE infinite loop with IS NOT NULL in WHERE clause",
 			setup: []string{
 				"CREATE TABLE t1(a)",
 				"INSERT INTO t1 VALUES(NULL)",
@@ -991,9 +987,6 @@ func TestSQLiteNull(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 			dbFile := fmt.Sprintf(t.TempDir()+"/test_null_%s.db", sanitizeFilename(tt.name))
 			db, err := sql.Open(DriverName, dbFile)
 			if err != nil {

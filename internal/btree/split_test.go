@@ -901,8 +901,8 @@ func TestFindInsertionPoint(t *testing.T) {
 	}
 }
 
-// TestUpdateRightChildIfNeeded tests updateRightChildIfNeeded function
-func TestUpdateRightChildIfNeeded(t *testing.T) {
+// TestFixChildPointerAfterSplit tests fixChildPointerAfterSplit function
+func TestFixChildPointerAfterSplit(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(4096)
 	rootPage, err := bt.CreateTable()
@@ -917,23 +917,30 @@ func TestUpdateRightChildIfNeeded(t *testing.T) {
 		t.Fatalf("Failed to allocate page: %v", err)
 	}
 
-	// Insert 3 cells
+	// Insert 3 cells with child pointers 10, 30, 50
 	interiorPage.InsertCell(0, EncodeTableInteriorCell(10, 100))
 	interiorPage.InsertCell(1, EncodeTableInteriorCell(30, 300))
 	interiorPage.InsertCell(2, EncodeTableInteriorCell(50, 500))
 
-	// Update right child for last cell
-	cursor.updateRightChildIfNeeded(interiorPage, interiorPageNum, 999, 2)
-
-	// Verify right child was updated
+	// Inserting at the last position (insertIdx == NumCells-1 == 2) should update right child
+	cursor.fixChildPointerAfterSplit(interiorPage, interiorPageNum, 999, 2)
 	headerOffset := getHeaderOffset(interiorPageNum)
 	rightChild := binary.BigEndian.Uint32(interiorPage.Data[headerOffset+PageHeaderOffsetRightChild:])
 	if rightChild != 999 {
 		t.Errorf("Right child: expected 999, got %d", rightChild)
 	}
 
-	// Test with non-last cell (should not update)
-	cursor.updateRightChildIfNeeded(interiorPage, interiorPageNum, 777, 1)
+	// Inserting at a middle position (insertIdx == 1) should update cell[2]'s child pointer
+	cursor.fixChildPointerAfterSplit(interiorPage, interiorPageNum, 777, 1)
+	cellPtr, err := interiorPage.Header.GetCellPointer(interiorPage.Data, 2)
+	if err != nil {
+		t.Fatalf("Failed to get cell pointer: %v", err)
+	}
+	childPage := binary.BigEndian.Uint32(interiorPage.Data[cellPtr:])
+	if childPage != 777 {
+		t.Errorf("Cell 2 child: expected 777, got %d", childPage)
+	}
+	// Right child should still be 999
 	rightChild = binary.BigEndian.Uint32(interiorPage.Data[headerOffset+PageHeaderOffsetRightChild:])
 	if rightChild != 999 {
 		t.Errorf("Right child should still be 999, got %d", rightChild)

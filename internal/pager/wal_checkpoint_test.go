@@ -531,9 +531,6 @@ func TestCheckpoint_ReopenAfterRestart(t *testing.T) {
 
 func TestCheckpoint_LargeWAL(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping slow test in short mode")
-	}
 
 	wal, dbFile := createTestWALForCheckpoint(t)
 	defer wal.Close()

@@ -43,7 +43,7 @@ func GetTestDB(t *testing.T) *sql.DB {
 			var tables []string
 			for rows.Next() {
 				var name string
-				rows.Scan(&name)
+				_ = rows.Scan(&name)
 				tables = append(tables, name)
 			}
 			rows.Close()

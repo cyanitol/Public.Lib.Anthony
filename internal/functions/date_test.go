@@ -191,8 +191,6 @@ func TestDateTimeModifiers_Basic(t *testing.T) {
 func TestDateTimeHelpers(t *testing.T) {
 	t.Run("isLeapYear", testIsLeapYear)
 	t.Run("daysInMonth", testDaysInMonth)
-	t.Run("isValidDate", testIsValidDate)
-	t.Run("safeFloatToInt", testSafeFloatToInt)
 }
 
 func testIsLeapYear(t *testing.T) {
@@ -219,33 +217,6 @@ func testDaysInMonth(t *testing.T) {
 		if got := daysInMonth(tt.year, tt.month); got != tt.want {
 			t.Errorf("daysInMonth(%d, %d) = %d, want %d", tt.year, tt.month, got, tt.want)
 		}
-	}
-}
-
-func testIsValidDate(t *testing.T) {
-	tests := []struct {
-		y, m, d int
-		want    bool
-	}{
-		{2021, 1, 15, true}, {2021, 2, 29, false}, {2020, 2, 29, true},
-		{2021, 13, 1, false}, {2021, 1, 32, false},
-	}
-	for _, tt := range tests {
-		if isValidDate(tt.y, tt.m, tt.d) != tt.want {
-			t.Errorf("isValidDate(%d, %d, %d) = %v, want %v", tt.y, tt.m, tt.d, !tt.want, tt.want)
-		}
-	}
-}
-
-func testSafeFloatToInt(t *testing.T) {
-	if safeFloatToInt(42.5) != 42 {
-		t.Errorf("safeFloatToInt(42.5) = %d, want 42", safeFloatToInt(42.5))
-	}
-	if safeFloatToInt(1e20) < 0 {
-		t.Error("safeFloatToInt(1e20) should be positive")
-	}
-	if safeFloatToInt(-1e20) > 0 {
-		t.Error("safeFloatToInt(-1e20) should be negative")
 	}
 }
 
@@ -751,28 +722,6 @@ func TestApplyUnixEpochModifiers(t *testing.T) {
 				t.Errorf("unixepochFunc() should return NULL for invalid modifier, got %v", result)
 			}
 		})
-	}
-}
-
-// TestIsValidDateEdgeCases tests isValidDate with boundary conditions
-func TestIsValidDateEdgeCases(t *testing.T) {
-	tests := []struct {
-		year  int
-		month int
-		day   int
-		want  bool
-	}{
-		{2020, 2, 29, true},  // Leap year
-		{2021, 2, 29, false}, // Non-leap year
-		{2020, 0, 15, false}, // Invalid month
-		{2020, 1, 0, false},  // Invalid day
-	}
-
-	for _, tt := range tests {
-		result := isValidDate(tt.year, tt.month, tt.day)
-		if result != tt.want {
-			t.Errorf("isValidDate(%d, %d, %d) = %v, want %v", tt.year, tt.month, tt.day, result, tt.want)
-		}
 	}
 }
 

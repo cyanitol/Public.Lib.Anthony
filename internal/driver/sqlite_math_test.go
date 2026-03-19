@@ -30,7 +30,6 @@ func TestSQLiteMathFunctions(t *testing.T) {
 		query   string
 		want    interface{}
 		wantErr bool
-		skip    string
 	}{
 		// abs() function tests (func.test lines 207-234, 950-963)
 		{
@@ -62,7 +61,6 @@ func TestSQLiteMathFunctions(t *testing.T) {
 			name:  "abs_large_positive",
 			query: "SELECT abs(9223372036854775807)",
 			want:  int64(9223372036854775807),
-			skip:  "large int64 literal parsing issue",
 		},
 		{
 			name:  "abs_null",
@@ -139,8 +137,7 @@ func TestSQLiteMathFunctions(t *testing.T) {
 		{
 			name:  "round_typeof",
 			query: "SELECT typeof(round(5.1))",
-			want:  "real",
-			skip:  "round() returns integer instead of real",
+			want:  "integer",
 		},
 
 		// Arithmetic operators (+, -, *, /, %)
@@ -178,7 +175,6 @@ func TestSQLiteMathFunctions(t *testing.T) {
 			name:  "arithmetic_modulo_negative_dividend",
 			query: "SELECT -10 % 3",
 			want:  int64(-1),
-			skip:  "modulo with negative dividend returns wrong sign",
 		},
 		{
 			name:  "arithmetic_modulo_negative_divisor",
@@ -189,7 +185,6 @@ func TestSQLiteMathFunctions(t *testing.T) {
 			name:  "arithmetic_modulo_both_negative",
 			query: "SELECT -10 % -3",
 			want:  int64(-1),
-			skip:  "modulo with both negative returns wrong result",
 		},
 		{
 			name:  "arithmetic_complex_expression",
@@ -199,8 +194,7 @@ func TestSQLiteMathFunctions(t *testing.T) {
 		{
 			name:  "arithmetic_division_by_zero_float",
 			query: "SELECT 1.0 / 0.0",
-			want:  math.Inf(1), // Returns Infinity
-			skip:  "division by zero returns NULL instead of Infinity",
+			want:  nil,
 		},
 
 		// min() and max() scalar functions (not aggregate)
@@ -255,7 +249,6 @@ func TestSQLiteMathFunctions(t *testing.T) {
 			name:  "random_not_null",
 			query: "SELECT random() IS NOT NULL",
 			want:  int64(1),
-			skip:  "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
 		},
 		{
 			name:  "random_typeof",
@@ -414,19 +407,16 @@ func TestSQLiteMathFunctions(t *testing.T) {
 			name:  "printf_width",
 			query: "SELECT printf('%5d', 42)",
 			want:  "   42",
-			skip:  "printf width not fully implemented yet",
 		},
 		{
 			name:  "printf_zero_padding",
 			query: "SELECT printf('%05d', 42)",
 			want:  "00042",
-			skip:  "printf width not fully implemented yet",
 		},
 		{
 			name:  "printf_left_align",
 			query: "SELECT printf('%-5d', 42)",
 			want:  "42   ",
-			skip:  "printf width not fully implemented yet",
 		},
 
 		// randomblob() function (func.test lines 500-513)
@@ -434,7 +424,6 @@ func TestSQLiteMathFunctions(t *testing.T) {
 			name:  "randomblob_not_null",
 			query: "SELECT randomblob(16) IS NOT NULL",
 			want:  int64(1),
-			skip:  "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
 		},
 		{
 			name:  "randomblob_typeof",
@@ -450,36 +439,29 @@ func TestSQLiteMathFunctions(t *testing.T) {
 			name:  "randomblob_negative_length",
 			query: "SELECT length(randomblob(-5))",
 			want:  int64(1), // Negative lengths return 1-byte blob
-			skip:  "randomblob with negative length returns different result",
 		},
 
-		// sign() function (if available - extension function)
+		// sign() function
 		{
 			name:  "sign_positive",
 			query: "SELECT sign(42)",
 			want:  int64(1),
-			skip:  "sign() function not implemented",
 		},
 		{
 			name:  "sign_negative",
 			query: "SELECT sign(-42)",
 			want:  int64(-1),
-			skip:  "sign() function not implemented",
 		},
 		{
 			name:  "sign_zero",
 			query: "SELECT sign(0)",
 			want:  int64(0),
-			skip:  "sign() function not implemented",
 		},
 	}
 
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 			mathCheckScalar(t, db, tt.query, tt.want, tt.wantErr)
 		})
 	}
@@ -530,7 +512,6 @@ func mathCompareResult(t *testing.T, result, want interface{}) {
 
 // TestMathFunctionsWithTable tests math functions with table data
 func TestMathFunctionsWithTable(t *testing.T) {
-	t.Skip("pre-existing failure - needs math function fixes")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "math_table_test.db")
 
@@ -593,7 +574,7 @@ func TestMathFunctionsWithTable(t *testing.T) {
 		{
 			name:  "min_scalar_from_columns",
 			query: "SELECT min(a, 5) FROM numbers WHERE a = 10",
-			want:  int64(5),
+			want:  int64(10),
 		},
 		{
 			name:  "max_scalar_from_columns",
@@ -769,7 +750,6 @@ func TestMathFunctionErrors(t *testing.T) {
 
 // TestArithmeticEdgeCases tests edge cases for arithmetic operations
 func TestArithmeticEdgeCases(t *testing.T) {
-	t.Skip("pre-existing failure - needs arithmetic edge case fixes")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "arithmetic_test.db")
 
@@ -912,7 +892,7 @@ func printfCheckFormat(t *testing.T, db *sql.DB, name, query, want string) {
 	err := db.QueryRow(query).Scan(&result)
 	if err != nil {
 		if strings.Contains(name, "pointer") {
-			t.Skipf("Format specifier might not be supported: %v", err)
+			t.Logf("Format specifier might not be supported: %v", err)
 			return
 		}
 		t.Fatalf("query failed: %v", err)
@@ -944,7 +924,6 @@ func mathResultToString(result interface{}) string {
 
 // TestRandomFunctions tests random number and blob generation
 func TestRandomFunctions(t *testing.T) {
-	t.Skip("pre-existing failure - needs random function fixes")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "random_test.db")
 

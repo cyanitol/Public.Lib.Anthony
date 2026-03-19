@@ -388,9 +388,8 @@ type sqlTestCase struct {
 	query    string          // SELECT to run and compare results
 	args     []interface{}   // bind parameters for query/exec
 	wantRows [][]interface{} // expected rows from query
-	wantErr  bool            // expect an error
-	errLike  string          // error message substring match
-	skip     string          // skip reason (empty = don't skip)
+	wantErr bool   // expect an error
+	errLike string // error message substring match
 }
 
 // runSQLTests runs a slice of sqlTestCase against a shared database.
@@ -418,9 +417,6 @@ func runSQLTestsFreshDB(t *testing.T, tests []sqlTestCase) {
 // runSingleSQLTest executes a single sqlTestCase.
 func runSingleSQLTest(t *testing.T, db *sql.DB, tt sqlTestCase) {
 	t.Helper()
-	if tt.skip != "" {
-		t.Skip(tt.skip)
-	}
 	for _, s := range tt.setup {
 		if _, err := db.Exec(s); err != nil {
 			t.Fatalf("setup %q failed: %v", s, err)

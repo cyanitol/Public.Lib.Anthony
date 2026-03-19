@@ -244,7 +244,7 @@ func FuzzParse(f *testing.F) {
 	f.Fuzz(func(t *testing.T, sql string) {
 		// Skip extremely long inputs to prevent timeout
 		if len(sql) > 100000 {
-			t.Skip("input too long")
+			return
 		}
 
 		// Create parser
@@ -315,7 +315,7 @@ func FuzzLexer(f *testing.F) {
 	f.Fuzz(func(t *testing.T, input string) {
 		// Skip extremely long inputs
 		if len(input) > 100000 {
-			t.Skip("input too long")
+			return
 		}
 
 		defer func() {
@@ -454,7 +454,7 @@ func FuzzParseExpression(f *testing.F) {
 	f.Fuzz(func(t *testing.T, expr string) {
 		// Skip extremely long inputs
 		if len(expr) > 10000 {
-			t.Skip("input too long")
+			return
 		}
 
 		defer func() {
@@ -516,7 +516,7 @@ func FuzzParseTableName(f *testing.F) {
 	f.Fuzz(func(t *testing.T, table string) {
 		// Skip extremely long inputs
 		if len(table) > 10000 {
-			t.Skip("input too long")
+			return
 		}
 
 		defer func() {
@@ -580,7 +580,7 @@ func FuzzParseCreateTable(f *testing.F) {
 	f.Fuzz(func(t *testing.T, ddl string) {
 		// Skip extremely long inputs
 		if len(ddl) > 10000 {
-			t.Skip("input too long")
+			return
 		}
 
 		defer func() {

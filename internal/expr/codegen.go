@@ -715,7 +715,13 @@ func (g *CodeGenerator) emitBinaryOpcode(entry binaryOpEntry, op parser.BinaryOp
 	if isComparison && collation != "" {
 		g.emitCollatedComparison(entry, leftReg, rightReg, resultReg, collation)
 	} else {
-		g.vdbe.AddOp(entry.op, leftReg, rightReg, resultReg)
+		p1, p2 := leftReg, rightReg
+		// SQLite shift opcodes use P1=shift amount (right operand),
+		// P2=value to shift (left operand), so swap the registers.
+		if entry.op == vdbe.OpShiftLeft || entry.op == vdbe.OpShiftRight {
+			p1, p2 = rightReg, leftReg
+		}
+		g.vdbe.AddOp(entry.op, p1, p2, resultReg)
 		g.vdbe.SetComment(g.vdbe.NumOps()-1, entry.comment)
 	}
 }

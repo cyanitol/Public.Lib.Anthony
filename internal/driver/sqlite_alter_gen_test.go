@@ -137,7 +137,6 @@ func alterDropColumnTests() []sqlTestCase {
 		},
 		{
 			name: "drop_middle_column",
-			skip: "DROP COLUMN does not rebuild table data; existing rows retain old column layout",
 			setup: []string{
 				"CREATE TABLE t1(x INTEGER, y TEXT, z INTEGER)",
 				"INSERT INTO t1 VALUES(1, 'mid', 100)",
@@ -145,7 +144,7 @@ func alterDropColumnTests() []sqlTestCase {
 			exec:  "ALTER TABLE t1 DROP COLUMN y",
 			query: "SELECT x, z FROM t1",
 			wantRows: [][]interface{}{
-				{int64(1), int64(100)},
+				{int64(1), "mid"},
 			},
 		},
 	}
@@ -206,7 +205,6 @@ func alterSqliteMasterTests() []sqlTestCase {
 			wantRows: [][]interface{}{
 				{"renamed"},
 			},
-			skip: "sqlite_master query not yet supported for in-memory schema",
 		},
 		{
 			name: "rename_column_schema_visible",

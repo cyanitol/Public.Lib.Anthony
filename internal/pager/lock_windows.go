@@ -324,6 +324,9 @@ func (lm *LockManager) acquireExclusiveLock() error {
 	)
 
 	if err != nil {
+		if lm.currentLevel < lockPending {
+			lm.releasePendingLock()
+		}
 		if err == syscall.ERROR_LOCK_VIOLATION {
 			return ErrLockBusy
 		}

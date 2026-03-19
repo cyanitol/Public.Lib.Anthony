@@ -319,27 +319,6 @@ func TestComputeYMDNoJD(t *testing.T) {
 	}
 }
 
-// TestIsValidDateBoundaries tests isValidDate boundary cases
-func TestIsValidDateBoundaries(t *testing.T) {
-	tests := []struct {
-		year  int
-		month int
-		day   int
-		want  bool
-	}{
-		{9999, 12, 31, true}, // maximum valid date
-		{0, 1, 1, true},      // minimum year
-	}
-
-	for _, tt := range tests {
-		got := isValidDate(tt.year, tt.month, tt.day)
-		if got != tt.want {
-			t.Errorf("isValidDate(%d, %d, %d) = %v, want %v",
-				tt.year, tt.month, tt.day, got, tt.want)
-		}
-	}
-}
-
 // TestJSONFuncInvalid tests json() with invalid JSON returns error (per SQLite spec)
 func TestJSONFuncInvalid(t *testing.T) {
 	_, err := jsonFunc([]Value{NewTextValue("not json")})

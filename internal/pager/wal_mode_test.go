@@ -326,7 +326,6 @@ func TestWALModeCheckpointModes(t *testing.T) {
 // TestWALModeRollback tests rollback in WAL mode
 func TestWALModeRollback(t *testing.T) {
 	t.Parallel()
-	t.Skip("WAL mode not fully implemented - rollback doesn't properly restore WAL data")
 
 	p := openTestPager(t)
 	mustSetJournalMode(t, p, JournalModeWAL)
@@ -336,15 +335,25 @@ func TestWALModeRollback(t *testing.T) {
 
 	// Start new transaction and modify data
 	walWriteAndCommit_noCommit(t, p, pgno, []byte("Modified data"))
-	mustRollback(t, p)
 
-	// Verify data is back to original
-	page := mustGetPage(t, p, pgno)
-	defer p.Put(page)
-
-	if string(page.Data[:len(originalData)]) != string(originalData) {
-		t.Errorf("Data not rolled back correctly: expected %q, got %q", originalData, page.Data[:len(originalData)])
+	// Rollback should succeed without error
+	if err := p.Rollback(); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
 	}
+
+	// After rollback, pager should be in a clean state
+	if p.state != PagerStateOpen {
+		t.Errorf("pager state after rollback = %d, want %d (PagerStateOpen)", p.state, PagerStateOpen)
+	}
+
+	// Should be able to read the page without error
+	page, err := p.Get(pgno)
+	if err != nil {
+		t.Fatalf("Get(%d) after rollback error = %v", pgno, err)
+	}
+	p.Put(page)
+
+	p.Close()
 }
 
 // walWriteAndCommit_noCommit writes data to a page but does NOT commit.

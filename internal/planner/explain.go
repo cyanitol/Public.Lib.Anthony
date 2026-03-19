@@ -238,6 +238,12 @@ func (c *explainCtx) formatScanDetail(tableName string, where parser.Expression)
 	return fmt.Sprintf("SCAN TABLE %s", tableName)
 }
 
+// isRowidAlias reports whether name is one of the built-in rowid aliases.
+func isRowidAlias(name string) bool {
+	lower := strings.ToLower(name)
+	return lower == "rowid" || lower == "oid" || lower == "_rowid_"
+}
+
 // isRowidLookup checks if the WHERE clause is a rowid/INTEGER PRIMARY KEY lookup.
 func (c *explainCtx) isRowidLookup(tableName string, where parser.Expression) (string, bool) {
 	colName := extractEqColumnName(where)
@@ -245,8 +251,7 @@ func (c *explainCtx) isRowidLookup(tableName string, where parser.Expression) (s
 		return "", false
 	}
 
-	lower := strings.ToLower(colName)
-	if lower == "rowid" || lower == "oid" || lower == "_rowid_" {
+	if isRowidAlias(colName) {
 		return colName, true
 	}
 

@@ -170,34 +170,41 @@ func expandStarForJoinTables(stmt *parser.SelectStmt, tables []stmtTableInfo) {
 		return
 	}
 	for _, col := range stmt.Columns {
-		if !col.Star {
-			expanded = append(expanded, col)
-			continue
-		}
-		if col.Table != "" {
-			// table.* — expand only that table's columns
-			for _, tbl := range tables {
-				if tbl.name == col.Table || tbl.table.Name == col.Table {
-					for _, sc := range tbl.table.Columns {
-						expanded = append(expanded, parser.ResultColumn{
-							Expr: &parser.IdentExpr{Table: tbl.name, Name: sc.Name},
-						})
-					}
-					break
-				}
-			}
-		} else {
-			// bare * — expand all tables in order
-			for _, tbl := range tables {
-				for _, sc := range tbl.table.Columns {
-					expanded = append(expanded, parser.ResultColumn{
-						Expr: &parser.IdentExpr{Table: tbl.name, Name: sc.Name},
-					})
-				}
-			}
-		}
+		expanded = expandOneResultColumn(col, tables, expanded)
 	}
 	stmt.Columns = expanded
+}
+
+// expandOneResultColumn appends the expansion of a single ResultColumn to dst.
+// Non-star columns are passed through; star columns are expanded using tables.
+func expandOneResultColumn(col parser.ResultColumn, tables []stmtTableInfo, dst []parser.ResultColumn) []parser.ResultColumn {
+	if !col.Star {
+		return append(dst, col)
+	}
+	if col.Table != "" {
+		// table.* — expand only that table's columns
+		for _, tbl := range tables {
+			if tbl.name == col.Table || tbl.table.Name == col.Table {
+				return appendTableColumns(tbl, dst)
+			}
+		}
+		return dst
+	}
+	// bare * — expand all tables in order
+	for _, tbl := range tables {
+		dst = appendTableColumns(tbl, dst)
+	}
+	return dst
+}
+
+// appendTableColumns appends ResultColumns for every column in tbl to dst.
+func appendTableColumns(tbl stmtTableInfo, dst []parser.ResultColumn) []parser.ResultColumn {
+	for _, sc := range tbl.table.Columns {
+		dst = append(dst, parser.ResultColumn{
+			Expr: &parser.IdentExpr{Table: tbl.name, Name: sc.Name},
+		})
+	}
+	return dst
 }
 
 // ---------------------------------------------------------------------------

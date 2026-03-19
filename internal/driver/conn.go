@@ -96,11 +96,13 @@ func (c *Conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, e
 			if len(parts) == len(stmts) && i < len(parts) {
 				subQuery = parts[i]
 			}
-			multiStmt.stmts[i] = &Stmt{
+			child := &Stmt{
 				conn:  c,
 				query: subQuery,
 				ast:   ast,
 			}
+			c.stmts[child] = struct{}{}
+			multiStmt.stmts[i] = child
 		}
 		return multiStmt, nil
 	}
@@ -119,11 +121,11 @@ func (c *Conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, e
 // Close closes the connection using a two-phase close pattern to avoid lock ordering violations.
 // Phase 1: Mark closed and collect cleanup items under conn lock
 // Phase 2: Close statements without holding conn lock
-// Phase 3: Remove from driver (only driver lock needed)
-// Phase 4: Close pager
+// Phase 3: Rollback any active transaction
+// Phase 4: Release shared state via driver (only closes pager when last ref is released)
 func (c *Conn) Close() error {
 	// Phase 1: Mark closed and collect cleanup items under conn lock
-	stmts, inTx, pager := c.markClosedAndCollect()
+	stmts, inTx, pgr := c.markClosedAndCollect()
 	if stmts == nil {
 		return nil // Already closed
 	}
@@ -131,11 +133,15 @@ func (c *Conn) Close() error {
 	// Phase 2: Close statements without holding conn lock
 	c.closeStatements(stmts)
 
-	// Phase 3: Remove from driver (only driver lock needed)
-	c.removeFromDriver()
+	// Phase 3: Rollback any active transaction and close attached databases
+	if err := c.cleanupPager(pgr, inTx); err != nil {
+		return err
+	}
 
-	// Phase 4: Close pager (no locks needed)
-	return c.closePager(pager, inTx)
+	// Phase 4: Release shared state via driver (reference-counted pager close)
+	c.releaseFromDriver()
+
+	return nil
 }
 
 // markClosedAndCollect marks the connection as closed and collects cleanup items.
@@ -173,19 +179,26 @@ func (c *Conn) closeStatements(stmts []*Stmt) {
 	}
 }
 
-// removeFromDriver removes the connection from the driver's connection map.
-// This respects the lock hierarchy: Driver.mu should be acquired before Conn.mu.
-func (c *Conn) removeFromDriver() {
-	if c.driver != nil {
-		c.driver.mu.Lock()
-		delete(c.driver.conns, c.filename)
-		c.driver.mu.Unlock()
+// releaseFromDriver removes the connection from the driver's connection map
+// and decrements the shared database state reference count. The pager is only
+// closed when the last reference is released.
+func (c *Conn) releaseFromDriver() {
+	if c.driver == nil {
+		return
+	}
+	c.driver.mu.Lock()
+	defer c.driver.mu.Unlock()
+
+	delete(c.driver.conns, c.filename)
+
+	if state, ok := c.driver.dbs[c.filename]; ok {
+		c.driver.releaseState(c.filename, state)
 	}
 }
 
-// closePager closes attached databases and the main pager,
-// rolling back any active transaction first.
-func (c *Conn) closePager(pgr pager.PagerInterface, inTx bool) error {
+// cleanupPager closes attached databases and rolls back any active transaction.
+// It does NOT close the pager itself; that is handled by releaseFromDriver.
+func (c *Conn) cleanupPager(pgr pager.PagerInterface, inTx bool) error {
 	// Close all attached databases (excludes main and temp)
 	if c.dbRegistry != nil {
 		if err := c.dbRegistry.CloseAttached(); err != nil {
@@ -211,8 +224,7 @@ func (c *Conn) closePager(pgr pager.PagerInterface, inTx bool) error {
 		}
 	}
 
-	// Close main pager
-	return pgr.Close()
+	return nil
 }
 
 // Begin starts a transaction.

@@ -230,6 +230,9 @@ func (p *BtreePage) InsertCell(idx int, cell []byte) error {
 	}
 
 	// Copy cell data
+	if cellOffset+len(cell) > len(p.Data) {
+		return fmt.Errorf("cell data exceeds page bounds: offset %d + size %d > %d", cellOffset, len(cell), len(p.Data))
+	}
 	copy(p.Data[cellOffset:], cell)
 
 	// Make room in cell pointer array
@@ -237,9 +240,12 @@ func (p *BtreePage) InsertCell(idx int, cell []byte) error {
 	numCellsAfter := int(p.Header.NumCells) - idx
 
 	if numCellsAfter > 0 {
-		// Shift cell pointers to make room
+		endOffset := cellPtrOffset + 2 + (numCellsAfter * 2)
+		if endOffset > len(p.Data) {
+			return fmt.Errorf("cell pointer shift exceeds page bounds")
+		}
 		src := p.Data[cellPtrOffset : cellPtrOffset+(numCellsAfter*2)]
-		dst := p.Data[cellPtrOffset+2 : cellPtrOffset+2+(numCellsAfter*2)]
+		dst := p.Data[cellPtrOffset+2 : endOffset]
 		copy(dst, src)
 	}
 

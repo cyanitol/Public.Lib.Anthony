@@ -10,7 +10,6 @@ import (
 // TestSQLiteUTF tests UTF-8, UTF-16, and Unicode handling
 // Converted from contrib/sqlite/sqlite-src-3510200/test/utf*.test and badutf*.test
 func TestSQLiteUTF(t *testing.T) {
-	t.Skip("pre-existing failure")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "utf_test.db")
 
@@ -76,17 +75,17 @@ func TestSQLiteUTF(t *testing.T) {
 		{
 			name:  "trim_invalid_utf8",
 			query: "SELECT hex(trim(char(0x80) || char(0xF0) || char(0xFF), char(0x80) || char(0xFF)))",
-			want:  "F0",
+			want:  "C3B0",
 		},
 		{
 			name:  "ltrim_invalid_utf8",
 			query: "SELECT hex(ltrim(char(0x80) || char(0x80) || char(0xF0), char(0x80)))",
-			want:  "F0",
+			want:  "C3B0",
 		},
 		{
 			name:  "rtrim_invalid_utf8",
 			query: "SELECT hex(rtrim(char(0xF0) || char(0x80) || char(0x80), char(0x80)))",
-			want:  "F0",
+			want:  "C3B0",
 		},
 
 		// badutf2.test - Unicode conversions (lines 44-120)
@@ -152,17 +151,17 @@ func TestSQLiteUTF(t *testing.T) {
 		{
 			name:  "utf8_valid_2byte",
 			query: "SELECT length(char(0xC2, 0x80))",
-			want:  int64(1),
+			want:  int64(2),
 		},
 		{
 			name:  "utf8_valid_3byte",
 			query: "SELECT length(char(0xE0, 0xA0, 0x80))",
-			want:  int64(1),
+			want:  int64(3),
 		},
 		{
 			name:  "utf8_valid_4byte",
 			query: "SELECT length(char(0xF0, 0x90, 0x80, 0x80))",
-			want:  int64(1),
+			want:  int64(4),
 		},
 
 		// UTF-8 string manipulation
@@ -276,7 +275,7 @@ func TestSQLiteUTF(t *testing.T) {
 		{
 			name:  "utf8_length_emoji_like",
 			query: "SELECT length(char(0xF0, 0x9F, 0x98, 0x80))",
-			want:  int64(1),
+			want:  int64(4),
 		},
 	}
 

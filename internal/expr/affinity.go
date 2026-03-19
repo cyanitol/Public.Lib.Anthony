@@ -291,18 +291,23 @@ func applyRealAffinity(value interface{}) interface{} {
 }
 
 // applyNumericAffinity converts value to the most appropriate numeric type.
+// int64 values are preserved to avoid precision loss for large integers.
+// Strings are tried as int64 first, then float64.
 func applyNumericAffinity(value interface{}) interface{} {
 	switch v := value.(type) {
-	case float64:
-		return v
 	case int64:
-		return float64(v)
-	case string:
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return f
+		return v
+	case float64:
+		if i := int64(v); float64(i) == v {
+			return i
 		}
+		return v
+	case string:
 		if i, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return i
+		}
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
 		}
 		return v
 	default:

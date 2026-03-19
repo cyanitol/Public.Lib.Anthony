@@ -325,7 +325,7 @@ func (p *Planner) OptimizeWhereClause(expr Expr, tables []*TableInfo) (*WhereCla
 	}
 
 	// Apply transitive closure (if a=b and b=c, add a=c)
-	p.applyTransitiveClosure(clause)
+	p.applyTransitiveClosure(clause, tables)
 
 	return clause, nil
 }
@@ -442,14 +442,14 @@ func (p *Planner) parseOperator(op string) WhereOperator {
 
 // applyTransitiveClosure adds implied constraints from transitive relationships.
 // For example, if we have a=b and b=5, we can infer a=5.
-func (p *Planner) applyTransitiveClosure(clause *WhereClause) {
-	equiv := p.buildEquivalenceClasses(clause)
+func (p *Planner) applyTransitiveClosure(clause *WhereClause, tables []*TableInfo) {
+	equiv := p.buildEquivalenceClasses(clause, tables)
 	newTerms := p.propagateConstants(clause, equiv)
 	clause.Terms = append(clause.Terms, newTerms...)
 }
 
 // buildEquivalenceClasses builds a map of equivalent columns.
-func (p *Planner) buildEquivalenceClasses(clause *WhereClause) map[string][]string {
+func (p *Planner) buildEquivalenceClasses(clause *WhereClause, tables []*TableInfo) map[string][]string {
 	equiv := make(map[string][]string)
 	for _, term := range clause.Terms {
 		if term.Operator != WO_EQ {
@@ -464,7 +464,11 @@ func (p *Planner) buildEquivalenceClasses(clause *WhereClause) map[string][]stri
 			continue
 		}
 		leftKey := fmt.Sprintf("%d.%d", term.LeftCursor, term.LeftColumn)
-		rightKey := fmt.Sprintf("%d.%d", rightCol.Cursor, rightCol.UsedTables())
+		rightColIdx := -1
+		if rightCol.Cursor >= 0 && rightCol.Cursor < len(tables) {
+			rightColIdx = findColumnIndex(tables[rightCol.Cursor], rightCol.Column)
+		}
+		rightKey := fmt.Sprintf("%d.%d", rightCol.Cursor, rightColIdx)
 		equiv[leftKey] = append(equiv[leftKey], rightKey)
 		equiv[rightKey] = append(equiv[rightKey], leftKey)
 	}
@@ -533,22 +537,6 @@ func (p *Planner) ExplainPlan(info *WhereInfo) string {
 		result += p.explainLoopDetailed(info, loop, i, len(info.BestPath.Loops))
 	}
 
-	return result
-}
-
-// explainLoop returns a human-readable explanation for a single loop.
-// SCAFFOLDING: For EXPLAIN QUERY PLAN output showing query execution details.
-func (p *Planner) explainLoop(info *WhereInfo, loop *WhereLoop, i int) string {
-	table := info.Tables[loop.TabIndex]
-	indent := makeIndent(i)
-
-	var result string
-	if loop.Index != nil {
-		result = p.explainIndexLoop(table, loop, indent, i)
-	} else {
-		result = fmt.Sprintf("%s%d. SCAN %s\n", indent, i+1, table.Name)
-	}
-	result += fmt.Sprintf("%s   Cost: %d, Rows: %d\n", indent, loop.Run.ToInt(), loop.NOut.ToInt())
 	return result
 }
 

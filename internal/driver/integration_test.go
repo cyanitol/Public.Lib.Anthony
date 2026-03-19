@@ -3,7 +3,6 @@ package driver
 
 import (
 	"database/sql"
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -33,14 +32,8 @@ func TestFullIntegration(t *testing.T) {
 
 // TestSchemaLoading tests that the schema is properly loaded on connection
 func TestSchemaLoading(t *testing.T) {
-	t.Skip("Schema loading requires properly initialized database file")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-
-	// Create database file first
-	if err := os.WriteFile(dbPath, make([]byte, 4096), 0600); err != nil {
-		t.Fatalf("failed to create test database: %v", err)
-	}
 
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
@@ -48,45 +41,25 @@ func TestSchemaLoading(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Get the underlying driver connection
-	driver := GetDriver()
-	if driver == nil {
-		t.Fatal("driver is nil")
+	// Force a connection to be created
+	if err := db.Ping(); err != nil {
+		t.Fatalf("failed to ping database: %v", err)
 	}
 
-	// Verify that connections are tracked
-	driver.mu.Lock()
-	conn, exists := driver.conns[dbPath]
-	driver.mu.Unlock()
-
-	if !exists {
-		t.Fatal("connection not tracked in driver")
+	// Verify schema is usable by querying sqlite_master
+	rows, err := db.Query("SELECT name FROM sqlite_master")
+	if err != nil {
+		t.Fatalf("failed to query sqlite_master: %v", err)
 	}
+	defer rows.Close()
 
-	// Verify schema is loaded
-	if conn.schema == nil {
-		t.Fatal("schema not loaded on connection")
-	}
-
-	// Verify sqlite_master table exists in schema
-	_, ok := conn.schema.GetTable("sqlite_master")
-	if !ok {
-		t.Fatal("sqlite_master table not found in schema")
-	}
-
-	t.Log("Schema successfully loaded with sqlite_master table")
+	t.Log("Schema successfully loaded - sqlite_master is queryable")
 }
 
 // TestFunctionRegistry tests that built-in functions are registered
 func TestFunctionRegistry(t *testing.T) {
-	t.Skip("Function registry requires properly initialized database file")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-
-	// Create database file
-	if err := os.WriteFile(dbPath, make([]byte, 4096), 0600); err != nil {
-		t.Fatalf("failed to create test database: %v", err)
-	}
 
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
@@ -94,38 +67,30 @@ func TestFunctionRegistry(t *testing.T) {
 	}
 	defer db.Close()
 
-	driver := GetDriver()
-	driver.mu.Lock()
-	conn, exists := driver.conns[dbPath]
-	driver.mu.Unlock()
-
-	if !exists {
-		t.Fatal("connection not found")
+	// Verify built-in functions work by calling a few
+	var result int64
+	if err := db.QueryRow("SELECT abs(-42)").Scan(&result); err != nil {
+		t.Fatalf("abs() function failed: %v", err)
+	}
+	if result != 42 {
+		t.Errorf("abs(-42) = %d, want 42", result)
 	}
 
-	// Verify function registry is initialized
-	if conn.funcReg == nil {
-		t.Fatal("function registry not initialized")
+	var lenResult int64
+	if err := db.QueryRow("SELECT length('hello')").Scan(&lenResult); err != nil {
+		t.Fatalf("length() function failed: %v", err)
+	}
+	if lenResult != 5 {
+		t.Errorf("length('hello') = %d, want 5", lenResult)
 	}
 
-	// Verify some built-in functions are registered
-	functions := conn.funcReg.GetAllFunctions()
-	if len(functions) == 0 {
-		t.Fatal("no functions registered")
-	}
-
-	t.Logf("Function registry initialized with %d functions", len(functions))
+	t.Log("Function registry verified - built-in functions work")
 }
 
 // TestStatementPrepare tests SQL statement preparation and parsing
 func TestStatementPrepare(t *testing.T) {
-	t.Skip("Statement preparation requires properly initialized database file")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-
-	if err := os.WriteFile(dbPath, make([]byte, 4096), 0600); err != nil {
-		t.Fatalf("failed to create test database: %v", err)
-	}
 
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
@@ -151,13 +116,8 @@ func TestStatementPrepare(t *testing.T) {
 
 // TestVDBECompilation tests that statements are compiled to VDBE bytecode
 func TestVDBECompilation(t *testing.T) {
-	t.Skip("VDBE compilation requires properly initialized database file")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-
-	if err := os.WriteFile(dbPath, make([]byte, 4096), 0600); err != nil {
-		t.Fatalf("failed to create test database: %v", err)
-	}
 
 	driver := GetDriver()
 	conn, err := driver.OpenConnector(dbPath)
@@ -210,13 +170,8 @@ func integrationCheckColumns(t *testing.T, rows *sql.Rows, expected []string) {
 
 // TestSelectQueryExecution tests executing a simple SELECT query
 func TestSelectQueryExecution(t *testing.T) {
-	t.Skip("SELECT execution requires properly initialized database file")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-
-	if err := os.WriteFile(dbPath, make([]byte, 4096), 0600); err != nil {
-		t.Fatalf("failed to create test database: %v", err)
-	}
 
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
@@ -246,13 +201,8 @@ func TestSelectQueryExecution(t *testing.T) {
 
 // TestTransactionSupport tests transaction begin/commit/rollback
 func TestTransactionSupport(t *testing.T) {
-	t.Skip("Transaction support requires properly initialized database file")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-
-	if err := os.WriteFile(dbPath, make([]byte, 4096), 0600); err != nil {
-		t.Fatalf("failed to create test database: %v", err)
-	}
 
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
@@ -288,13 +238,8 @@ func TestTransactionSupport(t *testing.T) {
 
 // TestConnectionPooling tests that multiple connections work correctly
 func TestConnectionPooling(t *testing.T) {
-	t.Skip("Connection pooling requires properly initialized database file")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-
-	if err := os.WriteFile(dbPath, make([]byte, 4096), 0600); err != nil {
-		t.Fatalf("failed to create test database: %v", err)
-	}
 
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
@@ -333,13 +278,8 @@ func TestConnectionPooling(t *testing.T) {
 
 // TestErrorHandling tests various error conditions
 func TestErrorHandling(t *testing.T) {
-	t.Skip("Error handling requires properly initialized database file")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-
-	if err := os.WriteFile(dbPath, make([]byte, 4096), 0600); err != nil {
-		t.Fatalf("failed to create test database: %v", err)
-	}
 
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
@@ -375,13 +315,8 @@ func TestErrorHandling(t *testing.T) {
 
 // TestPreparedStatementReuse tests reusing prepared statements
 func TestPreparedStatementReuse(t *testing.T) {
-	t.Skip("Prepared statement reuse not yet fully implemented in internal driver")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-
-	if err := os.WriteFile(dbPath, make([]byte, 4096), 0600); err != nil {
-		t.Fatalf("failed to create test database: %v", err)
-	}
 
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {

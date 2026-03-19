@@ -863,6 +863,10 @@ func (c *BtCursor) positionOnParent(parentPage uint32, parentDepth int, parent *
 }
 
 // insertDividerIntoParent inserts the divider cell into the parent page.
+// After inserting the divider at insertIdx, the cell at insertIdx+1 (which was
+// the old cell at insertIdx before shifting) must have its child pointer updated
+// to point to the right page of the split. If the divider was appended at the
+// end, the page's right-child pointer is updated instead.
 func (c *BtCursor) insertDividerIntoParent(parent *BtreePage, parentPage, rightPage uint32, dividerKey int64, dividerKeyBytes []byte, dividerCell []byte) error {
 	if c.Btree.Provider != nil {
 		if err := c.Btree.Provider.MarkDirty(parentPage); err != nil {
@@ -876,7 +880,26 @@ func (c *BtCursor) insertDividerIntoParent(parent *BtreePage, parentPage, rightP
 		return fmt.Errorf("failed to insert divider into parent: %w", err)
 	}
 
-	c.updateRightChildIfNeeded(parent, parentPage, rightPage, insertIdx)
+	return c.fixChildPointerAfterSplit(parent, parentPage, rightPage, insertIdx)
+}
+
+// fixChildPointerAfterSplit updates the child pointer that follows the newly
+// inserted divider cell so it points to the right page of the split.
+func (c *BtCursor) fixChildPointerAfterSplit(parent *BtreePage, parentPage, rightPage uint32, insertIdx int) error {
+	numCells := int(parent.Header.NumCells)
+	nextIdx := insertIdx + 1
+	if nextIdx < numCells {
+		// Update the left-child pointer of the next cell to rightPage.
+		cellPtr, err := parent.Header.GetCellPointer(parent.Data, nextIdx)
+		if err != nil {
+			return fmt.Errorf("failed to get cell pointer after split: %w", err)
+		}
+		binary.BigEndian.PutUint32(parent.Data[cellPtr:], rightPage)
+	} else {
+		// Divider was appended at the end; update the page's right-child pointer.
+		headerOffset := getHeaderOffset(parentPage)
+		binary.BigEndian.PutUint32(parent.Data[headerOffset+PageHeaderOffsetRightChild:], rightPage)
+	}
 	return nil
 }
 
@@ -899,14 +922,6 @@ func (c *BtCursor) findInsertionPoint(parent *BtreePage, dividerKey int64, divid
 		}
 	}
 	return int(parent.Header.NumCells)
-}
-
-// updateRightChildIfNeeded updates the rightmost child pointer if necessary.
-func (c *BtCursor) updateRightChildIfNeeded(parent *BtreePage, parentPage, rightPage uint32, insertIdx int) {
-	if insertIdx == int(parent.Header.NumCells)-1 {
-		headerOffset := getHeaderOffset(parentPage)
-		binary.BigEndian.PutUint32(parent.Data[headerOffset+PageHeaderOffsetRightChild:], rightPage)
-	}
 }
 
 // createNewRoot creates a new root page after splitting the old root
@@ -941,45 +956,6 @@ func (c *BtCursor) createNewRoot(leftPage, rightPage uint32, dividerKey int64, d
 	return nil
 }
 
-// allocateAndSetupNewRoot allocates and initializes a new root page.
-func (c *BtCursor) allocateAndSetupNewRoot() (uint32, *BtreePage, error) {
-	newRootNum, err := c.Btree.AllocatePage()
-	if err != nil {
-		return 0, nil, fmt.Errorf("failed to allocate new root: %w", err)
-	}
-
-	newRootData, err := c.Btree.GetPage(newRootNum)
-	if err != nil {
-		return 0, nil, fmt.Errorf("failed to get new root page: %w", err)
-	}
-
-	pageType := byte(PageTypeInteriorTable)
-	if c.CompositePK {
-		pageType = byte(PageTypeInteriorTableNo)
-	}
-	if err := initializeInteriorPage(newRootData, newRootNum, c.Btree.UsableSize, pageType); err != nil {
-		return 0, nil, fmt.Errorf("failed to initialize new root: %w", err)
-	}
-
-	if err := c.markNewRootDirty(newRootNum); err != nil {
-		return 0, nil, err
-	}
-
-	newRoot, err := NewBtreePage(newRootNum, newRootData, c.Btree.UsableSize)
-	if err != nil {
-		return 0, nil, fmt.Errorf("failed to create new root BtreePage: %w", err)
-	}
-
-	return newRootNum, newRoot, nil
-}
-
-// markNewRootDirty marks the new root page as dirty if provider exists.
-func (c *BtCursor) markNewRootDirty(newRootNum uint32) error {
-	if c.Btree.Provider != nil {
-		return c.Btree.Provider.MarkDirty(newRootNum)
-	}
-	return nil
-}
 
 // populateNewRoot inserts the divider cell and sets right child.
 func (c *BtCursor) populateNewRoot(newRoot *BtreePage, newRootNum, leftPage, rightPage uint32, dividerKey int64, dividerKeyBytes []byte) error {

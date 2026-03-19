@@ -69,7 +69,7 @@ func explainScanPlanRows(t *testing.T, rows *sql.Rows) []string {
 
 // TestExplainQueryPlan tests EXPLAIN QUERY PLAN functionality end-to-end.
 func TestExplainQueryPlan(t *testing.T) {
-	t.Skip("EXPLAIN QUERY PLAN requires full query planning integration")
+
 	db, cleanup := createTestDB(t)
 	defer cleanup()
 
@@ -105,7 +105,7 @@ func TestExplainQueryPlan(t *testing.T) {
 
 // TestExplainQueryPlanWithWhere tests EXPLAIN QUERY PLAN with WHERE clause.
 func TestExplainQueryPlanWithWhere(t *testing.T) {
-	t.Skip("EXPLAIN QUERY PLAN requires full query planning integration")
+
 	db, cleanup := createTestDB(t)
 	defer cleanup()
 
@@ -145,7 +145,7 @@ func TestExplainQueryPlanWithWhere(t *testing.T) {
 
 // TestExplainQueryPlanWithJoin tests EXPLAIN QUERY PLAN with JOIN.
 func TestExplainQueryPlanWithJoin(t *testing.T) {
-	t.Skip("EXPLAIN QUERY PLAN requires full query planning integration")
+
 	db, cleanup := createTestDB(t)
 	defer cleanup()
 
@@ -201,7 +201,7 @@ func scanExplainOpcodes(t *testing.T, rows *sql.Rows) map[string]bool {
 
 // TestExplainOpcodes tests basic EXPLAIN (shows VDBE opcodes).
 func TestExplainOpcodes(t *testing.T) {
-	t.Skip("EXPLAIN requires full query planning integration")
+
 	db, cleanup := createTestDB(t)
 	defer cleanup()
 
@@ -232,7 +232,7 @@ func TestExplainOpcodes(t *testing.T) {
 
 // TestExplainInsert tests EXPLAIN QUERY PLAN for INSERT.
 func TestExplainInsert(t *testing.T) {
-	t.Skip("EXPLAIN QUERY PLAN requires full query planning integration")
+
 	db, cleanup := createTestDB(t)
 	defer cleanup()
 
@@ -271,7 +271,7 @@ func TestExplainInsert(t *testing.T) {
 
 // TestExplainUpdate tests EXPLAIN QUERY PLAN for UPDATE.
 func TestExplainUpdate(t *testing.T) {
-	t.Skip("EXPLAIN QUERY PLAN requires full query planning integration")
+
 	db, cleanup := createTestDB(t)
 	defer cleanup()
 
@@ -310,7 +310,7 @@ func TestExplainUpdate(t *testing.T) {
 
 // TestExplainDelete tests EXPLAIN QUERY PLAN for DELETE.
 func TestExplainDelete(t *testing.T) {
-	t.Skip("EXPLAIN QUERY PLAN requires full query planning integration")
+
 	db, cleanup := createTestDB(t)
 	defer cleanup()
 

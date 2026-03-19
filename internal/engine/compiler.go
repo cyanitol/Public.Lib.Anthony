@@ -128,7 +128,10 @@ func (c *Compiler) compileSelectScan(vm *vdbe.VDBE, stmt *parser.SelectStmt, tab
 // compileWhereAndColumns compiles WHERE clause and emits column operations for SELECT.
 func (c *Compiler) compileWhereAndColumns(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []tableInfo, loopStart int) error {
 	// Evaluate WHERE clause if present
-	hasWhere := c.compileWhereClause(vm, stmt, tables)
+	hasWhere, err := c.compileWhereClause(vm, stmt, tables)
+	if err != nil {
+		return err
+	}
 
 	// Emit column operations
 	if err := emitColumnOpsMultiTable(vm, stmt.Columns, tables); err != nil {
@@ -146,9 +149,9 @@ func (c *Compiler) compileWhereAndColumns(vm *vdbe.VDBE, stmt *parser.SelectStmt
 }
 
 // compileWhereClause compiles WHERE clause and returns true if WHERE was present.
-func (c *Compiler) compileWhereClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []tableInfo) bool {
+func (c *Compiler) compileWhereClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []tableInfo) (bool, error) {
 	if stmt.Where == nil {
-		return false
+		return false, nil
 	}
 
 	// Create code generator for WHERE expression
@@ -157,15 +160,14 @@ func (c *Compiler) compileWhereClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 	// Generate WHERE condition
 	whereReg, err := codegen.GenerateExpr(stmt.Where)
 	if err != nil {
-		// Note: In production code, this should return error, but keeping current behavior
-		return false
+		return false, fmt.Errorf("failed to compile WHERE clause: %w", err)
 	}
 
 	// If WHERE is false, skip this row combination
 	skipLabel := vm.NumOps() + 100 // Will be patched later
 	vm.AddOp(vdbe.OpIfNot, whereReg, skipLabel, 0)
 	vm.SetComment(vm.NumOps()-1, "Skip row if WHERE is false")
-	return true
+	return true, nil
 }
 
 // patchWhereSkipLabelFromStart patches WHERE skip labels starting from loopStart.
@@ -282,7 +284,7 @@ func emitColumnOpsMultiTable(vm *vdbe.VDBE, cols []parser.ResultColumn, tables [
 func resolveColumnIndex(col parser.ResultColumn, table *schema.Table) (int, error) {
 	ident, ok := col.Expr.(*parser.IdentExpr)
 	if !ok {
-		return 0, nil
+		return 0, fmt.Errorf("expression is not a column reference")
 	}
 	idx := table.GetColumnIndex(ident.Name)
 	if idx < 0 {
@@ -296,7 +298,7 @@ func resolveColumnIndex(col parser.ResultColumn, table *schema.Table) (int, erro
 func resolveColumnIndexMultiTable(col parser.ResultColumn, tables []tableInfo) (cursorIdx int, colIdx int, err error) {
 	ident, ok := col.Expr.(*parser.IdentExpr)
 	if !ok {
-		return 0, 0, nil
+		return 0, 0, fmt.Errorf("expression is not a column reference")
 	}
 
 	// Dispatch based on whether column has table qualifier

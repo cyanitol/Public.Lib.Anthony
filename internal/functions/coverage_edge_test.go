@@ -439,15 +439,3 @@ func TestApplyModifierNumeric(t *testing.T) {
 	}
 }
 
-// TestIsValidDateEdge tests isValidDate with edge values
-func TestIsValidDateEdge(t *testing.T) {
-	// Test month 12 day 31
-	if !isValidDate(2023, 12, 31) {
-		t.Error("Dec 31 should be valid")
-	}
-
-	// Test Feb in leap year
-	if !isValidDate(2024, 2, 29) {
-		t.Error("Feb 29 in leap year should be valid")
-	}
-}

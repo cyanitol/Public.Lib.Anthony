@@ -151,10 +151,10 @@ func computeResolvedPath(path, sandboxRoot string) string {
 
 // validateSandboxPrefix validates that the resolved path is within the sandbox.
 func validateSandboxPrefix(resolvedPath, sandboxRoot string) error {
-	if !strings.HasPrefix(resolvedPath, sandboxRoot) {
-		return ErrEscapesSandbox
-	}
-	if !strings.HasPrefix(filepath.Clean(resolvedPath), filepath.Clean(sandboxRoot)) {
+	cleanPath := filepath.Clean(resolvedPath)
+	cleanRoot := filepath.Clean(sandboxRoot)
+	// Ensure directory boundary: path must equal root or start with root + separator.
+	if cleanPath != cleanRoot && !strings.HasPrefix(cleanPath, cleanRoot+string(filepath.Separator)) {
 		return ErrEscapesSandbox
 	}
 	return nil
@@ -183,13 +183,8 @@ func checkAllowlist(path string, config *SecurityConfig) error {
 		allowedPath := filepath.Join(sandboxRoot, allowedSubdir)
 		allowedPath = filepath.Clean(allowedPath)
 
-		// Check if path is under this allowed directory
-		if strings.HasPrefix(path, allowedPath) {
-			return nil
-		}
-
-		// Also allow exact match with the allowed path
-		if path == allowedPath {
+		// Check if path equals or is under this allowed directory
+		if path == allowedPath || strings.HasPrefix(path, allowedPath+string(filepath.Separator)) {
 			return nil
 		}
 	}

@@ -7,7 +7,6 @@ import (
 
 // TestSQLiteWhereSimpleComparisons tests basic WHERE clause comparisons
 func TestSQLiteWhereSimpleComparisons(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -89,7 +88,6 @@ func TestSQLiteWhereSimpleComparisons(t *testing.T) {
 
 // TestSQLiteWhereANDOR tests AND and OR combinations
 func TestSQLiteWhereANDOR(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -150,7 +148,6 @@ func TestSQLiteWhereANDOR(t *testing.T) {
 
 // TestSQLiteWhereIN tests IN operator with lists
 func TestSQLiteWhereIN(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -206,7 +203,6 @@ func TestSQLiteWhereIN(t *testing.T) {
 
 // TestSQLiteWhereINSubquery tests IN with subqueries
 func TestSQLiteWhereINSubquery(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -253,7 +249,6 @@ func TestSQLiteWhereINSubquery(t *testing.T) {
 
 // TestSQLiteWhereBETWEEN tests BETWEEN operator
 func TestSQLiteWhereBETWEEN(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -304,7 +299,6 @@ func TestSQLiteWhereBETWEEN(t *testing.T) {
 
 // TestSQLiteWhereLIKE tests LIKE pattern matching
 func TestSQLiteWhereLIKE(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -360,7 +354,6 @@ func TestSQLiteWhereLIKE(t *testing.T) {
 
 // TestSQLiteWhereNULL tests IS NULL and IS NOT NULL
 func TestSQLiteWhereNULL(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -411,7 +404,6 @@ func TestSQLiteWhereNULL(t *testing.T) {
 
 // TestSQLiteWhereEXISTS tests EXISTS subquery
 func TestSQLiteWhereEXISTS(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -459,7 +451,6 @@ func TestSQLiteWhereEXISTS(t *testing.T) {
 
 // TestSQLiteWhereComplexNested tests complex nested conditions
 func TestSQLiteWhereComplexNested(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -486,7 +477,7 @@ func TestSQLiteWhereComplexNested(t *testing.T) {
 		{
 			name:  "deep nesting",
 			query: "SELECT a FROM t1 WHERE ((a=1 OR a=2) AND b<30) OR (a>4 AND c>500) ORDER BY a",
-			want:  [][]interface{}{{1}, {6}},
+			want:  [][]interface{}{{1}, {2}, {6}},
 		},
 		{
 			name:  "multiple OR groups",
@@ -516,7 +507,6 @@ func TestSQLiteWhereComplexNested(t *testing.T) {
 
 // TestSQLiteWhereJoin tests WHERE clauses in JOIN queries (based on where.test where-2.*)
 func TestSQLiteWhereJoin(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -586,7 +576,6 @@ func TestSQLiteWhereJoin(t *testing.T) {
 
 // TestSQLiteWhereConstant tests constant WHERE clauses (where.test where-4.*)
 func TestSQLiteWhereConstant(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -635,7 +624,6 @@ func TestSQLiteWhereConstant(t *testing.T) {
 
 // TestSQLiteWhereIndexOptimization tests that WHERE uses indexes when appropriate
 func TestSQLiteWhereIndexOptimization(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -681,7 +669,6 @@ func TestSQLiteWhereIndexOptimization(t *testing.T) {
 
 // TestSQLiteWhereExpressions tests WHERE with expressions
 func TestSQLiteWhereExpressions(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 
@@ -732,7 +719,6 @@ func TestSQLiteWhereExpressions(t *testing.T) {
 
 // TestSQLiteWhereCaseInsensitive tests case-insensitive comparisons
 func TestSQLiteWhereCaseInsensitive(t *testing.T) {
-	t.Skip("WHERE clause not yet fully implemented in internal driver")
 	db := setupMemoryDB(t)
 	defer db.Close()
 

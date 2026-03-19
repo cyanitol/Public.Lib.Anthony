@@ -4,7 +4,6 @@ package functions
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
 )
 
@@ -544,17 +543,4 @@ func maxScalarFunc(args []Value) (Value, error) {
 	return maxVal, nil
 }
 
-// init registers scalar versions of min/max
-func init() {
-	// These will be registered by the registry when needed
-}
 
-// Helper to check for NaN
-func isNaN(f float64) bool {
-	return math.IsNaN(f)
-}
-
-// Helper to check for infinity
-func isInf(f float64) bool {
-	return math.IsInf(f, 0)
-}

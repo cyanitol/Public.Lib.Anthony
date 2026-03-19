@@ -606,15 +606,15 @@ func (c *RTreeCursor) buildQueryBox() *BoundingBox {
 		if dimIndex < c.table.dimensions {
 			if isMaxCol {
 				// This is a maxX/maxY/etc column
-				// Constraints are typically: maxX >= value
-				if val < bbox.Max[dimIndex] {
-					bbox.Max[dimIndex] = val
+				// Constraint: maxX >= value → query box min = value
+				if val > bbox.Min[dimIndex] {
+					bbox.Min[dimIndex] = val
 				}
 			} else {
 				// This is a minX/minY/etc column
-				// Constraints are typically: minX <= value
-				if val > bbox.Min[dimIndex] {
-					bbox.Min[dimIndex] = val
+				// Constraint: minX <= value → query box max = value
+				if val < bbox.Max[dimIndex] {
+					bbox.Max[dimIndex] = val
 				}
 			}
 		}
@@ -706,6 +706,9 @@ func (c *RTreeCursor) Rowid() (int64, error) {
 // Close closes the cursor.
 func (c *RTreeCursor) Close() error {
 	c.results = nil
+	c.queryBBox = nil
+	c.queryID = nil
+	c.constraint = nil
 	return nil
 }
 

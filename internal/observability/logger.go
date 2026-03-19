@@ -217,8 +217,9 @@ func (l *defaultLogger) formatJSON(level Level, msg string, fields Fields) strin
 
 	data, err := json.Marshal(entry)
 	if err != nil {
-		// Fallback to text format if JSON marshaling fails
-		return l.formatText(level, msg, fields)
+		// Fallback to text format and include the marshaling error
+		return l.formatText(level, msg, fields) +
+			fmt.Sprintf(" | json_error=%v", err)
 	}
 
 	return string(data)

@@ -100,6 +100,9 @@ func DecodeCompositeKey(data []byte) ([]interface{}, error) {
 // decodeOneValue decodes a single value from the start of data, returning the value,
 // bytes consumed, and any error.
 func decodeOneValue(data []byte) (interface{}, int, error) {
+	if len(data) == 0 {
+		return nil, 0, fmt.Errorf("unexpected end of composite key data")
+	}
 	prefix := data[0]
 	rest := data[1:]
 

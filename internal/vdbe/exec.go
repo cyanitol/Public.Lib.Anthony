@@ -1079,6 +1079,9 @@ func (v *VDBE) execOpenEphemeral(instr *Instruction) error {
 // execClearEphemeral clears all rows from an ephemeral table by reinitializing its root page.
 // P1 = cursor number
 func (v *VDBE) execClearEphemeral(instr *Instruction) error {
+	if instr.P1 < 0 || instr.P1 >= len(v.Cursors) {
+		return fmt.Errorf("cursor index %d out of range", instr.P1)
+	}
 	cursor := v.Cursors[instr.P1]
 	if cursor == nil {
 		return nil
@@ -2173,7 +2176,7 @@ func (v *VDBE) execInsert(instr *Instruction) error {
 	}
 
 	if cursor.WithoutRowID {
-		return v.execInsertWithoutRowID(cursor, btCursor, payload, tableName, isUpdate)
+		return v.execInsertWithoutRowID(cursor, btCursor, payload, tableName, isUpdate, conflictMode)
 	}
 
 	return v.execInsertWithRowID(cursor, btCursor, payload, tableName, isUpdate, instr.P3, conflictMode)
@@ -2662,7 +2665,7 @@ func (v *VDBE) validateInsertWithRowID(tableName string, payload []byte, btCurso
 }
 
 // execInsertWithoutRowID handles INSERT for WITHOUT ROWID tables using composite keys.
-func (v *VDBE) execInsertWithoutRowID(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, tableName string, isUpdate bool) error {
+func (v *VDBE) execInsertWithoutRowID(cursor *Cursor, btCursor *btree.BtCursor, payload []byte, tableName string, isUpdate bool, conflictMode int32) error {
 	keyBytes, err := v.computeCompositeKeyBytes(tableName, payload)
 	if err != nil {
 		if isUpdate {
@@ -2675,7 +2678,7 @@ func (v *VDBE) execInsertWithoutRowID(cursor *Cursor, btCursor *btree.BtCursor, 
 		return err
 	}
 
-	if err := v.performInsertWithCompositeKey(cursor, btCursor, keyBytes, payload, isUpdate); err != nil {
+	if err := v.performInsertWithCompositeKey(cursor, btCursor, keyBytes, payload, isUpdate, conflictMode); err != nil {
 		if isUpdate {
 			v.restorePendingUpdate()
 		}
@@ -2754,9 +2757,15 @@ func (v *VDBE) getTypedFKManager() (interface {
 }
 
 // performInsertWithCompositeKey inserts a row using composite key for WITHOUT ROWID tables.
-func (v *VDBE) performInsertWithCompositeKey(cursor *Cursor, btCursor *btree.BtCursor, keyBytes []byte, payload []byte, isUpdate bool) error {
+func (v *VDBE) performInsertWithCompositeKey(cursor *Cursor, btCursor *btree.BtCursor, keyBytes []byte, payload []byte, isUpdate bool, conflictMode int32) error {
 	if err := btCursor.InsertWithComposite(0, keyBytes, payload); err != nil {
-		return v.wrapInsertError(err)
+		skip, resolved := v.resolveCompositeConflict(btCursor, keyBytes, payload, conflictMode, err)
+		if resolved != nil {
+			return v.wrapInsertError(resolved)
+		}
+		if skip {
+			return nil
+		}
 	}
 
 	// Root page can change after a split; keep cursor and schema in sync.
@@ -2779,6 +2788,40 @@ func (v *VDBE) performInsertWithCompositeKey(cursor *Cursor, btCursor *btree.BtC
 		v.Stats.RowsWritten++
 	}
 	return nil
+}
+
+// resolveCompositeConflict handles conflict resolution for WITHOUT ROWID composite key inserts.
+// Returns (skip bool, err error): skip=true means silently skip this insert,
+// err=nil means the conflict was resolved (row deleted, retry succeeded), err!=nil means unresolvable.
+func (v *VDBE) resolveCompositeConflict(btCursor *btree.BtCursor, keyBytes []byte, payload []byte, conflictMode int32, origErr error) (bool, error) {
+	if !isUniqueConstraintError(origErr) {
+		return false, origErr
+	}
+	switch conflictMode {
+	case conflictModeIgnore:
+		return true, nil
+	case conflictModeReplace:
+		if err := v.deleteAndRetryComposite(btCursor, keyBytes, payload); err != nil {
+			return false, err
+		}
+		return false, nil
+	default:
+		return false, origErr
+	}
+}
+
+// deleteAndRetryComposite deletes an existing row by composite key and re-inserts.
+func (v *VDBE) deleteAndRetryComposite(btCursor *btree.BtCursor, keyBytes []byte, payload []byte) error {
+	found, err := btCursor.SeekComposite(keyBytes)
+	if err != nil {
+		return err
+	}
+	if found {
+		if err := btCursor.Delete(); err != nil {
+			return err
+		}
+	}
+	return btCursor.InsertWithComposite(0, keyBytes, payload)
 }
 
 // validateUpdateConstraintsWithRowid validates FK constraints with the new rowid for INTEGER PRIMARY KEY updates.
@@ -2882,7 +2925,9 @@ func (v *VDBE) restorePendingUpdate() {
 	if err == nil && found {
 		return
 	}
-	_ = cursor.Insert(ctx.rowid, ctx.payload)
+	if err := cursor.Insert(ctx.rowid, ctx.payload); err != nil {
+		v.SetError(fmt.Sprintf("restorePendingUpdate: %v", err))
+	}
 }
 
 // validateInsertConstraints checks all constraints before insert.
@@ -4067,10 +4112,15 @@ func (v *VDBE) execCompare(instr *Instruction, test func(int) bool) error {
 		return err
 	}
 
+	dest, err := v.GetMem(instr.P3)
+	if err != nil {
+		return err
+	}
+
 	// NULL handling: NULL compared to anything (including NULL) results in NULL (UNKNOWN)
 	// This implements SQL three-valued logic
 	if left.IsNull() || right.IsNull() {
-		v.Mem[instr.P3].SetNull()
+		dest.SetNull()
 		return nil
 	}
 
@@ -4081,7 +4131,7 @@ func (v *VDBE) execCompare(instr *Instruction, test func(int) bool) error {
 		result = 1
 	}
 
-	v.Mem[instr.P3].SetInt(result)
+	dest.SetInt(result)
 	return nil
 }
 
@@ -6088,7 +6138,7 @@ func (v *VDBE) buildVFilterArguments(instr *Instruction) []interface{} {
 
 	for i := 0; i < argc; i++ {
 		regIdx := int(instr.P5) + i
-		if regIdx < len(v.Mem) {
+		if regIdx >= 0 && regIdx < len(v.Mem) {
 			argv[i] = v.Mem[regIdx].Value()
 		}
 	}

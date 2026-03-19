@@ -219,8 +219,8 @@ _, err := db.Exec("CREATE UNIQUE INDEX idx_username ON users(name)")
 // Composite index
 _, err := db.Exec("CREATE INDEX idx_age_name ON users(age, name)")
 
-// Conditional index (partial index)
-_, err := db.Exec("CREATE INDEX idx_active ON users(name) WHERE active = 1")
+// Conditional index (partial index) — not yet supported
+// _, err := db.Exec("CREATE INDEX idx_active ON users(name) WHERE active = 1")
 ```
 
 #### CREATE VIEW
@@ -1401,10 +1401,6 @@ db.Exec("PRAGMA synchronous = NORMAL") // Balanced
 
 ## License
 
-Anthony is in the public domain (SQLite License).
+Licensed under your choice of: **Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause**.
 
-The authors disclaim copyright to this source code. In place of a legal notice, here is a blessing:
-
-- May you do good and not evil.
-- May you find forgiveness for yourself and forgive others.
-- May you share freely, never taking more than you give.
+See `LICENSE` and the `LICENSE-*` files for the full text.

@@ -4,6 +4,7 @@ package pager
 import (
 	"encoding/binary"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -455,8 +456,25 @@ func TestJournalWriteOriginalValidSize(t *testing.T) {
 // TestJournalRollbackSuccess tests successful rollback
 func TestJournalRollbackSuccess(t *testing.T) {
 	t.Parallel()
-	// This is a complex integration test, skip for now
-	t.Skip("Rollback integration test is complex")
+	dbFile := filepath.Join(t.TempDir(), "test_rollback_success.db")
+
+	p := mustOpenPagerSized(t, dbFile, 4096)
+	originalData := []byte("ROLLBACK SUCCESS")
+	mustWriteDataToPage(t, p, 1, DatabaseHeaderSize, originalData)
+	mustCommit(t, p)
+
+	// Modify and rollback
+	mustModifyPage(t, p, 1, DatabaseHeaderSize, []byte("CHANGED DATA"))
+	mustRollback(t, p)
+
+	// Verify original data is restored
+	page := mustGetPage(t, p, 1)
+	defer p.Put(page)
+	readData := string(page.Data[DatabaseHeaderSize : DatabaseHeaderSize+len(originalData)])
+	if readData != string(originalData) {
+		t.Errorf("data not restored: got %q, want %q", readData, originalData)
+	}
+	p.Close()
 }
 
 // TestJournalFinalizeSuccess tests successful finalize

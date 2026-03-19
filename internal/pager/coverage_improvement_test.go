@@ -1,3 +1,5 @@
+//go:build !windows
+
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package pager
 
@@ -7,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -156,9 +157,6 @@ func TestJournalValidateHeader(t *testing.T) {
 // TestLockUnixFcntlGetLk tests the fcntlGetLk function
 func TestLockUnixFcntlGetLk(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	f, cleanup := createCoverageTestFile(t)
 	defer cleanup()
@@ -179,9 +177,6 @@ func TestLockUnixFcntlGetLk(t *testing.T) {
 // TestLockUnixCheckReservedLock tests the CheckReservedLock function
 func TestLockUnixCheckReservedLock(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	f1, cleanup1 := createCoverageTestFile(t)
 	defer cleanup1()
@@ -216,9 +211,6 @@ func TestLockUnixCheckReservedLock(t *testing.T) {
 // TestLockUnixAcquirePendingLock tests pending lock acquisition
 func TestLockUnixAcquirePendingLock(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	f, cleanup := createCoverageTestFile(t)
 	defer cleanup()
@@ -248,9 +240,6 @@ func TestLockUnixAcquirePendingLock(t *testing.T) {
 // TestLockUnixAcquireReservedLock tests reserved lock acquisition edge cases
 func TestLockUnixAcquireReservedLock(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	f1, cleanup1 := createCoverageTestFile(t)
 	defer cleanup1()
@@ -324,47 +313,6 @@ func TestTransactionErrorState(t *testing.T) {
 	// Verify cleared
 	if err := pager.validateTransactionState(); err != nil {
 		t.Errorf("expected no error after clear, got %v", err)
-	}
-}
-
-// TestTransactionUpgradeDowngradeLock tests lock upgrade/downgrade
-func TestTransactionUpgradeDowngradeLock(t *testing.T) {
-	t.Parallel()
-	dbFile := filepath.Join(t.TempDir(), "test_lock_updown.db")
-
-	pager, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Start with no lock
-	pager.lockState = LockNone
-
-	// Upgrade to write lock
-	if err := pager.upgradeToWriteLock(); err != nil {
-		t.Errorf("upgradeToWriteLock() error = %v", err)
-	}
-	if pager.lockState != LockReserved {
-		t.Errorf("lock state = %v, want %v", pager.lockState, LockReserved)
-	}
-
-	// Try to upgrade again (should be no-op)
-	if err := pager.upgradeToWriteLock(); err != nil {
-		t.Errorf("second upgradeToWriteLock() error = %v", err)
-	}
-
-	// Downgrade lock
-	if err := pager.downgradeLock(); err != nil {
-		t.Errorf("downgradeLock() error = %v", err)
-	}
-	if pager.lockState != LockShared {
-		t.Errorf("lock state = %v, want %v", pager.lockState, LockShared)
-	}
-
-	// Try to downgrade from shared (should be no-op)
-	if err := pager.downgradeLock(); err != nil {
-		t.Errorf("downgradeLock() from shared error = %v", err)
 	}
 }
 
@@ -585,9 +533,6 @@ func createCoverageTestFile(t *testing.T) (*os.File, func()) {
 // TestBusyHandlerRetry tests busy handler with retry logic
 func TestBusyHandlerRetry(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	dbFile := filepath.Join(t.TempDir(), "test_busy.db")
 

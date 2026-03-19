@@ -1,3 +1,5 @@
+//go:build stress
+
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package driver
 
@@ -69,10 +71,6 @@ func stressBulkInsert(t *testing.T, db *sql.DB, insertSQL string, numRows int, a
 // =============================================================================
 
 func TestStress_BulkInsertUnindexed(t *testing.T) {
-	t.Skip("pre-existing failure - needs bulk insert fixes")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -95,10 +93,6 @@ func TestStress_BulkInsertUnindexed(t *testing.T) {
 }
 
 func TestStress_BulkInsertIndexed(t *testing.T) {
-	t.Skip("pre-existing failure - needs bulk insert fixes")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -128,9 +122,6 @@ func TestStress_BulkInsertIndexed(t *testing.T) {
 // =============================================================================
 
 func TestStress_FullTableScanInteger(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 5000
 	numQueries := 10
@@ -166,10 +157,6 @@ func TestStress_FullTableScanInteger(t *testing.T) {
 }
 
 func TestStress_FullTableScanLike(t *testing.T) {
-	t.Skip("pre-existing failure - needs LIKE implementation")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -202,9 +189,6 @@ func TestStress_FullTableScanLike(t *testing.T) {
 // =============================================================================
 
 func TestStress_CreateIndexOnLargeTable(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 10000
 	if raceEnabled {
@@ -247,9 +231,6 @@ func TestStress_CreateIndexOnLargeTable(t *testing.T) {
 // =============================================================================
 
 func TestStress_IndexedRangeQuery(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 10000
 	numQueries := 1000
@@ -291,9 +272,6 @@ func TestStress_IndexedRangeQuery(t *testing.T) {
 // =============================================================================
 
 func TestStress_RandomRowidLookup(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 10000
 	numLookups := 5000
@@ -325,9 +303,6 @@ func TestStress_RandomRowidLookup(t *testing.T) {
 // =============================================================================
 
 func TestStress_RandomIndexedLookup(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 10000
 	numLookups := 5000
@@ -359,9 +334,6 @@ func TestStress_RandomIndexedLookup(t *testing.T) {
 // =============================================================================
 
 func TestStress_TextIndexLookup(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 5000
 	numLookups := 2000
@@ -406,9 +378,6 @@ func TestStress_TextIndexLookup(t *testing.T) {
 // =============================================================================
 
 func TestStress_VacuumPerformance(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "vacuum.db")
@@ -446,9 +415,6 @@ func TestStress_VacuumPerformance(t *testing.T) {
 // =============================================================================
 
 func TestStress_UpdateIndexedColumn(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 5000
 	numUpdates := 1000
@@ -488,9 +454,6 @@ func TestStress_UpdateIndexedColumn(t *testing.T) {
 // =============================================================================
 
 func TestStress_DeleteWithIndex(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 10000
 	if raceEnabled {
@@ -527,10 +490,6 @@ func TestStress_DeleteWithIndex(t *testing.T) {
 // =============================================================================
 
 func TestStress_LargeBlobInsert(t *testing.T) {
-	t.Skip("pre-existing failure - needs large blob insert")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -556,10 +515,6 @@ func TestStress_LargeBlobInsert(t *testing.T) {
 }
 
 func TestStress_LargeBlobRead(t *testing.T) {
-	t.Skip("pre-existing failure - needs large blob read")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -595,10 +550,6 @@ func TestStress_LargeBlobRead(t *testing.T) {
 // =============================================================================
 
 func TestStress_LargeTextInsert(t *testing.T) {
-	t.Skip("pre-existing failure - needs large text insert")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -625,10 +576,6 @@ func TestStress_LargeTextInsert(t *testing.T) {
 // =============================================================================
 
 func TestStress_SimpleJoin(t *testing.T) {
-	t.Skip("pre-existing failure - needs join fixes")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -660,10 +607,6 @@ func TestStress_SimpleJoin(t *testing.T) {
 }
 
 func TestStress_ComplexJoin(t *testing.T) {
-	t.Skip("pre-existing failure - needs complex join fixes")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -704,10 +647,6 @@ func TestStress_ComplexJoin(t *testing.T) {
 // =============================================================================
 
 func TestStress_ConcurrentReads(t *testing.T) {
-	t.Skip("pre-existing failure - needs concurrent read fixes")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "concurrent.db")
@@ -788,10 +727,6 @@ func stressConcurrentWriter(t *testing.T, dbPath string, writerID, insertsPerWri
 }
 
 func TestStress_ConcurrentInserts(t *testing.T) {
-	t.Skip("pre-existing failure - needs concurrent insert fixes")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	dbPath := filepath.Join(t.TempDir(), "concurrent_write.db")
 	setupDB, err := sql.Open(DriverName, dbPath)
@@ -837,9 +772,6 @@ func TestStress_ConcurrentInserts(t *testing.T) {
 // =============================================================================
 
 func TestStress_MixedReadWrite(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "mixed.db")
@@ -914,9 +846,6 @@ func TestStress_MixedReadWrite(t *testing.T) {
 // =============================================================================
 
 func TestStress_TransactionThroughput(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -954,10 +883,6 @@ func TestStress_TransactionThroughput(t *testing.T) {
 // =============================================================================
 
 func TestStress_AggregateOperations(t *testing.T) {
-	t.Skip("pre-existing failure - needs aggregate operation fixes")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -990,10 +915,6 @@ func TestStress_AggregateOperations(t *testing.T) {
 // =============================================================================
 
 func TestStress_CorrelatedSubquery(t *testing.T) {
-	t.Skip("pre-existing failure - needs correlated subquery fixes")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -1026,10 +947,6 @@ func TestStress_CorrelatedSubquery(t *testing.T) {
 // =============================================================================
 
 func TestStress_DistinctValues(t *testing.T) {
-	t.Skip("DISTINCT not yet implemented")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -1061,9 +978,6 @@ func TestStress_DistinctValues(t *testing.T) {
 // =============================================================================
 
 func TestStress_OrderByLargeResult(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 5000
 	if raceEnabled {
@@ -1100,9 +1014,6 @@ func TestStress_OrderByLargeResult(t *testing.T) {
 // =============================================================================
 
 func TestStress_UnionOperations(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 2000
 	if raceEnabled {
@@ -1139,10 +1050,6 @@ func TestStress_UnionOperations(t *testing.T) {
 // =============================================================================
 
 func TestStress_WindowFunctions(t *testing.T) {
-	t.Skip("pre-existing failure - needs window function fixes")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -1183,9 +1090,6 @@ func TestStress_WindowFunctions(t *testing.T) {
 // =============================================================================
 
 func TestStress_RecursiveCTE(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -1215,9 +1119,6 @@ func TestStress_RecursiveCTE(t *testing.T) {
 // =============================================================================
 
 func TestStress_PreparedStatementReuse(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 10000
 	if raceEnabled {
@@ -1258,9 +1159,6 @@ func TestStress_PreparedStatementReuse(t *testing.T) {
 // =============================================================================
 
 func TestStress_MultipleIndexes(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 5000
 	if raceEnabled {
@@ -1299,10 +1197,6 @@ func TestStress_MultipleIndexes(t *testing.T) {
 // =============================================================================
 
 func TestStress_InsertOrReplace(t *testing.T) {
-	t.Skip("pre-existing failure - needs INSERT OR REPLACE fixes")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -1335,9 +1229,6 @@ func TestStress_InsertOrReplace(t *testing.T) {
 // =============================================================================
 
 func TestStress_BatchDelete(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 10000
 	if raceEnabled {
@@ -1371,9 +1262,6 @@ func TestStress_BatchDelete(t *testing.T) {
 // =============================================================================
 
 func TestStress_ComplexWhereClause(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	numRows := 5000
 	if raceEnabled {
@@ -1414,10 +1302,6 @@ func TestStress_ComplexWhereClause(t *testing.T) {
 // =============================================================================
 
 func TestStress_LargeResultFetch(t *testing.T) {
-	t.Skip("pre-existing failure - needs large result fetch fixes")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()
@@ -1448,10 +1332,6 @@ func TestStress_LargeResultFetch(t *testing.T) {
 // =============================================================================
 
 func TestStress_AnalyzePerformance(t *testing.T) {
-	t.Skip("ANALYZE not implemented")
-	if testing.Short() {
-		t.Skip("skipping stress test in short mode")
-	}
 
 	db := setupMemoryDB(t)
 	defer db.Close()

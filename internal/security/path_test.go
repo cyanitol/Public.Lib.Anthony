@@ -254,7 +254,7 @@ func TestValidateDatabasePath_Symlinks(t *testing.T) {
 
 	symlinkDir := filepath.Join(tmpDir, "symlink")
 	if err := os.Symlink(realDir, symlinkDir); err != nil {
-		t.Skipf("Cannot create symlinks on this system: %v", err)
+		t.Fatalf("Cannot create symlinks on this system: %v", err)
 	}
 
 	config := DefaultSecurityConfig()

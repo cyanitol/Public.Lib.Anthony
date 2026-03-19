@@ -1,10 +1,11 @@
+//go:build !windows
+
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package pager
 
 import (
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -111,9 +112,6 @@ func TestFreeListProcessTrunkPageEdgeCases(t *testing.T) {
 // TestTryUpgradeToExclusiveWithContention tests exclusive lock upgrade with contention
 func TestTryUpgradeToExclusiveWithContention(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	dbFile := filepath.Join(t.TempDir(), "test_excl_contention.db")
 
@@ -146,9 +144,6 @@ func TestTryUpgradeToExclusiveWithContention(t *testing.T) {
 // TestAcquireReservedLockEdgeCases tests reserved lock acquisition edge cases
 func TestAcquireReservedLockEdgeCases(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	dbFile := filepath.Join(t.TempDir(), "test_reserved_edge.db")
 
@@ -199,9 +194,6 @@ func TestAcquireReservedLockEdgeCases(t *testing.T) {
 // TestAcquirePendingLockEdgeCases tests pending lock acquisition edge cases
 func TestAcquirePendingLockEdgeCases(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	dbFile := filepath.Join(t.TempDir(), "test_pending_edge.db")
 
@@ -313,32 +305,6 @@ func TestValidateTransactionStateError(t *testing.T) {
 	}
 }
 
-// TestUpgradeToWriteLockReadOnly tests upgrade on read-only database
-func TestUpgradeToWriteLockReadOnly(t *testing.T) {
-	t.Parallel()
-	dbFile := filepath.Join(t.TempDir(), "test_upgrade_readonly.db")
-
-	// Create database first
-	pager1, err := OpenWithPageSize(dbFile, false, 4096)
-	if err != nil {
-		t.Fatalf("failed to create pager: %v", err)
-	}
-	pager1.Close()
-
-	// Open read-only
-	pager2, err := Open(dbFile, true)
-	if err != nil {
-		t.Fatalf("failed to open read-only: %v", err)
-	}
-	defer pager2.Close()
-
-	// Try to upgrade (should fail)
-	err = pager2.upgradeToWriteLock()
-	if err != ErrReadOnly {
-		t.Errorf("expected ErrReadOnly, got %v", err)
-	}
-}
-
 // TestJournalRestoreEntryFull tests full journal restore with valid entry
 func TestJournalRestoreEntryFull(t *testing.T) {
 	t.Parallel()
@@ -371,9 +337,6 @@ func TestJournalRestoreEntryFull(t *testing.T) {
 // TestFcntlGetLkWithOFD tests fcntlGetLk with OFD locks
 func TestFcntlGetLkWithOFD(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	f, cleanup := createCoverageTestFile(t)
 	defer cleanup()
@@ -397,9 +360,6 @@ func TestFcntlGetLkWithOFD(t *testing.T) {
 // TestCheckReservedLockDetection tests reserved lock detection
 func TestCheckReservedLockDetection(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	f1, cleanup1 := createCoverageTestFile(t)
 	defer cleanup1()

@@ -121,8 +121,13 @@ func (d *Driver) getOrCreateState(filename string, readOnly bool) (*dbState, boo
 }
 
 // newDBState creates a new database state.
+// If the file cannot be opened read-write, it falls back to read-only mode.
 func (d *Driver) newDBState(filename string, readOnly bool) (*dbState, error) {
 	pgr, err := pager.Open(filename, readOnly)
+	if err != nil && !readOnly {
+		// Fall back to read-only if read-write open fails (e.g. file permissions)
+		pgr, err = pager.Open(filename, true)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -250,8 +255,9 @@ func (d *Driver) createMemoryConnection(memoryID string, state *dbState, config 
 		return nil, fmt.Errorf("failed to apply configuration: %w", err)
 	}
 
-	// Track memory connection (each gets unique ID)
+	// Track memory connection and state for reference-counted cleanup
 	d.conns[memoryID] = conn
+	d.dbs[memoryID] = state
 	return conn, nil
 }
 
@@ -289,7 +295,12 @@ func (pp *pagerProvider) GetPageData(pgno uint32) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return page.GetData(), nil
+	data := page.GetData()
+	// Release the page reference so the cache can evict it when needed.
+	// The btree layer caches the []byte slice in bt.Pages, so the data
+	// remains accessible after the pager page reference is released.
+	pp.pager.Put(page)
+	return data, nil
 }
 
 // AllocatePageData allocates a new page
@@ -304,9 +315,12 @@ func (pp *pagerProvider) AllocatePageData() (uint32, []byte, error) {
 	}
 	// Mark it as dirty so it gets written during commit
 	if err := pp.pager.Write(page); err != nil {
+		pp.pager.Put(page)
 		return 0, nil, err
 	}
-	return pgno, page.GetData(), nil
+	data := page.GetData()
+	pp.pager.Put(page)
+	return pgno, data, nil
 }
 
 // MarkDirty marks a page as dirty and journals it for rollback support
@@ -318,8 +332,10 @@ func (pp *pagerProvider) MarkDirty(pgno uint32) error {
 	// Call Write() which journals the page before marking it dirty
 	// This is crucial for transaction rollback support
 	if err := pp.pager.Write(page); err != nil {
+		pp.pager.Put(page)
 		return err
 	}
+	pp.pager.Put(page)
 	return nil
 }
 
@@ -343,7 +359,9 @@ func (pp *memoryPagerProvider) GetPageData(pgno uint32) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return page.GetData(), nil
+	data := page.GetData()
+	pp.pager.Put(page)
+	return data, nil
 }
 
 // AllocatePageData allocates a new page
@@ -355,9 +373,12 @@ func (pp *memoryPagerProvider) AllocatePageData() (uint32, []byte, error) {
 		return 0, nil, err
 	}
 	if err := pp.pager.Write(page); err != nil {
+		pp.pager.Put(page)
 		return 0, nil, err
 	}
-	return pgno, page.GetData(), nil
+	data := page.GetData()
+	pp.pager.Put(page)
+	return pgno, data, nil
 }
 
 // MarkDirty marks a page as dirty
@@ -367,7 +388,9 @@ func (pp *memoryPagerProvider) MarkDirty(pgno uint32) error {
 		return err
 	}
 	if err := pp.pager.Write(page); err != nil {
+		pp.pager.Put(page)
 		return err
 	}
+	pp.pager.Put(page)
 	return nil
 }

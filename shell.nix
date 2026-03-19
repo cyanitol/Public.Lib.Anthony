@@ -14,8 +14,9 @@ pkgs.mkShell {
     gnumake
     gcc
 
-    # Git
+    # Git + GitHub CLI
     git
+    gh
 
     # Fossil for SQLite source code
     fossil

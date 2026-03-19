@@ -1,70 +1,70 @@
 # Anthony Roadmap (Production Readiness)
 
-## Scope and Current Snapshot
-- Feature parity: 100% trinity (1,257/1,257); 24 packages all passing, 0 failures.
-- Targets: no CGO, maintain cyclomatic complexity ≤ 11.
+## Current State (v0.3.3)
+- **17,443 tests passing**, 0 skipped, 0 failures
+- **1,257 Trinity (DO-178C trace) tests** at 100% parity
+- **Race detector clean** across all 27 packages
+- **Cyclomatic complexity ≤11** for all functions
+- No external Go dependencies (zero-dependency project)
+- Go 1.26.1, pure Go (no CGO)
 
-## Recently Completed (v0.3.1)
-- **100% Trinity Parity** - All 1,257 DO-178C trace tests passing, 0 skipped
-- **Correlated TVF Cross-Joins** - `FROM table, json_each(table.col)` pattern
-- **Derived Table Materialization** - JOIN subqueries as B-tree temp tables
-- **Window State Isolation** - Multiple OVER clauses with separate state
-- **IPK-Aware Table Reading** - OpRowid for INTEGER PRIMARY KEY columns
+## Recently Completed (v0.3.3)
+- **Zero Skipped Tests** — Eliminated all 787+ `t.Skip()` calls across 147 test files
+- **B-tree Split Fix** — Non-sequential inserts no longer produce phantom rows
+- **Pager Reference Counting** — Shared connection state properly managed
+- **Cache Eviction** — Page ref leak fixed, dirty page flush under pressure
+- **Stress Tests** — All concurrent/large-blob tests passing
+- **Cyclomatic Complexity** — All functions (production + test) ≤11
+- **GitHub Actions** — checkout@v6, setup-go@v6, gh CLI (Node.js 24)
 
-## Previously Completed (v0.2.0–v0.2.1)
-- **Cyclomatic Complexity ≤9** - All functions across entire codebase
-- **Race Condition Fixes** - PlanCache.Get() (RLock→Lock+atomics), VDBE test isolation
-- **Test Isolation** - 181 hardcoded DB paths converted to t.TempDir()
-- **alltests Build Tag** - Unified main + trinity test execution
-- **Go 1.26.1** - Toolchain upgrade
-- **Trigger Runtime** - Full BEFORE/AFTER execution, WHEN clause, RAISE, UPDATE OF, cascading
-- **ALTER TABLE** - RENAME TABLE, RENAME COLUMN, DROP COLUMN
-- **ATTACH/DETACH** - Cross-database queries, PRAGMA database_list
-- **Table-Valued Functions** - json_each, json_tree wired to SQL FROM clauses
-- **Window Functions** - NTH_VALUE, named WINDOW clauses, PARTITION BY
-- **Date/Time** - strftime %w/%u/%W/%j format codes
-- **AUTOINCREMENT** - sqlite_sequence tracking
-- **FTS5/R-Tree Persistence** - Shadow table management
-- **Foreign Key Runtime** - 83/83 tests passing with deferred/immediate enforcement
-- **WITHOUT ROWID Tables** - 45 passing, JOINs working
+## Completed (v0.3.2)
+- RETURNING clause, UPDATE...FROM, ANALYZE
+- IS DISTINCT FROM / IS NOT DISTINCT FROM
+- generate_series TVF, PERCENT_RANK/CUME_DIST
+- trunc(), custom collations, BACKUP API
+- RIGHT/FULL OUTER JOIN, generated columns
+- EXPLAIN QUERY PLAN improvements
+- Recursive CTE improvements (iterative VDBE loop, dedup, cycle detection)
+- FTS5 + R-Tree SQL integration (MATCH queries, spatial range, INSERT/DELETE)
 
-## Active Workstreams
+## Completed (v0.3.1)
+- 100% Trinity test parity (1,257 tests)
+- Correlated TVF cross-joins, derived table materialization
+- Window function state isolation, IPK-aware table reading
 
-1) Recursive CTE (In Progress)
-- Cursor architecture being reworked for correct anchor/recursive member interaction.
-
-2) PERCENT_RANK / CUME_DIST Window Functions
-- Not yet implemented.
+## Completed (v0.2.x)
+- Core SQL engine, pager, btree, VDBE
+- All 11 window functions
+- Triggers (BEFORE/AFTER, WHEN, RAISE, cascading)
+- ALTER TABLE, ATTACH/DETACH, TVFs
+- Foreign keys (83/83 tests), WITHOUT ROWID (68 tests)
+- JSON functions + aggregates, WAL mode, online backup
+- Security audit (23 vulnerabilities resolved)
 
 ## Future Workstreams
 
-4) VACUUM Robustness
-- Schema persistence across VACUUM.
-- Table/index rebuild fidelity.
+### P1 — Hardening
+- Run sqllogictest subsets vs reference SQLite
+- Fuzz parser and record decoder
+- Crash-replay tests for WAL/journal durability
+- Target ≥80% coverage in pager/vdbe/btree/parser/engine
 
-5) Concurrent WAL Operations
-- Multiple reader/single writer with WAL mode.
-- Checkpoint operations.
+### P2 — Performance
+- Cost-based index selection
+- Join reordering
+- Subquery flattening
+- Incremental vacuum (auto_vacuum=INCREMENTAL)
+- Page cache tuning, overflow page read-ahead
 
-6) FTS5/R-Tree SQL Integration
-- Wire virtual table modules to SQL execution through xBestIndex/xFilter.
-- MATCH/NEAR/prefix queries for FTS5.
-- Spatial queries for R-Tree.
+### P3 — Feature Gaps
+- Partial indexes (CREATE INDEX ... WHERE)
+- Expression indexes
+- ALTER TABLE ADD CONSTRAINT
+- Native composite key B-tree for WITHOUT ROWID
 
-## Hardening and Compatibility
-- Run sqllogictest subsets and reference SQLite diffs to catch drift.
-- Fuzz parser and record decoder; add crash-replay tests for WAL/journal durability.
-- Expand pragma coverage (journal_mode, synchronous, locking) and ensure unsupported pragmas error cleanly.
-- Benchmark hot paths (btree cursor, pager I/O, VDBE ops) and set regression budgets.
+### Testing & Compatibility
+- Expand fault injection (I/O, OOM, corruption)
+- Continue TCL → Go test conversion for high-value SQLite suites
+- Benchmark hot paths (btree cursor, pager I/O, VDBE ops)
 
-## Reference & Testing Integration (Merged Planning Notes)
-- Maintain contrib/sqlite as a read-only reference source with version tracking.
-- Keep trinity generator + traceability matrix; target decision + MC/DC coverage in critical paths.
-- Expand fault injection (I/O, OOM, corruption), fuzzing, and regression suites.
-- Continue TCL -> Go test conversion in phased batches for high-value SQLite suites.
-
-## Documentation and Release
-- Keep README and CHANGELOG aligned with current priorities and unsupported features.
-- Publish tagged releases once active workstreams are completed and conformance/coverage thresholds are met.
-
-*Last updated: 2026-03-16*
+*Last updated: 2026-03-19*

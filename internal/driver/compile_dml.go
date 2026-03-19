@@ -37,6 +37,11 @@ func (s *Stmt) compileInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driv
 	}
 	s.setVdbeContextForDatabase(vm, db)
 
+	// Route virtual tables through vtab interface
+	if s.isVirtualTable(table) {
+		return s.compileVTabInsert(vm, stmt, table, args)
+	}
+
 	// Trigger execution is wired through OpTriggerBefore/OpTriggerAfter opcodes
 	// emitted in compileInsertValues, compileUpdate, and compileDelete.
 	// At VDBE runtime, these opcodes invoke TriggerCompilerInterface to compile
@@ -926,6 +931,11 @@ func (s *Stmt) compileUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt, args []driv
 	}
 	s.setVdbeContextForDatabase(vm, db)
 
+	// Route virtual tables through vtab interface
+	if s.isVirtualTable(table) {
+		return s.compileVTabUpdate(vm, stmt, table, args)
+	}
+
 	if err := s.validateUpdateColumns(table, stmt); err != nil {
 		return nil, err
 	}
@@ -1411,6 +1421,11 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 	}
 	s.setVdbeContextForDatabase(vm, db)
 
+	// Route virtual tables through vtab interface
+	if s.isVirtualTable(table) {
+		return s.compileVTabDelete(vm, stmt, table, args)
+	}
+
 	hasTriggers := s.tableHasTriggers(stmt.Table)
 
 	// Allocate extra registers for OLD row snapshot when triggers exist
@@ -1666,16 +1681,164 @@ func getConflictMode(onConflict parser.OnConflictClause) int32 {
 }
 
 // compileInsertUpsert compiles an INSERT with ON CONFLICT (UPSERT) clause.
-// This is a stub implementation that currently falls back to regular INSERT.
+// For DO NOTHING, it delegates to INSERT OR IGNORE.
+// For DO UPDATE, it rewrites excluded.col references and runs an UPDATE
+// on conflict followed by INSERT OR IGNORE for new rows. CC=10
 func (s *Stmt) compileInsertUpsert(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
-	// TODO: Implement full UPSERT support
-	// For now, ignore the UPSERT clause and fall through to regular INSERT
-	// by clearing the Upsert field temporarily
+	if stmt.Upsert.Action == parser.ConflictDoNothing {
+		return s.compileUpsertDoNothing(vm, stmt, args)
+	}
+	return s.compileUpsertDoUpdate(vm, stmt, args)
+}
+
+// compileUpsertDoNothing compiles UPSERT with DO NOTHING as INSERT OR IGNORE.
+func (s *Stmt) compileUpsertDoNothing(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	saved := stmt.OnConflict
+	stmt.OnConflict = parser.OnConflictIgnore
 	savedUpsert := stmt.Upsert
 	stmt.Upsert = nil
 	result, err := s.compileInsert(vm, stmt, args)
+	stmt.OnConflict = saved
 	stmt.Upsert = savedUpsert
 	return result, err
+}
+
+// compileUpsertDoUpdate compiles UPSERT with DO UPDATE by building an UPDATE
+// statement with excluded references replaced by the INSERT values, then
+// running INSERT OR IGNORE for new rows. CC=10
+func (s *Stmt) compileUpsertDoUpdate(vm *vdbe.VDBE, stmt *parser.InsertStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	table, _, _, ok := s.conn.dbRegistry.ResolveTable(stmt.Schema, stmt.Table)
+	if !ok {
+		return nil, fmt.Errorf("table not found: %s", stmt.Table)
+	}
+
+	// Build column-to-value map from the INSERT for excluded references
+	colValueMap := buildInsertColumnValueMap(stmt, table)
+
+	// Build an UPDATE statement from the DO UPDATE clause
+	updateStmt := buildUpsertUpdateStmt(stmt, table, colValueMap)
+
+	// Compile and execute the UPDATE first
+	updateVM := vdbe.New()
+	updateVM.Ctx = vm.Ctx
+	if _, err := s.compileUpdate(updateVM, updateStmt, args); err != nil {
+		return nil, fmt.Errorf("upsert update: %w", err)
+	}
+	if err := updateVM.Run(); err != nil {
+		return nil, fmt.Errorf("upsert update exec: %w", err)
+	}
+
+	// Now do INSERT OR IGNORE for new rows
+	return s.compileUpsertDoNothing(vm, stmt, args)
+}
+
+// buildInsertColumnValueMap maps column names to their INSERT value expressions.
+func buildInsertColumnValueMap(stmt *parser.InsertStmt, table *schema.Table) map[string]parser.Expression {
+	m := make(map[string]parser.Expression)
+	cols := stmt.Columns
+	if len(cols) == 0 {
+		cols = allTableColumnNames(table)
+	}
+	if len(stmt.Values) > 0 {
+		for i, col := range cols {
+			if i < len(stmt.Values[0]) {
+				m[col] = stmt.Values[0][i]
+			}
+		}
+	}
+	return m
+}
+
+// buildUpsertUpdateStmt constructs an UPDATE statement from the UPSERT clause,
+// replacing excluded.col references with the INSERT values.
+func buildUpsertUpdateStmt(stmt *parser.InsertStmt, table *schema.Table, colValueMap map[string]parser.Expression) *parser.UpdateStmt {
+	sets := make([]parser.Assignment, len(stmt.Upsert.Update.Sets))
+	for i, a := range stmt.Upsert.Update.Sets {
+		sets[i] = parser.Assignment{
+			Column: a.Column,
+			Value:  replaceExcludedRefs(a.Value, colValueMap),
+		}
+	}
+
+	// Build WHERE clause from conflict target columns
+	var where parser.Expression
+	if stmt.Upsert.Target != nil {
+		where = buildConflictWhere(stmt.Upsert.Target, colValueMap)
+	}
+	// Apply additional WHERE from DO UPDATE if present
+	if stmt.Upsert.Update.Where != nil {
+		extraWhere := replaceExcludedRefs(stmt.Upsert.Update.Where, colValueMap)
+		if where != nil {
+			where = &parser.BinaryExpr{Left: where, Op: parser.OpAnd, Right: extraWhere}
+		} else {
+			where = extraWhere
+		}
+	}
+
+	return &parser.UpdateStmt{
+		Schema: stmt.Schema,
+		Table:  stmt.Table,
+		Sets:   sets,
+		Where:  where,
+	}
+}
+
+// buildConflictWhere builds a WHERE clause matching the conflict target columns
+// to their INSERT values.
+func buildConflictWhere(target *parser.ConflictTarget, colValueMap map[string]parser.Expression) parser.Expression {
+	var result parser.Expression
+	for _, col := range target.Columns {
+		val, ok := colValueMap[col.Column]
+		if !ok {
+			continue
+		}
+		eq := &parser.BinaryExpr{
+			Left:  &parser.IdentExpr{Name: col.Column},
+			Op:    parser.OpEq,
+			Right: val,
+		}
+		if result == nil {
+			result = eq
+		} else {
+			result = &parser.BinaryExpr{Left: result, Op: parser.OpAnd, Right: eq}
+		}
+	}
+	return result
+}
+
+// replaceExcludedRefs replaces excluded.col references with the actual INSERT values.
+func replaceExcludedRefs(e parser.Expression, colValueMap map[string]parser.Expression) parser.Expression {
+	if e == nil {
+		return nil
+	}
+	switch expr := e.(type) {
+	case *parser.IdentExpr:
+		if strings.EqualFold(expr.Table, "excluded") {
+			if val, ok := colValueMap[expr.Name]; ok {
+				return val
+			}
+		}
+		return expr
+	case *parser.BinaryExpr:
+		return &parser.BinaryExpr{
+			Left:  replaceExcludedRefs(expr.Left, colValueMap),
+			Op:    expr.Op,
+			Right: replaceExcludedRefs(expr.Right, colValueMap),
+		}
+	case *parser.UnaryExpr:
+		return &parser.UnaryExpr{
+			Op:   expr.Op,
+			Expr: replaceExcludedRefs(expr.Expr, colValueMap),
+		}
+	case *parser.FunctionExpr:
+		newArgs := make([]parser.Expression, len(expr.Args))
+		for i, arg := range expr.Args {
+			newArgs[i] = replaceExcludedRefs(arg, colValueMap)
+		}
+		return &parser.FunctionExpr{Name: expr.Name, Args: newArgs, Distinct: expr.Distinct}
+	default:
+		return e
+	}
 }
 
 // allTableColumnNames returns all column names from the table schema.

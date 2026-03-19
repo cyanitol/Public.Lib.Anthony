@@ -58,9 +58,9 @@ func setupExpressionTestDB(t *testing.T) *sql.DB {
 // TestSQLiteExpressionEvaluation tests comprehensive SQL expression evaluation
 // Converted from SQLite TCL tests, covering all major expression types
 func TestSQLiteExpressionEvaluation(t *testing.T) {
-	t.Skip("pre-existing failure - multiple expression evaluation issues")
 	db := setupExpressionTestDB(t)
 	defer db.Close()
+	db.SetMaxOpenConns(1)
 
 	tests := []struct {
 		name    string
@@ -68,7 +68,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 		query   string // Full SELECT query
 		want    interface{}
 		wantErr bool
-		skip    string
 	}{
 		// ================================================================
 		// ARITHMETIC EXPRESSIONS (+, -, *, /, %)
@@ -84,7 +83,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=-5, b=10",
 			query: "SELECT a + b FROM expr_test",
 			want:  int64(5),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "arithmetic-subtract",
@@ -97,7 +95,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=10, b=30",
 			query: "SELECT a - b FROM expr_test",
 			want:  int64(-20),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "arithmetic-multiply",
@@ -110,7 +107,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=-5, b=4",
 			query: "SELECT a * b FROM expr_test",
 			want:  int64(-20),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "arithmetic-divide-integer",
@@ -123,7 +119,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=7, b=2",
 			query: "SELECT a / b FROM expr_test",
 			want:  int64(3),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "arithmetic-divide-real",
@@ -142,14 +137,12 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=-17, b=5",
 			query: "SELECT a % b FROM expr_test",
 			want:  int64(-2),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "arithmetic-modulo-negative-divisor",
 			setup: "a=17, b=-5",
 			query: "SELECT a % b FROM expr_test",
 			want:  int64(2),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "arithmetic-division-by-zero",
@@ -178,7 +171,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=10, b=20",
 			query: "SELECT a = b FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "compare-not-equal-true",
@@ -191,7 +183,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=10, b=10",
 			query: "SELECT a <> b FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "compare-not-equal-alt",
@@ -210,14 +201,12 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=20, b=10",
 			query: "SELECT a < b FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "compare-less-than-equal-false",
 			setup: "a=20, b=20",
 			query: "SELECT a < b FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "compare-greater-than-true",
@@ -230,28 +219,24 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=10, b=30",
 			query: "SELECT a > b FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "compare-less-equal-true",
 			setup: "a=10, b=20",
 			query: "SELECT a <= b FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - UPDATE does not persist correctly across subtests",
 		},
 		{
 			name:  "compare-less-equal-equal",
 			setup: "a=20, b=20",
 			query: "SELECT a <= b FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "compare-less-equal-false",
 			setup: "a=30, b=20",
 			query: "SELECT a <= b FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "compare-greater-equal-true",
@@ -264,14 +249,12 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=20, b=20",
 			query: "SELECT a >= b FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "compare-greater-equal-false",
 			setup: "a=10, b=20",
 			query: "SELECT a >= b FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "compare-string-equal",
@@ -300,49 +283,42 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=1, b=0",
 			query: "SELECT a AND b FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "logical-and-false-true",
 			setup: "a=0, b=1",
 			query: "SELECT a AND b FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "logical-and-false-false",
 			setup: "a=0, b=0",
 			query: "SELECT a AND b FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "logical-or-true-true",
 			setup: "a=1, b=1",
 			query: "SELECT a OR b FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - UPDATE does not persist correctly across subtests",
 		},
 		{
 			name:  "logical-or-true-false",
 			setup: "a=1, b=0",
 			query: "SELECT a OR b FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "logical-or-false-true",
 			setup: "a=0, b=1",
 			query: "SELECT a OR b FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "logical-or-false-false",
 			setup: "a=0, b=0",
 			query: "SELECT a OR b FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "logical-not-true",
@@ -355,14 +331,12 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=0",
 			query: "SELECT NOT a FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "logical-not-nonzero",
 			setup: "a=42",
 			query: "SELECT NOT a FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "logical-and-with-comparison",
@@ -409,7 +383,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "s1='test', s2=''",
 			query: "SELECT s1 || s2 FROM expr_test",
 			want:  "test",
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "concat-multiple",
@@ -432,42 +405,36 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=10",
 			query: "SELECT -a FROM expr_test",
 			want:  int64(-10),
-			skip:  "pre-existing failure - UPDATE does not persist correctly across subtests",
 		},
 		{
 			name:  "unary-minus-negative",
 			setup: "a=-10",
 			query: "SELECT -a FROM expr_test",
 			want:  int64(10),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "unary-minus-zero",
 			setup: "a=0",
 			query: "SELECT -a FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "unary-plus",
 			setup: "a=42",
 			query: "SELECT +a FROM expr_test",
 			want:  int64(42),
-			skip:  "pre-existing failure - UPDATE does not persist correctly across subtests",
 		},
 		{
 			name:  "unary-minus-expression",
 			setup: "a=5, b=3",
 			query: "SELECT -(a + b) FROM expr_test",
 			want:  int64(-8),
-			skip:  "pre-existing failure - UPDATE does not persist correctly across subtests",
 		},
 		{
 			name:  "double-negation",
 			setup: "a=10",
 			query: "SELECT -(-a) FROM expr_test",
 			want:  int64(10),
-			skip:  "pre-existing failure - UPDATE does not persist correctly across subtests",
 		},
 
 		// ================================================================
@@ -478,49 +445,42 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=42",
 			query: "SELECT CAST(a AS TEXT) FROM expr_test",
 			want:  "42",
-			skip:  "pre-existing failure - CAST returns nil instead of expected value",
 		},
 		{
 			name:  "cast-text-to-int",
 			setup: "s1='123'",
 			query: "SELECT CAST(s1 AS INTEGER) FROM expr_test",
 			want:  int64(123),
-			skip:  "pre-existing failure - CAST returns nil instead of expected value",
 		},
 		{
 			name:  "cast-text-to-real",
 			setup: "s1='3.14'",
 			query: "SELECT CAST(s1 AS REAL) FROM expr_test",
 			want:  3.14,
-			skip:  "pre-existing failure - CAST returns nil instead of expected value",
 		},
 		{
 			name:  "cast-real-to-int",
 			setup: "c=3.7",
 			query: "SELECT CAST(c AS INTEGER) FROM expr_test",
 			want:  int64(3),
-			skip:  "pre-existing failure - CAST returns nil instead of expected value",
 		},
 		{
 			name:  "cast-int-to-real",
 			setup: "a=42",
 			query: "SELECT CAST(a AS REAL) FROM expr_test",
 			want:  42.0,
-			skip:  "pre-existing failure - CAST returns nil instead of expected value",
 		},
 		{
 			name:  "cast-text-leading-zeros",
 			setup: "s1='007'",
 			query: "SELECT CAST(s1 AS INTEGER) FROM expr_test",
 			want:  int64(7),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "cast-invalid-text-to-int",
 			setup: "s1='abc'",
 			query: "SELECT CAST(s1 AS INTEGER) FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "cast-null",
@@ -537,21 +497,18 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=10, b=20",
 			query: "SELECT COALESCE(a, b, 99) FROM expr_test",
 			want:  int64(10),
-			skip:  "pre-existing failure - UPDATE does not persist correctly across subtests",
 		},
 		{
 			name:  "coalesce-second-non-null",
 			setup: "a=NULL, b=20",
 			query: "SELECT COALESCE(a, b, 99) FROM expr_test",
 			want:  int64(20),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "coalesce-third-non-null",
 			setup: "a=NULL, b=NULL",
 			query: "SELECT COALESCE(a, b, 99) FROM expr_test",
 			want:  int64(99),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "coalesce-all-null",
@@ -580,28 +537,24 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=10, b=10",
 			query: "SELECT NULLIF(a, b) FROM expr_test",
 			want:  nil,
-			skip:  "pre-existing failure - NULLIF returns non-nil when equal values expected",
 		},
 		{
 			name:  "nullif-not-equal",
 			setup: "a=10, b=20",
 			query: "SELECT NULLIF(a, b) FROM expr_test",
 			want:  int64(10),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "nullif-strings-equal",
 			setup: "s1='test', s2='test'",
 			query: "SELECT NULLIF(s1, s2) FROM expr_test",
 			want:  nil,
-			skip:  "pre-existing failure - NULLIF returns non-nil when equal strings expected",
 		},
 		{
 			name:  "nullif-strings-not-equal",
 			setup: "s1='hello', s2='world'",
 			query: "SELECT NULLIF(s1, s2) FROM expr_test",
 			want:  "hello",
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "nullif-first-null",
@@ -648,14 +601,12 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=3, b=10",
 			query: "SELECT CASE WHEN a > b THEN 'greater' WHEN a < b THEN 'less' ELSE 'equal' END FROM expr_test",
 			want:  "less",
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "case-searched-equal",
 			setup: "a=10, b=10",
 			query: "SELECT CASE WHEN a > b THEN 'greater' WHEN a < b THEN 'less' ELSE 'equal' END FROM expr_test",
 			want:  "equal",
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "case-nested",
@@ -674,7 +625,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=NULL",
 			query: "SELECT CASE WHEN a IS NULL THEN 'null' ELSE 'not null' END FROM expr_test",
 			want:  "null",
-			skip:  "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
 		},
 		{
 			name:  "case-return-number",
@@ -709,7 +659,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=5, b=10, flag=1",
 			query: "SELECT a < 10 AND b > 5 FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "precedence-or-and",
@@ -722,7 +671,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=0, b=1",
 			query: "SELECT NOT a AND b FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - UPDATE does not persist correctly across subtests",
 		},
 
 		// ================================================================
@@ -733,14 +681,12 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=2, b=3, flag=4",
 			query: "SELECT (a + b) * flag FROM expr_test",
 			want:  int64(20),
-			skip:  "pre-existing failure - UPDATE does not persist correctly across subtests",
 		},
 		{
 			name:  "parens-nested",
 			setup: "a=2, b=3, flag=4",
 			query: "SELECT ((a + b) * flag) / 2 FROM expr_test",
 			want:  int64(10),
-			skip:  "pre-existing failure - UPDATE does not persist correctly across subtests",
 		},
 		{
 			name:  "parens-logical",
@@ -762,22 +708,19 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			name:  "null-and-true",
 			setup: "a=NULL, b=1",
 			query: "SELECT a AND b FROM expr_test",
-			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
+			want:  nil, // SQLite: NULL AND TRUE = NULL
 		},
 		{
 			name:  "null-and-false",
 			setup: "a=NULL, b=0",
 			query: "SELECT a AND b FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "null-or-true",
 			setup: "a=NULL, b=1",
 			query: "SELECT a OR b FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "null-or-false",
@@ -808,28 +751,24 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=NULL",
 			query: "SELECT a IS NULL FROM expr_test",
 			want:  int64(1),
-			skip:  "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
 		},
 		{
 			name:  "null-is-not-null",
 			setup: "a=NULL",
 			query: "SELECT a IS NOT NULL FROM expr_test",
 			want:  int64(0),
-			skip:  "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
 		},
 		{
 			name:  "not-null-is-null",
 			setup: "a=42",
 			query: "SELECT a IS NULL FROM expr_test",
 			want:  int64(0),
-			skip:  "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
 		},
 		{
 			name:  "not-null-is-not-null",
 			setup: "a=42",
 			query: "SELECT a IS NOT NULL FROM expr_test",
 			want:  int64(1),
-			skip:  "Known issue: IS NULL/IS NOT NULL causes infinite loop in VDBE",
 		},
 
 		// ================================================================
@@ -846,7 +785,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=5",
 			query: "SELECT a IN (1, 2, 3) FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "in-single-value",
@@ -865,7 +803,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=2",
 			query: "SELECT a IN (1, NULL, 3) FROM expr_test",
 			want:  nil,
-			skip:  "pre-existing failure - IN with NULL not returning expected result",
 		},
 		{
 			name:  "in-null-value",
@@ -884,21 +821,18 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=5",
 			query: "SELECT a NOT IN (1, 2, 3) FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - no rows returned after UPDATE",
 		},
 		{
 			name:  "in-subquery-found",
 			setup: "a=2",
 			query: "SELECT a IN (SELECT key FROM lookup WHERE key <= 3) FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - IN with subquery not implemented correctly",
 		},
 		{
 			name:  "in-subquery-not-found",
 			setup: "a=99",
 			query: "SELECT a IN (SELECT key FROM lookup) FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - IN with subquery not implemented correctly",
 		},
 
 		// ================================================================
@@ -909,35 +843,30 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "",
 			query: "SELECT EXISTS(SELECT 1 FROM lookup WHERE key = 1) FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - EXISTS subquery not implemented correctly",
 		},
 		{
 			name:  "exists-false",
 			setup: "",
 			query: "SELECT EXISTS(SELECT 1 FROM lookup WHERE key = 999) FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - EXISTS subquery not implemented correctly",
 		},
 		{
 			name:  "not-exists-true",
 			setup: "",
 			query: "SELECT NOT EXISTS(SELECT 1 FROM lookup WHERE key = 999) FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - EXISTS subquery not implemented correctly",
 		},
 		{
 			name:  "not-exists-false",
 			setup: "",
 			query: "SELECT NOT EXISTS(SELECT 1 FROM lookup WHERE key = 1) FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - EXISTS subquery not implemented correctly",
 		},
 		{
 			name:  "exists-correlated",
 			setup: "a=2",
 			query: "SELECT EXISTS(SELECT 1 FROM lookup WHERE key = expr_test.a) FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - EXISTS subquery not implemented correctly",
 		},
 
 		// ================================================================
@@ -948,21 +877,18 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=1",
 			query: "SELECT (SELECT value FROM lookup WHERE key = expr_test.a) FROM expr_test",
 			want:  "first",
-			skip:  "pre-existing failure - scalar subquery not implemented correctly",
 		},
 		{
 			name:  "scalar-subquery-in-arithmetic",
 			setup: "a=2",
 			query: "SELECT a + (SELECT COUNT(*) FROM lookup) FROM expr_test",
 			want:  int64(5),
-			skip:  "pre-existing failure - scalar subquery in arithmetic not implemented correctly",
 		},
 		{
 			name:  "scalar-subquery-in-comparison",
 			setup: "a=3",
 			query: "SELECT a > (SELECT COUNT(*) FROM lookup WHERE key < 3) FROM expr_test",
 			want:  int64(1),
-			skip:  "pre-existing failure - scalar subquery in comparison not implemented correctly",
 		},
 		{
 			name:  "scalar-subquery-null-result",
@@ -975,7 +901,6 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=1",
 			query: "SELECT CASE WHEN (SELECT COUNT(*) FROM lookup) > 0 THEN 'has data' ELSE 'empty' END FROM expr_test",
 			want:  "has data",
-			skip:  "pre-existing failure - scalar subquery in CASE not implemented correctly",
 		},
 
 		// ================================================================
@@ -1010,51 +935,42 @@ func TestSQLiteExpressionEvaluation(t *testing.T) {
 			setup: "a=0",
 			query: "SELECT CASE WHEN a THEN 'true' ELSE 'false' END FROM expr_test",
 			want:  "false",
-			skip:  "pre-existing failure - CASE WHEN with truthiness test fails after UPDATE",
 		},
 		{
 			name:  "nonzero-as-true",
 			setup: "a=42",
 			query: "SELECT CASE WHEN a THEN 'true' ELSE 'false' END FROM expr_test",
 			want:  "true",
-			skip:  "pre-existing failure - CASE WHEN with truthiness test fails after UPDATE",
 		},
 		{
 			name:  "negative-as-true",
 			setup: "a=-1",
 			query: "SELECT CASE WHEN a THEN 'true' ELSE 'false' END FROM expr_test",
 			want:  "true",
-			skip:  "pre-existing failure - CASE WHEN with truthiness test fails after UPDATE",
 		},
 		{
 			name:  "empty-string-as-int",
 			setup: "s1=''",
 			query: "SELECT CAST(s1 AS INTEGER) FROM expr_test",
 			want:  int64(0),
-			skip:  "pre-existing failure - CAST with empty string fails after UPDATE",
 		},
 		{
 			name:  "real-overflow",
 			setup: "c=1.5, d=0.0",
 			query: "SELECT c / d FROM expr_test",
-			want:  math.Inf(1),
-			skip:  "pre-existing failure - real division by zero does not return infinity",
+			want:  nil, // Division by zero returns NULL
 		},
 		{
 			name:  "negative-real-overflow",
 			setup: "c=-1.5, d=0.0",
 			query: "SELECT c / d FROM expr_test",
-			want:  math.Inf(-1),
-			skip:  "pre-existing failure - real division by zero does not return negative infinity",
+			want:  nil, // Division by zero returns NULL
 		},
 	}
 
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 			if tt.setup != "" {
 				if _, err := db.Exec("UPDATE expr_test SET " + tt.setup + " WHERE id = 1"); err != nil {
 					t.Fatalf("setup failed: %v", err)
@@ -1106,9 +1022,9 @@ func exprEvalCompare(t *testing.T, query string, result, want interface{}) {
 
 // TestExpressionBetween tests BETWEEN operator
 func TestExpressionBetween(t *testing.T) {
-	t.Skip("pre-existing failure - needs BETWEEN expression implementation")
 	db := setupExpressionTestDB(t)
 	defer db.Close()
+	db.SetMaxOpenConns(1)
 
 	tests := []struct {
 		name  string
@@ -1191,9 +1107,9 @@ func TestExpressionBetween(t *testing.T) {
 
 // TestExpressionComplexCombinations tests complex expression combinations
 func TestExpressionComplexCombinations(t *testing.T) {
-	t.Skip("pre-existing failure - needs complex expression implementation")
 	db := setupExpressionTestDB(t)
 	defer db.Close()
+	db.SetMaxOpenConns(1)
 
 	tests := []struct {
 		name  string

@@ -379,6 +379,9 @@ type FTS5Cursor struct {
 	results []SearchResult
 	pos     int
 	query   string
+	// rowSnap holds a snapshot of row data captured under the read lock
+	// during Filter, so that Column can serve results without re-locking.
+	rowSnap map[DocumentID][]interface{}
 }
 
 // Filter initializes the cursor with search constraints.
@@ -387,12 +390,27 @@ func (c *FTS5Cursor) Filter(idxNum int, idxStr string, argv []interface{}) error
 	defer c.table.mu.RUnlock()
 
 	if idxNum == 1 && len(argv) > 0 {
-		return c.executeMatchQuery(argv[0])
+		if err := c.executeMatchQuery(argv[0]); err != nil {
+			return err
+		}
+	} else {
+		c.loadAllDocuments()
+		c.positionAtFirst()
 	}
 
-	c.loadAllDocuments()
-	c.positionAtFirst()
+	c.snapshotRows()
 	return nil
+}
+
+// snapshotRows captures row data for all results so that Column can
+// serve values without re-acquiring the table lock.
+func (c *FTS5Cursor) snapshotRows() {
+	c.rowSnap = make(map[DocumentID][]interface{}, len(c.results))
+	for _, r := range c.results {
+		if row, ok := c.table.rows[r.DocID]; ok {
+			c.rowSnap[r.DocID] = row
+		}
+	}
 }
 
 // executeMatchQuery executes a MATCH query and populates results.
@@ -477,19 +495,15 @@ func (c *FTS5Cursor) Column(index int) (interface{}, error) {
 		return nil, fmt.Errorf("cursor at EOF")
 	}
 
-	c.table.mu.RLock()
-	defer c.table.mu.RUnlock()
-
 	result := c.results[c.pos]
-	row, exists := c.table.rows[result.DocID]
-	if !exists {
-		return nil, fmt.Errorf("document not found")
-	}
 
-	// Check for special FTS5 columns
-	// Column -1 is often used for rank/score
 	if index == -1 {
 		return result.Score, nil
+	}
+
+	row, exists := c.rowSnap[result.DocID]
+	if !exists {
+		return nil, fmt.Errorf("document not found")
 	}
 
 	if index < 0 || index >= len(row) {
@@ -511,6 +525,7 @@ func (c *FTS5Cursor) Rowid() (int64, error) {
 // Close closes the cursor.
 func (c *FTS5Cursor) Close() error {
 	c.results = nil
+	c.rowSnap = nil
 	return nil
 }
 

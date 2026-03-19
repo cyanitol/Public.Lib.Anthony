@@ -150,9 +150,15 @@ func (mp *MemoryPager) getLocked(pgno Pgno) (*DbPage, error) {
 		return nil, err
 	}
 
-	// Add to cache
+	// Add to cache; if full, flush dirty pages to make room
 	if err := mp.cache.Put(page); err != nil {
-		return nil, err
+		if err == ErrCacheFull {
+			mp.flushAndEvictDirtyPages()
+			err = mp.cache.Put(page)
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return page, nil
@@ -564,6 +570,19 @@ func (mp *MemoryPager) RollbackTo(name string) error {
 }
 
 // --- Internal helper methods ---
+
+// flushAndEvictDirtyPages writes dirty pages to memory storage and marks
+// them clean so the cache can evict them. This prevents "cache full" errors
+// when many pages are dirty (e.g., during large blob overflow writes).
+func (mp *MemoryPager) flushAndEvictDirtyPages() {
+	dirtyPages := mp.cache.GetDirtyPages()
+	for _, page := range dirtyPages {
+		if err := mp.writePage(page); err == nil {
+			page.MakeClean()
+		}
+	}
+	mp.cache.MakeClean()
+}
 
 // readPage reads a page from memory storage.
 func (mp *MemoryPager) readPage(pgno Pgno) (*DbPage, error) {

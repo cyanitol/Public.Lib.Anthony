@@ -484,16 +484,22 @@ func (l *Lexer) readQuotedIdentifier(quote byte) Token {
 
 	l.readChar() // consume opening quote
 
-	for l.ch != 0 && l.ch != quote {
-		if l.ch == '\n' {
-			l.line++
-			l.col = 0
+	for l.ch != 0 {
+		if l.ch == quote {
+			if l.peekChar() == quote {
+				l.readChar() // consume first quote
+				l.readChar() // consume second quote (escaped)
+			} else {
+				l.readChar() // consume closing quote
+				break
+			}
+		} else {
+			if l.ch == '\n' {
+				l.line++
+				l.col = 0
+			}
+			l.readChar()
 		}
-		l.readChar()
-	}
-
-	if l.ch == quote {
-		l.readChar() // consume closing quote
 	}
 
 	return Token{

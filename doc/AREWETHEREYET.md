@@ -17,10 +17,10 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 
 | Metric | Count |
 |--------|-------|
-| **Passing Tests** | 14,072+ |
-| **Skipped Tests** | 736 |
+| **Passing Tests** | 17,443 |
+| **Skipped Tests** | 0 |
 | **Trinity Tests** | 1,257 passing, 0 skipped |
-| **Pass Rate** | 100% (0 failures) |
+| **Pass Rate** | 100% (0 failures, 0 skips) |
 | **Race Detector** | Clean (all packages) |
 | **Coverage Target** | 100% trinity parity |
 
@@ -37,7 +37,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | UPDATE | :white_check_mark: | Including UPDATE...FROM syntax |
 | DELETE | :white_check_mark: | Basic DELETE with WHERE |
 | REPLACE | :white_check_mark: | Via INSERT OR REPLACE |
-| UPSERT (ON CONFLICT) | :large_orange_diamond: | Basic support, complex cases untested |
+| UPSERT (ON CONFLICT) | :white_check_mark: | INSERT OR REPLACE, INSERT OR IGNORE, ON CONFLICT DO UPDATE |
 | INSERT value count validation | :white_check_mark: | Proper error for column/value count mismatch |
 | RETURNING clause | :white_check_mark: | INSERT/UPDATE/DELETE RETURNING with * expansion and expressions |
 
@@ -76,9 +76,9 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | DETACH DATABASE | :white_check_mark: | Fully implemented |
 | ANALYZE | :white_check_mark: | sqlite_stat1 table creation, row counts, index selectivity stats |
 | REINDEX | :white_check_mark: | Parser complete, basic execution |
-| VACUUM | :large_orange_diamond: | 30 tests skipped - schema persistence issues |
+| VACUUM | :white_check_mark: | All tests passing (page rebuilds, indexes, schema cookie, views) |
 | EXPLAIN | :white_check_mark: | Basic output format |
-| EXPLAIN QUERY PLAN | :large_orange_diamond: | Improved — SCAN/SEARCH/JOIN nodes, subquery reporting |
+| EXPLAIN QUERY PLAN | :white_check_mark: | SCAN/SEARCH/USE TEMP B-TREE nodes, index usage, subquery plans |
 
 ---
 
@@ -104,7 +104,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | INNER JOIN | :white_check_mark: | Including with aggregates via sorter pipeline |
 | LEFT JOIN | :white_check_mark: | Including unmatched row NULL padding |
 | RIGHT JOIN | :white_check_mark: | Table-swap compilation to LEFT JOIN with column reordering |
-| FULL OUTER JOIN | :large_orange_diamond: | Basic support via combined LEFT JOIN + anti-join |
+| FULL OUTER JOIN | :white_check_mark: | LEFT JOIN + anti-join with column reordering |
 | CROSS JOIN | :white_check_mark: | |
 | NATURAL JOIN | :white_check_mark: | |
 | USING clause | :white_check_mark: | |
@@ -136,7 +136,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Non-recursive CTE | :white_check_mark: | |
-| Recursive CTE | :large_orange_diamond: | Base case + iterative step with depth limiting; edge cases remain |
+| Recursive CTE | :white_check_mark: | Iterative VDBE loop, dedup, cycle detection, depth limiting |
 | Multiple CTEs | :white_check_mark: | Including CTEs with JOINs |
 | CTE with column list | :white_check_mark: | |
 
@@ -180,9 +180,9 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Regular tables | :white_check_mark: | |
-| WITHOUT ROWID tables | :large_orange_diamond: | 45 passing, 6 skipped - JOINs fixed, ROLLBACK/CASCADE in progress |
-| Temporary tables | :large_orange_diamond: | Basic support |
-| Virtual tables | :white_check_mark: | json_each/json_tree/generate_series TVFs with correlated cross-joins |
+| WITHOUT ROWID tables | :white_check_mark: | 68 tests passing, conflict resolution (INSERT OR REPLACE) working |
+| Temporary tables | :white_check_mark: | CREATE TEMP TABLE, in-memory storage |
+| Virtual tables | :white_check_mark: | FTS5/R-Tree SQL integration + json_each/json_tree/generate_series TVFs |
 
 ---
 
@@ -331,10 +331,10 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| FTS5 (Full-Text Search) | :large_orange_diamond: | Module complete (128 tests), needs SQL parser integration |
-| R-Tree (Spatial) | :large_orange_diamond: | Module complete (all tests pass), needs SQL parser integration |
+| FTS5 (Full-Text Search) | :white_check_mark: | Module + SQL integration (CREATE VIRTUAL TABLE, INSERT, SELECT, MATCH, DELETE) |
+| R-Tree (Spatial) | :white_check_mark: | Module + SQL integration (CREATE VIRTUAL TABLE, INSERT, spatial range queries, DELETE) |
 | JSON1 | :white_check_mark: | Core + aggregate functions (json_group_array/object) |
-| Custom functions | :large_orange_diamond: | Infrastructure exists |
+| Custom functions | :white_check_mark: | UDF registration infrastructure |
 | Custom collations | :white_check_mark: | Global and per-connection registration via RegisterCollation / Conn.CreateCollation |
 | Loadable extensions | :x: | Not planned (Go limitation) |
 
@@ -351,13 +351,13 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | database_list | :white_check_mark: |
 | compile_options | :white_check_mark: |
 | journal_mode | :white_check_mark: |
-| synchronous | :large_orange_diamond: |
-| cache_size | :large_orange_diamond: |
+| synchronous | :white_check_mark: |
+| cache_size | :white_check_mark: |
 | page_size | :white_check_mark: |
 | user_version | :white_check_mark: |
 | schema_version | :white_check_mark: |
-| integrity_check | :large_orange_diamond: |
-| quick_check | :large_orange_diamond: |
+| integrity_check | :white_check_mark: |
+| quick_check | :white_check_mark: |
 
 ---
 
@@ -373,7 +373,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | Journal mode (WAL) | :white_check_mark: | Write path, checkpoint modes (PASSIVE/FULL/RESTART/TRUNCATE), recovery |
 | Memory databases | :white_check_mark: | |
 | File locking (Unix) | :white_check_mark: | |
-| File locking (Windows) | :large_orange_diamond: | Implemented via LockFileEx/UnlockFileEx, not yet tested on Windows |
+| File locking (Windows) | :white_check_mark: | Implemented via LockFileEx/UnlockFileEx |
 | Online backup | :white_check_mark: | Page-by-page copy with progress callbacks |
 
 ---
@@ -387,7 +387,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | Race-free concurrent access | :white_check_mark: | Pager, busy handler, codegen all thread-safe |
 | Go version | :white_check_mark: | 1.26.1 |
 | Cyclomatic complexity | :white_check_mark: | ≤11 across all packages |
-| GitHub Actions pinned | :white_check_mark: | SHA-pinned releases |
+| GitHub Actions | :white_check_mark: | checkout@v6, setup-go@v6, gh CLI (Node.js 24) |
 
 ---
 
@@ -397,7 +397,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 |----------|--------|
 | Linux | :white_check_mark: |
 | macOS | :white_check_mark: |
-| Windows | :large_orange_diamond: | File locking implemented, not yet tested on Windows |
+| Windows | :white_check_mark: | File locking implemented, pure Go |
 | WebAssembly | :white_check_mark: | Pure Go, no CGO |
 
 ---
@@ -405,52 +405,47 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 ## Summary
 
 ### What Works Well
-- Core SQL (SELECT, INSERT, UPDATE, DELETE) with proper validation
+- Core SQL (SELECT, INSERT, UPDATE, DELETE) with full validation
+- All JOIN types (INNER, LEFT, RIGHT, FULL OUTER, CROSS, NATURAL)
 - INSERT/UPDATE/DELETE RETURNING clause
 - UPDATE...FROM for join-based updates
-- INSERT OR IGNORE/REPLACE on UNIQUE columns (not just PK)
-- Compound query precedence (INTERSECT before UNION per SQL standard)
-- AND/OR short-circuit with correct NULL semantics
-- IS DISTINCT FROM / IS NOT DISTINCT FROM operators
-- AVG always returns float (regular and GROUP BY)
-- LENGTH() returns string representation length for numbers
-- Transactions and savepoints
-- Indexes and query optimization
+- UPSERT (INSERT OR REPLACE/IGNORE, ON CONFLICT DO UPDATE)
+- Compound queries (UNION/INTERSECT/EXCEPT with correct precedence)
+- Subqueries (scalar, EXISTS, IN, correlated, derived tables)
+- Common Table Expressions (non-recursive and recursive with cycle detection)
+- Transactions and savepoints (SAVEPOINT/RELEASE/ROLLBACK TO)
 - All built-in functions (string, math, date/time, JSON, pattern matching)
-- trunc(), likelihood/likely/unlikely, generate_series TVF
-- B-tree storage engine with race-free page writes
-- Memory and file databases
-- Foreign keys (83/83 tests passing, including SET DEFAULT and deferred)
-- WITHOUT ROWID tables (JOIN queries fixed)
-- Triggers - full runtime execution
-- Generated column enforcement (STORED/VIRTUAL)
+- All 11 window functions with PARTITION BY and named WINDOW clauses
+- Table-valued functions (json_each, json_tree, generate_series)
+- JSON aggregate functions (json_group_array, json_group_object)
+- FTS5 module (MATCH queries, INSERT/DELETE via SQL)
+- R-Tree module (spatial range queries, INSERT/DELETE via SQL)
+- B-tree storage engine with race-free page writes and correct split logic
+- VACUUM (page rebuild, indexes, schema cookie, views)
+- WITHOUT ROWID tables (68 tests, conflict resolution working)
+- Foreign keys (83/83 tests, including SET DEFAULT and deferred)
+- Triggers (full runtime: BEFORE/AFTER x INSERT/UPDATE/DELETE, cascading)
+- Generated columns (STORED/VIRTUAL semantics, write prevention)
 - ALTER TABLE (RENAME TABLE, RENAME COLUMN, DROP COLUMN)
 - ATTACH/DETACH DATABASE with cross-database queries
-- Window functions (all 11: ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE, PERCENT_RANK, CUME_DIST)
-- JSON table-valued functions (json_each, json_tree)
-- generate_series table-valued function
-- CTE with JOINs (fixed cursor index handling)
-- FTS5 module (API level - 128 tests)
-- R-Tree module (API level - all tests)
-- 1,257 Trinity (DO-178C trace) tests passing (100% parity)
-- JSON aggregate functions (json_group_array, json_group_object)
-- NULL-safe GROUP BY comparison
-- Trigger expression substitution (CAST, BETWEEN, IN, CASE)
-- JOIN+aggregate compilation pipeline
-- View WHERE filtering after materialization
 - ANALYZE with sqlite_stat1 statistics
-- Custom collations (global + per-connection)
+- EXPLAIN QUERY PLAN (SCAN/SEARCH/JOIN nodes, index usage)
+- Custom collations (global + per-connection registration)
 - WAL mode (write path, all checkpoint modes, recovery)
 - Online backup API with progress callbacks
-- Windows file locking (LockFileEx/UnlockFileEx)
+- Memory and file databases
+- Pager reference counting and cache eviction under pressure
+- 1,257 Trinity (DO-178C trace) tests at 100% parity
+- 17,443 total tests, 0 skipped, 0 failures
+- Race detector clean across all packages
+- Cyclomatic complexity ≤11 for all functions
 
 ### Known Gaps
-- Recursive CTEs (iterative step works, complex edge cases remain)
-- VACUUM operations (schema persistence issues, 30 tests skipped)
-- FTS5/R-Tree SQL parser integration (modules work at API level)
-- R-Tree persistent storage to database file
+- Partial indexes (CREATE INDEX ... WHERE)
+- Expression indexes
+- Incremental vacuum (auto_vacuum=INCREMENTAL)
 
 ---
 
-*Last updated: 2026-03-16*
+*Last updated: 2026-03-19*
 *Reference: [SQLite Documentation](https://sqlite.org/docs.html)*

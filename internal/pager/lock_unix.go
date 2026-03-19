@@ -316,6 +316,9 @@ func (lm *LockManager) acquireExclusiveLock() error {
 	}
 
 	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
+		if lm.currentLevel < lockPending {
+			lm.releasePendingLock()
+		}
 		if err == syscall.EAGAIN || err == syscall.EACCES {
 			return ErrLockBusy
 		}

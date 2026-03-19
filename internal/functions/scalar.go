@@ -5,9 +5,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 )
 
@@ -618,28 +616,6 @@ func compareValues(a, b Value) int {
 	return 0
 }
 
-// isDigit checks if a rune is a digit
-func isDigit(r rune) bool {
-	return unicode.IsDigit(r)
-}
-
-// isSpace checks if a rune is whitespace
-func isSpace(r rune) bool {
-	return unicode.IsSpace(r)
-}
-
-// abs returns the absolute value of an integer
-func abs(n int64) int64 {
-	if n < 0 {
-		return -n
-	}
-	return n
-}
-
-// fabs returns the absolute value of a float
-func fabs(f float64) float64 {
-	return math.Abs(f)
-}
 
 // likelyFunc implements likely(X)
 // Returns the argument X unchanged. It's a hint to the query planner that X is probably TRUE.
@@ -1040,6 +1016,17 @@ func processPrintfFormatCode(format string, pos int, args []Value, argIdx *int, 
 		return newPos
 	}
 
+	// Look up handler and format
+	handler, ok := printfFormatHandlers[spec.specifier]
+	if !ok {
+		// Unknown specifier: do not consume an argument.
+		result.WriteByte('%')
+		if spec.specifier != 0 {
+			result.WriteByte(spec.specifier)
+		}
+		return newPos
+	}
+
 	// Get argument value
 	var arg Value
 	if *argIdx < len(args) {
@@ -1049,16 +1036,7 @@ func processPrintfFormatCode(format string, pos int, args []Value, argIdx *int, 
 		arg = NewNullValue()
 	}
 
-	// Look up handler and format
-	if handler, ok := printfFormatHandlers[spec.specifier]; ok {
-		result.WriteString(handler(spec, arg))
-	} else {
-		// Unknown specifier, output as-is
-		result.WriteByte('%')
-		if spec.specifier != 0 {
-			result.WriteByte(spec.specifier)
-		}
-	}
+	result.WriteString(handler(spec, arg))
 
 	return newPos
 }

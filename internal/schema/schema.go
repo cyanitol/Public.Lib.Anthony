@@ -817,13 +817,24 @@ func (s *Schema) CreateVirtualTable(name, module string, args []string, vtab int
 		return fmt.Errorf("table already exists: %s", name)
 	}
 
-	// Parse the schema DDL to get column information
-	// For now, create a minimal table entry - the virtual table module handles the actual data
+	// Build column definitions from module arguments
+	columns := make([]*Column, 0, len(args))
+	for _, arg := range args {
+		colName := strings.TrimSpace(arg)
+		if colName != "" {
+			columns = append(columns, &Column{
+				Name:     colName,
+				Type:     "TEXT",
+				Affinity: AffinityText,
+			})
+		}
+	}
+
 	table := &Table{
 		Name:         name,
 		RootPage:     0, // Virtual tables don't use B-tree pages
 		SQL:          fmt.Sprintf("CREATE VIRTUAL TABLE %s USING %s(%s)", name, module, strings.Join(args, ", ")), // nosec: name/module/args are from internal schema registration, not user input
-		Columns:      []*Column{}, // Will be populated from schemaDDL if needed
+		Columns:      columns,
 		IsVirtual:    true,
 		Module:       module,
 		ModuleArgs:   args,

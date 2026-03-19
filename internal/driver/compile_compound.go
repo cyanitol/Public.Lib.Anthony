@@ -435,12 +435,23 @@ func cmpDifferentTypes(a, b interface{}) (int, bool) {
 }
 
 // cmpSameType dispatches to type-specific comparison functions.
+// Handles int64/float64 cross-type comparisons since they share type order.
 func cmpSameType(a, b interface{}) int {
 	switch av := a.(type) {
 	case int64:
-		return cmpIntegers(av, b.(int64))
+		if bv, ok := b.(int64); ok {
+			return cmpIntegers(av, bv)
+		}
+		if bv, ok := b.(float64); ok {
+			return cmpFloats(float64(av), bv)
+		}
 	case float64:
-		return cmpFloats(av, b.(float64))
+		if bv, ok := b.(float64); ok {
+			return cmpFloats(av, bv)
+		}
+		if bv, ok := b.(int64); ok {
+			return cmpFloats(av, float64(bv))
+		}
 	case string:
 		return cmpStrings(av, b.(string))
 	case []byte:

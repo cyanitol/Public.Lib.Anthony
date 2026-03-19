@@ -168,7 +168,7 @@ make commit
 This runs:
 1. **Format check** - Ensures code is `gofmt` formatted
 2. **SPDX check** - All `.go` files must have SPDX license headers
-3. **Complexity check** - No function may have cyclomatic complexity > 9
+3. **Complexity check** - No function may have cyclomatic complexity > 11
 4. **go vet** - Static analysis for bugs
 5. **Build** - Ensures project compiles
 6. **Tests** - All tests must pass
@@ -224,7 +224,7 @@ make test-cover   # With coverage
 ### Coding Style & Naming Conventions
 - Go code must be formatted with `gofmt`; no diffs should appear from `gofmt -w .`.
 - Every `.go` file requires an `SPDX-License-Identifier` header; `make check-spdx` enforces this.
-- Maintain cyclomatic complexity ≤ 9 for non-test functions (`make check-complexity`); refactor or split functions if they drift higher.
+- Maintain cyclomatic complexity ≤ 11 for all functions (`make check-complexity`); refactor or split functions if they drift higher.
 - Follow idiomatic Go naming; keep exported APIs minimal. Use clear package prefixes for helpers instead of stuttered names (e.g., `pager.Cache`, not `pager.PagerCache`).
 - Tests favor table-driven layouts with underscore-separated scenario names (e.g., `TestPlanBuilder_NestedCTE`).
 
@@ -245,10 +245,10 @@ make test-cover   # With coverage
 
 ## Known Limitations
 
-- **Windows File Locking** - File locking on Windows is not yet implemented
-- **Recursive CTEs** - Cursor architecture being reworked for correct recursive member execution
-- **Window Function Edge Cases** - 42 trinity tests skipped for advanced window function scenarios
-- **Performance** - No prepared statement caching yet
+- **Partial Indexes** - CREATE INDEX ... WHERE not yet supported
+- **Expression Indexes** - Not yet supported
+- **Incremental Vacuum** - auto_vacuum=INCREMENTAL not yet implemented
+- **Performance** - No cost-based index selection or join reordering yet
 
 ## Roadmap
 
@@ -264,15 +264,13 @@ make test-cover   # With coverage
 - Phase 9: Date/Time (strftime %w/%u/%W/%j), AUTOINCREMENT, schema persistence
 
 ### Current Focus
-- Recursive CTE cursor architecture fix
-- Window function edge cases (42 trinity tests skipped)
-- OLD row extraction from cursors for DELETE/UPDATE triggers
+- Hardening: sqllogictest conformance, fuzzing, crash-replay tests
+- Performance: cost-based index selection, join reordering, subquery flattening
 
 ### Planned
-- Performance optimization (caching, pooling)
-- WAL concurrent operations
-- Fuzzing and sqllogictest conformance
-- Platform-specific enhancements (Windows file locking)
+- Partial indexes and expression indexes
+- Incremental vacuum (auto_vacuum=INCREMENTAL)
+- Page cache tuning and overflow page read-ahead
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
 
@@ -282,7 +280,7 @@ Contributions are welcome! When contributing:
 
 1. **Read the documentation** - Understand the architecture before making changes
 2. **Follow coding standards**:
-   - Keep cyclomatic complexity ≤ 9
+   - Keep cyclomatic complexity ≤ 11
    - Add comprehensive tests for new features
    - Document all public APIs
    - Use the standard Go formatting (`gofmt`)

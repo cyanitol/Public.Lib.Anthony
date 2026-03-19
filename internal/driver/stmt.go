@@ -23,6 +23,7 @@ type Stmt struct {
 	closed         bool
 	mu             sync.Mutex     // Protects closed and vdbe fields
 	windowStateMap map[string]int // Maps OVER clause key → window state index
+	noCache        bool           // Set by vtab queries to prevent VDBE caching
 }
 
 // Close closes the statement.
@@ -381,6 +382,9 @@ func (s *Stmt) cacheVdbeIfAppropriate(vm *vdbe.VDBE, args []driver.NamedValue) {
 // DDL statements, PRAGMAs, and transaction control statements cannot be cached
 // because they embed schema state or connection state at compile time.
 func (s *Stmt) isCacheable() bool {
+	if s.noCache {
+		return false
+	}
 	switch s.ast.(type) {
 	case *parser.PragmaStmt, *parser.CreateTableStmt, *parser.DropTableStmt,
 		*parser.CreateIndexStmt, *parser.DropIndexStmt, *parser.AlterTableStmt,

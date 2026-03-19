@@ -31,7 +31,7 @@ func TestExamples(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir := filepath.Join(exampleDir, name)
 			if _, err := os.Stat(dir); os.IsNotExist(err) {
-				t.Skipf("example dir %s not found", dir)
+				t.Fatalf("example dir %s not found", dir)
 			}
 
 			cmd := exec.Command("go", "run", ".")

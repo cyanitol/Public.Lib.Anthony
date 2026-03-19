@@ -64,7 +64,11 @@ func Example_checkConstraintValidation() {
 	table, _ := s.CreateTable(stmt)
 
 	// Create a CHECK constraint validator
-	validator := constraint.NewCheckValidator(table)
+	validator, err := constraint.NewCheckValidator(table)
+	if err != nil {
+		fmt.Printf("NewCheckValidator error: %v\n", err)
+		return
+	}
 
 	fmt.Printf("Has CHECK constraints: %v\n", validator.HasCheckConstraints())
 	fmt.Printf("Number of constraints: %d\n", len(validator.GetConstraints()))
@@ -115,7 +119,11 @@ func Example_insertWithCheckValidation() {
 	table, _ := s.CreateTable(stmt)
 
 	// Create validator
-	validator := constraint.NewCheckValidator(table)
+	validator, err := constraint.NewCheckValidator(table)
+	if err != nil {
+		fmt.Printf("NewCheckValidator error: %v\n", err)
+		return
+	}
 
 	// Use a code generator that implements CheckCodeGenerator
 	gen := &mockCodeGen{}
@@ -159,7 +167,11 @@ func Example_updateWithCheckValidation() {
 	table, _ := s.CreateTable(stmt)
 
 	// Create validator
-	validator := constraint.NewCheckValidator(table)
+	validator, err := constraint.NewCheckValidator(table)
+	if err != nil {
+		fmt.Printf("NewCheckValidator error: %v\n", err)
+		return
+	}
 
 	// Use a code generator that implements CheckCodeGenerator
 	gen := &mockCodeGen{}
@@ -238,7 +250,11 @@ func Example_multiColumnConstraint() {
 	s := schema.NewSchema()
 	table, _ := s.CreateTable(stmt)
 
-	validator := constraint.NewCheckValidator(table)
+	validator, err := constraint.NewCheckValidator(table)
+	if err != nil {
+		fmt.Printf("NewCheckValidator error: %v\n", err)
+		return
+	}
 	constraints := validator.GetConstraints()
 
 	fmt.Printf("Multi-column constraint count: %d\n", len(constraints))

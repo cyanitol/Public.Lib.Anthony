@@ -226,19 +226,6 @@ func TestStrftimeFuncInvalidModifier(t *testing.T) {
 	}
 }
 
-// TestIsValidDateMonthBoundary tests isValidDate at month boundary
-func TestIsValidDateMonthBoundary(t *testing.T) {
-	// Test December 31
-	if !isValidDate(2023, 12, 31) {
-		t.Error("Dec 31 should be valid")
-	}
-
-	// Test January 1
-	if !isValidDate(2023, 1, 1) {
-		t.Error("Jan 1 should be valid")
-	}
-}
-
 // TestJSONArrayFuncMarshalError tests json_array() edge case
 func TestJSONArrayFuncMarshalError(t *testing.T) {
 	// Test with various types

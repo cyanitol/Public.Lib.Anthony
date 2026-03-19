@@ -1,3 +1,5 @@
+//go:build !windows
+
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package pager
 
@@ -5,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -161,9 +162,6 @@ func TestCommitWithJournalFinalization(t *testing.T) {
 // TestAcquireReservedLockWithRetryContention tests retry logic for reserved lock
 func TestAcquireReservedLockWithRetryContention(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	dbFile := filepath.Join(t.TempDir(), "test_reserved_retry.db")
 
@@ -201,9 +199,6 @@ func TestAcquireReservedLockWithRetryContention(t *testing.T) {
 // TestAcquirePendingLockWithRetry tests pending lock acquisition with retry
 func TestAcquirePendingLockWithRetry(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	dbFile := filepath.Join(t.TempDir(), "test_pending_retry.db")
 
@@ -312,9 +307,6 @@ func TestEnableWALModeEdgeCases(t *testing.T) {
 // TestTryUpgradeToExclusiveEdgeCases tests exclusive upgrade edge cases
 func TestTryUpgradeToExclusiveEdgeCases(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	dbFile := filepath.Join(t.TempDir(), "test_excl_edge.db")
 

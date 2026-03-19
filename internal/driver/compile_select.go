@@ -31,6 +31,11 @@ func (s *Stmt) compileSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driv
 	// Ensure VDBE context uses the correct database (main or attached)
 	s.setVdbeContextForDatabase(vm, db)
 
+	// Route virtual tables through vtab interface
+	if s.isVirtualTable(table) {
+		return s.compileVTabSelect(vm, stmt, table, args)
+	}
+
 	// Route to specialized compilers
 	if routedVM, err, handled := s.routeSpecializedSelect(vm, stmt, tableName, table, args); handled {
 		return routedVM, err

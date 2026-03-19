@@ -91,7 +91,7 @@ func (e *Engine) Close() error {
 
 	// Rollback any active transaction
 	if e.inTransaction {
-		if err := e.pager.Rollback(); err != nil {
+		if err := e.pager.Rollback(); err != nil && err != pager.ErrNoTransaction {
 			return fmt.Errorf("failed to rollback transaction on close: %w", err)
 		}
 		e.inTransaction = false

@@ -113,7 +113,6 @@ func memTxExecAndFinish(t *testing.T, db *sql.DB, query string, commit bool) {
 }
 
 func TestMemoryDatabaseTransaction(t *testing.T) {
-	t.Skip("pre-existing failure - memory database transactions incomplete")
 	db := memOpenDB(t)
 	defer db.Close()
 

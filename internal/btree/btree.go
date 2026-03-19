@@ -31,18 +31,6 @@ type Btree struct {
 	mu           sync.RWMutex      // Protects Pages map
 }
 
-// BtShared represents shared B-tree state (in SQLite, multiple Btree handles can share this)
-type BtShared struct {
-	PageSize      uint32 // Total bytes on a page
-	UsableSize    uint32 // Number of usable bytes on each page
-	MaxLocal      uint16 // Maximum local payload in non-LEAFDATA tables
-	MinLocal      uint16 // Minimum local payload in non-LEAFDATA tables
-	MaxLeaf       uint16 // Maximum local payload in a LEAFDATA table
-	MinLeaf       uint16 // Minimum local payload in a LEAFDATA table
-	NumPages      uint32 // Number of pages in the database
-	InTransaction bool   // True if in a transaction
-}
-
 // NewBtree creates a new B-tree instance
 func NewBtree(pageSize uint32) *Btree {
 	if pageSize == 0 {

@@ -481,7 +481,7 @@ func TestResolveColumnIndex(t *testing.T) {
 				Expr: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
 			},
 			wantIdx:   0,
-			wantError: false,
+			wantError: true,
 		},
 	}
 

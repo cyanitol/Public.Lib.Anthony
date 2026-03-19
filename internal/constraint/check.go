@@ -35,63 +35,56 @@ type CheckValidator struct {
 }
 
 // NewCheckValidator creates a new CHECK constraint validator for a table.
-func NewCheckValidator(table *schema.Table) *CheckValidator {
-	return &CheckValidator{
-		constraints: extractCheckConstraints(table),
-		table:       table,
+// Returns an error if any CHECK constraint expression fails to parse.
+func NewCheckValidator(table *schema.Table) (*CheckValidator, error) {
+	constraints, err := extractCheckConstraints(table)
+	if err != nil {
+		return nil, err
 	}
+	return &CheckValidator{
+		constraints: constraints,
+		table:       table,
+	}, nil
 }
 
 // extractCheckConstraints extracts all CHECK constraints from a table schema.
-func extractCheckConstraints(table *schema.Table) []*CheckConstraint {
+func extractCheckConstraints(table *schema.Table) ([]*CheckConstraint, error) {
 	var constraints []*CheckConstraint
 
 	// Extract column-level CHECK constraints
-	constraints = extractColumnCheckConstraints(table, constraints)
-
-	// Extract table-level CHECK constraints
-	constraints = extractTableCheckConstraints(table, constraints)
-
-	return constraints
-}
-
-// extractColumnCheckConstraints extracts column-level CHECK constraints.
-func extractColumnCheckConstraints(table *schema.Table, constraints []*CheckConstraint) []*CheckConstraint {
 	for _, col := range table.Columns {
 		if col.Check == "" {
 			continue
 		}
-
-		constraint := parseCheckConstraint(col.Check, "", col.Name, false)
-		if constraint != nil {
-			constraints = append(constraints, constraint)
+		constraint, err := parseCheckConstraint(col.Check, "", col.Name, false)
+		if err != nil {
+			return nil, err
 		}
+		constraints = append(constraints, constraint)
 	}
-	return constraints
-}
 
-// extractTableCheckConstraints extracts table-level CHECK constraints.
-func extractTableCheckConstraints(table *schema.Table, constraints []*CheckConstraint) []*CheckConstraint {
+	// Extract table-level CHECK constraints
 	for _, tc := range table.Constraints {
 		if tc.Type != schema.ConstraintCheck || tc.Expression == "" {
 			continue
 		}
-
-		constraint := parseCheckConstraint(tc.Expression, tc.Name, "", true)
-		if constraint != nil {
-			constraints = append(constraints, constraint)
+		constraint, err := parseCheckConstraint(tc.Expression, tc.Name, "", true)
+		if err != nil {
+			return nil, err
 		}
+		constraints = append(constraints, constraint)
 	}
-	return constraints
+
+	return constraints, nil
 }
 
 // parseCheckConstraint parses a CHECK expression and creates a constraint.
-func parseCheckConstraint(exprStr, name, colName string, isTableLevel bool) *CheckConstraint {
+// Returns an error if parsing fails rather than silently skipping.
+func parseCheckConstraint(exprStr, name, colName string, isTableLevel bool) (*CheckConstraint, error) {
 	p := parser.NewParser(exprStr)
 	expr, err := p.ParseExpression()
 	if err != nil {
-		// If parsing fails, skip this constraint
-		return nil
+		return nil, fmt.Errorf("failed to parse CHECK constraint %q: %w", exprStr, err)
 	}
 
 	return &CheckConstraint{
@@ -100,7 +93,7 @@ func parseCheckConstraint(exprStr, name, colName string, isTableLevel bool) *Che
 		ExprString:   exprStr,
 		IsTableLevel: isTableLevel,
 		ColumnName:   colName,
-	}
+	}, nil
 }
 
 // CheckCodeGenerator is an interface that allows CHECK constraint validation

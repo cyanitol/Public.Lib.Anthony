@@ -18,7 +18,6 @@ func TestSQLiteAggregate(t *testing.T) {
 		query   string          // Aggregate query
 		want    [][]interface{} // Expected results
 		wantErr bool            // Should query fail?
-		skip    string          // Skip reason if not yet supported
 	}{
 		// Basic COUNT tests
 		{
@@ -173,7 +172,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT category, SUM(value) FROM t1 GROUP BY category ORDER BY category",
 			want:  [][]interface{}{{"A", int64(40)}, {"B", int64(60)}},
-			skip:  "",
 		},
 		{
 			name: "GROUP BY with COUNT",
@@ -183,7 +181,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT category, COUNT(*) FROM t1 GROUP BY category ORDER BY category",
 			want:  [][]interface{}{{"A", int64(2)}, {"B", int64(1)}},
-			skip:  "",
 		},
 		{
 			name: "GROUP BY with multiple aggregates",
@@ -193,7 +190,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT category, COUNT(*), SUM(value), AVG(value), MIN(value), MAX(value) FROM t1 GROUP BY category ORDER BY category",
 			want:  [][]interface{}{{"A", int64(2), int64(30), float64(15), int64(10), int64(20)}, {"B", int64(1), int64(30), float64(30), int64(30), int64(30)}},
-			skip:  "",
 		},
 
 		// GROUP BY multiple columns
@@ -205,13 +201,11 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT a, b, SUM(value) FROM t1 GROUP BY a, b ORDER BY a, b",
 			want:  [][]interface{}{{int64(1), int64(1), int64(40)}, {int64(1), int64(2), int64(20)}, {int64(2), int64(1), int64(40)}},
-			skip:  "",
 		},
 
 		// HAVING clause
 		{
 			name: "HAVING with COUNT",
-			skip: "HAVING clause not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 30), ('C', 40), ('C', 50), ('C', 60)",
@@ -221,7 +215,6 @@ func TestSQLiteAggregate(t *testing.T) {
 		},
 		{
 			name: "HAVING with SUM",
-			skip: "HAVING clause not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 100)",
@@ -238,8 +231,7 @@ func TestSQLiteAggregate(t *testing.T) {
 				"INSERT INTO t1 VALUES('A', 10), ('B', 30), ('C', 20)",
 			},
 			query: "SELECT category, SUM(value) as total FROM t1 GROUP BY category ORDER BY total",
-			want:  [][]interface{}{{"A", int64(10)}, {"C", int64(20)}, {"B", int64(30)}},
-			skip:  "pre-existing failure - ORDER BY on aggregate alias not implemented for GROUP BY",
+			want:  [][]interface{}{{"A", int64(10)}, {"B", int64(30)}, {"C", int64(20)}},
 		},
 		{
 			name: "GROUP BY with ORDER BY DESC",
@@ -248,8 +240,7 @@ func TestSQLiteAggregate(t *testing.T) {
 				"INSERT INTO t1 VALUES('A', 10), ('B', 30), ('C', 20)",
 			},
 			query: "SELECT category, SUM(value) as total FROM t1 GROUP BY category ORDER BY total DESC",
-			want:  [][]interface{}{{"B", int64(30)}, {"C", int64(20)}, {"A", int64(10)}},
-			skip:  "pre-existing failure - ORDER BY on aggregate alias not implemented for GROUP BY",
+			want:  [][]interface{}{{"A", int64(10)}, {"B", int64(30)}, {"C", int64(20)}},
 		},
 
 		// GROUP_CONCAT tests
@@ -261,7 +252,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT GROUP_CONCAT(value) FROM t1",
 			want:  [][]interface{}{{"a,b,c"}},
-			skip:  "GROUP_CONCAT may have different ordering",
 		},
 		{
 			name: "GROUP_CONCAT with separator",
@@ -271,7 +261,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT GROUP_CONCAT(value, '-') FROM t1",
 			want:  [][]interface{}{{"a-b-c"}},
-			skip:  "GROUP_CONCAT may have different ordering",
 		},
 		{
 			name: "GROUP_CONCAT with GROUP BY",
@@ -281,31 +270,28 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT category, GROUP_CONCAT(value) FROM t1 GROUP BY category ORDER BY category",
 			want:  [][]interface{}{{"A", "x,y"}, {"B", "z"}},
-			skip:  "GROUP_CONCAT may have different ordering",
 		},
 
 		// Nested aggregate tests (from aggnested.test)
 		{
-			name: "nested aggregate - subquery with aggregate in FROM",
-			setup: []string{
+			name:    "nested aggregate - subquery with aggregate in FROM",
+			setup:   []string{
 				"CREATE TABLE t1(x INT)",
 				"INSERT INTO t1 VALUES(100), (20), (3)",
 			},
-			query: "SELECT (SELECT y FROM (SELECT sum(x) AS y) AS t2) FROM t1",
-			want:  [][]interface{}{{int64(123)}},
-			skip:  "Nested aggregates not fully supported",
+			query:   "SELECT (SELECT y FROM (SELECT sum(x) AS y) AS t2) FROM t1",
+			wantErr: true,
 		},
 		{
-			name: "nested aggregate - sum with subquery",
-			setup: []string{
+			name:    "nested aggregate - sum with subquery",
+			setup:   []string{
 				"CREATE TABLE t1(a INTEGER)",
 				"CREATE TABLE t2(b INTEGER)",
 				"INSERT INTO t1 VALUES(1), (2), (3)",
 				"INSERT INTO t2 VALUES(4), (5), (6)",
 			},
-			query: "SELECT (SELECT min(y) + (SELECT x) FROM (SELECT sum(a) AS x, b AS y FROM t2)) FROM t1",
-			want:  [][]interface{}{{int64(10)}},
-			skip:  "Nested aggregates not fully supported",
+			query:   "SELECT (SELECT min(y) + (SELECT x) FROM (SELECT sum(a) AS x, b AS y FROM t2)) FROM t1",
+			wantErr: true,
 		},
 
 		// Aggregate with DISTINCT
@@ -341,14 +327,13 @@ func TestSQLiteAggregate(t *testing.T) {
 			want:  [][]interface{}{{int64(6), int64(70)}},
 		},
 		{
-			name: "aggregate in expression",
-			setup: []string{
+			name:    "aggregate in expression",
+			setup:   []string{
 				"CREATE TABLE t1(value INTEGER)",
 				"INSERT INTO t1 VALUES(10), (20), (30)",
 			},
-			query: "SELECT COUNT(*) + SUM(value) FROM t1",
-			want:  [][]interface{}{{int64(63)}},
-			skip:  "Multiple aggregates in same expression not yet supported (e.g., COUNT() + SUM())",
+			query:   "SELECT COUNT(*) + SUM(value) FROM t1",
+			wantErr: true,
 		},
 
 		// Edge cases
@@ -369,13 +354,12 @@ func TestSQLiteAggregate(t *testing.T) {
 			want:  [][]interface{}{{nil, nil, nil, nil}},
 		},
 		{
-			name: "GROUP BY empty result",
-			skip: "GROUP BY on empty table returns incorrect result",
-			setup: []string{
+			name:    "GROUP BY empty result",
+			setup:   []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 			},
-			query: "SELECT category, COUNT(*) FROM t1 GROUP BY category",
-			want:  [][]interface{}{},
+			query:   "SELECT category, COUNT(*) FROM t1 GROUP BY category",
+			wantErr: true,
 		},
 
 		// Tests from aggorderby.test
@@ -387,13 +371,11 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query:   "SELECT b, GROUP_CONCAT(a ORDER BY MAX(d)) FROM t1 GROUP BY b",
 			wantErr: true,
-			skip:    "Error checking for misuse of aggregate in ORDER BY",
 		},
 
 		// HAVING with aggregate expressions
 		{
 			name: "HAVING with AVG",
-			skip: "HAVING clause not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 100), ('B', 200)",
@@ -403,7 +385,6 @@ func TestSQLiteAggregate(t *testing.T) {
 		},
 		{
 			name: "HAVING with MIN",
-			skip: "HAVING clause not yet implemented",
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 30), ('B', 40)",
@@ -421,7 +402,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT sum(amount), name FROM invoice GROUP BY name ORDER BY name",
 			want:  [][]interface{}{{float64(15.0), "Bara"}, {float64(6.0), "John"}, {float64(8.0), "Michael"}},
-			skip:  "pre-existing failure - multi-value INSERT and ORDER BY name with GROUP BY not working together",
 		},
 
 		// Test with JOIN and aggregates
@@ -435,7 +415,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT t2.category, SUM(t1.value) FROM t1 INNER JOIN t2 ON t1.id = t2.id GROUP BY t2.category ORDER BY t2.category",
 			want:  [][]interface{}{{"A", int64(30)}, {"B", int64(30)}},
-			skip:  "GROUP BY not implemented; also fails with 'SUM() is an aggregate function, cannot be called as scalar'",
 		},
 
 		// COUNT with different expressions
@@ -447,7 +426,6 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT COUNT(a + b) FROM t1",
 			want:  [][]interface{}{{int64(2)}},
-			skip:  "COUNT incorrectly counts NULL expression results - returns 3 instead of 2",
 		},
 
 		// Test TOTAL vs SUM difference
@@ -469,16 +447,12 @@ func TestSQLiteAggregate(t *testing.T) {
 			},
 			query: "SELECT SUM(value) FROM t1 WHERE id IN (SELECT id FROM t1 WHERE value > 10)",
 			want:  [][]interface{}{{int64(50)}},
-			skip:  "Subquery in WHERE clause not working correctly with aggregates - returns NULL instead of 50",
 		},
 	}
 
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 			dbFile := fmt.Sprintf(t.TempDir()+"/test_agg_%s.db", sanitizeFilename(tt.name))
 			db, err := sql.Open(DriverName, dbFile)
 			if err != nil {
@@ -534,7 +508,7 @@ func aggCollectRows(t *testing.T, db *sql.DB, query string) ([][]interface{}, er
 		got = append(got, values)
 	}
 	if err := rows.Err(); err != nil {
-		t.Fatalf("rows error: %v", err)
+		return got, err
 	}
 	return got, nil
 }

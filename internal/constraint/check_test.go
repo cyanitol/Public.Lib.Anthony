@@ -64,7 +64,10 @@ func TestNewCheckValidator(t *testing.T) {
 		t.Fatalf("Failed to create table: %v", err)
 	}
 
-	validator := NewCheckValidator(table)
+	validator, err := NewCheckValidator(table)
+	if err != nil {
+		t.Fatalf("NewCheckValidator failed: %v", err)
+	}
 	if validator == nil {
 		t.Fatal("Expected non-nil validator")
 	}
@@ -172,7 +175,10 @@ func TestExtractCheckConstraints(t *testing.T) {
 				t.Fatalf("Failed to create table: %v", err)
 			}
 
-			constraints := extractCheckConstraints(table)
+			constraints, err := extractCheckConstraints(table)
+			if err != nil {
+				t.Fatalf("extractCheckConstraints failed: %v", err)
+			}
 			if len(constraints) != tt.expectedCount {
 				t.Errorf("Expected %d constraints, got %d", tt.expectedCount, len(constraints))
 			}
@@ -218,7 +224,10 @@ func TestValidateInsert(t *testing.T) {
 		t.Fatalf("Failed to create table: %v", err)
 	}
 
-	validator := NewCheckValidator(table)
+	validator, err := NewCheckValidator(table)
+	if err != nil {
+		t.Fatalf("NewCheckValidator failed: %v", err)
+	}
 
 	// Create a mock code generator for testing
 	mock := &mockCodeGenerator{}
@@ -267,7 +276,10 @@ func TestValidateUpdate(t *testing.T) {
 		t.Fatalf("Failed to create table: %v", err)
 	}
 
-	validator := NewCheckValidator(table)
+	validator, err := NewCheckValidator(table)
+	if err != nil {
+		t.Fatalf("NewCheckValidator failed: %v", err)
+	}
 
 	// Create a mock code generator for testing
 	mock := &mockCodeGenerator{}
@@ -388,7 +400,10 @@ func TestHasCheckConstraints(t *testing.T) {
 				t.Fatalf("Failed to create table: %v", err)
 			}
 
-			validator := NewCheckValidator(table)
+			validator, err := NewCheckValidator(table)
+			if err != nil {
+				t.Fatalf("NewCheckValidator failed: %v", err)
+			}
 			if validator.HasCheckConstraints() != tt.expected {
 				t.Errorf("Expected HasCheckConstraints() = %v, got %v", tt.expected, validator.HasCheckConstraints())
 			}
@@ -491,7 +506,10 @@ func TestComplexCheckExpressions(t *testing.T) {
 				t.Fatalf("Failed to create table: %v", err)
 			}
 
-			validator := NewCheckValidator(table)
+			validator, err := NewCheckValidator(table)
+			if err != nil {
+				t.Fatalf("NewCheckValidator failed: %v", err)
+			}
 			if !validator.HasCheckConstraints() {
 				t.Error("Expected validator to have CHECK constraints")
 			}
@@ -539,7 +557,10 @@ func TestNullInCheckConstraints(t *testing.T) {
 		t.Fatalf("Failed to create table: %v", err)
 	}
 
-	validator := NewCheckValidator(table)
+	validator, err := NewCheckValidator(table)
+	if err != nil {
+		t.Fatalf("NewCheckValidator failed: %v", err)
+	}
 
 	// Use mock code generator for testing
 	mock := &mockCodeGenerator{}

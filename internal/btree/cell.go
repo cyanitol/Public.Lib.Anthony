@@ -392,9 +392,7 @@ func calculateMinLocal(usableSize uint32, isTable bool) uint32 {
 
 // calculateLocalPayload calculates how much payload to store locally when it overflows
 func calculateLocalPayload(payloadSize uint32, minLocal, maxLocal, usableSize uint32) uint16 {
-	// Validate usableSize to prevent underflow
-	if usableSize < 4 {
-		// Fallback to minLocal if usableSize is too small
+	if usableSize < 4 || payloadSize < minLocal {
 		localPayload, err := security.SafeCastUint32ToUint16(minLocal)
 		if err != nil {
 			return 0

@@ -35,12 +35,12 @@ func vacVerifyTestPages(t *testing.T, pager *Pager, start, end Pgno) {
 }
 
 func TestVacuum_BasicOperation(t *testing.T) {
-	t.Skip("pager vacuum page 1 header not preserved")
 	t.Parallel()
 	filename := filepath.Join(t.TempDir(), "test.db")
 
 	pager := openTestPagerAt(t, filename, false)
-	vacWriteTestPages(t, pager, 1, 10)
+	// Start from page 2: page 1 is reserved for sqlite_master btree header
+	vacWriteTestPages(t, pager, 2, 10)
 	mustCommit(t, pager)
 
 	initialSize := pager.dbSize
@@ -48,7 +48,7 @@ func TestVacuum_BasicOperation(t *testing.T) {
 		t.Fatalf("Vacuum() error = %v", err)
 	}
 
-	vacVerifyTestPages(t, pager, 1, 10)
+	vacVerifyTestPages(t, pager, 2, 10)
 
 	if pager.dbSize > initialSize {
 		t.Errorf("Database size after vacuum = %d, want <= %d", pager.dbSize, initialSize)
@@ -148,7 +148,6 @@ func vacIntoVerifyPage(t *testing.T, pager *Pager, pgno Pgno, expected byte) {
 }
 
 func TestVacuum_Into(t *testing.T) {
-	t.Skip("pager vacuum into page 1 header not preserved")
 	t.Parallel()
 	sourceFile := filepath.Join(t.TempDir(), "source.db")
 	targetFile := filepath.Join(t.TempDir(), "target.db")
@@ -158,7 +157,8 @@ func TestVacuum_Into(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 
-	for i := Pgno(1); i <= 5; i++ {
+	// Start from page 2: page 1 is reserved for sqlite_master btree header
+	for i := Pgno(2); i <= 5; i++ {
 		vacIntoWritePage(t, pager, i, byte(i*2))
 	}
 
@@ -183,7 +183,7 @@ func TestVacuum_Into(t *testing.T) {
 	}
 	defer targetPager.Close()
 
-	for i := Pgno(1); i <= 5; i++ {
+	for i := Pgno(2); i <= 5; i++ {
 		vacIntoVerifyPage(t, targetPager, i, byte(i*2))
 	}
 
@@ -193,7 +193,7 @@ func TestVacuum_Into(t *testing.T) {
 	}
 	defer sourcePager.Close()
 
-	vacIntoVerifyPage(t, sourcePager, 1, 2)
+	vacIntoVerifyPage(t, sourcePager, 2, 4)
 }
 
 func TestVacuum_ReadOnlyDatabase(t *testing.T) {
@@ -284,19 +284,19 @@ func vacVerifyPatternPages(t *testing.T, pager *Pager, pattern []byte, start, en
 }
 
 func TestVacuum_DataIntegrity(t *testing.T) {
-	t.Skip("pager vacuum page 1 header not preserved")
 	t.Parallel()
 	filename := filepath.Join(t.TempDir(), "test.db")
 
 	pager := openTestPagerAt(t, filename, false)
 	pattern := []byte("INTEGRITY_TEST_PATTERN_")
-	vacWritePatternPages(t, pager, pattern, 1, 20)
+	// Start from page 2: page 1 is reserved for sqlite_master btree header
+	vacWritePatternPages(t, pager, pattern, 2, 20)
 	mustCommit(t, pager)
 
 	if err := pager.Vacuum(&VacuumOptions{}); err != nil {
 		t.Fatalf("Vacuum() error = %v", err)
 	}
-	vacVerifyPatternPages(t, pager, pattern, 1, 20)
+	vacVerifyPatternPages(t, pager, pattern, 2, 20)
 	pager.Close()
 }
 

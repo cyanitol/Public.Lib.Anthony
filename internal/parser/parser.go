@@ -164,10 +164,11 @@ var statementParsers = map[TokenType]statementParser{
 	TK_RELEASE:   func(p *Parser) (Statement, error) { return p.parseRelease() },
 	TK_END:       func(p *Parser) (Statement, error) { return &CommitStmt{}, nil },
 	TK_WITH:      func(p *Parser) (Statement, error) { return p.parseSelect() }, // WITH starts a CTE, parsed as part of SELECT
+	TK_REPLACE:   func(p *Parser) (Statement, error) { return p.parseReplaceInto() },
 }
 
 var statementParserOrder = []TokenType{
-	TK_WITH, TK_SELECT, TK_INSERT, TK_UPDATE, TK_DELETE,
+	TK_WITH, TK_SELECT, TK_INSERT, TK_REPLACE, TK_UPDATE, TK_DELETE,
 	TK_CREATE, TK_DROP, TK_ALTER, TK_BEGIN, TK_COMMIT, TK_ROLLBACK,
 	TK_ATTACH, TK_DETACH, TK_PRAGMA, TK_VACUUM, TK_REINDEX, TK_ANALYZE,
 	TK_SAVEPOINT, TK_RELEASE, TK_END,
@@ -403,13 +404,21 @@ func (p *Parser) parseLimitClauseInto(stmt *SelectStmt) error {
 	}
 	stmt.Limit = limit
 
-	// OFFSET clause
-	if p.match(TK_OFFSET) || p.match(TK_COMMA) {
+	// OFFSET clause: "LIMIT x OFFSET y" or "LIMIT y, x" (comma swaps meaning)
+	if p.match(TK_OFFSET) {
 		offset, err := p.parseExpression()
 		if err != nil {
 			return err
 		}
 		stmt.Offset = offset
+	} else if p.match(TK_COMMA) {
+		// In "LIMIT a, b" syntax, a is offset and b is limit
+		count, err := p.parseExpression()
+		if err != nil {
+			return err
+		}
+		stmt.Offset = stmt.Limit
+		stmt.Limit = count
 	}
 	return nil
 }
@@ -899,6 +908,41 @@ func (p *Parser) parseInsert() (*InsertStmt, error) {
 	stmt.Table = Unquote(p.advance().Lexeme)
 
 	// Handle schema-qualified table name: schema.table
+	if p.match(TK_DOT) {
+		if !p.check(TK_ID) {
+			return nil, p.error("expected table name after '.'")
+		}
+		stmt.Schema = stmt.Table
+		stmt.Table = Unquote(p.advance().Lexeme)
+	}
+
+	if err := p.parseInsertColumnList(stmt); err != nil {
+		return nil, err
+	}
+	if err := p.parseInsertSource(stmt); err != nil {
+		return nil, err
+	}
+	if err := p.parseInsertUpsertClause(stmt); err != nil {
+		return nil, err
+	}
+	if err := p.parseReturningClause(&stmt.Returning); err != nil {
+		return nil, err
+	}
+	return stmt, nil
+}
+
+// parseReplaceInto parses REPLACE INTO as INSERT OR REPLACE INTO.
+func (p *Parser) parseReplaceInto() (*InsertStmt, error) {
+	stmt := &InsertStmt{OnConflict: OnConflictReplace}
+
+	if !p.match(TK_INTO) {
+		return nil, p.error("expected INTO after REPLACE")
+	}
+	if !p.check(TK_ID) {
+		return nil, p.error("expected table name")
+	}
+	stmt.Table = Unquote(p.advance().Lexeme)
+
 	if p.match(TK_DOT) {
 		if !p.check(TK_ID) {
 			return nil, p.error("expected table name after '.'")
@@ -2294,6 +2338,11 @@ func extractExpressionName(expr Expression) string {
 		return ident.Name
 	}
 
+	// For COLLATE expressions, extract the underlying column name
+	if collate, ok := expr.(*CollateExpr); ok {
+		return extractExpressionName(collate.Expr)
+	}
+
 	// For any other expression, return its string representation
 	return expr.String()
 }
@@ -2700,8 +2749,7 @@ func (p *Parser) parseExplain() (*ExplainStmt, error) {
 func (p *Parser) parseBegin() (*BeginStmt, error) {
 	stmt := &BeginStmt{Mode: TransactionDeferred}
 
-	p.match(TK_TRANSACTION)
-
+	// BEGIN [DEFERRED|IMMEDIATE|EXCLUSIVE] [TRANSACTION]
 	if p.match(TK_DEFERRED) {
 		stmt.Mode = TransactionDeferred
 	} else if p.match(TK_IMMEDIATE) {
@@ -2709,6 +2757,8 @@ func (p *Parser) parseBegin() (*BeginStmt, error) {
 	} else if p.match(TK_EXCLUSIVE) {
 		stmt.Mode = TransactionExclusive
 	}
+
+	p.match(TK_TRANSACTION)
 
 	return stmt, nil
 }
@@ -3435,13 +3485,19 @@ func (p *Parser) parseUnaryExpression() (Expression, error) {
 		return p.parseUnaryExpression()
 	}
 
-	// Handle NOT EXISTS
-	if p.match(TK_NOT) && p.match(TK_EXISTS) {
-		return p.parseExistsExpr(true)
+	// Handle NOT: could be NOT EXISTS or plain NOT <expr>
+	if p.match(TK_NOT) {
+		if p.match(TK_EXISTS) {
+			return p.parseExistsExpr(true)
+		}
+		return p.parseUnaryExprWithOp(OpNot)
 	}
 
-	// Handle other unary operators using map lookup
+	// Handle other unary operators (-, ~)
 	for tok, op := range unaryOperatorMap {
+		if tok == TK_NOT {
+			continue
+		}
 		if p.match(tok) {
 			return p.parseUnaryExprWithOp(op)
 		}

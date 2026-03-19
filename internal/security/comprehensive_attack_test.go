@@ -144,9 +144,6 @@ func TestUnicodeSecurityVectors(t *testing.T) {
 
 // TestConcurrentSecurityValidation tests concurrent access patterns
 func TestConcurrentSecurityValidation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping race condition test in short mode")
-	}
 
 	cfg := DefaultSecurityConfig()
 	cfg.DatabaseRoot = "/tmp/sandbox"
@@ -169,9 +166,6 @@ func TestConcurrentSecurityValidation(t *testing.T) {
 
 // TestDenialOfServiceResistance tests DoS attack resistance
 func TestDenialOfServiceResistance(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping DoS test in short mode")
-	}
 
 	cfg := DefaultSecurityConfig()
 	cfg.DatabaseRoot = "/tmp/sandbox"

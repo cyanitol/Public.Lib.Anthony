@@ -169,7 +169,6 @@ func updateOfColumnTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name: "fires_on_tracked_column",
-			skip: "UPDATE OF column filtering not yet wired to runtime",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER PRIMARY KEY, a TEXT, b TEXT)",
 				"CREATE TABLE audit(id INTEGER PRIMARY KEY, msg TEXT)",
@@ -178,7 +177,6 @@ func updateOfColumnTests() []sqlTestCase {
 				"INSERT INTO t1(a, b) VALUES('x', 'y')",
 				"UPDATE t1 SET a = 'z'",
 			},
-			// UPDATE OF a fires when column a is updated.
 			query:    "SELECT COUNT(*) FROM audit",
 			wantRows: [][]interface{}{{int64(1)}},
 		},

@@ -86,7 +86,6 @@ func TestReleaseStateSharedConnection(t *testing.T) {
 
 // TestCreateConnectionPermissionError tests error paths in createConnection
 func TestCreateConnectionPermissionError(t *testing.T) {
-	t.Skip("pre-existing failure - permission error handling incomplete")
 	tmpDir := t.TempDir()
 
 	// Create a read-only directory to cause permission errors
@@ -764,7 +763,6 @@ func TestMemoryPagerProviderAllocateError(t *testing.T) {
 
 // TestExecContextErrorRollback tests that ExecContext rolls back on error
 func TestExecContextErrorRollback(t *testing.T) {
-	t.Skip("pre-existing failure - exec context error rollback incomplete")
 	drv := &Driver{}
 	conn, err := drv.Open(":memory:")
 	if err != nil {

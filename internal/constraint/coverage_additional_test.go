@@ -70,14 +70,17 @@ func TestCheckConstraint_ValidateWithNoConstraints(t *testing.T) {
 		Columns: []*schema.Column{{Name: "id", Type: "INTEGER"}},
 	}
 
-	validator := NewCheckValidator(table)
+	validator, err := NewCheckValidator(table)
+	if err != nil {
+		t.Fatalf("NewCheckValidator failed: %v", err)
+	}
 
 	if validator.HasCheckConstraints() {
 		t.Error("Expected no CHECK constraints")
 	}
 
 	mock := &mockCodeGenerator{}
-	err := validator.ValidateInsertWithGenerator(mock)
+	err = validator.ValidateInsertWithGenerator(mock)
 	if err != nil {
 		t.Errorf("ValidateInsertWithGenerator should not fail: %v", err)
 	}

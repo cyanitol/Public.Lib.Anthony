@@ -93,8 +93,8 @@ func TestApplyNumericAffinityStringInt(t *testing.T) {
 	t.Parallel()
 	// Lines 303-304: string that parses as int
 	result := applyNumericAffinity("789")
-	if val, ok := result.(float64); !ok || val != 789.0 {
-		t.Errorf("Expected float64(789), got %v", result)
+	if val, ok := result.(int64); !ok || val != 789 {
+		t.Errorf("Expected int64(789), got %v", result)
 	}
 }
 

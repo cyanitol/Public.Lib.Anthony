@@ -214,7 +214,7 @@ func TestCursor_FreeOverflowPages(t *testing.T) {
 		t.Fatalf("SeekRowid() error = %v", err)
 	}
 	if !found {
-		t.Skip("Row with overflow not found (may have failed to insert)")
+		t.Fatal("Row with overflow not found after insert")
 	}
 
 	err = cursor.Delete()

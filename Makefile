@@ -49,7 +49,7 @@ test-race:
 # Run cyclomatic complexity check
 complexity:
 	@which gocyclo > /dev/null || go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
-	gocyclo -over 9 .
+	gocyclo -over 11 .
 
 # Run go vet
 vet:

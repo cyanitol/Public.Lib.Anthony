@@ -1421,7 +1421,10 @@ func TestForeignKey_MismatchErrors(t *testing.T) {
 			CREATE TABLE child(cid INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id))
 		`)
 
-		_, err := db.Query("PRAGMA foreign_key_check")
+		rows, err := db.Query("PRAGMA foreign_key_check")
+		if rows != nil {
+			rows.Close()
+		}
 		if err == nil {
 			t.Error("expected 'foreign key mismatch' error, got nil")
 		} else if !strings.Contains(err.Error(), "foreign key mismatch") {

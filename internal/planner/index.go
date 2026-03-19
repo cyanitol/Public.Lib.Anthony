@@ -227,6 +227,17 @@ func (s *IndexSelector) checkCovering(index *IndexInfo, neededColumns []string) 
 	return true
 }
 
+// indexColumnName returns the index column name for a given table column index.
+// Falls back to "?" if no matching index column is found.
+func indexColumnName(index *IndexInfo, tableColIdx int) string {
+	for _, col := range index.Columns {
+		if col.Index == tableColIdx {
+			return col.Name
+		}
+	}
+	return "?"
+}
+
 // ExplainIndexUsage returns a human-readable explanation of index usage.
 func (usage *IndexUsage) Explain() string {
 	if usage.Index == nil {
@@ -240,17 +251,17 @@ func (usage *IndexUsage) Explain() string {
 	constraints := make([]string, 0)
 
 	for _, term := range usage.EqTerms {
-		col := usage.Index.Columns[term.LeftColumn].Name
+		col := indexColumnName(usage.Index, term.LeftColumn)
 		constraints = append(constraints, fmt.Sprintf("%s=?", col))
 	}
 
 	for _, term := range usage.InTerms {
-		col := usage.Index.Columns[term.LeftColumn].Name
+		col := indexColumnName(usage.Index, term.LeftColumn)
 		constraints = append(constraints, fmt.Sprintf("%s IN (?)", col))
 	}
 
 	for _, term := range usage.RangeTerms {
-		col := usage.Index.Columns[term.LeftColumn].Name
+		col := indexColumnName(usage.Index, term.LeftColumn)
 		op := operatorString(term.Operator)
 		constraints = append(constraints, fmt.Sprintf("%s%s?", col, op))
 	}

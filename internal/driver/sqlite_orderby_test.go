@@ -75,7 +75,6 @@ func queryOrderBy(t *testing.T, db *sql.DB, query string) [][]interface{} {
 // TestSQLiteOrderBySingleColumn tests ORDER BY with a single column
 // Converted from orderby1.test, orderby2.test, and sort.test
 func TestSQLiteOrderBySingleColumn(t *testing.T) {
-	// t.Skip("pre-existing failure - needs ORDER BY fixes")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
@@ -84,7 +83,7 @@ func TestSQLiteOrderBySingleColumn(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "ORDER BY integer ASC",
@@ -145,9 +144,6 @@ func TestSQLiteOrderBySingleColumn(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			// Create a fresh database for each test
 			db := setupOrderByTestDB(t)
@@ -166,7 +162,6 @@ func TestSQLiteOrderBySingleColumn(t *testing.T) {
 // TestSQLiteOrderByMultipleColumns tests ORDER BY with multiple columns
 // Converted from orderby1.test and orderby2.test
 func TestSQLiteOrderByMultipleColumns(t *testing.T) {
-	// t.Skip("pre-existing failure - needs ORDER BY fixes")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
@@ -175,7 +170,7 @@ func TestSQLiteOrderByMultipleColumns(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "ORDER BY two columns ASC",
@@ -251,9 +246,6 @@ func TestSQLiteOrderByMultipleColumns(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -271,7 +263,6 @@ func TestSQLiteOrderByMultipleColumns(t *testing.T) {
 // TestSQLiteOrderByColumnNumber tests ORDER BY with column numbers
 // Converted from orderby4.test and sort.test
 func TestSQLiteOrderByColumnNumber(t *testing.T) {
-	t.Skip("SKIP: ORDER BY column number with JOINs not yet supported")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
@@ -280,7 +271,7 @@ func TestSQLiteOrderByColumnNumber(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "ORDER BY column position 1",
@@ -321,9 +312,6 @@ func TestSQLiteOrderByColumnNumber(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -341,7 +329,6 @@ func TestSQLiteOrderByColumnNumber(t *testing.T) {
 // TestSQLiteOrderByExpression tests ORDER BY with expressions
 // Converted from sort.test
 func TestSQLiteOrderByExpression(t *testing.T) {
-	t.Skip("SKIP: ORDER BY expression (concatenation) not yet supported")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
@@ -350,7 +337,7 @@ func TestSQLiteOrderByExpression(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "ORDER BY substr expression",
@@ -384,9 +371,6 @@ func TestSQLiteOrderByExpression(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -404,7 +388,6 @@ func TestSQLiteOrderByExpression(t *testing.T) {
 // TestSQLiteOrderByWithNulls tests NULL handling in ORDER BY
 // Converted from sort.test
 func TestSQLiteOrderByWithNulls(t *testing.T) {
-	t.Skip("SKIP: ORDER BY NULL handling not yet correct - mixed ASC/DESC with NULLs")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
@@ -413,7 +396,7 @@ func TestSQLiteOrderByWithNulls(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "ORDER BY with NULLs ASC (NULLs first)",
@@ -456,9 +439,6 @@ func TestSQLiteOrderByWithNulls(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -484,7 +464,7 @@ func TestSQLiteOrderByWithLimit(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "ORDER BY with LIMIT",
@@ -519,9 +499,6 @@ func TestSQLiteOrderByWithLimit(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -539,7 +516,6 @@ func TestSQLiteOrderByWithLimit(t *testing.T) {
 // TestSQLiteOrderByJoin tests ORDER BY with JOINs
 // Converted from orderby1.test, orderby2.test, and orderby3.test
 func TestSQLiteOrderByJoin(t *testing.T) {
-	t.Skip("SKIP: ORDER BY with JOIN not yet supported")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
@@ -548,7 +524,7 @@ func TestSQLiteOrderByJoin(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "JOIN with ORDER BY",
@@ -614,9 +590,6 @@ func TestSQLiteOrderByJoin(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -642,7 +615,7 @@ func TestSQLiteOrderByCompoundSelect(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name:  "UNION ALL with ORDER BY",
@@ -675,9 +648,6 @@ func TestSQLiteOrderByCompoundSelect(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -705,7 +675,7 @@ func TestSQLiteOrderByRowid(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "ORDER BY rowid DESC",
@@ -730,9 +700,6 @@ func TestSQLiteOrderByRowid(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -758,7 +725,7 @@ func TestSQLiteOrderByTypeMixing(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "ORDER BY mixed integer storage",
@@ -792,9 +759,6 @@ func TestSQLiteOrderByTypeMixing(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -812,7 +776,6 @@ func TestSQLiteOrderByTypeMixing(t *testing.T) {
 // TestSQLiteOrderByComplexQueries tests complex ORDER BY scenarios
 // Converted from orderby1.test and orderby2.test
 func TestSQLiteOrderByComplexQueries(t *testing.T) {
-	t.Skip("SKIP: ORDER BY with complex queries not yet supported")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
@@ -821,7 +784,7 @@ func TestSQLiteOrderByComplexQueries(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "Nested subquery with ORDER BY",
@@ -880,9 +843,6 @@ func TestSQLiteOrderByComplexQueries(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -900,7 +860,6 @@ func TestSQLiteOrderByComplexQueries(t *testing.T) {
 // TestSQLiteOrderByEdgeCases tests edge cases for ORDER BY
 // Converted from orderby1.test and sort.test
 func TestSQLiteOrderByEdgeCases(t *testing.T) {
-	t.Skip("SKIP: ORDER BY edge cases not yet supported")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
@@ -910,7 +869,6 @@ func TestSQLiteOrderByEdgeCases(t *testing.T) {
 		query   string
 		want    [][]interface{}
 		wantErr bool
-		skip    string
 	}{
 		{
 			name:  "ORDER BY constant value",
@@ -933,7 +891,7 @@ func TestSQLiteOrderByEdgeCases(t *testing.T) {
 				"CREATE TABLE t1(a INTEGER, b INTEGER)",
 			},
 			query: "SELECT a FROM t1 ORDER BY a",
-			want:  [][]interface{}{},
+			want:  nil,
 		},
 		{
 			name:    "Invalid ORDER BY column name",
@@ -955,9 +913,6 @@ func TestSQLiteOrderByEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -967,7 +922,10 @@ func TestSQLiteOrderByEdgeCases(t *testing.T) {
 			}
 
 			if tt.wantErr {
-				_, err := db.Query(tt.query)
+				rows, err := db.Query(tt.query)
+				if rows != nil {
+					rows.Close()
+				}
 				if err == nil {
 					t.Errorf("expected error for query %q, got none", tt.query)
 				}
@@ -993,7 +951,7 @@ func TestSQLiteOrderByCollation(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "Case-sensitive text ordering",
@@ -1027,9 +985,6 @@ func TestSQLiteOrderByCollation(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -1047,7 +1002,6 @@ func TestSQLiteOrderByCollation(t *testing.T) {
 // TestSQLiteOrderByStability tests that ORDER BY is stable
 // Converted from sort.test
 func TestSQLiteOrderByStability(t *testing.T) {
-	t.Skip("Large dataset test - skipped for performance")
 
 	db := setupOrderByTestDB(t)
 	defer db.Close()
@@ -1092,7 +1046,6 @@ func TestSQLiteOrderByStability(t *testing.T) {
 
 // TestSQLiteOrderByASCExplicit tests explicit ASC keyword
 func TestSQLiteOrderByASCExplicit(t *testing.T) {
-	// t.Skip("pre-existing failure - needs ORDER BY fixes")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
@@ -1101,7 +1054,7 @@ func TestSQLiteOrderByASCExplicit(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "Explicit ASC single column",
@@ -1135,9 +1088,6 @@ func TestSQLiteOrderByASCExplicit(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -1155,7 +1105,6 @@ func TestSQLiteOrderByASCExplicit(t *testing.T) {
 // TestSQLiteOrderByJoinUnique tests ORDER BY with unique constraints in joins
 // Converted from sort.test
 func TestSQLiteOrderByJoinUnique(t *testing.T) {
-	t.Skip("SKIP: ORDER BY with JOIN not yet supported")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
@@ -1164,7 +1113,7 @@ func TestSQLiteOrderByJoinUnique(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "Join with unique constraint - order matters",
@@ -1193,9 +1142,6 @@ func TestSQLiteOrderByJoinUnique(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -1260,11 +1206,6 @@ func orderByBenchmarkVerify(t *testing.T, rows [][]interface{}) {
 
 // TestSQLiteOrderByBenchmark provides a simple benchmark-style test
 func TestSQLiteOrderByBenchmark(t *testing.T) {
-	t.Skip("SKIP: ORDER BY benchmark has panic issues")
-	if testing.Short() {
-		t.Skip("skipping benchmark test in short mode")
-	}
-
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
@@ -1276,7 +1217,6 @@ func TestSQLiteOrderByBenchmark(t *testing.T) {
 // TestSQLiteOrderByPrimaryKey tests ORDER BY with multi-column primary keys
 // Converted from orderby4.test
 func TestSQLiteOrderByPrimaryKey(t *testing.T) {
-	t.Skip("SKIP: ORDER BY with primary key/JOINs not yet supported")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
@@ -1285,7 +1225,7 @@ func TestSQLiteOrderByPrimaryKey(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "Multi-column primary key ORDER BY",
@@ -1340,9 +1280,6 @@ func TestSQLiteOrderByPrimaryKey(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()
@@ -1360,7 +1297,6 @@ func TestSQLiteOrderByPrimaryKey(t *testing.T) {
 // TestSQLiteOrderByWithIndex tests ORDER BY using indexes
 // Converted from orderby4.test
 func TestSQLiteOrderByWithIndex(t *testing.T) {
-	t.Skip("SKIP: ORDER BY with index/JOINs not yet supported")
 	db := setupOrderByTestDB(t)
 	defer db.Close()
 
@@ -1369,7 +1305,7 @@ func TestSQLiteOrderByWithIndex(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-		skip  string
+
 	}{
 		{
 			name: "Single column index ORDER BY",
@@ -1430,9 +1366,6 @@ func TestSQLiteOrderByWithIndex(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 
 			db := setupOrderByTestDB(t)
 			defer db.Close()

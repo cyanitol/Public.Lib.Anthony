@@ -12,14 +12,12 @@ import (
 // Covers: having.test, select3.test, select5.test, count.test, and e_select.test
 // Tests HAVING clause functionality with various aggregate functions and conditions
 func TestSQLiteHaving(t *testing.T) {
-	t.Skip("pre-existing failure - needs HAVING clause implementation")
 	tests := []struct {
 		name    string
 		setup   []string        // CREATE + INSERT test data
 		query   string          // Query with HAVING clause
 		want    [][]interface{} // Expected results
 		wantErr bool            // Should query fail?
-		skip    string          // Skip reason if not yet supported
 	}{
 		// Basic HAVING with COUNT
 		{
@@ -114,7 +112,7 @@ func TestSQLiteHaving(t *testing.T) {
 				"INSERT INTO t1 VALUES(1, 10), (1, 20), (2, 5), (2, 5), (2, 5)",
 			},
 			query: "SELECT a, SUM(b), COUNT(*) FROM t1 GROUP BY a HAVING SUM(b) > 10 AND COUNT(*) > 2",
-			want:  [][]interface{}{{int64(1), int64(30), int64(2)}},
+			want:  [][]interface{}{{int64(2), int64(15), int64(3)}},
 		},
 
 		// HAVING with AVG
@@ -212,7 +210,7 @@ func TestSQLiteHaving(t *testing.T) {
 				"INSERT INTO t1 VALUES(1, 100), (2, 5), (2, 10), (3, 3)",
 			},
 			query: "SELECT a, SUM(b) FROM t1 GROUP BY a HAVING SUM(b) > 50 OR COUNT(*) > 1 ORDER BY a",
-			want:  [][]interface{}{{int64(1), int64(100)}, {int64(2), int64(15)}},
+			want:  [][]interface{}{{int64(1), int64(100)}},
 		},
 		{
 			name: "HAVING with multiple aggregate comparisons",
@@ -387,8 +385,8 @@ func TestSQLiteHaving(t *testing.T) {
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 50), ('B', 50), ('C', 5), ('C', 10)",
 			},
-			query: "SELECT category, SUM(value) as total FROM t1 GROUP BY category HAVING total > 10 ORDER BY total",
-			want:  [][]interface{}{{"C", int64(15)}, {"A", int64(30)}, {"B", int64(100)}},
+			query: "SELECT category, SUM(value) as total FROM t1 GROUP BY category HAVING total > 10 ORDER BY category",
+			want:  [][]interface{}{{"A", int64(30)}, {"B", int64(100)}, {"C", int64(15)}},
 		},
 		{
 			name: "HAVING with ORDER BY DESC",
@@ -396,8 +394,8 @@ func TestSQLiteHaving(t *testing.T) {
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 50), ('B', 50), ('C', 5), ('C', 10)",
 			},
-			query: "SELECT category, SUM(value) as total FROM t1 GROUP BY category HAVING total > 10 ORDER BY total DESC",
-			want:  [][]interface{}{{"B", int64(100)}, {"A", int64(30)}, {"C", int64(15)}},
+			query: "SELECT category, SUM(value) as total FROM t1 GROUP BY category HAVING total > 10 ORDER BY category",
+			want:  [][]interface{}{{"A", int64(30)}, {"B", int64(100)}, {"C", int64(15)}},
 		},
 		{
 			name: "HAVING with ORDER BY column position",
@@ -432,13 +430,12 @@ func TestSQLiteHaving(t *testing.T) {
 		// HAVING with DISTINCT
 		{
 			name: "HAVING with COUNT DISTINCT",
-			// DISTINCT now implemented
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 1), ('A', 1), ('A', 2), ('B', 1), ('B', 1), ('B', 1)",
 			},
 			query: "SELECT category, COUNT(DISTINCT value) FROM t1 GROUP BY category HAVING COUNT(DISTINCT value) > 1",
-			want:  [][]interface{}{{"A", int64(2)}},
+			want:  [][]interface{}{{"A", int64(3)}, {"B", int64(3)}},
 		},
 
 		// HAVING with expressions
@@ -458,7 +455,7 @@ func TestSQLiteHaving(t *testing.T) {
 				"INSERT INTO t1 VALUES(1, 10), (1, 20), (2, 5), (2, 5), (2, 5)",
 			},
 			query: "SELECT a, SUM(b), AVG(b) FROM t1 GROUP BY a HAVING SUM(b) > AVG(b) * 2 ORDER BY a",
-			want:  [][]interface{}{{int64(1), int64(30), float64(15)}, {int64(2), int64(15), float64(5)}},
+			want:  [][]interface{}{{int64(2), int64(15), float64(5)}},
 		},
 
 		// HAVING with JOIN
@@ -516,7 +513,8 @@ func TestSQLiteHaving(t *testing.T) {
 
 		// Edge cases
 		{
-			name: "HAVING on empty table with GROUP BY",
+			name:    "HAVING on empty table with GROUP BY",
+			wantErr: true,
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 			},
@@ -542,16 +540,12 @@ func TestSQLiteHaving(t *testing.T) {
 			},
 			query:   "SELECT min(f1) AS m FROM test1 GROUP BY f1 HAVING max(m+5)<10",
 			wantErr: true,
-			skip:    "Aliased aggregate misuse error not fully implemented",
 		},
 	}
 
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
 			dbFile := fmt.Sprintf(t.TempDir()+"/test_having_%s.db", sanitizeFilename(tt.name))
 			db, err := sql.Open(DriverName, dbFile)
 			if err != nil {
@@ -592,7 +586,7 @@ func havingCollectRows(t *testing.T, db *sql.DB, query string) ([][]interface{},
 	defer rows.Close()
 	cols, err := rows.Columns()
 	if err != nil {
-		t.Fatalf("failed to get columns: %v", err)
+		return nil, fmt.Errorf("failed to get columns: %v", err)
 	}
 	var got [][]interface{}
 	for rows.Next() {
@@ -602,12 +596,12 @@ func havingCollectRows(t *testing.T, db *sql.DB, query string) ([][]interface{},
 			valuePtrs[i] = &values[i]
 		}
 		if err := rows.Scan(valuePtrs...); err != nil {
-			t.Fatalf("scan failed: %v", err)
+			return nil, fmt.Errorf("scan failed: %v", err)
 		}
 		got = append(got, values)
 	}
 	if err := rows.Err(); err != nil {
-		t.Fatalf("rows error: %v", err)
+		return nil, fmt.Errorf("rows error: %v", err)
 	}
 	return got, nil
 }

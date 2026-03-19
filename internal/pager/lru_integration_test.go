@@ -121,9 +121,6 @@ func lruVerifyStats(t *testing.T, cache *LRUCache, maxPages int) {
 // TestPagerWithLRUCache_LargeWorkload tests LRU cache with many pages
 func TestPagerWithLRUCache_LargeWorkload(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping slow test in short mode")
-	}
 
 	tmpFile := "/tmp/test_lru_large.db"
 	defer os.Remove(tmpFile)

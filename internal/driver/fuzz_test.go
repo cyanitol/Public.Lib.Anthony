@@ -136,7 +136,6 @@ func FuzzSQL(f *testing.F) {
 	f.Fuzz(func(t *testing.T, sqlStr string) {
 		// Skip extremely long inputs to prevent timeout
 		if len(sqlStr) > 100000 {
-			t.Skip("input too long")
 		}
 
 		// Create in-memory database connection
@@ -197,7 +196,6 @@ func FuzzPreparedStatement(f *testing.F) {
 	f.Fuzz(func(t *testing.T, sqlStr string, param string) {
 		// Skip extremely long inputs
 		if len(sqlStr) > 10000 || len(param) > 10000 {
-			t.Skip("input too long")
 		}
 
 		// Create in-memory database
@@ -258,7 +256,6 @@ func FuzzTransaction(f *testing.F) {
 	f.Fuzz(func(t *testing.T, sqlStr string) {
 		// Skip extremely long inputs
 		if len(sqlStr) > 10000 {
-			t.Skip("input too long")
 		}
 
 		// Create in-memory database
@@ -299,7 +296,6 @@ func FuzzConcurrentAccess(f *testing.F) {
 	f.Fuzz(func(t *testing.T, sqlStr string) {
 		// Skip extremely long inputs
 		if len(sqlStr) > 1000 {
-			t.Skip("input too long")
 		}
 
 		// Create in-memory database

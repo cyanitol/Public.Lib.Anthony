@@ -471,7 +471,6 @@ func printfCompareInt64(t *testing.T, result interface{}, expected int64) {
 // TestPrintfWithTable tests printf() with table data
 // Based on printf2-2.1 from the TCL tests
 func TestPrintfWithTable(t *testing.T) {
-	t.Skip("pre-existing failure - needs printf with table")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "printf_table_test.db")
 
@@ -542,7 +541,6 @@ func printfTableCheck(t *testing.T, db *sql.DB, expr string, want []string) {
 
 // TestPrintfNullHandling tests how printf handles NULL values
 func TestPrintfNullHandling(t *testing.T) {
-	t.Skip("pre-existing failure - needs printf NULL handling")
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "printf_null_test.db")
 

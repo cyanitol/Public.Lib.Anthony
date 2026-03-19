@@ -1,3 +1,5 @@
+//go:build !windows
+
 // SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
 package pager
 
@@ -6,7 +8,6 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -592,9 +593,6 @@ func TestMemoryPagerWritePageError(t *testing.T) {
 // TestLockUnixAcquirePendingLockError tests pending lock error cases (50% coverage)
 func TestLockUnixAcquirePendingLockError(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix-specific test")
-	}
 
 	dbFile := filepath.Join(t.TempDir(), "test_pending_error.db")
 

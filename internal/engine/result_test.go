@@ -320,44 +320,153 @@ func TestScanIntoUnsupportedType(t *testing.T) {
 
 // TestTxCommit tests transaction commit
 func TestTxCommit(t *testing.T) {
-	// Skip - requires full transaction support
-	t.Skip("Requires full transaction support")
+	tmpDir := t.TempDir()
+	db, err := Open(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Failed to begin transaction: %v", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Errorf("Commit() returned error: %v", err)
+	}
+
+	if !tx.done {
+		t.Error("Commit() should set done to true")
+	}
 }
 
 // TestTxCommitAlreadyDone tests committing an already finished transaction
 func TestTxCommitAlreadyDone(t *testing.T) {
-	// Skip - requires full transaction support
-	t.Skip("Requires full transaction support")
+	tmpDir := t.TempDir()
+	db, err := Open(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Failed to begin transaction: %v", err)
+	}
+
+	tx.Commit()
+	err = tx.Commit()
+	if err == nil {
+		t.Error("Second Commit() should return error")
+	}
 }
 
 // TestTxRollback tests transaction rollback
 func TestTxRollback(t *testing.T) {
-	// Skip - requires full transaction support
-	t.Skip("Requires full transaction support")
+	tmpDir := t.TempDir()
+	db, err := Open(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Failed to begin transaction: %v", err)
+	}
+
+	if err := tx.Rollback(); err != nil {
+		t.Errorf("Rollback() returned error: %v", err)
+	}
+
+	if !tx.done {
+		t.Error("Rollback() should set done to true")
+	}
 }
 
 // TestTxRollbackAlreadyDone tests rolling back an already finished transaction
 func TestTxRollbackAlreadyDone(t *testing.T) {
-	// Skip - requires full transaction support
-	t.Skip("Requires full transaction support")
+	tmpDir := t.TempDir()
+	db, err := Open(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Failed to begin transaction: %v", err)
+	}
+
+	tx.Rollback()
+	err = tx.Rollback()
+	if err == nil {
+		t.Error("Second Rollback() should return error")
+	}
 }
 
 // TestTxExecuteWhenDone tests executing on finished transaction
 func TestTxExecuteWhenDone(t *testing.T) {
-	// Skip - requires full transaction support
-	t.Skip("Requires full transaction support")
+	tmpDir := t.TempDir()
+	db, err := Open(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Failed to begin transaction: %v", err)
+	}
+
+	tx.Commit()
+	_, err = tx.Execute("SELECT 1")
+	if err == nil {
+		t.Error("Execute() on finished transaction should return error")
+	}
 }
 
 // TestTxQueryWhenDone tests querying on finished transaction
 func TestTxQueryWhenDone(t *testing.T) {
-	// Skip - requires full transaction support
-	t.Skip("Requires full transaction support")
+	tmpDir := t.TempDir()
+	db, err := Open(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Failed to begin transaction: %v", err)
+	}
+
+	tx.Commit()
+	_, err = tx.Query("SELECT 1")
+	if err == nil {
+		t.Error("Query() on finished transaction should return error")
+	}
 }
 
 // TestTxExecWhenDone tests exec on finished transaction
 func TestTxExecWhenDone(t *testing.T) {
-	// Skip - requires full transaction support
-	t.Skip("Requires full transaction support")
+	tmpDir := t.TempDir()
+	db, err := Open(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Failed to begin transaction: %v", err)
+	}
+
+	tx.Commit()
+	_, err = tx.Exec("SELECT 1")
+	if err == nil {
+		t.Error("Exec() on finished transaction should return error")
+	}
 }
 
 // TestPreparedStmtClose tests closing a prepared statement
