@@ -531,17 +531,4 @@ func (ws *WindowState) GetNthValue(colIdx int, n int) *Mem {
 	return result
 }
 
-// Helper functions
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
+// min and max are provided by Go 1.21+ builtins.
