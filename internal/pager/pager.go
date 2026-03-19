@@ -1359,3 +1359,24 @@ func (p *Pager) autoCheckpointWAL() {
 		_ = p.wal.Checkpoint()
 	}
 }
+
+// SetUserVersion sets the user version in the database header and persists it.
+func (p *Pager) SetUserVersion(version uint32) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.header.UserVersion = version
+	return p.updateDatabaseHeader()
+}
+
+// SetSchemaCookie sets the schema cookie in the database header and persists it.
+func (p *Pager) SetSchemaCookie(cookie uint32) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.header.SchemaCookie = cookie
+	return p.updateDatabaseHeader()
+}
+
+// VerifyFreeList checks the integrity of the free list.
+func (p *Pager) VerifyFreeList() error {
+	return p.freeList.Verify()
+}

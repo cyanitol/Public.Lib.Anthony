@@ -47,7 +47,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 |---------|--------|-------|
 | CREATE TABLE | :white_check_mark: | Including constraints |
 | CREATE TABLE AS | :white_check_mark: | |
-| CREATE INDEX | :white_check_mark: | Including UNIQUE indexes |
+| CREATE INDEX | :white_check_mark: | Including UNIQUE, partial (WHERE), and expression indexes |
 | CREATE VIEW | :white_check_mark: | |
 | CREATE TRIGGER | :white_check_mark: | Runtime execution complete - BEFORE/AFTER x INSERT/UPDATE/DELETE all working |
 | CREATE VIRTUAL TABLE | :white_check_mark: | SQL parsing complete, FTS5/R-Tree modules ready |
@@ -76,7 +76,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | DETACH DATABASE | :white_check_mark: | Fully implemented |
 | ANALYZE | :white_check_mark: | sqlite_stat1 table creation, row counts, index selectivity stats |
 | REINDEX | :white_check_mark: | Parser complete, basic execution |
-| VACUUM | :white_check_mark: | All tests passing (page rebuilds, indexes, schema cookie, views) |
+| VACUUM | :white_check_mark: | All tests passing (page rebuilds, indexes, schema cookie, views, incremental) |
 | EXPLAIN | :white_check_mark: | Basic output format |
 | EXPLAIN QUERY PLAN | :white_check_mark: | SCAN/SEARCH/USE TEMP B-TREE nodes, index usage, subquery plans |
 
@@ -221,6 +221,8 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | unicode | :white_check_mark: |
 | like | :white_check_mark: |
 | glob | :white_check_mark: |
+| unhex | :white_check_mark: |
+| soundex | :white_check_mark: |
 
 ### Math Functions
 
@@ -230,6 +232,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | round | :white_check_mark: |
 | trunc | :white_check_mark: |
 | random | :white_check_mark: |
+| randomblob | :white_check_mark: |
 | max | :white_check_mark: |
 | min | :white_check_mark: |
 | sign | :white_check_mark: |
@@ -238,7 +241,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | sqrt | :white_check_mark: |
 | power/pow | :white_check_mark: |
 | exp | :white_check_mark: |
-| ln/log | :white_check_mark: |
+| ln/log | :white_check_mark: | Including two-argument log(B,X) |
 | log10 | :white_check_mark: |
 | log2 | :white_check_mark: |
 | mod | :white_check_mark: |
@@ -260,6 +263,9 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | julianday | :white_check_mark: | |
 | unixepoch | :white_check_mark: | |
 | strftime | :white_check_mark: | All format specifiers including %w, %u, %W, %j |
+| current_date | :white_check_mark: | |
+| current_time | :white_check_mark: | |
+| current_timestamp | :white_check_mark: | |
 
 ### JSON Functions
 
@@ -278,6 +284,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | json_quote | :white_check_mark: |
 | json_each | :white_check_mark: |
 | json_tree | :white_check_mark: |
+| json_array_length | :white_check_mark: |
 | json_group_array | :white_check_mark: |
 | json_group_object | :white_check_mark: |
 
@@ -303,6 +310,10 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | likelihood | :white_check_mark: |
 | likely | :white_check_mark: |
 | unlikely | :white_check_mark: |
+| last_insert_rowid | :white_check_mark: |
+| changes | :white_check_mark: |
+| total_changes | :white_check_mark: |
+| sqlite_version | :white_check_mark: |
 
 ---
 
@@ -342,22 +353,27 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 
 ## PRAGMA Statements
 
-| PRAGMA | Status |
-|--------|--------|
-| table_info | :white_check_mark: |
-| index_list | :white_check_mark: |
-| index_info | :white_check_mark: |
-| foreign_key_list | :white_check_mark: |
-| database_list | :white_check_mark: |
-| compile_options | :white_check_mark: |
-| journal_mode | :white_check_mark: |
-| synchronous | :white_check_mark: |
-| cache_size | :white_check_mark: |
-| page_size | :white_check_mark: |
-| user_version | :white_check_mark: |
-| schema_version | :white_check_mark: |
-| integrity_check | :white_check_mark: |
-| quick_check | :white_check_mark: |
+| PRAGMA | Status | Notes |
+|--------|--------|-------|
+| table_info | :white_check_mark: | |
+| index_list | :white_check_mark: | Including partial flag |
+| index_info | :white_check_mark: | seqno, cid, name |
+| foreign_keys | :white_check_mark: | GET/SET |
+| foreign_key_list | :white_check_mark: | |
+| foreign_key_check | :white_check_mark: | Per-table and whole-database |
+| database_list | :white_check_mark: | |
+| compile_options | :white_check_mark: | |
+| journal_mode | :white_check_mark: | GET/SET |
+| synchronous | :white_check_mark: | GET/SET (OFF/NORMAL/FULL/EXTRA) |
+| cache_size | :white_check_mark: | GET/SET |
+| page_size | :white_check_mark: | GET (SET before DB creation only) |
+| page_count | :white_check_mark: | |
+| user_version | :white_check_mark: | GET/SET |
+| schema_version | :white_check_mark: | GET/SET |
+| auto_vacuum | :white_check_mark: | GET/SET (NONE/FULL/INCREMENTAL) |
+| incremental_vacuum | :white_check_mark: | PRAGMA incremental_vacuum(N) |
+| integrity_check | :white_check_mark: | Free list verification |
+| quick_check | :white_check_mark: | Alias for integrity_check |
 
 ---
 
@@ -430,20 +446,21 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 - ATTACH/DETACH DATABASE with cross-database queries
 - ANALYZE with sqlite_stat1 statistics
 - EXPLAIN QUERY PLAN (SCAN/SEARCH/JOIN nodes, index usage)
+- Partial indexes (CREATE INDEX ... WHERE) with planner integration
+- Expression indexes (CREATE INDEX ... (expr))
+- Incremental vacuum (PRAGMA auto_vacuum=INCREMENTAL, PRAGMA incremental_vacuum(N))
+- All 19 PRAGMAs fully implemented (GET/SET)
+- Connection state functions (last_insert_rowid, changes, total_changes, sqlite_version)
 - Custom collations (global + per-connection registration)
 - WAL mode (write path, all checkpoint modes, recovery)
 - Online backup API with progress callbacks
 - Memory and file databases
 - Pager reference counting and cache eviction under pressure
-- 1,257 Trinity (DO-178C trace) tests at 100% parity
-- 17,443 total tests, 0 skipped, 0 failures
 - Race detector clean across all packages
 - Cyclomatic complexity ≤11 for all functions
 
-### Known Gaps
-- Partial indexes (CREATE INDEX ... WHERE)
-- Expression indexes
-- Incremental vacuum (auto_vacuum=INCREMENTAL)
+### Intentional Exclusions
+- Loadable extensions (.so/.dll) - not possible in pure Go without CGO
 
 ---
 

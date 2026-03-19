@@ -42,6 +42,15 @@ type PagerWriter interface {
 
 	// Vacuum compacts and rebuilds the database
 	Vacuum(opts *VacuumOptions) error
+
+	// SetUserVersion sets the user version in the database header
+	SetUserVersion(version uint32) error
+
+	// SetSchemaCookie sets the schema cookie in the database header
+	SetSchemaCookie(cookie uint32) error
+
+	// VerifyFreeList checks the integrity of the free list
+	VerifyFreeList() error
 }
 
 // PagerTransaction defines transaction control operations.

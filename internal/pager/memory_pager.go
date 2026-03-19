@@ -735,3 +735,26 @@ func (mp *MemoryPager) findSavepoint(name string) int {
 	}
 	return -1
 }
+
+// SetUserVersion sets the user version in the database header.
+func (mp *MemoryPager) SetUserVersion(version uint32) error {
+	mp.mu.Lock()
+	defer mp.mu.Unlock()
+	mp.header.UserVersion = version
+	mp.updateDatabaseHeader()
+	return nil
+}
+
+// SetSchemaCookie sets the schema cookie in the database header.
+func (mp *MemoryPager) SetSchemaCookie(cookie uint32) error {
+	mp.mu.Lock()
+	defer mp.mu.Unlock()
+	mp.header.SchemaCookie = cookie
+	mp.updateDatabaseHeader()
+	return nil
+}
+
+// VerifyFreeList checks the integrity of the free list.
+func (mp *MemoryPager) VerifyFreeList() error {
+	return mp.freeList.Verify()
+}

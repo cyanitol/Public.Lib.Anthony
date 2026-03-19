@@ -105,6 +105,17 @@ type VDBEContext struct {
 
 	// Trigger support
 	TriggerCompiler interface{} // Callback for compiling trigger body statements
+
+	// Connection-level state for built-in functions (last_insert_rowid, changes, total_changes)
+	ConnState ConnStateProvider
+}
+
+// ConnStateProvider supplies connection-level state to VDBE functions
+// like last_insert_rowid(), changes(), and total_changes().
+type ConnStateProvider interface {
+	LastInsertRowID() int64
+	Changes() int64
+	TotalChanges() int64
 }
 
 // TriggerRowData holds OLD and NEW pseudo-table row data for trigger execution.

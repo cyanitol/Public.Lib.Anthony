@@ -442,5 +442,8 @@ func DefaultRegistry() *Registry {
 	// Register pattern matching functions (LIKE, GLOB)
 	RegisterPatternFunctions(r)
 
+	// Register SQLite compatibility functions (sqlite_version, soundex)
+	RegisterSQLiteCompatFunctions(r)
+
 	return r
 }

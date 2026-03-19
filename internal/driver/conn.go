@@ -46,6 +46,8 @@ type Conn struct {
 	foreignKeysEnabled bool
 	journalMode        string
 	cacheSize          int64 // PRAGMA cache_size: positive=pages, negative=KiB
+	autoVacuumMode     int   // 0=none, 1=full, 2=incremental
+	synchronousMode    int   // 0=OFF, 1=NORMAL, 2=FULL (default), 3=EXTRA
 
 	// Security configuration
 	securityConfig *security.SecurityConfig
@@ -56,6 +58,31 @@ type Conn struct {
 
 	// Foreign key constraint manager
 	fkManager *constraint.ForeignKeyManager
+
+	// Connection-level change tracking for built-in functions
+	lastInsertRowID int64 // Tracks last INSERT rowid across statements
+	lastChanges     int64 // Tracks changes from last DML statement
+	totalChanges    int64 // Tracks total changes since connection opened
+}
+
+// LastInsertRowID implements vdbe.ConnStateProvider.
+func (c *Conn) LastInsertRowID() int64 { return c.lastInsertRowID }
+
+// Changes implements vdbe.ConnStateProvider.
+func (c *Conn) Changes() int64 { return c.lastChanges }
+
+// TotalChanges implements vdbe.ConnStateProvider.
+func (c *Conn) TotalChanges() int64 { return c.totalChanges }
+
+// updateChangeTracking updates connection-level change tracking after a DML execution.
+func (c *Conn) updateChangeTracking(vm *vdbe.VDBE) {
+	if vm.NumChanges > 0 || vm.LastInsertID > 0 {
+		c.lastChanges = vm.NumChanges
+		c.totalChanges += vm.NumChanges
+		if vm.LastInsertID > 0 {
+			c.lastInsertRowID = vm.LastInsertID
+		}
+	}
 }
 
 // Prepare prepares a SQL statement.
@@ -434,6 +461,10 @@ func (c *Conn) openDatabase(schemaLoaded bool) error {
 
 	if c.cacheSize == 0 {
 		c.cacheSize = -2000
+	}
+
+	if c.synchronousMode == 0 {
+		c.synchronousMode = 2 // FULL
 	}
 
 	return nil
@@ -816,6 +847,7 @@ func (r *ConnRowReader) newRowReader() *vdbe.VDBERowReader {
 			Pager:              r.conn.pager,
 			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
 			FKManager:          r.conn.fkManager,
+			ConnState:          r.conn,
 		},
 		Cursors: make([]*vdbe.Cursor, 10),
 	}

@@ -482,6 +482,156 @@ func (p *Pager) allocateLocked() (*DbPage, error) {
 	return page, nil
 }
 
+// GetAutoVacuumMode returns the current auto_vacuum mode from the database header.
+// Returns 0 (none), 1 (full), or 2 (incremental).
+func (p *Pager) GetAutoVacuumMode() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if p.header == nil || p.header.LargestRootPage == 0 {
+		return 0 // none
+	}
+	if p.header.IncrementalVacuum != 0 {
+		return 2 // incremental
+	}
+	return 1 // full
+}
+
+// SetAutoVacuumMode sets the auto_vacuum mode by updating header fields.
+// Mode 0=none, 1=full, 2=incremental.
+func (p *Pager) SetAutoVacuumMode(mode int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.readOnly {
+		return ErrReadOnly
+	}
+
+	if err := p.applyAutoVacuumHeader(mode); err != nil {
+		return err
+	}
+
+	return p.writeHeaderToPage1()
+}
+
+// applyAutoVacuumHeader updates the header fields for the given auto_vacuum mode.
+func (p *Pager) applyAutoVacuumHeader(mode int) error {
+	switch mode {
+	case 0: // none
+		p.header.LargestRootPage = 0
+		p.header.IncrementalVacuum = 0
+	case 1: // full
+		p.header.LargestRootPage = 1
+		p.header.IncrementalVacuum = 0
+	case 2: // incremental
+		p.header.LargestRootPage = 1
+		p.header.IncrementalVacuum = 1
+	default:
+		return fmt.Errorf("invalid auto_vacuum mode: %d", mode)
+	}
+	return nil
+}
+
+// writeHeaderToPage1 serializes the header and writes it to page 1.
+func (p *Pager) writeHeaderToPage1() error {
+	if err := p.ensureWriteTransaction(); err != nil {
+		return err
+	}
+
+	page1, err := p.getLocked(1)
+	if err != nil {
+		return fmt.Errorf("failed to get page 1: %w", err)
+	}
+	defer p.Put(page1)
+
+	if err := p.writeLocked(page1); err != nil {
+		return fmt.Errorf("failed to mark page 1 dirty: %w", err)
+	}
+
+	headerData := p.header.Serialize()
+	copy(page1.Data[:DatabaseHeaderSize], headerData)
+	return nil
+}
+
+// IncrementalVacuum frees up to nPages pages from the freelist by removing
+// pages from the end of the database file. If nPages is 0, all free pages
+// at the end of the file are removed.
+func (p *Pager) IncrementalVacuum(nPages int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.readOnly {
+		return ErrReadOnly
+	}
+
+	if p.header.LargestRootPage == 0 || p.header.IncrementalVacuum == 0 {
+		return nil // not in incremental vacuum mode
+	}
+
+	if err := p.ensureWriteTransaction(); err != nil {
+		return err
+	}
+
+	freed := p.freeTrailingPages(nPages)
+	if freed > 0 {
+		return p.updateHeaderAfterVacuum()
+	}
+	return nil
+}
+
+// freeTrailingPages removes free pages from the end of the database file.
+// Returns the number of pages freed.
+func (p *Pager) freeTrailingPages(nPages int) int {
+	freeSet := p.buildFreeSet()
+	freed := 0
+	limit := nPages
+	if limit <= 0 {
+		limit = int(p.dbSize) // free all trailing free pages
+	}
+
+	for freed < limit && p.dbSize > 1 {
+		if !freeSet[p.dbSize] {
+			break // last page is not free
+		}
+		delete(freeSet, p.dbSize)
+		p.dbSize--
+		freed++
+	}
+	return freed
+}
+
+// buildFreeSet builds a set of all free page numbers.
+func (p *Pager) buildFreeSet() map[Pgno]bool {
+	freeSet := make(map[Pgno]bool)
+	if p.freeList == nil {
+		return freeSet
+	}
+	_ = p.freeList.Iterate(func(pgno Pgno) bool {
+		freeSet[pgno] = true
+		return true
+	})
+	return freeSet
+}
+
+// updateHeaderAfterVacuum updates the database header after incremental vacuum.
+func (p *Pager) updateHeaderAfterVacuum() error {
+	p.header.DatabaseSize = uint32(p.dbSize)
+
+	// Recalculate freelist count based on new dbSize
+	freeCount := uint32(0)
+	if p.freeList != nil {
+		_ = p.freeList.Iterate(func(pgno Pgno) bool {
+			if pgno <= p.dbSize {
+				freeCount++
+			}
+			return true
+		})
+	}
+	p.header.FreelistCount = freeCount
+
+	return p.writeHeaderToPage1()
+}
+
 // copyFile copies a file from src to dst.
 func copyFile(src, dst string) error {
 	sourceFile, err := os.Open(src)

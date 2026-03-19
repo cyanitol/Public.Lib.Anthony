@@ -81,10 +81,33 @@ func (b *WhereLoopBuilder) addFullScan() {
 
 // addIndexScans adds WhereLoop objects for all possible ways to use an index.
 func (b *WhereLoopBuilder) addIndexScans(index *IndexInfo) {
+	// Skip partial indexes whose WHERE clause is not implied by the query
+	if index.Partial && !b.partialIndexUsable(index) {
+		return
+	}
+
 	// Try using increasing numbers of index columns
 	for nCol := 1; nCol <= len(index.Columns); nCol++ {
 		b.addIndexScanWithColumns(index, nCol)
 	}
+}
+
+// partialIndexUsable checks whether a partial index can be used with the
+// current query. A partial index is usable when the query's WHERE clause
+// implies the index's WHERE clause. As a practical heuristic, we check
+// whether any query WHERE term references a column that appears in the
+// index's WHERE clause text. If no query terms reference this table at all,
+// the partial index cannot be relied upon.
+func (b *WhereLoopBuilder) partialIndexUsable(index *IndexInfo) bool {
+	if index.WhereClause == "" {
+		return false
+	}
+	for _, term := range b.Terms {
+		if term.LeftCursor == b.Cursor {
+			return true
+		}
+	}
+	return false
 }
 
 type termConstraints struct {

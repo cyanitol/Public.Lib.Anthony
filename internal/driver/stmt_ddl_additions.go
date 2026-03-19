@@ -286,13 +286,20 @@ func (s *Stmt) compilePragma(vm *vdbe.VDBE, stmt *parser.PragmaStmt, args []driv
 	vm.AllocMemory(10)
 
 	dispatch := map[string]pragmaCompiler{
-		"table_info":        s.compilePragmaTableInfo,
-		"foreign_keys":      s.compilePragmaForeignKeys,
-		"foreign_key_check": s.compilePragmaForeignKeyCheck,
-		"foreign_key_list":  s.compilePragmaForeignKeyList,
-		"journal_mode":      s.compilePragmaJournalMode,
-		"index_list":        s.compilePragmaIndexList,
-		"cache_size":        s.compilePragmaCacheSize,
+		"table_info":         s.compilePragmaTableInfo,
+		"foreign_keys":       s.compilePragmaForeignKeys,
+		"foreign_key_check":  s.compilePragmaForeignKeyCheck,
+		"foreign_key_list":   s.compilePragmaForeignKeyList,
+		"journal_mode":       s.compilePragmaJournalMode,
+		"index_list":         s.compilePragmaIndexList,
+		"index_info":         s.compilePragmaIndexInfo,
+		"cache_size":         s.compilePragmaCacheSize,
+		"auto_vacuum":        s.compilePragmaAutoVacuum,
+		"incremental_vacuum": s.compilePragmaIncrementalVacuum,
+		"page_size":          s.compilePragmaPageSize,
+		"user_version":       s.compilePragmaUserVersion,
+		"schema_version":     s.compilePragmaSchemaVersion,
+		"synchronous":        s.compilePragmaSynchronous,
 	}
 
 	pragmaName := strings.ToLower(stmt.Name)
@@ -307,6 +314,12 @@ func (s *Stmt) compilePragma(vm *vdbe.VDBE, stmt *parser.PragmaStmt, args []driv
 		return s.compilePragmaPageCount(vm)
 	case "database_list":
 		return s.compilePragmaDatabaseList(vm)
+	case "compile_options":
+		return s.compilePragmaCompileOptions(vm)
+	case "integrity_check":
+		return s.compilePragmaIntegrityCheck(vm)
+	case "quick_check":
+		return s.compilePragmaIntegrityCheck(vm)
 	default:
 		vm.AddOp(vdbe.OpInit, 0, 0, 0)
 		vm.AddOp(vdbe.OpHalt, 0, 0, 0)
@@ -1334,6 +1347,337 @@ func (s *Stmt) compilePragmaIndexList(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*
 
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	return vm, nil
+}
+
+// compilePragmaAutoVacuum compiles PRAGMA auto_vacuum or PRAGMA auto_vacuum = value.
+func (s *Stmt) compilePragmaAutoVacuum(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	if stmt.Value != nil {
+		return s.compilePragmaAutoVacuumSet(vm, stmt)
+	}
+	return s.compilePragmaAutoVacuumGet(vm)
+}
+
+// compilePragmaAutoVacuumGet returns the current auto_vacuum mode.
+func (s *Stmt) compilePragmaAutoVacuumGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"auto_vacuum"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	mode := s.getAutoVacuumMode()
+	vm.AddOpWithP4Int(vdbe.OpInteger, mode, 1, 0, int32(mode))
+	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// getAutoVacuumMode returns the current auto_vacuum mode from the pager or connection.
+func (s *Stmt) getAutoVacuumMode() int {
+	if concretePager, ok := s.conn.pager.(*pager.Pager); ok {
+		return concretePager.GetAutoVacuumMode()
+	}
+	return s.conn.autoVacuumMode
+}
+
+// compilePragmaAutoVacuumSet sets the auto_vacuum mode.
+func (s *Stmt) compilePragmaAutoVacuumSet(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+
+	mode, err := parseAutoVacuumValue(stmt.Value)
+	if err != nil {
+		return nil, err
+	}
+
+	s.conn.autoVacuumMode = mode
+
+	if concretePager, ok := s.conn.pager.(*pager.Pager); ok {
+		if err := concretePager.SetAutoVacuumMode(mode); err != nil {
+			return nil, fmt.Errorf("failed to set auto_vacuum mode: %w", err)
+		}
+	}
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// parseAutoVacuumValue parses a PRAGMA auto_vacuum value to an integer mode.
+func parseAutoVacuumValue(value parser.Expression) (int, error) {
+	valueStr := strings.ToUpper(extractPragmaValueString(value))
+	modeMap := map[string]int{
+		"NONE": 0, "0": 0, "OFF": 0,
+		"FULL": 1, "1": 1, "ON": 1,
+		"INCREMENTAL": 2, "2": 2,
+	}
+	mode, ok := modeMap[valueStr]
+	if !ok {
+		return 0, fmt.Errorf("invalid value for PRAGMA auto_vacuum: %s", valueStr)
+	}
+	return mode, nil
+}
+
+// compilePragmaIncrementalVacuum compiles PRAGMA incremental_vacuum(N).
+func (s *Stmt) compilePragmaIncrementalVacuum(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+
+	nPages := 0
+	if stmt.Value != nil {
+		valueStr := extractPragmaValueString(stmt.Value)
+		if _, err := fmt.Sscanf(valueStr, "%d", &nPages); err != nil {
+			return nil, fmt.Errorf("invalid value for PRAGMA incremental_vacuum: %s", valueStr)
+		}
+	}
+
+	if concretePager, ok := s.conn.pager.(*pager.Pager); ok {
+		if err := concretePager.IncrementalVacuum(nPages); err != nil {
+			return nil, fmt.Errorf("incremental_vacuum failed: %w", err)
+		}
+	}
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaCompileOptions returns a list of compile-time options.
+func (s *Stmt) compilePragmaCompileOptions(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"compile_options"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	options := []string{
+		"THREADSAFE=1",
+		"ENABLE_FTS5",
+		"ENABLE_RTREE",
+		"ENABLE_JSON1",
+		"OMIT_LOAD_EXTENSION",
+	}
+	for _, opt := range options {
+		vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, opt)
+		vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	}
+
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaIndexInfo compiles PRAGMA index_info(indexname).
+func (s *Stmt) compilePragmaIndexInfo(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	indexName := extractOptionalTableName(stmt)
+	if indexName == "" {
+		return nil, fmt.Errorf("PRAGMA index_info requires an index name")
+	}
+
+	index, exists := s.conn.schema.GetIndex(indexName)
+	if !exists {
+		return nil, fmt.Errorf("index not found: %s", indexName)
+	}
+
+	vm.ResultCols = []string{"seqno", "cid", "name"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	table, _ := s.conn.schema.GetTable(index.Table)
+	for i, colName := range index.Columns {
+		emitIndexInfoRow(vm, i, colName, table)
+	}
+
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// emitIndexInfoRow emits a single row for PRAGMA index_info.
+func emitIndexInfoRow(vm *vdbe.VDBE, seqno int, colName string, table *schema.Table) {
+	vm.AddOpWithP4Int(vdbe.OpInteger, seqno, 1, 0, int32(seqno))
+
+	cid := findColumnIndex(table, colName)
+	vm.AddOpWithP4Int(vdbe.OpInteger, cid, 2, 0, int32(cid))
+
+	vm.AddOpWithP4Str(vdbe.OpString, 0, 3, 0, colName)
+	vm.AddOp(vdbe.OpResultRow, 1, 3, 0)
+}
+
+// findColumnIndex returns the column index in the table, or -1 if not found.
+func findColumnIndex(table *schema.Table, colName string) int {
+	if table == nil {
+		return -1
+	}
+	for i, col := range table.Columns {
+		if strings.EqualFold(col.Name, colName) {
+			return i
+		}
+	}
+	return -1
+}
+
+// compilePragmaPageSize compiles PRAGMA page_size or PRAGMA page_size = value.
+func (s *Stmt) compilePragmaPageSize(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	if stmt.Value != nil {
+		// SET is a no-op at runtime (page size must be set before database creation)
+		vm.AddOp(vdbe.OpInit, 0, 0, 0)
+		vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+		return vm, nil
+	}
+	return s.compilePragmaPageSizeGet(vm)
+}
+
+// compilePragmaPageSizeGet returns the current page size.
+func (s *Stmt) compilePragmaPageSizeGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"page_size"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	pageSize := int64(s.conn.pager.PageSize())
+	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 1, 0, pageSize)
+	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaUserVersion compiles PRAGMA user_version or PRAGMA user_version = value.
+func (s *Stmt) compilePragmaUserVersion(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	if stmt.Value != nil {
+		return s.compilePragmaUserVersionSet(vm, stmt)
+	}
+	return s.compilePragmaUserVersionGet(vm)
+}
+
+// compilePragmaUserVersionGet returns the current user_version.
+func (s *Stmt) compilePragmaUserVersionGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"user_version"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	header := s.conn.pager.GetHeader()
+	version := int64(header.UserVersion)
+	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 1, 0, version)
+	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaUserVersionSet sets the user_version.
+func (s *Stmt) compilePragmaUserVersionSet(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+
+	valueStr := extractPragmaValueString(stmt.Value)
+	var val int64
+	if _, err := fmt.Sscanf(valueStr, "%d", &val); err != nil {
+		return nil, fmt.Errorf("invalid value for PRAGMA user_version: %s", valueStr)
+	}
+
+	if err := s.conn.pager.SetUserVersion(uint32(val)); err != nil {
+		return nil, fmt.Errorf("failed to set user_version: %w", err)
+	}
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaSchemaVersion compiles PRAGMA schema_version or PRAGMA schema_version = value.
+func (s *Stmt) compilePragmaSchemaVersion(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	if stmt.Value != nil {
+		return s.compilePragmaSchemaVersionSet(vm, stmt)
+	}
+	return s.compilePragmaSchemaVersionGet(vm)
+}
+
+// compilePragmaSchemaVersionGet returns the current schema_version (SchemaCookie).
+func (s *Stmt) compilePragmaSchemaVersionGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"schema_version"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	header := s.conn.pager.GetHeader()
+	version := int64(header.SchemaCookie)
+	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 1, 0, version)
+	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaSchemaVersionSet sets the schema_version (SchemaCookie).
+func (s *Stmt) compilePragmaSchemaVersionSet(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+
+	valueStr := extractPragmaValueString(stmt.Value)
+	var val int64
+	if _, err := fmt.Sscanf(valueStr, "%d", &val); err != nil {
+		return nil, fmt.Errorf("invalid value for PRAGMA schema_version: %s", valueStr)
+	}
+
+	if err := s.conn.pager.SetSchemaCookie(uint32(val)); err != nil {
+		return nil, fmt.Errorf("failed to set schema_version: %w", err)
+	}
+
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaIntegrityCheck runs basic integrity checks on the database.
+func (s *Stmt) compilePragmaIntegrityCheck(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"integrity_check"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	result := s.runIntegrityCheck()
+	vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, result)
+	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// runIntegrityCheck performs basic integrity checks and returns a result string.
+func (s *Stmt) runIntegrityCheck() string {
+	if err := s.conn.pager.VerifyFreeList(); err != nil {
+		return fmt.Sprintf("*** free list corruption: %v", err)
+	}
+	return "ok"
+}
+
+// compilePragmaSynchronous compiles PRAGMA synchronous or PRAGMA synchronous = value.
+func (s *Stmt) compilePragmaSynchronous(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	if stmt.Value != nil {
+		return s.compilePragmaSynchronousSet(vm, stmt)
+	}
+	return s.compilePragmaSynchronousGet(vm)
+}
+
+// compilePragmaSynchronousGet returns the current synchronous mode.
+func (s *Stmt) compilePragmaSynchronousGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{"synchronous"}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	mode := s.conn.synchronousMode
+	vm.AddOpWithP4Int(vdbe.OpInteger, mode, 1, 0, int32(mode))
+	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// compilePragmaSynchronousSet sets the synchronous mode.
+func (s *Stmt) compilePragmaSynchronousSet(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(false)
+
+	mode, err := parseSynchronousValue(stmt.Value)
+	if err != nil {
+		return nil, err
+	}
+
+	s.conn.synchronousMode = mode
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// parseSynchronousValue parses a PRAGMA synchronous value to an integer mode.
+func parseSynchronousValue(value parser.Expression) (int, error) {
+	valueStr := strings.ToUpper(extractPragmaValueString(value))
+	modeMap := map[string]int{
+		"OFF": 0, "0": 0,
+		"NORMAL": 1, "1": 1,
+		"FULL": 2, "2": 2,
+		"EXTRA": 3, "3": 3,
+	}
+	mode, ok := modeMap[valueStr]
+	if !ok {
+		return 0, fmt.Errorf("invalid value for PRAGMA synchronous: %s", valueStr)
+	}
+	return mode, nil
 }
 
 // simpleRowReader is a minimal RowReader implementation for foreign_key_check.

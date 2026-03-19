@@ -27,7 +27,7 @@ func RegisterMathFunctions(r *Registry) {
 	r.Register(NewScalarFunc("pow", 2, powerFunc))
 	r.Register(NewScalarFunc("exp", 1, expFunc))
 	r.Register(NewScalarFunc("ln", 1, lnFunc))
-	r.Register(NewScalarFunc("log", 1, lnFunc)) // SQLite compatibility
+	r.Register(NewScalarFunc("log", -1, logVariadicFunc)) // 1 or 2 args
 	r.Register(NewScalarFunc("log10", 1, log10Func))
 	r.Register(NewScalarFunc("log2", 1, log2Func))
 

@@ -62,6 +62,7 @@ var SafePragmas = map[string]bool{
 	"temp_store":          true,
 	"busy_timeout":        true,
 	"auto_vacuum":         true,
+	"incremental_vacuum":  true,
 	"secure_delete":       true,
 	"wal_checkpoint":      true,
 	"wal_autocheckpoint":  true,

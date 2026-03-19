@@ -4,6 +4,7 @@ package vdbe
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
 )
@@ -136,6 +137,11 @@ func (v *VDBE) opFunction(p1, p2, p3, p4, p5 int) error {
 		return err
 	}
 
+	// Handle connection-state functions that need VDBE/connection access
+	if result, ok := v.handleConnStateFunc(funcName); ok {
+		return v.storeResult(p3, result)
+	}
+
 	args, err := v.collectFunctionArgs(p2, p5)
 	if err != nil {
 		return err
@@ -151,6 +157,45 @@ func (v *VDBE) opFunction(p1, p2, p3, p4, p5 int) error {
 	}
 
 	return v.storeResult(p3, result)
+}
+
+// handleConnStateFunc handles built-in functions that require connection state.
+// Returns the result and true if handled, or nil and false if not a special function.
+func (v *VDBE) handleConnStateFunc(name string) (*Mem, bool) {
+	switch strings.ToLower(name) {
+	case "last_insert_rowid":
+		return v.connStateFuncLastInsertRowID(), true
+	case "changes":
+		return v.connStateFuncChanges(), true
+	case "total_changes":
+		return v.connStateFuncTotalChanges(), true
+	default:
+		return nil, false
+	}
+}
+
+// connStateFuncLastInsertRowID returns the last insert rowid from connection state or VDBE.
+func (v *VDBE) connStateFuncLastInsertRowID() *Mem {
+	if v.Ctx != nil && v.Ctx.ConnState != nil {
+		return NewMemInt(v.Ctx.ConnState.LastInsertRowID())
+	}
+	return NewMemInt(v.LastInsertID)
+}
+
+// connStateFuncChanges returns the number of changes from connection state or VDBE.
+func (v *VDBE) connStateFuncChanges() *Mem {
+	if v.Ctx != nil && v.Ctx.ConnState != nil {
+		return NewMemInt(v.Ctx.ConnState.Changes())
+	}
+	return NewMemInt(v.NumChanges)
+}
+
+// connStateFuncTotalChanges returns the total changes from connection state.
+func (v *VDBE) connStateFuncTotalChanges() *Mem {
+	if v.Ctx != nil && v.Ctx.ConnState != nil {
+		return NewMemInt(v.Ctx.ConnState.TotalChanges())
+	}
+	return NewMemInt(0)
 }
 
 // validateFunctionP4 validates and extracts function name from P4.

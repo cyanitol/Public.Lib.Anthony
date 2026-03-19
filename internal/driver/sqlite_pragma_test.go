@@ -36,12 +36,12 @@ func TestSQLitePragma(t *testing.T) {
 		{
 			name:     "pragma_synchronous_query",
 			query:    "PRAGMA synchronous",
-			wantRows: 0,
+			wantRows: 1,
 		},
 		{
 			name:     "pragma_page_size_query",
 			query:    "PRAGMA page_size",
-			wantRows: 0,
+			wantRows: 1,
 		},
 		{
 			name:     "pragma_page_count",
@@ -111,14 +111,14 @@ func TestSQLitePragma(t *testing.T) {
 				"CREATE INDEX i1 ON t1(a, b)",
 			},
 			query:    "PRAGMA index_info(i1)",
-			wantRows: 0,
+			wantRows: 2,
 		},
 
 		// Database settings
 		{
 			name:     "pragma_auto_vacuum_query",
 			query:    "PRAGMA auto_vacuum",
-			wantRows: 0,
+			wantRows: 1,
 		},
 		{
 			name:     "pragma_encoding",
@@ -128,12 +128,12 @@ func TestSQLitePragma(t *testing.T) {
 		{
 			name:     "pragma_schema_version",
 			query:    "PRAGMA schema_version",
-			wantRows: 0,
+			wantRows: 1,
 		},
 		{
 			name:     "pragma_user_version",
 			query:    "PRAGMA user_version",
-			wantRows: 0,
+			wantRows: 1,
 		},
 		{
 			name:     "pragma_application_id",
@@ -187,7 +187,7 @@ func TestSQLitePragma(t *testing.T) {
 				"INSERT INTO t1 VALUES(1, 2, 3)",
 			},
 			query:    "PRAGMA integrity_check",
-			wantRows: 0,
+			wantRows: 1,
 		},
 		{
 			name: "pragma_quick_check",
@@ -196,7 +196,7 @@ func TestSQLitePragma(t *testing.T) {
 				"INSERT INTO t1 VALUES(1, 2, 3)",
 			},
 			query:    "PRAGMA quick_check",
-			wantRows: 0,
+			wantRows: 1,
 		},
 
 		// Freelist (pragma2.test:1.*)
@@ -511,8 +511,8 @@ func TestPragmaSchemaQueries(t *testing.T) {
 	})
 
 	t.Run("index_info", func(t *testing.T) {
-		if c := pragmaCountRows(t, db, "PRAGMA index_info(idx_users_name)"); c != 0 {
-			t.Errorf("expected 0 rows from index_info, got %d", c)
+		if c := pragmaCountRows(t, db, "PRAGMA index_info(idx_users_name)"); c != 1 {
+			t.Errorf("expected 1 row from index_info, got %d", c)
 		}
 	})
 }

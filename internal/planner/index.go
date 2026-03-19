@@ -113,13 +113,55 @@ func (s *IndexSelector) findUsableTermsForIndex(index *IndexInfo) []*WhereTerm {
 
 // termMatchesColumn checks if a WHERE term can use a specific index column.
 func (s *IndexSelector) termMatchesColumn(term *WhereTerm, col IndexColumn) bool {
-	// Term must reference this column
-	if term.LeftColumn != col.Index {
+	// Must be a usable operator
+	if !isUsableOperator(term.Operator) {
 		return false
 	}
 
-	// Must be a usable operator
-	return isUsableOperator(term.Operator)
+	// For expression indexes, match by comparing expression text
+	if col.Expression != "" {
+		return termMatchesExpression(term, col.Expression)
+	}
+
+	// For simple column indexes, match by column index
+	return term.LeftColumn == col.Index
+}
+
+// termMatchesExpression checks if a WHERE term's left-hand side matches
+// an index expression by comparing normalized text representations.
+func termMatchesExpression(term *WhereTerm, exprText string) bool {
+	if term.Expr == nil {
+		return false
+	}
+
+	termExprText := extractLeftExprText(term.Expr)
+	if termExprText == "" {
+		return false
+	}
+
+	return normalizeExpr(termExprText) == normalizeExpr(exprText)
+}
+
+// extractLeftExprText extracts the text of the left-hand side of a binary expression.
+func extractLeftExprText(expr Expr) string {
+	binExpr, ok := expr.(*BinaryExpr)
+	if !ok {
+		return ""
+	}
+	if binExpr.Left == nil {
+		return ""
+	}
+	return binExpr.Left.String()
+}
+
+// normalizeExpr normalizes an expression string for comparison by
+// converting to uppercase and removing whitespace.
+func normalizeExpr(s string) string {
+	s = strings.ToUpper(s)
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, "\t", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	return s
 }
 
 // AnalyzeIndexUsage analyzes how an index would be used for given terms.

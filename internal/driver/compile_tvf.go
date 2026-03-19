@@ -762,8 +762,9 @@ func (s *Stmt) readAllTableRows(table *schema.Table) ([][]interface{}, error) {
 	readVM.Program[0].P2 = 1
 
 	readVM.Ctx = &vdbe.VDBEContext{
-		Btree:  s.conn.btree,
-		Schema: s.conn.schema,
+		Btree:     s.conn.btree,
+		Schema:    s.conn.schema,
+		ConnState: s.conn,
 	}
 
 	return s.collectRows(readVM, numCols, "outer table read")

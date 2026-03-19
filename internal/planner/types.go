@@ -236,6 +236,12 @@ type IndexInfo struct {
 	// ColumnStats[i] is the estimated distinct values for the
 	// first i+1 columns of the index
 	ColumnStats []LogEst
+
+	// Partial indicates this is a partial index with a WHERE clause
+	Partial bool
+
+	// WhereClause is the text of the WHERE clause for partial indexes
+	WhereClause string
 }
 
 // IndexColumn describes a single column in an index.
@@ -251,6 +257,9 @@ type IndexColumn struct {
 
 	// Collation is the collation sequence name (e.g., "BINARY", "NOCASE")
 	Collation string
+
+	// Expression is the expression text for expression indexes (empty for simple columns)
+	Expression string
 }
 
 // WherePath represents a complete or partial query plan.

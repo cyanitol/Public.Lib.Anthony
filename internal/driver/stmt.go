@@ -237,6 +237,7 @@ func (s *Stmt) autoCommitIfNeeded(inTx bool) error {
 
 // buildResult creates a Result from the VDBE execution
 func (s *Stmt) buildResult(vm *vdbe.VDBE) *Result {
+	s.conn.updateChangeTracking(vm)
 	return &Result{
 		lastInsertID: vm.LastInsertID,
 		rowsAffected: vm.NumChanges,
@@ -368,6 +369,7 @@ func (s *Stmt) setVdbeContextForDatabase(vm *vdbe.VDBE, db *schema.Database) {
 		FKManager:          interface{}(s.conn.fkManager),
 		ForeignKeysEnabled: s.conn.foreignKeysEnabled,
 		TriggerCompiler:    NewTriggerRuntime(s.conn),
+		ConnState:          s.conn,
 	}
 }
 

@@ -149,6 +149,9 @@ func (m *MultiStmt) execSingleStmt(ctx context.Context, stmt *Stmt, args []drive
 
 	// Don't auto-commit here - we'll commit after all statements
 
+	// Update connection-level change tracking
+	m.conn.updateChangeTracking(vm)
+
 	// Return result
 	return &Result{
 		lastInsertID: vm.LastInsertID,
