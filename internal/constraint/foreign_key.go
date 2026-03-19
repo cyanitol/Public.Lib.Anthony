@@ -425,10 +425,7 @@ func (m *ForeignKeyManager) handleDeleteConstraint(
 	rowDeleter RowDeleter,
 	rowUpdater RowUpdater,
 ) error {
-	refCols := fk.RefColumns
-	if len(refCols) == 0 {
-		refCols = table.PrimaryKey
-	}
+	refCols := resolveRefColumns(fk, table)
 
 	keyValues := extractKeyValues(values, refCols)
 
@@ -841,6 +838,14 @@ func tryParseNumeric(s string, fallback interface{}) interface{} {
 	return fallback
 }
 
+// resolveRefColumns returns the referenced columns, defaulting to the table's primary key.
+func resolveRefColumns(fk *ForeignKeyConstraint, refTable *schema.Table) []string {
+	if len(fk.RefColumns) > 0 {
+		return fk.RefColumns
+	}
+	return refTable.PrimaryKey
+}
+
 // extractKeyValues extracts values from the given map based on column names.
 func extractKeyValues(values map[string]interface{}, columns []string) []interface{} {
 	result := make([]interface{}, len(columns))
@@ -1007,10 +1012,7 @@ func (m *ForeignKeyManager) validateReference(
 	}
 
 	// Determine referenced columns (PRIMARY KEY if not specified)
-	refCols := fk.RefColumns
-	if len(refCols) == 0 {
-		refCols = refTable.PrimaryKey
-	}
+	refCols := resolveRefColumns(fk, refTable)
 
 	if len(refCols) != len(values) {
 		return fmt.Errorf("foreign key column count mismatch")
@@ -1076,10 +1078,7 @@ func (m *ForeignKeyManager) handleUpdateConstraint(
 	rowReader RowReader,
 	rowUpdater RowUpdater,
 ) error {
-	refCols := fk.RefColumns
-	if len(refCols) == 0 {
-		refCols = table.PrimaryKey
-	}
+	refCols := resolveRefColumns(fk, table)
 
 	if !columnsChanged(refCols, oldValues, newValues) {
 		return nil
@@ -1417,10 +1416,7 @@ func (m *ForeignKeyManager) validateFKSchema(fk *ForeignKeyConstraint, fkid int,
 	}
 
 	// Determine referenced columns (PRIMARY KEY if not specified)
-	refCols := fk.RefColumns
-	if len(refCols) == 0 {
-		refCols = refTable.PrimaryKey
-	}
+	refCols := resolveRefColumns(fk, refTable)
 
 	// Check column count mismatch (parent exists but wrong column count)
 	if len(fk.Columns) != len(refCols) {
@@ -1474,10 +1470,7 @@ func (m *ForeignKeyManager) ValidateFKAtCreateTime(tableName string, schemaObj i
 		}
 
 		// Determine referenced columns
-		refCols := fk.RefColumns
-		if len(refCols) == 0 {
-			refCols = refTable.PrimaryKey
-		}
+		refCols := resolveRefColumns(fk, refTable)
 
 		// Check column count mismatch
 		if len(fk.Columns) != len(refCols) {
@@ -1586,10 +1579,7 @@ func (m *ForeignKeyManager) checkConstraintViolations(
 		return m.scanMissingParentViolations(fk, fkid, reader)
 	}
 
-	refCols := fk.RefColumns
-	if len(refCols) == 0 {
-		refCols = refTable.PrimaryKey
-	}
+	refCols := resolveRefColumns(fk, refTable)
 
 	// Schema mismatches should be caught by CheckSchemaMismatch before calling FindViolations
 	// If we get here with a schema mismatch, just skip scanning (no violations to find)
@@ -1693,7 +1683,11 @@ func (m *ForeignKeyManager) checkRowForViolation(
 		return nil, nil
 	}
 
-	if isViolation(fk, fkValues, refCols, reader) {
+	violated, err := isViolation(fk, fkValues, refCols, reader)
+	if err != nil {
+		return nil, err
+	}
+	if violated {
 		return &ForeignKeyViolation{
 			Table:  fk.Table,
 			Rowid:  rowid,
@@ -1706,17 +1700,18 @@ func (m *ForeignKeyManager) checkRowForViolation(
 }
 
 // isViolation checks if FK values violate the constraint.
+// Returns true if violated, false if not, and any error encountered.
 func isViolation(
 	fk *ForeignKeyConstraint,
 	fkValues []interface{},
 	refCols []string,
 	reader RowReader,
-) bool {
+) (bool, error) {
 	exists, err := reader.RowExists(fk.RefTable, refCols, fkValues)
 	if err != nil {
-		return true
+		return false, fmt.Errorf("failed to check FK reference in %s: %w", fk.RefTable, err)
 	}
-	return !exists
+	return !exists, nil
 }
 
 // extractCollations extracts collation names for the given columns from a table.
@@ -1730,13 +1725,23 @@ func extractCollations(table *schema.Table, columns []string) []string {
 			collations[i] = "BINARY"
 			continue
 		}
-		if col.Collation == "" {
-			collations[i] = "BINARY"
-		} else {
-			collations[i] = col.Collation
-		}
+		collations[i] = validatedCollation(col.Collation)
 	}
 	return collations
+}
+
+// validatedCollation returns the collation if it's a known valid name, otherwise "BINARY".
+func validatedCollation(collation string) string {
+	if collation == "" {
+		return "BINARY"
+	}
+	upper := strings.ToUpper(collation)
+	switch upper {
+	case "BINARY", "NOCASE", "RTRIM":
+		return upper
+	default:
+		return "BINARY"
+	}
 }
 
 // Note: Affinity conversion functions have been removed as they are currently

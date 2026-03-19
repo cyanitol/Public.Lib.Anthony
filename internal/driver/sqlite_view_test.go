@@ -592,13 +592,13 @@ func TestSQLiteView(t *testing.T) {
 		},
 		// View from view2.test with CTE (view2-1.1)
 		{
-			name:    "view2-1.1 view with CTE",
-			wantErr: true, // parser does not support CTE in subquery within view definition
+			name: "view2-1.1 view with CTE",
 			setup: []string{
 				"CREATE TABLE t1(x, y)",
 				"INSERT INTO t1 VALUES(1, 2)",
+				"CREATE VIEW v1 AS SELECT * FROM (WITH x1 AS (SELECT y, x FROM t1) SELECT * FROM x1)",
 			},
-			query: "CREATE VIEW v1 AS SELECT * FROM (WITH x1 AS (SELECT y, x FROM t1) SELECT * FROM x1)",
+			query: "SELECT * FROM v1",
 			wantRows: [][]interface{}{
 				{int64(2), int64(1)},
 			},

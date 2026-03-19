@@ -440,8 +440,9 @@ func (l *Lexer) consumeExponentSign() {
 	}
 }
 
-// readString reads a string literal enclosed in single quotes.
-func (l *Lexer) readString(quote byte) Token {
+// readQuotedToken reads a quoted token (string literal or identifier) enclosed
+// in the given quote character, returning a token of the specified type.
+func (l *Lexer) readQuotedToken(quote byte, tokType TokenType) Token {
 	startPos := l.pos
 	startLine := l.line
 	startCol := l.col
@@ -468,7 +469,7 @@ func (l *Lexer) readString(quote byte) Token {
 	}
 
 	return Token{
-		Type:   TK_STRING,
+		Type:   tokType,
 		Lexeme: l.input[startPos:l.pos],
 		Pos:    startPos,
 		Line:   startLine,
@@ -476,39 +477,14 @@ func (l *Lexer) readString(quote byte) Token {
 	}
 }
 
+// readString reads a string literal enclosed in single quotes.
+func (l *Lexer) readString(quote byte) Token {
+	return l.readQuotedToken(quote, TK_STRING)
+}
+
 // readQuotedIdentifier reads a quoted identifier (double-quoted or backticked).
 func (l *Lexer) readQuotedIdentifier(quote byte) Token {
-	startPos := l.pos
-	startLine := l.line
-	startCol := l.col
-
-	l.readChar() // consume opening quote
-
-	for l.ch != 0 {
-		if l.ch == quote {
-			if l.peekChar() == quote {
-				l.readChar() // consume first quote
-				l.readChar() // consume second quote (escaped)
-			} else {
-				l.readChar() // consume closing quote
-				break
-			}
-		} else {
-			if l.ch == '\n' {
-				l.line++
-				l.col = 0
-			}
-			l.readChar()
-		}
-	}
-
-	return Token{
-		Type:   TK_ID,
-		Lexeme: l.input[startPos:l.pos],
-		Pos:    startPos,
-		Line:   startLine,
-		Col:    startCol,
-	}
+	return l.readQuotedToken(quote, TK_ID)
 }
 
 // readBracketedIdentifier reads a bracketed identifier [...].
@@ -852,7 +828,7 @@ func TokenizeAll(input string) ([]Token, error) {
 
 // isMatchingQuote checks if a string starts and ends with the same quote character.
 func isMatchingQuote(s string, quote byte) bool {
-	return s[0] == quote && s[len(s)-1] == quote
+	return len(s) >= 2 && s[0] == quote && s[len(s)-1] == quote
 }
 
 // unquoteStandard removes standard quotes (', ", `) and unescapes doubled quotes.

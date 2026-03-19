@@ -774,103 +774,74 @@ func (dt *DateTime) getUnixEpoch() float64 {
 
 // Date/time function implementations
 
-func dateFunc(args []Value) (Value, error) {
+// parseDateTimeWithModifiers parses a date/time value from args and applies
+// any modifier arguments (args[1:]).  Returns (nil, nil) on parse or modifier
+// failure so the caller can return NULL per SQLite convention.
+func parseDateTimeWithModifiers(args []Value) (*DateTime, error) {
 	if len(args) == 0 {
 		dt := &DateTime{}
 		dt.setNow()
-		return NewTextValue(dt.formatDate()), nil
+		return dt, nil
 	}
 
 	dt, err := parseDateTime(args[0])
 	if err != nil {
-		return NewNullValue(), nil
+		return nil, nil
 	}
 
-	// Apply modifiers
 	for i := 1; i < len(args); i++ {
 		if args[i].IsNull() {
-			return NewNullValue(), nil
+			return nil, nil
 		}
 		if err := dt.applyModifier(args[i].AsString()); err != nil {
-			return NewNullValue(), nil
+			return nil, nil
 		}
 	}
 
+	return dt, nil
+}
+
+func dateFunc(args []Value) (Value, error) {
+	dt, err := parseDateTimeWithModifiers(args)
+	if dt == nil {
+		if err != nil {
+			return nil, err
+		}
+		return NewNullValue(), nil
+	}
 	return NewTextValue(dt.formatDate()), nil
 }
 
 func timeFunc(args []Value) (Value, error) {
-	if len(args) == 0 {
-		dt := &DateTime{}
-		dt.setNow()
-		return NewTextValue(dt.formatTime()), nil
-	}
-
-	dt, err := parseDateTime(args[0])
-	if err != nil {
+	dt, err := parseDateTimeWithModifiers(args)
+	if dt == nil {
+		if err != nil {
+			return nil, err
+		}
 		return NewNullValue(), nil
 	}
-
-	// Apply modifiers
-	for i := 1; i < len(args); i++ {
-		if args[i].IsNull() {
-			return NewNullValue(), nil
-		}
-		if err := dt.applyModifier(args[i].AsString()); err != nil {
-			return NewNullValue(), nil
-		}
-	}
-
 	return NewTextValue(dt.formatTime()), nil
 }
 
 func datetimeFunc(args []Value) (Value, error) {
-	if len(args) == 0 {
-		dt := &DateTime{}
-		dt.setNow()
-		return NewTextValue(dt.formatDateTime()), nil
-	}
-
-	dt, err := parseDateTime(args[0])
-	if err != nil {
+	dt, err := parseDateTimeWithModifiers(args)
+	if dt == nil {
+		if err != nil {
+			return nil, err
+		}
 		return NewNullValue(), nil
 	}
-
-	// Apply modifiers
-	for i := 1; i < len(args); i++ {
-		if args[i].IsNull() {
-			return NewNullValue(), nil
-		}
-		if err := dt.applyModifier(args[i].AsString()); err != nil {
-			return NewNullValue(), nil
-		}
-	}
-
 	return NewTextValue(dt.formatDateTime()), nil
 }
 
 func juliandayFunc(args []Value) (Value, error) {
-	if len(args) == 0 {
-		dt := &DateTime{}
-		dt.setNow()
-		return NewFloatValue(dt.getJulianDay()), nil
-	}
-
-	dt, err := parseDateTime(args[0])
-	if err != nil {
+	dt, err := parseDateTimeWithModifiers(args)
+	if dt == nil {
+		if err != nil {
+			return nil, err
+		}
 		return NewNullValue(), nil
 	}
-
-	// Apply modifiers
-	for i := 1; i < len(args); i++ {
-		if args[i].IsNull() {
-			return NewNullValue(), nil
-		}
-		if err := dt.applyModifier(args[i].AsString()); err != nil {
-			return NewNullValue(), nil
-		}
-	}
-
 	return NewFloatValue(dt.getJulianDay()), nil
 }
 
@@ -1097,4 +1068,3 @@ func daysInMonth(year, month int) int {
 		return 31
 	}
 }
-

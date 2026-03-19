@@ -102,17 +102,9 @@ func (bt *Btree) validatePageSize(data []byte) error {
 }
 
 // validatePageTypeForBtree checks if the page type is valid for btree validation.
+// Reuses the package-level validPageTypes map defined in page.go.
 func validatePageTypeForBtree(pageType byte) error {
-	validTypes := map[byte]bool{
-		PageTypeLeafTable:       true,
-		PageTypeInteriorTable:   true,
-		PageTypeLeafIndex:       true,
-		PageTypeInteriorIndex:   true,
-		PageTypeLeafTableNoInt:  true,
-		PageTypeInteriorTableNo: true,
-	}
-
-	if !validTypes[pageType] {
+	if !validPageTypes[pageType] {
 		return fmt.Errorf("%w: 0x%02x", ErrInvalidPageType, pageType)
 	}
 	return nil
@@ -139,6 +131,24 @@ func validatePageStructure(header *PageHeader, data []byte) error {
 	}
 
 	return nil
+}
+
+// initEmptyPageHeader zeroes the B-tree page header fields and sets the page type.
+// This consolidates the repeated header-init pattern used by CreateTable,
+// CreateWithoutRowidTable, and ClearTableData.
+func initEmptyPageHeader(pageData []byte, pageNum uint32, pageType byte) {
+	headerOffset := 0
+	if pageNum == 1 {
+		headerOffset = FileHeaderSize
+	}
+	pageData[headerOffset+PageHeaderOffsetType] = pageType
+	pageData[headerOffset+PageHeaderOffsetFreeblock] = 0
+	pageData[headerOffset+PageHeaderOffsetFreeblock+1] = 0
+	pageData[headerOffset+PageHeaderOffsetNumCells] = 0
+	pageData[headerOffset+PageHeaderOffsetNumCells+1] = 0
+	pageData[headerOffset+PageHeaderOffsetCellStart] = 0
+	pageData[headerOffset+PageHeaderOffsetCellStart+1] = 0
+	pageData[headerOffset+PageHeaderOffsetFragmented] = 0
 }
 
 // GetPage retrieves a page from the B-tree
@@ -328,32 +338,8 @@ func (bt *Btree) CreateTable() (rootPage uint32, err error) {
 		return 0, fmt.Errorf("failed to get allocated page: %w", err)
 	}
 
-	// Page 1 has a 100-byte database file header, so the page header starts at offset 100
-	// For all other pages, the page header starts at offset 0
-	headerOffset := 0
-	if rootPage == 1 {
-		headerOffset = FileHeaderSize
-	}
-
 	// Initialize the page as an empty leaf table page
-	// Set page type to leaf table (0x0D)
-	pageData[headerOffset+PageHeaderOffsetType] = PageTypeLeafTable
-
-	// Initialize header fields
-	// FirstFreeblock = 0 (2 bytes)
-	pageData[headerOffset+PageHeaderOffsetFreeblock] = 0
-	pageData[headerOffset+PageHeaderOffsetFreeblock+1] = 0
-
-	// NumCells = 0 (2 bytes)
-	pageData[headerOffset+PageHeaderOffsetNumCells] = 0
-	pageData[headerOffset+PageHeaderOffsetNumCells+1] = 0
-
-	// CellContentStart = 0 (2 bytes, 0 means end of page)
-	pageData[headerOffset+PageHeaderOffsetCellStart] = 0
-	pageData[headerOffset+PageHeaderOffsetCellStart+1] = 0
-
-	// FragmentedBytes = 0 (1 byte)
-	pageData[headerOffset+PageHeaderOffsetFragmented] = 0
+	initEmptyPageHeader(pageData, rootPage, PageTypeLeafTable)
 
 	// Mark page dirty so pager persists initialization
 	if bt.Provider != nil {
@@ -377,19 +363,7 @@ func (bt *Btree) CreateWithoutRowidTable() (rootPage uint32, err error) {
 		return 0, fmt.Errorf("failed to get allocated page: %w", err)
 	}
 
-	headerOffset := 0
-	if rootPage == 1 {
-		headerOffset = FileHeaderSize
-	}
-
-	pageData[headerOffset+PageHeaderOffsetType] = PageTypeLeafTableNoInt
-	pageData[headerOffset+PageHeaderOffsetFreeblock] = 0
-	pageData[headerOffset+PageHeaderOffsetFreeblock+1] = 0
-	pageData[headerOffset+PageHeaderOffsetNumCells] = 0
-	pageData[headerOffset+PageHeaderOffsetNumCells+1] = 0
-	pageData[headerOffset+PageHeaderOffsetCellStart] = 0
-	pageData[headerOffset+PageHeaderOffsetCellStart+1] = 0
-	pageData[headerOffset+PageHeaderOffsetFragmented] = 0
+	initEmptyPageHeader(pageData, rootPage, PageTypeLeafTableNoInt)
 
 	if bt.Provider != nil {
 		if err := bt.Provider.MarkDirty(rootPage); err != nil {
@@ -423,19 +397,7 @@ func (bt *Btree) ClearTableData(rootPage uint32) error {
 	}
 
 	// Reinitialize root page as empty leaf table
-	headerOffset := 0
-	if rootPage == 1 {
-		headerOffset = FileHeaderSize
-	}
-
-	pageData[headerOffset+PageHeaderOffsetType] = PageTypeLeafTable
-	pageData[headerOffset+PageHeaderOffsetFreeblock] = 0
-	pageData[headerOffset+PageHeaderOffsetFreeblock+1] = 0
-	pageData[headerOffset+PageHeaderOffsetNumCells] = 0
-	pageData[headerOffset+PageHeaderOffsetNumCells+1] = 0
-	pageData[headerOffset+PageHeaderOffsetCellStart] = 0
-	pageData[headerOffset+PageHeaderOffsetCellStart+1] = 0
-	pageData[headerOffset+PageHeaderOffsetFragmented] = 0
+	initEmptyPageHeader(pageData, rootPage, PageTypeLeafTable)
 
 	return nil
 }

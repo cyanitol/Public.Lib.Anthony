@@ -404,15 +404,15 @@ func buildCTETests() []cteTestCase {
 		},
 		// Fibonacci sequence
 		{
-			name:  "recursive_fibonacci",
-			setup: []string{},
+			name:    "recursive_fibonacci",
+			setup:   []string{},
 			query:   "WITH RECURSIVE fib(n, a, b) AS (VALUES(0, 0, 1) UNION ALL SELECT n+1, b, a+b FROM fib WHERE n < 7) SELECT a FROM fib",
 			wantErr: true,
 		},
 		// Factorial
 		{
-			name:  "recursive_factorial",
-			setup: []string{},
+			name:    "recursive_factorial",
+			setup:   []string{},
 			query:   "WITH RECURSIVE fact(n, f) AS (VALUES(1, 1) UNION ALL SELECT n+1, f*(n+1) FROM fact WHERE n < 5) SELECT n, f FROM fact",
 			wantErr: true,
 		},
@@ -454,8 +454,8 @@ func buildCTETests() []cteTestCase {
 				"INSERT INTO t1 VALUES(1)",
 				"INSERT INTO t1 VALUES(2)",
 			},
-			query:   "SELECT * FROM (WITH tmp AS (SELECT x*2 AS doubled FROM t1) SELECT doubled FROM tmp)",
-			wantErr: true,
+			query:    "SELECT * FROM (WITH tmp AS (SELECT x*2 AS doubled FROM t1) SELECT doubled FROM tmp) ORDER BY 1",
+			wantRows: [][]interface{}{{int64(2)}, {int64(4)}},
 		},
 		// CTE with WHERE clause
 		{

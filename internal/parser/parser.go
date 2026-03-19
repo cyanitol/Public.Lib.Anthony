@@ -144,20 +144,20 @@ func (p *Parser) parseStatements() ([]Statement, error) {
 type statementParser func(p *Parser) (Statement, error)
 
 var statementParsers = map[TokenType]statementParser{
-	TK_SELECT:   func(p *Parser) (Statement, error) { return p.parseSelect() },
-	TK_INSERT:   func(p *Parser) (Statement, error) { return p.parseInsert() },
-	TK_UPDATE:   func(p *Parser) (Statement, error) { return p.parseUpdate() },
-	TK_DELETE:   func(p *Parser) (Statement, error) { return p.parseDelete() },
-	TK_CREATE:   (*Parser).parseCreate,
-	TK_DROP:     (*Parser).parseDrop,
-	TK_ALTER:    (*Parser).parseAlter,
-	TK_BEGIN:    func(p *Parser) (Statement, error) { return p.parseBegin() },
-	TK_COMMIT:   func(p *Parser) (Statement, error) { return &CommitStmt{}, nil },
-	TK_ROLLBACK: func(p *Parser) (Statement, error) { return p.parseRollback() },
-	TK_ATTACH:   func(p *Parser) (Statement, error) { return p.parseAttach() },
-	TK_DETACH:   func(p *Parser) (Statement, error) { return p.parseDetach() },
-	TK_PRAGMA:   func(p *Parser) (Statement, error) { return p.parsePragma() },
-	TK_VACUUM:   func(p *Parser) (Statement, error) { return p.parseVacuum() },
+	TK_SELECT:    func(p *Parser) (Statement, error) { return p.parseSelect() },
+	TK_INSERT:    func(p *Parser) (Statement, error) { return p.parseInsert() },
+	TK_UPDATE:    func(p *Parser) (Statement, error) { return p.parseUpdate() },
+	TK_DELETE:    func(p *Parser) (Statement, error) { return p.parseDelete() },
+	TK_CREATE:    (*Parser).parseCreate,
+	TK_DROP:      (*Parser).parseDrop,
+	TK_ALTER:     (*Parser).parseAlter,
+	TK_BEGIN:     func(p *Parser) (Statement, error) { return p.parseBegin() },
+	TK_COMMIT:    func(p *Parser) (Statement, error) { return &CommitStmt{}, nil },
+	TK_ROLLBACK:  func(p *Parser) (Statement, error) { return p.parseRollback() },
+	TK_ATTACH:    func(p *Parser) (Statement, error) { return p.parseAttach() },
+	TK_DETACH:    func(p *Parser) (Statement, error) { return p.parseDetach() },
+	TK_PRAGMA:    func(p *Parser) (Statement, error) { return p.parsePragma() },
+	TK_VACUUM:    func(p *Parser) (Statement, error) { return p.parseVacuum() },
 	TK_REINDEX:   func(p *Parser) (Statement, error) { return p.parseReindex() },
 	TK_ANALYZE:   func(p *Parser) (Statement, error) { return p.parseAnalyze() },
 	TK_SAVEPOINT: func(p *Parser) (Statement, error) { return p.parseSavepoint() },
@@ -686,7 +686,8 @@ func (p *Parser) parseTableOrSubquery() (*TableOrSubquery, error) {
 }
 
 func (p *Parser) parseSubquery(table *TableOrSubquery) error {
-	if !p.match(TK_SELECT) {
+	// Handle both (SELECT ...) and (WITH ... SELECT ...) subqueries
+	if !p.match(TK_SELECT) && !p.check(TK_WITH) {
 		return p.error("expected SELECT in subquery")
 	}
 	subquery, err := p.parseSelect()
@@ -701,18 +702,18 @@ func (p *Parser) parseSubquery(table *TableOrSubquery) error {
 }
 
 func (p *Parser) parseTableRef(table *TableOrSubquery) error {
-	if !p.isTableIdentifier() {
+	if !p.isSimpleIdentifier() {
 		return p.error("expected table name")
 	}
-	firstIdent := p.consumeTableIdentifier()
+	firstIdent := p.consumeSimpleIdentifier()
 
 	// Check for schema.table syntax
 	if p.match(TK_DOT) {
-		if !p.isTableIdentifier() {
+		if !p.isSimpleIdentifier() {
 			return p.error("expected table name after schema")
 		}
 		table.Schema = firstIdent
-		table.TableName = p.consumeTableIdentifier()
+		table.TableName = p.consumeSimpleIdentifier()
 	} else {
 		table.TableName = firstIdent
 	}
@@ -746,16 +747,17 @@ func (p *Parser) parseIndexedBy(table *TableOrSubquery) error {
 	if !p.match(TK_BY) {
 		return p.error("expected BY after INDEXED")
 	}
-	if !p.isTableIdentifier() {
+	if !p.isSimpleIdentifier() {
 		return p.error("expected index name")
 	}
-	table.Indexed = p.consumeTableIdentifier()
+	table.Indexed = p.consumeSimpleIdentifier()
 	return nil
 }
 
-// isTableIdentifier checks if the current token can be used as a table/index name.
-// This includes regular identifiers and certain keywords that can be used as names.
-func (p *Parser) isTableIdentifier() bool {
+// isSimpleIdentifier checks if the current token can be used as a simple name
+// (table, index, schema, pragma). Includes regular identifiers and certain
+// keywords that are valid as names.
+func (p *Parser) isSimpleIdentifier() bool {
 	switch p.peek().Type {
 	case TK_ID, TK_TEMP:
 		return true
@@ -764,8 +766,8 @@ func (p *Parser) isTableIdentifier() bool {
 	}
 }
 
-// consumeTableIdentifier consumes and returns a table/index identifier token.
-func (p *Parser) consumeTableIdentifier() string {
+// consumeSimpleIdentifier consumes and returns a simple identifier token.
+func (p *Parser) consumeSimpleIdentifier() string {
 	tok := p.advance()
 	return Unquote(tok.Lexeme)
 }
@@ -902,33 +904,8 @@ func (p *Parser) parseInsert() (*InsertStmt, error) {
 	if !p.match(TK_INTO) {
 		return nil, p.error("expected INTO after INSERT")
 	}
-	if !p.check(TK_ID) {
-		return nil, p.error("expected table name")
-	}
-	stmt.Table = Unquote(p.advance().Lexeme)
 
-	// Handle schema-qualified table name: schema.table
-	if p.match(TK_DOT) {
-		if !p.check(TK_ID) {
-			return nil, p.error("expected table name after '.'")
-		}
-		stmt.Schema = stmt.Table
-		stmt.Table = Unquote(p.advance().Lexeme)
-	}
-
-	if err := p.parseInsertColumnList(stmt); err != nil {
-		return nil, err
-	}
-	if err := p.parseInsertSource(stmt); err != nil {
-		return nil, err
-	}
-	if err := p.parseInsertUpsertClause(stmt); err != nil {
-		return nil, err
-	}
-	if err := p.parseReturningClause(&stmt.Returning); err != nil {
-		return nil, err
-	}
-	return stmt, nil
+	return p.parseInsertBody(stmt)
 }
 
 // parseReplaceInto parses REPLACE INTO as INSERT OR REPLACE INTO.
@@ -938,11 +915,19 @@ func (p *Parser) parseReplaceInto() (*InsertStmt, error) {
 	if !p.match(TK_INTO) {
 		return nil, p.error("expected INTO after REPLACE")
 	}
+
+	return p.parseInsertBody(stmt)
+}
+
+// parseInsertBody parses the shared portion of INSERT/REPLACE after INTO:
+// table name, optional schema, columns, source, upsert, and returning.
+func (p *Parser) parseInsertBody(stmt *InsertStmt) (*InsertStmt, error) {
 	if !p.check(TK_ID) {
 		return nil, p.error("expected table name")
 	}
 	stmt.Table = Unquote(p.advance().Lexeme)
 
+	// Handle schema-qualified table name: schema.table
 	if p.match(TK_DOT) {
 		if !p.check(TK_ID) {
 			return nil, p.error("expected table name after '.'")
@@ -2438,60 +2423,47 @@ func (p *Parser) parseDrop() (Statement, error) {
 	}
 }
 
-func (p *Parser) parseDropTable() (*DropTableStmt, error) {
-	stmt := &DropTableStmt{}
-
+// parseDropIfExistsName parses the common [IF EXISTS] name pattern for DROP statements.
+// Returns (ifExists, name, error).
+func (p *Parser) parseDropIfExistsName(what string) (bool, string, error) {
+	var ifExists bool
 	if p.match(TK_IF) {
 		if !p.match(TK_EXISTS) {
-			return nil, p.error("expected EXISTS after IF")
+			return false, "", p.error("expected EXISTS after IF")
 		}
-		stmt.IfExists = true
+		ifExists = true
 	}
-
 	if !p.check(TK_ID) {
-		return nil, p.error("expected table name")
+		return false, "", p.error("expected %s name", what)
 	}
-	stmt.Name = Unquote(p.advance().Lexeme)
+	name := Unquote(p.advance().Lexeme)
+	return ifExists, name, nil
+}
 
-	return stmt, nil
+func (p *Parser) parseDropTable() (*DropTableStmt, error) {
+	ifExists, name, err := p.parseDropIfExistsName("table")
+	if err != nil {
+		return nil, err
+	}
+	return &DropTableStmt{Name: name, IfExists: ifExists}, nil
 }
 
 func (p *Parser) parseDropIndex() (*DropIndexStmt, error) {
-	stmt := &DropIndexStmt{}
-
-	if p.match(TK_IF) {
-		if !p.match(TK_EXISTS) {
-			return nil, p.error("expected EXISTS after IF")
-		}
-		stmt.IfExists = true
+	ifExists, name, err := p.parseDropIfExistsName("index")
+	if err != nil {
+		return nil, err
 	}
-
-	if !p.check(TK_ID) {
-		return nil, p.error("expected index name")
-	}
-	stmt.Name = Unquote(p.advance().Lexeme)
-
-	return stmt, nil
+	return &DropIndexStmt{Name: name, IfExists: ifExists}, nil
 }
 
 // parseDropView parses a DROP VIEW statement.
 // Syntax: DROP VIEW [IF EXISTS] view_name
 func (p *Parser) parseDropView() (*DropViewStmt, error) {
-	stmt := &DropViewStmt{}
-
-	if p.match(TK_IF) {
-		if !p.match(TK_EXISTS) {
-			return nil, p.error("expected EXISTS after IF")
-		}
-		stmt.IfExists = true
+	ifExists, name, err := p.parseDropIfExistsName("view")
+	if err != nil {
+		return nil, err
 	}
-
-	if !p.check(TK_ID) {
-		return nil, p.error("expected view name")
-	}
-	stmt.Name = Unquote(p.advance().Lexeme)
-
-	return stmt, nil
+	return &DropViewStmt{Name: name, IfExists: ifExists}, nil
 }
 
 // =============================================================================
@@ -2693,23 +2665,11 @@ func (p *Parser) parseTriggerBodyStatement() (Statement, error) {
 // parseDropTrigger parses a DROP TRIGGER statement.
 // Syntax: DROP TRIGGER [IF EXISTS] name
 func (p *Parser) parseDropTrigger() (*DropTriggerStmt, error) {
-	stmt := &DropTriggerStmt{}
-
-	// IF EXISTS
-	if p.match(TK_IF) {
-		if !p.match(TK_EXISTS) {
-			return nil, p.error("expected EXISTS after IF")
-		}
-		stmt.IfExists = true
+	ifExists, name, err := p.parseDropIfExistsName("trigger")
+	if err != nil {
+		return nil, err
 	}
-
-	// Trigger name
-	if !p.check(TK_ID) {
-		return nil, p.error("expected trigger name")
-	}
-	stmt.Name = Unquote(p.advance().Lexeme)
-
-	return stmt, nil
+	return &DropTriggerStmt{Name: name, IfExists: ifExists}, nil
 }
 
 // =============================================================================
@@ -2848,21 +2808,14 @@ func (p *Parser) parseDetach() (*DetachStmt, error) {
 	return stmt, nil
 }
 
-// isSchemaIdentifier checks if the current token can be used as a schema name.
-// This includes regular identifiers and certain keywords that are valid as schema names.
+// isSchemaIdentifier is an alias for isSimpleIdentifier (schema names).
 func (p *Parser) isSchemaIdentifier() bool {
-	switch p.peek().Type {
-	case TK_ID, TK_TEMP:
-		return true
-	default:
-		return false
-	}
+	return p.isSimpleIdentifier()
 }
 
-// consumeSchemaIdentifier consumes and returns a schema identifier token.
+// consumeSchemaIdentifier is an alias for consumeSimpleIdentifier (schema names).
 func (p *Parser) consumeSchemaIdentifier() string {
-	tok := p.advance()
-	return Unquote(tok.Lexeme)
+	return p.consumeSimpleIdentifier()
 }
 
 // =============================================================================
@@ -2955,21 +2908,14 @@ func (p *Parser) parsePragmaParenValue(stmt *PragmaStmt) error {
 	return nil
 }
 
-// isPragmaIdentifier checks if the current token can be used as a pragma/schema name.
-// This includes regular identifiers and certain keywords that are valid as schema names.
+// isPragmaIdentifier is an alias for isSimpleIdentifier (pragma names).
 func (p *Parser) isPragmaIdentifier() bool {
-	switch p.peek().Type {
-	case TK_ID, TK_TEMP:
-		return true
-	default:
-		return false
-	}
+	return p.isSimpleIdentifier()
 }
 
-// consumePragmaIdentifier consumes and returns a pragma identifier token.
+// consumePragmaIdentifier is an alias for consumeSimpleIdentifier (pragma names).
 func (p *Parser) consumePragmaIdentifier() string {
-	tok := p.advance()
-	return Unquote(tok.Lexeme)
+	return p.consumeSimpleIdentifier()
 }
 
 // parsePragmaValue parses a PRAGMA value, which can be a literal, number, or keyword.
@@ -3675,11 +3621,10 @@ func (p *Parser) isExpressionIdentifier() bool {
 // RAISE actions may be tokenized as keywords (TK_ABORT, TK_FAIL, etc.) or TK_ID.
 func (p *Parser) isRaiseAction() bool {
 	switch p.peek().Type {
-	case TK_ID, TK_ABORT, TK_FAIL, TK_IGNORE:
+	case TK_ID, TK_ABORT, TK_FAIL, TK_IGNORE, TK_ROLLBACK:
 		return true
 	default:
-		// ROLLBACK may also be tokenized as a keyword
-		return p.check(TK_ID) || strings.EqualFold(p.peek().Lexeme, "ROLLBACK")
+		return false
 	}
 }
 

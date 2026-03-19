@@ -241,9 +241,6 @@ func readIndexPayloadVarint(info *CellInfo, cellData []byte, offset int) (int, e
 	if payloadSize64 > math.MaxUint32 {
 		return 0, security.ErrIntegerOverflow
 	}
-	if payloadSize64 > math.MaxInt64 {
-		return 0, security.ErrIntegerOverflow
-	}
 	info.PayloadSize = uint32(payloadSize64)
 	info.Key = int64(payloadSize64) // For index pages, key is payload size
 	return offset + n, nil
@@ -357,18 +354,11 @@ func parseIndexInteriorCell(cellData []byte, usableSize uint32) (*CellInfo, erro
 }
 
 // calculateMaxLocal calculates the maximum amount of payload that can be stored locally
-// Based on SQLite's usable page size and whether this is a table or index page
-func calculateMaxLocal(usableSize uint32, isTable bool) uint32 {
-	// Default values from SQLite: 64/255 for tables, 255/255 for indexes
-	// maxLocal = usableSize - 35 (approximately)
-	// For simplicity, using SQLite's calculation:
-	// At least 4 cells must fit on a page, so maxLocal <= (usableSize-12)/4
-
-	if isTable {
-		// Table b-trees: max embedded payload fraction = 64/255
-		return (usableSize - 35)
-	}
-	// Index b-trees: max embedded payload fraction = 255/255 (100%)
+// Based on SQLite's usable page size.
+// Note: SQLite distinguishes table vs index via different payload fractions,
+// but the resulting formula simplifies to usableSize-35 for both.
+// The isTable parameter is retained for API compatibility and future adjustment.
+func calculateMaxLocal(usableSize uint32, _ bool) uint32 {
 	return usableSize - 35
 }
 

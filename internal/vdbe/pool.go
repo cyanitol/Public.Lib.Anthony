@@ -4,6 +4,7 @@ package vdbe
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 // Global pools for VDBE memory optimization
@@ -59,12 +60,12 @@ var (
 
 // MemoryPool provides pooled memory allocation for VDBE components.
 type MemoryPool struct {
-	// Statistics for monitoring pool usage
+	// Statistics for monitoring pool usage (atomic for lock-free access)
 	stats PoolStats
-	mu    sync.RWMutex
 }
 
 // PoolStats tracks memory pool usage statistics.
+// All fields are accessed atomically for lock-free performance.
 type PoolStats struct {
 	MemGets              int64
 	MemPuts              int64
@@ -81,15 +82,8 @@ type PoolStats struct {
 // GlobalPool is the global memory pool instance.
 var GlobalPool = &MemoryPool{}
 
-// GetMem retrieves a Mem cell from the pool.
-// The returned Mem is reset to an undefined state.
-func GetMem() *Mem {
-	GlobalPool.mu.Lock()
-	GlobalPool.stats.MemGets++
-	GlobalPool.mu.Unlock()
-
-	mem := memPool.Get().(*Mem)
-	// Reset the Mem to undefined state
+// resetMem resets a Mem cell to its zero/undefined state.
+func resetMem(mem *Mem) {
 	mem.flags = MemUndefined
 	mem.i = 0
 	mem.r = 0
@@ -98,6 +92,27 @@ func GetMem() *Mem {
 	mem.nZero = 0
 	mem.subtype = 0
 	mem.xDel = nil
+}
+
+// resetInstruction resets an Instruction to its zero state.
+func resetInstruction(instr *Instruction) {
+	instr.Opcode = 0
+	instr.P1 = 0
+	instr.P2 = 0
+	instr.P3 = 0
+	instr.P4 = P4Union{}
+	instr.P4Type = 0
+	instr.P5 = 0
+	instr.Comment = ""
+}
+
+// GetMem retrieves a Mem cell from the pool.
+// The returned Mem is reset to an undefined state.
+func GetMem() *Mem {
+	atomic.AddInt64(&GlobalPool.stats.MemGets, 1)
+
+	mem := memPool.Get().(*Mem)
+	resetMem(mem)
 	return mem
 }
 
@@ -108,45 +123,24 @@ func PutMem(mem *Mem) {
 		return
 	}
 
-	GlobalPool.mu.Lock()
-	GlobalPool.stats.MemPuts++
-	GlobalPool.mu.Unlock()
+	atomic.AddInt64(&GlobalPool.stats.MemPuts, 1)
 
 	// Clean up dynamic memory
 	if mem.flags&(MemDyn|MemAgg) != 0 && mem.xDel != nil {
 		mem.xDel(mem.z)
 	}
 
-	// Reset to undefined
-	mem.flags = MemUndefined
-	mem.i = 0
-	mem.r = 0
-	mem.z = nil
-	mem.n = 0
-	mem.nZero = 0
-	mem.subtype = 0
-	mem.xDel = nil
-
+	resetMem(mem)
 	memPool.Put(mem)
 }
 
 // GetInstruction retrieves an Instruction from the pool.
 // The returned Instruction is zeroed.
 func GetInstruction() *Instruction {
-	GlobalPool.mu.Lock()
-	GlobalPool.stats.InstructionGets++
-	GlobalPool.mu.Unlock()
+	atomic.AddInt64(&GlobalPool.stats.InstructionGets, 1)
 
 	instr := instructionPool.Get().(*Instruction)
-	// Zero the instruction
-	instr.Opcode = 0
-	instr.P1 = 0
-	instr.P2 = 0
-	instr.P3 = 0
-	instr.P4 = P4Union{}
-	instr.P4Type = 0
-	instr.P5 = 0
-	instr.Comment = ""
+	resetInstruction(instr)
 	return instr
 }
 
@@ -156,29 +150,16 @@ func PutInstruction(instr *Instruction) {
 		return
 	}
 
-	GlobalPool.mu.Lock()
-	GlobalPool.stats.InstructionPuts++
-	GlobalPool.mu.Unlock()
+	atomic.AddInt64(&GlobalPool.stats.InstructionPuts, 1)
 
-	// Clear the instruction
-	instr.Opcode = 0
-	instr.P1 = 0
-	instr.P2 = 0
-	instr.P3 = 0
-	instr.P4 = P4Union{}
-	instr.P4Type = 0
-	instr.P5 = 0
-	instr.Comment = ""
-
+	resetInstruction(instr)
 	instructionPool.Put(instr)
 }
 
 // GetPageBuffer retrieves a page buffer from the pool.
 // The size parameter determines which pool to use (standard or large).
 func GetPageBuffer(size int) *[]byte {
-	GlobalPool.mu.Lock()
-	GlobalPool.stats.PageBufferGets++
-	GlobalPool.mu.Unlock()
+	atomic.AddInt64(&GlobalPool.stats.PageBufferGets, 1)
 
 	if size <= 4096 {
 		buf := pageBufferPool.Get().(*[]byte)
@@ -199,34 +180,23 @@ func PutPageBuffer(buf *[]byte) {
 		return
 	}
 
-	GlobalPool.mu.Lock()
-	GlobalPool.stats.PageBufferPuts++
-	GlobalPool.mu.Unlock()
+	atomic.AddInt64(&GlobalPool.stats.PageBufferPuts, 1)
 
 	size := cap(*buf)
+	// Reset to full capacity and zero the buffer for security
+	*buf = (*buf)[:cap(*buf)]
+	clear(*buf)
+
 	if size <= 4096 {
-		// Reset to full capacity
-		*buf = (*buf)[:cap(*buf)]
-		// Zero the buffer for security
-		for i := range *buf {
-			(*buf)[i] = 0
-		}
 		pageBufferPool.Put(buf)
 	} else {
-		*buf = (*buf)[:cap(*buf)]
-		// Zero the buffer for security
-		for i := range *buf {
-			(*buf)[i] = 0
-		}
 		largePageBufferPool.Put(buf)
 	}
 }
 
 // GetInstructionSlice retrieves an instruction slice from the pool.
 func GetInstructionSlice() *[]*Instruction {
-	GlobalPool.mu.Lock()
-	GlobalPool.stats.InstructionSliceGets++
-	GlobalPool.mu.Unlock()
+	atomic.AddInt64(&GlobalPool.stats.InstructionSliceGets, 1)
 
 	slice := instructionSlicePool.Get().(*[]*Instruction)
 	// Clear the slice
@@ -240,9 +210,7 @@ func PutInstructionSlice(slice *[]*Instruction) {
 		return
 	}
 
-	GlobalPool.mu.Lock()
-	GlobalPool.stats.InstructionSlicePuts++
-	GlobalPool.mu.Unlock()
+	atomic.AddInt64(&GlobalPool.stats.InstructionSlicePuts, 1)
 
 	// Clear references
 	for i := range *slice {
@@ -255,9 +223,7 @@ func PutInstructionSlice(slice *[]*Instruction) {
 
 // GetMemSlice retrieves a Mem cell slice from the pool.
 func GetMemSlice() *[]*Mem {
-	GlobalPool.mu.Lock()
-	GlobalPool.stats.MemSliceGets++
-	GlobalPool.mu.Unlock()
+	atomic.AddInt64(&GlobalPool.stats.MemSliceGets, 1)
 
 	slice := memSlicePool.Get().(*[]*Mem)
 	*slice = (*slice)[:0]
@@ -270,9 +236,7 @@ func PutMemSlice(slice *[]*Mem) {
 		return
 	}
 
-	GlobalPool.mu.Lock()
-	GlobalPool.stats.MemSlicePuts++
-	GlobalPool.mu.Unlock()
+	atomic.AddInt64(&GlobalPool.stats.MemSlicePuts, 1)
 
 	// Clear references
 	for i := range *slice {
@@ -285,16 +249,32 @@ func PutMemSlice(slice *[]*Mem) {
 
 // Stats returns a copy of the current pool statistics.
 func (p *MemoryPool) Stats() PoolStats {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.stats
+	return PoolStats{
+		MemGets:              atomic.LoadInt64(&p.stats.MemGets),
+		MemPuts:              atomic.LoadInt64(&p.stats.MemPuts),
+		InstructionGets:      atomic.LoadInt64(&p.stats.InstructionGets),
+		InstructionPuts:      atomic.LoadInt64(&p.stats.InstructionPuts),
+		PageBufferGets:       atomic.LoadInt64(&p.stats.PageBufferGets),
+		PageBufferPuts:       atomic.LoadInt64(&p.stats.PageBufferPuts),
+		InstructionSliceGets: atomic.LoadInt64(&p.stats.InstructionSliceGets),
+		InstructionSlicePuts: atomic.LoadInt64(&p.stats.InstructionSlicePuts),
+		MemSliceGets:         atomic.LoadInt64(&p.stats.MemSliceGets),
+		MemSlicePuts:         atomic.LoadInt64(&p.stats.MemSlicePuts),
+	}
 }
 
 // ResetStats resets all pool statistics to zero.
 func (p *MemoryPool) ResetStats() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.stats = PoolStats{}
+	atomic.StoreInt64(&p.stats.MemGets, 0)
+	atomic.StoreInt64(&p.stats.MemPuts, 0)
+	atomic.StoreInt64(&p.stats.InstructionGets, 0)
+	atomic.StoreInt64(&p.stats.InstructionPuts, 0)
+	atomic.StoreInt64(&p.stats.PageBufferGets, 0)
+	atomic.StoreInt64(&p.stats.PageBufferPuts, 0)
+	atomic.StoreInt64(&p.stats.InstructionSliceGets, 0)
+	atomic.StoreInt64(&p.stats.InstructionSlicePuts, 0)
+	atomic.StoreInt64(&p.stats.MemSliceGets, 0)
+	atomic.StoreInt64(&p.stats.MemSlicePuts, 0)
 }
 
 // GetStats returns the current pool statistics without locking.

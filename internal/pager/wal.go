@@ -2,10 +2,10 @@
 package pager
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"hash/crc32"
 	"io"
 	"os"
 	"sync"
@@ -279,11 +279,17 @@ func (w *WAL) validateReadFrame(frameNo uint32) error {
 }
 
 func (w *WAL) readFrameData(frameNo uint32) (*WALFrame, error) {
+	return w.readFrameRaw(frameNo)
+}
+
+// readFrameRaw reads a frame's header and data from disk at the given index.
+// This is the single low-level frame reader used by all higher-level readers.
+func (w *WAL) readFrameRaw(frameNo uint32) (*WALFrame, error) {
 	offset := int64(WALHeaderSize) + int64(frameNo)*(int64(WALFrameHeaderSize)+int64(w.pageSize))
 
 	headerData := make([]byte, WALFrameHeaderSize)
 	if _, err := w.file.ReadAt(headerData, offset); err != nil {
-		return nil, fmt.Errorf("failed to read frame header: %w", err)
+		return nil, fmt.Errorf("failed to read frame %d header: %w", frameNo, err)
 	}
 
 	frame := &WALFrame{
@@ -298,7 +304,7 @@ func (w *WAL) readFrameData(frameNo uint32) (*WALFrame, error) {
 
 	dataOffset := offset + int64(WALFrameHeaderSize)
 	if _, err := w.file.ReadAt(frame.Data, dataOffset); err != nil {
-		return nil, fmt.Errorf("failed to read frame data: %w", err)
+		return nil, fmt.Errorf("failed to read frame %d data: %w", frameNo, err)
 	}
 
 	return frame, nil
@@ -345,30 +351,7 @@ func (w *WAL) readFrameAtIndex(frameNo uint32) (*WALFrame, error) {
 	if frameNo >= w.frameCount {
 		return nil, fmt.Errorf("frame %d out of range", frameNo)
 	}
-
-	offset := int64(WALHeaderSize) + int64(frameNo)*(int64(WALFrameHeaderSize)+int64(w.pageSize))
-
-	headerData := make([]byte, WALFrameHeaderSize)
-	if _, err := w.file.ReadAt(headerData, offset); err != nil {
-		return nil, fmt.Errorf("failed to read frame header: %w", err)
-	}
-
-	frame := &WALFrame{
-		PageNumber: binary.BigEndian.Uint32(headerData[0:4]),
-		DbSize:     binary.BigEndian.Uint32(headerData[4:8]),
-		Salt1:      binary.BigEndian.Uint32(headerData[8:12]),
-		Salt2:      binary.BigEndian.Uint32(headerData[12:16]),
-		Checksum1:  binary.BigEndian.Uint32(headerData[16:20]),
-		Checksum2:  binary.BigEndian.Uint32(headerData[20:24]),
-		Data:       make([]byte, w.pageSize),
-	}
-
-	dataOffset := offset + int64(WALFrameHeaderSize)
-	if _, err := w.file.ReadAt(frame.Data, dataOffset); err != nil {
-		return nil, fmt.Errorf("failed to read frame data: %w", err)
-	}
-
-	return frame, nil
+	return w.readFrameRaw(frameNo)
 }
 
 // Checkpoint copies all frames from the WAL back to the database file.
@@ -583,10 +566,9 @@ func (w *WAL) writeFrameData(frame *WALFrame) error {
 	return nil
 }
 
-// calculateHeaderChecksum calculates the checksums for the WAL header.
-// Uses the same algorithm as SQLite.
-func (w *WAL) calculateHeaderChecksum(header *WALHeader) {
-	// Create data array for checksum calculation (first 24 bytes)
+// serializeHeaderForChecksum serializes the first 24 bytes of the WAL header
+// into a byte slice for checksum calculation.
+func serializeHeaderForChecksum(header *WALHeader) []byte {
 	data := make([]byte, 24)
 	binary.BigEndian.PutUint32(data[0:4], header.Magic)
 	binary.BigEndian.PutUint32(data[4:8], header.Version)
@@ -594,8 +576,13 @@ func (w *WAL) calculateHeaderChecksum(header *WALHeader) {
 	binary.BigEndian.PutUint32(data[12:16], header.CheckpointSeq)
 	binary.BigEndian.PutUint32(data[16:20], header.Salt1)
 	binary.BigEndian.PutUint32(data[20:24], header.Salt2)
+	return data
+}
 
-	// Calculate checksums using SQLite algorithm
+// calculateHeaderChecksum calculates the checksums for the WAL header.
+// Uses the same algorithm as SQLite.
+func (w *WAL) calculateHeaderChecksum(header *WALHeader) {
+	data := serializeHeaderForChecksum(header)
 	s1, s2 := walChecksum(data, 0, 0)
 	header.Checksum1 = s1
 	header.Checksum2 = s2
@@ -603,19 +590,9 @@ func (w *WAL) calculateHeaderChecksum(header *WALHeader) {
 
 // validateHeaderChecksum validates the checksum of the WAL header.
 func (w *WAL) validateHeaderChecksum(header *WALHeader) error {
-	// Create data array for checksum calculation (first 24 bytes)
-	data := make([]byte, 24)
-	binary.BigEndian.PutUint32(data[0:4], header.Magic)
-	binary.BigEndian.PutUint32(data[4:8], header.Version)
-	binary.BigEndian.PutUint32(data[8:12], header.PageSize)
-	binary.BigEndian.PutUint32(data[12:16], header.CheckpointSeq)
-	binary.BigEndian.PutUint32(data[16:20], header.Salt1)
-	binary.BigEndian.PutUint32(data[20:24], header.Salt2)
-
-	// Calculate checksums using SQLite algorithm
+	data := serializeHeaderForChecksum(header)
 	s1, s2 := walChecksum(data, 0, 0)
 
-	// Compare calculated checksum with stored checksum
 	if s1 != header.Checksum1 || s2 != header.Checksum2 {
 		return fmt.Errorf("checksum mismatch: expected (%d, %d), got (%d, %d)",
 			header.Checksum1, header.Checksum2, s1, s2)
@@ -624,25 +601,23 @@ func (w *WAL) validateHeaderChecksum(header *WALHeader) error {
 	return nil
 }
 
-// calculateFrameChecksum calculates the checksums for a WAL frame.
-// This is cumulative - each frame's checksum depends on previous checksums.
-func (w *WAL) calculateFrameChecksum(frame *WALFrame) {
-	// Build frame header data (first 16 bytes)
+// serializeFrameHeaderForChecksum serializes a frame's first 16 bytes for checksum calculation.
+func serializeFrameHeaderForChecksum(frame *WALFrame) []byte {
 	headerData := make([]byte, 16)
 	binary.BigEndian.PutUint32(headerData[0:4], frame.PageNumber)
 	binary.BigEndian.PutUint32(headerData[4:8], frame.DbSize)
 	binary.BigEndian.PutUint32(headerData[8:12], frame.Salt1)
 	binary.BigEndian.PutUint32(headerData[12:16], frame.Salt2)
+	return headerData
+}
 
-	// Start with previous checksums (cumulative calculation)
+// calculateFrameChecksum calculates the checksums for a WAL frame.
+// This is cumulative - each frame's checksum depends on previous checksums.
+func (w *WAL) calculateFrameChecksum(frame *WALFrame) {
 	s1 := w.lastChecksum1
 	s2 := w.lastChecksum2
 
-	// Checksum the frame header
-	s1, s2 = walChecksum(headerData, s1, s2)
-
-	// Checksum the page data
-	s1, s2 = walChecksum(frame.Data, s1, s2)
+	s1, s2 = w.checksumFrame(frame, s1, s2)
 
 	frame.Checksum1 = s1
 	frame.Checksum2 = s2
@@ -726,44 +701,14 @@ func (w *WAL) getFrameForChecksum(targetFrame *WALFrame, currentIdx, targetIdx u
 
 // readFrameForChecksum reads a frame from disk for checksum calculation.
 func (w *WAL) readFrameForChecksum(frameIdx uint32) (*WALFrame, error) {
-	offset := int64(WALHeaderSize) + int64(frameIdx)*(int64(WALFrameHeaderSize)+int64(w.pageSize))
-
-	headerData := make([]byte, WALFrameHeaderSize)
-	if _, err := w.file.ReadAt(headerData, offset); err != nil {
-		return nil, fmt.Errorf("failed to read frame %d header: %w", frameIdx, err)
-	}
-
-	frame := &WALFrame{
-		PageNumber: binary.BigEndian.Uint32(headerData[0:4]),
-		DbSize:     binary.BigEndian.Uint32(headerData[4:8]),
-		Salt1:      binary.BigEndian.Uint32(headerData[8:12]),
-		Salt2:      binary.BigEndian.Uint32(headerData[12:16]),
-		Data:       make([]byte, w.pageSize),
-	}
-
-	dataOffset := offset + int64(WALFrameHeaderSize)
-	if _, err := w.file.ReadAt(frame.Data, dataOffset); err != nil {
-		return nil, fmt.Errorf("failed to read frame %d data: %w", frameIdx, err)
-	}
-
-	return frame, nil
+	return w.readFrameRaw(frameIdx)
 }
 
 // checksumFrame calculates the checksum for a single frame.
 func (w *WAL) checksumFrame(frame *WALFrame, s1, s2 uint32) (uint32, uint32) {
-	// Build frame header for checksum (first 16 bytes)
-	headerData := make([]byte, 16)
-	binary.BigEndian.PutUint32(headerData[0:4], frame.PageNumber)
-	binary.BigEndian.PutUint32(headerData[4:8], frame.DbSize)
-	binary.BigEndian.PutUint32(headerData[8:12], frame.Salt1)
-	binary.BigEndian.PutUint32(headerData[12:16], frame.Salt2)
-
-	// Checksum the frame header
+	headerData := serializeFrameHeaderForChecksum(frame)
 	s1, s2 = walChecksum(headerData, s1, s2)
-
-	// Checksum the page data
 	s1, s2 = walChecksum(frame.Data, s1, s2)
-
 	return s1, s2
 }
 
@@ -822,29 +767,7 @@ func (w *WAL) validateSingleFrame(frameIdx, s1, s2 uint32) (uint32, uint32, erro
 
 // readFrameForValidation reads a frame from disk for validation.
 func (w *WAL) readFrameForValidation(frameIdx uint32) (*WALFrame, error) {
-	offset := int64(WALHeaderSize) + int64(frameIdx)*(int64(WALFrameHeaderSize)+int64(w.pageSize))
-
-	headerData := make([]byte, WALFrameHeaderSize)
-	if _, err := w.file.ReadAt(headerData, offset); err != nil {
-		return nil, fmt.Errorf("failed to read frame %d header: %w", frameIdx, err)
-	}
-
-	frame := &WALFrame{
-		PageNumber: binary.BigEndian.Uint32(headerData[0:4]),
-		DbSize:     binary.BigEndian.Uint32(headerData[4:8]),
-		Salt1:      binary.BigEndian.Uint32(headerData[8:12]),
-		Salt2:      binary.BigEndian.Uint32(headerData[12:16]),
-		Checksum1:  binary.BigEndian.Uint32(headerData[16:20]),
-		Checksum2:  binary.BigEndian.Uint32(headerData[20:24]),
-		Data:       make([]byte, w.pageSize),
-	}
-
-	dataOffset := offset + int64(WALFrameHeaderSize)
-	if _, err := w.file.ReadAt(frame.Data, dataOffset); err != nil {
-		return nil, fmt.Errorf("failed to read frame %d data: %w", frameIdx, err)
-	}
-
-	return frame, nil
+	return w.readFrameRaw(frameIdx)
 }
 
 // validateFrameSalt validates the frame salt values.
@@ -857,14 +780,7 @@ func (w *WAL) validateFrameSalt(frame *WALFrame, frameIdx uint32) error {
 
 // calculateAndValidateFrameChecksum calculates and validates frame checksum.
 func (w *WAL) calculateAndValidateFrameChecksum(frame *WALFrame, frameIdx, s1, s2 uint32) (uint32, uint32, error) {
-	checksumData := make([]byte, 16)
-	binary.BigEndian.PutUint32(checksumData[0:4], frame.PageNumber)
-	binary.BigEndian.PutUint32(checksumData[4:8], frame.DbSize)
-	binary.BigEndian.PutUint32(checksumData[8:12], frame.Salt1)
-	binary.BigEndian.PutUint32(checksumData[12:16], frame.Salt2)
-
-	s1, s2 = walChecksum(checksumData, s1, s2)
-	s1, s2 = walChecksum(frame.Data, s1, s2)
+	s1, s2 = w.checksumFrame(frame, s1, s2)
 
 	if s1 != frame.Checksum1 || s2 != frame.Checksum2 {
 		return 0, 0, fmt.Errorf("frame %d checksum mismatch: expected (%d, %d), got (%d, %d)",
@@ -892,16 +808,12 @@ func walChecksum(data []byte, s1, s2 uint32) (uint32, uint32) {
 	return s1, s2
 }
 
-// generateSalt generates a random salt value for the WAL.
-// In production, this should use crypto/rand for security.
+// generateSalt generates a cryptographically random salt value for the WAL.
 func generateSalt() uint32 {
-	// Use CRC32 of current nonce counter for deterministic but varied salts
-	// In production, replace with crypto/rand
-	nonce := generateNonce()
-	return crc32.ChecksumIEEE([]byte{
-		byte(nonce >> 24),
-		byte(nonce >> 16),
-		byte(nonce >> 8),
-		byte(nonce),
-	})
+	var buf [4]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		// Fallback if crypto/rand fails (extremely unlikely)
+		return generateNonce()
+	}
+	return binary.BigEndian.Uint32(buf[:])
 }

@@ -227,21 +227,21 @@ func init() {
 		OpSCopy:   (*VDBE).execSCopy,
 
 		// Cursor operations
-		OpOpenRead:      (*VDBE).execOpenRead,
-		OpOpenWrite:     (*VDBE).execOpenWrite,
+		OpOpenRead:       (*VDBE).execOpenRead,
+		OpOpenWrite:      (*VDBE).execOpenWrite,
 		OpOpenEphemeral:  (*VDBE).execOpenEphemeral,
 		OpClearEphemeral: (*VDBE).execClearEphemeral,
 		OpClose:          (*VDBE).execClose,
-		OpRewind:        (*VDBE).execRewind,
-		OpNext:          (*VDBE).execNext,
-		OpPrev:          (*VDBE).execPrev,
-		OpSeekGE:        (*VDBE).execSeekGE,
-		OpSeekGT:        (*VDBE).execSeekGT,
-		OpSeekLE:        (*VDBE).execSeekLE,
-		OpSeekLT:        (*VDBE).execSeekLT,
-		OpSeekRowid:     (*VDBE).execSeekRowid,
-		OpNotExists:     (*VDBE).execNotExists,
-		OpDeferredSeek:  (*VDBE).execDeferredSeek,
+		OpRewind:         (*VDBE).execRewind,
+		OpNext:           (*VDBE).execNext,
+		OpPrev:           (*VDBE).execPrev,
+		OpSeekGE:         (*VDBE).execSeekGE,
+		OpSeekGT:         (*VDBE).execSeekGT,
+		OpSeekLE:         (*VDBE).execSeekLE,
+		OpSeekLT:         (*VDBE).execSeekLT,
+		OpSeekRowid:      (*VDBE).execSeekRowid,
+		OpNotExists:      (*VDBE).execNotExists,
+		OpDeferredSeek:   (*VDBE).execDeferredSeek,
 
 		// Data retrieval
 		OpColumn:    (*VDBE).execColumn,
@@ -341,28 +341,28 @@ func init() {
 		OpOpenPseudo:    (*VDBE).execOpenPseudo,
 
 		// Trigger execution
-		OpTriggerBefore: (*VDBE).execTriggerBefore,
-		OpTriggerAfter:  (*VDBE).execTriggerAfter,
+		OpTriggerBefore:    (*VDBE).execTriggerBefore,
+		OpTriggerAfter:     (*VDBE).execTriggerAfter,
 		OpRaise:            (*VDBE).execRaise,
 		OpCorrelatedExists: (*VDBE).execCorrelatedExists,
 		OpCorrelatedScalar: (*VDBE).execCorrelatedScalar,
 
 		// Window function operations
-		OpAggStepWindow:    (*VDBE).execAggStepWindow,
-		OpWindowRowNum:     (*VDBE).execWindowRowNum,
-		OpWindowRank:       (*VDBE).execWindowRank,
-		OpWindowDenseRank:  (*VDBE).execWindowDenseRank,
-		OpWindowNtile:      (*VDBE).execWindowNtile,
-		OpWindowLag:        (*VDBE).execWindowLag,
-		OpWindowLead:       (*VDBE).execWindowLead,
-		OpWindowFirstValue: (*VDBE).execWindowFirstValue,
-		OpWindowLastValue:  (*VDBE).execWindowLastValue,
+		OpAggStepWindow:     (*VDBE).execAggStepWindow,
+		OpWindowRowNum:      (*VDBE).execWindowRowNum,
+		OpWindowRank:        (*VDBE).execWindowRank,
+		OpWindowDenseRank:   (*VDBE).execWindowDenseRank,
+		OpWindowNtile:       (*VDBE).execWindowNtile,
+		OpWindowLag:         (*VDBE).execWindowLag,
+		OpWindowLead:        (*VDBE).execWindowLead,
+		OpWindowFirstValue:  (*VDBE).execWindowFirstValue,
+		OpWindowLastValue:   (*VDBE).execWindowLastValue,
 		OpWindowNthValue:    (*VDBE).execWindowNthValue,
 		OpWindowAggregate:   (*VDBE).execWindowAggregate,
 		OpWindowPercentRank: (*VDBE).execWindowPercentRank,
 		OpWindowCumeDist:    (*VDBE).execWindowCumeDist,
 		OpAggDistinct:       (*VDBE).execAggDistinct,
-		OpDistinctRow:      (*VDBE).execDistinctRow,
+		OpDistinctRow:       (*VDBE).execDistinctRow,
 	}
 }
 
@@ -676,50 +676,16 @@ func (v *VDBE) findTableByRootPage(rootPage uint32) interface{} {
 }
 
 func (v *VDBE) execOpenRead(instr *Instruction) error {
-	// Open cursor P1 for reading on root page P2
-	// P1 = cursor number, P2 = root page, P3 = num columns
-	if v.Ctx == nil || v.Ctx.Btree == nil {
-		return fmt.Errorf("no btree context available")
-	}
-
-	bt, ok := v.Ctx.Btree.(*btree.Btree)
-	if !ok {
-		return fmt.Errorf("invalid btree context type")
-	}
-
-	// Allocate cursors if needed
-	if err := v.AllocCursors(instr.P1 + 1); err != nil {
-		return err
-	}
-
-	// Store table metadata if available (for handling ALTER TABLE ADD COLUMN defaults)
-	table := v.findTableByRootPage(uint32(instr.P2))
-
-	// Check if this is a WITHOUT ROWID table
-	isWithoutRowID := v.isTableWithoutRowID(table)
-
-	// Create btree cursor with composite key mode for WITHOUT ROWID tables
-	btCursor := btree.NewCursorWithOptions(bt, uint32(instr.P2), isWithoutRowID)
-
-	// Create VDBE cursor
-	cursor := &Cursor{
-		CurType:      CursorBTree,
-		IsTable:      true,
-		WithoutRowID: isWithoutRowID,
-		RootPage:     uint32(instr.P2),
-		BtreeCursor:  btCursor,
-		CachedCols:   make([][]byte, 0),
-		CacheStatus:  0,
-		Table:        table,
-	}
-
-	v.Cursors[instr.P1] = cursor
-	return nil
+	return v.openCursorOnBtree(instr.P1, uint32(instr.P2), false)
 }
 
 func (v *VDBE) execOpenWrite(instr *Instruction) error {
-	// Open cursor P1 for writing on root page P2
-	// P1 = cursor number, P2 = root page, P3 = num columns
+	return v.openCursorOnBtree(instr.P1, uint32(instr.P2), true)
+}
+
+// openCursorOnBtree is the shared implementation for execOpenRead and execOpenWrite.
+// It opens a btree cursor at the given root page for the specified cursor slot.
+func (v *VDBE) openCursorOnBtree(cursorNum int, rootPage uint32, writable bool) error {
 	if v.Ctx == nil || v.Ctx.Btree == nil {
 		return fmt.Errorf("no btree context available")
 	}
@@ -729,34 +695,25 @@ func (v *VDBE) execOpenWrite(instr *Instruction) error {
 		return fmt.Errorf("invalid btree context type")
 	}
 
-	// Allocate cursors if needed
-	if err := v.AllocCursors(instr.P1 + 1); err != nil {
+	if err := v.AllocCursors(cursorNum + 1); err != nil {
 		return err
 	}
 
-	// Store table metadata if available (for handling ALTER TABLE ADD COLUMN defaults)
-	table := v.findTableByRootPage(uint32(instr.P2))
-
-	// Check if this is a WITHOUT ROWID table
+	table := v.findTableByRootPage(rootPage)
 	isWithoutRowID := v.isTableWithoutRowID(table)
+	btCursor := btree.NewCursorWithOptions(bt, rootPage, isWithoutRowID)
 
-	// Create btree cursor with composite key mode for WITHOUT ROWID tables
-	btCursor := btree.NewCursorWithOptions(bt, uint32(instr.P2), isWithoutRowID)
-
-	// Create VDBE cursor with writable flag set
-	cursor := &Cursor{
+	v.Cursors[cursorNum] = &Cursor{
 		CurType:      CursorBTree,
 		IsTable:      true,
-		Writable:     true, // Mark as writable for write operations
+		Writable:     writable,
 		WithoutRowID: isWithoutRowID,
-		RootPage:     uint32(instr.P2),
+		RootPage:     rootPage,
 		BtreeCursor:  btCursor,
 		CachedCols:   make([][]byte, 0),
 		CacheStatus:  0,
 		Table:        table,
 	}
-
-	v.Cursors[instr.P1] = cursor
 	return nil
 }
 
@@ -1808,22 +1765,16 @@ func decodeSerialIntValue(data []byte, offset int, st uint64) int64 {
 }
 
 // parseSignedInt24 decodes a 3-byte big-endian signed integer.
+// Delegates to decodeInt24Value in record.go.
 func parseSignedInt24(data []byte) int64 {
-	v := int32(data[0])<<16 | int32(data[1])<<8 | int32(data[2])
-	if v&0x800000 != 0 {
-		v |= ^0xffffff // Sign extend
-	}
-	return int64(v)
+	v, _ := decodeInt24Value(data, 0)
+	return v
 }
 
 // parseSignedInt48 decodes a 6-byte big-endian signed integer.
+// Delegates to decodeInt48Value in record.go.
 func parseSignedInt48(data []byte) int64 {
-	v := int64(data[0])<<40 | int64(data[1])<<32 |
-		int64(data[2])<<24 | int64(data[3])<<16 |
-		int64(data[4])<<8 | int64(data[5])
-	if v&0x800000000000 != 0 {
-		v |= ^0xffffffffffff // Sign extend
-	}
+	v, _ := decodeInt48Value(data, 0)
 	return v
 }
 
@@ -1948,24 +1899,10 @@ func (v *VDBE) execMakeRecord(instr *Instruction) error {
 	return nil
 }
 
-// memToInterface converts a Mem value to a Go interface{}
+// memToInterface converts a Mem value to a Go interface{}.
+// This delegates to memToGoValue which is the canonical implementation.
 func memToInterface(m *Mem) interface{} {
-	if m == nil || m.IsNull() {
-		return nil
-	}
-	if m.IsInt() {
-		return m.IntValue()
-	}
-	if m.IsReal() {
-		return m.RealValue()
-	}
-	if m.IsString() {
-		return m.StrValue()
-	}
-	if m.IsBlob() {
-		return m.BlobValue()
-	}
-	return nil
+	return memToGoValue(m)
 }
 
 // ParseRecordColumn is an exported wrapper for parseRecordColumn.
@@ -2553,18 +2490,18 @@ func (v *VDBE) extractRowValues(cursor *Cursor, btCursor *btree.BtCursor, tableN
 
 // serialDecoder maps serial types 0-11 to their decode functions.
 var serialDecoders = [12]func([]byte) (interface{}, int){
-	0:  func(_ []byte) (interface{}, int) { return nil, 0 },                          // NULL
-	1:  decodeInt8,                                                                    // 8-bit signed
-	2:  decodeInt16,                                                                   // 16-bit signed
-	3:  decodeInt24,                                                                   // 24-bit signed
-	4:  decodeInt32,                                                                   // 32-bit signed
-	5:  decodeInt48,                                                                   // 48-bit signed
-	6:  decodeInt64,                                                                   // 64-bit signed
-	7:  serialDecodeFloat64,                                                             // IEEE 754 float
-	8:  func(_ []byte) (interface{}, int) { return int64(0), 0 },                     // constant 0
-	9:  func(_ []byte) (interface{}, int) { return int64(1), 0 },                     // constant 1
-	10: func(_ []byte) (interface{}, int) { return nil, 0 },                          // reserved
-	11: func(_ []byte) (interface{}, int) { return nil, 0 },                          // reserved
+	0:  func(_ []byte) (interface{}, int) { return nil, 0 },      // NULL
+	1:  decodeInt8,                                               // 8-bit signed
+	2:  decodeInt16,                                              // 16-bit signed
+	3:  decodeInt24,                                              // 24-bit signed
+	4:  decodeInt32,                                              // 32-bit signed
+	5:  decodeInt48,                                              // 48-bit signed
+	6:  decodeInt64,                                              // 64-bit signed
+	7:  serialDecodeFloat64,                                      // IEEE 754 float
+	8:  func(_ []byte) (interface{}, int) { return int64(0), 0 }, // constant 0
+	9:  func(_ []byte) (interface{}, int) { return int64(1), 0 }, // constant 1
+	10: func(_ []byte) (interface{}, int) { return nil, 0 },      // reserved
+	11: func(_ []byte) (interface{}, int) { return nil, 0 },      // reserved
 }
 
 func decodeInt8(data []byte) (interface{}, int) {

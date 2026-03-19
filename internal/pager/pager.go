@@ -238,8 +238,8 @@ func OpenWithLRUCache(filename string, readOnly bool, pageSize int, cacheConfig 
 	return pager, nil
 }
 
-// newPager creates a new Pager instance.
-func newPager(filename string, pageSize int, readOnly bool) *Pager {
+// newPagerBase creates a new Pager with the given cache implementation.
+func newPagerBase(filename string, pageSize int, readOnly bool, cache PageCacheInterface) *Pager {
 	pager := &Pager{
 		filename:        filename,
 		journalFilename: filename + "-journal",
@@ -248,7 +248,7 @@ func newPager(filename string, pageSize int, readOnly bool) *Pager {
 		readOnly:        readOnly,
 		state:           PagerStateOpen,
 		lockState:       LockNone,
-		cache:           NewPageCache(pageSize, DefaultCacheSize),
+		cache:           cache,
 		maxPageNum:      0x7FFFFFFF,
 	}
 	// Initialize free list (will be loaded from header later)
@@ -256,27 +256,16 @@ func newPager(filename string, pageSize int, readOnly bool) *Pager {
 	return pager
 }
 
+// newPager creates a new Pager instance.
+func newPager(filename string, pageSize int, readOnly bool) *Pager {
+	return newPagerBase(filename, pageSize, readOnly, NewPageCache(pageSize, DefaultCacheSize))
+}
+
 // newPagerWithLRUCache creates a new Pager instance with an LRU cache.
 func newPagerWithLRUCache(filename string, pageSize int, readOnly bool, cacheConfig LRUCacheConfig) *Pager {
-	// Ensure page size matches
 	cacheConfig.PageSize = pageSize
-
 	lruCache, _ := NewLRUCache(cacheConfig)
-
-	pager := &Pager{
-		filename:        filename,
-		journalFilename: filename + "-journal",
-		pageSize:        pageSize,
-		journalMode:     JournalModeDelete,
-		readOnly:        readOnly,
-		state:           PagerStateOpen,
-		lockState:       LockNone,
-		cache:           lruCache,
-		maxPageNum:      0x7FFFFFFF,
-	}
-	// Initialize free list (will be loaded from header later)
-	pager.freeList = NewFreeList(pager)
-	return pager
+	return newPagerBase(filename, pageSize, readOnly, lruCache)
 }
 
 // openFile opens the database file.
@@ -909,9 +898,7 @@ func (p *Pager) writePage(page *DbPage) error {
 	}
 
 	offset := int64(page.Pgno-1) * int64(p.pageSize)
-	dataCopy := make([]byte, p.pageSize)
-	copy(dataCopy, page.Data[:p.pageSize])
-	if _, err := p.file.WriteAt(dataCopy, offset); err != nil {
+	if _, err := p.file.WriteAt(page.Data[:p.pageSize], offset); err != nil {
 		return fmt.Errorf("failed to write page %d: %w", page.Pgno, err)
 	}
 

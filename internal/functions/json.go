@@ -1107,7 +1107,9 @@ func wrapFloats(data interface{}) interface{} {
 	}
 }
 
-// deepCopy creates a deep copy of a JSON-compatible data structure
+// deepCopy creates a deep copy of a JSON-compatible data structure.
+// Primitive types (string, float64, bool, json.Number) are immutable
+// and returned directly without marshaling overhead.
 func deepCopy(data interface{}) interface{} {
 	if data == nil {
 		return nil
@@ -1115,7 +1117,7 @@ func deepCopy(data interface{}) interface{} {
 
 	switch v := data.(type) {
 	case map[string]interface{}:
-		result := make(map[string]interface{})
+		result := make(map[string]interface{}, len(v))
 		for k, val := range v {
 			result[k] = deepCopy(val)
 		}
@@ -1127,11 +1129,8 @@ func deepCopy(data interface{}) interface{} {
 		}
 		return result
 	default:
-		// Primitive types are copied by value
-		// Marshal and unmarshal to ensure deep copy
-		b, _ := json.Marshal(v)
-		var result interface{}
-		json.Unmarshal(b, &result)
-		return result
+		// Primitive types (string, float64, bool, json.Number) are
+		// immutable in Go and safe to share without copying.
+		return data
 	}
 }

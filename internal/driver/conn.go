@@ -806,9 +806,9 @@ type ConnRowReader struct {
 	conn *Conn
 }
 
-// RowExists checks if a row exists with the given column values.
-func (r *ConnRowReader) RowExists(table string, columns []string, values []interface{}) (bool, error) {
-	// Create a minimal VDBE context to use the row reader
+// newRowReader creates a VDBERowReader backed by a minimal VDBE context.
+// This avoids repeating the same VDBE construction in every ConnRowReader method.
+func (r *ConnRowReader) newRowReader() *vdbe.VDBERowReader {
 	v := &vdbe.VDBE{
 		Ctx: &vdbe.VDBEContext{
 			Schema:             r.conn.schema,
@@ -819,44 +819,22 @@ func (r *ConnRowReader) RowExists(table string, columns []string, values []inter
 		},
 		Cursors: make([]*vdbe.Cursor, 10),
 	}
+	return vdbe.NewVDBERowReader(v)
+}
 
-	reader := vdbe.NewVDBERowReader(v)
-	return reader.RowExists(table, columns, values)
+// RowExists checks if a row exists with the given column values.
+func (r *ConnRowReader) RowExists(table string, columns []string, values []interface{}) (bool, error) {
+	return r.newRowReader().RowExists(table, columns, values)
 }
 
 // RowExistsWithCollation checks if a row exists using specified collations.
 func (r *ConnRowReader) RowExistsWithCollation(table string, columns []string, values []interface{}, collations []string) (bool, error) {
-	v := &vdbe.VDBE{
-		Ctx: &vdbe.VDBEContext{
-			Schema:             r.conn.schema,
-			Btree:              r.conn.btree,
-			Pager:              r.conn.pager,
-			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
-			FKManager:          r.conn.fkManager,
-		},
-		Cursors: make([]*vdbe.Cursor, 10),
-	}
-
-	reader := vdbe.NewVDBERowReader(v)
-	return reader.RowExistsWithCollation(table, columns, values, collations)
+	return r.newRowReader().RowExistsWithCollation(table, columns, values, collations)
 }
 
 // FindReferencingRows finds all rows that reference the given values.
 func (r *ConnRowReader) FindReferencingRows(table string, columns []string, values []interface{}) ([]int64, error) {
-	// Create a minimal VDBE context
-	v := &vdbe.VDBE{
-		Ctx: &vdbe.VDBEContext{
-			Schema:             r.conn.schema,
-			Btree:              r.conn.btree,
-			Pager:              r.conn.pager,
-			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
-			FKManager:          r.conn.fkManager,
-		},
-		Cursors: make([]*vdbe.Cursor, 10),
-	}
-
-	reader := vdbe.NewVDBERowReader(v)
-	return reader.FindReferencingRows(table, columns, values)
+	return r.newRowReader().FindReferencingRows(table, columns, values)
 }
 
 // FindReferencingRowsWithParentAffinity finds all rows that reference the given values,
@@ -868,38 +846,12 @@ func (r *ConnRowReader) FindReferencingRowsWithParentAffinity(
 	parentTableName string,
 	parentColumns []string,
 ) ([]int64, error) {
-	// Create a minimal VDBE context
-	v := &vdbe.VDBE{
-		Ctx: &vdbe.VDBEContext{
-			Schema:             r.conn.schema,
-			Btree:              r.conn.btree,
-			Pager:              r.conn.pager,
-			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
-			FKManager:          r.conn.fkManager,
-		},
-		Cursors: make([]*vdbe.Cursor, 10),
-	}
-
-	reader := vdbe.NewVDBERowReader(v)
-	return reader.FindReferencingRowsWithParentAffinity(childTableName, childColumns, parentValues, parentTableName, parentColumns)
+	return r.newRowReader().FindReferencingRowsWithParentAffinity(childTableName, childColumns, parentValues, parentTableName, parentColumns)
 }
 
 // ReadRowByRowid reads a row's values by its rowid.
 func (r *ConnRowReader) ReadRowByRowid(table string, rowid int64) (map[string]interface{}, error) {
-	// Create a minimal VDBE context
-	v := &vdbe.VDBE{
-		Ctx: &vdbe.VDBEContext{
-			Schema:             r.conn.schema,
-			Btree:              r.conn.btree,
-			Pager:              r.conn.pager,
-			ForeignKeysEnabled: r.conn.foreignKeysEnabled,
-			FKManager:          r.conn.fkManager,
-		},
-		Cursors: make([]*vdbe.Cursor, 10),
-	}
-
-	reader := vdbe.NewVDBERowReader(v)
-	return reader.ReadRowByRowid(table, rowid)
+	return r.newRowReader().ReadRowByRowid(table, rowid)
 }
 
 // DatabaseExecutor implementation for FTS5/R-Tree shadow table operations.

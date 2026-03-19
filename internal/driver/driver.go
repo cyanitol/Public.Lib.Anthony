@@ -225,31 +225,19 @@ func (d *Driver) buildConnection(filename string, state *dbState, secCfg *securi
 
 // createMemoryConnection creates a new in-memory database connection.
 func (d *Driver) createMemoryConnection(memoryID string, state *dbState, config *DriverConfig) (driver.Conn, error) {
-	// Use provided security config or default
 	secCfg := config.Security
 	if secCfg == nil {
 		secCfg = security.DefaultSecurityConfig()
 	}
 
-	conn := &Conn{
-		driver:         d,
-		filename:       memoryID,
-		pager:          state.pager,
-		btree:          state.btree,
-		schema:         state.schema,
-		dbRegistry:     schema.NewDatabaseRegistry(),
-		stmts:          make(map[*Stmt]struct{}),
-		stmtCache:      NewStmtCache(100), // Default cache size of 100
-		writeMu:        &state.writeMu,
-		securityConfig: secCfg,
-	}
+	conn := d.buildConnection(memoryID, state, secCfg)
+
 	// Memory databases are always new, so schema never pre-loaded
 	if err := conn.openDatabase(false); err != nil {
 		state.pager.Close()
 		return nil, fmt.Errorf("failed to initialize memory database: %w", err)
 	}
 
-	// Apply DSN configuration settings via PRAGMA statements
 	if err := conn.applyConfig(config); err != nil {
 		state.pager.Close()
 		return nil, fmt.Errorf("failed to apply configuration: %w", err)

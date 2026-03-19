@@ -21,6 +21,15 @@ func RegisterAggregateFunctions(r *Registry) {
 	r.Register(&JSONGroupObjectFunc{})
 }
 
+// toFloat64 converts a non-null Value to float64, preferring the integer
+// representation for TypeInteger values to avoid precision loss.
+func toFloat64(v Value) float64 {
+	if v.Type() == TypeInteger {
+		return float64(v.AsInt64())
+	}
+	return v.AsFloat64()
+}
+
 // Resettable defines the interface for types that can be reset.
 type Resettable interface {
 	Reset()
@@ -179,16 +188,7 @@ func (f *TotalFunc) Step(args []Value) error {
 	if args[0].IsNull() {
 		return nil
 	}
-
-	switch args[0].Type() {
-	case TypeInteger:
-		f.sum += float64(args[0].AsInt64())
-	case TypeFloat:
-		f.sum += args[0].AsFloat64()
-	default:
-		f.sum += args[0].AsFloat64()
-	}
-
+	f.sum += toFloat64(args[0])
 	return nil
 }
 
@@ -216,18 +216,8 @@ func (f *AvgFunc) Step(args []Value) error {
 	if args[0].IsNull() {
 		return nil
 	}
-
 	f.count++
-
-	switch args[0].Type() {
-	case TypeInteger:
-		f.sum += float64(args[0].AsInt64())
-	case TypeFloat:
-		f.sum += args[0].AsFloat64()
-	default:
-		f.sum += args[0].AsFloat64()
-	}
-
+	f.sum += toFloat64(args[0])
 	return nil
 }
 
@@ -542,5 +532,3 @@ func maxScalarFunc(args []Value) (Value, error) {
 
 	return maxVal, nil
 }
-
-

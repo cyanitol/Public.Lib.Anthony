@@ -798,7 +798,7 @@ func (s *Stmt) emitExplainRow(vm *vdbe.VDBE, addr int, instr *vdbe.Instruction) 
 	vm.AddOp(vdbe.OpInteger, instr.P3, 4, 0)
 	vm.AddOpWithP4Str(vdbe.OpString8, 0, 5, 0, formatP4(instr))
 	vm.AddOp(vdbe.OpInteger, int(instr.P5), 6, 0)
-	vm.AddOpWithP4Str(vdbe.OpString8, 0, 7, 0, getComment(instr))
+	vm.AddOpWithP4Str(vdbe.OpString8, 0, 7, 0, instr.Comment)
 	vm.AddOp(vdbe.OpResultRow, 0, 8, 0)
 }
 
@@ -813,14 +813,6 @@ func formatP4(instr *vdbe.Instruction) string {
 		return fmt.Sprintf("%g", instr.P4.R)
 	case vdbe.P4Static, vdbe.P4Dynamic:
 		return instr.P4.Z
-	}
-	return ""
-}
-
-// getComment returns the comment or empty string
-func getComment(instr *vdbe.Instruction) string {
-	if instr.Comment != "" {
-		return instr.Comment
 	}
 	return ""
 }

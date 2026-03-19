@@ -475,7 +475,7 @@ func (c *Compiler) CompileUpdate(stmt *parser.UpdateStmt) (*vdbe.VDBE, error) {
 	}
 
 	// Setup cursor and code generator
-	cursorIdx := c.setupUpdateCursor(vm, stmt.Table, table, numCols)
+	cursorIdx := c.setupWriteCursor(vm, stmt.Table, table, numCols*2+20, "UPDATE")
 	codegen := createCodeGenerator(vm, stmt.Table, table, cursorIdx)
 
 	// Setup table scan loop
@@ -507,13 +507,14 @@ func (c *Compiler) validateAndGetTable(tableName string) (*schema.Table, int, er
 	return table, len(table.Columns), nil
 }
 
-// setupUpdateCursor sets up the cursor for UPDATE operation.
-func (c *Compiler) setupUpdateCursor(vm *vdbe.VDBE, tableName string, table *schema.Table, numCols int) int {
-	vm.AllocMemory(numCols*2 + 20) // Extra registers for temps, SET expressions, etc.
+// setupWriteCursor allocates memory registers, opens a write cursor, and
+// returns the cursor index.
+func (c *Compiler) setupWriteCursor(vm *vdbe.VDBE, tableName string, table *schema.Table, numRegs int, operation string) int {
+	vm.AllocMemory(numRegs)
 	cursorIdx := 0
 	vm.AllocCursors(1)
 	vm.AddOp(vdbe.OpOpenWrite, cursorIdx, int(table.RootPage), 0)
-	vm.SetComment(vm.NumOps()-1, fmt.Sprintf("Open cursor for UPDATE on %s", tableName))
+	vm.SetComment(vm.NumOps()-1, fmt.Sprintf("Open cursor for %s on %s", operation, tableName))
 	return cursorIdx
 }
 
@@ -644,7 +645,7 @@ func (c *Compiler) CompileDelete(stmt *parser.DeleteStmt) (*vdbe.VDBE, error) {
 	}
 
 	// Setup cursor and code generator
-	cursorIdx := c.setupDeleteCursor(vm, stmt.Table, table, numCols)
+	cursorIdx := c.setupWriteCursor(vm, stmt.Table, table, numCols+10, "DELETE")
 	codegen := createCodeGenerator(vm, stmt.Table, table, cursorIdx)
 
 	// Setup table scan loop
@@ -664,16 +665,6 @@ func (c *Compiler) CompileDelete(stmt *parser.DeleteStmt) (*vdbe.VDBE, error) {
 
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	return vm, nil
-}
-
-// setupDeleteCursor sets up the cursor for DELETE operation.
-func (c *Compiler) setupDeleteCursor(vm *vdbe.VDBE, tableName string, table *schema.Table, numCols int) int {
-	vm.AllocMemory(numCols + 10) // Extra registers for temps
-	cursorIdx := 0
-	vm.AllocCursors(1)
-	vm.AddOp(vdbe.OpOpenWrite, cursorIdx, int(table.RootPage), 0)
-	vm.SetComment(vm.NumOps()-1, fmt.Sprintf("Open cursor for DELETE on %s", tableName))
-	return cursorIdx
 }
 
 // compileDeleteWhere compiles the WHERE clause for DELETE.

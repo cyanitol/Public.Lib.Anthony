@@ -395,13 +395,7 @@ func (c *BtCursor) populateRightPage(newPage *BtreePage, cells [][]byte, medianI
 
 // defragmentBothLeafPages defragments both pages after redistribution.
 func (c *BtCursor) defragmentBothLeafPages(oldPage, newPage *BtreePage) error {
-	if err := oldPage.Defragment(); err != nil {
-		return fmt.Errorf("failed to defragment left page: %w", err)
-	}
-	if err := newPage.Defragment(); err != nil {
-		return fmt.Errorf("failed to defragment right page: %w", err)
-	}
-	return nil
+	return c.defragmentBothPages(oldPage, newPage)
 }
 
 // redistributeInteriorCells distributes cells between left and right interior pages
@@ -955,7 +949,6 @@ func (c *BtCursor) createNewRoot(leftPage, rightPage uint32, dividerKey int64, d
 	c.RootPage = newRootNum
 	return nil
 }
-
 
 // populateNewRoot inserts the divider cell and sets right child.
 func (c *BtCursor) populateNewRoot(newRoot *BtreePage, newRootNum, leftPage, rightPage uint32, dividerKey int64, dividerKeyBytes []byte) error {

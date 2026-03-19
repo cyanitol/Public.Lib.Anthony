@@ -746,19 +746,9 @@ func (c *BtCursor) seekLeafPage(pageData []byte, header *PageHeader, pageNum uin
 }
 
 // seekLeafPageComposite positions the cursor on a leaf page for composite keys.
+// The logic is identical to seekLeafPage.
 func (c *BtCursor) seekLeafPageComposite(pageData []byte, header *PageHeader, pageNum uint32, idx int, exactMatch bool) (bool, error) {
-	c.CurrentPage = pageNum
-	c.CurrentIndex = idx
-	c.CurrentHeader = header
-	c.IndexStack[c.Depth] = idx
-
-	if exactMatch && idx < int(header.NumCells) {
-		return c.seekLeafExactMatch(pageData, header, idx)
-	}
-
-	c.State = CursorValid
-	c.tryLoadCell(pageData, header, idx)
-	return false, nil
+	return c.seekLeafPage(pageData, header, pageNum, idx, exactMatch)
 }
 
 // seekLeafExactMatch loads the cell at idx and marks the cursor valid on an

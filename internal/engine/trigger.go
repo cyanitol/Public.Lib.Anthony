@@ -32,10 +32,9 @@ func NewTriggerExecutor(ctx *TriggerContext) *TriggerExecutor {
 	return &TriggerExecutor{ctx: ctx}
 }
 
-// ExecuteBeforeTriggers executes all BEFORE triggers for the given event.
+// executeTriggers executes all triggers matching the given timing and event.
 // Returns an error if any trigger fails.
-func (te *TriggerExecutor) ExecuteBeforeTriggers(event parser.TriggerEvent, updatedColumns []string) error {
-	timing := parser.TriggerBefore
+func (te *TriggerExecutor) executeTriggers(timing parser.TriggerTiming, event parser.TriggerEvent, updatedColumns []string, label string) error {
 	triggers := te.ctx.Schema.GetTableTriggers(te.ctx.TableName, &timing, &event)
 
 	for _, trigger := range triggers {
@@ -55,72 +54,30 @@ func (te *TriggerExecutor) ExecuteBeforeTriggers(event parser.TriggerEvent, upda
 
 		// Execute trigger body
 		if err := te.executeTriggerBody(trigger); err != nil {
-			return fmt.Errorf("error executing BEFORE trigger %s: %w", trigger.Name, err)
+			return fmt.Errorf("error executing %s trigger %s: %w", label, trigger.Name, err)
 		}
 	}
 
 	return nil
 }
 
+// ExecuteBeforeTriggers executes all BEFORE triggers for the given event.
+// Returns an error if any trigger fails.
+func (te *TriggerExecutor) ExecuteBeforeTriggers(event parser.TriggerEvent, updatedColumns []string) error {
+	return te.executeTriggers(parser.TriggerBefore, event, updatedColumns, "BEFORE")
+}
+
 // ExecuteAfterTriggers executes all AFTER triggers for the given event.
 // Returns an error if any trigger fails.
 func (te *TriggerExecutor) ExecuteAfterTriggers(event parser.TriggerEvent, updatedColumns []string) error {
-	timing := parser.TriggerAfter
-	triggers := te.ctx.Schema.GetTableTriggers(te.ctx.TableName, &timing, &event)
-
-	for _, trigger := range triggers {
-		// Check if trigger matches the updated columns (for UPDATE events)
-		if !trigger.MatchesUpdateColumns(updatedColumns) {
-			continue
-		}
-
-		// Check WHEN clause
-		shouldExecute, err := trigger.ShouldExecuteTrigger(te.ctx.OldRow, te.ctx.NewRow)
-		if err != nil {
-			return fmt.Errorf("error evaluating WHEN clause for trigger %s: %w", trigger.Name, err)
-		}
-		if !shouldExecute {
-			continue
-		}
-
-		// Execute trigger body
-		if err := te.executeTriggerBody(trigger); err != nil {
-			return fmt.Errorf("error executing AFTER trigger %s: %w", trigger.Name, err)
-		}
-	}
-
-	return nil
+	return te.executeTriggers(parser.TriggerAfter, event, updatedColumns, "AFTER")
 }
 
 // ExecuteInsteadOfTriggers executes all INSTEAD OF triggers for the given event.
 // Returns an error if any trigger fails.
 // INSTEAD OF triggers are typically used with views.
 func (te *TriggerExecutor) ExecuteInsteadOfTriggers(event parser.TriggerEvent, updatedColumns []string) error {
-	timing := parser.TriggerInsteadOf
-	triggers := te.ctx.Schema.GetTableTriggers(te.ctx.TableName, &timing, &event)
-
-	for _, trigger := range triggers {
-		// Check if trigger matches the updated columns (for UPDATE events)
-		if !trigger.MatchesUpdateColumns(updatedColumns) {
-			continue
-		}
-
-		// Check WHEN clause
-		shouldExecute, err := trigger.ShouldExecuteTrigger(te.ctx.OldRow, te.ctx.NewRow)
-		if err != nil {
-			return fmt.Errorf("error evaluating WHEN clause for trigger %s: %w", trigger.Name, err)
-		}
-		if !shouldExecute {
-			continue
-		}
-
-		// Execute trigger body
-		if err := te.executeTriggerBody(trigger); err != nil {
-			return fmt.Errorf("error executing INSTEAD OF trigger %s: %w", trigger.Name, err)
-		}
-	}
-
-	return nil
+	return te.executeTriggers(parser.TriggerInsteadOf, event, updatedColumns, "INSTEAD OF")
 }
 
 // executeTriggerBody executes the statements in a trigger's body.
@@ -514,38 +471,34 @@ func (te *TriggerExecutor) executeSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt)
 	return nil
 }
 
-// PrepareOldRow prepares the OLD pseudo-record for trigger execution.
-// For INSERT triggers, OLD is not available.
-// For UPDATE and DELETE triggers, OLD contains the row before the operation.
-func PrepareOldRow(table *schema.Table, rowData map[string]interface{}) map[string]interface{} {
+// preparePseudoRow copies column values from rowData that match the table schema.
+// Returns nil if rowData is nil.
+func preparePseudoRow(table *schema.Table, rowData map[string]interface{}) map[string]interface{} {
 	if rowData == nil {
 		return nil
 	}
 
-	oldRow := make(map[string]interface{})
+	row := make(map[string]interface{})
 	for _, col := range table.Columns {
 		if val, ok := rowData[col.Name]; ok {
-			oldRow[col.Name] = val
+			row[col.Name] = val
 		}
 	}
-	return oldRow
+	return row
+}
+
+// PrepareOldRow prepares the OLD pseudo-record for trigger execution.
+// For INSERT triggers, OLD is not available.
+// For UPDATE and DELETE triggers, OLD contains the row before the operation.
+func PrepareOldRow(table *schema.Table, rowData map[string]interface{}) map[string]interface{} {
+	return preparePseudoRow(table, rowData)
 }
 
 // PrepareNewRow prepares the NEW pseudo-record for trigger execution.
 // For DELETE triggers, NEW is not available.
 // For INSERT and UPDATE triggers, NEW contains the row after the operation.
 func PrepareNewRow(table *schema.Table, rowData map[string]interface{}) map[string]interface{} {
-	if rowData == nil {
-		return nil
-	}
-
-	newRow := make(map[string]interface{})
-	for _, col := range table.Columns {
-		if val, ok := rowData[col.Name]; ok {
-			newRow[col.Name] = val
-		}
-	}
-	return newRow
+	return preparePseudoRow(table, rowData)
 }
 
 // ExecuteTriggersForInsert is a convenience function that executes all triggers for an INSERT operation.

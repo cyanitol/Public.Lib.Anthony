@@ -100,30 +100,33 @@ func (w *WAL) checkpointPassive() (int, int, error) {
 	return framesCheckpointed, framesRemaining, nil
 }
 
-// checkpointFramesPassive handles the frame checkpointing for passive mode.
-func (w *WAL) checkpointFramesPassive(initialFrameCount int) (int, error) {
-	// Open database file if not already open
+// checkpointFramesToDB is the shared implementation for checkpointing frames
+// to the database file. It opens the DB file, builds a page-to-frame map,
+// writes the latest version of each page, and syncs.
+func (w *WAL) checkpointFramesToDB() (int, error) {
 	if err := w.ensureDBFileOpen(); err != nil {
 		return 0, fmt.Errorf("failed to open database file: %w", err)
 	}
 
-	// Build map of page number to latest frame index
 	pageFrames, err := w.buildPageFrameMap()
 	if err != nil {
 		return 0, err
 	}
 
-	// Write frames to database
 	if err := w.writeFramesToDB(pageFrames); err != nil {
 		return 0, err
 	}
 
-	// Sync database file
 	if err := w.dbFile.Sync(); err != nil {
 		return 0, fmt.Errorf("failed to sync database: %w", err)
 	}
 
 	return len(pageFrames), nil
+}
+
+// checkpointFramesPassive handles the frame checkpointing for passive mode.
+func (w *WAL) checkpointFramesPassive(initialFrameCount int) (int, error) {
+	return w.checkpointFramesToDB()
 }
 
 // checkpointFull performs a full checkpoint.
@@ -159,28 +162,7 @@ func (w *WAL) checkpointFull() (int, int, error) {
 
 // checkpointFramesFull handles the frame checkpointing for full mode.
 func (w *WAL) checkpointFramesFull(initialFrameCount int) (int, error) {
-	// Open database file if not already open
-	if err := w.ensureDBFileOpen(); err != nil {
-		return 0, fmt.Errorf("failed to open database file: %w", err)
-	}
-
-	// Build map of page number to latest frame index
-	pageFrames, err := w.buildPageFrameMap()
-	if err != nil {
-		return 0, err
-	}
-
-	// Write frames to database
-	if err := w.writeFramesToDB(pageFrames); err != nil {
-		return 0, err
-	}
-
-	// Sync database file
-	if err := w.dbFile.Sync(); err != nil {
-		return 0, fmt.Errorf("failed to sync database: %w", err)
-	}
-
-	return len(pageFrames), nil
+	return w.checkpointFramesToDB()
 }
 
 // checkpointRestart performs a restart checkpoint.
@@ -215,28 +197,7 @@ func (w *WAL) checkpointRestart() (int, int, error) {
 
 // checkpointFramesForRestart handles the frame checkpointing phase of restart checkpoint.
 func (w *WAL) checkpointFramesForRestart(initialFrameCount int) (int, error) {
-	// Open database file if not already open
-	if err := w.ensureDBFileOpen(); err != nil {
-		return 0, fmt.Errorf("failed to open database file: %w", err)
-	}
-
-	// Build map of page number to latest frame index
-	pageFrames, err := w.buildPageFrameMap()
-	if err != nil {
-		return 0, err
-	}
-
-	// Write frames to database
-	if err := w.writeFramesToDB(pageFrames); err != nil {
-		return 0, err
-	}
-
-	// Sync database file
-	if err := w.dbFile.Sync(); err != nil {
-		return 0, fmt.Errorf("failed to sync database: %w", err)
-	}
-
-	return len(pageFrames), nil
+	return w.checkpointFramesToDB()
 }
 
 // restartWAL resets the WAL file to the beginning with a fresh header.
@@ -297,33 +258,10 @@ func (w *WAL) checkpointTruncate() (int, int, error) {
 
 // checkpointFramesForTruncate handles the frame checkpointing phase of truncate checkpoint.
 func (w *WAL) checkpointFramesForTruncate(initialFrameCount int) (int, error) {
-	// No frames to checkpoint
 	if initialFrameCount == 0 {
 		return 0, nil
 	}
-
-	// Open database file if not already open
-	if err := w.ensureDBFileOpen(); err != nil {
-		return 0, fmt.Errorf("failed to open database file: %w", err)
-	}
-
-	// Build map of page number to latest frame index
-	pageFrames, err := w.buildPageFrameMap()
-	if err != nil {
-		return 0, err
-	}
-
-	// Write frames to database
-	if err := w.writeFramesToDB(pageFrames); err != nil {
-		return 0, err
-	}
-
-	// Sync database file
-	if err := w.dbFile.Sync(); err != nil {
-		return 0, fmt.Errorf("failed to sync database: %w", err)
-	}
-
-	return len(pageFrames), nil
+	return w.checkpointFramesToDB()
 }
 
 // truncateWALFile closes and truncates the WAL file to zero bytes.
