@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
+	sqlpkg "github.com/cyanitol/Public.Lib.Anthony/internal/sql"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
@@ -35,6 +38,19 @@ func (s *Stmt) hasFromSubqueries(stmt *parser.SelectStmt) bool {
 		}
 	}
 
+	return false
+}
+
+// hasFromTableSubqueries checks if any base FROM table (not JOIN) has a subquery.
+func (s *Stmt) hasFromTableSubqueries(stmt *parser.SelectStmt) bool {
+	if stmt.From == nil {
+		return false
+	}
+	for _, table := range stmt.From.Tables {
+		if table.Subquery != nil {
+			return true
+		}
+	}
 	return false
 }
 
@@ -1065,4 +1081,118 @@ func (s *Stmt) compileInSubquery(vm *vdbe.VDBE, leftExpr parser.Expression, subq
 	vm.AddOp(vdbe.OpInteger, 1, targetReg, 0)
 
 	return nil
+}
+
+// materializeDerivedTables pre-executes subqueries in JOIN positions and creates
+// real B-tree temp tables so the normal JOIN path can read from them.
+func (s *Stmt) materializeDerivedTables(stmt *parser.SelectStmt, args []driver.NamedValue) error {
+	if stmt.From == nil {
+		return nil
+	}
+	for i := range stmt.From.Joins {
+		if stmt.From.Joins[i].Table.Subquery == nil {
+			continue
+		}
+		if err := s.materializeSingleDerived(&stmt.From.Joins[i].Table, args); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// materializeSingleDerived compiles+executes a subquery, creates a temp table,
+// and rewrites the table reference.
+func (s *Stmt) materializeSingleDerived(ref *parser.TableOrSubquery, args []driver.NamedValue) error {
+	subVM, err := s.compileSelect(vdbe.New(), ref.Subquery, args)
+	if err != nil {
+		return fmt.Errorf("derived table: %w", err)
+	}
+
+	numCols := len(subVM.ResultCols)
+	rows, err := s.collectRows(subVM, numCols, "derived table")
+	if err != nil {
+		return err
+	}
+
+	alias := ref.Alias
+	if alias == "" {
+		alias = "_derived_0"
+	}
+	tempName := "_dt_" + alias
+
+	tempTable := s.buildDerivedTempTable(tempName, subVM.ResultCols)
+	rootPage, err := s.insertDerivedRows(tempTable, rows)
+	if err != nil {
+		return err
+	}
+	tempTable.RootPage = rootPage
+
+	s.conn.schema.AddTableDirect(tempTable)
+
+	ref.Subquery = nil
+	ref.TableName = tempName
+	ref.Alias = alias
+	return nil
+}
+
+// buildDerivedTempTable creates a schema.Table from result column names.
+func (s *Stmt) buildDerivedTempTable(name string, colNames []string) *schema.Table {
+	cols := make([]*schema.Column, len(colNames))
+	for i, cn := range colNames {
+		cols[i] = &schema.Column{Name: cn, Type: ""}
+	}
+	return &schema.Table{
+		Name:    name,
+		Columns: cols,
+	}
+}
+
+// insertDerivedRows creates a B-tree table and inserts rows, returning the root page.
+func (s *Stmt) insertDerivedRows(table *schema.Table, rows [][]interface{}) (uint32, error) {
+	rootPage, err := s.conn.btree.CreateTable()
+	if err != nil {
+		return 0, fmt.Errorf("create derived table: %w", err)
+	}
+
+	cursor := btree.NewCursor(s.conn.btree, rootPage)
+
+	for i, row := range rows {
+		vals := goValuesToSQLValues(row)
+		payload, err := sqlpkg.MakeRecord(vals)
+		if err != nil {
+			return 0, fmt.Errorf("derived table record %d: %w", i, err)
+		}
+		if err := cursor.Insert(int64(i+1), payload); err != nil {
+			return 0, fmt.Errorf("derived table insert %d: %w", i, err)
+		}
+	}
+
+	return rootPage, nil
+}
+
+// goValuesToSQLValues converts Go interface values to sql.Value slice.
+func goValuesToSQLValues(row []interface{}) []sqlpkg.Value {
+	vals := make([]sqlpkg.Value, len(row))
+	for i, v := range row {
+		vals[i] = goToSQLValue(v)
+	}
+	return vals
+}
+
+// goToSQLValue converts a single Go interface{} to sql.Value.
+func goToSQLValue(v interface{}) sqlpkg.Value {
+	switch val := v.(type) {
+	case nil:
+		return sqlpkg.NullValue()
+	case int64:
+		return sqlpkg.IntValue(val)
+	case float64:
+		return sqlpkg.FloatValue(val)
+	case string:
+		return sqlpkg.TextValue(val)
+	case []byte:
+		return sqlpkg.BlobValue(val)
+	default:
+		return sqlpkg.TextValue(fmt.Sprintf("%v", v))
+	}
 }

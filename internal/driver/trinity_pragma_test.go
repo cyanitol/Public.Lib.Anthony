@@ -30,49 +30,42 @@ func genPragmaTableInfoTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:     "REQ-PRAGMA-001_table_info_basic",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"CREATE TABLE pi1(a INTEGER, b TEXT, c REAL)"},
 			query:    "SELECT name, type FROM pragma_table_info('pi1') ORDER BY cid",
 			wantRows: [][]interface{}{{"a", "INTEGER"}, {"b", "TEXT"}, {"c", "REAL"}},
 		},
 		{
 			name:     "REQ-PRAGMA-002_table_info_notnull",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"CREATE TABLE pi2(a INTEGER NOT NULL, b TEXT)"},
 			query:    "SELECT name, \"notnull\" FROM pragma_table_info('pi2') ORDER BY cid",
 			wantRows: [][]interface{}{{"a", int64(1)}, {"b", int64(0)}},
 		},
 		{
 			name:     "REQ-PRAGMA-003_table_info_default_value",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"CREATE TABLE pi3(a INTEGER DEFAULT 42, b TEXT DEFAULT 'hello')"},
 			query:    "SELECT name, dflt_value FROM pragma_table_info('pi3') ORDER BY cid",
 			wantRows: [][]interface{}{{"a", "42"}, {"b", "'hello'"}},
 		},
 		{
 			name:     "REQ-PRAGMA-004_table_info_pk_flag",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"CREATE TABLE pi4(id INTEGER PRIMARY KEY, v TEXT)"},
 			query:    "SELECT name, pk FROM pragma_table_info('pi4') ORDER BY cid",
 			wantRows: [][]interface{}{{"id", int64(1)}, {"v", int64(0)}},
 		},
 		{
 			name:     "REQ-PRAGMA-005_table_info_column_count",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"CREATE TABLE pi5(a, b, c, d, e)"},
 			query:    "SELECT COUNT(*) FROM pragma_table_info('pi5')",
 			wantRows: [][]interface{}{{int64(5)}},
 		},
 		{
 			name:     "REQ-PRAGMA-006_table_info_empty_type",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"CREATE TABLE pi6(a, b)"},
 			query:    "SELECT name, type FROM pragma_table_info('pi6') ORDER BY cid",
 			wantRows: [][]interface{}{{"a", ""}, {"b", ""}},
 		},
 		{
 			name:     "REQ-PRAGMA-007_table_info_composite_pk",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"CREATE TABLE pi7(a INTEGER, b TEXT, PRIMARY KEY(a, b))"},
 			query:    "SELECT name, pk FROM pragma_table_info('pi7') ORDER BY cid",
 			wantRows: [][]interface{}{{"a", int64(1)}, {"b", int64(2)}},
@@ -88,35 +81,30 @@ func genPragmaIndexListTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:     "REQ-PRAGMA-010_index_list_explicit",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"CREATE TABLE il1(a INTEGER, b TEXT)", "CREATE INDEX idx_il1_a ON il1(a)"},
 			query:    "SELECT name FROM pragma_index_list('il1') WHERE origin='c'",
 			wantRows: [][]interface{}{{"idx_il1_a"}},
 		},
 		{
 			name:     "REQ-PRAGMA-011_index_list_unique",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"CREATE TABLE il2(a INTEGER)", "CREATE UNIQUE INDEX idx_il2_a ON il2(a)"},
 			query:    "SELECT name, \"unique\" FROM pragma_index_list('il2') WHERE origin='c'",
 			wantRows: [][]interface{}{{"idx_il2_a", int64(1)}},
 		},
 		{
 			name:     "REQ-PRAGMA-012_index_list_no_indexes",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"CREATE TABLE il3(a INTEGER)"},
 			query:    "SELECT COUNT(*) FROM pragma_index_list('il3') WHERE origin='c'",
 			wantRows: [][]interface{}{{int64(0)}},
 		},
 		{
 			name:     "REQ-PRAGMA-013_index_list_multiple",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"CREATE TABLE il4(a INTEGER, b TEXT, c REAL)", "CREATE INDEX idx_il4_a ON il4(a)", "CREATE INDEX idx_il4_b ON il4(b)"},
 			query:    "SELECT COUNT(*) FROM pragma_index_list('il4') WHERE origin='c'",
 			wantRows: [][]interface{}{{int64(2)}},
 		},
 		{
 			name:     "REQ-PRAGMA-014_index_list_partial",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"CREATE TABLE il5(a INTEGER, b TEXT)", "CREATE INDEX idx_il5_p ON il5(a) WHERE a > 0"},
 			query:    "SELECT partial FROM pragma_index_list('il5') WHERE name='idx_il5_p'",
 			wantRows: [][]interface{}{{int64(1)}},
@@ -132,19 +120,16 @@ func genPragmaDatabaseListTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:     "REQ-PRAGMA-020_database_list_main",
-			skip:     "pragma virtual tables not yet implemented",
 			query:    "SELECT name FROM pragma_database_list WHERE seq=0",
 			wantRows: [][]interface{}{{"main"}},
 		},
 		{
 			name:     "REQ-PRAGMA-021_database_list_has_seq",
-			skip:     "pragma virtual tables not yet implemented",
 			query:    "SELECT COUNT(*) FROM pragma_database_list WHERE seq >= 0",
 			wantRows: [][]interface{}{{int64(1)}},
 		},
 		{
 			name:     "REQ-PRAGMA-022_database_list_columns",
-			skip:     "pragma virtual tables not yet implemented",
 			query:    "SELECT seq, name FROM pragma_database_list WHERE name='main'",
 			wantRows: [][]interface{}{{int64(0), "main"}},
 		},
@@ -159,7 +144,6 @@ func genPragmaForeignKeysTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name: "REQ-PRAGMA-030_fk_list_basic",
-			skip: "pragma virtual tables not yet implemented",
 			setup: []string{
 				"CREATE TABLE fkp(id INTEGER PRIMARY KEY)",
 				"CREATE TABLE fkc(id INTEGER, pid INTEGER REFERENCES fkp(id))",
@@ -169,14 +153,12 @@ func genPragmaForeignKeysTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-PRAGMA-031_fk_list_no_fks",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"CREATE TABLE fkn(a INTEGER)"},
 			query:    "SELECT COUNT(*) FROM pragma_foreign_key_list('fkn')",
 			wantRows: [][]interface{}{{int64(0)}},
 		},
 		{
 			name: "REQ-PRAGMA-032_fk_list_multiple",
-			skip: "pragma virtual tables not yet implemented",
 			setup: []string{
 				"CREATE TABLE fkm_p1(id INTEGER PRIMARY KEY)",
 				"CREATE TABLE fkm_p2(id INTEGER PRIMARY KEY)",
@@ -187,7 +169,6 @@ func genPragmaForeignKeysTests() []sqlTestCase {
 		},
 		{
 			name: "REQ-PRAGMA-033_fk_list_on_delete",
-			skip: "pragma virtual tables not yet implemented",
 			setup: []string{
 				"CREATE TABLE fkd_p(id INTEGER PRIMARY KEY)",
 				"CREATE TABLE fkd_c(id INTEGER, pid INTEGER REFERENCES fkd_p(id) ON DELETE CASCADE)",
@@ -197,7 +178,6 @@ func genPragmaForeignKeysTests() []sqlTestCase {
 		},
 		{
 			name: "REQ-PRAGMA-034_fk_list_on_update",
-			skip: "pragma virtual tables not yet implemented",
 			setup: []string{
 				"CREATE TABLE fku_p(id INTEGER PRIMARY KEY)",
 				"CREATE TABLE fku_c(id INTEGER, pid INTEGER REFERENCES fku_p(id) ON UPDATE SET NULL)",
@@ -216,34 +196,29 @@ func genPragmaCacheSizeTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:     "REQ-PRAGMA-040_cache_size_default",
-			skip:     "pragma virtual tables not yet implemented",
 			query:    "PRAGMA cache_size",
 			wantRows: [][]interface{}{{int64(-2000)}},
 		},
 		{
 			name:     "REQ-PRAGMA-041_cache_size_set_positive",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"PRAGMA cache_size=500"},
 			query:    "PRAGMA cache_size",
 			wantRows: [][]interface{}{{int64(500)}},
 		},
 		{
 			name:     "REQ-PRAGMA-042_cache_size_set_negative_kb",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"PRAGMA cache_size=-4000"},
 			query:    "PRAGMA cache_size",
 			wantRows: [][]interface{}{{int64(-4000)}},
 		},
 		{
 			name:     "REQ-PRAGMA-043_cache_size_reset",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"PRAGMA cache_size=100", "PRAGMA cache_size=-2000"},
 			query:    "PRAGMA cache_size",
 			wantRows: [][]interface{}{{int64(-2000)}},
 		},
 		{
 			name:     "REQ-PRAGMA-044_cache_size_set_one",
-			skip:     "pragma virtual tables not yet implemented",
 			setup:    []string{"PRAGMA cache_size=1"},
 			query:    "PRAGMA cache_size",
 			wantRows: [][]interface{}{{int64(1)}},

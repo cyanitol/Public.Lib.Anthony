@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-03-16
+
+### Added
+- **100% Trinity Test Parity** - All 1,257 DO-178C trace tests passing, 0 skipped
+- **Correlated TVF Cross-Joins** - `FROM table, json_each(table.col)` with per-row TVF evaluation
+- **Derived Table Materialization** - Subqueries in JOIN positions materialized as B-tree temp tables
+- **Window Function State Isolation** - Multiple OVER clauses correctly maintain separate state
+- **IPK-Aware Table Reading** - INTEGER PRIMARY KEY columns correctly read via OpRowid in table scans
+- **Flat Row Aggregation** - Aggregate queries over correlated TVF joins use full column names
+
+### Fixed
+- Window functions: SUM() OVER() returned running sum instead of grand total when combined with ROW_NUMBER()
+- Window functions: only state 0 received partition data; all states now fed in collect loop
+- Derived tables: CTE rewrite approach returned 0 rows; replaced with direct B-tree materialization
+- Correlated TVF: IPK column values read as NULL; now uses OpRowid for IPK, adjusted record column indices
+- Correlated TVF aggregates: COUNT/COUNT(DISTINCT) returned 0 because aggregate used projected column names instead of full joined column names
+- Cyclomatic complexity: extractLeadingNumeric (13→8), getJSONType (12→11), handleSpecialSelectTypes (12→9)
+
+### Test Status
+- **1,257** trinity tests passing, **0** skipped (was 1,177 passing, 80 skipped)
+- **0** failures across all packages
+- All cyclomatic complexity ≤ 11
+
 ## [0.2.2] - 2026-03-16
 
 ### Added

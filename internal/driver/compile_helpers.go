@@ -27,6 +27,11 @@ type stmtTableInfo struct {
 // compileSelectWithJoins compiles a SELECT statement with JOIN clauses
 // and implicit cross joins (comma-separated tables in FROM).
 func (s *Stmt) compileSelectWithJoins(vm *vdbe.VDBE, stmt *parser.SelectStmt, tableName string, table *schema.Table, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	// Materialize derived tables (subqueries in JOIN position) into real temp tables
+	if err := s.materializeDerivedTables(stmt, args); err != nil {
+		return nil, err
+	}
+
 	// Collect all tables involved in the query
 	tables, err := s.collectJoinTables(stmt, tableName, table)
 	if err != nil {

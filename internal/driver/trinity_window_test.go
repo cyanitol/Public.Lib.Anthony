@@ -463,7 +463,7 @@ func genWindowAggregateTests() []sqlTestCase {
 		},
 		{
 			name:  "REQ-WIN-069_multiple_windows_one_query",
-			skip:  "SUM(salary) OVER () returns running sum instead of grand total when combined with ROW_NUMBER() OVER (ORDER BY ...) — different OVER clauses share accumulator state",
+
 			setup: ws,
 			query: "SELECT name, ROW_NUMBER() OVER (ORDER BY salary DESC) AS rn, SUM(salary) OVER () AS total FROM w ORDER BY salary DESC LIMIT 3",
 			wantRows: [][]interface{}{

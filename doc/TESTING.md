@@ -43,8 +43,8 @@ The Anthony SQLite driver has comprehensive test coverage across all components.
 
 **Test Statistics:**
 - 300+ test files across 27 packages
-- 14,046 tests passing with 0 failures (alltests tag)
-- 1,073 trinity (DO-178C trace) tests passing
+- 14,072+ tests passing with 0 failures (alltests tag)
+- 1,257 trinity (DO-178C trace) tests passing (100% parity, 0 skipped)
 - Comprehensive coverage of parser, VDBE, pager, btree, and driver layers
 - Security-focused tests for attack vectors and edge cases
 - Fuzz tests for parser and record decoder

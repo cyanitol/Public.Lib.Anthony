@@ -10,8 +10,9 @@ type PagerConfig struct {
 	// Default is 4096.
 	PageSize int
 
-	// CacheSize is the number of pages to keep in the page cache.
-	// Default is 2000 pages.
+	// CacheSize is the suggested cache size.
+	// Negative values are in KiB; positive values are in pages.
+	// Default is -2000 (2000 KiB).
 	CacheSize int
 
 	// JournalMode specifies the journaling mode for transactions.
@@ -64,7 +65,7 @@ type PagerConfig struct {
 func DefaultPagerConfig() *PagerConfig {
 	return &PagerConfig{
 		PageSize:          4096,
-		CacheSize:         2000,
+		CacheSize:         -2000,
 		JournalMode:       "delete",
 		SyncMode:          "full",
 		LockingMode:       "normal",

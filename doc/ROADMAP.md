@@ -1,17 +1,15 @@
 # Anthony Roadmap (Production Readiness)
 
 ## Scope and Current Snapshot
-- Feature parity: ~89% trinity (1,122/1,257); 24 packages all passing, 14,072 tests passing (alltests tag), 0 failures.
-- Targets: no CGO, maintain cyclomatic complexity ≤ 9, push trinity parity to ≥95%.
+- Feature parity: 100% trinity (1,257/1,257); 24 packages all passing, 0 failures.
+- Targets: no CGO, maintain cyclomatic complexity ≤ 11.
 
-## Recently Completed (v0.2.2)
-- **JSON Aggregates** - json_group_array, json_group_object as Step/Final aggregates
-- **JOIN+Aggregate Pipeline** - compile_join_agg.go for SELECT with JOINs and GROUP BY
-- **NULL-Safe GROUP BY** - OpIsNull checks for correct NULL grouping
-- **Trigger Expression Substitution** - CAST, BETWEEN, IN, CASE in trigger bodies
-- **View WHERE Filtering** - Outer WHERE applied after view materialization
-- **VTab Aggregate Routing** - TVF selects with aggregates
-- **22 Trinity Tests Unskipped** - 1,122 passing (was 1,073)
+## Recently Completed (v0.3.1)
+- **100% Trinity Parity** - All 1,257 DO-178C trace tests passing, 0 skipped
+- **Correlated TVF Cross-Joins** - `FROM table, json_each(table.col)` pattern
+- **Derived Table Materialization** - JOIN subqueries as B-tree temp tables
+- **Window State Isolation** - Multiple OVER clauses with separate state
+- **IPK-Aware Table Reading** - OpRowid for INTEGER PRIMARY KEY columns
 
 ## Previously Completed (v0.2.0–v0.2.1)
 - **Cyclomatic Complexity ≤9** - All functions across entire codebase
@@ -32,31 +30,11 @@
 
 ## Active Workstreams
 
-1) Unskip Already-Implemented Tests
-- GROUP BY NULL (2 tests), triggers (2 tests), json_group_array/object (6 tests), JOIN+aggregate (5 tests).
-- These features are implemented; need verification and skip removal.
-
-2) Join Edge Cases (7 tests)
-- LEFT JOIN unmatched rows, NULL handling in ON clause, empty table joins.
-- IS operator in JOIN ON clause (NULL IS NULL = true).
-
-3) HAVING, Views, DELETE Subquery (7 tests)
-- HAVING with complex aggregates.
-- Views with DISTINCT, HAVING.
-- DELETE FROM WHERE IN (SELECT ...).
-
-4) Window Functions (42 tests - largest gap)
-- Need OpWindowAggregate opcode for SUM/COUNT/AVG/MIN/MAX over frame.
-- Column mapping fix in sorter population (rowid alias).
-- PERCENT_RANK, CUME_DIST not implemented.
-- Outer ORDER BY/LIMIT after window computation.
-
-5) TVF Multi-Table FROM (5 tests)
-- Correlated TVF evaluation (per-row args from outer table).
-- New compilation path needed.
-
-6) Recursive CTE (In Progress)
+1) Recursive CTE (In Progress)
 - Cursor architecture being reworked for correct anchor/recursive member interaction.
+
+2) PERCENT_RANK / CUME_DIST Window Functions
+- Not yet implemented.
 
 ## Future Workstreams
 

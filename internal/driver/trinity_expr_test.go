@@ -165,7 +165,6 @@ func genArithStringCoerce() []sqlTestCase {
 		},
 		{
 			name:     "REQ-EXPR-005_arith_string_coerce/partial_numeric_string",
-			skip:     "engine does not extract leading digits from partial numeric strings",
 			query:    "SELECT '5abc' + 1",
 			wantRows: [][]interface{}{{int64(6)}},
 		},
@@ -762,7 +761,6 @@ func genLikeTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-EXPR-062_like/escape_percent",
-			skip:     "LIKE ESCAPE clause not yet supported by parser",
 			query:    "SELECT '10%' LIKE '10\\%%' ESCAPE '\\'",
 			wantRows: [][]interface{}{{int64(1)}},
 		},
@@ -793,13 +791,11 @@ func genGlobTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-EXPR-063_glob/bracket_range",
-			skip:     "GLOB bracket ranges not yet implemented",
 			query:    "SELECT 'a' GLOB '[a-z]'",
 			wantRows: [][]interface{}{{int64(1)}},
 		},
 		{
 			name:     "REQ-EXPR-063_glob/bracket_no_match",
-			skip:     "GLOB bracket ranges not yet implemented",
 			query:    "SELECT 'A' GLOB '[a-z]'",
 			wantRows: [][]interface{}{{int64(0)}},
 		},

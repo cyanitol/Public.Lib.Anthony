@@ -29,7 +29,7 @@ From an SQL perspective, virtual tables work like regular tables with some limit
 - Cannot use ALTER TABLE ... ADD COLUMN
 - Individual implementations may be read-only or have restricted UPDATE/DELETE support
 
-**Status**: Partially Implemented
+**Status**: Implemented (json_each, json_tree with correlated cross-joins; FTS5/R-Tree at module level)
 
 ## Virtual Table Basics
 

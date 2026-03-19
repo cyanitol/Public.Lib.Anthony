@@ -1459,13 +1459,14 @@ func (v *VDBE) parseColumnIntoMem(payload []byte, colIndex int, dst *Mem, cursor
 
 // applyDefaultValueIfAvailable applies a default value from schema if available.
 // This is used when reading columns that were added via ALTER TABLE ADD COLUMN.
-func (v *VDBE) applyDefaultValueIfAvailable(colIndex int, dst *Mem, tableInterface interface{}) {
-	// Define interfaces that schema.Table and schema.Column implement
-	// to avoid import cycle
+// recordIdx is the B-tree record column index (which skips IPK columns).
+func (v *VDBE) applyDefaultValueIfAvailable(recordIdx int, dst *Mem, tableInterface interface{}) {
 	type colDefault interface {
 		GetDefault() interface{}
 	}
-
+	type colIsRowid interface {
+		IsIntegerPrimaryKey() bool
+	}
 	type tblColumns interface {
 		GetColumns() []interface{}
 	}
@@ -1476,11 +1477,12 @@ func (v *VDBE) applyDefaultValueIfAvailable(colIndex int, dst *Mem, tableInterfa
 	}
 
 	cols := tbl.GetColumns()
-	if colIndex < 0 || colIndex >= len(cols) {
+	schemaIdx := recordIdxToSchemaIdx(cols, recordIdx)
+	if schemaIdx < 0 || schemaIdx >= len(cols) {
 		return
 	}
 
-	col, ok := cols[colIndex].(colDefault)
+	col, ok := cols[schemaIdx].(colDefault)
 	if !ok {
 		return
 	}
@@ -1490,10 +1492,29 @@ func (v *VDBE) applyDefaultValueIfAvailable(colIndex int, dst *Mem, tableInterfa
 		return
 	}
 
-	// Parse the default value string and set it in dst
 	if defaultStr, ok := defaultVal.(string); ok {
 		v.parseDefaultValue(defaultStr, dst)
 	}
+}
+
+// recordIdxToSchemaIdx converts a B-tree record index to a schema column
+// index by accounting for INTEGER PRIMARY KEY columns that are stored as
+// the rowid and not present in the record.
+func recordIdxToSchemaIdx(cols []interface{}, recordIdx int) int {
+	type colIsRowid interface {
+		IsIntegerPrimaryKey() bool
+	}
+	ri := 0
+	for i, c := range cols {
+		if ipk, ok := c.(colIsRowid); ok && ipk.IsIntegerPrimaryKey() {
+			continue // IPK not in record
+		}
+		if ri == recordIdx {
+			return i
+		}
+		ri++
+	}
+	return -1
 }
 
 // parseDefaultValue parses a DEFAULT value string and stores it in dst.
@@ -4837,7 +4858,7 @@ func explicitCastToInteger(mem *Mem) error {
 		mem.SetInt(int64(mem.RealValue()))
 		return nil
 	}
-	// String or blob: try to parse, default to 0
+	// String or blob: try to parse, extract leading numeric, default to 0
 	str := string(mem.BlobValue())
 	if val, err := strconv.ParseInt(str, 10, 64); err == nil {
 		mem.SetInt(val)
@@ -4846,6 +4867,13 @@ func explicitCastToInteger(mem *Mem) error {
 	if val, err := strconv.ParseFloat(str, 64); err == nil {
 		mem.SetInt(int64(val))
 		return nil
+	}
+	// SQLite extracts leading numeric prefix: "123abc" → 123
+	if prefix := extractLeadingNumeric(str); prefix != "" {
+		if val, err := strconv.ParseFloat(prefix, 64); err == nil {
+			mem.SetInt(int64(val))
+			return nil
+		}
 	}
 	mem.SetInt(0)
 	return nil
@@ -6661,9 +6689,9 @@ func (v *VDBE) getCollationRegistry() interface{} {
 }
 
 // execWindowAggregate implements OpWindowAggregate - aggregate window functions over frame rows.
-// P1 = result register, P3 = arg column index in partition data, P4.Z = function name
+// P1 = result register, P2 = window state index, P3 = arg column index in partition data, P4.Z = function name
 func (v *VDBE) execWindowAggregate(instr *Instruction) error {
-	ws, err := v.getWindowState(0)
+	ws, err := v.getWindowState(instr.P2)
 	if err != nil {
 		return err
 	}

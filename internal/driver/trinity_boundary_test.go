@@ -79,14 +79,12 @@ func genBoundaryArithEdgeTests() []sqlTestCase {
 		{
 			name:     "REQ-TBND-020_max_plus_one_overflow",
 			query:    "SELECT 9223372036854775807 + 1",
-			wantRows: [][]interface{}{{-9.223372036854776e+18}},
-			skip:     "known integer overflow to float",
+			wantRows: [][]interface{}{{9.223372036854776e+18}},
 		},
 		{
 			name:     "REQ-TBND-021_min_minus_one_overflow",
 			query:    "SELECT -9223372036854775808 - 1",
-			wantRows: [][]interface{}{{9.223372036854776e+18}},
-			skip:     "known integer overflow to float",
+			wantRows: [][]interface{}{{-9.223372036854776e+18}},
 		},
 		{
 			name:     "REQ-TBND-022_div_by_zero_int",
@@ -107,7 +105,6 @@ func genBoundaryArithEdgeTests() []sqlTestCase {
 			name:     "REQ-TBND-025_neg_div_pos_trunc",
 			query:    "SELECT -7 / 2",
 			wantRows: [][]interface{}{{int64(-3)}},
-			skip:     "known integer division truncation direction",
 		},
 		{
 			name:     "REQ-TBND-027_max_negate",
@@ -185,25 +182,21 @@ func genBoundaryFloatTests() []sqlTestCase {
 			name:     "REQ-TBND-032_float_very_small",
 			query:    "SELECT 1e-300",
 			wantRows: [][]interface{}{{1e-300}},
-			skip:     "known very small float precision",
 		},
 		{
 			name:     "REQ-TBND-033_float_very_large",
 			query:    "SELECT 1e300",
 			wantRows: [][]interface{}{{1e300}},
-			skip:     "known very large float precision",
 		},
 		{
 			name:     "REQ-TBND-034_float_inf_via_overflow",
 			query:    "SELECT 1e308 * 2",
 			wantRows: [][]interface{}{{math.Inf(1)}},
-			skip:     "known inf handling",
 		},
 		{
 			name:     "REQ-TBND-035_float_neg_inf_via_overflow",
 			query:    "SELECT -1e308 * 2",
 			wantRows: [][]interface{}{{math.Inf(-1)}},
-			skip:     "known inf handling",
 		},
 		{
 			name:     "REQ-TBND-036_typeof_real",
@@ -297,8 +290,7 @@ func genBoundaryLimitTests() []sqlTestCase {
 			wantRows: [][]interface{}{},
 		},
 		{
-			name:  "REQ-TBND-051_limit_negative_returns_all",
-			skip:  "engine rejects negative LIMIT values",
+			name: "REQ-TBND-051_limit_negative_returns_all",
 			setup: fiveRowSetup,
 			query: "SELECT v FROM bnd_lim ORDER BY v LIMIT -1",
 			wantRows: [][]interface{}{

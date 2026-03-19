@@ -89,7 +89,6 @@ func genDDLConstraintTests() []sqlTestCase {
 			},
 			exec: "INSERT INTO t1 VALUES(2, 'B')"},
 		{name: "REQ-DDL-014_default_value",
-			skip: "engine gap: column-list INSERT does not apply DEFAULT values",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER PRIMARY KEY, status TEXT DEFAULT 'active')",
 				"INSERT INTO t1(id) VALUES(1)",
@@ -97,7 +96,6 @@ func genDDLConstraintTests() []sqlTestCase {
 			query:    "SELECT status FROM t1 WHERE id = 1",
 			wantRows: [][]interface{}{{"active"}}},
 		{name: "REQ-DDL-015_default_integer",
-			skip: "engine gap: column-list INSERT does not apply DEFAULT values",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER PRIMARY KEY, qty INTEGER DEFAULT 0)",
 				"INSERT INTO t1(id) VALUES(1)",
@@ -105,7 +103,6 @@ func genDDLConstraintTests() []sqlTestCase {
 			query:    "SELECT qty FROM t1 WHERE id = 1",
 			wantRows: [][]interface{}{{int64(0)}}},
 		{name: "REQ-DDL-016_check_constraint_reject",
-			skip:    "engine gap: CHECK constraints not enforced",
 			setup:   []string{"CREATE TABLE t1(id INTEGER PRIMARY KEY, age INTEGER CHECK(age >= 0))"},
 			exec:    "INSERT INTO t1 VALUES(1, -1)",
 			wantErr: true, errLike: "CHECK"},
@@ -113,7 +110,6 @@ func genDDLConstraintTests() []sqlTestCase {
 			setup: []string{"CREATE TABLE t1(id INTEGER PRIMARY KEY, age INTEGER CHECK(age >= 0))"},
 			exec:  "INSERT INTO t1 VALUES(1, 10)"},
 		{name: "REQ-DDL-018_multiple_constraints",
-			skip: "engine gap: column-list INSERT does not apply DEFAULT values",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, age INTEGER CHECK(age > 0) DEFAULT 1)",
 				"INSERT INTO t1(id, name) VALUES(1, 'Alice')",
@@ -136,7 +132,6 @@ func genDDLCompositePKTests() []sqlTestCase {
 				{"one-one"}, {"one-two"},
 			}},
 		{name: "REQ-DDL-021_composite_pk_unique",
-			skip: "engine gap: composite PRIMARY KEY uniqueness not enforced",
 			setup: []string{
 				"CREATE TABLE t1(a INTEGER, b INTEGER, c TEXT, PRIMARY KEY(a, b))",
 				"INSERT INTO t1 VALUES(1, 1, 'first')",
@@ -163,7 +158,6 @@ func genDDLIfNotExistsTests() []sqlTestCase {
 			setup: []string{"CREATE TABLE t1(id INTEGER PRIMARY KEY)"},
 			exec:  "CREATE TABLE IF NOT EXISTS t1(id INTEGER PRIMARY KEY)"},
 		{name: "REQ-DDL-027_if_not_exists_preserves_data",
-			skip: "engine gap: CREATE TABLE IF NOT EXISTS does not preserve existing data",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER PRIMARY KEY, val TEXT)",
 				"INSERT INTO t1 VALUES(1, 'kept')",
@@ -200,7 +194,6 @@ func genDDLAlterTableTests() []sqlTestCase {
 			query:    "SELECT new_col FROM t1",
 			wantRows: [][]interface{}{{"hi"}}},
 		{name: "REQ-DDL-033_alter_add_column",
-			skip: "engine gap: ALTER TABLE ADD COLUMN does not backfill DEFAULT for existing rows",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER PRIMARY KEY)",
 				"INSERT INTO t1 VALUES(1)",
@@ -266,7 +259,6 @@ func genDDLIndexTests() []sqlTestCase {
 			setup: baseSetup,
 			exec:  "CREATE UNIQUE INDEX idx_name_u ON t1(name)"},
 		{name: "REQ-DDL-052_unique_index_enforced",
-			skip: "engine gap: UNIQUE index constraint not enforced on INSERT",
 			setup: append(append([]string{}, baseSetup...),
 				"CREATE UNIQUE INDEX idx_name_u ON t1(name)"),
 			exec:    "INSERT INTO t1 VALUES(3, 'Alice', 40)",

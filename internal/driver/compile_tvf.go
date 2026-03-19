@@ -610,3 +610,554 @@ func resolveTVFValue(expr parser.Expression, row []functions.Value, cols []strin
 		return functions.NewNullValue()
 	}
 }
+
+// hasCorrelatedTVF detects FROM table, tvf(column_ref) pattern.
+func (s *Stmt) hasCorrelatedTVF(stmt *parser.SelectStmt) bool {
+	if stmt.From == nil || len(stmt.From.Tables) < 2 {
+		return false
+	}
+	for i := 1; i < len(stmt.From.Tables); i++ {
+		ref := &stmt.From.Tables[i]
+		if ref.FuncArgs != nil && s.lookupTVF(ref.TableName) != nil {
+			if s.hasColumnRefArg(ref.FuncArgs) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasColumnRefArg checks if any argument contains a column reference.
+func (s *Stmt) hasColumnRefArg(args []parser.Expression) bool {
+	for _, arg := range args {
+		if _, ok := arg.(*parser.IdentExpr); ok {
+			return true
+		}
+		if ident, ok := arg.(*parser.IdentExpr); ok && ident.Table != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// compileCorrelatedTVFJoin compiles a cross-join between a table and a correlated TVF
+// by pre-executing the join at compile time.
+func (s *Stmt) compileCorrelatedTVFJoin(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
+	vm.SetReadOnly(true)
+
+	outerRef := &stmt.From.Tables[0]
+	tvfRef := s.findCorrelatedTVFRef(stmt)
+	if tvfRef == nil {
+		return nil, fmt.Errorf("correlated TVF not found")
+	}
+
+	tvf := s.lookupTVF(tvfRef.TableName)
+	tvfCols := tvf.Columns()
+
+	outerTable, _, _, ok := s.conn.dbRegistry.ResolveTable(outerRef.Schema, outerRef.TableName)
+	if !ok {
+		return nil, fmt.Errorf("table not found: %s", outerRef.TableName)
+	}
+
+	outerAlias := outerRef.TableName
+	if outerRef.Alias != "" {
+		outerAlias = outerRef.Alias
+	}
+	tvfAlias := tvfRef.TableName
+	if tvfRef.Alias != "" {
+		tvfAlias = tvfRef.Alias
+	}
+
+	// Read all rows from the outer table
+	outerRows, err := s.readAllTableRows(outerTable)
+	if err != nil {
+		return nil, err
+	}
+
+	// For each outer row, evaluate TVF args and call TVF
+	joined := s.crossJoinWithTVF(outerRows, outerTable, tvfRef, tvf, args)
+
+	// Build flat joined rows with full column names for filtering/aggregation
+	flatCols := buildFlatColNames(outerTable, tvfCols)
+	flatRows := flattenCorrelatedRows(joined, outerTable, tvfCols)
+
+	// Apply WHERE filter on full joined data
+	if stmt.Where != nil {
+		flatRows = filterTVFRows(flatRows, stmt.Where, flatCols)
+	}
+
+	// Handle aggregates on full joined data
+	if s.detectAggregates(stmt) {
+		outCols := s.resolveCorrelatedOutputCols(stmt.Columns, outerTable, tvfCols, outerAlias, tvfAlias)
+		return s.emitCorrelatedAggregate(vm, flatRows, stmt, outCols, flatCols)
+	}
+
+	// Resolve output columns and project for non-aggregate queries
+	outCols := s.resolveCorrelatedOutputCols(stmt.Columns, outerTable, tvfCols, outerAlias, tvfAlias)
+	projected := projectFlatRows(flatRows, stmt.Columns, outerTable, tvfCols, flatCols)
+
+	// Apply DISTINCT
+	if stmt.Distinct {
+		projected = deduplicateTVFRows(projected)
+	}
+
+	// Apply ORDER BY
+	if len(stmt.OrderBy) > 0 {
+		sortTVFRows(projected, stmt.OrderBy, outCols)
+	}
+
+	// Apply LIMIT
+	if stmt.Limit != nil {
+		projected = applyTVFLimit(projected, stmt.Limit)
+	}
+
+	return emitTVFProjectedBytecode(vm, projected, outCols)
+}
+
+// findCorrelatedTVFRef finds the TVF table reference in the FROM clause.
+func (s *Stmt) findCorrelatedTVFRef(stmt *parser.SelectStmt) *parser.TableOrSubquery {
+	for i := 1; i < len(stmt.From.Tables); i++ {
+		ref := &stmt.From.Tables[i]
+		if ref.FuncArgs != nil && s.lookupTVF(ref.TableName) != nil {
+			return ref
+		}
+	}
+	return nil
+}
+
+// readAllTableRows reads all rows from a table using a fresh VM.
+// Handles INTEGER PRIMARY KEY columns correctly by using OpRowid.
+func (s *Stmt) readAllTableRows(table *schema.Table) ([][]interface{}, error) {
+	readVM := vdbe.New()
+	numCols := len(table.Columns)
+	readVM.AllocMemory(numCols + 5)
+	readVM.AllocCursors(1)
+	readVM.AddOp(vdbe.OpInit, 0, 0, 0)
+	readVM.AddOp(vdbe.OpOpenRead, 0, int(table.RootPage), numCols)
+	rewindAddr := readVM.AddOp(vdbe.OpRewind, 0, 0, 0)
+
+	// Find IPK column (if any) — its value is the rowid, not in the record
+	ipkIdx := -1
+	for i, col := range table.Columns {
+		if col.IsIntegerPrimaryKey() {
+			ipkIdx = i
+			break
+		}
+	}
+
+	recordCol := 0
+	for i := 0; i < numCols; i++ {
+		if i == ipkIdx {
+			readVM.AddOp(vdbe.OpRowid, 0, i, 0)
+		} else {
+			readVM.AddOp(vdbe.OpColumn, 0, recordCol, i)
+			recordCol++
+		}
+	}
+
+	readVM.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+	readVM.AddOp(vdbe.OpNext, 0, rewindAddr+1, 0)
+	readVM.Program[rewindAddr].P2 = readVM.NumOps()
+	readVM.AddOp(vdbe.OpHalt, 0, 0, 0)
+	readVM.Program[0].P2 = 1
+
+	readVM.Ctx = &vdbe.VDBEContext{
+		Btree:  s.conn.btree,
+		Schema: s.conn.schema,
+	}
+
+	return s.collectRows(readVM, numCols, "outer table read")
+}
+
+// crossJoinWithTVF evaluates the TVF for each outer row and cross-joins.
+// Returns []struct{outerRow, tvfRow}.
+func (s *Stmt) crossJoinWithTVF(outerRows [][]interface{}, outerTable *schema.Table,
+	tvfRef *parser.TableOrSubquery, tvf functions.TableValuedFunction,
+	args []driver.NamedValue) []correlatedRow {
+
+	var result []correlatedRow
+	for _, outerRow := range outerRows {
+		tvfArgs := s.evalCorrelatedArgs(tvfRef.FuncArgs, outerRow, outerTable, args)
+		tvfRows, err := tvf.Open(tvfArgs)
+		if err != nil {
+			continue
+		}
+		for _, tvfRow := range tvfRows {
+			result = append(result, correlatedRow{outer: outerRow, tvf: tvfRow})
+		}
+	}
+	return result
+}
+
+// correlatedRow holds one combined row from the correlated TVF join.
+type correlatedRow struct {
+	outer []interface{}
+	tvf   []functions.Value
+}
+
+// buildFlatColNames builds column names for the flattened joined row: outer cols + TVF cols.
+func buildFlatColNames(outerTable *schema.Table, tvfCols []string) []string {
+	cols := make([]string, 0, len(outerTable.Columns)+len(tvfCols))
+	for _, c := range outerTable.Columns {
+		cols = append(cols, c.Name)
+	}
+	cols = append(cols, tvfCols...)
+	return cols
+}
+
+// flattenCorrelatedRows converts correlatedRow pairs into flat value rows.
+func flattenCorrelatedRows(rows []correlatedRow, outerTable *schema.Table, tvfCols []string) [][]functions.Value {
+	result := make([][]functions.Value, len(rows))
+	for i, r := range rows {
+		flat := make([]functions.Value, 0, len(outerTable.Columns)+len(tvfCols))
+		for _, v := range r.outer {
+			flat = append(flat, goToFuncValue(v))
+		}
+		flat = append(flat, r.tvf...)
+		result[i] = flat
+	}
+	return result
+}
+
+// projectFlatRows projects flat joined rows to SELECT output columns.
+func projectFlatRows(rows [][]functions.Value, cols []parser.ResultColumn,
+	outerTable *schema.Table, tvfCols, flatCols []string) [][]functions.Value {
+
+	result := make([][]functions.Value, len(rows))
+	for i, row := range rows {
+		projected := make([]functions.Value, len(cols))
+		for j, col := range cols {
+			projected[j] = resolveFlatCol(col, row, flatCols)
+		}
+		result[i] = projected
+	}
+	return result
+}
+
+// resolveFlatCol resolves a single SELECT column from a flat row.
+func resolveFlatCol(col parser.ResultColumn, row []functions.Value, flatCols []string) functions.Value {
+	switch e := col.Expr.(type) {
+	case *parser.IdentExpr:
+		lower := strings.ToLower(e.Name)
+		for i, name := range flatCols {
+			if strings.ToLower(name) == lower && i < len(row) {
+				return row[i]
+			}
+		}
+	}
+	return functions.NewNullValue()
+}
+
+// evalCorrelatedArgs evaluates TVF arguments, resolving column references against the outer row.
+func (s *Stmt) evalCorrelatedArgs(exprs []parser.Expression, outerRow []interface{},
+	outerTable *schema.Table, args []driver.NamedValue) []functions.Value {
+
+	result := make([]functions.Value, len(exprs))
+	for i, e := range exprs {
+		result[i] = s.evalCorrelatedArg(e, outerRow, outerTable, args)
+	}
+	return result
+}
+
+// evalCorrelatedArg evaluates a single TVF argument expression.
+func (s *Stmt) evalCorrelatedArg(e parser.Expression, outerRow []interface{},
+	outerTable *schema.Table, args []driver.NamedValue) functions.Value {
+
+	switch expr := e.(type) {
+	case *parser.LiteralExpr:
+		return literalToFuncValue(expr)
+	case *parser.IdentExpr:
+		return s.resolveColumnToFuncValue(expr.Name, outerRow, outerTable)
+	case *parser.VariableExpr:
+		val, err := variableToFuncValue(expr, args)
+		if err != nil {
+			return functions.NewNullValue()
+		}
+		return val
+	default:
+		return functions.NewNullValue()
+	}
+}
+
+// resolveColumnToFuncValue looks up a column value in the outer row.
+func (s *Stmt) resolveColumnToFuncValue(colName string, outerRow []interface{}, table *schema.Table) functions.Value {
+	lower := strings.ToLower(colName)
+	for i, col := range table.Columns {
+		if strings.ToLower(col.Name) == lower && i < len(outerRow) {
+			return goToFuncValue(outerRow[i])
+		}
+	}
+	return functions.NewNullValue()
+}
+
+// goToFuncValue converts a Go interface{} to functions.Value.
+func goToFuncValue(v interface{}) functions.Value {
+	switch val := v.(type) {
+	case nil:
+		return functions.NewNullValue()
+	case int64:
+		return functions.NewIntValue(val)
+	case float64:
+		return functions.NewFloatValue(val)
+	case string:
+		return functions.NewTextValue(val)
+	case []byte:
+		return functions.NewBlobValue(val)
+	default:
+		return functions.NewTextValue(fmt.Sprintf("%v", v))
+	}
+}
+
+// resolveCorrelatedOutputCols resolves output column names for the correlated join.
+func (s *Stmt) resolveCorrelatedOutputCols(cols []parser.ResultColumn,
+	outerTable *schema.Table, tvfCols []string, outerAlias, tvfAlias string) []string {
+
+	var out []string
+	for _, col := range cols {
+		out = append(out, resolveCorrelatedColName(col, outerTable, tvfCols, outerAlias, tvfAlias))
+	}
+	return out
+}
+
+// resolveCorrelatedColName resolves a single column name.
+func resolveCorrelatedColName(col parser.ResultColumn, outerTable *schema.Table,
+	tvfCols []string, outerAlias, tvfAlias string) string {
+
+	if col.Alias != "" {
+		return col.Alias
+	}
+	if col.Star {
+		return "*"
+	}
+	switch e := col.Expr.(type) {
+	case *parser.IdentExpr:
+		return e.Name
+	case *parser.FunctionExpr:
+		return e.Name
+	default:
+		return "expr"
+	}
+}
+
+// applyTVFLimit applies LIMIT to TVF rows.
+func applyTVFLimit(rows [][]functions.Value, limitExpr parser.Expression) [][]functions.Value {
+	limit := parseLimitExpr(limitExpr)
+	if limit < 0 || limit >= len(rows) {
+		return rows
+	}
+	return rows[:limit]
+}
+
+// emitCorrelatedAggregate handles aggregate queries over correlated TVF results.
+// outCols are the SELECT output names; flatCols are the full joined column names.
+func (s *Stmt) emitCorrelatedAggregate(vm *vdbe.VDBE, rows [][]functions.Value,
+	stmt *parser.SelectStmt, outCols, flatCols []string) (*vdbe.VDBE, error) {
+
+	// For GROUP BY, partition rows and compute aggregates
+	if len(stmt.GroupBy) > 0 {
+		return s.emitCorrelatedGroupByAggregate(vm, rows, stmt, outCols, flatCols)
+	}
+
+	// Simple aggregate: COUNT(*), COUNT(DISTINCT x), etc.
+	numCols := len(stmt.Columns)
+	vm.AllocMemory(numCols + 5)
+	vm.ResultCols = make([]string, numCols)
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	for i, col := range stmt.Columns {
+		vm.ResultCols[i] = resolveAggColName(col)
+		val := s.computeAggregate(col, rows, flatCols)
+		emitFuncValue(vm, val, i)
+	}
+
+	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	vm.Program[0].P2 = 1
+	return vm, nil
+}
+
+// resolveAggColName resolves the name for an aggregate column.
+func resolveAggColName(col parser.ResultColumn) string {
+	if col.Alias != "" {
+		return col.Alias
+	}
+	if fn, ok := col.Expr.(*parser.FunctionExpr); ok {
+		return fn.Name
+	}
+	return "expr"
+}
+
+// computeAggregate computes a single aggregate value over all rows.
+func (s *Stmt) computeAggregate(col parser.ResultColumn, rows [][]functions.Value, colNames []string) functions.Value {
+	fn, ok := col.Expr.(*parser.FunctionExpr)
+	if !ok {
+		return functions.NewNullValue()
+	}
+
+	name := strings.ToUpper(fn.Name)
+	switch name {
+	case "COUNT":
+		if fn.Star {
+			return functions.NewIntValue(int64(len(rows)))
+		}
+		if fn.Distinct {
+			return s.computeCountDistinct(fn, rows, colNames)
+		}
+		return s.computeCount(fn, rows, colNames)
+	default:
+		return functions.NewNullValue()
+	}
+}
+
+// computeCount computes COUNT(expr) over rows.
+func (s *Stmt) computeCount(fn *parser.FunctionExpr, rows [][]functions.Value, colNames []string) functions.Value {
+	colIdx := s.findTVFColIdx(fn.Args, colNames)
+	count := int64(0)
+	for _, row := range rows {
+		if colIdx >= 0 && colIdx < len(row) && row[colIdx] != nil && row[colIdx].Type() != functions.TypeNull {
+			count++
+		}
+	}
+	return functions.NewIntValue(count)
+}
+
+// computeCountDistinct computes COUNT(DISTINCT expr) over rows.
+func (s *Stmt) computeCountDistinct(fn *parser.FunctionExpr, rows [][]functions.Value, colNames []string) functions.Value {
+	colIdx := s.findTVFColIdx(fn.Args, colNames)
+	seen := make(map[string]bool)
+	for _, row := range rows {
+		if colIdx >= 0 && colIdx < len(row) && row[colIdx] != nil && row[colIdx].Type() != functions.TypeNull {
+			key := row[colIdx].AsString()
+			seen[key] = true
+		}
+	}
+	return functions.NewIntValue(int64(len(seen)))
+}
+
+// findTVFColIdx finds the column index for a function argument.
+func (s *Stmt) findTVFColIdx(fnArgs []parser.Expression, colNames []string) int {
+	if len(fnArgs) == 0 {
+		return -1
+	}
+	switch e := fnArgs[0].(type) {
+	case *parser.IdentExpr:
+		lower := strings.ToLower(e.Name)
+		for i, name := range colNames {
+			if strings.ToLower(name) == lower {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// emitCorrelatedGroupByAggregate handles GROUP BY over correlated TVF results.
+func (s *Stmt) emitCorrelatedGroupByAggregate(vm *vdbe.VDBE, rows [][]functions.Value,
+	stmt *parser.SelectStmt, outCols, flatCols []string) (*vdbe.VDBE, error) {
+
+	// Build group keys using flat column names
+	groupColIdxs := s.resolveGroupByColIdxs(stmt.GroupBy, flatCols)
+	groups := s.groupCorrelatedRows(rows, groupColIdxs)
+
+	numCols := len(stmt.Columns)
+	vm.AllocMemory(numCols + 5)
+	outColNames := make([]string, numCols)
+	for i, col := range stmt.Columns {
+		outColNames[i] = resolveAggColName(col)
+	}
+	vm.ResultCols = outColNames
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+
+	// Sort group keys for deterministic output
+	sortedKeys := s.sortGroupKeys(groups)
+
+	for _, key := range sortedKeys {
+		groupRows := groups[key]
+		for i, col := range stmt.Columns {
+			val := s.evalGroupByCol(col, groupRows, flatCols)
+			emitFuncValue(vm, val, i)
+		}
+		vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
+	}
+
+	// ORDER BY
+	if len(stmt.OrderBy) > 0 {
+		// Already sorted by group keys; for complex ORDER BY we'd need sorting
+	}
+
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	vm.Program[0].P2 = 1
+	return vm, nil
+}
+
+// resolveGroupByColIdxs maps GROUP BY expressions to column indices.
+func (s *Stmt) resolveGroupByColIdxs(groupBy []parser.Expression, colNames []string) []int {
+	var idxs []int
+	for _, expr := range groupBy {
+		switch e := expr.(type) {
+		case *parser.IdentExpr:
+			for i, name := range colNames {
+				if strings.EqualFold(e.Name, name) {
+					idxs = append(idxs, i)
+					break
+				}
+			}
+		}
+	}
+	return idxs
+}
+
+// groupCorrelatedRows groups rows by the specified column indices.
+func (s *Stmt) groupCorrelatedRows(rows [][]functions.Value, groupIdxs []int) map[string][][]functions.Value {
+	groups := make(map[string][][]functions.Value)
+	for _, row := range rows {
+		key := s.makeGroupKey(row, groupIdxs)
+		groups[key] = append(groups[key], row)
+	}
+	return groups
+}
+
+// makeGroupKey creates a string key from the group-by column values.
+func (s *Stmt) makeGroupKey(row []functions.Value, idxs []int) string {
+	parts := make([]string, len(idxs))
+	for i, idx := range idxs {
+		if idx < len(row) && row[idx] != nil {
+			parts[i] = row[idx].AsString()
+		}
+	}
+	return strings.Join(parts, "\x00")
+}
+
+// sortGroupKeys returns group keys in sorted order.
+func (s *Stmt) sortGroupKeys(groups map[string][][]functions.Value) []string {
+	keys := make([]string, 0, len(groups))
+	for k := range groups {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// evalGroupByCol evaluates a column expression for a GROUP BY result.
+func (s *Stmt) evalGroupByCol(col parser.ResultColumn, groupRows [][]functions.Value, colNames []string) functions.Value {
+	_, isFn := col.Expr.(*parser.FunctionExpr)
+	if isFn {
+		return s.computeAggregate(col, groupRows, colNames)
+	}
+
+	// Non-aggregate column: use value from first row in group
+	if len(groupRows) == 0 {
+		return functions.NewNullValue()
+	}
+	firstRow := groupRows[0]
+
+	switch e := col.Expr.(type) {
+	case *parser.IdentExpr:
+		for i, name := range colNames {
+			if strings.EqualFold(e.Name, name) && i < len(firstRow) {
+				return firstRow[i]
+			}
+		}
+	}
+	return functions.NewNullValue()
+}

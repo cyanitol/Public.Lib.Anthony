@@ -27,10 +27,20 @@ func (s *Stmt) compileCreateTable(vm *vdbe.VDBE, stmt *parser.CreateTableStmt, a
 		return nil, err
 	}
 
+	_, alreadyExists := targetSchema.GetTable(stmt.Name)
+
 	table, err := targetSchema.CreateTable(stmt)
 	if err != nil {
 		return nil, err
 	}
+
+	if alreadyExists {
+		// IF NOT EXISTS on existing table — preserve data, skip init.
+		vm.AddOp(vdbe.OpInit, 0, 0, 0)
+		vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+		return vm, nil
+	}
+
 	table.SQL = s.query
 
 	if err := s.initializeNewTable(table, stmt, targetSchema, targetBtree); err != nil {

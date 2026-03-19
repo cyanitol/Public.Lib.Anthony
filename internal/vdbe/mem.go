@@ -205,8 +205,15 @@ func (m *Mem) IntValue() int64 {
 		return int64(m.r)
 	}
 	if m.flags&(MemStr|MemBlob) != 0 {
-		if val, err := strconv.ParseInt(string(m.z), 10, 64); err == nil {
+		s := string(m.z)
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil {
 			return val
+		}
+		// SQLite extracts leading numeric prefix from strings like "5abc"
+		if prefix := extractLeadingNumeric(s); prefix != "" {
+			if val, err := strconv.ParseFloat(prefix, 64); err == nil {
+				return int64(val)
+			}
 		}
 	}
 	return 0
@@ -222,8 +229,15 @@ func (m *Mem) RealValue() float64 {
 		return float64(m.i)
 	}
 	if m.flags&(MemStr|MemBlob) != 0 {
-		if val, err := strconv.ParseFloat(string(m.z), 64); err == nil {
+		s := string(m.z)
+		if val, err := strconv.ParseFloat(s, 64); err == nil {
 			return val
+		}
+		// SQLite extracts leading numeric prefix from strings like "5abc"
+		if prefix := extractLeadingNumeric(s); prefix != "" {
+			if val, err := strconv.ParseFloat(prefix, 64); err == nil {
+				return val
+			}
 		}
 	}
 	return 0.0
@@ -709,6 +723,32 @@ func (m *Mem) ApplyAffinity(affinity byte) error {
 	default:
 		return nil
 	}
+}
+
+// extractLeadingNumeric returns the leading numeric prefix of s.
+// For example, "5abc" → "5", "3.14xyz" → "3.14", "abc" → "".
+func extractLeadingNumeric(s string) string {
+	i := 0
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		i++
+	}
+	start := i
+	i = skipDigits(s, i)
+	if i < len(s) && s[i] == '.' {
+		i = skipDigits(s, i+1)
+	}
+	if i == start {
+		return ""
+	}
+	return s[:i]
+}
+
+// skipDigits advances past consecutive ASCII digits.
+func skipDigits(s string, i int) int {
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	return i
 }
 
 // Add adds two memory cells (this = this + other).

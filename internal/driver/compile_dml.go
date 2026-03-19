@@ -63,6 +63,10 @@ func (s *Stmt) compileInsertValues(vm *vdbe.VDBE, stmt *parser.InsertStmt, table
 	}
 
 	allColNames := allTableColumnNames(table)
+	// If a rowid alias was appended by expandInsertDefaults, include it.
+	if len(expandedValues[0]) > len(table.Columns) {
+		allColNames = append(allColNames, "rowid")
+	}
 	rowidColIdx := findInsertRowidCol(allColNames, table)
 	numRecordCols := insertRecordColCount(expandedValues[0], table, rowidColIdx)
 
@@ -104,8 +108,13 @@ func (s *Stmt) validateAndExpandInsertValues(stmt *parser.InsertStmt, table *sch
 
 	expandedValues := expandInsertDefaults(stmt, table)
 	numCols := len(table.Columns)
+	hasVirtualRowid := findRowidAliasInColumns(stmt.Columns, table) >= 0
 	for _, row := range expandedValues {
-		if len(row) != numCols {
+		expected := numCols
+		if hasVirtualRowid {
+			expected++
+		}
+		if len(row) != expected {
 			return nil, fmt.Errorf("table %s has %d columns but %d values were supplied", table.Name, numCols, len(row))
 		}
 	}
@@ -556,19 +565,25 @@ func resolveInsertColumns(stmt *parser.InsertStmt, table *schema.Table) []string
 }
 
 // findInsertRowidCol returns the index within names of the INTEGER PRIMARY KEY
-// column, or -1 when none exists. For WITHOUT ROWID tables, always returns -1
-// since they don't have a rowid column.
+// column (or explicit rowid alias), or -1 when none exists.
+// For WITHOUT ROWID tables, always returns -1.
 func findInsertRowidCol(names []string, table *schema.Table) int {
 	if table.WithoutRowID {
-		return -1 // WITHOUT ROWID tables don't have a rowid column
+		return -1
 	}
 	for i, name := range names {
 		idx := table.GetColumnIndex(name)
-		if idx < 0 {
-			continue
-		}
-		if schemaColIsRowid(table.Columns[idx]) {
+		if idx >= 0 && schemaColIsRowid(table.Columns[idx]) {
 			return i
+		}
+	}
+	// Check for explicit rowid aliases (rowid, _rowid_, oid) not in schema.
+	for i, name := range names {
+		lower := strings.ToLower(name)
+		if lower == "rowid" || lower == "_rowid_" || lower == "oid" {
+			if table.GetColumnIndex(name) < 0 {
+				return i
+			}
 		}
 	}
 	return -1
@@ -1409,16 +1424,37 @@ func allTableColumnNames(table *schema.Table) []string {
 // expandInsertDefaults expands a partial-column INSERT into a full-column
 // INSERT by filling in DEFAULT values for omitted columns. When the INSERT
 // already specifies all columns, the original values are returned unchanged.
+// If a rowid alias (rowid/_rowid_/oid) is in stmt.Columns but not a real
+// table column, it is appended as an extra trailing element in each row.
 func expandInsertDefaults(stmt *parser.InsertStmt, table *schema.Table) [][]parser.Expression {
 	if len(stmt.Columns) == 0 {
-		return stmt.Values // All columns specified implicitly
+		return stmt.Values
 	}
 	specifiedSet := buildColumnSet(stmt.Columns)
+	rowidStmtIdx := findRowidAliasInColumns(stmt.Columns, table)
 	expanded := make([][]parser.Expression, len(stmt.Values))
 	for i, row := range stmt.Values {
-		expanded[i] = expandSingleRow(row, stmt.Columns, specifiedSet, table)
+		full := expandSingleRow(row, stmt.Columns, specifiedSet, table)
+		if rowidStmtIdx >= 0 && rowidStmtIdx < len(row) {
+			full = append(full, row[rowidStmtIdx])
+		}
+		expanded[i] = full
 	}
 	return expanded
+}
+
+// findRowidAliasInColumns returns the index in cols of an explicit rowid
+// alias that is NOT a real table column, or -1 if none.
+func findRowidAliasInColumns(cols []string, table *schema.Table) int {
+	for i, c := range cols {
+		lower := strings.ToLower(c)
+		if lower == "rowid" || lower == "_rowid_" || lower == "oid" {
+			if table.GetColumnIndex(c) < 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // buildColumnSet creates a set of lower-cased column names for fast lookup.

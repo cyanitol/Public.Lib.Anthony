@@ -61,8 +61,8 @@ func (s *Stmt) handleSpecialSelectTypes(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 	}
 	*stmt = *expandedStmt
 
-	// Handle FROM subqueries
-	if s.hasFromSubqueries(stmt) {
+	// Handle FROM subqueries (but NOT join-only subqueries — those are handled in compileSelectWithJoins)
+	if s.hasFromTableSubqueries(stmt) {
 		result, err := s.compileSelectWithFromSubqueries(vm, stmt, args)
 		return result, err, true
 	}
@@ -73,17 +73,8 @@ func (s *Stmt) handleSpecialSelectTypes(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 		return result, err, true
 	}
 
-	// Handle table-valued functions (e.g., json_each, json_tree)
-	if s.hasTableValuedFunction(stmt) {
-		// If the query has aggregates, materialize TVF into an ephemeral table
-		// and let the aggregate pipeline handle it instead of emitting raw rows.
-		if s.detectAggregates(stmt) {
-			if err := s.materializeTVFAsEphemeral(vm, stmt, args); err != nil {
-				return nil, err, true
-			}
-			return nil, nil, false
-		}
-		result, err := s.compileSelectWithTVF(vm, stmt, args)
+	// Handle table-valued functions (standalone or correlated cross-join)
+	if result, err, handled := s.handleTVFSelect(vm, stmt, args); handled {
 		return result, err, true
 	}
 
@@ -93,6 +84,25 @@ func (s *Stmt) handleSpecialSelectTypes(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 		return result, err, true
 	}
 
+	return nil, nil, false
+}
+
+// handleTVFSelect handles standalone TVFs and correlated TVF cross-joins.
+func (s *Stmt) handleTVFSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	if s.hasTableValuedFunction(stmt) {
+		if s.detectAggregates(stmt) {
+			if err := s.materializeTVFAsEphemeral(vm, stmt, args); err != nil {
+				return nil, err, true
+			}
+			return nil, nil, false
+		}
+		result, err := s.compileSelectWithTVF(vm, stmt, args)
+		return result, err, true
+	}
+	if s.hasCorrelatedTVF(stmt) {
+		result, err := s.compileCorrelatedTVFJoin(vm, stmt, args)
+		return result, err, true
+	}
 	return nil, nil, false
 }
 

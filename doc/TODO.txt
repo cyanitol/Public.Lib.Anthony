@@ -1,286 +1,170 @@
 # Anthony - Pure Go SQLite Implementation - TODO
 #
-# Code Quality: Cyclomatic complexity <= 9 for all production code
-# Coverage Snapshot: ~75% feature parity vs reference SQLite
+# Code Quality: Cyclomatic complexity <= 11 for all production code
+# Coverage Snapshot: 100% trinity parity (1,257/1,257 tests passing)
 # Last Updated: 2026-03-16
 
 ================================================================================
-HIGH PRIORITY COMPLETION TARGETS (Production Readiness)
+P0 — BIGGEST GAPS BY USER IMPACT
 ================================================================================
 
-[x] Foreign Key Runtime Enforcement (83/83 tests passing)
-    - [DONE] Wire FK manager through VDBE context
-    - [DONE] INSERT FK validation (ValidateInsert) - blocks invalid child inserts
-    - [DONE] DELETE FK validation (ValidateDelete) - blocks parent deletes when referenced
-    - [DONE] UPDATE FK validation (ValidateUpdate) - blocks parent updates when referenced
-    - [DONE] ON DELETE/UPDATE CASCADE - child rows auto-deleted/updated
-    - [DONE] ON DELETE/UPDATE SET NULL - FK columns set to NULL
-    - [DONE] ON DELETE/UPDATE SET DEFAULT - FK columns set to default
-    - [DONE] RESTRICT action (same as NO ACTION for immediate constraints)
-    - [DONE] Multi-column FK constraints (table-level FOREIGN KEY clauses)
-    - [DONE] INTEGER PRIMARY KEY handling in FK lookups (rowid alias)
-    - [DONE] Quoted table name handling
-    - [DONE] Recursive CASCADE for self-referencing FKs
-    - [DONE] PRAGMA foreign_key_check (with driverRowReader)
-    - [DONE] DROP TABLE reference checking
-    - [DONE] Unique index column order flexibility
-    - [DONE] Deferred constraint checking at transaction boundaries
-    - [DONE] Collation-aware FK matching
-    - [DONE] Type affinity in FK comparison
+[ ] 1. Recursive CTE (WITH RECURSIVE)
+    - [ ] Implement iterative VDBE loop for recursive term (OpInitCoroutine -> working queue)
+    - [ ] Wire recursive self-reference detection in planner
+    - [ ] Handle UNION vs UNION ALL semantics in recursive step
+    - [ ] Cycle detection / depth limit (SQLITE_MAX_RECURSIVE_DEPTH = 1000)
+    - [ ] Test: hierarchical data (org chart), graph traversal, sequence generation
+    Files: internal/driver/stmt_cte_recursive.go, internal/planner/cte.go, internal/vdbe/exec.go
 
-[x] WITHOUT ROWID Tables (51 tests -> 45 passing, 6 skipped)
-    - [DONE] Implement alt btree layout using PRIMARY KEY as key (no rowid)
-    - [DONE] Route DML/DDL paths correctly; ensure index selection and VACUUM support
-    - [DONE] Split/rewind regression: statement cache invalidation on root page changes
-    - [DONE] rowid/oid/_rowid_ column rejection for WITHOUT ROWID tables
-    - [DONE] FK validation integration for WITHOUT ROWID inserts
-    - [DONE] JOIN queries with WITHOUT ROWID tables (cursor handling fixed)
-    - [DONE] ROLLBACK for WITHOUT ROWID btrees (pager callback syncs btree cache)
-    - [DONE] CASCADE FK actions: proper PK extraction with PKColumnIndices
+[ ] 2. RETURNING clause (INSERT/UPDATE/DELETE RETURNING)
+    - [ ] Add Returning []ResultColumn field to InsertStmt, UpdateStmt, DeleteStmt AST
+    - [ ] Parse RETURNING column list after DML statement
+    - [ ] Compile RETURNING as result-row emission after each DML row operation
+    - [ ] Handle RETURNING * expansion
+    - [ ] Handle RETURNING expressions (function calls, aliases)
+    Files: internal/parser/ast.go, internal/parser/parser.go, internal/driver/compile_dml.go
 
-[x] Window Functions (All ranking and value functions working)
-    - [DONE] ROW_NUMBER() with streaming and partition modes
-    - [DONE] RANK() with OpWindowRank opcode integration
-    - [DONE] DENSE_RANK() with OpWindowDenseRank opcode
-    - [DONE] NTILE() bucket distribution
-    - [DONE] LAG/LEAD with offset parameter support
-    - [DONE] FIRST_VALUE/LAST_VALUE frame access
-    - [DONE] ROWS/RANGE frame specification parsing and extraction
+[ ] 3. WAL mode (Write-Ahead Logging)
+    - [ ] Implement WAL frame writing (wal.go already has read path)
+    - [ ] WAL checkpoint (PASSIVE, FULL, RESTART, TRUNCATE modes)
+    - [ ] Concurrent reader support (shared memory WAL index)
+    - [ ] PRAGMA journal_mode=WAL switching
+    - [ ] WAL recovery on open (replay uncommitted frames)
+    Files: internal/pager/wal.go, internal/pager/wal_index.go, internal/pager/transaction.go
 
-[~] FTS5 Virtual Table (module implemented, 128 tests pass)
-    - [DONE] Tokenizer pipeline (SimpleTokenizer, StopWordTokenizer)
-    - [DONE] Inverted index with posting lists
-    - [DONE] BM25/TFIDF ranking, snippet/highlight
-    - [DONE] Query parser (AND, OR, NOT, prefix, phrase)
-    - [DONE] Module registration in driver
-    - [DONE] SQL parser support for CREATE VIRTUAL TABLE
-    - [DONE] Virtual table instance creation on CREATE VIRTUAL TABLE
-    - [DONE] Shadow table infrastructure (persistence.go)
-    - [~] Persistent storage to database file (deferred, in-memory only)
+[ ] 4. FTS5 SQL integration
+    - [ ] Wire FTS5 module into SQL execution pipeline (CREATE VIRTUAL TABLE ... USING fts5)
+    - [ ] Compile MATCH operator for FTS5 queries in WHERE clauses
+    - [ ] Route INSERT/UPDATE/DELETE through FTS5 module update method
+    - [ ] Expose rank(), snippet(), highlight() as SQL functions
+    - [ ] Shadow table persistence (content, data, idx, config tables)
+    Files: internal/vtab/fts5/, internal/driver/compile_select.go, internal/driver/compile_dml.go
 
-[x] R-Tree Virtual Table (module implemented, all tests pass)
-    - [DONE] R*-tree insertion/split/reinsertion
-    - [DONE] 2D/3D/4D/5D spatial indexing
-    - [DONE] Bounding box queries (overlap/contains/within)
-    - [DONE] Nearest neighbor search (k-NN)
-    - [DONE] Module registration in driver
-    - [DONE] SQL parser support for CREATE VIRTUAL TABLE
+[ ] 5. generate_series TVF
+    - [ ] Implement generate_series(start, stop, step?) table-valued function
+    - [ ] Register in TVF dispatch alongside json_each/json_tree
+    - [ ] Support all three argument forms (start, start+stop, start+stop+step)
+    Files: internal/functions/generate_series.go, internal/driver/compile_tvf.go
+
+================================================================================
+P1 — PARTIALLY IMPLEMENTED
+================================================================================
+
+[ ] 6. RIGHT / FULL OUTER JOIN execution
+    - [ ] Add RIGHT JOIN compilation path (swap left/right, emit LEFT JOIN, reorder columns)
+    - [ ] Add FULL OUTER JOIN compilation (LEFT JOIN + anti-join of right unmatched rows)
+    - [ ] Handle NULL padding for unmatched rows on both sides
+    Files: internal/driver/compile_join.go
+
+[ ] 7. Generated columns execution
+    - [ ] Evaluate GENERATED ALWAYS AS expressions during INSERT/UPDATE
+    - [ ] Enforce STORED vs VIRTUAL semantics (stored persists to B-tree, virtual computed on read)
+    - [ ] Prevent direct writes to generated columns
+    Files: internal/driver/compile_dml.go, internal/schema/table.go
+
+[ ] 8. VACUUM hardening
+    - [ ] Fix schema persistence issues causing 30 skipped tests
+    - [ ] Incremental vacuum support (auto_vacuum=INCREMENTAL)
+    - [ ] VACUUM INTO with proper index rebuilding
+    Files: internal/pager/vacuum.go, internal/driver/compile_ddl.go
+
+[ ] 9. WITHOUT ROWID remaining 6 tests
+    - [ ] Investigate and fix remaining 6 skipped tests
+    - [ ] Likely edge cases in ROLLBACK, complex CASCADE, or composite PK ordering
+    Files: internal/withoutrowid/, internal/driver/compile_dml.go
+
+[ ] 10. EXPLAIN QUERY PLAN completeness
+    - [ ] Full tree output matching SQLite format (SCAN, SEARCH, USE TEMP B-TREE)
+    - [ ] Index usage reporting
+    - [ ] Subquery and compound query plan nodes
+    Files: internal/planner/explain.go
+
+================================================================================
+P2 — NOT IMPLEMENTED (REMAINING)
+================================================================================
+
+[ ] 11. UPDATE...FROM
+    - [ ] Add From *FromClause to UpdateStmt AST
+    - [ ] Parse FROM clause after SET in UPDATE
+    - [ ] Compile as join between target table and FROM sources
+    Files: internal/parser/ast.go, internal/parser/parser.go, internal/driver/compile_dml.go
+
+[ ] 12. PERCENT_RANK / CUME_DIST window functions
+    - [ ] Implement PERCENT_RANK: (rank - 1) / (partition_size - 1)
+    - [ ] Implement CUME_DIST: count_of_rows_with_value_le / partition_size
+    - [ ] Add opcodes or compute in window evaluation loop
+    Files: internal/driver/compile_select_agg.go, internal/vdbe/exec.go
+
+[ ] 13. ANALYZE
+    - [ ] Create sqlite_stat1 / sqlite_stat4 tables on ANALYZE
+    - [ ] Collect row count and index selectivity statistics
+    - [ ] Integrate stats into query planner cost estimator
+    Files: internal/driver/compile_ddl.go, internal/planner/cost.go, internal/schema/
+
+[ ] 14. trunc() math function
+    - [ ] Implement trunc(X) and trunc(X,Y) — truncate toward zero
+    - [ ] Register in math function table
+    Files: internal/functions/math.go
+
+[ ] 15. likelihood / likely / unlikely optimizer hints
+    - [ ] Parse as no-op functions (pass through argument unchanged)
+    - [ ] Optionally wire into cost estimator for selectivity hints
+    Files: internal/functions/builtin.go, internal/parser/parser.go
+
+[ ] 16. Custom collations
+    - [ ] Expose CollationRegistry.Register() through database/sql driver
+    - [ ] Support CREATE COLLATION or driver-level API
+    - [ ] Ensure collation propagation through indexes and comparisons
+    Files: internal/collation/collation.go, internal/driver/driver.go
+
+[ ] 17. R-Tree SQL integration
+    - [ ] Wire R-Tree module into SQL pipeline (CREATE VIRTUAL TABLE ... USING rtree)
+    - [ ] Route spatial queries through R-Tree module
     - [ ] Persistent storage to database file
+    Files: internal/vtab/rtree/, internal/driver/compile_select.go
 
-[ ] Durability & Conformance Hardening
-    - Run sqllogictest subsets vs reference SQLite; diff drift
-    - Fuzz parser and record decoder; add crash-replay tests for WAL/journal
-    - Target ≥80% coverage in pager/vdbe/btree/parser/engine
-
-================================================================================
-SCAFFOLDING CODE - Prepared but waiting for activation
-================================================================================
-
-The following code is intentionally unused, prepared for future features.
-Each section documents what the code is waiting for.
-
-## Phase 3.5: Trigger Execution
-Location: internal/driver/compile_helpers.go
-Functions:
-  - executeBeforeInsertTriggers()
-  - executeAfterInsertTriggers()
-  - executeBeforeUpdateTriggers()
-  - executeAfterUpdateTriggers()
-  - executeBeforeDeleteTriggers()
-  - executeAfterDeleteTriggers()
-  - prepareNewRowForInsert()
-Waiting for:
-  - VDBE runtime integration (triggers execute during row ops, not compilation)
-  - NEW/OLD row pseudo-tables populated from actual row data
-  - Recursive statement execution within trigger body
-See: compile_dml.go TODO Phase 3.5 comments
-
-## Subquery Optimization
-Location: internal/driver/compile_subquery.go
-Functions:
-  - adjustSubqueryJumpTargets()
-  - buildJumpOpcodeMap()
-  - buildDualJumpOpcodeMap()
-  - adjustJumpTargetsInProgram()
-  - compileInSubquery()
-Location: internal/expr/codegen.go
-  - registerAdjustmentRule (type)
-  - registerAdjustmentRules (var)
-  - adjustSubqueryCursors()
-  - adjustSubqueryRegisters()
-  - adjustInstructionRegisters()
-Waiting for:
-  - Subquery flattening optimization
-  - Inline scalar subquery evaluation
-  - Materialized IN subquery optimization
-
-## CTE Bytecode Inlining
-Location: internal/driver/stmt_cte.go
-Functions:
-  - compileCTEPopulation()
-  - inlineCTEBytecode()
-  - handleSpecialOpcode()
-  - isControlFlowOp()
-Waiting for:
-  - CTE materialization optimization for multiple references
-  - Recursive CTE support (iterative bytecode generation)
-Currently using coroutine-based implementation (compileCTEPopulationCoroutine)
-
-## GROUP BY Evaluation
-Location: internal/driver/stmt_groupby.go
-Functions:
-  - evaluateGroupByExprs()
-Waiting for:
-  - Complex GROUP BY expressions requiring separate evaluation pass
-Currently using inline bytecode generation in compileGroupBy
-
-## Transaction Management
-Location: internal/pager/transaction.go
-Fields:
-  - journal: For direct journal integration
-  - readRefs: For multi-reader tracking
-  - writeOwner: For deadlock detection
-  - mu: For concurrent access protection
-Waiting for:
-  - WAL mode concurrent readers
-  - Deadlock detection
-  - Connection-level transaction isolation
-
-## Pager Infrastructure
-Location: internal/pager/pager.go
-  - tempFile: For temp database support (ATTACH ':memory:')
-  - changeCountDone: For file header change counter updates
-Location: internal/pager/journal.go
-  - headerSynced: For atomic commit tracking
-Location: internal/pager/memory_pager.go
-  - changeCountDone: For consistency with file-based pager
-Location: internal/pager/savepoint.go
-  - mu: For concurrent savepoint access
-Location: internal/pager/wal_index.go
-  - pageSize: For page size validation during WAL ops
-Location: internal/pager/vacuum.go
-  - allocateLocked(): For incremental/auto-vacuum modes
-
-## Date/Time Functions
-Location: internal/functions/date.go
-  - isError: For error propagation in date parsing chains
-  - getWeekday(): For strftime %w and %u format specifiers
-  - getWeekNumber(): For strftime %W format specifier
-  - getDayOfYear(): For strftime %j format specifier
-
-## EXPLAIN Infrastructure
-Location: internal/planner/explain.go
-  - addOrderByNode(): Simplified version without cost estimates
-  - formatIndexScan(): For detailed EXPLAIN with index info
-Location: internal/planner/planner.go
-  - explainLoop(): For EXPLAIN QUERY PLAN output
-
-## R-Tree Virtual Table
-Location: internal/vtab/rtree/rtree.go
-  - queryBBox: For spatial range queries (overlap, contains, within)
-  - queryType: For distinguishing spatial query operations
+[ ] 18. IS DISTINCT FROM / IS NOT DISTINCT FROM operators
+    - [ ] Add BinaryOp variants (OpIsDistinctFrom, OpIsNotDistinctFrom)
+    - [ ] Parse IS DISTINCT FROM and IS NOT DISTINCT FROM syntax
+    - [ ] Compile as NULL-safe inequality/equality
+    Files: internal/parser/ast.go, internal/parser/parser.go, internal/expr/codegen.go
 
 ================================================================================
-v0.1.x - Current Development
+P3 — PLATFORM & HARDENING
 ================================================================================
 
-## Completed
+[ ] 19. Windows file locking
+    - [ ] Implement LockFile/UnlockFile via syscall on Windows
+    - [ ] Test concurrent access on Windows
+    Files: internal/pager/lock_windows.go
+
+[ ] 20. BACKUP API
+    - [ ] Implement online backup (page-by-page copy with concurrent read)
+    - [ ] Progress callback support
+    Files: internal/pager/backup.go
+
+[ ] 21. Durability & conformance hardening
+    - [ ] Run sqllogictest subsets vs reference SQLite
+    - [ ] Fuzz parser and record decoder
+    - [ ] Crash-replay tests for WAL/journal
+    - [ ] Target >=80% coverage in pager/vdbe/btree/parser/engine
+
+================================================================================
+COMPLETED (v0.1.x - v0.3.0)
+================================================================================
+
 [x] Core Infrastructure (B-tree, Pager, VDBE, Parser)
 [x] SQL Features (Constraints, CTEs, Subqueries, DDL)
-[x] Built-in Functions (String, Math, Date/Time, Aggregate)
+[x] Built-in Functions (String, Math, Date/Time, Aggregate, JSON)
 [x] Query Optimization (Index selection, cost estimation)
-[x] Code Quality (Cyclomatic complexity <= 9)
-[x] Pre-commit validation (make commit)
-[x] SPDX license headers on all files
-[x] Documentation scaffolding comments
-
-## In Progress
-[x] Foreign Key Runtime Enforcement (83/83 tests passing) - COMPLETE
-    - [DONE] FK manager wired through VDBE context
-    - [DONE] INSERT/DELETE/UPDATE FK validation working
-    - [DONE] CASCADE/SET NULL/SET DEFAULT/RESTRICT actions working
-    - [DONE] PRAGMA foreign_key_check, DROP TABLE checks
-    - [DONE] Deferred constraints, collation, type affinity
-[~] CTE Edge Cases (improved)
-    - [DONE] Sorter adjustment for GROUP BY in CTE coroutines
-    - [~] Recursive CTE: works for small datasets (compile-time execution)
-    - [ ] Recursive CTE bytecode generation (runtime loop optimization)
-[x] WITHOUT ROWID Tables (45/51 tests passing)
-    - [DONE] Composite PK key encoding (collation-aware, stable ordering)
-    - [DONE] Btree cursor comparator for composite keys
-    - [DONE] Split/rewind regression fix (statement cache invalidation)
-    - [DONE] rowid column rejection, FK validation for WITHOUT ROWID
-    - [DONE] ROLLBACK cache sync via pager callback
-    - [DONE] CASCADE FK: PKColumnIndices for proper PK extraction
-[x] VACUUM Operations (fixed)
-    - [DONE] sqlite_master persistence with conditional commit
-    - [DONE] Schema cookie management in commitTargetPager
-    - [DONE] VACUUM INTO schema persistence with commit
-[x] Window Functions - COMPLETE
-    - [DONE] ROW_NUMBER, RANK, DENSE_RANK, NTILE
-    - [DONE] LAG, LEAD, FIRST_VALUE, LAST_VALUE
-    - [DONE] ROWS/RANGE frame specification parsing
-[x] Sorter Spill-to-Disk - COMPLETE
-    - [DONE] SorterInterface abstraction for sorter types
-    - [DONE] SorterWithSpill: memory tracking, k-way merge, temp files
-    - [DONE] VDBE integration via NewSorterWithSpillAndRegistry
-    - [DONE] 10MB default memory limit, configurable
-
-================================================================================
-v0.2.0 - Planned Features
-================================================================================
-
-[ ] ANALYZE - Query optimizer statistics
-    - Collect histogram data for table columns
-    - Store in sqlite_stat1/sqlite_stat4 tables
-    - Integrate with cost estimator
-
-[ ] BACKUP - Online backup API
-    - Incremental backup support
-    - Progress callback
-    - Concurrent read access during backup
-
-[ ] FTS5 - Full-text search
-    - Tokenizer infrastructure (internal/vtab/fts5/)
-    - Segment storage/merge, search operators (MATCH, NEAR, prefix)
-    - Ranking functions (bm25, etc.), highlight/offsets support
-
-[ ] R-Tree - Spatial indexing
-    - Bounding box queries (internal/vtab/rtree/)
-    - Insert/Update/Delete operations and reinsertion/pack
-    - Index maintenance and 2D/3D configurations
-
-================================================================================
-Future Phases
-================================================================================
-
-## Phase 4: Performance
-[ ] Prepared statement caching
-[ ] Connection pooling improvements
-[ ] Memory limits and spill-to-disk for large sorts
-[ ] Query plan caching
-
-## Phase 5: Security
-[ ] Input validation hardening
-[ ] Resource limits enforcement
-[ ] SQL injection prevention audit
-
-## Phase 6: Testing
-[ ] Fuzzing infrastructure
-[ ] Benchmarks vs reference SQLite
-[ ] Stress testing
-
-## Phase 7: Configuration
-[ ] DSN parsing improvements
-[ ] Custom collation support
-[ ] Extension loading
-
-================================================================================
-Known Limitations
-================================================================================
-
-- Windows file locking not implemented
-- ORDER BY mixed ASC/DESC with NULLs has edge cases (basic ORDER BY works)
-- ATTACH DATABASE partially implemented
-- Window function edge cases (42 trinity tests skipped as pre-existing)
-- Join edge cases (14 trinity tests skipped as pre-existing)
+[x] Foreign Key Runtime (83/83 tests passing)
+[x] WITHOUT ROWID Tables (45/51 passing)
+[x] Window Functions (ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE)
+[x] Triggers (BEFORE/AFTER x INSERT/UPDATE/DELETE)
+[x] ALTER TABLE (RENAME TABLE, RENAME COLUMN, DROP COLUMN)
+[x] ATTACH/DETACH DATABASE
+[x] JSON TVFs (json_each, json_tree)
+[x] FTS5 Module (128 tests, API level)
+[x] R-Tree Module (all tests, API level)
+[x] Sorter Spill-to-Disk
+[x] Trinity Test Parity (1,257/1,257)

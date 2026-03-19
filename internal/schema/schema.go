@@ -123,6 +123,11 @@ func (c *Column) IsPrimaryKeyColumn() bool {
 	return c.PrimaryKey
 }
 
+// IsIntegerPrimaryKey returns true if this is an INTEGER PRIMARY KEY (rowid alias).
+func (c *Column) IsIntegerPrimaryKey() bool {
+	return c.PrimaryKey && (c.Type == "INTEGER" || c.Type == "INT")
+}
+
 // TableConstraint represents a table-level constraint.
 type TableConstraint struct {
 	Type       ConstraintType

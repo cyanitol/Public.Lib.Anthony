@@ -75,7 +75,8 @@ func genVTabJSONEachTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-VTAB-010_json_each_from_column",
-			skip:     "json_each with column reference arg not recognized as TVF",
+
+
 			setup:    []string{"CREATE TABLE vt1(doc TEXT)", `INSERT INTO vt1 VALUES('[100,200]')`},
 			query:    "SELECT je.value FROM vt1, json_each(vt1.doc) AS je ORDER BY je.key",
 			wantRows: [][]interface{}{{int64(100)}, {int64(200)}},
@@ -134,35 +135,40 @@ func genVTabJoinTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:     "REQ-VTAB-030_join_json_each_expand",
-			skip:     "json_each with column reference arg not recognized as TVF in JOIN",
+
+
 			setup:    setup,
 			query:    "SELECT t.id, je.value FROM tags t, json_each(t.tag_list) je WHERE je.value='go' ORDER BY t.id",
 			wantRows: [][]interface{}{{int64(1), "go"}, {int64(3), "go"}},
 		},
 		{
 			name:     "REQ-VTAB-031_join_json_each_count",
-			skip:     "json_each with column reference arg not recognized as TVF in JOIN",
+
+
 			setup:    setup,
 			query:    "SELECT t.id, COUNT(je.value) AS cnt FROM tags t, json_each(t.tag_list) je GROUP BY t.id ORDER BY t.id",
 			wantRows: [][]interface{}{{int64(1), int64(2)}, {int64(2), int64(2)}, {int64(3), int64(3)}},
 		},
 		{
 			name:     "REQ-VTAB-032_join_json_each_filter",
-			skip:     "json_each with column reference arg not recognized as TVF in JOIN",
+
+
 			setup:    setup,
 			query:    "SELECT DISTINCT je.value FROM tags t, json_each(t.tag_list) je WHERE je.value='wasm'",
 			wantRows: [][]interface{}{{"wasm"}},
 		},
 		{
 			name:     "REQ-VTAB-033_join_json_each_all_tags",
-			skip:     "json_each with column reference arg not recognized as TVF in JOIN",
+
+
 			setup:    setup,
 			query:    "SELECT COUNT(DISTINCT je.value) FROM tags t, json_each(t.tag_list) je",
 			wantRows: [][]interface{}{{int64(5)}}, // go, sql, rust, wasm, ffi
 		},
 		{
 			name:     "REQ-VTAB-034_join_json_each_no_match",
-			skip:     "json_each with column reference arg not recognized as TVF in JOIN",
+
+
 			setup:    setup,
 			query:    "SELECT COUNT(*) FROM tags t, json_each(t.tag_list) je WHERE je.value='python'",
 			wantRows: [][]interface{}{{int64(0)}},

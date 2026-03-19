@@ -327,7 +327,6 @@ func genJoinMultiTableTests() []sqlTestCase {
 				{"Acme", "Electronics", int64(1)}, {"Acme", "Hardware", int64(2)}, {"Beta", "Hardware", int64(1)},
 			}},
 		{name: "REQ-JOIN-065_subquery_as_join_target",
-			skip:     "stack overflow in recursive view expansion (TODO v0.2.x)",
 			setup:    multiSetup,
 			query:    "SELECT c.name, sub.order_count FROM customers c JOIN (SELECT cust_id, COUNT(*) AS order_count FROM orders GROUP BY cust_id) sub ON c.id = sub.cust_id ORDER BY c.name",
 			wantRows: [][]interface{}{{"Acme", int64(2)}, {"Beta", int64(1)}}},

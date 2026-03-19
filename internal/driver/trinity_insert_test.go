@@ -240,7 +240,7 @@ func genTrinityInsertAutoincTests() []sqlTestCase {
 			},
 			query:    "SELECT id FROM t1 ORDER BY id",
 			wantRows: [][]interface{}{{int64(1)}, {int64(2)}},
-			skip:     "known AUTOINCREMENT not yet implemented"},
+		},
 		{name: "REQ-INSERT-041_autoincrement_after_delete",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)",
@@ -251,7 +251,7 @@ func genTrinityInsertAutoincTests() []sqlTestCase {
 			},
 			query:    "SELECT id FROM t1 ORDER BY id",
 			wantRows: [][]interface{}{{int64(1)}, {int64(3)}},
-			skip:     "known AUTOINCREMENT not yet implemented"},
+		},
 		{name: "REQ-INSERT-042_autoincrement_gap",
 			setup: []string{
 				"CREATE TABLE t1(id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)",
@@ -263,7 +263,7 @@ func genTrinityInsertAutoincTests() []sqlTestCase {
 			},
 			query:    "SELECT id, v FROM t1 ORDER BY id",
 			wantRows: [][]interface{}{{int64(1), "a"}, {int64(3), "c"}, {int64(4), "d"}},
-			skip:     "known AUTOINCREMENT not yet implemented"},
+		},
 	}
 }
 

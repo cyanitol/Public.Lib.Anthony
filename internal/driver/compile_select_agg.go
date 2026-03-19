@@ -974,6 +974,9 @@ func (s *Stmt) initializeWindowStates(vm *vdbe.VDBE, expandedCols []parser.Resul
 		s.collectWindowFuncs(col.Expr, table, vm, seenOverClauses, windowFunctionCounts, &windowStateIdx)
 	}
 
+	// Save mapping for use in emitWindowFunctionColumnWithOpcodes.
+	s.windowStateMap = seenOverClauses
+
 	for idx, count := range windowFunctionCounts {
 		if ws, ok := vm.WindowStates[idx]; ok {
 			ws.WindowFunctionCount = count
@@ -1256,11 +1259,13 @@ func (s *Stmt) compileWindowWithSorting(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 
 	vm.AddOp(vdbe.OpSorterData, 1, 0, numTableCols)
 
-	// Add row to window state 0
-	addr := vm.AddOp(vdbe.OpAggStepWindow, 0, 0, 0)
-	vm.Program[addr].P4.Z = "_window_feed"
-	vm.Program[addr].P4Type = vdbe.P4Static
-	vm.Program[addr].P5 = uint16(numTableCols)
+	// Add row to all window states
+	for wsIdx := 0; wsIdx < len(vm.WindowStates); wsIdx++ {
+		addr := vm.AddOp(vdbe.OpAggStepWindow, wsIdx, 0, 0)
+		vm.Program[addr].P4.Z = "_window_feed"
+		vm.Program[addr].P4Type = vdbe.P4Static
+		vm.Program[addr].P5 = uint16(numTableCols)
+	}
 
 	vm.AddOp(vdbe.OpSorterNext, 1, collectLoopAddr, 0)
 	vm.Program[collectNextAddr].P2 = collectLoopAddr
@@ -1312,7 +1317,7 @@ func (s *Stmt) emitWindowColumnFromSorter(vm *vdbe.VDBE, gen *expr.CodeGenerator
 	numTableCols := len(table.Columns)
 
 	if fnExpr, ok := col.Expr.(*parser.FunctionExpr); ok && fnExpr.Over != nil {
-		s.emitWindowFunctionColumnWithOpcodes(vm, fnExpr, colIdx, numTableCols)
+		s.emitWindowFunctionColumnWithOpcodes(vm, fnExpr, colIdx, numTableCols, table)
 		return
 	}
 
@@ -1360,13 +1365,13 @@ func (s *Stmt) emitSorterColumnValue(vm *vdbe.VDBE, gen *expr.CodeGenerator,
 func (s *Stmt) precomputeNestedWindowFuncs(vm *vdbe.VDBE, gen *expr.CodeGenerator,
 	e parser.Expression, table *schema.Table) {
 
-	numTableCols := len(table.Columns)
-	s.walkAndPrecompute(vm, gen, e, numTableCols)
+	s.walkAndPrecompute(vm, gen, e, table)
 }
 
 // walkAndPrecompute recursively walks an expression tree to precompute window functions.
 func (s *Stmt) walkAndPrecompute(vm *vdbe.VDBE, gen *expr.CodeGenerator,
-	e parser.Expression, numTableCols int) {
+	e parser.Expression, table *schema.Table) {
+	numTableCols := len(table.Columns)
 
 	if e == nil {
 		return
@@ -1375,49 +1380,49 @@ func (s *Stmt) walkAndPrecompute(vm *vdbe.VDBE, gen *expr.CodeGenerator,
 	fnExpr, ok := e.(*parser.FunctionExpr)
 	if ok && fnExpr.Over != nil {
 		reg := gen.AllocReg()
-		s.emitWindowFunctionColumnWithOpcodes(vm, fnExpr, reg, numTableCols)
+		s.emitWindowFunctionColumnWithOpcodes(vm, fnExpr, reg, numTableCols, table)
 		gen.SetPrecomputed(e, reg)
 		return
 	}
 
 	if ok {
 		for _, arg := range fnExpr.Args {
-			s.walkAndPrecompute(vm, gen, arg, numTableCols)
+			s.walkAndPrecompute(vm, gen, arg, table)
 		}
 		return
 	}
 
-	s.walkAndPrecomputeChildren(vm, gen, e, numTableCols)
+	s.walkAndPrecomputeChildren(vm, gen, e, table)
 }
 
 // walkAndPrecomputeChildren walks non-function expression children.
 func (s *Stmt) walkAndPrecomputeChildren(vm *vdbe.VDBE, gen *expr.CodeGenerator,
-	e parser.Expression, numTableCols int) {
+	e parser.Expression, table *schema.Table) {
 
 	switch ex := e.(type) {
 	case *parser.BinaryExpr:
-		s.walkAndPrecompute(vm, gen, ex.Left, numTableCols)
-		s.walkAndPrecompute(vm, gen, ex.Right, numTableCols)
+		s.walkAndPrecompute(vm, gen, ex.Left, table)
+		s.walkAndPrecompute(vm, gen, ex.Right, table)
 	case *parser.UnaryExpr:
-		s.walkAndPrecompute(vm, gen, ex.Expr, numTableCols)
+		s.walkAndPrecompute(vm, gen, ex.Expr, table)
 	case *parser.ParenExpr:
-		s.walkAndPrecompute(vm, gen, ex.Expr, numTableCols)
+		s.walkAndPrecompute(vm, gen, ex.Expr, table)
 	case *parser.CastExpr:
-		s.walkAndPrecompute(vm, gen, ex.Expr, numTableCols)
+		s.walkAndPrecompute(vm, gen, ex.Expr, table)
 	case *parser.CaseExpr:
-		s.walkAndPrecomputeCase(vm, gen, ex, numTableCols)
+		s.walkAndPrecomputeCase(vm, gen, ex, table)
 	}
 }
 
 // walkAndPrecomputeCase walks CASE expression children.
 func (s *Stmt) walkAndPrecomputeCase(vm *vdbe.VDBE, gen *expr.CodeGenerator,
-	ex *parser.CaseExpr, numTableCols int) {
+	ex *parser.CaseExpr, table *schema.Table) {
 
 	for _, w := range ex.WhenClauses {
-		s.walkAndPrecompute(vm, gen, w.Condition, numTableCols)
-		s.walkAndPrecompute(vm, gen, w.Result, numTableCols)
+		s.walkAndPrecompute(vm, gen, w.Condition, table)
+		s.walkAndPrecompute(vm, gen, w.Result, table)
 	}
-	s.walkAndPrecompute(vm, gen, ex.ElseClause, numTableCols)
+	s.walkAndPrecompute(vm, gen, ex.ElseClause, table)
 }
 
 // extractWindowPartitionCols extracts PARTITION BY column indices from the first

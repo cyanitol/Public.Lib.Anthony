@@ -456,12 +456,18 @@ func runSQLTestQuery(t *testing.T, db *sql.DB, tt sqlTestCase) {
 	t.Helper()
 	rows, err := db.Query(tt.query, tt.args...)
 	if tt.wantErr {
-		if err == nil {
-			rows.Close()
-			t.Fatalf("expected error but got none for: %s", tt.query)
+		if err != nil {
+			checkErrLike(t, err, tt.errLike)
+			return
 		}
-		checkErrLike(t, err, tt.errLike)
-		return
+		// Error may surface during row iteration (e.g. function errors).
+		defer rows.Close()
+		_ = scanAllRows(t, rows)
+		if iterErr := rows.Err(); iterErr != nil {
+			checkErrLike(t, iterErr, tt.errLike)
+			return
+		}
+		t.Fatalf("expected error but got none for: %s", tt.query)
 	}
 	if err != nil {
 		t.Fatalf("query failed: %v\nquery: %s", err, tt.query)

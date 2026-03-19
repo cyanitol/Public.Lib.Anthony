@@ -55,8 +55,7 @@ func genAffinityMatrixINTandTEXT() []sqlTestCase {
 			wantRows: [][]interface{}{{"integer", int64(100)}},
 		},
 		{
-			name:     "REQ-TYPE-004_int_col_store_blob",
-			skip:     "engine gap: blob literal X'...' stored as text not blob",
+			name: "REQ-TYPE-004_int_col_store_blob",
 			setup:    []string{"CREATE TABLE ta04(v INT)", "INSERT INTO ta04 VALUES(X'CAFE')"},
 			query:    "SELECT TYPEOF(v) FROM ta04",
 			wantRows: [][]interface{}{{"blob"}},
@@ -87,8 +86,7 @@ func genAffinityMatrixINTandTEXT() []sqlTestCase {
 			wantRows: [][]interface{}{{"text", "hello"}},
 		},
 		{
-			name:     "REQ-TYPE-009_text_col_store_blob",
-			skip:     "engine gap: blob literal X'...' stored as text not blob",
+			name: "REQ-TYPE-009_text_col_store_blob",
 			setup:    []string{"CREATE TABLE ta09(v TEXT)", "INSERT INTO ta09 VALUES(X'CAFE')"},
 			query:    "SELECT TYPEOF(v) FROM ta09",
 			wantRows: [][]interface{}{{"blob"}},
@@ -124,8 +122,7 @@ func genAffinityMatrixREALBLOBNUMERIC() []sqlTestCase {
 			wantRows: [][]interface{}{{"real", 9.5}},
 		},
 		{
-			name:     "REQ-TYPE-014_real_col_store_blob",
-			skip:     "engine gap: blob literal X'...' stored as text not blob",
+			name: "REQ-TYPE-014_real_col_store_blob",
 			setup:    []string{"CREATE TABLE ta14(v REAL)", "INSERT INTO ta14 VALUES(X'BEEF')"},
 			query:    "SELECT TYPEOF(v) FROM ta14",
 			wantRows: [][]interface{}{{"blob"}},
@@ -156,8 +153,7 @@ func genAffinityMatrixREALBLOBNUMERIC() []sqlTestCase {
 			wantRows: [][]interface{}{{"text", "abc"}},
 		},
 		{
-			name:     "REQ-TYPE-019_blob_col_store_blob",
-			skip:     "engine gap: blob literal X'...' stored as text not blob",
+			name: "REQ-TYPE-019_blob_col_store_blob",
 			setup:    []string{"CREATE TABLE ta19(v BLOB)", "INSERT INTO ta19 VALUES(X'DEAD')"},
 			query:    "SELECT TYPEOF(v) FROM ta19",
 			wantRows: [][]interface{}{{"blob"}},
@@ -188,8 +184,7 @@ func genAffinityMatrixREALBLOBNUMERIC() []sqlTestCase {
 			wantRows: [][]interface{}{{"integer", int64(100)}},
 		},
 		{
-			name:     "REQ-TYPE-024_numeric_col_store_blob",
-			skip:     "engine gap: blob literal X'...' stored as text not blob",
+			name: "REQ-TYPE-024_numeric_col_store_blob",
 			setup:    []string{"CREATE TABLE ta24(v NUMERIC)", "INSERT INTO ta24 VALUES(X'FF')"},
 			query:    "SELECT TYPEOF(v) FROM ta24",
 			wantRows: [][]interface{}{{"blob"}},
@@ -236,13 +231,11 @@ func genTypeofTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-TYPE-035_typeof_true",
-			skip:     "engine gap: TRUE/FALSE boolean keywords not supported",
 			query:    "SELECT TYPEOF(TRUE)",
 			wantRows: [][]interface{}{{"integer"}},
 		},
 		{
 			name:     "REQ-TYPE-036_typeof_false",
-			skip:     "engine gap: TRUE/FALSE boolean keywords not supported",
 			query:    "SELECT TYPEOF(FALSE)",
 			wantRows: [][]interface{}{{"integer"}},
 		},
@@ -267,31 +260,26 @@ func genTypeCastTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
 			name:     "REQ-TYPE-040_cast_text_to_int",
-			skip:     "engine gap: CAST expression returns nil instead of converted value",
 			query:    "SELECT CAST('123' AS INTEGER)",
 			wantRows: [][]interface{}{{int64(123)}},
 		},
 		{
 			name:     "REQ-TYPE-041_cast_real_to_int",
-			skip:     "engine gap: CAST expression returns nil instead of converted value",
 			query:    "SELECT CAST(3.9 AS INTEGER)",
 			wantRows: [][]interface{}{{int64(3)}},
 		},
 		{
 			name:     "REQ-TYPE-042_cast_int_to_real",
-			skip:     "engine gap: CAST expression returns nil instead of converted value",
 			query:    "SELECT TYPEOF(CAST(42 AS REAL)), CAST(42 AS REAL)",
 			wantRows: [][]interface{}{{"real", 42.0}},
 		},
 		{
 			name:     "REQ-TYPE-043_cast_int_to_text",
-			skip:     "engine gap: CAST expression returns nil instead of converted value",
 			query:    "SELECT TYPEOF(CAST(42 AS TEXT)), CAST(42 AS TEXT)",
 			wantRows: [][]interface{}{{"text", "42"}},
 		},
 		{
 			name:     "REQ-TYPE-044_cast_real_to_text",
-			skip:     "engine gap: CAST expression returns nil instead of converted value",
 			query:    "SELECT TYPEOF(CAST(3.14 AS TEXT)), CAST(3.14 AS TEXT)",
 			wantRows: [][]interface{}{{"text", "3.14"}},
 		},
@@ -307,13 +295,11 @@ func genTypeCastTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-TYPE-047_cast_text_nonnumeric_to_int",
-			skip:     "engine gap: CAST expression returns nil instead of converted value",
 			query:    "SELECT CAST('abc' AS INTEGER)",
 			wantRows: [][]interface{}{{int64(0)}},
 		},
 		{
 			name:     "REQ-TYPE-048_cast_blob_to_text",
-			skip:     "engine gap: CAST expression returns nil instead of converted value",
 			query:    "SELECT TYPEOF(CAST(X'68656C6C6F' AS TEXT))",
 			wantRows: [][]interface{}{{"text"}},
 		},
@@ -348,7 +334,6 @@ func genImplicitCoercionTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-TYPE-054_coerce_bool_arithmetic",
-			skip:     "engine gap: TRUE/FALSE boolean keywords not supported",
 			query:    "SELECT TRUE + TRUE",
 			wantRows: [][]interface{}{{int64(2)}},
 		},

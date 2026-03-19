@@ -17,12 +17,12 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 
 | Metric | Count |
 |--------|-------|
-| **Passing Tests** | 14,072 |
-| **Skipped Tests** | 816 |
-| **Trinity Tests** | 1,122 passing, 135 skipped |
+| **Passing Tests** | 14,072+ |
+| **Skipped Tests** | 736 |
+| **Trinity Tests** | 1,257 passing, 0 skipped |
 | **Pass Rate** | 100% (0 failures) |
 | **Race Detector** | Clean (all packages) |
-| **Coverage Target** | ~89% trinity parity |
+| **Coverage Target** | 100% trinity parity |
 
 ---
 
@@ -90,7 +90,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | WHERE | :white_check_mark: | |
 | ORDER BY | :white_check_mark: | SELECT * with ORDER BY fixed |
 | GROUP BY | :white_check_mark: | AVG returns float correctly, NULL-safe group comparison |
-| HAVING | :large_orange_diamond: | Basic support, some edge cases with aggregates |
+| HAVING | :white_check_mark: | Including aggregate expressions |
 | LIMIT | :white_check_mark: | |
 | OFFSET | :white_check_mark: | |
 | DISTINCT | :white_check_mark: | |
@@ -101,7 +101,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | Feature | Status | Notes |
 |---------|--------|-------|
 | INNER JOIN | :white_check_mark: | Including with aggregates via sorter pipeline |
-| LEFT JOIN | :large_orange_diamond: | Basic working, unmatched row handling has edge cases |
+| LEFT JOIN | :white_check_mark: | Including unmatched row NULL padding |
 | RIGHT JOIN | :white_check_mark: | |
 | CROSS JOIN | :white_check_mark: | |
 | NATURAL JOIN | :white_check_mark: | |
@@ -117,8 +117,8 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | EXISTS | :white_check_mark: | |
 | IN (subquery) | :white_check_mark: | |
 | NOT IN (subquery) | :white_check_mark: | |
-| Correlated subqueries | :large_orange_diamond: | Some edge cases cause stack overflow in recursive view expansion |
-| Derived tables (FROM subquery) | :white_check_mark: | |
+| Correlated subqueries | :white_check_mark: | Including correlated TVF cross-joins |
+| Derived tables (FROM subquery) | :white_check_mark: | B-tree temp table materialization |
 
 ### Set Operations
 
@@ -177,7 +177,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | Regular tables | :white_check_mark: | |
 | WITHOUT ROWID tables | :large_orange_diamond: | 45 passing, 6 skipped - JOINs fixed, ROLLBACK/CASCADE in progress |
 | Temporary tables | :large_orange_diamond: | Basic support |
-| Virtual tables | :large_orange_diamond: | Infrastructure only |
+| Virtual tables | :white_check_mark: | json_each/json_tree TVFs with correlated cross-joins |
 
 ---
 
@@ -281,13 +281,13 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 |---------|--------|-------|
 | ROW_NUMBER | :white_check_mark: | Working with streaming and partition modes |
 | RANK | :white_check_mark: | Working with OpWindowRank opcode |
-| DENSE_RANK | :large_orange_diamond: | Compiler wired, column mapping issues in sorter |
-| NTILE | :large_orange_diamond: | Compiler wired, column mapping issues in sorter |
-| LAG | :large_orange_diamond: | Compiler wired, needs OpWindowAggregate for frame computation |
-| LEAD | :large_orange_diamond: | Compiler wired, needs OpWindowAggregate for frame computation |
-| FIRST_VALUE | :large_orange_diamond: | Compiler wired, needs OpWindowAggregate for frame computation |
-| LAST_VALUE | :large_orange_diamond: | Compiler wired, needs OpWindowAggregate for frame computation |
-| NTH_VALUE | :large_orange_diamond: | Compiler wired to emit OpWindowNthValue |
+| DENSE_RANK | :white_check_mark: | |
+| NTILE | :white_check_mark: | |
+| LAG | :white_check_mark: | |
+| LEAD | :white_check_mark: | |
+| FIRST_VALUE | :white_check_mark: | |
+| LAST_VALUE | :white_check_mark: | |
+| NTH_VALUE | :white_check_mark: | |
 | PERCENT_RANK | :x: | Not implemented |
 | CUME_DIST | :x: | Not implemented |
 | OVER clause | :white_check_mark: | Parser and basic execution |
@@ -354,7 +354,7 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 | No unsafe package in hot paths | :white_check_mark: | Only in syscall interop (mmap, Windows locks) |
 | Race-free concurrent access | :white_check_mark: | Pager, busy handler, codegen all thread-safe |
 | Go version | :white_check_mark: | 1.26.1 |
-| Cyclomatic complexity | :white_check_mark: | ≤9 across all packages |
+| Cyclomatic complexity | :white_check_mark: | ≤11 across all packages |
 | GitHub Actions pinned | :white_check_mark: | SHA-pinned releases |
 
 ---
@@ -394,24 +394,16 @@ This document tracks feature parity between Anthony (pure Go SQLite) and the ref
 - CTE with JOINs (fixed cursor index handling)
 - FTS5 module (API level - 128 tests)
 - R-Tree module (API level - all tests)
-- 1,122 Trinity (DO-178C trace) tests passing
+- 1,257 Trinity (DO-178C trace) tests passing (100% parity)
 - JSON aggregate functions (json_group_array, json_group_object)
 - NULL-safe GROUP BY comparison
 - Trigger expression substitution (CAST, BETWEEN, IN, CASE)
 - JOIN+aggregate compilation pipeline
 - View WHERE filtering after materialization
 
-### Known Gaps (v0.2.2)
-- Window function frame aggregates (SUM/COUNT/AVG over frame - 42 tests)
-- LEFT JOIN unmatched row edge cases (7 tests)
-- HAVING with complex aggregates (2 tests)
-- TVF in multi-table FROM (correlated evaluation - 5 tests)
-- WITHOUT ROWID ROLLBACK (cache sync - 1 test)
+### Known Gaps
 - Recursive CTEs (cursor architecture being fixed)
 - VACUUM operations (schema persistence issues)
-
-### Major Missing Features (v0.3.0+)
-- Window function aggregate opcodes (OpWindowAggregate)
 - PERCENT_RANK / CUME_DIST window functions
 - ANALYZE (query statistics)
 - likelihood / likely / unlikely functions

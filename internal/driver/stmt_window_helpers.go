@@ -301,8 +301,8 @@ func (s *Stmt) emitWindowColumn(vm *vdbe.VDBE, gen *expr.CodeGenerator, col pars
 
 // emitWindowFunctionColumnWithOpcodes emits code for a window function using proper opcodes
 // numTableCols is used for streaming mode to read from registers
-func (s *Stmt) emitWindowFunctionColumnWithOpcodes(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, colIdx int, numTableCols int) {
-	windowStateIdx := 0
+func (s *Stmt) emitWindowFunctionColumnWithOpcodes(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, colIdx int, numTableCols int, table *schema.Table) {
+	windowStateIdx := s.resolveWindowStateIdx(fnExpr, table)
 
 	switch fnExpr.Name {
 	case "RANK", "DENSE_RANK", "ROW_NUMBER":
@@ -314,7 +314,7 @@ func (s *Stmt) emitWindowFunctionColumnWithOpcodes(vm *vdbe.VDBE, fnExpr *parser
 	case "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE":
 		s.emitWindowValueFunc(vm, fnExpr, windowStateIdx, colIdx, numTableCols)
 	case "SUM", "COUNT", "AVG", "MIN", "MAX", "TOTAL", "GROUP_CONCAT":
-		s.emitWindowAggregateFunc(vm, fnExpr, colIdx, numTableCols)
+		s.emitWindowAggregateFunc(vm, fnExpr, windowStateIdx, colIdx, numTableCols)
 	case "PERCENT_RANK":
 		vm.AddOp(vdbe.OpWindowPercentRank, colIdx, 0, 0)
 	case "CUME_DIST":
@@ -324,15 +324,29 @@ func (s *Stmt) emitWindowFunctionColumnWithOpcodes(vm *vdbe.VDBE, fnExpr *parser
 	}
 }
 
+// resolveWindowStateIdx looks up the correct window state index for a
+// window function based on its OVER clause. Falls back to 0 when no mapping exists.
+func (s *Stmt) resolveWindowStateIdx(fnExpr *parser.FunctionExpr, table *schema.Table) int {
+	if fnExpr.Over == nil || s.windowStateMap == nil {
+		return 0
+	}
+	orderByCols, orderByDesc := s.extractWindowOrderBy(fnExpr.Over, table)
+	overKey := s.makeOverClauseKey(orderByCols, orderByDesc)
+	if idx, ok := s.windowStateMap[overKey]; ok {
+		return idx
+	}
+	return 0
+}
+
 // emitWindowAggregateFunc emits OpWindowAggregate for aggregate window functions.
-func (s *Stmt) emitWindowAggregateFunc(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, colIdx, numTableCols int) {
+func (s *Stmt) emitWindowAggregateFunc(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, stateIdx, colIdx, numTableCols int) {
 	argColIdx := 0
 	if len(fnExpr.Args) > 0 {
 		if ident, ok := fnExpr.Args[0].(*parser.IdentExpr); ok {
 			argColIdx = s.findColumnIndexByName(ident.Name, numTableCols)
 		}
 	}
-	addr := vm.AddOp(vdbe.OpWindowAggregate, colIdx, 0, argColIdx)
+	addr := vm.AddOp(vdbe.OpWindowAggregate, colIdx, stateIdx, argColIdx)
 	vm.Program[addr].P4.Z = fnExpr.Name
 }
 

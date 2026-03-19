@@ -16,12 +16,13 @@ import (
 
 // Stmt implements database/sql/driver.Stmt for SQLite.
 type Stmt struct {
-	conn   *Conn
-	query  string
-	ast    parser.Statement
-	vdbe   *vdbe.VDBE
-	closed bool
-	mu     sync.Mutex // Protects closed and vdbe fields
+	conn           *Conn
+	query          string
+	ast            parser.Statement
+	vdbe           *vdbe.VDBE
+	closed         bool
+	mu             sync.Mutex     // Protects closed and vdbe fields
+	windowStateMap map[string]int // Maps OVER clause key → window state index
 }
 
 // Close closes the statement.

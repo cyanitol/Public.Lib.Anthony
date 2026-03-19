@@ -546,7 +546,7 @@ func valueToJSONSmart(v Value) interface{} {
 	case TypeInteger:
 		return v.AsInt64()
 	case TypeFloat:
-		return v.AsFloat64()
+		return jsonFloat(v.AsFloat64())
 	case TypeText:
 		return convertStringToJSON(v.AsString())
 	case TypeBlob:
@@ -688,10 +688,7 @@ func getJSONType(data interface{}) string {
 	case bool:
 		return "true" // SQLite uses "true" for both true and false
 	case json.Number:
-		if strings.Contains(v.String(), ".") {
-			return "real"
-		}
-		return "integer"
+		return jsonNumberType(v)
 	case float64:
 		if v == float64(int64(v)) && v <= 1e15 && v >= -1e15 {
 			return "integer"
@@ -706,6 +703,14 @@ func getJSONType(data interface{}) string {
 	default:
 		return "null"
 	}
+}
+
+// jsonNumberType returns "integer" or "real" for a json.Number.
+func jsonNumberType(v json.Number) string {
+	if strings.Contains(v.String(), ".") {
+		return "real"
+	}
+	return "integer"
 }
 
 // extractPath extracts a value from JSON using a JSONPath-like syntax
@@ -1078,15 +1083,13 @@ func marshalJSONPreserveFloats(data interface{}) (Value, error) {
 	return NewTextValue(string(result)), nil
 }
 
-// wrapFloats recursively wraps float64 values that have fractional parts as jsonFloat.
-// Integer-valued float64 (e.g., 3.0 from JSON parsing) are left as-is so they marshal as "3".
+// wrapFloats recursively processes nested structures to preserve jsonFloat wrappers.
+// SQL REAL values are already wrapped as jsonFloat by valueToJSONSmart;
+// float64 from JSON parsing are left as-is to marshal as integers.
 func wrapFloats(data interface{}) interface{} {
 	switch v := data.(type) {
 	case float64:
-		if v != float64(int64(v)) || v > 1e15 || v < -1e15 {
-			return jsonFloat(v) // has fractional part or too large for int64
-		}
-		return v // integer-valued float, marshal as integer
+		return v
 	case []interface{}:
 		out := make([]interface{}, len(v))
 		for i, elem := range v {

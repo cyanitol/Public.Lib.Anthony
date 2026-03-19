@@ -57,8 +57,7 @@ func genCoreCreateTableTests() []sqlTestCase {
 			errLike: "already exists",
 		},
 		{
-			name:     "REQ-CORE-005_create_table_multiple_columns",
-			skip:     "pragma virtual tables not yet implemented",
+			name: "REQ-CORE-005_create_table_multiple_columns",
 			setup:    []string{"CREATE TABLE t5(a INT, b TEXT, c REAL, d BLOB, e)"},
 			query:    "SELECT COUNT(*) FROM pragma_table_info('t5')",
 			wantRows: [][]interface{}{{int64(5)}},
@@ -71,8 +70,7 @@ func genCoreCreateTableTests() []sqlTestCase {
 			wantRows: nil,
 		},
 		{
-			name:     "REQ-CORE-007_create_table_default_select",
-			skip:     "engine bug: column-list INSERT assigns to wrong column positions",
+			name: "REQ-CORE-007_create_table_default_select",
 			setup:    []string{"CREATE TABLE t7(a INTEGER DEFAULT 42, b TEXT DEFAULT 'hello')", "INSERT INTO t7(b) VALUES('world')"},
 			query:    "SELECT a, b FROM t7",
 			wantRows: [][]interface{}{{int64(42), "world"}},
@@ -277,10 +275,9 @@ func genCoreWhereTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-CORE-040_where_like",
-			skip:     "engine gap: LIKE with leading % wildcard returns no results",
 			setup:    setup,
 			query:    "SELECT b FROM w1 WHERE b LIKE '%eta'",
-			wantRows: [][]interface{}{{"beta"}, {"delta"}},
+			wantRows: [][]interface{}{{"beta"}},
 		},
 		{
 			name:     "REQ-CORE-041_where_not",
@@ -325,7 +322,6 @@ func genCoreLimitOffsetTests() []sqlTestCase {
 		},
 		{
 			name:     "REQ-CORE-048_limit_exceeds_rows",
-			skip:     "engine gap: COUNT(*) over subquery with LIMIT",
 			setup:    setup,
 			query:    "SELECT COUNT(*) FROM (SELECT a FROM lim1 LIMIT 100)",
 			wantRows: [][]interface{}{{int64(5)}},
@@ -346,8 +342,7 @@ func genCoreRowidTests() []sqlTestCase {
 			wantRows: [][]interface{}{{int64(1), "x"}, {int64(2), "y"}},
 		},
 		{
-			name:     "REQ-CORE-051_rowid_explicit",
-			skip:     "engine gap: explicit rowid in column-list INSERT",
+			name: "REQ-CORE-051_rowid_explicit",
 			setup:    []string{"CREATE TABLE rid2(a TEXT)", "INSERT INTO rid2(rowid, a) VALUES(100,'z')"},
 			query:    "SELECT rowid, a FROM rid2",
 			wantRows: [][]interface{}{{int64(100), "z"}},
@@ -451,7 +446,6 @@ func genCoreDDLTests() []sqlTestCase {
 		},
 		{
 			name:    "REQ-CORE-066_create_table_check_constraint",
-			skip:    "engine gap: CHECK constraints not enforced on INSERT",
 			setup:   []string{"CREATE TABLE dd6(a INTEGER CHECK(a > 0))"},
 			exec:    "INSERT INTO dd6 VALUES(-1)",
 			wantErr: true,
@@ -459,7 +453,6 @@ func genCoreDDLTests() []sqlTestCase {
 		},
 		{
 			name:    "REQ-CORE-067_create_table_primary_key_text",
-			skip:    "engine gap: TEXT PRIMARY KEY uniqueness not enforced",
 			setup:   []string{"CREATE TABLE dd7(k TEXT PRIMARY KEY, v INTEGER)", "INSERT INTO dd7 VALUES('abc',1)"},
 			exec:    "INSERT INTO dd7 VALUES('abc',2)",
 			wantErr: true,

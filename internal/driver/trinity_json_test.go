@@ -44,8 +44,7 @@ func genJSONScalarTests() []sqlTestCase {
 			wantRows: [][]interface{}{{"[1,2,3]"}},
 		},
 		{
-			name:     "REQ-JSON-004_json_array_mixed",
-			skip:     "json_array renders 3.0 as 3 (integer), missing real formatting",
+			name: "REQ-JSON-004_json_array_mixed",
 			query:    `SELECT json_array(1, 'two', NULL, 3.0)`,
 			wantRows: [][]interface{}{{"[1,\"two\",null,3.0]"}},
 		},
@@ -75,8 +74,7 @@ func genJSONScalarTests() []sqlTestCase {
 			wantRows: [][]interface{}{{`{"a":{"b":2}}`}},
 		},
 		{
-			name:    "REQ-JSON-010_json_invalid_input",
-			skip:    "json() does not return error on malformed input",
+			name: "REQ-JSON-010_json_invalid_input",
 			query:   `SELECT json('not json')`,
 			wantErr: true,
 			errLike: "malformed",
