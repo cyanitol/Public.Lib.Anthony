@@ -5,7 +5,8 @@ package pager
 
 import (
 	"fmt"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // Platform-specific lock implementation for Unix systems.
@@ -66,13 +67,13 @@ func (lm *LockManager) initPlatform() error {
 	}
 
 	// Test if OFD locks are supported by attempting a test lock
-	testLock := syscall.Flock_t{
-		Type:   syscall.F_RDLCK,
+	testLock := unix.Flock_t{
+		Type:   unix.F_RDLCK,
 		Whence: 0,
 		Start:  0,
 		Len:    0, // Lock entire file
 	}
-	err := syscall.FcntlFlock(fd, F_OFD_GETLK, &testLock)
+	err := unix.FcntlFlock(fd, F_OFD_GETLK, &testLock)
 	if err != nil {
 		// OFD locks not supported, fall back to POSIX locks
 		data.useOFD = false
@@ -94,7 +95,7 @@ func (lm *LockManager) fcntlSetLk() int {
 	if data.useOFD {
 		return F_OFD_SETLK
 	}
-	return syscall.F_SETLK
+	return unix.F_SETLK
 }
 
 // fcntlGetLk returns the appropriate fcntl command for lock testing
@@ -103,7 +104,7 @@ func (lm *LockManager) fcntlGetLk() int {
 	if data.useOFD {
 		return F_OFD_GETLK
 	}
-	return syscall.F_GETLK
+	return unix.F_GETLK
 }
 
 // acquireLockPlatform performs the platform-specific lock acquisition.
@@ -166,16 +167,16 @@ func (lm *LockManager) acquireSharedLock() error {
 	data := lm.platformData.(*unixLockData)
 
 	// Try to acquire a shared (read) lock on one byte in the SHARED range
-	lock := syscall.Flock_t{
-		Type:   syscall.F_RDLCK, // Read lock
-		Whence: 0,               // SEEK_SET
+	lock := unix.Flock_t{
+		Type:   unix.F_RDLCK, // Read lock
+		Whence: 0,            // SEEK_SET
 		Start:  data.sharedByte,
 		Len:    1,
 	}
 
 	// Use F_OFD_SETLK or F_SETLK for non-blocking lock
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
-		if err == syscall.EAGAIN || err == syscall.EACCES {
+	if err := unix.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
+		if err == unix.EAGAIN || err == unix.EACCES {
 			return ErrLockBusy
 		}
 		return fmt.Errorf("failed to acquire shared lock: %w", err)
@@ -188,14 +189,14 @@ func (lm *LockManager) acquireSharedLock() error {
 func (lm *LockManager) releaseSharedLock() error {
 	data := lm.platformData.(*unixLockData)
 
-	lock := syscall.Flock_t{
-		Type:   syscall.F_UNLCK,
+	lock := unix.Flock_t{
+		Type:   unix.F_UNLCK,
 		Whence: 0,
 		Start:  data.sharedByte,
 		Len:    1,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
+	if err := unix.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
 		return fmt.Errorf("failed to release shared lock: %w", err)
 	}
 
@@ -205,15 +206,15 @@ func (lm *LockManager) releaseSharedLock() error {
 // acquireReservedLock acquires a RESERVED lock.
 func (lm *LockManager) acquireReservedLock() error {
 	// RESERVED lock is an exclusive lock on the RESERVED byte
-	lock := syscall.Flock_t{
-		Type:   syscall.F_WRLCK, // Write lock
+	lock := unix.Flock_t{
+		Type:   unix.F_WRLCK, // Write lock
 		Whence: 0,
 		Start:  reservedByte,
 		Len:    1,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
-		if err == syscall.EAGAIN || err == syscall.EACCES {
+	if err := unix.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
+		if err == unix.EAGAIN || err == unix.EACCES {
 			return ErrLockBusy
 		}
 		return fmt.Errorf("failed to acquire reserved lock: %w", err)
@@ -233,14 +234,14 @@ func (lm *LockManager) acquireReservedLock() error {
 
 // releaseReservedLock releases the RESERVED lock.
 func (lm *LockManager) releaseReservedLock() error {
-	lock := syscall.Flock_t{
-		Type:   syscall.F_UNLCK,
+	lock := unix.Flock_t{
+		Type:   unix.F_UNLCK,
 		Whence: 0,
 		Start:  reservedByte,
 		Len:    1,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
+	if err := unix.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
 		return fmt.Errorf("failed to release reserved lock: %w", err)
 	}
 
@@ -250,15 +251,15 @@ func (lm *LockManager) releaseReservedLock() error {
 // acquirePendingLock acquires a PENDING lock.
 func (lm *LockManager) acquirePendingLock() error {
 	// PENDING lock is an exclusive lock on the PENDING byte
-	lock := syscall.Flock_t{
-		Type:   syscall.F_WRLCK,
+	lock := unix.Flock_t{
+		Type:   unix.F_WRLCK,
 		Whence: 0,
 		Start:  pendingByte,
 		Len:    1,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
-		if err == syscall.EAGAIN || err == syscall.EACCES {
+	if err := unix.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
+		if err == unix.EAGAIN || err == unix.EACCES {
 			return ErrLockBusy
 		}
 		return fmt.Errorf("failed to acquire pending lock: %w", err)
@@ -277,14 +278,14 @@ func (lm *LockManager) acquirePendingLock() error {
 
 // releasePendingLock releases the PENDING lock.
 func (lm *LockManager) releasePendingLock() error {
-	lock := syscall.Flock_t{
-		Type:   syscall.F_UNLCK,
+	lock := unix.Flock_t{
+		Type:   unix.F_UNLCK,
 		Whence: 0,
 		Start:  pendingByte,
 		Len:    1,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
+	if err := unix.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
 		return fmt.Errorf("failed to release pending lock: %w", err)
 	}
 
@@ -308,18 +309,18 @@ func (lm *LockManager) acquireExclusiveLock() error {
 
 	// Now try to acquire exclusive lock on the entire SHARED range
 	// This will block until all readers have released their locks
-	lock := syscall.Flock_t{
-		Type:   syscall.F_WRLCK, // Write lock (exclusive)
+	lock := unix.Flock_t{
+		Type:   unix.F_WRLCK, // Write lock (exclusive)
 		Whence: 0,
 		Start:  sharedFirst,
 		Len:    sharedSize,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
+	if err := unix.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
 		if lm.currentLevel < lockPending {
 			lm.releasePendingLock()
 		}
-		if err == syscall.EAGAIN || err == syscall.EACCES {
+		if err == unix.EAGAIN || err == unix.EACCES {
 			return ErrLockBusy
 		}
 		return fmt.Errorf("failed to acquire exclusive lock: %w", err)
@@ -327,13 +328,13 @@ func (lm *LockManager) acquireExclusiveLock() error {
 
 	// Release our individual SHARED lock since we now have exclusive access
 	// We ignore errors here because we might not have had a SHARED lock
-	releaseLock := syscall.Flock_t{
-		Type:   syscall.F_UNLCK,
+	releaseLock := unix.Flock_t{
+		Type:   unix.F_UNLCK,
 		Whence: 0,
 		Start:  data.sharedByte,
 		Len:    1,
 	}
-	syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &releaseLock)
+	unix.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &releaseLock)
 
 	return nil
 }
@@ -341,14 +342,14 @@ func (lm *LockManager) acquireExclusiveLock() error {
 // releaseExclusiveLock releases the EXCLUSIVE lock.
 func (lm *LockManager) releaseExclusiveLock() error {
 	// Release the exclusive lock on the SHARED range
-	lock := syscall.Flock_t{
-		Type:   syscall.F_UNLCK,
+	lock := unix.Flock_t{
+		Type:   unix.F_UNLCK,
 		Whence: 0,
 		Start:  sharedFirst,
 		Len:    sharedSize,
 	}
 
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
+	if err := unix.FcntlFlock(lm.file.Fd(), lm.fcntlSetLk(), &lock); err != nil {
 		return fmt.Errorf("failed to release exclusive lock: %w", err)
 	}
 
@@ -358,18 +359,18 @@ func (lm *LockManager) releaseExclusiveLock() error {
 // CheckReservedLock checks if any other process holds a RESERVED lock.
 // This is used to detect lock conflicts.
 func (lm *LockManager) CheckReservedLock() (bool, error) {
-	lock := syscall.Flock_t{
-		Type:   syscall.F_WRLCK,
+	lock := unix.Flock_t{
+		Type:   unix.F_WRLCK,
 		Whence: 0,
 		Start:  reservedByte,
 		Len:    1,
 	}
 
 	// F_GETLK/F_OFD_GETLK checks if a lock would succeed without actually acquiring it
-	if err := syscall.FcntlFlock(lm.file.Fd(), lm.fcntlGetLk(), &lock); err != nil {
+	if err := unix.FcntlFlock(lm.file.Fd(), lm.fcntlGetLk(), &lock); err != nil {
 		return false, fmt.Errorf("failed to check reserved lock: %w", err)
 	}
 
 	// If lock.Type is F_UNLCK, no conflicting lock exists
-	return lock.Type != syscall.F_UNLCK, nil
+	return lock.Type != unix.F_UNLCK, nil
 }
