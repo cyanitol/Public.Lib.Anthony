@@ -8,8 +8,6 @@ import (
 	"hash/crc32"
 	"os"
 	"sync"
-	"syscall"
-	"unsafe"
 )
 
 // WAL index constants
@@ -274,8 +272,7 @@ func (w *WALIndex) writeHeaderToFile() error {
 }
 
 // mmapFile memory-maps the WAL index file.
-// In a production implementation, this would use syscall.Mmap for true shared memory.
-// For simplicity, we use a basic file-backed approach.
+// The actual mapping is delegated to platform-specific implementations.
 func (w *WALIndex) mmapFile() error {
 	info, err := w.file.Stat()
 	if err != nil {
@@ -287,14 +284,7 @@ func (w *WALIndex) mmapFile() error {
 		return errors.New("cannot mmap empty file")
 	}
 
-	// Use syscall.Mmap for true memory mapping
-	mmap, err := syscall.Mmap(
-		int(w.file.Fd()),
-		0,
-		size,
-		syscall.PROT_READ|syscall.PROT_WRITE,
-		syscall.MAP_SHARED,
-	)
+	mmap, err := platformMmap(w.file, size)
 	if err != nil {
 		return fmt.Errorf("failed to mmap WAL index file: %w", err)
 	}
@@ -312,7 +302,7 @@ func (w *WALIndex) Close() error {
 
 	// Unmap memory
 	if w.mmap != nil {
-		if err := syscall.Munmap(w.mmap); err != nil && firstErr == nil {
+		if err := platformMunmap(w.mmap); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("failed to munmap: %w", err)
 		}
 		w.mmap = nil
@@ -741,23 +731,7 @@ func (w *WALIndex) syncMmap() error {
 	if w.mmap == nil {
 		return errors.New("mmap not initialized")
 	}
-
-	// Use msync to flush changes to disk.
-	// unsafe.Pointer is required here to pass the mmap base address to the
-	// syscall.Syscall interface; there is no safe alternative for raw syscalls.
-	// nosec: unsafe.Pointer required for mmap syscall interop
-	_, _, errno := syscall.Syscall(
-		syscall.SYS_MSYNC,
-		uintptr(unsafe.Pointer(&w.mmap[0])),
-		uintptr(len(w.mmap)),
-		uintptr(syscall.MS_SYNC),
-	)
-
-	if errno != 0 {
-		return fmt.Errorf("msync failed: %v", errno)
-	}
-
-	return nil
+	return platformMsync(w.mmap)
 }
 
 // Delete deletes the WAL index file.

@@ -33,6 +33,10 @@ const (
 const (
 	LOCKFILE_FAIL_IMMEDIATELY = 0x00000001
 	LOCKFILE_EXCLUSIVE_LOCK   = 0x00000002
+
+	// ERROR_LOCK_VIOLATION is Windows error code 33 (0x21).
+	// It is not defined in Go's syscall package.
+	ERROR_LOCK_VIOLATION = syscall.Errno(0x21)
 )
 
 var (
@@ -181,7 +185,7 @@ func (lm *LockManager) acquireSharedLock() error {
 	)
 
 	if err != nil {
-		if err == syscall.ERROR_LOCK_VIOLATION {
+		if err == ERROR_LOCK_VIOLATION {
 			return ErrLockBusy
 		}
 		return fmt.Errorf("failed to acquire shared lock: %w", err)
@@ -220,7 +224,7 @@ func (lm *LockManager) acquireReservedLock() error {
 	)
 
 	if err != nil {
-		if err == syscall.ERROR_LOCK_VIOLATION {
+		if err == ERROR_LOCK_VIOLATION {
 			return ErrLockBusy
 		}
 		return fmt.Errorf("failed to acquire reserved lock: %w", err)
@@ -266,7 +270,7 @@ func (lm *LockManager) acquirePendingLock() error {
 	)
 
 	if err != nil {
-		if err == syscall.ERROR_LOCK_VIOLATION {
+		if err == ERROR_LOCK_VIOLATION {
 			return ErrLockBusy
 		}
 		return fmt.Errorf("failed to acquire pending lock: %w", err)
@@ -327,7 +331,7 @@ func (lm *LockManager) acquireExclusiveLock() error {
 		if lm.currentLevel < lockPending {
 			lm.releasePendingLock()
 		}
-		if err == syscall.ERROR_LOCK_VIOLATION {
+		if err == ERROR_LOCK_VIOLATION {
 			return ErrLockBusy
 		}
 		return fmt.Errorf("failed to acquire exclusive lock: %w", err)
@@ -377,7 +381,7 @@ func (lm *LockManager) CheckReservedLock() (bool, error) {
 	)
 
 	if err != nil {
-		if err == syscall.ERROR_LOCK_VIOLATION {
+		if err == ERROR_LOCK_VIOLATION {
 			// Someone else holds the reserved lock
 			return true, nil
 		}
