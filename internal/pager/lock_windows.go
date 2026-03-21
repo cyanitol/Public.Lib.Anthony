@@ -5,8 +5,8 @@ package pager
 
 import (
 	"fmt"
-
-	"golang.org/x/sys/windows"
+	"syscall"
+	"unsafe"
 )
 
 // Platform-specific lock implementation for Windows systems.
@@ -35,7 +35,14 @@ const (
 	LOCKFILE_EXCLUSIVE_LOCK   = 0x00000002
 
 	// ERROR_LOCK_VIOLATION is Windows error code 33 (0x21).
-	ERROR_LOCK_VIOLATION = windows.ERROR_LOCK_VIOLATION
+	// Go's stdlib syscall package does not define this constant.
+	ERROR_LOCK_VIOLATION = syscall.Errno(0x21)
+)
+
+var (
+	kernel32         = syscall.NewLazyDLL("kernel32.dll")
+	procLockFileEx   = kernel32.NewProc("LockFileEx")
+	procUnlockFileEx = kernel32.NewProc("UnlockFileEx")
 )
 
 // windowsLockData holds Windows-specific locking information.
@@ -117,22 +124,47 @@ func (lm *LockManager) releaseLockPlatform(level LockLevel) error {
 	return nil
 }
 
-// lockFileEx wraps LockFileEx with the Overlapped struct setup.
-func lockFileEx(handle windows.Handle, flags uint32, offsetLow uint32, offsetHigh uint32, nBytes uint32) error {
-	ol := windows.Overlapped{
-		Offset:     offsetLow,
-		OffsetHigh: offsetHigh,
+// lockFileEx wraps the Windows LockFileEx API.
+// unsafe.Pointer is required to pass the OVERLAPPED struct to the Windows
+// syscall interface; there is no safe alternative for raw Win32 API calls.
+func lockFileEx(handle syscall.Handle, flags uint32, offsetLow uint32, offsetHigh uint32, nBytes uint32) error {
+	var overlapped syscall.Overlapped
+	overlapped.Offset = offsetLow
+	overlapped.OffsetHigh = offsetHigh
+
+	r1, _, err := procLockFileEx.Call(
+		uintptr(handle),
+		uintptr(flags),
+		uintptr(0), // Reserved
+		uintptr(nBytes),
+		uintptr(0), // nNumberOfBytesToLockHigh
+		uintptr(unsafe.Pointer(&overlapped)),
+	)
+
+	if r1 == 0 {
+		return err
 	}
-	return windows.LockFileEx(handle, flags, 0, nBytes, 0, &ol)
+	return nil
 }
 
-// unlockFileEx wraps UnlockFileEx with the Overlapped struct setup.
-func unlockFileEx(handle windows.Handle, offsetLow uint32, offsetHigh uint32, nBytes uint32) error {
-	ol := windows.Overlapped{
-		Offset:     offsetLow,
-		OffsetHigh: offsetHigh,
+// unlockFileEx wraps the Windows UnlockFileEx API.
+func unlockFileEx(handle syscall.Handle, offsetLow uint32, offsetHigh uint32, nBytes uint32) error {
+	var overlapped syscall.Overlapped
+	overlapped.Offset = offsetLow
+	overlapped.OffsetHigh = offsetHigh
+
+	r1, _, err := procUnlockFileEx.Call(
+		uintptr(handle),
+		uintptr(0), // Reserved
+		uintptr(nBytes),
+		uintptr(0), // nNumberOfBytesToUnlockHigh
+		uintptr(unsafe.Pointer(&overlapped)),
+	)
+
+	if r1 == 0 {
+		return err
 	}
-	return windows.UnlockFileEx(handle, 0, nBytes, 0, &ol)
+	return nil
 }
 
 func (lm *LockManager) acquireSharedLock() error {
@@ -143,7 +175,7 @@ func (lm *LockManager) acquireSharedLock() error {
 	flags := uint32(LOCKFILE_FAIL_IMMEDIATELY)
 
 	err := lockFileEx(
-		windows.Handle(lm.file.Fd()),
+		syscall.Handle(lm.file.Fd()),
 		flags,
 		uint32(data.sharedByte),
 		0, // high 32 bits of offset
@@ -164,7 +196,7 @@ func (lm *LockManager) releaseSharedLock() error {
 	data := lm.platformData.(*windowsLockData)
 
 	err := unlockFileEx(
-		windows.Handle(lm.file.Fd()),
+		syscall.Handle(lm.file.Fd()),
 		uint32(data.sharedByte),
 		0, // high 32 bits of offset
 		1, // unlock 1 byte
@@ -182,7 +214,7 @@ func (lm *LockManager) acquireReservedLock() error {
 	flags := uint32(LOCKFILE_FAIL_IMMEDIATELY | LOCKFILE_EXCLUSIVE_LOCK)
 
 	err := lockFileEx(
-		windows.Handle(lm.file.Fd()),
+		syscall.Handle(lm.file.Fd()),
 		flags,
 		uint32(reservedByte),
 		0, // high 32 bits of offset
@@ -210,7 +242,7 @@ func (lm *LockManager) acquireReservedLock() error {
 
 func (lm *LockManager) releaseReservedLock() error {
 	err := unlockFileEx(
-		windows.Handle(lm.file.Fd()),
+		syscall.Handle(lm.file.Fd()),
 		uint32(reservedByte),
 		0, // high 32 bits of offset
 		1, // unlock 1 byte
@@ -228,7 +260,7 @@ func (lm *LockManager) acquirePendingLock() error {
 	flags := uint32(LOCKFILE_FAIL_IMMEDIATELY | LOCKFILE_EXCLUSIVE_LOCK)
 
 	err := lockFileEx(
-		windows.Handle(lm.file.Fd()),
+		syscall.Handle(lm.file.Fd()),
 		flags,
 		uint32(pendingByte),
 		0, // high 32 bits of offset
@@ -255,7 +287,7 @@ func (lm *LockManager) acquirePendingLock() error {
 
 func (lm *LockManager) releasePendingLock() error {
 	err := unlockFileEx(
-		windows.Handle(lm.file.Fd()),
+		syscall.Handle(lm.file.Fd()),
 		uint32(pendingByte),
 		0, // high 32 bits of offset
 		1, // unlock 1 byte
@@ -286,7 +318,7 @@ func (lm *LockManager) acquireExclusiveLock() error {
 	flags := uint32(LOCKFILE_FAIL_IMMEDIATELY | LOCKFILE_EXCLUSIVE_LOCK)
 
 	err := lockFileEx(
-		windows.Handle(lm.file.Fd()),
+		syscall.Handle(lm.file.Fd()),
 		flags,
 		uint32(sharedFirst),
 		0,          // high 32 bits of offset
@@ -306,7 +338,7 @@ func (lm *LockManager) acquireExclusiveLock() error {
 	// Release our individual SHARED lock since we now have exclusive access
 	// We ignore errors here because we might not have had a SHARED lock
 	unlockFileEx(
-		windows.Handle(lm.file.Fd()),
+		syscall.Handle(lm.file.Fd()),
 		uint32(data.sharedByte),
 		0, // high 32 bits of offset
 		1, // unlock 1 byte
@@ -318,7 +350,7 @@ func (lm *LockManager) acquireExclusiveLock() error {
 func (lm *LockManager) releaseExclusiveLock() error {
 	// Release the exclusive lock on the SHARED range
 	err := unlockFileEx(
-		windows.Handle(lm.file.Fd()),
+		syscall.Handle(lm.file.Fd()),
 		uint32(sharedFirst),
 		0,          // high 32 bits of offset
 		sharedSize, // unlock entire shared range
@@ -339,7 +371,7 @@ func (lm *LockManager) CheckReservedLock() (bool, error) {
 	flags := uint32(LOCKFILE_FAIL_IMMEDIATELY)
 
 	err := lockFileEx(
-		windows.Handle(lm.file.Fd()),
+		syscall.Handle(lm.file.Fd()),
 		flags,
 		uint32(reservedByte),
 		0, // high 32 bits of offset
@@ -356,7 +388,7 @@ func (lm *LockManager) CheckReservedLock() (bool, error) {
 
 	// We got the lock, so release it immediately
 	unlockErr := unlockFileEx(
-		windows.Handle(lm.file.Fd()),
+		syscall.Handle(lm.file.Fd()),
 		uint32(reservedByte),
 		0, // high 32 bits of offset
 		1, // unlock 1 byte

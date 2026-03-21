@@ -5,27 +5,21 @@ package pager
 
 import (
 	"os"
-
-	"golang.org/x/sys/unix"
+	"syscall"
 )
 
 // platformMmap memory-maps a file using Unix mmap.
 func platformMmap(f *os.File, size int) ([]byte, error) {
-	return unix.Mmap(
+	return syscall.Mmap(
 		int(f.Fd()),
 		0,
 		size,
-		unix.PROT_READ|unix.PROT_WRITE,
-		unix.MAP_SHARED,
+		syscall.PROT_READ|syscall.PROT_WRITE,
+		syscall.MAP_SHARED,
 	)
 }
 
 // platformMunmap unmaps a memory-mapped region.
 func platformMunmap(data []byte) error {
-	return unix.Munmap(data)
-}
-
-// platformMsync flushes a memory-mapped region to disk.
-func platformMsync(data []byte) error {
-	return unix.Msync(data, unix.MS_SYNC)
+	return syscall.Munmap(data)
 }
