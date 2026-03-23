@@ -237,6 +237,9 @@ func (w *WAL) WriteFrame(pgno Pgno, data []byte, dbSize uint32) error {
 	// Calculate checksums (cumulative)
 	w.calculateFrameChecksum(frame)
 
+	// Cache checksums immediately so ReadFrame after WriteFrame hits cache
+	w.checksumCache[w.frameCount] = [2]uint32{w.lastChecksum1, w.lastChecksum2}
+
 	// Serialize and write frame
 	if err := w.writeFrameData(frame); err != nil {
 		return err
@@ -537,7 +540,7 @@ func (w *WAL) readHeader() error {
 	return nil
 }
 
-// writeFrameData writes a frame to the WAL file.
+// writeFrameData writes a frame to the WAL file atomically.
 func (w *WAL) writeFrameData(frame *WALFrame) error {
 	// Serialize frame header
 	headerData := make([]byte, WALFrameHeaderSize)
@@ -548,19 +551,16 @@ func (w *WAL) writeFrameData(frame *WALFrame) error {
 	binary.BigEndian.PutUint32(headerData[16:20], frame.Checksum1)
 	binary.BigEndian.PutUint32(headerData[20:24], frame.Checksum2)
 
-	// Seek to end of file
-	if _, err := w.file.Seek(0, io.SeekEnd); err != nil {
+	// Get end-of-file offset for atomic WriteAt
+	offset, err := w.file.Seek(0, io.SeekEnd)
+	if err != nil {
 		return fmt.Errorf("failed to seek WAL: %w", err)
 	}
 
-	// Write frame header
-	if _, err := w.file.Write(headerData); err != nil {
-		return fmt.Errorf("failed to write frame header: %w", err)
-	}
-
-	// Write page data
-	if _, err := w.file.Write(frame.Data); err != nil {
-		return fmt.Errorf("failed to write frame data: %w", err)
+	// Combine header and page data into one buffer and write atomically
+	combined := append(headerData, frame.Data...)
+	if _, err := w.file.WriteAt(combined, offset); err != nil {
+		return fmt.Errorf("failed to write frame: %w", err)
 	}
 
 	return nil

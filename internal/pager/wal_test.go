@@ -577,6 +577,64 @@ func TestWALFrameFormat(t *testing.T) {
 	}
 }
 
+// TestWALLargeBlobRoundTrip tests writing and reading back 10 large blob frames,
+// then closing/reopening the WAL to exercise the recovery path.
+func TestWALLargeBlobRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	const pageSize = 4096
+	const numFrames = 10
+
+	dbFile := createTestDBFile(t)
+	wal := mustOpenWAL(t, dbFile, pageSize)
+
+	// Build deterministic frame data and write all frames
+	frames := make([][]byte, numFrames)
+	for frameIdx := 0; frameIdx < numFrames; frameIdx++ {
+		data := make([]byte, pageSize)
+		for i := range data {
+			data[i] = byte(i * (frameIdx + 1) % 251)
+		}
+		frames[frameIdx] = data
+		mustWriteFrame(t, wal, Pgno(frameIdx+1), data, uint32(frameIdx+1))
+	}
+
+	// Read back all frames immediately and verify data
+	for frameIdx := 0; frameIdx < numFrames; frameIdx++ {
+		frame, err := wal.ReadFrame(uint32(frameIdx))
+		if err != nil {
+			t.Fatalf("ReadFrame(%d) error = %v", frameIdx, err)
+		}
+		if !bytesEqual(frame.Data, frames[frameIdx]) {
+			t.Errorf("Frame %d: data mismatch before reopen", frameIdx)
+		}
+	}
+
+	wal.Close()
+
+	// Reopen to exercise the recovery path
+	wal2 := mustOpenWAL(t, dbFile, pageSize)
+	defer wal2.Close()
+
+	if wal2.frameCount != numFrames {
+		t.Fatalf("Expected %d frames after reopen, got %d", numFrames, wal2.frameCount)
+	}
+
+	// Read all frames again: verify checksums and data
+	for frameIdx := 0; frameIdx < numFrames; frameIdx++ {
+		frame, err := wal2.ReadFrame(uint32(frameIdx))
+		if err != nil {
+			t.Fatalf("ReadFrame(%d) after reopen error = %v", frameIdx, err)
+		}
+		if !bytesEqual(frame.Data, frames[frameIdx]) {
+			t.Errorf("Frame %d: data mismatch after reopen", frameIdx)
+		}
+		if frame.PageNumber != uint32(frameIdx+1) {
+			t.Errorf("Frame %d: wrong page number %d", frameIdx, frame.PageNumber)
+		}
+	}
+}
+
 // Helper functions
 
 // makeTestPage creates a test page with a recognizable pattern
