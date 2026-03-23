@@ -4,6 +4,7 @@ package driver
 import (
 	"database/sql/driver"
 	"fmt"
+	"sync/atomic"
 )
 
 // Tx implements database/sql/driver.Tx for SQLite.
@@ -35,6 +36,20 @@ func (tx *Tx) Commit() error {
 			return fmt.Errorf("failed to end read transaction: %w", err)
 		}
 	} else {
+		// OCC conflict detection: check if another writer committed since we began.
+		if tx.conn.writeVersion != nil {
+			current := atomic.LoadUint64(tx.conn.writeVersion)
+			if current != tx.conn.startVersion {
+				// A concurrent writer committed; rollback and signal conflict.
+				_ = tx.conn.pager.Rollback()
+				tx.conn.btree.ClearCache()
+				tx.conn.inTx = false
+				tx.conn.setFKTransactionState(false)
+				tx.closed = true
+				return ErrWriteConflict
+			}
+		}
+
 		// For write transactions, check deferred FK constraints before committing
 		if err := tx.conn.checkDeferredFKConstraints(); err != nil {
 			return err
@@ -43,6 +58,11 @@ func (tx *Tx) Commit() error {
 		// Commit the pager transaction
 		if err := tx.conn.pager.Commit(); err != nil {
 			return fmt.Errorf("commit failed: %w", err)
+		}
+
+		// Increment write version so concurrent transactions in-flight detect a conflict.
+		if tx.conn.writeVersion != nil {
+			atomic.AddUint64(tx.conn.writeVersion, 1)
 		}
 
 		// Clear deferred FK violations after successful commit

@@ -29,6 +29,10 @@ type dbState struct {
 	// another commits (writes dirty pages to disk), causing a data race on the
 	// shared page buffer.
 	writeMu sync.Mutex
+
+	// writeVersion is incremented atomically on each successful commit.
+	// Used for Optimistic Concurrency Control (OCC) conflict detection.
+	writeVersion uint64
 }
 
 // Driver implements database/sql/driver.Driver for SQLite.
@@ -219,6 +223,7 @@ func (d *Driver) buildConnection(filename string, state *dbState, secCfg *securi
 		stmts:          make(map[*Stmt]struct{}),
 		stmtCache:      NewStmtCache(100),
 		writeMu:        &state.writeMu,
+		writeVersion:   &state.writeVersion,
 		securityConfig: secCfg,
 	}
 }

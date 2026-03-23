@@ -4,9 +4,11 @@ package driver
 import (
 	"context"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/btree"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/collation"
@@ -22,25 +24,31 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vtab/rtree"
 )
 
+// ErrWriteConflict is returned when a write transaction conflicts with a
+// concurrent commit. The caller should retry the transaction.
+var ErrWriteConflict = errors.New("write conflict: concurrent modification detected")
+
 // Conn implements database/sql/driver.Conn for SQLite.
 type Conn struct {
-	driver     *Driver
-	filename   string
-	pager      pager.PagerInterface
-	btree      *btree.Btree
-	schema     *schema.Schema
-	funcReg    *functions.Registry
-	dbRegistry *schema.DatabaseRegistry
-	stmts      map[*Stmt]struct{}
-	stmtCache  *StmtCache
-	mu         sync.Mutex
-	writeMu    *sync.Mutex // Shared across all connections to the same database
-	closed     bool
+	driver       *Driver
+	filename     string
+	pager        pager.PagerInterface
+	btree        *btree.Btree
+	schema       *schema.Schema
+	funcReg      *functions.Registry
+	dbRegistry   *schema.DatabaseRegistry
+	stmts        map[*Stmt]struct{}
+	stmtCache    *StmtCache
+	mu           sync.Mutex
+	writeMu      *sync.Mutex // Shared across all connections to the same database
+	writeVersion *uint64     // Points to dbState.writeVersion; shared across connections
+	closed       bool
 
 	// Transaction state
 	inTx          bool
-	sqlTx         bool // true when transaction was started via SQL (BEGIN/SAVEPOINT)
-	savepointOnly bool // true when transaction was started implicitly by SAVEPOINT
+	sqlTx         bool   // true when transaction was started via SQL (BEGIN/SAVEPOINT)
+	savepointOnly bool   // true when transaction was started implicitly by SAVEPOINT
+	startVersion  uint64 // writeVersion snapshot at write transaction start (OCC)
 
 	// PRAGMA settings
 	foreignKeysEnabled bool
@@ -294,6 +302,11 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 	// Start a write transaction in the pager
 	if err := c.pager.BeginWrite(); err != nil {
 		return nil, fmt.Errorf("failed to begin write transaction: %w", err)
+	}
+
+	// Snapshot the current write version for OCC conflict detection at commit time.
+	if c.writeVersion != nil {
+		c.startVersion = atomic.LoadUint64(c.writeVersion)
 	}
 
 	c.inTx = true
