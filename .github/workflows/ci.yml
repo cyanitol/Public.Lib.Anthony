@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-or-later OR CC0-1.0 OR BSD-3-Clause)
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  ci:
+    name: CI checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      - name: Install gocyclo
+        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+
+      - name: Check formatting (gofmt)
+        run: |
+          UNFORMATTED=$(CGO_ENABLED=0 gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "The following files need formatting:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      - name: Check cyclomatic complexity (gocyclo)
+        run: |
+          FILES=$(find . -name '*.go' ! -name '*_test.go')
+          if [ -n "$FILES" ]; then
+            CGO_ENABLED=0 gocyclo -over 11 $FILES
+          fi
+
+      - name: Run go vet
+        run: CGO_ENABLED=0 go vet ./...
+
+      - name: Run tests
+        run: CGO_ENABLED=0 go test -p 4 -parallel 4 ./...
