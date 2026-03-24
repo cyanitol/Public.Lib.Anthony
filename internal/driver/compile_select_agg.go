@@ -1023,6 +1023,7 @@ func (s *Stmt) collectWindowFuncs(e parser.Expression, table *schema.Table, vm *
 	}
 	fnExpr, ok := e.(*parser.FunctionExpr)
 	if !ok {
+		s.collectWindowFuncsInExpr(e, table, vm, seen, counts, nextIdx)
 		return
 	}
 	if fnExpr.Over != nil {
@@ -1045,6 +1046,29 @@ func (s *Stmt) collectWindowFuncs(e parser.Expression, table *schema.Table, vm *
 	// Recurse into function args to find nested window functions
 	for _, arg := range fnExpr.Args {
 		s.collectWindowFuncs(arg, table, vm, seen, counts, nextIdx)
+	}
+}
+
+// collectWindowFuncsInExpr recurses into composite (non-function) expressions to
+// collect window function states.
+func (s *Stmt) collectWindowFuncsInExpr(e parser.Expression, table *schema.Table, vm *vdbe.VDBE,
+	seen map[string]int, counts map[int]int, nextIdx *int) {
+	switch ex := e.(type) {
+	case *parser.BinaryExpr:
+		s.collectWindowFuncs(ex.Left, table, vm, seen, counts, nextIdx)
+		s.collectWindowFuncs(ex.Right, table, vm, seen, counts, nextIdx)
+	case *parser.UnaryExpr:
+		s.collectWindowFuncs(ex.Expr, table, vm, seen, counts, nextIdx)
+	case *parser.ParenExpr:
+		s.collectWindowFuncs(ex.Expr, table, vm, seen, counts, nextIdx)
+	case *parser.CastExpr:
+		s.collectWindowFuncs(ex.Expr, table, vm, seen, counts, nextIdx)
+	case *parser.CaseExpr:
+		for _, w := range ex.WhenClauses {
+			s.collectWindowFuncs(w.Condition, table, vm, seen, counts, nextIdx)
+			s.collectWindowFuncs(w.Result, table, vm, seen, counts, nextIdx)
+		}
+		s.collectWindowFuncs(ex.ElseClause, table, vm, seen, counts, nextIdx)
 	}
 }
 
@@ -1159,11 +1183,44 @@ func (s *Stmt) detectWindowOrderBy(expandedCols []parser.ResultColumn, table *sc
 // window function that requires pre-populated partition data.
 func (s *Stmt) hasDataDependentWindowFunc(cols []parser.ResultColumn) bool {
 	for _, col := range cols {
-		if fn, ok := col.Expr.(*parser.FunctionExpr); ok && fn.Over != nil {
-			if isDataDependentWindowFunc(fn.Name) {
+		if s.exprHasDataDependentWindowFunc(col.Expr) {
+			return true
+		}
+	}
+	return false
+}
+
+// exprHasDataDependentWindowFunc recursively checks if an expression contains
+// an aggregate/value window function requiring two-pass execution.
+func (s *Stmt) exprHasDataDependentWindowFunc(e parser.Expression) bool {
+	if e == nil {
+		return false
+	}
+	switch ex := e.(type) {
+	case *parser.FunctionExpr:
+		if ex.Over != nil {
+			return isDataDependentWindowFunc(ex.Name)
+		}
+		for _, arg := range ex.Args {
+			if s.exprHasDataDependentWindowFunc(arg) {
 				return true
 			}
 		}
+	case *parser.BinaryExpr:
+		return s.exprHasDataDependentWindowFunc(ex.Left) || s.exprHasDataDependentWindowFunc(ex.Right)
+	case *parser.UnaryExpr:
+		return s.exprHasDataDependentWindowFunc(ex.Expr)
+	case *parser.ParenExpr:
+		return s.exprHasDataDependentWindowFunc(ex.Expr)
+	case *parser.CastExpr:
+		return s.exprHasDataDependentWindowFunc(ex.Expr)
+	case *parser.CaseExpr:
+		for _, w := range ex.WhenClauses {
+			if s.exprHasDataDependentWindowFunc(w.Condition) || s.exprHasDataDependentWindowFunc(w.Result) {
+				return true
+			}
+		}
+		return s.exprHasDataDependentWindowFunc(ex.ElseClause)
 	}
 	return false
 }
@@ -1187,7 +1244,7 @@ func (s *Stmt) findWindowOrderBy(e parser.Expression, table *schema.Table) (bool
 	}
 	fnExpr, ok := e.(*parser.FunctionExpr)
 	if !ok {
-		return false, nil, nil
+		return s.findWindowOrderByInExpr(e, table)
 	}
 	if fnExpr.Over != nil {
 		partCols := s.extractPartitionByCols(fnExpr.Over, table)
@@ -1212,6 +1269,32 @@ func (s *Stmt) findWindowOrderBy(e parser.Expression, table *schema.Table) (bool
 		if found, cols, desc := s.findWindowOrderBy(arg, table); found {
 			return true, cols, desc
 		}
+	}
+	return false, nil, nil
+}
+
+// findWindowOrderByInExpr recurses into composite (non-function) expressions to
+// locate a nested window function with ORDER BY.
+func (s *Stmt) findWindowOrderByInExpr(e parser.Expression, table *schema.Table) (bool, []int, []bool) {
+	switch ex := e.(type) {
+	case *parser.BinaryExpr:
+		if found, cols, desc := s.findWindowOrderBy(ex.Left, table); found {
+			return true, cols, desc
+		}
+		return s.findWindowOrderBy(ex.Right, table)
+	case *parser.UnaryExpr:
+		return s.findWindowOrderBy(ex.Expr, table)
+	case *parser.ParenExpr:
+		return s.findWindowOrderBy(ex.Expr, table)
+	case *parser.CastExpr:
+		return s.findWindowOrderBy(ex.Expr, table)
+	case *parser.CaseExpr:
+		for _, w := range ex.WhenClauses {
+			if found, cols, desc := s.findWindowOrderBy(w.Result, table); found {
+				return true, cols, desc
+			}
+		}
+		return s.findWindowOrderBy(ex.ElseClause, table)
 	}
 	return false, nil, nil
 }

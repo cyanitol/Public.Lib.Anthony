@@ -56,7 +56,7 @@ func TestSQLiteWindow(t *testing.T) {
 		{
 			name:  "sum_over_with_expression",
 			query: "SELECT a, 4 + sum(b) OVER () FROM t1",
-			want:  "",
+			want:  "1|22 5|22 9|22",
 		},
 		{
 			name:  "sum_over_partition_by",
