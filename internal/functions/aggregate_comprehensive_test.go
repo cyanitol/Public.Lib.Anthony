@@ -417,7 +417,6 @@ func TestMaxScalarFunc(t *testing.T) {
 	}
 }
 
-
 // TestSumFuncIntegerOverflow tests SumFunc.addInteger overflow handling
 func TestSumFuncIntegerOverflow(t *testing.T) {
 	f := &SumFunc{hasValue: true}

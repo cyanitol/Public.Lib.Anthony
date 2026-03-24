@@ -187,11 +187,11 @@ func conflictTestCases() []conflictTestCase {
 
 		// REPLACE INTO = INSERT OR REPLACE INTO (composite UNIQUE replace not fully supported)
 		{
-			name:        "conflict-1.4: REPLACE with UNIQUE conflict",
-			setup:       []string{"CREATE TABLE t1(a, b, c, UNIQUE(a,b))"},
-			stmts:       []string{"INSERT INTO t1 VALUES(1,2,3)", "REPLACE INTO t1 VALUES(1,2,4)"},
-			verifyType:  verifyCount,
-			verifyQuery: "SELECT COUNT(*) FROM t1",
+			name:         "conflict-1.4: REPLACE with UNIQUE conflict",
+			setup:        []string{"CREATE TABLE t1(a, b, c, UNIQUE(a,b))"},
+			stmts:        []string{"INSERT INTO t1 VALUES(1,2,3)", "REPLACE INTO t1 VALUES(1,2,4)"},
+			verifyType:   verifyCount,
+			verifyQuery:  "SELECT COUNT(*) FROM t1",
 			verifyExpect: 2,
 		},
 
@@ -517,21 +517,21 @@ func conflictTestCases() []conflictTestCase {
 
 		// WITHOUT ROWID INSERT OR IGNORE with composite PK
 		{
-			name:        "conflict2-1.2: WITHOUT ROWID with INSERT OR IGNORE",
-			setup:       []string{"CREATE TABLE t1(a, b, c, PRIMARY KEY(a,b)) WITHOUT ROWID"},
-			stmts:       []string{"INSERT INTO t1 VALUES(1,2,3)", "INSERT OR IGNORE INTO t1 VALUES(1,2,4)"},
-			verifyType:  verifyCount,
-			verifyQuery: "SELECT COUNT(*) FROM t1",
+			name:         "conflict2-1.2: WITHOUT ROWID with INSERT OR IGNORE",
+			setup:        []string{"CREATE TABLE t1(a, b, c, PRIMARY KEY(a,b)) WITHOUT ROWID"},
+			stmts:        []string{"INSERT INTO t1 VALUES(1,2,3)", "INSERT OR IGNORE INTO t1 VALUES(1,2,4)"},
+			verifyType:   verifyCount,
+			verifyQuery:  "SELECT COUNT(*) FROM t1",
 			verifyExpect: 1,
 		},
 
 		// WITHOUT ROWID INSERT OR REPLACE with composite PK
 		{
-			name:        "conflict2-1.3: WITHOUT ROWID with INSERT OR REPLACE",
-			setup:       []string{"CREATE TABLE t1(a, b, c, PRIMARY KEY(a,b)) WITHOUT ROWID"},
-			stmts:       []string{"INSERT INTO t1 VALUES(1,2,3)", "INSERT OR REPLACE INTO t1 VALUES(1,2,4)"},
-			verifyType:  verifyCount,
-			verifyQuery: "SELECT COUNT(*) FROM t1",
+			name:         "conflict2-1.3: WITHOUT ROWID with INSERT OR REPLACE",
+			setup:        []string{"CREATE TABLE t1(a, b, c, PRIMARY KEY(a,b)) WITHOUT ROWID"},
+			stmts:        []string{"INSERT INTO t1 VALUES(1,2,3)", "INSERT OR REPLACE INTO t1 VALUES(1,2,4)"},
+			verifyType:   verifyCount,
+			verifyQuery:  "SELECT COUNT(*) FROM t1",
 			verifyExpect: 1,
 		},
 

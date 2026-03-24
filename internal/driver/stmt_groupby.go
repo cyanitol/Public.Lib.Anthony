@@ -74,7 +74,7 @@ func (s *Stmt) emitGroupComparison(vm *vdbe.VDBE, gen *expr.CodeGenerator, stmt 
 	// OpNe(non_null, NULL) returns NULL under SQL three-valued logic,
 	// so we must handle NULL values explicitly for correct group detection.
 	groupChangedReg := gen.AllocReg()
-	cmpReg := gen.AllocReg() // temp register for per-column comparison results
+	cmpReg := gen.AllocReg()                        // temp register for per-column comparison results
 	vm.AddOp(vdbe.OpInteger, 0, groupChangedReg, 0) // Initialize to false
 
 	for i := 0; i < numGroupBy; i++ {

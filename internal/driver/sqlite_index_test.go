@@ -122,7 +122,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - No indexing sqlite_master
 		{
-			name: "idx-5.1 - Cannot index sqlite_master",
+			name:  "idx-5.1 - Cannot index sqlite_master",
 			setup: []string{},
 			// Engine does not prevent indexing sqlite_master
 			query:   "CREATE INDEX index1 ON sqlite_master(name)",
@@ -302,7 +302,7 @@ func TestSQLiteIndex(t *testing.T) {
 		},
 		// index.test - Reserved names
 		{
-			name: "idx-18.2 - Cannot create index with sqlite_ prefix",
+			name:  "idx-18.2 - Cannot create index with sqlite_ prefix",
 			setup: []string{"CREATE TABLE t7(c)"},
 			// Engine does not reject sqlite_ prefix for user-created indexes
 			query:   "CREATE INDEX sqlite_i1 ON t7(c)",

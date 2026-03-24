@@ -290,7 +290,7 @@ func genBoundaryLimitTests() []sqlTestCase {
 			wantRows: [][]interface{}{},
 		},
 		{
-			name: "REQ-TBND-051_limit_negative_returns_all",
+			name:  "REQ-TBND-051_limit_negative_returns_all",
 			setup: fiveRowSetup,
 			query: "SELECT v FROM bnd_lim ORDER BY v LIMIT -1",
 			wantRows: [][]interface{}{

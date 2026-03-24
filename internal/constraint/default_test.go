@@ -187,11 +187,11 @@ func TestNewDefaultConstraint(t *testing.T) {
 
 // Prefix: defEval_
 type defEvalTestCase struct {
-	name         string
-	dcType       DefaultType
-	litValue     interface{}
-	wantValue    interface{}
-	checkFormat  func(*testing.T, interface{})
+	name        string
+	dcType      DefaultType
+	litValue    interface{}
+	wantValue   interface{}
+	checkFormat func(*testing.T, interface{})
 }
 
 func defEval_checkTimeFormat(t *testing.T, val interface{}) {

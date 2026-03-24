@@ -533,5 +533,3 @@ func TestDatabaseFileLocking(t *testing.T) {
 		t.Errorf("Second connection read failed: %v", err)
 	}
 }
-
-

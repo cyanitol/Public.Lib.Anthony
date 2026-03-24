@@ -128,10 +128,10 @@ func testParseCreateViewBasic(t *testing.T) {
 func testParseCreateViewOptions(t *testing.T) {
 	t.Helper()
 	tests := []struct {
-		name          string
-		sql           string
-		wantName      string
-		wantTemp      bool
+		name           string
+		sql            string
+		wantName       string
+		wantTemp       bool
 		wantIfNotExist bool
 	}{
 		{"view with IF NOT EXISTS", "CREATE VIEW IF NOT EXISTS v AS SELECT * FROM users", "v", false, true},

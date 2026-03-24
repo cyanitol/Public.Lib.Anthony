@@ -274,8 +274,8 @@ func TestSQLiteAggregate(t *testing.T) {
 
 		// Nested aggregate tests (from aggnested.test)
 		{
-			name:    "nested aggregate - subquery with aggregate in FROM",
-			setup:   []string{
+			name: "nested aggregate - subquery with aggregate in FROM",
+			setup: []string{
 				"CREATE TABLE t1(x INT)",
 				"INSERT INTO t1 VALUES(100), (20), (3)",
 			},
@@ -283,8 +283,8 @@ func TestSQLiteAggregate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "nested aggregate - sum with subquery",
-			setup:   []string{
+			name: "nested aggregate - sum with subquery",
+			setup: []string{
 				"CREATE TABLE t1(a INTEGER)",
 				"CREATE TABLE t2(b INTEGER)",
 				"INSERT INTO t1 VALUES(1), (2), (3)",
@@ -327,8 +327,8 @@ func TestSQLiteAggregate(t *testing.T) {
 			want:  [][]interface{}{{int64(6), int64(70)}},
 		},
 		{
-			name:    "aggregate in expression",
-			setup:   []string{
+			name: "aggregate in expression",
+			setup: []string{
 				"CREATE TABLE t1(value INTEGER)",
 				"INSERT INTO t1 VALUES(10), (20), (30)",
 			},
@@ -354,8 +354,8 @@ func TestSQLiteAggregate(t *testing.T) {
 			want:  [][]interface{}{{nil, nil, nil, nil}},
 		},
 		{
-			name:    "GROUP BY empty result",
-			setup:   []string{
+			name: "GROUP BY empty result",
+			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 			},
 			query:   "SELECT category, COUNT(*) FROM t1 GROUP BY category",

@@ -320,13 +320,13 @@ func TestSQLiteJSON(t *testing.T) {
 		},
 		// json102.test:802-804 — bare string '1' is treated as object key, not array index
 		{
-			name: "json_arrow_operator_array_string",
+			name:  "json_arrow_operator_array_string",
 			query: `SELECT '["zero","one","two"]'->>'1'`,
 			want:  "",
 		},
 		// json102.test:805-807 — integer 1 is treated as key lookup, not array index
 		{
-			name: "json_arrow_operator_array_int",
+			name:  "json_arrow_operator_array_int",
 			query: `SELECT '["zero","one","two"]'->>1`,
 			want:  "",
 		},

@@ -55,7 +55,7 @@ func genAffinityMatrixINTandTEXT() []sqlTestCase {
 			wantRows: [][]interface{}{{"integer", int64(100)}},
 		},
 		{
-			name: "REQ-TYPE-004_int_col_store_blob",
+			name:     "REQ-TYPE-004_int_col_store_blob",
 			setup:    []string{"CREATE TABLE ta04(v INT)", "INSERT INTO ta04 VALUES(X'CAFE')"},
 			query:    "SELECT TYPEOF(v) FROM ta04",
 			wantRows: [][]interface{}{{"blob"}},
@@ -86,7 +86,7 @@ func genAffinityMatrixINTandTEXT() []sqlTestCase {
 			wantRows: [][]interface{}{{"text", "hello"}},
 		},
 		{
-			name: "REQ-TYPE-009_text_col_store_blob",
+			name:     "REQ-TYPE-009_text_col_store_blob",
 			setup:    []string{"CREATE TABLE ta09(v TEXT)", "INSERT INTO ta09 VALUES(X'CAFE')"},
 			query:    "SELECT TYPEOF(v) FROM ta09",
 			wantRows: [][]interface{}{{"blob"}},
@@ -122,7 +122,7 @@ func genAffinityMatrixREALBLOBNUMERIC() []sqlTestCase {
 			wantRows: [][]interface{}{{"real", 9.5}},
 		},
 		{
-			name: "REQ-TYPE-014_real_col_store_blob",
+			name:     "REQ-TYPE-014_real_col_store_blob",
 			setup:    []string{"CREATE TABLE ta14(v REAL)", "INSERT INTO ta14 VALUES(X'BEEF')"},
 			query:    "SELECT TYPEOF(v) FROM ta14",
 			wantRows: [][]interface{}{{"blob"}},
@@ -153,7 +153,7 @@ func genAffinityMatrixREALBLOBNUMERIC() []sqlTestCase {
 			wantRows: [][]interface{}{{"text", "abc"}},
 		},
 		{
-			name: "REQ-TYPE-019_blob_col_store_blob",
+			name:     "REQ-TYPE-019_blob_col_store_blob",
 			setup:    []string{"CREATE TABLE ta19(v BLOB)", "INSERT INTO ta19 VALUES(X'DEAD')"},
 			query:    "SELECT TYPEOF(v) FROM ta19",
 			wantRows: [][]interface{}{{"blob"}},
@@ -184,7 +184,7 @@ func genAffinityMatrixREALBLOBNUMERIC() []sqlTestCase {
 			wantRows: [][]interface{}{{"integer", int64(100)}},
 		},
 		{
-			name: "REQ-TYPE-024_numeric_col_store_blob",
+			name:     "REQ-TYPE-024_numeric_col_store_blob",
 			setup:    []string{"CREATE TABLE ta24(v NUMERIC)", "INSERT INTO ta24 VALUES(X'FF')"},
 			query:    "SELECT TYPEOF(v) FROM ta24",
 			wantRows: [][]interface{}{{"blob"}},

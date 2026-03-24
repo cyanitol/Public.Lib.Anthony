@@ -832,7 +832,7 @@ func (s *Schema) CreateVirtualTable(name, module string, args []string, vtab int
 
 	table := &Table{
 		Name:         name,
-		RootPage:     0, // Virtual tables don't use B-tree pages
+		RootPage:     0,                                                                                           // Virtual tables don't use B-tree pages
 		SQL:          fmt.Sprintf("CREATE VIRTUAL TABLE %s USING %s(%s)", name, module, strings.Join(args, ", ")), // nosec: name/module/args are from internal schema registration, not user input
 		Columns:      columns,
 		IsVirtual:    true,

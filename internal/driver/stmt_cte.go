@@ -675,7 +675,6 @@ func (s *Stmt) collectRows(vm *vdbe.VDBE, numColumns int, description string) ([
 	return rows, nil
 }
 
-
 func (s *Stmt) createCTETempTable(tableName string, def *planner.CTEDefinition) *schema.Table {
 	var columns []*schema.Column
 

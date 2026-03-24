@@ -9,8 +9,8 @@ import (
 
 // RegisterPatternFunctions registers LIKE and GLOB pattern matching functions.
 func RegisterPatternFunctions(r *Registry) {
-	r.Register(NewScalarFunc("like", -1, likeFunc))   // 2 or 3 args
-	r.Register(NewScalarFunc("glob", 2, globFunc))     // 2 args
+	r.Register(NewScalarFunc("like", -1, likeFunc)) // 2 or 3 args
+	r.Register(NewScalarFunc("glob", 2, globFunc))  // 2 args
 }
 
 // likeFunc implements the SQL LIKE operator as a function.

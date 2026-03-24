@@ -57,7 +57,7 @@ func genCoreCreateTableTests() []sqlTestCase {
 			errLike: "already exists",
 		},
 		{
-			name: "REQ-CORE-005_create_table_multiple_columns",
+			name:     "REQ-CORE-005_create_table_multiple_columns",
 			setup:    []string{"CREATE TABLE t5(a INT, b TEXT, c REAL, d BLOB, e)"},
 			query:    "SELECT COUNT(*) FROM pragma_table_info('t5')",
 			wantRows: [][]interface{}{{int64(5)}},
@@ -70,7 +70,7 @@ func genCoreCreateTableTests() []sqlTestCase {
 			wantRows: nil,
 		},
 		{
-			name: "REQ-CORE-007_create_table_default_select",
+			name:     "REQ-CORE-007_create_table_default_select",
 			setup:    []string{"CREATE TABLE t7(a INTEGER DEFAULT 42, b TEXT DEFAULT 'hello')", "INSERT INTO t7(b) VALUES('world')"},
 			query:    "SELECT a, b FROM t7",
 			wantRows: [][]interface{}{{int64(42), "world"}},
@@ -342,7 +342,7 @@ func genCoreRowidTests() []sqlTestCase {
 			wantRows: [][]interface{}{{int64(1), "x"}, {int64(2), "y"}},
 		},
 		{
-			name: "REQ-CORE-051_rowid_explicit",
+			name:     "REQ-CORE-051_rowid_explicit",
 			setup:    []string{"CREATE TABLE rid2(a TEXT)", "INSERT INTO rid2(rowid, a) VALUES(100,'z')"},
 			query:    "SELECT rowid, a FROM rid2",
 			wantRows: [][]interface{}{{int64(100), "z"}},

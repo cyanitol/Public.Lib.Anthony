@@ -570,16 +570,16 @@ func TestGetLogicalOperands(t *testing.T) {
 
 // arithTestCase represents a declarative arithmetic operation test
 type arithTestCase struct {
-	name     string
-	opcode   Opcode
-	leftInt  int64
-	leftReal float64
-	isLeftInt bool
-	rightInt  int64
-	rightReal float64
-	isRightInt bool
-	expectInt  int64
-	expectReal float64
+	name        string
+	opcode      Opcode
+	leftInt     int64
+	leftReal    float64
+	isLeftInt   bool
+	rightInt    int64
+	rightReal   float64
+	isRightInt  bool
+	expectInt   int64
+	expectReal  float64
 	isExpectInt bool
 }
 

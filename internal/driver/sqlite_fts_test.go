@@ -379,7 +379,7 @@ func TestSQLiteFTS(t *testing.T) {
 		},
 		// Test 17: Empty string search returns error
 		{
-			name:    "fts5-empty-1 empty search",
+			name: "fts5-empty-1 empty search",
 			setup: []string{
 				"CREATE VIRTUAL TABLE t1 USING fts5(content)",
 				"INSERT INTO t1(content) VALUES('test')",

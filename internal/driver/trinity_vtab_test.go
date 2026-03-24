@@ -52,7 +52,7 @@ func genVTabJSONEachTests() []sqlTestCase {
 			wantRows: [][]interface{}{{"integer"}, {"text"}, {"null"}, {"true"}},
 		},
 		{
-			name:     "REQ-VTAB-006_json_each_empty_array",
+			name: "REQ-VTAB-006_json_each_empty_array",
 
 			query:    "SELECT COUNT(*) FROM json_each('[]')",
 			wantRows: [][]interface{}{{int64(0)}},
@@ -68,14 +68,13 @@ func genVTabJSONEachTests() []sqlTestCase {
 			wantRows: [][]interface{}{{"m", int64(1)}, {"n", int64(2)}},
 		},
 		{
-			name:     "REQ-VTAB-009_json_each_count",
+			name: "REQ-VTAB-009_json_each_count",
 
 			query:    "SELECT COUNT(*) FROM json_each('[1,2,3,4,5]')",
 			wantRows: [][]interface{}{{int64(5)}},
 		},
 		{
-			name:     "REQ-VTAB-010_json_each_from_column",
-
+			name: "REQ-VTAB-010_json_each_from_column",
 
 			setup:    []string{"CREATE TABLE vt1(doc TEXT)", `INSERT INTO vt1 VALUES('[100,200]')`},
 			query:    "SELECT je.value FROM vt1, json_each(vt1.doc) AS je ORDER BY je.key",
@@ -91,13 +90,13 @@ func genVTabJSONEachTests() []sqlTestCase {
 func genVTabJSONTreeTests() []sqlTestCase {
 	return []sqlTestCase{
 		{
-			name:     "REQ-VTAB-020_json_tree_flat_array",
+			name: "REQ-VTAB-020_json_tree_flat_array",
 
 			query:    "SELECT COUNT(*) FROM json_tree('[1,2,3]')",
 			wantRows: [][]interface{}{{int64(4)}}, // root array + 3 elements
 		},
 		{
-			name:     "REQ-VTAB-021_json_tree_nested_count",
+			name: "REQ-VTAB-021_json_tree_nested_count",
 
 			query:    `SELECT COUNT(*) FROM json_tree('{"a":{"b":1}}')`,
 			wantRows: [][]interface{}{{int64(3)}}, // root + a-object + b
@@ -114,8 +113,8 @@ func genVTabJSONTreeTests() []sqlTestCase {
 			wantRows: [][]interface{}{{int64(10)}, {int64(20)}},
 		},
 		{
-			name:  "REQ-VTAB-024_json_tree_types",
-			query: `SELECT DISTINCT type FROM json_tree('{"a":[1,"t",null]}') ORDER BY type`,
+			name:     "REQ-VTAB-024_json_tree_types",
+			query:    `SELECT DISTINCT type FROM json_tree('{"a":[1,"t",null]}') ORDER BY type`,
 			wantRows: [][]interface{}{{"array"}, {"integer"}, {"null"}, {"object"}, {"text"}},
 		},
 	}
@@ -134,40 +133,35 @@ func genVTabJoinTests() []sqlTestCase {
 	}
 	return []sqlTestCase{
 		{
-			name:     "REQ-VTAB-030_join_json_each_expand",
-
+			name: "REQ-VTAB-030_join_json_each_expand",
 
 			setup:    setup,
 			query:    "SELECT t.id, je.value FROM tags t, json_each(t.tag_list) je WHERE je.value='go' ORDER BY t.id",
 			wantRows: [][]interface{}{{int64(1), "go"}, {int64(3), "go"}},
 		},
 		{
-			name:     "REQ-VTAB-031_join_json_each_count",
-
+			name: "REQ-VTAB-031_join_json_each_count",
 
 			setup:    setup,
 			query:    "SELECT t.id, COUNT(je.value) AS cnt FROM tags t, json_each(t.tag_list) je GROUP BY t.id ORDER BY t.id",
 			wantRows: [][]interface{}{{int64(1), int64(2)}, {int64(2), int64(2)}, {int64(3), int64(3)}},
 		},
 		{
-			name:     "REQ-VTAB-032_join_json_each_filter",
-
+			name: "REQ-VTAB-032_join_json_each_filter",
 
 			setup:    setup,
 			query:    "SELECT DISTINCT je.value FROM tags t, json_each(t.tag_list) je WHERE je.value='wasm'",
 			wantRows: [][]interface{}{{"wasm"}},
 		},
 		{
-			name:     "REQ-VTAB-033_join_json_each_all_tags",
-
+			name: "REQ-VTAB-033_join_json_each_all_tags",
 
 			setup:    setup,
 			query:    "SELECT COUNT(DISTINCT je.value) FROM tags t, json_each(t.tag_list) je",
 			wantRows: [][]interface{}{{int64(5)}}, // go, sql, rust, wasm, ffi
 		},
 		{
-			name:     "REQ-VTAB-034_join_json_each_no_match",
-
+			name: "REQ-VTAB-034_join_json_each_no_match",
 
 			setup:    setup,
 			query:    "SELECT COUNT(*) FROM tags t, json_each(t.tag_list) je WHERE je.value='python'",

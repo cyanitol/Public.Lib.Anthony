@@ -62,7 +62,10 @@ func testSetCookieMultiple(t *testing.T) {
 	v := NewTestVDBE(10)
 	mockPager := NewMockCookiePager()
 	v.Ctx = &VDBEContext{Pager: mockPager}
-	cookies := []struct{ db, typ int; value uint32 }{
+	cookies := []struct {
+		db, typ int
+		value   uint32
+	}{
 		{0, 0, 100}, {0, 1, 200}, {0, 2, 300}, {1, 0, 400},
 	}
 	for _, c := range cookies {

@@ -422,8 +422,8 @@ func TestLiteralComparisons(t *testing.T) {
 		expected bool
 	}{
 		{"int_eq_float", "500 = 500.0", true},
-		{"str_ne_float", "'500' = 500.0", true},  // Implementation compares numerically
-		{"int_ne_str", "500 = '500.0'", true}, // Implementation compares numerically
+		{"str_ne_float", "'500' = 500.0", true}, // Implementation compares numerically
+		{"int_ne_str", "500 = '500.0'", true},   // Implementation compares numerically
 		{"str_ne_str", "'500' = '500.0'", false},
 	}
 
@@ -770,7 +770,7 @@ func TestCastToNumeric(t *testing.T) {
 	}{
 		{"int_to_numeric", "CAST(123 AS NUMERIC)", "integer", true, 123, false, 0},
 		{"float_to_numeric", "CAST(123.456 AS NUMERIC)", "real", false, 0, true, 123.456},
-		{"text_to_numeric", "CAST('123abc' AS NUMERIC)", "text", false, 0, false, 0},     // Trailing non-numeric chars: returns text
+		{"text_to_numeric", "CAST('123abc' AS NUMERIC)", "text", false, 0, false, 0},         // Trailing non-numeric chars: returns text
 		{"text_float_to_numeric", "CAST('123.5abc' AS NUMERIC)", "text", false, 0, false, 0}, // Trailing non-numeric chars: returns text
 	}
 

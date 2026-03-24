@@ -83,7 +83,6 @@ func TestSQLiteOrderBySingleColumn(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "ORDER BY integer ASC",
@@ -170,7 +169,6 @@ func TestSQLiteOrderByMultipleColumns(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "ORDER BY two columns ASC",
@@ -271,7 +269,6 @@ func TestSQLiteOrderByColumnNumber(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "ORDER BY column position 1",
@@ -337,7 +334,6 @@ func TestSQLiteOrderByExpression(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "ORDER BY substr expression",
@@ -396,7 +392,6 @@ func TestSQLiteOrderByWithNulls(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "ORDER BY with NULLs ASC (NULLs first)",
@@ -464,7 +459,6 @@ func TestSQLiteOrderByWithLimit(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "ORDER BY with LIMIT",
@@ -524,7 +518,6 @@ func TestSQLiteOrderByJoin(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "JOIN with ORDER BY",
@@ -615,7 +608,6 @@ func TestSQLiteOrderByCompoundSelect(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name:  "UNION ALL with ORDER BY",
@@ -675,7 +667,6 @@ func TestSQLiteOrderByRowid(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "ORDER BY rowid DESC",
@@ -725,7 +716,6 @@ func TestSQLiteOrderByTypeMixing(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "ORDER BY mixed integer storage",
@@ -784,7 +774,6 @@ func TestSQLiteOrderByComplexQueries(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "Nested subquery with ORDER BY",
@@ -951,7 +940,6 @@ func TestSQLiteOrderByCollation(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "Case-sensitive text ordering",
@@ -1054,7 +1042,6 @@ func TestSQLiteOrderByASCExplicit(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "Explicit ASC single column",
@@ -1113,7 +1100,6 @@ func TestSQLiteOrderByJoinUnique(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "Join with unique constraint - order matters",
@@ -1225,7 +1211,6 @@ func TestSQLiteOrderByPrimaryKey(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "Multi-column primary key ORDER BY",
@@ -1305,7 +1290,6 @@ func TestSQLiteOrderByWithIndex(t *testing.T) {
 		setup []string
 		query string
 		want  [][]interface{}
-
 	}{
 		{
 			name: "Single column index ORDER BY",

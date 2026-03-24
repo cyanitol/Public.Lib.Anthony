@@ -582,7 +582,7 @@ func TestSQLiteUpdate(t *testing.T) {
 		// update2-7.110: UPDATE OR REPLACE with partial index
 		// Engine does not support OR REPLACE for this case; UNIQUE constraint error raised.
 		{
-			name:    "update2_or_replace_partial_index",
+			name: "update2_or_replace_partial_index",
 			setup: []string{
 				"CREATE TABLE t1(x, y)",
 				"CREATE UNIQUE INDEX t1x1 ON t1(x) WHERE x IS NOT NULL",

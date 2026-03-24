@@ -27,18 +27,18 @@ type Expression interface {
 
 // SelectStmt represents a SELECT statement.
 type SelectStmt struct {
-	With     *WithClause // Common Table Expressions (WITH clause)
-	Distinct bool
-	Columns  []ResultColumn
-	From     *FromClause
-	Where    Expression
-	GroupBy  []Expression
-	Having   Expression
+	With       *WithClause // Common Table Expressions (WITH clause)
+	Distinct   bool
+	Columns    []ResultColumn
+	From       *FromClause
+	Where      Expression
+	GroupBy    []Expression
+	Having     Expression
 	OrderBy    []OrderingTerm
 	Limit      Expression
 	Offset     Expression
-	WindowDefs []WindowDef        // Named window definitions (WINDOW clause)
-	Compound   *CompoundSelect    // For UNION, EXCEPT, INTERSECT
+	WindowDefs []WindowDef     // Named window definitions (WINDOW clause)
+	Compound   *CompoundSelect // For UNION, EXCEPT, INTERSECT
 }
 
 // WindowDef represents a named window definition in a WINDOW clause.
@@ -117,7 +117,7 @@ type TableOrSubquery struct {
 	TableName string
 	Alias     string
 	Subquery  *SelectStmt
-	Indexed   string // index name for INDEXED BY
+	Indexed   string       // index name for INDEXED BY
 	FuncArgs  []Expression // arguments for table-valued functions (e.g., json_each('...'))
 }
 
@@ -761,35 +761,35 @@ const (
 	OpGlob
 	OpRegexp
 	OpMatch
-	OpIs              // a IS b  (null-safe equality)
-	OpIsNot           // a IS NOT b (null-safe inequality)
-	OpIsDistinctFrom  // a IS DISTINCT FROM b (NULL-safe inequality)
+	OpIs                // a IS b  (null-safe equality)
+	OpIsNot             // a IS NOT b (null-safe inequality)
+	OpIsDistinctFrom    // a IS DISTINCT FROM b (NULL-safe inequality)
 	OpIsNotDistinctFrom // a IS NOT DISTINCT FROM b (NULL-safe equality)
 )
 
 var binaryOpStrings = map[BinaryOp]string{
-	OpEq:     "=",
-	OpNe:     "!=",
-	OpLt:     "<",
-	OpLe:     "<=",
-	OpGt:     ">",
-	OpGe:     ">=",
-	OpAnd:    "AND",
-	OpOr:     "OR",
-	OpPlus:   "+",
-	OpMinus:  "-",
-	OpMul:    "*",
-	OpDiv:    "/",
-	OpRem:    "%",
-	OpConcat: "||",
-	OpBitAnd: "&",
-	OpBitOr:  "|",
-	OpLShift: "<<",
-	OpRShift: ">>",
-	OpLike:   "LIKE",
-	OpGlob:   "GLOB",
-	OpRegexp: "REGEXP",
-	OpMatch:  "MATCH",
+	OpEq:                "=",
+	OpNe:                "!=",
+	OpLt:                "<",
+	OpLe:                "<=",
+	OpGt:                ">",
+	OpGe:                ">=",
+	OpAnd:               "AND",
+	OpOr:                "OR",
+	OpPlus:              "+",
+	OpMinus:             "-",
+	OpMul:               "*",
+	OpDiv:               "/",
+	OpRem:               "%",
+	OpConcat:            "||",
+	OpBitAnd:            "&",
+	OpBitOr:             "|",
+	OpLShift:            "<<",
+	OpRShift:            ">>",
+	OpLike:              "LIKE",
+	OpGlob:              "GLOB",
+	OpRegexp:            "REGEXP",
+	OpMatch:             "MATCH",
 	OpIs:                "IS",
 	OpIsNot:             "IS NOT",
 	OpIsDistinctFrom:    "IS DISTINCT FROM",
@@ -922,7 +922,7 @@ func (f *FunctionExpr) String() string {
 
 // WindowSpec represents a window specification for window functions.
 type WindowSpec struct {
-	BaseName    string         // Reference to a named window (OVER w)
+	BaseName    string // Reference to a named window (OVER w)
 	PartitionBy []Expression
 	OrderBy     []OrderingTerm
 	Frame       *FrameSpec

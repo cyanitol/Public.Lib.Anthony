@@ -560,7 +560,6 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "random_not_null",
 			expr: "SELECT random() IS NOT NULL",
 			want: int64(1),
-
 		},
 		{
 			name: "random_typeof",
@@ -639,19 +638,16 @@ func TestSQLiteFunctions(t *testing.T) {
 			name: "date_now",
 			expr: "SELECT date('now') IS NOT NULL",
 			want: int64(1),
-
 		},
 		{
 			name: "time_now",
 			expr: "SELECT time('now') IS NOT NULL",
 			want: int64(1),
-
 		},
 		{
 			name: "datetime_now",
 			expr: "SELECT datetime('now') IS NOT NULL",
 			want: int64(1),
-
 		},
 
 		// likelihood(), likely(), unlikely() functions (func3.test lines 76-198)

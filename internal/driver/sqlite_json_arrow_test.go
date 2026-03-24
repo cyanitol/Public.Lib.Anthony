@@ -26,7 +26,7 @@ func TestJSONArrowOperators(t *testing.T) {
 			wantRows: [][]interface{}{{"1"}},
 		},
 		{
-			name:  "arrow_with_table_column",
+			name: "arrow_with_table_column",
 			setup: []string{
 				"CREATE TABLE t1(data TEXT)",
 				`INSERT INTO t1 VALUES ('{"name":"Alice","age":30}')`,
@@ -35,7 +35,7 @@ func TestJSONArrowOperators(t *testing.T) {
 			wantRows: [][]interface{}{{"Alice"}},
 		},
 		{
-			name:  "double_arrow_with_table_column",
+			name: "double_arrow_with_table_column",
 			setup: []string{
 				"CREATE TABLE t2(data TEXT)",
 				`INSERT INTO t2 VALUES ('{"name":"Alice","age":30}')`,
@@ -44,7 +44,7 @@ func TestJSONArrowOperators(t *testing.T) {
 			wantRows: [][]interface{}{{"Alice"}},
 		},
 		{
-			name:  "double_arrow_numeric_from_table",
+			name: "double_arrow_numeric_from_table",
 			setup: []string{
 				"CREATE TABLE t3(data TEXT)",
 				`INSERT INTO t3 VALUES ('{"name":"Alice","age":30}')`,

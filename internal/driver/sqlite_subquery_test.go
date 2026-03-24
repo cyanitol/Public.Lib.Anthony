@@ -48,7 +48,7 @@ func TestSQLiteSubquery(t *testing.T) {
 				"INSERT INTO t1 VALUES(5,31)",
 				"INSERT INTO t1 VALUES(7,57)",
 			},
-			query: "SELECT b FROM t1 WHERE EXISTS(SELECT * FROM (SELECT 1 AS x) WHERE x=a)",
+			query:    "SELECT b FROM t1 WHERE EXISTS(SELECT * FROM (SELECT 1 AS x) WHERE x=a)",
 			wantRows: [][]interface{}{},
 		},
 		{
@@ -308,7 +308,7 @@ func TestSQLiteSubquery(t *testing.T) {
 				"INSERT INTO t3 VALUES(5,125)",
 				"INSERT INTO t3 VALUES(7,343)",
 			},
-			query: "SELECT a FROM t1 WHERE b IN (SELECT x+1 FROM (SELECT DISTINCT f/(a*a) AS x FROM t3))",
+			query:    "SELECT a FROM t1 WHERE b IN (SELECT x+1 FROM (SELECT DISTINCT f/(a*a) AS x FROM t3))",
 			wantRows: [][]interface{}{},
 		},
 		{

@@ -99,9 +99,9 @@ func (p *ExplainPlan) FormatAsText() string {
 
 // explainCtx holds context for plan generation.
 type explainCtx struct {
-	plan       *ExplainPlan
-	schema     *schema.Schema
-	subqCount  int
+	plan      *ExplainPlan
+	schema    *schema.Schema
+	subqCount int
 }
 
 // GenerateExplain generates an explain plan for a SQL statement.

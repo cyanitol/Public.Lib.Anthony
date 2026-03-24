@@ -412,7 +412,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 				"INSERT INTO t1 VALUES(1, 10), (2, 20)",
 				"INSERT INTO t2 VALUES(1, 30), (3, 40)",
 			},
-			query: "SELECT a, SUM(b) FROM (SELECT a, b FROM t1 UNION ALL SELECT a, b FROM t2) GROUP BY a ORDER BY a",
+			query:   "SELECT a, SUM(b) FROM (SELECT a, b FROM t1 UNION ALL SELECT a, b FROM t2) GROUP BY a ORDER BY a",
 			wantErr: true,
 		},
 		{
@@ -424,7 +424,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 				"INSERT INTO t1 VALUES(1), (2), (1)",
 				"INSERT INTO t2 VALUES(2), (3)",
 			},
-			query: "SELECT x, COUNT(*) FROM (SELECT x FROM t1 UNION ALL SELECT x FROM t2) GROUP BY x ORDER BY x",
+			query:   "SELECT x, COUNT(*) FROM (SELECT x FROM t1 UNION ALL SELECT x FROM t2) GROUP BY x ORDER BY x",
 			wantErr: true,
 		},
 
@@ -435,7 +435,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 			setup: []string{
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 			},
-			query: "SELECT category, COUNT(*) FROM t1 GROUP BY category",
+			query:   "SELECT category, COUNT(*) FROM t1 GROUP BY category",
 			wantErr: true,
 		},
 		{
@@ -515,7 +515,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 5), ('B', 10), ('C', 100)",
 			},
-			query: "SELECT category, SUM(value), COUNT(*) FROM t1 GROUP BY category HAVING (SUM(value) > 50 OR COUNT(*) >= 2) AND category != 'B' ORDER BY category",
+			query:   "SELECT category, SUM(value), COUNT(*) FROM t1 GROUP BY category HAVING (SUM(value) > 50 OR COUNT(*) >= 2) AND category != 'B' ORDER BY category",
 			wantErr: true,
 		},
 		{
@@ -544,7 +544,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 50), ('C', 5), ('C', 10), ('C', 15)",
 			},
-			query: "SELECT category, SUM(value) FROM t1 GROUP BY category HAVING SUM(value) BETWEEN 20 AND 40 ORDER BY category",
+			query:   "SELECT category, SUM(value) FROM t1 GROUP BY category HAVING SUM(value) BETWEEN 20 AND 40 ORDER BY category",
 			wantErr: true,
 		},
 		{
@@ -619,7 +619,7 @@ func TestSQLiteGroupBy(t *testing.T) {
 				"CREATE TABLE t1(category TEXT, value INTEGER)",
 				"INSERT INTO t1 VALUES('A', 10), ('A', 20), ('B', 30)",
 			},
-			query: "SELECT MAX(total) FROM (SELECT category, SUM(value) as total FROM t1 GROUP BY category)",
+			query:   "SELECT MAX(total) FROM (SELECT category, SUM(value) as total FROM t1 GROUP BY category)",
 			wantErr: true,
 		},
 		{

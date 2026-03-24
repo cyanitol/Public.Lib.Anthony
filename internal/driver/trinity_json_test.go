@@ -44,7 +44,7 @@ func genJSONScalarTests() []sqlTestCase {
 			wantRows: [][]interface{}{{"[1,2,3]"}},
 		},
 		{
-			name: "REQ-JSON-004_json_array_mixed",
+			name:     "REQ-JSON-004_json_array_mixed",
 			query:    `SELECT json_array(1, 'two', NULL, 3.0)`,
 			wantRows: [][]interface{}{{"[1,\"two\",null,3.0]"}},
 		},
@@ -74,7 +74,7 @@ func genJSONScalarTests() []sqlTestCase {
 			wantRows: [][]interface{}{{`{"a":{"b":2}}`}},
 		},
 		{
-			name: "REQ-JSON-010_json_invalid_input",
+			name:    "REQ-JSON-010_json_invalid_input",
 			query:   `SELECT json('not json')`,
 			wantErr: true,
 			errLike: "malformed",
@@ -184,7 +184,7 @@ func genJSONTypeValidTests() []sqlTestCase {
 			wantRows: [][]interface{}{{"integer"}},
 		},
 		{
-			name:     "REQ-JSON-043_type_real",
+			name: "REQ-JSON-043_type_real",
 
 			query:    `SELECT json_type('3.14')`,
 			wantRows: [][]interface{}{{"real"}},
@@ -220,7 +220,7 @@ func genJSONTypeValidTests() []sqlTestCase {
 			wantRows: [][]interface{}{{int64(0)}},
 		},
 		{
-			name:     "REQ-JSON-050_valid_null_input",
+			name: "REQ-JSON-050_valid_null_input",
 
 			query:    "SELECT json_valid(NULL)",
 			wantRows: [][]interface{}{{nil}},
@@ -315,42 +315,42 @@ func genJSONTableTests() []sqlTestCase {
 	}
 	return []sqlTestCase{
 		{
-			name:     "REQ-JSON-080_group_array_all",
+			name: "REQ-JSON-080_group_array_all",
 
 			setup:    setup,
 			query:    "SELECT json_group_array(val) FROM jt1",
 			wantRows: [][]interface{}{{"[10,20,30]"}},
 		},
 		{
-			name:     "REQ-JSON-081_group_array_filtered",
+			name: "REQ-JSON-081_group_array_filtered",
 
 			setup:    setup,
 			query:    "SELECT json_group_array(val) FROM jt1 WHERE id <= 2",
 			wantRows: [][]interface{}{{"[10,20]"}},
 		},
 		{
-			name:     "REQ-JSON-082_group_object_all",
+			name: "REQ-JSON-082_group_object_all",
 
 			setup:    setup,
 			query:    "SELECT json_group_object(name, val) FROM jt1",
 			wantRows: [][]interface{}{{`{"a":10,"b":20,"c":30}`}},
 		},
 		{
-			name:     "REQ-JSON-083_group_array_single",
+			name: "REQ-JSON-083_group_array_single",
 
 			setup:    setup,
 			query:    "SELECT json_group_array(val) FROM jt1 WHERE id=1",
 			wantRows: [][]interface{}{{"[10]"}},
 		},
 		{
-			name:     "REQ-JSON-084_group_array_strings",
+			name: "REQ-JSON-084_group_array_strings",
 
 			setup:    setup,
 			query:    "SELECT json_group_array(name) FROM jt1",
 			wantRows: [][]interface{}{{`["a","b","c"]`}},
 		},
 		{
-			name:     "REQ-JSON-085_group_object_single",
+			name: "REQ-JSON-085_group_object_single",
 
 			setup:    setup,
 			query:    "SELECT json_group_object(name, val) FROM jt1 WHERE id=2",

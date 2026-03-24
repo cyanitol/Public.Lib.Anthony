@@ -298,8 +298,8 @@ func corruptTestCases() []corruptTestCase {
 		},
 		// Attach test — ATTACH not implemented, verify basic DB works
 		{
-			name:       "corrupt-attach-1: Attach and detach databases",
-			verifyType: corruptVerifyNoError,
+			name:        "corrupt-attach-1: Attach and detach databases",
+			verifyType:  corruptVerifyNoError,
 			verifyQuery: "SELECT 1",
 		},
 	}

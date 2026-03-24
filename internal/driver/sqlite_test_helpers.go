@@ -388,8 +388,8 @@ type sqlTestCase struct {
 	query    string          // SELECT to run and compare results
 	args     []interface{}   // bind parameters for query/exec
 	wantRows [][]interface{} // expected rows from query
-	wantErr bool   // expect an error
-	errLike string // error message substring match
+	wantErr  bool            // expect an error
+	errLike  string          // error message substring match
 }
 
 // runSQLTests runs a slice of sqlTestCase against a shared database.

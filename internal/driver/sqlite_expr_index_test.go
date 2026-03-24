@@ -155,4 +155,3 @@ func TestExpressionIndexUniqueConstraint(t *testing.T) {
 		t.Fatalf("rows error: %v", err)
 	}
 }
-

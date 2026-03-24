@@ -50,8 +50,8 @@ type binarySpecialHandler func(g *CodeGenerator, leftReg, rightReg int) (int, er
 // binarySpecialHandlers maps operators that require special code paths to
 // their handler functions.
 var binarySpecialHandlers = map[parser.BinaryOp]binarySpecialHandler{
-	parser.OpLike:  (*CodeGenerator).generateLikeExpr,
-	parser.OpGlob:  (*CodeGenerator).generateGlobExpr,
+	parser.OpLike:              (*CodeGenerator).generateLikeExpr,
+	parser.OpGlob:              (*CodeGenerator).generateGlobExpr,
 	parser.OpIs:                (*CodeGenerator).generateIsExpr,
 	parser.OpIsNot:             (*CodeGenerator).generateIsNotExpr,
 	parser.OpIsDistinctFrom:    (*CodeGenerator).generateIsNotExpr,
@@ -228,14 +228,14 @@ type SubqueryExecutor func(selectStmt *parser.SelectStmt) ([][]interface{}, erro
 type CodeGenerator struct {
 	vdbe             *vdbe.VDBE
 	nextReg          int
-	nextCursor       int                  // next cursor index to allocate for subqueries
-	cursorMap        map[string]int       // table name -> cursor number
-	tableInfo        map[string]TableInfo // table name -> table info
-	args             []interface{}        // bound parameter values
-	paramIdx         int                  // next parameter index to use
-	collations       map[int]string       // register -> collation name (for collate expressions)
-	subqueryCompiler SubqueryCompiler     // callback to compile subqueries
-	subqueryExecutor SubqueryExecutor     // callback to materialise subqueries
+	nextCursor       int                       // next cursor index to allocate for subqueries
+	cursorMap        map[string]int            // table name -> cursor number
+	tableInfo        map[string]TableInfo      // table name -> table info
+	args             []interface{}             // bound parameter values
+	paramIdx         int                       // next parameter index to use
+	collations       map[int]string            // register -> collation name (for collate expressions)
+	subqueryCompiler SubqueryCompiler          // callback to compile subqueries
+	subqueryExecutor SubqueryExecutor          // callback to materialise subqueries
 	precomputed      map[parser.Expression]int // expressions pre-computed into registers
 }
 

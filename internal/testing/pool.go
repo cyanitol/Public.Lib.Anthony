@@ -49,7 +49,7 @@ func GetTestDB(t *testing.T) *sql.DB {
 			rows.Close()
 			for _, table := range tables {
 				// nosec: table name is a test constant, not user input
-			db.Exec("DROP TABLE IF EXISTS " + table)
+				db.Exec("DROP TABLE IF EXISTS " + table)
 			}
 		}
 

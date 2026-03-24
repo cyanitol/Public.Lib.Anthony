@@ -438,4 +438,3 @@ func TestApplyModifierNumeric(t *testing.T) {
 		t.Errorf("applyModifier() error = %v", err)
 	}
 }
-

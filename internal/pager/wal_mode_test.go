@@ -231,10 +231,10 @@ func TestWALModeMultipleVersions(t *testing.T) {
 
 // walCheckpointTest represents a declarative WAL checkpoint test
 type walCheckpointTest struct {
-	name         string
-	mode         CheckpointMode
-	writeAfter   bool
-	verifyTrunc  bool
+	name        string
+	mode        CheckpointMode
+	writeAfter  bool
+	verifyTrunc bool
 }
 
 // walWritePages writes test pages to the pager

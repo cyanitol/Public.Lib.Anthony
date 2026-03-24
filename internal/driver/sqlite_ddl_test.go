@@ -286,26 +286,26 @@ func TestSQLiteDDL(t *testing.T) {
 			wantRows: 1,
 		},
 		{
-			name: "table-8.8: CREATE TABLE AS SELECT from non-existent table",
-			exec: []string{"CREATE TABLE t5 AS SELECT * FROM no_such_table"},
-			wantErr: false,
-			verify:  "SELECT name FROM sqlite_master WHERE type='table' AND name='t5'",
+			name:     "table-8.8: CREATE TABLE AS SELECT from non-existent table",
+			exec:     []string{"CREATE TABLE t5 AS SELECT * FROM no_such_table"},
+			wantErr:  false,
+			verify:   "SELECT name FROM sqlite_master WHERE type='table' AND name='t5'",
 			wantRows: 1,
 		},
 
 		// Duplicate column names - engine does not currently detect duplicates at CREATE time
 		{
-			name:    "table-9.1: duplicate column name (simple)",
-			exec:    []string{"CREATE TABLE t6(a,b,a)"},
-			wantErr: false,
-			verify:  "SELECT name FROM sqlite_master WHERE type='table' AND name='t6'",
+			name:     "table-9.1: duplicate column name (simple)",
+			exec:     []string{"CREATE TABLE t6(a,b,a)"},
+			wantErr:  false,
+			verify:   "SELECT name FROM sqlite_master WHERE type='table' AND name='t6'",
 			wantRows: 1,
 		},
 		{
-			name:    "table-9.2: duplicate column name (typed)",
-			exec:    []string{"CREATE TABLE t6(a varchar(100), b blob, a integer)"},
-			wantErr: false,
-			verify:  "SELECT name FROM sqlite_master WHERE type='table' AND name='t6'",
+			name:     "table-9.2: duplicate column name (typed)",
+			exec:     []string{"CREATE TABLE t6(a varchar(100), b blob, a integer)"},
+			wantErr:  false,
+			verify:   "SELECT name FROM sqlite_master WHERE type='table' AND name='t6'",
 			wantRows: 1,
 		},
 
@@ -324,8 +324,8 @@ func TestSQLiteDDL(t *testing.T) {
 			exec: []string{
 				"CREATE TABLE t6(a INTEGER NOT NULL)",
 			},
-			wantErr: false,
-			verify:  "SELECT name FROM sqlite_master WHERE type='table' AND name='t6'",
+			wantErr:  false,
+			verify:   "SELECT name FROM sqlite_master WHERE type='table' AND name='t6'",
 			wantRows: 1,
 		},
 		{
@@ -333,8 +333,8 @@ func TestSQLiteDDL(t *testing.T) {
 			exec: []string{
 				"CREATE TABLE t6(a NOT NULL DEFAULT 0)",
 			},
-			wantErr: false,
-			verify:  "SELECT name FROM sqlite_master WHERE type='table' AND name='t6'",
+			wantErr:  false,
+			verify:   "SELECT name FROM sqlite_master WHERE type='table' AND name='t6'",
 			wantRows: 1,
 		},
 

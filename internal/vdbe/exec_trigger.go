@@ -427,4 +427,3 @@ func memToGoValue(mem *Mem) interface{} {
 		return nil
 	}
 }
-

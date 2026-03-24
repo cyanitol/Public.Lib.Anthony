@@ -677,4 +677,3 @@ func mustCreatePagesAndFreeRange(t *testing.T, p *Pager, fl *FreeList, totalPage
 	mustCreateWritePages(t, p, 2, Pgno(totalPages))
 	mustFreePages(t, fl, freeStart, freeEnd)
 }
-

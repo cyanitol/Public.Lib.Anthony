@@ -310,11 +310,11 @@ func checkErrorMessage(t *testing.T, err error, expected string) {
 func TestOpVerifyCookie(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name         string
+		name                             string
 		dbIndex, cookieType, expectedVal int
-		actualVal    uint32
-		expectError  bool
-		errorMessage string
+		actualVal                        uint32
+		expectError                      bool
+		errorMessage                     string
 	}{
 		{"cookie matches", 0, 0, 42, 42, false, ""},
 		{"cookie mismatch", 0, 0, 42, 43, true, "schema changed"},

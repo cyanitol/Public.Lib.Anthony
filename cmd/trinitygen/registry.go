@@ -37,7 +37,7 @@ func moduleRegistry() []ModuleSpec {
 func coreModule() ModuleSpec {
 	return ModuleSpec{
 		Module: "core", TestFunc: "TestTrinity_Core", BuildFunc: "buildTrinityCoreTests",
-		Comment: "TestTrinity_Core exercises CREATE TABLE, INSERT/SELECT/UPDATE/DELETE, ROWID, IPK.",
+		Comment:  "TestTrinity_Core exercises CREATE TABLE, INSERT/SELECT/UPDATE/DELETE, ROWID, IPK.",
 		NeedsFmt: true,
 		SubFuncs: []SubFunc{
 			{Name: "genCoreCreateTableTests"},
@@ -55,7 +55,7 @@ func coreModule() ModuleSpec {
 func typesModule() ModuleSpec {
 	return ModuleSpec{
 		Module: "types", TestFunc: "TestTrinity_Types", BuildFunc: "buildTrinityTypesTests",
-		Comment: "TestTrinity_Types exercises type affinity, TYPEOF, CAST, implicit coercion.",
+		Comment:  "TestTrinity_Types exercises type affinity, TYPEOF, CAST, implicit coercion.",
 		NeedsFmt: true,
 		SubFuncs: []SubFunc{
 			{Name: "genTypeAffinityMatrixTests"},
@@ -69,7 +69,7 @@ func typesModule() ModuleSpec {
 func nullModule() ModuleSpec {
 	return ModuleSpec{
 		Module: "null", TestFunc: "TestTrinity_Null", BuildFunc: "buildTrinityNullTests",
-		Comment: "TestTrinity_Null exercises NULL propagation, IS NULL, COALESCE, IFNULL, NULLIF.",
+		Comment:  "TestTrinity_Null exercises NULL propagation, IS NULL, COALESCE, IFNULL, NULLIF.",
 		NeedsFmt: true,
 		SubFuncs: []SubFunc{
 			{Name: "genNullArithPropTests"},

@@ -462,7 +462,7 @@ func genWindowAggregateTests() []sqlTestCase {
 			},
 		},
 		{
-			name:  "REQ-WIN-069_multiple_windows_one_query",
+			name: "REQ-WIN-069_multiple_windows_one_query",
 
 			setup: ws,
 			query: "SELECT name, ROW_NUMBER() OVER (ORDER BY salary DESC) AS rn, SUM(salary) OVER () AS total FROM w ORDER BY salary DESC LIMIT 3",

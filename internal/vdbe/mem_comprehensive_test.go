@@ -148,7 +148,6 @@ func bytesMatchComprehensive(got, expected []byte) bool {
 	return true
 }
 
-
 // TestMemValue tests the Value method
 func TestMemValue(t *testing.T) {
 	t.Parallel()
@@ -622,28 +621,44 @@ type arithEdgeCaseTest struct {
 func arithEdgeCases() []arithEdgeCaseTest {
 	return []arithEdgeCaseTest{
 		{"Subtract with null", func() *Mem { return NewMemInt(10) }, func(m *Mem) error { return m.Subtract(NewMemNull()) }, func(t *testing.T, m *Mem) {
-			if !m.IsNull() { t.Errorf("Expected null result") }
+			if !m.IsNull() {
+				t.Errorf("Expected null result")
+			}
 		}},
 		{"Subtract with overflow", func() *Mem { return NewMemInt(-9223372036854775808) }, func(m *Mem) error { return m.Subtract(NewMemInt(1)) }, func(t *testing.T, m *Mem) {
-			if !m.IsReal() { t.Errorf("Expected real after overflow") }
+			if !m.IsReal() {
+				t.Errorf("Expected real after overflow")
+			}
 		}},
 		{"Multiply with null", func() *Mem { return NewMemInt(10) }, func(m *Mem) error { return m.Multiply(NewMemNull()) }, func(t *testing.T, m *Mem) {
-			if !m.IsNull() { t.Errorf("Expected null result") }
+			if !m.IsNull() {
+				t.Errorf("Expected null result")
+			}
 		}},
 		{"Multiply with overflow", func() *Mem { return NewMemInt(9223372036854775807) }, func(m *Mem) error { return m.Multiply(NewMemInt(2)) }, func(t *testing.T, m *Mem) {
-			if !m.IsReal() { t.Errorf("Expected real after overflow") }
+			if !m.IsReal() {
+				t.Errorf("Expected real after overflow")
+			}
 		}},
 		{"Remainder with null", func() *Mem { return NewMemInt(10) }, func(m *Mem) error { return m.Remainder(NewMemNull()) }, func(t *testing.T, m *Mem) {
-			if !m.IsNull() { t.Errorf("Expected null result") }
+			if !m.IsNull() {
+				t.Errorf("Expected null result")
+			}
 		}},
 		{"Remainder with zero divisor (int)", func() *Mem { return NewMemInt(10) }, func(m *Mem) error { return m.Remainder(NewMemInt(0)) }, func(t *testing.T, m *Mem) {
-			if !m.IsNull() { t.Errorf("Expected null result for division by zero") }
+			if !m.IsNull() {
+				t.Errorf("Expected null result for division by zero")
+			}
 		}},
 		{"Remainder with zero divisor (real)", func() *Mem { return NewMemInt(10) }, func(m *Mem) error { return m.Remainder(NewMemReal(0.0)) }, func(t *testing.T, m *Mem) {
-			if !m.IsNull() { t.Errorf("Expected null result for division by zero") }
+			if !m.IsNull() {
+				t.Errorf("Expected null result for division by zero")
+			}
 		}},
 		{"Remainder with real values", func() *Mem { return NewMemReal(10.5) }, func(m *Mem) error { return m.Remainder(NewMemReal(3.0)) }, func(t *testing.T, m *Mem) {
-			if !m.IsReal() { t.Errorf("Expected real result") }
+			if !m.IsReal() {
+				t.Errorf("Expected real result")
+			}
 		}},
 	}
 }

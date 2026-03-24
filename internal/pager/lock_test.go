@@ -616,4 +616,3 @@ func createTestFile(t *testing.T) (*os.File, func()) {
 
 	return f, cleanup
 }
-

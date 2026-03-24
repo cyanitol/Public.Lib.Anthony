@@ -581,4 +581,3 @@ func TestMinMaxScalarFunc(t *testing.T) {
 		})
 	}
 }
-

@@ -989,7 +989,7 @@ func (s *Stmt) isAggregateExpr(expr parser.Expression) bool {
 	aggFuncs := map[string]bool{
 		"COUNT": true, "SUM": true, "AVG": true,
 		"MIN": true, "MAX": true, "TOTAL": true,
-		"GROUP_CONCAT": true,
+		"GROUP_CONCAT":     true,
 		"JSON_GROUP_ARRAY": true, "JSON_GROUP_OBJECT": true,
 	}
 
