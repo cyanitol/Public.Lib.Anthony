@@ -141,6 +141,10 @@ func (c *IndexCursor) navigateToRightmostLeaf(pageNum uint32) error {
 			return c.positionAtLastCell(pageNum, pageData, header)
 		}
 
+		// Record the right-child slot index at this interior level so that
+		// prevViaParent can correctly determine how many left siblings remain.
+		c.IndexStack[c.Depth] = int(header.NumCells)
+
 		pageNum, err = c.descendToRightChild(pageNum, header)
 		if err != nil {
 			return err
@@ -523,6 +527,14 @@ func (c *IndexCursor) SeekIndex(key []byte) (found bool, err error) {
 		if err != nil {
 			return false, err
 		}
+
+		// Record which slot we are taking at this interior level so that
+		// prevViaParent can navigate backwards correctly.
+		slotIdx := idx
+		if idx >= int(header.NumCells) {
+			slotIdx = int(header.NumCells)
+		}
+		c.IndexStack[c.Depth] = slotIdx
 
 		c.Depth++
 		if c.Depth >= MaxBtreeDepth {

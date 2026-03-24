@@ -147,6 +147,10 @@ func (c *BtCursor) navigateToRightmostLeaf(pageNum uint32) error {
 			return c.positionAtLastCell(pageNum, pageData, header)
 		}
 
+		// Record the right-child slot index at this interior level so that
+		// prevViaParent can correctly determine how many left siblings remain.
+		c.IndexStack[c.Depth] = int(header.NumCells)
+
 		pageNum, err = c.descendToRightChild(pageNum, header)
 		if err != nil {
 			return err
@@ -165,8 +169,14 @@ func (c *BtCursor) navigateToRightmostLeafComposite(pageNum uint32) error {
 			return c.positionAtLastCell(pageNum, pageData, header)
 		}
 
-		// Right child pointer for interior pages
-		pageNum = header.RightChild
+		// Record the right-child slot index at this interior level so that
+		// prevViaParent can correctly determine how many left siblings remain.
+		c.IndexStack[c.Depth] = int(header.NumCells)
+
+		pageNum, err = c.descendToRightChild(pageNum, header)
+		if err != nil {
+			return err
+		}
 	}
 }
 
