@@ -358,21 +358,29 @@ func (c *IndexCursor) climbToNextParent() (uint32, bool, error) {
 			c.State = CursorInvalid
 			return 0, false, err
 		}
-		if parentIndex >= int(parentHeader.NumCells)-1 {
+		if parentIndex >= int(parentHeader.NumCells) {
+			// Already past the right child; continue climbing.
 			continue
 		}
-		c.IndexStack[c.Depth] = parentIndex + 1
-		cellOffset, err := parentHeader.GetCellPointer(parentData, parentIndex+1)
-		if err != nil {
-			c.State = CursorInvalid
-			return 0, false, err
+		if parentIndex < int(parentHeader.NumCells)-1 {
+			c.IndexStack[c.Depth] = parentIndex + 1
+			cellOffset, err := parentHeader.GetCellPointer(parentData, parentIndex+1)
+			if err != nil {
+				c.State = CursorInvalid
+				return 0, false, err
+			}
+			cell, err := ParseCell(parentHeader.PageType, parentData[cellOffset:], c.Btree.UsableSize)
+			if err != nil {
+				c.State = CursorInvalid
+				return 0, false, err
+			}
+			return cell.ChildPage, true, nil
 		}
-		cell, err := ParseCell(parentHeader.PageType, parentData[cellOffset:], c.Btree.UsableSize)
-		if err != nil {
-			c.State = CursorInvalid
-			return 0, false, err
+		// parentIndex == NumCells-1: advance to the right child.
+		if parentHeader.RightChild != 0 {
+			c.IndexStack[c.Depth] = int(parentHeader.NumCells)
+			return parentHeader.RightChild, true, nil
 		}
-		return cell.ChildPage, true, nil
 	}
 	return 0, false, nil
 }
