@@ -47,8 +47,8 @@ type WindowDef struct {
 	Spec *WindowSpec
 }
 
-func (s *SelectStmt) node()      {}
-func (s *SelectStmt) statement() {}
+func (s *SelectStmt) node()      { return }
+func (s *SelectStmt) statement() { return }
 func (s *SelectStmt) String() string {
 	return "SELECT"
 }
@@ -166,8 +166,8 @@ type InsertStmt struct {
 	Returning   []ResultColumn
 }
 
-func (i *InsertStmt) node()      {}
-func (i *InsertStmt) statement() {}
+func (i *InsertStmt) node()      { return }
+func (i *InsertStmt) statement() { return }
 func (i *InsertStmt) String() string {
 	return "INSERT"
 }
@@ -196,8 +196,8 @@ type UpdateStmt struct {
 	Returning  []ResultColumn
 }
 
-func (u *UpdateStmt) node()      {}
-func (u *UpdateStmt) statement() {}
+func (u *UpdateStmt) node()      { return }
+func (u *UpdateStmt) statement() { return }
 func (u *UpdateStmt) String() string {
 	return "UPDATE"
 }
@@ -218,8 +218,8 @@ type DeleteStmt struct {
 	Returning []ResultColumn
 }
 
-func (d *DeleteStmt) node()      {}
-func (d *DeleteStmt) statement() {}
+func (d *DeleteStmt) node()      { return }
+func (d *DeleteStmt) statement() { return }
 func (d *DeleteStmt) String() string {
 	return "DELETE"
 }
@@ -237,8 +237,8 @@ type CreateTableStmt struct {
 	Strict       bool
 }
 
-func (c *CreateTableStmt) node()      {}
-func (c *CreateTableStmt) statement() {}
+func (c *CreateTableStmt) node()      { return }
+func (c *CreateTableStmt) statement() { return }
 func (c *CreateTableStmt) String() string {
 	return "CREATE TABLE"
 }
@@ -371,8 +371,8 @@ type CreateVirtualTableStmt struct {
 	Args        []string
 }
 
-func (c *CreateVirtualTableStmt) node()      {}
-func (c *CreateVirtualTableStmt) statement() {}
+func (c *CreateVirtualTableStmt) node()      { return }
+func (c *CreateVirtualTableStmt) statement() { return }
 func (c *CreateVirtualTableStmt) String() string {
 	return "CREATE VIRTUAL TABLE"
 }
@@ -383,8 +383,8 @@ type DropTableStmt struct {
 	IfExists bool
 }
 
-func (d *DropTableStmt) node()      {}
-func (d *DropTableStmt) statement() {}
+func (d *DropTableStmt) node()      { return }
+func (d *DropTableStmt) statement() { return }
 func (d *DropTableStmt) String() string {
 	return "DROP TABLE"
 }
@@ -399,8 +399,8 @@ type CreateIndexStmt struct {
 	Where       Expression
 }
 
-func (c *CreateIndexStmt) node()      {}
-func (c *CreateIndexStmt) statement() {}
+func (c *CreateIndexStmt) node()      { return }
+func (c *CreateIndexStmt) statement() { return }
 func (c *CreateIndexStmt) String() string {
 	return "CREATE INDEX"
 }
@@ -411,8 +411,8 @@ type DropIndexStmt struct {
 	IfExists bool
 }
 
-func (d *DropIndexStmt) node()      {}
-func (d *DropIndexStmt) statement() {}
+func (d *DropIndexStmt) node()      { return }
+func (d *DropIndexStmt) statement() { return }
 func (d *DropIndexStmt) String() string {
 	return "DROP INDEX"
 }
@@ -426,8 +426,8 @@ type CreateViewStmt struct {
 	Temporary   bool
 }
 
-func (c *CreateViewStmt) node()      {}
-func (c *CreateViewStmt) statement() {}
+func (c *CreateViewStmt) node()      { return }
+func (c *CreateViewStmt) statement() { return }
 func (c *CreateViewStmt) String() string {
 	return "CREATE VIEW"
 }
@@ -438,8 +438,8 @@ type DropViewStmt struct {
 	IfExists bool
 }
 
-func (d *DropViewStmt) node()      {}
-func (d *DropViewStmt) statement() {}
+func (d *DropViewStmt) node()      { return }
+func (d *DropViewStmt) statement() { return }
 func (d *DropViewStmt) String() string {
 	return "DROP VIEW"
 }
@@ -458,8 +458,8 @@ type CreateTriggerStmt struct {
 	Body        []Statement
 }
 
-func (c *CreateTriggerStmt) node()      {}
-func (c *CreateTriggerStmt) statement() {}
+func (c *CreateTriggerStmt) node()      { return }
+func (c *CreateTriggerStmt) statement() { return }
 func (c *CreateTriggerStmt) String() string {
 	return "CREATE TRIGGER"
 }
@@ -488,8 +488,8 @@ type DropTriggerStmt struct {
 	IfExists bool
 }
 
-func (d *DropTriggerStmt) node()      {}
-func (d *DropTriggerStmt) statement() {}
+func (d *DropTriggerStmt) node()      { return }
+func (d *DropTriggerStmt) statement() { return }
 func (d *DropTriggerStmt) String() string {
 	return "DROP TRIGGER"
 }
@@ -499,8 +499,8 @@ type BeginStmt struct {
 	Mode TransactionMode
 }
 
-func (b *BeginStmt) node()      {}
-func (b *BeginStmt) statement() {}
+func (b *BeginStmt) node()      { return }
+func (b *BeginStmt) statement() { return }
 func (b *BeginStmt) String() string {
 	return "BEGIN"
 }
@@ -516,8 +516,8 @@ const (
 // CommitStmt represents a COMMIT statement.
 type CommitStmt struct{}
 
-func (c *CommitStmt) node()      {}
-func (c *CommitStmt) statement() {}
+func (c *CommitStmt) node()      { return }
+func (c *CommitStmt) statement() { return }
 func (c *CommitStmt) String() string {
 	return "COMMIT"
 }
@@ -527,8 +527,8 @@ type RollbackStmt struct {
 	Savepoint string
 }
 
-func (r *RollbackStmt) node()      {}
-func (r *RollbackStmt) statement() {}
+func (r *RollbackStmt) node()      { return }
+func (r *RollbackStmt) statement() { return }
 func (r *RollbackStmt) String() string {
 	return "ROLLBACK"
 }
@@ -538,8 +538,8 @@ type SavepointStmt struct {
 	Name string
 }
 
-func (s *SavepointStmt) node()      {}
-func (s *SavepointStmt) statement() {}
+func (s *SavepointStmt) node()      { return }
+func (s *SavepointStmt) statement() { return }
 func (s *SavepointStmt) String() string {
 	return "SAVEPOINT"
 }
@@ -549,8 +549,8 @@ type ReleaseStmt struct {
 	Name string
 }
 
-func (r *ReleaseStmt) node()      {}
-func (r *ReleaseStmt) statement() {}
+func (r *ReleaseStmt) node()      { return }
+func (r *ReleaseStmt) statement() { return }
 func (r *ReleaseStmt) String() string {
 	return "RELEASE"
 }
@@ -561,8 +561,8 @@ type ExplainStmt struct {
 	Statement Statement // the statement being explained
 }
 
-func (e *ExplainStmt) node()      {}
-func (e *ExplainStmt) statement() {}
+func (e *ExplainStmt) node()      { return }
+func (e *ExplainStmt) statement() { return }
 func (e *ExplainStmt) String() string {
 	if e.QueryPlan {
 		return "EXPLAIN QUERY PLAN"
@@ -576,8 +576,8 @@ type AttachStmt struct {
 	SchemaName string     // The schema name to attach as
 }
 
-func (a *AttachStmt) node()      {}
-func (a *AttachStmt) statement() {}
+func (a *AttachStmt) node()      { return }
+func (a *AttachStmt) statement() { return }
 func (a *AttachStmt) String() string {
 	return "ATTACH"
 }
@@ -587,8 +587,8 @@ type DetachStmt struct {
 	SchemaName string // The schema name to detach
 }
 
-func (d *DetachStmt) node()      {}
-func (d *DetachStmt) statement() {}
+func (d *DetachStmt) node()      { return }
+func (d *DetachStmt) statement() { return }
 func (d *DetachStmt) String() string {
 	return "DETACH"
 }
@@ -600,8 +600,8 @@ type PragmaStmt struct {
 	Value  Expression // optional value (for = or () syntax)
 }
 
-func (p *PragmaStmt) node()      {}
-func (p *PragmaStmt) statement() {}
+func (p *PragmaStmt) node()      { return }
+func (p *PragmaStmt) statement() { return }
 func (p *PragmaStmt) String() string {
 	return "PRAGMA"
 }
@@ -612,8 +612,8 @@ type AlterTableStmt struct {
 	Action AlterTableAction
 }
 
-func (a *AlterTableStmt) node()      {}
-func (a *AlterTableStmt) statement() {}
+func (a *AlterTableStmt) node()      { return }
+func (a *AlterTableStmt) statement() { return }
 func (a *AlterTableStmt) String() string {
 	return "ALTER TABLE"
 }
@@ -625,8 +625,8 @@ type VacuumStmt struct {
 	IntoParam bool   // true if INTO filename comes from a parameter
 }
 
-func (v *VacuumStmt) node()      {}
-func (v *VacuumStmt) statement() {}
+func (v *VacuumStmt) node()      { return }
+func (v *VacuumStmt) statement() { return }
 func (v *VacuumStmt) String() string {
 	if v.Into != "" || v.IntoParam {
 		return "VACUUM INTO"
@@ -640,8 +640,8 @@ type ReindexStmt struct {
 	Name   string
 }
 
-func (r *ReindexStmt) node()      {}
-func (r *ReindexStmt) statement() {}
+func (r *ReindexStmt) node()      { return }
+func (r *ReindexStmt) statement() { return }
 func (r *ReindexStmt) String() string {
 	return "REINDEX"
 }
@@ -652,8 +652,8 @@ type AnalyzeStmt struct {
 	Name   string // optional table or index name
 }
 
-func (a *AnalyzeStmt) node()      {}
-func (a *AnalyzeStmt) statement() {}
+func (a *AnalyzeStmt) node()      { return }
+func (a *AnalyzeStmt) statement() { return }
 func (a *AnalyzeStmt) String() string {
 	return "ANALYZE"
 }
@@ -669,8 +669,8 @@ type RenameTableAction struct {
 	NewName string
 }
 
-func (r *RenameTableAction) node()             {}
-func (r *RenameTableAction) alterTableAction() {}
+func (r *RenameTableAction) node()             { return }
+func (r *RenameTableAction) alterTableAction() { return }
 func (r *RenameTableAction) String() string {
 	return "RENAME TO"
 }
@@ -681,8 +681,8 @@ type RenameColumnAction struct {
 	NewName string
 }
 
-func (r *RenameColumnAction) node()             {}
-func (r *RenameColumnAction) alterTableAction() {}
+func (r *RenameColumnAction) node()             { return }
+func (r *RenameColumnAction) alterTableAction() { return }
 func (r *RenameColumnAction) String() string {
 	return "RENAME COLUMN"
 }
@@ -692,8 +692,8 @@ type AddColumnAction struct {
 	Column ColumnDef
 }
 
-func (a *AddColumnAction) node()             {}
-func (a *AddColumnAction) alterTableAction() {}
+func (a *AddColumnAction) node()             { return }
+func (a *AddColumnAction) alterTableAction() { return }
 func (a *AddColumnAction) String() string {
 	return "ADD COLUMN"
 }
@@ -704,8 +704,8 @@ type DropColumnAction struct {
 	IfExists   bool
 }
 
-func (d *DropColumnAction) node()             {}
-func (d *DropColumnAction) alterTableAction() {}
+func (d *DropColumnAction) node()             { return }
+func (d *DropColumnAction) alterTableAction() { return }
 func (d *DropColumnAction) String() string {
 	return "DROP COLUMN"
 }
@@ -722,8 +722,8 @@ type BinaryExpr struct {
 	Escape Expression // optional ESCAPE clause for LIKE
 }
 
-func (b *BinaryExpr) node()       {}
-func (b *BinaryExpr) expression() {}
+func (b *BinaryExpr) node()       { return }
+func (b *BinaryExpr) expression() { return }
 func (b *BinaryExpr) String() string {
 	left := "nil"
 	right := "nil"
@@ -809,8 +809,8 @@ type UnaryExpr struct {
 	Expr Expression
 }
 
-func (u *UnaryExpr) node()       {}
-func (u *UnaryExpr) expression() {}
+func (u *UnaryExpr) node()       { return }
+func (u *UnaryExpr) expression() { return }
 func (u *UnaryExpr) String() string {
 	expr := "nil"
 	if u.Expr != nil {
@@ -848,8 +848,8 @@ type LiteralExpr struct {
 	Value string
 }
 
-func (l *LiteralExpr) node()       {}
-func (l *LiteralExpr) expression() {}
+func (l *LiteralExpr) node()       { return }
+func (l *LiteralExpr) expression() { return }
 func (l *LiteralExpr) String() string {
 	switch l.Type {
 	case LiteralNull:
@@ -882,8 +882,8 @@ type IdentExpr struct {
 	Table string // optional table qualifier
 }
 
-func (i *IdentExpr) node()       {}
-func (i *IdentExpr) expression() {}
+func (i *IdentExpr) node()       { return }
+func (i *IdentExpr) expression() { return }
 func (i *IdentExpr) String() string {
 	if i.Table != "" {
 		return i.Table + "." + i.Name
@@ -901,8 +901,8 @@ type FunctionExpr struct {
 	Over     *WindowSpec
 }
 
-func (f *FunctionExpr) node()       {}
-func (f *FunctionExpr) expression() {}
+func (f *FunctionExpr) node()       { return }
+func (f *FunctionExpr) expression() { return }
 func (f *FunctionExpr) String() string {
 	if f.Star {
 		return f.Name + "(*)"
@@ -977,8 +977,8 @@ type CaseExpr struct {
 	ElseClause  Expression
 }
 
-func (c *CaseExpr) node()       {}
-func (c *CaseExpr) expression() {}
+func (c *CaseExpr) node()       { return }
+func (c *CaseExpr) expression() { return }
 func (c *CaseExpr) String() string {
 	var sb strings.Builder
 	sb.WriteString("CASE")
@@ -1018,8 +1018,8 @@ type InExpr struct {
 	Not    bool
 }
 
-func (i *InExpr) node()       {}
-func (i *InExpr) expression() {}
+func (i *InExpr) node()       { return }
+func (i *InExpr) expression() { return }
 func (i *InExpr) String() string {
 	var sb strings.Builder
 	if i.Expr != nil {
@@ -1048,8 +1048,8 @@ type BetweenExpr struct {
 	Not   bool
 }
 
-func (b *BetweenExpr) node()       {}
-func (b *BetweenExpr) expression() {}
+func (b *BetweenExpr) node()       { return }
+func (b *BetweenExpr) expression() { return }
 func (b *BetweenExpr) String() string {
 	var sb strings.Builder
 	if b.Expr != nil {
@@ -1075,8 +1075,8 @@ type CastExpr struct {
 	Type string
 }
 
-func (c *CastExpr) node()       {}
-func (c *CastExpr) expression() {}
+func (c *CastExpr) node()       { return }
+func (c *CastExpr) expression() { return }
 func (c *CastExpr) String() string {
 	expr := "nil"
 	if c.Expr != nil {
@@ -1091,8 +1091,8 @@ type CollateExpr struct {
 	Collation string
 }
 
-func (c *CollateExpr) node()       {}
-func (c *CollateExpr) expression() {}
+func (c *CollateExpr) node()       { return }
+func (c *CollateExpr) expression() { return }
 func (c *CollateExpr) String() string {
 	expr := "nil"
 	if c.Expr != nil {
@@ -1106,8 +1106,8 @@ type ParenExpr struct {
 	Expr Expression
 }
 
-func (p *ParenExpr) node()       {}
-func (p *ParenExpr) expression() {}
+func (p *ParenExpr) node()       { return }
+func (p *ParenExpr) expression() { return }
 func (p *ParenExpr) String() string {
 	expr := "nil"
 	if p.Expr != nil {
@@ -1121,8 +1121,8 @@ type SubqueryExpr struct {
 	Select *SelectStmt
 }
 
-func (s *SubqueryExpr) node()       {}
-func (s *SubqueryExpr) expression() {}
+func (s *SubqueryExpr) node()       { return }
+func (s *SubqueryExpr) expression() { return }
 func (s *SubqueryExpr) String() string {
 	// We can't easily convert a full SELECT statement to string here,
 	// so we return a placeholder. Full subquery serialization would require
@@ -1136,8 +1136,8 @@ type ExistsExpr struct {
 	Not    bool // true for NOT EXISTS
 }
 
-func (e *ExistsExpr) node()       {}
-func (e *ExistsExpr) expression() {}
+func (e *ExistsExpr) node()       { return }
+func (e *ExistsExpr) expression() { return }
 func (e *ExistsExpr) String() string {
 	if e.Not {
 		return "NOT EXISTS (SELECT ...)"
@@ -1150,8 +1150,8 @@ type VariableExpr struct {
 	Name string
 }
 
-func (v *VariableExpr) node()       {}
-func (v *VariableExpr) expression() {}
+func (v *VariableExpr) node()       { return }
+func (v *VariableExpr) expression() { return }
 func (v *VariableExpr) String() string {
 	// SQL parameters are typically represented as ? or :name or $name
 	if v.Name == "" {
@@ -1180,8 +1180,8 @@ type RaiseExpr struct {
 	Message string    // Error message (empty for IGNORE)
 }
 
-func (r *RaiseExpr) node()       {}
-func (r *RaiseExpr) expression() {}
+func (r *RaiseExpr) node()       { return }
+func (r *RaiseExpr) expression() { return }
 func (r *RaiseExpr) String() string {
 	switch r.Type {
 	case RaiseIgnore:
