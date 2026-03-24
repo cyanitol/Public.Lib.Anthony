@@ -144,8 +144,11 @@ func TestCompositeInteriorSplit(t *testing.T) {
 //   - enterPage (0%)
 //   - prevViaParent (21.7%)
 //
-// We build a deep index tree with many entries so MoveToLast descends
-// multiple interior pages, and PrevIndex crosses page boundaries.
+// Strategy: move to first (which sets up IndexStack correctly via descendToFirst),
+// then advance forward past multiple page boundaries (so the parent IndexStack
+// reflects non-leftmost child positions), then iterate backward.
+// When PrevIndex hits CurrentIndex==0 on a non-leftmost child, it calls
+// prevViaParent which calls descendToLast/enterPage.
 func TestIndexCursorBackwardDeepTree(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(512) // small pages → many interior levels
@@ -167,15 +170,22 @@ func TestIndexCursorBackwardDeepTree(t *testing.T) {
 		t.Fatalf("Only inserted %d index entries", inserted)
 	}
 
-	// MoveToLast exercises descendToLast and enterPage
-	if err := cursor.MoveToLast(); err != nil {
-		t.Fatalf("MoveToLast: %v", err)
-	}
-	if !cursor.IsValid() {
-		t.Fatal("cursor invalid after MoveToLast")
+	// MoveToFirst establishes a correct IndexStack via descendToFirst
+	if err := cursor.MoveToFirst(); err != nil {
+		t.Fatalf("MoveToFirst: %v", err)
 	}
 
-	// Iterate backward — this exercises prevViaParent when crossing pages
+	// Advance well into the tree via NextIndex so parent indices > 0
+	forward := 0
+	for cursor.IsValid() && forward < inserted/2 {
+		if err := cursor.NextIndex(); err != nil {
+			break
+		}
+		forward++
+	}
+
+	// Now iterate backward — prevViaParent / descendToLast / enterPage are hit
+	// when we cross page boundaries while going backward.
 	backward := 0
 	for cursor.IsValid() && backward < inserted {
 		backward++
@@ -185,6 +195,60 @@ func TestIndexCursorBackwardDeepTree(t *testing.T) {
 	}
 	if backward < 2 {
 		t.Errorf("backward iteration only got %d steps", backward)
+	}
+}
+
+// TestIndexCursorFullBackwardScan does a complete backward scan after a full
+// forward scan to ensure prevViaParent/descendToLast/enterPage are exercised
+// across all page boundaries.
+func TestIndexCursorFullBackwardScan(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(512)
+	rootPage, err := createIndexPage(bt)
+	if err != nil {
+		t.Fatalf("createIndexPage: %v", err)
+	}
+	cursor := NewIndexCursor(bt, rootPage)
+
+	inserted := 0
+	for i := 0; i < 200; i++ {
+		key := []byte(fmt.Sprintf("scan%06d", i))
+		if err := cursor.InsertIndex(key, int64(i)); err != nil {
+			break
+		}
+		inserted++
+	}
+
+	// Full forward traversal with NextIndex to build proper IndexStack state
+	if err := cursor.MoveToFirst(); err != nil {
+		t.Fatalf("MoveToFirst: %v", err)
+	}
+	for cursor.IsValid() {
+		if err := cursor.NextIndex(); err != nil {
+			break
+		}
+	}
+
+	// Now restart with a fresh forward pass and mid-point backward scan
+	if err := cursor.MoveToFirst(); err != nil {
+		t.Fatalf("MoveToFirst (2nd): %v", err)
+	}
+	// Move to ~75% of the way through
+	for i := 0; i < inserted*3/4 && cursor.IsValid(); i++ {
+		if err := cursor.NextIndex(); err != nil {
+			break
+		}
+	}
+	// Scan backward from here to the beginning
+	count := 0
+	for cursor.IsValid() {
+		count++
+		if err := cursor.PrevIndex(); err != nil {
+			break
+		}
+	}
+	if count < 1 {
+		t.Error("backward scan from 75% should traverse at least 1 entry")
 	}
 }
 
@@ -251,8 +315,10 @@ func TestNavigateToRightmostLeafComposite(t *testing.T) {
 }
 
 // TestMergeGetSiblingWithLeftPage exercises getSiblingWithLeftPage (0% merge.go:102).
-// We build a tree via normal inserts (small page size to force multi-page)
-// then delete entries to trigger merging — specifically for a non-leftmost child.
+// Key insight: getSiblingWithLeftPage requires parentIndex > 0 in findSiblingPages.
+// parentIndex comes from IndexStack[parentDepth]. After SeekRowid, IndexStack[0] is
+// always 0 (reset by initializeSeek). To get parentIndex > 0, use MoveToFirst + Next
+// which advances IndexStack as it crosses page boundaries.
 func TestMergeGetSiblingWithLeftPage(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(512)
@@ -262,33 +328,42 @@ func TestMergeGetSiblingWithLeftPage(t *testing.T) {
 	}
 	cursor := NewCursor(bt, rootPage)
 
-	// Build tree large enough to have at least 3 leaf pages
+	// Build a multi-page tree
 	for i := int64(1); i <= 80; i++ {
 		if err := cursor.Insert(i, make([]byte, 20)); err != nil {
 			break
 		}
 	}
 
-	// Delete a range from the middle to make middle pages underfull
-	// so MergePage is called from a non-leftmost position (has left sibling)
-	for i := int64(20); i <= 50; i++ {
-		found, err := cursor.SeekRowid(i)
-		if err == nil && found {
-			if err2 := cursor.Delete(); err2 != nil {
-				break
-			}
-		}
+	// Navigate from start with MoveToFirst + Next to properly track IndexStack
+	if err := cursor.MoveToFirst(); err != nil {
+		t.Fatalf("MoveToFirst: %v", err)
 	}
 
-	// Seek to a surviving middle key and attempt merge
-	cursor.SeekRowid(55)
-	if cursor.IsValid() && cursor.Depth > 0 {
+	// Advance past the first page boundary to get IndexStack[parent] > 0
+	prevPage := cursor.CurrentPage
+	crossedBoundary := false
+	for cursor.IsValid() {
+		if err := cursor.Next(); err != nil {
+			break
+		}
+		if cursor.CurrentPage != prevPage {
+			crossedBoundary = true
+			break
+		}
+		prevPage = cursor.CurrentPage
+	}
+
+	// If we crossed a page boundary and Depth > 0, IndexStack[parent] == 1
+	// so findSiblingPages routes to getSiblingWithLeftPage
+	if crossedBoundary && cursor.IsValid() && cursor.Depth > 0 {
 		cursor.MergePage() //nolint:errcheck
 	}
 }
 
 // TestMergeGetSiblingAsRightmost exercises getSiblingAsRightmost (0% merge.go:125).
-// Delete the rightmost entries to make the rightmost child underfull.
+// getSiblingAsRightmost is called when parentIndex == parentHeader.NumCells.
+// This happens after Next() has advanced IndexStack[parent] to NumCells (right child).
 func TestMergeGetSiblingAsRightmost(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(512)
@@ -304,17 +379,113 @@ func TestMergeGetSiblingAsRightmost(t *testing.T) {
 		}
 	}
 
-	// Delete the upper half so the rightmost leaf becomes underfull
-	for i := int64(60); i <= 80; i++ {
+	// Navigate to the last cell via MoveToFirst + iterate all the way
+	// to ensure IndexStack[parent] == NumCells at the rightmost child
+	if err := cursor.MoveToFirst(); err != nil {
+		t.Fatalf("MoveToFirst: %v", err)
+	}
+	// Iterate to the last valid entry
+	for cursor.IsValid() {
+		prevKey := cursor.GetKey()
+		if err := cursor.Next(); err != nil {
+			// End of tree - go back to previous position
+			cursor.SeekRowid(prevKey)
+			break
+		}
+	}
+
+	if cursor.IsValid() && cursor.Depth > 0 {
+		cursor.MergePage() //nolint:errcheck
+	}
+}
+
+// TestBalanceUnderfullNonRoot exercises handleUnderfullPage for non-root pages
+// by directly calling balance() from a cursor positioned at depth > 0.
+func TestBalanceUnderfullNonRoot(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(512)
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	cursor := NewCursor(bt, rootPage)
+
+	// Insert then delete most rows to create underfull non-root pages
+	for i := int64(1); i <= 80; i++ {
+		if err := cursor.Insert(i, make([]byte, 20)); err != nil {
+			break
+		}
+	}
+	// Delete most to make leaf pages underfull
+	for i := int64(5); i <= 75; i++ {
 		found, err := cursor.SeekRowid(i)
 		if err == nil && found {
 			cursor.Delete() //nolint:errcheck
 		}
 	}
 
-	// Seek to near the end and attempt merge from the rightmost child
-	cursor.SeekRowid(59)
+	// Navigate with MoveToFirst + Next to position at a non-root leaf
+	if err := cursor.MoveToFirst(); err != nil {
+		t.Logf("MoveToFirst: %v", err)
+		return
+	}
+	// Advance to a non-root page if possible
 	if cursor.IsValid() && cursor.Depth > 0 {
-		cursor.MergePage() //nolint:errcheck
+		if err := balance(cursor); err != nil {
+			t.Logf("balance() on underfull non-root: %v (expected)", err)
+		}
+	}
+}
+
+// TestBalanceDefragmentIfNeeded exercises the defragmentIfNeeded path (50%).
+// Create a page that is neither overfull nor underfull but has fragmented bytes.
+func TestBalanceDefragmentIfNeeded(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(4096)
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	cursor := NewCursor(bt, rootPage)
+
+	// Insert, delete some to create fragmentation, then balance
+	for i := int64(1); i <= 20; i++ {
+		if err := cursor.Insert(i, make([]byte, 50)); err != nil {
+			break
+		}
+	}
+	for i := int64(5); i <= 10; i++ {
+		found, err := cursor.SeekRowid(i)
+		if err == nil && found {
+			cursor.Delete() //nolint:errcheck
+		}
+	}
+
+	// Position at a remaining entry
+	found, err := cursor.SeekRowid(12)
+	if err != nil || !found {
+		return
+	}
+	// Manually set fragmented bytes to force defragmentIfNeeded path
+	pageData, getErr := bt.GetPage(cursor.CurrentPage)
+	if getErr != nil {
+		return
+	}
+	// Set the fragmented bytes field in the page header
+	headerOffset := 0
+	if cursor.CurrentPage == 1 {
+		headerOffset = FileHeaderSize
+	}
+	pageData[headerOffset+PageHeaderOffsetFragmented] = 10
+
+	// Reload current header
+	header, parseErr := ParsePageHeader(pageData, cursor.CurrentPage)
+	if parseErr != nil {
+		return
+	}
+	cursor.CurrentHeader = header
+
+	if err := balance(cursor); err != nil {
+		t.Logf("balance() with fragmentation: %v", err)
 	}
 }

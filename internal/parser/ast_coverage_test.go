@@ -437,6 +437,64 @@ func TestInExprStringWithNilExpr(t *testing.T) {
 	}
 }
 
+// TestMissingStatementStrings covers String() for statement types not reached by parser tests.
+func TestMissingStatementStrings(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		stmt Statement
+		want string
+	}{
+		{"CreateVirtualTableStmt", &CreateVirtualTableStmt{Name: "vt", Module: "fts5"}, "CREATE VIRTUAL TABLE"},
+		{"SavepointStmt", &SavepointStmt{Name: "sp1"}, "SAVEPOINT"},
+		{"ReleaseStmt", &ReleaseStmt{Name: "sp1"}, "RELEASE"},
+		{"ReindexStmt", &ReindexStmt{Name: "idx"}, "REINDEX"},
+		{"AnalyzeStmt", &AnalyzeStmt{Name: "tbl"}, "ANALYZE"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.stmt.String()
+			if got != tt.want {
+				t.Errorf("String() = %q, want %q", got, tt.want)
+			}
+			tt.stmt.node()
+			tt.stmt.statement()
+		})
+	}
+}
+
+// TestRaiseExprString covers all branches of RaiseExpr.String().
+func TestRaiseExprString(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		expr *RaiseExpr
+		want string
+	}{
+		{"Ignore", &RaiseExpr{Type: RaiseIgnore}, "RAISE(IGNORE)"},
+		{"Rollback", &RaiseExpr{Type: RaiseRollback, Message: "oops"}, "RAISE(ROLLBACK, oops)"},
+		{"Abort", &RaiseExpr{Type: RaiseAbort, Message: "err"}, "RAISE(ABORT, err)"},
+		{"Fail", &RaiseExpr{Type: RaiseFail, Message: "fail"}, "RAISE(FAIL, fail)"},
+		{"Unknown", &RaiseExpr{Type: RaiseType(99)}, "RAISE(UNKNOWN)"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.expr.String()
+			if got != tt.want {
+				t.Errorf("String() = %q, want %q", got, tt.want)
+			}
+			tt.expr.node()
+			tt.expr.expression()
+		})
+	}
+}
+
 // Test all AlterTableAction implementations
 func TestAlterTableActionNode(t *testing.T) {
 	t.Parallel()
