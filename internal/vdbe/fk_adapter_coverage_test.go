@@ -650,3 +650,102 @@ func TestGetParentColumnTypeAndCollation_FirstColumn(t *testing.T) {
 		t.Errorf("expected BINARY, got %q", coll)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// applyIntegerAffinity
+// ---------------------------------------------------------------------------
+
+func TestApplyIntegerAffinity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input interface{}
+		want  interface{}
+	}{
+		{"Int64PassThrough", int64(42), int64(42)},
+		{"IntConverted", int(7), int64(7)},
+		{"Float64Truncated", float64(3.9), int64(3)},
+		{"StringParsedAsInt", "123", int64(123)},
+		{"StringParsedAsFloat", "4.7", int64(4)},
+		{"StringUnparseable", "hello", "hello"},
+		{"NilPassThrough", nil, nil},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := applyIntegerAffinity(tc.input)
+			if got != tc.want {
+				t.Errorf("applyIntegerAffinity(%v) = %v (%T), want %v (%T)",
+					tc.input, got, got, tc.want, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// applyRealAffinity
+// ---------------------------------------------------------------------------
+
+func TestApplyRealAffinity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input interface{}
+		want  interface{}
+	}{
+		{"Float64PassThrough", float64(1.5), float64(1.5)},
+		{"Int64Converted", int64(10), float64(10)},
+		{"IntConverted", int(3), float64(3)},
+		{"StringParsed", "2.5", float64(2.5)},
+		{"StringUnparseable", "abc", "abc"},
+		{"NilPassThrough", nil, nil},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := applyRealAffinity(tc.input)
+			if got != tc.want {
+				t.Errorf("applyRealAffinity(%v) = %v (%T), want %v (%T)",
+					tc.input, got, got, tc.want, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// applyTextAffinity
+// ---------------------------------------------------------------------------
+
+func TestApplyTextAffinity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input interface{}
+		want  interface{}
+	}{
+		{"StringPassThrough", "hello", "hello"},
+		{"IntConverted", int(42), "42"},
+		{"Int64Converted", int64(99), "99"},
+		{"Float64Converted", float64(3.14), "3.14"},
+		{"NilPassThrough", nil, nil},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := applyTextAffinity(tc.input)
+			if got != tc.want {
+				t.Errorf("applyTextAffinity(%v) = %v (%T), want %v (%T)",
+					tc.input, got, got, tc.want, tc.want)
+			}
+		})
+	}
+}
