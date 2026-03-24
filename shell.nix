@@ -7,6 +7,7 @@ pkgs.mkShell {
     gopls
     gotools
     go-tools
+    gocyclo
     delve
     codex
 
