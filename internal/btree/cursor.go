@@ -695,6 +695,14 @@ func (c *BtCursor) advanceToChildPage(pageData []byte, header *PageHeader, idx i
 		return 0, err
 	}
 
+	// Record which slot we are taking at this interior level so that
+	// prevViaParent can navigate backwards correctly.
+	slotIdx := idx
+	if idx >= int(header.NumCells) {
+		slotIdx = int(header.NumCells)
+	}
+	c.IndexStack[c.Depth] = slotIdx
+
 	c.Depth++
 	if c.Depth >= MaxBtreeDepth {
 		c.State = CursorInvalid
