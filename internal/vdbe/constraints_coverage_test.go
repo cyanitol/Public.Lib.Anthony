@@ -304,3 +304,236 @@ func TestConstraintsCheckMultipleColumns(t *testing.T) {
 		t.Error("expected CHECK failure on y=100")
 	}
 }
+
+// TestConstraintsNotNullViolation exercises checkNotNullConstraints /
+// validateNotNullColumns / checkColumnNotNull when inserting NULL into a
+// NOT NULL column.
+func TestConstraintsNotNullViolation(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(a INTEGER NOT NULL)")
+
+	// Valid insert passes.
+	constraintsExec(t, db, "INSERT INTO t VALUES(1)")
+
+	// NULL must fail the NOT NULL constraint.
+	if err := constraintsExecErr(t, db, "INSERT INTO t VALUES(NULL)"); err == nil {
+		t.Error("expected NOT NULL constraint error")
+	}
+}
+
+// TestConstraintsNotNullTextColumn exercises NOT NULL on a TEXT column.
+func TestConstraintsNotNullTextColumn(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(name TEXT NOT NULL)")
+	constraintsExec(t, db, "INSERT INTO t VALUES('hello')")
+
+	if err := constraintsExecErr(t, db, "INSERT INTO t VALUES(NULL)"); err == nil {
+		t.Error("expected NOT NULL constraint error on TEXT column")
+	}
+}
+
+// TestConstraintsNotNullMultipleColumns exercises validateNotNullColumns loop
+// when several NOT NULL columns exist.
+func TestConstraintsNotNullMultipleColumns(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(a INTEGER NOT NULL, b TEXT NOT NULL)")
+	constraintsExec(t, db, "INSERT INTO t VALUES(1, 'x')")
+
+	// First column NULL.
+	if err := constraintsExecErr(t, db, "INSERT INTO t VALUES(NULL, 'x')"); err == nil {
+		t.Error("expected NOT NULL error on first column")
+	}
+	// Second column NULL.
+	if err := constraintsExecErr(t, db, "INSERT INTO t VALUES(1, NULL)"); err == nil {
+		t.Error("expected NOT NULL error on second column")
+	}
+}
+
+// TestConstraintsNotNullNullableColumn verifies that nullable columns allow NULL.
+func TestConstraintsNotNullNullableColumn(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(a INTEGER, b TEXT NOT NULL)")
+	// a is nullable, so NULL is allowed there.
+	constraintsExec(t, db, "INSERT INTO t VALUES(NULL, 'required')")
+}
+
+// TestConstraintsCheckRealColumn exercises memToNumber for REAL values and
+// the float literal path in literalToNumber / toFloat.
+func TestConstraintsCheckRealColumn(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(a REAL CHECK(a >= 1.5))")
+	constraintsExec(t, db, "INSERT INTO t VALUES(2.0)")
+
+	if err := constraintsExecErr(t, db, "INSERT INTO t VALUES(1.0)"); err == nil {
+		t.Error("expected CHECK constraint error for a=1.0, CHECK(a>=1.5)")
+	}
+}
+
+// TestConstraintsCheckIntegerEqualFloat exercises compareCheckValues across
+// int and float operands (toFloat conversion).
+func TestConstraintsCheckIntegerEqualFloat(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(a REAL CHECK(a > 0.0))")
+	constraintsExec(t, db, "INSERT INTO t VALUES(1.5)")
+
+	if err := constraintsExecErr(t, db, "INSERT INTO t VALUES(-0.1)"); err == nil {
+		t.Error("expected CHECK constraint error for a=-0.1")
+	}
+}
+
+// TestConstraintsUniqueMultiColThreeRows exercises checkMultiColRow with
+// multiple existing rows to ensure the full scan loop is exercised.
+func TestConstraintsUniqueMultiColThreeRows(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(a INTEGER, b INTEGER)")
+	constraintsExec(t, db, "CREATE UNIQUE INDEX idx_t_ab ON t(a,b)")
+	constraintsExec(t, db, "INSERT INTO t VALUES(1,1)")
+	constraintsExec(t, db, "INSERT INTO t VALUES(1,2)")
+	constraintsExec(t, db, "INSERT INTO t VALUES(2,1)")
+
+	// Duplicate of existing row (2,1) must fail.
+	if err := constraintsExecErr(t, db, "INSERT INTO t VALUES(2,1)"); err == nil {
+		t.Error("expected UNIQUE constraint error for (2,1)")
+	}
+}
+
+// TestConstraintsPrimaryKeyUnique exercises checkCompositePKUnique / GetTablePrimaryKey
+// via a composite primary key defined inline.
+func TestConstraintsPrimaryKeyUnique(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(a INTEGER, b TEXT, PRIMARY KEY(a, b))")
+	constraintsExec(t, db, "INSERT INTO t VALUES(1, 'x')")
+	constraintsExec(t, db, "INSERT INTO t VALUES(1, 'y')")
+
+	// Duplicate primary key must fail.
+	if err := constraintsExecErr(t, db, "INSERT INTO t VALUES(1, 'x')"); err == nil {
+		t.Error("expected PRIMARY KEY constraint error for duplicate (1,'x')")
+	}
+}
+
+// TestConstraintsNotNullWithCheck exercises both NOT NULL and CHECK constraints
+// on the same column.
+func TestConstraintsNotNullWithCheck(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(score INTEGER NOT NULL CHECK(score > 0))")
+	constraintsExec(t, db, "INSERT INTO t VALUES(10)")
+
+	// NULL fails NOT NULL.
+	if err := constraintsExecErr(t, db, "INSERT INTO t VALUES(NULL)"); err == nil {
+		t.Error("expected NOT NULL error")
+	}
+	// Zero fails CHECK.
+	if err := constraintsExecErr(t, db, "INSERT INTO t VALUES(0)"); err == nil {
+		t.Error("expected CHECK error for score=0")
+	}
+}
+
+// TestConstraintsUniqueIndexNonUnique verifies non-unique index does not
+// trigger a uniqueness error (exercises checkIndexUniqueConstraints skip branch).
+func TestConstraintsUniqueIndexNonUnique(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(a INTEGER, b TEXT)")
+	constraintsExec(t, db, "CREATE INDEX idx_t_a ON t(a)")
+	constraintsExec(t, db, "INSERT INTO t VALUES(1,'x')")
+	// Same value should be allowed on a non-unique index.
+	constraintsExec(t, db, "INSERT INTO t VALUES(1,'y')")
+}
+
+// TestConstraintsCheckNullInBinaryExpr exercises the evalBinaryCheck NULL-in-
+// comparison path: when one operand resolves to nil the check must pass.
+// We trigger this by inserting NULL into a CHECK(a > 0) column since NULL
+// is handled early in evaluateCheckConstraint — exercising the outer NULL guard.
+func TestConstraintsCheckNullInBinaryExprPasses(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(a INTEGER CHECK(a > 0))")
+	// NULL passes all CHECK constraints per SQL standard.
+	constraintsExec(t, db, "INSERT INTO t VALUES(NULL)")
+}
+
+// TestConstraintsAutoincrementSequence exercises getSequenceManager indirectly
+// via an AUTOINCREMENT table, inserting multiple rows.
+func TestConstraintsAutoincrementSequence(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(id INTEGER PRIMARY KEY AUTOINCREMENT, val TEXT NOT NULL)")
+	constraintsExec(t, db, "INSERT INTO t(val) VALUES('first')")
+	constraintsExec(t, db, "INSERT INTO t(val) VALUES('second')")
+	constraintsExec(t, db, "INSERT INTO t(val) VALUES('third')")
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM t").Scan(&count); err != nil {
+		t.Fatalf("SELECT COUNT(*): %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected 3 rows, got %d", count)
+	}
+}
+
+// TestConstraintsCheckGTWithNegatedFloat exercises the negative float literal
+// path through resolveUnaryOperand → literalToNumber(float).
+func TestConstraintsCheckGTWithNegatedFloat(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(a REAL CHECK(a > -1.5))")
+	constraintsExec(t, db, "INSERT INTO t VALUES(-1.0)")
+
+	if err := constraintsExecErr(t, db, "INSERT INTO t VALUES(-2.0)"); err == nil {
+		t.Error("expected CHECK error for a=-2.0, CHECK(a > -1.5)")
+	}
+}
+
+// TestConstraintsUniqueIndexNullAllCols exercises the allNull branch in
+// checkMultiColUnique: when ALL indexed columns are NULL the row is always
+// distinct and the allNull early-return must be taken.
+func TestConstraintsUniqueIndexNullAllCols(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(a INTEGER, b TEXT)")
+	constraintsExec(t, db, "CREATE UNIQUE INDEX idx_t_ab ON t(a,b)")
+	// Multiple rows where BOTH a and b are NULL must all be allowed.
+	constraintsExec(t, db, "INSERT INTO t VALUES(NULL,NULL)")
+	constraintsExec(t, db, "INSERT INTO t VALUES(NULL,NULL)")
+	constraintsExec(t, db, "INSERT INTO t VALUES(NULL,NULL)")
+}
+
+// TestConstraintsUniqueColCollation exercises GetColumnCollation during a
+// multi-column unique scan by inserting case-distinct text values.
+func TestConstraintsUniqueColCollation(t *testing.T) {
+	db := constraintsOpenDB(t)
+	defer db.Close()
+
+	constraintsExec(t, db, "CREATE TABLE t(a INTEGER, b TEXT)")
+	constraintsExec(t, db, "CREATE UNIQUE INDEX idx_t_ab ON t(a,b)")
+	constraintsExec(t, db, "INSERT INTO t VALUES(1,'ABC')")
+	constraintsExec(t, db, "INSERT INTO t VALUES(1,'abc')")
+
+	// Exact duplicate must fail.
+	if err := constraintsExecErr(t, db, "INSERT INTO t VALUES(1,'ABC')"); err == nil {
+		t.Error("expected UNIQUE constraint error for (1,'ABC') duplicate")
+	}
+}
