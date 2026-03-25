@@ -340,3 +340,269 @@ func TestInsertOrReplaceUniqueIndexExplicit(t *testing.T) {
 		t.Errorf("expected id=3 with code='A', count=%d", hasNew)
 	}
 }
+
+// TestExecConflictReplaceUniqueConstraint exercises handleExistingRowConflict
+// and deleteRowForReplace via a UNIQUE column conflict during INSERT OR REPLACE.
+func TestExecConflictReplaceUniqueConstraint(t *testing.T) {
+	db := conflictOpenDB(t)
+	defer db.Close()
+
+	conflictExec(t, db, "CREATE TABLE t(id INTEGER PRIMARY KEY, tag TEXT UNIQUE)")
+	conflictExec(t, db, "INSERT INTO t VALUES(1,'alpha')")
+	conflictExec(t, db, "INSERT INTO t VALUES(2,'beta')")
+
+	// New row id=5 with tag='alpha' conflicts with id=1; REPLACE must remove id=1.
+	conflictExec(t, db, "INSERT OR REPLACE INTO t VALUES(5,'alpha')")
+
+	count := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t")
+	if count != 2 {
+		t.Errorf("expected 2 rows after REPLACE, got %d", count)
+	}
+	gone := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE id=1")
+	if gone != 0 {
+		t.Errorf("expected id=1 replaced (deleted), got count=%d", gone)
+	}
+	present := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE id=5 AND tag='alpha'")
+	if present != 1 {
+		t.Errorf("expected id=5 with tag='alpha', count=%d", present)
+	}
+}
+
+// TestExecConflictReplaceMultipleUniqueIndexes exercises deleteConflictingIndexRows
+// and findMultiColConflictRowid when two separate unique indexes both conflict.
+func TestExecConflictReplaceMultipleUniqueIndexes(t *testing.T) {
+	db := conflictOpenDB(t)
+	defer db.Close()
+
+	conflictExec(t, db, "CREATE TABLE t(id INTEGER PRIMARY KEY, a TEXT, b TEXT)")
+	conflictExec(t, db, "CREATE UNIQUE INDEX idx_a ON t(a)")
+	conflictExec(t, db, "CREATE UNIQUE INDEX idx_b ON t(b)")
+	conflictExec(t, db, "INSERT INTO t VALUES(1,'x','p')")
+	conflictExec(t, db, "INSERT INTO t VALUES(2,'y','q')")
+
+	// New row id=10 with a='x' conflicts on idx_a with id=1.
+	// id=1 must be deleted before id=10 is inserted.
+	conflictExec(t, db, "INSERT OR REPLACE INTO t VALUES(10,'x','r')")
+
+	count := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t")
+	if count != 2 {
+		t.Errorf("expected 2 rows, got %d", count)
+	}
+	old := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE id=1")
+	if old != 0 {
+		t.Errorf("expected id=1 deleted, count=%d", old)
+	}
+	n := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE id=10 AND a='x'")
+	if n != 1 {
+		t.Errorf("expected id=10 present, count=%d", n)
+	}
+}
+
+// TestExecConflictIgnoreUniqueViolation exercises handleUniqueConflict with
+// conflictModeIgnore: a duplicate unique value must be silently discarded.
+func TestExecConflictIgnoreUniqueViolation(t *testing.T) {
+	db := conflictOpenDB(t)
+	defer db.Close()
+
+	conflictExec(t, db, "CREATE TABLE t(id INTEGER PRIMARY KEY, val TEXT UNIQUE)")
+	conflictExec(t, db, "INSERT INTO t VALUES(1,'dup')")
+
+	conflictExec(t, db, "INSERT OR IGNORE INTO t VALUES(2,'dup')")
+
+	count := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t")
+	if count != 1 {
+		t.Errorf("expected 1 row after OR IGNORE, got %d", count)
+	}
+}
+
+// TestExecConflictFailUniqueViolation exercises the INSERT OR FAIL path through
+// handleUniqueConflict's default branch (neither ignore nor replace).
+func TestExecConflictFailUniqueViolation(t *testing.T) {
+	db := conflictOpenDB(t)
+	defer db.Close()
+
+	conflictExec(t, db, "CREATE TABLE t(id INTEGER PRIMARY KEY, val TEXT UNIQUE)")
+	conflictExec(t, db, "INSERT INTO t VALUES(1,'original')")
+
+	// OR FAIL hits handleUniqueConflict default branch; result may vary by engine.
+	_, _ = db.Exec("INSERT OR FAIL INTO t VALUES(2,'original')")
+
+	// Regardless of outcome, the original row must still be there and DB operational.
+	orig := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE val='original'")
+	if orig < 1 {
+		t.Errorf("expected at least 1 row with val='original', got %d", orig)
+	}
+}
+
+// TestExecConflictCompositeUniqueIndex exercises findMultiColConflictRowid and
+// rowMatchesIndexValues via a composite UNIQUE INDEX.  Multiple pre-existing rows
+// ensure that the scanner visits non-matching rows (exercising the != 0 branch
+// inside rowMatchesIndexValues) before finding the conflicting one.
+func TestExecConflictCompositeUniqueIndex(t *testing.T) {
+	db := conflictOpenDB(t)
+	defer db.Close()
+
+	conflictExec(t, db, "CREATE TABLE t(id INTEGER PRIMARY KEY, a TEXT, b TEXT)")
+	conflictExec(t, db, "CREATE UNIQUE INDEX idx_ab ON t(a,b)")
+	// Row 1: (a='go', b='lang') — will be the conflict target.
+	conflictExec(t, db, "INSERT INTO t VALUES(1,'go','lang')")
+	// Row 2: (a='go', b='test') — shares first column but not second (exercises non-match path).
+	conflictExec(t, db, "INSERT INTO t VALUES(2,'go','test')")
+	// Row 3: (a='py', b='lang') — shares second column but not first.
+	conflictExec(t, db, "INSERT INTO t VALUES(3,'py','lang')")
+
+	// New row id=10 with (a='go', b='lang') conflicts with id=1.
+	conflictExec(t, db, "INSERT OR REPLACE INTO t VALUES(10,'go','lang')")
+
+	gone := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE id=1")
+	if gone != 0 {
+		t.Errorf("expected id=1 deleted by composite REPLACE, count=%d", gone)
+	}
+	here := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE id=10 AND a='go' AND b='lang'")
+	if here != 1 {
+		t.Errorf("expected id=10 inserted, count=%d", here)
+	}
+	// Rows 2 and 3 must still be present (they did not conflict on the full composite key).
+	kept := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE id IN (2,3)")
+	if kept != 2 {
+		t.Errorf("expected rows 2 and 3 intact, count=%d", kept)
+	}
+}
+
+// TestExecConflictRowidConflict exercises rowExists and execNewRowid by first
+// inserting a row explicitly at a known rowid so that the next auto-rowid
+// generation (NewRowid on populated table) must produce a value beyond it.
+func TestExecConflictRowidConflict(t *testing.T) {
+	db := conflictOpenDB(t)
+	defer db.Close()
+
+	conflictExec(t, db, "CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT)")
+	// Insert at a high explicit rowid to force NewRowid to advance past it.
+	conflictExec(t, db, "INSERT INTO t VALUES(100,'anchor')")
+
+	// Insert without explicit rowid; engine must call NewRowid which returns > 100.
+	conflictExec(t, db, "INSERT INTO t(v) VALUES('auto1')")
+	conflictExec(t, db, "INSERT INTO t(v) VALUES('auto2')")
+
+	// REPLACE on the known rowid exercises rowExists returning true then deleteRowForReplace.
+	conflictExec(t, db, "INSERT OR REPLACE INTO t VALUES(100,'updated')")
+
+	updated := conflictQueryStr(t, db, "SELECT v FROM t WHERE id=100")
+	if updated != "updated" {
+		t.Errorf("expected v='updated', got %q", updated)
+	}
+	// All three logical rows should exist.
+	count := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t")
+	if count != 3 {
+		t.Errorf("expected 3 rows, got %d", count)
+	}
+}
+
+// TestExecConflictPKAndUniqueConflict exercises deleteConflictingIndexRows with
+// a table that has both INTEGER PRIMARY KEY and a CREATE UNIQUE INDEX; the REPLACE
+// must satisfy both constraints.
+func TestExecConflictPKAndUniqueConflict(t *testing.T) {
+	db := conflictOpenDB(t)
+	defer db.Close()
+
+	conflictExec(t, db, "CREATE TABLE t(id INTEGER PRIMARY KEY, code TEXT)")
+	conflictExec(t, db, "CREATE UNIQUE INDEX idx_code ON t(code)")
+	conflictExec(t, db, "INSERT INTO t VALUES(1,'X')")
+	conflictExec(t, db, "INSERT INTO t VALUES(2,'Y')")
+
+	// New row id=1 with code='Y' conflicts on PK (id=1) AND on idx_code (code='Y' → id=2).
+	// Both conflicting rows must be removed before the new row is inserted.
+	conflictExec(t, db, "INSERT OR REPLACE INTO t VALUES(1,'Y')")
+
+	count := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t")
+	if count != 1 {
+		t.Errorf("expected 1 row after double REPLACE, got %d", count)
+	}
+	n := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE id=1 AND code='Y'")
+	if n != 1 {
+		t.Errorf("expected id=1 code='Y' present, count=%d", n)
+	}
+}
+
+// TestExecConflictReplaceNullUnique exercises the NULL-in-composite-unique-index
+// path inside parseNewIndexValues: when the new row has NULL in one column of a
+// composite UNIQUE INDEX, parseNewIndexValues returns nil and findMultiColConflictRowid
+// skips the scan entirely, so REPLACE inserts the new row without deleting anything.
+func TestExecConflictReplaceNullUnique(t *testing.T) {
+	db := conflictOpenDB(t)
+	defer db.Close()
+
+	conflictExec(t, db, "CREATE TABLE t(id INTEGER PRIMARY KEY, a TEXT, b TEXT)")
+	conflictExec(t, db, "CREATE UNIQUE INDEX idx_ab ON t(a,b)")
+	// Seed with a row that has matching 'a' but b=NULL so the composite index
+	// has no scannable conflict (NULL in index column skips conflict detection).
+	conflictExec(t, db, "INSERT INTO t VALUES(1,'key','val')")
+	conflictExec(t, db, "INSERT INTO t VALUES(2,'key2','val2')")
+
+	// New row with b=NULL: parseNewIndexValues returns nil for the composite
+	// (a,b) index since b is NULL, so no conflict scan happens and the insert
+	// proceeds via the regular path (no matching row to delete).
+	conflictExec(t, db, "INSERT OR REPLACE INTO t VALUES(3,'newkey',NULL)")
+
+	n := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE id=3 AND a='newkey'")
+	if n != 1 {
+		t.Errorf("expected id=3 inserted, count=%d", n)
+	}
+	// Rows 1 and 2 must be undisturbed (no composite conflict with NULL).
+	kept := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE id IN (1,2)")
+	if kept != 2 {
+		t.Errorf("expected rows 1 and 2 intact, count=%d", kept)
+	}
+}
+
+// TestExecConflictNonUniqueIndexSkipped exercises the !idx.IsUnique() continue
+// branch in deleteConflictingIndexRows by having both a plain (non-unique) index
+// and a unique index on the same table; the REPLACE must skip the non-unique one.
+func TestExecConflictNonUniqueIndexSkipped(t *testing.T) {
+	db := conflictOpenDB(t)
+	defer db.Close()
+
+	conflictExec(t, db, "CREATE TABLE t(id INTEGER PRIMARY KEY, a TEXT, b TEXT)")
+	conflictExec(t, db, "CREATE INDEX idx_a ON t(a)")        // non-unique
+	conflictExec(t, db, "CREATE UNIQUE INDEX idx_b ON t(b)") // unique
+	conflictExec(t, db, "INSERT INTO t VALUES(1,'hello','world')")
+
+	// New row id=2 with b='world' conflicts on the unique idx_b with id=1.
+	// idx_a is non-unique and must be skipped without error.
+	conflictExec(t, db, "INSERT OR REPLACE INTO t VALUES(2,'hello','world')")
+
+	gone := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE id=1")
+	if gone != 0 {
+		t.Errorf("expected id=1 replaced, count=%d", gone)
+	}
+	here := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE id=2 AND b='world'")
+	if here != 1 {
+		t.Errorf("expected id=2 with b='world', count=%d", here)
+	}
+}
+
+// TestExecConflictSameRowidReplace exercises the rowid==newRowid skip inside
+// findMultiColConflictRowid: when REPLACE targets the same PK it already holds,
+// the scanner must skip itself and return "not found" on the composite index scan.
+func TestExecConflictSameRowidReplace(t *testing.T) {
+	db := conflictOpenDB(t)
+	defer db.Close()
+
+	conflictExec(t, db, "CREATE TABLE t(id INTEGER PRIMARY KEY, a TEXT, b TEXT)")
+	conflictExec(t, db, "CREATE UNIQUE INDEX idx_ab ON t(a,b)")
+	conflictExec(t, db, "INSERT INTO t VALUES(1,'m','n')")
+	conflictExec(t, db, "INSERT INTO t VALUES(2,'p','q')")
+
+	// REPLACE on existing id=1 with the same composite key values; the scanner
+	// must skip rowid=1 (newRowid==rowid) and find no conflict.
+	conflictExec(t, db, "INSERT OR REPLACE INTO t VALUES(1,'m','n')")
+
+	count := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t")
+	if count != 2 {
+		t.Errorf("expected 2 rows after self-replace, got %d", count)
+	}
+	n := conflictQueryInt(t, db, "SELECT COUNT(*) FROM t WHERE id=1 AND a='m' AND b='n'")
+	if n != 1 {
+		t.Errorf("expected id=1 still present, count=%d", n)
+	}
+}

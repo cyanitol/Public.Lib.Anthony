@@ -192,6 +192,12 @@ type Pager struct {
 	// This is used to clear btree caches when pager rolls back, ensuring
 	// WITHOUT ROWID tables and other btree users have consistent state.
 	RollbackCallback func()
+
+	// lockTestFailsRemaining is a test-only injection counter.
+	// When > 0, tryAcquireSharedLock/tryAcquireReservedLock/tryAcquireExclusiveLock
+	// will return ErrDatabaseLocked and decrement this counter, enabling tests to
+	// exercise the retry/busy-handler branches.
+	lockTestFailsRemaining int
 }
 
 // Open opens a database file and creates a new Pager.

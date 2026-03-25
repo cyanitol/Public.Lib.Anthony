@@ -378,6 +378,11 @@ func (p *Pager) tryAcquireSharedLock() error {
 		return nil
 	}
 
+	if p.lockTestFailsRemaining > 0 {
+		p.lockTestFailsRemaining--
+		return ErrDatabaseLocked
+	}
+
 	// In a real implementation, this would use file locking (flock/fcntl)
 	// For simplicity, we just update the state
 	// TODO: Implement actual file locking that can fail with EWOULDBLOCK
@@ -418,6 +423,11 @@ func (p *Pager) tryAcquireReservedLock() error {
 		return nil
 	}
 
+	if p.lockTestFailsRemaining > 0 {
+		p.lockTestFailsRemaining--
+		return ErrDatabaseLocked
+	}
+
 	// In a real implementation, this would use file locking
 	// TODO: Implement actual file locking
 	p.lockState = LockReserved
@@ -450,6 +460,11 @@ func (p *Pager) acquireExclusiveLockWithRetry() error {
 func (p *Pager) tryAcquireExclusiveLock() error {
 	if p.lockState >= LockExclusive {
 		return nil
+	}
+
+	if p.lockTestFailsRemaining > 0 {
+		p.lockTestFailsRemaining--
+		return ErrDatabaseLocked
 	}
 
 	// In a real implementation, this would use file locking
