@@ -570,9 +570,9 @@ func TestDebugDeepBuildCursorDumpFlags(t *testing.T) {
 			absent:   []string{"[WRITABLE]", "[NULL ROW]", "[EOF]", "Root="},
 		},
 		{
-			name:     "RootPage_Zero_NoRootLabel",
-			cursor:   &Cursor{RootPage: 0},
-			absent:   []string{"Root="},
+			name:   "RootPage_Zero_NoRootLabel",
+			cursor: &Cursor{RootPage: 0},
+			absent: []string{"Root="},
 		},
 		{
 			name:     "RootPage_Positive",

@@ -366,7 +366,10 @@ func TestCompileHelpersLeafRowSorterWithWhere(t *testing.T) {
 	}
 	defer rows.Close()
 
-	type row struct{ rname string; amount int64 }
+	type row struct {
+		rname  string
+		amount int64
+	}
 	var got []row
 	for rows.Next() {
 		var r row

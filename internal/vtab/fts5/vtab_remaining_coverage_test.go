@@ -210,9 +210,9 @@ func TestTruncateText_TruncationApplied(t *testing.T) {
 func TestCalculateSnippetBounds_EndExceedsText(t *testing.T) {
 	t.Parallel()
 
-	text := "short"       // len=5
-	matchPos := 4         // near end
-	maxLength := 10       // window larger than remaining text
+	text := "short" // len=5
+	matchPos := 4   // near end
+	maxLength := 10 // window larger than remaining text
 
 	start, end := calculateSnippetBounds(text, matchPos, maxLength)
 	if end > len(text) {
@@ -234,7 +234,7 @@ func TestCalculateSnippetBounds_StartNegativeAfterAdjust(t *testing.T) {
 	// text shorter than maxLength; matchPos > 0 means start = matchPos - maxLength/2 < 0.
 	// After clamping start=0, end = 0 + maxLength > len(text).
 	// Adjustment: end = len(text); start = end - maxLength < 0 → clamped to 0.
-	text := "hi"         // len=2
+	text := "hi" // len=2
 	start, end := calculateSnippetBounds(text, 0, 20)
 	if start != 0 {
 		t.Errorf("expected start=0, got %d", start)
@@ -418,8 +418,8 @@ func TestDecodePostingList_TruncatedAfterDocID(t *testing.T) {
 	mgr := NewShadowTableManager("dp_tbl3", nil)
 
 	// count=1, docID present (8 bytes), but freq truncated.
-	buf := make([]byte, 12) // 4 (count) + 8 (docID) = 12, no freq
-	binary.LittleEndian.PutUint32(buf, 1)   // count = 1
+	buf := make([]byte, 12)                   // 4 (count) + 8 (docID) = 12, no freq
+	binary.LittleEndian.PutUint32(buf, 1)     // count = 1
 	binary.LittleEndian.PutUint64(buf[4:], 7) // docID = 7
 	result := mgr.decodePostingList(buf)
 
@@ -435,9 +435,9 @@ func TestDecodePostingList_TruncatedAfterFreq(t *testing.T) {
 	mgr := NewShadowTableManager("dp_tbl4", nil)
 
 	// count=1, docID(8) + freq(4) present, but posCount truncated.
-	buf := make([]byte, 16) // 4+8+4=16, no posCount
-	binary.LittleEndian.PutUint32(buf, 1)   // count=1
-	binary.LittleEndian.PutUint64(buf[4:], 5) // docID=5
+	buf := make([]byte, 16)                    // 4+8+4=16, no posCount
+	binary.LittleEndian.PutUint32(buf, 1)      // count=1
+	binary.LittleEndian.PutUint64(buf[4:], 5)  // docID=5
 	binary.LittleEndian.PutUint32(buf[12:], 3) // freq=3
 	result := mgr.decodePostingList(buf)
 	if len(result) != 0 {
@@ -452,9 +452,9 @@ func TestDecodePostingList_TruncatedPosition(t *testing.T) {
 	mgr := NewShadowTableManager("dp_tbl5", nil)
 
 	// count=1, docID(8)+freq(4)+posCount=2(4), but only 0 position bytes follow.
-	buf := make([]byte, 20) // 4+8+4+4=20, no position data
-	binary.LittleEndian.PutUint32(buf, 1)    // count=1
-	binary.LittleEndian.PutUint64(buf[4:], 9) // docID=9
+	buf := make([]byte, 20)                    // 4+8+4+4=20, no position data
+	binary.LittleEndian.PutUint32(buf, 1)      // count=1
+	binary.LittleEndian.PutUint64(buf[4:], 9)  // docID=9
 	binary.LittleEndian.PutUint32(buf[12:], 1) // freq=1
 	binary.LittleEndian.PutUint32(buf[16:], 2) // posCount=2 (but no data follows)
 	result := mgr.decodePostingList(buf)

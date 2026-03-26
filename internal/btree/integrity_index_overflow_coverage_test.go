@@ -26,8 +26,8 @@ func TestValidateFreeBlock_SmallSize(t *testing.T) {
 	// FirstFreeblock at offset 200
 	binary.BigEndian.PutUint16(data[1:], 200)
 	// At offset 200: nextOffset=0, blockSize=2 (invalid, < 4)
-	binary.BigEndian.PutUint16(data[200:], 0)   // next = 0
-	binary.BigEndian.PutUint16(data[202:], 2)   // size = 2
+	binary.BigEndian.PutUint16(data[200:], 0) // next = 0
+	binary.BigEndian.PutUint16(data[202:], 2) // size = 2
 	bt.Pages[3] = data
 
 	result := ValidateFreeBlockList(bt, 3)
@@ -1305,7 +1305,7 @@ func TestPositionAtLastCell_ParseCellError(t *testing.T) {
 	data := make([]byte, 4096)
 	data[0] = PageTypeLeafIndex
 	binary.BigEndian.PutUint16(data[3:], 1) // NumCells = 1
-	cellOff := uint16(4094)                  // only 2 bytes remain: truncated varint
+	cellOff := uint16(4094)                 // only 2 bytes remain: truncated varint
 	binary.BigEndian.PutUint16(data[PageHeaderSizeLeaf:], cellOff)
 	binary.BigEndian.PutUint16(data[5:], cellOff) // CellContentStart
 	data[cellOff] = 0x82                          // multi-byte varint, truncated

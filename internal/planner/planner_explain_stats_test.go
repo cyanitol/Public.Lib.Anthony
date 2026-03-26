@@ -27,7 +27,7 @@ func TestGenerateExplain_UnsupportedType(t *testing.T) {
 // TestGenerateExplain_InsertStmt verifies explain for INSERT statement.
 func TestGenerateExplain_InsertStmt(t *testing.T) {
 	stmt := &parser.InsertStmt{
-		Table: "users",
+		Table:   "users",
 		Columns: []string{"id", "name"},
 	}
 	plan, err := GenerateExplain(stmt)

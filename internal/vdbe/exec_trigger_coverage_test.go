@@ -364,7 +364,7 @@ func TestTriggerAllEvents(t *testing.T) {
 		UPDATE log SET cnt = cnt + 4;
 	END`)
 
-	triggerExec(t, db, "INSERT INTO src VALUES(1, 'a')")   // +1
+	triggerExec(t, db, "INSERT INTO src VALUES(1, 'a')")    // +1
 	triggerExec(t, db, "UPDATE src SET val='b' WHERE id=1") // +2
 	triggerExec(t, db, "DELETE FROM src WHERE id=1")        // +4
 

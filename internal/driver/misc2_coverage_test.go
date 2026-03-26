@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"testing"
 
-	driver "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
+	driver "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 // ---------------------------------------------------------------------------

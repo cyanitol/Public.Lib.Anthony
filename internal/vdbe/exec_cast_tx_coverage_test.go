@@ -54,11 +54,11 @@ func TestExecCastExplicit(t *testing.T) {
 			setMemValue(v.Mem[1], tt.input)
 
 			instr := &Instruction{
-				Opcode:  OpCast,
-				P1:      1,
-				P2:      2,
-				P4:      P4Union{Z: tt.typeName},
-				P4Type:  P4Static,
+				Opcode: OpCast,
+				P1:     1,
+				P2:     2,
+				P4:     P4Union{Z: tt.typeName},
+				P4Type: P4Static,
 			}
 
 			if err := v.execCast(instr); err != nil {
@@ -241,11 +241,11 @@ type mockBtreeCacheCleared struct {
 func (b *mockBtreeCacheCleared) ClearCache() { b.cleared++ }
 
 // BtreeAccess stubs — only ClearCache is exercised.
-func (b *mockBtreeCacheCleared) CreateTable() (uint32, error)       { return 0, nil }
-func (b *mockBtreeCacheCleared) AllocatePage() (uint32, error)      { return 0, nil }
-func (b *mockBtreeCacheCleared) GetPage(uint32) ([]byte, error)     { return nil, nil }
-func (b *mockBtreeCacheCleared) SetPage(uint32, []byte) error       { return nil }
-func (b *mockBtreeCacheCleared) NewRowid(uint32) (int64, error)     { return 0, nil }
+func (b *mockBtreeCacheCleared) CreateTable() (uint32, error)   { return 0, nil }
+func (b *mockBtreeCacheCleared) AllocatePage() (uint32, error)  { return 0, nil }
+func (b *mockBtreeCacheCleared) GetPage(uint32) ([]byte, error) { return nil, nil }
+func (b *mockBtreeCacheCleared) SetPage(uint32, []byte) error   { return nil }
+func (b *mockBtreeCacheCleared) NewRowid(uint32) (int64, error) { return 0, nil }
 
 // TestClearBtreeCache covers the three branches of clearBtreeCache.
 func TestClearBtreeCache(t *testing.T) {
@@ -382,7 +382,7 @@ func TestExecShiftRightNullPropagation(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
+		name        string
 		shiftIsNull bool
 		valueIsNull bool
 	}{

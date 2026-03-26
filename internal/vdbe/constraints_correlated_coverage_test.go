@@ -540,9 +540,9 @@ func TestCorrelated_ExecCorrelatedScalar(t *testing.T) {
 	})
 
 	scalarCases := []struct {
-		name    string
-		retVal  interface{}
-		check   func(t *testing.T, m *Mem)
+		name   string
+		retVal interface{}
+		check  func(t *testing.T, m *Mem)
 	}{
 		{
 			name:   "NilResult_StoresNull",

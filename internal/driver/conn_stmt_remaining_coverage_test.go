@@ -373,9 +373,9 @@ func TestConnStmtRemaining_TriggerWhenClause(t *testing.T) {
 			BEGIN
 				INSERT INTO high_price_log VALUES(NEW.id, NEW.price);
 			END`,
-		"INSERT INTO prices VALUES (1, 50)",   // below threshold — no trigger
-		"INSERT INTO prices VALUES (2, 150)",  // above threshold — fires
-		"INSERT INTO prices VALUES (3, 200)",  // above threshold — fires
+		"INSERT INTO prices VALUES (1, 50)",  // below threshold — no trigger
+		"INSERT INTO prices VALUES (2, 150)", // above threshold — fires
+		"INSERT INTO prices VALUES (3, 200)", // above threshold — fires
 	)
 
 	count := csrQueryInt64(t, db, "SELECT COUNT(*) FROM high_price_log")

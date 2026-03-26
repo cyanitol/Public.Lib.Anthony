@@ -316,9 +316,9 @@ func TestWindowHelperDeadCode_WindowRankUpdate_NoPanic(t *testing.T) {
 	vm.AllocMemory(60)
 	regs := testRankRegisters()
 	info := rankFunctionInfo{
-		hasRank:     true,
+		hasRank:      true,
 		hasDenseRank: true,
-		orderByCols: []int{1, 2},
+		orderByCols:  []int{1, 2},
 	}
 	valuesChangedReg := 45
 

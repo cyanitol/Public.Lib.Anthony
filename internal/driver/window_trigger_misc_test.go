@@ -157,9 +157,9 @@ func TestWindowTriggerMisc_EmitWindowRankTracking_EmptyOrderByCols(t *testing.T)
 	vm.AllocMemory(60)
 	regs := initWindowRankRegisters(5)
 	info := rankFunctionInfo{
-		hasRank:     false,
+		hasRank:      false,
 		hasDenseRank: false,
-		orderByCols: []int{},
+		orderByCols:  []int{},
 	}
 
 	emitWindowRankTracking(vm, regs, info, 5)

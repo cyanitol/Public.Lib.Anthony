@@ -205,10 +205,10 @@ func TestCompileDDLInternal_CompileCreateTrigger_IfNotExistsSilent(t *testing.T)
 
 	// Create the trigger the first time.
 	trigStmt := &parser.CreateTriggerStmt{
-		Name:     "trg1",
-		Table:    "t1",
-		Timing:   parser.TriggerAfter,
-		Event:    parser.TriggerInsert,
+		Name:        "trg1",
+		Table:       "t1",
+		Timing:      parser.TriggerAfter,
+		Event:       parser.TriggerInsert,
 		IfNotExists: false,
 	}
 	_, err = c.schema.CreateTrigger(trigStmt)

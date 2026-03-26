@@ -86,12 +86,12 @@ func TestPragma_TableInfo_Basic(t *testing.T) {
 	defer rows.Close()
 
 	type colInfo struct {
-		cid      int64
-		name     string
-		typ      string
-		notnull  int64
-		dfltVal  sql.NullString
-		pk       int64
+		cid     int64
+		name    string
+		typ     string
+		notnull int64
+		dfltVal sql.NullString
+		pk      int64
 	}
 
 	var cols []colInfo

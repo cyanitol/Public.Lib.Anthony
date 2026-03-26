@@ -41,11 +41,11 @@ func TestExecInternalNewRowid_InvalidBtreeType(t *testing.T) {
 // but is not *btree.Btree, triggering the type-assertion failure in execNewRowid.
 type nonBtreeStub struct{}
 
-func (n *nonBtreeStub) CreateTable() (uint32, error)            { return 0, nil }
-func (n *nonBtreeStub) AllocatePage() (uint32, error)           { return 0, nil }
-func (n *nonBtreeStub) GetPage(pageNum uint32) ([]byte, error)  { return nil, nil }
+func (n *nonBtreeStub) CreateTable() (uint32, error)              { return 0, nil }
+func (n *nonBtreeStub) AllocatePage() (uint32, error)             { return 0, nil }
+func (n *nonBtreeStub) GetPage(pageNum uint32) ([]byte, error)    { return nil, nil }
 func (n *nonBtreeStub) SetPage(pageNum uint32, data []byte) error { return nil }
-func (n *nonBtreeStub) NewRowid(root uint32) (int64, error)     { return 0, nil }
+func (n *nonBtreeStub) NewRowid(root uint32) (int64, error)       { return 0, nil }
 
 // ---------------------------------------------------------------------------
 // getRowidFromRegister — out-of-range register returns an error
@@ -166,9 +166,9 @@ func TestExecInternalExecMakeRecord_OutOfRangeDestReg(t *testing.T) {
 
 	instr := &Instruction{
 		Opcode: OpMakeRecord,
-		P1:     0,    // start register
-		P2:     2,    // two source registers
-		P3:     99,   // destination register out of range
+		P1:     0,  // start register
+		P2:     2,  // two source registers
+		P3:     99, // destination register out of range
 	}
 
 	err := v.execMakeRecord(instr)

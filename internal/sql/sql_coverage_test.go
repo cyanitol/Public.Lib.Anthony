@@ -782,4 +782,3 @@ func TestValidateInsertRowCounts_Mismatch(t *testing.T) {
 		t.Error("expected error for mismatched column/value count")
 	}
 }
-

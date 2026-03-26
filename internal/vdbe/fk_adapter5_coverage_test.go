@@ -114,8 +114,8 @@ func fk5MakeSchema(regularPage, withoutRowIDPage uint32) *fkaCovSchema {
 	}
 	return &fkaCovSchema{
 		tables: map[string]interface{}{
-			"regular":       regularTable,
-			"withoutrowid":  withoutRowIDTable,
+			"regular":      regularTable,
+			"withoutrowid": withoutRowIDTable,
 		},
 	}
 }

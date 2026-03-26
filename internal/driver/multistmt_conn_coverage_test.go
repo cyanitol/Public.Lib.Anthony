@@ -233,8 +233,8 @@ func TestStmtCache_SetSchemaVersionInvalidatesGet(t *testing.T) {
 // variants including the zero-capacity default normalisation.
 func TestStmtCache_CapacityVariants(t *testing.T) {
 	cases := []struct {
-		input    int
-		wantCap  int
+		input   int
+		wantCap int
 	}{
 		{1, 1},
 		{50, 50},

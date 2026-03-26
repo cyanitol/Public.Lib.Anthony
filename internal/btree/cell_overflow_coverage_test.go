@@ -43,7 +43,7 @@ func TestCellOverflowWithoutRowidComposite(t *testing.T) {
 	t.Run("key length exceeds cell size error", func(t *testing.T) {
 		// Craft a cell where key length varint says more bytes than exist
 		buf := make([]byte, 10)
-		n := PutVarint(buf, 5)   // payloadSize = 5
+		n := PutVarint(buf, 5)       // payloadSize = 5
 		n += PutVarint(buf[n:], 200) // keyLen = 200, but only a few bytes remain
 		_, err := ParseCell(PageTypeLeafTableNoInt, buf[:n+2], 4096)
 		if err == nil {
@@ -190,7 +190,7 @@ func TestCellOverflowExtractIndexPayloadAndOverflow(t *testing.T) {
 		info.LocalPayload = calculateLocalPayload(info.PayloadSize, minLocal, maxLocal, usableSize)
 
 		// Build a buffer that is shorter than offset+localPayload
-		offset := 5 // simulate 5 bytes before payload area
+		offset := 5                                               // simulate 5 bytes before payload area
 		shortBuf := make([]byte, offset+int(info.LocalPayload)/2) // too short
 
 		err := extractIndexPayloadAndOverflow(info, shortBuf, offset, maxLocal)

@@ -298,7 +298,7 @@ func TestResolveQualifiedColumn_TableNotFound(t *testing.T) {
 		EList: &ExprList{
 			Items: []ExprListItem{
 				{Expr: &Expr{
-					Op: TK_DOT,
+					Op:    TK_DOT,
 					Left:  &Expr{Op: TK_ID, StringValue: "missing_table"},
 					Right: &Expr{Op: TK_ID, StringValue: "col"},
 				}},

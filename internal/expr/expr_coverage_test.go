@@ -579,7 +579,7 @@ func TestGenerateInSubqueryMaterialised_Materialized(t *testing.T) {
 	})
 
 	inExpr := &parser.InExpr{
-		Expr: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "2"},
+		Expr:   &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "2"},
 		Select: &parser.SelectStmt{},
 	}
 	reg, err := gen.GenerateExpr(inExpr)

@@ -283,9 +283,9 @@ func TestCompileVtab3Coverage_ExtractVTabOrderByName_NonIdentFalse(t *testing.T)
 func TestCompileVtab3Coverage_EmitVTabBytecode_MixedTypes(t *testing.T) {
 	vm := vdbe.New()
 	rows := [][]interface{}{
-		{int(1)},            // case int
-		{[]byte("data")},    // case []byte
-		{true},              // default (bool)
+		{int(1)},         // case int
+		{[]byte("data")}, // case []byte
+		{true},           // default (bool)
 	}
 	colNames := []string{"val"}
 	_, err := emitVTabBytecode(vm, rows, colNames)

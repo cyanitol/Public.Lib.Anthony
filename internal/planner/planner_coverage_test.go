@@ -1312,13 +1312,13 @@ func TestMaterializeDependencies_WithDep(t *testing.T) {
 		CTEOrder:         []string{},
 	}
 	ctx.CTEs["dep"] = &CTEDefinition{
-		Name:        "dep",
-		IsRecursive: false,
+		Name:          "dep",
+		IsRecursive:   false,
 		EstimatedRows: NewLogEst(100),
 	}
 	ctx.CTEs["main"] = &CTEDefinition{
-		Name:        "main",
-		IsRecursive: false,
+		Name:          "main",
+		IsRecursive:   false,
 		EstimatedRows: NewLogEst(100),
 	}
 	err := ctx.materializeDependencies("main", []string{"dep"})

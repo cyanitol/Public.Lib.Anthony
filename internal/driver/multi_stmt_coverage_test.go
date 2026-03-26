@@ -15,8 +15,8 @@ import (
 	"database/sql/driver"
 	"testing"
 
-	internaldriver "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
+	internaldriver "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 // mscOpenConn opens a raw driver.Conn for multi_stmt coverage tests.

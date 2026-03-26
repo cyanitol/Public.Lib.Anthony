@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
 	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
 )
 
 // ---------------------------------------------------------------------------
@@ -271,8 +271,8 @@ func TestFunctionsRemaining2_Trunc(t *testing.T) {
 		{`SELECT trunc(3.7)`, "3"},
 		{`SELECT trunc(-3.7)`, "-3"},
 		{`SELECT trunc(3.456, 2)`, "3.45"},
-		{`SELECT trunc(NULL)`, ""},        // NULL input
-		{`SELECT trunc(1e400)`, ""},        // Inf passthrough — returns NULL or Inf
+		{`SELECT trunc(NULL)`, ""},  // NULL input
+		{`SELECT trunc(1e400)`, ""}, // Inf passthrough — returns NULL or Inf
 	}
 	for _, tc := range tests {
 		t.Run(tc.query, func(t *testing.T) {

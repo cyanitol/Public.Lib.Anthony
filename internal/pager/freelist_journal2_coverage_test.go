@@ -208,9 +208,9 @@ func TestFreelistJournal2_ProcessTrunkPageFull(t *testing.T) {
 
 	// Trunk at page 5: maxLeaves = (16-8)/4 = 2. Set leafCount = 2 (full).
 	data := make([]byte, smallPageSize)
-	binary.BigEndian.PutUint32(data[0:4], 0)          // no next trunk
-	binary.BigEndian.PutUint32(data[4:8], 2)           // leafCount = 2 (at max)
-	binary.BigEndian.PutUint32(data[8:12], uint32(10)) // leaf 0 = page 10
+	binary.BigEndian.PutUint32(data[0:4], 0)            // no next trunk
+	binary.BigEndian.PutUint32(data[4:8], 2)            // leafCount = 2 (at max)
+	binary.BigEndian.PutUint32(data[8:12], uint32(10))  // leaf 0 = page 10
 	binary.BigEndian.PutUint32(data[12:16], uint32(11)) // leaf 1 = page 11
 	mp.pages[5] = &DbPage{Pgno: 5, Data: data}
 	// Page 7 exists so createNewTrunk can initialise it.
@@ -218,7 +218,7 @@ func TestFreelistJournal2_ProcessTrunkPageFull(t *testing.T) {
 
 	fl := NewFreeList(mp)
 	fl.firstTrunk = 5
-	fl.totalFree = 3        // trunk + 2 leaves
+	fl.totalFree = 3           // trunk + 2 leaves
 	fl.pendingFree = []Pgno{7} // one pending page that needs a new trunk
 
 	maxLeaves := FreeListMaxLeafPages(smallPageSize)

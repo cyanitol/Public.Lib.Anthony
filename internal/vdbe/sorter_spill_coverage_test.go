@@ -123,8 +123,8 @@ func TestWriteRunToFile_ClosedFile(t *testing.T) {
 		t.Fatalf("CreateTemp: %v", err)
 	}
 	name := f.Name()
-	f.Close()            // close it immediately
-	os.Remove(name)      // also remove it so any lingering fd is invalid
+	f.Close()       // close it immediately
+	os.Remove(name) // also remove it so any lingering fd is invalid
 
 	// Re-open read-only so Write fails.
 	rf, err := os.Open(os.DevNull)

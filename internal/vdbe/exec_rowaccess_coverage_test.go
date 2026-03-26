@@ -292,11 +292,11 @@ func TestParseColumnIntoMemRowAccess(t *testing.T) {
 	t.Parallel()
 
 	type tc struct {
-		name    string
-		payload []byte
-		col     int
+		name     string
+		payload  []byte
+		col      int
 		wantNull bool
-		wantErr bool
+		wantErr  bool
 	}
 	cases := []tc{
 		{"NullColumn", nullRecord(), 0, true, false},
@@ -430,9 +430,9 @@ type mockColForExtract struct {
 	ctype string
 }
 
-func (c *mockColForExtract) GetName() string           { return c.name }
-func (c *mockColForExtract) IsPrimaryKeyColumn() bool  { return c.isPK }
-func (c *mockColForExtract) GetType() string           { return c.ctype }
+func (c *mockColForExtract) GetName() string          { return c.name }
+func (c *mockColForExtract) IsPrimaryKeyColumn() bool { return c.isPK }
+func (c *mockColForExtract) GetType() string          { return c.ctype }
 
 func TestExtractValuesFromPayload(t *testing.T) {
 	t.Parallel()
@@ -683,10 +683,10 @@ func TestDeleteRowWithDuplicateValue(t *testing.T) {
 // mockSchemaIndexProvider implements schemaIndexProvider with no real indexes.
 type mockSchemaIndexProvider struct{}
 
-func (m *mockSchemaIndexProvider) GetTableIndexes(string) []uniqueIndexInfo    { return nil }
+func (m *mockSchemaIndexProvider) GetTableIndexes(string) []uniqueIndexInfo   { return nil }
 func (m *mockSchemaIndexProvider) GetTablePrimaryKey(string) ([]string, bool) { return nil, false }
-func (m *mockSchemaIndexProvider) GetRecordColumnIndex(string, string) int { return -1 }
-func (m *mockSchemaIndexProvider) GetColumnCollation(string, string) string { return "BINARY" }
+func (m *mockSchemaIndexProvider) GetRecordColumnIndex(string, string) int    { return -1 }
+func (m *mockSchemaIndexProvider) GetColumnCollation(string, string) string   { return "BINARY" }
 
 func TestFindMultiColConflictRowid(t *testing.T) {
 	t.Parallel()
