@@ -1198,14 +1198,7 @@ func (s *Stmt) exprHasDataDependentWindowFunc(e parser.Expression) bool {
 	}
 	switch ex := e.(type) {
 	case *parser.FunctionExpr:
-		if ex.Over != nil {
-			return isDataDependentWindowFunc(ex.Name)
-		}
-		for _, arg := range ex.Args {
-			if s.exprHasDataDependentWindowFunc(arg) {
-				return true
-			}
-		}
+		return s.exprHasDDWFInFunc(ex)
 	case *parser.BinaryExpr:
 		return s.exprHasDataDependentWindowFunc(ex.Left) || s.exprHasDataDependentWindowFunc(ex.Right)
 	case *parser.UnaryExpr:
@@ -1215,14 +1208,30 @@ func (s *Stmt) exprHasDataDependentWindowFunc(e parser.Expression) bool {
 	case *parser.CastExpr:
 		return s.exprHasDataDependentWindowFunc(ex.Expr)
 	case *parser.CaseExpr:
-		for _, w := range ex.WhenClauses {
-			if s.exprHasDataDependentWindowFunc(w.Condition) || s.exprHasDataDependentWindowFunc(w.Result) {
-				return true
-			}
-		}
-		return s.exprHasDataDependentWindowFunc(ex.ElseClause)
+		return s.exprHasDDWFInCase(ex)
 	}
 	return false
+}
+
+func (s *Stmt) exprHasDDWFInFunc(ex *parser.FunctionExpr) bool {
+	if ex.Over != nil {
+		return isDataDependentWindowFunc(ex.Name)
+	}
+	for _, arg := range ex.Args {
+		if s.exprHasDataDependentWindowFunc(arg) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Stmt) exprHasDDWFInCase(ex *parser.CaseExpr) bool {
+	for _, w := range ex.WhenClauses {
+		if s.exprHasDataDependentWindowFunc(w.Condition) || s.exprHasDataDependentWindowFunc(w.Result) {
+			return true
+		}
+	}
+	return s.exprHasDataDependentWindowFunc(ex.ElseClause)
 }
 
 // isDataDependentWindowFunc returns true for window functions that require

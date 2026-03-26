@@ -33,12 +33,12 @@ func TestFormatJSON_MarshalError(t *testing.T) {
 // lazily through sync.Once. We reset the global state to allow it to be
 // exercised again.
 func TestInitGlobalLogger(t *testing.T) {
-	// Save and restore global state around the test
+	// Save and restore global logger around the test.
+	// sync.Once must not be copied, so only reset it in-place.
 	origLogger := globalLogger
-	origOnce := globalLoggerOnce
 	defer func() {
 		globalLogger = origLogger
-		globalLoggerOnce = origOnce
+		globalLoggerOnce = sync.Once{}
 	}()
 
 	// Reset so initGlobalLogger runs again
