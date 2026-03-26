@@ -18,7 +18,7 @@ type wrColTable struct {
 	integerPKCol string
 }
 
-func (t *wrColTable) GetColumnNames() []string { return t.colNames }
+func (t *wrColTable) GetColumnNames() []string   { return t.colNames }
 func (t *wrColTable) GetIntegerPKColumn() string { return t.integerPKCol }
 
 // wrFullTable adds GetPrimaryKey + GetColumns + HasRowID + GetRootPage for

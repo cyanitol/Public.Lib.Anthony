@@ -196,15 +196,15 @@ func TestDSNCoverage_parseBoolParameter2_triggers(t *testing.T) {
 // the addXxxParam helpers through FormatDSN.
 func TestDSNCoverage_buildDSNParameters(t *testing.T) {
 	cfg := driver.DefaultDriverConfig()
-	cfg.Pager.ReadOnly = true       // addModeParameter
-	cfg.SharedCache = true          // addCacheParameter
-	cfg.Pager.JournalMode = "wal"   // addJournalModeParam (non-default)
-	cfg.Pager.SyncMode = "normal"   // addSyncModeParam (non-default)
-	cfg.Pager.CacheSize = 512       // addCacheSizeParam (non-default)
-	cfg.Pager.PageSize = 8192       // addPageSizeParam (non-default)
-	cfg.Pager.BusyTimeout = 0       // addBusyTimeoutParam (non-default: 0 != 5s)
-	cfg.EnableForeignKeys = false    // addDriverParameters (foreign_keys off)
-	cfg.EnableTriggers = false       // addDriverParameters (triggers off)
+	cfg.Pager.ReadOnly = true     // addModeParameter
+	cfg.SharedCache = true        // addCacheParameter
+	cfg.Pager.JournalMode = "wal" // addJournalModeParam (non-default)
+	cfg.Pager.SyncMode = "normal" // addSyncModeParam (non-default)
+	cfg.Pager.CacheSize = 512     // addCacheSizeParam (non-default)
+	cfg.Pager.PageSize = 8192     // addPageSizeParam (non-default)
+	cfg.Pager.BusyTimeout = 0     // addBusyTimeoutParam (non-default: 0 != 5s)
+	cfg.EnableForeignKeys = false // addDriverParameters (foreign_keys off)
+	cfg.EnableTriggers = false    // addDriverParameters (triggers off)
 
 	dsn := &driver.DSN{
 		Filename: "test.db",

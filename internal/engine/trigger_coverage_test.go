@@ -537,8 +537,8 @@ func addTrigger(sch *schema.Schema, trig *schema.Trigger) {
 func TestExecuteTriggersForInsert_WithTrigger(t *testing.T) {
 	sch := makeSchemaWithTable("users", "id", "name")
 	addTrigger(sch, &schema.Trigger{
-		Name:  "trg_ins",
-		Table: "users",
+		Name:   "trg_ins",
+		Table:  "users",
 		Timing: parser.TriggerBefore,
 		Event:  parser.TriggerInsert,
 		Body:   []parser.Statement{&parser.InsertStmt{Table: "audit"}},

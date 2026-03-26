@@ -15,9 +15,9 @@ func TestFormatP4Direct(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		instr  *vdbe.Instruction
-		want   string
+		name  string
+		instr *vdbe.Instruction
+		want  string
 	}{
 		{
 			name:  "P4Int32_positive",

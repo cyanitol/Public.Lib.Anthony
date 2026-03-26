@@ -36,9 +36,9 @@ func TestConnStateFuncTotalChanges(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name         string
-		connState    ConnStateProvider
-		wantTotal    int64
+		name      string
+		connState ConnStateProvider
+		wantTotal int64
 	}{
 		{
 			name:      "with ConnState returns provider value",
@@ -78,10 +78,10 @@ func TestHandleConnStateFunc(t *testing.T) {
 	state := &mockConnStateFKSorter{lastInsertRowID: 10, changes: 5, totalChanges: 99}
 
 	tests := []struct {
-		name      string
-		funcName  string
+		name        string
+		funcName    string
 		wantHandled bool
-		wantVal   int64
+		wantVal     int64
 	}{
 		{"last_insert_rowid lowercase", "last_insert_rowid", true, 10},
 		{"last_insert_rowid upper", "LAST_INSERT_ROWID", true, 10},

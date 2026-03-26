@@ -67,7 +67,7 @@ func TestFreelist2_FlushPendingProcessTrunkError(t *testing.T) {
 	mp := &mockPagerGetError{pageSize: pageSize}
 
 	fl := NewFreeList(mp)
-	fl.firstTrunk = 5   // non-zero so flushPending enters the processTrunkPage branch
+	fl.firstTrunk = 5 // non-zero so flushPending enters the processTrunkPage branch
 	fl.totalFree = 1
 	fl.pendingFree = []Pgno{10}
 
@@ -135,8 +135,8 @@ func TestFreelist2_AllocateFromDiskWriteLockedError(t *testing.T) {
 	// Build a trunk page at pgno 2 with one leaf page (pgno 5).
 	data := make([]byte, pageSize)
 	binary.BigEndian.PutUint32(data[0:4], 0)          // no next trunk
-	binary.BigEndian.PutUint32(data[4:8], 1)           // leafCount = 1
-	binary.BigEndian.PutUint32(data[8:12], uint32(5))  // leaf[0] = page 5
+	binary.BigEndian.PutUint32(data[4:8], 1)          // leafCount = 1
+	binary.BigEndian.PutUint32(data[8:12], uint32(5)) // leaf[0] = page 5
 	mp.pages[2] = &DbPage{Pgno: 2, Data: data}
 
 	fl := NewFreeList(mp)

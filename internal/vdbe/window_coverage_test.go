@@ -618,7 +618,7 @@ func TestWindowCoverageAdditional(t *testing.T) {
 		ws := vdbe.NewWindowState(nil, nil, nil, vdbe.DefaultWindowFrame())
 		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(1)})
 		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(2)})
-		ws.NextRow() // CurrentPartRow = 0
+		ws.NextRow()           // CurrentPartRow = 0
 		got := ws.GetLagRow(5) // 0 - 5 = -5 < 0
 		if got != nil {
 			t.Errorf("GetLagRow offset>partition: expected nil, got %v", got)
@@ -631,7 +631,7 @@ func TestWindowCoverageAdditional(t *testing.T) {
 		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(1)})
 		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(2)})
 		ws.NextRow()
-		ws.NextRow() // CurrentPartRow = 1 (last row)
+		ws.NextRow()            // CurrentPartRow = 1 (last row)
 		got := ws.GetLeadRow(5) // 1 + 5 = 6 >= 2
 		if got != nil {
 			t.Errorf("GetLeadRow offset>partition: expected nil, got %v", got)

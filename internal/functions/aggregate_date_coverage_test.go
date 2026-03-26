@@ -348,19 +348,19 @@ func TestAggregateDateCoverage_ParseTimeParts(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		input   string
-		wantH   int
-		wantM   int
-		wantS   float64
-		wantOK  bool
+		input  string
+		wantH  int
+		wantM  int
+		wantS  float64
+		wantOK bool
 	}{
 		{"12:30", 12, 30, 0.0, true},
 		{"08:05:15", 8, 5, 15.0, true},
 		{"23:59:59.5", 23, 59, 59.5, true},
 		{"bad:val", 0, 0, 0, false},
-		{"12:99", 0, 0, 0, false}, // invalid minutes
+		{"12:99", 0, 0, 0, false},    // invalid minutes
 		{"12:30:99", 0, 0, 0, false}, // invalid seconds
-		{"12", 0, 0, 0, false},      // only one part
+		{"12", 0, 0, 0, false},       // only one part
 	}
 
 	for _, tc := range cases {

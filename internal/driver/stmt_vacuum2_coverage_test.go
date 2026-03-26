@@ -17,32 +17,32 @@ import (
 // ---------------------------------------------------------------------------
 
 type stubPager struct {
-	inWriteTx    bool
-	commitErr    error
-	endReadErr   error
+	inWriteTx  bool
+	commitErr  error
+	endReadErr error
 }
 
-func (p *stubPager) Get(_ pager.Pgno) (*pager.DbPage, error)    { return nil, nil }
-func (p *stubPager) Put(_ *pager.DbPage)                        {}
-func (p *stubPager) PageSize() int                              { return 4096 }
-func (p *stubPager) PageCount() pager.Pgno                      { return 0 }
-func (p *stubPager) IsReadOnly() bool                           { return false }
-func (p *stubPager) GetHeader() *pager.DatabaseHeader           { return nil }
-func (p *stubPager) GetFreePageCount() uint32                   { return 0 }
-func (p *stubPager) Write(_ *pager.DbPage) error                { return nil }
-func (p *stubPager) AllocatePage() (pager.Pgno, error)          { return 0, nil }
-func (p *stubPager) FreePage(_ pager.Pgno) error                { return nil }
-func (p *stubPager) Vacuum(_ *pager.VacuumOptions) error        { return nil }
-func (p *stubPager) SetUserVersion(_ uint32) error              { return nil }
-func (p *stubPager) SetSchemaCookie(_ uint32) error             { return nil }
-func (p *stubPager) VerifyFreeList() error                      { return nil }
-func (p *stubPager) BeginRead() error                           { return nil }
-func (p *stubPager) BeginWrite() error                          { return nil }
-func (p *stubPager) Rollback() error                            { return nil }
-func (p *stubPager) Savepoint(_ string) error                   { return nil }
-func (p *stubPager) Release(_ string) error                     { return nil }
-func (p *stubPager) RollbackTo(_ string) error                  { return nil }
-func (p *stubPager) Close() error                               { return nil }
+func (p *stubPager) Get(_ pager.Pgno) (*pager.DbPage, error) { return nil, nil }
+func (p *stubPager) Put(_ *pager.DbPage)                     {}
+func (p *stubPager) PageSize() int                           { return 4096 }
+func (p *stubPager) PageCount() pager.Pgno                   { return 0 }
+func (p *stubPager) IsReadOnly() bool                        { return false }
+func (p *stubPager) GetHeader() *pager.DatabaseHeader        { return nil }
+func (p *stubPager) GetFreePageCount() uint32                { return 0 }
+func (p *stubPager) Write(_ *pager.DbPage) error             { return nil }
+func (p *stubPager) AllocatePage() (pager.Pgno, error)       { return 0, nil }
+func (p *stubPager) FreePage(_ pager.Pgno) error             { return nil }
+func (p *stubPager) Vacuum(_ *pager.VacuumOptions) error     { return nil }
+func (p *stubPager) SetUserVersion(_ uint32) error           { return nil }
+func (p *stubPager) SetSchemaCookie(_ uint32) error          { return nil }
+func (p *stubPager) VerifyFreeList() error                   { return nil }
+func (p *stubPager) BeginRead() error                        { return nil }
+func (p *stubPager) BeginWrite() error                       { return nil }
+func (p *stubPager) Rollback() error                         { return nil }
+func (p *stubPager) Savepoint(_ string) error                { return nil }
+func (p *stubPager) Release(_ string) error                  { return nil }
+func (p *stubPager) RollbackTo(_ string) error               { return nil }
+func (p *stubPager) Close() error                            { return nil }
 
 func (p *stubPager) InWriteTransaction() bool {
 	return p.inWriteTx

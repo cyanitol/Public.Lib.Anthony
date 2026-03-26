@@ -147,10 +147,10 @@ func TestDecodeRecordErrors(t *testing.T) {
 
 func TestVdbeTypesRaiseError(t *testing.T) {
 	tests := []struct {
-		name       string
-		errType    int
-		msg        string
-		wantIgnore bool
+		name         string
+		errType      int
+		msg          string
+		wantIgnore   bool
 		wantRollback bool
 	}{
 		{"IGNORE", 0, "ignore me", true, false},
@@ -246,11 +246,11 @@ func TestNullsFirstForKey(t *testing.T) {
 	ff := false
 
 	tests := []struct {
-		name      string
-		desc      []bool
+		name       string
+		desc       []bool
 		nullsFirst []*bool
-		keyIdx    int
-		want      bool
+		keyIdx     int
+		want       bool
 	}{
 		{"explicit true", []bool{false}, []*bool{&tf}, 0, true},
 		{"explicit false", []bool{false}, []*bool{&ff}, 0, false},

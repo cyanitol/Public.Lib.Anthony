@@ -36,9 +36,9 @@ func makeStrRows(vals ...string) [][]*Mem {
 func TestWindowAggCount(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		rows  [][]*Mem
-		want  int64
+		name string
+		rows [][]*Mem
+		want int64
 	}{
 		{"empty", nil, 0},
 		{"all null", makeNullRows(3), 0},
@@ -78,8 +78,8 @@ func TestWindowAggCount(t *testing.T) {
 func TestWindowAggAvg(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		rows    [][]*Mem
+		name     string
+		rows     [][]*Mem
 		wantNull bool
 		wantReal float64
 	}{
@@ -112,9 +112,9 @@ func TestWindowAggAvg(t *testing.T) {
 func TestWindowAggMinMax(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		rows    [][]*Mem
-		isMin   bool
+		name     string
+		rows     [][]*Mem
+		isMin    bool
 		wantNull bool
 		wantInt  int64
 	}{
@@ -394,10 +394,10 @@ func TestJumpIfValid(t *testing.T) {
 	v.Program = make([]*Instruction, 5)
 
 	tests := []struct {
-		name    string
-		addr    int
-		initPC  int
-		wantPC  int
+		name   string
+		addr   int
+		initPC int
+		wantPC int
 	}{
 		{"valid jump", 3, 0, 3},
 		{"negative addr no jump", -1, 0, 0},
@@ -562,11 +562,11 @@ func TestExecDistinctRowWithCollation(t *testing.T) {
 	m0.SetStr("hello")
 
 	instr := &Instruction{
-		P1:   0,
-		P2:   3,
-		P3:   1,
-		P4:   P4Union{P: []string{"NOCASE"}},
-		P5:   0,
+		P1: 0,
+		P2: 3,
+		P3: 1,
+		P4: P4Union{P: []string{"NOCASE"}},
+		P5: 0,
 	}
 
 	v.PC = 0

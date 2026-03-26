@@ -712,9 +712,9 @@ func TestWindowHelpersOrderByComparisons(t *testing.T) {
 	// v=20 (row 2): rank 3, dense_rank 2
 	// v=30 (tied, rows 3-4): rank 4, dense_rank 3
 	groups := []struct {
-		indices    []int
-		wantRank   string
-		wantDR     string
+		indices  []int
+		wantRank string
+		wantDR   string
 	}{
 		{[]int{0, 1}, "1", "1"},
 		{[]int{2}, "3", "2"},
@@ -743,9 +743,9 @@ func TestWindowHelpersOrderByComparisons(t *testing.T) {
 // TestWindowHelpersEmitColumnPaths verifies that SELECT expressions of
 // different kinds alongside window functions all produce correct output.
 // This ensures the three branches of emitWindowColumn are all exercised:
-//   1. Window function (FunctionExpr with Over != nil)
-//   2. Regular identifier (IdentExpr)
-//   3. Arithmetic/function expression (GenerateExpr path)
+//  1. Window function (FunctionExpr with Over != nil)
+//  2. Regular identifier (IdentExpr)
+//  3. Arithmetic/function expression (GenerateExpr path)
 func TestWindowHelpersEmitColumnPaths(t *testing.T) {
 	db := openWHCovDB(t)
 	whExec(t, db, "CREATE TABLE col_paths(x INTEGER, y INTEGER)")

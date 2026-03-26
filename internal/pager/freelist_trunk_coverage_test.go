@@ -137,9 +137,9 @@ func TestFreelistTrunk_ProcessTrunkPageFullNewTrunkWriteError(t *testing.T) {
 	// Trunk at page 5: full (leafCount == maxLeaves == 2).
 	data := make([]byte, smallPageSize)
 	binary.BigEndian.PutUint32(data[0:4], 0)            // no next trunk
-	binary.BigEndian.PutUint32(data[4:8], 2)             // leafCount == 2 == maxLeaves
-	binary.BigEndian.PutUint32(data[8:12], uint32(10))   // leaf 0
-	binary.BigEndian.PutUint32(data[12:16], uint32(11))  // leaf 1
+	binary.BigEndian.PutUint32(data[4:8], 2)            // leafCount == 2 == maxLeaves
+	binary.BigEndian.PutUint32(data[8:12], uint32(10))  // leaf 0
+	binary.BigEndian.PutUint32(data[12:16], uint32(11)) // leaf 1
 	mp.pages[5] = &DbPage{Pgno: 5, Data: data}
 
 	// Page 7 exists so createNewTrunk's getLocked succeeds, but writeLocked fails.

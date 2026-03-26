@@ -57,9 +57,9 @@ func (m *fkMockFKManager) ValidateUpdate(
 // TestCompareReals exercises all three branches of compareReals.
 func TestCompareReals(t *testing.T) {
 	cases := []struct {
-		name    string
-		a, b    float64
-		want    int
+		name string
+		a, b float64
+		want int
 	}{
 		{"less", 1.0, 2.0, -1},
 		{"greater", 2.0, 1.0, 1},

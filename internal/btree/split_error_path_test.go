@@ -443,11 +443,11 @@ func TestSplitErrorPath_RedistributeInteriorCells_PopulateRightFails(t *testing.
 	binary.BigEndian.PutUint16(data[PageHeaderOffsetCellStart:], 0)
 	binary.BigEndian.PutUint32(data[PageHeaderOffsetRightChild:], 0)
 	oldHeader := &PageHeader{
-		PageType:    PageTypeInteriorTable,
-		NumCells:    0,
-		IsInterior:  true,
-		IsTable:     true,
-		HeaderSize:  PageHeaderSizeInterior,
+		PageType:      PageTypeInteriorTable,
+		NumCells:      0,
+		IsInterior:    true,
+		IsTable:       true,
+		HeaderSize:    PageHeaderSizeInterior,
 		CellPtrOffset: PageHeaderSizeInterior,
 	}
 	oldPage := &BtreePage{Data: data, PageNum: 2, Header: oldHeader, UsableSize: pageSize}
@@ -933,13 +933,13 @@ func TestSplitErrorPath_InsertDividerIntoParent_DirectMarkDirtyFail(t *testing.T
 		Data:    parentData,
 		PageNum: parentPgno,
 		Header: &PageHeader{
-			PageType:         PageTypeInteriorTable,
-			NumCells:         0,
-			IsInterior:       true,
-			IsTable:          true,
-			HeaderSize:       PageHeaderSizeInterior,
-			CellPtrOffset:    PageHeaderSizeInterior,
-			RightChild:       root,
+			PageType:      PageTypeInteriorTable,
+			NumCells:      0,
+			IsInterior:    true,
+			IsTable:       true,
+			HeaderSize:    PageHeaderSizeInterior,
+			CellPtrOffset: PageHeaderSizeInterior,
+			RightChild:    root,
 		},
 		UsableSize: pageSize,
 	}

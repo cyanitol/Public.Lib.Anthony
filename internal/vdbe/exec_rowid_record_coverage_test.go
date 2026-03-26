@@ -401,11 +401,11 @@ func TestExecRowidRecord_ParseSerialBlobType(t *testing.T) {
 		id   int
 		data []byte
 	}{
-		{1, []byte{0x00}},                      // 1 byte: st=12 (even)
-		{2, []byte{0xFF, 0xFE}},                 // 2 bytes: st=16 (even)
-		{3, []byte{0x01, 0x02, 0x03, 0x04}},     // 4 bytes: st=20 (even)
-		{4, make([]byte, 50)},                   // 50 bytes: st=112 (even)
-		{5, make([]byte, 200)},                  // 200 bytes: st=412 (even, 2-byte varint)
+		{1, []byte{0x00}},                   // 1 byte: st=12 (even)
+		{2, []byte{0xFF, 0xFE}},             // 2 bytes: st=16 (even)
+		{3, []byte{0x01, 0x02, 0x03, 0x04}}, // 4 bytes: st=20 (even)
+		{4, make([]byte, 50)},               // 50 bytes: st=112 (even)
+		{5, make([]byte, 200)},              // 200 bytes: st=412 (even, 2-byte varint)
 	}
 	// fill the larger blobs with a pattern
 	for i := range cases[3].data {
@@ -448,11 +448,11 @@ func TestExecRowidRecord_ParseSerialTextType(t *testing.T) {
 		id  int
 		val string
 	}{
-		{1, "a"},                              // 1 byte: st=15 (odd)
-		{2, "ab"},                             // 2 bytes: st=17 (odd)
-		{3, strings.Repeat("x", 57)},          // 57 bytes: st=127 (1-byte varint boundary)
-		{4, strings.Repeat("y", 58)},          // 58 bytes: st=129 (2-byte varint)
-		{5, strings.Repeat("z", 300)},         // 300 bytes: st=613 (2-byte varint)
+		{1, "a"},                      // 1 byte: st=15 (odd)
+		{2, "ab"},                     // 2 bytes: st=17 (odd)
+		{3, strings.Repeat("x", 57)},  // 57 bytes: st=127 (1-byte varint boundary)
+		{4, strings.Repeat("y", 58)},  // 58 bytes: st=129 (2-byte varint)
+		{5, strings.Repeat("z", 300)}, // 300 bytes: st=613 (2-byte varint)
 	}
 
 	for _, c := range cases {
@@ -551,18 +551,18 @@ func TestExecRowidRecord_DecodeSerialIntAllSizes(t *testing.T) {
 		id  int
 		val int64
 	}{
-		{1, int64(int8(-1))},               // serial type 1: 1-byte int8
-		{2, int64(int8(127))},              // serial type 1: max int8
-		{3, int64(int16(-1000))},           // serial type 2: 2-byte int16
-		{4, int64(int16(30000))},           // serial type 2: near max int16
-		{5, -8388608},                      // serial type 3: min int24
-		{6, 8388607},                       // serial type 3: max int24
-		{7, int64(int32(-2000000000))},     // serial type 4: 4-byte int32
-		{8, int64(int32(2000000000))},      // serial type 4: near max int32
-		{9, -140737488355328},              // serial type 5: min int48
-		{10, 140737488355327},              // serial type 5: max int48
-		{11, int64(-9223372036854775808)},  // serial type 6: min int64
-		{12, int64(9223372036854775807)},   // serial type 6: max int64
+		{1, int64(int8(-1))},              // serial type 1: 1-byte int8
+		{2, int64(int8(127))},             // serial type 1: max int8
+		{3, int64(int16(-1000))},          // serial type 2: 2-byte int16
+		{4, int64(int16(30000))},          // serial type 2: near max int16
+		{5, -8388608},                     // serial type 3: min int24
+		{6, 8388607},                      // serial type 3: max int24
+		{7, int64(int32(-2000000000))},    // serial type 4: 4-byte int32
+		{8, int64(int32(2000000000))},     // serial type 4: near max int32
+		{9, -140737488355328},             // serial type 5: min int48
+		{10, 140737488355327},             // serial type 5: max int48
+		{11, int64(-9223372036854775808)}, // serial type 6: min int64
+		{12, int64(9223372036854775807)},  // serial type 6: max int64
 	}
 
 	for _, c := range cases {
@@ -679,9 +679,9 @@ func TestExecRowidRecord_MultiColUniqueThreeColumns(t *testing.T) {
 	rrExec(t, db, `CREATE UNIQUE INDEX idx_3c ON mc3col(a, b, c)`)
 
 	rrExec(t, db, `INSERT INTO mc3col VALUES(1, 'x', 'y', 'z')`)
-	rrExec(t, db, `INSERT INTO mc3col VALUES(2, 'x', 'y', 'w')`)  // differs on c
-	rrExec(t, db, `INSERT INTO mc3col VALUES(3, 'x', 'v', 'z')`)  // differs on b
-	rrExec(t, db, `INSERT INTO mc3col VALUES(4, 'u', 'y', 'z')`)  // differs on a
+	rrExec(t, db, `INSERT INTO mc3col VALUES(2, 'x', 'y', 'w')`) // differs on c
+	rrExec(t, db, `INSERT INTO mc3col VALUES(3, 'x', 'v', 'z')`) // differs on b
+	rrExec(t, db, `INSERT INTO mc3col VALUES(4, 'u', 'y', 'z')`) // differs on a
 
 	n := rrCount(t, db, `SELECT COUNT(*) FROM mc3col`)
 	if n != 4 {

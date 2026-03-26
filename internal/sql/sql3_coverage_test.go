@@ -143,9 +143,9 @@ func TestCompileSimpleSelect3_WithWhere(t *testing.T) {
 		},
 		Src: srcList,
 		Where: &Expr{
-			Op:       TK_EQ,
-			Left:     &Expr{Op: TK_COLUMN, Table: 0, Column: 0},
-			Right:    &Expr{Op: TK_INTEGER, IntValue: 1},
+			Op:    TK_EQ,
+			Left:  &Expr{Op: TK_COLUMN, Table: 0, Column: 0},
+			Right: &Expr{Op: TK_INTEGER, IntValue: 1},
 		},
 	}
 
@@ -556,8 +556,8 @@ func TestResolveQualifiedColumn3_DotExpr(t *testing.T) {
 		EList: &ExprList{
 			Items: []ExprListItem{
 				{Expr: &Expr{
-					Op:   TK_DOT,
-					Left: &Expr{Op: TK_ID, StringValue: "products"},
+					Op:    TK_DOT,
+					Left:  &Expr{Op: TK_ID, StringValue: "products"},
 					Right: &Expr{Op: TK_ID, StringValue: "name"},
 				}},
 			},

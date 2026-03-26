@@ -91,9 +91,9 @@ func TestApplyIDFilter_NonInt64(t *testing.T) {
 
 // errOnNthDB is a DatabaseExecutor that errors on the nth DDL call.
 type errOnNthDB struct {
-	callCount  int
-	failAfter  int
-	tables     map[string]bool
+	callCount int
+	failAfter int
+	tables    map[string]bool
 }
 
 func newErrOnNthDB(failAfter int) *errOnNthDB {
@@ -264,7 +264,7 @@ func TestDecodeEntry_TruncatedCoordinates(t *testing.T) {
 
 	// 12 bytes: ID(8) + dims(4), but no coordinate data follows.
 	buf := make([]byte, 12)
-	binary.LittleEndian.PutUint64(buf, 3)   // id=3
+	binary.LittleEndian.PutUint64(buf, 3)     // id=3
 	binary.LittleEndian.PutUint32(buf[8:], 2) // dims=2, but no coords
 	entry := mgr.decodeEntry(buf)
 	if entry != nil {
@@ -306,7 +306,7 @@ func TestDecodeEntry_ValidEntry(t *testing.T) {
 // queryReturnsString is a DatabaseExecutor that returns a string for parentnode.
 type queryReturnsString struct{}
 
-func (q *queryReturnsString) ExecDDL(sql string) error               { return nil }
+func (q *queryReturnsString) ExecDDL(sql string) error { return nil }
 func (q *queryReturnsString) ExecDML(sql string, args ...interface{}) (int64, error) {
 	return 0, nil
 }
@@ -335,7 +335,7 @@ func TestLoadNextID_NonInt64Value(t *testing.T) {
 // queryReturnsInvalidRows is a DatabaseExecutor that returns rows which fail parseEntryRow.
 type queryReturnsInvalidRows struct{}
 
-func (q *queryReturnsInvalidRows) ExecDDL(sql string) error               { return nil }
+func (q *queryReturnsInvalidRows) ExecDDL(sql string) error { return nil }
 func (q *queryReturnsInvalidRows) ExecDML(sql string, args ...interface{}) (int64, error) {
 	return 0, nil
 }
@@ -795,7 +795,7 @@ func TestDecodeEntry_TruncatedMinCoord(t *testing.T) {
 	// Provide ID(8) + dims(4) = 12 bytes: len==12, passes guard.
 	// Then reading Min[0] (float64, 8 bytes) fails → return nil.
 	buf := make([]byte, 12)
-	binary.LittleEndian.PutUint64(buf[:8], 5)  // id=5
+	binary.LittleEndian.PutUint64(buf[:8], 5)   // id=5
 	binary.LittleEndian.PutUint32(buf[8:12], 2) // dims=2
 	entry := mgr.decodeEntry(buf)
 	if entry != nil {
@@ -812,7 +812,7 @@ func TestDecodeEntry_TruncatedMaxCoord(t *testing.T) {
 	// Then reading Max[0] (float64, 8 bytes) fails → return nil.
 	buf := make([]byte, 20)
 	binary.LittleEndian.PutUint64(buf[:8], 7)   // id=7
-	binary.LittleEndian.PutUint32(buf[8:12], 1)  // dims=1
+	binary.LittleEndian.PutUint32(buf[8:12], 1) // dims=1
 	// Min[0] = 3.14 → 8 bytes
 	bits := math.Float64bits(3.14)
 	binary.LittleEndian.PutUint64(buf[12:20], bits)

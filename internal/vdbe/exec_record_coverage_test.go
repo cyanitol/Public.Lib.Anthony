@@ -286,12 +286,12 @@ func TestExecRecord_LargeIntegers(t *testing.T) {
 
 	cases := []int64{
 		0, 1, -1,
-		127, -128,         // 1-byte boundary
-		32767, -32768,     // 2-byte boundary
+		127, -128, // 1-byte boundary
+		32767, -32768, // 2-byte boundary
 		8388607, -8388608, // 3-byte boundary
-		2147483647, -2147483648,                    // 4-byte boundary
-		140737488355327, -140737488355328,           // 6-byte boundary
-		9223372036854775807, -9223372036854775808,  // 8-byte boundary
+		2147483647, -2147483648, // 4-byte boundary
+		140737488355327, -140737488355328, // 6-byte boundary
+		9223372036854775807, -9223372036854775808, // 8-byte boundary
 	}
 
 	for i, c := range cases {

@@ -453,8 +453,8 @@ func TestExecuteTriggers_WhenClauseEvaluationError(t *testing.T) {
 		Timing: parser.TriggerBefore,
 		Event:  parser.TriggerInsert,
 		// IdentExpr with table="INVALID" causes ShouldExecuteTrigger to return error.
-		When:   &parser.IdentExpr{Table: "INVALID", Name: "col"},
-		Body:   []parser.Statement{&parser.InsertStmt{Table: "t"}},
+		When: &parser.IdentExpr{Table: "INVALID", Name: "col"},
+		Body: []parser.Statement{&parser.InsertStmt{Table: "t"}},
 	}
 	ctx := &TriggerContext{
 		Schema:    sch,

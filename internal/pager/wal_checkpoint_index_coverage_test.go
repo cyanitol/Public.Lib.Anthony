@@ -208,8 +208,8 @@ func TestWALCheckpointIndex_WALIndexOpen_ReadHeaderCorrupt(t *testing.T) {
 	corruptContent := make([]byte, minSize)
 	// Set IsInit = 1 (offset 12) and Version = 0xDEAD (mismatched) so that
 	// validateAndFixHeader is exercised.
-	corruptContent[12] = 1    // IsInit = 1
-	corruptContent[0] = 0xFF  // Version byte 0 – will not match WALIndexVersion
+	corruptContent[12] = 1   // IsInit = 1
+	corruptContent[0] = 0xFF // Version byte 0 – will not match WALIndexVersion
 	if err := os.WriteFile(shmFile, corruptContent, 0600); err != nil {
 		t.Fatalf("WriteFile corrupt content: %v", err)
 	}

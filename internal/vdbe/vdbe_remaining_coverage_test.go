@@ -163,7 +163,10 @@ func TestVDBERemaining_DecodeFloat64_InsertAndRead(t *testing.T) {
 	}
 	defer rows.Close()
 
-	type row struct{ id int; val float64 }
+	type row struct {
+		id  int
+		val float64
+	}
 	expected := []row{
 		{1, 3.14159},
 		{2, -273.15},
@@ -219,12 +222,12 @@ func TestVDBERemaining_DecodeIntValue_AllWidths(t *testing.T) {
 
 	remainExec(t, db, "CREATE TABLE ints (val INTEGER)")
 	values := []int64{
-		42,                   // serial type 1 (1 byte, fits int8)
-		300,                  // serial type 2 (2 bytes, fits int16)
-		100000,               // serial type 4 (4 bytes, fits int32)
-		9223372036854775807,  // serial type 6 (8 bytes, max int64)
-		-1,                   // serial type 1 (negative)
-		-32769,               // serial type 4 (exceeds int16)
+		42,                  // serial type 1 (1 byte, fits int8)
+		300,                 // serial type 2 (2 bytes, fits int16)
+		100000,              // serial type 4 (4 bytes, fits int32)
+		9223372036854775807, // serial type 6 (8 bytes, max int64)
+		-1,                  // serial type 1 (negative)
+		-32769,              // serial type 4 (exceeds int16)
 	}
 
 	tx, err := db.Begin()

@@ -103,7 +103,7 @@ func TestExecEncoding_EncodeValueDefault(t *testing.T) {
 
 	// Various Go types that the switch does not handle.
 	unknowns := []interface{}{
-		int(42),       // plain int, not int64
+		int(42), // plain int, not int64
 		uint64(1),
 		bool(true),
 		struct{}{},

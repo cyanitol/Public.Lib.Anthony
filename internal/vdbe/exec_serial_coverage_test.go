@@ -62,7 +62,9 @@ func TestExecSerial_SerialTypeLenOverflow(t *testing.T) {
 // TestExecSerial_SerialTypeLenOverflow32 targets the overflow guard on
 // platforms where int is 32 bits (math.MaxInt == 1<<31-1 == 2147483647).
 // We pick a serial type whose length would be 2147483648 (MaxInt32+1):
-//   st = 12 + 2*2147483648 = 12 + 4294967296 = 4294967308
+//
+//	st = 12 + 2*2147483648 = 12 + 4294967296 = 4294967308
+//
 // On a 32-bit system (st-12)/2 = 2147483648 > math.MaxInt → return 0.
 // On a 64-bit system (st-12)/2 = 2147483648 < math.MaxInt → return that value.
 func TestExecSerial_SerialTypeLenOverflow32(t *testing.T) {

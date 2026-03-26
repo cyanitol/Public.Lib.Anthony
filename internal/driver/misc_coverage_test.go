@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
-	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/pager"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
@@ -19,30 +19,30 @@ import (
 
 type errStubPager struct{}
 
-func (p *errStubPager) Get(_ pager.Pgno) (*pager.DbPage, error)   { return nil, nil }
-func (p *errStubPager) Put(_ *pager.DbPage)                       {}
-func (p *errStubPager) PageSize() int                             { return 4096 }
-func (p *errStubPager) PageCount() pager.Pgno                     { return 0 }
-func (p *errStubPager) IsReadOnly() bool                          { return false }
-func (p *errStubPager) GetHeader() *pager.DatabaseHeader          { return nil }
-func (p *errStubPager) GetFreePageCount() uint32                  { return 0 }
-func (p *errStubPager) Write(_ *pager.DbPage) error               { return nil }
-func (p *errStubPager) AllocatePage() (pager.Pgno, error)         { return 0, nil }
-func (p *errStubPager) FreePage(_ pager.Pgno) error               { return nil }
-func (p *errStubPager) Vacuum(_ *pager.VacuumOptions) error       { return nil }
-func (p *errStubPager) SetUserVersion(_ uint32) error             { return nil }
-func (p *errStubPager) SetSchemaCookie(_ uint32) error            { return nil }
-func (p *errStubPager) VerifyFreeList() error                     { return errors.New("free list error injected") }
-func (p *errStubPager) BeginRead() error                          { return nil }
-func (p *errStubPager) BeginWrite() error                         { return nil }
-func (p *errStubPager) Rollback() error                           { return nil }
-func (p *errStubPager) Savepoint(_ string) error                  { return nil }
-func (p *errStubPager) Release(_ string) error                    { return nil }
-func (p *errStubPager) RollbackTo(_ string) error                 { return nil }
-func (p *errStubPager) Close() error                              { return nil }
-func (p *errStubPager) InWriteTransaction() bool                  { return false }
-func (p *errStubPager) Commit() error                             { return nil }
-func (p *errStubPager) EndRead() error                            { return nil }
+func (p *errStubPager) Get(_ pager.Pgno) (*pager.DbPage, error) { return nil, nil }
+func (p *errStubPager) Put(_ *pager.DbPage)                     {}
+func (p *errStubPager) PageSize() int                           { return 4096 }
+func (p *errStubPager) PageCount() pager.Pgno                   { return 0 }
+func (p *errStubPager) IsReadOnly() bool                        { return false }
+func (p *errStubPager) GetHeader() *pager.DatabaseHeader        { return nil }
+func (p *errStubPager) GetFreePageCount() uint32                { return 0 }
+func (p *errStubPager) Write(_ *pager.DbPage) error             { return nil }
+func (p *errStubPager) AllocatePage() (pager.Pgno, error)       { return 0, nil }
+func (p *errStubPager) FreePage(_ pager.Pgno) error             { return nil }
+func (p *errStubPager) Vacuum(_ *pager.VacuumOptions) error     { return nil }
+func (p *errStubPager) SetUserVersion(_ uint32) error           { return nil }
+func (p *errStubPager) SetSchemaCookie(_ uint32) error          { return nil }
+func (p *errStubPager) VerifyFreeList() error                   { return errors.New("free list error injected") }
+func (p *errStubPager) BeginRead() error                        { return nil }
+func (p *errStubPager) BeginWrite() error                       { return nil }
+func (p *errStubPager) Rollback() error                         { return nil }
+func (p *errStubPager) Savepoint(_ string) error                { return nil }
+func (p *errStubPager) Release(_ string) error                  { return nil }
+func (p *errStubPager) RollbackTo(_ string) error               { return nil }
+func (p *errStubPager) Close() error                            { return nil }
+func (p *errStubPager) InWriteTransaction() bool                { return false }
+func (p *errStubPager) Commit() error                           { return nil }
+func (p *errStubPager) EndRead() error                          { return nil }
 
 // ---------------------------------------------------------------------------
 // TestMiscCoverage_ToFloat64Value exercises all branches of toFloat64Value.

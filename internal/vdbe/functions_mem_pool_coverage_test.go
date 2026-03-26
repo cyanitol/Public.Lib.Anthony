@@ -119,8 +119,8 @@ func TestFunctionsMemPoolOpAggStepCollectArgsError(t *testing.T) {
 	instr := &Instruction{
 		Opcode: OpAggStep,
 		P1:     0,
-		P2:     0,  // first arg register
-		P3:     0,  // func index
+		P2:     0, // first arg register
+		P3:     0, // func index
 		P4:     P4Union{Z: "count"},
 		P4Type: P4Static,
 		P5:     5, // want 5 args → registers 0..4, but only 0..1 exist
@@ -143,8 +143,8 @@ func TestFunctionsMemPoolOpAggStepCollectArgsError(t *testing.T) {
 // "%s is not an aggregate function" error branch in ensureAggFuncSlot.
 type scalarOnlyFunc struct{ name string }
 
-func (s *scalarOnlyFunc) Name() string                           { return s.name }
-func (s *scalarOnlyFunc) NumArgs() int                           { return 0 }
+func (s *scalarOnlyFunc) Name() string { return s.name }
+func (s *scalarOnlyFunc) NumArgs() int { return 0 }
 func (s *scalarOnlyFunc) Call(_ []functions.Value) (functions.Value, error) {
 	return functions.NewNullValue(), nil
 }
@@ -186,8 +186,8 @@ func TestFunctionsMemPoolEnsureAggFuncSlotNotAggregate(t *testing.T) {
 // errorStepAgg always returns an error from Step().
 type errorStepAgg struct{ name string }
 
-func (e *errorStepAgg) Name() string                               { return e.name }
-func (e *errorStepAgg) NumArgs() int                               { return 1 }
+func (e *errorStepAgg) Name() string { return e.name }
+func (e *errorStepAgg) NumArgs() int { return 1 }
 func (e *errorStepAgg) Call(_ []functions.Value) (functions.Value, error) {
 	return functions.NewNullValue(), nil
 }
@@ -268,8 +268,8 @@ func TestFunctionsMemPoolOpAggFinalGetMemError(t *testing.T) {
 // errorFinalAgg always returns an error from Final().
 type errorFinalAgg struct{ name string }
 
-func (e *errorFinalAgg) Name() string                               { return e.name }
-func (e *errorFinalAgg) NumArgs() int                               { return 1 }
+func (e *errorFinalAgg) Name() string { return e.name }
+func (e *errorFinalAgg) NumArgs() int { return 1 }
 func (e *errorFinalAgg) Call(_ []functions.Value) (functions.Value, error) {
 	return functions.NewNullValue(), nil
 }
@@ -322,8 +322,8 @@ type minimalAgg struct {
 	count int
 }
 
-func (m *minimalAgg) Name() string                               { return "minimalagg" }
-func (m *minimalAgg) NumArgs() int                               { return 1 }
+func (m *minimalAgg) Name() string { return "minimalagg" }
+func (m *minimalAgg) NumArgs() int { return 1 }
 func (m *minimalAgg) Call(_ []functions.Value) (functions.Value, error) {
 	return functions.NewNullValue(), nil
 }

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
 	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/functions"
 )
 
 // ---------------------------------------------------------------------------

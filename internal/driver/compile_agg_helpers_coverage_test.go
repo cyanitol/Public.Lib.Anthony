@@ -250,8 +250,8 @@ func TestCompileAggHelpersEqualInt64(t *testing.T) {
 		{10, int(9), false},
 		{10, float64(10.0), true},
 		{10, float64(10.5), false},
-		{10, "10", false},        // unknown type → false
-		{10, nil, false},         // nil → false
+		{10, "10", false},         // unknown type → false
+		{10, nil, false},          // nil → false
 		{10, []byte("10"), false}, // unknown type → false
 	}
 	for _, c := range cases {
@@ -277,8 +277,8 @@ func TestCompileAggHelpersEqualFloat64(t *testing.T) {
 		{10.0, int64(11), false},
 		{10.0, int(10), true},
 		{10.0, int(11), false},
-		{10.0, "10.0", false},       // unknown type → false
-		{10.0, nil, false},           // nil → false
+		{10.0, "10.0", false}, // unknown type → false
+		{10.0, nil, false},    // nil → false
 	}
 	for _, c := range cases {
 		got := equalFloat64(c.a, c.b)
@@ -294,9 +294,9 @@ func TestCompileAggHelpersEqualFloat64(t *testing.T) {
 // tryTypeSpecificComparison including the int branch and the "no match" branch.
 func TestCompileAggHelpersTryTypeSpecificComparison(t *testing.T) {
 	cases := []struct {
-		a      interface{}
-		b      interface{}
-		equal  bool
+		a       interface{}
+		b       interface{}
+		equal   bool
 		handled bool
 	}{
 		// int64 branch

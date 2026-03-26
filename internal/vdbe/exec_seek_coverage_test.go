@@ -203,9 +203,9 @@ func TestExecSeekGT_NilBtreeCursor(t *testing.T) {
 
 	v.AddOp(vdbe.OpInit, 0, 1, 0)
 	v.AddOp(vdbe.OpInteger, 25, 1, 0) // r1 = 25
-	v.AddOp(vdbe.OpSeekGT, 0, 4, 1)  // seek > 25; jump to 4 if not found
-	v.AddOp(vdbe.OpInteger, 1, 2, 0) // r2 = 1 (found — should not execute)
-	v.AddOp(vdbe.OpHalt, 0, 0, 0)    // 4: halt (not-found path)
+	v.AddOp(vdbe.OpSeekGT, 0, 4, 1)   // seek > 25; jump to 4 if not found
+	v.AddOp(vdbe.OpInteger, 1, 2, 0)  // r2 = 1 (found — should not execute)
+	v.AddOp(vdbe.OpHalt, 0, 0, 0)     // 4: halt (not-found path)
 
 	if err := v.Run(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -228,9 +228,9 @@ func TestExecSeekGT_EmptyTable(t *testing.T) {
 	v.AddOp(vdbe.OpInit, 0, 1, 0)
 	v.AddOp(vdbe.OpOpenRead, 0, 1, 2) // open cursor on the empty page
 	v.AddOp(vdbe.OpInteger, 5, 1, 0)  // r1 = 5
-	v.AddOp(vdbe.OpSeekGT, 0, 5, 1)  // jump to 5 if not found
-	v.AddOp(vdbe.OpInteger, 1, 2, 0) // r2 = 1 (should not execute)
-	v.AddOp(vdbe.OpHalt, 0, 0, 0)    // 5: not-found path
+	v.AddOp(vdbe.OpSeekGT, 0, 5, 1)   // jump to 5 if not found
+	v.AddOp(vdbe.OpInteger, 1, 2, 0)  // r2 = 1 (should not execute)
+	v.AddOp(vdbe.OpHalt, 0, 0, 0)     // 5: not-found path
 
 	if err := v.Run(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -287,9 +287,9 @@ func TestExecSeekLT_NilBtreeCursor(t *testing.T) {
 
 	v.AddOp(vdbe.OpInit, 0, 1, 0)
 	v.AddOp(vdbe.OpInteger, 35, 1, 0) // r1 = 35
-	v.AddOp(vdbe.OpSeekLT, 0, 4, 1)  // jump to 4 if not found
-	v.AddOp(vdbe.OpInteger, 1, 2, 0) // r2 = 1 (should not execute)
-	v.AddOp(vdbe.OpHalt, 0, 0, 0)    // 4
+	v.AddOp(vdbe.OpSeekLT, 0, 4, 1)   // jump to 4 if not found
+	v.AddOp(vdbe.OpInteger, 1, 2, 0)  // r2 = 1 (should not execute)
+	v.AddOp(vdbe.OpHalt, 0, 0, 0)     // 4
 
 	if err := v.Run(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -310,9 +310,9 @@ func TestExecSeekLT_EmptyTable(t *testing.T) {
 	v.AddOp(vdbe.OpInit, 0, 1, 0)
 	v.AddOp(vdbe.OpOpenRead, 0, 1, 2) // empty table
 	v.AddOp(vdbe.OpInteger, 50, 1, 0) // r1 = 50
-	v.AddOp(vdbe.OpSeekLT, 0, 5, 1)  // jump to 5 if not found
-	v.AddOp(vdbe.OpInteger, 1, 2, 0) // r2 = 1 (should not execute)
-	v.AddOp(vdbe.OpHalt, 0, 0, 0)    // 5
+	v.AddOp(vdbe.OpSeekLT, 0, 5, 1)   // jump to 5 if not found
+	v.AddOp(vdbe.OpInteger, 1, 2, 0)  // r2 = 1 (should not execute)
+	v.AddOp(vdbe.OpHalt, 0, 0, 0)     // 5
 
 	if err := v.Run(); err != nil {
 		t.Fatalf("unexpected error: %v", err)

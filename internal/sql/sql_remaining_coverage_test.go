@@ -138,8 +138,8 @@ func TestFindAggsInChildren_ListBranch(t *testing.T) {
 	aggInfo := &AggInfo{}
 
 	expr := &Expr{
-		Op:   TK_FUNCTION,
-		Left: nil,
+		Op:    TK_FUNCTION,
+		Left:  nil,
 		Right: nil,
 		List: &ExprList{
 			Items: []ExprListItem{
