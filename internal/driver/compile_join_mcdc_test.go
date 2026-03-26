@@ -1378,10 +1378,10 @@ func TestMCDC_EmitJoinLevel_RewindFix(t *testing.T) {
 	}
 }
 
-// mcdcQueryRows is a local helper that returns (result rows, error) for a query
+// mcdcJoinQueryRows is a local helper that returns (result rows, error) for a query
 // without failing the test, used where error cases need to be distinguished from
 // the row-count assertion.
-func mcdcQueryRows(t *testing.T, db *sql.DB, query string) (int, error) {
+func mcdcJoinQueryRows(t *testing.T, db *sql.DB, query string) (int, error) {
 	t.Helper()
 	rows, err := db.Query(query)
 	if err != nil {
