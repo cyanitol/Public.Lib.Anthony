@@ -3,6 +3,7 @@ package vdbe
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/types"
@@ -310,16 +311,9 @@ func (s *Sorter) Sort() error {
 		return nil
 	}
 
-	// Simple insertion sort (adequate for most ORDER BY cases)
-	for i := 1; i < len(s.Rows); i++ {
-		key := s.Rows[i]
-		j := i - 1
-		for j >= 0 && s.compareRows(s.Rows[j], key) > 0 {
-			s.Rows[j+1] = s.Rows[j]
-			j--
-		}
-		s.Rows[j+1] = key
-	}
+	sort.Slice(s.Rows, func(i, j int) bool {
+		return s.compareRows(s.Rows[i], s.Rows[j]) < 0
+	})
 	s.Sorted = true
 	return nil
 }

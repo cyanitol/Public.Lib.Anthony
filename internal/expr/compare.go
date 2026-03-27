@@ -82,9 +82,34 @@ func compareBinary(a, b string) int {
 	return strings.Compare(a, b)
 }
 
-// compareNoCase performs case-insensitive comparison.
+// foldASCII converts an ASCII uppercase byte to lowercase; other bytes are
+// returned unchanged. This is the folding SQLite NOCASE applies.
+func foldASCII(c byte) byte {
+	if c >= 'A' && c <= 'Z' {
+		return c + 32
+	}
+	return c
+}
+
+// compareNoCase performs case-insensitive comparison following SQLite NOCASE
+// semantics: only ASCII letters A–Z are folded; all other bytes compare as-is.
+// No heap allocations are made.
 func compareNoCase(a, b string) int {
-	return strings.Compare(strings.ToUpper(a), strings.ToUpper(b))
+	minLen := len(a)
+	if len(b) < minLen {
+		minLen = len(b)
+	}
+	for i := 0; i < minLen; i++ {
+		ca := foldASCII(a[i])
+		cb := foldASCII(b[i])
+		if ca < cb {
+			return -1
+		}
+		if ca > cb {
+			return 1
+		}
+	}
+	return len(a) - len(b)
 }
 
 // compareRTrim performs comparison with trailing spaces ignored.

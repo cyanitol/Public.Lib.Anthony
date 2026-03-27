@@ -4,12 +4,20 @@ package vdbe
 import (
 	"encoding/binary"
 	"fmt"
-	"io"
 	"math"
 	"os"
-	"path/filepath"
 	"sort"
 )
+
+// SpillBackend writes and reads spill data for external sort.
+type SpillBackend interface {
+	// WriteRun appends a serialized run to the backend. Returns run ID.
+	WriteRun(data []byte) (int, error)
+	// ReadRun reads a previously written run by ID.
+	ReadRun(id int) ([]byte, error)
+	// Close releases all resources.
+	Close() error
+}
 
 // SorterConfig holds configuration for sorter memory limits and spill behavior.
 type SorterConfig struct {
@@ -18,28 +26,34 @@ type SorterConfig struct {
 	MaxMemoryBytes int64
 
 	// TempDir is the directory for temporary spill files.
-	// If empty, uses os.TempDir()
+	// If empty, uses os.TempDir() on platforms that support it.
 	TempDir string
 
 	// EnableSpill determines whether spill-to-disk is enabled.
 	// If false, sorter will use unlimited memory.
 	EnableSpill bool
+
+	// Backend is the spill storage implementation.
+	// If nil, uses the platform default (file-based on native, memory on WASM).
+	Backend SpillBackend
 }
 
 // DefaultSorterConfig returns the default sorter configuration.
 func DefaultSorterConfig() *SorterConfig {
 	return &SorterConfig{
 		MaxMemoryBytes: 10 * 1024 * 1024, // 10 MB
-		TempDir:        "",               // Use os.TempDir()
+		TempDir:        "",
 		EnableSpill:    true,
+		Backend:        newDefaultSpillBackend(),
 	}
 }
 
-// SpilledRun represents a sorted run that has been written to disk.
+// SpilledRun represents a sorted run that has been spilled to storage.
 type SpilledRun struct {
-	FilePath string   // Path to the temporary file
-	File     *os.File // Open file handle
+	FilePath string   // Path to the temporary file (file backend only)
+	File     *os.File // Always nil; kept for API compatibility with existing tests
 	NumRows  int      // Number of rows in this run
+	runID    int      // Run ID for backend-based storage
 }
 
 // SorterWithSpill extends the basic Sorter with spill-to-disk capability.
@@ -47,7 +61,7 @@ type SorterWithSpill struct {
 	*Sorter                       // Embed the base Sorter
 	Config          *SorterConfig // Configuration
 	currentMemBytes int64         // Current memory usage in bytes
-	spilledRuns     []*SpilledRun // List of spilled runs on disk
+	spilledRuns     []*SpilledRun // List of spilled runs
 	spillCounter    int           // Counter for unique spill file names
 }
 
@@ -121,63 +135,20 @@ func (s *SorterWithSpill) Insert(row []*Mem) error {
 	return nil
 }
 
-// spillCurrentRun sorts the current in-memory rows and writes them to a temporary file.
+// spillCurrentRun sorts the current in-memory rows and writes them to storage.
 func (s *SorterWithSpill) spillCurrentRun() error {
 	if len(s.Rows) == 0 {
 		return nil
 	}
 
 	s.Sorter.Sort()
-
-	filePath, err := s.createSpillFilePath()
-	if err != nil {
-		return err
-	}
-
 	numRows := len(s.Rows)
-	if err := s.writeAndRecordSpill(filePath, numRows); err != nil {
+
+	if err := s.doSpillCurrentRun(numRows); err != nil {
 		return err
 	}
 
 	s.clearInMemoryRows()
-	return nil
-}
-
-// createSpillFilePath generates a unique temporary file path for spilling
-func (s *SorterWithSpill) createSpillFilePath() (string, error) {
-	tempDir := s.Config.TempDir
-	if tempDir == "" {
-		tempDir = os.TempDir()
-	}
-
-	s.spillCounter++
-	fileName := fmt.Sprintf("anthony_sorter_spill_%d_%d.tmp", os.Getpid(), s.spillCounter)
-	return filepath.Join(tempDir, fileName), nil
-}
-
-// writeAndRecordSpill writes rows to a spill file and records the spilled run
-func (s *SorterWithSpill) writeAndRecordSpill(filePath string, numRows int) error {
-	file, err := os.Create(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to create spill file: %w", err)
-	}
-
-	if err := s.writeRunToFile(file, s.Rows); err != nil {
-		file.Close()
-		os.Remove(filePath)
-		return fmt.Errorf("failed to write spill file: %w", err)
-	}
-
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("failed to close spill file: %w", err)
-	}
-
-	s.spilledRuns = append(s.spilledRuns, &SpilledRun{
-		FilePath: filePath,
-		File:     nil,
-		NumRows:  numRows,
-	})
-
 	return nil
 }
 
@@ -195,34 +166,59 @@ func (s *SorterWithSpill) clearInMemoryRows() {
 	s.Sorted = false
 }
 
-// writeRunToFile writes sorted rows to a file.
-// Format: [numRows:8][row1_len:4][row1_data][row2_len:4][row2_data]...
-func (s *SorterWithSpill) writeRunToFile(file *os.File, rows [][]*Mem) error {
-	// Write number of rows
-	if err := binary.Write(file, binary.LittleEndian, int64(len(rows))); err != nil {
-		return err
-	}
+// serializeRows serializes a slice of rows to bytes.
+func (s *SorterWithSpill) serializeRows(rows [][]*Mem) ([]byte, error) {
+	var buf []byte
 
-	// Write each row
+	// Write number of rows
+	hdr := make([]byte, 8)
+	binary.LittleEndian.PutUint64(hdr, uint64(len(rows)))
+	buf = append(buf, hdr...)
+
 	for _, row := range rows {
-		// Serialize row
 		rowData, err := s.serializeRow(row)
 		if err != nil {
-			return fmt.Errorf("failed to serialize row: %w", err)
+			return nil, fmt.Errorf("failed to serialize row: %w", err)
 		}
 
-		// Write row length
-		if err := binary.Write(file, binary.LittleEndian, int32(len(rowData))); err != nil {
-			return err
-		}
-
-		// Write row data
-		if _, err := file.Write(rowData); err != nil {
-			return err
-		}
+		lenBuf := make([]byte, 4)
+		binary.LittleEndian.PutUint32(lenBuf, uint32(len(rowData)))
+		buf = append(buf, lenBuf...)
+		buf = append(buf, rowData...)
 	}
 
-	return nil
+	return buf, nil
+}
+
+// deserializeRows deserializes a slice of rows from bytes.
+func (s *SorterWithSpill) deserializeRows(data []byte) ([][]*Mem, error) {
+	if len(data) < 8 {
+		return nil, fmt.Errorf("run data too short")
+	}
+
+	numRows := int64(binary.LittleEndian.Uint64(data[0:8]))
+	offset := 8
+	rows := make([][]*Mem, 0, numRows)
+
+	for i := int64(0); i < numRows; i++ {
+		if offset+4 > len(data) {
+			return nil, fmt.Errorf("run data truncated at row length")
+		}
+		rowLen := int(binary.LittleEndian.Uint32(data[offset : offset+4]))
+		offset += 4
+
+		if offset+rowLen > len(data) {
+			return nil, fmt.Errorf("run data truncated at row data")
+		}
+		row, err := s.deserializeRow(data[offset : offset+rowLen])
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize row: %w", err)
+		}
+		rows = append(rows, row)
+		offset += rowLen
+	}
+
+	return rows, nil
 }
 
 // serializeRow converts a row of Mem cells to bytes.
@@ -301,42 +297,6 @@ func (s *SorterWithSpill) serializeMem(mem *Mem) ([]byte, error) {
 	}
 
 	return buf, nil
-}
-
-// readRunFromFile reads a sorted run from a file.
-func (s *SorterWithSpill) readRunFromFile(file *os.File) ([][]*Mem, error) {
-	// Read number of rows
-	var numRows int64
-	if err := binary.Read(file, binary.LittleEndian, &numRows); err != nil {
-		return nil, err
-	}
-
-	rows := make([][]*Mem, 0, numRows)
-
-	// Read each row
-	for i := int64(0); i < numRows; i++ {
-		// Read row length
-		var rowLen int32
-		if err := binary.Read(file, binary.LittleEndian, &rowLen); err != nil {
-			return nil, err
-		}
-
-		// Read row data
-		rowData := make([]byte, rowLen)
-		if _, err := io.ReadFull(file, rowData); err != nil {
-			return nil, err
-		}
-
-		// Deserialize row
-		row, err := s.deserializeRow(rowData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to deserialize row: %w", err)
-		}
-
-		rows = append(rows, row)
-	}
-
-	return rows, nil
 }
 
 // deserializeRow converts bytes back to a row of Mem cells.
@@ -469,49 +429,8 @@ func (s *SorterWithSpill) Sort() error {
 	return nil
 }
 
-// mergeSpilledRuns performs a k-way merge of all spilled runs.
-func (s *SorterWithSpill) mergeSpilledRuns() error {
-	if len(s.spilledRuns) == 0 {
-		return nil
-	}
-
-	// Open all spilled run files
-	readers := make([]*runReader, 0, len(s.spilledRuns))
-	for _, run := range s.spilledRuns {
-		file, err := os.Open(run.FilePath)
-		if err != nil {
-			s.closeReaders(readers)
-			return fmt.Errorf("failed to open spill file: %w", err)
-		}
-
-		rows, err := s.readRunFromFile(file)
-		if err != nil {
-			file.Close()
-			s.closeReaders(readers)
-			return fmt.Errorf("failed to read spill file: %w", err)
-		}
-
-		readers = append(readers, &runReader{
-			file:    file,
-			rows:    rows,
-			current: 0,
-		})
-	}
-
-	// Perform k-way merge
-	s.Rows = s.mergeRuns(readers)
-	s.Sorted = true
-
-	// Close and delete all spill files
-	s.closeReaders(readers)
-	s.cleanupSpillFiles()
-
-	return nil
-}
-
 // runReader tracks state for reading from a spilled run.
 type runReader struct {
-	file    *os.File
 	rows    [][]*Mem
 	current int
 }
@@ -624,25 +543,6 @@ func (h *mergeHeap) down(i int) {
 		h.Swap(i, j)
 		i = j
 	}
-}
-
-// closeReaders closes all run readers.
-func (s *SorterWithSpill) closeReaders(readers []*runReader) {
-	for _, reader := range readers {
-		if reader.file != nil {
-			reader.file.Close()
-		}
-	}
-}
-
-// cleanupSpillFiles removes all temporary spill files.
-func (s *SorterWithSpill) cleanupSpillFiles() {
-	for _, run := range s.spilledRuns {
-		if run.FilePath != "" {
-			os.Remove(run.FilePath)
-		}
-	}
-	s.spilledRuns = s.spilledRuns[:0]
 }
 
 // Close releases all resources and removes temporary files.
