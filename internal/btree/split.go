@@ -31,6 +31,33 @@ func (c *BtCursor) splitLeafPage(key int64, keyBytes []byte, payload []byte) err
 		return c.splitLeafPageComposite(keyBytes, payload)
 	}
 
+	// P2 TODO – right-edge split bias (Graefe "Modern B-Tree Techniques" §3.4,
+	// Knuth TAOCP Vol 3 §6.2.4, SQLite btree.c balance()):
+	//
+	// When the new key is strictly greater than all existing keys on the page
+	// (sequential / append workload), bias the split so that ~all existing
+	// cells stay on the left page and only the new cell lands on the right.
+	// This raises leaf fill from ~50 % to ~95 % for monotone INSERT patterns.
+	//
+	// Implementation sketch:
+	//   splitIdx, dividerKey := leafSplitPoint(keys, key)
+	//   where leafSplitPoint returns (n-1, keys[n-2]) for the append case,
+	//   (n/2, keys[n/2]) otherwise.
+	//
+	// The divider sent to the parent MUST be keys[n-2] (the last existing key,
+	// now the rightmost key on the left page), NOT keys[n-1] (the new key).
+	// Interior-node search routes an exact-match leftward; using the new key as
+	// the divider would cause a subsequent SeekRowid(newKey) to descend into
+	// the left page and fail to find the row.
+	//
+	// Prerequisite: MoveToLast (and other rightmost-descent code) must be
+	// hardened to skip empty leaf pages.  The optimization produces many
+	// single-cell right pages; deletion of those cells leaves empty pages that
+	// currently cause MoveToLast to return an "empty leaf page" error.  Until
+	// empty-page underflow is handled (either by merging on delete or by
+	// skipping empty pages during traversal), activating this bias breaks
+	// TestRightmostSiblingHandling and TestSplitCoverage2_DefragmentBothPages_FragmentedSplit.
+
 	oldPage, cells, keys, newPage, newPageNum, err := c.prepareLeafSplitPages(key, payload)
 	if err != nil {
 		return err
