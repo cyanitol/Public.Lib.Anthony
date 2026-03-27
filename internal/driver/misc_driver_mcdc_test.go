@@ -1008,7 +1008,7 @@ func TestMCDC_Vacuum_ValidateSourceSchema(t *testing.T) {
 //   Flip B: A=F B=T → ":memory:" DSN → MemoryDB set
 // ============================================================================
 
-func TestMCDC_DSN_ParseDSN_EmptyOrMemory(t *testing.T) {
+func TestMCDC_DSN_ParseDSN_EmptyOrMemory_Misc(t *testing.T) {
 	t.Parallel()
 
 	type tc struct {
