@@ -264,3 +264,57 @@ func TestMCDC10_RemoveCollation_NonExistent(t *testing.T) {
 		return nil
 	})
 }
+
+// TestMCDC10_StmtCache_EvictLRU_Empty exercises evictLRU on an empty cache
+// (lruList.Len() == 0 early-return path).
+func TestMCDC10_StmtCache_EvictLRU_Empty(t *testing.T) {
+	t.Parallel()
+
+	cache := NewStmtCache(5)
+	// Cache is empty; evictLRU should be a no-op.
+	// Call via SetCapacity to force eviction path on empty list.
+	cache.SetCapacity(1)
+	// Still empty, no panic.
+	if cache.Size() != 0 {
+		t.Errorf("expected 0, got %d", cache.Size())
+	}
+}
+
+// TestMCDC10_StmtCache_Remove_NotInCache exercises the early-return in remove
+// when the SQL key doesn't exist in the map.
+func TestMCDC10_StmtCache_Remove_NotInCache(t *testing.T) {
+	t.Parallel()
+
+	cache := NewStmtCache(10)
+	// Acquire the lock ourselves so we can call remove directly.
+	cache.mu.Lock()
+	cache.remove("SELECT nonexistent")
+	cache.mu.Unlock()
+	// No panic; cache still empty.
+	if cache.Size() != 0 {
+		t.Errorf("expected 0, got %d", cache.Size())
+	}
+}
+
+// TestMCDC10_CloseStatements_WithVDBE exercises the stmt.vdbe != nil branch
+// in closeStatements by creating a Stmt with a non-nil vdbe and calling
+// closeStatements directly.
+func TestMCDC10_CloseStatements_WithVDBE(t *testing.T) {
+	t.Parallel()
+
+	// Create a minimal Stmt with a live vdbe.
+	vm := vdbe.New()
+	vm.AllocMemory(2)
+	stmt := &Stmt{
+		vdbe: vm,
+	}
+
+	// A minimal conn just to satisfy closeStatements; fields unused by the func.
+	c := &Conn{}
+	c.closeStatements([]*Stmt{stmt})
+
+	// After closeStatements, vdbe should be nil (finalized).
+	if stmt.vdbe != nil {
+		t.Error("expected stmt.vdbe to be nil after closeStatements")
+	}
+}
