@@ -10,13 +10,17 @@ package driver
 //   conn.go:418          reloadSchemaAfterRollback    (72.7%) — nil btree early return
 //   compile_dml.go:713   affinityToOpCastCode     (71.4%) — BLOB and default cases
 //   compile_dml.go:1919  generatedExprForColumn   (71.4%) — empty expr + parse error
+//   compile_select_agg.go:784 emitBinaryOp        (87.5%) — default error case
+//   stmt_window_helpers.go:329 resolveWindowStateIdx (71.4%) — nil windowStateMap
 
 import (
 	"context"
 	"database/sql/driver"
 	"testing"
 
+	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
+	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
 // ---------------------------------------------------------------------------
@@ -160,5 +164,41 @@ func TestMCDC11_GeneratedExprForColumn_ParseError(t *testing.T) {
 	// Parse fails → returns literal NULL, not nil.
 	if expr == nil {
 		t.Error("expected non-nil literal NULL on parse error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// emitBinaryOp — default (unsupported operator) error path
+// ---------------------------------------------------------------------------
+
+// TestMCDC11_EmitBinaryOp_Default exercises the default branch in emitBinaryOp
+// by calling it with an operator not in the arithmetic switch (OpConcat = ||).
+// This path is dead code from SQL since the SQL path only calls emitBinaryOp
+// with arithmetic operators, but the branch must be exercised for MC/DC coverage.
+func TestMCDC11_EmitBinaryOp_Default(t *testing.T) {
+	t.Parallel()
+	s := &Stmt{}
+	vm := vdbe.New()
+	err := s.emitBinaryOp(vm, parser.OpConcat, 1, 2, 3)
+	if err == nil {
+		t.Error("expected error for unsupported operator, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// resolveWindowStateIdx — nil windowStateMap early return
+// ---------------------------------------------------------------------------
+
+// TestMCDC11_ResolveWindowStateIdx_NilMap exercises the nil-windowStateMap
+// branch in resolveWindowStateIdx which returns 0 immediately.
+func TestMCDC11_ResolveWindowStateIdx_NilMap(t *testing.T) {
+	t.Parallel()
+	// s.windowStateMap is nil by default in zero-value Stmt.
+	s := &Stmt{}
+	over := &parser.WindowSpec{}
+	fn := &parser.FunctionExpr{Name: "ROW_NUMBER", Over: over}
+	idx := s.resolveWindowStateIdx(fn, nil)
+	if idx != 0 {
+		t.Errorf("expected 0 for nil windowStateMap, got %d", idx)
 	}
 }
