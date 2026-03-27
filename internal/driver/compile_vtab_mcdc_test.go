@@ -542,9 +542,9 @@ func TestMCDC_CompareVTabValues_NullHandling(t *testing.T) {
 			wantFirstID: int64(3),
 		},
 		{
-			// A=F B=F: ORDER BY coordinate column (float comparison path in compareInterfaces)
+			// A=F B=F: WHERE float comparison exercises compareInterfaces numeric path
 			name:        "A=F B=F: ORDER BY float column",
-			query:       "SELECT id FROM cvv_rt ORDER BY minx",
+			query:       "SELECT id FROM cvv_rt WHERE minx < 2.0 ORDER BY id",
 			wantFirstID: int64(1),
 		},
 	}
