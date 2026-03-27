@@ -1,6 +1,21 @@
 # Anthony Roadmap (Production Readiness)
 
-## Current State (v0.3.3)
+## Current State (v0.6.0)
+- **20,000+ tests passing**, 0 skipped, 0 failures
+- **94.8% statement coverage** (MC/DC coverage across all packages)
+- **1,257 Trinity (DO-178C trace) tests** at 100% parity
+- **Primary target: WASM (browser-embedded DBMS)**; also embedded, VPS, scalable
+
+## Next Milestone: Algorithm Improvements (v0.6.0)
+- Replace O(n²) insertion sort with pdqsort (`vdbe/vdbe.go`)
+- Lazy streaming external sort merge (`vdbe/sorter_spill.go`)
+- Allocation-free NOCASE collation (`utf/collation.go`)
+- B-tree interior page merge (`btree/merge.go`)
+- B-tree right-edge split bias (`btree/split.go`)
+- WASM packaging (IndexedDB, npm bundle)
+- MC/DC coverage ≥99% all packages
+
+## Baseline (v0.3.3)
 - **17,443 tests passing**, 0 skipped, 0 failures
 - **1,257 Trinity (DO-178C trace) tests** at 100% parity
 - **Race detector clean** across all 27 packages

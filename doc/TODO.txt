@@ -1,51 +1,161 @@
 TODO - Public.Lib.Anthony (Go SQLite)
 =================================================
 
-Status (code-derived):
-        Total passing tests: 17,443.
-        Skipped tests: 0.
-        Trinity test cases defined: 1,064.
-        Trinity skip markers in code: 0.
-        Last updated: 2026-03-19.
+Status (2026-03-27):
+        Total passing tests: 20,000+
+        Skipped tests: 0
+        Statement coverage: 94.8% overall
+        Last updated: 2026-03-27
+
 Code Quality: Cyclomatic complexity <= 11 for all functions.
 
 Goal: Maintain zero skip markers and 100% pass rate.
-Current release: v0.3.3 (zero skipped tests milestone).
+Current release: v0.5.0 → next: v0.6.0 (algorithm improvements)
+
+##########################################################################
+# IN PROGRESS
+##########################################################################
+
+[ ] MC/DC coverage — target >=99% all packages (currently 94.8% overall)
+    - btree: 91.1%  (split/merge/cursor error paths)
+    - pager: 91.3%  (vacuum/journal/lock paths)
+    - vdbe:  93.0%  (exec internal paths, fk_adapter)
+    - driver: 93.7% (compile internal, window/trigger)
+
+[ ] Algorithm improvements (WASM-first, v0.6.0)
+    See P1-P3 below.
 
 ##########################################################################
 # ROADMAP / FEATURE BACKLOG
 ##########################################################################
 
-P1 — HARDENING
+P0 — CORRECTNESS (must fix before next release)
+
+[ ] WASM spill sorter — RUNTIME PANIC ON WASM
+    - File: internal/vdbe/sorter_spill.go (uses os.TempDir, os.Create, os.Open, os.Remove)
+    - Problem: SorterWithSpill is instantiated unconditionally; filesystem calls
+      are unavailable under GOOS=js GOARCH=wasm; causes runtime panic on large ORDER BY
+    - Fix: SpillBackend interface with build-tag-gated implementations:
+        spill_file.go (//go:build !js && !wasip1) — current os.File logic
+        spill_mem.go  (//go:build js || wasip1)   — capped bytes.Buffer fallback
+    - Also: exec.go:4613 passes nil config to NewSorterWithSpillAndRegistry;
+      DefaultSorterConfig() must select backend via build tag at init
+    - See: doc/ALGORITHM_IMPROVEMENT_PLAN.md §P0.1
 
 [ ] Durability & conformance
     - [ ] Run sqllogictest subsets vs reference SQLite
     - [ ] Fuzz parser and record decoder
     - [ ] Crash-replay tests for WAL/journal
-    - [ ] Target >=80% coverage in pager/vdbe/btree/parser/engine
+    - [ ] WAL checksum trailing-byte edge case (non-power-of-2 data)
 
-P2 — PERFORMANCE
+P1 — ALGORITHM IMPROVEMENTS (WASM-first, high impact)
 
-[ ] Query planner optimization
-    - [ ] Cost-based index selection
-    - [ ] Join reordering
-    - [ ] Subquery flattening
+[ ] Sort: replace O(n²) insertion sort with pdqsort/introsort
+    - File: internal/vdbe/vdbe.go (Sorter.Sort)
+    - Fix: replace hand-rolled insertion sort with sort.Slice
+    - WASM impact: CRITICAL — single-threaded, no offload possible
+    - Effort: small (one function change)
+    - Reference: Knuth TAOCP Vol 3 §5.2.4, Musser (1997) introsort
 
-[ ] Storage engine optimization
-    - [ ] Incremental vacuum (auto_vacuum=INCREMENTAL)
-    - [ ] Page cache tuning
-    - [ ] Overflow page read-ahead
+[ ] External sort: lazy streaming merge (stop eager memory load)
+    - File: internal/vdbe/sorter_spill.go (mergeSpilledRuns)
+    - Problem: readRunFromFile loads entire spill file into memory
+    - Fix: make runReader.next() decode one row at a time lazily
+    - WASM impact: CRITICAL — browser heap is limited (~256MB)
+    - Effort: medium
+    - Reference: Knuth TAOCP Vol 3 §5.4 "External Sorting"
 
-P3 — FEATURE GAPS
+[ ] NOCASE collation: eliminate per-call []byte allocation
+    - File: internal/utf/collation.go (CompareNoCase or equivalent)
+    - Fix: direct ASCII fold with byte indexing (b | 0x20), no alloc
+    - WASM impact: HIGH — GC pressure in hot paths (no background GC)
+    - Effort: small
+    - Reference: Unicode CaseFolding.txt; SQLite nocase implementation
 
-[ ] Partial indexes (CREATE INDEX ... WHERE)
-[ ] Expression indexes
-[ ] Incremental vacuum (auto_vacuum=INCREMENTAL)
-[ ] ALTER TABLE ADD CONSTRAINT
+P2 — ALGORITHM IMPROVEMENTS (all targets)
+
+[ ] B-tree interior page merge (currently never merged after deletion)
+    - File: internal/btree/merge.go (canMergePageTypes, handleUnderfullPage)
+    - Problem: canMergePageTypes returns false for interior pages;
+      handleUnderfullPage errors instead of merging
+    - Fix: implement interior page merge following Knuth TAOCP Vol 3 §6.2.4
+    - WASM impact: MEDIUM — storage bloat after deletion-heavy workloads
+    - Effort: large
+
+[ ] B-tree split right-edge bias for sequential inserts
+    - File: internal/btree/split.go (prepareLeafSplit, lines 39 and 121)
+    - Problem: 50/50 split wastes ~50% space on bulk/sequential inserts
+    - Fix: detect when new key > all existing keys, bias to ~90% fill left
+    - WASM impact: MEDIUM — reduces page count and memory usage
+    - Effort: small-medium
+    - Reference: SQLite "next-key" split, Graefe "Modern B-Tree Techniques" §3
+
+[ ] LIKE pattern matching: replace recursive backtracking
+    - File: internal/utf/collation.go (LIKE implementation)
+    - Problem: adversarial patterns (e.g. "%a%a%a%") cause exponential blowup
+    - Fix: NFA simulation (Knuth-Morris-Pratt style) or iterative DP
+    - WASM impact: MEDIUM — single-threaded means no timeout goroutine
+    - Effort: medium
+    - Reference: KMP algorithm (Knuth, Morris, Pratt 1977)
+
+P3 — FEATURES AND IMPROVEMENTS
+
+[ ] Browser/WASM deployment packaging
+    - [ ] WASM build target verification (js/wasm, wasip1/wasm)
+    - [ ] JavaScript API wrapper for browser embedding
+    - [ ] IndexedDB persistence backend for WASM
+    - [ ] Service Worker integration for offline-first apps
+    - [ ] npm package with WASM bundle
+
+[ ] Scalability improvements
+    - [ ] Optimistic Concurrency Control (OCC) for multi-writer
+    - [ ] WAL pipeline (async writer queue)
+    - [ ] Page cache ARC algorithm (adaptive replacement cache)
+
+[ ] Query optimizer improvements
+    - [ ] Bloom filter for hash joins
+    - [ ] Better statistics (histogram-based selectivity estimation)
+    - [ ] Subquery flattening / correlated subquery decorrelation
+    - [ ] Parallel scan (WASM Web Workers)
+
+[ ] Feature gaps
+    - [ ] Partial indexes (CREATE INDEX ... WHERE)
+    - [ ] Materialized CTEs (WITH ... AS MATERIALIZED)
+    - [ ] RETURNING in UPDATE/DELETE
+    - [ ] ALTER TABLE RENAME COLUMN
+    - [ ] STRICT tables (per-column type enforcement)
+    - [ ] JSONB type support
+    - [ ] Window functions: EXCLUDE clause full support
+    - [ ] Geo/spatial extensions beyond rtree
+
+[ ] Developer experience
+    - [ ] Query profiling / EXPLAIN ANALYZE
+    - [ ] PRAGMA integrity_check improvements
+    - [ ] Better error messages with position info
+    - [ ] CLI tool: .schema, .tables, .mode commands
 
 ##########################################################################
 # COMPLETED
 ##########################################################################
+
+v0.5.0 (2026-03-19):
+[x] Zero external dependencies (removed golang.org/x/sys)
+[x] Platform-specific syscalls in pure Go
+[x] Cross-platform compilation (Windows, WASM)
+[x] Fix AVG integer division bug
+[x] Cyclomatic complexity ≤11 for all functions
+
+v0.4.x (2026-03-16 to 2026-03-18):
+[x] MC/DC coverage tests across all packages (batches 1-7, 94.8% overall)
+[x] BTrees: split/merge/cursor/overflow error path coverage
+[x] Pager: WAL, journal, vacuum, checkpoint coverage
+[x] VDBE: FK adapter, exec paths, window functions coverage
+[x] Driver: compile_cte, compile_vtab, compile_dml, trigger coverage
+[x] Functions, planner, schema, expr, utf coverage tests
+[x] Fix rtree ORDER BY float non-determinism
+[x] Fix CTE EndToEnd deadlock (parallel subtests + SetMaxOpenConns)
+[x] Fix HAVING compound condition test data
+[x] All commits timestamped outside 7AM-7PM Eastern
 
 v0.3.3 (2026-03-18):
 [x] Zero skipped tests — all 787+ t.Skip() calls eliminated

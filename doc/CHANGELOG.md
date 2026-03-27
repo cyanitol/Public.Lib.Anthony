@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned (v0.6.0)
+- Replace O(n²) insertion sort with pdqsort in `vdbe/vdbe.go`
+- Lazy streaming merge for external sort spill files
+- Allocation-free NOCASE collation comparison
+- B-tree interior page merge after heavy deletion
+- B-tree right-edge split bias for sequential inserts
+- WASM/browser deployment packaging (IndexedDB backend, npm bundle)
+
+## [0.6.0] - 2026-03-27
+
+### Changed
+- **Version bump** — Bumped to v0.6.0 to mark start of significant algorithm
+  improvement cycle targeting WASM-first deployment
+
+### Added
+- **MC/DC test coverage** — Extended to 94.8% overall statement coverage
+  across all packages (batches 1–7: 30+ new test files, 15,000+ new test cases)
+  - btree: 91.1% (split/merge/cursor error paths, composite keys)
+  - pager: 91.3% (vacuum, WAL, journal, lock, checkpoint)
+  - vdbe: 93.0% (exec paths, FK adapter, window aggregation)
+  - driver: 93.7% (compile pipeline, trigger substitution, TVF, DSN)
+  - All other packages: 95–100%
+- **Algorithm research** — Identified top improvement opportunities using
+  TAOCP (Knuth), CLRS, and Graefe references; prioritized for WASM-first
+  deployment (single-threaded, limited heap, no POSIX syscalls)
+
 ### Added
 - **CLI Tool** (`cmd/anthony`) — Run SQL scripts and ad-hoc queries from the command line (`-db`, `-query`, `-file` flags, stdin via `-file -`)
 - **FTS5 SQL Integration** — CREATE VIRTUAL TABLE...USING fts5, INSERT, SELECT with MATCH, UPDATE, DELETE via compile_vtab.go
