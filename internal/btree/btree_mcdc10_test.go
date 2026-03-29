@@ -32,7 +32,7 @@ import (
 type mcdc10Provider struct {
 	bt          *Btree
 	dirtyCalls  int
-	failAt      int  // fail MarkDirty on Nth call (0=never)
+	failAt      int    // fail MarkDirty on Nth call (0=never)
 	failGetPage uint32 // fail GetPageData for this page number (0=none)
 	failAlloc   bool   // fail next AllocatePageData call
 }

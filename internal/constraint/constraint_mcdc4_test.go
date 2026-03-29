@@ -57,8 +57,9 @@ func mcdc4CountRows(t *testing.T, db *sql.DB, table string) int {
 // through a three-level parent → child → grandchild hierarchy.
 //
 // Deleting the grandparent triggers:
-//   cascadeDelete on "parent" rows  (validates multi-level cascade path in
-//   cascadeDelete and validateDeleteRecursive).
+//
+//	cascadeDelete on "parent" rows  (validates multi-level cascade path in
+//	cascadeDelete and validateDeleteRecursive).
 func TestMCDC4_CascadeDelete_MultiLevel(t *testing.T) {
 	db := mcdc4OpenDB(t)
 	defer db.Close()

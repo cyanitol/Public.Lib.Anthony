@@ -518,8 +518,8 @@ func TestMCDC5_CompileDelete_WithWhere(t *testing.T) {
 	t.Parallel()
 	where := &WhereClause{
 		Expr: &Expression{
-			Type:     ExprLiteral,
-			Value:    Value{Type: TypeInteger, Int: 1},
+			Type:  ExprLiteral,
+			Value: Value{Type: TypeInteger, Int: 1},
 		},
 	}
 	stmt := &DeleteStmt{Table: "products", Where: where}

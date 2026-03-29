@@ -255,7 +255,10 @@ func TestMCDC5_ParseClassEntry_RangePath(t *testing.T) {
 func TestMCDC5_ParseClassEntry_MultipleEntries(t *testing.T) {
 	t.Parallel()
 	// Multiple entries: [aeiou] matches vowels
-	for _, tc := range []struct{ pat, str string; want bool }{
+	for _, tc := range []struct {
+		pat, str string
+		want     bool
+	}{
 		{"[aeiou]", "e", true},
 		{"[aeiou]", "b", false},
 	} {
