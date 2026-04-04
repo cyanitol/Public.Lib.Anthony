@@ -64,11 +64,8 @@ func (s *Schema) UpdateTableSQL(tableName string) {
 
 // findTableLocked finds a table by name. Caller must hold the lock.
 func (s *Schema) findTableLocked(name string) (*Table, error) {
-	lowerName := strings.ToLower(name)
-	for tableName, table := range s.Tables {
-		if strings.ToLower(tableName) == lowerName {
-			return table, nil
-		}
+	if table, found := findCaseInsensitive(s.Tables, name); found {
+		return table, nil
 	}
 	return nil, fmt.Errorf("table not found: %s", name)
 }

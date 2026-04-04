@@ -437,38 +437,28 @@ func (te *TriggerExecutor) valueToLiteralExpr(value interface{}) *parser.Literal
 // Helper functions for executing different statement types
 // These are simplified versions - a full implementation would use the proper compiler
 
-func (te *TriggerExecutor) executeInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt) error {
-	// Simplified INSERT execution
-	// In a real implementation, this would use the full INSERT compiler
-	// with OLD/NEW substitution
+// executeVDBEStatement runs the VDBE and wraps any error with the statement type.
+func (te *TriggerExecutor) executeVDBEStatement(vm *vdbe.VDBE, stmtType string) error {
 	if err := vm.Run(); err != nil {
-		return fmt.Errorf("INSERT execution failed: %w", err)
+		return fmt.Errorf("%s execution failed: %w", stmtType, err)
 	}
 	return nil
+}
+
+func (te *TriggerExecutor) executeInsert(vm *vdbe.VDBE, stmt *parser.InsertStmt) error {
+	return te.executeVDBEStatement(vm, "INSERT")
 }
 
 func (te *TriggerExecutor) executeUpdate(vm *vdbe.VDBE, stmt *parser.UpdateStmt) error {
-	// Simplified UPDATE execution
-	if err := vm.Run(); err != nil {
-		return fmt.Errorf("UPDATE execution failed: %w", err)
-	}
-	return nil
+	return te.executeVDBEStatement(vm, "UPDATE")
 }
 
 func (te *TriggerExecutor) executeDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt) error {
-	// Simplified DELETE execution
-	if err := vm.Run(); err != nil {
-		return fmt.Errorf("DELETE execution failed: %w", err)
-	}
-	return nil
+	return te.executeVDBEStatement(vm, "DELETE")
 }
 
 func (te *TriggerExecutor) executeSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt) error {
-	// SELECT in trigger - execute but discard results
-	if err := vm.Run(); err != nil {
-		return fmt.Errorf("SELECT execution failed: %w", err)
-	}
-	return nil
+	return te.executeVDBEStatement(vm, "SELECT")
 }
 
 // preparePseudoRow copies column values from rowData that match the table schema.
@@ -501,59 +491,44 @@ func PrepareNewRow(table *schema.Table, rowData map[string]interface{}) map[stri
 	return preparePseudoRow(table, rowData)
 }
 
+// executeBeforeTriggersFor creates an executor and runs BEFORE triggers for the given event.
+func executeBeforeTriggersFor(ctx *TriggerContext, event parser.TriggerEvent, updatedColumns []string) error {
+	executor := NewTriggerExecutor(ctx)
+	return executor.ExecuteBeforeTriggers(event, updatedColumns)
+}
+
+// executeAfterTriggersFor creates an executor and runs AFTER triggers for the given event.
+func executeAfterTriggersFor(ctx *TriggerContext, event parser.TriggerEvent, updatedColumns []string) error {
+	executor := NewTriggerExecutor(ctx)
+	return executor.ExecuteAfterTriggers(event, updatedColumns)
+}
+
 // ExecuteTriggersForInsert is a convenience function that executes all triggers for an INSERT operation.
 func ExecuteTriggersForInsert(ctx *TriggerContext) error {
-	executor := NewTriggerExecutor(ctx)
-
-	// Execute BEFORE INSERT triggers
-	if err := executor.ExecuteBeforeTriggers(parser.TriggerInsert, nil); err != nil {
-		return err
-	}
-
-	// Note: The actual INSERT happens between BEFORE and AFTER triggers
-	// This is handled by the caller
-
-	return nil
+	return executeBeforeTriggersFor(ctx, parser.TriggerInsert, nil)
 }
 
 // ExecuteAfterInsertTriggers executes AFTER INSERT triggers.
 func ExecuteAfterInsertTriggers(ctx *TriggerContext) error {
-	executor := NewTriggerExecutor(ctx)
-	return executor.ExecuteAfterTriggers(parser.TriggerInsert, nil)
+	return executeAfterTriggersFor(ctx, parser.TriggerInsert, nil)
 }
 
 // ExecuteTriggersForUpdate executes triggers for an UPDATE operation.
 func ExecuteTriggersForUpdate(ctx *TriggerContext, updatedColumns []string) error {
-	executor := NewTriggerExecutor(ctx)
-
-	// Execute BEFORE UPDATE triggers
-	if err := executor.ExecuteBeforeTriggers(parser.TriggerUpdate, updatedColumns); err != nil {
-		return err
-	}
-
-	return nil
+	return executeBeforeTriggersFor(ctx, parser.TriggerUpdate, updatedColumns)
 }
 
 // ExecuteAfterUpdateTriggers executes AFTER UPDATE triggers.
 func ExecuteAfterUpdateTriggers(ctx *TriggerContext, updatedColumns []string) error {
-	executor := NewTriggerExecutor(ctx)
-	return executor.ExecuteAfterTriggers(parser.TriggerUpdate, updatedColumns)
+	return executeAfterTriggersFor(ctx, parser.TriggerUpdate, updatedColumns)
 }
 
 // ExecuteTriggersForDelete executes triggers for a DELETE operation.
 func ExecuteTriggersForDelete(ctx *TriggerContext) error {
-	executor := NewTriggerExecutor(ctx)
-
-	// Execute BEFORE DELETE triggers
-	if err := executor.ExecuteBeforeTriggers(parser.TriggerDelete, nil); err != nil {
-		return err
-	}
-
-	return nil
+	return executeBeforeTriggersFor(ctx, parser.TriggerDelete, nil)
 }
 
 // ExecuteAfterDeleteTriggers executes AFTER DELETE triggers.
 func ExecuteAfterDeleteTriggers(ctx *TriggerContext) error {
-	executor := NewTriggerExecutor(ctx)
-	return executor.ExecuteAfterTriggers(parser.TriggerDelete, nil)
+	return executeAfterTriggersFor(ctx, parser.TriggerDelete, nil)
 }

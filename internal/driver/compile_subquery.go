@@ -434,13 +434,9 @@ func (s *Stmt) materializeAndFilter(outer *parser.SelectStmt, subVM *vdbe.VDBE, 
 
 // filterMaterializedRows filters materialized rows by evaluating a WHERE expression.
 func (s *Stmt) filterMaterializedRows(rows [][]interface{}, where parser.Expression, colNames []string) [][]interface{} {
-	var result [][]interface{}
-	for _, row := range rows {
-		if s.evalWhereOnRow(where, row, colNames) {
-			result = append(result, row)
-		}
-	}
-	return result
+	return filterRowsBy(rows, func(row []interface{}) bool {
+		return s.evalWhereOnRow(where, row, colNames)
+	})
 }
 
 // evalWhereOnRow evaluates a WHERE expression against a single materialized row.

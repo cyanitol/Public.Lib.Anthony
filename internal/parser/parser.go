@@ -3304,76 +3304,11 @@ var bitwiseTokenOps = map[TokenType]BinaryOp{
 	TK_RSHIFT: OpRShift,
 }
 
-func (p *Parser) parseBitwiseExpression() (Expression, error) {
-	left, err := p.parseAdditiveExpression()
-	if err != nil {
-		return nil, err
-	}
-
-	for {
-		op, matched := p.matchBitwiseOp()
-		if !matched {
-			break
-		}
-		right, err := p.parseAdditiveExpression()
-		if err != nil {
-			return nil, err
-		}
-		left = &BinaryExpr{Left: left, Op: op, Right: right}
-	}
-	return left, nil
-}
-
-// matchBitwiseOp tries to match a bitwise operator.
-func (p *Parser) matchBitwiseOp() (BinaryOp, bool) {
-	for tk, op := range bitwiseTokenOps {
-		if p.match(tk) {
-			return op, true
-		}
-	}
-	return 0, false
-}
-
 // additiveTokenOps maps tokens to additive operators.
 var additiveTokenOps = map[TokenType]BinaryOp{
 	TK_PLUS:   OpPlus,
 	TK_MINUS:  OpMinus,
 	TK_CONCAT: OpConcat,
-}
-
-func (p *Parser) parseAdditiveExpression() (Expression, error) {
-	left, err := p.parseMultiplicativeExpression()
-	if err != nil {
-		return nil, err
-	}
-
-	for {
-		op, matched := p.matchAdditiveOp()
-		if !matched {
-			break
-		}
-
-		right, err := p.parseMultiplicativeExpression()
-		if err != nil {
-			return nil, err
-		}
-		left = &BinaryExpr{
-			Left:  left,
-			Op:    op,
-			Right: right,
-		}
-	}
-
-	return left, nil
-}
-
-func (p *Parser) matchAdditiveOp() (BinaryOp, bool) {
-	for tk, op := range additiveTokenOps {
-		if p.match(tk) {
-			return op, true
-		}
-	}
-	return 0, false
 }
 
 // multiplicativeTokenOps maps tokens to multiplicative operators.
@@ -3383,39 +3318,53 @@ var multiplicativeTokenOps = map[TokenType]BinaryOp{
 	TK_REM:   OpRem,
 }
 
-func (p *Parser) parseMultiplicativeExpression() (Expression, error) {
-	left, err := p.parseUnaryExpression()
+// makeOpMatcher returns a function that tries to match any token in ops,
+// returning the corresponding BinaryOp.
+func (p *Parser) makeOpMatcher(ops map[TokenType]BinaryOp) func() (BinaryOp, bool) {
+	return func() (BinaryOp, bool) {
+		for tk, op := range ops {
+			if p.match(tk) {
+				return op, true
+			}
+		}
+		return 0, false
+	}
+}
+
+// parseLeftAssocBinaryExpr parses a left-associative binary expression.
+// next parses the higher-precedence operand; matchOp tries to consume an operator token.
+func (p *Parser) parseLeftAssocBinaryExpr(
+	next func() (Expression, error),
+	matchOp func() (BinaryOp, bool),
+) (Expression, error) {
+	left, err := next()
 	if err != nil {
 		return nil, err
 	}
-
 	for {
-		op, matched := p.matchMultiplicativeOp()
+		op, matched := matchOp()
 		if !matched {
 			break
 		}
-
-		right, err := p.parseUnaryExpression()
+		right, err := next()
 		if err != nil {
 			return nil, err
 		}
-		left = &BinaryExpr{
-			Left:  left,
-			Op:    op,
-			Right: right,
-		}
+		left = &BinaryExpr{Left: left, Op: op, Right: right}
 	}
-
 	return left, nil
 }
 
-func (p *Parser) matchMultiplicativeOp() (BinaryOp, bool) {
-	for tk, op := range multiplicativeTokenOps {
-		if p.match(tk) {
-			return op, true
-		}
-	}
-	return 0, false
+func (p *Parser) parseBitwiseExpression() (Expression, error) {
+	return p.parseLeftAssocBinaryExpr(p.parseAdditiveExpression, p.makeOpMatcher(bitwiseTokenOps))
+}
+
+func (p *Parser) parseAdditiveExpression() (Expression, error) {
+	return p.parseLeftAssocBinaryExpr(p.parseMultiplicativeExpression, p.makeOpMatcher(additiveTokenOps))
+}
+
+func (p *Parser) parseMultiplicativeExpression() (Expression, error) {
+	return p.parseLeftAssocBinaryExpr(p.parseUnaryExpression, p.makeOpMatcher(multiplicativeTokenOps))
 }
 
 // unaryOperatorMap maps tokens to their corresponding unary operators.

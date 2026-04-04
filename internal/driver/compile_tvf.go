@@ -148,20 +148,7 @@ func variableToFuncValue(v *parser.VariableExpr, args []driver.NamedValue) (func
 
 // driverValueToFuncValue converts a driver.Value to a functions.Value.
 func driverValueToFuncValue(v interface{}) functions.Value {
-	switch val := v.(type) {
-	case int64:
-		return functions.NewIntValue(val)
-	case float64:
-		return functions.NewFloatValue(val)
-	case string:
-		return functions.NewTextValue(val)
-	case []byte:
-		return functions.NewBlobValue(val)
-	case nil:
-		return functions.NewNullValue()
-	default:
-		return functions.NewTextValue(fmt.Sprintf("%v", val))
-	}
+	return goToFuncValue(v)
 }
 
 // resolveTVFColumns maps SELECT columns to TVF output column indices.
@@ -308,17 +295,7 @@ func projectTVFRows(rows [][]functions.Value, colIndices []int) [][]functions.Va
 
 // deduplicateTVFRows removes duplicate rows using string-key dedup.
 func deduplicateTVFRows(rows [][]functions.Value) [][]functions.Value {
-	seen := make(map[string]struct{}, len(rows))
-	result := make([][]functions.Value, 0, len(rows))
-	for _, row := range rows {
-		key := tvfRowKey(row)
-		if _, dup := seen[key]; dup {
-			continue
-		}
-		seen[key] = struct{}{}
-		result = append(result, row)
-	}
-	return result
+	return deduplicateRowsBy(rows, tvfRowKey)
 }
 
 // tvfRowKey builds a string key for a row for deduplication.
@@ -367,25 +344,7 @@ func tvfNullsFirst(k tvfSortKey) bool {
 // tvfCompareNull handles NULL comparison for TVF values.
 // Returns (result, true) if a NULL was involved, (0, false) otherwise.
 func tvfCompareNull(a, b functions.Value, k tvfSortKey) (int, bool) {
-	aNil := a == nil || a.IsNull()
-	bNil := b == nil || b.IsNull()
-	if !aNil && !bNil {
-		return 0, false
-	}
-	if aNil && bNil {
-		return 0, true
-	}
-	nf := tvfNullsFirst(k)
-	if aNil {
-		if nf {
-			return -1, true
-		}
-		return 1, true
-	}
-	if nf {
-		return 1, true
-	}
-	return -1, true
+	return compareNulls(a == nil || a.IsNull(), b == nil || b.IsNull(), tvfNullsFirst(k))
 }
 
 // tvfRowLess returns true if row a should sort before row b.
@@ -565,13 +524,9 @@ func emitIntValue(vm *vdbe.VDBE, n int64, reg int) {
 
 // filterTVFRows filters TVF rows by evaluating a WHERE expression.
 func filterTVFRows(rows [][]functions.Value, where parser.Expression, tvfCols []string) [][]functions.Value {
-	var result [][]functions.Value
-	for _, row := range rows {
-		if evalTVFWhere(where, row, tvfCols) {
-			result = append(result, row)
-		}
-	}
-	return result
+	return filterRowsBy(rows, func(row []functions.Value) bool {
+		return evalTVFWhere(where, row, tvfCols)
+	})
 }
 
 // evalTVFWhere evaluates a WHERE expression against a single TVF row.
@@ -1080,14 +1035,8 @@ func (s *Stmt) findTVFColIdx(fnArgs []parser.Expression, colNames []string) int 
 	if len(fnArgs) == 0 {
 		return -1
 	}
-	switch e := fnArgs[0].(type) {
-	case *parser.IdentExpr:
-		lower := strings.ToLower(e.Name)
-		for i, name := range colNames {
-			if strings.ToLower(name) == lower {
-				return i
-			}
-		}
+	if e, ok := fnArgs[0].(*parser.IdentExpr); ok {
+		return findTVFColIndex(e.Name, colNames)
 	}
 	return -1
 }

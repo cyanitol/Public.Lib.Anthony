@@ -186,6 +186,16 @@ func (lm *LockManager) Close() error {
 	return nil
 }
 
+// validLockTransitions maps each lock level to the set of levels it can transition to.
+// This table encodes SQLite's lock escalation and downgrade rules.
+var validLockTransitions = map[LockLevel][]LockLevel{
+	lockNone:      {lockShared, lockExclusive},
+	lockShared:    {lockReserved, lockExclusive, lockNone},
+	lockReserved:  {lockPending, lockExclusive, lockShared, lockNone},
+	lockPending:   {lockExclusive, lockShared, lockNone},
+	lockExclusive: {lockShared, lockNone},
+}
+
 // isValidTransition checks if transitioning from one lock level to another is valid.
 func (lm *LockManager) isValidTransition(from, to LockLevel) bool {
 	// Can always stay at the same level
@@ -193,51 +203,16 @@ func (lm *LockManager) isValidTransition(from, to LockLevel) bool {
 		return true
 	}
 
-	// Check valid transition based on source lock level
-	switch from {
-	case lockNone:
-		return lm.isValidFromNone(to)
-	case lockShared:
-		return lm.isValidFromShared(to)
-	case lockReserved:
-		return lm.isValidFromReserved(to)
-	case lockPending:
-		return lm.isValidFromPending(to)
-	case lockExclusive:
-		return lm.isValidFromExclusive(to)
-	default:
+	targets, ok := validLockTransitions[from]
+	if !ok {
 		return false
 	}
-}
-
-// isValidFromNone checks valid transitions from NONE lock level.
-func (lm *LockManager) isValidFromNone(to LockLevel) bool {
-	// Can acquire any lock from NONE, but typically start with SHARED
-	return to == lockShared || to == lockExclusive
-}
-
-// isValidFromShared checks valid transitions from SHARED lock level.
-func (lm *LockManager) isValidFromShared(to LockLevel) bool {
-	// From SHARED, can go to RESERVED or EXCLUSIVE, or back to NONE
-	return to == lockReserved || to == lockExclusive || to == lockNone
-}
-
-// isValidFromReserved checks valid transitions from RESERVED lock level.
-func (lm *LockManager) isValidFromReserved(to LockLevel) bool {
-	// From RESERVED, can go to PENDING or EXCLUSIVE, or downgrade to SHARED or NONE
-	return to == lockPending || to == lockExclusive || to == lockShared || to == lockNone
-}
-
-// isValidFromPending checks valid transitions from PENDING lock level.
-func (lm *LockManager) isValidFromPending(to LockLevel) bool {
-	// From PENDING, can go to EXCLUSIVE, or downgrade to SHARED or NONE
-	return to == lockExclusive || to == lockShared || to == lockNone
-}
-
-// isValidFromExclusive checks valid transitions from EXCLUSIVE lock level.
-func (lm *LockManager) isValidFromExclusive(to LockLevel) bool {
-	// From EXCLUSIVE, can only downgrade to SHARED or NONE
-	return to == lockShared || to == lockNone
+	for _, valid := range targets {
+		if to == valid {
+			return true
+		}
+	}
+	return false
 }
 
 // TryAcquireLock attempts to acquire a lock without blocking.

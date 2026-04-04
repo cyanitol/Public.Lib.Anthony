@@ -8,6 +8,58 @@ import (
 	"math"
 )
 
+// newMathFunc creates a single-arg math function with null handling.
+func newMathFunc(fn func(float64) float64) func([]Value) (Value, error) {
+	return func(args []Value) (Value, error) {
+		if args[0].IsNull() {
+			return NewNullValue(), nil
+		}
+		return NewFloatValue(fn(args[0].AsFloat64())), nil
+	}
+}
+
+// newMathFuncWithCheck creates a single-arg math function with a domain check.
+// If invalid returns true for the input, NaN is returned.
+func newMathFuncWithCheck(fn func(float64) float64, invalid func(float64) bool) func([]Value) (Value, error) {
+	return func(args []Value) (Value, error) {
+		if args[0].IsNull() {
+			return NewNullValue(), nil
+		}
+		v := args[0].AsFloat64()
+		if invalid(v) {
+			return NewFloatValue(math.NaN()), nil
+		}
+		return NewFloatValue(fn(v)), nil
+	}
+}
+
+// Single-arg math functions created via factories.
+// Named variables are kept for backward compatibility with tests.
+var (
+	ceilFunc    = newMathFunc(math.Ceil)
+	floorFunc   = newMathFunc(math.Floor)
+	expFunc     = newMathFunc(math.Exp)
+	sinFunc     = newMathFunc(math.Sin)
+	cosFunc     = newMathFunc(math.Cos)
+	tanFunc     = newMathFunc(math.Tan)
+	atanFunc    = newMathFunc(math.Atan)
+	sinhFunc    = newMathFunc(math.Sinh)
+	coshFunc    = newMathFunc(math.Cosh)
+	tanhFunc    = newMathFunc(math.Tanh)
+	asinhFunc   = newMathFunc(math.Asinh)
+	radiansFunc = newMathFunc(func(x float64) float64 { return x * math.Pi / 180.0 })
+	degreesFunc = newMathFunc(func(x float64) float64 { return x * 180.0 / math.Pi })
+
+	sqrtFunc  = newMathFuncWithCheck(math.Sqrt, func(v float64) bool { return v < 0 })
+	lnFunc    = newMathFuncWithCheck(math.Log, func(v float64) bool { return v <= 0 })
+	log10Func = newMathFuncWithCheck(math.Log10, func(v float64) bool { return v <= 0 })
+	log2Func  = newMathFuncWithCheck(math.Log2, func(v float64) bool { return v <= 0 })
+	asinFunc  = newMathFuncWithCheck(math.Asin, func(v float64) bool { return v < -1 || v > 1 })
+	acosFunc  = newMathFuncWithCheck(math.Acos, func(v float64) bool { return v < -1 || v > 1 })
+	acoshFunc = newMathFuncWithCheck(math.Acosh, func(v float64) bool { return v < 1 })
+	atanhFunc = newMathFuncWithCheck(math.Atanh, func(v float64) bool { return v <= -1 || v >= 1 })
+)
+
 // RegisterMathFunctions registers all math functions.
 func RegisterMathFunctions(r *Registry) {
 	r.Register(NewScalarFunc("abs", 1, absFunc))
@@ -198,38 +250,6 @@ func randomblobFunc(args []Value) (Value, error) {
 	return NewBlobValue(blob), nil
 }
 
-// ceilFunc implements ceil(X) / ceiling(X)
-func ceilFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Ceil(args[0].AsFloat64())), nil
-}
-
-// floorFunc implements floor(X)
-func floorFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Floor(args[0].AsFloat64())), nil
-}
-
-// sqrtFunc implements sqrt(X)
-func sqrtFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value < 0 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Sqrt(value)), nil
-}
-
 // powerFunc implements power(X, Y) / pow(X, Y)
 func powerFunc(args []Value) (Value, error) {
 	if args[0].IsNull() || args[1].IsNull() {
@@ -242,121 +262,6 @@ func powerFunc(args []Value) (Value, error) {
 	return NewFloatValue(math.Pow(base, exponent)), nil
 }
 
-// expFunc implements exp(X)
-func expFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Exp(args[0].AsFloat64())), nil
-}
-
-// lnFunc implements ln(X) / log(X)
-func lnFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value <= 0 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Log(value)), nil
-}
-
-// log10Func implements log10(X)
-func log10Func(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value <= 0 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Log10(value)), nil
-}
-
-// log2Func implements log2(X)
-func log2Func(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value <= 0 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Log2(value)), nil
-}
-
-// sinFunc implements sin(X)
-func sinFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Sin(args[0].AsFloat64())), nil
-}
-
-// cosFunc implements cos(X)
-func cosFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Cos(args[0].AsFloat64())), nil
-}
-
-// tanFunc implements tan(X)
-func tanFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Tan(args[0].AsFloat64())), nil
-}
-
-// asinFunc implements asin(X)
-func asinFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value < -1 || value > 1 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Asin(value)), nil
-}
-
-// acosFunc implements acos(X)
-func acosFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value < -1 || value > 1 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Acos(value)), nil
-}
-
-// atanFunc implements atan(X)
-func atanFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Atan(args[0].AsFloat64())), nil
-}
-
 // atan2Func implements atan2(Y, X)
 func atan2Func(args []Value) (Value, error) {
 	if args[0].IsNull() || args[1].IsNull() {
@@ -367,70 +272,6 @@ func atan2Func(args []Value) (Value, error) {
 	x := args[1].AsFloat64()
 
 	return NewFloatValue(math.Atan2(y, x)), nil
-}
-
-// sinhFunc implements sinh(X)
-func sinhFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Sinh(args[0].AsFloat64())), nil
-}
-
-// coshFunc implements cosh(X)
-func coshFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Cosh(args[0].AsFloat64())), nil
-}
-
-// tanhFunc implements tanh(X)
-func tanhFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Tanh(args[0].AsFloat64())), nil
-}
-
-// asinhFunc implements asinh(X)
-func asinhFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	return NewFloatValue(math.Asinh(args[0].AsFloat64())), nil
-}
-
-// acoshFunc implements acosh(X)
-func acoshFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value < 1 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Acosh(value)), nil
-}
-
-// atanhFunc implements atanh(X)
-func atanhFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	value := args[0].AsFloat64()
-	if value <= -1 || value >= 1 {
-		return NewFloatValue(math.NaN()), nil
-	}
-
-	return NewFloatValue(math.Atanh(value)), nil
 }
 
 // signFunc implements sign(X)
@@ -469,28 +310,4 @@ func modFunc(args []Value) (Value, error) {
 // Returns the value of π
 func piFunc(args []Value) (Value, error) {
 	return NewFloatValue(math.Pi), nil
-}
-
-// radiansFunc implements radians(X)
-// Converts degrees to radians
-func radiansFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	degrees := args[0].AsFloat64()
-	radians := degrees * math.Pi / 180.0
-	return NewFloatValue(radians), nil
-}
-
-// degreesFunc implements degrees(X)
-// Converts radians to degrees
-func degreesFunc(args []Value) (Value, error) {
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	radians := args[0].AsFloat64()
-	degrees := radians * 180.0 / math.Pi
-	return NewFloatValue(degrees), nil
 }

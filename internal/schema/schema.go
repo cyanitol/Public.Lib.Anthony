@@ -175,14 +175,7 @@ func (s *Schema) GetTable(name string) (*Table, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// SQLite table names are case-insensitive
-	lowerName := strings.ToLower(name)
-	for tableName, table := range s.Tables {
-		if strings.ToLower(tableName) == lowerName {
-			return table, true
-		}
-	}
-	return nil, false
+	return findCaseInsensitive(s.Tables, name)
 }
 
 // GetTableByName retrieves a table by name (case-insensitive).
@@ -217,13 +210,7 @@ func (s *Schema) GetIndex(name string) (*Index, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	lowerName := strings.ToLower(name)
-	for indexName, index := range s.Indexes {
-		if strings.ToLower(indexName) == lowerName {
-			return index, true
-		}
-	}
-	return nil, false
+	return findCaseInsensitive(s.Indexes, name)
 }
 
 // ListTables returns a sorted list of all table names.
@@ -289,22 +276,14 @@ func (s *Schema) DropTable(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	lowerName := strings.ToLower(name)
-
 	// Find the actual table name (case-insensitive)
-	var actualName string
-	for tableName := range s.Tables {
-		if strings.ToLower(tableName) == lowerName {
-			actualName = tableName
-			break
-		}
-	}
-
-	if actualName == "" {
+	actualName, found := keyCaseInsensitive(s.Tables, name)
+	if !found {
 		return fmt.Errorf("table not found: %s", name)
 	}
 
 	// Remove all indexes for this table
+	lowerName := strings.ToLower(name)
 	for indexName, idx := range s.Indexes {
 		if strings.ToLower(idx.Table) == lowerName {
 			delete(s.Indexes, indexName)
@@ -323,20 +302,12 @@ func (s *Schema) DropTable(name string) error {
 // checkNameConflict checks if a name conflicts with existing tables or indexes.
 // Caller must hold the schema lock.
 func (s *Schema) checkNameConflict(name string) error {
-	lowerName := strings.ToLower(name)
-
-	for tableName := range s.Tables {
-		if strings.ToLower(tableName) == lowerName {
-			return fmt.Errorf("there is already another table or index with this name: %s", name)
-		}
+	if existsCaseInsensitive(s.Tables, name) {
+		return fmt.Errorf("there is already another table or index with this name: %s", name)
 	}
-
-	for indexName := range s.Indexes {
-		if strings.ToLower(indexName) == lowerName {
-			return fmt.Errorf("there is already another table or index with this name: %s", name)
-		}
+	if existsCaseInsensitive(s.Indexes, name) {
+		return fmt.Errorf("there is already another table or index with this name: %s", name)
 	}
-
 	return nil
 }
 
@@ -344,13 +315,7 @@ func (s *Schema) checkNameConflict(name string) error {
 // Returns the actual name and true if found, empty string and false otherwise.
 // Caller must hold the schema lock.
 func (s *Schema) findTableName(name string) (string, bool) {
-	lowerName := strings.ToLower(name)
-	for tableName := range s.Tables {
-		if strings.ToLower(tableName) == lowerName {
-			return tableName, true
-		}
-	}
-	return "", false
+	return keyCaseInsensitive(s.Tables, name)
 }
 
 // updateIndexTableReferences updates all index references from oldName to newName.
@@ -397,16 +362,9 @@ func (s *Schema) DropIndex(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	lowerName := strings.ToLower(name)
-
-	// Find the actual index name (case-insensitive)
-	for indexName := range s.Indexes {
-		if strings.ToLower(indexName) == lowerName {
-			delete(s.Indexes, indexName)
-			return nil
-		}
+	if deleteCaseInsensitive(s.Indexes, name) {
+		return nil
 	}
-
 	return fmt.Errorf("index not found: %s", name)
 }
 
@@ -584,14 +542,11 @@ func (t *Table) GetPrimaryKey() []string {
 // checkTableExists checks if a table already exists in the schema.
 // Returns the existing table if found and ifNotExists is true, otherwise an error.
 func (s *Schema) checkTableExists(name string, ifNotExists bool) (*Table, error) {
-	lowerName := strings.ToLower(name)
-	for tableName, table := range s.Tables {
-		if strings.ToLower(tableName) == lowerName {
-			if ifNotExists {
-				return table, nil
-			}
-			return nil, fmt.Errorf("table already exists: %s", name)
+	if table, found := findCaseInsensitive(s.Tables, name); found {
+		if ifNotExists {
+			return table, nil
 		}
+		return nil, fmt.Errorf("table already exists: %s", name)
 	}
 	return nil, nil
 }
@@ -877,38 +832,20 @@ func (s *Schema) CreateIndex(stmt *parser.CreateIndexStmt) (*Index, error) {
 // checkExistingIndex checks if an index already exists.
 // Returns (existing, true) if should skip, (existing, false) if error needed, (nil, false) if OK to proceed.
 func (s *Schema) checkExistingIndex(stmt *parser.CreateIndexStmt) (*Index, bool) {
-	lowerName := strings.ToLower(stmt.Name)
-	for indexName := range s.Indexes {
-		if strings.ToLower(indexName) == lowerName {
-			if stmt.IfNotExists {
-				return s.Indexes[indexName], true
-			}
-			return s.Indexes[indexName], false
-		}
+	if idx, found := findCaseInsensitive(s.Indexes, stmt.Name); found {
+		return idx, stmt.IfNotExists
 	}
 	return nil, false
 }
 
 // tableExistsLocked checks if a table exists (caller must hold lock).
 func (s *Schema) tableExistsLocked(tableName string) bool {
-	lowerTableName := strings.ToLower(tableName)
-	for name := range s.Tables {
-		if strings.ToLower(name) == lowerTableName {
-			return true
-		}
-	}
-	return false
+	return existsCaseInsensitive(s.Tables, tableName)
 }
 
 // viewExistsLocked checks if a view exists (caller must hold lock).
 func (s *Schema) viewExistsLocked(viewName string) bool {
-	lowerViewName := strings.ToLower(viewName)
-	for name := range s.Views {
-		if strings.ToLower(name) == lowerViewName {
-			return true
-		}
-	}
-	return false
+	return existsCaseInsensitive(s.Views, viewName)
 }
 
 // buildIndex creates an Index from a CREATE INDEX statement.

@@ -97,11 +97,7 @@ func (s *Stmt) compileSelectWithJoinsAndOrderBy(vm *vdbe.VDBE, stmt *parser.Sele
 
 	// Emit initialization, open non-temp cursors, and sorter
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	for _, tbl := range tables {
-		if !tbl.table.Temp {
-			vm.AddOp(vdbe.OpOpenRead, tbl.cursorIdx, int(tbl.table.RootPage), len(tbl.table.Columns))
-		}
-	}
+	openTableCursors(vm, tables)
 	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, 0, orderInfo.sorterCols, 0)
 	vm.Program[sorterOpenAddr].P4.P = keyInfo
 
@@ -143,11 +139,7 @@ func (s *Stmt) emitInnerJoinSorterBody(vm *vdbe.VDBE, stmt *parser.SelectStmt, t
 	outerNextAddr := vm.AddOp(vdbe.OpNext, tables[0].cursorIdx, loopStart, 0)
 
 	// Close ALL cursors after the outermost loop exits
-	for i := len(tables) - 1; i >= 0; i-- {
-		if !tables[i].table.Temp {
-			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
-		}
-	}
+	closeTableCursors(vm, tables)
 
 	// Fix inner Rewind empty-table jumps
 	for _, addr := range innerRewindAddrs {
@@ -174,11 +166,7 @@ func (s *Stmt) emitLeftJoinSorterBody(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 	s.emitJoinLevelSorter(ctx, 0)
 
 	vm.AddOp(vdbe.OpNext, tables[0].cursorIdx, loopStart, 0)
-	for i := len(tables) - 1; i >= 0; i-- {
-		if !tables[i].table.Temp {
-			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
-		}
-	}
+	closeTableCursors(vm, tables)
 }
 
 // resolveOrderByColumnsMultiTable resolves ORDER BY columns for multi-table queries.
@@ -474,17 +462,30 @@ func (s *Stmt) setupJoinVDBE(vm *vdbe.VDBE, stmt *parser.SelectStmt, tables []st
 	return numCols, gen
 }
 
-// emitJoinScanSetup emits initialization and cursor open operations for JOIN.
-// Temp/CTE tables already have open cursors, so OpenRead is skipped for them.
-func (s *Stmt) emitJoinScanSetup(vm *vdbe.VDBE, tables []stmtTableInfo) int {
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
+// openTableCursors emits OpOpenRead for each non-temp table.
+// Temp/CTE tables already have open cursors, so they are skipped.
+func openTableCursors(vm *vdbe.VDBE, tables []stmtTableInfo) {
 	for _, tbl := range tables {
 		if !tbl.table.Temp {
 			vm.AddOp(vdbe.OpOpenRead, tbl.cursorIdx, int(tbl.table.RootPage), len(tbl.table.Columns))
 		}
 	}
+}
 
+// closeTableCursors emits OpClose for each non-temp table in reverse order.
+func closeTableCursors(vm *vdbe.VDBE, tables []stmtTableInfo) {
+	for i := len(tables) - 1; i >= 0; i-- {
+		if !tables[i].table.Temp {
+			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
+		}
+	}
+}
+
+// emitJoinScanSetup emits initialization and cursor open operations for JOIN.
+// Temp/CTE tables already have open cursors, so OpenRead is skipped for them.
+func (s *Stmt) emitJoinScanSetup(vm *vdbe.VDBE, tables []stmtTableInfo) int {
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	openTableCursors(vm, tables)
 	return vm.AddOp(vdbe.OpRewind, tables[0].cursorIdx, 0, 0)
 }
 
@@ -543,11 +544,7 @@ func (s *Stmt) emitJoinLoopCleanup(vm *vdbe.VDBE, tables []stmtTableInfo, innerL
 	outerNextAddr := vm.AddOp(vdbe.OpNext, tables[0].cursorIdx, loopStart, 0)
 
 	// Close ALL cursors after the outermost loop exits
-	for i := len(tables) - 1; i >= 0; i-- {
-		if !tables[i].table.Temp {
-			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
-		}
-	}
+	closeTableCursors(vm, tables)
 	haltAddr := vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	vm.Program[rewindAddr].P2 = haltAddr
 

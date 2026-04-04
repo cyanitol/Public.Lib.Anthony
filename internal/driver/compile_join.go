@@ -238,9 +238,7 @@ func (s *Stmt) compileJoinsWithLeftSupport(vm *vdbe.VDBE, stmt *parser.SelectStm
 
 	// Init + open cursors
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	for _, tbl := range tables {
-		vm.AddOp(vdbe.OpOpenRead, tbl.cursorIdx, int(tbl.table.RootPage), len(tbl.table.Columns))
-	}
+	openTableCursors(vm, tables)
 
 	outerCursor := tables[0].cursorIdx
 	rewindAddr := vm.AddOp(vdbe.OpRewind, outerCursor, 0, 0)
@@ -251,11 +249,7 @@ func (s *Stmt) compileJoinsWithLeftSupport(vm *vdbe.VDBE, stmt *parser.SelectStm
 
 	// Outer Next loops back; close ALL cursors after loop exits
 	vm.AddOp(vdbe.OpNext, outerCursor, loopStart, 0)
-	for i := len(tables) - 1; i >= 0; i-- {
-		if !tables[i].table.Temp {
-			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
-		}
-	}
+	closeTableCursors(vm, tables)
 	haltAddr := vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	vm.Program[rewindAddr].P2 = haltAddr
 

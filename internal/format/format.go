@@ -180,6 +180,12 @@ const (
 	BtreeHeaderSizeInterior = 12
 )
 
+// headerU32Field maps a byte offset in the 100-byte header to a uint32 field pointer.
+type headerU32Field struct {
+	offset int
+	field  *uint32
+}
+
 // Header represents the 100-byte SQLite database file header.
 type Header struct {
 	// Magic is the magic header string ("SQLite format 3\x00").
@@ -253,6 +259,26 @@ type Header struct {
 	SQLiteVersion uint32
 }
 
+// u32Fields returns the mapping of header byte offsets to uint32 field pointers.
+func (h *Header) u32Fields() []headerU32Field {
+	return []headerU32Field{
+		{OffsetFileChangeCounter, &h.FileChangeCounter},
+		{OffsetDatabaseSize, &h.DatabaseSize},
+		{OffsetFirstFreelist, &h.FirstFreelist},
+		{OffsetFreelistCount, &h.FreelistCount},
+		{OffsetSchemaCookie, &h.SchemaCookie},
+		{OffsetSchemaFormat, &h.SchemaFormat},
+		{OffsetDefaultCacheSize, &h.DefaultCacheSize},
+		{OffsetLargestRootPage, &h.LargestRootPage},
+		{OffsetTextEncoding, &h.TextEncoding},
+		{OffsetUserVersion, &h.UserVersion},
+		{OffsetIncrVacuum, &h.IncrVacuum},
+		{OffsetAppID, &h.AppID},
+		{OffsetVersionValidFor, &h.VersionValidFor},
+		{OffsetSQLiteVersion, &h.SQLiteVersion},
+	}
+}
+
 // Parse parses the 100-byte database header from raw bytes.
 func (h *Header) Parse(data []byte) error {
 	if len(data) < HeaderSize {
@@ -288,20 +314,9 @@ func (h *Header) Parse(data []byte) error {
 	h.LeafPayloadFrac = data[OffsetLeafPayloadFrac]
 
 	// Parse 32-bit fields
-	h.FileChangeCounter = binary.BigEndian.Uint32(data[OffsetFileChangeCounter : OffsetFileChangeCounter+4])
-	h.DatabaseSize = binary.BigEndian.Uint32(data[OffsetDatabaseSize : OffsetDatabaseSize+4])
-	h.FirstFreelist = binary.BigEndian.Uint32(data[OffsetFirstFreelist : OffsetFirstFreelist+4])
-	h.FreelistCount = binary.BigEndian.Uint32(data[OffsetFreelistCount : OffsetFreelistCount+4])
-	h.SchemaCookie = binary.BigEndian.Uint32(data[OffsetSchemaCookie : OffsetSchemaCookie+4])
-	h.SchemaFormat = binary.BigEndian.Uint32(data[OffsetSchemaFormat : OffsetSchemaFormat+4])
-	h.DefaultCacheSize = binary.BigEndian.Uint32(data[OffsetDefaultCacheSize : OffsetDefaultCacheSize+4])
-	h.LargestRootPage = binary.BigEndian.Uint32(data[OffsetLargestRootPage : OffsetLargestRootPage+4])
-	h.TextEncoding = binary.BigEndian.Uint32(data[OffsetTextEncoding : OffsetTextEncoding+4])
-	h.UserVersion = binary.BigEndian.Uint32(data[OffsetUserVersion : OffsetUserVersion+4])
-	h.IncrVacuum = binary.BigEndian.Uint32(data[OffsetIncrVacuum : OffsetIncrVacuum+4])
-	h.AppID = binary.BigEndian.Uint32(data[OffsetAppID : OffsetAppID+4])
-	h.VersionValidFor = binary.BigEndian.Uint32(data[OffsetVersionValidFor : OffsetVersionValidFor+4])
-	h.SQLiteVersion = binary.BigEndian.Uint32(data[OffsetSQLiteVersion : OffsetSQLiteVersion+4])
+	for _, f := range h.u32Fields() {
+		*f.field = binary.BigEndian.Uint32(data[f.offset : f.offset+4])
+	}
 
 	// Parse reserved space
 	copy(h.Reserved[:], data[OffsetReserved:OffsetReserved+20])
@@ -328,20 +343,9 @@ func (h *Header) Serialize() []byte {
 	data[OffsetLeafPayloadFrac] = h.LeafPayloadFrac
 
 	// 32-bit fields
-	binary.BigEndian.PutUint32(data[OffsetFileChangeCounter:], h.FileChangeCounter)
-	binary.BigEndian.PutUint32(data[OffsetDatabaseSize:], h.DatabaseSize)
-	binary.BigEndian.PutUint32(data[OffsetFirstFreelist:], h.FirstFreelist)
-	binary.BigEndian.PutUint32(data[OffsetFreelistCount:], h.FreelistCount)
-	binary.BigEndian.PutUint32(data[OffsetSchemaCookie:], h.SchemaCookie)
-	binary.BigEndian.PutUint32(data[OffsetSchemaFormat:], h.SchemaFormat)
-	binary.BigEndian.PutUint32(data[OffsetDefaultCacheSize:], h.DefaultCacheSize)
-	binary.BigEndian.PutUint32(data[OffsetLargestRootPage:], h.LargestRootPage)
-	binary.BigEndian.PutUint32(data[OffsetTextEncoding:], h.TextEncoding)
-	binary.BigEndian.PutUint32(data[OffsetUserVersion:], h.UserVersion)
-	binary.BigEndian.PutUint32(data[OffsetIncrVacuum:], h.IncrVacuum)
-	binary.BigEndian.PutUint32(data[OffsetAppID:], h.AppID)
-	binary.BigEndian.PutUint32(data[OffsetVersionValidFor:], h.VersionValidFor)
-	binary.BigEndian.PutUint32(data[OffsetSQLiteVersion:], h.SQLiteVersion)
+	for _, f := range h.u32Fields() {
+		binary.BigEndian.PutUint32(data[f.offset:], *f.field)
+	}
 
 	// Reserved space
 	copy(data[OffsetReserved:], h.Reserved[:])

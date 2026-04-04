@@ -244,54 +244,17 @@ func applySetOperation(op parser.CompoundOp, left, right [][]interface{}, numCol
 
 // deduplicateRows removes duplicate rows, preserving order of first occurrence.
 func deduplicateRows(rows [][]interface{}) [][]interface{} {
-	seen := make(map[string]bool)
-	var result [][]interface{}
-	for _, row := range rows {
-		k := rowKey(row)
-		if !seen[k] {
-			seen[k] = true
-			result = append(result, row)
-		}
-	}
-	return result
+	return deduplicateRowsBy(rows, rowKey)
 }
 
 // intersectRows returns rows that appear in both left and right (deduplicated).
 func intersectRows(left, right [][]interface{}) [][]interface{} {
-	rightSet := make(map[string]bool)
-	for _, row := range right {
-		rightSet[rowKey(row)] = true
-	}
-
-	seen := make(map[string]bool)
-	var result [][]interface{}
-	for _, row := range left {
-		k := rowKey(row)
-		if rightSet[k] && !seen[k] {
-			seen[k] = true
-			result = append(result, row)
-		}
-	}
-	return result
+	return intersectRowsBy(left, right, rowKey)
 }
 
 // exceptRows returns rows in left that do not appear in right (deduplicated).
 func exceptRows(left, right [][]interface{}) [][]interface{} {
-	rightSet := make(map[string]bool)
-	for _, row := range right {
-		rightSet[rowKey(row)] = true
-	}
-
-	seen := make(map[string]bool)
-	var result [][]interface{}
-	for _, row := range left {
-		k := rowKey(row)
-		if !rightSet[k] && !seen[k] {
-			seen[k] = true
-			result = append(result, row)
-		}
-	}
-	return result
+	return exceptRowsBy(left, right, rowKey)
 }
 
 // orderSpec defines a column to sort by and its direction.
@@ -383,24 +346,7 @@ func shouldNullsFirst(spec orderSpec) bool {
 // compareCompoundNull handles NULL comparison for a single column.
 // Returns (result, true) if a NULL was involved, (0, false) otherwise.
 func compareCompoundNull(a, b interface{}, spec orderSpec) (int, bool) {
-	if a != nil && b != nil {
-		return 0, false
-	}
-	if a == nil && b == nil {
-		return 0, true
-	}
-	nf := shouldNullsFirst(spec)
-	if a == nil {
-		if nf {
-			return -1, true
-		}
-		return 1, true
-	}
-	// b == nil
-	if nf {
-		return 1, true
-	}
-	return -1, true
+	return compareNulls(a == nil, b == nil, shouldNullsFirst(spec))
 }
 
 // compareCompoundRows compares two rows according to orderSpecs.

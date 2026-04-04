@@ -5,10 +5,92 @@ import (
 	"fmt"
 )
 
+// windowErrFunc returns an error indicating the function is a window function.
+func windowErrFunc(name string) func([]Value) (Value, error) {
+	return func([]Value) (Value, error) {
+		return nil, fmt.Errorf("%s() is a window function", name)
+	}
+}
+
+// RowNumberFunc implements ROW_NUMBER() window function placeholder.
+type RowNumberFunc struct{}
+
+func (f *RowNumberFunc) Name() string                  { return "row_number" }
+func (f *RowNumberFunc) NumArgs() int                  { return 0 }
+func (f *RowNumberFunc) Call(a []Value) (Value, error) { return windowErrFunc("row_number")(a) }
+
+// RankFunc implements RANK() window function placeholder.
+type RankFunc struct{}
+
+func (f *RankFunc) Name() string                  { return "rank" }
+func (f *RankFunc) NumArgs() int                  { return 0 }
+func (f *RankFunc) Call(a []Value) (Value, error) { return windowErrFunc("rank")(a) }
+
+// DenseRankFunc implements DENSE_RANK() window function placeholder.
+type DenseRankFunc struct{}
+
+func (f *DenseRankFunc) Name() string                  { return "dense_rank" }
+func (f *DenseRankFunc) NumArgs() int                  { return 0 }
+func (f *DenseRankFunc) Call(a []Value) (Value, error) { return windowErrFunc("dense_rank")(a) }
+
+// NtileFunc implements NTILE() window function placeholder.
+type NtileFunc struct{}
+
+func (f *NtileFunc) Name() string                  { return "ntile" }
+func (f *NtileFunc) NumArgs() int                  { return 1 }
+func (f *NtileFunc) Call(a []Value) (Value, error) { return windowErrFunc("ntile")(a) }
+
+// PercentRankFunc implements PERCENT_RANK() window function placeholder.
+type PercentRankFunc struct{}
+
+func (f *PercentRankFunc) Name() string                  { return "percent_rank" }
+func (f *PercentRankFunc) NumArgs() int                  { return 0 }
+func (f *PercentRankFunc) Call(a []Value) (Value, error) { return windowErrFunc("percent_rank")(a) }
+
+// CumeDistFunc implements CUME_DIST() window function placeholder.
+type CumeDistFunc struct{}
+
+func (f *CumeDistFunc) Name() string                  { return "cume_dist" }
+func (f *CumeDistFunc) NumArgs() int                  { return 0 }
+func (f *CumeDistFunc) Call(a []Value) (Value, error) { return windowErrFunc("cume_dist")(a) }
+
+// LagFunc implements LAG() window function placeholder.
+type LagFunc struct{}
+
+func (f *LagFunc) Name() string                  { return "lag" }
+func (f *LagFunc) NumArgs() int                  { return -1 }
+func (f *LagFunc) Call(a []Value) (Value, error) { return windowErrFunc("lag")(a) }
+
+// LeadFunc implements LEAD() window function placeholder.
+type LeadFunc struct{}
+
+func (f *LeadFunc) Name() string                  { return "lead" }
+func (f *LeadFunc) NumArgs() int                  { return -1 }
+func (f *LeadFunc) Call(a []Value) (Value, error) { return windowErrFunc("lead")(a) }
+
+// FirstValueFunc implements FIRST_VALUE() window function placeholder.
+type FirstValueFunc struct{}
+
+func (f *FirstValueFunc) Name() string                  { return "first_value" }
+func (f *FirstValueFunc) NumArgs() int                  { return 1 }
+func (f *FirstValueFunc) Call(a []Value) (Value, error) { return windowErrFunc("first_value")(a) }
+
+// LastValueFunc implements LAST_VALUE() window function placeholder.
+type LastValueFunc struct{}
+
+func (f *LastValueFunc) Name() string                  { return "last_value" }
+func (f *LastValueFunc) NumArgs() int                  { return 1 }
+func (f *LastValueFunc) Call(a []Value) (Value, error) { return windowErrFunc("last_value")(a) }
+
+// NthValueFunc implements NTH_VALUE() window function placeholder.
+type NthValueFunc struct{}
+
+func (f *NthValueFunc) Name() string                  { return "nth_value" }
+func (f *NthValueFunc) NumArgs() int                  { return 2 }
+func (f *NthValueFunc) Call(a []Value) (Value, error) { return windowErrFunc("nth_value")(a) }
+
 // RegisterWindowFunctions registers all window functions.
 func RegisterWindowFunctions(r *Registry) {
-	// ROW_NUMBER, RANK, DENSE_RANK, NTILE are implemented as opcodes
-	// but we register placeholder functions for completeness
 	r.Register(&RowNumberFunc{})
 	r.Register(&RankFunc{})
 	r.Register(&DenseRankFunc{})
@@ -20,106 +102,6 @@ func RegisterWindowFunctions(r *Registry) {
 	r.Register(&FirstValueFunc{})
 	r.Register(&LastValueFunc{})
 	r.Register(&NthValueFunc{})
-}
-
-// RowNumberFunc implements ROW_NUMBER() window function
-// This is primarily handled by opcode, but we provide the interface
-type RowNumberFunc struct{}
-
-func (f *RowNumberFunc) Name() string { return "row_number" }
-func (f *RowNumberFunc) NumArgs() int { return 0 }
-func (f *RowNumberFunc) Call([]Value) (Value, error) {
-	return nil, fmt.Errorf("row_number() is a window function")
-}
-
-// RankFunc implements RANK() window function
-type RankFunc struct{}
-
-func (f *RankFunc) Name() string { return "rank" }
-func (f *RankFunc) NumArgs() int { return 0 }
-func (f *RankFunc) Call([]Value) (Value, error) {
-	return nil, fmt.Errorf("rank() is a window function")
-}
-
-// DenseRankFunc implements DENSE_RANK() window function
-type DenseRankFunc struct{}
-
-func (f *DenseRankFunc) Name() string { return "dense_rank" }
-func (f *DenseRankFunc) NumArgs() int { return 0 }
-func (f *DenseRankFunc) Call([]Value) (Value, error) {
-	return nil, fmt.Errorf("dense_rank() is a window function")
-}
-
-// NtileFunc implements NTILE() window function
-type NtileFunc struct{}
-
-func (f *NtileFunc) Name() string { return "ntile" }
-func (f *NtileFunc) NumArgs() int { return 1 }
-func (f *NtileFunc) Call([]Value) (Value, error) {
-	return nil, fmt.Errorf("ntile() is a window function")
-}
-
-// PercentRankFunc implements PERCENT_RANK() window function
-type PercentRankFunc struct{}
-
-func (f *PercentRankFunc) Name() string { return "percent_rank" }
-func (f *PercentRankFunc) NumArgs() int { return 0 }
-func (f *PercentRankFunc) Call([]Value) (Value, error) {
-	return nil, fmt.Errorf("percent_rank() is a window function")
-}
-
-// CumeDistFunc implements CUME_DIST() window function
-type CumeDistFunc struct{}
-
-func (f *CumeDistFunc) Name() string { return "cume_dist" }
-func (f *CumeDistFunc) NumArgs() int { return 0 }
-func (f *CumeDistFunc) Call([]Value) (Value, error) {
-	return nil, fmt.Errorf("cume_dist() is a window function")
-}
-
-// LagFunc implements LAG() window function
-type LagFunc struct{}
-
-func (f *LagFunc) Name() string { return "lag" }
-func (f *LagFunc) NumArgs() int { return -1 } // 1-3 args
-func (f *LagFunc) Call([]Value) (Value, error) {
-	return nil, fmt.Errorf("lag() is a window function")
-}
-
-// LeadFunc implements LEAD() window function
-type LeadFunc struct{}
-
-func (f *LeadFunc) Name() string { return "lead" }
-func (f *LeadFunc) NumArgs() int { return -1 } // 1-3 args
-func (f *LeadFunc) Call([]Value) (Value, error) {
-	return nil, fmt.Errorf("lead() is a window function")
-}
-
-// FirstValueFunc implements FIRST_VALUE() window function
-type FirstValueFunc struct{}
-
-func (f *FirstValueFunc) Name() string { return "first_value" }
-func (f *FirstValueFunc) NumArgs() int { return 1 }
-func (f *FirstValueFunc) Call([]Value) (Value, error) {
-	return nil, fmt.Errorf("first_value() is a window function")
-}
-
-// LastValueFunc implements LAST_VALUE() window function
-type LastValueFunc struct{}
-
-func (f *LastValueFunc) Name() string { return "last_value" }
-func (f *LastValueFunc) NumArgs() int { return 1 }
-func (f *LastValueFunc) Call([]Value) (Value, error) {
-	return nil, fmt.Errorf("last_value() is a window function")
-}
-
-// NthValueFunc implements NTH_VALUE() window function
-type NthValueFunc struct{}
-
-func (f *NthValueFunc) Name() string { return "nth_value" }
-func (f *NthValueFunc) NumArgs() int { return 2 }
-func (f *NthValueFunc) Call([]Value) (Value, error) {
-	return nil, fmt.Errorf("nth_value() is a window function")
 }
 
 // WindowAggregateWrapper wraps an aggregate function for use in window context

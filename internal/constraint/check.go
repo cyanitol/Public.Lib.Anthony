@@ -119,7 +119,7 @@ func (cv *CheckValidator) ValidateInsertWithGenerator(gen CheckCodeGenerator) er
 
 	// Validate each CHECK constraint
 	for _, constraint := range cv.constraints {
-		errorMsg := cv.formatErrorMessage(constraint)
+		errorMsg := FormatErrorMessage(constraint)
 		if err := gen.GenerateCheckConstraint(constraint, errorMsg); err != nil {
 			return err
 		}
@@ -140,21 +140,12 @@ func (cv *CheckValidator) ValidateUpdateWithGenerator(gen CheckCodeGenerator) er
 	return cv.ValidateInsertWithGenerator(gen)
 }
 
-// formatErrorMessage creates a user-friendly error message for constraint violations.
+// formatErrorMessage is a method alias for FormatErrorMessage, kept for internal callers.
 func (cv *CheckValidator) formatErrorMessage(constraint *CheckConstraint) string {
-	if constraint.Name != "" {
-		return fmt.Sprintf("CHECK constraint failed: %s (%s)", constraint.Name, constraint.ExprString)
-	}
-
-	if constraint.IsTableLevel {
-		return fmt.Sprintf("CHECK constraint failed: %s", constraint.ExprString)
-	}
-
-	// Column-level constraint
-	return fmt.Sprintf("CHECK constraint failed for column %s: %s", constraint.ColumnName, constraint.ExprString)
+	return FormatErrorMessage(constraint)
 }
 
-// FormatErrorMessage is a public version of formatErrorMessage for use by external code generators.
+// FormatErrorMessage creates a user-friendly error message for constraint violations.
 func FormatErrorMessage(constraint *CheckConstraint) string {
 	if constraint.Name != "" {
 		return fmt.Sprintf("CHECK constraint failed: %s (%s)", constraint.Name, constraint.ExprString)

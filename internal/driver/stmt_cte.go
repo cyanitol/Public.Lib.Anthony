@@ -138,26 +138,7 @@ func (s *Stmt) inlineMainQueryBytecode(vm *vdbe.VDBE, compiledMain *vdbe.VDBE,
 	offsets cteInlineOffsets, cursorMap map[int]int) {
 
 	addrMap := s.buildSimpleAddrMap(compiledMain, offsets.startAddr)
-
-	for i, instr := range compiledMain.Program {
-		_ = i
-		newInstr := s.adjustInstrWithMap(instr, offsets, cursorMap)
-
-		// Convert control flow and mapped cursor ops
-		switch {
-		case instr.Opcode == vdbe.OpInit:
-			newInstr.Opcode = vdbe.OpNoop
-		case isMappedCursorOp(instr, cursorMap):
-			newInstr.Opcode = vdbe.OpNoop
-		}
-
-		addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
-		vm.Program[addr].P4 = instr.P4
-		vm.Program[addr].P4Type = instr.P4Type
-		vm.Program[addr].P5 = instr.P5
-		vm.Program[addr].Comment = instr.Comment
-		s.fixJumpWithAddrMap(vm, instr, addr, addrMap)
-	}
+	s.inlineBytecodeCore(vm, compiledMain, addrMap, offsets, cursorMap, false, nil)
 
 	// Copy result column names from sub-VM
 	if len(compiledMain.ResultCols) > 0 {
@@ -247,52 +228,22 @@ func (s *Stmt) inlineCTESingleInsert(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE,
 	targetCursor int, offsets cteInlineOffsets, cursorMap map[int]int) {
 
 	addrMap := s.buildSingleInsertAddrMap(compiledCTE, offsets.startAddr)
-
-	for _, instr := range compiledCTE.Program {
-		newInstr := s.adjustInstrWithMap(instr, offsets, cursorMap)
-
-		if instr.Opcode == vdbe.OpResultRow {
-			// Convert ResultRow to MakeRecord + single Insert
-			newInstr.Opcode = vdbe.OpMakeRecord
-			newInstr.P3 = offsets.recordReg
-			addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
-			vm.Program[addr].P4 = instr.P4
-			vm.Program[addr].Comment = "CTE: make record"
-			vm.AddOp(vdbe.OpInsert, targetCursor, offsets.recordReg, 0)
-			continue
-		}
-
-		switch {
-		case instr.Opcode == vdbe.OpHalt || instr.Opcode == vdbe.OpInit:
-			newInstr.Opcode = vdbe.OpNoop
-		case isMappedCursorOp(instr, cursorMap):
-			newInstr.Opcode = vdbe.OpNoop
-		}
-
-		addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
-		vm.Program[addr].P4 = instr.P4
-		vm.Program[addr].P4Type = instr.P4Type
-		vm.Program[addr].P5 = instr.P5
-		vm.Program[addr].Comment = instr.Comment
-		s.fixJumpWithAddrMap(vm, instr, addr, addrMap)
+	onResultRow := func(v *vdbe.VDBE, newInstr *vdbe.Instruction, origInstr *vdbe.Instruction) bool {
+		newInstr.Opcode = vdbe.OpMakeRecord
+		newInstr.P3 = offsets.recordReg
+		addr := v.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
+		v.Program[addr].P4 = origInstr.P4
+		v.Program[addr].Comment = "CTE: make record"
+		v.AddOp(vdbe.OpInsert, targetCursor, offsets.recordReg, 0)
+		return true
 	}
+	s.inlineBytecodeCore(vm, compiledCTE, addrMap, offsets, cursorMap, true, onResultRow)
 }
 
 // buildSingleInsertAddrMap builds an address map accounting for ResultRow expansion
 // to 2 instructions (MakeRecord + Insert) instead of 3 (MakeRecord + Insert + Insert).
 func (s *Stmt) buildSingleInsertAddrMap(compiledCTE *vdbe.VDBE, startAddr int) []int {
-	addrMap := make([]int, len(compiledCTE.Program)+1)
-	mainAddr := startAddr
-	for i, instr := range compiledCTE.Program {
-		addrMap[i] = mainAddr
-		if instr.Opcode == vdbe.OpResultRow {
-			mainAddr += 2 // MakeRecord + Insert
-		} else {
-			mainAddr++
-		}
-	}
-	addrMap[len(compiledCTE.Program)] = mainAddr
-	return addrMap
+	return s.buildAddrMapWithExpansion(compiledCTE, startAddr, 2)
 }
 
 // compileCTEPopulation generates bytecode to populate an ephemeral table with CTE results.

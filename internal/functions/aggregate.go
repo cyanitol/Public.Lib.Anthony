@@ -468,67 +468,30 @@ func marshalJSONValue(v interface{}) Value {
 	return NewTextValue(string(data))
 }
 
-// Scalar versions of min/max for non-aggregate use
-// These are registered separately and handle multiple arguments
-
-// minScalarFunc implements min(X1, X2, ..., XN) as scalar function
-func minScalarFunc(args []Value) (Value, error) {
-	if len(args) == 0 {
-		return nil, fmt.Errorf("min() requires at least 1 argument")
-	}
-
-	var minVal Value
-	hasValue := false
-
-	for _, arg := range args {
-		if arg.IsNull() {
-			continue
+// makeMinMaxScalar creates a scalar min/max function parameterized by comparison direction.
+// cmpDir should be -1 for min (pick smaller) or +1 for max (pick larger).
+func makeMinMaxScalar(name string, cmpDir int) func([]Value) (Value, error) {
+	return func(args []Value) (Value, error) {
+		if len(args) == 0 {
+			return nil, fmt.Errorf("%s() requires at least 1 argument", name)
 		}
-
-		if !hasValue {
-			minVal = arg
-			hasValue = true
-		} else {
-			if compareValues(arg, minVal) < 0 {
-				minVal = arg
+		var best Value
+		for _, arg := range args {
+			if arg.IsNull() {
+				continue
+			}
+			if best == nil || compareValues(arg, best)*cmpDir > 0 {
+				best = arg
 			}
 		}
+		if best == nil {
+			return NewNullValue(), nil
+		}
+		return best, nil
 	}
-
-	if !hasValue {
-		return NewNullValue(), nil
-	}
-
-	return minVal, nil
 }
 
-// maxScalarFunc implements max(X1, X2, ..., XN) as scalar function
-func maxScalarFunc(args []Value) (Value, error) {
-	if len(args) == 0 {
-		return nil, fmt.Errorf("max() requires at least 1 argument")
-	}
-
-	var maxVal Value
-	hasValue := false
-
-	for _, arg := range args {
-		if arg.IsNull() {
-			continue
-		}
-
-		if !hasValue {
-			maxVal = arg
-			hasValue = true
-		} else {
-			if compareValues(arg, maxVal) > 0 {
-				maxVal = arg
-			}
-		}
-	}
-
-	if !hasValue {
-		return NewNullValue(), nil
-	}
-
-	return maxVal, nil
-}
+var (
+	minScalarFunc = makeMinMaxScalar("min", -1)
+	maxScalarFunc = makeMinMaxScalar("max", 1)
+)

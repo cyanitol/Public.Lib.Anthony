@@ -232,28 +232,12 @@ func (s *Stmt) emitQueueSwap(vm *vdbe.VDBE, state *recursiveCTEState) {
 // buildAddrMap builds a mapping from CTE instruction index to main VM address,
 // accounting for instruction expansion (ResultRow -> 3 instructions).
 func (s *Stmt) buildAddrMap(compiledCTE *vdbe.VDBE, startAddr int) []int {
-	addrMap := make([]int, len(compiledCTE.Program)+1)
-	mainAddr := startAddr
-	for i, instr := range compiledCTE.Program {
-		addrMap[i] = mainAddr
-		if instr.Opcode == vdbe.OpResultRow {
-			mainAddr += 3 // MakeRecord + Insert + Insert
-		} else {
-			mainAddr++
-		}
-	}
-	addrMap[len(compiledCTE.Program)] = mainAddr // address past the end
-	return addrMap
+	return s.buildAddrMapWithExpansion(compiledCTE, startAddr, 3)
 }
 
 // buildSimpleAddrMap builds a 1:1 address map (no instruction expansion).
 func (s *Stmt) buildSimpleAddrMap(compiled *vdbe.VDBE, startAddr int) []int {
-	addrMap := make([]int, len(compiled.Program)+1)
-	for i := range compiled.Program {
-		addrMap[i] = startAddr + i
-	}
-	addrMap[len(compiled.Program)] = startAddr + len(compiled.Program)
-	return addrMap
+	return s.buildAddrMapWithExpansion(compiled, startAddr, 1)
 }
 
 // inlineCTEWithAddrMap inlines CTE bytecode using a proper address mapping
@@ -262,31 +246,11 @@ func (s *Stmt) inlineCTEWithAddrMap(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE,
 	cursors [2]int, offsets cteInlineOffsets, cursorMap map[int]int) {
 
 	addrMap := s.buildAddrMap(compiledCTE, offsets.startAddr)
-
-	for i, instr := range compiledCTE.Program {
-		_ = i // used in addrMap
-		newInstr := s.adjustInstrWithMap(instr, offsets, cursorMap)
-
-		if instr.Opcode == vdbe.OpResultRow {
-			s.emitMultiInsert(vm, &newInstr, instr, cursors, offsets)
-			continue
-		}
-
-		// Convert control flow and mapped cursor ops to no-ops when inlining.
-		switch {
-		case instr.Opcode == vdbe.OpHalt || instr.Opcode == vdbe.OpInit:
-			newInstr.Opcode = vdbe.OpNoop
-		case isMappedCursorOp(instr, cursorMap):
-			newInstr.Opcode = vdbe.OpNoop
-		}
-
-		addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
-		vm.Program[addr].P4 = instr.P4
-		vm.Program[addr].P4Type = instr.P4Type
-		vm.Program[addr].P5 = instr.P5
-		vm.Program[addr].Comment = instr.Comment
-		s.fixJumpWithAddrMap(vm, instr, addr, addrMap)
+	onResultRow := func(v *vdbe.VDBE, newInstr *vdbe.Instruction, origInstr *vdbe.Instruction) bool {
+		s.emitMultiInsert(v, newInstr, origInstr, cursors, offsets)
+		return true
 	}
+	s.inlineBytecodeCore(vm, compiledCTE, addrMap, offsets, cursorMap, true, onResultRow)
 }
 
 // emitMultiInsert emits MakeRecord + Insert into two cursors for a ResultRow replacement.
@@ -319,45 +283,33 @@ func (s *Stmt) inlineCTEWithDedupInner(vm *vdbe.VDBE, compiledCTE *vdbe.VDBE,
 	cursors [2]int, offsets cteInlineOffsets, cursorMap map[int]int, state *recursiveCTEState) {
 
 	addrMap := s.buildDedupAddrMap(compiledCTE, offsets.startAddr)
-
-	for _, instr := range compiledCTE.Program {
-		newInstr := s.adjustInstrWithMap(instr, offsets, cursorMap)
-
-		if instr.Opcode == vdbe.OpResultRow {
-			s.emitDedupMultiInsert(vm, &newInstr, instr, cursors, offsets, state)
-			continue
-		}
-
-		switch {
-		case instr.Opcode == vdbe.OpHalt || instr.Opcode == vdbe.OpInit:
-			newInstr.Opcode = vdbe.OpNoop
-		case isMappedCursorOp(instr, cursorMap):
-			newInstr.Opcode = vdbe.OpNoop
-		}
-
-		addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
-		vm.Program[addr].P4 = instr.P4
-		vm.Program[addr].P4Type = instr.P4Type
-		vm.Program[addr].P5 = instr.P5
-		vm.Program[addr].Comment = instr.Comment
-		s.fixJumpWithAddrMap(vm, instr, addr, addrMap)
+	onResultRow := func(v *vdbe.VDBE, newInstr *vdbe.Instruction, origInstr *vdbe.Instruction) bool {
+		s.emitDedupMultiInsert(v, newInstr, origInstr, cursors, offsets, state)
+		return true
 	}
+	s.inlineBytecodeCore(vm, compiledCTE, addrMap, offsets, cursorMap, true, onResultRow)
 }
 
 // buildDedupAddrMap builds an address map where ResultRow expands to 4 instructions
 // (MakeRecord + DistinctRow + Insert + Insert) instead of 3.
 func (s *Stmt) buildDedupAddrMap(compiledCTE *vdbe.VDBE, startAddr int) []int {
-	addrMap := make([]int, len(compiledCTE.Program)+1)
+	return s.buildAddrMapWithExpansion(compiledCTE, startAddr, 4)
+}
+
+// buildAddrMapWithExpansion builds an address map from CTE instruction indices to main VM
+// addresses. Each OpResultRow expands to resultRowExpansion instructions; all others map 1:1.
+func (s *Stmt) buildAddrMapWithExpansion(compiled *vdbe.VDBE, startAddr int, resultRowExpansion int) []int {
+	addrMap := make([]int, len(compiled.Program)+1)
 	mainAddr := startAddr
-	for i, instr := range compiledCTE.Program {
+	for i, instr := range compiled.Program {
 		addrMap[i] = mainAddr
 		if instr.Opcode == vdbe.OpResultRow {
-			mainAddr += 4 // MakeRecord + DistinctRow + Insert + Insert
+			mainAddr += resultRowExpansion
 		} else {
 			mainAddr++
 		}
 	}
-	addrMap[len(compiledCTE.Program)] = mainAddr
+	addrMap[len(compiled.Program)] = mainAddr
 	return addrMap
 }
 
@@ -381,6 +333,47 @@ func (s *Stmt) emitDedupMultiInsert(vm *vdbe.VDBE, newInstr *vdbe.Instruction,
 	// 3. Insert into both cursors
 	vm.AddOp(vdbe.OpInsert, cursors[0], offsets.recordReg, 0)
 	vm.AddOp(vdbe.OpInsert, cursors[1], offsets.recordReg, 0)
+}
+
+// resultRowHandler is called when a ResultRow opcode is encountered during
+// bytecode inlining. It receives the adjusted and original instructions and
+// must emit replacement bytecode into vm. Return true to skip the default
+// AddOp for this instruction (i.e. the handler already emitted ops).
+type resultRowHandler func(vm *vdbe.VDBE, newInstr *vdbe.Instruction, origInstr *vdbe.Instruction) bool
+
+// inlineBytecodeCore is the shared core loop for inlining sub-VM bytecode into
+// the main VM. It adjusts cursors/registers via adjustInstrWithMap, converts
+// Init (and optionally Halt) plus mapped-cursor ops to Noop, and delegates
+// ResultRow handling to the provided callback.
+func (s *Stmt) inlineBytecodeCore(vm *vdbe.VDBE, compiled *vdbe.VDBE,
+	addrMap []int, offsets cteInlineOffsets, cursorMap map[int]int,
+	convertHalt bool, onResultRow resultRowHandler) {
+
+	for _, instr := range compiled.Program {
+		newInstr := s.adjustInstrWithMap(instr, offsets, cursorMap)
+
+		if instr.Opcode == vdbe.OpResultRow && onResultRow != nil {
+			if onResultRow(vm, &newInstr, instr) {
+				continue
+			}
+		}
+
+		switch {
+		case instr.Opcode == vdbe.OpInit:
+			newInstr.Opcode = vdbe.OpNoop
+		case convertHalt && instr.Opcode == vdbe.OpHalt:
+			newInstr.Opcode = vdbe.OpNoop
+		case isMappedCursorOp(instr, cursorMap):
+			newInstr.Opcode = vdbe.OpNoop
+		}
+
+		addr := vm.AddOp(newInstr.Opcode, newInstr.P1, newInstr.P2, newInstr.P3)
+		vm.Program[addr].P4 = instr.P4
+		vm.Program[addr].P4Type = instr.P4Type
+		vm.Program[addr].P5 = instr.P5
+		vm.Program[addr].Comment = instr.Comment
+		s.fixJumpWithAddrMap(vm, instr, addr, addrMap)
+	}
 }
 
 // adjustInstrWithMap adjusts instruction parameters with optional cursor mapping.

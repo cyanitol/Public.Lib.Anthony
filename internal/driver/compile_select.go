@@ -826,15 +826,7 @@ func (s *Stmt) emitOrderByOutputLoop(vm *vdbe.VDBE, stmt *parser.SelectStmt, num
 	vm.AddOp(vdbe.OpSorterData, 0, 0, numCols)
 
 	// OFFSET check before ResultRow (skip early rows)
-	var offsetSkipAddr int
-	if limitInfo.hasOffset {
-		vm.AddOp(vdbe.OpAddImm, limitInfo.offsetReg, 1, 0)
-		offsetCheckReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpInteger, limitInfo.offsetVal, offsetCheckReg, 0)
-		cmpReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpLe, limitInfo.offsetReg, offsetCheckReg, cmpReg)
-		offsetSkipAddr = vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)
-	}
+	offsetSkipAddr := s.emitOffsetCheck(vm, limitInfo, gen)
 
 	// Handle DISTINCT - check if row is unique before outputting
 	var distinctSkipAddr int
@@ -854,15 +846,7 @@ func (s *Stmt) emitOrderByOutputLoop(vm *vdbe.VDBE, stmt *parser.SelectStmt, num
 	vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
 
 	// LIMIT check after ResultRow (stop after N rows emitted)
-	var limitJumpAddr int
-	if limitInfo.hasLimit {
-		vm.AddOp(vdbe.OpAddImm, limitInfo.limitReg, 1, 0)
-		limitCheckReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpInteger, limitInfo.limitVal, limitCheckReg, 0)
-		cmpReg := gen.AllocReg()
-		vm.AddOp(vdbe.OpGe, limitInfo.limitReg, limitCheckReg, cmpReg)
-		limitJumpAddr = vm.AddOp(vdbe.OpIf, cmpReg, 0, 0)
-	}
+	limitJumpAddr := s.emitLimitCheck(vm, limitInfo, gen)
 
 	// Fix DISTINCT skip - jump to SorterNext
 	nextRowAddr := vm.AddOp(vdbe.OpSorterNext, 0, sorterLoopAddr, 0)

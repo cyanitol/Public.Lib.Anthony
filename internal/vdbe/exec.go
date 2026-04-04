@@ -4128,25 +4128,27 @@ func (v *VDBE) execNotNull(instr *Instruction) error {
 
 // Arithmetic implementations
 
-func (v *VDBE) execAdd(instr *Instruction) error {
-	// P3 = P1 + P2
+// execBinaryMemOp implements a binary arithmetic operation: P3 = P1 op P2.
+// The op function is called as result.op(right) after copying left into result.
+func (v *VDBE) execBinaryMemOp(instr *Instruction, op func(*Mem, *Mem) error) error {
 	left, err := v.GetMem(instr.P1)
 	if err != nil {
 		return err
 	}
-
 	right, err := v.GetMem(instr.P2)
 	if err != nil {
 		return err
 	}
-
 	result, err := v.GetMem(instr.P3)
 	if err != nil {
 		return err
 	}
-
 	result.Copy(left)
-	return result.Add(right)
+	return op(result, right)
+}
+
+func (v *VDBE) execAdd(instr *Instruction) error {
+	return v.execBinaryMemOp(instr, (*Mem).Add)
 }
 
 func (v *VDBE) execConcat(instr *Instruction) error {
@@ -4179,87 +4181,19 @@ func (v *VDBE) execConcat(instr *Instruction) error {
 }
 
 func (v *VDBE) execSubtract(instr *Instruction) error {
-	// P3 = P1 - P2
-	left, err := v.GetMem(instr.P1)
-	if err != nil {
-		return err
-	}
-
-	right, err := v.GetMem(instr.P2)
-	if err != nil {
-		return err
-	}
-
-	result, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
-	}
-
-	result.Copy(left)
-	return result.Subtract(right)
+	return v.execBinaryMemOp(instr, (*Mem).Subtract)
 }
 
 func (v *VDBE) execMultiply(instr *Instruction) error {
-	// P3 = P1 * P2
-	left, err := v.GetMem(instr.P1)
-	if err != nil {
-		return err
-	}
-
-	right, err := v.GetMem(instr.P2)
-	if err != nil {
-		return err
-	}
-
-	result, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
-	}
-
-	result.Copy(left)
-	return result.Multiply(right)
+	return v.execBinaryMemOp(instr, (*Mem).Multiply)
 }
 
 func (v *VDBE) execDivide(instr *Instruction) error {
-	// P3 = P1 / P2
-	left, err := v.GetMem(instr.P1)
-	if err != nil {
-		return err
-	}
-
-	right, err := v.GetMem(instr.P2)
-	if err != nil {
-		return err
-	}
-
-	result, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
-	}
-
-	result.Copy(left)
-	return result.Divide(right)
+	return v.execBinaryMemOp(instr, (*Mem).Divide)
 }
 
 func (v *VDBE) execRemainder(instr *Instruction) error {
-	// P3 = P1 % P2
-	left, err := v.GetMem(instr.P1)
-	if err != nil {
-		return err
-	}
-
-	right, err := v.GetMem(instr.P2)
-	if err != nil {
-		return err
-	}
-
-	result, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
-	}
-
-	result.Copy(left)
-	return result.Remainder(right)
+	return v.execBinaryMemOp(instr, (*Mem).Remainder)
 }
 
 func (v *VDBE) execAddImm(instr *Instruction) error {
@@ -5153,68 +5087,35 @@ func (v *VDBE) execToReal(instr *Instruction) error {
 
 // Bitwise operation implementations
 
-func (v *VDBE) execBitAnd(instr *Instruction) error {
-	// P3 = P1 & P2 (bitwise AND)
+// execBinaryBitOp implements a binary bitwise operation: P3 = P1 op P2.
+// NULL propagates: if either operand is NULL, result is NULL.
+func (v *VDBE) execBinaryBitOp(instr *Instruction, op func(int64, int64) int64) error {
 	left, err := v.GetMem(instr.P1)
 	if err != nil {
 		return err
 	}
-
 	right, err := v.GetMem(instr.P2)
 	if err != nil {
 		return err
 	}
-
 	result, err := v.GetMem(instr.P3)
 	if err != nil {
 		return err
 	}
-
-	// NULL propagation: if either operand is NULL, result is NULL
 	if left.IsNull() || right.IsNull() {
 		result.SetNull()
 		return nil
 	}
-
-	// Convert both operands to integers
-	leftVal := left.IntValue()
-	rightVal := right.IntValue()
-
-	// Perform bitwise AND
-	result.SetInt(leftVal & rightVal)
+	result.SetInt(op(left.IntValue(), right.IntValue()))
 	return nil
 }
 
+func (v *VDBE) execBitAnd(instr *Instruction) error {
+	return v.execBinaryBitOp(instr, func(a, b int64) int64 { return a & b })
+}
+
 func (v *VDBE) execBitOr(instr *Instruction) error {
-	// P3 = P1 | P2 (bitwise OR)
-	left, err := v.GetMem(instr.P1)
-	if err != nil {
-		return err
-	}
-
-	right, err := v.GetMem(instr.P2)
-	if err != nil {
-		return err
-	}
-
-	result, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
-	}
-
-	// NULL propagation: if either operand is NULL, result is NULL
-	if left.IsNull() || right.IsNull() {
-		result.SetNull()
-		return nil
-	}
-
-	// Convert both operands to integers
-	leftVal := left.IntValue()
-	rightVal := right.IntValue()
-
-	// Perform bitwise OR
-	result.SetInt(leftVal | rightVal)
-	return nil
+	return v.execBinaryBitOp(instr, func(a, b int64) int64 { return a | b })
 }
 
 func (v *VDBE) execBitNot(instr *Instruction) error {
@@ -5243,7 +5144,9 @@ func (v *VDBE) execBitNot(instr *Instruction) error {
 	return nil
 }
 
-func (v *VDBE) execShiftLeft(instr *Instruction) error {
+// execShiftOp implements a shift operation: P3 = P2 shift P1.
+// The op function computes the shifted value from shift amount and value.
+func (v *VDBE) execShiftOp(instr *Instruction, op func(int64, int64) int64) error {
 	shiftAmount, value, result, err := v.getShiftOperands(instr)
 	if err != nil {
 		return err
@@ -5254,10 +5157,12 @@ func (v *VDBE) execShiftLeft(instr *Instruction) error {
 		return nil
 	}
 
-	shift := shiftAmount.IntValue()
-	val := value.IntValue()
-	result.SetInt(computeLeftShift(shift, val))
+	result.SetInt(op(shiftAmount.IntValue(), value.IntValue()))
 	return nil
+}
+
+func (v *VDBE) execShiftLeft(instr *Instruction) error {
+	return v.execShiftOp(instr, computeLeftShift)
 }
 
 // getShiftOperands retrieves the three memory operands for shift operations.
@@ -5306,47 +5211,14 @@ func computeShiftRight(shift, val int64) int64 {
 }
 
 func (v *VDBE) execShiftRight(instr *Instruction) error {
-	// P3 = P2 >> P1
-	// Note: P1 is shift amount, P2 is value to shift
-	shiftAmount, err := v.GetMem(instr.P1)
-	if err != nil {
-		return err
-	}
-
-	value, err := v.GetMem(instr.P2)
-	if err != nil {
-		return err
-	}
-
-	result, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
-	}
-
-	// NULL propagation: if either operand is NULL, result is NULL
-	if shiftAmount.IsNull() || value.IsNull() {
-		result.SetNull()
-		return nil
-	}
-
-	// Convert operands to integers and perform shift
-	shift := shiftAmount.IntValue()
-	val := value.IntValue()
-	result.SetInt(computeShiftRight(shift, val))
-	return nil
+	return v.execShiftOp(instr, computeShiftRight)
 }
 
 // Logical operation implementations
 
-func (v *VDBE) execAnd(instr *Instruction) error {
-	// P3 = P1 AND P2 (logical AND, returns 0/1/NULL)
-	// SQLite semantics:
-	// - FALSE AND anything = FALSE (0)
-	// - TRUE AND TRUE = TRUE (1)
-	// - TRUE AND FALSE = FALSE (0)
-	// - NULL AND FALSE = FALSE (0)
-	// - NULL AND TRUE = NULL
-	// - NULL AND NULL = NULL
+// execLogicalOp implements a binary logical operation: P3 = P1 op P2.
+// The setResult function applies the appropriate three-valued logic.
+func (v *VDBE) execLogicalOp(instr *Instruction, setResult func(*Mem, bool, bool, bool, bool)) error {
 	left, right, result, err := v.getLogicalOperands(instr)
 	if err != nil {
 		return err
@@ -5355,8 +5227,12 @@ func (v *VDBE) execAnd(instr *Instruction) error {
 	leftIsNull, leftBool := evalMemAsBool(left)
 	rightIsNull, rightBool := evalMemAsBool(right)
 
-	v.setLogicalAndResult(result, leftIsNull, leftBool, rightIsNull, rightBool)
+	setResult(result, leftIsNull, leftBool, rightIsNull, rightBool)
 	return nil
+}
+
+func (v *VDBE) execAnd(instr *Instruction) error {
+	return v.execLogicalOp(instr, v.setLogicalAndResult)
 }
 
 // getLogicalOperands retrieves the operands and result for logical operations
@@ -5400,24 +5276,7 @@ func (v *VDBE) setLogicalAndResult(result *Mem, leftIsNull, leftBool, rightIsNul
 }
 
 func (v *VDBE) execOr(instr *Instruction) error {
-	// P3 = P1 OR P2 (logical OR, returns 0/1/NULL)
-	// SQLite semantics:
-	// - TRUE OR anything = TRUE (1)
-	// - FALSE OR FALSE = FALSE (0)
-	// - FALSE OR TRUE = TRUE (1)
-	// - NULL OR TRUE = TRUE (1)
-	// - NULL OR FALSE = NULL
-	// - NULL OR NULL = NULL
-	left, right, result, err := v.getLogicalOperands(instr)
-	if err != nil {
-		return err
-	}
-
-	leftIsNull, leftBool := evalMemAsBool(left)
-	rightIsNull, rightBool := evalMemAsBool(right)
-
-	v.setLogicalOrResult(result, leftIsNull, leftBool, rightIsNull, rightBool)
-	return nil
+	return v.execLogicalOp(instr, v.setLogicalOrResult)
 }
 
 // setLogicalOrResult sets the result of a logical OR operation

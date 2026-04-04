@@ -119,11 +119,7 @@ func (s *Stmt) joinAggPhase1(vm *vdbe.VDBE, gen *expr.CodeGenerator,
 
 	// Open table cursors and sorter
 	keyInfo := s.createGroupBySorterKeyInfo(numGroupBy, collations)
-	for _, tbl := range tables {
-		if !tbl.table.Temp {
-			vm.AddOp(vdbe.OpOpenRead, tbl.cursorIdx, int(tbl.table.RootPage), len(tbl.table.Columns))
-		}
-	}
+	openTableCursors(vm, tables)
 	sorterOpenAddr := vm.AddOp(vdbe.OpSorterOpen, sorterCursor, sorterCols, 0)
 	vm.Program[sorterOpenAddr].P4.P = keyInfo
 
@@ -160,11 +156,7 @@ func (s *Stmt) emitInnerJoinAggBody(vm *vdbe.VDBE, gen *expr.CodeGenerator,
 	}
 	outerNextAddr := vm.AddOp(vdbe.OpNext, tables[0].cursorIdx, loopStart, 0)
 
-	for i := len(tables) - 1; i >= 0; i-- {
-		if !tables[i].table.Temp {
-			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
-		}
-	}
+	closeTableCursors(vm, tables)
 	for _, addr := range innerRewindAddrs {
 		vm.Program[addr].P2 = outerNextAddr
 	}
@@ -204,11 +196,7 @@ func (s *Stmt) emitLeftJoinAggBody(vm *vdbe.VDBE, gen *expr.CodeGenerator,
 	s.emitJoinLevelAgg(ctx, 0)
 
 	vm.AddOp(vdbe.OpNext, tables[0].cursorIdx, loopStart, 0)
-	for i := len(tables) - 1; i >= 0; i-- {
-		if !tables[i].table.Temp {
-			vm.AddOp(vdbe.OpClose, tables[i].cursorIdx, 0, 0)
-		}
-	}
+	closeTableCursors(vm, tables)
 }
 
 // emitJoinLevelAgg emits the loop body for join index joinIdx, inserting into the aggregate sorter.

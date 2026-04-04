@@ -23,14 +23,7 @@ func (s *Schema) GetView(name string) (*View, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// SQLite view names are case-insensitive
-	lowerName := strings.ToLower(name)
-	for viewName, view := range s.Views {
-		if strings.ToLower(viewName) == lowerName {
-			return view, true
-		}
-	}
-	return nil, false
+	return findCaseInsensitive(s.Views, name)
 }
 
 // ListViews returns a sorted list of all view names.
@@ -90,30 +83,20 @@ func (s *Schema) DropView(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	lowerName := strings.ToLower(name)
-
-	// Find the actual view name (case-insensitive)
-	for viewName := range s.Views {
-		if strings.ToLower(viewName) == lowerName {
-			delete(s.Views, viewName)
-			return nil
-		}
+	if deleteCaseInsensitive(s.Views, name) {
+		return nil
 	}
-
 	return fmt.Errorf("view not found: %s", name)
 }
 
 // checkViewExists checks if a view already exists in the schema.
 // Returns the existing view if found and ifNotExists is true, otherwise an error.
 func (s *Schema) checkViewExists(name string, ifNotExists bool) (*View, error) {
-	lowerName := strings.ToLower(name)
-	for viewName, view := range s.Views {
-		if strings.ToLower(viewName) == lowerName {
-			if ifNotExists {
-				return view, nil
-			}
-			return nil, fmt.Errorf("view already exists: %s", name)
+	if view, found := findCaseInsensitive(s.Views, name); found {
+		if ifNotExists {
+			return view, nil
 		}
+		return nil, fmt.Errorf("view already exists: %s", name)
 	}
 	return nil, nil
 }

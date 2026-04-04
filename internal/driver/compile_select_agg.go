@@ -630,17 +630,7 @@ func (s *Stmt) emitAggregateScanLoop(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 // emitAggregateWhereClause emits WHERE clause for aggregate SELECT.
 func (s *Stmt) emitAggregateWhereClause(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	gen *expr.CodeGenerator) int {
-
-	if stmt.Where == nil {
-		return 0
-	}
-
-	whereReg, err := gen.GenerateExpr(stmt.Where)
-	if err != nil {
-		return 0
-	}
-
-	return vm.AddOp(vdbe.OpIfNot, whereReg, 0, 0)
+	return s.emitSimpleSelectWhere(vm, stmt, gen)
 }
 
 // emitAggregateUpdates emits accumulator updates for all aggregate functions.

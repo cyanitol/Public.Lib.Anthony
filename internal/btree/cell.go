@@ -9,6 +9,17 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/security"
 )
 
+// mustGetVarint reads a varint from data at the given offset.
+// It returns the decoded value, the new offset past the varint, or an error
+// if the varint could not be read.
+func mustGetVarint(data []byte, offset int, field string) (uint64, int, error) {
+	val, n := GetVarint(data[offset:])
+	if n == 0 {
+		return 0, 0, fmt.Errorf("failed to read %s", field)
+	}
+	return val, offset + n, nil
+}
+
 // CellInfo contains parsed information about a B-tree cell
 type CellInfo struct {
 	Key          int64  // The integer key for table b-trees, or payload size for index b-trees
@@ -63,21 +74,19 @@ func parseTableLeafCompositeCell(cellData []byte, usableSize uint32) (*CellInfo,
 	offset := 0
 	info := &CellInfo{}
 
-	payloadSize64, n := GetVarint(cellData[offset:])
-	if n == 0 {
-		return nil, fmt.Errorf("failed to read payload size")
+	payloadSize64, offset, err := mustGetVarint(cellData, offset, "payload size")
+	if err != nil {
+		return nil, err
 	}
 	if payloadSize64 > math.MaxUint32 {
 		return nil, security.ErrIntegerOverflow
 	}
 	info.PayloadSize = uint32(payloadSize64)
-	offset += n
 
-	keyLen64, n := GetVarint(cellData[offset:])
-	if n == 0 {
-		return nil, fmt.Errorf("failed to read composite key length")
+	keyLen64, offset, err := mustGetVarint(cellData, offset, "composite key length")
+	if err != nil {
+		return nil, err
 	}
-	offset += n
 	if keyLen64 > uint64(len(cellData)-offset) {
 		return nil, fmt.Errorf("composite key length exceeds cell size")
 	}
@@ -93,25 +102,23 @@ func parseLeafCellHeader(cellData []byte) (*CellInfo, int, error) {
 	info := &CellInfo{}
 	offset := 0
 
-	payloadSize64, n := GetVarint(cellData[offset:])
-	if n == 0 {
-		return nil, 0, fmt.Errorf("failed to read payload size")
+	payloadSize64, offset, err := mustGetVarint(cellData, offset, "payload size")
+	if err != nil {
+		return nil, 0, err
 	}
 	if payloadSize64 > math.MaxUint32 {
 		return nil, 0, security.ErrIntegerOverflow
 	}
 	info.PayloadSize = uint32(payloadSize64)
-	offset += n
 
-	rowid, n := GetVarint(cellData[offset:])
-	if n == 0 {
-		return nil, 0, fmt.Errorf("failed to read rowid")
+	rowid, offset, err := mustGetVarint(cellData, offset, "rowid")
+	if err != nil {
+		return nil, 0, err
 	}
 	if rowid > math.MaxInt64 {
 		return nil, 0, security.ErrIntegerOverflow
 	}
 	info.Key = int64(rowid)
-	offset += n
 
 	return info, offset, nil
 }
@@ -194,15 +201,15 @@ func parseTableInteriorCell(cellData []byte) (*CellInfo, error) {
 	info.ChildPage = binary.BigEndian.Uint32(cellData[0:4])
 
 	// Read rowid (varint)
-	rowid, n := GetVarint(cellData[4:])
-	if n == 0 {
-		return nil, fmt.Errorf("failed to read rowid")
+	rowid, newOff, err := mustGetVarint(cellData, 4, "rowid")
+	if err != nil {
+		return nil, err
 	}
 	if rowid > math.MaxInt64 {
 		return nil, security.ErrIntegerOverflow
 	}
 	info.Key = int64(rowid)
-	info.CellSize = uint16(4 + n)
+	info.CellSize = uint16(newOff)
 
 	return info, nil
 }
@@ -218,32 +225,31 @@ func parseTableInteriorCompositeCell(cellData []byte) (*CellInfo, error) {
 	info.ChildPage = binary.BigEndian.Uint32(cellData[offset:])
 	offset += 4
 
-	keyLen64, n := GetVarint(cellData[offset:])
-	if n == 0 {
-		return nil, fmt.Errorf("failed to read composite key length")
+	keyLen64, offset, err := mustGetVarint(cellData, offset, "composite key length")
+	if err != nil {
+		return nil, err
 	}
-	offset += n
 	if keyLen64 > uint64(len(cellData)-offset) {
 		return nil, fmt.Errorf("composite key length exceeds cell size")
 	}
 	keyLen := int(keyLen64)
 	info.KeyBytes = append([]byte(nil), cellData[offset:offset+keyLen]...)
-	info.CellSize = uint16(4 + n + keyLen)
+	info.CellSize = uint16(offset + keyLen)
 	return info, nil
 }
 
 // readIndexPayloadVarint reads payload size varint and sets PayloadSize and Key.
 func readIndexPayloadVarint(info *CellInfo, cellData []byte, offset int) (int, error) {
-	payloadSize64, n := GetVarint(cellData[offset:])
-	if n == 0 {
-		return 0, fmt.Errorf("failed to read payload size")
+	payloadSize64, newOff, err := mustGetVarint(cellData, offset, "payload size")
+	if err != nil {
+		return 0, err
 	}
 	if payloadSize64 > math.MaxUint32 {
 		return 0, security.ErrIntegerOverflow
 	}
 	info.PayloadSize = uint32(payloadSize64)
 	info.Key = int64(payloadSize64) // For index pages, key is payload size
-	return offset + n, nil
+	return newOff, nil
 }
 
 // computeIndexCellSizeAndLocal calculates LocalPayload and CellSize for index cells.

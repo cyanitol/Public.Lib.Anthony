@@ -1,0 +1,111 @@
+DRY Code Reduction TODO
+========================
+Goal: Improve resilience, readability, and auditability while retaining all features and security guarantees.
+Constraints: cyclomatic complexity ≤ 11, all tests pass, no external deps, Go 1.26.1, WASM primary target.
+
+COMPLETED
+---------
+Step 1:  Math single-arg wrappers → factory (internal/functions/math.go) ~140 lines saved
+Step 2:  Window function Call dedup via windowErrFunc (internal/functions/window.go) ~20 lines saved
+Step 3:  Trim functions → makeTrimFunc factory (internal/functions/scalar.go) ~30 lines saved
+Step 4:  Min/Max scalar → makeMinMaxScalar factory (internal/functions/aggregate.go) ~25 lines saved
+Step 8:  Check constraint formatErrorMessage dedup (internal/constraint/check.go) ~10 lines saved
+Step 9:  VDBE arithmetic → execBinaryMemOp helper (internal/vdbe/exec.go) ~60 lines saved
+Step 10: VDBE bitwise → execBinaryBitOp helper (internal/vdbe/exec.go) ~25 lines saved
+Step 11: WHERE clause dedup → emitAggregateWhereClause delegates (internal/driver/compile_select_agg.go) ~15 lines saved
+Step 12: Cursor open/close → openTableCursors/closeTableCursors helpers (internal/driver/compile_helpers.go) ~50 lines saved
+Step 13: LIMIT/OFFSET → reuse emitOffsetCheck/emitLimitCheck (internal/driver/compile_select.go) ~12 lines saved
+Step 17: Parser precedence → parseLeftAssocBinaryExpr + makeOpMatcher (internal/parser/parser.go) ~50 lines saved
+Step 18: Schema lookups → findCaseInsensitive/deleteCaseInsensitive generics (internal/schema/helpers.go) ~60 lines saved
+Step 19: Format header → u32Fields descriptor loop (internal/format/format.go) ~40 lines saved
+Step 20: Btree varint → mustGetVarint helper (internal/btree/cell.go) ~30 lines saved
+
+SKIPPED (not worth doing)
+-------------------------
+Step 5-6: Constraint helpers — valuesEqual/compareTypedValues already shared; coerceToInt64 patterns incompatible (type-assertion vs string-parse).
+Step 7:   Error builder — 11 Error() methods too varied in structure for a shared builder to provide meaningful savings.
+
+REMAINING IMPLEMENTATION STEPS
+==============================
+
+Step 12: DONE - Cursor open/close loop extraction (~50 lines saved)
+  Files: internal/driver/compile_helpers.go, compile_join.go, compile_join_agg.go
+  Pattern: 4 cursor-open occurrences (3 with IsTemp check, 1 without), 6 cursor-close occurrences.
+  - compile_helpers.go: openTableCursor (lines ~45-65) — opens cursor with IsTemp branch
+  - compile_helpers.go: closeTableCursors loop (lines ~70-85)
+  - compile_join.go: duplicate open loop (lines ~90-110), duplicate close loop (lines ~180-195)
+  - compile_join_agg.go: duplicate open loop (lines ~50-70), duplicate close loop (lines ~140-155)
+  Action: Extract openTableCursors(vm, tables)/closeTableCursors(vm, tables) to compile_helpers.go.
+  Note: 3 of 4 open patterns check table.IsTemp for OpenEphemeral vs OpenRead; 1 always uses OpenRead.
+
+Step 13: DONE - LIMIT/OFFSET unified helper (~12 lines saved)
+
+Step 14: Row deduplication shared helper (~30 lines saved)
+  Files: internal/driver/compile_compound.go, compile_tvf.go
+  Pattern: Two independent dedup implementations — compile_compound.go uses [][]interface{},
+    compile_tvf.go uses [][]functions.Value. Both do the same hash-based seen-set logic.
+  Action: Create generic deduplicateRows[T comparable](rows [][]T) helper or use fmt.Sprint key approach.
+  Note: compile_subquery.go does NOT have dedup logic — only compound and TVF.
+
+Step 15: Parameterized buildAddrMap (~40 lines saved)
+  Files: internal/driver/stmt_cte.go, stmt_cte_recursive.go
+  Pattern: 4 address map builder variants across CTE files. All follow same structure:
+    iterate instructions, map old→new addresses, apply expansion function.
+  Action: Create buildAddrMapWithExpansion(compiled, startAddr, expansionFn) shared function.
+  Note: Highly modular already; main difference is expansion callback signature.
+
+Step 16: Parameterized inlineCTEBytecode (~80 lines saved)
+  Files: internal/driver/stmt_cte.go, stmt_cte_recursive.go, stmt_cte_coroutine.go
+  Pattern: 6 inlining functions that copy bytecode with address remapping.
+    Core loop is identical; differs only in onResultRow callback behavior.
+  Action: Extract core inliner with onResultRow callback. Also extract shouldConvertToNoop() predicate.
+  Note: Complex — CTE inlining is correctness-critical. Test thoroughly.
+
+Step 17: DONE - Parser precedence → parseLeftAssocBinaryExpr + makeOpMatcher (~50 lines saved)
+Step 18: DONE - Schema generics → findCaseInsensitive/deleteCaseInsensitive/keyCaseInsensitive/existsCaseInsensitive (~60 lines saved)
+Step 19: DONE - Format header → u32Fields descriptor loop (~40 lines saved)
+Step 20: DONE - Btree varint → mustGetVarint helper (~30 lines saved)
+
+TEST & GENERATION CODE DRY
+===========================
+Estimated ~3,500-4,700 lines reducible across test files.
+NOTE: Test files are safety net — changes here must be extremely careful.
+
+T1: Shared DB setup helper (~800 lines saved)
+  Pattern: 93+ test files duplicate this setup:
+    db, err := sql.Open("sqlite3", ":memory:")
+    require.NoError(t, err)
+    defer db.Close()
+    // create table, insert rows
+  Files: Nearly every *_test.go file across internal/driver/, internal/vdbe/, internal/functions/
+  Action: Create testutil package with SetupTestDB(t, schema, inserts) (*sql.DB, func()).
+
+T2: MCDC test helper dedup (~1,500 lines saved)
+  Pattern: 149 MCDC test files (functions_mcdc*.go, vdbe_mcdc*.go, etc.) each define identical helpers:
+    - execQuery(t, db, query) [][]interface{}
+    - execExpr(t, db, expr) interface{}
+    - mustExec(t, db, query)
+  Files: internal/*/test/*_mcdc*.go (149 files)
+  Action: Create shared mcdc_helpers_test.go per package with common helpers.
+
+T3: Coverage gap test table patterns (~600 lines saved)
+  Pattern: Coverage gap tests repeat table-driven test structure with identical assertion logic.
+    Each defines []struct{name, query, expected} and iterates with t.Run.
+  Files: *_coverage_gap_test.go, *_coverage_polish_test.go
+  Action: Create generic runQueryTests(t, db, tests) helper.
+
+T4: Generation script dedup (~500 lines saved)
+  Pattern: Test generation scripts (if any exist) produce boilerplate that could use templates.
+  Action: Audit scripts/ or gen/ directory for template opportunities.
+  Note: Need to verify if generation scripts exist in this repo.
+
+T5: Assertion helper consolidation (~300 lines saved)
+  Pattern: Many tests manually compare results with loops instead of using table-driven helpers.
+    Repeated patterns: iterate rows, scan into variables, compare with expected.
+  Action: Create compareQueryResults(t, db, query, expected [][]interface{}) helper.
+
+PRIORITY ORDER
+==============
+DONE:   Steps 1-4, 8-13, 17-20 (~532 lines saved)
+Low:    Steps 14, 15, 16 (complex, correctness-critical CTE/compound logic)
+Test:   T1, T2 (highest savings but test safety net — schedule separately)

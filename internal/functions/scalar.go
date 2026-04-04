@@ -233,66 +233,29 @@ func lowerFunc(args []Value) (Value, error) {
 	return NewTextValue(strings.ToLower(args[0].AsString())), nil
 }
 
-// trimFunc implements trim(X [, Y])
-// Removes characters in Y from both ends of X
-func trimFunc(args []Value) (Value, error) {
-	if len(args) < 1 || len(args) > 2 {
-		return nil, fmt.Errorf("trim() requires 1 or 2 arguments")
+// makeTrimFunc creates a trim function parameterized by the trim direction.
+func makeTrimFunc(trimFn func(string, string) string) func([]Value) (Value, error) {
+	return func(args []Value) (Value, error) {
+		if len(args) < 1 || len(args) > 2 {
+			return nil, fmt.Errorf("trim function requires 1 or 2 arguments")
+		}
+		if args[0].IsNull() {
+			return NewNullValue(), nil
+		}
+		s := args[0].AsString()
+		cutset := " "
+		if len(args) == 2 && !args[1].IsNull() {
+			cutset = args[1].AsString()
+		}
+		return NewTextValue(trimFn(s, cutset)), nil
 	}
-
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	s := args[0].AsString()
-	cutset := " " // default to space
-
-	if len(args) == 2 && !args[1].IsNull() {
-		cutset = args[1].AsString()
-	}
-
-	return NewTextValue(strings.Trim(s, cutset)), nil
 }
 
-// ltrimFunc implements ltrim(X [, Y])
-func ltrimFunc(args []Value) (Value, error) {
-	if len(args) < 1 || len(args) > 2 {
-		return nil, fmt.Errorf("ltrim() requires 1 or 2 arguments")
-	}
-
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	s := args[0].AsString()
-	cutset := " "
-
-	if len(args) == 2 && !args[1].IsNull() {
-		cutset = args[1].AsString()
-	}
-
-	return NewTextValue(strings.TrimLeft(s, cutset)), nil
-}
-
-// rtrimFunc implements rtrim(X [, Y])
-func rtrimFunc(args []Value) (Value, error) {
-	if len(args) < 1 || len(args) > 2 {
-		return nil, fmt.Errorf("rtrim() requires 1 or 2 arguments")
-	}
-
-	if args[0].IsNull() {
-		return NewNullValue(), nil
-	}
-
-	s := args[0].AsString()
-	cutset := " "
-
-	if len(args) == 2 && !args[1].IsNull() {
-		cutset = args[1].AsString()
-	}
-
-	return NewTextValue(strings.TrimRight(s, cutset)), nil
-}
+var (
+	trimFunc  = makeTrimFunc(strings.Trim)
+	ltrimFunc = makeTrimFunc(strings.TrimLeft)
+	rtrimFunc = makeTrimFunc(strings.TrimRight)
+)
 
 // replaceFunc implements replace(X, Y, Z)
 // Replaces all occurrences of Y in X with Z

@@ -66,13 +66,7 @@ func (s *Schema) CreateTrigger(stmt *parser.CreateTriggerStmt) (*Trigger, error)
 
 // findTriggerLocked finds a trigger by name (case-insensitive). Must be called with mu held.
 func (s *Schema) findTriggerLocked(name string) (*Trigger, bool) {
-	lowerName := strings.ToLower(name)
-	for triggerName, trigger := range s.Triggers {
-		if strings.ToLower(triggerName) == lowerName {
-			return trigger, true
-		}
-	}
-	return nil, false
+	return findCaseInsensitive(s.Triggers, name)
 }
 
 // validateTriggerTarget validates the table/view target for a trigger. Must be called with mu held.
@@ -91,16 +85,9 @@ func (s *Schema) DropTrigger(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	lowerName := strings.ToLower(name)
-
-	// Find the actual trigger name (case-insensitive)
-	for triggerName := range s.Triggers {
-		if strings.ToLower(triggerName) == lowerName {
-			delete(s.Triggers, triggerName)
-			return nil
-		}
+	if deleteCaseInsensitive(s.Triggers, name) {
+		return nil
 	}
-
 	return fmt.Errorf("trigger not found: %s", name)
 }
 
@@ -110,13 +97,7 @@ func (s *Schema) GetTrigger(name string) (*Trigger, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	lowerName := strings.ToLower(name)
-	for triggerName, trigger := range s.Triggers {
-		if strings.ToLower(triggerName) == lowerName {
-			return trigger, true
-		}
-	}
-	return nil, false
+	return findCaseInsensitive(s.Triggers, name)
 }
 
 // GetTableTriggers returns all triggers for a given table and event.
