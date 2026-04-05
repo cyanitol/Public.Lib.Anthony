@@ -171,15 +171,9 @@ func (c *Compiler) compileWhereClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, ta
 }
 
 // patchWhereSkipLabelFromStart patches WHERE skip labels starting from loopStart.
+// Delegates to patchWhereSkipLabel which performs the same scan.
 func patchWhereSkipLabelFromStart(vm *vdbe.VDBE, loopStart int) {
-	currentAddr := vm.NumOps()
-	// Find and patch the OpIfNot instruction
-	for i := loopStart; i < vm.NumOps(); i++ {
-		if vm.Program[i].Opcode == vdbe.OpIfNot && vm.Program[i].P2 > vm.NumOps() {
-			vm.Program[i].P2 = currentAddr
-			break
-		}
-	}
+	patchWhereSkipLabel(vm, loopStart)
 }
 
 func (c *Compiler) collectQueryTables(stmt *parser.SelectStmt, tableName string, table *schema.Table) ([]tableInfo, error) {
@@ -492,7 +486,7 @@ func (c *Compiler) CompileUpdate(stmt *parser.UpdateStmt) (*vdbe.VDBE, error) {
 	}
 
 	// Close loop and cursor
-	c.closeUpdateLoop(vm, cursorIdx, loopStart)
+	c.closeScanLoop(vm, cursorIdx, loopStart)
 
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	return vm, nil
@@ -597,8 +591,8 @@ func (c *Compiler) applySetAssignments(vm *vdbe.VDBE, stmt *parser.UpdateStmt, t
 	return nil
 }
 
-// closeUpdateLoop closes the UPDATE loop and patches labels.
-func (c *Compiler) closeUpdateLoop(vm *vdbe.VDBE, cursorIdx, loopStart int) {
+// closeScanLoop closes a table-scan loop (UPDATE/DELETE) and patches labels.
+func (c *Compiler) closeScanLoop(vm *vdbe.VDBE, cursorIdx, loopStart int) {
 	// Patch the skip label if WHERE clause exists
 	patchWhereSkipLabel(vm, loopStart)
 
@@ -692,16 +686,7 @@ func (c *Compiler) compileDeleteWhere(vm *vdbe.VDBE, stmt *parser.DeleteStmt, co
 
 // closeDeleteLoop closes the DELETE loop and patches labels.
 func (c *Compiler) closeDeleteLoop(vm *vdbe.VDBE, cursorIdx, loopStart int) {
-	// Patch the skip label if WHERE clause exists
-	patchWhereSkipLabel(vm, loopStart)
-
-	// Next row
-	vm.AddOp(vdbe.OpNext, cursorIdx, loopStart, 0)
-
-	// Close cursor - patch end label
-	patchRewindEndLabel(vm)
-
-	vm.AddOp(vdbe.OpClose, cursorIdx, 0, 0)
+	c.closeScanLoop(vm, cursorIdx, loopStart)
 }
 
 // CompileCreateTable compiles a CREATE TABLE statement.
@@ -848,12 +833,10 @@ func (c *Compiler) CompileRollback(stmt *parser.RollbackStmt) (*vdbe.VDBE, error
 	return vm, nil
 }
 
-// createCodeGenerator creates a code generator for expression compilation.
-func createCodeGenerator(vm *vdbe.VDBE, tableName string, table *schema.Table, cursorIdx int) *expr.CodeGenerator {
-	codegen := expr.NewCodeGenerator(vm)
+// registerTableOnCodegen registers a single table's cursor and columns on the code generator.
+func registerTableOnCodegen(codegen *expr.CodeGenerator, tableName string, table *schema.Table, cursorIdx int) {
 	codegen.RegisterCursor(tableName, cursorIdx)
 
-	// Register table columns
 	columns := make([]expr.ColumnInfo, len(table.Columns))
 	for i, col := range table.Columns {
 		columns[i] = expr.ColumnInfo{
@@ -866,10 +849,13 @@ func createCodeGenerator(vm *vdbe.VDBE, tableName string, table *schema.Table, c
 		Name:    tableName,
 		Columns: columns,
 	})
+}
 
-	// Set next register to avoid conflicts
+// createCodeGenerator creates a code generator for expression compilation.
+func createCodeGenerator(vm *vdbe.VDBE, tableName string, table *schema.Table, cursorIdx int) *expr.CodeGenerator {
+	codegen := expr.NewCodeGenerator(vm)
+	registerTableOnCodegen(codegen, tableName, table, cursorIdx)
 	codegen.SetNextReg(len(table.Columns) + 1)
-
 	return codegen
 }
 
@@ -877,33 +863,12 @@ func createCodeGenerator(vm *vdbe.VDBE, tableName string, table *schema.Table, c
 func (c *Compiler) createMultiTableCodeGenerator(vm *vdbe.VDBE, tables []tableInfo) *expr.CodeGenerator {
 	codegen := expr.NewCodeGenerator(vm)
 
-	// Calculate total number of columns across all tables
 	totalCols := 0
 	for _, tbl := range tables {
 		totalCols += len(tbl.table.Columns)
+		registerTableOnCodegen(codegen, tbl.name, tbl.table, tbl.cursorIdx)
 	}
 
-	// Register all tables and their cursors
-	for _, tbl := range tables {
-		codegen.RegisterCursor(tbl.name, tbl.cursorIdx)
-
-		// Register table columns
-		columns := make([]expr.ColumnInfo, len(tbl.table.Columns))
-		for i, col := range tbl.table.Columns {
-			columns[i] = expr.ColumnInfo{
-				Name:  col.Name,
-				Index: i,
-			}
-		}
-
-		codegen.RegisterTable(expr.TableInfo{
-			Name:    tbl.name,
-			Columns: columns,
-		})
-	}
-
-	// Set next register to avoid conflicts
 	codegen.SetNextReg(totalCols + 1)
-
 	return codegen
 }

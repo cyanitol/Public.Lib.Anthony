@@ -1106,21 +1106,7 @@ func (s *Stmt) extractValueFromExpression(expr parser.Expression) interface{} {
 }
 
 // parseLiteralValue converts a literal expression to its Go value.
+// Delegates to evalLiteralToInterface.
 func (s *Stmt) parseLiteralValue(expr *parser.LiteralExpr) interface{} {
-	switch expr.Type {
-	case parser.LiteralInteger:
-		var val int64
-		fmt.Sscanf(expr.Value, "%d", &val)
-		return val
-	case parser.LiteralFloat:
-		var val float64
-		fmt.Sscanf(expr.Value, "%f", &val)
-		return val
-	case parser.LiteralString:
-		return expr.Value
-	case parser.LiteralNull:
-		return nil
-	default:
-		return expr.Value
-	}
+	return evalLiteralToInterface(expr)
 }

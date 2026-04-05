@@ -151,17 +151,7 @@ func (s *Stmt) emitNullSafeGroupCompare(vm *vdbe.VDBE, curReg, prevReg, changedR
 
 // initializeGroupAccumulator initializes a single accumulator register based on function type.
 func (s *Stmt) initializeGroupAccumulator(vm *vdbe.VDBE, funcName string, accReg, avgCountReg int) {
-	switch funcName {
-	case "COUNT":
-		vm.AddOp(vdbe.OpInteger, 0, accReg, 0)
-	case "AVG":
-		vm.AddOp(vdbe.OpNull, 0, accReg, 0)
-		vm.AddOp(vdbe.OpInteger, 0, avgCountReg, 0)
-	case "TOTAL":
-		vm.AddOpWithP4Real(vdbe.OpReal, 0, accReg, 0, 0.0)
-	case "SUM", "MIN", "MAX", "GROUP_CONCAT", "JSON_GROUP_ARRAY", "JSON_GROUP_OBJECT":
-		vm.AddOp(vdbe.OpNull, 0, accReg, 0)
-	}
+	emitAccumulatorInit(vm, funcName, accReg, avgCountReg)
 }
 
 // initializeGroupAccumulators initializes/resets accumulators for a new group.
@@ -774,61 +764,42 @@ func binaryExprsEqual(v1 *parser.BinaryExpr, e2 parser.Expression) bool {
 // emitAggregateHavingClause emits HAVING clause check for aggregate output (without GROUP BY).
 // Returns the address of the IfNot instruction to skip the row if HAVING fails, or 0 if no HAVING clause.
 func (s *Stmt) emitAggregateHavingClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, accRegs []int, avgCountRegs []int, numCols int) int {
-	if stmt.Having == nil {
-		return 0
-	}
-
-	// Create a code generator starting after all allocated registers
-	// to avoid overwriting result or accumulator registers.
-	gen := expr.NewCodeGenerator(vm)
-	gen.SetNextReg(vm.NumMem)
-	s.setupSubqueryCompiler(gen)
-
-	// Build a map from aggregate expressions to their result registers
-	aggregateMap := s.buildAggregateMap(stmt, accRegs, avgCountRegs)
-
-	// Generate code for the HAVING expression
-	havingReg, err := s.generateHavingExpression(vm, gen, stmt.Having, aggregateMap, numCols)
-	if err != nil {
-		// If we can't generate the HAVING expression, skip it (conservative)
-		return 0
-	}
-
-	// Emit IfNot to skip the result row if HAVING condition is false
-	return vm.AddOp(vdbe.OpIfNot, havingReg, 0, 0)
+	return s.emitHavingClause(vm, stmt, accRegs, avgCountRegs, nil, numCols)
 }
 
 // emitGroupByHavingClause emits HAVING clause check for GROUP BY output.
 // Returns the address of the IfNot instruction to skip the row if HAVING fails, or 0 if no HAVING clause.
 func (s *Stmt) emitGroupByHavingClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, accRegs []int, avgCountRegs []int, groupByRegs []int, numCols int) int {
+	return s.emitHavingClause(vm, stmt, accRegs, avgCountRegs, groupByRegs, numCols)
+}
+
+// emitHavingClause emits the shared HAVING clause check logic.
+// When groupByRegs is non-nil, GROUP BY columns are added to the aggregate map.
+func (s *Stmt) emitHavingClause(vm *vdbe.VDBE, stmt *parser.SelectStmt, accRegs []int, avgCountRegs []int, groupByRegs []int, numCols int) int {
 	if stmt.Having == nil {
 		return 0
 	}
 
-	// Create a code generator starting after all allocated registers
-	// to avoid overwriting result or accumulator registers.
 	gen := expr.NewCodeGenerator(vm)
 	gen.SetNextReg(vm.NumMem)
 	s.setupSubqueryCompiler(gen)
 
-	// Build a map from aggregate expressions and GROUP BY columns to their result registers
 	aggregateMap := s.buildAggregateMap(stmt, accRegs, avgCountRegs)
 
-	// Add GROUP BY columns to the map
-	for i, groupExpr := range stmt.GroupBy {
-		if ident, ok := groupExpr.(*parser.IdentExpr); ok {
-			aggregateMap[ident.Name] = aggregateRef{accReg: groupByRegs[i]}
+	// Add GROUP BY columns to the map if present
+	if groupByRegs != nil {
+		for i, groupExpr := range stmt.GroupBy {
+			if ident, ok := groupExpr.(*parser.IdentExpr); ok {
+				aggregateMap[ident.Name] = aggregateRef{accReg: groupByRegs[i]}
+			}
 		}
 	}
 
-	// Generate code for the HAVING expression
 	havingReg, err := s.generateHavingExpression(vm, gen, stmt.Having, aggregateMap, numCols)
 	if err != nil {
-		// If we can't generate the HAVING expression, skip it (conservative)
 		return 0
 	}
 
-	// Emit IfNot to skip the result row if HAVING condition is false
 	return vm.AddOp(vdbe.OpIfNot, havingReg, 0, 0)
 }
 
@@ -901,14 +872,7 @@ func (s *Stmt) generateHavingFunctionExpr(vm *vdbe.VDBE, gen *expr.CodeGenerator
 	}
 	key := s.aggregateKey(expr)
 	if ref, ok := aggregateMap[key]; ok {
-		if ref.isAvg {
-			resultReg := gen.AllocReg()
-			vm.AddOp(vdbe.OpToReal, ref.accReg, 0, 0)
-			vm.AddOp(vdbe.OpDivide, ref.accReg, ref.countReg, resultReg)
-			vm.AddOp(vdbe.OpToReal, resultReg, 0, 0)
-			return resultReg, nil
-		}
-		return ref.accReg, nil
+		return emitAggregateRefValue(vm, gen, ref), nil
 	}
 	return gen.GenerateExpr(expr)
 }
@@ -916,16 +880,22 @@ func (s *Stmt) generateHavingFunctionExpr(vm *vdbe.VDBE, gen *expr.CodeGenerator
 // generateHavingIdentExpr handles identifier expressions in HAVING
 func (s *Stmt) generateHavingIdentExpr(vm *vdbe.VDBE, gen *expr.CodeGenerator, expr *parser.IdentExpr, aggregateMap map[string]aggregateRef) (int, error) {
 	if ref, ok := aggregateMap[expr.Name]; ok {
-		if ref.isAvg {
-			resultReg := gen.AllocReg()
-			vm.AddOp(vdbe.OpToReal, ref.accReg, 0, 0)
-			vm.AddOp(vdbe.OpDivide, ref.accReg, ref.countReg, resultReg)
-			vm.AddOp(vdbe.OpToReal, resultReg, 0, 0)
-			return resultReg, nil
-		}
-		return ref.accReg, nil
+		return emitAggregateRefValue(vm, gen, ref), nil
 	}
 	return gen.GenerateExpr(expr)
+}
+
+// emitAggregateRefValue emits opcodes to produce the value of an aggregate reference.
+// For AVG, this computes sum/count into a new register. For others, returns the accumulator register directly.
+func emitAggregateRefValue(vm *vdbe.VDBE, gen *expr.CodeGenerator, ref aggregateRef) int {
+	if ref.isAvg {
+		resultReg := gen.AllocReg()
+		vm.AddOp(vdbe.OpToReal, ref.accReg, 0, 0)
+		vm.AddOp(vdbe.OpDivide, ref.accReg, ref.countReg, resultReg)
+		vm.AddOp(vdbe.OpToReal, resultReg, 0, 0)
+		return resultReg
+	}
+	return ref.accReg
 }
 
 // binaryOpToVdbeOpcode maps parser binary operators to VDBE opcodes.

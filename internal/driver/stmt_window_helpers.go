@@ -119,7 +119,7 @@ func (s *Stmt) extractWindowOrderByCols(orderBy []parser.OrderingTerm, table *sc
 		if !ok {
 			continue
 		}
-		colIdx := s.findColumnIndex(table, identExpr.Name)
+		colIdx := table.GetColumnIndex(identExpr.Name)
 		if colIdx >= 0 {
 			cols = append(cols, colIdx)
 		}
@@ -281,7 +281,7 @@ func (s *Stmt) emitWindowColumn(vm *vdbe.VDBE, gen *expr.CodeGenerator, col pars
 
 	// Regular column
 	if identExpr, ok := col.Expr.(*parser.IdentExpr); ok {
-		tableColIdx := s.findColumnIndex(table, identExpr.Name)
+		tableColIdx := table.GetColumnIndex(identExpr.Name)
 		if tableColIdx >= 0 {
 			vm.AddOp(vdbe.OpColumn, 0, tableColIdx, colIdx)
 		} else {

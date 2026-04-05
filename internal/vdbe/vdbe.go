@@ -248,8 +248,8 @@ type Sorter struct {
 	CollationRegistry interface{} // *collation.CollationRegistry (for connection-specific collations)
 }
 
-// NewSorter creates a new Sorter with the given key columns and sort directions.
-func NewSorter(keyCols []int, desc []bool, collations []string, numCols int) *Sorter {
+// newSorterBase creates a base Sorter with common fields.
+func newSorterBase(keyCols []int, desc []bool, collations []string, numCols int) *Sorter {
 	return &Sorter{
 		Rows:       make([][]*Mem, 0),
 		KeyCols:    keyCols,
@@ -261,33 +261,24 @@ func NewSorter(keyCols []int, desc []bool, collations []string, numCols int) *So
 	}
 }
 
+// NewSorter creates a new Sorter with the given key columns and sort directions.
+func NewSorter(keyCols []int, desc []bool, collations []string, numCols int) *Sorter {
+	return newSorterBase(keyCols, desc, collations, numCols)
+}
+
 // NewSorterWithRegistry creates a new Sorter with a custom collation registry.
 func NewSorterWithRegistry(keyCols []int, desc []bool, collations []string, numCols int, registry interface{}) *Sorter {
-	return &Sorter{
-		Rows:              make([][]*Mem, 0),
-		KeyCols:           keyCols,
-		Desc:              desc,
-		Collations:        collations,
-		Current:           -1,
-		Sorted:            false,
-		NumCols:           numCols,
-		CollationRegistry: registry,
-	}
+	s := newSorterBase(keyCols, desc, collations, numCols)
+	s.CollationRegistry = registry
+	return s
 }
 
 // NewSorterWithNulls creates a new Sorter with NULLS FIRST/LAST overrides and collation registry.
 func NewSorterWithNulls(keyCols []int, desc []bool, nullsFirst []*bool, collations []string, numCols int, registry interface{}) *Sorter {
-	return &Sorter{
-		Rows:              make([][]*Mem, 0),
-		KeyCols:           keyCols,
-		Desc:              desc,
-		NullsFirst:        nullsFirst,
-		Collations:        collations,
-		Current:           -1,
-		Sorted:            false,
-		NumCols:           numCols,
-		CollationRegistry: registry,
-	}
+	s := newSorterBase(keyCols, desc, collations, numCols)
+	s.NullsFirst = nullsFirst
+	s.CollationRegistry = registry
+	return s
 }
 
 // Insert adds a row to the sorter. The row is copied.
@@ -635,23 +626,33 @@ func (v *VDBE) resetMemoryCells() {
 	}
 }
 
-// resetResultRow returns ResultRow cells to pool.
-func (v *VDBE) resetResultRow() {
-	for _, mem := range v.ResultRow {
+// putMemSlice returns all non-nil Mem cells in the slice to the pool.
+func putMemSlice(mems []*Mem) {
+	for _, mem := range mems {
 		if mem != nil {
 			PutMem(mem)
 		}
 	}
+}
+
+// closeSorterSlice closes all non-nil sorters in the slice.
+func closeSorterSlice(sorters []SorterInterface) {
+	for _, sorter := range sorters {
+		if sorter != nil {
+			sorter.Close()
+		}
+	}
+}
+
+// resetResultRow returns ResultRow cells to pool.
+func (v *VDBE) resetResultRow() {
+	putMemSlice(v.ResultRow)
 	v.ResultRow = nil
 }
 
 // resetSorters closes all sorters and returns pooled memory.
 func (v *VDBE) resetSorters() {
-	for _, sorter := range v.Sorters {
-		if sorter != nil {
-			sorter.Close()
-		}
-	}
+	closeSorterSlice(v.Sorters)
 }
 
 // resetCursors closes all cursors.
@@ -700,31 +701,19 @@ func (v *VDBE) Finalize() error {
 
 // releaseMemoryCells returns all memory cells to the pool.
 func (v *VDBE) releaseMemoryCells() {
-	for _, mem := range v.Mem {
-		if mem != nil {
-			PutMem(mem)
-		}
-	}
+	putMemSlice(v.Mem)
 	v.Mem = nil
 }
 
 // releaseResultRow returns ResultRow cells to the pool.
 func (v *VDBE) releaseResultRow() {
-	for _, mem := range v.ResultRow {
-		if mem != nil {
-			PutMem(mem)
-		}
-	}
+	putMemSlice(v.ResultRow)
 	v.ResultRow = nil
 }
 
 // releaseSorters closes all sorters and returns pooled memory.
 func (v *VDBE) releaseSorters() {
-	for _, sorter := range v.Sorters {
-		if sorter != nil {
-			sorter.Close()
-		}
-	}
+	closeSorterSlice(v.Sorters)
 	v.Sorters = nil
 }
 
@@ -1007,31 +996,37 @@ func (s *QueryStatistics) String() string {
 		return "Statistics: disabled"
 	}
 
-	var result string
-	result += fmt.Sprintf("Query Statistics:\n")
-	result += fmt.Sprintf("  Execution Time: %d ms (%d ns)\n", s.ExecutionMS, s.ExecutionNS)
-	result += fmt.Sprintf("  Instructions: %d\n", s.NumInstructions)
-	result += fmt.Sprintf("    - Jumps: %d\n", s.NumJumps)
-	result += fmt.Sprintf("    - Comparisons: %d\n", s.NumComparisons)
-	result += fmt.Sprintf("  Data Operations:\n")
-	result += fmt.Sprintf("    - Rows Read: %d\n", s.RowsRead)
-	result += fmt.Sprintf("    - Rows Written: %d\n", s.RowsWritten)
-	result += fmt.Sprintf("    - Rows Scanned: %d\n", s.RowsScanned)
-	result += fmt.Sprintf("  Cursor Operations:\n")
-	result += fmt.Sprintf("    - Seeks: %d\n", s.CursorSeeks)
-	result += fmt.Sprintf("    - Steps: %d\n", s.CursorSteps)
-	result += fmt.Sprintf("    - Index Lookups: %d\n", s.IndexLookups)
-	result += fmt.Sprintf("  I/O Operations:\n")
-	result += fmt.Sprintf("    - Page Reads: %d\n", s.PageReads)
-	result += fmt.Sprintf("    - Page Writes: %d\n", s.PageWrites)
-	result += fmt.Sprintf("    - Cache Hits: %d\n", s.CacheHits)
-	result += fmt.Sprintf("    - Cache Misses: %d\n", s.CacheMisses)
-	result += fmt.Sprintf("  Memory:\n")
-	result += fmt.Sprintf("    - Peak Memory: %d bytes\n", s.MemoryUsed)
-	result += fmt.Sprintf("    - Sorter Memory: %d bytes\n", s.SorterMemory)
-	result += fmt.Sprintf("    - Allocated Cells: %d\n", s.AllocatedCells)
-	result += fmt.Sprintf("  Query Type: %s\n", s.QueryType)
-	result += fmt.Sprintf("  Read-Only: %v\n", s.IsReadOnly)
-
-	return result
+	return fmt.Sprintf(
+		"Query Statistics:\n"+
+			"  Execution Time: %d ms (%d ns)\n"+
+			"  Instructions: %d\n"+
+			"    - Jumps: %d\n"+
+			"    - Comparisons: %d\n"+
+			"  Data Operations:\n"+
+			"    - Rows Read: %d\n"+
+			"    - Rows Written: %d\n"+
+			"    - Rows Scanned: %d\n"+
+			"  Cursor Operations:\n"+
+			"    - Seeks: %d\n"+
+			"    - Steps: %d\n"+
+			"    - Index Lookups: %d\n"+
+			"  I/O Operations:\n"+
+			"    - Page Reads: %d\n"+
+			"    - Page Writes: %d\n"+
+			"    - Cache Hits: %d\n"+
+			"    - Cache Misses: %d\n"+
+			"  Memory:\n"+
+			"    - Peak Memory: %d bytes\n"+
+			"    - Sorter Memory: %d bytes\n"+
+			"    - Allocated Cells: %d\n"+
+			"  Query Type: %s\n"+
+			"  Read-Only: %v\n",
+		s.ExecutionMS, s.ExecutionNS,
+		s.NumInstructions, s.NumJumps, s.NumComparisons,
+		s.RowsRead, s.RowsWritten, s.RowsScanned,
+		s.CursorSeeks, s.CursorSteps, s.IndexLookups,
+		s.PageReads, s.PageWrites, s.CacheHits, s.CacheMisses,
+		s.MemoryUsed, s.SorterMemory, s.AllocatedCells,
+		s.QueryType, s.IsReadOnly,
+	)
 }

@@ -268,39 +268,28 @@ func (s *Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driv
 		return nil, err
 	}
 
-	// Compile the statement to VDBE bytecode
-	vm, err := s.compile(args)
-	if err != nil {
-		return nil, fmt.Errorf("compile error: %w", err)
-	}
-
-	// Create rows iterator
-	rows := &Rows{
-		stmt:    s,
-		vdbe:    vm,
-		columns: vm.ResultCols,
-		ctx:     ctx,
-	}
-
-	return rows, nil
+	return s.compileAndBuildRows(ctx, args)
 }
 
 // queryInternal executes a query without acquiring the connection mutex.
 // This must only be called when the caller already holds c.mu.
 func (s *Stmt) queryInternal(args []driver.NamedValue) (driver.Rows, error) {
+	return s.compileAndBuildRows(context.Background(), args)
+}
+
+// compileAndBuildRows compiles the statement and wraps the resulting VDBE in a Rows iterator.
+func (s *Stmt) compileAndBuildRows(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
 	vm, err := s.compile(args)
 	if err != nil {
 		return nil, fmt.Errorf("compile error: %w", err)
 	}
 
-	rows := &Rows{
+	return &Rows{
 		stmt:    s,
 		vdbe:    vm,
 		columns: vm.ResultCols,
-		ctx:     context.Background(),
-	}
-
-	return rows, nil
+		ctx:     ctx,
+	}, nil
 }
 
 // compile compiles the SQL statement into VDBE bytecode.
@@ -458,31 +447,6 @@ func (s *Stmt) dispatchDDLOrTxn(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.
 
 // dispatchSchemaDDL handles CREATE/DROP/ALTER statements.
 func (s *Stmt) dispatchSchemaDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
-	// Try table operations
-	if result, err, handled := s.dispatchTableDDL(vm, args); handled {
-		return result, err, true
-	}
-
-	// Try index operations
-	if result, err, handled := s.dispatchIndexDDL(vm, args); handled {
-		return result, err, true
-	}
-
-	// Try view operations
-	if result, err, handled := s.dispatchViewDDL(vm, args); handled {
-		return result, err, true
-	}
-
-	// Try trigger operations
-	if result, err, handled := s.dispatchTriggerDDL(vm, args); handled {
-		return result, err, true
-	}
-
-	return nil, nil, false
-}
-
-// dispatchTableDDL handles CREATE/DROP/ALTER TABLE statements.
-func (s *Stmt) dispatchTableDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
 	switch stmt := s.ast.(type) {
 	case *parser.CreateTableStmt:
 		result, err := s.compileCreateTable(vm, stmt, args)
@@ -496,42 +460,18 @@ func (s *Stmt) dispatchTableDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.
 	case *parser.AlterTableStmt:
 		result, err := s.compileAlterTable(vm, stmt, args)
 		return result, err, true
-	default:
-		return nil, nil, false
-	}
-}
-
-// dispatchIndexDDL handles CREATE/DROP INDEX statements.
-func (s *Stmt) dispatchIndexDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
-	switch stmt := s.ast.(type) {
 	case *parser.CreateIndexStmt:
 		result, err := s.compileCreateIndex(vm, stmt, args)
 		return result, err, true
 	case *parser.DropIndexStmt:
 		result, err := s.compileDropIndex(vm, stmt, args)
 		return result, err, true
-	default:
-		return nil, nil, false
-	}
-}
-
-// dispatchViewDDL handles CREATE/DROP VIEW statements.
-func (s *Stmt) dispatchViewDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
-	switch stmt := s.ast.(type) {
 	case *parser.CreateViewStmt:
 		result, err := s.compileCreateView(vm, stmt, args)
 		return result, err, true
 	case *parser.DropViewStmt:
 		result, err := s.compileDropView(vm, stmt, args)
 		return result, err, true
-	default:
-		return nil, nil, false
-	}
-}
-
-// dispatchTriggerDDL handles CREATE/DROP TRIGGER statements.
-func (s *Stmt) dispatchTriggerDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
-	switch stmt := s.ast.(type) {
 	case *parser.CreateTriggerStmt:
 		result, err := s.compileCreateTrigger(vm, stmt, args)
 		return result, err, true

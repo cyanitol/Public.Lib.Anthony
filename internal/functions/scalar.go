@@ -60,18 +60,11 @@ func lengthFunc(args []Value) (Value, error) {
 		return NewNullValue(), nil
 	}
 
-	switch args[0].Type() {
-	case TypeBlob:
+	if args[0].Type() == TypeBlob {
 		return NewIntValue(int64(args[0].Bytes())), nil
-	case TypeInteger, TypeFloat:
-		s := args[0].AsString()
-		return NewIntValue(int64(utf8.RuneCountInString(s))), nil
-	case TypeText:
-		s := args[0].AsString()
-		return NewIntValue(int64(utf8.RuneCountInString(s))), nil
-	default:
-		return NewNullValue(), nil
 	}
+	s := args[0].AsString()
+	return NewIntValue(int64(utf8.RuneCountInString(s))), nil
 }
 
 // substrFunc implements substr(X, Y [, Z])
@@ -717,14 +710,38 @@ func parseDecimalNumber(format string, pos int) (int, int) {
 	return num, pos
 }
 
+// intOrZero returns arg.AsInt64() or 0 if arg is null.
+func intOrZero(arg Value) int64 {
+	if arg.IsNull() {
+		return 0
+	}
+	return arg.AsInt64()
+}
+
+// floatOrZero returns arg.AsFloat64() or 0 if arg is null.
+func floatOrZero(arg Value) float64 {
+	if arg.IsNull() {
+		return 0
+	}
+	return arg.AsFloat64()
+}
+
+// applySignPrefix prepends a sign prefix to a non-negative number string.
+func applySignPrefix(numStr string, isNonNegative bool, spec printfFormatSpec) string {
+	if isNonNegative {
+		if spec.showSign {
+			return "+" + numStr
+		}
+		if spec.spaceSign {
+			return " " + numStr
+		}
+	}
+	return numStr
+}
+
 // formatPrintfInteger formats integer values (%d, %i, %u)
 func formatPrintfInteger(spec printfFormatSpec, arg Value) string {
-	var val int64
-	if arg.IsNull() {
-		val = 0
-	} else {
-		val = arg.AsInt64()
-	}
+	val := intOrZero(arg)
 
 	var numStr string
 	if spec.specifier == 'u' {
@@ -738,16 +755,7 @@ func formatPrintfInteger(spec printfFormatSpec, arg Value) string {
 		numStr = addThousandsSeparator(numStr)
 	}
 
-	// Handle sign
-	if val >= 0 {
-		if spec.showSign {
-			numStr = "+" + numStr
-		} else if spec.spaceSign {
-			numStr = " " + numStr
-		}
-	}
-
-	// Apply width padding
+	numStr = applySignPrefix(numStr, val >= 0, spec)
 	return applyPadding(numStr, spec)
 }
 
@@ -801,12 +809,7 @@ func applyPadding(s string, spec printfFormatSpec) string {
 
 // formatPrintfFloat formats floating-point values (%f, %F, %e, %E, %g, %G)
 func formatPrintfFloat(spec printfFormatSpec, arg Value) string {
-	var val float64
-	if arg.IsNull() {
-		val = 0
-	} else {
-		val = arg.AsFloat64()
-	}
+	val := floatOrZero(arg)
 
 	prec := 6 // default precision
 	if spec.precision >= 0 {
@@ -823,26 +826,13 @@ func formatPrintfFloat(spec printfFormatSpec, arg Value) string {
 		numStr = fmt.Sprintf("%.*f", prec, val)
 	}
 
-	// Handle sign
-	if val >= 0 {
-		if spec.showSign {
-			numStr = "+" + numStr
-		} else if spec.spaceSign {
-			numStr = " " + numStr
-		}
-	}
-
+	numStr = applySignPrefix(numStr, val >= 0, spec)
 	return applyPadding(numStr, spec)
 }
 
 // formatPrintfHex formats hexadecimal values (%x, %X)
 func formatPrintfHex(spec printfFormatSpec, arg Value) string {
-	var val int64
-	if arg.IsNull() {
-		val = 0
-	} else {
-		val = arg.AsInt64()
-	}
+	val := intOrZero(arg)
 
 	var numStr string
 	if spec.specifier == 'X' {
@@ -864,12 +854,7 @@ func formatPrintfHex(spec printfFormatSpec, arg Value) string {
 
 // formatPrintfOctal formats octal values (%o)
 func formatPrintfOctal(spec printfFormatSpec, arg Value) string {
-	var val int64
-	if arg.IsNull() {
-		val = 0
-	} else {
-		val = arg.AsInt64()
-	}
+	val := intOrZero(arg)
 
 	numStr := fmt.Sprintf("%o", val)
 	if spec.altForm && val != 0 {

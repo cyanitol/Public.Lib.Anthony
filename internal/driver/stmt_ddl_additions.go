@@ -16,6 +16,57 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
+// persistSchemaAndFinalize persists the schema to sqlite_master, emits Init/Halt
+// opcodes, and invalidates the statement cache. Used by all DDL compilation paths.
+func (s *Stmt) persistSchemaAndFinalize(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	if s.conn.btree != nil {
+		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
+			return nil, fmt.Errorf("failed to persist schema: %w", err)
+		}
+	}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	s.invalidateStmtCache()
+	return vm, nil
+}
+
+// emitSingleIntResult emits a single-row, single-column integer result.
+func emitSingleIntResult(vm *vdbe.VDBE, colName string, value int) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{colName}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOpWithP4Int(vdbe.OpInteger, value, 1, 0, int32(value))
+	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// emitSingleInt64Result emits a single-row, single-column int64 result.
+func emitSingleInt64Result(vm *vdbe.VDBE, colName string, value int64) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{colName}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 1, 0, value)
+	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// emitSingleStringResult emits a single-row, single-column string result.
+func emitSingleStringResult(vm *vdbe.VDBE, colName string, value string) (*vdbe.VDBE, error) {
+	vm.ResultCols = []string{colName}
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, value)
+	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
+// emitInitHalt emits OpInit + OpHalt with no result rows.
+func emitInitHalt(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
+	vm.AddOp(vdbe.OpInit, 0, 0, 0)
+	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	return vm, nil
+}
+
 // compileCreateIndex compiles a CREATE INDEX statement.
 func (s *Stmt) compileCreateIndex(vm *vdbe.VDBE, stmt *parser.CreateIndexStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(false)
@@ -42,20 +93,7 @@ func (s *Stmt) compileCreateIndex(vm *vdbe.VDBE, stmt *parser.CreateIndexStmt, a
 		index.RootPage = uint32(1000 + s.conn.schema.IndexCount())
 	}
 
-	// Persist schema to sqlite_master
-	if s.conn.btree != nil {
-		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
-			return nil, fmt.Errorf("failed to persist schema: %w", err)
-		}
-	}
-
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	// Invalidate statement cache since schema has changed
-	s.invalidateStmtCache()
-
-	return vm, nil
+	return s.persistSchemaAndFinalize(vm)
 }
 
 // compileDropIndex compiles a DROP INDEX statement.
@@ -67,10 +105,7 @@ func (s *Stmt) compileDropIndex(vm *vdbe.VDBE, stmt *parser.DropIndexStmt, args 
 	_, exists := s.conn.schema.GetIndex(stmt.Name)
 	if !exists {
 		if stmt.IfExists {
-			// IF EXISTS was specified, silently succeed
-			vm.AddOp(vdbe.OpInit, 0, 0, 0)
-			vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-			return vm, nil
+			return emitInitHalt(vm)
 		}
 		return nil, fmt.Errorf("index not found: %s", stmt.Name)
 	}
@@ -80,20 +115,7 @@ func (s *Stmt) compileDropIndex(vm *vdbe.VDBE, stmt *parser.DropIndexStmt, args 
 		return nil, err
 	}
 
-	// Persist schema to sqlite_master
-	if s.conn.btree != nil {
-		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
-			return nil, fmt.Errorf("failed to persist schema: %w", err)
-		}
-	}
-
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	// Invalidate statement cache since schema has changed
-	s.invalidateStmtCache()
-
-	return vm, nil
+	return s.persistSchemaAndFinalize(vm)
 }
 
 // compileAlterTable compiles an ALTER TABLE statement.
@@ -142,19 +164,7 @@ func (s *Stmt) compileAlterTableRename(vm *vdbe.VDBE, oldName, newName string) (
 	// Update trigger table references
 	s.updateTriggerTableRefs(oldName, newName)
 
-	// Persist to sqlite_master
-	if s.conn.btree != nil {
-		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
-			return nil, fmt.Errorf("failed to persist schema: %w", err)
-		}
-	}
-
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	s.invalidateStmtCache()
-
-	return vm, nil
+	return s.persistSchemaAndFinalize(vm)
 }
 
 // updateTriggerTableRefs updates trigger table references after a table rename.
@@ -173,19 +183,7 @@ func (s *Stmt) compileAlterTableRenameColumn(vm *vdbe.VDBE, table *schema.Table,
 		return nil, err
 	}
 
-	// Persist to sqlite_master
-	if s.conn.btree != nil {
-		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
-			return nil, fmt.Errorf("failed to persist schema: %w", err)
-		}
-	}
-
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	s.invalidateStmtCache()
-
-	return vm, nil
+	return s.persistSchemaAndFinalize(vm)
 }
 
 // compileAlterTableAddColumn handles ALTER TABLE ... ADD COLUMN ...
@@ -197,20 +195,10 @@ func (s *Stmt) compileAlterTableAddColumn(vm *vdbe.VDBE, table *schema.Table, co
 	newCol := s.createNewColumn(colDef)
 	table.Columns = append(table.Columns, newCol)
 
-	// Regenerate stored SQL and persist
+	// Regenerate stored SQL
 	s.conn.schema.UpdateTableSQL(table.Name)
-	if s.conn.btree != nil {
-		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
-			return nil, fmt.Errorf("failed to persist schema: %w", err)
-		}
-	}
 
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	s.invalidateStmtCache()
-
-	return vm, nil
+	return s.persistSchemaAndFinalize(vm)
 }
 
 // validateColumnAddition checks if a column can be added to the table.
@@ -262,19 +250,7 @@ func (s *Stmt) compileAlterTableDropColumn(vm *vdbe.VDBE, table *schema.Table, c
 		return nil, err
 	}
 
-	// Persist to sqlite_master
-	if s.conn.btree != nil {
-		if err := s.conn.schema.SaveToMaster(s.conn.btree); err != nil {
-			return nil, fmt.Errorf("failed to persist schema: %w", err)
-		}
-	}
-
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-
-	s.invalidateStmtCache()
-
-	return vm, nil
+	return s.persistSchemaAndFinalize(vm)
 }
 
 // pragmaCompiler is a function that compiles a specific PRAGMA statement.
@@ -321,9 +297,7 @@ func (s *Stmt) compilePragma(vm *vdbe.VDBE, stmt *parser.PragmaStmt, args []driv
 	case "quick_check":
 		return s.compilePragmaIntegrityCheck(vm)
 	default:
-		vm.AddOp(vdbe.OpInit, 0, 0, 0)
-		vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-		return vm, nil
+		return emitInitHalt(vm)
 	}
 }
 
@@ -463,26 +437,16 @@ func (s *Stmt) compilePragmaForeignKeysSet(vm *vdbe.VDBE, stmt *parser.PragmaStm
 		s.conn.fkManager.SetEnabled(enabled)
 	}
 
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitInitHalt(vm)
 }
 
 // compilePragmaForeignKeysGet handles GET operation: PRAGMA foreign_keys
 func (s *Stmt) compilePragmaForeignKeysGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
-	vm.ResultCols = []string{"foreign_keys"}
-
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
 	value := 0
 	if s.conn.foreignKeysEnabled {
 		value = 1
 	}
-	vm.AddOpWithP4Int(vdbe.OpInteger, value, 1, 0, int32(value))
-	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
-
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitSingleIntResult(vm, "foreign_keys", value)
 }
 
 // parseForeignKeysValue parses a PRAGMA foreign_keys value into a boolean
@@ -559,14 +523,7 @@ func (s *Stmt) compilePragmaJournalModeSet(vm *vdbe.VDBE, stmt *parser.PragmaStm
 
 // compilePragmaJournalModeGet handles GET operation: PRAGMA journal_mode
 func (s *Stmt) compilePragmaJournalModeGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
-	vm.ResultCols = []string{"journal_mode"}
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
-	mode := s.getCurrentJournalMode()
-	vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, mode)
-	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitSingleStringResult(vm, "journal_mode", s.getCurrentJournalMode())
 }
 
 // compilePragmaDatabaseList handles PRAGMA database_list.
@@ -589,15 +546,7 @@ func (s *Stmt) compilePragmaDatabaseList(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
 
 // compilePragmaPageCount handles PRAGMA page_count
 func (s *Stmt) compilePragmaPageCount(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
-	vm.ResultCols = []string{"page_count"}
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
-	// Get page count from pager
-	pageCount := int64(s.conn.pager.PageCount())
-	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 1, 0, pageCount)
-	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitSingleInt64Result(vm, "page_count", int64(s.conn.pager.PageCount()))
 }
 
 // extractJournalModeValue extracts the journal mode string from a pragma value expression.
@@ -660,11 +609,7 @@ func (s *Stmt) getCurrentJournalMode() string {
 
 // emitJournalModeResult emits VDBE opcodes for returning a journal mode result.
 func emitJournalModeResult(vm *vdbe.VDBE, mode string) {
-	vm.ResultCols = []string{"journal_mode"}
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, mode)
-	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
+	emitSingleStringResult(vm, "journal_mode", mode) //nolint:errcheck // always returns nil
 }
 
 // compilePragmaForeignKeyCheck compiles PRAGMA foreign_key_check or PRAGMA foreign_key_check(table)
@@ -710,9 +655,7 @@ func extractOptionalTableName(stmt *parser.PragmaStmt) string {
 // emptyForeignKeyCheckResult returns an empty result set.
 func (s *Stmt) emptyForeignKeyCheckResult(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
 	vm.ResultCols = []string{"table", "rowid", "parent", "fkid"}
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitInitHalt(vm)
 }
 
 // emitForeignKeyCheckResults emits violations as VDBE result rows.
@@ -858,46 +801,39 @@ func (r *driverRowReader) initializeCursor(tableName string) (*btree.BtCursor, e
 	return cursor, nil
 }
 
-// scanForMatch scans all rows looking for a match.
-func (r *driverRowReader) scanForMatch(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}) (bool, error) {
+// rowMatchFunc checks if the current cursor row matches. Used by scanRows.
+type rowMatchFunc func() (bool, error)
+
+// scanRows scans all rows looking for a match using the provided match function.
+func scanRows(cursor *btree.BtCursor, matchFn rowMatchFunc) (bool, error) {
 	if cursor == nil {
 		return false, nil
 	}
-
 	for {
-		if match, err := r.checkRowMatch(cursor, table, columns, values); err != nil {
+		if match, err := matchFn(); err != nil {
 			return false, err
 		} else if match {
 			return true, nil
 		}
-
 		if err := cursor.Next(); err != nil {
 			break
 		}
 	}
-
 	return false, nil
+}
+
+// scanForMatch scans all rows looking for a match.
+func (r *driverRowReader) scanForMatch(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}) (bool, error) {
+	return scanRows(cursor, func() (bool, error) {
+		return r.checkRowMatch(cursor, table, columns, values)
+	})
 }
 
 // scanForMatchWithCollation scans all rows looking for a match using specified collations.
 func (r *driverRowReader) scanForMatchWithCollation(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}, collations []string) (bool, error) {
-	if cursor == nil {
-		return false, nil
-	}
-
-	for {
-		if match, err := r.checkRowMatchWithCollation(cursor, table, columns, values, collations); err != nil {
-			return false, err
-		} else if match {
-			return true, nil
-		}
-
-		if err := cursor.Next(); err != nil {
-			break
-		}
-	}
-
-	return false, nil
+	return scanRows(cursor, func() (bool, error) {
+		return r.checkRowMatchWithCollation(cursor, table, columns, values, collations)
+	})
 }
 
 // FindReferencingRows finds all rowids of rows with matching column values.
@@ -939,22 +875,27 @@ func (r *driverRowReader) FindReferencingRowsWithParentAffinity(
 	return r.collectMatchingRowidsWithAffinity(cursor, childTable, childColumns, parentValues, parentTable, parentColumns)
 }
 
-// collectMatchingRowids scans all rows and collects rowids that match.
-func (r *driverRowReader) collectMatchingRowids(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}) ([]int64, error) {
+// collectMatchingRowidsByFunc scans all rows and collects rowids where matchFn returns true.
+func collectMatchingRowidsByFunc(cursor *btree.BtCursor, matchFn rowMatchFunc) ([]int64, error) {
 	var rowids []int64
 	for {
-		if match, err := r.checkRowMatch(cursor, table, columns, values); err != nil {
+		if match, err := matchFn(); err != nil {
 			return nil, err
 		} else if match {
 			rowids = append(rowids, cursor.GetKey())
 		}
-
 		if err := cursor.Next(); err != nil {
 			break
 		}
 	}
-
 	return rowids, nil
+}
+
+// collectMatchingRowids scans all rows and collects rowids that match.
+func (r *driverRowReader) collectMatchingRowids(cursor *btree.BtCursor, table *schema.Table, columns []string, values []interface{}) ([]int64, error) {
+	return collectMatchingRowidsByFunc(cursor, func() (bool, error) {
+		return r.checkRowMatch(cursor, table, columns, values)
+	})
 }
 
 // collectMatchingRowidsWithAffinity scans rows and collects matches using parent column affinity.
@@ -966,22 +907,9 @@ func (r *driverRowReader) collectMatchingRowidsWithAffinity(
 	parentTable *schema.Table,
 	parentColumns []string,
 ) ([]int64, error) {
-	var rowids []int64
-	for {
-		match, err := r.checkRowMatchWithParentAffinity(cursor, childTable, childColumns, parentValues, parentTable, parentColumns)
-		if err != nil {
-			return nil, err
-		}
-		if match {
-			rowids = append(rowids, cursor.GetKey())
-		}
-
-		if err := cursor.Next(); err != nil {
-			break
-		}
-	}
-
-	return rowids, nil
+	return collectMatchingRowidsByFunc(cursor, func() (bool, error) {
+		return r.checkRowMatchWithParentAffinity(cursor, childTable, childColumns, parentValues, parentTable, parentColumns)
+	})
 }
 
 // ReadRowByRowid reads a row's values by its rowid.
@@ -1295,12 +1223,7 @@ func (s *Stmt) compilePragmaCacheSize(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*
 
 // compilePragmaCacheSizeGet returns the current cache_size value.
 func (s *Stmt) compilePragmaCacheSizeGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
-	vm.ResultCols = []string{"cache_size"}
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 1, 0, s.conn.cacheSize)
-	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitSingleInt64Result(vm, "cache_size", s.conn.cacheSize)
 }
 
 // compilePragmaCacheSizeSet sets the cache_size value.
@@ -1312,9 +1235,7 @@ func (s *Stmt) compilePragmaCacheSizeSet(vm *vdbe.VDBE, stmt *parser.PragmaStmt)
 		return nil, fmt.Errorf("invalid value for PRAGMA cache_size: %s", valueStr)
 	}
 	s.conn.cacheSize = val
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitInitHalt(vm)
 }
 
 // compilePragmaIndexList compiles PRAGMA index_list(tablename).
@@ -1359,14 +1280,7 @@ func (s *Stmt) compilePragmaAutoVacuum(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (
 
 // compilePragmaAutoVacuumGet returns the current auto_vacuum mode.
 func (s *Stmt) compilePragmaAutoVacuumGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
-	vm.ResultCols = []string{"auto_vacuum"}
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
-	mode := s.getAutoVacuumMode()
-	vm.AddOpWithP4Int(vdbe.OpInteger, mode, 1, 0, int32(mode))
-	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitSingleIntResult(vm, "auto_vacuum", s.getAutoVacuumMode())
 }
 
 // getAutoVacuumMode returns the current auto_vacuum mode from the pager or connection.
@@ -1394,9 +1308,7 @@ func (s *Stmt) compilePragmaAutoVacuumSet(vm *vdbe.VDBE, stmt *parser.PragmaStmt
 		}
 	}
 
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitInitHalt(vm)
 }
 
 // parseAutoVacuumValue parses a PRAGMA auto_vacuum value to an integer mode.
@@ -1432,9 +1344,7 @@ func (s *Stmt) compilePragmaIncrementalVacuum(vm *vdbe.VDBE, stmt *parser.Pragma
 		}
 	}
 
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitInitHalt(vm)
 }
 
 // compilePragmaCompileOptions returns a list of compile-time options.
@@ -1510,23 +1420,9 @@ func findColumnIndex(table *schema.Table, colName string) int {
 func (s *Stmt) compilePragmaPageSize(vm *vdbe.VDBE, stmt *parser.PragmaStmt) (*vdbe.VDBE, error) {
 	if stmt.Value != nil {
 		// SET is a no-op at runtime (page size must be set before database creation)
-		vm.AddOp(vdbe.OpInit, 0, 0, 0)
-		vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-		return vm, nil
+		return emitInitHalt(vm)
 	}
-	return s.compilePragmaPageSizeGet(vm)
-}
-
-// compilePragmaPageSizeGet returns the current page size.
-func (s *Stmt) compilePragmaPageSizeGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
-	vm.ResultCols = []string{"page_size"}
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
-	pageSize := int64(s.conn.pager.PageSize())
-	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 1, 0, pageSize)
-	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitSingleInt64Result(vm, "page_size", int64(s.conn.pager.PageSize()))
 }
 
 // compilePragmaUserVersion compiles PRAGMA user_version or PRAGMA user_version = value.
@@ -1539,15 +1435,7 @@ func (s *Stmt) compilePragmaUserVersion(vm *vdbe.VDBE, stmt *parser.PragmaStmt) 
 
 // compilePragmaUserVersionGet returns the current user_version.
 func (s *Stmt) compilePragmaUserVersionGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
-	vm.ResultCols = []string{"user_version"}
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
-	header := s.conn.pager.GetHeader()
-	version := int64(header.UserVersion)
-	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 1, 0, version)
-	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitSingleInt64Result(vm, "user_version", int64(s.conn.pager.GetHeader().UserVersion))
 }
 
 // compilePragmaUserVersionSet sets the user_version.
@@ -1564,9 +1452,7 @@ func (s *Stmt) compilePragmaUserVersionSet(vm *vdbe.VDBE, stmt *parser.PragmaStm
 		return nil, fmt.Errorf("failed to set user_version: %w", err)
 	}
 
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitInitHalt(vm)
 }
 
 // compilePragmaSchemaVersion compiles PRAGMA schema_version or PRAGMA schema_version = value.
@@ -1579,15 +1465,7 @@ func (s *Stmt) compilePragmaSchemaVersion(vm *vdbe.VDBE, stmt *parser.PragmaStmt
 
 // compilePragmaSchemaVersionGet returns the current schema_version (SchemaCookie).
 func (s *Stmt) compilePragmaSchemaVersionGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
-	vm.ResultCols = []string{"schema_version"}
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
-	header := s.conn.pager.GetHeader()
-	version := int64(header.SchemaCookie)
-	vm.AddOpWithP4Int64(vdbe.OpInt64, 0, 1, 0, version)
-	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitSingleInt64Result(vm, "schema_version", int64(s.conn.pager.GetHeader().SchemaCookie))
 }
 
 // compilePragmaSchemaVersionSet sets the schema_version (SchemaCookie).
@@ -1604,21 +1482,12 @@ func (s *Stmt) compilePragmaSchemaVersionSet(vm *vdbe.VDBE, stmt *parser.PragmaS
 		return nil, fmt.Errorf("failed to set schema_version: %w", err)
 	}
 
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitInitHalt(vm)
 }
 
 // compilePragmaIntegrityCheck runs basic integrity checks on the database.
 func (s *Stmt) compilePragmaIntegrityCheck(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
-	vm.ResultCols = []string{"integrity_check"}
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
-	result := s.runIntegrityCheck()
-	vm.AddOpWithP4Str(vdbe.OpString, 0, 1, 0, result)
-	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitSingleStringResult(vm, "integrity_check", s.runIntegrityCheck())
 }
 
 // runIntegrityCheck performs basic integrity checks and returns a result string.
@@ -1639,14 +1508,7 @@ func (s *Stmt) compilePragmaSynchronous(vm *vdbe.VDBE, stmt *parser.PragmaStmt) 
 
 // compilePragmaSynchronousGet returns the current synchronous mode.
 func (s *Stmt) compilePragmaSynchronousGet(vm *vdbe.VDBE) (*vdbe.VDBE, error) {
-	vm.ResultCols = []string{"synchronous"}
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
-	mode := s.conn.synchronousMode
-	vm.AddOpWithP4Int(vdbe.OpInteger, mode, 1, 0, int32(mode))
-	vm.AddOp(vdbe.OpResultRow, 1, 1, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitSingleIntResult(vm, "synchronous", s.conn.synchronousMode)
 }
 
 // compilePragmaSynchronousSet sets the synchronous mode.
@@ -1659,9 +1521,7 @@ func (s *Stmt) compilePragmaSynchronousSet(vm *vdbe.VDBE, stmt *parser.PragmaStm
 	}
 
 	s.conn.synchronousMode = mode
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitInitHalt(vm)
 }
 
 // parseSynchronousValue parses a PRAGMA synchronous value to an integer mode.

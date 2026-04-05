@@ -33,95 +33,69 @@ func NewVDBERowModifier(v *VDBE) *VDBERowModifier {
 	return &VDBERowModifier{reader: NewVDBERowReader(v)}
 }
 
+// withReadCursor validates context, resolves a table, and opens a temporary read cursor.
+// The callback receives the cursor number and table info; the cursor is closed on return.
+func (r *VDBERowReader) withReadCursor(tableName string, fn func(int, *tableInfo) error) error {
+	if err := r.validateContext(); err != nil {
+		return err
+	}
+	table, err := r.getTable(tableName)
+	if err != nil {
+		return err
+	}
+	cursorNum := r.allocTempCursor()
+	defer r.closeTempCursor(cursorNum)
+	if err := r.openReadCursorForTable(cursorNum, table); err != nil {
+		return err
+	}
+	return fn(cursorNum, table)
+}
+
 // RowExists checks if a row exists with the given column values in the referenced table.
 // It returns true if a matching row is found, false otherwise.
 func (r *VDBERowReader) RowExists(tableName string, columns []string, values []interface{}) (bool, error) {
-	if err := r.validateContext(); err != nil {
-		return false, err
-	}
-
-	// Get the table from schema
-	table, err := r.getTable(tableName)
-	if err != nil {
-		return false, err
-	}
-
-	// Open a temporary cursor for reading
-	cursorNum := r.allocTempCursor()
-	defer r.closeTempCursor(cursorNum)
-
-	if err := r.openReadCursorForTable(cursorNum, table); err != nil {
-		return false, err
-	}
-
-	// Search for a matching row
-	return r.findMatchingRow(cursorNum, table, columns, values)
+	var result bool
+	err := r.withReadCursor(tableName, func(cur int, t *tableInfo) error {
+		var e error
+		result, e = r.findMatchingRow(cur, t, columns, values)
+		return e
+	})
+	return result, err
 }
 
 // RowExistsWithCollation checks if a row exists using specified collations per column.
 func (r *VDBERowReader) RowExistsWithCollation(tableName string, columns []string, values []interface{}, collations []string) (bool, error) {
-	if err := r.validateContext(); err != nil {
-		return false, err
-	}
-
-	table, err := r.getTable(tableName)
-	if err != nil {
-		return false, err
-	}
-
-	cursorNum := r.allocTempCursor()
-	defer r.closeTempCursor(cursorNum)
-
-	if err := r.openReadCursorForTable(cursorNum, table); err != nil {
-		return false, err
-	}
-
-	// Search for a matching row with collation-aware comparison
-	return r.findMatchingRowWithCollation(cursorNum, table, columns, values, collations)
+	var result bool
+	err := r.withReadCursor(tableName, func(cur int, t *tableInfo) error {
+		var e error
+		result, e = r.findMatchingRowWithCollation(cur, t, columns, values, collations)
+		return e
+	})
+	return result, err
 }
 
 // FindReferencingRows finds all rowids of rows that reference the given values.
 // This is used for ON DELETE/UPDATE CASCADE operations.
 func (r *VDBERowReader) FindReferencingRows(tableName string, columns []string, values []interface{}) ([]int64, error) {
-	if err := r.validateContext(); err != nil {
-		return nil, err
-	}
-
-	table, err := r.getTable(tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	cursorNum := r.allocTempCursor()
-	defer r.closeTempCursor(cursorNum)
-
-	if err := r.openReadCursorForTable(cursorNum, table); err != nil {
-		return nil, err
-	}
-
-	return r.collectMatchingRowids(cursorNum, table, columns, values)
+	var result []int64
+	err := r.withReadCursor(tableName, func(cur int, t *tableInfo) error {
+		var e error
+		result, e = r.collectMatchingRowids(cur, t, columns, values)
+		return e
+	})
+	return result, err
 }
 
 // FindReferencingRowsWithData finds all rows that match and returns their complete data.
 // This is used for CASCADE operations on WITHOUT ROWID tables where we need primary key values.
 func (r *VDBERowReader) FindReferencingRowsWithData(tableName string, columns []string, values []interface{}) ([]map[string]interface{}, error) {
-	if err := r.validateContext(); err != nil {
-		return nil, err
-	}
-
-	table, err := r.getTable(tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	cursorNum := r.allocTempCursor()
-	defer r.closeTempCursor(cursorNum)
-
-	if err := r.openReadCursorForTable(cursorNum, table); err != nil {
-		return nil, err
-	}
-
-	return r.collectMatchingRowData(cursorNum, table, columns, values)
+	var result []map[string]interface{}
+	err := r.withReadCursor(tableName, func(cur int, t *tableInfo) error {
+		var e error
+		result, e = r.collectMatchingRowData(cur, t, columns, values)
+		return e
+	})
+	return result, err
 }
 
 // FindReferencingRowsWithParentAffinity finds all rowids with affinity and collation-aware matching.
@@ -136,69 +110,45 @@ func (r *VDBERowReader) FindReferencingRowsWithParentAffinity(
 	if err := r.validateContext(); err != nil {
 		return nil, err
 	}
-
-	childTable, err := r.getTable(childTableName)
-	if err != nil {
-		return nil, err
-	}
-
 	parentTable, err := r.getTable(parentTableName)
 	if err != nil {
 		return nil, err
 	}
-
-	cursorNum := r.allocTempCursor()
-	defer r.closeTempCursor(cursorNum)
-
-	if err := r.openReadCursorForTable(cursorNum, childTable); err != nil {
-		return nil, err
-	}
-
-	return r.collectMatchingRowidsWithAffinityAndCollation(cursorNum, childTable, childColumns, parentValues, parentTable, parentColumns)
+	var result []int64
+	err = r.withReadCursor(childTableName, func(cur int, childTable *tableInfo) error {
+		var e error
+		result, e = r.collectMatchingRowidsWithAffinityAndCollation(cur, childTable, childColumns, parentValues, parentTable, parentColumns)
+		return e
+	})
+	return result, err
 }
 
 // ReadRowByRowid reads a row's values by its rowid.
 // Used for recursive CASCADE operations.
 // For WITHOUT ROWID tables, rowid is encoded as a composite key of primary key columns.
 func (r *VDBERowReader) ReadRowByRowid(tableName string, rowid int64) (map[string]interface{}, error) {
-	if err := r.validateContext(); err != nil {
-		return nil, err
-	}
-
-	table, err := r.getTable(tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	if table.WithoutRowID {
-		// For WITHOUT ROWID tables, the "rowid" is actually a composite key stored in a special format
-		// We need to decode it back to the primary key values
-		return nil, fmt.Errorf("ReadRowByRowid not supported for WITHOUT ROWID table: %s (use ReadRowByKey)", tableName)
-	}
-
-	cursorNum := r.allocTempCursor()
-	defer r.closeTempCursor(cursorNum)
-
-	if err := r.openReadCursorForTable(cursorNum, table); err != nil {
-		return nil, err
-	}
-
-	cursor, err := r.getBTreeCursor(cursorNum)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := r.seekToRowid(cursor, rowid); err != nil {
-		return nil, err
-	}
-
-	return r.readRowValuesFromCursor(r.vdbe.Cursors[cursorNum], table)
+	var result map[string]interface{}
+	err := r.withReadCursor(tableName, func(cur int, table *tableInfo) error {
+		if table.WithoutRowID {
+			return fmt.Errorf("ReadRowByRowid not supported for WITHOUT ROWID table: %s (use ReadRowByKey)", tableName)
+		}
+		cursor, e := r.getBTreeCursor(cur)
+		if e != nil {
+			return e
+		}
+		if e = r.seekToRowid(cursor, rowid); e != nil {
+			return e
+		}
+		result, e = r.readRowValuesFromCursor(r.vdbe.Cursors[cur], table)
+		return e
+	})
+	return result, err
 }
 
 // seekByKeyValues seeks a cursor to the row identified by keyValues.
 func (r *VDBERowReader) seekByKeyValues(cursor *btree.BtCursor, table *tableInfo, keyValues []interface{}) error {
 	if table.WithoutRowID {
-		keyBytes := encodeCompositeKeyFromValues(keyValues)
+		keyBytes := encodeCompositeKey(keyValues)
 		found, err := cursor.SeekComposite(keyBytes)
 		if err != nil {
 			return err
@@ -221,32 +171,19 @@ func (r *VDBERowReader) seekByKeyValues(cursor *btree.BtCursor, table *tableInfo
 // ReadRowByKey reads a row's values by its primary key values.
 // Used for recursive CASCADE operations on WITHOUT ROWID tables.
 func (r *VDBERowReader) ReadRowByKey(tableName string, keyValues []interface{}) (map[string]interface{}, error) {
-	if err := r.validateContext(); err != nil {
-		return nil, err
-	}
-
-	table, err := r.getTable(tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	cursorNum := r.allocTempCursor()
-	defer r.closeTempCursor(cursorNum)
-
-	if err := r.openReadCursorForTable(cursorNum, table); err != nil {
-		return nil, err
-	}
-
-	cursor, err := r.getBTreeCursor(cursorNum)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := r.seekByKeyValues(cursor, table, keyValues); err != nil {
-		return nil, err
-	}
-
-	return r.readRowValuesFromCursor(r.vdbe.Cursors[cursorNum], table)
+	var result map[string]interface{}
+	err := r.withReadCursor(tableName, func(cur int, table *tableInfo) error {
+		cursor, e := r.getBTreeCursor(cur)
+		if e != nil {
+			return e
+		}
+		if e = r.seekByKeyValues(cursor, table, keyValues); e != nil {
+			return e
+		}
+		result, e = r.readRowValuesFromCursor(r.vdbe.Cursors[cur], table)
+		return e
+	})
+	return result, err
 }
 
 // validateContext checks if VDBE context is available
@@ -539,38 +476,20 @@ func (r *VDBERowReader) closeTempCursor(cursorNum int) {
 
 // findMatchingRow scans the table to find a row matching the given values.
 func (r *VDBERowReader) findMatchingRow(cursorNum int, table *tableInfo, columns []string, values []interface{}) (bool, error) {
-	btCursor, err := r.getBTreeCursor(cursorNum)
-	if err != nil {
+	cursor, btCursor, empty, err := r.prepareTableScan(cursorNum)
+	if err != nil || empty {
 		return false, err
 	}
-
-	isEmpty, err := r.moveToFirstRow(btCursor)
-	if err != nil {
-		return false, err
-	}
-	if isEmpty {
-		return false, nil // Empty table means no match
-	}
-
-	return r.scanForMatch(r.vdbe.Cursors[cursorNum], btCursor, table, columns, values)
+	return r.scanForMatch(cursor, btCursor, table, columns, values)
 }
 
 // findMatchingRowWithCollation scans the table to find a row matching the given values with collation.
 func (r *VDBERowReader) findMatchingRowWithCollation(cursorNum int, table *tableInfo, columns []string, values []interface{}, collations []string) (bool, error) {
-	btCursor, err := r.getBTreeCursor(cursorNum)
-	if err != nil {
+	cursor, btCursor, empty, err := r.prepareTableScan(cursorNum)
+	if err != nil || empty {
 		return false, err
 	}
-
-	isEmpty, err := r.moveToFirstRow(btCursor)
-	if err != nil {
-		return false, err
-	}
-	if isEmpty {
-		return false, nil // Empty table means no match
-	}
-
-	return r.scanForMatchWithCollation(r.vdbe.Cursors[cursorNum], btCursor, table, columns, values, collations)
+	return r.scanForMatchWithCollation(cursor, btCursor, table, columns, values, collations)
 }
 
 // moveToFirstRow moves cursor to the first row, returns (isEmpty, error).
@@ -583,6 +502,20 @@ func (r *VDBERowReader) moveToFirstRow(btCursor *btree.BtCursor) (bool, error) {
 		return false, err
 	}
 	return false, nil // Cursor is at first row
+}
+
+// prepareTableScan gets the btree cursor, moves to the first row, and returns scan state.
+// Returns (cursor, btCursor, isEmpty, error). If isEmpty is true, the table has no rows.
+func (r *VDBERowReader) prepareTableScan(cursorNum int) (*Cursor, *btree.BtCursor, bool, error) {
+	btCursor, err := r.getBTreeCursor(cursorNum)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	isEmpty, err := r.moveToFirstRow(btCursor)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	return r.vdbe.Cursors[cursorNum], btCursor, isEmpty, nil
 }
 
 // scanForMatch scans through rows looking for a match
@@ -625,38 +558,26 @@ func (r *VDBERowReader) scanForMatchWithCollation(cursor *Cursor, btCursor *btre
 
 // collectMatchingRowids finds all rowids that match the given column values.
 func (r *VDBERowReader) collectMatchingRowids(cursorNum int, table *tableInfo, columns []string, values []interface{}) ([]int64, error) {
-	btCursor, err := r.getBTreeCursor(cursorNum)
+	cursor, btCursor, empty, err := r.prepareTableScan(cursorNum)
 	if err != nil {
 		return nil, err
 	}
-
-	isEmpty, err := r.moveToFirstRow(btCursor)
-	if err != nil {
-		return nil, err
+	if empty {
+		return []int64{}, nil
 	}
-	if isEmpty {
-		return []int64{}, nil // Empty table means no matches
-	}
-
-	return r.collectAllMatchingRowids(r.vdbe.Cursors[cursorNum], btCursor, table, columns, values)
+	return r.collectAllMatchingRowids(cursor, btCursor, table, columns, values)
 }
 
 // collectMatchingRowData finds all rows that match and returns their complete data.
 func (r *VDBERowReader) collectMatchingRowData(cursorNum int, table *tableInfo, columns []string, values []interface{}) ([]map[string]interface{}, error) {
-	btCursor, err := r.getBTreeCursor(cursorNum)
+	cursor, btCursor, empty, err := r.prepareTableScan(cursorNum)
 	if err != nil {
 		return nil, err
 	}
-
-	isEmpty, err := r.moveToFirstRow(btCursor)
-	if err != nil {
-		return nil, err
+	if empty {
+		return []map[string]interface{}{}, nil
 	}
-	if isEmpty {
-		return []map[string]interface{}{}, nil // Empty table means no matches
-	}
-
-	return r.collectAllMatchingRowData(r.vdbe.Cursors[cursorNum], btCursor, table, columns, values)
+	return r.collectAllMatchingRowData(cursor, btCursor, table, columns, values)
 }
 
 // collectAllMatchingRowData scans all rows and collects full row data for matches.
@@ -694,21 +615,15 @@ func (r *VDBERowReader) collectMatchingRowidsWithAffinityAndCollation(
 	parentTable *tableInfo,
 	parentColumns []string,
 ) ([]int64, error) {
-	btCursor, err := r.getBTreeCursor(cursorNum)
+	cursor, btCursor, empty, err := r.prepareTableScan(cursorNum)
 	if err != nil {
 		return nil, err
 	}
-
-	isEmpty, err := r.moveToFirstRow(btCursor)
-	if err != nil {
-		return nil, err
-	}
-	if isEmpty {
+	if empty {
 		return []int64{}, nil
 	}
-
 	return r.collectAllMatchingRowidsWithAffinityAndCollation(
-		r.vdbe.Cursors[cursorNum], btCursor, childTable, childColumns, parentValues, parentTable, parentColumns)
+		cursor, btCursor, childTable, childColumns, parentValues, parentTable, parentColumns)
 }
 
 // collectAllMatchingRowidsWithAffinityAndCollation scans rows with parent affinity and collation.
@@ -768,46 +683,35 @@ func (r *VDBERowReader) isEmptyTableError(err error) bool {
 	return errMsg == "empty table" || errMsg == "empty leaf" || strings.Contains(errMsg, "empty leaf page")
 }
 
-// checkRowMatch checks if the current row matches the given column values.
-func (r *VDBERowReader) checkRowMatch(cursor *Cursor, table *tableInfo, columns []string, values []interface{}) (bool, error) {
+// cursorPayload extracts the btree cursor, payload, and rowid from a Cursor.
+func cursorPayload(cursor *Cursor) (*btree.BtCursor, []byte, int64, error) {
 	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
 	if !ok {
-		return false, fmt.Errorf("invalid cursor type")
+		return nil, nil, 0, fmt.Errorf("invalid cursor type")
 	}
-
 	payload, err := btCursor.GetPayloadWithOverflow()
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	return btCursor, payload, btCursor.GetKey(), nil
+}
+
+// checkRowMatch checks if the current row matches the given column values.
+func (r *VDBERowReader) checkRowMatch(cursor *Cursor, table *tableInfo, columns []string, values []interface{}) (bool, error) {
+	_, payload, rowid, err := cursorPayload(cursor)
 	if err != nil {
 		return false, err
 	}
-
-	rowid := btCursor.GetKey()
-
-	// Parse the record and check column values
 	for i, colName := range columns {
+		colValue, err := r.extractColumnValueFromRow(table, colName, payload, rowid)
+		if err != nil {
+			return false, err
+		}
 		colIdx := r.findColumnIndex(table, colName)
-		if colIdx < 0 {
-			return false, fmt.Errorf("column not found: %s", colName)
-		}
-
-		colInfo := table.Columns[colIdx]
-		colValue := NewMem()
-
-		if colInfo.IsIntegerPK {
-			// INTEGER PRIMARY KEY is stored as rowid, not in payload
-			colValue.SetInt(rowid)
-		} else {
-			// Regular column: extract from payload using PayloadColIndex
-			if err := parseRecordColumn(payload, colInfo.PayloadColIndex, colValue); err != nil {
-				return false, err
-			}
-		}
-
-		// Compare with expected value
-		if !r.valuesEqualWithAffinity(colValue, values[i], colInfo.Type) {
+		if !r.valuesEqualWithAffinity(colValue, values[i], table.Columns[colIdx].Type) {
 			return false, nil
 		}
 	}
-
 	return true, nil
 }
 
@@ -821,31 +725,21 @@ func getCollationForColumn(collations []string, idx int) string {
 
 // checkRowMatchWithCollation checks if the current row matches the given column values with collation.
 func (r *VDBERowReader) checkRowMatchWithCollation(cursor *Cursor, table *tableInfo, columns []string, values []interface{}, collations []string) (bool, error) {
-	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
-	if !ok {
-		return false, fmt.Errorf("invalid cursor type")
-	}
-
-	payload, err := btCursor.GetPayloadWithOverflow()
+	_, payload, rowid, err := cursorPayload(cursor)
 	if err != nil {
 		return false, err
 	}
-
-	rowid := btCursor.GetKey()
-
 	for i, colName := range columns {
 		colValue, err := r.extractColumnValueFromRow(table, colName, payload, rowid)
 		if err != nil {
 			return false, err
 		}
-
 		colIdx := r.findColumnIndex(table, colName)
 		colCollation := getCollationForColumn(collations, i)
 		if !r.valuesEqualWithAffinityAndCollation(colValue, values[i], table.Columns[colIdx].Type, colCollation) {
 			return false, nil
 		}
 	}
-
 	return true, nil
 }
 
@@ -889,17 +783,10 @@ func (r *VDBERowReader) checkRowMatchWithParentAffinityAndCollation(
 	parentTable *tableInfo,
 	parentColumns []string,
 ) (bool, error) {
-	btCursor, ok := cursor.BtreeCursor.(*btree.BtCursor)
-	if !ok {
-		return false, fmt.Errorf("invalid cursor type")
-	}
-
-	payload, err := btCursor.GetPayloadWithOverflow()
+	_, payload, rowid, err := cursorPayload(cursor)
 	if err != nil {
 		return false, err
 	}
-
-	rowid := btCursor.GetKey()
 
 	for i, childColName := range childColumns {
 		childValue, err := r.extractColumnValueFromRow(childTable, childColName, payload, rowid)
@@ -1280,21 +1167,7 @@ func (m *VDBERowModifier) DeleteRowByKey(table string, keyValues []interface{}) 
 		return err
 	}
 
-	var found bool
-	if tableInfo.WithoutRowID {
-		keyBytes := encodeCompositeKeyFromValues(keyValues)
-		found, err = btCursor.SeekComposite(keyBytes)
-	} else {
-		if len(keyValues) != 1 {
-			return fmt.Errorf("regular tables expect single rowid value")
-		}
-		rowid, ok := keyValues[0].(int64)
-		if !ok {
-			return fmt.Errorf("rowid must be int64")
-		}
-		found, err = btCursor.SeekRowid(rowid)
-	}
-
+	found, err := m.seekByKey(btCursor, tableInfo, keyValues)
 	if err != nil {
 		return err
 	}
@@ -1336,7 +1209,7 @@ func (m *VDBERowModifier) UpdateRow(table string, rowid int64, values map[string
 // seekByKey seeks to a row using either composite key or rowid.
 func (m *VDBERowModifier) seekByKey(btCursor *btree.BtCursor, tableInfo *tableInfo, keyValues []interface{}) (bool, error) {
 	if tableInfo.WithoutRowID {
-		keyBytes := encodeCompositeKeyFromValues(keyValues)
+		keyBytes := encodeCompositeKey(keyValues)
 		return btCursor.SeekComposite(keyBytes)
 	}
 	if len(keyValues) != 1 {
@@ -1415,24 +1288,8 @@ func (m *VDBERowModifier) fetchAndMergeValues(btCursor *btree.BtCursor, tableInf
 	if !found {
 		return nil, fmt.Errorf("rowid %d not found in table %s", rowid, tableName)
 	}
-
-	payload, err := btCursor.GetPayloadWithOverflow()
-	if err != nil {
-		return nil, err
-	}
-
-	currentValues, err := m.readRowValues(tableInfo, payload, rowid)
-	if err != nil {
-		return nil, err
-	}
-
-	for colIdx, col := range tableInfo.Columns {
-		if newVal, ok := values[col.Name]; ok {
-			currentValues[colIdx] = newVal
-		}
-	}
-
-	return currentValues, nil
+	merged, _, err := m.readAndMergeRowByKey(btCursor, tableInfo, values)
+	return merged, err
 }
 
 // replaceRow deletes the current row and inserts updated values
@@ -1511,7 +1368,7 @@ func (m *VDBERowModifier) replaceRowWithoutRowID(btCursor *btree.BtCursor, table
 
 	// Build new key from primary key columns
 	newKeyValues := m.extractPrimaryKeyValues(tableInfo, newValues)
-	keyBytes := encodeCompositeKeyFromValues(newKeyValues)
+	keyBytes := encodeCompositeKey(newKeyValues)
 
 	// Build payload (all columns)
 	payload := encodeSimpleRecord(newValues)
@@ -1537,12 +1394,6 @@ func (m *VDBERowModifier) extractPrimaryKeyValues(tableInfo *tableInfo, rowValue
 	// Fallback: if no PK columns identified, return all values
 	// This handles edge cases where schema info is incomplete
 	return rowValues
-}
-
-// encodeCompositeKeyFromValues encodes values into a composite key.
-func encodeCompositeKeyFromValues(values []interface{}) []byte {
-	// Import the withoutrowid package's EncodeCompositeKey function
-	return encodeCompositeKey(values)
 }
 
 // encodeCompositeKey is a local implementation matching withoutrowid.EncodeCompositeKey.

@@ -103,8 +103,8 @@ func (c *Conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, e
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
-		return nil, driver.ErrBadConn
+	if err := c.checkClosedLocked(); err != nil {
+		return nil, err
 	}
 
 	// Parse the SQL
@@ -275,8 +275,8 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
-		return nil, driver.ErrBadConn
+	if err := c.checkClosedLocked(); err != nil {
+		return nil, err
 	}
 
 	if c.inTx {
@@ -348,12 +348,7 @@ func (c *Conn) clearDeferredFKViolations() {
 func (c *Conn) Ping(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	if c.closed {
-		return driver.ErrBadConn
-	}
-
-	return nil
+	return c.checkClosedLocked()
 }
 
 // ResetSession is called prior to executing a query on the connection
@@ -362,8 +357,8 @@ func (c *Conn) ResetSession(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
-		return driver.ErrBadConn
+	if err := c.checkClosedLocked(); err != nil {
+		return err
 	}
 
 	// SQL-managed transactions (via BEGIN/SAVEPOINT SQL statements) are allowed
@@ -523,18 +518,15 @@ func (c *Conn) initRegistries() {
 
 // registerBuiltinVirtualTables registers built-in virtual table modules like FTS5 and RTree.
 func (c *Conn) registerBuiltinVirtualTables() error {
-	// Register FTS5 full-text search module
-	if err := c.vtabRegistry.RegisterModule("fts5", fts5.NewFTS5Module()); err != nil {
-		return fmt.Errorf("failed to register fts5 module: %w", err)
+	builtins := map[string]vtab.Module{
+		"fts5":  fts5.NewFTS5Module(),
+		"rtree": rtree.NewRTreeModule(),
 	}
-
-	// Register RTree spatial index module
-	if err := c.vtabRegistry.RegisterModule("rtree", rtree.NewRTreeModule()); err != nil {
-		return fmt.Errorf("failed to register rtree module: %w", err)
+	for name, mod := range builtins {
+		if err := c.vtabRegistry.RegisterModule(name, mod); err != nil {
+			return fmt.Errorf("failed to register %s module: %w", name, err)
+		}
 	}
-
-	// Future: Register additional modules like JSON, etc. when implemented
-
 	return nil
 }
 
@@ -598,6 +590,24 @@ func (c *Conn) applyConfig(config *DriverConfig) error {
 	return nil
 }
 
+// checkClosedLocked checks if the connection is closed while holding c.mu.
+// Returns driver.ErrBadConn if closed.
+func (c *Conn) checkClosedLocked() error {
+	if c.closed {
+		return driver.ErrBadConn
+	}
+	return nil
+}
+
+// newFuncConfig builds a FunctionConfig from the given parameters.
+func newFuncConfig(name string, numArgs int, deterministic bool) functions.FunctionConfig {
+	return functions.FunctionConfig{
+		Name:          name,
+		NumArgs:       numArgs,
+		Deterministic: deterministic,
+	}
+}
+
 // CreateScalarFunction registers a user-defined scalar function.
 // The function is registered in the connection's local function registry
 // and can be used in SQL queries executed on this connection.
@@ -622,17 +632,10 @@ func (c *Conn) CreateScalarFunction(name string, numArgs int, deterministic bool
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
-		return driver.ErrBadConn
+	if err := c.checkClosedLocked(); err != nil {
+		return err
 	}
-
-	config := functions.FunctionConfig{
-		Name:          name,
-		NumArgs:       numArgs,
-		Deterministic: deterministic,
-	}
-
-	return functions.RegisterScalarFunction(c.funcReg, config, fn)
+	return functions.RegisterScalarFunction(c.funcReg, newFuncConfig(name, numArgs, deterministic), fn)
 }
 
 // CreateAggregateFunction registers a user-defined aggregate function.
@@ -665,17 +668,10 @@ func (c *Conn) CreateAggregateFunction(name string, numArgs int, deterministic b
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
-		return driver.ErrBadConn
+	if err := c.checkClosedLocked(); err != nil {
+		return err
 	}
-
-	config := functions.FunctionConfig{
-		Name:          name,
-		NumArgs:       numArgs,
-		Deterministic: deterministic,
-	}
-
-	return functions.RegisterAggregateFunction(c.funcReg, config, fn)
+	return functions.RegisterAggregateFunction(c.funcReg, newFuncConfig(name, numArgs, deterministic), fn)
 }
 
 // UnregisterFunction removes a user-defined function from the connection.
@@ -690,10 +686,9 @@ func (c *Conn) UnregisterFunction(name string, numArgs int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
+	if c.checkClosedLocked() != nil {
 		return false
 	}
-
 	return functions.UnregisterFunction(c.funcReg, name, numArgs)
 }
 
@@ -728,15 +723,12 @@ func (c *Conn) RegisterVirtualTableModule(name string, module vtab.Module) error
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
-		return driver.ErrBadConn
+	if err := c.checkClosedLocked(); err != nil {
+		return err
 	}
-
-	// Initialize the registry if not already done
 	if c.vtabRegistry == nil {
 		c.vtabRegistry = vtab.NewModuleRegistry()
 	}
-
 	return c.vtabRegistry.RegisterModule(name, module)
 }
 
@@ -752,14 +744,12 @@ func (c *Conn) UnregisterVirtualTableModule(name string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
-		return driver.ErrBadConn
+	if err := c.checkClosedLocked(); err != nil {
+		return err
 	}
-
 	if c.vtabRegistry == nil {
 		return fmt.Errorf("virtual table module %q not registered", name)
 	}
-
 	return c.vtabRegistry.UnregisterModule(name)
 }
 
@@ -802,23 +792,18 @@ func (c *Conn) CreateCollation(name string, fn collation.CollationFunc) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
-		return driver.ErrBadConn
+	if err := c.checkClosedLocked(); err != nil {
+		return err
 	}
-
 	if name == "" {
 		return fmt.Errorf("collation name cannot be empty")
 	}
-
 	if fn == nil {
 		return fmt.Errorf("collation function cannot be nil")
 	}
-
-	// Initialize the registry if not already done
 	if c.collRegistry == nil {
 		c.collRegistry = collation.NewCollationRegistry()
 	}
-
 	return c.collRegistry.Register(name, fn)
 }
 
@@ -833,14 +818,12 @@ func (c *Conn) RemoveCollation(name string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
-		return driver.ErrBadConn
+	if err := c.checkClosedLocked(); err != nil {
+		return err
 	}
-
 	if c.collRegistry == nil {
 		return fmt.Errorf("collation %q not registered", name)
 	}
-
 	return c.collRegistry.Unregister(name)
 }
 
@@ -907,8 +890,8 @@ func (r *ConnRowReader) ReadRowByRowid(table string, rowid int64) (map[string]in
 // prepareInternal prepares a SQL statement without acquiring the connection mutex.
 // This must only be called when the caller already holds c.mu.
 func (c *Conn) prepareInternal(sqlStr string) (*Stmt, error) {
-	if c.closed {
-		return nil, driver.ErrBadConn
+	if err := c.checkClosedLocked(); err != nil {
+		return nil, err
 	}
 
 	p := parser.NewParser(sqlStr)

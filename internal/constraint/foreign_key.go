@@ -153,16 +153,9 @@ func (m *ForeignKeyManager) ValidateInsert(
 		return nil
 	}
 
-	// Type assert the schema
-	schemaTyped, ok := schemaObj.(*schema.Schema)
+	schemaTyped, reader, ok := assertSchemaAndReader(schemaObj, rowReader)
 	if !ok {
-		return nil // Can't validate without proper schema
-	}
-
-	// Type assert the row reader
-	reader, ok := rowReader.(RowReader)
-	if !ok {
-		return nil // Can't validate without proper row reader
+		return nil
 	}
 
 	for _, fk := range constraints {
@@ -171,6 +164,49 @@ func (m *ForeignKeyManager) ValidateInsert(
 		}
 	}
 
+	return nil
+}
+
+// shouldDeferViolation checks if a constraint should be deferred and records the violation if so.
+func (m *ForeignKeyManager) shouldDeferViolation(fk *ForeignKeyConstraint, fkValues []interface{}, tableName string) bool {
+	if fk.Deferrable != DeferrableInitiallyDeferred || !m.IsInTransaction() {
+		return false
+	}
+	m.recordDeferredViolation(fk, fkValues, tableName)
+	return true
+}
+
+// fkMismatchError returns a standard FK mismatch error.
+func fkMismatchError(childTable, parentTable string) error {
+	return fmt.Errorf("foreign key mismatch - \"%s\" referencing \"%s\"", childTable, parentTable)
+}
+
+// fkReferencingRowsError returns a standard FK referencing rows error.
+func fkReferencingRowsError(childTable string) error {
+	return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", childTable)
+}
+
+// assertSchemaAndReader performs type assertions for schema and row reader.
+// Returns nil values and false if any assertion fails.
+func assertSchemaAndReader(schemaObj, rowReader interface{}) (*schema.Schema, RowReader, bool) {
+	schemaTyped, ok := schemaObj.(*schema.Schema)
+	if !ok {
+		return nil, nil, false
+	}
+	reader, ok := rowReader.(RowReader)
+	if !ok {
+		return nil, nil, false
+	}
+	return schemaTyped, reader, true
+}
+
+// updateRowsBatch applies the same set of values to multiple rows by rowid.
+func updateRowsBatch(table string, rowIDs []int64, values map[string]interface{}, rowUpdater RowUpdater, errPrefix string) error {
+	for _, rowID := range rowIDs {
+		if err := rowUpdater.UpdateRow(table, rowID, values); err != nil {
+			return fmt.Errorf("%s failed: %w", errPrefix, err)
+		}
+	}
 	return nil
 }
 
@@ -194,10 +230,7 @@ func (m *ForeignKeyManager) validateInsertConstraint(
 		}
 	}
 
-	// For deferred constraints, record violation for later checking at COMMIT
-	// But only defer if we're inside a transaction
-	if fk.Deferrable == DeferrableInitiallyDeferred && m.IsInTransaction() {
-		m.recordDeferredViolation(fk, fkValues, tableName)
+	if m.shouldDeferViolation(fk, fkValues, tableName) {
 		return nil
 	}
 
@@ -218,12 +251,7 @@ func (m *ForeignKeyManager) ValidateUpdate(
 		return nil
 	}
 
-	// Type assertions
-	schemaTyped, ok := schemaObj.(*schema.Schema)
-	if !ok {
-		return nil
-	}
-	reader, ok := rowReader.(RowReader)
+	schemaTyped, reader, ok := assertSchemaAndReader(schemaObj, rowReader)
 	if !ok {
 		return nil
 	}
@@ -269,10 +297,7 @@ func (m *ForeignKeyManager) validateOutgoingReferences(
 			continue
 		}
 
-		// For deferred constraints, record violation for later checking at COMMIT
-		// But only defer if we're inside a transaction
-		if fk.Deferrable == DeferrableInitiallyDeferred && m.IsInTransaction() {
-			m.recordDeferredViolation(fk, fkValues, tableName)
+		if m.shouldDeferViolation(fk, fkValues, tableName) {
 			continue
 		}
 
@@ -301,6 +326,15 @@ func extractForeignKeyValues(values map[string]interface{}, columns []string) ([
 	return fkValues, hasNull
 }
 
+// lookupCaseInsensitive looks up a column value trying lowercase first, then exact.
+func lookupCaseInsensitive(values map[string]interface{}, col string) (interface{}, bool) {
+	val, ok := values[strings.ToLower(col)]
+	if !ok {
+		val, ok = values[col]
+	}
+	return val, ok
+}
+
 // selfReferenceMatches checks if a self-referencing row references itself.
 // This happens when the FK column values match the parent key column values.
 func selfReferenceMatches(values map[string]interface{}, fkColumns, parentColumns []string) bool {
@@ -309,14 +343,8 @@ func selfReferenceMatches(values map[string]interface{}, fkColumns, parentColumn
 	}
 
 	for i := range fkColumns {
-		fkVal, fkOK := values[strings.ToLower(fkColumns[i])]
-		if !fkOK {
-			fkVal, fkOK = values[fkColumns[i]]
-		}
-		parentVal, parentOK := values[strings.ToLower(parentColumns[i])]
-		if !parentOK {
-			parentVal, parentOK = values[parentColumns[i]]
-		}
+		fkVal, fkOK := lookupCaseInsensitive(values, fkColumns[i])
+		parentVal, parentOK := lookupCaseInsensitive(values, parentColumns[i])
 
 		if !fkOK || !parentOK {
 			return false
@@ -335,11 +363,7 @@ func selfReferenceMatches(values map[string]interface{}, fkColumns, parentColumn
 func (m *ForeignKeyManager) validateDeleteTypeAssertions(
 	schemaObj, rowReader, rowDeleter, rowUpdater interface{},
 ) (*schema.Schema, RowReader, RowDeleter, RowUpdater, bool) {
-	schemaTyped, ok := schemaObj.(*schema.Schema)
-	if !ok {
-		return nil, nil, nil, nil, false
-	}
-	reader, ok := rowReader.(RowReader)
+	schemaTyped, reader, ok := assertSchemaAndReader(schemaObj, rowReader)
 	if !ok {
 		return nil, nil, nil, nil, false
 	}
@@ -470,15 +494,11 @@ func (m *ForeignKeyManager) filterDeleteSelfRef(
 
 // shouldDeferDeleteViolation checks if the violation should be deferred and records it if so.
 func (m *ForeignKeyManager) shouldDeferDeleteViolation(fk *ForeignKeyConstraint, keyValues []interface{}) bool {
-	if fk.Deferrable != DeferrableInitiallyDeferred || !m.IsInTransaction() {
-		return false
-	}
 	action := fk.OnDelete
 	if action != FKActionNone && action != FKActionNoAction {
 		return false
 	}
-	m.recordDeferredViolation(fk, keyValues, fk.Table)
-	return true
+	return m.shouldDeferViolation(fk, keyValues, fk.Table)
 }
 
 // handleDeleteConstraintWithoutRowID handles FK constraint for WITHOUT ROWID child tables.
@@ -522,7 +542,7 @@ func (m *ForeignKeyManager) handleDeleteConstraintWithoutRowID(
 
 // applyDeleteActionRestrict returns an error for RESTRICT/NO ACTION/default behavior.
 func (m *ForeignKeyManager) applyDeleteActionRestrict(fk *ForeignKeyConstraint) error {
-	return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", fk.Table)
+	return fkReferencingRowsError(fk.Table)
 }
 
 // applyDeleteAction applies the appropriate ON DELETE action.
@@ -726,15 +746,7 @@ func (m *ForeignKeyManager) setNullOnRows(table string, columns []string, rowIDs
 	for _, col := range columns {
 		nullValues[col] = nil
 	}
-
-	// Note: This function currently only supports regular tables with rowids.
-	// For WITHOUT ROWID tables, rowIDs would need to be replaced with primary key values.
-	for _, rowID := range rowIDs {
-		if err := rowUpdater.UpdateRow(table, rowID, nullValues); err != nil {
-			return fmt.Errorf("SET NULL failed: %w", err)
-		}
-	}
-	return nil
+	return updateRowsBatch(table, rowIDs, nullValues, rowUpdater, "SET NULL")
 }
 
 // setDefaultOnRows sets foreign key columns to their DEFAULT values in the given rows.
@@ -749,13 +761,7 @@ func (m *ForeignKeyManager) setDefaultOnRows(
 	if err != nil {
 		return err
 	}
-
-	for _, rowID := range rowIDs {
-		if err := rowUpdater.UpdateRow(table, rowID, defaultValues); err != nil {
-			return fmt.Errorf("SET DEFAULT failed: %w", err)
-		}
-	}
-	return nil
+	return updateRowsBatch(table, rowIDs, defaultValues, rowUpdater, "SET DEFAULT")
 }
 
 // getDefaultValues retrieves default values for the given columns.
@@ -1020,7 +1026,7 @@ func (m *ForeignKeyManager) validateReference(
 
 	// Check if referenced columns have a unique constraint
 	if !columnsAreUnique(refTable, refCols, schemaObj) {
-		return fmt.Errorf("foreign key mismatch - \"%s\" referencing \"%s\"", fk.Table, fk.RefTable)
+		return fkMismatchError(fk.Table, fk.RefTable)
 	}
 
 	// Extract collations from parent table columns
@@ -1124,7 +1130,7 @@ func (m *ForeignKeyManager) applyUpdateAction(
 	switch fk.OnUpdate {
 	case FKActionNone, FKActionRestrict, FKActionNoAction:
 		// FKActionNone is the default when no ON UPDATE is specified, which is equivalent to NO ACTION
-		return fmt.Errorf("FOREIGN KEY constraint failed: table %s has referencing rows", fk.Table)
+		return fkReferencingRowsError(fk.Table)
 
 	case FKActionCascade:
 		return m.cascadeUpdate(fk, newKeyValues, referencingRows, rowUpdater)
@@ -1150,15 +1156,7 @@ func (m *ForeignKeyManager) cascadeUpdate(
 	for i, col := range fk.Columns {
 		updateValues[col] = newKeyValues[i]
 	}
-
-	// Note: This function currently only supports regular tables with rowids.
-	// For WITHOUT ROWID tables, rowIDs would need to be replaced with primary key values.
-	for _, rowID := range rowIDs {
-		if err := rowUpdater.UpdateRow(fk.Table, rowID, updateValues); err != nil {
-			return fmt.Errorf("CASCADE UPDATE failed: %w", err)
-		}
-	}
-	return nil
+	return updateRowsBatch(fk.Table, rowIDs, updateValues, rowUpdater, "CASCADE UPDATE")
 }
 
 // RowReader defines the interface for reading rows from tables.
@@ -1291,12 +1289,7 @@ func (m *ForeignKeyManager) CheckDeferredViolations(
 		return nil
 	}
 
-	schemaTyped, ok := schemaObj.(*schema.Schema)
-	if !ok {
-		return nil
-	}
-
-	reader, ok := rowReader.(RowReader)
+	schemaTyped, reader, ok := assertSchemaAndReader(schemaObj, rowReader)
 	if !ok {
 		return nil
 	}
@@ -1420,19 +1413,19 @@ func (m *ForeignKeyManager) validateFKSchema(fk *ForeignKeyConstraint, fkid int,
 
 	// Check column count mismatch (parent exists but wrong column count)
 	if len(fk.Columns) != len(refCols) {
-		return fmt.Errorf("foreign key mismatch - \"%s\" referencing \"%s\"", fk.Table, fk.RefTable)
+		return fkMismatchError(fk.Table, fk.RefTable)
 	}
 
 	// Check if referenced columns exist (parent exists but columns don't)
 	for _, colName := range refCols {
 		if _, ok := refTable.GetColumn(colName); !ok {
-			return fmt.Errorf("foreign key mismatch - \"%s\" referencing \"%s\"", fk.Table, fk.RefTable)
+			return fkMismatchError(fk.Table, fk.RefTable)
 		}
 	}
 
 	// Check if referenced columns have a unique constraint (parent exists but not unique)
 	if !columnsAreUnique(refTable, refCols, schemaObj) {
-		return fmt.Errorf("foreign key mismatch - \"%s\" referencing \"%s\"", fk.Table, fk.RefTable)
+		return fkMismatchError(fk.Table, fk.RefTable)
 	}
 
 	return nil
@@ -1590,6 +1583,57 @@ func (m *ForeignKeyManager) checkConstraintViolations(
 	return m.scanTableForViolations(fk, fkid, refCols, reader, schemaObj)
 }
 
+// newViolation creates a ForeignKeyViolation for the given FK constraint and rowid.
+func newViolation(fk *ForeignKeyConstraint, fkid int, rowid int64) ForeignKeyViolation {
+	return ForeignKeyViolation{
+		Table:  fk.Table,
+		Rowid:  rowid,
+		Parent: fk.RefTable,
+		FKid:   fkid,
+	}
+}
+
+// scanRowsForViolations scans all rows in a table and calls isViolated for each non-NULL FK row.
+// isViolated receives the FK values and returns whether the row is a violation.
+func (m *ForeignKeyManager) scanRowsForViolations(
+	fk *ForeignKeyConstraint,
+	fkid int,
+	reader RowReader,
+	isViolated func(fkValues []interface{}) (bool, error),
+) ([]ForeignKeyViolation, error) {
+	if reader == nil {
+		return nil, nil
+	}
+
+	rowids, err := reader.FindReferencingRows(fk.Table, []string{}, []interface{}{})
+	if err != nil {
+		return nil, err
+	}
+
+	var violations []ForeignKeyViolation
+	for _, rowid := range rowids {
+		rowValues, err := reader.ReadRowByRowid(fk.Table, rowid)
+		if err != nil {
+			return nil, err
+		}
+
+		fkValues, hasNull := extractForeignKeyValues(rowValues, fk.Columns)
+		if hasNull {
+			continue
+		}
+
+		violated, err := isViolated(fkValues)
+		if err != nil {
+			return nil, err
+		}
+		if violated {
+			violations = append(violations, newViolation(fk, fkid, rowid))
+		}
+	}
+
+	return violations, nil
+}
+
 // scanMissingParentViolations scans child table when parent table doesn't exist.
 // Reports violations for all rows with non-NULL FK values.
 func (m *ForeignKeyManager) scanMissingParentViolations(
@@ -1597,38 +1641,9 @@ func (m *ForeignKeyManager) scanMissingParentViolations(
 	fkid int,
 	reader RowReader,
 ) ([]ForeignKeyViolation, error) {
-	if reader == nil {
-		return nil, nil
-	}
-
-	var violations []ForeignKeyViolation
-	rowids, err := reader.FindReferencingRows(fk.Table, []string{}, []interface{}{})
-	if err != nil {
-		return nil, err
-	}
-
-	for _, rowid := range rowids {
-		rowValues, err := reader.ReadRowByRowid(fk.Table, rowid)
-		if err != nil {
-			return nil, err
-		}
-
-		// Check if FK columns have NULL values (partial NULL is allowed)
-		_, hasNull := extractForeignKeyValues(rowValues, fk.Columns)
-		if hasNull {
-			continue // Partial NULL is not a violation
-		}
-
-		// Non-NULL FK with missing parent table is a violation
-		violations = append(violations, ForeignKeyViolation{
-			Table:  fk.Table,
-			Rowid:  rowid,
-			Parent: fk.RefTable,
-			FKid:   fkid,
-		})
-	}
-
-	return violations, nil
+	return m.scanRowsForViolations(fk, fkid, reader, func(_ []interface{}) (bool, error) {
+		return true, nil // All non-NULL rows are violations when parent is missing
+	})
 }
 
 // scanTableForViolations scans all rows in a table and checks for violations.
@@ -1639,29 +1654,10 @@ func (m *ForeignKeyManager) scanTableForViolations(
 	reader RowReader,
 	schemaObj *schema.Schema,
 ) ([]ForeignKeyViolation, error) {
-	// If no reader provided, can't scan rows - return empty violations
-	if reader == nil {
-		return nil, nil
-	}
-
-	var violations []ForeignKeyViolation
-
-	rowids, err := reader.FindReferencingRows(fk.Table, []string{}, []interface{}{})
-	if err != nil {
-		return nil, err
-	}
-
-	for _, rowid := range rowids {
-		violation, err := m.checkRowForViolation(fk, fkid, rowid, refCols, reader, schemaObj)
-		if err != nil {
-			return nil, err
-		}
-		if violation != nil {
-			violations = append(violations, *violation)
-		}
-	}
-
-	return violations, nil
+	_ = schemaObj // retained for interface compatibility
+	return m.scanRowsForViolations(fk, fkid, reader, func(fkValues []interface{}) (bool, error) {
+		return isViolation(fk, fkValues, refCols, reader)
+	})
 }
 
 // checkRowForViolation checks if a specific row violates an FK constraint.
@@ -1671,7 +1667,7 @@ func (m *ForeignKeyManager) checkRowForViolation(
 	rowid int64,
 	refCols []string,
 	reader RowReader,
-	schemaObj *schema.Schema,
+	_ *schema.Schema,
 ) (*ForeignKeyViolation, error) {
 	rowValues, err := reader.ReadRowByRowid(fk.Table, rowid)
 	if err != nil {
@@ -1688,14 +1684,9 @@ func (m *ForeignKeyManager) checkRowForViolation(
 		return nil, err
 	}
 	if violated {
-		return &ForeignKeyViolation{
-			Table:  fk.Table,
-			Rowid:  rowid,
-			Parent: fk.RefTable,
-			FKid:   fkid,
-		}, nil
+		v := newViolation(fk, fkid, rowid)
+		return &v, nil
 	}
-
 	return nil, nil
 }
 

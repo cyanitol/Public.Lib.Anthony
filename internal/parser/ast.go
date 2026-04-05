@@ -714,6 +714,14 @@ func (d *DropColumnAction) String() string {
 // Expressions
 // =============================================================================
 
+// exprStr returns the String() of an expression, or "nil" if it is nil.
+func exprStr(e Expression) string {
+	if e != nil {
+		return e.String()
+	}
+	return "nil"
+}
+
 // BinaryExpr represents a binary expression.
 type BinaryExpr struct {
 	Left   Expression
@@ -725,15 +733,7 @@ type BinaryExpr struct {
 func (b *BinaryExpr) node()       { return }
 func (b *BinaryExpr) expression() { return }
 func (b *BinaryExpr) String() string {
-	left := "nil"
-	right := "nil"
-	if b.Left != nil {
-		left = b.Left.String()
-	}
-	if b.Right != nil {
-		right = b.Right.String()
-	}
-	return left + " " + b.Op.String() + " " + right
+	return exprStr(b.Left) + " " + b.Op.String() + " " + exprStr(b.Right)
 }
 
 type BinaryOp int
@@ -812,10 +812,7 @@ type UnaryExpr struct {
 func (u *UnaryExpr) node()       { return }
 func (u *UnaryExpr) expression() { return }
 func (u *UnaryExpr) String() string {
-	expr := "nil"
-	if u.Expr != nil {
-		expr = u.Expr.String()
-	}
+	expr := exprStr(u.Expr)
 	switch u.Op {
 	case OpNot:
 		return "NOT " + expr
@@ -907,17 +904,11 @@ func (f *FunctionExpr) String() string {
 	if f.Star {
 		return f.Name + "(*)"
 	}
-	var args []string
-	for _, arg := range f.Args {
-		if arg != nil {
-			args = append(args, arg.String())
-		}
-	}
 	prefix := ""
 	if f.Distinct {
 		prefix = "DISTINCT "
 	}
-	return f.Name + "(" + prefix + strings.Join(args, ", ") + ")"
+	return f.Name + "(" + prefix + exprListStr(f.Args) + ")"
 }
 
 // WindowSpec represents a window specification for window functions.
@@ -1029,15 +1020,20 @@ func (i *InExpr) String() string {
 		sb.WriteString(" NOT")
 	}
 	sb.WriteString(" IN (")
-	var vals []string
-	for _, v := range i.Values {
-		if v != nil {
-			vals = append(vals, v.String())
-		}
-	}
-	sb.WriteString(strings.Join(vals, ", "))
+	sb.WriteString(exprListStr(i.Values))
 	sb.WriteString(")")
 	return sb.String()
+}
+
+// exprListStr joins non-nil expressions with ", ".
+func exprListStr(exprs []Expression) string {
+	var vals []string
+	for _, e := range exprs {
+		if e != nil {
+			vals = append(vals, e.String())
+		}
+	}
+	return strings.Join(vals, ", ")
 }
 
 // BetweenExpr represents a BETWEEN expression.
@@ -1078,11 +1074,7 @@ type CastExpr struct {
 func (c *CastExpr) node()       { return }
 func (c *CastExpr) expression() { return }
 func (c *CastExpr) String() string {
-	expr := "nil"
-	if c.Expr != nil {
-		expr = c.Expr.String()
-	}
-	return "CAST(" + expr + " AS " + c.Type + ")"
+	return "CAST(" + exprStr(c.Expr) + " AS " + c.Type + ")"
 }
 
 // CollateExpr represents a COLLATE expression.
@@ -1094,11 +1086,7 @@ type CollateExpr struct {
 func (c *CollateExpr) node()       { return }
 func (c *CollateExpr) expression() { return }
 func (c *CollateExpr) String() string {
-	expr := "nil"
-	if c.Expr != nil {
-		expr = c.Expr.String()
-	}
-	return expr + " COLLATE " + c.Collation
+	return exprStr(c.Expr) + " COLLATE " + c.Collation
 }
 
 // ParenExpr represents a parenthesized expression.
@@ -1109,11 +1097,7 @@ type ParenExpr struct {
 func (p *ParenExpr) node()       { return }
 func (p *ParenExpr) expression() { return }
 func (p *ParenExpr) String() string {
-	expr := "nil"
-	if p.Expr != nil {
-		expr = p.Expr.String()
-	}
-	return "(" + expr + ")"
+	return "(" + exprStr(p.Expr) + ")"
 }
 
 // SubqueryExpr represents a subquery expression.

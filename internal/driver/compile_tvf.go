@@ -154,32 +154,15 @@ func driverValueToFuncValue(v interface{}) functions.Value {
 // resolveTVFColumns maps SELECT columns to TVF output column indices.
 // Returns the output column names and indices into the TVF row.
 func resolveTVFColumns(selectCols []parser.ResultColumn, tvfCols []string) ([]string, []int) {
-	// Handle SELECT *
-	if len(selectCols) == 1 && selectCols[0].Star {
-		indices := make([]int, len(tvfCols))
-		for i := range indices {
-			indices[i] = i
-		}
-		return tvfCols, indices
-	}
-
-	names := make([]string, 0, len(selectCols))
-	indices := make([]int, 0, len(selectCols))
-	for _, col := range selectCols {
-		name := extractColName(col)
-		idx := findTVFColIndex(name, tvfCols)
-		names = append(names, colDisplayName(col, name))
-		indices = append(indices, idx)
-	}
-	return names, indices
+	return resolveColumnMapping(selectCols, tvfCols, func(col parser.ResultColumn, name string, _ int) string {
+		return colDisplayName(col, name)
+	})
 }
 
 // extractColName extracts the column name from a result column expression.
+// Delegates to extractResultColName.
 func extractColName(col parser.ResultColumn) string {
-	if ident, ok := col.Expr.(*parser.IdentExpr); ok {
-		return ident.Name
-	}
-	return ""
+	return extractResultColName(col)
 }
 
 // colDisplayName returns the display name for a column.
@@ -191,14 +174,9 @@ func colDisplayName(col parser.ResultColumn, fallback string) string {
 }
 
 // findTVFColIndex finds the index of a column name in TVF columns.
+// Delegates to findColIndexCI.
 func findTVFColIndex(name string, tvfCols []string) int {
-	lower := strings.ToLower(name)
-	for i, c := range tvfCols {
-		if strings.ToLower(c) == lower {
-			return i
-		}
-	}
-	return -1
+	return findColIndexCI(name, tvfCols)
 }
 
 // materializeTVFAsEphemeral executes a TVF, materializes its rows into an
@@ -571,23 +549,7 @@ func evalTVFBinary(e *parser.BinaryExpr, row []functions.Value, cols []string) b
 
 // evalTVFComparison evaluates a comparison between two TVF values.
 func evalTVFComparison(op parser.BinaryOp, left, right functions.Value) bool {
-	cmp := compareFuncValues(left, right)
-	switch op {
-	case parser.OpEq:
-		return cmp == 0
-	case parser.OpNe:
-		return cmp != 0
-	case parser.OpLt:
-		return cmp < 0
-	case parser.OpGt:
-		return cmp > 0
-	case parser.OpLe:
-		return cmp <= 0
-	case parser.OpGe:
-		return cmp >= 0
-	default:
-		return true
-	}
+	return compareOpResult(op, compareFuncValues(left, right))
 }
 
 // resolveTVFValue resolves an expression to a functions.Value from a TVF row.

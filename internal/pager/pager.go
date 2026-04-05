@@ -553,66 +553,49 @@ func (p *Pager) Commit() error {
 	return nil
 }
 
-// commitPhase0FlushFreeList flushes pending free pages to disk.
-func (p *Pager) commitPhase0FlushFreeList() error {
-	if err := p.freeList.Flush(); err != nil {
+// commitOrError runs fn and transitions to error state on failure.
+func (p *Pager) commitOrError(fn func() error) error {
+	if err := fn(); err != nil {
 		p.setErrorState(err)
 		return err
 	}
 	return nil
 }
 
+// commitPhase0FlushFreeList flushes pending free pages to disk.
+func (p *Pager) commitPhase0FlushFreeList() error {
+	return p.commitOrError(p.freeList.Flush)
+}
+
 // commitPhase1WriteDirtyPages writes all dirty pages to disk.
 func (p *Pager) commitPhase1WriteDirtyPages() error {
 	if lruCache, ok := p.cache.(*LRUCache); ok && lruCache.Mode() == WriteBackMode {
-		if _, err := lruCache.Flush(); err != nil {
-			p.setErrorState(err)
+		return p.commitOrError(func() error {
+			_, err := lruCache.Flush()
 			return err
-		}
-		return nil
+		})
 	}
 
 	// In WAL mode, write to WAL instead of database file
 	if p.journalMode == JournalModeWAL {
-		if err := p.writeDirtyPagesToWAL(); err != nil {
-			p.setErrorState(err)
-			return err
-		}
-		return nil
+		return p.commitOrError(p.writeDirtyPagesToWAL)
 	}
 
-	if err := p.writeDirtyPages(); err != nil {
-		p.setErrorState(err)
-		return err
-	}
-	return nil
+	return p.commitOrError(p.writeDirtyPages)
 }
 
 // commitPhase2SyncDatabase syncs the database file.
 func (p *Pager) commitPhase2SyncDatabase() error {
 	// In WAL mode, sync the WAL file instead of database file
 	if p.journalMode == JournalModeWAL && p.wal != nil {
-		if err := p.wal.Sync(); err != nil {
-			p.setErrorState(err)
-			return err
-		}
-		return nil
+		return p.commitOrError(p.wal.Sync)
 	}
-
-	if err := p.file.Sync(); err != nil {
-		p.setErrorState(err)
-		return err
-	}
-	return nil
+	return p.commitOrError(p.file.Sync)
 }
 
 // commitPhase3FinalizeJournal deletes or truncates the journal.
 func (p *Pager) commitPhase3FinalizeJournal() error {
-	if err := p.finalizeJournal(); err != nil {
-		p.setErrorState(err)
-		return err
-	}
-	return nil
+	return p.commitOrError(p.finalizeJournal)
 }
 
 // commitPhase4UpdateHeader updates the database header.
@@ -1063,42 +1046,31 @@ func (p *Pager) readJournalEntry() (*journalEntry, error) {
 
 	// Check if we have a complete entry with checksum
 	if n >= 4+p.pageSize+4 {
-		return p.parseJournalEntryWithChecksum(entry), nil
+		return p.parseJournalEntryData(entry, true), nil
 	}
 
 	// Check if we have old format without checksum
 	if n == 4+p.pageSize {
-		return p.parseJournalEntryWithoutChecksum(entry), nil
+		return p.parseJournalEntryData(entry, false), nil
 	}
 
 	// Incomplete entry - end of journal
 	return nil, io.EOF
 }
 
-// parseJournalEntryWithChecksum parses an entry that includes checksum.
-func (p *Pager) parseJournalEntryWithChecksum(entry []byte) *journalEntry {
+// parseJournalEntryData parses a journal entry from raw bytes.
+// If withChecksum is true, the checksum is read from after the page data.
+func (p *Pager) parseJournalEntryData(entry []byte, withChecksum bool) *journalEntry {
 	pgno := Pgno(entry[0])<<24 | Pgno(entry[1])<<16 | Pgno(entry[2])<<8 | Pgno(entry[3])
-	pageData := entry[4 : 4+p.pageSize]
-	checksum := binary.BigEndian.Uint32(entry[4+p.pageSize:])
-
-	return &journalEntry{
+	je := &journalEntry{
 		pgno:        pgno,
-		pageData:    pageData,
-		checksum:    checksum,
-		hasChecksum: true,
+		pageData:    entry[4 : 4+p.pageSize],
+		hasChecksum: withChecksum,
 	}
-}
-
-// parseJournalEntryWithoutChecksum parses an entry without checksum (old format).
-func (p *Pager) parseJournalEntryWithoutChecksum(entry []byte) *journalEntry {
-	pgno := Pgno(entry[0])<<24 | Pgno(entry[1])<<16 | Pgno(entry[2])<<8 | Pgno(entry[3])
-	pageData := entry[4 : 4+p.pageSize]
-
-	return &journalEntry{
-		pgno:        pgno,
-		pageData:    pageData,
-		hasChecksum: false,
+	if withChecksum {
+		je.checksum = binary.BigEndian.Uint32(entry[4+p.pageSize:])
 	}
+	return je
 }
 
 // restorePageFromJournal writes page data back to the database file.

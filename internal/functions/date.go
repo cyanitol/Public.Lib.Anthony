@@ -502,27 +502,17 @@ func (dt *DateTime) startOf(unit string) error {
 	dt.computeHMS()
 
 	switch unit {
+	case "year":
+		dt.month = 1
+		fallthrough
+	case "month":
+		dt.day = 1
+		fallthrough
 	case "day":
 		dt.hour = 0
 		dt.minute = 0
 		dt.second = 0
 		dt.validJD = false
-
-	case "month":
-		dt.day = 1
-		dt.hour = 0
-		dt.minute = 0
-		dt.second = 0
-		dt.validJD = false
-
-	case "year":
-		dt.month = 1
-		dt.day = 1
-		dt.hour = 0
-		dt.minute = 0
-		dt.second = 0
-		dt.validJD = false
-
 	default:
 		return fmt.Errorf("invalid unit for 'start of': %s", unit)
 	}
@@ -801,7 +791,9 @@ func parseDateTimeWithModifiers(args []Value) (*DateTime, error) {
 	return dt, nil
 }
 
-func dateFunc(args []Value) (Value, error) {
+// dateTimeFormatFunc applies parseDateTimeWithModifiers and maps the result
+// through formatter, returning NULL when parsing/modifiers fail.
+func dateTimeFormatFunc(args []Value, formatter func(*DateTime) Value) (Value, error) {
 	dt, err := parseDateTimeWithModifiers(args)
 	if dt == nil {
 		if err != nil {
@@ -809,40 +801,23 @@ func dateFunc(args []Value) (Value, error) {
 		}
 		return NewNullValue(), nil
 	}
-	return NewTextValue(dt.formatDate()), nil
+	return formatter(dt), nil
+}
+
+func dateFunc(args []Value) (Value, error) {
+	return dateTimeFormatFunc(args, func(dt *DateTime) Value { return NewTextValue(dt.formatDate()) })
 }
 
 func timeFunc(args []Value) (Value, error) {
-	dt, err := parseDateTimeWithModifiers(args)
-	if dt == nil {
-		if err != nil {
-			return nil, err
-		}
-		return NewNullValue(), nil
-	}
-	return NewTextValue(dt.formatTime()), nil
+	return dateTimeFormatFunc(args, func(dt *DateTime) Value { return NewTextValue(dt.formatTime()) })
 }
 
 func datetimeFunc(args []Value) (Value, error) {
-	dt, err := parseDateTimeWithModifiers(args)
-	if dt == nil {
-		if err != nil {
-			return nil, err
-		}
-		return NewNullValue(), nil
-	}
-	return NewTextValue(dt.formatDateTime()), nil
+	return dateTimeFormatFunc(args, func(dt *DateTime) Value { return NewTextValue(dt.formatDateTime()) })
 }
 
 func juliandayFunc(args []Value) (Value, error) {
-	dt, err := parseDateTimeWithModifiers(args)
-	if dt == nil {
-		if err != nil {
-			return nil, err
-		}
-		return NewNullValue(), nil
-	}
-	return NewFloatValue(dt.getJulianDay()), nil
+	return dateTimeFormatFunc(args, func(dt *DateTime) Value { return NewFloatValue(dt.getJulianDay()) })
 }
 
 func unixepochFunc(args []Value) (Value, error) {
@@ -1031,22 +1006,23 @@ func (dt *DateTime) strftime(format string) string {
 	return result.String()
 }
 
-func currentDateFunc(args []Value) (Value, error) {
+// nowFormatted creates a DateTime for "now" and formats it with the given formatter.
+func nowFormatted(formatter func(*DateTime) string) (Value, error) {
 	dt := &DateTime{}
 	dt.setNow()
-	return NewTextValue(dt.formatDate()), nil
+	return NewTextValue(formatter(dt)), nil
 }
 
-func currentTimeFunc(args []Value) (Value, error) {
-	dt := &DateTime{}
-	dt.setNow()
-	return NewTextValue(dt.formatTime()), nil
+func currentDateFunc(_ []Value) (Value, error) {
+	return nowFormatted((*DateTime).formatDate)
 }
 
-func currentTimestampFunc(args []Value) (Value, error) {
-	dt := &DateTime{}
-	dt.setNow()
-	return NewTextValue(dt.formatDateTime()), nil
+func currentTimeFunc(_ []Value) (Value, error) {
+	return nowFormatted((*DateTime).formatTime)
+}
+
+func currentTimestampFunc(_ []Value) (Value, error) {
+	return nowFormatted((*DateTime).formatDateTime)
 }
 
 // Helper to check for leap year

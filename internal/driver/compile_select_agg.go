@@ -4,7 +4,6 @@ package driver
 import (
 	"database/sql/driver"
 	"fmt"
-	"strings"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/expr"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
@@ -116,36 +115,9 @@ func (s *Stmt) emitSumUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 		}
 	}
 
-	// Handle DISTINCT if specified
-	var distinctSkipAddr int
-	if fnExpr.Distinct {
-		// Check if value is distinct, skip addition if already seen
-		distinctSkipAddr = vm.AddOp(vdbe.OpAggDistinct, tempReg, 0, accReg)
-		if len(fnExpr.Args) > 0 {
-			if coll := resolveExprCollation(fnExpr.Args[0], table); coll != "" {
-				vm.Program[distinctSkipAddr].P4.Z = coll
-			}
-		}
-	}
-
-	// If accumulator is NOT NULL, jump to add instruction
-	addAddr := vm.AddOp(vdbe.OpNotNull, accReg, 0, 0)
-
-	// Accumulator is NULL - copy the first value
-	vm.AddOp(vdbe.OpCopy, tempReg, accReg, 0)
-	skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
-
-	// Accumulator is not NULL - add to it
-	vm.Program[addAddr].P2 = vm.NumOps()
-	vm.AddOp(vdbe.OpAdd, accReg, tempReg, accReg)
-
-	// Patch jump addresses
-	endAddr := vm.NumOps()
-	vm.Program[skipAddr].P2 = endAddr
-	vm.Program[skipToEndAddr].P2 = endAddr
-	if fnExpr.Distinct {
-		vm.Program[distinctSkipAddr].P2 = endAddr
-	}
+	distinctSkipAddr := s.emitAggregateDistinctCheck(vm, fnExpr, table, tempReg, accReg)
+	emitAccumAdd(vm, accReg, tempReg)
+	s.patchAggregateSkipAddrs(vm, skipAddr, distinctSkipAddr)
 }
 
 // emitAvgUpdate emits VDBE opcodes to update AVG accumulator (sum and count)
@@ -155,69 +127,48 @@ func (s *Stmt) emitAvgUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 		return
 	}
 
-	// Handle DISTINCT if specified
-	var distinctSkipAddr int
-	if fnExpr.Distinct {
-		// Check if value is distinct, skip averaging if already seen
-		distinctSkipAddr = vm.AddOp(vdbe.OpAggDistinct, tempReg, 0, sumReg)
-	}
-
-	// Increment count (always for non-NULL distinct values)
+	distinctSkipAddr := s.emitAggregateDistinctCheck(vm, fnExpr, table, tempReg, sumReg)
 	vm.AddOp(vdbe.OpAddImm, countReg, 1, 0)
+	emitAccumAdd(vm, sumReg, tempReg)
+	s.patchAggregateSkipAddrs(vm, skipAddr, distinctSkipAddr)
+}
 
-	// If sum accumulator is NOT NULL, jump to add instruction
-	addAddr := vm.AddOp(vdbe.OpNotNull, sumReg, 0, 0)
+// emitAggregateDistinctCheck emits DISTINCT check for aggregate functions.
+// Returns the skip address to patch, or -1 if not DISTINCT.
+func (s *Stmt) emitAggregateDistinctCheck(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tempReg, accReg int) int {
+	if !fnExpr.Distinct {
+		return -1
+	}
+	distinctSkipAddr := vm.AddOp(vdbe.OpAggDistinct, tempReg, 0, accReg)
+	if len(fnExpr.Args) > 0 {
+		if coll := resolveExprCollation(fnExpr.Args[0], table); coll != "" {
+			vm.Program[distinctSkipAddr].P4.Z = coll
+		}
+	}
+	return distinctSkipAddr
+}
 
-	// Sum is NULL - copy the first value
-	vm.AddOp(vdbe.OpCopy, tempReg, sumReg, 0)
-	skipToEndAddr := vm.AddOp(vdbe.OpGoto, 0, 0, 0)
-
-	// Sum is not NULL - add to it
-	vm.Program[addAddr].P2 = vm.NumOps()
-	vm.AddOp(vdbe.OpAdd, sumReg, tempReg, sumReg)
-
-	// Patch jump addresses
+// patchAggregateSkipAddrs patches NULL-skip and DISTINCT-skip addresses to current position.
+func (s *Stmt) patchAggregateSkipAddrs(vm *vdbe.VDBE, skipAddr, distinctSkipAddr int) {
 	endAddr := vm.NumOps()
 	vm.Program[skipAddr].P2 = endAddr
-	vm.Program[skipToEndAddr].P2 = endAddr
-	if fnExpr.Distinct {
+	if distinctSkipAddr >= 0 {
 		vm.Program[distinctSkipAddr].P2 = endAddr
 	}
 }
 
 // emitMinUpdate emits VDBE opcodes to update MIN accumulator
 func (s *Stmt) emitMinUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, accReg int, gen *expr.CodeGenerator) {
-	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, tableName, gen)
-	if !ok {
-		return
-	}
-
-	// If accumulator is NULL, just copy the value (first value)
-	copyAddr := vm.AddOp(vdbe.OpIsNull, accReg, 0, 0)
-
-	// Accumulator is not NULL - compare
-	cmpReg := gen.AllocReg()
-	cmpAddr := vm.AddOp(vdbe.OpLt, tempReg, accReg, cmpReg)
-	if len(fnExpr.Args) > 0 {
-		if coll := resolveExprCollation(fnExpr.Args[0], table); coll != "" {
-			vm.Program[cmpAddr].P4.Z = coll
-			vm.Program[cmpAddr].P4Type = vdbe.P4Static
-		}
-	}
-	notLessAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
-
-	// Copy value (either first value or new min)
-	vm.Program[copyAddr].P2 = vm.NumOps()
-	vm.AddOp(vdbe.OpCopy, tempReg, accReg, 0)
-
-	// Patch jump addresses
-	endAddr := vm.NumOps()
-	vm.Program[skipAddr].P2 = endAddr
-	vm.Program[notLessAddr].P2 = endAddr
+	s.emitMinMaxUpdate(vm, fnExpr, table, tableName, accReg, gen, vdbe.OpLt)
 }
 
 // emitMaxUpdate emits VDBE opcodes to update MAX accumulator
 func (s *Stmt) emitMaxUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, accReg int, gen *expr.CodeGenerator) {
+	s.emitMinMaxUpdate(vm, fnExpr, table, tableName, accReg, gen, vdbe.OpGt)
+}
+
+// emitMinMaxUpdate emits VDBE opcodes to update MIN or MAX accumulator using the given comparison opcode.
+func (s *Stmt) emitMinMaxUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *schema.Table, tableName string, accReg int, gen *expr.CodeGenerator, cmpOp vdbe.Opcode) {
 	tempReg, skipAddr, ok := s.loadAggregateColumnValue(vm, fnExpr, table, tableName, gen)
 	if !ok {
 		return
@@ -228,23 +179,23 @@ func (s *Stmt) emitMaxUpdate(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr, table *
 
 	// Accumulator is not NULL - compare
 	cmpReg := gen.AllocReg()
-	cmpAddr := vm.AddOp(vdbe.OpGt, tempReg, accReg, cmpReg)
+	cmpAddr := vm.AddOp(cmpOp, tempReg, accReg, cmpReg)
 	if len(fnExpr.Args) > 0 {
 		if coll := resolveExprCollation(fnExpr.Args[0], table); coll != "" {
 			vm.Program[cmpAddr].P4.Z = coll
 			vm.Program[cmpAddr].P4Type = vdbe.P4Static
 		}
 	}
-	notGreaterAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
+	notBetterAddr := vm.AddOp(vdbe.OpIfNot, cmpReg, 0, 0)
 
-	// Copy value (either first value or new max)
+	// Copy value (either first value or new min/max)
 	vm.Program[copyAddr].P2 = vm.NumOps()
 	vm.AddOp(vdbe.OpCopy, tempReg, accReg, 0)
 
 	// Patch jump addresses
 	endAddr := vm.NumOps()
 	vm.Program[skipAddr].P2 = endAddr
-	vm.Program[notGreaterAddr].P2 = endAddr
+	vm.Program[notBetterAddr].P2 = endAddr
 }
 
 // emitGroupConcatUpdate emits VDBE opcodes to update GROUP_CONCAT accumulator.
@@ -419,20 +370,29 @@ func emitJSONWrap(vm *vdbe.VDBE, gen *expr.CodeGenerator, accReg, targetReg int,
 }
 
 // initializeAggregateRegister initializes a single aggregate accumulator register.
+// Allocates and returns the avgCountReg for AVG functions.
 func (s *Stmt) initializeAggregateRegister(vm *vdbe.VDBE, funcName string, accReg int, gen *expr.CodeGenerator) (avgCountReg int) {
+	if funcName == "AVG" {
+		avgCountReg = gen.AllocReg()
+	}
+	emitAccumulatorInit(vm, funcName, accReg, avgCountReg)
+	return avgCountReg
+}
+
+// emitAccumulatorInit emits opcodes to initialize an aggregate accumulator register.
+// For AVG, avgCountReg must already be allocated.
+func emitAccumulatorInit(vm *vdbe.VDBE, funcName string, accReg, avgCountReg int) {
 	switch funcName {
 	case "COUNT":
 		vm.AddOp(vdbe.OpInteger, 0, accReg, 0)
 	case "AVG":
 		vm.AddOp(vdbe.OpNull, 0, accReg, 0)
-		avgCountReg = gen.AllocReg()
 		vm.AddOp(vdbe.OpInteger, 0, avgCountReg, 0)
 	case "TOTAL":
 		vm.AddOpWithP4Real(vdbe.OpReal, 0, accReg, 0, 0.0)
 	case "SUM", "MIN", "MAX", "GROUP_CONCAT", "JSON_GROUP_ARRAY", "JSON_GROUP_OBJECT":
 		vm.AddOp(vdbe.OpNull, 0, accReg, 0)
 	}
-	return avgCountReg
 }
 
 // findAggregateInExpr finds the first aggregate function in an expression tree
@@ -715,49 +675,29 @@ func (s *Stmt) emitAggregateByName(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr,
 func (s *Stmt) emitAggregateArithmeticOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator,
 	binExpr *parser.BinaryExpr, accReg int, avgCountReg int, targetReg int) error {
 
-	tempReg := gen.AllocReg()
+	aggReg := gen.AllocReg()
 
 	// Check if left side is aggregate
 	if fnExpr, ok := binExpr.Left.(*parser.FunctionExpr); ok && s.isAggregateExpr(fnExpr) {
-		return s.emitLeftAggregateOutput(vm, gen, binExpr, fnExpr, accReg, avgCountReg, tempReg, targetReg)
+		s.emitAggregateCopy(vm, fnExpr.Name, accReg, avgCountReg, aggReg)
+		otherReg, err := gen.GenerateExpr(binExpr.Right)
+		if err != nil {
+			return err
+		}
+		return s.emitBinaryOp(vm, binExpr.Op, aggReg, otherReg, targetReg)
 	}
 
 	// Check if right side is aggregate
 	if fnExpr, ok := binExpr.Right.(*parser.FunctionExpr); ok && s.isAggregateExpr(fnExpr) {
-		return s.emitRightAggregateOutput(vm, gen, binExpr, fnExpr, accReg, avgCountReg, tempReg, targetReg)
+		s.emitAggregateCopy(vm, fnExpr.Name, accReg, avgCountReg, aggReg)
+		otherReg, err := gen.GenerateExpr(binExpr.Left)
+		if err != nil {
+			return err
+		}
+		return s.emitBinaryOp(vm, binExpr.Op, otherReg, aggReg, targetReg)
 	}
 
 	return fmt.Errorf("no aggregate found in expression")
-}
-
-// emitLeftAggregateOutput handles binary expressions with aggregate on the left side.
-func (s *Stmt) emitLeftAggregateOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator,
-	binExpr *parser.BinaryExpr, fnExpr *parser.FunctionExpr,
-	accReg int, avgCountReg int, tempReg int, targetReg int) error {
-
-	s.emitAggregateCopy(vm, fnExpr.Name, accReg, avgCountReg, tempReg)
-
-	rightReg, err := gen.GenerateExpr(binExpr.Right)
-	if err != nil {
-		return err
-	}
-
-	return s.emitBinaryOp(vm, binExpr.Op, tempReg, rightReg, targetReg)
-}
-
-// emitRightAggregateOutput handles binary expressions with aggregate on the right side.
-func (s *Stmt) emitRightAggregateOutput(vm *vdbe.VDBE, gen *expr.CodeGenerator,
-	binExpr *parser.BinaryExpr, fnExpr *parser.FunctionExpr,
-	accReg int, avgCountReg int, tempReg int, targetReg int) error {
-
-	s.emitAggregateCopy(vm, fnExpr.Name, accReg, avgCountReg, tempReg)
-
-	leftReg, err := gen.GenerateExpr(binExpr.Left)
-	if err != nil {
-		return err
-	}
-
-	return s.emitBinaryOp(vm, binExpr.Op, leftReg, tempReg, targetReg)
 }
 
 // emitAggregateCopy copies aggregate value to target register (divides for AVG).
@@ -887,30 +827,6 @@ func (s *Stmt) finalizeAggregate(vm *vdbe.VDBE, rewindAddr int, afterScanAddr in
 	vm.AddOp(vdbe.OpClose, 0, 0, 0)
 	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
 	vm.Program[rewindAddr].P2 = afterScanAddr
-}
-
-// findColumnIndex finds the index of a column by name in a table
-func (s *Stmt) findColumnIndex(table *schema.Table, colName string) int {
-	// Try exact match first
-	for i, col := range table.Columns {
-		if col.Name == colName {
-			return i
-		}
-	}
-	// Try case-insensitive match
-	for i, col := range table.Columns {
-		if strings.EqualFold(col.Name, colName) {
-			return i
-		}
-	}
-	// Try with uppercase column name
-	upperColName := strings.ToUpper(colName)
-	for i, col := range table.Columns {
-		if col.Name == upperColName || strings.ToUpper(col.Name) == upperColName {
-			return i
-		}
-	}
-	return -1
 }
 
 // compileSelectWithWindowFunctions compiles a SELECT with window functions using two-pass execution
@@ -1070,7 +986,7 @@ func (s *Stmt) extractPartitionByCols(over *parser.WindowSpec, table *schema.Tab
 	var cols []int
 	for _, expr := range over.PartitionBy {
 		if ident, ok := expr.(*parser.IdentExpr); ok {
-			idx := s.findColumnIndex(table, ident.Name)
+			idx := table.GetColumnIndex(ident.Name)
 			if idx >= 0 {
 				cols = append(cols, idx)
 			}
@@ -1113,7 +1029,7 @@ func (s *Stmt) extractWindowOrderBy(over *parser.WindowSpec, table *schema.Table
 		if !ok {
 			continue
 		}
-		colIdx := s.findColumnIndex(table, identExpr.Name)
+		colIdx := table.GetColumnIndex(identExpr.Name)
 		if colIdx >= 0 {
 			orderByCols = append(orderByCols, colIdx)
 			orderByDesc = append(orderByDesc, !orderTerm.Asc)
@@ -1458,7 +1374,7 @@ func (s *Stmt) emitSorterColumnValue(vm *vdbe.VDBE, gen *expr.CodeGenerator,
 	e parser.Expression, table *schema.Table, colIdx int) {
 
 	if identExpr, ok := e.(*parser.IdentExpr); ok {
-		tableColIdx := s.findColumnIndex(table, identExpr.Name)
+		tableColIdx := table.GetColumnIndex(identExpr.Name)
 		if tableColIdx >= 0 && tableColIdx != colIdx {
 			vm.AddOp(vdbe.OpCopy, tableColIdx, colIdx, 0)
 		} else if tableColIdx < 0 {

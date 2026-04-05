@@ -398,36 +398,12 @@ func applyPathValuePairs(data interface{}, pathValueArgs []Value, shouldSet path
 // jsonSetFunc implements json_set(X, path1, value1, path2, value2, ...)
 // Sets values in JSON (creates or replaces)
 func jsonSetFunc(args []Value) (Value, error) {
-	if len(args) < 3 || len(args)%2 == 0 {
-		return nil, fmt.Errorf("json_set() requires odd number of arguments (at least 3)")
-	}
-
-	data, err := parseJSONArg(args[0])
-	if err != nil {
-		return NewNullValue(), nil
-	}
-
-	data = applySetPathPairs(data, args[1:])
-
-	result, err := json.Marshal(data)
-	if err != nil {
-		return NewNullValue(), nil
-	}
-
-	return NewTextValue(string(result)), nil
+	return processPathValuePairs(args, "json_set", alwaysSetPath)
 }
 
-// applySetPathPairs applies all path-value pairs for json_set
-func applySetPathPairs(data interface{}, pathValueArgs []Value) interface{} {
-	for i := 0; i < len(pathValueArgs); i += 2 {
-		if pathValueArgs[i].IsNull() {
-			continue
-		}
-		path := pathValueArgs[i].AsString()
-		value := valueToJSONSmart(pathValueArgs[i+1])
-		data = setPath(data, path, value)
-	}
-	return data
+// alwaysSetPath always returns true (json_set always creates or replaces)
+func alwaysSetPath(_ interface{}, _ string) bool {
+	return true
 }
 
 // jsonTypeFunc implements json_type(X [, path])
@@ -563,17 +539,9 @@ func convertStringToJSON(s string) interface{} {
 		return s
 	}
 
-	// Try parsing as JSON object
-	if s[0] == '{' {
-		if parsed := tryParseJSONObject(s); parsed != nil {
-			return parsed
-		}
-		return s
-	}
-
-	// Try parsing as JSON array
-	if s[0] == '[' {
-		if parsed := tryParseJSONArray(s); parsed != nil {
+	// Try parsing as JSON object or array
+	if s[0] == '{' || s[0] == '[' {
+		if parsed := tryParseMinifiedJSON(s, s[0] == '['); parsed != nil {
 			return parsed
 		}
 		return s
@@ -583,47 +551,37 @@ func convertStringToJSON(s string) interface{} {
 	return s
 }
 
-// tryParseJSONObject attempts to parse a string as a JSON object.
-// Returns the parsed object if it's minified JSON, nil otherwise.
-func tryParseJSONObject(s string) interface{} {
+// tryParseMinifiedJSON attempts to parse s as JSON, returning the parsed
+// value only when it round-trips to the same string (i.e. is minified,
+// indicating it came from the json() function). expectedType should be
+// "object" or "array" to gate which top-level JSON type is accepted.
+func tryParseMinifiedJSON(s string, expectArray bool) interface{} {
 	var data interface{}
 	if err := json.Unmarshal([]byte(s), &data); err != nil {
 		return nil
 	}
 
-	obj, ok := data.(map[string]interface{})
-	if !ok {
-		return nil
+	if expectArray {
+		if _, ok := data.([]interface{}); !ok {
+			return nil
+		}
+	} else {
+		if _, ok := data.(map[string]interface{}); !ok {
+			return nil
+		}
 	}
 
-	// Check if minified (indicates it's from json())
 	if isMinifiedJSON(data, s) {
-		return obj
+		return data
 	}
-
 	return nil
 }
 
-// tryParseJSONArray attempts to parse a string as a JSON array.
-// Returns the parsed array if it's minified JSON (indicating it came from json()).
-func tryParseJSONArray(s string) interface{} {
-	var data interface{}
-	if err := json.Unmarshal([]byte(s), &data); err != nil {
-		return nil
-	}
+// tryParseJSONObject attempts to parse a string as a JSON object (backward-compatible wrapper).
+func tryParseJSONObject(s string) interface{} { return tryParseMinifiedJSON(s, false) }
 
-	arr, ok := data.([]interface{})
-	if !ok {
-		return nil
-	}
-
-	// Check if minified (indicates it's from json())
-	if isMinifiedJSON(data, s) {
-		return arr
-	}
-
-	return nil
-}
+// tryParseJSONArray attempts to parse a string as a JSON array (backward-compatible wrapper).
+func tryParseJSONArray(s string) interface{} { return tryParseMinifiedJSON(s, true) }
 
 // isMinifiedJSON checks if the string representation matches the minified JSON.
 func isMinifiedJSON(data interface{}, s string) bool {

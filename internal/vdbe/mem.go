@@ -330,6 +330,18 @@ func (m *Mem) Stringify() error {
 	return nil
 }
 
+// setAffinityInt sets the integer affinity, clearing other type flags.
+func (m *Mem) setAffinityInt(val int64) {
+	m.i = val
+	m.flags = (m.flags &^ MemAffMask) | MemInt
+}
+
+// setAffinityReal sets the real affinity, clearing other type flags.
+func (m *Mem) setAffinityReal(val float64) {
+	m.r = val
+	m.flags = (m.flags &^ MemAffMask) | MemReal
+}
+
 // Integerify converts the memory cell to an integer.
 // This modifies the cell to have the MEM_Int flag set.
 func (m *Mem) Integerify() error {
@@ -338,9 +350,7 @@ func (m *Mem) Integerify() error {
 	}
 
 	if m.flags&MemReal != 0 {
-		m.i = int64(m.r)
-		// Clear affinity flags first, then set integer flag
-		m.flags = (m.flags &^ MemAffMask) | MemInt
+		m.setAffinityInt(int64(m.r))
 		return nil
 	}
 
@@ -349,23 +359,17 @@ func (m *Mem) Integerify() error {
 		if err != nil {
 			// Try parsing as float first, then convert to int
 			if fval, ferr := strconv.ParseFloat(string(m.z), 64); ferr == nil {
-				m.i = int64(fval)
-				// Clear affinity flags first, then set integer flag
-				m.flags = (m.flags &^ MemAffMask) | MemInt
+				m.setAffinityInt(int64(fval))
 				return nil
 			}
 			return fmt.Errorf("cannot convert to integer: %w", err)
 		}
-		m.i = val
-		// Clear affinity flags first, then set integer flag
-		m.flags = (m.flags &^ MemAffMask) | MemInt
+		m.setAffinityInt(val)
 		return nil
 	}
 
 	if m.flags&MemNull != 0 {
-		m.i = 0
-		// Clear affinity flags first, then set integer flag
-		m.flags = (m.flags &^ MemAffMask) | MemInt
+		m.setAffinityInt(0)
 		return nil
 	}
 
@@ -380,9 +384,7 @@ func (m *Mem) Realify() error {
 	}
 
 	if m.flags&MemInt != 0 {
-		m.r = float64(m.i)
-		// Clear affinity flags first, then set real flag
-		m.flags = (m.flags &^ MemAffMask) | MemReal
+		m.setAffinityReal(float64(m.i))
 		return nil
 	}
 
@@ -391,16 +393,12 @@ func (m *Mem) Realify() error {
 		if err != nil {
 			return fmt.Errorf("cannot convert to real: %w", err)
 		}
-		m.r = val
-		// Clear affinity flags first, then set real flag
-		m.flags = (m.flags &^ MemAffMask) | MemReal
+		m.setAffinityReal(val)
 		return nil
 	}
 
 	if m.flags&MemNull != 0 {
-		m.r = 0.0
-		// Clear affinity flags first, then set real flag
-		m.flags = (m.flags &^ MemAffMask) | MemReal
+		m.setAffinityReal(0.0)
 		return nil
 	}
 
@@ -879,29 +877,11 @@ func (m *Mem) Remainder(other *Mem) error {
 // ToDistinctKey converts a Mem value to a string key for DISTINCT deduplication.
 // This ensures different types with the same logical value are treated distinctly.
 func (m *Mem) ToDistinctKey() string {
-	if m.IsNull() {
-		return "NULL"
-	}
-	if m.IsInt() {
-		return fmt.Sprintf("I:%d", m.i)
-	}
-	if m.IsReal() {
-		return fmt.Sprintf("R:%g", m.r)
-	}
-	if m.IsStr() {
-		return fmt.Sprintf("S:%s", string(m.z))
-	}
-	if m.IsBlob() {
-		return fmt.Sprintf("B:%x", m.z)
-	}
-	return "UNDEFINED"
+	return m.ToDistinctKeyWithCollation("", nil)
 }
 
 // ToDistinctKeyWithCollation converts a Mem value to a distinct key using collation rules.
 func (m *Mem) ToDistinctKeyWithCollation(collName string, registry interface{}) string {
-	if collName == "" {
-		return m.ToDistinctKey()
-	}
 	if m.IsNull() {
 		return "NULL"
 	}
@@ -912,7 +892,11 @@ func (m *Mem) ToDistinctKeyWithCollation(collName string, registry interface{}) 
 		return fmt.Sprintf("R:%g", m.r)
 	}
 	if m.IsStr() {
-		return fmt.Sprintf("S:%s", normalizeDistinctText(string(m.z), collName, registry))
+		s := string(m.z)
+		if collName != "" {
+			s = normalizeDistinctText(s, collName, registry)
+		}
+		return fmt.Sprintf("S:%s", s)
 	}
 	if m.IsBlob() {
 		return fmt.Sprintf("B:%x", m.z)

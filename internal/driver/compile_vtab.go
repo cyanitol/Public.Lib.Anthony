@@ -283,6 +283,8 @@ func vtabColumnNames(table *schema.Table) []string {
 }
 
 // resolveVTabColumns maps SELECT columns to virtual table column indices.
+// Unlike resolveTVFColumns, this also handles special "rowid" references
+// (mapped to index -1) and skips unresolvable columns.
 func resolveVTabColumns(selectCols []parser.ResultColumn, vtabCols []string) ([]string, []int) {
 	if len(selectCols) == 1 && selectCols[0].Star {
 		indices := make([]int, len(vtabCols))
@@ -294,7 +296,6 @@ func resolveVTabColumns(selectCols []parser.ResultColumn, vtabCols []string) ([]
 
 	names := make([]string, 0, len(selectCols))
 	indices := make([]int, 0, len(selectCols))
-
 	for _, col := range selectCols {
 		colName := extractVTabColumnName(col)
 		idx := findVTabColumnIndex(colName, vtabCols)
@@ -314,22 +315,15 @@ func resolveVTabColumns(selectCols []parser.ResultColumn, vtabCols []string) ([]
 }
 
 // extractVTabColumnName gets the column name from a ResultColumn.
+// Delegates to extractResultColName.
 func extractVTabColumnName(col parser.ResultColumn) string {
-	if e, ok := col.Expr.(*parser.IdentExpr); ok {
-		return e.Name
-	}
-	return ""
+	return extractResultColName(col)
 }
 
 // findVTabColumnIndex finds a column by name (case-insensitive).
+// Delegates to findColIndexCI.
 func findVTabColumnIndex(name string, cols []string) int {
-	lower := strings.ToLower(name)
-	for i, c := range cols {
-		if strings.ToLower(c) == lower {
-			return i
-		}
-	}
-	return -1
+	return findColIndexCI(name, cols)
 }
 
 // collectVTabRows reads all rows from a vtab cursor.
@@ -361,15 +355,12 @@ func collectVTabRows(cursor vtab.VirtualCursor, colIndices []int) ([][]interface
 }
 
 // filterVTabRowsWhere applies WHERE filtering to collected rows.
+// Delegates to the generic filterRowsBy helper.
 func filterVTabRowsWhere(rows [][]interface{}, where parser.Expression,
 	cols []string, args []driver.NamedValue) [][]interface{} {
-	var result [][]interface{}
-	for _, row := range rows {
-		if matchesVTabWhere(where, row, cols, args) {
-			result = append(result, row)
-		}
-	}
-	return result
+	return filterRowsBy(rows, func(row []interface{}) bool {
+		return matchesVTabWhere(where, row, cols, args)
+	})
 }
 
 // projectVTabRows projects full rows to requested column indices.
@@ -388,17 +379,9 @@ func projectVTabRows(rows [][]interface{}, outIndices, allIndices []int) [][]int
 }
 
 // deduplicateVTabRows removes duplicate rows.
+// Delegates to the generic deduplicateRowsBy helper.
 func deduplicateVTabRows(rows [][]interface{}) [][]interface{} {
-	seen := make(map[string]bool)
-	var result [][]interface{}
-	for _, row := range rows {
-		key := fmt.Sprintf("%v", row)
-		if !seen[key] {
-			seen[key] = true
-			result = append(result, row)
-		}
-	}
-	return result
+	return deduplicateRowsBy(rows, interfaceRowKey)
 }
 
 // sortVTabRows sorts rows by ORDER BY clauses.
@@ -559,26 +542,9 @@ func applyVTabLimit(rows [][]interface{}, stmt *parser.SelectStmt) [][]interface
 }
 
 // emitVTabBytecode generates VDBE bytecode for pre-computed vtab rows.
+// Delegates to emitInterfaceRows.
 func emitVTabBytecode(vm *vdbe.VDBE, rows [][]interface{}, colNames []string) (*vdbe.VDBE, error) {
-	numCols := len(colNames)
-	vm.AllocMemory(numCols + 10)
-	vm.ResultCols = colNames
-
-	vm.AddOp(vdbe.OpInit, 0, 0, 0)
-
-	for _, row := range rows {
-		for i := 0; i < numCols; i++ {
-			if i < len(row) {
-				emitInterfaceValue(vm, row[i], i)
-			} else {
-				vm.AddOp(vdbe.OpNull, 0, i, 0)
-			}
-		}
-		vm.AddOp(vdbe.OpResultRow, 0, numCols, 0)
-	}
-
-	vm.AddOp(vdbe.OpHalt, 0, 0, 0)
-	return vm, nil
+	return emitInterfaceRows(vm, rows, colNames)
 }
 
 // emitInterfaceValue emits a Go interface{} value into a VDBE register.
@@ -832,24 +798,7 @@ func evalVTabBinaryWhere(e *parser.BinaryExpr, row []interface{},
 
 	leftVal := resolveVTabExprValue(e.Left, row, cols, args)
 	rightVal := resolveVTabExprValue(e.Right, row, cols, args)
-	cmp := compareInterfaces(leftVal, rightVal)
-
-	switch e.Op {
-	case parser.OpEq:
-		return cmp == 0
-	case parser.OpNe:
-		return cmp != 0
-	case parser.OpLt:
-		return cmp < 0
-	case parser.OpLe:
-		return cmp <= 0
-	case parser.OpGt:
-		return cmp > 0
-	case parser.OpGe:
-		return cmp >= 0
-	default:
-		return true
-	}
+	return compareOpResult(e.Op, compareInterfaces(leftVal, rightVal))
 }
 
 // resolveVTabExprValue resolves an expression to a value given a row context.
