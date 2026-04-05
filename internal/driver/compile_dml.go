@@ -14,6 +14,52 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
+// extractArgValues converts driver.NamedValue args to a plain []interface{}.
+func extractArgValues(args []driver.NamedValue) []interface{} {
+	argValues := make([]interface{}, len(args))
+	for i, a := range args {
+		argValues[i] = a.Value
+	}
+	return argValues
+}
+
+// emitMakeRecordAndInsert emits OpMakeRecord + OpInsert with the correct
+// rowid register handling for both normal and WITHOUT ROWID tables.
+// cursor is the btree cursor index, conflictMode is stored in P4.I,
+// and tableName is stored in P4.Z. conflictMode of -1 means no P4.I is set.
+func emitMakeRecordAndInsert(vm *vdbe.VDBE, cursor, recordStartReg, numRecordCols, rowidReg int,
+	withoutRowID bool, conflictMode int32, tableName string) int {
+
+	resultReg := recordStartReg + numRecordCols
+	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
+
+	rowidRegToUse := rowidReg
+	if withoutRowID {
+		rowidRegToUse = 0
+	}
+	insertOp := vm.AddOp(vdbe.OpInsert, cursor, resultReg, rowidRegToUse)
+	if conflictMode >= 0 {
+		vm.Program[insertOp].P4.I = conflictMode
+	}
+	vm.Program[insertOp].P4.Z = tableName
+	return insertOp
+}
+
+// newTableCodeGenerator creates a CodeGenerator configured for a table cursor,
+// with subquery support and optional args binding.
+func (s *Stmt) newTableCodeGenerator(vm *vdbe.VDBE, tableName string, table *schema.Table,
+	cursorIdx int, args []driver.NamedValue) *expr.CodeGenerator {
+
+	gen := expr.NewCodeGenerator(vm)
+	s.setupSubqueryCompiler(gen)
+	gen.RegisterCursor(tableName, cursorIdx)
+	gen.RegisterTable(buildTableInfo(tableName, table))
+	if len(args) > 0 {
+		gen.SetArgs(extractArgValues(args))
+	}
+	return gen
+}
+
 // ============================================================================
 // INSERT Compilation
 // ============================================================================
@@ -184,11 +230,7 @@ func (s *Stmt) initInsertVDBE(vm *vdbe.VDBE, numRecordCols, recordStartReg int, 
 	gen := expr.NewCodeGenerator(vm)
 	gen.SetNextReg(recordStartReg + numRecordCols + 1)
 	if len(args) > 0 {
-		argValues := make([]interface{}, len(args))
-		for i, a := range args {
-			argValues[i] = a.Value
-		}
-		gen.SetArgs(argValues)
+		gen.SetArgs(extractArgValues(args))
 	}
 	return gen
 }
@@ -209,15 +251,8 @@ func (s *Stmt) emitInsertValueRow(vm *vdbe.VDBE, stmt *parser.InsertStmt, table 
 		vm.Program[beforeAddr].P4.Z = stmt.Table
 	}
 
-	resultReg := recordStartReg + numRecordCols
-	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
-	rowidRegToUse := rowidReg
-	if table.WithoutRowID {
-		rowidRegToUse = 0
-	}
-	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidRegToUse)
-	vm.Program[insertOp].P4.I = conflictMode
-	vm.Program[insertOp].P4.Z = table.Name
+	emitMakeRecordAndInsert(vm, 0, recordStartReg, numRecordCols, rowidReg,
+		table.WithoutRowID, conflictMode, table.Name)
 
 	if hasTriggers {
 		afterAddr := vm.AddOp(vdbe.OpTriggerAfter, 0, 0, recordStartReg)
@@ -237,20 +272,8 @@ func (s *Stmt) emitInsertRow(vm *vdbe.VDBE, table *schema.Table, colNames []stri
 	}
 	s.emitInsertRecordValues(vm, table, colNames, row, rowidColIdx, recordStartReg, args, paramIdx, gen)
 
-	resultReg := recordStartReg + numRecordCols
-	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
-
-	// OpInsert: P1=cursor, P2=record register, P3=rowid register
-	// For WITHOUT ROWID tables, P3 is set to 0 (no rowid)
-	// P4.I = conflict mode (0=abort, 1=ignore, 2=replace)
-	// P4.Z = table name (for UNIQUE constraint checking and AUTOINCREMENT)
-	rowidRegToUse := rowidReg
-	if table.WithoutRowID {
-		rowidRegToUse = 0
-	}
-	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidRegToUse)
-	vm.Program[insertOp].P4.I = conflictMode
-	vm.Program[insertOp].P4.Z = table.Name
+	emitMakeRecordAndInsert(vm, 0, recordStartReg, numRecordCols, rowidReg,
+		table.WithoutRowID, conflictMode, table.Name)
 }
 
 // compileInsertSelect compiles an INSERT...SELECT statement.
@@ -362,14 +385,8 @@ func (s *Stmt) emitMaterialisedRow(vm *vdbe.VDBE, table *schema.Table, row []int
 		reg++
 	}
 
-	resultReg := recordStartReg + numRecordCols
-	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, numRecordCols, resultReg)
-	rowidRegToUse := rowidReg
-	if table.WithoutRowID {
-		rowidRegToUse = 0
-	}
-	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidRegToUse)
-	vm.Program[insertOp].P4.Z = table.Name
+	emitMakeRecordAndInsert(vm, 0, recordStartReg, numRecordCols, rowidReg,
+		table.WithoutRowID, -1, table.Name)
 }
 
 // insertSelectContext holds the context for INSERT...SELECT compilation.
@@ -443,20 +460,7 @@ func (s *Stmt) prepareInsertSelectContext(vm *vdbe.VDBE, stmt *parser.InsertStmt
 
 // setupInsertSelectGenerator creates and configures the code generator.
 func (s *Stmt) setupInsertSelectGenerator(vm *vdbe.VDBE, sourceTableName string, sourceTable *schema.Table, args []driver.NamedValue) *expr.CodeGenerator {
-	gen := expr.NewCodeGenerator(vm)
-	s.setupSubqueryCompiler(gen)
-	gen.RegisterCursor(sourceTableName, 1)
-	sourceTableInfo := buildTableInfo(sourceTableName, sourceTable)
-	gen.RegisterTable(sourceTableInfo)
-
-	// Set up args for parameter binding
-	argValues := make([]interface{}, len(args))
-	for i, a := range args {
-		argValues[i] = a.Value
-	}
-	gen.SetArgs(argValues)
-
-	return gen
+	return s.newTableCodeGenerator(vm, sourceTableName, sourceTable, 1, args)
 }
 
 // resolveSelectColumns expands SELECT * if needed and validates column count.
@@ -505,17 +509,8 @@ func (s *Stmt) emitInsertSelectLoop(vm *vdbe.VDBE, selectStmt *parser.SelectStmt
 	s.emitInsertSelectRecordColumns(vm, ctx, recordStartReg)
 
 	// Make record and insert
-	resultReg := recordStartReg + ctx.numRecordCols
-	vm.AddOp(vdbe.OpMakeRecord, recordStartReg, ctx.numRecordCols, resultReg)
-
-	// For WITHOUT ROWID tables, P3 is set to 0 (no rowid)
-	rowidRegToUse := rowidReg
-	if ctx.targetTable.WithoutRowID {
-		rowidRegToUse = 0
-	}
-	insertOp := vm.AddOp(vdbe.OpInsert, 0, resultReg, rowidRegToUse)
-	// Pass table name for UNIQUE constraint checking and AUTOINCREMENT
-	vm.Program[insertOp].P4.Z = ctx.targetTable.Name
+	emitMakeRecordAndInsert(vm, 0, recordStartReg, ctx.numRecordCols, rowidReg,
+		ctx.targetTable.WithoutRowID, -1, ctx.targetTable.Name)
 
 	// Fix WHERE skip address
 	if ctx.hasWhereClause {
@@ -1058,11 +1053,7 @@ func (s *Stmt) applyUpdateFromRows(vm *vdbe.VDBE, table *schema.Table,
 	vm.AddOp(vdbe.OpInit, 0, 0, 0)
 	vm.AddOp(vdbe.OpOpenWrite, 0, int(table.RootPage), len(table.Columns))
 
-	gen := expr.NewCodeGenerator(vm)
-	s.setupSubqueryCompiler(gen)
-	gen.RegisterCursor(stmt.Table, 0)
-	tableInfo := buildTableInfo(stmt.Table, table)
-	gen.RegisterTable(tableInfo)
+	gen := s.newTableCodeGenerator(vm, stmt.Table, table, 0, nil)
 
 	for _, row := range rows {
 		s.emitUpdateFromSingleRow(vm, table, stmt, row, numRecordCols, gen)
@@ -1183,11 +1174,7 @@ func (s *Stmt) setupUpdateVDBE(vm *vdbe.VDBE, table *schema.Table, stmt *parser.
 	vm.AddOp(vdbe.OpOpenWrite, 0, int(table.RootPage), len(table.Columns))
 
 	// Create and configure code generator
-	gen := expr.NewCodeGenerator(vm)
-	s.setupSubqueryCompiler(gen)
-	gen.RegisterCursor(stmt.Table, 0)
-	tableInfo := buildTableInfo(stmt.Table, table)
-	gen.RegisterTable(tableInfo)
+	gen := s.newTableCodeGenerator(vm, stmt.Table, table, 0, nil)
 
 	return gen, numRecordCols
 }
@@ -1201,10 +1188,7 @@ func (s *Stmt) emitUpdateLoop(vm *vdbe.VDBE, stmt *parser.UpdateStmt, table *sch
 
 	// Prepare args
 	setParamCount := countParams(stmt.Sets)
-	argValues := make([]interface{}, len(args))
-	for i, a := range args {
-		argValues[i] = a.Value
-	}
+	argValues := extractArgValues(args)
 
 	// Get rowid
 	rowidReg := gen.AllocReg()
@@ -1446,9 +1430,7 @@ func (s *Stmt) compileDelete(vm *vdbe.VDBE, stmt *parser.DeleteStmt, args []driv
 		retCols, retNames := expandReturningColumns(stmt.Returning, table)
 		stmt.Returning = retCols
 		vm.ResultCols = retNames
-		retGen = expr.NewCodeGenerator(vm)
-		retGen.RegisterCursor(stmt.Table, 0)
-		retGen.RegisterTable(buildTableInfo(stmt.Table, table))
+		retGen = s.newTableCodeGenerator(vm, stmt.Table, table, 0, nil)
 	}
 
 	return s.emitDeleteBody(vm, stmt, table, hasTriggers, numRecordCols, oldRowStartReg, retGen, args)
@@ -1515,18 +1497,7 @@ func (s *Stmt) emitDeleteWhereClause(vm *vdbe.VDBE, stmt *parser.DeleteStmt,
 		return 0
 	}
 
-	gen := expr.NewCodeGenerator(vm)
-	s.setupSubqueryCompiler(gen)
-	gen.RegisterCursor(stmt.Table, 0)
-
-	tableInfo := buildTableInfo(stmt.Table, table)
-	gen.RegisterTable(tableInfo)
-
-	argValues := make([]interface{}, len(args))
-	for i, a := range args {
-		argValues[i] = a.Value
-	}
-	gen.SetArgs(argValues)
+	gen := s.newTableCodeGenerator(vm, stmt.Table, table, 0, args)
 
 	whereReg, err := gen.GenerateExpr(stmt.Where)
 	if err != nil {

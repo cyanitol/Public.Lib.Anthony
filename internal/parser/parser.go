@@ -861,33 +861,12 @@ func (p *Parser) parseJoinOnCondition(join *JoinClause) error {
 
 // parseJoinUsingCondition parses a USING (col, ...) join condition.
 func (p *Parser) parseJoinUsingCondition(join *JoinClause) error {
-	if !p.match(TK_LP) {
-		return p.error("expected ( after USING")
-	}
-	columns, err := p.parseUsingColumnList()
+	columns, err := p.parseParenthesizedList(p.parseColumnIdentifier, "expected ( after USING", "expected ) after USING columns")
 	if err != nil {
 		return err
 	}
-	if !p.match(TK_RP) {
-		return p.error("expected ) after USING columns")
-	}
 	join.Condition.Using = columns
 	return nil
-}
-
-// parseUsingColumnList parses the comma-separated identifier list inside USING().
-func (p *Parser) parseUsingColumnList() ([]string, error) {
-	columns := make([]string, 0)
-	for {
-		if !p.check(TK_ID) {
-			return nil, p.error("expected column name")
-		}
-		columns = append(columns, Unquote(p.advance().Lexeme))
-		if !p.match(TK_COMMA) {
-			break
-		}
-	}
-	return columns, nil
 }
 
 // =============================================================================
@@ -953,21 +932,14 @@ func (p *Parser) parseInsertBody(stmt *InsertStmt) (*InsertStmt, error) {
 
 // parseInsertColumnList parses the optional (col1, col2, ...) column list.
 func (p *Parser) parseInsertColumnList(stmt *InsertStmt) error {
-	if !p.match(TK_LP) {
+	if !p.check(TK_LP) {
 		return nil
 	}
-	for {
-		if !p.checkIdentifier() {
-			return p.error("expected column name")
-		}
-		stmt.Columns = append(stmt.Columns, Unquote(p.advance().Lexeme))
-		if !p.match(TK_COMMA) {
-			break
-		}
+	columns, err := p.parseParenthesizedList(p.parseKeywordIdentifier, "expected ( before column list", "expected ) after column list")
+	if err != nil {
+		return err
 	}
-	if !p.match(TK_RP) {
-		return p.error("expected ) after column list")
-	}
+	stmt.Columns = columns
 	return nil
 }
 
@@ -1203,19 +1175,20 @@ func (p *Parser) parseUpdate() (*UpdateStmt, error) {
 // parseUpdateClauses parses all post-SET clauses: assignments, FROM, WHERE,
 // ORDER BY, and LIMIT. Grouping them here keeps parseUpdate at CC <= 6.
 func (p *Parser) parseUpdateClauses(stmt *UpdateStmt) error {
-	if err := p.parseUpdateAssignments(stmt); err != nil {
+	var err error
+	if err = p.parseUpdateAssignments(stmt); err != nil {
 		return err
 	}
-	if err := p.parseUpdateFromClause(stmt); err != nil {
+	if err = p.parseUpdateFromClause(stmt); err != nil {
 		return err
 	}
-	if err := p.parseUpdateWhereClause(stmt); err != nil {
+	if stmt.Where, err = p.parseOptionalWhere(); err != nil {
 		return err
 	}
-	if err := p.parseUpdateOrderByClause(stmt); err != nil {
+	if stmt.OrderBy, err = p.parseOptionalOrderBy(); err != nil {
 		return err
 	}
-	if err := p.parseUpdateLimitClause(stmt); err != nil {
+	if stmt.Limit, err = p.parseOptionalLimit(); err != nil {
 		return err
 	}
 	return p.parseReturningClause(&stmt.Returning)
@@ -1258,46 +1231,34 @@ func (p *Parser) parseUpdateAssignments(stmt *UpdateStmt) error {
 	return nil
 }
 
-// parseUpdateWhereClause parses the optional WHERE clause.
-func (p *Parser) parseUpdateWhereClause(stmt *UpdateStmt) error {
+// parseOptionalWhere parses an optional WHERE clause, returning the expression
+// or nil if no WHERE keyword is present.
+func (p *Parser) parseOptionalWhere() (Expression, error) {
 	if !p.match(TK_WHERE) {
-		return nil
+		return nil, nil
 	}
-	where, err := p.parseExpression()
-	if err != nil {
-		return err
-	}
-	stmt.Where = where
-	return nil
+	return p.parseExpression()
 }
 
-// parseUpdateOrderByClause parses the optional ORDER BY clause.
-func (p *Parser) parseUpdateOrderByClause(stmt *UpdateStmt) error {
+// parseOptionalOrderBy parses an optional ORDER BY clause, returning the list
+// or nil if no ORDER keyword is present.
+func (p *Parser) parseOptionalOrderBy() ([]OrderingTerm, error) {
 	if !p.match(TK_ORDER) {
-		return nil
+		return nil, nil
 	}
 	if !p.match(TK_BY) {
-		return p.error("expected BY after ORDER")
+		return nil, p.error("expected BY after ORDER")
 	}
-	orderBy, err := p.parseOrderByList()
-	if err != nil {
-		return err
-	}
-	stmt.OrderBy = orderBy
-	return nil
+	return p.parseOrderByList()
 }
 
-// parseUpdateLimitClause parses the optional LIMIT clause.
-func (p *Parser) parseUpdateLimitClause(stmt *UpdateStmt) error {
+// parseOptionalLimit parses an optional LIMIT clause, returning the expression
+// or nil if no LIMIT keyword is present.
+func (p *Parser) parseOptionalLimit() (Expression, error) {
 	if !p.match(TK_LIMIT) {
-		return nil
+		return nil, nil
 	}
-	limit, err := p.parseExpression()
-	if err != nil {
-		return err
-	}
-	stmt.Limit = limit
-	return nil
+	return p.parseExpression()
 }
 
 // =============================================================================
@@ -1321,55 +1282,17 @@ func (p *Parser) parseDelete() (*DeleteStmt, error) {
 
 // parseDeleteClauses parses optional WHERE, ORDER BY, and LIMIT clauses.
 func (p *Parser) parseDeleteClauses(stmt *DeleteStmt) error {
-	if err := p.parseDeleteWhere(stmt); err != nil {
+	var err error
+	if stmt.Where, err = p.parseOptionalWhere(); err != nil {
 		return err
 	}
-	if err := p.parseDeleteOrderBy(stmt); err != nil {
+	if stmt.OrderBy, err = p.parseOptionalOrderBy(); err != nil {
 		return err
 	}
-	if err := p.parseDeleteLimit(stmt); err != nil {
+	if stmt.Limit, err = p.parseOptionalLimit(); err != nil {
 		return err
 	}
 	return p.parseReturningClause(&stmt.Returning)
-}
-
-func (p *Parser) parseDeleteWhere(stmt *DeleteStmt) error {
-	if !p.match(TK_WHERE) {
-		return nil
-	}
-	where, err := p.parseExpression()
-	if err != nil {
-		return err
-	}
-	stmt.Where = where
-	return nil
-}
-
-func (p *Parser) parseDeleteOrderBy(stmt *DeleteStmt) error {
-	if !p.match(TK_ORDER) {
-		return nil
-	}
-	if !p.match(TK_BY) {
-		return p.error("expected BY after ORDER")
-	}
-	orderBy, err := p.parseOrderByList()
-	if err != nil {
-		return err
-	}
-	stmt.OrderBy = orderBy
-	return nil
-}
-
-func (p *Parser) parseDeleteLimit(stmt *DeleteStmt) error {
-	if !p.match(TK_LIMIT) {
-		return nil
-	}
-	limit, err := p.parseExpression()
-	if err != nil {
-		return err
-	}
-	stmt.Limit = limit
-	return nil
 }
 
 // =============================================================================
@@ -2130,27 +2053,7 @@ func (p *Parser) applyTableConstraintForeignKey(c *TableConstraint) error {
 
 // parseForeignKeyColumns parses the column list in FOREIGN KEY (col1, col2, ...).
 func (p *Parser) parseForeignKeyColumns() ([]string, error) {
-	if !p.match(TK_LP) {
-		return nil, p.error("expected ( after FOREIGN KEY")
-	}
-
-	var columns []string
-	for {
-		if !p.check(TK_ID) {
-			return nil, p.error("expected column name")
-		}
-		columns = append(columns, Unquote(p.advance().Lexeme))
-
-		if !p.match(TK_COMMA) {
-			break
-		}
-	}
-
-	if !p.match(TK_RP) {
-		return nil, p.error("expected ) after FOREIGN KEY columns")
-	}
-
-	return columns, nil
+	return p.parseParenthesizedList(p.parseColumnIdentifier, "expected ( after FOREIGN KEY", "expected ) after FOREIGN KEY columns")
 }
 
 // parseForeignKeyReferences parses the REFERENCES table (columns) clause.
@@ -2173,27 +2076,10 @@ func (p *Parser) parseForeignKeyReferences() (string, []string, error) {
 }
 
 func (p *Parser) parseForeignKeyRefColumns() ([]string, error) {
-	if !p.match(TK_LP) {
+	if !p.check(TK_LP) {
 		return nil, nil
 	}
-
-	var refColumns []string
-	for {
-		if !p.check(TK_ID) {
-			return nil, p.error("expected column name")
-		}
-		refColumns = append(refColumns, Unquote(p.advance().Lexeme))
-
-		if !p.match(TK_COMMA) {
-			break
-		}
-	}
-
-	if !p.match(TK_RP) {
-		return nil, p.error("expected ) after referenced columns")
-	}
-
-	return refColumns, nil
+	return p.parseParenthesizedList(p.parseColumnIdentifier, "expected ( after referenced table", "expected ) after referenced columns")
 }
 
 func (p *Parser) parseCreateIndex(unique bool) (*CreateIndexStmt, error) {
@@ -2369,20 +2255,14 @@ func (p *Parser) parseCreateView(temp bool) (*CreateViewStmt, error) {
 
 // parseViewColumns parses the optional column list in a CREATE VIEW statement.
 func (p *Parser) parseViewColumns(stmt *CreateViewStmt) error {
-	if p.match(TK_LP) {
-		for {
-			if !p.check(TK_ID) {
-				return p.error("expected column name")
-			}
-			stmt.Columns = append(stmt.Columns, Unquote(p.advance().Lexeme))
-			if !p.match(TK_COMMA) {
-				break
-			}
-		}
-		if !p.match(TK_RP) {
-			return p.error("expected ) after column list")
-		}
+	if !p.check(TK_LP) {
+		return nil
 	}
+	columns, err := p.parseParenthesizedList(p.parseColumnIdentifier, "expected ( before column list", "expected ) after column list")
+	if err != nil {
+		return err
+	}
+	stmt.Columns = columns
 	return nil
 }
 
@@ -2706,21 +2586,17 @@ func (p *Parser) parseExplain() (*ExplainStmt, error) {
 // Transactions
 // =============================================================================
 
+var transactionModePairs = []tokenEnumPair[TransactionMode]{
+	{TK_DEFERRED, TransactionDeferred},
+	{TK_IMMEDIATE, TransactionImmediate},
+	{TK_EXCLUSIVE, TransactionExclusive},
+}
+
 func (p *Parser) parseBegin() (*BeginStmt, error) {
-	stmt := &BeginStmt{Mode: TransactionDeferred}
-
 	// BEGIN [DEFERRED|IMMEDIATE|EXCLUSIVE] [TRANSACTION]
-	if p.match(TK_DEFERRED) {
-		stmt.Mode = TransactionDeferred
-	} else if p.match(TK_IMMEDIATE) {
-		stmt.Mode = TransactionImmediate
-	} else if p.match(TK_EXCLUSIVE) {
-		stmt.Mode = TransactionExclusive
-	}
-
+	mode := matchTokenToEnum(p, transactionModePairs, TransactionDeferred)
 	p.match(TK_TRANSACTION)
-
-	return stmt, nil
+	return &BeginStmt{Mode: mode}, nil
 }
 
 func (p *Parser) parseRollback() (*RollbackStmt, error) {
@@ -3950,6 +3826,46 @@ func (p *Parser) parseParenOrSubquery() (Expression, error) {
 // Helper methods
 // =============================================================================
 
+// parseColumnIdentifier parses a single column identifier (TK_ID only).
+func (p *Parser) parseColumnIdentifier() (string, error) {
+	if !p.check(TK_ID) {
+		return "", p.error("expected column name")
+	}
+	return Unquote(p.advance().Lexeme), nil
+}
+
+// parseKeywordIdentifier parses an identifier that may also be a keyword.
+func (p *Parser) parseKeywordIdentifier() (string, error) {
+	if !p.checkIdentifier() {
+		return "", p.error("expected column name")
+	}
+	return Unquote(p.advance().Lexeme), nil
+}
+
+// parseParenthesizedList parses a parenthesized, comma-separated list using
+// the provided parseItem callback to extract each element. It consumes the
+// opening and closing parentheses, returning the collected items.
+func (p *Parser) parseParenthesizedList(parseItem func() (string, error), openErr, closeErr string) ([]string, error) {
+	if !p.match(TK_LP) {
+		return nil, p.error("%s", openErr)
+	}
+	var items []string
+	for {
+		item, err := parseItem()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+		if !p.match(TK_COMMA) {
+			break
+		}
+	}
+	if !p.match(TK_RP) {
+		return nil, p.error("%s", closeErr)
+	}
+	return items, nil
+}
+
 func (p *Parser) parseExpressionList() ([]Expression, error) {
 	exprs := make([]Expression, 0)
 
@@ -4020,19 +3936,33 @@ func (p *Parser) parseOrderByList() ([]OrderingTerm, error) {
 	return terms, nil
 }
 
-func (p *Parser) parseOnConflict() OnConflictClause {
-	if p.match(TK_ROLLBACK) {
-		return OnConflictRollback
-	} else if p.match(TK_ABORT) {
-		return OnConflictAbort
-	} else if p.match(TK_FAIL) {
-		return OnConflictFail
-	} else if p.match(TK_IGNORE) {
-		return OnConflictIgnore
-	} else if p.match(TK_REPLACE) {
-		return OnConflictReplace
+// tokenEnumPair maps a token type to a typed enum value.
+type tokenEnumPair[T any] struct {
+	tok TokenType
+	val T
+}
+
+// matchTokenToEnum tries each token in order, returning the paired value on first match.
+// If no token matches, it returns defaultVal.
+func matchTokenToEnum[T any](p *Parser, pairs []tokenEnumPair[T], defaultVal T) T {
+	for _, pair := range pairs {
+		if p.match(pair.tok) {
+			return pair.val
+		}
 	}
-	return OnConflictNone
+	return defaultVal
+}
+
+var onConflictPairs = []tokenEnumPair[OnConflictClause]{
+	{TK_ROLLBACK, OnConflictRollback},
+	{TK_ABORT, OnConflictAbort},
+	{TK_FAIL, OnConflictFail},
+	{TK_IGNORE, OnConflictIgnore},
+	{TK_REPLACE, OnConflictReplace},
+}
+
+func (p *Parser) parseOnConflict() OnConflictClause {
+	return matchTokenToEnum(p, onConflictPairs, OnConflictNone)
 }
 
 func (p *Parser) isJoinKeyword() bool {

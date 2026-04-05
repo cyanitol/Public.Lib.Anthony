@@ -209,8 +209,8 @@ func (w *WALIndex) initializeFile(size int64) error {
 	return nil
 }
 
-// writeHeaderToFile writes the header directly to the file (before mmap is established).
-func (w *WALIndex) writeHeaderToFile() error {
+// serializeHeader serializes the WAL index header into a byte slice.
+func (w *WALIndex) serializeHeader() []byte {
 	buf := make([]byte, WALIndexHeaderSize)
 	offset := 0
 
@@ -238,29 +238,26 @@ func (w *WALIndex) writeHeaderToFile() error {
 	binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.NPage)
 	offset += 4
 
-	// Write frame checksums
-	for i := 0; i < 2; i++ {
-		binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.AFrameCksum[i])
-		offset += 4
-	}
+	offset = putUint32Array(buf, offset, w.header.AFrameCksum[:])
+	offset = putUint32Array(buf, offset, w.header.ASalt[:])
+	offset = putUint32Array(buf, offset, w.header.ACksum[:])
+	_ = putUint32Array(buf, offset, w.header.ReadMark[:])
 
-	// Write salt values
-	for i := 0; i < 2; i++ {
-		binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.ASalt[i])
-		offset += 4
-	}
+	return buf
+}
 
-	// Write checksums
-	for i := 0; i < 2; i++ {
-		binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.ACksum[i])
+// putUint32Array writes multiple uint32 values to buf at the given offset.
+func putUint32Array(buf []byte, offset int, src []uint32) int {
+	for _, v := range src {
+		binary.LittleEndian.PutUint32(buf[offset:offset+4], v)
 		offset += 4
 	}
+	return offset
+}
 
-	// Write read marks
-	for i := 0; i < WALIndexMaxReaders; i++ {
-		binary.LittleEndian.PutUint32(buf[offset:offset+4], w.header.ReadMark[i])
-		offset += 4
-	}
+// writeHeaderToFile writes the header directly to the file (before mmap is established).
+func (w *WALIndex) writeHeaderToFile() error {
+	buf := w.serializeHeader()
 
 	// Write to file at position 0
 	_, err := w.file.WriteAt(buf, 0)
@@ -520,35 +517,41 @@ func (w *WALIndex) readHeader() error {
 
 // readHeaderFields reads all header fields from mmap and returns final offset.
 func (w *WALIndex) readHeaderFields() int {
+	return w.deserializeHeader(w.mmap)
+}
+
+// deserializeHeader reads the WAL index header fields from a byte slice.
+func (w *WALIndex) deserializeHeader(buf []byte) int {
 	offset := 0
-	w.header.Version = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
+
+	w.header.Version = binary.LittleEndian.Uint32(buf[offset : offset+4])
 	offset += 4
 
-	w.header.Unused = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
+	w.header.Unused = binary.LittleEndian.Uint32(buf[offset : offset+4])
 	offset += 4
 
-	w.header.Change = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
+	w.header.Change = binary.LittleEndian.Uint32(buf[offset : offset+4])
 	offset += 4
 
-	w.header.IsInit = w.mmap[offset]
+	w.header.IsInit = buf[offset]
 	offset++
 
-	w.header.BigEndCksum = w.mmap[offset]
+	w.header.BigEndCksum = buf[offset]
 	offset++
 
-	w.header.PageSize = binary.LittleEndian.Uint16(w.mmap[offset : offset+2])
+	w.header.PageSize = binary.LittleEndian.Uint16(buf[offset : offset+2])
 	offset += 2
 
-	w.header.MxFrame = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
+	w.header.MxFrame = binary.LittleEndian.Uint32(buf[offset : offset+4])
 	offset += 4
 
-	w.header.NPage = binary.LittleEndian.Uint32(w.mmap[offset : offset+4])
+	w.header.NPage = binary.LittleEndian.Uint32(buf[offset : offset+4])
 	offset += 4
 
-	offset = readUint32Array(w.mmap, offset, w.header.AFrameCksum[:])
-	offset = readUint32Array(w.mmap, offset, w.header.ASalt[:])
-	offset = readUint32Array(w.mmap, offset, w.header.ACksum[:])
-	offset = readUint32Array(w.mmap, offset, w.header.ReadMark[:])
+	offset = readUint32Array(buf, offset, w.header.AFrameCksum[:])
+	offset = readUint32Array(buf, offset, w.header.ASalt[:])
+	offset = readUint32Array(buf, offset, w.header.ACksum[:])
+	offset = readUint32Array(buf, offset, w.header.ReadMark[:])
 
 	return offset
 }
@@ -587,62 +590,10 @@ func (w *WALIndex) writeHeader() error {
 		return ErrWALIndexCorrupt
 	}
 
-	offset := 0
+	buf := w.serializeHeader()
+	copy(w.mmap[:WALIndexHeaderSize], buf)
 
-	binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.Version)
-	offset += 4
-
-	binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.Unused)
-	offset += 4
-
-	binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.Change)
-	offset += 4
-
-	w.mmap[offset] = w.header.IsInit
-	offset++
-
-	w.mmap[offset] = w.header.BigEndCksum
-	offset++
-
-	binary.LittleEndian.PutUint16(w.mmap[offset:offset+2], w.header.PageSize)
-	offset += 2
-
-	binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.MxFrame)
-	offset += 4
-
-	binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.NPage)
-	offset += 4
-
-	// Write frame checksums
-	for i := 0; i < 2; i++ {
-		binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.AFrameCksum[i])
-		offset += 4
-	}
-
-	// Write salt values
-	for i := 0; i < 2; i++ {
-		binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.ASalt[i])
-		offset += 4
-	}
-
-	// Write checksums
-	for i := 0; i < 2; i++ {
-		binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.ACksum[i])
-		offset += 4
-	}
-
-	// Write read marks
-	for i := 0; i < WALIndexMaxReaders; i++ {
-		binary.LittleEndian.PutUint32(w.mmap[offset:offset+4], w.header.ReadMark[i])
-		offset += 4
-	}
-
-	// Sync to disk
-	if err := w.syncMmap(); err != nil {
-		return err
-	}
-
-	return nil
+	return w.syncMmap()
 }
 
 // writeHashEntry writes a hash table entry to the memory-mapped region.

@@ -807,28 +807,27 @@ func (g *CodeGenerator) generateUnary(e *parser.UnaryExpr) (int, error) {
 		g.vdbe.SetComment(g.vdbe.NumOps()-1, "BITNOT")
 
 	case parser.OpIsNull:
-		// OpIsNull is a jump instruction: jumps to P2 if P1 is NULL.
-		// Emit a boolean-producing sequence instead of using it directly.
-		g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
-		isNullAddr := g.vdbe.AddOp(vdbe.OpIsNull, operandReg, 0, 0)
-		g.vdbe.SetComment(isNullAddr, "IS NULL")
-		g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
-		g.vdbe.Program[isNullAddr].P2 = g.vdbe.NumOps()
+		g.emitNullCheckBoolean(vdbe.OpIsNull, operandReg, resultReg, "IS NULL")
 
 	case parser.OpNotNull:
-		// OpNotNull is a jump instruction: jumps to P2 if P1 is NOT NULL.
-		// Emit a boolean-producing sequence instead of using it directly.
-		g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
-		notNullAddr := g.vdbe.AddOp(vdbe.OpNotNull, operandReg, 0, 0)
-		g.vdbe.SetComment(notNullAddr, "NOT NULL")
-		g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
-		g.vdbe.Program[notNullAddr].P2 = g.vdbe.NumOps()
+		g.emitNullCheckBoolean(vdbe.OpNotNull, operandReg, resultReg, "NOT NULL")
 
 	default:
 		return 0, fmt.Errorf("unsupported unary operator: %v", e.Op)
 	}
 
 	return resultReg, nil
+}
+
+// emitNullCheckBoolean emits a boolean-producing sequence for a jump-based null
+// check opcode (OpIsNull or OpNotNull). Sets resultReg to 1 if the check
+// succeeds, 0 otherwise.
+func (g *CodeGenerator) emitNullCheckBoolean(op vdbe.Opcode, operandReg, resultReg int, comment string) {
+	g.vdbe.AddOp(vdbe.OpInteger, 1, resultReg, 0)
+	jumpAddr := g.vdbe.AddOp(op, operandReg, 0, 0)
+	g.vdbe.SetComment(jumpAddr, comment)
+	g.vdbe.AddOp(vdbe.OpInteger, 0, resultReg, 0)
+	g.vdbe.Program[jumpAddr].P2 = g.vdbe.NumOps()
 }
 
 // generateFunction generates code for function calls.
@@ -1354,27 +1353,7 @@ func (g *CodeGenerator) generateSubquery(e *parser.SubqueryExpr) (int, error) {
 		return g.generateSubqueryMaterialised(e)
 	}
 
-	if g.subqueryCompiler == nil {
-		return 0, fmt.Errorf("subquery compiler not set")
-	}
-
-	resultReg := g.AllocReg()
-	g.initSubqueryResult(resultReg)
-
-	subVM, err := g.subqueryCompiler(e.Select)
-	if err != nil {
-		return 0, fmt.Errorf("failed to compile scalar subquery: %w", err)
-	}
-
-	addrSubqueryStart := g.vdbe.NumOps()
-	addrMap := g.buildSubqueryAddressMap(subVM, addrSubqueryStart)
-	resultRowGotoAddrs := g.copySubqueryInstructions(subVM, addrMap, resultReg)
-	g.patchResultRowGotos(resultRowGotoAddrs)
-
-	g.vdbe.AddOp(vdbe.OpNoop, 0, 0, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "Scalar subquery: end")
-
-	return resultReg, nil
+	return g.embedScalarSubquery(e.Select)
 }
 
 // generateSubqueryMaterialised executes a scalar subquery at compile time and
@@ -1404,13 +1383,20 @@ func (g *CodeGenerator) generateSubqueryMaterialised(e *parser.SubqueryExpr) (in
 // generateSubqueryBytecodeEmbedding falls back to bytecode embedding for
 // scalar subqueries (typically correlated ones).
 func (g *CodeGenerator) generateSubqueryBytecodeEmbedding(e *parser.SubqueryExpr) (int, error) {
+	return g.embedScalarSubquery(e.Select)
+}
+
+// embedScalarSubquery compiles a SELECT into inline bytecode that writes its
+// first result column into a fresh register. Used by both the primary
+// generateSubquery path and the materialisation fallback.
+func (g *CodeGenerator) embedScalarSubquery(selectStmt *parser.SelectStmt) (int, error) {
 	if g.subqueryCompiler == nil {
 		return 0, fmt.Errorf("subquery compiler not set")
 	}
 	resultReg := g.AllocReg()
 	g.initSubqueryResult(resultReg)
 
-	subVM, err := g.subqueryCompiler(e.Select)
+	subVM, err := g.subqueryCompiler(selectStmt)
 	if err != nil {
 		return 0, fmt.Errorf("failed to compile scalar subquery: %w", err)
 	}
@@ -1552,38 +1538,21 @@ func (g *CodeGenerator) generateLikeEscapeExpr(e *parser.BinaryExpr) (int, error
 
 // generateLikeExpr generates code for LIKE expressions.
 func (g *CodeGenerator) generateLikeExpr(leftReg, rightReg int) (int, error) {
-	resultReg := g.AllocReg()
-	// For now, use function call approach
-	// In real implementation, would use optimized LIKE opcode
-
-	// Allocate consecutive registers for the two arguments (value, pattern)
-	firstArg := g.AllocRegs(2)
-
-	// Move arguments to consecutive registers
-	if leftReg != firstArg {
-		g.vdbe.AddOp(vdbe.OpMove, leftReg, firstArg, 0)
-	}
-	if rightReg != firstArg+1 {
-		g.vdbe.AddOp(vdbe.OpMove, rightReg, firstArg+1, 0)
-	}
-
-	// Emit function call
-	addr := g.vdbe.AddOp(vdbe.OpFunction, 0, firstArg, resultReg)
-	g.vdbe.Program[addr].P4.Z = "like"
-	g.vdbe.Program[addr].P4Type = vdbe.P4Static
-	g.vdbe.Program[addr].P5 = 2
-	g.vdbe.SetComment(addr, "LIKE")
-	return resultReg, nil
+	return g.generatePatternMatchFunc("like", "LIKE", leftReg, rightReg)
 }
 
 // generateGlobExpr generates code for GLOB expressions.
 func (g *CodeGenerator) generateGlobExpr(leftReg, rightReg int) (int, error) {
-	resultReg := g.AllocReg()
+	return g.generatePatternMatchFunc("glob", "GLOB", leftReg, rightReg)
+}
 
-	// Allocate consecutive registers for the two arguments (value, pattern)
+// generatePatternMatchFunc generates code for a two-argument pattern matching
+// function (LIKE, GLOB) by moving operands into consecutive registers and
+// emitting an OpFunction call.
+func (g *CodeGenerator) generatePatternMatchFunc(funcName, comment string, leftReg, rightReg int) (int, error) {
+	resultReg := g.AllocReg()
 	firstArg := g.AllocRegs(2)
 
-	// Move arguments to consecutive registers
 	if leftReg != firstArg {
 		g.vdbe.AddOp(vdbe.OpMove, leftReg, firstArg, 0)
 	}
@@ -1591,12 +1560,11 @@ func (g *CodeGenerator) generateGlobExpr(leftReg, rightReg int) (int, error) {
 		g.vdbe.AddOp(vdbe.OpMove, rightReg, firstArg+1, 0)
 	}
 
-	// Emit function call
 	addr := g.vdbe.AddOp(vdbe.OpFunction, 0, firstArg, resultReg)
-	g.vdbe.Program[addr].P4.Z = "glob"
+	g.vdbe.Program[addr].P4.Z = funcName
 	g.vdbe.Program[addr].P4Type = vdbe.P4Static
 	g.vdbe.Program[addr].P5 = 2
-	g.vdbe.SetComment(addr, "GLOB")
+	g.vdbe.SetComment(addr, comment)
 	return resultReg, nil
 }
 
@@ -1727,25 +1695,7 @@ func (g *CodeGenerator) generateExists(e *parser.ExistsExpr) (int, error) {
 		return g.generateExistsMaterialised(e)
 	}
 
-	if g.subqueryCompiler == nil {
-		return 0, fmt.Errorf("subquery compiler not set")
-	}
-
-	resultReg := g.AllocReg()
-	g.initExistsResult(resultReg)
-
-	selectWithLimit := g.applyExistsLimit(e.Select)
-	subVM, err := g.subqueryCompiler(selectWithLimit)
-	if err != nil {
-		return 0, fmt.Errorf("failed to compile EXISTS subquery: %w", err)
-	}
-
-	addrSubqueryStart := g.vdbe.NumOps()
-	g.adjustSubqueryJumpTargets(subVM, addrSubqueryStart)
-	resultRowGotoAddrs := g.embedExistsSubquery(subVM, resultReg)
-	g.finalizeExistsSubquery(resultReg, resultRowGotoAddrs)
-
-	return g.applyExistsNegation(e.Not, resultReg), nil
+	return g.embedExistsSubqueryFull(e)
 }
 
 // generateExistsMaterialised executes the subquery at compile time and emits a
@@ -1785,6 +1735,13 @@ func (g *CodeGenerator) generateExistsMaterialised(e *parser.ExistsExpr) (int, e
 
 // generateExistsBytecodeEmbedding falls back to bytecode embedding for EXISTS.
 func (g *CodeGenerator) generateExistsBytecodeEmbedding(e *parser.ExistsExpr) (int, error) {
+	return g.embedExistsSubqueryFull(e)
+}
+
+// embedExistsSubqueryFull compiles an EXISTS subquery SELECT into inline
+// bytecode that sets a boolean result register. Used by both the primary
+// generateExists path and the materialisation fallback.
+func (g *CodeGenerator) embedExistsSubqueryFull(e *parser.ExistsExpr) (int, error) {
 	if g.subqueryCompiler == nil {
 		return 0, fmt.Errorf("subquery compiler not set")
 	}
@@ -1905,110 +1862,45 @@ func (g *CodeGenerator) emitNullParameter(reg int, name string) {
 	g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param %s (no value)", name))
 }
 
-// emitScalarParameterValue emits opcodes for int, int64, float64.
-func (g *CodeGenerator) emitScalarParameterValue(reg int, arg interface{}) bool {
-	switch v := arg.(type) {
-	case int:
-		g.emitIntValue(reg, v)
-		return true
-	case int64:
-		g.emitInt64Value(reg, v)
-		return true
-	case float64:
-		g.emitFloatValue(reg, v)
-		return true
-	}
-	return false
-}
-
-// emitComplexParameterValue emits opcodes for string, []byte, bool.
-func (g *CodeGenerator) emitComplexParameterValue(reg int, arg interface{}) bool {
-	switch v := arg.(type) {
-	case string:
-		g.emitStringValue(reg, v)
-		return true
-	case []byte:
-		g.emitBlobValue(reg, v)
-		return true
-	case bool:
-		g.emitBoolValue(reg, v)
-		return true
-	}
-	return false
-}
-
 // emitParameterValue emits the appropriate opcode for a parameter value.
 func (g *CodeGenerator) emitParameterValue(reg int, arg interface{}) {
-	if arg == nil {
-		g.emitNullValue(reg)
-		return
+	switch v := arg.(type) {
+	case nil:
+		g.vdbe.AddOp(vdbe.OpNull, 0, reg, 0)
+		g.vdbe.SetComment(g.vdbe.NumOps()-1, "param NULL")
+	case int:
+		g.vdbe.AddOp(vdbe.OpInteger, v, reg, 0)
+		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param INT %d", v))
+	case int64:
+		if v >= -2147483648 && v <= 2147483647 {
+			g.vdbe.AddOp(vdbe.OpInteger, int(v), reg, 0)
+		} else {
+			g.vdbe.AddOpWithP4Int64(vdbe.OpInt64, 0, reg, 0, v)
+		}
+		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param INT64 %d", v))
+	case float64:
+		addr := g.vdbe.AddOp(vdbe.OpReal, 0, reg, 0)
+		g.vdbe.Program[addr].P4.R = v
+		g.vdbe.Program[addr].P4Type = vdbe.P4Real
+		g.vdbe.SetComment(addr, fmt.Sprintf("param REAL %v", v))
+	case string:
+		g.vdbe.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, v)
+		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param STRING '%s'", v))
+	case []byte:
+		g.vdbe.AddOpWithP4Str(vdbe.OpBlob, len(v), reg, 0, string(v))
+		g.vdbe.SetComment(g.vdbe.NumOps()-1, "param BLOB")
+	case bool:
+		val := 0
+		if v {
+			val = 1
+		}
+		g.vdbe.AddOp(vdbe.OpInteger, val, reg, 0)
+		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param BOOL %v", v))
+	default:
+		str := fmt.Sprintf("%v", v)
+		g.vdbe.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, str)
+		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param %T as STRING", v))
 	}
-	if g.emitScalarParameterValue(reg, arg) {
-		return
-	}
-	if g.emitComplexParameterValue(reg, arg) {
-		return
-	}
-	g.emitDefaultValue(reg, arg)
-}
-
-// emitNullValue emits a NULL parameter value.
-func (g *CodeGenerator) emitNullValue(reg int) {
-	g.vdbe.AddOp(vdbe.OpNull, 0, reg, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "param NULL")
-}
-
-// emitIntValue emits an integer parameter value.
-func (g *CodeGenerator) emitIntValue(reg int, v int) {
-	g.vdbe.AddOp(vdbe.OpInteger, v, reg, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param INT %d", v))
-}
-
-// emitInt64Value emits an int64 parameter value.
-func (g *CodeGenerator) emitInt64Value(reg int, v int64) {
-	if v >= -2147483648 && v <= 2147483647 {
-		g.vdbe.AddOp(vdbe.OpInteger, int(v), reg, 0)
-	} else {
-		g.vdbe.AddOpWithP4Int64(vdbe.OpInt64, 0, reg, 0, v)
-	}
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param INT64 %d", v))
-}
-
-// emitFloatValue emits a float64 parameter value.
-func (g *CodeGenerator) emitFloatValue(reg int, v float64) {
-	addr := g.vdbe.AddOp(vdbe.OpReal, 0, reg, 0)
-	g.vdbe.Program[addr].P4.R = v
-	g.vdbe.Program[addr].P4Type = vdbe.P4Real
-	g.vdbe.SetComment(addr, fmt.Sprintf("param REAL %v", v))
-}
-
-// emitStringValue emits a string parameter value.
-func (g *CodeGenerator) emitStringValue(reg int, v string) {
-	g.vdbe.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, v)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param STRING '%s'", v))
-}
-
-// emitBlobValue emits a blob parameter value.
-func (g *CodeGenerator) emitBlobValue(reg int, v []byte) {
-	g.vdbe.AddOpWithP4Str(vdbe.OpBlob, len(v), reg, 0, string(v))
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, "param BLOB")
-}
-
-// emitBoolValue emits a boolean parameter value.
-func (g *CodeGenerator) emitBoolValue(reg int, v bool) {
-	val := 0
-	if v {
-		val = 1
-	}
-	g.vdbe.AddOp(vdbe.OpInteger, val, reg, 0)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param BOOL %v", v))
-}
-
-// emitDefaultValue emits a default parameter value by converting to string.
-func (g *CodeGenerator) emitDefaultValue(reg int, v interface{}) {
-	str := fmt.Sprintf("%v", v)
-	g.vdbe.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, str)
-	g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param %T as STRING", v))
 }
 
 // generateCollate generates code for COLLATE expressions.

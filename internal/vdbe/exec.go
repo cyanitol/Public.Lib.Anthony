@@ -847,65 +847,72 @@ func (v *VDBE) execPrev(instr *Instruction) error {
 }
 
 // handleIndexSeekGE performs SeekGE on an index cursor.
-func (v *VDBE) handleIndexSeekGE(cursor *Cursor, idxCursor *btree.IndexCursor, keyReg *Mem, jumpAddr int) error {
-	// Encode the search key as a SQLite record
-	searchKey := encodeValueAsRecord(keyReg)
+// seekSetup extracts the cursor and key register for a seek instruction.
+// It returns the cursor, key register, and any error from lookup.
+func (v *VDBE) seekSetup(instr *Instruction) (*Cursor, *Mem, error) {
+	cursor, err := v.GetCursor(instr.P1)
+	if err != nil {
+		return nil, nil, err
+	}
+	keyReg, err := v.GetMem(instr.P3)
+	if err != nil {
+		return nil, nil, err
+	}
+	return cursor, keyReg, nil
+}
 
-	// Seek to the first entry >= searchKey
+// seekBtree performs a btree-based seek: extracts the BtCursor, runs scanFn,
+// and on success marks the cursor as positioned. If the BtCursor is nil or
+// scanFn returns not-found, it jumps to jumpAddr via seekNotFound.
+// The scanFn is responsible for positioning (e.g. calling MoveToFirst).
+func (v *VDBE) seekBtree(cursor *Cursor, jumpAddr int, scanFn func(*btree.BtCursor) (bool, error)) error {
+	btCursor := seekGetBtCursor(cursor)
+	if btCursor == nil {
+		return v.seekNotFound(cursor, jumpAddr)
+	}
+	found, err := scanFn(btCursor)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return v.seekNotFound(cursor, jumpAddr)
+	}
+	cursor.EOF = false
+	v.IncrCacheCtr()
+	return nil
+}
+
+func (v *VDBE) handleIndexSeekGE(cursor *Cursor, idxCursor *btree.IndexCursor, keyReg *Mem, jumpAddr int) error {
+	searchKey := encodeValueAsRecord(keyReg)
 	found, err := idxCursor.SeekIndex(searchKey)
 	if err != nil {
 		return err
 	}
-
-	// Check if cursor is still valid after seek
 	if !found && !idxCursor.IsValid() {
 		return v.seekNotFound(cursor, jumpAddr)
 	}
-
 	cursor.EOF = false
 	return nil
 }
 
 func (v *VDBE) execSeekGE(instr *Instruction) error {
-	// Seek cursor P1 to entry >= key in register P3
-	// P1 = cursor number
-	// P2 = jump target if not found
-	// P3 = register containing search key
-	cursor, err := v.GetCursor(instr.P1)
+	cursor, keyReg, err := v.seekSetup(instr)
 	if err != nil {
 		return err
 	}
-
-	keyReg, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
-	}
-
-	// Handle index cursors
 	if idxCursor, ok := cursor.BtreeCursor.(*btree.IndexCursor); ok && idxCursor != nil {
 		return v.handleIndexSeekGE(cursor, idxCursor, keyReg, instr.P2)
 	}
-
-	// Handle table cursors - simplified implementation
 	cursor.EOF = false
 	return nil
 }
 
 func (v *VDBE) execSeekLE(instr *Instruction) error {
-	// Seek cursor P1 to entry <= key in register P3
-	cursor, err := v.GetCursor(instr.P1)
+	cursor, _, err := v.seekSetup(instr)
 	if err != nil {
 		return err
 	}
-
-	keyReg, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
-	}
-
-	_ = keyReg
 	cursor.EOF = false
-
 	return nil
 }
 
@@ -934,9 +941,6 @@ func seekGetBtCursor(cursor *Cursor) *btree.BtCursor {
 // targetRowid. It returns true (found) together with a nil error when the row
 // exists, false (not found) with nil when the scan is exhausted, and false
 // with a non-nil error only on unexpected failures.
-//
-// In a real implementation this would use the btree's own key-search path
-// instead of a sequential walk.
 func seekLinearScan(btCursor *btree.BtCursor, targetRowid int64) (found bool, err error) {
 	for {
 		currentRowid := btCursor.GetKey()
@@ -953,37 +957,16 @@ func seekLinearScan(btCursor *btree.BtCursor, targetRowid int64) (found bool, er
 }
 
 func (v *VDBE) execSeekRowid(instr *Instruction) error {
-	// Seek cursor P1 to rowid in register P3, jump to P2 if not found.
-	cursor, err := v.GetCursor(instr.P1)
+	cursor, keyReg, err := v.seekSetup(instr)
 	if err != nil {
 		return err
 	}
-
-	rowidReg, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
-	}
-
-	btCursor := seekGetBtCursor(cursor)
-	if btCursor == nil {
-		return v.seekNotFound(cursor, instr.P2)
-	}
-
-	if err = btCursor.MoveToFirst(); err != nil {
-		return v.seekNotFound(cursor, instr.P2)
-	}
-
-	found, err := seekLinearScan(btCursor, rowidReg.IntValue())
-	if err != nil {
-		return err
-	}
-	if !found {
-		return v.seekNotFound(cursor, instr.P2)
-	}
-
-	cursor.EOF = false
-	v.IncrCacheCtr()
-	return nil
+	return v.seekBtree(cursor, instr.P2, func(btc *btree.BtCursor) (bool, error) {
+		if err := btc.MoveToFirst(); err != nil {
+			return false, nil
+		}
+		return seekLinearScan(btc, keyReg.IntValue())
+	})
 }
 
 func (v *VDBE) execOpenEphemeral(instr *Instruction) error {
@@ -1071,84 +1054,45 @@ func seekLinearScanGT(btCursor *btree.BtCursor, targetRowid int64) (bool, error)
 			return true, nil
 		}
 		if err := btCursor.Next(); err != nil {
-			// Reached end without finding
 			return false, nil
 		}
 	}
 }
 
 func (v *VDBE) execSeekGT(instr *Instruction) error {
-	// Position cursor to first row > key
-	// P1 = cursor number
-	// P2 = jump address if not found
-	// P3 = key register
-	cursor, err := v.GetCursor(instr.P1)
+	cursor, keyReg, err := v.seekSetup(instr)
 	if err != nil {
 		return err
 	}
-
-	keyReg, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
-	}
-
-	btCursor := seekGetBtCursor(cursor)
-	if btCursor == nil {
-		return v.seekNotFound(cursor, instr.P2)
-	}
-
-	// Move to first entry
-	if err = btCursor.MoveToFirst(); err != nil {
-		return v.seekNotFound(cursor, instr.P2)
-	}
-
-	// Linear scan to find first entry > key
-	found, err := seekLinearScanGT(btCursor, keyReg.IntValue())
-	if err != nil || !found {
-		return v.seekNotFound(cursor, instr.P2)
-	}
-
-	cursor.EOF = false
-	v.IncrCacheCtr()
-	return nil
+	return v.seekBtree(cursor, instr.P2, func(btc *btree.BtCursor) (bool, error) {
+		if err := btc.MoveToFirst(); err != nil {
+			return false, nil
+		}
+		return seekLinearScanGT(btc, keyReg.IntValue())
+	})
 }
 
 func (v *VDBE) execSeekLT(instr *Instruction) error {
-	// Position cursor to last row < key
-	// P1 = cursor number
-	// P2 = jump address if not found
-	// P3 = key register
-	cursor, err := v.GetCursor(instr.P1)
+	cursor, keyReg, err := v.seekSetup(instr)
 	if err != nil {
 		return err
 	}
+	return v.seekBtree(cursor, instr.P2, func(btc *btree.BtCursor) (bool, error) {
+		return seekLTScan(btc, keyReg.IntValue())
+	})
+}
 
-	keyReg, err := v.GetMem(instr.P3)
-	if err != nil {
-		return err
-	}
-
-	btCursor := seekGetBtCursor(cursor)
-	if btCursor == nil {
-		return v.seekNotFound(cursor, instr.P2)
-	}
-
-	targetRowid := keyReg.IntValue()
-
-	// Find and position to the last valid entry
+// seekLTScan finds and positions to the last entry < targetRowid.
+// Errors from positioning (e.g. empty table) are treated as not-found.
+func seekLTScan(btCursor *btree.BtCursor, targetRowid int64) (bool, error) {
 	lastValidRowid, found, err := findLastRowidLessThan(btCursor, targetRowid)
 	if err != nil || !found {
-		return v.seekNotFound(cursor, instr.P2)
+		return false, nil //nolint:nilerr // positioning failures mean not-found
 	}
-
-	// Reposition to the last valid entry
 	if err := repositionToRowid(btCursor, lastValidRowid); err != nil {
-		return v.seekNotFound(cursor, instr.P2)
+		return false, nil //nolint:nilerr // reposition failure means not-found
 	}
-
-	cursor.EOF = false
-	v.IncrCacheCtr()
-	return nil
+	return true, nil
 }
 
 // findLastRowidLessThan scans the cursor to find the last rowid less than target.
@@ -1334,10 +1278,22 @@ func (v *VDBE) execColumn(instr *Instruction) error {
 	if err != nil {
 		return err
 	}
-	payload := v.getColumnPayload(cursor, dst)
+
+	// Inline payload extraction: avoid extra dispatch through getColumnPayload
+	if cursor.NullRow || cursor.EOF {
+		dst.SetNull()
+		return nil
+	}
+	var payload []byte
+	if cursor.CurType == CursorPseudo {
+		payload = v.getPseudoCursorPayload(cursor, dst)
+	} else {
+		payload = v.getBtreeCursorPayload(cursor, dst)
+	}
 	if payload == nil {
 		return nil
 	}
+
 	return v.parseColumnIntoMem(payload, instr.P2, dst, cursor)
 }
 
@@ -1347,11 +1303,9 @@ func (v *VDBE) getColumnPayload(cursor *Cursor, dst *Mem) []byte {
 		dst.SetNull()
 		return nil
 	}
-
 	if cursor.CurType == CursorPseudo {
 		return v.getPseudoCursorPayload(cursor, dst)
 	}
-
 	return v.getBtreeCursorPayload(cursor, dst)
 }
 
@@ -1424,9 +1378,6 @@ func (v *VDBE) applyDefaultValueIfAvailable(recordIdx int, dst *Mem, tableInterf
 	type colDefault interface {
 		GetDefault() interface{}
 	}
-	type colIsRowid interface {
-		IsIntegerPrimaryKey() bool
-	}
 	type tblColumns interface {
 		GetColumns() []interface{}
 	}
@@ -1480,28 +1431,21 @@ func recordIdxToSchemaIdx(cols []interface{}, recordIdx int) int {
 // parseDefaultValue parses a DEFAULT value string and stores it in dst.
 // This handles integer, real, string, and NULL literals.
 func (v *VDBE) parseDefaultValue(defaultStr string, dst *Mem) {
-	// Try to parse as integer first
-	if v.tryParseAsInteger(defaultStr, dst) {
+	if i, err := strconv.ParseInt(defaultStr, 10, 64); err == nil {
+		dst.SetInt(i)
 		return
 	}
-
-	// Try to parse as float
-	if v.tryParseAsFloat(defaultStr, dst) {
+	if f, err := strconv.ParseFloat(defaultStr, 64); err == nil {
+		dst.SetReal(f)
 		return
 	}
-
-	// Check for NULL
 	if defaultStr == "NULL" {
 		dst.SetNull()
 		return
 	}
-
-	// Check for string literal (remove quotes)
 	if v.tryParseAsQuotedString(defaultStr, dst) {
 		return
 	}
-
-	// Default: treat as string
 	dst.SetStr(defaultStr)
 }
 
@@ -1528,15 +1472,12 @@ func (v *VDBE) tryParseAsFloat(defaultStr string, dst *Mem) bool {
 // tryParseAsQuotedString attempts to parse defaultStr as a quoted string.
 // Returns true if successful (string was quoted), false otherwise.
 func (v *VDBE) tryParseAsQuotedString(defaultStr string, dst *Mem) bool {
-	if len(defaultStr) < 2 {
-		return false
-	}
-
-	if isQuotedWith(defaultStr, '\'') || isQuotedWith(defaultStr, '"') {
+	if len(defaultStr) >= 2 &&
+		(defaultStr[0] == '\'' && defaultStr[len(defaultStr)-1] == '\'' ||
+			defaultStr[0] == '"' && defaultStr[len(defaultStr)-1] == '"') {
 		dst.SetStr(defaultStr[1 : len(defaultStr)-1])
 		return true
 	}
-
 	return false
 }
 
@@ -4917,48 +4858,39 @@ func castToNumeric(mem *Mem) error {
 	return nil
 }
 
-// execToText forces the value in register P1 to text type.
-// P1 = register to convert
-// This always converts to string representation.
-func (v *VDBE) execToText(instr *Instruction) error {
+// execTypeConvert loads register P1 and applies convert to it,
+// skipping the conversion when the value is NULL.
+func (v *VDBE) execTypeConvert(instr *Instruction, convert func(*Mem) error) error {
 	mem, err := v.GetMem(instr.P1)
 	if err != nil {
 		return err
 	}
-
-	// NULL remains NULL
 	if mem.IsNull() {
 		return nil
 	}
+	return convert(mem)
+}
 
-	// Convert to string
-	return mem.Stringify()
+// execToText forces the value in register P1 to text type.
+func (v *VDBE) execToText(instr *Instruction) error {
+	return v.execTypeConvert(instr, func(mem *Mem) error {
+		return mem.Stringify()
+	})
 }
 
 // execToBlob forces the value in register P1 to blob type.
-// P1 = register to convert
-// Converts the value to a blob (byte array).
 func (v *VDBE) execToBlob(instr *Instruction) error {
-	mem, err := v.GetMem(instr.P1)
-	if err != nil {
-		return err
-	}
+	return v.execTypeConvert(instr, convertMemToBlob)
+}
 
-	// NULL remains NULL
-	if mem.IsNull() {
-		return nil
-	}
-
-	// If already a blob, nothing to do
+// convertMemToBlob converts a non-null memory cell to blob type.
+func convertMemToBlob(mem *Mem) error {
 	if mem.IsBlob() {
 		return nil
 	}
-
-	// If string, convert to blob
 	if mem.IsString() {
 		return mem.SetBlob(mem.BlobValue())
 	}
-
 	// For numeric types, stringify first then convert to blob
 	if err := mem.Stringify(); err != nil {
 		return err
@@ -4967,20 +4899,14 @@ func (v *VDBE) execToBlob(instr *Instruction) error {
 }
 
 // execToNumeric applies numeric affinity to the value in register P1.
-// P1 = register to convert
 // Tries to convert to integer first, then real, keeps as text if neither works.
 func (v *VDBE) execToNumeric(instr *Instruction) error {
-	mem, err := v.GetMem(instr.P1)
-	if err != nil {
-		return err
-	}
-
-	if mem.IsNull() || mem.IsNumeric() {
+	return v.execTypeConvert(instr, func(mem *Mem) error {
+		if !mem.IsNumeric() {
+			v.convertMemToNumeric(mem)
+		}
 		return nil
-	}
-
-	v.convertMemToNumeric(mem)
-	return nil
+	})
 }
 
 // convertMemToNumeric attempts to convert a memory value to numeric.
@@ -5027,62 +4953,39 @@ func convertStringToInt(str string) int64 {
 }
 
 // execToInt forces the value in register P1 to integer type.
-// P1 = register to convert
 // Truncates real numbers to integers.
 func (v *VDBE) execToInt(instr *Instruction) error {
-	mem, err := v.GetMem(instr.P1)
-	if err != nil {
-		return err
-	}
-
-	// NULL remains NULL
-	if mem.IsNull() {
+	return v.execTypeConvert(instr, func(mem *Mem) error {
+		convertMemToInt(mem)
 		return nil
-	}
+	})
+}
 
-	// Already an integer, nothing to do
+// convertMemToInt converts a non-null memory cell to integer type.
+func convertMemToInt(mem *Mem) {
 	if mem.IsInt() {
-		return nil
+		return
 	}
-
-	// Convert to integer, truncating if real
 	if mem.IsReal() {
 		mem.SetInt(int64(mem.RealValue()))
-		return nil
+		return
 	}
-
-	// Try to parse string/blob as integer, default to 0
 	if mem.IsString() || mem.IsBlob() {
 		mem.SetInt(convertStringToInt(mem.StrValue()))
-		return nil
+		return
 	}
-
-	// Default to 0 for unknown types
 	mem.SetInt(0)
-	return nil
 }
 
 // execToReal forces the value in register P1 to real (floating-point) type.
-// P1 = register to convert
 // Converts integers and strings to real numbers.
 func (v *VDBE) execToReal(instr *Instruction) error {
-	mem, err := v.GetMem(instr.P1)
-	if err != nil {
-		return err
-	}
-
-	// NULL remains NULL
-	if mem.IsNull() {
-		return nil
-	}
-
-	// Already a real, nothing to do
-	if mem.IsReal() {
-		return nil
-	}
-
-	// Convert to real
-	return mem.Realify()
+	return v.execTypeConvert(instr, func(mem *Mem) error {
+		if mem.IsReal() {
+			return nil
+		}
+		return mem.Realify()
+	})
 }
 
 // Bitwise operation implementations
@@ -6086,20 +5989,33 @@ func (v *VDBE) execAggStepWindow(instr *Instruction) error {
 	return nil
 }
 
+// windowInit retrieves the window state and performs common partition initialization:
+// getWindowState, initWindowPartition, IncrementPartRowOnFirstCall, advancePartitionIfNeeded.
+func (v *VDBE) windowInit(stateIdx int) (*WindowState, error) {
+	ws, err := v.getWindowState(stateIdx)
+	if err != nil {
+		return nil, err
+	}
+	v.initWindowPartition(ws)
+	ws.IncrementPartRowOnFirstCall()
+	v.advancePartitionIfNeeded(ws)
+	return ws, nil
+}
+
 // execWindowRowNum implements OpWindowRowNum - ROW_NUMBER() window function
 // P1 = window state index
 // P2 = output register
 // P3 = streaming mode flag (if > 0, increment counter before returning)
 func (v *VDBE) execWindowRowNum(instr *Instruction) error {
-	windowState, err := v.getWindowState(instr.P1)
+	var windowState *WindowState
+	var err error
+	if instr.P3 > 0 {
+		windowState, err = v.windowInit(instr.P1)
+	} else {
+		windowState, err = v.getWindowState(instr.P1)
+	}
 	if err != nil {
 		return err
-	}
-
-	if instr.P3 > 0 {
-		v.initWindowPartition(windowState)
-		windowState.IncrementPartRowOnFirstCall()
-		v.advancePartitionIfNeeded(windowState)
 	}
 
 	mem, mErr := v.GetMem(instr.P2)
@@ -6163,14 +6079,10 @@ func (v *VDBE) execWindowDenseRank(instr *Instruction) error {
 // P2 = output register
 // P3 = number of buckets (from register or immediate)
 func (v *VDBE) execWindowNtile(instr *Instruction) error {
-	windowState, err := v.getWindowState(instr.P1)
+	windowState, err := v.windowInit(instr.P1)
 	if err != nil {
 		return err
 	}
-
-	v.initWindowPartition(windowState)
-	windowState.IncrementPartRowOnFirstCall()
-	v.advancePartitionIfNeeded(windowState)
 
 	numBuckets := int64(instr.P3)
 	if numBuckets <= 0 {
@@ -6202,14 +6114,10 @@ func (v *VDBE) execWindowNtile(instr *Instruction) error {
 // P4 = offset (default 1)
 // P5 = default value register (if row doesn't exist)
 func (v *VDBE) execWindowLag(instr *Instruction) error {
-	windowState, err := v.getWindowState(instr.P1)
+	windowState, err := v.windowInit(instr.P1)
 	if err != nil {
 		return err
 	}
-
-	v.initWindowPartition(windowState)
-	windowState.IncrementPartRowOnFirstCall()
-	v.advancePartitionIfNeeded(windowState)
 
 	offset := v.getWindowOffset(instr)
 	lagRow := windowState.GetLagRow(offset)
@@ -6224,14 +6132,10 @@ func (v *VDBE) execWindowLag(instr *Instruction) error {
 // P4 = offset (default 1)
 // P5 = default value register (if row doesn't exist)
 func (v *VDBE) execWindowLead(instr *Instruction) error {
-	windowState, err := v.getWindowState(instr.P1)
+	windowState, err := v.windowInit(instr.P1)
 	if err != nil {
 		return err
 	}
-
-	v.initWindowPartition(windowState)
-	windowState.IncrementPartRowOnFirstCall()
-	v.advancePartitionIfNeeded(windowState)
 
 	offset := v.getWindowOffset(instr)
 	leadRow := windowState.GetLeadRow(offset)
@@ -6244,14 +6148,10 @@ func (v *VDBE) execWindowLead(instr *Instruction) error {
 // P2 = output register
 // P3 = column index to retrieve
 func (v *VDBE) execWindowFirstValue(instr *Instruction) error {
-	windowState, err := v.getWindowState(instr.P1)
+	windowState, err := v.windowInit(instr.P1)
 	if err != nil {
 		return err
 	}
-
-	v.initWindowPartition(windowState)
-	windowState.IncrementPartRowOnFirstCall()
-	v.advancePartitionIfNeeded(windowState)
 	windowState.UpdateFrame()
 
 	firstValue := windowState.GetFirstValue(instr.P3)
@@ -6269,14 +6169,10 @@ func (v *VDBE) execWindowFirstValue(instr *Instruction) error {
 // P2 = output register
 // P3 = column index to retrieve
 func (v *VDBE) execWindowLastValue(instr *Instruction) error {
-	windowState, err := v.getWindowState(instr.P1)
+	windowState, err := v.windowInit(instr.P1)
 	if err != nil {
 		return err
 	}
-
-	v.initWindowPartition(windowState)
-	windowState.IncrementPartRowOnFirstCall()
-	v.advancePartitionIfNeeded(windowState)
 	windowState.UpdateFrame()
 
 	lastValue := windowState.GetLastValue(instr.P3)
@@ -6295,15 +6191,10 @@ func (v *VDBE) execWindowLastValue(instr *Instruction) error {
 // P3 = column index to retrieve
 // P4 = N (which row in the frame, 1-based)
 func (v *VDBE) execWindowNthValue(instr *Instruction) error {
-	windowState, err := v.getWindowState(instr.P1)
+	windowState, err := v.windowInit(instr.P1)
 	if err != nil {
 		return err
 	}
-
-	v.initWindowPartition(windowState)
-	windowState.IncrementPartRowOnFirstCall()
-	v.advancePartitionIfNeeded(windowState)
-
 	windowState.UpdateFrame()
 
 	n := int(instr.P4.I)
@@ -6414,43 +6305,21 @@ func (v *VDBE) setWindowDefault(mem *Mem, defaultReg uint16) error {
 // P2 = jump address if NOT distinct (already seen)
 // P3 = aggregate register (used as key for distinct set)
 func (v *VDBE) execAggDistinct(instr *Instruction) error {
-	inputReg := instr.P1
-	jumpAddr := instr.P2
-	aggReg := instr.P3
-	collName := instr.P4.Z
-
-	// Get the value to check
-	mem, err := v.GetMem(inputReg)
+	mem, err := v.GetMem(instr.P1)
 	if err != nil {
 		return err
 	}
 
-	// Initialize DistinctSets if needed
-	if v.DistinctSets == nil {
-		v.DistinctSets = make(map[int]map[string]bool)
-	}
+	v.ensureDistinctSet(instr.P3)
 
-	// Initialize the set for this aggregate if needed
-	if v.DistinctSets[aggReg] == nil {
-		v.DistinctSets[aggReg] = make(map[string]bool)
-	}
+	key := mem.ToDistinctKeyWithCollation(instr.P4.Z, v.getCollationRegistry())
 
-	// Convert value to string key for deduplication
-	key := mem.ToDistinctKeyWithCollation(collName, v.getCollationRegistry())
-
-	// Check if we've seen this value before
-	if v.DistinctSets[aggReg][key] {
-		// Already seen - jump to skip address
-		if jumpAddr >= 0 && jumpAddr < len(v.Program) {
-			v.PC = jumpAddr
-		}
+	if v.DistinctSets[instr.P3][key] {
+		v.jumpIfValid(instr.P2)
 		return nil
 	}
 
-	// New value - mark as seen
-	v.DistinctSets[aggReg][key] = true
-
-	// Continue to next instruction (don't jump)
+	v.DistinctSets[instr.P3][key] = true
 	return nil
 }
 
@@ -6590,29 +6459,39 @@ func windowAggDispatch(funcName string, rows [][]*Mem, colIdx int, out *Mem) err
 	return nil
 }
 
-// windowAggSum computes SUM over frame rows. Returns NULL if all values are NULL.
-func windowAggSum(rows [][]*Mem, colIdx int, out *Mem) {
-	var sum float64
-	hasValue := false
-	isAllInt := true
-
+// windowNonNullVals collects non-NULL values from a column across frame rows.
+func windowNonNullVals(rows [][]*Mem, colIdx int) []*Mem {
+	vals := make([]*Mem, 0, len(rows))
 	for _, row := range rows {
 		val := windowGetVal(row, colIdx)
-		if val == nil || val.IsNull() {
-			continue
+		if val != nil && !val.IsNull() {
+			vals = append(vals, val)
 		}
-		hasValue = true
-		if !val.IsInt() {
-			isAllInt = false
-		}
-		sum += val.RealValue()
 	}
+	return vals
+}
 
-	if !hasValue {
+// windowSumAccum computes the sum and type info for a set of non-null values.
+func windowSumAccum(vals []*Mem) (sum float64, allInt bool) {
+	allInt = true
+	for _, v := range vals {
+		if !v.IsInt() {
+			allInt = false
+		}
+		sum += v.RealValue()
+	}
+	return sum, allInt
+}
+
+// windowAggSum computes SUM over frame rows. Returns NULL if all values are NULL.
+func windowAggSum(rows [][]*Mem, colIdx int, out *Mem) {
+	vals := windowNonNullVals(rows, colIdx)
+	if len(vals) == 0 {
 		out.SetNull()
 		return
 	}
-	if isAllInt {
+	sum, allInt := windowSumAccum(vals)
+	if allInt {
 		out.SetInt(int64(sum))
 		return
 	}
@@ -6621,54 +6500,33 @@ func windowAggSum(rows [][]*Mem, colIdx int, out *Mem) {
 
 // windowAggCount computes COUNT over frame rows (counts non-NULL values).
 func windowAggCount(rows [][]*Mem, colIdx int, out *Mem) {
-	var count int64
-	for _, row := range rows {
-		val := windowGetVal(row, colIdx)
-		if val != nil && !val.IsNull() {
-			count++
-		}
-	}
-	out.SetInt(count)
+	out.SetInt(int64(len(windowNonNullVals(rows, colIdx))))
 }
 
 // windowAggAvg computes AVG over frame rows. Returns NULL if no non-NULL values.
 func windowAggAvg(rows [][]*Mem, colIdx int, out *Mem) {
-	var sum float64
-	var count int64
-
-	for _, row := range rows {
-		val := windowGetVal(row, colIdx)
-		if val == nil || val.IsNull() {
-			continue
-		}
-		sum += val.RealValue()
-		count++
-	}
-
-	if count == 0 {
+	vals := windowNonNullVals(rows, colIdx)
+	if len(vals) == 0 {
 		out.SetNull()
 		return
 	}
-	out.SetReal(sum / float64(count))
+	sum, _ := windowSumAccum(vals)
+	out.SetReal(sum / float64(len(vals)))
 }
 
 // windowAggMinMax computes MIN (isMin=true) or MAX (isMin=false) over frame rows.
 func windowAggMinMax(rows [][]*Mem, colIdx int, out *Mem, isMin bool) {
-	var best *Mem
-
-	for _, row := range rows {
-		val := windowGetVal(row, colIdx)
-		if val == nil || val.IsNull() {
-			continue
-		}
-		if best == nil || windowShouldReplace(val, best, isMin) {
-			best = val
-		}
-	}
-
-	if best == nil {
+	vals := windowNonNullVals(rows, colIdx)
+	if len(vals) == 0 {
 		out.SetNull()
 		return
+	}
+	best := vals[0]
+	for _, v := range vals[1:] {
+		cmp := v.Compare(best)
+		if (isMin && cmp < 0) || (!isMin && cmp > 0) {
+			best = v
+		}
 	}
 	_ = out.Copy(best)
 }
@@ -6684,28 +6542,20 @@ func windowShouldReplace(val, best *Mem, isMin bool) bool {
 
 // windowAggTotal computes TOTAL over frame rows. Returns 0.0 (not NULL) if all NULL.
 func windowAggTotal(rows [][]*Mem, colIdx int, out *Mem) {
-	var sum float64
-	for _, row := range rows {
-		val := windowGetVal(row, colIdx)
-		if val != nil && !val.IsNull() {
-			sum += val.RealValue()
-		}
-	}
+	sum, _ := windowSumAccum(windowNonNullVals(rows, colIdx))
 	out.SetReal(sum)
 }
 
 // windowAggGroupConcat concatenates non-NULL string values from frame rows.
 func windowAggGroupConcat(rows [][]*Mem, colIdx int, out *Mem, sep string) {
-	var parts []string
-	for _, row := range rows {
-		val := windowGetVal(row, colIdx)
-		if val != nil && !val.IsNull() {
-			parts = append(parts, val.StringValue())
-		}
-	}
-	if len(parts) == 0 {
+	vals := windowNonNullVals(rows, colIdx)
+	if len(vals) == 0 {
 		out.SetNull()
 		return
+	}
+	parts := make([]string, len(vals))
+	for i, v := range vals {
+		parts[i] = v.StringValue()
 	}
 	_ = out.SetStr(strings.Join(parts, sep))
 }
@@ -6721,14 +6571,10 @@ func windowGetVal(row []*Mem, colIdx int) *Mem {
 // execWindowPercentRank implements OpWindowPercentRank - PERCENT_RANK() window function.
 // P1 = result register
 func (v *VDBE) execWindowPercentRank(instr *Instruction) error {
-	ws, err := v.getWindowState(0)
+	ws, err := v.windowInit(0)
 	if err != nil {
 		return err
 	}
-
-	v.initWindowPartition(ws)
-	ws.IncrementPartRowOnFirstCall()
-	v.advancePartitionIfNeeded(ws)
 	ws.UpdateRanking()
 
 	mem, mErr := v.GetMem(instr.P1)
@@ -6750,14 +6596,10 @@ func (v *VDBE) execWindowPercentRank(instr *Instruction) error {
 // execWindowCumeDist implements OpWindowCumeDist - CUME_DIST() window function.
 // P1 = result register
 func (v *VDBE) execWindowCumeDist(instr *Instruction) error {
-	ws, err := v.getWindowState(0)
+	ws, err := v.windowInit(0)
 	if err != nil {
 		return err
 	}
-
-	v.initWindowPartition(ws)
-	ws.IncrementPartRowOnFirstCall()
-	v.advancePartitionIfNeeded(ws)
 	ws.UpdateRanking()
 
 	mem, mErr := v.GetMem(instr.P1)
