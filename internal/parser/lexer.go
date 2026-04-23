@@ -796,9 +796,29 @@ var keywordMap = map[string]TokenType{
 	"RETURNING":     TK_RETURNING,
 }
 
+const maxKeywordLen = len("AUTOINCREMENT")
+
 // lookupKeyword returns the token type for a keyword, or TK_ID if not a keyword.
 func lookupKeyword(ident string) TokenType {
-	if tokType, ok := keywordMap[strings.ToUpper(ident)]; ok {
+	if tokType, ok := keywordMap[ident]; ok {
+		return tokType
+	}
+	if len(ident) > maxKeywordLen {
+		return TK_ID
+	}
+	var upper [maxKeywordLen]byte
+	for i := 0; i < len(ident); i++ {
+		c := ident[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+			upper[i] = c - 'a' + 'A'
+		case c >= 'A' && c <= 'Z':
+			upper[i] = c
+		default:
+			return TK_ID
+		}
+	}
+	if tokType, ok := keywordMap[string(upper[:len(ident)])]; ok {
 		return tokType
 	}
 	return TK_ID
