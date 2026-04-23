@@ -66,6 +66,30 @@ func TestRegisterCollation(t *testing.T) {
 	}
 }
 
+func TestRegisterCollationCaseInsensitiveName(t *testing.T) {
+	t.Parallel()
+	cr := NewCollationRegistry()
+
+	err := cr.Register("custom", func(a, b string) int { return strings.Compare(a, b) })
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	if _, ok := cr.Get("CUSTOM"); !ok {
+		t.Fatal("Get(CUSTOM) did not find lowercase registered collation")
+	}
+	if _, ok := cr.Get("CuStOm"); !ok {
+		t.Fatal("Get(CuStOm) did not find lowercase registered collation")
+	}
+
+	if err := cr.Unregister("CUSTOM"); err != nil {
+		t.Fatalf("Unregister(CUSTOM) error = %v", err)
+	}
+	if _, ok := cr.Get("custom"); ok {
+		t.Fatal("collation still exists after mixed-case unregister")
+	}
+}
+
 func TestRegisterErrors(t *testing.T) {
 	t.Parallel()
 	cr := NewCollationRegistry()
@@ -119,7 +143,7 @@ func TestUnregisterBuiltinProtection(t *testing.T) {
 	t.Parallel()
 	cr := NewCollationRegistry()
 
-	builtins := []string{"BINARY", "NOCASE", "RTRIM"}
+	builtins := []string{"BINARY", "binary", "NOCASE", "nocase", "RTRIM", "rtrim"}
 	for _, name := range builtins {
 		name := name
 		t.Run(name, func(t *testing.T) {

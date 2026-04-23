@@ -84,7 +84,8 @@ func (cr *CollationRegistry) Register(name string, fn CollationFunc) error {
 	cr.mu.Lock()
 	defer cr.mu.Unlock()
 
-	cr.collations[name] = &Collation{
+	key := normalizeCollationName(name)
+	cr.collations[key] = &Collation{
 		Name: name,
 		Func: fn,
 	}
@@ -99,9 +100,7 @@ func (cr *CollationRegistry) Get(name string) (*Collation, bool) {
 	cr.mu.RLock()
 	defer cr.mu.RUnlock()
 
-	// Normalize collation name to uppercase for case-insensitive lookup
-	name = strings.ToUpper(name)
-	coll, ok := cr.collations[name]
+	coll, ok := cr.collations[normalizeCollationName(name)]
 	return coll, ok
 }
 
@@ -111,13 +110,25 @@ func (cr *CollationRegistry) Unregister(name string) error {
 	cr.mu.Lock()
 	defer cr.mu.Unlock()
 
+	key := normalizeCollationName(name)
+
 	// Protect built-in collations
-	if name == "BINARY" || name == "NOCASE" || name == "RTRIM" {
+	if key == "BINARY" || key == "NOCASE" || key == "RTRIM" {
 		return fmt.Errorf("cannot unregister built-in collation: %s", name)
 	}
 
-	delete(cr.collations, name)
+	delete(cr.collations, key)
 	return nil
+}
+
+func normalizeCollationName(name string) string {
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if (c >= 'a' && c <= 'z') || c >= 0x80 {
+			return strings.ToUpper(name)
+		}
+	}
+	return name
 }
 
 // List returns a list of all registered collation names.
