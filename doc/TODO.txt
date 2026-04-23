@@ -48,6 +48,15 @@ P0 — CORRECTNESS (must fix before next release)
     - [ ] Crash-replay tests for WAL/journal
     - [ ] WAL checksum trailing-byte edge case (non-power-of-2 data)
 
+[ ] Pager file locking conformance
+    - Files: internal/pager/busy.go, internal/pager/lock*.go
+    - Problem: busy.go still contains placeholder lock implementations that
+      cannot surface EWOULDBLOCK-style contention in some paths.
+    - Fix: route busy-handler acquisition through the real platform lock
+      primitives and add contention tests covering timeout/retry behavior.
+    - Impact: correctness under concurrent multi-process access.
+    - Effort: medium-large
+
 P1 — ALGORITHM IMPROVEMENTS (WASM-first, high impact)
 
 [ ] Sort: replace O(n²) insertion sort with pdqsort/introsort
@@ -97,6 +106,26 @@ P2 — ALGORITHM IMPROVEMENTS (all targets)
     - WASM impact: MEDIUM — single-threaded means no timeout goroutine
     - Effort: medium
     - Reference: KMP algorithm (Knuth, Morris, Pratt 1977)
+
+[ ] Subquery ORDER BY propagation
+    - File: internal/driver/compile_subquery.go (compileSimpleSubquery)
+    - Problem: outer ORDER BY handling for FROM subqueries is explicitly
+      incomplete, risking incorrect or unstable result ordering in subquery
+      compilation paths.
+    - Fix: propagate and/or remap outer ORDER BY expressions after subquery
+      materialization, with tests for aliases, positional ordering, and
+      compound outer SELECTs.
+    - Impact: query correctness and SQLite compatibility.
+    - Effort: medium
+
+[ ] VACUUM attached databases
+    - File: internal/driver/stmt_vacuum.go (resolveVacuumSchema)
+    - Problem: VACUUM currently rejects attached database schemas.
+    - Fix: resolve attached schema names through the connection registry,
+      pass the selected schema/pager into VACUUM, and test VACUUM aux plus
+      VACUUM aux INTO.
+    - Impact: SQLite compatibility for multi-database connections.
+    - Effort: medium
 
 P3 — FEATURES AND IMPROVEMENTS
 
