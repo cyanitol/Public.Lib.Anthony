@@ -239,9 +239,7 @@ func CompileDeleteWithIndex(stmt *DeleteStmt, tableRoot int, indexes []IndexInfo
 			Comment: fmt.Sprintf("Open index %s", idx.Name),
 		}
 
-		// Insert instruction
-		prog.Instructions = append(prog.Instructions[:insertPos],
-			append([]Instruction{newInst}, prog.Instructions[insertPos:]...)...)
+		prog.insert(insertPos, newInst)
 
 		// Add close for index at end (before final Close)
 		closePos := len(prog.Instructions) - 2
@@ -250,8 +248,7 @@ func CompileDeleteWithIndex(stmt *DeleteStmt, tableRoot int, indexes []IndexInfo
 			P1:      cursor,
 			Comment: fmt.Sprintf("Close index %s", idx.Name),
 		}
-		prog.Instructions = append(prog.Instructions[:closePos],
-			append([]Instruction{closeInst}, prog.Instructions[closePos:]...)...)
+		prog.insert(closePos, closeInst)
 	}
 
 	return prog, nil
@@ -285,8 +282,7 @@ func CompileDeleteWithForeignKeys(stmt *DeleteStmt, tableRoot int, foreignKeys [
 				Comment: "Check foreign key constraints",
 			}
 
-			prog.Instructions = append(prog.Instructions[:i],
-				append([]Instruction{fkInst}, prog.Instructions[i:]...)...)
+			prog.insert(i, fkInst)
 			break
 		}
 	}

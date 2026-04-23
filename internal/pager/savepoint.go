@@ -270,10 +270,14 @@ func (p *Pager) restoreToSavepoint(sp *Savepoint, index int) error {
 // addSavepoint adds a savepoint to the stack.
 func (p *Pager) addSavepoint(sp *Savepoint) {
 	if p.savepoints == nil {
-		p.savepoints = make([]*Savepoint, 0)
+		p.savepoints = make([]*Savepoint, 1)
+		p.savepoints[0] = sp
+		return
 	}
-	// Add to the beginning (stack)
-	p.savepoints = append([]*Savepoint{sp}, p.savepoints...)
+	// Add to the beginning (stack) while reusing capacity where possible.
+	p.savepoints = append(p.savepoints, nil)
+	copy(p.savepoints[1:], p.savepoints[:len(p.savepoints)-1])
+	p.savepoints[0] = sp
 }
 
 // releaseSavepoints removes savepoints from index 0 to the given index (inclusive).
@@ -287,9 +291,6 @@ func (p *Pager) releaseSavepoints(index int) {
 
 // getSavepoints returns the current savepoint stack.
 func (p *Pager) getSavepoints() []*Savepoint {
-	if p.savepoints == nil {
-		return []*Savepoint{}
-	}
 	return p.savepoints
 }
 

@@ -44,16 +44,17 @@ func writeHeader(buf *bytes.Buffer) {
 }
 
 func writeImports(buf *bytes.Buffer, spec ModuleSpec) {
-	imports := []string{`"testing"`}
+	imports := make([]string, 0, 4)
 	if spec.NeedsFmt {
-		imports = append([]string{`"fmt"`}, imports...)
+		imports = append(imports, `"fmt"`)
 	}
 	if spec.NeedsMath {
-		imports = append([]string{`"math"`}, imports...)
+		imports = append(imports, `"math"`)
 	}
 	if spec.NeedsString {
-		imports = append([]string{`"strings"`}, imports...)
+		imports = append(imports, `"strings"`)
 	}
+	imports = append(imports, `"testing"`)
 	if len(imports) == 1 {
 		fmt.Fprintf(buf, "import %s\n\n", imports[0])
 		return

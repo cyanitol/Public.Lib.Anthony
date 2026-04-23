@@ -269,6 +269,13 @@ func (p *Program) add(op OpCode, p1, p2, p3 int, p4 interface{}, p5 int, comment
 	})
 }
 
+// insert adds an instruction at pos while preserving instruction order.
+func (p *Program) insert(pos int, inst Instruction) {
+	p.Instructions = append(p.Instructions, Instruction{})
+	copy(p.Instructions[pos+1:], p.Instructions[pos:])
+	p.Instructions[pos] = inst
+}
+
 // allocReg allocates a new register
 func (p *Program) allocReg() int {
 	reg := p.NumRegisters
