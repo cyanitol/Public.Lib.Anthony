@@ -284,14 +284,14 @@ func NewRegistry() *Registry {
 // This is used for standard SQLite functions.
 // Function names are normalized to lowercase for case-insensitive lookup.
 func (r *Registry) Register(fn Function) {
-	r.builtins[strings.ToLower(fn.Name())] = fn
+	r.builtins[normalizeFunctionName(fn.Name())] = fn
 }
 
 // RegisterUser registers a user-defined function with overloading support.
 // numArgs should match fn.NumArgs() and is used for overloading.
 // Function names are normalized to lowercase for case-insensitive lookup.
 func (r *Registry) RegisterUser(fn Function, numArgs int) {
-	name := strings.ToLower(fn.Name())
+	name := normalizeFunctionName(fn.Name())
 	if numArgs < 0 {
 		// Variadic function
 		r.variadicUser[name] = fn
@@ -307,7 +307,7 @@ func (r *Registry) RegisterUser(fn Function, numArgs int) {
 // Function names are case-insensitive (converted to lowercase).
 func (r *Registry) Unregister(name string, numArgs int) bool {
 	// Normalize to lowercase for case-insensitive lookup
-	name = strings.ToLower(name)
+	name = normalizeFunctionName(name)
 
 	if numArgs < 0 {
 		if _, ok := r.variadicUser[name]; ok {
@@ -331,7 +331,7 @@ func (r *Registry) Unregister(name string, numArgs int) bool {
 // Function names are case-insensitive (converted to lowercase).
 func (r *Registry) Lookup(name string) (Function, bool) {
 	// Normalize to lowercase for case-insensitive lookup
-	name = strings.ToLower(name)
+	name = normalizeFunctionName(name)
 
 	// First check variadic user functions
 	if fn, ok := r.variadicUser[name]; ok {
@@ -351,7 +351,7 @@ func (r *Registry) Lookup(name string) (Function, bool) {
 // scalar versions with the same name have been registered as user functions.
 // Function names are case-insensitive (converted to lowercase).
 func (r *Registry) LookupBuiltin(name string) (Function, bool) {
-	name = strings.ToLower(name)
+	name = normalizeFunctionName(name)
 	fn, ok := r.builtins[name]
 	return fn, ok
 }
@@ -366,7 +366,7 @@ func (r *Registry) LookupBuiltin(name string) (Function, bool) {
 // Function names are case-insensitive (converted to lowercase).
 func (r *Registry) LookupWithArgs(name string, numArgs int) (Function, bool) {
 	// Normalize to lowercase for case-insensitive lookup
-	name = strings.ToLower(name)
+	name = normalizeFunctionName(name)
 
 	// First try exact match in user functions
 	key := functionKey{name: name, numArgs: numArgs}
@@ -385,6 +385,16 @@ func (r *Registry) LookupWithArgs(name string, numArgs int) (Function, bool) {
 	}
 
 	return nil, false
+}
+
+func normalizeFunctionName(name string) string {
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if (c >= 'A' && c <= 'Z') || c >= 0x80 {
+			return strings.ToLower(name)
+		}
+	}
+	return name
 }
 
 // GetAllFunctions returns all registered functions.
