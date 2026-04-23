@@ -59,7 +59,7 @@ P0 — CORRECTNESS (must fix before next release)
 
 P1 — ALGORITHM IMPROVEMENTS (WASM-first, high impact)
 
-[ ] Sort: replace O(n²) insertion sort with pdqsort/introsort
+[x] Sort: replace O(n²) insertion sort with pdqsort/introsort
     - File: internal/vdbe/vdbe.go (Sorter.Sort)
     - Fix: replace hand-rolled insertion sort with sort.Slice
     - WASM impact: CRITICAL — single-threaded, no offload possible
