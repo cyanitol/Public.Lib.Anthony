@@ -6,9 +6,11 @@ import "strings"
 // findCaseInsensitive performs a case-insensitive lookup in a string-keyed map.
 // Returns the value and true if found, zero value and false otherwise.
 func findCaseInsensitive[V any](m map[string]V, name string) (V, bool) {
-	lowerName := strings.ToLower(name)
+	if val, found := m[name]; found {
+		return val, true
+	}
 	for key, val := range m {
-		if strings.ToLower(key) == lowerName {
+		if strings.EqualFold(key, name) {
 			return val, true
 		}
 	}
@@ -19,9 +21,12 @@ func findCaseInsensitive[V any](m map[string]V, name string) (V, bool) {
 // deleteCaseInsensitive performs a case-insensitive delete in a string-keyed map.
 // Returns true if an entry was deleted, false otherwise.
 func deleteCaseInsensitive[V any](m map[string]V, name string) bool {
-	lowerName := strings.ToLower(name)
+	if _, found := m[name]; found {
+		delete(m, name)
+		return true
+	}
 	for key := range m {
-		if strings.ToLower(key) == lowerName {
+		if strings.EqualFold(key, name) {
 			delete(m, key)
 			return true
 		}
@@ -32,9 +37,11 @@ func deleteCaseInsensitive[V any](m map[string]V, name string) bool {
 // keyCaseInsensitive returns the actual map key matching name case-insensitively.
 // Returns the key and true if found, empty string and false otherwise.
 func keyCaseInsensitive[V any](m map[string]V, name string) (string, bool) {
-	lowerName := strings.ToLower(name)
+	if _, found := m[name]; found {
+		return name, true
+	}
 	for key := range m {
-		if strings.ToLower(key) == lowerName {
+		if strings.EqualFold(key, name) {
 			return key, true
 		}
 	}
