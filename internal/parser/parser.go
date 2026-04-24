@@ -1317,32 +1317,44 @@ func (p *Parser) parseReturningClause(returning *[]ResultColumn) error {
 // =============================================================================
 
 func (p *Parser) parseCreate() (Statement, error) {
-	// TEMP/TEMPORARY
 	temp := p.match(TK_TEMP) || p.match(TK_TEMPORARY)
-
-	// Check for VIRTUAL TABLE
 	if p.match(TK_VIRTUAL) {
-		if !p.match(TK_TABLE) {
-			return nil, p.error("expected TABLE after VIRTUAL")
-		}
-		return p.parseCreateVirtualTable()
+		return p.parseVirtualCreate()
 	}
-
-	// Check for UNIQUE before INDEX
 	unique := p.match(TK_UNIQUE)
-
-	if p.match(TK_TABLE) {
-		return p.parseCreateTable(temp)
-	} else if p.match(TK_INDEX) {
-		return p.parseCreateIndex(unique)
-	} else if p.match(TK_VIEW) {
-		return p.parseCreateView(temp)
-	} else if p.match(TK_TRIGGER) {
-		return p.parseCreateTrigger(temp)
-	} else if unique {
+	stmt, handled, err := p.parseCreateObject(temp, unique)
+	if handled || err != nil {
+		return stmt, err
+	}
+	if unique {
 		return nil, p.error("expected INDEX after UNIQUE")
-	} else {
-		return nil, p.error("expected TABLE, INDEX, VIEW, or TRIGGER after CREATE")
+	}
+	return nil, p.error("expected TABLE, INDEX, VIEW, or TRIGGER after CREATE")
+}
+
+func (p *Parser) parseVirtualCreate() (Statement, error) {
+	if !p.match(TK_TABLE) {
+		return nil, p.error("expected TABLE after VIRTUAL")
+	}
+	return p.parseCreateVirtualTable()
+}
+
+func (p *Parser) parseCreateObject(temp, unique bool) (Statement, bool, error) {
+	switch {
+	case p.match(TK_TABLE):
+		stmt, err := p.parseCreateTable(temp)
+		return stmt, true, err
+	case p.match(TK_INDEX):
+		stmt, err := p.parseCreateIndex(unique)
+		return stmt, true, err
+	case p.match(TK_VIEW):
+		stmt, err := p.parseCreateView(temp)
+		return stmt, true, err
+	case p.match(TK_TRIGGER):
+		stmt, err := p.parseCreateTrigger(temp)
+		return stmt, true, err
+	default:
+		return nil, false, nil
 	}
 }
 
