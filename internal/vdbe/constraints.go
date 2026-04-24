@@ -554,22 +554,33 @@ func (v *VDBE) checkMultiColRow(scanCursor *btree.BtCursor, cols []string, newVa
 	if err != nil {
 		return nil
 	}
-	for i, col := range cols {
-		recIdx := provider.GetRecordColumnIndex(tableName, col)
-		if recIdx < 0 {
-			return nil
-		}
-		existing := NewMem()
-		if err := parseRecordColumn(recordData, recIdx, existing); err != nil {
-			return nil
-		}
-		if existing.IsNull() || newValues[i].IsNull() {
-			return nil // NULL is always distinct
-		}
-		collation := provider.GetColumnCollation(tableName, col)
-		if v.compareMemValuesWithCollation(existing, newValues[i], collation) != 0 {
-			return nil // Mismatch on this column
-		}
+	if !v.multiColRowMatches(recordData, cols, newValues, tableName, provider) {
+		return nil
 	}
 	return fmt.Errorf("UNIQUE constraint failed: %s.%s", tableName, strings.Join(cols, ", "))
+}
+
+func (v *VDBE) multiColRowMatches(recordData []byte, cols []string, newValues []*Mem, tableName string, provider schemaIndexProvider) bool {
+	for i, col := range cols {
+		if !v.multiColValueMatches(recordData, col, newValues[i], tableName, provider) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v *VDBE) multiColValueMatches(recordData []byte, col string, newValue *Mem, tableName string, provider schemaIndexProvider) bool {
+	recIdx := provider.GetRecordColumnIndex(tableName, col)
+	if recIdx < 0 {
+		return false
+	}
+	existing := NewMem()
+	if err := parseRecordColumn(recordData, recIdx, existing); err != nil {
+		return false
+	}
+	if existing.IsNull() || newValue.IsNull() {
+		return false
+	}
+	collation := provider.GetColumnCollation(tableName, col)
+	return v.compareMemValuesWithCollation(existing, newValue, collation) == 0
 }
