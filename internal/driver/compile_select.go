@@ -47,49 +47,46 @@ func (s *Stmt) compileSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driv
 
 // handleSpecialSelectTypes handles compounds, CTEs, views, subqueries, and no-FROM selects.
 func (s *Stmt) handleSpecialSelectTypes(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
-	// Handle compound SELECT (UNION, UNION ALL, INTERSECT, EXCEPT)
-	if stmt.Compound != nil {
-		result, err := s.compileCompoundSelect(vm, stmt, args)
+	if result, err, handled := s.handleCompoundOrCTESelect(vm, stmt, args); handled {
 		return result, err, true
 	}
-
-	// Handle WITH clause (CTEs)
-	if stmt.With != nil {
-		result, err := s.compileSelectWithCTEs(vm, stmt, args)
-		return result, err, true
-	}
-
-	// Expand views
 	expandedStmt, err := planner.ExpandViewsInSelect(stmt, s.conn.schema)
 	if err != nil {
 		return nil, err, true
 	}
 	*stmt = *expandedStmt
-
-	// Handle FROM subqueries (but NOT join-only subqueries — those are handled in compileSelectWithJoins)
-	if s.hasFromTableSubqueries(stmt) {
-		result, err := s.compileSelectWithFromSubqueries(vm, stmt, args)
+	if result, err, handled := s.handleExpandedSpecialSelect(vm, stmt, args); handled {
 		return result, err, true
 	}
-
-	// Handle pragma table-valued functions (e.g., pragma_table_info)
-	if s.isPragmaTVF(stmt) {
-		result, err := s.compileSelectWithPragmaTVF(vm, stmt, args)
-		return result, err, true
-	}
-
-	// Handle table-valued functions (standalone or correlated cross-join)
-	if result, err, handled := s.handleTVFSelect(vm, stmt, args); handled {
-		return result, err, true
-	}
-
-	// Handle SELECT without FROM
 	if stmt.From == nil || len(stmt.From.Tables) == 0 {
 		result, err := s.compileSelectWithoutFrom(vm, stmt, args)
 		return result, err, true
 	}
-
 	return nil, nil, false
+}
+
+func (s *Stmt) handleCompoundOrCTESelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	if stmt.Compound != nil {
+		result, err := s.compileCompoundSelect(vm, stmt, args)
+		return result, err, true
+	}
+	if stmt.With != nil {
+		result, err := s.compileSelectWithCTEs(vm, stmt, args)
+		return result, err, true
+	}
+	return nil, nil, false
+}
+
+func (s *Stmt) handleExpandedSpecialSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	if s.hasFromTableSubqueries(stmt) {
+		result, err := s.compileSelectWithFromSubqueries(vm, stmt, args)
+		return result, err, true
+	}
+	if s.isPragmaTVF(stmt) {
+		result, err := s.compileSelectWithPragmaTVF(vm, stmt, args)
+		return result, err, true
+	}
+	return s.handleTVFSelect(vm, stmt, args)
 }
 
 // handleTVFSelect handles standalone TVFs and correlated TVF cross-joins.

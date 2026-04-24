@@ -27,6 +27,30 @@ Next implementation slices:
 2. Add package-local test helpers to collapse repeated MC/DC and coverage scaffolding
 3. Re-run `gocyclo -over 8 .` after each slice and track the remaining overages
 
+Current remaining production complexity audit (`make check-complexity-prod`):
+- driver `(*Stmt).dispatchSchemaDDL` — [internal/driver/stmt.go]
+- driver `compareInterfaces` — [internal/driver/compile_vtab.go]
+- driver `(*Stmt).compileVTabSelect` — [internal/driver/compile_vtab.go]
+- driver `(*Stmt).compileCorrelatedTVFJoin` — [internal/driver/compile_tvf.go]
+- driver `(*Stmt).projectRows` — [internal/driver/compile_subquery.go]
+- driver `scanVTabRows` — [internal/driver/compile_vtab.go]
+- driver `evalConstraintValue` — [internal/driver/compile_vtab.go]
+- driver `binaryOpToConstraint` — [internal/driver/compile_vtab.go]
+- driver `findInsertRowidCol` — [internal/driver/compile_dml.go]
+- driver `(*Stmt).calculateSorterColumns` — [internal/driver/stmt_groupby.go]
+- driver `(*Stmt).inlineBytecodeCore` — [internal/driver/stmt_cte_recursive.go]
+- driver `(*Stmt).findWindowOrderByInExpr` — [internal/driver/compile_select_agg.go]
+- driver `(*Stmt).exprHasDataDependentWindowFunc` — [internal/driver/compile_select_agg.go]
+- driver `(*Stmt).emitAggregateByName` — [internal/driver/compile_select_agg.go]
+- driver `(*Stmt).handleSpecialSelectTypes` — [internal/driver/compile_select.go]
+- driver `(*Stmt).emitJoinLevelAgg` — [internal/driver/compile_join_agg.go]
+- driver `(*Stmt).emitJoinLevelSorter` — [internal/driver/compile_join.go]
+- driver `(*Stmt).emitJoinLevel` — [internal/driver/compile_join.go]
+- driver `(*Stmt).emitJoinSorterPopulation` — [internal/driver/compile_helpers.go]
+- driver `replaceExcludedRefs` — [internal/driver/compile_dml.go]
+- driver `(*Stmt).validateAndExpandInsertValues` — [internal/driver/compile_dml.go]
+- driver `cmpSameType` — [internal/driver/compile_compound.go]
+
 COMPLETED
 ---------
 Step 1:  Math single-arg wrappers → factory (internal/functions/math.go) ~140 lines saved
