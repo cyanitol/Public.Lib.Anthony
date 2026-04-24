@@ -251,25 +251,28 @@ func (c *explainCtx) isRowidLookup(tableName string, where parser.Expression) (s
 		return "", false
 	}
 
-	if isRowidAlias(colName) {
-		return colName, true
-	}
+	return colName, isRowidAlias(colName) || c.isIntegerPrimaryKeyAlias(tableName, colName)
+}
 
-	// Check if column is INTEGER PRIMARY KEY (rowid alias)
-	if c.schema != nil {
-		if tbl, ok := c.schema.GetTable(tableName); ok {
-			for _, col := range tbl.Columns {
-				if strings.EqualFold(col.Name, colName) && col.PrimaryKey {
-					colType := strings.ToUpper(col.Type)
-					if colType == "INTEGER" || colType == "INT" {
-						return colName, true
-					}
-				}
-			}
+func (c *explainCtx) isIntegerPrimaryKeyAlias(tableName, colName string) bool {
+	if c.schema == nil {
+		return false
+	}
+	tbl, ok := c.schema.GetTable(tableName)
+	if !ok {
+		return false
+	}
+	for _, col := range tbl.Columns {
+		if strings.EqualFold(col.Name, colName) && col.PrimaryKey && isIntegerAffinity(col.Type) {
+			return true
 		}
 	}
+	return false
+}
 
-	return colName, false
+func isIntegerAffinity(colType string) bool {
+	upper := strings.ToUpper(colType)
+	return upper == "INTEGER" || upper == "INT"
 }
 
 // findIndexForColumn looks up the best index for a column in the schema.
@@ -321,28 +324,44 @@ func (c *explainCtx) walkExprForSubqueries(parent *ExplainNode, expr parser.Expr
 	if expr == nil {
 		return
 	}
+	if sel := subqueryExprSelect(expr); sel != nil {
+		c.emitCorrelatedScalarSubquery(parent, sel)
+		return
+	}
+	for _, child := range subqueryChildExprs(expr) {
+		c.walkExprForSubqueries(parent, child)
+	}
+}
+
+func (c *explainCtx) emitCorrelatedScalarSubquery(parent *ExplainNode, sel *parser.SelectStmt) {
+	c.subqCount++
+	sub := c.plan.AddNode(parent, fmt.Sprintf("CORRELATED SCALAR SUBQUERY %d", c.subqCount))
+	c.explainSelect(sub, sel)
+}
+
+func subqueryExprSelect(expr parser.Expression) *parser.SelectStmt {
 	switch e := expr.(type) {
 	case *parser.SubqueryExpr:
-		c.subqCount++
-		sub := c.plan.AddNode(parent, fmt.Sprintf("CORRELATED SCALAR SUBQUERY %d", c.subqCount))
-		c.explainSelect(sub, e.Select)
+		return e.Select
 	case *parser.ExistsExpr:
-		c.subqCount++
-		sub := c.plan.AddNode(parent, fmt.Sprintf("CORRELATED SCALAR SUBQUERY %d", c.subqCount))
-		c.explainSelect(sub, e.Select)
+		return e.Select
 	case *parser.InExpr:
-		if e.Select != nil {
-			c.subqCount++
-			sub := c.plan.AddNode(parent, fmt.Sprintf("CORRELATED SCALAR SUBQUERY %d", c.subqCount))
-			c.explainSelect(sub, e.Select)
-		}
+		return e.Select
+	default:
+		return nil
+	}
+}
+
+func subqueryChildExprs(expr parser.Expression) []parser.Expression {
+	switch e := expr.(type) {
 	case *parser.BinaryExpr:
-		c.walkExprForSubqueries(parent, e.Left)
-		c.walkExprForSubqueries(parent, e.Right)
+		return []parser.Expression{e.Left, e.Right}
 	case *parser.UnaryExpr:
-		c.walkExprForSubqueries(parent, e.Expr)
+		return []parser.Expression{e.Expr}
 	case *parser.ParenExpr:
-		c.walkExprForSubqueries(parent, e.Expr)
+		return []parser.Expression{e.Expr}
+	default:
+		return nil
 	}
 }
 
