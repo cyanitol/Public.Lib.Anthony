@@ -21,43 +21,51 @@ func likeFunc(args []Value) (Value, error) {
 		return nil, fmt.Errorf("like() takes 2 or 3 arguments (%d given)", len(args))
 	}
 
-	// NULL propagation: if either operand is NULL, result is NULL
-	if args[0].IsNull() || args[1].IsNull() {
+	if hasNullPatternArg(args[:2]) {
 		return NewNullValue(), nil
 	}
 
 	value := args[0].AsString()
 	pattern := args[1].AsString()
-
-	var escape rune
-	if len(args) == 3 && !args[2].IsNull() {
-		escStr := args[2].AsString()
-		if len(escStr) > 0 {
-			runes := []rune(escStr)
-			escape = runes[0]
-		}
-	}
-
-	if utf.Like(pattern, value, escape) {
-		return NewIntValue(1), nil
-	}
-	return NewIntValue(0), nil
+	return patternMatchValue(utf.Like(pattern, value, patternEscape(args))), nil
 }
 
 // globFunc implements the SQL GLOB operator as a function.
 // Args: glob(value, pattern)
 // Returns 1 if value matches pattern, 0 if not, NULL if either is NULL.
 func globFunc(args []Value) (Value, error) {
-	// NULL propagation
-	if args[0].IsNull() || args[1].IsNull() {
+	if hasNullPatternArg(args) {
 		return NewNullValue(), nil
 	}
 
 	value := args[0].AsString()
 	pattern := args[1].AsString()
+	return patternMatchValue(utf.Glob(pattern, value)), nil
+}
 
-	if utf.Glob(pattern, value) {
-		return NewIntValue(1), nil
+func hasNullPatternArg(args []Value) bool {
+	for _, arg := range args {
+		if arg.IsNull() {
+			return true
+		}
 	}
-	return NewIntValue(0), nil
+	return false
+}
+
+func patternEscape(args []Value) rune {
+	if len(args) != 3 || args[2].IsNull() {
+		return 0
+	}
+	escStr := args[2].AsString()
+	if len(escStr) == 0 {
+		return 0
+	}
+	return []rune(escStr)[0]
+}
+
+func patternMatchValue(matched bool) Value {
+	if matched {
+		return NewIntValue(1)
+	}
+	return NewIntValue(0)
 }
