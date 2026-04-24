@@ -553,33 +553,45 @@ func isRowidAlias(colName string) bool {
 // It also handles special rowid aliases (rowid, _rowid_, oid) by checking if
 // the table has any rowid column (INTEGER PRIMARY KEY).
 func (g *CodeGenerator) findTableWithColumn(colName string) (string, int) {
-	// First try exact column name match
+	if tableName, cursor, ok := g.findExactColumnTable(colName); ok {
+		return tableName, cursor
+	}
+	if !isRowidAlias(colName) {
+		return "", 0
+	}
+	return g.findRowidAliasTable()
+}
+
+func (g *CodeGenerator) findExactColumnTable(colName string) (string, int, bool) {
 	for name, info := range g.tableInfo {
 		for _, col := range info.Columns {
 			if col.Name == colName {
-				return name, g.cursorMap[name]
+				return name, g.cursorMap[name], true
 			}
 		}
 	}
+	return "", 0, false
+}
 
-	// If no exact match and this is a rowid alias, find a table with a rowid column
-	if isRowidAlias(colName) {
-		// First, prefer a table that has an explicit INTEGER PRIMARY KEY
-		for name, info := range g.tableInfo {
-			for _, col := range info.Columns {
-				if col.IsRowid {
-					return name, g.cursorMap[name]
-				}
-			}
-		}
-		// If no explicit INTEGER PRIMARY KEY, return the first available table
-		// since SQLite always has an implicit rowid for regular tables
-		for name := range g.tableInfo {
-			return name, g.cursorMap[name]
-		}
+func (g *CodeGenerator) findRowidAliasTable() (string, int) {
+	if tableName, cursor, ok := g.findExplicitRowidTable(); ok {
+		return tableName, cursor
 	}
-
+	for name := range g.tableInfo {
+		return name, g.cursorMap[name]
+	}
 	return "", 0
+}
+
+func (g *CodeGenerator) findExplicitRowidTable() (string, int, bool) {
+	for name, info := range g.tableInfo {
+		for _, col := range info.Columns {
+			if col.IsRowid {
+				return name, g.cursorMap[name], true
+			}
+		}
+	}
+	return "", 0, false
 }
 
 // lookupColumnInfo finds the column index and rowid flag for a column in a table.
