@@ -1878,41 +1878,72 @@ func (g *CodeGenerator) emitNullParameter(reg int, name string) {
 func (g *CodeGenerator) emitParameterValue(reg int, arg interface{}) {
 	switch v := arg.(type) {
 	case nil:
-		g.vdbe.AddOp(vdbe.OpNull, 0, reg, 0)
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, "param NULL")
+		g.emitTypedParameterComment(reg, vdbe.OpNull, 0, "param NULL")
 	case int:
-		g.vdbe.AddOp(vdbe.OpInteger, v, reg, 0)
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param INT %d", v))
+		g.emitIntegerParameter(reg, v, fmt.Sprintf("param INT %d", v))
 	case int64:
-		if v >= -2147483648 && v <= 2147483647 {
-			g.vdbe.AddOp(vdbe.OpInteger, int(v), reg, 0)
-		} else {
-			g.vdbe.AddOpWithP4Int64(vdbe.OpInt64, 0, reg, 0, v)
-		}
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param INT64 %d", v))
+		g.emitInt64Parameter(reg, v)
 	case float64:
-		addr := g.vdbe.AddOp(vdbe.OpReal, 0, reg, 0)
-		g.vdbe.Program[addr].P4.R = v
-		g.vdbe.Program[addr].P4Type = vdbe.P4Real
-		g.vdbe.SetComment(addr, fmt.Sprintf("param REAL %v", v))
+		g.emitRealParameter(reg, v)
 	case string:
-		g.vdbe.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, v)
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param STRING '%s'", v))
+		g.emitStringParameter(reg, v)
 	case []byte:
-		g.vdbe.AddOpWithP4Str(vdbe.OpBlob, len(v), reg, 0, string(v))
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, "param BLOB")
+		g.emitBlobParameter(reg, v)
 	case bool:
-		val := 0
-		if v {
-			val = 1
-		}
-		g.vdbe.AddOp(vdbe.OpInteger, val, reg, 0)
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param BOOL %v", v))
+		g.emitBoolParameter(reg, v)
 	default:
-		str := fmt.Sprintf("%v", v)
-		g.vdbe.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, str)
-		g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param %T as STRING", v))
+		g.emitFallbackParameter(reg, v)
 	}
+}
+
+func (g *CodeGenerator) emitTypedParameterComment(reg int, opcode vdbe.Opcode, p1 int, comment string) {
+	g.vdbe.AddOp(opcode, p1, reg, 0)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, comment)
+}
+
+func (g *CodeGenerator) emitIntegerParameter(reg int, value int, comment string) {
+	g.emitTypedParameterComment(reg, vdbe.OpInteger, value, comment)
+}
+
+func (g *CodeGenerator) emitInt64Parameter(reg int, value int64) {
+	comment := fmt.Sprintf("param INT64 %d", value)
+	if value >= -2147483648 && value <= 2147483647 {
+		g.emitIntegerParameter(reg, int(value), comment)
+		return
+	}
+	g.vdbe.AddOpWithP4Int64(vdbe.OpInt64, 0, reg, 0, value)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, comment)
+}
+
+func (g *CodeGenerator) emitRealParameter(reg int, value float64) {
+	addr := g.vdbe.AddOp(vdbe.OpReal, 0, reg, 0)
+	g.vdbe.Program[addr].P4.R = value
+	g.vdbe.Program[addr].P4Type = vdbe.P4Real
+	g.vdbe.SetComment(addr, fmt.Sprintf("param REAL %v", value))
+}
+
+func (g *CodeGenerator) emitStringParameter(reg int, value string) {
+	g.vdbe.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, value)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param STRING '%s'", value))
+}
+
+func (g *CodeGenerator) emitBlobParameter(reg int, value []byte) {
+	g.vdbe.AddOpWithP4Str(vdbe.OpBlob, len(value), reg, 0, string(value))
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, "param BLOB")
+}
+
+func (g *CodeGenerator) emitBoolParameter(reg int, value bool) {
+	intValue := 0
+	if value {
+		intValue = 1
+	}
+	g.emitIntegerParameter(reg, intValue, fmt.Sprintf("param BOOL %v", value))
+}
+
+func (g *CodeGenerator) emitFallbackParameter(reg int, value interface{}) {
+	str := fmt.Sprintf("%v", value)
+	g.vdbe.AddOpWithP4Str(vdbe.OpString8, 0, reg, 0, str)
+	g.vdbe.SetComment(g.vdbe.NumOps()-1, fmt.Sprintf("param %T as STRING", value))
 }
 
 // generateCollate generates code for COLLATE expressions.
