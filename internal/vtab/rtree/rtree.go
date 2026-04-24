@@ -578,51 +578,57 @@ func (c *RTreeCursor) applySpatialFilter() {
 
 // buildQueryBox constructs a bounding box from the query constraints.
 func (c *RTreeCursor) buildQueryBox() *BoundingBox {
-	// Initialize with infinite bounds
-	bbox := NewBoundingBox(c.table.dimensions)
-	for i := 0; i < c.table.dimensions; i++ {
-		bbox.Min[i] = -1e308 // Approximate negative infinity
-		bbox.Max[i] = 1e308  // Approximate positive infinity
-	}
-
-	// Parse constraints and refine the bounding box
+	bbox := newInfiniteBoundingBox(c.table.dimensions)
 	argIdx := 0
 	for col := 1; col <= c.table.dimensions*2; col++ {
 		if c.idxNum&(1<<col) == 0 {
-			continue // This column doesn't have a constraint
+			continue
 		}
-
 		if argIdx >= len(c.constraint) {
 			break
 		}
-
-		// Extract the constraint value
-		val := c.extractConstraintValue(c.constraint[argIdx])
-
-		// Update the appropriate bound
-		dimIndex := (col - 1) / 2
-		isMaxCol := (col-1)%2 == 1
-
-		if dimIndex < c.table.dimensions {
-			if isMaxCol {
-				// This is a maxX/maxY/etc column
-				// Constraint: maxX >= value → query box min = value
-				if val > bbox.Min[dimIndex] {
-					bbox.Min[dimIndex] = val
-				}
-			} else {
-				// This is a minX/minY/etc column
-				// Constraint: minX <= value → query box max = value
-				if val < bbox.Max[dimIndex] {
-					bbox.Max[dimIndex] = val
-				}
-			}
-		}
-
+		c.applyConstraintToBoundingBox(bbox, col, c.constraint[argIdx])
 		argIdx++
 	}
-
 	return bbox
+}
+
+func newInfiniteBoundingBox(dimensions int) *BoundingBox {
+	bbox := NewBoundingBox(dimensions)
+	for i := 0; i < dimensions; i++ {
+		bbox.Min[i] = -1e308
+		bbox.Max[i] = 1e308
+	}
+	return bbox
+}
+
+func (c *RTreeCursor) applyConstraintToBoundingBox(bbox *BoundingBox, col int, constraint interface{}) {
+	dimIndex := (col - 1) / 2
+	if dimIndex >= c.table.dimensions {
+		return
+	}
+	val := c.extractConstraintValue(constraint)
+	if colIsMaxBound(col) {
+		c.updateBoundingBoxMin(bbox, dimIndex, val)
+		return
+	}
+	c.updateBoundingBoxMax(bbox, dimIndex, val)
+}
+
+func colIsMaxBound(col int) bool {
+	return (col-1)%2 == 1
+}
+
+func (c *RTreeCursor) updateBoundingBoxMin(bbox *BoundingBox, dimIndex int, val float64) {
+	if val > bbox.Min[dimIndex] {
+		bbox.Min[dimIndex] = val
+	}
+}
+
+func (c *RTreeCursor) updateBoundingBoxMax(bbox *BoundingBox, dimIndex int, val float64) {
+	if val < bbox.Max[dimIndex] {
+		bbox.Max[dimIndex] = val
+	}
 }
 
 // extractConstraintValue extracts a float64 value from a constraint.
