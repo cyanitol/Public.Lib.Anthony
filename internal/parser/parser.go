@@ -2981,29 +2981,30 @@ func (p *Parser) parseComparisonExpression() (Expression, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// IS NULL, IS NOT NULL
-	if p.match(TK_IS) {
-		return p.parseIsExpression(left)
+	if expr, handled, err := p.tryParseSpecialComparison(left); handled || err != nil {
+		return expr, err
 	}
-
-	// IN / NOT IN
-	if p.check(TK_IN) || p.checkNotWithAhead(TK_IN) {
-		return p.parseInExpression(left)
-	}
-
-	// BETWEEN / NOT BETWEEN
-	if p.check(TK_BETWEEN) || p.checkNotWithAhead(TK_BETWEEN) {
-		return p.parseBetweenExpression(left)
-	}
-
-	// NOT LIKE / NOT GLOB
-	if p.checkNotWithAhead(TK_LIKE) || p.checkNotWithAhead(TK_GLOB) {
-		return p.parseNotPatternOp(left)
-	}
-
-	// Pattern operators and comparison operators
 	return p.tryParseOperators(left)
+}
+
+func (p *Parser) tryParseSpecialComparison(left Expression) (Expression, bool, error) {
+	if p.match(TK_IS) {
+		expr, err := p.parseIsExpression(left)
+		return expr, true, err
+	}
+	if p.check(TK_IN) || p.checkNotWithAhead(TK_IN) {
+		expr, err := p.parseInExpression(left)
+		return expr, true, err
+	}
+	if p.check(TK_BETWEEN) || p.checkNotWithAhead(TK_BETWEEN) {
+		expr, err := p.parseBetweenExpression(left)
+		return expr, true, err
+	}
+	if p.checkNotWithAhead(TK_LIKE) || p.checkNotWithAhead(TK_GLOB) {
+		expr, err := p.parseNotPatternOp(left)
+		return expr, true, err
+	}
+	return nil, false, nil
 }
 
 // tryParseOperators attempts to parse pattern or comparison operators.
