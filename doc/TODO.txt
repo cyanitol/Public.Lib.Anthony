@@ -7,7 +7,7 @@ Status (2026-03-27):
         Statement coverage: 94.8% overall
         Last updated: 2026-03-27
 
-Code Quality: Cyclomatic complexity <= 11 for all functions.
+Code Quality: Cyclomatic complexity <= 8 for all production functions (achieved 2026-04-24).
 
 Goal: Maintain zero skip markers and 100% pass rate.
 Current release: v0.5.0 → next: v0.6.0 (algorithm improvements)

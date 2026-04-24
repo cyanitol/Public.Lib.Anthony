@@ -7,49 +7,21 @@ RELEASE-HARDENING AUDIT (2026-04-24)
 ------------------------------------
 Target raised: cyclomatic complexity <= 8 across the entire codebase, including tests.
 
-Baseline status:
+Status (2026-04-24):
 - Full test suite passes under `go test ./...`
-- Whole-tree complexity audit with `gocyclo -over 8 .` reports widespread overages
-- The highest concentration is in generated/coverage-heavy test files, but there are also
-  production overages that must be reduced before a 1.0 release gate can be claimed
-
-Immediate tracked gaps:
-- Production complexity > 8 still exists in parser, driver, planner, expr, functions,
-  pager, vtab, rtree, fts5, btree, and command code
-- Test complexity > 8 is far above the requested ceiling; this will require helper
+- PRODUCTION COMPLEXITY GATE ACHIEVED: `gocyclo -over 8 .` reports ZERO production overages
+- Test complexity > 8 remains (198 test functions); this will require helper
   extraction, generated-test consolidation, and selective decomposition of oversized cases
-- Publication-grade / peer-review readiness is not credible until the complexity gate,
-  roadmap backlog, and TODO feature gaps in `doc/TODO.txt` are materially reduced
+- Publication-grade / peer-review readiness depends on test complexity reduction,
+  roadmap backlog, and TODO feature gaps in `doc/TODO.txt`
 
 Next implementation slices:
-1. Reduce production complexity overages one function at a time, starting with the
-   smallest hot-path functions that are already well covered
+1. Reduce test complexity overages via shared test helpers (T1-T5 below)
 2. Add package-local test helpers to collapse repeated MC/DC and coverage scaffolding
 3. Re-run `gocyclo -over 8 .` after each slice and track the remaining overages
 
-Current remaining production complexity audit (`make check-complexity-prod`):
-- driver `(*Stmt).dispatchSchemaDDL` — [internal/driver/stmt.go]
-- driver `compareInterfaces` — [internal/driver/compile_vtab.go]
-- driver `(*Stmt).compileVTabSelect` — [internal/driver/compile_vtab.go]
-- driver `(*Stmt).compileCorrelatedTVFJoin` — [internal/driver/compile_tvf.go]
-- driver `(*Stmt).projectRows` — [internal/driver/compile_subquery.go]
-- driver `scanVTabRows` — [internal/driver/compile_vtab.go]
-- driver `evalConstraintValue` — [internal/driver/compile_vtab.go]
-- driver `binaryOpToConstraint` — [internal/driver/compile_vtab.go]
-- driver `findInsertRowidCol` — [internal/driver/compile_dml.go]
-- driver `(*Stmt).calculateSorterColumns` — [internal/driver/stmt_groupby.go]
-- driver `(*Stmt).inlineBytecodeCore` — [internal/driver/stmt_cte_recursive.go]
-- driver `(*Stmt).findWindowOrderByInExpr` — [internal/driver/compile_select_agg.go]
-- driver `(*Stmt).exprHasDataDependentWindowFunc` — [internal/driver/compile_select_agg.go]
-- driver `(*Stmt).emitAggregateByName` — [internal/driver/compile_select_agg.go]
-- driver `(*Stmt).handleSpecialSelectTypes` — [internal/driver/compile_select.go]
-- driver `(*Stmt).emitJoinLevelAgg` — [internal/driver/compile_join_agg.go]
-- driver `(*Stmt).emitJoinLevelSorter` — [internal/driver/compile_join.go]
-- driver `(*Stmt).emitJoinLevel` — [internal/driver/compile_join.go]
-- driver `(*Stmt).emitJoinSorterPopulation` — [internal/driver/compile_helpers.go]
-- driver `replaceExcludedRefs` — [internal/driver/compile_dml.go]
-- driver `(*Stmt).validateAndExpandInsertValues` — [internal/driver/compile_dml.go]
-- driver `cmpSameType` — [internal/driver/compile_compound.go]
+Current remaining production complexity audit (`gocyclo -over 8 .`):
+  *** NONE — all production functions are at complexity ≤ 8 ***
 
 COMPLETED
 ---------
@@ -67,6 +39,21 @@ Step 17: Parser precedence → parseLeftAssocBinaryExpr + makeOpMatcher (interna
 Step 18: Schema lookups → findCaseInsensitive/deleteCaseInsensitive generics (internal/schema/helpers.go) ~60 lines saved
 Step 19: Format header → u32Fields descriptor loop (internal/format/format.go) ~40 lines saved
 Step 20: Btree varint → mustGetVarint helper (internal/btree/cell.go) ~30 lines saved
+Step 21: DML/vtab/select helpers → validateInsertColumnValueCounts, validateExpandedInsertRows,
+  isExplicitInsertRowidAlias, openAndFilterVTabCursor, postProcessVTabRows, compareNilInterfaces,
+  compareNumericInterfaces, compareStringInterfaces, evalConstraintVariableValue,
+  evalNegatedConstraintValue, readMatchedVTabRow, collectMatchedVTabRows ~60 lines refactored
+Step 22: Production complexity gate → all production functions ≤ 8 cyclomatic complexity
+  - projectRows → buildProjectionMap + resolveColumnIndex + applyProjection
+  - replaceExcludedRefs → resolveExcludedIdent + replaceExcludedRefsInFunc
+  - cmpSameType → cmpNumericInt64 + cmpNumericFloat64
+  - calculateSorterColumns → aggregateSorterCols
+  - inlineBytecodeCore → shouldNoopInline
+  - emitAggregateByName → emitAggregateByNameExt (default case extraction)
+  - exprHasDataDependentWindowFunc → unwrapSingleExpr (case consolidation)
+  - findWindowOrderByInExpr → findWindowOrderByInCase
+  - emitJoinLevel/emitJoinLevelSorter/emitJoinLevelAgg → merged duplicate LEFT JOIN conditionals
+  - emitJoinSorterPopulation → emitExtraOrderByAndInsert
 
 SKIPPED (not worth doing)
 -------------------------
@@ -154,6 +141,7 @@ T5: Assertion helper consolidation (~300 lines saved)
 
 PRIORITY ORDER
 ==============
-DONE:   Steps 1-4, 8-13, 17-20 (~532 lines saved)
+DONE:   Steps 1-4, 8-13, 17-22 (~650 lines saved/refactored)
+        PRODUCTION COMPLEXITY GATE ACHIEVED: 0 functions > 8
 Low:    Steps 14, 15, 16 (complex, correctness-critical CTE/compound logic)
 Test:   T1, T2 (highest savings but test safety net — schedule separately)
