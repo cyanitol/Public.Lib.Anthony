@@ -447,6 +447,22 @@ func (s *Stmt) dispatchDDLOrTxn(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.
 
 // dispatchSchemaDDL handles CREATE/DROP/ALTER statements.
 func (s *Stmt) dispatchSchemaDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	if result, err, handled := s.dispatchSchemaDDLTable(vm, args); handled {
+		return result, err, true
+	}
+	if result, err, handled := s.dispatchSchemaDDLIndex(vm, args); handled {
+		return result, err, true
+	}
+	if result, err, handled := s.dispatchSchemaDDLView(vm, args); handled {
+		return result, err, true
+	}
+	if result, err, handled := s.dispatchSchemaDDLTrigger(vm, args); handled {
+		return result, err, true
+	}
+	return nil, nil, false
+}
+
+func (s *Stmt) dispatchSchemaDDLTable(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
 	switch stmt := s.ast.(type) {
 	case *parser.CreateTableStmt:
 		result, err := s.compileCreateTable(vm, stmt, args)
@@ -460,18 +476,39 @@ func (s *Stmt) dispatchSchemaDDL(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe
 	case *parser.AlterTableStmt:
 		result, err := s.compileAlterTable(vm, stmt, args)
 		return result, err, true
+	default:
+		return nil, nil, false
+	}
+}
+
+func (s *Stmt) dispatchSchemaDDLIndex(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	switch stmt := s.ast.(type) {
 	case *parser.CreateIndexStmt:
 		result, err := s.compileCreateIndex(vm, stmt, args)
 		return result, err, true
 	case *parser.DropIndexStmt:
 		result, err := s.compileDropIndex(vm, stmt, args)
 		return result, err, true
+	default:
+		return nil, nil, false
+	}
+}
+
+func (s *Stmt) dispatchSchemaDDLView(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	switch stmt := s.ast.(type) {
 	case *parser.CreateViewStmt:
 		result, err := s.compileCreateView(vm, stmt, args)
 		return result, err, true
 	case *parser.DropViewStmt:
 		result, err := s.compileDropView(vm, stmt, args)
 		return result, err, true
+	default:
+		return nil, nil, false
+	}
+}
+
+func (s *Stmt) dispatchSchemaDDLTrigger(vm *vdbe.VDBE, args []driver.NamedValue) (*vdbe.VDBE, error, bool) {
+	switch stmt := s.ast.(type) {
 	case *parser.CreateTriggerStmt:
 		result, err := s.compileCreateTrigger(vm, stmt, args)
 		return result, err, true
