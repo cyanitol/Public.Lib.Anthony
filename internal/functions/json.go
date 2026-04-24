@@ -641,25 +641,24 @@ func getJSONType(data interface{}) string {
 	if data == nil {
 		return "null"
 	}
+	if simpleType, ok := getSimpleJSONType(data); ok {
+		return simpleType
+	}
+	return getCompositeJSONType(data)
+}
 
+func getSimpleJSONType(data interface{}) (string, bool) {
 	switch v := data.(type) {
 	case bool:
-		return "true" // SQLite uses "true" for both true and false
+		return "true", true // SQLite uses "true" for both true and false
 	case json.Number:
-		return jsonNumberType(v)
+		return jsonNumberType(v), true
 	case float64:
-		if v == float64(int64(v)) && v <= 1e15 && v >= -1e15 {
-			return "integer"
-		}
-		return "real"
+		return jsonFloatType(v), true
 	case string:
-		return "text"
-	case []interface{}:
-		return "array"
-	case map[string]interface{}:
-		return "object"
+		return "text", true
 	default:
-		return "null"
+		return "", false
 	}
 }
 
@@ -669,6 +668,24 @@ func jsonNumberType(v json.Number) string {
 		return "real"
 	}
 	return "integer"
+}
+
+func jsonFloatType(v float64) string {
+	if v == float64(int64(v)) && v <= 1e15 && v >= -1e15 {
+		return "integer"
+	}
+	return "real"
+}
+
+func getCompositeJSONType(data interface{}) string {
+	switch data.(type) {
+	case []interface{}:
+		return "array"
+	case map[string]interface{}:
+		return "object"
+	default:
+		return "null"
+	}
 }
 
 // extractPath extracts a value from JSON using a JSONPath-like syntax

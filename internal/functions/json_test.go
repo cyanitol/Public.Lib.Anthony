@@ -7,6 +7,35 @@ import (
 	"testing"
 )
 
+func TestGetJSONType(t *testing.T) {
+	tests := []struct {
+		name  string
+		input interface{}
+		want  string
+	}{
+		{name: "nil", input: nil, want: "null"},
+		{name: "true", input: true, want: "true"},
+		{name: "false", input: false, want: "true"},
+		{name: "json integer", input: json.Number("42"), want: "integer"},
+		{name: "json real", input: json.Number("4.2"), want: "real"},
+		{name: "float integer range", input: float64(42), want: "integer"},
+		{name: "float fractional", input: 4.2, want: "real"},
+		{name: "float large integral", input: 1e16, want: "real"},
+		{name: "string", input: "hello", want: "text"},
+		{name: "array", input: []interface{}{1, 2}, want: "array"},
+		{name: "object", input: map[string]interface{}{"x": 1}, want: "object"},
+		{name: "unknown", input: struct{}{}, want: "null"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := getJSONType(tt.input); got != tt.want {
+				t.Fatalf("getJSONType(%v) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 // Test json() - Validate and minify JSON
 func TestJSONFunc(t *testing.T) {
 	tests := []struct {
