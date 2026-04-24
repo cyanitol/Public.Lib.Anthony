@@ -10,10 +10,9 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/withoutrowid"
 )
 
-// TestBtreeMain_CreateWithoutRowidTable verifies that CreateWithoutRowidTable
-// initialises a root page with PageTypeLeafTableNoInt and that composite-key
-// inserts via the cursor API are accepted.
-func TestBtreeMain_CreateWithoutRowidTable(t *testing.T) {
+// TestBtreeMain_CreateWithoutRowidTable_Header verifies that CreateWithoutRowidTable
+// initialises a root page with PageTypeLeafTableNoInt.
+func TestBtreeMain_CreateWithoutRowidTable_Header(t *testing.T) {
 	t.Parallel()
 
 	bt := NewBtree(4096)
@@ -22,7 +21,6 @@ func TestBtreeMain_CreateWithoutRowidTable(t *testing.T) {
 		t.Fatalf("CreateWithoutRowidTable: %v", err)
 	}
 
-	// Verify page header type.
 	pageData, err := bt.GetPage(root)
 	if err != nil {
 		t.Fatalf("GetPage: %v", err)
@@ -40,8 +38,18 @@ func TestBtreeMain_CreateWithoutRowidTable(t *testing.T) {
 	if !header.IsTable {
 		t.Error("expected IsTable = true for WITHOUT ROWID root")
 	}
+}
 
-	// Insert several composite-key entries and confirm they are readable.
+// TestBtreeMain_CreateWithoutRowidTable_InsertAndScan verifies that composite-key
+// inserts via the cursor API are accepted and a forward scan returns all entries.
+func TestBtreeMain_CreateWithoutRowidTable_InsertAndScan(t *testing.T) {
+	t.Parallel()
+
+	bt := NewBtree(4096)
+	root, err := bt.CreateWithoutRowidTable()
+	if err != nil {
+		t.Fatalf("CreateWithoutRowidTable: %v", err)
+	}
 	cursor := NewCursorWithOptions(bt, root, true)
 	keys := [][]byte{
 		withoutrowid.EncodeCompositeKey([]interface{}{"alpha"}),
@@ -55,7 +63,6 @@ func TestBtreeMain_CreateWithoutRowidTable(t *testing.T) {
 		}
 	}
 
-	// Forward scan: should see 4 entries.
 	if err := cursor.MoveToFirst(); err != nil {
 		t.Fatalf("MoveToFirst: %v", err)
 	}
@@ -69,8 +76,26 @@ func TestBtreeMain_CreateWithoutRowidTable(t *testing.T) {
 	if count != len(keys) {
 		t.Errorf("forward scan count = %d, want %d", count, len(keys))
 	}
+}
 
-	// Seek to a specific key.
+// TestBtreeMain_CreateWithoutRowidTable_Seek verifies SeekComposite on a
+// WITHOUT ROWID table.
+func TestBtreeMain_CreateWithoutRowidTable_Seek(t *testing.T) {
+	t.Parallel()
+
+	bt := NewBtree(4096)
+	root, err := bt.CreateWithoutRowidTable()
+	if err != nil {
+		t.Fatalf("CreateWithoutRowidTable: %v", err)
+	}
+	cursor := NewCursorWithOptions(bt, root, true)
+	for _, name := range []string{"alpha", "beta", "gamma", "delta"} {
+		k := withoutrowid.EncodeCompositeKey([]interface{}{name})
+		if err := cursor.InsertWithComposite(0, k, []byte("value")); err != nil {
+			t.Fatalf("InsertWithComposite(%s): %v", name, err)
+		}
+	}
+
 	found, err := cursor.SeekComposite(withoutrowid.EncodeCompositeKey([]interface{}{"beta"}))
 	if err != nil {
 		t.Fatalf("SeekComposite: %v", err)
@@ -80,12 +105,28 @@ func TestBtreeMain_CreateWithoutRowidTable(t *testing.T) {
 	}
 }
 
+// countCompositeForwardScan counts the number of entries reachable via forward scan.
+func countCompositeForwardScan(t *testing.T, scan *BtCursor) int {
+	t.Helper()
+	if err := scan.MoveToFirst(); err != nil {
+		t.Fatalf("MoveToFirst: %v", err)
+	}
+	seen := 0
+	for scan.IsValid() {
+		seen++
+		if err := scan.Next(); err != nil {
+			break
+		}
+	}
+	return seen
+}
+
 // TestBtreeMain_CreateWithoutRowidTable_ManyRows forces the WITHOUT ROWID tree
 // through page splits so that interior composite pages are created.
 func TestBtreeMain_CreateWithoutRowidTable_ManyRows(t *testing.T) {
 	t.Parallel()
 
-	bt := NewBtree(512) // small pages → splits happen quickly
+	bt := NewBtree(512) // small pages -> splits happen quickly
 	root, err := bt.CreateWithoutRowidTable()
 	if err != nil {
 		t.Fatalf("CreateWithoutRowidTable: %v", err)
@@ -105,18 +146,8 @@ func TestBtreeMain_CreateWithoutRowidTable_ManyRows(t *testing.T) {
 		t.Fatalf("only inserted %d rows; need at least 2", inserted)
 	}
 
-	// Verify all inserted rows are reachable.
 	scan := NewCursorWithOptions(bt, cursor.RootPage, true)
-	if err := scan.MoveToFirst(); err != nil {
-		t.Fatalf("MoveToFirst: %v", err)
-	}
-	seen := 0
-	for scan.IsValid() {
-		seen++
-		if err := scan.Next(); err != nil {
-			break
-		}
-	}
+	seen := countCompositeForwardScan(t, scan)
 	if seen != inserted {
 		t.Errorf("forward scan = %d entries, want %d", seen, inserted)
 	}
@@ -138,11 +169,15 @@ func TestBtreeMain_ClearTableData_LeafRoot(t *testing.T) {
 			t.Fatalf("Insert(%d): %v", i, err)
 		}
 	}
-
 	if err := bt.ClearTableData(root); err != nil {
 		t.Fatalf("ClearTableData: %v", err)
 	}
+	verifyClearedLeafRoot(t, bt, root)
+}
 
+// verifyClearedLeafRoot checks that a page has been reset to an empty leaf table.
+func verifyClearedLeafRoot(t *testing.T, bt *Btree, root uint32) {
+	t.Helper()
 	pageData, err := bt.GetPage(root)
 	if err != nil {
 		t.Fatalf("GetPage after clear: %v", err)
@@ -229,165 +264,162 @@ func TestBtreeMain_DropInteriorChildren(t *testing.T) {
 	}
 }
 
-// TestBtreeMain_ParsePage_AllTypes exercises ParsePage for leaf table,
-// interior table, leaf index, and interior index pages.
-func TestBtreeMain_ParsePage_AllTypes(t *testing.T) {
+// TestBtreeMain_ParsePage_LeafTable exercises ParsePage for a leaf table page.
+func TestBtreeMain_ParsePage_LeafTable(t *testing.T) {
 	t.Parallel()
+	bt := NewBtree(4096)
+	root, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	cursor := NewCursor(bt, root)
+	for i := int64(1); i <= 5; i++ {
+		cursor.Insert(i, []byte("pay"))
+	}
+	header, cells, err := bt.ParsePage(root)
+	if err != nil {
+		t.Fatalf("ParsePage leaf table: %v", err)
+	}
+	if header.PageType != PageTypeLeafTable {
+		t.Errorf("PageType = 0x%02x, want PageTypeLeafTable", header.PageType)
+	}
+	if len(cells) != int(header.NumCells) {
+		t.Errorf("cells len %d != NumCells %d", len(cells), header.NumCells)
+	}
+	if header.NumCells == 0 {
+		t.Error("expected at least 1 cell on leaf table page")
+	}
+}
 
+// TestBtreeMain_ParsePage_InteriorTable exercises ParsePage for an interior table page.
+func TestBtreeMain_ParsePage_InteriorTable(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(512) // small -> forces interior pages
+	root, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	cursor := NewCursor(bt, root)
+	for i := int64(1); i <= 200; i++ {
+		if err := cursor.Insert(i, make([]byte, 20)); err != nil {
+			break
+		}
+	}
+	// ParsePage on the root which should now be an interior page.
+	header, cells, err := bt.ParsePage(cursor.RootPage)
+	if err != nil {
+		t.Fatalf("ParsePage interior table: %v", err)
+	}
+	// Root might still be a leaf if inserts were limited; just verify no error.
+	_ = header
+	_ = cells
+}
+
+// TestBtreeMain_ParsePage_LeafIndex exercises ParsePage for a leaf index page.
+func TestBtreeMain_ParsePage_LeafIndex(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(4096)
+	root, err := createIndexPage(bt)
+	if err != nil {
+		t.Fatalf("createIndexPage: %v", err)
+	}
+	idxCursor := NewIndexCursor(bt, root)
+	for i := 0; i < 5; i++ {
+		idxCursor.InsertIndex([]byte(fmt.Sprintf("key%02d", i)), int64(i))
+	}
+	header, cells, err := bt.ParsePage(root)
+	if err != nil {
+		t.Fatalf("ParsePage leaf index: %v", err)
+	}
+	if header.PageType != PageTypeLeafIndex {
+		t.Errorf("PageType = 0x%02x, want PageTypeLeafIndex", header.PageType)
+	}
+	if len(cells) == 0 {
+		t.Error("expected cells on leaf index page")
+	}
+}
+
+// TestBtreeMain_ParsePage_InteriorIndex exercises ParsePage for an interior index page
+// built manually so ParseCell gets called for PageTypeInteriorIndex.
+func TestBtreeMain_ParsePage_InteriorIndex(t *testing.T) {
+	t.Parallel()
 	const pageSize = 4096
+	bt := NewBtree(pageSize)
 
-	t.Run("leaf_table", func(t *testing.T) {
-		t.Parallel()
-		bt := NewBtree(pageSize)
-		root, err := bt.CreateTable()
-		if err != nil {
-			t.Fatalf("CreateTable: %v", err)
-		}
-		cursor := NewCursor(bt, root)
-		for i := int64(1); i <= 5; i++ {
-			cursor.Insert(i, []byte("pay"))
-		}
-		header, cells, err := bt.ParsePage(root)
-		if err != nil {
-			t.Fatalf("ParsePage leaf table: %v", err)
-		}
-		if header.PageType != PageTypeLeafTable {
-			t.Errorf("PageType = 0x%02x, want PageTypeLeafTable", header.PageType)
-		}
-		if len(cells) != int(header.NumCells) {
-			t.Errorf("cells len %d != NumCells %d", len(cells), header.NumCells)
-		}
-		if header.NumCells == 0 {
-			t.Error("expected at least 1 cell on leaf table page")
-		}
-	})
+	// Leaf page 2
+	leaf2 := make([]byte, pageSize)
+	leaf2[PageHeaderOffsetType] = PageTypeLeafIndex
+	binary.BigEndian.PutUint16(leaf2[PageHeaderOffsetNumCells:], 1)
+	payload2 := encodeIndexPayload([]byte("aaa"), 1)
+	cell2 := EncodeIndexLeafCell(payload2)
+	cellOff2 := uint32(pageSize) - uint32(len(cell2))
+	copy(leaf2[cellOff2:], cell2)
+	binary.BigEndian.PutUint16(leaf2[PageHeaderOffsetCellStart:], uint16(cellOff2))
+	binary.BigEndian.PutUint16(leaf2[PageHeaderSizeLeaf:], uint16(cellOff2))
+	bt.SetPage(2, leaf2)
 
-	t.Run("interior_table", func(t *testing.T) {
-		t.Parallel()
-		bt := NewBtree(512) // small → forces interior pages
-		root, err := bt.CreateTable()
-		if err != nil {
-			t.Fatalf("CreateTable: %v", err)
-		}
-		cursor := NewCursor(bt, root)
-		for i := int64(1); i <= 200; i++ {
-			if err := cursor.Insert(i, make([]byte, 20)); err != nil {
-				break
-			}
-		}
-		// ParsePage on the root which should now be an interior page.
-		header, cells, err := bt.ParsePage(cursor.RootPage)
-		if err != nil {
-			t.Fatalf("ParsePage interior table: %v", err)
-		}
-		// Root might still be a leaf if inserts were limited; just verify no error.
-		_ = header
-		_ = cells
-	})
+	// Leaf page 3
+	leaf3 := make([]byte, pageSize)
+	leaf3[PageHeaderOffsetType] = PageTypeLeafIndex
+	binary.BigEndian.PutUint16(leaf3[PageHeaderOffsetNumCells:], 1)
+	payload3 := encodeIndexPayload([]byte("zzz"), 2)
+	cell3 := EncodeIndexLeafCell(payload3)
+	cellOff3 := uint32(pageSize) - uint32(len(cell3))
+	copy(leaf3[cellOff3:], cell3)
+	binary.BigEndian.PutUint16(leaf3[PageHeaderOffsetCellStart:], uint16(cellOff3))
+	binary.BigEndian.PutUint16(leaf3[PageHeaderSizeLeaf:], uint16(cellOff3))
+	bt.SetPage(3, leaf3)
 
-	t.Run("leaf_index", func(t *testing.T) {
-		t.Parallel()
-		bt := NewBtree(pageSize)
-		root, err := createIndexPage(bt)
-		if err != nil {
-			t.Fatalf("createIndexPage: %v", err)
-		}
-		idxCursor := NewIndexCursor(bt, root)
-		for i := 0; i < 5; i++ {
-			idxCursor.InsertIndex([]byte(fmt.Sprintf("key%02d", i)), int64(i))
-		}
-		header, cells, err := bt.ParsePage(root)
-		if err != nil {
-			t.Fatalf("ParsePage leaf index: %v", err)
-		}
-		if header.PageType != PageTypeLeafIndex {
-			t.Errorf("PageType = 0x%02x, want PageTypeLeafIndex", header.PageType)
-		}
-		if len(cells) == 0 {
-			t.Error("expected cells on leaf index page")
-		}
-	})
+	// Interior root (page 1 has FileHeaderSize offset)
+	interior := make([]byte, pageSize)
+	ho := FileHeaderSize
+	interior[ho+PageHeaderOffsetType] = PageTypeInteriorIndex
+	binary.BigEndian.PutUint16(interior[ho+PageHeaderOffsetNumCells:], 1)
+	binary.BigEndian.PutUint32(interior[ho+PageHeaderOffsetRightChild:], 3)
+	intPayload := encodeIndexPayload([]byte("mmm"), 10)
+	intCell := EncodeIndexInteriorCell(2, intPayload)
+	cellOff := uint32(pageSize) - uint32(len(intCell))
+	copy(interior[cellOff:], intCell)
+	binary.BigEndian.PutUint16(interior[ho+PageHeaderOffsetCellStart:], uint16(cellOff))
+	binary.BigEndian.PutUint16(interior[ho+PageHeaderSizeInterior:], uint16(cellOff))
+	bt.SetPage(1, interior)
 
-	t.Run("interior_index", func(t *testing.T) {
-		t.Parallel()
-		// Build an interior index page manually so ParseCell gets called for
-		// PageTypeInteriorIndex.
-		bt := NewBtree(pageSize)
+	header, cells, err := bt.ParsePage(1)
+	if err != nil {
+		t.Fatalf("ParsePage interior index: %v", err)
+	}
+	if header.PageType != PageTypeInteriorIndex {
+		t.Errorf("PageType = 0x%02x, want PageTypeInteriorIndex", header.PageType)
+	}
+	if len(cells) == 0 {
+		t.Error("expected cells on interior index page")
+	}
+	if cells[0].ChildPage == 0 {
+		t.Error("expected non-zero ChildPage on interior index cell")
+	}
+}
 
-		// Leaf page 2
-		leaf2 := make([]byte, pageSize)
-		leaf2[PageHeaderOffsetType] = PageTypeLeafIndex
-		binary.BigEndian.PutUint16(leaf2[PageHeaderOffsetNumCells:], 1)
-		payload2 := encodeIndexPayload([]byte("aaa"), 1)
-		cell2 := EncodeIndexLeafCell(payload2)
-		cellOff2 := uint32(pageSize) - uint32(len(cell2))
-		copy(leaf2[cellOff2:], cell2)
-		binary.BigEndian.PutUint16(leaf2[PageHeaderOffsetCellStart:], uint16(cellOff2))
-		binary.BigEndian.PutUint16(leaf2[PageHeaderSizeLeaf:], uint16(cellOff2))
-		bt.SetPage(2, leaf2)
-
-		// Leaf page 3
-		leaf3 := make([]byte, pageSize)
-		leaf3[PageHeaderOffsetType] = PageTypeLeafIndex
-		binary.BigEndian.PutUint16(leaf3[PageHeaderOffsetNumCells:], 1)
-		payload3 := encodeIndexPayload([]byte("zzz"), 2)
-		cell3 := EncodeIndexLeafCell(payload3)
-		cellOff3 := uint32(pageSize) - uint32(len(cell3))
-		copy(leaf3[cellOff3:], cell3)
-		binary.BigEndian.PutUint16(leaf3[PageHeaderOffsetCellStart:], uint16(cellOff3))
-		binary.BigEndian.PutUint16(leaf3[PageHeaderSizeLeaf:], uint16(cellOff3))
-		bt.SetPage(3, leaf3)
-
-		// Interior root (page 1 has FileHeaderSize offset)
-		interior := make([]byte, pageSize)
-		ho := FileHeaderSize
-		interior[ho+PageHeaderOffsetType] = PageTypeInteriorIndex
-		binary.BigEndian.PutUint16(interior[ho+PageHeaderOffsetNumCells:], 1)
-		binary.BigEndian.PutUint32(interior[ho+PageHeaderOffsetRightChild:], 3)
-		intPayload := encodeIndexPayload([]byte("mmm"), 10)
-		intCell := EncodeIndexInteriorCell(2, intPayload)
-		cellOff := uint32(pageSize) - uint32(len(intCell))
-		copy(interior[cellOff:], intCell)
-		binary.BigEndian.PutUint16(interior[ho+PageHeaderOffsetCellStart:], uint16(cellOff))
-		binary.BigEndian.PutUint16(interior[ho+PageHeaderSizeInterior:], uint16(cellOff))
-		bt.SetPage(1, interior)
-
-		header, cells, err := bt.ParsePage(1)
-		if err != nil {
-			t.Fatalf("ParsePage interior index: %v", err)
-		}
-		if header.PageType != PageTypeInteriorIndex {
-			t.Errorf("PageType = 0x%02x, want PageTypeInteriorIndex", header.PageType)
-		}
-		if len(cells) == 0 {
-			t.Error("expected cells on interior index page")
-		}
-		if cells[0].ChildPage == 0 {
-			t.Error("expected non-zero ChildPage on interior index cell")
-		}
-	})
-
-	t.Run("without_rowid_leaf", func(t *testing.T) {
-		t.Parallel()
-		bt := NewBtree(pageSize)
-		root, err := bt.CreateWithoutRowidTable()
-		if err != nil {
-			t.Fatalf("CreateWithoutRowidTable: %v", err)
-		}
-		cursor := NewCursorWithOptions(bt, root, true)
-		for i := 0; i < 3; i++ {
-			k := withoutrowid.EncodeCompositeKey([]interface{}{fmt.Sprintf("item%d", i)})
-			cursor.InsertWithComposite(0, k, []byte("val"))
-		}
-		header, cells, err := bt.ParsePage(root)
-		if err != nil {
-			t.Fatalf("ParsePage without_rowid: %v", err)
-		}
-		if header.PageType != PageTypeLeafTableNoInt {
-			t.Errorf("PageType = 0x%02x, want PageTypeLeafTableNoInt", header.PageType)
-		}
-		_ = cells
-	})
+// TestBtreeMain_ParsePage_WithoutRowidLeaf exercises ParsePage for a WITHOUT ROWID leaf page.
+func TestBtreeMain_ParsePage_WithoutRowidLeaf(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(4096)
+	root, err := bt.CreateWithoutRowidTable()
+	if err != nil {
+		t.Fatalf("CreateWithoutRowidTable: %v", err)
+	}
+	cursor := NewCursorWithOptions(bt, root, true)
+	for i := 0; i < 3; i++ {
+		k := withoutrowid.EncodeCompositeKey([]interface{}{fmt.Sprintf("item%d", i)})
+		cursor.InsertWithComposite(0, k, []byte("val"))
+	}
+	header, cells, err := bt.ParsePage(root)
+	if err != nil {
+		t.Fatalf("ParsePage without_rowid: %v", err)
+	}
+	if header.PageType != PageTypeLeafTableNoInt {
+		t.Errorf("PageType = 0x%02x, want PageTypeLeafTableNoInt", header.PageType)
+	}
+	_ = cells
 }
 
 // TestBtreeMain_ValidatePage_Paths exercises uncovered branches of validatePage:
@@ -467,96 +499,85 @@ func TestBtreeMain_ValidatePage_Paths(t *testing.T) {
 	})
 }
 
-// TestBtreeMain_IndexCellParsing drives the index cell parsing helpers
-// (parseIndexInteriorCell, completeIndexCellParse, computeIndexCellSizeAndLocal,
-// extractIndexPayloadAndOverflow, calculateMinLocal, calculateLocalPayload) by
-// inserting many index entries with various payload sizes.
-func TestBtreeMain_IndexCellParsing(t *testing.T) {
+// TestBtreeMain_IndexCellParsing_SmallPayloads drives the index cell parsing helpers
+// with small payloads that fit locally.
+func TestBtreeMain_IndexCellParsing_SmallPayloads(t *testing.T) {
 	t.Parallel()
+	bt := NewBtree(4096)
+	root, _ := createIndexPage(bt)
+	cursor := NewIndexCursor(bt, root)
+	for i := 0; i < 50; i++ {
+		key := []byte(fmt.Sprintf("smallkey%04d", i))
+		cursor.InsertIndex(key, int64(i))
+	}
+	header, cells, err := bt.ParsePage(root)
+	if err != nil {
+		t.Fatalf("ParsePage: %v", err)
+	}
+	_ = header
+	for i, c := range cells {
+		if c.PayloadSize == 0 {
+			t.Errorf("cell[%d] PayloadSize = 0", i)
+		}
+	}
+}
 
-	const pageSize = 4096
+// TestBtreeMain_IndexCellParsing_LargePayloads exercises the overflow branch in
+// extractIndexPayloadAndOverflow using keys larger than maxLocal.
+func TestBtreeMain_IndexCellParsing_LargePayloads(t *testing.T) {
+	t.Parallel()
+	// Use a 1024-byte page so maxLocal = 989. Insert keys > 989 bytes to
+	// force the overflow branch in extractIndexPayloadAndOverflow.
+	bt := NewBtree(1024)
+	root, _ := createIndexPage(bt)
+	cursor := NewIndexCursor(bt, root)
+	inserted := 0
+	for i := 0; i < 5; i++ {
+		key := bytes.Repeat([]byte{byte(i + 1)}, 992)
+		if err := cursor.InsertIndex(key, int64(i)); err != nil {
+			break
+		}
+		inserted++
+	}
+	if inserted == 0 {
+		t.Skip("no entries inserted with large payload (page too small for any overflow cell)")
+	}
+	if err := cursor.MoveToFirst(); err != nil {
+		t.Skipf("MoveToFirst after large-payload inserts: %v", err)
+	}
+	count := 0
+	for cursor.IsValid() {
+		count++
+		if err := cursor.NextIndex(); err != nil {
+			break
+		}
+	}
+	if count == 0 {
+		t.Error("expected at least one index entry with large payload")
+	}
+}
 
-	t.Run("small_payloads_local", func(t *testing.T) {
-		t.Parallel()
-		bt := NewBtree(pageSize)
-		root, _ := createIndexPage(bt)
-		cursor := NewIndexCursor(bt, root)
-		// Insert entries with small payloads (fit locally).
-		for i := 0; i < 50; i++ {
-			key := []byte(fmt.Sprintf("smallkey%04d", i))
-			cursor.InsertIndex(key, int64(i))
-		}
-		header, cells, err := bt.ParsePage(root)
-		if err != nil {
-			t.Fatalf("ParsePage: %v", err)
-		}
-		_ = header
-		for i, c := range cells {
-			if c.PayloadSize == 0 {
-				t.Errorf("cell[%d] PayloadSize = 0", i)
-			}
-		}
+// TestBtreeMain_IndexCellParsing_MultiLevel forces interior index pages by inserting
+// many entries into a small btree and verifies forward and backward scans.
+func TestBtreeMain_IndexCellParsing_MultiLevel(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(512)
+	root, _ := createIndexPage(bt)
+	cursor := NewIndexCursor(bt, root)
+	inserted := insertIndexEntriesN(cursor, 200, func(i int) []byte {
+		return []byte(fmt.Sprintf("idx%06d", i))
 	})
-
-	t.Run("large_payloads_overflow", func(t *testing.T) {
-		t.Parallel()
-		// Use a 1024-byte page so maxLocal = 989. Insert keys > 989 bytes to
-		// force the overflow branch in extractIndexPayloadAndOverflow.
-		bt := NewBtree(1024)
-		root, _ := createIndexPage(bt)
-		cursor := NewIndexCursor(bt, root)
-		inserted := 0
-		for i := 0; i < 5; i++ {
-			// Key > maxLocal (989) to trigger overflow handling.
-			key := bytes.Repeat([]byte{byte(i + 1)}, 992)
-			if err := cursor.InsertIndex(key, int64(i)); err != nil {
-				// May fail due to page limits; that is acceptable.
-				break
-			}
-			inserted++
-		}
-		if inserted == 0 {
-			t.Skip("no entries inserted with large payload (page too small for any overflow cell)")
-		}
-		// Scan forward; parsing these cells exercises overflow extraction.
-		if err := cursor.MoveToFirst(); err != nil {
-			t.Skipf("MoveToFirst after large-payload inserts: %v", err)
-		}
-		count := 0
-		for cursor.IsValid() {
-			count++
-			if err := cursor.NextIndex(); err != nil {
-				break
-			}
-		}
-		if count == 0 {
-			t.Error("expected at least one index entry with large payload")
-		}
-	})
-
-	t.Run("multi_level_index_interior_cells", func(t *testing.T) {
-		t.Parallel()
-		// Force interior index pages by inserting many entries into a small btree.
-		bt := NewBtree(512)
-		root, _ := createIndexPage(bt)
-		cursor := NewIndexCursor(bt, root)
-		inserted := insertIndexEntriesN(cursor, 200, func(i int) []byte {
-			return []byte(fmt.Sprintf("idx%06d", i))
-		})
-		if inserted < 5 {
-			t.Fatalf("only %d entries inserted", inserted)
-		}
-		// Full forward scan parses all leaf and interior cells.
-		fwdCount := countIndexForward(cursor)
-		if fwdCount != inserted {
-			t.Errorf("forward count = %d, want %d", fwdCount, inserted)
-		}
-		// Full backward scan likewise.
-		bwdCount := countIndexBackward(cursor)
-		if bwdCount != inserted {
-			t.Errorf("backward count = %d, want %d", bwdCount, inserted)
-		}
-	})
+	if inserted < 5 {
+		t.Fatalf("only %d entries inserted", inserted)
+	}
+	fwdCount := countIndexForward(cursor)
+	if fwdCount != inserted {
+		t.Errorf("forward count = %d, want %d", fwdCount, inserted)
+	}
+	bwdCount := countIndexBackward(cursor)
+	if bwdCount != inserted {
+		t.Errorf("backward count = %d, want %d", bwdCount, inserted)
+	}
 }
 
 // TestBtreeMain_ComputeIndexCellSizeAndLocal directly exercises

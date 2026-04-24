@@ -550,7 +550,7 @@ func TestDispatchWrapperRewriteUnknownType(t *testing.T) {
 }
 
 // TestCopyExpressionTypes exercises copyExpression for each supported type.
-func TestCopyExpressionTypes(t *testing.T) {
+func TestCopyExpressionTypes_SimpleTypes(t *testing.T) {
 	t.Run("nil", func(t *testing.T) {
 		if copyExpression(nil) != nil {
 			t.Error("expected nil")
@@ -575,22 +575,32 @@ func TestCopyExpressionTypes(t *testing.T) {
 		}
 	})
 
-	t.Run("BinaryExpr", func(t *testing.T) {
-		orig := &parser.BinaryExpr{
-			Left:  makeIdentExpr("a"),
-			Op:    parser.OpPlus,
-			Right: makeIdentExpr("b"),
-		}
+	t.Run("UnknownType", func(t *testing.T) {
+		orig := &parser.InExpr{Expr: makeIdentExpr("x")}
 		cp := copyExpression(orig)
-		bin, ok := cp.(*parser.BinaryExpr)
-		if !ok || bin == orig {
-			t.Error("expected deep copy of BinaryExpr")
-		}
-		if bin.Left == orig.Left {
-			t.Error("expected deep copy of Left")
+		if cp != orig {
+			t.Error("expected same instance for unknown type")
 		}
 	})
+}
 
+func TestCopyExpressionTypes_BinaryExpr(t *testing.T) {
+	orig := &parser.BinaryExpr{
+		Left:  makeIdentExpr("a"),
+		Op:    parser.OpPlus,
+		Right: makeIdentExpr("b"),
+	}
+	cp := copyExpression(orig)
+	bin, ok := cp.(*parser.BinaryExpr)
+	if !ok || bin == orig {
+		t.Error("expected deep copy of BinaryExpr")
+	}
+	if bin.Left == orig.Left {
+		t.Error("expected deep copy of Left")
+	}
+}
+
+func TestCopyExpressionTypes_UnaryAndFunctionExpr(t *testing.T) {
 	t.Run("UnaryExpr", func(t *testing.T) {
 		orig := &parser.UnaryExpr{Op: parser.OpNeg, Expr: makeIdentExpr("a")}
 		cp := copyExpression(orig)
@@ -609,14 +619,6 @@ func TestCopyExpressionTypes(t *testing.T) {
 		}
 		if len(fn.Args) != 1 {
 			t.Error("expected args to be copied")
-		}
-	})
-
-	t.Run("UnknownType", func(t *testing.T) {
-		orig := &parser.InExpr{Expr: makeIdentExpr("x")}
-		cp := copyExpression(orig)
-		if cp != orig {
-			t.Error("expected same instance for unknown type")
 		}
 	})
 }

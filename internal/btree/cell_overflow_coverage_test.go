@@ -9,29 +9,30 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/withoutrowid"
 )
 
-// TestCellOverflowWithoutRowidComposite exercises parseTableLeafCompositeCell by
-// inserting rows into a WITHOUT ROWID table using composite primary keys.
-// Small page size (512) forces splits and covers multiple code paths.
-func TestCellOverflowWithoutRowidComposite(t *testing.T) {
+// TestCellOverflowWithoutRowidComposite_RoundTrip exercises parseTableLeafCompositeCell
+// via ParseCell for basic round-trip verification.
+func TestCellOverflowWithoutRowidComposite_RoundTrip(t *testing.T) {
 	t.Parallel()
 
-	t.Run("basic composite cell round-trip", func(t *testing.T) {
-		// Directly test parseTableLeafCompositeCell via ParseCell
-		keyBytes := withoutrowid.EncodeCompositeKey([]interface{}{"region-west", "user-12345"})
-		payload := bytes.Repeat([]byte("data"), 20)
+	keyBytes := withoutrowid.EncodeCompositeKey([]interface{}{"region-west", "user-12345"})
+	payload := bytes.Repeat([]byte("data"), 20)
 
-		cell := EncodeTableLeafCompositeCell(keyBytes, payload)
-		info, err := ParseCell(PageTypeLeafTableNoInt, cell, 4096)
-		if err != nil {
-			t.Fatalf("ParseCell(PageTypeLeafTableNoInt) error = %v", err)
-		}
-		if !bytes.Equal(info.KeyBytes, keyBytes) {
-			t.Errorf("KeyBytes mismatch: got %v, want %v", info.KeyBytes, keyBytes)
-		}
-		if info.PayloadSize != uint32(len(payload)) {
-			t.Errorf("PayloadSize = %d, want %d", info.PayloadSize, len(payload))
-		}
-	})
+	cell := EncodeTableLeafCompositeCell(keyBytes, payload)
+	info, err := ParseCell(PageTypeLeafTableNoInt, cell, 4096)
+	if err != nil {
+		t.Fatalf("ParseCell(PageTypeLeafTableNoInt) error = %v", err)
+	}
+	if !bytes.Equal(info.KeyBytes, keyBytes) {
+		t.Errorf("KeyBytes mismatch: got %v, want %v", info.KeyBytes, keyBytes)
+	}
+	if info.PayloadSize != uint32(len(payload)) {
+		t.Errorf("PayloadSize = %d, want %d", info.PayloadSize, len(payload))
+	}
+}
+
+// TestCellOverflowWithoutRowidComposite_Errors exercises error paths for composite cells.
+func TestCellOverflowWithoutRowidComposite_Errors(t *testing.T) {
+	t.Parallel()
 
 	t.Run("empty cell data error", func(t *testing.T) {
 		_, err := ParseCell(PageTypeLeafTableNoInt, []byte{}, 4096)
@@ -41,7 +42,6 @@ func TestCellOverflowWithoutRowidComposite(t *testing.T) {
 	})
 
 	t.Run("key length exceeds cell size error", func(t *testing.T) {
-		// Craft a cell where key length varint says more bytes than exist
 		buf := make([]byte, 10)
 		n := PutVarint(buf, 5)       // payloadSize = 5
 		n += PutVarint(buf[n:], 200) // keyLen = 200, but only a few bytes remain
@@ -50,76 +50,83 @@ func TestCellOverflowWithoutRowidComposite(t *testing.T) {
 			t.Error("ParseCell should fail when key length exceeds cell data")
 		}
 	})
+}
 
-	t.Run("composite pk insert many rows", func(t *testing.T) {
-		bt := NewBtree(512)
-		root, err := bt.CreateWithoutRowidTable()
-		if err != nil {
-			t.Fatalf("CreateWithoutRowidTable: %v", err)
-		}
-		cursor := NewCursorWithOptions(bt, root, true)
-		payload := bytes.Repeat([]byte("v"), 30)
+// TestCellOverflowWithoutRowidComposite_InsertMany inserts many rows into a
+// WITHOUT ROWID table using composite primary keys with a small page size.
+func TestCellOverflowWithoutRowidComposite_InsertMany(t *testing.T) {
+	t.Parallel()
 
-		const n = 50
-		for i := 0; i < n; i++ {
-			key := withoutrowid.EncodeCompositeKey([]interface{}{
-				fmt.Sprintf("region-%03d", i%5),
-				fmt.Sprintf("user-%06d", i),
-			})
-			if err := cursor.InsertWithComposite(0, key, payload); err != nil {
-				t.Fatalf("InsertWithComposite(%d): %v", i, err)
-			}
-		}
+	bt := NewBtree(512)
+	root, err := bt.CreateWithoutRowidTable()
+	if err != nil {
+		t.Fatalf("CreateWithoutRowidTable: %v", err)
+	}
+	cursor := NewCursorWithOptions(bt, root, true)
+	payload := bytes.Repeat([]byte("v"), 30)
 
-		scan := NewCursorWithOptions(bt, cursor.RootPage, true)
-		if err := scan.MoveToFirst(); err != nil {
-			t.Fatalf("MoveToFirst: %v", err)
+	const n = 50
+	for i := 0; i < n; i++ {
+		key := withoutrowid.EncodeCompositeKey([]interface{}{
+			fmt.Sprintf("region-%03d", i%5),
+			fmt.Sprintf("user-%06d", i),
+		})
+		if err := cursor.InsertWithComposite(0, key, payload); err != nil {
+			t.Fatalf("InsertWithComposite(%d): %v", i, err)
 		}
-		count := 0
-		for scan.IsValid() {
-			count++
-			if err := scan.Next(); err != nil {
-				break
-			}
-		}
-		if count != n {
-			t.Errorf("expected %d rows, got %d", n, count)
-		}
-	})
+	}
 
-	t.Run("composite pk with large key values", func(t *testing.T) {
-		bt := NewBtree(4096)
-		root, err := bt.CreateWithoutRowidTable()
-		if err != nil {
-			t.Fatalf("CreateWithoutRowidTable: %v", err)
+	scan := NewCursorWithOptions(bt, cursor.RootPage, true)
+	if err := scan.MoveToFirst(); err != nil {
+		t.Fatalf("MoveToFirst: %v", err)
+	}
+	count := 0
+	for scan.IsValid() {
+		count++
+		if err := scan.Next(); err != nil {
+			break
 		}
-		cursor := NewCursorWithOptions(bt, root, true)
-		payload := bytes.Repeat([]byte("p"), 50)
+	}
+	if count != n {
+		t.Errorf("expected %d rows, got %d", n, count)
+	}
+}
 
-		// Large key components to exercise key-length varint path
-		for i := 0; i < 20; i++ {
-			longPart := fmt.Sprintf("%-100s", fmt.Sprintf("key-component-%d", i))
-			key := withoutrowid.EncodeCompositeKey([]interface{}{longPart, int64(i)})
-			if err := cursor.InsertWithComposite(0, key, payload); err != nil {
-				t.Fatalf("InsertWithComposite(%d): %v", i, err)
-			}
-		}
+// TestCellOverflowWithoutRowidComposite_LargeKeys exercises the key-length
+// varint path with large key components.
+func TestCellOverflowWithoutRowidComposite_LargeKeys(t *testing.T) {
+	t.Parallel()
 
-		scan := NewCursorWithOptions(bt, cursor.RootPage, true)
-		count := 0
-		if err := scan.MoveToFirst(); err != nil {
-			t.Fatalf("MoveToFirst: %v", err)
+	bt := NewBtree(4096)
+	root, err := bt.CreateWithoutRowidTable()
+	if err != nil {
+		t.Fatalf("CreateWithoutRowidTable: %v", err)
+	}
+	cursor := NewCursorWithOptions(bt, root, true)
+	payload := bytes.Repeat([]byte("p"), 50)
+
+	for i := 0; i < 20; i++ {
+		longPart := fmt.Sprintf("%-100s", fmt.Sprintf("key-component-%d", i))
+		key := withoutrowid.EncodeCompositeKey([]interface{}{longPart, int64(i)})
+		if err := cursor.InsertWithComposite(0, key, payload); err != nil {
+			t.Fatalf("InsertWithComposite(%d): %v", i, err)
 		}
-		for scan.IsValid() {
-			count++
-			if err := scan.Next(); err != nil {
-				break
-			}
+	}
+
+	scan := NewCursorWithOptions(bt, cursor.RootPage, true)
+	count := 0
+	if err := scan.MoveToFirst(); err != nil {
+		t.Fatalf("MoveToFirst: %v", err)
+	}
+	for scan.IsValid() {
+		count++
+		if err := scan.Next(); err != nil {
+			break
 		}
-		if count != 20 {
-			t.Errorf("expected 20 rows, got %d", count)
-		}
-	})
+	}
+	if count != 20 {
+		t.Errorf("expected 20 rows, got %d", count)
+	}
 }
 
 // TestCellOverflowParseLeafCellHeader exercises parseLeafCellHeader error paths
@@ -321,132 +328,123 @@ func TestCellOverflowCompleteIndexCellParse(t *testing.T) {
 	})
 }
 
-// TestCellOverflowParseIndexInteriorCell exercises parseIndexInteriorCell by
-// constructing multi-level index B-trees manually (the IndexCursor does not support
-// automatic splits, so we build the page structures by hand).
-func TestCellOverflowParseIndexInteriorCell(t *testing.T) {
+// TestCellOverflowParseIndexInteriorCell_MultiLevel exercises parseIndexInteriorCell
+// by constructing a multi-level index B-tree manually and traversing it.
+func TestCellOverflowParseIndexInteriorCell_MultiLevel(t *testing.T) {
 	t.Parallel()
 
-	// encodeIndexPayload is a local helper (mirrors the private function used in zero_coverage_test).
-	encodePayload := func(key []byte, rowid int64) []byte {
-		rowidVarint := make([]byte, 9)
-		n := PutVarint(rowidVarint, uint64(rowid))
-		out := make([]byte, len(key)+n)
-		copy(out, key)
-		copy(out[len(key):], rowidVarint[:n])
-		return out
+	bt := NewBtree(4096)
+
+	leaf1 := createIndexLeafPage(2, 4096, []struct {
+		key   []byte
+		rowid int64
+	}{
+		{[]byte("alpha"), 1},
+		{[]byte("bravo"), 2},
+		{[]byte("charlie"), 3},
+	})
+	bt.SetPage(2, leaf1)
+
+	leaf2 := createIndexLeafPage(3, 4096, []struct {
+		key   []byte
+		rowid int64
+	}{
+		{[]byte("delta"), 4},
+		{[]byte("echo"), 5},
+		{[]byte("foxtrot"), 6},
+	})
+	bt.SetPage(3, leaf2)
+
+	interior := createIndexInteriorPage(1, 4096, []struct {
+		childPage uint32
+		key       []byte
+		rowid     int64
+	}{
+		{2, []byte("charlie"), 3},
+	}, 3)
+	bt.SetPage(1, interior)
+
+	cursor := NewIndexCursor(bt, 1)
+	if err := cursor.MoveToFirst(); err != nil {
+		t.Fatalf("MoveToFirst: %v", err)
 	}
 
-	t.Run("manual multi-level index tree traversal hits interior pages", func(t *testing.T) {
-		bt := NewBtree(4096)
+	count := 0
+	for cursor.IsValid() {
+		count++
+		if err := cursor.NextIndex(); err != nil {
+			break
+		}
+	}
+	if count < 3 {
+		t.Errorf("expected at least 3 entries from multi-level index, got %d", count)
+	}
+}
 
-		// Build two leaf pages (pages 2 and 3) and one interior root (page 1).
-		leaf1 := createIndexLeafPage(2, 4096, []struct {
+// TestCellOverflowParseIndexInteriorCell_ManyCells exercises parseIndexInteriorCell
+// repeatedly by constructing an interior page with many child pointers.
+func TestCellOverflowParseIndexInteriorCell_ManyCells(t *testing.T) {
+	t.Parallel()
+
+	bt := NewBtree(4096)
+	const numLeaves = 8
+
+	for i := 0; i < numLeaves; i++ {
+		pageNum := uint32(i + 2)
+		key1 := []byte(fmt.Sprintf("key-%03d-a", i*2))
+		key2 := []byte(fmt.Sprintf("key-%03d-b", i*2+1))
+		leaf := createIndexLeafPage(pageNum, 4096, []struct {
 			key   []byte
 			rowid int64
 		}{
-			{[]byte("alpha"), 1},
-			{[]byte("bravo"), 2},
-			{[]byte("charlie"), 3},
+			{key1, int64(i*2 + 1)},
+			{key2, int64(i*2 + 2)},
 		})
-		bt.SetPage(2, leaf1)
+		bt.SetPage(pageNum, leaf)
+	}
 
-		leaf2 := createIndexLeafPage(3, 4096, []struct {
-			key   []byte
-			rowid int64
-		}{
-			{[]byte("delta"), 4},
-			{[]byte("echo"), 5},
-			{[]byte("foxtrot"), 6},
-		})
-		bt.SetPage(3, leaf2)
-
-		interiorPayload := encodePayload([]byte("charlie"), 3)
-		interior := createIndexInteriorPage(1, 4096, []struct {
+	interiorCells := make([]struct {
+		childPage uint32
+		key       []byte
+		rowid     int64
+	}, numLeaves-1)
+	for i := 0; i < numLeaves-1; i++ {
+		interiorCells[i] = struct {
 			childPage uint32
 			key       []byte
 			rowid     int64
 		}{
-			{2, []byte("charlie"), 3},
-		}, 3)
-		_ = interiorPayload
-		bt.SetPage(1, interior)
+			childPage: uint32(i + 2),
+			key:       []byte(fmt.Sprintf("key-%03d-b", i*2+1)),
+			rowid:     int64(i*2 + 2),
+		}
+	}
+	interior := createIndexInteriorPage(1, 4096, interiorCells, uint32(numLeaves+1))
+	bt.SetPage(1, interior)
 
-		cursor := NewIndexCursor(bt, 1)
-		if err := cursor.MoveToFirst(); err != nil {
-			t.Fatalf("MoveToFirst: %v", err)
-		}
+	cursor := NewIndexCursor(bt, 1)
+	if err := cursor.MoveToFirst(); err != nil {
+		t.Fatalf("MoveToFirst: %v", err)
+	}
 
-		count := 0
-		for cursor.IsValid() {
-			count++
-			if err := cursor.NextIndex(); err != nil {
-				break
-			}
+	count := 0
+	for cursor.IsValid() {
+		count++
+		if err := cursor.NextIndex(); err != nil {
+			break
 		}
-		if count < 3 {
-			t.Errorf("expected at least 3 entries from multi-level index, got %d", count)
-		}
-	})
+	}
+	if count < numLeaves {
+		t.Errorf("expected at least %d entries, got %d", numLeaves, count)
+	}
+}
 
-	t.Run("manual interior index with many cells hits parseIndexInteriorCell repeatedly", func(t *testing.T) {
-		bt := NewBtree(4096)
-		const numLeaves = 8
-
-		// Create leaf pages 2..numLeaves+1
-		for i := 0; i < numLeaves; i++ {
-			pageNum := uint32(i + 2)
-			key1 := []byte(fmt.Sprintf("key-%03d-a", i*2))
-			key2 := []byte(fmt.Sprintf("key-%03d-b", i*2+1))
-			leaf := createIndexLeafPage(pageNum, 4096, []struct {
-				key   []byte
-				rowid int64
-			}{
-				{key1, int64(i*2 + 1)},
-				{key2, int64(i*2 + 2)},
-			})
-			bt.SetPage(pageNum, leaf)
-		}
-
-		// Build interior root (page 1) with numLeaves-1 cells pointing to child pages 2..numLeaves
-		interiorCells := make([]struct {
-			childPage uint32
-			key       []byte
-			rowid     int64
-		}, numLeaves-1)
-		for i := 0; i < numLeaves-1; i++ {
-			interiorCells[i] = struct {
-				childPage uint32
-				key       []byte
-				rowid     int64
-			}{
-				childPage: uint32(i + 2),
-				key:       []byte(fmt.Sprintf("key-%03d-b", i*2+1)),
-				rowid:     int64(i*2 + 2),
-			}
-		}
-		interior := createIndexInteriorPage(1, 4096, interiorCells, uint32(numLeaves+1))
-		bt.SetPage(1, interior)
-
-		cursor := NewIndexCursor(bt, 1)
-		if err := cursor.MoveToFirst(); err != nil {
-			t.Fatalf("MoveToFirst: %v", err)
-		}
-
-		count := 0
-		for cursor.IsValid() {
-			count++
-			if err := cursor.NextIndex(); err != nil {
-				break
-			}
-		}
-		if count < numLeaves {
-			t.Errorf("expected at least %d entries, got %d", numLeaves, count)
-		}
-	})
+// TestCellOverflowParseIndexInteriorCell_DirectParse exercises parseIndexInteriorCell
+// with direct cell parsing including error paths and batch parsing.
+func TestCellOverflowParseIndexInteriorCell_DirectParse(t *testing.T) {
+	t.Parallel()
 
 	t.Run("error on too small cell data", func(t *testing.T) {
-		// parseIndexInteriorCell requires at least 4 bytes for child page
 		_, err := ParseCell(PageTypeInteriorIndex, []byte{0x01, 0x02}, 4096)
 		if err == nil {
 			t.Error("ParseCell(PageTypeInteriorIndex) with 2 bytes should fail")
@@ -469,7 +467,6 @@ func TestCellOverflowParseIndexInteriorCell(t *testing.T) {
 	})
 
 	t.Run("direct parse of many interior index cells", func(t *testing.T) {
-		// Parse 100 distinct interior cells directly to hit all branches of parseIndexInteriorCell
 		for i := 0; i < 100; i++ {
 			payload := []byte(fmt.Sprintf("interior-key-%05d", i))
 			cell := EncodeIndexInteriorCell(uint32(i+2), payload)
@@ -484,9 +481,9 @@ func TestCellOverflowParseIndexInteriorCell(t *testing.T) {
 	})
 }
 
-// TestCellOverflowCalculateLocalPayload exercises calculateLocalPayload boundary
-// conditions: exactly at minLocal, just above, surplus <= maxLocal, surplus > maxLocal.
-func TestCellOverflowCalculateLocalPayload(t *testing.T) {
+// TestCellOverflowCalculateLocalPayload_MinBoundary exercises calculateLocalPayload
+// at and below minLocal boundaries.
+func TestCellOverflowCalculateLocalPayload_MinBoundary(t *testing.T) {
 	t.Parallel()
 
 	usableSize := uint32(4096)
@@ -494,7 +491,6 @@ func TestCellOverflowCalculateLocalPayload(t *testing.T) {
 	minLocal := calculateMinLocal(usableSize, false)
 
 	t.Run("payload below minLocal returns minLocal", func(t *testing.T) {
-		// payloadSize < minLocal → should return minLocal
 		if minLocal == 0 {
 			t.Skip("minLocal is 0 for this usableSize")
 		}
@@ -506,17 +502,29 @@ func TestCellOverflowCalculateLocalPayload(t *testing.T) {
 
 	t.Run("payload exactly at minLocal", func(t *testing.T) {
 		result := calculateLocalPayload(minLocal, minLocal, maxLocal, usableSize)
-		// surplus = minLocal + (minLocal-minLocal)%(usableSize-4) = minLocal + 0 = minLocal
-		// minLocal <= maxLocal → returns minLocal
 		if uint32(result) != minLocal {
 			t.Errorf("calculateLocalPayload(minLocal) = %d, want %d", result, minLocal)
 		}
 	})
 
+	t.Run("usableSize less than 4 returns minLocal", func(t *testing.T) {
+		result := calculateLocalPayload(1000, 50, 900, 3)
+		if result != 50 {
+			t.Errorf("calculateLocalPayload with usableSize<4 = %d, want 50", result)
+		}
+	})
+}
+
+// TestCellOverflowCalculateLocalPayload_SurplusBelowMax exercises calculateLocalPayload
+// when surplus is at or below maxLocal.
+func TestCellOverflowCalculateLocalPayload_SurplusBelowMax(t *testing.T) {
+	t.Parallel()
+
+	usableSize := uint32(4096)
+	maxLocal := calculateMaxLocal(usableSize, false)
+	minLocal := calculateMinLocal(usableSize, false)
+
 	t.Run("surplus just below maxLocal", func(t *testing.T) {
-		// Choose payloadSize so surplus = minLocal + X where X < maxLocal-minLocal
-		// surplus = minLocal + (payloadSize-minLocal) % (usableSize-4)
-		// Set (payloadSize-minLocal) = maxLocal-minLocal-1 so surplus = maxLocal-1
 		payloadSize := minLocal + (maxLocal - minLocal - 1)
 		if payloadSize < minLocal {
 			t.Skip("cannot craft payloadSize for this usableSize")
@@ -533,8 +541,6 @@ func TestCellOverflowCalculateLocalPayload(t *testing.T) {
 	})
 
 	t.Run("surplus exactly at maxLocal", func(t *testing.T) {
-		// surplus = minLocal + (payloadSize-minLocal) % (usableSize-4) = maxLocal
-		// payloadSize-minLocal = maxLocal-minLocal, so payloadSize = maxLocal
 		payloadSize := maxLocal
 		result := calculateLocalPayload(payloadSize, minLocal, maxLocal, usableSize)
 		surplus := minLocal + (payloadSize-minLocal)%(usableSize-4)
@@ -548,16 +554,21 @@ func TestCellOverflowCalculateLocalPayload(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestCellOverflowCalculateLocalPayload_SurplusExceedsMax exercises calculateLocalPayload
+// when surplus exceeds maxLocal and falls back to minLocal.
+func TestCellOverflowCalculateLocalPayload_SurplusExceedsMax(t *testing.T) {
+	t.Parallel()
+
+	usableSize := uint32(4096)
+	maxLocal := calculateMaxLocal(usableSize, false)
+	minLocal := calculateMinLocal(usableSize, false)
 
 	t.Run("surplus exceeds maxLocal falls back to minLocal", func(t *testing.T) {
-		// Choose payloadSize so surplus = minLocal + (payloadSize-minLocal)%(usableSize-4) > maxLocal.
-		// usableSize-4 = 4092; maxLocal = 4061; minLocal = ~480 for 4096 pages.
-		// We need surplus > maxLocal.
-		// Pick payloadSize such that (payloadSize-minLocal) % 4092 = maxLocal-minLocal+1
 		remainder := maxLocal - minLocal + 1
 		payloadSize := minLocal + remainder
 		if payloadSize <= maxLocal {
-			// Already within maxLocal, try a larger value that wraps
 			payloadSize = minLocal + uint32(usableSize-4) + remainder
 		}
 		result := calculateLocalPayload(payloadSize, minLocal, maxLocal, usableSize)
@@ -569,19 +580,10 @@ func TestCellOverflowCalculateLocalPayload(t *testing.T) {
 		}
 	})
 
-	t.Run("usableSize less than 4 returns minLocal", func(t *testing.T) {
-		// usableSize < 4 triggers the early return with minLocal
-		result := calculateLocalPayload(1000, 50, 900, 3)
-		if result != 50 {
-			t.Errorf("calculateLocalPayload with usableSize<4 = %d, want 50", result)
-		}
-	})
-
 	t.Run("small usable size", func(t *testing.T) {
 		smallUsable := uint32(512)
 		smallMax := calculateMaxLocal(smallUsable, false)
 		smallMin := calculateMinLocal(smallUsable, false)
-		// payload much larger than max
 		result := calculateLocalPayload(smallMax*10, smallMin, smallMax, smallUsable)
 		if uint32(result) > smallMax {
 			t.Errorf("calculateLocalPayload result %d exceeds maxLocal %d", result, smallMax)
@@ -589,208 +591,210 @@ func TestCellOverflowCalculateLocalPayload(t *testing.T) {
 	})
 }
 
-// TestCellOverflowPrepareCellDataComposite exercises prepareCellData when CompositePK is true
-// and the payload is large enough to require overflow pages.
-func TestCellOverflowPrepareCellDataComposite(t *testing.T) {
-	t.Parallel()
-
-	t.Run("composite pk with overflow payload", func(t *testing.T) {
-		bt := NewBtree(4096)
-		root, err := bt.CreateWithoutRowidTable()
-		if err != nil {
-			t.Fatalf("CreateWithoutRowidTable: %v", err)
-		}
-		cursor := NewCursorWithOptions(bt, root, true)
-
-		// Payload size well above the overflow threshold for 4096-byte pages
-		largePayload := make([]byte, 5000)
-		for i := range largePayload {
-			largePayload[i] = byte(i % 251)
-		}
-
-		key := withoutrowid.EncodeCompositeKey([]interface{}{"pk-part1", int64(42)})
-
-		// InsertWithComposite calls prepareCellData internally with CompositePK=true
-		if err := cursor.InsertWithComposite(0, key, largePayload); err != nil {
-			t.Fatalf("InsertWithComposite: %v", err)
-		}
-
-		// Seek back and verify payload via overflow read
-		found, err := cursor.SeekComposite(key)
-		if err != nil {
-			t.Fatalf("SeekComposite: %v", err)
-		}
-		if !found {
-			t.Fatal("row not found after InsertWithComposite")
-		}
-
-		if cursor.CurrentCell == nil {
-			t.Fatal("CurrentCell is nil")
-		}
-		if cursor.CurrentCell.OverflowPage == 0 {
-			t.Error("expected overflow pages for 5000-byte payload on 4096-byte pages")
-		}
-
-		complete, err := cursor.GetCompletePayload()
-		if err != nil {
-			t.Fatalf("GetCompletePayload: %v", err)
-		}
-		if !bytes.Equal(complete, largePayload) {
-			t.Errorf("payload mismatch: got %d bytes, want %d bytes", len(complete), len(largePayload))
-		}
-	})
-
-	t.Run("non-composite with overflow payload exercises prepareCellData int key path", func(t *testing.T) {
-		bt := NewBtree(4096)
-		rootPage, err := bt.CreateTable()
-		if err != nil {
-			t.Fatalf("CreateTable: %v", err)
-		}
-		cursor := NewCursor(bt, rootPage)
-
-		// 5000 bytes triggers overflow on 4096-byte pages
-		largePayload := make([]byte, 5000)
-		for i := range largePayload {
-			largePayload[i] = byte(i % 253)
-		}
-
-		if err := cursor.Insert(1, largePayload); err != nil {
-			t.Fatalf("Insert: %v", err)
-		}
-
-		found, err := cursor.SeekRowid(1)
-		if err != nil {
-			t.Fatalf("SeekRowid: %v", err)
-		}
-		if !found {
-			t.Fatal("row not found")
-		}
-		if cursor.CurrentCell.OverflowPage == 0 {
-			t.Error("expected overflow for 5000-byte payload")
-		}
-
-		complete, err := cursor.GetCompletePayload()
-		if err != nil {
-			t.Fatalf("GetCompletePayload: %v", err)
-		}
-		if !bytes.Equal(complete, largePayload) {
-			t.Errorf("payload mismatch: got %d bytes, want %d bytes", len(complete), len(largePayload))
-		}
-	})
+// makeLargePayload creates a deterministic payload of the given size.
+func makeLargePayload(size int, mod byte) []byte {
+	p := make([]byte, size)
+	for i := range p {
+		p[i] = byte(i) % mod
+	}
+	return p
 }
 
-// TestCellOverflowIndexLargeKeys exercises extractIndexPayloadAndOverflow and
-// calculateLocalPayload via raw cell construction with 200+ byte payloads.
-// The IndexCursor does not support splits, so we use ParseCell directly and
-// only insert a small number of entries via InsertIndex to avoid page-full errors.
-func TestCellOverflowIndexLargeKeys(t *testing.T) {
+// TestCellOverflowPrepareCellDataComposite_WithOverflow exercises prepareCellData
+// when CompositePK is true and the payload requires overflow pages.
+func TestCellOverflowPrepareCellDataComposite_WithOverflow(t *testing.T) {
 	t.Parallel()
 
-	t.Run("direct parse of 200-byte index leaf cells", func(t *testing.T) {
-		// Build and parse 200-byte index leaf cells directly without inserting into a cursor.
-		// This exercises parseIndexLeafCell -> completeIndexCellParse -> extractIndexPayloadAndOverflow.
-		for i := 0; i < 20; i++ {
-			key := []byte(fmt.Sprintf("%-200s", fmt.Sprintf("large-index-key-%05d", i)))
-			// Encode a rowid varint appended to the key to form the payload
-			rowidBuf := make([]byte, 9)
-			n := PutVarint(rowidBuf, uint64(i+1))
-			payload := append(key, rowidBuf[:n]...)
-			cell := EncodeIndexLeafCell(payload)
-			info, err := ParseCell(PageTypeLeafIndex, cell, 4096)
-			if err != nil {
-				t.Fatalf("ParseCell[%d] error = %v", i, err)
-			}
-			if info.PayloadSize != uint32(len(payload)) {
-				t.Errorf("[%d] PayloadSize = %d, want %d", i, info.PayloadSize, len(payload))
-			}
-		}
-	})
+	bt := NewBtree(4096)
+	root, err := bt.CreateWithoutRowidTable()
+	if err != nil {
+		t.Fatalf("CreateWithoutRowidTable: %v", err)
+	}
+	cursor := NewCursorWithOptions(bt, root, true)
 
-	t.Run("insert small number of 200-byte key entries via index cursor", func(t *testing.T) {
-		// Insert just a few entries so the page doesn't overflow.
-		bt := NewBtree(4096)
-		rootPage, err := createIndexPage(bt)
+	largePayload := makeLargePayload(5000, 251)
+	key := withoutrowid.EncodeCompositeKey([]interface{}{"pk-part1", int64(42)})
+	if err := cursor.InsertWithComposite(0, key, largePayload); err != nil {
+		t.Fatalf("InsertWithComposite: %v", err)
+	}
+
+	verifyCompositeOverflow(t, cursor, key, largePayload)
+}
+
+// verifyCompositeOverflow seeks a composite key and verifies the overflow payload.
+func verifyCompositeOverflow(t *testing.T, cursor *BtCursor, key, expectedPayload []byte) {
+	t.Helper()
+	found, err := cursor.SeekComposite(key)
+	if err != nil {
+		t.Fatalf("SeekComposite: %v", err)
+	}
+	if !found {
+		t.Fatal("row not found after InsertWithComposite")
+	}
+	if cursor.CurrentCell == nil {
+		t.Fatal("CurrentCell is nil")
+	}
+	if cursor.CurrentCell.OverflowPage == 0 {
+		t.Error("expected overflow pages for large payload")
+	}
+	complete, err := cursor.GetCompletePayload()
+	if err != nil {
+		t.Fatalf("GetCompletePayload: %v", err)
+	}
+	if !bytes.Equal(complete, expectedPayload) {
+		t.Errorf("payload mismatch: got %d bytes, want %d bytes", len(complete), len(expectedPayload))
+	}
+}
+
+// verifyRowidOverflow seeks a rowid and verifies the overflow payload.
+func verifyRowidOverflow(t *testing.T, cursor *BtCursor, rowid int64, expectedPayload []byte) {
+	t.Helper()
+	found, err := cursor.SeekRowid(rowid)
+	if err != nil {
+		t.Fatalf("SeekRowid: %v", err)
+	}
+	if !found {
+		t.Fatal("row not found")
+	}
+	if cursor.CurrentCell.OverflowPage == 0 {
+		t.Error("expected overflow for large payload")
+	}
+	complete, err := cursor.GetCompletePayload()
+	if err != nil {
+		t.Fatalf("GetCompletePayload: %v", err)
+	}
+	if !bytes.Equal(complete, expectedPayload) {
+		t.Errorf("payload mismatch: got %d bytes, want %d bytes", len(complete), len(expectedPayload))
+	}
+}
+
+// TestCellOverflowPrepareCellDataComposite_IntKeyOverflow exercises prepareCellData
+// for the non-composite int key path with overflow payload.
+func TestCellOverflowPrepareCellDataComposite_IntKeyOverflow(t *testing.T) {
+	t.Parallel()
+
+	bt := NewBtree(4096)
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	cursor := NewCursor(bt, rootPage)
+
+	largePayload := makeLargePayload(5000, 253)
+	if err := cursor.Insert(1, largePayload); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	verifyRowidOverflow(t, cursor, 1, largePayload)
+}
+
+// TestCellOverflowIndexLargeKeys_DirectParse exercises extractIndexPayloadAndOverflow
+// via direct ParseCell of 200-byte index leaf cells.
+func TestCellOverflowIndexLargeKeys_DirectParse(t *testing.T) {
+	t.Parallel()
+
+	for i := 0; i < 20; i++ {
+		key := []byte(fmt.Sprintf("%-200s", fmt.Sprintf("large-index-key-%05d", i)))
+		rowidBuf := make([]byte, 9)
+		n := PutVarint(rowidBuf, uint64(i+1))
+		payload := append(key, rowidBuf[:n]...)
+		cell := EncodeIndexLeafCell(payload)
+		info, err := ParseCell(PageTypeLeafIndex, cell, 4096)
 		if err != nil {
-			t.Fatalf("createIndexPage: %v", err)
+			t.Fatalf("ParseCell[%d] error = %v", i, err)
 		}
-		cursor := NewIndexCursor(bt, rootPage)
-
-		// 4096-byte page: maxLocal = 4061, each 200-byte key + rowid varint = ~201 bytes.
-		// A 4096-byte page holds roughly 19 entries. Use 10 to stay safe.
-		const n = 10
-		for i := 0; i < n; i++ {
-			key := []byte(fmt.Sprintf("%-200s", fmt.Sprintf("large-index-key-%05d", i)))
-			if err := cursor.InsertIndex(key, int64(i)); err != nil {
-				t.Fatalf("InsertIndex(%d): %v", i, err)
-			}
+		if info.PayloadSize != uint32(len(payload)) {
+			t.Errorf("[%d] PayloadSize = %d, want %d", i, info.PayloadSize, len(payload))
 		}
+	}
+}
 
-		count := countIndexForward(cursor)
-		if count != n {
-			t.Errorf("expected %d entries, got %d", n, count)
+// TestCellOverflowIndexLargeKeys_InsertViaCursor inserts a small number of
+// 200-byte key entries via the index cursor.
+func TestCellOverflowIndexLargeKeys_InsertViaCursor(t *testing.T) {
+	t.Parallel()
+
+	bt := NewBtree(4096)
+	rootPage, err := createIndexPage(bt)
+	if err != nil {
+		t.Fatalf("createIndexPage: %v", err)
+	}
+	cursor := NewIndexCursor(bt, rootPage)
+
+	const n = 10
+	for i := 0; i < n; i++ {
+		key := []byte(fmt.Sprintf("%-200s", fmt.Sprintf("large-index-key-%05d", i)))
+		if err := cursor.InsertIndex(key, int64(i)); err != nil {
+			t.Fatalf("InsertIndex(%d): %v", i, err)
 		}
-	})
+	}
 
-	t.Run("direct parse of overflow index leaf cells triggers overflow branch", func(t *testing.T) {
-		// We need payload > maxLocal = 4096-35 = 4061 to trigger overflow branch.
-		usableSize := uint32(4096)
-		maxLocal := calculateMaxLocal(usableSize, false)
+	count := countIndexForward(cursor)
+	if count != n {
+		t.Errorf("expected %d entries, got %d", n, count)
+	}
+}
 
-		for i := 0; i < 5; i++ {
-			totalPayloadSize := uint32(maxLocal) + 100 + uint32(i)*50
-			localPayload := CalculateLocalPayload(totalPayloadSize, usableSize, false)
+// TestCellOverflowIndexLargeKeys_OverflowBranch exercises the overflow branch
+// in extractIndexPayloadAndOverflow with payloads exceeding maxLocal.
+func TestCellOverflowIndexLargeKeys_OverflowBranch(t *testing.T) {
+	t.Parallel()
 
-			// Determine varint size for totalPayloadSize
-			varBuf := make([]byte, 9)
-			varN := PutVarint(varBuf, uint64(totalPayloadSize))
+	usableSize := uint32(4096)
+	maxLocal := calculateMaxLocal(usableSize, false)
 
-			// Allocate buffer: varint + localPayload bytes + 4-byte overflow page ptr
-			cellBuf := make([]byte, varN+int(localPayload)+4)
-			copy(cellBuf, varBuf[:varN])
-			// local payload bytes already zero-initialized
-			// write overflow page number at offset varN+localPayload
-			cellBuf[varN+int(localPayload)+3] = byte(i + 2)
+	for i := 0; i < 5; i++ {
+		totalPayloadSize := uint32(maxLocal) + 100 + uint32(i)*50
+		localPayload := CalculateLocalPayload(totalPayloadSize, usableSize, false)
 
-			info, err := ParseCell(PageTypeLeafIndex, cellBuf, usableSize)
-			if err != nil {
-				t.Fatalf("[%d] ParseCell error = %v", i, err)
-			}
-			if info.OverflowPage != uint32(i+2) {
-				t.Errorf("[%d] OverflowPage = %d, want %d", i, info.OverflowPage, i+2)
-			}
-			if info.PayloadSize != totalPayloadSize {
-				t.Errorf("[%d] PayloadSize = %d, want %d", i, info.PayloadSize, totalPayloadSize)
-			}
-		}
-	})
+		varBuf := make([]byte, 9)
+		varN := PutVarint(varBuf, uint64(totalPayloadSize))
 
-	t.Run("direct parseIndexLeafCell with overflow", func(t *testing.T) {
-		usableSize := uint32(4096)
-		maxLocal := calculateMaxLocal(usableSize, false)
-		localPayload := CalculateLocalPayload(uint32(maxLocal)+100, usableSize, false)
+		cellBuf := make([]byte, varN+int(localPayload)+4)
+		copy(cellBuf, varBuf[:varN])
+		cellBuf[varN+int(localPayload)+3] = byte(i + 2)
 
-		// Build a raw leaf index cell with overflow
-		payloadSize := uint64(maxLocal) + 100
-		buf := make([]byte, 9+int(localPayload)+4)
-		n := PutVarint(buf, payloadSize)
-		for i := 0; i < int(localPayload); i++ {
-			buf[n+i] = byte(i % 127)
-		}
-		// Overflow page = 33
-		buf[n+int(localPayload)] = 0
-		buf[n+int(localPayload)+1] = 0
-		buf[n+int(localPayload)+2] = 0
-		buf[n+int(localPayload)+3] = 33
-
-		info, err := ParseCell(PageTypeLeafIndex, buf[:n+int(localPayload)+4], usableSize)
+		info, err := ParseCell(PageTypeLeafIndex, cellBuf, usableSize)
 		if err != nil {
-			t.Fatalf("ParseCell(PageTypeLeafIndex) error = %v", err)
+			t.Fatalf("[%d] ParseCell error = %v", i, err)
 		}
-		if info.OverflowPage != 33 {
-			t.Errorf("OverflowPage = %d, want 33", info.OverflowPage)
+		if info.OverflowPage != uint32(i+2) {
+			t.Errorf("[%d] OverflowPage = %d, want %d", i, info.OverflowPage, i+2)
 		}
-		if uint32(info.LocalPayload) != uint32(localPayload) {
-			t.Errorf("LocalPayload = %d, want %d", info.LocalPayload, localPayload)
+		if info.PayloadSize != totalPayloadSize {
+			t.Errorf("[%d] PayloadSize = %d, want %d", i, info.PayloadSize, totalPayloadSize)
 		}
-	})
+	}
+}
+
+// TestCellOverflowIndexLargeKeys_RawOverflowCell directly parses a raw leaf
+// index cell with overflow to verify overflow page and local payload.
+func TestCellOverflowIndexLargeKeys_RawOverflowCell(t *testing.T) {
+	t.Parallel()
+
+	usableSize := uint32(4096)
+	maxLocal := calculateMaxLocal(usableSize, false)
+	localPayload := CalculateLocalPayload(uint32(maxLocal)+100, usableSize, false)
+
+	payloadSize := uint64(maxLocal) + 100
+	buf := make([]byte, 9+int(localPayload)+4)
+	n := PutVarint(buf, payloadSize)
+	for i := 0; i < int(localPayload); i++ {
+		buf[n+i] = byte(i % 127)
+	}
+	buf[n+int(localPayload)] = 0
+	buf[n+int(localPayload)+1] = 0
+	buf[n+int(localPayload)+2] = 0
+	buf[n+int(localPayload)+3] = 33
+
+	info, err := ParseCell(PageTypeLeafIndex, buf[:n+int(localPayload)+4], usableSize)
+	if err != nil {
+		t.Fatalf("ParseCell(PageTypeLeafIndex) error = %v", err)
+	}
+	if info.OverflowPage != 33 {
+		t.Errorf("OverflowPage = %d, want 33", info.OverflowPage)
+	}
+	if uint32(info.LocalPayload) != uint32(localPayload) {
+		t.Errorf("LocalPayload = %d, want %d", info.LocalPayload, localPayload)
+	}
 }

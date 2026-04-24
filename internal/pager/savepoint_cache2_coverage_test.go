@@ -9,20 +9,10 @@ import (
 	"testing"
 )
 
-// TestSavepointCache2Coverage covers several low-coverage internal functions:
-//   - releaseSavepoints (savepoint.go)
-//   - rollbackJournal (pager.go)
-//   - Put with nil page (pager.go)
-//   - readFrameAtIndex (wal.go)
-//   - initializeFile (wal_index.go)
-//   - acquirePendingLock (lock_unix.go)
-func TestSavepointCache2Coverage(t *testing.T) {
-	// ---------------------------------------------------------------------------
-	// releaseSavepoints — savepoint.go line 280
-	// ---------------------------------------------------------------------------
-
+// TestSavepointCache2_ReleaseSavepoints covers releaseSavepoints (savepoint.go).
+func TestSavepointCache2_ReleaseSavepoints(t *testing.T) {
 	// exercises the early-return branch when index < 0.
-	t.Run("ReleaseSavepointsNegativeIndex", func(t *testing.T) {
+	t.Run("NegativeIndex", func(t *testing.T) {
 		t.Parallel()
 		p := openTestPager(t)
 		mustBeginWrite(t, p)
@@ -38,7 +28,7 @@ func TestSavepointCache2Coverage(t *testing.T) {
 	})
 
 	// exercises the early-return branch when index >= len(savepoints).
-	t.Run("ReleaseSavepointsOutOfRange", func(t *testing.T) {
+	t.Run("OutOfRange", func(t *testing.T) {
 		t.Parallel()
 		p := openTestPager(t)
 		mustBeginWrite(t, p)
@@ -53,7 +43,7 @@ func TestSavepointCache2Coverage(t *testing.T) {
 	})
 
 	// exercises the happy path: removing savepoints 0..index inclusive.
-	t.Run("ReleaseSavepointsValid", func(t *testing.T) {
+	t.Run("Valid", func(t *testing.T) {
 		t.Parallel()
 		p := openTestPager(t)
 		mustBeginWrite(t, p)
@@ -68,13 +58,12 @@ func TestSavepointCache2Coverage(t *testing.T) {
 		}
 		p.Rollback()
 	})
+}
 
-	// ---------------------------------------------------------------------------
-	// rollbackJournal — pager.go line 1121
-	// ---------------------------------------------------------------------------
-
+// TestSavepointCache2_RollbackJournal covers rollbackJournal (pager.go).
+func TestSavepointCache2_RollbackJournal(t *testing.T) {
 	// exercises the nil journalFile early-return branch.
-	t.Run("RollbackJournalNilJournal", func(t *testing.T) {
+	t.Run("NilJournal", func(t *testing.T) {
 		t.Parallel()
 		p := openTestPager(t)
 		// journalFile is nil when no transaction has written anything.
@@ -84,7 +73,7 @@ func TestSavepointCache2Coverage(t *testing.T) {
 	})
 
 	// exercises rollbackJournal through a real write-then-rollback cycle.
-	t.Run("RollbackJournalWithData", func(t *testing.T) {
+	t.Run("WithData", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		p := openTestPagerAt(t, filepath.Join(dir, "rjwd.db"), false)
@@ -117,20 +106,19 @@ func TestSavepointCache2Coverage(t *testing.T) {
 		p.Put(pg3)
 		mustEndRead(t, p)
 	})
+}
 
-	// ---------------------------------------------------------------------------
-	// Put — pager.go line 450
-	// ---------------------------------------------------------------------------
-
+// TestSavepointCache2_Put covers Put with nil page (pager.go).
+func TestSavepointCache2_Put(t *testing.T) {
 	// exercises the nil guard in Pager.Put (uncovered nil branch).
-	t.Run("PutNilPage", func(t *testing.T) {
+	t.Run("NilPage", func(t *testing.T) {
 		t.Parallel()
 		p := openTestPager(t)
 		p.Put(nil) // must not panic
 	})
 
 	// exercises Put with a real page (Unref path).
-	t.Run("PutValidPage", func(t *testing.T) {
+	t.Run("ValidPage", func(t *testing.T) {
 		t.Parallel()
 		p := openTestPager(t)
 		mustBeginRead(t, p)
@@ -138,13 +126,12 @@ func TestSavepointCache2Coverage(t *testing.T) {
 		p.Put(pg)
 		mustEndRead(t, p)
 	})
+}
 
-	// ---------------------------------------------------------------------------
-	// readFrameAtIndex — wal.go line 353
-	// ---------------------------------------------------------------------------
-
+// TestSavepointCache2_ReadFrameAtIndex covers readFrameAtIndex (wal.go).
+func TestSavepointCache2_ReadFrameAtIndex(t *testing.T) {
 	// exercises the out-of-range error branch of readFrameAtIndex.
-	t.Run("ReadFrameAtIndexOutOfRange", func(t *testing.T) {
+	t.Run("OutOfRange", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		dbFile := filepath.Join(dir, "rfi.db")
@@ -163,7 +150,7 @@ func TestSavepointCache2Coverage(t *testing.T) {
 	})
 
 	// exercises the happy path by writing a frame first.
-	t.Run("ReadFrameAtIndexValid", func(t *testing.T) {
+	t.Run("Valid", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		dbFile := filepath.Join(dir, "rfiv.db")
@@ -189,82 +176,73 @@ func TestSavepointCache2Coverage(t *testing.T) {
 			t.Errorf("frame.PageNumber = %d, want 1", frame.PageNumber)
 		}
 	})
+}
 
-	// ---------------------------------------------------------------------------
-	// initializeFile — wal_index.go line 191
-	// ---------------------------------------------------------------------------
+// TestSavepointCache2_InitializeFile covers initializeFile (wal_index.go).
+func TestSavepointCache2_InitializeFile(t *testing.T) {
+	t.Parallel()
+	filename := tempWALIndexFile(t)
 
-	// exercises the success path of WALIndex.initializeFile directly.
-	t.Run("InitializeFileSuccess", func(t *testing.T) {
-		t.Parallel()
-		filename := tempWALIndexFile(t)
+	// Open normally (which already calls initializeFile internally).
+	idx := mustOpenWALIndex(t, filename)
+	defer idx.Close()
 
-		// Open normally (which already calls initializeFile internally).
-		idx := mustOpenWALIndex(t, filename)
-		defer idx.Close()
+	// Call initializeFile again directly to cover its body a second time.
+	minSize := int64(WALIndexHeaderSize + WALIndexHashTableSize*WALIndexHashSlotSize)
+	if err := idx.initializeFile(minSize); err != nil {
+		t.Fatalf("initializeFile(%d): %v", minSize, err)
+	}
 
-		// Call initializeFile again directly to cover its body a second time.
-		minSize := int64(WALIndexHeaderSize + WALIndexHashTableSize*WALIndexHashSlotSize)
-		if err := idx.initializeFile(minSize); err != nil {
-			t.Fatalf("initializeFile(%d): %v", minSize, err)
-		}
+	if idx.header == nil {
+		t.Fatal("header is nil after initializeFile")
+	}
+	if idx.header.Version != WALIndexVersion {
+		t.Errorf("header.Version = %d, want %d", idx.header.Version, WALIndexVersion)
+	}
+	if idx.header.IsInit != 1 {
+		t.Errorf("header.IsInit = %d, want 1", idx.header.IsInit)
+	}
+}
 
-		if idx.header == nil {
-			t.Fatal("header is nil after initializeFile")
-		}
-		if idx.header.Version != WALIndexVersion {
-			t.Errorf("header.Version = %d, want %d", idx.header.Version, WALIndexVersion)
-		}
-		if idx.header.IsInit != 1 {
-			t.Errorf("header.IsInit = %d, want 1", idx.header.IsInit)
-		}
-	})
+// TestSavepointCache2_AcquirePendingLock covers acquirePendingLock (lock_unix.go).
+func TestSavepointCache2_AcquirePendingLock(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pending.db")
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		t.Fatalf("open file: %v", err)
+	}
+	if _, err := f.Write(make([]byte, 4096)); err != nil {
+		f.Close()
+		t.Fatalf("write file: %v", err)
+	}
+	f.Sync()
 
-	// ---------------------------------------------------------------------------
-	// acquirePendingLock — lock_unix.go line 251
-	// ---------------------------------------------------------------------------
+	lm, err := NewLockManager(f)
+	if err != nil {
+		f.Close()
+		t.Fatalf("NewLockManager: %v", err)
+	}
+	defer func() {
+		lm.Close()
+		f.Close()
+	}()
 
-	// exercises the branch where currentLevel < lockReserved so acquirePendingLock
-	// must also call acquireReservedLock (line 268-272 of lock_unix.go).
-	t.Run("AcquirePendingLockFromShared", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		path := filepath.Join(dir, "pending.db")
-		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
-		if err != nil {
-			t.Fatalf("open file: %v", err)
-		}
-		if _, err := f.Write(make([]byte, 4096)); err != nil {
-			f.Close()
-			t.Fatalf("write file: %v", err)
-		}
-		f.Sync()
+	// Acquire only SHARED so currentLevel < lockReserved when we call
+	// acquirePendingLock directly (the uncovered branch at line 268).
+	if err := lm.AcquireLock(lockShared); err != nil {
+		t.Fatalf("AcquireLock(SHARED): %v", err)
+	}
 
-		lm, err := NewLockManager(f)
-		if err != nil {
-			f.Close()
-			t.Fatalf("NewLockManager: %v", err)
-		}
-		defer func() {
-			lm.Close()
-			f.Close()
-		}()
+	// currentLevel == SHARED (< lockReserved), so acquirePendingLock
+	// enters the inner branch and calls acquireReservedLock as well.
+	if err := lm.acquirePendingLock(); err != nil {
+		t.Fatalf("acquirePendingLock from SHARED: %v", err)
+	}
 
-		// Acquire only SHARED so currentLevel < lockReserved when we call
-		// acquirePendingLock directly (the uncovered branch at line 268).
-		if err := lm.AcquireLock(lockShared); err != nil {
-			t.Fatalf("AcquireLock(SHARED): %v", err)
-		}
-
-		// currentLevel == SHARED (< lockReserved), so acquirePendingLock
-		// enters the inner branch and calls acquireReservedLock as well.
-		if err := lm.acquirePendingLock(); err != nil {
-			t.Fatalf("acquirePendingLock from SHARED: %v", err)
-		}
-
-		// Release all locks cleanly.
-		if err := lm.ReleaseLock(lockNone); err != nil {
-			t.Fatalf("ReleaseLock(NONE): %v", err)
-		}
-	})
+	// Release all locks cleanly.
+	if err := lm.ReleaseLock(lockNone); err != nil {
+		t.Fatalf("ReleaseLock(NONE): %v", err)
+	}
 }

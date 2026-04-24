@@ -170,81 +170,63 @@ func TestMCDC_CheckCompoundOp(t *testing.T) {
 //	A=T B=T C=F → F (dot not followed by star — parsed as qualified column)
 //
 // -----------------------------------------------------------------------------
-func TestMCDC_IsTableStar(t *testing.T) {
+// mcdcIsTableStarHelper parses sql and returns the first SelectStmt, failing if
+// parsing errors or the statement is not a SelectStmt.
+func mcdcIsTableStarHelper(t *testing.T, sql string) *SelectStmt {
+	t.Helper()
+	stmts, err := ParseString(sql)
+	if err != nil {
+		t.Fatalf("ParseString(%q) unexpected error: %v", sql, err)
+	}
+	sel, ok := stmts[0].(*SelectStmt)
+	if !ok {
+		t.Fatalf("ParseString(%q): expected *SelectStmt, got %T", sql, stmts[0])
+	}
+	return sel
+}
+
+func TestMCDC_IsTableStar_StarCases(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name    string
-		sql     string
-		wantErr bool
-		check   func(stmts []Statement) bool
-	}{
-		// A=T B=T C=T: table.* is valid
-		{
-			name:    "A=T B=T C=T: table.* accepted",
-			sql:     "SELECT t.* FROM t",
-			wantErr: false,
-			check: func(stmts []Statement) bool {
-				sel, ok := stmts[0].(*SelectStmt)
-				if !ok {
-					return false
-				}
-				return len(sel.Columns) == 1 && sel.Columns[0].Star && sel.Columns[0].Table == "t"
-			},
-		},
-		// A=F B=T C=T: plain * (no table qualifier)
-		{
-			name:    "A=F B=T C=T: bare * accepted",
-			sql:     "SELECT * FROM t",
-			wantErr: false,
-			check: func(stmts []Statement) bool {
-				sel, ok := stmts[0].(*SelectStmt)
-				if !ok {
-					return false
-				}
-				return len(sel.Columns) == 1 && sel.Columns[0].Star && sel.Columns[0].Table == ""
-			},
-		},
-		// A=T B=F C=T: identifier without dot — treated as expression
-		{
-			name:    "A=T B=F C=T: id without dot is expression",
-			sql:     "SELECT col FROM t",
-			wantErr: false,
-			check: func(stmts []Statement) bool {
-				sel, ok := stmts[0].(*SelectStmt)
-				if !ok {
-					return false
-				}
-				return len(sel.Columns) == 1 && !sel.Columns[0].Star
-			},
-		},
-		// A=T B=T C=F: qualified column (id.col, no star)
-		{
-			name:    "A=T B=T C=F: id.col is expression not table-star",
-			sql:     "SELECT t.col FROM t",
-			wantErr: false,
-			check: func(stmts []Statement) bool {
-				sel, ok := stmts[0].(*SelectStmt)
-				if !ok {
-					return false
-				}
-				return len(sel.Columns) == 1 && !sel.Columns[0].Star
-			},
-		},
-	}
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			stmts, err := ParseString(tt.sql)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseString(%q) err=%v, wantErr=%v", tt.sql, err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr && !tt.check(stmts) {
-				t.Errorf("ParseString(%q): check failed", tt.sql)
-			}
-		})
-	}
+
+	// A=T B=T C=T: table.* is valid
+	t.Run("A=T B=T C=T: table.* accepted", func(t *testing.T) {
+		t.Parallel()
+		sel := mcdcIsTableStarHelper(t, "SELECT t.* FROM t")
+		if len(sel.Columns) != 1 || !sel.Columns[0].Star || sel.Columns[0].Table != "t" {
+			t.Error("expected single table-star column with Table='t'")
+		}
+	})
+
+	// A=F B=T C=T: plain * (no table qualifier)
+	t.Run("A=F B=T C=T: bare * accepted", func(t *testing.T) {
+		t.Parallel()
+		sel := mcdcIsTableStarHelper(t, "SELECT * FROM t")
+		if len(sel.Columns) != 1 || !sel.Columns[0].Star || sel.Columns[0].Table != "" {
+			t.Error("expected single bare-star column with Table=''")
+		}
+	})
+}
+
+func TestMCDC_IsTableStar_NonStarCases(t *testing.T) {
+	t.Parallel()
+
+	// A=T B=F C=T: identifier without dot — treated as expression
+	t.Run("A=T B=F C=T: id without dot is expression", func(t *testing.T) {
+		t.Parallel()
+		sel := mcdcIsTableStarHelper(t, "SELECT col FROM t")
+		if len(sel.Columns) != 1 || sel.Columns[0].Star {
+			t.Error("expected single non-star column")
+		}
+	})
+
+	// A=T B=T C=F: qualified column (id.col, no star)
+	t.Run("A=T B=T C=F: id.col is expression not table-star", func(t *testing.T) {
+		t.Parallel()
+		sel := mcdcIsTableStarHelper(t, "SELECT t.col FROM t")
+		if len(sel.Columns) != 1 || sel.Columns[0].Star {
+			t.Error("expected single non-star column")
+		}
+	})
 }
 
 // -----------------------------------------------------------------------------

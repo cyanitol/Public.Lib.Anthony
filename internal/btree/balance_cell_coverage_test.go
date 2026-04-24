@@ -6,154 +6,148 @@ import (
 	"testing"
 )
 
-// TestBalanceCellLoadPageForBalance exercises loadPageForBalance via balance().
-// A valid cursor on a populated page triggers loadPageForBalance and then executeBalance.
-func TestBalanceCellLoadPageForBalance(t *testing.T) {
+// TestBalanceCellLoadPageForBalance_Valid exercises loadPageForBalance via balance()
+// with a valid cursor on a populated page.
+func TestBalanceCellLoadPageForBalance_Valid(t *testing.T) {
 	t.Parallel()
 
-	t.Run("valid cursor loads page", func(t *testing.T) {
-		bt := NewBtree(4096)
-		rootPage, err := bt.CreateTable()
-		if err != nil {
-			t.Fatalf("CreateTable: %v", err)
-		}
-		cursor := NewCursor(bt, rootPage)
-		insertRows(cursor, 1, 20, 10)
+	bt := NewBtree(4096)
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	cursor := NewCursor(bt, rootPage)
+	insertRows(cursor, 1, 20, 10)
 
-		found, err := cursor.SeekRowid(5)
-		if err != nil || !found {
-			t.Fatalf("SeekRowid failed: err=%v found=%v", err, found)
-		}
+	found, err := cursor.SeekRowid(5)
+	if err != nil || !found {
+		t.Fatalf("SeekRowid failed: err=%v found=%v", err, found)
+	}
 
-		// balance calls loadPageForBalance internally; we just need it not to panic
-		// on a bad-page error. Any error here must be overfull/underfull, not a page load error.
-		balErr := balance(cursor)
-		if balErr != nil {
-			msg := balErr.Error()
-			if contains(msg, "failed to get page") || contains(msg, "failed to parse page") {
-				t.Errorf("loadPageForBalance returned unexpected error: %v", balErr)
-			}
+	balErr := balance(cursor)
+	if balErr != nil {
+		msg := balErr.Error()
+		if contains(msg, "failed to get page") || contains(msg, "failed to parse page") {
+			t.Errorf("loadPageForBalance returned unexpected error: %v", balErr)
 		}
-	})
-
-	t.Run("cursor on invalid page triggers load error path", func(t *testing.T) {
-		bt := NewBtree(4096)
-		rootPage, err := bt.CreateTable()
-		if err != nil {
-			t.Fatalf("CreateTable: %v", err)
-		}
-		cursor := NewCursor(bt, rootPage)
-		insertRows(cursor, 1, 5, 10)
-		cursor.SeekRowid(1)
-
-		// Point cursor at a page that does not exist to exercise the error branch
-		cursor.CurrentPage = 9999
-		balErr := balance(cursor)
-		if balErr == nil {
-			t.Fatal("expected error for non-existent page, got nil")
-		}
-	})
+	}
 }
 
-// TestBalanceCellExecuteBalance exercises all three branches of executeBalance:
-// overfull, underfull, and balanced-with-fragmentation.
-func TestBalanceCellExecuteBalance(t *testing.T) {
+// TestBalanceCellLoadPageForBalance_InvalidPage exercises the error branch of
+// loadPageForBalance when the cursor points to a non-existent page.
+func TestBalanceCellLoadPageForBalance_InvalidPage(t *testing.T) {
 	t.Parallel()
 
-	t.Run("overfull branch", func(t *testing.T) {
-		// Build a page that is genuinely overfull by constructing it directly.
-		pageSize := uint32(512)
-		bt := NewBtree(pageSize)
-		rootPage, err := bt.CreateTable()
-		if err != nil {
-			t.Fatalf("CreateTable: %v", err)
+	bt := NewBtree(4096)
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	cursor := NewCursor(bt, rootPage)
+	insertRows(cursor, 1, 5, 10)
+	cursor.SeekRowid(1)
+
+	cursor.CurrentPage = 9999
+	balErr := balance(cursor)
+	if balErr == nil {
+		t.Fatal("expected error for non-existent page, got nil")
+	}
+}
+
+// TestBalanceCellExecuteBalance_Overfull exercises the overfull branch of executeBalance.
+func TestBalanceCellExecuteBalance_Overfull(t *testing.T) {
+	t.Parallel()
+
+	pageSize := uint32(512)
+	bt := NewBtree(pageSize)
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	cursor := NewCursor(bt, rootPage)
+
+	for i := int64(1); i <= 200; i++ {
+		if insertErr := cursor.Insert(i, make([]byte, 15)); insertErr != nil {
+			break
 		}
-		cursor := NewCursor(bt, rootPage)
+	}
+	cursor.SeekRowid(1)
 
-		// Fill until insert fails (page full)
-		for i := int64(1); i <= 200; i++ {
-			if insertErr := cursor.Insert(i, make([]byte, 15)); insertErr != nil {
-				break
-			}
+	pageData, _ := bt.GetPage(cursor.CurrentPage)
+	page, _ := NewBtreePage(cursor.CurrentPage, pageData, bt.UsableSize)
+
+	if isOverfull(page) {
+		err := executeBalance(cursor, page)
+		if err == nil {
+			t.Error("expected overfull error from executeBalance, got nil")
 		}
-		cursor.SeekRowid(1)
+	}
+}
 
-		pageData, _ := bt.GetPage(cursor.CurrentPage)
-		page, _ := NewBtreePage(cursor.CurrentPage, pageData, bt.UsableSize)
+// TestBalanceCellExecuteBalance_Underfull exercises the underfull non-root branch
+// of executeBalance.
+func TestBalanceCellExecuteBalance_Underfull(t *testing.T) {
+	t.Parallel()
 
-		if isOverfull(page) {
-			err := executeBalance(cursor, page)
-			if err == nil {
-				t.Error("expected overfull error from executeBalance, got nil")
-			}
+	bt := NewBtree(512)
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	cursor := NewCursor(bt, rootPage)
+	insertRows(cursor, 1, 100, 10)
+
+	cursor2 := NewCursor(bt, cursor.RootPage)
+	for i := int64(2); i <= 95; i++ {
+		found, _ := cursor2.SeekRowid(i)
+		if found {
+			cursor2.Delete()
 		}
-	})
+	}
 
-	t.Run("underfull non-root branch", func(t *testing.T) {
-		// Use a very small page so splits occur, then delete most cells so
-		// a non-root leaf becomes underfull.
-		bt := NewBtree(512)
-		rootPage, err := bt.CreateTable()
-		if err != nil {
-			t.Fatalf("CreateTable: %v", err)
+	cursor3 := NewCursor(bt, cursor.RootPage)
+	cursor3.SeekRowid(1)
+	if cursor3.State == CursorValid && cursor3.Depth > 0 {
+		pageData, _ := bt.GetPage(cursor3.CurrentPage)
+		page, _ := NewBtreePage(cursor3.CurrentPage, pageData, bt.UsableSize)
+		if isUnderfull(page) {
+			_ = executeBalance(cursor3, page)
 		}
-		cursor := NewCursor(bt, rootPage)
-		insertRows(cursor, 1, 100, 10)
+	}
+}
 
-		// Delete most rows; leaves that are not root should become underfull.
-		cursor2 := NewCursor(bt, cursor.RootPage)
-		for i := int64(2); i <= 95; i++ {
-			found, _ := cursor2.SeekRowid(i)
-			if found {
-				cursor2.Delete()
-			}
+// TestBalanceCellExecuteBalance_Fragmentation exercises the balanced-with-fragmentation
+// branch of executeBalance.
+func TestBalanceCellExecuteBalance_Fragmentation(t *testing.T) {
+	t.Parallel()
+
+	bt := NewBtree(4096)
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	cursor := NewCursor(bt, rootPage)
+	insertRows(cursor, 1, 30, 20)
+
+	for i := int64(2); i <= 30; i += 2 {
+		cursor.SeekRowid(i)
+		if cursor.IsValid() {
+			cursor.Delete()
 		}
+	}
 
-		// Walk through pages and try to trigger executeBalance on underfull non-root pages.
-		cursor3 := NewCursor(bt, cursor.RootPage)
-		cursor3.SeekRowid(1)
-		if cursor3.State == CursorValid && cursor3.Depth > 0 {
-			pageData, _ := bt.GetPage(cursor3.CurrentPage)
-			page, _ := NewBtreePage(cursor3.CurrentPage, pageData, bt.UsableSize)
-			if isUnderfull(page) {
-				// This exercises handleUnderfullPage with Depth > 0
-				_ = executeBalance(cursor3, page)
-			}
+	cursor.SeekRowid(1)
+	pageData, _ := bt.GetPage(cursor.CurrentPage)
+	page, _ := NewBtreePage(cursor.CurrentPage, pageData, bt.UsableSize)
+
+	page.Header.FragmentedBytes = 10
+	err = executeBalance(cursor, page)
+	if err != nil {
+		msg := err.Error()
+		if !contains(msg, "overfull") && !contains(msg, "underfull") {
+			t.Errorf("unexpected error from executeBalance on balanced page: %v", err)
 		}
-	})
-
-	t.Run("balanced page with fragmentation", func(t *testing.T) {
-		bt := NewBtree(4096)
-		rootPage, err := bt.CreateTable()
-		if err != nil {
-			t.Fatalf("CreateTable: %v", err)
-		}
-		cursor := NewCursor(bt, rootPage)
-		insertRows(cursor, 1, 30, 20)
-
-		// Delete alternating rows to create fragmentation
-		for i := int64(2); i <= 30; i += 2 {
-			cursor.SeekRowid(i)
-			if cursor.IsValid() {
-				cursor.Delete()
-			}
-		}
-
-		cursor.SeekRowid(1)
-		pageData, _ := bt.GetPage(cursor.CurrentPage)
-		page, _ := NewBtreePage(cursor.CurrentPage, pageData, bt.UsableSize)
-
-		// Force fragmented bytes in the header so defragmentIfNeeded runs
-		page.Header.FragmentedBytes = 10
-		err = executeBalance(cursor, page)
-		// Should succeed (balanced page gets defragmented)
-		if err != nil {
-			msg := err.Error()
-			if !contains(msg, "overfull") && !contains(msg, "underfull") {
-				t.Errorf("unexpected error from executeBalance on balanced page: %v", err)
-			}
-		}
-	})
+	}
 }
 
 // TestBalanceCellDefragmentIfNeeded directly exercises defragmentIfNeeded.
@@ -295,8 +289,9 @@ func TestBalanceCellHandleOverfullPage(t *testing.T) {
 	})
 }
 
-// TestBalanceCellHandleUnderfullPage directly exercises handleUnderfullPage.
-func TestBalanceCellHandleUnderfullPage(t *testing.T) {
+// TestBalanceCellHandleUnderfullPage_RootAndDepthZero exercises handleUnderfullPage
+// for root pages and non-root pages at depth 0.
+func TestBalanceCellHandleUnderfullPage_RootAndDepthZero(t *testing.T) {
 	t.Parallel()
 
 	t.Run("root page - returns nil", func(t *testing.T) {
@@ -309,7 +304,6 @@ func TestBalanceCellHandleUnderfullPage(t *testing.T) {
 		pageData, _ := bt.GetPage(rootPage)
 		page, _ := NewBtreePage(rootPage, pageData, bt.UsableSize)
 
-		// Ensure it reads as underfull for the test to be meaningful
 		cursor.CurrentPage = rootPage
 		cursor.RootPage = rootPage
 		err := handleUnderfullPage(cursor, page)
@@ -324,7 +318,6 @@ func TestBalanceCellHandleUnderfullPage(t *testing.T) {
 		cursor := NewCursor(bt, rootPage)
 		insertRows(cursor, 1, 2, 5)
 
-		// Simulate cursor on a non-root page but depth 0
 		nonRoot := uint32(99)
 		pageData := make([]byte, 4096)
 		pageData[0] = PageTypeLeafTable
@@ -338,125 +331,124 @@ func TestBalanceCellHandleUnderfullPage(t *testing.T) {
 
 		page, _ := NewBtreePage(nonRoot, pageData, bt.UsableSize)
 		cursor.CurrentPage = nonRoot
-		cursor.RootPage = rootPage // different, so not root
+		cursor.RootPage = rootPage
 		cursor.Depth = 0
 
 		err := handleUnderfullPage(cursor, page)
-		// depth == 0, so returns nil
 		if err != nil {
 			t.Errorf("handleUnderfullPage depth=0 non-root: expected nil, got %v", err)
 		}
 	})
-
-	t.Run("non-root page depth > 0 - returns merge error", func(t *testing.T) {
-		bt := NewBtree(512)
-		rootPage, _ := bt.CreateTable()
-		cursor := NewCursor(bt, rootPage)
-		insertRows(cursor, 1, 80, 10)
-
-		// Delete most rows to create underfull non-root leaves
-		cursor2 := NewCursor(bt, cursor.RootPage)
-		for i := int64(2); i <= 75; i++ {
-			found, _ := cursor2.SeekRowid(i)
-			if found {
-				cursor2.Delete()
-			}
-		}
-
-		cursor3 := NewCursor(bt, cursor.RootPage)
-		cursor3.SeekRowid(1)
-		if cursor3.State != CursorValid || cursor3.Depth <= 0 {
-			t.Skip("cursor not at depth > 0 after deletions")
-		}
-
-		pageData, _ := bt.GetPage(cursor3.CurrentPage)
-		page, _ := NewBtreePage(cursor3.CurrentPage, pageData, bt.UsableSize)
-		if !isUnderfull(page) {
-			t.Skip("page not underfull")
-		}
-
-		err := handleUnderfullPage(cursor3, page)
-		if err == nil {
-			t.Error("expected underfull merge error, got nil")
-		}
-		if !contains(err.Error(), "underfull") {
-			t.Errorf("error should mention underfull: %v", err)
-		}
-	})
-
-	t.Run("non-root with fragmentation runs defrag", func(t *testing.T) {
-		bt := NewBtree(512)
-		rootPage, _ := bt.CreateTable()
-		cursor := NewCursor(bt, rootPage)
-		insertRows(cursor, 1, 80, 10)
-
-		cursor2 := NewCursor(bt, cursor.RootPage)
-		for i := int64(2); i <= 75; i++ {
-			found, _ := cursor2.SeekRowid(i)
-			if found {
-				cursor2.Delete()
-			}
-		}
-
-		cursor3 := NewCursor(bt, cursor.RootPage)
-		cursor3.SeekRowid(1)
-		if cursor3.State != CursorValid || cursor3.Depth <= 0 {
-			t.Skip("cursor not at depth > 0")
-		}
-
-		pageData, _ := bt.GetPage(cursor3.CurrentPage)
-		page, _ := NewBtreePage(cursor3.CurrentPage, pageData, bt.UsableSize)
-
-		// Force fragmented bytes to exercise defrag path
-		page.Header.FragmentedBytes = 5
-		_ = handleUnderfullPage(cursor3, page)
-		// Just verify no panic; error is expected (merge needed)
-	})
 }
 
-// TestBalanceCellBalance exercises balance() itself across several conditions.
-func TestBalanceCellBalance(t *testing.T) {
+// setupUnderfullNonRootCursor creates a btree with rows, deletes most of them,
+// and returns a cursor positioned at depth > 0. Returns nil cursor if setup
+// conditions are not met.
+func setupUnderfullNonRootCursor(t *testing.T) (*Btree, *BtCursor) {
+	t.Helper()
+	bt := NewBtree(512)
+	rootPage, _ := bt.CreateTable()
+	cursor := NewCursor(bt, rootPage)
+	insertRows(cursor, 1, 80, 10)
+
+	cursor2 := NewCursor(bt, cursor.RootPage)
+	deleteRowRange(cursor2, 2, 75)
+
+	cursor3 := NewCursor(bt, cursor.RootPage)
+	cursor3.SeekRowid(1)
+	if cursor3.State != CursorValid || cursor3.Depth <= 0 {
+		return bt, nil
+	}
+	return bt, cursor3
+}
+
+// TestBalanceCellHandleUnderfullPage_MergeError exercises handleUnderfullPage for
+// non-root pages at depth > 0 that should return a merge error.
+func TestBalanceCellHandleUnderfullPage_MergeError(t *testing.T) {
 	t.Parallel()
 
-	t.Run("many inserts trigger overfull detection", func(t *testing.T) {
-		bt := NewBtree(512)
-		rootPage, _ := bt.CreateTable()
-		cursor := NewCursor(bt, rootPage)
+	bt, cursor3 := setupUnderfullNonRootCursor(t)
+	if cursor3 == nil {
+		t.Skip("cursor not at depth > 0 after deletions")
+	}
 
-		for i := int64(1); i <= 200; i++ {
-			cursor.Insert(i, make([]byte, 15))
-		}
+	pageData, _ := bt.GetPage(cursor3.CurrentPage)
+	page, _ := NewBtreePage(cursor3.CurrentPage, pageData, bt.UsableSize)
+	if !isUnderfull(page) {
+		t.Skip("page not underfull")
+	}
 
-		cursor2 := NewCursor(bt, cursor.RootPage)
-		count := verifyOrderedForward(t, cursor2)
-		if count < 10 {
-			t.Errorf("expected at least 10 entries, got %d", count)
-		}
-	})
+	err := handleUnderfullPage(cursor3, page)
+	if err == nil {
+		t.Error("expected underfull merge error, got nil")
+	}
+	if !contains(err.Error(), "underfull") {
+		t.Errorf("error should mention underfull: %v", err)
+	}
+}
 
-	t.Run("delete triggers underfull on non-root", func(t *testing.T) {
-		bt := NewBtree(512)
-		rootPage, _ := bt.CreateTable()
-		cursor := NewCursor(bt, rootPage)
-		insertRows(cursor, 1, 100, 10)
+// TestBalanceCellHandleUnderfullPage_Fragmentation exercises the defrag path
+// in handleUnderfullPage for non-root pages with fragmentation.
+func TestBalanceCellHandleUnderfullPage_Fragmentation(t *testing.T) {
+	t.Parallel()
 
-		cursor2 := NewCursor(bt, cursor.RootPage)
-		deleteRowRange(cursor2, 1, 90)
+	bt, cursor3 := setupUnderfullNonRootCursor(t)
+	if cursor3 == nil {
+		t.Skip("cursor not at depth > 0")
+	}
 
-		cursor3 := NewCursor(bt, cursor.RootPage)
-		cursor3.SeekRowid(91)
-		if cursor3.State == CursorValid {
-			balErr := balance(cursor3)
-			if balErr != nil {
-				msg := balErr.Error()
-				// Only unexpected errors should fail the test
-				if !contains(msg, "overfull") && !contains(msg, "underfull") &&
-					!contains(msg, "failed to get page") && !contains(msg, "failed to parse page") {
-					t.Errorf("unexpected error from balance: %v", balErr)
-				}
+	pageData, _ := bt.GetPage(cursor3.CurrentPage)
+	page, _ := NewBtreePage(cursor3.CurrentPage, pageData, bt.UsableSize)
+
+	page.Header.FragmentedBytes = 5
+	_ = handleUnderfullPage(cursor3, page)
+}
+
+// TestBalanceCellBalance_Overfull exercises balance() with many inserts that trigger
+// overfull detection.
+func TestBalanceCellBalance_Overfull(t *testing.T) {
+	t.Parallel()
+
+	bt := NewBtree(512)
+	rootPage, _ := bt.CreateTable()
+	cursor := NewCursor(bt, rootPage)
+
+	for i := int64(1); i <= 200; i++ {
+		cursor.Insert(i, make([]byte, 15))
+	}
+
+	cursor2 := NewCursor(bt, cursor.RootPage)
+	count := verifyOrderedForward(t, cursor2)
+	if count < 10 {
+		t.Errorf("expected at least 10 entries, got %d", count)
+	}
+}
+
+// TestBalanceCellBalance_Underfull exercises balance() after deleting most rows
+// to trigger underfull detection on non-root pages.
+func TestBalanceCellBalance_Underfull(t *testing.T) {
+	t.Parallel()
+
+	bt := NewBtree(512)
+	rootPage, _ := bt.CreateTable()
+	cursor := NewCursor(bt, rootPage)
+	insertRows(cursor, 1, 100, 10)
+
+	cursor2 := NewCursor(bt, cursor.RootPage)
+	deleteRowRange(cursor2, 1, 90)
+
+	cursor3 := NewCursor(bt, cursor.RootPage)
+	cursor3.SeekRowid(91)
+	if cursor3.State == CursorValid {
+		balErr := balance(cursor3)
+		if balErr != nil {
+			msg := balErr.Error()
+			if !contains(msg, "overfull") && !contains(msg, "underfull") &&
+				!contains(msg, "failed to get page") && !contains(msg, "failed to parse page") {
+				t.Errorf("unexpected error from balance: %v", balErr)
 			}
 		}
-	})
+	}
 }
 
 // TestBalanceCellCalculateCellSizeAndLocal exercises calculateCellSizeAndLocal
@@ -521,162 +513,178 @@ func TestBalanceCellCalculateCellSizeAndLocal(t *testing.T) {
 	})
 }
 
-// TestBalanceCellExtractOverflowPage exercises extractOverflowPage via ParseCell.
-func TestBalanceCellExtractOverflowPage(t *testing.T) {
+// TestBalanceCellExtractOverflowPage_NoOverflow verifies no overflow page is set
+// when the payload fits locally.
+func TestBalanceCellExtractOverflowPage_NoOverflow(t *testing.T) {
 	t.Parallel()
 
-	t.Run("no overflow when payload fits locally", func(t *testing.T) {
-		cell := EncodeTableLeafCell(42, []byte("short payload"))
-		info, err := ParseCell(PageTypeLeafTable, cell, 4096)
-		if err != nil {
-			t.Fatalf("ParseCell: %v", err)
-		}
-		if info.OverflowPage != 0 {
-			t.Errorf("OverflowPage = %d, want 0", info.OverflowPage)
-		}
-	})
-
-	t.Run("overflow page extracted for large payload", func(t *testing.T) {
-		bt := NewBtree(4096)
-		rootPage, _ := bt.CreateTable()
-		cursor := NewCursor(bt, rootPage)
-
-		// Insert payload larger than maxLocal to trigger overflow
-		overflowPayload := make([]byte, 5000)
-		for i := range overflowPayload {
-			overflowPayload[i] = byte(i % 256)
-		}
-		if err := cursor.Insert(1, overflowPayload); err != nil {
-			t.Fatalf("Insert large payload: %v", err)
-		}
-
-		found, err := cursor.SeekRowid(1)
-		if err != nil || !found {
-			t.Fatalf("SeekRowid: err=%v found=%v", err, found)
-		}
-
-		if cursor.CurrentCell.OverflowPage == 0 {
-			t.Error("expected overflow page to be set for large payload")
-		}
-		if cursor.CurrentCell.PayloadSize != uint32(len(overflowPayload)) {
-			t.Errorf("PayloadSize = %d, want %d", cursor.CurrentCell.PayloadSize, len(overflowPayload))
-		}
-	})
-
-	t.Run("overflow page number truncated error", func(t *testing.T) {
-		// Craft a cell where the overflow pointer is cut off
-		usableSize := uint32(512)
-		maxLocal := calculateMaxLocal(usableSize, true)
-
-		// Build raw cell: varint(payloadSize > maxLocal), varint(rowid), localPayload bytes
-		// but without the 4-byte overflow page pointer at the end
-		oversized := uint64(maxLocal) + 100
-		buf := make([]byte, 20+int(maxLocal))
-		offset := 0
-		offset += PutVarint(buf[offset:], oversized)
-		offset += PutVarint(buf[offset:], 1) // rowid
-		// Do NOT append the overflow pointer - truncated cell
-		truncated := buf[:offset+int(maxLocal)/2]
-
-		_, err := ParseCell(PageTypeLeafTable, truncated, usableSize)
-		// Should either error or succeed depending on internal clamping;
-		// we just verify no panic
-		_ = err
-	})
+	cell := EncodeTableLeafCell(42, []byte("short payload"))
+	info, err := ParseCell(PageTypeLeafTable, cell, 4096)
+	if err != nil {
+		t.Fatalf("ParseCell: %v", err)
+	}
+	if info.OverflowPage != 0 {
+		t.Errorf("OverflowPage = %d, want 0", info.OverflowPage)
+	}
 }
 
-// TestBalanceCellParseTableInteriorCell exercises parseTableInteriorCell.
-func TestBalanceCellParseTableInteriorCell(t *testing.T) {
+// TestBalanceCellExtractOverflowPage_LargePayload verifies overflow page extraction
+// for a payload larger than maxLocal.
+func TestBalanceCellExtractOverflowPage_LargePayload(t *testing.T) {
 	t.Parallel()
 
-	t.Run("round-trip encode and parse", func(t *testing.T) {
-		childPage := uint32(42)
-		rowid := int64(1000)
-		cell := EncodeTableInteriorCell(childPage, rowid)
+	bt := NewBtree(4096)
+	rootPage, _ := bt.CreateTable()
+	cursor := NewCursor(bt, rootPage)
 
-		info, err := ParseCell(PageTypeInteriorTable, cell, 4096)
-		if err != nil {
-			t.Fatalf("ParseCell interior: %v", err)
-		}
-		if info.ChildPage != childPage {
-			t.Errorf("ChildPage = %d, want %d", info.ChildPage, childPage)
-		}
-		if info.Key != rowid {
-			t.Errorf("Key = %d, want %d", info.Key, rowid)
-		}
-		if info.CellSize == 0 {
-			t.Error("CellSize should not be 0")
-		}
-	})
+	overflowPayload := make([]byte, 5000)
+	for i := range overflowPayload {
+		overflowPayload[i] = byte(i % 256)
+	}
+	if err := cursor.Insert(1, overflowPayload); err != nil {
+		t.Fatalf("Insert large payload: %v", err)
+	}
 
-	t.Run("multi-byte varint rowid", func(t *testing.T) {
-		// rowid requiring 2+ varint bytes
-		childPage := uint32(7)
-		rowid := int64(300) // encodes as 2-byte varint
-		cell := EncodeTableInteriorCell(childPage, rowid)
+	found, err := cursor.SeekRowid(1)
+	if err != nil || !found {
+		t.Fatalf("SeekRowid: err=%v found=%v", err, found)
+	}
 
-		info, err := ParseCell(PageTypeInteriorTable, cell, 4096)
-		if err != nil {
-			t.Fatalf("ParseCell: %v", err)
-		}
-		if info.Key != rowid {
-			t.Errorf("Key = %d, want %d", info.Key, rowid)
-		}
-		if info.CellSize != uint16(len(cell)) {
-			t.Errorf("CellSize = %d, want %d", info.CellSize, len(cell))
-		}
-	})
+	if cursor.CurrentCell.OverflowPage == 0 {
+		t.Error("expected overflow page to be set for large payload")
+	}
+	if cursor.CurrentCell.PayloadSize != uint32(len(overflowPayload)) {
+		t.Errorf("PayloadSize = %d, want %d", cursor.CurrentCell.PayloadSize, len(overflowPayload))
+	}
+}
 
-	t.Run("too small - returns error", func(t *testing.T) {
-		_, err := ParseCell(PageTypeInteriorTable, []byte{0x01, 0x02}, 4096)
-		if err == nil {
-			t.Error("expected error for too-small interior cell data")
-		}
-	})
+// TestBalanceCellExtractOverflowPage_Truncated verifies behavior when the overflow
+// page pointer is truncated.
+func TestBalanceCellExtractOverflowPage_Truncated(t *testing.T) {
+	t.Parallel()
 
-	t.Run("interior cells appear after btree split", func(t *testing.T) {
-		// Force tree to split so interior pages exist, then read interior cells
-		bt := NewBtree(512)
-		rootPage, err := bt.CreateTable()
-		if err != nil {
-			t.Fatalf("CreateTable: %v", err)
-		}
-		cursor := NewCursor(bt, rootPage)
-		insertRows(cursor, 1, 150, 10)
+	usableSize := uint32(512)
+	maxLocal := calculateMaxLocal(usableSize, true)
 
-		// root should now be an interior page
-		rootData, err := bt.GetPage(cursor.RootPage)
-		if err != nil {
-			t.Fatalf("GetPage root: %v", err)
-		}
-		header, err := ParsePageHeader(rootData, cursor.RootPage)
-		if err != nil {
-			t.Fatalf("ParsePageHeader: %v", err)
-		}
-		if !header.IsInterior {
-			t.Skip("root did not become interior page")
-		}
+	oversized := uint64(maxLocal) + 100
+	buf := make([]byte, 20+int(maxLocal))
+	offset := 0
+	offset += PutVarint(buf[offset:], oversized)
+	offset += PutVarint(buf[offset:], 1)
+	truncated := buf[:offset+int(maxLocal)/2]
 
-		ptrs, err := header.GetCellPointers(rootData)
-		if err != nil {
-			t.Fatalf("GetCellPointers: %v", err)
-		}
-		if len(ptrs) == 0 {
-			t.Fatal("no cells in interior root")
-		}
+	_, err := ParseCell(PageTypeLeafTable, truncated, usableSize)
+	// Should either error or succeed depending on internal clamping;
+	// we just verify no panic
+	_ = err
+}
 
-		// Parse each interior cell to exercise parseTableInteriorCell
-		for i, ptr := range ptrs {
-			info, err := ParseCell(PageTypeInteriorTable, rootData[ptr:], bt.UsableSize)
-			if err != nil {
-				t.Errorf("ParseCell interior cell %d: %v", i, err)
-				continue
-			}
-			if info.ChildPage == 0 {
-				t.Errorf("interior cell %d: ChildPage should not be 0", i)
-			}
+// TestBalanceCellParseTableInteriorCell_RoundTrip exercises parseTableInteriorCell
+// round-trip encoding and parsing.
+func TestBalanceCellParseTableInteriorCell_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	childPage := uint32(42)
+	rowid := int64(1000)
+	cell := EncodeTableInteriorCell(childPage, rowid)
+
+	info, err := ParseCell(PageTypeInteriorTable, cell, 4096)
+	if err != nil {
+		t.Fatalf("ParseCell interior: %v", err)
+	}
+	if info.ChildPage != childPage {
+		t.Errorf("ChildPage = %d, want %d", info.ChildPage, childPage)
+	}
+	if info.Key != rowid {
+		t.Errorf("Key = %d, want %d", info.Key, rowid)
+	}
+	if info.CellSize == 0 {
+		t.Error("CellSize should not be 0")
+	}
+}
+
+// TestBalanceCellParseTableInteriorCell_MultiByteVarint exercises parseTableInteriorCell
+// with a multi-byte varint rowid.
+func TestBalanceCellParseTableInteriorCell_MultiByteVarint(t *testing.T) {
+	t.Parallel()
+
+	childPage := uint32(7)
+	rowid := int64(300)
+	cell := EncodeTableInteriorCell(childPage, rowid)
+
+	info, err := ParseCell(PageTypeInteriorTable, cell, 4096)
+	if err != nil {
+		t.Fatalf("ParseCell: %v", err)
+	}
+	if info.Key != rowid {
+		t.Errorf("Key = %d, want %d", info.Key, rowid)
+	}
+	if info.CellSize != uint16(len(cell)) {
+		t.Errorf("CellSize = %d, want %d", info.CellSize, len(cell))
+	}
+}
+
+// TestBalanceCellParseTableInteriorCell_TooSmall exercises parseTableInteriorCell
+// with insufficient data.
+func TestBalanceCellParseTableInteriorCell_TooSmall(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseCell(PageTypeInteriorTable, []byte{0x01, 0x02}, 4096)
+	if err == nil {
+		t.Error("expected error for too-small interior cell data")
+	}
+}
+
+// getInteriorRootCells returns the cell pointers from an interior root page,
+// skipping the test if the root is not an interior page.
+func getInteriorRootCells(t *testing.T, bt *Btree, rootPage uint32) ([]byte, []uint16) {
+	t.Helper()
+	rootData, err := bt.GetPage(rootPage)
+	if err != nil {
+		t.Fatalf("GetPage root: %v", err)
+	}
+	header, err := ParsePageHeader(rootData, rootPage)
+	if err != nil {
+		t.Fatalf("ParsePageHeader: %v", err)
+	}
+	if !header.IsInterior {
+		t.Skip("root did not become interior page")
+	}
+	ptrs, err := header.GetCellPointers(rootData)
+	if err != nil {
+		t.Fatalf("GetCellPointers: %v", err)
+	}
+	if len(ptrs) == 0 {
+		t.Fatal("no cells in interior root")
+	}
+	return rootData, ptrs
+}
+
+// TestBalanceCellParseTableInteriorCell_AfterSplit exercises parseTableInteriorCell
+// on interior cells produced by btree splits.
+func TestBalanceCellParseTableInteriorCell_AfterSplit(t *testing.T) {
+	t.Parallel()
+
+	bt := NewBtree(512)
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	cursor := NewCursor(bt, rootPage)
+	insertRows(cursor, 1, 150, 10)
+
+	rootData, ptrs := getInteriorRootCells(t, bt, cursor.RootPage)
+
+	for i, ptr := range ptrs {
+		info, parseErr := ParseCell(PageTypeInteriorTable, rootData[ptr:], bt.UsableSize)
+		if parseErr != nil {
+			t.Errorf("ParseCell interior cell %d: %v", i, parseErr)
+			continue
 		}
-	})
+		if info.ChildPage == 0 {
+			t.Errorf("interior cell %d: ChildPage should not be 0", i)
+		}
+	}
 }
 
 // TestBalanceCellParseTableInteriorCompositeCell exercises parseTableInteriorCompositeCell.
@@ -735,53 +743,59 @@ func TestBalanceCellParseTableInteriorCompositeCell(t *testing.T) {
 	})
 }
 
-// TestBalanceCellReadIndexPayloadVarint exercises readIndexPayloadVarint
-// indirectly via parseIndexLeafCell and parseIndexInteriorCell.
-func TestBalanceCellReadIndexPayloadVarint(t *testing.T) {
+// TestBalanceCellReadIndexPayloadVarint_Leaf exercises readIndexPayloadVarint
+// indirectly via parseIndexLeafCell.
+func TestBalanceCellReadIndexPayloadVarint_Leaf(t *testing.T) {
 	t.Parallel()
 
-	t.Run("index leaf cell - payload size and key set correctly", func(t *testing.T) {
-		payload := make([]byte, 30)
-		for i := range payload {
-			payload[i] = byte(i)
-		}
-		cell := EncodeIndexLeafCell(payload)
+	payload := make([]byte, 30)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	cell := EncodeIndexLeafCell(payload)
 
-		info, err := ParseCell(PageTypeLeafIndex, cell, 4096)
-		if err != nil {
-			t.Fatalf("ParseCell index leaf: %v", err)
-		}
-		if info.PayloadSize != uint32(len(payload)) {
-			t.Errorf("PayloadSize = %d, want %d", info.PayloadSize, len(payload))
-		}
-		// For index pages, Key is set equal to payload size
-		if info.Key != int64(len(payload)) {
-			t.Errorf("Key = %d, want %d (payload size)", info.Key, len(payload))
-		}
-	})
+	info, err := ParseCell(PageTypeLeafIndex, cell, 4096)
+	if err != nil {
+		t.Fatalf("ParseCell index leaf: %v", err)
+	}
+	if info.PayloadSize != uint32(len(payload)) {
+		t.Errorf("PayloadSize = %d, want %d", info.PayloadSize, len(payload))
+	}
+	if info.Key != int64(len(payload)) {
+		t.Errorf("Key = %d, want %d (payload size)", info.Key, len(payload))
+	}
+}
 
-	t.Run("index interior cell - reads payload size after child page", func(t *testing.T) {
-		childPage := uint32(99)
-		payload := make([]byte, 20)
-		cell := EncodeIndexInteriorCell(childPage, payload)
+// TestBalanceCellReadIndexPayloadVarint_Interior exercises readIndexPayloadVarint
+// indirectly via parseIndexInteriorCell.
+func TestBalanceCellReadIndexPayloadVarint_Interior(t *testing.T) {
+	t.Parallel()
 
-		info, err := ParseCell(PageTypeInteriorIndex, cell, 4096)
-		if err != nil {
-			t.Fatalf("ParseCell index interior: %v", err)
-		}
-		if info.ChildPage != childPage {
-			t.Errorf("ChildPage = %d, want %d", info.ChildPage, childPage)
-		}
-		if info.PayloadSize != uint32(len(payload)) {
-			t.Errorf("PayloadSize = %d, want %d", info.PayloadSize, len(payload))
-		}
-		if info.Key != int64(len(payload)) {
-			t.Errorf("Key = %d, want %d", info.Key, len(payload))
-		}
-	})
+	childPage := uint32(99)
+	payload := make([]byte, 20)
+	cell := EncodeIndexInteriorCell(childPage, payload)
 
-	t.Run("large payload exercises overflow variant of readIndexPayloadVarint path", func(t *testing.T) {
-		// PayloadSize > maxLocal for index page
+	info, err := ParseCell(PageTypeInteriorIndex, cell, 4096)
+	if err != nil {
+		t.Fatalf("ParseCell index interior: %v", err)
+	}
+	if info.ChildPage != childPage {
+		t.Errorf("ChildPage = %d, want %d", info.ChildPage, childPage)
+	}
+	if info.PayloadSize != uint32(len(payload)) {
+		t.Errorf("PayloadSize = %d, want %d", info.PayloadSize, len(payload))
+	}
+	if info.Key != int64(len(payload)) {
+		t.Errorf("Key = %d, want %d", info.Key, len(payload))
+	}
+}
+
+// TestBalanceCellReadIndexPayloadVarint_OverflowAndEdgeCases exercises
+// readIndexPayloadVarint overflow and edge-case paths.
+func TestBalanceCellReadIndexPayloadVarint_OverflowAndEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("large payload exercises overflow variant", func(t *testing.T) {
 		usableSize := uint32(4096)
 		maxLocal := calculateMaxLocal(usableSize, false)
 		largePayload := make([]byte, maxLocal+200)
@@ -807,7 +821,6 @@ func TestBalanceCellReadIndexPayloadVarint(t *testing.T) {
 	})
 
 	t.Run("multi-byte varint payload size", func(t *testing.T) {
-		// Payload size of 200 requires 2-byte varint encoding
 		payload := make([]byte, 200)
 		cell := EncodeIndexLeafCell(payload)
 
@@ -821,9 +834,9 @@ func TestBalanceCellReadIndexPayloadVarint(t *testing.T) {
 	})
 }
 
-// TestBalanceCellFullInsertDeleteCycle performs a high-volume insert/delete
-// cycle to exercise balance code paths end-to-end.
-func TestBalanceCellFullInsertDeleteCycle(t *testing.T) {
+// TestBalanceCellFullInsertDeleteCycle_InsertAndVerify performs a high-volume insert
+// and verifies all rows are readable in order after splits.
+func TestBalanceCellFullInsertDeleteCycle_InsertAndVerify(t *testing.T) {
 	t.Parallel()
 
 	bt := NewBtree(512)
@@ -838,38 +851,88 @@ func TestBalanceCellFullInsertDeleteCycle(t *testing.T) {
 		t.Fatalf("expected at least 10 inserts, got %d", n)
 	}
 
-	// Verify all inserted rows are readable in order after splits
 	cursor2 := NewCursor(bt, cursor.RootPage)
 	count := verifyOrderedForward(t, cursor2)
 	if count != n {
 		t.Errorf("forward traversal: got %d entries, want %d", count, n)
 	}
+}
 
-	// Delete a few rows to exercise delete/balance interaction
-	cursor3 := NewCursor(bt, cursor.RootPage)
-	for i := int64(1); i <= 5 && i <= int64(n); i++ {
-		found, err := cursor3.SeekRowid(i)
-		if err == nil && found {
-			cursor3.Delete()
+// deleteFirstNRows deletes rows with rowids 1..count from the btree.
+func deleteFirstNRows(bt *Btree, rootPage uint32, count int) {
+	cursor := NewCursor(bt, rootPage)
+	for i := int64(1); i <= int64(count); i++ {
+		found, seekErr := cursor.SeekRowid(i)
+		if seekErr == nil && found {
+			cursor.Delete()
 		}
 	}
+}
 
-	// Verify the specific deleted rows are gone
-	cursor4 := NewCursor(bt, cursor.RootPage)
-	for i := int64(1); i <= 5 && i <= int64(n); i++ {
-		found, _ := cursor4.SeekRowid(i)
+// verifyRowsDeleted checks that rows with rowids 1..count are not found.
+func verifyRowsDeleted(t *testing.T, bt *Btree, rootPage uint32, count int) {
+	t.Helper()
+	cursor := NewCursor(bt, rootPage)
+	for i := int64(1); i <= int64(count); i++ {
+		found, _ := cursor.SeekRowid(i)
 		if found {
 			t.Errorf("row %d should have been deleted", i)
 		}
 	}
+}
 
-	// Verify at least one remaining row is still accessible
+// TestBalanceCellFullInsertDeleteCycle_DeleteAndVerify exercises delete/balance
+// interaction and verifies deleted rows are gone while remaining rows persist.
+func TestBalanceCellFullInsertDeleteCycle_DeleteAndVerify(t *testing.T) {
+	t.Parallel()
+
+	bt := NewBtree(512)
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+
+	cursor := NewCursor(bt, rootPage)
+	n := insertRows(cursor, 1, 300, 12)
+	if n < 10 {
+		t.Fatalf("expected at least 10 inserts, got %d", n)
+	}
+
+	deleteCount := 5
+	if deleteCount > n {
+		deleteCount = n
+	}
+	deleteFirstNRows(bt, cursor.RootPage, deleteCount)
+	verifyRowsDeleted(t, bt, cursor.RootPage, deleteCount)
+
 	if n > 5 {
 		cursor5 := NewCursor(bt, cursor.RootPage)
-		found, err := cursor5.SeekRowid(int64(n))
-		if err != nil || !found {
-			t.Errorf("last inserted row %d should still exist: err=%v found=%v", n, err, found)
+		found, seekErr := cursor5.SeekRowid(int64(n))
+		if seekErr != nil || !found {
+			t.Errorf("last inserted row %d should still exist: err=%v found=%v", n, seekErr, found)
 		}
+	}
+}
+
+// verifyOverflowInsert inserts a payload and verifies it has an overflow page.
+func verifyOverflowInsert(t *testing.T, cursor *BtCursor, rowid int64, payloadSize uint32) {
+	t.Helper()
+	payload := make([]byte, payloadSize)
+	for i := range payload {
+		payload[i] = byte(i % 256)
+	}
+	if err := cursor.Insert(rowid, payload); err != nil {
+		t.Fatalf("Insert rowid=%d size=%d: %v", rowid, payloadSize, err)
+	}
+	found, err := cursor.SeekRowid(rowid)
+	if err != nil || !found {
+		t.Fatalf("SeekRowid %d: err=%v found=%v", rowid, err, found)
+	}
+	if cursor.CurrentCell.OverflowPage == 0 {
+		t.Errorf("rowid %d: expected overflow page for payload size %d", rowid, payloadSize)
+	}
+	if cursor.CurrentCell.PayloadSize != payloadSize {
+		t.Errorf("rowid %d: PayloadSize = %d, want %d", rowid, cursor.CurrentCell.PayloadSize, payloadSize)
 	}
 }
 
@@ -887,35 +950,7 @@ func TestBalanceCellLargePayloadOverflowPages(t *testing.T) {
 	cursor := NewCursor(bt, rootPage)
 
 	overflowThreshold := GetOverflowThreshold(bt.PageSize, true)
-
-	testCases := []struct {
-		rowid       int64
-		payloadSize uint32
-	}{
-		{1, overflowThreshold + 1},   // just over threshold
-		{2, overflowThreshold + 100}, // moderately over threshold
-		{3, overflowThreshold + 500}, // further over threshold
-	}
-
-	for _, tc := range testCases {
-		payload := make([]byte, tc.payloadSize)
-		for i := range payload {
-			payload[i] = byte(i % 256)
-		}
-		if err := cursor.Insert(tc.rowid, payload); err != nil {
-			t.Fatalf("Insert rowid=%d size=%d: %v", tc.rowid, tc.payloadSize, err)
-		}
-
-		found, err := cursor.SeekRowid(tc.rowid)
-		if err != nil || !found {
-			t.Fatalf("SeekRowid %d: err=%v found=%v", tc.rowid, err, found)
-		}
-		if cursor.CurrentCell.OverflowPage == 0 {
-			t.Errorf("rowid %d: expected overflow page for payload size %d", tc.rowid, tc.payloadSize)
-		}
-		if cursor.CurrentCell.PayloadSize != tc.payloadSize {
-			t.Errorf("rowid %d: PayloadSize = %d, want %d",
-				tc.rowid, cursor.CurrentCell.PayloadSize, tc.payloadSize)
-		}
-	}
+	verifyOverflowInsert(t, cursor, 1, overflowThreshold+1)
+	verifyOverflowInsert(t, cursor, 2, overflowThreshold+100)
+	verifyOverflowInsert(t, cursor, 3, overflowThreshold+500)
 }

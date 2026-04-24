@@ -167,8 +167,10 @@ func TestExecRecord_IndexLookupMultipleRows(t *testing.T) {
 //    parseSerialBlobOrText, execMakeRecord.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestExecRecord_VariedColumnTypes stores and retrieves every SQLite type class.
-func TestExecRecord_VariedColumnTypes(t *testing.T) {
+// recSetupMixedTable creates and populates the mixed-type table used by
+// TestExecRecord_VariedColumnTypes tests.
+func recSetupMixedTable(t *testing.T) *sql.DB {
+	t.Helper()
 	db := recOpenDB(t)
 
 	recExec(t, db, `CREATE TABLE mixed (
@@ -192,16 +194,17 @@ func TestExecRecord_VariedColumnTypes(t *testing.T) {
 	//   int32 / int48 / int64
 	recExec(t, db,
 		`INSERT INTO mixed VALUES(1, -128, -32768, -8388608, -2147483648, 140737488355328, 9223372036854775807, 3.14159, 'hello', X'deadbeef', NULL)`)
+	return db
+}
 
-	var i8, i16, i24, i32 int64
-	var i48, i64 int64
-	var r64 float64
-	var txt string
-	var blb []byte
-	var nul *string
+// TestExecRecord_VariedColumnTypesIntegers verifies integer serial types
+// (int8 through int64) round-trip correctly.
+func TestExecRecord_VariedColumnTypesIntegers(t *testing.T) {
+	db := recSetupMixedTable(t)
 
-	err := db.QueryRow(`SELECT i8,i16,i24,i32,i48,i64,r64,txt,blb,nul FROM mixed WHERE id=1`).
-		Scan(&i8, &i16, &i24, &i32, &i48, &i64, &r64, &txt, &blb, &nul)
+	var i8, i16, i24, i32, i48, i64 int64
+	err := db.QueryRow(`SELECT i8,i16,i24,i32,i48,i64 FROM mixed WHERE id=1`).
+		Scan(&i8, &i16, &i24, &i32, &i48, &i64)
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
@@ -224,6 +227,24 @@ func TestExecRecord_VariedColumnTypes(t *testing.T) {
 	if i64 != 9223372036854775807 {
 		t.Errorf("i64: want max int64, got %d", i64)
 	}
+}
+
+// TestExecRecord_VariedColumnTypesOther verifies real, text, blob, and NULL
+// serial types round-trip correctly.
+func TestExecRecord_VariedColumnTypesOther(t *testing.T) {
+	db := recSetupMixedTable(t)
+
+	var r64 float64
+	var txt string
+	var blb []byte
+	var nul *string
+
+	err := db.QueryRow(`SELECT r64,txt,blb,nul FROM mixed WHERE id=1`).
+		Scan(&r64, &txt, &blb, &nul)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
 	if r64 < 3.14 || r64 > 3.15 {
 		t.Errorf("r64: want ~3.14159, got %f", r64)
 	}
@@ -329,10 +350,10 @@ func TestExecRecord_LargeIntegers(t *testing.T) {
 //    serial types (0=NULL, 1–6=ints, 7=float, 8–9=bool, ≥12=text/blob).
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestExecRecord_ManyColumns exercises a 12-column table so that
-// parseRecordColumnHeader, skipToColumn, and serialTypeLen are called for every
-// serial-type family.
-func TestExecRecord_ManyColumns(t *testing.T) {
+// recSetupWideTable creates and populates the wide table used by
+// TestExecRecord_ManyColumns tests.
+func recSetupWideTable(t *testing.T) *sql.DB {
+	t.Helper()
 	db := recOpenDB(t)
 
 	recExec(t, db, `CREATE TABLE wide (
@@ -364,19 +385,19 @@ func TestExecRecord_ManyColumns(t *testing.T) {
 		'negative', X'0102', 'more',
 		NULL, 1
 	)`)
+	return db
+}
 
-	// Verify row 1
+// TestExecRecord_ManyColumnsRow1Integers verifies integer columns (c1-c5) of
+// row 1 in the wide table.
+func TestExecRecord_ManyColumnsRow1Integers(t *testing.T) {
+	db := recSetupWideTable(t)
+
 	var c1, c2, c3, c4, c5 int64
-	var c6 float64
-	var c7, c9 string
-	var c8 []byte
-	var c10 *int64
-	var c11 int64
-
-	err := db.QueryRow(`SELECT c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11 FROM wide WHERE c0=1`).
-		Scan(&c1, &c2, &c3, &c4, &c5, &c6, &c7, &c8, &c9, &c10, &c11)
+	err := db.QueryRow(`SELECT c1,c2,c3,c4,c5 FROM wide WHERE c0=1`).
+		Scan(&c1, &c2, &c3, &c4, &c5)
 	if err != nil {
-		t.Fatalf("scan row 1: %v", err)
+		t.Fatalf("scan row 1 ints: %v", err)
 	}
 	if c1 != 42 {
 		t.Errorf("c1: want 42, got %d", c1)
@@ -393,6 +414,22 @@ func TestExecRecord_ManyColumns(t *testing.T) {
 	if c5 != 9999999999 {
 		t.Errorf("c5: want 9999999999, got %d", c5)
 	}
+}
+
+// TestExecRecord_ManyColumnsRow1RealTextBlob verifies real, text, and blob
+// columns (c6-c9) of row 1 in the wide table.
+func TestExecRecord_ManyColumnsRow1RealTextBlob(t *testing.T) {
+	db := recSetupWideTable(t)
+
+	var c6 float64
+	var c7, c9 string
+	var c8 []byte
+
+	err := db.QueryRow(`SELECT c6,c7,c8,c9 FROM wide WHERE c0=1`).
+		Scan(&c6, &c7, &c8, &c9)
+	if err != nil {
+		t.Fatalf("scan row 1 real/text/blob: %v", err)
+	}
 	if c6 < 2.71 || c6 > 2.72 {
 		t.Errorf("c6: want ~2.71828, got %f", c6)
 	}
@@ -405,14 +442,34 @@ func TestExecRecord_ManyColumns(t *testing.T) {
 	if c9 != "second-text" {
 		t.Errorf("c9: want 'second-text', got %q", c9)
 	}
+}
+
+// TestExecRecord_ManyColumnsRow1NullBool verifies null and bool columns
+// (c10-c11) of row 1 in the wide table.
+func TestExecRecord_ManyColumnsRow1NullBool(t *testing.T) {
+	db := recSetupWideTable(t)
+
+	var c10 *int64
+	var c11 int64
+
+	err := db.QueryRow(`SELECT c10,c11 FROM wide WHERE c0=1`).
+		Scan(&c10, &c11)
+	if err != nil {
+		t.Fatalf("scan row 1 null/bool: %v", err)
+	}
 	if c10 != nil {
 		t.Errorf("c10: want nil, got %v", *c10)
 	}
 	if c11 != 0 {
 		t.Errorf("c11: want 0, got %d", c11)
 	}
+}
 
-	// Verify row 2 (bool constant 1 stored as serial type 9)
+// TestExecRecord_ManyColumnsRow2 verifies the bool constant (serial type 9) in
+// row 2 of the wide table.
+func TestExecRecord_ManyColumnsRow2(t *testing.T) {
+	db := recSetupWideTable(t)
+
 	var c11b int64
 	if err := db.QueryRow(`SELECT c11 FROM wide WHERE c0=2`).Scan(&c11b); err != nil {
 		t.Fatalf("scan row 2: %v", err)
@@ -694,9 +751,9 @@ func TestExecRecord_LargeBlobSerial(t *testing.T) {
 //    through MakeRecord → btree → column read works for all value types.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestExecRecord_MakeRecordRoundTrip inserts a row with every column type and
-// reads it back verifying exact values, exercising execMakeRecord end-to-end.
-func TestExecRecord_MakeRecordRoundTrip(t *testing.T) {
+// recSetupRoundtripTable creates and populates the roundtrip table.
+func recSetupRoundtripTable(t *testing.T) *sql.DB {
+	t.Helper()
 	db := recOpenDB(t)
 	recExec(t, db, `CREATE TABLE roundtrip (
 		id  INTEGER PRIMARY KEY,
@@ -706,17 +763,20 @@ func TestExecRecord_MakeRecordRoundTrip(t *testing.T) {
 		d   BLOB,
 		e   INTEGER
 	)`)
-
 	recExec(t, db, `INSERT INTO roundtrip VALUES(42, -999, 1.23456789, 'testval', X'01020304', NULL)`)
+	return db
+}
+
+// TestExecRecord_MakeRecordRoundTripScalars verifies integer, real, and text
+// columns round-trip correctly through execMakeRecord.
+func TestExecRecord_MakeRecordRoundTripScalars(t *testing.T) {
+	db := recSetupRoundtripTable(t)
 
 	var a int64
 	var b float64
 	var c string
-	var d []byte
-	var e *int64
-
-	if err := db.QueryRow(`SELECT a,b,c,d,e FROM roundtrip WHERE id=42`).
-		Scan(&a, &b, &c, &d, &e); err != nil {
+	if err := db.QueryRow(`SELECT a,b,c FROM roundtrip WHERE id=42`).
+		Scan(&a, &b, &c); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
 
@@ -729,6 +789,20 @@ func TestExecRecord_MakeRecordRoundTrip(t *testing.T) {
 	if c != "testval" {
 		t.Errorf("c: want 'testval', got %q", c)
 	}
+}
+
+// TestExecRecord_MakeRecordRoundTripBlobNull verifies blob and NULL columns
+// round-trip correctly through execMakeRecord.
+func TestExecRecord_MakeRecordRoundTripBlobNull(t *testing.T) {
+	db := recSetupRoundtripTable(t)
+
+	var d []byte
+	var e *int64
+	if err := db.QueryRow(`SELECT d,e FROM roundtrip WHERE id=42`).
+		Scan(&d, &e); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
 	if len(d) != 4 || d[0] != 1 || d[3] != 4 {
 		t.Errorf("d: unexpected value %v", d)
 	}
